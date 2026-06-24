@@ -43,8 +43,12 @@ class ChatCompletionRequest:
             raise ValueError("messages must not be empty")
         if self.stream:
             raise ValueError("streaming is not supported by the gateway")
-        if self.max_tokens is not None and self.max_tokens < 1:
-            raise ValueError("max_tokens must be greater than zero")
+        if self.max_tokens is not None and (
+            isinstance(self.max_tokens, bool)
+            or not isinstance(self.max_tokens, int)
+            or self.max_tokens < 1
+        ):
+            raise ValueError("max_tokens must be a positive integer")
 
 
 def build_llama_payload(

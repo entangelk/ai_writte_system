@@ -118,6 +118,33 @@
 - 검증 AI가 canonical plan, 구현 파일, boundary matrix, 정확한 재현 명령, 제외 범위를 독립적으로 확인할 수 있게 정리했다.
 - 이 문서는 자체 검증 verdict가 아니라 후속 검증자의 범위 입력이다.
 
+### 독립 검증 F1/F2 보강
+
+- 근거 기록: `docs/verifications/2026-06-24/llm_gateway_slice_0_1_to_0_5.md`
+- F1 해결: thinking 생략 시 `default_thinking=true`가 그대로 전달되는 대칭 회귀를 추가했다.
+- F2 해결 방향: 기존 입력 거부를 완화하지 않고 공식 precondition으로 채택했다.
+- request precondition으로 non-empty messages/role/default model, non-streaming, positive integer `max_tokens`를 문서화하고 0/음수/bool/float/string 거절 및 1 허용 회귀를 추가했다.
+- response precondition으로 2xx object/non-empty choices, string model/content/finish reason, non-negative integer token counts를 문서화하고 malformed cases를 확장했다.
+- public ProviderError message가 비어 있지 않아야 한다는 계약과 회귀를 추가했다.
+- pattern sweep에서 FakeJsonTransport exhaustion 회귀 누락을 찾아, outcome 소진 시 응답을 날조하지 않는 test를 추가했다.
+- token count의 음수/bool뿐 아니라 string/float도 invalid response로 잠갔다.
+- 원 검증 기록은 독립 감사 산출물이므로 수정하지 않았다.
+
+### Direct live server smoke
+
+- 대상: `http://192.168.1.29:9080`의 llama.cpp server
+- `/health` → `{"status":"ok"}`
+- `/v1/models` → `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`, GGUF, context 8192 확인
+- `/v1/chat/completions`에 `chat_template_kwargs.enable_thinking=false`로 짧은 한국어 요청 전송
+- 응답 content `연결 확인 완료`, `finish_reason=stop`, usage prompt/completion/total `23/5/28`
+- `reasoning_content`가 응답에 없어 non-thinking 동작을 확인했다.
+- 이 smoke는 direct curl 확인이며 아직 Slice 0.6 실제 HTTP adapter를 통과한 검증은 아니다.
+
+### F1/F2 후속 검증 브리프 작성
+
+- 변경 파일: `docs/verification_briefs/2026-06-24/llm_gateway_f1_f2_live_smoke.md`
+- 원 조건부 합격의 두 조건, 추가된 contract/test, live smoke 재현 범위만 독립적으로 재검증할 수 있게 정리했다.
+
 ## Issues found
 
 ### Phase와 MVP 축 불일치
@@ -208,7 +235,7 @@
 
 ## Next steps
 
-1. Slice 0.6에서 실제 HTTP adapter에 사용할 dependency/package 경계를 정한다.
-2. mock transport로 timeout/connection/JSON decode를 검증한 뒤 adapter를 구현한다.
-3. flat loop 구현 전 종료 decision과 domain tool 최소 목록을 확정한다.
-4. 라이브 서버 주소를 받으면 별도 real-provider smoke 계획을 실행한다.
+1. 독립 검증 AI가 F1/F2 delta와 live smoke 기록을 재검증한다.
+2. 합격 승격 후 Slice 0.6 실제 HTTP adapter dependency/package 경계를 정한다.
+3. mock transport로 timeout/connection/JSON decode를 검증한 뒤 adapter를 구현한다.
+4. flat loop 구현 전 종료 decision과 domain tool 최소 목록을 확정한다.

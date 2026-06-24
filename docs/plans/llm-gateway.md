@@ -69,6 +69,16 @@ stop
 deadline_ms
 ```
 
+### 현재 request preconditions
+
+- `messages`는 하나 이상이어야 한다.
+- 각 message의 `role`은 빈 문자열일 수 없다.
+- `stream`은 현재 `false`만 허용한다.
+- `max_tokens`는 생략하거나 1 이상의 정수여야 한다. `0`은 허용하지 않는다.
+- Gateway의 `default_model` 설정은 빈 문자열일 수 없다.
+- `thinking`을 생략하면 configured `default_thinking` 값을 그대로 사용하며 `true`와 `false` 모두 유효하다.
+- 명시적 `chat_template_kwargs.enable_thinking`은 request/default thinking보다 우선한다.
+
 응답에 필요한 최소 정보:
 
 ```text
@@ -80,6 +90,16 @@ input_tokens / output_tokens
 load/queue/prompt/generation timing
 schema_valid
 ```
+
+### 현재 text-completion response preconditions
+
+- HTTP 2xx 응답만 generation 성공 후보로 parsing한다.
+- body는 JSON object이고 `choices`는 비어 있지 않은 list여야 한다.
+- `model`, 첫 choice의 `message.content`, `finish_reason`은 문자열이어야 한다.
+- `usage`는 생략할 수 있으며 이 경우 token usage는 0이다.
+- `usage`가 있으면 `prompt_tokens`와 `completion_tokens`는 bool이 아닌 0 이상의 정수여야 한다.
+- public `ProviderError.message`는 빈 문자열일 수 없다.
+- 위 조건을 어긴 성공 응답은 `provider_invalid_response`로 처리한다.
 
 실제 wire schema와 오류 literal은 Slice 0에서 계약 테스트와 함께 확정한다.
 

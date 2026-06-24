@@ -124,10 +124,68 @@ class LlamaCppProviderTests(unittest.IsolatedAsyncioTestCase):
             JsonResponse(
                 status_code=200,
                 body={
+                    "model": None,
+                    "choices": [
+                        {"message": {"content": "ok"}, "finish_reason": "stop"}
+                    ],
+                },
+            ),
+            JsonResponse(
+                status_code=200,
+                body={
                     "model": "gemma-live",
                     "choices": [
                         {"message": {"content": None}, "finish_reason": "stop"}
                     ],
+                },
+            ),
+            JsonResponse(
+                status_code=200,
+                body={
+                    "model": "gemma-live",
+                    "choices": [
+                        {"message": {"content": "ok"}, "finish_reason": None}
+                    ],
+                },
+            ),
+            JsonResponse(
+                status_code=200,
+                body={
+                    "model": "gemma-live",
+                    "choices": [
+                        {"message": {"content": "ok"}, "finish_reason": "stop"}
+                    ],
+                    "usage": {"prompt_tokens": -1, "completion_tokens": 1},
+                },
+            ),
+            JsonResponse(
+                status_code=200,
+                body={
+                    "model": "gemma-live",
+                    "choices": [
+                        {"message": {"content": "ok"}, "finish_reason": "stop"}
+                    ],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": True},
+                },
+            ),
+            JsonResponse(
+                status_code=200,
+                body={
+                    "model": "gemma-live",
+                    "choices": [
+                        {"message": {"content": "ok"}, "finish_reason": "stop"}
+                    ],
+                    "usage": {"prompt_tokens": "1", "completion_tokens": 1},
+                },
+            ),
+            JsonResponse(
+                status_code=200,
+                body={
+                    "model": "gemma-live",
+                    "choices": [
+                        {"message": {"content": "ok"}, "finish_reason": "stop"}
+                    ],
+                    "usage": {"prompt_tokens": 1.5, "completion_tokens": 1},
                 },
             ),
         )

@@ -74,6 +74,14 @@ class ProviderErrorContractTests(unittest.TestCase):
         self.assertNotIn("secret upstream", serialized)
         self.assertNotIn("transport detail", serialized)
 
+    def test_public_error_message_must_not_be_empty(self):
+        with self.assertRaisesRegex(ValueError, "message must not be empty"):
+            ProviderError(
+                code=ProviderErrorCode.INVALID_RESPONSE,
+                message="",
+                retryable=False,
+            )
+
 
 class ProviderErrorFakeTests(unittest.IsolatedAsyncioTestCase):
     async def test_fake_raises_the_stable_provider_error_unchanged(self):

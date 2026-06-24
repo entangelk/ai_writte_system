@@ -2,6 +2,8 @@ import unittest
 
 from services.llm_gateway.app.errors import ProviderErrorCode
 from services.llm_gateway.app.transport import (
+    FakeJsonTransport,
+    FakeTransportExhausted,
     TransportFailureKind,
     error_from_http_status,
     error_from_transport_failure,
@@ -37,6 +39,22 @@ class TransportFailureMappingTests(unittest.TestCase):
                 self.assertEqual(error.code, expected_code)
                 self.assertIs(error.retryable, expected_retryable)
                 self.assertEqual(error.provider, "gemma_local")
+
+
+class FakeJsonTransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_exhaustion_fails_instead_of_fabricating_a_response(self):
+        transport = FakeJsonTransport([])
+
+        with self.assertRaisesRegex(
+            FakeTransportExhausted,
+            "no queued outcome",
+        ):
+            await transport.post_json("/v1/chat/completions", {})
+
+        self.assertEqual(
+            transport.requests,
+            [("/v1/chat/completions", {})],
+        )
 
 
 class HttpStatusMappingTests(unittest.TestCase):

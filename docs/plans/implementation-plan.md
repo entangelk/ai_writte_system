@@ -58,6 +58,8 @@ Application API ───── MongoDB
 - legacy `<|think|>` message 주입 금지
 - 미지원 `stream=true` 조기 거절
 - 외부 repo, FastAPI, Docker, GPU 없이 실행되는 7개 unit contract test 추가
+- request precondition(messages, role, non-streaming, positive max_tokens, non-empty default model)을 plan과 양방향 회귀로 고정
+- thinking 생략 시 default false/true 양쪽을 회귀로 고정
 
 아직 provider HTTP client, fake provider, FastAPI endpoint, Docker/실모델 구성은 구현하지 않았다.
 
@@ -96,14 +98,23 @@ Application API ───── MongoDB
 ### 완료: Slice 0.5 — fake-transport 기반 llama.cpp provider client
 
 - async `JsonTransport` protocol, JSON response, FIFO fake transport 추가
+- fake transport outcome 소진 시 응답을 만들지 않고 명시적으로 실패
 - `LlamaCppProvider`가 `/v1/chat/completions` payload를 전송하고 text completion을 parsing
 - model/content/finish reason/prompt·completion token usage를 `GenerationResult`로 변환
 - transport failure와 HTTP status mapper를 실제 provider 흐름에 연결
 - malformed object, empty choices, `content=None`을 성공으로 위장하지 않고 invalid response 처리
 - upstream error body를 public envelope에 포함하지 않음
 - live server 없이 정상/timeout/429/redirect/malformed/optional usage를 포함한 7개 contract test 추가
+- text response의 필수 문자열과 token count 타입/범위를 plan과 malformed cases로 고정
 
 아직 실제 HTTP library adapter와 tool-call response parsing은 구현하지 않았다.
+
+### 완료: 검증 조건 F1/F2 보강과 direct live smoke
+
+- F1: thinking 생략 + `default_thinking=true` 대칭 회귀 추가
+- F2: 기존 code-enforced request/response precondition을 `llm-gateway.md` 계약으로 승격하고 회귀 추가
+- direct llama.cpp `/health`, `/v1/models`, non-thinking chat completion 확인
+- live smoke는 curl로 직접 server를 확인한 것이며 아직 실제 HTTP adapter 검증은 아님
 
 ## 제안 저장소 구조
 
