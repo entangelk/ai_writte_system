@@ -78,12 +78,9 @@ class LlamaCppProvider:
             content = _string(message["content"])
             finish_reason = _string(choice["finish_reason"])
 
-            usage_value = body.get("usage", {})
-            usage = _mapping(usage_value)
-            prompt_tokens = _token_count(usage.get("prompt_tokens", 0))
-            completion_tokens = _token_count(
-                usage.get("completion_tokens", 0)
-            )
+            usage = _mapping(body["usage"])
+            prompt_tokens = _token_count(usage["prompt_tokens"])
+            completion_tokens = _token_count(usage["completion_tokens"])
         except (KeyError, TypeError, ValueError) as exc:
             error = error_from_transport_failure(
                 TransportFailureKind.INVALID_RESPONSE,

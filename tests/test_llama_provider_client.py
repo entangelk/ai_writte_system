@@ -157,7 +157,10 @@ class LlamaCppProviderTests(unittest.IsolatedAsyncioTestCase):
                 body={
                     "model": "gemma-live",
                     "choices": [
-                        {"message": {"content": "ok"}, "finish_reason": "stop"}
+                        {
+                            "message": {"content": "ok"},
+                            "finish_reason": "stop",
+                        }
                     ],
                     "usage": {"prompt_tokens": -1, "completion_tokens": 1},
                 },
@@ -167,7 +170,10 @@ class LlamaCppProviderTests(unittest.IsolatedAsyncioTestCase):
                 body={
                     "model": "gemma-live",
                     "choices": [
-                        {"message": {"content": "ok"}, "finish_reason": "stop"}
+                        {
+                            "message": {"content": "ok"},
+                            "finish_reason": "stop",
+                        }
                     ],
                     "usage": {"prompt_tokens": 1, "completion_tokens": True},
                 },
@@ -180,6 +186,26 @@ class LlamaCppProviderTests(unittest.IsolatedAsyncioTestCase):
                         {"message": {"content": "ok"}, "finish_reason": "stop"}
                     ],
                     "usage": {"prompt_tokens": "1", "completion_tokens": 1},
+                },
+            ),
+            JsonResponse(
+                status_code=200,
+                body={
+                    "model": "gemma-live",
+                    "choices": [
+                        {"message": {"content": "ok"}, "finish_reason": "stop"}
+                    ],
+                    "usage": {"completion_tokens": 1},
+                },
+            ),
+            JsonResponse(
+                status_code=200,
+                body={
+                    "model": "gemma-live",
+                    "choices": [
+                        {"message": {"content": "ok"}, "finish_reason": "stop"}
+                    ],
+                    "usage": {"prompt_tokens": 1},
                 },
             ),
             JsonResponse(
@@ -205,7 +231,7 @@ class LlamaCppProviderTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertIs(raised.exception.retryable, False)
 
-    async def test_missing_usage_is_valid_and_defaults_to_zero(self):
+    async def test_missing_usage_is_rejected_as_invalid_response(self):
         response = JsonResponse(
             status_code=200,
             body={
@@ -220,14 +246,19 @@ class LlamaCppProviderTests(unittest.IsolatedAsyncioTestCase):
         )
         provider, _ = self._provider([response])
 
-        result = await provider.generate(_request())
+        with self.assertRaises(ProviderError) as raised:
+            await provider.generate(_request())
 
-        self.assertEqual(result.usage.total_tokens, 0)
+        self.assertEqual(
+            raised.exception.code,
+            ProviderErrorCode.INVALID_RESPONSE,
+        )
+        self.assertIs(raised.exception.retryable, False)
 
     async def test_zero_token_counts_are_accepted_as_valid(self):
         # Over-strict guard for the lower bound of "non-negative integer":
         # an explicit prompt_tokens=0 / completion_tokens=0 must be accepted,
-        # not only tolerated through the usage-omission default path.
+        # while omission of the usage object itself remains invalid.
         response = JsonResponse(
             status_code=200,
             body={

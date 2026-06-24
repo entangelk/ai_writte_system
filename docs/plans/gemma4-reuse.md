@@ -96,21 +96,21 @@
 Application/Worker AgentLoopRunner
   ├─ LLM Gateway: chat/tool_calls만 반환
   ├─ Domain Tool Registry: 허용 도구와 argument schema
-  │    ├─ search_context
+  │    ├─ search_memory / load_memory
   │    ├─ load_snapshot
-  │    ├─ resolve_memory
-  │    └─ validate_candidate
+  │    ├─ compare_memory / validate_candidate
+  │    └─ validate_context
   ├─ Loop Gate: iteration/time/token/repeat/error budget
   └─ Trace + decision
 ```
 
-도구 이름은 예시이며 Phase 계약 확정 전 public literal이 아니다. Loop runner는 다른 AgentLoopRunner를 tool로 호출할 수 없고, agent spawn/delegate 도구를 등록하지 않는다.
+도구 이름과 task별 allowlist는 [`flat-loop-gate.md`](flat-loop-gate.md)의 tool registry slice에서 확정됐다. Loop runner는 다른 AgentLoopRunner를 tool로 호출할 수 없고, agent spawn/delegate 도구를 등록하지 않는다.
 
 ## 종료 decision 논의안
 
 ```text
 completed
-needs_review
+awaiting_review
 blocked
 budget_exhausted
 invalid_tool_arguments
@@ -118,7 +118,7 @@ tool_error
 provider_error
 ```
 
-literal은 아직 확정 전이다. Agentic Search와 Analysis의 기존 Gate decision과 중복되지 않도록 공통 오류/decision 계약에서 조정한다.
+literal과 domain Gate의 직교 관계는 [`flat-loop-gate.md`](flat-loop-gate.md)의 decision slice에서 확정됐다.
 
 ## 테스트 이관과 추가
 

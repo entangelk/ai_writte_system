@@ -26,7 +26,8 @@
 - `create`, `update`, `add_evidence`, `no_change`, `conflict` 작업 후보 생성
 - 필요 시 `merge`/`split`은 자동 실행하지 않고 review 후보로 제안
 - 승인된 변경만 versioned upsert와 재색인으로 연결
-- 비교 작업은 허용된 search/load/compare/validate tool만 쓰는 bounded flat loop로 수행하며 sub-agent를 생성하지 않음
+- 비교 작업은 [`flat-loop-gate.md`](flat-loop-gate.md)의 `analysis_compare` allowlist만 쓰는 bounded flat loop로 수행하며 sub-agent를 생성하지 않음
+- `compare_memory`/`validate_candidate`는 loop 중 preflight이며, 종료 후 Analysis Gate 검사를 대체하지 않음
 
 2A와 2B를 하나의 Phase로 구현할지, Phase 4 전후의 별도 milestone로 나눌지는 착수 전에 확정한다.
 

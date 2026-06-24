@@ -97,8 +97,8 @@ schema_valid
 - HTTP 2xx 응답만 generation 성공 후보로 parsing한다.
 - body는 JSON object이고 `choices`는 비어 있지 않은 list여야 한다.
 - `model`, 첫 choice의 `message.content`, `finish_reason`은 문자열이어야 한다.
-- `usage`는 생략할 수 있으며 이 경우 token usage는 0이다.
-- `usage`가 있으면 `prompt_tokens`와 `completion_tokens`는 bool이 아닌 0 이상의 정수여야 한다.
+- `usage`와 그 안의 `prompt_tokens`, `completion_tokens`는 필수다. 어느 하나라도 누락되면 `provider_invalid_response`로 거절한다.
+- `prompt_tokens`와 `completion_tokens`는 bool이 아닌 0 이상의 정수여야 하며 명시적 0은 유효하다.
 - public `ProviderError.message`는 빈 문자열일 수 없다.
 - 위 조건을 어긴 성공 응답은 `provider_invalid_response`로 처리한다.
 

@@ -29,8 +29,9 @@ graph expansion, multi-hop search, 고급 reranking, retriever plugin은 후속 
 
 참조 구현은 [`gemma4-reuse.md`](gemma4-reuse.md)의 bounded flat loop를 사용한다.
 
-- 하나의 AgentLoopRunner가 허용된 search/resolve/validate tool만 호출한다.
+- 하나의 AgentLoopRunner가 [`flat-loop-gate.md`](flat-loop-gate.md)의 `context_search` allowlist만 호출한다.
 - tool은 Application/Worker가 소유하고 LLM Gateway는 tool을 직접 실행하지 않는다.
+- `validate_context`는 loop 중 preflight이며, 종료 후 Context Gate 검사를 대체하지 않는다.
 - iteration뿐 아니라 time/token/tool-call/repeated-call budget을 검사한다.
 - loop 종료는 `completed`와 budget/error 종료를 명시적으로 구분한다.
 - sub-agent spawn, delegate tool, nested agent loop 호출은 지원하지 않는다.
@@ -100,7 +101,7 @@ Analysis 대조용 패키지에는 추가로 기존 memory type/scope, 현재 �
 - [ ] ES/Chroma 장애 시 허용할 fallback 수준
 - [ ] ContextPackage 저장 기간과 민감 정보 처리
 - [ ] Writing용 ContextPackage와 Analysis 비교용 package의 공통/분리 경계
-- [ ] flat loop 종료 decision과 기존 Context Gate decision의 관계
+- [x] flat loop 종료 decision과 기존 Context Gate decision은 직교하며 순차 합성(2026-06-24 소유자 확정)
 
 ## 원문 및 상세 참고
 

@@ -38,6 +38,7 @@ user instruction + editor pointers + WritingBrief
 ## Writing AI 경계
 
 - DB나 검색 인덱스에 직접 접근하지 않는다.
+- MVP `writing_generate` profile에는 domain tool을 등록하지 않고 검증된 ContextPackage만 입력받는다.
 - ContextPackage에 없는 프로젝트 기억을 사실처럼 만들지 않는다.
 - candidate 정보는 확정 canon처럼 단정하지 않는다.
 - `do_not_use`와 POV/timeline constraint를 우선한다.

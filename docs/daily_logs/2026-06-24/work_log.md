@@ -9,6 +9,8 @@
 - LLM 배포 경계와 Gemma 12B Q4를 포함한 실제 구현 순서·검증 계획을 작성한다.
 - 기존 `/mnt/d/devel/gemma4_12b` 구현을 확인해 안전한 재사용 범위와 Agentic Loop Gate 보강점을 계획에 반영한다.
 - 외부 참조 repo 없이 동작하는 첫 LLM Gateway 계약 구현을 아주 작은 단위로 시작한다.
+- flat loop tool registry의 allowlist, strict argument validator, v1 domain tool과 Gate 합성 경계를 확정한다.
+- Gateway usage 누락 계약을 budget-safe하게 반전하고 flat loop budget 차원·초과·retry 정책을 확정한다.
 
 ## Completed work
 
@@ -209,6 +211,43 @@
 - 제외 범위 명시: tool registry·budget 차원·completion criteria·trace 저장 정책은 후속 slice.
 - 계획 인덱스(README)와 HANDOFF(Current Status/Active Decisions/Next Tasks/Project Structure) 갱신.
 
+### flat loop tool registry 계약 확정(tool slice)
+
+- 변경 파일: `docs/plans/flat-loop-gate.md`, `gemma4-reuse.md`, `02-analysis-pipeline.md`, `04-agentic-search.md`, `05-writing-ai.md`, 계획 인덱스, `CHANGELOG.md`, `HANDOFF.md`, 이 작업 로그.
+- 소유자 승인 방향을 반영해 Registry/handler를 Application/Worker 소유로 고정하고, run 시작 시 task profile allowlist를 서버가 고정하도록 했다. 모델/API 요청자는 허용 범위를 확장할 수 없다.
+- v1 public tool 6종을 `search_memory`, `load_memory`, `load_snapshot`, `compare_memory`, `validate_candidate`, `validate_context`로 확정했다. 모두 read-only 조회·대조·preflight이며 저장·승인·canon 변경 side effect를 금지했다.
+- profile별 allowlist를 `analysis_compare` 5종, `context_search` 3종, `writing_generate` 0종으로 분리했다. Writing MVP는 검증된 ContextPackage만 입력받고 DB/검색 tool을 직접 호출하지 않는다.
+- argument validation은 단일 JSON parse, object-root schema, required/type/enum/bounds, `additionalProperties: false`를 강제한다. coercion/default/repair 없이 검증 실패 시 handler를 실행하지 않고 `invalid_tool_arguments`로 종료한다.
+- `project_id`/task/trace/deadline은 모델 arguments에서 제거하고 신뢰된 `ToolExecutionContext`로 주입한다. 미등록·다른 profile·spawn/delegate/nested loop 요청은 실행 없이 `blocked`로 종료한다.
+- compare/validate tool은 loop 내 preflight일 뿐이며 loop 후 Analysis/Context Gate를 항상 독립 실행하도록 Phase 문서와 boundary matrix를 함께 잠갔다.
+- 상세 tool payload 필드는 아직 미확정인 Phase request/candidate/package schema를 선행 추측하지 않았다. 대신 schema 없는 tool은 등록할 수 없다는 registry 조건을 확정했다.
+- 검증: `git diff --check` 통과, 연결 계획 파일 존재와 stale tool literal sweep 확인, 전체 contract 회귀 `python3 -m unittest discover -s tests -v` 44/44 통과.
+
+### tool registry slice 독립 검증 결과 반영
+
+- 독립 검증 기록 `docs/verifications/2026-06-24/flat_loop_tool_registry.md`의 verdict는 합격이다. tool↔profile 양방향 일관성, strict validation, Gate 직교, project scope, 교차참조와 stale literal 부재가 재도출됐다.
+- O1(project scope 행 terminal decision 미명시)은 모델 인자가 아닌 handler context 경계이므로 코드/계약 결함으로 확대하지 않았다. O2(구현 회귀 미존재)는 계약-only slice의 비차단 항목이며 Phase 4 구현 boundary matrix에 이미 남아 있다.
+- 독립 검증 기록은 감사 산출물이므로 수정하지 않았다.
+
+### Gateway usage 필수화(deliberate contract reversal)
+
+- 변경 파일: `services/llm_gateway/app/client.py`, `tests/test_llama_provider_client.py`, `docs/plans/llm-gateway.md`, `CHANGELOG.md`, `HANDOFF.md`, 이 작업 로그.
+- 사용자 승인으로 이전의 “usage 생략 시 0” 계약을 역전해 `usage`, `prompt_tokens`, `completion_tokens`를 모두 필수화했다. 누락은 non-retryable `provider_invalid_response`로 처리한다.
+- 테스트 우선: `test_missing_usage_is_rejected_as_invalid_response`로 반전한 뒤 기존 구현에서 예상대로 FAIL하는 것을 확인하고 구현을 수정했다.
+- 양방향 guard: usage/count 누락은 거절하지만 명시적 `prompt_tokens=0`, `completion_tokens=0`은 `test_zero_token_counts_are_accepted_as_valid`로 계속 수용한다.
+- 패턴 sweep에서 usage object만 있고 한 count가 빠진 경우도 동일하게 0 보정됨을 발견해 두 missing-count case를 malformed response matrix에 추가했다. `git blame HEAD`로 세 기본값이 동일한 Slice 0 도입(`c87fec31`)에서 함께 들어온 것을 확인했다.
+- focused provider 회귀 8/8, 전체 contract 회귀 44/44 통과.
+- actual adapter live smoke도 새 필수 계약으로 성공했다: content `연결 확인 완료`, finish `stop`, usage `23/5/28`. sandbox 내부 연결 실패 후 승인된 외부 네트워크 경계에서 동일 명령을 재실행했다.
+
+### flat loop budget 계약 확정(policy slice)
+
+- 변경 파일: `docs/plans/flat-loop-gate.md`, 계획 인덱스, `CHANGELOG.md`, `HANDOFF.md`, 이 작업 로그.
+- budget literal 5종을 `max_iterations`, `max_wall_clock_ms`, `max_total_tokens`, `max_tool_calls`, `max_repeated_calls`로 확정하고 각 계측 시점과 포함 범위를 명시했다.
+- count budget은 N번째 작업까지 허용하고 N+1번째 시작을 차단한다. token은 실제 usage를 응답 후 합산하는 post-accounting으로 정의해 `== limit` 완료는 허용하고 `> limit` 응답은 성공으로 채택하지 않는다.
+- repeated-call signature는 strict validation 뒤 tool name + key-sorted canonical JSON arguments로 고정했다. 같은 tool의 다른 valid arguments를 과잉 차단하지 않는다.
+- retry는 무료 경로가 아니며 기존 iteration/wall-clock/token 또는 tool-call/repeated-call budget을 그대로 소비한다. retry cap 소진은 원래 error decision, 다른 budget이 retry를 막으면 `budget_exhausted`로 구분한다.
+- 숫자 production 기본값은 Gemma Q4 benchmark 이후로 남기고, 그전 contract test는 한도를 명시적으로 주입하도록 했다.
+
 ## Issues found
 
 ### Phase와 MVP 축 불일치
@@ -259,6 +298,13 @@
 - 해결: loop 골격만 재사용하고 Application/Worker에 domain registry와 Loop Gate를 추가하도록 계획했다.
 - 결과: 실제 구현 전 양방향 회귀와 decision literal 확정이 필요하다.
 
+### token budget과 Gateway usage 생략 계약 충돌
+
+- 문제: 누적 token budget은 신뢰할 수 있는 token usage가 필요하지만 현재 Gateway 계약과 `LlamaCppProvider`는 응답의 `usage` 생략을 허용하고 0으로 기록한다.
+- 원인: Slice 0의 portable provider 계약은 usage를 optional metadata로 설계했지만 후속 flat loop는 token을 강제 budget 차원으로 사용하려 한다.
+- 해결: 사용자 결정으로 Gateway `usage`와 두 token count를 필수화하고 누락을 `provider_invalid_response`로 거절했다. 명시적 0은 계속 유효하다.
+- 결과: token budget이 unknown을 0으로 오인하는 우회가 사라졌고 budget 5차원 계약을 확정할 수 있게 됐다.
+
 ### 개발 머신별 참조 repo 가용성
 
 - 문제: 여러 머신에서 작업하므로 `/mnt/d/devel/gemma4_12b`가 항상 존재하지 않는다.
@@ -296,9 +342,13 @@
 - 재사용 결정: 전체 repo 복제 대신 선택 이관하며, inference는 Gateway, domain agent loop/tool은 Application/Worker가 소유한다.
 - 사용자 운영 결정: 이 repo는 여러 머신에서 작업하므로 외부 `gemma4_12b` checkout에 의존하지 않는다. 현재 머신은 작업 전용으로 사용하고 실모델 smoke는 미룬다.
 - 사용자 상황 공유: 외부 `gemma4_12b`는 다른 AI가 수정 중이므로 현재 작업은 고정 snapshot만 참고하고 최신 변경을 따라가지 않는다.
+- 사용자 결정: flat loop registry는 task별 서버 allowlist를 사용하고 v1 domain tool 6종을 제공한다. compare/validate는 preflight로 허용하되 loop 후 domain Gate는 항상 별도로 실행한다.
+- 사용자 결정: `project_id`는 모델 tool arguments로 받지 않고 신뢰된 실행 context에서 주입한다. strict JSON Schema 검증은 coercion/default/unknown field를 허용하지 않는다.
+- 사용자 결정: 이전 F2/M3 시점의 optional usage 계약을 의도적으로 역전한다. usage/count 누락은 `provider_invalid_response`, 명시적 0 token은 유효로 유지한다.
+- 사용자 결정: budget 5차원과 초과/retry 정책은 지금 확정하되 production 숫자 기본 한도는 Gemma Q4 benchmark 이후 정한다.
 
 ## Next steps
 
-1. flat loop tool registry 계약 확정(허용 tool allowlist, argument validator, domain tool 목록).
-2. flat loop budget 계약 확정(iteration/wall-clock/token/tool-call/repeated-call 차원·한도·초과 정책). 기본 한도는 Gemma Q4 benchmark 이후.
-3. task별 completion criteria 확정(Analysis/Context/Writing). (decision slice는 `flat-loop-gate.md`에 폐쇄됐다.)
+1. task별 completion criteria 확정(Analysis/Context/Writing).
+2. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도 확정.
+3. Phase 4 구현 slice에서 AgentLoopRunner/tool registry/budget boundary matrix의 양방향 회귀 구현.

@@ -11,7 +11,8 @@
 - Slice 0.6 httpx adapter와 mock contract가 구현됐다. actual adapter live smoke는 독립 검증 환경에서 완료됐다.
 - Git repository이며 Slice 0.6 httpx adapter가 구현·검증·커밋됐다.
 - Slice 0.1~0.5의 F1/F2 조건이 delta 독립 재검증으로 폐쇄됐고 조건부 합격이 합격으로 승격됐다.
-- flat loop 종료 decision 계약(decision slice)이 `docs/plans/flat-loop-gate.md`에 확정됐다. tool/budget slice는 후속.
+- flat loop 종료 decision, tool registry, budget policy 계약이 `docs/plans/flat-loop-gate.md`에 확정됐다. 숫자 기본 한도와 completion slice는 후속이다.
+- Gateway optional `usage`→0과 token budget의 충돌은 usage/count 필수화로 해소됐다. 누락은 `provider_invalid_response`, 명시적 0은 유효하다.
 
 ## Active Decisions
 
@@ -29,20 +30,29 @@
 - direct curl smoke는 성공했고, actual adapter live smoke는 독립 검증 환경에서 완료됐다.
 - flat loop 종료 decision 7종(completed/awaiting_review/blocked/budget_exhausted/invalid_tool_arguments/tool_error/provider_error)을 확정했고, Loop/Analysis/Context Gate는 다른 층위(직교)로 병합하지 않는다.
 - Loop의 `needs_review`를 `awaiting_review`로 rename(Analysis candidate status 충돌 해소), `provider_error`는 umbrella + Gateway 5 literal은 trace 보존, `completed`는 loop 종료 상태만(domain Gate 통과 별개)으로 정했다.
+- flat loop registry는 Application/Worker 소유, task별 서버 allowlist, strict JSON Schema validation, read-only v1 tool 6종을 사용한다. `project_id`는 모델 인자가 아니라 신뢰된 실행 context에서 주입한다.
+- `analysis_compare`는 5종, `context_search`는 3종 tool을 허용하고 `writing_generate`는 tool을 허용하지 않는다. compare/validate tool은 preflight이며 독립 domain Gate를 대체하지 않는다.
+- budget은 iteration/wall-clock/total-token/tool-call/repeated-call 5차원을 사용한다. retry도 같은 budget을 소비하며, 초과는 성공으로 위장하지 않는다.
+- budget/retry production 숫자 기본값은 Gemma Q4 benchmark 뒤에 확정한다. 그전 contract test는 명시값을 주입한다.
 
 ## Next Tasks
 
-1. flat loop tool registry 계약 확정(허용 tool allowlist, argument validator, domain tool 목록) — `docs/plans/flat-loop-gate.md` tool slice
-2. flat loop budget 계약 확정(iteration/wall-clock/token/tool-call/repeated-call 차원·한도·초과 정책) — budget slice. 기본 한도는 Gemma Q4 benchmark 이후
+1. task별 completion criteria 확정(Analysis/Context/Writing)
+2. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도 확정
+3. Phase 4 구현 slice에서 AgentLoopRunner/tool registry/budget boundary matrix 양방향 회귀 구현
 
 ## Verification
 
 - 계획 문서의 상대 링크와 원문 추적표 확인
+- tool registry 계약과 Phase 2/4/5 연결 문구 및 양방향 boundary matrix 확인
+- tool registry 계약 독립 검증 합격: `docs/verifications/2026-06-24/flat_loop_tool_registry.md`
+- Gateway usage/count 누락 거절과 명시적 0 수용 focused regression 확인
+- usage 필수화 후 actual adapter live smoke 재통과: content `연결 확인 완료`, finish `stop`, usage `23/5/28`
 - 각 Phase 문서의 필수 planning section 확인
 - 원본 `docs/abstract.md` 본문 보존 확인
 - Product Shell과 analysis taxonomy의 계획 링크 및 Phase 연결 확인
 - 구현 slice의 선후 관계와 LLM Gateway contract/model-test 분리 확인
-- 현재 repo contract test 44개 통과(F1/F2 closure 검증 후 비차단 보강 M3/O1/O2 적용, 43→44)
+- 현재 repo contract test 44개 통과. optional usage lock은 사용자 결정으로 missing-usage rejection으로 반전됐고 명시적 0 수용 guard는 유지됨
 - 참조 repo unit contract test 8개 통과; 정책상 실모델 smoke는 보류
 - Slice 0.1~0.5 독립 검증(2026-06-24): 조건부 합격. 기록 `docs/verifications/2026-06-24/llm_gateway_slice_0_1_to_0_5.md`. 당시 조건은 F1(기본값 True 미고정)·F2(spec-silent 거부의 계약 지위)였고 현재 구현 보강은 완료됐다.
 - F1/F2 구현 보강 완료, delta 독립 재검증 합격(2026-06-24): F1 양방향 변이 증명(else False→true-test FAIL, else True→false-test FAIL), F2 request/response precondition이 `llm-gateway.md`에 명문화되고 13개 delta branch가 회귀에 1:1 매핑, live smoke 6항목 재실행 일치. 기록 `docs/verifications/2026-06-24/llm_gateway_f1_f2_closure.md`. 조건부 합격을 합격으로 승격.
@@ -64,7 +74,7 @@ docs/
 │   ├── implementation-plan.md   # vertical slice와 검증 계획
 │   ├── llm-gateway.md           # 모델 서빙 경계와 Gemma Q4 검증
 │   ├── gemma4-reuse.md          # 기존 구현 선택 이관과 Loop Gate 보강
-│   ├── flat-loop-gate.md        # flat loop 종료 decision 계약(tool/budget 후속)
+│   ├── flat-loop-gate.md        # flat loop decision/tool registry/budget policy 계약
 │   └── 01-core-sot.md ~ 06-review-ui.md
 └── daily_logs/2026-06-24/work_log.md
 services/
@@ -91,6 +101,7 @@ docs/verification_briefs/2026-06-24/
 ├── llm_gateway_f1_f2_live_smoke.md
 └── llm_gateway_slice_0_6_httpx.md
 docs/verifications/2026-06-24/
+├── flat_loop_tool_registry.md
 ├── llm_gateway_slice_0_1_to_0_5.md
 ├── llm_gateway_slice_0_6_httpx.md
 └── llm_gateway_f1_f2_closure.md
