@@ -268,6 +268,27 @@
 - R3 해결: "self-report"의 기계적 정의를 추가했다. self-report 신호는 모델이 run 종료 시 `finalize`(확정 제출) 대신 `defer`(사람 판단 요청)를 택하는 **loop 종료 채널**의 결정이며, candidate `needs_review` status 등 **산출물 데이터 채널**의 필드 값과 직교한다. 이로써 `analysis_compare`의 needs_review 후보 제출(데이터 채널, `completed`)과 `writing_generate`의 모호·충돌 `defer`(종료 채널, `awaiting_review`)가 모순 없이 구분된다. 종료 채널 신호의 구체 wire 형식만 Phase 4 구현 slice로 위임했다.
 - 검증 기록은 독립 감사 산출물이므로 수정하지 않았다. 변경은 `flat-loop-gate.md` 한정(문서).
 
+### AgentLoopRunner A1 구현(decision + budget 계약 회귀)
+
+- 변경 파일: `services/application/app/agent_loop/__init__.py`, `decision.py`, `budget.py`(및 상위 패키지 `__init__.py`), `tests/test_agent_loop_decision.py`, `tests/test_agent_loop_budget.py`, `implementation-plan.md`, `flat-loop-gate.md`(산출물), `CHANGELOG.md`, `HANDOFF.md`, 이 작업 로그.
+- 사용자 입도 결정("decision+budget 먼저, 더 작게")에 따라 flat loop 계약의 가장 작은 구현 단위부터 fake/인프라 없이 결정적 회귀로 잠갔다. AgentLoopRunner는 Application 소유이므로 `services/application/app/agent_loop/` 패키지를 신설했다(기존엔 `services/llm_gateway/`만 존재).
+- TDD: 두 테스트(decision 4 + budget 15)를 먼저 작성해 `ModuleNotFoundError`로 red를 확인한 뒤 최소 구현으로 green 전환했다.
+- `LoopDecision`: 종료 decision 7종을 `StrEnum`으로 고정해 trace payload가 raw literal과 비교 가능하게 했다. literal 값·개수·유일성을 회귀로 잠갔다.
+- `BudgetPolicy`: 5차원을 검증하는 immutable policy. iteration/wall-clock/token은 정수 하한 1, tool-call/repeated-call은 비음수, `allows_tools`와 tool 차원의 모순(tool 사용인데 0, tool 없는데 >0)을 거부한다. bool은 int subclass라 명시적으로 거부해 `True` budget을 1로 오인하지 않게 했다.
+- `BudgetTracker`: count 차원(iteration/tool-call/repeated-call)은 `can_start_*`로 N번째 허용·N+1 차단, wall-clock은 `start` 시 deadline 설정 후 `is_deadline_reached`(clock 주입으로 결정적), token은 post-accounting으로 `record_tokens` 후 `is_token_budget_exceeded`(`== limit` 허용·`> limit` 초과)를 판정한다.
+- 양방향 회귀: budget boundary matrix의 should-fire(한도 도달 차단)와 should-NOT-fire(정상 in-budget 비차단, 같은 tool의 다른 valid arguments를 반복으로 오인 안 함)를 각 차원에 1:1로 매핑했다. signature normalization은 A2 영역이라 정규화된 문자열을 입력으로 받는 추상으로 두었다.
+- 검증: `python3 -m unittest discover -s tests` 전체 63/63 통과(기존 44 + 신규 19). `git diff --check` clean.
+- 제외(후속 sub-slice): A2(tool registry·argument validation·signature normalization), A3(completion 판정·retry 우선순위·loop 합성과 budget→`budget_exhausted` decision 매핑). 실제 tool handler와 Mongo/ES/Chroma 통합은 Slice 1·3 이후.
+
+### Slice A1 독립 검증 결과 반영(합격, F4 보강)
+
+- 근거 기록: `docs/verifications/2026-06-24/agent_loop_a1_decision_budget.md`(verdict: 합격). 워커 보고(63/63, 변이 증명 양방향, 복원 정확, whitespace clean)를 독립 재현으로 입증했고, `LoopDecision` 7종·`BudgetPolicy` 검증·`BudgetTracker` 5차원 계측(특히 token post-accounting `==limit` 허용/`>limit` 초과)이 `flat-loop-gate.md`와 line 단위로 일치함을 확인했다. blocking defect 없음.
+- 검증이 이전 검증의 conditional pass 조건이던 R1(context_search over-strict guard)이 aba3274에서 해소됐음을 재확인했다.
+- F4 보강(소유자 결정으로 즉시): `max_tool_calls=1`, `max_repeated_calls=1` 최소 운영 budget 경계 테스트 2개를 추가했다. 1번째 허용·2번째 차단을 명시 lock해 하한 경계의 빈 셀을 제거했다. 회귀 63→65, 전체 65/65 통과.
+- F1 추적(A3로 이월): `record_tokens`는 A1 범위상 Gateway가 검증한 valid 값을 받는다고 docstring에 명시했으나, A3에서 Gateway→budget 연결 시 음수/None/invalid usage 방어를 회귀로 lock해야 한다(`flat-loop-gate.md` token 차원 요구). Next steps와 HANDOFF A3 항목에 명시했다.
+- F2/F3 비보강: F2(start 전 RuntimeError)는 `test_deadline_check_before_start_is_an_error`와 docstring으로 이미 lock됨. F3(A1 보고가 R1/R2/R3 보강을 언급 안 함)은 코드/문서 결함이 아닌 보고 completeness 항목.
+- 검증 기록은 독립 감사 산출물이므로 수정하지 않았다.
+
 ## Issues found
 
 ### Phase와 MVP 축 불일치
@@ -370,5 +391,6 @@
 
 ## Next steps
 
-1. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도 확정.
-2. Phase 4 구현 slice에서 AgentLoopRunner/tool registry/budget/completion boundary matrix의 양방향 회귀 구현.
+1. AgentLoopRunner A2: tool registry·argument validation(strict JSON Schema)·signature normalization의 계약 회귀 구현.
+2. AgentLoopRunner A3: completion 판정·retry 우선순위·loop 합성과 budget→`budget_exhausted` decision 매핑. Gateway→budget usage 연결 시 음수/None/invalid usage 방어 회귀 lock(검증 F1).
+3. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도 확정.

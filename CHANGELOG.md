@@ -21,6 +21,7 @@
 - flat loop의 task별 tool allowlist, strict argument validation, read-only v1 domain tool 6종과 Gate 비우회 원칙을 확정했다.
 - 누적 token budget 우회를 막기 위해 Gateway usage를 필수화하고, flat loop budget 5차원의 계측·초과·retry 우선순위를 확정했다.
 - flat loop task별 completion criteria를 확정했다. `completed`/`awaiting_review`를 하이브리드(구조 조건 AND self-report)로 판정하고, "완결된 산출 vs loop 미해결" 구분으로 Analysis/Context/Writing의 종료 기준을 잠갔다.
+- AgentLoopRunner 구현을 시작했다(A1). `services/application/` 패키지에 `LoopDecision` 종료 decision 7종과 `BudgetPolicy`/`BudgetTracker` 5차원 budget을 fake/인프라 없이 양방향 회귀로 잠갔다.
 
 사용자는 기존 문서를 초기 아이디에이션으로 보존하면서 실제 개발 전 검토가 쉽도록 긴 초안을 세분화하기를 선택했다. 이에 원문은 유지하고 `docs/plans/`를 작업용 계획 진입점으로 추가했다.
 

@@ -128,6 +128,16 @@ Application API ───── MongoDB
 
 구현 환경에서는 Python socket이 응답 없이 대기해 live adapter smoke를 못 했으나, 2026-06-24 독립 검증 환경에서 `HttpxJsonTransport`를 경유한 actual adapter live smoke를 완료했다(응답 content `연결 확인 완료`, `finish_reason=stop`, usage 23/5/28). close-lifecycle 회귀까지 포함한 Mock contract 6개 회귀도 통과했다. 기록: `docs/verifications/2026-06-24/llm_gateway_slice_0_6_httpx.md`.
 
+### 진행 중: Slice 4 계약 회귀 — AgentLoopRunner A1: decision + budget
+
+[`flat-loop-gate.md`](flat-loop-gate.md)의 확정된 계약을 실제 검색 인프라 없이 결정적 회귀로 잠그는 첫 구현 sub-slice다. Application 소유 컴포넌트이므로 `services/application/app/agent_loop/` 패키지로 시작했다.
+
+- `LoopDecision` 종료 decision enum 7종을 계약 literal 그대로 고정(StrEnum, trace 비교 가능)
+- `BudgetPolicy` 5차원 검증: iteration/wall-clock/token 하한 1, tool-call/repeated-call 비음수, bool 거부, tool 사용 여부와 tool 차원의 모순 거부
+- `BudgetTracker` 계측: count 차원 N번째 허용·N+1 차단, wall-clock deadline(clock 주입으로 결정적), token post-accounting(`== limit` 허용·`> limit` 초과), repeated-call signature 분리(다른 valid arguments 비반복)
+- GPU/인프라 없이 19개 양방향 회귀 통과(decision 4 + budget 15). 전체 회귀 63개 통과
+- 후속 sub-slice: A2(tool registry·argument validation·signature normalization), A3(completion 판정·retry·loop 합성과 decision 매핑). 실제 tool handler와 Mongo/ES/Chroma 통합은 Slice 1·3 이후
+
 ## 제안 저장소 구조
 
 실제 framework 선택 전의 논리 구조다. 디렉터리 이름은 stack 확정 시 조정할 수 있다.
