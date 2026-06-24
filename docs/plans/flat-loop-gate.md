@@ -1,12 +1,12 @@
 # Flat Loop Gate 계약
 
-상태: `Draft`(decision/tool registry/budget policy slice는 2026-06-24 소유자 확정. 숫자 기본 한도와 completion slice는 후속)
+상태: `Draft`(decision/tool registry/budget policy/completion criteria slice는 2026-06-24 소유자 확정. 숫자 기본 한도는 후속)
 선행 조건: [`gemma4-reuse.md`](gemma4-reuse.md)의 bounded flat loop 재사용 방침, Slice 0 LLM Gateway provider error 계약
 후속 소비자: Phase 2 Analysis Pipeline(2B 비교 loop), Phase 4 Agentic Search, Writing/Review
 
 ## 목표와 범위
 
-Application/Worker의 평면형 agent loop(`AgentLoopRunner`)가 정상 종료했는지, 아니면 왜 멈췄는지를 안정된 decision literal로 보고하고, task별로 허용된 domain tool과 다차원 budget 안에서 안전하게 실행하는 계약을 확정한다. 숫자 기본 한도와 task별 completion criteria는 후속 slice로 둔다.
+Application/Worker의 평면형 agent loop(`AgentLoopRunner`)가 정상 종료했는지, 아니면 왜 멈췄는지를 안정된 decision literal로 보고하고, task별로 허용된 domain tool과 다차원 budget 안에서 안전하게 실행하며, task별로 언제 `completed`로 종료하는지를 정의하는 계약을 확정한다. 숫자 기본 한도는 후속 slice로 둔다.
 
 flat loop는 [`gemma4-reuse.md`](gemma4-reuse.md) 원칙을 따른다. sub-agent spawn, delegate tool, 중첩 agent loop 호출은 지원하지 않는다.
 
@@ -189,6 +189,52 @@ LLM provider(Gateway) 실패로 종료한 상태. **coarse umbrella decision**�
 | tool_error | tool non-retryable runtime 오류 | malformed args 아님(`invalid_tool_arguments`); provider 실패 아님(`provider_error`); retryable은 재시도 정책 |
 | provider_error | Gateway 실패로 종료 | tool runtime 오류 아님(`tool_error`); 5 literal 자체가 아님(umbrella, 상세는 trace) |
 
+## task별 completion criteria 계약
+
+`completed`와 `awaiting_review`를 가르는 자율 완료 기준을 task profile별로 확정한다. 본 계약은 **Loop 층위**의 판정이며 domain Gate와 직교한다. 산출물이 Analysis/Context/Writing Gate를 통과하는지는 completion 판정에 들어가지 않는다("completed but Gate rejected" 가능).
+
+### 공통 판정(하이브리드)
+
+`completed`는 다음 두 조건을 **모두** 충족할 때만 가능하다.
+
+1. **구조 조건(결정적)**: task의 목표 산출물이 정의된 형태로 존재한다.
+2. **자율 조건(self-report)**: 모델이 미해결 분기·추가 진행 필요를 보고하지 않는다.
+
+산출물은 존재하나 두 조건 중 하나가 미달이면 `awaiting_review`. 산출물 자체를 만들 수 없는 전제 결핍/해결 불가 의존성이면 `blocked`. 예산이 추가 진행을 막으면 `budget_exhausted`. 이 우선순위는 [종료 decision literal](#종료-decision-literal)의 상호 배타성을 따른다.
+
+### 완결된 산출 vs loop 미해결의 구분(핵심)
+
+모델이 개별 항목의 불확실성을 **산출물 안에 명시적으로 표현**하면(candidate `needs_review` status, confidence 표기, `conflict` 후보 등) 그것은 **완결된 산출**이며 loop는 `completed`다. 불확실성의 처분은 candidate status와 loop 후 domain Gate의 소관이지 loop 종료 상태가 아니다.
+
+반면 모델이 **산출물 자체를 어떻게 도출할지 미해결**이라고 self-report하면 loop 미해결이며 `awaiting_review`다. 이 구분이 본 계약의 중심이다.
+
+두 경우를 기계적으로 가르는 것은 **신호가 나오는 채널**이다. self-report는 모델이 run을 종료할 때 산출물을 확정 제출(`finalize`)하는 대신 사람 판단을 요청(`defer`)하는 **loop 종료 채널**의 명시적 결정이다. candidate `needs_review` status·confidence 표기·`conflict` 후보는 **산출물 데이터 채널**의 필드 값이며, 모델이 이를 담아 산출물을 `finalize`하면 종료 채널은 여전히 `completed`다. 두 채널은 직교한다. 따라서 `analysis_compare`가 모호 대상을 `needs_review` 후보로 담아 제출하는 것(데이터 채널)과 `writing_generate`가 산출물을 확정하지 못해 `defer`하는 것(종료 채널)의 차이는 채널 차이이지 모순이 아니다. 종료 채널 신호의 구체 wire 형식(명시 토큰·구조화 필드 등)은 Phase 4 `AgentLoopRunner` 구현 slice에서 확정한다.
+
+### task profile별 기준
+
+| Task profile | 목표 산출물 | `completed` 구조 조건 | `awaiting_review` 분기 |
+|---|---|---|---|
+| `analysis_compare` | 입력 분석 대상별 변경 작업 후보(`create`/`update`/`add_evidence`/`no_change`/`conflict` 중 하나) | 입력된 모든 대상이 후보로 처리됨. 개별 모호 대상은 candidate `needs_review` status로 표현 | 모델이 어떤 대상을 어떻게 후보화할지 자체를 미해결로 self-report |
+| `context_search` | 검증 가능한 ContextPackage 후보 1건 | 요청 의도를 충족하는 package 후보가 pointer/budget을 갖춰 빌드됨 | 모델이 충분한 근거 미수집·검색 계획 미해결을 self-report |
+| `writing_generate` | WritingCandidate 1건 | candidate가 생성됨(tool 없음, budget상 tool 0회) | 모델이 산출물 자체의 모호·충돌을 self-report |
+
+- **`analysis_compare`**: 다수 대상을 다루므로, 일부 대상만 확신 후보가 나오고 일부는 모호해도 run은 `completed`로 종료한다. 모호 대상은 candidate `needs_review` status로 표현되며 이는 완결된 산출이다(소유자 결정 2026-06-24). loop가 `awaiting_review`인 경우는 모델이 후보화 자체를 미해결로 보고할 때다. `compare_memory`/`validate_candidate` preflight 성공은 `completed` 신호가 아니며, 후보 처분은 loop 후 Analysis Gate가 독립 판정한다.
+- **`context_search`**: package 후보가 빌드되고 모델이 추가 검색이 불필요하다고 보고하면 `completed`. `validate_context` preflight 성공은 신호일 뿐 Context Gate를 대체하지 않는다. 필수 tool 미등록·SOT 참조 부재 같은 구조적 불가는 `blocked`.
+- **`writing_generate`**: tool이 없어 1~소수 provider 호출로 candidate를 생성한다. 모델이 모호·충돌을 self-report하지 않으면 `completed`, self-report하면 `awaiting_review`다(소유자 결정 2026-06-24). 모호·충돌의 구체 판정은 candidate 메타로도 전달돼 loop 후 Writing Gate가 본다.
+
+### completion boundary matrix(구현 slice 회귀 lock list)
+
+각 task를 `completed` 분기와 `awaiting_review` 분기 2행으로 횡일관하게 잠근다. 모든 task의 `completed` 행은 over-strict guard(Gate reject여도 `completed`)를 포함한다.
+
+| Task profile | 분기 | should-fire | should-NOT-fire(over-strict / 인접 decision 구분) |
+|---|---|---|---|
+| `analysis_compare` | `completed` | 모든 대상 후보화 + 후보화 미해결 `defer` 없음 | 일부 후보가 `needs_review` status여도 `completed` 유지(`awaiting_review`로 승격 금지); Gate reject여도 `completed` |
+| `analysis_compare` | `awaiting_review` | 모델이 후보화 자체를 미해결로 `defer` | 개별 후보 모호를 `awaiting_review`로 승격하지 않음 |
+| `context_search` | `completed` | package 후보 빌드 + 추가 검색 불필요 보고 | preflight 성공만으로 `completed` 처리 금지; Gate reject여도 `completed` |
+| `context_search` | `awaiting_review` | 모델이 근거 부족·검색 계획 미해결을 `defer` | 정상 빌드된 package를 근거 부족으로 오인하지 않음 |
+| `writing_generate` | `completed` | candidate 생성 + 모호·충돌 `defer` 없음 | Gate reject여도 `completed`(over-strict guard) |
+| `writing_generate` | `awaiting_review` | 모델이 산출물의 모호·충돌을 `defer` | candidate 생성 실패 아닌 모호를 `blocked`/`tool_error`로 분류하지 않음 |
+
 ## Loop Gate 보강점 반영
 
 [`gemma4-reuse.md`](gemma4-reuse.md)의 7개 보강점이 decision에 어떻게 반영되는지:
@@ -206,14 +252,13 @@ LLM provider(Gateway) 실패로 종료한 상태. **coarse umbrella decision**�
 ## 제외 범위(후속 slice)
 
 - **숫자 기본 한도**: 각 budget 및 retry cap의 production 값. hardware benchmark([`llm-gateway.md`](llm-gateway.md) §Slice 0 benchmark) 이후 확정한다.
-- **completion criteria 계약**: task별 `completed` 판정 기준(필수 evidence/tool 사용). Analysis/Context/Writing task별로 별도 확정.
 - **저장 정책**: trace의 thinking text 보존 여부·길이 제한·기본 비보존.
 
 ## 착수 전 결정사항(남음)
 
 - [x] tool registry 계약 확정: strict validator, task별 allowlist, v1 domain tool 6종(2026-06-24 소유자 확정)
 - [x] budget 5차원·계측·초과·retry 우선순위 확정(2026-06-24 소유자 확정). 숫자 기본 한도는 benchmark 이후
-- [ ] task별 completion criteria 확정(Analysis/Context/Writing)
+- [x] task별 completion criteria 확정(Analysis/Context/Writing): 하이브리드 판정, 완결된 산출 vs loop 미해결 구분(2026-06-24 소유자 확정)
 - [x] decision literal 7종 및 세 Gate 직교 원칙(2026-06-24 소유자 확정)
 - [x] `needs_review` → `awaiting_review` rename(Analysis candidate status 충돌 해소)
 - [x] `provider_error` umbrella + Gateway 5 literal trace 보존

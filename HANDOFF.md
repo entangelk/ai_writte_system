@@ -11,7 +11,7 @@
 - Slice 0.6 httpx adapter와 mock contract가 구현됐다. actual adapter live smoke는 독립 검증 환경에서 완료됐다.
 - Git repository이며 Slice 0.6 httpx adapter가 구현·검증·커밋됐다.
 - Slice 0.1~0.5의 F1/F2 조건이 delta 독립 재검증으로 폐쇄됐고 조건부 합격이 합격으로 승격됐다.
-- flat loop 종료 decision, tool registry, budget policy 계약이 `docs/plans/flat-loop-gate.md`에 확정됐다. 숫자 기본 한도와 completion slice는 후속이다.
+- flat loop 종료 decision, tool registry, budget policy, task별 completion criteria 계약이 `docs/plans/flat-loop-gate.md`에 확정됐다. 숫자 기본 한도만 후속(benchmark 이후)이다.
 - Gateway optional `usage`→0과 token budget의 충돌은 usage/count 필수화로 해소됐다. 누락은 `provider_invalid_response`, 명시적 0은 유효하다.
 
 ## Active Decisions
@@ -34,12 +34,12 @@
 - `analysis_compare`는 5종, `context_search`는 3종 tool을 허용하고 `writing_generate`는 tool을 허용하지 않는다. compare/validate tool은 preflight이며 독립 domain Gate를 대체하지 않는다.
 - budget은 iteration/wall-clock/total-token/tool-call/repeated-call 5차원을 사용한다. retry도 같은 budget을 소비하며, 초과는 성공으로 위장하지 않는다.
 - budget/retry production 숫자 기본값은 Gemma Q4 benchmark 뒤에 확정한다. 그전 contract test는 명시값을 주입한다.
+- completion 판정은 하이브리드(구조 조건 AND self-report)다. self-report는 loop 종료 채널의 `finalize` vs `defer` 결정이며 candidate status(산출물 데이터 채널)와 직교한다. `analysis_compare`의 부분 모호는 run `completed`+candidate status, tool 없는 `writing_generate`는 산출물 모호 `defer` 시 `awaiting_review`. completion matrix는 `task × {completed, awaiting_review}` 횡일관 2행으로 양방향 lock(독립 검증 R1/R2/R3 보강 완료). 종료 채널 wire 형식은 Phase 4 구현 slice에서 확정.
 
 ## Next Tasks
 
-1. task별 completion criteria 확정(Analysis/Context/Writing)
-2. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도 확정
-3. Phase 4 구현 slice에서 AgentLoopRunner/tool registry/budget boundary matrix 양방향 회귀 구현
+1. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도 확정
+2. Phase 4 구현 slice에서 AgentLoopRunner/tool registry/budget/completion boundary matrix 양방향 회귀 구현
 
 ## Verification
 
@@ -57,6 +57,7 @@
 - Slice 0.1~0.5 독립 검증(2026-06-24): 조건부 합격. 기록 `docs/verifications/2026-06-24/llm_gateway_slice_0_1_to_0_5.md`. 당시 조건은 F1(기본값 True 미고정)·F2(spec-silent 거부의 계약 지위)였고 현재 구현 보강은 완료됐다.
 - F1/F2 구현 보강 완료, delta 독립 재검증 합격(2026-06-24): F1 양방향 변이 증명(else False→true-test FAIL, else True→false-test FAIL), F2 request/response precondition이 `llm-gateway.md`에 명문화되고 13개 delta branch가 회귀에 1:1 매핑, live smoke 6항목 재실행 일치. 기록 `docs/verifications/2026-06-24/llm_gateway_f1_f2_closure.md`. 조건부 합격을 합격으로 승격.
 - direct live smoke: health ok, model QAT GGUF Q4_0/context 8192, non-thinking 한국어 completion 성공
+- completion criteria 계약 독립 검증(2026-06-24): 조건부 합격. 워커 보고·내부 일관성·cross-reference 4종 독립 확인, blocking 없음. 비차단 risk R1/R2(matrix 비대칭)·R3(self-report 정의 갭)를 소유자 결정으로 본 slice에서 즉시 보강했다. 기록 `docs/verifications/2026-06-24/completion_criteria_contract.md`
 - Slice 0.6 독립 검증(2026-06-24): 합격. httpx MockTransport/proxy/close 경계 6개 회귀 통과, `except` 순서 load-bearing 가정 4종 검증. 독립 검증 환경에서 `HttpxJsonTransport` 경유 actual adapter live smoke 완료(content `연결 확인 완료`, finish_reason=stop). 기록 `docs/verifications/2026-06-24/llm_gateway_slice_0_6_httpx.md`
 
 ## Project Structure
@@ -104,5 +105,6 @@ docs/verifications/2026-06-24/
 ├── flat_loop_tool_registry.md
 ├── llm_gateway_slice_0_1_to_0_5.md
 ├── llm_gateway_slice_0_6_httpx.md
-└── llm_gateway_f1_f2_closure.md
+├── llm_gateway_f1_f2_closure.md
+└── completion_criteria_contract.md
 ```

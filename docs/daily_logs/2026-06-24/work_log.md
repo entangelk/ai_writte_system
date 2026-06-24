@@ -11,6 +11,7 @@
 - 외부 참조 repo 없이 동작하는 첫 LLM Gateway 계약 구현을 아주 작은 단위로 시작한다.
 - flat loop tool registry의 allowlist, strict argument validator, v1 domain tool과 Gate 합성 경계를 확정한다.
 - Gateway usage 누락 계약을 budget-safe하게 반전하고 flat loop budget 차원·초과·retry 정책을 확정한다.
+- flat loop task별 completion criteria(`completed`/`awaiting_review` 경계)를 Loop 층위에서 확정한다.
 
 ## Completed work
 
@@ -248,6 +249,25 @@
 - retry는 무료 경로가 아니며 기존 iteration/wall-clock/token 또는 tool-call/repeated-call budget을 그대로 소비한다. retry cap 소진은 원래 error decision, 다른 budget이 retry를 막으면 `budget_exhausted`로 구분한다.
 - 숫자 production 기본값은 Gemma Q4 benchmark 이후로 남기고, 그전 contract test는 한도를 명시적으로 주입하도록 했다.
 
+### flat loop task별 completion criteria 확정(completion slice)
+
+- 변경 파일: `docs/plans/flat-loop-gate.md`, 계획 인덱스, `CHANGELOG.md`, `HANDOFF.md`, 이 작업 로그.
+- flat-loop-gate의 후속 slice로 남아 있던 task별 `completed` 판정 기준을 확정했다. completion criteria는 Loop 층위 판정이며 domain Gate와 직교한다는 점을 명시했다("completed but Gate rejected" 가능).
+- 공통 판정을 하이브리드로 고정했다: 구조 조건(목표 산출물이 정의된 형태로 존재)과 자율 조건(모델이 미해결 분기를 self-report하지 않음)을 모두 충족해야 `completed`, 하나라도 미달이면서 산출물이 있으면 `awaiting_review`.
+- 핵심 구분을 명문화했다: 모델이 개별 항목 불확실성을 산출물 안에 명시(candidate `needs_review` status, confidence, `conflict` 후보)하면 완결된 산출이라 `completed`; 산출물 자체를 어떻게 도출할지 미해결로 self-report하면 `awaiting_review`.
+- task profile별 기준을 표로 확정했다. `analysis_compare`는 모든 대상 후보화 시 completed(개별 모호는 candidate status로 표현), `context_search`는 의도 충족 package 후보 빌드 시 completed(preflight 성공은 신호일 뿐), `writing_generate`는 candidate 생성 + 모호·충돌 self-report 없음 시 completed.
+- 구현 slice용 completion boundary matrix를 추가해 should-fire/should-NOT-fire를 양방향 회귀 lock으로 남겼다. over-strict guard(Gate reject여도 completed)와 부분 모호의 비승격을 명시했다.
+- 제외 범위에서 completion criteria 항목을 제거하고 착수 전 결정사항을 `[x]`로 갱신했다. 숫자 기본 한도만 후속(benchmark 이후)으로 남았다.
+- 검증: 변경은 문서 한정. flat-loop-gate 내부 cross-reference(`#종료-decision-literal`)와 인덱스/HANDOFF 연결 문구를 확인했다.
+
+### completion criteria 독립 검증 결과 반영(R1/R2/R3 보강)
+
+- 근거 기록: `docs/verifications/2026-06-24/completion_criteria_contract.md`(독립 검증 verdict: 조건부 합격). 워커 보고의 3가지 결정·5개 변경 파일·내부 일관성·cross-reference 4종이 독립 재도출로 확인됐고, blocking defect는 없으며 비차단 risk 3종이 제기됐다.
+- 소유자 결정으로 3종 risk를 본 completion slice에서 즉시 보강했다(구현 slice 착수 전 명확화가 회귀 재작업을 막으므로).
+- R1/R2 해결: completion boundary matrix를 `task × {completed, awaiting_review}` 횡일관 2행 구조로 재정렬했다. 모든 task의 `completed` 행에 over-strict guard("Gate reject여도 `completed`")를 일관 배치해 `context_search` 행의 guard 누락(R1)을 메우고 행 구조 비대칭(R2)을 제거했다. 각 `awaiting_review` 행에도 should-NOT-fire(인접 decision 오분류 금지)를 채워 빈 셀이 없다.
+- R3 해결: "self-report"의 기계적 정의를 추가했다. self-report 신호는 모델이 run 종료 시 `finalize`(확정 제출) 대신 `defer`(사람 판단 요청)를 택하는 **loop 종료 채널**의 결정이며, candidate `needs_review` status 등 **산출물 데이터 채널**의 필드 값과 직교한다. 이로써 `analysis_compare`의 needs_review 후보 제출(데이터 채널, `completed`)과 `writing_generate`의 모호·충돌 `defer`(종료 채널, `awaiting_review`)가 모순 없이 구분된다. 종료 채널 신호의 구체 wire 형식만 Phase 4 구현 slice로 위임했다.
+- 검증 기록은 독립 감사 산출물이므로 수정하지 않았다. 변경은 `flat-loop-gate.md` 한정(문서).
+
 ## Issues found
 
 ### Phase와 MVP 축 불일치
@@ -346,9 +366,9 @@
 - 사용자 결정: `project_id`는 모델 tool arguments로 받지 않고 신뢰된 실행 context에서 주입한다. strict JSON Schema 검증은 coercion/default/unknown field를 허용하지 않는다.
 - 사용자 결정: 이전 F2/M3 시점의 optional usage 계약을 의도적으로 역전한다. usage/count 누락은 `provider_invalid_response`, 명시적 0 token은 유효로 유지한다.
 - 사용자 결정: budget 5차원과 초과/retry 정책은 지금 확정하되 production 숫자 기본 한도는 Gemma Q4 benchmark 이후 정한다.
+- 사용자 결정(completion criteria): (A) `completed`/`awaiting_review` 판정 주체는 하이브리드(구조 조건 AND 모델 self-report). (B) `analysis_compare`의 부분 모호는 run `completed`로 두고 개별 모호 후보는 candidate status로 표현한다(loop decision과 candidate status의 직교 활용). (C) tool 없는 `writing_generate`는 모델이 산출물의 모호·충돌을 self-report하면 `awaiting_review`로 종료한다. 세 결정은 "완결된 산출(candidate status로 표현) vs loop 미해결(self-report)" 구분 아래 일관된다.
 
 ## Next steps
 
-1. task별 completion criteria 확정(Analysis/Context/Writing).
-2. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도 확정.
-3. Phase 4 구현 slice에서 AgentLoopRunner/tool registry/budget boundary matrix의 양방향 회귀 구현.
+1. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도 확정.
+2. Phase 4 구현 slice에서 AgentLoopRunner/tool registry/budget/completion boundary matrix의 양방향 회귀 구현.

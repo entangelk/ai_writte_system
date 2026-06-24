@@ -20,6 +20,7 @@
 - httpx 기반 실제 JSON transport와 재현 가능한 provider smoke command를 추가했다. Mock contract 6개 회귀와 독립 검증 환경의 actual adapter live smoke까지 통과했다.
 - flat loop의 task별 tool allowlist, strict argument validation, read-only v1 domain tool 6종과 Gate 비우회 원칙을 확정했다.
 - 누적 token budget 우회를 막기 위해 Gateway usage를 필수화하고, flat loop budget 5차원의 계측·초과·retry 우선순위를 확정했다.
+- flat loop task별 completion criteria를 확정했다. `completed`/`awaiting_review`를 하이브리드(구조 조건 AND self-report)로 판정하고, "완결된 산출 vs loop 미해결" 구분으로 Analysis/Context/Writing의 종료 기준을 잠갔다.
 
 사용자는 기존 문서를 초기 아이디에이션으로 보존하면서 실제 개발 전 검토가 쉽도록 긴 초안을 세분화하기를 선택했다. 이에 원문은 유지하고 `docs/plans/`를 작업용 계획 진입점으로 추가했다.
 
@@ -32,5 +33,7 @@ LLM 운영은 같은 monorepo에서 계약을 함께 관리하되 Gateway를 독
 사용자는 tool registry를 Application/Worker가 소유하고 task별 서버 allowlist로 제한하는 방향을 승인했다. 모델 arguments는 strict JSON Schema로 검증하고 `project_id`는 신뢰된 실행 문맥에서 주입하며, compare/validate tool은 preflight로만 사용해 독립 domain Gate를 우회하지 않도록 했다.
 
 사용자는 budget 안전성을 위해 이전의 optional usage 계약을 의도적으로 역전했다. `usage`와 두 token count는 필수이며 누락은 `provider_invalid_response`로 처리하되, 명시적 0 token은 정상값으로 계속 허용한다. 이 결정은 token usage를 `unknown`으로 전파하는 대안보다 단일 Gateway 경계에서 누락을 차단하는 단순성을 택한 것이다.
+
+사용자는 task별 completion criteria를 하이브리드 판정으로 확정했다. `completed`는 구조 조건(목표 산출물 존재)과 자율 조건(모델이 미해결 분기를 self-report하지 않음)을 모두 충족해야 한다. `analysis_compare`의 부분 모호는 loop decision과 candidate status의 직교성을 활용해 run `completed`로 두고 개별 모호 후보는 candidate status로 표현하며, tool 없는 `writing_generate`는 모델이 산출물 자체의 모호·충돌을 self-report할 때만 `awaiting_review`로 종료한다. 이 방향은 개별 항목의 불확실성을 loop 미완료로 승격하지 않고 완결된 산출로 표현하는 직교 모델을 택한 것이다.
 
 여러 개발 머신에서 참조 repo가 없을 수 있으므로 외부 경로는 runtime dependency로 사용하지 않는다. 첫 구현 slice로 llama.cpp thinking payload 경계를 현재 repo에 자립적으로 이관했으며, 작업용 머신의 real-model smoke는 보류한다.
