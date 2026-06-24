@@ -1,0 +1,86 @@
+# Phase 5. Writing AI
+
+상태: `Draft`  
+선행 조건: Phase 4 ContextPackage와 Context Gate  
+후속 소비자: Editor, 저장/분석 재진입, Review UI
+
+## 목표
+
+사용자 요청과 WritingBrief, 검증된 ContextPackage만을 사용해 글 후보를 만들고, 기존 기억과의 충돌을 검사한 뒤 editor에 제안한다.
+
+## MVP 범위
+
+- `WritingRequest`와 `WritingBrief`
+- `continue_scene` 중심의 최소 task type
+- ContextPackage prompt assembly
+- `WritingCandidate`/`draft_candidate`
+- Writing Gate의 기본 계약
+- editor에 full text 또는 patch 제안
+- 사용자 accept 후 Phase 1 save 흐름 재진입
+
+후속 증분:
+
+- revise, outline, critique, dialogue, scene plan
+- Continuity/POV/Foreshadowing Gate 고도화
+- Voice RAG와 Voice Gate
+- 자동 retrieve-more/regeneration loop
+
+## 핵심 흐름
+
+```text
+user instruction + editor pointers + WritingBrief
+→ context request → Phase 4 ContextPackage
+→ prompt assembly → Writing AI → WritingCandidate
+→ Writing Gate → editor 제안/revise/retrieve_more/review/block
+→ 사용자 accept → Phase 1 save → Phase 2 analysis
+```
+
+## Writing AI 경계
+
+- DB나 검색 인덱스에 직접 접근하지 않는다.
+- ContextPackage에 없는 프로젝트 기억을 사실처럼 만들지 않는다.
+- candidate 정보는 확정 canon처럼 단정하지 않는다.
+- `do_not_use`와 POV/timeline constraint를 우선한다.
+- 출력은 최종 원문이 아니라 사용자 검토 대상 후보다.
+
+## Gate 계층
+
+MVP에서 최소한 요청 적합성, 프로젝트 격리, hard constraint 위반을 검사한다. 원문에 제시된 고급 Gate는 증분 계획으로 분리한다.
+
+- Continuity: 죽은 인물, 관계, 장소, 사건의 모순
+- POV: 현재 장면에서 인물이 알 수 없는 사실
+- Foreshadowing: 의도하지 않은 회수/재등장/과잉 노출
+- Voice: WritingBrief 및 승인된 voice sample 위반
+
+## 산출물
+
+1. WritingRequest/Brief/Candidate 계약
+2. 최소 Writing Agent system contract와 prompt
+3. ContextPackage formatter
+4. Writing Gate와 decision 처리
+5. editor integration contract
+6. accept → save → analysis 재진입 흐름
+
+## 수용 기준
+
+- `continue_scene` 후보가 사용자 요청과 현재 editor 위치를 반영한다.
+- ContextPackage 밖의 프로젝트 사실을 단정한 후보가 검출된다.
+- `do_not_use`와 명시된 POV constraint 위반이 통과하지 않는다.
+- 정상적인 창작적 추가까지 모두 차단하는 과잉 검증을 피하는 정상 사례가 있다.
+- Gate decision별 editor 동작이 명확하다.
+- 사용자가 accept하기 전에는 원문 draft version이나 canon이 바뀌지 않는다.
+
+## 착수 전 결정사항
+
+- [ ] 첫 task type을 `continue_scene` 하나로 제한할지
+- [ ] 출력이 full text인지 patch인지, editor 적용 단위
+- [ ] Gate decision literal과 각 decision의 자동/수동 처리
+- [ ] Continuity/POV 검사를 규칙, LLM, hybrid 중 어떻게 구성할지
+- [ ] 후보가 새 설정을 만든 경우 memory hint를 어떻게 다룰지
+- [ ] 첫 모델의 context/output budget과 timeout
+
+## 원문 및 상세 참고
+
+- [`../abstract.md`](../abstract.md) §4.1, §6, §12.3~12.5, §13.1, §14.1
+- [`../writing_agent_prompt.md`](../writing_agent_prompt.md)
+- [`../contracts.md`](../contracts.md) §3, §6.2
