@@ -197,6 +197,18 @@
 - 회귀 카운트 43 → 44. 전체 회귀 44/44 통과. working tree: 검증 기록·테스트·plan만 변경, 구현 코드 무변경.
 - 커밋: addendum + 보강 + 문서 갱신을 한 커밋으로 main에 반영.
 
+### flat loop 종료 decision 계약 확정(decision slice)
+
+- 변경 파일: `docs/plans/flat-loop-gate.md`(신규), `docs/plans/README.md`, `HANDOFF.md`, 이 작업 로그
+- 심층 조사: Phase 2 Analysis Gate(후보 검증 + 처분 `create/update/add_evidence/no_change/conflict` + AnalysisJob 상태)와 Phase 4 Context Gate(project_id/SOT/pointer-version/stale/budget 검사)를 end-to-end 읽어 세 Gate의 층위를 정리.
+- 핵심 설계: Loop Gate decision(loop run 종료 상태)·Analysis Gate(memory 처분)·Context Gate(context 품질)는 다른 질문에 답하므로 **직교**하며 병합하지 않는다. loop run 종료 후 산출물이 별도로 domain Gate 검사를 받는 순차 합성.
+- decision literal 7종 확정: `completed / awaiting_review / blocked / budget_exhausted / invalid_tool_arguments / tool_error / provider_error`. 상호 배타적, 한 run은 정확히 하나.
+- 충돌 해소(소유자 결정): (A) Loop `needs_review` → `awaiting_review` rename으로 Analysis candidate status `needs_review`와 단어 충돌 제거. (B) `provider_error`는 coarse umbrella, Gateway 5 literal은 trace 보존. (C) `completed`는 loop 종료 상태만, domain Gate 통과는 별개("completed but Gate rejected" 가능).
+- boundary matrix: 각 decision의 should-fire/should-NOT-fire를 표로 정리해 구현 slice의 양방향 회귀 lock list로 둠. 빈 칸 없음.
+- gemma4-reuse의 7개 Loop Gate 보강점이 각 decision에 어떻게 반영되는지 매핑 표 작성.
+- 제외 범위 명시: tool registry·budget 차원·completion criteria·trace 저장 정책은 후속 slice.
+- 계획 인덱스(README)와 HANDOFF(Current Status/Active Decisions/Next Tasks/Project Structure) 갱신.
+
 ## Issues found
 
 ### Phase와 MVP 축 불일치
@@ -287,4 +299,6 @@
 
 ## Next steps
 
-1. flat loop decision/tool/budget 계약을 확정한다. (F1/F2 재검증·Slice 0.6 mock contract/live smoke는 각각 독립 검증 기록에서 합격으로 폐쇄됐다.)
+1. flat loop tool registry 계약 확정(허용 tool allowlist, argument validator, domain tool 목록).
+2. flat loop budget 계약 확정(iteration/wall-clock/token/tool-call/repeated-call 차원·한도·초과 정책). 기본 한도는 Gemma Q4 benchmark 이후.
+3. task별 completion criteria 확정(Analysis/Context/Writing). (decision slice는 `flat-loop-gate.md`에 폐쇄됐다.)

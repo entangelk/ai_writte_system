@@ -11,6 +11,7 @@
 - Slice 0.6 httpx adapter와 mock contract가 구현됐다. actual adapter live smoke는 독립 검증 환경에서 완료됐다.
 - Git repository이며 Slice 0.6 httpx adapter가 구현·검증·커밋됐다.
 - Slice 0.1~0.5의 F1/F2 조건이 delta 독립 재검증으로 폐쇄됐고 조건부 합격이 합격으로 승격됐다.
+- flat loop 종료 decision 계약(decision slice)이 `docs/plans/flat-loop-gate.md`에 확정됐다. tool/budget slice는 후속.
 
 ## Active Decisions
 
@@ -26,10 +27,13 @@
 - 외부 `gemma4_12b`는 선택적 provenance이며 현재 repo runtime dependency가 아니다.
 - 외부 서버 수정은 완료됐고 direct live endpoint `192.168.1.29:9080`을 사용할 수 있다.
 - direct curl smoke는 성공했고, actual adapter live smoke는 독립 검증 환경에서 완료됐다.
+- flat loop 종료 decision 7종(completed/awaiting_review/blocked/budget_exhausted/invalid_tool_arguments/tool_error/provider_error)을 확정했고, Loop/Analysis/Context Gate는 다른 층위(직교)로 병합하지 않는다.
+- Loop의 `needs_review`를 `awaiting_review`로 rename(Analysis candidate status 충돌 해소), `provider_error`는 umbrella + Gateway 5 literal은 trace 보존, `completed`는 loop 종료 상태만(domain Gate 통과 별개)으로 정했다.
 
 ## Next Tasks
 
-1. flat loop decision/tool/budget 계약 확정
+1. flat loop tool registry 계약 확정(허용 tool allowlist, argument validator, domain tool 목록) — `docs/plans/flat-loop-gate.md` tool slice
+2. flat loop budget 계약 확정(iteration/wall-clock/token/tool-call/repeated-call 차원·한도·초과 정책) — budget slice. 기본 한도는 Gemma Q4 benchmark 이후
 
 ## Verification
 
@@ -60,6 +64,7 @@ docs/
 │   ├── implementation-plan.md   # vertical slice와 검증 계획
 │   ├── llm-gateway.md           # 모델 서빙 경계와 Gemma Q4 검증
 │   ├── gemma4-reuse.md          # 기존 구현 선택 이관과 Loop Gate 보강
+│   ├── flat-loop-gate.md        # flat loop 종료 decision 계약(tool/budget 후속)
 │   └── 01-core-sot.md ~ 06-review-ui.md
 └── daily_logs/2026-06-24/work_log.md
 services/

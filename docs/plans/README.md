@@ -18,6 +18,7 @@
 10. [`04-agentic-search.md`](04-agentic-search.md) — 검색 계획, 정본 재조회, ContextPackage
 11. [`05-writing-ai.md`](05-writing-ai.md) — 컨텍스트 기반 글 생성과 Writing Gate
 12. [`06-review-ui.md`](06-review-ui.md) — 후보 검토와 프로젝트 메모리 관리 UI
+13. [`flat-loop-gate.md`](flat-loop-gate.md) — flat agent loop 종료 decision 계약(tool/budget은 후속 slice). Phase 2/4/5가 소비하는 횡단 계약
 
 ## 문서 지위와 우선순위
 
