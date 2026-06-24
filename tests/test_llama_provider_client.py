@@ -123,6 +123,10 @@ class LlamaCppProviderTests(unittest.IsolatedAsyncioTestCase):
             JsonResponse(status_code=200, body={"choices": []}),
             JsonResponse(
                 status_code=200,
+                body={"model": "gemma-live", "choices": [42]},
+            ),
+            JsonResponse(
+                status_code=200,
                 body={
                     "model": None,
                     "choices": [
@@ -218,6 +222,31 @@ class LlamaCppProviderTests(unittest.IsolatedAsyncioTestCase):
 
         result = await provider.generate(_request())
 
+        self.assertEqual(result.usage.total_tokens, 0)
+
+    async def test_zero_token_counts_are_accepted_as_valid(self):
+        # Over-strict guard for the lower bound of "non-negative integer":
+        # an explicit prompt_tokens=0 / completion_tokens=0 must be accepted,
+        # not only tolerated through the usage-omission default path.
+        response = JsonResponse(
+            status_code=200,
+            body={
+                "model": "gemma-live",
+                "choices": [
+                    {
+                        "message": {"content": "ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0},
+            },
+        )
+        provider, _ = self._provider([response])
+
+        result = await provider.generate(_request())
+
+        self.assertEqual(result.usage.prompt_tokens, 0)
+        self.assertEqual(result.usage.completion_tokens, 0)
         self.assertEqual(result.usage.total_tokens, 0)
 
 

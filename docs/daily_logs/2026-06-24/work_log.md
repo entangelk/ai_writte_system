@@ -188,6 +188,15 @@
 - 비차단 informational 2건 기록: O1(max_tokens precondition prose에 “bool이 아닌” 누락, 동작·검증엔 영향 없음), O2(choice/message 비-object 구조 guard의 별도 malformed case 부재, 같은 `_mapping` 경로라 영향 없음). 둘 다 분기 lock이 이미 있어 blocking 아님.
 - HANDOFF/본 로그의 Next Tasks에서 F1/F2 재검증 항목을 제거하고 다음 과제를 flat loop 계약 확정으로 둠.
 
+### F1/F2 검증의 메타검증 + 비차단 보강 적용
+
+- 변경 파일: `docs/verifications/2026-06-24/llm_gateway_f1_f2_closure.md`(addendum 섹션 + Hardening applied 섹션), `tests/test_llama_provider_client.py`, `docs/plans/llm-gateway.md`, 이 작업 로그, `HANDOFF.md`
+- 메타검증: 독립 서브에이전트가 작업 AI(위 F1/F2 검증)의 "합격 승격" verdict를 회의적으로 재검증. 같은 1차 자료에서 재도출해 F1 양방향 변이·13 branch 삼각검증·live smoke 6항목·spec-silent 잔존 없음을 모두 독립 확인. verdict 타당. addendum(M1~M8)을 기록 말미에 추가하고 기존 findings·verdict prose는 수정하지 않음.
+- 메타검증이 발견한 내가 놓친 관측(M3): `client.py` `_token_count`의 token=0 수용 경계(하한 0의 should-NOT-fire)는 전용 회귀가 없었으나 `test_missing_usage`가 usage-omission 기본값 0 경로로 우회 pin. guard는 존재하지만 traceability 불투명.
+- 소유자 결정으로 비차단 보강 3종 적용: M3(`test_zero_token_counts_are_accepted_as_valid` 신규, 변이 증명으로 pin 확인), O1(`llm-gateway.md` max_tokens precondition에 “bool이 아닌” 추가, token-count와 서술 대칭), O2(`choices=[42]` 비-object case 추가).
+- 회귀 카운트 43 → 44. 전체 회귀 44/44 통과. working tree: 검증 기록·테스트·plan만 변경, 구현 코드 무변경.
+- 커밋: addendum + 보강 + 문서 갱신을 한 커밋으로 main에 반영.
+
 ## Issues found
 
 ### Phase와 MVP 축 불일치

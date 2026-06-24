@@ -166,7 +166,7 @@ load-bearing 이유:
 - working tree: clean(commit `23c3519` HEAD, `git status --porcelain` 빈 출력). F1/F2 delta는 `4b4129b`, Slice 0.6은 `23c3519`에 각각 커밋됨.
 - F1/F2 delta + direct live smoke 검증이 합격으로 폐쇄됐으므로, HANDOFF Next Task #1(Slice 0.1~0.5 verdict 승격 여부 결정)은 완료. 핸드오프의 “조건부 합격” 표기를 합격으로 갱신한다.
 - HANDOFF Next Task #2(flat loop decision/tool/budget 계약 확정)가 다음 과제.
-- O1/O2는 비차단 informational이며, 소유자가 원하면 prose 대칭 정리(`max_tokens` 줄에 “bool이 아닌” 추가)와 `choices=[42]` malformed case 추가로 보강할 수 있다. 우선순위 아님.
+- O1/O2/M3(아래 “Hardening applied” 참조)는 소유자 결정으로 적용 완료됐다. 비차단 informational이었으나 traceability 명확화를 위해 회귀·prose 보강을 반영했다.
 
 ## Reproduction
 
@@ -198,3 +198,94 @@ curl -sS --max-time 120 http://192.168.1.29:9080/v1/chat/completions \
 # spec-silent 거부 잔존 pattern sweep(모든 raise가 precondition/mapping/exhaustion에 해당):
 grep -rn "raise" services/llm_gateway/app/
 ```
+
+## Meta-verification addendum
+
+본 섹션은 작업 AI(위 본문의 검증자)의 “합격 승격” verdict를 독립·회의적으로 재검증한 메타검증자의 추가 증거만 기록한다. 작업 AI가 쓴 본문·verdict·findings prose는 일절 수정하지 않았다. 메타검증자는 같은 1차 자료에서 재도출했다.
+
+- 메타검증 일자: 2026-06-24
+- 메타검증자: 독립 메타검증 AI(Claude Code)
+- 대상: 위 본문의 합격 verdict와 F1/F2/live smoke 주장
+- 기준 HEAD: `5cb6f18`(working tree clean, `git status --porcelain` 빈 출력 확인)
+
+### M1. F1 양방향 가드 — 메타검증자 직접 변이 재현
+
+작업 AI의 변이 증명을 메타검증자가 독립 재현했다(백업→변이→FAIL 확인→원본 복원 전 단계 수행).
+
+- 변이 A `else default_thinking → else False`: `test_default_thinking_true_applies_when_request_omits_it`가 `AssertionError: False is not True`로 **FAIL**(under-strict 방향). 동시에 false-test는 통과. 작업 AI 주장과 일치.
+- 변이 B `else False → else True`: `test_default_thinking_applies_when_request_omits_it`가 `AssertionError: True is not False`로 **FAIL**(over-strict 방향). 동시에 true-test는 통과. 작업 AI 주장과 일치.
+- 원본 복원: `cp /tmp/payload_backup_meta.py` 후 `git status --porcelain` 빈 출력, `git diff --stat` 빈 출력, `payload.py:65-69`의 `else default_thinking` 복귀 확인. 복원 누락 없음.
+- 결론: F1 가드는 진짜 양방향이며 단방향만 통과하는 pseudo-guard가 아니다. 메타검증자 평가: 작업 AI의 F1 폐쇄 주장은 **사실**.
+
+### M2. 추가 변이 — max_tokens bool guard pin 확인
+
+작업 AI는 max_tokens parametrize가 `{0,-1,True,1.5,"1"}`를 덮는다고 주장했다. 메타검증자는 bool guard(`payload.py:47`의 `isinstance(self.max_tokens, bool)`)를 제거하는 변이로 이 주장을 보강 검증했다.
+
+- 변이: bool 체크 줄 제거 → `test_max_tokens_must_be_positive_and_one_is_valid`가 `AssertionError: ValueError not raised`로 **FAIL**(under-strict, `max_tokens=True`가 거부되지 않음).
+- 결론: max_tokens=True parametrize 값이 bool guard를 실제로 pin한다. 복원 clean.
+- 이는 작업 AI가 명시적으로 변이 증명하진 않았지만, 주장(parametrize가 경계값을 덮는다)의 타당성을 메타검증자가 추가 입증.
+
+### M3. 추가 변이 — token=0 over-strict guard (작업 AI 미언급 분기)
+
+메타검증자는 token count 하한 경계(`value < 0`, 즉 `0 이상`)의 over-strict guard를 별도로 점검했다. 작업 AI는 token parametrize가 `{음수,bool,string,float}`를 덮는다고 했으나, **token=0 입력값이 수용되는 경계(하한 0의 should-NOT-fire)**는 전용 회귀가 없다.
+
+- 변이 `value < 0 → value < 1`(token=0을 잘못 거부): `test_missing_usage_is_valid_and_defaults_to_zero`가 **FAIL**(usage 생략 시 기본값 0이 `_token_count(0)`로 들어가 거부됨).
+- 결론: token=0 over-strict guard는 전용 token-count 회귀는 없으나, **`test_missing_usage`의 usage-omission 기본값 0 경로가 우회적으로 pin**한다. lock은 존재하지만 traceability가 불투명(전용 token-count 회귀로 명시하면 더 명확).
+- 평가: 이는 작업 AI가 놓친 추가 관측이나, **guard 자체는 존재**하므로 합격을 가르지 않는다. 다만 boundary matrix traceability 보강 후보로 기록(전용 `prompt_tokens=0` 수용 case 추가 권장).
+- 해결(2026-06-24 소유자 결정): 전용 `test_zero_token_counts_are_accepted_as_valid` 회귀가 추가됐다. 메타검증자가 `_token_count`의 `value < 0 → value < 1` 변이로 이 회귀가 token=0 수용 경계를 실제로 pin함(변이 시 `ProviderError: provider returned an invalid response`로 FAIL)을 확인했다. traceability 명확화 완료.
+
+### M4. boundary matrix 13 branch 삼각검증 — 메타검증자 재추적
+
+작업 AI의 13 branch 매핑을 코드 줄 ↔ 테스트 함수 ↔ 계약 prose(`llm-gateway.md:75-103`) 삼각검증했다.
+
+- request 7 + response 7 = 14 branch 중 F1(thinking 생략)을 제외한 13 branch가 1:1로 추적됨을 메타검증자가 독립 확인. 빈 칸 없음.
+- 모든 parametrize 경계값(max_tokens 5값, token 4값, 문자열 필드 3곳 None)이 실제 public 표면(payload dict, INVALID_RESPONSE 단언)을 pin함을 확인.
+- 결론: 작업 AI의 “13개 branch 빈 칸 없음” 주장은 **사실**.
+
+### M5. live smoke — 메타검증자 독립 재실행
+
+작성자·작업AI 관측치를 믿지 않고 동일 curl 재실행. 6항목 전부 일치:
+
+- `/health` → `{"status":"ok"}` ✓
+- `/v1/models` → `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`, `format:gguf`, `n_ctx:8192` ✓
+- completion content → `연결 확인 완료` ✓
+- finish_reason → `stop` ✓
+- usage → prompt 23 / completion 5 / total 28 ✓
+- `reasoning_content` → 부재(thinking off) ✓
+
+이 smoke는 direct curl이며 `HttpxJsonTransport`를 경유한 것은 아님을 재확인(Slice 0.6 기록에서 별도 합격).
+
+### M6. spec-silent 거부 잔존 — 메타검증자 독립 pattern sweep
+
+`grep -rn "raise" services/llm_gateway/app/`의 22개 raise 사이트를 메타검증자가 재분류: contract precondition(5종) + stable error mapping(client/transport/httpx) + test-harness exhaustion(Fake*Exhausted) + mapper misuse guard(status<400 ValueError)로 전부 분류됨. F2 표면에 spec-silent *거부* 분기 잔존 없음. 추가 spec-silent 후보(content=None 수용, temperature/top_p 무검증)는 *수용/전달*이지 거부가 아니므로 F2 범위 밖.
+
+### M7. 작업 AI의 “future risk 재분류 금지” 준수 여부
+
+작업 AI는 verdict 160줄에서 O1·O2를 “future enhancement/후속 보강 후보로 재분류하지 않는다”고 명시했다. 메타검증자 평가: CLAUDE.md가 금지하는 “미추적 over-strict guard를 future risk로 재분류” 패턴을 **위반하지 않는다**. O1·O2는 둘 다 분기 lock(회귀)이 이미 존재하므로 “미추적”이 아니다.
+
+### M8. O1/O2 non-blocking 분류 — 메타검증자 평가
+
+- **O1**(max_tokens prose “bool이 아닌” 누락): 동작은 양쪽 모두 bool 거부로 일관(`payload.py:47`, `client.py:118`), max_tokens=True 회귀도 lock됨. prose만 비대칭(78줄 vs 101줄). “정수”의 Python 해석이 bool 포함이냐 배제냐는 해석 의존적이나, 동작·검증이 일관하므로 **진정한 내부 모순(blocking)이 아닌 서술 명확성 gap**. non-blocking 분류에 동의. 다만 소유자 판단으로 78줄을 “bool이 아닌 1 이상의 정수”로 정리하면 traceability가 더 명확해진다.
+- **O2**(`choices=[42]` 비-object choice 구조적 guard): `case 1(body=[])`가 동일 `_mapping` 헬퍼의 비-object 분기를 이미 lock하므로, 별도 case가 없어도 구조적 lock은 존재. non-blocking 분류에 동의.
+
+### 메타검증자 verdict
+
+**작업 AI의 “합격 승격” verdict는 타당하다.** load-bearing 근거:
+
+1. F1 양방향 가드가 메타검증자 직접 변이로 양쪽 FAIL 재현됨(M1).
+2. F2 13 branch 삼각검증이 메타검증자 독립 추적으로 빈 칸 없음 확인(M4). 추가 spec-silent 거부 잔존 없음(M6).
+3. live smoke 6항목 메타검증자 독립 재실행으로 전부 일치(M5).
+4. contract 자기 모순(blocking) 없음. O1은 서술 비대칭이지 동작 모순이 아님(M8).
+5. 43/43 회귀 통과(메타검증자 재확인). green bar는 보조 증거.
+6. 작업 AI가 CLAUDE.md 금지 패턴(future risk 재분류)을 위반하지 않음(M7).
+
+메타검증자가 추가 발견한 것(M3: token=0 over-strict guard의 traceability 불투명, M2: max_tokens bool guard 변이 보강)은 모두 guard *존재*를 확인하는 방향이며, 합격을 가르는 blocking 조건이 아니다. M3의 traceability 보강(전용 `prompt_tokens=0` 수용 case)은 소유자 선택 과제로 기록한다.
+
+## Hardening applied (소유자 결정, 2026-06-24)
+
+메타검증 후 소유자 결정으로 비차단 traceability 보강 3종을 적용했다. verdict(합격)에는 영향이 없으며, 본 기록의 기존 findings·addendum prose는 수정하지 않았다.
+
+- **M3 적용**: `tests/test_llama_provider_client.py`에 `test_zero_token_counts_are_accepted_as_valid` 추가. 명시 `prompt_tokens=0`/`completion_tokens=0` 수용을 고정해 token-count 하한(0)의 should-NOT-fire 경계 traceability를 명확화. 변이 증명(`value < 0 → value < 1`)으로 이 회귀가 경계를 pin함 확인.
+- **O1 적용**: `docs/plans/llm-gateway.md:78`의 `max_tokens` precondition을 “bool이 아닌 1 이상의 정수”로 수정해 token-count(101줄)와 서술 대칭. 동작·검증 무변경.
+- **O2 적용**: `test_malformed_success_response_is_not_accepted`의 malformed case에 `choices=[42]`(비-object choice) 추가. 동일 `_mapping` 헬퍼의 비-object 분기 traceability 명시.
+- 회귀 카운트: 43 → **44**(M3 신규 +1. O2는 기존 parametrized 튜플에 case 추가라 카운트 변동 없음). `python3 -m unittest discover -s tests` → Ran 44 tests, OK.

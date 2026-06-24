@@ -38,7 +38,7 @@
 - 원본 `docs/abstract.md` 본문 보존 확인
 - Product Shell과 analysis taxonomy의 계획 링크 및 Phase 연결 확인
 - 구현 slice의 선후 관계와 LLM Gateway contract/model-test 분리 확인
-- 현재 repo contract test 43개 통과
+- 현재 repo contract test 44개 통과(F1/F2 closure 검증 후 비차단 보강 M3/O1/O2 적용, 43→44)
 - 참조 repo unit contract test 8개 통과; 정책상 실모델 smoke는 보류
 - Slice 0.1~0.5 독립 검증(2026-06-24): 조건부 합격. 기록 `docs/verifications/2026-06-24/llm_gateway_slice_0_1_to_0_5.md`. 당시 조건은 F1(기본값 True 미고정)·F2(spec-silent 거부의 계약 지위)였고 현재 구현 보강은 완료됐다.
 - F1/F2 구현 보강 완료, delta 독립 재검증 합격(2026-06-24): F1 양방향 변이 증명(else False→true-test FAIL, else True→false-test FAIL), F2 request/response precondition이 `llm-gateway.md`에 명문화되고 13개 delta branch가 회귀에 1:1 매핑, live smoke 6항목 재실행 일치. 기록 `docs/verifications/2026-06-24/llm_gateway_f1_f2_closure.md`. 조건부 합격을 합격으로 승격.

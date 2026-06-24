@@ -75,7 +75,7 @@ deadline_ms
 - `messages`는 하나 이상이어야 한다.
 - 각 message의 `role`은 빈 문자열일 수 없다.
 - `stream`은 현재 `false`만 허용한다.
-- `max_tokens`는 생략하거나 1 이상의 정수여야 한다. `0`은 허용하지 않는다.
+- `max_tokens`는 생략하거나 bool이 아닌 1 이상의 정수여야 한다. `0`은 허용하지 않는다.
 - Gateway의 `default_model` 설정은 빈 문자열일 수 없다.
 - `thinking`을 생략하면 configured `default_thinking` 값을 그대로 사용하며 `true`와 `false` 모두 유효하다.
 - 명시적 `chat_template_kwargs.enable_thinking`은 request/default thinking보다 우선한다.
