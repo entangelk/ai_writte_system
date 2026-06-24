@@ -51,7 +51,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 git diff --check
 ```
 
-Expected author-side baseline: 37 tests passing. Rerun independently.
+Expected author-side baseline after Slice 0.6 implementation: 42 tests passing. F1/F2 delta assertions remain in the named tests above. Rerun independently.
 
 ## Direct live smoke target
 

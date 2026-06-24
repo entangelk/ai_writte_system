@@ -145,6 +145,36 @@
 - 변경 파일: `docs/verification_briefs/2026-06-24/llm_gateway_f1_f2_live_smoke.md`
 - 원 조건부 합격의 두 조건, 추가된 contract/test, live smoke 재현 범위만 독립적으로 재검증할 수 있게 정리했다.
 
+### Slice 0.6 httpx JSON adapter 구현
+
+- 변경 파일: `services/llm_gateway/app/httpx_transport.py`, `requirements.txt`, `tests/test_httpx_transport.py`, `scripts/smoke_llm_provider.py`
+- 전체 프로젝트 packaging 대신 LLM Gateway service에 `httpx>=0.28,<1` 의존성만 선언했다.
+- async JSON POST, response decode, context-managed close를 제공하는 `HttpxJsonTransport`를 구현했다.
+- timeout/connection exception을 stable transport failure로 변환했다.
+- 2xx non-JSON은 invalid response로 차단하고, non-JSON HTTP error는 body를 폐기한 채 status mapper에 전달했다.
+- local LLM 요청이 host proxy 설정을 우발적으로 사용하지 않도록 `trust_env=false`를 기본값으로 뒀다.
+- MockTransport 기반 success/timeout/connection/non-JSON과 proxy opt-in/out 경계 5개 test가 통과했다.
+- 실제 provider 경로를 재현하는 `python -m scripts.smoke_llm_provider --base-url ...` 명령을 추가했다.
+
+### Python live adapter smoke 미완료
+
+- 첫 파일 경로 실행은 repository root가 import path에 없어 `ModuleNotFoundError`가 발생했다.
+- 해결: smoke를 `scripts` package module로 전환하고 `python -m scripts.smoke_llm_provider` 실행 방식으로 고정했다.
+- sandbox 밖 실행 승인을 받아 httpx smoke를 재시도했으나 응답 없이 대기해 중단했다.
+- `trust_env=false` 보강 후에도 동일했고, 독립 `httpx.AsyncClient GET /health`와 stdlib `urllib`도 대기했다.
+- 같은 시점 curl `/health`와 completion은 각각 즉시 성공했다.
+- 결론: 서버 장애나 특정 adapter 결함으로 단정하지 않고 현재 실행 환경의 Python socket 경로 문제로 기록한다. 다른 Python 실행 환경에서 adapter live smoke 재실행이 필요하다.
+
+### Slice 0.6 독립 검증 및 I2 보강
+
+- 근거 기록: `docs/verifications/2026-06-24/llm_gateway_slice_0_6_httpx.md`
+- 독립 검증 결과: 합격. 42개 회귀를 독립 재실행으로 통과했고 `except` 순서의 load-bearing httpx 예외 계층 가정 4종을 인터프리터로 검증했으며 조건 분기 7종이 양방향으로 lock 됐다.
+- live adapter smoke: 구현 작업 환경에서는 Python socket이 대기해 미완료였으나 본 검증 환경에서 `HttpxJsonTransport` 경유 actual adapter smoke를 완료했다. 응답 content `연결 확인 완료`, `finish_reason=stop`, usage 23/5/28로 brief 예측과 일치한다.
+- 사용자 결정: 본 검증 환경의 live adapter smoke 결과를 canonical로 받아들이고 plan/HANDOFF/CHANGELOG/brief의 “live 대기/미완료” 표기를 “완료”로 갱신하기로 했다.
+- I2 해결: 검증에서 발견한 close lifecycle 비차단 권고를 회귀로 보강했다. `async with` 종료 전후 `is_closed`를 검증하는 양방향 테스트 `test_context_manager_closes_the_httpx_client`를 추가했다. 전체 회귀 42→43, httpx 회귀 5→6.
+- 문서 정정: `implementation-plan.md`, `llm-gateway.md`, `HANDOFF.md`, `CHANGELOG.md`, 본 검증 brief의 live 상태 표기를 완료로 갱신했다.
+- 원 검증 기록은 독립 감사 산출물이므로 I2 해결·카운트 갱신 외에 본문을 재작성하지 않았다.
+
 ## Issues found
 
 ### Phase와 MVP 축 불일치
@@ -235,7 +265,7 @@
 
 ## Next steps
 
-1. 독립 검증 AI가 F1/F2 delta와 live smoke 기록을 재검증한다.
-2. 합격 승격 후 Slice 0.6 실제 HTTP adapter dependency/package 경계를 정한다.
-3. mock transport로 timeout/connection/JSON decode를 검증한 뒤 adapter를 구현한다.
-4. flat loop 구현 전 종료 decision과 domain tool 최소 목록을 확정한다.
+1. 독립 검증 AI가 F1/F2 delta와 direct curl smoke 기록을 재검증한다.
+2. Slice 0.6 mock contract와 Python live 미완료 사유를 별도 검증한다.
+3. 다른 Python 실행 환경에서 actual adapter smoke를 재실행한다.
+4. 완료 후 flat loop decision/tool/budget 계약을 확정한다.

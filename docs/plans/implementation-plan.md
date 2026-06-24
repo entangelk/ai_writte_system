@@ -116,6 +116,18 @@ Application API ───── MongoDB
 - direct llama.cpp `/health`, `/v1/models`, non-thinking chat completion 확인
 - live smoke는 curl로 직접 server를 확인한 것이며 아직 실제 HTTP adapter 검증은 아님
 
+### 구현 완료·live 검증 완료: Slice 0.6 — httpx JSON adapter
+
+- LLM Gateway service dependency로 `httpx>=0.28,<1` 선언
+- `HttpxJsonTransport`가 async POST, JSON decode, close/context manager 제공
+- httpx timeout/connection을 기존 TransportFailure로 변환
+- 2xx non-JSON은 invalid response, non-JSON 4xx/5xx는 body를 버리고 status 보존
+- host proxy 환경을 우발적으로 사용하지 않도록 `trust_env=false` 기본값
+- `httpx.MockTransport` 기반 success/timeout/connection/non-JSON과 proxy opt-in/out 5개 회귀 추가
+- URL을 인자로 받는 실제 provider smoke module 추가
+
+구현 환경에서는 Python socket이 응답 없이 대기해 live adapter smoke를 못 했으나, 2026-06-24 독립 검증 환경에서 `HttpxJsonTransport`를 경유한 actual adapter live smoke를 완료했다(응답 content `연결 확인 완료`, `finish_reason=stop`, usage 23/5/28). close-lifecycle 회귀까지 포함한 Mock contract 6개 회귀도 통과했다. 기록: `docs/verifications/2026-06-24/llm_gateway_slice_0_6_httpx.md`.
+
 ## 제안 저장소 구조
 
 실제 framework 선택 전의 논리 구조다. 디렉터리 이름은 stack 확정 시 조정할 수 있다.

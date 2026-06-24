@@ -41,7 +41,8 @@ Gateway가 하지 않는 일:
 - 외부 `gemma4_12b` repo는 필수 dependency가 아니다.
 - 이관된 code/test는 현재 repo 안에서 독립 실행한다.
 - model weight와 GPU smoke는 별도 실행 환경의 책임이다.
-- 현재 작업용 머신에서는 unit/contract/integration fake test까지만 수행하고 real-model smoke를 보류한다.
+- 현재 작업 환경에서는 direct curl smoke가 가능하다. 실제 Python adapter smoke 가능 여부는 실행 환경별로 따로 검증한다.
+- 로컬 LLM HTTP adapter는 host proxy 환경에 우발적으로 연결되지 않도록 `trust_env=false`를 기본으로 사용하며, proxy가 필요한 배포에서만 명시적으로 활성화한다.
 
 ## 내부 API 초안
 
@@ -113,9 +114,7 @@ provider_invalid_response
 provider_request_rejected
 ```
 
-transport/HTTP status mapper는 injected `JsonTransport` 기반 client 흐름에 연결됐다. 실제 HTTP library adapter는 아직 연결하지 않았다.
-
-현재 `LlamaCppProvider`는 injected `JsonTransport`를 통해 `/v1/chat/completions` payload 전송, text completion parsing, stable error 연결까지 구현됐다. 실제 HTTP library adapter와 tool-call parsing은 아직 없다.
+transport/HTTP status mapper와 `LlamaCppProvider`는 `JsonTransport` 경계로 연결됐고, 실제 library adapter인 `HttpxJsonTransport`도 구현됐다. Mock HTTP 경계는 검증됐다. service dependency는 `httpx>=0.28,<1`이며 local endpoint 기본 정책은 `trust_env=false`다. 2026-06-24 독립 검증 환경에서 `HttpxJsonTransport`를 경유한 actual adapter live smoke까지 검증됐다. Tool-call parsing은 여전히 미구현이다.
 
 ## Gemma Q4 적용 원칙
 
@@ -208,6 +207,7 @@ transport/HTTP status mapper는 injected `JsonTransport` 기반 client 흐름에
 - provider error literal/envelope와 내부 cause 비노출 — 구현 완료
 - transport failure/HTTP status의 stable error mapping — 구현 완료
 - fake-transport 기반 llama.cpp text provider client — 구현 완료
+- httpx JSON adapter와 mock HTTP contract — 구현 완료, live adapter smoke 검증 완료
 - malformed JSON과 truncated output
 - provider timeout/unavailable/overload
 - request ID와 prompt/model revision trace
@@ -223,7 +223,7 @@ transport/HTTP status mapper는 injected `JsonTransport` 기반 client 흐름에
 
 N과 합격 기준은 실제 hardware baseline을 본 뒤 고정한다.
 
-이 smoke suite는 현재 작업용 머신의 완료 조건이 아니라 GPU 실행 머신의 배포 전 gate다.
+짧은 direct curl smoke와 기본 adapter smoke는 완료됐지만, 전체 model evaluation은 GPU/Python 실행 환경의 배포 전 gate다.
 
 ## 착수 전 필요한 정보
 
