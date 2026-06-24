@@ -175,6 +175,19 @@
 - 문서 정정: `implementation-plan.md`, `llm-gateway.md`, `HANDOFF.md`, `CHANGELOG.md`, 본 검증 brief의 live 상태 표기를 완료로 갱신했다.
 - 원 검증 기록은 독립 감사 산출물이므로 I2 해결·카운트 갱신 외에 본문을 재작성하지 않았다.
 
+### Slice 0.1~0.5 F1/F2 delta 독립 재검증(조건부 합격 승격)
+
+- 근거 기록: `docs/verifications/2026-06-24/llm_gateway_f1_f2_closure.md`
+- 대상: commit `4b4129b`의 F1/F2 보강 delta + direct live smoke. working tree clean.
+- F1 폐쇄 증명: `payload.py`의 `else default_thinking`을 직접 변이해 양방향을 증명했다. `else False`로 바꾸면 `test_default_thinking_true_applies_when_request_omits_it`가 FAIL, `else True`로 바꾸면 `test_default_thinking_applies_when_request_omits_it`가 FAIL. 두 방향 모두 회귀 도입을 잡아냄을 확인하고 원본 복원(`git status --porcelain` 빈 출력).
+- F2 폐쇄 확인: 7 request + 7 response precondition이 `llm-gateway.md`에 명문화됐고 delta boundary matrix 13개 branch가 코드와 회귀에 1:1 매핑됨(빈 칸 없음). parametrize가 max_tokens `{0,-1,True,1.5,"1"}`·token `{음수,bool,string,float}`·문자열 필드 `{model,content,finish} None` 전 경계값을 덮는다.
+- pattern sweep: gateway app의 22개 raise 사이트가 모두 contract precondition, stable error mapping, 또는 test-harness exhaustion에 해당하며 F2 표면에 spec-silent 거부가 잔존하지 않음을 확인.
+- live smoke 재실행: `/health` ok, model Q4_0/gguf/n_ctx 8192, content `연결 확인 완료`, finish stop, usage 23/5/28, reasoning_content 부재 — 작성자 관측 6항목 전부 검증자 재도출로 일치.
+- 독립 재현: 전체 회귀 43/43 통과.
+- verdict: 합격. 조건부 합격의 두 조건(F1, F2)이 충족돼 합격으로 승격. 원 검증 기록은 독립 감사 산출물이므로 수정하지 않고 별도 기록으로 폐쇄.
+- 비차단 informational 2건 기록: O1(max_tokens precondition prose에 “bool이 아닌” 누락, 동작·검증엔 영향 없음), O2(choice/message 비-object 구조 guard의 별도 malformed case 부재, 같은 `_mapping` 경로라 영향 없음). 둘 다 분기 lock이 이미 있어 blocking 아님.
+- HANDOFF/본 로그의 Next Tasks에서 F1/F2 재검증 항목을 제거하고 다음 과제를 flat loop 계약 확정으로 둠.
+
 ## Issues found
 
 ### Phase와 MVP 축 불일치
@@ -265,7 +278,4 @@
 
 ## Next steps
 
-1. 독립 검증 AI가 F1/F2 delta와 direct curl smoke 기록을 재검증한다.
-2. Slice 0.6 mock contract와 Python live 미완료 사유를 별도 검증한다.
-3. 다른 Python 실행 환경에서 actual adapter smoke를 재실행한다.
-4. 완료 후 flat loop decision/tool/budget 계약을 확정한다.
+1. flat loop decision/tool/budget 계약을 확정한다. (F1/F2 재검증·Slice 0.6 mock contract/live smoke는 각각 독립 검증 기록에서 합격으로 폐쇄됐다.)

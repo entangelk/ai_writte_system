@@ -10,6 +10,7 @@
 - Slice 0.1~0.5가 구현됐다: payload, provider/fake, error envelope, transport mapping, fake-transport llama.cpp client.
 - Slice 0.6 httpx adapter와 mock contract가 구현됐다. actual adapter live smoke는 독립 검증 환경에서 완료됐다.
 - Git repository이며 Slice 0.6 httpx adapter가 구현·검증·커밋됐다.
+- Slice 0.1~0.5의 F1/F2 조건이 delta 독립 재검증으로 폐쇄됐고 조건부 합격이 합격으로 승격됐다.
 
 ## Active Decisions
 
@@ -28,8 +29,7 @@
 
 ## Next Tasks
 
-1. F1/F2 보강 후속 독립 재검증 후 Slice 0.1~0.5 조건부 합격 verdict 승격 여부 결정: `docs/verification_briefs/2026-06-24/llm_gateway_f1_f2_live_smoke.md`
-2. flat loop decision/tool/budget 계약 확정
+1. flat loop decision/tool/budget 계약 확정
 
 ## Verification
 
@@ -41,7 +41,7 @@
 - 현재 repo contract test 43개 통과
 - 참조 repo unit contract test 8개 통과; 정책상 실모델 smoke는 보류
 - Slice 0.1~0.5 독립 검증(2026-06-24): 조건부 합격. 기록 `docs/verifications/2026-06-24/llm_gateway_slice_0_1_to_0_5.md`. 당시 조건은 F1(기본값 True 미고정)·F2(spec-silent 거부의 계약 지위)였고 현재 구현 보강은 완료됐다.
-- F1/F2 구현 보강 완료, 독립 재검증 대기: F1 대칭 default 회귀 추가, F2 request/response precondition 명시 및 회귀 추가
+- F1/F2 구현 보강 완료, delta 독립 재검증 합격(2026-06-24): F1 양방향 변이 증명(else False→true-test FAIL, else True→false-test FAIL), F2 request/response precondition이 `llm-gateway.md`에 명문화되고 13개 delta branch가 회귀에 1:1 매핑, live smoke 6항목 재실행 일치. 기록 `docs/verifications/2026-06-24/llm_gateway_f1_f2_closure.md`. 조건부 합격을 합격으로 승격.
 - direct live smoke: health ok, model QAT GGUF Q4_0/context 8192, non-thinking 한국어 completion 성공
 - Slice 0.6 독립 검증(2026-06-24): 합격. httpx MockTransport/proxy/close 경계 6개 회귀 통과, `except` 순서 load-bearing 가정 4종 검증. 독립 검증 환경에서 `HttpxJsonTransport` 경유 actual adapter live smoke 완료(content `연결 확인 완료`, finish_reason=stop). 기록 `docs/verifications/2026-06-24/llm_gateway_slice_0_6_httpx.md`
 
@@ -85,4 +85,8 @@ docs/verification_briefs/2026-06-24/
 ├── llm_gateway_slice_0_1_to_0_5.md
 ├── llm_gateway_f1_f2_live_smoke.md
 └── llm_gateway_slice_0_6_httpx.md
+docs/verifications/2026-06-24/
+├── llm_gateway_slice_0_1_to_0_5.md
+├── llm_gateway_slice_0_6_httpx.md
+└── llm_gateway_f1_f2_closure.md
 ```
