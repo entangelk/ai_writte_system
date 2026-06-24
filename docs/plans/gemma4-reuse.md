@@ -9,6 +9,15 @@
 
 참조 구현은 Slice 0의 좋은 기반이다. 전체 repo를 그대로 복제하거나 submodule로 연결하기보다, 검증된 작은 단위를 현재 monorepo의 책임 경계에 맞춰 선택 이관한다.
 
+`/mnt/d/devel/gemma4_12b`는 선택적인 provenance/비교 자료다. 다른 개발 머신에 이 경로 또는 repo가 없어도 현재 프로젝트의 build, test, run이 가능해야 한다. 필요한 code, contract test, configuration은 현재 repo에 이관하고 외부 경로를 import, volume mount, build context로 사용하지 않는다.
+
+## 참조 업데이트 정책
+
+- commit `485c4e2`는 이번 검토의 고정 snapshot이다.
+- 외부 repo는 현재 다른 작업자가 수정 중이므로 working tree와 최신 HEAD를 구현 중간에 다시 읽거나 복사하지 않는다.
+- 외부 수정 완료 후 사용자가 재검토를 요청하면 새 commit을 별도 기준으로 비교한다.
+- 변경분은 자동 merge하지 않고 현재 repo의 contract와 회귀 테스트에 필요한 부분만 다시 선별한다.
+
 핵심 원칙:
 
 - model server와 inference client/schema는 적극 재사용한다.
@@ -139,11 +148,12 @@ literal은 아직 확정 전이다. Agentic Search와 Analysis의 기존 Gate de
 - 참조 repo의 최근 work log에는 thinking off의 실모델 결과가 기록돼 있지만, 이번 검토에서 독립 재현한 것은 아니다.
 - 현재 repo에는 코드 자체의 LICENSE 파일이 없고 README에는 Gemma model terms만 있다. 동일 소유자의 내부 재사용은 사용자가 허용했지만, 외부 공개·배포 전에는 source code license/provenance를 명시해야 한다.
 - 일부 README/설계 문서는 legacy `<|think|>` 주입을 설명하지만 현재 code/test/work log는 `chat_template_kwargs.enable_thinking`을 canonical mechanism으로 사용한다. 이관 시 code/test를 기준으로 한다.
+- 실제 모델/컨테이너 smoke는 현재 작업용 머신에서 실행하지 않고, GPU 실행 환경이 준비된 다른 머신의 별도 verification step으로 미룬다.
 
 ## 이관 순서
 
 1. 참조 commit과 이관 파일 목록을 기록한다.
-2. 참조의 8개 contract test를 현재 package 경계에 맞게 먼저 이식한다.
+2. 참조 contract 중 thinking payload 경계를 현재 package와 self-contained test로 먼저 이식한다. 완료.
 3. Compose model service와 schema/client를 이관해 tests와 smoke를 통과시킨다.
 4. AgentEngine의 loop 골격을 Application/Worker로 옮긴다.
 5. demo registry 대신 domain tool interface와 Loop Gate를 구현한다.

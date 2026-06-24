@@ -8,6 +8,7 @@
 - 단일 사용자용 프로젝트·원고 관리 껍데기와 분석 기억 세분화 논의안을 계획에 포함한다.
 - LLM 배포 경계와 Gemma 12B Q4를 포함한 실제 구현 순서·검증 계획을 작성한다.
 - 기존 `/mnt/d/devel/gemma4_12b` 구현을 확인해 안전한 재사용 범위와 Agentic Loop Gate 보강점을 계획에 반영한다.
+- 외부 참조 repo 없이 동작하는 첫 LLM Gateway 계약 구현을 아주 작은 단위로 시작한다.
 
 ## Completed work
 
@@ -65,6 +66,58 @@
 - max iteration의 정상 응답 위장, invalid tool arguments의 `{}` 대체, 반복 call/time/token budget 부재를 Loop Gate 보강점으로 기록했다.
 - sub-agent spawn/delegation/nested agent loop를 명시적으로 제외했다.
 
+### Slice 0.1 portable thinking payload contract 구현
+
+- 변경 파일: `services/llm_gateway/app/payload.py`, package init 파일, `tests/test_llm_gateway_payload.py`
+- 외부 `gemma4_12b` repo를 import하지 않는 self-contained chat request와 llama.cpp payload builder를 구현했다.
+- reference의 canonical thinking mechanism인 `chat_template_kwargs.enable_thinking`을 이관했다.
+- thinking false/true/default/explicit override, legacy token 비주입, stream 거절, generation field 전달을 7개 test로 고정했다.
+- 테스트를 먼저 추가해 `ModuleNotFoundError` 실패를 확인한 뒤 최소 구현으로 통과시켰다.
+- FastAPI, HTTP client, Docker, model smoke, agent loop는 이번 slice에 포함하지 않았다.
+
+### Slice 0.2 provider protocol과 fake 구현
+
+- 변경 파일: `services/llm_gateway/app/provider.py`, `tests/test_llm_provider.py`
+- 구체적인 llama.cpp client와 Application 사이에 async `LLMProvider` protocol을 추가했다.
+- generation 결과와 token usage의 최소 immutable 값 객체를 추가했다.
+- 성공 응답과 provider error를 FIFO로 재현하고 호출 request를 기록하는 deterministic fake를 구현했다.
+- fake outcome 소진 시 응답을 날조하지 않고 `FakeProviderExhausted`로 실패하게 했다.
+- 정상 FIFO, protocol 적합성, timeout 후 다음 결과 보존, exhaustion을 4개 test로 검증했다.
+
+### Slice 0.3 provider error literal과 envelope 구현
+
+- 변경 파일: `services/llm_gateway/app/errors.py`, `tests/test_llm_provider_errors.py`
+- `provider_unavailable`, `provider_timeout`, `provider_overloaded`, `provider_invalid_response` 네 literal을 고정했다.
+- message/retryable/provider만 노출하는 안정된 error envelope를 추가했다.
+- retryable과 non-retryable을 모두 명시적으로 표현하고 내부 transport cause는 envelope에서 제외했다.
+- fake provider가 stable `ProviderError`를 그대로 재현하는 경계를 포함해 5개 test로 검증했다.
+- HTTP status/exception mapping과 실제 network client는 다음 slice로 미뤘다.
+
+### Slice 0.4 transport/HTTP status error mapping 구현
+
+- 변경 파일: `services/llm_gateway/app/transport.py`, `errors.py`, `tests/test_llm_transport_mapping.py`, provider error literal test
+- transport timeout/connection/invalid-response와 HTTP 상태를 stable `ProviderError`로 매핑했다.
+- 408/504, 429, 5xx, 기타 4xx 경계를 각각 timeout/overloaded/unavailable/request-rejected로 고정했다.
+- 기존 네 literal로는 4xx 요청 거절을 정확히 표현할 수 없어 `provider_request_rejected`를 공개 계약에 추가했다.
+- 정상 2xx/3xx를 오류로 오판하지 않는 반대 방향과 upstream body 비노출을 포함해 7개 test로 검증했다.
+- 특정 HTTP library와 실제 network client는 이번 slice에 포함하지 않았다.
+
+### Slice 0.5 fake-transport 기반 llama.cpp provider client 구현
+
+- 변경 파일: `services/llm_gateway/app/client.py`, `transport.py`, `tests/test_llama_provider_client.py`
+- async `JsonTransport` protocol과 deterministic `FakeJsonTransport`를 추가했다.
+- `LlamaCppProvider`가 payload builder, transport, status mapper, response parser를 한 흐름으로 연결하게 했다.
+- 정상 text completion에서 model/content/finish reason/token usage를 `GenerationResult`로 변환했다.
+- timeout과 429를 stable provider error로 연결하고 upstream body를 노출하지 않았다.
+- malformed body, empty choices, null content, non-2xx redirect를 성공 처리하지 않는 반대 방향을 포함해 7개 test로 검증했다.
+- actual HTTP library, live URL, tool-call response, retry는 포함하지 않았다.
+
+### 독립 검증 브리프 작성
+
+- 변경 파일: `docs/verification_briefs/2026-06-24/llm_gateway_slice_0_1_to_0_5.md`
+- 검증 AI가 canonical plan, 구현 파일, boundary matrix, 정확한 재현 명령, 제외 범위를 독립적으로 확인할 수 있게 정리했다.
+- 이 문서는 자체 검증 verdict가 아니라 후속 검증자의 범위 입력이다.
+
 ## Issues found
 
 ### Phase와 MVP 축 불일치
@@ -115,6 +168,27 @@
 - 해결: loop 골격만 재사용하고 Application/Worker에 domain registry와 Loop Gate를 추가하도록 계획했다.
 - 결과: 실제 구현 전 양방향 회귀와 decision literal 확정이 필요하다.
 
+### 개발 머신별 참조 repo 가용성
+
+- 문제: 여러 머신에서 작업하므로 `/mnt/d/devel/gemma4_12b`가 항상 존재하지 않는다.
+- 원인: 참조 repo는 현재 머신의 별도 로컬 checkout이다.
+- 해결: 참조 경로를 provenance로만 사용하고 필요한 code/test/configuration은 현재 repo에 self-contained 형태로 이관한다.
+- 결과: 이번 Slice 0.1 test는 외부 repo 없이 실행된다. 실모델 smoke는 GPU 실행 머신으로 보류한다.
+
+### 외부 참조 repo의 동시 수정
+
+- 상황: 다른 AI가 `gemma4_12b`에서 이전 검토 finding을 수정 중이다.
+- 위험: 작업 도중 움직이는 HEAD를 다시 참조하면 현재 구현 기준과 provenance가 흔들린다.
+- 처리: 기존 commit `485c4e2`를 고정 snapshot으로 유지하고 외부 작업 완료 전에는 재검사·재복사하지 않는다.
+- 결과: 현재 Slice 0.2는 외부 repo와 무관하게 구현·검증됐다.
+
+### 3xx 응답의 성공 오인 가능성
+
+- 문제: 초기 `LlamaCppProvider`는 400 미만 응답을 parsing해 유효한 body를 가진 3xx를 generation 성공으로 받아들일 수 있었다.
+- 원인: HTTP error mapper와 provider 성공 조건을 동일한 경계로 간주했다.
+- 해결: provider 성공을 2xx로 제한하고 3xx를 `provider_invalid_response`로 처리하는 양방향 회귀를 추가했다.
+- 결과: 유효한 2xx는 통과하고 동일 body의 307은 차단된다.
+
 ## Decisions
 
 - 사용자 결정: 기존 `docs/` 문서들은 초기 아이디에이션으로 취급하고, 긴 `abstract.md`를 실제 개발 기획에 용이하도록 세분화한다.
@@ -129,10 +203,12 @@
 - 확인된 기준: 참조 repo의 첫 model/runtime은 `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`과 llama.cpp CUDA다. 실제 실행 hardware와 benchmark는 미확정이다.
 - 사용자 결정: `/mnt/d/devel/gemma4_12b`의 loop Gate와 Agentic 구현을 재사용하되 sub-agent spawn은 도입하지 않는다.
 - 재사용 결정: 전체 repo 복제 대신 선택 이관하며, inference는 Gateway, domain agent loop/tool은 Application/Worker가 소유한다.
+- 사용자 운영 결정: 이 repo는 여러 머신에서 작업하므로 외부 `gemma4_12b` checkout에 의존하지 않는다. 현재 머신은 작업 전용으로 사용하고 실모델 smoke는 미룬다.
+- 사용자 상황 공유: 외부 `gemma4_12b`는 다른 AI가 수정 중이므로 현재 작업은 고정 snapshot만 참고하고 최신 변경을 따라가지 않는다.
 
 ## Next steps
 
-1. 실제 실행 장비가 참조 환경과 같은 RTX 3050 6GB인지 확인한다.
-2. monorepo 내부 package/framework와 이관 대상 파일 경로를 확정한다.
-3. flat loop 종료 decision과 domain tool 최소 목록을 확정한다.
-4. Slice 0에서 참조 8개 테스트와 실모델 smoke를 재현한다.
+1. Slice 0.6에서 실제 HTTP adapter에 사용할 dependency/package 경계를 정한다.
+2. mock transport로 timeout/connection/JSON decode를 검증한 뒤 adapter를 구현한다.
+3. flat loop 구현 전 종료 decision과 domain tool 최소 목록을 확정한다.
+4. 라이브 서버 주소를 받으면 별도 real-provider smoke 계획을 실행한다.

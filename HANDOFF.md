@@ -7,7 +7,7 @@
 - 계획은 공통 기반, Product Shell, 분석 memory taxonomy, Phase 1~6으로 나뉘어 있다.
 - Product Shell과 Phase 계획은 `Draft`, 분석 taxonomy는 `Discussion` 상태다.
 - 전체 구현 순서 문서는 `Draft`, LLM Gateway 경계는 `Proposed` 상태다.
-- 구현은 아직 시작하지 않았다.
+- Slice 0.1~0.5가 구현됐다: payload, provider/fake, error envelope, transport mapping, fake-transport llama.cpp client.
 - 현재 경로에는 Git metadata가 없다.
 
 ## Active Decisions
@@ -21,13 +21,17 @@
 - 제안 아키텍처는 monorepo + modular Application + 독립 LLM Gateway/Worker다. 사용자 승인 전이다.
 - `/mnt/d/devel/gemma4_12b` commit `485c4e2`를 참조 구현으로 검토했으며 model/quant는 공식 QAT GGUF Q4_0으로 확인됐다. 실제 실행 hardware는 미확정이다.
 - sub-agent spawn은 제외하고 bounded flat loop만 사용한다.
+- 외부 `gemma4_12b` checkout은 선택적 참조이며 현재 repo의 build/test/runtime dependency가 아니다.
+- 현재 작업용 머신에서는 real-model smoke를 수행하지 않는다.
+- 외부 `gemma4_12b`는 다른 AI가 수정 중이다. 완료 신호 전에는 pinned commit 이후 변경을 재검사하거나 복사하지 않는다.
+- 외부 작업 완료 후 사용자가 라이브 서버 주소를 제공할 예정이다. 그 전에는 network/model smoke를 실행하지 않는다.
 
 ## Next Tasks
 
-1. 실제 GPU/VRAM과 참조 환경 일치 여부 확인
-2. `docs/plans/gemma4-reuse.md`의 선택 이관 경계 승인
+1. 독립 검증 AI가 `docs/verification_briefs/2026-06-24/llm_gateway_slice_0_1_to_0_5.md` 기준으로 현재 slice 검증
+2. 검증 통과 후 Slice 0.6 실제 HTTP adapter의 dependency/package 경계 확정
 3. flat loop decision/tool/budget 계약 확정
-4. Slice 0에서 참조 contract tests와 실모델 smoke 재현
+4. real-model smoke는 GPU 실행 머신에서 별도 수행
 
 ## Verification
 
@@ -36,7 +40,8 @@
 - 원본 `docs/abstract.md` 본문 보존 확인
 - Product Shell과 analysis taxonomy의 계획 링크 및 Phase 연결 확인
 - 구현 slice의 선후 관계와 LLM Gateway contract/model-test 분리 확인
-- 참조 repo unit contract test 8개 통과; live Gemma container가 없어 실모델 smoke는 미실행
+- 현재 repo contract test 30개 통과: 기존 23개 + llama.cpp client 7
+- 참조 repo unit contract test 8개 통과; 정책상 실모델 smoke는 보류
 
 ## Project Structure
 
@@ -55,4 +60,19 @@ docs/
 │   ├── gemma4-reuse.md          # 기존 구현 선택 이관과 Loop Gate 보강
 │   └── 01-core-sot.md ~ 06-review-ui.md
 └── daily_logs/2026-06-24/work_log.md
+services/
+└── llm_gateway/app/
+    ├── payload.py              # portable llama.cpp payload contract
+    ├── provider.py             # provider protocol과 deterministic fake
+    ├── errors.py               # stable provider error envelope
+    ├── transport.py            # JSON transport/fake와 status error mapping
+    └── client.py               # llama.cpp text completion provider
+tests/
+├── test_llm_gateway_payload.py
+├── test_llm_provider.py
+├── test_llm_provider_errors.py
+├── test_llm_transport_mapping.py
+└── test_llama_provider_client.py
+docs/verification_briefs/2026-06-24/
+└── llm_gateway_slice_0_1_to_0_5.md
 ```

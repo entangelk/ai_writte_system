@@ -36,6 +36,13 @@ Gateway가 하지 않는 일:
 
 참조 repo는 Gateway 안에서 generic tool loop까지 실행하지만, 현재 프로젝트에서는 역할을 분리한다. inference proxy/client는 Gateway에 두고, Agentic Search/Analysis의 loop와 domain tool registry는 Application/Worker가 소유한다.
 
+## 개발 머신 독립성
+
+- 외부 `gemma4_12b` repo는 필수 dependency가 아니다.
+- 이관된 code/test는 현재 repo 안에서 독립 실행한다.
+- model weight와 GPU smoke는 별도 실행 환경의 책임이다.
+- 현재 작업용 머신에서는 unit/contract/integration fake test까지만 수행하고 real-model smoke를 보류한다.
+
 ## 내부 API 초안
 
 가능하면 inference engine의 OpenAI-compatible API를 그대로 외부 계약으로 삼지 않고 얇은 내부 계약으로 감싼다. engine 교체 시 Application 변경을 줄이기 위해서다.
@@ -75,6 +82,20 @@ schema_valid
 ```
 
 실제 wire schema와 오류 literal은 Slice 0에서 계약 테스트와 함께 확정한다.
+
+현재 구현된 provider 오류 literal:
+
+```text
+provider_unavailable
+provider_timeout
+provider_overloaded
+provider_invalid_response
+provider_request_rejected
+```
+
+transport/HTTP status mapper는 injected `JsonTransport` 기반 client 흐름에 연결됐다. 실제 HTTP library adapter는 아직 연결하지 않았다.
+
+현재 `LlamaCppProvider`는 injected `JsonTransport`를 통해 `/v1/chat/completions` payload 전송, text completion parsing, stable error 연결까지 구현됐다. 실제 HTTP library adapter와 tool-call parsing은 아직 없다.
 
 ## Gemma Q4 적용 원칙
 
@@ -163,7 +184,10 @@ schema_valid
 
 ### Application 계약
 
-- fake provider success
+- fake provider success, queued failure, exhaustion — 구현 완료
+- provider error literal/envelope와 내부 cause 비노출 — 구현 완료
+- transport failure/HTTP status의 stable error mapping — 구현 완료
+- fake-transport 기반 llama.cpp text provider client — 구현 완료
 - malformed JSON과 truncated output
 - provider timeout/unavailable/overload
 - request ID와 prompt/model revision trace
@@ -178,6 +202,8 @@ schema_valid
 - 연속 N회 호출과 memory 안정성
 
 N과 합격 기준은 실제 hardware baseline을 본 뒤 고정한다.
+
+이 smoke suite는 현재 작업용 머신의 완료 조건이 아니라 GPU 실행 머신의 배포 전 gate다.
 
 ## 착수 전 필요한 정보
 

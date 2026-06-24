@@ -47,6 +47,63 @@ Application API ───── MongoDB
 - demo tool과 Gateway 내부 ToolRegistry는 프로젝트 도메인에 그대로 가져오지 않는다.
 - sub-agent spawn/delegation은 도입하지 않는다.
 - reference code의 loop 종료/오류를 업무 Gate decision과 혼동하지 않도록 보강한다.
+- 참조 repo가 없는 머신에서도 build/test/run이 가능해야 하며 외부 경로 의존을 금지한다.
+
+## 구현 진행 상태
+
+### 완료: Slice 0.1 — portable thinking payload contract
+
+- 현재 repo 내부에 self-contained `ChatMessage`, `ChatCompletionRequest`, llama.cpp payload builder 추가
+- `thinking=true/false/default/explicit override` 계약 고정
+- legacy `<|think|>` message 주입 금지
+- 미지원 `stream=true` 조기 거절
+- 외부 repo, FastAPI, Docker, GPU 없이 실행되는 7개 unit contract test 추가
+
+아직 provider HTTP client, fake provider, FastAPI endpoint, Docker/실모델 구성은 구현하지 않았다.
+
+### 완료: Slice 0.2 — provider protocol과 deterministic fake
+
+- Application이 구체적인 llama.cpp client 대신 의존할 async `LLMProvider` protocol 추가
+- model/content/finish reason/token usage의 최소 generation result 추가
+- 결과와 오류를 FIFO로 재현하고 요청을 기록하는 fake provider 추가
+- 준비된 outcome이 없으면 응답을 조작하지 않고 명시적으로 실패
+- 정상 결과, provider timeout, fake exhaustion을 포함한 4개 unit contract test 추가
+
+아직 실제 HTTP provider와 오류 literal/envelope는 구현하지 않았다.
+
+### 완료: Slice 0.3 — provider error literal과 envelope
+
+- `provider_unavailable`, `provider_timeout`, `provider_overloaded`, `provider_invalid_response` 고정
+- public message, retryable, 선택 provider 이름을 가진 안정된 error envelope 추가
+- retryable/non-retryable을 오류 종류로 추측하지 않고 provider adapter가 명시
+- 내부 transport exception/cause가 envelope에 직렬화되지 않도록 분리
+- fake provider에서도 같은 `ProviderError`를 그대로 재현
+- literal, 양방향 retryable, 내부 정보 비노출을 포함한 5개 unit contract test 추가
+
+아직 HTTP status/transport exception 매핑과 실제 HTTP provider는 구현하지 않았다.
+
+### 완료: Slice 0.4 — transport/HTTP status error mapping
+
+- transport timeout/connection/invalid-response를 stable `ProviderError`로 변환
+- HTTP 408/504는 timeout, 429는 overloaded, 5xx는 unavailable로 변환
+- 그 밖의 4xx를 의미에 맞게 표현하기 위해 `provider_request_rejected` literal 추가
+- 2xx/3xx를 오류로 잘못 분류하지 않고 mapper 사용 오류로 거절
+- upstream response body나 raw exception을 mapper 입력/공개 envelope에 포함하지 않음
+- retryable/non-retryable 양방향과 상태 경계를 포함한 7개 unit contract test 추가
+
+아직 특정 HTTP library와 실제 endpoint를 호출하는 provider client는 구현하지 않았다.
+
+### 완료: Slice 0.5 — fake-transport 기반 llama.cpp provider client
+
+- async `JsonTransport` protocol, JSON response, FIFO fake transport 추가
+- `LlamaCppProvider`가 `/v1/chat/completions` payload를 전송하고 text completion을 parsing
+- model/content/finish reason/prompt·completion token usage를 `GenerationResult`로 변환
+- transport failure와 HTTP status mapper를 실제 provider 흐름에 연결
+- malformed object, empty choices, `content=None`을 성공으로 위장하지 않고 invalid response 처리
+- upstream error body를 public envelope에 포함하지 않음
+- live server 없이 정상/timeout/429/redirect/malformed/optional usage를 포함한 7개 contract test 추가
+
+아직 실제 HTTP library adapter와 tool-call response parsing은 구현하지 않았다.
 
 ## 제안 저장소 구조
 
@@ -86,6 +143,7 @@ tests/
 - 공통 configuration과 secret/volume 규칙
 - `gemma4_12b` 선택 이관: Compose, schema/client, thinking contract tests
 - reference commit과 이관 파일 provenance 기록
+- 이 작업 머신에서는 real-model smoke를 실행하지 않고 GPU 실행 머신으로 검증을 이관
 
 완료 증거:
 
