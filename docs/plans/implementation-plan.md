@@ -144,7 +144,7 @@ Application API ───── MongoDB
 - A3 독립 검증(합격) 후 보강: `BudgetPolicy`에 `provider_retry_cap`/`tool_retry_cap`(0 이상, bool 거부)을 추가해 계약 §retry의 필수 policy 값을 실현(I1, 사용자 결정 Option A)하고, `InvalidBudgetPolicy.decision=blocked`로 budget/registry 예외→종료 decision uniform 매핑을 완성(I3). retry cap 검증 변이 증명. runner 합성 순서(I2)는 runner slice forward-lock
 - `AgentLoopRunner` provider composition slice(runner.py): provider 호출 전 budget check → iteration 기록 → provider call/retry → usage 기록 → post-accounting budget check → `parse_self_report_payload` → `judge_completion` 순서를 실제 코드로 연결했다. I2 forward-lock으로 token overrun이 `completed`로 위장되지 않음과 provider retry가 iteration budget을 소비함을 양방향 회귀로 잠갔다. trace는 provider call/error/retry, budget stop, self_report, completion event를 보존한다.
 - GPU/인프라 없이 agent_loop focused 93개 양방향 회귀 통과(decision 4 + budget 29 + registry 20 + completion 6 + parser 9 + resolution 18 + runner 7). 전체 discovery 137개 통과
-- 후속: 실제 tool handler와 Mongo/ES/Chroma 통합은 Slice 1·3 이후. runner의 domain tool-call branch와 task별 artifact schema 평가는 해당 Phase payload/handler가 들어올 때 확정한다. retry cap 구조는 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 benchmark 이후
+- agent_loop 계약층은 여기서 멈춘다. runner의 domain tool-call branch는 Gateway tool-call response parsing, model tool-call wire format, Phase payload/tool handler가 모두 확정된 뒤 구현한다. task별 `artifact_present` 구조 평가는 Slice 2A/4/5 payload schema가 들어올 때 profile별로 교체한다. retry cap 구조는 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 benchmark 이후
 
 ## 제안 저장소 구조
 
@@ -342,6 +342,7 @@ tests/
 - [ ] monorepo + 독립 LLM Gateway 경계 승인
 - [ ] backend/frontend framework
 - [ ] job queue 방식과 worker process 경계
+- [ ] Gateway/model tool-call response wire format
 - [x] 첫 model artifact: `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`
 - [ ] Gemma model terms/download 권한과 참조 source code provenance
 - [ ] GPU 모델/VRAM, CPU RAM, 운영 OS

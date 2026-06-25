@@ -284,11 +284,22 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 | AgentLoopRunner provider composition | 구현·독립 검증 합격(보강) | `parser.py`, `runner.py`, `test_agent_loop_runner.py`; I2 forward-lock(provider usage budget before completion, retry non-free), provider runner verification |
 | Product Shell/Phase 1~6 | 미구현 | 계획 문서만 존재 |
 
+## 다음 구현 경계
+
+- agent_loop 계약층은 A1/A2/A3, self-report parser, provider composition까지 구현·독립 검증됐다.
+- runner의 domain tool-call branch는 지금 구현하지 않는다. 선행 계약은 (1) Gateway tool-call response parsing, (2) model tool-call wire format, (3) Phase payload와 실제 tool handler다.
+- `ProviderTurnResult`는 현재 terminal provider content와 usage만 표현한다. tool-call 수신 구조는 wire 계약이 생긴 뒤 확장한다.
+- `artifact_present`는 현재 runner에 주입되는 결정 함수다. Slice 2A AnalysisCandidate, Slice 4 ContextPackage, Slice 5 WritingCandidate schema가 확정되면 profile별 구조 조건 평가로 교체한다.
+
 ## 미확정 결정 목록
 
 다음 항목은 구현자가 임의로 채우지 않는다.
 
 - 본 SoT를 `Approved`로 승격할지 여부
+- monorepo + 독립 LLM Gateway 경계 최종 승인
+- backend/frontend framework
+- job queue 방식과 worker process 경계
+- Gateway/model tool-call response wire format
 - `confirmed`와 `canonical`의 의미 및 승격 주체
 - Core SOT의 offset 기준, normalization/hash, block split 규칙
 - project/draft archive/soft delete/hard delete 정책

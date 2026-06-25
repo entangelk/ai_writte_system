@@ -41,14 +41,17 @@
 - flat loop 종료 decision 합성 원시가 A3로 잠겼고 독립 검증 합격 후 I1/I3를 보강했다. self-report는 `SelfReport`(FINALIZE/DEFER) enum 주입이고 wire 형식은 parser slice에서 확정. retry cap은 `BudgetPolicy.provider_retry_cap`/`tool_retry_cap`(0 이상)으로 실현됐다(검증 I1 폐쇄). I2(runner 합성 순서)는 provider composition runner slice에서 forward-lock 됐다.
 - self-report 종료채널 parser slice가 구현됐다. provider 응답 `content`는 JSON object이고 top-level `self_report` field 값은 정확히 `finalize`/`defer`만 허용한다. 누락·malformed/non-object JSON·non-string·case variant·artifact nested `self_report`는 `InvalidSelfReport(decision=provider_error)`다.
 - minimal `AgentLoopRunner` provider composition slice가 구현됐다. provider 호출 전 budget check → iteration 기록 → provider call/retry → usage 기록 → post-accounting budget check → `parse_self_report_payload` → `judge_completion` 순서를 연결한다. token overrun은 completion 전에 `budget_exhausted`, provider retry는 iteration budget을 소비한다. 실제 domain tool handler와 task별 artifact schema 평가는 Slice 1·3 이후 범위다.
+- agent_loop 계약층(A1/A2/A3/parser/provider composition)은 현재 더 진행하지 않는다. tool-call branch는 Gateway tool-call parsing 미구현, model tool-call wire format 미계약, `ProviderTurnResult`가 terminal content만 받는 구조라는 3중 상류 의존이 있어 지금 구현하면 wire를 추측하게 된다. `artifact_present`도 Slice 2A/4/5 payload schema가 확정될 때 profile별로 교체한다.
 - `docs/system-contract-sot.md`가 추가됐다. 현재는 `Draft` 초안이며 사용자 검토 후 정본으로 승격할지, 범위를 조정할지 결정해야 한다.
 
 ## Next Tasks
 
 1. `docs/system-contract-sot.md` 검토: 문서 우선순위와 미확정 결정 목록이 원하는 정본 역할을 하는지 확인하고 `Draft` 유지/수정/Approved 승격 방향 결정. (precedence tree는 독립 검증 R1 보강으로 SoT↔plans/README 통일 완료)
-2. runner의 domain tool-call branch와 실제 tool handler 연결은 Slice 1·3 이후 Phase payload/handler가 들어올 때 구현한다.
-3. task별 artifact schema 평가(`artifact_present`)는 Phase payload schema 확정 시 profile별로 교체한다.
-4. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도 확정(retry cap 구조는 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 남음).
+2. Slice 1 착수 전 결정 해소: monorepo+독립 LLM Gateway 경계 승인, backend/frontend framework, job queue/worker process 경계.
+3. Slice 1(Project Shell + Core SOT) 착수: project/draft/version/snapshot/source_ref의 최소 계약과 저장 골격 구현.
+4. runner domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
+5. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
+6. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도 확정(retry cap 구조는 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 남음).
 
 ## Verification
 

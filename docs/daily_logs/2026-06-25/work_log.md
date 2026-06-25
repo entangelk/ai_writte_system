@@ -95,6 +95,15 @@
 - `implementation-plan.md`의 Slice 4 제목을 provider composition까지 포함하도록 갱신했다.
 - SoT 자체의 `Draft` 상태나 `Approved` 승격 여부는 사용자 결정이므로 변경하지 않았다.
 
+### 다음 작업 blocker 정리
+
+- 변경 파일: `HANDOFF.md`, `docs/system-contract-sot.md`, `docs/plans/implementation-plan.md`, 이 작업 로그.
+- 검증 AI의 다음 작업 검토에 따라 agent_loop 계약층은 A1/A2/A3/parser/provider composition으로 완결된 상태로 정리했다.
+- runner domain tool-call branch를 지금 진행하지 않는 이유를 명시했다: Gateway tool-call response parsing 미구현, model tool-call wire format 미계약, 현재 `ProviderTurnResult`가 terminal content/usage만 표현한다.
+- `artifact_present`는 Slice 2A/4/5 payload schema가 들어올 때 profile별 구조 조건 평가로 교체하는 후속 작업으로 남겼다.
+- 다음 구현 방향을 SoT 승인/수정 여부와 Slice 1 착수 전 결정(monorepo+Gateway 경계, backend/frontend framework, job queue/worker 경계) 해소로 재정렬했다.
+- `system-contract-sot.md` 미확정 결정 목록에 Gateway/model tool-call response wire format을 추가했다.
+
 ## Issues found
 
 ### A2 시작 시 registry 모듈 부재
@@ -187,10 +196,12 @@
 - terminal-decision 우선순위(error > blocked/invalid_tool_arguments > budget_exhausted > completion)를 별도 compose 함수가 아니라 각 원시의 decision point 순차 합성으로 표현했다. 루프에서는 한 시점에 정확히 하나만 발화하므로 "동시 후보 중 선택" 함수는 불필요하다 판단했다(Simplicity First).
 - self-report 종료채널은 JSON object의 top-level `self_report` field로 확정했다. 이유: Phase payload들이 이후 JSON schema로 구체화될 가능성이 높고, top-level field가 산출물 데이터 채널과 가장 단순하게 분리된다. tradeoff: 자유 텍스트 응답이나 nested artifact field는 종료채널로 인정하지 않으므로 prompt/runner가 이 wrapper를 강제해야 한다.
 - provider composition runner는 domain tool branch를 아직 구현하지 않았다. 이유: 실제 tool handler와 Phase payload schema가 아직 없고, 지금 검증 가능한 계약은 provider 응답 흐름과 I2 forward-lock이다. tradeoff: `analysis_compare`/`context_search`의 tool 실행 루프는 후속 Phase handler가 들어올 때 별도 slice로 잠가야 한다.
+- tool-call branch는 단순히 handler가 없어서만 막힌 것이 아니라 Gateway tool-call parsing, model tool-call wire format, runner 수신 구조가 모두 미확정이라 막혀 있다. 이 상태에서 runner branch를 만들면 wire format을 추측하게 되므로 보류한다.
 
 ## Next steps
 
 1. `docs/system-contract-sot.md`를 사용자가 검토하고 `Draft` 유지/수정/Approved 승격 방향을 결정한다.
-2. runner의 domain tool-call branch와 실제 tool handler 연결은 Slice 1·3 이후 Phase payload/handler가 들어올 때 구현한다.
-3. task별 artifact schema 평가(`artifact_present`)는 Phase payload schema 확정 시 profile별로 교체한다.
-4. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도를 확정한다. (retry cap 구조는 보강에서 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 남음.)
+2. Slice 1 착수 전 결정(monorepo+Gateway 경계, backend/frontend framework, job queue/worker 경계)을 해소한다.
+3. Slice 1(Project Shell + Core SOT)의 project/draft/version/snapshot/source_ref 최소 계약과 저장 골격을 구현한다.
+4. runner의 domain tool-call branch와 task별 `artifact_present` 평가는 Gateway/model tool-call wire, Phase payload schema, 실제 tool handler가 확정된 뒤 별도 slice로 구현한다.
+5. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도를 확정한다. (retry cap 구조는 보강에서 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 남음.)
