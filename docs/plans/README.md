@@ -4,21 +4,24 @@
 기준 원본: [`../abstract.md`](../abstract.md)  
 목적: 2,000여 줄의 전체 초안을 실제 개발 전에 검토하고 확정할 수 있는 Phase 단위 계획으로 재구성한다.
 
+서비스 경계와 확정된 계약을 먼저 볼 때는 [`../system-contract-sot.md`](../system-contract-sot.md)를 정본 SoT 초안으로 사용한다. 이 인덱스는 Phase별 세부 계획을 읽는 순서다.
+
 ## 읽는 순서
 
-1. [`00-foundations.md`](00-foundations.md) — 제품 경계와 전 Phase 공통 원칙
-2. [`implementation-plan.md`](implementation-plan.md) — 배포 경계, 구현 순서, 단계별 검증
-3. [`gemma4-reuse.md`](gemma4-reuse.md) — 기존 `gemma4_12b`의 재사용 범위와 보강점
-4. [`llm-gateway.md`](llm-gateway.md) — Gemma Q4 서빙 경계와 실모델 검증
-5. [`product-shell.md`](product-shell.md) — 프로젝트 관리, 원고 작업 공간, 내보내기
-6. [`01-core-sot.md`](01-core-sot.md) — 저장, 버전, snapshot, block, source reference
-7. [`analysis-memory-taxonomy.md`](analysis-memory-taxonomy.md) — 분석 대상과 저장 단위 논의안
-8. [`02-analysis-pipeline.md`](02-analysis-pipeline.md) — 최초 추출과 기존 기억 대조·갱신 후보
-9. [`03-indexing.md`](03-indexing.md) — ChromaDB/Elasticsearch 파생 인덱스와 동기화
-10. [`04-agentic-search.md`](04-agentic-search.md) — 검색 계획, 정본 재조회, ContextPackage
-11. [`05-writing-ai.md`](05-writing-ai.md) — 컨텍스트 기반 글 생성과 Writing Gate
-12. [`06-review-ui.md`](06-review-ui.md) — 후보 검토와 프로젝트 메모리 관리 UI
-13. [`flat-loop-gate.md`](flat-loop-gate.md) — flat agent loop 종료 decision, tool registry, budget policy, task별 completion criteria 계약(숫자 기본 한도는 후속 slice). Phase 2/4/5가 소비하는 횡단 계약
+1. [`../system-contract-sot.md`](../system-contract-sot.md) — 서비스 경계, 확정 계약, 문서 우선순위
+2. [`00-foundations.md`](00-foundations.md) — 제품 경계와 전 Phase 공통 원칙
+3. [`implementation-plan.md`](implementation-plan.md) — 배포 경계, 구현 순서, 단계별 검증
+4. [`gemma4-reuse.md`](gemma4-reuse.md) — 기존 `gemma4_12b`의 재사용 범위와 보강점
+5. [`llm-gateway.md`](llm-gateway.md) — Gemma Q4 서빙 경계와 실모델 검증
+6. [`product-shell.md`](product-shell.md) — 프로젝트 관리, 원고 작업 공간, 내보내기
+7. [`01-core-sot.md`](01-core-sot.md) — 저장, 버전, snapshot, block, source reference
+8. [`analysis-memory-taxonomy.md`](analysis-memory-taxonomy.md) — 분석 대상과 저장 단위 논의안
+9. [`02-analysis-pipeline.md`](02-analysis-pipeline.md) — 최초 추출과 기존 기억 대조·갱신 후보
+10. [`03-indexing.md`](03-indexing.md) — ChromaDB/Elasticsearch 파생 인덱스와 동기화
+11. [`04-agentic-search.md`](04-agentic-search.md) — 검색 계획, 정본 재조회, ContextPackage
+12. [`05-writing-ai.md`](05-writing-ai.md) — 컨텍스트 기반 글 생성과 Writing Gate
+13. [`06-review-ui.md`](06-review-ui.md) — 후보 검토와 프로젝트 메모리 관리 UI
+14. [`flat-loop-gate.md`](flat-loop-gate.md) — flat agent loop 종료 decision, tool registry, budget policy, task별 completion criteria 계약(숫자 기본 한도는 후속 slice). Phase 2/4/5가 소비하는 횡단 계약
 
 ## 문서 지위와 우선순위
 
@@ -27,8 +30,10 @@
 충돌 시 우선순위는 다음과 같다.
 
 1. 사용자가 명시적으로 승인해 해당 Phase 문서에 반영된 결정
-2. `Approved` 상태의 Phase 계획과 공통 기반 문서
-3. `docs/` 루트의 아이디에이션 문서
+2. [`../system-contract-sot.md`](../system-contract-sot.md)에 반영된 확정 계약
+3. `Approved` 상태의 Phase 계획과 공통 기반 문서
+4. 구현·검증·커밋으로 잠긴 `Draft` 계약 문서
+5. `docs/` 루트의 아이디에이션 문서
 
 동일 우선순위 문서끼리 충돌하면 어느 한쪽을 조용히 선택하지 않고 사용자에게 기준을 확인한다.
 

@@ -4,6 +4,7 @@
 
 - `docs/` 루트의 기존 설계 문서는 초기 아이디에이션 자료로 분류되어 있다.
 - 실제 개발 준비용 진입점은 `docs/plans/README.md`다.
+- 서비스 경계와 확정 계약을 모은 정본 SoT 초안은 `docs/system-contract-sot.md`다.
 - 계획은 공통 기반, Product Shell, 분석 memory taxonomy, Phase 1~6으로 나뉘어 있다.
 - Product Shell과 Phase 계획은 `Draft`, 분석 taxonomy는 `Discussion` 상태다.
 - 전체 구현 순서 문서는 `Draft`, LLM Gateway 경계는 `Proposed` 상태다.
@@ -36,11 +37,13 @@
 - budget/retry production 숫자 기본값은 Gemma Q4 benchmark 뒤에 확정한다. 그전 contract test는 명시값을 주입한다.
 - completion 판정은 하이브리드(구조 조건 AND self-report)다. self-report는 loop 종료 채널의 `finalize` vs `defer` 결정이며 candidate status(산출물 데이터 채널)와 직교한다. `analysis_compare`의 부분 모호는 run `completed`+candidate status, tool 없는 `writing_generate`는 산출물 모호 `defer` 시 `awaiting_review`. completion matrix는 `task × {completed, awaiting_review}` 횡일관 2행으로 양방향 lock(독립 검증 R1/R2/R3 보강 완료). 종료 채널 wire 형식은 Phase 4 구현 slice에서 확정.
 - AgentLoopRunner A1/A2가 구현됐다. `services/application/app/agent_loop/`에 `LoopDecision`(7종), `BudgetPolicy`/`BudgetTracker`(5차원), `ToolRegistry`(profile allowlist·strict arguments·canonical signature)를 fake/인프라 없이 양방향 회귀로 잠갔다. completion 판정/loop 합성(A3)·실제 tool handler(Slice 1·3 이후)는 미구현이다.
+- `docs/system-contract-sot.md`가 추가됐다. 현재는 `Draft` 초안이며 사용자 검토 후 정본으로 승격할지, 범위를 조정할지 결정해야 한다.
 
 ## Next Tasks
 
-1. AgentLoopRunner A3: completion 판정·retry 우선순위·loop 합성과 budget→`budget_exhausted` decision 매핑. Gateway→budget usage 연결 시 음수/None/invalid usage 방어 회귀 lock(검증 F1)
-2. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도 확정
+1. `docs/system-contract-sot.md` 검토: 문서 우선순위와 미확정 결정 목록이 원하는 정본 역할을 하는지 확인하고 `Draft` 유지/수정/Approved 승격 방향 결정
+2. AgentLoopRunner A3: completion 판정·retry 우선순위·loop 합성과 budget→`budget_exhausted` decision 매핑. Gateway→budget usage 연결 시 음수/None/invalid usage 방어 회귀 lock(검증 F1)
+3. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도 확정
 
 ## Verification
 
@@ -62,6 +65,7 @@
 - Slice A2(tool registry+strict arguments+signature) 자체 회귀(2026-06-25): focused 20개 통과, 전체 85개 통과. pattern sweep에서 위험한 중복 구현 없음.
 - Slice A2 독립 검증(2026-06-25): **합격**(조건부 → 승격). allowlist/registration/strict args/blocked-vs-invalid/signature는 계약 literal 그대로 정확하고 양방향 lock 됨. 독립 검증이 §33 "enum, bounds 적용" 명시와 구현의 enum/bounds 미검증 불일치를 실증 발견 → 사용자 결정(option a)으로 v1/A2 validator 범위를 `{required, type, additionalProperties, array items}`로 §33·plan §138·CHANGELOG에 명시 좁히고 enum/bounds는 keyword 사용 tool 등록 시점까지 deferred로 reconcile. triggered 조건: enum/bounds 사용 tool 첫 등록 시 검증+회귀 추가. 기록 `docs/verifications/2026-06-25/agent_loop_a2_registry.md`
 - A2 독립 검증의 비차단 I2/I3는 후속 보강 완료(2026-06-25): 중첩 object schema와 array `items`를 등록 시점에 재귀 검증하고 `_validate_arguments`의 `assert`를 명시 검사로 교체. enum/bounds deferral은 유지됨.
+- System Contract SoT 초안 작성(2026-06-25): `docs/system-contract-sot.md` 추가, `docs/README.md`와 `docs/plans/README.md` 진입점 갱신. 아직 독립 검증 기록은 없음.
 - completion criteria 계약 독립 검증(2026-06-24): 조건부 합격. 워커 보고·내부 일관성·cross-reference 4종 독립 확인, blocking 없음. 비차단 risk R1/R2(matrix 비대칭)·R3(self-report 정의 갭)를 소유자 결정으로 본 slice에서 즉시 보강했다. 기록 `docs/verifications/2026-06-24/completion_criteria_contract.md`
 - Slice 0.6 독립 검증(2026-06-24): 합격. httpx MockTransport/proxy/close 경계 6개 회귀 통과, `except` 순서 load-bearing 가정 4종 검증. 독립 검증 환경에서 `HttpxJsonTransport` 경유 actual adapter live smoke 완료(content `연결 확인 완료`, finish_reason=stop). 기록 `docs/verifications/2026-06-24/llm_gateway_slice_0_6_httpx.md`
 
@@ -70,6 +74,7 @@
 ```text
 docs/
 ├── README.md                    # 문서 분류와 진입점
+├── system-contract-sot.md       # 서비스 경계와 확정 계약 SoT 초안
 ├── abstract.md                  # 보존된 전체 아이디에이션 원본
 ├── *.md                         # 주제별 상세 아이디에이션
 ├── plans/

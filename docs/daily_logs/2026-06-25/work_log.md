@@ -5,6 +5,7 @@
 - HANDOFF 기준 다음 작업인 AgentLoopRunner A2를 진행한다.
 - tool registry, strict argument validation, signature normalization을 실제 인프라 없이 결정적 회귀로 잠근다.
 - A2 완료 후 다음 작업자가 A3(completion/retry/loop 합성)를 바로 이어갈 수 있게 상태 문서를 갱신한다.
+- 흩어진 계획 문서의 서비스 경계와 확정 계약을 정리하는 SoT 초안을 만든다.
 
 ## Completed work
 
@@ -19,6 +20,14 @@
 - `validate_call`은 raw arguments를 JSON으로 한 번 parse하고 object가 아니면 거부한다. malformed JSON, unknown field, required 누락, type coercion 시도는 `InvalidToolArguments(decision=invalid_tool_arguments)`로 분류한다.
 - valid call만 `tool name + canonical JSON arguments` signature를 만든다. canonical JSON은 key sort와 compact separator를 사용하며, 다른 argument 값/type/tool은 같은 signature로 접히지 않는다.
 - 실제 Mongo/검색 handler 실행, runtime `tool_error`, budget→decision 매핑, retry, completion 판정은 A3 및 Slice 1·3 이후 범위로 남겼다.
+
+### 시스템 정본 계약 SoT 초안 작성
+
+- 변경 파일: `docs/system-contract-sot.md`, `docs/README.md`, `docs/plans/README.md`, `CHANGELOG.md`, `HANDOFF.md`, 이 작업 로그.
+- 기존 계획 문서가 Phase별로 흩어져 있어 구현자가 어떤 계약을 먼저 봐야 하는지 모호했다. 새 문서를 "정본 계약 인덱스"로 추가해 문서 우선순위, 서비스 책임, 확정된 전역 계약, Gateway/AgentLoopRunner 계약, Gate 합성, Phase별 계약 인덱스, 미확정 결정 목록을 한 곳에 모았다.
+- `docs/contracts.md`는 여전히 아이디에이션/reference로 두고, 새 구현 진입점은 `docs/system-contract-sot.md`로 분리했다.
+- `docs/README.md`와 `docs/plans/README.md`에 SoT 문서를 먼저 보도록 링크와 우선순위 문구를 추가했다.
+- 초안 상태이므로 세부 Phase schema를 추측하지 않았다. 확정된 구현·검증 계약과 미확정 항목을 분리했고, `enum`/bounds validator deferral 같은 triggered 조건도 유지했다.
 
 ## Issues found
 
@@ -54,6 +63,7 @@
 
 ## Next steps
 
-1. AgentLoopRunner A3: completion 판정, retry 우선순위, loop 합성, budget→`budget_exhausted` decision 매핑 구현.
-2. A3에서 Gateway→budget usage 연결 시 음수/None/invalid usage 방어를 회귀로 lock한다.
-3. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도를 확정한다.
+1. `docs/system-contract-sot.md`를 사용자가 검토하고 `Draft` 유지/수정/Approved 승격 방향을 결정한다.
+2. AgentLoopRunner A3: completion 판정, retry 우선순위, loop 합성, budget→`budget_exhausted` decision 매핑 구현.
+3. A3에서 Gateway→budget usage 연결 시 음수/None/invalid usage 방어를 회귀로 lock한다.
+4. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도를 확정한다.

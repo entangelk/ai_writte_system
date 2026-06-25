@@ -2,6 +2,11 @@
 
 이 저장소의 문서는 성격에 따라 두 영역으로 구분한다.
 
+## 정본 계약 SoT
+
+서비스 경계와 확정된 계약의 현재 정본 초안은 [`system-contract-sot.md`](system-contract-sot.md)에서 시작한다.
+구현자는 계획 문서를 세부 근거로 읽기 전에 이 문서의 우선순위와 미확정 항목을 먼저 확인한다.
+
 ## 계획 문서
 
 실제 개발을 준비하기 위한 현재 계획은 [`plans/README.md`](plans/README.md)에서 시작한다.
@@ -18,4 +23,4 @@
 - [`writing_agent_prompt.md`](writing_agent_prompt.md): Writing Agent 프롬프트 설계 후보
 - [`contracts.md`](contracts.md): 공통 계약 설계 후보
 
-아이디에이션 문서와 계획 문서가 충돌하면 임의로 구현하지 않는다. 해당 Phase 문서에 충돌을 기록하고 사용자 결정을 받아 계획을 갱신한다.
+아이디에이션 문서와 계획 문서가 충돌하면 임의로 구현하지 않는다. [`system-contract-sot.md`](system-contract-sot.md)의 문서 우선순위를 확인하고, 해당 Phase 문서에 충돌을 기록한 뒤 사용자 결정을 받아 계획을 갱신한다.

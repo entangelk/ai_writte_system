@@ -11,10 +11,13 @@
 
 - AgentLoopRunner A2를 구현했다. `ToolRegistry`가 task profile별 v1 domain tool allowlist, strict JSON argument validation(`required`·type·`additionalProperties`·array `items`만; `enum`/bounds는 후속), context-only argument 차단, canonical tool-call signature를 fake/인프라 없이 양방향 회귀로 잠근다.
 - A2 독립 검증의 비차단 권고를 반영해 중첩 object schema와 array `items`를 등록 시점에 재귀 검증하고, runtime schema guard의 `assert` 의존을 명시 검사로 교체했다.
+- 서비스 경계와 확정 계약을 한 곳에서 추적하기 위한 `docs/system-contract-sot.md` 초안을 추가하고, `docs/README.md`와 `docs/plans/README.md`의 진입점을 갱신했다.
 
 사용자는 HANDOFF의 다음 작업을 이어 진행하도록 요청했다. 이에 A2 범위를 실제 domain handler 구현이 아니라 registry/argument/signature 계약 회귀로 좁혀 완료하고, handler 실행·retry·completion 합성은 A3 이후로 남겼다.
 
 독립 검증(2026-06-25)이 `flat-loop-gate.md` §33 "enum, bounds 적용" 명시와 구현이 일치하지 않음을 실증 발견했다. 사용자 결정으로 v1/A2 validator 범위를 `{required, type, additionalProperties, array items}`로 계약에 명시 좁히고 `enum`/bounds는 keyword 사용 tool 등록 시점까지 deferred로 reconcile 했다(§33·본 로그·검증 기록에 반영). 상세 기록은 `docs/verifications/2026-06-25/agent_loop_a2_registry.md`.
+
+사용자는 여러 계획 문서가 나뉘어 있어 계약 및 서비스에 대한 정본 문서를 SoT로 활용하고 싶다고 결정했다. 이에 새 SoT 문서는 세부 Phase 계획을 대체하지 않고, 문서 우선순위·서비스 책임·확정 계약·미확정 결정을 먼저 확인하는 정본 인덱스 역할로 작성했다.
 
 ## 2026-06-24
 
