@@ -86,6 +86,15 @@
 - 비차단 I2: `runner.py`에 사용하지 않는 `field` import가 남아 있어 제거했다.
 - 검증 기록의 I3/I5 선택 강화 후보는 runner 고유 계약의 빈 칸이 아니므로 이번 보강에서는 추가 테스트를 만들지 않았다. domain tool branch와 task별 artifact schema는 후속 Phase 범위로 유지한다.
 
+### SoT runner 검증 상태 갱신
+
+- 변경 파일: `docs/system-contract-sot.md`, `docs/plans/implementation-plan.md`, 이 작업 로그.
+- 다음 작업인 SoT 검토 중 provider composition 독립 검증 상태가 SoT에 아직 "자체 회귀"로 남아 있고, AgentLoopRunner 검증 근거도 A1/A2만 링크한 것을 확인했다.
+- `system-contract-sot.md`의 AgentLoopRunner 검증 근거에 A3, self-report parser, provider runner 검증 기록을 추가했다.
+- 현재 구현 상태 표에서 provider composition을 `구현·독립 검증 합격(보강)`으로 갱신했다.
+- `implementation-plan.md`의 Slice 4 제목을 provider composition까지 포함하도록 갱신했다.
+- SoT 자체의 `Draft` 상태나 `Approved` 승격 여부는 사용자 결정이므로 변경하지 않았다.
+
 ## Issues found
 
 ### A2 시작 시 registry 모듈 부재

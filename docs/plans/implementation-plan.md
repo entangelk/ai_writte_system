@@ -128,7 +128,7 @@ Application API ───── MongoDB
 
 구현 환경에서는 Python socket이 응답 없이 대기해 live adapter smoke를 못 했으나, 2026-06-24 독립 검증 환경에서 `HttpxJsonTransport`를 경유한 actual adapter live smoke를 완료했다(응답 content `연결 확인 완료`, `finish_reason=stop`, usage 23/5/28). close-lifecycle 회귀까지 포함한 Mock contract 6개 회귀도 통과했다. 기록: `docs/verifications/2026-06-24/llm_gateway_slice_0_6_httpx.md`.
 
-### 진행 중: Slice 4 계약 회귀 — AgentLoopRunner A1/A2/A3
+### 진행 중: Slice 4 계약 회귀 — AgentLoopRunner A1/A2/A3 + provider composition
 
 [`flat-loop-gate.md`](flat-loop-gate.md)의 확정된 계약을 실제 검색 인프라 없이 결정적 회귀로 잠그는 구현 sub-slice다. Application 소유 컴포넌트이므로 `services/application/app/agent_loop/` 패키지에서 진행한다.
 
