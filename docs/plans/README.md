@@ -27,15 +27,15 @@
 
 현재 구현 계획은 검토 전 `Draft`이고 분석 taxonomy는 `Discussion`이다. 개발 착수 전 관련 `착수 전 결정사항`을 해소하고 구현 기준 문서의 상태를 `Approved`로 바꿔야 한다.
 
-충돌 시 우선순위는 다음과 같다.
+충돌 시 문서 우선순위는 [`../system-contract-sot.md`](../system-contract-sot.md)의 **문서 우선순위**를 정본으로 따른다. 요약:
 
-1. 사용자가 명시적으로 승인해 해당 Phase 문서에 반영된 결정
-2. [`../system-contract-sot.md`](../system-contract-sot.md)에 반영된 확정 계약
-3. `Approved` 상태의 Phase 계획과 공통 기반 문서
-4. 구현·검증·커밋으로 잠긴 `Draft` 계약 문서
+1. 사용자가 명시 승인해 SoT 또는 해당 Phase 계획에 반영된 결정
+2. `Approved` 상태의 SoT와 Phase 계획
+3. `Draft` 상태이지만 구현·검증·커밋으로 잠긴 계약 문서
+4. `docs/plans/`의 미구현 Phase 계획
 5. `docs/` 루트의 아이디에이션 문서
 
-동일 우선순위 문서끼리 충돌하면 어느 한쪽을 조용히 선택하지 않고 사용자에게 기준을 확인한다.
+동일 우선순위 문서끼리 충돌하면 어느 한쪽을 조용히 선택하지 않고 사용자에게 기준을 확인한다. 상세와 최종 판정은 SoT에 있다.
 
 ## Phase와 MVP의 관계
 

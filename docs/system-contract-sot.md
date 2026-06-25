@@ -275,7 +275,7 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 | LLM Gateway 0.1~0.6 | 구현·검증 완료 | `services/llm_gateway/`, `tests/test_llm_*`, `test_httpx_transport.py` |
 | AgentLoopRunner A1 | 구현·검증 완료 | `decision.py`, `budget.py`, A1 verification |
 | AgentLoopRunner A2 | 구현·검증 완료 | `registry.py`, A2 verification |
-| AgentLoopRunner A3 | 미구현 | completion/retry/loop 합성과 decision 매핑 |
+| AgentLoopRunner A3 | 구현·독립 검증 합격(보강) | `completion.py`, `resolution.py`, budget F1 방어 + retry cap, `InvalidBudgetPolicy.decision` |
 | Product Shell/Phase 1~6 | 미구현 | 계획 문서만 존재 |
 
 ## 미확정 결정 목록

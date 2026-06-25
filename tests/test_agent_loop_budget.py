@@ -18,7 +18,9 @@ from services.application.app.agent_loop.budget import (
     BudgetPolicy,
     BudgetTracker,
     InvalidBudgetPolicy,
+    InvalidProviderUsage,
 )
+from services.application.app.agent_loop.decision import LoopDecision
 
 
 def _tool_policy(**overrides):
@@ -29,6 +31,8 @@ def _tool_policy(**overrides):
         max_tool_calls=5,
         max_repeated_calls=2,
         allows_tools=True,
+        provider_retry_cap=2,
+        tool_retry_cap=1,
     )
     base.update(overrides)
     return BudgetPolicy(**base)
@@ -42,6 +46,8 @@ def _writing_policy(**overrides):
         max_tool_calls=0,
         max_repeated_calls=0,
         allows_tools=False,
+        provider_retry_cap=2,
+        tool_retry_cap=0,
     )
     base.update(overrides)
     return BudgetPolicy(**base)
@@ -86,6 +92,33 @@ class BudgetPolicyValidationTest(unittest.TestCase):
             _writing_policy(max_tool_calls=1)
         with self.assertRaises(InvalidBudgetPolicy):
             _writing_policy(max_repeated_calls=1)
+
+    def test_invalid_budget_policy_classifies_as_blocked(self):
+        # flat-loop-gate.md §Budget 계약: a missing/self-contradictory policy
+        # terminates as `blocked` before any provider call. Pairs with
+        # InvalidProviderUsage.decision so a future runner maps budget/registry
+        # exceptions to a terminal decision uniformly (I3 closure).
+        self.assertEqual(InvalidBudgetPolicy.decision, LoopDecision.BLOCKED)
+
+    def test_retry_caps_allow_lower_bound_zero(self):
+        # flat-loop-gate.md §retry: retry caps are mandatory policy values, >= 0.
+        policy = _tool_policy(provider_retry_cap=0, tool_retry_cap=0)
+        self.assertEqual(policy.provider_retry_cap, 0)
+        self.assertEqual(policy.tool_retry_cap, 0)
+
+    def test_retry_caps_reject_negative(self):
+        # under-strict guard: a negative cap must not be accepted.
+        with self.assertRaises(InvalidBudgetPolicy):
+            _tool_policy(provider_retry_cap=-1)
+        with self.assertRaises(InvalidBudgetPolicy):
+            _tool_policy(tool_retry_cap=-1)
+
+    def test_retry_caps_reject_bool(self):
+        # bool is a subclass of int; a True cap must not be treated as 1.
+        with self.assertRaises(InvalidBudgetPolicy):
+            _tool_policy(provider_retry_cap=True)
+        with self.assertRaises(InvalidBudgetPolicy):
+            _tool_policy(tool_retry_cap=True)
 
 
 class IterationBudgetTest(unittest.TestCase):
@@ -176,6 +209,66 @@ class RepeatedCallBudgetTest(unittest.TestCase):
         self.assertTrue(
             tracker.can_start_repeated_call("search_memory:{\"q\":2}")
         )
+
+
+class ProviderUsageDefenseTest(unittest.TestCase):
+    """F1 defense: Gateway-reported usage must never be coerced to 0.
+
+    Locks docs/plans/flat-loop-gate.md (§Budget 계약): a missing/negative/
+    non-integer token count terminates as provider_error, not a silent 0. The
+    bool subclass of int is rejected too. Each rejection leaves the accumulated
+    total unchanged.
+    """
+
+    def test_invalid_usage_classifies_as_provider_error(self):
+        self.assertEqual(InvalidProviderUsage.decision, LoopDecision.PROVIDER_ERROR)
+
+    def test_negative_count_is_rejected(self):
+        tracker = BudgetTracker(_tool_policy())
+        with self.assertRaises(InvalidProviderUsage):
+            tracker.record_tokens(prompt_tokens=-1, completion_tokens=0)
+        with self.assertRaises(InvalidProviderUsage):
+            tracker.record_tokens(prompt_tokens=0, completion_tokens=-1)
+
+    def test_none_count_is_rejected(self):
+        tracker = BudgetTracker(_tool_policy())
+        with self.assertRaises(InvalidProviderUsage):
+            tracker.record_tokens(prompt_tokens=None, completion_tokens=0)
+
+    def test_bool_count_is_rejected(self):
+        # bool is a subclass of int; a True usage count must not be treated as 1.
+        tracker = BudgetTracker(_tool_policy())
+        with self.assertRaises(InvalidProviderUsage):
+            tracker.record_tokens(prompt_tokens=True, completion_tokens=0)
+
+    def test_non_integer_count_is_rejected(self):
+        tracker = BudgetTracker(_tool_policy())
+        with self.assertRaises(InvalidProviderUsage):
+            tracker.record_tokens(prompt_tokens=1.5, completion_tokens=0)
+        with self.assertRaises(InvalidProviderUsage):
+            tracker.record_tokens(prompt_tokens="1", completion_tokens=0)
+
+    def test_explicit_zero_is_valid_and_accumulates(self):
+        # over-strict guard: an explicit 0 usage is a valid provider response.
+        tracker = BudgetTracker(_tool_policy(max_total_tokens=10))
+        tracker.record_tokens(prompt_tokens=0, completion_tokens=0)
+        self.assertFalse(tracker.is_token_budget_exceeded())
+
+    def test_valid_counts_accumulate(self):
+        tracker = BudgetTracker(_tool_policy(max_total_tokens=100))
+        tracker.record_tokens(prompt_tokens=6, completion_tokens=4)
+        tracker.record_tokens(prompt_tokens=1, completion_tokens=0)
+        self.assertTrue(tracker.is_token_budget_exceeded() is False)
+
+    def test_rejection_leaves_accumulated_total_unchanged(self):
+        # a rejected call must not partially accumulate into the token budget.
+        tracker = BudgetTracker(_tool_policy(max_total_tokens=100))
+        tracker.record_tokens(prompt_tokens=5, completion_tokens=5)
+        with self.assertRaises(InvalidProviderUsage):
+            tracker.record_tokens(prompt_tokens=-1, completion_tokens=3)
+        # only the first valid call counts (10); the rejected 3 did not slip in.
+        tracker.record_tokens(prompt_tokens=0, completion_tokens=0)
+        self.assertFalse(tracker.is_token_budget_exceeded())
 
 
 if __name__ == "__main__":

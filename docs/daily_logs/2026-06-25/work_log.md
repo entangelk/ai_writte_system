@@ -6,6 +6,7 @@
 - tool registry, strict argument validation, signature normalization을 실제 인프라 없이 결정적 회귀로 잠근다.
 - A2 완료 후 다음 작업자가 A3(completion/retry/loop 합성)를 바로 이어갈 수 있게 상태 문서를 갱신한다.
 - 흩어진 계획 문서의 서비스 경계와 확정 계약을 정리하는 SoT 초안을 만든다.
+- AgentLoopRunner A3(completion 판정·retry 우선순위·loop decision 합성·budget→budget_exhausted 매핑·F1 usage 방어)를 인프라 없는 순수 원시로 잠근다.
 
 ## Completed work
 
@@ -28,6 +29,25 @@
 - `docs/contracts.md`는 여전히 아이디에이션/reference로 두고, 새 구현 진입점은 `docs/system-contract-sot.md`로 분리했다.
 - `docs/README.md`와 `docs/plans/README.md`에 SoT 문서를 먼저 보도록 링크와 우선순위 문구를 추가했다.
 - 초안 상태이므로 세부 Phase schema를 추측하지 않았다. 확정된 구현·검증 계약과 미확정 항목을 분리했고, `enum`/bounds validator deferral 같은 triggered 조건도 유지했다.
+
+### AgentLoopRunner A3 구현(completion 판정 + retry/budget decision 합성 + F1 usage 방어)
+
+- 변경 파일: `services/application/app/agent_loop/completion.py`(신규), `services/application/app/agent_loop/resolution.py`(신규), `services/application/app/agent_loop/budget.py`(F1 방어), `tests/test_agent_loop_completion.py`·`tests/test_agent_loop_resolution.py`(신규), `tests/test_agent_loop_budget.py`(F1 회귀), `docs/plans/implementation-plan.md`, `docs/system-contract-sot.md`, `CHANGELOG.md`, `HANDOFF.md`, 이 작업 로그.
+- 사용자 결정(아래 Decisions)으로 A3를 A1·A2와 동일한 인프라 없는 순수 decision 합성 원시로 진행했다. 러너 실구동(fake provider/tool 주입 루프)은 Slice 1·3 이후.
+- `SelfReport`(`FINALIZE`/`DEFER`) 종료채널 신호 추상과 `judge_completion(artifact_present, self_report)`을 추가했다. 구조 조건(artifact 존재)과 self-report(`FINALIZE`)을 모두 충족할 때만 `completed`, 그 외 `awaiting_review`. 산출물 데이터 채널의 불확실성(needs_review·confidence·conflict)은 `artifact_present`를 유지하므로 종료채널 `FINALIZE`면 `completed`(승격 금지). 구체 wire 형식은 provider-response parser slice로 deferred.
+- `resolve_retry(error_kind, retryable, retries_remaining, budget_permits_next)`로 retry 우선순위를 잠갔다: non-retryable 즉시 종료 → retryable cap 소건 시 해당 error decision → cap 남음+budget 허용 retry(비종단) → cap 남음+budget 차단 `budget_exhausted`(원래 error literal은 `preserved_literal`로 trace 보존). cap 소건이 budget 차단보다 우선.
+- `next_step_budget_decision(tracker, needs_iteration, tool_signature)`로 budget 5차원(iteration·wall-clock·token·tool-call·repeated-call) → `budget_exhausted` 매핑을 잠갔다. wall-clock deadline과 token 초과는 전역 정지 신호, iteration/tool 차원은 다음 단위 작업 종류에 따라 검사. budget-blocked가 completion보다 선행(성공 위장 금지).
+- `BudgetTracker.record_tokens`에 F1 방어를 추가했다: prompt/completion count가 음수/None/bool/비-int면 0으로 보정하지 않고 `InvalidProviderUsage`(decision=`provider_error`)로 거부. 명시적 0은 유효. 거부 시 누적 총합은 불변.
+- terminal-decision 우선순위(error > blocked/invalid_tool_arguments > budget_exhausted > completion)는 순차 합성으로, 각 decision point에서 정확히 하나가 발화한다. 별도 compose 함수 없이 각 원시가 자기 decision point를 담당.
+- agent_loop focused 73개(decision 4 + budget 25 + registry 20 + completion 6 + resolution 18), 전체 117개 회귀 통과. 4곳 핵심 분기를 변이해 양방향 lock을 증명했다.
+
+### A3 독립 검증 후 보강(I1 / I3 폐쇄)
+
+- 변경 파일: `services/application/app/agent_loop/budget.py`, `tests/test_agent_loop_budget.py`, `docs/plans/implementation-plan.md`, `docs/system-contract-sot.md`, `CHANGELOG.md`, `HANDOFF.md`, 이 작업 로그.
+- 독립 검증(`docs/verifications/2026-06-25/agent_loop_a3_completion_resolution.md`) 판정 **합격**. 비차단 3건 중 I1(유일한 spec↔impl 갭)·I3(cosmetic)을 보강했고, I2(runner 합성 순서)는 spec이 A3를 순수 원시로 규정하므로 runner slice의 forward-lock 의무로 추적만 유지.
+- **I3 보강**: `InvalidBudgetPolicy`에 `decision = LoopDecision.BLOCKED` 추가(계약 §Budget "모순 policy는 provider 호출 전 blocked"). `InvalidProviderUsage`(`provider_error`)와 짝이 돼 "future runner가 budget/registry 예외를 uniformly 매핑"이라는 docstring 주장이 실현됐다. 회귀 `test_invalid_budget_policy_classifies_as_blocked`.
+- **I1 폐쇄(사용자 결정 Option A)**: `BudgetPolicy`에 `provider_retry_cap`/`tool_retry_cap`을 추가했다. 계약 §retry "retry cap은 task profile의 필수 policy 값, 0 이상"이 이제 구현에 실현됐다(`_RETRY_DIMENSIONS` 루프로 >= 0·bool 거부 검증). `resolve_retry(retries_remaining)` 시그니처는 그대로이고, runner가 `policy.<cap> - used`로 `retries_remaining`을 합법 계산할 수 있게 됐다. 회귀 3종(0 허용, 음수·bool 거부). 변이 증명(`_RETRY_DIMENSIONS=()` → FAIL(2) / 복원 PASS).
+- 회귀: 전체 117 → **121**(I3 +1, I1 +3). 검증 기록은 보강 전 working-tree 상태(HEAD `c5202e8`)를 가리키므로, 해당 기록 Reproduction의 `BudgetPolicy(...)` 호출은 retry cap 필드가 없는 보강 전 시그니처이다(점-in-time 기록이라 그대로 둠).
 
 ## Issues found
 
@@ -54,16 +74,45 @@
 - 결과: `python3 -m unittest tests.test_agent_loop_registry -v` 20/20 통과, `python3 -m unittest discover -s tests` 85/85 통과.
 - 확인: enum/bounds는 여전히 validator 범위에서 제외되어 수용된다. 이는 사용자 결정으로 갱신한 `flat-loop-gate.md` §33의 explicit deferral과 일치한다.
 
+### SoT 독립 검증 R1 보강(precedence tree 통일)
+
+- 문제: 독립 검증(`docs/verifications/2026-06-25/system_contract_sot.md`)이 SoT(`system-contract-sot.md` §문서 우선순위)와 `plans/README.md`(충돌 시 우선순위)의 문서-precedence tree가 항목 불일치함을 발견했다. SoT는 "Approved SoT+Phase 계획(2) / Draft-locked(3) / 미구현 Draft(4)", plans/README는 "SoT 확정 계약(2) / Approved Phase 계획(3) / Draft-locked(4)"로, Draft SoT 확정 계약 vs Approved Phase 문서 충돌 시 결론이 양쪽에서 달라질 수 있었다.
+- 확인: repo sweep에서 문서-precedence tree는 SoT·plans/README 두 곳만(`docs/README.md`는 SoT로 defer). 제3의 분기 없음.
+- 해결(사용자 요청 "비차단 부분 네가 보강해줘. 권고부분도 보강해주고"): `plans/README.md` tree를 SoT 5-level과 동일하게 통일하고 "상세와 최종 판정은 SoT에 있다"로 SoT를 정본 precedence로 defer. SoT tree가 의미론상 더 타당(Approved=사용자 서명 계획이 미서명 Draft-locked 구현보다 우선이어야 사용자 지시 변경이 기존 구현을 덮어씀)하고 SoT가 §7에서 자기 precedence를 권위로 선언했으므로 plans/README를 SoT에 맞췄다.
+- 결과: 정본 precedence tree는 SoT 한 곳만 유지(DRY). 독립 검증 R1 폐쇄.
+
+### A3 변이 검증 중 stale `__pycache__` 충돌
+
+- 문제: 양방향 변이 spot-check에서 소스를 `cp`로 복원했는데도 복원 후 테스트가 계속 FAIL(28 errors)했다. 에러는 `BudgetPolicy` 생성 시 `max_tool_calls must be an integer >= 0`였다.
+- 원인: 변이로 생성된 mutated `.pyc`가 WSL2 `/mnt/d`(Windows DrvFs) 마운트의 mtime 캐싱 때문에 소스 복원 후에도 재컴파일되지 않고 재사용됐다. `grep`으로 본 소스는 정상(`value < 0`)이지만 런타임은 mutated bytecode를 썼다.
+- 해결: `find services tests -name __pycache__ -type d -prune -exec rm -rf {} +`로 캐시 정리 후 정상(117 통과). 이후 변이 검증은 `python3 -B`(pyc 미생성)로 실행해 stale 캐시를 원천 차단했다.
+- 결과: 4곳 변이가 양방향으로 정확히 검증됐고, repo는 gitignored `__pycache__`만 영향이라 깨끗함.
+
+### A3 변이 시 sed 다중 매칭
+
+- 문제: F1 라인 변이에 `sed 's/value < 0/value > 0/'`를 썼더니 `_require_token_count`(line 55)뿐 아니라 A1 `BudgetPolicy`의 TOOL_DIMENSIONS 검사(line 88)까지 같이 바뀌어 `BudgetPolicy` 생성이 깨졌다.
+- 해결: `raise InvalidProviderUsage`에 anchor한 Python 1회 치환으로 F1 라인만 정확히 타겟팅해 변이 증명을 다시 했다(line 88 미영향 확인).
+- 교훈: 동일한 패턴이 인접한 다른 의미의 라인에도 있을 수 있으니 변이는 문맥 anchor를 쓸 것.
+
+### 유사 패턴 sweep(provider 숫자 값 검증)
+
+- 확인: "provider가 준 token count를 검증 없이 수용" 패턴을 `services`에서 검색. `services/llm_gateway/app/client.py:114`의 `_token_count`가 이미 bool·비-int·음수(`value < 0`)를 거부한다.
+- 결과: loop 측 `_require_token_count`(budget.py)와 동일 정책. loop F1 방어는 gateway 1차 게이트 뒤의 defense-in-depth로 일관적이며, gap/중복 위험 없음. `record_tokens`는 loop가 gateway 응답을 소비하는 지점이므로 F1 방어 위치가 맞다.
+
 ## Decisions
 
 - 상세 domain tool payload 필드는 아직 Phase schema가 확정되지 않았으므로 추측하지 않았다. A2는 schema 구조와 strict 검증 메커니즘을 잠그고, 실제 handler payload schema는 해당 Phase 구현에서 구체화한다.
 - 외부 `jsonschema` dependency를 추가하지 않았다. 현재 테스트 표면에 필요한 strict object/type/required/array 검증만 표준 `json` 기반 최소 구현으로 제공한다. 더 넓은 JSON Schema keyword가 필요해지면 그때 dependency 도입을 판단한다.
 - **[독립 검증 후 사용자 결정, 2026-06-25]** 독립 검증(`docs/verifications/2026-06-25/agent_loop_a2_registry.md`)이 `flat-loop-gate.md` §33 "enum, bounds 적용" 명시와 구현의 enum/bounds 미검증 불일치를 실증 발견했다. 사용자 결정으로 v1/A2 validator 범위를 `{required, type, additionalProperties, array items}`로 계약에 **명시 좁힘**하고 `enum`/bounds는 keyword를 사용하는 tool schema가 등록되는 시점까지 deferred로 reconcile했다(§33·implementation-plan §138·CHANGELOG에 반영). 이유: 현재 v1 tool schema에 enum/bounds가 없어 활성 결함이 아니며, 의존성·구현 추가보다 계약 개정이 가볍다. tradeoff: enum/bounds를 쓰는 tool이 처음 등록되는 시점에 검증 + 양방향 회귀를 반드시 추가해야 한다(해당 시점까지 empty cell 아님, 명시적 deferral).
 - 독립 검증의 비차단 I2/I3는 바로 보강했다. 중첩 object와 array `items`는 현재 A2 validator 범위에 속하므로 등록 시점 fail-fast가 단순하고, `assert` 제거는 동작 변화 없이 최적화 모드에서도 의도가 드러나는 쪽을 택했다.
+- **[사용자 결정, 2026-06-25]** A3 범위를 fake provider/tool 주입 러너 골격이 아니라 A1·A2 동일 패턴의 인프라 없는 순수 decision 합성 원시로 좁혔다. 이유: 계약이 실제 tool handler·Mongo/ES 통합을 Slice 1·3 이후로 미뤘고, A1·A2 cadence를 유지하면 decision 합성 계약을 인프라 없이 빠르게 잠글 수 있다. tradeoff: 러너 실구동(종료채널 wire parsing·provider/tool 호출 순서·trace 조립)은 후속 slice로 남는다.
+- self-report의 구체 wire 형식(명시 토큰·구조화 필드)은 provider-response parser slice에서 확정한다(flat-loop-gate §completion criteria가 "Phase 4 구현 slice에서 확정"으로 명시). A3는 `SelfReport` enum을 주입받아 판정만 잠갔다.
+- **open contract point(→ 해소)**: flat-loop-gate §retry가 "provider/tool retry cap은 task profile의 필수 policy 값이며 0 이상"으로 명시하나 A1 `BudgetPolicy`는 5차원+allows_tools만 lock해 cap이 없었다. A3는 `resolve_retry(retries_remaining)`로 policy 저장 위치에 무관하게 동작시켰다. 독립 검증 I1이 이를 "유일한 spec↔impl 갭"으로 지적했고, **사용자 결정(Option A)**으로 `BudgetPolicy`에 `provider_retry_cap`/`tool_retry_cap`(0 이상)을 추가해 보강에서 폐쇄했다. 별도 `RetryPolicy`/`TaskProfile` 배치 대신 단일 run-policy 객체를 택했다(이유: `allows_tools`도 budget이 아닌데 이미 BudgetPolicy에 있어 "run policy" 역할과 일관, runner가 policy 1개만 전달). numeric 기본값은 benchmark 이후.
+- terminal-decision 우선순위(error > blocked/invalid_tool_arguments > budget_exhausted > completion)를 별도 compose 함수가 아니라 각 원시의 decision point 순차 합성으로 표현했다. 루프에서는 한 시점에 정확히 하나만 발화하므로 "동시 후보 중 선택" 함수는 불필요하다 판단했다(Simplicity First).
 
 ## Next steps
 
 1. `docs/system-contract-sot.md`를 사용자가 검토하고 `Draft` 유지/수정/Approved 승격 방향을 결정한다.
-2. AgentLoopRunner A3: completion 판정, retry 우선순위, loop 합성, budget→`budget_exhausted` decision 매핑 구현.
-3. A3에서 Gateway→budget usage 연결 시 음수/None/invalid usage 방어를 회귀로 lock한다.
-4. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도를 확정한다.
+2. self-report 종료채널 wire 형식 확정(provider-response parser slice).
+3. 러너 실구동(Slice 1·3+): 종료채널 wire parsing + provider/tool 호출 순서 + trace 조립. 이때 검증 I2 forward-lock — `next_step_budget_decision`을 completion/retry 결정보다 먼저 호출(budget_exhausted가 completed로 위장 금지), retry 시 동일 차원 budget 소비(retry 비-무료성) — 을 양방향 회귀로 lock. 실제 tool handler·Mongo/ES/Chroma 통합도 이 범위.
+4. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도를 확정한다. (retry cap 구조는 보강에서 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 남음.)

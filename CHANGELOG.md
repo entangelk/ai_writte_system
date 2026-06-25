@@ -2,6 +2,8 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-25 | AgentLoopRunner A3 검증 후 보강(I1/I3) | [work log](docs/daily_logs/2026-06-25/work_log.md) |
+| 2026-06-25 | AgentLoopRunner A3 decision 합성 회귀 구현 | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-25 | AgentLoopRunner A2 registry 계약 회귀 구현 | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-24 | 개발 계획 문서 구조 도입 | [work log](docs/daily_logs/2026-06-24/work_log.md) |
 
@@ -9,15 +11,23 @@
 
 ### Added
 
+- AgentLoopRunner A3 독립 검증(합격) 후 비차단 2건을 보강했다. I3로 `InvalidBudgetPolicy`에 `decision = blocked`를 추가해 budget/registry 예외→종료 decision uniform 매핑을 완성했고, I1(유일한 spec↔impl 갭)로 `BudgetPolicy`에 `provider_retry_cap`/`tool_retry_cap`(0 이상)을 추가해 계약 §retry "retry cap은 필수 policy 값"을 구현에 실현했다. I2(runner 합성 순서)는 spec이 A3를 순수 원시로 규정해 runner slice forward-lock으로 뒀다. 전체 회귀 117→121, retry cap 검증 변이 증명(`_RETRY_DIMENSIONS=()` FAIL/복원 PASS).
+- AgentLoopRunner A3를 구현했다. `judge_completion`(종료채널 self-report `FINALIZE`/`DEFER` + 구조 조건 하이브리드 판정 → `completed`/`awaiting_review`), `resolve_retry`(retry 우선순위: non-retryable 즉시 종료 → cap 소진 → cap 남음+budget 허용 retry → cap 남음+budget 차단 `budget_exhausted`에 원래 error literal trace 보존), `next_step_budget_decision`(budget 5차원 → `budget_exhausted` 매핑)을 fake/인프라 없이 양방향 회귀로 잠갔다. terminal-decision 우선순위(error > blocked/invalid_tool_arguments > budget_exhausted > completion)는 순차 합성으로 뒀다.
+- A3의 F1 방어로 `BudgetTracker.record_tokens`가 음수/None/bool/비-int token count를 0으로 보정하지 않고 `InvalidProviderUsage`(decision=`provider_error`)로 거부하도록 했다(명시적 0은 유효).
 - AgentLoopRunner A2를 구현했다. `ToolRegistry`가 task profile별 v1 domain tool allowlist, strict JSON argument validation(`required`·type·`additionalProperties`·array `items`만; `enum`/bounds는 후속), context-only argument 차단, canonical tool-call signature를 fake/인프라 없이 양방향 회귀로 잠근다.
 - A2 독립 검증의 비차단 권고를 반영해 중첩 object schema와 array `items`를 등록 시점에 재귀 검증하고, runtime schema guard의 `assert` 의존을 명시 검사로 교체했다.
 - 서비스 경계와 확정 계약을 한 곳에서 추적하기 위한 `docs/system-contract-sot.md` 초안을 추가하고, `docs/README.md`와 `docs/plans/README.md`의 진입점을 갱신했다.
+- SoT 독립 검증 R1을 보강해 `docs/plans/README.md`의 문서-precedence tree를 SoT(`docs/system-contract-sot.md` §문서 우선순위)의 5-level과 통일하고, SoT를 정본 precedence로 defer 했다. 정본 precedence tree를 SoT 한 곳으로 단일화.
 
 사용자는 HANDOFF의 다음 작업을 이어 진행하도록 요청했다. 이에 A2 범위를 실제 domain handler 구현이 아니라 registry/argument/signature 계약 회귀로 좁혀 완료하고, handler 실행·retry·completion 합성은 A3 이후로 남겼다.
 
 독립 검증(2026-06-25)이 `flat-loop-gate.md` §33 "enum, bounds 적용" 명시와 구현이 일치하지 않음을 실증 발견했다. 사용자 결정으로 v1/A2 validator 범위를 `{required, type, additionalProperties, array items}`로 계약에 명시 좁히고 `enum`/bounds는 keyword 사용 tool 등록 시점까지 deferred로 reconcile 했다(§33·본 로그·검증 기록에 반영). 상세 기록은 `docs/verifications/2026-06-25/agent_loop_a2_registry.md`.
 
 사용자는 여러 계획 문서가 나뉘어 있어 계약 및 서비스에 대한 정본 문서를 SoT로 활용하고 싶다고 결정했다. 이에 새 SoT 문서는 세부 Phase 계획을 대체하지 않고, 문서 우선순위·서비스 책임·확정 계약·미확정 결정을 먼저 확인하는 정본 인덱스 역할로 작성했다.
+
+사용자는 A3 범위를 fake provider/tool을 주입받아 루프를 실구동하는 러너 골격이 아니라 A1·A2와 동일한 인프라 없는 순수 decision 합성 원시로 진행하기로 결정했다(결과: `completion.py`·`resolution.py`·budget F1 방어). self-report의 구체 wire 형식은 provider-response parser slice로, retry cap policy 배치(`BudgetPolicy` cap 추가 여부)는 별도 slice로 남겼다.
+
+사용자는 A3 독립 검증이 "retry cap 정책 근원 부재"를 유일한 spec↔impl 갭(I1)으로 지적한 뒤, retry cap 배치를 별도 `RetryPolicy`/`TaskProfile`이 아니라 `BudgetPolicy` 확장(Option A)으로 결정했다. 이유: `allows_tools`도 budget이 아닌데 이미 `BudgetPolicy`에 있어 "run policy" 역할과 일관되고 runner가 policy 객체 1개만 전달하면 된다. tradeoff: `BudgetPolicy`가 소비 budget과 retry 한도를 함께 가져 이름이 약간 불일치하지만, 단일 run-policy 객체의 단순함이 우선했다. `resolve_retry(retries_remaining)` 시그니처는 그대로이고 runner가 `policy.<cap> - used`로 남은 retry를 계산한다.
 
 ## 2026-06-24
 
