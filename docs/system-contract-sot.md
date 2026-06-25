@@ -146,6 +146,8 @@ provider_error
 - domain Gate 결과와 Loop decision은 직교한다.
 - `completed`는 loop 종료 상태일 뿐 domain Gate 통과가 아니다.
 - `budget_exhausted`는 성공이 아니다.
+- provider 응답 content는 JSON object이며 loop 종료 채널은 top-level `self_report` field다.
+- `self_report` 허용값은 정확히 `finalize` 또는 `defer`다. 누락·오타·대소문자 변형·non-string·산출물 내부 nested `self_report`는 provider output 오류다.
 
 Budget 계약:
 

@@ -208,7 +208,7 @@ LLM provider(Gateway) 실패로 종료한 상태. **coarse umbrella decision**�
 
 반면 모델이 **산출물 자체를 어떻게 도출할지 미해결**이라고 self-report하면 loop 미해결이며 `awaiting_review`다. 이 구분이 본 계약의 중심이다.
 
-두 경우를 기계적으로 가르는 것은 **신호가 나오는 채널**이다. self-report는 모델이 run을 종료할 때 산출물을 확정 제출(`finalize`)하는 대신 사람 판단을 요청(`defer`)하는 **loop 종료 채널**의 명시적 결정이다. candidate `needs_review` status·confidence 표기·`conflict` 후보는 **산출물 데이터 채널**의 필드 값이며, 모델이 이를 담아 산출물을 `finalize`하면 종료 채널은 여전히 `completed`다. 두 채널은 직교한다. 따라서 `analysis_compare`가 모호 대상을 `needs_review` 후보로 담아 제출하는 것(데이터 채널)과 `writing_generate`가 산출물을 확정하지 못해 `defer`하는 것(종료 채널)의 차이는 채널 차이이지 모순이 아니다. 종료 채널 신호의 구체 wire 형식(명시 토큰·구조화 필드 등)은 Phase 4 `AgentLoopRunner` 구현 slice에서 확정한다.
+두 경우를 기계적으로 가르는 것은 **신호가 나오는 채널**이다. self-report는 모델이 run을 종료할 때 산출물을 확정 제출(`finalize`)하는 대신 사람 판단을 요청(`defer`)하는 **loop 종료 채널**의 명시적 결정이다. provider 응답 content는 JSON object이며 종료 채널 wire 형식은 top-level `self_report` field다. 허용값은 정확히 `finalize` 또는 `defer`뿐이다. 누락·오타·대소문자 변형·non-string·산출물 내부 nested `self_report`는 종료 채널로 인정하지 않고 provider output 오류로 처리한다. candidate `needs_review` status·confidence 표기·`conflict` 후보는 **산출물 데이터 채널**의 필드 값이며, 모델이 이를 담아 산출물을 `finalize`하면 종료 채널은 여전히 `completed`다. 두 채널은 직교한다. 따라서 `analysis_compare`가 모호 대상을 `needs_review` 후보로 담아 제출하는 것(데이터 채널)과 `writing_generate`가 산출물을 확정하지 못해 `defer`하는 것(종료 채널)의 차이는 채널 차이이지 모순이 아니다.
 
 ### task profile별 기준
 

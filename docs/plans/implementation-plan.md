@@ -137,12 +137,13 @@ Application API ───── MongoDB
 - `BudgetTracker` 계측: count 차원 N번째 허용·N+1 차단, wall-clock deadline(clock 주입으로 결정적), token post-accounting(`== limit` 허용·`> limit` 초과), repeated-call signature 분리(다른 valid arguments 비반복)
 - `ToolRegistry` A2: task profile별 allowlist, schema-less/unknown 허용/context scope argument 등록 거부, strict JSON argument validation(`required`·type·`additionalProperties`·array `items`; `enum`/bounds는 keyword 사용 tool 등록 시점까지 deferred — flat-loop-gate §33 참조), canonical tool-call signature를 고정
 - 독립 검증 후 보강: 중첩 object schema와 array `items`를 등록 시점에 재귀 검증하고, runtime schema guard의 `assert` 의존을 명시 검사로 교체
-- `judge_completion` A3(completion.py): 종료채널 self-report(`FINALIZE`/`DEFER`)와 구조 조건(artifact 존재)의 하이브리드 판정으로 `completed`/`awaiting_review`를 가른다. 산출물 데이터 채널의 불확실성(needs_review·confidence·conflict)은 `artifact_present`를 유지하며 종료채널 `FINALIZE`면 `completed`(승격 금지). wire 형식은 provider-response parser slice로 deferred
+- `judge_completion` A3(completion.py): 종료채널 self-report(`FINALIZE`/`DEFER`)와 구조 조건(artifact 존재)의 하이브리드 판정으로 `completed`/`awaiting_review`를 가른다. 산출물 데이터 채널의 불확실성(needs_review·confidence·conflict)은 `artifact_present`를 유지하며 종료채널 `FINALIZE`면 `completed`(승격 금지).
+- `parse_self_report_payload` parser slice(parser.py): provider 응답 content를 JSON object로 파싱하고 top-level `self_report` field의 정확한 `finalize`/`defer` literal만 종료 채널로 인정한다. 누락·malformed JSON·non-object·non-string·case variant·artifact nested `self_report`는 `provider_error`로 분류한다.
 - `resolve_retry`/`next_step_budget_decision` A3(resolution.py): retry 우선순위(non-retryable 즉시 종료 → cap 소진 → cap 남음+budget 허용 retry → cap 남음+budget 차단 `budget_exhausted`+원래 literal trace 보존)와 budget 5차원→`budget_exhausted` 매핑. terminal-decision 우선순위(error > blocked/invalid_tool_arguments > budget_exhausted > completion)는 순차 합성
 - `BudgetTracker.record_tokens` F1 방어(budget.py): 음수/None/bool/비-int token count를 0으로 보정하지 않고 `InvalidProviderUsage`(decision=`provider_error`)로 거부. 명시적 0은 유효
 - A3 독립 검증(합격) 후 보강: `BudgetPolicy`에 `provider_retry_cap`/`tool_retry_cap`(0 이상, bool 거부)을 추가해 계약 §retry의 필수 policy 값을 실현(I1, 사용자 결정 Option A)하고, `InvalidBudgetPolicy.decision=blocked`로 budget/registry 예외→종료 decision uniform 매핑을 완성(I3). retry cap 검증 변이 증명. runner 합성 순서(I2)는 runner slice forward-lock
 - GPU/인프라 없이 agent_loop focused 77개 양방향 회귀 통과(decision 4 + budget 29 + registry 20 + completion 6 + resolution 18). 전체 회귀 121개 통과
-- 후속: 실제 tool handler와 Mongo/ES/Chroma 통합은 Slice 1·3 이후. self-report wire 형식과 runner 실구동(검증 I2 forward-lock 포함)도 후속 slice에서 확정. retry cap 구조는 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 benchmark 이후
+- 후속: 실제 tool handler와 Mongo/ES/Chroma 통합은 Slice 1·3 이후. runner 실구동(검증 I2 forward-lock 포함)은 후속 slice에서 확정. retry cap 구조는 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 benchmark 이후
 
 ## 제안 저장소 구조
 

@@ -7,6 +7,7 @@
 - A2 완료 후 다음 작업자가 A3(completion/retry/loop 합성)를 바로 이어갈 수 있게 상태 문서를 갱신한다.
 - 흩어진 계획 문서의 서비스 경계와 확정 계약을 정리하는 SoT 초안을 만든다.
 - AgentLoopRunner A3(completion 판정·retry 우선순위·loop decision 합성·budget→budget_exhausted 매핑·F1 usage 방어)를 인프라 없는 순수 원시로 잠근다.
+- AgentLoopRunner self-report 종료채널 wire 형식을 확정하고 provider-response parser slice를 회귀로 잠근다.
 
 ## Completed work
 
@@ -48,6 +49,23 @@
 - **I3 보강**: `InvalidBudgetPolicy`에 `decision = LoopDecision.BLOCKED` 추가(계약 §Budget "모순 policy는 provider 호출 전 blocked"). `InvalidProviderUsage`(`provider_error`)와 짝이 돼 "future runner가 budget/registry 예외를 uniformly 매핑"이라는 docstring 주장이 실현됐다. 회귀 `test_invalid_budget_policy_classifies_as_blocked`.
 - **I1 폐쇄(사용자 결정 Option A)**: `BudgetPolicy`에 `provider_retry_cap`/`tool_retry_cap`을 추가했다. 계약 §retry "retry cap은 task profile의 필수 policy 값, 0 이상"이 이제 구현에 실현됐다(`_RETRY_DIMENSIONS` 루프로 >= 0·bool 거부 검증). `resolve_retry(retries_remaining)` 시그니처는 그대로이고, runner가 `policy.<cap> - used`로 `retries_remaining`을 합법 계산할 수 있게 됐다. 회귀 3종(0 허용, 음수·bool 거부). 변이 증명(`_RETRY_DIMENSIONS=()` → FAIL(2) / 복원 PASS).
 - 회귀: 전체 117 → **121**(I3 +1, I1 +3). 검증 기록은 보강 전 working-tree 상태(HEAD `c5202e8`)를 가리키므로, 해당 기록 Reproduction의 `BudgetPolicy(...)` 호출은 retry cap 필드가 없는 보강 전 시그니처이다(점-in-time 기록이라 그대로 둠).
+
+### AgentLoopRunner self-report parser slice
+
+- 변경 파일: `services/application/app/agent_loop/parser.py`, `tests/test_agent_loop_parser.py`, `services/application/app/agent_loop/completion.py`, `docs/plans/flat-loop-gate.md`, `docs/plans/implementation-plan.md`, `docs/system-contract-sot.md`, `HANDOFF.md`, 이 작업 로그.
+- A3에서 deferred로 남겨둔 종료채널 wire 형식을 확정했다. provider 응답 `content`는 JSON object이고, loop 종료 채널은 top-level `self_report` field다.
+- 허용값은 정확히 `finalize` 또는 `defer`뿐이다. `parse_self_report_payload`는 이를 `SelfReport.FINALIZE`/`SelfReport.DEFER`로 변환한다.
+- 누락, malformed JSON, non-object JSON, non-string 값, 대소문자 변형, artifact 내부 nested `self_report`는 모두 `InvalidSelfReport(decision=provider_error)`로 거부한다. silent default나 산출물 데이터 채널 fallback은 없다.
+- 산출물 payload schema 자체는 아직 Phase schema가 확정되지 않았으므로 검증하지 않았다. 이 slice는 종료채널 추출만 소유한다.
+- `flat-loop-gate.md`, `implementation-plan.md`, `system-contract-sot.md`의 deferred 문구를 확정된 `self_report` wire 계약으로 갱신했다.
+- 회귀: focused parser+completion 14개 통과, 전체 discovery 129개 통과.
+
+### self-report parser 독립 검증 R1 보강
+
+- 변경 파일: `tests/test_agent_loop_parser.py`, `HANDOFF.md`, 이 작업 로그.
+- 독립 검증(`docs/verifications/2026-06-25/self_report_parser.md`)은 parser slice를 **합격**으로 판정했고, 비차단 R1로 계약의 "오타" 거부 카테고리에 전용 value sample이 없다는 권고를 남겼다. branch는 이미 `case variant` test가 동일 `ValueError` 분기를 잠그고 있어 비차단이었다.
+- 권고를 수용해 잘 형성된 잘못된 리터럴 `{"self_report":"done"}`을 거부하는 `test_wrong_literal_typo_is_invalid`를 추가했다.
+- 회귀: focused parser+completion 15개 통과, 전체 discovery 130개 통과.
 
 ## Issues found
 
@@ -99,6 +117,24 @@
 - 확인: "provider가 준 token count를 검증 없이 수용" 패턴을 `services`에서 검색. `services/llm_gateway/app/client.py:114`의 `_token_count`가 이미 bool·비-int·음수(`value < 0`)를 거부한다.
 - 결과: loop 측 `_require_token_count`(budget.py)와 동일 정책. loop F1 방어는 gateway 1차 게이트 뒤의 defense-in-depth로 일관적이며, gap/중복 위험 없음. `record_tokens`는 loop가 gateway 응답을 소비하는 지점이므로 F1 방어 위치가 맞다.
 
+### self-report parser 패턴 sweep
+
+- 확인: `self_report`, `SelfReport`, `finalize`, `defer` 패턴을 `services`, `tests`, `docs/plans`, `docs/system-contract-sot.md`에서 검색했다.
+- 결과: 기존 코드에 종료채널을 default하거나 nested artifact field로 오인하는 중복 parser는 없었다. 관련 구현은 새 `parser.py`, 기존 `completion.py`, A3 resolution 테스트의 판정 예시뿐이었다.
+
+### self-report parser 독립 검증 R1
+
+- 문제: 검증 기록이 "오타" 카테고리의 전용 wrong-literal sample 부재를 비차단 권고로 기록했다.
+- 원인: `"Finalize"` case-variant가 동일 `SelfReport(raw)` → `ValueError` 분기를 이미 잠갔으나, 계약 열거값 수준에서 `"done"` 같은 잘못된 정상 문자열 샘플은 없었다.
+- 해결: `test_wrong_literal_typo_is_invalid` 추가.
+- 결과: branch-level lock에 더해 value-level sample도 채워졌다.
+
+### 전체 테스트 명령 선택
+
+- 문제: `python3 -m unittest`가 이 저장소에서는 테스트를 자동 발견하지 못하고 0개를 실행했다.
+- 해결: repository test surface는 `python3 -m unittest discover -s tests -p 'test_*.py'`로 실행했다.
+- 결과: 129개 테스트 통과. 앞으로 전체 회귀 기록은 discovery 명령을 사용한다.
+
 ## Decisions
 
 - 상세 domain tool payload 필드는 아직 Phase schema가 확정되지 않았으므로 추측하지 않았다. A2는 schema 구조와 strict 검증 메커니즘을 잠그고, 실제 handler payload schema는 해당 Phase 구현에서 구체화한다.
@@ -109,10 +145,10 @@
 - self-report의 구체 wire 형식(명시 토큰·구조화 필드)은 provider-response parser slice에서 확정한다(flat-loop-gate §completion criteria가 "Phase 4 구현 slice에서 확정"으로 명시). A3는 `SelfReport` enum을 주입받아 판정만 잠갔다.
 - **open contract point(→ 해소)**: flat-loop-gate §retry가 "provider/tool retry cap은 task profile의 필수 policy 값이며 0 이상"으로 명시하나 A1 `BudgetPolicy`는 5차원+allows_tools만 lock해 cap이 없었다. A3는 `resolve_retry(retries_remaining)`로 policy 저장 위치에 무관하게 동작시켰다. 독립 검증 I1이 이를 "유일한 spec↔impl 갭"으로 지적했고, **사용자 결정(Option A)**으로 `BudgetPolicy`에 `provider_retry_cap`/`tool_retry_cap`(0 이상)을 추가해 보강에서 폐쇄했다. 별도 `RetryPolicy`/`TaskProfile` 배치 대신 단일 run-policy 객체를 택했다(이유: `allows_tools`도 budget이 아닌데 이미 BudgetPolicy에 있어 "run policy" 역할과 일관, runner가 policy 1개만 전달). numeric 기본값은 benchmark 이후.
 - terminal-decision 우선순위(error > blocked/invalid_tool_arguments > budget_exhausted > completion)를 별도 compose 함수가 아니라 각 원시의 decision point 순차 합성으로 표현했다. 루프에서는 한 시점에 정확히 하나만 발화하므로 "동시 후보 중 선택" 함수는 불필요하다 판단했다(Simplicity First).
+- self-report 종료채널은 JSON object의 top-level `self_report` field로 확정했다. 이유: Phase payload들이 이후 JSON schema로 구체화될 가능성이 높고, top-level field가 산출물 데이터 채널과 가장 단순하게 분리된다. tradeoff: 자유 텍스트 응답이나 nested artifact field는 종료채널로 인정하지 않으므로 prompt/runner가 이 wrapper를 강제해야 한다.
 
 ## Next steps
 
 1. `docs/system-contract-sot.md`를 사용자가 검토하고 `Draft` 유지/수정/Approved 승격 방향을 결정한다.
-2. self-report 종료채널 wire 형식 확정(provider-response parser slice).
-3. 러너 실구동(Slice 1·3+): 종료채널 wire parsing + provider/tool 호출 순서 + trace 조립. 이때 검증 I2 forward-lock — `next_step_budget_decision`을 completion/retry 결정보다 먼저 호출(budget_exhausted가 completed로 위장 금지), retry 시 동일 차원 budget 소비(retry 비-무료성) — 을 양방향 회귀로 lock. 실제 tool handler·Mongo/ES/Chroma 통합도 이 범위.
-4. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도를 확정한다. (retry cap 구조는 보강에서 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 남음.)
+2. 러너 실구동(Slice 1·3+): `parse_self_report_payload` 연결 + provider/tool 호출 순서 + trace 조립. 이때 검증 I2 forward-lock — `next_step_budget_decision`을 completion/retry 결정보다 먼저 호출(budget_exhausted가 completed로 위장 금지), retry 시 동일 차원 budget 소비(retry 비-무료성) — 을 양방향 회귀로 lock. 실제 tool handler·Mongo/ES/Chroma 통합도 이 범위.
+3. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도를 확정한다. (retry cap 구조는 보강에서 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 남음.)

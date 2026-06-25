@@ -14,9 +14,9 @@ deficit) and ``budget_exhausted`` are decided elsewhere (registry/resolution)
 with explicit structural or budget signals; this judge only answers the
 completion question when the run has reached a candidate terminal state.
 
-The concrete wire format of the self-report signal (explicit token, structured
-field, ...) is fixed in the provider-response parser slice. Here it is injected
-as a SelfReport value, so the judgment is infrastructure-free and deterministic.
+The wire format is fixed in parser.py as a provider JSON object with a top-level
+``self_report`` field. Here it is injected as a SelfReport value, so the
+judgment is infrastructure-free and deterministic.
 """
 
 from __future__ import annotations
