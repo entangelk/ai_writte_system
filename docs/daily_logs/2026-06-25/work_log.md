@@ -78,6 +78,14 @@
 - trace는 provider call/error/retry, budget stop, self_report, completion event를 `RunnerTraceEvent`로 보존한다.
 - 회귀: focused runner/parser/completion/resolution 40개 통과, 전체 discovery 137개 통과.
 
+### AgentLoopRunner provider composition 독립 검증 보강
+
+- 변경 파일: `services/application/app/agent_loop/runner.py`, `docs/plans/implementation-plan.md`, `HANDOFF.md`, 이 작업 로그.
+- 독립 검증(`docs/verifications/2026-06-25/agent_loop_provider_runner.md`)은 provider composition slice를 **합격**으로 판정했다. I2 forward-lock과 retry non-free는 변이 증명으로 load-bearing임이 확인됐고, 전체 137개 회귀도 재현됐다.
+- 비차단 I1: `implementation-plan.md`의 focused agent_loop 총합이 `84`로 잘못 기록되어 있었다. breakdown `decision 4 + budget 29 + registry 20 + completion 6 + parser 9 + resolution 18 + runner 7`의 합과 실측은 `93`이므로 `84→93`으로 수정했다.
+- 비차단 I2: `runner.py`에 사용하지 않는 `field` import가 남아 있어 제거했다.
+- 검증 기록의 I3/I5 선택 강화 후보는 runner 고유 계약의 빈 칸이 아니므로 이번 보강에서는 추가 테스트를 만들지 않았다. domain tool branch와 task별 artifact schema는 후속 Phase 범위로 유지한다.
+
 ## Issues found
 
 ### A2 시작 시 registry 모듈 부재
@@ -144,6 +152,13 @@
 
 - 확인: `AgentLoopRunner`, `parse_self_report_payload`, `next_step_budget_decision`, `record_tokens`, `judge_completion` 사용 위치를 `services`, `tests`, `docs`에서 검색했다.
 - 결과: 실제 composition 구현은 새 `runner.py` 한 곳뿐이다. 기존 A3 원시와 테스트 외에 completion-before-budget 또는 retry-free 우회 경로는 발견되지 않았다.
+
+### AgentLoopRunner provider composition 독립 검증 I1/I2
+
+- 문제: 검증 기록이 `implementation-plan.md`의 focused 회귀 숫자 오류와 `runner.py` dead import를 비차단 정리 항목으로 발견했다.
+- 원인: focused 총합 산술에서 parser 9개가 누락되어 `84`로 기록됐고, `dataclasses.field`는 도입 후 사용되지 않았다.
+- 해결: focused 총합을 `93`으로 수정하고 unused `field` import를 제거했다.
+- 결과: 문서 envelope claim과 실제 test count가 일치하고, runner import surface가 정리됐다.
 
 ### 전체 테스트 명령 선택
 
