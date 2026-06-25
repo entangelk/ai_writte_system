@@ -30,7 +30,7 @@ Registry와 tool handler는 LLM Gateway가 아니라 Application/Worker가 소�
 
 1. raw arguments를 JSON으로 정확히 한 번 parse한다. parse 실패를 `{}`로 바꾸지 않는다.
 2. root object와 등록된 schema를 검증한다.
-3. schema의 `required`, type, enum, bounds를 그대로 적용하고 unknown field는 `additionalProperties: false`로 거절한다.
+3. schema의 `required`·type(string/integer/number/boolean/array/object)·unknown field 거부(`additionalProperties: false`)·array `items`를 그대로 적용한다. `enum`·bounds(`minimum`/`maximum`)은 이 keyword를 선언하는 tool schema가 등록되기 전까지 validator 범위에서 **명시적으로 제외**한다(2026-06-25 독립 검증으로 v1/A2 validator 범위를 계약에 reconcile). 첫 사용 tool 등록 시점에 같은 계약으로 잠근다.
 4. string↔number 변환, singleton↔array 변환, 기본값 삽입 같은 coercion/repair를 하지 않는다.
 5. 검증이 끝난 뒤에만 handler를 호출한다. 실패한 arguments는 실행·재시도하지 않고 `invalid_tool_arguments`로 종료한다.
 
