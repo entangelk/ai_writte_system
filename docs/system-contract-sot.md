@@ -278,6 +278,7 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 | AgentLoopRunner A1 | 구현·검증 완료 | `decision.py`, `budget.py`, A1 verification |
 | AgentLoopRunner A2 | 구현·검증 완료 | `registry.py`, A2 verification |
 | AgentLoopRunner A3 | 구현·독립 검증 합격(보강) | `completion.py`, `resolution.py`, budget F1 방어 + retry cap, `InvalidBudgetPolicy.decision` |
+| AgentLoopRunner provider composition | 구현·자체 회귀 완료 | `parser.py`, `runner.py`, `test_agent_loop_runner.py`; I2 forward-lock(provider usage budget before completion, retry non-free) |
 | Product Shell/Phase 1~6 | 미구현 | 계획 문서만 존재 |
 
 ## 미확정 결정 목록

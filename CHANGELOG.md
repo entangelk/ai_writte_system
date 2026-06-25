@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-25 | AgentLoopRunner provider composition slice 구현 | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-25 | AgentLoopRunner A3 검증 후 보강(I1/I3) | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-25 | AgentLoopRunner A3 decision 합성 회귀 구현 | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-25 | AgentLoopRunner A2 registry 계약 회귀 구현 | [work log](docs/daily_logs/2026-06-25/work_log.md) |
@@ -11,6 +12,7 @@
 
 ### Added
 
+- AgentLoopRunner provider composition slice를 구현했다. `runner.py`가 provider 호출 전 budget check, iteration 기록, provider retry, usage 기록, post-accounting budget check, `parse_self_report_payload`, `judge_completion` 순서를 연결한다. I2 forward-lock으로 token overrun이 `completed`로 위장되지 않음과 provider retry가 iteration budget을 소비함을 양방향 회귀로 잠갔다. 실제 domain tool handler와 task별 artifact schema 평가는 Slice 1·3 이후로 남겼다. 전체 discovery 137개 통과.
 - AgentLoopRunner A3 독립 검증(합격) 후 비차단 2건을 보강했다. I3로 `InvalidBudgetPolicy`에 `decision = blocked`를 추가해 budget/registry 예외→종료 decision uniform 매핑을 완성했고, I1(유일한 spec↔impl 갭)로 `BudgetPolicy`에 `provider_retry_cap`/`tool_retry_cap`(0 이상)을 추가해 계약 §retry "retry cap은 필수 policy 값"을 구현에 실현했다. I2(runner 합성 순서)는 spec이 A3를 순수 원시로 규정해 runner slice forward-lock으로 뒀다. 전체 회귀 117→121, retry cap 검증 변이 증명(`_RETRY_DIMENSIONS=()` FAIL/복원 PASS).
 - AgentLoopRunner A3를 구현했다. `judge_completion`(종료채널 self-report `FINALIZE`/`DEFER` + 구조 조건 하이브리드 판정 → `completed`/`awaiting_review`), `resolve_retry`(retry 우선순위: non-retryable 즉시 종료 → cap 소진 → cap 남음+budget 허용 retry → cap 남음+budget 차단 `budget_exhausted`에 원래 error literal trace 보존), `next_step_budget_decision`(budget 5차원 → `budget_exhausted` 매핑)을 fake/인프라 없이 양방향 회귀로 잠갔다. terminal-decision 우선순위(error > blocked/invalid_tool_arguments > budget_exhausted > completion)는 순차 합성으로 뒀다.
 - A3의 F1 방어로 `BudgetTracker.record_tokens`가 음수/None/bool/비-int token count를 0으로 보정하지 않고 `InvalidProviderUsage`(decision=`provider_error`)로 거부하도록 했다(명시적 0은 유효).

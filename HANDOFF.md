@@ -37,16 +37,17 @@
 - budget/retry production 숫자 기본값은 Gemma Q4 benchmark 뒤에 확정한다. 그전 contract test는 명시값을 주입한다.
 - completion 판정은 하이브리드(구조 조건 AND self-report)다. self-report는 loop 종료 채널의 `finalize` vs `defer` 결정이며 candidate status(산출물 데이터 채널)와 직교한다. `analysis_compare`의 부분 모호는 run `completed`+candidate status, tool 없는 `writing_generate`는 산출물 모호 `defer` 시 `awaiting_review`. completion matrix는 `task × {completed, awaiting_review}` 횡일관 2행으로 양방향 lock(독립 검증 R1/R2/R3 보강 완료).
 - self-report wire 형식은 provider 응답 JSON object의 top-level `self_report` field다. 값은 정확히 `finalize` 또는 `defer`이고, 산출물 내부 nested `self_report`는 종료채널이 아니다.
-- AgentLoopRunner A1/A2/A3가 구현됐다. `services/application/app/agent_loop/`에 `LoopDecision`(7종), `BudgetPolicy`(5차원 budget + retry cap + allows_tools)/`BudgetTracker`(F1 usage 방어), `ToolRegistry`(profile allowlist·strict arguments·canonical signature), `judge_completion`(completed/awaiting_review 하이브리드 판정), `resolve_retry`/`next_step_budget_decision`(retry 우선순위·budget→budget_exhausted 매핑)을 fake/인프라 없이 양방향 회귀로 잠갔다. 러너 실구동(종료채널 wire parsing·provider/tool 호출 순서·trace 조립)·실제 tool handler(Slice 1·3 이후)는 미구현이다.
-- flat loop 종료 decision 합성 원시가 A3로 잠겼고 독립 검증 합격 후 I1/I3를 보강했다. self-report는 `SelfReport`(FINALIZE/DEFER) enum 주입이고 wire 형식은 parser slice에서 확정. retry cap은 `BudgetPolicy.provider_retry_cap`/`tool_retry_cap`(0 이상)으로 실현됐다(검증 I1 폐쇄). I2(runner 합성 순서)는 runner slice의 forward-lock.
-- self-report 종료채널 parser slice가 구현됐다. provider 응답 `content`는 JSON object이고 top-level `self_report` field 값은 정확히 `finalize`/`defer`만 허용한다. 누락·malformed/non-object JSON·non-string·case variant·artifact nested `self_report`는 `InvalidSelfReport(decision=provider_error)`다. runner 연결은 미구현이다.
+- AgentLoopRunner A1/A2/A3가 구현됐다. `services/application/app/agent_loop/`에 `LoopDecision`(7종), `BudgetPolicy`(5차원 budget + retry cap + allows_tools)/`BudgetTracker`(F1 usage 방어), `ToolRegistry`(profile allowlist·strict arguments·canonical signature), `judge_completion`(completed/awaiting_review 하이브리드 판정), `resolve_retry`/`next_step_budget_decision`(retry 우선순위·budget→budget_exhausted 매핑)을 fake/인프라 없이 양방향 회귀로 잠갔다.
+- flat loop 종료 decision 합성 원시가 A3로 잠겼고 독립 검증 합격 후 I1/I3를 보강했다. self-report는 `SelfReport`(FINALIZE/DEFER) enum 주입이고 wire 형식은 parser slice에서 확정. retry cap은 `BudgetPolicy.provider_retry_cap`/`tool_retry_cap`(0 이상)으로 실현됐다(검증 I1 폐쇄). I2(runner 합성 순서)는 provider composition runner slice에서 forward-lock 됐다.
+- self-report 종료채널 parser slice가 구현됐다. provider 응답 `content`는 JSON object이고 top-level `self_report` field 값은 정확히 `finalize`/`defer`만 허용한다. 누락·malformed/non-object JSON·non-string·case variant·artifact nested `self_report`는 `InvalidSelfReport(decision=provider_error)`다.
+- minimal `AgentLoopRunner` provider composition slice가 구현됐다. provider 호출 전 budget check → iteration 기록 → provider call/retry → usage 기록 → post-accounting budget check → `parse_self_report_payload` → `judge_completion` 순서를 연결한다. token overrun은 completion 전에 `budget_exhausted`, provider retry는 iteration budget을 소비한다. 실제 domain tool handler와 task별 artifact schema 평가는 Slice 1·3 이후 범위다.
 - `docs/system-contract-sot.md`가 추가됐다. 현재는 `Draft` 초안이며 사용자 검토 후 정본으로 승격할지, 범위를 조정할지 결정해야 한다.
 
 ## Next Tasks
 
 1. `docs/system-contract-sot.md` 검토: 문서 우선순위와 미확정 결정 목록이 원하는 정본 역할을 하는지 확인하고 `Draft` 유지/수정/Approved 승격 방향 결정. (precedence tree는 독립 검증 R1 보강으로 SoT↔plans/README 통일 완료)
-2. 러너 실구동(Slice 1·3+): `parse_self_report_payload` 연결, provider/tool 호출 순서, trace 조립.
-3. 러너 slice에서 검증 I2 forward-lock 회귀: `next_step_budget_decision`을 completion/retry 결정보다 먼저 호출(budget_exhausted가 completed로 위장 금지), retry 시 동일 차원 budget 소비(retry 비-무료성).
+2. runner의 domain tool-call branch와 실제 tool handler 연결은 Slice 1·3 이후 Phase payload/handler가 들어올 때 구현한다.
+3. task별 artifact schema 평가(`artifact_present`)는 Phase payload schema 확정 시 profile별로 교체한다.
 4. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도 확정(retry cap 구조는 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 남음).
 
 ## Verification
@@ -75,6 +76,7 @@
 - self-report parser slice 자체 회귀(2026-06-25): focused parser+completion 14개 통과, 전체 discovery 129개 통과. 패턴 sweep에서 기존 parser/default/nested-field 오인 경로 없음.
 - self-report parser slice 독립 검증(2026-06-25): **합격**. 14/129 재현, boundary matrix 9분기 전 매핑(branch-level 빈 칸 없음), spec↔code 리터럴 행 단위 일치, 양방향 guard·패턴 sweep·예외→decision uniform 매핑 확인. 비차단 R1('오타' value-sample 비고 — 동일 분기가 이미 lock됨). 기록 `docs/verifications/2026-06-25/self_report_parser.md`
 - self-report parser R1 보강 완료(2026-06-25): wrong well-formed literal `done` 거부 sample 추가. focused parser+completion 15개 통과, 전체 discovery 130개 통과.
+- AgentLoopRunner provider composition 자체 회귀(2026-06-25): focused runner/parser/completion/resolution 40개 통과, 전체 discovery 137개 통과. I2 forward-lock(token overrun before completion, retry non-free) 양방향 회귀 포함.
 - System Contract SoT 초안 독립 검증(2026-06-25): **합격**. SoT가 인용한 literal(5 provider·5 Analysis·3 candidate·7 decision·6 tool·3 allowlist·budget 임계)·status·링크가 정본과 문자열 그대로 일치하고 enum/bounds deferral이 정확히 전파됨. 같은 묶음의 A2 I2/I3 비차단 권고도 코드+양방향 회귀로 폐쇄(registry 18→20, 전체 85/85). 비차단 risk R1(SoT↔plans/README precedence tree 불일치)도 검증자가 직접 reconcile로 폐쉄 — plans/README tree를 SoT 5-level과 통일하고 SoT를 정본 precedence로 defer. 기록 `docs/verifications/2026-06-25/system_contract_sot.md`
 - completion criteria 계약 독립 검증(2026-06-24): 조건부 합격. 워커 보고·내부 일관성·cross-reference 4종 독립 확인, blocking 없음. 비차단 risk R1/R2(matrix 비대칭)·R3(self-report 정의 갭)를 소유자 결정으로 본 slice에서 즉시 보강했다. 기록 `docs/verifications/2026-06-24/completion_criteria_contract.md`
 - Slice 0.6 독립 검증(2026-06-24): 합격. httpx MockTransport/proxy/close 경계 6개 회귀 통과, `except` 순서 load-bearing 가정 4종 검증. 독립 검증 환경에서 `HttpxJsonTransport` 경유 actual adapter live smoke 완료(content `연결 확인 완료`, finish_reason=stop). 기록 `docs/verifications/2026-06-24/llm_gateway_slice_0_6_httpx.md`
@@ -118,7 +120,8 @@ services/
             ├── decision.py     # LoopDecision 종료 decision 7종(A1)
             ├── parser.py       # provider JSON content의 top-level self_report parser
             ├── registry.py     # ToolRegistry allowlist/strict args/signature(A2)
-            └── resolution.py   # resolve_retry + next_step_budget_decision(A3)
+            ├── resolution.py   # resolve_retry + next_step_budget_decision(A3)
+            └── runner.py       # minimal provider composition runner + trace
 tests/
 ├── test_llm_gateway_payload.py
 ├── test_llm_provider.py
@@ -131,6 +134,7 @@ tests/
 ├── test_agent_loop_registry.py
 ├── test_agent_loop_completion.py
 ├── test_agent_loop_parser.py
+├── test_agent_loop_runner.py
 └── test_agent_loop_resolution.py
 scripts/
 └── smoke_llm_provider.py

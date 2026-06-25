@@ -8,6 +8,7 @@
 - 흩어진 계획 문서의 서비스 경계와 확정 계약을 정리하는 SoT 초안을 만든다.
 - AgentLoopRunner A3(completion 판정·retry 우선순위·loop decision 합성·budget→budget_exhausted 매핑·F1 usage 방어)를 인프라 없는 순수 원시로 잠근다.
 - AgentLoopRunner self-report 종료채널 wire 형식을 확정하고 provider-response parser slice를 회귀로 잠근다.
+- AgentLoopRunner provider composition slice를 구현해 parser 연결과 I2 forward-lock을 회귀로 잠근다.
 
 ## Completed work
 
@@ -66,6 +67,16 @@
 - 독립 검증(`docs/verifications/2026-06-25/self_report_parser.md`)은 parser slice를 **합격**으로 판정했고, 비차단 R1로 계약의 "오타" 거부 카테고리에 전용 value sample이 없다는 권고를 남겼다. branch는 이미 `case variant` test가 동일 `ValueError` 분기를 잠그고 있어 비차단이었다.
 - 권고를 수용해 잘 형성된 잘못된 리터럴 `{"self_report":"done"}`을 거부하는 `test_wrong_literal_typo_is_invalid`를 추가했다.
 - 회귀: focused parser+completion 15개 통과, 전체 discovery 130개 통과.
+
+### AgentLoopRunner provider composition slice
+
+- 변경 파일: `services/application/app/agent_loop/runner.py`, `tests/test_agent_loop_runner.py`, `docs/plans/implementation-plan.md`, `docs/system-contract-sot.md`, `CHANGELOG.md`, `HANDOFF.md`, 이 작업 로그.
+- `AgentLoopRunner` 최소 provider composition을 추가했다. 실제 domain tool handler는 아직 없으므로 provider call/usage/self-report/completion 순서만 실행 가능한 코드로 연결했다.
+- 실행 순서: provider 호출 전 `next_step_budget_decision(needs_iteration=True)` → `record_iteration()` → provider call → provider retry resolution → `record_tokens()` → `next_step_budget_decision(needs_iteration=False)` → `parse_self_report_payload()` → `judge_completion()`.
+- I2 forward-lock을 회귀로 잠갔다. token overrun은 self-report를 파싱하거나 completion을 판단하기 전에 `budget_exhausted`로 종료한다. `== token limit`은 over-strict guard로 `completed` 가능하다.
+- provider retry는 free path가 아니다. retryable provider error에서 retry cap이 남아도 다음 provider attempt가 iteration budget에 막히면 `budget_exhausted`가 되고 원래 `provider_error` literal은 `preserved_error_literal`로 보존된다. iteration budget이 남으면 retry 후 정상 completion 가능하다.
+- trace는 provider call/error/retry, budget stop, self_report, completion event를 `RunnerTraceEvent`로 보존한다.
+- 회귀: focused runner/parser/completion/resolution 40개 통과, 전체 discovery 137개 통과.
 
 ## Issues found
 
@@ -129,11 +140,16 @@
 - 해결: `test_wrong_literal_typo_is_invalid` 추가.
 - 결과: branch-level lock에 더해 value-level sample도 채워졌다.
 
+### AgentLoopRunner provider composition 패턴 sweep
+
+- 확인: `AgentLoopRunner`, `parse_self_report_payload`, `next_step_budget_decision`, `record_tokens`, `judge_completion` 사용 위치를 `services`, `tests`, `docs`에서 검색했다.
+- 결과: 실제 composition 구현은 새 `runner.py` 한 곳뿐이다. 기존 A3 원시와 테스트 외에 completion-before-budget 또는 retry-free 우회 경로는 발견되지 않았다.
+
 ### 전체 테스트 명령 선택
 
 - 문제: `python3 -m unittest`가 이 저장소에서는 테스트를 자동 발견하지 못하고 0개를 실행했다.
 - 해결: repository test surface는 `python3 -m unittest discover -s tests -p 'test_*.py'`로 실행했다.
-- 결과: 129개 테스트 통과. 앞으로 전체 회귀 기록은 discovery 명령을 사용한다.
+- 결과: 당시 129개 테스트 통과. provider composition slice 이후 현재 전체 회귀는 137개이며, 앞으로 전체 회귀 기록은 discovery 명령을 사용한다.
 
 ## Decisions
 
@@ -141,14 +157,16 @@
 - 외부 `jsonschema` dependency를 추가하지 않았다. 현재 테스트 표면에 필요한 strict object/type/required/array 검증만 표준 `json` 기반 최소 구현으로 제공한다. 더 넓은 JSON Schema keyword가 필요해지면 그때 dependency 도입을 판단한다.
 - **[독립 검증 후 사용자 결정, 2026-06-25]** 독립 검증(`docs/verifications/2026-06-25/agent_loop_a2_registry.md`)이 `flat-loop-gate.md` §33 "enum, bounds 적용" 명시와 구현의 enum/bounds 미검증 불일치를 실증 발견했다. 사용자 결정으로 v1/A2 validator 범위를 `{required, type, additionalProperties, array items}`로 계약에 **명시 좁힘**하고 `enum`/bounds는 keyword를 사용하는 tool schema가 등록되는 시점까지 deferred로 reconcile했다(§33·implementation-plan §138·CHANGELOG에 반영). 이유: 현재 v1 tool schema에 enum/bounds가 없어 활성 결함이 아니며, 의존성·구현 추가보다 계약 개정이 가볍다. tradeoff: enum/bounds를 쓰는 tool이 처음 등록되는 시점에 검증 + 양방향 회귀를 반드시 추가해야 한다(해당 시점까지 empty cell 아님, 명시적 deferral).
 - 독립 검증의 비차단 I2/I3는 바로 보강했다. 중첩 object와 array `items`는 현재 A2 validator 범위에 속하므로 등록 시점 fail-fast가 단순하고, `assert` 제거는 동작 변화 없이 최적화 모드에서도 의도가 드러나는 쪽을 택했다.
-- **[사용자 결정, 2026-06-25]** A3 범위를 fake provider/tool 주입 러너 골격이 아니라 A1·A2 동일 패턴의 인프라 없는 순수 decision 합성 원시로 좁혔다. 이유: 계약이 실제 tool handler·Mongo/ES 통합을 Slice 1·3 이후로 미뤘고, A1·A2 cadence를 유지하면 decision 합성 계약을 인프라 없이 빠르게 잠글 수 있다. tradeoff: 러너 실구동(종료채널 wire parsing·provider/tool 호출 순서·trace 조립)은 후속 slice로 남는다.
+- **[사용자 결정, 2026-06-25]** A3 범위를 fake provider/tool 주입 러너 골격이 아니라 A1·A2 동일 패턴의 인프라 없는 순수 decision 합성 원시로 좁혔다. 이유: 계약이 실제 tool handler·Mongo/ES 통합을 Slice 1·3 이후로 미뤘고, A1·A2 cadence를 유지하면 decision 합성 계약을 인프라 없이 빠르게 잠글 수 있었다. 당시 tradeoff로 러너 실구동(종료채널 wire parsing·provider/tool 호출 순서·trace 조립)은 후속 slice로 남겼고, 이후 provider composition runner slice에서 provider 응답 흐름과 I2 forward-lock만 별도 구현했다.
 - self-report의 구체 wire 형식(명시 토큰·구조화 필드)은 provider-response parser slice에서 확정한다(flat-loop-gate §completion criteria가 "Phase 4 구현 slice에서 확정"으로 명시). A3는 `SelfReport` enum을 주입받아 판정만 잠갔다.
 - **open contract point(→ 해소)**: flat-loop-gate §retry가 "provider/tool retry cap은 task profile의 필수 policy 값이며 0 이상"으로 명시하나 A1 `BudgetPolicy`는 5차원+allows_tools만 lock해 cap이 없었다. A3는 `resolve_retry(retries_remaining)`로 policy 저장 위치에 무관하게 동작시켰다. 독립 검증 I1이 이를 "유일한 spec↔impl 갭"으로 지적했고, **사용자 결정(Option A)**으로 `BudgetPolicy`에 `provider_retry_cap`/`tool_retry_cap`(0 이상)을 추가해 보강에서 폐쇄했다. 별도 `RetryPolicy`/`TaskProfile` 배치 대신 단일 run-policy 객체를 택했다(이유: `allows_tools`도 budget이 아닌데 이미 BudgetPolicy에 있어 "run policy" 역할과 일관, runner가 policy 1개만 전달). numeric 기본값은 benchmark 이후.
 - terminal-decision 우선순위(error > blocked/invalid_tool_arguments > budget_exhausted > completion)를 별도 compose 함수가 아니라 각 원시의 decision point 순차 합성으로 표현했다. 루프에서는 한 시점에 정확히 하나만 발화하므로 "동시 후보 중 선택" 함수는 불필요하다 판단했다(Simplicity First).
 - self-report 종료채널은 JSON object의 top-level `self_report` field로 확정했다. 이유: Phase payload들이 이후 JSON schema로 구체화될 가능성이 높고, top-level field가 산출물 데이터 채널과 가장 단순하게 분리된다. tradeoff: 자유 텍스트 응답이나 nested artifact field는 종료채널로 인정하지 않으므로 prompt/runner가 이 wrapper를 강제해야 한다.
+- provider composition runner는 domain tool branch를 아직 구현하지 않았다. 이유: 실제 tool handler와 Phase payload schema가 아직 없고, 지금 검증 가능한 계약은 provider 응답 흐름과 I2 forward-lock이다. tradeoff: `analysis_compare`/`context_search`의 tool 실행 루프는 후속 Phase handler가 들어올 때 별도 slice로 잠가야 한다.
 
 ## Next steps
 
 1. `docs/system-contract-sot.md`를 사용자가 검토하고 `Draft` 유지/수정/Approved 승격 방향을 결정한다.
-2. 러너 실구동(Slice 1·3+): `parse_self_report_payload` 연결 + provider/tool 호출 순서 + trace 조립. 이때 검증 I2 forward-lock — `next_step_budget_decision`을 completion/retry 결정보다 먼저 호출(budget_exhausted가 completed로 위장 금지), retry 시 동일 차원 budget 소비(retry 비-무료성) — 을 양방향 회귀로 lock. 실제 tool handler·Mongo/ES/Chroma 통합도 이 범위.
-3. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도를 확정한다. (retry cap 구조는 보강에서 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 남음.)
+2. runner의 domain tool-call branch와 실제 tool handler 연결은 Slice 1·3 이후 Phase payload/handler가 들어올 때 구현한다.
+3. task별 artifact schema 평가(`artifact_present`)는 Phase payload schema 확정 시 profile별로 교체한다.
+4. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도를 확정한다. (retry cap 구조는 보강에서 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 남음.)
