@@ -50,11 +50,24 @@ save request
 ## 반드시 잠글 계약
 
 - snapshot은 생성 후 수정하지 않는다.
-- offset 기준은 원문/정규화문 중 하나로 명시하며 혼용하지 않는다.
-- hash 알고리즘과 normalization 규칙은 재현 가능해야 한다.
+- offset 기준은 snapshot `raw_text`의 Unicode code point index이며, 정규화문/byte/UTF-16 offset과 혼용하지 않는다.
+- `content_hash`는 `raw_text`의 UTF-8 bytes에 대한 SHA-256이다.
+- `normalized_text_hash`는 v1 필수 계약이 아니다. 정규화 기반 dedupe/search가 필요해질 때 별도 계약으로 추가한다.
 - block이 바뀌어도 과거 version의 ref는 해석 가능해야 한다.
 - 중복 save/retry가 같은 version을 두 번 만들지 않도록 idempotency 경계를 둔다.
 - MongoDB 저장이 완료되기 전에는 후속 분석 성공을 응답하지 않는다.
+
+## 승인된 텍스트 정본 계약
+
+- MongoDB의 raw snapshot이 원문 SOT다. 검색/인덱스/벡터DB는 MongoDB pointer, version, hash로 재조회 가능한 파생물이다.
+- raw snapshot은 저장 후 변경하지 않는다. source offset과 quote 검증은 항상 raw snapshot 기준이다.
+- update/upsert 확장성을 위해 draft/source snapshot/source block/source ref는 version을 보존하고, 후속 index는 해당 version을 metadata로 가진다.
+- MVP `source_blocks`는 source reference를 안정적으로 만들기 위한 deterministic block이다.
+- Markdown heading(`#`, `##` 등)은 heading block 또는 그 아래 paragraph의 context로 보존한다.
+- 단독 줄 `---` 또는 `***`는 명시 scene marker로 처리한다.
+- paragraph block은 빈 줄 경계로 나눈다.
+- AI 추론 기반 장면 분할은 SOT block split에 사용하지 않는다.
+- adaptive chunking, semantic chunking, 길이 기반 episode/section chunking은 Phase 3 이후 파생 index 전략 후보로 검토한다. 이들은 MongoDB raw snapshot/source_ref 정본을 대체하지 않는다.
 
 ## 수용 기준
 
@@ -66,9 +79,9 @@ save request
 
 ## 착수 전 결정사항
 
-- [ ] 원문의 block 분할 기준과 scene marker 형식
-- [ ] offset을 Unicode code point, UTF-16, byte 중 무엇으로 셀지
-- [ ] 원문 정규화 여부와 `content_hash`/`normalized_text_hash`의 역할
+- [x] 원문의 block 분할 기준과 scene marker 형식: Markdown heading, 단독 `---`/`***`, 빈 줄 paragraph 기반 deterministic MVP 규칙
+- [x] offset을 Unicode code point, UTF-16, byte 중 무엇으로 셀지: raw snapshot Unicode code point
+- [x] 원문 정규화 여부와 `content_hash`/`normalized_text_hash`의 역할: raw text 불변, `content_hash = sha256(raw UTF-8)`, normalized hash는 v1 필수 아님
 - [ ] MongoDB transaction 범위와 비-transaction fallback
 - [ ] draft autosave와 명시적 version save의 구분
 - [ ] 프로젝트/draft 삭제를 archive, soft delete, hard delete 중 어떻게 제공할지

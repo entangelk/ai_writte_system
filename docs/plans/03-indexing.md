@@ -22,6 +22,7 @@ MongoDB 정본을 바꾸지 않는 단방향 검색 인덱스를 구축하고, s
 - Mongo pointer, `project_id`, kind, version, status metadata
 - `index_sync_logs`
 - upsert/delete/rebuild와 stale check
+- adaptive chunking, semantic chunking, 길이 기반 episode/section chunking은 후속 파생 index 전략 후보로 둔다. 이들은 MongoDB raw snapshot/source_ref 정본을 대체하지 않으며, 도입 시 Mongo pointer/version/hash로 재조회 가능해야 한다.
 
 collection/index 분리는 사용량과 mapping 요구가 확인된 뒤 검토한다.
 
@@ -71,6 +72,7 @@ MVP에서 실제 지원할 이벤트는 착수 전에 축소 확정한다.
 - [ ] event queue, outbox, polling 중 sync 전달 방식
 - [ ] 삭제를 hard delete, tombstone, version filter 중 어떻게 반영할지
 - [ ] sync 실패 시 retry/backoff와 운영 가시성
+- [ ] adaptive chunking 또는 길이 기반 episode/section chunking을 도입할지, 도입한다면 어떤 quality metric과 version metadata를 요구할지
 
 ## 원문 및 상세 참고
 

@@ -1,7 +1,7 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`  
-계약 버전: `v1.1`  
+계약 버전: `v1.2`  
 승인일: `2026-06-26`  
 최근 갱신일: `2026-06-26`  
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
@@ -33,6 +33,7 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.2 | 2026-06-26 | Core SOT text/reference 계약 승인: raw snapshot 기준, Unicode code point offset, raw UTF-8 SHA-256 content hash, deterministic MVP source block split. Adaptive/length-based chunking은 파생 index layer 후속 후보로 분리. | 사용자 승인 |
 | v1.1 | 2026-06-26 | Slice 1 실행 경계 승인: monorepo+독립 LLM Gateway, FastAPI Application API, 느슨하게 분리 가능한 Worker 경계. frontend framework 최종 선택은 보류. | 사용자 승인 |
 | v1.0 | 2026-06-26 | SoT를 정본 계약 인덱스로 승인. 미확정 항목은 계속 추측 구현 금지. | 사용자 승인, `docs/verifications/2026-06-25/system_contract_sot.md` |
 
@@ -40,7 +41,7 @@
 
 | 문서 | 역할 | 지위 |
 |---|---|---|
-| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.1 |
+| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.2 |
 | [`plans/README.md`](plans/README.md) | 계획 문서 진입점과 Phase/MVP 관계 | Draft |
 | [`plans/00-foundations.md`](plans/00-foundations.md) | 전역 원칙과 제품 경계 | Draft |
 | [`plans/implementation-plan.md`](plans/implementation-plan.md) | 구현 순서, slice 상태, 검증 gate | Draft |
@@ -94,9 +95,15 @@
 
 - MongoDB가 원문과 구조화 기억의 SOT다.
 - 원문 snapshot은 primary SOT다.
+- 원문 snapshot의 `raw_text`는 저장 후 변경하지 않는다.
+- `source_ref` offset은 `raw_text` 기준 Unicode code point index로 계산한다.
+- `content_hash`는 `raw_text`의 UTF-8 bytes에 대한 SHA-256이다.
+- `normalized_text_hash`는 v1 필수 계약이 아니다. 정규화 기반 dedupe/search가 필요해질 때 별도 계약으로 추가한다.
+- MVP `source_blocks`는 deterministic source reference 단위다. Markdown heading, 명시 scene marker, paragraph boundary 기반으로 만들며 AI 추론으로 block을 나누지 않는다.
 - 사용자가 승인한 설정은 canonical SOT다.
 - 분석 결과는 저장되더라도 derived SOT이며 상태와 근거가 필요하다.
 - ChromaDB와 Elasticsearch는 MongoDB로 재생성 가능한 파생 인덱스다.
+- adaptive chunking, semantic chunking, 길이 기반 episode/section chunking은 검색 품질을 위한 파생 index 후보이며 MongoDB raw snapshot/source_ref 정본을 대체하지 않는다.
 - 검색 hit는 MongoDB pointer/version/hash로 재조회하기 전까지 정본 사실이 아니다.
 
 ### Candidate 원칙
@@ -253,7 +260,7 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 
 - `projects`, `drafts`, `draft_versions`, `source_snapshots`, `source_blocks`, `source_refs` 계약을 만든다.
 - snapshot은 생성 후 수정하지 않는다.
-- offset 기준, normalization/hash, transaction/idempotency, 삭제 보존 정책은 미확정이다.
+- transaction/idempotency, save mode, 삭제 보존 정책은 미확정이다.
 
 ### Phase 2. Analysis Pipeline
 
@@ -326,8 +333,9 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 - 외부 queue 제품 선택. 초기 local/personal runtime은 단순한 in-process/background boundary로 시작한다.
 - Gateway/model tool-call response wire format
 - `confirmed`와 `canonical`의 의미 및 승격 주체
-- Core SOT의 offset 기준, normalization/hash, block split 규칙
+- Core SOT의 transaction/idempotency/save mode 정책
 - project/draft archive/soft delete/hard delete 정책
+- adaptive chunking 또는 길이 기반 episode/section chunking을 Phase 3 파생 index에 도입할지 여부
 - Analysis MVP taxonomy와 confidence threshold
 - Analysis `create/update/add_evidence/no_change/conflict`의 정확한 public envelope
 - Chroma embedding model, ES analyzer, sync delivery 방식
