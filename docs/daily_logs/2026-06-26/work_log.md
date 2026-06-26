@@ -39,6 +39,19 @@
 - adaptive chunking, semantic chunking, 길이 기반 episode/section chunking은 Phase 3 이후 파생 index 전략 후보로 남겼다. 이들은 MongoDB raw snapshot/source_ref 정본을 대체하지 않는다.
 - 이 결정은 Core SOT 정본 계약에 영향을 주므로 SoT 계약 버전을 v1.1에서 v1.2로 올렸다.
 
+### Core SOT persistence/retention 계약 승인
+
+- 변경 파일: `docs/system-contract-sot.md`, `docs/plans/01-core-sot.md`, `docs/plans/03-indexing.md`, `docs/plans/implementation-plan.md`, `HANDOFF.md`, `CHANGELOG.md`, 이 작업 로그.
+- 사용자 결정으로 Docker 기반 정상 runtime은 MongoDB transaction을 기본으로 사용한다.
+- non-transaction fallback은 transaction을 사용할 수 없는 local/test 환경의 제한적 경로로 두며, write order, idempotency lookup, orphan cleanup/retry guard를 요구한다.
+- MVP는 명시적 version save만 지원한다. autosave는 AI 생성 결과가 항상 맞지 않는다는 제품 판단 때문에 초기 구현에서 제외하고, 실제 필요성이 확인될 때 별도 결정으로만 추가한다.
+- draft save request는 `idempotency_key`를 필수로 가진다. 같은 `project_id + draft_id + idempotency_key` 재시도는 새 version을 만들지 않고 같은 `draft_version`을 반환한다.
+- project/draft 삭제는 MVP에서 archive로 처리한다.
+- `draft_versions`, `source_snapshots`, `source_blocks`, `source_refs`는 archive 이후에도 보존한다.
+- archive/delete 이후 파생 index는 stale 처리, version/status filter, rebuild 대상으로 둔다.
+- 사용자가 언급한 분석 후보의 부분 승인, 부분 저장, 나머지 retry는 Slice 1 draft save idempotency가 아니라 Phase 2/6 review action idempotency 계약에서 다룬다.
+- 이 결정은 Core SOT 정본 계약에 영향을 주므로 SoT 계약 버전을 v1.2에서 v1.3으로 올렸다.
+
 ### HANDOFF 기반 다음 작업 검토
 
 - 변경 파일: `HANDOFF.md`, 이 작업 로그.
@@ -52,17 +65,17 @@
 - `docs/system-contract-sot.md`, `docs/plans/README.md`, `docs/plans/implementation-plan.md`, `docs/plans/01-core-sot.md`를 대조했다.
 - SoT와 `plans/README.md`의 문서 우선순위는 같은 5-level tree로 통일되어 있다.
 - SoT는 현재 `Approved` v1.2이며, 본문은 미확정 항목을 추측해 구현하지 말라고 명시한다.
-- Slice 1 착수에 필요한 결정은 아직 남아 있다: transaction/idempotency, explicit version save vs autosave, archive/delete policy, snapshot/index preservation.
+- Slice 1 Core SOT 착수 전 결정은 text/reference와 persistence/retention까지 해소됐다.
 - 위 항목은 구현 계약과 저장 스키마를 직접 바꾸므로 작업자가 임의로 선택하지 않고 사용자 확인이 필요하다.
 
 ## Issues found
 
 ### Slice 1 착수 전 결정 미해소
 
-- 문제: 다음 구현 작업은 Slice 1(Project Shell + Core SOT)이지만, Core SOT의 persistence/retention 착수 전 결정사항이 아직 체크되지 않았다.
-- 원인: SoT v1.2는 미확정 항목을 계속 추측 구현 금지로 두며, Phase 1 계획도 transaction/idempotency/save mode/delete policy 같은 계약 선택을 별도 사용자 결정 전까지 열어두었다.
-- 해결: 코드 구현 대신 결정 필요 항목을 HANDOFF에 더 명확히 남겼다.
-- 결과: 다음 작업자는 같은 지점에서 스키마를 추측하지 않고 사용자 결정부터 받을 수 있다.
+- 문제: 다음 구현 작업은 Slice 1(Project Shell + Core SOT)이지만, 작업 초반에는 Core SOT의 persistence/retention 결정사항이 아직 열려 있었다.
+- 원인: SoT v1.2 시점에는 Phase 1 계획이 transaction/idempotency/save mode/delete policy 같은 계약 선택을 별도 사용자 결정 전까지 열어두었다.
+- 해결: 사용자 결정을 받아 transaction 기본, limited fallback, explicit save only, idempotency key, archive/preserve 정책을 SoT v1.3과 Phase 1 계획에 반영했다.
+- 결과: Slice 1 Core SOT 착수 전 결정이 해소됐다.
 
 ### 검색 명령 quoting 주의
 
@@ -77,11 +90,12 @@
 - 정본 계약은 앞으로 사용자 결정으로 업데이트될 수 있으므로 SoT 내부에 계약 버전과 변경 이력을 둔다.
 - **[사용자 결정, 2026-06-26]** Slice 1 실행 경계는 monorepo + 독립 LLM Gateway, FastAPI backend, 느슨하게 분리 가능한 Worker 구조로 승인했다. frontend framework는 보류하며 standalone frontend가 필요할 때 React/Vue 중 선택한다. 초기 개인 로컬 runtime은 외부 queue 제품 없이 단순 in-process/background boundary로 시작한다.
 - **[사용자 결정, 2026-06-26]** Core SOT text/reference 계약은 raw snapshot 기준으로 승인했다. offset은 raw Unicode code point, `content_hash`는 raw UTF-8 SHA-256, `normalized_text_hash`는 v1 필수 아님, MVP block split은 Markdown heading/scene marker/paragraph 기반 deterministic 규칙이다. adaptive/semantic/length-based chunking은 Phase 3 이후 파생 index 전략 후보로 남긴다.
-- Slice 1의 transaction/idempotency, save mode, 삭제/보존 정책은 임의로 정하지 않았다.
-- 이번 작업은 SoT 승인과 문서 상태 정리까지만 수행했다. 실제 Slice 1 구현은 사용자 선택을 받은 뒤 진행한다.
+- **[사용자 결정, 2026-06-26]** Core SOT persistence/retention 계약은 MongoDB transaction 기본, local/test 제한 fallback, 명시적 version save only, autosave 제외, `idempotency_key` 필수, project/draft archive, snapshot/version/source_ref 보존으로 승인했다.
+- **[사용자 결정, 2026-06-26]** 분석 후보의 부분 승인, 부분 저장, 나머지 retry는 Slice 1 draft save idempotency가 아니라 Phase 2/6 review action idempotency 계약에서 다룬다.
+- 이번 작업은 SoT 승인과 문서 상태 정리까지만 수행했다. 실제 Slice 1 구현은 승인된 계약을 기준으로 진행한다.
 
 ## Next steps
 
-1. Slice 1 착수 전 Core SOT persistence/retention 결정을 해소한다: transaction/idempotency, explicit version save vs autosave, archive/delete policy, snapshot/index preservation.
-2. 결정이 내려지면 Project Shell + Core SOT의 최소 저장 골격과 회귀 테스트를 구현한다.
+1. Slice 1(Project Shell + Core SOT)의 최소 저장 골격과 회귀 테스트를 구현한다.
+2. 구현 회귀는 idempotent save, immutable snapshot/version, deterministic block/hash/ref, project_id isolation, archive preservation을 우선 잠근다.
 3. Slice 1 결정이 현재 SoT 정본 계약을 바꾸면 계약 버전을 올리고 변경 이력에 사용자 결정 근거를 남긴다.

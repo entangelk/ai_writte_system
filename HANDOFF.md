@@ -28,6 +28,8 @@
 - 초기 local/personal runtime에서는 외부 queue 제품을 전제하지 않고 단순 in-process/background boundary로 시작한다.
 - Core SOT text/reference 계약은 raw snapshot 기준으로 승인됐다. offset은 raw Unicode code point, `content_hash`는 raw UTF-8 SHA-256, `normalized_text_hash`는 v1 필수 아님. MVP `source_blocks`는 Markdown heading/단독 `---`·`***` scene marker/빈 줄 paragraph 기반 deterministic split이며 AI 추론 split은 SOT에 넣지 않는다.
 - adaptive chunking, semantic chunking, 길이 기반 episode/section chunking은 Phase 3 이후 파생 index 전략 후보로 둔다. MongoDB raw snapshot/source_ref 정본을 대체하지 않고 pointer/version/hash로 재조회 가능해야 한다.
+- Core SOT persistence/retention 계약은 승인됐다. Docker 기반 정상 runtime은 MongoDB transaction 기본, non-transaction fallback은 local/test 제한 경로다. MVP는 명시적 version save only, autosave는 후속 결정이다. draft save는 `idempotency_key` 필수이며 같은 `project_id + draft_id + idempotency_key` 재시도는 같은 `draft_version`을 반환한다. project/draft는 archive하고 snapshot/version/source_ref는 보존한다.
+- 분석 후보의 부분 승인, 부분 저장, 나머지 retry는 Phase 2/6 review action idempotency 계약에서 다루며 Slice 1 draft save idempotency와 섞지 않는다.
 - `/mnt/d/devel/gemma4_12b` commit `485c4e2`를 참조 구현으로 검토했으며 model/quant는 공식 QAT GGUF Q4_0으로 확인됐다. 실제 실행 hardware는 미확정이다.
 - sub-agent spawn은 제외하고 bounded flat loop만 사용한다.
 - 외부 `gemma4_12b`는 선택적 provenance이며 현재 repo runtime dependency가 아니다.
@@ -49,11 +51,12 @@
 - `docs/system-contract-sot.md`는 2026-06-26 사용자 결정으로 `Approved` v1.0이 됐다. 승인 범위는 정본 계약 인덱스와 문서 우선순위이며, 미확정 항목은 계속 추측 구현 금지다.
 - 2026-06-26 Slice A 실행 경계 결정으로 `docs/system-contract-sot.md`가 v1.1이 됐다. monorepo+독립 Gateway, FastAPI backend, 느슨하게 분리 가능한 Worker 경계가 승인됐다.
 - 2026-06-26 Slice B text/reference 결정으로 `docs/system-contract-sot.md`가 v1.2가 됐다. Slice 1 착수는 transaction/idempotency/save mode/delete policy 결정 뒤 진행한다.
+- 2026-06-26 Slice C persistence/retention 결정으로 `docs/system-contract-sot.md`가 v1.3이 됐다. Slice 1 Core SOT 착수 전 결정은 해소됐다.
 
 ## Next Tasks
 
-1. Slice 1 착수 전 Core SOT 결정 해소: transaction/idempotency, explicit version save vs autosave, archive/delete policy, snapshot/index preservation.
-2. 결정 후 Slice 1(Project Shell + Core SOT) 착수: FastAPI 기반 project/draft/version/snapshot/source_ref의 최소 계약과 저장 골격 구현.
+1. Slice 1(Project Shell + Core SOT) 착수: FastAPI 기반 project/draft/version/snapshot/source_ref의 최소 계약과 저장 골격 구현.
+2. Slice 1 구현 시 focused 회귀: idempotent save, immutable snapshot/version, deterministic block/hash/ref, project_id isolation, archive preservation.
 3. Slice 1 결정이 현재 SoT 정본 계약을 바꾸면 `docs/system-contract-sot.md` 계약 버전을 갱신하고 변경 이력에 사용자 결정 근거를 남긴다.
 4. runner domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
 5. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.

@@ -47,6 +47,8 @@ ChromaDB나 Elasticsearch 검색 결과가 MongoDB 기억을 직접 갱신해서
 
 MVP에서 실제 지원할 이벤트는 착수 전에 축소 확정한다.
 
+Project/draft archive 이후 MongoDB source snapshot과 version은 보존한다. 파생 index record는 stale 처리, version/status filter, rebuild 중 선택해 정본 상태를 따라가야 하며, index 삭제가 MongoDB 정본 삭제를 의미하지 않는다.
+
 ## 산출물
 
 1. 공통 IndexSyncRequest/Result 계약

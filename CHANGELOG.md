@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-26 | Core SOT persistence/retention 계약 승인 | [work log](docs/daily_logs/2026-06-26/work_log.md) |
 | 2026-06-26 | Core SOT text/reference 계약 승인 | [work log](docs/daily_logs/2026-06-26/work_log.md) |
 | 2026-06-26 | Slice 1 실행 경계 승인 | [work log](docs/daily_logs/2026-06-26/work_log.md) |
 | 2026-06-26 | System Contract SoT v1.0 승인 | [work log](docs/daily_logs/2026-06-26/work_log.md) |
@@ -17,12 +18,15 @@
 
 - Slice 1 실행 경계를 승인하고 SoT를 v1.1로 갱신했다. monorepo + 독립 LLM Gateway, FastAPI backend, 느슨하게 분리 가능한 Worker 경계를 확정했다. frontend framework 최종 선택은 보류하며, standalone frontend가 필요할 때 React 또는 Vue를 기본 후보로 검토한다. 초기 개인 로컬 runtime은 외부 queue 제품 없이 단순 in-process/background boundary로 시작한다.
 - Core SOT text/reference 계약을 승인하고 SoT를 v1.2로 갱신했다. raw snapshot을 MongoDB SOT로 두고, offset은 raw Unicode code point, `content_hash`는 raw UTF-8 SHA-256으로 정했다. MVP `source_blocks`는 Markdown heading, 단독 `---`/`***` scene marker, 빈 줄 paragraph 기반 deterministic split만 사용한다. adaptive/semantic/length-based chunking은 Phase 3 이후 파생 index 전략 후보로 분리했다.
+- Core SOT persistence/retention 계약을 승인하고 SoT를 v1.3으로 갱신했다. MongoDB transaction을 기본으로 하되 non-transaction fallback은 local/test 제한 경로로 두고, MVP는 명시적 version save만 지원한다. draft save는 `idempotency_key` 필수이며 project/draft는 archive, snapshot/version/source_ref는 보존한다.
 - `docs/system-contract-sot.md`를 `Approved` v1.0 정본 계약 인덱스로 승격했다. 승인 범위는 문서 우선순위와 이미 확정·검증된 계약의 인덱스 역할이며, 미확정 결정 목록은 계속 추측 구현 금지로 남긴다.
 - 향후 사용자 결정으로 정본 계약이 바뀔 수 있으므로 SoT 내부에 계약 버전 관리 규칙과 계약 변경 이력을 추가했다.
 
 사용자는 FastAPI 경험을 이유로 backend framework를 FastAPI로 승인했다. frontend framework는 단일 local service UI 가능성을 열어두기 위해 보류하고, 필요 시 React/Vue 중 선택하는 방향으로 남겼다. Worker/queue는 개인 로컬 시스템 특성상 과도한 외부 queue 제품을 피하고 느슨한 연결과 후속 분리 가능성을 우선했다.
 
 사용자는 SOT는 MongoDB, 검색·인덱스는 vector/index DB라는 경계를 다시 확인했고, 업데이트/upsert와 version 확장성을 고려해 SOT에 version 추적성을 유지하기로 했다. 해시는 로컬이어도 두는 방향을 채택했다. adaptive chunking과 1화 단위 길이 기반 chunking은 MVP SOT block 규칙에 넣지 않고, 후속 파생 index 전략 후보로 남겼다.
+
+사용자는 Docker 기반 사용을 전제로 MongoDB transaction 문제가 일반 runtime에서는 크지 않을 것이라고 판단했지만, fallback은 있으면 좋다고 승인했다. autosave는 AI 생성 결과가 항상 맞지 않는다는 이유로 초기 구현에서 제외하고, 실제 필요성이 확인될 때만 별도 기능으로 검토하기로 했다. 분석 후보의 부분 승인/부분 retry는 Slice 1 저장 계약이 아니라 Phase 2/6 review action idempotency에서 다룬다.
 
 사용자는 SoT가 앞으로 사용자 결정에 의해 업데이트될 수 있음을 명시했고, 그 변경은 문서 내부에서 버전 관리되기를 원했다. 이에 v1.0 승인 이력과 future-change rule을 SoT에 직접 기록했다.
 

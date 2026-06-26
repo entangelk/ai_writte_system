@@ -69,6 +69,21 @@ save request
 - AI 추론 기반 장면 분할은 SOT block split에 사용하지 않는다.
 - adaptive chunking, semantic chunking, 길이 기반 episode/section chunking은 Phase 3 이후 파생 index 전략 후보로 검토한다. 이들은 MongoDB raw snapshot/source_ref 정본을 대체하지 않는다.
 
+## 승인된 저장·보존 계약
+
+- Docker 기반 정상 runtime은 MongoDB transaction을 기본으로 사용한다.
+- transaction 범위는 draft save의 load-bearing write set 전체다: `draft_versions`, `source_snapshots`, `source_blocks`, idempotency record 또는 save request record.
+- non-transaction fallback은 transaction을 사용할 수 없는 local/test 환경의 제한적 경로다.
+- fallback은 write order, idempotency lookup, orphan cleanup/retry guard를 가져야 하며, 후속 분석 성공을 MongoDB 저장 성공보다 먼저 응답하지 않는다.
+- MVP는 명시적 version save만 지원한다.
+- autosave는 초기 구현 범위가 아니며, 실제 필요성이 확인될 때 별도 사용자 결정으로만 추가한다.
+- draft save request는 `idempotency_key`를 필수로 가진다.
+- 같은 `project_id + draft_id + idempotency_key` 재시도는 새 version을 만들지 않고 같은 `draft_version`을 반환한다.
+- project/draft 삭제는 MVP에서 archive로 처리한다.
+- `draft_versions`, `source_snapshots`, `source_blocks`, `source_refs`는 archive 이후에도 보존한다.
+- archive/delete 이후 파생 인덱스는 stale 처리, version filter, rebuild 대상으로 다룬다.
+- 분석 후보의 부분 승인, 부분 저장, 나머지 retry는 Phase 2/6 review action idempotency 계약에서 다룬다. Slice 1 draft save idempotency와 섞지 않는다.
+
 ## 수용 기준
 
 - 동일 입력을 재처리하면 같은 snapshot hash와 block 경계를 얻는다.
@@ -82,10 +97,10 @@ save request
 - [x] 원문의 block 분할 기준과 scene marker 형식: Markdown heading, 단독 `---`/`***`, 빈 줄 paragraph 기반 deterministic MVP 규칙
 - [x] offset을 Unicode code point, UTF-16, byte 중 무엇으로 셀지: raw snapshot Unicode code point
 - [x] 원문 정규화 여부와 `content_hash`/`normalized_text_hash`의 역할: raw text 불변, `content_hash = sha256(raw UTF-8)`, normalized hash는 v1 필수 아님
-- [ ] MongoDB transaction 범위와 비-transaction fallback
-- [ ] draft autosave와 명시적 version save의 구분
-- [ ] 프로젝트/draft 삭제를 archive, soft delete, hard delete 중 어떻게 제공할지
-- [ ] 삭제·보관 시 과거 snapshot과 파생 기억 보존 정책
+- [x] MongoDB transaction 범위와 비-transaction fallback: transaction 기본, non-transaction fallback은 local/test 제한 경로
+- [x] draft autosave와 명시적 version save의 구분: MVP는 명시적 version save only, autosave 후속 결정
+- [x] 프로젝트/draft 삭제를 archive, soft delete, hard delete 중 어떻게 제공할지: MVP archive
+- [x] 삭제·보관 시 과거 snapshot과 파생 기억 보존 정책: snapshot/version/source_ref 보존, 파생 index stale/filter/rebuild
 
 ## 원문 및 상세 참고
 

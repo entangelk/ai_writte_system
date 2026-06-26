@@ -1,7 +1,7 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`  
-계약 버전: `v1.2`  
+계약 버전: `v1.3`  
 승인일: `2026-06-26`  
 최근 갱신일: `2026-06-26`  
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
@@ -33,6 +33,7 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.3 | 2026-06-26 | Core SOT persistence/retention 계약 승인: Mongo transaction 기본, 제한적 non-transaction fallback, explicit version save only, save idempotency key 필수, project/draft archive와 snapshot/version/source_ref 보존. | 사용자 승인 |
 | v1.2 | 2026-06-26 | Core SOT text/reference 계약 승인: raw snapshot 기준, Unicode code point offset, raw UTF-8 SHA-256 content hash, deterministic MVP source block split. Adaptive/length-based chunking은 파생 index layer 후속 후보로 분리. | 사용자 승인 |
 | v1.1 | 2026-06-26 | Slice 1 실행 경계 승인: monorepo+독립 LLM Gateway, FastAPI Application API, 느슨하게 분리 가능한 Worker 경계. frontend framework 최종 선택은 보류. | 사용자 승인 |
 | v1.0 | 2026-06-26 | SoT를 정본 계약 인덱스로 승인. 미확정 항목은 계속 추측 구현 금지. | 사용자 승인, `docs/verifications/2026-06-25/system_contract_sot.md` |
@@ -41,7 +42,7 @@
 
 | 문서 | 역할 | 지위 |
 |---|---|---|
-| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.2 |
+| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.3 |
 | [`plans/README.md`](plans/README.md) | 계획 문서 진입점과 Phase/MVP 관계 | Draft |
 | [`plans/00-foundations.md`](plans/00-foundations.md) | 전역 원칙과 제품 경계 | Draft |
 | [`plans/implementation-plan.md`](plans/implementation-plan.md) | 구현 순서, slice 상태, 검증 gate | Draft |
@@ -105,6 +106,12 @@
 - ChromaDB와 Elasticsearch는 MongoDB로 재생성 가능한 파생 인덱스다.
 - adaptive chunking, semantic chunking, 길이 기반 episode/section chunking은 검색 품질을 위한 파생 index 후보이며 MongoDB raw snapshot/source_ref 정본을 대체하지 않는다.
 - 검색 hit는 MongoDB pointer/version/hash로 재조회하기 전까지 정본 사실이 아니다.
+- draft save는 명시적 version save만 지원한다. autosave는 MVP 범위가 아니며, 필요성이 확인될 때 별도 사용자 결정으로만 추가한다.
+- draft save request는 `idempotency_key`를 필수로 가진다. 같은 `project_id + draft_id + idempotency_key` 재시도는 같은 `draft_version`을 반환해야 한다.
+- Docker 기반 정상 runtime은 MongoDB transaction을 기본으로 사용한다. non-transaction fallback은 transaction을 사용할 수 없는 local/test 환경의 제한적 경로이며, write order, idempotency lookup, orphan cleanup/retry guard를 요구한다.
+- project/draft 삭제는 MVP에서 archive로 처리한다. `source_snapshots`, `draft_versions`, `source_blocks`, `source_refs`는 보존한다.
+- archive/delete 이후 파생 인덱스는 stale 처리, version filter, rebuild 대상으로 다루며 MongoDB 정본 보존을 되돌리지 않는다.
+- 분석 후보의 부분 승인, 부분 저장, 나머지 retry는 Phase 2/6 review action idempotency 계약에서 다룬다. Slice 1 draft save idempotency와 섞지 않는다.
 
 ### Candidate 원칙
 
@@ -260,7 +267,7 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 
 - `projects`, `drafts`, `draft_versions`, `source_snapshots`, `source_blocks`, `source_refs` 계약을 만든다.
 - snapshot은 생성 후 수정하지 않는다.
-- transaction/idempotency, save mode, 삭제 보존 정책은 미확정이다.
+- text/reference와 persistence/retention 계약은 v1.2~v1.3에서 승인됐다.
 
 ### Phase 2. Analysis Pipeline
 
@@ -333,8 +340,7 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 - 외부 queue 제품 선택. 초기 local/personal runtime은 단순한 in-process/background boundary로 시작한다.
 - Gateway/model tool-call response wire format
 - `confirmed`와 `canonical`의 의미 및 승격 주체
-- Core SOT의 transaction/idempotency/save mode 정책
-- project/draft archive/soft delete/hard delete 정책
+- Phase 2/6 review action idempotency와 부분 승인/부분 retry 정책
 - adaptive chunking 또는 길이 기반 episode/section chunking을 Phase 3 파생 index에 도입할지 여부
 - Analysis MVP taxonomy와 confidence threshold
 - Analysis `create/update/add_evidence/no_change/conflict`의 정확한 public envelope
