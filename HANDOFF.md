@@ -26,10 +26,12 @@
 - 아키텍처는 monorepo + modular Application + 독립 LLM Gateway/Worker로 승인됐다. Application API backend는 FastAPI다. Worker는 Application 코드/계약을 공유하되 느슨하게 연결하고, 나중에 별도 entrypoint/process로 분리 가능하게 둔다.
 - frontend framework 최종 선택은 보류한다. 개인 로컬 시스템의 단일 서비스 UI로 충분할 수 있으므로, standalone frontend가 필요해질 때 React 또는 Vue를 기본 후보로 검토한다.
 - 초기 local/personal runtime에서는 외부 queue 제품을 전제하지 않고 단순 in-process/background boundary로 시작한다.
+- Dockerfile/Compose를 추가할 때는 빌드 캐시를 보존하는 레이어 순서를 우선한다. dependency manifest 복사·설치 레이어를 소스 복사보다 앞에 두고, 불필요한 전체 rebuild를 유발하는 `COPY .`/캐시 무효화 패턴을 피한다.
 - Core SOT text/reference 계약은 raw snapshot 기준으로 승인됐다. offset은 raw Unicode code point, `content_hash`는 raw UTF-8 SHA-256, `normalized_text_hash`는 v1 필수 아님. MVP `source_blocks`는 Markdown heading/단독 `---`·`***` scene marker/빈 줄 paragraph 기반 deterministic split이며 AI 추론 split은 SOT에 넣지 않는다.
 - adaptive chunking, semantic chunking, 길이 기반 episode/section chunking은 Phase 3 이후 파생 index 전략 후보로 둔다. MongoDB raw snapshot/source_ref 정본을 대체하지 않고 pointer/version/hash로 재조회 가능해야 한다.
 - Core SOT persistence/retention 계약은 승인됐다. Docker 기반 정상 runtime은 MongoDB transaction 기본, non-transaction fallback은 local/test 제한 경로다. MVP는 명시적 version save only, autosave는 후속 결정이다. draft save는 `idempotency_key` 필수이며 같은 `project_id + draft_id + idempotency_key` 재시도는 같은 `draft_version`을 반환한다. project/draft는 archive하고 snapshot/version/source_ref는 보존한다.
 - 분석 후보의 부분 승인, 부분 저장, 나머지 retry는 Phase 2/6 review action idempotency 계약에서 다루며 Slice 1 draft save idempotency와 섞지 않는다.
+- MVP `source_ref` span은 하나의 `source_block` 안에 포함되어야 한다. 여러 block을 가로지르는 인용은 후속 후보/review 계약에서 별도로 다룬다.
 - `/mnt/d/devel/gemma4_12b` commit `485c4e2`를 참조 구현으로 검토했으며 model/quant는 공식 QAT GGUF Q4_0으로 확인됐다. 실제 실행 hardware는 미확정이다.
 - sub-agent spawn은 제외하고 bounded flat loop만 사용한다.
 - 외부 `gemma4_12b`는 선택적 provenance이며 현재 repo runtime dependency가 아니다.
@@ -53,15 +55,17 @@
 - 2026-06-26 Slice B text/reference 결정으로 `docs/system-contract-sot.md`가 v1.2가 됐다. Slice 1 착수는 transaction/idempotency/save mode/delete policy 결정 뒤 진행한다.
 - 2026-06-26 Slice C persistence/retention 결정으로 `docs/system-contract-sot.md`가 v1.3이 됐다. Slice 1 Core SOT 착수 전 결정은 해소됐다.
 - 2026-06-26 Slice 1 최소 구현 맛보기 완료: `services/application/app/core_sot/`에 domain models, deterministic splitter/hash/source_ref, in-memory repository/service를 추가했고 `services/application/app/main.py`에 FastAPI shell(health/project/draft/save)을 추가했다. MongoDB adapter/transaction-backed repository/Docker compose/export/editor shell은 아직 미구현이다.
+- Core SOT minimal skeleton 독립 검증은 조건부 합격이었다(`docs/verifications/2026-06-26/core_sot_minimal_skeleton.md`). C1(`***`, `##`, `archive_project` 회귀), C2(known SHA-256 vector), C3(within-block source_ref 계약 명시)는 보강 완료됐다.
 
 ## Next Tasks
 
 1. Slice 1 다음 구현: MongoDB adapter와 transaction-backed repository를 추가해 현재 in-memory Core SOT service contract를 실제 저장소에 연결한다.
-2. Slice 1 다음 회귀: Mongo transaction path, non-transaction fallback guard, idempotency unique constraint, archive 후 stale/index 이벤트 후보.
-3. Slice 1 결정이 현재 SoT 정본 계약을 바꾸면 `docs/system-contract-sot.md` 계약 버전을 갱신하고 변경 이력에 사용자 결정 근거를 남긴다.
-4. runner domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
-5. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
-6. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도 확정(retry cap 구조는 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 남음).
+2. Dockerfile/Compose 추가 시 dependency layer cache가 유지되도록 Dockerfile을 구성한다.
+3. Slice 1 다음 회귀: Mongo transaction path, non-transaction fallback guard, idempotency unique constraint, archive 후 stale/index 이벤트 후보.
+4. Slice 1 결정이 현재 SoT 정본 계약을 바꾸면 `docs/system-contract-sot.md` 계약 버전을 갱신하고 변경 이력에 사용자 결정 근거를 남긴다.
+5. runner domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
+6. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
+7. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도 확정(retry cap 구조는 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 남음).
 
 ## Verification
 
@@ -92,7 +96,7 @@
 - AgentLoopRunner provider composition 자체 회귀(2026-06-25): focused runner/parser/completion/resolution 40개 통과, 전체 discovery 137개 통과. I2 forward-lock(token overrun before completion, retry non-free) 양방향 회귀 포함.
 - AgentLoopRunner provider composition 독립 검증(2026-06-25): **합격**. I2 forward-lock·retry non-free를 변이 증명으로 확인, 전체 137개 재현, spec↔code 리터럴·composition 순서 일치. 비차단 I1(focused 숫자 84→93)·I2(dead import)는 보강 완료. 기록 `docs/verifications/2026-06-25/agent_loop_provider_runner.md`
 - System Contract SoT 최초 독립 검증(2026-06-25): **합격**. 당시 SoT가 인용한 literal(5 provider·5 Analysis·3 candidate·7 decision·6 tool·3 allowlist·budget 임계)·status·링크가 정본과 문자열 그대로 일치하고 enum/bounds deferral이 정확히 전파됨. 같은 묶음의 A2 I2/I3 비차단 권고도 코드+양방향 회귀로 폐쇄(registry 18→20, 전체 85/85). 비차단 risk R1(SoT↔plans/README precedence tree 불일치)도 검증자가 직접 reconcile로 폐쉄 — plans/README tree를 SoT 5-level과 통일하고 SoT를 정본 precedence로 defer. 기록 `docs/verifications/2026-06-25/system_contract_sot.md`
-- Core SOT minimal skeleton 자체 회귀(2026-06-26): focused `python3 -m unittest tests.test_core_sot tests.test_application_api -v` 11개 통과, 전체 discovery 148개 통과. 잠근 범위: idempotent save, immutable snapshot/hash/block, source_ref quote/hash, bool offset rejection, project_id isolation, archive preservation, FastAPI minimal flow.
+- Core SOT minimal skeleton 자체 회귀(2026-06-26): focused `python3 -m unittest tests.test_core_sot tests.test_application_api -v` 14개 통과, 전체 discovery 151개 통과. 잠근 범위: idempotent save, immutable snapshot/hash/block, known SHA-256 UTF-8 vector, `##` heading, `***` scene marker, source_ref quote/hash, within-block rejection, bool offset rejection, project_id isolation, project/draft archive preservation, FastAPI minimal flow.
 - completion criteria 계약 독립 검증(2026-06-24): 조건부 합격. 워커 보고·내부 일관성·cross-reference 4종 독립 확인, blocking 없음. 비차단 risk R1/R2(matrix 비대칭)·R3(self-report 정의 갭)를 소유자 결정으로 본 slice에서 즉시 보강했다. 기록 `docs/verifications/2026-06-24/completion_criteria_contract.md`
 - Slice 0.6 독립 검증(2026-06-24): 합격. httpx MockTransport/proxy/close 경계 6개 회귀 통과, `except` 순서 load-bearing 가정 4종 검증. 독립 검증 환경에서 `HttpxJsonTransport` 경유 actual adapter live smoke 완료(content `연결 확인 완료`, finish_reason=stop). 기록 `docs/verifications/2026-06-24/llm_gateway_slice_0_6_httpx.md`
 

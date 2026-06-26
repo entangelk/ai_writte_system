@@ -65,6 +65,22 @@
 - `services/application/requirements.txt`에 `fastapi>=0.115,<1`을 추가했다.
 - MongoDB adapter, transaction-backed repository, Docker compose, export, editor shell은 이번 맛보기 범위에서 제외했다.
 
+### Docker build cache 제약 기록
+
+- 변경 파일: `HANDOFF.md`, 이 작업 로그.
+- 사용자 결정으로 Dockerfile/Compose를 추가할 때 빌드할 때마다 새로 전부 빌드되지 않도록 build cache를 고려해야 한다.
+- 향후 Dockerfile은 dependency manifest 복사·설치 레이어를 소스 복사보다 앞에 두고, 불필요한 전체 rebuild를 유발하는 `COPY .`/캐시 무효화 패턴을 피한다.
+- 이 지시는 다음 Docker/Docker Compose slice의 구현 제약으로 남겼다.
+
+### Core SOT minimal skeleton 독립 검증 보강
+
+- 변경 파일: `tests/test_core_sot.py`, `docs/system-contract-sot.md`, `docs/plans/01-core-sot.md`, `HANDOFF.md`, `CHANGELOG.md`, 이 작업 로그.
+- 독립 검증 기록 `docs/verifications/2026-06-26/core_sot_minimal_skeleton.md`의 판정은 조건부 합격이었다.
+- C1 보강: `***` scene marker, `##` heading, `archive_project` 후 신규 draft/save 차단과 history 보존 회귀를 추가했다.
+- C2 보강: `content_hash("두번째")`의 known SHA-256/UTF-8 vector를 하드코딩해 동일 함수 비교 tautology를 제거했다.
+- C3 보강: MVP `source_ref` span은 하나의 `source_block` 안에 포함되어야 한다는 계약을 SoT와 Phase 1 계획에 명시했다. 여러 block을 가로지르는 인용은 후속 후보/review 계약에서 별도로 다룬다.
+- focused Core SOT/API 회귀는 11개에서 14개로 늘었다.
+
 ### HANDOFF 기반 다음 작업 검토
 
 - 변경 파일: `HANDOFF.md`, 이 작업 로그.
@@ -112,6 +128,7 @@
 - **[사용자 결정, 2026-06-26]** Core SOT text/reference 계약은 raw snapshot 기준으로 승인했다. offset은 raw Unicode code point, `content_hash`는 raw UTF-8 SHA-256, `normalized_text_hash`는 v1 필수 아님, MVP block split은 Markdown heading/scene marker/paragraph 기반 deterministic 규칙이다. adaptive/semantic/length-based chunking은 Phase 3 이후 파생 index 전략 후보로 남긴다.
 - **[사용자 결정, 2026-06-26]** Core SOT persistence/retention 계약은 MongoDB transaction 기본, local/test 제한 fallback, 명시적 version save only, autosave 제외, `idempotency_key` 필수, project/draft archive, snapshot/version/source_ref 보존으로 승인했다.
 - **[사용자 결정, 2026-06-26]** 분석 후보의 부분 승인, 부분 저장, 나머지 retry는 Slice 1 draft save idempotency가 아니라 Phase 2/6 review action idempotency 계약에서 다룬다.
+- **[사용자 결정, 2026-06-26]** Dockerfile/Compose를 추가할 때 dependency layer cache를 보존해 매번 전체 rebuild가 일어나지 않도록 한다.
 - 오늘 구현은 실제 MongoDB adapter 없이 application core contract를 잠그는 최소 skeleton으로 제한했다. 이는 뼈대를 먼저 세우고 storage adapter를 후속으로 붙이기 위한 선택이다.
 
 ## Next steps
@@ -123,5 +140,5 @@
 ## Verification
 
 - `python3 -m py_compile services/application/app/core_sot/models.py services/application/app/core_sot/splitter.py services/application/app/core_sot/service.py services/application/app/main.py tests/test_core_sot.py tests/test_application_api.py`
-- `python3 -m unittest tests.test_core_sot tests.test_application_api -v` — 11개 통과
-- `python3 -m unittest discover -s tests -p 'test_*.py'` — 148개 통과
+- `python3 -m unittest tests.test_core_sot tests.test_application_api -v` — 14개 통과
+- `python3 -m unittest discover -s tests -p 'test_*.py'` — 151개 통과

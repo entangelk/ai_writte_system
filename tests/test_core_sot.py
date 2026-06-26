@@ -59,6 +59,39 @@ class CoreSotSaveTest(unittest.TestCase):
         self.assertEqual(result.blocks[2].text, "---")
         self.assertEqual(result.blocks[3].text, "Next scene.")
 
+    def test_hash_uses_sha256_over_raw_utf8_bytes(self):
+        # Independent known vector: this must fail if the implementation changes
+        # to another algorithm, normalization, or non-UTF-8 encoding.
+        self.assertEqual(
+            content_hash("두번째"),
+            "c29de6a8ce7a05ea24880bbcfe84bdf788981a02a7e404e1c8733fe620b97ff2",
+        )
+
+    def test_extended_heading_and_star_scene_marker_are_deterministic_blocks(self):
+        service, _repo = _service()
+        project = service.create_project(name="Novel")
+        draft = service.create_draft(project_id=project.id, title="Episode 1")
+        raw_text = "## Section\n\nOpening.\n\n***\n\nAfter marker."
+
+        result = service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text=raw_text,
+            idempotency_key="save-1",
+        )
+
+        self.assertEqual(
+            [block.kind for block in result.blocks],
+            [
+                BlockKind.HEADING,
+                BlockKind.PARAGRAPH,
+                BlockKind.SCENE_MARKER,
+                BlockKind.PARAGRAPH,
+            ],
+        )
+        self.assertEqual(result.blocks[0].text, "## Section")
+        self.assertEqual(result.blocks[2].text, "***")
+
     def test_idempotency_key_replay_returns_same_version_without_duplicate(self):
         service, repo = _service()
         project = service.create_project(name="Novel")
@@ -213,6 +246,32 @@ class CoreSotIsolationAndArchiveTest(unittest.TestCase):
 
         service.archive_draft(project_id=project.id, draft_id=draft.id)
 
+        with self.assertRaises(Archived):
+            service.save_draft(
+                project_id=project.id,
+                draft_id=draft.id,
+                raw_text="new text",
+                idempotency_key="save-2",
+            )
+        self.assertIn(saved.draft_version.id, repo.versions)
+        self.assertIn(saved.snapshot.id, repo.snapshots)
+        self.assertEqual(repo.blocks_by_snapshot[saved.snapshot.id], saved.blocks)
+
+    def test_project_archive_blocks_new_draft_and_save_but_preserves_history(self):
+        service, repo = _service()
+        project = service.create_project(name="Novel")
+        draft = service.create_draft(project_id=project.id, title="Episode 1")
+        saved = service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text="project archived text",
+            idempotency_key="save-1",
+        )
+
+        service.archive_project(project_id=project.id)
+
+        with self.assertRaises(Archived):
+            service.create_draft(project_id=project.id, title="Episode 2")
         with self.assertRaises(Archived):
             service.save_draft(
                 project_id=project.id,

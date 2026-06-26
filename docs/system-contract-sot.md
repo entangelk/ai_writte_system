@@ -98,6 +98,7 @@
 - 원문 snapshot은 primary SOT다.
 - 원문 snapshot의 `raw_text`는 저장 후 변경하지 않는다.
 - `source_ref` offset은 `raw_text` 기준 Unicode code point index로 계산한다.
+- MVP `source_ref` span은 하나의 `source_block` 안에 포함되어야 한다. 여러 block을 가로지르는 인용은 후속 후보/review 계약에서 별도로 다룬다.
 - `content_hash`는 `raw_text`의 UTF-8 bytes에 대한 SHA-256이다.
 - `normalized_text_hash`는 v1 필수 계약이 아니다. 정규화 기반 dedupe/search가 필요해질 때 별도 계약으로 추가한다.
 - MVP `source_blocks`는 deterministic source reference 단위다. Markdown heading, 명시 scene marker, paragraph boundary 기반으로 만들며 AI 추론으로 block을 나누지 않는다.
@@ -323,7 +324,7 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 | AgentLoopRunner A2 | 구현·검증 완료 | `registry.py`, A2 verification |
 | AgentLoopRunner A3 | 구현·독립 검증 합격(보강) | `completion.py`, `resolution.py`, budget F1 방어 + retry cap, `InvalidBudgetPolicy.decision` |
 | AgentLoopRunner provider composition | 구현·독립 검증 합격(보강) | `parser.py`, `runner.py`, `test_agent_loop_runner.py`; I2 forward-lock(provider usage budget before completion, retry non-free), provider runner verification |
-| Core SOT minimal skeleton | 구현·자체 회귀 완료 | `services/application/app/core_sot/`, `services/application/app/main.py`, `tests/test_core_sot.py`, `tests/test_application_api.py` |
+| Core SOT minimal skeleton | 구현·조건부 검증 보강 완료 | `services/application/app/core_sot/`, `services/application/app/main.py`, `tests/test_core_sot.py`, `tests/test_application_api.py`; C1/C2/C3 보강 |
 | Product Shell UI/Phase 2~6 | 미구현 | 계획 문서만 존재 |
 
 ## 다음 구현 경계

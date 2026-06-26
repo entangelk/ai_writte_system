@@ -51,6 +51,7 @@ save request
 
 - snapshot은 생성 후 수정하지 않는다.
 - offset 기준은 snapshot `raw_text`의 Unicode code point index이며, 정규화문/byte/UTF-16 offset과 혼용하지 않는다.
+- MVP `source_ref` span은 하나의 `source_block` 안에 포함되어야 한다. 여러 block을 가로지르는 인용은 후속 후보/review 계약에서 별도로 다룬다.
 - `content_hash`는 `raw_text`의 UTF-8 bytes에 대한 SHA-256이다.
 - `normalized_text_hash`는 v1 필수 계약이 아니다. 정규화 기반 dedupe/search가 필요해질 때 별도 계약으로 추가한다.
 - block이 바뀌어도 과거 version의 ref는 해석 가능해야 한다.
@@ -87,7 +88,7 @@ save request
 ## 수용 기준
 
 - 동일 입력을 재처리하면 같은 snapshot hash와 block 경계를 얻는다.
-- 임의의 `source_ref`로 정확한 snapshot, block, span, quote를 재구성한다.
+- 임의의 단일-block `source_ref`로 정확한 snapshot, block, span, quote를 재구성한다.
 - 다른 `project_id`로 동일 ID를 조회해도 데이터가 노출되지 않는다.
 - 이전 draft version은 최신 저장 후에도 변하지 않는다.
 - 중간 실패 후 재시도해 orphan/중복 문서가 생기지 않는다.
