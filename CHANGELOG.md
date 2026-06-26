@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-26 | Core SOT 최소 구현 골격 추가 | [work log](docs/daily_logs/2026-06-26/work_log.md) |
 | 2026-06-26 | Core SOT persistence/retention 계약 승인 | [work log](docs/daily_logs/2026-06-26/work_log.md) |
 | 2026-06-26 | Core SOT text/reference 계약 승인 | [work log](docs/daily_logs/2026-06-26/work_log.md) |
 | 2026-06-26 | Slice 1 실행 경계 승인 | [work log](docs/daily_logs/2026-06-26/work_log.md) |
@@ -16,6 +17,7 @@
 
 ### Changed
 
+- Core SOT 최소 구현 골격을 추가했다. `services/application/app/core_sot/`에 immutable dataclass models, raw UTF-8 SHA-256 hash, deterministic source block splitter, source_ref 생성, in-memory repository/service를 추가했고, `services/application/app/main.py`에 FastAPI shell(health/project/draft/version save)을 추가했다. focused 11개와 전체 148개 회귀가 통과했다. MongoDB adapter/transaction-backed repository/export/editor shell은 후속이다.
 - Slice 1 실행 경계를 승인하고 SoT를 v1.1로 갱신했다. monorepo + 독립 LLM Gateway, FastAPI backend, 느슨하게 분리 가능한 Worker 경계를 확정했다. frontend framework 최종 선택은 보류하며, standalone frontend가 필요할 때 React 또는 Vue를 기본 후보로 검토한다. 초기 개인 로컬 runtime은 외부 queue 제품 없이 단순 in-process/background boundary로 시작한다.
 - Core SOT text/reference 계약을 승인하고 SoT를 v1.2로 갱신했다. raw snapshot을 MongoDB SOT로 두고, offset은 raw Unicode code point, `content_hash`는 raw UTF-8 SHA-256으로 정했다. MVP `source_blocks`는 Markdown heading, 단독 `---`/`***` scene marker, 빈 줄 paragraph 기반 deterministic split만 사용한다. adaptive/semantic/length-based chunking은 Phase 3 이후 파생 index 전략 후보로 분리했다.
 - Core SOT persistence/retention 계약을 승인하고 SoT를 v1.3으로 갱신했다. MongoDB transaction을 기본으로 하되 non-transaction fallback은 local/test 제한 경로로 두고, MVP는 명시적 version save만 지원한다. draft save는 `idempotency_key` 필수이며 project/draft는 archive, snapshot/version/source_ref는 보존한다.

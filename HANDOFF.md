@@ -52,11 +52,12 @@
 - 2026-06-26 Slice A 실행 경계 결정으로 `docs/system-contract-sot.md`가 v1.1이 됐다. monorepo+독립 Gateway, FastAPI backend, 느슨하게 분리 가능한 Worker 경계가 승인됐다.
 - 2026-06-26 Slice B text/reference 결정으로 `docs/system-contract-sot.md`가 v1.2가 됐다. Slice 1 착수는 transaction/idempotency/save mode/delete policy 결정 뒤 진행한다.
 - 2026-06-26 Slice C persistence/retention 결정으로 `docs/system-contract-sot.md`가 v1.3이 됐다. Slice 1 Core SOT 착수 전 결정은 해소됐다.
+- 2026-06-26 Slice 1 최소 구현 맛보기 완료: `services/application/app/core_sot/`에 domain models, deterministic splitter/hash/source_ref, in-memory repository/service를 추가했고 `services/application/app/main.py`에 FastAPI shell(health/project/draft/save)을 추가했다. MongoDB adapter/transaction-backed repository/Docker compose/export/editor shell은 아직 미구현이다.
 
 ## Next Tasks
 
-1. Slice 1(Project Shell + Core SOT) 착수: FastAPI 기반 project/draft/version/snapshot/source_ref의 최소 계약과 저장 골격 구현.
-2. Slice 1 구현 시 focused 회귀: idempotent save, immutable snapshot/version, deterministic block/hash/ref, project_id isolation, archive preservation.
+1. Slice 1 다음 구현: MongoDB adapter와 transaction-backed repository를 추가해 현재 in-memory Core SOT service contract를 실제 저장소에 연결한다.
+2. Slice 1 다음 회귀: Mongo transaction path, non-transaction fallback guard, idempotency unique constraint, archive 후 stale/index 이벤트 후보.
 3. Slice 1 결정이 현재 SoT 정본 계약을 바꾸면 `docs/system-contract-sot.md` 계약 버전을 갱신하고 변경 이력에 사용자 결정 근거를 남긴다.
 4. runner domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
 5. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
@@ -91,6 +92,7 @@
 - AgentLoopRunner provider composition 자체 회귀(2026-06-25): focused runner/parser/completion/resolution 40개 통과, 전체 discovery 137개 통과. I2 forward-lock(token overrun before completion, retry non-free) 양방향 회귀 포함.
 - AgentLoopRunner provider composition 독립 검증(2026-06-25): **합격**. I2 forward-lock·retry non-free를 변이 증명으로 확인, 전체 137개 재현, spec↔code 리터럴·composition 순서 일치. 비차단 I1(focused 숫자 84→93)·I2(dead import)는 보강 완료. 기록 `docs/verifications/2026-06-25/agent_loop_provider_runner.md`
 - System Contract SoT 최초 독립 검증(2026-06-25): **합격**. 당시 SoT가 인용한 literal(5 provider·5 Analysis·3 candidate·7 decision·6 tool·3 allowlist·budget 임계)·status·링크가 정본과 문자열 그대로 일치하고 enum/bounds deferral이 정확히 전파됨. 같은 묶음의 A2 I2/I3 비차단 권고도 코드+양방향 회귀로 폐쇄(registry 18→20, 전체 85/85). 비차단 risk R1(SoT↔plans/README precedence tree 불일치)도 검증자가 직접 reconcile로 폐쉄 — plans/README tree를 SoT 5-level과 통일하고 SoT를 정본 precedence로 defer. 기록 `docs/verifications/2026-06-25/system_contract_sot.md`
+- Core SOT minimal skeleton 자체 회귀(2026-06-26): focused `python3 -m unittest tests.test_core_sot tests.test_application_api -v` 11개 통과, 전체 discovery 148개 통과. 잠근 범위: idempotent save, immutable snapshot/hash/block, source_ref quote/hash, bool offset rejection, project_id isolation, archive preservation, FastAPI minimal flow.
 - completion criteria 계약 독립 검증(2026-06-24): 조건부 합격. 워커 보고·내부 일관성·cross-reference 4종 독립 확인, blocking 없음. 비차단 risk R1/R2(matrix 비대칭)·R3(self-report 정의 갭)를 소유자 결정으로 본 slice에서 즉시 보강했다. 기록 `docs/verifications/2026-06-24/completion_criteria_contract.md`
 - Slice 0.6 독립 검증(2026-06-24): 합격. httpx MockTransport/proxy/close 경계 6개 회귀 통과, `except` 순서 load-bearing 가정 4종 검증. 독립 검증 환경에서 `HttpxJsonTransport` 경유 actual adapter live smoke 완료(content `연결 확인 완료`, finish_reason=stop). 기록 `docs/verifications/2026-06-24/llm_gateway_slice_0_6_httpx.md`
 
@@ -127,7 +129,13 @@ services/
 │       ├── client.py           # llama.cpp text completion provider
 │       └── httpx_transport.py  # 실제 async HTTP JSON adapter
 └── application/
+    ├── requirements.txt        # FastAPI application dependency
     └── app/
+        ├── main.py             # FastAPI shell: health/project/draft/version save
+        ├── core_sot/
+        │   ├── models.py       # Core SOT immutable dataclasses
+        │   ├── splitter.py     # raw-text SHA-256 + deterministic source block split
+        │   └── service.py      # in-memory Core SOT service/repository skeleton
         └── agent_loop/
             ├── budget.py       # BudgetPolicy(5차원 budget+retry cap)/BudgetTracker+F1 usage 방어(A1/A3)
             ├── completion.py   # SelfReport + judge_completion completed/awaiting_review(A3)
@@ -149,7 +157,9 @@ tests/
 ├── test_agent_loop_completion.py
 ├── test_agent_loop_parser.py
 ├── test_agent_loop_runner.py
-└── test_agent_loop_resolution.py
+├── test_agent_loop_resolution.py
+├── test_core_sot.py
+└── test_application_api.py
 scripts/
 └── smoke_llm_provider.py
 docs/verification_briefs/2026-06-24/

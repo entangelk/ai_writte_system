@@ -201,6 +201,13 @@ tests/
 
 목표: 계정 없이 프로젝트를 만들고 원고를 저장·다시 열고 내보내는 첫 vertical slice를 만든다.
 
+진행 상태:
+
+- 최소 Application core skeleton 구현: `core_sot` domain models, deterministic splitter/hash/source_ref, infrastructure-free repository/service
+- 최소 FastAPI shell 구현: health, project 생성, draft 생성, draft version save
+- 자체 회귀 11개 추가: idempotent save, immutable snapshot/hash/block, source_ref quote/hash, bool offset rejection, project_id isolation, archive preservation, FastAPI minimal flow
+- 아직 MongoDB adapter, transaction-backed repository, Docker compose, export, editor shell은 구현하지 않았다.
+
 - 프로젝트/draft CRUD
 - editor shell
 - immutable draft version/snapshot/block/source_ref

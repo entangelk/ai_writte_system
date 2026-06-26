@@ -52,6 +52,19 @@
 - 사용자가 언급한 분석 후보의 부분 승인, 부분 저장, 나머지 retry는 Slice 1 draft save idempotency가 아니라 Phase 2/6 review action idempotency 계약에서 다룬다.
 - 이 결정은 Core SOT 정본 계약에 영향을 주므로 SoT 계약 버전을 v1.2에서 v1.3으로 올렸다.
 
+### Slice 1 Core SOT 최소 구현 골격
+
+- 변경 파일: `services/application/app/core_sot/`, `services/application/app/main.py`, `services/application/requirements.txt`, `tests/test_core_sot.py`, `tests/test_application_api.py`, `docs/plans/implementation-plan.md`, `docs/system-contract-sot.md`, `HANDOFF.md`, `CHANGELOG.md`, 이 작업 로그.
+- `core_sot.models`에 `Project`, `Draft`, `DraftVersion`, `SourceSnapshot`, `SourceBlock`, `SourceRef`, `SaveDraftResult` dataclass와 `BlockKind` literal을 추가했다.
+- `core_sot.splitter`에 raw UTF-8 SHA-256 `content_hash`, Markdown heading/단독 `---`·`***`/빈 줄 paragraph 기반 deterministic splitter, block materializer를 추가했다.
+- `core_sot.service`에 infrastructure-free `InMemoryCoreSotRepository`와 `CoreSotService`를 추가했다. 이는 Mongo adapter 전까지 application-level contract를 잠그는 skeleton이다.
+- `save_draft`는 `idempotency_key`를 필수로 요구하고, 같은 `project_id + draft_id + idempotency_key` 재시도 시 기존 `draft_version`/snapshot/blocks를 반환한다.
+- `create_source_ref`는 raw Unicode code point offset으로 exact quote/hash를 재구성하고, block boundary를 넘는 span과 bool offset을 거부한다.
+- project/draft archive는 새 save를 막지만 기존 version/snapshot/source_blocks는 보존한다.
+- `services/application/app/main.py`에 FastAPI shell을 추가했다: `/health`, project 생성, draft 생성, draft version save.
+- `services/application/requirements.txt`에 `fastapi>=0.115,<1`을 추가했다.
+- MongoDB adapter, transaction-backed repository, Docker compose, export, editor shell은 이번 맛보기 범위에서 제외했다.
+
 ### HANDOFF 기반 다음 작업 검토
 
 - 변경 파일: `HANDOFF.md`, 이 작업 로그.
@@ -64,9 +77,9 @@
 - 변경 파일: `HANDOFF.md`, 이 작업 로그.
 - `docs/system-contract-sot.md`, `docs/plans/README.md`, `docs/plans/implementation-plan.md`, `docs/plans/01-core-sot.md`를 대조했다.
 - SoT와 `plans/README.md`의 문서 우선순위는 같은 5-level tree로 통일되어 있다.
-- SoT는 현재 `Approved` v1.2이며, 본문은 미확정 항목을 추측해 구현하지 말라고 명시한다.
+- SoT는 현재 `Approved` v1.3이며, 본문은 미확정 항목을 추측해 구현하지 말라고 명시한다.
 - Slice 1 Core SOT 착수 전 결정은 text/reference와 persistence/retention까지 해소됐다.
-- 위 항목은 구현 계약과 저장 스키마를 직접 바꾸므로 작업자가 임의로 선택하지 않고 사용자 확인이 필요하다.
+- 후속 결정이 SoT v1.3과 충돌하면 구현 전에 사용자 확인이 필요하다.
 
 ## Issues found
 
@@ -76,6 +89,13 @@
 - 원인: SoT v1.2 시점에는 Phase 1 계획이 transaction/idempotency/save mode/delete policy 같은 계약 선택을 별도 사용자 결정 전까지 열어두었다.
 - 해결: 사용자 결정을 받아 transaction 기본, limited fallback, explicit save only, idempotency key, archive/preserve 정책을 SoT v1.3과 Phase 1 계획에 반영했다.
 - 결과: Slice 1 Core SOT 착수 전 결정이 해소됐다.
+
+### Core SOT source_ref bool offset 방어
+
+- 문제: Python에서는 `bool`이 `int`의 하위 타입이라 `start_offset=False`, `end_offset=True` 같은 값이 정수 검사에 통과할 수 있었다.
+- 원인: 초기 `create_source_ref` 검사가 `isinstance(value, int)`만 사용했다.
+- 해결: bool을 명시적으로 거부하는 `_is_int` helper와 회귀 `test_source_ref_offsets_reject_bool_values`를 추가했다.
+- 결과: source_ref offset 계약이 `BudgetPolicy`의 정수 방어와 같은 방향으로 정리됐다.
 
 ### 검색 명령 quoting 주의
 
@@ -92,10 +112,16 @@
 - **[사용자 결정, 2026-06-26]** Core SOT text/reference 계약은 raw snapshot 기준으로 승인했다. offset은 raw Unicode code point, `content_hash`는 raw UTF-8 SHA-256, `normalized_text_hash`는 v1 필수 아님, MVP block split은 Markdown heading/scene marker/paragraph 기반 deterministic 규칙이다. adaptive/semantic/length-based chunking은 Phase 3 이후 파생 index 전략 후보로 남긴다.
 - **[사용자 결정, 2026-06-26]** Core SOT persistence/retention 계약은 MongoDB transaction 기본, local/test 제한 fallback, 명시적 version save only, autosave 제외, `idempotency_key` 필수, project/draft archive, snapshot/version/source_ref 보존으로 승인했다.
 - **[사용자 결정, 2026-06-26]** 분석 후보의 부분 승인, 부분 저장, 나머지 retry는 Slice 1 draft save idempotency가 아니라 Phase 2/6 review action idempotency 계약에서 다룬다.
-- 이번 작업은 SoT 승인과 문서 상태 정리까지만 수행했다. 실제 Slice 1 구현은 승인된 계약을 기준으로 진행한다.
+- 오늘 구현은 실제 MongoDB adapter 없이 application core contract를 잠그는 최소 skeleton으로 제한했다. 이는 뼈대를 먼저 세우고 storage adapter를 후속으로 붙이기 위한 선택이다.
 
 ## Next steps
 
-1. Slice 1(Project Shell + Core SOT)의 최소 저장 골격과 회귀 테스트를 구현한다.
-2. 구현 회귀는 idempotent save, immutable snapshot/version, deterministic block/hash/ref, project_id isolation, archive preservation을 우선 잠근다.
+1. MongoDB adapter와 transaction-backed repository를 추가해 현재 in-memory Core SOT service contract를 실제 저장소에 연결한다.
+2. Mongo transaction path, non-transaction fallback guard, idempotency unique constraint, archive 후 stale/index 이벤트 후보를 회귀로 잠근다.
 3. Slice 1 결정이 현재 SoT 정본 계약을 바꾸면 계약 버전을 올리고 변경 이력에 사용자 결정 근거를 남긴다.
+
+## Verification
+
+- `python3 -m py_compile services/application/app/core_sot/models.py services/application/app/core_sot/splitter.py services/application/app/core_sot/service.py services/application/app/main.py tests/test_core_sot.py tests/test_application_api.py`
+- `python3 -m unittest tests.test_core_sot tests.test_application_api -v` — 11개 통과
+- `python3 -m unittest discover -s tests -p 'test_*.py'` — 148개 통과
