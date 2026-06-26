@@ -4,7 +4,7 @@
 기준 원본: [`../abstract.md`](../abstract.md)  
 목적: 2,000여 줄의 전체 초안을 실제 개발 전에 검토하고 확정할 수 있는 Phase 단위 계획으로 재구성한다.
 
-서비스 경계와 확정된 계약을 먼저 볼 때는 [`../system-contract-sot.md`](../system-contract-sot.md)를 정본 SoT 초안으로 사용한다. 이 인덱스는 Phase별 세부 계획을 읽는 순서다.
+서비스 경계와 확정된 계약을 먼저 볼 때는 [`../system-contract-sot.md`](../system-contract-sot.md)를 정본 SoT로 사용한다. 이 인덱스는 Phase별 세부 계획을 읽는 순서다.
 
 ## 읽는 순서
 

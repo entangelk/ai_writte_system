@@ -4,7 +4,7 @@
 
 ## 정본 계약 SoT
 
-서비스 경계와 확정된 계약의 현재 정본 초안은 [`system-contract-sot.md`](system-contract-sot.md)에서 시작한다.
+서비스 경계와 확정된 계약의 현재 정본은 [`system-contract-sot.md`](system-contract-sot.md)에서 시작한다.
 구현자는 계획 문서를 세부 근거로 읽기 전에 이 문서의 우선순위와 미확정 항목을 먼저 확인한다.
 
 ## 계획 문서

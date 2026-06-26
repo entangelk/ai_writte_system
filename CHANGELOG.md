@@ -2,11 +2,21 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-26 | System Contract SoT v1.0 승인 | [work log](docs/daily_logs/2026-06-26/work_log.md) |
 | 2026-06-25 | AgentLoopRunner provider composition slice 구현 | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-25 | AgentLoopRunner A3 검증 후 보강(I1/I3) | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-25 | AgentLoopRunner A3 decision 합성 회귀 구현 | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-25 | AgentLoopRunner A2 registry 계약 회귀 구현 | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-24 | 개발 계획 문서 구조 도입 | [work log](docs/daily_logs/2026-06-24/work_log.md) |
+
+## 2026-06-26
+
+### Changed
+
+- `docs/system-contract-sot.md`를 `Approved` v1.0 정본 계약 인덱스로 승격했다. 승인 범위는 문서 우선순위와 이미 확정·검증된 계약의 인덱스 역할이며, 미확정 결정 목록은 계속 추측 구현 금지로 남긴다.
+- 향후 사용자 결정으로 정본 계약이 바뀔 수 있으므로 SoT 내부에 계약 버전 관리 규칙과 계약 변경 이력을 추가했다.
+
+사용자는 SoT가 앞으로 사용자 결정에 의해 업데이트될 수 있음을 명시했고, 그 변경은 문서 내부에서 버전 관리되기를 원했다. 이에 v1.0 승인 이력과 future-change rule을 SoT에 직접 기록했다.
 
 ## 2026-06-25
 

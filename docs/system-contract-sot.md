@@ -1,6 +1,8 @@
 # 시스템 정본 계약 SoT
 
-상태: `Draft`  
+상태: `Approved`  
+계약 버전: `v1.0`  
+승인일: `2026-06-26`  
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
 적용 범위: 제품 경계, 서비스 책임, 데이터 정본, Gateway, AgentLoopRunner, Gate 합성, 검증 기록.
 
@@ -16,13 +18,27 @@
 
 동일 우선순위 문서끼리 충돌하면 구현하지 않는다. 충돌을 작업 로그와 해당 문서에 기록하고 사용자에게 어느 쪽이 canonical인지 확인한다.
 
-현재 이 문서는 `Draft`다. 새 구현은 아래 "확정된 계약"만 구현 기준으로 삼고, "미확정" 항목은 추측해 채우지 않는다.
+이 문서의 `Approved` 상태는 정본 계약 인덱스와 문서 우선순위의 승인을 뜻한다. 아래 "미확정" 항목은 이 승인으로 확정되지 않으며, 사용자 결정 또는 별도 승인된 Phase 계획 없이는 추측해 구현하지 않는다.
+
+## 계약 버전 관리
+
+- 이 문서의 계약 버전은 사용자 결정으로 정본 계약, 문서 우선순위, 서비스 경계, public literal, 미확정 항목의 상태가 바뀔 때 올린다.
+- 호환 가능한 명확화, 링크 보정, 검증 근거 추가는 patch 수준으로 기록한다.
+- 구현 계약이나 public literal 의미가 바뀌면 minor 이상으로 기록하고, 영향받는 계획 문서·테스트·검증 기록을 함께 갱신한다.
+- 기존 승인 결정과 충돌하는 새 요청이 들어오면 구현 전에 충돌을 명시하고 어느 쪽이 canonical인지 사용자에게 확인한다.
+- 상세 작업 이력은 `docs/daily_logs/`에 남기고, 이 문서에는 현재 정본에 영향을 주는 변경만 기록한다.
+
+## 계약 변경 이력
+
+| 버전 | 날짜 | 변경 | 근거 |
+|---|---|---|---|
+| v1.0 | 2026-06-26 | SoT를 정본 계약 인덱스로 승인. 미확정 항목은 계속 추측 구현 금지. | 사용자 승인, `docs/verifications/2026-06-25/system_contract_sot.md` |
 
 ## 문서 역할
 
 | 문서 | 역할 | 지위 |
 |---|---|---|
-| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Draft SoT |
+| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.0 |
 | [`plans/README.md`](plans/README.md) | 계획 문서 진입점과 Phase/MVP 관계 | Draft |
 | [`plans/00-foundations.md`](plans/00-foundations.md) | 전역 원칙과 제품 경계 | Draft |
 | [`plans/implementation-plan.md`](plans/implementation-plan.md) | 구현 순서, slice 상태, 검증 gate | Draft |
@@ -295,7 +311,6 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 
 다음 항목은 구현자가 임의로 채우지 않는다.
 
-- 본 SoT를 `Approved`로 승격할지 여부
 - monorepo + 독립 LLM Gateway 경계 최종 승인
 - backend/frontend framework
 - job queue 방식과 worker process 경계
