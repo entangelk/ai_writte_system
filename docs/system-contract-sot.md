@@ -1,8 +1,9 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`  
-계약 버전: `v1.0`  
+계약 버전: `v1.1`  
 승인일: `2026-06-26`  
+최근 갱신일: `2026-06-26`  
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
 적용 범위: 제품 경계, 서비스 책임, 데이터 정본, Gateway, AgentLoopRunner, Gate 합성, 검증 기록.
 
@@ -32,13 +33,14 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.1 | 2026-06-26 | Slice 1 실행 경계 승인: monorepo+독립 LLM Gateway, FastAPI Application API, 느슨하게 분리 가능한 Worker 경계. frontend framework 최종 선택은 보류. | 사용자 승인 |
 | v1.0 | 2026-06-26 | SoT를 정본 계약 인덱스로 승인. 미확정 항목은 계속 추측 구현 금지. | 사용자 승인, `docs/verifications/2026-06-25/system_contract_sot.md` |
 
 ## 문서 역할
 
 | 문서 | 역할 | 지위 |
 |---|---|---|
-| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.0 |
+| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.1 |
 | [`plans/README.md`](plans/README.md) | 계획 문서 진입점과 Phase/MVP 관계 | Draft |
 | [`plans/00-foundations.md`](plans/00-foundations.md) | 전역 원칙과 제품 경계 | Draft |
 | [`plans/implementation-plan.md`](plans/implementation-plan.md) | 구현 순서, slice 상태, 검증 gate | Draft |
@@ -69,6 +71,15 @@
 | AgentLoopRunner | bounded flat loop, tool allowlist, budget, terminal decision | domain Gate 통과 여부, memory update |
 | Gate | 후보 검증과 처분 | 사용자 의도 최종 확정, loop 종료 원인 |
 | Review UI | 승인/거절/수정 UX | 자동 canon 승격 규칙의 독자 소유 |
+
+## 구현 기술 결정
+
+- 저장소 구조는 monorepo를 유지한다.
+- LLM Gateway는 같은 repo에서 계약을 맞추되 독립 프로세스/컨테이너 경계를 유지한다.
+- Application API의 backend framework는 FastAPI를 사용한다.
+- frontend framework 최종 선택은 보류한다. 개인 로컬 시스템의 단일 서비스 UI로 충분할 수 있으므로, standalone frontend가 필요해질 때 React 또는 Vue를 기본 후보로 검토한다.
+- Worker는 Application과 코드·계약을 공유하되, 나중에 별도 entrypoint나 프로세스로 분리할 수 있게 느슨하게 연결한다.
+- 초기 local/personal runtime에서는 외부 queue 제품을 전제하지 않고 단순한 in-process/background boundary로 시작한다. 더 강한 queue가 필요하다는 증거가 생기면 별도 결정으로 승격한다.
 
 ## 확정된 전역 계약
 
@@ -311,9 +322,8 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 
 다음 항목은 구현자가 임의로 채우지 않는다.
 
-- monorepo + 독립 LLM Gateway 경계 최종 승인
-- backend/frontend framework
-- job queue 방식과 worker process 경계
+- frontend framework 최종 선택. standalone frontend가 필요해질 때 React 또는 Vue를 기본 후보로 검토한다.
+- 외부 queue 제품 선택. 초기 local/personal runtime은 단순한 in-process/background boundary로 시작한다.
 - Gateway/model tool-call response wire format
 - `confirmed`와 `canonical`의 의미 및 승격 주체
 - Core SOT의 offset 기준, normalization/hash, block split 규칙

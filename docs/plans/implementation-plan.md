@@ -3,14 +3,16 @@
 상태: `Draft`  
 목표: 현재 계획을 실제 개발 가능한 vertical slice와 검증 gate로 변환한다.
 
-## 권장 아키텍처 결론
+## 승인된 아키텍처 결론
 
 처음부터 여러 저장소와 독립 배포 조직을 전제로 한 MSA는 사용하지 않는다. 하나의 monorepo 안에서 다음 두 경계를 조합한다.
 
-- Application: Product Shell, API, domain service를 우선 modular monolith로 구성
+- Application: FastAPI 기반 Product Shell/API/domain service를 우선 modular monolith로 구성
 - LLM Gateway: GPU/모델 lifecycle 때문에 별도 프로세스·컨테이너로 구성
-- Background Worker: 분석·색인 job이 웹 요청을 막지 않도록 별도 실행 가능하게 구성하되 Application과 코드/계약을 공유
+- Background Worker: 분석·색인 job이 웹 요청을 막지 않도록 별도 실행 가능하게 구성하되 Application과 코드/계약을 공유하고 느슨한 연결을 유지
 - Data services: MongoDB, ChromaDB, Elasticsearch는 개발 환경에서 Compose로 조합
+
+2026-06-26 사용자 결정으로 monorepo + 독립 LLM Gateway 경계, FastAPI backend, 느슨하게 분리 가능한 Worker 경계를 승인했다. frontend framework 최종 선택은 보류하며, 단일 local service UI로 충분하지 않을 때 React 또는 Vue를 기본 후보로 검토한다. 초기 개인 로컬 runtime은 외부 queue 제품을 전제하지 않고 단순한 in-process/background boundary로 시작한다.
 
 ```text
 Browser / Local UI
@@ -18,7 +20,7 @@ Browser / Local UI
         ▼
 Application API ───── MongoDB
         │                 │
-        ├── Job Queue/Worker ── ChromaDB / Elasticsearch
+        ├── Background/Worker ── ChromaDB / Elasticsearch
         │          │
         │          └────────── LLM Gateway ── model volume
         │
@@ -339,9 +341,11 @@ tests/
 
 ## 착수 전 결정사항
 
-- [ ] monorepo + 독립 LLM Gateway 경계 승인
-- [ ] backend/frontend framework
-- [ ] job queue 방식과 worker process 경계
+- [x] monorepo + 독립 LLM Gateway 경계 승인
+- [x] backend framework: FastAPI
+- [x] frontend framework policy: 최종 선택 보류, standalone frontend 필요 시 React/Vue 기본 후보
+- [x] worker process 경계: Application 코드/계약 공유, 느슨한 연결, 분리 가능한 entrypoint
+- [x] 초기 job queue 방식: 개인 local runtime에서는 외부 queue 제품 없이 단순 in-process/background boundary
 - [ ] Gateway/model tool-call response wire format
 - [x] 첫 model artifact: `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`
 - [ ] Gemma model terms/download 권한과 참조 source code provenance

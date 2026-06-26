@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-26 | Slice 1 실행 경계 승인 | [work log](docs/daily_logs/2026-06-26/work_log.md) |
 | 2026-06-26 | System Contract SoT v1.0 승인 | [work log](docs/daily_logs/2026-06-26/work_log.md) |
 | 2026-06-25 | AgentLoopRunner provider composition slice 구현 | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-25 | AgentLoopRunner A3 검증 후 보강(I1/I3) | [work log](docs/daily_logs/2026-06-25/work_log.md) |
@@ -13,8 +14,11 @@
 
 ### Changed
 
+- Slice 1 실행 경계를 승인하고 SoT를 v1.1로 갱신했다. monorepo + 독립 LLM Gateway, FastAPI backend, 느슨하게 분리 가능한 Worker 경계를 확정했다. frontend framework 최종 선택은 보류하며, standalone frontend가 필요할 때 React 또는 Vue를 기본 후보로 검토한다. 초기 개인 로컬 runtime은 외부 queue 제품 없이 단순 in-process/background boundary로 시작한다.
 - `docs/system-contract-sot.md`를 `Approved` v1.0 정본 계약 인덱스로 승격했다. 승인 범위는 문서 우선순위와 이미 확정·검증된 계약의 인덱스 역할이며, 미확정 결정 목록은 계속 추측 구현 금지로 남긴다.
 - 향후 사용자 결정으로 정본 계약이 바뀔 수 있으므로 SoT 내부에 계약 버전 관리 규칙과 계약 변경 이력을 추가했다.
+
+사용자는 FastAPI 경험을 이유로 backend framework를 FastAPI로 승인했다. frontend framework는 단일 local service UI 가능성을 열어두기 위해 보류하고, 필요 시 React/Vue 중 선택하는 방향으로 남겼다. Worker/queue는 개인 로컬 시스템 특성상 과도한 외부 queue 제품을 피하고 느슨한 연결과 후속 분리 가능성을 우선했다.
 
 사용자는 SoT가 앞으로 사용자 결정에 의해 업데이트될 수 있음을 명시했고, 그 변경은 문서 내부에서 버전 관리되기를 원했다. 이에 v1.0 승인 이력과 future-change rule을 SoT에 직접 기록했다.
 
