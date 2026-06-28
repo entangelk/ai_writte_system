@@ -27,7 +27,7 @@
 
 ### Added
 
-- archive API endpoint를 추가해 Core SOT CRUD를 API로 완성했다. `DELETE /projects/{id}`와 `DELETE /projects/{id}/drafts/{draft_id}`를 archive(soft delete)로 매핑했다(계약 §115 "삭제는 archive로 처리"). archived 엔티티를 200으로 반환하고, 없음/cross-project draft는 404, 재archive는 idempotent(상태전이는 쓰기차단 대상 아님)다. service의 archive_project/archive_draft를 재사용하며 SOT/계약 변경은 없다. 전체 206개(Mongo 미연결 27 skip / 연결 시 전통과).
+- archive API endpoint를 추가해 Core SOT CRUD를 API로 완성했다. `DELETE /projects/{id}`와 `DELETE /projects/{id}/drafts/{draft_id}`를 archive(soft delete)로 매핑했다(계약 §115 "삭제는 archive로 처리"). archived 엔티티를 200으로 반환하고, 없음/missing draft/cross-project draft는 404, project·draft 재archive는 idempotent(상태전이는 쓰기차단 대상 아님)다. service의 archive_project/archive_draft를 재사용하며 SOT/계약 변경은 없다. 독립 재검증(archive_api_endpoint.md) 대응으로 archived project 하위 draft archive 허용 분기를 over-strict guard로 lock(mutation 증명)하고 §115 :121에 "하위 draft archive도 상태전이 예외"를 비의미 명확화했다. 전체 207개(Mongo 미연결 27 skip / 연결 시 전통과).
 
 ### Changed
 

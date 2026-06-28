@@ -33,7 +33,7 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
-| v1.5 | 2026-06-28 | archive를 읽기 전용 상태로 명문화: 읽기 허용, 본문 쓰기(draft 생성·version 저장)+메타데이터 수정(rename) 차단(409), SOT 본문은 archive 무관 불변, 상태 전이(unarchive)와 source_ref/분석 후보 archived 정책은 범위 밖. 기존 구현·회귀와 정합하는 문서 명문화. | 사용자 결정, `docs/verifications/2026-06-28/rename_api.md` R1 |
+| v1.5 | 2026-06-28 | archive를 읽기 전용 상태로 명문화: 읽기 허용, 본문 쓰기(draft 생성·version 저장)+메타데이터 수정(rename) 차단(409), SOT 본문은 archive 무관 불변, 상태 전이(unarchive)와 source_ref/분석 후보 archived 정책은 범위 밖. 기존 구현·회귀와 정합하는 문서 명문화. (같은 날 비의미 명확화: archived project 하위 draft를 archive하는 것은 상태 전이이므로 하위 draft 쓰기 차단의 예외임을 명시 — `archive_api_endpoint.md` Issue #1.) | 사용자 결정, `docs/verifications/2026-06-28/rename_api.md` R1 |
 | v1.4 | 2026-06-28 | non-transaction fallback을 single-writer 전용으로 명시. 동시성 안전은 transaction 기본 경로가 담당하고, fallback의 orphan cleanup/retry guard는 같은 writer의 순차 재시도에만 정의됨. | 사용자 결정(R2 option b), `docs/verifications/2026-06-28/mongo_adapter_recheck.md` |
 | v1.3 | 2026-06-26 | Core SOT persistence/retention 계약 승인: Mongo transaction 기본, 제한적 non-transaction fallback, explicit version save only, save idempotency key 필수, project/draft archive와 snapshot/version/source_ref 보존. | 사용자 승인 |
 | v1.2 | 2026-06-26 | Core SOT text/reference 계약 승인: raw snapshot 기준, Unicode code point offset, raw UTF-8 SHA-256 content hash, deterministic MVP source block split. Adaptive/length-based chunking은 파생 index layer 후속 후보로 분리. | 사용자 승인 |
@@ -118,7 +118,7 @@
   - 읽기(project/draft get·list, version/snapshot/block 재조회)는 허용한다.
   - 본문 쓰기(draft 생성, version 저장)와 메타데이터 수정(project/draft rename)은 차단한다(409 Archived). project archive는 그 하위 draft 쓰기까지 차단한다.
   - SOT 본문(`source_snapshots`, `draft_versions`, `source_blocks`)은 archive 여부와 무관하게 생성 후 불변이다. 따라서 "archived 본문 수정"이라는 연산은 존재하지 않는다.
-  - archive/unarchive 같은 상태 전이는 본 쓰기 차단의 대상이 아니다. unarchive는 MVP 범위가 아니므로 본 계약은 "archived인 동안 차단"으로 한정하며 영구 불변을 규정하지 않는다.
+  - archive/unarchive 같은 상태 전이는 본 쓰기 차단의 대상이 아니다. 여기에는 archived project 하위 draft를 archive하는 것도 포함되므로(상태 전이), "하위 draft 쓰기 차단"의 예외로서 archived project에서도 허용한다. unarchive는 MVP 범위가 아니므로 본 계약은 "archived인 동안 차단"으로 한정하며 영구 불변을 규정하지 않는다.
   - `source_refs` 생성은 보존된 immutable snapshot에 대한 파생 주석이므로 archived 상태에서도 **허용한다**(사용자 결정). 이는 본문/메타데이터 쓰기 차단의 예외다. 단 `create_source_ref` idempotency와 분석 후보(candidate)의 archived 정책은 Phase 2/6에서 별도로 정한다.
 - archive/delete 이후 파생 인덱스는 stale 처리, version filter, rebuild 대상으로 다루며 MongoDB 정본 보존을 되돌리지 않는다.
 - 분석 후보의 부분 승인, 부분 저장, 나머지 retry는 Phase 2/6 review action idempotency 계약에서 다룬다. Slice 1 draft save idempotency와 섞지 않는다.

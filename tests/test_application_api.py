@@ -302,13 +302,47 @@ class ApplicationApiTest(unittest.TestCase):
     def test_archive_is_idempotent(self):
         client = TestClient(create_app())
         project = client.post("/projects", json={"name": "Novel"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
 
+        # Draft re-archive is idempotent (archive its draft before the project).
+        first_draft = client.delete(
+            f"/projects/{project['id']}/drafts/{draft['id']}"
+        )
+        second_draft = client.delete(
+            f"/projects/{project['id']}/drafts/{draft['id']}"
+        )
+        self.assertEqual(first_draft.status_code, 200)
+        self.assertEqual(second_draft.status_code, 200)
+        self.assertTrue(second_draft.json()["archived"])
+
+        # Project re-archive is idempotent too.
         first = client.delete(f"/projects/{project['id']}")
         second = client.delete(f"/projects/{project['id']}")
-
         self.assertEqual(first.status_code, 200)
         self.assertEqual(second.status_code, 200)
         self.assertTrue(second.json()["archived"])
+
+    def test_archive_draft_allowed_when_project_archived(self):
+        # §115: archiving a draft is a STATE TRANSITION, exempt from the
+        # "archived project blocks child-draft writes" rule. Archiving the
+        # project first must NOT make the draft un-archivable. This is an
+        # over-strict guard: adding a project.archived check to archive_draft
+        # (misreading the write-block) would re-fail this test.
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        client.delete(f"/projects/{project['id']}")  # archive project first
+
+        archived_draft = client.delete(
+            f"/projects/{project['id']}/drafts/{draft['id']}"
+        )
+
+        self.assertEqual(archived_draft.status_code, 200)
+        self.assertTrue(archived_draft.json()["archived"])
 
     def test_archive_missing_and_cross_project_returns_404(self):
         client = TestClient(create_app())
@@ -319,6 +353,14 @@ class ApplicationApiTest(unittest.TestCase):
         ).json()
 
         self.assertEqual(client.delete("/projects/nope").status_code, 404)
+        # Missing draft under an existing project.
+        self.assertEqual(
+            client.delete(
+                f"/projects/{project_a['id']}/drafts/nope"
+            ).status_code,
+            404,
+        )
+        # Cross-project draft.
         self.assertEqual(
             client.delete(
                 f"/projects/{project_b['id']}/drafts/{draft_a['id']}"

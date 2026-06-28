@@ -219,6 +219,14 @@
 - API 회귀 4종: DELETE project archive(archived=true, 읽기 유지, 이후 draft 생성·save→409), DELETE draft archive(archived=true, rename→409, 읽기 200), idempotent 재archive(200), 없음/cross-project→404.
 - 전체 206개(Mongo 미연결 27 skip), 단일 노드 replica set 연결 시 206개 전부 통과.
 
+### 재검증 후 보강 (조건부 합격 → 합격)
+
+- 독립 재검증(`docs/verifications/2026-06-28/archive_api_endpoint.md`, 조건부 합격)의 Issue #1과 비차단 #2/#3 대응.
+- Issue #1(차단성): `archive_draft`가 archived project의 하위 draft도 archive(200)하는 분기가 lock 안 됐고, §115 :119(하위 draft 쓰기차단)↔:121(상태전이 예외) 연결이 prose에 없어 over-correction(archive_draft에 project.archived 추가)을 못 잡았다. ① §115 :121에 "archived project 하위 draft archive도 상태전이이므로 예외"를 명시(비의미 명확화, v1.5 이력 행에 기록). ② `test_archive_draft_allowed_when_project_archived`로 over-strict guard 추가. mutation 증명: archive_draft에 project.archived 차단 주입 시 FAIL, 복원 시 PASS.
+- Issue #2(비차단): `test_archive_is_idempotent`에 draft 재archive idempotent 케이스 추가(기존 project만).
+- Issue #3(비차단): missing draft(존재 project) DELETE→404를 cross-project test에 추가.
+- 전체 207개(Mongo 미연결 27 skip), replica set 연결 시 전부 통과.
+
 ## Next steps
 
 - gateway 서비스 Dockerfile/compose 편입(현재는 application+Mongo만; gateway는 외부 llama.cpp endpoint 의존, Slice 1 범위 밖).
