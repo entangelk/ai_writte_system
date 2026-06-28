@@ -160,6 +160,8 @@ class ApplicationApiTest(unittest.TestCase):
             [b["text"] for b in body["blocks"]],
             ["# Chapter 1", "Opening line.", "---", "Next scene."],
         )
+        # idempotency_key stays an internal token in the detail payload too.
+        self.assertNotIn("idempotency_key", body["draft_version"])
 
     def test_get_missing_version_returns_404(self):
         client = TestClient(create_app())
@@ -195,6 +197,28 @@ class ApplicationApiTest(unittest.TestCase):
         # Version belongs to draft A; requesting it under draft B must 404.
         cross = client.get(
             f"/projects/{project['id']}/drafts/{draft_b['id']}/versions/{version}"
+        )
+
+        self.assertEqual(cross.status_code, 404)
+
+    def test_get_version_cross_project_returns_404(self):
+        client = TestClient(create_app())
+        project_a = client.post("/projects", json={"name": "A"}).json()
+        project_b = client.post("/projects", json={"name": "B"}).json()
+        draft_a = client.post(
+            f"/projects/{project_a['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        draft_b = client.post(
+            f"/projects/{project_b['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        version = client.post(
+            f"/projects/{project_a['id']}/drafts/{draft_a['id']}/versions",
+            json={"raw_text": "secret", "idempotency_key": "save-1"},
+        ).json()["draft_version"]["id"]
+
+        # Project A's version must not be readable through project B's context.
+        cross = client.get(
+            f"/projects/{project_b['id']}/drafts/{draft_b['id']}/versions/{version}"
         )
 
         self.assertEqual(cross.status_code, 404)

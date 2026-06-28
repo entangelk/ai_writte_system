@@ -12,7 +12,11 @@ Locks the approved Slice 1 source-of-truth contracts:
 
 import unittest
 
-from services.application.app.core_sot.models import BlockKind
+from services.application.app.core_sot.models import (
+    BlockKind,
+    DraftVersion,
+    SourceSnapshot,
+)
 from services.application.app.core_sot.service import (
     Archived,
     CoreSotError,
@@ -338,6 +342,66 @@ class CoreSotIsolationAndArchiveTest(unittest.TestCase):
         self.assertIn(saved.draft_version.id, repo.versions)
         self.assertIn(saved.snapshot.id, repo.snapshots)
         self.assertEqual(repo.blocks_by_snapshot[saved.snapshot.id], saved.blocks)
+
+    def test_get_draft_version_rejects_cross_project_version_ownership(self):
+        # Defense-in-depth: service.get_draft_version's `version.project_id !=
+        # project_id` guard. A version row that references a draft in this
+        # project but carries a different project_id must NOT be returned.
+        # This isolates the project_id branch (draft_id matches, so only the
+        # project_id clause can fire) — removing that clause re-fails this test.
+        # Locks plan 01 L93 project_id isolation as defense against corrupt data.
+        service, repo = _service()
+        project = service.create_project(name="Owner")
+        draft = service.create_draft(project_id=project.id, title="Episode 1")
+        foreign = DraftVersion(
+            id=repo.next_version_id(),
+            project_id="other-project",
+            draft_id=draft.id,
+            version_number=1,
+            snapshot_id=repo.next_snapshot_id(),
+            idempotency_key="x",
+        )
+        snapshot = SourceSnapshot(
+            id=foreign.snapshot_id,
+            project_id="other-project",
+            draft_id=draft.id,
+            version_id=foreign.id,
+            raw_text="secret",
+            content_hash="deadbeef",
+        )
+        repo.record_save(
+            idempotency_key="x", version=foreign, snapshot=snapshot, blocks=()
+        )
+
+        with self.assertRaises(NotFound):
+            service.get_draft_version(
+                project_id=project.id, draft_id=draft.id, version_id=foreign.id
+            )
+
+    def test_archive_preserves_version_read(self):
+        service, _repo = _service()
+        project = service.create_project(name="Novel")
+        draft = service.create_draft(project_id=project.id, title="Episode 1")
+        saved = service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text="archived body",
+            idempotency_key="save-1",
+        )
+
+        service.archive_project(project_id=project.id)
+
+        # SoT §115 read-allowed: version list/read survives archive.
+        versions = service.list_draft_versions(
+            project_id=project.id, draft_id=draft.id
+        )
+        self.assertEqual([v.id for v in versions], [saved.draft_version.id])
+        detail = service.get_draft_version(
+            project_id=project.id,
+            draft_id=draft.id,
+            version_id=saved.draft_version.id,
+        )
+        self.assertEqual(detail.snapshot.raw_text, "archived body")
 
     def test_archive_preserves_source_ref(self):
         service, repo = _service()

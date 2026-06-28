@@ -131,7 +131,7 @@
 - API: `GET /projects`(목록), `GET /projects/{id}`(단건, 없으면 404), `GET /projects/{id}/drafts`(프로젝트별 목록, project 없으면 404), `GET /projects/{id}/drafts/{draft_id}`(단건, 없음/cross-project 404). project_id 격리는 service의 `_require_draft`(project_id 불일치 시 NotFound)와 `list_drafts`(project_id 필터)로 강제.
 - 응답 shape는 기존 create 응답과 동일(project: id/name/archived, draft: id/project_id/title/archived). `_project_payload`/`_draft_payload` 헬퍼로 통일하고 기존 create_draft도 헬퍼를 재사용하도록 정리.
 - 정렬: in-memory는 삽입(생성) 순서, Mongo는 `_id`(ObjectId 시간순) ASCENDING. 범위: list/get만. rename/update와 version read는 후속.
-- SoT 계약 변경 없음(plan 01 §13 "프로젝트/draft 조회·목록" 구현).
+- SoT 계약 변경 없음(canonical: SoT v1.4 §96–134 + plan 01 L50–95의 조회·목록 계약 구현).
 
 ### 검증
 
@@ -154,13 +154,22 @@
 - API: `GET /projects/{id}/drafts/{draft_id}/versions`(목록, version_number 순), `GET .../versions/{version_id}`(단건 full read-back: snapshot raw_text + blocks text). project/draft 없음·version 없음·cross-draft는 404. version은 project_id·draft_id 양쪽 일치를 service에서 강제.
 - 계약 결정: version 메타 payload에서 `idempotency_key`를 의도적으로 제외(내부 save 토큰이며 public read 표면이 아님). detail은 snapshot raw_text와 blocks text를 모두 반환(재조회 목적).
 - 정렬: version 목록은 version_number ASC(in-memory는 저장 순서, Mongo는 version_number sort). 범위: read만. rename은 후속.
-- SoT 계약 변경 없음(plan 01 §13 draft 조회·§30 draft_versions 계약 구현).
+- SoT 계약 변경 없음(canonical: SoT v1.4 §96–134 + plan 01 L50–95의 draft_versions 조회 계약 구현).
 
 ### 검증
 
 - API 회귀 3종: list+detail read-back(raw_text+block text 일치, version_number 순, idempotency_key 미노출), 없는 version/draft→404, cross-draft version→404.
 - Mongo mixin 1종(fallback/transaction 양 경로 = 2): fresh service로 persisted version list 순서 + detail read-back(raw_text/hash/blocks) + 없는 version→NotFound.
 - 전체: Mongo 미연결 190개(25 skip), 단일 노드 replica set 연결 시 190개 전부 통과.
+
+### 재검증 후 보강 (조건부 합격 → 합격)
+
+- 독립 재검증(`docs/verifications/2026-06-28/version_read_api.md`, 조건부 합격)의 차단 Issue #1과 비차단 #2/#3/R2를 대응했다.
+- Issue #1(차단): `get_draft_version`의 `version.project_id != project_id` 분기가 회귀로 안 잠겨 있었다. 실증 결과 이 절은 draft_id 전역 고유 + `_require_draft` gate 때문에 **정상 데이터에선 redundant**(제거해도 cross-project 노출 없음)였다. 그래서 inconsistent state(draft_id 일치, project_id 불일치)를 주입해 그 절만 fire하는 `test_get_draft_version_rejects_cross_project_version_ownership`를 추가했다. mutation 증명: 절 제거 시 FAIL, 복원 시 PASS → defense-in-depth 분기를 양방향 lock. 추가로 API contract test `test_get_version_cross_project_returns_404`로 사용자 표면 격리도 잠금.
+- Issue #2(비차단): archived project/draft의 version list/read 동작을 `test_archive_preserves_version_read`로 lock(SoT §115 read-allowed).
+- Issue #3(비차단): detail payload의 `idempotency_key` 미노출 assertion을 detail test에 추가(기존 list만 있었음).
+- R2(문서): work_log/CHANGELOG의 부정확 인용 "plan 01 §13/§30"을 canonical "SoT v1.4 §96–134 + plan 01 L50–95"로 교정. plan 01은 § 기호를 쓰지 않으며 SoT에 §13/§30 절은 없다.
+- 전체 193개(Mongo 미연결 25 skip), replica set 연결 시 전부 통과.
 
 ## Next steps
 
