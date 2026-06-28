@@ -277,6 +277,21 @@
 - O2 보강: 한글 raw text `# 장면\n\n민아는 파란 문을 열었다.`로 multibyte source_ref 회귀를 추가했다. `파란`의 Unicode code point offset과 UTF-8 byte offset이 다름을 먼저 확인하고, code point offset으로 `create_source_ref`가 정확한 quote를 재구성함을 잠갔다.
 - 재검증: `python3 -m unittest tests.test_core_sot_fixture -v` → 3개 통과, `timeout 90 python3 -m unittest discover -s tests` → 214개 통과(27 skip).
 
+## Mongo index setup residual regression
+
+- 변경 파일: `services/application/app/core_sot/mongo_repository.py`, `tests/test_core_sot_mongo_indexes.py`(신규).
+- 배경: HANDOFF의 Slice 1 잔여 회귀 후보 중 "index 부재/충돌 시 동작"이 아직 직접 잠겨 있지 않았다. Phase 3의 archive 후 파생 인덱스 stale 이벤트는 아직 Draft 계약이라 이번 범위에서 제외했다.
+- 구현: `ensure_indexes()`가 `draft_versions` unique idempotency index(`uniq_save_request`), `source_blocks` snapshot/block index(`blocks_by_snapshot`), `source_refs` project/snapshot index(`source_refs_by_snapshot`)를 계속 생성하되, MongoDB가 기존 충돌 index 등으로 `OperationFailure`를 반환하면 stable `MongoRepositorySetupError`로 감싼다.
+- 회귀: 실제 Mongo 없이 fake collection으로 absent-index setup 호출을 검증하고, 충돌 index 실패가 save/idempotency 흐름의 `DuplicateSaveRequest`로 오인되지 않고 setup error로 표면화됨을 잠갔다. 테스트 docstring에 under-strict/over-strict guard를 명시했다.
+- pattern sweep: `rg -n "create_index|ensure_indexes|OperationFailure|DuplicateKeyError" services tests`로 인덱스 생성 경로가 `MongoCoreSotRepository.ensure_indexes()` 단일 경로임을 확인했다.
+
+### 검증
+
+- `python3 -m unittest tests.test_core_sot_mongo_indexes -v` → 2개 통과.
+- `python3 -m py_compile services/application/app/core_sot/mongo_repository.py tests/test_core_sot_mongo_indexes.py` 통과.
+- `timeout 90 python3 -m unittest discover -s tests` → 216개 통과(27 skip).
+
 ## Next steps
 
+- Slice 1 잔여 후보 중 archive 후 파생 인덱스 stale 이벤트는 Phase 3 indexing 계약이 확정된 뒤 처리한다.
 - 동시성이 필요해지면 fallback (a) 보강 재검토(현재는 single-writer 계약으로 닫힘, R2).

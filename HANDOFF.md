@@ -69,10 +69,11 @@
 - project/draft rename API가 추가됐다(2026-06-28). `PATCH /projects/{id}`·`PATCH /projects/{id}/drafts/{draft_id}`. 없음/cross-project 404, archived rename은 409(쓰기차단 계약).
 - archive API endpoint가 추가돼 Core SOT CRUD가 API로 완성됐다(2026-06-28). `DELETE /projects/{id}`·`DELETE /projects/{id}/drafts/{draft_id}` → archive(soft delete, §115). archived 200 반환, 없음/cross-project 404, 재archive idempotent. 이로써 project/draft는 create·list·get·rename·archive 전부 API로 제공된다.
 - SourceRef persistence가 추가돼 Slice 1이 마무리됐다(2026-06-28, R3 폐쇄). `SourceRef`에 `id`/`project_id`를 더하고 `create_source_ref`가 `source_refs` collection에 persist, `get_source_ref`는 project_id 격리를 강제한다. archive 후 source_ref 보존을 in-memory+Mongo(양 경로) 회귀로 잠갔다(SoT §113 충족, 계약 변경 없음). source_ref ↔ candidate 연결은 Phase 2 범위.
+- Mongo index setup 잔여 회귀가 보강됐다(2026-06-28). `ensure_indexes()`는 required Core SOT index 3종을 생성하고, 기존 충돌 index 등 Mongo `OperationFailure`는 stable `MongoRepositorySetupError`로 표면화한다. 실제 Mongo 없이 absent-index 호출과 conflict mapping을 단위 회귀로 잠갔다.
 
 ## Next Tasks
 
-1. Slice 1 잔여 회귀 후보: index 부재/충돌 시 동작, archive 후 파생 인덱스 stale 이벤트. (fallback 동시성 race는 SoT v1.4 single-writer 제약으로 contract out 됨; 동시성 필요 시에만 (a) 보강 재검토.)
+1. Slice 1 잔여 회귀 후보: archive 후 파생 인덱스 stale 이벤트. Phase 3 indexing 계약이 Draft라 현재는 구현하지 않는다. (fallback 동시성 race는 SoT v1.4 single-writer 제약으로 contract out 됨; 동시성 필요 시에만 (a) 보강 재검토.)
 2. Phase 2 source_ref 정책 결정: create_source_ref idempotency — 현재 같은 span 재호출 시 매번 새 ref, §111은 draft save만 규정하므로 중복 ref 정책을 Phase 2에서 결정. (archive 후 source_ref 생성 허용 여부는 SoT v1.5에서 "허용"으로 확정·회귀 lock됨.)
 3. Application/Worker가 gateway `/v1/generate`를 호출하는 runtime wiring은 Phase payload/tool handler와 model tool-call wire format이 확정된 뒤 별도 slice로 구현한다.
 4. runner domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
@@ -120,6 +121,7 @@
 - LLM Gateway client Docker 런타임 검증(2026-06-28): focused gateway/provider/httpx 18개 통과(provider error 5종→HTTP status subTest 포함), `docker compose config` 통과, `COMPOSE_BAKE=false docker compose build gateway` 성공, `docker compose up -d gateway` 후 `/health/live` → `{"status":"ok"}` 및 container `healthy` 확인. 외부 llama.cpp readiness는 별도 운영 endpoint 의존이라 live smoke 범위에서 제외.
 - Verification follow-up(2026-06-28): `docs/verifications/2026-06-28/gateway_compose.md` 합격 기록 반영. application API tests의 `fastapi.testclient.TestClient` hang을 test-only ASGITransport wrapper로 교체해 전체 discovery가 종료되게 했다.
 - Core SOT reusable fixture 자체 회귀(2026-06-28): `python3 -m unittest tests.test_core_sot_fixture -v` 3개 통과, 전체 discovery 214개 통과(27 skip). 잠근 범위: deterministic raw snapshot hash, block index/kind/order/offset/text, source_ref quote/hash/project/block 연결, idempotent replay, multibyte Unicode code point offset.
+- Mongo index setup 잔여 회귀(2026-06-28): `python3 -m unittest tests.test_core_sot_mongo_indexes -v` 2개 통과, `python3 -m py_compile services/application/app/core_sot/mongo_repository.py tests/test_core_sot_mongo_indexes.py` 통과, 전체 discovery 216개 통과(27 skip). 잠근 범위: required index 3종 absent-index 생성 호출, conflicting pre-existing index의 `MongoRepositorySetupError` 매핑.
 - Core SOT MongoDB adapter 독립 재검증(2026-06-28): **조건부 합격 → R1 보강으로 합격 조건 충족**. 기록 `docs/verifications/2026-06-28/mongo_adapter_recheck.md`. 168개·양 경로 17개 재현, 핵심 persistence/retention 계약 양방향 lock 확인. R1(pymongo 미설치 시 discovery 깨짐) 해결: import try/except + skip, pymongo 차단 후 `errors=1`→`errors=0, skipped=17` 복원. R2(fallback 동시성 bug) 사용자 결정 option (b)로 single-writer 제약을 SoT v1.4/plan/adapter에 명시. R3(`source_refs` 미persist)는 SourceRef persistence slice 추적.
 - completion criteria 계약 독립 검증(2026-06-24): 조건부 합격. 워커 보고·내부 일관성·cross-reference 4종 독립 확인, blocking 없음. 비차단 risk R1/R2(matrix 비대칭)·R3(self-report 정의 갭)를 소유자 결정으로 본 slice에서 즉시 보강했다. 기록 `docs/verifications/2026-06-24/completion_criteria_contract.md`
 - Slice 0.6 독립 검증(2026-06-24): 합격. httpx MockTransport/proxy/close 경계 6개 회귀 통과, `except` 순서 load-bearing 가정 4종 검증. 독립 검증 환경에서 `HttpxJsonTransport` 경유 actual adapter live smoke 완료(content `연결 확인 완료`, finish_reason=stop). 기록 `docs/verifications/2026-06-24/llm_gateway_slice_0_6_httpx.md`
@@ -199,6 +201,7 @@ tests/
 ├── test_agent_loop_resolution.py
 ├── test_core_sot.py
 ├── test_core_sot_fixture.py
+├── test_core_sot_mongo_indexes.py
 ├── test_core_sot_mongo.py
 └── test_application_api.py
 scripts/

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from bson import ObjectId
 from pymongo import ASCENDING, MongoClient
-from pymongo.errors import DuplicateKeyError
+from pymongo.errors import DuplicateKeyError, OperationFailure
 
 from services.application.app.core_sot.models import (
     BlockKind,
@@ -40,6 +40,10 @@ from services.application.app.core_sot.models import (
 from services.application.app.core_sot.repository import DuplicateSaveRequest
 
 DEFAULT_DB_NAME = "ai_writing_system"
+
+
+class MongoRepositorySetupError(RuntimeError):
+    """Raised when MongoDB cannot install the required Core SOT indexes."""
 
 
 class MongoCoreSotRepository:
@@ -78,23 +82,28 @@ class MongoCoreSotRepository:
         )
 
     def ensure_indexes(self) -> None:
-        self._versions.create_index(
-            [
-                ("project_id", ASCENDING),
-                ("draft_id", ASCENDING),
-                ("idempotency_key", ASCENDING),
-            ],
-            unique=True,
-            name="uniq_save_request",
-        )
-        self._blocks.create_index(
-            [("snapshot_id", ASCENDING), ("block_index", ASCENDING)],
-            name="blocks_by_snapshot",
-        )
-        self._source_refs.create_index(
-            [("project_id", ASCENDING), ("snapshot_id", ASCENDING)],
-            name="source_refs_by_snapshot",
-        )
+        try:
+            self._versions.create_index(
+                [
+                    ("project_id", ASCENDING),
+                    ("draft_id", ASCENDING),
+                    ("idempotency_key", ASCENDING),
+                ],
+                unique=True,
+                name="uniq_save_request",
+            )
+            self._blocks.create_index(
+                [("snapshot_id", ASCENDING), ("block_index", ASCENDING)],
+                name="blocks_by_snapshot",
+            )
+            self._source_refs.create_index(
+                [("project_id", ASCENDING), ("snapshot_id", ASCENDING)],
+                name="source_refs_by_snapshot",
+            )
+        except OperationFailure as exc:
+            raise MongoRepositorySetupError(
+                "failed to create required Core SOT MongoDB indexes"
+            ) from exc
 
     # -- identifier generation ------------------------------------------------
 
