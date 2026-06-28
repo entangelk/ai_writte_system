@@ -170,6 +170,13 @@ transport/HTTP status mapper와 `LlamaCppProvider`는 `JsonTransport` 경계로 
 - timeout/cancel 후 memory 회수
 - 연속 실행 시 OOM/crash 여부
 
+현재 repo에는 live endpoint 관측을 위한 lightweight runner
+`scripts/benchmark_llm_provider.py`가 있다. 이 runner는 Gateway provider
+계약을 통해 `short_smoke`, `json_extraction`, `continue_scene` case의
+latency/token/error summary를 JSON으로 출력한다. 실제 budget/retry
+production 기본값은 이 report를 live Gemma/llama.cpp endpoint에서 생성한
+뒤 별도 결정한다.
+
 ### 품질 task
 
 - entity/event 등 최초 추출

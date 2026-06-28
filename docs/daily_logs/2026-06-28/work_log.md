@@ -298,7 +298,21 @@
 - O2 보강: `source_refs_by_snapshot`은 현재 query path가 없어 speculative/dead index였으므로 제거했다. `source_refs`는 `_id` 기반 `get_source_ref` 조회만 사용하며, list-by-snapshot API가 생기기 전까지 by-snapshot index는 required contract가 아니다.
 - O3/O4 판단: `object.__new__` 기반 단위 테스트는 실제 Mongo 없는 index-call contract를 잠그기 위한 의도적 범위이고, `__init__`→`ensure_indexes` 통합은 기존 live Mongo slice 담당으로 유지한다. `OperationFailure`만 좁게 catch하는 것도 "index 부재/충돌" 범위에 맞아 유지한다.
 
+## Gemma Q4 benchmark harness
+
+- 변경 파일: `scripts/benchmark_llm_provider.py`(신규), `tests/test_llm_benchmark_script.py`(신규), `docs/plans/llm-gateway.md`, `HANDOFF.md`, `CHANGELOG.md`.
+- 배경: HANDOFF의 남은 실행 가능 작업은 "Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도 확정"이었다. 실제 숫자 확정은 live Gemma endpoint와 hardware 상태가 필요하므로, 추측값을 넣지 않고 먼저 재현 가능한 benchmark runner를 추가했다.
+- 구현: `benchmark_llm_provider.py`가 기존 `HttpxJsonTransport` + `LlamaCppProvider` 계약으로 `short_smoke`, `json_extraction`, `continue_scene` 3개 case를 반복 실행한다. 각 run은 latency, prompt/completion/total tokens, output tokens/sec, finish_reason, provider error literal/retryable 여부를 JSON으로 기록한다. 출력 report는 metadata, per-case summary, raw runs를 포함한다.
+- 범위: benchmark harness만 추가했다. production `BudgetPolicy` 숫자 기본값, retry cap 기본값, task별 generation profile은 실제 endpoint에서 report를 만든 뒤 결정한다.
+- 사용 예: `python3 scripts/benchmark_llm_provider.py --base-url http://host.docker.internal:9080 --repeats 3 --warmups 1`.
+
+### 검증
+
+- `python3 -m unittest tests.test_llm_benchmark_script -v` → 5개 통과.
+- `python3 -m py_compile scripts/benchmark_llm_provider.py tests/test_llm_benchmark_script.py` 통과.
+
 ## Next steps
 
 - Slice 1 잔여 후보 중 archive 후 파생 인덱스 stale 이벤트는 Phase 3 indexing 계약이 확정된 뒤 처리한다.
+- 실제 Gemma/llama.cpp endpoint에서 `scripts/benchmark_llm_provider.py`를 실행하고, latency/token/오류율 report를 근거로 budget/retry production 기본값을 확정한다.
 - 동시성이 필요해지면 fallback (a) 보강 재검토(현재는 single-writer 계약으로 닫힘, R2).
