@@ -207,6 +207,40 @@ class ApplicationApiTest(unittest.TestCase):
         )
         self.assertEqual(project_blocked.status_code, 409)
 
+    def test_rename_draft_blocked_when_only_project_archived(self):
+        # Isolates rename_draft's `project.archived` guard: the draft itself is
+        # active, so only the project-archived branch can block. Removing that
+        # guard would wrongly allow renaming a draft in an archived project.
+        service = CoreSotService(InMemoryCoreSotRepository())
+        client = TestClient(create_app(service))
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        service.archive_project(project_id=project["id"])  # draft stays active
+
+        blocked = client.patch(
+            f"/projects/{project['id']}/drafts/{draft['id']}",
+            json={"title": "Nope"},
+        )
+
+        self.assertEqual(blocked.status_code, 409)
+
+    def test_rename_project_allowed_when_only_draft_archived(self):
+        # should-fire: an archived draft must not block renaming its project.
+        service = CoreSotService(InMemoryCoreSotRepository())
+        client = TestClient(create_app(service))
+        project = client.post("/projects", json={"name": "Old"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        service.archive_draft(project_id=project["id"], draft_id=draft["id"])
+
+        renamed = client.patch(f"/projects/{project['id']}", json={"name": "New"})
+
+        self.assertEqual(renamed.status_code, 200)
+        self.assertEqual(renamed.json()["name"], "New")
+
     def test_version_list_and_detail_read_back_saved_content(self):
         client = TestClient(create_app())
         project = client.post("/projects", json={"name": "Novel"}).json()

@@ -174,7 +174,7 @@
 ## project/draft rename API (CRUD "수정" 완성)
 
 - 변경 파일: `service.py`(`rename_project`/`rename_draft`), `main.py`(`RenameProjectRequest`/`RenameDraftRequest` + PATCH 엔드포인트 2종), `tests/test_application_api.py`·`tests/test_core_sot_mongo.py`(회귀).
-- 배경: plan 01 §13 CRUD 범위(생성·조회·목록·수정·보관) 중 "수정"이 유일한 미구현이었다.
+- 배경: plan 01 L13–14 CRUD 범위(생성·조회·목록·수정·보관) 중 "수정"이 유일한 미구현이었다(canonical: plan 01 L13–14 + SoT §115).
 - API: `PATCH /projects/{id}`{name}, `PATCH /projects/{id}/drafts/{draft_id}`{title}. 없음→404, cross-project draft→404.
 - archive=쓰기차단 계약: archived project/draft의 rename은 차단(409 Archived). 기존 save_draft/create_draft가 archived에서 쓰기를 막는 패턴과 일관(읽기 허용/쓰기 차단). spec 침묵 신규 강제가 아니라 확립된 archive 패턴의 연장.
 - repo 변경 없음(기존 put_project/put_draft 재사용), Protocol 변경 없음. SoT 계약 변경 없음(SoT v1.4 §96–134 + plan 01 L50–95 수정 계약 구현).
@@ -185,8 +185,19 @@
 - Mongo mixin 1종(양 경로): persisted rename round-trip(fresh service 재조회).
 - 전체: Mongo 미연결 199개(27 skip), 단일 노드 replica set 연결 시 199개 전부 통과.
 
+### 재검증 후 보강 (조건부 합격 → 합격)
+
+- 독립 재검증(`docs/verifications/2026-06-28/rename_api.md`, 조건부 합격)의 차단 Issue #1과 비차단 #2/R2 대응.
+- Issue #1(차단): `rename_draft`의 `project.archived` 절(project archived + draft active)이 어느 test에도 안 닿았다. `test_rename_draft_blocked_when_only_project_archived`(project만 archive, draft active → 409)로 그 절만 isolation해 lock. mutation 증명: 절 제거 시 FAIL, 복원 시 PASS.
+- Issue #2(비차단 should-fire): `test_rename_project_allowed_when_only_draft_archived`(draft archived인데 project active → rename_project 200) 추가.
+- R2(문서): work_log/CHANGELOG의 rename 인용 "plan 01 §13"을 canonical "plan 01 L13–14 + SoT §115"로 교정.
+- R1(추적): archived 쓰기차단(create/save/rename 공통)이 SoT §115에 명문화돼 있지 않은 spec-silent 사항. rename 단독 문제가 아니므로 SoT amendment 권고로 남긴다(사용자 결정 필요, 아래 Next steps).
+- 전체 201개(Mongo 미연결 27 skip), replica set 연결 시 전부 통과.
+
 ## Next steps
 
 - gateway 서비스 Dockerfile/compose 편입(현재는 application+Mongo만; gateway는 외부 llama.cpp endpoint 의존, Slice 1 범위 밖).
+- (R1 권고, 사용자 결정 필요) SoT §115에 "archive = 읽기 허용·신규 쓰기(생성·저장·수정) 차단"을 명문화해 반복 지적된 spec-silent 갭을 닫는다. 현재 create/save/rename은 이미 이 패턴을 구현·회귀로 잠갔다.
+- archive API endpoint(현재 archive는 service-only).
 - 후속 Phase 재사용 fixture(plan 01 최소 산출물 #7)는 실제 소비자(Phase 2)가 생기면 그 shape에 맞춰 추가.
 - 동시성이 필요해지면 fallback (a) 보강 재검토(현재는 single-writer 계약으로 닫힘, R2).
