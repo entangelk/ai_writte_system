@@ -66,10 +66,49 @@ def create_app(service: CoreSotService | None = None) -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    def _project_payload(project) -> dict[str, object]:
+        return {"id": project.id, "name": project.name, "archived": project.archived}
+
+    def _draft_payload(draft) -> dict[str, object]:
+        return {
+            "id": draft.id,
+            "project_id": draft.project_id,
+            "title": draft.title,
+            "archived": draft.archived,
+        }
+
     @app.post("/projects")
     async def create_project(request: CreateProjectRequest) -> dict[str, object]:
         project = core_sot.create_project(name=request.name)
-        return {"id": project.id, "name": project.name, "archived": project.archived}
+        return _project_payload(project)
+
+    @app.get("/projects")
+    async def list_projects() -> dict[str, object]:
+        return {"projects": [_project_payload(p) for p in core_sot.list_projects()]}
+
+    @app.get("/projects/{project_id}")
+    async def get_project(project_id: str) -> dict[str, object]:
+        try:
+            project = core_sot.get_project(project_id=project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _project_payload(project)
+
+    @app.get("/projects/{project_id}/drafts")
+    async def list_drafts(project_id: str) -> dict[str, object]:
+        try:
+            drafts = core_sot.list_drafts(project_id=project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"drafts": [_draft_payload(d) for d in drafts]}
+
+    @app.get("/projects/{project_id}/drafts/{draft_id}")
+    async def get_draft(project_id: str, draft_id: str) -> dict[str, object]:
+        try:
+            draft = core_sot.get_draft(project_id=project_id, draft_id=draft_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _draft_payload(draft)
 
     @app.post("/projects/{project_id}/drafts")
     async def create_draft(
@@ -81,12 +120,7 @@ def create_app(service: CoreSotService | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Archived as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return {
-            "id": draft.id,
-            "project_id": draft.project_id,
-            "title": draft.title,
-            "archived": draft.archived,
-        }
+        return _draft_payload(draft)
 
     @app.post("/projects/{project_id}/drafts/{draft_id}/versions")
     async def save_draft(

@@ -124,8 +124,23 @@
 - #1(보강): `get_source_ref` 존재하지 않는 id→NotFound 명시 회귀를 추가했다(`test_get_source_ref_missing_id_raises_not_found`). 전체 176개로 통과.
 - #2/#3(추적): archive 후 신규 source_ref 생성 정책과 create_source_ref idempotency는 모두 §113/§111 spec-silent이므로 코드 변경 없이 HANDOFF Next Tasks #5(Phase 2 정책 결정)로 반영했다.
 
+## project/draft list/get API (Core SOT round-trip 완성)
+
+- 변경 파일: `repository.py`(`list_projects`/`list_drafts` Protocol), `service.py`(InMemory list 구현 + service `get_project`/`list_projects`/`get_draft`/`list_drafts`), `mongo_repository.py`(Mongo list 구현, `_id` ASCENDING 정렬), `main.py`(GET 엔드포인트 4종 + payload 헬퍼), `tests/test_application_api.py`·`tests/test_core_sot_mongo.py`(회귀).
+- 배경: create/save만 있고 조회가 없어 Core SOT round-trip이 불완전했다. 후속 Phase가 의존할 public read 계약을 확정한다.
+- API: `GET /projects`(목록), `GET /projects/{id}`(단건, 없으면 404), `GET /projects/{id}/drafts`(프로젝트별 목록, project 없으면 404), `GET /projects/{id}/drafts/{draft_id}`(단건, 없음/cross-project 404). project_id 격리는 service의 `_require_draft`(project_id 불일치 시 NotFound)와 `list_drafts`(project_id 필터)로 강제.
+- 응답 shape는 기존 create 응답과 동일(project: id/name/archived, draft: id/project_id/title/archived). `_project_payload`/`_draft_payload` 헬퍼로 통일하고 기존 create_draft도 헬퍼를 재사용하도록 정리.
+- 정렬: in-memory는 삽입(생성) 순서, Mongo는 `_id`(ObjectId 시간순) ASCENDING. 범위: list/get만. rename/update와 version read는 후속.
+- SoT 계약 변경 없음(plan 01 §13 "프로젝트/draft 조회·목록" 구현).
+
+### 검증
+
+- API 회귀 4종: project list+get round-trip, 없는 project→404, draft list+get+project 격리(B는 A의 draft 미노출), cross-project/없는 project→404.
+- Mongo mixin 1종(fallback/transaction 양 경로 = 2): persisted project/draft list/get round-trip + 격리(fresh service 재조회).
+- 전체: Mongo 미연결 182개(23 skip), 단일 노드 replica set 연결 시 182개 전부 통과.
+
 ## Next steps
 
 - gateway 서비스 Dockerfile/compose 편입(현재는 application+Mongo만; gateway는 외부 llama.cpp endpoint 의존, Slice 1 범위 밖).
-- 후속 Phase 재사용 fixture(plan 01 최소 산출물 #7)와 project/draft list/get API는 별도 작업으로 남김.
+- project/draft rename(수정)·version read API와 후속 Phase 재사용 fixture(plan 01 최소 산출물 #7)는 별도 작업으로 남김.
 - 동시성이 필요해지면 fallback (a) 보강 재검토(현재는 single-writer 계약으로 닫힘, R2).

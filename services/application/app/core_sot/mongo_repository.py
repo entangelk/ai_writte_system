@@ -124,12 +124,20 @@ class MongoCoreSotRepository:
             {"_id": project.id}, _project_doc(project), upsert=True
         )
 
+    def list_projects(self) -> tuple[Project, ...]:
+        cursor = self._projects.find().sort("_id", ASCENDING)
+        return tuple(_to_project(doc) for doc in cursor)
+
     def get_draft(self, draft_id: str) -> Draft | None:
         doc = self._drafts.find_one({"_id": draft_id})
         return _to_draft(doc) if doc else None
 
     def put_draft(self, draft: Draft) -> None:
         self._drafts.replace_one({"_id": draft.id}, _draft_doc(draft), upsert=True)
+
+    def list_drafts(self, project_id: str) -> tuple[Draft, ...]:
+        cursor = self._drafts.find({"project_id": project_id}).sort("_id", ASCENDING)
+        return tuple(_to_draft(doc) for doc in cursor)
 
     # -- save / lookups -------------------------------------------------------
 

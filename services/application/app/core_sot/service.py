@@ -97,11 +97,19 @@ class InMemoryCoreSotRepository:
     def put_project(self, project: Project) -> None:
         self.projects[project.id] = project
 
+    def list_projects(self) -> tuple[Project, ...]:
+        return tuple(self.projects.values())
+
     def get_draft(self, draft_id: str) -> Draft | None:
         return self.drafts.get(draft_id)
 
     def put_draft(self, draft: Draft) -> None:
         self.drafts[draft.id] = draft
+
+    def list_drafts(self, project_id: str) -> tuple[Draft, ...]:
+        return tuple(
+            draft for draft in self.drafts.values() if draft.project_id == project_id
+        )
 
     def get_version(self, version_id: str) -> DraftVersion | None:
         return self.versions.get(version_id)
@@ -160,6 +168,20 @@ class CoreSotService:
         )
         self._repo.put_draft(draft)
         return draft
+
+    def get_project(self, *, project_id: str) -> Project:
+        return self._require_project(project_id)
+
+    def list_projects(self) -> tuple[Project, ...]:
+        return self._repo.list_projects()
+
+    def get_draft(self, *, project_id: str, draft_id: str) -> Draft:
+        self._require_project(project_id)
+        return self._require_draft(project_id, draft_id)
+
+    def list_drafts(self, *, project_id: str) -> tuple[Draft, ...]:
+        self._require_project(project_id)
+        return self._repo.list_drafts(project_id)
 
     def save_draft(
         self,
