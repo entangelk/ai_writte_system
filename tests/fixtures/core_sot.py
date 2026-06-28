@@ -35,6 +35,7 @@ CONTENT_HASH = (
 
 @dataclass(frozen=True, slots=True)
 class ExpectedBlock:
+    block_index: int
     kind: BlockKind
     start_offset: int
     end_offset: int
@@ -61,17 +62,24 @@ class CoreSotFixture:
 
 
 EXPECTED_BLOCKS = (
-    ExpectedBlock(BlockKind.HEADING, 0, 11, "# Episode 1"),
-    ExpectedBlock(BlockKind.PARAGRAPH, 13, 40, "Mina opened the brass door."),
-    ExpectedBlock(BlockKind.SCENE_MARKER, 42, 45, "---"),
+    ExpectedBlock(1, BlockKind.HEADING, 0, 11, "# Episode 1"),
+    ExpectedBlock(2, BlockKind.PARAGRAPH, 13, 40, "Mina opened the brass door."),
+    ExpectedBlock(3, BlockKind.SCENE_MARKER, 42, 45, "---"),
     ExpectedBlock(
+        4,
         BlockKind.PARAGRAPH,
         47,
         85,
         "The corridor answered with blue light.",
     ),
-    ExpectedBlock(BlockKind.HEADING, 87, 95, "## Notes"),
-    ExpectedBlock(BlockKind.PARAGRAPH, 97, 129, "Mina remembered the old promise."),
+    ExpectedBlock(5, BlockKind.HEADING, 87, 95, "## Notes"),
+    ExpectedBlock(
+        6,
+        BlockKind.PARAGRAPH,
+        97,
+        129,
+        "Mina remembered the old promise.",
+    ),
 )
 
 EXPECTED_SOURCE_REFS = (
