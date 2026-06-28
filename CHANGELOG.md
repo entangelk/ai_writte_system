@@ -2,6 +2,8 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-28 | SoT v1.4: non-transaction fallback single-writer 제약 명시(R2) | [work log](docs/daily_logs/2026-06-28/work_log.md) |
+| 2026-06-28 | Core SOT MongoDB adapter + transaction-backed repository 추가 | [work log](docs/daily_logs/2026-06-28/work_log.md) |
 | 2026-06-26 | Core SOT 검증 보강(C1~C3) | [work log](docs/daily_logs/2026-06-26/work_log.md) |
 | 2026-06-26 | Core SOT 최소 구현 골격 추가 | [work log](docs/daily_logs/2026-06-26/work_log.md) |
 | 2026-06-26 | Core SOT persistence/retention 계약 승인 | [work log](docs/daily_logs/2026-06-26/work_log.md) |
@@ -13,6 +15,20 @@
 | 2026-06-25 | AgentLoopRunner A3 decision 합성 회귀 구현 | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-25 | AgentLoopRunner A2 registry 계약 회귀 구현 | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-24 | 개발 계획 문서 구조 도입 | [work log](docs/daily_logs/2026-06-24/work_log.md) |
+
+## 2026-06-28
+
+### Added
+
+- Core SOT를 실제 MongoDB 저장소에 연결했다. `services/application/app/core_sot/`에 method 기반 `CoreSotRepository` Protocol(`repository.py`)과 pymongo(sync) 기반 `MongoCoreSotRepository`(`mongo_repository.py`)를 추가했다. 승인된 persistence/retention 계약(v1.3)을 구현으로 충족한다: `draft_versions`의 unique index `(project_id, draft_id, idempotency_key)`로 idempotency 경계를 강제하고, transaction 경로(기본, Docker/replica-set)는 save write set을 원자적으로 commit하며, non-transaction fallback(local/test)은 retry guard·orphan cleanup·ordered write를 갖춘다. `CoreSotService`는 dict 직접접근 대신 Protocol method만 사용하도록 리팩터됐고 기존 in-memory 골격과 14개 단위 테스트는 그대로 유지된다. `tests/test_core_sot_mongo.py`에 skip-aware live 통합 테스트(fallback+transaction 17개)를 추가했고 단일 노드 replica set에서 전부 통과했다.
+
+사용자는 transaction을 실제로 검증해야 한다는 이유로 mongomock 대신 real pymongo + live Mongo 통합 테스트(미가용 시 skip)를 선택했고, 로컬 단일 사용자 MVP 단순성을 위해 sync 드라이버(pymongo)를 선택했다. 이로써 통합 테스트 층은 인프라를 요구하지만, 기본 단위 스위트는 skip-aware로 여전히 인프라 없이 실행된다.
+
+### Changed
+
+- 독립 재검증(`docs/verifications/2026-06-28/mongo_adapter_recheck.md`, 조건부 합격) 대응으로 SoT를 v1.4로 갱신하고 R1~R3를 보강했다. R1(load-bearing): `tests/test_core_sot_mongo.py`의 pymongo/adapter import를 try/except로 감싸 pymongo 미설치 시에도 `unittest discover`가 깨지지 않고 skip되도록 복원했다. R2(사용자 결정 option b): non-transaction fallback을 single-writer 전용으로 SoT §112 / plan §01 / adapter docstring에 명시했다(동시성 안전은 transaction 기본 경로 담당). R3: `source_refs` 보존(§113) literal은 SourceRef persistence slice 추적 포인트로 남겼다.
+
+R2는 사용자 결정이다. fallback 동시성 correctness bug에 대해, fallback이 spec상 "local/test 제한 경로"이고 production이 transaction path(동시성 안전)를 쓰므로, 제한된 경로에 동시성 방어 복잡도를 더하는 대신 single-writer 제약을 계약에 명시해 닫는 방향을 선택했다.
 
 ## 2026-06-26
 

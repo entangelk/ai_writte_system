@@ -19,6 +19,10 @@ from services.application.app.core_sot.models import (
     SourceRef,
     SourceSnapshot,
 )
+from services.application.app.core_sot.repository import (
+    CoreSotRepository,
+    DuplicateSaveRequest,
+)
 from services.application.app.core_sot.splitter import (
     content_hash,
     materialize_blocks,
@@ -81,6 +85,27 @@ class InMemoryCoreSotRepository:
     def version_count(self, draft_id: str) -> int:
         return len(self._version_ids_by_draft.get(draft_id, ()))
 
+    def get_project(self, project_id: str) -> Project | None:
+        return self.projects.get(project_id)
+
+    def put_project(self, project: Project) -> None:
+        self.projects[project.id] = project
+
+    def get_draft(self, draft_id: str) -> Draft | None:
+        return self.drafts.get(draft_id)
+
+    def put_draft(self, draft: Draft) -> None:
+        self.drafts[draft.id] = draft
+
+    def get_version(self, version_id: str) -> DraftVersion | None:
+        return self.versions.get(version_id)
+
+    def get_snapshot(self, snapshot_id: str) -> SourceSnapshot | None:
+        return self.snapshots.get(snapshot_id)
+
+    def get_blocks(self, snapshot_id: str) -> tuple[SourceBlock, ...]:
+        return self.blocks_by_snapshot.get(snapshot_id, ())
+
     def find_save_request(
         self, project_id: str, draft_id: str, idempotency_key: str
     ) -> str | None:
@@ -104,12 +129,12 @@ class InMemoryCoreSotRepository:
 
 
 class CoreSotService:
-    def __init__(self, repository: InMemoryCoreSotRepository) -> None:
+    def __init__(self, repository: CoreSotRepository) -> None:
         self._repo = repository
 
     def create_project(self, *, name: str) -> Project:
         project = Project(id=self._repo.next_project_id(), name=name)
-        self._repo.projects[project.id] = project
+        self._repo.put_project(project)
         return project
 
     def create_draft(self, *, project_id: str, title: str) -> Draft:
@@ -121,7 +146,7 @@ class CoreSotService:
             project_id=project_id,
             title=title,
         )
-        self._repo.drafts[draft.id] = draft
+        self._repo.put_draft(draft)
         return draft
 
     def save_draft(
@@ -165,12 +190,19 @@ class CoreSotService:
             snapshot_id=snapshot_id,
             raw_blocks=split_source_blocks(raw_text),
         )
-        self._repo.record_save(
-            idempotency_key=idempotency_key,
-            version=version,
-            snapshot=snapshot,
-            blocks=blocks,
-        )
+        try:
+            self._repo.record_save(
+                idempotency_key=idempotency_key,
+                version=version,
+                snapshot=snapshot,
+                blocks=blocks,
+            )
+        except DuplicateSaveRequest:
+            committed_version_id = self._repo.find_save_request(
+                project_id, draft_id, idempotency_key
+            )
+            assert committed_version_id is not None
+            return self._save_result(committed_version_id, idempotent_replay=True)
         return SaveDraftResult(
             draft_version=version,
             snapshot=snapshot,
@@ -186,7 +218,7 @@ class CoreSotService:
         start_offset: int,
         end_offset: int,
     ) -> SourceRef:
-        snapshot = self._repo.snapshots.get(snapshot_id)
+        snapshot = self._repo.get_snapshot(snapshot_id)
         if snapshot is None or snapshot.project_id != project_id:
             raise NotFound("snapshot not found")
         if (
@@ -198,7 +230,7 @@ class CoreSotService:
         ):
             raise InvalidSourceRef("invalid source_ref span")
 
-        for block in self._repo.blocks_by_snapshot.get(snapshot_id, ()):
+        for block in self._repo.get_blocks(snapshot_id):
             if block.start_offset <= start_offset and end_offset <= block.end_offset:
                 return SourceRef(
                     snapshot_id=snapshot_id,
@@ -213,20 +245,22 @@ class CoreSotService:
     def archive_project(self, *, project_id: str) -> Project:
         project = self._require_project(project_id)
         archived = replace(project, archived=True)
-        self._repo.projects[project_id] = archived
+        self._repo.put_project(archived)
         return archived
 
     def archive_draft(self, *, project_id: str, draft_id: str) -> Draft:
         self._require_project(project_id)
         draft = self._require_draft(project_id, draft_id)
         archived = replace(draft, archived=True)
-        self._repo.drafts[draft_id] = archived
+        self._repo.put_draft(archived)
         return archived
 
     def _save_result(self, version_id: str, *, idempotent_replay: bool) -> SaveDraftResult:
-        version = self._repo.versions[version_id]
-        snapshot = self._repo.snapshots[version.snapshot_id]
-        blocks = self._repo.blocks_by_snapshot[version.snapshot_id]
+        version = self._repo.get_version(version_id)
+        assert version is not None
+        snapshot = self._repo.get_snapshot(version.snapshot_id)
+        assert snapshot is not None
+        blocks = self._repo.get_blocks(version.snapshot_id)
         return SaveDraftResult(
             draft_version=version,
             snapshot=snapshot,
@@ -235,13 +269,13 @@ class CoreSotService:
         )
 
     def _require_project(self, project_id: str) -> Project:
-        project = self._repo.projects.get(project_id)
+        project = self._repo.get_project(project_id)
         if project is None:
             raise NotFound("project not found")
         return project
 
     def _require_draft(self, project_id: str, draft_id: str) -> Draft:
-        draft = self._repo.drafts.get(draft_id)
+        draft = self._repo.get_draft(draft_id)
         if draft is None or draft.project_id != project_id:
             raise NotFound("draft not found")
         return draft

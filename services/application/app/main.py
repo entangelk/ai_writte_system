@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -12,6 +14,35 @@ from services.application.app.core_sot.service import (
     InMemoryCoreSotRepository,
     NotFound,
 )
+
+
+def _default_service() -> CoreSotService:
+    """Build the service from environment configuration.
+
+    Uses MongoDB when ``CORE_SOT_MONGO_URI`` is set (transaction-backed by
+    default, the approved Docker runtime), otherwise the in-memory skeleton for
+    local/test runs without infrastructure.
+    """
+
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if not uri:
+        return CoreSotService(InMemoryCoreSotRepository())
+
+    # Imported lazily so the in-memory path needs no pymongo install.
+    from services.application.app.core_sot.mongo_repository import (
+        DEFAULT_DB_NAME,
+        MongoCoreSotRepository,
+    )
+
+    use_transactions = os.environ.get(
+        "CORE_SOT_MONGO_TRANSACTIONS", "true"
+    ).lower() not in {"0", "false", "no"}
+    repository = MongoCoreSotRepository.from_uri(
+        uri,
+        db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME),
+        use_transactions=use_transactions,
+    )
+    return CoreSotService(repository)
 
 
 class CreateProjectRequest(BaseModel):
@@ -29,7 +60,7 @@ class SaveDraftRequest(BaseModel):
 
 def create_app(service: CoreSotService | None = None) -> FastAPI:
     app = FastAPI(title="AI Writing System Application")
-    core_sot = service or CoreSotService(InMemoryCoreSotRepository())
+    core_sot = service or _default_service()
 
     @app.get("/health")
     async def health() -> dict[str, str]:

@@ -1,9 +1,9 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`  
-계약 버전: `v1.3`  
+계약 버전: `v1.4`  
 승인일: `2026-06-26`  
-최근 갱신일: `2026-06-26`  
+최근 갱신일: `2026-06-28`  
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
 적용 범위: 제품 경계, 서비스 책임, 데이터 정본, Gateway, AgentLoopRunner, Gate 합성, 검증 기록.
 
@@ -33,6 +33,7 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.4 | 2026-06-28 | non-transaction fallback을 single-writer 전용으로 명시. 동시성 안전은 transaction 기본 경로가 담당하고, fallback의 orphan cleanup/retry guard는 같은 writer의 순차 재시도에만 정의됨. | 사용자 결정(R2 option b), `docs/verifications/2026-06-28/mongo_adapter_recheck.md` |
 | v1.3 | 2026-06-26 | Core SOT persistence/retention 계약 승인: Mongo transaction 기본, 제한적 non-transaction fallback, explicit version save only, save idempotency key 필수, project/draft archive와 snapshot/version/source_ref 보존. | 사용자 승인 |
 | v1.2 | 2026-06-26 | Core SOT text/reference 계약 승인: raw snapshot 기준, Unicode code point offset, raw UTF-8 SHA-256 content hash, deterministic MVP source block split. Adaptive/length-based chunking은 파생 index layer 후속 후보로 분리. | 사용자 승인 |
 | v1.1 | 2026-06-26 | Slice 1 실행 경계 승인: monorepo+독립 LLM Gateway, FastAPI Application API, 느슨하게 분리 가능한 Worker 경계. frontend framework 최종 선택은 보류. | 사용자 승인 |
@@ -42,7 +43,7 @@
 
 | 문서 | 역할 | 지위 |
 |---|---|---|
-| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.3 |
+| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.4 |
 | [`plans/README.md`](plans/README.md) | 계획 문서 진입점과 Phase/MVP 관계 | Draft |
 | [`plans/00-foundations.md`](plans/00-foundations.md) | 전역 원칙과 제품 경계 | Draft |
 | [`plans/implementation-plan.md`](plans/implementation-plan.md) | 구현 순서, slice 상태, 검증 gate | Draft |
@@ -110,6 +111,7 @@
 - draft save는 명시적 version save만 지원한다. autosave는 MVP 범위가 아니며, 필요성이 확인될 때 별도 사용자 결정으로만 추가한다.
 - draft save request는 `idempotency_key`를 필수로 가진다. 같은 `project_id + draft_id + idempotency_key` 재시도는 같은 `draft_version`을 반환해야 한다.
 - Docker 기반 정상 runtime은 MongoDB transaction을 기본으로 사용한다. non-transaction fallback은 transaction을 사용할 수 없는 local/test 환경의 제한적 경로이며, write order, idempotency lookup, orphan cleanup/retry guard를 요구한다.
+- non-transaction fallback은 **single-writer 전용**이다. 같은 `(project_id, draft_id, idempotency_key)`에 대한 동시 draft save는 fallback에서 보장하지 않으며(orphan cleanup이 동시 writer의 committed dependents를 지울 수 있음), 동시성 안전이 필요한 runtime은 transaction 기본 경로를 사용한다. fallback의 orphan cleanup/retry guard는 같은 writer의 순차 재시도에 대해서만 정의된다.
 - project/draft 삭제는 MVP에서 archive로 처리한다. `source_snapshots`, `draft_versions`, `source_blocks`, `source_refs`는 보존한다.
 - archive/delete 이후 파생 인덱스는 stale 처리, version filter, rebuild 대상으로 다루며 MongoDB 정본 보존을 되돌리지 않는다.
 - 분석 후보의 부분 승인, 부분 저장, 나머지 retry는 Phase 2/6 review action idempotency 계약에서 다룬다. Slice 1 draft save idempotency와 섞지 않는다.

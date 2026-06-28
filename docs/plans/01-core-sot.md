@@ -76,6 +76,7 @@ save request
 - transaction 범위는 draft save의 load-bearing write set 전체다: `draft_versions`, `source_snapshots`, `source_blocks`, idempotency record 또는 save request record.
 - non-transaction fallback은 transaction을 사용할 수 없는 local/test 환경의 제한적 경로다.
 - fallback은 write order, idempotency lookup, orphan cleanup/retry guard를 가져야 하며, 후속 분석 성공을 MongoDB 저장 성공보다 먼저 응답하지 않는다.
+- fallback은 single-writer 전용이다(SoT v1.4). 같은 save request의 동시 진입은 보장하지 않으며, orphan cleanup/retry guard는 같은 writer의 순차 재시도에만 정의된다. 동시성 안전이 필요하면 transaction 기본 경로를 쓴다.
 - MVP는 명시적 version save만 지원한다.
 - autosave는 초기 구현 범위가 아니며, 실제 필요성이 확인될 때 별도 사용자 결정으로만 추가한다.
 - draft save request는 `idempotency_key`를 필수로 가진다.
