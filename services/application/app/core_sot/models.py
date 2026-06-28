@@ -66,6 +66,8 @@ class SourceBlock:
 
 @dataclass(frozen=True, slots=True)
 class SourceRef:
+    id: str
+    project_id: str
     snapshot_id: str
     block_id: str
     start_offset: int

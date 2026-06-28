@@ -272,6 +272,50 @@ class _MongoContractMixin:
         self.assertEqual(source_ref.quote, "두번째")
         self.assertEqual(source_ref.content_hash, result.snapshot.content_hash)
         self.assertEqual(source_ref.block_id, result.blocks[0].id)
+        # Persisted and reconstructable through a fresh read path.
+        self.assertEqual(self.repo.get_source_ref(source_ref.id), source_ref)
+
+    def test_archive_preserves_persisted_source_ref(self):
+        project, draft = self._project_and_draft()
+        result = self.service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text="Paragraph one.",
+            idempotency_key="save-1",
+        )
+        source_ref = self.service.create_source_ref(
+            project_id=project.id,
+            snapshot_id=result.snapshot.id,
+            start_offset=0,
+            end_offset=len("Paragraph"),
+        )
+
+        self.service.archive_project(project_id=project.id)
+
+        # SoT §113: source_refs are preserved after archive.
+        self.assertEqual(self.repo.get_source_ref(source_ref.id), source_ref)
+
+    def test_source_ref_get_enforces_project_isolation(self):
+        project_a = self.service.create_project(name="A")
+        project_b = self.service.create_project(name="B")
+        draft = self.service.create_draft(project_id=project_a.id, title="Episode 1")
+        result = self.service.save_draft(
+            project_id=project_a.id,
+            draft_id=draft.id,
+            raw_text="Paragraph one.",
+            idempotency_key="save-1",
+        )
+        source_ref = self.service.create_source_ref(
+            project_id=project_a.id,
+            snapshot_id=result.snapshot.id,
+            start_offset=0,
+            end_offset=len("Paragraph"),
+        )
+
+        with self.assertRaises(NotFound):
+            self.service.get_source_ref(
+                project_id=project_b.id, source_ref_id=source_ref.id
+            )
 
 
 @unittest.skipUnless(_MONGO_AVAILABLE, "no MongoDB reachable for integration tests")

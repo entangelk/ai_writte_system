@@ -178,6 +178,53 @@ class CoreSotSourceRefTest(unittest.TestCase):
         self.assertEqual(source_ref.content_hash, result.snapshot.content_hash)
         self.assertEqual(source_ref.block_id, result.blocks[0].id)
 
+    def test_source_ref_is_persisted_and_retrievable_by_id(self):
+        service, repo = _service()
+        project = service.create_project(name="Novel")
+        draft = service.create_draft(project_id=project.id, title="Episode 1")
+        result = service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text="Paragraph one.",
+            idempotency_key="save-1",
+        )
+
+        source_ref = service.create_source_ref(
+            project_id=project.id,
+            snapshot_id=result.snapshot.id,
+            start_offset=0,
+            end_offset=len("Paragraph"),
+        )
+
+        self.assertIn(source_ref.id, repo.source_refs)
+        fetched = service.get_source_ref(
+            project_id=project.id, source_ref_id=source_ref.id
+        )
+        self.assertEqual(fetched, source_ref)
+
+    def test_source_ref_get_enforces_project_isolation(self):
+        service, _repo = _service()
+        project_a = service.create_project(name="A")
+        project_b = service.create_project(name="B")
+        draft = service.create_draft(project_id=project_a.id, title="Episode 1")
+        result = service.save_draft(
+            project_id=project_a.id,
+            draft_id=draft.id,
+            raw_text="Paragraph one.",
+            idempotency_key="save-1",
+        )
+        source_ref = service.create_source_ref(
+            project_id=project_a.id,
+            snapshot_id=result.snapshot.id,
+            start_offset=0,
+            end_offset=len("Paragraph"),
+        )
+
+        with self.assertRaises(NotFound):
+            service.get_source_ref(
+                project_id=project_b.id, source_ref_id=source_ref.id
+            )
+
     def test_source_ref_cannot_cross_block_boundary(self):
         service, _repo = _service()
         project = service.create_project(name="Novel")
@@ -282,6 +329,32 @@ class CoreSotIsolationAndArchiveTest(unittest.TestCase):
         self.assertIn(saved.draft_version.id, repo.versions)
         self.assertIn(saved.snapshot.id, repo.snapshots)
         self.assertEqual(repo.blocks_by_snapshot[saved.snapshot.id], saved.blocks)
+
+    def test_archive_preserves_source_ref(self):
+        service, repo = _service()
+        project = service.create_project(name="Novel")
+        draft = service.create_draft(project_id=project.id, title="Episode 1")
+        saved = service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text="Paragraph one.",
+            idempotency_key="save-1",
+        )
+        source_ref = service.create_source_ref(
+            project_id=project.id,
+            snapshot_id=saved.snapshot.id,
+            start_offset=0,
+            end_offset=len("Paragraph"),
+        )
+
+        service.archive_project(project_id=project.id)
+
+        # SoT §113: source_refs are preserved after archive.
+        self.assertIn(source_ref.id, repo.source_refs)
+        self.assertEqual(
+            service.get_source_ref(project_id=project.id, source_ref_id=source_ref.id),
+            source_ref,
+        )
 
 
 if __name__ == "__main__":

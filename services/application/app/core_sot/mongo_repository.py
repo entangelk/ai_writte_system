@@ -34,6 +34,7 @@ from services.application.app.core_sot.models import (
     DraftVersion,
     Project,
     SourceBlock,
+    SourceRef,
     SourceSnapshot,
 )
 from services.application.app.core_sot.repository import DuplicateSaveRequest
@@ -59,6 +60,7 @@ class MongoCoreSotRepository:
         self._versions = self._db["draft_versions"]
         self._snapshots = self._db["source_snapshots"]
         self._blocks = self._db["source_blocks"]
+        self._source_refs = self._db["source_refs"]
         self.ensure_indexes()
 
     @classmethod
@@ -89,6 +91,10 @@ class MongoCoreSotRepository:
             [("snapshot_id", ASCENDING), ("block_index", ASCENDING)],
             name="blocks_by_snapshot",
         )
+        self._source_refs.create_index(
+            [("project_id", ASCENDING), ("snapshot_id", ASCENDING)],
+            name="source_refs_by_snapshot",
+        )
 
     # -- identifier generation ------------------------------------------------
 
@@ -102,6 +108,9 @@ class MongoCoreSotRepository:
         return str(ObjectId())
 
     def next_snapshot_id(self) -> str:
+        return str(ObjectId())
+
+    def next_source_ref_id(self) -> str:
         return str(ObjectId())
 
     # -- project / draft ------------------------------------------------------
@@ -153,6 +162,13 @@ class MongoCoreSotRepository:
             "block_index", ASCENDING
         )
         return tuple(_to_block(doc) for doc in cursor)
+
+    def record_source_ref(self, source_ref: SourceRef) -> None:
+        self._source_refs.insert_one(_source_ref_doc(source_ref))
+
+    def get_source_ref(self, source_ref_id: str) -> SourceRef | None:
+        doc = self._source_refs.find_one({"_id": source_ref_id})
+        return _to_source_ref(doc) if doc else None
 
     def record_save(
         self,
@@ -330,4 +346,30 @@ def _to_block(doc: dict) -> SourceBlock:
         start_offset=doc["start_offset"],
         end_offset=doc["end_offset"],
         text=doc["text"],
+    )
+
+
+def _source_ref_doc(source_ref: SourceRef) -> dict:
+    return {
+        "_id": source_ref.id,
+        "project_id": source_ref.project_id,
+        "snapshot_id": source_ref.snapshot_id,
+        "block_id": source_ref.block_id,
+        "start_offset": source_ref.start_offset,
+        "end_offset": source_ref.end_offset,
+        "quote": source_ref.quote,
+        "content_hash": source_ref.content_hash,
+    }
+
+
+def _to_source_ref(doc: dict) -> SourceRef:
+    return SourceRef(
+        id=doc["_id"],
+        project_id=doc["project_id"],
+        snapshot_id=doc["snapshot_id"],
+        block_id=doc["block_id"],
+        start_offset=doc["start_offset"],
+        end_offset=doc["end_offset"],
+        quote=doc["quote"],
+        content_hash=doc["content_hash"],
     )

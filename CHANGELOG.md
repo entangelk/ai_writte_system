@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-28 | SourceRef persistence 추가로 Slice 1 마무리(§113/R3 폐쇄) | [work log](docs/daily_logs/2026-06-28/work_log.md) |
 | 2026-06-28 | Application + MongoDB(replica set) Docker 런타임 추가 | [work log](docs/daily_logs/2026-06-28/work_log.md) |
 | 2026-06-28 | SoT v1.4: non-transaction fallback single-writer 제약 명시(R2) | [work log](docs/daily_logs/2026-06-28/work_log.md) |
 | 2026-06-28 | Core SOT MongoDB adapter + transaction-backed repository 추가 | [work log](docs/daily_logs/2026-06-28/work_log.md) |
@@ -21,6 +22,7 @@
 
 ### Added
 
+- SourceRef persistence를 추가해 Slice 1을 마무리하고 재검증 R3(§113 `source_refs` 보존 gap)을 폐쇄했다. `SourceRef`에 `id`/`project_id`를 더하고 `create_source_ref`가 `source_refs` collection(in-memory + Mongo)에 persist하며, `get_source_ref`는 project_id 격리를 강제한다. archive 후 source_ref 보존을 in-memory와 Mongo 양 경로(fallback/transaction) 회귀로 잠갔다. source_ref ↔ owning candidate 연결은 Phase 2 범위로 남기고, archive 후 신규 ref 생성 차단은 §113이 침묵하므로 추가하지 않았다(spec-faithful). SoT 계약 변경 없음(v1.4 §113 구현 충족). 전체 175개(Mongo 미연결 21 skip / 연결 시 통합 21개 포함 전통과).
 - Application + MongoDB Docker 런타임을 추가했다. `services/application/Dockerfile`은 빌드 캐시 보존을 위해 `requirements.txt`를 먼저 설치하고 소스를 뒤에 복사한다(Active Decision 준수). `docker-compose.yml`은 Slice 1 runtime으로 MongoDB 단일 노드 replica set(transaction 기본 계약을 위해 필수)과 application을 정의하며, mongo healthcheck가 `rs.initiate`를 idempotent하게 수행하고 member host를 `mongo:27017`로 두어 compose 네트워크 내 replica-set discovery가 성공한다. `.dockerignore`로 build context를 최소화했다. `docker compose up` 후 transaction 경로로 API save/replay end-to-end를 검증했다(version 1, idempotent replay, `draft_versions`=1). application requirements에 `uvicorn[standard]`을 추가했다. gateway 서비스는 외부 llama.cpp endpoint 의존이라 아직 compose에 미편입.
 - Core SOT를 실제 MongoDB 저장소에 연결했다. `services/application/app/core_sot/`에 method 기반 `CoreSotRepository` Protocol(`repository.py`)과 pymongo(sync) 기반 `MongoCoreSotRepository`(`mongo_repository.py`)를 추가했다. 승인된 persistence/retention 계약(v1.3)을 구현으로 충족한다: `draft_versions`의 unique index `(project_id, draft_id, idempotency_key)`로 idempotency 경계를 강제하고, transaction 경로(기본, Docker/replica-set)는 save write set을 원자적으로 commit하며, non-transaction fallback(local/test)은 retry guard·orphan cleanup·ordered write를 갖춘다. `CoreSotService`는 dict 직접접근 대신 Protocol method만 사용하도록 리팩터됐고 기존 in-memory 골격과 14개 단위 테스트는 그대로 유지된다. `tests/test_core_sot_mongo.py`에 skip-aware live 통합 테스트(fallback+transaction 17개)를 추가했고 단일 노드 replica set에서 전부 통과했다.
 

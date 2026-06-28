@@ -58,11 +58,13 @@ class InMemoryCoreSotRepository:
         self._draft_seq = 0
         self._version_seq = 0
         self._snapshot_seq = 0
+        self._source_ref_seq = 0
         self.projects: dict[str, Project] = {}
         self.drafts: dict[str, Draft] = {}
         self.versions: dict[str, DraftVersion] = {}
         self.snapshots: dict[str, SourceSnapshot] = {}
         self.blocks_by_snapshot: dict[str, tuple[SourceBlock, ...]] = {}
+        self.source_refs: dict[str, SourceRef] = {}
         self._version_ids_by_draft: dict[str, list[str]] = {}
         self._save_request_index: dict[tuple[str, str, str], str] = {}
 
@@ -81,6 +83,10 @@ class InMemoryCoreSotRepository:
     def next_snapshot_id(self) -> str:
         self._snapshot_seq += 1
         return f"source-snapshot-{self._snapshot_seq}"
+
+    def next_source_ref_id(self) -> str:
+        self._source_ref_seq += 1
+        return f"source-ref-{self._source_ref_seq}"
 
     def version_count(self, draft_id: str) -> int:
         return len(self._version_ids_by_draft.get(draft_id, ()))
@@ -105,6 +111,12 @@ class InMemoryCoreSotRepository:
 
     def get_blocks(self, snapshot_id: str) -> tuple[SourceBlock, ...]:
         return self.blocks_by_snapshot.get(snapshot_id, ())
+
+    def record_source_ref(self, source_ref: SourceRef) -> None:
+        self.source_refs[source_ref.id] = source_ref
+
+    def get_source_ref(self, source_ref_id: str) -> SourceRef | None:
+        return self.source_refs.get(source_ref_id)
 
     def find_save_request(
         self, project_id: str, draft_id: str, idempotency_key: str
@@ -232,7 +244,9 @@ class CoreSotService:
 
         for block in self._repo.get_blocks(snapshot_id):
             if block.start_offset <= start_offset and end_offset <= block.end_offset:
-                return SourceRef(
+                source_ref = SourceRef(
+                    id=self._repo.next_source_ref_id(),
+                    project_id=project_id,
                     snapshot_id=snapshot_id,
                     block_id=block.id,
                     start_offset=start_offset,
@@ -240,7 +254,15 @@ class CoreSotService:
                     quote=snapshot.raw_text[start_offset:end_offset],
                     content_hash=snapshot.content_hash,
                 )
+                self._repo.record_source_ref(source_ref)
+                return source_ref
         raise InvalidSourceRef("source_ref span must fit within one source block")
+
+    def get_source_ref(self, *, project_id: str, source_ref_id: str) -> SourceRef:
+        source_ref = self._repo.get_source_ref(source_ref_id)
+        if source_ref is None or source_ref.project_id != project_id:
+            raise NotFound("source_ref not found")
+        return source_ref
 
     def archive_project(self, *, project_id: str) -> Project:
         project = self._require_project(project_id)

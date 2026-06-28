@@ -104,8 +104,22 @@
 - #2(유지): mongo `--bind_ip_all`은 compose 네트워크에서 application 컨테이너가 mongo에 도달하기 위해 필요한 설정이라 현행 유지(localhost-only 바인딩이면 cross-container 접속 불가). 검증자도 로컬 MVP에서는 OK로 명시. 공유/운영 환경 진입 시 bind 제한은 그때 별도 적용.
 - #3(유지): uvicorn 단일 worker는 단일 사용자 로컬에 적합(검증자 확인). 변경은 speculative라 미적용.
 
+## SourceRef persistence (Slice 1 마무리, R3 폐쇄)
+
+- 변경 파일: `services/application/app/core_sot/models.py`(SourceRef에 `id`/`project_id` 추가), `repository.py`(`next_source_ref_id`/`record_source_ref`/`get_source_ref`), `service.py`(InMemory source_refs 저장 + `create_source_ref` persist + `get_source_ref` 격리), `mongo_repository.py`(`source_refs` collection + mappers + project_id/snapshot_id index), `tests/test_core_sot.py`·`tests/test_core_sot_mongo.py`(회귀).
+- 배경: 재검증 R3이 §113의 `source_refs` 보존 literal과 구현 미존재 간 gap을 추적 포인트로 남겼다. 기존 `create_source_ref`는 검증·재구성만 하고 persist하지 않았다.
+- 구현: `create_source_ref`가 id/project_id를 부여해 `source_refs`에 저장하고, `get_source_ref`는 project_id 격리를 강제한다(불일치 시 NotFound). source_ref ↔ owning candidate 연결은 Phase 2 범위이므로 이번엔 building-block(생성·persist·재조회·격리·보존)만 다룬다.
+- spec-silent 경계 처리: archive된 project/draft에 대한 신규 source_ref 생성 차단은 §113이 명시하지 않으므로 추가하지 않았다(snapshot은 archive 후에도 보존되며, create_source_ref는 snapshot 존재만 요구). 보존 회귀는 archive 이전에 생성한 ref가 archive 이후에도 조회됨을 검사한다.
+- SoT 계약 변경 없음: 기존 v1.4 §113을 구현으로 충족.
+
+### 검증
+
+- in-memory 신규 3개: persist+id 재조회, project_id 격리(NotFound), archive_project 후 보존.
+- Mongo mixin 신규 2개(fallback/transaction 양 경로 = 4): archive 후 persisted source_ref 보존, project_id 격리. 기존 source_ref 재구성 test에 persist 재조회 assertion 추가.
+- 전체: Mongo 미연결 175개(21 skip), 단일 노드 replica set 연결 시 175개 전부 통과(Mongo 통합 21개).
+
 ## Next steps
 
 - gateway 서비스 Dockerfile/compose 편입(현재는 application+Mongo만; gateway는 외부 llama.cpp endpoint 의존, Slice 1 범위 밖).
-- SourceRef persistence slice에서 `source_refs` collection과 §113 보존 계약 적용(R3).
+- 후속 Phase 재사용 fixture(plan 01 최소 산출물 #7)와 project/draft list/get API는 별도 작업으로 남김.
 - 동시성이 필요해지면 fallback (a) 보강 재검토(현재는 single-writer 계약으로 닫힘, R2).
