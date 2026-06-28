@@ -139,6 +139,14 @@
 - Mongo mixin 1종(fallback/transaction 양 경로 = 2): persisted project/draft list/get round-trip + 격리(fresh service 재조회).
 - 전체: Mongo 미연결 182개(23 skip), 단일 노드 replica set 연결 시 182개 전부 통과.
 
+### 재검증 후 보강
+
+- 독립 재검증(`docs/verifications/2026-06-28/project_draft_list_get_api.md`, 합격)의 비차단 observation 3건을 모두 회귀로 잠갔다(코드 변경 없이 현재 동작 lock).
+- #1: 다중 element list가 생성 순서를 유지함을 lock(`test_lists_preserve_creation_order` — projects+drafts, in-memory). Mongo mixin round-trip test에 draft 2개 생성 순서 assertion 추가(`_id` ASCENDING). spec-silent이나 양 backend의 결정적 순서를 회귀로 보호.
+- #2: archive된 project/draft가 여전히 list/get 가능함을 lock(`test_archived_project_and_draft_remain_listable_and_gettable`). §113 보존(읽기 허용/쓰기 차단)과 일관. service를 주입해 archive 수행.
+- #3: 존재하지 않는 draft_id→404 명시 lock(`test_get_missing_draft_returns_404`).
+- 전체 185개(Mongo 미연결 23 skip), replica set 연결 시 전부 통과.
+
 ## Next steps
 
 - gateway 서비스 Dockerfile/compose 편입(현재는 application+Mongo만; gateway는 외부 llama.cpp endpoint 의존, Slice 1 범위 밖).

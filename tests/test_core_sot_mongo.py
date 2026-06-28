@@ -137,23 +137,25 @@ class _MongoContractMixin:
     def test_project_and_draft_list_get_round_trip_with_isolation(self):
         project_a = self.service.create_project(name="A")
         project_b = self.service.create_project(name="B")
-        draft_a = self.service.create_draft(project_id=project_a.id, title="Episode 1")
+        draft_a1 = self.service.create_draft(project_id=project_a.id, title="Episode 1")
+        draft_a2 = self.service.create_draft(project_id=project_a.id, title="Episode 2")
 
         # Re-read through a fresh service to exercise the persisted read path.
         reread = CoreSotService(self.repo)
         self.assertIn(project_a.id, [p.id for p in reread.list_projects()])
         self.assertEqual(reread.get_project(project_id=project_a.id), project_a)
+        # Persisted list returns creation order (_id ASCENDING).
         self.assertEqual(
             [d.id for d in reread.list_drafts(project_id=project_a.id)],
-            [draft_a.id],
+            [draft_a1.id, draft_a2.id],
         )
         # should NOT fire: project B has no drafts of project A.
         self.assertEqual(reread.list_drafts(project_id=project_b.id), ())
         self.assertEqual(
-            reread.get_draft(project_id=project_a.id, draft_id=draft_a.id), draft_a
+            reread.get_draft(project_id=project_a.id, draft_id=draft_a1.id), draft_a1
         )
         with self.assertRaises(NotFound):
-            reread.get_draft(project_id=project_b.id, draft_id=draft_a.id)
+            reread.get_draft(project_id=project_b.id, draft_id=draft_a1.id)
 
     def test_idempotent_replay_returns_same_version_without_duplicate(self):
         project, draft = self._project_and_draft()
