@@ -58,11 +58,12 @@
 - 2026-06-28 Slice 1 MongoDB adapter 결정: Mongo adapter는 real pymongo + live Mongo 통합 테스트(미가용 시 skip), 드라이버는 pymongo(sync). 이유: transaction을 실제로 검증해야 하고(mongomock은 transaction 미지원), 로컬 단일 사용자 MVP에는 sync가 단순. 트레이드오프로 통합 테스트 층은 인프라를 요구하지만 기본 단위 스위트는 skip-aware로 인프라 없이 실행된다. service↔storage는 method 기반 `CoreSotRepository` Protocol로 분리했고 idempotency race는 `DuplicateSaveRequest`로 처리한다.
 - 2026-06-28 Mongo adapter 재검증(R2) 사용자 결정: non-transaction fallback은 single-writer 전용으로 SoT v1.4에 명시(동시성 안전은 transaction 기본 경로 담당). 구현은 유지하고 계약만 명확화했다. 동시성이 필요해지면 후속에서 (a) concurrent-safe 보강을 재검토한다.
 - Core SOT minimal skeleton 독립 검증은 조건부 합격이었다(`docs/verifications/2026-06-26/core_sot_minimal_skeleton.md`). C1(`***`, `##`, `archive_project` 회귀), C2(known SHA-256 vector), C3(within-block source_ref 계약 명시)는 보강 완료됐다.
-- Core SOT가 실제 MongoDB 저장소에 연결됐다(2026-06-28). method 기반 `CoreSotRepository` Protocol + pymongo(sync) `MongoCoreSotRepository`가 transaction 경로(기본)와 non-transaction fallback(retry guard·orphan cleanup·ordered write)을 구현하고, idempotency는 `draft_versions` unique index로 강제된다. skip-aware live 통합 테스트 17개가 단일 노드 replica set에서 통과했다. Dockerfile/Compose는 아직 미구현이다.
+- Core SOT가 실제 MongoDB 저장소에 연결됐다(2026-06-28). method 기반 `CoreSotRepository` Protocol + pymongo(sync) `MongoCoreSotRepository`가 transaction 경로(기본)와 non-transaction fallback(retry guard·orphan cleanup·ordered write)을 구현하고, idempotency는 `draft_versions` unique index로 강제된다. skip-aware live 통합 테스트 17개가 단일 노드 replica set에서 통과했다.
+- Application + MongoDB(replica set) Docker 런타임이 추가됐다(2026-06-28). `services/application/Dockerfile`(cache-friendly layer)·`docker-compose.yml`(mongo replica set healthcheck로 rs.initiate idempotent + application)·`.dockerignore`. `docker compose up` 후 transaction 경로로 API save/replay end-to-end 검증 완료. gateway 서비스는 아직 compose에 미편입(외부 llama.cpp endpoint 의존).
 
 ## Next Tasks
 
-1. Dockerfile/Compose 추가 시 dependency layer cache가 유지되도록 Dockerfile을 구성하고 MongoDB(replica set) 서비스를 포함한다.
+1. gateway 서비스를 Dockerfile/compose에 편입(현재 application+Mongo만 compose에 있음; gateway는 외부 llama.cpp endpoint 의존이라 Slice 1 범위 밖이었음).
 2. Slice 1 잔여 회귀 후보: index 부재/충돌 시 동작, archive 후 파생 인덱스 stale 이벤트. (fallback 동시성 race는 SoT v1.4 single-writer 제약으로 contract out 됨; 동시성 필요 시에만 (a) 보강 재검토.)
 3. SourceRef persistence slice: `source_refs` collection을 추가해 SoT §113 보존 계약을 적용한다(현재 `create_source_ref`는 반환만 하고 persist 안 함 — 재검증 R3 추적 포인트).
 4. Slice 1 결정이 현재 SoT 정본 계약을 바꾸면 `docs/system-contract-sot.md` 계약 버전을 갱신하고 변경 이력에 사용자 결정 근거를 남긴다. (Mongo adapter는 persistence/retention v1.3을 구현으로 충족, 재검증 R2 결정으로 fallback single-writer 제약이 v1.4로 추가됨.)
@@ -101,6 +102,7 @@
 - System Contract SoT 최초 독립 검증(2026-06-25): **합격**. 당시 SoT가 인용한 literal(5 provider·5 Analysis·3 candidate·7 decision·6 tool·3 allowlist·budget 임계)·status·링크가 정본과 문자열 그대로 일치하고 enum/bounds deferral이 정확히 전파됨. 같은 묶음의 A2 I2/I3 비차단 권고도 코드+양방향 회귀로 폐쇄(registry 18→20, 전체 85/85). 비차단 risk R1(SoT↔plans/README precedence tree 불일치)도 검증자가 직접 reconcile로 폐쉄 — plans/README tree를 SoT 5-level과 통일하고 SoT를 정본 precedence로 defer. 기록 `docs/verifications/2026-06-25/system_contract_sot.md`
 - Core SOT minimal skeleton 자체 회귀(2026-06-26): focused `python3 -m unittest tests.test_core_sot tests.test_application_api -v` 14개 통과, 전체 discovery 151개 통과. 잠근 범위: idempotent save, immutable snapshot/hash/block, known SHA-256 UTF-8 vector, `##` heading, `***` scene marker, source_ref quote/hash, within-block rejection, bool offset rejection, project_id isolation, project/draft archive preservation, FastAPI minimal flow.
 - Core SOT MongoDB adapter 자체 회귀(2026-06-28): Mongo 미지정 시 전체 discovery 168개 중 17개 skip(OK), `CORE_SOT_TEST_MONGO_URI` 지정 시 168개 전부 통과. 단일 노드 replica set(`docker run ... mongo:7 --replSet rs0` + `rs.initiate`, `?directConnection=true`)에서 fallback/transaction 양 경로 17개 검증. 잠근 범위: save 후 snapshot/blocks/version 재구성, deterministic hash/blocks, idempotent replay 무중복, distinct key version 증가, unique index 중복 거절(`DuplicateSaveRequest`), project_id 격리, archive 보존, source_ref quote 재구성, fallback orphan cleanup, fallback retry guard(commit dependents 미삭제), transaction abort 후 partial write 잔류 없음. FastAPI app wiring smoke(env var Mongo)로 HTTP save/replay 확인.
+- Application + Mongo Docker 런타임 검증(2026-06-28): `docker compose build` 성공(deps→source 캐시 순서), `docker compose up` 후 mongo healthy·app `/health` ok·transaction 경로 API save/replay end-to-end(version 1, idempotent replay, `draft_versions`=1) 확인. `docker compose down -v`로 정리.
 - Core SOT MongoDB adapter 독립 재검증(2026-06-28): **조건부 합격 → R1 보강으로 합격 조건 충족**. 기록 `docs/verifications/2026-06-28/mongo_adapter_recheck.md`. 168개·양 경로 17개 재현, 핵심 persistence/retention 계약 양방향 lock 확인. R1(pymongo 미설치 시 discovery 깨짐) 해결: import try/except + skip, pymongo 차단 후 `errors=1`→`errors=0, skipped=17` 복원. R2(fallback 동시성 bug) 사용자 결정 option (b)로 single-writer 제약을 SoT v1.4/plan/adapter에 명시. R3(`source_refs` 미persist)는 SourceRef persistence slice 추적.
 - completion criteria 계약 독립 검증(2026-06-24): 조건부 합격. 워커 보고·내부 일관성·cross-reference 4종 독립 확인, blocking 없음. 비차단 risk R1/R2(matrix 비대칭)·R3(self-report 정의 갭)를 소유자 결정으로 본 slice에서 즉시 보강했다. 기록 `docs/verifications/2026-06-24/completion_criteria_contract.md`
 - Slice 0.6 독립 검증(2026-06-24): 합격. httpx MockTransport/proxy/close 경계 6개 회귀 통과, `except` 순서 load-bearing 가정 4종 검증. 독립 검증 환경에서 `HttpxJsonTransport` 경유 actual adapter live smoke 완료(content `연결 확인 완료`, finish_reason=stop). 기록 `docs/verifications/2026-06-24/llm_gateway_slice_0_6_httpx.md`
@@ -108,6 +110,8 @@
 ## Project Structure
 
 ```text
+docker-compose.yml               # Slice 1 runtime: application + Mongo replica set
+.dockerignore                    # build context 최소화
 docs/
 ├── README.md                    # 문서 분류와 진입점
 ├── system-contract-sot.md       # 서비스 경계와 확정 계약 Approved SoT
@@ -139,7 +143,8 @@ services/
 │       ├── client.py           # llama.cpp text completion provider
 │       └── httpx_transport.py  # 실제 async HTTP JSON adapter
 └── application/
-    ├── requirements.txt        # FastAPI application dependency
+    ├── requirements.txt        # FastAPI/pymongo/uvicorn dependency
+    ├── Dockerfile              # cache-friendly application image (deps→source)
     └── app/
         ├── main.py             # FastAPI shell: health/project/draft/version save (+Mongo wiring)
         ├── core_sot/

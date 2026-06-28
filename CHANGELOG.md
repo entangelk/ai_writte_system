@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-28 | Application + MongoDB(replica set) Docker 런타임 추가 | [work log](docs/daily_logs/2026-06-28/work_log.md) |
 | 2026-06-28 | SoT v1.4: non-transaction fallback single-writer 제약 명시(R2) | [work log](docs/daily_logs/2026-06-28/work_log.md) |
 | 2026-06-28 | Core SOT MongoDB adapter + transaction-backed repository 추가 | [work log](docs/daily_logs/2026-06-28/work_log.md) |
 | 2026-06-26 | Core SOT 검증 보강(C1~C3) | [work log](docs/daily_logs/2026-06-26/work_log.md) |
@@ -20,6 +21,7 @@
 
 ### Added
 
+- Application + MongoDB Docker 런타임을 추가했다. `services/application/Dockerfile`은 빌드 캐시 보존을 위해 `requirements.txt`를 먼저 설치하고 소스를 뒤에 복사한다(Active Decision 준수). `docker-compose.yml`은 Slice 1 runtime으로 MongoDB 단일 노드 replica set(transaction 기본 계약을 위해 필수)과 application을 정의하며, mongo healthcheck가 `rs.initiate`를 idempotent하게 수행하고 member host를 `mongo:27017`로 두어 compose 네트워크 내 replica-set discovery가 성공한다. `.dockerignore`로 build context를 최소화했다. `docker compose up` 후 transaction 경로로 API save/replay end-to-end를 검증했다(version 1, idempotent replay, `draft_versions`=1). application requirements에 `uvicorn[standard]`을 추가했다. gateway 서비스는 외부 llama.cpp endpoint 의존이라 아직 compose에 미편입.
 - Core SOT를 실제 MongoDB 저장소에 연결했다. `services/application/app/core_sot/`에 method 기반 `CoreSotRepository` Protocol(`repository.py`)과 pymongo(sync) 기반 `MongoCoreSotRepository`(`mongo_repository.py`)를 추가했다. 승인된 persistence/retention 계약(v1.3)을 구현으로 충족한다: `draft_versions`의 unique index `(project_id, draft_id, idempotency_key)`로 idempotency 경계를 강제하고, transaction 경로(기본, Docker/replica-set)는 save write set을 원자적으로 commit하며, non-transaction fallback(local/test)은 retry guard·orphan cleanup·ordered write를 갖춘다. `CoreSotService`는 dict 직접접근 대신 Protocol method만 사용하도록 리팩터됐고 기존 in-memory 골격과 14개 단위 테스트는 그대로 유지된다. `tests/test_core_sot_mongo.py`에 skip-aware live 통합 테스트(fallback+transaction 17개)를 추가했고 단일 노드 replica set에서 전부 통과했다.
 
 사용자는 transaction을 실제로 검증해야 한다는 이유로 mongomock 대신 real pymongo + live Mongo 통합 테스트(미가용 시 skip)를 선택했고, 로컬 단일 사용자 MVP 단순성을 위해 sync 드라이버(pymongo)를 선택했다. 이로써 통합 테스트 층은 인프라를 요구하지만, 기본 단위 스위트는 skip-aware로 여전히 인프라 없이 실행된다.

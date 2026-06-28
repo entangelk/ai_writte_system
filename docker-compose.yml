@@ -1,0 +1,42 @@
+# Slice 1 runtime: Application API + MongoDB (single-node replica set).
+# The replica set is required because the approved persistence contract uses
+# MongoDB transactions by default (SoT v1.3 §112).
+services:
+  mongo:
+    image: mongo:7
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      # Idempotently initiate the single-node replica set, then report healthy
+      # once it is up. The member host must match the in-network name the
+      # application uses (mongo:27017) so replica-set discovery resolves it.
+      test:
+        - "CMD"
+        - "mongosh"
+        - "--quiet"
+        - "--eval"
+        - "try { rs.status().ok } catch (e) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] }).ok }"
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 10s
+
+  application:
+    build:
+      context: .
+      dockerfile: services/application/Dockerfile
+    environment:
+      CORE_SOT_MONGO_URI: "mongodb://mongo:27017/?replicaSet=rs0"
+      CORE_SOT_MONGO_DB: "ai_writing_system"
+      CORE_SOT_MONGO_TRANSACTIONS: "true"
+    ports:
+      - "8000:8000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+volumes:
+  mongo_data:

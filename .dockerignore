@@ -1,0 +1,11 @@
+# Keep the build context small and the dependency-install cache layer stable.
+**/__pycache__/
+**/*.pyc
+.git/
+.gitignore
+docs/
+tests/
+scripts/
+*.md
+.venv/
+venv/

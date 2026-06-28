@@ -82,8 +82,23 @@
 
 - sot §113의 `source_refs` 보존 literal은 존재하나 `source_refs` collection은 아직 미구현이다(`create_source_ref`는 `SourceRef`를 반환만 하고 persist하지 않음 — minimal skeleton 시점과 동일). 본 slice(draft save write set + idempotency + transaction/fallback) scope 밖이며, 별도 SourceRef persistence slice에서 보존 정책을 적용한다. HANDOFF Next Tasks에 추적으로 남긴다.
 
+## Dockerfile / Compose 추가 (Next Task #1)
+
+- 변경 파일: `services/application/Dockerfile`(신규), `docker-compose.yml`(신규), `.dockerignore`(신규), `services/application/requirements.txt`(uvicorn 추가).
+- Dockerfile은 Active Decision(빌드 캐시 보존)을 따른다: `requirements.txt`를 먼저 복사·설치하고 소스(`services/`)는 그 뒤에 복사해, 소스 변경이 의존성 install 레이어를 무효화하지 않게 했다. base는 `python:3.12-slim`(StrEnum 등 3.11+ 문법 사용). entrypoint는 `uvicorn services.application.app.main:app`.
+- `.dockerignore`로 `__pycache__`/`.git`/`docs`/`tests` 등을 build context에서 제외해 컨텍스트 크기와 캐시 안정성을 확보했다.
+- `docker-compose.yml`은 Slice 1 runtime을 정의한다: MongoDB 단일 노드 replica set(`--replSet rs0`) + application. 승인된 persistence 계약이 transaction 기본이므로 replica set이 필수다. mongo healthcheck가 `rs.initiate`를 idempotent하게 수행하고, member host를 `mongo:27017`로 두어 application이 compose 네트워크 내 hostname으로 replica set discovery를 성공한다(host 직결의 directConnection 우회가 불필요).
+- application은 `CORE_SOT_MONGO_URI=mongodb://mongo:27017/?replicaSet=rs0`, `CORE_SOT_MONGO_TRANSACTIONS=true`로 transaction 경로를 쓰며 `depends_on: mongo healthy`로 기동 순서를 보장한다.
+
+### 검증
+
+- `docker compose config` OK, `docker compose build application` 성공(레이어 캐시 순서 확인: requirements → install → source).
+- `docker compose up -d` 후 mongo healthy, app `/health` → `{"status":"ok"}`.
+- API end-to-end(transaction 경로): project→draft→save(version 1, 4 blocks)→같은 key replay가 `idempotent_replay=true, version_number=1`, `draft_versions` count=1(중복 없음). transaction이 실제 사용됨을 확인.
+- `docker compose down -v`로 정리, 단위 스위트 재확인 OK(skipped=17).
+
 ## Next steps
 
-- Dockerfile/Compose 추가(Next Task #1): dependency layer cache 보존 순서로 구성하고 MongoDB(replica set) 서비스 포함.
+- gateway 서비스 Dockerfile/compose 편입(현재는 application+Mongo만; gateway는 외부 llama.cpp endpoint 의존, Slice 1 범위 밖).
 - SourceRef persistence slice에서 `source_refs` collection과 §113 보존 계약 적용(R3).
 - 동시성이 필요해지면 fallback (a) 보강 재검토(현재는 single-writer 계약으로 닫힘, R2).
