@@ -1,14 +1,45 @@
 """FastAPI shell tests for the Application service."""
 
+import asyncio
 import unittest
 
-from fastapi.testclient import TestClient
+import httpx
 
 from services.application.app.core_sot.service import (
     CoreSotService,
     InMemoryCoreSotRepository,
 )
 from services.application.app.main import create_app
+
+
+class TestClient:
+    """Small sync wrapper around ASGITransport for this test module."""
+
+    def __init__(self, app):
+        self._app = app
+
+    def get(self, path: str, **kwargs):
+        return self._request("GET", path, **kwargs)
+
+    def post(self, path: str, **kwargs):
+        return self._request("POST", path, **kwargs)
+
+    def patch(self, path: str, **kwargs):
+        return self._request("PATCH", path, **kwargs)
+
+    def delete(self, path: str, **kwargs):
+        return self._request("DELETE", path, **kwargs)
+
+    def _request(self, method: str, path: str, **kwargs):
+        async def send():
+            transport = httpx.ASGITransport(app=self._app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://test",
+            ) as client:
+                return await client.request(method, path, **kwargs)
+
+        return asyncio.run(send())
 
 
 class ApplicationApiTest(unittest.TestCase):

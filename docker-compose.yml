@@ -49,5 +49,34 @@ services:
       retries: 5
       start_period: 10s
 
+  gateway:
+    build:
+      context: .
+      dockerfile: services/llm_gateway/Dockerfile
+    environment:
+      # Compose owns only the client gateway. The llama.cpp server is operated
+      # outside this stack and can be changed per machine via LLAMA_BASE_URL.
+      LLAMA_BASE_URL: "${LLAMA_BASE_URL:-http://host.docker.internal:9080}"
+      LLAMA_DEFAULT_MODEL: "${LLAMA_DEFAULT_MODEL:-gemma-local}"
+      LLAMA_DEFAULT_THINKING: "${LLAMA_DEFAULT_THINKING:-false}"
+      LLAMA_TIMEOUT_SECONDS: "${LLAMA_TIMEOUT_SECONDS:-120}"
+      LLAMA_TRUST_ENV: "${LLAMA_TRUST_ENV:-false}"
+    ports:
+      - "8001:8001"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      # Liveness is intentionally local-only; /health/ready checks the external
+      # llama.cpp endpoint when an operator wants upstream readiness.
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health/live', timeout=2).status == 200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
 volumes:
   mongo_data:

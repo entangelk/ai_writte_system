@@ -3,6 +3,7 @@
 ## Goals
 
 - HANDOFF를 읽고 다음 작업(Next Task #1)을 진행한다.
+- gateway를 compose에 추가하되 llama.cpp 서버는 compose가 띄우지 않고, 외부 endpoint를 `LLAMA_BASE_URL`로 가리키는 client container로 둔다.
 - in-memory Core SOT service contract를 실제 MongoDB 저장소에 연결한다.
 - 승인된 persistence/retention 계약(transaction 기본 + 제한적 non-transaction fallback, idempotency, isolation, archive 보존)을 코드와 회귀로 잠근다.
 
@@ -51,11 +52,16 @@
 
 ## Decisions
 
+- 사용자 결정 반영: gateway compose 편입은 옵션 A로 진행한다. compose는 llama.cpp 서버를 띄우지 않고 gateway 컨테이너만 관리하며, `LLAMA_BASE_URL`이 외부 llama.cpp-compatible server를 가리킨다. 과거 `192.168.1.29:9080`은 다른 머신에서 검증한 live endpoint로 남기고, 현재 repo 기준 기본값은 Docker host의 `http://host.docker.internal:9080`로 둔다. 트레이드오프: 모델 서버 운영은 여전히 별도 책임이라 `/health/live`는 gateway process만 확인하고, upstream 모델 준비 여부는 `/health/ready`에서 별도 확인한다.
 - 사용자 결정: Mongo adapter는 **real pymongo + live Mongo 통합 테스트(미가용 시 skip)** 방식, 드라이버는 **pymongo(sync)**. 이유: transaction을 실제로 검증해야 하고(mongomock은 transaction 미지원), 로컬 단일 사용자 MVP에는 sync가 단순하다. 트레이드오프로 기존 "전부 인프라 없는 단위 테스트" 컨벤션이 통합 테스트 층에서는 깨지지만, skip-aware로 두어 기본 단위 스위트는 인프라 없이 그대로 돌아간다.
 - repository Protocol 추출은 surgical refactor 범위로 판단했다(저장소 교체를 위한 최소 선행조건이며 기존 테스트를 보존).
 
 ## Verification
 
+- gateway focused regression: `python3 -m unittest tests.test_llm_gateway_app tests.test_llama_provider_client tests.test_httpx_transport -v` → 18개 통과(provider error 5종→HTTP status subTest 포함).
+- gateway syntax/config/build: `python3 -m py_compile services/llm_gateway/app/main.py`, `docker compose config`, `COMPOSE_BAKE=false docker compose build gateway` 통과. 기본 `docker compose build gateway`는 현재 Docker Compose Bake 경로 panic으로 실패해 내부 builder 우회(`COMPOSE_BAKE=false`)로 검증했다.
+- gateway container smoke: `docker compose up -d gateway` 후 `curl -sS http://localhost:8001/health/live` → `{"status":"ok"}`, `docker compose ps gateway` → `healthy`; 검증 후 `docker compose stop gateway`.
+- 전체 discovery: 독립 검증 후 TestClient hang을 test-only ASGITransport wrapper로 보강한 뒤 `timeout 90 python3 -m unittest discover -s tests` → 211개 통과(27 skip).
 - `python3 -m unittest discover -s tests`: 168개 중 17개 skip(Mongo 미지정), OK.
 - `CORE_SOT_TEST_MONGO_URI=mongodb://localhost:27018/?directConnection=true python3 -m unittest discover -s tests`: 168개 전부 통과(신규 17개 fallback+transaction 포함).
 - FastAPI app wiring smoke: `CORE_SOT_MONGO_URI` 설정 후 TestClient로 project→draft→save→replay 수행, replay가 같은 version 반환 확인.
@@ -227,9 +233,32 @@
 - Issue #3(비차단): missing draft(존재 project) DELETE→404를 cross-project test에 추가.
 - 전체 207개(Mongo 미연결 27 skip), replica set 연결 시 전부 통과.
 
+## LLM Gateway compose 편입 (external llama.cpp client)
+
+- 변경 파일: `services/llm_gateway/app/main.py`(신규), `services/llm_gateway/Dockerfile`(신규), `services/llm_gateway/requirements.txt`, `docker-compose.yml`, `tests/test_llm_gateway_app.py`(신규).
+- 배경: HANDOFF Next Task #1은 gateway 서비스를 Dockerfile/compose에 편입하는 것이었지만, 모델 서버는 기존 운영 방식처럼 별도 llama.cpp server로 둬야 했다.
+- 구현: `gateway` 서비스는 `LLAMA_BASE_URL`의 외부 llama.cpp-compatible endpoint를 호출하는 client container다. compose는 llama.cpp server/model weight/GPU lifecycle을 관리하지 않는다. 기본값은 repo-local Docker host 기준 `http://host.docker.internal:9080`이며, 이전 검증 머신의 `192.168.1.29:9080`은 필요 시 env override로만 사용한다.
+- FastAPI shell: `/health/live`와 `/health`는 gateway process liveness만 반환하고, `/health/ready`는 외부 llama.cpp `/health`를 조회한다. `POST /v1/generate`는 기존 `LlamaCppProvider`/`HttpxJsonTransport` 계약을 재사용해 stable generation envelope를 반환하고, `ProviderError`는 public stable error envelope로 노출한다.
+- Dockerfile은 application과 같은 cache-friendly 패턴을 따른다: gateway `requirements.txt`를 먼저 복사·설치하고, 그 뒤 `services/` 소스를 복사한다.
+- compose healthcheck는 외부 모델 상태에 묶이지 않도록 `/health/live`만 probe한다. upstream readiness가 필요한 운영자는 `/health/ready`를 별도 확인한다.
+
+### 검증
+
+- focused 회귀: `python3 -m unittest tests.test_llm_gateway_app tests.test_llama_provider_client tests.test_httpx_transport -v` → 18개 통과.
+- `python3 -m py_compile services/llm_gateway/app/main.py` 통과.
+- `docker compose config` 통과.
+- `docker compose build gateway`는 현재 Docker Compose Bake 경로 panic으로 실패했고, `COMPOSE_BAKE=false docker compose build gateway`로 재실행해 성공했다.
+- `docker compose up -d gateway` 후 `/health/live`가 `{"status":"ok"}`를 반환하고 `docker compose ps gateway`에서 `healthy` 확인. 검증 후 `docker compose stop gateway`.
+
+### 독립 검증 후 보강
+
+- 근거 기록: `docs/verifications/2026-06-28/gateway_compose.md`(합격, working tree 기준).
+- Issue #2 보강: `tests/test_llm_gateway_app.py`의 provider error envelope test를 5종 매핑 전체로 확장했다. `provider_timeout`→504, `provider_overloaded`→429, `provider_unavailable`→503, `provider_request_rejected`→400, `provider_invalid_response`→502를 subTest로 모두 lock했다.
+- R2 문서화: Docker Compose Bake 경로 panic이 있는 환경에서는 `COMPOSE_BAKE=false docker compose build gateway`로 빌드 검증한다는 내용을 work_log/HANDOFF에 유지했다. 이는 코드 결함이 아니라 현 Docker Compose 환경 이슈다.
+- R3/검증 방법론 보강: 이 작업 환경에서도 `tests.test_application_api`가 `fastapi.testclient.TestClient` 경로에서 멈추는 현상이 재현됐다. gateway와 무관한 test harness 이슈라, application API 테스트만 `httpx.ASGITransport` 기반 동기 wrapper로 바꿔 public API 테스트 의미는 유지하면서 전체 discovery가 종료되게 했다.
+- 재검증: `python3 -m unittest tests.test_application_api -v` → 24개 통과, `python3 -m unittest tests.test_llm_gateway_app tests.test_llama_provider_client tests.test_httpx_transport -v` → 18개 통과, `timeout 90 python3 -m unittest discover -s tests` → 211개 통과(27 skip).
+
 ## Next steps
 
-- gateway 서비스 Dockerfile/compose 편입(현재는 application+Mongo만; gateway는 외부 llama.cpp endpoint 의존, Slice 1 범위 밖).
-- 후속 Phase 재사용 fixture(plan 01 최소 산출물 #7)는 실제 소비자(Phase 2)가 생기면 그 shape에 맞춰 추가.
 - 후속 Phase 재사용 fixture(plan 01 최소 산출물 #7)는 실제 소비자(Phase 2)가 생기면 그 shape에 맞춰 추가.
 - 동시성이 필요해지면 fallback (a) 보강 재검토(현재는 single-writer 계약으로 닫힘, R2).
