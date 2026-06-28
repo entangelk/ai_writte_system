@@ -171,8 +171,22 @@
 - R2(문서): work_log/CHANGELOG의 부정확 인용 "plan 01 §13/§30"을 canonical "SoT v1.4 §96–134 + plan 01 L50–95"로 교정. plan 01은 § 기호를 쓰지 않으며 SoT에 §13/§30 절은 없다.
 - 전체 193개(Mongo 미연결 25 skip), replica set 연결 시 전부 통과.
 
+## project/draft rename API (CRUD "수정" 완성)
+
+- 변경 파일: `service.py`(`rename_project`/`rename_draft`), `main.py`(`RenameProjectRequest`/`RenameDraftRequest` + PATCH 엔드포인트 2종), `tests/test_application_api.py`·`tests/test_core_sot_mongo.py`(회귀).
+- 배경: plan 01 §13 CRUD 범위(생성·조회·목록·수정·보관) 중 "수정"이 유일한 미구현이었다.
+- API: `PATCH /projects/{id}`{name}, `PATCH /projects/{id}/drafts/{draft_id}`{title}. 없음→404, cross-project draft→404.
+- archive=쓰기차단 계약: archived project/draft의 rename은 차단(409 Archived). 기존 save_draft/create_draft가 archived에서 쓰기를 막는 패턴과 일관(읽기 허용/쓰기 차단). spec 침묵 신규 강제가 아니라 확립된 archive 패턴의 연장.
+- repo 변경 없음(기존 put_project/put_draft 재사용), Protocol 변경 없음. SoT 계약 변경 없음(SoT v1.4 §96–134 + plan 01 L50–95 수정 계약 구현).
+
+### 검증
+
+- API 회귀 4종: rename round-trip(get 반영), 없음→404, cross-project draft→404, archived project/draft rename→409(draft archived 시 draft만 차단·project는 가능, project archived 시 project도 차단).
+- Mongo mixin 1종(양 경로): persisted rename round-trip(fresh service 재조회).
+- 전체: Mongo 미연결 199개(27 skip), 단일 노드 replica set 연결 시 199개 전부 통과.
+
 ## Next steps
 
 - gateway 서비스 Dockerfile/compose 편입(현재는 application+Mongo만; gateway는 외부 llama.cpp endpoint 의존, Slice 1 범위 밖).
-- project/draft rename(수정) API와 후속 Phase 재사용 fixture(plan 01 최소 산출물 #7)는 별도 작업으로 남김.
+- 후속 Phase 재사용 fixture(plan 01 최소 산출물 #7)는 실제 소비자(Phase 2)가 생기면 그 shape에 맞춰 추가.
 - 동시성이 필요해지면 fallback (a) 보강 재검토(현재는 single-writer 계약으로 닫힘, R2).

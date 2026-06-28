@@ -157,6 +157,22 @@ class _MongoContractMixin:
         with self.assertRaises(NotFound):
             reread.get_draft(project_id=project_b.id, draft_id=draft_a1.id)
 
+    def test_rename_persists_for_project_and_draft(self):
+        project = self.service.create_project(name="Old")
+        draft = self.service.create_draft(project_id=project.id, title="Old Title")
+
+        self.service.rename_project(project_id=project.id, name="New")
+        self.service.rename_draft(
+            project_id=project.id, draft_id=draft.id, title="New Title"
+        )
+
+        reread = CoreSotService(self.repo)
+        self.assertEqual(reread.get_project(project_id=project.id).name, "New")
+        self.assertEqual(
+            reread.get_draft(project_id=project.id, draft_id=draft.id).title,
+            "New Title",
+        )
+
     def test_version_read_back_from_persisted_store(self):
         project, draft = self._project_and_draft()
         raw_text = "# Chapter 1\n\nOpening line.\n\n---\n\nNext scene."

@@ -53,6 +53,14 @@ class CreateDraftRequest(BaseModel):
     title: str
 
 
+class RenameProjectRequest(BaseModel):
+    name: str
+
+
+class RenameDraftRequest(BaseModel):
+    title: str
+
+
 class SaveDraftRequest(BaseModel):
     raw_text: str
     idempotency_key: str
@@ -104,6 +112,34 @@ def create_app(service: CoreSotService | None = None) -> FastAPI:
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return _project_payload(project)
+
+    @app.patch("/projects/{project_id}")
+    async def rename_project(
+        project_id: str, request: RenameProjectRequest
+    ) -> dict[str, object]:
+        try:
+            project = core_sot.rename_project(
+                project_id=project_id, name=request.name
+            )
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Archived as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _project_payload(project)
+
+    @app.patch("/projects/{project_id}/drafts/{draft_id}")
+    async def rename_draft(
+        project_id: str, draft_id: str, request: RenameDraftRequest
+    ) -> dict[str, object]:
+        try:
+            draft = core_sot.rename_draft(
+                project_id=project_id, draft_id=draft_id, title=request.title
+            )
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Archived as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _draft_payload(draft)
 
     @app.get("/projects/{project_id}/drafts")
     async def list_drafts(project_id: str) -> dict[str, object]:

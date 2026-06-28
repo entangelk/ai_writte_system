@@ -176,6 +176,25 @@ class CoreSotService:
         self._repo.put_draft(draft)
         return draft
 
+    def rename_project(self, *, project_id: str, name: str) -> Project:
+        project = self._require_project(project_id)
+        if project.archived:
+            raise Archived("project is archived")
+        renamed = replace(project, name=name)
+        self._repo.put_project(renamed)
+        return renamed
+
+    def rename_draft(self, *, project_id: str, draft_id: str, title: str) -> Draft:
+        project = self._require_project(project_id)
+        if project.archived:
+            raise Archived("project is archived")
+        draft = self._require_draft(project_id, draft_id)
+        if draft.archived:
+            raise Archived("draft is archived")
+        renamed = replace(draft, title=title)
+        self._repo.put_draft(renamed)
+        return renamed
+
     def get_project(self, *, project_id: str) -> Project:
         return self._require_project(project_id)
 

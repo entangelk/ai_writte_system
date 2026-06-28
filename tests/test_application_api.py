@@ -128,6 +128,85 @@ class ApplicationApiTest(unittest.TestCase):
         ]
         self.assertEqual(listed_drafts, created_drafts)
 
+    def test_rename_project_and_draft_persist_via_get(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Old"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Old Title"}
+        ).json()
+
+        renamed_project = client.patch(
+            f"/projects/{project['id']}", json={"name": "New"}
+        )
+        renamed_draft = client.patch(
+            f"/projects/{project['id']}/drafts/{draft['id']}",
+            json={"title": "New Title"},
+        )
+
+        self.assertEqual(renamed_project.status_code, 200)
+        self.assertEqual(renamed_project.json()["name"], "New")
+        self.assertEqual(renamed_draft.json()["title"], "New Title")
+        # Reflected through a fresh read.
+        self.assertEqual(client.get(f"/projects/{project['id']}").json()["name"], "New")
+        self.assertEqual(
+            client.get(
+                f"/projects/{project['id']}/drafts/{draft['id']}"
+            ).json()["title"],
+            "New Title",
+        )
+
+    def test_rename_missing_returns_404(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+
+        self.assertEqual(
+            client.patch("/projects/nope", json={"name": "X"}).status_code, 404
+        )
+        self.assertEqual(
+            client.patch(
+                f"/projects/{project['id']}/drafts/nope", json={"title": "X"}
+            ).status_code,
+            404,
+        )
+
+    def test_rename_cross_project_draft_returns_404(self):
+        client = TestClient(create_app())
+        project_a = client.post("/projects", json={"name": "A"}).json()
+        project_b = client.post("/projects", json={"name": "B"}).json()
+        draft_a = client.post(
+            f"/projects/{project_a['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+
+        cross = client.patch(
+            f"/projects/{project_b['id']}/drafts/{draft_a['id']}",
+            json={"title": "Hijack"},
+        )
+
+        self.assertEqual(cross.status_code, 404)
+
+    def test_rename_on_archived_is_blocked_409(self):
+        service = CoreSotService(InMemoryCoreSotRepository())
+        client = TestClient(create_app(service))
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        service.archive_draft(project_id=project["id"], draft_id=draft["id"])
+
+        # Draft archived: draft rename blocked, project still renamable.
+        draft_blocked = client.patch(
+            f"/projects/{project['id']}/drafts/{draft['id']}",
+            json={"title": "Nope"},
+        )
+        self.assertEqual(draft_blocked.status_code, 409)
+
+        service.archive_project(project_id=project["id"])
+        # Project archived: project rename blocked too.
+        project_blocked = client.patch(
+            f"/projects/{project['id']}", json={"name": "Nope"}
+        )
+        self.assertEqual(project_blocked.status_code, 409)
+
     def test_version_list_and_detail_read_back_saved_content(self):
         client = TestClient(create_app())
         project = client.post("/projects", json={"name": "Novel"}).json()
