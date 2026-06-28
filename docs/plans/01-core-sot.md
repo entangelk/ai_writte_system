@@ -33,7 +33,7 @@
 4. deterministic snapshot hash와 block split 규칙
 5. `source_ref` 생성 및 무결성 검사
 6. 저장 성공/부분 실패/재시도 정책
-7. 후속 Phase가 재사용할 fixture
+7. 후속 Phase가 재사용할 fixture — 구현: `tests/fixtures/core_sot.py`
 
 ## 핵심 흐름
 

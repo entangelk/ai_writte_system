@@ -63,6 +63,7 @@
 - Core SOT가 실제 MongoDB 저장소에 연결됐다(2026-06-28). method 기반 `CoreSotRepository` Protocol + pymongo(sync) `MongoCoreSotRepository`가 transaction 경로(기본)와 non-transaction fallback(retry guard·orphan cleanup·ordered write)을 구현하고, idempotency는 `draft_versions` unique index로 강제된다. skip-aware live 통합 테스트 17개가 단일 노드 replica set에서 통과했다.
 - Application + MongoDB(replica set) Docker 런타임이 추가됐다(2026-06-28). `services/application/Dockerfile`(cache-friendly layer)·`docker-compose.yml`(mongo replica set healthcheck로 rs.initiate idempotent + application + application healthcheck)·`.dockerignore`. `docker compose up` 후 transaction 경로로 API save/replay end-to-end 검증 완료.
 - LLM Gateway client Docker 런타임이 추가됐다(2026-06-28). `services/llm_gateway/Dockerfile`(cache-friendly layer)·`services/llm_gateway/app/main.py`(FastAPI shell: `/health/live`, `/health/ready`, `/v1/generate`)·compose `gateway` service. 모델 서버는 별도 운영이며 compose는 `LLAMA_BASE_URL`로 외부 llama.cpp-compatible endpoint만 가리킨다. gateway image build와 liveness/health smoke 통과. 검증 후 provider error 5종→HTTP status 매핑을 모두 gateway app test에서 lock했다.
+- Core SOT 후속 Phase 재사용 fixture가 추가됐다(2026-06-28, plan 01 최소 산출물 #7 완료). `tests/fixtures/core_sot.py`가 deterministic raw text, expected hash/block/source_ref matrix, `build_core_sot_fixture()`를 제공한다. Analysis candidate fixture는 Phase 2 schema 확정 전이라 의도적으로 제외했다.
 - project/draft list/get API가 추가돼 Core SOT round-trip이 완성됐다(2026-06-28). `GET /projects`·`/projects/{id}`·`/projects/{id}/drafts`·`/projects/{id}/drafts/{draft_id}`. project_id 격리·404(없음/cross-project)·persisted round-trip을 API+Mongo(양 경로) 회귀로 잠갔다. rename은 후속.
 - version read API가 추가됐다(2026-06-28). `GET /projects/{id}/drafts/{draft_id}/versions`(목록, version_number 순)·`GET .../versions/{version_id}`(단건 full read-back: snapshot raw_text + blocks text). version은 project_id·draft_id 일치 강제, 없음/cross-draft 404, payload에서 `idempotency_key` 의도적 제외. 분석/검색 Phase가 의존할 version/snapshot 재조회 표면이 열렸다.
 - project/draft rename API가 추가됐다(2026-06-28). `PATCH /projects/{id}`·`PATCH /projects/{id}/drafts/{draft_id}`. 없음/cross-project 404, archived rename은 409(쓰기차단 계약).
@@ -72,12 +73,11 @@
 ## Next Tasks
 
 1. Slice 1 잔여 회귀 후보: index 부재/충돌 시 동작, archive 후 파생 인덱스 stale 이벤트. (fallback 동시성 race는 SoT v1.4 single-writer 제약으로 contract out 됨; 동시성 필요 시에만 (a) 보강 재검토.)
-2. plan 01 최소 산출물 #7(후속 Phase 재사용 fixture)은 아직 미구현(실제 소비자 Phase 2 생길 때 그 shape로 추가). project/draft CRUD(create·list·get·rename·archive API)·version read·source_ref는 완료.
-3. Phase 2 source_ref 정책 결정: create_source_ref idempotency — 현재 같은 span 재호출 시 매번 새 ref, §111은 draft save만 규정하므로 중복 ref 정책을 Phase 2에서 결정. (archive 후 source_ref 생성 허용 여부는 SoT v1.5에서 "허용"으로 확정·회귀 lock됨.)
-4. Application/Worker가 gateway `/v1/generate`를 호출하는 runtime wiring은 Phase payload/tool handler와 model tool-call wire format이 확정된 뒤 별도 slice로 구현한다.
-5. runner domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
-6. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
-7. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도 확정(retry cap 구조는 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 남음).
+2. Phase 2 source_ref 정책 결정: create_source_ref idempotency — 현재 같은 span 재호출 시 매번 새 ref, §111은 draft save만 규정하므로 중복 ref 정책을 Phase 2에서 결정. (archive 후 source_ref 생성 허용 여부는 SoT v1.5에서 "허용"으로 확정·회귀 lock됨.)
+3. Application/Worker가 gateway `/v1/generate`를 호출하는 runtime wiring은 Phase payload/tool handler와 model tool-call wire format이 확정된 뒤 별도 slice로 구현한다.
+4. runner domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
+5. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
+6. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도 확정(retry cap 구조는 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 남음).
 
 ## Verification
 
@@ -118,7 +118,8 @@
 - SourceRef persistence 독립 재검증(2026-06-28): **합격**. 기록 `docs/verifications/2026-06-28/source_ref_persistence.md`. schema 변경 regression 없음·R3(§113 archive 보존) 폐쇄·spec-silent 판단 정당을 독립 재현으로 증명. 비차단 observation 3건 중 #1(missing-id→NotFound test 부재)은 회귀 추가로 폐쇄, #2/#3(archive 후 생성·idempotency 정책)은 Phase 2 추적(Next Tasks #5)으로 반영.
 - Application + Mongo Docker 런타임 검증(2026-06-28): `docker compose build` 성공(deps→source 캐시 순서), `docker compose up` 후 mongo healthy·app `/health` ok·transaction 경로 API save/replay end-to-end(version 1, idempotent replay, `draft_versions`=1) 확인. `docker compose down -v`로 정리.
 - LLM Gateway client Docker 런타임 검증(2026-06-28): focused gateway/provider/httpx 18개 통과(provider error 5종→HTTP status subTest 포함), `docker compose config` 통과, `COMPOSE_BAKE=false docker compose build gateway` 성공, `docker compose up -d gateway` 후 `/health/live` → `{"status":"ok"}` 및 container `healthy` 확인. 외부 llama.cpp readiness는 별도 운영 endpoint 의존이라 live smoke 범위에서 제외.
-- Verification follow-up(2026-06-28): `docs/verifications/2026-06-28/gateway_compose.md` 합격 기록 반영. application API tests의 `fastapi.testclient.TestClient` hang을 test-only ASGITransport wrapper로 교체해 `timeout 90 python3 -m unittest discover -s tests`가 211개/27 skip으로 통과한다.
+- Verification follow-up(2026-06-28): `docs/verifications/2026-06-28/gateway_compose.md` 합격 기록 반영. application API tests의 `fastapi.testclient.TestClient` hang을 test-only ASGITransport wrapper로 교체해 전체 discovery가 종료되게 했다.
+- Core SOT reusable fixture 자체 회귀(2026-06-28): `python3 -m unittest tests.test_core_sot_fixture -v` 2개 통과, 전체 discovery 213개 통과(27 skip). 잠근 범위: deterministic raw snapshot hash, block kind/order/offset/text, source_ref quote/hash/project/block 연결, idempotent replay.
 - Core SOT MongoDB adapter 독립 재검증(2026-06-28): **조건부 합격 → R1 보강으로 합격 조건 충족**. 기록 `docs/verifications/2026-06-28/mongo_adapter_recheck.md`. 168개·양 경로 17개 재현, 핵심 persistence/retention 계약 양방향 lock 확인. R1(pymongo 미설치 시 discovery 깨짐) 해결: import try/except + skip, pymongo 차단 후 `errors=1`→`errors=0, skipped=17` 복원. R2(fallback 동시성 bug) 사용자 결정 option (b)로 single-writer 제약을 SoT v1.4/plan/adapter에 명시. R3(`source_refs` 미persist)는 SourceRef persistence slice 추적.
 - completion criteria 계약 독립 검증(2026-06-24): 조건부 합격. 워커 보고·내부 일관성·cross-reference 4종 독립 확인, blocking 없음. 비차단 risk R1/R2(matrix 비대칭)·R3(self-report 정의 갭)를 소유자 결정으로 본 slice에서 즉시 보강했다. 기록 `docs/verifications/2026-06-24/completion_criteria_contract.md`
 - Slice 0.6 독립 검증(2026-06-24): 합격. httpx MockTransport/proxy/close 경계 6개 회귀 통과, `except` 순서 load-bearing 가정 4종 검증. 독립 검증 환경에서 `HttpxJsonTransport` 경유 actual adapter live smoke 완료(content `연결 확인 완료`, finish_reason=stop). 기록 `docs/verifications/2026-06-24/llm_gateway_slice_0_6_httpx.md`
@@ -180,6 +181,8 @@ services/
             ├── resolution.py   # resolve_retry + next_step_budget_decision(A3)
             └── runner.py       # minimal provider composition runner + trace
 tests/
+├── fixtures/
+│   └── core_sot.py            # 후속 Phase 재사용 Core SOT fixture
 ├── test_llm_gateway_payload.py
 ├── test_llm_gateway_app.py
 ├── test_llm_provider.py
@@ -195,6 +198,7 @@ tests/
 ├── test_agent_loop_runner.py
 ├── test_agent_loop_resolution.py
 ├── test_core_sot.py
+├── test_core_sot_fixture.py
 ├── test_core_sot_mongo.py
 └── test_application_api.py
 scripts/

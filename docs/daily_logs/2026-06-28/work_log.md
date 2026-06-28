@@ -61,7 +61,7 @@
 - gateway focused regression: `python3 -m unittest tests.test_llm_gateway_app tests.test_llama_provider_client tests.test_httpx_transport -v` → 18개 통과(provider error 5종→HTTP status subTest 포함).
 - gateway syntax/config/build: `python3 -m py_compile services/llm_gateway/app/main.py`, `docker compose config`, `COMPOSE_BAKE=false docker compose build gateway` 통과. 기본 `docker compose build gateway`는 현재 Docker Compose Bake 경로 panic으로 실패해 내부 builder 우회(`COMPOSE_BAKE=false`)로 검증했다.
 - gateway container smoke: `docker compose up -d gateway` 후 `curl -sS http://localhost:8001/health/live` → `{"status":"ok"}`, `docker compose ps gateway` → `healthy`; 검증 후 `docker compose stop gateway`.
-- 전체 discovery: 독립 검증 후 TestClient hang을 test-only ASGITransport wrapper로 보강한 뒤 `timeout 90 python3 -m unittest discover -s tests` → 211개 통과(27 skip).
+- 전체 discovery: 독립 검증 후 TestClient hang을 test-only ASGITransport wrapper로 보강했고, fixture 추가 후 `timeout 90 python3 -m unittest discover -s tests` → 213개 통과(27 skip).
 - `python3 -m unittest discover -s tests`: 168개 중 17개 skip(Mongo 미지정), OK.
 - `CORE_SOT_TEST_MONGO_URI=mongodb://localhost:27018/?directConnection=true python3 -m unittest discover -s tests`: 168개 전부 통과(신규 17개 fallback+transaction 포함).
 - FastAPI app wiring smoke: `CORE_SOT_MONGO_URI` 설정 후 TestClient로 project→draft→save→replay 수행, replay가 같은 version 반환 확인.
@@ -256,9 +256,20 @@
 - Issue #2 보강: `tests/test_llm_gateway_app.py`의 provider error envelope test를 5종 매핑 전체로 확장했다. `provider_timeout`→504, `provider_overloaded`→429, `provider_unavailable`→503, `provider_request_rejected`→400, `provider_invalid_response`→502를 subTest로 모두 lock했다.
 - R2 문서화: Docker Compose Bake 경로 panic이 있는 환경에서는 `COMPOSE_BAKE=false docker compose build gateway`로 빌드 검증한다는 내용을 work_log/HANDOFF에 유지했다. 이는 코드 결함이 아니라 현 Docker Compose 환경 이슈다.
 - R3/검증 방법론 보강: 이 작업 환경에서도 `tests.test_application_api`가 `fastapi.testclient.TestClient` 경로에서 멈추는 현상이 재현됐다. gateway와 무관한 test harness 이슈라, application API 테스트만 `httpx.ASGITransport` 기반 동기 wrapper로 바꿔 public API 테스트 의미는 유지하면서 전체 discovery가 종료되게 했다.
-- 재검증: `python3 -m unittest tests.test_application_api -v` → 24개 통과, `python3 -m unittest tests.test_llm_gateway_app tests.test_llama_provider_client tests.test_httpx_transport -v` → 18개 통과, `timeout 90 python3 -m unittest discover -s tests` → 211개 통과(27 skip).
+- 재검증: `python3 -m unittest tests.test_application_api -v` → 24개 통과, `python3 -m unittest tests.test_llm_gateway_app tests.test_llama_provider_client tests.test_httpx_transport -v` → 18개 통과. fixture 추가 후 전체 discovery는 213개 통과(27 skip).
+
+## Core SOT reusable fixture (plan 01 최소 산출물 #7)
+
+- 변경 파일: `tests/fixtures/__init__.py`(신규), `tests/fixtures/core_sot.py`(신규), `tests/test_core_sot_fixture.py`(신규), `docs/plans/01-core-sot.md`, `HANDOFF.md`, `CHANGELOG.md`.
+- 배경: plan 01 최소 산출물 #7은 "후속 Phase가 재사용할 fixture"였다. Phase 2는 아직 AnalysisJob/Candidate schema가 미확정이므로, 그 schema를 추측하지 않고 Core SOT의 확정 표면(snapshot/block/source_ref/idempotent save)만 reusable fixture로 제공한다.
+- 구현: `build_core_sot_fixture()`가 in-memory `CoreSotService`로 project/draft/version save/source_ref 2개를 생성한다. fixture module은 deterministic raw text, expected raw UTF-8 SHA-256, block kind/order/offset/text matrix, source_ref span/quote/block index를 상수로 제공한다.
+- 효과: Phase 2 Snapshot Loader, Analysis Gate, anchor validator 테스트가 동일한 snapshot/block/ref 계약을 import해 쓸 수 있다. production service에는 테스트 fixture 데이터가 섞이지 않는다.
+
+### 검증
+
+- `python3 -m unittest tests.test_core_sot_fixture -v` → 2개 통과.
+- `timeout 90 python3 -m unittest discover -s tests` → 213개 통과(27 skip).
 
 ## Next steps
 
-- 후속 Phase 재사용 fixture(plan 01 최소 산출물 #7)는 실제 소비자(Phase 2)가 생기면 그 shape에 맞춰 추가.
 - 동시성이 필요해지면 fallback (a) 보강 재검토(현재는 single-writer 계약으로 닫힘, R2).
