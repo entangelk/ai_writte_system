@@ -97,6 +97,13 @@
 - API end-to-end(transaction 경로): project→draft→save(version 1, 4 blocks)→같은 key replay가 `idempotent_replay=true, version_number=1`, `draft_versions` count=1(중복 없음). transaction이 실제 사용됨을 확인.
 - `docker compose down -v`로 정리, 단위 스위트 재확인 OK(skipped=17).
 
+### Docker 검증 후 보강 (비차단 observation 대응)
+
+- 독립 검증(`docs/verifications/2026-06-28/slice1_docker_and_recheck_closure.md`, 합격)의 비차단 observation 3건 중 #1만 보강했다.
+- #1(적용): `docker-compose.yml`의 application 서비스에 healthcheck를 추가했다. slim 이미지에 curl이 없어 stdlib `urllib`로 `/health`를 probe한다. 검증: `docker compose up` 후 application 컨테이너가 ~3s 내 `healthy` 도달 확인, `down -v` 정리.
+- #2(유지): mongo `--bind_ip_all`은 compose 네트워크에서 application 컨테이너가 mongo에 도달하기 위해 필요한 설정이라 현행 유지(localhost-only 바인딩이면 cross-container 접속 불가). 검증자도 로컬 MVP에서는 OK로 명시. 공유/운영 환경 진입 시 bind 제한은 그때 별도 적용.
+- #3(유지): uvicorn 단일 worker는 단일 사용자 로컬에 적합(검증자 확인). 변경은 speculative라 미적용.
+
 ## Next steps
 
 - gateway 서비스 Dockerfile/compose 편입(현재는 application+Mongo만; gateway는 외부 llama.cpp endpoint 의존, Slice 1 범위 밖).

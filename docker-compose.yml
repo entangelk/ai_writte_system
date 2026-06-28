@@ -37,6 +37,17 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
+    healthcheck:
+      # The slim image has no curl; probe /health with stdlib urllib instead.
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=2).status == 200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 volumes:
   mongo_data:
