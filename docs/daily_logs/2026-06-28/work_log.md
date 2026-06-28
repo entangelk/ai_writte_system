@@ -207,9 +207,21 @@
 - 전체 202개(Mongo 미연결 27 skip), replica set 연결 시 전부 통과(아래 별도 실행).
 - 문서 경계 ↔ 회귀 매핑: 본문 쓰기 차단(test_project_archive_blocks_new_draft_and_save..., test_archive_blocks_new_save...), rename 차단(test_rename_on_archived_is_blocked_409, test_rename_draft_blocked_when_only_project_archived), 읽기 허용(test_archived_project_and_draft_remain_listable_and_gettable, test_archive_preserves_version_read), source_ref carve-out(test_source_ref_creation_allowed_on_archived).
 
+## archive API endpoint (CRUD 보관/삭제 표면)
+
+- 변경 파일: `main.py`(DELETE 엔드포인트 2종), `tests/test_application_api.py`(회귀).
+- 배경: archive는 service-only였고 HTTP 표면이 없었다. plan 01 L13–14 "보관/삭제"를 채운다.
+- API: `DELETE /projects/{id}`·`DELETE /projects/{id}/drafts/{draft_id}` → archive(soft delete). 계약 §115 "삭제는 archive로 처리"에 맞춰 DELETE를 archive로 매핑하고 archived 엔티티를 200으로 반환. 없음/cross-project draft→404. 재archive는 idempotent(상태전이는 §115 쓰기차단 대상 아님)라 200 유지.
+- SOT/계약 변경 없음. service archive_project/archive_draft 재사용.
+
+### 검증
+
+- API 회귀 4종: DELETE project archive(archived=true, 읽기 유지, 이후 draft 생성·save→409), DELETE draft archive(archived=true, rename→409, 읽기 200), idempotent 재archive(200), 없음/cross-project→404.
+- 전체 206개(Mongo 미연결 27 skip), 단일 노드 replica set 연결 시 206개 전부 통과.
+
 ## Next steps
 
 - gateway 서비스 Dockerfile/compose 편입(현재는 application+Mongo만; gateway는 외부 llama.cpp endpoint 의존, Slice 1 범위 밖).
-- archive API endpoint(현재 archive는 service-only).
+- 후속 Phase 재사용 fixture(plan 01 최소 산출물 #7)는 실제 소비자(Phase 2)가 생기면 그 shape에 맞춰 추가.
 - 후속 Phase 재사용 fixture(plan 01 최소 산출물 #7)는 실제 소비자(Phase 2)가 생기면 그 shape에 맞춰 추가.
 - 동시성이 필요해지면 fallback (a) 보강 재검토(현재는 single-writer 계약으로 닫힘, R2).

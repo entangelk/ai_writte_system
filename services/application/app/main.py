@@ -141,6 +141,24 @@ def create_app(service: CoreSotService | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return _draft_payload(draft)
 
+    @app.delete("/projects/{project_id}")
+    async def archive_project(project_id: str) -> dict[str, object]:
+        # MVP: delete is archive (soft delete); SOT data is preserved (§115).
+        # Re-archiving is idempotent.
+        try:
+            project = core_sot.archive_project(project_id=project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _project_payload(project)
+
+    @app.delete("/projects/{project_id}/drafts/{draft_id}")
+    async def archive_draft(project_id: str, draft_id: str) -> dict[str, object]:
+        try:
+            draft = core_sot.archive_draft(project_id=project_id, draft_id=draft_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _draft_payload(draft)
+
     @app.get("/projects/{project_id}/drafts")
     async def list_drafts(project_id: str) -> dict[str, object]:
         try:

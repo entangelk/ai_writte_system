@@ -241,6 +241,91 @@ class ApplicationApiTest(unittest.TestCase):
         self.assertEqual(renamed.status_code, 200)
         self.assertEqual(renamed.json()["name"], "New")
 
+    def test_archive_project_via_delete_blocks_writes_keeps_reads(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+
+        archived = client.delete(f"/projects/{project['id']}")
+
+        self.assertEqual(archived.status_code, 200)
+        self.assertTrue(archived.json()["archived"])
+        # Read still allowed (§115).
+        self.assertEqual(
+            client.get(f"/projects/{project['id']}").json()["archived"], True
+        )
+        # Writes blocked: new draft and save → 409.
+        self.assertEqual(
+            client.post(
+                f"/projects/{project['id']}/drafts", json={"title": "E2"}
+            ).status_code,
+            409,
+        )
+        self.assertEqual(
+            client.post(
+                f"/projects/{project['id']}/drafts/{draft['id']}/versions",
+                json={"raw_text": "x", "idempotency_key": "k"},
+            ).status_code,
+            409,
+        )
+
+    def test_archive_draft_via_delete(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+
+        archived = client.delete(
+            f"/projects/{project['id']}/drafts/{draft['id']}"
+        )
+
+        self.assertEqual(archived.status_code, 200)
+        self.assertTrue(archived.json()["archived"])
+        # Draft write blocked, draft still readable.
+        self.assertEqual(
+            client.patch(
+                f"/projects/{project['id']}/drafts/{draft['id']}",
+                json={"title": "X"},
+            ).status_code,
+            409,
+        )
+        self.assertEqual(
+            client.get(
+                f"/projects/{project['id']}/drafts/{draft['id']}"
+            ).status_code,
+            200,
+        )
+
+    def test_archive_is_idempotent(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+
+        first = client.delete(f"/projects/{project['id']}")
+        second = client.delete(f"/projects/{project['id']}")
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertTrue(second.json()["archived"])
+
+    def test_archive_missing_and_cross_project_returns_404(self):
+        client = TestClient(create_app())
+        project_a = client.post("/projects", json={"name": "A"}).json()
+        project_b = client.post("/projects", json={"name": "B"}).json()
+        draft_a = client.post(
+            f"/projects/{project_a['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+
+        self.assertEqual(client.delete("/projects/nope").status_code, 404)
+        self.assertEqual(
+            client.delete(
+                f"/projects/{project_b['id']}/drafts/{draft_a['id']}"
+            ).status_code,
+            404,
+        )
+
     def test_version_list_and_detail_read_back_saved_content(self):
         client = TestClient(create_app())
         project = client.post("/projects", json={"name": "Novel"}).json()

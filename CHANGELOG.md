@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-28 | archive API endpoint 추가(DELETE=archive, CRUD API 완성) | [work log](docs/daily_logs/2026-06-28/work_log.md) |
 | 2026-06-28 | SoT v1.5: archive 읽기전용 명문화 + source_ref carve-out | [work log](docs/daily_logs/2026-06-28/work_log.md) |
 | 2026-06-28 | project/draft rename API 추가(CRUD 수정 완성) | [work log](docs/daily_logs/2026-06-28/work_log.md) |
 | 2026-06-28 | version read API 추가(version/snapshot 재조회 표면) | [work log](docs/daily_logs/2026-06-28/work_log.md) |
@@ -23,6 +24,10 @@
 | 2026-06-24 | 개발 계획 문서 구조 도입 | [work log](docs/daily_logs/2026-06-24/work_log.md) |
 
 ## 2026-06-28
+
+### Added
+
+- archive API endpoint를 추가해 Core SOT CRUD를 API로 완성했다. `DELETE /projects/{id}`와 `DELETE /projects/{id}/drafts/{draft_id}`를 archive(soft delete)로 매핑했다(계약 §115 "삭제는 archive로 처리"). archived 엔티티를 200으로 반환하고, 없음/cross-project draft는 404, 재archive는 idempotent(상태전이는 쓰기차단 대상 아님)다. service의 archive_project/archive_draft를 재사용하며 SOT/계약 변경은 없다. 전체 206개(Mongo 미연결 27 skip / 연결 시 전통과).
 
 ### Changed
 
