@@ -225,6 +225,15 @@ class CoreSotSourceRefTest(unittest.TestCase):
                 project_id=project_b.id, source_ref_id=source_ref.id
             )
 
+    def test_get_source_ref_missing_id_raises_not_found(self):
+        service, _repo = _service()
+        project = service.create_project(name="Novel")
+
+        with self.assertRaises(NotFound):
+            service.get_source_ref(
+                project_id=project.id, source_ref_id="source-ref-does-not-exist"
+            )
+
     def test_source_ref_cannot_cross_block_boundary(self):
         service, _repo = _service()
         project = service.create_project(name="Novel")

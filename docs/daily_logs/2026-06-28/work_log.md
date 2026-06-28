@@ -118,6 +118,12 @@
 - Mongo mixin 신규 2개(fallback/transaction 양 경로 = 4): archive 후 persisted source_ref 보존, project_id 격리. 기존 source_ref 재구성 test에 persist 재조회 assertion 추가.
 - 전체: Mongo 미연결 175개(21 skip), 단일 노드 replica set 연결 시 175개 전부 통과(Mongo 통합 21개).
 
+### 재검증 후 보강
+
+- 독립 재검증(`docs/verifications/2026-06-28/source_ref_persistence.md`, 합격)의 비차단 observation 대응.
+- #1(보강): `get_source_ref` 존재하지 않는 id→NotFound 명시 회귀를 추가했다(`test_get_source_ref_missing_id_raises_not_found`). 전체 176개로 통과.
+- #2/#3(추적): archive 후 신규 source_ref 생성 정책과 create_source_ref idempotency는 모두 §113/§111 spec-silent이므로 코드 변경 없이 HANDOFF Next Tasks #5(Phase 2 정책 결정)로 반영했다.
+
 ## Next steps
 
 - gateway 서비스 Dockerfile/compose 편입(현재는 application+Mongo만; gateway는 외부 llama.cpp endpoint 의존, Slice 1 범위 밖).
