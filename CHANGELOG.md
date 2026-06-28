@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-28 | SoT v1.5.1: Mongo index setup 계약 명확화 | [work log](docs/daily_logs/2026-06-28/work_log.md) |
 | 2026-06-28 | Core SOT reusable fixture 추가(plan 01 #7 완료) | [work log](docs/daily_logs/2026-06-28/work_log.md) |
 | 2026-06-28 | LLM Gateway client container compose 편입 | [work log](docs/daily_logs/2026-06-28/work_log.md) |
 | 2026-06-28 | archive API endpoint 추가(DELETE=archive, CRUD API 완성) | [work log](docs/daily_logs/2026-06-28/work_log.md) |
@@ -35,6 +36,7 @@
 
 ### Changed
 
+- SoT를 v1.5.1로 갱신해 Mongo adapter setup 계약을 명확화했다. required query index는 `uniq_save_request`와 `blocks_by_snapshot`이며, MongoDB가 required index 생성을 거부하면 `MongoRepositorySetupError`로 표면화한다. 검증 O2가 지적한 `source_refs_by_snapshot`은 현재 query path가 없는 speculative/dead index라 제거했다. source_ref by-snapshot 조회 API가 생기기 전까지 해당 index는 required contract가 아니다.
 - SoT를 v1.5로 갱신해 archive를 읽기 전용 상태로 명문화했다(rename_api.md R1, 사용자 결정). archived project/draft는 읽기(get/list, version/snapshot 재조회) 허용, 본문 쓰기(draft 생성·version 저장)와 메타데이터 수정(rename)은 차단(409), SOT 본문은 archive 무관 항상 불변, unarchive/상태전이는 차단 범위 밖("archived 동안 차단"으로 한정). `source_refs` 생성은 immutable snapshot 파생 주석이라 archived에서도 허용(carve-out)하며 회귀로 잠갔다. 사용자가 제안한 write-level 다단계(강제/수정/일반) 모델은 검토 후 과설계(YAGNI, archived에서 다른 쓰기는 source_ref 1개뿐)로 채택하지 않고 연산 카테고리 prose로 정리했다. 기존 구현·회귀와 정합하는 문서 명문화이며 코드 변경은 carve-out 회귀 1건뿐이다.
 
 ### Added

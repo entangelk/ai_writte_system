@@ -281,7 +281,7 @@
 
 - 변경 파일: `services/application/app/core_sot/mongo_repository.py`, `tests/test_core_sot_mongo_indexes.py`(신규).
 - 배경: HANDOFF의 Slice 1 잔여 회귀 후보 중 "index 부재/충돌 시 동작"이 아직 직접 잠겨 있지 않았다. Phase 3의 archive 후 파생 인덱스 stale 이벤트는 아직 Draft 계약이라 이번 범위에서 제외했다.
-- 구현: `ensure_indexes()`가 `draft_versions` unique idempotency index(`uniq_save_request`), `source_blocks` snapshot/block index(`blocks_by_snapshot`), `source_refs` project/snapshot index(`source_refs_by_snapshot`)를 계속 생성하되, MongoDB가 기존 충돌 index 등으로 `OperationFailure`를 반환하면 stable `MongoRepositorySetupError`로 감싼다.
+- 구현: `ensure_indexes()`가 `draft_versions` unique idempotency index(`uniq_save_request`)와 `source_blocks` snapshot/block index(`blocks_by_snapshot`)를 생성하되, MongoDB가 기존 충돌 index 등으로 `OperationFailure`를 반환하면 stable `MongoRepositorySetupError`로 감싼다.
 - 회귀: 실제 Mongo 없이 fake collection으로 absent-index setup 호출을 검증하고, 충돌 index 실패가 save/idempotency 흐름의 `DuplicateSaveRequest`로 오인되지 않고 setup error로 표면화됨을 잠갔다. 테스트 docstring에 under-strict/over-strict guard를 명시했다.
 - pattern sweep: `rg -n "create_index|ensure_indexes|OperationFailure|DuplicateKeyError" services tests`로 인덱스 생성 경로가 `MongoCoreSotRepository.ensure_indexes()` 단일 경로임을 확인했다.
 
@@ -290,6 +290,13 @@
 - `python3 -m unittest tests.test_core_sot_mongo_indexes -v` → 2개 통과.
 - `python3 -m py_compile services/application/app/core_sot/mongo_repository.py tests/test_core_sot_mongo_indexes.py` 통과.
 - `timeout 90 python3 -m unittest discover -s tests` → 216개 통과(27 skip).
+
+### 독립 검증 후 보강
+
+- 근거 기록: `docs/verifications/2026-06-28/mongo_index_setup.md`(합격, commit `679a132` 기준).
+- O1 보강: SoT v1.5.1에 Mongo adapter setup 계약을 명확화했다. required query index는 `uniq_save_request`와 `blocks_by_snapshot`이며, MongoDB가 required index 생성을 거부하면 `MongoRepositorySetupError`로 표면화한다.
+- O2 보강: `source_refs_by_snapshot`은 현재 query path가 없어 speculative/dead index였으므로 제거했다. `source_refs`는 `_id` 기반 `get_source_ref` 조회만 사용하며, list-by-snapshot API가 생기기 전까지 by-snapshot index는 required contract가 아니다.
+- O3/O4 판단: `object.__new__` 기반 단위 테스트는 실제 Mongo 없는 index-call contract를 잠그기 위한 의도적 범위이고, `__init__`→`ensure_indexes` 통합은 기존 live Mongo slice 담당으로 유지한다. `OperationFailure`만 좁게 catch하는 것도 "index 부재/충돌" 범위에 맞아 유지한다.
 
 ## Next steps
 

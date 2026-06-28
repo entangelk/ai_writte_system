@@ -39,14 +39,13 @@ def _repo_with_indexes(*, fail_on_name: str | None = None):
     repo = object.__new__(MongoCoreSotRepository)
     repo._versions = _FakeCollection(fail_on_name=fail_on_name)
     repo._blocks = _FakeCollection(fail_on_name=fail_on_name)
-    repo._source_refs = _FakeCollection(fail_on_name=fail_on_name)
     return repo
 
 
 @unittest.skipUnless(_PYMONGO_AVAILABLE, "pymongo is not installed")
 class MongoIndexSetupTests(unittest.TestCase):
     def test_ensure_indexes_creates_required_absent_indexes(self):
-        """Under-strict guard: every required Core SOT index must be requested."""
+        """Under-strict guard: every required query index must be requested."""
 
         repo = _repo_with_indexes()
 
@@ -75,13 +74,9 @@ class MongoIndexSetupTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            repo._source_refs.calls,
-            [
-                (
-                    [("project_id", 1), ("snapshot_id", 1)],
-                    {"name": "source_refs_by_snapshot"},
-                )
-            ],
+            getattr(repo, "_source_refs", None),
+            None,
+            "source_refs currently has no by-snapshot query path to index",
         )
 
     def test_conflicting_index_failure_is_stable_setup_error(self):

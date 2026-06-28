@@ -96,10 +96,6 @@ class MongoCoreSotRepository:
                 [("snapshot_id", ASCENDING), ("block_index", ASCENDING)],
                 name="blocks_by_snapshot",
             )
-            self._source_refs.create_index(
-                [("project_id", ASCENDING), ("snapshot_id", ASCENDING)],
-                name="source_refs_by_snapshot",
-            )
         except OperationFailure as exc:
             raise MongoRepositorySetupError(
                 "failed to create required Core SOT MongoDB indexes"
