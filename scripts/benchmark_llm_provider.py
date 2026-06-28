@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import Any
+from typing import Any, TextIO
 
 from services.llm_gateway.app.client import LlamaCppProvider
 from services.llm_gateway.app.errors import ProviderError
@@ -124,7 +124,22 @@ async def run_benchmark(
     for case in cases:
         request = case.to_request(model=model)
         for _ in range(warmups):
-            await provider.generate(request)
+            started = now()
+            try:
+                await provider.generate(request)
+            except ProviderError as exc:
+                elapsed_ms = (now() - started) * 1000
+                runs.append(
+                    BenchmarkRun(
+                        case=case.name,
+                        iteration=0,
+                        success=False,
+                        latency_ms=elapsed_ms,
+                        error_code=exc.code.value,
+                        error_retryable=exc.retryable,
+                        error_message=str(exc),
+                    )
+                )
         for iteration in range(1, repeats + 1):
             started = now()
             try:
@@ -262,16 +277,25 @@ async def _run_live(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
-def main() -> None:
+def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=180.0)
-    args = parser.parse_args()
-    report = asyncio.run(_run_live(args))
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return parser
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    run_live: Callable[[argparse.Namespace], Any] = _run_live,
+    stdout: TextIO | None = None,
+) -> None:
+    args = build_arg_parser().parse_args(argv)
+    report = asyncio.run(run_live(args))
+    print(json.dumps(report, ensure_ascii=False, indent=2), file=stdout)
 
 
 if __name__ == "__main__":

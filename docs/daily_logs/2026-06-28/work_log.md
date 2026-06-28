@@ -311,6 +311,16 @@
 - `python3 -m unittest tests.test_llm_benchmark_script -v` → 5개 통과.
 - `python3 -m py_compile scripts/benchmark_llm_provider.py tests/test_llm_benchmark_script.py` 통과.
 
+### 독립 검증 후 보강
+
+- 근거 기록: `docs/verifications/2026-06-28/gemma_benchmark_harness.md`(합격, commit `04950d4` 기준).
+- O1 보강(부분): live endpoint 없이도 CLI wiring을 fake runner로 검증했다. `main(argv, run_live, stdout)` 주입점을 추가해 argparse 값이 `_run_live`로 전달되고 JSON이 stdout에 출력됨을 lock했다. 실제 `HttpxJsonTransport` live 실행은 endpoint 필요로 다음 slice에 남긴다.
+- O2 보강: warmup 중 `ProviderError`가 나도 전체 benchmark가 crash하지 않고 `iteration=0` 실패 run으로 기록되게 했다. measured repeat는 계속 실행한다.
+- O4 보강: `docs/plans/llm-gateway.md`에 benchmark report top-level shape와 raw run/summary fields, warmup failure 기록 정책을 명시했다.
+- O5 보강: report raw run 직렬화 snapshot assertion으로 `prompt_tokens`, `completion_tokens`, `finish_reason`, `output_chars` 등 기존 미assert 필드를 직접 lock했다.
+- 재검증: `python3 -m unittest tests.test_llm_benchmark_script -v` → 7개 통과.
+- 전체: `timeout 90 python3 -m unittest discover -s tests` → 223개 통과(27 skip).
+
 ## Next steps
 
 - Slice 1 잔여 후보 중 archive 후 파생 인덱스 stale 이벤트는 Phase 3 indexing 계약이 확정된 뒤 처리한다.

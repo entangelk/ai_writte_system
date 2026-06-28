@@ -177,6 +177,16 @@ latency/token/error summary를 JSON으로 출력한다. 실제 budget/retry
 production 기본값은 이 report를 live Gemma/llama.cpp endpoint에서 생성한
 뒤 별도 결정한다.
 
+Benchmark report는 다음 top-level shape를 가진다: `metadata`(`created_at`,
+`base_url`, `model`, `repeats`, `warmups`), `summary`(case별 `runs`,
+`successes`, `failures`, `latency_ms_p50`, `latency_ms_p95`,
+`max_total_tokens`, `avg_output_tokens_per_second`, `error_codes`), `runs`
+(raw run별 `case`, `iteration`, `success`, `latency_ms`, `prompt_tokens`,
+`completion_tokens`, `total_tokens`, `tokens_per_second`, `finish_reason`,
+`output_chars`, `error_code`, `error_retryable`, `error_message`). Warmup
+provider failure는 전체 benchmark를 중단하지 않고 `iteration=0` 실패 run으로
+기록한다.
+
 ### 품질 task
 
 - entity/event 등 최초 추출
