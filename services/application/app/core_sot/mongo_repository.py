@@ -144,6 +144,12 @@ class MongoCoreSotRepository:
     def version_count(self, draft_id: str) -> int:
         return self._versions.count_documents({"draft_id": draft_id})
 
+    def list_versions(self, draft_id: str) -> tuple[DraftVersion, ...]:
+        cursor = self._versions.find({"draft_id": draft_id}).sort(
+            "version_number", ASCENDING
+        )
+        return tuple(_to_version(doc) for doc in cursor)
+
     def find_save_request(
         self, project_id: str, draft_id: str, idempotency_key: str
     ) -> str | None:

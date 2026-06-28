@@ -128,6 +128,77 @@ class ApplicationApiTest(unittest.TestCase):
         ]
         self.assertEqual(listed_drafts, created_drafts)
 
+    def test_version_list_and_detail_read_back_saved_content(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        base = f"/projects/{project['id']}/drafts/{draft['id']}/versions"
+        raw_text = "# Chapter 1\n\nOpening line.\n\n---\n\nNext scene."
+        v1 = client.post(
+            base, json={"raw_text": raw_text, "idempotency_key": "save-1"}
+        ).json()
+        v2 = client.post(
+            base, json={"raw_text": "second", "idempotency_key": "save-2"}
+        ).json()
+
+        listed = client.get(base).json()["versions"]
+        detail = client.get(f"{base}/{v1['draft_version']['id']}")
+
+        # Listed in version_number order, idempotency_key not leaked.
+        self.assertEqual(
+            [(v["version_number"], v["id"]) for v in listed],
+            [(1, v1["draft_version"]["id"]), (2, v2["draft_version"]["id"])],
+        )
+        self.assertNotIn("idempotency_key", listed[0])
+        # Detail reads back the exact persisted snapshot text and block text.
+        self.assertEqual(detail.status_code, 200)
+        body = detail.json()
+        self.assertEqual(body["snapshot"]["raw_text"], raw_text)
+        self.assertEqual(
+            [b["text"] for b in body["blocks"]],
+            ["# Chapter 1", "Opening line.", "---", "Next scene."],
+        )
+
+    def test_get_missing_version_returns_404(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+
+        missing = client.get(
+            f"/projects/{project['id']}/drafts/{draft['id']}/versions/nope"
+        )
+        missing_list = client.get(
+            f"/projects/{project['id']}/drafts/nope/versions"
+        )
+
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(missing_list.status_code, 404)
+
+    def test_get_version_cross_draft_returns_404(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        draft_a = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        draft_b = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 2"}
+        ).json()
+        version = client.post(
+            f"/projects/{project['id']}/drafts/{draft_a['id']}/versions",
+            json={"raw_text": "body", "idempotency_key": "save-1"},
+        ).json()["draft_version"]["id"]
+
+        # Version belongs to draft A; requesting it under draft B must 404.
+        cross = client.get(
+            f"/projects/{project['id']}/drafts/{draft_b['id']}/versions/{version}"
+        )
+
+        self.assertEqual(cross.status_code, 404)
+
     def test_archived_project_and_draft_remain_listable_and_gettable(self):
         # SoT §113: archive preserves data; read stays allowed (writes blocked
         # elsewhere). Lock that archived entities are still listed/fetched.

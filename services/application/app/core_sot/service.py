@@ -13,6 +13,7 @@ from dataclasses import replace
 from services.application.app.core_sot.models import (
     Draft,
     DraftVersion,
+    DraftVersionDetail,
     Project,
     SaveDraftResult,
     SourceBlock,
@@ -90,6 +91,12 @@ class InMemoryCoreSotRepository:
 
     def version_count(self, draft_id: str) -> int:
         return len(self._version_ids_by_draft.get(draft_id, ()))
+
+    def list_versions(self, draft_id: str) -> tuple[DraftVersion, ...]:
+        return tuple(
+            self.versions[vid]
+            for vid in self._version_ids_by_draft.get(draft_id, ())
+        )
 
     def get_project(self, project_id: str) -> Project | None:
         return self.projects.get(project_id)
@@ -182,6 +189,32 @@ class CoreSotService:
     def list_drafts(self, *, project_id: str) -> tuple[Draft, ...]:
         self._require_project(project_id)
         return self._repo.list_drafts(project_id)
+
+    def list_draft_versions(
+        self, *, project_id: str, draft_id: str
+    ) -> tuple[DraftVersion, ...]:
+        self._require_project(project_id)
+        self._require_draft(project_id, draft_id)
+        return self._repo.list_versions(draft_id)
+
+    def get_draft_version(
+        self, *, project_id: str, draft_id: str, version_id: str
+    ) -> DraftVersionDetail:
+        self._require_project(project_id)
+        self._require_draft(project_id, draft_id)
+        version = self._repo.get_version(version_id)
+        if (
+            version is None
+            or version.project_id != project_id
+            or version.draft_id != draft_id
+        ):
+            raise NotFound("draft_version not found")
+        snapshot = self._repo.get_snapshot(version.snapshot_id)
+        assert snapshot is not None
+        blocks = self._repo.get_blocks(version.snapshot_id)
+        return DraftVersionDetail(
+            draft_version=version, snapshot=snapshot, blocks=blocks
+        )
 
     def save_draft(
         self,

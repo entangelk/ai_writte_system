@@ -147,8 +147,23 @@
 - #3: 존재하지 않는 draft_id→404 명시 lock(`test_get_missing_draft_returns_404`).
 - 전체 185개(Mongo 미연결 23 skip), replica set 연결 시 전부 통과.
 
+## version read API (version/snapshot 재조회 public 표면)
+
+- 변경 파일: `models.py`(`DraftVersionDetail`), `repository.py`(`list_versions` Protocol), `service.py`(InMemory `list_versions` + service `list_draft_versions`/`get_draft_version`), `mongo_repository.py`(Mongo `list_versions`, version_number ASC), `main.py`(GET 엔드포인트 2종), `tests/test_application_api.py`·`tests/test_core_sot_mongo.py`(회귀).
+- 배경: save는 version+snapshot+blocks를 persist하지만 재조회 endpoint가 없어 분석/검색 Phase가 의존할 "version/snapshot 재조회" public 표면이 닫혀 있었다.
+- API: `GET /projects/{id}/drafts/{draft_id}/versions`(목록, version_number 순), `GET .../versions/{version_id}`(단건 full read-back: snapshot raw_text + blocks text). project/draft 없음·version 없음·cross-draft는 404. version은 project_id·draft_id 양쪽 일치를 service에서 강제.
+- 계약 결정: version 메타 payload에서 `idempotency_key`를 의도적으로 제외(내부 save 토큰이며 public read 표면이 아님). detail은 snapshot raw_text와 blocks text를 모두 반환(재조회 목적).
+- 정렬: version 목록은 version_number ASC(in-memory는 저장 순서, Mongo는 version_number sort). 범위: read만. rename은 후속.
+- SoT 계약 변경 없음(plan 01 §13 draft 조회·§30 draft_versions 계약 구현).
+
+### 검증
+
+- API 회귀 3종: list+detail read-back(raw_text+block text 일치, version_number 순, idempotency_key 미노출), 없는 version/draft→404, cross-draft version→404.
+- Mongo mixin 1종(fallback/transaction 양 경로 = 2): fresh service로 persisted version list 순서 + detail read-back(raw_text/hash/blocks) + 없는 version→NotFound.
+- 전체: Mongo 미연결 190개(25 skip), 단일 노드 replica set 연결 시 190개 전부 통과.
+
 ## Next steps
 
 - gateway 서비스 Dockerfile/compose 편입(현재는 application+Mongo만; gateway는 외부 llama.cpp endpoint 의존, Slice 1 범위 밖).
-- project/draft rename(수정)·version read API와 후속 Phase 재사용 fixture(plan 01 최소 산출물 #7)는 별도 작업으로 남김.
+- project/draft rename(수정) API와 후속 Phase 재사용 fixture(plan 01 최소 산출물 #7)는 별도 작업으로 남김.
 - 동시성이 필요해지면 fallback (a) 보강 재검토(현재는 single-writer 계약으로 닫힘, R2).

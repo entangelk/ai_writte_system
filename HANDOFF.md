@@ -60,14 +60,15 @@
 - Core SOT minimal skeleton 독립 검증은 조건부 합격이었다(`docs/verifications/2026-06-26/core_sot_minimal_skeleton.md`). C1(`***`, `##`, `archive_project` 회귀), C2(known SHA-256 vector), C3(within-block source_ref 계약 명시)는 보강 완료됐다.
 - Core SOT가 실제 MongoDB 저장소에 연결됐다(2026-06-28). method 기반 `CoreSotRepository` Protocol + pymongo(sync) `MongoCoreSotRepository`가 transaction 경로(기본)와 non-transaction fallback(retry guard·orphan cleanup·ordered write)을 구현하고, idempotency는 `draft_versions` unique index로 강제된다. skip-aware live 통합 테스트 17개가 단일 노드 replica set에서 통과했다.
 - Application + MongoDB(replica set) Docker 런타임이 추가됐다(2026-06-28). `services/application/Dockerfile`(cache-friendly layer)·`docker-compose.yml`(mongo replica set healthcheck로 rs.initiate idempotent + application + application healthcheck)·`.dockerignore`. `docker compose up` 후 transaction 경로로 API save/replay end-to-end 검증 완료. gateway 서비스는 아직 compose에 미편입(외부 llama.cpp endpoint 의존).
-- project/draft list/get API가 추가돼 Core SOT round-trip이 완성됐다(2026-06-28). `GET /projects`·`/projects/{id}`·`/projects/{id}/drafts`·`/projects/{id}/drafts/{draft_id}`. project_id 격리·404(없음/cross-project)·persisted round-trip을 API+Mongo(양 경로) 회귀로 잠갔다. rename/version read는 후속.
+- project/draft list/get API가 추가돼 Core SOT round-trip이 완성됐다(2026-06-28). `GET /projects`·`/projects/{id}`·`/projects/{id}/drafts`·`/projects/{id}/drafts/{draft_id}`. project_id 격리·404(없음/cross-project)·persisted round-trip을 API+Mongo(양 경로) 회귀로 잠갔다. rename은 후속.
+- version read API가 추가됐다(2026-06-28). `GET /projects/{id}/drafts/{draft_id}/versions`(목록, version_number 순)·`GET .../versions/{version_id}`(단건 full read-back: snapshot raw_text + blocks text). version은 project_id·draft_id 일치 강제, 없음/cross-draft 404, payload에서 `idempotency_key` 의도적 제외. 분석/검색 Phase가 의존할 version/snapshot 재조회 표면이 열렸다.
 - SourceRef persistence가 추가돼 Slice 1이 마무리됐다(2026-06-28, R3 폐쇄). `SourceRef`에 `id`/`project_id`를 더하고 `create_source_ref`가 `source_refs` collection에 persist, `get_source_ref`는 project_id 격리를 강제한다. archive 후 source_ref 보존을 in-memory+Mongo(양 경로) 회귀로 잠갔다(SoT §113 충족, 계약 변경 없음). source_ref ↔ candidate 연결은 Phase 2 범위.
 
 ## Next Tasks
 
 1. gateway 서비스를 Dockerfile/compose에 편입(현재 application+Mongo만 compose에 있음; gateway는 외부 llama.cpp endpoint 의존이라 Slice 1 범위 밖이었음).
 2. Slice 1 잔여 회귀 후보: index 부재/충돌 시 동작, archive 후 파생 인덱스 stale 이벤트. (fallback 동시성 race는 SoT v1.4 single-writer 제약으로 contract out 됨; 동시성 필요 시에만 (a) 보강 재검토.)
-3. plan 01 최소 산출물 #7(후속 Phase 재사용 fixture)은 아직 미구현. project/draft list/get은 완료, rename(수정)·version read API는 후속.
+3. plan 01 최소 산출물 #7(후속 Phase 재사용 fixture)은 아직 미구현. project/draft list/get·version read는 완료, rename(수정) API는 후속.
 4. Slice 1 결정이 현재 SoT 정본 계약을 바꾸면 `docs/system-contract-sot.md` 계약 버전을 갱신하고 변경 이력에 사용자 결정 근거를 남긴다. (Mongo adapter는 persistence/retention v1.3을 구현으로 충족, 재검증 R2 결정으로 fallback single-writer 제약이 v1.4로 추가됨. SourceRef persistence는 v1.4 §113을 구현으로 충족.)
 5. Phase 2 source_ref 정책 결정(재검증 비차단 추적): (a) archive 후 신규 source_ref 생성 허용 여부 — 현재 §113 spec-silent로 허용됨, candidate 연결 시 정책 확정 필요. (b) create_source_ref idempotency — 현재 같은 span 재호출 시 매번 새 ref, §111은 draft save만 규정하므로 중복 ref 정책을 Phase 2에서 결정.
 6. runner domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
@@ -105,6 +106,7 @@
 - System Contract SoT 최초 독립 검증(2026-06-25): **합격**. 당시 SoT가 인용한 literal(5 provider·5 Analysis·3 candidate·7 decision·6 tool·3 allowlist·budget 임계)·status·링크가 정본과 문자열 그대로 일치하고 enum/bounds deferral이 정확히 전파됨. 같은 묶음의 A2 I2/I3 비차단 권고도 코드+양방향 회귀로 폐쇄(registry 18→20, 전체 85/85). 비차단 risk R1(SoT↔plans/README precedence tree 불일치)도 검증자가 직접 reconcile로 폐쉄 — plans/README tree를 SoT 5-level과 통일하고 SoT를 정본 precedence로 defer. 기록 `docs/verifications/2026-06-25/system_contract_sot.md`
 - Core SOT minimal skeleton 자체 회귀(2026-06-26): focused `python3 -m unittest tests.test_core_sot tests.test_application_api -v` 14개 통과, 전체 discovery 151개 통과. 잠근 범위: idempotent save, immutable snapshot/hash/block, known SHA-256 UTF-8 vector, `##` heading, `***` scene marker, source_ref quote/hash, within-block rejection, bool offset rejection, project_id isolation, project/draft archive preservation, FastAPI minimal flow.
 - Core SOT MongoDB adapter 자체 회귀(2026-06-28): Mongo 미지정 시 전체 discovery 168개 중 17개 skip(OK), `CORE_SOT_TEST_MONGO_URI` 지정 시 168개 전부 통과. 단일 노드 replica set(`docker run ... mongo:7 --replSet rs0` + `rs.initiate`, `?directConnection=true`)에서 fallback/transaction 양 경로 17개 검증. 잠근 범위: save 후 snapshot/blocks/version 재구성, deterministic hash/blocks, idempotent replay 무중복, distinct key version 증가, unique index 중복 거절(`DuplicateSaveRequest`), project_id 격리, archive 보존, source_ref quote 재구성, fallback orphan cleanup, fallback retry guard(commit dependents 미삭제), transaction abort 후 partial write 잔류 없음. FastAPI app wiring smoke(env var Mongo)로 HTTP save/replay 확인.
+- version read API 자체 회귀(2026-06-28): 전체 190개(Mongo 미연결 25 skip), replica set 연결 시 전부 통과. 잠근 범위: version list(version_number 순)+detail read-back(raw_text/block text 일치), idempotency_key 미노출, 없는 version/draft→404, cross-draft version→404, Mongo persisted read-back(양 경로).
 - project/draft list/get API 자체 회귀(2026-06-28): 전체 185개(Mongo 미연결 23 skip), replica set 연결 시 전부 통과. 잠근 범위: project list+get round-trip, 없는 project→404, draft list+get+project 격리(B는 A draft 미노출, should-NOT-fire), cross-project/없는 project/없는 draft→404, 생성 순서 유지(in-memory+Mongo), archive된 project/draft도 list/get 가능(§113 read-allowed), Mongo persisted round-trip(양 경로). 독립 재검증 합격, 비차단 observation 3건은 모두 회귀로 폐쇄(`docs/verifications/2026-06-28/project_draft_list_get_api.md`).
 - SourceRef persistence 자체 회귀(2026-06-28): Mongo 미연결 전체 176개(21 skip), 단일 노드 replica set 연결 시 Mongo 통합 21개 포함 전부 통과. 잠근 범위: source_ref persist+id 재조회, project_id 격리(NotFound), 존재하지 않는 id→NotFound, archive_project 후 §113 보존(in-memory + Mongo fallback/transaction 양 경로). pattern sweep: 생성-후-미persist 패턴은 source_ref가 마지막 gap이었고 나머지 엔티티는 이미 persist됨.
 - SourceRef persistence 독립 재검증(2026-06-28): **합격**. 기록 `docs/verifications/2026-06-28/source_ref_persistence.md`. schema 변경 regression 없음·R3(§113 archive 보존) 폐쇄·spec-silent 판단 정당을 독립 재현으로 증명. 비차단 observation 3건 중 #1(missing-id→NotFound test 부재)은 회귀 추가로 폐쇄, #2/#3(archive 후 생성·idempotency 정책)은 Phase 2 추적(Next Tasks #5)으로 반영.
@@ -152,7 +154,7 @@ services/
     ├── requirements.txt        # FastAPI/pymongo/uvicorn dependency
     ├── Dockerfile              # cache-friendly application image (deps→source)
     └── app/
-        ├── main.py             # FastAPI shell: health/project/draft CRUD(list/get/create)/version save (+Mongo wiring)
+        ├── main.py             # FastAPI shell: health/project·draft list·get·create/version save·list·read (+Mongo wiring)
         ├── core_sot/
         │   ├── models.py       # Core SOT immutable dataclasses
         │   ├── splitter.py     # raw-text SHA-256 + deterministic source block split

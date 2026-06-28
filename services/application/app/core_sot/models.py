@@ -83,3 +83,10 @@ class SaveDraftResult:
     blocks: tuple[SourceBlock, ...]
     idempotent_replay: bool
 
+
+@dataclass(frozen=True, slots=True)
+class DraftVersionDetail:
+    draft_version: DraftVersion
+    snapshot: SourceSnapshot
+    blocks: tuple[SourceBlock, ...]
+

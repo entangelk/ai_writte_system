@@ -157,6 +157,46 @@ class _MongoContractMixin:
         with self.assertRaises(NotFound):
             reread.get_draft(project_id=project_b.id, draft_id=draft_a1.id)
 
+    def test_version_read_back_from_persisted_store(self):
+        project, draft = self._project_and_draft()
+        raw_text = "# Chapter 1\n\nOpening line.\n\n---\n\nNext scene."
+        saved1 = self.service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text=raw_text,
+            idempotency_key="save-1",
+        )
+        saved2 = self.service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text="second",
+            idempotency_key="save-2",
+        )
+
+        # Fresh service so the read path comes entirely from Mongo.
+        reread = CoreSotService(self.repo)
+        versions = reread.list_draft_versions(project_id=project.id, draft_id=draft.id)
+        self.assertEqual(
+            [(v.version_number, v.id) for v in versions],
+            [(1, saved1.draft_version.id), (2, saved2.draft_version.id)],
+        )
+
+        detail = reread.get_draft_version(
+            project_id=project.id,
+            draft_id=draft.id,
+            version_id=saved1.draft_version.id,
+        )
+        self.assertEqual(detail.snapshot.raw_text, raw_text)
+        self.assertEqual(detail.snapshot.content_hash, content_hash(raw_text))
+        self.assertEqual(detail.blocks, saved1.blocks)
+
+        with self.assertRaises(NotFound):
+            reread.get_draft_version(
+                project_id=project.id,
+                draft_id=draft.id,
+                version_id="does-not-exist",
+            )
+
     def test_idempotent_replay_returns_same_version_without_duplicate(self):
         project, draft = self._project_and_draft()
 

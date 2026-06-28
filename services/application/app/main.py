@@ -77,6 +77,17 @@ def create_app(service: CoreSotService | None = None) -> FastAPI:
             "archived": draft.archived,
         }
 
+    def _version_meta_payload(version) -> dict[str, object]:
+        # idempotency_key is intentionally omitted: it is an internal save token,
+        # not part of the public read surface.
+        return {
+            "id": version.id,
+            "project_id": version.project_id,
+            "draft_id": version.draft_id,
+            "version_number": version.version_number,
+            "snapshot_id": version.snapshot_id,
+        }
+
     @app.post("/projects")
     async def create_project(request: CreateProjectRequest) -> dict[str, object]:
         project = core_sot.create_project(name=request.name)
@@ -109,6 +120,51 @@ def create_app(service: CoreSotService | None = None) -> FastAPI:
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return _draft_payload(draft)
+
+    @app.get("/projects/{project_id}/drafts/{draft_id}/versions")
+    async def list_draft_versions(project_id: str, draft_id: str) -> dict[str, object]:
+        try:
+            versions = core_sot.list_draft_versions(
+                project_id=project_id, draft_id=draft_id
+            )
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"versions": [_version_meta_payload(v) for v in versions]}
+
+    @app.get("/projects/{project_id}/drafts/{draft_id}/versions/{version_id}")
+    async def get_draft_version(
+        project_id: str, draft_id: str, version_id: str
+    ) -> dict[str, object]:
+        try:
+            detail = core_sot.get_draft_version(
+                project_id=project_id, draft_id=draft_id, version_id=version_id
+            )
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {
+            "draft_version": _version_meta_payload(detail.draft_version),
+            "snapshot": {
+                "id": detail.snapshot.id,
+                "project_id": detail.snapshot.project_id,
+                "draft_id": detail.snapshot.draft_id,
+                "version_id": detail.snapshot.version_id,
+                "raw_text": detail.snapshot.raw_text,
+                "content_hash": detail.snapshot.content_hash,
+            },
+            "blocks": [
+                {
+                    "id": block.id,
+                    "project_id": block.project_id,
+                    "snapshot_id": block.snapshot_id,
+                    "block_index": block.block_index,
+                    "kind": block.kind,
+                    "start_offset": block.start_offset,
+                    "end_offset": block.end_offset,
+                    "text": block.text,
+                }
+                for block in detail.blocks
+            ],
+        }
 
     @app.post("/projects/{project_id}/drafts")
     async def create_draft(
