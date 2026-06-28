@@ -403,6 +403,34 @@ class CoreSotIsolationAndArchiveTest(unittest.TestCase):
         )
         self.assertEqual(detail.snapshot.raw_text, "archived body")
 
+    def test_source_ref_creation_allowed_on_archived(self):
+        # SoT §115 carve-out (user decision): source_ref is a derived annotation
+        # over an immutable, preserved snapshot, so creating one is allowed even
+        # after archive — unlike content/metadata writes which are blocked.
+        service, _repo = _service()
+        project = service.create_project(name="Novel")
+        draft = service.create_draft(project_id=project.id, title="Episode 1")
+        saved = service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text="Paragraph one.",
+            idempotency_key="save-1",
+        )
+
+        service.archive_project(project_id=project.id)
+
+        source_ref = service.create_source_ref(
+            project_id=project.id,
+            snapshot_id=saved.snapshot.id,
+            start_offset=0,
+            end_offset=len("Paragraph"),
+        )
+        self.assertEqual(source_ref.quote, "Paragraph")
+        self.assertEqual(
+            service.get_source_ref(project_id=project.id, source_ref_id=source_ref.id),
+            source_ref,
+        )
+
     def test_archive_preserves_source_ref(self):
         service, repo = _service()
         project = service.create_project(name="Novel")

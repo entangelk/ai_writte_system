@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-28 | SoT v1.5: archive 읽기전용 명문화 + source_ref carve-out | [work log](docs/daily_logs/2026-06-28/work_log.md) |
 | 2026-06-28 | project/draft rename API 추가(CRUD 수정 완성) | [work log](docs/daily_logs/2026-06-28/work_log.md) |
 | 2026-06-28 | version read API 추가(version/snapshot 재조회 표면) | [work log](docs/daily_logs/2026-06-28/work_log.md) |
 | 2026-06-28 | project/draft list/get API 추가(Core SOT round-trip 완성) | [work log](docs/daily_logs/2026-06-28/work_log.md) |
@@ -22,6 +23,10 @@
 | 2026-06-24 | 개발 계획 문서 구조 도입 | [work log](docs/daily_logs/2026-06-24/work_log.md) |
 
 ## 2026-06-28
+
+### Changed
+
+- SoT를 v1.5로 갱신해 archive를 읽기 전용 상태로 명문화했다(rename_api.md R1, 사용자 결정). archived project/draft는 읽기(get/list, version/snapshot 재조회) 허용, 본문 쓰기(draft 생성·version 저장)와 메타데이터 수정(rename)은 차단(409), SOT 본문은 archive 무관 항상 불변, unarchive/상태전이는 차단 범위 밖("archived 동안 차단"으로 한정). `source_refs` 생성은 immutable snapshot 파생 주석이라 archived에서도 허용(carve-out)하며 회귀로 잠갔다. 사용자가 제안한 write-level 다단계(강제/수정/일반) 모델은 검토 후 과설계(YAGNI, archived에서 다른 쓰기는 source_ref 1개뿐)로 채택하지 않고 연산 카테고리 prose로 정리했다. 기존 구현·회귀와 정합하는 문서 명문화이며 코드 변경은 carve-out 회귀 1건뿐이다.
 
 ### Added
 

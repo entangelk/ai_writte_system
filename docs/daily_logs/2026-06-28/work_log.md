@@ -194,10 +194,22 @@
 - R1(추적): archived 쓰기차단(create/save/rename 공통)이 SoT §115에 명문화돼 있지 않은 spec-silent 사항. rename 단독 문제가 아니므로 SoT amendment 권고로 남긴다(사용자 결정 필요, 아래 Next steps).
 - 전체 201개(Mongo 미연결 27 skip), replica set 연결 시 전부 통과.
 
+## SoT v1.5: archive 읽기전용 명문화 (R1 사용자 결정)
+
+- 변경 파일: `docs/system-contract-sot.md`(§115 확장, v1.4→v1.5, 헤더·이력·문서역할표), `tests/test_core_sot.py`(source_ref carve-out 회귀).
+- 사용자 결정 과정: 작업자가 write-level 다단계(강제/수정/일반) 아이디어를 제안했으나, ① SOT 본문(snapshot/version/block)은 archive 무관 **항상 불변**이라 "archived 본문 수정" 연산 자체가 없고(오해 교정), ② archived에서 다르게 굴 쓰기는 사실상 source_ref 1개뿐이라 3단계 프레임워크는 과설계(YAGNI)임을 확인. 사용자가 "복잡하면 추천대로"에 동의해 **연산 카테고리 prose** 방식으로 확정.
+- §115 확정 내용: 읽기 허용(get/list, version/snapshot/block 재조회), 본문 쓰기(draft 생성·version 저장)+메타데이터 수정(rename) 차단(409), project archive는 하위 draft 쓰기까지 차단, SOT 본문은 archive 무관 불변, unarchive/상태전이는 차단 범위 밖("archived 동안 차단"으로 한정해 향후 unarchive 여지 보존).
+- source_ref carve-out(사용자 #1 결정 "허용"): source_ref 생성은 immutable snapshot에 대한 파생 주석이라 archived에서도 허용. `test_source_ref_creation_allowed_on_archived`로 회귀 lock(archive 후 create_source_ref 성공). idempotency·candidate archived 정책은 Phase 2/6로 남김.
+- 정합성: §115의 모든 경계는 이미 회귀로 잠겨 있다(create/save/rename archived 차단 + archive read 허용 + 신규 source_ref carve-out). 즉 코드 변경 없는 문서 명문화 + carve-out 회귀 1건 추가.
+
+### 검증
+
+- 전체 202개(Mongo 미연결 27 skip), replica set 연결 시 전부 통과(아래 별도 실행).
+- 문서 경계 ↔ 회귀 매핑: 본문 쓰기 차단(test_project_archive_blocks_new_draft_and_save..., test_archive_blocks_new_save...), rename 차단(test_rename_on_archived_is_blocked_409, test_rename_draft_blocked_when_only_project_archived), 읽기 허용(test_archived_project_and_draft_remain_listable_and_gettable, test_archive_preserves_version_read), source_ref carve-out(test_source_ref_creation_allowed_on_archived).
+
 ## Next steps
 
 - gateway 서비스 Dockerfile/compose 편입(현재는 application+Mongo만; gateway는 외부 llama.cpp endpoint 의존, Slice 1 범위 밖).
-- (R1 권고, 사용자 결정 필요) SoT §115에 "archive = 읽기 허용·신규 쓰기(생성·저장·수정) 차단"을 명문화해 반복 지적된 spec-silent 갭을 닫는다. 현재 create/save/rename은 이미 이 패턴을 구현·회귀로 잠갔다.
 - archive API endpoint(현재 archive는 service-only).
 - 후속 Phase 재사용 fixture(plan 01 최소 산출물 #7)는 실제 소비자(Phase 2)가 생기면 그 shape에 맞춰 추가.
 - 동시성이 필요해지면 fallback (a) 보강 재검토(현재는 single-writer 계약으로 닫힘, R2).

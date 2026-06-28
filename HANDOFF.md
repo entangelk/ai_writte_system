@@ -57,6 +57,7 @@
 - 2026-06-26 Slice 1 최소 구현 맛보기 완료: `services/application/app/core_sot/`에 domain models, deterministic splitter/hash/source_ref, in-memory repository/service를 추가했고 `services/application/app/main.py`에 FastAPI shell(health/project/draft/save)을 추가했다. Docker compose/export/editor shell은 아직 미구현이다.
 - 2026-06-28 Slice 1 MongoDB adapter 결정: Mongo adapter는 real pymongo + live Mongo 통합 테스트(미가용 시 skip), 드라이버는 pymongo(sync). 이유: transaction을 실제로 검증해야 하고(mongomock은 transaction 미지원), 로컬 단일 사용자 MVP에는 sync가 단순. 트레이드오프로 통합 테스트 층은 인프라를 요구하지만 기본 단위 스위트는 skip-aware로 인프라 없이 실행된다. service↔storage는 method 기반 `CoreSotRepository` Protocol로 분리했고 idempotency race는 `DuplicateSaveRequest`로 처리한다.
 - 2026-06-28 Mongo adapter 재검증(R2) 사용자 결정: non-transaction fallback은 single-writer 전용으로 SoT v1.4에 명시(동시성 안전은 transaction 기본 경로 담당). 구현은 유지하고 계약만 명확화했다. 동시성이 필요해지면 후속에서 (a) concurrent-safe 보강을 재검토한다.
+- 2026-06-28 archive 읽기전용 명문화 사용자 결정(SoT v1.5, rename_api.md R1): archive = 읽기 허용 + 본문 쓰기(draft 생성·version 저장)·메타데이터 수정(rename) 차단(409). SOT 본문은 archive 무관 항상 불변이라 "archived 본문 수정" 연산은 없음. write-level 다단계 프레임워크는 과설계로 채택하지 않고 연산 카테고리 prose로 정리. unarchive/상태전이는 범위 밖(차단 한정). source_ref 생성은 immutable snapshot 파생 주석이라 archived에서도 허용(사용자 #1 결정), idempotency·candidate archived 정책은 Phase 2/6.
 - Core SOT minimal skeleton 독립 검증은 조건부 합격이었다(`docs/verifications/2026-06-26/core_sot_minimal_skeleton.md`). C1(`***`, `##`, `archive_project` 회귀), C2(known SHA-256 vector), C3(within-block source_ref 계약 명시)는 보강 완료됐다.
 - Core SOT가 실제 MongoDB 저장소에 연결됐다(2026-06-28). method 기반 `CoreSotRepository` Protocol + pymongo(sync) `MongoCoreSotRepository`가 transaction 경로(기본)와 non-transaction fallback(retry guard·orphan cleanup·ordered write)을 구현하고, idempotency는 `draft_versions` unique index로 강제된다. skip-aware live 통합 테스트 17개가 단일 노드 replica set에서 통과했다.
 - Application + MongoDB(replica set) Docker 런타임이 추가됐다(2026-06-28). `services/application/Dockerfile`(cache-friendly layer)·`docker-compose.yml`(mongo replica set healthcheck로 rs.initiate idempotent + application + application healthcheck)·`.dockerignore`. `docker compose up` 후 transaction 경로로 API save/replay end-to-end 검증 완료. gateway 서비스는 아직 compose에 미편입(외부 llama.cpp endpoint 의존).
@@ -71,11 +72,10 @@
 2. Slice 1 잔여 회귀 후보: index 부재/충돌 시 동작, archive 후 파생 인덱스 stale 이벤트. (fallback 동시성 race는 SoT v1.4 single-writer 제약으로 contract out 됨; 동시성 필요 시에만 (a) 보강 재검토.)
 3. plan 01 최소 산출물 #7(후속 Phase 재사용 fixture)은 아직 미구현(실제 소비자 Phase 2 생길 때 그 shape로 추가). project/draft CRUD(create·list·get·rename API + archive service-only)·version read·source_ref는 완료. archive API endpoint는 후속.
 4. Slice 1 결정이 현재 SoT 정본 계약을 바꾸면 `docs/system-contract-sot.md` 계약 버전을 갱신하고 변경 이력에 사용자 결정 근거를 남긴다. (Mongo adapter는 persistence/retention v1.3을 구현으로 충족, 재검증 R2 결정으로 fallback single-writer 제약이 v1.4로 추가됨. SourceRef persistence는 v1.4 §113을 구현으로 충족.)
-5. Phase 2 source_ref 정책 결정(재검증 비차단 추적): (a) archive 후 신규 source_ref 생성 허용 여부 — 현재 §113 spec-silent로 허용됨, candidate 연결 시 정책 확정 필요. (b) create_source_ref idempotency — 현재 같은 span 재호출 시 매번 새 ref, §111은 draft save만 규정하므로 중복 ref 정책을 Phase 2에서 결정.
+5. Phase 2 source_ref 정책 결정: create_source_ref idempotency — 현재 같은 span 재호출 시 매번 새 ref, §111은 draft save만 규정하므로 중복 ref 정책을 Phase 2에서 결정. (archive 후 source_ref 생성 허용 여부는 SoT v1.5에서 "허용"으로 확정·회귀 lock됨.)
 6. runner domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
 7. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
 8. Gemma Q4 benchmark 후 budget/retry production 숫자 기본 한도 확정(retry cap 구조는 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 남음).
-9. (재검증 R1 권고, 사용자 결정 필요) SoT §115에 "archive = 읽기 허용·신규 쓰기(생성·저장·수정) 차단"을 명문화. 현재 create/save/rename이 이 패턴을 구현·회귀로 잠갔으나 SoT는 침묵(spec-silent). 명문화 시 v1.5로 bump.
 
 ## Verification
 
