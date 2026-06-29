@@ -67,6 +67,15 @@
 - `test_logical_key_treats_same_anchor_set_as_order_insensitive`를 추가했다. 같은 anchor set의 순서만 바뀐 provider output은 같은 key를 만들고, anchor 내용이 달라지면 다른 key를 만든다.
 - SoT를 v1.6.2로 올리고 kickoff/plan 문서에 "anchor 순서는 identity에 포함하지 않는다"를 명시해 spec-silent gap을 닫았다.
 
+### Phase 2A Slice3 독립 검증 non-blocking 보강
+
+- 변경 파일: `services/application/app/analysis/extractor.py`, `tests/test_analysis_extractor_schema.py`, `docs/system-contract-sot.md`, `docs/plans/02-analysis-kickoff-decisions.md`, `docs/plans/02-analysis-pipeline.md`, `HANDOFF.md`, `CHANGELOG.md`.
+- 독립 검증 기록: `docs/verifications/2026-06-29/analysis_phase2a_slice3.md` 합격.
+- D1 보강: `source_anchors`를 identity에서 unordered set으로 끝까지 취급하기 위해 동일 anchor 중복을 정규화한다. adapter parsing 단계에서 duplicate anchor를 하나로 접고, `_logical_key()` 직접 호출 경로도 `_dedupe_source_anchors()`를 거친다.
+- `test_logical_key_treats_duplicate_anchor_as_same_set_member`를 추가했다. `[A]`와 `[A, A]`는 같은 logical_key이며 parsed draft의 anchor도 하나로 접힌다. `[A, B]`는 `[A]`와 다른 key다.
+- D2 보강: SoT 상단 계약 버전과 문서 역할 표를 `v1.6.3`으로 갱신했다.
+- D3 보강: ordered evidence chain이 필요해지면 provider 배열 순서를 암묵적으로 쓰지 않고 `sequence`/`evidence_order` 같은 명시 필드로 후속 계약화한다고 SoT/plan/kickoff에 남겼다.
+
 ## Issues found
 
 - 문제: Phase 2A는 `02-analysis-pipeline.md`와 `analysis-memory-taxonomy.md` 모두에서 taxonomy와 candidate 경계를 미확정으로 남기고 있다.
@@ -99,6 +108,11 @@
 - Resolution: 옵션 (a) 순서 무관 정규화를 채택했다. 같은 anchor set은 순서와 무관하게 같은 key를 만들고, anchor 내용이 다르면 별도 candidate identity가 된다.
 - Outcome: Phase 2A idempotency 경계가 provider 출력 순서 흔들림에 안정적이 됐다.
 
+- 문제: slice3 독립 검증이 source anchor set 의미론의 잔여 edge와 문서 누락을 non-blocking으로 지적했다(D1 duplicate anchor, D2 SoT version field, D3 ordered evidence forward path).
+- 원인: G1 보강은 순서 무관 정규화에 집중했고, 동일 anchor 중복과 상단 version field/후속 ordered-evidence 확장 정책까지는 같이 닫지 않았다.
+- Resolution: 동일 anchor 중복을 adapter/dedup key에서 정규화하고, SoT v1.6.3과 Phase 2A 문서에 unordered set 및 ordered-evidence 명시 필드 확장 방침을 기록했다.
+- Outcome: Phase 2A `source_anchors` identity는 순서와 중복 모두에 안정적인 set 의미론으로 닫혔다.
+
 ## Decisions
 
 - 작업자 판단: 승인 전에는 Phase 2A candidate 저장소나 schema를 구현하지 않았다. 승인 후에는 첫 slice를 domain model + in-memory repository + idempotency 회귀로 제한했다. Snapshot Loader/source validation은 다음 slice로 남긴다.
@@ -107,6 +121,7 @@
 - 작업자 판단: taxonomy payload 확장성은 느슨한 additional field 허용이 아니라 타입별 validator registry로 확보한다. Phase 2A 첫 schema는 malformed provider output을 빨리 잡기 위해 추가 field를 거절한다.
 - 작업자 판단: `logical_key`는 사용자가 직접 넣는 opaque key에서 adapter 파생 기본값으로 전진했다. 파생 입력은 `candidate_type + payload + source_anchors`로 제한해 같은 retry는 dedupe하고 서로 다른 관찰은 과도하게 합치지 않는다.
 - 작업자 판단: G1은 옵션 (a) 순서 무관 정규화로 닫는다. source anchor의 출력 순서는 후보 의미가 아니라 provider formatting 흔들림이므로 identity에 포함하지 않는다.
+- 작업자 판단: duplicate anchor도 같은 이유로 identity에 포함하지 않는다. 순서나 중복이 의미가 되는 분석이 필요해지면 배열 위치가 아니라 명시적인 순서/역할 필드를 schema에 추가해야 한다.
 
 ## Verification
 
@@ -130,6 +145,10 @@
 - G1 보강 focused: `python3 -m py_compile services/application/app/analysis/extractor.py tests/test_analysis_extractor_schema.py` 통과.
 - G1 보강 pattern sweep: `logical_key`/`source_anchors`/anchor 순서 문구를 검색해 code/test/SoT/plan/kickoff에 순서 무관 계약이 매핑됨을 확인했다.
 - 전체: `python3 -m unittest discover -s tests` → 254개 통과(27 skip).
+- Slice3 보강 focused: `python3 -m unittest tests.test_analysis_extractor_schema tests.test_analysis_source_validation tests.test_analysis_phase2a -v` → 32개 통과.
+- Slice3 보강 focused: `python3 -m py_compile services/application/app/analysis/extractor.py tests/test_analysis_extractor_schema.py` 통과.
+- Slice3 보강 pattern sweep: `v1.6.3`/`unordered set`/`동일 anchor 중복`/`sequence`/`evidence_order`/`_dedupe_source_anchors`를 검색해 code/test/SoT/plan/kickoff에 매핑됨을 확인했다.
+- 전체: `python3 -m unittest discover -s tests` → 255개 통과(27 skip).
 
 ## Next steps
 

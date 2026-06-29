@@ -1,7 +1,7 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`  
-계약 버전: `v1.6`
+계약 버전: `v1.6.3`
 승인일: `2026-06-26`  
 최근 갱신일: `2026-06-29`  
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
@@ -33,6 +33,7 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.6.3 | 2026-06-29 | Phase 2A `source_anchors` identity를 unordered set으로 명확화했다. 같은 anchor 중복은 identity와 parsed draft에서 하나로 정규화하며, ordered evidence chain이 필요해지면 순서 의미를 별도 필드(`sequence`/`evidence_order` 등)로 계약화한다. | `verifications/2026-06-29/analysis_phase2a_slice3.md` |
 | v1.6.2 | 2026-06-29 | Phase 2A logical_key derivation에서 같은 `source_anchors` set은 순서와 무관하게 같은 key를 만든다고 명시했다. Anchor 내용이 다르면 별도 candidate identity다. | `verifications/2026-06-29/analysis_phase2a_slice2.md` |
 | v1.6.1 | 2026-06-29 | Phase 2A source validation 이후 최소 taxonomy schema와 fake-provider extraction adapter 계약을 명시했다. Payload는 `character_observation {name, observation}`, `event_observation {event}`, `open_question_observation {question}`이고 모든 field는 non-empty string이다. Provider extraction output은 top-level `{candidates: [...]}` JSON object이며, logical_key는 `candidate_type + payload + source_anchors` canonical JSON SHA-256으로 파생한다. | `plans/02-analysis-kickoff-decisions.md`, `plans/02-analysis-pipeline.md` |
 | v1.6 | 2026-06-29 | Phase 2A 착수 최소 계약 승인: taxonomy 3종(`character_observation`, `event_observation`, `open_question_observation`), provenance `source_observed`/`ai_inferred`, candidate action `create` only, status `needs_review`, confidence range만 강제, `create_source_ref` primitive non-idempotent 유지 + candidate/job 저장층 retry idempotency 소유, 2A/2B milestone 분리. 같은 날 검증 보강으로 confidence NaN 거절, action≠`create` 회귀, `logical_key` 임시 identity 계약을 명시했다. | 사용자 결정, `plans/02-analysis-kickoff-decisions.md`, `verifications/2026-06-29/analysis_phase2a_slice1.md` |
@@ -48,7 +49,7 @@
 
 | 문서 | 역할 | 지위 |
 |---|---|---|
-| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6 |
+| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.3 |
 | [`plans/README.md`](plans/README.md) | 계획 문서 진입점과 Phase/MVP 관계 | Draft |
 | [`plans/00-foundations.md`](plans/00-foundations.md) | 전역 원칙과 제품 경계 | Draft |
 | [`plans/implementation-plan.md`](plans/implementation-plan.md) | 구현 순서, slice 상태, 검증 gate | Draft |
@@ -127,7 +128,7 @@
   - archive/unarchive 같은 상태 전이는 본 쓰기 차단의 대상이 아니다. 여기에는 archived project 하위 draft를 archive하는 것도 포함되므로(상태 전이), "하위 draft 쓰기 차단"의 예외로서 archived project에서도 허용한다. unarchive는 MVP 범위가 아니므로 본 계약은 "archived인 동안 차단"으로 한정하며 영구 불변을 규정하지 않는다.
   - `source_refs` 생성은 보존된 immutable snapshot에 대한 파생 주석이므로 archived 상태에서도 **허용한다**(사용자 결정). 이는 본문/메타데이터 쓰기 차단의 예외다.
 - `create_source_ref` primitive는 non-idempotent다. 같은 span 재호출은 새 ref를 만들 수 있다. Phase 2A candidate/job 저장층이 같은 logical candidate retry 중복 방지 idempotency를 소유한다.
-- Phase 2A candidate retry identity는 `project_id + task_id + logical_key`다. `logical_key`는 비어 있지 않은 문자열이어야 한다. schema/extraction slice의 기본 derivation은 `candidate_type + payload + source_anchors` canonical JSON의 SHA-256이며, 같은 provider retry payload는 같은 key가 되고 payload 또는 anchor set이 다른 관찰은 별도 candidate가 된다. 같은 `source_anchors` set은 provider 출력 순서와 무관하게 같은 identity로 정규화한다.
+- Phase 2A candidate retry identity는 `project_id + task_id + logical_key`다. `logical_key`는 비어 있지 않은 문자열이어야 한다. schema/extraction slice의 기본 derivation은 `candidate_type + payload + source_anchors` canonical JSON의 SHA-256이며, 같은 provider retry payload는 같은 key가 되고 payload 또는 anchor set이 다른 관찰은 별도 candidate가 된다. `source_anchors`는 identity에서 unordered set으로 취급하므로 provider 출력 순서와 동일 anchor 중복은 같은 identity로 정규화한다. 순서 의미가 필요한 ordered evidence chain은 후속 schema에서 `sequence`/`evidence_order` 같은 명시 필드를 추가해 계약화한다.
 - archive/delete 이후 파생 인덱스는 stale 처리, version filter, rebuild 대상으로 다루며 MongoDB 정본 보존을 되돌리지 않는다.
 - 분석 후보의 부분 승인, 부분 저장, 나머지 retry는 Phase 2/6 review action idempotency 계약에서 다룬다. Slice 1 draft save idempotency와 섞지 않는다.
 

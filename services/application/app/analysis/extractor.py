@@ -152,7 +152,7 @@ def _confidence(value: object) -> float:
 def _source_anchors(value: object) -> tuple[CandidateSourceAnchor, ...]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or not value:
         raise AnalysisExtractionError("source_anchors must be a non-empty array")
-    return tuple(_source_anchor(item) for item in value)
+    return _dedupe_source_anchors(tuple(_source_anchor(item) for item in value))
 
 
 def _source_anchor(item: object) -> CandidateSourceAnchor:
@@ -200,7 +200,10 @@ def _logical_key(
         "candidate_type": candidate_type.value,
         "payload": dict(payload),
         "source_anchors": sorted(
-            (_canonical_anchor(anchor) for anchor in source_anchors),
+            (
+                _canonical_anchor(anchor)
+                for anchor in _dedupe_source_anchors(source_anchors)
+            ),
             key=lambda anchor: (
                 anchor["source_ref_id"],
                 anchor["start_offset"],
@@ -212,6 +215,25 @@ def _logical_key(
     }
     encoded = json.dumps(canonical, ensure_ascii=False, sort_keys=True).encode("utf-8")
     return f"{candidate_type.value}:{hashlib.sha256(encoded).hexdigest()}"
+
+
+def _dedupe_source_anchors(
+    source_anchors: tuple[CandidateSourceAnchor, ...],
+) -> tuple[CandidateSourceAnchor, ...]:
+    unique: dict[tuple[str, int, int, str, str], CandidateSourceAnchor] = {}
+    for anchor in source_anchors:
+        unique.setdefault(_anchor_identity(anchor), anchor)
+    return tuple(unique.values())
+
+
+def _anchor_identity(anchor: CandidateSourceAnchor) -> tuple[str, int, int, str, str]:
+    return (
+        anchor.source_ref_id,
+        anchor.start_offset,
+        anchor.end_offset,
+        anchor.quote,
+        anchor.content_hash,
+    )
 
 
 def _canonical_anchor(anchor: CandidateSourceAnchor) -> dict[str, object]:

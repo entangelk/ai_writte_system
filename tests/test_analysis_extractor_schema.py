@@ -299,6 +299,36 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(replay_draft.logical_key, first_draft.logical_key)
         self.assertNotEqual(distinct_draft.logical_key, first_draft.logical_key)
 
+    def test_logical_key_treats_duplicate_anchor_as_same_set_member(self):
+        """Under/over guard: duplicate evidence anchors do not split identity."""
+        anchor = _anchor("source-ref-1", 0, 2, "민아")
+        first = _candidate(
+            "character_observation",
+            {"name": "민아", "observation": "민아가 편지를 발견했다."},
+        )
+        replay = _candidate(
+            "character_observation",
+            {"name": "민아", "observation": "민아가 편지를 발견했다."},
+        )
+        distinct = _candidate(
+            "character_observation",
+            {"name": "민아", "observation": "민아가 편지를 발견했다."},
+        )
+        first["source_anchors"] = [anchor]
+        replay["source_anchors"] = [anchor, anchor]
+        distinct["source_anchors"] = [
+            anchor,
+            _anchor("source-ref-2", 3, 5, "편지"),
+        ]
+
+        first_draft, replay_draft, distinct_draft = parse_analysis_extraction(
+            _content([first, replay, distinct])
+        )
+
+        self.assertEqual(replay_draft.logical_key, first_draft.logical_key)
+        self.assertEqual(len(replay_draft.source_anchors), 1)
+        self.assertNotEqual(distinct_draft.logical_key, first_draft.logical_key)
+
 
 if __name__ == "__main__":
     unittest.main()
