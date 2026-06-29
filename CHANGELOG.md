@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-29 | Phase 2A Analysis Mongo persistence 검증 후 보강 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | Phase 2A Analysis Mongo persistence 구현 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | Phase 2A runner 검증 후 보강(F1/F3) | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | Phase 2A extraction runner 구현 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
@@ -54,6 +55,7 @@
 
 ### Fixed
 
+- Phase 2A Analysis Mongo persistence 독립 검증 조건을 보강했다. Live Mongo replica set 실행에서 `insert_many` duplicate가 `BulkWriteError`로 누출되는 것을 확인해 `DuplicateAnalysisCandidateRequest`로 매핑했고, fallback/transaction 통합 6개를 실제 Mongo에서 통과시켰다. `record_candidates()`의 intra-batch 동일 `project_id + task_id + logical_key` request는 idempotent replay로 정규화한다고 SoT v1.6.7/plan에 명시하고 focused 회귀를 추가했다.
 - Phase 2A runner의 candidate 저장 단계를 batch API로 바꿔 Mongo repository가 all-or-nothing 경계를 소유할 수 있게 했다. 단건 `record_candidate()`는 batch API의 1건 wrapper로 유지해 기존 호출 표면은 보존한다.
 - Phase 2A runner 독립 검증의 non-blocking F1/F3을 보강했다. Runner는 source validation이 구성된 `AnalysisService`만 받으며, 같은 run의 duplicate `(task_id, logical_key)` draft는 result/write에서 1개로 정규화한다. focused 39개와 전체 discovery 262개(27 skip)를 통과했다. 당시 이월된 F2(Mongo all-or-nothing)는 이후 Analysis Mongo persistence slice에서 닫았다.
 - 로컬 기본 Mongo가 인증을 요구하는 환경에서 `tests/test_core_sot_mongo.py` probe cleanup이 `Unauthorized`로 import 실패하던 문제를 보강했다. cleanup 실패도 Mongo 미가용으로 보고 skip하므로 infrastructure-free 전체 discovery가 다시 통과한다.

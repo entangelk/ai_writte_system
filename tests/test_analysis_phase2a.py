@@ -2,6 +2,7 @@ import unittest
 
 from services.application.app.analysis.models import (
     AnalysisCandidateAction,
+    AnalysisCandidateRecordRequest,
     AnalysisCandidateStatus,
     AnalysisCandidateType,
     AnalysisProvenance,
@@ -199,6 +200,32 @@ class AnalysisCandidateTest(unittest.TestCase):
         self.assertEqual(replay.candidate.id, first.candidate.id)
         self.assertEqual(replay.candidate.payload["name"], "민아")
         self.assertEqual(len(repo.candidates), 1)
+
+    def test_record_candidates_dedupes_same_task_logical_key_within_batch(self):
+        service, repo = _service()
+        task = self._task(service)
+        duplicate_request = self._record_request(
+            task_id=task.id,
+            logical_key="character:min-a",
+            payload={"name": "민아", "observation": "민아가 편지를 발견했다."},
+        )
+        distinct_request = self._record_request(
+            task_id=task.id,
+            logical_key="character:letter-sender",
+            payload={"name": "민아", "observation": "민아가 보낸 이를 궁금해한다."},
+        )
+
+        first, replay, distinct = service.record_candidates(
+            project_id="project-1",
+            requests=(duplicate_request, duplicate_request, distinct_request),
+        )
+
+        self.assertFalse(first.idempotent_replay)
+        self.assertTrue(replay.idempotent_replay)
+        self.assertFalse(distinct.idempotent_replay)
+        self.assertEqual(replay.candidate.id, first.candidate.id)
+        self.assertNotEqual(distinct.candidate.id, first.candidate.id)
+        self.assertEqual(len(repo.candidates), 2)
 
     def test_same_source_span_can_support_different_logical_candidates(self):
         service, repo = _service()
@@ -398,4 +425,22 @@ class AnalysisCandidateTest(unittest.TestCase):
             source_ref_ids=source_ref_ids,
             payload=payload
             or {"name": "민아", "observation": "민아가 편지를 발견했다."},
+        )
+
+    def _record_request(
+        self,
+        *,
+        task_id: str,
+        logical_key: str,
+        payload,
+    ):
+        return AnalysisCandidateRecordRequest(
+            task_id=task_id,
+            logical_key=logical_key,
+            candidate_type=AnalysisCandidateType.CHARACTER_OBSERVATION,
+            action=AnalysisCandidateAction.CREATE,
+            provenance=AnalysisProvenance.AI_INFERRED,
+            confidence=0.8,
+            source_ref_ids=("source-ref-1",),
+            payload=payload,
         )

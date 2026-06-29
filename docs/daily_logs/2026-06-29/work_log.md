@@ -101,6 +101,14 @@
 - live Mongo 통합 테스트는 기존 Core SOT와 같은 방식으로 `CORE_SOT_TEST_MONGO_URI`를 사용하고, Mongo가 없거나 transaction을 지원하지 않으면 skip한다. 인덱스 setup은 fake collection 단위 테스트로 인프라 없이도 required index 이름과 setup error mapping을 잠근다.
 - 효과: 이전 slice4의 F2(Mongo persistence에서 candidate all-or-nothing 재검증)를 닫았다. Job/task 실패 상태 저장은 여전히 별도 상태 전이 계약 전까지 구현하지 않는다.
 
+### Phase 2A Analysis Mongo persistence 검증 조건 보강
+
+- 변경 파일: `services/application/app/analysis/mongo_repository.py`, `tests/test_analysis_phase2a.py`, `docs/system-contract-sot.md`, `docs/plans/02-analysis-pipeline.md`, 문서/HANDOFF/CHANGELOG.
+- 독립 검증 기록: `docs/verifications/2026-06-29/analysis_mongo_persistence.md` 조건부 합격.
+- C1 보강: 임시 Mongo replica set 컨테이너를 띄워 `CORE_SOT_TEST_MONGO_URI='mongodb://localhost:27019/?directConnection=true'`로 live integration을 실행했다. 첫 실행에서 `insert_many` duplicate가 `BulkWriteError`로 올라와 기존 `DuplicateKeyError` catch가 작동하지 않는 결함을 발견했다. `BulkWriteError`도 `DuplicateAnalysisCandidateRequest`로 매핑하도록 수정했고, fallback/transaction 양 경로 6개 live Mongo 통합 테스트가 모두 통과했다.
+- C2 보강: `record_candidates()`의 같은 batch 내부 동일 `project_id + task_id + logical_key` request 정규화를 SoT v1.6.7/plan에 명시하고, in-memory focused 회귀 `test_record_candidates_dedupes_same_task_logical_key_within_batch`를 추가했다. 같은 key는 첫 candidate replay로 접고, 다른 logical_key는 같은 batch에서도 별도 candidate로 유지함을 함께 잠갔다.
+- 임시 Mongo 컨테이너 `analysis-mongo-txn-test`는 테스트 후 stop/rm으로 정리했다.
+
 ## Issues found
 
 - 문제: Phase 2A는 `02-analysis-pipeline.md`와 `analysis-memory-taxonomy.md` 모두에서 taxonomy와 candidate 경계를 미확정으로 남기고 있다.
@@ -163,6 +171,16 @@
 - Resolution: service/repository에 candidate batch write 경계를 추가하고, Mongo transaction/fallback 양 경로에서 batch 단위 commit/rollback을 구현했다.
 - Outcome: candidate 부분 저장 방지 경계가 runner preflight뿐 아니라 persistence adapter에도 생겼다.
 
+- 문제: live Mongo에서 batch duplicate가 `DuplicateAnalysisCandidateRequest`로 매핑되지 않고 `BulkWriteError`로 누출됐다.
+- 원인: `insert_many`의 unique index 충돌은 단건 insert와 달리 `DuplicateKeyError`가 아니라 `BulkWriteError`로 표면화될 수 있다. fake collection 검증은 이 드라이버 예외 차이를 재현하지 못했다.
+- Resolution: transaction/fallback candidate batch write에서 `BulkWriteError`를 stable duplicate request error로 매핑했다.
+- Outcome: live Mongo fallback/transaction 통합 테스트가 모두 통과하고, candidate duplicate rollback 경계가 실제 pymongo 예외 형태에서도 유지된다.
+
+- 문제: `record_candidates()`의 intra-batch duplicate 정규화가 load-bearing 코드인데 정본과 named 회귀가 없었다.
+- 원인: runner는 호출 전에 duplicate draft를 제거하므로 service batch API의 직접 호출 분기가 기존 테스트에서 실행되지 않았다.
+- Resolution: SoT v1.6.7/plan에 batch API 의미를 명시하고, 같은 batch의 동일 key replay와 다른 key 별도 생성을 함께 검증하는 회귀를 추가했다.
+- Outcome: spec-silent-but-code-enforced gap과 미추적 should-fire 분기를 닫았다.
+
 ## Decisions
 
 - 작업자 판단: 승인 전에는 Phase 2A candidate 저장소나 schema를 구현하지 않았다. 승인 후에는 첫 slice를 domain model + in-memory repository + idempotency 회귀로 제한했다. Snapshot Loader/source validation은 다음 slice로 남긴다.
@@ -176,6 +194,7 @@
 - 작업자 판단: runner 경로는 Phase 2A source validation 계약의 public entrypoint이므로 resolver 없는 service를 허용하지 않는다. resolver optional은 pure domain/service 단위 테스트 경계에만 남긴다.
 - 작업자 판단: Analysis Mongo non-transaction fallback은 Core SOT와 같은 single-writer local/test 제한 경로로 둔다. 정상 Docker/runtime은 transaction 경로가 기본이므로 fallback에 동시성 방어 복잡도를 추가하지 않고, 실패 시 이번 시도 candidate만 정리하는 retry-safe 경계를 문서화했다.
 - 작업자 판단: candidate all-or-nothing을 저장소가 소유할 수 있도록 batch API를 추가하되, 기존 단건 API는 wrapper로 유지해 호출자 호환성을 보존한다.
+- 작업자 판단: service batch API의 intra-batch duplicate는 오류가 아니라 idempotent replay로 정규화한다. runner 외부에서 batch API를 직접 쓰는 호출자가 생겨도 같은 `(task_id, logical_key)` 후보가 batch 안에서 전체 실패를 만들지 않게 하는 쪽이 candidate retry idempotency 계약과 더 일관적이다.
 
 ## Verification
 
@@ -212,9 +231,13 @@
 - Analysis Mongo focused: `python3 -m py_compile services/application/app/analysis/models.py services/application/app/analysis/repository.py services/application/app/analysis/service.py services/application/app/analysis/runner.py services/application/app/analysis/mongo_repository.py tests/test_analysis_mongo.py tests/test_analysis_mongo_indexes.py` 통과.
 - Analysis Mongo focused: `python3 -m unittest tests.test_analysis_runner tests.test_analysis_mongo_indexes -v` → 8개 통과.
 - Analysis Mongo live integration: `python3 -m unittest tests.test_analysis_mongo -v` → live Mongo 미가용으로 6개 skip(OK). 잠긴 범위는 persisted round-trip, same job/task/candidate replay, candidate batch duplicate rollback이며, 실제 Mongo 연결 시 fallback/transaction 양 경로에서 실행된다.
+- Analysis Mongo verification follow-up live: 임시 `mongo:7 --replSet rs0` 컨테이너(`analysis-mongo-txn-test`, port 27019) + `rs.initiate()` 후 `CORE_SOT_TEST_MONGO_URI='mongodb://localhost:27019/?directConnection=true' python3 -m unittest tests.test_analysis_mongo -v` → 첫 실행은 `BulkWriteError` 누출로 2 errors, 보강 후 6개 통과.
+- Analysis Mongo verification follow-up focused: `python3 -m py_compile services/application/app/analysis/mongo_repository.py services/application/app/analysis/service.py tests/test_analysis_phase2a.py` 통과.
+- Analysis Mongo verification follow-up focused: `python3 -m unittest tests.test_analysis_phase2a tests.test_analysis_mongo_indexes tests.test_analysis_runner -v` → 28개 통과.
+- 전체: `python3 -m unittest discover -s tests` → 271개 통과(33 skip).
 
 ## Next steps
 
-- Analysis Mongo repository/persistence slice 독립 검증을 받는다. 검증 시 live Mongo가 가능하면 `CORE_SOT_TEST_MONGO_URI`로 fallback/transaction 양 경로를 재현한다.
+- Analysis Mongo persistence 보강분을 독립 재검증한다. 특히 `BulkWriteError` 매핑과 `record_candidates()` intra-batch duplicate 계약/회귀가 조건 C1/C2를 닫는지 확인한다.
 - Phase 2A 다음 slice는 Application/Worker wiring 또는 Analysis job/task 상태 전이 중 어느 쪽을 먼저 할지 계약을 좁힌 뒤 진행한다.
 - 실제 llama.cpp endpoint가 준비되면 `scripts/benchmark_llm_provider.py`를 실행해 budget/retry production 기본 숫자를 확정한다.

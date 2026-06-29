@@ -7,7 +7,12 @@ from typing import Any
 
 from bson import ObjectId
 from pymongo import ASCENDING, MongoClient
-from pymongo.errors import DuplicateKeyError, OperationFailure, PyMongoError
+from pymongo.errors import (
+    BulkWriteError,
+    DuplicateKeyError,
+    OperationFailure,
+    PyMongoError,
+)
 
 from services.application.app.analysis.models import (
     AnalysisCandidate,
@@ -201,7 +206,7 @@ class MongoAnalysisRepository:
             try:
                 with session.start_transaction():
                     self._candidates.insert_many(docs, session=session)
-            except DuplicateKeyError as exc:
+            except (BulkWriteError, DuplicateKeyError) as exc:
                 raise DuplicateAnalysisCandidateRequest(
                     "analysis candidate request already exists"
                 ) from exc
@@ -213,9 +218,9 @@ class MongoAnalysisRepository:
         inserted_ids = [doc["_id"] for doc in docs]
         try:
             self._candidates.insert_many(docs)
-        except (DuplicateKeyError, PyMongoError) as exc:
+        except (BulkWriteError, DuplicateKeyError, PyMongoError) as exc:
             self._candidates.delete_many({"_id": {"$in": inserted_ids}})
-            if isinstance(exc, DuplicateKeyError):
+            if isinstance(exc, (BulkWriteError, DuplicateKeyError)):
                 raise DuplicateAnalysisCandidateRequest(
                     "analysis candidate request already exists"
                 ) from exc
