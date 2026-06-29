@@ -78,6 +78,7 @@
 - Phase 2A extraction runner가 구현됐다(2026-06-29). `AnalysisExtractionRunner`는 source validation이 구성된 `AnalysisService`만 받으며, `AnalysisJob` idempotent 생성/재사용 → Snapshot Loader → provider extraction → `AnalysisTask` 생성/재사용 → 전체 draft 사전 검증 → candidate 저장 순서로 실행한다. Task는 `project_id + job_id + candidate_type`으로 재사용해 same job retry에서 candidate idempotency의 `task_id`가 흔들리지 않는다. invalid logical_key/source/schema draft가 있으면 candidate write를 시작하지 않고, 같은 run의 duplicate `(task_id, logical_key)` draft는 1개로 정규화한다. focused 39개와 전체 discovery 262개(27 skip)를 통과했다.
 - Phase 2A Analysis Mongo repository/persistence가 구현됐다(2026-06-29). `MongoAnalysisRepository`는 `analysis_jobs`, `analysis_tasks`, `analysis_candidates`를 저장하고 required indexes `uniq_analysis_job_request`, `uniq_analysis_task_request`, `uniq_analysis_candidate_request`, `analysis_candidates_by_job`를 설치한다. Runner candidate write는 `record_candidates()` batch 경계를 통해 저장소에 전달되며, transaction 경로는 한 트랜잭션 commit, fallback은 single-writer local/test 전용 rollback(이번 시도 candidate `_id` 정리)으로 candidate 부분 저장을 막는다. Local live Mongo 미가용 환경에서는 새 통합 6개가 skip된다.
 - Phase 2A Analysis Mongo persistence 독립 검증 조건부 합격의 C1/C2를 보강했다(2026-06-29). Live Mongo replica set 실행에서 드러난 `insert_many` duplicate `BulkWriteError` 누출을 `DuplicateAnalysisCandidateRequest` 매핑으로 수정했고, fallback/transaction 통합 6개가 실제 Mongo에서 통과했다. `record_candidates()` intra-batch 동일 `project_id + task_id + logical_key` request는 idempotent replay로 정규화한다고 SoT v1.6.7/plan에 명시하고 focused 회귀를 추가했다.
+- `.gitignore`가 보강됐다(2026-06-29). Local agent state(`.agents/`, `.claude/`, `.codex/`, `.serena/`)와 Python cache/test cache, virtualenv, local env, build/editor/OS/log/tmp 산출물을 ignore한다.
 
 ## Next Tasks
 
@@ -146,6 +147,7 @@
 ```text
 docker-compose.yml               # Slice 1 runtime: application + Mongo replica set + external-llama client gateway
 .dockerignore                    # build context 최소화
+.gitignore                       # local agent/tool state + Python/env/build/editor 산출물 제외
 docs/
 ├── README.md                    # 문서 분류와 진입점
 ├── system-contract-sot.md       # 서비스 경계와 확정 계약 Approved SoT

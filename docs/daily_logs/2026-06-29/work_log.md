@@ -109,6 +109,13 @@
 - C2 보강: `record_candidates()`의 같은 batch 내부 동일 `project_id + task_id + logical_key` request 정규화를 SoT v1.6.7/plan에 명시하고, in-memory focused 회귀 `test_record_candidates_dedupes_same_task_logical_key_within_batch`를 추가했다. 같은 key는 첫 candidate replay로 접고, 다른 logical_key는 같은 batch에서도 별도 candidate로 유지함을 함께 잠갔다.
 - 임시 Mongo 컨테이너 `analysis-mongo-txn-test`는 테스트 후 stop/rm으로 정리했다.
 
+### Repository ignore hygiene
+
+- 변경 파일: `.gitignore`, `HANDOFF.md`.
+- `.gitignore`가 Python cache 두 항목만 갖고 있어, 로컬 agent state와 일반 개발 산출물이 계속 untracked로 노출될 수 있었다.
+- `.agents/`, `.claude/`, `.codex/`, `.serena/`를 ignore에 추가했다. 함께 Python cache/test cache, virtualenv, local env 파일(`.env`, `.env.*`, `!.env.example`), build 산출물, IDE/OS 파일, log/tmp 파일을 기본 ignore로 정리했다.
+- 효과: 검증/에이전트 도구가 만든 로컬 상태 디렉터리가 작업 diff에 섞이지 않는다.
+
 ## Issues found
 
 - 문제: Phase 2A는 `02-analysis-pipeline.md`와 `analysis-memory-taxonomy.md` 모두에서 taxonomy와 candidate 경계를 미확정으로 남기고 있다.
@@ -235,6 +242,7 @@
 - Analysis Mongo verification follow-up focused: `python3 -m py_compile services/application/app/analysis/mongo_repository.py services/application/app/analysis/service.py tests/test_analysis_phase2a.py` 통과.
 - Analysis Mongo verification follow-up focused: `python3 -m unittest tests.test_analysis_phase2a tests.test_analysis_mongo_indexes tests.test_analysis_runner -v` → 28개 통과.
 - 전체: `python3 -m unittest discover -s tests` → 271개 통과(33 skip).
+- `.gitignore` hygiene: `git status --short`에서 `.serena/`가 더 이상 untracked로 표시되지 않고 `.gitignore`만 변경 대상으로 남는 것을 확인했다.
 
 ## Next steps
 
