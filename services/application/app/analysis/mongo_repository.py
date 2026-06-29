@@ -26,6 +26,27 @@ from services.application.app.analysis.models import (
 )
 from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
 
+_DUPLICATE_KEY_CODE = 11000
+
+
+def _is_duplicate_key_error(exc: PyMongoError) -> bool:
+    """Return True only when ``exc`` is a duplicate-key write failure.
+
+    ``insert_many`` surfaces a duplicate unique index hit as a ``BulkWriteError``
+    whose ``writeErrors`` carry code ``11000``. Any other ``BulkWriteError``
+    (e.g. document validation, write concern) must keep its original type so an
+    infrastructure failure is never mislabelled as a duplicate request.
+    """
+
+    if isinstance(exc, DuplicateKeyError):
+        return True
+    if isinstance(exc, BulkWriteError):
+        write_errors = (exc.details or {}).get("writeErrors", [])
+        return bool(write_errors) and all(
+            error.get("code") == _DUPLICATE_KEY_CODE for error in write_errors
+        )
+    return False
+
 
 class MongoAnalysisRepositorySetupError(RuntimeError):
     """Raised when MongoDB cannot install required analysis indexes."""
@@ -207,9 +228,11 @@ class MongoAnalysisRepository:
                 with session.start_transaction():
                     self._candidates.insert_many(docs, session=session)
             except (BulkWriteError, DuplicateKeyError) as exc:
-                raise DuplicateAnalysisCandidateRequest(
-                    "analysis candidate request already exists"
-                ) from exc
+                if _is_duplicate_key_error(exc):
+                    raise DuplicateAnalysisCandidateRequest(
+                        "analysis candidate request already exists"
+                    ) from exc
+                raise
 
     def _put_candidates_fallback(
         self, candidates: Sequence[tuple[AnalysisCandidate, str]]
@@ -218,9 +241,9 @@ class MongoAnalysisRepository:
         inserted_ids = [doc["_id"] for doc in docs]
         try:
             self._candidates.insert_many(docs)
-        except (BulkWriteError, DuplicateKeyError, PyMongoError) as exc:
+        except PyMongoError as exc:
             self._candidates.delete_many({"_id": {"$in": inserted_ids}})
-            if isinstance(exc, (BulkWriteError, DuplicateKeyError)):
+            if _is_duplicate_key_error(exc):
                 raise DuplicateAnalysisCandidateRequest(
                     "analysis candidate request already exists"
                 ) from exc

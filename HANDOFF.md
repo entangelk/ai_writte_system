@@ -79,16 +79,16 @@
 - Phase 2A Analysis Mongo repository/persistence가 구현됐다(2026-06-29). `MongoAnalysisRepository`는 `analysis_jobs`, `analysis_tasks`, `analysis_candidates`를 저장하고 required indexes `uniq_analysis_job_request`, `uniq_analysis_task_request`, `uniq_analysis_candidate_request`, `analysis_candidates_by_job`를 설치한다. Runner candidate write는 `record_candidates()` batch 경계를 통해 저장소에 전달되며, transaction 경로는 한 트랜잭션 commit, fallback은 single-writer local/test 전용 rollback(이번 시도 candidate `_id` 정리)으로 candidate 부분 저장을 막는다. Local live Mongo 미가용 환경에서는 새 통합 6개가 skip된다.
 - Phase 2A Analysis Mongo persistence 독립 검증 조건부 합격의 C1/C2를 보강했다(2026-06-29). Live Mongo replica set 실행에서 드러난 `insert_many` duplicate `BulkWriteError` 누출을 `DuplicateAnalysisCandidateRequest` 매핑으로 수정했고, fallback/transaction 통합 6개가 실제 Mongo에서 통과했다. `record_candidates()` intra-batch 동일 `project_id + task_id + logical_key` request는 idempotent replay로 정규화한다고 SoT v1.6.7/plan에 명시하고 focused 회귀를 추가했다.
 - `.gitignore`가 보강됐다(2026-06-29). Local agent state(`.agents/`, `.claude/`, `.codex/`, `.serena/`)와 Python cache/test cache, virtualenv, local env, build/editor/OS/log/tmp 산출물을 ignore한다.
+- Phase 2A candidate write-error 분류가 정밀화됐다(2026-06-29, SoT v1.6.8). `_is_duplicate_key_error` helper로 duplicate-key(code `11000`) 충돌만 `DuplicateAnalysisCandidateRequest`로 매핑하고, duplicate가 아닌 `BulkWriteError`/`PyMongoError`는 원본 타입을 보존한다(인프라 오류 오표기 방지). fallback은 매핑 여부와 무관하게 이번 시도 candidate `_id`를 먼저 정리한다. 인프라 없는 fake 기반 회귀 4종(`tests/test_analysis_mongo_error_mapping.py`)이 transaction/fallback × duplicate/non-duplicate를 양방향 lock하고, live Mongo duplicate 경로 6개는 그대로 통과한다. 직전 독립 재검증의 비차단 Issue #1/#2를 닫았다.
 
 ## Next Tasks
 
 1. Slice 1 잔여 회귀 후보: archive 후 파생 인덱스 stale 이벤트. Phase 3 indexing 계약이 Draft라 현재는 구현하지 않는다. (fallback 동시성 race는 SoT v1.4 single-writer 제약으로 contract out 됨; 동시성 필요 시에만 (a) 보강 재검토.)
-2. Phase 2A Analysis Mongo persistence 보강분을 독립 재검증한다. 검증 포인트: `BulkWriteError` duplicate 매핑, live Mongo fallback/transaction all-or-nothing, service batch intra-batch duplicate replay 계약/회귀.
-3. Phase 2A 다음 구현 slice는 Application/Worker wiring 또는 Analysis job/task 상태 전이 중 먼저 진행할 쪽을 계약화한 뒤 시작한다. Job/task 실패 상태 저장은 아직 미확정이므로 구현 전 문서화가 필요하다.
-4. Application/Worker가 gateway `/v1/generate`를 호출하는 runtime wiring은 Phase payload/tool handler와 model tool-call wire format이 확정된 뒤 별도 slice로 구현한다.
-5. runner domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
-6. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
-7. 실제 Gemma/llama.cpp endpoint에서 `scripts/benchmark_llm_provider.py` 실행 후 budget/retry production 숫자 기본 한도 확정(retry cap 구조는 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 남음).
+2. Phase 2A 다음 구현 slice는 Application/Worker wiring 또는 Analysis job/task 상태 전이 중 먼저 진행할 쪽을 계약화한 뒤 시작한다. Job/task 실패 상태 저장은 아직 미확정이므로 구현 전 문서화가 필요하다.
+3. Application/Worker가 gateway `/v1/generate`를 호출하는 runtime wiring은 Phase payload/tool handler와 model tool-call wire format이 확정된 뒤 별도 slice로 구현한다.
+4. runner domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
+5. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
+6. 실제 Gemma/llama.cpp endpoint에서 `scripts/benchmark_llm_provider.py` 실행 후 budget/retry production 숫자 기본 한도 확정(retry cap 구조는 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 남음).
 
 ## Verification
 
@@ -140,6 +140,8 @@
 - Phase 2A taxonomy schema/extractor 자체 회귀(2026-06-29): `python3 -m py_compile services/application/app/analysis/schema.py services/application/app/analysis/extractor.py services/application/app/analysis/service.py tests/test_analysis_extractor_schema.py tests/test_analysis_phase2a.py tests/test_analysis_source_validation.py` 통과, Slice3 보강 후 `python3 -m py_compile services/application/app/analysis/extractor.py tests/test_analysis_extractor_schema.py` 통과, `python3 -m unittest tests.test_analysis_extractor_schema tests.test_analysis_source_validation tests.test_analysis_phase2a -v` 32개 통과, 전체 discovery 255개 통과(27 skip). 잠근 범위: 3종 최소 payload schema 정상/거절, service 저장 경로 malformed payload 거절, fake-provider extraction adapter parsing, malformed provider content 거절, deterministic logical_key, over-collapse 방지, 같은 anchor set 순서 무관 identity, 동일 anchor 중복 정규화.
 - Phase 2A extraction runner 자체 회귀(2026-06-29): `python3 -m py_compile services/application/app/analysis/runner.py services/application/app/analysis/service.py services/application/app/analysis/repository.py tests/test_analysis_runner.py tests/test_analysis_phase2a.py` 통과, Slice4 보강 후 `python3 -m py_compile services/application/app/analysis/runner.py services/application/app/analysis/service.py tests/test_analysis_runner.py` 통과, `python3 -m unittest tests.test_analysis_runner tests.test_analysis_extractor_schema tests.test_analysis_source_validation tests.test_analysis_phase2a -v` 39개 통과, 전체 discovery 262개 통과(27 skip). 잠근 범위: load→extract→validate→store 흐름, same job replay의 job/task/candidate idempotency, invalid logical_key/source/schema draft가 있을 때 candidate 부분 저장 금지, runner source validation 구성 강제, duplicate `(task_id, logical_key)` result dedupe.
 - Phase 2A Analysis Mongo persistence 자체 회귀(2026-06-29): `python3 -m py_compile services/application/app/analysis/models.py services/application/app/analysis/repository.py services/application/app/analysis/service.py services/application/app/analysis/runner.py services/application/app/analysis/mongo_repository.py tests/test_analysis_mongo.py tests/test_analysis_mongo_indexes.py` 통과, `python3 -m unittest tests.test_analysis_runner tests.test_analysis_mongo_indexes -v` 8개 통과, `python3 -m unittest tests.test_analysis_mongo -v`는 live Mongo 미가용으로 6개 skip(OK). 잠근 범위: required analysis indexes, setup error mapping, runner batch write 경계, persisted round-trip/replay/batch rollback은 live Mongo 연결 시 fallback/transaction 양 경로에서 실행.
+- Phase 2A candidate write-error 정밀화 자체 회귀(2026-06-29): `python3 -m unittest tests.test_analysis_mongo_error_mapping` 4개 통과, 전체 discovery 275개 통과(33 skip). over-broad 변이(helper 항상 True) 시 non-duplicate 재던지기 test 2개 FAIL → 양방향 lock 증명. throwaway replica set(port 27022)에서 live `tests.test_analysis_mongo` 6개 재통과로 duplicate(11000) 경로 무손상 확인.
+- Phase 2A Analysis Mongo persistence 보강 독립 재검증(2026-06-29): **합격**. 기록 `docs/verifications/2026-06-29/analysis_mongo_persistence_hardening.md`. 선행 conditional pass의 C1(transaction/fallback all-or-nothing)을 throwaway replica set에서 live 6개 통과로 실행 증명, `BulkWriteError`(code 11000) 매핑을 변이 증명으로 load-bearing 확인(보강 전 `errors=2` 누출), C2 intra-batch dedupe(`batch_seen`) 회귀를 변이 증명으로 양방향 lock + SoT v1.6.7/plan literal 일치. pattern sweep: Core SOT `insert_many`는 `blocks_by_snapshot` non-unique라 동일 패턴이나 버그 아님. 전체 discovery 271 통과(33 skip) 재현. 비차단 Issue 2건(catch 정밀도/문서 배치)은 Next Tasks #7.
 - Phase 2A Analysis Mongo persistence 검증 보강 자체 회귀(2026-06-29): 임시 `mongo:7 --replSet rs0` 컨테이너(port 27019)에서 `CORE_SOT_TEST_MONGO_URI='mongodb://localhost:27019/?directConnection=true' python3 -m unittest tests.test_analysis_mongo -v` 첫 실행은 `BulkWriteError` 누출로 2 errors, 보강 후 6개 통과. `python3 -m unittest tests.test_analysis_phase2a tests.test_analysis_mongo_indexes tests.test_analysis_runner -v` 28개 통과, 전체 discovery 271개 통과(33 skip). 임시 컨테이너는 stop/rm 정리됨.
 
 ## Project Structure
@@ -232,6 +234,7 @@ tests/
 ├── test_analysis_extractor_schema.py
 ├── test_analysis_runner.py
 ├── test_analysis_source_validation.py
+├── test_analysis_mongo_error_mapping.py
 ├── test_core_sot.py
 ├── test_core_sot_fixture.py
 ├── test_core_sot_mongo_indexes.py

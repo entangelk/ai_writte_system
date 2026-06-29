@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-29 | SoT v1.6.8: Phase 2A candidate write-error 분류 정밀화(duplicate-key 한정 매핑) | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | Phase 2A Analysis Mongo persistence 검증 후 보강 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | Phase 2A Analysis Mongo persistence 구현 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | Phase 2A runner 검증 후 보강(F1/F3) | [work log](docs/daily_logs/2026-06-29/work_log.md) |

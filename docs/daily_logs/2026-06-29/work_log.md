@@ -109,6 +109,16 @@
 - C2 보강: `record_candidates()`의 같은 batch 내부 동일 `project_id + task_id + logical_key` request 정규화를 SoT v1.6.7/plan에 명시하고, in-memory focused 회귀 `test_record_candidates_dedupes_same_task_logical_key_within_batch`를 추가했다. 같은 key는 첫 candidate replay로 접고, 다른 logical_key는 같은 batch에서도 별도 candidate로 유지함을 함께 잠갔다.
 - 임시 Mongo 컨테이너 `analysis-mongo-txn-test`는 테스트 후 stop/rm으로 정리했다.
 
+### Phase 2A candidate write-error 분류 정밀화 (SoT v1.6.8)
+
+- 변경 파일: `services/application/app/analysis/mongo_repository.py`, `tests/test_analysis_mongo_error_mapping.py`(신규), `docs/system-contract-sot.md`, `docs/plans/02-analysis-pipeline.md`, `CHANGELOG.md`, `HANDOFF.md`.
+- 배경: 직전 보강 독립 재검증(`docs/verifications/2026-06-29/analysis_mongo_persistence_hardening.md`)의 비차단 Issue #1 — `BulkWriteError`를 무조건 `DuplicateAnalysisCandidateRequest`로 매핑하면 duplicate가 아닌 인프라 오류(document validation, write concern 등)가 duplicate request로 오표기될 수 있었다. 계약 literal은 "duplicate"로 한정돼 있었으나 코드가 더 넓게 잡고 있었다.
+- 핵심 변경: `_is_duplicate_key_error()` helper를 추가해 `DuplicateKeyError` 또는 `writeErrors`가 모두 code `11000`인 `BulkWriteError`만 duplicate로 분류한다. transaction/fallback 양 경로의 catch가 이 helper로 분기해, duplicate면 `DuplicateAnalysisCandidateRequest`로 매핑하고 그 외는 원본 예외를 재던진다. fallback의 except는 `PyMongoError`로 단순화했고 cleanup(`delete_many`)은 매핑 여부와 무관하게 먼저 수행한다.
+- 회귀: 인프라 없는 fake 기반 4종으로 transaction/fallback × duplicate(11000)/non-duplicate(121)를 양방향 lock했다. helper를 over-broad로 변이하면 non-duplicate 재던지기 test 2개가 FAIL함을 확인(load-bearing 증명), 복원 후 통과.
+- 검증: throwaway replica set(port 27022)에서 live `tests.test_analysis_mongo` 6개 재통과로 realistic duplicate 경로가 무손상임을 확인했다. 임시 컨테이너는 stop/rm 정리.
+- 계약: SoT v1.6.8 §본문에 duplicate-key 한정 매핑·원본 예외 보존·fallback cleanup 순서를 명시하고, plan/changelog/우선순위 라벨을 동기화했다. 이로써 검증 Issue #2(§본문에 `DuplicateAnalysisCandidateRequest` 표면화 누락)도 닫혔다.
+- 효과: 인프라 오류가 "이미 존재하는 candidate"로 오인되지 않아 운영 디버깅에서 원인이 보존된다.
+
 ### Repository ignore hygiene
 
 - 변경 파일: `.gitignore`, `HANDOFF.md`.
@@ -243,9 +253,9 @@
 - Analysis Mongo verification follow-up focused: `python3 -m unittest tests.test_analysis_phase2a tests.test_analysis_mongo_indexes tests.test_analysis_runner -v` → 28개 통과.
 - 전체: `python3 -m unittest discover -s tests` → 271개 통과(33 skip).
 - `.gitignore` hygiene: `git status --short`에서 `.serena/`가 더 이상 untracked로 표시되지 않고 `.gitignore`만 변경 대상으로 남는 것을 확인했다.
+- Analysis Mongo persistence 보강 독립 재검증(별도 검증 기록): throwaway `mongo:7 --replSet rs0`(port 27021) replica set에서 `tests.test_analysis_mongo` 6개 통과로 C1(transaction/fallback all-or-nothing) 실행 증명. `BulkWriteError` catch를 보강 전 상태로 되돌려 live 재실행 시 `errors=2`(누출 예외 code 11000) 확인 후 `git checkout` 복원 — 매핑이 load-bearing임을 변이로 증명. `batch_seen` 분기를 무력화하면 intra-batch dedupe 회귀가 FAIL 후 복원 — C2 양방향 lock 확인. pattern sweep으로 Core SOT `insert_many`(non-unique `blocks_by_snapshot`)는 동일 패턴이나 버그 아님을 확인. 결과 **합격**, 기록은 `docs/verifications/2026-06-29/analysis_mongo_persistence_hardening.md`. 모든 변이는 검증 후 복원, working tree clean.
 
 ## Next steps
 
-- Analysis Mongo persistence 보강분을 독립 재검증한다. 특히 `BulkWriteError` 매핑과 `record_candidates()` intra-batch duplicate 계약/회귀가 조건 C1/C2를 닫는지 확인한다.
 - Phase 2A 다음 slice는 Application/Worker wiring 또는 Analysis job/task 상태 전이 중 어느 쪽을 먼저 할지 계약을 좁힌 뒤 진행한다.
 - 실제 llama.cpp endpoint가 준비되면 `scripts/benchmark_llm_provider.py`를 실행해 budget/retry production 기본 숫자를 확정한다.

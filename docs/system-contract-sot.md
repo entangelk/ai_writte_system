@@ -1,7 +1,7 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`  
-계약 버전: `v1.6.7`
+계약 버전: `v1.6.8`
 승인일: `2026-06-26`  
 최근 갱신일: `2026-06-29`  
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
@@ -33,6 +33,7 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.6.8 | 2026-06-29 | Phase 2A candidate write의 write-error 분류를 정밀화했다. duplicate-key(code `11000`) 충돌만 `DuplicateAnalysisCandidateRequest`로 표면화하고, 그 외 `BulkWriteError`/`PyMongoError`는 원본 타입을 보존해 인프라 오류 오표기를 막는다. fallback은 매핑 여부와 무관하게 이번 시도 candidate `_id`를 먼저 정리한다. | `verifications/2026-06-29/analysis_mongo_persistence_hardening.md` |
 | v1.6.7 | 2026-06-29 | Phase 2A service batch API의 intra-batch idempotency를 명시했다. 같은 batch 안의 동일 `project_id + task_id + logical_key` request는 첫 candidate를 만들고 이후 항목은 idempotent replay로 정규화하며, 다른 logical_key는 별도 candidate로 유지한다. Mongo bulk duplicate는 stable `DuplicateAnalysisCandidateRequest`로 표면화한다. | `verifications/2026-06-29/analysis_mongo_persistence.md` |
 | v1.6.6 | 2026-06-29 | Phase 2A Analysis Mongo persistence 계약을 명시했다. `analysis_jobs`, `analysis_tasks`, `analysis_candidates`를 저장하고 job/task/candidate idempotency는 unique index로 강제한다. Candidate batch write는 transaction 경로에서 한 트랜잭션으로 commit하고, non-transaction fallback은 single-writer local/test 경로로 실패 시 이번 시도 candidate만 rollback한다. | `plans/02-analysis-pipeline.md` |
 | v1.6.5 | 2026-06-29 | Phase 2A runner는 source validation이 구성된 `AnalysisService`만 받도록 명시하고, 같은 run의 duplicate `(task_id, logical_key)` draft는 result/write에서 1개로 정규화한다. Mongo persistence slice에서는 runner all-or-nothing의 transaction/fallback 보존을 별도 검증한다. | `verifications/2026-06-29/analysis_phase2a_slice4.md` |
@@ -53,7 +54,7 @@
 
 | 문서 | 역할 | 지위 |
 |---|---|---|
-| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.7 |
+| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.8 |
 | [`plans/README.md`](plans/README.md) | 계획 문서 진입점과 Phase/MVP 관계 | Draft |
 | [`plans/00-foundations.md`](plans/00-foundations.md) | 전역 원칙과 제품 경계 | Draft |
 | [`plans/implementation-plan.md`](plans/implementation-plan.md) | 구현 순서, slice 상태, 검증 gate | Draft |
@@ -309,6 +310,7 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 - Phase 2A service batch API는 같은 batch 안의 동일 `project_id + task_id + logical_key` candidate request를 idempotent replay로 정규화한다. 첫 request는 candidate를 만들고 이후 동일 request는 같은 candidate를 반환한다. 같은 batch 안에서도 logical_key가 다르면 별도 candidate로 유지한다.
 - Phase 2A Mongo persistence는 `analysis_jobs`, `analysis_tasks`, `analysis_candidates`를 저장한다. Required idempotency indexes는 `uniq_analysis_job_request`(`project_id`, `snapshot_id`, `idempotency_key`, unique), `uniq_analysis_task_request`(`project_id`, `job_id`, `candidate_type`, unique), `uniq_analysis_candidate_request`(`project_id`, `task_id`, `logical_key`, unique)다. Candidate list query는 `analysis_candidates_by_job`(`project_id`, `job_id`) index를 사용한다. MongoDB가 required index 생성을 거부하면 setup failure는 `MongoAnalysisRepositorySetupError`로 표면화한다.
 - Phase 2A candidate batch write는 transaction 경로에서 한 트랜잭션으로 commit한다. Non-transaction fallback은 Core SOT fallback과 같이 **single-writer local/test 전용**이며, 실패하면 이번 시도에서 새로 쓴 candidate `_id`만 삭제해 candidate 부분 저장을 남기지 않는다. 동시성 안전이 필요한 runtime은 transaction 경로를 사용한다.
+- Phase 2A candidate write의 duplicate 충돌만 stable `DuplicateAnalysisCandidateRequest`로 표면화한다. `insert_many`가 unique index를 위반하면 pymongo는 duplicate-key code `11000`을 담은 `BulkWriteError`를 던지므로 양 경로(transaction/fallback)는 이를 `DuplicateAnalysisCandidateRequest`로 매핑한다. duplicate가 아닌 다른 `BulkWriteError`/`PyMongoError`(예: document validation, write concern)는 원본 예외 타입을 보존해 인프라 오류가 duplicate request로 오표기되지 않게 한다. fallback은 매핑 여부와 무관하게 이번 시도 candidate `_id`를 먼저 정리한다.
 - Phase 2A와 2B는 별도 milestone이다.
 - Phase 2B는 Phase 3~4 이후 prior memory를 검색해 `create/update/add_evidence/no_change/conflict` 후보를 만든다.
 - Analysis AI는 canon을 확정하지 않고 기존 기억을 직접 덮어쓰지 않는다.
