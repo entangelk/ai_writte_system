@@ -9,6 +9,7 @@ from typing import Any
 from services.application.app.analysis.models import (
     AnalysisCandidate,
     AnalysisCandidateAction,
+    AnalysisCandidateRecordRequest,
     AnalysisCandidateStatus,
     AnalysisCandidateType,
     AnalysisJob,
@@ -37,6 +38,15 @@ class AnalysisNotFound(AnalysisError):
 
 class InvalidAnalysisCandidate(AnalysisError):
     pass
+
+
+_PreparedCandidateRecord = tuple[
+    AnalysisCandidateRecordRequest,
+    AnalysisTask,
+    Mapping[str, Any],
+    float,
+    tuple[str, ...],
+]
 
 
 class InMemoryAnalysisRepository:
@@ -102,10 +112,20 @@ class InMemoryAnalysisRepository:
     def put_candidate(
         self, candidate: AnalysisCandidate, *, logical_key: str
     ) -> None:
-        self.candidates[candidate.id] = candidate
-        self._candidate_request_index[
-            (candidate.project_id, candidate.task_id, logical_key)
-        ] = candidate.id
+        self.put_candidates(((candidate, logical_key),))
+
+    def put_candidates(
+        self, candidates: Sequence[tuple[AnalysisCandidate, str]]
+    ) -> None:
+        next_candidates = dict(self.candidates)
+        next_candidate_index = dict(self._candidate_request_index)
+        for candidate, logical_key in candidates:
+            next_candidates[candidate.id] = candidate
+            next_candidate_index[
+                (candidate.project_id, candidate.task_id, logical_key)
+            ] = candidate.id
+        self.candidates = next_candidates
+        self._candidate_request_index = next_candidate_index
 
     def list_candidates_for_job(
         self, project_id: str, job_id: str
@@ -192,51 +212,88 @@ class AnalysisService:
         payload: Mapping[str, Any],
         source_anchors: Sequence[CandidateSourceAnchor] | None = None,
     ) -> RecordAnalysisCandidateResult:
-        self._validate_logical_key(logical_key)
-        (
-            task,
-            normalized_payload,
-            normalized_confidence,
-            normalized_source_ref_ids,
-        ) = self._validate_candidate_request(
+        return self.record_candidates(
             project_id=project_id,
-            task_id=task_id,
-            candidate_type=candidate_type,
-            action=action,
-            provenance=provenance,
-            confidence=confidence,
-            source_ref_ids=source_ref_ids,
-            payload=payload,
-            source_anchors=source_anchors,
-        )
+            requests=(
+                AnalysisCandidateRecordRequest(
+                    task_id=task_id,
+                    logical_key=logical_key,
+                    candidate_type=candidate_type,
+                    action=action,
+                    provenance=provenance,
+                    confidence=confidence,
+                    source_ref_ids=source_ref_ids,
+                    payload=payload,
+                    source_anchors=source_anchors,
+                ),
+            ),
+        )[0]
 
-        existing_candidate_id = self._repo.find_candidate_request(
-            project_id, task_id, logical_key
+    def record_candidates(
+        self,
+        *,
+        project_id: str,
+        requests: Sequence[AnalysisCandidateRecordRequest],
+    ) -> tuple[RecordAnalysisCandidateResult, ...]:
+        prepared = tuple(
+            self._prepare_candidate_record(project_id=project_id, request=request)
+            for request in requests
         )
-        if existing_candidate_id is not None:
-            return RecordAnalysisCandidateResult(
-                candidate=self._require_candidate(project_id, existing_candidate_id),
-                idempotent_replay=True,
+        new_candidates: list[tuple[AnalysisCandidate, str]] = []
+        batch_seen: dict[tuple[str, str, str], AnalysisCandidate] = {}
+        results: list[RecordAnalysisCandidateResult] = []
+
+        for request, task, normalized_payload, confidence, source_ref_ids in prepared:
+            candidate_key = (project_id, request.task_id, request.logical_key)
+            existing_candidate = batch_seen.get(candidate_key)
+            if existing_candidate is not None:
+                results.append(
+                    RecordAnalysisCandidateResult(
+                        candidate=existing_candidate,
+                        idempotent_replay=True,
+                    )
+                )
+                continue
+
+            existing_candidate_id = self._repo.find_candidate_request(
+                project_id, request.task_id, request.logical_key
+            )
+            if existing_candidate_id is not None:
+                results.append(
+                    RecordAnalysisCandidateResult(
+                        candidate=self._require_candidate(
+                            project_id, existing_candidate_id
+                        ),
+                        idempotent_replay=True,
+                    )
+                )
+                continue
+
+            candidate = AnalysisCandidate(
+                id=self._repo.next_candidate_id(),
+                project_id=project_id,
+                job_id=task.job_id,
+                task_id=task.id,
+                candidate_type=request.candidate_type,
+                action=AnalysisCandidateAction.CREATE,
+                status=AnalysisCandidateStatus.NEEDS_REVIEW,
+                provenance=request.provenance,
+                confidence=confidence,
+                source_ref_ids=source_ref_ids,
+                payload=immutable_payload(normalized_payload),
+            )
+            new_candidates.append((candidate, request.logical_key))
+            batch_seen[candidate_key] = candidate
+            results.append(
+                RecordAnalysisCandidateResult(
+                    candidate=candidate,
+                    idempotent_replay=False,
+                )
             )
 
-        candidate = AnalysisCandidate(
-            id=self._repo.next_candidate_id(),
-            project_id=project_id,
-            job_id=task.job_id,
-            task_id=task.id,
-            candidate_type=candidate_type,
-            action=AnalysisCandidateAction.CREATE,
-            status=AnalysisCandidateStatus.NEEDS_REVIEW,
-            provenance=provenance,
-            confidence=normalized_confidence,
-            source_ref_ids=normalized_source_ref_ids,
-            payload=immutable_payload(normalized_payload),
-        )
-        self._repo.put_candidate(candidate, logical_key=logical_key)
-        return RecordAnalysisCandidateResult(
-            candidate=candidate,
-            idempotent_replay=False,
-        )
+        if new_candidates:
+            self._repo.put_candidates(tuple(new_candidates))
+        return tuple(results)
 
     def validate_candidate(
         self,
@@ -305,6 +362,34 @@ class AnalysisService:
                     "source_anchors must match source_ref_ids"
                 )
         return (
+            task,
+            normalized_payload,
+            normalized_confidence,
+            normalized_source_ref_ids,
+        )
+
+    def _prepare_candidate_record(
+        self,
+        *,
+        project_id: str,
+        request: AnalysisCandidateRecordRequest,
+    ) -> _PreparedCandidateRecord:
+        self._validate_logical_key(request.logical_key)
+        task, normalized_payload, normalized_confidence, normalized_source_ref_ids = (
+            self._validate_candidate_request(
+                project_id=project_id,
+                task_id=request.task_id,
+                candidate_type=request.candidate_type,
+                action=request.action,
+                provenance=request.provenance,
+                confidence=request.confidence,
+                source_ref_ids=request.source_ref_ids,
+                payload=request.payload,
+                source_anchors=request.source_anchors,
+            )
+        )
+        return (
+            request,
             task,
             normalized_payload,
             normalized_confidence,

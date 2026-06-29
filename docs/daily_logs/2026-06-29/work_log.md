@@ -92,6 +92,15 @@
 - F3 보강: 같은 run에서 duplicate `(task_id, logical_key)` draft가 나오면 runner 결과와 write 경로에서 1개로 정규화한다.
 - F2 이월: in-memory all-or-nothing은 검증됐지만 Mongo persistence에서는 transaction/fallback 경로에서 같은 경계가 유지되는지 별도 검증해야 한다. SoT/plan/HANDOFF의 다음 작업에 Mongo all-or-nothing 검증 포인트로 남겼다.
 
+### Phase 2A Analysis Mongo repository/persistence 구현
+
+- 변경 파일: `services/application/app/analysis/mongo_repository.py`, `analysis/repository.py`, `analysis/service.py`, `analysis/runner.py`, `analysis/models.py`, `tests/test_analysis_mongo.py`, `tests/test_analysis_mongo_indexes.py`, 문서/HANDOFF/CHANGELOG.
+- `MongoAnalysisRepository`를 추가했다. `analysis_jobs`, `analysis_tasks`, `analysis_candidates` collection을 사용하고, idempotency 경계는 required unique index `uniq_analysis_job_request`(`project_id`, `snapshot_id`, `idempotency_key`), `uniq_analysis_task_request`(`project_id`, `job_id`, `candidate_type`), `uniq_analysis_candidate_request`(`project_id`, `task_id`, `logical_key`)로 강제한다. candidate list query용 `analysis_candidates_by_job`도 required index로 둔다.
+- `AnalysisRepository.put_candidates()`와 `AnalysisService.record_candidates()`를 추가했다. 단건 `record_candidate()`는 batch API의 1건 wrapper로 유지해 기존 호출 표면을 보존했고, runner는 candidate 저장을 batch API로 넘긴다.
+- Mongo transaction 경로는 candidate batch를 한 트랜잭션으로 `insert_many`한다. Non-transaction fallback은 Core SOT와 같은 single-writer local/test 제한 경로로 문서화했고, batch insert 실패 시 이번 시도에서 새로 쓴 candidate `_id`만 삭제해 partial candidate write를 남기지 않는다.
+- live Mongo 통합 테스트는 기존 Core SOT와 같은 방식으로 `CORE_SOT_TEST_MONGO_URI`를 사용하고, Mongo가 없거나 transaction을 지원하지 않으면 skip한다. 인덱스 setup은 fake collection 단위 테스트로 인프라 없이도 required index 이름과 setup error mapping을 잠근다.
+- 효과: 이전 slice4의 F2(Mongo persistence에서 candidate all-or-nothing 재검증)를 닫았다. Job/task 실패 상태 저장은 여전히 별도 상태 전이 계약 전까지 구현하지 않는다.
+
 ## Issues found
 
 - 문제: Phase 2A는 `02-analysis-pipeline.md`와 `analysis-memory-taxonomy.md` 모두에서 taxonomy와 candidate 경계를 미확정으로 남기고 있다.
@@ -149,6 +158,11 @@
 - Resolution: runner가 prepared drafts를 `(task_id, logical_key)` 기준으로 dedupe한 뒤 preflight/write한다.
 - Outcome: result/write 경로가 같은 logical candidate를 한 번만 노출한다.
 
+- 문제: runner의 candidate 저장 단계가 단건 반복이면 Mongo에서 DB-level 실패가 중간에 발생할 때 부분 저장을 repository가 한 경계에서 책임질 수 없다.
+- 원인: in-memory slice에서는 preflight가 validation failure를 막았지만, Mongo unique conflict/driver error는 write 단계에서 발생할 수 있다.
+- Resolution: service/repository에 candidate batch write 경계를 추가하고, Mongo transaction/fallback 양 경로에서 batch 단위 commit/rollback을 구현했다.
+- Outcome: candidate 부분 저장 방지 경계가 runner preflight뿐 아니라 persistence adapter에도 생겼다.
+
 ## Decisions
 
 - 작업자 판단: 승인 전에는 Phase 2A candidate 저장소나 schema를 구현하지 않았다. 승인 후에는 첫 slice를 domain model + in-memory repository + idempotency 회귀로 제한했다. Snapshot Loader/source validation은 다음 slice로 남긴다.
@@ -160,6 +174,8 @@
 - 작업자 판단: duplicate anchor도 같은 이유로 identity에 포함하지 않는다. 순서나 중복이 의미가 되는 분석이 필요해지면 배열 위치가 아니라 명시적인 순서/역할 필드를 schema에 추가해야 한다.
 - 작업자 판단: extraction runner slice에서는 job/task 실패 상태 저장을 구현하지 않는다. 해당 상태 전이는 아직 계약이 없으므로 candidate write 부분 저장을 막는 사전 검증까지만 구현한다.
 - 작업자 판단: runner 경로는 Phase 2A source validation 계약의 public entrypoint이므로 resolver 없는 service를 허용하지 않는다. resolver optional은 pure domain/service 단위 테스트 경계에만 남긴다.
+- 작업자 판단: Analysis Mongo non-transaction fallback은 Core SOT와 같은 single-writer local/test 제한 경로로 둔다. 정상 Docker/runtime은 transaction 경로가 기본이므로 fallback에 동시성 방어 복잡도를 추가하지 않고, 실패 시 이번 시도 candidate만 정리하는 retry-safe 경계를 문서화했다.
+- 작업자 판단: candidate all-or-nothing을 저장소가 소유할 수 있도록 batch API를 추가하되, 기존 단건 API는 wrapper로 유지해 호출자 호환성을 보존한다.
 
 ## Verification
 
@@ -193,8 +209,12 @@
 - Slice4 보강 focused: `python3 -m unittest tests.test_analysis_runner tests.test_analysis_extractor_schema tests.test_analysis_source_validation tests.test_analysis_phase2a -v` → 39개 통과.
 - Slice4 보강 focused: `python3 -m py_compile services/application/app/analysis/runner.py services/application/app/analysis/service.py tests/test_analysis_runner.py` 통과.
 - 전체: `python3 -m unittest discover -s tests` → 262개 통과(27 skip).
+- Analysis Mongo focused: `python3 -m py_compile services/application/app/analysis/models.py services/application/app/analysis/repository.py services/application/app/analysis/service.py services/application/app/analysis/runner.py services/application/app/analysis/mongo_repository.py tests/test_analysis_mongo.py tests/test_analysis_mongo_indexes.py` 통과.
+- Analysis Mongo focused: `python3 -m unittest tests.test_analysis_runner tests.test_analysis_mongo_indexes -v` → 8개 통과.
+- Analysis Mongo live integration: `python3 -m unittest tests.test_analysis_mongo -v` → live Mongo 미가용으로 6개 skip(OK). 잠긴 범위는 persisted round-trip, same job/task/candidate replay, candidate batch duplicate rollback이며, 실제 Mongo 연결 시 fallback/transaction 양 경로에서 실행된다.
 
 ## Next steps
 
-- Analysis Mongo repository/persistence를 추가한다. candidate/needs_review 중심 Mongo 저장, job/task/candidate idempotency index, runner replay와 all-or-nothing 경계를 transaction/fallback 양 경로에서 잠근다.
+- Analysis Mongo repository/persistence slice 독립 검증을 받는다. 검증 시 live Mongo가 가능하면 `CORE_SOT_TEST_MONGO_URI`로 fallback/transaction 양 경로를 재현한다.
+- Phase 2A 다음 slice는 Application/Worker wiring 또는 Analysis job/task 상태 전이 중 어느 쪽을 먼저 할지 계약을 좁힌 뒤 진행한다.
 - 실제 llama.cpp endpoint가 준비되면 `scripts/benchmark_llm_provider.py`를 실행해 budget/retry production 기본 숫자를 확정한다.

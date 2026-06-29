@@ -9,8 +9,8 @@ from services.application.app.analysis.extractor import AnalysisCandidateDraft
 from services.application.app.analysis.models import (
     AnalysisCandidate,
     AnalysisCandidateAction,
+    AnalysisCandidateRecordRequest,
     AnalysisJob,
-    RecordAnalysisCandidateResult,
     SnapshotText,
 )
 from services.application.app.analysis.service import AnalysisService
@@ -89,8 +89,9 @@ class AnalysisExtractionRunner:
         for item in prepared:
             self._validate_draft(project_id=project_id, item=item)
 
-        recorded = tuple(
-            self._record_draft(project_id=project_id, item=item) for item in prepared
+        recorded = self._analysis_service.record_candidates(
+            project_id=project_id,
+            requests=tuple(self._record_request(item) for item in prepared),
         )
         return AnalysisExtractionRunResult(
             job=job_result.job,
@@ -130,12 +131,10 @@ class AnalysisExtractionRunner:
             source_anchors=draft.source_anchors,
         )
 
-    def _record_draft(
-        self, *, project_id: str, item: _PreparedDraft
-    ) -> RecordAnalysisCandidateResult:
+    @staticmethod
+    def _record_request(item: _PreparedDraft) -> AnalysisCandidateRecordRequest:
         draft = item.draft
-        return self._analysis_service.record_candidate(
-            project_id=project_id,
+        return AnalysisCandidateRecordRequest(
             task_id=item.task_id,
             logical_key=draft.logical_key,
             candidate_type=draft.candidate_type,

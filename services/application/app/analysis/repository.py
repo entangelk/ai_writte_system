@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Protocol
 
 from services.application.app.analysis.models import (
@@ -43,6 +44,10 @@ class AnalysisRepository(Protocol):
 
     def put_candidate(
         self, candidate: AnalysisCandidate, *, logical_key: str
+    ) -> None: ...
+
+    def put_candidates(
+        self, candidates: Sequence[tuple[AnalysisCandidate, str]]
     ) -> None: ...
 
     def list_candidates_for_job(

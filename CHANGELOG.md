@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-29 | Phase 2A Analysis Mongo persistence 구현 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | Phase 2A runner 검증 후 보강(F1/F3) | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | Phase 2A extraction runner 구현 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | Phase 2A source_anchors set 의미론 보강 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
@@ -45,6 +46,7 @@
 
 ### Added
 
+- Phase 2A Analysis Mongo persistence를 추가했다. `MongoAnalysisRepository`는 `analysis_jobs`, `analysis_tasks`, `analysis_candidates`를 저장하고, job/task/candidate idempotency를 required unique index(`uniq_analysis_job_request`, `uniq_analysis_task_request`, `uniq_analysis_candidate_request`)로 강제한다. Runner candidate write는 service batch API를 통해 저장소에 전달되며, Mongo transaction 경로는 한 트랜잭션으로 commit하고 non-transaction fallback은 single-writer local/test 전용으로 실패 시 이번 시도 candidate만 rollback한다. Live Mongo 통합 테스트는 미가용 시 skip되고, index setup은 fake collection 단위 회귀로 잠갔다.
 - Phase 2A extraction runner를 추가했다. Runner는 `AnalysisJob`을 idempotent 생성/재사용하고 Snapshot Loader → provider extraction → task 생성/재사용 → 전체 draft 사전 검증 → candidate 저장 순서로 실행한다. Task는 `project_id + job_id + candidate_type`으로 재사용하므로 같은 job retry가 candidate idempotency의 `task_id`를 흔들지 않는다. logical_key/source/schema validation 실패가 하나라도 있으면 candidate write를 시작하지 않는다. focused 37개와 전체 discovery 260개(27 skip)를 통과했다.
 - Phase 2A domain model과 in-memory repository를 추가했다. `services/application/app/analysis/`가 `AnalysisJob`/`AnalysisTask`/`AnalysisCandidate`, approved literal enum, `AnalysisRepository` Protocol, `InMemoryAnalysisRepository`, `AnalysisService`를 제공한다. job retry는 `project_id + snapshot_id + idempotency_key`, candidate retry는 `project_id + task_id + logical_key`로 idempotent replay한다. Candidate status는 `needs_review` 고정이고 confidence는 range만 검증한다. `user_declared` 같은 미승인 provenance 문자열은 runtime에서 거절한다. 독립 검증 조건 보강으로 NaN confidence를 거절하고 action≠`create` 회귀와 `logical_key` 계약을 추가했다. focused 18개 회귀와 전체 discovery 241개(27 skip)를 통과했다.
 - Phase 2A Snapshot Loader와 candidate source validation을 추가했다. `CoreSotSourceAdapter`가 Core SOT snapshot raw text/hash/block ids를 analysis 입력으로 로드하고, `AnalysisService`가 resolver 구성 시 `CandidateSourceAnchor(source_ref_id, start_offset, end_offset, quote, content_hash)`를 실제 `SourceRef`와 대조한다. 같은 project source_ref만 허용하며 source_ref 없음, cross-project, span/quote/hash mismatch, source_ref_ids-anchor mismatch, source_anchors 누락을 거절한다. focused 25개 회귀와 전체 discovery 248개(27 skip)를 통과했다.
@@ -52,7 +54,8 @@
 
 ### Fixed
 
-- Phase 2A runner 독립 검증의 non-blocking F1/F3을 보강했다. Runner는 source validation이 구성된 `AnalysisService`만 받으며, 같은 run의 duplicate `(task_id, logical_key)` draft는 result/write에서 1개로 정규화한다. F2(Mongo all-or-nothing)는 다음 persistence slice 검증 포인트로 SoT/plan/HANDOFF에 남겼다. focused 39개와 전체 discovery 262개(27 skip)를 통과했다.
+- Phase 2A runner의 candidate 저장 단계를 batch API로 바꿔 Mongo repository가 all-or-nothing 경계를 소유할 수 있게 했다. 단건 `record_candidate()`는 batch API의 1건 wrapper로 유지해 기존 호출 표면은 보존한다.
+- Phase 2A runner 독립 검증의 non-blocking F1/F3을 보강했다. Runner는 source validation이 구성된 `AnalysisService`만 받으며, 같은 run의 duplicate `(task_id, logical_key)` draft는 result/write에서 1개로 정규화한다. focused 39개와 전체 discovery 262개(27 skip)를 통과했다. 당시 이월된 F2(Mongo all-or-nothing)는 이후 Analysis Mongo persistence slice에서 닫았다.
 - 로컬 기본 Mongo가 인증을 요구하는 환경에서 `tests/test_core_sot_mongo.py` probe cleanup이 `Unauthorized`로 import 실패하던 문제를 보강했다. cleanup 실패도 Mongo 미가용으로 보고 skip하므로 infrastructure-free 전체 discovery가 다시 통과한다.
 - Phase 2A slice2 독립 검증 G1을 보강했다. `logical_key` derivation에서 같은 `source_anchors` set은 provider 출력 순서와 무관하게 같은 identity로 정규화하도록 SoT v1.6.2와 plan에 명시하고, extractor가 canonical anchor를 정렬하도록 수정했다. anchor set 순서 무관 회귀를 추가해 focused 31개와 전체 discovery 254개(27 skip)를 통과했다.
 - Phase 2A slice3 독립 검증의 non-blocking D1~D3을 보강했다. SoT 상단 계약 버전을 v1.6.3으로 갱신하고, `source_anchors` identity를 unordered set으로 명확화해 동일 anchor 중복을 parsed draft와 logical_key에서 하나로 정규화한다. ordered evidence chain이 필요해지면 `sequence`/`evidence_order` 같은 명시 필드로 후속 계약화한다. focused 32개와 전체 discovery 255개(27 skip)를 통과했다.

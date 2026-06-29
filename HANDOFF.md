@@ -76,15 +76,17 @@
 - Phase 2A Snapshot Loader + candidate source validation이 구현됐다(2026-06-29). `CoreSotSourceAdapter`가 같은 project의 snapshot raw text/hash/block ids를 로드하고, `AnalysisService`가 resolver 구성 시 `CandidateSourceAnchor(source_ref_id, start_offset, end_offset, quote, content_hash)`를 Core SOT `SourceRef`와 대조한다. source_ref 없음/cross-project/span mismatch/quote mismatch/hash mismatch/source_ref_ids-anchor mismatch/source_anchors 누락을 7개 회귀로 잠갔다. 전체 discovery 248개 통과(27 skip).
 - Phase 2A 최소 taxonomy schema + fake-provider extraction adapter가 구현됐다(2026-06-29). `character_observation {name, observation}`, `event_observation {event}`, `open_question_observation {question}`만 허용하고 field는 모두 non-empty string이다. `AnalysisExtractionAdapter`는 provider content의 top-level `{candidates: [...]}` JSON object를 파싱해 approved literal/provenance/confidence/source_anchors/payload를 검증하고, `candidate_type + payload + source_anchors` canonical JSON SHA-256으로 `logical_key`를 만든다. 독립 검증 G1/D1 보강으로 `source_anchors`는 identity에서 unordered set으로 정규화한다(순서·동일 anchor 중복 무시, 다른 anchor 내용은 별도 identity). focused 32개 회귀와 전체 discovery 255개(27 skip)를 통과했다.
 - Phase 2A extraction runner가 구현됐다(2026-06-29). `AnalysisExtractionRunner`는 source validation이 구성된 `AnalysisService`만 받으며, `AnalysisJob` idempotent 생성/재사용 → Snapshot Loader → provider extraction → `AnalysisTask` 생성/재사용 → 전체 draft 사전 검증 → candidate 저장 순서로 실행한다. Task는 `project_id + job_id + candidate_type`으로 재사용해 same job retry에서 candidate idempotency의 `task_id`가 흔들리지 않는다. invalid logical_key/source/schema draft가 있으면 candidate write를 시작하지 않고, 같은 run의 duplicate `(task_id, logical_key)` draft는 1개로 정규화한다. focused 39개와 전체 discovery 262개(27 skip)를 통과했다.
+- Phase 2A Analysis Mongo repository/persistence가 구현됐다(2026-06-29). `MongoAnalysisRepository`는 `analysis_jobs`, `analysis_tasks`, `analysis_candidates`를 저장하고 required indexes `uniq_analysis_job_request`, `uniq_analysis_task_request`, `uniq_analysis_candidate_request`, `analysis_candidates_by_job`를 설치한다. Runner candidate write는 `record_candidates()` batch 경계를 통해 저장소에 전달되며, transaction 경로는 한 트랜잭션 commit, fallback은 single-writer local/test 전용 rollback(이번 시도 candidate `_id` 정리)으로 candidate 부분 저장을 막는다. Local live Mongo 미가용 환경에서는 새 통합 6개가 skip된다.
 
 ## Next Tasks
 
 1. Slice 1 잔여 회귀 후보: archive 후 파생 인덱스 stale 이벤트. Phase 3 indexing 계약이 Draft라 현재는 구현하지 않는다. (fallback 동시성 race는 SoT v1.4 single-writer 제약으로 contract out 됨; 동시성 필요 시에만 (a) 보강 재검토.)
-2. Phase 2A 다음 slice: Analysis Mongo repository/persistence를 추가한다. candidate/needs_review 중심 Mongo 저장, job/task/candidate idempotency index, runner replay와 all-or-nothing 경계를 transaction/fallback 양 경로에서 잠근다. Job/task 실패 상태 저장은 별도 계약이 필요하면 먼저 문서화한다.
-3. Application/Worker가 gateway `/v1/generate`를 호출하는 runtime wiring은 Phase payload/tool handler와 model tool-call wire format이 확정된 뒤 별도 slice로 구현한다.
-4. runner domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
-5. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
-6. 실제 Gemma/llama.cpp endpoint에서 `scripts/benchmark_llm_provider.py` 실행 후 budget/retry production 숫자 기본 한도 확정(retry cap 구조는 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 남음).
+2. Phase 2A Analysis Mongo persistence slice를 독립 검증한다. 검증 시 live Mongo가 가능하면 `CORE_SOT_TEST_MONGO_URI`로 fallback/transaction 양 경로를 재현하고, unavailable 환경에서는 skip-aware 계약을 확인한다.
+3. Phase 2A 다음 구현 slice는 Application/Worker wiring 또는 Analysis job/task 상태 전이 중 먼저 진행할 쪽을 계약화한 뒤 시작한다. Job/task 실패 상태 저장은 아직 미확정이므로 구현 전 문서화가 필요하다.
+4. Application/Worker가 gateway `/v1/generate`를 호출하는 runtime wiring은 Phase payload/tool handler와 model tool-call wire format이 확정된 뒤 별도 slice로 구현한다.
+5. runner domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
+6. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
+7. 실제 Gemma/llama.cpp endpoint에서 `scripts/benchmark_llm_provider.py` 실행 후 budget/retry production 숫자 기본 한도 확정(retry cap 구조는 `BudgetPolicy`에 폐쇄됐고 숫자 기본값만 남음).
 
 ## Verification
 
@@ -135,6 +137,7 @@
 - Phase 2A source validation 자체 회귀(2026-06-29): `python3 -m unittest tests.test_analysis_source_validation tests.test_analysis_phase2a -v` 25개 통과, `python3 -m py_compile ...` 통과, 전체 discovery 248개 통과(27 skip).
 - Phase 2A taxonomy schema/extractor 자체 회귀(2026-06-29): `python3 -m py_compile services/application/app/analysis/schema.py services/application/app/analysis/extractor.py services/application/app/analysis/service.py tests/test_analysis_extractor_schema.py tests/test_analysis_phase2a.py tests/test_analysis_source_validation.py` 통과, Slice3 보강 후 `python3 -m py_compile services/application/app/analysis/extractor.py tests/test_analysis_extractor_schema.py` 통과, `python3 -m unittest tests.test_analysis_extractor_schema tests.test_analysis_source_validation tests.test_analysis_phase2a -v` 32개 통과, 전체 discovery 255개 통과(27 skip). 잠근 범위: 3종 최소 payload schema 정상/거절, service 저장 경로 malformed payload 거절, fake-provider extraction adapter parsing, malformed provider content 거절, deterministic logical_key, over-collapse 방지, 같은 anchor set 순서 무관 identity, 동일 anchor 중복 정규화.
 - Phase 2A extraction runner 자체 회귀(2026-06-29): `python3 -m py_compile services/application/app/analysis/runner.py services/application/app/analysis/service.py services/application/app/analysis/repository.py tests/test_analysis_runner.py tests/test_analysis_phase2a.py` 통과, Slice4 보강 후 `python3 -m py_compile services/application/app/analysis/runner.py services/application/app/analysis/service.py tests/test_analysis_runner.py` 통과, `python3 -m unittest tests.test_analysis_runner tests.test_analysis_extractor_schema tests.test_analysis_source_validation tests.test_analysis_phase2a -v` 39개 통과, 전체 discovery 262개 통과(27 skip). 잠근 범위: load→extract→validate→store 흐름, same job replay의 job/task/candidate idempotency, invalid logical_key/source/schema draft가 있을 때 candidate 부분 저장 금지, runner source validation 구성 강제, duplicate `(task_id, logical_key)` result dedupe.
+- Phase 2A Analysis Mongo persistence 자체 회귀(2026-06-29): `python3 -m py_compile services/application/app/analysis/models.py services/application/app/analysis/repository.py services/application/app/analysis/service.py services/application/app/analysis/runner.py services/application/app/analysis/mongo_repository.py tests/test_analysis_mongo.py tests/test_analysis_mongo_indexes.py` 통과, `python3 -m unittest tests.test_analysis_runner tests.test_analysis_mongo_indexes -v` 8개 통과, `python3 -m unittest tests.test_analysis_mongo -v`는 live Mongo 미가용으로 6개 skip(OK). 잠근 범위: required analysis indexes, setup error mapping, runner batch write 경계, persisted round-trip/replay/batch rollback은 live Mongo 연결 시 fallback/transaction 양 경로에서 실행.
 
 ## Project Structure
 
@@ -189,6 +192,7 @@ services/
         ├── analysis/
         │   ├── models.py       # Phase 2A AnalysisJob/Task/Candidate + approved literals
         │   ├── repository.py   # AnalysisRepository Protocol
+        │   ├── mongo_repository.py # pymongo(sync) adapter: analysis job/task/candidate persistence
         │   ├── schema.py       # 3종 taxonomy 최소 payload validator
         │   ├── extractor.py    # fake/provider extraction adapter + logical_key derivation
         │   ├── runner.py       # Snapshot Loader→provider extraction→candidate 저장 orchestration

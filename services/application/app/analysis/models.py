@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 
 class AnalysisCandidateType(StrEnum):
@@ -68,6 +68,19 @@ class CreateAnalysisJobResult:
 class RecordAnalysisCandidateResult:
     candidate: AnalysisCandidate
     idempotent_replay: bool
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisCandidateRecordRequest:
+    task_id: str
+    logical_key: str
+    candidate_type: AnalysisCandidateType
+    action: AnalysisCandidateAction
+    provenance: AnalysisProvenance
+    confidence: float
+    source_ref_ids: Sequence[str]
+    payload: Mapping[str, Any]
+    source_anchors: Sequence["CandidateSourceAnchor"] | None = None
 
 
 @dataclass(frozen=True, slots=True)
