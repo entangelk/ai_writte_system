@@ -27,12 +27,30 @@ class AnalysisCandidateStatus(StrEnum):
     NEEDS_REVIEW = "needs_review"
 
 
+class AnalysisJobStatus(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class AnalysisJobFailureReason(StrEnum):
+    SNAPSHOT_NOT_FOUND = "snapshot_not_found"
+    SOURCE_INVALID = "source_invalid"
+    SCHEMA_INVALID = "schema_invalid"
+    PROVIDER_ERROR = "provider_error"
+    DUPLICATE_CONFLICT = "duplicate_conflict"
+
+
 @dataclass(frozen=True, slots=True)
 class AnalysisJob:
     id: str
     project_id: str
     snapshot_id: str
     idempotency_key: str
+    status: AnalysisJobStatus = AnalysisJobStatus.PENDING
+    failure_reason: AnalysisJobFailureReason | None = None
+    failure_detail: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

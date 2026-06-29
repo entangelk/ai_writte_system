@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from numbers import Real
 from typing import Any
 
@@ -13,6 +14,8 @@ from services.application.app.analysis.models import (
     AnalysisCandidateStatus,
     AnalysisCandidateType,
     AnalysisJob,
+    AnalysisJobFailureReason,
+    AnalysisJobStatus,
     AnalysisProvenance,
     AnalysisTask,
     CandidateSourceAnchor,
@@ -38,6 +41,21 @@ class AnalysisNotFound(AnalysisError):
 
 class InvalidAnalysisCandidate(AnalysisError):
     pass
+
+
+class InvalidJobStateTransition(AnalysisError):
+    pass
+
+
+_ALLOWED_JOB_TRANSITIONS: frozenset[tuple[AnalysisJobStatus, AnalysisJobStatus]] = (
+    frozenset(
+        {
+            (AnalysisJobStatus.PENDING, AnalysisJobStatus.RUNNING),
+            (AnalysisJobStatus.RUNNING, AnalysisJobStatus.SUCCEEDED),
+            (AnalysisJobStatus.RUNNING, AnalysisJobStatus.FAILED),
+        }
+    )
+)
 
 
 _PreparedCandidateRecord = tuple[
@@ -86,6 +104,9 @@ class InMemoryAnalysisRepository:
         self._job_request_index[
             (job.project_id, job.snapshot_id, job.idempotency_key)
         ] = job.id
+
+    def update_job(self, job: AnalysisJob) -> None:
+        self.jobs[job.id] = job
 
     def get_task(self, task_id: str) -> AnalysisTask | None:
         return self.tasks.get(task_id)
@@ -173,6 +194,75 @@ class AnalysisService:
         )
         self._repo.put_job(job)
         return CreateAnalysisJobResult(job=job, idempotent_replay=False)
+
+    def mark_job_running(self, *, project_id: str, job_id: str) -> AnalysisJob:
+        return self._transition_job(
+            project_id=project_id,
+            job_id=job_id,
+            target=AnalysisJobStatus.RUNNING,
+        )
+
+    def mark_job_succeeded(self, *, project_id: str, job_id: str) -> AnalysisJob:
+        return self._transition_job(
+            project_id=project_id,
+            job_id=job_id,
+            target=AnalysisJobStatus.SUCCEEDED,
+        )
+
+    def mark_job_failed(
+        self,
+        *,
+        project_id: str,
+        job_id: str,
+        failure_reason: AnalysisJobFailureReason,
+        failure_detail: str | None = None,
+    ) -> AnalysisJob:
+        return self._transition_job(
+            project_id=project_id,
+            job_id=job_id,
+            target=AnalysisJobStatus.FAILED,
+            failure_reason=failure_reason,
+            failure_detail=failure_detail,
+        )
+
+    def _transition_job(
+        self,
+        *,
+        project_id: str,
+        job_id: str,
+        target: AnalysisJobStatus,
+        failure_reason: AnalysisJobFailureReason | None = None,
+        failure_detail: str | None = None,
+    ) -> AnalysisJob:
+        job = self._require_job(project_id, job_id)
+        if (job.status, target) not in _ALLOWED_JOB_TRANSITIONS:
+            raise InvalidJobStateTransition(
+                f"cannot transition job from {job.status} to {target}"
+            )
+        if target is AnalysisJobStatus.FAILED:
+            if not isinstance(failure_reason, AnalysisJobFailureReason):
+                raise InvalidJobStateTransition(
+                    "failed transition requires a failure_reason"
+                )
+            updated = replace(
+                job,
+                status=target,
+                failure_reason=failure_reason,
+                failure_detail=failure_detail,
+            )
+        else:
+            if failure_reason is not None or failure_detail:
+                raise InvalidJobStateTransition(
+                    "non-failed transition must not set failure fields"
+                )
+            updated = replace(
+                job,
+                status=target,
+                failure_reason=None,
+                failure_detail=None,
+            )
+        self._repo.update_job(updated)
+        return updated
 
     def create_task(
         self,

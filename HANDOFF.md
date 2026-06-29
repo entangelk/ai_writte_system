@@ -79,12 +79,13 @@
 - Phase 2A Analysis Mongo repository/persistence가 구현됐다(2026-06-29). `MongoAnalysisRepository`는 `analysis_jobs`, `analysis_tasks`, `analysis_candidates`를 저장하고 required indexes `uniq_analysis_job_request`, `uniq_analysis_task_request`, `uniq_analysis_candidate_request`, `analysis_candidates_by_job`를 설치한다. Runner candidate write는 `record_candidates()` batch 경계를 통해 저장소에 전달되며, transaction 경로는 한 트랜잭션 commit, fallback은 single-writer local/test 전용 rollback(이번 시도 candidate `_id` 정리)으로 candidate 부분 저장을 막는다. Local live Mongo 미가용 환경에서는 새 통합 6개가 skip된다.
 - Phase 2A Analysis Mongo persistence 독립 검증 조건부 합격의 C1/C2를 보강했다(2026-06-29). Live Mongo replica set 실행에서 드러난 `insert_many` duplicate `BulkWriteError` 누출을 `DuplicateAnalysisCandidateRequest` 매핑으로 수정했고, fallback/transaction 통합 6개가 실제 Mongo에서 통과했다. `record_candidates()` intra-batch 동일 `project_id + task_id + logical_key` request는 idempotent replay로 정규화한다고 SoT v1.6.7/plan에 명시하고 focused 회귀를 추가했다.
 - `.gitignore`가 보강됐다(2026-06-29). Local agent state(`.agents/`, `.claude/`, `.codex/`, `.serena/`)와 Python cache/test cache, virtualenv, local env, build/editor/OS/log/tmp 산출물을 ignore한다.
+- Phase 2A job 상태 전이가 계약화·구현(slice 1)됐다(2026-06-29, SoT v1.6.9). 사용자 결정으로 상태는 job-level만(task 무상태), `pending→running→succeeded|failed`(terminal 불변), failed는 terminal이라 재실행은 새 idempotency_key, 실패는 닫힌 `failure_reason` enum 5종 + free-text detail로 확정했다(`docs/plans/02-analysis-job-state-decisions.md`). `AnalysisJob`에 status/failure 필드, service `mark_job_running/succeeded/failed`+`_transition_job`(`InvalidJobStateTransition`), repository `update_job`(in-memory/Mongo `replace_one`), `_job_doc`/`_to_job` round-trip을 추가했다. in-memory 10종 회귀 + live Mongo 영속성/terminal replay를 확인했다. **runner 통합(slice 2)과 skip-aware live 회귀(slice 3)는 아직** — 현재 runner는 job 상태를 전이시키지 않아 runner로 만든 job은 `pending`에 머문다.
 - Phase 2A candidate write-error 분류가 정밀화됐다(2026-06-29, SoT v1.6.8). `_is_duplicate_key_error` helper로 duplicate-key(code `11000`) 충돌만 `DuplicateAnalysisCandidateRequest`로 매핑하고, duplicate가 아닌 `BulkWriteError`/`PyMongoError`는 원본 타입을 보존한다(인프라 오류 오표기 방지). fallback은 매핑 여부와 무관하게 이번 시도 candidate `_id`를 먼저 정리한다. 인프라 없는 fake 기반 회귀 4종(`tests/test_analysis_mongo_error_mapping.py`)이 transaction/fallback × duplicate/non-duplicate를 양방향 lock하고, live Mongo duplicate 경로 6개는 그대로 통과한다. 직전 독립 재검증의 비차단 Issue #1/#2를 닫았다.
 
 ## Next Tasks
 
 1. Slice 1 잔여 회귀 후보: archive 후 파생 인덱스 stale 이벤트. Phase 3 indexing 계약이 Draft라 현재는 구현하지 않는다. (fallback 동시성 race는 SoT v1.4 single-writer 제약으로 contract out 됨; 동시성 필요 시에만 (a) 보강 재검토.)
-2. Phase 2A 다음 구현 slice는 Application/Worker wiring 또는 Analysis job/task 상태 전이 중 먼저 진행할 쪽을 계약화한 뒤 시작한다. Job/task 실패 상태 저장은 아직 미확정이므로 구현 전 문서화가 필요하다.
+2. Phase 2A job 상태 전이 slice 2/3: runner 통합(새 job만 `pending→running→terminal` 전이, 실패 지점→`failure_reason` 매핑, all-or-nothing 유지, 기존 job replay는 재실행 안 함)과 skip-aware live 상태 영속성 회귀를 구현한다. 계약은 `docs/plans/02-analysis-job-state-decisions.md`에 확정됨.
 3. Application/Worker가 gateway `/v1/generate`를 호출하는 runtime wiring은 Phase payload/tool handler와 model tool-call wire format이 확정된 뒤 별도 slice로 구현한다.
 4. runner domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
 5. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
@@ -161,6 +162,7 @@ docs/
 │   ├── product-shell.md         # 프로젝트/원고 관리와 내보내기
 │   ├── analysis-memory-taxonomy.md # 분석 대상 및 갱신 논의안
 │   ├── 02-analysis-kickoff-decisions.md # Phase 2A 착수 전 결정 브리프
+│   ├── 02-analysis-job-state-decisions.md # Phase 2A job 상태 전이 결정 브리프
 │   ├── implementation-plan.md   # vertical slice와 검증 계획
 │   ├── llm-gateway.md           # 모델 서빙 경계와 Gemma Q4 검증
 │   ├── gemma4-reuse.md          # 기존 구현 선택 이관과 Loop Gate 보강
@@ -196,14 +198,14 @@ services/
         │   ├── mongo_repository.py # pymongo(sync) adapter: transaction/fallback/idempotency
         │   └── service.py      # Core SOT service + in-memory repository skeleton
         ├── analysis/
-        │   ├── models.py       # Phase 2A AnalysisJob/Task/Candidate + approved literals
+        │   ├── models.py       # Phase 2A AnalysisJob/Task/Candidate + approved literals + job status/failure enums
         │   ├── repository.py   # AnalysisRepository Protocol
         │   ├── mongo_repository.py # pymongo(sync) adapter: analysis job/task/candidate persistence
         │   ├── schema.py       # 3종 taxonomy 최소 payload validator
         │   ├── extractor.py    # fake/provider extraction adapter + logical_key derivation
         │   ├── runner.py       # Snapshot Loader→provider extraction→candidate 저장 orchestration
         │   ├── source.py       # Core SOT snapshot/source_ref adapter
-        │   └── service.py      # in-memory analysis repository/service + retry idempotency
+        │   └── service.py      # in-memory analysis repository/service + retry idempotency + job state transitions
         └── agent_loop/
             ├── budget.py       # BudgetPolicy(5차원 budget+retry cap)/BudgetTracker+F1 usage 방어(A1/A3)
             ├── completion.py   # SelfReport + judge_completion completed/awaiting_review(A3)
@@ -235,6 +237,7 @@ tests/
 ├── test_analysis_runner.py
 ├── test_analysis_source_validation.py
 ├── test_analysis_mongo_error_mapping.py
+├── test_analysis_job_state.py
 ├── test_core_sot.py
 ├── test_core_sot_fixture.py
 ├── test_core_sot_mongo_indexes.py

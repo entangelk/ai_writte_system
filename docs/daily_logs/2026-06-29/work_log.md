@@ -119,6 +119,16 @@
 - 계약: SoT v1.6.8 §본문에 duplicate-key 한정 매핑·원본 예외 보존·fallback cleanup 순서를 명시하고, plan/changelog/우선순위 라벨을 동기화했다. 이로써 검증 Issue #2(§본문에 `DuplicateAnalysisCandidateRequest` 표면화 누락)도 닫혔다.
 - 효과: 인프라 오류가 "이미 존재하는 candidate"로 오인되지 않아 운영 디버깅에서 원인이 보존된다.
 
+### Phase 2A job 상태 전이 계약화 + slice 1 구현 (SoT v1.6.9)
+
+- 변경 파일: `docs/plans/02-analysis-job-state-decisions.md`(신규 결정 브리프), `docs/system-contract-sot.md`(v1.6.9), `docs/plans/02-analysis-pipeline.md`, `services/application/app/analysis/models.py`, `.../repository.py`, `.../service.py`, `.../mongo_repository.py`, `tests/test_analysis_job_state.py`(신규), `CHANGELOG.md`, `HANDOFF.md`.
+- 사용자 결정(3 fork): (1) 상태는 job-level만, task 무상태 (2) failed는 terminal, 재실행은 새 idempotency_key (3) 실패는 닫힌 `failure_reason` enum + free-text detail. 결정 브리프는 kickoff-decisions 패턴을 따랐다.
+- 계약화: SoT §본문에 job 상태(`pending→running→succeeded|failed`, terminal 불변), runner는 새 job만 실행·기존 job replay, `failure_reason` 5종(`snapshot_not_found`/`source_invalid`/`schema_invalid`/`provider_error`/`duplicate_conflict`)을 명시했다. 기존 "상태 전이는 아직 구현하지 않는다" 문구를 새 계약 참조로 reconcile해 spec 내부 모순을 제거했다.
+- slice 1 구현: `AnalysisJobStatus`/`AnalysisJobFailureReason` enum과 `AnalysisJob.status/failure_reason/failure_detail`(기본 pending/None) 필드 추가. service에 `mark_job_running/succeeded/failed` + `_transition_job`(allow-set 검증, terminal 불변, failed만 failure 필드 설정) + `InvalidJobStateTransition`. repository Protocol에 `update_job` 추가(in-memory dict 갱신, Mongo `replace_one`). Mongo `_job_doc`/`_to_job`가 status/failure 필드를 round-trip(구버전 doc은 기본 pending tolerant).
+- 회귀: in-memory 10종으로 합법 전이·불법 전이(skip/terminal/재진입)·failed reason 필수·succeeded는 failure 필드 없음·project isolation을 양방향 lock. allow-set에 `failed→running`을 추가하는 변이 시 terminal test가 FAIL함을 확인(load-bearing 증명) 후 복원.
+- 검증: 전체 discovery 285개 통과(33 skip). throwaway replica set(port 27023)에서 기존 live `tests.test_analysis_mongo` 6개 무손상 + 수동 live 체크로 pending→running→failed 영속화(reason/detail) 및 terminal job idempotent replay를 확인. 임시 컨테이너 정리.
+- 미완(다음 slice): runner 통합(slice 2 — 새 job만 실행하며 `pending→running→terminal` 전이, 실패 지점→reason 매핑)과 skip-aware live 상태 영속성 회귀(slice 3)는 아직이다. 현재 runner는 job 상태를 전이시키지 않아 runner로 만든 job은 `pending`에 머문다.
+
 ### Repository ignore hygiene
 
 - 변경 파일: `.gitignore`, `HANDOFF.md`.

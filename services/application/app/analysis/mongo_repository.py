@@ -20,6 +20,8 @@ from services.application.app.analysis.models import (
     AnalysisCandidateStatus,
     AnalysisCandidateType,
     AnalysisJob,
+    AnalysisJobFailureReason,
+    AnalysisJobStatus,
     AnalysisProvenance,
     AnalysisTask,
     immutable_payload,
@@ -159,6 +161,9 @@ class MongoAnalysisRepository:
     def put_job(self, job: AnalysisJob) -> None:
         self._jobs.insert_one(_job_doc(job))
 
+    def update_job(self, job: AnalysisJob) -> None:
+        self._jobs.replace_one({"_id": job.id}, _job_doc(job))
+
     def get_task(self, task_id: str) -> AnalysisTask | None:
         doc = self._tasks.find_one({"_id": task_id})
         return _to_task(doc) if doc else None
@@ -256,15 +261,28 @@ def _job_doc(job: AnalysisJob) -> dict[str, Any]:
         "project_id": job.project_id,
         "snapshot_id": job.snapshot_id,
         "idempotency_key": job.idempotency_key,
+        "status": str(job.status),
+        "failure_reason": (
+            str(job.failure_reason) if job.failure_reason is not None else None
+        ),
+        "failure_detail": job.failure_detail,
     }
 
 
 def _to_job(doc: dict[str, Any]) -> AnalysisJob:
+    failure_reason = doc.get("failure_reason")
     return AnalysisJob(
         id=doc["_id"],
         project_id=doc["project_id"],
         snapshot_id=doc["snapshot_id"],
         idempotency_key=doc["idempotency_key"],
+        status=AnalysisJobStatus(doc.get("status", AnalysisJobStatus.PENDING)),
+        failure_reason=(
+            AnalysisJobFailureReason(failure_reason)
+            if failure_reason is not None
+            else None
+        ),
+        failure_detail=doc.get("failure_detail"),
     )
 
 
