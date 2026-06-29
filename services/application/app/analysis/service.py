@@ -127,6 +127,10 @@ class AnalysisService:
         self._repo = repository
         self._source_ref_resolver = source_ref_resolver
 
+    @property
+    def source_validation_enabled(self) -> bool:
+        return self._source_ref_resolver is not None
+
     def create_job(
         self, *, project_id: str, snapshot_id: str, idempotency_key: str
     ) -> CreateAnalysisJobResult:

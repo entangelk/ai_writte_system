@@ -84,6 +84,14 @@
 - `AnalysisService.validate_candidate()`를 추가해 runner가 모든 draft를 사전 검증한 뒤 candidate write를 시작할 수 있게 했다. Job/task 생성은 idempotent setup으로 허용하지만, candidate write는 logical_key/source/schema validation이 전부 통과한 뒤 실행한다.
 - runner 회귀를 추가했다. load→extract→logical_key/source validation→candidate 저장 흐름, same job retry의 job/task/candidate replay, invalid second draft가 있을 때 첫 candidate가 부분 저장되지 않음을 잠갔다.
 
+### Phase 2A Slice4 독립 검증 non-blocking 보강
+
+- 변경 파일: `services/application/app/analysis/runner.py`, `analysis/service.py`, `tests/test_analysis_runner.py`, `docs/system-contract-sot.md`, `docs/plans/02-analysis-kickoff-decisions.md`, `docs/plans/02-analysis-pipeline.md`, `HANDOFF.md`, `CHANGELOG.md`.
+- 독립 검증 기록: `docs/verifications/2026-06-29/analysis_phase2a_slice4.md` 합격.
+- F1 보강: runner가 resolver 없는 AnalysisService를 받아 source validation을 조용히 skip하지 않도록 했다. `AnalysisService.source_validation_enabled`를 추가하고, `AnalysisExtractionRunner`가 source validation이 없는 service를 받으면 `AnalysisRunnerConfigurationError`를 낸다.
+- F3 보강: 같은 run에서 duplicate `(task_id, logical_key)` draft가 나오면 runner 결과와 write 경로에서 1개로 정규화한다.
+- F2 이월: in-memory all-or-nothing은 검증됐지만 Mongo persistence에서는 transaction/fallback 경로에서 같은 경계가 유지되는지 별도 검증해야 한다. SoT/plan/HANDOFF의 다음 작업에 Mongo all-or-nothing 검증 포인트로 남겼다.
+
 ## Issues found
 
 - 문제: Phase 2A는 `02-analysis-pipeline.md`와 `analysis-memory-taxonomy.md` 모두에서 taxonomy와 candidate 경계를 미확정으로 남기고 있다.
@@ -131,6 +139,16 @@
 - Resolution: runner는 모든 draft를 먼저 `validate_candidate()`로 logical_key/source/schema 사전 검증하고, 전부 통과한 뒤에 candidate 저장을 시작한다. Job/task setup은 남을 수 있지만 candidate 부분 저장은 막는다.
 - Outcome: Phase 2A runner slice는 실패 상태 저장을 추측 구현하지 않고 candidate write만 보수적으로 all-or-nothing 처리한다.
 
+- 문제: runner에 resolver 없는 AnalysisService를 주입하면 source validation이 skip될 수 있었다.
+- 원인: `AnalysisService`는 pure domain tests를 위해 resolver optional이고, runner가 이 optional 경계를 강제하지 않았다.
+- Resolution: runner 생성 시 `source_validation_enabled`를 요구하도록 했다.
+- Outcome: runner 경로는 항상 source validation이 구성된 service로만 실행된다.
+
+- 문제: 같은 run에서 동일 `(task_id, logical_key)` draft가 중복되면 저장은 1건이어도 result tuple에는 같은 candidate가 두 번 들어갈 수 있었다.
+- 원인: candidate 저장소의 idempotent replay 결과를 그대로 result에 모았다.
+- Resolution: runner가 prepared drafts를 `(task_id, logical_key)` 기준으로 dedupe한 뒤 preflight/write한다.
+- Outcome: result/write 경로가 같은 logical candidate를 한 번만 노출한다.
+
 ## Decisions
 
 - 작업자 판단: 승인 전에는 Phase 2A candidate 저장소나 schema를 구현하지 않았다. 승인 후에는 첫 slice를 domain model + in-memory repository + idempotency 회귀로 제한했다. Snapshot Loader/source validation은 다음 slice로 남긴다.
@@ -141,6 +159,7 @@
 - 작업자 판단: G1은 옵션 (a) 순서 무관 정규화로 닫는다. source anchor의 출력 순서는 후보 의미가 아니라 provider formatting 흔들림이므로 identity에 포함하지 않는다.
 - 작업자 판단: duplicate anchor도 같은 이유로 identity에 포함하지 않는다. 순서나 중복이 의미가 되는 분석이 필요해지면 배열 위치가 아니라 명시적인 순서/역할 필드를 schema에 추가해야 한다.
 - 작업자 판단: extraction runner slice에서는 job/task 실패 상태 저장을 구현하지 않는다. 해당 상태 전이는 아직 계약이 없으므로 candidate write 부분 저장을 막는 사전 검증까지만 구현한다.
+- 작업자 판단: runner 경로는 Phase 2A source validation 계약의 public entrypoint이므로 resolver 없는 service를 허용하지 않는다. resolver optional은 pure domain/service 단위 테스트 경계에만 남긴다.
 
 ## Verification
 
@@ -171,8 +190,11 @@
 - runner focused: `python3 -m unittest tests.test_analysis_runner tests.test_analysis_extractor_schema tests.test_analysis_source_validation tests.test_analysis_phase2a -v` → 37개 통과.
 - runner focused: `python3 -m py_compile services/application/app/analysis/runner.py services/application/app/analysis/service.py services/application/app/analysis/repository.py tests/test_analysis_runner.py tests/test_analysis_phase2a.py` 통과.
 - 전체: `python3 -m unittest discover -s tests` → 260개 통과(27 skip).
+- Slice4 보강 focused: `python3 -m unittest tests.test_analysis_runner tests.test_analysis_extractor_schema tests.test_analysis_source_validation tests.test_analysis_phase2a -v` → 39개 통과.
+- Slice4 보강 focused: `python3 -m py_compile services/application/app/analysis/runner.py services/application/app/analysis/service.py tests/test_analysis_runner.py` 통과.
+- 전체: `python3 -m unittest discover -s tests` → 262개 통과(27 skip).
 
 ## Next steps
 
-- Analysis Mongo repository/persistence를 추가한다. candidate/needs_review 중심 Mongo 저장, job/task/candidate idempotency index, runner replay를 Mongo 양 경로에서 잠근다.
+- Analysis Mongo repository/persistence를 추가한다. candidate/needs_review 중심 Mongo 저장, job/task/candidate idempotency index, runner replay와 all-or-nothing 경계를 transaction/fallback 양 경로에서 잠근다.
 - 실제 llama.cpp endpoint가 준비되면 `scripts/benchmark_llm_provider.py`를 실행해 budget/retry production 기본 숫자를 확정한다.

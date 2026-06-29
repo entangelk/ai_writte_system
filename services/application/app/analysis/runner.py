@@ -22,6 +22,10 @@ class CandidateExtractor(Protocol):
         ...
 
 
+class AnalysisRunnerConfigurationError(ValueError):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class AnalysisExtractionRunResult:
     job: AnalysisJob
@@ -44,6 +48,10 @@ class AnalysisExtractionRunner:
         snapshot_loader: SnapshotLoader,
         extractor: CandidateExtractor,
     ) -> None:
+        if not analysis_service.source_validation_enabled:
+            raise AnalysisRunnerConfigurationError(
+                "AnalysisExtractionRunner requires source validation"
+            )
         self._analysis_service = analysis_service
         self._snapshot_loader = snapshot_loader
         self._extractor = extractor
@@ -65,13 +73,15 @@ class AnalysisExtractionRunner:
             snapshot_id=snapshot_id,
         )
         drafts = await self._extractor.extract(snapshot)
-        prepared = tuple(
-            self._prepare_draft(
-                project_id=project_id,
-                job_id=job_result.job.id,
-                draft=draft,
+        prepared = self._dedupe_prepared(
+            tuple(
+                self._prepare_draft(
+                    project_id=project_id,
+                    job_id=job_result.job.id,
+                    draft=draft,
+                )
+                for draft in drafts
             )
-            for draft in drafts
         )
 
         # Preflight every draft before writing any candidate. Job/task creation is
@@ -136,3 +146,12 @@ class AnalysisExtractionRunner:
             payload=draft.payload,
             source_anchors=draft.source_anchors,
         )
+
+    @staticmethod
+    def _dedupe_prepared(
+        prepared: tuple[_PreparedDraft, ...],
+    ) -> tuple[_PreparedDraft, ...]:
+        unique: dict[tuple[str, str], _PreparedDraft] = {}
+        for item in prepared:
+            unique.setdefault((item.task_id, item.draft.logical_key), item)
+        return tuple(unique.values())

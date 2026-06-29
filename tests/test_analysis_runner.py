@@ -11,6 +11,7 @@ from services.application.app.analysis.models import (
     CandidateSourceAnchor,
 )
 from services.application.app.analysis.runner import AnalysisExtractionRunner
+from services.application.app.analysis.runner import AnalysisRunnerConfigurationError
 from services.application.app.analysis.service import (
     AnalysisService,
     InMemoryAnalysisRepository,
@@ -25,6 +26,16 @@ from services.llm_gateway.app.provider import FakeLLMProvider, GenerationResult
 
 
 class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
+    def test_runner_requires_source_validating_analysis_service(self):
+        saved = self._saved_source()
+
+        with self.assertRaises(AnalysisRunnerConfigurationError):
+            AnalysisExtractionRunner(
+                analysis_service=AnalysisService(InMemoryAnalysisRepository()),
+                snapshot_loader=CoreSotSourceAdapter(saved["core_sot"]),
+                extractor=_StaticExtractor(()),
+            )
+
     async def test_runner_loads_extracts_validates_and_stores_candidates(self):
         saved = self._saved_source()
         analysis_service, analysis_repo, source_adapter = self._analysis(
@@ -120,6 +131,31 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(replay.candidates[0].id, first.candidates[0].id)
         self.assertEqual(len(analysis_repo.jobs), 1)
         self.assertEqual(len(analysis_repo.tasks), 1)
+        self.assertEqual(len(analysis_repo.candidates), 1)
+
+    async def test_runner_dedupes_duplicate_logical_key_in_same_run_result(self):
+        saved = self._saved_source()
+        analysis_service, analysis_repo, source_adapter = self._analysis(
+            saved["core_sot"]
+        )
+        draft = self._draft(
+            logical_key="character:min-a",
+            source_anchor=saved["anchors"]["min-a"],
+        )
+        runner = AnalysisExtractionRunner(
+            analysis_service=analysis_service,
+            snapshot_loader=source_adapter,
+            extractor=_StaticExtractor((draft, draft)),
+        )
+
+        result = await runner.run(
+            project_id=saved["project_id"],
+            snapshot_id=saved["snapshot_id"],
+            idempotency_key="analysis-run-1",
+        )
+
+        self.assertEqual(len(result.candidates), 1)
+        self.assertEqual(result.candidate_idempotent_replays, (False,))
         self.assertEqual(len(analysis_repo.candidates), 1)
 
     async def test_runner_preflights_all_drafts_before_candidate_writes(self):

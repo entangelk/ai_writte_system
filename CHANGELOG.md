@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-29 | Phase 2A runner 검증 후 보강(F1/F3) | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | Phase 2A extraction runner 구현 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | Phase 2A source_anchors set 의미론 보강 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | Phase 2A logical_key anchor-order idempotency 보강 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
@@ -51,6 +52,7 @@
 
 ### Fixed
 
+- Phase 2A runner 독립 검증의 non-blocking F1/F3을 보강했다. Runner는 source validation이 구성된 `AnalysisService`만 받으며, 같은 run의 duplicate `(task_id, logical_key)` draft는 result/write에서 1개로 정규화한다. F2(Mongo all-or-nothing)는 다음 persistence slice 검증 포인트로 SoT/plan/HANDOFF에 남겼다. focused 39개와 전체 discovery 262개(27 skip)를 통과했다.
 - 로컬 기본 Mongo가 인증을 요구하는 환경에서 `tests/test_core_sot_mongo.py` probe cleanup이 `Unauthorized`로 import 실패하던 문제를 보강했다. cleanup 실패도 Mongo 미가용으로 보고 skip하므로 infrastructure-free 전체 discovery가 다시 통과한다.
 - Phase 2A slice2 독립 검증 G1을 보강했다. `logical_key` derivation에서 같은 `source_anchors` set은 provider 출력 순서와 무관하게 같은 identity로 정규화하도록 SoT v1.6.2와 plan에 명시하고, extractor가 canonical anchor를 정렬하도록 수정했다. anchor set 순서 무관 회귀를 추가해 focused 31개와 전체 discovery 254개(27 skip)를 통과했다.
 - Phase 2A slice3 독립 검증의 non-blocking D1~D3을 보강했다. SoT 상단 계약 버전을 v1.6.3으로 갱신하고, `source_anchors` identity를 unordered set으로 명확화해 동일 anchor 중복을 parsed draft와 logical_key에서 하나로 정규화한다. ordered evidence chain이 필요해지면 `sequence`/`evidence_order` 같은 명시 필드로 후속 계약화한다. focused 32개와 전체 discovery 255개(27 skip)를 통과했다.
