@@ -7,6 +7,24 @@
 
 ## Completed work
 
+### Two committed Phase 2A changes independently verified
+
+- 변경 파일: `docs/verifications/2026-06-29/analysis_write_error_and_job_state_commits.md`, `docs/daily_logs/2026-06-29/work_log.md`, `HANDOFF.md`.
+- 사용자 요청에 따라 커밋 `23d6ef3`(candidate write-error duplicate-key 정밀화)와 `ebbbd14`(job 상태 전이 계약화 + slice 1)를 독립 검증했다.
+- `23d6ef3`은 SoT v1.6.8과 코드/테스트가 일치하고 focused/full/live Mongo 검증이 통과해 합격으로 판정했다.
+- `ebbbd14`는 core in-memory 상태 전이 동작과 수동 live Mongo 상태 영속성 smoke가 통과했지만, 닫힌 `failure_reason` enum 5종 중 2종의 committed regression과 skip-aware Mongo job-state round-trip/terminal replay regression이 아직 없어 조건부 합격으로 판정했다.
+- 효과: runner slice 2로 들어가기 전 slice 1 검증 잠금에서 먼저 닫아야 할 항목이 명확해졌다.
+
+### ebbbd14 조건부 합격의 두 차단 조건 폐쇄
+
+- 변경 파일: `tests/test_analysis_job_state.py`, `tests/test_analysis_mongo.py`, `docs/daily_logs/2026-06-29/work_log.md`, `HANDOFF.md`, `CHANGELOG.md`.
+- 검증 기록 `analysis_write_error_and_job_state_commits.md`의 ebbbd14 조건부 합격(차단 2종)을 닫았다.
+- 조건 1(`failure_reason` enum 5종 boundary matrix empty cell): `test_every_failure_reason_literal_round_trips`로 5종 전부(`snapshot_not_found`/`source_invalid`/`schema_invalid`/`provider_error`/`duplicate_conflict`)를 failed job에 기록·read-back 잠금하고, `test_non_enum_failure_reason_is_rejected`로 raw string 거절(over-strict guard)을 추가했다.
+- 조건 2(Mongo job-state round-trip/terminal replay committed regression 부재): `tests/test_analysis_mongo.py`에 skip-aware `test_job_state_round_trips_and_terminal_replay`를 추가해 `pending→running→failed`(reason/detail) 영속화·fresh-repo read-back·terminal job idempotent replay를 fallback/transaction 양 클래스에서 잠갔다. 수동 smoke를 durable regression으로 전환했다.
+- 비차단 Issue #3(문서가 "live 확인"을 committed regression처럼 읽힐 위험): 회귀가 committed되며 문구가 실제 잠금과 일치하게 됐고, work log/HANDOFF를 그에 맞게 갱신했다.
+- 검증: `python3 -m unittest tests.test_analysis_job_state` 12개 통과, 전체 discovery 289개 통과(35 skip). throwaway replica set(port 27025)에서 `tests.test_analysis_mongo` 8개(신규 job-state 2개 포함, fallback/transaction) 통과. 임시 컨테이너 정리.
+- 비보강 결정: 검증자가 기록에 올리지 않은 약한 냄새(`MongoAnalysisRepository.update_job`이 `replace_one` 결과 미확인)는 service가 `_require_job`로 존재/project를 먼저 확인하는 현재 public path에서 관찰되지 않는 방어성 항목이라, 추측적 error handling을 더하지 않고 유지했다.
+
 ### Phase 2A 착수 결정 브리프 추가
 
 - 변경 파일: `docs/plans/02-analysis-kickoff-decisions.md`, `docs/plans/README.md`, `HANDOFF.md`.

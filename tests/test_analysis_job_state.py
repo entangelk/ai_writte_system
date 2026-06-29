@@ -142,6 +142,38 @@ class AnalysisJobStateTests(unittest.TestCase):
         with self.assertRaises(AnalysisNotFound):
             service.mark_job_running(project_id="project-2", job_id=job.id)
 
+    def test_every_failure_reason_literal_round_trips(self):
+        # Boundary matrix: every closed failure_reason literal must be lockable
+        # on a failed job and survive read-back, including schema_invalid and
+        # duplicate_conflict which no other test exercises.
+        for reason in AnalysisJobFailureReason:
+            with self.subTest(reason=reason):
+                service, repo = _service()
+                job = _job(service)
+                service.mark_job_running(project_id="project-1", job_id=job.id)
+                failed = service.mark_job_failed(
+                    project_id="project-1",
+                    job_id=job.id,
+                    failure_reason=reason,
+                    failure_detail=f"detail::{reason}",
+                )
+                self.assertEqual(failed.failure_reason, reason)
+                persisted = repo.get_job(job.id)
+                self.assertEqual(persisted.failure_reason, reason)
+                self.assertEqual(persisted.failure_detail, f"detail::{reason}")
+
+    def test_non_enum_failure_reason_is_rejected(self):
+        # Over-strict guard: a raw string literal must not pass as a reason.
+        service, _ = _service()
+        job = _job(service)
+        service.mark_job_running(project_id="project-1", job_id=job.id)
+        with self.assertRaises(InvalidJobStateTransition):
+            service.mark_job_failed(
+                project_id="project-1",
+                job_id=job.id,
+                failure_reason="schema_invalid",  # type: ignore[arg-type]
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

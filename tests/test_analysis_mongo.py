@@ -26,6 +26,8 @@ from services.application.app.analysis.models import (
     AnalysisCandidateAction,
     AnalysisCandidateStatus,
     AnalysisCandidateType,
+    AnalysisJobFailureReason,
+    AnalysisJobStatus,
     AnalysisProvenance,
 )
 from services.application.app.analysis.service import AnalysisService
@@ -169,6 +171,48 @@ class _MongoAnalysisContractMixin:
         self.assertEqual(
             len(self.repo.list_candidates_for_job("project-1", job.id)),
             1,
+        )
+
+    def test_job_state_round_trips_and_terminal_replay(self):
+        job = self.service.create_job(
+            project_id="project-1",
+            snapshot_id="snapshot-1",
+            idempotency_key="analysis-run-1",
+        ).job
+        self.assertEqual(job.status, AnalysisJobStatus.PENDING)
+
+        self.service.mark_job_running(project_id="project-1", job_id=job.id)
+        self.service.mark_job_failed(
+            project_id="project-1",
+            job_id=job.id,
+            failure_reason=AnalysisJobFailureReason.PROVIDER_ERROR,
+            failure_detail="gateway timeout",
+        )
+
+        # Fresh repository read-back: the persisted job reconstructs its terminal
+        # status and failure fields (update_job + _job_doc/_to_job round-trip).
+        persisted = MongoAnalysisRepository(
+            self._client,
+            db_name=self._db_name,
+            use_transactions=self.use_transactions,
+        ).get_job(job.id)
+        self.assertEqual(persisted.status, AnalysisJobStatus.FAILED)
+        self.assertEqual(
+            persisted.failure_reason, AnalysisJobFailureReason.PROVIDER_ERROR
+        )
+        self.assertEqual(persisted.failure_detail, "gateway timeout")
+
+        # Terminal job is returned as an idempotent replay, never re-run.
+        replay = AnalysisService(self.repo).create_job(
+            project_id="project-1",
+            snapshot_id="snapshot-1",
+            idempotency_key="analysis-run-1",
+        )
+        self.assertTrue(replay.idempotent_replay)
+        self.assertEqual(replay.job.id, job.id)
+        self.assertEqual(replay.job.status, AnalysisJobStatus.FAILED)
+        self.assertEqual(
+            replay.job.failure_reason, AnalysisJobFailureReason.PROVIDER_ERROR
         )
 
     def test_candidate_batch_duplicate_rolls_back_partial_write(self):
