@@ -7,6 +7,24 @@
 
 ## Completed work
 
+### Phase 2A job-state runner 통합 커밋 독립 검증
+
+- 변경 파일: `docs/verifications/2026-06-29/analysis_job_state_runner_slice2.md`, `docs/daily_logs/2026-06-29/work_log.md`, `HANDOFF.md`.
+- 사용자 요청에 따라 커밋 `bffd850`의 job 상태 전이 runner 통합(slice 2)과 "slice 1/2/3 완료" 주장을 독립 검증했다.
+- 재현 결과: focused runner/job-state/Mongo/error-mapping 37개 OK(8 skip), 전체 discovery 296개 OK(35 skip), py_compile OK, throwaway Mongo replica set에서 `tests.test_analysis_mongo` 8개 OK, live runner 합성 smoke(succeeded 영속 + missing snapshot→`snapshot_not_found` failed 영속) OK.
+- 판정: 조건부 합격. 구현 동작과 live smoke는 맞고 이전 slice 1/3 차단 항목은 committed regression으로 닫혔지만, runner replay의 상태 무관성(기존 `failed`/`pending`/`running` job)과 base `InvalidAnalysisCandidate→schema_invalid` failure_reason 저장이 아직 직접 회귀로 잠기지 않았다.
+- 비차단 의심: runner failure detail 저장은 코드에 있으나 runner test에서 직접 assert하지 않고, 원본 예외 재던지기 exactness가 일부 경로에서 느슨하며, 실패 후 task setup 잔류가 "candidate all-or-nothing" 계약에는 맞지만 문구상 오해 여지가 있다.
+
+### slice 2 조건부 합격의 차단/비차단 항목 폐쇄
+
+- 변경 파일: `tests/test_analysis_runner.py`, `docs/plans/02-analysis-job-state-decisions.md`, `docs/system-contract-sot.md`(v1.6.10), `CHANGELOG.md`, `HANDOFF.md`, `docs/daily_logs/2026-06-29/work_log.md`.
+- 차단 1(replay 상태 무관성): `test_runner_replay_of_failed_job_does_not_reexecute`(first run을 bad anchor로 `failed`로 만든 뒤 같은 key replay가 extractor를 재호출하지 않고 failed job+빈 candidate 반환)와 `test_runner_replay_of_non_terminal_job_does_not_reexecute`(미리 만든 `pending` job을 runner가 extractor 호출 0회로 replay)를 추가했다. succeeded(기존)+failed+pending 3상태로 state-agnostic replay를 잠갔다.
+- 차단 2(base `InvalidAnalysisCandidate→schema_invalid` reason-lock): `test_runner_marks_failed_schema_invalid_on_base_validation`(빈 logical_key→base validation 실패)을 추가했다. base 분기를 제거하는 변이 시 이 test가 FAIL(→provider_error로 떨어짐)함을 백업/복원으로 증명했다.
+- 비차단(detail): `_assert_failed_reason`이 `job.failure_detail == str(raised.exception)`을 단정하도록 보강해 모든 실패 reason 테스트에서 detail 저장을 잠갔다.
+- 비차단(예외 exactness): snapshot/malformed/source 실패 테스트의 `expected_exc`를 `NotFound`/`AnalysisExtractionError`/`InvalidCandidateSource`로 좁혀 원본 예외 재던지기를 정확히 잠갔다.
+- 비차단(task 잔류 문구): all-or-nothing이 candidate write 한정이고 job/task 생성은 idempotent setup이라 실패 후에도 남을 수 있음(롤백 대상 아님)을 brief와 SoT(v1.6.10)에 명확화했다. 동작 변경 없음.
+- 검증: `tests.test_analysis_runner` 16개 통과, 전체 discovery 299개 통과(35 skip). throwaway replica set(port 27027)에서 `tests.test_analysis_mongo` 8개 통과. 임시 컨테이너 정리.
+
 ### Two committed Phase 2A changes independently verified
 
 - 변경 파일: `docs/verifications/2026-06-29/analysis_write_error_and_job_state_commits.md`, `docs/daily_logs/2026-06-29/work_log.md`, `HANDOFF.md`.

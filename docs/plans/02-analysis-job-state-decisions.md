@@ -7,7 +7,7 @@
 
 ## 현재 확정된 경계 (변경 없음)
 
-- Phase 2A runner는 동기 실행이며 candidate write는 **job 단위 all-or-nothing**이다(모든 draft가 logical_key/source/schema 검증을 통과한 뒤에만 저장 시작).
+- Phase 2A runner는 동기 실행이며 **candidate write가 all-or-nothing**이다(모든 draft가 logical_key/source/schema 검증을 통과한 뒤에만 저장 시작). all-or-nothing은 candidate 저장에 한정된다 — job/task 생성은 idempotent setup이라 실패 후에도 남을 수 있고, 같은 key 재시도는 같은 job/task를 재사용한다.
 - candidate는 `needs_review`로 고정 저장되고 Gate/사용자 승인 없이 canonical이 되지 않는다.
 - job 생성 idempotency는 `project_id + snapshot_id + idempotency_key`다.
 - candidate retry identity는 `project_id + task_id + logical_key`이고, task 재사용 key는 `project_id + job_id + candidate_type`다.
@@ -60,7 +60,7 @@
 
 - `failure_detail`은 사람이 읽는 진단 문자열이며 계약상 형식을 강제하지 않는다.
 - `succeeded`/비terminal 상태에서는 `failure_reason`/`failure_detail`이 비어 있어야 한다(설정 시 불법).
-- 실패는 성공으로 위장하지 않는다: 실패 시 candidate는 저장되지 않고 job은 `failed`로만 닫힌다.
+- 실패는 성공으로 위장하지 않는다: 실패 시 candidate는 저장되지 않고 job은 `failed`로만 닫힌다. 단 all-or-nothing은 candidate write 한정이며, 실패 지점 이전에 만들어진 job/task setup은 idempotent라 남을 수 있다(롤백 대상 아님).
 
 ## 구현 슬라이스 (승인된 순서)
 

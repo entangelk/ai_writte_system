@@ -4,6 +4,7 @@ import unittest
 from services.application.app.analysis.extractor import (
     AnalysisCandidateDraft,
     AnalysisExtractionAdapter,
+    AnalysisExtractionError,
 )
 from services.application.app.analysis.models import (
     AnalysisCandidateType,
@@ -21,11 +22,13 @@ from services.application.app.analysis.service import (
     AnalysisService,
     InMemoryAnalysisRepository,
     InvalidAnalysisCandidate,
+    InvalidCandidateSource,
 )
 from services.application.app.analysis.source import CoreSotSourceAdapter
 from services.application.app.core_sot.service import (
     CoreSotService,
     InMemoryCoreSotRepository,
+    NotFound,
 )
 from services.llm_gateway.app.provider import FakeLLMProvider, GenerationResult
 
@@ -313,6 +316,7 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
             extractor=_StaticExtractor(()),
             snapshot_id="missing-snapshot",
             expected=AnalysisJobFailureReason.SNAPSHOT_NOT_FOUND,
+            expected_exc=NotFound,
         )
 
     async def test_runner_marks_failed_schema_invalid_on_malformed_provider(self):
@@ -329,6 +333,25 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
                 )
             ),
             expected=AnalysisJobFailureReason.SCHEMA_INVALID,
+            expected_exc=AnalysisExtractionError,
+        )
+
+    async def test_runner_marks_failed_schema_invalid_on_base_validation(self):
+        # Empty logical_key raises plain InvalidAnalysisCandidate (not source,
+        # not extraction): locks the base -> schema_invalid mapping branch.
+        saved = self._saved_source()
+        await self._assert_failed_reason(
+            saved=saved,
+            extractor=_StaticExtractor(
+                (
+                    self._draft(
+                        logical_key="",
+                        source_anchor=saved["anchors"]["min-a"],
+                    ),
+                )
+            ),
+            expected=AnalysisJobFailureReason.SCHEMA_INVALID,
+            expected_exc=InvalidAnalysisCandidate,
         )
 
     async def test_runner_marks_failed_source_invalid_on_anchor_mismatch(self):
@@ -340,6 +363,7 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
                 (self._draft(logical_key="character:min-a", source_anchor=bad_anchor),)
             ),
             expected=AnalysisJobFailureReason.SOURCE_INVALID,
+            expected_exc=InvalidCandidateSource,
         )
 
     async def test_runner_marks_failed_provider_error_on_extract_exception(self):
@@ -400,7 +424,7 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
             extractor=extractor,
         )
 
-        with self.assertRaises(expected_exc):
+        with self.assertRaises(expected_exc) as raised:
             await runner.run(
                 project_id=saved["project_id"],
                 snapshot_id=snapshot_id or saved["snapshot_id"],
@@ -410,7 +434,83 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
         job = next(iter(analysis_repo.jobs.values()))
         self.assertEqual(job.status, AnalysisJobStatus.FAILED)
         self.assertEqual(job.failure_reason, expected)
+        # failure_detail is the stringified original exception (re-raised as-is).
+        self.assertEqual(job.failure_detail, str(raised.exception))
         self.assertEqual(len(analysis_repo.candidates), 0)
+
+    async def test_runner_replay_of_failed_job_does_not_reexecute(self):
+        # Existing-job replay is state-agnostic: a failed job is returned as-is
+        # and never re-run.
+        saved = self._saved_source()
+        analysis_service, analysis_repo, source_adapter = self._analysis(
+            saved["core_sot"]
+        )
+        bad_anchor = {**saved["anchors"]["min-a"], "quote": "잘못된 인용"}
+        extractor = _CountingExtractor(
+            (self._draft(logical_key="character:min-a", source_anchor=bad_anchor),)
+        )
+        runner = AnalysisExtractionRunner(
+            analysis_service=analysis_service,
+            snapshot_loader=source_adapter,
+            extractor=extractor,
+        )
+
+        with self.assertRaises(InvalidCandidateSource):
+            await runner.run(
+                project_id=saved["project_id"],
+                snapshot_id=saved["snapshot_id"],
+                idempotency_key="analysis-run-1",
+            )
+
+        replay = await runner.run(
+            project_id=saved["project_id"],
+            snapshot_id=saved["snapshot_id"],
+            idempotency_key="analysis-run-1",
+        )
+
+        self.assertEqual(extractor.calls, 1)  # failed job is not re-extracted
+        self.assertTrue(replay.job_idempotent_replay)
+        self.assertEqual(replay.job.status, AnalysisJobStatus.FAILED)
+        self.assertEqual(
+            replay.job.failure_reason, AnalysisJobFailureReason.SOURCE_INVALID
+        )
+        self.assertEqual(replay.candidates, ())
+
+    async def test_runner_replay_of_non_terminal_job_does_not_reexecute(self):
+        # A pre-existing pending/running job is also replayed without re-running.
+        saved = self._saved_source()
+        analysis_service, analysis_repo, source_adapter = self._analysis(
+            saved["core_sot"]
+        )
+        analysis_service.create_job(
+            project_id=saved["project_id"],
+            snapshot_id=saved["snapshot_id"],
+            idempotency_key="analysis-run-1",
+        )  # pending job exists before the runner is invoked
+        extractor = _CountingExtractor(
+            (
+                self._draft(
+                    logical_key="character:min-a",
+                    source_anchor=saved["anchors"]["min-a"],
+                ),
+            )
+        )
+        runner = AnalysisExtractionRunner(
+            analysis_service=analysis_service,
+            snapshot_loader=source_adapter,
+            extractor=extractor,
+        )
+
+        result = await runner.run(
+            project_id=saved["project_id"],
+            snapshot_id=saved["snapshot_id"],
+            idempotency_key="analysis-run-1",
+        )
+
+        self.assertEqual(extractor.calls, 0)  # never extracted
+        self.assertTrue(result.job_idempotent_replay)
+        self.assertEqual(result.job.status, AnalysisJobStatus.PENDING)
+        self.assertEqual(result.candidates, ())
 
     def _analysis(self, core_sot):
         repo = InMemoryAnalysisRepository()
