@@ -147,6 +147,16 @@
 - 검증: 전체 discovery 285개 통과(33 skip). throwaway replica set(port 27023)에서 기존 live `tests.test_analysis_mongo` 6개 무손상 + 수동 live 체크로 pending→running→failed 영속화(reason/detail) 및 terminal job idempotent replay를 확인. 임시 컨테이너 정리.
 - 미완(다음 slice): runner 통합(slice 2 — 새 job만 실행하며 `pending→running→terminal` 전이, 실패 지점→reason 매핑)과 skip-aware live 상태 영속성 회귀(slice 3)는 아직이다. 현재 runner는 job 상태를 전이시키지 않아 runner로 만든 job은 `pending`에 머문다.
 
+### Phase 2A job 상태 전이 runner 통합 (slice 2)
+
+- 변경 파일: `services/application/app/analysis/runner.py`, `.../service.py`, `.../repository.py`, `.../mongo_repository.py`, `tests/test_analysis_runner.py`, `HANDOFF.md`, `CHANGELOG.md`.
+- 결정 브리프 `02-analysis-job-state-decisions.md` slice 2를 구현했다. runner는 `create_job`이 새 job(`pending`)을 만들 때만 실행한다: `mark_job_running` → load_snapshot → extract → preflight validate → record_candidates → `mark_job_succeeded`. 기존 job(idempotent replay)은 재실행하지 않고 `list_candidates`로 저장된 candidate를 반환한다.
+- 실패 처리: try/except로 실패 지점을 닫힌 `failure_reason`으로 매핑(`NotFound`→`snapshot_not_found`, `AnalysisExtractionError`→`schema_invalid`, `InvalidCandidateSource`→`source_invalid`, base `InvalidAnalysisCandidate`→`schema_invalid`, `DuplicateAnalysisCandidateRequest`→`duplicate_conflict`, 나머지→`provider_error`)한 뒤 `mark_job_failed`로 닫고 **원본 예외를 재던진다**. 실패는 성공으로 위장하지 않고 candidate를 저장하지 않는다.
+- source vs schema 구분을 위해 service에 `InvalidCandidateSource(InvalidAnalysisCandidate)`를 추가하고 anchor 검증(`_validate_source_anchors` + anchors 필수/`source_ref_ids` 불일치) raise를 그것으로 재분류했다. base subclass라 기존 `assertRaises(InvalidAnalysisCandidate)` 회귀는 그대로 통과한다.
+- layering: 기존 mongo_repository의 `DuplicateAnalysisCandidateRequest`를 storage 경계인 `repository.py`로 옮기고 mongo에서 re-export했다(테스트 import 호환). runner가 mongo 구현이 아닌 repository 경계만 의존하게 했다.
+- 회귀: runner 13종(succeeded 전이 + 영속, replay가 extractor를 1회만 호출, 5개 실패 지점이 각 reason으로 `failed`+candidate 0). `InvalidCandidateSource` 분기를 제거하는 변이 시 source_invalid test가 FAIL함을 백업/복원으로 증명(git checkout 대신 파일 백업 사용).
+- 검증: 전체 discovery 296개 통과(35 skip). throwaway replica set(port 27026)에서 live runner 합성 smoke(succeeded 영속 + unknown snapshot→`snapshot_not_found` `failed` 영속)를 확인했다. 임시 컨테이너 정리. 이로써 job 상태 전이 slice 1/2/3 완료.
+
 ### Repository ignore hygiene
 
 - 변경 파일: `.gitignore`, `HANDOFF.md`.

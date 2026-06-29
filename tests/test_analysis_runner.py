@@ -7,8 +7,13 @@ from services.application.app.analysis.extractor import (
 )
 from services.application.app.analysis.models import (
     AnalysisCandidateType,
+    AnalysisJobFailureReason,
+    AnalysisJobStatus,
     AnalysisProvenance,
     CandidateSourceAnchor,
+)
+from services.application.app.analysis.repository import (
+    DuplicateAnalysisCandidateRequest,
 )
 from services.application.app.analysis.runner import AnalysisExtractionRunner
 from services.application.app.analysis.runner import AnalysisRunnerConfigurationError
@@ -235,6 +240,178 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(analysis_repo.candidates), 0)
 
+    async def test_runner_marks_job_succeeded_on_success(self):
+        saved = self._saved_source()
+        analysis_service, analysis_repo, source_adapter = self._analysis(
+            saved["core_sot"]
+        )
+        runner = AnalysisExtractionRunner(
+            analysis_service=analysis_service,
+            snapshot_loader=source_adapter,
+            extractor=_StaticExtractor(
+                (
+                    self._draft(
+                        logical_key="character:min-a",
+                        source_anchor=saved["anchors"]["min-a"],
+                    ),
+                )
+            ),
+        )
+
+        result = await runner.run(
+            project_id=saved["project_id"],
+            snapshot_id=saved["snapshot_id"],
+            idempotency_key="analysis-run-1",
+        )
+
+        self.assertEqual(result.job.status, AnalysisJobStatus.SUCCEEDED)
+        self.assertIsNone(result.job.failure_reason)
+        self.assertEqual(
+            analysis_repo.get_job(result.job.id).status,
+            AnalysisJobStatus.SUCCEEDED,
+        )
+
+    async def test_runner_replay_does_not_reexecute_extraction(self):
+        saved = self._saved_source()
+        analysis_service, analysis_repo, source_adapter = self._analysis(
+            saved["core_sot"]
+        )
+        extractor = _CountingExtractor(
+            (
+                self._draft(
+                    logical_key="character:min-a",
+                    source_anchor=saved["anchors"]["min-a"],
+                ),
+            )
+        )
+        runner = AnalysisExtractionRunner(
+            analysis_service=analysis_service,
+            snapshot_loader=source_adapter,
+            extractor=extractor,
+        )
+
+        first = await runner.run(
+            project_id=saved["project_id"],
+            snapshot_id=saved["snapshot_id"],
+            idempotency_key="analysis-run-1",
+        )
+        replay = await runner.run(
+            project_id=saved["project_id"],
+            snapshot_id=saved["snapshot_id"],
+            idempotency_key="analysis-run-1",
+        )
+
+        self.assertEqual(extractor.calls, 1)  # replay must not re-extract
+        self.assertTrue(replay.job_idempotent_replay)
+        self.assertEqual(replay.job.status, AnalysisJobStatus.SUCCEEDED)
+        self.assertEqual(replay.candidate_idempotent_replays, (True,))
+        self.assertEqual(replay.candidates[0].id, first.candidates[0].id)
+        self.assertEqual(len(analysis_repo.candidates), 1)
+
+    async def test_runner_marks_failed_snapshot_not_found(self):
+        await self._assert_failed_reason(
+            extractor=_StaticExtractor(()),
+            snapshot_id="missing-snapshot",
+            expected=AnalysisJobFailureReason.SNAPSHOT_NOT_FOUND,
+        )
+
+    async def test_runner_marks_failed_schema_invalid_on_malformed_provider(self):
+        await self._assert_failed_reason(
+            extractor=AnalysisExtractionAdapter(
+                FakeLLMProvider(
+                    [
+                        GenerationResult(
+                            model="fake-gemma",
+                            content="not json",
+                            finish_reason="stop",
+                        )
+                    ]
+                )
+            ),
+            expected=AnalysisJobFailureReason.SCHEMA_INVALID,
+        )
+
+    async def test_runner_marks_failed_source_invalid_on_anchor_mismatch(self):
+        saved = self._saved_source()
+        bad_anchor = {**saved["anchors"]["min-a"], "quote": "잘못된 인용"}
+        await self._assert_failed_reason(
+            saved=saved,
+            extractor=_StaticExtractor(
+                (self._draft(logical_key="character:min-a", source_anchor=bad_anchor),)
+            ),
+            expected=AnalysisJobFailureReason.SOURCE_INVALID,
+        )
+
+    async def test_runner_marks_failed_provider_error_on_extract_exception(self):
+        await self._assert_failed_reason(
+            extractor=_RaisingExtractor(RuntimeError("gateway down")),
+            expected=AnalysisJobFailureReason.PROVIDER_ERROR,
+            expected_exc=RuntimeError,
+        )
+
+    async def test_runner_marks_failed_duplicate_conflict_on_storage_duplicate(self):
+        saved = self._saved_source()
+        repo = _DuplicateOnWriteRepo()
+        source_adapter = CoreSotSourceAdapter(saved["core_sot"])
+        analysis_service = AnalysisService(repo, source_ref_resolver=source_adapter)
+        runner = AnalysisExtractionRunner(
+            analysis_service=analysis_service,
+            snapshot_loader=source_adapter,
+            extractor=_StaticExtractor(
+                (
+                    self._draft(
+                        logical_key="character:min-a",
+                        source_anchor=saved["anchors"]["min-a"],
+                    ),
+                )
+            ),
+        )
+
+        with self.assertRaises(DuplicateAnalysisCandidateRequest):
+            await runner.run(
+                project_id=saved["project_id"],
+                snapshot_id=saved["snapshot_id"],
+                idempotency_key="analysis-run-1",
+            )
+
+        job = next(iter(repo.jobs.values()))
+        self.assertEqual(job.status, AnalysisJobStatus.FAILED)
+        self.assertEqual(
+            job.failure_reason, AnalysisJobFailureReason.DUPLICATE_CONFLICT
+        )
+        self.assertEqual(len(repo.candidates), 0)
+
+    async def _assert_failed_reason(
+        self,
+        *,
+        extractor,
+        expected,
+        saved=None,
+        snapshot_id=None,
+        expected_exc=Exception,
+    ):
+        saved = saved or self._saved_source()
+        analysis_service, analysis_repo, source_adapter = self._analysis(
+            saved["core_sot"]
+        )
+        runner = AnalysisExtractionRunner(
+            analysis_service=analysis_service,
+            snapshot_loader=source_adapter,
+            extractor=extractor,
+        )
+
+        with self.assertRaises(expected_exc):
+            await runner.run(
+                project_id=saved["project_id"],
+                snapshot_id=snapshot_id or saved["snapshot_id"],
+                idempotency_key="analysis-run-1",
+            )
+
+        job = next(iter(analysis_repo.jobs.values()))
+        self.assertEqual(job.status, AnalysisJobStatus.FAILED)
+        self.assertEqual(job.failure_reason, expected)
+        self.assertEqual(len(analysis_repo.candidates), 0)
+
     def _analysis(self, core_sot):
         repo = InMemoryAnalysisRepository()
         source_adapter = CoreSotSourceAdapter(core_sot)
@@ -328,6 +505,29 @@ class _StaticExtractor:
 
     async def extract(self, _snapshot):
         return self._drafts
+
+
+class _CountingExtractor:
+    def __init__(self, drafts):
+        self._drafts = drafts
+        self.calls = 0
+
+    async def extract(self, _snapshot):
+        self.calls += 1
+        return self._drafts
+
+
+class _RaisingExtractor:
+    def __init__(self, error):
+        self._error = error
+
+    async def extract(self, _snapshot):
+        raise self._error
+
+
+class _DuplicateOnWriteRepo(InMemoryAnalysisRepository):
+    def put_candidates(self, candidates):
+        raise DuplicateAnalysisCandidateRequest("duplicate candidate request")
 
 
 if __name__ == "__main__":

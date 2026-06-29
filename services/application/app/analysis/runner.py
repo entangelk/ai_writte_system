@@ -5,16 +5,28 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from services.application.app.analysis.extractor import AnalysisCandidateDraft
+from services.application.app.analysis.extractor import (
+    AnalysisCandidateDraft,
+    AnalysisExtractionError,
+)
 from services.application.app.analysis.models import (
     AnalysisCandidate,
     AnalysisCandidateAction,
     AnalysisCandidateRecordRequest,
     AnalysisJob,
+    AnalysisJobFailureReason,
     SnapshotText,
 )
-from services.application.app.analysis.service import AnalysisService
+from services.application.app.analysis.repository import (
+    DuplicateAnalysisCandidateRequest,
+)
+from services.application.app.analysis.service import (
+    AnalysisService,
+    InvalidAnalysisCandidate,
+    InvalidCandidateSource,
+)
 from services.application.app.analysis.source import SnapshotLoader
+from services.application.app.core_sot.service import NotFound
 
 
 class CandidateExtractor(Protocol):
@@ -68,39 +80,86 @@ class AnalysisExtractionRunner:
             snapshot_id=snapshot_id,
             idempotency_key=idempotency_key,
         )
-        snapshot = self._snapshot_loader.load_snapshot(
-            project_id=project_id,
-            snapshot_id=snapshot_id,
-        )
-        drafts = await self._extractor.extract(snapshot)
-        prepared = self._dedupe_prepared(
-            tuple(
-                self._prepare_draft(
-                    project_id=project_id,
-                    job_id=job_result.job.id,
-                    draft=draft,
-                )
-                for draft in drafts
+        if job_result.idempotent_replay:
+            # Existing job (any state) is a replay: never re-run. Return the
+            # already-stored candidates as-is.
+            stored = self._analysis_service.list_candidates(
+                project_id=project_id, job_id=job_result.job.id
             )
+            return AnalysisExtractionRunResult(
+                job=job_result.job,
+                candidates=stored,
+                job_idempotent_replay=True,
+                candidate_idempotent_replays=tuple(True for _ in stored),
+            )
+
+        job_id = job_result.job.id
+        self._analysis_service.mark_job_running(
+            project_id=project_id, job_id=job_id
         )
+        try:
+            snapshot = self._snapshot_loader.load_snapshot(
+                project_id=project_id,
+                snapshot_id=snapshot_id,
+            )
+            drafts = await self._extractor.extract(snapshot)
+            prepared = self._dedupe_prepared(
+                tuple(
+                    self._prepare_draft(
+                        project_id=project_id,
+                        job_id=job_id,
+                        draft=draft,
+                    )
+                    for draft in drafts
+                )
+            )
 
-        # Preflight every draft before writing any candidate. Job/task creation is
-        # idempotent setup; candidate persistence remains all-or-nothing here.
-        for item in prepared:
-            self._validate_draft(project_id=project_id, item=item)
+            # Preflight every draft before writing any candidate. Job/task
+            # creation is idempotent setup; candidate persistence stays
+            # all-or-nothing here.
+            for item in prepared:
+                self._validate_draft(project_id=project_id, item=item)
 
-        recorded = self._analysis_service.record_candidates(
-            project_id=project_id,
-            requests=tuple(self._record_request(item) for item in prepared),
+            recorded = self._analysis_service.record_candidates(
+                project_id=project_id,
+                requests=tuple(self._record_request(item) for item in prepared),
+            )
+        except Exception as exc:
+            self._analysis_service.mark_job_failed(
+                project_id=project_id,
+                job_id=job_id,
+                failure_reason=self._failure_reason(exc),
+                failure_detail=str(exc),
+            )
+            raise
+
+        succeeded = self._analysis_service.mark_job_succeeded(
+            project_id=project_id, job_id=job_id
         )
         return AnalysisExtractionRunResult(
-            job=job_result.job,
+            job=succeeded,
             candidates=tuple(result.candidate for result in recorded),
-            job_idempotent_replay=job_result.idempotent_replay,
+            job_idempotent_replay=False,
             candidate_idempotent_replays=tuple(
                 result.idempotent_replay for result in recorded
             ),
         )
+
+    @staticmethod
+    def _failure_reason(exc: Exception) -> AnalysisJobFailureReason:
+        # Map each runner failure point to its closed failure_reason. Order
+        # matters: InvalidCandidateSource is a subclass of InvalidAnalysisCandidate.
+        if isinstance(exc, NotFound):
+            return AnalysisJobFailureReason.SNAPSHOT_NOT_FOUND
+        if isinstance(exc, AnalysisExtractionError):
+            return AnalysisJobFailureReason.SCHEMA_INVALID
+        if isinstance(exc, InvalidCandidateSource):
+            return AnalysisJobFailureReason.SOURCE_INVALID
+        if isinstance(exc, InvalidAnalysisCandidate):
+            return AnalysisJobFailureReason.SCHEMA_INVALID
+        if isinstance(exc, DuplicateAnalysisCandidateRequest):
+            return AnalysisJobFailureReason.DUPLICATE_CONFLICT
+        return AnalysisJobFailureReason.PROVIDER_ERROR
 
     def _prepare_draft(
         self,

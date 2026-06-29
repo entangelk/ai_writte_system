@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-29 | Phase 2A job 상태 전이 runner 통합(slice 2): 새 job만 실행·실패 지점→failure_reason 매핑·replay 비재실행 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | Phase 2A job-state slice 1 검증 조건 폐쇄(failure_reason enum 5종 + skip-aware live job-state 회귀) | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | SoT v1.6.9: Phase 2A job 상태 전이/실패 저장 계약 승인 + 상태 전이 slice 1 구현 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | SoT v1.6.8: Phase 2A candidate write-error 분류 정밀화(duplicate-key 한정 매핑) | [work log](docs/daily_logs/2026-06-29/work_log.md) |

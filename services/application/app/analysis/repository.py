@@ -13,6 +13,14 @@ from services.application.app.analysis.models import (
 )
 
 
+class DuplicateAnalysisCandidateRequest(RuntimeError):
+    """Raised when a candidate idempotency key is already committed.
+
+    Defined at the repository boundary so storage-agnostic callers (service,
+    runner) can map it without depending on a concrete adapter.
+    """
+
+
 class AnalysisRepository(Protocol):
     def next_job_id(self) -> str: ...
 

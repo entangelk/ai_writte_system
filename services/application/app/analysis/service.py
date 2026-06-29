@@ -43,6 +43,10 @@ class InvalidAnalysisCandidate(AnalysisError):
     pass
 
 
+class InvalidCandidateSource(InvalidAnalysisCandidate):
+    """Candidate rejected for a source_ref/anchor problem (vs payload schema)."""
+
+
 class InvalidJobStateTransition(AnalysisError):
     pass
 
@@ -441,14 +445,14 @@ class AnalysisService:
         normalized_confidence = self._validate_confidence(confidence)
         normalized_source_ref_ids = self._validate_source_ref_ids(source_ref_ids)
         if self._source_ref_resolver is not None and source_anchors is None:
-            raise InvalidAnalysisCandidate("source_anchors are required")
+            raise InvalidCandidateSource("source_anchors are required")
         if source_anchors is not None:
             anchor_source_ref_ids = self._validate_source_anchors(
                 project_id=project_id,
                 source_anchors=source_anchors,
             )
             if anchor_source_ref_ids != normalized_source_ref_ids:
-                raise InvalidAnalysisCandidate(
+                raise InvalidCandidateSource(
                     "source_anchors must match source_ref_ids"
                 )
         return (
@@ -535,20 +539,20 @@ class AnalysisService:
         source_anchors: Sequence[CandidateSourceAnchor],
     ) -> tuple[str, ...]:
         if self._source_ref_resolver is None:
-            raise InvalidAnalysisCandidate("source_ref resolver is required")
+            raise InvalidCandidateSource("source_ref resolver is required")
         if isinstance(source_anchors, (str, bytes)) or not source_anchors:
-            raise InvalidAnalysisCandidate("source_anchors are required")
+            raise InvalidCandidateSource("source_anchors are required")
 
         source_ref_ids: list[str] = []
         for anchor in source_anchors:
             if not isinstance(anchor, CandidateSourceAnchor):
-                raise InvalidAnalysisCandidate("invalid source anchor")
+                raise InvalidCandidateSource("invalid source anchor")
             source_ref = self._source_ref_resolver.get_source_ref(
                 project_id=project_id,
                 source_ref_id=anchor.source_ref_id,
             )
             if source_ref is None:
-                raise InvalidAnalysisCandidate("source_ref not found")
+                raise InvalidCandidateSource("source_ref not found")
             if (
                 source_ref.project_id != project_id
                 or source_ref.start_offset != anchor.start_offset
@@ -556,7 +560,7 @@ class AnalysisService:
                 or source_ref.quote != anchor.quote
                 or source_ref.content_hash != anchor.content_hash
             ):
-                raise InvalidAnalysisCandidate("source_ref anchor mismatch")
+                raise InvalidCandidateSource("source_ref anchor mismatch")
             source_ref_ids.append(anchor.source_ref_id)
         return tuple(source_ref_ids)
 

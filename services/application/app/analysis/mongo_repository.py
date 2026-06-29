@@ -26,6 +26,9 @@ from services.application.app.analysis.models import (
     AnalysisTask,
     immutable_payload,
 )
+from services.application.app.analysis.repository import (
+    DuplicateAnalysisCandidateRequest,
+)
 from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
 
 _DUPLICATE_KEY_CODE = 11000
@@ -52,10 +55,6 @@ def _is_duplicate_key_error(exc: PyMongoError) -> bool:
 
 class MongoAnalysisRepositorySetupError(RuntimeError):
     """Raised when MongoDB cannot install required analysis indexes."""
-
-
-class DuplicateAnalysisCandidateRequest(RuntimeError):
-    """Raised when a candidate idempotency key is already committed."""
 
 
 class MongoAnalysisRepository:
