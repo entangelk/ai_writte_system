@@ -63,7 +63,7 @@ NaN confidence는 `0.0 <= confidence <= 1.0` 범위 밖이므로 거절한다.
 
 이유: 같은 span을 여러 후보가 참조할 수 있고, source_ref는 immutable snapshot 주석에 가깝다. 원시 `create_source_ref`에 dedupe를 넣으면 후보별 trace와 재시도 의미가 섞인다.
 
-candidate retry identity는 `project_id + task_id + logical_key`다. `logical_key`는 비어 있지 않은 문자열이며, schema/extraction slice의 기본 derivation은 `candidate_type + payload + source_anchors` canonical JSON의 SHA-256이다.
+candidate retry identity는 `project_id + task_id + logical_key`다. `logical_key`는 비어 있지 않은 문자열이며, schema/extraction slice의 기본 derivation은 `candidate_type + payload + source_anchors` canonical JSON의 SHA-256이다. 같은 `source_anchors` set은 provider 출력 순서와 무관하게 같은 identity로 정규화한다.
 
 검증 방향:
 
@@ -98,5 +98,5 @@ candidate retry identity는 `project_id + task_id + logical_key`다. `logical_ke
 - 모든 Phase 2A candidate는 `needs_review`로 저장하고 자동 승격은 미룬다.
 - `create_source_ref` primitive는 non-idempotent로 유지하고 candidate/job 저장층에서 retry idempotency를 맡는다.
 - candidate retry identity는 `project_id + task_id + logical_key`이며, `logical_key`는 비어 있지 않은 문자열이다.
-- schema/extraction slice의 logical_key derivation은 `candidate_type + payload + source_anchors`의 canonical JSON SHA-256이다. 같은 provider retry payload는 같은 key가 되고, 같은 인물의 다른 관찰처럼 payload나 anchor가 다르면 별도 candidate가 된다.
+- schema/extraction slice의 logical_key derivation은 `candidate_type + payload + source_anchors`의 canonical JSON SHA-256이다. 같은 provider retry payload는 같은 key가 되고, 같은 인물의 다른 관찰처럼 payload나 anchor set이 다르면 별도 candidate가 된다. 같은 anchor set의 순서 차이는 identity 차이가 아니다.
 - Phase 2A와 2B는 별도 milestone로 분리한다.

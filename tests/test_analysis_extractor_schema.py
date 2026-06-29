@@ -25,16 +25,18 @@ def _candidate(candidate_type, payload):
         "candidate_type": candidate_type,
         "provenance": "source_observed",
         "confidence": 0.8,
-        "source_anchors": [
-            {
-                "source_ref_id": "source-ref-1",
-                "start_offset": 0,
-                "end_offset": 2,
-                "quote": "민아",
-                "content_hash": "hash-1",
-            }
-        ],
+        "source_anchors": [_anchor("source-ref-1", 0, 2, "민아")],
         "payload": payload,
+    }
+
+
+def _anchor(source_ref_id, start_offset, end_offset, quote):
+    return {
+        "source_ref_id": source_ref_id,
+        "start_offset": start_offset,
+        "end_offset": end_offset,
+        "quote": quote,
+        "content_hash": "hash-1",
     }
 
 
@@ -264,6 +266,38 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(replay.logical_key, first.logical_key)
         self.assertNotEqual(distinct.logical_key, first.logical_key)
+
+    def test_logical_key_treats_same_anchor_set_as_order_insensitive(self):
+        """Under/over guard: provider anchor ordering does not duplicate candidates."""
+        anchors = [
+            _anchor("source-ref-1", 0, 2, "민아"),
+            _anchor("source-ref-2", 3, 5, "편지"),
+        ]
+        first = _candidate(
+            "character_observation",
+            {"name": "민아", "observation": "민아가 편지를 발견했다."},
+        )
+        replay = _candidate(
+            "character_observation",
+            {"name": "민아", "observation": "민아가 편지를 발견했다."},
+        )
+        distinct = _candidate(
+            "character_observation",
+            {"name": "민아", "observation": "민아가 편지를 발견했다."},
+        )
+        first["source_anchors"] = anchors
+        replay["source_anchors"] = tuple(reversed(anchors))
+        distinct["source_anchors"] = [
+            _anchor("source-ref-1", 0, 2, "민아"),
+            _anchor("source-ref-3", 6, 8, "창고"),
+        ]
+
+        first_draft, replay_draft, distinct_draft = parse_analysis_extraction(
+            _content([first, replay, distinct])
+        )
+
+        self.assertEqual(replay_draft.logical_key, first_draft.logical_key)
+        self.assertNotEqual(distinct_draft.logical_key, first_draft.logical_key)
 
 
 if __name__ == "__main__":

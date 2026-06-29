@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-29 | Phase 2A logical_key anchor-order idempotency 보강 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | Phase 2A 최소 taxonomy schema + fake-provider extraction adapter 구현 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | Phase 2A Snapshot Loader + source validation 구현 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | Phase 2A domain model + in-memory repository 구현 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
@@ -48,6 +49,7 @@
 ### Fixed
 
 - 로컬 기본 Mongo가 인증을 요구하는 환경에서 `tests/test_core_sot_mongo.py` probe cleanup이 `Unauthorized`로 import 실패하던 문제를 보강했다. cleanup 실패도 Mongo 미가용으로 보고 skip하므로 infrastructure-free 전체 discovery가 다시 통과한다.
+- Phase 2A slice2 독립 검증 G1을 보강했다. `logical_key` derivation에서 같은 `source_anchors` set은 provider 출력 순서와 무관하게 같은 identity로 정규화하도록 SoT v1.6.2와 plan에 명시하고, extractor가 canonical anchor를 정렬하도록 수정했다. anchor set 순서 무관 회귀를 추가해 focused 31개와 전체 discovery 254개(27 skip)를 통과했다.
 
 ## 2026-06-28
 

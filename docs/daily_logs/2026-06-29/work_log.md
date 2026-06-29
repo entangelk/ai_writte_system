@@ -59,6 +59,14 @@
 - adapter는 candidate마다 approved type/provenance, confidence range, source_anchors shape/offset, taxonomy payload schema를 검증한다. schema 오류는 public adapter 오류인 `AnalysisExtractionError`로 통일한다.
 - `logical_key` derivation을 `candidate_type + payload + source_anchors` canonical JSON SHA-256으로 잠갔다. 같은 provider retry payload는 같은 key가 되고, 같은 인물의 다른 관찰처럼 payload나 anchor가 다르면 별도 candidate가 된다.
 
+### Phase 2A Slice2 독립 검증 G1 보강
+
+- 변경 파일: `services/application/app/analysis/extractor.py`, `tests/test_analysis_extractor_schema.py`, `docs/system-contract-sot.md`, `docs/plans/02-analysis-kickoff-decisions.md`, `docs/plans/02-analysis-pipeline.md`, `HANDOFF.md`, `CHANGELOG.md`.
+- 독립 검증 기록: `docs/verifications/2026-06-29/analysis_phase2a_slice2.md` 조건부 합격.
+- G1 해결: `logical_key` derivation에서 같은 `source_anchors` set은 provider 출력 순서와 무관하게 같은 identity가 되도록 정규화했다. extractor는 anchor canonical dict를 만들고 `(source_ref_id, start_offset, end_offset, quote, content_hash)` 기준으로 정렬한 뒤 hash 입력에 넣는다.
+- `test_logical_key_treats_same_anchor_set_as_order_insensitive`를 추가했다. 같은 anchor set의 순서만 바뀐 provider output은 같은 key를 만들고, anchor 내용이 달라지면 다른 key를 만든다.
+- SoT를 v1.6.2로 올리고 kickoff/plan 문서에 "anchor 순서는 identity에 포함하지 않는다"를 명시해 spec-silent gap을 닫았다.
+
 ## Issues found
 
 - 문제: Phase 2A는 `02-analysis-pipeline.md`와 `analysis-memory-taxonomy.md` 모두에서 taxonomy와 candidate 경계를 미확정으로 남기고 있다.
@@ -86,6 +94,11 @@
 - Resolution: 소설 MVP 최초 추출의 최소 field만 SoT v1.6.1/plan/kickoff에 명시했다. 넓은 taxonomy 확장은 validator registry 구조로 후속 추가하도록 두고, 첫 schema는 타입별 필수 field만 닫았다.
 - Outcome: code/test/doc이 같은 minimal payload boundary를 공유한다.
 
+- 문제: 독립 검증이 `logical_key` derivation의 anchor 순서 민감성을 발견했다.
+- 원인: canonical JSON에서 dict key는 정렬했지만 `source_anchors` list 순서는 그대로 hash 입력에 들어갔다. real provider가 같은 관찰의 anchor 순서만 바꾸면 retry idempotency가 깨질 수 있다.
+- Resolution: 옵션 (a) 순서 무관 정규화를 채택했다. 같은 anchor set은 순서와 무관하게 같은 key를 만들고, anchor 내용이 다르면 별도 candidate identity가 된다.
+- Outcome: Phase 2A idempotency 경계가 provider 출력 순서 흔들림에 안정적이 됐다.
+
 ## Decisions
 
 - 작업자 판단: 승인 전에는 Phase 2A candidate 저장소나 schema를 구현하지 않았다. 승인 후에는 첫 slice를 domain model + in-memory repository + idempotency 회귀로 제한했다. Snapshot Loader/source validation은 다음 slice로 남긴다.
@@ -93,6 +106,7 @@
 - 사용자 결정: Phase 2A는 3종 taxonomy로 시작하되 확장 가능한 구조로 구현한다. `create` only, `needs_review`, confidence range-only, 2A/2B 분리, candidate/job 저장층 idempotency를 채택한다. provenance는 사용자 위임에 따라 2A에서 `source_observed`/`ai_inferred`만 적용하고 `user_declared`는 WritingBrief/Product Shell 이후로 보류한다.
 - 작업자 판단: taxonomy payload 확장성은 느슨한 additional field 허용이 아니라 타입별 validator registry로 확보한다. Phase 2A 첫 schema는 malformed provider output을 빨리 잡기 위해 추가 field를 거절한다.
 - 작업자 판단: `logical_key`는 사용자가 직접 넣는 opaque key에서 adapter 파생 기본값으로 전진했다. 파생 입력은 `candidate_type + payload + source_anchors`로 제한해 같은 retry는 dedupe하고 서로 다른 관찰은 과도하게 합치지 않는다.
+- 작업자 판단: G1은 옵션 (a) 순서 무관 정규화로 닫는다. source anchor의 출력 순서는 후보 의미가 아니라 provider formatting 흔들림이므로 identity에 포함하지 않는다.
 
 ## Verification
 
@@ -112,6 +126,10 @@
 - taxonomy schema focused: `python3 -m py_compile services/application/app/analysis/schema.py services/application/app/analysis/extractor.py services/application/app/analysis/service.py tests/test_analysis_extractor_schema.py tests/test_analysis_phase2a.py tests/test_analysis_source_validation.py` 통과.
 - taxonomy schema focused: `python3 -m unittest tests.test_analysis_extractor_schema tests.test_analysis_source_validation tests.test_analysis_phase2a -v` → 30개 통과.
 - 전체: `python3 -m unittest discover -s tests` → 253개 통과(27 skip).
+- G1 보강 focused: `python3 -m unittest tests.test_analysis_extractor_schema tests.test_analysis_source_validation tests.test_analysis_phase2a -v` → 31개 통과.
+- G1 보강 focused: `python3 -m py_compile services/application/app/analysis/extractor.py tests/test_analysis_extractor_schema.py` 통과.
+- G1 보강 pattern sweep: `logical_key`/`source_anchors`/anchor 순서 문구를 검색해 code/test/SoT/plan/kickoff에 순서 무관 계약이 매핑됨을 확인했다.
+- 전체: `python3 -m unittest discover -s tests` → 254개 통과(27 skip).
 
 ## Next steps
 

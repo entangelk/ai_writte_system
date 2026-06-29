@@ -199,16 +199,26 @@ def _logical_key(
     canonical = {
         "candidate_type": candidate_type.value,
         "payload": dict(payload),
-        "source_anchors": [
-            {
-                "source_ref_id": anchor.source_ref_id,
-                "start_offset": anchor.start_offset,
-                "end_offset": anchor.end_offset,
-                "quote": anchor.quote,
-                "content_hash": anchor.content_hash,
-            }
-            for anchor in source_anchors
-        ],
+        "source_anchors": sorted(
+            (_canonical_anchor(anchor) for anchor in source_anchors),
+            key=lambda anchor: (
+                anchor["source_ref_id"],
+                anchor["start_offset"],
+                anchor["end_offset"],
+                anchor["quote"],
+                anchor["content_hash"],
+            ),
+        ),
     }
     encoded = json.dumps(canonical, ensure_ascii=False, sort_keys=True).encode("utf-8")
     return f"{candidate_type.value}:{hashlib.sha256(encoded).hexdigest()}"
+
+
+def _canonical_anchor(anchor: CandidateSourceAnchor) -> dict[str, object]:
+    return {
+        "source_ref_id": anchor.source_ref_id,
+        "start_offset": anchor.start_offset,
+        "end_offset": anchor.end_offset,
+        "quote": anchor.quote,
+        "content_hash": anchor.content_hash,
+    }

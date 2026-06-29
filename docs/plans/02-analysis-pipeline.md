@@ -23,11 +23,11 @@ Phase 2A 착수 최소 계약은 [`02-analysis-kickoff-decisions.md`](02-analysi
 - candidate status는 `needs_review` 고정
 - confidence는 `0.0 <= confidence <= 1.0`만 강제하고 자동 reject threshold는 후속 품질 fixture 이후 결정. NaN은 범위 밖이므로 거절
 - `create_source_ref` primitive는 non-idempotent로 유지하며, job/task retry idempotency는 candidate 저장층이 담당
-- candidate retry identity는 `project_id + task_id + logical_key`. `logical_key`는 비어 있지 않은 string이고, schema/extraction slice의 기본 derivation은 `candidate_type + payload + source_anchors` canonical JSON의 SHA-256
+- candidate retry identity는 `project_id + task_id + logical_key`. `logical_key`는 비어 있지 않은 string이고, schema/extraction slice의 기본 derivation은 `candidate_type + payload + source_anchors` canonical JSON의 SHA-256. 같은 `source_anchors` set은 provider 출력 순서와 무관하게 같은 identity로 정규화한다
 - `CandidateSourceAnchor(source_ref_id, start_offset, end_offset, quote, content_hash)`를 같은 project의 Core SOT `SourceRef`와 대조해 source_ref 없음/cross-project/span mismatch/quote mismatch/hash mismatch를 거절
 - Snapshot Loader는 같은 project의 snapshot raw text, content hash, source block ids를 제공하고 cross-project snapshot 접근을 거절
 - 3종 taxonomy의 최소 payload schema는 `character_observation {name, observation}`, `event_observation {event}`, `open_question_observation {question}`이다. 모든 payload field는 non-empty string이며 추가 field나 누락 field는 malformed payload로 거절한다.
-- fake-provider extraction adapter는 provider content를 top-level `{candidates: [...]}` JSON object로 파싱하고, 각 candidate의 approved type/provenance/confidence/source_anchors/payload를 검증한다. `logical_key`는 `candidate_type + payload + source_anchors` canonical JSON의 SHA-256으로 만든다.
+- fake-provider extraction adapter는 provider content를 top-level `{candidates: [...]}` JSON object로 파싱하고, 각 candidate의 approved type/provenance/confidence/source_anchors/payload를 검증한다. `logical_key`는 `candidate_type + payload + source_anchors` canonical JSON의 SHA-256으로 만들며 anchor 순서는 identity에 포함하지 않는다.
 - candidate/needs_review 중심의 MongoDB 저장
 
 ### Phase 2B: 기존 기억 대조와 변경 제안
