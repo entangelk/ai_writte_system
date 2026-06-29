@@ -74,11 +74,12 @@
 - Phase 2A 착수 최소 계약이 승인됐다(2026-06-29, SoT v1.6). `docs/plans/02-analysis-kickoff-decisions.md`는 최소 taxonomy 3종(`character_observation`, `event_observation`, `open_question_observation`), provenance `source_observed`/`ai_inferred`, Phase 2A `create` only, `needs_review` 고정, confidence range만 강제, `create_source_ref` primitive non-idempotent 유지 + candidate/job 저장층 idempotency 소유, 2A/2B milestone 분리를 확정한다. 후속 taxonomy 확장을 염두에 두되 첫 slice에서 넓은 taxonomy를 추측 구현하지 않는다.
 - Phase 2A domain model + in-memory repository가 구현됐다(2026-06-29). `services/application/app/analysis/`에 `AnalysisJob`/`AnalysisTask`/`AnalysisCandidate`, repository Protocol, in-memory repository/service를 추가했다. job idempotency(`project_id + snapshot_id + idempotency_key`), candidate retry idempotency(`project_id + task_id + logical_key`), project isolation, `needs_review` 고정, confidence range, approved literal runtime validation, same source span의 다른 logical candidate 허용을 18개 회귀로 잠갔다. 독립 검증 조건 C1(NaN confidence reject), C2(action≠`create` 회귀), C3(`logical_key` 임시 identity 계약 명시)를 보강했고 전체 discovery 241개 통과(27 skip).
 - Phase 2A Snapshot Loader + candidate source validation이 구현됐다(2026-06-29). `CoreSotSourceAdapter`가 같은 project의 snapshot raw text/hash/block ids를 로드하고, `AnalysisService`가 resolver 구성 시 `CandidateSourceAnchor(source_ref_id, start_offset, end_offset, quote, content_hash)`를 Core SOT `SourceRef`와 대조한다. source_ref 없음/cross-project/span mismatch/quote mismatch/hash mismatch/source_ref_ids-anchor mismatch/source_anchors 누락을 7개 회귀로 잠갔다. 전체 discovery 248개 통과(27 skip).
+- Phase 2A 최소 taxonomy schema + fake-provider extraction adapter가 구현됐다(2026-06-29). `character_observation {name, observation}`, `event_observation {event}`, `open_question_observation {question}`만 허용하고 field는 모두 non-empty string이다. `AnalysisExtractionAdapter`는 provider content의 top-level `{candidates: [...]}` JSON object를 파싱해 approved literal/provenance/confidence/source_anchors/payload를 검증하고, `candidate_type + payload + source_anchors` canonical JSON SHA-256으로 `logical_key`를 만든다. focused 30개 회귀와 전체 discovery 253개(27 skip)를 통과했다.
 
 ## Next Tasks
 
 1. Slice 1 잔여 회귀 후보: archive 후 파생 인덱스 stale 이벤트. Phase 3 indexing 계약이 Draft라 현재는 구현하지 않는다. (fallback 동시성 race는 SoT v1.4 single-writer 제약으로 contract out 됨; 동시성 필요 시에만 (a) 보강 재검토.)
-2. Phase 2A 다음 slice: 3종 taxonomy의 최소 schema와 fake-provider extraction adapter 추가. malformed payload 거절과 under/over-strict 회귀를 잠근다.
+2. Phase 2A 다음 slice: extraction runner/job orchestration을 추가한다. Snapshot Loader → provider extraction → source validation → candidate 저장을 한 흐름으로 연결하고, task별 부분 실패/재시도 단위는 아직 미확정이면 문서화 후 보수적으로 제한한다.
 3. Application/Worker가 gateway `/v1/generate`를 호출하는 runtime wiring은 Phase payload/tool handler와 model tool-call wire format이 확정된 뒤 별도 slice로 구현한다.
 4. runner domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
 5. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
@@ -130,6 +131,8 @@
 - Core SOT MongoDB adapter 독립 재검증(2026-06-28): **조건부 합격 → R1 보강으로 합격 조건 충족**. 기록 `docs/verifications/2026-06-28/mongo_adapter_recheck.md`. 168개·양 경로 17개 재현, 핵심 persistence/retention 계약 양방향 lock 확인. R1(pymongo 미설치 시 discovery 깨짐) 해결: import try/except + skip, pymongo 차단 후 `errors=1`→`errors=0, skipped=17` 복원. R2(fallback 동시성 bug) 사용자 결정 option (b)로 single-writer 제약을 SoT v1.4/plan/adapter에 명시. R3(`source_refs` 미persist)는 SourceRef persistence slice 추적.
 - completion criteria 계약 독립 검증(2026-06-24): 조건부 합격. 워커 보고·내부 일관성·cross-reference 4종 독립 확인, blocking 없음. 비차단 risk R1/R2(matrix 비대칭)·R3(self-report 정의 갭)를 소유자 결정으로 본 slice에서 즉시 보강했다. 기록 `docs/verifications/2026-06-24/completion_criteria_contract.md`
 - Slice 0.6 독립 검증(2026-06-24): 합격. httpx MockTransport/proxy/close 경계 6개 회귀 통과, `except` 순서 load-bearing 가정 4종 검증. 독립 검증 환경에서 `HttpxJsonTransport` 경유 actual adapter live smoke 완료(content `연결 확인 완료`, finish_reason=stop). 기록 `docs/verifications/2026-06-24/llm_gateway_slice_0_6_httpx.md`
+- Phase 2A source validation 자체 회귀(2026-06-29): `python3 -m unittest tests.test_analysis_source_validation tests.test_analysis_phase2a -v` 25개 통과, `python3 -m py_compile ...` 통과, 전체 discovery 248개 통과(27 skip).
+- Phase 2A taxonomy schema/extractor 자체 회귀(2026-06-29): `python3 -m py_compile services/application/app/analysis/schema.py services/application/app/analysis/extractor.py services/application/app/analysis/service.py tests/test_analysis_extractor_schema.py tests/test_analysis_phase2a.py tests/test_analysis_source_validation.py` 통과, `python3 -m unittest tests.test_analysis_extractor_schema tests.test_analysis_source_validation tests.test_analysis_phase2a -v` 30개 통과, 전체 discovery 253개 통과(27 skip). 잠근 범위: 3종 최소 payload schema 정상/거절, service 저장 경로 malformed payload 거절, fake-provider extraction adapter parsing, malformed provider content 거절, deterministic logical_key 및 over-collapse 방지.
 
 ## Project Structure
 
@@ -184,6 +187,8 @@ services/
         ├── analysis/
         │   ├── models.py       # Phase 2A AnalysisJob/Task/Candidate + approved literals
         │   ├── repository.py   # AnalysisRepository Protocol
+        │   ├── schema.py       # 3종 taxonomy 최소 payload validator
+        │   ├── extractor.py    # fake/provider extraction adapter + logical_key derivation
         │   ├── source.py       # Core SOT snapshot/source_ref adapter
         │   └── service.py      # in-memory analysis repository/service + retry idempotency
         └── agent_loop/
@@ -213,6 +218,7 @@ tests/
 ├── test_agent_loop_runner.py
 ├── test_agent_loop_resolution.py
 ├── test_analysis_phase2a.py
+├── test_analysis_extractor_schema.py
 ├── test_analysis_source_validation.py
 ├── test_core_sot.py
 ├── test_core_sot_fixture.py

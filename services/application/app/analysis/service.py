@@ -20,6 +20,10 @@ from services.application.app.analysis.models import (
     immutable_payload,
 )
 from services.application.app.analysis.repository import AnalysisRepository
+from services.application.app.analysis.schema import (
+    InvalidAnalysisPayload,
+    validate_candidate_payload,
+)
 from services.application.app.analysis.source import SourceRefResolver
 
 
@@ -176,6 +180,7 @@ class AnalysisService:
         self._validate_provenance(provenance)
         if candidate_type != task.candidate_type:
             raise InvalidAnalysisCandidate("candidate_type must match task")
+        normalized_payload = self._validate_payload(candidate_type, payload)
         normalized_confidence = self._validate_confidence(confidence)
         normalized_source_ref_ids = self._validate_source_ref_ids(source_ref_ids)
         if self._source_ref_resolver is not None and source_anchors is None:
@@ -210,7 +215,7 @@ class AnalysisService:
             provenance=provenance,
             confidence=normalized_confidence,
             source_ref_ids=normalized_source_ref_ids,
-            payload=immutable_payload(payload),
+            payload=immutable_payload(normalized_payload),
         )
         self._repo.put_candidate(candidate, logical_key=logical_key)
         return RecordAnalysisCandidateResult(
@@ -312,6 +317,16 @@ class AnalysisService:
     def _validate_provenance(provenance: AnalysisProvenance) -> None:
         if not isinstance(provenance, AnalysisProvenance):
             raise InvalidAnalysisCandidate("unsupported analysis provenance")
+
+    @staticmethod
+    def _validate_payload(
+        candidate_type: AnalysisCandidateType,
+        payload: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        try:
+            return validate_candidate_payload(candidate_type, payload)
+        except InvalidAnalysisPayload as exc:
+            raise InvalidAnalysisCandidate(str(exc)) from exc
 
     @staticmethod
     def _validate_logical_key(logical_key: str) -> None:

@@ -150,7 +150,7 @@ class AnalysisSourceValidationTest(unittest.TestCase):
                 provenance=AnalysisProvenance.SOURCE_OBSERVED,
                 confidence=1.0,
                 source_ref_ids=(saved["source_ref_id"],),
-                payload={"name": "민아"},
+                payload={"name": "민아", "observation": "민아가 편지를 발견했다."},
             )
 
     def _saved_source(self):
@@ -220,7 +220,7 @@ class AnalysisSourceValidationTest(unittest.TestCase):
             confidence=1.0,
             source_ref_ids=(source_ref_id,),
             source_anchors=(source_anchor,),
-            payload={"name": "민아"},
+            payload={"name": "민아", "observation": "민아가 편지를 발견했다."},
         )
 
     @staticmethod

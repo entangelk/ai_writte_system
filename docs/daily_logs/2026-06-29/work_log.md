@@ -50,6 +50,15 @@
 - `AnalysisService`는 `source_ref_resolver`가 구성된 경우 `source_anchors`를 필수로 요구하고, 각 anchor를 실제 Core SOT `SourceRef`와 대조한다. source_ref 없음/cross-project/span mismatch/quote mismatch/hash mismatch/source_ref_ids-anchor mismatch를 거절한다.
 - 기존 Phase 2A 순수 domain tests는 resolver 없는 service로 유지해, 인프라 없는 모델/idempotency 검증과 source validation 검증을 분리했다.
 
+### Phase 2A 최소 taxonomy schema + fake-provider extraction adapter 구현
+
+- 변경 파일: `services/application/app/analysis/schema.py`, `analysis/extractor.py`, `analysis/service.py`, `tests/test_analysis_extractor_schema.py`, 기존 Phase 2A/source validation tests, 문서/HANDOFF/CHANGELOG.
+- 3종 taxonomy의 최소 payload schema를 확정해 SoT/plan/kickoff에 명시했다: `character_observation {name, observation}`, `event_observation {event}`, `open_question_observation {question}`. 모든 field는 non-empty string이고, 추가 field/누락 field는 malformed payload로 거절한다.
+- `AnalysisService.record_candidate()`에 payload validator를 연결해 provider adapter를 우회한 저장 경로에서도 malformed payload가 저장되지 않게 했다.
+- `AnalysisExtractionAdapter`를 추가했다. LLM provider(fake 포함)에 snapshot raw text를 보내고, provider content의 top-level `{candidates: [...]}` JSON object를 파싱한다.
+- adapter는 candidate마다 approved type/provenance, confidence range, source_anchors shape/offset, taxonomy payload schema를 검증한다. schema 오류는 public adapter 오류인 `AnalysisExtractionError`로 통일한다.
+- `logical_key` derivation을 `candidate_type + payload + source_anchors` canonical JSON SHA-256으로 잠갔다. 같은 provider retry payload는 같은 key가 되고, 같은 인물의 다른 관찰처럼 payload나 anchor가 다르면 별도 candidate가 된다.
+
 ## Issues found
 
 - 문제: Phase 2A는 `02-analysis-pipeline.md`와 `analysis-memory-taxonomy.md` 모두에서 taxonomy와 candidate 경계를 미확정으로 남기고 있다.
@@ -72,11 +81,18 @@
 - Resolution: `source_ref_resolver`가 있으면 `source_anchors`를 필수로 요구하고 회귀를 추가했다.
 - Outcome: source validation slice에서 검증 없는 source_ref_ids-only 저장 경로를 닫았다.
 
+- 문제: taxonomy별 payload field는 정본에 아직 없었고, 그대로 구현하면 다음 검증에서 spec-silent-but-code-enforced gap이 된다.
+- 원인: kickoff은 taxonomy literal 3종까지만 승인했고 `analysis-memory-taxonomy.md`는 discussion 문서라 구현 schema가 아니라고 명시한다.
+- Resolution: 소설 MVP 최초 추출의 최소 field만 SoT v1.6.1/plan/kickoff에 명시했다. 넓은 taxonomy 확장은 validator registry 구조로 후속 추가하도록 두고, 첫 schema는 타입별 필수 field만 닫았다.
+- Outcome: code/test/doc이 같은 minimal payload boundary를 공유한다.
+
 ## Decisions
 
 - 작업자 판단: 승인 전에는 Phase 2A candidate 저장소나 schema를 구현하지 않았다. 승인 후에는 첫 slice를 domain model + in-memory repository + idempotency 회귀로 제한했다. Snapshot Loader/source validation은 다음 slice로 남긴다.
 - 작업자 추천: `create_source_ref` 자체는 non-idempotent primitive로 유지하고, 같은 analysis job/task retry 중복 방지는 Phase 2 candidate/job 저장층에서 담당한다. 같은 span을 여러 candidate가 합법적으로 참조할 수 있으므로 source_ref 원시 API에 dedupe를 넣으면 후보 trace와 idempotency 의미가 섞인다.
 - 사용자 결정: Phase 2A는 3종 taxonomy로 시작하되 확장 가능한 구조로 구현한다. `create` only, `needs_review`, confidence range-only, 2A/2B 분리, candidate/job 저장층 idempotency를 채택한다. provenance는 사용자 위임에 따라 2A에서 `source_observed`/`ai_inferred`만 적용하고 `user_declared`는 WritingBrief/Product Shell 이후로 보류한다.
+- 작업자 판단: taxonomy payload 확장성은 느슨한 additional field 허용이 아니라 타입별 validator registry로 확보한다. Phase 2A 첫 schema는 malformed provider output을 빨리 잡기 위해 추가 field를 거절한다.
+- 작업자 판단: `logical_key`는 사용자가 직접 넣는 opaque key에서 adapter 파생 기본값으로 전진했다. 파생 입력은 `candidate_type + payload + source_anchors`로 제한해 같은 retry는 dedupe하고 서로 다른 관찰은 과도하게 합치지 않는다.
 
 ## Verification
 
@@ -93,8 +109,11 @@
 - source validation focused: `python3 -m unittest tests.test_analysis_source_validation tests.test_analysis_phase2a -v` → 25개 통과.
 - 전체: `python3 -m unittest discover -s tests` → 248개 통과(27 skip).
 - source validation pattern sweep: `source_anchors`/`CandidateSourceAnchor`/`load_snapshot`/`source_ref_ids`를 검색해 source_ref 없음, cross-project, span/quote/hash mismatch, anchor id mismatch, resolver 구성 시 anchors 필수 경계가 코드·테스트·문서에 매핑됨을 확인했다.
+- taxonomy schema focused: `python3 -m py_compile services/application/app/analysis/schema.py services/application/app/analysis/extractor.py services/application/app/analysis/service.py tests/test_analysis_extractor_schema.py tests/test_analysis_phase2a.py tests/test_analysis_source_validation.py` 통과.
+- taxonomy schema focused: `python3 -m unittest tests.test_analysis_extractor_schema tests.test_analysis_source_validation tests.test_analysis_phase2a -v` → 30개 통과.
+- 전체: `python3 -m unittest discover -s tests` → 253개 통과(27 skip).
 
 ## Next steps
 
-- 3종 taxonomy의 최소 schema와 fake-provider extraction adapter를 추가한다.
+- extraction runner/job orchestration을 추가한다. Snapshot Loader → provider extraction → source validation → candidate 저장을 한 흐름으로 연결한다.
 - 실제 llama.cpp endpoint가 준비되면 `scripts/benchmark_llm_provider.py`를 실행해 budget/retry production 기본 숫자를 확정한다.

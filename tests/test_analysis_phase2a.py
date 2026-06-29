@@ -138,7 +138,7 @@ class AnalysisCandidateTest(unittest.TestCase):
             provenance=AnalysisProvenance.SOURCE_OBSERVED,
             confidence=1.0,
             source_ref_ids=("source-ref-1",),
-            payload={"name": "민아"},
+            payload={"name": "민아", "observation": "민아가 편지를 발견했다."},
         )
 
         candidate = result.candidate
@@ -150,6 +150,7 @@ class AnalysisCandidateTest(unittest.TestCase):
         self.assertEqual(candidate.confidence, 1.0)
         self.assertEqual(candidate.source_ref_ids, ("source-ref-1",))
         self.assertEqual(candidate.payload["name"], "민아")
+        self.assertEqual(candidate.payload["observation"], "민아가 편지를 발견했다.")
 
     def test_same_task_retry_replays_logical_candidate_without_duplicate(self):
         service, repo = _service()
@@ -159,13 +160,16 @@ class AnalysisCandidateTest(unittest.TestCase):
             service,
             task_id=task.id,
             logical_key="character:min-a",
-            payload={"name": "민아"},
+            payload={"name": "민아", "observation": "민아가 편지를 발견했다."},
         )
         replay = self._record(
             service,
             task_id=task.id,
             logical_key="character:min-a",
-            payload={"name": "retry body must not replace candidate"},
+            payload={
+                "name": "민아",
+                "observation": "retry body must not replace candidate",
+            },
         )
 
         self.assertFalse(first.idempotent_replay)
@@ -310,7 +314,7 @@ class AnalysisCandidateTest(unittest.TestCase):
                 provenance=AnalysisProvenance.AI_INFERRED,
                 confidence=0.8,
                 source_ref_ids=("source-ref-1",),
-                payload={"name": "민아"},
+                payload={"name": "민아", "observation": "민아가 편지를 발견했다."},
             )
 
     def test_logical_key_must_be_non_empty_string(self):
@@ -336,7 +340,7 @@ class AnalysisCandidateTest(unittest.TestCase):
                 provenance="user_declared",
                 confidence=0.8,
                 source_ref_ids=("source-ref-1",),
-                payload={"name": "민아"},
+                payload={"name": "민아", "observation": "민아가 편지를 발견했다."},
             )
 
     def _task(self, service: AnalysisService):
@@ -370,5 +374,6 @@ class AnalysisCandidateTest(unittest.TestCase):
             provenance=AnalysisProvenance.AI_INFERRED,
             confidence=confidence,
             source_ref_ids=source_ref_ids,
-            payload=payload or {"name": "민아"},
+            payload=payload
+            or {"name": "민아", "observation": "민아가 편지를 발견했다."},
         )

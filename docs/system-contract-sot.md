@@ -34,6 +34,7 @@
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
 | v1.6 | 2026-06-29 | Phase 2A 착수 최소 계약 승인: taxonomy 3종(`character_observation`, `event_observation`, `open_question_observation`), provenance `source_observed`/`ai_inferred`, candidate action `create` only, status `needs_review`, confidence range만 강제, `create_source_ref` primitive non-idempotent 유지 + candidate/job 저장층 retry idempotency 소유, 2A/2B milestone 분리. 같은 날 검증 보강으로 confidence NaN 거절, action≠`create` 회귀, `logical_key` 임시 identity 계약을 명시했다. | 사용자 결정, `plans/02-analysis-kickoff-decisions.md`, `verifications/2026-06-29/analysis_phase2a_slice1.md` |
+| v1.6.1 | 2026-06-29 | Phase 2A source validation 이후 최소 taxonomy schema와 fake-provider extraction adapter 계약을 명시했다. Payload는 `character_observation {name, observation}`, `event_observation {event}`, `open_question_observation {question}`이고 모든 field는 non-empty string이다. Provider extraction output은 top-level `{candidates: [...]}` JSON object이며, logical_key는 `candidate_type + payload + source_anchors` canonical JSON SHA-256으로 파생한다. | `plans/02-analysis-kickoff-decisions.md`, `plans/02-analysis-pipeline.md` |
 | v1.5.1 | 2026-06-28 | Core SOT Mongo adapter setup 계약 명확화: query path를 지탱하는 required index는 `uniq_save_request`와 `blocks_by_snapshot`이며, MongoDB가 required index 생성을 거부하면 `MongoRepositorySetupError`로 표면화한다. 현재 query path가 없는 `source_refs_by_snapshot` 인덱스는 required contract에서 제외한다. | `docs/verifications/2026-06-28/mongo_index_setup.md` O1/O2 |
 | v1.5 | 2026-06-28 | archive를 읽기 전용 상태로 명문화: 읽기 허용, 본문 쓰기(draft 생성·version 저장)+메타데이터 수정(rename) 차단(409), SOT 본문은 archive 무관 불변, 상태 전이(unarchive)와 source_ref/분석 후보 archived 정책은 범위 밖. 기존 구현·회귀와 정합하는 문서 명문화. (같은 날 비의미 명확화: archived project 하위 draft를 archive하는 것은 상태 전이이므로 하위 draft 쓰기 차단의 예외임을 명시 — `archive_api_endpoint.md` Issue #1.) | 사용자 결정, `docs/verifications/2026-06-28/rename_api.md` R1 |
 | v1.4 | 2026-06-28 | non-transaction fallback을 single-writer 전용으로 명시. 동시성 안전은 transaction 기본 경로가 담당하고, fallback의 orphan cleanup/retry guard는 같은 writer의 순차 재시도에만 정의됨. | 사용자 결정(R2 option b), `docs/verifications/2026-06-28/mongo_adapter_recheck.md` |
@@ -125,7 +126,7 @@
   - archive/unarchive 같은 상태 전이는 본 쓰기 차단의 대상이 아니다. 여기에는 archived project 하위 draft를 archive하는 것도 포함되므로(상태 전이), "하위 draft 쓰기 차단"의 예외로서 archived project에서도 허용한다. unarchive는 MVP 범위가 아니므로 본 계약은 "archived인 동안 차단"으로 한정하며 영구 불변을 규정하지 않는다.
   - `source_refs` 생성은 보존된 immutable snapshot에 대한 파생 주석이므로 archived 상태에서도 **허용한다**(사용자 결정). 이는 본문/메타데이터 쓰기 차단의 예외다.
 - `create_source_ref` primitive는 non-idempotent다. 같은 span 재호출은 새 ref를 만들 수 있다. Phase 2A candidate/job 저장층이 같은 logical candidate retry 중복 방지 idempotency를 소유한다.
-- Phase 2A candidate retry identity는 임시로 `project_id + task_id + logical_key`다. `logical_key`는 비어 있지 않은 문자열이어야 하며, 첫 slice에서는 caller가 제공하는 opaque key로 취급한다. Snapshot Loader와 taxonomy별 schema가 확정될 때 logical key derivation 규칙을 별도로 잠근다.
+- Phase 2A candidate retry identity는 `project_id + task_id + logical_key`다. `logical_key`는 비어 있지 않은 문자열이어야 한다. schema/extraction slice의 기본 derivation은 `candidate_type + payload + source_anchors` canonical JSON의 SHA-256이며, 같은 provider retry payload는 같은 key가 되고 payload 또는 anchor가 다른 관찰은 별도 candidate가 된다.
 - archive/delete 이후 파생 인덱스는 stale 처리, version filter, rebuild 대상으로 다루며 MongoDB 정본 보존을 되돌리지 않는다.
 - 분석 후보의 부분 승인, 부분 저장, 나머지 retry는 Phase 2/6 review action idempotency 계약에서 다룬다. Slice 1 draft save idempotency와 섞지 않는다.
 
@@ -296,6 +297,8 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 - Phase 2A confidence는 `0.0 <= confidence <= 1.0`만 강제하고 자동 reject threshold는 후속 품질 fixture 이후 결정한다. NaN은 이 범위 밖이므로 거절한다.
 - Phase 2A source validation은 `CandidateSourceAnchor(source_ref_id, start_offset, end_offset, quote, content_hash)`를 같은 project의 Core SOT `SourceRef`와 대조한다. source_ref가 없거나 다른 project에 속하거나 span/quote/hash가 다르면 candidate 저장을 거절한다.
 - Phase 2A Snapshot Loader는 같은 project의 Core SOT snapshot raw text, content hash, source block ids를 analysis 입력으로 로드한다. 다른 project의 snapshot은 찾을 수 없는 것으로 처리한다.
+- Phase 2A 최소 payload schema는 `character_observation {name, observation}`, `event_observation {event}`, `open_question_observation {question}`이다. 모든 payload field는 non-empty string이며 추가 field와 누락 field는 malformed payload로 거절한다.
+- Phase 2A fake-provider extraction adapter는 provider content를 top-level `{candidates: [...]}` JSON object로 파싱하고, 각 candidate의 approved type/provenance/confidence/source_anchors/payload를 검증한 뒤 candidate draft를 만든다.
 - Phase 2A와 2B는 별도 milestone이다.
 - Phase 2B는 Phase 3~4 이후 prior memory를 검색해 `create/update/add_evidence/no_change/conflict` 후보를 만든다.
 - Analysis AI는 canon을 확정하지 않고 기존 기억을 직접 덮어쓰지 않는다.

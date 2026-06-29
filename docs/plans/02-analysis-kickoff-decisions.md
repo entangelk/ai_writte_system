@@ -63,7 +63,7 @@ NaN confidence는 `0.0 <= confidence <= 1.0` 범위 밖이므로 거절한다.
 
 이유: 같은 span을 여러 후보가 참조할 수 있고, source_ref는 immutable snapshot 주석에 가깝다. 원시 `create_source_ref`에 dedupe를 넣으면 후보별 trace와 재시도 의미가 섞인다.
 
-첫 slice의 candidate retry identity는 `project_id + task_id + logical_key`다. `logical_key`는 비어 있지 않은 문자열이며, Snapshot Loader와 taxonomy별 schema가 확정되기 전까지 caller가 제공하는 opaque key로 취급한다. logical key derivation 규칙은 다음 source validation/schema slice에서 확정한다.
+candidate retry identity는 `project_id + task_id + logical_key`다. `logical_key`는 비어 있지 않은 문자열이며, schema/extraction slice의 기본 derivation은 `candidate_type + payload + source_anchors` canonical JSON의 SHA-256이다.
 
 검증 방향:
 
@@ -87,6 +87,7 @@ NaN confidence는 `0.0 <= confidence <= 1.0` 범위 밖이므로 거절한다.
    완료: `CandidateSourceAnchor(source_ref_id, start_offset, end_offset, quote, content_hash)`와 Core SOT adapter로 잠금.
 3. 3종 taxonomy의 최소 schema와 fake-provider extraction adapter 추가  
    검증: under-strict/over-strict 회귀, malformed payload 거절.
+   완료: 최소 schema는 `character_observation {name, observation}`, `event_observation {event}`, `open_question_observation {question}`이며 모든 필드는 non-empty string이다. provider 출력은 top-level `{candidates: [...]}` JSON object여야 하며 adapter가 literal/provenance/confidence/source_anchors/payload를 검증한 뒤 deterministic logical_key를 만든다.
 
 ## 승인된 결정 요약
 
@@ -96,5 +97,6 @@ NaN confidence는 `0.0 <= confidence <= 1.0` 범위 밖이므로 거절한다.
 - Phase 2A candidate action은 `create` only다.
 - 모든 Phase 2A candidate는 `needs_review`로 저장하고 자동 승격은 미룬다.
 - `create_source_ref` primitive는 non-idempotent로 유지하고 candidate/job 저장층에서 retry idempotency를 맡는다.
-- candidate retry identity는 `project_id + task_id + logical_key`이며, `logical_key`는 비어 있지 않은 문자열이다. 첫 slice에서는 opaque key로 두고 derivation 규칙은 다음 slice에서 확정한다.
+- candidate retry identity는 `project_id + task_id + logical_key`이며, `logical_key`는 비어 있지 않은 문자열이다.
+- schema/extraction slice의 logical_key derivation은 `candidate_type + payload + source_anchors`의 canonical JSON SHA-256이다. 같은 provider retry payload는 같은 key가 되고, 같은 인물의 다른 관찰처럼 payload나 anchor가 다르면 별도 candidate가 된다.
 - Phase 2A와 2B는 별도 milestone로 분리한다.
