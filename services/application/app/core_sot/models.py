@@ -90,3 +90,8 @@ class DraftVersionDetail:
     snapshot: SourceSnapshot
     blocks: tuple[SourceBlock, ...]
 
+
+@dataclass(frozen=True, slots=True)
+class SourceSnapshotDetail:
+    snapshot: SourceSnapshot
+    blocks: tuple[SourceBlock, ...]

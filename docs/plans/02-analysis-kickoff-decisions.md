@@ -83,7 +83,8 @@ NaN confidence는 `0.0 <= confidence <= 1.0` 범위 밖이므로 거절한다.
 1. `AnalysisJob`/`AnalysisTask`/`AnalysisCandidate` domain model과 in-memory repository 추가  
    검증: project isolation, job retry idempotency, `needs_review` 고정.
 2. Snapshot Loader와 candidate source validation 추가  
-   검증: 같은 project source_ref만 허용, quote/hash/span mismatch 거절.
+   검증: 같은 project source_ref만 허용, quote/hash/span mismatch 거절.  
+   완료: `CandidateSourceAnchor(source_ref_id, start_offset, end_offset, quote, content_hash)`와 Core SOT adapter로 잠금.
 3. 3종 taxonomy의 최소 schema와 fake-provider extraction adapter 추가  
    검증: under-strict/over-strict 회귀, malformed payload 거절.
 

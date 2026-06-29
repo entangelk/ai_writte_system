@@ -14,11 +14,13 @@ from services.application.app.analysis.models import (
     AnalysisJob,
     AnalysisProvenance,
     AnalysisTask,
+    CandidateSourceAnchor,
     CreateAnalysisJobResult,
     RecordAnalysisCandidateResult,
     immutable_payload,
 )
 from services.application.app.analysis.repository import AnalysisRepository
+from services.application.app.analysis.source import SourceRefResolver
 
 
 class AnalysisError(ValueError):
@@ -103,8 +105,14 @@ class InMemoryAnalysisRepository:
 
 
 class AnalysisService:
-    def __init__(self, repository: AnalysisRepository) -> None:
+    def __init__(
+        self,
+        repository: AnalysisRepository,
+        *,
+        source_ref_resolver: SourceRefResolver | None = None,
+    ) -> None:
         self._repo = repository
+        self._source_ref_resolver = source_ref_resolver
 
     def create_job(
         self, *, project_id: str, snapshot_id: str, idempotency_key: str
@@ -159,6 +167,7 @@ class AnalysisService:
         confidence: float,
         source_ref_ids: Sequence[str],
         payload: Mapping[str, Any],
+        source_anchors: Sequence[CandidateSourceAnchor] | None = None,
     ) -> RecordAnalysisCandidateResult:
         self._validate_logical_key(logical_key)
         task = self._require_task(project_id, task_id)
@@ -169,6 +178,17 @@ class AnalysisService:
             raise InvalidAnalysisCandidate("candidate_type must match task")
         normalized_confidence = self._validate_confidence(confidence)
         normalized_source_ref_ids = self._validate_source_ref_ids(source_ref_ids)
+        if self._source_ref_resolver is not None and source_anchors is None:
+            raise InvalidAnalysisCandidate("source_anchors are required")
+        if source_anchors is not None:
+            anchor_source_ref_ids = self._validate_source_anchors(
+                project_id=project_id,
+                source_anchors=source_anchors,
+            )
+            if anchor_source_ref_ids != normalized_source_ref_ids:
+                raise InvalidAnalysisCandidate(
+                    "source_anchors must match source_ref_ids"
+                )
 
         existing_candidate_id = self._repo.find_candidate_request(
             project_id, task_id, logical_key
@@ -245,6 +265,38 @@ class AnalysisService:
         ):
             raise InvalidAnalysisCandidate("source_ref_ids must be non-empty strings")
         return normalized
+
+    def _validate_source_anchors(
+        self,
+        *,
+        project_id: str,
+        source_anchors: Sequence[CandidateSourceAnchor],
+    ) -> tuple[str, ...]:
+        if self._source_ref_resolver is None:
+            raise InvalidAnalysisCandidate("source_ref resolver is required")
+        if isinstance(source_anchors, (str, bytes)) or not source_anchors:
+            raise InvalidAnalysisCandidate("source_anchors are required")
+
+        source_ref_ids: list[str] = []
+        for anchor in source_anchors:
+            if not isinstance(anchor, CandidateSourceAnchor):
+                raise InvalidAnalysisCandidate("invalid source anchor")
+            source_ref = self._source_ref_resolver.get_source_ref(
+                project_id=project_id,
+                source_ref_id=anchor.source_ref_id,
+            )
+            if source_ref is None:
+                raise InvalidAnalysisCandidate("source_ref not found")
+            if (
+                source_ref.project_id != project_id
+                or source_ref.start_offset != anchor.start_offset
+                or source_ref.end_offset != anchor.end_offset
+                or source_ref.quote != anchor.quote
+                or source_ref.content_hash != anchor.content_hash
+            ):
+                raise InvalidAnalysisCandidate("source_ref anchor mismatch")
+            source_ref_ids.append(anchor.source_ref_id)
+        return tuple(source_ref_ids)
 
     @staticmethod
     def _validate_candidate_type(candidate_type: AnalysisCandidateType) -> None:

@@ -294,6 +294,8 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 - Phase 2A provenance literal은 `source_observed`와 `ai_inferred`만 허용한다. `user_declared`는 WritingBrief/Product Shell 입력 계약 이후로 미룬다.
 - Phase 2A candidate action은 `create` only이고 status는 `needs_review`로 고정한다.
 - Phase 2A confidence는 `0.0 <= confidence <= 1.0`만 강제하고 자동 reject threshold는 후속 품질 fixture 이후 결정한다. NaN은 이 범위 밖이므로 거절한다.
+- Phase 2A source validation은 `CandidateSourceAnchor(source_ref_id, start_offset, end_offset, quote, content_hash)`를 같은 project의 Core SOT `SourceRef`와 대조한다. source_ref가 없거나 다른 project에 속하거나 span/quote/hash가 다르면 candidate 저장을 거절한다.
+- Phase 2A Snapshot Loader는 같은 project의 Core SOT snapshot raw text, content hash, source block ids를 analysis 입력으로 로드한다. 다른 project의 snapshot은 찾을 수 없는 것으로 처리한다.
 - Phase 2A와 2B는 별도 milestone이다.
 - Phase 2B는 Phase 3~4 이후 prior memory를 검색해 `create/update/add_evidence/no_change/conflict` 후보를 만든다.
 - Analysis AI는 canon을 확정하지 않고 기존 기억을 직접 덮어쓰지 않는다.

@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-29 | Phase 2A Snapshot Loader + source validation 구현 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | Phase 2A domain model + in-memory repository 구현 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | SoT v1.6: Phase 2A 착수 최소 계약 승인 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-28 | Gemma Q4 benchmark harness 추가 | [work log](docs/daily_logs/2026-06-28/work_log.md) |
@@ -40,6 +41,7 @@
 ### Added
 
 - Phase 2A domain model과 in-memory repository를 추가했다. `services/application/app/analysis/`가 `AnalysisJob`/`AnalysisTask`/`AnalysisCandidate`, approved literal enum, `AnalysisRepository` Protocol, `InMemoryAnalysisRepository`, `AnalysisService`를 제공한다. job retry는 `project_id + snapshot_id + idempotency_key`, candidate retry는 `project_id + task_id + logical_key`로 idempotent replay한다. Candidate status는 `needs_review` 고정이고 confidence는 range만 검증한다. `user_declared` 같은 미승인 provenance 문자열은 runtime에서 거절한다. 독립 검증 조건 보강으로 NaN confidence를 거절하고 action≠`create` 회귀와 `logical_key` 계약을 추가했다. focused 18개 회귀와 전체 discovery 241개(27 skip)를 통과했다.
+- Phase 2A Snapshot Loader와 candidate source validation을 추가했다. `CoreSotSourceAdapter`가 Core SOT snapshot raw text/hash/block ids를 analysis 입력으로 로드하고, `AnalysisService`가 resolver 구성 시 `CandidateSourceAnchor(source_ref_id, start_offset, end_offset, quote, content_hash)`를 실제 `SourceRef`와 대조한다. 같은 project source_ref만 허용하며 source_ref 없음, cross-project, span/quote/hash mismatch, source_ref_ids-anchor mismatch, source_anchors 누락을 거절한다. focused 25개 회귀와 전체 discovery 248개(27 skip)를 통과했다.
 
 ### Fixed
 

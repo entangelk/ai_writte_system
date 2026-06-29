@@ -24,6 +24,8 @@ Phase 2A 착수 최소 계약은 [`02-analysis-kickoff-decisions.md`](02-analysi
 - confidence는 `0.0 <= confidence <= 1.0`만 강제하고 자동 reject threshold는 후속 품질 fixture 이후 결정. NaN은 범위 밖이므로 거절
 - `create_source_ref` primitive는 non-idempotent로 유지하며, job/task retry idempotency는 candidate 저장층이 담당
 - 첫 slice의 candidate retry identity는 `project_id + task_id + logical_key`. `logical_key`는 비어 있지 않은 opaque string이고 derivation 규칙은 Snapshot Loader/source validation slice에서 확정
+- `CandidateSourceAnchor(source_ref_id, start_offset, end_offset, quote, content_hash)`를 같은 project의 Core SOT `SourceRef`와 대조해 source_ref 없음/cross-project/span mismatch/quote mismatch/hash mismatch를 거절
+- Snapshot Loader는 같은 project의 snapshot raw text, content hash, source block ids를 제공하고 cross-project snapshot 접근을 거절
 - candidate/needs_review 중심의 MongoDB 저장
 
 ### Phase 2B: 기존 기억 대조와 변경 제안

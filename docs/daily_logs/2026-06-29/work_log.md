@@ -41,6 +41,15 @@
 - F2/C2 해결: action≠`create` reject path를 `test_action_other_than_create_is_rejected`로 잠갔다.
 - F3/C3 보강: candidate retry identity를 임시 `project_id + task_id + logical_key`로 SoT/kickoff/plan에 명시했다. `logical_key`는 비어 있지 않은 문자열이고, 첫 slice에서는 opaque key이며 derivation 규칙은 Snapshot Loader/source validation slice에서 확정한다. runtime도 non-string logical key를 거절하도록 보강했다.
 
+### Phase 2A Snapshot Loader + candidate source validation 구현
+
+- 변경 파일: `services/application/app/core_sot/models.py`, `core_sot/service.py`, `services/application/app/analysis/models.py`, `analysis/source.py`, `analysis/service.py`, `tests/test_analysis_source_validation.py`, 문서/HANDOFF/CHANGELOG.
+- Core SOT에 `SourceSnapshotDetail`과 `CoreSotService.get_snapshot(project_id, snapshot_id)`를 추가했다. snapshot은 project_id가 맞을 때만 raw text/hash/blocks로 읽을 수 있다.
+- `analysis/source.py`를 추가했다. `CoreSotSourceAdapter`는 Core SOT에서 `SourceRef`를 같은 project 기준으로 조회하고, snapshot raw text/hash/block ids를 `SnapshotText`로 로드한다.
+- `CandidateSourceAnchor(source_ref_id, start_offset, end_offset, quote, content_hash)`를 추가했다.
+- `AnalysisService`는 `source_ref_resolver`가 구성된 경우 `source_anchors`를 필수로 요구하고, 각 anchor를 실제 Core SOT `SourceRef`와 대조한다. source_ref 없음/cross-project/span mismatch/quote mismatch/hash mismatch/source_ref_ids-anchor mismatch를 거절한다.
+- 기존 Phase 2A 순수 domain tests는 resolver 없는 service로 유지해, 인프라 없는 모델/idempotency 검증과 source validation 검증을 분리했다.
+
 ## Issues found
 
 - 문제: Phase 2A는 `02-analysis-pipeline.md`와 `analysis-memory-taxonomy.md` 모두에서 taxonomy와 candidate 경계를 미확정으로 남기고 있다.
@@ -57,6 +66,11 @@
 - 원인: Python NaN 비교는 `<`/`>`가 모두 False라 range guard를 우회했고, action reject path와 logical key 의미는 구현에는 있었지만 boundary matrix/정본에 빈칸이 있었다.
 - Resolution: NaN reject 코드와 회귀, action reject 회귀, `logical_key` 임시 identity 계약 및 runtime string validation을 추가했다.
 - Outcome: 검증 조건 C1/C2/C3 보강 완료. focused test는 15개에서 18개로 증가했다.
+
+- 문제: resolver가 구성된 AnalysisService에서도 source_anchors 없이 source_ref_ids만 넘기면 Core SOT 대조 없이 candidate가 저장될 수 있었다.
+- 원인: 이전 slice의 source_ref_ids-only 경로를 유지하면서 resolver 구성 여부에 따른 강제 조건을 두지 않았다.
+- Resolution: `source_ref_resolver`가 있으면 `source_anchors`를 필수로 요구하고 회귀를 추가했다.
+- Outcome: source validation slice에서 검증 없는 source_ref_ids-only 저장 경로를 닫았다.
 
 ## Decisions
 
@@ -75,9 +89,12 @@
 - 전체: `python3 -m unittest discover -s tests` → 241개 통과(27 skip).
 - pattern sweep: Phase 2A literal/idempotency/source_ref 패턴을 검색했고, `user_declared` 문자열이 런타임에서 통과할 수 있는 경계를 발견해 enum instance 검증과 회귀를 추가했다. Mongo probe cleanup line은 `git blame`상 2026-06-28 skip-aware integration slice에서 들어온 것으로 확인했다.
 - 검증 보강 후 pattern sweep: `nan`/`_validate_action`/`logical_key`/`user_declared` 경계를 재검색해 코드·테스트·정본 문서에 매핑됨을 확인했다.
+- source validation focused: `python3 -m py_compile services/application/app/analysis/source.py services/application/app/analysis/models.py services/application/app/analysis/service.py services/application/app/core_sot/models.py services/application/app/core_sot/service.py tests/test_analysis_source_validation.py` 통과.
+- source validation focused: `python3 -m unittest tests.test_analysis_source_validation tests.test_analysis_phase2a -v` → 25개 통과.
+- 전체: `python3 -m unittest discover -s tests` → 248개 통과(27 skip).
+- source validation pattern sweep: `source_anchors`/`CandidateSourceAnchor`/`load_snapshot`/`source_ref_ids`를 검색해 source_ref 없음, cross-project, span/quote/hash mismatch, anchor id mismatch, resolver 구성 시 anchors 필수 경계가 코드·테스트·문서에 매핑됨을 확인했다.
 
 ## Next steps
 
-- Snapshot Loader와 candidate source validation을 추가한다. 검증: 같은 project source_ref만 허용, quote/hash/span mismatch 거절.
 - 3종 taxonomy의 최소 schema와 fake-provider extraction adapter를 추가한다.
 - 실제 llama.cpp endpoint가 준비되면 `scripts/benchmark_llm_provider.py`를 실행해 budget/retry production 기본 숫자를 확정한다.

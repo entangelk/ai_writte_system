@@ -70,5 +70,23 @@ class RecordAnalysisCandidateResult:
     idempotent_replay: bool
 
 
+@dataclass(frozen=True, slots=True)
+class CandidateSourceAnchor:
+    source_ref_id: str
+    start_offset: int
+    end_offset: int
+    quote: str
+    content_hash: str
+
+
+@dataclass(frozen=True, slots=True)
+class SnapshotText:
+    project_id: str
+    snapshot_id: str
+    raw_text: str
+    content_hash: str
+    block_ids: tuple[str, ...]
+
+
 def immutable_payload(payload: Mapping[str, Any]) -> Mapping[str, Any]:
     return MappingProxyType(dict(payload))

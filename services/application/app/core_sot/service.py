@@ -19,6 +19,7 @@ from services.application.app.core_sot.models import (
     SourceBlock,
     SourceRef,
     SourceSnapshot,
+    SourceSnapshotDetail,
 )
 from services.application.app.core_sot.repository import (
     CoreSotRepository,
@@ -233,6 +234,17 @@ class CoreSotService:
         blocks = self._repo.get_blocks(version.snapshot_id)
         return DraftVersionDetail(
             draft_version=version, snapshot=snapshot, blocks=blocks
+        )
+
+    def get_snapshot(
+        self, *, project_id: str, snapshot_id: str
+    ) -> SourceSnapshotDetail:
+        snapshot = self._repo.get_snapshot(snapshot_id)
+        if snapshot is None or snapshot.project_id != project_id:
+            raise NotFound("snapshot not found")
+        return SourceSnapshotDetail(
+            snapshot=snapshot,
+            blocks=self._repo.get_blocks(snapshot_id),
         )
 
     def save_draft(

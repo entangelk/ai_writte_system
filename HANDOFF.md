@@ -73,11 +73,12 @@
 - Gemma Q4 benchmark harness가 추가됐다(2026-06-28). `scripts/benchmark_llm_provider.py`가 외부 llama.cpp-compatible endpoint를 대상으로 short smoke, JSON extraction, scene continuation case를 반복 실행하고 latency/token/error summary JSON을 출력한다. 검증 후 CLI fake-runner wiring, warmup failure 기록(`iteration=0`), report field schema를 보강했다. 실제 endpoint benchmark와 budget/retry production 기본값 확정은 아직 남아 있다.
 - Phase 2A 착수 최소 계약이 승인됐다(2026-06-29, SoT v1.6). `docs/plans/02-analysis-kickoff-decisions.md`는 최소 taxonomy 3종(`character_observation`, `event_observation`, `open_question_observation`), provenance `source_observed`/`ai_inferred`, Phase 2A `create` only, `needs_review` 고정, confidence range만 강제, `create_source_ref` primitive non-idempotent 유지 + candidate/job 저장층 idempotency 소유, 2A/2B milestone 분리를 확정한다. 후속 taxonomy 확장을 염두에 두되 첫 slice에서 넓은 taxonomy를 추측 구현하지 않는다.
 - Phase 2A domain model + in-memory repository가 구현됐다(2026-06-29). `services/application/app/analysis/`에 `AnalysisJob`/`AnalysisTask`/`AnalysisCandidate`, repository Protocol, in-memory repository/service를 추가했다. job idempotency(`project_id + snapshot_id + idempotency_key`), candidate retry idempotency(`project_id + task_id + logical_key`), project isolation, `needs_review` 고정, confidence range, approved literal runtime validation, same source span의 다른 logical candidate 허용을 18개 회귀로 잠갔다. 독립 검증 조건 C1(NaN confidence reject), C2(action≠`create` 회귀), C3(`logical_key` 임시 identity 계약 명시)를 보강했고 전체 discovery 241개 통과(27 skip).
+- Phase 2A Snapshot Loader + candidate source validation이 구현됐다(2026-06-29). `CoreSotSourceAdapter`가 같은 project의 snapshot raw text/hash/block ids를 로드하고, `AnalysisService`가 resolver 구성 시 `CandidateSourceAnchor(source_ref_id, start_offset, end_offset, quote, content_hash)`를 Core SOT `SourceRef`와 대조한다. source_ref 없음/cross-project/span mismatch/quote mismatch/hash mismatch/source_ref_ids-anchor mismatch/source_anchors 누락을 7개 회귀로 잠갔다. 전체 discovery 248개 통과(27 skip).
 
 ## Next Tasks
 
 1. Slice 1 잔여 회귀 후보: archive 후 파생 인덱스 stale 이벤트. Phase 3 indexing 계약이 Draft라 현재는 구현하지 않는다. (fallback 동시성 race는 SoT v1.4 single-writer 제약으로 contract out 됨; 동시성 필요 시에만 (a) 보강 재검토.)
-2. Phase 2A 다음 slice: Snapshot Loader와 candidate source validation 추가. 같은 project source_ref만 허용하고 quote/hash/span mismatch를 거절하는 회귀를 잠근다.
+2. Phase 2A 다음 slice: 3종 taxonomy의 최소 schema와 fake-provider extraction adapter 추가. malformed payload 거절과 under/over-strict 회귀를 잠근다.
 3. Application/Worker가 gateway `/v1/generate`를 호출하는 runtime wiring은 Phase payload/tool handler와 model tool-call wire format이 확정된 뒤 별도 slice로 구현한다.
 4. runner domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
 5. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
@@ -183,6 +184,7 @@ services/
         ├── analysis/
         │   ├── models.py       # Phase 2A AnalysisJob/Task/Candidate + approved literals
         │   ├── repository.py   # AnalysisRepository Protocol
+        │   ├── source.py       # Core SOT snapshot/source_ref adapter
         │   └── service.py      # in-memory analysis repository/service + retry idempotency
         └── agent_loop/
             ├── budget.py       # BudgetPolicy(5차원 budget+retry cap)/BudgetTracker+F1 usage 방어(A1/A3)
@@ -211,6 +213,7 @@ tests/
 ├── test_agent_loop_runner.py
 ├── test_agent_loop_resolution.py
 ├── test_analysis_phase2a.py
+├── test_analysis_source_validation.py
 ├── test_core_sot.py
 ├── test_core_sot_fixture.py
 ├── test_core_sot_mongo_indexes.py
