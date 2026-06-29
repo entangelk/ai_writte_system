@@ -6,6 +6,7 @@ from typing import Protocol
 
 from services.application.app.analysis.models import (
     AnalysisCandidate,
+    AnalysisCandidateType,
     AnalysisJob,
     AnalysisTask,
 )
@@ -27,6 +28,10 @@ class AnalysisRepository(Protocol):
     def put_job(self, job: AnalysisJob) -> None: ...
 
     def get_task(self, task_id: str) -> AnalysisTask | None: ...
+
+    def find_task_request(
+        self, project_id: str, job_id: str, candidate_type: AnalysisCandidateType
+    ) -> str | None: ...
 
     def put_task(self, task: AnalysisTask) -> None: ...
 

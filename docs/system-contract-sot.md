@@ -1,7 +1,7 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`  
-계약 버전: `v1.6.3`
+계약 버전: `v1.6.4`
 승인일: `2026-06-26`  
 최근 갱신일: `2026-06-29`  
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
@@ -33,6 +33,7 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.6.4 | 2026-06-29 | Phase 2A extraction runner 계약을 명시했다. Runner는 job을 idempotent 생성/재사용하고, snapshot 로드→provider extraction→task 생성/재사용→전체 draft 사전 검증→candidate 저장 순서로 실행한다. Task는 `project_id + job_id + candidate_type`으로 재사용하며, candidate write는 모든 draft의 logical_key/source/schema 검증 뒤 시작한다. | `plans/02-analysis-pipeline.md` |
 | v1.6.3 | 2026-06-29 | Phase 2A `source_anchors` identity를 unordered set으로 명확화했다. 같은 anchor 중복은 identity와 parsed draft에서 하나로 정규화하며, ordered evidence chain이 필요해지면 순서 의미를 별도 필드(`sequence`/`evidence_order` 등)로 계약화한다. | `verifications/2026-06-29/analysis_phase2a_slice3.md` |
 | v1.6.2 | 2026-06-29 | Phase 2A logical_key derivation에서 같은 `source_anchors` set은 순서와 무관하게 같은 key를 만든다고 명시했다. Anchor 내용이 다르면 별도 candidate identity다. | `verifications/2026-06-29/analysis_phase2a_slice2.md` |
 | v1.6.1 | 2026-06-29 | Phase 2A source validation 이후 최소 taxonomy schema와 fake-provider extraction adapter 계약을 명시했다. Payload는 `character_observation {name, observation}`, `event_observation {event}`, `open_question_observation {question}`이고 모든 field는 non-empty string이다. Provider extraction output은 top-level `{candidates: [...]}` JSON object이며, logical_key는 `candidate_type + payload + source_anchors` canonical JSON SHA-256으로 파생한다. | `plans/02-analysis-kickoff-decisions.md`, `plans/02-analysis-pipeline.md` |
@@ -49,7 +50,7 @@
 
 | 문서 | 역할 | 지위 |
 |---|---|---|
-| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.3 |
+| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.4 |
 | [`plans/README.md`](plans/README.md) | 계획 문서 진입점과 Phase/MVP 관계 | Draft |
 | [`plans/00-foundations.md`](plans/00-foundations.md) | 전역 원칙과 제품 경계 | Draft |
 | [`plans/implementation-plan.md`](plans/implementation-plan.md) | 구현 순서, slice 상태, 검증 gate | Draft |
@@ -301,6 +302,7 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 - Phase 2A Snapshot Loader는 같은 project의 Core SOT snapshot raw text, content hash, source block ids를 analysis 입력으로 로드한다. 다른 project의 snapshot은 찾을 수 없는 것으로 처리한다.
 - Phase 2A 최소 payload schema는 `character_observation {name, observation}`, `event_observation {event}`, `open_question_observation {question}`이다. 모든 payload field는 non-empty string이며 추가 field와 누락 field는 malformed payload로 거절한다.
 - Phase 2A fake-provider extraction adapter는 provider content를 top-level `{candidates: [...]}` JSON object로 파싱하고, 각 candidate의 approved type/provenance/confidence/source_anchors/payload를 검증한 뒤 candidate draft를 만든다.
+- Phase 2A extraction runner는 `AnalysisJob`을 `project_id + snapshot_id + idempotency_key`로 idempotent 생성/재사용하고, Snapshot Loader → provider extraction → `AnalysisTask` 생성/재사용 → 전체 draft 사전 검증 → candidate 저장 순서로 실행한다. Task는 `project_id + job_id + candidate_type`으로 재사용한다. 한 run의 candidate write는 모든 draft가 logical_key/source/schema 검증을 통과한 뒤 시작한다. Job/task 상태 전이와 실패 상태 저장은 아직 구현하지 않는다.
 - Phase 2A와 2B는 별도 milestone이다.
 - Phase 2B는 Phase 3~4 이후 prior memory를 검색해 `create/update/add_evidence/no_change/conflict` 후보를 만든다.
 - Analysis AI는 canon을 확정하지 않고 기존 기억을 직접 덮어쓰지 않는다.

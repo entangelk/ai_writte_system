@@ -28,6 +28,7 @@ Phase 2A 착수 최소 계약은 [`02-analysis-kickoff-decisions.md`](02-analysi
 - Snapshot Loader는 같은 project의 snapshot raw text, content hash, source block ids를 제공하고 cross-project snapshot 접근을 거절
 - 3종 taxonomy의 최소 payload schema는 `character_observation {name, observation}`, `event_observation {event}`, `open_question_observation {question}`이다. 모든 payload field는 non-empty string이며 추가 field나 누락 field는 malformed payload로 거절한다.
 - fake-provider extraction adapter는 provider content를 top-level `{candidates: [...]}` JSON object로 파싱하고, 각 candidate의 approved type/provenance/confidence/source_anchors/payload를 검증한다. `logical_key`는 `candidate_type + payload + source_anchors` canonical JSON의 SHA-256으로 만들며 anchor 순서와 동일 anchor 중복은 identity에 포함하지 않는다. 순서 의미가 필요한 ordered evidence chain은 명시 필드 추가 후 별도 계약으로 다룬다.
+- extraction runner는 `AnalysisJob` idempotent 생성/재사용 → Snapshot Loader → provider extraction → `AnalysisTask` 생성/재사용 → 전체 draft 사전 검증 → candidate 저장 순서로 실행한다. Task는 `project_id + job_id + candidate_type`으로 재사용하고, candidate write는 모든 draft의 logical_key/source/schema 검증 뒤 시작한다. Job/task 실패 상태 저장은 후속이다.
 - candidate/needs_review 중심의 MongoDB 저장
 
 ### Phase 2B: 기존 기억 대조와 변경 제안

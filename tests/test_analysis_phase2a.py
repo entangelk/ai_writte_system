@@ -108,6 +108,28 @@ class AnalysisJobAndTaskTest(unittest.TestCase):
             ],
         )
 
+    def test_task_creation_replays_same_job_and_candidate_type(self):
+        service, repo = _service()
+        job = service.create_job(
+            project_id="project-1",
+            snapshot_id="snapshot-1",
+            idempotency_key="analysis-run-1",
+        ).job
+
+        first = service.create_task(
+            project_id="project-1",
+            job_id=job.id,
+            candidate_type=AnalysisCandidateType.CHARACTER_OBSERVATION,
+        )
+        replay = service.create_task(
+            project_id="project-1",
+            job_id=job.id,
+            candidate_type=AnalysisCandidateType.CHARACTER_OBSERVATION,
+        )
+
+        self.assertEqual(replay, first)
+        self.assertEqual(len(repo.tasks), 1)
+
     def test_unknown_candidate_type_is_rejected(self):
         service, _repo = _service()
         job = service.create_job(

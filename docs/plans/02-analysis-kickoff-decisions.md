@@ -88,6 +88,9 @@ candidate retry identity는 `project_id + task_id + logical_key`다. `logical_ke
 3. 3종 taxonomy의 최소 schema와 fake-provider extraction adapter 추가  
    검증: under-strict/over-strict 회귀, malformed payload 거절.
    완료: 최소 schema는 `character_observation {name, observation}`, `event_observation {event}`, `open_question_observation {question}`이며 모든 필드는 non-empty string이다. provider 출력은 top-level `{candidates: [...]}` JSON object여야 하며 adapter가 literal/provenance/confidence/source_anchors/payload를 검증한 뒤 deterministic logical_key를 만든다.
+4. Extraction runner/job orchestration 추가  
+   검증: Snapshot Loader → provider extraction → logical_key/source validation → candidate 저장 흐름, same job retry idempotency, invalid draft가 있을 때 candidate 부분 저장 금지.
+   완료: runner는 `AnalysisJob`을 idempotent 생성/재사용하고 task를 `project_id + job_id + candidate_type`으로 재사용한다. 모든 draft의 logical_key/source/schema를 사전 검증한 뒤 candidate 저장을 시작한다.
 
 ## 승인된 결정 요약
 

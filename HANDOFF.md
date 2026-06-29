@@ -75,11 +75,12 @@
 - Phase 2A domain model + in-memory repository가 구현됐다(2026-06-29). `services/application/app/analysis/`에 `AnalysisJob`/`AnalysisTask`/`AnalysisCandidate`, repository Protocol, in-memory repository/service를 추가했다. job idempotency(`project_id + snapshot_id + idempotency_key`), candidate retry idempotency(`project_id + task_id + logical_key`), project isolation, `needs_review` 고정, confidence range, approved literal runtime validation, same source span의 다른 logical candidate 허용을 18개 회귀로 잠갔다. 독립 검증 조건 C1(NaN confidence reject), C2(action≠`create` 회귀), C3(`logical_key` 임시 identity 계약 명시)를 보강했고 전체 discovery 241개 통과(27 skip).
 - Phase 2A Snapshot Loader + candidate source validation이 구현됐다(2026-06-29). `CoreSotSourceAdapter`가 같은 project의 snapshot raw text/hash/block ids를 로드하고, `AnalysisService`가 resolver 구성 시 `CandidateSourceAnchor(source_ref_id, start_offset, end_offset, quote, content_hash)`를 Core SOT `SourceRef`와 대조한다. source_ref 없음/cross-project/span mismatch/quote mismatch/hash mismatch/source_ref_ids-anchor mismatch/source_anchors 누락을 7개 회귀로 잠갔다. 전체 discovery 248개 통과(27 skip).
 - Phase 2A 최소 taxonomy schema + fake-provider extraction adapter가 구현됐다(2026-06-29). `character_observation {name, observation}`, `event_observation {event}`, `open_question_observation {question}`만 허용하고 field는 모두 non-empty string이다. `AnalysisExtractionAdapter`는 provider content의 top-level `{candidates: [...]}` JSON object를 파싱해 approved literal/provenance/confidence/source_anchors/payload를 검증하고, `candidate_type + payload + source_anchors` canonical JSON SHA-256으로 `logical_key`를 만든다. 독립 검증 G1/D1 보강으로 `source_anchors`는 identity에서 unordered set으로 정규화한다(순서·동일 anchor 중복 무시, 다른 anchor 내용은 별도 identity). focused 32개 회귀와 전체 discovery 255개(27 skip)를 통과했다.
+- Phase 2A extraction runner가 구현됐다(2026-06-29). `AnalysisExtractionRunner`는 `AnalysisJob` idempotent 생성/재사용 → Snapshot Loader → provider extraction → `AnalysisTask` 생성/재사용 → 전체 draft 사전 검증 → candidate 저장 순서로 실행한다. Task는 `project_id + job_id + candidate_type`으로 재사용해 same job retry에서 candidate idempotency의 `task_id`가 흔들리지 않는다. invalid logical_key/source/schema draft가 있으면 candidate write를 시작하지 않는다. focused 37개와 전체 discovery 260개(27 skip)를 통과했다.
 
 ## Next Tasks
 
 1. Slice 1 잔여 회귀 후보: archive 후 파생 인덱스 stale 이벤트. Phase 3 indexing 계약이 Draft라 현재는 구현하지 않는다. (fallback 동시성 race는 SoT v1.4 single-writer 제약으로 contract out 됨; 동시성 필요 시에만 (a) 보강 재검토.)
-2. Phase 2A 다음 slice: extraction runner/job orchestration을 추가한다. Snapshot Loader → provider extraction → source validation → candidate 저장을 한 흐름으로 연결하고, task별 부분 실패/재시도 단위는 아직 미확정이면 문서화 후 보수적으로 제한한다.
+2. Phase 2A 다음 slice: Analysis Mongo repository/persistence를 추가한다. candidate/needs_review 중심 Mongo 저장, job/task/candidate idempotency index, runner replay를 Mongo 양 경로에서 잠근다. Job/task 실패 상태 저장은 별도 계약이 필요하면 먼저 문서화한다.
 3. Application/Worker가 gateway `/v1/generate`를 호출하는 runtime wiring은 Phase payload/tool handler와 model tool-call wire format이 확정된 뒤 별도 slice로 구현한다.
 4. runner domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
 5. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
@@ -133,6 +134,7 @@
 - Slice 0.6 독립 검증(2026-06-24): 합격. httpx MockTransport/proxy/close 경계 6개 회귀 통과, `except` 순서 load-bearing 가정 4종 검증. 독립 검증 환경에서 `HttpxJsonTransport` 경유 actual adapter live smoke 완료(content `연결 확인 완료`, finish_reason=stop). 기록 `docs/verifications/2026-06-24/llm_gateway_slice_0_6_httpx.md`
 - Phase 2A source validation 자체 회귀(2026-06-29): `python3 -m unittest tests.test_analysis_source_validation tests.test_analysis_phase2a -v` 25개 통과, `python3 -m py_compile ...` 통과, 전체 discovery 248개 통과(27 skip).
 - Phase 2A taxonomy schema/extractor 자체 회귀(2026-06-29): `python3 -m py_compile services/application/app/analysis/schema.py services/application/app/analysis/extractor.py services/application/app/analysis/service.py tests/test_analysis_extractor_schema.py tests/test_analysis_phase2a.py tests/test_analysis_source_validation.py` 통과, Slice3 보강 후 `python3 -m py_compile services/application/app/analysis/extractor.py tests/test_analysis_extractor_schema.py` 통과, `python3 -m unittest tests.test_analysis_extractor_schema tests.test_analysis_source_validation tests.test_analysis_phase2a -v` 32개 통과, 전체 discovery 255개 통과(27 skip). 잠근 범위: 3종 최소 payload schema 정상/거절, service 저장 경로 malformed payload 거절, fake-provider extraction adapter parsing, malformed provider content 거절, deterministic logical_key, over-collapse 방지, 같은 anchor set 순서 무관 identity, 동일 anchor 중복 정규화.
+- Phase 2A extraction runner 자체 회귀(2026-06-29): `python3 -m py_compile services/application/app/analysis/runner.py services/application/app/analysis/service.py services/application/app/analysis/repository.py tests/test_analysis_runner.py tests/test_analysis_phase2a.py` 통과, `python3 -m unittest tests.test_analysis_runner tests.test_analysis_extractor_schema tests.test_analysis_source_validation tests.test_analysis_phase2a -v` 37개 통과, 전체 discovery 260개 통과(27 skip). 잠근 범위: load→extract→validate→store 흐름, same job replay의 job/task/candidate idempotency, invalid logical_key/source/schema draft가 있을 때 candidate 부분 저장 금지.
 
 ## Project Structure
 
@@ -189,6 +191,7 @@ services/
         │   ├── repository.py   # AnalysisRepository Protocol
         │   ├── schema.py       # 3종 taxonomy 최소 payload validator
         │   ├── extractor.py    # fake/provider extraction adapter + logical_key derivation
+        │   ├── runner.py       # Snapshot Loader→provider extraction→candidate 저장 orchestration
         │   ├── source.py       # Core SOT snapshot/source_ref adapter
         │   └── service.py      # in-memory analysis repository/service + retry idempotency
         └── agent_loop/
@@ -219,6 +222,7 @@ tests/
 ├── test_agent_loop_resolution.py
 ├── test_analysis_phase2a.py
 ├── test_analysis_extractor_schema.py
+├── test_analysis_runner.py
 ├── test_analysis_source_validation.py
 ├── test_core_sot.py
 ├── test_core_sot_fixture.py

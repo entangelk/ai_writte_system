@@ -76,6 +76,14 @@
 - D2 보강: SoT 상단 계약 버전과 문서 역할 표를 `v1.6.3`으로 갱신했다.
 - D3 보강: ordered evidence chain이 필요해지면 provider 배열 순서를 암묵적으로 쓰지 않고 `sequence`/`evidence_order` 같은 명시 필드로 후속 계약화한다고 SoT/plan/kickoff에 남겼다.
 
+### Phase 2A extraction runner/job orchestration 구현
+
+- 변경 파일: `services/application/app/analysis/runner.py`, `analysis/service.py`, `analysis/repository.py`, `tests/test_analysis_runner.py`, `tests/test_analysis_phase2a.py`, 문서/HANDOFF/CHANGELOG.
+- `AnalysisExtractionRunner`를 추가했다. runner는 `AnalysisJob` idempotent 생성/재사용 → Snapshot Loader → provider extraction → `AnalysisTask` 생성/재사용 → 전체 draft 사전 검증 → candidate 저장 순서로 실행한다.
+- `AnalysisTask`를 `project_id + job_id + candidate_type` 단위로 재사용하게 했다. candidate retry identity가 `project_id + task_id + logical_key`이므로, same job retry에서 task_id가 흔들리면 중복 candidate가 생길 수 있기 때문이다.
+- `AnalysisService.validate_candidate()`를 추가해 runner가 모든 draft를 사전 검증한 뒤 candidate write를 시작할 수 있게 했다. Job/task 생성은 idempotent setup으로 허용하지만, candidate write는 logical_key/source/schema validation이 전부 통과한 뒤 실행한다.
+- runner 회귀를 추가했다. load→extract→logical_key/source validation→candidate 저장 흐름, same job retry의 job/task/candidate replay, invalid second draft가 있을 때 첫 candidate가 부분 저장되지 않음을 잠갔다.
+
 ## Issues found
 
 - 문제: Phase 2A는 `02-analysis-pipeline.md`와 `analysis-memory-taxonomy.md` 모두에서 taxonomy와 candidate 경계를 미확정으로 남기고 있다.
@@ -113,6 +121,16 @@
 - Resolution: 동일 anchor 중복을 adapter/dedup key에서 정규화하고, SoT v1.6.3과 Phase 2A 문서에 unordered set 및 ordered-evidence 명시 필드 확장 방침을 기록했다.
 - Outcome: Phase 2A `source_anchors` identity는 순서와 중복 모두에 안정적인 set 의미론으로 닫혔다.
 
+- 문제: extraction runner가 매 retry마다 새 task를 만들면 candidate idempotency key의 `task_id`가 달라져 같은 logical candidate가 중복 저장될 수 있다.
+- 원인: 이전 slice의 `create_task()`는 idempotent하지 않았고 task identity 규칙이 없었다.
+- Resolution: `create_task(project_id, job_id, candidate_type)`를 job+type 단위 replay로 바꾸고, runner가 이 task를 재사용해 candidate를 저장하도록 했다.
+- Outcome: same job retry가 job/task/candidate 모두를 재사용한다.
+
+- 문제: provider extraction 결과 중 뒤쪽 candidate가 source validation에 실패하면 앞쪽 candidate만 저장되는 부분 저장이 생길 수 있다.
+- 원인: job/task 실패 상태와 부분 성공 정책이 아직 미확정이다.
+- Resolution: runner는 모든 draft를 먼저 `validate_candidate()`로 logical_key/source/schema 사전 검증하고, 전부 통과한 뒤에 candidate 저장을 시작한다. Job/task setup은 남을 수 있지만 candidate 부분 저장은 막는다.
+- Outcome: Phase 2A runner slice는 실패 상태 저장을 추측 구현하지 않고 candidate write만 보수적으로 all-or-nothing 처리한다.
+
 ## Decisions
 
 - 작업자 판단: 승인 전에는 Phase 2A candidate 저장소나 schema를 구현하지 않았다. 승인 후에는 첫 slice를 domain model + in-memory repository + idempotency 회귀로 제한했다. Snapshot Loader/source validation은 다음 slice로 남긴다.
@@ -122,6 +140,7 @@
 - 작업자 판단: `logical_key`는 사용자가 직접 넣는 opaque key에서 adapter 파생 기본값으로 전진했다. 파생 입력은 `candidate_type + payload + source_anchors`로 제한해 같은 retry는 dedupe하고 서로 다른 관찰은 과도하게 합치지 않는다.
 - 작업자 판단: G1은 옵션 (a) 순서 무관 정규화로 닫는다. source anchor의 출력 순서는 후보 의미가 아니라 provider formatting 흔들림이므로 identity에 포함하지 않는다.
 - 작업자 판단: duplicate anchor도 같은 이유로 identity에 포함하지 않는다. 순서나 중복이 의미가 되는 분석이 필요해지면 배열 위치가 아니라 명시적인 순서/역할 필드를 schema에 추가해야 한다.
+- 작업자 판단: extraction runner slice에서는 job/task 실패 상태 저장을 구현하지 않는다. 해당 상태 전이는 아직 계약이 없으므로 candidate write 부분 저장을 막는 사전 검증까지만 구현한다.
 
 ## Verification
 
@@ -149,8 +168,11 @@
 - Slice3 보강 focused: `python3 -m py_compile services/application/app/analysis/extractor.py tests/test_analysis_extractor_schema.py` 통과.
 - Slice3 보강 pattern sweep: `v1.6.3`/`unordered set`/`동일 anchor 중복`/`sequence`/`evidence_order`/`_dedupe_source_anchors`를 검색해 code/test/SoT/plan/kickoff에 매핑됨을 확인했다.
 - 전체: `python3 -m unittest discover -s tests` → 255개 통과(27 skip).
+- runner focused: `python3 -m unittest tests.test_analysis_runner tests.test_analysis_extractor_schema tests.test_analysis_source_validation tests.test_analysis_phase2a -v` → 37개 통과.
+- runner focused: `python3 -m py_compile services/application/app/analysis/runner.py services/application/app/analysis/service.py services/application/app/analysis/repository.py tests/test_analysis_runner.py tests/test_analysis_phase2a.py` 통과.
+- 전체: `python3 -m unittest discover -s tests` → 260개 통과(27 skip).
 
 ## Next steps
 
-- extraction runner/job orchestration을 추가한다. Snapshot Loader → provider extraction → source validation → candidate 저장을 한 흐름으로 연결한다.
+- Analysis Mongo repository/persistence를 추가한다. candidate/needs_review 중심 Mongo 저장, job/task/candidate idempotency index, runner replay를 Mongo 양 경로에서 잠근다.
 - 실제 llama.cpp endpoint가 준비되면 `scripts/benchmark_llm_provider.py`를 실행해 budget/retry production 기본 숫자를 확정한다.

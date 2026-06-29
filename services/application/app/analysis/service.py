@@ -48,6 +48,7 @@ class InMemoryAnalysisRepository:
         self.tasks: dict[str, AnalysisTask] = {}
         self.candidates: dict[str, AnalysisCandidate] = {}
         self._job_request_index: dict[tuple[str, str, str], str] = {}
+        self._task_request_index: dict[tuple[str, str, AnalysisCandidateType], str] = {}
         self._candidate_request_index: dict[tuple[str, str, str], str] = {}
 
     def next_job_id(self) -> str:
@@ -79,8 +80,16 @@ class InMemoryAnalysisRepository:
     def get_task(self, task_id: str) -> AnalysisTask | None:
         return self.tasks.get(task_id)
 
+    def find_task_request(
+        self, project_id: str, job_id: str, candidate_type: AnalysisCandidateType
+    ) -> str | None:
+        return self._task_request_index.get((project_id, job_id, candidate_type))
+
     def put_task(self, task: AnalysisTask) -> None:
         self.tasks[task.id] = task
+        self._task_request_index[
+            (task.project_id, task.job_id, task.candidate_type)
+        ] = task.id
 
     def get_candidate(self, candidate_id: str) -> AnalysisCandidate | None:
         return self.candidates.get(candidate_id)
@@ -150,6 +159,12 @@ class AnalysisService:
     ) -> AnalysisTask:
         job = self._require_job(project_id, job_id)
         self._validate_candidate_type(candidate_type)
+        existing_task_id = self._repo.find_task_request(
+            project_id, job.id, candidate_type
+        )
+        if existing_task_id is not None:
+            return self._require_task(project_id, existing_task_id)
+
         task = AnalysisTask(
             id=self._repo.next_task_id(),
             project_id=project_id,
@@ -174,26 +189,22 @@ class AnalysisService:
         source_anchors: Sequence[CandidateSourceAnchor] | None = None,
     ) -> RecordAnalysisCandidateResult:
         self._validate_logical_key(logical_key)
-        task = self._require_task(project_id, task_id)
-        self._validate_candidate_type(candidate_type)
-        self._validate_action(action)
-        self._validate_provenance(provenance)
-        if candidate_type != task.candidate_type:
-            raise InvalidAnalysisCandidate("candidate_type must match task")
-        normalized_payload = self._validate_payload(candidate_type, payload)
-        normalized_confidence = self._validate_confidence(confidence)
-        normalized_source_ref_ids = self._validate_source_ref_ids(source_ref_ids)
-        if self._source_ref_resolver is not None and source_anchors is None:
-            raise InvalidAnalysisCandidate("source_anchors are required")
-        if source_anchors is not None:
-            anchor_source_ref_ids = self._validate_source_anchors(
-                project_id=project_id,
-                source_anchors=source_anchors,
-            )
-            if anchor_source_ref_ids != normalized_source_ref_ids:
-                raise InvalidAnalysisCandidate(
-                    "source_anchors must match source_ref_ids"
-                )
+        (
+            task,
+            normalized_payload,
+            normalized_confidence,
+            normalized_source_ref_ids,
+        ) = self._validate_candidate_request(
+            project_id=project_id,
+            task_id=task_id,
+            candidate_type=candidate_type,
+            action=action,
+            provenance=provenance,
+            confidence=confidence,
+            source_ref_ids=source_ref_ids,
+            payload=payload,
+            source_anchors=source_anchors,
+        )
 
         existing_candidate_id = self._repo.find_candidate_request(
             project_id, task_id, logical_key
@@ -223,11 +234,78 @@ class AnalysisService:
             idempotent_replay=False,
         )
 
+    def validate_candidate(
+        self,
+        *,
+        project_id: str,
+        task_id: str,
+        logical_key: str,
+        candidate_type: AnalysisCandidateType,
+        action: AnalysisCandidateAction,
+        provenance: AnalysisProvenance,
+        confidence: float,
+        source_ref_ids: Sequence[str],
+        payload: Mapping[str, Any],
+        source_anchors: Sequence[CandidateSourceAnchor] | None = None,
+    ) -> None:
+        self._validate_logical_key(logical_key)
+        self._validate_candidate_request(
+            project_id=project_id,
+            task_id=task_id,
+            candidate_type=candidate_type,
+            action=action,
+            provenance=provenance,
+            confidence=confidence,
+            source_ref_ids=source_ref_ids,
+            payload=payload,
+            source_anchors=source_anchors,
+        )
+
     def list_candidates(
         self, *, project_id: str, job_id: str
     ) -> tuple[AnalysisCandidate, ...]:
         self._require_job(project_id, job_id)
         return self._repo.list_candidates_for_job(project_id, job_id)
+
+    def _validate_candidate_request(
+        self,
+        *,
+        project_id: str,
+        task_id: str,
+        candidate_type: AnalysisCandidateType,
+        action: AnalysisCandidateAction,
+        provenance: AnalysisProvenance,
+        confidence: float,
+        source_ref_ids: Sequence[str],
+        payload: Mapping[str, Any],
+        source_anchors: Sequence[CandidateSourceAnchor] | None,
+    ) -> tuple[AnalysisTask, Mapping[str, Any], float, tuple[str, ...]]:
+        task = self._require_task(project_id, task_id)
+        self._validate_candidate_type(candidate_type)
+        self._validate_action(action)
+        self._validate_provenance(provenance)
+        if candidate_type != task.candidate_type:
+            raise InvalidAnalysisCandidate("candidate_type must match task")
+        normalized_payload = self._validate_payload(candidate_type, payload)
+        normalized_confidence = self._validate_confidence(confidence)
+        normalized_source_ref_ids = self._validate_source_ref_ids(source_ref_ids)
+        if self._source_ref_resolver is not None and source_anchors is None:
+            raise InvalidAnalysisCandidate("source_anchors are required")
+        if source_anchors is not None:
+            anchor_source_ref_ids = self._validate_source_anchors(
+                project_id=project_id,
+                source_anchors=source_anchors,
+            )
+            if anchor_source_ref_ids != normalized_source_ref_ids:
+                raise InvalidAnalysisCandidate(
+                    "source_anchors must match source_ref_ids"
+                )
+        return (
+            task,
+            normalized_payload,
+            normalized_confidence,
+            normalized_source_ref_ids,
+        )
 
     def _require_job(self, project_id: str, job_id: str) -> AnalysisJob:
         job = self._repo.get_job(job_id)
