@@ -71,11 +71,13 @@
 - SourceRef persistence가 추가돼 Slice 1이 마무리됐다(2026-06-28, R3 폐쇄). `SourceRef`에 `id`/`project_id`를 더하고 `create_source_ref`가 `source_refs` collection에 persist, `get_source_ref`는 project_id 격리를 강제한다. archive 후 source_ref 보존을 in-memory+Mongo(양 경로) 회귀로 잠갔다(SoT §113 충족, 계약 변경 없음). source_ref ↔ candidate 연결은 Phase 2 범위.
 - Mongo index setup 잔여 회귀가 보강됐다(2026-06-28). `ensure_indexes()`는 현재 query path를 지탱하는 required index 2종(`uniq_save_request`, `blocks_by_snapshot`)을 생성하고, 기존 충돌 index 등 Mongo `OperationFailure`는 stable `MongoRepositorySetupError`로 표면화한다. 검증 후 현재 query path가 없는 `source_refs_by_snapshot` speculative index는 제거했고 SoT v1.5.1에 명확화했다.
 - Gemma Q4 benchmark harness가 추가됐다(2026-06-28). `scripts/benchmark_llm_provider.py`가 외부 llama.cpp-compatible endpoint를 대상으로 short smoke, JSON extraction, scene continuation case를 반복 실행하고 latency/token/error summary JSON을 출력한다. 검증 후 CLI fake-runner wiring, warmup failure 기록(`iteration=0`), report field schema를 보강했다. 실제 endpoint benchmark와 budget/retry production 기본값 확정은 아직 남아 있다.
+- Phase 2A 착수 최소 계약이 승인됐다(2026-06-29, SoT v1.6). `docs/plans/02-analysis-kickoff-decisions.md`는 최소 taxonomy 3종(`character_observation`, `event_observation`, `open_question_observation`), provenance `source_observed`/`ai_inferred`, Phase 2A `create` only, `needs_review` 고정, confidence range만 강제, `create_source_ref` primitive non-idempotent 유지 + candidate/job 저장층 idempotency 소유, 2A/2B milestone 분리를 확정한다. 후속 taxonomy 확장을 염두에 두되 첫 slice에서 넓은 taxonomy를 추측 구현하지 않는다.
+- Phase 2A domain model + in-memory repository가 구현됐다(2026-06-29). `services/application/app/analysis/`에 `AnalysisJob`/`AnalysisTask`/`AnalysisCandidate`, repository Protocol, in-memory repository/service를 추가했다. job idempotency(`project_id + snapshot_id + idempotency_key`), candidate retry idempotency(`project_id + task_id + logical_key`), project isolation, `needs_review` 고정, confidence range, approved literal runtime validation, same source span의 다른 logical candidate 허용을 18개 회귀로 잠갔다. 독립 검증 조건 C1(NaN confidence reject), C2(action≠`create` 회귀), C3(`logical_key` 임시 identity 계약 명시)를 보강했고 전체 discovery 241개 통과(27 skip).
 
 ## Next Tasks
 
 1. Slice 1 잔여 회귀 후보: archive 후 파생 인덱스 stale 이벤트. Phase 3 indexing 계약이 Draft라 현재는 구현하지 않는다. (fallback 동시성 race는 SoT v1.4 single-writer 제약으로 contract out 됨; 동시성 필요 시에만 (a) 보강 재검토.)
-2. Phase 2 source_ref 정책 결정: create_source_ref idempotency — 현재 같은 span 재호출 시 매번 새 ref, §111은 draft save만 규정하므로 중복 ref 정책을 Phase 2에서 결정. (archive 후 source_ref 생성 허용 여부는 SoT v1.5에서 "허용"으로 확정·회귀 lock됨.)
+2. Phase 2A 다음 slice: Snapshot Loader와 candidate source validation 추가. 같은 project source_ref만 허용하고 quote/hash/span mismatch를 거절하는 회귀를 잠근다.
 3. Application/Worker가 gateway `/v1/generate`를 호출하는 runtime wiring은 Phase payload/tool handler와 model tool-call wire format이 확정된 뒤 별도 slice로 구현한다.
 4. runner domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
 5. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
@@ -143,6 +145,7 @@ docs/
 │   ├── 00-foundations.md
 │   ├── product-shell.md         # 프로젝트/원고 관리와 내보내기
 │   ├── analysis-memory-taxonomy.md # 분석 대상 및 갱신 논의안
+│   ├── 02-analysis-kickoff-decisions.md # Phase 2A 착수 전 결정 브리프
 │   ├── implementation-plan.md   # vertical slice와 검증 계획
 │   ├── llm-gateway.md           # 모델 서빙 경계와 Gemma Q4 검증
 │   ├── gemma4-reuse.md          # 기존 구현 선택 이관과 Loop Gate 보강
@@ -152,7 +155,8 @@ docs/
     ├── 2026-06-24/work_log.md
     ├── 2026-06-25/work_log.md
     ├── 2026-06-26/work_log.md
-    └── 2026-06-28/work_log.md
+    ├── 2026-06-28/work_log.md
+    └── 2026-06-29/work_log.md
 services/
 ├── llm_gateway/
 │   ├── Dockerfile
@@ -176,6 +180,10 @@ services/
         │   ├── repository.py   # CoreSotRepository Protocol + DuplicateSaveRequest
         │   ├── mongo_repository.py # pymongo(sync) adapter: transaction/fallback/idempotency
         │   └── service.py      # Core SOT service + in-memory repository skeleton
+        ├── analysis/
+        │   ├── models.py       # Phase 2A AnalysisJob/Task/Candidate + approved literals
+        │   ├── repository.py   # AnalysisRepository Protocol
+        │   └── service.py      # in-memory analysis repository/service + retry idempotency
         └── agent_loop/
             ├── budget.py       # BudgetPolicy(5차원 budget+retry cap)/BudgetTracker+F1 usage 방어(A1/A3)
             ├── completion.py   # SelfReport + judge_completion completed/awaiting_review(A3)
@@ -202,6 +210,7 @@ tests/
 ├── test_agent_loop_parser.py
 ├── test_agent_loop_runner.py
 ├── test_agent_loop_resolution.py
+├── test_analysis_phase2a.py
 ├── test_core_sot.py
 ├── test_core_sot_fixture.py
 ├── test_core_sot_mongo_indexes.py

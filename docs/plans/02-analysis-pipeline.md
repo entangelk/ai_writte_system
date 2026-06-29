@@ -1,6 +1,6 @@
 # Phase 2. Analysis Pipeline
 
-상태: `Draft`  
+상태: `Draft` — Phase 2A kickoff subset approved on `2026-06-29`  
 선행 조건: Phase 1 snapshot/block/source_ref 계약. update-aware 분석은 Phase 3~4도 필요  
 후속 소비자: Indexing, Agentic Search, Review UI
 
@@ -8,7 +8,7 @@
 
 저장된 snapshot에서 서사·문체·의도 정보를 근거가 있는 구조화 기억 후보로 추출하고, 기존 기억이 있으면 신규 생성·갱신·근거 추가·충돌·변경 없음 중 어떤 작업이 필요한지 제안한다.
 
-분석 대상과 저장 단위는 아직 확정하지 않는다. 논의 기준은 [`analysis-memory-taxonomy.md`](analysis-memory-taxonomy.md)를 따른다.
+Phase 2A 착수 최소 계약은 [`02-analysis-kickoff-decisions.md`](02-analysis-kickoff-decisions.md)에 승인됐다. 더 넓은 분석 대상과 저장 단위는 계속 [`analysis-memory-taxonomy.md`](analysis-memory-taxonomy.md)를 논의 기준으로 삼는다.
 
 ## 구현 slice
 
@@ -16,7 +16,14 @@
 
 - snapshot과 직접 근거만 사용해 초기 후보 생성
 - schema/anchor/quote/confidence 검증
-- 원문 초안이 제시한 Character, Event, Location, Foreshadowing, Relation은 최소 출발 후보이며 확정 목록이 아님
+- 최소 taxonomy는 `character_observation`, `event_observation`, `open_question_observation` 3종으로 시작
+- 후속 확장을 염두에 두되 location/relation/mood/style 등은 첫 slice에서 추측 구현하지 않음
+- provenance는 `source_observed`/`ai_inferred`만 허용하고 `user_declared`는 WritingBrief/Product Shell 이후로 보류
+- candidate action은 `create` only
+- candidate status는 `needs_review` 고정
+- confidence는 `0.0 <= confidence <= 1.0`만 강제하고 자동 reject threshold는 후속 품질 fixture 이후 결정. NaN은 범위 밖이므로 거절
+- `create_source_ref` primitive는 non-idempotent로 유지하며, job/task retry idempotency는 candidate 저장층이 담당
+- 첫 slice의 candidate retry identity는 `project_id + task_id + logical_key`. `logical_key`는 비어 있지 않은 opaque string이고 derivation 규칙은 Snapshot Loader/source validation slice에서 확정
 - candidate/needs_review 중심의 MongoDB 저장
 
 ### Phase 2B: 기존 기억 대조와 변경 제안
@@ -29,7 +36,7 @@
 - 비교 작업은 [`flat-loop-gate.md`](flat-loop-gate.md)의 `analysis_compare` allowlist만 쓰는 bounded flat loop로 수행하며 sub-agent를 생성하지 않음
 - `compare_memory`/`validate_candidate`는 loop 중 preflight이며, 종료 후 Analysis Gate 검사를 대체하지 않음
 
-2A와 2B를 하나의 Phase로 구현할지, Phase 4 전후의 별도 milestone로 나눌지는 착수 전에 확정한다.
+2A와 2B는 별도 milestone로 나눈다. 기존 기억의 의미적 대조와 안전한 update 제안은 Phase 3~4 이후 2B에서 확정한다.
 
 ## 공통 MVP 범위
 
@@ -102,14 +109,16 @@ snapshot_id → AnalysisJob → Snapshot Loader
 
 ## 착수 전 결정사항
 
-- [ ] [`analysis-memory-taxonomy.md`](analysis-memory-taxonomy.md)의 MVP 분석 대상과 scope 확정
-- [ ] 사실·해석·의도를 구분하는 공통 provenance 계약
-- [ ] create/update/add_evidence/no_change/conflict literal과 판정 경계
-- [ ] confidence threshold를 공통값으로 둘지 유형별로 둘지
+- [x] Phase 2A 최소 taxonomy와 scope 확정: `character_observation`, `event_observation`, `open_question_observation`
+- [x] Phase 2A provenance literal 확정: `source_observed`, `ai_inferred`; `user_declared`는 WritingBrief/Product Shell 이후
+- [x] Phase 2A candidate action 확정: `create` only
+- [x] Phase 2A confidence 최소 계약 확정: `0.0 <= confidence <= 1.0`, 자동 reject threshold 없음
 - [ ] `confirmed` 자동 승격을 MVP에서 허용할지
 - [ ] entity resolution을 Phase 2에서 어디까지 자동화할지
 - [ ] 부분 성공 job의 최종 상태와 재시도 단위
-- [ ] 2A/2B를 별도 milestone로 나눌지와 2B의 prior context 계약
+- [x] 2A/2B milestone 분리
+- [ ] Phase 2B taxonomy 확장과 prior context 계약
+- [ ] Phase 2B `update`/`add_evidence`/`no_change`/`conflict` 판정 경계
 
 마지막 항목은 구현 순서상 중요하다. 최초 추출은 prior memory 없이 가능하지만, 기존 기억의 의미적 대조와 안전한 update 제안은 Phase 3~4 이후에야 완성된다.
 

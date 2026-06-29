@@ -1,0 +1,74 @@
+"""Phase 2A analysis candidate contracts."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import StrEnum
+from types import MappingProxyType
+from typing import Any, Mapping
+
+
+class AnalysisCandidateType(StrEnum):
+    CHARACTER_OBSERVATION = "character_observation"
+    EVENT_OBSERVATION = "event_observation"
+    OPEN_QUESTION_OBSERVATION = "open_question_observation"
+
+
+class AnalysisProvenance(StrEnum):
+    SOURCE_OBSERVED = "source_observed"
+    AI_INFERRED = "ai_inferred"
+
+
+class AnalysisCandidateAction(StrEnum):
+    CREATE = "create"
+
+
+class AnalysisCandidateStatus(StrEnum):
+    NEEDS_REVIEW = "needs_review"
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisJob:
+    id: str
+    project_id: str
+    snapshot_id: str
+    idempotency_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisTask:
+    id: str
+    project_id: str
+    job_id: str
+    candidate_type: AnalysisCandidateType
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisCandidate:
+    id: str
+    project_id: str
+    job_id: str
+    task_id: str
+    candidate_type: AnalysisCandidateType
+    action: AnalysisCandidateAction
+    status: AnalysisCandidateStatus
+    provenance: AnalysisProvenance
+    confidence: float
+    source_ref_ids: tuple[str, ...]
+    payload: Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class CreateAnalysisJobResult:
+    job: AnalysisJob
+    idempotent_replay: bool
+
+
+@dataclass(frozen=True, slots=True)
+class RecordAnalysisCandidateResult:
+    candidate: AnalysisCandidate
+    idempotent_replay: bool
+
+
+def immutable_payload(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    return MappingProxyType(dict(payload))

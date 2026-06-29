@@ -75,7 +75,11 @@ def _probe_mongo() -> tuple[bool, bool]:
     except OperationFailure:
         txn_supported = False
     finally:
-        client.drop_database(probe_db)
+        try:
+            client.drop_database(probe_db)
+        except PyMongoError:
+            client.close()
+            return False, False
         client.close()
     return True, txn_supported
 

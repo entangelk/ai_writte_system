@@ -2,6 +2,8 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-29 | Phase 2A domain model + in-memory repository 구현 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
+| 2026-06-29 | SoT v1.6: Phase 2A 착수 최소 계약 승인 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-28 | Gemma Q4 benchmark harness 추가 | [work log](docs/daily_logs/2026-06-28/work_log.md) |
 | 2026-06-28 | SoT v1.5.1: Mongo index setup 계약 명확화 | [work log](docs/daily_logs/2026-06-28/work_log.md) |
 | 2026-06-28 | Core SOT reusable fixture 추가(plan 01 #7 완료) | [work log](docs/daily_logs/2026-06-28/work_log.md) |
@@ -26,6 +28,22 @@
 | 2026-06-25 | AgentLoopRunner A3 decision 합성 회귀 구현 | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-25 | AgentLoopRunner A2 registry 계약 회귀 구현 | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-24 | 개발 계획 문서 구조 도입 | [work log](docs/daily_logs/2026-06-24/work_log.md) |
+
+## 2026-06-29
+
+### Changed
+
+- SoT를 v1.6으로 갱신해 Phase 2A 착수 최소 계약을 승인했다. 최소 taxonomy는 `character_observation`, `event_observation`, `open_question_observation` 3종으로 시작하되 후속 확장성을 열어 둔다. provenance는 `source_observed`/`ai_inferred`만 허용하고 `user_declared`는 WritingBrief/Product Shell 이후로 미룬다. Phase 2A candidate action은 `create` only, status는 `needs_review`, confidence는 `0.0 <= confidence <= 1.0` 범위만 강제한다. `create_source_ref` primitive는 non-idempotent로 유지하고 candidate/job 저장층이 retry idempotency를 소유한다. 2A와 2B는 별도 milestone로 분리한다.
+
+사용자는 추천 3종 taxonomy를 채택하되 확장성을 염두에 둘 것을 요청했다. provenance는 사용자 위임에 따라 작업자가 보수적으로 결정해 WritingBrief 이전에는 `user_declared`를 넣지 않는다.
+
+### Added
+
+- Phase 2A domain model과 in-memory repository를 추가했다. `services/application/app/analysis/`가 `AnalysisJob`/`AnalysisTask`/`AnalysisCandidate`, approved literal enum, `AnalysisRepository` Protocol, `InMemoryAnalysisRepository`, `AnalysisService`를 제공한다. job retry는 `project_id + snapshot_id + idempotency_key`, candidate retry는 `project_id + task_id + logical_key`로 idempotent replay한다. Candidate status는 `needs_review` 고정이고 confidence는 range만 검증한다. `user_declared` 같은 미승인 provenance 문자열은 runtime에서 거절한다. 독립 검증 조건 보강으로 NaN confidence를 거절하고 action≠`create` 회귀와 `logical_key` 계약을 추가했다. focused 18개 회귀와 전체 discovery 241개(27 skip)를 통과했다.
+
+### Fixed
+
+- 로컬 기본 Mongo가 인증을 요구하는 환경에서 `tests/test_core_sot_mongo.py` probe cleanup이 `Unauthorized`로 import 실패하던 문제를 보강했다. cleanup 실패도 Mongo 미가용으로 보고 skip하므로 infrastructure-free 전체 discovery가 다시 통과한다.
 
 ## 2026-06-28
 

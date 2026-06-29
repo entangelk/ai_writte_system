@@ -1,9 +1,9 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`  
-계약 버전: `v1.5.1`
+계약 버전: `v1.6`
 승인일: `2026-06-26`  
-최근 갱신일: `2026-06-28`  
+최근 갱신일: `2026-06-29`  
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
 적용 범위: 제품 경계, 서비스 책임, 데이터 정본, Gateway, AgentLoopRunner, Gate 합성, 검증 기록.
 
@@ -33,6 +33,7 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.6 | 2026-06-29 | Phase 2A 착수 최소 계약 승인: taxonomy 3종(`character_observation`, `event_observation`, `open_question_observation`), provenance `source_observed`/`ai_inferred`, candidate action `create` only, status `needs_review`, confidence range만 강제, `create_source_ref` primitive non-idempotent 유지 + candidate/job 저장층 retry idempotency 소유, 2A/2B milestone 분리. 같은 날 검증 보강으로 confidence NaN 거절, action≠`create` 회귀, `logical_key` 임시 identity 계약을 명시했다. | 사용자 결정, `plans/02-analysis-kickoff-decisions.md`, `verifications/2026-06-29/analysis_phase2a_slice1.md` |
 | v1.5.1 | 2026-06-28 | Core SOT Mongo adapter setup 계약 명확화: query path를 지탱하는 required index는 `uniq_save_request`와 `blocks_by_snapshot`이며, MongoDB가 required index 생성을 거부하면 `MongoRepositorySetupError`로 표면화한다. 현재 query path가 없는 `source_refs_by_snapshot` 인덱스는 required contract에서 제외한다. | `docs/verifications/2026-06-28/mongo_index_setup.md` O1/O2 |
 | v1.5 | 2026-06-28 | archive를 읽기 전용 상태로 명문화: 읽기 허용, 본문 쓰기(draft 생성·version 저장)+메타데이터 수정(rename) 차단(409), SOT 본문은 archive 무관 불변, 상태 전이(unarchive)와 source_ref/분석 후보 archived 정책은 범위 밖. 기존 구현·회귀와 정합하는 문서 명문화. (같은 날 비의미 명확화: archived project 하위 draft를 archive하는 것은 상태 전이이므로 하위 draft 쓰기 차단의 예외임을 명시 — `archive_api_endpoint.md` Issue #1.) | 사용자 결정, `docs/verifications/2026-06-28/rename_api.md` R1 |
 | v1.4 | 2026-06-28 | non-transaction fallback을 single-writer 전용으로 명시. 동시성 안전은 transaction 기본 경로가 담당하고, fallback의 orphan cleanup/retry guard는 같은 writer의 순차 재시도에만 정의됨. | 사용자 결정(R2 option b), `docs/verifications/2026-06-28/mongo_adapter_recheck.md` |
@@ -45,7 +46,7 @@
 
 | 문서 | 역할 | 지위 |
 |---|---|---|
-| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.5.1 |
+| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6 |
 | [`plans/README.md`](plans/README.md) | 계획 문서 진입점과 Phase/MVP 관계 | Draft |
 | [`plans/00-foundations.md`](plans/00-foundations.md) | 전역 원칙과 제품 경계 | Draft |
 | [`plans/implementation-plan.md`](plans/implementation-plan.md) | 구현 순서, slice 상태, 검증 gate | Draft |
@@ -53,6 +54,7 @@
 | [`plans/flat-loop-gate.md`](plans/flat-loop-gate.md) | AgentLoopRunner decision/tool/budget/completion 계약 | Draft, 일부 구현 검증됨 |
 | [`plans/product-shell.md`](plans/product-shell.md) | 사용자 제품 표면 | Draft |
 | [`plans/01-core-sot.md`](plans/01-core-sot.md) | MongoDB 정본 저장 계약 | Draft |
+| [`plans/02-analysis-kickoff-decisions.md`](plans/02-analysis-kickoff-decisions.md) | Phase 2A 착수 최소 결정 | Approved for Phase 2A kickoff |
 | [`plans/02-analysis-pipeline.md`](plans/02-analysis-pipeline.md) | 분석 후보와 Analysis Gate | Draft |
 | [`plans/03-indexing.md`](plans/03-indexing.md) | Chroma/ES 파생 인덱스 | Draft |
 | [`plans/04-agentic-search.md`](plans/04-agentic-search.md) | ContextPackage와 Context Gate | Draft |
@@ -121,7 +123,9 @@
   - 본문 쓰기(draft 생성, version 저장)와 메타데이터 수정(project/draft rename)은 차단한다(409 Archived). project archive는 그 하위 draft 쓰기까지 차단한다.
   - SOT 본문(`source_snapshots`, `draft_versions`, `source_blocks`)은 archive 여부와 무관하게 생성 후 불변이다. 따라서 "archived 본문 수정"이라는 연산은 존재하지 않는다.
   - archive/unarchive 같은 상태 전이는 본 쓰기 차단의 대상이 아니다. 여기에는 archived project 하위 draft를 archive하는 것도 포함되므로(상태 전이), "하위 draft 쓰기 차단"의 예외로서 archived project에서도 허용한다. unarchive는 MVP 범위가 아니므로 본 계약은 "archived인 동안 차단"으로 한정하며 영구 불변을 규정하지 않는다.
-  - `source_refs` 생성은 보존된 immutable snapshot에 대한 파생 주석이므로 archived 상태에서도 **허용한다**(사용자 결정). 이는 본문/메타데이터 쓰기 차단의 예외다. 단 `create_source_ref` idempotency와 분석 후보(candidate)의 archived 정책은 Phase 2/6에서 별도로 정한다.
+  - `source_refs` 생성은 보존된 immutable snapshot에 대한 파생 주석이므로 archived 상태에서도 **허용한다**(사용자 결정). 이는 본문/메타데이터 쓰기 차단의 예외다.
+- `create_source_ref` primitive는 non-idempotent다. 같은 span 재호출은 새 ref를 만들 수 있다. Phase 2A candidate/job 저장층이 같은 logical candidate retry 중복 방지 idempotency를 소유한다.
+- Phase 2A candidate retry identity는 임시로 `project_id + task_id + logical_key`다. `logical_key`는 비어 있지 않은 문자열이어야 하며, 첫 slice에서는 caller가 제공하는 opaque key로 취급한다. Snapshot Loader와 taxonomy별 schema가 확정될 때 logical key derivation 규칙을 별도로 잠근다.
 - archive/delete 이후 파생 인덱스는 stale 처리, version filter, rebuild 대상으로 다루며 MongoDB 정본 보존을 되돌리지 않는다.
 - 분석 후보의 부분 승인, 부분 저장, 나머지 retry는 Phase 2/6 review action idempotency 계약에서 다룬다. Slice 1 draft save idempotency와 섞지 않는다.
 
@@ -286,9 +290,14 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 정본 세부 문서: [`plans/02-analysis-pipeline.md`](plans/02-analysis-pipeline.md)
 
 - Phase 2A는 prior memory 없이 snapshot 근거 기반 후보를 만든다.
+- Phase 2A 최소 taxonomy는 `character_observation`, `event_observation`, `open_question_observation` 3종으로 시작하며 후속 확장을 막지 않는 구조로 구현한다.
+- Phase 2A provenance literal은 `source_observed`와 `ai_inferred`만 허용한다. `user_declared`는 WritingBrief/Product Shell 입력 계약 이후로 미룬다.
+- Phase 2A candidate action은 `create` only이고 status는 `needs_review`로 고정한다.
+- Phase 2A confidence는 `0.0 <= confidence <= 1.0`만 강제하고 자동 reject threshold는 후속 품질 fixture 이후 결정한다. NaN은 이 범위 밖이므로 거절한다.
+- Phase 2A와 2B는 별도 milestone이다.
 - Phase 2B는 Phase 3~4 이후 prior memory를 검색해 `create/update/add_evidence/no_change/conflict` 후보를 만든다.
 - Analysis AI는 canon을 확정하지 않고 기존 기억을 직접 덮어쓰지 않는다.
-- 분석 taxonomy, confidence threshold, `confirmed` 자동 승격 여부는 미확정이다.
+- Phase 2B taxonomy 확장, confidence threshold, `confirmed` 자동 승격 여부는 미확정이다.
 
 ### Phase 3. Indexing
 
@@ -355,8 +364,8 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 - `confirmed`와 `canonical`의 의미 및 승격 주체
 - Phase 2/6 review action idempotency와 부분 승인/부분 retry 정책
 - adaptive chunking 또는 길이 기반 episode/section chunking을 Phase 3 파생 index에 도입할지 여부
-- Analysis MVP taxonomy와 confidence threshold
-- Analysis `create/update/add_evidence/no_change/conflict`의 정확한 public envelope
+- Phase 2B taxonomy 확장과 confidence threshold
+- Analysis `update/add_evidence/no_change/conflict`의 정확한 public envelope
 - Chroma embedding model, ES analyzer, sync delivery 방식
 - ContextPackage schema variant(Writing용/Analysis용 공통 또는 분리)
 - WritingCandidate 출력 단위(full text/patch)
