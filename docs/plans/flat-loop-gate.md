@@ -117,7 +117,7 @@ provider/tool retry cap은 task profile의 필수 policy 값이며 0 이상이�
 | task profile | max_iterations | max_wall_clock_ms | max_total_tokens | max_tool_calls | max_repeated_calls | provider_retry_cap | tool_retry_cap | 근거 |
 |---|---:|---:|---:|---:|---:|---:|---:|---|
 | `analysis_compare` | 2 | 45000 | 1024 | 5 | 2 | 1 | 1 | `json_extraction` p95 8.70s/125 tokens에 prior-memory 비교용 provider 2회와 read-only tool budget 여유 |
-| `context_search` | 3 | 60000 | 1536 | 8 | 2 | 1 | 1 | search planning/validation의 다단계 조회를 허용하되 measured extraction보다 작은 token ceiling 유지 |
+| `context_search` | 3 | 60000 | 1536 | 8 | 2 | 1 | 1 | search planning/validation의 다단계 조회를 위해 measured extraction에 token 여유를 둠 |
 | `writing_generate` | 1 | 120000 | 1024 | 0 | 0 | 1 | 0 | `continue_scene` p95 57.16s/407 tokens의 약 2배 wall-clock, tool-free writing 계약 |
 
 이 값은 현재 Gemma Q4_0 + llama.cpp endpoint의 초기 운용 기본값이다. 모델, quant, context, prompt shape, tool handler latency가 바뀌면 같은 benchmark/report 절차로 재확정한다. 특히 `analysis_compare`와 `context_search`는 실제 domain tool-call branch가 아직 미구현이므로, tool latency가 들어온 뒤 필요하면 별도 benchmark로 조정한다.

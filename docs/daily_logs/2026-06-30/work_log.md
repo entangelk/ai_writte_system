@@ -67,6 +67,13 @@
 - SoT를 v1.6.13으로 올려 benchmark report와 `flat-loop-gate.md`가 production 기본값의 canonical 근거임을 기록하고, 미확정 목록에서 budget/retry production 숫자를 제거했다.
 - `scripts/benchmark_llm_provider.py`는 문서와 사용 예시처럼 file path로 직접 실행해도 repo package import가 되도록 `sys.path` bootstrap을 추가했다. `tests/test_llm_benchmark_script.py`에 `python scripts/benchmark_llm_provider.py --help` 회귀를 추가해 CLI 사용 표면을 잠갔다.
 
+### benchmark defaults 독립 검증 비차단 권고 보강
+
+- 변경 파일: `docs/verifications/2026-06-30/phase2a_run_endpoint_closure.md`, `docs/verifications/2026-06-30/gemma_benchmark_defaults.md`, `docs/plans/flat-loop-gate.md`, `services/application/app/agent_loop/resolution.py`, `HANDOFF.md`, `docs/daily_logs/2026-06-30/work_log.md`.
+- 검증 AI의 폐쇄 검증 기록 2건을 확인했다. `phase2a_run_endpoint_closure.md`와 `gemma_benchmark_defaults.md` 모두 합격이며, 검증자가 보고한 수치와 재계산 근거를 원문 산출물로 보존했다.
+- `gemma_benchmark_defaults.md`의 비차단 권고 2건을 보강했다. `flat-loop-gate.md`의 `context_search` 근거 문구가 1536 token ceiling과 모순되지 않도록 "measured extraction에 token 여유"를 둔다는 설명으로 정정했다.
+- `resolution.py`의 benchmark 이전 시제 주석을 benchmark 이후 현재 상태에 맞게 "flat-loop-gate.md가 소유"하는 숫자 기본값으로 정정했다.
+
 ## Issues found
 
 - 문제: HANDOFF의 다음 작업은 analysis HTTP API와 runner→gateway runtime wiring 중 선택이 필요하다고 되어 있었다.
@@ -109,6 +116,11 @@
 - Resolution: 사용자 승인된 escalated command로 benchmark를 재실행했다.
 - Outcome: live benchmark가 완료되어 budget/retry production 기본값을 추측 없이 확정할 수 있었다.
 
+- 문제: 독립 검증이 `context_search` budget 근거 문장과 실제 1536 token ceiling 사이의 수치 비일관, 그리고 benchmark 완료 후 stale해진 retry 주석을 발견했다.
+- 원인: benchmark 기본값을 확정하면서 값은 업데이트됐지만 설명 문장 일부가 이전 표현을 유지했다.
+- Resolution: 값은 유지하고 문구만 현재 계약과 수치에 맞게 정정했다.
+- Outcome: 검증의 비차단 권고 2건이 문서/주석 수준에서 폐쇄됐다.
+
 ## Decisions
 
 - Analysis HTTP API는 job 생성/replay와 조회만 담당하고 runner 실행 트리거를 포함하지 않는다. 이유: 실행 wiring은 별도 계약이 필요하며, 이 slice의 목적은 이미 구현된 analysis 상태를 public Application API로 노출하는 것이다.
@@ -142,6 +154,10 @@
 - `python3 scripts/benchmark_llm_provider.py --help` — `--base-url` 옵션 표시 확인.
 - `python3 -m unittest tests.test_llm_benchmark_script -v` — 8개 통과.
 - `python3 -m unittest discover tests -v` — 314개 통과(35 skip).
+- 검증 기록 확인: `docs/verifications/2026-06-30/phase2a_run_endpoint_closure.md`, `docs/verifications/2026-06-30/gemma_benchmark_defaults.md`.
+- benchmark defaults 비차단 권고 보강 후 stale 문구 pattern sweep — 추가 발견 없음.
+- `python3 -m py_compile services/application/app/agent_loop/resolution.py`
+- `python3 -m unittest tests.test_agent_loop_resolution -v` — 18개 통과.
 
 ## Next steps
 

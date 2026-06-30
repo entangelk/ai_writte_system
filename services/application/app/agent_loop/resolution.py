@@ -73,10 +73,11 @@ def resolve_retry(
     * retryable, cap remaining, but a budget dimension blocks the next attempt
       -> ``budget_exhausted`` with the original error literal preserved.
 
-    The retry cap's policy placement (numeric defaults deferred to the Gemma Q4
-    benchmark) is irrelevant here: the caller passes ``retries_remaining``,
-    derived from the matching ``BudgetPolicy`` retry cap (``provider_retry_cap``
-    / ``tool_retry_cap``) minus retries already used.
+    The retry cap's policy placement (numeric defaults owned by
+    flat-loop-gate.md after the Gemma Q4 benchmark) is irrelevant here: the
+    caller passes ``retries_remaining``, derived from the matching
+    ``BudgetPolicy`` retry cap (``provider_retry_cap`` / ``tool_retry_cap``)
+    minus retries already used.
     """
     error_decision = _error_decision(error_kind)
 
