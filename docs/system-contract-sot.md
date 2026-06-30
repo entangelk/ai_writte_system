@@ -1,9 +1,9 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`  
-계약 버전: `v1.6.12`
+계약 버전: `v1.6.13`
 승인일: `2026-06-26`  
-최근 갱신일: `2026-06-29`  
+최근 갱신일: `2026-06-30`
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
 적용 범위: 제품 경계, 서비스 책임, 데이터 정본, Gateway, AgentLoopRunner, Gate 합성, 검증 기록.
 
@@ -33,6 +33,7 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.6.13 | 2026-06-30 | Gemma Q4_0 llama.cpp live benchmark를 실행하고 AgentLoopRunner task profile의 초기 production budget/retry 숫자 기본값을 확정했다. Report는 `docs/benchmarks/2026-06-30/gemma_q4_llama_cpp_repeats3_warmup1.json`이며, `flat-loop-gate.md`가 `analysis_compare`, `context_search`, `writing_generate` 기본 policy를 소유한다. | 사용자 요청, `scripts/benchmark_llm_provider.py`, `docs/benchmarks/2026-06-30/gemma_q4_llama_cpp_repeats3_warmup1.json` |
 | v1.6.12 | 2026-06-30 | Phase 2A analysis run endpoint 계약을 승인·구현했다. `POST /projects/{project_id}/analysis/jobs/{job_id}/run`은 pending job만 runner dependency로 실행하고 요청 안에서 await해 terminal job과 candidate 목록을 반환한다. `running`/`succeeded`/`failed` job은 재실행하지 않고 `idempotent_replay=true`로 현재 job과 저장된 candidate를 반환한다. pending job에서 runner가 구성되지 않았으면 503, missing/cross-project 및 `snapshot_not_found`는 404, `schema_invalid`/`source_invalid` 계열은 400, `duplicate_conflict`는 409, provider/기타 실행 오류는 502로 표면화한다. source_ref 자동 생성과 Gateway runtime wiring은 제외다. | 사용자 요청, `tests/test_application_api.py`, `tests/test_analysis_runner.py` |
 | v1.6.11 | 2026-06-30 | Phase 2A analysis job/candidate HTTP read surface를 추가했다. Application API는 `POST /projects/{project_id}/analysis/jobs`로 job을 idempotent 생성/replay하고, `GET /projects/{project_id}/analysis/jobs/{job_id}`와 `GET /projects/{project_id}/analysis/jobs/{job_id}/candidates`로 job 상태와 candidate를 조회한다. 이 API는 runner/gateway 실행을 시작하지 않으며, 존재하지 않는 project 또는 cross-project job/candidate 접근은 404다. | `tests/test_application_api.py` |
 | v1.6.10 | 2026-06-29 | Phase 2A job all-or-nothing 범위를 명확화했다. all-or-nothing은 candidate write에 한정되며, job/task 생성은 idempotent setup이라 실패 후에도 남을 수 있다(롤백 대상 아님). 동작 변경 없음, runner slice 2 검증의 비차단 오해 여지 해소. | `verifications/2026-06-29/analysis_job_state_runner_slice2.md` |
@@ -58,7 +59,7 @@
 
 | 문서 | 역할 | 지위 |
 |---|---|---|
-| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.12 |
+| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.13 |
 | [`plans/README.md`](plans/README.md) | 계획 문서 진입점과 Phase/MVP 관계 | Draft |
 | [`plans/00-foundations.md`](plans/00-foundations.md) | 전역 원칙과 제품 경계 | Draft |
 | [`plans/implementation-plan.md`](plans/implementation-plan.md) | 구현 순서, slice 상태, 검증 gate | Draft |
@@ -371,6 +372,7 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 | AgentLoopRunner A2 | 구현·검증 완료 | `registry.py`, A2 verification |
 | AgentLoopRunner A3 | 구현·독립 검증 합격(보강) | `completion.py`, `resolution.py`, budget F1 방어 + retry cap, `InvalidBudgetPolicy.decision` |
 | AgentLoopRunner provider composition | 구현·독립 검증 합격(보강) | `parser.py`, `runner.py`, `test_agent_loop_runner.py`; I2 forward-lock(provider usage budget before completion, retry non-free), provider runner verification |
+| AgentLoopRunner production budget defaults | benchmark 기반 확정 | `docs/benchmarks/2026-06-30/gemma_q4_llama_cpp_repeats3_warmup1.json`, `plans/flat-loop-gate.md` |
 | Core SOT minimal skeleton | 구현·조건부 검증 보강 완료 | `services/application/app/core_sot/`, `services/application/app/main.py`, `tests/test_core_sot.py`, `tests/test_application_api.py`; C1/C2/C3 보강 |
 | Product Shell UI/Phase 2~6 | 미구현 | 계획 문서만 존재 |
 
@@ -397,7 +399,6 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 - ContextPackage schema variant(Writing용/Analysis용 공통 또는 분리)
 - WritingCandidate 출력 단위(full text/patch)
 - Writing Gate decision literal과 editor 처리
-- budget/retry production 기본 숫자
 - enum/bounds를 쓰는 첫 tool schema 등록 시 validator 확장 방식
 
 ## 변경 규칙

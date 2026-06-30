@@ -5,6 +5,7 @@
 - HANDOFF를 읽고 다음 작업을 진행한다.
 - Phase 2A의 다음 막히지 않은 slice로 analysis job/candidate HTTP API를 추가한다.
 - Phase 2A runner 실행 경계 추천안을 승인된 다음 작업으로 보고 run endpoint API contract를 구현한다.
+- 검증자 산출물까지 포함해 커밋한 뒤, HANDOFF의 다음 막히지 않은 작업인 Gemma Q4 live benchmark로 AgentLoopRunner budget/retry production 기본값을 확정한다.
 
 ## Completed work
 
@@ -55,6 +56,17 @@
 - F5 폐쇄: 코드가 이미 `snapshot_not_found`를 404로 표면화하고 있었으므로 SoT v1.6.12 run endpoint 계약과 runner execution brief, pipeline plan에 `snapshot_not_found` 404를 명시했다. `/run` HTTP 회귀도 추가해 failed job의 `failure_reason=snapshot_not_found`를 확인한다.
 - F6 보강: failed job HTTP replay를 직접 추가하고, `AnalysisExtractionRunner.run_job()`의 non-pending replay 분기를 직접 caller surface에서 잠갔다.
 
+### Gemma Q4 live benchmark 및 AgentLoopRunner budget 기본값 확정
+
+- 변경 파일: `scripts/benchmark_llm_provider.py`, `tests/test_llm_benchmark_script.py`, `docs/benchmarks/2026-06-30/gemma_q4_llama_cpp_repeats3_warmup1.json`, `docs/plans/flat-loop-gate.md`, `docs/plans/README.md`, `docs/plans/implementation-plan.md`, `docs/system-contract-sot.md`, `CHANGELOG.md`, `HANDOFF.md`, `docs/daily_logs/2026-06-30/work_log.md`.
+- 검증자 산출물 포함 run endpoint 작업은 먼저 커밋 `4f8182a`로 닫았다.
+- HANDOFF의 다음 막히지 않은 작업인 실제 Gemma/llama.cpp endpoint benchmark를 진행했다. `http://192.168.1.29:9080/health`와 `/v1/models`를 확인했고, model은 `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`, context는 8192로 확인됐다.
+- `python3 -m scripts.benchmark_llm_provider --base-url http://192.168.1.29:9080 --repeats 3 --warmups 1 --timeout 240`를 실행해 raw report를 `docs/benchmarks/2026-06-30/gemma_q4_llama_cpp_repeats3_warmup1.json`에 저장했다.
+- 측정 결과는 전체 failure 0이었다. p95/max token은 `short_smoke` 1.56s/28 tokens, `json_extraction` 8.70s/125 tokens, `continue_scene` 57.16s/407 tokens다.
+- `flat-loop-gate.md`에 초기 local MVP production 기본값을 확정했다: `analysis_compare` 2 iterations/45s/1024 tokens/5 tool calls/repeat 2/retry 1+1, `context_search` 3/60s/1536/8/repeat 2/retry 1+1, `writing_generate` 1/120s/1024/no tools/provider retry 1.
+- SoT를 v1.6.13으로 올려 benchmark report와 `flat-loop-gate.md`가 production 기본값의 canonical 근거임을 기록하고, 미확정 목록에서 budget/retry production 숫자를 제거했다.
+- `scripts/benchmark_llm_provider.py`는 문서와 사용 예시처럼 file path로 직접 실행해도 repo package import가 되도록 `sys.path` bootstrap을 추가했다. `tests/test_llm_benchmark_script.py`에 `python scripts/benchmark_llm_provider.py --help` 회귀를 추가해 CLI 사용 표면을 잠갔다.
+
 ## Issues found
 
 - 문제: HANDOFF의 다음 작업은 analysis HTTP API와 runner→gateway runtime wiring 중 선택이 필요하다고 되어 있었다.
@@ -87,6 +99,16 @@
 - Resolution: duplicate conflict 409, provider/기타 502, snapshot_not_found 404를 `/run` HTTP 테스트로 추가하고, 계약 문서에 snapshot_not_found 404를 명시했다.
 - Outcome: 조건부 합격의 F4/F5가 폐쇄됐고, 비차단 F6도 direct regression으로 보강됐다.
 
+- 문제: `python3 scripts/benchmark_llm_provider.py --help`가 `ModuleNotFoundError: No module named 'services'`로 실패했다.
+- 원인: script를 module mode가 아니라 file path로 실행하면 Python이 repo root를 import path에 넣지 않는다.
+- Resolution: `__package__`가 비어 있는 직접 실행 경로에서 repo root를 `sys.path`에 추가하고, subprocess 회귀를 추가했다.
+- Outcome: 문서와 직관적인 CLI 사용 방식이 동작하며, 기존 `python3 -m scripts.benchmark_llm_provider` 실행 방식도 유지된다.
+
+- 문제: sandbox 안의 Python/httpx benchmark가 endpoint에 연결하지 못했지만 `curl`은 성공했다.
+- 원인: sandbox network 제약으로 보이는 `httpx.ConnectError('All connection attempts failed')`가 발생했다.
+- Resolution: 사용자 승인된 escalated command로 benchmark를 재실행했다.
+- Outcome: live benchmark가 완료되어 budget/retry production 기본값을 추측 없이 확정할 수 있었다.
+
 ## Decisions
 
 - Analysis HTTP API는 job 생성/replay와 조회만 담당하고 runner 실행 트리거를 포함하지 않는다. 이유: 실행 wiring은 별도 계약이 필요하며, 이 slice의 목적은 이미 구현된 analysis 상태를 public Application API로 노출하는 것이다.
@@ -96,6 +118,7 @@
 - Runner 실행 경계 추천안은 이번 사용자 요청으로 승인된 다음 작업으로 처리했다. 별도 run endpoint, 요청 안 await, 상태 무관 replay, runner dependency 주입, source_ref 자동 생성/Gateway wiring 제외를 채택했다.
 - 실패 HTTP mapping은 이번 API contract slice에서 최소 public 계약으로 고정했다: missing/cross-project 및 snapshot_not_found 404, runner 미구성 503, schema/source invalid 400, duplicate conflict 409, provider/기타 실행 오류 502.
 - 독립 검증 F5에 따라 `snapshot_not_found`는 run endpoint에서 404로 표면화하는 것이 canonical이다. 이유: snapshot loader가 같은 project의 snapshot을 찾지 못한 상태는 missing resource이며, job은 실패 상태로 보존되어 이후 GET으로 조회된다.
+- AgentLoopRunner production budget/retry 기본값은 2026-06-30 Gemma Q4_0 llama.cpp benchmark report를 canonical 근거로 삼는다. 이 값은 현재 local MVP endpoint 기준의 초기 상한이며, 모델·quant·prompt shape·tool handler latency가 바뀌면 같은 benchmark/report 절차로 재확정한다.
 
 ## Verification
 
@@ -113,6 +136,12 @@
 - 보강 후 `python3 -m unittest tests.test_application_api tests.test_analysis_runner -v` — 54개 통과.
 - 보강 후 `python3 -m unittest discover tests -v` — 313개 통과(35 skip).
 - 보강 후 잠근 범위: `/run` duplicate conflict 409, provider/기타 exception 502, snapshot_not_found 404, failed job replay, `AnalysisExtractionRunner.run_job()` non-pending replay.
+- benchmark endpoint 확인: `curl -sS --max-time 5 http://192.168.1.29:9080/health` → `{"status":"ok"}`, `/v1/models` → `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`.
+- live benchmark: `python3 -m scripts.benchmark_llm_provider --base-url http://192.168.1.29:9080 --repeats 3 --warmups 1 --timeout 240` — 3 case 모두 failure 0, report 저장 완료.
+- `python3 -m py_compile scripts/benchmark_llm_provider.py tests/test_llm_benchmark_script.py`
+- `python3 scripts/benchmark_llm_provider.py --help` — `--base-url` 옵션 표시 확인.
+- `python3 -m unittest tests.test_llm_benchmark_script -v` — 8개 통과.
+- `python3 -m unittest discover tests -v` — 314개 통과(35 skip).
 
 ## Next steps
 

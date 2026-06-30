@@ -5,11 +5,16 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from time import perf_counter
 from typing import Any, TextIO
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from services.llm_gateway.app.client import LlamaCppProvider
 from services.llm_gateway.app.errors import ProviderError

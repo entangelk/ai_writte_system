@@ -1,6 +1,9 @@
 import io
 import json
+import subprocess
+import sys
 import unittest
+from pathlib import Path
 
 from scripts.benchmark_llm_provider import (
     BenchmarkCase,
@@ -279,6 +282,24 @@ class BenchmarkSummaryTests(unittest.TestCase):
             json.loads(out.getvalue())["metadata"]["base_url"],
             args.base_url,
         )
+
+    def test_script_file_path_invocation_can_import_repo_packages(self):
+        repo_root = Path(__file__).resolve().parents[1]
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "scripts/benchmark_llm_provider.py",
+                "--help",
+            ],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--base-url", result.stdout)
 
 
 def _run(

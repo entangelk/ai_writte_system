@@ -1,12 +1,12 @@
 # Flat Loop Gate 계약
 
-상태: `Draft`(decision/tool registry/budget policy/completion criteria slice는 2026-06-24 소유자 확정. 숫자 기본 한도는 후속)
+상태: `Draft`(decision/tool registry/budget policy/completion criteria slice는 2026-06-24 소유자 확정. 숫자 기본 한도는 2026-06-30 benchmark로 확정)
 선행 조건: [`gemma4-reuse.md`](gemma4-reuse.md)의 bounded flat loop 재사용 방침, Slice 0 LLM Gateway provider error 계약
 후속 소비자: Phase 2 Analysis Pipeline(2B 비교 loop), Phase 4 Agentic Search, Writing/Review
 
 ## 목표와 범위
 
-Application/Worker의 평면형 agent loop(`AgentLoopRunner`)가 정상 종료했는지, 아니면 왜 멈췄는지를 안정된 decision literal로 보고하고, task별로 허용된 domain tool과 다차원 budget 안에서 안전하게 실행하며, task별로 언제 `completed`로 종료하는지를 정의하는 계약을 확정한다. 숫자 기본 한도는 후속 slice로 둔다.
+Application/Worker의 평면형 agent loop(`AgentLoopRunner`)가 정상 종료했는지, 아니면 왜 멈췄는지를 안정된 decision literal로 보고하고, task별로 허용된 domain tool과 다차원 budget 안에서 안전하게 실행하며, task별로 언제 `completed`로 종료하는지를 정의하는 계약을 확정한다. 숫자 기본 한도는 2026-06-30 Gemma Q4 benchmark 결과로 초기 local MVP 값을 확정했다.
 
 flat loop는 [`gemma4-reuse.md`](gemma4-reuse.md) 원칙을 따른다. sub-agent spawn, delegate tool, 중첩 agent loop 호출은 지원하지 않는다.
 
@@ -74,7 +74,7 @@ task profile allowlist는 다음과 같다.
 
 ## Budget 계약
 
-Budget은 run 시작 전에 서버의 task profile로 고정한다. 요청자는 profile 한도보다 작은 값을 요청할 수 있지만 늘리거나 차원을 끌 수 없다. 모든 차원은 필수이며 누락·음수·서로 모순된 policy는 provider 호출 전에 `blocked`로 종료한다. production 숫자 기본값은 Gemma Q4 benchmark 뒤에 확정하며, 그전 contract test는 각 한도를 명시적으로 주입한다.
+Budget은 run 시작 전에 서버의 task profile로 고정한다. 요청자는 profile 한도보다 작은 값을 요청할 수 있지만 늘리거나 차원을 끌 수 없다. 모든 차원은 필수이며 누락·음수·서로 모순된 policy는 provider 호출 전에 `blocked`로 종료한다. production 숫자 기본값은 Gemma Q4 benchmark report `docs/benchmarks/2026-06-30/gemma_q4_llama_cpp_repeats3_warmup1.json`을 근거로 확정했다. contract test는 각 한도를 명시적으로 주입해 경계 semantics를 검증한다.
 
 ### 차원과 계측
 
@@ -103,12 +103,24 @@ signature는 strict schema validation을 통과한 뒤 `tool name + canonical JS
 
 ### retry와 terminal decision 우선순위
 
-provider/tool retry cap은 task profile의 필수 policy 값이며 0 이상이다. production 기본값은 benchmark와 운영 smoke 뒤에 확정한다. retry는 별도 무료 경로가 아니며 provider retry는 iteration/wall-clock/token을, tool retry는 wall-clock/tool-call/repeated-call을 그대로 소비한다.
+provider/tool retry cap은 task profile의 필수 policy 값이며 0 이상이다. retry는 별도 무료 경로가 아니며 provider retry는 iteration/wall-clock/token을, tool retry는 wall-clock/tool-call/repeated-call을 그대로 소비한다.
 
 - non-retryable provider/tool 오류는 즉시 `provider_error`/`tool_error`로 종료한다.
 - retryable 오류의 retry cap이 먼저 소진되면 해당 `provider_error`/`tool_error`로 종료한다.
 - retry cap은 남았지만 다음 retry를 어느 budget 차원이 막으면 `budget_exhausted`로 종료하고 원래 오류 literal을 trace에 보존한다.
 - runner deadline이 도달하면 새 retry를 시작하지 않는다. 사용자 cancel 입력은 본 v1 request 계약에서 지원하지 않으며, deadline에 의한 cancel만 `budget_exhausted`다.
+
+### production 기본값
+
+초기 local MVP 기본값은 2026-06-30 live benchmark(`repeats=3`, `warmups=1`, endpoint `http://192.168.1.29:9080`)를 근거로 둔다. 측정 요약: `short_smoke` p95 1.56s / max 28 tokens, `json_extraction` p95 8.70s / max 125 tokens, `continue_scene` p95 57.16s / max 407 tokens, 전체 failure 0. 아래 값은 measured p95와 max token에 여유를 둔 서버 기본 상한이다. 요청자는 더 작은 한도를 요청할 수 있지만 늘릴 수 없다.
+
+| task profile | max_iterations | max_wall_clock_ms | max_total_tokens | max_tool_calls | max_repeated_calls | provider_retry_cap | tool_retry_cap | 근거 |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| `analysis_compare` | 2 | 45000 | 1024 | 5 | 2 | 1 | 1 | `json_extraction` p95 8.70s/125 tokens에 prior-memory 비교용 provider 2회와 read-only tool budget 여유 |
+| `context_search` | 3 | 60000 | 1536 | 8 | 2 | 1 | 1 | search planning/validation의 다단계 조회를 허용하되 measured extraction보다 작은 token ceiling 유지 |
+| `writing_generate` | 1 | 120000 | 1024 | 0 | 0 | 1 | 0 | `continue_scene` p95 57.16s/407 tokens의 약 2배 wall-clock, tool-free writing 계약 |
+
+이 값은 현재 Gemma Q4_0 + llama.cpp endpoint의 초기 운용 기본값이다. 모델, quant, context, prompt shape, tool handler latency가 바뀌면 같은 benchmark/report 절차로 재확정한다. 특히 `analysis_compare`와 `context_search`는 실제 domain tool-call branch가 아직 미구현이므로, tool latency가 들어온 뒤 필요하면 별도 benchmark로 조정한다.
 
 ### budget boundary matrix(구현 slice 회귀 lock list)
 
@@ -161,7 +173,7 @@ loop가 최종 answer를 도출하거나 계획된 작업을 정상 완료한 �
 
 ### budget_exhausted
 
-iteration·wall-clock·token·tool-call·repeated-call 예산이 완료 전 추가 진행을 막거나 token 한도를 초과해 멈춘 상태. **성공이 아니다**([`gemma4-reuse.md`](gemma4-reuse.md)의 "max iteration 시 마지막 content를 정상 완료로 오해" 보강점). budget 차원과 초과 정책은 본 문서에서 확정했고 숫자 기본 한도는 Gemma Q4 benchmark 이후 확정한다.
+iteration·wall-clock·token·tool-call·repeated-call 예산이 완료 전 추가 진행을 막거나 token 한도를 초과해 멈춘 상태. **성공이 아니다**([`gemma4-reuse.md`](gemma4-reuse.md)의 "max iteration 시 마지막 content를 정상 완료로 오해" 보강점). budget 차원과 초과 정책, 숫자 기본 한도는 본 문서에서 확정한다.
 
 ### invalid_tool_arguments
 
@@ -251,13 +263,12 @@ LLM provider(Gateway) 실패로 종료한 상태. **coarse umbrella decision**�
 
 ## 제외 범위(후속 slice)
 
-- **숫자 기본 한도**: 각 budget 및 retry cap의 production 값. hardware benchmark([`llm-gateway.md`](llm-gateway.md) §Slice 0 benchmark) 이후 확정한다.
 - **저장 정책**: trace의 thinking text 보존 여부·길이 제한·기본 비보존.
 
 ## 착수 전 결정사항(남음)
 
 - [x] tool registry 계약 확정: strict validator, task별 allowlist, v1 domain tool 6종(2026-06-24 소유자 확정)
-- [x] budget 5차원·계측·초과·retry 우선순위 확정(2026-06-24 소유자 확정). 숫자 기본 한도는 benchmark 이후
+- [x] budget 5차원·계측·초과·retry 우선순위 확정(2026-06-24 소유자 확정). 숫자 기본 한도는 2026-06-30 live benchmark로 확정
 - [x] task별 completion criteria 확정(Analysis/Context/Writing): 하이브리드 판정, 완결된 산출 vs loop 미해결 구분(2026-06-24 소유자 확정)
 - [x] decision literal 7종 및 세 Gate 직교 원칙(2026-06-24 소유자 확정)
 - [x] `needs_review` → `awaiting_review` rename(Analysis candidate status 충돌 해소)

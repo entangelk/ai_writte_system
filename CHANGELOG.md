@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-30 | SoT v1.6.13: Gemma Q4 benchmark 기반 AgentLoopRunner budget/retry 기본값 확정 | [work log](docs/daily_logs/2026-06-30/work_log.md) |
 | 2026-06-30 | SoT v1.6.12: Phase 2A analysis run endpoint 추가 | [work log](docs/daily_logs/2026-06-30/work_log.md) |
 | 2026-06-30 | SoT v1.6.11: Phase 2A analysis job/candidate HTTP API 추가 | [work log](docs/daily_logs/2026-06-30/work_log.md) |
 | 2026-06-29 | SoT v1.6.10: job-state slice 2 검증 조건 폐쇄(state-agnostic replay + base schema_invalid 회귀) + all-or-nothing 범위 명확화 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
@@ -48,12 +49,18 @@
 
 ### Added
 
+- Gemma Q4_0 llama.cpp live benchmark report를 추가했다. `docs/benchmarks/2026-06-30/gemma_q4_llama_cpp_repeats3_warmup1.json`은 endpoint `http://192.168.1.29:9080`, model `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`, `repeats=3`, `warmups=1` 결과를 담는다.
 - Phase 2A analysis run endpoint를 추가했다. `POST /projects/{project_id}/analysis/jobs/{job_id}/run`은 pending job만 injected runner로 실행하고 요청 안에서 await해 terminal job과 candidate 목록을 반환한다. `running`/`succeeded`/`failed` job은 재실행하지 않고 `idempotent_replay=true`로 현재 상태와 저장된 candidate를 반환한다. 기본 runtime은 아직 실제 provider/Gateway runner를 구성하지 않으므로 pending run은 runner 미구성 시 503이며, Gateway runtime wiring과 source_ref 자동 생성은 별도 slice로 남겼다.
 - Phase 2A analysis job/candidate HTTP API를 추가했다. `POST /projects/{project_id}/analysis/jobs`는 job을 `project_id + snapshot_id + idempotency_key` 기준으로 idempotent 생성/replay하고, `GET /projects/{project_id}/analysis/jobs/{job_id}`와 `GET /projects/{project_id}/analysis/jobs/{job_id}/candidates`는 job 상태와 저장된 candidate를 읽는다. 이 surface는 runner나 Gateway 호출을 시작하지 않으며, 존재하지 않는 project와 cross-project job/candidate 접근은 404로 잠갔다.
 
 ### Fixed
 
+- `scripts/benchmark_llm_provider.py`를 file path로 직접 실행할 때 repo package import가 실패하던 문제를 보강하고 subprocess 회귀를 추가했다.
 - Phase 2A run endpoint 독립 검증 조건을 폐쇄했다. `/run` HTTP 경로의 duplicate conflict 409, provider/기타 exception 502, `snapshot_not_found` 404를 named regression으로 추가하고, `snapshot_not_found` 404를 SoT v1.6.12 계약에 명시했다.
+
+### Changed
+
+- SoT v1.6.13과 `docs/plans/flat-loop-gate.md`에 AgentLoopRunner production budget/retry 기본값을 확정했다. 초기 local MVP 기준 기본값은 benchmark p95/max token에 여유를 둔 `analysis_compare`, `context_search`, `writing_generate` profile별 상한이다.
 
 ## 2026-06-29
 
