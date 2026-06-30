@@ -7,6 +7,11 @@ import os
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from services.application.app.analysis.service import (
+    AnalysisNotFound,
+    AnalysisService,
+    InMemoryAnalysisRepository,
+)
 from services.application.app.core_sot.service import (
     Archived,
     CoreSotError,
@@ -16,7 +21,7 @@ from services.application.app.core_sot.service import (
 )
 
 
-def _default_service() -> CoreSotService:
+def _default_core_sot_service() -> CoreSotService:
     """Build the service from environment configuration.
 
     Uses MongoDB when ``CORE_SOT_MONGO_URI`` is set (transaction-backed by
@@ -45,8 +50,35 @@ def _default_service() -> CoreSotService:
     return CoreSotService(repository)
 
 
+def _default_analysis_service() -> AnalysisService:
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if not uri:
+        return AnalysisService(InMemoryAnalysisRepository())
+
+    # Imported lazily so the in-memory path needs no pymongo install.
+    from services.application.app.analysis.mongo_repository import (
+        MongoAnalysisRepository,
+    )
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+
+    use_transactions = os.environ.get(
+        "CORE_SOT_MONGO_TRANSACTIONS", "true"
+    ).lower() not in {"0", "false", "no"}
+    repository = MongoAnalysisRepository.from_uri(
+        uri,
+        db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME),
+        use_transactions=use_transactions,
+    )
+    return AnalysisService(repository)
+
+
 class CreateProjectRequest(BaseModel):
     name: str
+
+
+class CreateAnalysisJobRequest(BaseModel):
+    snapshot_id: str
+    idempotency_key: str
 
 
 class CreateDraftRequest(BaseModel):
@@ -66,9 +98,13 @@ class SaveDraftRequest(BaseModel):
     idempotency_key: str
 
 
-def create_app(service: CoreSotService | None = None) -> FastAPI:
+def create_app(
+    service: CoreSotService | None = None,
+    analysis_service: AnalysisService | None = None,
+) -> FastAPI:
     app = FastAPI(title="AI Writing System Application")
-    core_sot = service or _default_service()
+    core_sot = service or _default_core_sot_service()
+    analysis = analysis_service or _default_analysis_service()
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -95,6 +131,36 @@ def create_app(service: CoreSotService | None = None) -> FastAPI:
             "version_number": version.version_number,
             "snapshot_id": version.snapshot_id,
         }
+
+    def _analysis_job_payload(job) -> dict[str, object]:
+        return {
+            "id": job.id,
+            "project_id": job.project_id,
+            "snapshot_id": job.snapshot_id,
+            "status": str(job.status),
+            "failure_reason": (
+                str(job.failure_reason) if job.failure_reason is not None else None
+            ),
+            "failure_detail": job.failure_detail,
+        }
+
+    def _analysis_candidate_payload(candidate) -> dict[str, object]:
+        return {
+            "id": candidate.id,
+            "project_id": candidate.project_id,
+            "job_id": candidate.job_id,
+            "task_id": candidate.task_id,
+            "candidate_type": str(candidate.candidate_type),
+            "action": str(candidate.action),
+            "status": str(candidate.status),
+            "provenance": str(candidate.provenance),
+            "confidence": candidate.confidence,
+            "source_ref_ids": list(candidate.source_ref_ids),
+            "payload": dict(candidate.payload),
+        }
+
+    def _require_project_exists(project_id: str) -> None:
+        core_sot.get_project(project_id=project_id)
 
     @app.post("/projects")
     async def create_project(request: CreateProjectRequest) -> dict[str, object]:
@@ -269,6 +335,48 @@ def create_app(service: CoreSotService | None = None) -> FastAPI:
                 for block in result.blocks
             ],
             "idempotent_replay": result.idempotent_replay,
+        }
+
+    @app.post("/projects/{project_id}/analysis/jobs")
+    async def create_analysis_job(
+        project_id: str, request: CreateAnalysisJobRequest
+    ) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+            result = analysis.create_job(
+                project_id=project_id,
+                snapshot_id=request.snapshot_id,
+                idempotency_key=request.idempotency_key,
+            )
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {
+            "job": _analysis_job_payload(result.job),
+            "idempotent_replay": result.idempotent_replay,
+        }
+
+    @app.get("/projects/{project_id}/analysis/jobs/{job_id}")
+    async def get_analysis_job(project_id: str, job_id: str) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+            job = analysis.get_job(project_id=project_id, job_id=job_id)
+        except (AnalysisNotFound, NotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _analysis_job_payload(job)
+
+    @app.get("/projects/{project_id}/analysis/jobs/{job_id}/candidates")
+    async def list_analysis_candidates(
+        project_id: str, job_id: str
+    ) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+            candidates = analysis.list_candidates(project_id=project_id, job_id=job_id)
+        except (AnalysisNotFound, NotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {
+            "candidates": [
+                _analysis_candidate_payload(candidate) for candidate in candidates
+            ]
         }
 
     return app

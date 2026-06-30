@@ -1,0 +1,57 @@
+# Work Log — 2026-06-30
+
+## Goals
+
+- HANDOFF를 읽고 다음 작업을 진행한다.
+- Phase 2A의 다음 막히지 않은 slice로 analysis job/candidate HTTP API를 추가한다.
+
+## Completed work
+
+### Phase 2A analysis job/candidate HTTP API 추가
+
+- 변경 파일: `services/application/app/main.py`, `services/application/app/analysis/service.py`, `tests/test_application_api.py`, `docs/system-contract-sot.md`, `docs/plans/02-analysis-pipeline.md`, `CHANGELOG.md`, `HANDOFF.md`, `docs/daily_logs/2026-06-30/work_log.md`.
+- HANDOFF의 다음 후보 중 runner→gateway runtime wiring은 model tool-call wire format/payload 확정에 의존해 현재 구현하지 않는 것이 SoT와 일치한다. 따라서 Core SOT API 패턴에 맞춰 analysis job/candidate 상태 노출 API를 먼저 구현했다.
+- `AnalysisService.get_job()`를 추가해 repository 내부 `_require_job()`을 public read surface로 열었다.
+- `create_app()`가 `analysis_service`를 주입받을 수 있게 하고, 기본 runtime에서는 `CORE_SOT_MONGO_URI`가 있으면 `MongoAnalysisRepository`, 없으면 `InMemoryAnalysisRepository`를 사용하도록 했다.
+- 새 API:
+  - `POST /projects/{project_id}/analysis/jobs`: `project_id + snapshot_id + idempotency_key` 기준 job idempotent 생성/replay.
+  - `GET /projects/{project_id}/analysis/jobs/{job_id}`: job 상태/failure field 조회.
+  - `GET /projects/{project_id}/analysis/jobs/{job_id}/candidates`: 저장된 candidate 목록 조회.
+- 이 surface는 runner나 Gateway 호출을 시작하지 않는다. 존재하지 않는 project와 cross-project job/candidate 접근은 404로 잠갔다.
+- SoT를 v1.6.11로 올리고 `02-analysis-pipeline.md`에 API 경계를 명시했다.
+
+### Phase 2A analysis HTTP API 독립 검증 조건 보강
+
+- 변경 파일: `tests/test_application_api.py`, `HANDOFF.md`, `docs/daily_logs/2026-06-30/work_log.md`.
+- 독립 검증 기록 `docs/verifications/2026-06-30/phase2a_analysis_http_api.md`가 조건부 합격으로 I1을 제기했다. 계약이 "존재하지 않는 project → 404"를 3개 endpoint에 적용하지만, 기존 회귀는 POST와 GET job만 건드리고 `GET /projects/{nope}/analysis/jobs/{any}/candidates`를 잠그지 않았다.
+- `test_analysis_job_missing_project_returns_404`에 candidates endpoint 호출을 추가해 I1 빈 셀을 폐쇄했다.
+- 비차단 권고 I2도 함께 보강했다. `test_analysis_missing_job_under_existing_project_returns_404`를 추가해 존재하는 project 아래 없는 job id에 대해 GET job과 GET candidates가 404를 반환함을 잠갔다.
+- I3(빈 `idempotency_key`가 HTTP에서 500이 될 수 있음)는 계약이 명명하지 않은 malformed request 정책 변경이라 이번 조건 폐쇄 범위에서는 건드리지 않고 후속 참고로 남겼다.
+
+## Issues found
+
+- 문제: HANDOFF의 다음 작업은 analysis HTTP API와 runner→gateway runtime wiring 중 선택이 필요하다고 되어 있었다.
+- 원인: runtime wiring은 Gateway tool-call response parsing, model tool-call wire format, Phase payload/tool handler가 아직 미확정이라 구현하면 wire를 추측하게 된다.
+- Resolution: 막힌 wiring은 그대로 Next Tasks에 남기고, 상태/결과 노출 HTTP API만 좁게 구현했다.
+- Outcome: Phase 2A job/candidate를 UI나 후속 worker가 조회할 수 있는 최소 public surface가 생겼고, 미확정 LLM/tool-call 계약은 건드리지 않았다.
+
+- 문제: 독립 검증이 GET candidates missing-project 404 회귀 누락을 발견했다.
+- 원인: POST와 GET job missing-project는 같은 테스트에서 잠겼지만, candidates handler의 `_require_project_exists()` 호출은 endpoint-specific 회귀가 없었다.
+- Resolution: candidates missing-project 404 회귀를 추가했고, 권고였던 existing-project missing job 404도 GET job/GET candidates 양쪽으로 보강했다.
+- Outcome: 조건부 합격의 차단 조건 I1이 폐쇄됐고, 권고 I2도 회귀로 잠겼다.
+
+## Decisions
+
+- Analysis HTTP API는 job 생성/replay와 조회만 담당하고 runner 실행 트리거를 포함하지 않는다. 이유: 실행 wiring은 별도 계약이 필요하며, 이 slice의 목적은 이미 구현된 analysis 상태를 public Application API로 노출하는 것이다.
+- `POST /projects/{project_id}/analysis/jobs`는 project 존재만 검증하고 snapshot 존재는 앞당겨 검증하지 않는다. 이유: runner의 `snapshot_not_found` failure_reason 계약이 이미 snapshot load 실패를 소유한다.
+
+## Verification
+
+- `python3 -m py_compile services/application/app/main.py services/application/app/analysis/service.py tests/test_application_api.py`
+- `python3 -m unittest tests.test_application_api -v` — 28개 통과.
+- `python3 -m unittest discover tests -v` — 303개 통과(35 skip).
+- 잠근 범위: job create/replay/get, candidate list read-back, missing project 404(POST/GET job/GET candidates), existing-project missing job 404, cross-project job/candidate 404.
+
+## Next steps
+
+- 다음 Phase 2A 작업은 runner 실행을 API/Worker에서 시작하는 계약 브리프다. Gateway `/v1/generate` runtime wiring과 domain tool-call branch는 model tool-call wire format/payload 확정 뒤 구현한다.

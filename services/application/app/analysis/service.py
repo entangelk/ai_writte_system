@@ -199,6 +199,9 @@ class AnalysisService:
         self._repo.put_job(job)
         return CreateAnalysisJobResult(job=job, idempotent_replay=False)
 
+    def get_job(self, *, project_id: str, job_id: str) -> AnalysisJob:
+        return self._require_job(project_id, job_id)
+
     def mark_job_running(self, *, project_id: str, job_id: str) -> AnalysisJob:
         return self._transition_job(
             project_id=project_id,

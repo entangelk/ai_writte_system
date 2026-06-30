@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-30 | SoT v1.6.11: Phase 2A analysis job/candidate HTTP API 추가 | [work log](docs/daily_logs/2026-06-30/work_log.md) |
 | 2026-06-29 | SoT v1.6.10: job-state slice 2 검증 조건 폐쇄(state-agnostic replay + base schema_invalid 회귀) + all-or-nothing 범위 명확화 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | Phase 2A job 상태 전이 runner 통합(slice 2): 새 job만 실행·실패 지점→failure_reason 매핑·replay 비재실행 | [work log](docs/daily_logs/2026-06-29/work_log.md) |
 | 2026-06-29 | Phase 2A job-state slice 1 검증 조건 폐쇄(failure_reason enum 5종 + skip-aware live job-state 회귀) | [work log](docs/daily_logs/2026-06-29/work_log.md) |
@@ -41,6 +42,12 @@
 | 2026-06-25 | AgentLoopRunner A3 decision 합성 회귀 구현 | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-25 | AgentLoopRunner A2 registry 계약 회귀 구현 | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-24 | 개발 계획 문서 구조 도입 | [work log](docs/daily_logs/2026-06-24/work_log.md) |
+
+## 2026-06-30
+
+### Added
+
+- Phase 2A analysis job/candidate HTTP API를 추가했다. `POST /projects/{project_id}/analysis/jobs`는 job을 `project_id + snapshot_id + idempotency_key` 기준으로 idempotent 생성/replay하고, `GET /projects/{project_id}/analysis/jobs/{job_id}`와 `GET /projects/{project_id}/analysis/jobs/{job_id}/candidates`는 job 상태와 저장된 candidate를 읽는다. 이 surface는 runner나 Gateway 호출을 시작하지 않으며, 존재하지 않는 project와 cross-project job/candidate 접근은 404로 잠갔다.
 
 ## 2026-06-29
 

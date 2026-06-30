@@ -32,6 +32,7 @@ Phase 2A 착수 최소 계약은 [`02-analysis-kickoff-decisions.md`](02-analysi
 - service batch API는 같은 batch 안의 동일 `project_id + task_id + logical_key` request를 idempotent replay로 정규화한다. 첫 request는 candidate를 만들고 이후 동일 request는 같은 candidate를 반환하며, logical_key가 다른 request는 같은 batch에서도 별도 candidate로 유지한다.
 - candidate/needs_review 중심의 MongoDB 저장은 `analysis_jobs`, `analysis_tasks`, `analysis_candidates` collection에 기록한다. Required idempotency indexes는 `uniq_analysis_job_request`(`project_id`, `snapshot_id`, `idempotency_key`, unique), `uniq_analysis_task_request`(`project_id`, `job_id`, `candidate_type`, unique), `uniq_analysis_candidate_request`(`project_id`, `task_id`, `logical_key`, unique)이며, job candidate list는 `analysis_candidates_by_job`(`project_id`, `job_id`) index를 사용한다. Candidate batch write는 transaction 경로에서 한 트랜잭션으로 commit하고, non-transaction fallback은 single-writer local/test 전용으로 실패 시 이번 시도에서 새로 쓴 candidate만 rollback한다.
 - candidate write의 write-error 분류는 duplicate-key 충돌만 `DuplicateAnalysisCandidateRequest`로 표면화한다. `insert_many` 중복은 pymongo가 code `11000`을 담은 `BulkWriteError`로 던지므로 양 경로가 이를 매핑하고, duplicate가 아닌 `BulkWriteError`/`PyMongoError`는 원본 타입을 보존해 인프라 오류가 duplicate request로 오표기되지 않게 한다.
+- Application API는 `POST /projects/{project_id}/analysis/jobs`, `GET /projects/{project_id}/analysis/jobs/{job_id}`, `GET /projects/{project_id}/analysis/jobs/{job_id}/candidates`를 제공한다. 이 surface는 job 생성/idempotent replay와 상태·candidate 조회만 담당하며 runner 또는 Gateway 호출은 시작하지 않는다. 존재하지 않는 project와 cross-project job/candidate 접근은 404다.
 
 ### Phase 2B: 기존 기억 대조와 변경 제안
 

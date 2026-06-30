@@ -5,6 +5,15 @@ import unittest
 
 import httpx
 
+from services.application.app.analysis.models import (
+    AnalysisCandidateAction,
+    AnalysisCandidateType,
+    AnalysisProvenance,
+)
+from services.application.app.analysis.service import (
+    AnalysisService,
+    InMemoryAnalysisRepository,
+)
 from services.application.app.core_sot.service import (
     CoreSotService,
     InMemoryCoreSotRepository,
@@ -517,6 +526,125 @@ class ApplicationApiTest(unittest.TestCase):
         self.assertEqual(got_draft.status_code, 200)
         self.assertTrue(got_draft.json()["archived"])
         self.assertIn(draft["id"], [d["id"] for d in listed_drafts])
+
+    def test_analysis_job_create_get_and_idempotent_replay(self):
+        core_sot = CoreSotService(InMemoryCoreSotRepository())
+        analysis = AnalysisService(InMemoryAnalysisRepository())
+        client = TestClient(create_app(core_sot, analysis_service=analysis))
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        version = client.post(
+            f"/projects/{project['id']}/drafts/{draft['id']}/versions",
+            json={"raw_text": "Opening line.", "idempotency_key": "save-1"},
+        ).json()
+        request = {
+            "snapshot_id": version["snapshot"]["id"],
+            "idempotency_key": "analysis-run-1",
+        }
+
+        first = client.post(
+            f"/projects/{project['id']}/analysis/jobs", json=request
+        )
+        replay = client.post(
+            f"/projects/{project['id']}/analysis/jobs", json=request
+        )
+        fetched = client.get(
+            f"/projects/{project['id']}/analysis/jobs/{first.json()['job']['id']}"
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(replay.status_code, 200)
+        self.assertFalse(first.json()["idempotent_replay"])
+        self.assertTrue(replay.json()["idempotent_replay"])
+        self.assertEqual(replay.json()["job"]["id"], first.json()["job"]["id"])
+        self.assertEqual(fetched.status_code, 200)
+        self.assertEqual(fetched.json()["status"], "pending")
+        self.assertIsNone(fetched.json()["failure_reason"])
+
+    def test_analysis_candidates_read_back_and_project_isolation(self):
+        core_sot = CoreSotService(InMemoryCoreSotRepository())
+        analysis = AnalysisService(InMemoryAnalysisRepository())
+        client = TestClient(create_app(core_sot, analysis_service=analysis))
+        project_a = client.post("/projects", json={"name": "A"}).json()
+        project_b = client.post("/projects", json={"name": "B"}).json()
+        job = analysis.create_job(
+            project_id=project_a["id"],
+            snapshot_id="snapshot-1",
+            idempotency_key="analysis-run-1",
+        ).job
+        task = analysis.create_task(
+            project_id=project_a["id"],
+            job_id=job.id,
+            candidate_type=AnalysisCandidateType.CHARACTER_OBSERVATION,
+        )
+        saved = analysis.record_candidate(
+            project_id=project_a["id"],
+            task_id=task.id,
+            logical_key="candidate-1",
+            candidate_type=AnalysisCandidateType.CHARACTER_OBSERVATION,
+            action=AnalysisCandidateAction.CREATE,
+            provenance=AnalysisProvenance.SOURCE_OBSERVED,
+            confidence=0.75,
+            source_ref_ids=("source-ref-1",),
+            payload={"name": "Mina", "observation": "Keeps a hidden notebook."},
+        ).candidate
+
+        listed = client.get(
+            f"/projects/{project_a['id']}/analysis/jobs/{job.id}/candidates"
+        )
+        cross_project_job = client.get(
+            f"/projects/{project_b['id']}/analysis/jobs/{job.id}"
+        )
+        cross_project_candidates = client.get(
+            f"/projects/{project_b['id']}/analysis/jobs/{job.id}/candidates"
+        )
+
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(len(listed.json()["candidates"]), 1)
+        candidate = listed.json()["candidates"][0]
+        self.assertEqual(candidate["id"], saved.id)
+        self.assertEqual(candidate["candidate_type"], "character_observation")
+        self.assertEqual(candidate["status"], "needs_review")
+        self.assertEqual(candidate["source_ref_ids"], ["source-ref-1"])
+        self.assertEqual(
+            candidate["payload"],
+            {"name": "Mina", "observation": "Keeps a hidden notebook."},
+        )
+        # should NOT fire: project B must not read project A's analysis job.
+        self.assertEqual(cross_project_job.status_code, 404)
+        self.assertEqual(cross_project_candidates.status_code, 404)
+
+    def test_analysis_job_missing_project_returns_404(self):
+        client = TestClient(create_app())
+
+        created = client.post(
+            "/projects/nope/analysis/jobs",
+            json={"snapshot_id": "snapshot-1", "idempotency_key": "analysis-run-1"},
+        )
+        fetched = client.get("/projects/nope/analysis/jobs/analysis-job-1")
+        candidates = client.get(
+            "/projects/nope/analysis/jobs/analysis-job-1/candidates"
+        )
+
+        self.assertEqual(created.status_code, 404)
+        self.assertEqual(fetched.status_code, 404)
+        self.assertEqual(candidates.status_code, 404)
+
+    def test_analysis_missing_job_under_existing_project_returns_404(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+
+        fetched = client.get(
+            f"/projects/{project['id']}/analysis/jobs/analysis-job-nope"
+        )
+        candidates = client.get(
+            f"/projects/{project['id']}/analysis/jobs/analysis-job-nope/candidates"
+        )
+
+        self.assertEqual(fetched.status_code, 404)
+        self.assertEqual(candidates.status_code, 404)
 
 
 if __name__ == "__main__":

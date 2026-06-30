@@ -81,6 +81,7 @@
 - `.gitignore`가 보강됐다(2026-06-29). Local agent state(`.agents/`, `.claude/`, `.codex/`, `.serena/`)와 Python cache/test cache, virtualenv, local env, build/editor/OS/log/tmp 산출물을 ignore한다.
 - Phase 2A job 상태 전이가 계약화·구현(slice 1)됐다(2026-06-29, SoT v1.6.9). 사용자 결정으로 상태는 job-level만(task 무상태), `pending→running→succeeded|failed`(terminal 불변), failed는 terminal이라 재실행은 새 idempotency_key, 실패는 닫힌 `failure_reason` enum 5종 + free-text detail로 확정했다(`docs/plans/02-analysis-job-state-decisions.md`). `AnalysisJob`에 status/failure 필드, service `mark_job_running/succeeded/failed`+`_transition_job`(`InvalidJobStateTransition`), repository `update_job`(in-memory/Mongo `replace_one`), `_job_doc`/`_to_job` round-trip을 추가했다. in-memory 12종 회귀(`failure_reason` enum 5종 전체 + non-enum 거절 포함)와 skip-aware live Mongo job-state round-trip/terminal replay 회귀(fallback/transaction 양 경로)로 잠갔다.
 - Phase 2A job 상태 전이 runner 통합(slice 2)이 구현됐다(2026-06-29). runner는 새 job(`pending`)만 실행해 `mark_job_running` 후 load→extract→validate→record를 돌리고 성공 시 `mark_job_succeeded`, 실패 시 실패 지점을 `failure_reason`으로 매핑해 `mark_job_failed` 뒤 원본 예외를 재던진다(실패를 성공으로 위장 안 함, candidate 미저장). 기존 job(replay)은 재실행하지 않고 저장된 candidate를 반환한다. 실패 매핑: `NotFound`→`snapshot_not_found`, `AnalysisExtractionError`→`schema_invalid`, `InvalidCandidateSource`→`source_invalid`, 그 외 `InvalidAnalysisCandidate`→`schema_invalid`, `DuplicateAnalysisCandidateRequest`→`duplicate_conflict`, 나머지→`provider_error`. source/schema 구분을 위해 service에 `InvalidCandidateSource(InvalidAnalysisCandidate)`를 추가하고 anchor 검증 실패를 그것으로 재분류했다(기존 base assertRaises 호환). `DuplicateAnalysisCandidateRequest`는 layering을 위해 `repository.py`로 옮기고 mongo에서 re-export한다. runner 회귀 16종(succeeded 전이, replay 비재실행=succeeded/failed/pending 3상태, base→schema_invalid 포함 5개 실패 지점→reason+detail, 변이 증명)과 live Mongo 합성 smoke로 확인했다. all-or-nothing은 candidate write 한정이고 job/task 생성은 idempotent setup이라 실패 후에도 남는다(SoT v1.6.10 명확화). **job 상태 전이 slice 1/2/3 완료, slice 2 검증 조건 폐쇄.**
+- Phase 2A analysis job/candidate HTTP API가 추가됐다(2026-06-30, SoT v1.6.11). `POST /projects/{project_id}/analysis/jobs`는 job을 idempotent 생성/replay하고, `GET /projects/{project_id}/analysis/jobs/{job_id}`와 `GET /projects/{project_id}/analysis/jobs/{job_id}/candidates`는 job 상태와 저장된 candidate를 읽는다. 이 API는 runner/Gateway 실행을 시작하지 않으며, missing project와 cross-project job/candidate 접근은 404로 잠갔다.
 - 2026-06-29 독립 검증 `docs/verifications/2026-06-29/analysis_job_state_runner_slice2.md`: 커밋 `bffd850`은 조건부 합격이었고 차단 2건·비차단 3건을 모두 폐쇄했다. 차단 (1) replay 상태 무관성은 `failed`/`pending` replay 비재실행 회귀로(succeeded 포함 3상태), (2) base `InvalidAnalysisCandidate→schema_invalid`는 빈 logical_key 회귀+변이 증명으로 닫았다. 비차단: `failure_detail==str(exc)` assert 추가, 실패 테스트 `expected_exc`를 `NotFound`/`AnalysisExtractionError`/`InvalidCandidateSource`로 정확화, task 잔류 문구는 all-or-nothing=candidate write 한정으로 SoT v1.6.10/brief에 명확화. runner 회귀 16종, 전체 299개 통과(35 skip).
 - Phase 2A candidate write-error 분류가 정밀화됐다(2026-06-29, SoT v1.6.8). `_is_duplicate_key_error` helper로 duplicate-key(code `11000`) 충돌만 `DuplicateAnalysisCandidateRequest`로 매핑하고, duplicate가 아닌 `BulkWriteError`/`PyMongoError`는 원본 타입을 보존한다(인프라 오류 오표기 방지). fallback은 매핑 여부와 무관하게 이번 시도 candidate `_id`를 먼저 정리한다. 인프라 없는 fake 기반 회귀 4종(`tests/test_analysis_mongo_error_mapping.py`)이 transaction/fallback × duplicate/non-duplicate를 양방향 lock하고, live Mongo duplicate 경로 6개는 그대로 통과한다. 직전 독립 재검증의 비차단 Issue #1/#2를 닫았다.
 - 2026-06-29 독립 검증 `docs/verifications/2026-06-29/analysis_write_error_and_job_state_commits.md`: 커밋 `23d6ef3`은 합격. 커밋 `ebbbd14`는 조건부 합격이었고, 두 차단 조건(닫힌 `failure_reason` enum 5종 전체 regression, skip-aware Mongo job-state round-trip/terminal replay regression)을 committed artifact로 추가해 폐쇄했다(in-memory 12종 + live 양 경로). 비차단 Issue #3(work log/HANDOFF의 "live 확인" 문구가 committed regression처럼 읽힐 위험)도 회귀가 committed되며 해소됐다.
@@ -88,7 +89,7 @@
 ## Next Tasks
 
 1. Slice 1 잔여 회귀 후보: archive 후 파생 인덱스 stale 이벤트. Phase 3 indexing 계약이 Draft라 현재는 구현하지 않는다. (fallback 동시성 race는 SoT v1.4 single-writer 제약으로 contract out 됨; 동시성 필요 시에만 (a) 보강 재검토.)
-2. Phase 2A job 상태 전이(slice 1/2/3) 완료, 검증 조건 폐쇄. 다음 Phase 2A 후보: (a) analysis job/candidate를 노출하는 HTTP API(Core SOT API 패턴), (b) runner→gateway `/v1/generate` runtime wiring(단 model tool-call wire format/payload 확정 의존으로 현재 막힘). 진행 전 어느 쪽을 계약화할지 결정 필요.
+2. Phase 2A HTTP 상태/결과 노출 API는 완료됐다. 다음 Phase 2A 후보는 실제 runner 실행을 API/Worker에서 어떻게 시작할지 결정하는 브리프다. Gateway `/v1/generate` runtime wiring은 model tool-call wire format/payload 확정 의존으로 현재 구현하지 않는다.
 3. Application/Worker가 gateway `/v1/generate`를 호출하는 runtime wiring은 Phase payload/tool handler와 model tool-call wire format이 확정된 뒤 별도 slice로 구현한다.
 4. runner domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
 5. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
@@ -96,6 +97,7 @@
 
 ## Verification
 
+- Phase 2A analysis job/candidate HTTP API 자체 회귀(2026-06-30): `python3 -m py_compile services/application/app/main.py services/application/app/analysis/service.py tests/test_application_api.py` 통과, `python3 -m unittest tests.test_application_api -v` 28개 통과, `python3 -m unittest discover tests -v` 303개 통과(35 skip). 잠근 범위: analysis job create/replay/get, candidate list read-back, missing project 404(POST/GET job/GET candidates), existing-project missing job 404, cross-project job/candidate 404. 독립 검증 `docs/verifications/2026-06-30/phase2a_analysis_http_api.md`의 조건부 합격 I1은 GET candidates missing-project 회귀로 폐쇄했고, I2 권고도 existing-project missing job 회귀로 보강했다.
 - 계획 문서의 상대 링크와 원문 추적표 확인
 - tool registry 계약과 Phase 2/4/5 연결 문구 및 양방향 boundary matrix 확인
 - tool registry 계약 독립 검증 합격: `docs/verifications/2026-06-24/flat_loop_tool_registry.md`
@@ -195,7 +197,7 @@ services/
     ├── requirements.txt        # FastAPI/pymongo/uvicorn dependency
     ├── Dockerfile              # cache-friendly application image (deps→source)
     └── app/
-        ├── main.py             # FastAPI shell: health/project·draft create·list·get·rename·archive(DELETE)/version save·list·read (+Mongo wiring)
+        ├── main.py             # FastAPI shell: health/project·draft CRUD/version read + Phase 2A analysis job/candidate read API (+Mongo wiring)
         ├── core_sot/
         │   ├── models.py       # Core SOT immutable dataclasses
         │   ├── splitter.py     # raw-text SHA-256 + deterministic source block split
