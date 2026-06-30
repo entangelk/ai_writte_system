@@ -28,6 +28,14 @@
 - 비차단 권고 I2도 함께 보강했다. `test_analysis_missing_job_under_existing_project_returns_404`를 추가해 존재하는 project 아래 없는 job id에 대해 GET job과 GET candidates가 404를 반환함을 잠갔다.
 - I3(빈 `idempotency_key`가 HTTP에서 500이 될 수 있음)는 계약이 명명하지 않은 malformed request 정책 변경이라 이번 조건 폐쇄 범위에서는 건드리지 않고 후속 참고로 남겼다.
 
+### Phase 2A runner 실행 경계 결정 브리프 추가
+
+- 변경 파일: `docs/plans/02-analysis-runner-execution-decisions.md`, `docs/plans/README.md`, `HANDOFF.md`, `docs/daily_logs/2026-06-30/work_log.md`.
+- 커밋 `64ec099` 후 HANDOFF의 다음 작업을 이어 진행했다. 다음 구현 후보는 실제 runner 실행을 API/Worker에서 어떻게 시작할지 정해야 하지만, Gateway runtime wiring과 tool-call wire format은 아직 미확정이라 구현으로 들어가면 추측이 된다.
+- 이에 `Decision Required` 상태의 브리프를 추가했다. 추천안은 별도 `POST /projects/{project_id}/analysis/jobs/{job_id}/run`, 첫 slice 동기 실행, 기존 job 상태 무관 replay, runner/factory dependency 주입, source_ref 자동 생성과 Gateway runtime wiring 제외다.
+- 실패 HTTP status/error envelope는 승인 전 미결정으로 남겼다. 이 부분은 runner 실행 API 구현 전에 사용자 결정이 필요하다.
+- `docs/plans/README.md` 읽는 순서에 job-state 브리프와 runner 실행 브리프를 추가했고, `HANDOFF.md` Next Tasks를 승인 대기 상태로 갱신했다.
+
 ## Issues found
 
 - 문제: HANDOFF의 다음 작업은 analysis HTTP API와 runner→gateway runtime wiring 중 선택이 필요하다고 되어 있었다.
@@ -40,10 +48,16 @@
 - Resolution: candidates missing-project 404 회귀를 추가했고, 권고였던 existing-project missing job 404도 GET job/GET candidates 양쪽으로 보강했다.
 - Outcome: 조건부 합격의 차단 조건 I1이 폐쇄됐고, 권고 I2도 회귀로 잠겼다.
 
+- 문제: runner 실행 API를 바로 구현하려면 실행 트리거, 동기/비동기 경계, replay semantics, runner dependency 주입, 실패 HTTP mapping을 정해야 한다.
+- 원인: 기존 SoT는 HTTP 상태/결과 노출 API만 승인했고, Gateway/model tool-call/runtime wiring은 미확정으로 남아 있다.
+- Resolution: 구현 대신 결정 브리프를 작성해 선택지와 추천안을 분리했다.
+- Outcome: 다음 구현자가 추측 없이 사용자 승인 후 run endpoint 또는 Worker 실행 slice로 들어갈 수 있다.
+
 ## Decisions
 
 - Analysis HTTP API는 job 생성/replay와 조회만 담당하고 runner 실행 트리거를 포함하지 않는다. 이유: 실행 wiring은 별도 계약이 필요하며, 이 slice의 목적은 이미 구현된 analysis 상태를 public Application API로 노출하는 것이다.
 - `POST /projects/{project_id}/analysis/jobs`는 project 존재만 검증하고 snapshot 존재는 앞당겨 검증하지 않는다. 이유: runner의 `snapshot_not_found` failure_reason 계약이 이미 snapshot load 실패를 소유한다.
+- Runner 실행 경계는 승인 전까지 구현하지 않는다. 추천안은 브리프에 남겼지만, 실패 HTTP status/error envelope는 사용자 결정이 필요하다.
 
 ## Verification
 
@@ -51,6 +65,7 @@
 - `python3 -m unittest tests.test_application_api -v` — 28개 통과.
 - `python3 -m unittest discover tests -v` — 303개 통과(35 skip).
 - 잠근 범위: job create/replay/get, candidate list read-back, missing project 404(POST/GET job/GET candidates), existing-project missing job 404, cross-project job/candidate 404.
+- 문서-only 추가 검증: `docs/plans/02-analysis-runner-execution-decisions.md`의 기준 문서 링크와 `docs/plans/README.md`/`HANDOFF.md` 참조 대상 존재 확인.
 
 ## Next steps
 

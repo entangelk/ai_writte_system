@@ -17,12 +17,14 @@
 7. [`01-core-sot.md`](01-core-sot.md) — 저장, 버전, snapshot, block, source reference
 8. [`analysis-memory-taxonomy.md`](analysis-memory-taxonomy.md) — 분석 대상과 저장 단위 논의안
 9. [`02-analysis-kickoff-decisions.md`](02-analysis-kickoff-decisions.md) — Phase 2A 착수 전 사용자 결정 브리프
-10. [`02-analysis-pipeline.md`](02-analysis-pipeline.md) — 최초 추출과 기존 기억 대조·갱신 후보
-11. [`03-indexing.md`](03-indexing.md) — ChromaDB/Elasticsearch 파생 인덱스와 동기화
-12. [`04-agentic-search.md`](04-agentic-search.md) — 검색 계획, 정본 재조회, ContextPackage
-13. [`05-writing-ai.md`](05-writing-ai.md) — 컨텍스트 기반 글 생성과 Writing Gate
-14. [`06-review-ui.md`](06-review-ui.md) — 후보 검토와 프로젝트 메모리 관리 UI
-15. [`flat-loop-gate.md`](flat-loop-gate.md) — flat agent loop 종료 decision, tool registry, budget policy, task별 completion criteria 계약(숫자 기본 한도는 후속 slice). Phase 2/4/5가 소비하는 횡단 계약
+10. [`02-analysis-job-state-decisions.md`](02-analysis-job-state-decisions.md) — Phase 2A job 상태 전이 결정 브리프
+11. [`02-analysis-runner-execution-decisions.md`](02-analysis-runner-execution-decisions.md) — Phase 2A runner 실행 경계 결정 브리프
+12. [`02-analysis-pipeline.md`](02-analysis-pipeline.md) — 최초 추출과 기존 기억 대조·갱신 후보
+13. [`03-indexing.md`](03-indexing.md) — ChromaDB/Elasticsearch 파생 인덱스와 동기화
+14. [`04-agentic-search.md`](04-agentic-search.md) — 검색 계획, 정본 재조회, ContextPackage
+15. [`05-writing-ai.md`](05-writing-ai.md) — 컨텍스트 기반 글 생성과 Writing Gate
+16. [`06-review-ui.md`](06-review-ui.md) — 후보 검토와 프로젝트 메모리 관리 UI
+17. [`flat-loop-gate.md`](flat-loop-gate.md) — flat agent loop 종료 decision, tool registry, budget policy, task별 completion criteria 계약(숫자 기본 한도는 후속 slice). Phase 2/4/5가 소비하는 횡단 계약
 
 ## 문서 지위와 우선순위
 
