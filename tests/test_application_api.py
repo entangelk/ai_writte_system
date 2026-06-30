@@ -534,6 +534,141 @@ class ApplicationApiTest(unittest.TestCase):
         self.assertTrue(got_draft.json()["archived"])
         self.assertIn(draft["id"], [d["id"] for d in listed_drafts])
 
+    def test_export_returns_selected_version_body_and_traceability(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        base = f"/projects/{project['id']}/drafts/{draft['id']}/versions"
+        raw_text = "# Chapter 1\n\nOpening line.\n\n---\n\nNext scene."
+        saved = client.post(
+            base, json={"raw_text": raw_text, "idempotency_key": "save-1"}
+        ).json()
+        version_id = saved["draft_version"]["id"]
+
+        resp = client.get(f"{base}/{version_id}/export")
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["format"], "txt")
+        self.assertEqual(body["body"], raw_text)
+        self.assertEqual(body["version_id"], version_id)
+        self.assertEqual(body["version_number"], 1)
+        self.assertEqual(body["snapshot_id"], saved["snapshot"]["id"])
+        self.assertTrue(body["filename"].endswith(".txt"))
+        # AI metadata must not leak into an export payload's body.
+        self.assertNotIn("---\nanalysis", body["body"])
+
+    def test_export_markdown_format_query(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        base = f"/projects/{project['id']}/drafts/{draft['id']}/versions"
+        saved = client.post(
+            base, json={"raw_text": "# H\n\nbody", "idempotency_key": "save-1"}
+        ).json()
+        version_id = saved["draft_version"]["id"]
+
+        resp = client.get(f"{base}/{version_id}/export?format=markdown")
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["format"], "markdown")
+        self.assertIn("text/markdown", body["content_type"])
+        self.assertTrue(body["filename"].endswith(".md"))
+        self.assertEqual(body["body"], "# H\n\nbody")
+
+    def test_export_unsupported_format_returns_400(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        base = f"/projects/{project['id']}/drafts/{draft['id']}/versions"
+        saved = client.post(
+            base, json={"raw_text": "body", "idempotency_key": "save-1"}
+        ).json()
+        version_id = saved["draft_version"]["id"]
+
+        resp = client.get(f"{base}/{version_id}/export?format=pdf")
+
+        self.assertEqual(resp.status_code, 400)
+
+    def test_export_missing_version_returns_404(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+
+        resp = client.get(
+            f"/projects/{project['id']}/drafts/{draft['id']}/versions/nope/export"
+        )
+
+        self.assertEqual(resp.status_code, 404)
+
+    def test_export_cross_project_returns_404(self):
+        client = TestClient(create_app())
+        project_a = client.post("/projects", json={"name": "A"}).json()
+        project_b = client.post("/projects", json={"name": "B"}).json()
+        draft_a = client.post(
+            f"/projects/{project_a['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        draft_b = client.post(
+            f"/projects/{project_b['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        version_id = client.post(
+            f"/projects/{project_a['id']}/drafts/{draft_a['id']}/versions",
+            json={"raw_text": "secret", "idempotency_key": "save-1"},
+        ).json()["draft_version"]["id"]
+
+        # Project A's version must not be exportable through project B's context.
+        resp = client.get(
+            f"/projects/{project_b['id']}/drafts/{draft_b['id']}"
+            f"/versions/{version_id}/export"
+        )
+
+        self.assertEqual(resp.status_code, 404)
+
+    def test_export_survives_draft_and_project_archive(self):
+        # SoT archive read-allowed policy (v1.5): archiving blocks writes but not
+        # reads, and export is a read. Pin the export endpoint directly for both
+        # draft archive and project archive (the service-level domain test only
+        # covers project archive).
+        service = CoreSotService(InMemoryCoreSotRepository())
+        client = TestClient(create_app(service))
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        base = f"/projects/{project['id']}/drafts/{draft['id']}/versions"
+        version_id = client.post(
+            base, json={"raw_text": "archived body", "idempotency_key": "save-1"},
+        ).json()["draft_version"]["id"]
+
+        # Archive the draft, then the project; export must stay 200 each time.
+        client.delete(f"/projects/{project['id']}/drafts/{draft['id']}")
+        after_draft_archive = client.get(f"{base}/{version_id}/export")
+        client.delete(f"/projects/{project['id']}")
+        after_project_archive = client.get(f"{base}/{version_id}/export")
+
+        self.assertEqual(after_draft_archive.status_code, 200)
+        self.assertEqual(after_draft_archive.json()["body"], "archived body")
+        self.assertEqual(after_project_archive.status_code, 200)
+        self.assertEqual(after_project_archive.json()["body"], "archived body")
+
+    def test_export_missing_project_returns_404(self):
+        client = TestClient(create_app())
+
+        resp = client.get(
+            "/projects/nope/drafts/also-nope/versions/whatever/export"
+        )
+
+        self.assertEqual(resp.status_code, 404)
+
     def test_analysis_job_create_get_and_idempotent_replay(self):
         core_sot = CoreSotService(InMemoryCoreSotRepository())
         analysis = AnalysisService(InMemoryAnalysisRepository())

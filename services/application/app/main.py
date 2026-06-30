@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Protocol
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
 from services.application.app.analysis.extractor import AnalysisExtractionError
@@ -25,6 +25,7 @@ from services.application.app.core_sot.service import (
     CoreSotService,
     InMemoryCoreSotRepository,
     NotFound,
+    UnsupportedExportFormat,
 )
 
 
@@ -314,6 +315,39 @@ def create_app(
                 }
                 for block in detail.blocks
             ],
+        }
+
+    @app.get(
+        "/projects/{project_id}/drafts/{draft_id}/versions/{version_id}/export"
+    )
+    async def export_draft_version(
+        project_id: str,
+        draft_id: str,
+        version_id: str,
+        format: str = Query("txt"),
+    ) -> dict[str, object]:
+        try:
+            export = core_sot.export_draft_version(
+                project_id=project_id,
+                draft_id=draft_id,
+                version_id=version_id,
+                fmt=format,
+            )
+        except UnsupportedExportFormat as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {
+            "format": export.format,
+            "filename": export.filename,
+            "content_type": export.content_type,
+            "body": export.body,
+            "project_id": export.project_id,
+            "draft_id": export.draft_id,
+            "version_id": export.version_id,
+            "version_number": export.version_number,
+            "snapshot_id": export.snapshot_id,
+            "content_hash": export.content_hash,
         }
 
     @app.post("/projects/{project_id}/drafts")

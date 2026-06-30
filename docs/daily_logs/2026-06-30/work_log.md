@@ -67,6 +67,23 @@
 - SoT를 v1.6.13으로 올려 benchmark report와 `flat-loop-gate.md`가 production 기본값의 canonical 근거임을 기록하고, 미확정 목록에서 budget/retry production 숫자를 제거했다.
 - `scripts/benchmark_llm_provider.py`는 문서와 사용 예시처럼 file path로 직접 실행해도 repo package import가 되도록 `sys.path` bootstrap을 추가했다. `tests/test_llm_benchmark_script.py`에 `python scripts/benchmark_llm_provider.py --help` 회귀를 추가해 CLI 사용 표면을 잠갔다.
 
+### Slice 1 draft version export 추가
+
+- 변경 파일: `services/application/app/core_sot/models.py`, `services/application/app/core_sot/service.py`, `services/application/app/main.py`, `tests/test_core_sot.py`, `tests/test_application_api.py`, `CHANGELOG.md`, `HANDOFF.md`, `docs/daily_logs/2026-06-30/work_log.md`.
+- HANDOFF의 Next Tasks(2~6)가 모두 Gateway/model tool-call wire format 등 미확정 결정에 막혀 있어 사용자에게 진행 방향을 물었고, 막히지 않은 Slice 1 잔여 백엔드 작업인 export를 진행하기로 했다(사용자 선택). export 형식은 plain text + Markdown으로 결정했다.
+- `DraftVersionExport` immutable model을 추가했다: `format`/`filename`/`content_type`/`body`와 추적 필드(`project_id`/`draft_id`/`version_id`/`version_number`/`snapshot_id`/`content_hash`).
+- `CoreSotService.export_draft_version()`을 추가했다. 기존 `get_draft_version()` 위에 build하며, `body`는 두 형식 모두 선택 version snapshot의 `raw_text`를 그대로 내보낸다(변환·strip·AI metadata 주입 없음).
+- 형식은 `txt`/`markdown`만 허용한다. `UnsupportedExportFormat`(CoreSotError) 거절, 형식은 content_type(`text/plain`/`text/markdown`)과 filename 확장자(`.txt`/`.md`)만 가른다.
+- `GET /projects/{project_id}/drafts/{draft_id}/versions/{version_id}/export?format=txt|markdown` endpoint를 추가했다. unsupported format은 400, missing/cross-project version은 404(기존 `get_draft_version` 격리 경로 재사용).
+
+### Slice 1 export 독립 검증 비차단 note 보강 (N1/N4)
+
+- 변경 파일: `tests/test_core_sot.py`, `tests/test_application_api.py`, `docs/daily_logs/2026-06-30/work_log.md`, `HANDOFF.md`.
+- 독립 검증 기록 `docs/verifications/2026-06-30/slice1_draft_version_export.md`는 합격이며 비차단 note 4건을 남겼다.
+- N1(허위 인용): export 작업이 새로 넣은 `§113/§115` 인용 2곳(`test_export_survives_archive` docstring, work_log "잠근 범위")을 실제 근거인 "SoT archive 읽기 전용 정책(v1.5, `system-contract-sot.md:136-141`)"로 교정했다. SoT는 번호 조항(§N)이 아니라 마크다운 섹션이라 `§113/§115`는 옛 줄번호를 가리키는 stale 인용이다. 레포 전반(CHANGELOG/HANDOFF/기존 테스트)의 동일 관행은 surgical 원칙상 이번 범위 밖으로 두고 미수정했다.
+- N4(직접 회귀 부재): `test_export_survives_draft_and_project_archive`(draft archive + project archive 후 export 200·body 보존)와 `test_export_missing_project_returns_404`를 HTTP 회귀로 추가해 export endpoint를 직접 잠갔다. 기존엔 동일 `get_draft_version` 경로를 다른 endpoint 회귀가 간접 커버했다.
+- N2(content_type charset suffix)·N3(filename prefix 미명시)는 계약 위반이 아니고 pin할 조항이 계약에 없어 그대로 둔다.
+
 ### benchmark defaults 독립 검증 비차단 권고 보강
 
 - 변경 파일: `docs/verifications/2026-06-30/phase2a_run_endpoint_closure.md`, `docs/verifications/2026-06-30/gemma_benchmark_defaults.md`, `docs/plans/flat-loop-gate.md`, `services/application/app/agent_loop/resolution.py`, `HANDOFF.md`, `docs/daily_logs/2026-06-30/work_log.md`.
@@ -158,6 +175,11 @@
 - benchmark defaults 비차단 권고 보강 후 stale 문구 pattern sweep — 추가 발견 없음.
 - `python3 -m py_compile services/application/app/agent_loop/resolution.py`
 - `python3 -m unittest tests.test_agent_loop_resolution -v` — 18개 통과.
+
+- export 자체 회귀: `python3 -m py_compile services/application/app/main.py services/application/app/core_sot/service.py services/application/app/core_sot/models.py tests/test_core_sot.py tests/test_application_api.py` 통과.
+- `python3 -m unittest tests.test_core_sot.CoreSotExportTest tests.test_application_api -v` — 47개 통과.
+- 독립 검증 N1/N4 보강 후 `python3 -m unittest discover tests` — 327개 통과(35 skip, export 회귀 +2).
+- export 잠근 범위: body가 선택 version snapshot raw_text와 정확히 일치, 요청한 version 선택(latest 아님), txt/markdown은 content_type/확장자만 차이·body 동일, unsupported format 거절, missing version NotFound, archive 후 export 보존(SoT archive 읽기 전용 정책, v1.5); HTTP는 200 traceability payload, markdown query, unsupported 400, missing 404, cross-project 404, archived-draft export 200, missing-project export 404.
 
 ## Next steps
 

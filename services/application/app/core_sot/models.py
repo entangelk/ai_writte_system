@@ -95,3 +95,26 @@ class DraftVersionDetail:
 class SourceSnapshotDetail:
     snapshot: SourceSnapshot
     blocks: tuple[SourceBlock, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class DraftVersionExport:
+    """A readable export of one immutable draft version.
+
+    ``body`` is the snapshot's raw text verbatim: no AI analysis metadata is
+    injected and no Markdown is synthesized or stripped, so the exported body
+    always matches the selected version. ``format`` only governs the
+    ``content_type`` and ``filename`` extension. The version pointers make the
+    export traceable to exactly the version it was produced from.
+    """
+
+    format: str
+    filename: str
+    content_type: str
+    body: str
+    project_id: str
+    draft_id: str
+    version_id: str
+    version_number: int
+    snapshot_id: str
+    content_hash: str

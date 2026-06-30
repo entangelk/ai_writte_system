@@ -14,6 +14,7 @@ from services.application.app.core_sot.models import (
     Draft,
     DraftVersion,
     DraftVersionDetail,
+    DraftVersionExport,
     Project,
     SaveDraftResult,
     SourceBlock,
@@ -46,6 +47,17 @@ class Archived(CoreSotError):
 
 class InvalidSourceRef(CoreSotError):
     pass
+
+
+class UnsupportedExportFormat(CoreSotError):
+    pass
+
+
+_EXPORT_FORMATS: dict[str, tuple[str, str]] = {
+    # format -> (content_type, filename extension)
+    "txt": ("text/plain; charset=utf-8", "txt"),
+    "markdown": ("text/markdown; charset=utf-8", "md"),
+}
 
 
 def _is_int(value: object) -> bool:
@@ -234,6 +246,34 @@ class CoreSotService:
         blocks = self._repo.get_blocks(version.snapshot_id)
         return DraftVersionDetail(
             draft_version=version, snapshot=snapshot, blocks=blocks
+        )
+
+    def export_draft_version(
+        self,
+        *,
+        project_id: str,
+        draft_id: str,
+        version_id: str,
+        fmt: str = "txt",
+    ) -> DraftVersionExport:
+        if fmt not in _EXPORT_FORMATS:
+            raise UnsupportedExportFormat(f"unsupported export format: {fmt!r}")
+        detail = self.get_draft_version(
+            project_id=project_id, draft_id=draft_id, version_id=version_id
+        )
+        content_type, extension = _EXPORT_FORMATS[fmt]
+        version = detail.draft_version
+        return DraftVersionExport(
+            format=fmt,
+            filename=f"{draft_id}-v{version.version_number}.{extension}",
+            content_type=content_type,
+            body=detail.snapshot.raw_text,
+            project_id=project_id,
+            draft_id=draft_id,
+            version_id=version.id,
+            version_number=version.version_number,
+            snapshot_id=detail.snapshot.id,
+            content_hash=detail.snapshot.content_hash,
         )
 
     def get_snapshot(

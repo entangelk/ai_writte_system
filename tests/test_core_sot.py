@@ -24,6 +24,7 @@ from services.application.app.core_sot.service import (
     InMemoryCoreSotRepository,
     InvalidSourceRef,
     NotFound,
+    UnsupportedExportFormat,
 )
 from services.application.app.core_sot.splitter import content_hash
 
@@ -456,6 +457,149 @@ class CoreSotIsolationAndArchiveTest(unittest.TestCase):
             service.get_source_ref(project_id=project.id, source_ref_id=source_ref.id),
             source_ref,
         )
+
+
+class CoreSotExportTest(unittest.TestCase):
+    def test_export_body_matches_selected_version_verbatim(self):
+        # Acceptance: exported body equals the selected version's snapshot, with
+        # no AI metadata injected and no Markdown transformation. Locks against a
+        # future change that derives the body from anything but raw_text.
+        service, _repo = _service()
+        project = service.create_project(name="Novel")
+        draft = service.create_draft(project_id=project.id, title="Episode 1")
+        raw_text = "# Chapter 1\n\n사건이 시작된다.\n\n---\n\n다음 장면."
+        saved = service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text=raw_text,
+            idempotency_key="save-1",
+        )
+
+        export = service.export_draft_version(
+            project_id=project.id,
+            draft_id=draft.id,
+            version_id=saved.draft_version.id,
+            fmt="txt",
+        )
+
+        self.assertEqual(export.body, raw_text)
+        # Traceable to exactly the version it was produced from.
+        self.assertEqual(export.version_id, saved.draft_version.id)
+        self.assertEqual(export.version_number, saved.draft_version.version_number)
+        self.assertEqual(export.snapshot_id, saved.snapshot.id)
+        self.assertEqual(export.content_hash, saved.snapshot.content_hash)
+
+    def test_export_picks_the_requested_version_not_the_latest(self):
+        # Two versions exist; exporting v1 must return v1's body, never v2's.
+        service, _repo = _service()
+        project = service.create_project(name="Novel")
+        draft = service.create_draft(project_id=project.id, title="Episode 1")
+        v1 = service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text="first body",
+            idempotency_key="save-1",
+        )
+        service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text="second body",
+            idempotency_key="save-2",
+        )
+
+        export = service.export_draft_version(
+            project_id=project.id,
+            draft_id=draft.id,
+            version_id=v1.draft_version.id,
+        )
+
+        self.assertEqual(export.body, "first body")
+        self.assertEqual(export.version_number, 1)
+
+    def test_txt_and_markdown_differ_only_in_content_type_and_extension(self):
+        service, _repo = _service()
+        project = service.create_project(name="Novel")
+        draft = service.create_draft(project_id=project.id, title="Episode 1")
+        saved = service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text="# Heading\n\nbody",
+            idempotency_key="save-1",
+        )
+
+        txt = service.export_draft_version(
+            project_id=project.id,
+            draft_id=draft.id,
+            version_id=saved.draft_version.id,
+            fmt="txt",
+        )
+        md = service.export_draft_version(
+            project_id=project.id,
+            draft_id=draft.id,
+            version_id=saved.draft_version.id,
+            fmt="markdown",
+        )
+
+        # Body is identical across formats (no transformation either way).
+        self.assertEqual(txt.body, md.body)
+        self.assertEqual(txt.body, "# Heading\n\nbody")
+        self.assertTrue(txt.filename.endswith(".txt"))
+        self.assertTrue(md.filename.endswith(".md"))
+        self.assertIn("text/plain", txt.content_type)
+        self.assertIn("text/markdown", md.content_type)
+
+    def test_unsupported_format_is_rejected(self):
+        service, _repo = _service()
+        project = service.create_project(name="Novel")
+        draft = service.create_draft(project_id=project.id, title="Episode 1")
+        saved = service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text="body",
+            idempotency_key="save-1",
+        )
+
+        with self.assertRaises(UnsupportedExportFormat):
+            service.export_draft_version(
+                project_id=project.id,
+                draft_id=draft.id,
+                version_id=saved.draft_version.id,
+                fmt="pdf",
+            )
+
+    def test_export_missing_version_raises_not_found(self):
+        service, _repo = _service()
+        project = service.create_project(name="Novel")
+        draft = service.create_draft(project_id=project.id, title="Episode 1")
+
+        with self.assertRaises(NotFound):
+            service.export_draft_version(
+                project_id=project.id,
+                draft_id=draft.id,
+                version_id="nope",
+            )
+
+    def test_export_survives_archive(self):
+        # SoT archive read-allowed policy (v1.5; "archive는 보존이자 읽기 전용
+        # 상태다 — 읽기는 허용"): export is a read, so it survives archive.
+        service, _repo = _service()
+        project = service.create_project(name="Novel")
+        draft = service.create_draft(project_id=project.id, title="Episode 1")
+        saved = service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text="archived body",
+            idempotency_key="save-1",
+        )
+
+        service.archive_project(project_id=project.id)
+
+        export = service.export_draft_version(
+            project_id=project.id,
+            draft_id=draft.id,
+            version_id=saved.draft_version.id,
+        )
+        self.assertEqual(export.body, "archived body")
 
 
 if __name__ == "__main__":

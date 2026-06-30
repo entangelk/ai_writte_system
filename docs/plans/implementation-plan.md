@@ -359,7 +359,7 @@ tests/
 - [ ] GPU 모델/VRAM, CPU RAM, 운영 OS
 - [ ] 첫 inference engine과 fallback provider
 - [ ] Slice 2A의 최소 분석 taxonomy
-- [ ] 첫 export 형식
+- [x] 첫 export 형식: plain text + Markdown(SoT v1.6.14)
 
 Slice 1 Core SOT 착수 전 결정은 `01-core-sot.md`에서 text/reference와 persistence/retention 계약까지 승인 완료됐다. Gateway/model tool-call wire, model terms/hardware/provider, Slice 2A taxonomy, export 형식은 후속 slice 결정이다.
 

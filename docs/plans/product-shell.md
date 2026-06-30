@@ -87,7 +87,7 @@
 - [ ] draft/chapter/scene 계층을 UI와 저장소에서 어디까지 고정할지
 - [ ] autosave, 명시적 save, version 생성 UX
 - [ ] 제작 관리에서 실제 필요한 진행 정보
-- [ ] 첫 export 형식과 파일 구성
+- [x] 첫 export 형식: plain text + Markdown(SoT v1.6.14). 파일 구성/DOCX/PDF/EPUB은 후속
 - [ ] archive/soft delete/hard delete 정책
 
 ## 관련 계획

@@ -1,7 +1,7 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`  
-계약 버전: `v1.6.13`
+계약 버전: `v1.6.14`
 승인일: `2026-06-26`  
 최근 갱신일: `2026-06-30`
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
@@ -33,6 +33,7 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.6.14 | 2026-06-30 | 첫 export 형식을 plain text + Markdown으로 확정하고 Slice 1 draft version export 계약을 추가했다. `GET /projects/{project_id}/drafts/{draft_id}/versions/{version_id}/export?format=txt\|markdown`은 선택 version snapshot의 `raw_text`를 verbatim body로 내보내고(AI metadata 미주입, Markdown 합성/제거 없음, 두 형식 body 동일), `format`은 content_type/확장자만 가른다. payload에 version 추적 필드 포함. unsupported format 400, missing/cross-project version 404, archived도 export 허용. 사용자 결정: 막힌 Next Tasks 대신 export 진행, 형식은 plain text + Markdown. | 사용자 결정, `tests/test_core_sot.py`, `tests/test_application_api.py` |
 | v1.6.13 | 2026-06-30 | Gemma Q4_0 llama.cpp live benchmark를 실행하고 AgentLoopRunner task profile의 초기 production budget/retry 숫자 기본값을 확정했다. Report는 `docs/benchmarks/2026-06-30/gemma_q4_llama_cpp_repeats3_warmup1.json`이며, `flat-loop-gate.md`가 `analysis_compare`, `context_search`, `writing_generate` 기본 policy를 소유한다. | 사용자 요청, `scripts/benchmark_llm_provider.py`, `docs/benchmarks/2026-06-30/gemma_q4_llama_cpp_repeats3_warmup1.json` |
 | v1.6.12 | 2026-06-30 | Phase 2A analysis run endpoint 계약을 승인·구현했다. `POST /projects/{project_id}/analysis/jobs/{job_id}/run`은 pending job만 runner dependency로 실행하고 요청 안에서 await해 terminal job과 candidate 목록을 반환한다. `running`/`succeeded`/`failed` job은 재실행하지 않고 `idempotent_replay=true`로 현재 job과 저장된 candidate를 반환한다. pending job에서 runner가 구성되지 않았으면 503, missing/cross-project 및 `snapshot_not_found`는 404, `schema_invalid`/`source_invalid` 계열은 400, `duplicate_conflict`는 409, provider/기타 실행 오류는 502로 표면화한다. source_ref 자동 생성과 Gateway runtime wiring은 제외다. | 사용자 요청, `tests/test_application_api.py`, `tests/test_analysis_runner.py` |
 | v1.6.11 | 2026-06-30 | Phase 2A analysis job/candidate HTTP read surface를 추가했다. Application API는 `POST /projects/{project_id}/analysis/jobs`로 job을 idempotent 생성/replay하고, `GET /projects/{project_id}/analysis/jobs/{job_id}`와 `GET /projects/{project_id}/analysis/jobs/{job_id}/candidates`로 job 상태와 candidate를 조회한다. 이 API는 runner/gateway 실행을 시작하지 않으며, 존재하지 않는 project 또는 cross-project job/candidate 접근은 404다. | `tests/test_application_api.py` |
@@ -59,7 +60,7 @@
 
 | 문서 | 역할 | 지위 |
 |---|---|---|
-| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.13 |
+| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.14 |
 | [`plans/README.md`](plans/README.md) | 계획 문서 진입점과 Phase/MVP 관계 | Draft |
 | [`plans/00-foundations.md`](plans/00-foundations.md) | 전역 원칙과 제품 경계 | Draft |
 | [`plans/implementation-plan.md`](plans/implementation-plan.md) | 구현 순서, slice 상태, 검증 gate | Draft |
@@ -289,7 +290,8 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 
 - 단일 사용자 제품 표면이다.
 - 프로젝트 CRUD, 원고 작업 공간, 처리 상태, 내보내기를 제공한다.
-- 보관/삭제 정책, export 형식, draft/chapter/scene 계층은 미확정이다.
+- 첫 export 형식은 plain text와 Markdown으로 확정했다(v1.6.14). DOCX/PDF/EPUB은 후속 검토다.
+- 보관/삭제 정책, draft/chapter/scene 계층은 미확정이다.
 
 ### Phase 1. Core SOT
 
@@ -298,6 +300,7 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 - `projects`, `drafts`, `draft_versions`, `source_snapshots`, `source_blocks`, `source_refs` 계약을 만든다.
 - snapshot은 생성 후 수정하지 않는다.
 - text/reference와 persistence/retention 계약은 v1.2~v1.3에서 승인됐다.
+- Application API는 `GET /projects/{project_id}/drafts/{draft_id}/versions/{version_id}/export?format=txt|markdown`으로 선택한 draft version을 내보낸다. export `body`는 그 version snapshot의 `raw_text`를 verbatim으로 내보내며 AI 분석 metadata를 본문에 주입하지 않고 Markdown을 합성·제거하지 않는다(두 형식 body 동일). `format`은 `content_type`(`text/plain`/`text/markdown`)과 filename 확장자(`.txt`/`.md`)만 가른다. payload는 `version_id`/`version_number`/`snapshot_id`/`content_hash` 추적 필드를 포함한다. 지원하지 않는 format은 400, missing/cross-project version은 404다. archive는 read를 막지 않으므로 export는 archived에서도 가능하다.
 
 ### Phase 2. Analysis Pipeline
 

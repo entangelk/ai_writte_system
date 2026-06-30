@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-06-30 | SoT v1.6.14: Slice 1 draft version export 추가(plain text/Markdown, version 추적·body verbatim). 사용자 결정: 막힌 Next Tasks 대신 export 진행, 형식은 plain text + Markdown | [work log](docs/daily_logs/2026-06-30/work_log.md) |
 | 2026-06-30 | SoT v1.6.13: Gemma Q4 benchmark 기반 AgentLoopRunner budget/retry 기본값 확정 | [work log](docs/daily_logs/2026-06-30/work_log.md) |
 | 2026-06-30 | SoT v1.6.12: Phase 2A analysis run endpoint 추가 | [work log](docs/daily_logs/2026-06-30/work_log.md) |
 | 2026-06-30 | SoT v1.6.11: Phase 2A analysis job/candidate HTTP API 추가 | [work log](docs/daily_logs/2026-06-30/work_log.md) |
