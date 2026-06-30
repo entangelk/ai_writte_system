@@ -32,7 +32,7 @@
 
 - 변경 파일: `docs/plans/02-analysis-runner-execution-decisions.md`, `docs/plans/README.md`, `HANDOFF.md`, `docs/daily_logs/2026-06-30/work_log.md`.
 - 커밋 `64ec099` 후 HANDOFF의 다음 작업을 이어 진행했다. 다음 구현 후보는 실제 runner 실행을 API/Worker에서 어떻게 시작할지 정해야 하지만, Gateway runtime wiring과 tool-call wire format은 아직 미확정이라 구현으로 들어가면 추측이 된다.
-- 이에 `Decision Required` 상태의 브리프를 추가했다. 추천안은 별도 `POST /projects/{project_id}/analysis/jobs/{job_id}/run`, 첫 slice 동기 실행, 기존 job 상태 무관 replay, runner/factory dependency 주입, source_ref 자동 생성과 Gateway runtime wiring 제외다.
+- 이에 `Decision Required` 상태의 브리프를 추가했다. 추천안은 별도 `POST /projects/{project_id}/analysis/jobs/{job_id}/run`, 첫 slice는 HTTP 요청 안에서 runner를 실행하고 완료까지 기다리는 방식, 기존 job 상태 무관 replay, runner/factory dependency 주입, source_ref 자동 생성과 Gateway runtime wiring 제외다.
 - 실패 HTTP status/error envelope는 승인 전 미결정으로 남겼다. 이 부분은 runner 실행 API 구현 전에 사용자 결정이 필요하다.
 - `docs/plans/README.md` 읽는 순서에 job-state 브리프와 runner 실행 브리프를 추가했고, `HANDOFF.md` Next Tasks를 승인 대기 상태로 갱신했다.
 
@@ -53,11 +53,17 @@
 - Resolution: 구현 대신 결정 브리프를 작성해 선택지와 추천안을 분리했다.
 - Outcome: 다음 구현자가 추측 없이 사용자 승인 후 run endpoint 또는 Worker 실행 slice로 들어갈 수 있다.
 
+- 문제: 독립 검증이 runner 실행 브리프의 "동기 함수형 orchestration" 표현이 실제 코드와 모순된다고 지적했다.
+- 원인: `AnalysisExtractionRunner.run`은 `async def` coroutine인데, 브리프가 Python sync/async 축과 HTTP 요청-블로킹/background enqueue 축을 섞어 표현했다.
+- Resolution: 브리프의 확정 경계를 "async coroutine이며 호출자가 await/bridge 필요"로 고치고, Q2를 "요청 안에서 완료까지 기다리는가 background/worker에 넘기는가"로 재구성했다. `running` replay는 `idempotent_replay=true`로 명시했고, run API 구현 시 SoT minor update가 필요함도 남겼다.
+- Outcome: 조건부 합격 I1의 사실 오류가 폐쇄됐고, 사용자 승인 전제가 코드와 일치한다.
+
 ## Decisions
 
 - Analysis HTTP API는 job 생성/replay와 조회만 담당하고 runner 실행 트리거를 포함하지 않는다. 이유: 실행 wiring은 별도 계약이 필요하며, 이 slice의 목적은 이미 구현된 analysis 상태를 public Application API로 노출하는 것이다.
 - `POST /projects/{project_id}/analysis/jobs`는 project 존재만 검증하고 snapshot 존재는 앞당겨 검증하지 않는다. 이유: runner의 `snapshot_not_found` failure_reason 계약이 이미 snapshot load 실패를 소유한다.
 - Runner 실행 경계는 승인 전까지 구현하지 않는다. 추천안은 브리프에 남겼지만, 실패 HTTP status/error envelope는 사용자 결정이 필요하다.
+- Runner는 async coroutine이므로, "동기 실행"이라는 표현은 Python 함수 형태가 아니라 HTTP 요청이 완료까지 기다리는지 여부로만 사용한다.
 
 ## Verification
 
@@ -66,7 +72,9 @@
 - `python3 -m unittest discover tests -v` — 303개 통과(35 skip).
 - 잠근 범위: job create/replay/get, candidate list read-back, missing project 404(POST/GET job/GET candidates), existing-project missing job 404, cross-project job/candidate 404.
 - 문서-only 추가 검증: `docs/plans/02-analysis-runner-execution-decisions.md`의 기준 문서 링크와 `docs/plans/README.md`/`HANDOFF.md` 참조 대상 존재 확인.
+- runner 실행 브리프 보강 검증: `services/application/app/analysis/runner.py`의 `async def run` 및 `tests/test_analysis_runner.py`의 `await runner.run` 호출과 브리프의 async/await 표현 일치 확인.
 
 ## Next steps
 
-- 다음 Phase 2A 작업은 runner 실행을 API/Worker에서 시작하는 계약 브리프다. Gateway `/v1/generate` runtime wiring과 domain tool-call branch는 model tool-call wire format/payload 확정 뒤 구현한다.
+- 다음 Phase 2A 작업은 `docs/plans/02-analysis-runner-execution-decisions.md` 사용자 승인이다. run endpoint 도입 여부, 요청 안에서 async runner를 await할지/background·worker에 넘길지, replay 의미, runner dependency 주입 방식, 실패 HTTP status/error envelope를 확정해야 구현 가능하다.
+- Gateway `/v1/generate` runtime wiring과 domain tool-call branch는 model tool-call wire format/payload 확정 뒤 구현한다.

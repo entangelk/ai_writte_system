@@ -7,7 +7,7 @@
 
 ## 현재 확정된 경계
 
-- Phase 2A runner는 이미 동기 함수형 orchestration으로 구현되어 있다.
+- Phase 2A runner는 async coroutine(`AnalysisExtractionRunner.run`)으로 구현되어 있으며 호출자는 `await`하거나 명시적 async bridge를 둬야 한다.
 - runner는 source validation이 구성된 `AnalysisService`만 받는다.
 - runner는 새 job(`pending`)만 실행하고 기존 job은 상태와 무관하게 idempotent replay로 반환한다.
 - 실패 job은 terminal이며 같은 snapshot 재분석은 새 `idempotency_key`로 새 job을 만들어야 한다.
@@ -28,23 +28,25 @@
 
 | 옵션 | 설명 | 장점 | 리스크 |
 |---|---|---|---|
-| A. 기존 `POST /analysis/jobs`가 생성과 실행을 모두 수행 | job 생성 직후 runner를 동기 실행 | endpoint가 하나라 단순 | 현재 계약의 "상태/결과 노출 API" 의미를 바꾸고, HTTP 요청 시간이 provider latency에 묶임 |
+| A. 기존 `POST /analysis/jobs`가 생성과 실행을 모두 수행 | job 생성 직후 runner를 await해 실행 | endpoint가 하나라 단순 | 현재 계약의 "상태/결과 노출 API" 의미를 바꾸고, HTTP 요청 시간이 provider latency에 묶임 |
 | B. 별도 `POST /analysis/jobs/{job_id}/run` 추가 | job 생성과 실행을 분리 | idempotency 단위가 명확하고 상태 조회 API와 충돌하지 않음 | endpoint가 하나 늘어남 |
 | C. Worker-only 내부 entrypoint | HTTP는 job 생성/조회만 하고 worker가 pending job을 실행 | 장기 구조와 맞음 | MVP에서 worker discovery/polling 계약을 먼저 만들어야 함 |
 
-추천: **B**. Phase 2A MVP에서는 `POST /projects/{project_id}/analysis/jobs/{job_id}/run`을 추가해 생성과 실행을 분리한다. HTTP 동기 실행으로 시작하되, 이 endpoint를 나중에 worker enqueue로 바꿀 수 있게 response shape를 job/candidate 결과 중심으로 둔다.
+추천: **B**. Phase 2A MVP에서는 `POST /projects/{project_id}/analysis/jobs/{job_id}/run`을 추가해 생성과 실행을 분리한다. 첫 구현은 async endpoint가 runner coroutine을 await해 요청 안에서 완료까지 기다리는 방식으로 시작하되, 이 endpoint를 나중에 worker enqueue로 바꿀 수 있게 response shape를 job/candidate 결과 중심으로 둔다.
 
-### 2. run endpoint는 동기 실행인가 비동기 enqueue인가?
+### 2. run endpoint는 요청 안에서 완료까지 기다리는가 background/worker에 넘기는가?
+
+이 질문은 Python 함수가 sync인지 async인지가 아니라 HTTP 요청 lifecycle을 정한다. 현재 runner 자체는 async coroutine이므로, 요청 안에서 실행하는 옵션도 내부적으로는 `await runner.run(...)` 형태가 된다.
 
 선택지:
 
 | 옵션 | 설명 | 장점 | 리스크 |
 |---|---|---|---|
-| A. 동기 실행 후 terminal job 반환 | 요청 안에서 runner 실행 완료 | 외부 queue 없이 구현·검증 가능 | 실모델 latency 동안 요청이 오래 걸림 |
+| A. 요청 안에서 await 후 terminal job 반환 | HTTP 요청 중 runner coroutine을 await해 완료까지 실행 | 외부 queue 없이 구현·검증 가능 | 실모델 latency 동안 요청이 오래 걸림 |
 | B. in-process background task로 `pending` 반환 | 요청은 빨리 끝나고 background에서 실행 | UI polling 구조에 가까움 | crash/restart/stale running 복구 계약이 필요해짐 |
 | C. 별도 Worker polling/enqueue | production-like | 가장 확장 가능 | queue/claim/stale lease 계약이 필요해 Phase 2A보다 커짐 |
 
-추천: **A**. 초기 local MVP와 현재 runner 계약에 맞춰 동기 실행으로 시작한다. 오래 걸리는 실모델 실행은 후속 Worker slice에서 분리한다.
+추천: **A**. 초기 local MVP에서는 HTTP 요청 안에서 async runner를 await해 terminal job을 반환하는 방식으로 시작한다. 오래 걸리는 실모델 실행은 후속 Worker slice에서 분리한다.
 
 ### 3. run endpoint의 replay 동작은 무엇인가?
 
@@ -52,7 +54,7 @@
 
 - `POST /analysis/jobs/{job_id}/run`은 해당 job이 `pending`일 때만 runner를 실행한다.
 - job이 이미 `succeeded` 또는 `failed`이면 재실행하지 않고 현재 job과 저장된 candidate 목록을 반환한다.
-- job이 `running`이면 재실행하지 않고 현재 job과 저장된 candidate 목록을 반환한다. stale `running` 복구는 MVP 범위 밖이다.
+- job이 `running`이면 재실행하지 않고 현재 job과 저장된 candidate 목록을 반환한다. 이 응답도 replay로 취급해 `idempotent_replay=true`를 반환한다. stale `running` 복구는 MVP 범위 밖이다.
 - 다른 project의 job 또는 없는 job은 404다.
 
 이유: `02-analysis-job-state-decisions.md`가 이미 "기존 job은 상태 무관 replay, failed 재실행은 새 idempotency_key"로 승인했다. run endpoint도 이 의미를 깨지 않아야 한다.
@@ -98,7 +100,7 @@
 1. `AnalysisRunResult` 또는 동등한 API response helper 추가  
    검증: job payload와 candidate payload가 기존 read API와 동일 literal을 사용한다.
 2. `POST /projects/{project_id}/analysis/jobs/{job_id}/run` 추가  
-   검증: pending job 실행, succeeded/failed/pending replay 비재실행, missing/cross-project 404.
+   검증: pending job 실행, succeeded/failed/running replay 비재실행, missing/cross-project 404.
 3. fake runner 주입 기반 API contract test 추가  
    검증: runner 호출 횟수, candidate read-back, failure job 상태 보존, runner/Gateway real wiring 미사용.
 4. 실제 provider/Gateway wiring은 별도 slice로 보류  
@@ -109,9 +111,11 @@
 추천안:
 
 - 실행 트리거는 별도 `POST /projects/{project_id}/analysis/jobs/{job_id}/run`.
-- 첫 slice는 동기 실행으로 시작한다.
+- 첫 slice는 HTTP 요청 안에서 async runner를 await해 완료까지 실행하는 방식으로 시작한다.
 - 기존 job은 상태와 무관하게 replay하며 재실행하지 않는다.
 - run response는 `job`, `candidates`, `idempotent_replay`를 반환한다.
 - app은 runner/factory를 dependency로 주입받고, 첫 회귀는 fake runner로 닫는다.
 - source_ref 자동 생성과 Gateway runtime wiring은 이번 slice에서 제외한다.
 - 실패 HTTP status/error envelope는 별도 결정을 받아야 한다.
+
+구현 slice에서 이 추천안을 승인해 API가 runner를 시작하게 되면, 기존 SoT v1.6.11의 "상태/결과 노출 API는 runner를 시작하지 않는다" 계약이 확장되므로 SoT minor update가 필요하다.
