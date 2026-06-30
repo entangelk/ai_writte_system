@@ -512,6 +512,77 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.job.status, AnalysisJobStatus.PENDING)
         self.assertEqual(result.candidates, ())
 
+    async def test_runner_run_job_executes_existing_pending_job(self):
+        saved = self._saved_source()
+        analysis_service, analysis_repo, source_adapter = self._analysis(
+            saved["core_sot"]
+        )
+        job = analysis_service.create_job(
+            project_id=saved["project_id"],
+            snapshot_id=saved["snapshot_id"],
+            idempotency_key="analysis-run-1",
+        ).job
+        extractor = _CountingExtractor(
+            (
+                self._draft(
+                    logical_key="character:min-a",
+                    source_anchor=saved["anchors"]["min-a"],
+                ),
+            )
+        )
+        runner = AnalysisExtractionRunner(
+            analysis_service=analysis_service,
+            snapshot_loader=source_adapter,
+            extractor=extractor,
+        )
+
+        result = await runner.run_job(project_id=saved["project_id"], job_id=job.id)
+
+        self.assertEqual(extractor.calls, 1)
+        self.assertFalse(result.job_idempotent_replay)
+        self.assertEqual(result.job.id, job.id)
+        self.assertEqual(result.job.status, AnalysisJobStatus.SUCCEEDED)
+        self.assertEqual(len(result.candidates), 1)
+        self.assertEqual(len(analysis_repo.candidates), 1)
+
+    async def test_runner_run_job_replays_existing_non_pending_job(self):
+        saved = self._saved_source()
+        analysis_service, analysis_repo, source_adapter = self._analysis(
+            saved["core_sot"]
+        )
+        job = analysis_service.create_job(
+            project_id=saved["project_id"],
+            snapshot_id=saved["snapshot_id"],
+            idempotency_key="analysis-run-1",
+        ).job
+        analysis_service.mark_job_running(project_id=saved["project_id"], job_id=job.id)
+        succeeded = analysis_service.mark_job_succeeded(
+            project_id=saved["project_id"],
+            job_id=job.id,
+        )
+        extractor = _CountingExtractor(
+            (
+                self._draft(
+                    logical_key="character:min-a",
+                    source_anchor=saved["anchors"]["min-a"],
+                ),
+            )
+        )
+        runner = AnalysisExtractionRunner(
+            analysis_service=analysis_service,
+            snapshot_loader=source_adapter,
+            extractor=extractor,
+        )
+
+        result = await runner.run_job(project_id=saved["project_id"], job_id=job.id)
+
+        self.assertEqual(extractor.calls, 0)
+        self.assertTrue(result.job_idempotent_replay)
+        self.assertEqual(result.job.id, succeeded.id)
+        self.assertEqual(result.job.status, AnalysisJobStatus.SUCCEEDED)
+        self.assertEqual(result.candidates, ())
+        self.assertEqual(len(analysis_repo.candidates), 0)
+
     def _analysis(self, core_sot):
         repo = InMemoryAnalysisRepository()
         source_adapter = CoreSotSourceAdapter(core_sot)

@@ -15,6 +15,7 @@ from services.application.app.analysis.models import (
     AnalysisCandidateRecordRequest,
     AnalysisJob,
     AnalysisJobFailureReason,
+    AnalysisJobStatus,
     SnapshotText,
 )
 from services.application.app.analysis.repository import (
@@ -93,7 +94,34 @@ class AnalysisExtractionRunner:
                 candidate_idempotent_replays=tuple(True for _ in stored),
             )
 
-        job_id = job_result.job.id
+        return await self._execute_pending_job(job_result.job)
+
+    async def run_job(
+        self,
+        *,
+        project_id: str,
+        job_id: str,
+    ) -> AnalysisExtractionRunResult:
+        job = self._analysis_service.get_job(project_id=project_id, job_id=job_id)
+        if job.status is not AnalysisJobStatus.PENDING:
+            stored = self._analysis_service.list_candidates(
+                project_id=project_id, job_id=job.id
+            )
+            return AnalysisExtractionRunResult(
+                job=job,
+                candidates=stored,
+                job_idempotent_replay=True,
+                candidate_idempotent_replays=tuple(True for _ in stored),
+            )
+
+        return await self._execute_pending_job(job)
+
+    async def _execute_pending_job(
+        self, job: AnalysisJob
+    ) -> AnalysisExtractionRunResult:
+        project_id = job.project_id
+        snapshot_id = job.snapshot_id
+        job_id = job.id
         self._analysis_service.mark_job_running(
             project_id=project_id, job_id=job_id
         )

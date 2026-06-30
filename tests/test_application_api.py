@@ -8,15 +8,22 @@ import httpx
 from services.application.app.analysis.models import (
     AnalysisCandidateAction,
     AnalysisCandidateType,
+    AnalysisJobFailureReason,
     AnalysisProvenance,
 )
+from services.application.app.analysis.repository import (
+    DuplicateAnalysisCandidateRequest,
+)
+from services.application.app.analysis.runner import AnalysisExtractionRunResult
 from services.application.app.analysis.service import (
     AnalysisService,
     InMemoryAnalysisRepository,
+    InvalidAnalysisCandidate,
 )
 from services.application.app.core_sot.service import (
     CoreSotService,
     InMemoryCoreSotRepository,
+    NotFound,
 )
 from services.application.app.main import create_app
 
@@ -645,6 +652,334 @@ class ApplicationApiTest(unittest.TestCase):
 
         self.assertEqual(fetched.status_code, 404)
         self.assertEqual(candidates.status_code, 404)
+
+    def test_analysis_run_endpoint_executes_pending_job_with_injected_runner(self):
+        core_sot = CoreSotService(InMemoryCoreSotRepository())
+        analysis = AnalysisService(InMemoryAnalysisRepository())
+        runner = _ApiFakeAnalysisRunner(analysis)
+        client = TestClient(
+            create_app(core_sot, analysis_service=analysis, analysis_runner=runner)
+        )
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        created = client.post(
+            f"/projects/{project['id']}/analysis/jobs",
+            json={"snapshot_id": "snapshot-1", "idempotency_key": "analysis-run-1"},
+        ).json()
+
+        response = client.post(
+            f"/projects/{project['id']}/analysis/jobs/{created['job']['id']}/run"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertFalse(body["idempotent_replay"])
+        self.assertEqual(body["job"]["status"], "succeeded")
+        self.assertEqual(len(body["candidates"]), 1)
+        self.assertEqual(
+            body["candidates"][0]["candidate_type"],
+            "character_observation",
+        )
+        self.assertEqual(runner.calls, [created["job"]["id"]])
+        self.assertEqual(
+            client.get(
+                f"/projects/{project['id']}/analysis/jobs/{created['job']['id']}/candidates"
+            ).json()["candidates"][0]["id"],
+            body["candidates"][0]["id"],
+        )
+
+    def test_analysis_run_endpoint_replays_terminal_and_running_without_runner(self):
+        core_sot = CoreSotService(InMemoryCoreSotRepository())
+        analysis = AnalysisService(InMemoryAnalysisRepository())
+        client = TestClient(create_app(core_sot, analysis_service=analysis))
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        succeeded = analysis.create_job(
+            project_id=project["id"],
+            snapshot_id="snapshot-1",
+            idempotency_key="analysis-run-1",
+        ).job
+        analysis.mark_job_running(project_id=project["id"], job_id=succeeded.id)
+        analysis.mark_job_succeeded(project_id=project["id"], job_id=succeeded.id)
+        running = analysis.create_job(
+            project_id=project["id"],
+            snapshot_id="snapshot-2",
+            idempotency_key="analysis-run-2",
+        ).job
+        analysis.mark_job_running(project_id=project["id"], job_id=running.id)
+        failed = analysis.create_job(
+            project_id=project["id"],
+            snapshot_id="snapshot-3",
+            idempotency_key="analysis-run-3",
+        ).job
+        analysis.mark_job_running(project_id=project["id"], job_id=failed.id)
+        analysis.mark_job_failed(
+            project_id=project["id"],
+            job_id=failed.id,
+            failure_reason=AnalysisJobFailureReason.PROVIDER_ERROR,
+            failure_detail="gateway down",
+        )
+
+        succeeded_replay = client.post(
+            f"/projects/{project['id']}/analysis/jobs/{succeeded.id}/run"
+        )
+        running_replay = client.post(
+            f"/projects/{project['id']}/analysis/jobs/{running.id}/run"
+        )
+        failed_replay = client.post(
+            f"/projects/{project['id']}/analysis/jobs/{failed.id}/run"
+        )
+
+        self.assertEqual(succeeded_replay.status_code, 200)
+        self.assertTrue(succeeded_replay.json()["idempotent_replay"])
+        self.assertEqual(succeeded_replay.json()["job"]["status"], "succeeded")
+        self.assertEqual(running_replay.status_code, 200)
+        self.assertTrue(running_replay.json()["idempotent_replay"])
+        self.assertEqual(running_replay.json()["job"]["status"], "running")
+        self.assertEqual(failed_replay.status_code, 200)
+        self.assertTrue(failed_replay.json()["idempotent_replay"])
+        self.assertEqual(failed_replay.json()["job"]["status"], "failed")
+        self.assertEqual(
+            failed_replay.json()["job"]["failure_reason"],
+            "provider_error",
+        )
+
+    def test_analysis_run_endpoint_missing_and_cross_project_returns_404(self):
+        core_sot = CoreSotService(InMemoryCoreSotRepository())
+        analysis = AnalysisService(InMemoryAnalysisRepository())
+        runner = _ApiFakeAnalysisRunner(analysis)
+        client = TestClient(
+            create_app(core_sot, analysis_service=analysis, analysis_runner=runner)
+        )
+        project_a = client.post("/projects", json={"name": "A"}).json()
+        project_b = client.post("/projects", json={"name": "B"}).json()
+        job = analysis.create_job(
+            project_id=project_a["id"],
+            snapshot_id="snapshot-1",
+            idempotency_key="analysis-run-1",
+        ).job
+
+        missing_project = client.post(
+            f"/projects/nope/analysis/jobs/{job.id}/run"
+        )
+        missing_job = client.post(
+            f"/projects/{project_a['id']}/analysis/jobs/nope/run"
+        )
+        cross_project = client.post(
+            f"/projects/{project_b['id']}/analysis/jobs/{job.id}/run"
+        )
+
+        self.assertEqual(missing_project.status_code, 404)
+        self.assertEqual(missing_job.status_code, 404)
+        self.assertEqual(cross_project.status_code, 404)
+
+    def test_analysis_run_endpoint_preserves_failed_job_on_runner_error(self):
+        core_sot = CoreSotService(InMemoryCoreSotRepository())
+        analysis = AnalysisService(InMemoryAnalysisRepository())
+        client = TestClient(
+            create_app(
+                core_sot,
+                analysis_service=analysis,
+                analysis_runner=_ApiFailingAnalysisRunner(analysis),
+            )
+        )
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        job = analysis.create_job(
+            project_id=project["id"],
+            snapshot_id="snapshot-1",
+            idempotency_key="analysis-run-1",
+        ).job
+
+        failed = client.post(f"/projects/{project['id']}/analysis/jobs/{job.id}/run")
+        fetched = client.get(f"/projects/{project['id']}/analysis/jobs/{job.id}")
+
+        self.assertEqual(failed.status_code, 400)
+        self.assertEqual(fetched.json()["status"], "failed")
+        self.assertEqual(fetched.json()["failure_reason"], "schema_invalid")
+
+    def test_analysis_run_endpoint_maps_duplicate_conflict_to_409(self):
+        core_sot = CoreSotService(InMemoryCoreSotRepository())
+        analysis = AnalysisService(InMemoryAnalysisRepository())
+        client = TestClient(
+            create_app(
+                core_sot,
+                analysis_service=analysis,
+                analysis_runner=_ApiDuplicateConflictRunner(analysis),
+            )
+        )
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        job = analysis.create_job(
+            project_id=project["id"],
+            snapshot_id="snapshot-1",
+            idempotency_key="analysis-run-1",
+        ).job
+
+        failed = client.post(f"/projects/{project['id']}/analysis/jobs/{job.id}/run")
+        fetched = client.get(f"/projects/{project['id']}/analysis/jobs/{job.id}")
+
+        self.assertEqual(failed.status_code, 409)
+        self.assertEqual(fetched.json()["status"], "failed")
+        self.assertEqual(fetched.json()["failure_reason"], "duplicate_conflict")
+
+    def test_analysis_run_endpoint_maps_provider_exception_to_502(self):
+        core_sot = CoreSotService(InMemoryCoreSotRepository())
+        analysis = AnalysisService(InMemoryAnalysisRepository())
+        client = TestClient(
+            create_app(
+                core_sot,
+                analysis_service=analysis,
+                analysis_runner=_ApiProviderErrorRunner(analysis),
+            )
+        )
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        job = analysis.create_job(
+            project_id=project["id"],
+            snapshot_id="snapshot-1",
+            idempotency_key="analysis-run-1",
+        ).job
+
+        failed = client.post(f"/projects/{project['id']}/analysis/jobs/{job.id}/run")
+        fetched = client.get(f"/projects/{project['id']}/analysis/jobs/{job.id}")
+
+        self.assertEqual(failed.status_code, 502)
+        self.assertEqual(fetched.json()["status"], "failed")
+        self.assertEqual(fetched.json()["failure_reason"], "provider_error")
+
+    def test_analysis_run_endpoint_maps_snapshot_not_found_to_404(self):
+        core_sot = CoreSotService(InMemoryCoreSotRepository())
+        analysis = AnalysisService(InMemoryAnalysisRepository())
+        client = TestClient(
+            create_app(
+                core_sot,
+                analysis_service=analysis,
+                analysis_runner=_ApiSnapshotNotFoundRunner(analysis),
+            )
+        )
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        job = analysis.create_job(
+            project_id=project["id"],
+            snapshot_id="missing-snapshot",
+            idempotency_key="analysis-run-1",
+        ).job
+
+        failed = client.post(f"/projects/{project['id']}/analysis/jobs/{job.id}/run")
+        fetched = client.get(f"/projects/{project['id']}/analysis/jobs/{job.id}")
+
+        self.assertEqual(failed.status_code, 404)
+        self.assertEqual(fetched.json()["status"], "failed")
+        self.assertEqual(fetched.json()["failure_reason"], "snapshot_not_found")
+
+    def test_analysis_run_endpoint_pending_without_runner_returns_503(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        job = client.post(
+            f"/projects/{project['id']}/analysis/jobs",
+            json={"snapshot_id": "snapshot-1", "idempotency_key": "analysis-run-1"},
+        ).json()["job"]
+
+        response = client.post(f"/projects/{project['id']}/analysis/jobs/{job['id']}/run")
+
+        self.assertEqual(response.status_code, 503)
+
+class _ApiFakeAnalysisRunner:
+    def __init__(self, analysis_service):
+        self._analysis_service = analysis_service
+        self.calls = []
+
+    async def run_job(self, *, project_id: str, job_id: str):
+        self.calls.append(job_id)
+        running = self._analysis_service.mark_job_running(
+            project_id=project_id,
+            job_id=job_id,
+        )
+        task = self._analysis_service.create_task(
+            project_id=project_id,
+            job_id=running.id,
+            candidate_type=AnalysisCandidateType.CHARACTER_OBSERVATION,
+        )
+        recorded = self._analysis_service.record_candidate(
+            project_id=project_id,
+            task_id=task.id,
+            logical_key="character:min-a",
+            candidate_type=AnalysisCandidateType.CHARACTER_OBSERVATION,
+            action=AnalysisCandidateAction.CREATE,
+            provenance=AnalysisProvenance.SOURCE_OBSERVED,
+            confidence=0.9,
+            source_ref_ids=("source-ref-1",),
+            payload={"name": "Mina", "observation": "Keeps a hidden notebook."},
+        )
+        succeeded = self._analysis_service.mark_job_succeeded(
+            project_id=project_id,
+            job_id=job_id,
+        )
+        return AnalysisExtractionRunResult(
+            job=succeeded,
+            candidates=(recorded.candidate,),
+            job_idempotent_replay=False,
+            candidate_idempotent_replays=(recorded.idempotent_replay,),
+        )
+
+
+class _ApiFailingAnalysisRunner:
+    def __init__(self, analysis_service):
+        self._analysis_service = analysis_service
+
+    async def run_job(self, *, project_id: str, job_id: str):
+        self._analysis_service.mark_job_running(project_id=project_id, job_id=job_id)
+        error = InvalidAnalysisCandidate("bad candidate")
+        self._analysis_service.mark_job_failed(
+            project_id=project_id,
+            job_id=job_id,
+            failure_reason=AnalysisJobFailureReason.SCHEMA_INVALID,
+            failure_detail=str(error),
+        )
+        raise error
+
+
+class _ApiDuplicateConflictRunner:
+    def __init__(self, analysis_service):
+        self._analysis_service = analysis_service
+
+    async def run_job(self, *, project_id: str, job_id: str):
+        self._analysis_service.mark_job_running(project_id=project_id, job_id=job_id)
+        error = DuplicateAnalysisCandidateRequest("duplicate candidate request")
+        self._analysis_service.mark_job_failed(
+            project_id=project_id,
+            job_id=job_id,
+            failure_reason=AnalysisJobFailureReason.DUPLICATE_CONFLICT,
+            failure_detail=str(error),
+        )
+        raise error
+
+
+class _ApiProviderErrorRunner:
+    def __init__(self, analysis_service):
+        self._analysis_service = analysis_service
+
+    async def run_job(self, *, project_id: str, job_id: str):
+        self._analysis_service.mark_job_running(project_id=project_id, job_id=job_id)
+        error = RuntimeError("gateway down")
+        self._analysis_service.mark_job_failed(
+            project_id=project_id,
+            job_id=job_id,
+            failure_reason=AnalysisJobFailureReason.PROVIDER_ERROR,
+            failure_detail=str(error),
+        )
+        raise error
+
+
+class _ApiSnapshotNotFoundRunner:
+    def __init__(self, analysis_service):
+        self._analysis_service = analysis_service
+
+    async def run_job(self, *, project_id: str, job_id: str):
+        self._analysis_service.mark_job_running(project_id=project_id, job_id=job_id)
+        error = NotFound("snapshot not found")
+        self._analysis_service.mark_job_failed(
+            project_id=project_id,
+            job_id=job_id,
+            failure_reason=AnalysisJobFailureReason.SNAPSHOT_NOT_FOUND,
+            failure_detail=str(error),
+        )
+        raise error
 
 
 if __name__ == "__main__":

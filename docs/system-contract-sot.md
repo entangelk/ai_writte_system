@@ -1,7 +1,7 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`  
-계약 버전: `v1.6.11`
+계약 버전: `v1.6.12`
 승인일: `2026-06-26`  
 최근 갱신일: `2026-06-29`  
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
@@ -33,6 +33,7 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.6.12 | 2026-06-30 | Phase 2A analysis run endpoint 계약을 승인·구현했다. `POST /projects/{project_id}/analysis/jobs/{job_id}/run`은 pending job만 runner dependency로 실행하고 요청 안에서 await해 terminal job과 candidate 목록을 반환한다. `running`/`succeeded`/`failed` job은 재실행하지 않고 `idempotent_replay=true`로 현재 job과 저장된 candidate를 반환한다. pending job에서 runner가 구성되지 않았으면 503, missing/cross-project 및 `snapshot_not_found`는 404, `schema_invalid`/`source_invalid` 계열은 400, `duplicate_conflict`는 409, provider/기타 실행 오류는 502로 표면화한다. source_ref 자동 생성과 Gateway runtime wiring은 제외다. | 사용자 요청, `tests/test_application_api.py`, `tests/test_analysis_runner.py` |
 | v1.6.11 | 2026-06-30 | Phase 2A analysis job/candidate HTTP read surface를 추가했다. Application API는 `POST /projects/{project_id}/analysis/jobs`로 job을 idempotent 생성/replay하고, `GET /projects/{project_id}/analysis/jobs/{job_id}`와 `GET /projects/{project_id}/analysis/jobs/{job_id}/candidates`로 job 상태와 candidate를 조회한다. 이 API는 runner/gateway 실행을 시작하지 않으며, 존재하지 않는 project 또는 cross-project job/candidate 접근은 404다. | `tests/test_application_api.py` |
 | v1.6.10 | 2026-06-29 | Phase 2A job all-or-nothing 범위를 명확화했다. all-or-nothing은 candidate write에 한정되며, job/task 생성은 idempotent setup이라 실패 후에도 남을 수 있다(롤백 대상 아님). 동작 변경 없음, runner slice 2 검증의 비차단 오해 여지 해소. | `verifications/2026-06-29/analysis_job_state_runner_slice2.md` |
 | v1.6.9 | 2026-06-29 | Phase 2A job 상태 전이와 실패 상태 저장 계약을 승인했다. 상태는 `AnalysisJob`에만 두고(Task 무상태), `pending→running→succeeded|failed` 전이만 허용하며 terminal은 불변이다. runner는 새 job(`pending`)만 실행하고 기존 job은 replay로 반환하며, `failed`는 terminal이라 재실행은 새 `idempotency_key`로 한다. `failed`는 닫힌 `failure_reason` enum(`snapshot_not_found`, `source_invalid`, `schema_invalid`, `provider_error`, `duplicate_conflict`) + free-text `failure_detail`로 저장한다. | 사용자 결정, `plans/02-analysis-job-state-decisions.md` |
@@ -57,7 +58,7 @@
 
 | 문서 | 역할 | 지위 |
 |---|---|---|
-| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.11 |
+| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.12 |
 | [`plans/README.md`](plans/README.md) | 계획 문서 진입점과 Phase/MVP 관계 | Draft |
 | [`plans/00-foundations.md`](plans/00-foundations.md) | 전역 원칙과 제품 경계 | Draft |
 | [`plans/implementation-plan.md`](plans/implementation-plan.md) | 구현 순서, slice 상태, 검증 gate | Draft |
@@ -318,7 +319,8 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 - Phase 2A job 상태는 `AnalysisJob`에만 둔다. `AnalysisTask`는 status가 없다(candidate_type 파티션이며 독립 lifecycle 없음). job 상태는 `pending`(생성, 미실행) → `running`(추출/검증/저장 진행) → `succeeded`(이번 run candidate 모두 저장) | `failed`(실패, candidate 미저장)다. 허용 전이는 `pending→running`, `running→succeeded`, `running→failed`뿐이고 그 외는 `InvalidJobStateTransition`이다. terminal 상태(`succeeded`/`failed`)는 불변이다.
 - Phase 2A runner는 새로 생성한 job(`pending`)일 때만 추출을 실행한다. `find_job_request`가 기존 job(상태 무관)을 찾으면 idempotent replay로 그대로 반환하고 재실행하지 않는다. `failed`는 terminal이며 같은 snapshot 재분석은 새 `idempotency_key`(새 job)로 한다. crash 등으로 비terminal에 멈춘 stale job의 자동 복구/재개는 MVP 범위 밖이다.
 - Phase 2A `failed` job은 닫힌 `failure_reason` enum과 free-text `failure_detail`을 저장한다. `failure_reason`은 `snapshot_not_found`(snapshot 로드 실패), `source_invalid`(source_ref/anchor 검증 실패), `schema_invalid`(payload/logical_key/provider content malformed), `provider_error`(provider extraction 호출 실패, Gateway `provider_error` umbrella와 정렬), `duplicate_conflict`(candidate 저장 `DuplicateAnalysisCandidateRequest`)다. `succeeded`/비terminal 상태에서는 `failure_reason`/`failure_detail`이 비어 있어야 한다. 실패는 성공으로 위장하지 않으며 candidate를 저장하지 않는다. all-or-nothing은 candidate write에 한정되고, job/task 생성은 idempotent setup이라 실패 후에도 남을 수 있다(롤백 대상 아님).
-- Phase 2A Application API는 `POST /projects/{project_id}/analysis/jobs`로 job을 `project_id + snapshot_id + idempotency_key` 기준 idempotent 생성/replay하고, `GET /projects/{project_id}/analysis/jobs/{job_id}`로 job 상태를 읽고, `GET /projects/{project_id}/analysis/jobs/{job_id}/candidates`로 저장된 candidate를 읽는다. 이 surface는 runner 또는 Gateway 호출을 시작하지 않는 상태/결과 노출 API다. 존재하지 않는 project 또는 다른 project의 job/candidate 접근은 404로 처리한다.
+- Phase 2A Application API는 `POST /projects/{project_id}/analysis/jobs`로 job을 `project_id + snapshot_id + idempotency_key` 기준 idempotent 생성/replay하고, `GET /projects/{project_id}/analysis/jobs/{job_id}`로 job 상태를 읽고, `GET /projects/{project_id}/analysis/jobs/{job_id}/candidates`로 저장된 candidate를 읽는다. 존재하지 않는 project 또는 다른 project의 job/candidate 접근은 404로 처리한다.
+- Phase 2A Application API는 `POST /projects/{project_id}/analysis/jobs/{job_id}/run`으로 기존 job 실행을 시작할 수 있다. 이 endpoint는 `pending` job만 실행하며, runner dependency를 주입받아 요청 안에서 async runner를 await한다. `running`/`succeeded`/`failed` job은 재실행하지 않고 현재 job과 저장된 candidate를 `idempotent_replay=true`로 반환한다. pending job에서 runner가 구성되지 않았으면 503이다. 실패 HTTP mapping은 `snapshot_not_found` 404, `schema_invalid`/`source_invalid` 계열 400, `duplicate_conflict` 409, provider/기타 실행 오류 502다. 실패 job은 이후 `GET`으로 조회 가능해야 한다. source_ref 자동 생성과 Gateway runtime wiring은 이 endpoint 범위가 아니다.
 - Phase 2A와 2B는 별도 milestone이다.
 - Phase 2B는 Phase 3~4 이후 prior memory를 검색해 `create/update/add_evidence/no_change/conflict` 후보를 만든다.
 - Analysis AI는 canon을 확정하지 않고 기존 기억을 직접 덮어쓰지 않는다.

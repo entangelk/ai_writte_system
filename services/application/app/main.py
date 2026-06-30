@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 import os
+from typing import Protocol
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from services.application.app.analysis.extractor import AnalysisExtractionError
+from services.application.app.analysis.models import AnalysisJobStatus
+from services.application.app.analysis.repository import DuplicateAnalysisCandidateRequest
+from services.application.app.analysis.runner import AnalysisExtractionRunResult
 from services.application.app.analysis.service import (
     AnalysisNotFound,
     AnalysisService,
     InMemoryAnalysisRepository,
+    InvalidAnalysisCandidate,
+    InvalidCandidateSource,
 )
 from services.application.app.core_sot.service import (
     Archived,
@@ -19,6 +26,16 @@ from services.application.app.core_sot.service import (
     InMemoryCoreSotRepository,
     NotFound,
 )
+
+
+class AnalysisJobRunner(Protocol):
+    async def run_job(
+        self,
+        *,
+        project_id: str,
+        job_id: str,
+    ) -> AnalysisExtractionRunResult:
+        ...
 
 
 def _default_core_sot_service() -> CoreSotService:
@@ -101,6 +118,7 @@ class SaveDraftRequest(BaseModel):
 def create_app(
     service: CoreSotService | None = None,
     analysis_service: AnalysisService | None = None,
+    analysis_runner: AnalysisJobRunner | None = None,
 ) -> FastAPI:
     app = FastAPI(title="AI Writing System Application")
     core_sot = service or _default_core_sot_service()
@@ -157,6 +175,18 @@ def create_app(
             "confidence": candidate.confidence,
             "source_ref_ids": list(candidate.source_ref_ids),
             "payload": dict(candidate.payload),
+        }
+
+    def _analysis_run_payload(
+        result: AnalysisExtractionRunResult,
+    ) -> dict[str, object]:
+        return {
+            "job": _analysis_job_payload(result.job),
+            "candidates": [
+                _analysis_candidate_payload(candidate)
+                for candidate in result.candidates
+            ],
+            "idempotent_replay": result.job_idempotent_replay,
         }
 
     def _require_project_exists(project_id: str) -> None:
@@ -378,6 +408,48 @@ def create_app(
                 _analysis_candidate_payload(candidate) for candidate in candidates
             ]
         }
+
+    @app.post("/projects/{project_id}/analysis/jobs/{job_id}/run")
+    async def run_analysis_job(project_id: str, job_id: str) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+            job = analysis.get_job(project_id=project_id, job_id=job_id)
+            if job.status is not AnalysisJobStatus.PENDING:
+                candidates = analysis.list_candidates(
+                    project_id=project_id, job_id=job_id
+                )
+                return _analysis_run_payload(
+                    AnalysisExtractionRunResult(
+                        job=job,
+                        candidates=candidates,
+                        job_idempotent_replay=True,
+                        candidate_idempotent_replays=tuple(True for _ in candidates),
+                    )
+                )
+            if analysis_runner is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="analysis runner is not configured",
+                )
+            result = await analysis_runner.run_job(
+                project_id=project_id,
+                job_id=job_id,
+            )
+        except (AnalysisNotFound, NotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except DuplicateAnalysisCandidateRequest as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (
+            AnalysisExtractionError,
+            InvalidCandidateSource,
+            InvalidAnalysisCandidate,
+        ) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return _analysis_run_payload(result)
 
     return app
 
