@@ -127,19 +127,41 @@ class VersionedPromptAnalysisExtractionAdapter:
 
         result = await self._provider.generate(request)
         try:
-            return parse_analysis_extraction(result.content)
+            drafts = parse_analysis_extraction(result.content)
         except AnalysisExtractionError as first_error:
-            repair = await self._provider.generate(
-                _repair_request(
-                    original_request=request,
-                    invalid_content=result.content,
-                    parser_error=str(first_error),
-                )
+            return await self._repair_once(
+                request=request,
+                invalid_content=result.content,
+                error=str(first_error),
             )
-            try:
-                return parse_analysis_extraction(repair.content)
-            except AnalysisExtractionError as repair_error:
-                raise repair_error from first_error
+
+        catalog_error = _catalog_anchor_error(drafts, source_refs)
+        if catalog_error is None:
+            return drafts
+        repaired = await self._repair_once(
+            request=request,
+            invalid_content=result.content,
+            error=catalog_error,
+        )
+        if _catalog_anchor_error(repaired, source_refs) is None:
+            return repaired
+        return repaired
+
+    async def _repair_once(
+        self,
+        *,
+        request: ChatCompletionRequest,
+        invalid_content: str,
+        error: str,
+    ) -> tuple[AnalysisCandidateDraft, ...]:
+        repair = await self._provider.generate(
+            _repair_request(
+                original_request=request,
+                invalid_content=invalid_content,
+                parser_error=error,
+            )
+        )
+        return parse_analysis_extraction(repair.content)
 
 
 def parse_analysis_extraction(content: str) -> tuple[AnalysisCandidateDraft, ...]:
@@ -148,6 +170,26 @@ def parse_analysis_extraction(content: str) -> tuple[AnalysisCandidateDraft, ...
     if not isinstance(raw_candidates, list):
         raise AnalysisExtractionError("candidates must be an array")
     return tuple(_candidate_draft(item) for item in raw_candidates)
+
+
+def _catalog_anchor_error(
+    drafts: Sequence[AnalysisCandidateDraft],
+    source_refs: Sequence[SourceRef],
+) -> str | None:
+    catalog = {source_ref.id: source_ref for source_ref in source_refs}
+    for draft in drafts:
+        for anchor in draft.source_anchors:
+            source_ref = catalog.get(anchor.source_ref_id)
+            if source_ref is None:
+                return "source_ref_id must exactly match the source_ref catalog"
+            if (
+                source_ref.start_offset != anchor.start_offset
+                or source_ref.end_offset != anchor.end_offset
+                or source_ref.quote != anchor.quote
+                or source_ref.content_hash != anchor.content_hash
+            ):
+                return "source_anchors must preserve catalog span, quote, and content_hash"
+    return None
 
 
 _REPAIR_SYSTEM_PROMPT = """Repair Phase 2A analysis extraction output.

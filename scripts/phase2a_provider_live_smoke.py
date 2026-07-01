@@ -120,7 +120,6 @@ async def main() -> int:
         app = create_application_app(core_sot, analysis, runner)
         summary = await _run_smoke(
             app=app,
-            core_sot=core_sot,
             args=args,
             provider=gateway_provider,
         )
@@ -137,7 +136,6 @@ async def main() -> int:
 async def _run_smoke(
     *,
     app,
-    core_sot: CoreSotService,
     args: argparse.Namespace,
     provider: "_RecordingProvider",
 ) -> dict[str, Any]:
@@ -166,10 +164,17 @@ async def _run_smoke(
             )
         ).json()
         snapshot_id = saved["snapshot"]["id"]
-        source_refs = [
-            _create_source_ref(core_sot, project["id"], snapshot_id, raw_text, quote)
-            for quote in ("민아", "파란 편지", "준호")
-        ]
+        source_refs = []
+        for quote in ("민아", "파란 편지", "준호"):
+            source_refs.append(
+                (
+                    await client.post(
+                        f"/projects/{project['id']}/snapshots/{snapshot_id}"
+                        "/source-refs",
+                        json=_source_ref_request(raw_text, quote),
+                    )
+                ).json()
+            )
         job_response = await client.post(
             f"/projects/{project['id']}/analysis/jobs",
             json={"snapshot_id": snapshot_id, "idempotency_key": "smoke-job-1"},
@@ -192,10 +197,10 @@ async def _run_smoke(
         "snapshot_id": snapshot_id,
         "source_refs": [
             {
-                "id": ref.id,
-                "quote": ref.quote,
-                "start_offset": ref.start_offset,
-                "end_offset": ref.end_offset,
+                "id": ref["id"],
+                "quote": ref["quote"],
+                "start_offset": ref["start_offset"],
+                "end_offset": ref["end_offset"],
             }
             for ref in source_refs
         ],
@@ -208,20 +213,9 @@ async def _run_smoke(
     }
 
 
-def _create_source_ref(
-    core_sot: CoreSotService,
-    project_id: str,
-    snapshot_id: str,
-    raw_text: str,
-    quote: str,
-):
+def _source_ref_request(raw_text: str, quote: str) -> dict[str, int]:
     start = raw_text.index(quote)
-    return core_sot.create_source_ref(
-        project_id=project_id,
-        snapshot_id=snapshot_id,
-        start_offset=start,
-        end_offset=start + len(quote),
-    )
+    return {"start_offset": start, "end_offset": start + len(quote)}
 
 
 def _safe_json(response: httpx.Response) -> Any:

@@ -2,6 +2,8 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-07-01 | SoT v1.6.19: Phase 2A source_ref catalog anchor repair 보강 | [work log](docs/daily_logs/2026-07-01/work_log.md) |
+| 2026-07-01 | SoT v1.6.18: Phase 2A source_ref catalog HTTP API 추가 | [work log](docs/daily_logs/2026-07-01/work_log.md) |
 | 2026-07-01 | SoT v1.6.17: Phase 2A Application-side JSON repair retry 추가 | [work log](docs/daily_logs/2026-07-01/work_log.md) |
 | 2026-07-01 | SoT v1.6.16: Phase 2A provider/Gateway runner factory wiring 첫 구현 slice 추가 | [work log](docs/daily_logs/2026-07-01/work_log.md) |
 | 2026-07-01 | SoT v1.6.15: Phase 2A provider/Gateway wiring pre-implementation 결정 승인 | [work log](docs/daily_logs/2026-07-01/work_log.md) |
@@ -53,6 +55,8 @@
 
 ### Changed
 
+- SoT를 v1.6.19로 갱신해 Phase 2A repair retry가 valid JSON이지만 source_ref catalog anchor literal을 보존하지 못한 출력도 1회 repair 대상으로 삼도록 보강했다. Adapter는 parsed candidate의 `source_ref_id`, span, quote, content_hash를 입력 catalog와 대조해 mismatch가 있으면 repair prompt를 재호출한다. repair 후에도 mismatch가 남으면 성공으로 보정하지 않고 기존 source validation 경계가 `source_invalid`를 보존한다.
+- SoT를 v1.6.18로 갱신해 Phase 2A source_ref catalog 준비용 Application HTTP API를 추가했다. `POST /projects/{project_id}/snapshots/{snapshot_id}/source-refs`, `GET /projects/{project_id}/snapshots/{snapshot_id}/source-refs`, `GET /projects/{project_id}/source-refs/{source_ref_id}`를 열어 snapshot span에서 source_ref를 만들고 같은 project 안에서만 catalog/ref를 조회한다. invalid span은 400, missing/cross-project snapshot/ref는 404이며 archived project에서도 source_ref 생성·조회는 허용된다.
 - SoT를 v1.6.17로 갱신해 Phase 2A Application-side JSON repair retry를 추가했다. `/v1/generate` 경로는 유지하고, `VersionedPromptAnalysisExtractionAdapter`가 strict parser 실패 시 원문 output/parser error/original prompt payload로 repair prompt를 1회만 재호출한다. Repair output도 같은 Phase 2A strict parser/source validation/candidate schema를 통과해야 하며 실패하면 `schema_invalid`로 보존된다.
 - SoT를 v1.6.16으로 갱신해 Phase 2A provider/Gateway runner factory wiring 첫 구현 slice를 추가했다. Core SOT source_ref catalog read surface, versioned prompt template DB, `analysis_extract_v1` prompt builder, `/v1/generate` 기반 Application→Gateway provider adapter, env 기반 default runner wiring을 추가했다. `LLM_GATEWAY_BASE_URL`이 없으면 기존 pending run 503 behavior를 유지한다.
 - SoT를 v1.6.15로 갱신해 Phase 2A provider/Gateway wiring pre-implementation 결정을 승인했다. 첫 실제 provider wiring은 tool-call 없는 terminal JSON extraction으로 진행하고, 모델은 입력 source_ref catalog의 id를 선택한다. Prompt template은 DB에 저장해 versioned 관리하며 첫 prompt version은 `analysis_extract_v1`, task_type은 `analysis_extract`다.

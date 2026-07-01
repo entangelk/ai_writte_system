@@ -196,6 +196,11 @@ class SaveDraftRequest(BaseModel):
     idempotency_key: str
 
 
+class CreateSourceRefRequest(BaseModel):
+    start_offset: int
+    end_offset: int
+
+
 def create_app(
     service: CoreSotService | None = None,
     analysis_service: AnalysisService | None = None,
@@ -259,6 +264,18 @@ def create_app(
             "confidence": candidate.confidence,
             "source_ref_ids": list(candidate.source_ref_ids),
             "payload": dict(candidate.payload),
+        }
+
+    def _source_ref_payload(source_ref) -> dict[str, object]:
+        return {
+            "id": source_ref.id,
+            "project_id": source_ref.project_id,
+            "snapshot_id": source_ref.snapshot_id,
+            "block_id": source_ref.block_id,
+            "start_offset": source_ref.start_offset,
+            "end_offset": source_ref.end_offset,
+            "quote": source_ref.quote,
+            "content_hash": source_ref.content_hash,
         }
 
     def _analysis_run_payload(
@@ -483,6 +500,53 @@ def create_app(
             ],
             "idempotent_replay": result.idempotent_replay,
         }
+
+    @app.post("/projects/{project_id}/snapshots/{snapshot_id}/source-refs")
+    async def create_source_ref(
+        project_id: str,
+        snapshot_id: str,
+        request: CreateSourceRefRequest,
+    ) -> dict[str, object]:
+        try:
+            source_ref = core_sot.create_source_ref(
+                project_id=project_id,
+                snapshot_id=snapshot_id,
+                start_offset=request.start_offset,
+                end_offset=request.end_offset,
+            )
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except CoreSotError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _source_ref_payload(source_ref)
+
+    @app.get("/projects/{project_id}/snapshots/{snapshot_id}/source-refs")
+    async def list_source_refs(
+        project_id: str,
+        snapshot_id: str,
+    ) -> dict[str, object]:
+        try:
+            source_refs = core_sot.list_source_refs(
+                project_id=project_id,
+                snapshot_id=snapshot_id,
+            )
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"source_refs": [_source_ref_payload(ref) for ref in source_refs]}
+
+    @app.get("/projects/{project_id}/source-refs/{source_ref_id}")
+    async def get_source_ref(
+        project_id: str,
+        source_ref_id: str,
+    ) -> dict[str, object]:
+        try:
+            source_ref = core_sot.get_source_ref(
+                project_id=project_id,
+                source_ref_id=source_ref_id,
+            )
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _source_ref_payload(source_ref)
 
     @app.post("/projects/{project_id}/analysis/jobs")
     async def create_analysis_job(

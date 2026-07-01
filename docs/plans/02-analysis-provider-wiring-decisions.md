@@ -51,6 +51,8 @@
 
 이 추천안을 채택하면 `run`을 실행하기 전에 같은 project/snapshot에 필요한 source_ref가 준비되어 있어야 한다. source_ref가 없어서 후보를 만들 수 없는 상태는 provider/runtime 오류가 아니라 입력 준비 정책의 문제로 남는다. 이 정책을 HTTP에서 어떻게 표면화할지는 구현 slice 전에 별도 확인이 필요하다.
 
+2026-07-01 follow-up: source_ref catalog 준비용 Application HTTP surface가 추가됐다. `POST /projects/{project_id}/snapshots/{snapshot_id}/source-refs`가 snapshot span에서 source_ref를 만들고, `GET /projects/{project_id}/snapshots/{snapshot_id}/source-refs`와 `GET /projects/{project_id}/source-refs/{source_ref_id}`가 같은 project 안에서 catalog/ref를 조회한다.
+
 ### 3. prompt 조립은 어디서 소유하는가?
 
 선택지:
@@ -120,6 +122,7 @@ structured generation/grammar는 malformed JSON 비율이나 schema failure enve
 - 실제 Gemma/llama.cpp 호출에서 첫 output은 markdown-fenced JSON이거나 adapter가 요구하는 candidate schema보다 얕은 JSON일 수 있음을 확인했다.
 - `chat_template_kwargs.enable_thinking=false`를 명시하면 simple JSON 요청은 `message.content`로 정상 반환된다. `response_format={"type":"json_object"}`도 endpoint에서 거절되지는 않았지만, 이번 slice의 Application/Gateway 계약은 아직 `/v1/generate` text surface를 사용한다.
 - 사용자 결정에 따라 `/v1/generate-structured` public contract를 바로 열기보다 Application-side repair를 먼저 적용한다. Versioned extraction adapter는 strict parser 실패 시 원문 output과 parser error, 원래 prompt payload를 포함해 repair prompt를 1회만 재호출한다. repair output도 같은 strict parser와 source validation을 통과해야 하며 실패하면 `schema_invalid`로 보존한다.
+- HTTP source_ref 준비 경로를 탄 live smoke에서 model이 catalog id `source-ref-1`을 `source_ref-1`로 바꾸는 실패가 확인됐다. Versioned extraction adapter는 parsed output의 source anchors를 입력 catalog와 대조하고, catalog literal mismatch도 같은 1회 repair 대상으로 삼는다. 자동 normalization은 하지 않으며 repair 후에도 mismatch가 남으면 기존 source validation 실패를 보존한다.
 
 ### 6. runner factory의 최소 구성은 무엇인가?
 
@@ -138,8 +141,8 @@ structured generation/grammar는 malformed JSON 비율이나 schema failure enve
 
 승인 뒤 구현 순서:
 
-1. SourceRef catalog read surface 추가  
-   검증: 같은 project/snapshot source_ref만 prompt input으로 제공, cross-project ref 제외.
+1. SourceRef catalog read + HTTP preparation surface 추가
+   검증: 같은 project/snapshot source_ref만 prompt input으로 제공, cross-project ref 제외. HTTP로 snapshot span에서 source_ref를 만들고 catalog/ref를 다시 읽는다.
 2. Prompt template DB 최소 저장소/seed/fetch surface 추가  
    검증: `analysis_extract_v1` version을 조회하고, 없는 version은 명시적으로 실패한다.
 3. `analysis_extract_v1` prompt builder 추가  

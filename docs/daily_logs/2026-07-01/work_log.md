@@ -5,6 +5,7 @@
 - HANDOFF를 읽고 다음 작업을 진행한다.
 - Phase 2A 실제 provider/Gateway wiring을 막고 있는 prompt, JSON output, source_ref 생성 경계를 결정 브리프로 정리한다.
 - 다음 구현자가 추측 없이 사용자 승인 후 runner factory wiring slice로 들어갈 수 있게 HANDOFF를 갱신한다.
+- Phase 2A source_ref catalog를 내부 smoke setup이 아니라 Application HTTP API로 준비할 수 있게 한다.
 
 ## Completed work
 
@@ -64,6 +65,24 @@
 - smoke script는 provider 원문/repair 결과를 `provider_results`에 남기도록 보강했고, 기본 `--max-tokens`를 Application runtime 기본값과 같은 2048로 맞췄다.
 - 승인 live smoke 재실행 결과: 첫 provider result는 fenced `{"candidates":[]}`였고, repair result는 valid Phase 2A JSON candidate 3개였다. `/analysis/jobs/{job_id}/run`은 `200`, final job `succeeded`, candidates 3개로 닫혔다.
 
+### Phase 2A source_ref catalog HTTP API
+
+- 변경 파일: `services/application/app/main.py`, `tests/test_application_api.py`, `scripts/phase2a_provider_live_smoke.py`, `docs/system-contract-sot.md`, `docs/plans/02-analysis-provider-wiring-decisions.md`, `CHANGELOG.md`, `HANDOFF.md`, `docs/daily_logs/2026-07-01/work_log.md`.
+- `POST /projects/{project_id}/snapshots/{snapshot_id}/source-refs`를 추가했다. 요청은 `start_offset`, `end_offset`만 받고, Core SOT가 snapshot raw text에서 `quote`, `block_id`, `content_hash`를 계산한다.
+- `GET /projects/{project_id}/snapshots/{snapshot_id}/source-refs`와 `GET /projects/{project_id}/source-refs/{source_ref_id}`를 추가했다. 두 조회 경로 모두 project/snapshot/ref 격리를 Core SOT 서비스에 위임한다.
+- invalid span은 400, missing/cross-project snapshot/ref는 404로 매핑했다.
+- archived project에서도 source_ref 생성·조회가 허용됨을 API 회귀로 잠갔다. 이는 immutable snapshot의 파생 주석이라는 기존 SoT carve-out과 일치한다.
+- `scripts/phase2a_provider_live_smoke.py`가 더 이상 in-memory service로 source_ref를 직접 만들지 않고, 새 HTTP source-ref endpoint로 catalog를 준비하도록 바꿨다.
+- 효과: Phase 2A live smoke 준비 경로가 public Application API에 가까워졌고, 다음 smoke는 snapshot save → source_ref HTTP materialization → analysis job run 흐름을 함께 검증한다.
+
+### Phase 2A source_ref catalog anchor repair
+
+- 변경 파일: `services/application/app/analysis/extractor.py`, `tests/test_analysis_extractor_schema.py`, `docs/system-contract-sot.md`, `CHANGELOG.md`, `HANDOFF.md`, `docs/daily_logs/2026-07-01/work_log.md`.
+- source_ref HTTP 준비 경로를 탄 live smoke에서 repair output이 valid Phase 2A JSON이었지만, catalog id `source-ref-1`을 `source_ref-1`처럼 underscore 형태로 바꾸는 실패를 확인했다.
+- `VersionedPromptAnalysisExtractionAdapter`가 parsed candidate의 `source_ref_id`, `start_offset`, `end_offset`, `quote`, `content_hash`를 입력 source_ref catalog와 대조하도록 보강했다. mismatch가 있으면 malformed JSON/schema repair와 같은 1회 repair prompt를 사용한다.
+- repair 후에도 catalog mismatch가 남으면 성공으로 보정하지 않고 parsed draft를 그대로 반환해 기존 runner/source validation 경계가 `source_invalid`를 보존한다.
+- 보강 뒤 live smoke 재실행 결과: 새 HTTP source_ref endpoint로 catalog를 준비했고, 첫 provider result는 fenced `{"candidates":[]}`, repair result는 `source-ref-*` id와 span/hash를 정확히 보존한 valid JSON이었다. `/analysis/jobs/{job_id}/run`은 `200`, final job `succeeded`, candidates 3개로 닫혔다.
+
 ## Issues found
 
 - 문제: HANDOFF의 다음 작업 대부분이 Gateway/model tool-call wire format, prompt/output 계약, source_ref 생성 boundary에 막혀 있었다.
@@ -108,6 +127,16 @@
 
 - 패턴 스윕: 같은 `parse_analysis_extraction(result.content)` 경로가 legacy `AnalysisExtractionAdapter`에도 남아 있음을 확인했다(`services/application/app/analysis/extractor.py`). `git blame` 결과 2026-06-29 fake-provider extraction adapter slice에서 추가된 초기 adapter이며, 현재 runtime provider wiring은 `VersionedPromptAnalysisExtractionAdapter`를 사용한다. legacy adapter는 source_ref catalog/original prompt payload가 없어 같은 repair prompt를 정확히 구성하기 어렵고 live path가 아니므로 이번 수정 범위에서는 건드리지 않았다.
 
+- 문제: Phase 2A live smoke가 public HTTP가 아니라 in-memory Core SOT service로 source_ref catalog를 준비했다.
+- 원인: SourceRef persistence와 domain service는 있었지만 Application API에 source_ref 생성/list/get surface가 없었다.
+- Resolution: source_ref catalog HTTP API를 추가하고 live smoke script가 그 endpoint를 사용하게 바꿨다.
+- Outcome: HTTP-only에 가까운 Phase 2A 준비 경로가 열렸다. 단, 전체 배포 환경에서 Application process와 Gateway process를 실제 네트워크로 띄우는 smoke는 아직 별도 운영 검증이다.
+
+- 문제: source_ref HTTP API로 만든 catalog id는 `source-ref-*`인데 model repair output이 `source_ref-*`로 바꿔 source validation이 실패했다.
+- 원인: prompt가 "source_ref_id" 필드명을 쓰다 보니 모델이 catalog id literal의 hyphen까지 보존하지 못하고 field naming convention처럼 underscore로 변형했다.
+- Resolution: Versioned adapter가 parser 통과 뒤에도 입력 catalog와 anchor literal을 대조하고, mismatch를 1회 repair 대상으로 삼도록 했다.
+- Outcome: live smoke가 `run_http_status=200`, final job `succeeded`, candidates 3개로 통과했다. repair 후에도 mismatch가 남으면 기존 source validation 실패가 보존된다.
+
 ## Decisions
 
 - 이번 턴에서는 provider/Gateway runtime wiring을 구현하지 않았다. 이유: SoT의 미확정 항목을 임의로 채우지 않는다는 프로젝트 규칙과 충돌하기 때문이다.
@@ -121,6 +150,9 @@
 - `LLM_GATEWAY_BASE_URL` env가 default analysis runner activation switch다. env가 없으면 existing 503 behavior를 유지한다.
 - Live smoke는 public source_ref 생성 API가 아직 없으므로 repo script가 in-memory setup으로 catalog를 준비하는 방식으로 진행했다. Application→Gateway→model 운영 경계 검증에는 충분하지만, full deployed HTTP-only E2E는 source_ref materialization/API가 생긴 뒤 별도 확인한다.
 - 사용자 결정: parser 실패 원인 확인 후에도 `/v1/generate-structured`를 바로 열지 않고 Application-side repair retry를 먼저 적용한다. 이유는 현재 JSON/schema 검증 소유자가 Application adapter이고, 새 Gateway public contract 없이 실제 실패(fence/schema mismatch)를 줄일 수 있기 때문이다.
+- SourceRef catalog HTTP path는 `/projects/{project_id}/snapshots/{snapshot_id}/source-refs`와 `/projects/{project_id}/source-refs/{source_ref_id}`로 정했다. 이유: source_ref 생성/list는 snapshot catalog 준비 행위이고, 단건 ref read는 snapshot id 없이 ref identity로 읽는 사용처가 생길 수 있기 때문이다. 두 경로 모두 project_id 격리를 유지한다.
+- SourceRef create는 기존 Core SOT primitive처럼 non-idempotent로 유지한다. idempotency는 Phase 2A candidate/job 저장층이 소유한다.
+- Catalog anchor mismatch repair는 normalization이 아니라 retry다. `source_ref-1`을 코드가 `source-ref-1`로 자동 보정하지 않고, 모델에게 catalog literal을 다시 출력하게 한다. 이유: id literal 자동 보정은 잘못된 ref를 조용히 연결할 위험이 있고, 실패 시에는 기존 `source_invalid`가 더 안전한 결과다.
 
 ## Verification
 
@@ -142,6 +174,14 @@
 - Pattern sweep: `rg -n "parse_analysis_extraction\\(|provider content must be JSON|repair|generate\\(request\\)" services/application/app/analysis tests` 및 `git blame -L 70,82 -- services/application/app/analysis/extractor.py`.
 - Focused broader regression: `python3 -m unittest tests.test_analysis_extractor_schema tests.test_analysis_runner tests.test_application_api -v` — 75개 통과.
 - Full regression: `python3 -m unittest discover tests -v` — 351개 통과(37 skip).
+- SourceRef API compile check: `python3 -m py_compile services/application/app/main.py tests/test_application_api.py scripts/phase2a_provider_live_smoke.py` — 통과.
+- SourceRef API focused regression: `python3 -m unittest tests.test_application_api -v` — 47개 통과.
+- SourceRef HTTP live smoke first run: `python3 scripts/phase2a_provider_live_smoke.py` — HTTP source_ref catalog 준비는 성공했지만 repair output이 `source_ref-*` id를 반환해 `run_http_status=400`, final job `failed/source_invalid`, `failure_detail="source_ref not found"`로 닫힘.
+- Catalog anchor repair focused regression: `python3 -m py_compile services/application/app/analysis/extractor.py tests/test_analysis_extractor_schema.py` — 통과. `python3 -m unittest tests.test_analysis_extractor_schema -v` — 13개 통과.
+- Catalog anchor repair live smoke: `python3 scripts/phase2a_provider_live_smoke.py` — HTTP source_ref catalog 준비, provider_results 2개(첫 fenced empty JSON, repair valid catalog anchors), `run_http_status=200`, final job `succeeded`, candidates 3개.
+- Final focused regression: `python3 -m unittest tests.test_analysis_extractor_schema tests.test_analysis_runner tests.test_application_api -v` — 79개 통과.
+- Final full regression: `python3 -m unittest discover tests -v` — 355개 통과(37 skip).
+- Final diff hygiene: `git diff --check` — 통과.
 
 ## Next steps
 

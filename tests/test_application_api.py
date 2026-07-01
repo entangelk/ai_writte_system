@@ -673,6 +673,120 @@ class ApplicationApiTest(unittest.TestCase):
 
         self.assertEqual(resp.status_code, 404)
 
+    def test_source_ref_create_list_get_round_trip(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        raw_text = "민아는 파란 편지를 발견했다.\n\n다음 문단."
+        saved = client.post(
+            f"/projects/{project['id']}/drafts/{draft['id']}/versions",
+            json={"raw_text": raw_text, "idempotency_key": "save-1"},
+        ).json()
+        quote = "파란 편지"
+        start = raw_text.index(quote)
+        end = start + len(quote)
+        base = f"/projects/{project['id']}/snapshots/{saved['snapshot']['id']}"
+
+        created = client.post(
+            f"{base}/source-refs",
+            json={"start_offset": start, "end_offset": end},
+        )
+        listed = client.get(f"{base}/source-refs")
+        fetched = client.get(
+            f"/projects/{project['id']}/source-refs/{created.json()['id']}"
+        )
+
+        self.assertEqual(created.status_code, 200)
+        body = created.json()
+        self.assertEqual(body["project_id"], project["id"])
+        self.assertEqual(body["snapshot_id"], saved["snapshot"]["id"])
+        self.assertEqual(body["block_id"], saved["blocks"][0]["id"])
+        self.assertEqual(body["start_offset"], start)
+        self.assertEqual(body["end_offset"], end)
+        self.assertEqual(body["quote"], quote)
+        self.assertEqual(body["content_hash"], saved["snapshot"]["content_hash"])
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.json()["source_refs"], [body])
+        self.assertEqual(fetched.status_code, 200)
+        self.assertEqual(fetched.json(), body)
+
+    def test_source_ref_api_rejects_invalid_span_and_cross_project(self):
+        client = TestClient(create_app())
+        project_a = client.post("/projects", json={"name": "A"}).json()
+        project_b = client.post("/projects", json={"name": "B"}).json()
+        draft_a = client.post(
+            f"/projects/{project_a['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        raw_text = "민아는 파란 편지를 발견했다."
+        saved = client.post(
+            f"/projects/{project_a['id']}/drafts/{draft_a['id']}/versions",
+            json={"raw_text": raw_text, "idempotency_key": "save-1"},
+        ).json()
+        snapshot_id = saved["snapshot"]["id"]
+        ref = client.post(
+            f"/projects/{project_a['id']}/snapshots/{snapshot_id}/source-refs",
+            json={"start_offset": 0, "end_offset": 2},
+        ).json()
+
+        invalid = client.post(
+            f"/projects/{project_a['id']}/snapshots/{snapshot_id}/source-refs",
+            json={"start_offset": 2, "end_offset": 2},
+        )
+        cross_create = client.post(
+            f"/projects/{project_b['id']}/snapshots/{snapshot_id}/source-refs",
+            json={"start_offset": 0, "end_offset": 2},
+        )
+        missing_list = client.get(
+            f"/projects/{project_a['id']}/snapshots/nope/source-refs"
+        )
+        cross_get = client.get(
+            f"/projects/{project_b['id']}/source-refs/{ref['id']}"
+        )
+
+        # should fire: malformed spans are rejected at the public API boundary.
+        self.assertEqual(invalid.status_code, 400)
+        # should NOT fire: project B cannot create/list/read project A anchors.
+        self.assertEqual(cross_create.status_code, 404)
+        self.assertEqual(missing_list.status_code, 404)
+        self.assertEqual(cross_get.status_code, 404)
+
+    def test_source_ref_api_survives_project_archive(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        raw_text = "민아는 파란 편지를 발견했다."
+        saved = client.post(
+            f"/projects/{project['id']}/drafts/{draft['id']}/versions",
+            json={"raw_text": raw_text, "idempotency_key": "save-1"},
+        ).json()
+        snapshot_id = saved["snapshot"]["id"]
+        client.delete(f"/projects/{project['id']}")
+
+        created = client.post(
+            f"/projects/{project['id']}/snapshots/{snapshot_id}/source-refs",
+            json={"start_offset": 0, "end_offset": 2},
+        )
+        listed = client.get(
+            f"/projects/{project['id']}/snapshots/{snapshot_id}/source-refs"
+        )
+        fetched = client.get(
+            f"/projects/{project['id']}/source-refs/{created.json()['id']}"
+        )
+
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(created.json()["quote"], "민아")
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(
+            [ref["id"] for ref in listed.json()["source_refs"]],
+            [created.json()["id"]],
+        )
+        self.assertEqual(fetched.status_code, 200)
+        self.assertEqual(fetched.json(), created.json())
+
     def test_analysis_job_create_get_and_idempotent_replay(self):
         core_sot = CoreSotService(InMemoryCoreSotRepository())
         analysis = AnalysisService(InMemoryAnalysisRepository())

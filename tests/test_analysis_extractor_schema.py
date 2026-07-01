@@ -313,6 +313,84 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("source-ref-1", repair.messages[1].content)
         self.assertIn("candidate_type", repair.messages[0].content)
 
+    async def test_versioned_prompt_adapter_repairs_catalog_id_drift_once(self):
+        provider = FakeLLMProvider(
+            [
+                GenerationResult(
+                    model="fake-gemma",
+                    content=_content(
+                        [
+                            {
+                                **_candidate(
+                                    "character_observation",
+                                    {
+                                        "name": "민아",
+                                        "observation": "민아가 편지를 발견했다.",
+                                    },
+                                ),
+                                "source_anchors": [
+                                    _anchor("source_ref-1", 0, 2, "민아")
+                                ],
+                            }
+                        ]
+                    ),
+                    finish_reason="stop",
+                ),
+                GenerationResult(
+                    model="fake-gemma",
+                    content=_content(
+                        [
+                            _candidate(
+                                "character_observation",
+                                {
+                                    "name": "민아",
+                                    "observation": "민아가 편지를 발견했다.",
+                                },
+                            )
+                        ]
+                    ),
+                    finish_reason="stop",
+                ),
+            ]
+        )
+        prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
+        prompt_templates.seed_analysis_extract_v1()
+        adapter = VersionedPromptAnalysisExtractionAdapter(
+            provider,
+            prompt_templates=prompt_templates,
+            source_ref_catalog=_Catalog(
+                (
+                    SourceRef(
+                        id="source-ref-1",
+                        project_id="project-1",
+                        snapshot_id="snapshot-1",
+                        block_id="block-1",
+                        start_offset=0,
+                        end_offset=2,
+                        quote="민아",
+                        content_hash="hash-1",
+                    ),
+                )
+            ),
+        )
+
+        drafts = await adapter.extract(
+            SnapshotText(
+                project_id="project-1",
+                snapshot_id="snapshot-1",
+                raw_text="민아",
+                content_hash="hash-1",
+                block_ids=("block-1",),
+            )
+        )
+
+        self.assertEqual(len(provider.requests), 2)
+        self.assertEqual(drafts[0].source_anchors[0].source_ref_id, "source-ref-1")
+        self.assertIn(
+            "source_ref_id must exactly match the source_ref catalog",
+            provider.requests[1].messages[1].content,
+        )
+
     async def test_versioned_prompt_adapter_does_not_retry_more_than_once(self):
         provider = FakeLLMProvider(
             [
