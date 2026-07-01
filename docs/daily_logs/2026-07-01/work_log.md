@@ -83,6 +83,13 @@
 - repair 후에도 catalog mismatch가 남으면 성공으로 보정하지 않고 parsed draft를 그대로 반환해 기존 runner/source validation 경계가 `source_invalid`를 보존한다.
 - 보강 뒤 live smoke 재실행 결과: 새 HTTP source_ref endpoint로 catalog를 준비했고, 첫 provider result는 fenced `{"candidates":[]}`, repair result는 `source-ref-*` id와 span/hash를 정확히 보존한 valid JSON이었다. `/analysis/jobs/{job_id}/run`은 `200`, final job `succeeded`, candidates 3개로 닫혔다.
 
+### SourceRef catalog HTTP API verification follow-up
+
+- 변경 파일: `tests/test_analysis_extractor_schema.py`, `docs/verifications/2026-07-01/source_ref_catalog_http_api.md`, `HANDOFF.md`, `docs/daily_logs/2026-07-01/work_log.md`.
+- 독립 검증 `docs/verifications/2026-07-01/source_ref_catalog_http_api.md`가 조건부 합격을 기록했다. 차단 조건 I1은 catalog id는 유효하지만 span/quote/content_hash가 catalog와 다른 경우에도 repair가 1회 시도되는지 테스트가 없다는 점이었다.
+- `test_versioned_prompt_adapter_repairs_catalog_anchor_drift_once`를 추가했다. provider 첫 응답은 `source_ref_id="source-ref-1"`을 유지하되 quote만 `"민호"`로 틀리게 만들고, adapter가 repair prompt를 1회 호출하며 `"source_anchors must preserve catalog span, quote, and content_hash"` 메시지를 포함하는지 단언한다.
+- verification record에는 원 조건부 판정을 보존하고, 후속 폐쇄 섹션으로 I1이 닫혔음을 기록했다.
+
 ## Issues found
 
 - 문제: HANDOFF의 다음 작업 대부분이 Gateway/model tool-call wire format, prompt/output 계약, source_ref 생성 boundary에 막혀 있었다.
@@ -137,6 +144,11 @@
 - Resolution: Versioned adapter가 parser 통과 뒤에도 입력 catalog와 anchor literal을 대조하고, mismatch를 1회 repair 대상으로 삼도록 했다.
 - Outcome: live smoke가 `run_http_status=200`, final job `succeeded`, candidates 3개로 통과했다. repair 후에도 mismatch가 남으면 기존 source validation 실패가 보존된다.
 
+- 문제: 독립 검증이 `_catalog_anchor_error`의 span/quote/content_hash mismatch branch가 회귀에 추적되지 않는다고 지적했다.
+- 원인: 기존 보강 테스트는 catalog id drift(`source_ref-1`)만 다뤘고, id는 유효하지만 quote/span/hash만 다른 branch를 직접 밟지 않았다.
+- Resolution: id는 유효하고 quote만 다른 anchor를 사용해 두 번째 catalog mismatch 메시지를 repair prompt에 포함하는지 단언하는 회귀를 추가했다.
+- Outcome: I1 빈 cell이 닫혔다.
+
 ## Decisions
 
 - 이번 턴에서는 provider/Gateway runtime wiring을 구현하지 않았다. 이유: SoT의 미확정 항목을 임의로 채우지 않는다는 프로젝트 규칙과 충돌하기 때문이다.
@@ -182,6 +194,11 @@
 - Final focused regression: `python3 -m unittest tests.test_analysis_extractor_schema tests.test_analysis_runner tests.test_application_api -v` — 79개 통과.
 - Final full regression: `python3 -m unittest discover tests -v` — 355개 통과(37 skip).
 - Final diff hygiene: `git diff --check` — 통과.
+- Verification follow-up compile check: `python3 -m py_compile tests/test_analysis_extractor_schema.py` — 통과.
+- Verification follow-up focused extractor regression: `python3 -m unittest tests.test_analysis_extractor_schema -v` — 14개 통과.
+- Verification follow-up focused 3-module regression: `python3 -m unittest tests.test_analysis_extractor_schema tests.test_analysis_runner tests.test_application_api -v` — 80개 통과.
+- Verification follow-up full regression: `python3 -m unittest discover tests -v` — 356개 통과(37 skip).
+- Verification follow-up diff hygiene: `git diff --check` — 통과.
 
 ## Next steps
 
