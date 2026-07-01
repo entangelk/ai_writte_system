@@ -146,6 +146,26 @@ class InMemoryCoreSotRepository:
     def get_source_ref(self, source_ref_id: str) -> SourceRef | None:
         return self.source_refs.get(source_ref_id)
 
+    def list_source_refs(
+        self, *, project_id: str, snapshot_id: str
+    ) -> tuple[SourceRef, ...]:
+        refs = (
+            source_ref
+            for source_ref in self.source_refs.values()
+            if source_ref.project_id == project_id
+            and source_ref.snapshot_id == snapshot_id
+        )
+        return tuple(
+            sorted(
+                refs,
+                key=lambda source_ref: (
+                    source_ref.start_offset,
+                    source_ref.end_offset,
+                    source_ref.id,
+                ),
+            )
+        )
+
     def find_save_request(
         self, project_id: str, draft_id: str, idempotency_key: str
     ) -> str | None:
@@ -389,6 +409,16 @@ class CoreSotService:
         if source_ref is None or source_ref.project_id != project_id:
             raise NotFound("source_ref not found")
         return source_ref
+
+    def list_source_refs(
+        self, *, project_id: str, snapshot_id: str
+    ) -> tuple[SourceRef, ...]:
+        snapshot = self._repo.get_snapshot(snapshot_id)
+        if snapshot is None or snapshot.project_id != project_id:
+            raise NotFound("snapshot not found")
+        return self._repo.list_source_refs(
+            project_id=project_id, snapshot_id=snapshot_id
+        )
 
     def archive_project(self, *, project_id: str) -> Project:
         project = self._require_project(project_id)

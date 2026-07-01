@@ -8,10 +8,21 @@ from typing import Protocol
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
-from services.application.app.analysis.extractor import AnalysisExtractionError
+from services.application.app.analysis.extractor import (
+    AnalysisExtractionError,
+    VersionedPromptAnalysisExtractionAdapter,
+)
+from services.application.app.analysis.gateway_provider import GatewayGenerateProvider
 from services.application.app.analysis.models import AnalysisJobStatus
+from services.application.app.analysis.prompt_templates import (
+    InMemoryPromptTemplateRepository,
+    PromptTemplateService,
+)
 from services.application.app.analysis.repository import DuplicateAnalysisCandidateRequest
-from services.application.app.analysis.runner import AnalysisExtractionRunResult
+from services.application.app.analysis.runner import (
+    AnalysisExtractionRunner,
+    AnalysisExtractionRunResult,
+)
 from services.application.app.analysis.service import (
     AnalysisNotFound,
     AnalysisService,
@@ -19,6 +30,7 @@ from services.application.app.analysis.service import (
     InvalidAnalysisCandidate,
     InvalidCandidateSource,
 )
+from services.application.app.analysis.source import CoreSotSourceAdapter
 from services.application.app.core_sot.service import (
     Archived,
     CoreSotError,
@@ -68,10 +80,13 @@ def _default_core_sot_service() -> CoreSotService:
     return CoreSotService(repository)
 
 
-def _default_analysis_service() -> AnalysisService:
+def _default_analysis_service(core_sot: CoreSotService) -> AnalysisService:
     uri = os.environ.get("CORE_SOT_MONGO_URI")
     if not uri:
-        return AnalysisService(InMemoryAnalysisRepository())
+        return AnalysisService(
+            InMemoryAnalysisRepository(),
+            source_ref_resolver=CoreSotSourceAdapter(core_sot),
+        )
 
     # Imported lazily so the in-memory path needs no pymongo install.
     from services.application.app.analysis.mongo_repository import (
@@ -87,7 +102,72 @@ def _default_analysis_service() -> AnalysisService:
         db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME),
         use_transactions=use_transactions,
     )
-    return AnalysisService(repository)
+    return AnalysisService(
+        repository,
+        source_ref_resolver=CoreSotSourceAdapter(core_sot),
+    )
+
+
+def _default_prompt_template_service() -> PromptTemplateService:
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if not uri:
+        service = PromptTemplateService(InMemoryPromptTemplateRepository())
+        service.seed_analysis_extract_v1()
+        return service
+
+    from services.application.app.analysis.prompt_template_mongo_repository import (
+        MongoPromptTemplateRepository,
+    )
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+
+    repository = MongoPromptTemplateRepository.from_uri(
+        uri,
+        db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME),
+    )
+    service = PromptTemplateService(repository)
+    service.seed_analysis_extract_v1()
+    return service
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return float(raw)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.lower() not in {"0", "false", "no"}
+
+
+def _default_analysis_runner(
+    *,
+    core_sot: CoreSotService,
+    analysis: AnalysisService,
+) -> AnalysisExtractionRunner | None:
+    base_url = os.environ.get("LLM_GATEWAY_BASE_URL")
+    if not base_url:
+        return None
+    prompt_templates = _default_prompt_template_service()
+    provider = GatewayGenerateProvider(
+        base_url=base_url,
+        timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
+        trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False),
+    )
+    return AnalysisExtractionRunner(
+        analysis_service=analysis,
+        snapshot_loader=CoreSotSourceAdapter(core_sot),
+        extractor=VersionedPromptAnalysisExtractionAdapter(
+            provider,
+            prompt_templates=prompt_templates,
+            source_ref_catalog=core_sot,
+            model=os.environ.get("LLM_GATEWAY_MODEL") or None,
+            max_tokens=int(os.environ.get("ANALYSIS_EXTRACT_MAX_TOKENS", "2048")),
+        ),
+    )
 
 
 class CreateProjectRequest(BaseModel):
@@ -123,7 +203,10 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="AI Writing System Application")
     core_sot = service or _default_core_sot_service()
-    analysis = analysis_service or _default_analysis_service()
+    analysis = analysis_service or _default_analysis_service(core_sot)
+    runner = analysis_runner
+    if runner is None:
+        runner = _default_analysis_runner(core_sot=core_sot, analysis=analysis)
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -460,12 +543,12 @@ def create_app(
                         candidate_idempotent_replays=tuple(True for _ in candidates),
                     )
                 )
-            if analysis_runner is None:
+            if runner is None:
                 raise HTTPException(
                     status_code=503,
                     detail="analysis runner is not configured",
                 )
-            result = await analysis_runner.run_job(
+            result = await runner.run_job(
                 project_id=project_id,
                 job_id=job_id,
             )

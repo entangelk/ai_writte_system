@@ -1,9 +1,9 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`  
-계약 버전: `v1.6.14`
+계약 버전: `v1.6.16`
 승인일: `2026-06-26`  
-최근 갱신일: `2026-06-30`
+최근 갱신일: `2026-07-01`
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
 적용 범위: 제품 경계, 서비스 책임, 데이터 정본, Gateway, AgentLoopRunner, Gate 합성, 검증 기록.
 
@@ -33,6 +33,8 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.6.16 | 2026-07-01 | Phase 2A provider/Gateway runner factory wiring의 첫 구현 slice를 추가했다. Core SOT는 snapshot별 source_ref catalog read surface를 제공하고 Mongo required index `source_refs_by_project_snapshot`을 설치한다. Prompt template은 `prompt_templates` 저장소에 `task_type + version` unique contract로 seed/fetch하며 `analysis_extract_v1`을 기본 seed한다. Prompt builder는 snapshot과 source_ref catalog를 Gateway `ChatCompletionRequest`로 조립한다. Application은 `LLM_GATEWAY_BASE_URL`이 설정된 경우 `/v1/generate` 기반 `GatewayGenerateProvider`와 `VersionedPromptAnalysisExtractionAdapter`로 기본 analysis runner를 구성하고, env가 없으면 기존처럼 503을 반환한다. `{"candidates":[]}`는 유효한 빈 extraction으로 처리한다. | `tests/test_core_sot.py`, `tests/test_prompt_templates.py`, `tests/test_analysis_prompt_builder.py`, `tests/test_analysis_gateway_provider.py`, `tests/test_analysis_extractor_schema.py`, `tests/test_analysis_runner.py`, `tests/test_application_api.py` |
+| v1.6.15 | 2026-07-01 | Phase 2A provider/Gateway wiring pre-implementation 결정을 승인했다. 첫 실제 provider wiring은 tool-call 없는 terminal JSON extraction으로 진행하고, 모델은 새 source_ref를 생성하지 않고 입력 source_ref catalog의 id를 선택한다. Prompt template은 DB에 저장해 versioned 관리하며 첫 literal은 `analysis_extract_v1`, task_type은 `analysis_extract`다. Gateway 호출 surface는 구현 전 비용 확인으로 `/v1/generate` 임시 사용과 `/v1/generate-structured` 최소 구현 중 선택한다. | 사용자 결정, `plans/02-analysis-provider-wiring-decisions.md` |
 | v1.6.14 | 2026-06-30 | 첫 export 형식을 plain text + Markdown으로 확정하고 Slice 1 draft version export 계약을 추가했다. `GET /projects/{project_id}/drafts/{draft_id}/versions/{version_id}/export?format=txt\|markdown`은 선택 version snapshot의 `raw_text`를 verbatim body로 내보내고(AI metadata 미주입, Markdown 합성/제거 없음, 두 형식 body 동일), `format`은 content_type/확장자만 가른다. payload에 version 추적 필드 포함. unsupported format 400, missing/cross-project version 404, archived도 export 허용. 사용자 결정: 막힌 Next Tasks 대신 export 진행, 형식은 plain text + Markdown. | 사용자 결정, `tests/test_core_sot.py`, `tests/test_application_api.py` |
 | v1.6.13 | 2026-06-30 | Gemma Q4_0 llama.cpp live benchmark를 실행하고 AgentLoopRunner task profile의 초기 production budget/retry 숫자 기본값을 확정했다. Report는 `docs/benchmarks/2026-06-30/gemma_q4_llama_cpp_repeats3_warmup1.json`이며, `flat-loop-gate.md`가 `analysis_compare`, `context_search`, `writing_generate` 기본 policy를 소유한다. | 사용자 요청, `scripts/benchmark_llm_provider.py`, `docs/benchmarks/2026-06-30/gemma_q4_llama_cpp_repeats3_warmup1.json` |
 | v1.6.12 | 2026-06-30 | Phase 2A analysis run endpoint 계약을 승인·구현했다. `POST /projects/{project_id}/analysis/jobs/{job_id}/run`은 pending job만 runner dependency로 실행하고 요청 안에서 await해 terminal job과 candidate 목록을 반환한다. `running`/`succeeded`/`failed` job은 재실행하지 않고 `idempotent_replay=true`로 현재 job과 저장된 candidate를 반환한다. pending job에서 runner가 구성되지 않았으면 503, missing/cross-project 및 `snapshot_not_found`는 404, `schema_invalid`/`source_invalid` 계열은 400, `duplicate_conflict`는 409, provider/기타 실행 오류는 502로 표면화한다. source_ref 자동 생성과 Gateway runtime wiring은 제외다. | 사용자 요청, `tests/test_application_api.py`, `tests/test_analysis_runner.py` |
@@ -70,6 +72,7 @@
 | [`plans/01-core-sot.md`](plans/01-core-sot.md) | MongoDB 정본 저장 계약 | Draft |
 | [`plans/02-analysis-kickoff-decisions.md`](plans/02-analysis-kickoff-decisions.md) | Phase 2A 착수 최소 결정 | Approved for Phase 2A kickoff |
 | [`plans/02-analysis-job-state-decisions.md`](plans/02-analysis-job-state-decisions.md) | Phase 2A job 상태 전이 결정 | Approved for Phase 2A job-state slice |
+| [`plans/02-analysis-provider-wiring-decisions.md`](plans/02-analysis-provider-wiring-decisions.md) | Phase 2A provider/Gateway wiring 결정 | Approved for Phase 2A provider wiring pre-implementation |
 | [`plans/02-analysis-pipeline.md`](plans/02-analysis-pipeline.md) | 분석 후보와 Analysis Gate | Draft |
 | [`plans/03-indexing.md`](plans/03-indexing.md) | Chroma/ES 파생 인덱스 | Draft |
 | [`plans/04-agentic-search.md`](plans/04-agentic-search.md) | ContextPackage와 Context Gate | Draft |
@@ -325,6 +328,7 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 - Phase 2A `failed` job은 닫힌 `failure_reason` enum과 free-text `failure_detail`을 저장한다. `failure_reason`은 `snapshot_not_found`(snapshot 로드 실패), `source_invalid`(source_ref/anchor 검증 실패), `schema_invalid`(payload/logical_key/provider content malformed), `provider_error`(provider extraction 호출 실패, Gateway `provider_error` umbrella와 정렬), `duplicate_conflict`(candidate 저장 `DuplicateAnalysisCandidateRequest`)다. `succeeded`/비terminal 상태에서는 `failure_reason`/`failure_detail`이 비어 있어야 한다. 실패는 성공으로 위장하지 않으며 candidate를 저장하지 않는다. all-or-nothing은 candidate write에 한정되고, job/task 생성은 idempotent setup이라 실패 후에도 남을 수 있다(롤백 대상 아님).
 - Phase 2A Application API는 `POST /projects/{project_id}/analysis/jobs`로 job을 `project_id + snapshot_id + idempotency_key` 기준 idempotent 생성/replay하고, `GET /projects/{project_id}/analysis/jobs/{job_id}`로 job 상태를 읽고, `GET /projects/{project_id}/analysis/jobs/{job_id}/candidates`로 저장된 candidate를 읽는다. 존재하지 않는 project 또는 다른 project의 job/candidate 접근은 404로 처리한다.
 - Phase 2A Application API는 `POST /projects/{project_id}/analysis/jobs/{job_id}/run`으로 기존 job 실행을 시작할 수 있다. 이 endpoint는 `pending` job만 실행하며, runner dependency를 주입받아 요청 안에서 async runner를 await한다. `running`/`succeeded`/`failed` job은 재실행하지 않고 현재 job과 저장된 candidate를 `idempotent_replay=true`로 반환한다. pending job에서 runner가 구성되지 않았으면 503이다. 실패 HTTP mapping은 `snapshot_not_found` 404, `schema_invalid`/`source_invalid` 계열 400, `duplicate_conflict` 409, provider/기타 실행 오류 502다. 실패 job은 이후 `GET`으로 조회 가능해야 한다. source_ref 자동 생성과 Gateway runtime wiring은 이 endpoint 범위가 아니다.
+- Phase 2A 실제 provider wiring 첫 slice는 tool-call 없는 terminal JSON extraction으로 진행한다. source_ref 후보는 Application/Worker가 static/mechanical anchor catalog로 준비하고, 모델은 새 source_ref를 생성하지 않고 입력 catalog의 `source_ref_id`만 선택한다. Core SOT는 `project_id + snapshot_id`로 source_ref catalog를 source order로 읽는 surface를 제공하며, Mongo required index는 `source_refs_by_project_snapshot`이다. Prompt template은 DB에 저장해 versioned 관리하며, `prompt_templates` 저장소는 `task_type + version` unique contract를 가진다. 첫 prompt version literal은 `analysis_extract_v1`, task_type은 `analysis_extract`다. Prompt builder는 snapshot metadata/raw_text와 source_ref catalog를 Gateway `ChatCompletionRequest`로 조립한다. Application runtime은 `LLM_GATEWAY_BASE_URL`이 설정된 경우 `/v1/generate` 기반 provider adapter와 versioned prompt extractor로 기본 analysis runner를 구성한다. env가 없으면 기존처럼 pending `run`은 runner 미구성 503이다. `{"candidates":[]}`는 유효한 빈 extraction 결과다.
 - Phase 2A와 2B는 별도 milestone이다.
 - Phase 2B는 Phase 3~4 이후 prior memory를 검색해 `create/update/add_evidence/no_change/conflict` 후보를 만든다.
 - Analysis AI는 canon을 확정하지 않고 기존 기억을 직접 덮어쓰지 않는다.

@@ -400,6 +400,39 @@ class _MongoContractMixin:
                 project_id=project_b.id, source_ref_id=source_ref.id
             )
 
+    def test_source_ref_catalog_round_trip_from_persisted_store(self):
+        project, draft = self._project_and_draft()
+        raw_text = "민아는 파란 편지를 발견했다."
+        result = self.service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text=raw_text,
+            idempotency_key="save-1",
+        )
+        letter_start = raw_text.index("편지")
+        min_a_start = raw_text.index("민아")
+        letter = self.service.create_source_ref(
+            project_id=project.id,
+            snapshot_id=result.snapshot.id,
+            start_offset=letter_start,
+            end_offset=letter_start + len("편지"),
+        )
+        min_a = self.service.create_source_ref(
+            project_id=project.id,
+            snapshot_id=result.snapshot.id,
+            start_offset=min_a_start,
+            end_offset=min_a_start + len("민아"),
+        )
+
+        reread = CoreSotService(self.repo)
+
+        self.assertEqual(
+            reread.list_source_refs(
+                project_id=project.id, snapshot_id=result.snapshot.id
+            ),
+            (min_a, letter),
+        )
+
 
 @unittest.skipUnless(_MONGO_AVAILABLE, "no MongoDB reachable for integration tests")
 class FallbackMongoTest(_MongoContractMixin, unittest.TestCase):

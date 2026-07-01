@@ -4,6 +4,7 @@ import unittest
 from services.application.app.analysis.extractor import (
     AnalysisExtractionAdapter,
     AnalysisExtractionError,
+    VersionedPromptAnalysisExtractionAdapter,
     parse_analysis_extraction,
 )
 from services.application.app.analysis.models import (
@@ -12,11 +13,16 @@ from services.application.app.analysis.models import (
     AnalysisProvenance,
     SnapshotText,
 )
+from services.application.app.analysis.prompt_templates import (
+    InMemoryPromptTemplateRepository,
+    PromptTemplateService,
+)
 from services.application.app.analysis.service import (
     AnalysisService,
     InMemoryAnalysisRepository,
     InvalidAnalysisCandidate,
 )
+from services.application.app.core_sot.models import SourceRef
 from services.llm_gateway.app.provider import FakeLLMProvider, GenerationResult
 
 
@@ -174,11 +180,93 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(provider.requests[0].messages[-1].content, "민아")
         self.assertIs(provider.requests[0].thinking, False)
 
+    async def test_versioned_prompt_adapter_uses_template_and_source_ref_catalog(self):
+        provider = FakeLLMProvider(
+            [
+                GenerationResult(
+                    model="fake-gemma",
+                    content=_content(
+                        [
+                            _candidate(
+                                "character_observation",
+                                {
+                                    "name": "민아",
+                                    "observation": "민아가 편지를 발견했다.",
+                                },
+                            )
+                        ]
+                    ),
+                    finish_reason="stop",
+                )
+            ]
+        )
+        prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
+        template = prompt_templates.seed_analysis_extract_v1()
+        adapter = VersionedPromptAnalysisExtractionAdapter(
+            provider,
+            prompt_templates=prompt_templates,
+            source_ref_catalog=_Catalog(
+                (
+                    SourceRef(
+                        id="source-ref-1",
+                        project_id="project-1",
+                        snapshot_id="snapshot-1",
+                        block_id="block-1",
+                        start_offset=0,
+                        end_offset=2,
+                        quote="민아",
+                        content_hash="hash-1",
+                    ),
+                )
+            ),
+            model="gemma",
+            max_tokens=512,
+        )
+
+        drafts = await adapter.extract(
+            SnapshotText(
+                project_id="project-1",
+                snapshot_id="snapshot-1",
+                raw_text="민아는 편지를 발견했다.",
+                content_hash="hash-1",
+                block_ids=("block-1",),
+            )
+        )
+
+        self.assertEqual(len(drafts), 1)
+        self.assertEqual(drafts[0].source_anchors[0].source_ref_id, "source-ref-1")
+        self.assertEqual(provider.requests[0].messages[0].content, template.template)
+        self.assertIn("source-ref-1", provider.requests[0].messages[1].content)
+        self.assertEqual(provider.requests[0].model, "gemma")
+        self.assertEqual(provider.requests[0].max_tokens, 512)
+
+    async def test_versioned_prompt_adapter_rejects_missing_catalog_before_provider(self):
+        provider = FakeLLMProvider([])
+        prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
+        prompt_templates.seed_analysis_extract_v1()
+        adapter = VersionedPromptAnalysisExtractionAdapter(
+            provider,
+            prompt_templates=prompt_templates,
+            source_ref_catalog=_Catalog(()),
+        )
+
+        with self.assertRaises(AnalysisExtractionError):
+            await adapter.extract(
+                SnapshotText(
+                    project_id="project-1",
+                    snapshot_id="snapshot-1",
+                    raw_text="민아",
+                    content_hash="hash-1",
+                    block_ids=("block-1",),
+                )
+            )
+
+        self.assertEqual(provider.requests, [])
+
     def test_extractor_rejects_malformed_provider_payload(self):
         """Under-strict guard: invalid provider JSON cannot become a draft."""
         malformed = [
             "[]",
-            json.dumps({"candidates": []}),
             _content(
                 [
                     _candidate(
@@ -242,6 +330,9 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             with self.subTest(content=content):
                 with self.assertRaises(AnalysisExtractionError):
                     parse_analysis_extraction(content)
+
+    def test_empty_candidates_array_is_valid_empty_extraction(self):
+        self.assertEqual(parse_analysis_extraction(json.dumps({"candidates": []})), ())
 
     def test_logical_key_is_stable_but_changes_when_payload_changes(self):
         """Over/under guard: retry identity is deterministic, not over-collapsed."""
@@ -328,6 +419,19 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(replay_draft.logical_key, first_draft.logical_key)
         self.assertEqual(len(replay_draft.source_anchors), 1)
         self.assertNotEqual(distinct_draft.logical_key, first_draft.logical_key)
+
+
+class _Catalog:
+    def __init__(self, source_refs):
+        self._source_refs = tuple(source_refs)
+
+    def list_source_refs(self, *, project_id: str, snapshot_id: str):
+        return tuple(
+            source_ref
+            for source_ref in self._source_refs
+            if source_ref.project_id == project_id
+            and source_ref.snapshot_id == snapshot_id
+        )
 
 
 if __name__ == "__main__":

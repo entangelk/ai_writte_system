@@ -96,6 +96,16 @@ class MongoCoreSotRepository:
                 [("snapshot_id", ASCENDING), ("block_index", ASCENDING)],
                 name="blocks_by_snapshot",
             )
+            self._source_refs.create_index(
+                [
+                    ("project_id", ASCENDING),
+                    ("snapshot_id", ASCENDING),
+                    ("start_offset", ASCENDING),
+                    ("end_offset", ASCENDING),
+                    ("_id", ASCENDING),
+                ],
+                name="source_refs_by_project_snapshot",
+            )
         except OperationFailure as exc:
             raise MongoRepositorySetupError(
                 "failed to create required Core SOT MongoDB indexes"
@@ -188,6 +198,20 @@ class MongoCoreSotRepository:
     def get_source_ref(self, source_ref_id: str) -> SourceRef | None:
         doc = self._source_refs.find_one({"_id": source_ref_id})
         return _to_source_ref(doc) if doc else None
+
+    def list_source_refs(
+        self, *, project_id: str, snapshot_id: str
+    ) -> tuple[SourceRef, ...]:
+        cursor = self._source_refs.find(
+            {"project_id": project_id, "snapshot_id": snapshot_id}
+        ).sort(
+            [
+                ("start_offset", ASCENDING),
+                ("end_offset", ASCENDING),
+                ("_id", ASCENDING),
+            ]
+        )
+        return tuple(_to_source_ref(doc) for doc in cursor)
 
     def record_save(
         self,

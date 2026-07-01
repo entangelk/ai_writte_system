@@ -1,7 +1,10 @@
 """FastAPI shell tests for the Application service."""
 
 import asyncio
+import json
+import os
 import unittest
+from unittest.mock import patch
 
 import httpx
 
@@ -26,6 +29,7 @@ from services.application.app.core_sot.service import (
     NotFound,
 )
 from services.application.app.main import create_app
+from services.llm_gateway.app.provider import FakeLLMProvider, GenerationResult
 
 
 class TestClient:
@@ -819,6 +823,104 @@ class ApplicationApiTest(unittest.TestCase):
             client.get(
                 f"/projects/{project['id']}/analysis/jobs/{created['job']['id']}/candidates"
             ).json()["candidates"][0]["id"],
+            body["candidates"][0]["id"],
+        )
+
+    def test_analysis_run_endpoint_uses_env_configured_default_runner(self):
+        core_sot = CoreSotService(InMemoryCoreSotRepository())
+        client = TestClient(create_app(core_sot))
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts",
+            json={"title": "Episode 1"},
+        ).json()
+        version = client.post(
+            f"/projects/{project['id']}/drafts/{draft['id']}/versions",
+            json={
+                "raw_text": "Mina finds a hidden notebook.",
+                "idempotency_key": "save-1",
+            },
+        ).json()["draft_version"]
+        source_ref = core_sot.create_source_ref(
+            project_id=project["id"],
+            snapshot_id=version["snapshot_id"],
+            start_offset=0,
+            end_offset=4,
+        )
+        provider = FakeLLMProvider(
+            (
+                GenerationResult(
+                    model="test-model",
+                    finish_reason="stop",
+                    content=json.dumps(
+                        {
+                            "candidates": [
+                                {
+                                    "candidate_type": "character_observation",
+                                    "provenance": "source_observed",
+                                    "confidence": 0.9,
+                                    "source_anchors": [
+                                        {
+                                            "source_ref_id": source_ref.id,
+                                            "start_offset": source_ref.start_offset,
+                                            "end_offset": source_ref.end_offset,
+                                            "quote": source_ref.quote,
+                                            "content_hash": source_ref.content_hash,
+                                        }
+                                    ],
+                                    "payload": {
+                                        "name": "Mina",
+                                        "observation": "Mina finds a hidden notebook.",
+                                    },
+                                }
+                            ]
+                        }
+                    ),
+                ),
+            )
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "LLM_GATEWAY_BASE_URL": "http://gateway.test",
+                "LLM_GATEWAY_MODEL": "",
+                "CORE_SOT_MONGO_URI": "",
+            },
+        ), patch(
+            "services.application.app.main.GatewayGenerateProvider",
+            return_value=provider,
+        ) as provider_factory:
+            client = TestClient(create_app(core_sot))
+            job = client.post(
+                f"/projects/{project['id']}/analysis/jobs",
+                json={
+                    "snapshot_id": version["snapshot_id"],
+                    "idempotency_key": "analysis-run-1",
+                },
+            ).json()["job"]
+
+            response = client.post(
+                f"/projects/{project['id']}/analysis/jobs/{job['id']}/run"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertFalse(body["idempotent_replay"])
+        self.assertEqual(body["job"]["status"], "succeeded")
+        self.assertEqual(body["candidates"][0]["source_ref_ids"], [source_ref.id])
+        self.assertEqual(
+            body["candidates"][0]["payload"],
+            {"name": "Mina", "observation": "Mina finds a hidden notebook."},
+        )
+        self.assertEqual(len(provider.requests), 1)
+        self.assertEqual(provider.requests[0].model, None)
+        provider_factory.assert_called_once()
+        fetched = client.get(
+            f"/projects/{project['id']}/analysis/jobs/{job['id']}/candidates"
+        )
+        self.assertEqual(
+            fetched.json()["candidates"][0]["id"],
             body["candidates"][0]["id"],
         )
 

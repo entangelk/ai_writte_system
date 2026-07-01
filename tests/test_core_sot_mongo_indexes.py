@@ -39,6 +39,7 @@ def _repo_with_indexes(*, fail_on_name: str | None = None):
     repo = object.__new__(MongoCoreSotRepository)
     repo._versions = _FakeCollection(fail_on_name=fail_on_name)
     repo._blocks = _FakeCollection(fail_on_name=fail_on_name)
+    repo._source_refs = _FakeCollection(fail_on_name=fail_on_name)
     return repo
 
 
@@ -74,9 +75,19 @@ class MongoIndexSetupTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            getattr(repo, "_source_refs", None),
-            None,
-            "source_refs currently has no by-snapshot query path to index",
+            repo._source_refs.calls,
+            [
+                (
+                    [
+                        ("project_id", 1),
+                        ("snapshot_id", 1),
+                        ("start_offset", 1),
+                        ("end_offset", 1),
+                        ("_id", 1),
+                    ],
+                    {"name": "source_refs_by_project_snapshot"},
+                )
+            ],
         )
 
     def test_conflicting_index_failure_is_stable_setup_error(self):

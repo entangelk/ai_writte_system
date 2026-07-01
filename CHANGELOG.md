@@ -2,6 +2,8 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-07-01 | SoT v1.6.16: Phase 2A provider/Gateway runner factory wiring 첫 구현 slice 추가 | [work log](docs/daily_logs/2026-07-01/work_log.md) |
+| 2026-07-01 | SoT v1.6.15: Phase 2A provider/Gateway wiring pre-implementation 결정 승인 | [work log](docs/daily_logs/2026-07-01/work_log.md) |
 | 2026-06-30 | SoT v1.6.14: Slice 1 draft version export 추가(plain text/Markdown, version 추적·body verbatim). 사용자 결정: 막힌 Next Tasks 대신 export 진행, 형식은 plain text + Markdown | [work log](docs/daily_logs/2026-06-30/work_log.md) |
 | 2026-06-30 | SoT v1.6.13: Gemma Q4 benchmark 기반 AgentLoopRunner budget/retry 기본값 확정 | [work log](docs/daily_logs/2026-06-30/work_log.md) |
 | 2026-06-30 | SoT v1.6.12: Phase 2A analysis run endpoint 추가 | [work log](docs/daily_logs/2026-06-30/work_log.md) |
@@ -45,6 +47,15 @@
 | 2026-06-25 | AgentLoopRunner A3 decision 합성 회귀 구현 | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-25 | AgentLoopRunner A2 registry 계약 회귀 구현 | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-24 | 개발 계획 문서 구조 도입 | [work log](docs/daily_logs/2026-06-24/work_log.md) |
+
+## 2026-07-01
+
+### Changed
+
+- SoT를 v1.6.16으로 갱신해 Phase 2A provider/Gateway runner factory wiring 첫 구현 slice를 추가했다. Core SOT source_ref catalog read surface, versioned prompt template DB, `analysis_extract_v1` prompt builder, `/v1/generate` 기반 Application→Gateway provider adapter, env 기반 default runner wiring을 추가했다. `LLM_GATEWAY_BASE_URL`이 없으면 기존 pending run 503 behavior를 유지한다.
+- SoT를 v1.6.15로 갱신해 Phase 2A provider/Gateway wiring pre-implementation 결정을 승인했다. 첫 실제 provider wiring은 tool-call 없는 terminal JSON extraction으로 진행하고, 모델은 입력 source_ref catalog의 id를 선택한다. Prompt template은 DB에 저장해 versioned 관리하며 첫 prompt version은 `analysis_extract_v1`, task_type은 `analysis_extract`다.
+
+사용자 결정: source_ref 후보는 글쓰기 프로그램 특성상 정적/기계적으로 anchor 선택이 가능하므로 모델이 새 source_ref를 만들 필요가 없다. Prompt/template은 변경과 version 추적, agentic loop context/ContextPackage 체계화를 위해 DB 저장 방향을 택한다. Gateway 호출 surface는 `/v1/generate` 임시 사용과 `/v1/generate-structured` 최소 구현 비용을 확인한 뒤 더 나은 쪽으로 진행한다.
 
 ## 2026-06-30
 

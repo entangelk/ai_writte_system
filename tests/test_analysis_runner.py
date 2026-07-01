@@ -512,6 +512,28 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.job.status, AnalysisJobStatus.PENDING)
         self.assertEqual(result.candidates, ())
 
+    async def test_runner_succeeds_with_empty_extraction_result(self):
+        saved = self._saved_source()
+        analysis_service, analysis_repo, source_adapter = self._analysis(
+            saved["core_sot"]
+        )
+        runner = AnalysisExtractionRunner(
+            analysis_service=analysis_service,
+            snapshot_loader=source_adapter,
+            extractor=_StaticExtractor(()),
+        )
+
+        result = await runner.run(
+            project_id=saved["project_id"],
+            snapshot_id=saved["snapshot_id"],
+            idempotency_key="analysis-run-empty",
+        )
+
+        self.assertEqual(result.job.status, AnalysisJobStatus.SUCCEEDED)
+        self.assertEqual(result.candidates, ())
+        self.assertEqual(result.candidate_idempotent_replays, ())
+        self.assertEqual(len(analysis_repo.candidates), 0)
+
     async def test_runner_run_job_executes_existing_pending_job(self):
         saved = self._saved_source()
         analysis_service, analysis_repo, source_adapter = self._analysis(

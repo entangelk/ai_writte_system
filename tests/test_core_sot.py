@@ -230,6 +230,69 @@ class CoreSotSourceRefTest(unittest.TestCase):
                 project_id=project_b.id, source_ref_id=source_ref.id
             )
 
+    def test_list_source_refs_returns_snapshot_catalog_in_source_order(self):
+        """Under-strict: provider input catalog must expose every prepared ref."""
+
+        service, _repo = _service()
+        project = service.create_project(name="Novel")
+        draft = service.create_draft(project_id=project.id, title="Episode 1")
+        raw_text = "민아는 파란 편지를 발견했다."
+        result = service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text=raw_text,
+            idempotency_key="save-1",
+        )
+        letter_start = raw_text.index("편지")
+        min_a_start = raw_text.index("민아")
+        letter = service.create_source_ref(
+            project_id=project.id,
+            snapshot_id=result.snapshot.id,
+            start_offset=letter_start,
+            end_offset=letter_start + len("편지"),
+        )
+        min_a = service.create_source_ref(
+            project_id=project.id,
+            snapshot_id=result.snapshot.id,
+            start_offset=min_a_start,
+            end_offset=min_a_start + len("민아"),
+        )
+
+        catalog = service.list_source_refs(
+            project_id=project.id, snapshot_id=result.snapshot.id
+        )
+
+        self.assertEqual(catalog, (min_a, letter))
+
+    def test_list_source_refs_enforces_project_and_snapshot_boundary(self):
+        """Over-strict: cross-project and missing snapshots must not leak refs."""
+
+        service, _repo = _service()
+        project_a = service.create_project(name="A")
+        project_b = service.create_project(name="B")
+        draft = service.create_draft(project_id=project_a.id, title="Episode 1")
+        result = service.save_draft(
+            project_id=project_a.id,
+            draft_id=draft.id,
+            raw_text="Paragraph one.",
+            idempotency_key="save-1",
+        )
+        service.create_source_ref(
+            project_id=project_a.id,
+            snapshot_id=result.snapshot.id,
+            start_offset=0,
+            end_offset=len("Paragraph"),
+        )
+
+        with self.assertRaises(NotFound):
+            service.list_source_refs(
+                project_id=project_b.id, snapshot_id=result.snapshot.id
+            )
+        with self.assertRaises(NotFound):
+            service.list_source_refs(
+                project_id=project_a.id, snapshot_id="source-snapshot-missing"
+            )
+
     def test_get_source_ref_missing_id_raises_not_found(self):
         service, _repo = _service()
         project = service.create_project(name="Novel")

@@ -7,16 +7,27 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from numbers import Real
-from typing import Any
+from typing import Any, Protocol
 
+from services.application.app.analysis.prompt_builder import (
+    AnalysisPromptBuildError,
+    build_analysis_extract_request,
+)
 from services.application.app.analysis.models import (
     AnalysisCandidateType,
     AnalysisProvenance,
     CandidateSourceAnchor,
     SnapshotText,
 )
+from services.application.app.analysis.prompt_templates import (
+    ANALYSIS_EXTRACT_PROMPT_VERSION,
+    ANALYSIS_EXTRACT_TASK_TYPE,
+    PromptTemplateError,
+    PromptTemplateService,
+)
 from services.application.app.analysis.schema import validate_candidate_payload
 from services.application.app.analysis.schema import InvalidAnalysisPayload
+from services.application.app.core_sot.models import SourceRef
 from services.llm_gateway.app.payload import ChatCompletionRequest, ChatMessage
 from services.llm_gateway.app.provider import LLMProvider
 
@@ -68,11 +79,61 @@ class AnalysisExtractionAdapter:
         return parse_analysis_extraction(result.content)
 
 
+class SourceRefCatalog(Protocol):
+    def list_source_refs(
+        self, *, project_id: str, snapshot_id: str
+    ) -> tuple[SourceRef, ...]: ...
+
+
+class VersionedPromptAnalysisExtractionAdapter:
+    def __init__(
+        self,
+        provider: LLMProvider,
+        *,
+        prompt_templates: PromptTemplateService,
+        source_ref_catalog: SourceRefCatalog,
+        task_type: str = ANALYSIS_EXTRACT_TASK_TYPE,
+        prompt_version: str = ANALYSIS_EXTRACT_PROMPT_VERSION,
+        model: str | None = None,
+        max_tokens: int = 2048,
+    ) -> None:
+        self._provider = provider
+        self._prompt_templates = prompt_templates
+        self._source_ref_catalog = source_ref_catalog
+        self._task_type = task_type
+        self._prompt_version = prompt_version
+        self._model = model
+        self._max_tokens = max_tokens
+
+    async def extract(self, snapshot: SnapshotText) -> tuple[AnalysisCandidateDraft, ...]:
+        try:
+            prompt_template = self._prompt_templates.get_template(
+                task_type=self._task_type,
+                version=self._prompt_version,
+            )
+            source_refs = self._source_ref_catalog.list_source_refs(
+                project_id=snapshot.project_id,
+                snapshot_id=snapshot.snapshot_id,
+            )
+            request = build_analysis_extract_request(
+                snapshot=snapshot,
+                source_refs=source_refs,
+                prompt_template=prompt_template,
+                model=self._model,
+                max_tokens=self._max_tokens,
+            )
+        except (PromptTemplateError, AnalysisPromptBuildError) as exc:
+            raise AnalysisExtractionError(str(exc)) from exc
+
+        result = await self._provider.generate(request)
+        return parse_analysis_extraction(result.content)
+
+
 def parse_analysis_extraction(content: str) -> tuple[AnalysisCandidateDraft, ...]:
     root = _json_object(content)
     raw_candidates = root.get("candidates")
-    if not isinstance(raw_candidates, list) or not raw_candidates:
-        raise AnalysisExtractionError("candidates must be a non-empty array")
+    if not isinstance(raw_candidates, list):
+        raise AnalysisExtractionError("candidates must be an array")
     return tuple(_candidate_draft(item) for item in raw_candidates)
 
 
