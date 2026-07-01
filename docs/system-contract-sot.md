@@ -1,7 +1,7 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`  
-계약 버전: `v1.6.16`
+계약 버전: `v1.6.17`
 승인일: `2026-06-26`  
 최근 갱신일: `2026-07-01`
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
@@ -33,6 +33,7 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.6.17 | 2026-07-01 | Phase 2A live provider output 원인 분석 뒤 Application-side JSON repair retry를 추가했다. `/v1/generate` 경로는 유지하고, `VersionedPromptAnalysisExtractionAdapter`가 첫 provider content를 strict parser로 검증한 뒤 실패 시 원문 output과 parser error, 원래 prompt payload를 포함한 repair prompt를 1회만 재호출한다. repair 출력도 같은 strict parser/source validation/candidate schema를 통과해야 하며, 실패하면 기존처럼 `schema_invalid`로 job failure가 보존된다. | 사용자 결정, `tests/test_analysis_extractor_schema.py`, `scripts/phase2a_provider_live_smoke.py` |
 | v1.6.16 | 2026-07-01 | Phase 2A provider/Gateway runner factory wiring의 첫 구현 slice를 추가했다. Core SOT는 snapshot별 source_ref catalog read surface를 제공하고 Mongo required index `source_refs_by_project_snapshot`을 설치한다. Prompt template은 `prompt_templates` 저장소에 `task_type + version` unique contract로 seed/fetch하며 `analysis_extract_v1`을 기본 seed한다. Prompt builder는 snapshot과 source_ref catalog를 Gateway `ChatCompletionRequest`로 조립한다. Application은 `LLM_GATEWAY_BASE_URL`이 설정된 경우 `/v1/generate` 기반 `GatewayGenerateProvider`와 `VersionedPromptAnalysisExtractionAdapter`로 기본 analysis runner를 구성하고, env가 없으면 기존처럼 503을 반환한다. `{"candidates":[]}`는 유효한 빈 extraction으로 처리한다. | `tests/test_core_sot.py`, `tests/test_prompt_templates.py`, `tests/test_analysis_prompt_builder.py`, `tests/test_analysis_gateway_provider.py`, `tests/test_analysis_extractor_schema.py`, `tests/test_analysis_runner.py`, `tests/test_application_api.py` |
 | v1.6.15 | 2026-07-01 | Phase 2A provider/Gateway wiring pre-implementation 결정을 승인했다. 첫 실제 provider wiring은 tool-call 없는 terminal JSON extraction으로 진행하고, 모델은 새 source_ref를 생성하지 않고 입력 source_ref catalog의 id를 선택한다. Prompt template은 DB에 저장해 versioned 관리하며 첫 literal은 `analysis_extract_v1`, task_type은 `analysis_extract`다. Gateway 호출 surface는 구현 전 비용 확인으로 `/v1/generate` 임시 사용과 `/v1/generate-structured` 최소 구현 중 선택한다. | 사용자 결정, `plans/02-analysis-provider-wiring-decisions.md` |
 | v1.6.14 | 2026-06-30 | 첫 export 형식을 plain text + Markdown으로 확정하고 Slice 1 draft version export 계약을 추가했다. `GET /projects/{project_id}/drafts/{draft_id}/versions/{version_id}/export?format=txt\|markdown`은 선택 version snapshot의 `raw_text`를 verbatim body로 내보내고(AI metadata 미주입, Markdown 합성/제거 없음, 두 형식 body 동일), `format`은 content_type/확장자만 가른다. payload에 version 추적 필드 포함. unsupported format 400, missing/cross-project version 404, archived도 export 허용. 사용자 결정: 막힌 Next Tasks 대신 export 진행, 형식은 plain text + Markdown. | 사용자 결정, `tests/test_core_sot.py`, `tests/test_application_api.py` |
@@ -62,7 +63,7 @@
 
 | 문서 | 역할 | 지위 |
 |---|---|---|
-| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.14 |
+| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.17 |
 | [`plans/README.md`](plans/README.md) | 계획 문서 진입점과 Phase/MVP 관계 | Draft |
 | [`plans/00-foundations.md`](plans/00-foundations.md) | 전역 원칙과 제품 경계 | Draft |
 | [`plans/implementation-plan.md`](plans/implementation-plan.md) | 구현 순서, slice 상태, 검증 gate | Draft |
@@ -329,6 +330,7 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 - Phase 2A Application API는 `POST /projects/{project_id}/analysis/jobs`로 job을 `project_id + snapshot_id + idempotency_key` 기준 idempotent 생성/replay하고, `GET /projects/{project_id}/analysis/jobs/{job_id}`로 job 상태를 읽고, `GET /projects/{project_id}/analysis/jobs/{job_id}/candidates`로 저장된 candidate를 읽는다. 존재하지 않는 project 또는 다른 project의 job/candidate 접근은 404로 처리한다.
 - Phase 2A Application API는 `POST /projects/{project_id}/analysis/jobs/{job_id}/run`으로 기존 job 실행을 시작할 수 있다. 이 endpoint는 `pending` job만 실행하며, runner dependency를 주입받아 요청 안에서 async runner를 await한다. `running`/`succeeded`/`failed` job은 재실행하지 않고 현재 job과 저장된 candidate를 `idempotent_replay=true`로 반환한다. pending job에서 runner가 구성되지 않았으면 503이다. 실패 HTTP mapping은 `snapshot_not_found` 404, `schema_invalid`/`source_invalid` 계열 400, `duplicate_conflict` 409, provider/기타 실행 오류 502다. 실패 job은 이후 `GET`으로 조회 가능해야 한다. source_ref 자동 생성과 Gateway runtime wiring은 이 endpoint 범위가 아니다.
 - Phase 2A 실제 provider wiring 첫 slice는 tool-call 없는 terminal JSON extraction으로 진행한다. source_ref 후보는 Application/Worker가 static/mechanical anchor catalog로 준비하고, 모델은 새 source_ref를 생성하지 않고 입력 catalog의 `source_ref_id`만 선택한다. Core SOT는 `project_id + snapshot_id`로 source_ref catalog를 source order로 읽는 surface를 제공하며, Mongo required index는 `source_refs_by_project_snapshot`이다. Prompt template은 DB에 저장해 versioned 관리하며, `prompt_templates` 저장소는 `task_type + version` unique contract를 가진다. 첫 prompt version literal은 `analysis_extract_v1`, task_type은 `analysis_extract`다. Prompt builder는 snapshot metadata/raw_text와 source_ref catalog를 Gateway `ChatCompletionRequest`로 조립한다. Application runtime은 `LLM_GATEWAY_BASE_URL`이 설정된 경우 `/v1/generate` 기반 provider adapter와 versioned prompt extractor로 기본 analysis runner를 구성한다. env가 없으면 기존처럼 pending `run`은 runner 미구성 503이다. `{"candidates":[]}`는 유효한 빈 extraction 결과다.
+- Phase 2A versioned provider extraction은 strict parser를 기본으로 유지한다. 첫 provider content가 malformed JSON, markdown-fenced JSON, 또는 candidate schema mismatch로 실패하면 Application adapter가 원문 output, parser error, 원래 prompt payload를 포함한 repair prompt를 같은 provider에 1회만 재호출한다. repair output도 top-level `{candidates:[...]}` JSON object와 Phase 2A candidate/source schema를 통과해야 한다. repair 실패 또는 output truncation은 성공으로 보정하지 않고 기존 runner failure mapping에 따라 `schema_invalid`로 보존한다.
 - Phase 2A와 2B는 별도 milestone이다.
 - Phase 2B는 Phase 3~4 이후 prior memory를 검색해 `create/update/add_evidence/no_change/conflict` 후보를 만든다.
 - Analysis AI는 canon을 확정하지 않고 기존 기억을 직접 덮어쓰지 않는다.

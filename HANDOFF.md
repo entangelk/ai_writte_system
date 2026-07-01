@@ -92,17 +92,20 @@
 - Phase 2A provider/Gateway runner factory wiring 첫 구현 slice가 추가됐다(2026-07-01, SoT v1.6.16). Core SOT `list_source_refs(project_id, snapshot_id)`와 Mongo index `source_refs_by_project_snapshot`, versioned prompt template 저장소(`prompt_templates`, `task_type + version` unique), `analysis_extract_v1` prompt builder, Application→Gateway `/v1/generate` adapter, `VersionedPromptAnalysisExtractionAdapter`, env 기반 default runner wiring(`LLM_GATEWAY_BASE_URL`)이 구현됐다. env가 없으면 pending run은 기존처럼 503이다. `{"candidates":[]}`는 유효한 빈 extraction으로 처리한다.
 - 독립 검증 `docs/verifications/2026-07-01/phase2a_provider_wiring.md`의 조건부 합격 차단 조건을 보강했다. `test_analysis_run_endpoint_uses_env_configured_default_runner`가 env-set 상태에서 runner를 명시 주입하지 않은 `create_app()` default factory 경로를 타고 pending `/analysis/jobs/{job_id}/run`이 `succeeded` job + 저장된 candidate까지 이어지는 branch를 잠근다.
 - 2026-06-29 독립 검증 `docs/verifications/2026-06-29/analysis_write_error_and_job_state_commits.md`: 커밋 `23d6ef3`은 합격. 커밋 `ebbbd14`는 조건부 합격이었고, 두 차단 조건(닫힌 `failure_reason` enum 5종 전체 regression, skip-aware Mongo job-state round-trip/terminal replay regression)을 committed artifact로 추가해 폐쇄했다(in-memory 12종 + live 양 경로). 비차단 Issue #3(work log/HANDOFF의 "live 확인" 문구가 committed regression처럼 읽힐 위험)도 회귀가 committed되며 해소됐다.
+- Phase 2A provider wiring live smoke가 완료됐다(2026-07-01). `scripts/phase2a_provider_live_smoke.py`가 in-memory Core SOT snapshot/source_ref catalog를 준비하고 Application `/analysis/jobs/{job_id}/run`을 Gateway app 경유 실제 llama.cpp endpoint `http://192.168.1.29:9080`로 실행한다. 승인된 외부 네트워크 실행에서 model output이 strict JSON이 아니라 `run_http_status=400`, final job `failed/schema_invalid`, `failure_detail="provider content must be JSON"`, candidates 0으로 안정 보존됨을 확인했다. sandbox 내부 Python/httpx는 외부 TCP가 막혀 provider_error로 떨어지므로 live smoke는 network sandbox 밖에서 실행해야 한다.
+- Phase 2A Application-side JSON repair retry가 추가됐다(2026-07-01, SoT v1.6.17). 원인 분석 결과 첫 output은 markdown-fenced JSON 또는 adapter schema보다 얕은 JSON일 수 있고, `chat_template_kwargs.enable_thinking=false`에서는 simple JSON이 content로 나온다. `/v1/generate-structured` public contract는 아직 열지 않고, `VersionedPromptAnalysisExtractionAdapter`가 strict parse 실패 시 원문 output/parser error/original prompt payload로 repair prompt를 1회만 재호출한다. 2048-token live smoke에서 첫 응답은 fenced `{"candidates":[]}`, repair 응답은 valid Phase 2A JSON candidate 3개였고 `/run`은 `200`, final job `succeeded`로 닫혔다.
 
 ## Next Tasks
 
-1. Phase 2A provider wiring live smoke: `LLM_GATEWAY_BASE_URL`을 실제 gateway로 지정하고, source_ref catalog가 준비된 snapshot에서 `/analysis/jobs/{job_id}/run`이 terminal job을 만들거나 provider/schema failure를 안정적으로 보존하는지 확인한다. Unit-level env-set default runner branch는 이미 잠겨 있으므로, live smoke는 실제 Gateway/model 운영 경계 확인에 집중한다.
-2. `/v1/generate-structured`는 이번 비용 확인에서 보류했다. JSON/schema 검증은 Application adapter가 소유하고, Gateway surface는 adapter로 분리해 두었다. malformed JSON 비율이나 schema failure envelope 필요가 확인되면 별도 Gateway slice로 올린다.
-3. Slice 1 잔여 회귀 후보: archive 후 파생 인덱스 stale 이벤트. Phase 3 indexing 계약이 Draft라 현재는 구현하지 않는다. (fallback 동시성 race는 SoT v1.4 single-writer 제약으로 contract out 됨; 동시성 필요 시에만 (a) 보강 재검토.)
-4. Domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
-5. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
+1. `/v1/generate-structured`는 이번 비용 확인에서 보류했다. JSON/schema 검증과 1회 repair는 Application adapter가 소유하고, Gateway surface는 adapter로 분리해 두었다. repair 후에도 malformed JSON 비율이나 latency가 운영상 문제로 확인되면 별도 Gateway structured-output slice를 검토한다.
+2. Slice 1 잔여 회귀 후보: archive 후 파생 인덱스 stale 이벤트. Phase 3 indexing 계약이 Draft라 현재는 구현하지 않는다. (fallback 동시성 race는 SoT v1.4 single-writer 제약으로 contract out 됨; 동시성 필요 시에만 (a) 보강 재검토.)
+3. Domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
+4. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
 
 ## Verification
 
+- Phase 2A provider wiring live smoke(2026-07-01): `python3 scripts/phase2a_provider_live_smoke.py`를 승인된 외부 네트워크 실행으로 실행. endpoint `http://192.168.1.29:9080`, model `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`, source_refs `민아`/`파란 편지`/`준호`. 결과: `run_http_status=400`, final job `status=failed`, `failure_reason=schema_invalid`, `failure_detail="provider content must be JSON"`, candidates 0. `python3 -m py_compile scripts/phase2a_provider_live_smoke.py` 통과. sandbox 내부 Python/httpx는 외부 TCP가 `[Errno 1] Operation not permitted`로 차단됨을 확인했고, 같은 sandbox에서의 smoke는 `provider_error` 보존 경로까지 확인했다.
+- Phase 2A JSON repair retry 자체 회귀/live smoke(2026-07-01): `python3 -m unittest tests.test_analysis_extractor_schema -v` 12개 통과, focused broader `python3 -m unittest tests.test_analysis_extractor_schema tests.test_analysis_runner tests.test_application_api -v` 75개 통과, full `python3 -m unittest discover tests -v` 351개 통과(37 skip). `python3 -m py_compile services/application/app/analysis/extractor.py tests/test_analysis_extractor_schema.py scripts/phase2a_provider_live_smoke.py` 및 `git diff --check` 통과. 승인된 `python3 scripts/phase2a_provider_live_smoke.py` 재실행 결과 provider_results 2개(첫 fenced `{"candidates":[]}`, repair valid schema JSON), `run_http_status=200`, final job `succeeded`, candidates 3개.
 - Phase 2A provider/Gateway runner factory wiring 첫 구현 slice(2026-07-01): focused `python3 -m unittest tests.test_core_sot.CoreSotSourceRefTest tests.test_core_sot_mongo_indexes tests.test_prompt_templates tests.test_prompt_template_mongo_indexes tests.test_analysis_prompt_builder tests.test_analysis_gateway_provider tests.test_analysis_extractor_schema tests.test_analysis_runner tests.test_application_api -v` 96개 통과. 전체 `python3 -m unittest discover tests -v` 349개 통과(37 skip). `git diff --check` 통과. 독립 검증 조건부 합격 차단 조건 보강으로 env-set default runner HTTP branch 회귀를 추가했다.
 - Slice 1 draft version export 자체 회귀(2026-06-30): `python3 -m unittest discover tests` 327개 통과(35 skip). 잠근 범위: body가 선택 version snapshot raw_text와 정확히 일치, 요청한 version 선택(latest 아님), txt/markdown content_type·확장자만 차이·body 동일, unsupported format 거절, missing version NotFound, archive 후 export 보존; HTTP 200 traceability payload, markdown query, unsupported 400, missing 404, cross-project 404, archived-draft+project archive export 200, missing-project export 404.
 - Slice 1 export 독립 검증 합격(2026-06-30, `docs/verifications/2026-06-30/slice1_draft_version_export.md`). 비차단 note 중 N1(존재하지 않는 `§113/§115` 인용)은 이번 작업이 새로 넣은 인용 2곳(test docstring·work_log)을 "SoT archive 읽기 전용 정책(v1.5)"로 교정해 폐쇄했다(레포 전반의 기존 `§113/§115` 관행은 별도 범위라 미수정). N4(archived-draft·missing-project export 직접 회귀 부재)는 HTTP 회귀 2개 추가로 폐쇄했다. N2(charset suffix)·N3(filename prefix 미명시)는 계약 위반 아님이라 그대로 둔다.
@@ -266,7 +269,8 @@ tests/
 └── test_application_api.py
 scripts/
 ├── smoke_llm_provider.py
-└── benchmark_llm_provider.py
+├── benchmark_llm_provider.py
+└── phase2a_provider_live_smoke.py
 docs/verification_briefs/2026-06-24/
 ├── llm_gateway_slice_0_1_to_0_5.md
 ├── llm_gateway_f1_f2_live_smoke.md

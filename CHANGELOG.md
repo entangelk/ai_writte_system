@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-07-01 | SoT v1.6.17: Phase 2A Application-side JSON repair retry 추가 | [work log](docs/daily_logs/2026-07-01/work_log.md) |
 | 2026-07-01 | SoT v1.6.16: Phase 2A provider/Gateway runner factory wiring 첫 구현 slice 추가 | [work log](docs/daily_logs/2026-07-01/work_log.md) |
 | 2026-07-01 | SoT v1.6.15: Phase 2A provider/Gateway wiring pre-implementation 결정 승인 | [work log](docs/daily_logs/2026-07-01/work_log.md) |
 | 2026-06-30 | SoT v1.6.14: Slice 1 draft version export 추가(plain text/Markdown, version 추적·body verbatim). 사용자 결정: 막힌 Next Tasks 대신 export 진행, 형식은 plain text + Markdown | [work log](docs/daily_logs/2026-06-30/work_log.md) |
@@ -52,6 +53,7 @@
 
 ### Changed
 
+- SoT를 v1.6.17로 갱신해 Phase 2A Application-side JSON repair retry를 추가했다. `/v1/generate` 경로는 유지하고, `VersionedPromptAnalysisExtractionAdapter`가 strict parser 실패 시 원문 output/parser error/original prompt payload로 repair prompt를 1회만 재호출한다. Repair output도 같은 Phase 2A strict parser/source validation/candidate schema를 통과해야 하며 실패하면 `schema_invalid`로 보존된다.
 - SoT를 v1.6.16으로 갱신해 Phase 2A provider/Gateway runner factory wiring 첫 구현 slice를 추가했다. Core SOT source_ref catalog read surface, versioned prompt template DB, `analysis_extract_v1` prompt builder, `/v1/generate` 기반 Application→Gateway provider adapter, env 기반 default runner wiring을 추가했다. `LLM_GATEWAY_BASE_URL`이 없으면 기존 pending run 503 behavior를 유지한다.
 - SoT를 v1.6.15로 갱신해 Phase 2A provider/Gateway wiring pre-implementation 결정을 승인했다. 첫 실제 provider wiring은 tool-call 없는 terminal JSON extraction으로 진행하고, 모델은 입력 source_ref catalog의 id를 선택한다. Prompt template은 DB에 저장해 versioned 관리하며 첫 prompt version은 `analysis_extract_v1`, task_type은 `analysis_extract`다.
 

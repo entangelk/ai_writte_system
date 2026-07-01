@@ -126,7 +126,20 @@ class VersionedPromptAnalysisExtractionAdapter:
             raise AnalysisExtractionError(str(exc)) from exc
 
         result = await self._provider.generate(request)
-        return parse_analysis_extraction(result.content)
+        try:
+            return parse_analysis_extraction(result.content)
+        except AnalysisExtractionError as first_error:
+            repair = await self._provider.generate(
+                _repair_request(
+                    original_request=request,
+                    invalid_content=result.content,
+                    parser_error=str(first_error),
+                )
+            )
+            try:
+                return parse_analysis_extraction(repair.content)
+            except AnalysisExtractionError as repair_error:
+                raise repair_error from first_error
 
 
 def parse_analysis_extraction(content: str) -> tuple[AnalysisCandidateDraft, ...]:
@@ -135,6 +148,55 @@ def parse_analysis_extraction(content: str) -> tuple[AnalysisCandidateDraft, ...
     if not isinstance(raw_candidates, list):
         raise AnalysisExtractionError("candidates must be an array")
     return tuple(_candidate_draft(item) for item in raw_candidates)
+
+
+_REPAIR_SYSTEM_PROMPT = """Repair Phase 2A analysis extraction output.
+
+Return valid JSON only. Do not wrap the JSON in markdown fences. Do not add prose.
+
+The output must be one object with top-level key "candidates".
+Each candidate must contain exactly these fields:
+- candidate_type: one of character_observation, event_observation, open_question_observation
+- provenance: source_observed or ai_inferred
+- confidence: number from 0.0 to 1.0
+- source_anchors: non-empty array of catalog anchors, preserving source_ref_id, start_offset, end_offset, quote, content_hash
+- payload: character_observation requires {"name": "...", "observation": "..."}; event_observation requires {"event": "..."}; open_question_observation requires {"question": "..."}
+
+Use only source_ref_id values from the original source_ref catalog. If no valid candidate can be produced, return {"candidates":[]}.
+"""
+
+
+def _repair_request(
+    *,
+    original_request: ChatCompletionRequest,
+    invalid_content: str,
+    parser_error: str,
+) -> ChatCompletionRequest:
+    payload = {
+        "parser_error": parser_error,
+        "invalid_output": invalid_content,
+        "original_user_payload": original_request.messages[-1].content,
+    }
+    return ChatCompletionRequest(
+        messages=(
+            ChatMessage(role="system", content=_REPAIR_SYSTEM_PROMPT),
+            ChatMessage(
+                role="user",
+                content=json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            ),
+        ),
+        model=original_request.model,
+        temperature=original_request.temperature,
+        top_p=original_request.top_p,
+        max_tokens=original_request.max_tokens,
+        thinking=False,
+        chat_template_kwargs=original_request.chat_template_kwargs,
+    )
 
 
 def _candidate_draft(item: object) -> AnalysisCandidateDraft:

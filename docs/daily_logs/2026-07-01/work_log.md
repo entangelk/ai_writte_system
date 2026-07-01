@@ -45,6 +45,25 @@
 - `test_analysis_run_endpoint_uses_env_configured_default_runner`를 추가했다. 테스트는 env-set 상태에서 `create_app()`에 runner를 주입하지 않고, `GatewayGenerateProvider` 생성자만 fake provider로 patch해 `_default_analysis_runner` 경로를 실제로 타게 한다. 준비된 snapshot/source_ref catalog와 provider JSON 결과가 `/analysis/jobs/{job_id}/run`을 통해 `succeeded` job과 저장된 candidate로 이어지는지 확인한다.
 - SoT v1.6.16 근거 열에 `tests/test_analysis_runner.py`를 포함하도록 보정했다.
 
+### Phase 2A provider wiring live smoke
+
+- 변경 파일: `scripts/phase2a_provider_live_smoke.py`, `HANDOFF.md`, `docs/daily_logs/2026-07-01/work_log.md`.
+- HANDOFF의 1순위 Next Task였던 실제 Gateway/model 운영 경계 smoke를 실행했다.
+- Public HTTP에는 아직 `source_ref` 생성 endpoint가 없으므로, smoke script가 in-memory Core SOT에 project/draft/version과 `source_ref` catalog(`민아`, `파란 편지`, `준호`)를 준비한다. 그 뒤 Application `/analysis/jobs/{job_id}/run`을 ASGI로 호출하고, Application provider adapter는 Gateway app의 `/v1/generate`를 통과해 실제 llama.cpp-compatible endpoint `http://192.168.1.29:9080`을 호출한다.
+- 첫 sandbox 내부 실행은 Python/httpx 외부 TCP가 `[Errno 1] Operation not permitted`로 막혀 `provider_error` 보존 경로로 떨어졌다. 이는 sandbox 제한에 의한 것이므로, 같은 명령을 승인된 외부 네트워크 실행으로 재실행했다.
+- 승인 실행 결과: `run_http_status=400`, final job `status=failed`, `failure_reason=schema_invalid`, `failure_detail="provider content must be JSON"`, candidates 0. 실제 모델 출력은 strict JSON이 아니었지만, run endpoint가 schema failure를 terminal job으로 안정 보존함을 확인했다.
+- 효과: live smoke 수용 기준인 "terminal job을 만들거나 provider/schema failure를 안정적으로 보존"이 충족됐다. 동시에 현 prompt/Gateway text generation 조합은 strict JSON을 보장하지 않는다는 운영 신호가 생겼고, 이는 `/v1/generate-structured` 후속 검토 근거로 남겼다.
+
+### Phase 2A JSON repair retry
+
+- 변경 파일: `services/application/app/analysis/extractor.py`, `tests/test_analysis_extractor_schema.py`, `scripts/phase2a_provider_live_smoke.py`, `docs/system-contract-sot.md`, `docs/plans/02-analysis-provider-wiring-decisions.md`, `CHANGELOG.md`, `HANDOFF.md`, `docs/daily_logs/2026-07-01/work_log.md`.
+- 사용자 제안에 따라 parser 실패 원인을 먼저 확인했다. live smoke 원문은 markdown-fenced JSON이었고, 내부 JSON도 adapter가 요구하는 candidate schema보다 얕았다(`source_ref_id`/`quote`만 있고 `candidate_type`/`provenance`/`confidence`/`source_anchors`/`payload`가 없음).
+- llama.cpp/Gemma endpoint의 JSON mode 가능성도 확인했다. `chat_template_kwargs.enable_thinking=false`를 명시하면 simple JSON 요청은 `message.content`로 정상 반환됐다. `response_format={"type":"json_object"}`도 거절되지는 않았지만, 동일 단순 요청에서는 response_format 없이도 JSON이 반환됐다. 직접 curl에서 thinking을 끄지 않으면 `message.content`가 비고 `reasoning_content`에만 JSON 예시가 들어가는 현상도 확인했다.
+- 사용자 결정: `/v1/generate-structured` public contract를 바로 열기보다, 1번 방향(Application-side repair)을 먼저 진행한다.
+- 구현: `VersionedPromptAnalysisExtractionAdapter`가 첫 provider content를 기존 strict parser로 검증하고, 실패 시 원문 output/parser error/original prompt payload를 포함한 repair prompt를 같은 provider에 1회만 재호출한다. repair output도 기존 `parse_analysis_extraction()`과 source validation/candidate schema를 그대로 통과해야 한다. repair도 실패하면 성공으로 보정하지 않고 기존 runner failure mapping에 따라 `schema_invalid`로 보존한다.
+- smoke script는 provider 원문/repair 결과를 `provider_results`에 남기도록 보강했고, 기본 `--max-tokens`를 Application runtime 기본값과 같은 2048로 맞췄다.
+- 승인 live smoke 재실행 결과: 첫 provider result는 fenced `{"candidates":[]}`였고, repair result는 valid Phase 2A JSON candidate 3개였다. `/analysis/jobs/{job_id}/run`은 `200`, final job `succeeded`, candidates 3개로 닫혔다.
+
 ## Issues found
 
 - 문제: HANDOFF의 다음 작업 대부분이 Gateway/model tool-call wire format, prompt/output 계약, source_ref 생성 boundary에 막혀 있었다.
@@ -67,6 +86,28 @@
 - Resolution: env-set 상태에서 `create_app()`의 default runner factory를 타고 pending job이 terminal 상태까지 실행되는 회귀를 추가했다.
 - Outcome: live Gateway smoke와 별개로, Slice 6의 단위 branch lock이 committed test artifact로 닫혔다.
 
+- 문제: sandbox 내부 Python/httpx는 live llama.cpp endpoint로 TCP 연결을 열 수 없었다.
+- 원인: 현재 실행 환경의 network sandbox가 Python socket 연결을 차단했고, 직접 `httpx.get("http://192.168.1.29:9080/health")`도 `[Errno 1] Operation not permitted`로 실패했다. `curl` health/models 조회는 가능했지만, Application/Gateway provider path는 Python/httpx라 같은 제한을 받는다.
+- Resolution: live smoke 명령을 승인된 외부 네트워크 실행으로 재실행했다.
+- Outcome: 실제 endpoint까지 도달했고 schema-invalid failure preservation을 확인했다. 앞으로 이 smoke는 sandbox 밖 네트워크 권한이 필요하다.
+
+- 문제: 실제 model output이 `AnalysisExtractionAdapter`가 요구하는 top-level JSON object가 아니었다.
+- 원인: 현재 `/v1/generate` text generation surface와 `analysis_extract_v1` prompt는 strict JSON을 강제하지 않는다.
+- Resolution: 이번 slice 범위에서는 정상적인 schema failure로 보존되는지를 확인했고, Gateway structured-output surface는 Next Task로 남겼다.
+- Outcome: failure가 `schema_invalid` terminal job으로 보존되어 운영 경계는 통과했다. malformed JSON 비율을 낮추려면 `/v1/generate-structured` 또는 prompt/grammar 보강 slice가 필요하다.
+
+- 문제: parser 실패가 단순히 markdown fence 때문인지, schema 불일치 때문인지 구분되지 않았다.
+- 원인: 기존 live smoke summary는 provider raw content를 기록하지 않고 final job failure만 기록했다.
+- Resolution: smoke script에 provider result recording을 추가하고 live run을 재실행했다.
+- Outcome: 첫 실패는 fenced JSON이면서 동시에 schema가 얕은 출력임을 확인했다. repair retry 후에는 같은 endpoint가 valid Phase 2A schema를 만들 수 있음도 확인했다.
+
+- 문제: direct curl에서는 Gemma가 JSON을 `message.content`가 아니라 `reasoning_content`에 쓰는 경우가 있었다.
+- 원인: direct curl 요청에 `chat_template_kwargs.enable_thinking=false`를 넣지 않아 thinking path가 켜졌다. Gateway provider path는 이미 `thinking=False`를 통해 `enable_thinking=false`를 넣는다.
+- Resolution: thinking off/on 조건을 나눠 direct curl을 비교했다.
+- Outcome: `enable_thinking=false`에서는 simple JSON이 content로 반환된다. 현재 Gateway path의 thinking 설정은 맞고, structured endpoint 도입 여부와 별개로 repair retry가 실제 Phase 2A 출력 실패를 줄인다.
+
+- 패턴 스윕: 같은 `parse_analysis_extraction(result.content)` 경로가 legacy `AnalysisExtractionAdapter`에도 남아 있음을 확인했다(`services/application/app/analysis/extractor.py`). `git blame` 결과 2026-06-29 fake-provider extraction adapter slice에서 추가된 초기 adapter이며, 현재 runtime provider wiring은 `VersionedPromptAnalysisExtractionAdapter`를 사용한다. legacy adapter는 source_ref catalog/original prompt payload가 없어 같은 repair prompt를 정확히 구성하기 어렵고 live path가 아니므로 이번 수정 범위에서는 건드리지 않았다.
+
 ## Decisions
 
 - 이번 턴에서는 provider/Gateway runtime wiring을 구현하지 않았다. 이유: SoT의 미확정 항목을 임의로 채우지 않는다는 프로젝트 규칙과 충돌하기 때문이다.
@@ -78,6 +119,8 @@
 - Gateway 호출 surface는 구현 전 비용 확인 뒤 `/v1/generate` 임시 사용 또는 `/v1/generate-structured` 최소 구현 중 선택한다.
 - 비용 확인 결과 이번 slice에서는 `/v1/generate` 임시 사용을 채택했다. structured endpoint는 schema failure envelope까지 정해야 하므로 별도 Gateway slice로 미룬다.
 - `LLM_GATEWAY_BASE_URL` env가 default analysis runner activation switch다. env가 없으면 existing 503 behavior를 유지한다.
+- Live smoke는 public source_ref 생성 API가 아직 없으므로 repo script가 in-memory setup으로 catalog를 준비하는 방식으로 진행했다. Application→Gateway→model 운영 경계 검증에는 충분하지만, full deployed HTTP-only E2E는 source_ref materialization/API가 생긴 뒤 별도 확인한다.
+- 사용자 결정: parser 실패 원인 확인 후에도 `/v1/generate-structured`를 바로 열지 않고 Application-side repair retry를 먼저 적용한다. 이유는 현재 JSON/schema 검증 소유자가 Application adapter이고, 새 Gateway public contract 없이 실제 실패(fence/schema mismatch)를 줄일 수 있기 때문이다.
 
 ## Verification
 
@@ -89,8 +132,18 @@
 - 전체 회귀: `python3 -m unittest discover tests -v` — 349개 통과(37 skip).
 - Diff hygiene: `git diff --check` 통과.
 - 독립 검증 보강 단일 회귀: `python3 -m unittest tests.test_application_api.ApplicationApiTest.test_analysis_run_endpoint_uses_env_configured_default_runner -v` — 1개 통과.
+- Live smoke script syntax: `python3 -m py_compile scripts/phase2a_provider_live_smoke.py` — 통과.
+- Sandbox 제한 확인: `python3 scripts/phase2a_provider_live_smoke.py` — sandbox 내부에서는 Python/httpx 외부 TCP 차단으로 `run_http_status=502`, final job `failed/provider_error`, `failure_detail="provider is unavailable"` 보존.
+- Live smoke 승인 실행: `python3 scripts/phase2a_provider_live_smoke.py` — 외부 네트워크 권한으로 endpoint `http://192.168.1.29:9080`, model `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0` 호출. 결과 `run_http_status=400`, final job `failed/schema_invalid`, `failure_detail="provider content must be JSON"`, candidates 0.
+- JSON mode/provenance check: direct curl에서 `chat_template_kwargs.enable_thinking=false` + simple JSON instruction은 `message.content`에 valid JSON을 반환했다. thinking off 없이 같은 요청을 보내면 `message.content`가 비고 `reasoning_content`에 JSON 예시가 들어갔다. `response_format={"type":"json_object"}`는 endpoint에서 거절되지 않았지만, simple case에서는 response_format 없이도 valid JSON이 반환됐다.
+- Repair focused regression: `python3 -m unittest tests.test_analysis_extractor_schema -v` — 12개 통과.
+- Repair compile check: `python3 -m py_compile services/application/app/analysis/extractor.py tests/test_analysis_extractor_schema.py scripts/phase2a_provider_live_smoke.py` — 통과.
+- Repair live smoke: `python3 scripts/phase2a_provider_live_smoke.py` — 첫 provider result fenced `{"candidates":[]}`, repair provider result valid Phase 2A JSON, `run_http_status=200`, final job `succeeded`, candidates 3개.
+- Pattern sweep: `rg -n "parse_analysis_extraction\\(|provider content must be JSON|repair|generate\\(request\\)" services/application/app/analysis tests` 및 `git blame -L 70,82 -- services/application/app/analysis/extractor.py`.
+- Focused broader regression: `python3 -m unittest tests.test_analysis_extractor_schema tests.test_analysis_runner tests.test_application_api -v` — 75개 통과.
+- Full regression: `python3 -m unittest discover tests -v` — 351개 통과(37 skip).
 
 ## Next steps
 
-- 실제 gateway endpoint를 대상으로 Phase 2A provider wiring live smoke를 실행한다.
-- malformed JSON/schema failure가 실제로 자주 발생하면 `/v1/generate-structured` 최소 contract를 별도 Gateway slice로 검토한다.
+- repair 후에도 malformed JSON/schema failure 또는 latency가 운영상 문제로 남으면 `/v1/generate-structured` 최소 contract를 별도 Gateway slice로 검토한다.
+- Phase 3 indexing 계약이 확정되면 archive 후 파생 인덱스 stale 이벤트를 별도 회귀로 다룬다.

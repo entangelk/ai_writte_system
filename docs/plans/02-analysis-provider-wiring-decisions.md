@@ -115,6 +115,12 @@
 
 structured generation/grammar는 malformed JSON 비율이나 schema failure envelope 필요가 확인되면 후속 Gateway slice로 올린다.
 
+2026-07-01 live smoke follow-up:
+
+- 실제 Gemma/llama.cpp 호출에서 첫 output은 markdown-fenced JSON이거나 adapter가 요구하는 candidate schema보다 얕은 JSON일 수 있음을 확인했다.
+- `chat_template_kwargs.enable_thinking=false`를 명시하면 simple JSON 요청은 `message.content`로 정상 반환된다. `response_format={"type":"json_object"}`도 endpoint에서 거절되지는 않았지만, 이번 slice의 Application/Gateway 계약은 아직 `/v1/generate` text surface를 사용한다.
+- 사용자 결정에 따라 `/v1/generate-structured` public contract를 바로 열기보다 Application-side repair를 먼저 적용한다. Versioned extraction adapter는 strict parser 실패 시 원문 output과 parser error, 원래 prompt payload를 포함해 repair prompt를 1회만 재호출한다. repair output도 같은 strict parser와 source validation을 통과해야 하며 실패하면 `schema_invalid`로 보존한다.
+
 ### 6. runner factory의 최소 구성은 무엇인가?
 
 결정:
