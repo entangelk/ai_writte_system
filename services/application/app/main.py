@@ -39,6 +39,10 @@ from services.application.app.core_sot.service import (
     NotFound,
     UnsupportedExportFormat,
 )
+from services.application.app.indexing.service import (
+    FAKE_VECTOR_BACKEND,
+    rebuild_source_block_index_summary,
+)
 
 
 class AnalysisJobRunner(Protocol):
@@ -289,6 +293,16 @@ def create_app(
             ],
             "idempotent_replay": result.job_idempotent_replay,
         }
+
+    def _rebuild_source_block_index_payload(
+        *, project_id: str, snapshot_id: str
+    ) -> dict[str, object]:
+        summary = rebuild_source_block_index_summary(
+            core_sot=core_sot,
+            project_id=project_id,
+            snapshot_id=snapshot_id,
+        )
+        return summary.to_dict(backend=FAKE_VECTOR_BACKEND)
 
     def _require_project_exists(project_id: str) -> None:
         core_sot.get_project(project_id=project_id)
@@ -547,6 +561,19 @@ def create_app(
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return _source_ref_payload(source_ref)
+
+    @app.post("/projects/{project_id}/snapshots/{snapshot_id}/index/source-blocks/rebuild")
+    async def rebuild_source_block_index(
+        project_id: str,
+        snapshot_id: str,
+    ) -> dict[str, object]:
+        try:
+            return _rebuild_source_block_index_payload(
+                project_id=project_id,
+                snapshot_id=snapshot_id,
+            )
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.post("/projects/{project_id}/analysis/jobs")
     async def create_analysis_job(

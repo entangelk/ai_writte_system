@@ -14,9 +14,7 @@ if __package__ in {None, ""}:
 
 from services.application.app.core_sot.service import CoreSotService
 from services.application.app.indexing.service import (
-    DeterministicFakeEmbeddingProvider,
-    InMemoryVectorIndexAdapter,
-    SourceBlockIndexingService,
+    rebuild_source_block_index_summary,
 )
 
 DEFAULT_MONGO_DB = "ai_writing_system"
@@ -65,31 +63,13 @@ def rebuild_source_block_index(
     snapshot_id: str,
     embedding_dimensions: int = 4,
 ) -> dict[str, Any]:
-    vector_index = InMemoryVectorIndexAdapter()
-    service = SourceBlockIndexingService(
+    summary = rebuild_source_block_index_summary(
         core_sot=core_sot,
-        embeddings=DeterministicFakeEmbeddingProvider(
-            dimensions=embedding_dimensions,
-        ),
-        vector_index=vector_index,
-    )
-
-    result = service.rebuild_snapshot_source_block_index(
         project_id=project_id,
         snapshot_id=snapshot_id,
+        embedding_dimensions=embedding_dimensions,
     )
-    all_records = vector_index.list_records(project_id=project_id, include_archived=True)
-    visible_records = vector_index.list_records(project_id=project_id)
-    return {
-        "project_id": result.request.project_id,
-        "snapshot_id": result.request.snapshot_id,
-        "target": result.request.target.value,
-        "records_attempted": result.records_attempted,
-        "records_written": result.records_written,
-        "records_indexed": len(all_records),
-        "records_query_visible": len(visible_records),
-        "records_archived": len(all_records) - len(visible_records),
-    }
+    return summary.to_dict()
 
 
 def terminal_status(summary: dict[str, Any]) -> bool:

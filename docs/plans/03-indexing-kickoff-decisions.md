@@ -106,3 +106,7 @@
 ## 구현 후속 — explicit rebuild script
 
 2026-07-02 Phase 3A 후속 작은 slice로 `scripts/phase3a_rebuild_source_block_index.py`를 추가했다. 이 script는 `--project-id`, `--snapshot-id`, `CORE_SOT_MONGO_URI`/`--mongo-uri`를 받아 Core SOT MongoDB에서 snapshot blocks를 읽고 deterministic fake vector adapter로 explicit rebuild를 실행한다. 출력은 JSON summary(`project_id`, `snapshot_id`, `target`, `records_attempted`, `records_written`, `records_indexed`, `records_query_visible`, `records_archived`)다. Exit code는 full write 성공 0, partial write 1, usage/config/domain error 2다. Application HTTP API endpoint와 persistent vector backend는 후속이다.
+
+## 구현 후속 — explicit rebuild HTTP API
+
+2026-07-02 Phase 3A 후속 slice로 `POST /projects/{project_id}/snapshots/{snapshot_id}/index/source-blocks/rebuild`를 추가했다. 이 endpoint는 deterministic fake vector adapter로 explicit rebuild를 실행하고 JSON summary(`project_id`, `snapshot_id`, `target`, `backend`, `records_attempted`, `records_written`, `records_indexed`, `records_query_visible`, `records_archived`)를 반환한다. `backend`는 `in_memory_fake`이며, missing/cross-project snapshot은 404다. Persistent vector backend와 automatic sync는 후속이다.

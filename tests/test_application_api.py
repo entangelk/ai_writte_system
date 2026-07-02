@@ -787,6 +787,86 @@ class ApplicationApiTest(unittest.TestCase):
         self.assertEqual(fetched.status_code, 200)
         self.assertEqual(fetched.json(), created.json())
 
+    def test_source_block_index_rebuild_endpoint_returns_fake_adapter_summary(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        saved = client.post(
+            f"/projects/{project['id']}/drafts/{draft['id']}/versions",
+            json={
+                "raw_text": "민아는 파란 편지를 발견했다.\n\n준호는 지도를 접었다.",
+                "idempotency_key": "save-1",
+            },
+        ).json()
+
+        response = client.post(
+            f"/projects/{project['id']}/snapshots/{saved['snapshot']['id']}"
+            "/index/source-blocks/rebuild"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "project_id": project["id"],
+                "snapshot_id": saved["snapshot"]["id"],
+                "target": "vector",
+                "backend": "in_memory_fake",
+                "records_attempted": 2,
+                "records_written": 2,
+                "records_indexed": 2,
+                "records_query_visible": 2,
+                "records_archived": 0,
+            },
+        )
+
+    def test_source_block_index_rebuild_filters_archived_project_records(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        saved = client.post(
+            f"/projects/{project['id']}/drafts/{draft['id']}/versions",
+            json={"raw_text": "문장 하나.\n\n문장 둘.", "idempotency_key": "save-1"},
+        ).json()
+        client.delete(f"/projects/{project['id']}")
+
+        response = client.post(
+            f"/projects/{project['id']}/snapshots/{saved['snapshot']['id']}"
+            "/index/source-blocks/rebuild"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["records_indexed"], 2)
+        self.assertEqual(response.json()["records_query_visible"], 0)
+        self.assertEqual(response.json()["records_archived"], 2)
+
+    def test_source_block_index_rebuild_rejects_missing_and_cross_project_snapshot(self):
+        client = TestClient(create_app())
+        project_a = client.post("/projects", json={"name": "A"}).json()
+        project_b = client.post("/projects", json={"name": "B"}).json()
+        draft_a = client.post(
+            f"/projects/{project_a['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        saved = client.post(
+            f"/projects/{project_a['id']}/drafts/{draft_a['id']}/versions",
+            json={"raw_text": "문장 하나.", "idempotency_key": "save-1"},
+        ).json()
+
+        missing = client.post(
+            f"/projects/{project_a['id']}/snapshots/nope/index/source-blocks/rebuild"
+        )
+        cross_project = client.post(
+            f"/projects/{project_b['id']}/snapshots/{saved['snapshot']['id']}"
+            "/index/source-blocks/rebuild"
+        )
+
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(cross_project.status_code, 404)
+
     def test_analysis_job_create_get_and_idempotent_replay(self):
         core_sot = CoreSotService(InMemoryCoreSotRepository())
         analysis = AnalysisService(InMemoryAnalysisRepository())

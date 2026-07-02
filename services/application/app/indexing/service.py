@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 from typing import Protocol
 
@@ -17,6 +18,7 @@ from services.application.app.indexing.models import (
 
 
 SOURCE_BLOCK_COLLECTION = "source_blocks"
+FAKE_VECTOR_BACKEND = "in_memory_fake"
 
 
 class EmbeddingProvider(Protocol):
@@ -66,6 +68,66 @@ class InMemoryVectorIndexAdapter:
                 if not record.project_archived and not record.draft_archived
             )
         return tuple(sorted(records, key=lambda record: record.id))
+
+
+@dataclass(frozen=True, slots=True)
+class SourceBlockIndexRebuildSummary:
+    project_id: str
+    snapshot_id: str
+    target: str
+    records_attempted: int
+    records_written: int
+    records_indexed: int
+    records_query_visible: int
+    records_archived: int
+
+    def to_dict(self, *, backend: str | None = None) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "project_id": self.project_id,
+            "snapshot_id": self.snapshot_id,
+            "target": self.target,
+            "records_attempted": self.records_attempted,
+            "records_written": self.records_written,
+            "records_indexed": self.records_indexed,
+            "records_query_visible": self.records_query_visible,
+            "records_archived": self.records_archived,
+        }
+        if backend is not None:
+            payload["backend"] = backend
+        return payload
+
+
+def rebuild_source_block_index_summary(
+    *,
+    core_sot: CoreSotService,
+    project_id: str,
+    snapshot_id: str,
+    embedding_dimensions: int = 4,
+) -> SourceBlockIndexRebuildSummary:
+    vector_index = InMemoryVectorIndexAdapter()
+    service = SourceBlockIndexingService(
+        core_sot=core_sot,
+        embeddings=DeterministicFakeEmbeddingProvider(
+            dimensions=embedding_dimensions,
+        ),
+        vector_index=vector_index,
+    )
+    result = service.rebuild_snapshot_source_block_index(
+        project_id=project_id,
+        snapshot_id=snapshot_id,
+    )
+    all_records = vector_index.list_records(project_id=project_id, include_archived=True)
+    visible_records = vector_index.list_records(project_id=project_id)
+    return SourceBlockIndexRebuildSummary(
+        project_id=result.request.project_id,
+        snapshot_id=result.request.snapshot_id,
+        target=result.request.target.value,
+        records_attempted=result.records_attempted,
+        records_written=result.records_written,
+        records_indexed=len(all_records),
+        records_query_visible=len(visible_records),
+        records_archived=len(all_records) - len(visible_records),
+    )
 
 
 class SourceBlockIndexingService:

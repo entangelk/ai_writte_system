@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-07-02 | SoT v1.6.23: Phase 3A explicit rebuild HTTP API 추가 | [work log](docs/daily_logs/2026-07-02/work_log.md) |
 | 2026-07-02 | SoT v1.6.22: Phase 3A explicit rebuild script 추가 | [work log](docs/daily_logs/2026-07-02/work_log.md) |
 | 2026-07-02 | SoT v1.6.21: Phase 3A source block indexing 검증 후 보강 | [work log](docs/daily_logs/2026-07-02/work_log.md) |
 | 2026-07-02 | SoT v1.6.20: Phase 3A source block indexing fake-adapter slice 추가 | [work log](docs/daily_logs/2026-07-02/work_log.md) |
@@ -59,6 +60,7 @@
 
 ### Changed
 
+- SoT를 v1.6.23으로 갱신해 Phase 3A explicit rebuild HTTP API를 추가했다. `POST /projects/{project_id}/snapshots/{snapshot_id}/index/source-blocks/rebuild`는 deterministic fake vector adapter rebuild summary를 반환하며 `backend`는 `in_memory_fake`다. Persistent vector backend와 automatic sync는 후속이다.
 - SoT를 v1.6.22로 갱신해 Phase 3A explicit rebuild script 계약을 추가했다. `scripts/phase3a_rebuild_source_block_index.py`는 `project_id + snapshot_id`를 받아 Core SOT MongoDB에서 source blocks를 읽고 deterministic fake vector adapter rebuild summary를 JSON으로 출력한다. Exit code는 full write 성공 0, partial write 1, usage/config/domain error 2다. Application HTTP API endpoint와 persistent vector backend는 후속이다.
 - SoT를 v1.6.21로 갱신해 Phase 3A `IndexSyncRequest`/`IndexSyncResult` reduced shape와 `contracts.md` §7.3 persistent sync log/outbox envelope의 관계를 명시했다. 검증 F2 대응으로 draft-only archive query exclusion 회귀를 추가했고, archive/status filter가 explicit rebuild 시점 metadata 기준임을 명확화했다.
 - SoT를 v1.6.20으로 갱신해 Phase 3A source block indexing 첫 slice를 추가했다. 첫 target은 Core SOT source block only이며, backend는 Chroma-like vector contract with deterministic fake adapter, embedding은 fake provider only, delivery는 explicit snapshot rebuild, archive/delete 반영은 status/version filter다.
