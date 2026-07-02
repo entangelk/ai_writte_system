@@ -22,11 +22,12 @@
 12. [`02-analysis-provider-wiring-decisions.md`](02-analysis-provider-wiring-decisions.md) — Phase 2A provider/Gateway wiring 결정 브리프
 13. [`02-analysis-pipeline.md`](02-analysis-pipeline.md) — 최초 추출과 기존 기억 대조·갱신 후보
 14. [`03-indexing-kickoff-decisions.md`](03-indexing-kickoff-decisions.md) — Phase 3 indexing 착수 결정 브리프
-15. [`03-indexing.md`](03-indexing.md) — ChromaDB/Elasticsearch 파생 인덱스와 동기화
-16. [`04-agentic-search.md`](04-agentic-search.md) — 검색 계획, 정본 재조회, ContextPackage
-17. [`05-writing-ai.md`](05-writing-ai.md) — 컨텍스트 기반 글 생성과 Writing Gate
-18. [`06-review-ui.md`](06-review-ui.md) — 후보 검토와 프로젝트 메모리 관리 UI
-19. [`flat-loop-gate.md`](flat-loop-gate.md) — flat agent loop 종료 decision, tool registry, budget policy, task별 completion criteria와 benchmark 기반 숫자 기본 한도. Phase 2/4/5가 소비하는 횡단 계약
+15. [`03-index-sync-outbox-decisions.md`](03-index-sync-outbox-decisions.md) — Phase 3B automatic sync/outbox 결정 브리프
+16. [`03-indexing.md`](03-indexing.md) — ChromaDB/Elasticsearch 파생 인덱스와 동기화
+17. [`04-agentic-search.md`](04-agentic-search.md) — 검색 계획, 정본 재조회, ContextPackage
+18. [`05-writing-ai.md`](05-writing-ai.md) — 컨텍스트 기반 글 생성과 Writing Gate
+19. [`06-review-ui.md`](06-review-ui.md) — 후보 검토와 프로젝트 메모리 관리 UI
+20. [`flat-loop-gate.md`](flat-loop-gate.md) — flat agent loop 종료 decision, tool registry, budget policy, task별 completion criteria와 benchmark 기반 숫자 기본 한도. Phase 2/4/5가 소비하는 횡단 계약
 
 ## 문서 지위와 우선순위
 

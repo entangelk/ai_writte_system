@@ -7,6 +7,7 @@
 - 배포형 E2E smoke를 재현 가능한 스크립트와 회귀로 남긴다.
 - Phase 3A explicit rebuild의 HTTP/CLI public 표면을 live Mongo runtime에서 재현 가능한 smoke로 묶는다.
 - Phase 3A source-block hit stale validation을 추가한다.
+- Phase 3B automatic sync/outbox 첫 구현 범위를 결정 브리프로 좁힌다.
 
 ## Completed work
 
@@ -102,6 +103,14 @@
 - 코드 변경은 하지 않았다. Boundary matrix가 이미 채워져 있고, 추가 회귀가 필요한 blocking 사유는 없었다.
 - 비블로킹 관찰 중 다음 작업자에게 의미가 될 수 있는 부분만 SoT/plan에 명확화했다: `snapshot_missing`은 단독 reason으로 short-circuit하고, `draft_archived`는 조회된 snapshot의 owning draft 기준이며, drift 판정은 `version_id`가 아니라 `content_hash`와 draft/block pointer 정합성 기준이다.
 
+### Phase 3B automatic sync/outbox 결정 브리프 추가
+
+- 변경 파일: `docs/plans/03-index-sync-outbox-decisions.md`, `docs/plans/03-indexing.md`, `docs/plans/README.md`, `HANDOFF.md`, `CHANGELOG.md`, `docs/daily_logs/2026-07-02/work_log.md`.
+- 사용자 요청에 따라 검증 기록 커밋 후 다음 작업으로 Phase 3A의 남은 gap인 automatic sync/outbox를 검토했다.
+- `contracts.md` §7.2~7.3과 `mongo_collections.md` §39는 persistent sync request/result/log envelope를 제시하지만, Phase 3A 구현은 source block explicit rebuild와 hit validation에 머물러 있다.
+- 새 브리프는 첫 automatic event source를 `project_archived`/`draft_archived` archive events로 추천하고, delivery는 inline adapter 호출이나 외부 queue가 아니라 Mongo `index_sync_logs` pending outbox entry로 시작하자고 제안한다.
+- SoT 버전은 올리지 않았다. 이유: 아직 owner-approved public contract가 아니라, archive API/outbox schema 구현 전에 승인 또는 수정을 받아야 하는 결정 브리프다.
+
 ## Issues found
 
 - 문제: 다음 코드 슬라이스 후보 대부분이 계약 미확정에 막혀 있었다.
@@ -179,6 +188,11 @@
 - Resolution: 코드 변경 없이 SoT/plan 문구를 명확화했다.
 - Outcome: 검증 합격 상태를 유지하면서 후속 query/Context Gate wiring 작업자가 같은 의미로 guard를 사용할 수 있다.
 
+- 문제: automatic sync/outbox를 바로 구현하면 event source, delivery, 저장 단위, retry/backoff, worker 범위를 동시에 추측하게 된다.
+- 원인: `contracts.md`와 `mongo_collections.md`는 final envelope 예시를 제공하지만, Phase 3A의 reduced rebuild model과 archive-after-stale gap을 잇는 첫 slice 선택은 아직 승인되지 않았다.
+- Resolution: `docs/plans/03-index-sync-outbox-decisions.md`를 추가해 archive events + Mongo `index_sync_logs` pending outbox entry를 첫 추천안으로 분리했다.
+- Outcome: 다음 code slice는 owner가 이 브리프를 승인/수정한 뒤 archive API outbox entry 생성과 idempotency 회귀로 작게 시작할 수 있다.
+
 ## Decisions
 
 - Phase 3A 추천안은 fake embedding/fake vector adapter로 계약과 idempotency/stale semantics를 먼저 잠그는 방향이다.
@@ -194,6 +208,7 @@
 - 테스트용 compose 컨테이너는 사용자 요청에 따라 내리지 않았다.
 - Phase 3A 다음 작은 slice는 persistent backend 도입보다 deployed rebuild smoke를 먼저 추가하는 쪽을 선택했다. 이유: 현재 수용 기준의 "MongoDB만으로 프로젝트 인덱스를 완전히 재생성"을 새 인프라 없이 검증할 수 있고, Chroma/embedding 선택은 아직 계약상 미확정이기 때문이다.
 - Phase 3A archive 후 stale event는 automatic sync/outbox 대신 hit validation guard를 먼저 추가하는 쪽을 선택했다. 이유: 후속 검색/Context Gate가 사용할 안전장치를 열면서도, 기존 "explicit rebuild metadata 기준 query filter" 계약과 충돌하지 않기 때문이다.
+- Phase 3B automatic sync/outbox는 persistent backend보다 계약 브리프를 먼저 작성했다. 추천안은 archive events를 첫 automatic source로 삼고, inline adapter 호출/외부 queue 없이 Mongo `index_sync_logs` pending outbox entry만 생성하는 것이다. 아직 owner-approved contract가 아니므로 SoT는 올리지 않았다.
 
 ## Verification
 
@@ -247,9 +262,12 @@
 - Phase 3A stale validation compile: `python3 -m py_compile services/application/app/indexing/models.py services/application/app/indexing/service.py tests/test_indexing_phase3a.py` — 통과.
 - Phase 3A stale validation focused regression: `python3 -m unittest tests.test_indexing_phase3a -v` — 11개 통과.
 - Phase 3A stale validation verification follow-up: 문서 명확화만 수행. `git diff --check` — 통과.
+- Phase 3B sync/outbox decision brief links: `docs/plans/03-index-sync-outbox-decisions.md`가 참조하는 `../system-contract-sot.md`, `03-indexing.md`, `03-indexing-kickoff-decisions.md` 존재 확인.
+- Phase 3B sync/outbox decision brief diff hygiene: `git diff --check` — 통과.
 
 ## Next steps
 
-- Persistent Chroma-like adapter를 붙일지 결정한다.
-- Archive 후 파생 index automatic sync/outbox 이벤트를 별도 slice로 다룰지 결정한다.
+- `docs/plans/03-index-sync-outbox-decisions.md`의 Phase 3B automatic sync/outbox 추천안을 owner가 승인/수정한다.
+- 승인되면 archive 후 Mongo `index_sync_logs` pending outbox entry 생성과 idempotency 회귀를 첫 code slice로 구현한다.
+- Persistent Chroma-like adapter는 automatic sync/outbox 계약 승인 뒤 재검토한다.
 - `/v1/generate-structured`는 repair 후 malformed JSON 비율이나 latency가 운영상 문제로 확인될 때 별도 Gateway slice로 검토한다.
