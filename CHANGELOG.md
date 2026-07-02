@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-07-02 | Phase 2A deployed E2E smoke 추가 및 compose Application→Gateway wiring 보강 | [work log](docs/daily_logs/2026-07-02/work_log.md) |
 | 2026-07-01 | SoT v1.6.19: Phase 2A source_ref catalog anchor repair 보강 | [work log](docs/daily_logs/2026-07-01/work_log.md) |
 | 2026-07-01 | SoT v1.6.18: Phase 2A source_ref catalog HTTP API 추가 | [work log](docs/daily_logs/2026-07-01/work_log.md) |
 | 2026-07-01 | SoT v1.6.17: Phase 2A Application-side JSON repair retry 추가 | [work log](docs/daily_logs/2026-07-01/work_log.md) |
@@ -50,6 +51,17 @@
 | 2026-06-25 | AgentLoopRunner A3 decision 합성 회귀 구현 | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-25 | AgentLoopRunner A2 registry 계약 회귀 구현 | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-24 | 개발 계획 문서 구조 도입 | [work log](docs/daily_logs/2026-06-24/work_log.md) |
+
+## 2026-07-02
+
+### Added
+
+- Phase 2A 배포형 E2E smoke 스크립트를 추가했다. `scripts/phase2a_deployed_e2e_smoke.py`는 이미 실행 중인 Application HTTP endpoint를 대상으로 project/draft/version 저장, source_ref catalog 준비, analysis job run, candidate read-back을 수행한다.
+- Compose runtime에서 Application이 Gateway 컨테이너를 실제 네트워크로 호출하도록 `LLM_GATEWAY_BASE_URL=http://gateway:8001` 기본 env를 추가했다. Host port는 `APPLICATION_PORT`/`GATEWAY_PORT`/`MONGO_PORT`로 override 가능해 로컬 포트 충돌을 피할 수 있다.
+
+### Verified
+
+- 실제 compose stack과 llama.cpp endpoint `http://192.168.1.29:9080`로 배포형 E2E를 실행해 `run_http_status=200`, final job `succeeded`, candidates 3개를 확인했다. 모델 처리 속도를 고려해 `LLAMA_TIMEOUT_SECONDS=900` 및 smoke client timeout 1000초로 리턴 시그널을 기다렸다.
 
 ## 2026-07-01
 
