@@ -1,7 +1,7 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`  
-계약 버전: `v1.6.21`
+계약 버전: `v1.6.22`
 승인일: `2026-06-26`  
 최근 갱신일: `2026-07-02`
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
@@ -33,6 +33,7 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.6.22 | 2026-07-02 | Phase 3A explicit source-block index rebuild script를 추가했다. `scripts/phase3a_rebuild_source_block_index.py --project-id ... --snapshot-id ...`는 `CORE_SOT_MONGO_URI` 또는 `--mongo-uri`로 Core SOT MongoDB를 읽고 deterministic fake vector adapter로 rebuild를 실행한 뒤 JSON summary(`project_id`, `snapshot_id`, `target`, `records_attempted`, `records_written`, `records_indexed`, `records_query_visible`, `records_archived`)를 출력한다. Exit code는 full write 성공 0, partial write 1, usage/config/domain error 2다. Application HTTP API endpoint와 persistent vector backend는 후속이다. | `tests/test_phase3a_rebuild_source_block_index_script.py` |
 | v1.6.21 | 2026-07-02 | Phase 3A source block indexing 독립 검증 후속 보강을 반영했다. Phase 3A `IndexSyncRequest(project_id, snapshot_id, target)`와 `IndexSyncResult(request, records_attempted, records_written)`는 explicit rebuild용 in-process 축소 계약이며, `contracts.md` §7.3의 persistent sync log/outbox envelope(`sync_result_id`, `sync_request_id`, target별 결과, timestamps)는 후속 sync log slice 전까지 구현 대상이 아니다. Archived project/draft query exclusion은 explicit rebuild가 materialize한 record metadata 기준으로 적용되며, archive 이후 stale record를 즉시 숨기려면 재build 또는 후속 automatic sync가 필요하다. Draft-only archive 제외 분기는 회귀로 잠갔다. | `docs/verifications/2026-07-02/phase3a_source_block_index.md`, `tests/test_indexing_phase3a.py` |
 | v1.6.20 | 2026-07-02 | Phase 3A source block indexing 첫 slice를 승인·구현했다. 첫 index target은 Core SOT source block only, backend는 Chroma-like vector contract with deterministic fake adapter, embedding은 fake provider only, delivery는 explicit snapshot rebuild, archive/delete 반영은 status/version filter다. Index record는 `project_id`, collection, document/block id, version id, content hash를 가진 Mongo pointer를 포함하며, archived project/draft record는 query 결과에서 제외한다. Adapter failure는 Core SOT save를 rollback하지 않는다. | 사용자 승인, `plans/03-indexing-kickoff-decisions.md`, `tests/test_indexing_phase3a.py` |
 | v1.6.19 | 2026-07-01 | Phase 2A repair retry가 valid JSON이지만 source_ref catalog anchor literal을 보존하지 못한 출력도 1회 repair 대상으로 삼도록 보강했다. Adapter는 parsed candidate의 `source_ref_id`, span, quote, content_hash를 입력 catalog와 대조하고 mismatch가 있으면 parser/schema repair와 같은 prompt 경로로 재호출한다. repair 후에도 catalog mismatch가 남으면 성공으로 보정하지 않고 기존 runner/source validation 경계가 `source_invalid`를 보존한다. | `tests/test_analysis_extractor_schema.py`, `scripts/phase2a_provider_live_smoke.py` |
@@ -67,7 +68,7 @@
 
 | 문서 | 역할 | 지위 |
 |---|---|---|
-| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.21 |
+| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.22 |
 | [`plans/README.md`](plans/README.md) | 계획 문서 진입점과 Phase/MVP 관계 | Draft |
 | [`plans/00-foundations.md`](plans/00-foundations.md) | 전역 원칙과 제품 경계 | Draft |
 | [`plans/implementation-plan.md`](plans/implementation-plan.md) | 구현 순서, slice 상태, 검증 gate | Draft |
@@ -348,6 +349,7 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 - ChromaDB와 Elasticsearch는 MongoDB pointer/version/status를 가진 파생 인덱스다.
 - index hit는 SOT 재조회 전까지 정본이 아니다.
 - Phase 3A 첫 slice는 Core SOT source block only를 Chroma-like vector contract에 색인한다. `IndexPointer`는 `project_id`, Mongo collection/document id, version id, content hash를 가진다. `IndexSyncRequest(project_id, snapshot_id, target)`와 `IndexSyncResult(request, records_attempted, records_written)`는 explicit rebuild용 in-process 축소 계약이다. `contracts.md` §7.3의 persistent sync log/outbox envelope(`sync_result_id`, `sync_request_id`, target별 결과, timestamps)는 후속 sync log slice 전까지 구현 대상이 아니다. Embedding은 deterministic fake provider만 사용하고 실제 embedding model/dimension은 후속 quality spike 뒤 확정한다. Sync delivery는 explicit snapshot rebuild only이며 자동 outbox/polling은 후속이다. Archive/delete 반영은 hard delete가 아니라 explicit rebuild가 materialize한 `project_archived`/`draft_archived` metadata status filter로 query 결과에서 제외한다. Archive 이후 기존 stale record를 즉시 숨기려면 재build 또는 후속 automatic sync가 필요하다. Adapter failure는 MongoDB/Core SOT 저장 결과를 rollback하지 않는다.
+- Phase 3A는 `scripts/phase3a_rebuild_source_block_index.py`로 explicit rebuild를 실행할 수 있다. 이 script는 `--project-id`, `--snapshot-id`, `CORE_SOT_MONGO_URI`/`--mongo-uri`를 받아 Core SOT MongoDB에서 snapshot blocks를 읽고 current fake vector adapter에 rebuild한 뒤 JSON summary를 출력한다. JSON summary field는 `project_id`, `snapshot_id`, `target`, `records_attempted`, `records_written`, `records_indexed`, `records_query_visible`, `records_archived`다. Exit code는 full write 성공 0, partial write(`records_attempted != records_written`) 1, usage/config/domain error(no Mongo URI, missing snapshot 등) 2다. Application HTTP API endpoint와 persistent vector backend는 후속이다.
 - ES analyzer, 자동 sync 전달 방식, 실제 embedding model, analysis candidate indexing, 삭제 rebuild 정책은 미확정이다.
 
 ### Phase 4. Agentic Search

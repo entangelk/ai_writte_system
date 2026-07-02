@@ -35,6 +35,16 @@
 - F2 대응으로 draft-only archive 상태에서 query 결과가 제외되고 include_archived에서는 `draft_archived=True`, `project_archived=False`로 남는 회귀를 추가했다.
 - R1 대응으로 archive/status filter는 rebuild가 materialize한 metadata 기준이고, archive 이후 기존 stale record를 즉시 숨기려면 재build 또는 후속 automatic sync가 필요하다고 SoT/plan/HANDOFF에 명확화했다.
 
+### Phase 3A explicit rebuild script 추가
+
+- 변경 파일: `scripts/phase3a_rebuild_source_block_index.py`, `tests/test_phase3a_rebuild_source_block_index_script.py`, `docs/system-contract-sot.md`, `docs/plans/03-indexing-kickoff-decisions.md`, `docs/plans/03-indexing.md`, `HANDOFF.md`, `CHANGELOG.md`, `docs/daily_logs/2026-07-02/work_log.md`.
+- `scripts/phase3a_rebuild_source_block_index.py`를 추가했다. `--project-id`, `--snapshot-id`, `CORE_SOT_MONGO_URI`/`--mongo-uri`를 받아 Core SOT MongoDB에서 snapshot blocks를 읽고 deterministic fake vector adapter로 explicit rebuild를 실행한다.
+- 출력은 JSON summary로 제한했다: `project_id`, `snapshot_id`, `target`, `records_attempted`, `records_written`, `records_indexed`, `records_query_visible`, `records_archived`.
+- Exit code는 full write 성공 0, partial write 1, usage/config/domain error 2다.
+- Mongo URI 누락은 usage/config error(exit 2)로 표면화한다.
+- SoT를 v1.6.22로 올려 CLI surface와 persistent vector backend/API endpoint가 후속임을 명시했다.
+- 독립 검증 `docs/verifications/2026-07-02/phase3a_rebuild_script.md`의 합격 판정 후 비블로킹 권고 O1/O2를 반영해 exit code 계약을 SoT/plan/HANDOFF에 추가하고, `main()` partial write exit 1 회귀를 추가했다.
+
 ### Phase 2A deployed E2E smoke 추가
 
 - 변경 파일: `scripts/phase2a_deployed_e2e_smoke.py`, `tests/test_phase2a_deployed_e2e_smoke_script.py`, `docker-compose.yml`, `HANDOFF.md`, `CHANGELOG.md`, `docs/daily_logs/2026-07-02/work_log.md`.
@@ -65,6 +75,11 @@
 - Resolution: draft만 archive한 뒤 default query 0건, include_archived 2건, `draft_archived=True`, `project_archived=False`를 단언하는 회귀를 추가했다.
 - Outcome: F2 미잠금 분기를 닫았다.
 
+- 문제: Phase 3A indexing service가 domain service로만 있어 수동 rebuild entrypoint가 없었다.
+- 원인: 첫 slice는 public Application API와 script 노출을 후속으로 남겼다.
+- Resolution: HTTP endpoint보다 작은 CLI script를 먼저 추가해 explicit rebuild를 Mongo Core SOT + fake vector adapter JSON summary로 실행하게 했다.
+- Outcome: 운영/디버그용 수동 rebuild 표면이 생겼고, HTTP endpoint 및 persistent vector backend는 후속 결정으로 남았다.
+
 - 문제: 첫 compose up에서 `8001` host port가 이미 `agent-memory-chroma`에 점유돼 Gateway 컨테이너가 시작하지 못했다.
 - 원인: compose가 `8001:8001`을 고정 publish하고 있었다.
 - Resolution: host port를 env override 가능하게 바꿨고, 실제 smoke는 `APPLICATION_PORT=8010`, `GATEWAY_PORT=8011`, `MONGO_PORT=27029`로 실행했다.
@@ -86,6 +101,8 @@
 - 사용자 요청으로 Phase 3A 추천안의 첫 코드 slice를 진행했다. 실제 embedding model, ChromaDB adapter, Elasticsearch adapter, automatic sync/outbox는 계속 후속 결정으로 남긴다.
 - 독립 검증 F1은 생략 문서화가 아니라 작은 `IndexSyncRequest` 모델 추가와 SoT v1.6.21 명확화로 닫았다. 이유: 승인된 slice 산출물과 맞고, full sync log/outbox 구현을 추측하지 않으면서도 다음 worker가 §7.3과 혼동하지 않게 한다.
 - Archive/status filter는 live query guarantee가 아니라 explicit rebuild가 capture한 metadata 기준으로 명시했다. 즉 archive 이후 즉시 검색 노출을 막는 자동 sync는 후속 결정이다.
+- Phase 3A 노출 표면은 Application HTTP API보다 CLI script를 먼저 선택했다. 이유: 현재 backend가 in-memory fake adapter라 HTTP endpoint를 열면 persistent index처럼 오해될 수 있고, script는 explicit rebuild 계약과 summary shape만 작게 잠글 수 있다.
+- Phase 3A rebuild script 검증 권고 중 DEFAULT Mongo DB literal 중복은 그대로 두었다. 이유: `mongo_repository.DEFAULT_DB_NAME`을 top-level import하면 script `--help`와 unit path가 pymongo import에 더 빨리 결합될 수 있어, 현재의 lazy Mongo import 경계를 유지하는 편이 더 작고 안전하다.
 - 배포형 Phase 2A smoke는 ASGITransport가 아니라 실제 Application/Gateway 프로세스 네트워크 경로를 확인하는 별도 스크립트로 유지한다. 이유: 기존 live smoke는 같은 프로세스 내 ASGI 조립이라 container DNS, compose env, process boundary를 검증하지 못한다.
 - 사용자 지적에 따라 실제 모델 smoke는 240초 같은 짧은 timeout으로 조급하게 실패 판정하지 않고, 모델 처리 속도를 고려해 충분한 timeout을 둔 뒤 리턴 시그널을 기다린다.
 - 테스트용 compose 컨테이너는 사용자 요청에 따라 내리지 않았다.
@@ -103,6 +120,11 @@
 - Phase 3A verification follow-up broader regression: `python3 -m unittest tests.test_indexing_phase3a tests.test_core_sot -v` — 33개 통과.
 - Final full regression after Phase 3A verification follow-up: `python3 -m unittest discover tests -v` — 366개 통과(37 skip).
 - Final diff hygiene after Phase 3A verification follow-up: `git diff --check` — 통과.
+- Phase 3A rebuild script compile: `python3 -m py_compile scripts/phase3a_rebuild_source_block_index.py tests/test_phase3a_rebuild_source_block_index_script.py` — 통과.
+- Phase 3A rebuild script focused regression: `python3 -m unittest tests.test_phase3a_rebuild_source_block_index_script -v` — 6개 통과.
+- Phase 3A rebuild script broader regression: `python3 -m unittest tests.test_phase3a_rebuild_source_block_index_script tests.test_indexing_phase3a tests.test_core_sot -v` — 39개 통과.
+- Final full regression after Phase 3A rebuild script: `python3 -m unittest discover tests -v` — 372개 통과(37 skip).
+- Final diff hygiene after Phase 3A rebuild script: `git diff --check` — 통과.
 - Compile: `python3 -m py_compile scripts/phase2a_deployed_e2e_smoke.py tests/test_phase2a_deployed_e2e_smoke_script.py` — 통과.
 - Focused smoke script regression: `python3 -m unittest tests.test_phase2a_deployed_e2e_smoke_script -v` — 4개 통과.
 - Focused broader regression: `python3 -m unittest tests.test_phase2a_deployed_e2e_smoke_script tests.test_application_api tests.test_analysis_gateway_provider -v` — 54개 통과.

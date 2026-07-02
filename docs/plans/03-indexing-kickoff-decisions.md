@@ -102,3 +102,7 @@
 `IndexSyncRequest`/`IndexSyncResult`는 Phase 3A explicit rebuild용 in-process 축소 계약이다. `contracts.md` §7.3의 persistent sync log/outbox envelope(`sync_result_id`, `sync_request_id`, target별 결과, timestamps)는 후속 sync log slice에서 다룬다. Archive/delete status filter는 rebuild가 materialize한 `project_archived`/`draft_archived` metadata 기준으로 적용되며, archive 이후 기존 stale record를 즉시 숨기려면 재build 또는 후속 automatic sync가 필요하다.
 
 실제 embedding model, Elasticsearch analyzer, automatic sync/outbox, analysis candidate indexing은 후속 결정으로 남긴다.
+
+## 구현 후속 — explicit rebuild script
+
+2026-07-02 Phase 3A 후속 작은 slice로 `scripts/phase3a_rebuild_source_block_index.py`를 추가했다. 이 script는 `--project-id`, `--snapshot-id`, `CORE_SOT_MONGO_URI`/`--mongo-uri`를 받아 Core SOT MongoDB에서 snapshot blocks를 읽고 deterministic fake vector adapter로 explicit rebuild를 실행한다. 출력은 JSON summary(`project_id`, `snapshot_id`, `target`, `records_attempted`, `records_written`, `records_indexed`, `records_query_visible`, `records_archived`)다. Exit code는 full write 성공 0, partial write 1, usage/config/domain error 2다. Application HTTP API endpoint와 persistent vector backend는 후속이다.
