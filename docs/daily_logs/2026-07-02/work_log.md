@@ -95,6 +95,13 @@
 - 이 helper는 existing vector hit를 자동 삭제하거나 자동 숨김 처리하지 않는다. Query/Context Gate 계층이 hit 사용 전에 호출하는 explicit guard이며, automatic sync/outbox는 후속으로 남겼다.
 - 정상 live record, archive 후 project/draft stale, pointer/hash/block drift, missing snapshot을 회귀로 잠갔다.
 
+### Phase 3A source-block stale validation 검증 확인 후 문서 명확화
+
+- 변경 파일: `docs/system-contract-sot.md`, `docs/plans/03-indexing.md`, `HANDOFF.md`, `docs/daily_logs/2026-07-02/work_log.md`.
+- 독립 검증 `docs/verifications/2026-07-02/phase3a_stale_validation.md`의 합격 판정과 비블로킹 관찰을 확인했다.
+- 코드 변경은 하지 않았다. Boundary matrix가 이미 채워져 있고, 추가 회귀가 필요한 blocking 사유는 없었다.
+- 비블로킹 관찰 중 다음 작업자에게 의미가 될 수 있는 부분만 SoT/plan에 명확화했다: `snapshot_missing`은 단독 reason으로 short-circuit하고, `draft_archived`는 조회된 snapshot의 owning draft 기준이며, drift 판정은 `version_id`가 아니라 `content_hash`와 draft/block pointer 정합성 기준이다.
+
 ## Issues found
 
 - 문제: 다음 코드 슬라이스 후보 대부분이 계약 미확정에 막혀 있었다.
@@ -167,6 +174,11 @@
 - Resolution: index record 사용 전 Core SOT를 재조회하는 `validate_source_block_record()` guard를 추가했다.
 - Outcome: automatic sync를 추측하지 않고도 Context Gate/search 계층이 stale hit를 사용하지 않도록 판정할 수 있다.
 
+- 문제: 독립 검증에서 stale validation의 몇몇 semantics가 spec-silent 관찰로 남았다.
+- 원인: 구현과 테스트는 명확하지만 SoT/plan prose에는 `snapshot_missing` short-circuit, current owning draft 기준, `content_hash` drift 기준이 직접 쓰여 있지 않았다.
+- Resolution: 코드 변경 없이 SoT/plan 문구를 명확화했다.
+- Outcome: 검증 합격 상태를 유지하면서 후속 query/Context Gate wiring 작업자가 같은 의미로 guard를 사용할 수 있다.
+
 ## Decisions
 
 - Phase 3A 추천안은 fake embedding/fake vector adapter로 계약과 idempotency/stale semantics를 먼저 잠그는 방향이다.
@@ -234,6 +246,7 @@
 - Final diff hygiene after verification follow-up: `git diff --check` — 통과.
 - Phase 3A stale validation compile: `python3 -m py_compile services/application/app/indexing/models.py services/application/app/indexing/service.py tests/test_indexing_phase3a.py` — 통과.
 - Phase 3A stale validation focused regression: `python3 -m unittest tests.test_indexing_phase3a -v` — 11개 통과.
+- Phase 3A stale validation verification follow-up: 문서 명확화만 수행. `git diff --check` — 통과.
 
 ## Next steps
 

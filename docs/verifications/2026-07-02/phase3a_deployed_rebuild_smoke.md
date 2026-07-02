@@ -114,6 +114,12 @@ boundary matrix(terminal_status의 should-fire 분기):
 조건(불합격 인자는 아님, boundary-matrix 규칙상 조건부):
 - smoke 자체 `terminal_status`의 partial-write 분기 2개(`http_complete` 단독, `cli_complete` 단독)가 untraced "should fire" 분기다. 이 잠금이 추가되거나 상류 공통 `terminal_status`로 통합되기 전까지는 full 합격으로 올리지 않는다. 현 fake adapter로는 partial write가 발생하지 않아 즉시 영향은 없으므로, 오너 판단으로 후속 보강으로 연기 가능하다(이 경우 조건은 "추가 보강 예정"으로 남김).
 
+> **Update (2026-07-02, 후속 slice `ed35ca8`/`3bce5d8` 검증 시 폐쇄 확인)** — 위 조건부 사유가 **폐쇄**됐다. commit `ed35ca8`에서 단독 회귀 2건이 추가됐고, `terminal_status` 본체는 불변이다:
+> - `test_terminal_status_rejects_http_partial_without_cli`: `http_complete=False` 단독(cli 없음) → False. Gap 1 폐쇄.
+> - `test_terminal_status_rejects_cli_partial_even_when_summaries_match`: `cli_complete=False` 단독(`summaries_match=True`) → False. Gap 2 폐쇄.
+>
+> deployed smoke 모듈 6→8, 전체 discover 381→388. 본 판정은 **full 합격으로 승격**된다. 폐쇄 재확인 상세는 `docs/verifications/2026-07-02/phase3a_stale_validation.md` §7.
+
 ## Outstanding items
 
 - 작업 tree는 uncommitted(`scripts/phase3a_deployed_rebuild_smoke.py`, `tests/test_phase3a_deployed_rebuild_smoke_script.py` untracked + 5 doc modified). 커밋·게시는 오너 승인 전이다.
