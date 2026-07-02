@@ -111,6 +111,20 @@
 - 새 브리프는 첫 automatic event source를 `project_archived`/`draft_archived` archive events로 추천하고, delivery는 inline adapter 호출이나 외부 queue가 아니라 Mongo `index_sync_logs` pending outbox entry로 시작하자고 제안한다.
 - SoT 버전은 올리지 않았다. 이유: 아직 owner-approved public contract가 아니라, archive API/outbox schema 구현 전에 승인 또는 수정을 받아야 하는 결정 브리프다.
 
+### Phase 3B automatic sync/outbox 브리프 검증 후 보강
+
+- 변경 파일: `docs/plans/03-index-sync-outbox-decisions.md`, `docs/plans/03-indexing.md`, `HANDOFF.md`, `CHANGELOG.md`, `docs/daily_logs/2026-07-02/work_log.md`.
+- 독립 검증 `docs/verifications/2026-07-02/phase3b_sync_outbox_brief.md`의 합격 판정과 승인 전 고려거리 5개를 확인했다.
+- 코드 변경은 하지 않았다. 브리프가 아직 owner-approved SoT/public contract가 아니므로 archive API wiring이나 persistent schema 구현도 하지 않았다.
+- 브리프에 승인 전 schema lock 섹션을 추가했다: `success` status literal 재사용, canonical `targets` shape, required `project_id`, `user_id` deferred/nullable 결정 필요, dedup key `(project_id, event, source.mongo_collection, source.mongo_id)`, §64 stale-hit job과 Phase 3A `content_hash` 기준의 긴장.
+- 오너 선택이 필요한 항목은 persistent log target shape이다. 추천은 canonical `targets.chroma` + `backend="in_memory_fake"`이며, `target="vector"`를 persistent literal로 유지하려면 SoT/§7.2/§7.3/§39에 reduced persistent target 예외를 올려야 한다.
+
+### Day-end handoff 선택사항 정리
+
+- 변경 파일: `HANDOFF.md`, `docs/daily_logs/2026-07-02/work_log.md`.
+- 사용자 요청에 따라 오늘 작업을 마감하기 전 오너가 선택해야 할 항목을 HANDOFF의 `Owner Decisions Needed` 섹션으로 분리했다.
+- 남긴 선택사항은 Phase 3B sync/outbox 브리프 승인 여부, persistent sync log target shape(`targets.chroma` 추천 vs `target="vector"` 예외), `user_id` nullable/deferred 여부다.
+
 ## Issues found
 
 - 문제: 다음 코드 슬라이스 후보 대부분이 계약 미확정에 막혀 있었다.
@@ -193,6 +207,11 @@
 - Resolution: `docs/plans/03-index-sync-outbox-decisions.md`를 추가해 archive events + Mongo `index_sync_logs` pending outbox entry를 첫 추천안으로 분리했다.
 - Outcome: 다음 code slice는 owner가 이 브리프를 승인/수정한 뒤 archive API outbox entry 생성과 idempotency 회귀로 작게 시작할 수 있다.
 
+- 문제: sync/outbox 브리프의 첫 code slice schema가 §39/§7.2/§7.3과 갈라질 수 있는 지점이 있었다.
+- 원인: 브리프 초안이 `succeeded` literal, reduced `target="vector"`, project/user scope, dedup key, §64 stale-hit job과 `content_hash` 기준의 관계를 충분히 명시하지 않았다.
+- Resolution: 브리프에 승인 전 schema lock 섹션을 추가하고, `success` literal 재사용과 canonical `targets` shape를 추천안으로 명시했다.
+- Outcome: 첫 code slice 전에 오너가 persistent target shape를 선택할 수 있고, 선택 없이 schema를 구현하지 않도록 문서가 막아준다.
+
 ## Decisions
 
 - Phase 3A 추천안은 fake embedding/fake vector adapter로 계약과 idempotency/stale semantics를 먼저 잠그는 방향이다.
@@ -209,6 +228,8 @@
 - Phase 3A 다음 작은 slice는 persistent backend 도입보다 deployed rebuild smoke를 먼저 추가하는 쪽을 선택했다. 이유: 현재 수용 기준의 "MongoDB만으로 프로젝트 인덱스를 완전히 재생성"을 새 인프라 없이 검증할 수 있고, Chroma/embedding 선택은 아직 계약상 미확정이기 때문이다.
 - Phase 3A archive 후 stale event는 automatic sync/outbox 대신 hit validation guard를 먼저 추가하는 쪽을 선택했다. 이유: 후속 검색/Context Gate가 사용할 안전장치를 열면서도, 기존 "explicit rebuild metadata 기준 query filter" 계약과 충돌하지 않기 때문이다.
 - Phase 3B automatic sync/outbox는 persistent backend보다 계약 브리프를 먼저 작성했다. 추천안은 archive events를 첫 automatic source로 삼고, inline adapter 호출/외부 queue 없이 Mongo `index_sync_logs` pending outbox entry만 생성하는 것이다. 아직 owner-approved contract가 아니므로 SoT는 올리지 않았다.
+- Phase 3B sync/outbox 검증 권고 중 status literal은 기존 §39/§7.3의 `success`를 재사용하는 쪽으로 브리프를 보강했다. 이유: `succeeded`를 새로 쓰면 정본 envelope와 조용히 갈라지기 때문이다.
+- Persistent outbox target shape는 오너 선택으로 남겼다. 추천은 canonical `targets.chroma` + `backend="in_memory_fake"`이고, Phase 3A reduced `target="vector"`를 persistent log에 쓰려면 SoT/§39 예외 승인이 필요하다.
 
 ## Verification
 
@@ -264,10 +285,12 @@
 - Phase 3A stale validation verification follow-up: 문서 명확화만 수행. `git diff --check` — 통과.
 - Phase 3B sync/outbox decision brief links: `docs/plans/03-index-sync-outbox-decisions.md`가 참조하는 `../system-contract-sot.md`, `03-indexing.md`, `03-indexing-kickoff-decisions.md` 존재 확인.
 - Phase 3B sync/outbox decision brief diff hygiene: `git diff --check` — 통과.
+- Phase 3B sync/outbox verification follow-up: 문서 보강만 수행. `git diff --check` — 통과.
+- Day-end handoff final diff hygiene: `git diff --check` — 통과.
 
 ## Next steps
 
 - `docs/plans/03-index-sync-outbox-decisions.md`의 Phase 3B automatic sync/outbox 추천안을 owner가 승인/수정한다.
-- 승인되면 archive 후 Mongo `index_sync_logs` pending outbox entry 생성과 idempotency 회귀를 첫 code slice로 구현한다.
+- 승인되면 archive 후 Mongo `index_sync_logs` pending outbox entry 생성과 idempotency 회귀를 첫 code slice로 구현한다. 승인 시 persistent target shape를 canonical `targets.chroma`로 할지, `target="vector"` 예외를 SoT에 올릴지 결정해야 한다.
 - Persistent Chroma-like adapter는 automatic sync/outbox 계약 승인 뒤 재검토한다.
 - `/v1/generate-structured`는 repair 후 malformed JSON 비율이나 latency가 운영상 문제로 확인될 때 별도 Gateway slice로 검토한다.

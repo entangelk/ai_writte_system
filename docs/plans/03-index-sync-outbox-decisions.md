@@ -10,6 +10,7 @@
 - Phase 3A public rebuild 표면은 CLI script와 HTTP command endpoint이며, 둘 다 deterministic fake vector adapter를 사용한다.
 - Phase 3A `IndexSyncRequest`/`IndexSyncResult`는 explicit rebuild용 in-process 축소 계약이다.
 - `contracts.md` §7.2~7.3과 `mongo_collections.md` §39의 persistent sync envelope는 후속 sync log/outbox slice 범위다.
+- `mongo_collections.md` §64는 stale hit 발견 시 context에서 제외하고 index sync job을 만든다고 적는다. 다만 §64는 `mongo_version` 기준 예시이고, Phase 3A source-block validator는 `content_hash`와 draft/block pointer 정합성 기준이므로, stale-hit 기반 sync job을 구현하기 전에 이 기준을 다시 맞춰야 한다.
 - `validate_source_block_record(record)`는 stale hit 사용 전 Core SOT를 재조회하는 guard이며, automatic sync나 queue 처리를 대신하지 않는다.
 
 ## 구현을 막는 미확정 항목
@@ -50,16 +51,44 @@
 | B. `index_sync_outbox` + `index_sync_logs` 분리 | queue와 history를 분리한다 | lifecycle이 명확함 | 새 collection/schema를 추가해야 한다 |
 | C. in-memory queue only | 테스트용 queue만 둔다 | 가장 작음 | restart/retry/운영 가시성 수용 기준을 못 잠근다 |
 
-추천: **A**. `index_sync_logs`는 이미 Mongo collection 목록에 있고 status index도 있다. 첫 slice는 status를 `pending|running|succeeded|failed`로 확장하는 계약 브리프/SoT 보강 뒤 구현한다.
+추천: **A**. `index_sync_logs`는 이미 Mongo collection 목록에 있고 status index도 있다. 첫 slice는 pending request와 completed result를 같은 document lifecycle로 다룰 수 있게 하되, 아래 schema lock을 승인받은 뒤 구현한다.
 
-## 4. 첫 구현 slice 제안
+## 4. 승인 전 schema lock
+
+첫 code slice 전에 아래 항목은 조용히 추측하지 않는다.
+
+1. status literal
+   - `contracts.md` §7.3과 `mongo_collections.md` §39의 완료 literal은 `success`다.
+   - 추천: terminal 성공은 기존 `success`를 재사용하고, lifecycle status는 `pending|running|success|failed`로 둔다.
+   - `succeeded`를 쓰려면 §7.3/§39/SoT를 함께 갱신해야 한다.
+2. target shape
+   - `contracts.md` §7.2는 request를 `targets: ["chroma", "elasticsearch"]` list로, §7.3/§39는 result/log를 `targets: {chroma: {...}, elasticsearch: {...}}` object로 표현한다.
+   - Phase 3A의 `target="vector"`는 explicit rebuild용 in-process 축소명이다.
+   - 추천: persistent `index_sync_logs`에는 `target: "vector"` 단수 field를 저장하지 않는다. 첫 pending outbox entry는 canonical envelope에 맞춰 `targets`를 쓰고, 실제 backend가 fake인 동안에는 `targets.chroma.status="pending"`과 별도 `backend="in_memory_fake"` 또는 equivalent field로 runtime backend를 드러낸다.
+   - 오너가 `vector`를 persistent target literal로 유지하려면 §7.2/§7.3/§39와 SoT에 reduced persistent target 예외를 명시해야 한다.
+3. project/user scope
+   - `project_id`는 필수다. §39 index와 project isolation 수용 기준, outbox dedup 모두 `project_id`에 의존한다.
+   - `user_id`는 §39 예시에 있지만 현재 Core SOT/API 흐름에는 user model이 아직 없으므로 첫 slice에서는 `user_id`를 명시적으로 deferred/nullable로 둘지 결정해야 한다. 조용히 생략하지 않는다.
+4. idempotency key
+   - 추천 dedup key: `(project_id, event, source.mongo_collection, source.mongo_id)`.
+   - `project_archived`의 source는 `projects/{project_id}`, `draft_archived`의 source는 `drafts/{draft_id}`다.
+   - 같은 archive endpoint를 반복 호출해도 같은 key의 pending entry가 하나만 남아야 한다.
+   - versioned content sync(`draft_saved`, stale-hit repair 등)를 추가할 때는 `mongo_version` 또는 `content_hash` 포함 여부를 별도 결정한다.
+5. stale-hit sync job
+   - `mongo_collections.md` §64의 stale-hit → sync job은 이 브리프의 option C에 해당한다.
+   - 이번 추천은 archive events를 먼저 다루며, §64 경로는 query/Context Gate wiring 이후 별도 slice로 둔다.
+   - 그때 §64의 `mongo_version` 기준과 Phase 3A source-block `content_hash` 기준을 SoT에서 reconcile한다.
+
+## 5. 첫 구현 slice 제안
 
 승인되면 다음 코드 slice는 아래로 제한한다.
 
 1. `IndexSyncEvent`/`IndexSyncLog` domain model 추가
    - event literal: `project_archived`, `draft_archived`
+   - `project_id`: required
+   - `user_id`: deferred/nullable until user ownership is modeled
    - source: `mongo_collection`, `mongo_id`, optional `mongo_version`
-   - target: `vector`
+   - targets: canonical `targets` shape; first recommended logical target is `chroma` with `backend="in_memory_fake"` while the fake vector adapter is still in use
    - status: `pending`
 2. `CoreSotService.archive_project()`와 `archive_draft()` 성공 후 outbox entry 생성
    - outbox write 실패는 archive write rollback 여부를 명시한 뒤 구현한다.
@@ -70,8 +99,9 @@
    - project archive creates one pending `project_archived` sync log
    - draft archive creates one pending `draft_archived` sync log
    - repeated archive is idempotent with respect to outbox event
+   - dedup key is `(project_id, event, source.mongo_collection, source.mongo_id)`
    - archive read preservation remains unchanged
-   - outbox target is `vector`, not real Chroma/ES
+   - outbox uses canonical `targets` shape and does not silently persist Phase 3A's reduced `target="vector"` field
 
 ## 승인 전 보류
 

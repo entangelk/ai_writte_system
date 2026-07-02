@@ -64,6 +64,7 @@
 ### Changed
 
 - Phase 3B automatic sync/outbox 결정 브리프를 추가했다. 추천안은 archive events(`project_archived`, `draft_archived`)를 첫 automatic source로 삼고, inline adapter 호출/외부 queue 대신 Mongo `index_sync_logs` pending outbox entry를 먼저 생성하는 방향이다. 아직 owner-approved SoT/public contract가 아니므로 code slice는 승인 후 진행한다.
+- Phase 3B automatic sync/outbox 결정 브리프 검증 권고를 반영했다. 승인 전 schema lock 항목으로 기존 `success` literal 재사용, canonical `targets` shape, required `project_id`, outbox dedup key, §64 stale-hit job과 Phase 3A `content_hash` 기준의 긴장을 명시했다.
 - SoT를 v1.6.24로 갱신해 Phase 3A source-block index hit stale validation을 추가했다. `validate_source_block_record(record)`는 Core SOT 정본을 재조회해 `project_archived`, `draft_archived`, `snapshot_missing`, `draft_mismatch`, `content_hash_mismatch`, `block_missing` reason으로 hit 사용 가능 여부를 판정한다. 이 guard는 automatic sync가 아니라 query/Context Gate 계층이 hit 사용 전에 호출하는 방어선이다.
 - SoT를 v1.6.23으로 갱신해 Phase 3A explicit rebuild HTTP API를 추가했다. `POST /projects/{project_id}/snapshots/{snapshot_id}/index/source-blocks/rebuild`는 deterministic fake vector adapter rebuild summary를 반환하며 `backend`는 `in_memory_fake`다. Persistent vector backend와 automatic sync는 후속이다.
 - SoT를 v1.6.22로 갱신해 Phase 3A explicit rebuild script 계약을 추가했다. `scripts/phase3a_rebuild_source_block_index.py`는 `project_id + snapshot_id`를 받아 Core SOT MongoDB에서 source blocks를 읽고 deterministic fake vector adapter rebuild summary를 JSON으로 출력한다. Exit code는 full write 성공 0, partial write 1, usage/config/domain error 2다. Application HTTP API endpoint와 persistent vector backend는 후속이다.
