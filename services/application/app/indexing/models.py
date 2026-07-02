@@ -14,6 +14,15 @@ class IndexSyncTarget(StrEnum):
     VECTOR = "vector"
 
 
+class IndexStaleReason(StrEnum):
+    PROJECT_ARCHIVED = "project_archived"
+    DRAFT_ARCHIVED = "draft_archived"
+    SNAPSHOT_MISSING = "snapshot_missing"
+    DRAFT_MISMATCH = "draft_mismatch"
+    CONTENT_HASH_MISMATCH = "content_hash_mismatch"
+    BLOCK_MISSING = "block_missing"
+
+
 @dataclass(frozen=True, slots=True)
 class IndexSyncRequest:
     project_id: str
@@ -50,3 +59,10 @@ class IndexSyncResult:
     request: IndexSyncRequest
     records_attempted: int
     records_written: int
+
+
+@dataclass(frozen=True, slots=True)
+class IndexRecordValidation:
+    record_id: str
+    usable: bool
+    stale_reasons: tuple[IndexStaleReason, ...]

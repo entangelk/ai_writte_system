@@ -6,10 +6,12 @@ from dataclasses import dataclass
 import hashlib
 from typing import Protocol
 
-from services.application.app.core_sot.service import CoreSotService
+from services.application.app.core_sot.service import CoreSotService, NotFound
 from services.application.app.indexing.models import (
     IndexPointer,
     IndexRecordKind,
+    IndexRecordValidation,
+    IndexStaleReason,
     IndexSyncRequest,
     IndexSyncResult,
     IndexSyncTarget,
@@ -177,6 +179,44 @@ class SourceBlockIndexingService:
             request=request,
             records_attempted=len(records),
             records_written=written,
+        )
+
+    def validate_source_block_record(
+        self, record: SourceBlockIndexRecord
+    ) -> IndexRecordValidation:
+        reasons: list[IndexStaleReason] = []
+        project_id = record.pointer.project_id
+        try:
+            detail = self._core_sot.get_snapshot(
+                project_id=project_id,
+                snapshot_id=record.snapshot_id,
+            )
+        except NotFound:
+            return IndexRecordValidation(
+                record_id=record.id,
+                usable=False,
+                stale_reasons=(IndexStaleReason.SNAPSHOT_MISSING,),
+            )
+
+        project = self._core_sot.get_project(project_id=project_id)
+        draft = self._core_sot.get_draft(
+            project_id=project_id,
+            draft_id=detail.snapshot.draft_id,
+        )
+        if project.archived:
+            reasons.append(IndexStaleReason.PROJECT_ARCHIVED)
+        if draft.archived:
+            reasons.append(IndexStaleReason.DRAFT_ARCHIVED)
+        if record.draft_id != detail.snapshot.draft_id:
+            reasons.append(IndexStaleReason.DRAFT_MISMATCH)
+        if record.pointer.content_hash != detail.snapshot.content_hash:
+            reasons.append(IndexStaleReason.CONTENT_HASH_MISMATCH)
+        if record.block_id not in {block.id for block in detail.blocks}:
+            reasons.append(IndexStaleReason.BLOCK_MISSING)
+        return IndexRecordValidation(
+            record_id=record.id,
+            usable=not reasons,
+            stale_reasons=tuple(reasons),
         )
 
     def _record_for_block(

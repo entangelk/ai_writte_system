@@ -1,12 +1,17 @@
 """Phase 3A source block indexing contract tests."""
 
+from dataclasses import replace
 import unittest
 
 from services.application.app.core_sot.service import (
     CoreSotService,
     InMemoryCoreSotRepository,
 )
-from services.application.app.indexing.models import IndexRecordKind, IndexSyncTarget
+from services.application.app.indexing.models import (
+    IndexRecordKind,
+    IndexStaleReason,
+    IndexSyncTarget,
+)
 from services.application.app.indexing.service import (
     DeterministicFakeEmbeddingProvider,
     InMemoryVectorIndexAdapter,
@@ -136,6 +141,96 @@ class SourceBlockIndexingServiceTest(unittest.TestCase):
         )
         self.assertEqual(detail.snapshot.content_hash, saved["content_hash"])
         self.assertEqual(len(detail.blocks), 2)
+
+    def test_validate_source_block_record_accepts_current_live_record(self):
+        _core_sot, index, service, saved = _fixture()
+        service.rebuild_snapshot_source_block_index(
+            project_id=saved["project_id"], snapshot_id=saved["snapshot_id"]
+        )
+        record = index.list_records(project_id=saved["project_id"])[0]
+
+        validation = service.validate_source_block_record(record)
+
+        self.assertTrue(validation.usable)
+        self.assertEqual(validation.record_id, record.id)
+        self.assertEqual(validation.stale_reasons, ())
+
+    def test_validate_source_block_record_detects_archive_after_rebuild(self):
+        core_sot, index, service, saved = _fixture()
+        service.rebuild_snapshot_source_block_index(
+            project_id=saved["project_id"], snapshot_id=saved["snapshot_id"]
+        )
+        record = index.list_records(project_id=saved["project_id"])[0]
+        core_sot.archive_project(project_id=saved["project_id"])
+
+        validation = service.validate_source_block_record(record)
+
+        self.assertFalse(validation.usable)
+        self.assertEqual(
+            validation.stale_reasons,
+            (IndexStaleReason.PROJECT_ARCHIVED,),
+        )
+
+    def test_validate_source_block_record_detects_draft_archive_after_rebuild(self):
+        core_sot, index, service, saved = _fixture()
+        service.rebuild_snapshot_source_block_index(
+            project_id=saved["project_id"], snapshot_id=saved["snapshot_id"]
+        )
+        record = index.list_records(project_id=saved["project_id"])[0]
+        core_sot.archive_draft(
+            project_id=saved["project_id"], draft_id=saved["draft_id"]
+        )
+
+        validation = service.validate_source_block_record(record)
+
+        self.assertFalse(validation.usable)
+        self.assertEqual(
+            validation.stale_reasons,
+            (IndexStaleReason.DRAFT_ARCHIVED,),
+        )
+
+    def test_validate_source_block_record_detects_pointer_drift(self):
+        _core_sot, index, service, saved = _fixture()
+        service.rebuild_snapshot_source_block_index(
+            project_id=saved["project_id"], snapshot_id=saved["snapshot_id"]
+        )
+        record = index.list_records(project_id=saved["project_id"])[0]
+
+        validation = service.validate_source_block_record(
+            replace(
+                record,
+                draft_id="other-draft",
+                block_id="missing-block",
+                pointer=replace(record.pointer, content_hash="wrong-hash"),
+            )
+        )
+
+        self.assertFalse(validation.usable)
+        self.assertEqual(
+            validation.stale_reasons,
+            (
+                IndexStaleReason.DRAFT_MISMATCH,
+                IndexStaleReason.CONTENT_HASH_MISMATCH,
+                IndexStaleReason.BLOCK_MISSING,
+            ),
+        )
+
+    def test_validate_source_block_record_detects_missing_snapshot(self):
+        _core_sot, index, service, saved = _fixture()
+        service.rebuild_snapshot_source_block_index(
+            project_id=saved["project_id"], snapshot_id=saved["snapshot_id"]
+        )
+        record = index.list_records(project_id=saved["project_id"])[0]
+
+        validation = service.validate_source_block_record(
+            replace(record, snapshot_id="missing-snapshot")
+        )
+
+        self.assertFalse(validation.usable)
+        self.assertEqual(
+            validation.stale_reasons,
+            (IndexStaleReason.SNAPSHOT_MISSING,),
+        )
 
 
 def _fixture(*, project_name="Novel"):

@@ -6,6 +6,7 @@
 - Phase 2A 전체 배포형 E2E를 Application/Gateway 실제 프로세스 네트워크 경로로 확인한다.
 - 배포형 E2E smoke를 재현 가능한 스크립트와 회귀로 남긴다.
 - Phase 3A explicit rebuild의 HTTP/CLI public 표면을 live Mongo runtime에서 재현 가능한 smoke로 묶는다.
+- Phase 3A source-block hit stale validation을 추가한다.
 
 ## Completed work
 
@@ -83,6 +84,17 @@
 - `test_terminal_status_rejects_cli_partial_even_when_summaries_match`를 추가해 CLI partial write가 summary mismatch와 무관하게 실패 조건임을 잠갔다.
 - 코드 변경 없이 boundary matrix의 빈 칸만 회귀로 채웠다.
 
+### Phase 3A source-block stale validation 추가
+
+- 변경 파일: `services/application/app/indexing/models.py`, `services/application/app/indexing/service.py`, `tests/test_indexing_phase3a.py`, `docs/system-contract-sot.md`, `docs/plans/03-indexing.md`, `docs/plans/03-indexing-kickoff-decisions.md`, `HANDOFF.md`, `CHANGELOG.md`, `docs/daily_logs/2026-07-02/work_log.md`.
+- HANDOFF의 다음 후보 중 persistent Chroma-like adapter는 backend/dependency 선택이 아직 미확정이라 보류했다.
+- Archive 후 파생 index stale 이벤트는 자동 sync/outbox까지 가면 계약을 추측하게 되므로, 먼저 hit 사용 전 정본 재검증 guard를 추가했다.
+- `IndexStaleReason` literal 6종을 추가했다: `project_archived`, `draft_archived`, `snapshot_missing`, `draft_mismatch`, `content_hash_mismatch`, `block_missing`.
+- `IndexRecordValidation(record_id, usable, stale_reasons)`를 추가했다.
+- `SourceBlockIndexingService.validate_source_block_record(record)`가 Core SOT snapshot/project/draft/block/content_hash를 재조회해 stale 여부를 판정한다.
+- 이 helper는 existing vector hit를 자동 삭제하거나 자동 숨김 처리하지 않는다. Query/Context Gate 계층이 hit 사용 전에 호출하는 explicit guard이며, automatic sync/outbox는 후속으로 남겼다.
+- 정상 live record, archive 후 project/draft stale, pointer/hash/block drift, missing snapshot을 회귀로 잠갔다.
+
 ## Issues found
 
 - 문제: 다음 코드 슬라이스 후보 대부분이 계약 미확정에 막혀 있었다.
@@ -150,6 +162,11 @@
 - Resolution: HTTP partial 단독 실패 회귀와 CLI partial 단독 실패 회귀를 추가했다.
 - Outcome: 조건부 판정의 유일한 blocking 사유를 회귀로 폐쇄했다.
 
+- 문제: archive 후 기존 materialized index record는 explicit rebuild 전까지 old archived flags를 갖고 있어 query filter만으로는 stale hit를 검출하지 못한다.
+- 원인: Phase 3A 첫 slice는 rebuild 시점 metadata를 materialize하는 fake adapter이고, automatic sync/outbox는 아직 미확정이다.
+- Resolution: index record 사용 전 Core SOT를 재조회하는 `validate_source_block_record()` guard를 추가했다.
+- Outcome: automatic sync를 추측하지 않고도 Context Gate/search 계층이 stale hit를 사용하지 않도록 판정할 수 있다.
+
 ## Decisions
 
 - Phase 3A 추천안은 fake embedding/fake vector adapter로 계약과 idempotency/stale semantics를 먼저 잠그는 방향이다.
@@ -164,6 +181,7 @@
 - 사용자 지적에 따라 실제 모델 smoke는 240초 같은 짧은 timeout으로 조급하게 실패 판정하지 않고, 모델 처리 속도를 고려해 충분한 timeout을 둔 뒤 리턴 시그널을 기다린다.
 - 테스트용 compose 컨테이너는 사용자 요청에 따라 내리지 않았다.
 - Phase 3A 다음 작은 slice는 persistent backend 도입보다 deployed rebuild smoke를 먼저 추가하는 쪽을 선택했다. 이유: 현재 수용 기준의 "MongoDB만으로 프로젝트 인덱스를 완전히 재생성"을 새 인프라 없이 검증할 수 있고, Chroma/embedding 선택은 아직 계약상 미확정이기 때문이다.
+- Phase 3A archive 후 stale event는 automatic sync/outbox 대신 hit validation guard를 먼저 추가하는 쪽을 선택했다. 이유: 후속 검색/Context Gate가 사용할 안전장치를 열면서도, 기존 "explicit rebuild metadata 기준 query filter" 계약과 충돌하지 않기 때문이다.
 
 ## Verification
 
@@ -214,9 +232,11 @@
 - Final full regression after Phase 3A deployed rebuild smoke verification follow-up: `python3 -m unittest discover tests -v` — 383개 통과(37 skip).
 - Pattern sweep: `rg -n "def terminal_status|terminal_status\\(" scripts tests` — partial-write style terminal status는 Phase 3A rebuild script와 deployed rebuild smoke뿐이며, 둘 다 full/partial 회귀가 있다. Phase 2A deployed E2E smoke는 job terminal status(`succeeded|failed`) 성격이라 동일 root-cause가 아니다.
 - Final diff hygiene after verification follow-up: `git diff --check` — 통과.
+- Phase 3A stale validation compile: `python3 -m py_compile services/application/app/indexing/models.py services/application/app/indexing/service.py tests/test_indexing_phase3a.py` — 통과.
+- Phase 3A stale validation focused regression: `python3 -m unittest tests.test_indexing_phase3a -v` — 11개 통과.
 
 ## Next steps
 
 - Persistent Chroma-like adapter를 붙일지 결정한다.
-- Archive 후 파생 index stale 이벤트/automatic sync를 별도 회귀로 다룰지 결정한다.
+- Archive 후 파생 index automatic sync/outbox 이벤트를 별도 slice로 다룰지 결정한다.
 - `/v1/generate-structured`는 repair 후 malformed JSON 비율이나 latency가 운영상 문제로 확인될 때 별도 Gateway slice로 검토한다.

@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-07-02 | SoT v1.6.24: Phase 3A source-block stale validation 추가 | [work log](docs/daily_logs/2026-07-02/work_log.md) |
 | 2026-07-02 | Phase 3A deployed rebuild smoke 추가 | [work log](docs/daily_logs/2026-07-02/work_log.md) |
 | 2026-07-02 | SoT v1.6.23: Phase 3A explicit rebuild HTTP API 추가 | [work log](docs/daily_logs/2026-07-02/work_log.md) |
 | 2026-07-02 | SoT v1.6.22: Phase 3A explicit rebuild script 추가 | [work log](docs/daily_logs/2026-07-02/work_log.md) |
@@ -61,6 +62,7 @@
 
 ### Changed
 
+- SoT를 v1.6.24로 갱신해 Phase 3A source-block index hit stale validation을 추가했다. `validate_source_block_record(record)`는 Core SOT 정본을 재조회해 `project_archived`, `draft_archived`, `snapshot_missing`, `draft_mismatch`, `content_hash_mismatch`, `block_missing` reason으로 hit 사용 가능 여부를 판정한다. 이 guard는 automatic sync가 아니라 query/Context Gate 계층이 hit 사용 전에 호출하는 방어선이다.
 - SoT를 v1.6.23으로 갱신해 Phase 3A explicit rebuild HTTP API를 추가했다. `POST /projects/{project_id}/snapshots/{snapshot_id}/index/source-blocks/rebuild`는 deterministic fake vector adapter rebuild summary를 반환하며 `backend`는 `in_memory_fake`다. Persistent vector backend와 automatic sync는 후속이다.
 - SoT를 v1.6.22로 갱신해 Phase 3A explicit rebuild script 계약을 추가했다. `scripts/phase3a_rebuild_source_block_index.py`는 `project_id + snapshot_id`를 받아 Core SOT MongoDB에서 source blocks를 읽고 deterministic fake vector adapter rebuild summary를 JSON으로 출력한다. Exit code는 full write 성공 0, partial write 1, usage/config/domain error 2다. Application HTTP API endpoint와 persistent vector backend는 후속이다.
 - SoT를 v1.6.21로 갱신해 Phase 3A `IndexSyncRequest`/`IndexSyncResult` reduced shape와 `contracts.md` §7.3 persistent sync log/outbox envelope의 관계를 명시했다. 검증 F2 대응으로 draft-only archive query exclusion 회귀를 추가했고, archive/status filter가 explicit rebuild 시점 metadata 기준임을 명확화했다.

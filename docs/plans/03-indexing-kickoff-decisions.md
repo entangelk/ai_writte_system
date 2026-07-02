@@ -114,3 +114,7 @@
 ## 구현 후속 — deployed rebuild smoke
 
 2026-07-02 Phase 3A follow-up으로 `scripts/phase3a_deployed_rebuild_smoke.py`를 추가했다. 이 script는 이미 떠 있는 Application HTTP endpoint만 사용해 project/draft/version snapshot을 준비하고 HTTP rebuild endpoint를 실행한다. `--mongo-uri`가 주어지면 같은 snapshot을 CLI rebuild 경로로도 읽어 HTTP summary와 CLI summary의 핵심 count/pointer field가 일치하는지 비교한다. 이 smoke는 persistent vector backend를 추가하지 않고, 현재 fake vector adapter 기반 public rebuild 표면이 live Mongo runtime에서 재현 가능한지만 확인한다.
+
+## 구현 후속 — source-block stale validation
+
+2026-07-02 Phase 3A follow-up으로 `validate_source_block_record(record)`를 추가했다. 이 helper는 existing vector hit를 자동 삭제하거나 자동 숨김 처리하지 않고, Core SOT 정본을 재조회해 hit를 사용해도 되는지와 stale reason literal을 반환한다. Reason literal은 `project_archived`, `draft_archived`, `snapshot_missing`, `draft_mismatch`, `content_hash_mismatch`, `block_missing`이다. Archive 이후 stale record를 즉시 index query에서 숨기는 automatic sync/outbox는 여전히 후속이다.
