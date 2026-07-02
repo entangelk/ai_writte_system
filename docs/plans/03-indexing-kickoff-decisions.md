@@ -1,6 +1,6 @@
 # Decision brief — Phase 3 indexing kickoff
 
-상태: `Decision brief — awaiting user approval`  
+상태: `Approved for Phase 3A first slice`
 정본 연결: [`../system-contract-sot.md`](../system-contract-sot.md), [`03-indexing.md`](03-indexing.md)  
 목적: Phase 3 첫 구현 slice가 Chroma/Elasticsearch/동기화 방식을 추측하지 않도록 MVP 범위를 좁힌다.
 
@@ -78,7 +78,7 @@
 1. `services/application/app/indexing/`에 pure domain model 추가
    - `IndexRecordKind.SOURCE_BLOCK`
    - `IndexPointer(project_id, collection, document_id, version_id, content_hash)`
-   - `IndexSyncRequest`, `IndexSyncResult`
+   - `IndexSyncRequest(project_id, snapshot_id, target)`, `IndexSyncResult(request, records_attempted, records_written)`
 2. deterministic fake embedding provider와 in-memory vector index adapter
 3. Core SOT snapshot/source block → index record mapping
 4. explicit `rebuild_snapshot_source_block_index(project_id, snapshot_id)` service
@@ -89,9 +89,9 @@
    - archived project/draft record가 query 결과에서 제외
    - adapter failure가 Core SOT 저장 결과를 rollback하지 않음
 
-## 승인 요청
+## 승인 결과
 
-추천안을 승인하면 Phase 3A 첫 구현은 다음 계약으로 시작한다.
+2026-07-02 사용자 요청("다음 슬라이스 진행, 작은것부터 구현")으로 추천안을 첫 코드 slice 범위로 승인했다. Phase 3A 첫 구현은 다음 계약으로 시작한다.
 
 - target: source block only
 - backend: Chroma-like vector contract with deterministic fake adapter
@@ -99,4 +99,6 @@
 - delivery: explicit rebuild/index command only
 - archive/delete: status/version filter, no hard delete in first slice
 
-다른 선택을 원하면 위 1~5 중 바꿀 항목만 지정한다.
+`IndexSyncRequest`/`IndexSyncResult`는 Phase 3A explicit rebuild용 in-process 축소 계약이다. `contracts.md` §7.3의 persistent sync log/outbox envelope(`sync_result_id`, `sync_request_id`, target별 결과, timestamps)는 후속 sync log slice에서 다룬다. Archive/delete status filter는 rebuild가 materialize한 `project_archived`/`draft_archived` metadata 기준으로 적용되며, archive 이후 기존 stale record를 즉시 숨기려면 재build 또는 후속 automatic sync가 필요하다.
+
+실제 embedding model, Elasticsearch analyzer, automatic sync/outbox, analysis candidate indexing은 후속 결정으로 남긴다.

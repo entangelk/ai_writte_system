@@ -98,19 +98,21 @@
 - Phase 2A source_ref catalog anchor repair가 추가됐다(2026-07-01, SoT v1.6.19). `VersionedPromptAnalysisExtractionAdapter`는 parsed candidate의 source anchors를 입력 catalog와 대조하고, `source-ref-1`이 `source_ref-1`처럼 변형되는 catalog literal mismatch도 1회 repair 대상으로 삼는다. repair 후에도 mismatch가 남으면 자동 보정하지 않고 기존 runner/source validation이 `source_invalid`를 보존한다. HTTP source_ref 준비 경로 포함 live smoke는 `run_http_status=200`, final job `succeeded`, candidates 3개로 통과했다.
 - 독립 검증 `docs/verifications/2026-07-01/source_ref_catalog_http_api.md`의 조건부 합격 I1은 후속 회귀로 폐쇄됐다. `test_versioned_prompt_adapter_repairs_catalog_anchor_drift_once`가 catalog id는 유효하지만 quote/span/hash 계열이 catalog와 다른 경우에도 repair 1회와 `"source_anchors must preserve catalog span, quote, and content_hash"` prompt 포함을 직접 잠근다.
 - Phase 2A 배포형 E2E smoke가 추가·검증됐다(2026-07-02). Compose application은 `LLM_GATEWAY_BASE_URL=http://gateway:8001`로 gateway 서비스를 실제 네트워크 경유 호출하고, host port는 `APPLICATION_PORT`/`GATEWAY_PORT`/`MONGO_PORT`로 override 가능하다. `scripts/phase2a_deployed_e2e_smoke.py`는 이미 떠 있는 Application HTTP endpoint만 사용해 project/draft/version/source_ref catalog 준비 → analysis job create/run → candidate read-back을 수행한다. 실제 compose stack(`APPLICATION_PORT=8010`, `GATEWAY_PORT=8011`, `MONGO_PORT=27029`, `LLAMA_BASE_URL=http://192.168.1.29:9080`, `LLAMA_DEFAULT_MODEL=google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`, `LLAMA_TIMEOUT_SECONDS=900`)에서 `python3 scripts/phase2a_deployed_e2e_smoke.py --application-base-url http://127.0.0.1:8010 --timeout-seconds 1000` 실행 결과 `run_http_status=200`, final job `succeeded`, candidates 3개로 통과했다. 모델 처리 속도가 약 5 t/s일 수 있으므로 deployed smoke timeout은 900~1000초처럼 충분히 길게 둔다.
-- Phase 3 indexing 착수 결정 브리프가 추가됐다(2026-07-02). `docs/plans/03-indexing-kickoff-decisions.md`는 추천안을 source block only, Chroma-like vector contract + deterministic fake adapter, fake embedding only, explicit rebuild/index command, archive/delete는 status/version filter로 좁힌다. 아직 승인 대기 상태이며 SoT 버전은 올리지 않았다. 승인 전에는 Phase 3A indexing code를 구현하지 않는다.
+- Phase 3 indexing 착수 결정 브리프가 승인됐고 Phase 3A 첫 코드 slice가 구현·검증 보강됐다(2026-07-02, SoT v1.6.21). `services/application/app/indexing/`은 source block only를 대상으로 `IndexPointer(project_id, collection, document_id, version_id, content_hash)`, `IndexSyncRequest(project_id, snapshot_id, target)`, `IndexSyncResult(request, records_attempted, records_written)`, `SourceBlockIndexRecord`, deterministic fake embedding provider, in-memory vector index adapter, explicit `rebuild_snapshot_source_block_index()` service를 제공한다. Adapter failure는 Core SOT save를 rollback하지 않고, archived project/draft records는 rebuild가 materialize한 metadata 기준으로 query 결과에서 제외된다. 실제 Chroma/embedding model/ES/analyzer/automatic sync와 persistent sync log/outbox envelope는 후속이다.
+- 독립 검증 `docs/verifications/2026-07-02/phase3a_source_block_index.md`의 조건부 합격 블로킹 2건은 보강 완료됐다. F1은 Phase 3A reduced `IndexSyncRequest`/`IndexSyncResult` 모델과 SoT v1.6.21 명시로 닫았고, F2는 draft-only archive query exclusion 회귀로 닫았다. 검증 기록은 당시 조건부 판정의 원본으로 보존한다.
 
 ## Next Tasks
 
 1. `/v1/generate-structured`는 이번 비용 확인에서 보류했다. JSON/schema 검증과 1회 repair는 Application adapter가 소유하고, Gateway surface는 adapter로 분리해 두었다. repair 후에도 malformed JSON 비율이나 latency가 운영상 문제로 확인되면 별도 Gateway structured-output slice를 검토한다.
-2. Phase 3 indexing 착수 브리프(`docs/plans/03-indexing-kickoff-decisions.md`) 승인 후 Phase 3A 첫 코드 slice를 구현한다. 추천 코드 slice는 source block indexing domain model + deterministic fake vector adapter + explicit snapshot rebuild service + archive/status filter 회귀다.
-3. Slice 1 잔여 회귀 후보: archive 후 파생 인덱스 stale 이벤트. Phase 3A 계약 승인 전에는 구현하지 않는다. (fallback 동시성 race는 SoT v1.4 single-writer 제약으로 contract out 됨; 동시성 필요 시에만 (a) 보강 재검토.)
+2. Phase 3A 다음 작은 slice: source block indexing service를 Application HTTP API 또는 script로 노출할지 결정한다. 아직 public endpoint는 없다.
+3. Slice 1 잔여 회귀 후보: archive 후 파생 인덱스 stale 이벤트. Phase 3A 첫 slice는 explicit rebuild가 materialize한 archived record query filter만 구현했고 archive event 자동 sync는 아직 없다.
 4. Domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
 5. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
 
 ## Verification
 
 - Phase 2A deployed E2E smoke(2026-07-02): `python3 -m py_compile scripts/phase2a_deployed_e2e_smoke.py tests/test_phase2a_deployed_e2e_smoke_script.py` 통과. `python3 -m unittest tests.test_phase2a_deployed_e2e_smoke_script -v` 4개 통과. focused `python3 -m unittest tests.test_phase2a_deployed_e2e_smoke_script tests.test_application_api tests.test_analysis_gateway_provider -v` 54개 통과. full `python3 -m unittest discover tests -v` 360개 통과(37 skip). `docker compose config` 및 `git diff --check` 통과. 실제 compose smoke는 기본 `host.docker.internal:9080`에서 `provider_error/provider is unavailable`, 120초 timeout에서 `provider_error/gateway request timed out`을 안정 보존했고, `LLAMA_TIMEOUT_SECONDS=900` + client `--timeout-seconds 1000`로 재실행해 `run_http_status=200`, final job `succeeded`, candidates 3개를 확인했다. sandbox 내부 Python/httpx는 localhost TCP도 차단되어 smoke는 승인된 네트워크 실행이 필요했다.
+- Phase 3A source block indexing 첫 slice 검증 보강(2026-07-02): `python3 -m py_compile services/application/app/indexing/models.py services/application/app/indexing/service.py tests/test_indexing_phase3a.py` 통과. `python3 -m unittest tests.test_indexing_phase3a -v` 6개 통과, `python3 -m unittest tests.test_indexing_phase3a tests.test_core_sot -v` 33개 통과, `python3 -m unittest discover tests -v` 366개 통과(37 skip), `git diff --check` 통과. 잠근 범위: source block record가 project/collection/document/version/hash pointer를 보존, reduced `IndexSyncRequest`/`IndexSyncResult` shape, same snapshot rebuild idempotency, project isolation, archived project query exclusion, draft-only archive query exclusion, adapter failure가 Core SOT save를 rollback하지 않음.
 - Phase 2A provider wiring live smoke(2026-07-01): `python3 scripts/phase2a_provider_live_smoke.py`를 승인된 외부 네트워크 실행으로 실행. endpoint `http://192.168.1.29:9080`, model `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`, source_refs `민아`/`파란 편지`/`준호`. 결과: `run_http_status=400`, final job `status=failed`, `failure_reason=schema_invalid`, `failure_detail="provider content must be JSON"`, candidates 0. `python3 -m py_compile scripts/phase2a_provider_live_smoke.py` 통과. sandbox 내부 Python/httpx는 외부 TCP가 `[Errno 1] Operation not permitted`로 차단됨을 확인했고, 같은 sandbox에서의 smoke는 `provider_error` 보존 경로까지 확인했다.
 - Phase 2A JSON repair retry 자체 회귀/live smoke(2026-07-01): `python3 -m unittest tests.test_analysis_extractor_schema -v` 12개 통과, focused broader `python3 -m unittest tests.test_analysis_extractor_schema tests.test_analysis_runner tests.test_application_api -v` 75개 통과, full `python3 -m unittest discover tests -v` 351개 통과(37 skip). `python3 -m py_compile services/application/app/analysis/extractor.py tests/test_analysis_extractor_schema.py scripts/phase2a_provider_live_smoke.py` 및 `git diff --check` 통과. 승인된 `python3 scripts/phase2a_provider_live_smoke.py` 재실행 결과 provider_results 2개(첫 fenced `{"candidates":[]}`, repair valid schema JSON), `run_http_status=200`, final job `succeeded`, candidates 3개.
 - Phase 2A source_ref catalog HTTP API 자체 회귀(2026-07-01): `python3 -m py_compile services/application/app/main.py tests/test_application_api.py scripts/phase2a_provider_live_smoke.py` 통과, `python3 -m unittest tests.test_application_api -v` 47개 통과. 잠근 범위: source_ref create/list/get round-trip, invalid span 400, missing/cross-project snapshot/ref 404, archived project 후 source_ref 생성·조회 200.
@@ -243,6 +245,9 @@ services/
         │   ├── runner.py       # orchestration + job 상태 전이(running→succeeded/failed+reason), replay 비재실행, existing job run surface
         │   ├── source.py       # Core SOT snapshot/source_ref adapter
         │   └── service.py      # in-memory analysis repository/service + retry idempotency + job state transitions
+        ├── indexing/
+        │   ├── models.py       # Phase 3A source block index pointer/request/result/record contracts
+        │   └── service.py      # deterministic fake embedding + in-memory vector adapter + explicit snapshot rebuild
         └── agent_loop/
             ├── budget.py       # BudgetPolicy(5차원 budget+retry cap)/BudgetTracker+F1 usage 방어(A1/A3)
             ├── completion.py   # SelfReport + judge_completion completed/awaiting_review(A3)
@@ -279,6 +284,7 @@ tests/
 ├── test_core_sot_fixture.py
 ├── test_core_sot_mongo_indexes.py
 ├── test_core_sot_mongo.py
+├── test_indexing_phase3a.py
 └── test_application_api.py
 scripts/
 ├── smoke_llm_provider.py

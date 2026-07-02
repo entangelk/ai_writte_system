@@ -26,6 +26,8 @@ MongoDB 정본을 바꾸지 않는 단방향 검색 인덱스를 구축하고, s
 
 collection/index 분리는 사용량과 mapping 요구가 확인된 뒤 검토한다.
 
+2026-07-02 Phase 3A 첫 slice는 [`03-indexing-kickoff-decisions.md`](03-indexing-kickoff-decisions.md)에 따라 더 작게 시작한다. 첫 구현은 source block only, Chroma-like vector contract with deterministic fake adapter, fake embedding only, explicit snapshot rebuild, archive/status filter만 다룬다. `IndexSyncRequest(project_id, snapshot_id, target)`와 `IndexSyncResult(request, records_attempted, records_written)`는 explicit rebuild용 in-process 축소 계약이며, `contracts.md` §7.3의 persistent sync log/outbox envelope는 후속 sync log slice에서 다룬다. 실제 ChromaDB, Elasticsearch, 자동 outbox/polling, analysis candidate indexing은 후속 결정이다.
+
 ## 단방향 동기화
 
 ```text
@@ -47,7 +49,7 @@ ChromaDB나 Elasticsearch 검색 결과가 MongoDB 기억을 직접 갱신해서
 
 MVP에서 실제 지원할 이벤트는 착수 전에 축소 확정한다.
 
-Project/draft archive 이후 MongoDB source snapshot과 version은 보존한다. 파생 index record는 stale 처리, version/status filter, rebuild 중 선택해 정본 상태를 따라가야 하며, index 삭제가 MongoDB 정본 삭제를 의미하지 않는다.
+Project/draft archive 이후 MongoDB source snapshot과 version은 보존한다. 파생 index record는 stale 처리, version/status filter, rebuild 중 선택해 정본 상태를 따라가야 하며, index 삭제가 MongoDB 정본 삭제를 의미하지 않는다. Phase 3A의 archive/status filter는 explicit rebuild가 materialize한 record metadata 기준이므로, archive 이후 기존 stale record를 즉시 숨기려면 재build 또는 후속 automatic sync가 필요하다.
 
 ## 산출물
 

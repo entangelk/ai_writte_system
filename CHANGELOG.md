@@ -2,6 +2,8 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-07-02 | SoT v1.6.21: Phase 3A source block indexing 검증 후 보강 | [work log](docs/daily_logs/2026-07-02/work_log.md) |
+| 2026-07-02 | SoT v1.6.20: Phase 3A source block indexing fake-adapter slice 추가 | [work log](docs/daily_logs/2026-07-02/work_log.md) |
 | 2026-07-02 | Phase 2A deployed E2E smoke 추가 및 compose Application→Gateway wiring 보강 | [work log](docs/daily_logs/2026-07-02/work_log.md) |
 | 2026-07-01 | SoT v1.6.19: Phase 2A source_ref catalog anchor repair 보강 | [work log](docs/daily_logs/2026-07-01/work_log.md) |
 | 2026-07-01 | SoT v1.6.18: Phase 2A source_ref catalog HTTP API 추가 | [work log](docs/daily_logs/2026-07-01/work_log.md) |
@@ -53,6 +55,11 @@
 | 2026-06-24 | 개발 계획 문서 구조 도입 | [work log](docs/daily_logs/2026-06-24/work_log.md) |
 
 ## 2026-07-02
+
+### Changed
+
+- SoT를 v1.6.21로 갱신해 Phase 3A `IndexSyncRequest`/`IndexSyncResult` reduced shape와 `contracts.md` §7.3 persistent sync log/outbox envelope의 관계를 명시했다. 검증 F2 대응으로 draft-only archive query exclusion 회귀를 추가했고, archive/status filter가 explicit rebuild 시점 metadata 기준임을 명확화했다.
+- SoT를 v1.6.20으로 갱신해 Phase 3A source block indexing 첫 slice를 추가했다. 첫 target은 Core SOT source block only이며, backend는 Chroma-like vector contract with deterministic fake adapter, embedding은 fake provider only, delivery는 explicit snapshot rebuild, archive/delete 반영은 status/version filter다.
 
 ### Added
 
