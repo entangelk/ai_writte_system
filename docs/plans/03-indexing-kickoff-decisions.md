@@ -110,3 +110,7 @@
 ## 구현 후속 — explicit rebuild HTTP API
 
 2026-07-02 Phase 3A 후속 slice로 `POST /projects/{project_id}/snapshots/{snapshot_id}/index/source-blocks/rebuild`를 추가했다. 이 endpoint는 deterministic fake vector adapter로 explicit rebuild를 실행하고 JSON summary(`project_id`, `snapshot_id`, `target`, `backend`, `records_attempted`, `records_written`, `records_indexed`, `records_query_visible`, `records_archived`)를 반환한다. `backend`는 `in_memory_fake`이며, missing/cross-project snapshot은 404다. Persistent vector backend와 automatic sync는 후속이다.
+
+## 구현 후속 — deployed rebuild smoke
+
+2026-07-02 Phase 3A follow-up으로 `scripts/phase3a_deployed_rebuild_smoke.py`를 추가했다. 이 script는 이미 떠 있는 Application HTTP endpoint만 사용해 project/draft/version snapshot을 준비하고 HTTP rebuild endpoint를 실행한다. `--mongo-uri`가 주어지면 같은 snapshot을 CLI rebuild 경로로도 읽어 HTTP summary와 CLI summary의 핵심 count/pointer field가 일치하는지 비교한다. 이 smoke는 persistent vector backend를 추가하지 않고, 현재 fake vector adapter 기반 public rebuild 표면이 live Mongo runtime에서 재현 가능한지만 확인한다.

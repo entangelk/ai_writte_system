@@ -5,6 +5,7 @@
 - HANDOFF를 읽고 다음 작업을 진행한다.
 - Phase 2A 전체 배포형 E2E를 Application/Gateway 실제 프로세스 네트워크 경로로 확인한다.
 - 배포형 E2E smoke를 재현 가능한 스크립트와 회귀로 남긴다.
+- Phase 3A explicit rebuild의 HTTP/CLI public 표면을 live Mongo runtime에서 재현 가능한 smoke로 묶는다.
 
 ## Completed work
 
@@ -63,6 +64,25 @@
 - 로컬 포트 충돌을 피할 수 있도록 `APPLICATION_PORT`, `GATEWAY_PORT`, `MONGO_PORT` env override를 추가했다. 기본값은 기존 `8000`/`8001`/`27017`이라 기본 사용법은 유지된다.
 - 새 smoke 스크립트는 `httpx.MockTransport` 기반 테스트로 요청 순서, source_ref 준비, terminal status exit rule, file-path invocation import를 잠갔다.
 
+### Phase 3A deployed rebuild smoke 추가
+
+- 변경 파일: `scripts/phase3a_deployed_rebuild_smoke.py`, `tests/test_phase3a_deployed_rebuild_smoke_script.py`, `docs/plans/03-indexing.md`, `docs/plans/03-indexing-kickoff-decisions.md`, `HANDOFF.md`, `CHANGELOG.md`, `docs/daily_logs/2026-07-02/work_log.md`.
+- HANDOFF의 다음 후보 중 persistent Chroma-like adapter는 backend/dependency 선택을 아직 추측해야 하므로 보류했다.
+- 대신 현재 이미 열린 Phase 3A public 표면인 HTTP rebuild endpoint와 CLI rebuild script를 live Mongo runtime에서 같은 snapshot 기준으로 비교할 수 있는 smoke를 추가했다.
+- 스크립트는 이미 떠 있는 Application HTTP endpoint로 project/draft/version snapshot을 준비하고 `POST /projects/{project_id}/snapshots/{snapshot_id}/index/source-blocks/rebuild`를 호출한다.
+- `--mongo-uri`가 있으면 같은 snapshot을 `scripts/phase3a_rebuild_source_block_index.py`의 rebuild 함수 경로로 다시 읽어 HTTP summary와 CLI summary의 핵심 count/pointer field를 비교한다.
+- MockTransport 기반 회귀로 HTTP-only 성공, optional CLI summary comparison, mismatch exit 1, file-path invocation import를 잠갔다.
+- 실제 compose stack(`APPLICATION_PORT=8010`, `GATEWAY_PORT=8011`, `MONGO_PORT=27029`)에서 현재 Application 이미지를 rebuild/recreate한 뒤 smoke를 실행해 HTTP/CLI summary 일치를 확인했다.
+
+### Phase 3A deployed rebuild smoke 검증 조건 보강
+
+- 변경 파일: `tests/test_phase3a_deployed_rebuild_smoke_script.py`, `HANDOFF.md`, `docs/daily_logs/2026-07-02/work_log.md`.
+- 독립 검증 `docs/verifications/2026-07-02/phase3a_deployed_rebuild_smoke.md`의 조건부 사유를 확인했다.
+- 검증 지적대로 smoke 자체 `terminal_status()`에서 `http_complete=False`와 `cli_complete=False`가 단독 실패 인자로 잠기지 않았다.
+- `test_terminal_status_rejects_http_partial_without_cli`를 추가해 HTTP-only partial write가 exit 실패 조건임을 잠갔다.
+- `test_terminal_status_rejects_cli_partial_even_when_summaries_match`를 추가해 CLI partial write가 summary mismatch와 무관하게 실패 조건임을 잠갔다.
+- 코드 변경 없이 boundary matrix의 빈 칸만 회귀로 채웠다.
+
 ## Issues found
 
 - 문제: 다음 코드 슬라이스 후보 대부분이 계약 미확정에 막혀 있었다.
@@ -115,6 +135,21 @@
 - Resolution: `LLAMA_BASE_URL=http://192.168.1.29:9080`, `LLAMA_DEFAULT_MODEL=google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`, `LLAMA_TIMEOUT_SECONDS=900`, smoke client `--timeout-seconds 1000`로 재실행했다.
 - Outcome: 배포형 E2E가 `run_http_status=200`, final job `succeeded`, candidates 3개로 통과했다.
 
+- 문제: Phase 3A 다음 후보 중 persistent Chroma-like adapter는 실제 backend/dependency 결정 없이 들어가면 추측 구현이 된다.
+- 원인: SoT/plan의 미확정 항목에 embedding model, vector backend, automatic sync/outbox가 계속 남아 있다.
+- Resolution: 새 backend를 붙이지 않고, 현재 fake vector adapter 기반 CLI/HTTP rebuild public surface를 deployed smoke로 묶었다.
+- Outcome: live Mongo 검증은 같은 snapshot에 대해 HTTP rebuild와 CLI rebuild summary를 비교하는 방식으로 실행할 수 있다.
+
+- 문제: 처음 deployed rebuild smoke 실행에서 HTTP rebuild endpoint가 404를 반환했다.
+- 원인: 실행 중이던 Application 컨테이너가 현재 코드보다 오래된 이미지라 OpenAPI에 `/index/source-blocks/rebuild` route가 없었다.
+- Resolution: 컨테이너를 내리지 않고 같은 포트 override(`APPLICATION_PORT=8010`, `GATEWAY_PORT=8011`, `MONGO_PORT=27029`)로 `docker compose up -d --build application`을 실행해 Application 이미지를 rebuild/recreate했다.
+- Outcome: 재실행한 deployed smoke가 `summaries_match=true`, HTTP/CLI 모두 `records_attempted=2`, `records_written=2`, `records_query_visible=2`로 통과했다.
+
+- 문제: 독립 검증에서 smoke `terminal_status()` partial-write 분기 2개가 untraced라고 지적됐다.
+- 원인: 기존 fixture가 항상 full write였고, CLI partial write test도 `summaries_match=False`와 동시에 실패해 `cli_complete` 자체의 load-bearing 여부를 증명하지 못했다.
+- Resolution: HTTP partial 단독 실패 회귀와 CLI partial 단독 실패 회귀를 추가했다.
+- Outcome: 조건부 판정의 유일한 blocking 사유를 회귀로 폐쇄했다.
+
 ## Decisions
 
 - Phase 3A 추천안은 fake embedding/fake vector adapter로 계약과 idempotency/stale semantics를 먼저 잠그는 방향이다.
@@ -128,6 +163,7 @@
 - 배포형 Phase 2A smoke는 ASGITransport가 아니라 실제 Application/Gateway 프로세스 네트워크 경로를 확인하는 별도 스크립트로 유지한다. 이유: 기존 live smoke는 같은 프로세스 내 ASGI 조립이라 container DNS, compose env, process boundary를 검증하지 못한다.
 - 사용자 지적에 따라 실제 모델 smoke는 240초 같은 짧은 timeout으로 조급하게 실패 판정하지 않고, 모델 처리 속도를 고려해 충분한 timeout을 둔 뒤 리턴 시그널을 기다린다.
 - 테스트용 compose 컨테이너는 사용자 요청에 따라 내리지 않았다.
+- Phase 3A 다음 작은 slice는 persistent backend 도입보다 deployed rebuild smoke를 먼저 추가하는 쪽을 선택했다. 이유: 현재 수용 기준의 "MongoDB만으로 프로젝트 인덱스를 완전히 재생성"을 새 인프라 없이 검증할 수 있고, Chroma/embedding 선택은 아직 계약상 미확정이기 때문이다.
 
 ## Verification
 
@@ -166,9 +202,21 @@
 - Deployed smoke failure preservation: 기본 `host.docker.internal:9080` compose env에서 `run_http_status=502`, final job `failed/provider_error`, `failure_detail="provider is unavailable"` 확인.
 - Deployed smoke timeout preservation: 실제 model endpoint + 120초 timeout에서 `run_http_status=502`, final job `failed/provider_error`, `failure_detail="gateway request timed out"` 확인.
 - Deployed smoke success: `LLAMA_BASE_URL=http://192.168.1.29:9080 LLAMA_DEFAULT_MODEL=google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0 LLAMA_TIMEOUT_SECONDS=900 APPLICATION_PORT=8010 GATEWAY_PORT=8011 MONGO_PORT=27029 docker compose up -d --build` 후 `python3 scripts/phase2a_deployed_e2e_smoke.py --application-base-url http://127.0.0.1:8010 --timeout-seconds 1000` — `run_http_status=200`, final job `succeeded`, candidates 3개.
+- Phase 3A deployed rebuild smoke compile: `python3 -m py_compile scripts/phase3a_deployed_rebuild_smoke.py tests/test_phase3a_deployed_rebuild_smoke_script.py` — 통과.
+- Phase 3A deployed rebuild smoke focused regression: `python3 -m unittest tests.test_phase3a_deployed_rebuild_smoke_script -v` — 6개 통과.
+- Phase 3A deployed rebuild smoke broader regression: `python3 -m unittest tests.test_phase3a_deployed_rebuild_smoke_script tests.test_phase3a_rebuild_source_block_index_script tests.test_application_api tests.test_indexing_phase3a -v` — 68개 통과.
+- Final full regression after Phase 3A deployed rebuild smoke: `python3 -m unittest discover tests -v` — 381개 통과(37 skip).
+- Final diff hygiene after Phase 3A deployed rebuild smoke: `git diff --check` — 통과.
+- Phase 3A deployed rebuild smoke live compose: 첫 실행은 오래된 Application image로 HTTP rebuild 404. `env APPLICATION_PORT=8010 GATEWAY_PORT=8011 MONGO_PORT=27029 docker compose up -d --build application` 후 `python3 scripts/phase3a_deployed_rebuild_smoke.py --application-base-url http://127.0.0.1:8010 --mongo-uri 'mongodb://localhost:27029/?directConnection=true' --timeout-seconds 60` — `summaries_match=true`, HTTP/CLI `records_attempted=2`, `records_written=2`, `records_query_visible=2`.
+- Phase 3A deployed rebuild smoke verification follow-up compile: `python3 -m py_compile tests/test_phase3a_deployed_rebuild_smoke_script.py scripts/phase3a_deployed_rebuild_smoke.py` — 통과.
+- Phase 3A deployed rebuild smoke verification follow-up focused regression: `python3 -m unittest tests.test_phase3a_deployed_rebuild_smoke_script -v` — 8개 통과.
+- Phase 3A deployed rebuild smoke verification follow-up broader regression: `python3 -m unittest tests.test_phase3a_deployed_rebuild_smoke_script tests.test_phase3a_rebuild_source_block_index_script tests.test_application_api tests.test_indexing_phase3a -v` — 70개 통과.
+- Final full regression after Phase 3A deployed rebuild smoke verification follow-up: `python3 -m unittest discover tests -v` — 383개 통과(37 skip).
+- Pattern sweep: `rg -n "def terminal_status|terminal_status\\(" scripts tests` — partial-write style terminal status는 Phase 3A rebuild script와 deployed rebuild smoke뿐이며, 둘 다 full/partial 회귀가 있다. Phase 2A deployed E2E smoke는 job terminal status(`succeeded|failed`) 성격이라 동일 root-cause가 아니다.
+- Final diff hygiene after verification follow-up: `git diff --check` — 통과.
 
 ## Next steps
 
-- Phase 3A source block indexing service를 public Application API 또는 script로 노출할지 결정한다.
+- Persistent Chroma-like adapter를 붙일지 결정한다.
+- Archive 후 파생 index stale 이벤트/automatic sync를 별도 회귀로 다룰지 결정한다.
 - `/v1/generate-structured`는 repair 후 malformed JSON 비율이나 latency가 운영상 문제로 확인될 때 별도 Gateway slice로 검토한다.
-- Phase 3 indexing 계약이 확정되면 archive 후 파생 인덱스 stale 이벤트를 별도 회귀로 다룬다.

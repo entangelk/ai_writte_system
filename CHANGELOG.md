@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-07-02 | Phase 3A deployed rebuild smoke 추가 | [work log](docs/daily_logs/2026-07-02/work_log.md) |
 | 2026-07-02 | SoT v1.6.23: Phase 3A explicit rebuild HTTP API 추가 | [work log](docs/daily_logs/2026-07-02/work_log.md) |
 | 2026-07-02 | SoT v1.6.22: Phase 3A explicit rebuild script 추가 | [work log](docs/daily_logs/2026-07-02/work_log.md) |
 | 2026-07-02 | SoT v1.6.21: Phase 3A source block indexing 검증 후 보강 | [work log](docs/daily_logs/2026-07-02/work_log.md) |
@@ -67,11 +68,13 @@
 
 ### Added
 
+- Phase 3A deployed rebuild smoke 스크립트를 추가했다. `scripts/phase3a_deployed_rebuild_smoke.py`는 이미 실행 중인 Application HTTP endpoint로 project/draft/version snapshot을 준비하고 HTTP rebuild endpoint를 실행한다. `--mongo-uri`가 있으면 같은 snapshot을 CLI rebuild 경로로도 읽어 HTTP/CLI summary 일치를 확인한다.
 - Phase 2A 배포형 E2E smoke 스크립트를 추가했다. `scripts/phase2a_deployed_e2e_smoke.py`는 이미 실행 중인 Application HTTP endpoint를 대상으로 project/draft/version 저장, source_ref catalog 준비, analysis job run, candidate read-back을 수행한다.
 - Compose runtime에서 Application이 Gateway 컨테이너를 실제 네트워크로 호출하도록 `LLM_GATEWAY_BASE_URL=http://gateway:8001` 기본 env를 추가했다. Host port는 `APPLICATION_PORT`/`GATEWAY_PORT`/`MONGO_PORT`로 override 가능해 로컬 포트 충돌을 피할 수 있다.
 
 ### Verified
 
+- Phase 3A deployed rebuild smoke를 실제 compose stack에서 실행해 HTTP rebuild summary와 CLI rebuild summary가 같은 snapshot 기준으로 일치함을 확인했다. 실행 중이던 Application 이미지가 오래돼 첫 smoke는 404였고, 같은 포트 override로 `docker compose up -d --build application` 후 `summaries_match=true`, HTTP/CLI `records_attempted=2`, `records_written=2`, `records_query_visible=2`를 확인했다.
 - 실제 compose stack과 llama.cpp endpoint `http://192.168.1.29:9080`로 배포형 E2E를 실행해 `run_http_status=200`, final job `succeeded`, candidates 3개를 확인했다. 모델 처리 속도를 고려해 `LLAMA_TIMEOUT_SECONDS=900` 및 smoke client timeout 1000초로 리턴 시그널을 기다렸다.
 
 ## 2026-07-01
