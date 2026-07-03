@@ -25,10 +25,11 @@
 15. [`03-index-sync-outbox-decisions.md`](03-index-sync-outbox-decisions.md) — Phase 3B automatic sync/outbox 결정 브리프
 16. [`03-index-worker-retry-decisions.md`](03-index-worker-retry-decisions.md) — Phase 3B worker/retry 실행 경계 결정 브리프
 17. [`03-indexing.md`](03-indexing.md) — ChromaDB/Elasticsearch 파생 인덱스와 동기화
-18. [`04-agentic-search.md`](04-agentic-search.md) — 검색 계획, 정본 재조회, ContextPackage
-19. [`05-writing-ai.md`](05-writing-ai.md) — 컨텍스트 기반 글 생성과 Writing Gate
-20. [`06-review-ui.md`](06-review-ui.md) — 후보 검토와 프로젝트 메모리 관리 UI
-21. [`flat-loop-gate.md`](flat-loop-gate.md) — flat agent loop 종료 decision, tool registry, budget policy, task별 completion criteria와 benchmark 기반 숫자 기본 한도. Phase 2/4/5가 소비하는 횡단 계약
+18. [`04-agentic-search-kickoff-decisions.md`](04-agentic-search-kickoff-decisions.md) — Phase 4 착수 전 사용자 결정 브리프
+19. [`04-agentic-search.md`](04-agentic-search.md) — 검색 계획, 정본 재조회, ContextPackage
+20. [`05-writing-ai.md`](05-writing-ai.md) — 컨텍스트 기반 글 생성과 Writing Gate
+21. [`06-review-ui.md`](06-review-ui.md) — 후보 검토와 프로젝트 메모리 관리 UI
+22. [`flat-loop-gate.md`](flat-loop-gate.md) — flat agent loop 종료 decision, tool registry, budget policy, task별 completion criteria와 benchmark 기반 숫자 기본 한도. Phase 2/4/5가 소비하는 횡단 계약
 
 ## 문서 지위와 우선순위
 

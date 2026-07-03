@@ -109,22 +109,28 @@
 - Phase 3B archive outbox 첫 code slice가 구현됐다(2026-07-03, SoT v1.6.26). Application archive endpoint는 Core SOT archive 성공 후 `index_sync_outbox` pending entry를 idempotent하게 생성한다. Event는 `project_archived`/`draft_archived`, dedup key는 `(project_id, event, source.mongo_collection, source.mongo_id)`, target envelope는 canonical `targets.chroma.status="pending"` + `targets.chroma.backend="in_memory_fake"`다. Entry는 nullable `user_id`, `attempt_count=0`, `max_attempts=3`, `next_attempt_at=null`, `last_error=null`을 가진다. 오류 타입은 서버/backend 계열 `backend_error`와 데이터 없음/not-found 계열 `not_found`를 분리했다. `index_sync_outbox`와 future `index_sync_logs`는 `sync_request_id`로 조인한다. Worker execution, retry/backoff 실행·숫자, ChromaDB/Elasticsearch mutation, stale-hit sync job, `analysis_completed` wiring은 후속이다.
 - Phase 3B archive outbox 독립 검증 후속 보강이 완료됐다(2026-07-03, SoT v1.6.27). `index_sync_outbox`가 `docs/mongo_collections.md` 운영 collection 레지스트리에 등록됐고, Mongo repository의 outbox document 직렬화/역직렬화는 fake collection round-trip 회귀로 잠겼다. `analysis_completed` event가 아직 code enum에 열리지 않았음도 명시 회귀로 고정했다. 남은 후속 리스크는 worker slice에서 status-aware dedup을 정제하는 것이다.
 - Phase 3B `index_sync_outbox` live Mongo persistence smoke가 추가·검증 보강됐다(2026-07-03). `tests/test_indexing_mongo.py`는 `CORE_SOT_TEST_MONGO_URI`가 명시되고 write 가능한 Mongo를 가리킬 때만 실제 `MongoIndexSyncRepository`로 archive outbox entry insert, fresh repository read-back, repeated enqueue dedup을 검증한다. 기본 `unittest discover`가 우연히 `localhost:27017`에 side effect를 내지 않도록 env-only로 바꿨고, live smoke는 `project_archived`와 `draft_archived` round-trip을 모두 잠근다. `MongoIndexSyncRepository.put_outbox_entry()`의 `DuplicateKeyError` defensive branch도 fake collection 단위 회귀로 잠갔다. Throwaway `mongo:7` on `localhost:27032`에서 live 3개 smoke가 통과했다.
+- Phase 4 agentic search 착수 브리프가 2026-07-03 오너 결정으로 승인됐다(SoT v1.6.30, `docs/plans/04-agentic-search-kickoff-decisions.md`). purpose `writing_context` + need 4종, 터미널 JSON LLM planner(tool-call planner는 §2.1 전환 계획으로 추적), fake vector + Mongo direct 순차 실행, deterministic ranking/budget, candidate 기억은 A 먼저 + B 후속, degraded mode + 계열 error taxonomy(`backend_error`/`system_error`/`llm_error`/`sot_error`), package 비persist, 단일 schema + purpose literal(이후 Writing/Analysis 비교용 모두 완성 의무).
+- Phase 4 Slice 4.1이 구현됐다(2026-07-03, SoT v1.6.31). `services/application/app/context_search/`에 domain 계약 전부, planner 주입형 `ContextSearchService`(순차 실행, wall-clock 기본 60s, 문자수 기반 token 추정, budget 초과 항목 제외), 독립 `evaluate_context_gate()`(cross-project/SOT reload 증거/candidate 라벨 금지/stale 재검출/budget)를 추가했다. vector hit는 Phase 3A stale guard + SOT 재조회 후에만 ContextItem이 되며 index text는 쓰지 않는다. `current_scene`/`recent_scenes`는 SOT block kind 기반 deterministic 경계다. `InMemoryVectorIndexAdapter.query_similar()` cosine query 표면을 추가했다. Slice 4.2(터미널 JSON planner adapter + live smoke)가 다음이다.
+- Phase 4 Slice 4.1 독립 검증(`docs/verifications/2026-07-03/context_search_slice_4_1.md`, 조건부 합격)의 차단 조건이 폐쇄됐다(2026-07-03, SoT v1.6.32). 검증이 실증한 결함: SOT 백엔드 다운(non-NotFound 예외)이 `sot_error`로 매핑되지 않고 원형 탈출했고, 기존 회귀는 이름과 달리 NotFound 경로만 잠갔다(dead-code fixture). 보강: SOT reload 호출 4곳의 catch를 넓혀 `sot_error` 매핑, toggle repo로 진짜 백엔드 예외를 주입하는 양방향 회귀 3개(Mongo position/vector hit/Gate) + vector snapshot NotFound soft 제외(ghost record) 회귀 1개 추가, 변이 증명(catch 축소 시 5개 재실패) 완료. NotFound 경로별 분기(vector soft/mongo hard)와 `system_error` 예약 literal을 브리프 §6/SoT에 명문화했다. context_search 28개, 전체 439개 실행 중 395 passed/44 skipped. 비차단 정정: 직전 기록의 "435개 통과(44 skip)"는 unittest "Ran N" 출력 오독으로 실제 391 passed/44 skipped였다.
 - Phase 3B one-shot worker 첫 slice가 구현됐다(2026-07-03, SoT v1.6.29). 브리프는 `docs/plans/03-index-worker-retry-decisions.md`다. Worker는 `pending` 또는 10분 이상 지난 stale `running` outbox entry를 claim하고, recording-only fake archive mutation을 실행한 뒤 `index_sync_logs`에 attempt result를 append한다. Claim lease는 `claimed_at`, backoff는 1분 → 5분 → terminal `failed`다. Terminal-location/index 전략은 terminal 이동을 채택해 `success|failed`가 되면 active outbox entry를 제거하고 terminal history는 `index_sync_logs`가 소유한다. Archive worker-time `not_found`는 idempotent success다. `scripts/index_sync_worker.py --limit N`으로 one-shot 실행한다. 독립 검증(합격, `docs/verifications/2026-07-03/phase3b_worker_retry_slice.md`) 후속으로 Mongo claim/retry/terminal-move lifecycle live smoke 4개를 `tests/test_indexing_mongo.py`에 추가해 CI에서 잠갔고, 브리프 §5·Owner 결정의 `not_found` retry 문구를 query-time(3회)/archive worker-time(idempotent success)으로 정정해 브리프 내부 모순을 제거했다.
 
 ## Owner Decisions Needed
 
-- 없음. Phase 3B worker/retry 첫 code slice에 필요한 결정은 2026-07-03에 반영됐다.
+- 없음. Phase 4 착수 브리프 8개 항목은 2026-07-03에 결정·반영됐다(SoT v1.6.30).
 
 ## Next Tasks
 
-1. `/v1/generate-structured`는 이번 비용 확인에서 보류했다. JSON/schema 검증과 1회 repair는 Application adapter가 소유하고, Gateway surface는 adapter로 분리해 두었다. repair 후에도 malformed JSON 비율이나 latency가 운영상 문제로 확인되면 별도 Gateway structured-output slice를 검토한다.
-2. Actual ChromaDB/Elasticsearch mutation은 후속이다. 현재 worker는 recording-only fake archive mutation으로 status/log lifecycle만 검증한다. real adapter 도입 시 archive 대상 부재에 `DerivedIndexRecordNotFound`를 raise해야 idempotent success가 작동한다.
-3. Persistent Chroma-like adapter와 품질/embedding model 선택은 핵심 코어가 모두 만들어진 뒤 최후속으로 재검토한다. 현재 public 표면은 CLI script와 HTTP rebuild endpoint이며 둘 다 deterministic fake vector adapter를 사용한다.
-4. Domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
-5. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
+1. Phase 4 Slice 4.2: 터미널 JSON LLM planner adapter. versioned prompt template `context_search_plan_v1`(기존 `prompt_templates` 재사용), Gateway `/v1/generate` 1-turn 호출 → SearchPlan JSON strict parse + 1회 repair, §1 밖 literal은 repair 후에도 남으면 `llm_error`. unit은 fake provider, live smoke만 실제 endpoint.
+2. Phase 4 후속 추적 의무(오너 명시): ⑧ ContextPackage는 이후 slice에서 Writing용/Analysis 비교용 모두 완성해야 한다(analysis 필드는 Phase 2B 착수 브리프에서 결정). ⑤ `needs_review` candidate 포함(B)은 후속 slice로 확장한다. ②의 tool-call flat loop planner 전환 계획은 브리프 §2.1이다.
+3. `/v1/generate-structured`는 이번 비용 확인에서 보류했다. JSON/schema 검증과 1회 repair는 Application adapter가 소유하고, Gateway surface는 adapter로 분리해 두었다. repair 후에도 malformed JSON 비율이나 latency가 운영상 문제로 확인되면 별도 Gateway structured-output slice를 검토한다.
+4. Actual ChromaDB/Elasticsearch mutation은 후속이다. 현재 worker는 recording-only fake archive mutation으로 status/log lifecycle만 검증한다. real adapter 도입 시 archive 대상 부재에 `DerivedIndexRecordNotFound`를 raise해야 idempotent success가 작동한다.
+5. Persistent Chroma-like adapter와 품질/embedding model 선택은 핵심 코어가 모두 만들어진 뒤 최후속으로 재검토한다. 현재 public 표면은 CLI script와 HTTP rebuild endpoint이며 둘 다 deterministic fake vector adapter를 사용한다.
+6. Domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
+7. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
 
 ## Verification
 
+- Phase 4 Slice 4.1 자체 회귀 + 검증 보강(2026-07-03): `python3 -m py_compile services/application/app/context_search/models.py services/application/app/context_search/service.py services/application/app/indexing/service.py tests/test_context_search.py` 통과. `python3 -m unittest tests.test_context_search -v` 28개 통과(보강 전 24개). full: `python3 -m unittest discover tests` Ran 439 OK(skipped=44), `python3 -m pytest -q` 395 passed/44 skipped. `git diff --check` 통과. 잠근 범위: SOT reload 후 canonical item 구성(hit text 미사용), scene 경계 deterministic split, project isolation, archive 후 stale hit 제외+trace reason(양방향), SOT reload 실패 `sot_error` 전체 실패(missing position NotFound + 백엔드 다운 주입 3경로 양방향 + 변이 증명), vector snapshot NotFound soft 제외, budget 포함/제외 양방향, need 우선순위 ranking 양방향, backend 실패 degraded+error taxonomy, 빈 결과 trace 설명, planner 실패/plan literal 위반 `llm_error`, wall-clock 초과, Context Gate pass/reject 6분기 + Gate 백엔드 다운 `sot_error`.
 - Phase 2A deployed E2E smoke(2026-07-02): `python3 -m py_compile scripts/phase2a_deployed_e2e_smoke.py tests/test_phase2a_deployed_e2e_smoke_script.py` 통과. `python3 -m unittest tests.test_phase2a_deployed_e2e_smoke_script -v` 4개 통과. focused `python3 -m unittest tests.test_phase2a_deployed_e2e_smoke_script tests.test_application_api tests.test_analysis_gateway_provider -v` 54개 통과. full `python3 -m unittest discover tests -v` 360개 통과(37 skip). `docker compose config` 및 `git diff --check` 통과. 실제 compose smoke는 기본 `host.docker.internal:9080`에서 `provider_error/provider is unavailable`, 120초 timeout에서 `provider_error/gateway request timed out`을 안정 보존했고, `LLAMA_TIMEOUT_SECONDS=900` + client `--timeout-seconds 1000`로 재실행해 `run_http_status=200`, final job `succeeded`, candidates 3개를 확인했다. sandbox 내부 Python/httpx는 localhost TCP도 차단되어 smoke는 승인된 네트워크 실행이 필요했다.
 - Phase 3A source block indexing 첫 slice 검증 보강(2026-07-02): `python3 -m py_compile services/application/app/indexing/models.py services/application/app/indexing/service.py tests/test_indexing_phase3a.py` 통과. `python3 -m unittest tests.test_indexing_phase3a -v` 6개 통과, `python3 -m unittest tests.test_indexing_phase3a tests.test_core_sot -v` 33개 통과, `python3 -m unittest discover tests -v` 366개 통과(37 skip), `git diff --check` 통과. 잠근 범위: source block record가 project/collection/document/version/hash pointer를 보존, reduced `IndexSyncRequest`/`IndexSyncResult` shape, same snapshot rebuild idempotency, project isolation, archived project query exclusion, draft-only archive query exclusion, adapter failure가 Core SOT save를 rollback하지 않음.
 - Phase 3A explicit rebuild script 자체 회귀(2026-07-02): `python3 -m py_compile scripts/phase3a_rebuild_source_block_index.py tests/test_phase3a_rebuild_source_block_index_script.py` 통과. `python3 -m unittest tests.test_phase3a_rebuild_source_block_index_script -v` 6개 통과, `python3 -m unittest tests.test_phase3a_rebuild_source_block_index_script tests.test_indexing_phase3a tests.test_core_sot -v` 39개 통과, `python3 -m unittest discover tests -v` 372개 통과(37 skip), `git diff --check` 통과. 잠근 범위: script summary field, exit 0/1/2 wiring, missing Mongo URI usage error, file-path invocation import.
@@ -223,6 +229,7 @@ docs/
 │   ├── 02-analysis-runner-execution-decisions.md # Phase 2A runner 실행 경계 결정 브리프
 │   ├── 03-index-sync-outbox-decisions.md # Phase 3B automatic sync/outbox 결정 브리프
 │   ├── 03-index-worker-retry-decisions.md # Phase 3B worker/retry 실행 경계 결정 브리프
+│   ├── 04-agentic-search-kickoff-decisions.md # Phase 4 착수 전 사용자 결정 브리프(Proposed)
 │   ├── implementation-plan.md   # vertical slice와 검증 계획
 │   ├── llm-gateway.md           # 모델 서빙 경계와 Gemma Q4 검증
 │   ├── gemma4-reuse.md          # 기존 구현 선택 이관과 Loop Gate 보강
@@ -271,7 +278,10 @@ services/
         ├── indexing/
         │   ├── models.py       # Phase 3A source block index pointer/request/result/record contracts
         │   ├── mongo_repository.py # pymongo(sync) adapter: index_sync_outbox/index_sync_logs setup + outbox claim/retry/log persistence
-        │   └── service.py      # deterministic fake embedding + in-memory vector adapter + explicit snapshot rebuild + archive outbox service
+        │   └── service.py      # deterministic fake embedding + in-memory vector adapter(query_similar 포함) + explicit snapshot rebuild + archive outbox service
+        ├── context_search/
+        │   ├── models.py       # Phase 4 purpose/need/tool/status/error literal + request/plan/item/package/gate 계약
+        │   └── service.py      # planner 주입형 ContextSearchService + 독립 evaluate_context_gate
         └── agent_loop/
             ├── budget.py       # BudgetPolicy(5차원 budget+retry cap)/BudgetTracker+F1 usage 방어(A1/A3)
             ├── completion.py   # SelfReport + judge_completion completed/awaiting_review(A3)
@@ -311,6 +321,7 @@ tests/
 ├── test_indexing_phase3a.py
 ├── test_indexing_mongo.py
 ├── test_indexing_mongo_indexes.py
+├── test_context_search.py
 ├── test_index_sync_worker_script.py
 ├── test_phase3a_deployed_rebuild_smoke_script.py
 ├── test_phase3a_rebuild_source_block_index_script.py

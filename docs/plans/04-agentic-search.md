@@ -93,14 +93,16 @@ Analysis 대조용 패키지에는 추가로 기존 memory type/scope, 현재 �
 
 ## 착수 전 결정사항
 
-- [ ] MVP intent와 need literal의 최소 집합
-- [ ] planner를 규칙 기반으로 시작할지 LLM을 포함할지
-- [ ] ES/Chroma 병렬 실행과 timeout budget
-- [ ] ranking 공식과 목적별 token budget
-- [ ] candidate 상태 기억을 포함할 조건과 표현 방식
-- [ ] ES/Chroma 장애 시 허용할 fallback 수준
-- [ ] ContextPackage 저장 기간과 민감 정보 처리
-- [ ] Writing용 ContextPackage와 Analysis 비교용 package의 공통/분리 경계
+2026-07-03 아래 항목은 [`04-agentic-search-kickoff-decisions.md`](04-agentic-search-kickoff-decisions.md) 착수 결정 브리프에서 오너 결정으로 확정됐다. 첫 구현은 브리프 §9의 Slice 4.1/4.2 범위로 제한한다.
+
+- [x] MVP intent와 need literal의 최소 집합 — purpose `writing_context` 1종 + need 4종(`current_scene`, `recent_scenes`, `event_context`, `source_quote`), 후속 확장 가능(브리프 §1)
+- [x] planner를 규칙 기반으로 시작할지 LLM을 포함할지 — 터미널 JSON LLM planner 즉시 채택, tool-call flat loop planner는 전환 계획으로 추적(브리프 §2/§2.1)
+- [x] ES/Chroma 병렬 실행과 timeout budget — 첫 slice는 fake vector + Mongo direct 순차 실행 + 요청 wall-clock 한도, 병렬/세분화는 real backend 이후(브리프 §3)
+- [x] ranking 공식과 목적별 token budget — deterministic 최소 규칙, 최종 튜닝은 시스템 전부 구현 후 후속(브리프 §4)
+- [x] candidate 상태 기억을 포함할 조건과 표현 방식 — 첫 slice 제외 + status 라벨 계약 오픈, needs_review 포함(B)은 후속 slice(브리프 §5)
+- [x] ES/Chroma 장애 시 허용할 fallback 수준 — degraded mode + SOT 실패 전체 실패, 계열 구분 error taxonomy(`backend_error`/`system_error`/`llm_error`/`sot_error`) 확장 가능(브리프 §6)
+- [x] ContextPackage 저장 기간과 민감 정보 처리 — 첫 slice 비persist, 저장/retention은 후속(브리프 §7)
+- [x] Writing용 ContextPackage와 Analysis 비교용 package의 공통/분리 경계 — 단일 schema + purpose literal로 시작하되 이후 slice에서 양쪽 모두 완성 필수, Phase 2B 착수 브리프에서 analysis 필드 결정(브리프 §8)
 - [x] flat loop 종료 decision과 기존 Context Gate decision은 직교하며 순차 합성(2026-06-24 소유자 확정)
 
 ## 원문 및 상세 참고

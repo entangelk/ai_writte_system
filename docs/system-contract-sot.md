@@ -1,7 +1,7 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`  
-계약 버전: `v1.6.29`
+계약 버전: `v1.6.32`
 승인일: `2026-06-26`  
 최근 갱신일: `2026-07-03`
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
@@ -33,6 +33,9 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.6.32 | 2026-07-03 | Phase 4 Slice 4.1 독립 검증(조건부 합격)의 차단 조건을 폐쇄했다. `sot_error`의 범위를 명문화: SOT reload 호출(position reload, vector stale-guard 검증, hit 재조회, Gate 재검증)에서 탈출하는 모든 non-NotFound 예외(실가동 pymongo 장애 포함)는 원형 전파 없이 `ContextSearchFailed(sot_error)` 전체 실패다. NotFound는 경로별 의도 분기다 — vector hit snapshot NotFound는 `snapshot_missing` soft stale 제외, Mongo position NotFound는 `sot_error` 전체 실패. `system_error`는 발화 경로가 생길 때 회귀와 함께 여는 예약 literal이다. toggle repo로 진짜 백엔드 예외를 주입하는 양방향 회귀 4개를 추가했고 변이 증명(catch 축소 시 5개 재실패)으로 잠갔다. | `docs/verifications/2026-07-03/context_search_slice_4_1.md`, `plans/04-agentic-search-kickoff-decisions.md`, `tests/test_context_search.py` |
+| v1.6.31 | 2026-07-03 | Phase 4 Slice 4.1 context search를 구현했다. `services/application/app/context_search/`가 purpose/need/tool/status/error literal, `ContextSearchRequest`/`SearchPlan`/`ContextItem`/`ContextPackage`/`GateDecision` 계약, planner 주입형 `ContextSearchService`, 독립 `evaluate_context_gate()`를 제공한다. vector hit는 Phase 3A stale guard와 Mongo SOT 재조회를 거친 뒤에만 ContextItem이 되고 index text는 근거로 쓰지 않는다. `current_scene`/`recent_scenes`는 SOT block kind 기반 deterministic 경계다. retriever step 실패는 `degraded=true` + 계열 error type으로 trace에 남고, SOT reload 실패는 `sot_error` 전체 실패다. package는 persist하지 않고 응답 단위 trace를 포함한다. `InMemoryVectorIndexAdapter.query_similar()`가 project-scoped cosine 유사도 query 표면으로 추가됐다. LLM planner adapter(Slice 4.2), HTTP surface, ES lexical, candidate 포함은 후속이다. | 사용자 결정, `plans/04-agentic-search-kickoff-decisions.md`, `tests/test_context_search.py` |
+| v1.6.30 | 2026-07-03 | Phase 4 agentic search 착수 브리프를 승인했다. purpose는 `writing_context` 1종, need는 `current_scene`/`recent_scenes`/`event_context`/`source_quote` 4종으로 시작하고 후속 확장 가능하다. planner는 터미널 JSON LLM planner를 즉시 채택한다 — LLM이 versioned prompt 기반 1-turn 호출로 SearchPlan JSON을 생성하고(strict parse + 1회 repair), tool-call flat loop planner는 Gateway tool-call wire 계약 해소 후 전환 계획(브리프 §2.1)으로 추적한다. retrieval은 Phase 3A fake vector + Mongo direct 순차 실행, ranking/budget은 deterministic 최소 규칙이다. `needs_review` candidate는 첫 slice에서 제외하되 `candidate`/`canonical` status 라벨 필드는 처음부터 계약에 연다. retriever step 실패는 degraded + 계열 구분 error taxonomy(`backend_error`/`system_error`/`llm_error`/`sot_error`, enum 확장 가능)로 기록하고 Mongo SOT reload 실패는 전체 실패다. ContextPackage는 첫 slice에서 persist하지 않는다. package는 단일 schema + purpose literal로 시작하되 이후 slice에서 Writing용/Analysis 비교용 모두 완성해야 한다(추적 의무). | 사용자 결정, `plans/04-agentic-search-kickoff-decisions.md`, `plans/04-agentic-search.md` |
 | v1.6.29 | 2026-07-03 | Phase 3B one-shot index sync worker 첫 slice를 구현했다. Worker는 `pending` 또는 10분 이상 지난 stale `running` outbox entry를 claim해 recording-only fake archive mutation을 실행하고, attempt result를 `index_sync_logs`에 append한다. Claim lease는 `claimed_at` UTC datetime/BSON Date로 저장한다. Backoff는 `max_attempts=3` 기준 1분 → 5분 → terminal `failed`다. Terminal-location/index 전략은 terminal 이동을 채택해 `success|failed`가 되면 active outbox entry를 제거하고 terminal history는 `index_sync_logs`가 소유한다. Archive worker-time `not_found`는 idempotent success로 처리한다. | 사용자 결정, `plans/03-index-worker-retry-decisions.md`, `tests/test_indexing_phase3a.py`, `tests/test_index_sync_worker_script.py` |
 | v1.6.28 | 2026-07-03 | Phase 3B worker/retry 실행 경계 브리프를 조건부 승인 상태로 추가했다. 첫 worker는 one-shot command로 구현하고 장기적으로 UI-triggered background/daemon이 같은 service를 재사용할 수 있게 둔다. Claim timeout은 10분이며, stale running 판정을 위해 `claimed_at` lease timestamp가 필요하다. Backoff는 `max_attempts=3` 기준 1분 → 5분 → terminal `failed`다. `backend_error`와 query-time `not_found`는 둘 다 최대 3회 시도한다. Dedup은 `pending|running` active entry에만 적용한다. 독립 검증 후 terminal-location/index 전략과 archive worker-time `not_found` 처리는 구현 전 오너 결정으로 분리됐다. | 사용자 결정, `plans/03-index-worker-retry-decisions.md`, `docs/verifications/2026-07-03/phase3b_worker_retry_brief.md` |
 | v1.6.27 | 2026-07-03 | Phase 3B archive outbox 독립 검증 후속 보강을 반영했다. `index_sync_outbox`를 `mongo_collections.md` 운영 collection 레지스트리에 추가하고, `index_sync_logs`와 `sync_request_id`로 조인되는 pending request collection임을 명시했다. Mongo repository의 outbox document 직렬화/역직렬화는 fake collection round-trip 회귀로 잠갔고, `analysis_completed` event가 아직 code enum에 열리지 않았음을 명시 회귀로 고정했다. | `docs/verifications/2026-07-03/phase3b_archive_outbox_slice.md`, `tests/test_indexing_mongo_indexes.py`, `tests/test_indexing_phase3a.py` |
@@ -75,7 +78,7 @@
 
 | 문서 | 역할 | 지위 |
 |---|---|---|
-| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.29 |
+| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.32 |
 | [`plans/README.md`](plans/README.md) | 계획 문서 진입점과 Phase/MVP 관계 | Draft |
 | [`plans/00-foundations.md`](plans/00-foundations.md) | 전역 원칙과 제품 경계 | Draft |
 | [`plans/implementation-plan.md`](plans/implementation-plan.md) | 구현 순서, slice 상태, 검증 gate | Draft |
@@ -365,12 +368,15 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 
 ### Phase 4. Agentic Search
 
-정본 세부 문서: [`plans/04-agentic-search.md`](plans/04-agentic-search.md)
+정본 세부 문서: [`plans/04-agentic-search.md`](plans/04-agentic-search.md), [`plans/04-agentic-search-kickoff-decisions.md`](plans/04-agentic-search-kickoff-decisions.md)
 
 - 목적에 맞는 ContextPackage 후보를 만든 뒤 Context Gate를 통과시킨다.
-- `context_search` profile은 flat-loop allowlist 3종만 쓴다.
+- 착수 브리프가 v1.6.30으로 승인됐고 Slice 4.1(domain 계약 + orchestration + Context Gate, planner 주입)이 v1.6.31로 구현됐다. 첫 slice literal: purpose `writing_context`, need `current_scene`/`recent_scenes`/`event_context`/`source_quote`.
+- planner는 터미널 JSON LLM planner다(1-turn SearchPlan JSON, strict parse + 1회 repair). tool-call flat loop planner는 Gateway tool-call wire 계약 해소 후 전환한다(브리프 §2.1).
+- `context_search` profile은 flat-loop allowlist 3종만 쓴다(전환 후 적용).
 - tool success와 `validate_context` success는 Context Gate 통과가 아니다.
-- Writing용 package와 Analysis 비교용 package의 공통/분리 경계는 미확정이다.
+- retriever step 실패 error taxonomy는 `backend_error`/`system_error`/`llm_error`/`sot_error`로 시작하고 enum 확장 가능하다. `sot_error`(Mongo SOT reload 실패)는 degraded가 아니라 전체 실패이며, NotFound뿐 아니라 SOT reload 호출에서 탈출하는 모든 non-NotFound 예외(pymongo 장애 포함)를 원형 전파 없이 매핑한다(v1.6.32). vector hit의 snapshot NotFound만 index drift로 보고 `snapshot_missing` soft stale 제외한다. `system_error`는 예약 literal이다.
+- package는 단일 schema + purpose literal로 시작한다. 이후 slice에서 Writing용/Analysis 비교용 모두 완성해야 하며(오너 추적 의무), analysis 비교용 필드는 Phase 2B 착수 브리프에서 결정한다.
 
 ### Phase 5. Writing AI
 
@@ -424,7 +430,7 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 - Phase 2B taxonomy 확장과 confidence threshold
 - Analysis `update/add_evidence/no_change/conflict`의 정확한 public envelope
 - Chroma embedding model, ES analyzer, 자동 sync delivery 방식
-- ContextPackage schema variant(Writing용/Analysis용 공통 또는 분리)
+- ContextPackage의 Analysis 비교용 확장 필드(단일 schema + purpose literal은 v1.6.30으로 확정, Writing용/Analysis 비교용 모두 완성은 추적 의무, 필드는 Phase 2B 착수 브리프에서 결정)
 - WritingCandidate 출력 단위(full text/patch)
 - Writing Gate decision literal과 editor 처리
 - enum/bounds를 쓰는 첫 tool schema 등록 시 validator 확장 방식

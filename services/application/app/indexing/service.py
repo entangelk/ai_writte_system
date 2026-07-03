@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import hashlib
+import math
 from typing import Protocol
 
 from services.application.app.core_sot.service import CoreSotService, NotFound
@@ -256,6 +257,17 @@ class InMemoryVectorIndexAdapter:
                 if not record.project_archived and not record.draft_archived
             )
         return tuple(sorted(records, key=lambda record: record.id))
+
+    def query_similar(
+        self, *, project_id: str, vector: tuple[float, ...], limit: int
+    ) -> tuple[SourceBlockIndexRecord, ...]:
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        scored = sorted(
+            self.list_records(project_id=project_id),
+            key=lambda record: (-_cosine_similarity(vector, record.vector), record.id),
+        )
+        return tuple(scored[:limit])
 
 
 class IndexSyncOutboxService:
@@ -606,6 +618,15 @@ def _dedup_key(
     project_id: str, event: IndexSyncEvent, source: IndexSyncSource
 ) -> tuple[str, IndexSyncEvent, str, str]:
     return (project_id, event, source.mongo_collection, source.mongo_id)
+
+
+def _cosine_similarity(a: tuple[float, ...], b: tuple[float, ...]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
 
 
 _ACTIVE_OUTBOX_STATUSES = {

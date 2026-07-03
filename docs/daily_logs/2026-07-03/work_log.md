@@ -113,6 +113,45 @@
 - 이슈 #2(Mongo worker lifecycle live 회귀 부재): `tests/test_indexing_mongo.py`에 `MongoIndexSyncWorkerSmokeTests` 4개를 추가했다. 기존 outbox live smoke와 같은 `CORE_SOT_TEST_MONGO_URI` env-only skip 게이트를 공유한다. 잠근 범위: success → active outbox 제거 + success log append, backend_error 1분→5분 backoff 후 3회 terminal `failed`(logs `[1,2,3]`), stale running(>10분) reclaim은 `attempt_count` 미소비 + non-stale는 reclaim 불가, terminal success 후 같은 dedup key 재enqueue는 새 `sync_request_id`.
 - 이슈 #1(브리프 §5 내부 모순): 브리프 Owner 결정(line 13)과 §5 채택이 "`not_found` 3회"로 남아 §8.2/코드/테스트/SoT의 "archive worker-time `not_found` = idempotent success"와 충돌했다. line 13과 §5에 query-time(3회, 후속 selector)/archive worker-time(idempotent success) 분리 note를 추가해 모순을 제거했고, §8 회귀의 query-time `not_found` 항목에 "후속 query selector slice에서 회귀 추가"를 표시했다. 결정 자체는 변경 없이 문서 일관성만 정리했다.
 
+### Phase 4 agentic search 착수 결정 브리프 작성
+
+- 변경 파일: `docs/plans/04-agentic-search-kickoff-decisions.md`(신규), `docs/plans/04-agentic-search.md`, `docs/plans/README.md`, `HANDOFF.md`, `CHANGELOG.md`, `docs/daily_logs/2026-07-03/work_log.md`.
+- HANDOFF Next Tasks가 모두 후속/상류 차단 상태(real adapter 최후속, tool-call branch 차단, `artifact_present` 대기)라 계획 순서상 다음 착수 지점을 Phase 4 agentic search로 판단했다.
+- Phase 2A/3A/3B와 같은 관례로 구현 전 착수 결정 브리프를 먼저 작성했다. 상태는 `Proposed for owner decision`이며 오너 결정 전 구현을 시작하지 않는다.
+- `04-agentic-search.md`의 미확정 8개 항목 각각에 선택지 표와 추천안을 정리했다: ① purpose/need 최소 literal(추천 `writing_context` 1종 + `current_scene`/`recent_scenes`/`event_context`/`source_quote` 4종 — 현재 검색 재료인 source block + Mongo SOT로 실제 서빙 가능한 것만), ② 규칙 기반 deterministic planner 우선(LLM flat loop planner는 domain tool-call branch 상류 3중 의존 해소 후), ③ retrieval surface는 Phase 3A fake vector + Mongo direct 순차 실행(ES lexical 후속), ④ deterministic ranking(need 우선순위→similarity→tie-break)과 문자수 기반 token 추정 + 초과 항목 제외, ⑤ `needs_review` candidate는 첫 slice 제외하되 `candidate`/`canonical` status 라벨 필드는 계약에 오픈, ⑥ retriever step 실패는 degraded 표시 + trace 기록, Mongo SOT reload 실패는 전체 실패, ⑦ ContextPackage는 첫 slice에서 persist하지 않음, ⑧ Writing/Analysis package는 단일 schema + purpose literal로 시작하고 analysis 비교용 필드는 Phase 2B 착수 브리프에서 결정.
+- 구현을 막는 상류 의존(사실)도 결정과 분리해 명시했다: tool-call branch 미구현, ES 부재, canonical memory store 부재.
+- 첫 구현 slice 제안은 `services/application/app/context_search/` domain model + 규칙 기반 planner + `validate_source_block_record()` guard 경유 SOT reload orchestration + deterministic ranking/budget + Context Gate 최소 검사 + 양방향 회귀 목록으로 한정했다. HTTP API, LLM planner, ES, prior-memory purpose, package persist는 후속 slice로 남겼다.
+- SoT는 올리지 않았다. 승인된 결정이 아직 없으므로 SoT 반영은 오너 결정 후로 미룬다(3B 브리프와 같은 관례). (후속: 같은 날 오너 결정으로 v1.6.30 승인됨 — 아래 참조.)
+
+### Phase 4 착수 브리프 오너 결정 반영 (SoT v1.6.30)
+
+- 변경 파일: `docs/plans/04-agentic-search-kickoff-decisions.md`, `docs/plans/04-agentic-search.md`, `docs/system-contract-sot.md`, `HANDOFF.md`, `CHANGELOG.md`, `docs/daily_logs/2026-07-03/work_log.md`.
+- 오너가 8개 항목을 결정했다: §1 A(최소 literal, 후속 확장 가능 확인), §2 B(LLM planner 즉시), §3 A, §4 A(최소, 최종 튜닝 후속), §5 오너는 B 선호이나 확장 비용 낮음 확인 후 A 먼저 + B 후속, §6 A + 계열 구분 error taxonomy 확장 조건, §7 A, §8 A로 시작하되 이후 slice에서 C(Writing/Analysis 비교용 모두) 완성 의무.
+- §2는 기존 승인 결정("tool-call branch는 wire 미계약이라 추측 구현 금지")과의 충돌을 명시하고 확인 질문을 했다. 오너 확인 결과 **터미널 JSON planner**(1-turn SearchPlan JSON 생성, tool-call 없음, Phase 2A extraction 패턴)로 확정했고, tool-call flat loop planner 전환 계획을 브리프 §2.1로 남겼다. live Gateway는 test/smoke 전용이고 구현은 provider 추상화 뒤에 둔다. IP 진입→내부 통신 전환은 env 설정 변경임을 확인했다.
+- §6 오너 조건에 따라 step 실패 error taxonomy를 `backend_error`/`system_error`/`llm_error`/`sot_error` 4종(enum 확장 가능)으로 브리프에 확정했다. `sot_error`는 degraded가 아니라 전체 실패다.
+- 브리프 상태를 `Approved for Phase 4 first slices (2026-07-03)`로 올리고 Owner decisions 섹션과 §9 Slice 4.1/4.2 승인 범위를 기록했다. SoT v1.6.30, `04-agentic-search.md` 착수 전 결정사항 전항 [x] 처리.
+
+### Phase 4 Slice 4.1 구현 (SoT v1.6.31)
+
+- 변경 파일: `services/application/app/context_search/__init__.py`(신규), `services/application/app/context_search/models.py`(신규), `services/application/app/context_search/service.py`(신규), `services/application/app/indexing/service.py`, `tests/test_context_search.py`(신규), `docs/plans/04-agentic-search-kickoff-decisions.md`, `docs/system-contract-sot.md`, `HANDOFF.md`, `CHANGELOG.md`, `docs/daily_logs/2026-07-03/work_log.md`.
+- domain model: purpose/need/tool/status/error enum, `ContextSearchRequest`/`ContextBudget`/`CurrentPosition`, `SearchPlan`/`SearchPlanStep(tools tuple)`, `ContextItem`(candidate/canonical status 라벨 + `source_ref_ids` 계약 필드 포함), `ContextPackage`(macro/micro/constraints/do_not_use/trace/degraded/status="candidate"), `GateFinding`/`GateDecision`, need→tool 허용 매핑.
+- `ContextSearchService.build_context_package()`: planner(주입) → plan 검증(cross-project/미요청 need/불허 tool은 `llm_error`) → step 순차 실행 → deterministic ranking(need 우선순위, need 내 도착순=vector 유사도순) → budget 포함/제외(절단 없음) → package. wall-clock 한도 기본 60s(주입 clock), 초과는 error taxonomy와 분리된 `ContextSearchBudgetExceeded`.
+- vector 경로: `query_similar` hit → Phase 3A `validate_source_block_record()` guard(stale 제외 + trace reason) → Mongo SOT 재조회 → SOT block text로 ContextItem 구성. index hit text는 사용하지 않는다. adapter 예외는 step `backend_error` + `degraded=true`로 계속 진행, SOT reload의 non-NotFound 오류는 `sot_error` 전체 실패.
+- Mongo direct 경로: `current_position(draft_id, version_id)`로 version snapshot을 읽고 SOT block kind(heading/scene marker) 기반 deterministic 경계로 `current_scene`(마지막 경계 이후 paragraph run)/`recent_scenes`(경계 이전 paragraph 최대 5개)를 구성한다. AI 추론 split 없음.
+- `evaluate_context_gate()`: orchestration flag를 신뢰하지 않고 SOT를 재조회하는 독립 검사. cross-project, SOT reload 증거 부재, candidate status 항목(첫 slice 금지 — B 확장 시 완화), stale(hash drift/block 소실/archive), budget 초과 → reject + findings.
+- `InMemoryVectorIndexAdapter.query_similar(project_id, vector, limit)`을 indexing adapter에 추가했다(cosine, `(-similarity, record.id)` deterministic 순서, project-scoped). 유사도 계산은 context_search가 아니라 adapter 계층 소유로 두어 실제 Chroma 도입 시 같은 표면으로 교체한다.
+- 회귀 24개: SOT reload/canonical 라벨/trace, scene 경계, project isolation, archive 후 stale 제외(should-fire)+fresh hit 미제외(should-NOT-fire), `sot_error` 전체 실패, budget 양방향, need 우선순위 ranking 양방향, backend 실패 degraded+taxonomy, 정상 실행 비degraded, 빈 결과 trace, planner 실패/plan 위반 3종 `llm_error`, wall-clock 초과, invalid request 3종, Gate pass 1 + reject 5분기, token 추정, query_similar 경계.
+
+### Phase 4 Slice 4.1 독립 검증 차단 조건 폐쇄 (SoT v1.6.32)
+
+- 변경 파일: `services/application/app/context_search/service.py`, `tests/test_context_search.py`, `docs/plans/04-agentic-search-kickoff-decisions.md`, `docs/system-contract-sot.md`, `HANDOFF.md`, `CHANGELOG.md`, `docs/daily_logs/2026-07-03/work_log.md`.
+- 독립 검증(`docs/verifications/2026-07-03/context_search_slice_4_1.md`, 조건부 합격)이 차단급 결함을 실증했다: SOT reload catch가 `NotFound`/`CoreSotError`뿐이라 실가동 백엔드 장애(pymongo 등 non-CoreSotError 예외)가 `sot_error`로 매핑되지 않고 원형 탈출했고, vector 경로의 stale guard 호출은 try 블록 밖이었다. 기존 회귀 `test_sot_reload_failure_surfaces_sot_error_not_fake_success`는 `_BrokenSotRepository` fixture에도 불구하고 `version_id="missing-version"` 탓에 NotFound 경로만 탔다(`get_blocks`의 RuntimeError는 도달 불가 dead code).
+- 코드 보강: SOT reload 호출 4곳(vector stale-guard 검증, vector hit 재조회, Mongo position reload, Gate 재검증 2곳)의 catch를 non-NotFound 예외까지 넓혀 `ContextSearchFailed(sot_error)`로 매핑했다. try 블록은 SOT 호출만 감싸 orchestration 버그의 `sot_error` 오분류를 막는다. Gate도 검증 불가를 pass/오귀속 reject로 바꾸지 않고 같은 lineage로 던진다. 매핑 계열은 별도 오너 결정 없이 `sot_error`로 정했다 — 근거: 승인 계약(§6/SoT v1.6.31)의 "Mongo SOT reload 실패 = sot_error 전체 실패"는 reload 시도 중의 실패 전부를 가리키는 평문 독해이고, `system_error`는 SOT 호출 밖 orchestration 계열용 예약으로 남긴다.
+- 테스트 보강: `_ToggleBackendSotRepository`(정상↔`fail_reads=True`에서 raw RuntimeError)로 진짜 백엔드 예외를 주입하는 양방향 회귀 3개(Mongo position/vector hit/Gate — 정상 시 통과 over-strict + 다운 시 `sot_error` under-strict), vector snapshot NotFound soft 제외 회귀 1개(ghost record → `snapshot_missing` + 비degraded). 기존 테스트는 `test_missing_position_version_maps_to_sot_error`로 개명해 의도/동작을 일치시켰다. 변이 증명: 넓힌 catch를 `CoreSotError`로 되돌리면 5개 재실패.
+- 계약 보강: 브리프 §6에 sot_error 범위(non-NotFound 예외 포함), NotFound 경로별 의도 분기(vector hit=`snapshot_missing` soft 제외 / Mongo position=`sot_error` 전체 실패), `system_error` 예약 literal을 명문화하고 SoT v1.6.32로 올렸다. 브리프 §9.1 `ContextItem` 필드명 스케치도 구현 확정 명(`pointer`/`source_ref_ids`)으로 정정했다.
+- 비차단 정정: "435개 통과(44 skip)"는 unittest "Ran 435 ... OK (skipped=44)" 오독이었다(실제 391 passed/44 skipped). 이번 세션 기록(HANDOFF/work log/브리프)을 정정했다. 같은 "N개 통과(M skip)" 표현이 과거 날짜 기록 전반에도 있으므로(예: "394개 통과(37 skip)") 과거 이력은 고치지 않되, 이후 기록은 passed/skipped를 분리 표기한다.
+- 검증 기록 원본은 조건부 판정 그대로 보존한다(관례). 폐쇄 증적은 본 로그와 HANDOFF/SoT가 소유한다.
+
 ## Issues found
 
 - 문제: 브리프는 미확정 항목 목록에 4/5/6을 적었지만 실제 선택지와 채택안은 없었다.
@@ -185,6 +224,16 @@
 - Resolution: 실패 attempt 직전 `attempt_count + 1 < max_attempts`로 requeue 여부를 계산하게 바꿨다.
 - Outcome: in-memory와 Mongo repository에서 같은 worker summary semantics가 유지된다.
 
+- 문제: Slice 4.1의 SOT reload 실패 경로에서 실가동 백엔드 장애(non-CoreSotError 예외)가 `sot_error`로 매핑되지 않고 원형 탈출했고, 이를 잠갔다고 믿은 회귀는 실제로는 NotFound 경로만 탔다.
+- 원인: catch 표면을 `except NotFound`/`except CoreSotError`로 좁게 잡았는데 Mongo repository는 pymongo 예외를 `CoreSotError`로 감싸지 않는다. 테스트는 `_BrokenSotRepository`(get_blocks RuntimeError)를 만들고도 `version_id="missing-version"`을 줘서 `get_version()` None → NotFound가 먼저 발화해 fixture의 RuntimeError가 dead code가 됐다 — "초록 테스트 = 계약 검증" 함정 그대로.
+- Resolution: SOT reload 호출 4곳 catch를 non-NotFound 예외까지 넓혀 `sot_error` 매핑(try 블록은 SOT 호출만), toggle repo로 진짜 백엔드 예외를 주입하는 양방향 회귀 3개 + vector NotFound soft 제외 회귀 1개 추가, 기존 테스트 개명으로 의도/동작 일치, 변이 증명으로 잠금 확인.
+- Outcome: "SOT 백엔드 다운 → sot_error 전체 실패" boundary가 코드·회귀·계약(§6 명문화, SoT v1.6.32) 세 층에서 닫혔고, Slice 4.2 live caller가 붙어도 원형 예외가 새지 않는다.
+
+- 문제: 이번 세션 기록에 "전체 435개 통과(44 skip)"로 적었으나 실제 passed는 391이었다.
+- 원인: unittest discover의 "Ran 435 tests ... OK (skipped=44)"에서 "Ran N"을 "N개 통과"로 오독했다. skip은 Ran에 포함된다.
+- Resolution: 이번 세션 기록(HANDOFF/work log/브리프)을 passed/skipped 분리 표기로 정정했다(보강 후 439 실행 / 395 passed / 44 skipped).
+- Outcome: reported number가 재계산 가능해졌다. 과거 날짜 기록의 같은 표현("394개 통과(37 skip)" 등)은 이력 보존을 위해 고치지 않되, 이후 기록은 분리 표기를 따른다(추적 부채로 명시).
+
 ## Decisions
 
 - Phase 3B 첫 automatic event source는 archive events로 시작한다. `analysis_completed`는 장기적으로 더 맞는 흐름으로 보지만 candidate indexing/review 지위가 확정될 때까지 후속이다.
@@ -201,6 +250,9 @@
 - Status-aware dedup은 `pending|running` active entry에만 적용하고 terminal `success|failed`만 있으면 새 active request 생성을 허용한다.
 - Terminal-location/index 전략은 terminal 이동을 채택한다. Outbox는 active queue이고 terminal history는 `index_sync_logs`가 소유한다.
 - Archive worker-time `not_found`는 idempotent success다.
+- (Phase 4) 착수 브리프 8개 항목을 오너가 결정했다(§1 A, §2 터미널 JSON LLM planner, §3 A, §4 A, §5 A→B 후속, §6 A+error taxonomy 조건, §7 A, §8 A→C 완성 의무). 상세와 근거는 브리프 Owner decisions 섹션과 위 "Phase 4 착수 브리프 오너 결정 반영" 참조.
+- (Phase 4) planner를 LLM 기반으로 즉시 시작하는 이유: 뼈대가 되는 에이전트 LLM Gateway가 이미 live로 연결되어 있고, 규칙 기반 planner를 거치는 한 단계가 불필요하다고 판단했다. 단 tool-call wire 미계약 충돌을 피하기 위해 범위는 터미널 JSON 1-turn으로 좁혔다(오너 확인 완료).
+- (Phase 4) "LLM tool-call 미가용 시 터미널 JSON으로 우회" 패턴은 반복될 결정이므로 전환 계획을 브리프 §2.1로 문서화해 두기로 했다(오너 요청).
 
 ## Verification
 
@@ -238,7 +290,22 @@
 - Worker slice 보강 live smoke: throwaway `mongo:7`(27034)에서 `CORE_SOT_TEST_MONGO_URI='mongodb://localhost:27034/?directConnection=true' python3 -m unittest tests.test_indexing_mongo -v` — live 7개(기존 outbox 3 + 신규 worker 4) 통과. 컨테이너는 `docker stop`으로 정리.
 - Worker slice 보강 final full regression: `python3 -m unittest discover tests` — 411개 통과(44 skip).
 - Worker slice 보강 final diff hygiene: `git diff --check` — 통과.
+- Phase 4 착수 브리프 link check: 브리프가 참조하는 `../system-contract-sot.md`, `04-agentic-search.md`, `flat-loop-gate.md`, `../abstract.md`, `../agentic_search_flow.md`, `../contracts.md` 존재 확인.
+- Phase 4 착수 브리프 literal 정합: need 4종(`current_scene`, `recent_scenes`, `event_context`, `source_quote`)이 `agentic_search_flow.md` §7.2 목록과 일치, `context_search` tool 3종(`search_memory`, `load_memory`, `validate_context`)과 wall-clock 60000ms가 `flat-loop-gate.md` §tool/§budget 표와 일치함을 rg로 확인.
+- Phase 4 착수 브리프 diff hygiene: `git diff --check` — 통과. 문서 전용 변경이라 테스트 대상 코드 변경 없음.
+- Phase 4 Slice 4.1 compile: `python3 -m py_compile services/application/app/context_search/models.py services/application/app/context_search/service.py services/application/app/indexing/service.py tests/test_context_search.py` — 통과.
+- Phase 4 Slice 4.1 focused regression: `python3 -m unittest tests.test_context_search -v` — 24개 통과.
+- Phase 4 Slice 4.1 broader regression: `python3 -m unittest tests.test_context_search tests.test_indexing_phase3a tests.test_core_sot` — 72개 통과 (indexing adapter `query_similar` 추가에 따른 기존 Phase 3A/Core SOT 회귀 무손상 확인).
+- Phase 4 Slice 4.1 full regression: `python3 -m unittest discover tests` — Ran 435, OK(skipped=44). (당초 "435개 통과(44 skip)"로 기록했으나 이는 "Ran N" 오독 — 실제 391 passed/44 skipped. 독립 검증 지적으로 정정.)
+- Slice 4.1 검증 보강 compile: `python3 -m py_compile services/application/app/context_search/service.py tests/test_context_search.py` — 통과.
+- Slice 4.1 검증 보강 focused regression: `python3 -m unittest tests.test_context_search -v` — 28개 통과(보강 전 24개).
+- Slice 4.1 검증 보강 변이 증명: SOT reload catch 3계열을 `CoreSotError`로 좁히는 변이에서 5개 재실패(백엔드 다운 주입 회귀 포함), 복원 후 전체 통과 — 양방향 잠금 확인.
+- Slice 4.1 검증 보강 full regression: `python3 -m unittest discover tests` — Ran 439, OK(skipped=44). `python3 -m pytest -q` — 395 passed, 44 skipped.
+- Slice 4.1 검증 보강 diff hygiene: `git diff --check` — 통과.
+- Phase 4 Slice 4.1 diff hygiene: `git diff --check` — 통과.
 
 ## Next steps
 
+- Phase 4 Slice 4.2: 터미널 JSON LLM planner adapter(`context_search_plan_v1` prompt template, strict parse + 1회 repair, unit fake provider + live smoke).
+- Phase 4 후속 추적 의무: ContextPackage Writing용/Analysis 비교용 모두 완성(§8 C), `needs_review` candidate 포함 확장(§5 B), tool-call planner 전환(§2.1).
 - Actual ChromaDB/Elasticsearch mutation, stale-hit sync job, `analysis_completed` wiring은 후속이다.

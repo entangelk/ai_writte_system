@@ -2,6 +2,10 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-07-03 | SoT v1.6.32: Slice 4.1 독립 검증 차단 조건 폐쇄(SOT 백엔드 다운 → sot_error 매핑 + 백엔드 예외 주입 회귀 + NotFound 경로 분기 명문화) | [work log](docs/daily_logs/2026-07-03/work_log.md) |
+| 2026-07-03 | SoT v1.6.31: Phase 4 Slice 4.1 context search 구현(domain 계약 + planner 주입 orchestration + Context Gate) | [work log](docs/daily_logs/2026-07-03/work_log.md) |
+| 2026-07-03 | SoT v1.6.30: Phase 4 착수 브리프 승인. 사용자 결정: 터미널 JSON LLM planner 즉시 채택(tool-call planner는 전환 계획 추적), 계열 구분 error taxonomy, package 단일 schema로 시작하되 Writing/Analysis 비교용 모두 완성 의무 | [work log](docs/daily_logs/2026-07-03/work_log.md) |
+| 2026-07-03 | Phase 4 agentic search 착수 결정 브리프 추가 | [work log](docs/daily_logs/2026-07-03/work_log.md) |
 | 2026-07-03 | Phase 3B worker/retry slice 검증 후속 보강 | [work log](docs/daily_logs/2026-07-03/work_log.md) |
 | 2026-07-03 | SoT v1.6.29: Phase 3B one-shot index sync worker 첫 slice 구현 | [work log](docs/daily_logs/2026-07-03/work_log.md) |
 | 2026-07-03 | SoT v1.6.28: Phase 3B worker/retry 실행 경계 조건부 승인 | [work log](docs/daily_logs/2026-07-03/work_log.md) |
