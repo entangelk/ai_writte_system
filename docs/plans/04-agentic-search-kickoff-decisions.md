@@ -181,6 +181,21 @@ HTTP API surface, tool-call flat loop planner(§2.1), lexical(ES) 경로, prior-
 - 계약: §6에 sot_error 범위/NotFound 경로별 분기/`system_error` 예약을 명문화했다(SoT v1.6.32).
 - suite: context_search 28개, 전체 439개 실행 중 395 passed / 44 skipped (이전 기록의 "435개 통과(44 skip)"는 unittest "Ran N" 오독으로, 정확히는 391 passed / 44 skipped였다 — 함께 정정).
 
+## 구현 후속 — Slice 4.2 (2026-07-04)
+
+§9.2를 구현했다. `services/application/app/context_search/planner.py`에 아래를 추가했다.
+
+1. versioned prompt template `context_search_plan_v1`(task_type `context_search_plan`, 상수 + `seed_context_search_plan_template()`). 기존 `analysis/prompt_templates.py`의 `PromptTemplateService.seed_template()` 저장소를 그대로 재사용하고, analysis 모듈은 건드리지 않았다.
+2. `build_context_search_plan_request()`: system=template, user=JSON payload(project_id/purpose/query/has_current_position/needs+need별 allowed_tools/tool_literals/output_contract). `project_id`는 모델이 아니라 request에서 주입한다.
+3. `parse_search_plan(content, project_id)`: strict JSON object → `steps` 배열 → 각 step(step_id 비어있지 않은 str, need∈`ContextNeed`, tools 비어있지 않은 배열 각 원소∈`SearchTool`, query str). enum literal 위반은 `SearchPlanParseError`.
+4. `TerminalJsonSearchPlanner.build_plan()`(async): template 조회 → Gateway `/v1/generate` 1-turn → strict parse. parse 실패 시 원문 output/parser error/원 user payload로 1회 repair 후 재parse. 그래도 실패하면 `ContextSearchFailed(llm_error)`. template 부재도 `llm_error`.
+
+경계 결정: adapter는 §1 enum literal(need/tool) **멤버십만** 검증하고, plan 의미 검증(미요청 need, need별 불허 tool, project 일치)은 Slice 4.1 `ContextSearchService._validate_plan`이 계속 소유한다(중복 없음). provider가 async라 adapter도 async이며(Phase 2A `VersionedPromptAnalysisExtractionAdapter` 패턴), Slice 4.1의 sync `SearchPlanner` Protocol/`build_context_package`는 fake 주입 seam으로 유지된다 — async planner를 sync service에 통합하는 일은 HTTP wiring slice에서 service를 async로 올릴 때 처리한다.
+
+회귀 13개(`tests/test_context_search_planner.py`): valid parse(literal + project_id 주입), plan_id 기본값, 알 수 없는 need/tool literal parse error, non-JSON/bad shape 5종, prompt payload(template + needs/allowed_tools) 확인, markdown-fenced 1회 repair, invalid literal 1회 repair 후 성공, repair prompt에 parser_error/invalid_output 포함, repair 후에도 실패 시 `llm_error`, 1회 초과 재시도 금지(정확히 2회 호출), template 부재 `llm_error`. live smoke는 `scripts/phase4_context_search_planner_live_smoke.py`(실제 Gateway → llama.cpp, sandbox 밖 실행 필요).
+
+후속으로 남긴 것: HTTP API surface, service async 통합/wiring, tool-call flat loop planner(§2.1), lexical(ES) 경로, prior-memory(analysis 비교) purpose(§8 C), package persist.
+
 ## 원문 및 상세 참고
 
 - [`../abstract.md`](../abstract.md) §5, §12.2, §13.3, §14.3
