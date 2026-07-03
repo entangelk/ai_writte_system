@@ -8,19 +8,29 @@ from typing import Protocol
 
 from services.application.app.core_sot.service import CoreSotService, NotFound
 from services.application.app.indexing.models import (
+    IndexSyncBackend,
+    IndexSyncEvent,
+    IndexSyncOutboxEntry,
     IndexPointer,
     IndexRecordKind,
     IndexRecordValidation,
     IndexStaleReason,
     IndexSyncRequest,
     IndexSyncResult,
+    IndexSyncSource,
+    IndexSyncStatus,
     IndexSyncTarget,
+    IndexSyncTargetState,
     SourceBlockIndexRecord,
 )
 
 
 SOURCE_BLOCK_COLLECTION = "source_blocks"
 FAKE_VECTOR_BACKEND = "in_memory_fake"
+INDEX_SYNC_MAX_ATTEMPTS = 3
+PROJECTS_COLLECTION = "projects"
+DRAFTS_COLLECTION = "drafts"
+CHROMA_TARGET = "chroma"
 
 
 class EmbeddingProvider(Protocol):
@@ -29,6 +39,51 @@ class EmbeddingProvider(Protocol):
 
 class VectorIndexAdapter(Protocol):
     def upsert_records(self, records: tuple[SourceBlockIndexRecord, ...]) -> int: ...
+
+
+class IndexSyncRepository(Protocol):
+    def next_sync_request_id(self) -> str: ...
+
+    def get_outbox_entry_by_dedup_key(
+        self,
+        *,
+        project_id: str,
+        event: IndexSyncEvent,
+        source: IndexSyncSource,
+    ) -> IndexSyncOutboxEntry | None: ...
+
+    def put_outbox_entry(self, entry: IndexSyncOutboxEntry) -> None: ...
+
+
+class InMemoryIndexSyncRepository:
+    def __init__(self) -> None:
+        self._sync_request_seq = 0
+        self.outbox_entries: dict[str, IndexSyncOutboxEntry] = {}
+        self._outbox_dedup: dict[tuple[str, IndexSyncEvent, str, str], str] = {}
+
+    def next_sync_request_id(self) -> str:
+        self._sync_request_seq += 1
+        return f"index-sync-request-{self._sync_request_seq}"
+
+    def get_outbox_entry_by_dedup_key(
+        self,
+        *,
+        project_id: str,
+        event: IndexSyncEvent,
+        source: IndexSyncSource,
+    ) -> IndexSyncOutboxEntry | None:
+        entry_id = self._outbox_dedup.get(_dedup_key(project_id, event, source))
+        if entry_id is None:
+            return None
+        return self.outbox_entries[entry_id]
+
+    def put_outbox_entry(self, entry: IndexSyncOutboxEntry) -> None:
+        key = _dedup_key(entry.project_id, entry.event, entry.source)
+        existing_id = self._outbox_dedup.get(key)
+        if existing_id is not None:
+            return
+        self.outbox_entries[entry.sync_request_id] = entry
+        self._outbox_dedup[key] = entry.sync_request_id
 
 
 class DeterministicFakeEmbeddingProvider:
@@ -70,6 +125,70 @@ class InMemoryVectorIndexAdapter:
                 if not record.project_archived and not record.draft_archived
             )
         return tuple(sorted(records, key=lambda record: record.id))
+
+
+class IndexSyncOutboxService:
+    def __init__(self, repository: IndexSyncRepository) -> None:
+        self._repo = repository
+
+    def enqueue_project_archived(
+        self, *, project_id: str
+    ) -> IndexSyncOutboxEntry:
+        return self._enqueue_archive_event(
+            project_id=project_id,
+            event=IndexSyncEvent.PROJECT_ARCHIVED,
+            source=IndexSyncSource(
+                mongo_collection=PROJECTS_COLLECTION,
+                mongo_id=project_id,
+            ),
+        )
+
+    def enqueue_draft_archived(
+        self, *, project_id: str, draft_id: str
+    ) -> IndexSyncOutboxEntry:
+        return self._enqueue_archive_event(
+            project_id=project_id,
+            event=IndexSyncEvent.DRAFT_ARCHIVED,
+            source=IndexSyncSource(
+                mongo_collection=DRAFTS_COLLECTION,
+                mongo_id=draft_id,
+            ),
+        )
+
+    def _enqueue_archive_event(
+        self,
+        *,
+        project_id: str,
+        event: IndexSyncEvent,
+        source: IndexSyncSource,
+    ) -> IndexSyncOutboxEntry:
+        existing = self._repo.get_outbox_entry_by_dedup_key(
+            project_id=project_id,
+            event=event,
+            source=source,
+        )
+        if existing is not None:
+            return existing
+        entry = IndexSyncOutboxEntry(
+            sync_request_id=self._repo.next_sync_request_id(),
+            project_id=project_id,
+            user_id=None,
+            event=event,
+            source=source,
+            targets={
+                CHROMA_TARGET: IndexSyncTargetState(
+                    status=IndexSyncStatus.PENDING,
+                    backend=IndexSyncBackend.IN_MEMORY_FAKE,
+                )
+            },
+            status=IndexSyncStatus.PENDING,
+            attempt_count=0,
+            max_attempts=INDEX_SYNC_MAX_ATTEMPTS,
+            next_attempt_at=None,
+            last_error=None,
+        )
+        self._repo.put_outbox_entry(entry)
+        return entry
 
 
 @dataclass(frozen=True, slots=True)
@@ -252,3 +371,9 @@ class SourceBlockIndexingService:
             project_archived=project_archived,
             draft_archived=draft_archived,
         )
+
+
+def _dedup_key(
+    project_id: str, event: IndexSyncEvent, source: IndexSyncSource
+) -> tuple[str, IndexSyncEvent, str, str]:
+    return (project_id, event, source.mongo_collection, source.mongo_id)

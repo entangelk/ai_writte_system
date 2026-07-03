@@ -8,13 +8,25 @@ from services.application.app.core_sot.service import (
     InMemoryCoreSotRepository,
 )
 from services.application.app.indexing.models import (
+    IndexSyncBackend,
+    IndexSyncErrorType,
+    IndexSyncEvent,
+    IndexSyncLastError,
+    IndexSyncSource,
+    IndexSyncStatus,
     IndexRecordKind,
     IndexStaleReason,
     IndexSyncTarget,
 )
 from services.application.app.indexing.service import (
+    CHROMA_TARGET,
     DeterministicFakeEmbeddingProvider,
+    DRAFTS_COLLECTION,
+    INDEX_SYNC_MAX_ATTEMPTS,
+    InMemoryIndexSyncRepository,
     InMemoryVectorIndexAdapter,
+    IndexSyncOutboxService,
+    PROJECTS_COLLECTION,
     SourceBlockIndexingService,
 )
 
@@ -231,6 +243,77 @@ class SourceBlockIndexingServiceTest(unittest.TestCase):
             validation.stale_reasons,
             (IndexStaleReason.SNAPSHOT_MISSING,),
         )
+
+
+class IndexSyncOutboxServiceTest(unittest.TestCase):
+    def test_analysis_completed_event_is_not_open_until_candidate_indexing_contract(self):
+        self.assertNotIn(
+            "analysis_completed",
+            {event.value for event in IndexSyncEvent},
+        )
+
+    def test_project_archive_creates_pending_chroma_outbox_entry(self):
+        repo = InMemoryIndexSyncRepository()
+        service = IndexSyncOutboxService(repo)
+
+        entry = service.enqueue_project_archived(project_id="project-1")
+
+        self.assertEqual(entry.sync_request_id, "index-sync-request-1")
+        self.assertEqual(entry.project_id, "project-1")
+        self.assertIsNone(entry.user_id)
+        self.assertEqual(entry.event, IndexSyncEvent.PROJECT_ARCHIVED)
+        self.assertEqual(entry.source.mongo_collection, PROJECTS_COLLECTION)
+        self.assertEqual(entry.source.mongo_id, "project-1")
+        self.assertEqual(entry.status, IndexSyncStatus.PENDING)
+        self.assertEqual(entry.attempt_count, 0)
+        self.assertEqual(entry.max_attempts, INDEX_SYNC_MAX_ATTEMPTS)
+        self.assertEqual(INDEX_SYNC_MAX_ATTEMPTS, 3)
+        self.assertIsNone(entry.next_attempt_at)
+        self.assertIsNone(entry.last_error)
+        self.assertEqual(set(entry.targets), {CHROMA_TARGET})
+        self.assertEqual(
+            entry.targets[CHROMA_TARGET].status,
+            IndexSyncStatus.PENDING,
+        )
+        self.assertEqual(
+            entry.targets[CHROMA_TARGET].backend,
+            IndexSyncBackend.IN_MEMORY_FAKE,
+        )
+
+    def test_draft_archive_creates_distinct_dedup_source(self):
+        service = IndexSyncOutboxService(InMemoryIndexSyncRepository())
+
+        entry = service.enqueue_draft_archived(
+            project_id="project-1",
+            draft_id="draft-1",
+        )
+
+        self.assertEqual(entry.event, IndexSyncEvent.DRAFT_ARCHIVED)
+        self.assertEqual(entry.source.mongo_collection, DRAFTS_COLLECTION)
+        self.assertEqual(entry.source.mongo_id, "draft-1")
+
+    def test_repeated_archive_replays_same_outbox_entry(self):
+        repo = InMemoryIndexSyncRepository()
+        service = IndexSyncOutboxService(repo)
+
+        first = service.enqueue_project_archived(project_id="project-1")
+        second = service.enqueue_project_archived(project_id="project-1")
+
+        self.assertEqual(first, second)
+        self.assertEqual(len(repo.outbox_entries), 1)
+
+    def test_error_types_are_distinct_and_share_three_attempt_limit(self):
+        backend_error = IndexSyncLastError(
+            error_type=IndexSyncErrorType.BACKEND_ERROR,
+            detail="server unavailable",
+        )
+        not_found = IndexSyncLastError(
+            error_type=IndexSyncErrorType.NOT_FOUND,
+            detail="derived record not found",
+        )
+
+        self.assertNotEqual(backend_error.error_type, not_found.error_type)
+        self.assertEqual(INDEX_SYNC_MAX_ATTEMPTS, 3)
 
 
 def _fixture(*, project_name="Novel"):

@@ -28,6 +28,13 @@ from services.application.app.core_sot.service import (
     InMemoryCoreSotRepository,
     NotFound,
 )
+from services.application.app.indexing.models import IndexSyncEvent
+from services.application.app.indexing.service import (
+    DRAFTS_COLLECTION,
+    InMemoryIndexSyncRepository,
+    IndexSyncOutboxService,
+    PROJECTS_COLLECTION,
+)
 from services.application.app.main import create_app
 from services.llm_gateway.app.provider import FakeLLMProvider, GenerationResult
 
@@ -293,7 +300,12 @@ class ApplicationApiTest(unittest.TestCase):
         self.assertEqual(renamed.json()["name"], "New")
 
     def test_archive_project_via_delete_blocks_writes_keeps_reads(self):
-        client = TestClient(create_app())
+        sync_repo = InMemoryIndexSyncRepository()
+        client = TestClient(
+            create_app(
+                index_sync_outbox=IndexSyncOutboxService(sync_repo),
+            )
+        )
         project = client.post("/projects", json={"name": "Novel"}).json()
         draft = client.post(
             f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
@@ -303,6 +315,11 @@ class ApplicationApiTest(unittest.TestCase):
 
         self.assertEqual(archived.status_code, 200)
         self.assertTrue(archived.json()["archived"])
+        outbox_entries = tuple(sync_repo.outbox_entries.values())
+        self.assertEqual(len(outbox_entries), 1)
+        self.assertEqual(outbox_entries[0].event, IndexSyncEvent.PROJECT_ARCHIVED)
+        self.assertEqual(outbox_entries[0].source.mongo_collection, PROJECTS_COLLECTION)
+        self.assertEqual(outbox_entries[0].source.mongo_id, project["id"])
         # Read still allowed (§115).
         self.assertEqual(
             client.get(f"/projects/{project['id']}").json()["archived"], True
@@ -323,7 +340,12 @@ class ApplicationApiTest(unittest.TestCase):
         )
 
     def test_archive_draft_via_delete(self):
-        client = TestClient(create_app())
+        sync_repo = InMemoryIndexSyncRepository()
+        client = TestClient(
+            create_app(
+                index_sync_outbox=IndexSyncOutboxService(sync_repo),
+            )
+        )
         project = client.post("/projects", json={"name": "Novel"}).json()
         draft = client.post(
             f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
@@ -335,6 +357,11 @@ class ApplicationApiTest(unittest.TestCase):
 
         self.assertEqual(archived.status_code, 200)
         self.assertTrue(archived.json()["archived"])
+        outbox_entries = tuple(sync_repo.outbox_entries.values())
+        self.assertEqual(len(outbox_entries), 1)
+        self.assertEqual(outbox_entries[0].event, IndexSyncEvent.DRAFT_ARCHIVED)
+        self.assertEqual(outbox_entries[0].source.mongo_collection, DRAFTS_COLLECTION)
+        self.assertEqual(outbox_entries[0].source.mongo_id, draft["id"])
         # Draft write blocked, draft still readable.
         self.assertEqual(
             client.patch(
@@ -351,7 +378,12 @@ class ApplicationApiTest(unittest.TestCase):
         )
 
     def test_archive_is_idempotent(self):
-        client = TestClient(create_app())
+        sync_repo = InMemoryIndexSyncRepository()
+        client = TestClient(
+            create_app(
+                index_sync_outbox=IndexSyncOutboxService(sync_repo),
+            )
+        )
         project = client.post("/projects", json={"name": "Novel"}).json()
         draft = client.post(
             f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
@@ -374,6 +406,12 @@ class ApplicationApiTest(unittest.TestCase):
         self.assertEqual(first.status_code, 200)
         self.assertEqual(second.status_code, 200)
         self.assertTrue(second.json()["archived"])
+        entries = tuple(sync_repo.outbox_entries.values())
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(
+            {entry.event for entry in entries},
+            {IndexSyncEvent.DRAFT_ARCHIVED, IndexSyncEvent.PROJECT_ARCHIVED},
+        )
 
     def test_archive_draft_allowed_when_project_archived(self):
         # §115: archiving a draft is a STATE TRANSITION, exempt from the

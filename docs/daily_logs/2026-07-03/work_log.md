@@ -1,0 +1,119 @@
+# Work Log — 2026-07-03
+
+## Goals
+
+- HANDOFF와 2026-07-02 work log를 읽고 다음 작업을 진행한다.
+- Phase 3B automatic sync/outbox 브리프에 대한 사용자 결정을 반영한다.
+- 브리프의 미구현/미분석 항목 4, 5, 6을 분석해 첫 code slice 전에 추측이 남지 않게 한다.
+
+## Completed work
+
+### Phase 3B sync/outbox 브리프 승인 결정 반영
+
+- 변경 파일: `docs/plans/03-index-sync-outbox-decisions.md`, `docs/plans/03-indexing.md`, `docs/system-contract-sot.md`, `HANDOFF.md`, `CHANGELOG.md`, `docs/daily_logs/2026-07-03/work_log.md`.
+- 사용자 결정에 따라 브리프 상태를 owner-approved pre-implementation 상태로 바꿨다.
+- 첫 automatic event source는 archive events(`project_archived`, `draft_archived`)로 채택했다.
+- 다만 사용자는 `analysis_completed`가 장기적으로 가장 맞는 흐름이라고 보았으므로, 첫 slice는 archive events에 한정하되 event/source schema가 후속 `analysis_completed`를 닫지 않도록 문서화했다.
+- Delivery는 Mongo outbox/polling으로 확정하고, 외부 queue는 현재 로컬 1인 프로젝트 단계에서 제외했다.
+- 저장 단위는 기존 추천안 A(`index_sync_logs` 단일)가 아니라 B(`index_sync_outbox` + `index_sync_logs` 분리)로 확정했다. 두 collection은 `sync_request_id`로 조인한다.
+- SoT를 v1.6.25로 올려 이 사용자 결정을 정본 계약 인덱스에 반영했다.
+
+### 브리프 누락 항목 4/5/6 보강
+
+- 변경 파일: `docs/plans/03-index-sync-outbox-decisions.md`, `docs/plans/03-indexing.md`, `docs/system-contract-sot.md`, `HANDOFF.md`, `CHANGELOG.md`, `docs/daily_logs/2026-07-03/work_log.md`.
+- 항목 4 archive 반영 방식은 hard delete/tombstone-or-status/stale-validation 선택지로 정리했다.
+- 채택안은 첫 slice에서 outbox 기록까지만 처리하고, 실제 derived index mutation은 하지 않는 것이다. 현재 사용 안전성은 Phase 3A `validate_source_block_record()` guard가 담당한다. Worker/adapter slice가 열리면 hard delete보다 tombstone/status update를 우선 검토한다.
+- 항목 5 retry/backoff는 retry 없음/bounded local retry metadata/external queue retry policy 선택지로 정리했다.
+- 채택안은 outbox schema가 `attempt_count`, `max_attempts`, `next_attempt_at`, `last_error`, `status`를 담을 수 있게 하되, retry 실행과 backoff 숫자, claim timeout, retryable taxonomy는 worker slice에서 확정하는 것이다.
+- 항목 6 fake vector 단계는 persistent log only/Chroma adapter 동시 구현/Chroma+Elasticsearch 동시 구현 선택지로 정리했다.
+- 채택안은 persistent outbox/log 계약만 먼저 잠그고, actual ChromaDB adapter, embedding model/dimension, Elasticsearch analyzer는 후속 결정으로 남기는 것이다.
+
+### Phase 3B archive outbox 첫 code slice 구현
+
+- 변경 파일: `services/application/app/indexing/models.py`, `services/application/app/indexing/service.py`, `services/application/app/indexing/mongo_repository.py`, `services/application/app/main.py`, `tests/test_indexing_phase3a.py`, `tests/test_indexing_mongo_indexes.py`, `tests/test_application_api.py`, `docs/plans/03-index-sync-outbox-decisions.md`, `docs/plans/03-indexing.md`, `docs/system-contract-sot.md`, `HANDOFF.md`, `CHANGELOG.md`, `docs/daily_logs/2026-07-03/work_log.md`.
+- `IndexSyncEvent`, `IndexSyncStatus`, `IndexSyncBackend`, `IndexSyncErrorType`, `IndexSyncSource`, `IndexSyncTargetState`, `IndexSyncLastError`, `IndexSyncOutboxEntry`, `IndexSyncLog` 모델을 추가했다.
+- `IndexSyncOutboxService`와 `InMemoryIndexSyncRepository`를 추가했다.
+- `MongoIndexSyncRepository`를 추가해 `index_sync_outbox` dedup index와 future `index_sync_logs` join index를 설치하게 했다.
+- Application archive endpoint가 Core SOT archive 성공 후 `index_sync_outbox` pending entry를 생성하도록 연결했다.
+- `project_archived` source는 `projects/{project_id}`, `draft_archived` source는 `drafts/{draft_id}`다.
+- Dedup key는 `(project_id, event, source.mongo_collection, source.mongo_id)`라 재archive가 중복 outbox entry를 만들지 않는다.
+- Target envelope는 canonical `targets.chroma.status="pending"` + `targets.chroma.backend="in_memory_fake"`다. Phase 3A reduced `target="vector"`는 persistent outbox에 저장하지 않는다.
+- Retry metadata는 `attempt_count=0`, `max_attempts=3`, `next_attempt_at=None`, `last_error=None`로 시작한다.
+- 오류 타입은 서버/backend 계열 `backend_error`와 데이터 없음/not-found 계열 `not_found`를 분리했다.
+- `analysis_completed`는 후속 후보로 문서에만 남기고 code enum에는 아직 열지 않았다.
+- SoT를 v1.6.26으로 올려 archive outbox 첫 code slice를 정본 계약 인덱스에 반영했다.
+
+### Phase 3B archive outbox 독립 검증 후속 보강
+
+- 변경 파일: `docs/mongo_collections.md`, `services/application/app/indexing/mongo_repository.py`, `tests/test_indexing_mongo_indexes.py`, `tests/test_indexing_phase3a.py`, `docs/system-contract-sot.md`, `HANDOFF.md`, `CHANGELOG.md`, `docs/daily_logs/2026-07-03/work_log.md`.
+- 독립 검증 `docs/verifications/2026-07-03/phase3b_archive_outbox_slice.md`의 PASS 판정과 비블로킹 리스크를 확인했다.
+- Risk 1 대응으로 live Mongo 없이도 Mongo outbox document 직렬화/역직렬화를 잠그는 fake collection round-trip 회귀를 추가했다. `put_outbox_entry()`로 저장한 `IndexSyncOutboxEntry`를 `get_outbox_entry_by_dedup_key()`로 다시 읽어 동일 객체로 복원되는지 확인한다.
+- Risk 2 대응으로 `docs/mongo_collections.md`에 `39A. index_sync_outbox`를 추가했다. pending request collection, document shape, dedup key, indexes, `index_sync_logs`와의 `sync_request_id` 조인 관계를 명시했다.
+- 저위험 권고 대응으로 `analysis_completed`가 아직 `IndexSyncEvent` enum에 열리지 않았음을 명시 회귀로 고정했다.
+- work log의 v1.6.26 code slice 갱신 누락도 보완했다.
+- SoT를 v1.6.27로 올려 검증 후속 보강을 정본 계약 인덱스에 반영했다.
+
+## Issues found
+
+- 문제: 브리프는 미확정 항목 목록에 4/5/6을 적었지만 실제 선택지와 채택안은 없었다.
+- 원인: 초안이 event source, delivery, storage unit에 집중했고 archive mutation, retry/backoff, real adapter 도입 경계는 "승인 전 보류" 목록으로만 처리했다.
+- Resolution: 4/5/6 각각에 선택지 표, 채택안, 후속 조건을 추가했다.
+- Outcome: 다음 code slice가 archive outbox entry 생성으로 좁혀졌고, worker/retry/real adapter를 추측하지 않게 됐다.
+
+- 문제: 저장 단위 추천안 A는 사용자 결정과 맞지 않았다.
+- 원인: 기존 브리프는 이미 존재하는 `index_sync_logs` §39를 재사용하는 최소 변경을 선호했다.
+- Resolution: 사용자 결정대로 `index_sync_outbox` + `index_sync_logs` 분리로 바꾸고, `sync_request_id` 조인을 첫 slice 수용 기준에 추가했다.
+- Outcome: queue lifecycle과 result history가 섞이지 않는 방향으로 계약이 바뀌었다.
+
+- 문제: `analysis_completed`를 지금 enum에 넣으면 실제 지원하지 않는 event literal이 열린 것처럼 보일 수 있었다.
+- 원인: 사용자는 장기적으로 D가 가장 맞는 흐름이라고 판단했지만, 이번 구현은 archive events부터 시작하기로 했다.
+- Resolution: `analysis_completed`는 브리프/SoT/HANDOFF의 후속 event candidate로 명시하고, code enum은 `project_archived`/`draft_archived`만 허용했다.
+- Outcome: 첫 slice의 public/domain surface가 실제 구현 범위와 일치한다.
+
+- 문제: Core SOT archive write와 outbox write를 같은 Mongo transaction unit에 넣으려면 Core SOT repository 경계에 indexing concern을 섞어야 했다.
+- 원인: 현재 `CoreSotService`는 `CoreSotRepository` Protocol만 의존하고, indexing은 별도 domain module이다.
+- Resolution: 첫 code slice는 Application archive endpoint orchestration으로 archive 성공 후 outbox enqueue를 호출했다. 같은 transaction/fallback unit hardening은 persistent worker/repository slice에서 재검토한다.
+- Outcome: 현재 구조를 크게 흔들지 않고 archive outbox 계약과 idempotency를 먼저 잠갔다.
+
+- 문제: `MongoIndexSyncRepository`의 `_outbox_doc()`/`_to_outbox_entry()` 직렬화 경로가 production-reachable인데 테스트가 없었다.
+- 원인: 첫 회귀는 required index setup과 Application in-memory wiring에 집중했다.
+- Resolution: fake collection 기반 round-trip 회귀를 추가해 live Mongo 없이 document shape를 잠갔다.
+- Outcome: field 누락이나 enum 역직렬화 drift를 focused test가 잡을 수 있다.
+
+- 문제: `index_sync_outbox` collection이 `mongo_collections.md` 운영 collection 레지스트리에 없었다.
+- 원인: 첫 문서 업데이트는 SoT/Phase plan/brief에 집중했고, 루트 아이디에이션 collection registry를 갱신하지 않았다.
+- Resolution: `39A. index_sync_outbox` 섹션과 목록/relationship/workflow cross-reference를 추가했다.
+- Outcome: code-enforced collection이 문서 registry에도 드러난다.
+
+## Decisions
+
+- Phase 3B 첫 automatic event source는 archive events로 시작한다. `analysis_completed`는 장기적으로 더 맞는 흐름으로 보지만 candidate indexing/review 지위가 확정될 때까지 후속이다.
+- 외부 queue는 현재 로컬 1인 프로젝트 단계에서 고려하지 않는다. Mongo outbox/polling을 채택한다.
+- Pending/running/retry lifecycle은 `index_sync_outbox`, completed or terminal attempt history는 `index_sync_logs`가 소유한다.
+- 첫 code slice는 archive API 성공 후 canonical `targets.chroma` + `backend="in_memory_fake"` pending outbox entry를 idempotent하게 생성하는 데 한정한다.
+- `user_id`는 현재 user model이 없으므로 nullable로 둔다. 필드는 생략하지 않아 후속 user ownership 계약의 migration 지점을 남긴다.
+- `backend_error`와 `not_found`는 다른 error type이다. 둘 다 기본 3회 시도(`max_attempts=3`)로 시작한다.
+- `analysis_completed`는 아직 code enum에 열지 않는다. 실제 candidate indexing/review 지위가 확정될 때 event literal과 source collection을 추가한다.
+- `index_sync_outbox`는 `mongo_collections.md` 운영 collection 레지스트리에 등록한다.
+
+## Verification
+
+- Phase 3B brief links: `docs/plans/03-index-sync-outbox-decisions.md`가 참조하는 `../system-contract-sot.md`, `03-indexing.md`, `03-indexing-kickoff-decisions.md` 존재 확인.
+- Stale wording sweep: `rg -n 'Proposed for owner|owner approval|SoT/public contract가 아니며|승인 필요|index_sync_logs pending|Mongo index_sync_logs 기반 pending' docs/plans/03-index-sync-outbox-decisions.md docs/plans/03-indexing.md HANDOFF.md docs/system-contract-sot.md CHANGELOG.md` — 현재 문맥에 남은 stale 문구 없음.
+- Documentation diff hygiene: `git diff --check` — 통과.
+- Phase 3B archive outbox compile: `python3 -m py_compile services/application/app/indexing/models.py services/application/app/indexing/service.py services/application/app/indexing/mongo_repository.py services/application/app/main.py tests/test_indexing_phase3a.py tests/test_indexing_mongo_indexes.py tests/test_application_api.py` — 통과.
+- Phase 3B archive outbox focused regression: `python3 -m unittest tests.test_indexing_phase3a tests.test_indexing_mongo_indexes -v` — 17개 통과.
+- Application archive wiring regression: `python3 -m unittest tests.test_application_api -v` — 50개 통과.
+- Phase 3B related broader regression: `python3 -m unittest tests.test_indexing_phase3a tests.test_indexing_mongo_indexes tests.test_application_api -v` — 67개 통과.
+- Phase 3A/3B broader regression: `python3 -m unittest tests.test_phase3a_rebuild_source_block_index_script tests.test_phase3a_deployed_rebuild_smoke_script tests.test_indexing_phase3a tests.test_application_api -v` — 79개 통과.
+- Full regression: `python3 -m unittest discover tests -v` — 394개 통과(37 skip).
+- Pattern sweep: `rg -n "archive_project\\(|archive_draft\\(|enqueue_project_archived|enqueue_draft_archived|IndexSyncErrorType|backend_error|not_found|INDEX_SYNC_MAX_ATTEMPTS|max_attempts" services tests docs/plans/03-index-sync-outbox-decisions.md docs/plans/03-indexing.md docs/system-contract-sot.md HANDOFF.md CHANGELOG.md docs/daily_logs/2026-07-03/work_log.md` — Core SOT service 단위 테스트의 직접 archive 호출은 남아 있으나, 이번 slice의 outbox 책임은 Application archive endpoint에 둔 것으로 문서화했다. API endpoint와 outbox enqueue 경로, error type, max attempts는 회귀로 잠겼다.
+- Final diff hygiene: `git diff --check` — 통과.
+- Verification follow-up compile: `python3 -m py_compile services/application/app/indexing/mongo_repository.py tests/test_indexing_mongo_indexes.py tests/test_indexing_phase3a.py` — 통과.
+- Verification follow-up focused regression: `python3 -m unittest tests.test_indexing_phase3a tests.test_indexing_mongo_indexes -v` — 19개 통과.
+- Verification follow-up full regression: `python3 -m unittest discover tests` — 396개 통과(37 skip).
+
+## Next steps
+
+- Mongo live round-trip/outbox persistence smoke를 추가한다.
+- Worker loop, retry/backoff 실행·숫자, actual ChromaDB/Elasticsearch mutation, stale-hit sync job, `analysis_completed` wiring은 후속이다.

@@ -106,21 +106,21 @@
 - 독립 검증 `docs/verifications/2026-07-02/phase3a_rebuild_http_api.md` 판정은 **합격**이다. endpoint path·9-field summary(`backend="in_memory_fake"` 포함)·404 경계가 SoT v1.6.23과 일치하고, 카운트(50/89/375+37)·py_compile·`git diff --check`가 재현됐으며, archived project/draft rebuild가 200으로 query_visible 0 / archived 2로 집계됨과 fake-adapter 비지속성(누적 없음)을 입증했다. 비블로킹 권고 중 CLI/HTTP summary 빌드 로직 공통화(O1)는 보강 완료했고, real backend 도입 시 `backend` enum 정의와 HTTP 에러 표면 확장은 후속이다.
 - Phase 3A deployed rebuild smoke가 추가·실행됐다(2026-07-02). `scripts/phase3a_deployed_rebuild_smoke.py`는 이미 떠 있는 Application HTTP endpoint로 project/draft/version snapshot을 준비하고 HTTP rebuild endpoint를 실행한다. `--mongo-uri`가 있으면 같은 snapshot을 CLI rebuild 경로로도 읽어 HTTP/CLI summary의 핵심 count/pointer field 일치를 확인한다. 실제 compose stack(`APPLICATION_PORT=8010`, `GATEWAY_PORT=8011`, `MONGO_PORT=27029`)에서 현재 Application 이미지를 rebuild/recreate한 뒤 실행해 `summaries_match=true`, HTTP/CLI 모두 `records_attempted=2`, `records_written=2`, `records_query_visible=2`로 통과했다. 독립 검증(`docs/verifications/2026-07-02/phase3a_deployed_rebuild_smoke.md`)의 조건부 사유였던 smoke `terminal_status` partial-write 분기 2개는 단독 회귀 추가로 폐쇄했다.
 - Phase 3A source-block stale validation guard가 추가됐다(2026-07-02, SoT v1.6.24). `validate_source_block_record(record)`는 Core SOT 정본을 재조회해 index hit 사용 가능 여부와 stale reason literal 6종(`project_archived`, `draft_archived`, `snapshot_missing`, `draft_mismatch`, `content_hash_mismatch`, `block_missing`)을 반환한다. `snapshot_missing`은 단독 reason으로 short-circuit하고, drift는 `version_id`가 아니라 `content_hash`와 draft/block pointer 정합성 기준으로 판정한다. 이 guard는 automatic sync/outbox가 아니라 query/Context Gate 계층이 hit 사용 전 정본 상태를 재확인하는 방어선이다.
-- Phase 3B automatic sync/outbox 결정 브리프 초안을 추가하고 검증 권고를 반영했다(2026-07-02, `docs/plans/03-index-sync-outbox-decisions.md`). 추천안은 archive events(`project_archived`, `draft_archived`)를 첫 automatic event source로 삼고, inline adapter 호출/외부 queue 대신 Mongo `index_sync_logs` 기반 pending outbox entry를 먼저 남기는 방향이다. 승인 전 schema lock으로 `success` status literal, canonical `targets` shape, required `project_id`, dedup key, §64 stale-hit job과 `content_hash` 기준의 긴장을 명시했다. 아직 owner-approved SoT/public contract가 아니므로 archive API wiring, persistent sync log schema, worker loop는 구현 전 승인 필요하다.
+- Phase 3B archive outbox 첫 code slice가 구현됐다(2026-07-03, SoT v1.6.26). Application archive endpoint는 Core SOT archive 성공 후 `index_sync_outbox` pending entry를 idempotent하게 생성한다. Event는 `project_archived`/`draft_archived`, dedup key는 `(project_id, event, source.mongo_collection, source.mongo_id)`, target envelope는 canonical `targets.chroma.status="pending"` + `targets.chroma.backend="in_memory_fake"`다. Entry는 nullable `user_id`, `attempt_count=0`, `max_attempts=3`, `next_attempt_at=null`, `last_error=null`을 가진다. 오류 타입은 서버/backend 계열 `backend_error`와 데이터 없음/not-found 계열 `not_found`를 분리했다. `index_sync_outbox`와 future `index_sync_logs`는 `sync_request_id`로 조인한다. Worker execution, retry/backoff 실행·숫자, ChromaDB/Elasticsearch mutation, stale-hit sync job, `analysis_completed` wiring은 후속이다.
+- Phase 3B archive outbox 독립 검증 후속 보강이 완료됐다(2026-07-03, SoT v1.6.27). `index_sync_outbox`가 `docs/mongo_collections.md` 운영 collection 레지스트리에 등록됐고, Mongo repository의 outbox document 직렬화/역직렬화는 fake collection round-trip 회귀로 잠겼다. `analysis_completed` event가 아직 code enum에 열리지 않았음도 명시 회귀로 고정했다. 남은 후속 리스크는 worker slice에서 status-aware dedup을 정제하는 것이다.
 
 ## Owner Decisions Needed
 
-1. Phase 3B sync/outbox 브리프를 승인할지 수정할지 결정한다. 현재 추천안은 archive events(`project_archived`, `draft_archived`)를 첫 automatic source로 삼고 Mongo `index_sync_logs` pending outbox entry만 생성하는 것이다.
-2. Persistent sync log target shape를 정한다. 추천은 canonical `targets.chroma` + `backend="in_memory_fake"`이며, Phase 3A reduced `target="vector"`를 persistent literal로 유지하려면 SoT/`contracts.md` §7.2·§7.3/`mongo_collections.md` §39에 예외를 승인해야 한다.
-3. `user_id`는 §39 예시에 있지만 현재 Core SOT/API에 user model이 없으므로, 첫 sync log slice에서 nullable/deferred로 둘지 별도 user ownership 계약을 먼저 둘지 결정한다.
+- 없음. Phase 3B sync/outbox 첫 code slice에 필요한 브리프 결정은 2026-07-03에 반영됐다.
 
 ## Next Tasks
 
 1. `/v1/generate-structured`는 이번 비용 확인에서 보류했다. JSON/schema 검증과 1회 repair는 Application adapter가 소유하고, Gateway surface는 adapter로 분리해 두었다. repair 후에도 malformed JSON 비율이나 latency가 운영상 문제로 확인되면 별도 Gateway structured-output slice를 검토한다.
-2. Phase 3B automatic sync/outbox 브리프를 owner가 승인/수정한다. 현재 추천은 archive events(`project_archived`, `draft_archived`) → Mongo `index_sync_logs` pending outbox entry이며, 승인되면 다음 code slice는 archive API 성공 후 pending sync log 생성과 idempotency 회귀로 제한한다. 오너가 특히 정해야 할 선택지는 persistent log target을 canonical `targets.chroma`로 둘지, Phase 3A의 reduced `target="vector"` 예외를 SoT에 올릴지다.
-3. Persistent Chroma-like adapter는 automatic sync/outbox 계약 승인 뒤 재검토한다. 현재 public 표면은 CLI script와 HTTP rebuild endpoint이며 둘 다 deterministic fake vector adapter를 사용한다.
-4. Domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
-5. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
+2. 다음 작은 slice로 Mongo live round-trip/outbox persistence smoke를 추가한다. Fake collection round-trip은 보강 완료됐고, live Mongo outbox insert/replay는 아직 별도 smoke가 없다.
+3. Worker loop와 retry 실행은 outbox persistence가 안정된 뒤 별도 slice로 검토한다. `backend_error`/`not_found`는 다른 error type이고 둘 다 기본 3회 시도라는 계약을 유지한다.
+4. Persistent Chroma-like adapter와 품질/embedding model 선택은 핵심 코어가 모두 만들어진 뒤 최후속으로 재검토한다. 현재 public 표면은 CLI script와 HTTP rebuild endpoint이며 둘 다 deterministic fake vector adapter를 사용한다.
+5. Domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
+6. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
 
 ## Verification
 

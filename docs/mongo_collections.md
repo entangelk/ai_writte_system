@@ -275,6 +275,7 @@ gate_results
 ### 3.6 Operational Collections
 
 ```text
+index_sync_outbox
 index_sync_logs
 search_traces
 review_requests
@@ -2083,17 +2084,99 @@ db.gate_results.createIndex({ project_id: 1, decision: 1 })
 
 ---
 
-## 39. index_sync_logs
+## 39A. index_sync_outbox
 
-### 39.1 Purpose
+### 39A.1 Purpose
 
-Stores one-way index synchronization logs.
+Stores pending one-way index synchronization requests before worker execution.
 
 Direction:
 
 ```text
-MongoDB → ChromaDB
-MongoDB → Elasticsearch
+MongoDB → index_sync_outbox → worker/adapter → index_sync_logs
+```
+
+Phase 3B first slice creates outbox entries for archive events only:
+
+```text
+project_archived
+draft_archived
+```
+
+`analysis_completed` is a later event candidate and is not enabled until candidate indexing/review status is defined.
+
+### 39A.2 Document Example
+
+```json
+{
+  "_id": "sync_req_001",
+  "sync_request_id": "sync_req_001",
+  "project_id": "project_001",
+  "user_id": null,
+  "event": "project_archived",
+  "source": {
+    "mongo_collection": "projects",
+    "mongo_id": "project_001",
+    "mongo_version": null
+  },
+  "targets": {
+    "chroma": {
+      "status": "pending",
+      "backend": "in_memory_fake"
+    }
+  },
+  "status": "pending",
+  "attempt_count": 0,
+  "max_attempts": 3,
+  "next_attempt_at": null,
+  "last_error": null
+}
+```
+
+`last_error.error_type` must distinguish server/backend failures from missing-data failures:
+
+```text
+backend_error
+not_found
+```
+
+### 39A.3 Idempotency
+
+Repeated archive calls must not create duplicate active requests.
+
+Dedup key:
+
+```javascript
+{ project_id: 1, event: 1, "source.mongo_collection": 1, "source.mongo_id": 1 }
+```
+
+`index_sync_outbox` and `index_sync_logs` join by `sync_request_id`.
+
+### 39A.4 Indexes
+
+```javascript
+db.index_sync_outbox.createIndex(
+  { project_id: 1, event: 1, "source.mongo_collection": 1, "source.mongo_id": 1 },
+  { unique: true, name: "uniq_index_sync_outbox_event_source" }
+)
+db.index_sync_outbox.createIndex(
+  { status: 1, next_attempt_at: 1, sync_request_id: 1 },
+  { name: "index_sync_outbox_by_status_next_attempt" }
+)
+```
+
+---
+
+## 39. index_sync_logs
+
+### 39.1 Purpose
+
+Stores one-way index synchronization attempt/result history.
+
+Direction:
+
+```text
+MongoDB → index_sync_outbox → worker/adapter → index_sync_logs
 ```
 
 ### 39.2 Document Example
@@ -2131,6 +2214,8 @@ MongoDB → Elasticsearch
 db.index_sync_logs.createIndex({ project_id: 1, started_at: -1 })
 db.index_sync_logs.createIndex({ project_id: 1, "source.mongo_collection": 1, "source.mongo_id": 1 })
 db.index_sync_logs.createIndex({ status: 1, started_at: -1 })
+db.index_sync_logs.createIndex({ sync_request_id: 1, attempt_count: 1 })
+db.index_sync_logs.createIndex({ project_id: 1, sync_request_id: 1 })
 ```
 
 ---
@@ -2427,7 +2512,8 @@ MongoDB collections
   ├── ChromaDB records
   └── Elasticsearch documents
 
-index_sync_logs records the derived index state.
+index_sync_outbox records pending sync requests.
+index_sync_logs records derived index sync attempts/results.
 ```
 
 Indexing is one-way.
@@ -2569,6 +2655,7 @@ context_packages
 writing_requests
 writing_candidates
 gate_results
+index_sync_outbox
 index_sync_logs
 search_traces
 review_requests
@@ -2684,8 +2771,9 @@ Steps:
 3. Run Analysis Gate.
 4. Confirm safe candidates or mark needs_review.
 5. Upsert confirmed memory into target collections.
-6. Create index_sync_logs.
-7. Update ChromaDB and Elasticsearch.
+6. Create index_sync_outbox.
+7. Worker updates ChromaDB and Elasticsearch.
+8. Append index_sync_logs attempt/result.
 ```
 
 ---
@@ -2809,4 +2897,3 @@ Agentic Search turns those hits into verified context.
 Writing AI and Analysis AI only receive pointer-backed data.
 
 Gate components decide whether candidate outputs can be used.
-

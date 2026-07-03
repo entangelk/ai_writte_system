@@ -14,6 +14,27 @@ class IndexSyncTarget(StrEnum):
     VECTOR = "vector"
 
 
+class IndexSyncBackend(StrEnum):
+    IN_MEMORY_FAKE = "in_memory_fake"
+
+
+class IndexSyncEvent(StrEnum):
+    PROJECT_ARCHIVED = "project_archived"
+    DRAFT_ARCHIVED = "draft_archived"
+
+
+class IndexSyncStatus(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
+
+
+class IndexSyncErrorType(StrEnum):
+    BACKEND_ERROR = "backend_error"
+    NOT_FOUND = "not_found"
+
+
 class IndexStaleReason(StrEnum):
     PROJECT_ARCHIVED = "project_archived"
     DRAFT_ARCHIVED = "draft_archived"
@@ -28,6 +49,54 @@ class IndexSyncRequest:
     project_id: str
     snapshot_id: str
     target: IndexSyncTarget
+
+
+@dataclass(frozen=True, slots=True)
+class IndexSyncSource:
+    mongo_collection: str
+    mongo_id: str
+    mongo_version: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class IndexSyncTargetState:
+    status: IndexSyncStatus
+    backend: IndexSyncBackend
+
+
+@dataclass(frozen=True, slots=True)
+class IndexSyncLastError:
+    error_type: IndexSyncErrorType
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class IndexSyncOutboxEntry:
+    sync_request_id: str
+    project_id: str
+    user_id: str | None
+    event: IndexSyncEvent
+    source: IndexSyncSource
+    targets: dict[str, IndexSyncTargetState]
+    status: IndexSyncStatus
+    attempt_count: int
+    max_attempts: int
+    next_attempt_at: str | None
+    last_error: IndexSyncLastError | None
+
+
+@dataclass(frozen=True, slots=True)
+class IndexSyncLog:
+    sync_log_id: str
+    sync_request_id: str
+    project_id: str
+    user_id: str | None
+    event: IndexSyncEvent
+    source: IndexSyncSource
+    targets: dict[str, IndexSyncTargetState]
+    status: IndexSyncStatus
+    attempt_count: int
+    error: IndexSyncLastError | None
 
 
 @dataclass(frozen=True, slots=True)

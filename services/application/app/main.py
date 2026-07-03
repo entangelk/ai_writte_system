@@ -41,6 +41,8 @@ from services.application.app.core_sot.service import (
 )
 from services.application.app.indexing.service import (
     FAKE_VECTOR_BACKEND,
+    IndexSyncOutboxService,
+    InMemoryIndexSyncRepository,
     rebuild_source_block_index_summary,
 )
 
@@ -133,6 +135,23 @@ def _default_prompt_template_service() -> PromptTemplateService:
     return service
 
 
+def _default_index_sync_outbox_service() -> IndexSyncOutboxService:
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if not uri:
+        return IndexSyncOutboxService(InMemoryIndexSyncRepository())
+
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+    from services.application.app.indexing.mongo_repository import (
+        MongoIndexSyncRepository,
+    )
+
+    repository = MongoIndexSyncRepository.from_uri(
+        uri,
+        db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME),
+    )
+    return IndexSyncOutboxService(repository)
+
+
 def _env_float(name: str, default: float) -> float:
     raw = os.environ.get(name)
     if raw is None:
@@ -209,10 +228,12 @@ def create_app(
     service: CoreSotService | None = None,
     analysis_service: AnalysisService | None = None,
     analysis_runner: AnalysisJobRunner | None = None,
+    index_sync_outbox: IndexSyncOutboxService | None = None,
 ) -> FastAPI:
     app = FastAPI(title="AI Writing System Application")
     core_sot = service or _default_core_sot_service()
     analysis = analysis_service or _default_analysis_service(core_sot)
+    sync_outbox = index_sync_outbox or _default_index_sync_outbox_service()
     runner = analysis_runner
     if runner is None:
         runner = _default_analysis_runner(core_sot=core_sot, analysis=analysis)
@@ -360,6 +381,7 @@ def create_app(
             project = core_sot.archive_project(project_id=project_id)
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        sync_outbox.enqueue_project_archived(project_id=project_id)
         return _project_payload(project)
 
     @app.delete("/projects/{project_id}/drafts/{draft_id}")
@@ -368,6 +390,10 @@ def create_app(
             draft = core_sot.archive_draft(project_id=project_id, draft_id=draft_id)
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        sync_outbox.enqueue_draft_archived(
+            project_id=project_id,
+            draft_id=draft_id,
+        )
         return _draft_payload(draft)
 
     @app.get("/projects/{project_id}/drafts")

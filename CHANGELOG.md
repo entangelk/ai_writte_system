@@ -2,6 +2,9 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-07-03 | SoT v1.6.27: Phase 3B archive outbox 검증 후속 보강 | [work log](docs/daily_logs/2026-07-03/work_log.md) |
+| 2026-07-03 | SoT v1.6.26: Phase 3B archive outbox 첫 code slice 구현 | [work log](docs/daily_logs/2026-07-03/work_log.md) |
+| 2026-07-03 | SoT v1.6.25: Phase 3B sync/outbox 브리프 승인·수정 | [work log](docs/daily_logs/2026-07-03/work_log.md) |
 | 2026-07-02 | Phase 3B automatic sync/outbox 결정 브리프 추가 | [work log](docs/daily_logs/2026-07-02/work_log.md) |
 | 2026-07-02 | SoT v1.6.24: Phase 3A source-block stale validation 추가 | [work log](docs/daily_logs/2026-07-02/work_log.md) |
 | 2026-07-02 | Phase 3A deployed rebuild smoke 추가 | [work log](docs/daily_logs/2026-07-02/work_log.md) |
@@ -58,6 +61,23 @@
 | 2026-06-25 | AgentLoopRunner A3 decision 합성 회귀 구현 | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-25 | AgentLoopRunner A2 registry 계약 회귀 구현 | [work log](docs/daily_logs/2026-06-25/work_log.md) |
 | 2026-06-24 | 개발 계획 문서 구조 도입 | [work log](docs/daily_logs/2026-06-24/work_log.md) |
+
+## 2026-07-03
+
+### Changed
+
+- SoT를 v1.6.27로 갱신해 Phase 3B archive outbox 독립 검증 후속 보강을 반영했다. `index_sync_outbox`를 `mongo_collections.md` 운영 collection 레지스트리에 추가했고, Mongo outbox document 직렬화/역직렬화를 fake collection round-trip 회귀로 잠갔다. `analysis_completed`가 아직 code enum에 열리지 않았음도 명시 회귀로 고정했다.
+- SoT를 v1.6.26으로 갱신해 Phase 3B archive outbox 첫 code slice를 반영했다. Application archive endpoint는 Core SOT archive 성공 후 `index_sync_outbox` pending entry를 idempotent하게 생성한다. Event는 `project_archived`/`draft_archived`, dedup key는 `(project_id, event, source.mongo_collection, source.mongo_id)`, target envelope는 `targets.chroma.status="pending"` + `targets.chroma.backend="in_memory_fake"`다.
+- `IndexSyncOutboxEntry` 모델과 in-memory/Mongo repository skeleton을 추가했다. Mongo repository는 `index_sync_outbox` dedup index와 future `index_sync_logs` join index를 설치한다.
+- Retry metadata는 `attempt_count`, `max_attempts=3`, `next_attempt_at`, `last_error`로 시작한다. 서버/backend 계열 오류와 데이터 없음/not-found 계열 오류는 `backend_error`, `not_found`로 분리한다. Retry 실행, backoff 숫자, worker claim, actual ChromaDB/Elasticsearch mutation은 후속이다.
+- SoT를 v1.6.25로 갱신해 Phase 3B automatic sync/outbox 브리프의 owner 결정을 반영했다. 첫 automatic event source는 archive events(`project_archived`, `draft_archived`)로 시작하고, 오너가 장기적으로 더 맞는 흐름으로 본 `analysis_completed`는 후속 event candidate로 열어 둔다.
+- Delivery는 로컬 1인 프로젝트 기준 외부 queue 없이 Mongo outbox/polling으로 시작한다.
+- 저장 단위는 단일 `index_sync_logs`가 아니라 `index_sync_outbox` + `index_sync_logs` 분리로 확정했다. 두 collection은 `sync_request_id`로 조인한다.
+- 빠져 있던 브리프 항목 4/5/6을 보강했다. Archive 반영은 첫 slice에서 outbox 기록 + stale validation guard로 제한하고, worker slice에서는 tombstone/status update를 우선 검토한다. Retry/backoff는 outbox schema가 bounded retry metadata를 수용하되 실행·숫자는 worker slice로 둔다. 실제 Chroma/Elasticsearch adapter는 persistent outbox/log 계약 뒤로 미룬다.
+
+사용자 결정: `analysis_completed`가 장기적으로 가장 맞는 event source처럼 보이지만, 지금은 Phase 3A의 archive stale gap을 먼저 줄이기 위해 archive events부터 구현한다. 외부 queue 운영 확장성은 로컬 1인 프로젝트 단계에서 고려하지 않는다. 상태 필드는 계속 늘어날 가능성이 있으므로 queue lifecycle과 result history를 단일 collection에 섞지 않고 분리한다.
+
+사용자는 archive 반영 방식으로 C first, B later를 승인했다. 즉, 지금은 outbox 기록과 stale validation guard로 안전성을 확보하고, 정리는 가능하도록 후속 worker/adapter slice에서 tombstone/status update를 우선 검토한다. Retry는 bounded local metadata를 채택하고, 서버/backend 오류와 not-found 오류를 다른 error type으로 분리하되 둘 다 기본 3회로 시작한다. Fake vector 단계는 persistent outbox/log 계약만 먼저 만들고 품질·embedding·actual adapter는 핵심 코어 완료 뒤 최후속으로 둔다.
 
 ## 2026-07-02
 
