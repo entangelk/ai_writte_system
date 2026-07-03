@@ -4,6 +4,7 @@
 
 - HANDOFF와 최신 work log를 읽고 다음 작업을 진행한다.
 - HANDOFF Next Tasks 1의 Phase 4 Slice 4.2(터미널 JSON LLM planner adapter)를 구현한다.
+- 새 테스트 머신에는 외부 llama.cpp LLM 서버가 없으므로, 로컬 llama.cpp GPU 서버를 Docker로 띄워 환경을 맞춘다.
 
 ## Completed work
 
@@ -43,7 +44,22 @@
 - 각 guard를 개별 무력화하는 mutation으로 re-fail을 실증했다: B1(`if set(...)!=...` → `if False`) 2건 재실패, non-object(`if not isinstance(item, Mapping)` → `if False`) 1건 재실패, B2(`_string`의 isinstance 검사 제거) 1건 재실패, B4(`_plan_id`의 `or not value` 제거) 1건 재실패. 네 mutation 모두 복원 후 전체 통과.
 - 비차단 정정: 직전 기록의 "Ran 452 OK(skipped=44)"는 "Ran N" 오독으로, 실제 passed = 452−44 = 408(회귀 5개 추가 후 457−44 = 413)이다. 이후 기록은 passed/skipped를 분리 표기한다.
 
+### 로컬 llama.cpp GPU 서버 opt-in 구성 (환경 정합)
+
+- 변경 파일: `docker-compose.llama.yml`(신규), `docs/runbooks/local-llama-server.md`(신규), `HANDOFF.md`, `docs/daily_logs/2026-07-04/work_log.md`.
+- 새 테스트 머신(RTX 3060 12GB, 16코어/15GB RAM, nvidia runtime + container-toolkit 1.18.2)에는 이전 작업 머신의 외부 llama.cpp endpoint(`192.168.1.29:9080`)가 없다. 사용자 결정으로 실제 llama.cpp GPU 서버를 Docker로 띄워 환경을 맞췄다(모델은 이전 벤치와 동일한 12B QAT 정합).
+- 기존 `docker-compose.yml`은 의도적으로 llama.cpp 서버를 stack 밖으로 위임(주석 명시)하므로, 그 아키텍처를 훼손하지 않도록 **별도 opt-in override** `docker-compose.llama.yml`을 추가했다. base만 쓰면 종전대로 외부 `LLAMA_BASE_URL`이고, override를 함께 넘길 때만 in-stack `llama` 서비스가 뜬다: `docker compose -f docker-compose.yml -f docker-compose.llama.yml up -d`.
+- `llama` 서비스: image `ghcr.io/ggml-org/llama.cpp:server-cuda`, `-hf ${LLAMA_HF_REPO:-google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0}` + `--jinja`(llama.cpp `chat_template_kwargs.enable_thinking` 지원 필요) + `--n-gpu-layers 99` + `--ctx-size 8192`, host port 9080. GGUF 다운로드는 `LLAMA_CACHE=/models` + `llama_models` 볼륨으로 캐시해 재기동 시 재다운로드하지 않는다. GPU는 `deploy.resources.reservations.devices`(nvidia)로 전달한다.
+- override는 `gateway`의 `LLAMA_BASE_URL`을 `http://llama:9080`으로 덮고 `depends_on: llama: service_healthy`를 걸어, llama가 healthy(모델 로드 완료)된 뒤에만 gateway가 뜨고, 그 뒤 application이 뜨는 순서를 보장한다. `llama` healthcheck는 gateway `/health/ready`가 upstream으로 확인하는 것과 같은 `GET /health`를 curl로 친다(start_period 120s, retries 60 — 12B 로드 여유).
+- gateway가 llama.cpp 서버에 요구하는 계약은 `GET /health`(readiness) + `POST /v1/chat/completions`(OpenAI 호환 응답 + `chat_template_kwargs`) 둘뿐임을 코드(`client.py`, `main.py`)에서 확인했고, `llama-server`가 이를 충족한다. runbook에 계약·prerequisite·env override 표·smoke·teardown을 정리했다.
+
 ## Next steps
 
-- Slice 4.2 live smoke를 승인된 네트워크(sandbox 밖)에서 실제 Gateway → llama.cpp endpoint로 실행해 planner가 valid SearchPlan을 내는지 확인한다. sandbox 내부 Python/httpx는 외부 TCP가 막혀 실행할 수 없다.
+- 로컬 llama.cpp 서버 기동 완료 후: `curl localhost:9080/health`와 gateway `/health/ready`로 upstream readiness를 확인하고, `LLAMA_BASE_URL=http://localhost:9080 python3 scripts/phase4_context_search_planner_live_smoke.py --timeout-seconds 1000`로 Slice 4.2 planner를 실제 모델로 검증한다(valid SearchPlan 또는 repair 후 `llm_error`). 12B는 느리므로(~5 t/s) timeout을 넉넉히 둔다.
 - 이후 Phase 4 HTTP API surface + `TerminalJsonSearchPlanner`의 `ContextSearchService` wiring(service를 async로 올림)이 다음 slice다.
+
+## 검증 상태 (env)
+
+- `docker compose -f docker-compose.yml -f docker-compose.llama.yml config` 병합/검증 통과: gateway `LLAMA_BASE_URL=http://llama:9080` + `depends_on llama(service_healthy)`, llama GPU device 예약이 정상 반영됨.
+- 이미지 tag `ghcr.io/ggml-org/llama.cpp:server-cuda` 존재 확인(`docker manifest inspect`). 호스트에 nvidia runtime + container-toolkit 1.18.2 존재 확인.
+- `docker compose ... up -d llama`로 기동 착수 — CUDA 이미지 + 12B QAT GGUF(~7GB) 다운로드는 대용량이라 세션 내 완료 여부는 별도 확인 필요. `docker compose -f docker-compose.yml -f docker-compose.llama.yml logs -f llama`로 로드 진행을 보고 `ps`가 `healthy`가 되면 실제 모델 smoke를 실행한다.

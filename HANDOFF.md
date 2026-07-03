@@ -14,7 +14,8 @@
 - Slice 0.1~0.5의 F1/F2 조건이 delta 독립 재검증으로 폐쇄됐고 조건부 합격이 합격으로 승격됐다.
 - flat loop 종료 decision, tool registry, budget policy, task별 completion criteria 계약이 `docs/plans/flat-loop-gate.md`에 확정됐다. 숫자 기본 한도는 2026-06-30 Gemma Q4 live benchmark로 확정됐다.
 - Gateway optional `usage`→0과 token budget의 충돌은 usage/count 필수화로 해소됐다. 누락은 `provider_invalid_response`, 명시적 0은 유효하다.
-- Gateway가 compose에 독립 `gateway` 서비스로 편입됐다. compose는 llama.cpp 서버를 띄우지 않고, gateway 컨테이너가 `LLAMA_BASE_URL`의 외부 llama.cpp-compatible endpoint를 호출한다.
+- Gateway가 compose에 독립 `gateway` 서비스로 편입됐다. base `docker-compose.yml`은 llama.cpp 서버를 띄우지 않고, gateway 컨테이너가 `LLAMA_BASE_URL`의 외부 llama.cpp-compatible endpoint를 호출한다.
+- 외부 llama.cpp endpoint가 없는 머신을 위해 opt-in override `docker-compose.llama.yml`이 추가됐다(2026-07-04). `docker compose -f docker-compose.yml -f docker-compose.llama.yml up -d`로 in-stack `llama` 서비스(`ghcr.io/ggml-org/llama.cpp:server-cuda`, `-hf` 12B QAT GGUF, `--jinja`, GPU 예약, port 9080)를 띄우고 gateway가 `http://llama:9080`을 보게 한다. base만 쓰면 종전대로 외부 endpoint다. 계약은 `GET /health` + `POST /v1/chat/completions`(OpenAI 호환 + `chat_template_kwargs`)뿐이다. runbook: `docs/runbooks/local-llama-server.md`.
 
 ## Active Decisions
 
@@ -121,7 +122,7 @@
 
 ## Next Tasks
 
-1. Phase 4 Slice 4.2 live smoke 실행: `scripts/phase4_context_search_planner_live_smoke.py`를 승인된 네트워크(sandbox 밖)에서 실제 Gateway → llama.cpp endpoint로 실행해 planner가 valid SearchPlan을 내는지(또는 repair 후 `llm_error`) 확인한다. 이후 Phase 4 HTTP API surface + `TerminalJsonSearchPlanner`의 `ContextSearchService` wiring(service를 async로 올려 planner 주입)이 다음 slice다.
+1. 로컬 llama.cpp 서버 기동 확인 + Slice 4.2 live smoke: `docker compose -f docker-compose.yml -f docker-compose.llama.yml up -d llama`로 띄운 뒤(첫 기동은 CUDA 이미지 + 12B QAT GGUF ~7GB 다운로드라 수 분 소요), `docker compose ... ps`가 `llama: healthy`가 되면 `curl localhost:9080/health`와 gateway `/health/ready`를 확인한다. 그 다음 `LLAMA_BASE_URL=http://localhost:9080 python3 scripts/phase4_context_search_planner_live_smoke.py --timeout-seconds 1000`로 planner가 valid SearchPlan을 내는지(또는 repair 후 `llm_error`) 확인한다. 이후 Phase 4 HTTP API surface + `TerminalJsonSearchPlanner`의 `ContextSearchService` wiring(service를 async로 올려 planner 주입)이 다음 slice다.
 2. Phase 4 후속 추적 의무(오너 명시): ⑧ ContextPackage는 이후 slice에서 Writing용/Analysis 비교용 모두 완성해야 한다(analysis 필드는 Phase 2B 착수 브리프에서 결정). ⑤ `needs_review` candidate 포함(B)은 후속 slice로 확장한다. ②의 tool-call flat loop planner 전환 계획은 브리프 §2.1이다.
 3. `/v1/generate-structured`는 이번 비용 확인에서 보류했다. JSON/schema 검증과 1회 repair는 Application adapter가 소유하고, Gateway surface는 adapter로 분리해 두었다. repair 후에도 malformed JSON 비율이나 latency가 운영상 문제로 확인되면 별도 Gateway structured-output slice를 검토한다.
 4. Actual ChromaDB/Elasticsearch mutation은 후속이다. 현재 worker는 recording-only fake archive mutation으로 status/log lifecycle만 검증한다. real adapter 도입 시 archive 대상 부재에 `DerivedIndexRecordNotFound`를 raise해야 idempotent success가 작동한다.
@@ -214,9 +215,12 @@
 
 ```text
 docker-compose.yml               # Slice 1 runtime: application + Mongo replica set + external-llama client gateway
+docker-compose.llama.yml         # opt-in override: in-stack llama.cpp GPU 서버(server-cuda, -hf 12B QAT, port 9080)
 .dockerignore                    # build context 최소화
 .gitignore                       # local agent/tool state + Python/env/build/editor 산출물 제외
 docs/
+├── runbooks/
+│   └── local-llama-server.md    # 로컬 llama.cpp GPU 서버 opt-in 기동/설정/smoke runbook
 ├── README.md                    # 문서 분류와 진입점
 ├── system-contract-sot.md       # 서비스 경계와 확정 계약 Approved SoT
 ├── abstract.md                  # 보존된 전체 아이디에이션 원본
