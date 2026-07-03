@@ -62,6 +62,15 @@
 - 기본 환경에서는 Mongo가 없거나 인증/권한이 없으면 skip한다. 단순 ping이 아니라 throwaway DB에 index 생성까지 해 보는 probe로 권한 없는 Mongo를 오판하지 않게 했다.
 - Throwaway `mongo:7` replica set(`localhost:27031`)에서 live smoke 2개가 실제 실행 통과했다.
 
+### Phase 3B outbox live Mongo smoke 독립 검증 후속 보강
+
+- 변경 파일: `tests/test_indexing_mongo.py`, `tests/test_indexing_mongo_indexes.py`, `HANDOFF.md`, `docs/daily_logs/2026-07-03/work_log.md`.
+- 독립 검증 `docs/verifications/2026-07-03/phase3b_outbox_live_mongo_smoke.md`의 PASS 판정과 비블로킹 관찰을 확인했다.
+- Observation 1 대응으로 live smoke에 `draft_archived` round-trip을 추가했다. 이제 실제 Mongo에서 `project_archived`와 `draft_archived` archive event source를 모두 읽고 쓴다.
+- Observation 2 대응으로 fake collection이 duplicate `_id` insert에서 `DuplicateKeyError`를 발생시키게 하고, `MongoIndexSyncRepository.put_outbox_entry()`가 해당 branch를 idempotent no-op으로 처리하는 단위 회귀를 추가했다.
+- Observation 3 대응으로 live smoke의 기본 URI를 없앴다. `CORE_SOT_TEST_MONGO_URI`가 명시되지 않으면 skip하므로, 기본 `unittest discover`가 우연히 `localhost:27017`의 writable Mongo에 side effect를 내지 않는다.
+- Observation 4는 이미 `ensure_indexes()` 생성자 실패와 index setup 단위 회귀가 역할을 나눠 잠그고 있어 추가 live index 목록 단언은 하지 않았다.
+
 ## Issues found
 
 - 문제: 브리프는 미확정 항목 목록에 4/5/6을 적었지만 실제 선택지와 채택안은 없었다.
@@ -99,6 +108,11 @@
 - Resolution: `tests/test_indexing_mongo.py`의 probe가 ping 후 throwaway collection index 생성까지 수행하도록 했다.
 - Outcome: 권한 없는 Mongo는 failure가 아니라 skip으로 처리되고, write 가능한 Mongo에서만 live smoke가 실행된다.
 
+- 문제: `tests/test_indexing_mongo.py`의 기본 URI가 `localhost:27017`이면, 개발자 환경에 writable Mongo가 떠 있을 때 기본 discovery가 의도치 않게 live smoke를 실행할 수 있었다.
+- 원인: 기존 Mongo 통합 테스트 관례를 따라 기본 localhost를 두었지만, 이 live smoke는 test-only 보강이라 명시 opt-in이 더 안전했다.
+- Resolution: `CORE_SOT_TEST_MONGO_URI`가 명시되지 않으면 live smoke를 skip하도록 변경했다.
+- Outcome: 기본 discovery는 외부 Mongo side effect 없이 skip되고, live smoke는 명시 URI에서만 실행된다.
+
 ## Decisions
 
 - Phase 3B 첫 automatic event source는 archive events로 시작한다. `analysis_completed`는 장기적으로 더 맞는 흐름으로 보지만 candidate indexing/review 지위가 확정될 때까지 후속이다.
@@ -130,6 +144,10 @@
 - Index sync outbox default focused regression: `python3 -m unittest tests.test_indexing_mongo tests.test_indexing_mongo_indexes -v` — 권한 있는 Mongo 미가용으로 live 2개 skip, fake/index setup 3개 통과.
 - Index sync outbox live Mongo regression: throwaway `mongo:7` replica set on `localhost:27031`에서 `CORE_SOT_TEST_MONGO_URI='mongodb://localhost:27031/?directConnection=true' python3 -m unittest tests.test_indexing_mongo -v` — live 2개 통과. 컨테이너는 `docker stop index-sync-mongo-smoke`로 정리.
 - Final full regression after live smoke: `python3 -m unittest discover tests` — 398개 통과(39 skip).
+- Outbox live smoke follow-up compile: `python3 -m py_compile tests/test_indexing_mongo.py tests/test_indexing_mongo_indexes.py` — 통과.
+- Outbox live smoke follow-up focused regression: `python3 -m unittest tests.test_indexing_mongo tests.test_indexing_mongo_indexes -v` — env 미지정으로 live 3개 skip, fake/index setup 4개 통과.
+- Outbox live smoke follow-up live regression: throwaway `mongo:7` on `localhost:27032`에서 `CORE_SOT_TEST_MONGO_URI='mongodb://localhost:27032/?directConnection=true' python3 -m unittest tests.test_indexing_mongo -v` — live 3개 통과. 컨테이너는 `docker stop phase3b-outbox-followup`로 정리.
+- Final full regression after outbox live follow-up: `python3 -m unittest discover tests` — 400개 통과(40 skip).
 
 ## Next steps
 

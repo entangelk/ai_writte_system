@@ -3,7 +3,7 @@
 import unittest
 
 try:
-    from pymongo.errors import OperationFailure
+    from pymongo.errors import DuplicateKeyError, OperationFailure
 
     from services.application.app.indexing.models import (
         IndexSyncBackend,
@@ -22,7 +22,7 @@ try:
 
     _PYMONGO_AVAILABLE = True
 except ImportError:
-    OperationFailure = Exception
+    DuplicateKeyError = OperationFailure = Exception
     MongoIndexSyncRepository = None
     MongoIndexSyncRepositorySetupError = RuntimeError
     _PYMONGO_AVAILABLE = False
@@ -41,6 +41,8 @@ class _FakeCollection:
         return kwargs.get("name")
 
     def insert_one(self, doc):
+        if doc["_id"] in self.docs:
+            raise DuplicateKeyError("duplicate key")
         self.docs[doc["_id"]] = dict(doc)
 
     def find_one(self, query):
@@ -158,6 +160,35 @@ class MongoIndexSyncIndexSetupTests(unittest.TestCase):
         )
 
         self.assertEqual(recovered, entry)
+
+    def test_duplicate_outbox_insert_is_idempotent(self):
+        repo = _repo_with_indexes()
+        entry = IndexSyncOutboxEntry(
+            sync_request_id="sync-request-1",
+            project_id="project-1",
+            user_id=None,
+            event=IndexSyncEvent.PROJECT_ARCHIVED,
+            source=IndexSyncSource(
+                mongo_collection="projects",
+                mongo_id="project-1",
+            ),
+            targets={
+                "chroma": IndexSyncTargetState(
+                    status=IndexSyncStatus.PENDING,
+                    backend=IndexSyncBackend.IN_MEMORY_FAKE,
+                )
+            },
+            status=IndexSyncStatus.PENDING,
+            attempt_count=0,
+            max_attempts=3,
+            next_attempt_at=None,
+            last_error=None,
+        )
+
+        repo.put_outbox_entry(entry)
+        repo.put_outbox_entry(entry)
+
+        self.assertEqual(len(repo._outbox.docs), 1)
 
 
 if __name__ == "__main__":

@@ -28,16 +28,17 @@ from services.application.app.indexing.models import (
 )
 from services.application.app.indexing.service import (
     CHROMA_TARGET,
+    DRAFTS_COLLECTION,
     INDEX_SYNC_MAX_ATTEMPTS,
     PROJECTS_COLLECTION,
     IndexSyncOutboxService,
 )
 
-_MONGO_URI = os.environ.get("CORE_SOT_TEST_MONGO_URI", "mongodb://localhost:27017")
+_MONGO_URI = os.environ.get("CORE_SOT_TEST_MONGO_URI")
 
 
 def _probe_mongo() -> bool:
-    if not _PYMONGO_AVAILABLE:
+    if not _PYMONGO_AVAILABLE or _MONGO_URI is None:
         return False
     for _ in range(5):
         client = None
@@ -113,6 +114,28 @@ class MongoIndexSyncOutboxSmokeTests(unittest.TestCase):
             self._client[self._db_name]["index_sync_outbox"].count_documents({}),
             1,
         )
+
+    def test_draft_archive_outbox_entry_persists_and_round_trips(self):
+        entry = self.service.enqueue_draft_archived(
+            project_id="project-1",
+            draft_id="draft-1",
+        )
+
+        recovered = MongoIndexSyncRepository(
+            self._client,
+            db_name=self._db_name,
+        ).get_outbox_entry_by_dedup_key(
+            project_id="project-1",
+            event=IndexSyncEvent.DRAFT_ARCHIVED,
+            source=IndexSyncSource(
+                mongo_collection=DRAFTS_COLLECTION,
+                mongo_id="draft-1",
+            ),
+        )
+
+        self.assertEqual(recovered, entry)
+        self.assertEqual(entry.status, IndexSyncStatus.PENDING)
+        self.assertEqual(entry.targets[CHROMA_TARGET].status, IndexSyncStatus.PENDING)
 
 
 if __name__ == "__main__":
