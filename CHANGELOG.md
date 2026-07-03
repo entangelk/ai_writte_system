@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-07-03 | Phase 3B worker/retry slice 검증 후속 보강 | [work log](docs/daily_logs/2026-07-03/work_log.md) |
 | 2026-07-03 | SoT v1.6.29: Phase 3B one-shot index sync worker 첫 slice 구현 | [work log](docs/daily_logs/2026-07-03/work_log.md) |
 | 2026-07-03 | SoT v1.6.28: Phase 3B worker/retry 실행 경계 조건부 승인 | [work log](docs/daily_logs/2026-07-03/work_log.md) |
 | 2026-07-03 | SoT v1.6.27: Phase 3B archive outbox 검증 후속 보강 | [work log](docs/daily_logs/2026-07-03/work_log.md) |
@@ -68,6 +69,7 @@
 
 ### Changed
 
+- Phase 3B worker/retry slice 독립 검증(합격) 후속 보강: `tests/test_indexing_mongo.py`에 worker lifecycle live smoke 4개(success terminal-move / backend_error 1분→5분→terminal / stale running reclaim `attempt_count` 미소비 / terminal→reenqueue 새 요청)를 추가해 Mongo claim/retry/terminal-move 경로를 CI에서 잠갔다. throwaway `mongo:7`에서 live 7개가 통과했다. 브리프 §5·Owner 결정의 `not_found` retry 문구를 query-time(3회, 후속 selector)/archive worker-time(idempotent success)으로 정정해 브리프 내부 모순을 제거했다(결정 변경 없음).
 - SoT를 v1.6.29로 갱신해 Phase 3B one-shot index sync worker 첫 slice를 반영했다. Worker는 `pending` 또는 stale `running` outbox entry를 claim하고, recording-only fake archive mutation을 실행한 뒤 `index_sync_logs`에 attempt result를 append한다. `claimed_at`으로 10분 claim timeout을 판정하고, backend failure는 1분 → 5분 backoff 뒤 terminal `failed`가 된다. Terminal 이동을 채택해 `success|failed`가 되면 active outbox entry를 제거하고 history는 `index_sync_logs`가 소유한다. Archive worker-time `not_found`는 idempotent success다.
 - SoT를 v1.6.28로 갱신해 Phase 3B worker/retry 실행 경계를 조건부 승인 상태로 반영했다. 첫 worker는 one-shot command로 구현하고, 장기적으로 UI-triggered background/daemon이 같은 service를 재사용할 수 있게 둔다. Claim timeout은 10분이고 `claimed_at` lease timestamp로 stale running을 판정한다. Backoff는 1분 → 5분 → terminal `failed`, `backend_error`/query-time `not_found`는 둘 다 `max_attempts=3`을 사용한다. Status-aware dedup은 `pending|running` active entry에만 적용하되, terminal-location/index 전략과 archive worker-time `not_found` 처리는 구현 전 오너 결정으로 남겼다.
 - SoT를 v1.6.27로 갱신해 Phase 3B archive outbox 독립 검증 후속 보강을 반영했다. `index_sync_outbox`를 `mongo_collections.md` 운영 collection 레지스트리에 추가했고, Mongo outbox document 직렬화/역직렬화를 fake collection round-trip 회귀로 잠갔다. `analysis_completed`가 아직 code enum에 열리지 않았음도 명시 회귀로 고정했다.

@@ -10,7 +10,7 @@
 - Worker 첫 구현은 **B. one-shot worker command**로 시작한다. 장기적으로는 서비스 UI 호출 시 백그라운드에서 도는 worker/daemon 형태가 될 수 있지만, 현재 로컬 1인 runtime에서는 수동·직렬 실행 가능한 command가 가장 작고 충분하다.
 - Claim timeout은 **10분**으로 둔다. Docker/Compose가 프로세스를 재시작하더라도 MongoDB에 남은 `running` outbox entry가 자동으로 `pending`으로 돌아오지 않으므로, timeout은 DB 상태 회수를 위한 방어선이다.
 - Backoff는 **1분 → 5분 → terminal `failed`**로 둔다. `max_attempts=3`은 기존 Phase 3B archive outbox slice에서 확정된 값을 유지한다.
-- `backend_error`와 `not_found`는 둘 다 최대 3회 시도한다. 단, `not_found`는 단순 동일 조회 반복이 아니라 후속 LLM orchestration/query selector가 생기면 대체 조회 전략을 다시 고르는 loop로 해석한다.
+- `backend_error`는 최대 3회 시도한다. Query-time `not_found`도 후속 LLM orchestration/query selector가 대체 조회 전략을 다시 고르는 loop의 error type으로 같은 3회 budget을 쓴다. 단, archive worker-time `not_found`는 idempotent success로 따로 처리한다(아래 문단 및 §8.2).
 - Status-aware dedup은 **active 상태만 dedup**한다. `pending|running` entry가 있으면 기존 entry를 반환하고, `success|failed` terminal entry만 있으면 같은 dedup key라도 새 request 생성을 허용한다.
 - Terminal-location/index 전략은 **B. terminal 이동**을 채택한다. `success|failed`가 되면 active outbox entry는 제거되고 terminal attempt/history는 `index_sync_logs`가 소유한다. 따라서 기존 active outbox unique index는 유지한다.
 - Archive worker-time `not_found`는 **B. idempotent success**로 처리한다. Archive/tombstone/delete 대상 record가 이미 없으면 목표 상태가 달성된 것으로 본다. Query-time `not_found`는 별도의 query selector/LLM orchestration retry loop error type으로 남긴다.
@@ -80,6 +80,8 @@ Claim timeout 의미: worker가 entry를 `running`으로 claim한 뒤 프로세�
 | C. `backend_error` 3회, `not_found` 2회 | 약간 더 보수적이다 | 차이가 애매해진다 |
 
 채택: **B**. `not_found`는 "같은 query를 3번 반복"이 아니라, 후속 LLM orchestration/query selector가 생기면 다른 selector/query strategy를 다시 고르는 loop의 오류 타입으로 본다. 이번 worker slice가 selector를 구현하지 않더라도, error type과 attempt budget은 이 해석을 닫지 않게 둔다.
+
+> 이 절의 retry 정책은 **query-time `not_found`** 에 해당한다. Archive **worker-time `not_found`** 는 §8.2에서 idempotent success로 따로 정한다(archive cleanup 시 대상이 이미 없으면 목표 달성으로 본다). 둘을 같은 "3회"로 읽지 않도록 주의.
 
 ## 6. Status-aware dedup
 
@@ -208,7 +210,7 @@ Worker slice에서 append할 attempt log는 최소한 아래 field를 가져야 
    - non-stale running → not reclaimable
    - stale running reclaim 자체는 attempt_count를 증가시키지 않음
    - `backend_error` retry: attempt 1 failure → 1 minute, attempt 2 failure → 5 minutes, attempt 3 failure → failed
-   - query-time `not_found` retry도 같은 attempt budget을 쓰되 error type literal은 `not_found`
+   - query-time `not_found` retry도 같은 attempt budget을 쓰되 error type literal은 `not_found` (후속 query selector slice에서 회귀 추가)
    - archive worker-time `not_found` → idempotent success
    - success → terminal success
    - terminal entry 뒤 재enqueue → new active request

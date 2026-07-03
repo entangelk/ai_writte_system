@@ -106,6 +106,13 @@
 - `scripts/index_sync_worker.py`를 추가해 `CORE_SOT_MONGO_URI`/`--mongo-uri` 기반 one-shot worker command를 제공한다.
 - SoT를 v1.6.29로 올려 worker 첫 구현 slice를 정본 계약 인덱스에 반영했다.
 
+### Phase 3B worker/retry slice 독립 검증 후속 보강
+
+- 변경 파일: `tests/test_indexing_mongo.py`, `docs/plans/03-index-worker-retry-decisions.md`, `HANDOFF.md`, `CHANGELOG.md`, `docs/daily_logs/2026-07-03/work_log.md`, `docs/verifications/2026-07-03/phase3b_worker_retry_slice.md`.
+- 독립 검증(`docs/verifications/2026-07-03/phase3b_worker_retry_slice.md`, 합격)이 지적한 두 비블로킹 항목을 보강했다.
+- 이슈 #2(Mongo worker lifecycle live 회귀 부재): `tests/test_indexing_mongo.py`에 `MongoIndexSyncWorkerSmokeTests` 4개를 추가했다. 기존 outbox live smoke와 같은 `CORE_SOT_TEST_MONGO_URI` env-only skip 게이트를 공유한다. 잠근 범위: success → active outbox 제거 + success log append, backend_error 1분→5분 backoff 후 3회 terminal `failed`(logs `[1,2,3]`), stale running(>10분) reclaim은 `attempt_count` 미소비 + non-stale는 reclaim 불가, terminal success 후 같은 dedup key 재enqueue는 새 `sync_request_id`.
+- 이슈 #1(브리프 §5 내부 모순): 브리프 Owner 결정(line 13)과 §5 채택이 "`not_found` 3회"로 남아 §8.2/코드/테스트/SoT의 "archive worker-time `not_found` = idempotent success"와 충돌했다. line 13과 §5에 query-time(3회, 후속 selector)/archive worker-time(idempotent success) 분리 note를 추가해 모순을 제거했고, §8 회귀의 query-time `not_found` 항목에 "후속 query selector slice에서 회귀 추가"를 표시했다. 결정 자체는 변경 없이 문서 일관성만 정리했다.
+
 ## Issues found
 
 - 문제: 브리프는 미확정 항목 목록에 4/5/6을 적었지만 실제 선택지와 채택안은 없었다.
@@ -226,8 +233,12 @@
 - One-shot worker broader regression: `python3 -m unittest tests.test_indexing_phase3a tests.test_indexing_mongo_indexes tests.test_indexing_mongo tests.test_index_sync_worker_script tests.test_application_api` — 80개 통과(3 skip).
 - One-shot worker final full regression: `python3 -m unittest discover tests` — 407개 통과(40 skip).
 - One-shot worker final diff hygiene: `git diff --check` — 통과.
+- Worker slice 독립 검증: `docs/verifications/2026-07-03/phase3b_worker_retry_slice.md` — 합격. 직전 브리프 검증 리스크 #1~#4 해소, §8 회귀 전항 ↔ 테스트 추적, throwaway `mongo:7`로 live Mongo worker lifecycle 4경로(success / backoff-terminal / stale reclaim / terminal-reenqueue) 독립 통과를 입증.
+- Worker slice 보강 compile: `python3 -m py_compile tests/test_indexing_mongo.py` — 통과.
+- Worker slice 보강 live smoke: throwaway `mongo:7`(27034)에서 `CORE_SOT_TEST_MONGO_URI='mongodb://localhost:27034/?directConnection=true' python3 -m unittest tests.test_indexing_mongo -v` — live 7개(기존 outbox 3 + 신규 worker 4) 통과. 컨테이너는 `docker stop`으로 정리.
+- Worker slice 보강 final full regression: `python3 -m unittest discover tests` — 411개 통과(44 skip).
+- Worker slice 보강 final diff hygiene: `git diff --check` — 통과.
 
 ## Next steps
 
-- Phase 3B one-shot worker slice를 독립 검증한다.
 - Actual ChromaDB/Elasticsearch mutation, stale-hit sync job, `analysis_completed` wiring은 후속이다.
