@@ -109,16 +109,17 @@
 - Phase 3B archive outbox 첫 code slice가 구현됐다(2026-07-03, SoT v1.6.26). Application archive endpoint는 Core SOT archive 성공 후 `index_sync_outbox` pending entry를 idempotent하게 생성한다. Event는 `project_archived`/`draft_archived`, dedup key는 `(project_id, event, source.mongo_collection, source.mongo_id)`, target envelope는 canonical `targets.chroma.status="pending"` + `targets.chroma.backend="in_memory_fake"`다. Entry는 nullable `user_id`, `attempt_count=0`, `max_attempts=3`, `next_attempt_at=null`, `last_error=null`을 가진다. 오류 타입은 서버/backend 계열 `backend_error`와 데이터 없음/not-found 계열 `not_found`를 분리했다. `index_sync_outbox`와 future `index_sync_logs`는 `sync_request_id`로 조인한다. Worker execution, retry/backoff 실행·숫자, ChromaDB/Elasticsearch mutation, stale-hit sync job, `analysis_completed` wiring은 후속이다.
 - Phase 3B archive outbox 독립 검증 후속 보강이 완료됐다(2026-07-03, SoT v1.6.27). `index_sync_outbox`가 `docs/mongo_collections.md` 운영 collection 레지스트리에 등록됐고, Mongo repository의 outbox document 직렬화/역직렬화는 fake collection round-trip 회귀로 잠겼다. `analysis_completed` event가 아직 code enum에 열리지 않았음도 명시 회귀로 고정했다. 남은 후속 리스크는 worker slice에서 status-aware dedup을 정제하는 것이다.
 - Phase 3B `index_sync_outbox` live Mongo persistence smoke가 추가·검증 보강됐다(2026-07-03). `tests/test_indexing_mongo.py`는 `CORE_SOT_TEST_MONGO_URI`가 명시되고 write 가능한 Mongo를 가리킬 때만 실제 `MongoIndexSyncRepository`로 archive outbox entry insert, fresh repository read-back, repeated enqueue dedup을 검증한다. 기본 `unittest discover`가 우연히 `localhost:27017`에 side effect를 내지 않도록 env-only로 바꿨고, live smoke는 `project_archived`와 `draft_archived` round-trip을 모두 잠근다. `MongoIndexSyncRepository.put_outbox_entry()`의 `DuplicateKeyError` defensive branch도 fake collection 단위 회귀로 잠갔다. Throwaway `mongo:7` on `localhost:27032`에서 live 3개 smoke가 통과했다.
+- Phase 3B one-shot worker 첫 slice가 구현됐다(2026-07-03, SoT v1.6.29). 브리프는 `docs/plans/03-index-worker-retry-decisions.md`다. Worker는 `pending` 또는 10분 이상 지난 stale `running` outbox entry를 claim하고, recording-only fake archive mutation을 실행한 뒤 `index_sync_logs`에 attempt result를 append한다. Claim lease는 `claimed_at`, backoff는 1분 → 5분 → terminal `failed`다. Terminal-location/index 전략은 terminal 이동을 채택해 `success|failed`가 되면 active outbox entry를 제거하고 terminal history는 `index_sync_logs`가 소유한다. Archive worker-time `not_found`는 idempotent success다. `scripts/index_sync_worker.py --limit N`으로 one-shot 실행한다.
 
 ## Owner Decisions Needed
 
-- 없음. Phase 3B sync/outbox 첫 code slice에 필요한 브리프 결정은 2026-07-03에 반영됐다.
+- 없음. Phase 3B worker/retry 첫 code slice에 필요한 결정은 2026-07-03에 반영됐다.
 
 ## Next Tasks
 
 1. `/v1/generate-structured`는 이번 비용 확인에서 보류했다. JSON/schema 검증과 1회 repair는 Application adapter가 소유하고, Gateway surface는 adapter로 분리해 두었다. repair 후에도 malformed JSON 비율이나 latency가 운영상 문제로 확인되면 별도 Gateway structured-output slice를 검토한다.
-2. Worker loop와 retry 실행을 다음 별도 slice로 검토한다. `backend_error`/`not_found`는 다른 error type이고 둘 다 기본 3회 시도라는 계약을 유지한다. 검증자가 지적한 status-aware dedup은 worker가 terminal 상태를 만들기 시작할 때 함께 정제한다.
-3. Persistent `index_sync_logs` attempt append/read surface는 worker slice에서 `sync_request_id` 조인 기준으로 구현한다.
+2. One-shot worker slice를 독립 검증한다. 특히 terminal 이동이 기존 unique index와 충돌하지 않는지, `claimed_at`/BSON Date round-trip, archive worker-time `not_found` success, backend retry 1분→5분→failed를 확인한다.
+3. Actual ChromaDB/Elasticsearch mutation은 후속이다. 현재 worker는 recording-only fake archive mutation으로 status/log lifecycle만 검증한다.
 4. Persistent Chroma-like adapter와 품질/embedding model 선택은 핵심 코어가 모두 만들어진 뒤 최후속으로 재검토한다. 현재 public 표면은 CLI script와 HTTP rebuild endpoint이며 둘 다 deterministic fake vector adapter를 사용한다.
 5. Domain tool-call branch는 Gateway tool-call response parsing + model tool-call wire format + Phase payload/tool handler가 확정된 뒤 별도 slice로 구현한다.
 6. task별 artifact schema 평가(`artifact_present`)는 Slice 2A/4/5 payload schema 확정 시 profile별로 교체한다.
@@ -221,6 +222,7 @@ docs/
 │   ├── 02-analysis-job-state-decisions.md # Phase 2A job 상태 전이 결정 브리프
 │   ├── 02-analysis-runner-execution-decisions.md # Phase 2A runner 실행 경계 결정 브리프
 │   ├── 03-index-sync-outbox-decisions.md # Phase 3B automatic sync/outbox 결정 브리프
+│   ├── 03-index-worker-retry-decisions.md # Phase 3B worker/retry 실행 경계 결정 브리프
 │   ├── implementation-plan.md   # vertical slice와 검증 계획
 │   ├── llm-gateway.md           # 모델 서빙 경계와 Gemma Q4 검증
 │   ├── gemma4-reuse.md          # 기존 구현 선택 이관과 Loop Gate 보강
@@ -268,7 +270,7 @@ services/
         │   └── service.py      # in-memory analysis repository/service + retry idempotency + job state transitions
         ├── indexing/
         │   ├── models.py       # Phase 3A source block index pointer/request/result/record contracts
-        │   ├── mongo_repository.py # pymongo(sync) adapter: index_sync_outbox/index_sync_logs setup + outbox persistence
+        │   ├── mongo_repository.py # pymongo(sync) adapter: index_sync_outbox/index_sync_logs setup + outbox claim/retry/log persistence
         │   └── service.py      # deterministic fake embedding + in-memory vector adapter + explicit snapshot rebuild + archive outbox service
         └── agent_loop/
             ├── budget.py       # BudgetPolicy(5차원 budget+retry cap)/BudgetTracker+F1 usage 방어(A1/A3)
@@ -309,6 +311,7 @@ tests/
 ├── test_indexing_phase3a.py
 ├── test_indexing_mongo.py
 ├── test_indexing_mongo_indexes.py
+├── test_index_sync_worker_script.py
 ├── test_phase3a_deployed_rebuild_smoke_script.py
 ├── test_phase3a_rebuild_source_block_index_script.py
 └── test_application_api.py
@@ -318,7 +321,8 @@ scripts/
 ├── phase2a_provider_live_smoke.py
 ├── phase2a_deployed_e2e_smoke.py
 ├── phase3a_deployed_rebuild_smoke.py
-└── phase3a_rebuild_source_block_index.py
+├── phase3a_rebuild_source_block_index.py
+└── index_sync_worker.py
 docs/verification_briefs/2026-06-24/
 ├── llm_gateway_slice_0_1_to_0_5.md
 ├── llm_gateway_f1_f2_live_smoke.md

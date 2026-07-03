@@ -1,6 +1,7 @@
 """Phase 3A source block indexing contract tests."""
 
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 import unittest
 
 from services.application.app.core_sot.service import (
@@ -21,12 +22,16 @@ from services.application.app.indexing.models import (
 from services.application.app.indexing.service import (
     CHROMA_TARGET,
     DeterministicFakeEmbeddingProvider,
+    DerivedIndexRecordNotFound,
     DRAFTS_COLLECTION,
+    INDEX_SYNC_CLAIM_TIMEOUT_SECONDS,
     INDEX_SYNC_MAX_ATTEMPTS,
     InMemoryIndexSyncRepository,
     InMemoryVectorIndexAdapter,
+    IndexSyncWorker,
     IndexSyncOutboxService,
     PROJECTS_COLLECTION,
+    RecordingArchiveIndexMutationAdapter,
     SourceBlockIndexingService,
 )
 
@@ -316,6 +321,123 @@ class IndexSyncOutboxServiceTest(unittest.TestCase):
         self.assertEqual(INDEX_SYNC_MAX_ATTEMPTS, 3)
 
 
+class IndexSyncWorkerTest(unittest.TestCase):
+    def test_worker_success_records_log_and_moves_terminal_out_of_outbox(self):
+        repo = InMemoryIndexSyncRepository()
+        outbox = IndexSyncOutboxService(repo)
+        entry = outbox.enqueue_project_archived(project_id="project-1")
+        adapter = RecordingArchiveIndexMutationAdapter()
+        worker = IndexSyncWorker(repository=repo, archive_adapter=adapter)
+        now = _utc(2026, 7, 3, 12, 0, 0)
+
+        summary = worker.run_once(limit=1, now=now)
+
+        self.assertEqual(summary.entries_claimed, 1)
+        self.assertEqual(summary.entries_succeeded, 1)
+        self.assertEqual(summary.entries_failed, 0)
+        self.assertEqual(adapter.marked_archived, [replace(entry, status=IndexSyncStatus.RUNNING, claimed_at=now)])
+        self.assertEqual(repo.outbox_entries, {})
+        self.assertEqual(len(repo.logs), 1)
+        self.assertEqual(repo.logs[0].status, IndexSyncStatus.SUCCESS)
+        self.assertEqual(repo.logs[0].attempt_count, 1)
+
+        reenqueued = outbox.enqueue_project_archived(project_id="project-1")
+
+        self.assertEqual(reenqueued.sync_request_id, "index-sync-request-2")
+
+    def test_active_pending_or_running_entry_is_deduped(self):
+        repo = InMemoryIndexSyncRepository()
+        outbox = IndexSyncOutboxService(repo)
+        first = outbox.enqueue_project_archived(project_id="project-1")
+        pending_replay = outbox.enqueue_project_archived(project_id="project-1")
+        now = _utc(2026, 7, 3, 12, 0, 0)
+
+        running = repo.claim_next_outbox_entry(
+            now=now,
+            claim_timeout_seconds=INDEX_SYNC_CLAIM_TIMEOUT_SECONDS,
+        )
+        running_replay = outbox.enqueue_project_archived(project_id="project-1")
+
+        self.assertEqual(pending_replay, first)
+        self.assertEqual(running_replay, running)
+        self.assertEqual(len(repo.outbox_entries), 1)
+
+    def test_stale_running_reclaim_does_not_consume_attempt(self):
+        repo = InMemoryIndexSyncRepository()
+        IndexSyncOutboxService(repo).enqueue_project_archived(project_id="project-1")
+        now = _utc(2026, 7, 3, 12, 0, 0)
+        first_claim = repo.claim_next_outbox_entry(
+            now=now,
+            claim_timeout_seconds=INDEX_SYNC_CLAIM_TIMEOUT_SECONDS,
+        )
+
+        non_stale = repo.claim_next_outbox_entry(
+            now=now + timedelta(seconds=INDEX_SYNC_CLAIM_TIMEOUT_SECONDS - 1),
+            claim_timeout_seconds=INDEX_SYNC_CLAIM_TIMEOUT_SECONDS,
+        )
+        stale = repo.claim_next_outbox_entry(
+            now=now + timedelta(seconds=INDEX_SYNC_CLAIM_TIMEOUT_SECONDS),
+            claim_timeout_seconds=INDEX_SYNC_CLAIM_TIMEOUT_SECONDS,
+        )
+
+        self.assertIsNone(non_stale)
+        self.assertEqual(first_claim.attempt_count, 0)
+        self.assertEqual(stale.attempt_count, 0)
+        self.assertEqual(
+            stale.claimed_at,
+            now + timedelta(seconds=INDEX_SYNC_CLAIM_TIMEOUT_SECONDS),
+        )
+
+    def test_backend_error_uses_one_minute_then_five_minute_backoff_then_failed(self):
+        repo = InMemoryIndexSyncRepository()
+        IndexSyncOutboxService(repo).enqueue_project_archived(project_id="project-1")
+        worker = IndexSyncWorker(
+            repository=repo,
+            archive_adapter=_FailingArchiveAdapter(),
+        )
+        first = _utc(2026, 7, 3, 12, 0, 0)
+
+        first_summary = worker.run_once(limit=1, now=first)
+        after_first = next(iter(repo.outbox_entries.values()))
+        second = first + timedelta(seconds=60)
+        second_summary = worker.run_once(limit=1, now=second)
+        after_second = next(iter(repo.outbox_entries.values()))
+        third = second + timedelta(seconds=300)
+        third_summary = worker.run_once(limit=1, now=third)
+
+        self.assertEqual(first_summary.entries_requeued, 1)
+        self.assertEqual(after_first.status, IndexSyncStatus.PENDING)
+        self.assertEqual(after_first.attempt_count, 1)
+        self.assertEqual(after_first.next_attempt_at, second)
+        self.assertEqual(after_first.last_error.error_type, IndexSyncErrorType.BACKEND_ERROR)
+        self.assertEqual(second_summary.entries_requeued, 1)
+        self.assertEqual(after_second.attempt_count, 2)
+        self.assertEqual(after_second.next_attempt_at, third)
+        self.assertEqual(third_summary.entries_requeued, 0)
+        self.assertEqual(repo.outbox_entries, {})
+        self.assertEqual([log.attempt_count for log in repo.logs], [1, 2, 3])
+        self.assertTrue(all(log.status == IndexSyncStatus.FAILED for log in repo.logs))
+
+    def test_archive_worker_time_not_found_is_idempotent_success(self):
+        repo = InMemoryIndexSyncRepository()
+        IndexSyncOutboxService(repo).enqueue_draft_archived(
+            project_id="project-1",
+            draft_id="draft-1",
+        )
+        worker = IndexSyncWorker(
+            repository=repo,
+            archive_adapter=_NotFoundArchiveAdapter(),
+        )
+
+        summary = worker.run_once(limit=1, now=_utc(2026, 7, 3, 12, 0, 0))
+
+        self.assertEqual(summary.entries_succeeded, 1)
+        self.assertEqual(summary.entries_failed, 0)
+        self.assertEqual(repo.outbox_entries, {})
+        self.assertEqual(repo.logs[0].status, IndexSyncStatus.SUCCESS)
+        self.assertIsNone(repo.logs[0].error)
+
+
 def _fixture(*, project_name="Novel"):
     core_sot = CoreSotService(InMemoryCoreSotRepository())
     project = core_sot.create_project(name=project_name)
@@ -350,6 +472,20 @@ def _fixture(*, project_name="Novel"):
 class _FailingVectorIndexAdapter:
     def upsert_records(self, records):
         raise RuntimeError("vector index unavailable")
+
+
+class _FailingArchiveAdapter:
+    def mark_archived(self, entry):
+        raise RuntimeError("backend unavailable")
+
+
+class _NotFoundArchiveAdapter:
+    def mark_archived(self, entry):
+        raise DerivedIndexRecordNotFound("already absent")
+
+
+def _utc(year, month, day, hour, minute, second):
+    return datetime(year, month, day, hour, minute, second, tzinfo=timezone.utc)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`  
-계약 버전: `v1.6.27`
+계약 버전: `v1.6.29`
 승인일: `2026-06-26`  
 최근 갱신일: `2026-07-03`
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
@@ -33,6 +33,8 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.6.29 | 2026-07-03 | Phase 3B one-shot index sync worker 첫 slice를 구현했다. Worker는 `pending` 또는 10분 이상 지난 stale `running` outbox entry를 claim해 recording-only fake archive mutation을 실행하고, attempt result를 `index_sync_logs`에 append한다. Claim lease는 `claimed_at` UTC datetime/BSON Date로 저장한다. Backoff는 `max_attempts=3` 기준 1분 → 5분 → terminal `failed`다. Terminal-location/index 전략은 terminal 이동을 채택해 `success|failed`가 되면 active outbox entry를 제거하고 terminal history는 `index_sync_logs`가 소유한다. Archive worker-time `not_found`는 idempotent success로 처리한다. | 사용자 결정, `plans/03-index-worker-retry-decisions.md`, `tests/test_indexing_phase3a.py`, `tests/test_index_sync_worker_script.py` |
+| v1.6.28 | 2026-07-03 | Phase 3B worker/retry 실행 경계 브리프를 조건부 승인 상태로 추가했다. 첫 worker는 one-shot command로 구현하고 장기적으로 UI-triggered background/daemon이 같은 service를 재사용할 수 있게 둔다. Claim timeout은 10분이며, stale running 판정을 위해 `claimed_at` lease timestamp가 필요하다. Backoff는 `max_attempts=3` 기준 1분 → 5분 → terminal `failed`다. `backend_error`와 query-time `not_found`는 둘 다 최대 3회 시도한다. Dedup은 `pending|running` active entry에만 적용한다. 독립 검증 후 terminal-location/index 전략과 archive worker-time `not_found` 처리는 구현 전 오너 결정으로 분리됐다. | 사용자 결정, `plans/03-index-worker-retry-decisions.md`, `docs/verifications/2026-07-03/phase3b_worker_retry_brief.md` |
 | v1.6.27 | 2026-07-03 | Phase 3B archive outbox 독립 검증 후속 보강을 반영했다. `index_sync_outbox`를 `mongo_collections.md` 운영 collection 레지스트리에 추가하고, `index_sync_logs`와 `sync_request_id`로 조인되는 pending request collection임을 명시했다. Mongo repository의 outbox document 직렬화/역직렬화는 fake collection round-trip 회귀로 잠갔고, `analysis_completed` event가 아직 code enum에 열리지 않았음을 명시 회귀로 고정했다. | `docs/verifications/2026-07-03/phase3b_archive_outbox_slice.md`, `tests/test_indexing_mongo_indexes.py`, `tests/test_indexing_phase3a.py` |
 | v1.6.26 | 2026-07-03 | Phase 3B archive outbox 첫 code slice를 구현했다. `IndexSyncOutboxEntry`는 `project_id`, nullable `user_id`, event(`project_archived`, `draft_archived`), source(`mongo_collection`, `mongo_id`, optional `mongo_version`), canonical `targets.chroma.status`, `targets.chroma.backend="in_memory_fake"`, status(`pending|running|success|failed`), retry metadata(`attempt_count`, `max_attempts=3`, `next_attempt_at`, `last_error`)를 가진다. 서버/backend 계열 오류와 데이터 없음/not-found 계열 오류는 각각 `backend_error`, `not_found`로 분리한다. Application archive endpoint는 Core SOT archive 성공 후 `index_sync_outbox` pending entry를 idempotent하게 생성한다. Dedup key는 `(project_id, event, source.mongo_collection, source.mongo_id)`이고 outbox/log는 `sync_request_id`로 조인 가능하다. Worker execution, retry 실행/backoff 숫자, actual ChromaDB/Elasticsearch mutation, `analysis_completed` wiring은 후속이다. | 사용자 결정, `tests/test_indexing_phase3a.py`, `tests/test_application_api.py`, `tests/test_indexing_mongo_indexes.py` |
 | v1.6.25 | 2026-07-03 | Phase 3B automatic sync/outbox 브리프를 승인·수정했다. 첫 automatic event source는 archive events(`project_archived`, `draft_archived`)로 시작하되, 오너가 장기적으로 더 맞는 흐름으로 본 `analysis_completed`를 후속 확장 경로로 열어 둔다. Delivery는 로컬 1인 프로젝트 기준 외부 queue 없이 Mongo outbox/polling을 사용한다. 저장 단위는 단일 `index_sync_logs`가 아니라 `index_sync_outbox` + `index_sync_logs` 분리를 채택하고, 두 collection은 `sync_request_id`로 조인한다. 첫 slice는 archive event outbox entry 생성만 다루며 worker/adapter execution, ChromaDB/Elasticsearch mutation, retry 실행은 후속이다. Persistent envelope는 canonical `targets` shape와 `backend="in_memory_fake"`를 사용하고, `user_id`는 user model 확정 전까지 nullable이다. | 사용자 결정, `plans/03-index-sync-outbox-decisions.md` |
@@ -73,7 +75,7 @@
 
 | 문서 | 역할 | 지위 |
 |---|---|---|
-| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.27 |
+| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.29 |
 | [`plans/README.md`](plans/README.md) | 계획 문서 진입점과 Phase/MVP 관계 | Draft |
 | [`plans/00-foundations.md`](plans/00-foundations.md) | 전역 원칙과 제품 경계 | Draft |
 | [`plans/implementation-plan.md`](plans/implementation-plan.md) | 구현 순서, slice 상태, 검증 gate | Draft |
@@ -358,7 +360,8 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 - Phase 3A는 `scripts/phase3a_rebuild_source_block_index.py`로 explicit rebuild를 실행할 수 있다. 이 script는 `--project-id`, `--snapshot-id`, `CORE_SOT_MONGO_URI`/`--mongo-uri`를 받아 Core SOT MongoDB에서 snapshot blocks를 읽고 current fake vector adapter에 rebuild한 뒤 JSON summary를 출력한다. JSON summary field는 `project_id`, `snapshot_id`, `target`, `records_attempted`, `records_written`, `records_indexed`, `records_query_visible`, `records_archived`다. Exit code는 full write 성공 0, partial write(`records_attempted != records_written`) 1, usage/config/domain error(no Mongo URI, missing snapshot 등) 2다. Application HTTP API endpoint와 persistent vector backend는 후속이다.
 - Phase 3A는 Application HTTP API `POST /projects/{project_id}/snapshots/{snapshot_id}/index/source-blocks/rebuild`로도 explicit rebuild를 실행할 수 있다. 이 endpoint는 현재 deterministic fake vector adapter를 사용하며, JSON summary field는 `project_id`, `snapshot_id`, `target`, `backend`, `records_attempted`, `records_written`, `records_indexed`, `records_query_visible`, `records_archived`다. `backend`는 `in_memory_fake`이고, missing/cross-project snapshot은 404다. Persistent vector backend와 automatic sync는 후속이다.
 - Phase 3B archive outbox 첫 code slice가 구현됐다. Application archive endpoint는 `project_archived`/`draft_archived` event를 Core SOT archive 성공 후 `index_sync_outbox`에 pending entry로 남긴다. Dedup key는 `(project_id, event, source.mongo_collection, source.mongo_id)`라 재archive가 중복 outbox entry를 만들지 않는다. Entry는 nullable `user_id`, canonical `targets.chroma.status`, `targets.chroma.backend="in_memory_fake"`, `status="pending"`, `attempt_count=0`, `max_attempts=3`, `next_attempt_at=null`, `last_error=null`을 가진다. Outbox와 future log는 `sync_request_id`로 조인한다. `index_sync_outbox`는 `mongo_collections.md` 운영 collection 레지스트리에 등록됐다. 오류 타입은 서버/backend 계열 `backend_error`와 데이터 없음/not-found 계열 `not_found`를 분리한다. `analysis_completed`는 오너가 장기적으로 가장 맞는 흐름으로 본 후속 event candidate지만, 아직 code enum에는 열지 않는다.
-- ES analyzer, 실제 embedding model, analysis candidate indexing, worker execution/retry policy, actual ChromaDB/Elasticsearch mutation, `analysis_completed` sync wiring은 미확정이다.
+- Phase 3B one-shot worker 첫 slice가 구현됐다. Worker는 `pending` 또는 10분 이상 지난 stale `running` outbox entry를 claim하고, recording-only fake archive mutation으로 archive event 처리 의도를 검증한 뒤 `index_sync_logs`에 attempt result를 append한다. Terminal-location/index 전략은 terminal 이동을 채택해 `success|failed`가 되면 active outbox entry를 제거하고 terminal history는 `index_sync_logs`가 소유한다. Archive worker-time `not_found`는 idempotent success다. Query-time `not_found`는 후속 LLM orchestration/query selector retry loop의 error type으로 남는다.
+- ES analyzer, 실제 embedding model, analysis candidate indexing, actual ChromaDB/Elasticsearch mutation, `analysis_completed` sync wiring은 미확정이다.
 
 ### Phase 4. Agentic Search
 

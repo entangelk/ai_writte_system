@@ -2129,6 +2129,7 @@ draft_archived
   "attempt_count": 0,
   "max_attempts": 3,
   "next_attempt_at": null,
+  "claimed_at": null,
   "last_error": null
 }
 ```
@@ -2152,6 +2153,12 @@ Dedup key:
 
 `index_sync_outbox` and `index_sync_logs` join by `sync_request_id`.
 
+`index_sync_outbox` is the active queue. When a request reaches terminal
+`success` or `failed`, the active outbox document is removed and terminal
+attempt/result history remains in `index_sync_logs`. This keeps the existing
+unique index scoped to active outbox documents while still allowing a later
+archive event with the same dedup key to create a new active request.
+
 ### 39A.4 Indexes
 
 ```javascript
@@ -2160,7 +2167,7 @@ db.index_sync_outbox.createIndex(
   { unique: true, name: "uniq_index_sync_outbox_event_source" }
 )
 db.index_sync_outbox.createIndex(
-  { status: 1, next_attempt_at: 1, sync_request_id: 1 },
+  { status: 1, next_attempt_at: 1, claimed_at: 1, sync_request_id: 1 },
   { name: "index_sync_outbox_by_status_next_attempt" }
 )
 ```
@@ -2184,6 +2191,8 @@ MongoDB → index_sync_outbox → worker/adapter → index_sync_logs
 ```json
 {
   "_id": "sync_001",
+  "sync_log_id": "sync_001",
+  "sync_request_id": "sync_req_001",
   "project_id": "project_001",
   "user_id": "user_001",
   "event": "analysis_completed",
@@ -2203,6 +2212,8 @@ MongoDB → index_sync_outbox → worker/adapter → index_sync_logs
     }
   },
   "status": "success",
+  "attempt_count": 1,
+  "error": null,
   "started_at": "2026-06-23T00:00:00Z",
   "finished_at": "2026-06-23T00:00:02Z"
 }

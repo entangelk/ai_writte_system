@@ -1,5 +1,6 @@
 """Unit tests for Phase 3 index sync MongoDB index setup."""
 
+from datetime import datetime, timezone
 import unittest
 
 try:
@@ -47,7 +48,7 @@ class _FakeCollection:
 
     def find_one(self, query):
         for doc in self.docs.values():
-            if all(_lookup(doc, key) == value for key, value in query.items()):
+            if all(_matches(_lookup(doc, key), value) for key, value in query.items()):
                 return dict(doc)
         return None
 
@@ -64,6 +65,12 @@ def _lookup(doc, dotted_key):
     for part in dotted_key.split("."):
         value = value[part]
     return value
+
+
+def _matches(actual, expected):
+    if isinstance(expected, dict) and "$in" in expected:
+        return actual in expected["$in"]
+    return actual == expected
 
 
 @unittest.skipUnless(_PYMONGO_AVAILABLE, "pymongo is not installed")
@@ -92,6 +99,7 @@ class MongoIndexSyncIndexSetupTests(unittest.TestCase):
                     [
                         ("status", 1),
                         ("next_attempt_at", 1),
+                        ("claimed_at", 1),
                         ("sync_request_id", 1),
                     ],
                     {"name": "index_sync_outbox_by_status_next_attempt"},
@@ -142,7 +150,8 @@ class MongoIndexSyncIndexSetupTests(unittest.TestCase):
             status=IndexSyncStatus.PENDING,
             attempt_count=2,
             max_attempts=3,
-            next_attempt_at="2026-07-03T00:00:00Z",
+            next_attempt_at=datetime(2026, 7, 3, tzinfo=timezone.utc),
+            claimed_at=datetime(2026, 7, 3, 0, 1, tzinfo=timezone.utc),
             last_error=IndexSyncLastError(
                 error_type=IndexSyncErrorType.NOT_FOUND,
                 detail="derived record not found",
@@ -150,6 +159,12 @@ class MongoIndexSyncIndexSetupTests(unittest.TestCase):
         )
 
         repo.put_outbox_entry(entry)
+        repo._outbox.docs["sync-request-1"]["next_attempt_at"] = datetime(
+            2026, 7, 3
+        )
+        repo._outbox.docs["sync-request-1"]["claimed_at"] = datetime(
+            2026, 7, 3, 0, 1
+        )
         recovered = repo.get_outbox_entry_by_dedup_key(
             project_id="project-1",
             event=IndexSyncEvent.PROJECT_ARCHIVED,
@@ -182,6 +197,7 @@ class MongoIndexSyncIndexSetupTests(unittest.TestCase):
             attempt_count=0,
             max_attempts=3,
             next_attempt_at=None,
+            claimed_at=None,
             last_error=None,
         )
 

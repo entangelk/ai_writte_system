@@ -2,6 +2,8 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-07-03 | SoT v1.6.29: Phase 3B one-shot index sync worker 첫 slice 구현 | [work log](docs/daily_logs/2026-07-03/work_log.md) |
+| 2026-07-03 | SoT v1.6.28: Phase 3B worker/retry 실행 경계 조건부 승인 | [work log](docs/daily_logs/2026-07-03/work_log.md) |
 | 2026-07-03 | SoT v1.6.27: Phase 3B archive outbox 검증 후속 보강 | [work log](docs/daily_logs/2026-07-03/work_log.md) |
 | 2026-07-03 | SoT v1.6.26: Phase 3B archive outbox 첫 code slice 구현 | [work log](docs/daily_logs/2026-07-03/work_log.md) |
 | 2026-07-03 | SoT v1.6.25: Phase 3B sync/outbox 브리프 승인·수정 | [work log](docs/daily_logs/2026-07-03/work_log.md) |
@@ -66,6 +68,8 @@
 
 ### Changed
 
+- SoT를 v1.6.29로 갱신해 Phase 3B one-shot index sync worker 첫 slice를 반영했다. Worker는 `pending` 또는 stale `running` outbox entry를 claim하고, recording-only fake archive mutation을 실행한 뒤 `index_sync_logs`에 attempt result를 append한다. `claimed_at`으로 10분 claim timeout을 판정하고, backend failure는 1분 → 5분 backoff 뒤 terminal `failed`가 된다. Terminal 이동을 채택해 `success|failed`가 되면 active outbox entry를 제거하고 history는 `index_sync_logs`가 소유한다. Archive worker-time `not_found`는 idempotent success다.
+- SoT를 v1.6.28로 갱신해 Phase 3B worker/retry 실행 경계를 조건부 승인 상태로 반영했다. 첫 worker는 one-shot command로 구현하고, 장기적으로 UI-triggered background/daemon이 같은 service를 재사용할 수 있게 둔다. Claim timeout은 10분이고 `claimed_at` lease timestamp로 stale running을 판정한다. Backoff는 1분 → 5분 → terminal `failed`, `backend_error`/query-time `not_found`는 둘 다 `max_attempts=3`을 사용한다. Status-aware dedup은 `pending|running` active entry에만 적용하되, terminal-location/index 전략과 archive worker-time `not_found` 처리는 구현 전 오너 결정으로 남겼다.
 - SoT를 v1.6.27로 갱신해 Phase 3B archive outbox 독립 검증 후속 보강을 반영했다. `index_sync_outbox`를 `mongo_collections.md` 운영 collection 레지스트리에 추가했고, Mongo outbox document 직렬화/역직렬화를 fake collection round-trip 회귀로 잠갔다. `analysis_completed`가 아직 code enum에 열리지 않았음도 명시 회귀로 고정했다.
 - SoT를 v1.6.26으로 갱신해 Phase 3B archive outbox 첫 code slice를 반영했다. Application archive endpoint는 Core SOT archive 성공 후 `index_sync_outbox` pending entry를 idempotent하게 생성한다. Event는 `project_archived`/`draft_archived`, dedup key는 `(project_id, event, source.mongo_collection, source.mongo_id)`, target envelope는 `targets.chroma.status="pending"` + `targets.chroma.backend="in_memory_fake"`다.
 - `IndexSyncOutboxEntry` 모델과 in-memory/Mongo repository skeleton을 추가했다. Mongo repository는 `index_sync_outbox` dedup index와 future `index_sync_logs` join index를 설치한다.
@@ -78,6 +82,10 @@
 사용자 결정: `analysis_completed`가 장기적으로 가장 맞는 event source처럼 보이지만, 지금은 Phase 3A의 archive stale gap을 먼저 줄이기 위해 archive events부터 구현한다. 외부 queue 운영 확장성은 로컬 1인 프로젝트 단계에서 고려하지 않는다. 상태 필드는 계속 늘어날 가능성이 있으므로 queue lifecycle과 result history를 단일 collection에 섞지 않고 분리한다.
 
 사용자는 archive 반영 방식으로 C first, B later를 승인했다. 즉, 지금은 outbox 기록과 stale validation guard로 안전성을 확보하고, 정리는 가능하도록 후속 worker/adapter slice에서 tombstone/status update를 우선 검토한다. Retry는 bounded local metadata를 채택하고, 서버/backend 오류와 not-found 오류를 다른 error type으로 분리하되 둘 다 기본 3회로 시작한다. Fake vector 단계는 persistent outbox/log 계약만 먼저 만들고 품질·embedding·actual adapter는 핵심 코어 완료 뒤 최후속으로 둔다.
+
+사용자는 worker/retry 구현 전에 브리프를 먼저 확정하고 다음 작업자가 활용할 수 있게 장단점을 남기기로 했다. Worker는 one-shot command로 시작하되 장기적으로 서비스 UI와 결합된 background/daemon이 같은 service를 재사용할 수 있게 둔다. Docker/Compose restart가 DB의 `running` 상태를 자동 회수하지 않는다는 이유로 claim timeout 10분을 채택했고, backoff는 1분 → 5분이다. 독립 검증 후 terminal-location/index 전략과 archive worker-time `not_found` 처리는 별도 결정 항목으로 분리했고, 아래 사용자 결정으로 닫았다.
+
+사용자는 terminal-location/index 전략으로 B를 채택했다. 즉, outbox는 active queue로 두고 `success|failed` terminal history는 `index_sync_logs`가 소유한다. Archive worker-time `not_found`도 B를 채택해 archive/tombstone/delete 대상 record가 이미 없으면 idempotent success로 처리한다. Query-time `not_found`는 별도 selector/orchestration retry loop의 error type으로 남긴다.
 
 ## 2026-07-02
 

@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 import hashlib
 from typing import Protocol
 
 from services.application.app.core_sot.service import CoreSotService, NotFound
 from services.application.app.indexing.models import (
     IndexSyncBackend,
+    IndexSyncErrorType,
     IndexSyncEvent,
+    IndexSyncLastError,
+    IndexSyncLog,
     IndexSyncOutboxEntry,
     IndexPointer,
     IndexRecordKind,
@@ -28,6 +33,8 @@ from services.application.app.indexing.models import (
 SOURCE_BLOCK_COLLECTION = "source_blocks"
 FAKE_VECTOR_BACKEND = "in_memory_fake"
 INDEX_SYNC_MAX_ATTEMPTS = 3
+INDEX_SYNC_CLAIM_TIMEOUT_SECONDS = 600
+INDEX_SYNC_BACKOFF_SECONDS = (60, 300)
 PROJECTS_COLLECTION = "projects"
 DRAFTS_COLLECTION = "drafts"
 CHROMA_TARGET = "chroma"
@@ -41,8 +48,14 @@ class VectorIndexAdapter(Protocol):
     def upsert_records(self, records: tuple[SourceBlockIndexRecord, ...]) -> int: ...
 
 
+class ArchiveIndexMutationAdapter(Protocol):
+    def mark_archived(self, entry: IndexSyncOutboxEntry) -> None: ...
+
+
 class IndexSyncRepository(Protocol):
     def next_sync_request_id(self) -> str: ...
+
+    def next_sync_log_id(self) -> str: ...
 
     def get_outbox_entry_by_dedup_key(
         self,
@@ -54,16 +67,46 @@ class IndexSyncRepository(Protocol):
 
     def put_outbox_entry(self, entry: IndexSyncOutboxEntry) -> None: ...
 
+    def claim_next_outbox_entry(
+        self,
+        *,
+        now: datetime,
+        claim_timeout_seconds: int,
+    ) -> IndexSyncOutboxEntry | None: ...
+
+    def record_outbox_success(
+        self,
+        entry: IndexSyncOutboxEntry,
+        *,
+        started_at: datetime,
+        finished_at: datetime,
+    ) -> IndexSyncLog: ...
+
+    def record_outbox_failure(
+        self,
+        entry: IndexSyncOutboxEntry,
+        *,
+        error: IndexSyncLastError,
+        started_at: datetime,
+        finished_at: datetime,
+    ) -> IndexSyncLog: ...
+
 
 class InMemoryIndexSyncRepository:
     def __init__(self) -> None:
         self._sync_request_seq = 0
+        self._sync_log_seq = 0
         self.outbox_entries: dict[str, IndexSyncOutboxEntry] = {}
+        self.logs: list[IndexSyncLog] = []
         self._outbox_dedup: dict[tuple[str, IndexSyncEvent, str, str], str] = {}
 
     def next_sync_request_id(self) -> str:
         self._sync_request_seq += 1
         return f"index-sync-request-{self._sync_request_seq}"
+
+    def next_sync_log_id(self) -> str:
+        self._sync_log_seq += 1
+        return f"index-sync-log-{self._sync_log_seq}"
 
     def get_outbox_entry_by_dedup_key(
         self,
@@ -75,7 +118,10 @@ class InMemoryIndexSyncRepository:
         entry_id = self._outbox_dedup.get(_dedup_key(project_id, event, source))
         if entry_id is None:
             return None
-        return self.outbox_entries[entry_id]
+        entry = self.outbox_entries.get(entry_id)
+        if entry is None or entry.status not in _ACTIVE_OUTBOX_STATUSES:
+            return None
+        return entry
 
     def put_outbox_entry(self, entry: IndexSyncOutboxEntry) -> None:
         key = _dedup_key(entry.project_id, entry.event, entry.source)
@@ -84,6 +130,91 @@ class InMemoryIndexSyncRepository:
             return
         self.outbox_entries[entry.sync_request_id] = entry
         self._outbox_dedup[key] = entry.sync_request_id
+
+    def claim_next_outbox_entry(
+        self,
+        *,
+        now: datetime,
+        claim_timeout_seconds: int,
+    ) -> IndexSyncOutboxEntry | None:
+        stale_before = now - timedelta(seconds=claim_timeout_seconds)
+        candidates = [
+            entry
+            for entry in self.outbox_entries.values()
+            if _claimable(entry, now=now, stale_before=stale_before)
+        ]
+        if not candidates:
+            return None
+        entry = sorted(candidates, key=_claim_sort_key)[0]
+        claimed = replace(
+            entry,
+            status=IndexSyncStatus.RUNNING,
+            claimed_at=now,
+        )
+        self.outbox_entries[claimed.sync_request_id] = claimed
+        return claimed
+
+    def record_outbox_success(
+        self,
+        entry: IndexSyncOutboxEntry,
+        *,
+        started_at: datetime,
+        finished_at: datetime,
+    ) -> IndexSyncLog:
+        log = _sync_log(
+            repository=self,
+            entry=entry,
+            status=IndexSyncStatus.SUCCESS,
+            attempt_count=entry.attempt_count + 1,
+            error=None,
+            started_at=started_at,
+            finished_at=finished_at,
+        )
+        self._remove_outbox_entry(entry)
+        self.logs.append(log)
+        return log
+
+    def record_outbox_failure(
+        self,
+        entry: IndexSyncOutboxEntry,
+        *,
+        error: IndexSyncLastError,
+        started_at: datetime,
+        finished_at: datetime,
+    ) -> IndexSyncLog:
+        attempt_count = entry.attempt_count + 1
+        terminal = attempt_count >= entry.max_attempts
+        log = _sync_log(
+            repository=self,
+            entry=entry,
+            status=IndexSyncStatus.FAILED,
+            attempt_count=attempt_count,
+            error=error,
+            started_at=started_at,
+            finished_at=finished_at,
+        )
+        self.logs.append(log)
+        if terminal:
+            self._remove_outbox_entry(entry)
+            return log
+        retry = replace(
+            entry,
+            status=IndexSyncStatus.PENDING,
+            attempt_count=attempt_count,
+            next_attempt_at=finished_at
+            + timedelta(seconds=_backoff_seconds(attempt_count)),
+            claimed_at=None,
+            last_error=error,
+        )
+        self.outbox_entries[retry.sync_request_id] = retry
+        return log
+
+    def _remove_outbox_entry(self, entry: IndexSyncOutboxEntry) -> None:
+        self.outbox_entries.pop(entry.sync_request_id, None)
+        self._outbox_dedup.pop(
+            _dedup_key(entry.project_id, entry.event, entry.source),
+            None,
+        )
 
 
 class DeterministicFakeEmbeddingProvider:
@@ -185,10 +316,108 @@ class IndexSyncOutboxService:
             attempt_count=0,
             max_attempts=INDEX_SYNC_MAX_ATTEMPTS,
             next_attempt_at=None,
+            claimed_at=None,
             last_error=None,
         )
         self._repo.put_outbox_entry(entry)
         return entry
+
+
+class DerivedIndexRecordNotFound(Exception):
+    """Raised when archive mutation target is already absent."""
+
+
+class RecordingArchiveIndexMutationAdapter:
+    def __init__(self) -> None:
+        self.marked_archived: list[IndexSyncOutboxEntry] = []
+
+    def mark_archived(self, entry: IndexSyncOutboxEntry) -> None:
+        self.marked_archived.append(entry)
+
+
+@dataclass(frozen=True, slots=True)
+class IndexSyncWorkerSummary:
+    entries_claimed: int
+    entries_succeeded: int
+    entries_failed: int
+    entries_requeued: int
+
+
+class IndexSyncWorker:
+    def __init__(
+        self,
+        *,
+        repository: IndexSyncRepository,
+        archive_adapter: ArchiveIndexMutationAdapter,
+        claim_timeout_seconds: int = INDEX_SYNC_CLAIM_TIMEOUT_SECONDS,
+    ) -> None:
+        self._repo = repository
+        self._archive_adapter = archive_adapter
+        self._claim_timeout_seconds = claim_timeout_seconds
+
+    def run_once(
+        self,
+        *,
+        limit: int,
+        now: datetime | None = None,
+    ) -> IndexSyncWorkerSummary:
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        clock = now or datetime.now(timezone.utc)
+        claimed = succeeded = failed = requeued = 0
+        for _ in range(limit):
+            entry = self._repo.claim_next_outbox_entry(
+                now=clock,
+                claim_timeout_seconds=self._claim_timeout_seconds,
+            )
+            if entry is None:
+                break
+            claimed += 1
+            try:
+                self._process_entry(entry)
+            except DerivedIndexRecordNotFound:
+                self._repo.record_outbox_success(
+                    entry,
+                    started_at=clock,
+                    finished_at=clock,
+                )
+                succeeded += 1
+            except Exception as exc:
+                will_requeue = entry.attempt_count + 1 < entry.max_attempts
+                self._repo.record_outbox_failure(
+                    entry,
+                    error=IndexSyncLastError(
+                        error_type=IndexSyncErrorType.BACKEND_ERROR,
+                        detail=str(exc),
+                    ),
+                    started_at=clock,
+                    finished_at=clock,
+                )
+                failed += 1
+                if will_requeue:
+                    requeued += 1
+            else:
+                self._repo.record_outbox_success(
+                    entry,
+                    started_at=clock,
+                    finished_at=clock,
+                )
+                succeeded += 1
+        return IndexSyncWorkerSummary(
+            entries_claimed=claimed,
+            entries_succeeded=succeeded,
+            entries_failed=failed,
+            entries_requeued=requeued,
+        )
+
+    def _process_entry(self, entry: IndexSyncOutboxEntry) -> None:
+        if entry.event in {
+            IndexSyncEvent.PROJECT_ARCHIVED,
+            IndexSyncEvent.DRAFT_ARCHIVED,
+        }:
+            self._archive_adapter.mark_archived(entry)
+            return
+        raise RuntimeError(f"unsupported index sync event: {entry.event.value}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -377,3 +606,62 @@ def _dedup_key(
     project_id: str, event: IndexSyncEvent, source: IndexSyncSource
 ) -> tuple[str, IndexSyncEvent, str, str]:
     return (project_id, event, source.mongo_collection, source.mongo_id)
+
+
+_ACTIVE_OUTBOX_STATUSES = {
+    IndexSyncStatus.PENDING,
+    IndexSyncStatus.RUNNING,
+}
+
+
+def _claimable(
+    entry: IndexSyncOutboxEntry,
+    *,
+    now: datetime,
+    stale_before: datetime,
+) -> bool:
+    if entry.status == IndexSyncStatus.PENDING:
+        return entry.next_attempt_at is None or entry.next_attempt_at <= now
+    if entry.status == IndexSyncStatus.RUNNING:
+        return entry.claimed_at is not None and entry.claimed_at <= stale_before
+    return False
+
+
+def _claim_sort_key(entry: IndexSyncOutboxEntry) -> tuple[datetime, str]:
+    return (
+        entry.next_attempt_at or datetime.min.replace(tzinfo=timezone.utc),
+        entry.sync_request_id,
+    )
+
+
+def _backoff_seconds(attempt_count: int) -> int:
+    index = max(0, attempt_count - 1)
+    if index >= len(INDEX_SYNC_BACKOFF_SECONDS):
+        return INDEX_SYNC_BACKOFF_SECONDS[-1]
+    return INDEX_SYNC_BACKOFF_SECONDS[index]
+
+
+def _sync_log(
+    *,
+    repository: IndexSyncRepository,
+    entry: IndexSyncOutboxEntry,
+    status: IndexSyncStatus,
+    attempt_count: int,
+    error: IndexSyncLastError | None,
+    started_at: datetime,
+    finished_at: datetime,
+) -> IndexSyncLog:
+    return IndexSyncLog(
+        sync_log_id=repository.next_sync_log_id(),
+        sync_request_id=entry.sync_request_id,
+        project_id=entry.project_id,
+        user_id=entry.user_id,
+        event=entry.event,
+        source=entry.source,
+        targets=entry.targets,
+        status=status,
+        attempt_count=attempt_count,
+        error=error,
+        started_at=started_at,
+        finished_at=finished_at,
+    )

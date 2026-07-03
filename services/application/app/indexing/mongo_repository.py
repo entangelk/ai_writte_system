@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from bson import ObjectId
-from pymongo import ASCENDING, MongoClient
+from pymongo import ASCENDING, MongoClient, ReturnDocument
 from pymongo.errors import DuplicateKeyError, OperationFailure
 
 from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
@@ -11,6 +13,7 @@ from services.application.app.indexing.models import (
     IndexSyncBackend,
     IndexSyncEvent,
     IndexSyncLastError,
+    IndexSyncLog,
     IndexSyncOutboxEntry,
     IndexSyncSource,
     IndexSyncStatus,
@@ -59,6 +62,7 @@ class MongoIndexSyncRepository:
                 [
                     ("status", ASCENDING),
                     ("next_attempt_at", ASCENDING),
+                    ("claimed_at", ASCENDING),
                     ("sync_request_id", ASCENDING),
                 ],
                 name="index_sync_outbox_by_status_next_attempt",
@@ -79,6 +83,9 @@ class MongoIndexSyncRepository:
     def next_sync_request_id(self) -> str:
         return str(ObjectId())
 
+    def next_sync_log_id(self) -> str:
+        return str(ObjectId())
+
     def get_outbox_entry_by_dedup_key(
         self,
         *,
@@ -92,6 +99,12 @@ class MongoIndexSyncRepository:
                 "event": event.value,
                 "source.mongo_collection": source.mongo_collection,
                 "source.mongo_id": source.mongo_id,
+                "status": {
+                    "$in": [
+                        IndexSyncStatus.PENDING.value,
+                        IndexSyncStatus.RUNNING.value,
+                    ]
+                },
             }
         )
         return _to_outbox_entry(doc) if doc else None
@@ -101,6 +114,100 @@ class MongoIndexSyncRepository:
             self._outbox.insert_one(_outbox_doc(entry))
         except DuplicateKeyError:
             return
+
+    def claim_next_outbox_entry(
+        self,
+        *,
+        now: datetime,
+        claim_timeout_seconds: int,
+    ) -> IndexSyncOutboxEntry | None:
+        stale_before = now - timedelta(seconds=claim_timeout_seconds)
+        doc = self._outbox.find_one_and_update(
+            {
+                "$or": [
+                    {
+                        "status": IndexSyncStatus.PENDING.value,
+                        "$or": [
+                            {"next_attempt_at": None},
+                            {"next_attempt_at": {"$lte": now}},
+                        ],
+                    },
+                    {
+                        "status": IndexSyncStatus.RUNNING.value,
+                        "claimed_at": {"$lte": stale_before},
+                    },
+                ]
+            },
+            {
+                "$set": {
+                    "status": IndexSyncStatus.RUNNING.value,
+                    "claimed_at": now,
+                }
+            },
+            sort=[
+                ("next_attempt_at", ASCENDING),
+                ("sync_request_id", ASCENDING),
+            ],
+            return_document=ReturnDocument.AFTER,
+        )
+        return _to_outbox_entry(doc) if doc else None
+
+    def record_outbox_success(
+        self,
+        entry: IndexSyncOutboxEntry,
+        *,
+        started_at: datetime,
+        finished_at: datetime,
+    ) -> IndexSyncLog:
+        log = _sync_log(
+            repository=self,
+            entry=entry,
+            status=IndexSyncStatus.SUCCESS,
+            attempt_count=entry.attempt_count + 1,
+            error=None,
+            started_at=started_at,
+            finished_at=finished_at,
+        )
+        self._logs.insert_one(_log_doc(log))
+        self._outbox.delete_one({"_id": entry.sync_request_id})
+        return log
+
+    def record_outbox_failure(
+        self,
+        entry: IndexSyncOutboxEntry,
+        *,
+        error: IndexSyncLastError,
+        started_at: datetime,
+        finished_at: datetime,
+    ) -> IndexSyncLog:
+        attempt_count = entry.attempt_count + 1
+        log = _sync_log(
+            repository=self,
+            entry=entry,
+            status=IndexSyncStatus.FAILED,
+            attempt_count=attempt_count,
+            error=error,
+            started_at=started_at,
+            finished_at=finished_at,
+        )
+        self._logs.insert_one(_log_doc(log))
+        if attempt_count >= entry.max_attempts:
+            self._outbox.delete_one({"_id": entry.sync_request_id})
+            return log
+        self._outbox.update_one(
+            {"_id": entry.sync_request_id},
+            {
+                "$set": {
+                    "status": IndexSyncStatus.PENDING.value,
+                    "attempt_count": attempt_count,
+                    "next_attempt_at": finished_at
+                    + timedelta(seconds=_backoff_seconds(attempt_count)),
+                    "claimed_at": None,
+                    "last_error": _last_error_doc(error),
+                }
+            },
+        )
+        return log
 
 
 def _outbox_doc(entry: IndexSyncOutboxEntry) -> dict:
@@ -119,6 +226,7 @@ def _outbox_doc(entry: IndexSyncOutboxEntry) -> dict:
         "attempt_count": entry.attempt_count,
         "max_attempts": entry.max_attempts,
         "next_attempt_at": entry.next_attempt_at,
+        "claimed_at": entry.claimed_at,
         "last_error": (
             _last_error_doc(entry.last_error)
             if entry.last_error is not None
@@ -163,7 +271,8 @@ def _to_outbox_entry(doc: dict) -> IndexSyncOutboxEntry:
         status=IndexSyncStatus(doc["status"]),
         attempt_count=doc["attempt_count"],
         max_attempts=doc["max_attempts"],
-        next_attempt_at=doc.get("next_attempt_at"),
+        next_attempt_at=_to_utc_datetime(doc.get("next_attempt_at")),
+        claimed_at=_to_utc_datetime(doc.get("claimed_at")),
         last_error=(
             _to_last_error(doc["last_error"])
             if doc.get("last_error") is not None
@@ -194,3 +303,66 @@ def _to_last_error(doc: dict) -> IndexSyncLastError:
         error_type=IndexSyncErrorType(doc["error_type"]),
         detail=doc["detail"],
     )
+
+
+def _to_utc_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _sync_log(
+    *,
+    repository: MongoIndexSyncRepository,
+    entry: IndexSyncOutboxEntry,
+    status: IndexSyncStatus,
+    attempt_count: int,
+    error: IndexSyncLastError | None,
+    started_at: datetime,
+    finished_at: datetime,
+) -> IndexSyncLog:
+    return IndexSyncLog(
+        sync_log_id=repository.next_sync_log_id(),
+        sync_request_id=entry.sync_request_id,
+        project_id=entry.project_id,
+        user_id=entry.user_id,
+        event=entry.event,
+        source=entry.source,
+        targets=entry.targets,
+        status=status,
+        attempt_count=attempt_count,
+        error=error,
+        started_at=started_at,
+        finished_at=finished_at,
+    )
+
+
+def _log_doc(log: IndexSyncLog) -> dict:
+    return {
+        "_id": log.sync_log_id,
+        "sync_log_id": log.sync_log_id,
+        "sync_request_id": log.sync_request_id,
+        "project_id": log.project_id,
+        "user_id": log.user_id,
+        "event": log.event.value,
+        "source": _source_doc(log.source),
+        "targets": {
+            name: _target_state_doc(target)
+            for name, target in log.targets.items()
+        },
+        "status": log.status.value,
+        "attempt_count": log.attempt_count,
+        "error": _last_error_doc(log.error) if log.error is not None else None,
+        "started_at": log.started_at,
+        "finished_at": log.finished_at,
+    }
+
+
+def _backoff_seconds(attempt_count: int) -> int:
+    backoff_seconds = (60, 300)
+    index = max(0, attempt_count - 1)
+    if index >= len(backoff_seconds):
+        return backoff_seconds[-1]
+    return backoff_seconds[index]

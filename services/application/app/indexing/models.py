@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 
 
@@ -81,7 +82,8 @@ class IndexSyncOutboxEntry:
     status: IndexSyncStatus
     attempt_count: int
     max_attempts: int
-    next_attempt_at: str | None
+    next_attempt_at: datetime | None
+    claimed_at: datetime | None
     last_error: IndexSyncLastError | None
 
 
@@ -97,6 +99,8 @@ class IndexSyncLog:
     status: IndexSyncStatus
     attempt_count: int
     error: IndexSyncLastError | None
+    started_at: datetime
+    finished_at: datetime
 
 
 @dataclass(frozen=True, slots=True)

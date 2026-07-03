@@ -71,6 +71,41 @@
 - Observation 3 대응으로 live smoke의 기본 URI를 없앴다. `CORE_SOT_TEST_MONGO_URI`가 명시되지 않으면 skip하므로, 기본 `unittest discover`가 우연히 `localhost:27017`의 writable Mongo에 side effect를 내지 않는다.
 - Observation 4는 이미 `ensure_indexes()` 생성자 실패와 index setup 단위 회귀가 역할을 나눠 잠그고 있어 추가 live index 목록 단언은 하지 않았다.
 
+### Phase 3B worker/retry 결정 브리프 작성
+
+- 변경 파일: `docs/plans/03-index-worker-retry-decisions.md`, `docs/plans/03-indexing.md`, `docs/plans/README.md`, `docs/system-contract-sot.md`, `HANDOFF.md`, `CHANGELOG.md`, `docs/daily_logs/2026-07-03/work_log.md`.
+- 사용자 요청에 따라 worker/retry 구현 전에 결정 브리프를 먼저 만들었다.
+- 브리프는 one-shot worker command, claim timeout 10분, backoff 1분 → 5분 → terminal `failed`, `backend_error`/`not_found` 모두 3회 시도, active-only status-aware dedup을 채택안으로 기록했다.
+- Docker/Compose restart가 worker process를 재시작할 수는 있지만 MongoDB에 남은 `running` outbox 상태를 자동으로 `pending`으로 되돌리지는 않는다는 점을 claim timeout 필요성의 이유로 남겼다.
+- `not_found`는 단순 같은 query 반복이 아니라 후속 query selector/LLM orchestration이 생기면 대체 조회 전략을 다시 고르는 loop로 해석한다고 문서화했다.
+- SoT를 v1.6.28로 올려 worker/retry 실행 경계를 정본 계약 인덱스에 반영했다.
+
+### Phase 3B worker/retry 브리프 독립 검증 후속 보강
+
+- 변경 파일: `docs/plans/03-index-worker-retry-decisions.md`, `docs/plans/03-indexing.md`, `docs/system-contract-sot.md`, `HANDOFF.md`, `CHANGELOG.md`, `docs/daily_logs/2026-07-03/work_log.md`.
+- 독립 검증 `docs/verifications/2026-07-03/phase3b_worker_retry_brief.md`의 조건부 합격 판정과 구현 차단 빈칸을 확인했다.
+- status-aware dedup과 기존 unique index 충돌을 브리프에 구현 차단 사항으로 명시했다. Terminal entry location / active-only unique index는 partial unique index(A)와 terminal 이동(B) 중 오너 결정이 필요하며, 브리프 추천은 B로 남겼다.
+- Claim timeout 구현에 필요한 `claimed_at` lease timestamp, timestamp type, atomic claim, claim order, stale running reclaim 시 attempt accounting을 문서화했다.
+- Archive worker-time `not_found`와 query-time `not_found`를 분리해 설명했다. Archive worker-time은 idempotent success로 볼지 3회 retry할지 오너 결정이 필요하며, 브리프 추천은 idempotent success다.
+- Fake archive mutation은 recording-only `mark_archived`/`delete_or_tombstone` equivalent로 검증하고 실제 Chroma/Elasticsearch mutation은 후속으로 둔다고 명시했다.
+- `index_sync_logs` 최소 attempt log field(`sync_log_id`, timestamps, status/error fields 등)를 브리프에 추가했다.
+- SoT/HANDOFF/CHANGELOG의 표현을 "승인"에서 "조건부 승인, 구현 전 결정 필요"로 낮춰 overclaim을 제거했다.
+
+### Phase 3B one-shot index sync worker 첫 slice 구현
+
+- 변경 파일: `services/application/app/indexing/models.py`, `services/application/app/indexing/service.py`, `services/application/app/indexing/mongo_repository.py`, `scripts/index_sync_worker.py`, `tests/test_indexing_phase3a.py`, `tests/test_indexing_mongo_indexes.py`, `tests/test_index_sync_worker_script.py`, `docs/plans/03-index-worker-retry-decisions.md`, `docs/plans/03-indexing.md`, `docs/mongo_collections.md`, `docs/system-contract-sot.md`, `HANDOFF.md`, `CHANGELOG.md`, `docs/daily_logs/2026-07-03/work_log.md`.
+- 사용자 결정으로 terminal-location/index 전략은 B를 채택했다. `index_sync_outbox`는 active queue로 유지하고, terminal `success|failed` history는 `index_sync_logs`가 소유한다. 따라서 기존 active outbox unique index는 유지한다.
+- 사용자 결정으로 archive worker-time `not_found`는 B를 채택했다. Archive/tombstone/delete 대상 derived record가 이미 없으면 목표 상태 달성으로 보고 idempotent success 처리한다. Query-time `not_found`는 후속 query selector/LLM orchestration retry loop error type으로 남긴다.
+- `IndexSyncOutboxEntry`에 `claimed_at`을 추가하고, `IndexSyncLog`에 `started_at`/`finished_at`을 추가했다. Timestamp는 UTC datetime/BSON Date 정책으로 문서화했다.
+- `InMemoryIndexSyncRepository`와 `MongoIndexSyncRepository`에 pending/stale-running claim, success/failure record, terminal outbox removal, retry backoff update, log append를 추가했다.
+- `IndexSyncWorker`는 one-shot `run_once(limit=N)`로 bounded 실행되며, recording-only fake archive adapter를 사용해 archive event 처리 의도와 status/log lifecycle을 검증한다.
+- Backend failure는 attempt 실패로 기록하고 `attempt_count`를 증가시킨다. attempt 1 실패는 1분 뒤, attempt 2 실패는 5분 뒤 재시도하고, attempt 3 실패는 terminal `failed`로 outbox에서 제거한다.
+- Stale running reclaim은 `attempt_count`를 증가시키지 않는다. 실제 adapter/backend 결과가 없는 crash를 실패 attempt로 오표기하지 않기 위해서다.
+- Worker summary의 `entries_requeued`는 repository 내부 저장구조가 아니라 `attempt_count + 1 < max_attempts` 계약으로 계산한다. Mongo repository에도 같은 summary semantics가 적용되게 하기 위해서다.
+- MongoDB read-back 경로는 BSON Date가 naive UTC로 반환돼도 Python domain model 계약에 맞게 timezone-aware UTC `datetime`으로 정규화한다.
+- `scripts/index_sync_worker.py`를 추가해 `CORE_SOT_MONGO_URI`/`--mongo-uri` 기반 one-shot worker command를 제공한다.
+- SoT를 v1.6.29로 올려 worker 첫 구현 slice를 정본 계약 인덱스에 반영했다.
+
 ## Issues found
 
 - 문제: 브리프는 미확정 항목 목록에 4/5/6을 적었지만 실제 선택지와 채택안은 없었다.
@@ -113,6 +148,36 @@
 - Resolution: `CORE_SOT_TEST_MONGO_URI`가 명시되지 않으면 live smoke를 skip하도록 변경했다.
 - Outcome: 기본 discovery는 외부 Mongo side effect 없이 skip되고, live smoke는 명시 URI에서만 실행된다.
 
+- 문제: Docker/Compose restart만으로 worker crash 후 `running` outbox entry가 회수된다고 오해할 수 있었다.
+- 원인: process lifecycle과 MongoDB에 저장된 outbox lifecycle이 별도인데, worker/retry 숫자 결정 전 이 차이가 문서화되지 않았다.
+- Resolution: `docs/plans/03-index-worker-retry-decisions.md`에 claim timeout 10분의 목적을 stale `running` DB 상태 회수로 명시했다.
+- Outcome: worker 구현자가 restart와 claim recovery를 혼동하지 않게 됐다.
+
+- 문제: active-only status-aware dedup 결정이 기존 `index_sync_outbox` unique index와 충돌했다.
+- 원인: 기존 unique index는 dedup key에 status를 포함하지 않아 terminal entry가 outbox에 남으면 같은 key의 새 active request insert를 막는다.
+- Resolution: 브리프에 partial unique index와 terminal 이동 선택지를 추가하고, 오너 결정 전 worker 구현을 시작하지 않도록 상태를 조건부 승인으로 낮췄다.
+- Outcome: 구현자가 unique index migration 또는 terminal 이동을 임의로 선택하지 않게 됐다.
+
+- 문제: claim timeout을 판정할 lease timestamp field가 기존 model/schema에 없었다.
+- 원인: 첫 outbox slice는 pending entry 생성까지만 다뤘고 worker claim schema를 열지 않았다.
+- Resolution: 브리프에 `claimed_at`, UTC datetime/BSON Date 정책, atomic claim, stale running reclaim accounting을 추가했다.
+- Outcome: claim timeout 구현에 필요한 field/type/attempt budget 원칙이 문서화됐다.
+
+- 문제: worker terminal 처리 후 같은 dedup key의 새 active request를 허용하려면 outbox와 logs 책임을 code에서 분명히 나눠야 했다.
+- 원인: 기존 outbox unique index는 active/terminal을 구분하지 않고 같은 key를 전역 unique로 묶었다.
+- Resolution: terminal 이동을 채택하고 success/failed 시 active outbox entry를 제거하며 `index_sync_logs`에 attempt/result history를 append하게 했다.
+- Outcome: 기존 unique index를 유지하면서 terminal 후 재enqueue가 새 `sync_request_id`를 만들 수 있다.
+
+- 문제: MongoDB BSON Date read-back이 driver 설정에 따라 naive UTC `datetime`으로 들어올 수 있었다.
+- 원인: 문서 계약은 timezone-aware UTC였지만 `_to_outbox_entry()`가 Mongo document timestamp를 그대로 domain model에 넣었다.
+- Resolution: Mongo outbox 역직렬화에서 `next_attempt_at`/`claimed_at`을 UTC aware로 정규화하고, fake collection round-trip 회귀에 naive read-back sample을 추가했다.
+- Outcome: repository read-back이 timestamp 계약을 안정적으로 지킨다.
+
+- 문제: Worker summary의 `entries_requeued` 계산이 in-memory repository 내부 dict에 기대면 Mongo CLI 실행에서는 재시도 예정 실패를 requeued로 세지 못한다.
+- 원인: summary 계산이 repository public contract가 아니라 테스트용 저장구조를 들여다봤다.
+- Resolution: 실패 attempt 직전 `attempt_count + 1 < max_attempts`로 requeue 여부를 계산하게 바꿨다.
+- Outcome: in-memory와 Mongo repository에서 같은 worker summary semantics가 유지된다.
+
 ## Decisions
 
 - Phase 3B 첫 automatic event source는 archive events로 시작한다. `analysis_completed`는 장기적으로 더 맞는 흐름으로 보지만 candidate indexing/review 지위가 확정될 때까지 후속이다.
@@ -123,6 +188,12 @@
 - `backend_error`와 `not_found`는 다른 error type이다. 둘 다 기본 3회 시도(`max_attempts=3`)로 시작한다.
 - `analysis_completed`는 아직 code enum에 열지 않는다. 실제 candidate indexing/review 지위가 확정될 때 event literal과 source collection을 추가한다.
 - `index_sync_outbox`는 `mongo_collections.md` 운영 collection 레지스트리에 등록한다.
+- Worker/retry 구현 전 브리프를 먼저 확정한다. 첫 worker는 one-shot command로 시작하고 장기적으로 UI-triggered background/daemon이 같은 service를 재사용할 수 있게 둔다.
+- Claim timeout은 10분, backoff는 1분 → 5분 → terminal `failed`다.
+- `backend_error`와 `not_found`는 둘 다 `max_attempts=3`을 사용한다. `not_found`는 후속 query selector/LLM orchestration retry loop의 error type으로 해석한다.
+- Status-aware dedup은 `pending|running` active entry에만 적용하고 terminal `success|failed`만 있으면 새 active request 생성을 허용한다.
+- Terminal-location/index 전략은 terminal 이동을 채택한다. Outbox는 active queue이고 terminal history는 `index_sync_logs`가 소유한다.
+- Archive worker-time `not_found`는 idempotent success다.
 
 ## Verification
 
@@ -148,7 +219,15 @@
 - Outbox live smoke follow-up focused regression: `python3 -m unittest tests.test_indexing_mongo tests.test_indexing_mongo_indexes -v` — env 미지정으로 live 3개 skip, fake/index setup 4개 통과.
 - Outbox live smoke follow-up live regression: throwaway `mongo:7` on `localhost:27032`에서 `CORE_SOT_TEST_MONGO_URI='mongodb://localhost:27032/?directConnection=true' python3 -m unittest tests.test_indexing_mongo -v` — live 3개 통과. 컨테이너는 `docker stop phase3b-outbox-followup`로 정리.
 - Final full regression after outbox live follow-up: `python3 -m unittest discover tests` — 400개 통과(40 skip).
+- Worker/retry brief link check: `docs/plans/03-index-worker-retry-decisions.md`가 참조하는 `../system-contract-sot.md`, `03-indexing.md`, `03-index-sync-outbox-decisions.md` 존재 확인.
+- Worker/retry brief verification follow-up: `docs/verifications/2026-07-03/phase3b_worker_retry_brief.md` 확인 후 구현 차단 빈칸 #1/#2와 비차단 항목 #3~#6을 브리프/HANDOFF/SoT에 반영했다.
+- One-shot worker compile: `python3 -m py_compile services/application/app/indexing/models.py services/application/app/indexing/service.py services/application/app/indexing/mongo_repository.py scripts/index_sync_worker.py tests/test_indexing_phase3a.py tests/test_indexing_mongo_indexes.py tests/test_index_sync_worker_script.py` — 통과.
+- One-shot worker focused regression: `python3 -m unittest tests.test_indexing_phase3a tests.test_indexing_mongo_indexes tests.test_index_sync_worker_script -v` — 27개 통과.
+- One-shot worker broader regression: `python3 -m unittest tests.test_indexing_phase3a tests.test_indexing_mongo_indexes tests.test_indexing_mongo tests.test_index_sync_worker_script tests.test_application_api` — 80개 통과(3 skip).
+- One-shot worker final full regression: `python3 -m unittest discover tests` — 407개 통과(40 skip).
+- One-shot worker final diff hygiene: `git diff --check` — 통과.
 
 ## Next steps
 
-- Worker loop, retry/backoff 실행·숫자, actual ChromaDB/Elasticsearch mutation, stale-hit sync job, `analysis_completed` wiring은 후속이다.
+- Phase 3B one-shot worker slice를 독립 검증한다.
+- Actual ChromaDB/Elasticsearch mutation, stale-hit sync job, `analysis_completed` wiring은 후속이다.
