@@ -75,7 +75,20 @@ class _FailingPlanner:
         raise RuntimeError("provider unavailable")
 
 
-def _fixture(planner_factory):
+class _AdvancingClock:
+    """Returns each value once, then repeats the last, to drive wall-clock."""
+
+    def __init__(self, values):
+        self._values = list(values)
+        self._i = 0
+
+    def __call__(self):
+        value = self._values[min(self._i, len(self._values) - 1)]
+        self._i += 1
+        return value
+
+
+def _fixture(planner_factory, **service_kwargs):
     core_sot = CoreSotService(InMemoryCoreSotRepository())
     project = core_sot.create_project(name="Novel")
     draft = core_sot.create_draft(project_id=project.id, title="Episode 1")
@@ -118,6 +131,7 @@ def _fixture(planner_factory):
         vector_search=vector_index,
         embeddings=DeterministicFakeEmbeddingProvider(),
         planner=planner_factory(plan),
+        **service_kwargs,
     )
     app = create_app(service=core_sot, context_search_service=css)
     return app, project.id, draft.id, saved.draft_version.id
@@ -198,6 +212,20 @@ class ContextSearchApiTest(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 502)
         self.assertIn("llm_error", resp.json()["detail"])
+
+    def test_wall_clock_budget_exceeded_is_504(self):
+        """E1 should-fire: ContextSearchBudgetExceeded (wall-clock) maps to 504
+        per contract §9.3. Changing the endpoint mapping re-fails this."""
+        app, project_id, draft_id, version_id = _fixture(
+            _StaticPlanner,
+            wall_clock_seconds=0.01,
+            clock=_AdvancingClock([0.0, 100.0]),
+        )
+        resp = TestClient(app).post(
+            f"/projects/{project_id}/context-search",
+            json=_body(draft_id, version_id),
+        )
+        self.assertEqual(resp.status_code, 504)
 
     def test_unconfigured_service_is_503(self):
         core_sot = CoreSotService(InMemoryCoreSotRepository())

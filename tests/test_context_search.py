@@ -74,6 +74,16 @@ class _FailingPlanner:
         raise RuntimeError("provider unavailable")
 
 
+class _AsyncStaticPlanner:
+    """Async producer like the Slice 4.2 terminal-JSON planner."""
+
+    def __init__(self, plan):
+        self.plan = plan
+
+    async def build_plan(self, request):
+        return self.plan
+
+
 class _FailingVectorSearchAdapter:
     def query_similar(self, *, project_id, vector, limit):
         raise RuntimeError("vector backend unavailable")
@@ -196,6 +206,26 @@ class ContextSearchPackageTest(unittest.IsolatedAsyncioTestCase):
                 for item in package.macro_items + package.micro_evidence
             ),
         )
+
+    async def test_async_planner_is_awaited_by_service(self):
+        """S1 should-fire: an async planner (the Slice 4.2 terminal-JSON
+        planner shape) must be awaited by build_context_package. Dropping the
+        isawaitable/await step leaves a coroutine that fails _validate_plan, so
+        this test re-fails."""
+        core_sot, vector_index, indexing, saved = _fixture()
+        request = _request(
+            saved, needs=(ContextNeed.CURRENT_SCENE, ContextNeed.SOURCE_QUOTE)
+        )
+        plan = _plan(saved, steps=(_mongo_step(), _vector_step()))
+        service = _service(
+            core_sot, vector_index, indexing, _AsyncStaticPlanner(plan)
+        )
+
+        package = await service.build_context_package(request)
+
+        self.assertEqual(package.trace.plan.plan_id, plan.plan_id)
+        self.assertGreater(len(package.macro_items), 0)
+        self.assertGreater(len(package.micro_evidence), 0)
 
     async def test_current_scene_is_paragraph_run_after_last_scene_boundary(self):
         core_sot, vector_index, indexing, saved = _fixture()

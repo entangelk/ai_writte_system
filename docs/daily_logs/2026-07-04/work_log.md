@@ -66,6 +66,14 @@
 - 회귀 7개(`tests/test_context_search_api.py`)로 200/404/400×2/502/503/gate pass를 잠갔다.
 - SoT v1.6.34, 브리프 §9.3 + 구현 후속 반영.
 
+### Slice 4.3 독립 검증 조건부 합격의 빈 셸 2종 폐쇄
+
+- 변경 파일: `tests/test_context_search.py`, `tests/test_context_search_api.py`, `HANDOFF.md`, `docs/plans/04-agentic-search-kickoff-decisions.md`, `docs/daily_logs/2026-07-04/work_log.md`.
+- 독립 검증(`docs/verifications/2026-07-04/context_search_slice_4_3.md`, 조건부 합격)은 endpoint 매핑 4종·async sync 방향·suite green을 실증하면서도, contract 경계 2종이 회귀 없이 빈 셸로 남았음을 mutation으로 지적했다.
+- **E1 — wall-clock 504 매핑**: 브리프 §9.3 item 4가 명시하고 endpoint 코드에 있으나 pin하는 API 회귀가 없어 504→500으로 바꿔도 전부 통과했다. `test_wall_clock_budget_exceeded_is_504` 추가: `_AdvancingClock([0.0, 100.0])` + `wall_clock_seconds=0.01`로 `ContextSearchBudgetExceeded`를 trigger해 HTTP 504를 잠갔다. mutation(504→500) 재실패 확인.
+- **S1 — async planner→service seam**: 이 slice의 핵심 deliverable("async 터미널 JSON planner를 build_context_package에서 await")의 async 방향이, service를 거치는 모든 회귀가 sync fake planner만 주입해 잠기지 않았다(isawaitable→False로 바꿔도 통과). `test_async_planner_is_awaited_by_service` 추가: `_AsyncStaticPlanner`(async `build_plan`)를 service에 주입해 정상 package 생성을 확인. mutation(isawaitable→False) 시 coroutine이 `_validate_plan`에 도달해 `AttributeError`로 재실패 확인. sync 방향(S2)은 기존 회귀 24개로 이미 양방향 잠금.
+- 회귀 2개 추가 후 endpoint 8개 + context_search 29개, 전체 `unittest discover` 466 / `pytest` 422 passed / 44 skipped. `git diff --check` 통과. 두 mutation 모두 복원 후 전체 통과.
+
 ## Next steps
 
 - 로컬 llama.cpp 서버 기동 완료 후: `curl localhost:9080/health`와 gateway `/health/ready`로 upstream readiness를 확인하고, `LLAMA_BASE_URL=http://localhost:9080 python3 scripts/phase4_context_search_planner_live_smoke.py --timeout-seconds 1000`로 Slice 4.2 planner를 실제 모델로 검증한다(valid SearchPlan 또는 repair 후 `llm_error`). 12B는 느리므로(~5 t/s) timeout을 넉넉히 둔다.
