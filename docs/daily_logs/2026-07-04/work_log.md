@@ -66,6 +66,15 @@
 - 회귀 7개(`tests/test_context_search_api.py`)로 200/404/400×2/502/503/gate pass를 잠갔다.
 - SoT v1.6.34, 브리프 §9.3 + 구현 후속 반영.
 
+### Phase 4 context search deployed smoke 스크립트 (S-1)
+
+- 변경 파일: `scripts/phase4_context_search_deployed_smoke.py`(신규), `tests/test_phase4_context_search_deployed_smoke_script.py`(신규), `HANDOFF.md`, `CHANGELOG.md`, `docs/daily_logs/2026-07-04/work_log.md`.
+- 후속 후보 중 가장 작고 막힘 없는 슬라이스(S-1)를 진행했다. (a) real Chroma/ES는 인프라 필요·큼, (b) 비교 purpose는 오너가 뒤로 미룸, (c) tool-call planner는 상류 wire 계약 차단이라 제외.
+- Slice 4.3 endpoint E2E 경로(내가 수동 curl로만 확인)를 phase2a/3a deployed smoke 관례 그대로 재사용 가능한 자동화 스크립트로 고정했다. 이미 떠 있는 Application HTTP endpoint로 project/draft/version 준비 → `POST /projects/{id}/context-search` 호출 → package + gate 요약 출력. exit 0은 `search_http_status==200`.
+- self-regression 4개(MockTransport, 라이브 서버 불필요): 정상 200 package+gate/plan_steps + current_position·needs 페이로드 검증, 502 error status 캡처(package 필드 없음), CLI exit 규칙 양방향(200→0/502→1), file-path import(subprocess --help).
+- 실제 compose stack(application/gateway/llama healthy)에서 `--application-base-url http://127.0.0.1:8000 --timeout-seconds 650` 실행: `search_http_status=200`, gate `pass`, degraded `False`, macro 2(current_scene mongo), micro 0(source_quote vector empty — non-persistent fake), plan_steps `[(current_scene,[mongo]),(source_quote,[vector])]`, exit 0. 실제 12B planner가 gateway 컨테이너를 관통했다.
+- SoT는 올리지 않았다(smoke 스크립트는 계약 변경이 아니며 phase2a/3a deployed smoke 관례와 동일).
+
 ### Slice 4.3 독립 검증 조건부 합격의 빈 셸 2종 폐쇄
 
 - 변경 파일: `tests/test_context_search.py`, `tests/test_context_search_api.py`, `HANDOFF.md`, `docs/plans/04-agentic-search-kickoff-decisions.md`, `docs/daily_logs/2026-07-04/work_log.md`.
