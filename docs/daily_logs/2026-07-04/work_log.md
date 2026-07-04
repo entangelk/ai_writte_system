@@ -24,6 +24,9 @@
 - **경계 분담 — adapter는 literal 멤버십만, plan 의미는 service가 소유**: 브리프 §9.2 item 3은 "§1 집합 밖 literal은 repair 후에도 남으면 llm_error"만 요구한다. 따라서 adapter는 need/tool의 enum 멤버십만 검증하고, plan 의미 검증(미요청 need, need별 불허 tool, project_id 일치)은 Slice 4.1 `ContextSearchService._validate_plan`이 계속 소유한다. 두 계층이 겹치지 않아 중복 검증이 없다.
 - **async adapter + sync service seam 유지**: LLM provider(`generate`)가 async라 planner adapter도 async로 만들었다(Phase 2A와 동일). Slice 4.1의 sync `SearchPlanner` Protocol과 sync `build_context_package`는 fake 주입 seam으로 그대로 두었다. async planner를 sync service에 통합하려면 service를 async로 올려야 하는데, 이는 브리프가 "후속 slice"로 명시한 HTTP wiring 범위라 이번 slice에서 하지 않았다. 이 재조정 지점을 planner 모듈 docstring·브리프·SoT·HANDOFF에 명시했다.
 - **error type = llm_error**: planner가 낸 malformed/out-of-set output은 브리프 error taxonomy의 `llm_error`(planner provider 계열)로 매핑한다. service `_build_plan`도 planner 예외를 llm_error로 감싸므로 wiring 이후에도 계열이 유지된다.
+- **(Slice 4.3) async 통합 방식 — service를 async로, planner 결과는 isawaitable로 await**: 대안은 service를 sync로 유지하고 endpoint에서 plan을 미리 async로 resolve해 주입하는 것이었으나, 그러면 planner→execute→rank→budget 흐름의 캡슐화가 endpoint로 새어나간다. LLM I/O는 본질적으로 async이고 최종 호출자는 async FastAPI이므로 service를 async로 올리는 것이 정직한 설계다. `inspect.isawaitable`로 sync fake planner도 그대로 지원해 Slice 4.1 fake planner 클래스 churn을 0으로 만들고, 테스트 클래스만 기계적으로 async 전환했다.
+- **(Slice 4.3) analysis 회귀 `assert_called_once` → `assert_called_with` 정정**: create_app이 이제 analysis runner와 context search planner 두 곳에서 `GatewayGenerateProvider`를 만들어 호출 수가 1→2가 됐다. 해당 테스트의 계약은 "analysis run이 env-구성 provider를 쓴다"이고 호출 수는 구현 세부이므로, env 구성(base_url/timeout/trust_env)이 실제로 쓰였음을 검증하는 `assert_called_with`로 바꿔 계약을 유지하되 소비자 수에 취약하지 않게 했다. 행위 단언(run succeeded, provider.requests==1, model None)은 그대로 실제 계약을 잠근다.
+- **(Slice 4.3) deployed vector는 fake·non-persistent라 vector need hit 없음**: rebuild endpoint와 마찬가지로 공유 persistent vector store가 없어 배포 endpoint의 vector need(event_context/source_quote)는 hit이 없고, Mongo-direct need(current/recent scene)만 Core SOT에서 서빙된다. 브리프 승인 범위(real Chroma 최후속)와 일치하며 SoT/브리프/endpoint 주석에 명시했다.
 
 ## Issues found
 
@@ -52,6 +55,16 @@
 - `llama` 서비스: image `ghcr.io/ggml-org/llama.cpp:server-cuda`, `-hf ${LLAMA_HF_REPO:-google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0}` + `--jinja`(llama.cpp `chat_template_kwargs.enable_thinking` 지원 필요) + `--n-gpu-layers 99` + `--ctx-size 8192`, host port 9080. GGUF 다운로드는 `LLAMA_CACHE=/models` + `llama_models` 볼륨으로 캐시해 재기동 시 재다운로드하지 않는다. GPU는 `deploy.resources.reservations.devices`(nvidia)로 전달한다.
 - override는 `gateway`의 `LLAMA_BASE_URL`을 `http://llama:9080`으로 덮고 `depends_on: llama: service_healthy`를 걸어, llama가 healthy(모델 로드 완료)된 뒤에만 gateway가 뜨고, 그 뒤 application이 뜨는 순서를 보장한다. `llama` healthcheck는 gateway `/health/ready`가 upstream으로 확인하는 것과 같은 `GET /health`를 curl로 친다(start_period 120s, retries 60 — 12B 로드 여유).
 - gateway가 llama.cpp 서버에 요구하는 계약은 `GET /health`(readiness) + `POST /v1/chat/completions`(OpenAI 호환 응답 + `chat_template_kwargs`) 둘뿐임을 코드(`client.py`, `main.py`)에서 확인했고, `llama-server`가 이를 충족한다. runbook에 계약·prerequisite·env override 표·smoke·teardown을 정리했다.
+
+### Phase 4 Slice 4.3 context search HTTP API + async wiring 구현 (SoT v1.6.34)
+
+- 변경 파일: `services/application/app/context_search/service.py`, `services/application/app/main.py`, `tests/test_context_search.py`, `tests/test_context_search_api.py`(신규), `tests/test_application_api.py`, `docs/plans/04-agentic-search-kickoff-decisions.md`, `docs/system-contract-sot.md`, `HANDOFF.md`, `CHANGELOG.md`, `docs/daily_logs/2026-07-04/work_log.md`.
+- `build_context_package`를 async로 전환하고 `_build_plan`이 planner 결과를 `inspect.isawaitable`로 await하도록 했다. Slice 4.1 sync fake planner와 Slice 4.2 async 터미널 JSON planner가 같은 seam에 꽂힌다. `_build_plan`은 planner가 이미 분류한 `ContextSearchFailed`는 re-raise하고 나머지만 `llm_error`로 감싼다. `evaluate_context_gate`는 planner 미호출이라 sync 유지.
+- Slice 4.1 회귀 2개 클래스를 `IsolatedAsyncioTestCase`로 전환하고 호출부에 await를 붙였다(스크립트 기계 변환, fake planner 클래스 무수정). sync 테스트(`TokenEstimateTest`/`VectorQuerySimilarTest`)는 그대로 두어 async 오염을 막았다.
+- `POST /projects/{project_id}/context-search` endpoint와 직렬화 헬퍼(`_context_item_payload`/`_context_trace_payload`/`_context_package_payload`), 요청 파서 `_build_context_search_request`(미지원 purpose/need literal→ValueError→400)를 추가했다. `{package, gate}` 반환.
+- create_app에 `context_search_service` 주입 param + `_default_context_search_service` factory 추가. env `LLM_GATEWAY_BASE_URL` 기반 TerminalJsonSearchPlanner + `context_search_plan_v1` seed + fake vector/embeddings. 미구성이면 None → 503.
+- 회귀 7개(`tests/test_context_search_api.py`)로 200/404/400×2/502/503/gate pass를 잠갔다.
+- SoT v1.6.34, 브리프 §9.3 + 구현 후속 반영.
 
 ## Next steps
 

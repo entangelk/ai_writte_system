@@ -168,6 +168,15 @@
 
 HTTP API surface, tool-call flat loop planner(§2.1), lexical(ES) 경로, prior-memory(analysis 비교) purpose(§8 C 완성), package persist는 모두 후속 slice다.
 
+### Slice 4.3 — HTTP API surface + service async wiring
+
+1. `ContextSearchService.build_context_package`를 async로 올려 async 터미널 JSON planner를 await한다. sync fake planner(Slice 4.1)는 `inspect.isawaitable`로 계속 동작한다. `evaluate_context_gate`는 planner 미호출이라 sync 유지.
+2. `POST /projects/{project_id}/context-search`: body(query/needs/purpose/current_position/max_tokens) → ContextSearchRequest, build_context_package + Context Gate 실행, ContextPackage + gate 결정 직렬화 반환.
+3. create_app이 env(`LLM_GATEWAY_BASE_URL`) 기반으로 TerminalJsonSearchPlanner를 wiring한다(`_default_context_search_service`). 미구성이면 503.
+4. 오류 매핑: invalid 400 / wall-clock 504 / ContextSearchFailed 502 / missing project 404 / 미구성 503.
+
+deployed vector adapter는 non-persistent fake라 vector need hit은 없고 Mongo-direct need만 서빙한다(real Chroma 후속). tool-call planner(§2.1), ES lexical, prior-memory purpose(§8 C), package persist는 계속 후속이다.
+
 ## 구현 후속 — Slice 4.1 (2026-07-03)
 
 승인 당일 Slice 4.1을 구현했다. `services/application/app/context_search/`에 §9 domain model 전부와 `ContextSearchService`(planner 주입, 순차 실행, wall-clock 한도 기본 60s), `evaluate_context_gate()`(독립 재검증: cross-project, SOT reload 증거, candidate 라벨 금지, stale 재검출, budget)를 추가했다. `InMemoryVectorIndexAdapter`에 project-scoped `query_similar(project_id, vector, limit)` cosine 유사도 query 표면을 추가했다. `current_scene`/`recent_scenes`는 SOT block kind(heading/scene marker) 기반 deterministic 경계로 잘라 AI 추론 split을 쓰지 않는다. vector hit는 stale guard → SOT 재조회를 거친 뒤에만 ContextItem이 되고, hit의 index text는 사용하지 않는다. 회귀가 §9 목록의 양방향 분기를 잠갔다. Slice 4.2(터미널 JSON planner adapter)와 HTTP surface는 다음이다.
@@ -195,6 +204,19 @@ HTTP API surface, tool-call flat loop planner(§2.1), lexical(ES) 경로, prior-
 회귀 13개(`tests/test_context_search_planner.py`): valid parse(literal + project_id 주입), plan_id 기본값, 알 수 없는 need/tool literal parse error, non-JSON/bad shape 5종, prompt payload(template + needs/allowed_tools) 확인, markdown-fenced 1회 repair, invalid literal 1회 repair 후 성공, repair prompt에 parser_error/invalid_output 포함, repair 후에도 실패 시 `llm_error`, 1회 초과 재시도 금지(정확히 2회 호출), template 부재 `llm_error`. live smoke는 `scripts/phase4_context_search_planner_live_smoke.py`(실제 Gateway → llama.cpp, sandbox 밖 실행 필요).
 
 후속으로 남긴 것: HTTP API surface, service async 통합/wiring, tool-call flat loop planner(§2.1), lexical(ES) 경로, prior-memory(analysis 비교) purpose(§8 C), package persist.
+
+## 구현 후속 — Slice 4.3 (2026-07-04)
+
+§9.3(HTTP API surface + service async wiring)을 구현했다.
+
+- `ContextSearchService.build_context_package`를 async로 전환하고, planner 결과를 `inspect.isawaitable`로 await한다. Slice 4.1 sync fake planner와 Slice 4.2 async 터미널 JSON planner가 같은 seam에 꽂힌다. `_build_plan`은 planner가 이미 분류한 `ContextSearchFailed`(예: llm_error)는 re-raise하고 나머지 예외만 `llm_error`로 감싼다. `evaluate_context_gate`는 planner 미호출이라 sync 유지.
+- Slice 4.1 회귀 2개 클래스(`ContextSearchPackageTest`/`ContextGateTest`)를 `IsolatedAsyncioTestCase`로 전환하고 `build_context_package`/`_package` 호출에 await를 붙였다(기계적, fake planner 클래스는 무수정). 나머지 sync 테스트(`TokenEstimateTest`/`VectorQuerySimilarTest`)는 그대로다.
+- `POST /projects/{project_id}/context-search`: body(query/needs/purpose/current_position/max_tokens) → `_build_context_search_request`로 ContextSearchRequest 구성(미지원 purpose/need literal은 ValueError→400), build_context_package + `evaluate_context_gate` 실행, `{package, gate}` 직렬화 반환(package: project_id/purpose/status/degraded/token_estimate_total/macro_items/micro_evidence/constraints/do_not_use/trace, gate: decision/findings).
+- 오류 매핑: invalid(ValueError·InvalidContextSearchRequest) 400 / ContextSearchBudgetExceeded(wall-clock) 504 / ContextSearchFailed 502(detail에 error_type) / missing project 404 / planner 미구성 503.
+- create_app에 `context_search_service` 주입 param + env 기반 `_default_context_search_service`(TerminalJsonSearchPlanner + `context_search_plan_v1` seed + fake vector/embeddings) 추가. `LLM_GATEWAY_BASE_URL` 부재면 None → 503.
+- 회귀 7개(`tests/test_context_search_api.py`): 200 package+gate(macro/micro 존재, sot_reloaded, plan step id), fresh package gate pass, 미지원 need 400, empty needs 400, missing project 404, planner 실패 502(llm_error), 미구성 503. analysis run 회귀 1개(`test_analysis_run_endpoint_uses_env_configured_default_runner`)는 create_app이 이제 analysis+context search 두 provider를 만들어 `assert_called_once`가 깨지므로 env 구성 사용을 검증하는 `assert_called_with`로 정정(계약 유지).
+
+deployed vector adapter는 non-persistent fake라 vector need hit은 없고 Mongo-direct need(current/recent scene)만 서빙한다(real Chroma 후속). tool-call planner(§2.1), ES lexical, prior-memory purpose(§8 C), package persist는 계속 후속이다.
 
 ## 원문 및 상세 참고
 
