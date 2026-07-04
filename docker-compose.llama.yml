@@ -1,0 +1,66 @@
+# Optional opt-in override: run a local llama.cpp GPU server inside the stack.
+#
+# The base docker-compose.yml intentionally leaves the llama.cpp server external
+# (operated per machine via LLAMA_BASE_URL). Use this override only on a machine
+# that has no external llama.cpp endpoint and wants the full stack self-hosted:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.llama.yml up -d
+#
+# Prerequisites: NVIDIA GPU + nvidia-container-toolkit (the `deploy.resources`
+# device reservation below hands the GPU to the container). Without a GPU,
+# drop the `deploy` block and set LLAMA_GPU_LAYERS=0 for a CPU-only run.
+#
+# The first start downloads the GGUF model (~7 GB for the 12B QAT default) into
+# the llama_models volume, so `service_healthy` can take several minutes.
+services:
+  llama:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    command:
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "9080"
+      - "-hf"
+      - "${LLAMA_HF_REPO:-google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0}"
+      - "--jinja"
+      - "--n-gpu-layers"
+      - "${LLAMA_GPU_LAYERS:-99}"
+      - "--ctx-size"
+      - "${LLAMA_CTX_SIZE:-8192}"
+    environment:
+      # llama.cpp caches `-hf` downloads here; the volume keeps them across runs.
+      LLAMA_CACHE: "/models"
+    volumes:
+      - llama_models:/models
+    ports:
+      - "${LLAMA_PORT:-9080}:9080"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: ["gpu"]
+    healthcheck:
+      # llama.cpp server exposes GET /health (the same endpoint the gateway's
+      # /health/ready probes upstream). curl ships in the server-cuda image.
+      test: ["CMD", "curl", "-fsS", "http://localhost:9080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 120s
+
+  gateway:
+    # Point the gateway at the in-stack llama service instead of the external
+    # host default, and wait for the model to finish loading before starting.
+    environment:
+      LLAMA_BASE_URL: "http://llama:9080"
+      LLAMA_DEFAULT_MODEL: "${LLAMA_DEFAULT_MODEL:-google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0}"
+      LLAMA_DEFAULT_THINKING: "${LLAMA_DEFAULT_THINKING:-false}"
+      LLAMA_TIMEOUT_SECONDS: "${LLAMA_TIMEOUT_SECONDS:-900}"
+    depends_on:
+      llama:
+        condition: service_healthy
+
+volumes:
+  llama_models:

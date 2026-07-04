@@ -1147,7 +1147,14 @@ class ApplicationApiTest(unittest.TestCase):
         )
         self.assertEqual(len(provider.requests), 1)
         self.assertEqual(provider.requests[0].model, None)
-        provider_factory.assert_called_once()
+        # create_app now builds a gateway provider for both the analysis runner
+        # and the context search planner; assert the env config drives the
+        # construction rather than pinning the exact consumer count.
+        provider_factory.assert_called_with(
+            base_url="http://gateway.test",
+            timeout_seconds=120.0,
+            trust_env=False,
+        )
         fetched = client.get(
             f"/projects/{project['id']}/analysis/jobs/{job['id']}/candidates"
         )

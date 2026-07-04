@@ -2,6 +2,9 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-07-04 | Phase 4 context search deployed smoke 스크립트(`scripts/phase4_context_search_deployed_smoke.py`) 추가 및 실제 12B stack live 통과(gateway 컨테이너 관통) | [work log](docs/daily_logs/2026-07-04/work_log.md) |
+| 2026-07-04 | SoT v1.6.34: Phase 4 Slice 4.3 context search HTTP API(`POST /projects/{id}/context-search`) + `build_context_package` async wiring + create_app planner 배선 | [work log](docs/daily_logs/2026-07-04/work_log.md) |
+| 2026-07-04 | SoT v1.6.33: Phase 4 Slice 4.2 터미널 JSON LLM planner adapter 구현(`TerminalJsonSearchPlanner` + `context_search_plan_v1` template + strict parse/1회 repair/literal 검증→llm_error) | [work log](docs/daily_logs/2026-07-04/work_log.md) |
 | 2026-07-03 | SoT v1.6.32: Slice 4.1 독립 검증 차단 조건 폐쇄(SOT 백엔드 다운 → sot_error 매핑 + 백엔드 예외 주입 회귀 + NotFound 경로 분기 명문화) | [work log](docs/daily_logs/2026-07-03/work_log.md) |
 | 2026-07-03 | SoT v1.6.31: Phase 4 Slice 4.1 context search 구현(domain 계약 + planner 주입 orchestration + Context Gate) | [work log](docs/daily_logs/2026-07-03/work_log.md) |
 | 2026-07-03 | SoT v1.6.30: Phase 4 착수 브리프 승인. 사용자 결정: 터미널 JSON LLM planner 즉시 채택(tool-call planner는 전환 계획 추적), 계열 구분 error taxonomy, package 단일 schema로 시작하되 Writing/Analysis 비교용 모두 완성 의무 | [work log](docs/daily_logs/2026-07-03/work_log.md) |
