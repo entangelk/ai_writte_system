@@ -74,6 +74,16 @@ class _FailingPlanner:
         raise RuntimeError("provider unavailable")
 
 
+class _AsyncStaticPlanner:
+    """Async producer like the Slice 4.2 terminal-JSON planner."""
+
+    def __init__(self, plan):
+        self.plan = plan
+
+    async def build_plan(self, request):
+        return self.plan
+
+
 class _FailingVectorSearchAdapter:
     def query_similar(self, *, project_id, vector, limit):
         raise RuntimeError("vector backend unavailable")
@@ -166,8 +176,8 @@ def _service(core_sot, vector_index, indexing, planner, **kwargs):
     )
 
 
-class ContextSearchPackageTest(unittest.TestCase):
-    def test_builds_package_with_sot_reloaded_canonical_items_and_trace(self):
+class ContextSearchPackageTest(unittest.IsolatedAsyncioTestCase):
+    async def test_builds_package_with_sot_reloaded_canonical_items_and_trace(self):
         core_sot, vector_index, indexing, saved = _fixture()
         request = _request(
             saved, needs=(ContextNeed.CURRENT_SCENE, ContextNeed.SOURCE_QUOTE)
@@ -175,7 +185,7 @@ class ContextSearchPackageTest(unittest.TestCase):
         plan = _plan(saved, steps=(_mongo_step(), _vector_step()))
         service = _service(core_sot, vector_index, indexing, _StaticPlanner(plan))
 
-        package = service.build_context_package(request)
+        package = await service.build_context_package(request)
 
         self.assertEqual(package.project_id, saved["project_id"])
         self.assertEqual(package.status, "candidate")
@@ -197,7 +207,27 @@ class ContextSearchPackageTest(unittest.TestCase):
             ),
         )
 
-    def test_current_scene_is_paragraph_run_after_last_scene_boundary(self):
+    async def test_async_planner_is_awaited_by_service(self):
+        """S1 should-fire: an async planner (the Slice 4.2 terminal-JSON
+        planner shape) must be awaited by build_context_package. Dropping the
+        isawaitable/await step leaves a coroutine that fails _validate_plan, so
+        this test re-fails."""
+        core_sot, vector_index, indexing, saved = _fixture()
+        request = _request(
+            saved, needs=(ContextNeed.CURRENT_SCENE, ContextNeed.SOURCE_QUOTE)
+        )
+        plan = _plan(saved, steps=(_mongo_step(), _vector_step()))
+        service = _service(
+            core_sot, vector_index, indexing, _AsyncStaticPlanner(plan)
+        )
+
+        package = await service.build_context_package(request)
+
+        self.assertEqual(package.trace.plan.plan_id, plan.plan_id)
+        self.assertGreater(len(package.macro_items), 0)
+        self.assertGreater(len(package.micro_evidence), 0)
+
+    async def test_current_scene_is_paragraph_run_after_last_scene_boundary(self):
         core_sot, vector_index, indexing, saved = _fixture()
         request = _request(
             saved, needs=(ContextNeed.CURRENT_SCENE, ContextNeed.RECENT_SCENES)
@@ -211,7 +241,7 @@ class ContextSearchPackageTest(unittest.TestCase):
         )
         service = _service(core_sot, vector_index, indexing, _StaticPlanner(plan))
 
-        package = service.build_context_package(request)
+        package = await service.build_context_package(request)
 
         current = [
             item.text
@@ -235,7 +265,7 @@ class ContextSearchPackageTest(unittest.TestCase):
             ],
         )
 
-    def test_project_isolation_excludes_other_project_records(self):
+    async def test_project_isolation_excludes_other_project_records(self):
         core_sot, vector_index, indexing, saved = _fixture()
         other_project = core_sot.create_project(name="Other")
         other_draft = core_sot.create_draft(
@@ -254,21 +284,21 @@ class ContextSearchPackageTest(unittest.TestCase):
         plan = _plan(saved, steps=(_vector_step(),))
         service = _service(core_sot, vector_index, indexing, _StaticPlanner(plan))
 
-        package = service.build_context_package(request)
+        package = await service.build_context_package(request)
 
         self.assertGreater(len(package.micro_evidence), 0)
         for item in package.micro_evidence:
             self.assertEqual(item.pointer.project_id, saved["project_id"])
             self.assertNotIn("다른 프로젝트", item.text)
 
-    def test_stale_hits_after_archive_are_excluded_with_reason_in_trace(self):
+    async def test_stale_hits_after_archive_are_excluded_with_reason_in_trace(self):
         core_sot, vector_index, indexing, saved = _fixture()
         core_sot.archive_project(project_id=saved["project_id"])
         request = _request(saved, needs=(ContextNeed.SOURCE_QUOTE,))
         plan = _plan(saved, steps=(_vector_step(),))
         service = _service(core_sot, vector_index, indexing, _StaticPlanner(plan))
 
-        package = service.build_context_package(request)
+        package = await service.build_context_package(request)
 
         self.assertEqual(package.micro_evidence, ())
         step = package.trace.steps[0]
@@ -278,19 +308,19 @@ class ContextSearchPackageTest(unittest.TestCase):
         for excluded in step.excluded:
             self.assertIn("project_archived", excluded.reason)
 
-    def test_fresh_hits_are_not_wrongly_excluded_as_stale(self):
+    async def test_fresh_hits_are_not_wrongly_excluded_as_stale(self):
         core_sot, vector_index, indexing, saved = _fixture()
         request = _request(saved, needs=(ContextNeed.SOURCE_QUOTE,))
         plan = _plan(saved, steps=(_vector_step(),))
         service = _service(core_sot, vector_index, indexing, _StaticPlanner(plan))
 
-        package = service.build_context_package(request)
+        package = await service.build_context_package(request)
 
         step = package.trace.steps[0]
         self.assertEqual(step.excluded, ())
         self.assertEqual(step.items_produced, len(package.micro_evidence))
 
-    def test_missing_position_version_maps_to_sot_error(self):
+    async def test_missing_position_version_maps_to_sot_error(self):
         # Mongo direct path: a position that does not exist in the SOT is a
         # full sot_error failure (documented divergence from the vector
         # path's soft stale exclusion).
@@ -309,10 +339,10 @@ class ContextSearchPackageTest(unittest.TestCase):
         service = _service(core_sot, vector_index, indexing, _StaticPlanner(plan))
 
         with self.assertRaises(ContextSearchFailed) as ctx:
-            service.build_context_package(request)
+            await service.build_context_package(request)
         self.assertIs(ctx.exception.error_type, ContextSearchErrorType.SOT_ERROR)
 
-    def test_mongo_position_backend_down_maps_to_sot_error_bidirectional(self):
+    async def test_mongo_position_backend_down_maps_to_sot_error_bidirectional(self):
         # Under-strict: with the sot_error mapping removed this re-fails as a
         # raw RuntimeError. Over-strict: the same request succeeds while the
         # backend is healthy.
@@ -322,15 +352,15 @@ class ContextSearchPackageTest(unittest.TestCase):
         plan = _plan(saved, steps=(_mongo_step(),))
         service = _service(core_sot, vector_index, indexing, _StaticPlanner(plan))
 
-        healthy = service.build_context_package(request)
+        healthy = await service.build_context_package(request)
         self.assertGreater(len(healthy.macro_items), 0)
 
         repo.fail_reads = True
         with self.assertRaises(ContextSearchFailed) as ctx:
-            service.build_context_package(request)
+            await service.build_context_package(request)
         self.assertIs(ctx.exception.error_type, ContextSearchErrorType.SOT_ERROR)
 
-    def test_vector_hit_backend_down_maps_to_sot_error_not_degraded(self):
+    async def test_vector_hit_backend_down_maps_to_sot_error_not_degraded(self):
         # A backend failure during the stale-guard/SOT reload of a vector hit
         # is an sot_error full failure, not a degraded backend_error package.
         repo = _ToggleBackendSotRepository()
@@ -339,15 +369,15 @@ class ContextSearchPackageTest(unittest.TestCase):
         plan = _plan(saved, steps=(_vector_step(),))
         service = _service(core_sot, vector_index, indexing, _StaticPlanner(plan))
 
-        healthy = service.build_context_package(request)
+        healthy = await service.build_context_package(request)
         self.assertGreater(len(healthy.micro_evidence), 0)
 
         repo.fail_reads = True
         with self.assertRaises(ContextSearchFailed) as ctx:
-            service.build_context_package(request)
+            await service.build_context_package(request)
         self.assertIs(ctx.exception.error_type, ContextSearchErrorType.SOT_ERROR)
 
-    def test_vector_hit_missing_snapshot_is_soft_excluded_not_failure(self):
+    async def test_vector_hit_missing_snapshot_is_soft_excluded_not_failure(self):
         # Index drift (snapshot gone from the SOT) excludes the hit as stale
         # instead of failing the request or degrading the package.
         core_sot, vector_index, indexing, saved = _fixture()
@@ -376,7 +406,7 @@ class ContextSearchPackageTest(unittest.TestCase):
         plan = _plan(saved, steps=(_vector_step(),))
         service = _service(core_sot, vector_index, indexing, _StaticPlanner(plan))
 
-        package = service.build_context_package(request)
+        package = await service.build_context_package(request)
 
         self.assertFalse(package.degraded)
         self.assertGreater(len(package.micro_evidence), 0)
@@ -387,7 +417,7 @@ class ContextSearchPackageTest(unittest.TestCase):
         self.assertEqual(len(ghost_exclusions), 1)
         self.assertEqual(ghost_exclusions[0].reason, "snapshot_missing")
 
-    def test_budget_includes_high_priority_and_excludes_overflow_bidirectional(self):
+    async def test_budget_includes_high_priority_and_excludes_overflow_bidirectional(self):
         core_sot, vector_index, indexing, saved = _fixture()
         plan = _plan(
             saved,
@@ -398,7 +428,7 @@ class ContextSearchPackageTest(unittest.TestCase):
         )
         service = _service(core_sot, vector_index, indexing, _StaticPlanner(plan))
 
-        generous = service.build_context_package(
+        generous = await service.build_context_package(
             _request(
                 saved,
                 needs=(ContextNeed.CURRENT_SCENE, ContextNeed.SOURCE_QUOTE),
@@ -409,7 +439,7 @@ class ContextSearchPackageTest(unittest.TestCase):
         all_items = generous.macro_items + generous.micro_evidence
         first_estimate = all_items[0].token_estimate
 
-        tight = service.build_context_package(
+        tight = await service.build_context_package(
             _request(
                 saved,
                 needs=(ContextNeed.CURRENT_SCENE, ContextNeed.SOURCE_QUOTE),
@@ -424,7 +454,7 @@ class ContextSearchPackageTest(unittest.TestCase):
             self.assertEqual(excluded.reason, BUDGET_EXCLUDED_REASON)
         self.assertLessEqual(tight.token_estimate_total, first_estimate)
 
-    def test_need_priority_order_drives_ranking_bidirectional(self):
+    async def test_need_priority_order_drives_ranking_bidirectional(self):
         core_sot, vector_index, indexing, saved = _fixture()
         plan = _plan(
             saved,
@@ -435,7 +465,7 @@ class ContextSearchPackageTest(unittest.TestCase):
         )
         service = _service(core_sot, vector_index, indexing, _StaticPlanner(plan))
 
-        quote_first = service.build_context_package(
+        quote_first = await service.build_context_package(
             _request(
                 saved,
                 needs=(ContextNeed.SOURCE_QUOTE, ContextNeed.CURRENT_SCENE),
@@ -447,7 +477,7 @@ class ContextSearchPackageTest(unittest.TestCase):
         for item in included:
             self.assertIs(item.need, ContextNeed.SOURCE_QUOTE)
 
-        scene_first = service.build_context_package(
+        scene_first = await service.build_context_package(
             _request(
                 saved,
                 needs=(ContextNeed.CURRENT_SCENE, ContextNeed.SOURCE_QUOTE),
@@ -459,7 +489,7 @@ class ContextSearchPackageTest(unittest.TestCase):
         for item in included:
             self.assertIs(item.need, ContextNeed.CURRENT_SCENE)
 
-    def test_vector_backend_failure_marks_degraded_with_error_taxonomy(self):
+    async def test_vector_backend_failure_marks_degraded_with_error_taxonomy(self):
         core_sot, vector_index, indexing, saved = _fixture()
         plan = _plan(
             saved,
@@ -479,7 +509,7 @@ class ContextSearchPackageTest(unittest.TestCase):
             saved, needs=(ContextNeed.SOURCE_QUOTE, ContextNeed.CURRENT_SCENE)
         )
 
-        package = service.build_context_package(request)
+        package = await service.build_context_package(request)
 
         self.assertTrue(package.degraded)
         failed_step = package.trace.steps[0]
@@ -489,19 +519,19 @@ class ContextSearchPackageTest(unittest.TestCase):
         )
         self.assertGreater(len(package.macro_items), 0)
 
-    def test_successful_run_is_not_marked_degraded(self):
+    async def test_successful_run_is_not_marked_degraded(self):
         core_sot, vector_index, indexing, saved = _fixture()
         plan = _plan(saved, steps=(_vector_step(),))
         service = _service(core_sot, vector_index, indexing, _StaticPlanner(plan))
 
-        package = service.build_context_package(
+        package = await service.build_context_package(
             _request(saved, needs=(ContextNeed.SOURCE_QUOTE,))
         )
 
         self.assertFalse(package.degraded)
         self.assertIsNone(package.trace.steps[0].failure)
 
-    def test_empty_result_step_is_explainable_in_trace(self):
+    async def test_empty_result_step_is_explainable_in_trace(self):
         core_sot, vector_index, indexing, saved = _fixture()
         empty_index = InMemoryVectorIndexAdapter()
         plan = _plan(saved, steps=(_vector_step(),))
@@ -513,7 +543,7 @@ class ContextSearchPackageTest(unittest.TestCase):
             planner=_StaticPlanner(plan),
         )
 
-        package = service.build_context_package(
+        package = await service.build_context_package(
             _request(saved, needs=(ContextNeed.SOURCE_QUOTE,))
         )
 
@@ -524,17 +554,17 @@ class ContextSearchPackageTest(unittest.TestCase):
         self.assertEqual(step.items_produced, 0)
         self.assertIsNone(step.failure)
 
-    def test_planner_failure_maps_to_llm_error(self):
+    async def test_planner_failure_maps_to_llm_error(self):
         core_sot, vector_index, indexing, saved = _fixture()
         service = _service(core_sot, vector_index, indexing, _FailingPlanner())
 
         with self.assertRaises(ContextSearchFailed) as ctx:
-            service.build_context_package(
+            await service.build_context_package(
                 _request(saved, needs=(ContextNeed.SOURCE_QUOTE,))
             )
         self.assertIs(ctx.exception.error_type, ContextSearchErrorType.LLM_ERROR)
 
-    def test_plan_with_disallowed_tool_for_need_is_llm_error(self):
+    async def test_plan_with_disallowed_tool_for_need_is_llm_error(self):
         core_sot, vector_index, indexing, saved = _fixture()
         bad_plan = _plan(
             saved,
@@ -550,12 +580,12 @@ class ContextSearchPackageTest(unittest.TestCase):
         service = _service(core_sot, vector_index, indexing, _StaticPlanner(bad_plan))
 
         with self.assertRaises(ContextSearchFailed) as ctx:
-            service.build_context_package(
+            await service.build_context_package(
                 _request(saved, needs=(ContextNeed.CURRENT_SCENE,))
             )
         self.assertIs(ctx.exception.error_type, ContextSearchErrorType.LLM_ERROR)
 
-    def test_plan_for_other_project_or_unrequested_need_is_llm_error(self):
+    async def test_plan_for_other_project_or_unrequested_need_is_llm_error(self):
         core_sot, vector_index, indexing, saved = _fixture()
         service_cross = _service(
             core_sot,
@@ -570,7 +600,7 @@ class ContextSearchPackageTest(unittest.TestCase):
             ),
         )
         with self.assertRaises(ContextSearchFailed) as ctx:
-            service_cross.build_context_package(
+            await service_cross.build_context_package(
                 _request(saved, needs=(ContextNeed.SOURCE_QUOTE,))
             )
         self.assertIs(ctx.exception.error_type, ContextSearchErrorType.LLM_ERROR)
@@ -584,12 +614,12 @@ class ContextSearchPackageTest(unittest.TestCase):
             ),
         )
         with self.assertRaises(ContextSearchFailed) as ctx:
-            service_unrequested.build_context_package(
+            await service_unrequested.build_context_package(
                 _request(saved, needs=(ContextNeed.SOURCE_QUOTE,))
             )
         self.assertIs(ctx.exception.error_type, ContextSearchErrorType.LLM_ERROR)
 
-    def test_wall_clock_budget_exceeded_raises_budget_error(self):
+    async def test_wall_clock_budget_exceeded_raises_budget_error(self):
         core_sot, vector_index, indexing, saved = _fixture()
         ticks = iter([0.0, 100.0])
         plan = _plan(saved, steps=(_vector_step(),))
@@ -603,17 +633,17 @@ class ContextSearchPackageTest(unittest.TestCase):
         )
 
         with self.assertRaises(ContextSearchBudgetExceeded):
-            service.build_context_package(
+            await service.build_context_package(
                 _request(saved, needs=(ContextNeed.SOURCE_QUOTE,))
             )
 
-    def test_invalid_requests_are_rejected(self):
+    async def test_invalid_requests_are_rejected(self):
         core_sot, vector_index, indexing, saved = _fixture()
         plan = _plan(saved, steps=(_vector_step(),))
         service = _service(core_sot, vector_index, indexing, _StaticPlanner(plan))
 
         with self.assertRaises(InvalidContextSearchRequest):
-            service.build_context_package(
+            await service.build_context_package(
                 ContextSearchRequest(
                     project_id=saved["project_id"],
                     purpose=ContextSearchPurpose.WRITING_CONTEXT,
@@ -624,11 +654,11 @@ class ContextSearchPackageTest(unittest.TestCase):
                 )
             )
         with self.assertRaises(InvalidContextSearchRequest):
-            service.build_context_package(
+            await service.build_context_package(
                 _request(saved, needs=(ContextNeed.SOURCE_QUOTE,), max_tokens=0)
             )
         with self.assertRaises(InvalidContextSearchRequest):
-            service.build_context_package(
+            await service.build_context_package(
                 ContextSearchRequest(
                     project_id=saved["project_id"],
                     purpose=ContextSearchPurpose.WRITING_CONTEXT,
@@ -640,8 +670,8 @@ class ContextSearchPackageTest(unittest.TestCase):
             )
 
 
-class ContextGateTest(unittest.TestCase):
-    def _package(self, core_sot, vector_index, indexing, saved, **request_kwargs):
+class ContextGateTest(unittest.IsolatedAsyncioTestCase):
+    async def _package(self, core_sot, vector_index, indexing, saved, **request_kwargs):
         request = _request(
             saved,
             needs=(ContextNeed.CURRENT_SCENE, ContextNeed.SOURCE_QUOTE),
@@ -649,11 +679,11 @@ class ContextGateTest(unittest.TestCase):
         )
         plan = _plan(saved, steps=(_mongo_step(), _vector_step()))
         service = _service(core_sot, vector_index, indexing, _StaticPlanner(plan))
-        return request, service.build_context_package(request)
+        return request, await service.build_context_package(request)
 
-    def test_gate_passes_normal_package(self):
+    async def test_gate_passes_normal_package(self):
         core_sot, vector_index, indexing, saved = _fixture()
-        request, package = self._package(core_sot, vector_index, indexing, saved)
+        request, package = await self._package(core_sot, vector_index, indexing, saved)
 
         decision = evaluate_context_gate(
             package=package, request=request, core_sot=core_sot
@@ -662,9 +692,9 @@ class ContextGateTest(unittest.TestCase):
         self.assertEqual(decision.decision, GATE_PASS)
         self.assertEqual(decision.findings, ())
 
-    def test_gate_rejects_cross_project_item(self):
+    async def test_gate_rejects_cross_project_item(self):
         core_sot, vector_index, indexing, saved = _fixture()
-        request, package = self._package(core_sot, vector_index, indexing, saved)
+        request, package = await self._package(core_sot, vector_index, indexing, saved)
         leaked = replace(
             package.micro_evidence[0],
             pointer=replace(
@@ -684,9 +714,9 @@ class ContextGateTest(unittest.TestCase):
             "cross_project_item", [finding.check for finding in decision.findings]
         )
 
-    def test_gate_rejects_item_without_sot_reload(self):
+    async def test_gate_rejects_item_without_sot_reload(self):
         core_sot, vector_index, indexing, saved = _fixture()
-        request, package = self._package(core_sot, vector_index, indexing, saved)
+        request, package = await self._package(core_sot, vector_index, indexing, saved)
         unreloaded = replace(package.micro_evidence[0], sot_reloaded=False)
         tampered = replace(package, micro_evidence=(unreloaded,))
 
@@ -699,9 +729,9 @@ class ContextGateTest(unittest.TestCase):
             "missing_sot_reload", [finding.check for finding in decision.findings]
         )
 
-    def test_gate_rejects_candidate_status_item_in_first_slice(self):
+    async def test_gate_rejects_candidate_status_item_in_first_slice(self):
         core_sot, vector_index, indexing, saved = _fixture()
-        request, package = self._package(core_sot, vector_index, indexing, saved)
+        request, package = await self._package(core_sot, vector_index, indexing, saved)
         candidate_item = replace(
             package.micro_evidence[0], status=ContextItemStatus.CANDIDATE
         )
@@ -717,9 +747,9 @@ class ContextGateTest(unittest.TestCase):
             [finding.check for finding in decision.findings],
         )
 
-    def test_gate_rejects_stale_item_when_project_archived_after_build(self):
+    async def test_gate_rejects_stale_item_when_project_archived_after_build(self):
         core_sot, vector_index, indexing, saved = _fixture()
-        request, package = self._package(core_sot, vector_index, indexing, saved)
+        request, package = await self._package(core_sot, vector_index, indexing, saved)
         core_sot.archive_project(project_id=saved["project_id"])
 
         decision = evaluate_context_gate(
@@ -731,12 +761,12 @@ class ContextGateTest(unittest.TestCase):
             "stale_item", [finding.check for finding in decision.findings]
         )
 
-    def test_gate_backend_down_maps_to_sot_error(self):
+    async def test_gate_backend_down_maps_to_sot_error(self):
         # The gate's own SOT re-verification keeps the sot_error lineage: a
         # backend failure must not become a pass or a misattributed reject.
         repo = _ToggleBackendSotRepository()
         core_sot, vector_index, indexing, saved = _fixture(repository=repo)
-        request, package = self._package(core_sot, vector_index, indexing, saved)
+        request, package = await self._package(core_sot, vector_index, indexing, saved)
 
         repo.fail_reads = True
         with self.assertRaises(ContextSearchFailed) as ctx:
@@ -745,9 +775,9 @@ class ContextGateTest(unittest.TestCase):
             )
         self.assertIs(ctx.exception.error_type, ContextSearchErrorType.SOT_ERROR)
 
-    def test_gate_rejects_budget_violation(self):
+    async def test_gate_rejects_budget_violation(self):
         core_sot, vector_index, indexing, saved = _fixture()
-        request, package = self._package(core_sot, vector_index, indexing, saved)
+        request, package = await self._package(core_sot, vector_index, indexing, saved)
         shrunk_request = ContextSearchRequest(
             project_id=request.project_id,
             purpose=request.purpose,

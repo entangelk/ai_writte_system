@@ -9,8 +9,9 @@ SOT before it can become a ContextItem.
 
 from __future__ import annotations
 
+import inspect
 import time
-from typing import Callable, Protocol
+from typing import Awaitable, Callable, Protocol
 
 from services.application.app.core_sot.service import (
     CoreSotService,
@@ -75,7 +76,12 @@ class ContextSearchFailed(ContextSearchError):
 
 
 class SearchPlanner(Protocol):
-    def build_plan(self, request: ContextSearchRequest) -> SearchPlan: ...
+    # The planner may be sync (Slice 4.1 fake planners) or async (the Slice 4.2
+    # terminal-JSON LLM planner). build_context_package awaits the result when
+    # it is awaitable, so either shape plugs into the same seam.
+    def build_plan(
+        self, request: ContextSearchRequest
+    ) -> SearchPlan | Awaitable[SearchPlan]: ...
 
 
 class VectorSearchAdapter(Protocol):
@@ -114,10 +120,12 @@ class ContextSearchService:
         self._recent_scene_block_limit = recent_scene_block_limit
         self._clock = clock
 
-    def build_context_package(self, request: ContextSearchRequest) -> ContextPackage:
+    async def build_context_package(
+        self, request: ContextSearchRequest
+    ) -> ContextPackage:
         self._validate_request(request)
         started = self._clock()
-        plan = self._build_plan(request)
+        plan = await self._build_plan(request)
         self._validate_plan(plan, request)
 
         step_traces: list[SearchStepTrace] = []
@@ -168,9 +176,16 @@ class ContextSearchService:
                 + ", ".join(sorted(need.value for need in position_needs))
             )
 
-    def _build_plan(self, request: ContextSearchRequest) -> SearchPlan:
+    async def _build_plan(self, request: ContextSearchRequest) -> SearchPlan:
         try:
-            return self._planner.build_plan(request)
+            result = self._planner.build_plan(request)
+            if inspect.isawaitable(result):
+                result = await result
+            return result
+        except ContextSearchFailed:
+            # The terminal-JSON planner already classifies its own failures
+            # (e.g. llm_error); preserve that lineage instead of re-wrapping.
+            raise
         except Exception as exc:
             raise ContextSearchFailed(
                 ContextSearchErrorType.LLM_ERROR,

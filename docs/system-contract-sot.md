@@ -1,9 +1,9 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`  
-계약 버전: `v1.6.32`
+계약 버전: `v1.6.34`
 승인일: `2026-06-26`  
-최근 갱신일: `2026-07-03`
+최근 갱신일: `2026-07-04`
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
 적용 범위: 제품 경계, 서비스 책임, 데이터 정본, Gateway, AgentLoopRunner, Gate 합성, 검증 기록.
 
@@ -33,6 +33,8 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.6.34 | 2026-07-04 | Phase 4 Slice 4.3 context search HTTP API + async wiring을 구현했다. `ContextSearchService.build_context_package`가 async가 됐고(planner 결과를 `inspect.isawaitable`로 await — Slice 4.1 sync fake planner와 Slice 4.2 async 터미널 JSON planner가 같은 seam에 꽂힌다), `evaluate_context_gate`는 sync 유지다. `POST /projects/{project_id}/context-search`가 ContextPackage(macro/micro/constraints/do_not_use/trace)와 독립 Context Gate 결정을 직렬화해 반환한다. 오류 매핑: 미지원 purpose/need literal·미요청 need 등 invalid request는 400, wall-clock 초과는 504, `ContextSearchFailed`(llm_error/backend_error/system_error/sot_error)는 502, missing project는 404, planner 미구성(`LLM_GATEWAY_BASE_URL` 부재)은 503이다. create_app이 env 기반 `_default_context_search_service`로 TerminalJsonSearchPlanner를 wiring한다. deployed vector adapter는 여전히 non-persistent fake라 vector need는 hit이 없고 Mongo-direct need(current/recent scene)만 서빙한다(real Chroma 후속). | 사용자 결정, `plans/04-agentic-search-kickoff-decisions.md` §9.3, `tests/test_context_search_api.py` |
+| v1.6.33 | 2026-07-04 | Phase 4 Slice 4.2 터미널 JSON LLM planner adapter를 구현했다. `services/application/app/context_search/planner.py`가 versioned prompt template `context_search_plan_v1`(task_type `context_search_plan`, 기존 `prompt_templates` 저장소 재사용)과 `TerminalJsonSearchPlanner`를 제공한다. planner는 Gateway `/v1/generate` 1-turn 호출로 SearchPlan JSON을 strict parse하고, malformed/out-of-set output이면 1회 repair, 그래도 실패하면 `ContextSearchFailed(llm_error)`다. adapter는 enum literal(need/tool) 멤버십만 검증하고, plan 의미 검증(미요청 need, need별 불허 tool, project 일치)은 `ContextSearchService._validate_plan`이 계속 소유한다. `project_id`는 모델이 아니라 request에서 주입한다. provider가 async라 adapter도 async이며(Phase 2A extraction 패턴), Slice 4.1의 sync `SearchPlanner` Protocol/`build_context_package`는 fake 주입 seam으로 유지된다 — async planner의 service 통합은 HTTP wiring slice로 미룬다. | 사용자 결정, `plans/04-agentic-search-kickoff-decisions.md` §9.2, `tests/test_context_search_planner.py` |
 | v1.6.32 | 2026-07-03 | Phase 4 Slice 4.1 독립 검증(조건부 합격)의 차단 조건을 폐쇄했다. `sot_error`의 범위를 명문화: SOT reload 호출(position reload, vector stale-guard 검증, hit 재조회, Gate 재검증)에서 탈출하는 모든 non-NotFound 예외(실가동 pymongo 장애 포함)는 원형 전파 없이 `ContextSearchFailed(sot_error)` 전체 실패다. NotFound는 경로별 의도 분기다 — vector hit snapshot NotFound는 `snapshot_missing` soft stale 제외, Mongo position NotFound는 `sot_error` 전체 실패. `system_error`는 발화 경로가 생길 때 회귀와 함께 여는 예약 literal이다. toggle repo로 진짜 백엔드 예외를 주입하는 양방향 회귀 4개를 추가했고 변이 증명(catch 축소 시 5개 재실패)으로 잠갔다. | `docs/verifications/2026-07-03/context_search_slice_4_1.md`, `plans/04-agentic-search-kickoff-decisions.md`, `tests/test_context_search.py` |
 | v1.6.31 | 2026-07-03 | Phase 4 Slice 4.1 context search를 구현했다. `services/application/app/context_search/`가 purpose/need/tool/status/error literal, `ContextSearchRequest`/`SearchPlan`/`ContextItem`/`ContextPackage`/`GateDecision` 계약, planner 주입형 `ContextSearchService`, 독립 `evaluate_context_gate()`를 제공한다. vector hit는 Phase 3A stale guard와 Mongo SOT 재조회를 거친 뒤에만 ContextItem이 되고 index text는 근거로 쓰지 않는다. `current_scene`/`recent_scenes`는 SOT block kind 기반 deterministic 경계다. retriever step 실패는 `degraded=true` + 계열 error type으로 trace에 남고, SOT reload 실패는 `sot_error` 전체 실패다. package는 persist하지 않고 응답 단위 trace를 포함한다. `InMemoryVectorIndexAdapter.query_similar()`가 project-scoped cosine 유사도 query 표면으로 추가됐다. LLM planner adapter(Slice 4.2), HTTP surface, ES lexical, candidate 포함은 후속이다. | 사용자 결정, `plans/04-agentic-search-kickoff-decisions.md`, `tests/test_context_search.py` |
 | v1.6.30 | 2026-07-03 | Phase 4 agentic search 착수 브리프를 승인했다. purpose는 `writing_context` 1종, need는 `current_scene`/`recent_scenes`/`event_context`/`source_quote` 4종으로 시작하고 후속 확장 가능하다. planner는 터미널 JSON LLM planner를 즉시 채택한다 — LLM이 versioned prompt 기반 1-turn 호출로 SearchPlan JSON을 생성하고(strict parse + 1회 repair), tool-call flat loop planner는 Gateway tool-call wire 계약 해소 후 전환 계획(브리프 §2.1)으로 추적한다. retrieval은 Phase 3A fake vector + Mongo direct 순차 실행, ranking/budget은 deterministic 최소 규칙이다. `needs_review` candidate는 첫 slice에서 제외하되 `candidate`/`canonical` status 라벨 필드는 처음부터 계약에 연다. retriever step 실패는 degraded + 계열 구분 error taxonomy(`backend_error`/`system_error`/`llm_error`/`sot_error`, enum 확장 가능)로 기록하고 Mongo SOT reload 실패는 전체 실패다. ContextPackage는 첫 slice에서 persist하지 않는다. package는 단일 schema + purpose literal로 시작하되 이후 slice에서 Writing용/Analysis 비교용 모두 완성해야 한다(추적 의무). | 사용자 결정, `plans/04-agentic-search-kickoff-decisions.md`, `plans/04-agentic-search.md` |
@@ -78,7 +80,7 @@
 
 | 문서 | 역할 | 지위 |
 |---|---|---|
-| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.32 |
+| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.34 |
 | [`plans/README.md`](plans/README.md) | 계획 문서 진입점과 Phase/MVP 관계 | Draft |
 | [`plans/00-foundations.md`](plans/00-foundations.md) | 전역 원칙과 제품 경계 | Draft |
 | [`plans/implementation-plan.md`](plans/implementation-plan.md) | 구현 순서, slice 상태, 검증 gate | Draft |
@@ -371,8 +373,8 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 정본 세부 문서: [`plans/04-agentic-search.md`](plans/04-agentic-search.md), [`plans/04-agentic-search-kickoff-decisions.md`](plans/04-agentic-search-kickoff-decisions.md)
 
 - 목적에 맞는 ContextPackage 후보를 만든 뒤 Context Gate를 통과시킨다.
-- 착수 브리프가 v1.6.30으로 승인됐고 Slice 4.1(domain 계약 + orchestration + Context Gate, planner 주입)이 v1.6.31로 구현됐다. 첫 slice literal: purpose `writing_context`, need `current_scene`/`recent_scenes`/`event_context`/`source_quote`.
-- planner는 터미널 JSON LLM planner다(1-turn SearchPlan JSON, strict parse + 1회 repair). tool-call flat loop planner는 Gateway tool-call wire 계약 해소 후 전환한다(브리프 §2.1).
+- 착수 브리프가 v1.6.30으로 승인됐고 Slice 4.1(domain 계약 + orchestration + Context Gate, planner 주입)이 v1.6.31로, Slice 4.2(터미널 JSON LLM planner adapter)가 v1.6.33으로, Slice 4.3(HTTP API `POST /projects/{id}/context-search` + service async wiring)이 v1.6.34로 구현됐다. 첫 slice literal: purpose `writing_context`, need `current_scene`/`recent_scenes`/`event_context`/`source_quote`. build_context_package는 async이고 Gate는 sync다. HTTP 오류 매핑: invalid 400 / wall-clock 504 / ContextSearchFailed 502 / missing project 404 / planner 미구성 503.
+- planner는 터미널 JSON LLM planner다(1-turn SearchPlan JSON, strict parse + 1회 repair). `TerminalJsonSearchPlanner`가 versioned prompt template `context_search_plan_v1`(task_type `context_search_plan`)로 Gateway `/v1/generate`를 호출하고, enum literal(need/tool) 위반은 repair 1회 후 남으면 `llm_error`다. adapter는 literal 멤버십만 검증하고 plan 의미 검증은 service `_validate_plan`이 소유한다. provider가 async라 planner도 async이며 service 통합은 HTTP wiring slice로 미룬다. tool-call flat loop planner는 Gateway tool-call wire 계약 해소 후 전환한다(브리프 §2.1).
 - `context_search` profile은 flat-loop allowlist 3종만 쓴다(전환 후 적용).
 - tool success와 `validate_context` success는 Context Gate 통과가 아니다.
 - retriever step 실패 error taxonomy는 `backend_error`/`system_error`/`llm_error`/`sot_error`로 시작하고 enum 확장 가능하다. `sot_error`(Mongo SOT reload 실패)는 degraded가 아니라 전체 실패이며, NotFound뿐 아니라 SOT reload 호출에서 탈출하는 모든 non-NotFound 예외(pymongo 장애 포함)를 원형 전파 없이 매핑한다(v1.6.32). vector hit의 snapshot NotFound만 index drift로 보고 `snapshot_missing` soft stale 제외한다. `system_error`는 예약 literal이다.

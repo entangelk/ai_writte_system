@@ -31,6 +31,24 @@ from services.application.app.analysis.service import (
     InvalidCandidateSource,
 )
 from services.application.app.analysis.source import CoreSotSourceAdapter
+from services.application.app.context_search.models import (
+    ContextNeed,
+    ContextSearchPurpose,
+    ContextSearchRequest,
+    ContextBudget,
+    CurrentPosition,
+)
+from services.application.app.context_search.planner import (
+    TerminalJsonSearchPlanner,
+    seed_context_search_plan_template,
+)
+from services.application.app.context_search.service import (
+    ContextSearchBudgetExceeded,
+    ContextSearchFailed,
+    ContextSearchService,
+    InvalidContextSearchRequest,
+    evaluate_context_gate,
+)
 from services.application.app.core_sot.service import (
     Archived,
     CoreSotError,
@@ -40,9 +58,12 @@ from services.application.app.core_sot.service import (
     UnsupportedExportFormat,
 )
 from services.application.app.indexing.service import (
+    DeterministicFakeEmbeddingProvider,
     FAKE_VECTOR_BACKEND,
     IndexSyncOutboxService,
     InMemoryIndexSyncRepository,
+    InMemoryVectorIndexAdapter,
+    SourceBlockIndexingService,
     rebuild_source_block_index_summary,
 )
 
@@ -193,6 +214,45 @@ def _default_analysis_runner(
     )
 
 
+def _default_context_search_service(
+    core_sot: CoreSotService,
+) -> ContextSearchService | None:
+    base_url = os.environ.get("LLM_GATEWAY_BASE_URL")
+    if not base_url:
+        return None
+    prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
+    seed_context_search_plan_template(prompt_templates)
+    provider = GatewayGenerateProvider(
+        base_url=base_url,
+        timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
+        trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False),
+    )
+    planner = TerminalJsonSearchPlanner(
+        provider,
+        prompt_templates=prompt_templates,
+        model=os.environ.get("LLM_GATEWAY_MODEL") or None,
+        max_tokens=int(os.environ.get("CONTEXT_SEARCH_PLAN_MAX_TOKENS", "1024")),
+    )
+    # The vector adapter is the non-persistent fake (real Chroma is a later
+    # slice); with no shared persistent index, vector needs return no hits in a
+    # deployed app, while Mongo-direct needs (current/recent scenes) serve from
+    # the Core SOT. See docs/plans/04-agentic-search-kickoff-decisions.md.
+    embeddings = DeterministicFakeEmbeddingProvider()
+    vector_index = InMemoryVectorIndexAdapter()
+    indexing = SourceBlockIndexingService(
+        core_sot=core_sot,
+        embeddings=embeddings,
+        vector_index=vector_index,
+    )
+    return ContextSearchService(
+        core_sot=core_sot,
+        indexing_service=indexing,
+        vector_search=vector_index,
+        embeddings=embeddings,
+        planner=planner,
+    )
+
+
 class CreateProjectRequest(BaseModel):
     name: str
 
@@ -224,11 +284,25 @@ class CreateSourceRefRequest(BaseModel):
     end_offset: int
 
 
+class ContextPositionBody(BaseModel):
+    draft_id: str
+    version_id: str
+
+
+class ContextSearchHttpRequest(BaseModel):
+    query: str
+    needs: list[str]
+    purpose: str = ContextSearchPurpose.WRITING_CONTEXT.value
+    current_position: ContextPositionBody | None = None
+    max_tokens: int = 4096
+
+
 def create_app(
     service: CoreSotService | None = None,
     analysis_service: AnalysisService | None = None,
     analysis_runner: AnalysisJobRunner | None = None,
     index_sync_outbox: IndexSyncOutboxService | None = None,
+    context_search_service: ContextSearchService | None = None,
 ) -> FastAPI:
     app = FastAPI(title="AI Writing System Application")
     core_sot = service or _default_core_sot_service()
@@ -237,6 +311,9 @@ def create_app(
     runner = analysis_runner
     if runner is None:
         runner = _default_analysis_runner(core_sot=core_sot, analysis=analysis)
+    context_search = context_search_service
+    if context_search is None:
+        context_search = _default_context_search_service(core_sot)
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -685,7 +762,157 @@ def create_app(
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         return _analysis_run_payload(result)
 
+    def _context_item_payload(item) -> dict[str, object]:
+        return {
+            "need": item.need.value,
+            "status": item.status.value,
+            "text": item.text,
+            "pointer": {
+                "project_id": item.pointer.project_id,
+                "collection": item.pointer.collection,
+                "document_id": item.pointer.document_id,
+                "version_id": item.pointer.version_id,
+                "content_hash": item.pointer.content_hash,
+            },
+            "snapshot_id": item.snapshot_id,
+            "sot_reloaded": item.sot_reloaded,
+            "token_estimate": item.token_estimate,
+            "source_ref_ids": list(item.source_ref_ids),
+        }
+
+    def _context_trace_payload(trace) -> dict[str, object]:
+        return {
+            "plan": {
+                "plan_id": trace.plan.plan_id,
+                "steps": [
+                    {
+                        "step_id": step.step_id,
+                        "need": step.need.value,
+                        "tools": [tool.value for tool in step.tools],
+                        "query": step.query,
+                    }
+                    for step in trace.plan.steps
+                ],
+            },
+            "steps": [
+                {
+                    "step_id": step.step_id,
+                    "need": step.need.value,
+                    "tool": step.tool.value,
+                    "hits_considered": step.hits_considered,
+                    "items_produced": step.items_produced,
+                    "excluded": [
+                        {"record_id": hit.record_id, "reason": hit.reason}
+                        for hit in step.excluded
+                    ],
+                    "failure": (
+                        None
+                        if step.failure is None
+                        else {
+                            "error_type": step.failure.error_type.value,
+                            "detail": step.failure.detail,
+                        }
+                    ),
+                }
+                for step in trace.steps
+            ],
+            "budget_excluded": [
+                {"record_id": hit.record_id, "reason": hit.reason}
+                for hit in trace.budget_excluded
+            ],
+        }
+
+    def _context_package_payload(package, gate) -> dict[str, object]:
+        return {
+            "package": {
+                "project_id": package.project_id,
+                "purpose": package.purpose.value,
+                "status": package.status,
+                "degraded": package.degraded,
+                "token_estimate_total": package.token_estimate_total,
+                "macro_items": [
+                    _context_item_payload(item) for item in package.macro_items
+                ],
+                "micro_evidence": [
+                    _context_item_payload(item) for item in package.micro_evidence
+                ],
+                "constraints": list(package.constraints),
+                "do_not_use": list(package.do_not_use),
+                "trace": _context_trace_payload(package.trace),
+            },
+            "gate": {
+                "decision": gate.decision,
+                "findings": [
+                    {"check": finding.check, "detail": finding.detail}
+                    for finding in gate.findings
+                ],
+            },
+        }
+
+    @app.post("/projects/{project_id}/context-search")
+    async def context_search_endpoint(
+        project_id: str, body: ContextSearchHttpRequest
+    ) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+            request = _build_context_search_request(project_id, body)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if context_search is None:
+            raise HTTPException(
+                status_code=503,
+                detail="context search service is not configured",
+            )
+        try:
+            package = await context_search.build_context_package(request)
+            gate = evaluate_context_gate(
+                package=package, request=request, core_sot=core_sot
+            )
+        except InvalidContextSearchRequest as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except ContextSearchBudgetExceeded as exc:
+            raise HTTPException(status_code=504, detail=str(exc)) from exc
+        except ContextSearchFailed as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"{exc.error_type.value}: {exc.detail}",
+            ) from exc
+        return _context_package_payload(package, gate)
+
     return app
+
+
+def _build_context_search_request(
+    project_id: str, body: ContextSearchHttpRequest
+) -> ContextSearchRequest:
+    try:
+        purpose = ContextSearchPurpose(body.purpose)
+    except ValueError as exc:
+        raise ValueError(f"unsupported purpose: {body.purpose}") from exc
+    needs: list[ContextNeed] = []
+    for raw_need in body.needs:
+        try:
+            needs.append(ContextNeed(raw_need))
+        except ValueError as exc:
+            raise ValueError(f"unsupported need: {raw_need}") from exc
+    position = (
+        CurrentPosition(
+            draft_id=body.current_position.draft_id,
+            version_id=body.current_position.version_id,
+        )
+        if body.current_position is not None
+        else None
+    )
+    return ContextSearchRequest(
+        project_id=project_id,
+        purpose=purpose,
+        needs=tuple(needs),
+        query=body.query,
+        current_position=position,
+        context_budget=ContextBudget(max_tokens=body.max_tokens),
+    )
 
 
 app = create_app()
