@@ -183,9 +183,21 @@
 - **함의**: D1=B이므로 D2/D3/D4(검색 경로·`prior_memory` need·Gate 완화)는 열지 않는다. ⑤와 ⑧ 모두 Phase 2B로 추적 이관된다. Phase 4는 현재 상태(Writing용 뷰가 Phase 5 MVP에 충분, candidate 미포함, Gate가 candidate 금지)가 합리적 정지점이다. 코드 변경 없음 — 산출물은 결정 브리프와 추적 이관이다.
 - 임베딩 이미지 최적화(CPU-only torch pin)는 시도했다가 오너 지시로 되돌렸다("GPU버전으로 해줘, 최적화는 최후순위"). embedding 서비스는 기본(GPU-capable) torch를 유지한다.
 
+## User Decisions and Rationale — Phase 2B 착수 결정 (SoT v1.6.39)
+
+- 오너가 다음 큰 phase로 **Phase 2B 착수**를 선택했다(Phase 5 Writing 대신). Phase 2B는 기존 기억 대조·canonical memory이며 Phase 4 ⑤/⑧ 종속을 푸는 토대다. 착수 결정 브리프 `docs/plans/02b-analysis-compare-kickoff-decisions.md`를 2A 패턴(옵션표+추천)으로 작성했다.
+- 핵심 발견: **canonical memory store가 아직 없어** 대조 상대가 존재하지 않는다. 그래서 첫 sub-slice(2B.1)를 canonical store+승격으로 제안.
+- **오너 결정**:
+  - **D1 = A**: 첫 sub-slice(2B.1) = `MemoryEntry` canonical store + `needs_review` candidate 승격. compare/action(2B.3)은 후속. 근거: 대조 상대를 먼저 확보해야 compare가 실재하고 Phase 4 ⑤/⑧ 종속도 canonical store가 있어야 풀린다.
+  - **D2 = B**: confidence 기반 자동 승격 채택(작업자 추천 A였으나 오너가 B). **스펙 긴장 처리(CLAUDE.md §1)**: 2A `02-analysis-pipeline.md` §Analysis AI 경계 "canon 확정 금지" 및 2A kickoff §4 "사용자 검토 전 canon 금지, 자동 승격 미확정"과 표면 충돌 → 오너에게 화해 방식을 확인해 **"시스템 threshold gate" 해석을 canonical로 확정**했다. 즉 AI는 종전대로 candidate만 내고(경계 유지), 결정적 시스템 threshold gate가 승격한다. threshold 이상=자동 `canonical`, 미만=`needs_review`+수동 승인 보존. threshold 값은 **fixture/benchmark 근거**(budget 기본값을 Gemma benchmark로 확정한 선례, SoT v1.6.13)이며 그 전까지 보수적 주입 설정값(추측값으로 canon 양산 금지). 승격 MemoryEntry는 승격 근거(confidence/threshold/source_refs/provenance/job_id) 기록.
+  - **D3 = A**: entity resolution은 결정적 key(`memory_type + scope_type + scope_id` + 정규화 name) 완전일치만. 별칭/동명이인은 `merge/split` review 후보(자동 병합 없음).
+  - **D4 = A**: action literal `create/update/add_evidence/no_change/conflict` + `merge/split`(review-only, 자동 실행 금지). 판정 경계는 2B.3에서 fixture로 확정.
+  - **D5 = A**: taxonomy는 2A 3종 유지, 확장은 후속.
+- 함의: 2A kickoff §4의 "자동 승격 미확정"이 "system-threshold 자동 승격 + 미만 수동"으로 닫혔다. ⑧(`analysis_context` package)는 2B.2, ⑤(Writing canonical 포함)는 후속 slice 종속으로 명문화. 코드 착수는 2B.1부터(이 세션은 결정·문서까지).
+
 ## Next steps
 
-- **다음 큰 슬라이스: Phase 2B 착수**(오너 결정 D1=B의 자연 귀결). Phase 2B가 ⑤ candidate 포함(§5 B: 검색 경로/`prior_memory` need/Gate 완화)과 ⑧ Analysis 비교용 뷰(§8 C 확장 필드)를 candidate 승인/canonical 승격 계약과 함께 소유한다. 착수 브리프 필요.
+- **다음 구현: Phase 2B.1**(canonical `MemoryEntry` store + candidate 승격, 시스템 threshold gate, 보수적 주입 threshold). 그 뒤 2B.2(⑧ 비교 package = `analysis_context` purpose)/2B.3(compare→action 판정)/2B.4(versioned upsert/재색인), 그리고 ⑤ Writing canonical 포함. 착수 결정 브리프는 `02b-analysis-compare-kickoff-decisions.md`로 확정 완료.
 - worker→real Chroma **live smoke**(배포 stack에서 project/draft archive → outbox → worker command → 실제 Chroma record 삭제 확인)는 후속(sandbox 밖 실행 필요).
 - ES lexical 경로(§8, 착수 전 브리프)는 계속 후속.
 - embedding service image size/startup 최적화는 오너 지시로 **최후순위**(GPU 기본 유지). CPU-only torch pin은 보류.

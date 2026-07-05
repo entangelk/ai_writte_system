@@ -1,7 +1,7 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`  
-계약 버전: `v1.6.38`
+계약 버전: `v1.6.39`
 승인일: `2026-06-26`  
 최근 갱신일: `2026-07-05`
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
@@ -33,6 +33,7 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.6.39 | 2026-07-05 | Phase 2B(기존 기억 대조·canonical memory) 착수 결정 브리프를 승인했다(`plans/02b-analysis-compare-kickoff-decisions.md`). **D1=A**: 첫 sub-slice(2B.1)는 canonical memory store(`MemoryEntry`) + `needs_review` candidate 승격을 세우고 compare/action은 후속(대조 상대를 먼저 확보, Phase 4 ⑤/⑧ 종속의 토대). **D2=B**: confidence 기반 자동 승격을 채택하되, **AI가 아니라 결정적 시스템 threshold gate가 승격**한다(Analysis AI 경계 "canon 확정 금지" 유지, 문구 개정 없음) — threshold 이상만 자동 `canonical`, 미만은 `needs_review` 유지 + 수동 승인 경로 보존. threshold는 품질 fixture/benchmark 근거(SoT v1.6.13 budget 선례)이며 그 전까지 보수적 주입 설정값(추측값으로 canon 양산 금지). 승격 MemoryEntry는 승격 근거(confidence/threshold/source_refs/provenance/job_id) 기록. **D3=A**: entity resolution은 결정적 key(`memory_type + scope_type + scope_id` + 정규화 name) 완전일치만, 별칭/동명이인은 `merge/split` review 후보(자동 병합 없음). **D4=A**: action literal `create/update/add_evidence/no_change/conflict` + `merge/split`(review-only); 판정 경계는 2B.3 fixture로 확정. **D5=A**: taxonomy는 2A 3종 유지. ⑧ Analysis 비교용 package(`analysis_context` purpose)와 ⑤ Writing canonical 포함은 각 후속 slice 종속으로 명문화. 이 브리프는 결정만이며 코드는 2B.1부터. | 사용자 결정, `plans/02b-analysis-compare-kickoff-decisions.md`, `plans/02-analysis-pipeline.md` §Phase 2B, `plans/analysis-memory-taxonomy.md` |
 | v1.6.38 | 2026-07-05 | Phase 4 ContextPackage 완성(⑤ candidate 포함 §5 B / ⑧ Analysis 비교용 뷰 §8 C)이 Phase 2B에 종속됨을 오너 결정으로 확정했다(브리프 `plans/04-context-package-completion-decisions.md`, D1=B). `needs_review` candidate 포함은 지금 하지 않고 승인/canonical 승격 경로가 생기는 Phase 2B로 미룬다 — canonical store 부재 상태의 "지금 포함"은 미검증 후보를 Writing 근거로 흘려보내는 것이라 `evaluate_context_gate`의 candidate 라벨 금지(Writing-안전성 방어선)를 근거 없이 완화하게 된다. 따라서 D2/D3/D4(candidate 검색 경로·`prior_memory` need 신설·Gate 완화)는 열지 않는다. ⑧ Analysis 비교용 확장 필드는 착수 브리프 §8대로 Phase 2B 착수 브리프가 확정한다. Phase 4는 현재가 합리적 정지점이다(Writing용 ContextPackage는 Phase 5 MVP에 충분, candidate 미포함, Gate가 candidate 금지 유지). 코드/public literal 변경 없음 — 미확정 항목의 상태만 "Phase 2B 종속"으로 확정. | 사용자 결정, `plans/04-context-package-completion-decisions.md`, `plans/04-agentic-search-kickoff-decisions.md` §5·§8 |
 | v1.6.37 | 2026-07-05 | Phase 3B index sync worker를 real Chroma archive mutation에 배선했다(Next Tasks worker→real Chroma). `ChromaArchiveIndexMutationAdapter`(`services/application/app/indexing/chroma.py`)는 archive event를 real Chroma delete로 처리한다: `project_archived`는 `{project_id}` 매칭 derived source-block record 전부, `draft_archived`는 project-scoped `{project_id, draft_id}` 매칭 record만 삭제한다(`entry.source.mongo_id`가 draft id). derived record는 SOT에서 rebuild 가능하므로 cleanup은 tombstone이 아니라 **delete**다. 삭제 대상이 이미 없으면 목표 상태(archived 콘텐츠가 derived index에 없음)가 달성된 것으로 보고 `DerivedIndexRecordNotFound`를 raise → worker가 idempotent success로 처리한다(브리프 §8.2). 삭제 전 `get(where, include=[])`로 존재를 확인하고, `ids` 길이가 0이면 delete를 호출하지 않는다(numpy-like truthiness 회피 위해 truthiness 대신 `len()` 사용). `ChromaCollection` protocol에 `delete(where)`가 추가됐다. worker command `scripts/index_sync_worker.py`는 `CHROMA_HOST` 설정 시 `ChromaArchiveIndexMutationAdapter`(`connect_chroma_collection`, `CHROMA_PORT`/`CHROMA_COLLECTION` env는 create_app B.4 규약과 동일)를, 미설정 시 종전 `RecordingArchiveIndexMutationAdapter`를 쓴다. worker summary JSON에 `archive_backend`(`chroma`/`in_memory_fake`)가 추가됐다. claim/retry/backoff/terminal-move lifecycle은 v1.6.29 그대로다. 실제 Chroma 서버 관통 live smoke는 후속이다. | Next Tasks(worker→real Chroma), `plans/03-index-worker-retry-decisions.md` §8, `tests/test_chroma_adapter.py`, `tests/test_index_sync_worker_script.py` |
 | v1.6.36 | 2026-07-05 | Phase 4 real 영속 vector 백엔드(후보 B)를 wiring했다(브리프 `plans/04-real-vector-backend-decisions.md`, Approved). `create_app`은 env 기반으로 vector 백엔드를 선택한다: `CHROMA_HOST`가 있으면 real 영속 `ChromaVectorIndexAdapter`(재시작 생존, rebuild summary `backend="chroma"`), 없으면 종전 `InMemoryVectorIndexAdapter`(`backend="in_memory_fake"`)다. embedding은 `EMBEDDING_SERVICE_URL`이 있으면 real `RemoteEmbeddingProvider`(별도 embedding 서비스 컨테이너의 `dragonkue/BGE-m3-ko`, 1024-dim, `expected_dimensions=1024` 차원 guard armed), 없으면 `DeterministicFakeEmbeddingProvider`다. 주입된 `vector_index`(테스트)는 항상 fake backend label을 유지한다. embedding 서비스는 llama gateway와 분리된 컨테이너라 vector 백엔드는 LLM 게이트와 독립이다. stale guard는 backend 무관하게 SOT를 재조회하므로 Chroma hit도 정본 재확인 후에만 ContextItem이 된다. `backend` literal enum에 `chroma`가 추가됐다. 실제 Chroma 서버/embedding 모델 관통(1024-dim assert, 재시작 vector hit 생존)은 B.5 live 검증이다. | 사용자 결정, `plans/04-real-vector-backend-decisions.md`, `tests/test_real_vector_backend_wiring.py` |
@@ -84,7 +85,7 @@
 
 | 문서 | 역할 | 지위 |
 |---|---|---|
-| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.38 |
+| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.39 |
 | [`plans/README.md`](plans/README.md) | 계획 문서 진입점과 Phase/MVP 관계 | Draft |
 | [`plans/00-foundations.md`](plans/00-foundations.md) | 전역 원칙과 제품 경계 | Draft |
 | [`plans/implementation-plan.md`](plans/implementation-plan.md) | 구현 순서, slice 상태, 검증 gate | Draft |
@@ -354,9 +355,9 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 - Phase 2A 실제 provider wiring 첫 slice는 tool-call 없는 terminal JSON extraction으로 진행한다. source_ref 후보는 Application/Worker가 static/mechanical anchor catalog로 준비하고, 모델은 새 source_ref를 생성하지 않고 입력 catalog의 `source_ref_id`만 선택한다. Core SOT는 `project_id + snapshot_id`로 source_ref catalog를 source order로 읽는 surface를 제공하며, Mongo required index는 `source_refs_by_project_snapshot`이다. Prompt template은 DB에 저장해 versioned 관리하며, `prompt_templates` 저장소는 `task_type + version` unique contract를 가진다. 첫 prompt version literal은 `analysis_extract_v1`, task_type은 `analysis_extract`다. Prompt builder는 snapshot metadata/raw_text와 source_ref catalog를 Gateway `ChatCompletionRequest`로 조립한다. Application runtime은 `LLM_GATEWAY_BASE_URL`이 설정된 경우 `/v1/generate` 기반 provider adapter와 versioned prompt extractor로 기본 analysis runner를 구성한다. env가 없으면 기존처럼 pending `run`은 runner 미구성 503이다. `{"candidates":[]}`는 유효한 빈 extraction 결과다.
 - Phase 2A versioned provider extraction은 strict parser를 기본으로 유지한다. 첫 provider content가 malformed JSON, markdown-fenced JSON, 또는 candidate schema mismatch로 실패하면 Application adapter가 원문 output, parser error, 원래 prompt payload를 포함한 repair prompt를 같은 provider에 1회만 재호출한다. 첫 provider content가 JSON/schema는 통과했지만 `source_ref_id`, span, quote, content_hash가 입력 source_ref catalog와 정확히 일치하지 않는 경우도 같은 1회 repair 대상이다. repair output도 top-level `{candidates:[...]}` JSON object와 Phase 2A candidate/source schema를 통과해야 한다. repair 실패 또는 output truncation은 성공으로 보정하지 않고 기존 runner failure mapping에 따라 보존한다. repair 후에도 source_ref catalog mismatch가 남으면 기존 source validation 경계가 `source_invalid`로 실패를 보존한다.
 - Phase 2A와 2B는 별도 milestone이다.
-- Phase 2B는 Phase 3~4 이후 prior memory를 검색해 `create/update/add_evidence/no_change/conflict` 후보를 만든다.
-- Analysis AI는 canon을 확정하지 않고 기존 기억을 직접 덮어쓰지 않는다.
-- Phase 2B taxonomy 확장, confidence threshold, `confirmed` 자동 승격 여부는 미확정이다.
+- Phase 2B는 Phase 3~4 이후 prior memory를 검색해 `create/update/add_evidence/no_change/conflict` 후보를 만든다(action literal + `merge/split` review-only는 v1.6.39 D4로 확정).
+- Analysis AI는 canon을 확정하지 않고 기존 기억을 직접 덮어쓰지 않는다. v1.6.39 D2=B로 자동 승격을 도입하되 **AI가 아니라 결정적 시스템 threshold gate**가 승격하므로 이 경계는 유지된다.
+- v1.6.39로 착수 결정 확정: 첫 sub-slice(2B.1)는 canonical memory store(`MemoryEntry`) + candidate 승격(D1=A). 자동 승격은 confidence threshold gate(threshold 이상 자동 `canonical`, 미만 `needs_review`+수동), threshold는 fixture/benchmark 근거·그 전까지 보수적 주입 설정값(D2=B). entity resolution은 결정적 key만(D3=A). taxonomy는 2A 3종 유지(D5=A). **미확정으로 남은 것**: 자동 승격 threshold 실제 수치(품질 fixture 후), ⑧ `analysis_context` package 필드(2B.2), ⑤ Writing canonical 포함(후속), 중간 status(`confirmed`)·의미적 resolution·taxonomy 확장.
 
 ### Phase 3. Indexing
 
