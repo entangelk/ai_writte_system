@@ -13,6 +13,7 @@
 - **embedding model 확정 경위**: 오너가 처음 `dragonkue/bge-reranker-v2-m3-ko`를 지목했으나, 이는 cross-encoder **reranker**라 Chroma 벡터 생성(bi-encoder embedding)에는 부적합함을 확인·surface했다. 저장소에도 이 모델의 사전 확정 기록은 없었다(embedding model은 계속 "미확정"). 오너가 `dragonkue/BGE-m3-ko`(embedding model)로 정정했고, WebFetch로 bi-encoder·1024-dim·sentence-transformers·BAAI/bge-m3 한국어 파인튜닝을 확인했다. reranker는 후속 rerank 단계 후보로 남긴다.
 - **인프라 방침**: "다 컨테이너로 관리하자"는 오너 지시에 따라 Chroma와 embedding model 모두 base compose 서비스 컨테이너로 둔다. embedding 서비스는 llama gateway와 분리해 vector 백엔드의 LLM-독립성을 유지한다.
 - **embedding seam**: `EmbeddingProvider.embed`는 동기를 유지(짧은 호출, async 파급 회피)하고 `RemoteEmbeddingProvider`는 sync `httpx.Client`로 구현하기로 했다(단순성 우선).
+- **B.1 독립 검증 후속(2026-07-05)**: `docs/verifications/2026-07-05/real_vector_backend_brief_b1_embedding_seam.md` 판정 **합격(조건 없음)**. 검증자가 WebSearch로 reranker/embedding 구분과 BGE-m3-ko 1024-dim을 독립 확인했고, bool 거부 guard·`expected_dimensions` guard의 양방향 mutation(bool guard 제거→test 8 재실패, dim guard 제거→test 2 재실패)을 재현했다. 비차단 관찰 2건은 B.1 범위 밖(생산 측은 B.2, wiring은 B.4)이라 B.1 코드는 손대지 않았다. 관찰 #1(MockTransport라 소비 측만 lock)을 잊지 않도록 **B.2 수용 기준에 "생산 측 wire 계약 + B.1↔B.2 round-trip 회귀"를 추적 항목으로 명시**했다(브리프 B.2).
 
 ## Completed work
 
