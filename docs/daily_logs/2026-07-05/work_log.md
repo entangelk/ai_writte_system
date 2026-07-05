@@ -52,6 +52,8 @@
 - compose application에 `EMBEDDING_SERVICE_URL=http://embedding:8002`·`EMBEDDING_DIMENSIONS=1024`·`CHROMA_HOST=chroma`·`CHROMA_PORT=8000` env와 embedding/chroma `depends_on: service_healthy` 추가. embedding은 llama gateway와 분리된 컨테이너라 vector 백엔드는 LLM-독립.
 - 회귀 7개(`tests/test_real_vector_backend_wiring.py`): 빌더 env 분기 4(embedding fake/remote+1024 guard, chroma None/host·port) + create_app backend literal 3(기본 `in_memory_fake`, `CHROMA_HOST`+patched connect→`chroma`+collection write, 주입 vector_index는 `CHROMA_HOST` 있어도 fake 유지+connect 미호출). chromadb/live 서버 없이 patched `connect_chroma_collection`+`FakeChromaCollection`로 검증. 실서버·실모델 1024-dim 관통은 B.5 live.
 
+- **B.4 독립 검증 후속(2026-07-05)**: `docs/verifications/2026-07-05/b4_real_vector_backend_wiring.md` 판정 **합격**. stale-guard 자동 통합 주장을 검증자가 코드 추적(`validate_source_block_record`가 vector_index 아닌 core_sot 사용)으로 확인. 검증자가 "승계 사항: B.3 query_similar 빈 cell 미해결"을 지적했으나 이는 B.3 조건부 합격 원본 기록 기준의 오인 — 실제로는 커밋 `37f82f7`(B.4 커밋 `7ad90ef`의 직계 부모)에서 이미 폐쇄됨(가드 2개 + mutation 재실증), 재작업 불필요. 비차단 관찰(B.4가 만든 staleness) 보강: `_default_context_search_service`의 타입 힌트를 `InMemoryVectorIndexAdapter | ChromaVectorIndexAdapter`·`EmbeddingProvider`로 넓히고 "real Chroma is a later slice" 주석을 env 기반 backend 선택 설명으로 정정(런타임 무변, Protocol duck-typed였음). 전체 OK(45 skip).
+
 ### 다음 slice 방향 오너 결정
 
 - HANDOFF Next Tasks 1의 후보 4종(A 공유 in-process vector index / B real Chroma·ES / C prior-memory purpose / D tool-call planner 전환)을 제시했다.
