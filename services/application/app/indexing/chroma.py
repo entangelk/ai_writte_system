@@ -109,15 +109,12 @@ def _active_where(project_id: str) -> dict[str, Any]:
 
 
 class ChromaVectorIndexAdapter:
-    def __init__(
-        self, collection: ChromaCollection, *, include_embeddings: bool = True
-    ) -> None:
+    # Chroma get/query omit embeddings unless requested; the adapter always
+    # needs them to reconstruct record.vector, so this is fixed.
+    _INCLUDE = ["embeddings", "metadatas"]
+
+    def __init__(self, collection: ChromaCollection) -> None:
         self._collection = collection
-        # Chroma get/query omit embeddings unless requested; the adapter needs
-        # them to reconstruct record.vector.
-        self._include = (
-            ["embeddings", "metadatas"] if include_embeddings else ["metadatas"]
-        )
 
     def upsert_records(self, records: tuple[SourceBlockIndexRecord, ...]) -> int:
         if not records:
@@ -139,7 +136,7 @@ class ChromaVectorIndexAdapter:
         self, *, project_id: str, include_archived: bool = False
     ) -> tuple[SourceBlockIndexRecord, ...]:
         result = self._collection.get(
-            where={"project_id": project_id}, include=self._include
+            where={"project_id": project_id}, include=self._INCLUDE
         )
         records = _records_from_get(result)
         if not include_archived:
@@ -159,7 +156,7 @@ class ChromaVectorIndexAdapter:
             query_embeddings=[list(vector)],
             n_results=limit,
             where=_active_where(project_id),
-            include=self._include,
+            include=self._INCLUDE,
         )
         return _records_from_query(result)
 

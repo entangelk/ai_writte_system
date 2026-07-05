@@ -186,6 +186,39 @@ class ChromaAdapterLogicTest(unittest.TestCase):
         self.assertNotIn("archived_near", ids)
         self.assertTrue(all(isinstance(r, SourceBlockIndexRecord) for r in hits))
 
+    def test_query_similar_excludes_draft_archived(self):
+        # The closest vector belongs to a draft_archived record; query must drop
+        # it via _active_where's draft_archived clause (not just project_archived).
+        self.adapter.upsert_records(
+            (
+                _record("active", vector=(1.0, 0.0)),
+                _record("draft_gone", vector=(1.0, 0.0), draft_archived=True),
+            )
+        )
+        hits = self.adapter.query_similar(
+            project_id="project-1", vector=(1.0, 0.0), limit=5
+        )
+        ids = [r.id for r in hits]
+        self.assertIn("active", ids)
+        self.assertNotIn("draft_gone", ids)
+
+    def test_query_similar_is_project_scoped(self):
+        # A closer vector in another project must not leak into p1's query, so
+        # _active_where's project_id clause is exercised in the query path (not
+        # only in list_records).
+        self.adapter.upsert_records(
+            (
+                _record("p1_hit", project_id="p1", vector=(1.0, 0.0)),
+                _record("p2_closer", project_id="p2", vector=(1.0, 0.0)),
+            )
+        )
+        hits = self.adapter.query_similar(
+            project_id="p1", vector=(1.0, 0.0), limit=5
+        )
+        ids = [r.id for r in hits]
+        self.assertEqual(ids, ["p1_hit"])
+        self.assertNotIn("p2_closer", ids)
+
     def test_query_similar_respects_limit(self):
         self.adapter.upsert_records(
             tuple(_record(f"r{i}", vector=(1.0, float(i))) for i in range(5))

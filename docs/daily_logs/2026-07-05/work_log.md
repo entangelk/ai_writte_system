@@ -40,7 +40,9 @@
 - adapter는 **주입형 collection**(duck-typed upsert/query/get)을 받아 로직(project scoping, archived 제외, id 정렬, cosine 랭킹, limit, record 복원)을 인메모리 `FakeChromaCollection`으로 chromadb 없이 단위 테스트한다. `connect_chroma_collection(host, port)`가 `chromadb`를 lazy import해 real HttpClient collection(cosine space)을 만든다 — sandbox/제약 환경은 dependency 없이 통과.
 - 직렬화: `record_to_chroma`(record→id/embedding/metadata, 모든 필드 metadata 보존)·`record_from_chroma`(복원, embedding→float 튜플, archived bool 복원). query_similar는 `_active_where`(project + 비archived)로 랭킹 후보를 fake와 동일하게 좁힌다.
 - 인프라: compose `chroma` base 서비스(`chromadb/chroma`, `IS_PERSISTENT=TRUE`, port 8003→8000, `chroma_data` volume, port-open liveness healthcheck — API 버전 경로 비의존). `services/application/requirements.txt`에 `chromadb>=0.5,<0.7` 추가(B.4 wiring이 실제 client 사용). Chroma image tag/heartbeat 경로 정합은 B.5 live bring-up에서 확인.
-- 회귀 9개(`tests/test_chroma_adapter.py`): 직렬화 round-trip 2 + adapter 로직 6(빈 upsert short-circuit, archived 제외+id 정렬, project scope, cosine 랭킹+archived 제외, limit, limit<1 ValueError) + **skip-aware live Chroma 1**(`CHROMA_TEST_URL`+chromadb 설치 시 upsert/query/list + fresh client 재시작 생존; 미충족 시 skip). application→Chroma wiring은 B.4 예약.
+- 회귀(초기 9개 → 검증 후속으로 11개): 직렬화 round-trip 2 + adapter 로직 8 + **skip-aware live Chroma 1**(`CHROMA_TEST_URL`+chromadb 설치 시 upsert/query/list + fresh client 재시작 생존; 미충족 시 skip). application→Chroma wiring은 B.4 예약.
+
+- **B.3 독립 검증 후속(2026-07-05, 조건부 합격 → 폐쇄)**: `docs/verifications/2026-07-05/b3_chroma_persistent_adapter.md`. 차단 사유: `query_similar`의 `_active_where`는 3조건(project_id·project_archived·draft_archived)을 검사하나 회귀는 project_archived 제외만 lock해 boundary matrix에 빈 cell 2개(query 경로의 project scope·draft_archived). `list_records`는 별도 where라 query를 대신 못함. **폐쇄**: `test_query_similar_excludes_draft_archived`·`test_query_similar_is_project_scoped` 2개 추가(9→11), 각 절 제거 mutation으로 재실패 실증(draft_archived 절 제거→draft test 재실패, project_id 절 제거→scope test 재실패), 복원 byte-identical. 비차단 관찰(깨진 `include_embeddings=False` 옵션 → `record_from_chroma(None)` TypeError)은 옵션 자체를 제거해 단순화(embedding은 record 복원에 항상 필요, 아무도 False 미사용). 전체 pytest 454 passed/45 skip.
 
 ### 다음 slice 방향 오너 결정
 
