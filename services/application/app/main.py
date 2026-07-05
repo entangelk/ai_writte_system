@@ -60,6 +60,7 @@ from services.application.app.core_sot.service import (
 from services.application.app.indexing.service import (
     CHROMA_VECTOR_BACKEND,
     DeterministicFakeEmbeddingProvider,
+    EmbeddingProvider,
     FAKE_VECTOR_BACKEND,
     IndexSyncOutboxService,
     InMemoryIndexSyncRepository,
@@ -224,8 +225,8 @@ def _default_analysis_runner(
 def _default_context_search_service(
     core_sot: CoreSotService,
     *,
-    vector_index: InMemoryVectorIndexAdapter,
-    embeddings: DeterministicFakeEmbeddingProvider,
+    vector_index: InMemoryVectorIndexAdapter | ChromaVectorIndexAdapter,
+    embeddings: EmbeddingProvider,
 ) -> ContextSearchService | None:
     base_url = os.environ.get("LLM_GATEWAY_BASE_URL")
     if not base_url:
@@ -243,12 +244,13 @@ def _default_context_search_service(
         model=os.environ.get("LLM_GATEWAY_MODEL") or None,
         max_tokens=int(os.environ.get("CONTEXT_SEARCH_PLAN_MAX_TOKENS", "1024")),
     )
-    # The vector adapter is the process-shared in-process fake (real Chroma is a
-    # later slice). It is the same instance the rebuild endpoint writes into, so
-    # a rebuild followed by a context search in the same process yields real
-    # vector hits; the index is non-durable and lost on restart. Mongo-direct
-    # needs (current/recent scenes) serve from the Core SOT.
-    # See docs/plans/04-shared-vector-index-decisions.md.
+    # The vector adapter and embeddings are the process-shared instances the
+    # rebuild endpoint also writes into, so a rebuild followed by a context
+    # search yields real vector hits. Depending on env (B.4) these are either the
+    # persistent Chroma backend with real embeddings or the in-memory fake with
+    # deterministic fake embeddings. Mongo-direct needs (current/recent scenes)
+    # serve from the Core SOT. See docs/plans/04-shared-vector-index-decisions.md
+    # and docs/plans/04-real-vector-backend-decisions.md.
     indexing = SourceBlockIndexingService(
         core_sot=core_sot,
         embeddings=embeddings,
