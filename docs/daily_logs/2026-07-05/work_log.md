@@ -61,6 +61,12 @@
 - self-regression: rebuild가 search보다 먼저 호출되고(`summary_step_order_rebuild_before_search`) micro hit(`source_quote`)이 나는 성공 경로, search 502 실패, **rebuild 실패 시 search 200이어도 smoke 실패**(exit 규칙이 두 status 모두에 걸림) 3분기 + CLI 3방향(ok / search_err / rebuild_err). 4→5개.
 - 실제 in-process app(진짜 endpoint + 공유 index 주입, fake planner)에 `httpx.ASGITransport`로 smoke를 구동해 mock이 아닌 실경로에서 `rebuild_records_written=6`, `micro_count=6`(source_quote vector need 실hit), gate `pass`, `smoke_succeeded=True`를 확인했다(이 slice 이전이라면 micro 0). compose stack + 실제 12B 관통 live 실행은 sandbox 밖 승인 네트워크가 필요해 미실행이다.
 
+### 독립 검증 후속 보강 — real-app 관통 회귀 (2026-07-05)
+
+- 독립 검증(`docs/verifications/2026-07-05/deployed_smoke_rebuild_first.md`) 판정은 **합격**(조건 없음). 비차단 관찰: 이 slice 회귀가 전부 MockTransport라 HTTP orchestration·exit 규칙·summary 파싱은 lock하지만 "rebuild가 실제로 공유 index를 채워 search가 실hit"은 committed 회귀가 아니었다(수동 ASGITransport 드라이브였음).
+- 보강: 수동 드라이브를 committed 회귀로 전환했다. `test_real_app_rebuild_populates_shared_index_and_search_hits`가 real `create_app`(공유 index 주입 + fake planner)에 `httpx.ASGITransport`로 확장 smoke를 구동해 `rebuild_records_written>0`, `micro_count>0`(source_quote 실hit), `smoke_succeeded`를 잠근다. 5→6개.
+- non-vacuity mutation: `create_app`에 `vector_index=shared_index` 주입을 빼면 rebuild가 별도 adapter에 쓰여 search가 empty가 되어 `micro_count 0`으로 재실패 → 회귀가 실제 관통을 검증함을 증명. 복원 byte-identical. 전체 475 OK(44 skip)/pytest 431 passed.
+
 ## Next steps
 
 - compose stack(실제 12B) 관통 deployed smoke live 실행: 확장된 `scripts/phase4_context_search_deployed_smoke.py`가 이제 rebuild → context-search 2-step을 돌리므로, 승인된 네트워크에서 실행하면 배포 경로 vector 실hit을 관통 검증한다.

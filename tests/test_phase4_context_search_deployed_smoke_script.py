@@ -1,7 +1,10 @@
 """Self-regression for the Phase 4 context search deployed smoke script.
 
-Exercises the HTTP orchestration against a MockTransport (no live server) and
-locks the exit rule in both directions.
+Most cases exercise the HTTP orchestration against a MockTransport (no live
+server) and lock the exit rule in both directions. One case drives the smoke
+against a real in-process create_app (via ASGITransport, fake planner) so the
+committed regression proves the rebuild step actually populates the shared
+vector index and the search then hits it — not just that the calls are wired.
 """
 
 import io
@@ -18,6 +21,23 @@ from scripts.phase4_context_search_deployed_smoke import (
     run_deployed_context_search_smoke,
     smoke_succeeded,
 )
+from services.application.app.context_search.models import (
+    ContextNeed,
+    SearchPlan,
+    SearchPlanStep,
+    SearchTool,
+)
+from services.application.app.context_search.service import ContextSearchService
+from services.application.app.core_sot.service import (
+    CoreSotService,
+    InMemoryCoreSotRepository,
+)
+from services.application.app.indexing.service import (
+    DeterministicFakeEmbeddingProvider,
+    InMemoryVectorIndexAdapter,
+    SourceBlockIndexingService,
+)
+from services.application.app.main import create_app
 
 
 class DeployedContextSearchSmokeScriptTest(unittest.IsolatedAsyncioTestCase):
@@ -188,6 +208,30 @@ class DeployedContextSearchSmokeScriptTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["search_http_status"], 200)
         self.assertFalse(smoke_succeeded(summary))
 
+    async def test_real_app_rebuild_populates_shared_index_and_search_hits(self):
+        """Drive the smoke against a real create_app (fake planner) so the
+        committed regression proves the 2-step actually penetrates the shared
+        in-process vector index: without the rebuild the vector need would find
+        no hits, so a positive micro_count here comes from the rebuild the smoke
+        runs first."""
+        app = _real_app_with_shared_index()
+        async with httpx.AsyncClient(
+            base_url="http://application",
+            transport=httpx.ASGITransport(app=app),
+        ) as client:
+            summary = await run_deployed_context_search_smoke(
+                client, application_base_url="http://application"
+            )
+
+        self.assertEqual(summary["rebuild_http_status"], 200)
+        self.assertGreater(summary["rebuild_records_written"], 0)
+        self.assertEqual(summary["rebuild_backend"], "in_memory_fake")
+        self.assertEqual(summary["search_http_status"], 200)
+        # The source_quote vector need hits only because the rebuild populated
+        # the shared index the search reads from.
+        self.assertGreater(summary["micro_count"], 0)
+        self.assertTrue(smoke_succeeded(summary))
+
 
 class DeployedContextSearchSmokeScriptCliTest(unittest.TestCase):
     def test_main_exit_rule_is_two_directional(self):
@@ -255,6 +299,54 @@ class DeployedContextSearchSmokeScriptImportTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--application-base-url", result.stdout)
+
+
+class _StaticVectorPlanner:
+    """Fake planner: current_scene (mongo) + source_quote (vector) so the smoke
+    exercises the shared vector index without a live Gateway."""
+
+    def build_plan(self, request):
+        return SearchPlan(
+            plan_id="plan-1",
+            project_id=request.project_id,
+            steps=(
+                SearchPlanStep(
+                    step_id="s1",
+                    need=ContextNeed.CURRENT_SCENE,
+                    tools=(SearchTool.MONGO,),
+                    query="",
+                ),
+                SearchPlanStep(
+                    step_id="s2",
+                    need=ContextNeed.SOURCE_QUOTE,
+                    tools=(SearchTool.VECTOR,),
+                    query="단검",
+                ),
+            ),
+        )
+
+
+def _real_app_with_shared_index():
+    core_sot = CoreSotService(InMemoryCoreSotRepository())
+    shared_index = InMemoryVectorIndexAdapter()
+    embeddings = DeterministicFakeEmbeddingProvider()
+    indexing = SourceBlockIndexingService(
+        core_sot=core_sot,
+        embeddings=embeddings,
+        vector_index=shared_index,
+    )
+    css = ContextSearchService(
+        core_sot=core_sot,
+        indexing_service=indexing,
+        vector_search=shared_index,
+        embeddings=embeddings,
+        planner=_StaticVectorPlanner(),
+    )
+    return create_app(
+        service=core_sot,
+        context_search_service=css,
+        vector_index=shared_index,
+    )
 
 
 def summary_step_order_rebuild_before_search(calls):
