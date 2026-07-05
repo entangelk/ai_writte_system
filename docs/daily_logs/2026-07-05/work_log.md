@@ -44,6 +44,14 @@
 
 - **B.3 독립 검증 후속(2026-07-05, 조건부 합격 → 폐쇄)**: `docs/verifications/2026-07-05/b3_chroma_persistent_adapter.md`. 차단 사유: `query_similar`의 `_active_where`는 3조건(project_id·project_archived·draft_archived)을 검사하나 회귀는 project_archived 제외만 lock해 boundary matrix에 빈 cell 2개(query 경로의 project scope·draft_archived). `list_records`는 별도 where라 query를 대신 못함. **폐쇄**: `test_query_similar_excludes_draft_archived`·`test_query_similar_is_project_scoped` 2개 추가(9→11), 각 절 제거 mutation으로 재실패 실증(draft_archived 절 제거→draft test 재실패, project_id 절 제거→scope test 재실패), 복원 byte-identical. 비차단 관찰(깨진 `include_embeddings=False` 옵션 → `record_from_chroma(None)` TypeError)은 옵션 자체를 제거해 단순화(embedding은 record 복원에 항상 필요, 아무도 False 미사용). 전체 pytest 454 passed/45 skip.
 
+### Phase 4 real vector 백엔드 B.4 wiring (SoT v1.6.36)
+
+- 변경 파일: `services/application/app/main.py`, `services/application/app/indexing/service.py`(`CHROMA_VECTOR_BACKEND` 상수), `services/application/app/indexing/models.py`(`IndexSyncBackend.CHROMA`), `docker-compose.yml`, `tests/test_real_vector_backend_wiring.py`(신규), `docs/system-contract-sot.md`.
+- `create_app`이 env 기반으로 vector 백엔드를 선택한다: `_build_embedding_provider`(`EMBEDDING_SERVICE_URL` 설정 시 `RemoteEmbeddingProvider(expected_dimensions=1024)` — B.2 검증 후속 차원 guard armed, 없으면 fake)·`_build_chroma_vector_index`(`CHROMA_HOST` 설정 시 `ChromaVectorIndexAdapter(connect_chroma_collection(...))`, 없으면 None→InMemory). 주입된 `vector_index`(테스트)는 항상 fake backend label(`in_memory_fake`) 유지. rebuild summary `backend`는 wiring에 따라 `chroma`/`in_memory_fake`.
+- stale-guard 통합은 별도 코드 불필요: `_default_context_search_service`가 shared vector_index(이제 Chroma)를 `vector_search`(query)와 `indexing_service`(stale guard, SOT 재조회)로 함께 wiring하므로 Chroma hit도 정본 재확인 후에만 ContextItem이 된다.
+- compose application에 `EMBEDDING_SERVICE_URL=http://embedding:8002`·`EMBEDDING_DIMENSIONS=1024`·`CHROMA_HOST=chroma`·`CHROMA_PORT=8000` env와 embedding/chroma `depends_on: service_healthy` 추가. embedding은 llama gateway와 분리된 컨테이너라 vector 백엔드는 LLM-독립.
+- 회귀 7개(`tests/test_real_vector_backend_wiring.py`): 빌더 env 분기 4(embedding fake/remote+1024 guard, chroma None/host·port) + create_app backend literal 3(기본 `in_memory_fake`, `CHROMA_HOST`+patched connect→`chroma`+collection write, 주입 vector_index는 `CHROMA_HOST` 있어도 fake 유지+connect 미호출). chromadb/live 서버 없이 patched `connect_chroma_collection`+`FakeChromaCollection`로 검증. 실서버·실모델 1024-dim 관통은 B.5 live.
+
 ### 다음 slice 방향 오너 결정
 
 - HANDOFF Next Tasks 1의 후보 4종(A 공유 in-process vector index / B real Chroma·ES / C prior-memory purpose / D tool-call planner 전환)을 제시했다.
@@ -108,10 +116,11 @@
 - B.1: `python3 -m unittest tests.test_embedding_provider -v` 8개 통과. (독립 검증 합격, 위 User Decisions 후속.)
 - B.2: `python3 -m py_compile services/embedding/app/main.py tests/test_embedding_service.py` 통과. `python3 -m unittest tests.test_embedding_service -v` 5개 통과(app 자체 4 + round-trip 1). `docker compose config` 유효(embedding 서비스/볼륨 파싱). 전체 `python3 -m unittest discover tests` OK(44 skip), `python3 -m pytest -q` 444 passed / 44 skipped, `git diff --check` 통과. 실제 모델(`dragonkue/BGE-m3-ko`) 로드·1024-dim 관통은 컨테이너 기동 필요라 sandbox 밖 후속(B.5/live).
 - B.3: `python3 -m py_compile services/application/app/indexing/chroma.py tests/test_chroma_adapter.py` 통과. `python3 -m unittest tests.test_chroma_adapter -v` 8 passed + 1 live skip(`CHROMA_TEST_URL`/chromadb 미충족). `docker compose config` 유효(chroma 서비스/`chroma_data` 볼륨). 전체 `python3 -m unittest discover tests` OK(45 skip), `python3 -m pytest -q` 452 passed / 45 skipped, `git diff --check` 통과. 실제 Chroma 서버 관통(upsert/query/재시작 생존)은 `CHROMA_TEST_URL`+chromadb 설치 환경에서 live로, image tag/heartbeat 정합은 B.5 bring-up에서 확인.
+- B.4: `python3 -m py_compile services/application/app/main.py tests/test_real_vector_backend_wiring.py` 통과. `python3 -m unittest tests.test_real_vector_backend_wiring -v` 7개 통과. `docker compose config` 유효(application env/depends_on embedding·chroma). 전체 `python3 -m unittest discover tests` OK(45 skip), `python3 -m pytest -q` 461 passed / 45 skipped, `git diff --check` 통과. 실서버·실모델 관통(1024-dim assert, 재시작 vector hit 생존)은 B.5 live.
 
 ## Next steps
 
-- B.4(wiring): `create_app` env 기반 `RemoteEmbeddingProvider`(+`expected_dimensions=1024`)+`ChromaVectorIndexAdapter`(`connect_chroma_collection`) 기본 wiring(미구성 시 fake 유지), rebuild summary `backend="chroma"`, application→embedding/chroma depends_on 연결, stale-guard 통합.
+- B.5(deployed live smoke, LLM 환경 전용): 전체 compose stack(mongo/gateway/llama/embedding/chroma/application)을 올려, 확장된 `scripts/phase4_context_search_deployed_smoke.py`(rebuild→search)를 real Chroma+embedding+실제 12B로 관통. **수용 기준**: embedding 벡터 실제 1024-dim assert, Chroma 저장/query hit, 재시작에도 vector hit 생존, rebuild summary `backend="chroma"`. Chroma image tag(`chromadb/chroma:0.5.23`)/heartbeat 경로/persist volume 정합도 이 bring-up에서 확인·조정.
 - B.5(deployed live smoke): real Chroma + embedding 서비스 + 실제 12B planner 관통, 재시작 vector hit 생존 — LLM 환경 전용.
 - compose stack(실제 12B) 관통 deployed smoke live 실행: 확장된 `scripts/phase4_context_search_deployed_smoke.py`가 이제 rebuild → context-search 2-step을 돌리므로, 승인된 네트워크에서 실행하면 배포 경로 vector 실hit을 관통 검증한다.
 - real ChromaDB persistent vector adapter / ES lexical 경로(§8, 착수 전 브리프)는 계속 후속.

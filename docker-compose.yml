@@ -35,12 +35,23 @@ services:
       LLM_GATEWAY_BASE_URL: "http://gateway:8001"
       LLM_GATEWAY_MODEL: "${LLAMA_DEFAULT_MODEL:-gemma-local}"
       LLM_GATEWAY_TIMEOUT_SECONDS: "${LLAMA_TIMEOUT_SECONDS:-120}"
+      # Real vector backend (B.4): the embedding service and Chroma. When these
+      # are set the shared vector index is the persistent Chroma backend with
+      # real 1024-dim embeddings; without them the app falls back to the fake.
+      EMBEDDING_SERVICE_URL: "http://embedding:8002"
+      EMBEDDING_DIMENSIONS: "${EMBEDDING_DIMENSIONS:-1024}"
+      CHROMA_HOST: "chroma"
+      CHROMA_PORT: "8000"
     ports:
       - "${APPLICATION_PORT:-8000}:8000"
     depends_on:
       mongo:
         condition: service_healthy
       gateway:
+        condition: service_healthy
+      embedding:
+        condition: service_healthy
+      chroma:
         condition: service_healthy
     healthcheck:
       # The slim image has no curl; probe /health with stdlib urllib instead.

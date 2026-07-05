@@ -33,6 +33,7 @@ from services.application.app.indexing.models import (
 
 SOURCE_BLOCK_COLLECTION = "source_blocks"
 FAKE_VECTOR_BACKEND = "in_memory_fake"
+CHROMA_VECTOR_BACKEND = "chroma"
 INDEX_SYNC_MAX_ATTEMPTS = 3
 INDEX_SYNC_CLAIM_TIMEOUT_SECONDS = 600
 INDEX_SYNC_BACKOFF_SECONDS = (60, 300)

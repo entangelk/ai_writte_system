@@ -58,6 +58,7 @@ from services.application.app.core_sot.service import (
     UnsupportedExportFormat,
 )
 from services.application.app.indexing.service import (
+    CHROMA_VECTOR_BACKEND,
     DeterministicFakeEmbeddingProvider,
     FAKE_VECTOR_BACKEND,
     IndexSyncOutboxService,
@@ -66,6 +67,12 @@ from services.application.app.indexing.service import (
     SourceBlockIndexingService,
     rebuild_source_block_index_summary,
 )
+from services.application.app.indexing.chroma import (
+    DEFAULT_COLLECTION_NAME,
+    ChromaVectorIndexAdapter,
+    connect_chroma_collection,
+)
+from services.application.app.indexing.embedding import RemoteEmbeddingProvider
 
 
 class AnalysisJobRunner(Protocol):
@@ -256,6 +263,39 @@ def _default_context_search_service(
     )
 
 
+def _build_embedding_provider():
+    # Real embedding service (B.2) when configured, else the deterministic fake.
+    # expected_dimensions activates the B.1 dimension guard in deployment so a
+    # misconfigured model dimension fails fast (B.2 verification follow-up).
+    base_url = os.environ.get("EMBEDDING_SERVICE_URL")
+    if not base_url:
+        return DeterministicFakeEmbeddingProvider()
+    return RemoteEmbeddingProvider(
+        base_url=base_url,
+        timeout_seconds=_env_float("EMBEDDING_TIMEOUT_SECONDS", 30.0),
+        trust_env=_env_bool("EMBEDDING_TRUST_ENV", False),
+        expected_dimensions=int(os.environ.get("EMBEDDING_DIMENSIONS", "1024")),
+    )
+
+
+def _build_chroma_vector_index():
+    # Real persistent Chroma (B.3) when CHROMA_HOST is set, else None so the
+    # caller falls back to the in-memory fake. chromadb is imported lazily inside
+    # connect_chroma_collection, so unconfigured environments/tests never need it.
+    host = os.environ.get("CHROMA_HOST")
+    if not host:
+        return None
+    return ChromaVectorIndexAdapter(
+        connect_chroma_collection(
+            host=host,
+            port=int(os.environ.get("CHROMA_PORT", "8000")),
+            collection_name=os.environ.get(
+                "CHROMA_COLLECTION", DEFAULT_COLLECTION_NAME
+            ),
+        )
+    )
+
+
 class CreateProjectRequest(BaseModel):
     name: str
 
@@ -315,13 +355,27 @@ def create_app(
     runner = analysis_runner
     if runner is None:
         runner = _default_analysis_runner(core_sot=core_sot, analysis=analysis)
-    # A single process-shared in-process vector index is owned here so the
-    # rebuild endpoint writes into the same instance the default context search
-    # reads from. It is created regardless of the planner env (rebuild works
-    # without LLM_GATEWAY_BASE_URL); it is non-durable and lost on restart.
-    # See docs/plans/04-shared-vector-index-decisions.md.
-    shared_vector_index = vector_index if vector_index is not None else InMemoryVectorIndexAdapter()
-    shared_embeddings = DeterministicFakeEmbeddingProvider()
+    # A single shared vector index is owned here so the rebuild endpoint writes
+    # into the same instance the default context search reads from. It is created
+    # regardless of the planner env (rebuild works without LLM_GATEWAY_BASE_URL).
+    # When CHROMA_HOST is set it is the real persistent Chroma backend (B.4),
+    # else the in-memory fake (non-durable, lost on restart). An injected
+    # vector_index (tests) always uses the fake in-memory backend label.
+    # See docs/plans/04-shared-vector-index-decisions.md and
+    # docs/plans/04-real-vector-backend-decisions.md.
+    if vector_index is not None:
+        shared_vector_index = vector_index
+        shared_embeddings = DeterministicFakeEmbeddingProvider()
+        shared_backend = FAKE_VECTOR_BACKEND
+    else:
+        shared_embeddings = _build_embedding_provider()
+        chroma_index = _build_chroma_vector_index()
+        if chroma_index is not None:
+            shared_vector_index = chroma_index
+            shared_backend = CHROMA_VECTOR_BACKEND
+        else:
+            shared_vector_index = InMemoryVectorIndexAdapter()
+            shared_backend = FAKE_VECTOR_BACKEND
     context_search = context_search_service
     if context_search is None:
         context_search = _default_context_search_service(
@@ -417,7 +471,7 @@ def create_app(
             vector_index=shared_vector_index,
             embeddings=shared_embeddings,
         )
-        return summary.to_dict(backend=FAKE_VECTOR_BACKEND)
+        return summary.to_dict(backend=shared_backend)
 
     def _require_project_exists(project_id: str) -> None:
         core_sot.get_project(project_id=project_id)
