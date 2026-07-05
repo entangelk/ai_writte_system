@@ -125,8 +125,17 @@
 
 ## Next Tasks
 
-1. **진행 중: Phase 4 real 영속 vector 백엔드(후보 B).** 브리프 승인·B.1·B.2·B.3·B.4 완료(위 Current Status, SoT v1.6.36). 남은 것은 **B.5 deployed live smoke(LLM 환경 전용)**: 전체 compose stack(mongo/gateway/llama/embedding/chroma/application)을 올려 확장 `scripts/phase4_context_search_deployed_smoke.py`(rebuild→search)를 real Chroma+embedding+실제 12B로 관통. 수용 기준(B.2/B.3 검증 후속): embedding 벡터 **실제 1024-dim assert**, Chroma 저장/query hit, **재시작에도 vector hit 생존**, rebuild summary `backend="chroma"`. Chroma image tag(`chromadb/chroma:0.5.23`)/heartbeat 경로/persist volume 정합도 이 bring-up에서 확인·조정. B.5는 sandbox 밖 승인 네트워크·컨테이너 환경 필요(작업자가 sandbox에서 실행 불가).
-   - 후속(B 이후): ES lexical 경로(§8), real embedding quality spike, worker→real Chroma archive mutation(`DerivedIndexRecordNotFound`), prior-memory(analysis 비교) purpose §8 C, tool-call flat loop planner 전환(§2.1, 상류 차단).
+1. **Phase 4 real 영속 vector 백엔드(후보 B) — 코드 완료(B.1~B.4), 남은 것은 B.5 live 검증(오너 환경 전용).** 브리프 승인·B.1·B.2·B.3·B.4 구현·독립 검증까지 완료(위 Current Status/Verification, SoT v1.6.36). branch `phase4-slice-4-2-planner`는 origin에 push됨.
+   **B.5 deployed live smoke — 오너와 함께 실행하는 절차**(sandbox에서는 외부 네트워크 차단 + torch/모델·Chroma 컨테이너 기동 불가라 작업자 단독 실행 불가):
+   1. 전체 stack 기동: `docker compose -f docker-compose.yml -f docker-compose.llama.yml up -d --build` (base가 embedding+chroma 포함, `.llama.yml` override가 in-stack 12B; 외부 llama endpoint를 쓰면 base만 올리고 `LLAMA_BASE_URL`로 지정).
+   2. 전부 healthy 대기: `docker compose ps`. **embedding은 첫 실행 시 모델(`dragonkue/BGE-m3-ko`) 다운로드로 수 분 소요**(healthcheck start_period 300s). application은 embedding/chroma가 `service_healthy`가 될 때까지 안 뜬다.
+   3. smoke 실행: `python3 scripts/phase4_context_search_deployed_smoke.py --application-base-url http://127.0.0.1:8000 --timeout-seconds 900`.
+   **수용 기준 매핑**(어디서 확인하는지):
+   - `backend="chroma"` — smoke 출력 `rebuild_backend`에 이미 노출(B.2 smoke 확장). rebuild가 real Chroma에 write.
+   - Chroma 저장/query hit — smoke 출력 `micro_count>0`(source_quote가 real Chroma+embedding 관통 hit). 현재 fake 백엔드에선 여기가 0이었음.
+   - **실제 1024-dim** — smoke는 아직 미assert. 수동 확인: `curl -s -X POST http://127.0.0.1:8002/embed -H 'Content-Type: application/json' -d '{"text":"아린"}' | python3 -c "import sys,json;print(json.load(sys.stdin)['dimensions'])"` → `1024` 기대. (원하면 smoke에 embedding 서비스 probe assert를 추가하는 작은 코드 slice로 승격 가능.)
+   - **재시작 vector hit 생존** — `docker compose restart application` 후 **rebuild 없이** `/context-search`만 호출해 `micro_count>0` 유지 확인(Chroma volume 영속 증명). smoke는 항상 rebuild부터 하므로 이 검증은 수동 `curl`/별도 호출 또는 smoke에 `--skip-rebuild` 플래그 추가 필요.
+   - Chroma **image tag/heartbeat/volume 정합** — `chromadb/chroma:0.5.23`가 안 뜨거나 healthcheck 실패 시 `CHROMA_VERSION` env로 tag 조정, healthcheck는 port-open이라 API 버전 무관하지만 persist volume 경로(`/data`)는 image 버전에 따라 확인 필요.
    - 후속(B 이후): ES lexical 경로(§8), real embedding quality spike, worker→real Chroma archive mutation(`DerivedIndexRecordNotFound`), prior-memory(analysis 비교) purpose §8 C, tool-call flat loop planner 전환(§2.1, 상류 차단).
 2. Phase 4 후속 추적 의무(오너 명시): ⑧ ContextPackage는 이후 slice에서 Writing용/Analysis 비교용 모두 완성해야 한다(analysis 필드는 Phase 2B 착수 브리프에서 결정). ⑤ `needs_review` candidate 포함(B)은 후속 slice로 확장한다. ②의 tool-call flat loop planner 전환 계획은 브리프 §2.1이다.
 3. `/v1/generate-structured`는 이번 비용 확인에서 보류했다. JSON/schema 검증과 1회 repair는 Application adapter가 소유하고, Gateway surface는 adapter로 분리해 두었다. repair 후에도 malformed JSON 비율이나 latency가 운영상 문제로 확인되면 별도 Gateway structured-output slice를 검토한다.
