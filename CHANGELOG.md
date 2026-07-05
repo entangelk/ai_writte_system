@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-07-05 | Phase 4 real 영속 vector 백엔드(후보 B) 착수 브리프 승인 + B.1 embedding provider seam 구현. 오너 결정: B를 지금 앞당김(2026-07-02 "최후속" 갱신, LLM-독립이라 2-환경 제약과 맞음), Chroma vector만, embedding=`dragonkue/BGE-m3-ko`(1024-dim), 전부 컨테이너. `RemoteEmbeddingProvider`(sync httpx.Client) 추가 | [work log](docs/daily_logs/2026-07-05/work_log.md) |
 | 2026-07-05 | SoT v1.6.35: Phase 4 공유 in-process vector index 도입(create_app이 단일 adapter 소유, rebuild가 write·context search가 read → 같은 프로세스 rebuild 후 실제 vector hit; rebuild summary는 snapshot scope로 누적 없음 계약 유지). 오너 결정: 방향 A 채택, rebuild summary 기존 계약 유지 | [work log](docs/daily_logs/2026-07-05/work_log.md) |
 | 2026-07-05 | Phase 4 deployed context-search smoke를 rebuild → context-search 2-step으로 확장(공유 index vector 실hit 관통 검증, exit 규칙 rebuild+search 모두 게이팅) | [work log](docs/daily_logs/2026-07-05/work_log.md) |
 | 2026-07-05 | Phase 4 공유 in-process vector index 결정 브리프 추가(`docs/plans/04-shared-vector-index-decisions.md`) | [work log](docs/daily_logs/2026-07-05/work_log.md) |

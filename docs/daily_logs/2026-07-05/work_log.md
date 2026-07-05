@@ -6,6 +6,14 @@
 - HANDOFF Next Tasks 1이 "오너 우선순위 결정 필요"로 막혀 있으므로 다음 slice 방향을 오너에게 확인한다.
 - 승인된 방향(공유 in-process vector index)을 브리프로 확정한 뒤 구현·검증한다.
 
+## User Decisions and Rationale — Phase 4 real vector backend (B) 착수
+
+- 오너가 HANDOFF Next Tasks 1의 후보 **B(real 영속 vector 백엔드)**를 다음 작업으로 선택했다. 브리프 `docs/plans/04-real-vector-backend-decisions.md`를 이전 kickoff 브리프 형식(옵션 표 + 추천)으로 작성해 6개 결정을 받았다.
+- **2026-07-02 결정 갱신**: 그 시점 오너 결정은 "real ChromaDB/ES adapter와 embedding model 선택은 핵심 코어(Phase 5/6 포함) 이후 최후속"이었다. 오너가 지금(Phase 4 중반) B를 앞당기기로 결정해 이 부분을 갱신한다. 근거: 이 작업은 LLM 게이트와 무관해(테스트 스위트 전체가 LLM-독립, LLM은 live smoke 스크립트만 사용) 2-환경 개발(하나는 LLM 게이트 미가용) 제약과 정확히 맞고, vector need 영속화 이득을 조기 확보한다. ES lexical과 real embedding model 중 ES는 여전히 후속이다.
+- **embedding model 확정 경위**: 오너가 처음 `dragonkue/bge-reranker-v2-m3-ko`를 지목했으나, 이는 cross-encoder **reranker**라 Chroma 벡터 생성(bi-encoder embedding)에는 부적합함을 확인·surface했다. 저장소에도 이 모델의 사전 확정 기록은 없었다(embedding model은 계속 "미확정"). 오너가 `dragonkue/BGE-m3-ko`(embedding model)로 정정했고, WebFetch로 bi-encoder·1024-dim·sentence-transformers·BAAI/bge-m3 한국어 파인튜닝을 확인했다. reranker는 후속 rerank 단계 후보로 남긴다.
+- **인프라 방침**: "다 컨테이너로 관리하자"는 오너 지시에 따라 Chroma와 embedding model 모두 base compose 서비스 컨테이너로 둔다. embedding 서비스는 llama gateway와 분리해 vector 백엔드의 LLM-독립성을 유지한다.
+- **embedding seam**: `EmbeddingProvider.embed`는 동기를 유지(짧은 호출, async 파급 회피)하고 `RemoteEmbeddingProvider`는 sync `httpx.Client`로 구현하기로 했다(단순성 우선).
+
 ## Completed work
 
 ### 다음 slice 방향 오너 결정
