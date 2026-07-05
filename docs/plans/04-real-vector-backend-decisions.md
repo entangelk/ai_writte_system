@@ -101,7 +101,9 @@ real embedding model + Chroma 컨테이너 도입이라 한 커밋에 몰지 않
   - **수용 기준(B.1 검증 후속, 관찰 #1 추적)**: B.1 회귀는 MockTransport라 wire 계약의 *소비* 측만 잠근다. B.2는 계약을 *생산*하는 쪽이므로, 서비스가 B.1이 소비하는 정확한 wire 계약(`POST /embed` 요청 `{"text": str}` → 응답 `{"embedding": [float, ...]}`, non-empty, numeric)을 낸다는 것을 (a) 서비스 app 자체 회귀와 (b) **B.2 서비스 handler ↔ B.1 `RemoteEmbeddingProvider` round-trip**(embedding 모델은 fake/stub로 대체해 인프라 없이) 회귀로 함께 잠근다. 이로써 생산/소비 양측이 계약에서 드리프트하지 못하게 한다.
 - **B.3 Chroma persistent adapter** — 기존 `VectorIndexAdapter`/`VectorSearchAdapter` seam 뒤로 real 영속 Chroma adapter(thin client) 구현. Chroma는 base compose 서비스 컨테이너 + persistence volume. skip-aware live Chroma 통합 테스트로 upsert/query/재시작 생존을 잠근다.
 - **B.4 wiring + 계약 표면** — `create_app`이 env 기반으로 `RemoteEmbeddingProvider` + Chroma adapter를 기본 wiring(미구성 시 fake 유지). rebuild summary `backend="chroma"`, dimension 1024, stale-guard 통합. rebuild write → context-search vector read가 real Chroma+real embedding에서 hit.
+  - **수용 기준(B.2 검증 후속, 관찰 #1 추적)**: wiring 시 `RemoteEmbeddingProvider`를 `expected_dimensions=1024`로 구성해, embedding 서비스가 다른 차원을 내면 배포 런타임에서 `EmbeddingProviderError`로 즉시 잡는다(B.1이 만든 guard를 실제 배포 경로에서 활성화). env로 dimension을 조정 가능하게 두되 기본은 1024다.
 - **B.5 deployed live smoke(LLM 환경 전용)** — 확장된 deployed smoke(rebuild→search)를 real Chroma + embedding 서비스 + 실제 12B planner 관통으로 실행. 재시작에도 vector hit 생존 확인.
+  - **수용 기준(B.2 검증 후속, 관찰 #1 추적)**: 단위 회귀는 stub(dim=8)이라 실제 임베딩 차원이 미검증이다. B.5 live smoke는 실제 `dragonkue/BGE-m3-ko`를 관통해 embedding 벡터가 **실제 1024-dim**임을 assert하고, Chroma가 그 벡터를 저장·query해 hit를 낸다는 것까지 확인한다(sandbox 밖 승인 환경 실행).
 
 ## 후속 (이 slice 범위 밖)
 

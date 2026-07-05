@@ -31,6 +31,8 @@
 - `Dockerfile`(cache-friendly layer, model은 startup 로드)·compose `embedding` 서비스(base, port 8002, `embedding_cache` HF 볼륨, `/health/ready` healthcheck + 넉넉한 start_period)·`.gitignore`는 기존대로. application→embedding wiring은 B.4 예약(아직 depends_on 미연결).
 - 회귀 5개: 서비스 app 자체 회귀 4개(embed 벡터/차원, health/readiness, 빈 text 422, 미로드 503 — ASGITransport+stub) + **producer↔consumer round-trip 1개**(`build_embed_response` 출력을 B.1 `RemoteEmbeddingProvider`가 그대로 소비 → wire 계약 드리프트 방지, 검증자 관찰 #1을 회귀로 폐쇄). `docker compose config` 유효.
 
+- **B.2 독립 검증 후속(2026-07-05)**: `docs/verifications/2026-07-05/b2_embedding_service_container.md` 판정 **합격(조건 없음)**. round-trip이 vacuous하지 않음을 검증자가 mutation(응답 키 `embedding`→`vector`)으로 2개 재실패(consumer `EmbeddingProviderError` + app `KeyError`)로 재실증했다. 비차단 관찰 2건은 B.2 범위 밖(1024-dim live→B.5, wiring→B.4)이라 B.2 코드는 손대지 않고, 뒤 slice 수용 기준으로 못 박았다: **B.4에 `RemoteEmbeddingProvider(expected_dimensions=1024)` 구성**(배포 런타임 차원 드리프트 즉시 검출), **B.5 live smoke에 실제 1024-dim assert + Chroma 저장/query hit 확인**을 브리프에 추가했다.
+
 ### 다음 slice 방향 오너 결정
 
 - HANDOFF Next Tasks 1의 후보 4종(A 공유 in-process vector index / B real Chroma·ES / C prior-memory purpose / D tool-call planner 전환)을 제시했다.
