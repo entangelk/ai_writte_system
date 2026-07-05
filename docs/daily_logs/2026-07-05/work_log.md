@@ -53,8 +53,16 @@
   1. worker(자체) mutation 증명이 shared-wiring 제거만 다루고 이 slice가 새로 넣은 snapshot-scope 필터의 무력화 mutation을 빠뜨렸다. 위 "Mutation 실증 (B)"를 직접 돌려 `records_indexed` 6 != 15 재실패를 확인·기록했다(계약 guard non-vacuous 재입증). boundary 자체는 회귀로 이미 lock되어 있어 차단 사유가 아니었다.
   2. `tests/test_context_search_shared_index.py`의 httpx driver helper `TestClient`가 pytest `Test*` 수집 규칙에 걸려 `PytestCollectionWarning`을 냈다. `__test__ = False`를 달아 이 파일 경고를 제거했다(pytest warnings 3→2, 남은 2건은 기존 `test_context_search_api.py` 등 pre-existing이라 surgical 범위 밖). 기능 영향 없음.
 
+### deployed smoke 확장 (rebuild → context-search)
+
+- 변경 파일: `scripts/phase4_context_search_deployed_smoke.py`, `tests/test_phase4_context_search_deployed_smoke_script.py`.
+- 기존 smoke는 rebuild를 호출하지 않아 배포 경로에서 공유 index vector hit을 검증하지 못했다. save version → snapshot_id 취득 → `POST .../index/source-blocks/rebuild` → `POST .../context-search` 2-step으로 확장했다.
+- summary에 `snapshot_id`/`rebuild_http_status`/`rebuild_records_written`/`rebuild_backend`를 추가했다. exit 규칙을 `search_succeeded`→`smoke_succeeded`(rebuild 200 AND search 200)로 바꿔 두 status를 모두 게이팅한다.
+- self-regression: rebuild가 search보다 먼저 호출되고(`summary_step_order_rebuild_before_search`) micro hit(`source_quote`)이 나는 성공 경로, search 502 실패, **rebuild 실패 시 search 200이어도 smoke 실패**(exit 규칙이 두 status 모두에 걸림) 3분기 + CLI 3방향(ok / search_err / rebuild_err). 4→5개.
+- 실제 in-process app(진짜 endpoint + 공유 index 주입, fake planner)에 `httpx.ASGITransport`로 smoke를 구동해 mock이 아닌 실경로에서 `rebuild_records_written=6`, `micro_count=6`(source_quote vector need 실hit), gate `pass`, `smoke_succeeded=True`를 확인했다(이 slice 이전이라면 micro 0). compose stack + 실제 12B 관통 live 실행은 sandbox 밖 승인 네트워크가 필요해 미실행이다.
+
 ## Next steps
 
-- deployed(compose stack) smoke로 실제 12B planner + 공유 index 관통 시 vector need가 실제 hit을 내는지 확인(sandbox 밖 승인 네트워크 실행 필요). 현재 `scripts/phase4_context_search_deployed_smoke.py`는 rebuild를 호출하지 않으므로, rebuild → context-search 순서를 관통하려면 스크립트 확장 또는 수동 2-step 실행이 필요하다.
+- compose stack(실제 12B) 관통 deployed smoke live 실행: 확장된 `scripts/phase4_context_search_deployed_smoke.py`가 이제 rebuild → context-search 2-step을 돌리므로, 승인된 네트워크에서 실행하면 배포 경로 vector 실hit을 관통 검증한다.
 - real ChromaDB persistent vector adapter / ES lexical 경로(§8, 착수 전 브리프)는 계속 후속.
 - prior-memory(analysis 비교) purpose §8 C 완성(Phase 2B 착수 브리프)도 후속.
