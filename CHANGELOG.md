@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-07-05 | Phase 4 real vector 백엔드 B.5 deployed live smoke 완료. 전체 compose stack에서 real embedding(`dragonkue/BGE-m3-ko`, 1024-dim) + Chroma + 실제 12B planner 관통, `backend="chroma"` rebuild와 vector hit, application/Chroma 재시작 후 hit 생존 확인. Live 중 발견한 Chroma numpy-like container truthiness bug와 Chroma volume mount 경로(`/chroma/chroma`)도 회귀/compose 보강 | [work log](docs/daily_logs/2026-07-05/work_log.md) |
 | 2026-07-05 | SoT v1.6.36: Phase 4 real vector 백엔드 B.4 wiring. `create_app`이 env 기반으로 real Chroma(`CHROMA_HOST`)+real embedding(`EMBEDDING_SERVICE_URL`, `dragonkue/BGE-m3-ko` 1024-dim guard)을 선택, 미설정 시 fake 폴백. rebuild summary `backend="chroma"`, compose application→embedding/chroma depends_on. embedding은 gateway와 분리돼 LLM-독립 | [work log](docs/daily_logs/2026-07-05/work_log.md) |
 | 2026-07-05 | Phase 4 real vector 백엔드 B.3: `ChromaVectorIndexAdapter`(주입형 collection, VectorIndex/VectorSearch seam + list_records, record↔chroma 직렬화, cosine/project scope/archived 제외) + compose `chroma` 서비스 + `chromadb` 의존성. 인메모리 fake collection 단위 회귀 + skip-aware live | [work log](docs/daily_logs/2026-07-05/work_log.md) |
 | 2026-07-05 | Phase 4 real vector 백엔드 B.2: embedding 서비스 컨테이너(`services/embedding/`, FastAPI `/embed`+`/health`, `dragonkue/BGE-m3-ko` lazy 로드, base compose 서비스 + HF 캐시 볼륨). producer↔consumer round-trip 회귀로 B.1 wire 계약 드리프트 방지 | [work log](docs/daily_logs/2026-07-05/work_log.md) |

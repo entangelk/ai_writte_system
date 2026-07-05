@@ -162,9 +162,15 @@ class ChromaVectorIndexAdapter:
 
 
 def _records_from_get(result: dict[str, Any]) -> list[SourceBlockIndexRecord]:
-    ids = result.get("ids") or []
-    embeddings = result.get("embeddings") or [None] * len(ids)
-    metadatas = result.get("metadatas") or []
+    ids = result.get("ids")
+    if ids is None:
+        ids = []
+    embeddings = result.get("embeddings")
+    if embeddings is None:
+        embeddings = [None] * len(ids)
+    metadatas = result.get("metadatas")
+    if metadatas is None:
+        metadatas = []
     return [
         record_from_chroma(record_id, embedding, metadata)
         for record_id, embedding, metadata in zip(ids, embeddings, metadatas)
@@ -175,9 +181,18 @@ def _records_from_query(
     result: dict[str, Any],
 ) -> tuple[SourceBlockIndexRecord, ...]:
     # query nests one list per query embedding; we send exactly one.
-    ids = (result.get("ids") or [[]])[0]
-    embeddings = (result.get("embeddings") or [[None] * len(ids)])[0]
-    metadatas = (result.get("metadatas") or [[]])[0]
+    ids_by_query = result.get("ids")
+    if ids_by_query is None:
+        ids_by_query = [[]]
+    ids = ids_by_query[0]
+    embeddings_by_query = result.get("embeddings")
+    if embeddings_by_query is None:
+        embeddings_by_query = [[None] * len(ids)]
+    metadatas_by_query = result.get("metadatas")
+    if metadatas_by_query is None:
+        metadatas_by_query = [[]]
+    embeddings = embeddings_by_query[0]
+    metadatas = metadatas_by_query[0]
     return tuple(
         record_from_chroma(record_id, embedding, metadata)
         for record_id, embedding, metadata in zip(ids, embeddings, metadatas)

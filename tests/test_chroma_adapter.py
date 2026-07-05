@@ -27,6 +27,13 @@ from services.application.app.indexing.models import (
 from services.application.app.indexing.service import _cosine_similarity
 
 
+class AmbiguousTruthValueList(list):
+    """Mimic numpy arrays returned by real Chroma: iterable, but not truthy."""
+
+    def __bool__(self):
+        raise ValueError("ambiguous truth value")
+
+
 def _record(
     record_id: str,
     *,
@@ -66,6 +73,9 @@ class FakeChromaCollection:
     def __init__(self) -> None:
         self._store: dict[str, tuple[list[float], dict[str, Any]]] = {}
         self.upsert_calls = 0
+        self.ambiguous_ids = False
+        self.ambiguous_embeddings = False
+        self.ambiguous_metadatas = False
 
     def upsert(self, *, ids, embeddings, metadatas) -> None:
         self.upsert_calls += 1
@@ -89,11 +99,21 @@ class FakeChromaCollection:
                 ids.append(record_id)
                 embeddings.append(embedding)
                 metadatas.append(metadata)
-        result: dict[str, Any] = {"ids": ids}
+        result: dict[str, Any] = {
+            "ids": AmbiguousTruthValueList(ids) if self.ambiguous_ids else ids
+        }
         if "embeddings" in include:
-            result["embeddings"] = embeddings
+            result["embeddings"] = (
+                AmbiguousTruthValueList(embeddings)
+                if self.ambiguous_embeddings
+                else embeddings
+            )
         if "metadatas" in include:
-            result["metadatas"] = metadatas
+            result["metadatas"] = (
+                AmbiguousTruthValueList(metadatas)
+                if self.ambiguous_metadatas
+                else metadatas
+            )
         return result
 
     def query(self, *, query_embeddings, n_results, where, include):
@@ -110,11 +130,25 @@ class FakeChromaCollection:
             )
         )
         top = matched[:n_results]
-        result: dict[str, Any] = {"ids": [[item[0] for item in top]]}
+        result: dict[str, Any] = {
+            "ids": (
+                AmbiguousTruthValueList([[item[0] for item in top]])
+                if self.ambiguous_ids
+                else [[item[0] for item in top]]
+            )
+        }
         if "embeddings" in include:
-            result["embeddings"] = [[item[1] for item in top]]
+            result["embeddings"] = (
+                AmbiguousTruthValueList([[item[1] for item in top]])
+                if self.ambiguous_embeddings
+                else [[item[1] for item in top]]
+            )
         if "metadatas" in include:
-            result["metadatas"] = [[item[2] for item in top]]
+            result["metadatas"] = (
+                AmbiguousTruthValueList([[item[2] for item in top]])
+                if self.ambiguous_metadatas
+                else [[item[2] for item in top]]
+            )
         return result
 
 
@@ -169,6 +203,17 @@ class ChromaAdapterLogicTest(unittest.TestCase):
             [r.id for r in self.adapter.list_records(project_id="p1")], ["a"]
         )
 
+    def test_list_records_accepts_chroma_numpy_like_containers(self):
+        self.collection.ambiguous_ids = True
+        self.collection.ambiguous_embeddings = True
+        self.collection.ambiguous_metadatas = True
+        self.adapter.upsert_records((_record("a"),))
+
+        listed = self.adapter.list_records(project_id="project-1")
+
+        self.assertEqual([r.id for r in listed], ["a"])
+        self.assertEqual(listed[0].vector, (1.0, 0.0))
+
     def test_query_similar_ranks_by_cosine_excludes_archived_and_limits(self):
         self.adapter.upsert_records(
             (
@@ -218,6 +263,19 @@ class ChromaAdapterLogicTest(unittest.TestCase):
         ids = [r.id for r in hits]
         self.assertEqual(ids, ["p1_hit"])
         self.assertNotIn("p2_closer", ids)
+
+    def test_query_similar_accepts_chroma_numpy_like_containers(self):
+        self.collection.ambiguous_ids = True
+        self.collection.ambiguous_embeddings = True
+        self.collection.ambiguous_metadatas = True
+        self.adapter.upsert_records((_record("near", vector=(1.0, 0.0)),))
+
+        hits = self.adapter.query_similar(
+            project_id="project-1", vector=(1.0, 0.0), limit=1
+        )
+
+        self.assertEqual([r.id for r in hits], ["near"])
+        self.assertEqual(hits[0].vector, (1.0, 0.0))
 
     def test_query_similar_respects_limit(self):
         self.adapter.upsert_records(

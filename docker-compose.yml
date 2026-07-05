@@ -136,7 +136,10 @@ services:
     ports:
       - "${CHROMA_PORT:-8003}:8000"
     volumes:
-      - chroma_data:/data
+      # chromadb/chroma:0.5.23 stores persistent data under /chroma/chroma when
+      # IS_PERSISTENT=TRUE. Mount that path so container recreation does not
+      # lose the vector index.
+      - chroma_data:/chroma/chroma
     healthcheck:
       test:
         - "CMD"

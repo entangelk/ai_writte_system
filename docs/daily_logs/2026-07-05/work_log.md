@@ -54,6 +54,29 @@
 
 - **B.4 독립 검증 후속(2026-07-05)**: `docs/verifications/2026-07-05/b4_real_vector_backend_wiring.md` 판정 **합격**. stale-guard 자동 통합 주장을 검증자가 코드 추적(`validate_source_block_record`가 vector_index 아닌 core_sot 사용)으로 확인. 검증자가 "승계 사항: B.3 query_similar 빈 cell 미해결"을 지적했으나 이는 B.3 조건부 합격 원본 기록 기준의 오인 — 실제로는 커밋 `37f82f7`(B.4 커밋 `7ad90ef`의 직계 부모)에서 이미 폐쇄됨(가드 2개 + mutation 재실증), 재작업 불필요. 비차단 관찰(B.4가 만든 staleness) 보강: `_default_context_search_service`의 타입 힌트를 `InMemoryVectorIndexAdapter | ChromaVectorIndexAdapter`·`EmbeddingProvider`로 넓히고 "real Chroma is a later slice" 주석을 env 기반 backend 선택 설명으로 정정(런타임 무변, Protocol duck-typed였음). 전체 OK(45 skip).
 
+### Phase 4 real vector 백엔드 B.5 deployed live smoke
+
+- 실행 환경: `docker compose -f docker-compose.yml -f docker-compose.llama.yml up -d --build`로 mongo/gateway/llama/embedding/chroma/application 전체 stack 기동. 첫 시도는 Docker Compose bake 경로 panic으로 실패해 `COMPOSE_BAKE=false docker compose -f docker-compose.yml -f docker-compose.llama.yml up -d --build`로 재실행했다.
+- bring-up 관찰: Chroma `chromadb/chroma:0.5.23`는 port-open healthcheck로 healthy. embedding 서비스는 `dragonkue/BGE-m3-ko` 첫 다운로드로 약 2.2GB HuggingFace cache를 채운 뒤 healthy. application은 embedding/chroma/gateway/mongo health 이후 healthy.
+- 실제 embedding 확인: `curl -sS -X POST http://127.0.0.1:8002/embed -H 'Content-Type: application/json' -d '{"text":"아린"}'` 응답이 `dimensions: 1024`를 반환했다.
+- 최초 B.5 smoke에서 live-only 결함을 발견했다. `scripts/phase4_context_search_deployed_smoke.py --application-base-url http://127.0.0.1:8000 --timeout-seconds 900` 실행 결과 search는 Chroma hit(`micro_count=6`, gate pass)를 냈지만 rebuild endpoint가 500이었다. 원인은 real Chroma client가 `embeddings`를 numpy array-like 값으로 반환하는데 `_records_from_get()`이 `result.get("embeddings") or ...`로 truthiness를 평가해 `ValueError: The truth value of an array with more than one element is ambiguous`가 난 것.
+- 수정: `services/application/app/indexing/chroma.py`의 `_records_from_get()`/`_records_from_query()`가 `embeddings`/`metadatas` 존재 여부를 `is None`으로만 판단하도록 변경했다. 같은 root-cause pattern sweep에서 동일한 `or` fallback은 이 두 곳뿐이었다.
+- 회귀: `tests/test_chroma_adapter.py`에 `AmbiguousTruthValueList`를 추가해 numpy-like truthiness 오류를 재현하고, `test_list_records_accepts_chroma_numpy_like_embeddings`·`test_query_similar_accepts_chroma_numpy_like_embeddings`로 list/query 양쪽을 잠갔다.
+- 수정 반영 후 application 재빌드/재기동(`COMPOSE_BAKE=false docker compose -f docker-compose.yml -f docker-compose.llama.yml up -d --build application`) 및 B.5 smoke 재실행 성공: `rebuild_http_status=200`, `rebuild_backend="chroma"`, `rebuild_records_written=6`, `search_http_status=200`, `gate_decision="pass"`, `degraded=false`, `macro_count=2`, `micro_count=6`, plan은 실제 12B planner가 `current_scene→mongo`, `source_quote→vector`를 생성.
+- 재시작 생존 확인: `docker compose -f docker-compose.yml -f docker-compose.llama.yml restart application` 후 rebuild 없이 기존 `project_id=6a49ccf8baee0fccf1b3d35b`/`draft_id=6a49ccf8baee0fccf1b3d35c`/`version_id=6a49ccf8baee0fccf1b3d35d`로 `/context-search`만 호출해 `micro_evidence` 6개가 유지됨을 확인했다. 이는 application process 재시작 뒤 Chroma persistent volume hit가 살아 있음을 증명한다.
+- 운영 관찰: embedding image build가 torch 2.12.1의 CUDA wheel 묶음을 대량 다운로드했다. 현재 live 검증은 통과했지만, embedding service image size/startup 최적화(CPU-only torch pin 또는 base image 전략)는 별도 후속 후보로 남긴다.
+
+### B.5 verification follow-up — Chroma container persistence/cache check
+
+- 독립 검증 기록 `docs/verifications/2026-07-05/b5_deployed_live_smoke.md`는 **합격(조건 없음)**이었다. 비차단 관찰 O1(ids/metadatas의 잔존 `or` truthiness pattern)은 작고 일관적인 보강이라 즉시 처리했다.
+- `services/application/app/indexing/chroma.py`의 `_records_from_get()`/`_records_from_query()`가 `ids`도 `embeddings`/`metadatas`와 동일하게 `is None` fallback만 쓰도록 정리했다. `tests/test_chroma_adapter.py`의 `AmbiguousTruthValueList` 회귀를 ids/embeddings/metadatas 전체 container로 확장해 list/query 양쪽을 잠갔다.
+- Docker/Compose cache 점검:
+  - embedding model cache: `embedding_cache` named volume이 `/root/.cache/huggingface`에 mount되어 있고 실제 크기 `2.2G`. `services/embedding/Dockerfile`은 requirements 설치 layer가 source copy보다 앞이라 source edit/rebuild 시 pip dependency layer가 재사용된다. 모델은 image build 때가 아니라 startup 때 내려받고, volume에 남아 재시작/재생성 시 재사용된다.
+  - llama model cache: `llama_models` named volume이 `/models`에 mount되어 있고 실제 크기 `6.7G`.
+  - Chroma persistence: 최초 compose는 `chroma_data:/data`였지만 `chromadb/chroma:0.5.23`는 `IS_PERSISTENT=TRUE`에서 실제 DB를 `/chroma/chroma/chroma.sqlite3`에 썼다. `/data`는 4K로 비어 있어 Chroma 컨테이너 재생성 시 vector index가 날아갈 수 있는 구성이었다. `docker-compose.yml`을 `chroma_data:/chroma/chroma`로 수정했다.
+- 수정된 Chroma volume 검증: `docker compose -f docker-compose.yml -f docker-compose.llama.yml up -d chroma application` + application 재기동 후 B.5 smoke 재실행 성공(`rebuild_backend="chroma"`, `rebuild_records_written=6`, `micro_count=6`). 이후 `docker exec ai_writte_system-chroma-1 du -sh /chroma/chroma`가 `4.3M`, mount는 `volume:ai_writte_system_chroma_data->/chroma/chroma`로 확인됐다.
+- Chroma container restart 생존 확인: `docker compose -f docker-compose.yml -f docker-compose.llama.yml restart chroma application`은 compose restart 특성상 dependency health 대기를 하지 않아 application이 Chroma ready 전에 한 번 실패했다. Chroma가 healthy 된 뒤 `docker compose ... up -d application`으로 application을 다시 기동했고, rebuild 없이 새 smoke project(`project_id=6a49d1d8073f78a3eb24e1a4`, `draft_id=6a49d1d8073f78a3eb24e1a5`, `version_id=6a49d1d8073f78a3eb24e1a6`)로 `/context-search`를 호출해 `micro_count=6`, vector step `hits_considered=6/items_produced=6`, 모든 micro `sot_reloaded=true`를 확인했다. 이로써 Chroma 컨테이너 재시작 뒤에도 named volume hit가 생존함을 추가 확인했다.
+
 ### 다음 slice 방향 오너 결정
 
 - HANDOFF Next Tasks 1의 후보 4종(A 공유 in-process vector index / B real Chroma·ES / C prior-memory purpose / D tool-call planner 전환)을 제시했다.
@@ -77,7 +100,10 @@
 
 ## Issues found
 
-- 없음(신규 구현). rebuild summary가 v1.6.23에서 "누적 없음"으로 잠긴 계약을 공유 index 누적이 깨뜨릴 위험이 있었으나, snapshot scope로 봉쇄했다.
+- B.5 live에서 Chroma Python client의 embeddings 반환값이 numpy array-like라 truthiness 평가(`result.get("embeddings") or ...`)가 `ValueError`를 일으켜 rebuild endpoint 500을 냈다. cause: fake collection은 list를 반환해 단위 회귀가 이 컨테이너 타입 차이를 못 잡았다. resolution: embeddings/metadatas fallback을 `is None` 검사로 바꾸고 numpy-like truthiness 회귀 2개를 추가했다. outcome: B.5 smoke가 `rebuild_http_status=200`으로 통과했다.
+- B.5 후속 cache 점검에서 `chroma_data` volume이 `/data`에 붙어 있었지만 실제 Chroma DB는 `/chroma/chroma`에 생성되는 것을 발견했다. cause: image default persist directory와 compose mount path 불일치. resolution: `docker-compose.yml` mount target을 `/chroma/chroma`로 변경. outcome: Chroma 컨테이너 재시작 후 rebuild 없이 vector hit `micro_count=6` 유지 확인.
+- Docker Compose bake 빌드 경로가 Go panic으로 실패했다. resolution: `COMPOSE_BAKE=false`로 internal builder를 사용해 stack bring-up을 완료했다. outcome: live 검증 진행 가능.
+- rebuild summary가 v1.6.23에서 "누적 없음"으로 잠긴 계약을 공유 index 누적이 깨뜨릴 위험이 있었으나, snapshot scope로 봉쇄했다.
 
 ## Decisions
 
@@ -117,13 +143,13 @@
 
 - B.1: `python3 -m unittest tests.test_embedding_provider -v` 8개 통과. (독립 검증 합격, 위 User Decisions 후속.)
 - B.2: `python3 -m py_compile services/embedding/app/main.py tests/test_embedding_service.py` 통과. `python3 -m unittest tests.test_embedding_service -v` 5개 통과(app 자체 4 + round-trip 1). `docker compose config` 유효(embedding 서비스/볼륨 파싱). 전체 `python3 -m unittest discover tests` OK(44 skip), `python3 -m pytest -q` 444 passed / 44 skipped, `git diff --check` 통과. 실제 모델(`dragonkue/BGE-m3-ko`) 로드·1024-dim 관통은 컨테이너 기동 필요라 sandbox 밖 후속(B.5/live).
-- B.3: `python3 -m py_compile services/application/app/indexing/chroma.py tests/test_chroma_adapter.py` 통과. `python3 -m unittest tests.test_chroma_adapter -v` 8 passed + 1 live skip(`CHROMA_TEST_URL`/chromadb 미충족). `docker compose config` 유효(chroma 서비스/`chroma_data` 볼륨). 전체 `python3 -m unittest discover tests` OK(45 skip), `python3 -m pytest -q` 452 passed / 45 skipped, `git diff --check` 통과. 실제 Chroma 서버 관통(upsert/query/재시작 생존)은 `CHROMA_TEST_URL`+chromadb 설치 환경에서 live로, image tag/heartbeat 정합은 B.5 bring-up에서 확인.
-- B.4: `python3 -m py_compile services/application/app/main.py tests/test_real_vector_backend_wiring.py` 통과. `python3 -m unittest tests.test_real_vector_backend_wiring -v` 7개 통과. `docker compose config` 유효(application env/depends_on embedding·chroma). 전체 `python3 -m unittest discover tests` OK(45 skip), `python3 -m pytest -q` 461 passed / 45 skipped, `git diff --check` 통과. 실서버·실모델 관통(1024-dim assert, 재시작 vector hit 생존)은 B.5 live.
+- B.3/B.5 live fix: `python3 -m py_compile services/application/app/indexing/chroma.py tests/test_chroma_adapter.py` 통과. `python3 -m unittest tests.test_chroma_adapter -v` 12 passed + 1 live skip(`CHROMA_TEST_URL`/host chromadb 미충족). live에서 발견한 numpy-like container truthiness 결함을 list/query 회귀 2개로 잠금(ids/embeddings/metadatas 모두). `CHROMA_TEST_URL=127.0.0.1:8003 python3 -m unittest tests.test_chroma_adapter.ChromaAdapterLiveTest -v`는 host Python에 `chromadb` 미설치라 skip(컨테이너 관통은 B.5 deployed smoke로 확인).
+- B.4: `python3 -m py_compile services/application/app/main.py tests/test_real_vector_backend_wiring.py` 통과. `python3 -m unittest tests.test_real_vector_backend_wiring -v` 7개 통과. `docker compose config` 유효(application env/depends_on embedding·chroma). 전체 `python3 -m unittest discover tests` OK(45 skip), `python3 -m pytest -q` 461 passed / 45 skipped, `git diff --check` 통과.
+- B.5: `COMPOSE_BAKE=false docker compose -f docker-compose.yml -f docker-compose.llama.yml up -d --build` 통과(첫 `docker compose ... up -d --build`는 Compose bake panic). `curl /embed` 직접 probe에서 `dimensions=1024`. `python3 scripts/phase4_context_search_deployed_smoke.py --application-base-url http://127.0.0.1:8000 --timeout-seconds 900` 통과(`rebuild_backend="chroma"`, `rebuild_records_written=6`, `micro_count=6`, gate pass). `docker compose ... restart application` 후 rebuild 없이 `/context-search` 호출해 `micro_evidence` 6개 유지. Chroma volume mount 수정 후에도 smoke 재통과, `chroma_data:/chroma/chroma`에 4.3M 데이터 확인, Chroma+application 재시작 뒤 rebuild 없이 `micro_count=6` 유지. Focused regression: `python3 -m unittest tests.test_chroma_adapter tests.test_phase4_context_search_deployed_smoke_script -v` 18개 통과 + 1 skip, `git diff --check` 통과.
 
 ## Next steps
 
-- B.5(deployed live smoke, LLM 환경 전용): 전체 compose stack(mongo/gateway/llama/embedding/chroma/application)을 올려, 확장된 `scripts/phase4_context_search_deployed_smoke.py`(rebuild→search)를 real Chroma+embedding+실제 12B로 관통. **수용 기준**: embedding 벡터 실제 1024-dim assert, Chroma 저장/query hit, 재시작에도 vector hit 생존, rebuild summary `backend="chroma"`. Chroma image tag(`chromadb/chroma:0.5.23`)/heartbeat 경로/persist volume 정합도 이 bring-up에서 확인·조정.
-- B.5(deployed live smoke): real Chroma + embedding 서비스 + 실제 12B planner 관통, 재시작 vector hit 생존 — LLM 환경 전용.
-- compose stack(실제 12B) 관통 deployed smoke live 실행: 확장된 `scripts/phase4_context_search_deployed_smoke.py`가 이제 rebuild → context-search 2-step을 돌리므로, 승인된 네트워크에서 실행하면 배포 경로 vector 실hit을 관통 검증한다.
-- real ChromaDB persistent vector adapter / ES lexical 경로(§8, 착수 전 브리프)는 계속 후속.
+- ES lexical 경로(§8, 착수 전 브리프)는 계속 후속.
+- embedding service image size/startup 최적화 검토: 현재 build가 torch CUDA wheel 묶음을 크게 끌어오므로 CPU-only torch pin/base image 전략을 후속 후보로 둔다.
+- worker→real Chroma archive mutation(`DerivedIndexRecordNotFound` idempotent success) 배선은 후속.
 - prior-memory(analysis 비교) purpose §8 C 완성(Phase 2B 착수 브리프)도 후속.
