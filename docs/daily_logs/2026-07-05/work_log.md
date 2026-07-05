@@ -147,9 +147,37 @@
 - B.4: `python3 -m py_compile services/application/app/main.py tests/test_real_vector_backend_wiring.py` 통과. `python3 -m unittest tests.test_real_vector_backend_wiring -v` 7개 통과. `docker compose config` 유효(application env/depends_on embedding·chroma). 전체 `python3 -m unittest discover tests` OK(45 skip), `python3 -m pytest -q` 461 passed / 45 skipped, `git diff --check` 통과.
 - B.5: `COMPOSE_BAKE=false docker compose -f docker-compose.yml -f docker-compose.llama.yml up -d --build` 통과(첫 `docker compose ... up -d --build`는 Compose bake panic). `curl /embed` 직접 probe에서 `dimensions=1024`. `python3 scripts/phase4_context_search_deployed_smoke.py --application-base-url http://127.0.0.1:8000 --timeout-seconds 900` 통과(`rebuild_backend="chroma"`, `rebuild_records_written=6`, `micro_count=6`, gate pass). `docker compose ... restart application` 후 rebuild 없이 `/context-search` 호출해 `micro_evidence` 6개 유지. Chroma volume mount 수정 후에도 smoke 재통과, `chroma_data:/chroma/chroma`에 4.3M 데이터 확인, Chroma+application 재시작 뒤 rebuild 없이 `micro_count=6` 유지. Focused regression: `python3 -m unittest tests.test_chroma_adapter tests.test_phase4_context_search_deployed_smoke_script -v` 18개 통과 + 1 skip, `git diff --check` 통과.
 
+## Completed work — worker→real Chroma archive mutation (SoT v1.6.37)
+
+- **오너 결정**: HANDOFF Next Tasks 1의 B.1~B.5 완료 후 후속 후보 4개(worker→real Chroma / embedding 이미지 최적화 / ES lexical 브리프 / embedding quality spike) 중 **worker→real Chroma 배선**을 선택했다(AskUserQuestion).
+- **설계 결정 (delete vs tombstone)**: archive worker의 real Chroma mutation은 **delete**로 구현했다. 근거: derived source-block record는 SOT에서 완전히 rebuild 가능하고, archive의 목표는 "검색 후보에서 제외"이며, delete는 단일 원자적 Chroma 연산이다. query-time stale guard(SOT 재조회)가 이미 정합성을 보장하므로 이 mutation은 실제 물리적 cleanup 역할이다. tombstone(metadata `*_archived=True` 갱신)은 embeddings 재읽기+re-upsert가 필요해 더 복잡하고, 이득(Chroma 내 history 보존)은 rebuild 가능성 때문에 불필요하다. 스펙 근거: 브리프 §8.2 선택지 B가 "archive/tombstone/delete 대상 record가 이미 없으면"이라며 delete를 허용 묶음으로 나열하고, §8.3이 fake adapter에 `mark_archived`/`delete_or_tombstone` equivalent를 권고한다 — 브리프가 두 방식을 "등가"로 명시하지는 않으나 delete는 spec-allowed 선택이다(검증 F2 정정).
+- **변경 파일**:
+  - `services/application/app/indexing/chroma.py`: `ChromaCollection` protocol에 `delete(where)` 추가. `ChromaArchiveIndexMutationAdapter`(seam `mark_archived(entry)`)와 `_archive_where(entry)` 추가. `project_archived`→`{project_id}`, `draft_archived`→project-scoped `{project_id, draft_id}`(`entry.source.mongo_id`=draft id). 삭제 전 `get(where, include=[])`로 존재 확인, `ids` 길이 0이면 `DerivedIndexRecordNotFound` raise(delete 미호출). numpy-like truthiness 회피 위해 truthiness 대신 `len()` 사용(B.5 fix 패턴 준수).
+  - `scripts/index_sync_worker.py`: `_build_archive_adapter()` 추가 — `CHROMA_HOST` 설정 시 `ChromaArchiveIndexMutationAdapter`(`connect_chroma_collection`, `CHROMA_PORT`/`CHROMA_COLLECTION` env는 create_app B.4 규약과 동일), 미설정 시 `RecordingArchiveIndexMutationAdapter`. worker summary JSON에 `archive_backend`(`chroma`/`in_memory_fake`) field 추가.
+- **효과**: worker command가 배포 stack(`CHROMA_HOST` 설정)에서 archive event를 실제 Chroma record 삭제로 처리하고, 대상이 없으면 idempotent success 처리한다. claim/retry/backoff/terminal-move lifecycle(v1.6.29)은 불변이다. `IndexSyncWorker`의 `DerivedIndexRecordNotFound`→success 분기가 real adapter에서도 작동함을 통합 회귀로 잠갔다.
+
+## Verification — worker→real Chroma archive mutation
+
+- `python3 -m py_compile services/application/app/indexing/chroma.py scripts/index_sync_worker.py tests/test_chroma_adapter.py tests/test_index_sync_worker_script.py` 통과. `python3 -c "from ...chroma import ChromaArchiveIndexMutationAdapter"` import 통과(chroma→service `DerivedIndexRecordNotFound` import에 순환 없음 확인).
+- `python3 -m unittest tests.test_chroma_adapter tests.test_index_sync_worker_script tests.test_indexing_phase3a -v` 45개 통과(1 live skip).
+- 잠근 범위:
+  - **adapter delete 경계**(`ChromaArchiveMutationTest`, fake collection + `delete`): `project_archived`가 해당 project record만 삭제하고 타 project 무손상(delete 1회), `draft_archived`가 project-scoped 해당 draft만 삭제(같은 draft id의 타 project record 무손상), 삭제 대상 없음 시 `DerivedIndexRecordNotFound` raise + **delete 미호출**(project/draft 각각) + 타 record 무손상.
+  - **not-found guard numpy-like under-strict lock**(`test_not_found_guard_uses_len_not_truthiness_on_numpy_like_ids`, 검증 F1 보강): `ambiguous_ids=True`로 fake `get`이 빈 `AmbiguousTruthValueList`(`__bool__`가 ValueError)를 반환할 때도 `len()` guard가 `DerivedIndexRecordNotFound`를 raise + delete 미호출. mutation 실증: guard를 `if not ids:`로 되돌리면 `ValueError: ambiguous truth value`로 재실패(→ real backend에서 §8.2 idempotent-success가 조용히 깨져 BACKEND_ERROR 3회 retry로 오분류됨을 lock). 복원 후 재통과.
+  - **worker↔real adapter 통합**(`ChromaArchiveWorkerIntegrationTest`): worker가 real `ChromaArchiveIndexMutationAdapter`로 매칭 record 삭제 후 terminal success + outbox 제거 + success log, 대상 없음 시 idempotent success(delete 미호출, log error None).
+  - **script env 분기**(`BuildArchiveAdapterTest`): `CHROMA_HOST` 미설정→`RecordingArchiveIndexMutationAdapter`+`in_memory_fake`, 설정→`ChromaArchiveIndexMutationAdapter`+`chroma`(`connect_chroma_collection` host/port/collection 인자 검증). summary JSON에 `archive_backend` 포함.
+- 전체 `python3 -m unittest discover tests` Ran 517 OK(skipped=45). `python3 -m pytest -q` 472 passed / 45 skipped(신규 회귀 11개: chroma archive 6 + not-found numpy-like guard 1 + worker 통합 2 + script build 2). `git diff --check` 통과.
+- 실제 Chroma 서버 관통 live smoke(worker가 컨테이너 Chroma에서 archive record 실삭제)는 sandbox 밖 승인 네트워크가 필요해 미실행(후속).
+
+### 독립 검증 후속 보강 — F1/F2 (2026-07-05)
+
+- 독립 검증 판정은 **조건부 합격**(`docs/verifications/2026-07-05/worker_real_chroma_archive_mutation.md`), 차단 조건 F1 1건.
+- **F1(차단) 폐쇄**: `mark_archived`의 numpy-like ids guard에 under-strict 회귀가 빠져 있었다(B.5가 unit으로 잡을 수 있음을 증명한 패턴). `test_not_found_guard_uses_len_not_truthiness_on_numpy_like_ids`를 추가해 `ambiguous_ids=True` 빈 결과에서도 `DerivedIndexRecordNotFound`+delete 미호출을 잠갔고, guard를 `if not ids:`로 되돌리는 mutation이 `ValueError`로 재실패함을 실증했다.
+- **F2(비차단) 정정**: "브리프 §8.3이 delete/tombstone을 등가로 뒀다"는 인용을 정정했다. 실제로는 §8.2 선택지 B가 delete를 허용 묶음으로 나열하고 §8.3이 fake에 `mark_archived`/`delete_or_tombstone` equivalent를 권고할 뿐 "등가" 명시 문구는 없다. delete는 spec-allowed 선택이며 근거는 유지된다.
+- **F3/F4(비차단) 처리**: F3(`_archive_where` unsupported-event ValueError)은 worker `_process_entry`가 먼저 event를 필터링해 도달 불가한 defensive dead-path라 회귀를 추가하지 않는다(브리프 event set이 늘면 그때 lock). F4(live smoke)는 F1 보강으로 guard가 unit-proven이 됐고, 컨테이너 Chroma 관통 smoke는 여전히 후속이다.
+
 ## Next steps
 
+- worker→real Chroma **live smoke**(배포 stack에서 project/draft archive → outbox → worker command → 실제 Chroma record 삭제 확인)는 후속(sandbox 밖 실행 필요).
 - ES lexical 경로(§8, 착수 전 브리프)는 계속 후속.
 - embedding service image size/startup 최적화 검토: 현재 build가 torch CUDA wheel 묶음을 크게 끌어오므로 CPU-only torch pin/base image 전략을 후속 후보로 둔다.
-- worker→real Chroma archive mutation(`DerivedIndexRecordNotFound` idempotent success) 배선은 후속.
 - prior-memory(analysis 비교) purpose §8 C 완성(Phase 2B 착수 브리프)도 후속.

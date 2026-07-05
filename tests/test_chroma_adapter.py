@@ -14,6 +14,7 @@ import unittest
 from typing import Any
 
 from services.application.app.indexing.chroma import (
+    ChromaArchiveIndexMutationAdapter,
     ChromaVectorIndexAdapter,
     connect_chroma_collection,
     record_from_chroma,
@@ -24,7 +25,13 @@ from services.application.app.indexing.models import (
     IndexRecordKind,
     SourceBlockIndexRecord,
 )
-from services.application.app.indexing.service import _cosine_similarity
+from services.application.app.indexing.service import (
+    DerivedIndexRecordNotFound,
+    IndexSyncOutboxService,
+    IndexSyncWorker,
+    InMemoryIndexSyncRepository,
+    _cosine_similarity,
+)
 
 
 class AmbiguousTruthValueList(list):
@@ -38,6 +45,7 @@ def _record(
     record_id: str,
     *,
     project_id: str = "project-1",
+    draft_id: str = "draft-1",
     vector: tuple[float, ...] = (1.0, 0.0),
     snapshot_id: str = "snapshot-1",
     block_index: int = 0,
@@ -50,12 +58,12 @@ def _record(
         pointer=IndexPointer(
             project_id=project_id,
             collection="project_memory_vectors",
-            document_id="draft-1",
+            document_id=draft_id,
             version_id="version-1",
             content_hash="hash-" + record_id,
         ),
         snapshot_id=snapshot_id,
-        draft_id="draft-1",
+        draft_id=draft_id,
         block_id="block-" + record_id,
         block_index=block_index,
         text="본문 " + record_id,
@@ -73,6 +81,7 @@ class FakeChromaCollection:
     def __init__(self) -> None:
         self._store: dict[str, tuple[list[float], dict[str, Any]]] = {}
         self.upsert_calls = 0
+        self.delete_calls = 0
         self.ambiguous_ids = False
         self.ambiguous_embeddings = False
         self.ambiguous_metadatas = False
@@ -150,6 +159,19 @@ class FakeChromaCollection:
                 else [[item[2] for item in top]]
             )
         return result
+
+    def delete(self, *, where) -> None:
+        self.delete_calls += 1
+        to_remove = [
+            record_id
+            for record_id, (_embedding, metadata) in self._store.items()
+            if self._match(metadata, where)
+        ]
+        for record_id in to_remove:
+            del self._store[record_id]
+
+    def stored_ids(self) -> set[str]:
+        return set(self._store)
 
 
 class ChromaSerializationTest(unittest.TestCase):
@@ -291,6 +313,134 @@ class ChromaAdapterLogicTest(unittest.TestCase):
     def test_query_similar_rejects_nonpositive_limit(self):
         with self.assertRaises(ValueError):
             self.adapter.query_similar(project_id="project-1", vector=(1.0,), limit=0)
+
+
+class ChromaArchiveMutationTest(unittest.TestCase):
+    def setUp(self):
+        self.collection = FakeChromaCollection()
+        self.adapter = ChromaArchiveIndexMutationAdapter(self.collection)
+        self.outbox = IndexSyncOutboxService(InMemoryIndexSyncRepository())
+
+    def _seed(self, *records):
+        ChromaVectorIndexAdapter(self.collection).upsert_records(tuple(records))
+
+    def test_project_archived_deletes_only_that_projects_records(self):
+        self._seed(
+            _record("p1a", project_id="project-1", draft_id="draft-1"),
+            _record("p1b", project_id="project-1", draft_id="draft-2"),
+            _record("p2a", project_id="project-2", draft_id="draft-1"),
+        )
+        entry = self.outbox.enqueue_project_archived(project_id="project-1")
+
+        self.adapter.mark_archived(entry)
+
+        self.assertEqual(self.collection.stored_ids(), {"p2a"})
+        self.assertEqual(self.collection.delete_calls, 1)
+
+    def test_draft_archived_deletes_only_that_draft_scoped_to_project(self):
+        self._seed(
+            _record("p1d1", project_id="project-1", draft_id="draft-1"),
+            _record("p1d2", project_id="project-1", draft_id="draft-2"),
+            # Same draft id in another project must not be deleted.
+            _record("p2d1", project_id="project-2", draft_id="draft-1"),
+        )
+        entry = self.outbox.enqueue_draft_archived(
+            project_id="project-1", draft_id="draft-1"
+        )
+
+        self.adapter.mark_archived(entry)
+
+        self.assertEqual(self.collection.stored_ids(), {"p1d2", "p2d1"})
+        self.assertEqual(self.collection.delete_calls, 1)
+
+    def test_project_archived_with_no_records_is_idempotent_not_found(self):
+        self._seed(_record("p2a", project_id="project-2"))
+        entry = self.outbox.enqueue_project_archived(project_id="project-1")
+
+        with self.assertRaises(DerivedIndexRecordNotFound):
+            self.adapter.mark_archived(entry)
+
+        # No matching records => never calls delete, and the other project's
+        # records are untouched.
+        self.assertEqual(self.collection.delete_calls, 0)
+        self.assertEqual(self.collection.stored_ids(), {"p2a"})
+
+    def test_draft_archived_with_no_records_is_idempotent_not_found(self):
+        self._seed(_record("p1d2", project_id="project-1", draft_id="draft-2"))
+        entry = self.outbox.enqueue_draft_archived(
+            project_id="project-1", draft_id="draft-1"
+        )
+
+        with self.assertRaises(DerivedIndexRecordNotFound):
+            self.adapter.mark_archived(entry)
+
+        self.assertEqual(self.collection.delete_calls, 0)
+        self.assertEqual(self.collection.stored_ids(), {"p1d2"})
+
+    def test_not_found_guard_uses_len_not_truthiness_on_numpy_like_ids(self):
+        # Real Chroma may hand back a numpy-like ids container whose __bool__ is
+        # ambiguous; the not-found guard must count with len(), not truthiness
+        # (same B.5 fix as _records_from_get/_records_from_query). With an empty
+        # ambiguous ids container this must still raise DerivedIndexRecordNotFound
+        # and never call delete. Reverting the guard to `if not ids:` re-fails
+        # here because AmbiguousTruthValueList.__bool__ raises ValueError, so the
+        # §8.2 idempotent-success path would silently break on the real backend.
+        self.collection.ambiguous_ids = True  # empty collection -> ids = [] wrapped
+        entry = self.outbox.enqueue_project_archived(project_id="project-1")
+
+        with self.assertRaises(DerivedIndexRecordNotFound):
+            self.adapter.mark_archived(entry)
+
+        self.assertEqual(self.collection.delete_calls, 0)
+
+
+class ChromaArchiveWorkerIntegrationTest(unittest.TestCase):
+    """The worker driving the real (fake-collection) Chroma archive adapter:
+    delete on hit -> terminal success; not_found -> idempotent success. Both
+    remove the active outbox entry and log a success."""
+
+    def _run(self, collection, entry_kwargs, *, event):
+        repo = InMemoryIndexSyncRepository()
+        outbox = IndexSyncOutboxService(repo)
+        if event == "project":
+            outbox.enqueue_project_archived(**entry_kwargs)
+        else:
+            outbox.enqueue_draft_archived(**entry_kwargs)
+        worker = IndexSyncWorker(
+            repository=repo,
+            archive_adapter=ChromaArchiveIndexMutationAdapter(collection),
+        )
+        summary = worker.run_once(limit=1)
+        return repo, summary
+
+    def test_worker_deletes_matching_records_and_records_success(self):
+        collection = FakeChromaCollection()
+        ChromaVectorIndexAdapter(collection).upsert_records(
+            (_record("p1", project_id="project-1"),)
+        )
+
+        repo, summary = self._run(
+            collection, {"project_id": "project-1"}, event="project"
+        )
+
+        self.assertEqual(summary.entries_succeeded, 1)
+        self.assertEqual(summary.entries_failed, 0)
+        self.assertEqual(collection.stored_ids(), set())
+        self.assertEqual(repo.outbox_entries, {})
+        self.assertEqual(repo.logs[0].status.value, "success")
+
+    def test_worker_treats_missing_records_as_idempotent_success(self):
+        collection = FakeChromaCollection()  # nothing to delete
+
+        repo, summary = self._run(
+            collection, {"project_id": "project-1"}, event="project"
+        )
+
+        self.assertEqual(summary.entries_succeeded, 1)
+        self.assertEqual(summary.entries_failed, 0)
+        self.assertEqual(collection.delete_calls, 0)
+        self.assertEqual(repo.outbox_entries, {})
+        self.assertIsNone(repo.logs[0].error)
 
 
 _CHROMA_URL = os.environ.get("CHROMA_TEST_URL")

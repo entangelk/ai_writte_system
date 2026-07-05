@@ -18,8 +18,11 @@ from typing import Any, Protocol
 from services.application.app.indexing.models import (
     IndexPointer,
     IndexRecordKind,
+    IndexSyncEvent,
+    IndexSyncOutboxEntry,
     SourceBlockIndexRecord,
 )
+from services.application.app.indexing.service import DerivedIndexRecordNotFound
 
 
 DEFAULT_COLLECTION_NAME = "project_memory_vectors"
@@ -46,6 +49,8 @@ class ChromaCollection(Protocol):
     def get(
         self, *, where: dict[str, Any] | None, include: list[str]
     ) -> dict[str, Any]: ...
+
+    def delete(self, *, where: dict[str, Any] | None) -> None: ...
 
 
 def record_to_chroma(
@@ -197,6 +202,52 @@ def _records_from_query(
         record_from_chroma(record_id, embedding, metadata)
         for record_id, embedding, metadata in zip(ids, embeddings, metadatas)
     )
+
+
+def _archive_where(entry: IndexSyncOutboxEntry) -> dict[str, Any]:
+    # project_archived deletes every derived record of the project; draft_archived
+    # narrows to that draft (still project-scoped so a cross-project draft id can
+    # never collide). entry.source.mongo_id is the draft id for draft_archived.
+    if entry.event is IndexSyncEvent.PROJECT_ARCHIVED:
+        return {"project_id": entry.project_id}
+    if entry.event is IndexSyncEvent.DRAFT_ARCHIVED:
+        return {
+            "$and": [
+                {"project_id": entry.project_id},
+                {"draft_id": entry.source.mongo_id},
+            ]
+        }
+    raise ValueError(f"unsupported archive event: {entry.event.value}")
+
+
+class ChromaArchiveIndexMutationAdapter:
+    """Archive-time mutation against real Chroma (worker->real Chroma wiring).
+
+    When a project/draft is archived the derived source-block records for it must
+    stop being retrieval candidates. Records are fully rebuildable from the SOT,
+    so the cleanup is a delete, not a tombstone. If no matching record exists the
+    target state (archived content absent from the derived index) is already met,
+    so `mark_archived` raises `DerivedIndexRecordNotFound` and the worker treats
+    it as idempotent success (docs/plans/03-index-worker-retry-decisions.md §8.2).
+    """
+
+    def __init__(self, collection: ChromaCollection) -> None:
+        self._collection = collection
+
+    def mark_archived(self, entry: IndexSyncOutboxEntry) -> None:
+        where = _archive_where(entry)
+        existing = self._collection.get(where=where, include=[])
+        ids = existing.get("ids")
+        if ids is None:
+            ids = []
+        # len() rather than truthiness: real Chroma may hand back numpy-like
+        # containers whose __bool__ is ambiguous (B.5 live fix).
+        if len(ids) == 0:
+            raise DerivedIndexRecordNotFound(
+                f"no derived index records for {entry.event.value} "
+                f"{entry.source.mongo_id}"
+            )
+        self._collection.delete(where=where)
 
 
 def connect_chroma_collection(
