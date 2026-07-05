@@ -175,9 +175,17 @@
 - **F2(비차단) 정정**: "브리프 §8.3이 delete/tombstone을 등가로 뒀다"는 인용을 정정했다. 실제로는 §8.2 선택지 B가 delete를 허용 묶음으로 나열하고 §8.3이 fake에 `mark_archived`/`delete_or_tombstone` equivalent를 권고할 뿐 "등가" 명시 문구는 없다. delete는 spec-allowed 선택이며 근거는 유지된다.
 - **F3/F4(비차단) 처리**: F3(`_archive_where` unsupported-event ValueError)은 worker `_process_entry`가 먼저 event를 필터링해 도달 불가한 defensive dead-path라 회귀를 추가하지 않는다(브리프 event set이 늘면 그때 lock). F4(live smoke)는 F1 보강으로 guard가 unit-proven이 됐고, 컨테이너 Chroma 관통 smoke는 여전히 후속이다.
 
+## User Decisions and Rationale — Phase 4 ContextPackage 완성 (⑤/⑧) → Phase 2B 종속
+
+- 오너가 (worker→real Chroma 완료 후) 다음 슬라이스로 후속 후보 4개(live smoke/ES lexical 브리프/embedding 이미지 최적화/quality spike) 중 **"Phase 4 잔여 완성"**을 골랐다. 임베딩 이미지 최적화는 "최후순위"로 명시 보류하고 실제 기능 슬라이스를 원했다.
+- 조사 결과 Phase 4 완성의 두 추적 의무가 모두 결정/선행 의존성을 가짐을 확인했다: **⑧ Analysis 비교용 뷰**는 착수 브리프 §8이 Phase 2B 착수 브리프로 필드 확정을 위임했고, **⑤ candidate 포함**은 canonical store 부재 + Gate의 candidate 금지 + 검색 경로 미정 + Writing-안전성 위험이 얽혀 있다. 이를 `docs/plans/04-context-package-completion-decisions.md` 브리프로 정리했다(D1~D5 옵션표+추천).
+- **오너 결정 D1 = B (Phase 2B까지 미룸).** candidate 포함을 지금 하지 않고 승인/canonical 경로가 생기는 Phase 2B로 미룬다. 근거: canonical store가 없는 상태의 "지금 포함"은 미검증 후보를 Writing 근거로 흘려보내는 것이라 `evaluate_context_gate`의 candidate 금지(=Writing-안전성 방어선)를 근거 없이 완화하게 된다. ⑤의 안전한 완성은 Phase 2B(candidate↔기존 기억 대조/승격)에 자연 종속된다.
+- **함의**: D1=B이므로 D2/D3/D4(검색 경로·`prior_memory` need·Gate 완화)는 열지 않는다. ⑤와 ⑧ 모두 Phase 2B로 추적 이관된다. Phase 4는 현재 상태(Writing용 뷰가 Phase 5 MVP에 충분, candidate 미포함, Gate가 candidate 금지)가 합리적 정지점이다. 코드 변경 없음 — 산출물은 결정 브리프와 추적 이관이다.
+- 임베딩 이미지 최적화(CPU-only torch pin)는 시도했다가 오너 지시로 되돌렸다("GPU버전으로 해줘, 최적화는 최후순위"). embedding 서비스는 기본(GPU-capable) torch를 유지한다.
+
 ## Next steps
 
+- **다음 큰 슬라이스: Phase 2B 착수**(오너 결정 D1=B의 자연 귀결). Phase 2B가 ⑤ candidate 포함(§5 B: 검색 경로/`prior_memory` need/Gate 완화)과 ⑧ Analysis 비교용 뷰(§8 C 확장 필드)를 candidate 승인/canonical 승격 계약과 함께 소유한다. 착수 브리프 필요.
 - worker→real Chroma **live smoke**(배포 stack에서 project/draft archive → outbox → worker command → 실제 Chroma record 삭제 확인)는 후속(sandbox 밖 실행 필요).
 - ES lexical 경로(§8, 착수 전 브리프)는 계속 후속.
-- embedding service image size/startup 최적화 검토: 현재 build가 torch CUDA wheel 묶음을 크게 끌어오므로 CPU-only torch pin/base image 전략을 후속 후보로 둔다.
-- prior-memory(analysis 비교) purpose §8 C 완성(Phase 2B 착수 브리프)도 후속.
+- embedding service image size/startup 최적화는 오너 지시로 **최후순위**(GPU 기본 유지). CPU-only torch pin은 보류.

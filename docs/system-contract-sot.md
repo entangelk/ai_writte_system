@@ -1,7 +1,7 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`  
-계약 버전: `v1.6.37`
+계약 버전: `v1.6.38`
 승인일: `2026-06-26`  
 최근 갱신일: `2026-07-05`
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
@@ -33,6 +33,7 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.6.38 | 2026-07-05 | Phase 4 ContextPackage 완성(⑤ candidate 포함 §5 B / ⑧ Analysis 비교용 뷰 §8 C)이 Phase 2B에 종속됨을 오너 결정으로 확정했다(브리프 `plans/04-context-package-completion-decisions.md`, D1=B). `needs_review` candidate 포함은 지금 하지 않고 승인/canonical 승격 경로가 생기는 Phase 2B로 미룬다 — canonical store 부재 상태의 "지금 포함"은 미검증 후보를 Writing 근거로 흘려보내는 것이라 `evaluate_context_gate`의 candidate 라벨 금지(Writing-안전성 방어선)를 근거 없이 완화하게 된다. 따라서 D2/D3/D4(candidate 검색 경로·`prior_memory` need 신설·Gate 완화)는 열지 않는다. ⑧ Analysis 비교용 확장 필드는 착수 브리프 §8대로 Phase 2B 착수 브리프가 확정한다. Phase 4는 현재가 합리적 정지점이다(Writing용 ContextPackage는 Phase 5 MVP에 충분, candidate 미포함, Gate가 candidate 금지 유지). 코드/public literal 변경 없음 — 미확정 항목의 상태만 "Phase 2B 종속"으로 확정. | 사용자 결정, `plans/04-context-package-completion-decisions.md`, `plans/04-agentic-search-kickoff-decisions.md` §5·§8 |
 | v1.6.37 | 2026-07-05 | Phase 3B index sync worker를 real Chroma archive mutation에 배선했다(Next Tasks worker→real Chroma). `ChromaArchiveIndexMutationAdapter`(`services/application/app/indexing/chroma.py`)는 archive event를 real Chroma delete로 처리한다: `project_archived`는 `{project_id}` 매칭 derived source-block record 전부, `draft_archived`는 project-scoped `{project_id, draft_id}` 매칭 record만 삭제한다(`entry.source.mongo_id`가 draft id). derived record는 SOT에서 rebuild 가능하므로 cleanup은 tombstone이 아니라 **delete**다. 삭제 대상이 이미 없으면 목표 상태(archived 콘텐츠가 derived index에 없음)가 달성된 것으로 보고 `DerivedIndexRecordNotFound`를 raise → worker가 idempotent success로 처리한다(브리프 §8.2). 삭제 전 `get(where, include=[])`로 존재를 확인하고, `ids` 길이가 0이면 delete를 호출하지 않는다(numpy-like truthiness 회피 위해 truthiness 대신 `len()` 사용). `ChromaCollection` protocol에 `delete(where)`가 추가됐다. worker command `scripts/index_sync_worker.py`는 `CHROMA_HOST` 설정 시 `ChromaArchiveIndexMutationAdapter`(`connect_chroma_collection`, `CHROMA_PORT`/`CHROMA_COLLECTION` env는 create_app B.4 규약과 동일)를, 미설정 시 종전 `RecordingArchiveIndexMutationAdapter`를 쓴다. worker summary JSON에 `archive_backend`(`chroma`/`in_memory_fake`)가 추가됐다. claim/retry/backoff/terminal-move lifecycle은 v1.6.29 그대로다. 실제 Chroma 서버 관통 live smoke는 후속이다. | Next Tasks(worker→real Chroma), `plans/03-index-worker-retry-decisions.md` §8, `tests/test_chroma_adapter.py`, `tests/test_index_sync_worker_script.py` |
 | v1.6.36 | 2026-07-05 | Phase 4 real 영속 vector 백엔드(후보 B)를 wiring했다(브리프 `plans/04-real-vector-backend-decisions.md`, Approved). `create_app`은 env 기반으로 vector 백엔드를 선택한다: `CHROMA_HOST`가 있으면 real 영속 `ChromaVectorIndexAdapter`(재시작 생존, rebuild summary `backend="chroma"`), 없으면 종전 `InMemoryVectorIndexAdapter`(`backend="in_memory_fake"`)다. embedding은 `EMBEDDING_SERVICE_URL`이 있으면 real `RemoteEmbeddingProvider`(별도 embedding 서비스 컨테이너의 `dragonkue/BGE-m3-ko`, 1024-dim, `expected_dimensions=1024` 차원 guard armed), 없으면 `DeterministicFakeEmbeddingProvider`다. 주입된 `vector_index`(테스트)는 항상 fake backend label을 유지한다. embedding 서비스는 llama gateway와 분리된 컨테이너라 vector 백엔드는 LLM 게이트와 독립이다. stale guard는 backend 무관하게 SOT를 재조회하므로 Chroma hit도 정본 재확인 후에만 ContextItem이 된다. `backend` literal enum에 `chroma`가 추가됐다. 실제 Chroma 서버/embedding 모델 관통(1024-dim assert, 재시작 vector hit 생존)은 B.5 live 검증이다. | 사용자 결정, `plans/04-real-vector-backend-decisions.md`, `tests/test_real_vector_backend_wiring.py` |
 | v1.6.35 | 2026-07-05 | Phase 4 공유 in-process vector index를 도입했다. `create_app`이 단일 `InMemoryVectorIndexAdapter`(+ `DeterministicFakeEmbeddingProvider`)를 소유하고, source-block rebuild endpoint는 여기에 write하며 기본 wiring된 context search는 여기서 read한다 — 같은 프로세스에서 rebuild 후 context search를 하면 `source_quote` 등 vector need가 stale guard + SOT 재조회를 통과한 실제 hit을 반환한다. 이 공유 index는 프로세스 수명 in-memory이고 비durable이며(재시작 시 소실) `backend` literal은 여전히 `in_memory_fake`다. 공유 index는 `LLM_GATEWAY_BASE_URL` 유무와 무관하게 생성돼 rebuild가 채우고, planner 미구성 시 `/context-search`만 종전대로 503이다. rebuild HTTP/CLI summary count(`records_indexed`/`records_query_visible`/`records_archived`)는 해당 rebuild의 `snapshot_id`로 scope해 per-rebuild(누적 없음) 의미와 v1.6.22/v1.6.23 계약을 그대로 유지한다 — 누적은 뒤에서만 일어난다. real ChromaDB/ES persistent backend는 계속 후속이다. | 사용자 결정, `plans/04-shared-vector-index-decisions.md`, `tests/test_context_search_shared_index.py` |
@@ -83,7 +84,7 @@
 
 | 문서 | 역할 | 지위 |
 |---|---|---|
-| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.37 |
+| 이 문서 | 서비스/계약 SoT 인덱스와 우선순위 | Approved SoT v1.6.38 |
 | [`plans/README.md`](plans/README.md) | 계획 문서 진입점과 Phase/MVP 관계 | Draft |
 | [`plans/00-foundations.md`](plans/00-foundations.md) | 전역 원칙과 제품 경계 | Draft |
 | [`plans/implementation-plan.md`](plans/implementation-plan.md) | 구현 순서, slice 상태, 검증 gate | Draft |
@@ -383,7 +384,7 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 - `context_search` profile은 flat-loop allowlist 3종만 쓴다(전환 후 적용).
 - tool success와 `validate_context` success는 Context Gate 통과가 아니다.
 - retriever step 실패 error taxonomy는 `backend_error`/`system_error`/`llm_error`/`sot_error`로 시작하고 enum 확장 가능하다. `sot_error`(Mongo SOT reload 실패)는 degraded가 아니라 전체 실패이며, NotFound뿐 아니라 SOT reload 호출에서 탈출하는 모든 non-NotFound 예외(pymongo 장애 포함)를 원형 전파 없이 매핑한다(v1.6.32). vector hit의 snapshot NotFound만 index drift로 보고 `snapshot_missing` soft stale 제외한다. `system_error`는 예약 literal이다.
-- package는 단일 schema + purpose literal로 시작한다. 이후 slice에서 Writing용/Analysis 비교용 모두 완성해야 하며(오너 추적 의무), analysis 비교용 필드는 Phase 2B 착수 브리프에서 결정한다.
+- package는 단일 schema + purpose literal로 시작한다. 이후 slice에서 Writing용/Analysis 비교용 모두 완성해야 하며(오너 추적 의무), analysis 비교용 필드는 Phase 2B 착수 브리프에서 결정한다. v1.6.38로 이 완성(⑤ candidate 포함 §5 B / ⑧ Analysis 비교용 §8 C)이 **Phase 2B에 종속됨**이 확정됐다(오너 결정 D1=B, `plans/04-context-package-completion-decisions.md`). Writing용 뷰는 현재 package로 Phase 5 MVP에 충분하고, candidate 포함은 canonical/승인 경로가 없어 지금 하지 않으며 `evaluate_context_gate`의 candidate 라벨 금지를 유지한다.
 
 ### Phase 5. Writing AI
 
@@ -437,7 +438,7 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 - Phase 2B taxonomy 확장과 confidence threshold
 - Analysis `update/add_evidence/no_change/conflict`의 정확한 public envelope
 - Chroma embedding model, ES analyzer, 자동 sync delivery 방식
-- ContextPackage의 Analysis 비교용 확장 필드(단일 schema + purpose literal은 v1.6.30으로 확정, Writing용/Analysis 비교용 모두 완성은 추적 의무, 필드는 Phase 2B 착수 브리프에서 결정)
+- ContextPackage의 Analysis 비교용 확장 필드(단일 schema + purpose literal은 v1.6.30으로 확정, Writing용/Analysis 비교용 모두 완성은 추적 의무, 필드는 Phase 2B 착수 브리프에서 결정; v1.6.38로 ⑤ candidate 포함과 함께 Phase 2B 종속 확정 — D1=B)
 - WritingCandidate 출력 단위(full text/patch)
 - Writing Gate decision literal과 editor 처리
 - enum/bounds를 쓰는 첫 tool schema 등록 시 validator 확장 방식
