@@ -13,7 +13,10 @@ from services.application.app.analysis.extractor import (
     VersionedPromptAnalysisExtractionAdapter,
 )
 from services.application.app.analysis.gateway_provider import GatewayGenerateProvider
-from services.application.app.analysis.models import AnalysisJobStatus
+from services.application.app.analysis.models import (
+    AnalysisCandidateStatus,
+    AnalysisJobStatus,
+)
 from services.application.app.analysis.prompt_templates import (
     InMemoryPromptTemplateRepository,
     PromptTemplateService,
@@ -31,6 +34,12 @@ from services.application.app.analysis.service import (
     InvalidCandidateSource,
 )
 from services.application.app.analysis.source import CoreSotSourceAdapter
+from services.application.app.memory.models import PromotionMode
+from services.application.app.memory.service import (
+    InMemoryMemoryRepository,
+    MemoryNotFound,
+    MemoryService,
+)
 from services.application.app.context_search.models import (
     ContextNeed,
     ContextSearchPurpose,
@@ -141,6 +150,32 @@ def _default_analysis_service(core_sot: CoreSotService) -> AnalysisService:
         repository,
         source_ref_resolver=CoreSotSourceAdapter(core_sot),
     )
+
+
+def _default_memory_service() -> MemoryService:
+    # Conservative default: auto-promotion is off unless a threshold is set,
+    # so no canonical memory is minted from a guessed value (SoT v1.6.39 D2=B).
+    threshold_raw = os.environ.get("MEMORY_AUTO_PROMOTION_THRESHOLD")
+    auto_threshold = float(threshold_raw) if threshold_raw else None
+
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if not uri:
+        return MemoryService(
+            InMemoryMemoryRepository(),
+            auto_promotion_threshold=auto_threshold,
+        )
+
+    # Imported lazily so the in-memory path needs no pymongo install.
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+    from services.application.app.memory.mongo_repository import (
+        MongoMemoryRepository,
+    )
+
+    repository = MongoMemoryRepository.from_uri(
+        uri,
+        db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME),
+    )
+    return MemoryService(repository, auto_promotion_threshold=auto_threshold)
 
 
 def _default_prompt_template_service() -> PromptTemplateService:
@@ -346,6 +381,7 @@ def create_app(
     service: CoreSotService | None = None,
     analysis_service: AnalysisService | None = None,
     analysis_runner: AnalysisJobRunner | None = None,
+    memory_service: MemoryService | None = None,
     index_sync_outbox: IndexSyncOutboxService | None = None,
     context_search_service: ContextSearchService | None = None,
     vector_index: InMemoryVectorIndexAdapter | None = None,
@@ -353,6 +389,7 @@ def create_app(
     app = FastAPI(title="AI Writing System Application")
     core_sot = service or _default_core_sot_service()
     analysis = analysis_service or _default_analysis_service(core_sot)
+    memory = memory_service or _default_memory_service()
     sync_outbox = index_sync_outbox or _default_index_sync_outbox_service()
     runner = analysis_runner
     if runner is None:
@@ -437,6 +474,23 @@ def create_app(
             "confidence": candidate.confidence,
             "source_ref_ids": list(candidate.source_ref_ids),
             "payload": dict(candidate.payload),
+        }
+
+    def _memory_payload(entry) -> dict[str, object]:
+        return {
+            "id": entry.id,
+            "project_id": entry.project_id,
+            "memory_type": str(entry.memory_type),
+            "status": str(entry.status),
+            "provenance": str(entry.provenance),
+            "confidence": entry.confidence,
+            "source_ref_ids": list(entry.source_ref_ids),
+            "payload": dict(entry.payload),
+            "version": entry.version,
+            "analysis_job_id": entry.analysis_job_id,
+            "source_candidate_id": entry.source_candidate_id,
+            "promotion_mode": str(entry.promotion_mode),
+            "applied_threshold": entry.applied_threshold,
         }
 
     def _source_ref_payload(source_ref) -> dict[str, object]:
@@ -834,6 +888,80 @@ def create_app(
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         return _analysis_run_payload(result)
+
+    @app.post(
+        "/projects/{project_id}/analysis/candidates/{candidate_id}/promote"
+    )
+    async def promote_candidate(
+        project_id: str, candidate_id: str
+    ) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+            candidate = analysis.get_candidate(
+                project_id=project_id, candidate_id=candidate_id
+            )
+            result = memory.promote_candidate(
+                project_id=project_id,
+                candidate=candidate,
+                mode=PromotionMode.MANUAL,
+            )
+        except (AnalysisNotFound, MemoryNotFound, NotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {
+            "memory": _memory_payload(result.memory),
+            "idempotent_replay": result.idempotent_replay,
+        }
+
+    @app.post("/projects/{project_id}/analysis/jobs/{job_id}/auto-promote")
+    async def auto_promote_job(
+        project_id: str, job_id: str
+    ) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+            candidates = analysis.list_candidates(
+                project_id=project_id, job_id=job_id
+            )
+        except (AnalysisNotFound, NotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # ``promoted`` reports only memories newly created by this call. A
+        # candidate already promoted (a re-run of the gate) replays idempotently
+        # and is excluded, so the count stays consistent with the idempotency
+        # semantics instead of growing on every re-call.
+        promoted = []
+        for candidate in candidates:
+            if candidate.status is not AnalysisCandidateStatus.NEEDS_REVIEW:
+                continue
+            result = memory.auto_promote_candidate(
+                project_id=project_id, candidate=candidate
+            )
+            if result is not None and not result.idempotent_replay:
+                promoted.append(_memory_payload(result.memory))
+        return {
+            "auto_promotion_threshold": memory.auto_promotion_threshold,
+            "promoted": promoted,
+        }
+
+    @app.get("/projects/{project_id}/memory")
+    async def list_memory(project_id: str) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {
+            "memory": [
+                _memory_payload(entry)
+                for entry in memory.list_memories(project_id=project_id)
+            ]
+        }
+
+    @app.get("/projects/{project_id}/memory/{memory_id}")
+    async def get_memory(project_id: str, memory_id: str) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+            entry = memory.get_memory(project_id=project_id, memory_id=memory_id)
+        except (MemoryNotFound, NotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _memory_payload(entry)
 
     def _context_item_payload(item) -> dict[str, object]:
         return {

@@ -195,9 +195,44 @@
   - **D5 = A**: taxonomy는 2A 3종 유지, 확장은 후속.
 - 함의: 2A kickoff §4의 "자동 승격 미확정"이 "system-threshold 자동 승격 + 미만 수동"으로 닫혔다. ⑧(`analysis_context` package)는 2B.2, ⑤(Writing canonical 포함)는 후속 slice 종속으로 명문화. 코드 착수는 2B.1부터(이 세션은 결정·문서까지).
 
+## Completed work — Phase 2B.1 canonical MemoryEntry store + candidate 승격 (SoT v1.6.40)
+
+- **목표**: 착수 결정(SoT v1.6.39, D1=A)대로 canonical memory 저장 단위와 `needs_review` candidate 승격 경로를 세운다. compare/action(2B.3)은 아직 켜지 않는다.
+- **새 패키지 `services/application/app/memory/`**:
+  - `models.py` — `MemoryEntry`(canonical 저장 단위), `MemoryStatus`(`canonical` 단일 literal), `PromotionMode`(`manual`/`auto_threshold`), `PromoteMemoryResult`. `memory_type`/`provenance`는 2A enum(`AnalysisCandidateType`/`AnalysisProvenance`)을 재사용한다(D5=A: 2A 3종 유지, 중복 정의 회피). 필드는 candidate 보존분(`payload`/`provenance`/`source_ref_ids`/`confidence`) + 첫 `version=1` + 감사 필드(`analysis_job_id`/`source_candidate_id`/`promotion_mode`/`applied_threshold`).
+  - `repository.py` — `MemoryRepository` Protocol + 경계 예외 `DuplicatePromotionRequest`(2A `DuplicateAnalysisCandidateRequest` 패턴).
+  - `service.py` — `InMemoryMemoryRepository`, `MemoryService`, `MemoryError`/`MemoryNotFound`. 승격 두 경로: (1) `promote_candidate(mode=MANUAL)` = 사용자 승인, confidence 무관 항상 `canonical`; (2) 결정적 threshold gate `evaluate_auto_promotion`/`auto_promote_candidate` = `threshold is not None and confidence >= threshold`일 때만 `auto_threshold`로 승격, 미만은 `None` 반환(candidate `needs_review` 유지, 수동 경로 보존). idempotency는 `(project_id, source_candidate_id)`(같은 candidate 재승격=동일 memory, 첫 승격이 mode/threshold 확정).
+  - `mongo_repository.py` — `MongoMemoryRepository`(`memory_entries` collection). unique index `uniq_memory_candidate_promotion` `(project_id, source_candidate_id)` + query index `memory_entries_by_project`. `DuplicateKeyError→DuplicatePromotionRequest` 매핑으로 race guard.
+- **`analysis/service.py`**: 공개 `get_candidate(project_id, candidate_id)` 추가(HTTP 승격이 candidate를 project 격리로 로드하기 위함). 기존 `_require_candidate` 위 얇은 래퍼.
+- **`main.py` HTTP surface**: `_default_memory_service()`(env `MEMORY_AUTO_PROMOTION_THRESHOLD`, 기본 `None`=자동 승격 off / Mongo·in-memory 분기), `create_app(memory_service=...)` 주입, `_memory_payload`, 엔드포인트 4종:
+  - `POST /projects/{id}/analysis/candidates/{cid}/promote` — 수동 승격.
+  - `POST /projects/{id}/analysis/jobs/{jid}/auto-promote` — job의 `needs_review` candidate에 결정적 gate 적용, `{auto_promotion_threshold, promoted[]}` 반환.
+  - `GET /projects/{id}/memory` / `GET /projects/{id}/memory/{mid}` — 조회(project 격리).
+- **회귀 테스트**(신규 17 + skip-aware Mongo 3):
+  - `tests/test_memory_phase2b.py`(service) — 수동 승격 필드 보존/감사, candidate 단위 idempotency, cross-project 거절, **gate 양방향 lock**: 기본 off는 confidence=1.0도 미승격(over-strict "should NOT fire"), threshold 경계는 confidence==threshold 승격(under-strict), 미만은 미승격+수동은 여전히 canonical(both-direction+수동 경로 보존), auto→manual idempotent(첫 승격 mode 유지).
+  - `tests/test_memory_api.py`(HTTP) — 승격 생성/조회/목록 round-trip, idempotent replay, 404(candidate/project/memory 없음), auto-promote 기본 off·threshold 경계·미만 후 수동.
+  - `tests/test_memory_mongo.py`(skip-aware live) — 승격 memory round-trip(감사 필드 포함), find 기반 replay(2차 write 없음), unique index가 같은 candidate 2차 insert를 `DuplicatePromotionRequest`로 차단.
+- **검증**: `python3 -m pytest -q` → 489 passed / 48 skipped / 95 subtests passed(신규 17 + Mongo 3 skip). HTTP 통합 테스트가 project 생성→candidate seed→승격→조회 실흐름을 ASGI로 구동한다.
+
+### Decisions — 2B.1 slice 경계 (작업자, 오너 확인 대상)
+
+- **D3 entity/scope key 매칭은 2B.1에서 구현하지 않는다.** D3(`memory_type+scope_type+scope_id+정규화 name` 완전일치)은 *새 관찰을 기존 기억에 매칭*하는 연산으로 compare(2B.3)의 소관이다. 2B.1은 store+승격만이므로 유일성/idempotency를 `source_candidate_id`로만 잡고, scope key 산출·충돌 해소(같은 entity 중복 canonical의 병합/업데이트)는 2B.3에 위임한다.
+  - **Why**: 브리프가 2B.1을 create-only/`version=1`로 못박고 "이후 update는 2B.3에서 upsert 연결"로 위임했다. entity 중복 방지는 D3 매칭 = compare = 2B.3을 요구하므로, 2B.1이 다수 canonical을 만들고 2B.3이 나중에 화해하는 순서가 브리프와 정합한다. candidate 페이로드에는 scope_type/scope_id/name 필드가 없어 지금 D3 key를 기계적으로 산출하면 유형별 매핑을 추측해야 한다(CLAUDE.md §1 위반).
+  - **How to apply**: 2B.3 착수 시 D3 key 산출을 candidate→MemoryEntry 매핑과 함께 fixture로 확정하고, 그때 identity 충돌(같은 key 재승격=update/conflict) 경계를 잠근다. 오너가 2B.1에서 이미 scope-key 유일성 강제를 의도했다면 재조정한다(첫 slice 토대라 저비용).
+- **MemoryStatus는 `canonical` 단일.** 미만 candidate는 MemoryEntry가 아니라 `AnalysisCandidate(needs_review)`로 남는다(브리프 "status literal: MemoryEntry는 canonical"). 중간 status(`confirmed`)는 후속 미확정.
+- **자동 승격 threshold 기본 `None`(off).** 브리프 "보수적(거의 off에 가까운 높은 값 또는 명시 설정)"의 가장 보수적 실현. 품질 fixture 전까지 추측값으로 canon을 양산하지 않는다. gate는 주입 가능(`MEMORY_AUTO_PROMOTION_THRESHOLD`)하고 승격 memory에 `applied_threshold`를 기록해 감사 가능하다.
+
+### 독립 검증 후속 보강 — F1/F2 (2026-07-05)
+
+- 독립 검증 판정은 **합격**(차단 없음), non-blocking 2건(`docs/verifications/2026-07-05/phase2b1_memory_canonical_store.md`).
+- **F1(정정) 폐쇄**: SoT 상단 메타 2곳(`계약 버전`, 인덱스 표 `Approved SoT`)이 v1.6.39로 남아 있었다. 원인은 첫 세션의 병렬 호출에서 line 4 버전 bump Edit가 "파일 미읽음" 오류로 실패했고 이후 버전 로그/§Phase 2B 본문만 갱신됐기 때문. 두 메타를 v1.6.40으로 정정했다. (service.py/main.py 주석의 "v1.6.39 D2=B" 인용은 결정 확정 버전이라 정확 — 유지.)
+- **F2(권고) 폐쇄**: `auto_promote_job` 재호출 시 `promoted[]`가 idempotent replay 결과까지 append해 매 호출 count가 커졌다(저장 memory는 1로 정상). `promoted[]` 의미를 "이번 호출 신규 승격만"으로 확정하고, endpoint에서 `not result.idempotent_replay`인 것만 담도록 수정했다. 재호출 회귀 `test_auto_promote_recall_reports_only_newly_promoted`(1차 promoted=1, 2차 promoted=[], 저장 1)를 추가하고 SoT §Phase 2B v1.6.40 bullet에 재호출 시멘틱을 명문화(spec-silent 해소)했다.
+- **F3(오너 판단)**: D3 scope key를 2B.3에 위임하고 2B.1 유일성을 source_candidate_id로만 잡은 slice 경계는 검증에서 합리성만 확인됐다(candidate에 scope 필드 부재 사실 확인). 결함 아님 — 오너 확인 대상으로 유지.
+- 검증: `python3 -m pytest tests/test_memory_api.py -q` 9 passed(신규 1). 전체 재실행은 아래 참조.
+
 ## Next steps
 
-- **다음 구현: Phase 2B.1**(canonical `MemoryEntry` store + candidate 승격, 시스템 threshold gate, 보수적 주입 threshold). 그 뒤 2B.2(⑧ 비교 package = `analysis_context` purpose)/2B.3(compare→action 판정)/2B.4(versioned upsert/재색인), 그리고 ⑤ Writing canonical 포함. 착수 결정 브리프는 `02b-analysis-compare-kickoff-decisions.md`로 확정 완료.
+- **Phase 2B.1 독립 검증 후보**: slice 경계 결정(D3 매칭 2B.3 위임, source_candidate_id idempotency)이 브리프와 정합하는지 오너 확인. 그 뒤 2B.2(⑧ 비교 package = `analysis_context` purpose)/2B.3(compare→action 판정 + D3 scope key)/2B.4(versioned upsert/재색인), 그리고 ⑤ Writing canonical 포함.
 - worker→real Chroma **live smoke**(배포 stack에서 project/draft archive → outbox → worker command → 실제 Chroma record 삭제 확인)는 후속(sandbox 밖 실행 필요).
 - ES lexical 경로(§8, 착수 전 브리프)는 계속 후속.
 - embedding service image size/startup 최적화는 오너 지시로 **최후순위**(GPU 기본 유지). CPU-only torch pin은 보류.
