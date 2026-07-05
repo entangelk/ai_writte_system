@@ -114,6 +114,30 @@ services:
       retries: 20
       start_period: 300s
 
+  chroma:
+    # Persistent vector backend for the Phase 4 real vector index. The tag and
+    # heartbeat path are validated at live bring-up (B.5); the healthcheck below
+    # is a port-open liveness probe to stay independent of the API version path.
+    image: "chromadb/chroma:${CHROMA_VERSION:-0.5.23}"
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
+    ports:
+      - "${CHROMA_PORT:-8003}:8000"
+    volumes:
+      - chroma_data:/data
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(s.connect_ex(('localhost',8000)))"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
 volumes:
   mongo_data:
   embedding_cache:
+  chroma_data:

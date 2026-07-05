@@ -33,6 +33,15 @@
 
 - **B.2 독립 검증 후속(2026-07-05)**: `docs/verifications/2026-07-05/b2_embedding_service_container.md` 판정 **합격(조건 없음)**. round-trip이 vacuous하지 않음을 검증자가 mutation(응답 키 `embedding`→`vector`)으로 2개 재실패(consumer `EmbeddingProviderError` + app `KeyError`)로 재실증했다. 비차단 관찰 2건은 B.2 범위 밖(1024-dim live→B.5, wiring→B.4)이라 B.2 코드는 손대지 않고, 뒤 slice 수용 기준으로 못 박았다: **B.4에 `RemoteEmbeddingProvider(expected_dimensions=1024)` 구성**(배포 런타임 차원 드리프트 즉시 검출), **B.5 live smoke에 실제 1024-dim assert + Chroma 저장/query hit 확인**을 브리프에 추가했다.
 
+### Phase 4 real vector 백엔드 B.3 Chroma persistent adapter
+
+- 변경 파일: `services/application/app/indexing/chroma.py`(신규), `tests/test_chroma_adapter.py`(신규), `docker-compose.yml`, `services/application/requirements.txt`.
+- `ChromaVectorIndexAdapter`가 fake와 같은 `VectorIndexAdapter`(upsert)·`VectorSearchAdapter`(query_similar) seam + rebuild summary가 쓰는 `list_records`를 real Chroma collection 위에 구현한다. 인덱스가 프로세스 재시작에도 살아남는다.
+- adapter는 **주입형 collection**(duck-typed upsert/query/get)을 받아 로직(project scoping, archived 제외, id 정렬, cosine 랭킹, limit, record 복원)을 인메모리 `FakeChromaCollection`으로 chromadb 없이 단위 테스트한다. `connect_chroma_collection(host, port)`가 `chromadb`를 lazy import해 real HttpClient collection(cosine space)을 만든다 — sandbox/제약 환경은 dependency 없이 통과.
+- 직렬화: `record_to_chroma`(record→id/embedding/metadata, 모든 필드 metadata 보존)·`record_from_chroma`(복원, embedding→float 튜플, archived bool 복원). query_similar는 `_active_where`(project + 비archived)로 랭킹 후보를 fake와 동일하게 좁힌다.
+- 인프라: compose `chroma` base 서비스(`chromadb/chroma`, `IS_PERSISTENT=TRUE`, port 8003→8000, `chroma_data` volume, port-open liveness healthcheck — API 버전 경로 비의존). `services/application/requirements.txt`에 `chromadb>=0.5,<0.7` 추가(B.4 wiring이 실제 client 사용). Chroma image tag/heartbeat 경로 정합은 B.5 live bring-up에서 확인.
+- 회귀 9개(`tests/test_chroma_adapter.py`): 직렬화 round-trip 2 + adapter 로직 6(빈 upsert short-circuit, archived 제외+id 정렬, project scope, cosine 랭킹+archived 제외, limit, limit<1 ValueError) + **skip-aware live Chroma 1**(`CHROMA_TEST_URL`+chromadb 설치 시 upsert/query/list + fresh client 재시작 생존; 미충족 시 skip). application→Chroma wiring은 B.4 예약.
+
 ### 다음 slice 방향 오너 결정
 
 - HANDOFF Next Tasks 1의 후보 4종(A 공유 in-process vector index / B real Chroma·ES / C prior-memory purpose / D tool-call planner 전환)을 제시했다.
@@ -96,11 +105,11 @@
 
 - B.1: `python3 -m unittest tests.test_embedding_provider -v` 8개 통과. (독립 검증 합격, 위 User Decisions 후속.)
 - B.2: `python3 -m py_compile services/embedding/app/main.py tests/test_embedding_service.py` 통과. `python3 -m unittest tests.test_embedding_service -v` 5개 통과(app 자체 4 + round-trip 1). `docker compose config` 유효(embedding 서비스/볼륨 파싱). 전체 `python3 -m unittest discover tests` OK(44 skip), `python3 -m pytest -q` 444 passed / 44 skipped, `git diff --check` 통과. 실제 모델(`dragonkue/BGE-m3-ko`) 로드·1024-dim 관통은 컨테이너 기동 필요라 sandbox 밖 후속(B.5/live).
+- B.3: `python3 -m py_compile services/application/app/indexing/chroma.py tests/test_chroma_adapter.py` 통과. `python3 -m unittest tests.test_chroma_adapter -v` 8 passed + 1 live skip(`CHROMA_TEST_URL`/chromadb 미충족). `docker compose config` 유효(chroma 서비스/`chroma_data` 볼륨). 전체 `python3 -m unittest discover tests` OK(45 skip), `python3 -m pytest -q` 452 passed / 45 skipped, `git diff --check` 통과. 실제 Chroma 서버 관통(upsert/query/재시작 생존)은 `CHROMA_TEST_URL`+chromadb 설치 환경에서 live로, image tag/heartbeat 정합은 B.5 bring-up에서 확인.
 
 ## Next steps
 
-- B.3(Chroma persistent adapter): `VectorIndexAdapter`/`VectorSearchAdapter` seam 뒤로 real 영속 Chroma adapter, base compose Chroma 컨테이너 + volume, skip-aware live 통합 테스트(upsert/query/재시작 생존).
-- B.4(wiring): `create_app` env 기반 `RemoteEmbeddingProvider`+Chroma 기본 wiring, `backend="chroma"`, dimension 1024, application→embedding depends_on 연결.
+- B.4(wiring): `create_app` env 기반 `RemoteEmbeddingProvider`(+`expected_dimensions=1024`)+`ChromaVectorIndexAdapter`(`connect_chroma_collection`) 기본 wiring(미구성 시 fake 유지), rebuild summary `backend="chroma"`, application→embedding/chroma depends_on 연결, stale-guard 통합.
 - B.5(deployed live smoke): real Chroma + embedding 서비스 + 실제 12B planner 관통, 재시작 vector hit 생존 — LLM 환경 전용.
 - compose stack(실제 12B) 관통 deployed smoke live 실행: 확장된 `scripts/phase4_context_search_deployed_smoke.py`가 이제 rebuild → context-search 2-step을 돌리므로, 승인된 네트워크에서 실행하면 배포 경로 vector 실hit을 관통 검증한다.
 - real ChromaDB persistent vector adapter / ES lexical 경로(§8, 착수 전 브리프)는 계속 후속.
