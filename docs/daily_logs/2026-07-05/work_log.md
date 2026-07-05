@@ -17,6 +17,20 @@
 
 ## Completed work
 
+### Phase 4 real vector 백엔드 B.1 embedding provider seam
+
+- 변경 파일: `services/application/app/indexing/embedding.py`(신규), `tests/test_embedding_provider.py`(신규).
+- `EmbeddingProvider` Protocol(동기 `embed`)에 맞는 `RemoteEmbeddingProvider`를 추가했다. embedding 호출은 짧아 sync `httpx.Client`로 구현해 indexing/context-search 전반의 async 파급을 피한다(단순성 우선). `POST /embed`에 `{"text": ...}`를 보내고 `{"embedding": [...]}`를 파싱해 float 튜플로 반환한다. optional `expected_dimensions` 검증과 timeout/request/non-200/non-JSON/빈·비배열 embedding/비수치·bool 값을 `EmbeddingProviderError`로 매핑한다(bool은 int subclass라 0.0/1.0 silent coercion을 막기 위해 명시 거부).
+- 회귀 8개(MockTransport). 독립 검증 합격(위 User Decisions 후속 참고).
+
+### Phase 4 real vector 백엔드 B.2 embedding 서비스 컨테이너
+
+- 변경 파일: `services/embedding/__init__.py`·`services/embedding/app/__init__.py`·`services/embedding/app/main.py`·`services/embedding/requirements.txt`·`services/embedding/Dockerfile`(신규), `docker-compose.yml`, `tests/test_embedding_service.py`(신규).
+- `services/embedding/app/main.py`: 주입형 모델의 FastAPI 서비스. `create_app(model=None)`은 model이 주입되면 그대로 쓰고, 없으면 lifespan에서 env 기반 `SentenceTransformerEmbeddingModel`(`dragonkue/BGE-m3-ko`, 1024-dim)을 로드한다. `sentence_transformers` import는 lazy라 단위 테스트(stub 주입)는 무거운 dependency 없이 실행된다. `POST /embed`(`{text}`→`{embedding, dimensions}`), `/health`·`/health/live`, `/health/ready`(model 로드 전 503). 빈 text는 422. model 미로드 시 `/embed`·`/health/ready` 503.
+- `build_embed_response(model, text)`를 단일 응답 shape 소스로 분리해 route와 round-trip 회귀가 공유한다.
+- `Dockerfile`(cache-friendly layer, model은 startup 로드)·compose `embedding` 서비스(base, port 8002, `embedding_cache` HF 볼륨, `/health/ready` healthcheck + 넉넉한 start_period)·`.gitignore`는 기존대로. application→embedding wiring은 B.4 예약(아직 depends_on 미연결).
+- 회귀 5개: 서비스 app 자체 회귀 4개(embed 벡터/차원, health/readiness, 빈 text 422, 미로드 503 — ASGITransport+stub) + **producer↔consumer round-trip 1개**(`build_embed_response` 출력을 B.1 `RemoteEmbeddingProvider`가 그대로 소비 → wire 계약 드리프트 방지, 검증자 관찰 #1을 회귀로 폐쇄). `docker compose config` 유효.
+
 ### 다음 slice 방향 오너 결정
 
 - HANDOFF Next Tasks 1의 후보 4종(A 공유 in-process vector index / B real Chroma·ES / C prior-memory purpose / D tool-call planner 전환)을 제시했다.
@@ -76,8 +90,16 @@
 - 보강: 수동 드라이브를 committed 회귀로 전환했다. `test_real_app_rebuild_populates_shared_index_and_search_hits`가 real `create_app`(공유 index 주입 + fake planner)에 `httpx.ASGITransport`로 확장 smoke를 구동해 `rebuild_records_written>0`, `micro_count>0`(source_quote 실hit), `smoke_succeeded`를 잠근다. 5→6개.
 - non-vacuity mutation: `create_app`에 `vector_index=shared_index` 주입을 빼면 rebuild가 별도 adapter에 쓰여 search가 empty가 되어 `micro_count 0`으로 재실패 → 회귀가 실제 관통을 검증함을 증명. 복원 byte-identical. 전체 475 OK(44 skip)/pytest 431 passed.
 
+## Verification — real vector backend B.1/B.2
+
+- B.1: `python3 -m unittest tests.test_embedding_provider -v` 8개 통과. (독립 검증 합격, 위 User Decisions 후속.)
+- B.2: `python3 -m py_compile services/embedding/app/main.py tests/test_embedding_service.py` 통과. `python3 -m unittest tests.test_embedding_service -v` 5개 통과(app 자체 4 + round-trip 1). `docker compose config` 유효(embedding 서비스/볼륨 파싱). 전체 `python3 -m unittest discover tests` OK(44 skip), `python3 -m pytest -q` 444 passed / 44 skipped, `git diff --check` 통과. 실제 모델(`dragonkue/BGE-m3-ko`) 로드·1024-dim 관통은 컨테이너 기동 필요라 sandbox 밖 후속(B.5/live).
+
 ## Next steps
 
+- B.3(Chroma persistent adapter): `VectorIndexAdapter`/`VectorSearchAdapter` seam 뒤로 real 영속 Chroma adapter, base compose Chroma 컨테이너 + volume, skip-aware live 통합 테스트(upsert/query/재시작 생존).
+- B.4(wiring): `create_app` env 기반 `RemoteEmbeddingProvider`+Chroma 기본 wiring, `backend="chroma"`, dimension 1024, application→embedding depends_on 연결.
+- B.5(deployed live smoke): real Chroma + embedding 서비스 + 실제 12B planner 관통, 재시작 vector hit 생존 — LLM 환경 전용.
 - compose stack(실제 12B) 관통 deployed smoke live 실행: 확장된 `scripts/phase4_context_search_deployed_smoke.py`가 이제 rebuild → context-search 2-step을 돌리므로, 승인된 네트워크에서 실행하면 배포 경로 vector 실hit을 관통 검증한다.
 - real ChromaDB persistent vector adapter / ES lexical 경로(§8, 착수 전 브리프)는 계속 후속.
 - prior-memory(analysis 비교) purpose §8 C 완성(Phase 2B 착수 브리프)도 후속.

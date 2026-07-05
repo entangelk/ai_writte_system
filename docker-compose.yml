@@ -83,5 +83,37 @@ services:
       retries: 5
       start_period: 10s
 
+  embedding:
+    build:
+      context: .
+      dockerfile: services/embedding/Dockerfile
+    environment:
+      # Real local embedding model for the vector backend (dragonkue/BGE-m3-ko,
+      # 1024-dim). Kept as its own container, separate from the llama gateway,
+      # so the vector backend stays independent of the LLM gate.
+      EMBEDDING_MODEL_NAME: "${EMBEDDING_MODEL_NAME:-dragonkue/BGE-m3-ko}"
+      EMBEDDING_NORMALIZE: "${EMBEDDING_NORMALIZE:-true}"
+      # Let the model download reach HuggingFace at first startup.
+      HF_HOME: "/root/.cache/huggingface"
+    ports:
+      - "${EMBEDDING_PORT:-8002}:8002"
+    volumes:
+      # Cache the model across restarts so it is downloaded only once.
+      - embedding_cache:/root/.cache/huggingface
+    healthcheck:
+      # The model loads at startup (lifespan blocks serving until ready), so a
+      # successful probe means the model is loaded. The window is generous
+      # because the first run downloads the model.
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8002/health/ready', timeout=2).status == 200 else 1)"
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 300s
+
 volumes:
   mongo_data:
+  embedding_cache:
