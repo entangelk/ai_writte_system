@@ -230,8 +230,35 @@
 - **F3(오너 판단)**: D3 scope key를 2B.3에 위임하고 2B.1 유일성을 source_candidate_id로만 잡은 slice 경계는 검증에서 합리성만 확인됐다(candidate에 scope 필드 부재 사실 확인). 결함 아님 — 오너 확인 대상으로 유지.
 - 검증: `python3 -m pytest tests/test_memory_api.py -q` 9 passed(신규 1). 전체 재실행은 아래 참조.
 
+## Completed work — Phase 2B.2 착수 결정 브리프 작성 (Draft)
+
+- 2B.1 완료 후 다음 slice(2B.2 prior-memory 검색 + Analysis 비교용 ContextPackage = ⑧)의 착수 결정 브리프 `docs/plans/02b-2-analysis-context-package-decisions.md`를 2A/2B.1 패턴(옵션표+추천)으로 작성했다. 상태 `Draft` — 오너 결정 대기.
+- **헤드라인 긴장(CLAUDE.md §1 명시)**: 착수 브리프 순서는 2B.2→2B.3인데, "candidate와 같은 대상인 기존 기억"의 정밀 선별은 2B.1이 2B.3으로 위임한 D3 scope key 매칭 그 자체다. 해소 프레이밍을 D1로 확정 요청: **2B.2=검색+패키징(coarse 후보군=project+memory_type), 2B.3=판정+scope key 정밀화**로 분리하면 순서가 성립한다.
+- 결정 항목 6개(추천): D1 검색/판정 분리·순서 유지(A), D2 결정적 key 조회만(A, D3=A 정신), D3 단일 schema에 `PriorMemoryItem`(taxonomy 5필수: 값/상태/source/version/비교이유) 추가로 §8 C 완성(A), D4 memory_type 파라미터화·job 유도는 2B.3(A), D5 purpose별 Gate 분리(analysis_context는 candidate 금지 무적용)(A), D6 service 표면 우선·HTTP는 2B.3과(A). literal 신설: `ContextSearchPurpose.ANALYSIS_CONTEXT`, `ContextNeed.PRIOR_MEMORY`.
+- 코드 변경 없음 — 산출물은 결정 브리프.
+
+### User Decisions and Rationale — Phase 2B.2 착수 결정 (2026-07-05, 코드는 2026-07-06)
+
+- 오너가 D1~D6을 결정하고 코드 착수는 다음 날로 미뤘다(결정만 기입). 브리프 `02b-2-analysis-context-package-decisions.md` §Owner decisions에 근거 포함 기입.
+- **D1 = A**(검색+패키징 vs 판정 분리, coarse=project+memory_type). 근거: 소설 글쓰기라 scope/청킹 단위가 예측 가능해 유형 단위 coarse로 근시일 충분. 단 확장성 seam 유지.
+- **D2 = A + semantic seam**. 결정적 조회만 하되 후속 LLM 의미적 검색 쿼리 생성이 같은 인터페이스로 붙도록 검색 backend를 주입 seam으로 둔다.
+- **D3 = A**(단일 schema `PriorMemoryItem`, taxonomy 5필수).
+- **D4 = B(A 포함 hybrid)** — 작업자 D4 확인 요청에 대해: A(memory_type primitive)와 B(job-aware 진입면)는 경쟁 옵션이 아니라 2레이어(B가 A 위에 얹힘)임을 확인. 분석 LLM에 파라미터가 흘러야 하므로 둘 다 필요하고, D6=B(HTTP now)와 자연 정합(HTTP는 job 단위, 내부는 primitive). job 유도는 그 job의 memory_type 집합까지만(coarse); candidate 정밀은 2B.3.
+- **D5 = A**(purpose/단계별 Gate 분기, candidate 금지 무적용). 근거: 각 금지 규칙·단계에 서로 다른 레벨이 분기되어 세부 조정되어야 함(에러 taxonomy 계열 분기와 같은 방향).
+- **D6 = B**(지금 HTTP, job 단위). 근거: 어차피 처리 대상이고 TDD에 필요.
+- 정합성 점검: D1(coarse)+D4(job)+D6(HTTP) 상호 강화, D5는 error taxonomy 방향과 일치, 모순 없음. SoT 반영은 코드 착수(2026-07-06) 시 함께.
+
+### 브리프 독립 검증 후속 — F1/F2 정정 + F3~F5 명시 (2026-07-05)
+
+- 브리프 검증 판정 **조건부 승인**(`docs/verifications/2026-07-05/phase2b2_brief_spec_gate.md`), 착수 전 F1(정정)·F2(오너 확인) 2건.
+- **F1(정정) 폐쇄**: 브리프 내부 D6 엔드포인트 경로 모순. 본문 D6=B 표(옛 `POST /projects/{id}/analysis/context`, job 없음)가 Owner decisions(`.../jobs/{job_id}/context`, job 있음)와 갈렸다 — D4=hybrid(job-aware)와 정합하는 job 단위로 본문 표를 정정. "모순 없음" 주장이 부정확했음을 인정.
+- **F2(오너 확인) 처리 = (a) 문구 정정**: D3 "§8 C 완성" 과대주장을 정정했다. 04-context-package가 2B.2에 위임한 ⑧ 필드는 memory type/**scope**/status/version/검색 이유인데 `PriorMemoryItem`에 scope가 없다(D1=A가 2B.3에 위임). scope를 지금 넣으려면 MemoryEntry에 scope를 추가해야 해 D1=A와 모순되므로, 문구를 **"§8 ⑧ 5필수 완성, scope는 2B.3에서 닫힘"**으로 정정하고 ⑧ 추적을 2B.3까지 열어뒀다. (옵션 b=지금 scope 추가는 D1 역행이라 미채택 — 오너 확인 대상으로 남김.)
+- **F3~F5 착수 명시 항목 추가**(non-blocking): F3 `PriorMemoryItem.value`=MemoryEntry `payload`로 명시(+provenance/confidence는 2B.3 의존 시 확장), F4 self-match 제외(2B.1 auto-promote로 같은 job이 승격한 memory가 자기 자신을 prior로 잡음 → `analysis_job_id==job` 제외 기본값 제안, 회귀로 잠금), F5 Gate 실제 적용 여부는 착수 시 최소 결정(조회가 이미 project-scoped)하고 근거 로깅.
+- **오너 확인 2건(2026-07-05)**: (1) F2 — ⑧ scope를 2B.3으로 미루는 것 확정("역행은 안 된다", D1=A 유지). (2) F4 — self-exclusion(`analysis_job_id==job` 제외) 기본값 승인하되 **"일단 해봐야 안다"는 잠정 입장** → 2B.3 compare 상호작용을 실구현에서 관찰 후 확정. 브리프 F4 문구에 잠정값 명시 반영.
+
 ## Next steps
 
+- **Phase 2B.2 코드 착수(2026-07-06)**: 결정 확정됨(D1=A/D2=A+seam/D3=A/D4=B hybrid/D5=A/D6=B). literal 신설(`ANALYSIS_CONTEXT`/`PRIOR_MEMORY`), `PriorMemoryItem`(taxonomy 5필수), memory_type primitive + job-aware 진입면, `POST /projects/{id}/analysis/jobs/{job_id}/context` HTTP, purpose별 Gate 분기, semantic 검색 주입 seam. 착수 시 SoT 반영.
 - **Phase 2B.1 독립 검증 후보**: slice 경계 결정(D3 매칭 2B.3 위임, source_candidate_id idempotency)이 브리프와 정합하는지 오너 확인. 그 뒤 2B.2(⑧ 비교 package = `analysis_context` purpose)/2B.3(compare→action 판정 + D3 scope key)/2B.4(versioned upsert/재색인), 그리고 ⑤ Writing canonical 포함.
 - worker→real Chroma **live smoke**(배포 stack에서 project/draft archive → outbox → worker command → 실제 Chroma record 삭제 확인)는 후속(sandbox 밖 실행 필요).
 - ES lexical 경로(§8, 착수 전 브리프)는 계속 후속.
