@@ -465,21 +465,40 @@ def rebuild_source_block_index_summary(
     project_id: str,
     snapshot_id: str,
     embedding_dimensions: int = 4,
+    vector_index: InMemoryVectorIndexAdapter | None = None,
+    embeddings: EmbeddingProvider | None = None,
 ) -> SourceBlockIndexRebuildSummary:
-    vector_index = InMemoryVectorIndexAdapter()
+    # When a shared in-process vector index is provided the rebuild accumulates
+    # into it (so context search in the same process can query it); otherwise a
+    # throwaway adapter keeps the CLI script non-persistent. Either way the
+    # summary counts are scoped to this rebuild's snapshot_id, preserving the
+    # per-rebuild "no accumulation" contract (SoT v1.6.23). See
+    # docs/plans/04-shared-vector-index-decisions.md.
+    if vector_index is None:
+        vector_index = InMemoryVectorIndexAdapter()
+    if embeddings is None:
+        embeddings = DeterministicFakeEmbeddingProvider(dimensions=embedding_dimensions)
     service = SourceBlockIndexingService(
         core_sot=core_sot,
-        embeddings=DeterministicFakeEmbeddingProvider(
-            dimensions=embedding_dimensions,
-        ),
+        embeddings=embeddings,
         vector_index=vector_index,
     )
     result = service.rebuild_snapshot_source_block_index(
         project_id=project_id,
         snapshot_id=snapshot_id,
     )
-    all_records = vector_index.list_records(project_id=project_id, include_archived=True)
-    visible_records = vector_index.list_records(project_id=project_id)
+    all_records = tuple(
+        record
+        for record in vector_index.list_records(
+            project_id=project_id, include_archived=True
+        )
+        if record.snapshot_id == snapshot_id
+    )
+    visible_records = tuple(
+        record
+        for record in vector_index.list_records(project_id=project_id)
+        if record.snapshot_id == snapshot_id
+    )
     return SourceBlockIndexRebuildSummary(
         project_id=result.request.project_id,
         snapshot_id=result.request.snapshot_id,

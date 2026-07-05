@@ -216,6 +216,9 @@ def _default_analysis_runner(
 
 def _default_context_search_service(
     core_sot: CoreSotService,
+    *,
+    vector_index: InMemoryVectorIndexAdapter,
+    embeddings: DeterministicFakeEmbeddingProvider,
 ) -> ContextSearchService | None:
     base_url = os.environ.get("LLM_GATEWAY_BASE_URL")
     if not base_url:
@@ -233,12 +236,12 @@ def _default_context_search_service(
         model=os.environ.get("LLM_GATEWAY_MODEL") or None,
         max_tokens=int(os.environ.get("CONTEXT_SEARCH_PLAN_MAX_TOKENS", "1024")),
     )
-    # The vector adapter is the non-persistent fake (real Chroma is a later
-    # slice); with no shared persistent index, vector needs return no hits in a
-    # deployed app, while Mongo-direct needs (current/recent scenes) serve from
-    # the Core SOT. See docs/plans/04-agentic-search-kickoff-decisions.md.
-    embeddings = DeterministicFakeEmbeddingProvider()
-    vector_index = InMemoryVectorIndexAdapter()
+    # The vector adapter is the process-shared in-process fake (real Chroma is a
+    # later slice). It is the same instance the rebuild endpoint writes into, so
+    # a rebuild followed by a context search in the same process yields real
+    # vector hits; the index is non-durable and lost on restart. Mongo-direct
+    # needs (current/recent scenes) serve from the Core SOT.
+    # See docs/plans/04-shared-vector-index-decisions.md.
     indexing = SourceBlockIndexingService(
         core_sot=core_sot,
         embeddings=embeddings,
@@ -303,6 +306,7 @@ def create_app(
     analysis_runner: AnalysisJobRunner | None = None,
     index_sync_outbox: IndexSyncOutboxService | None = None,
     context_search_service: ContextSearchService | None = None,
+    vector_index: InMemoryVectorIndexAdapter | None = None,
 ) -> FastAPI:
     app = FastAPI(title="AI Writing System Application")
     core_sot = service or _default_core_sot_service()
@@ -311,9 +315,20 @@ def create_app(
     runner = analysis_runner
     if runner is None:
         runner = _default_analysis_runner(core_sot=core_sot, analysis=analysis)
+    # A single process-shared in-process vector index is owned here so the
+    # rebuild endpoint writes into the same instance the default context search
+    # reads from. It is created regardless of the planner env (rebuild works
+    # without LLM_GATEWAY_BASE_URL); it is non-durable and lost on restart.
+    # See docs/plans/04-shared-vector-index-decisions.md.
+    shared_vector_index = vector_index if vector_index is not None else InMemoryVectorIndexAdapter()
+    shared_embeddings = DeterministicFakeEmbeddingProvider()
     context_search = context_search_service
     if context_search is None:
-        context_search = _default_context_search_service(core_sot)
+        context_search = _default_context_search_service(
+            core_sot,
+            vector_index=shared_vector_index,
+            embeddings=shared_embeddings,
+        )
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -399,6 +414,8 @@ def create_app(
             core_sot=core_sot,
             project_id=project_id,
             snapshot_id=snapshot_id,
+            vector_index=shared_vector_index,
+            embeddings=shared_embeddings,
         )
         return summary.to_dict(backend=FAKE_VECTOR_BACKEND)
 

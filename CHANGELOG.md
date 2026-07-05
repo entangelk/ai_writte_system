@@ -2,6 +2,8 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-07-05 | SoT v1.6.35: Phase 4 공유 in-process vector index 도입(create_app이 단일 adapter 소유, rebuild가 write·context search가 read → 같은 프로세스 rebuild 후 실제 vector hit; rebuild summary는 snapshot scope로 누적 없음 계약 유지). 오너 결정: 방향 A 채택, rebuild summary 기존 계약 유지 | [work log](docs/daily_logs/2026-07-05/work_log.md) |
+| 2026-07-05 | Phase 4 공유 in-process vector index 결정 브리프 추가(`docs/plans/04-shared-vector-index-decisions.md`) | [work log](docs/daily_logs/2026-07-05/work_log.md) |
 | 2026-07-04 | Phase 4 context search deployed smoke 스크립트(`scripts/phase4_context_search_deployed_smoke.py`) 추가 및 실제 12B stack live 통과(gateway 컨테이너 관통) | [work log](docs/daily_logs/2026-07-04/work_log.md) |
 | 2026-07-04 | SoT v1.6.34: Phase 4 Slice 4.3 context search HTTP API(`POST /projects/{id}/context-search`) + `build_context_package` async wiring + create_app planner 배선 | [work log](docs/daily_logs/2026-07-04/work_log.md) |
 | 2026-07-04 | SoT v1.6.33: Phase 4 Slice 4.2 터미널 JSON LLM planner adapter 구현(`TerminalJsonSearchPlanner` + `context_search_plan_v1` template + strict parse/1회 repair/literal 검증→llm_error) | [work log](docs/daily_logs/2026-07-04/work_log.md) |
