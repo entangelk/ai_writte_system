@@ -102,8 +102,43 @@
 - **live smoke 4 경계 강화(J1 후속)**: `phase2b3_compare_judge_live_smoke.py`가 단일 pair만 다루던 것을 matched-pair 4 경계(update/add_evidence/no_change/conflict) 대표 pair로 확장 — 각 경계에서 12B가 실제 낸 action을 per-boundary JSON으로 출력(J1 empirical signal). `ProviderError`도 clean 처리(`provider_error` status + non-zero exit)해 Gateway down 시 crash 대신 상태 출력. py_compile/`--help` 확인(실실행은 sandbox 밖).
 - 검증: compare 계열 30 passed(신규 ProviderError 회귀 +1 포함), `pytest -q --ignore=tests/test_memory_mongo.py` → **542 passed / 45 skipped**, `git diff --check` 통과.
 
+## Phase 2B.4 — proposal→실제 memory versioned upsert (2026-07-06, SoT v1.6.44)
+
+### 착수 결정 브리프 + 오너 결정
+
+- 2B.4 kickoff 브리프 `docs/plans/02b-4-memory-versioned-upsert-decisions.md`를 작성해 D1~D7 결정을 받았다. 헤드라인 긴장(CLAUDE.md §1): HANDOFF는 "Chroma 재색인(memory→vector)도 이때"라 묶었으나 **memory→vector 색인 자체가 존재하지 않음**(현재 Chroma/embedding은 source_block만 색인)을 조사로 확인해 surface했다 — 재색인은 임베딩 대상·collection·트리거가 전부 신규인 독립 slice 규모.
+- **오너 결정**: D1=A(compare와 분리된 명시 apply, 안전 action 4종만 자동), D2=A(append-only 새 row + supersedes + `superseded` status), D3=추천(update:payload 교체·source union·conf=candidate / add_evidence:payload 보존·source union·conf=max), **D4=A(재색인 분리→2B.5)**, D5=A(`(project,source_candidate_id)` idempotency), D6=A(`POST .../apply`), D7=A(conflict/merge/split review-only).
+
+### 구현
+
+- 변경 파일: `services/application/app/memory/models.py`(`MemoryStatus.SUPERSEDED`·`MemoryEntry.supersedes`), `memory/repository.py`·`memory/service.py`·`memory/mongo_repository.py`(`update_memory` + `_versioned_upsert`/`record_updated_version`/`record_evidence_version` + supersedes round-trip), `analysis/apply.py`(신규 `MemoryApplyService`), `main.py`(apply endpoint·request model·wiring·`_memory_payload` supersedes), `context_search/prior_memory.py`(O1 마커→회귀 문구), `tests/test_memory_apply.py`·`tests/test_analysis_apply_api.py`(신규), `tests/test_analysis_context.py`(O1 회귀), `tests/test_memory_mongo.py`(versioned upsert live round-trip).
+- **versioned upsert(D2/D3)**: `_versioned_upsert`는 idempotency 확인(`find_memory_by_candidate`) → target canonical/타입 검증 → 새 canonical(version=prev+1, supersedes=prev.id) put → 이전 entry `superseded` 전이(append-only: 새 version 먼저 삽입 후 이전 supersede). update=payload를 candidate로 교체·conf=candidate·prov=candidate, add_evidence=payload 보존·conf=max·prov=prev, 둘 다 source_ref_ids order-preserving union.
+- **apply 오케스트레이션(D1)**: `MemoryApplyService.apply_proposals`가 proposal별로 no_change→쓰기 없음, conflict→skipped_review(D7), create→`promote_candidate(MANUAL)` 재사용, update/add_evidence→versioned upsert. AI 없음(라벨은 2B.3 proposal에서 확정).
+- **HTTP(D6)**: `POST /projects/{id}/analysis/jobs/{job_id}/apply`가 검토한 proposal을 body(`{proposals:[{candidate_id,action,matched_memory_id?}]}`)로 받아 반영하고 action별 결과(created/versioned/no_change/skipped_review)를 반환한다. unknown action/candidate 400, missing matched memory·cross-project 404. deterministic이라 env/injection seam 없음.
+- **2B.2 O1 폐쇄**: `MemoryStatus.SUPERSEDED` 도입으로 canonical-only prior 필터의 non-canonical 제외 방향이 처음으로 테스트 가능해졌다. `test_superseded_memories_excluded_from_prior_memory` 추가 + 필터 mutation으로 non-vacuity 재실증(필터 무력화 시 재실패, 파일 복원). `prior_memory.py`의 O1 마커 주석을 회귀 참조로 교체.
+
+### 회귀 19개 + 검증
+
+- `tests/test_memory_apply.py`(10): create version=1, create idempotent replay, update(payload 교체·source union·conf/prov·prior superseded·이전 version 불변 보존), update matched 없음→`MissingMatchedMemory`, 타입 불일치→`MemoryError`, update idempotent replay(3번째 version 미생성), add_evidence(payload 보존·source union·conf=max), no_change 무쓰기, conflict skipped_review 무쓰기, unknown candidate→`UnknownCandidate`.
+- `tests/test_analysis_apply_api.py`(8): create 200, update 200(supersede·status 전이), 재post idempotent, no_change 무쓰기, unknown action 400, candidate 부재 400, matched memory 부재 404, missing project/job 404.
+- `tests/test_analysis_context.py`(+1): O1 superseded 제외(양방향 1케이스).
+- 검증: `python3 -m unittest tests.test_memory_apply tests.test_analysis_apply_api` → 18 OK. O1 mutation 재실증(exit 1, 복원). `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **561 passed / 45 skipped**. `git diff --check` 통과.
+- **live Mongo**: throwaway `mongo:7`(port 27055)로 `CORE_SOT_TEST_MONGO_URI=... python3 -m unittest tests.test_memory_mongo` → 4 OK(신규 `test_versioned_update_round_trips_supersedes_and_status` 포함, `update_memory` replace_one + supersedes/superseded round-trip 실검증). 컨테이너 정리 완료. (기본 sandbox의 localhost:27017 auth 이슈로 인한 mongo 3(+1) error는 종전과 동일한 환경 문제, 내 변경 무관.)
+
+### 2B.4 검증 후속 보강 (독립 검증 조건부 합격 → 폐쇄)
+
+- 독립 검증 `docs/verifications/2026-07-06/phase_2b_4_versioned_upsert.md`는 **조건부 합격**. 차단 1건(non-canonical target 거절 분기 회귀 부재, boundary matrix #11 빈 셀)과 비차단 관찰(§3/O2/O3)을 보강했다.
+- **차단 폐쇄(#11)**: `test_update_of_superseded_target_rejected` 추가 — 서로 다른 candidate 2개가 같은 prior를 순차 update → 두 번째가 superseded(non-canonical) target에 도달 → `MemoryError`. 검증자가 지적한 "도달 가능하나 미잠금" 분기를 실사용 경로로 잠갔다. mutation 재실증: `if target.status is not CANONICAL` guard 무력화 시 재실패(NO RAISE).
+- **§3(update confidence over-strict)**: `test_update_takes_candidate_confidence_even_when_lower` 추가 — prior 0.8 > candidate 0.4에서 update 결과 conf=0.4(candidate)임을 잠가 max 규칙과 구분. mutation 재실증: `confidence=max(...)`로 바꾸면 재실패.
+- **O2(add_evidence replay)**: `test_add_evidence_is_idempotent_replay` 추가 — update replay와 공유하는 `_versioned_upsert` 상단 replay 체크를 add_evidence 분기에서도 명시(3번째 version 미생성).
+- **O3(MissingMatchedMemory-None HTTP)**: `test_update_without_matched_memory_returns_400` 추가 — matched_memory_id 생략(None) 시 HTTP 400(비존재 id→404와 구분).
+- **O4(브리프 D7 표현)**: 브리프 D7의 "conflict/merge/split review-only" 표현이 살짝 과대(merge/split은 2B.3 미산출이라 apply에 도달 못 하고 unknown action 400). 브리프 D7 본문에 "merge/split은 2B.3 미산출이므로 실제로는 conflict만 apply에 도달"을 명시(코드/SoT는 종전대로 정합).
+- 재검증: `python3 -m unittest tests.test_memory_apply tests.test_analysis_apply_api` → 22 OK. non-canonical/confidence guard mutation 각각 재실패 확인(복원). `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **565 passed / 45 skipped**. `git diff --check` 통과. 회귀 19→23.
+
 ## Next steps
 
+- **Phase 2B.5 — memory→vector 재색인**(D4가 분리): apply가 만든 canonical memory version을 vector index에 반영. memory 색인이 미존재라 임베딩 대상 payload·별도 collection·재색인 트리거(inline vs Phase 3B outbox/worker 패턴) 결정 브리프 필요.
+- **conflict/merge/split review queue 영속화**(2B.4는 skipped 반환까지), event/open_question 의미적 entity resolution(D2 semantic seam), ⑤ Writing canonical 포함.
 - **Phase 2B.3.2 live smoke 실행**(sandbox 밖): `scripts/phase2b3_compare_judge_live_smoke.py`(이제 matched-pair 4 경계 커버)를 실제 llama.cpp 12B endpoint로 돌려 각 경계에서 12B가 내는 action을 관찰·기록. 의미 판정 품질(update↔add_evidence↔no_change↔conflict 구분)이 충분하면 해당 결과로 판정 경계 회귀를 잠그고, 부족하면 prompt `analysis_compare_v1` 개정.
 - **Phase 2B.4**: proposal→실제 memory versioned upsert/재색인(Chroma), `MemoryStatus` 두 번째 literal(superseded 등) 도입 시 prior_memory canonical-only 필터의 non-canonical 제외 회귀(2B.2 O1) 추가.
 - ⑤ Writing canonical 포함(Gate candidate 금지를 "canonical 허용 + 미승인 candidate 금지"로 정련), event/open_question 의미적 resolution(D2 semantic seam).
