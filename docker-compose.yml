@@ -35,12 +35,23 @@ services:
       LLM_GATEWAY_BASE_URL: "http://gateway:8001"
       LLM_GATEWAY_MODEL: "${LLAMA_DEFAULT_MODEL:-gemma-local}"
       LLM_GATEWAY_TIMEOUT_SECONDS: "${LLAMA_TIMEOUT_SECONDS:-120}"
+      # Real vector backend (B.4): the embedding service and Chroma. When these
+      # are set the shared vector index is the persistent Chroma backend with
+      # real 1024-dim embeddings; without them the app falls back to the fake.
+      EMBEDDING_SERVICE_URL: "http://embedding:8002"
+      EMBEDDING_DIMENSIONS: "${EMBEDDING_DIMENSIONS:-1024}"
+      CHROMA_HOST: "chroma"
+      CHROMA_PORT: "8000"
     ports:
       - "${APPLICATION_PORT:-8000}:8000"
     depends_on:
       mongo:
         condition: service_healthy
       gateway:
+        condition: service_healthy
+      embedding:
+        condition: service_healthy
+      chroma:
         condition: service_healthy
     healthcheck:
       # The slim image has no curl; probe /health with stdlib urllib instead.
@@ -83,5 +94,64 @@ services:
       retries: 5
       start_period: 10s
 
+  embedding:
+    build:
+      context: .
+      dockerfile: services/embedding/Dockerfile
+    environment:
+      # Real local embedding model for the vector backend (dragonkue/BGE-m3-ko,
+      # 1024-dim). Kept as its own container, separate from the llama gateway,
+      # so the vector backend stays independent of the LLM gate.
+      EMBEDDING_MODEL_NAME: "${EMBEDDING_MODEL_NAME:-dragonkue/BGE-m3-ko}"
+      EMBEDDING_NORMALIZE: "${EMBEDDING_NORMALIZE:-true}"
+      # Let the model download reach HuggingFace at first startup.
+      HF_HOME: "/root/.cache/huggingface"
+    ports:
+      - "${EMBEDDING_PORT:-8002}:8002"
+    volumes:
+      # Cache the model across restarts so it is downloaded only once.
+      - embedding_cache:/root/.cache/huggingface
+    healthcheck:
+      # The model loads at startup (lifespan blocks serving until ready), so a
+      # successful probe means the model is loaded. The window is generous
+      # because the first run downloads the model.
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8002/health/ready', timeout=2).status == 200 else 1)"
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 300s
+
+  chroma:
+    # Persistent vector backend for the Phase 4 real vector index. The tag and
+    # heartbeat path are validated at live bring-up (B.5); the healthcheck below
+    # is a port-open liveness probe to stay independent of the API version path.
+    image: "chromadb/chroma:${CHROMA_VERSION:-0.5.23}"
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
+    ports:
+      - "${CHROMA_PORT:-8003}:8000"
+    volumes:
+      # chromadb/chroma:0.5.23 stores persistent data under /chroma/chroma when
+      # IS_PERSISTENT=TRUE. Mount that path so container recreation does not
+      # lose the vector index.
+      - chroma_data:/chroma/chroma
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(s.connect_ex(('localhost',8000)))"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
 volumes:
   mongo_data:
+  embedding_cache:
+  chroma_data:

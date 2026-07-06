@@ -13,11 +13,35 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from services.application.app.indexing.service import (
+    CHROMA_VECTOR_BACKEND,
+    FAKE_VECTOR_BACKEND,
     IndexSyncWorker,
     RecordingArchiveIndexMutationAdapter,
 )
 
 DEFAULT_MONGO_DB = "ai_writing_system"
+
+
+def _build_archive_adapter() -> tuple[object, str]:
+    # Real persistent Chroma when CHROMA_HOST is set (same env convention as
+    # create_app's B.4 wiring), else the recording-only fake so the worker still
+    # exercises the status/log lifecycle without a Chroma dependency. chromadb is
+    # imported lazily inside connect_chroma_collection.
+    host = os.environ.get("CHROMA_HOST")
+    if not host:
+        return RecordingArchiveIndexMutationAdapter(), FAKE_VECTOR_BACKEND
+    from services.application.app.indexing.chroma import (
+        DEFAULT_COLLECTION_NAME,
+        ChromaArchiveIndexMutationAdapter,
+        connect_chroma_collection,
+    )
+
+    collection = connect_chroma_collection(
+        host=host,
+        port=int(os.environ.get("CHROMA_PORT", "8000")),
+        collection_name=os.environ.get("CHROMA_COLLECTION", DEFAULT_COLLECTION_NAME),
+    )
+    return ChromaArchiveIndexMutationAdapter(collection), CHROMA_VECTOR_BACKEND
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -47,12 +71,14 @@ def run_worker(args: argparse.Namespace) -> dict[str, Any]:
         args.mongo_uri,
         db_name=args.mongo_db,
     )
+    archive_adapter, archive_backend = _build_archive_adapter()
     worker = IndexSyncWorker(
         repository=repository,
-        archive_adapter=RecordingArchiveIndexMutationAdapter(),
+        archive_adapter=archive_adapter,
     )
     summary = worker.run_once(limit=args.limit)
     return {
+        "archive_backend": archive_backend,
         "entries_claimed": summary.entries_claimed,
         "entries_succeeded": summary.entries_succeeded,
         "entries_failed": summary.entries_failed,

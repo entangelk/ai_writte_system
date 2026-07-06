@@ -425,6 +425,11 @@ class AnalysisService:
         self._require_job(project_id, job_id)
         return self._repo.list_candidates_for_job(project_id, job_id)
 
+    def get_candidate(
+        self, *, project_id: str, candidate_id: str
+    ) -> AnalysisCandidate:
+        return self._require_candidate(project_id, candidate_id)
+
     def _validate_candidate_request(
         self,
         *,
