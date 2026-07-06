@@ -1,6 +1,6 @@
 # Phase 2B.2 착수 결정 브리프 — prior-memory 검색과 Analysis 비교용 ContextPackage (⑧)
 
-상태: `Resolved (2026-07-05) — D1=A, D2=A(semantic seam), D3=A, D4=B(A 포함 hybrid), D5=A, D6=B. 브리프 검증 F1(경로)·F2(§8 ⑧ 완성 문구) 정정 반영, F3/F4/F5는 착수 명시 항목. 코드 착수는 2026-07-06.`
+상태: `Implemented (2026-07-06, SoT v1.6.41) — D1=A, D2=A(semantic seam), D3=A, D4=B(A 포함 hybrid), D5=A, D6=B. 브리프 검증 F1(경로)·F2(§8 ⑧ 완성 문구) 정정 반영, F3/F4/F5 착수 명시 항목 모두 반영(F3 value=payload, F4 exclude_job_id self-exclusion 잠정값, F5 조회 격리로 충분·Gate는 Writing-item 누출만). 코드는 services/application/app/context_search/prior_memory.py + tests/test_analysis_context{,_api}.py.`
 기준 문서: [`../system-contract-sot.md`](../system-contract-sot.md), [`02b-analysis-compare-kickoff-decisions.md`](02b-analysis-compare-kickoff-decisions.md) §D6, [`analysis-memory-taxonomy.md`](analysis-memory-taxonomy.md) §비교용 ContextPackage, [`04-agentic-search-kickoff-decisions.md`](04-agentic-search-kickoff-decisions.md) §8, [`04-context-package-completion-decisions.md`](04-context-package-completion-decisions.md), [`02-analysis-pipeline.md`](02-analysis-pipeline.md) §Phase 2B
 목적: Phase 2B.2(기존 canonical 기억을 검색해 비교용 package로 묶는 단계) 구현 전에 추측 구현을 피하기 위한 최소 결정을 한 화면에 모은다. Phase 2A/2B.1 패턴대로 첫 slice를 최소로 좁히고, action 판정(2B.3)과 versioned upsert(2B.4)는 이 slice에서 켜지 않는다.
 
