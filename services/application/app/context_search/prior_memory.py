@@ -79,10 +79,9 @@ class DeterministicPriorMemoryBackend:
         results = [
             entry
             # The canonical-only filter is a contract lock ("prior canonical
-            # memories"). Its non-canonical-excluded direction cannot be
-            # regression-tested today because MemoryStatus is CANONICAL-only;
-            # when 2B.4 introduces a second status (e.g. superseded/obsolete),
-            # add test_noncanonical_memories_excluded_from_prior_memory (O1).
+            # memories"). Phase 2B.4 introduced MemoryStatus.SUPERSEDED, so the
+            # non-canonical-excluded direction is now regression-tested by
+            # test_superseded_memories_excluded_from_prior_memory (2B.2 O1).
             for entry in self._memory.list_memories(project_id=project_id)
             if entry.status is MemoryStatus.CANONICAL
             and entry.memory_type in wanted

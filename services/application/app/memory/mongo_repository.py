@@ -93,6 +93,9 @@ class MongoMemoryRepository:
                 "candidate already promoted to a memory entry"
             ) from exc
 
+    def update_memory(self, entry: MemoryEntry) -> None:
+        self._memories.replace_one({"_id": entry.id}, _memory_doc(entry))
+
     def list_memories_for_project(
         self, project_id: str
     ) -> tuple[MemoryEntry, ...]:
@@ -125,6 +128,7 @@ def _memory_doc(entry: MemoryEntry) -> dict[str, Any]:
                 "scope_id": entry.scope.scope_id,
             }
         ),
+        "supersedes": entry.supersedes,
     }
 
 
@@ -152,4 +156,5 @@ def _to_memory(doc: dict[str, Any]) -> MemoryEntry:
                 scope_id=scope_doc["scope_id"],
             )
         ),
+        supersedes=doc.get("supersedes"),
     )

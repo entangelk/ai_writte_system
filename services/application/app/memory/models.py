@@ -22,6 +22,9 @@ from services.application.app.memory.scope import MemoryScope
 
 class MemoryStatus(StrEnum):
     CANONICAL = "canonical"
+    # Phase 2B.4: a versioned upsert (update/add_evidence) mints a new canonical
+    # version and marks the prior entry superseded, preserving it immutably.
+    SUPERSEDED = "superseded"
 
 
 class PromotionMode(StrEnum):
@@ -47,6 +50,9 @@ class MemoryEntry:
     # Phase 2B.3: deterministic identity key (character → normalized name;
     # event/open_question → None). Computed at promotion; used by compare.
     scope: MemoryScope | None = None
+    # Phase 2B.4: id of the memory version this entry replaced (update/
+    # add_evidence). ``None`` for a first (``version=1``) canonical entry.
+    supersedes: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

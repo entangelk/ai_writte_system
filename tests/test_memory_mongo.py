@@ -113,6 +113,48 @@ class MongoMemoryRepositoryTest(unittest.TestCase):
             len(MemoryService(self.repo).list_memories(project_id="project-1")), 1
         )
 
+    def test_versioned_update_round_trips_supersedes_and_status(self):
+        # Phase 2B.4: a versioned update inserts a new canonical version and
+        # supersedes the prior entry. A fresh service must read back the new
+        # version's supersedes link and the prior entry's superseded status.
+        prior_cand = _candidate(candidate_id="candidate-prior", confidence=0.5)
+        prior = MemoryService(self.repo).promote_candidate(
+            project_id="project-1", candidate=prior_cand, mode=PromotionMode.MANUAL
+        ).memory
+
+        update_cand = AnalysisCandidate(
+            id="candidate-update",
+            project_id="project-1",
+            job_id="analysis-job-2",
+            task_id="analysis-task-2",
+            candidate_type=AnalysisCandidateType.CHARACTER_OBSERVATION,
+            action=AnalysisCandidateAction.CREATE,
+            status=AnalysisCandidateStatus.NEEDS_REVIEW,
+            provenance=AnalysisProvenance.SOURCE_OBSERVED,
+            confidence=0.9,
+            source_ref_ids=("source-ref-2",),
+            payload={"name": "민아", "observation": "민아가 진실을 알았다."},
+        )
+        result = MemoryService(self.repo).record_updated_version(
+            project_id="project-1",
+            candidate=update_cand,
+            target_memory_id=prior.id,
+        )
+
+        reread = MemoryService(self.repo)
+        new_entry = reread.get_memory(
+            project_id="project-1", memory_id=result.memory.id
+        )
+        self.assertEqual(new_entry.version, 2)
+        self.assertEqual(new_entry.status, MemoryStatus.CANONICAL)
+        self.assertEqual(new_entry.supersedes, prior.id)
+        self.assertEqual(
+            new_entry.source_ref_ids, ("source-ref-1", "source-ref-2")
+        )
+        old_entry = reread.get_memory(project_id="project-1", memory_id=prior.id)
+        self.assertEqual(old_entry.status, MemoryStatus.SUPERSEDED)
+        self.assertIsNone(old_entry.supersedes)
+
     def test_unique_index_rejects_second_promotion_of_same_candidate(self):
         # Directly exercise the race guard: a second insert for the same
         # (project_id, source_candidate_id) must surface DuplicatePromotionRequest

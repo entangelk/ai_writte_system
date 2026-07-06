@@ -33,8 +33,15 @@ from services.application.app.analysis.service import (
     InvalidAnalysisCandidate,
     InvalidCandidateSource,
 )
+from services.application.app.analysis.apply import (
+    MemoryApplyError,
+    MemoryApplyService,
+    MissingMatchedMemory,
+)
 from services.application.app.analysis.compare import (
+    ActionProposal,
     AnalysisCompareService,
+    CompareAction,
     CompareJudgeNotConfigured,
     InvalidJudgeResult,
 )
@@ -47,6 +54,7 @@ from services.llm_gateway.app.errors import ProviderError
 from services.application.app.memory.models import PromotionMode
 from services.application.app.memory.service import (
     InMemoryMemoryRepository,
+    MemoryError,
     MemoryNotFound,
     MemoryService,
 )
@@ -409,6 +417,16 @@ class ContextPositionBody(BaseModel):
     version_id: str
 
 
+class ApplyProposalBody(BaseModel):
+    candidate_id: str
+    action: str
+    matched_memory_id: str | None = None
+
+
+class ApplyMemoryRequest(BaseModel):
+    proposals: list[ApplyProposalBody]
+
+
 class ContextSearchHttpRequest(BaseModel):
     query: str
     needs: list[str]
@@ -442,6 +460,10 @@ def create_app(
     # return 503 while no-match (create) and duplicate-canonical (conflict)
     # proposals are served deterministically.
     compare = compare_service or _default_compare_service(memory)
+    # Phase 2B.4: apply safe compare actions to the canonical store. Deterministic
+    # writes only (no LLM), so no env/injection seam is needed
+    # (docs/plans/02b-4-memory-versioned-upsert-decisions.md, D1=A).
+    apply_service = MemoryApplyService(memory_service=memory)
     sync_outbox = index_sync_outbox or _default_index_sync_outbox_service()
     runner = analysis_runner
     if runner is None:
@@ -544,6 +566,7 @@ def create_app(
             "promotion_mode": str(entry.promotion_mode),
             "applied_threshold": entry.applied_threshold,
             "scope": _scope_payload(entry.scope),
+            "supersedes": entry.supersedes,
         }
 
     def _scope_payload(scope) -> dict[str, object] | None:
@@ -1129,6 +1152,77 @@ def create_app(
         return {
             "job_id": job.id,
             "proposals": [_action_proposal_payload(p) for p in proposals],
+        }
+
+    def _applied_proposal_payload(applied) -> dict[str, object]:
+        return {
+            "candidate_id": applied.candidate_id,
+            "action": applied.action.value,
+            "outcome": applied.outcome.value,
+            "memory_id": applied.memory_id,
+            "superseded_memory_id": applied.superseded_memory_id,
+            "version": applied.version,
+            "idempotent_replay": applied.idempotent_replay,
+        }
+
+    @app.post("/projects/{project_id}/analysis/jobs/{job_id}/apply")
+    async def analysis_apply_endpoint(
+        project_id: str, job_id: str, request: ApplyMemoryRequest
+    ) -> dict[str, object]:
+        # Phase 2B.4 (D1=A/D6=A): apply reviewed compare proposals to the
+        # canonical memory store. Deterministic writes only — the proposals
+        # carry the already-decided action labels (no LLM here). Safe actions
+        # (create/update/add_evidence/no_change) are applied; conflict is
+        # review-only (D7).
+        try:
+            _require_project_exists(project_id)
+            job = analysis.get_job(project_id=project_id, job_id=job_id)
+            candidates = analysis.list_candidates(
+                project_id=project_id, job_id=job_id
+            )
+        except (AnalysisNotFound, NotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        proposals: list[ActionProposal] = []
+        by_id = {candidate.id: candidate for candidate in candidates}
+        for body in request.proposals:
+            candidate = by_id.get(body.candidate_id)
+            if candidate is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"candidate {body.candidate_id} is not part of this job",
+                )
+            try:
+                action = CompareAction(body.action)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400, detail=f"unknown action {body.action!r}"
+                ) from exc
+            proposals.append(
+                ActionProposal(
+                    candidate_id=body.candidate_id,
+                    candidate_type=candidate.candidate_type,
+                    action=action,
+                    matched_memory_id=body.matched_memory_id,
+                    rationale="",
+                )
+            )
+
+        try:
+            applied = apply_service.apply_proposals(
+                project_id=project_id,
+                proposals=tuple(proposals),
+                candidates=candidates,
+            )
+        except MemoryNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (MissingMatchedMemory, MemoryError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except MemoryApplyError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "job_id": job.id,
+            "applied": [_applied_proposal_payload(a) for a in applied],
         }
 
     def _context_item_payload(item) -> dict[str, object]:
