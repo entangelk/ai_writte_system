@@ -93,9 +93,18 @@
 - **판정 경계 심화 + live smoke 실행은 후속**: adapter는 parse/repair를 잠갔고, update↔add_evidence↔no_change↔conflict 의미 판정 자체의 fixture 심화와 실제 12B 관통 live smoke(`scripts/phase2b3_compare_judge_live_smoke.py`, sandbox 밖 실행 필요)는 다음이다.
 - 검증: `python3 -m unittest tests.test_analysis_compare_judge tests.test_analysis_compare_api` → 20 OK. `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **541 passed / 45 skipped**. `git diff --check` 통과.
 
+## Phase 2B.3.2 독립 검증 후속 보강 (검증자 직접, 2026-07-06)
+
+2B.3.2 독립 검증(`docs/verifications/2026-07-06/phase_2b_3_2_compare_judge.md`, PASS)이 발견한 2건을 검증자가 직접 보강했다(작업자 교체). 변경 파일: `services/application/app/main.py`, `tests/test_analysis_compare_api.py`, `scripts/phase2b3_compare_judge_live_smoke.py`.
+
+- **ProviderError 누출 수정(compare endpoint)**: `GatewayGenerateProvider.generate`가 Gateway 장애(timeout/unavailable/5xx) 시 raise하는 `ProviderError`가 `analysis_compare_endpoint`에서 uncaught → HTTP 500 누출임을 재현으로 확인(매칭 pair의 judge turn에서 발화; 재현은 prior를 별도 job에 넣어 D6 self-exclusion을 우회). v1.6.34 오류 taxonomy(LLM/Gateway error→502)가 이미 정한 매핑을 이 endpoint가 누락한 결함이라 `except ProviderError → 502`를 추가(`main.py`, `ProviderError` import 포함). 회귀 `test_provider_error_during_judge_maps_to_502`(under-strict: catch 제거 시 500 재누출로 재실패; over-strict는 기존 happy-path 200/라벨 회귀가 cover).
+- **패턴 수준 부채(수정 X, 추적)**: 같은 `ProviderError` 누출이 `/context-search`(planner 4.2)와 2A extraction adapter에도 있다(`provider.generate` bare 호출, global exception_handler 부재). 2B.3.2 범위 밖이라 이번엔 compare만 고치고 sibling은 HANDOFF Next Tasks에 추적.
+- **live smoke 4 경계 강화(J1 후속)**: `phase2b3_compare_judge_live_smoke.py`가 단일 pair만 다루던 것을 matched-pair 4 경계(update/add_evidence/no_change/conflict) 대표 pair로 확장 — 각 경계에서 12B가 실제 낸 action을 per-boundary JSON으로 출력(J1 empirical signal). `ProviderError`도 clean 처리(`provider_error` status + non-zero exit)해 Gateway down 시 crash 대신 상태 출력. py_compile/`--help` 확인(실실행은 sandbox 밖).
+- 검증: compare 계열 30 passed(신규 ProviderError 회귀 +1 포함), `pytest -q --ignore=tests/test_memory_mongo.py` → **542 passed / 45 skipped**, `git diff --check` 통과.
+
 ## Next steps
 
-- **Phase 2B.3.2 live smoke 실행**(sandbox 밖): `scripts/phase2b3_compare_judge_live_smoke.py`를 실제 llama.cpp 12B endpoint로 돌려 매칭 pair가 유효 action JSON을 내는지 확인. 판정 경계(같은 subject의 update vs add_evidence vs no_change vs conflict) 심화 fixture도 이때 함께.
+- **Phase 2B.3.2 live smoke 실행**(sandbox 밖): `scripts/phase2b3_compare_judge_live_smoke.py`(이제 matched-pair 4 경계 커버)를 실제 llama.cpp 12B endpoint로 돌려 각 경계에서 12B가 내는 action을 관찰·기록. 의미 판정 품질(update↔add_evidence↔no_change↔conflict 구분)이 충분하면 해당 결과로 판정 경계 회귀를 잠그고, 부족하면 prompt `analysis_compare_v1` 개정.
 - **Phase 2B.4**: proposal→실제 memory versioned upsert/재색인(Chroma), `MemoryStatus` 두 번째 literal(superseded 등) 도입 시 prior_memory canonical-only 필터의 non-canonical 제외 회귀(2B.2 O1) 추가.
 - ⑤ Writing canonical 포함(Gate candidate 금지를 "canonical 허용 + 미승인 candidate 금지"로 정련), event/open_question 의미적 resolution(D2 semantic seam).
 - 곁가지(막힘/저우선): worker→real Chroma live smoke(sandbox 밖), ES lexical(브리프 필요), embedding 이미지 최적화(최후순위).
