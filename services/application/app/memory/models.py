@@ -17,6 +17,7 @@ from services.application.app.analysis.models import (
     AnalysisCandidateType,
     AnalysisProvenance,
 )
+from services.application.app.memory.scope import MemoryScope
 
 
 class MemoryStatus(StrEnum):
@@ -43,6 +44,9 @@ class MemoryEntry:
     source_candidate_id: str
     promotion_mode: PromotionMode
     applied_threshold: float | None
+    # Phase 2B.3: deterministic identity key (character → normalized name;
+    # event/open_question → None). Computed at promotion; used by compare.
+    scope: MemoryScope | None = None
 
 
 @dataclass(frozen=True, slots=True)

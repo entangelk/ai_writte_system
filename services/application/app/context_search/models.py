@@ -14,6 +14,7 @@ from typing import Any, Mapping
 from services.application.app.analysis.models import AnalysisCandidateType
 from services.application.app.indexing.models import IndexPointer
 from services.application.app.memory.models import MemoryStatus
+from services.application.app.memory.scope import MemoryScope
 
 
 CONTEXT_PACKAGE_STATUS_CANDIDATE = "candidate"
@@ -138,6 +139,9 @@ class PriorMemoryItem:
     version: int
     source_ref_ids: tuple[str, ...]
     match_reason: str
+    # Phase 2B.3: deterministic identity scope (character → name; else None).
+    # Completes §8 ⑧ (memory type/scope/status/version/retrieval reason).
+    scope: MemoryScope | None = None
 
 
 @dataclass(frozen=True, slots=True)

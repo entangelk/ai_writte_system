@@ -143,6 +143,7 @@ def _prior_memory_item(entry: MemoryEntry) -> PriorMemoryItem:
         # memory shares the requested candidate group (memory_type). Semantic
         # match reasons arrive with the semantic backend (D2 seam).
         match_reason=f"memory_type matches {entry.memory_type.value}",
+        scope=entry.scope,
     )
 
 
