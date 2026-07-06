@@ -1,13 +1,16 @@
 import asyncio
+import json
 import unittest
 
 import httpx
 
+import services.application.app.main as main_module
 from services.application.app.analysis.compare import (
     AnalysisCompareService,
     CompareAction,
     JudgeResult,
 )
+from services.llm_gateway.app.provider import GenerationResult
 from services.application.app.analysis.models import (
     AnalysisCandidateAction,
     AnalysisCandidateType,
@@ -203,6 +206,70 @@ class AnalysisCompareApiTest(unittest.TestCase):
             listed[0]["scope"],
             {"scope_type": "character", "scope_id": "ariel song"},
         )
+
+    def test_env_configured_default_factory_wires_real_judge(self):
+        # 2B.3.2 wiring: with LLM_GATEWAY_BASE_URL set, the default compare
+        # factory builds a real TerminalJsonCompareJudge, and a matched pair is
+        # labeled through the adapter (fake provider stands in for the Gateway).
+        class _FakeProvider:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def generate(self, request):
+                return GenerationResult(
+                    model="fake",
+                    content=json.dumps({"action": "update", "rationale": "refines"}),
+                    finish_reason="stop",
+                )
+
+        analysis = AnalysisService(InMemoryAnalysisRepository())
+        memory = MemoryService(InMemoryMemoryRepository())
+        _pj, prior = _seed_candidate(
+            analysis, project_id="project-1", logical_key="prior",
+            payload={"name": "Ariel", "observation": "brave"},
+        )
+        memory.promote_candidate(
+            project_id="project-1", candidate=prior, mode=PromotionMode.MANUAL
+        )
+        job, current = _seed_candidate(
+            analysis, project_id="project-1", logical_key="cur",
+            payload={"name": "Ariel", "observation": "braver"},
+        )
+
+        original_provider = main_module.GatewayGenerateProvider
+        original_base = main_module.os.environ.get("LLM_GATEWAY_BASE_URL")
+        main_module.GatewayGenerateProvider = _FakeProvider
+        main_module.os.environ["LLM_GATEWAY_BASE_URL"] = "http://gateway.test"
+        try:
+            compare = main_module._default_compare_service(memory)
+        finally:
+            main_module.GatewayGenerateProvider = original_provider
+            if original_base is None:
+                main_module.os.environ.pop("LLM_GATEWAY_BASE_URL", None)
+            else:
+                main_module.os.environ["LLM_GATEWAY_BASE_URL"] = original_base
+
+        proposals = asyncio.run(
+            compare.compare_job(
+                project_id="project-1", job_id=job.id, candidates=(current,)
+            )
+        )
+        self.assertEqual(proposals[0].action, CompareAction.UPDATE)
+        self.assertEqual(proposals[0].rationale, "refines")
+
+    def test_default_factory_without_env_has_no_judge(self):
+        # Over-strict guard: absent env, the default factory wires no judge, so a
+        # matched pair 503s (locked by test_match_without_judge_returns_503 via
+        # the endpoint); here we assert the factory itself leaves judge unset.
+        original_base = main_module.os.environ.pop("LLM_GATEWAY_BASE_URL", None)
+        try:
+            compare = main_module._default_compare_service(
+                MemoryService(InMemoryMemoryRepository())
+            )
+        finally:
+            if original_base is not None:
+                main_module.os.environ["LLM_GATEWAY_BASE_URL"] = original_base
+        self.assertIsNone(compare._judge)
 
     def test_missing_project_returns_404(self):
         client, analysis, _memory, project_id = _build()

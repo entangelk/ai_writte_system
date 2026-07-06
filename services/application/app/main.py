@@ -38,6 +38,10 @@ from services.application.app.analysis.compare import (
     CompareJudgeNotConfigured,
     InvalidJudgeResult,
 )
+from services.application.app.analysis.compare_judge import (
+    TerminalJsonCompareJudge,
+    seed_analysis_compare_template,
+)
 from services.application.app.analysis.source import CoreSotSourceAdapter
 from services.application.app.memory.models import PromotionMode
 from services.application.app.memory.service import (
@@ -268,6 +272,30 @@ def _default_analysis_runner(
     )
 
 
+def _default_compare_service(memory: MemoryService) -> AnalysisCompareService:
+    # Phase 2B.3.2: wire the real terminal-JSON compare judge when a Gateway is
+    # configured; otherwise no judge (matched pairs → 503, deterministic
+    # no-match/duplicate proposals still serve). Mirrors the analysis runner /
+    # context search planner env gating.
+    base_url = os.environ.get("LLM_GATEWAY_BASE_URL")
+    if not base_url:
+        return AnalysisCompareService(memory_service=memory)
+    prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
+    seed_analysis_compare_template(prompt_templates)
+    provider = GatewayGenerateProvider(
+        base_url=base_url,
+        timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
+        trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False),
+    )
+    judge = TerminalJsonCompareJudge(
+        provider,
+        prompt_templates=prompt_templates,
+        model=os.environ.get("LLM_GATEWAY_MODEL") or None,
+        max_tokens=int(os.environ.get("ANALYSIS_COMPARE_MAX_TOKENS", "512")),
+    )
+    return AnalysisCompareService(memory_service=memory, judge=judge)
+
+
 def _default_context_search_service(
     core_sot: CoreSotService,
     *,
@@ -412,7 +440,7 @@ def create_app(
     # judge is a follow-up increment (2B.3.2); until injected, matched pairs
     # return 503 while no-match (create) and duplicate-canonical (conflict)
     # proposals are served deterministically.
-    compare = compare_service or AnalysisCompareService(memory_service=memory)
+    compare = compare_service or _default_compare_service(memory)
     sync_outbox = index_sync_outbox or _default_index_sync_outbox_service()
     runner = analysis_runner
     if runner is None:
