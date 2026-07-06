@@ -90,6 +90,24 @@ class CompareNoMatchTest(unittest.TestCase):
         self.assertEqual(proposal.action, CompareAction.CREATE)
         self.assertIsNone(proposal.matched_memory_id)
 
+    def test_character_with_different_identity_is_create(self):
+        # Negative direction of scope matching (G1): a prior character memory
+        # with a DIFFERENT name must not match → create, judge never consulted.
+        prior = _candidate(
+            candidate_id="prior", job_id="job-prior",
+            payload={"name": "Bob", "observation": "x"},
+        )
+        judge = FakeJudge(CompareAction.UPDATE)
+        service = AnalysisCompareService(
+            memory_service=_memory_service_with(prior), judge=judge
+        )
+        [proposal] = _compare(
+            service,
+            [_candidate(candidate_id="cur", payload={"name": "Ariel", "observation": "y"})],
+        )
+        self.assertEqual(proposal.action, CompareAction.CREATE)
+        self.assertEqual(len(judge.calls), 0)
+
     def test_event_is_always_create_even_with_prior_event_memory(self):
         # D2=A: event has no scope key, so it never matches → always create,
         # even when a prior event memory exists in the project.

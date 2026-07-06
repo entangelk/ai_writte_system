@@ -75,6 +75,15 @@
 - `tests/test_analysis_compare_api.py`(6): no-match→create(judge 없이 200), 매칭+judge 미구성→503, 주입 fake judge→라벨 proposal, **승격 character memory scope 직렬화(§8 ⑧)**, missing project/job 404.
 - 검증: `python3 -m unittest tests.test_memory_scope tests.test_analysis_compare tests.test_analysis_compare_api` → 19 OK. `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **526 passed / 45 skipped**. `git diff --check` 통과. (mongo 3개는 종전 환경 인증 이슈, 무관.)
 
+### 2B.3 검증 후속 보강 (독립 검증 PASS 후)
+
+- 독립 검증 `docs/verifications/2026-07-06/phase_2b_3_compare_action.md` **합격**. non-blocking 관찰 G1~G4 중 코드/문서로 닫을 수 있는 것을 보강.
+- **G1(음방향 회귀)**: `test_character_with_different_identity_is_create` 추가 — 다른 이름의 prior character memory는 매칭 안 됨→create, judge 미호출. scope 매칭의 음방향(under-strict는 잠겨 있었으나 명시 음방향 부재)을 채웠다.
+- **G2(HTTP 502)**: `test_judge_returning_create_maps_to_502` 추가 — judge가 매칭 pair에 `create` 반환 시 HTTP 502(`InvalidJudgeResult`) 매핑을 API 레벨에서 잠갔다(기존엔 service-layer raise만 검증).
+- **G3(문서 정정)**: 브리프 D5 요약표(line 137)가 "scope를 MemoryEntry/candidate/PriorMemoryItem에 저장"으로 상세 결정(line 125: candidate는 즉석 산출, 2A 스키마 미변경)과 갈렸다 → 요약표를 "MemoryEntry/PriorMemoryItem 저장 + candidate 즉석 산출"로 정정(코드는 상세 결정을 따름, `analysis/models.py` 미변경으로 확인).
+- **G4(설계 의도)**: 운영 `/compare` judge 미주입 시 매칭 503은 4.1→4.2 리듬으로 투명 명시 — 코드 변경 없음.
+- 재검증: 회귀 19→21, `pytest -q --ignore=tests/test_memory_mongo.py` → **528 passed / 45 skipped**, `git diff --check` 통과.
+
 ## Next steps
 
 - **Phase 2B.3.2 (다음 증분)**: 실제 Gateway 터미널-JSON `CompareJudge` adapter + versioned prompt template(예: `analysis_compare_v1`, 기존 `prompt_templates` 저장소 재사용) + strict parse/1회 repair + `create_app` env wiring + live smoke. 현재는 judge 미주입이라 매칭 pair가 503.
