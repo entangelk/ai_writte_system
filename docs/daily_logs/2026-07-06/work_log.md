@@ -84,9 +84,18 @@
 - **G4(설계 의도)**: 운영 `/compare` judge 미주입 시 매칭 503은 4.1→4.2 리듬으로 투명 명시 — 코드 변경 없음.
 - 재검증: 회귀 19→21, `pytest -q --ignore=tests/test_memory_mongo.py` → **528 passed / 45 skipped**, `git diff --check` 통과.
 
+## Phase 2B.3.2 — 실제 Gateway 터미널-JSON compare judge (2026-07-06, SoT v1.6.43)
+
+- 2B.3의 `CompareJudge` seam을 실 adapter로 채웠다(4.1→4.2→2B.3→2B.3.2 리듬, D1=A 터미널 JSON). 변경 파일: `services/application/app/analysis/compare_judge.py`(신규), `main.py`(`_default_compare_service` env wiring), `tests/test_analysis_compare_judge.py`(신규), `tests/test_analysis_compare_api.py`(env factory 회귀 2), `scripts/phase2b3_compare_judge_live_smoke.py`(신규).
+- **adapter**: `TerminalJsonCompareJudge`(async)가 versioned prompt `analysis_compare_v1`(task_type `analysis_compare`)로 매칭 (candidate payload + 기존 memory payload)을 Gateway `/v1/generate` 1-turn에 보내 `{"action","rationale"}` JSON을 strict parse. malformed/fenced/out-of-set이면 1회 repair, 그래도 실패면 `InvalidJudgeResult`(→502). 허용 action은 matched-pair 4종(update/add_evidence/no_change/conflict)뿐이고 **`create`는 거절**(no-match 결정적 전용, `_action`이 `JUDGE_ACTIONS` 멤버십 강제). 2A extraction/4.2 planner와 동일 구조(async provider·versioned prompt·single repair).
+- **wiring**: `_default_compare_service(memory)`가 env `LLM_GATEWAY_BASE_URL` 있으면 `GatewayGenerateProvider` + seed된 `analysis_compare_v1` 템플릿으로 judge를 붙이고(`ANALYSIS_COMPARE_MAX_TOKENS` 기본 512), 없으면 judge 미주입(매칭 pair 503) — analysis runner/context search planner env-gating과 동일 패턴. `create_app`의 `compare = compare_service or _default_compare_service(memory)`.
+- **회귀 13개**: `tests/test_analysis_compare_judge.py`(11) — valid parse, 4종 action 전수(subTest), fenced 1회 repair, unknown action repair→성공, **create 출력 거절(under-strict, repair 후에도 InvalidJudgeResult, 정확히 2 provider 호출)**, bad-shape/non-JSON repair→실패, template 부재→InvalidJudgeResult(provider 미호출), prompt payload에 candidate/memory·allowed_actions에 create 없음, parse 직접(빈 rationale/extra field 거절). `tests/test_analysis_compare_api.py`(+2) — **env 설정 시 `_default_compare_service`가 실 judge wiring→매칭 pair가 update로 라벨**(fake provider 주입, GatewayGenerateProvider 패치), env 부재 시 judge None(over-strict).
+- **판정 경계 심화 + live smoke 실행은 후속**: adapter는 parse/repair를 잠갔고, update↔add_evidence↔no_change↔conflict 의미 판정 자체의 fixture 심화와 실제 12B 관통 live smoke(`scripts/phase2b3_compare_judge_live_smoke.py`, sandbox 밖 실행 필요)는 다음이다.
+- 검증: `python3 -m unittest tests.test_analysis_compare_judge tests.test_analysis_compare_api` → 20 OK. `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **541 passed / 45 skipped**. `git diff --check` 통과.
+
 ## Next steps
 
-- **Phase 2B.3.2 (다음 증분)**: 실제 Gateway 터미널-JSON `CompareJudge` adapter + versioned prompt template(예: `analysis_compare_v1`, 기존 `prompt_templates` 저장소 재사용) + strict parse/1회 repair + `create_app` env wiring + live smoke. 현재는 judge 미주입이라 매칭 pair가 503.
+- **Phase 2B.3.2 live smoke 실행**(sandbox 밖): `scripts/phase2b3_compare_judge_live_smoke.py`를 실제 llama.cpp 12B endpoint로 돌려 매칭 pair가 유효 action JSON을 내는지 확인. 판정 경계(같은 subject의 update vs add_evidence vs no_change vs conflict) 심화 fixture도 이때 함께.
 - **Phase 2B.4**: proposal→실제 memory versioned upsert/재색인(Chroma), `MemoryStatus` 두 번째 literal(superseded 등) 도입 시 prior_memory canonical-only 필터의 non-canonical 제외 회귀(2B.2 O1) 추가.
 - ⑤ Writing canonical 포함(Gate candidate 금지를 "canonical 허용 + 미승인 candidate 금지"로 정련), event/open_question 의미적 resolution(D2 semantic seam).
 - 곁가지(막힘/저우선): worker→real Chroma live smoke(sandbox 밖), ES lexical(브리프 필요), embedding 이미지 최적화(최후순위).
