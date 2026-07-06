@@ -52,9 +52,32 @@
 - **O3/O5(무해, 설계 의도)**: Gate가 HTTP를 hard-block하지 않고 200과 함께 직렬화(2B.3용 정보 신호/defense-in-depth), Writing-item-leak invariant가 단일-status에선 구조적으로 거의 발화 불가 — 둘 다 F5 최소 Gate 결정과 정합하며 코드 변경 없음(오너 인지 사항).
 - 재검증: `python3 -m unittest tests.test_analysis_context tests.test_analysis_context_api` → 17 OK. `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **507 passed / 45 skipped**. `git diff --check` 통과.
 
+## Phase 2B.3 착수·구현 (2026-07-06, SoT v1.6.42)
+
+### 착수 결정 브리프 + 오너 결정
+
+- 2B.3 kickoff 브리프 `docs/plans/02b-3-analysis-compare-action-decisions.md`를 작성해 D1~D7 결정을 받았다. 헤드라인 긴장: **D3=A 결정적 scope key(`memory_type+scope_type+scope_id+정규화 name`)가 event/open_question에는 자연 적용 불가**(엔티티 id 없이 서술 텍스트뿐)임을 CLAUDE.md §1대로 surface했다.
+- **오너 결정**: D1=A(터미널 JSON 1-turn compare, flat-loop tool-call은 상류 정지로 후속), **D2=A(character만 결정적 name key로 대조, event/open_question은 identity 대조 제외+semantic seam 후속)**, D3=A(하이브리드: 결정적 key→LLM 라벨), D4=A(proposal only, 쓰기는 2B.4), D5=A(scope 저장+승격 시 산출, 2B.1 승격 코드 확장 승인), D6=fixture로 확정(self-exclusion 유지 무게), D7=A(`POST .../jobs/{job_id}/compare`).
+
+### 구현 (4.1→4.2 리듬: 이 증분=계약+fake judge, 실 adapter+live=2B.3.2)
+
+- 변경 파일: `services/application/app/memory/scope.py`(신규), `memory/models.py`·`memory/service.py`·`memory/mongo_repository.py`(scope 필드/승격 산출/round-trip), `context_search/models.py`·`context_search/prior_memory.py`(PriorMemoryItem.scope), `analysis/compare.py`(신규), `main.py`(scope 직렬화·compare endpoint·wiring), `tests/test_memory_scope.py`·`tests/test_analysis_compare.py`·`tests/test_analysis_compare_api.py`(신규).
+- **scope key(D2=A)**: `derive_scope(memory_type, payload)` — character만 `MemoryScope("character", 정규화(name))`(공백 collapse + casefold로 "Ariel Song"="  ariel   song"), event/open_question은 `None`. `MemoryEntry`에 `scope` 필드(default None) 추가하고 2B.1 승격이 산출(D5=A). Mongo `_memory_doc`/`_to_memory` round-trip과 HTTP `_memory_payload`에 scope 포함.
+- **§8 ⑧ 완전 완성**: `PriorMemoryItem.scope` 추가로 taxonomy가 위임한 scope까지 채워졌다(2B.2가 "5필수 완성"으로 남긴 추적 항목 폐쇄).
+- **compare(D1/D3=A)**: `AnalysisCompareService.compare_job`이 job candidate별로 결정적 scope 매칭 → (a) 매칭 0개=`create`(결정적, event/question은 scope 없어 항상 여기), (b) 1개=주입 `CompareJudge`(sync/async seam)가 `update/add_evidence/no_change/conflict` 라벨(judge가 `create` 반환 시 `InvalidJudgeResult`로 거절 — create는 no-match 결정적 전용), (c) 복수 canonical 동일 identity=결정적 `conflict`(2B.1이 허용한 중복 canonical을 재조정 신호로 표면화). proposal only(D4=A).
+- **D6 self-exclusion 확정(fixture로)**: `_find_matches`가 `analysis_job_id == 대상 job`인 memory를 제외한다. 근거: 같은 job이 승격한 memory가 자기 자신을 prior로 잡으면 항상 no_change 노이즈. 양방향 회귀(`test_self_exclusion_is_two_directional`: 같은 job→제외→create+judge 미호출 / 다른 job→매칭→judge 호출)로 잠갔다. 2B.2의 잠정값을 여기서 "유지"로 확정.
+- **HTTP(D7=A)**: `POST /projects/{id}/analysis/jobs/{job_id}/compare`. no-match(create)/multi-match(conflict)는 judge 없이 200. 매칭인데 judge 미구성이면 503(`CompareJudgeNotConfigured`), `InvalidJudgeResult`는 502, missing project/job 404. `create_app`에 `compare_service` 주입 param 추가(기본 judge=None).
+
+### 회귀 19개 + 검증
+
+- `tests/test_memory_scope.py`(5): character scope/정규화(case·whitespace)/event·open_question None/normalize_name.
+- `tests/test_analysis_compare.py`(8): no-match create, event 항상 create(prior event 있어도), 1개 매칭→judge 라벨, 정규화 name 매칭, judge 미구성→`CompareJudgeNotConfigured`, **judge의 create 반환 거절(over-strict)**, 복수 canonical→conflict, **self-exclusion 양방향**.
+- `tests/test_analysis_compare_api.py`(6): no-match→create(judge 없이 200), 매칭+judge 미구성→503, 주입 fake judge→라벨 proposal, **승격 character memory scope 직렬화(§8 ⑧)**, missing project/job 404.
+- 검증: `python3 -m unittest tests.test_memory_scope tests.test_analysis_compare tests.test_analysis_compare_api` → 19 OK. `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **526 passed / 45 skipped**. `git diff --check` 통과. (mongo 3개는 종전 환경 인증 이슈, 무관.)
+
 ## Next steps
 
-- **Phase 2B.3 compare→action 판정**: D4 action literal(`create/update/add_evidence/no_change/conflict` + `merge/split` review-only) 실현 + **D3 scope key 산출/매칭**(2B.1·2B.2가 위임한 identity 경계를 여기서 잠금). 이때 `PriorMemoryItem.scope`를 채워 §8 ⑧을 완전 완성하고, F4 self-exclusion 잠정값을 no_change 상호작용 관찰 후 확정한다. provenance/confidence를 PriorMemoryItem에 추가할지도 compare 의존 시 결정(F3).
-- 2B.4 versioned upsert/재색인, ⑤ Writing canonical 포함(Gate candidate 금지를 "canonical 허용 + 미승인 candidate 금지"로 정련).
-- 2B.2 독립 검증(오너 요청 시): backend seam·F4 self-exclusion 양방향·Gate purpose 분기·`/context-search` purpose 거절을 primary source로 재확인.
+- **Phase 2B.3.2 (다음 증분)**: 실제 Gateway 터미널-JSON `CompareJudge` adapter + versioned prompt template(예: `analysis_compare_v1`, 기존 `prompt_templates` 저장소 재사용) + strict parse/1회 repair + `create_app` env wiring + live smoke. 현재는 judge 미주입이라 매칭 pair가 503.
+- **Phase 2B.4**: proposal→실제 memory versioned upsert/재색인(Chroma), `MemoryStatus` 두 번째 literal(superseded 등) 도입 시 prior_memory canonical-only 필터의 non-canonical 제외 회귀(2B.2 O1) 추가.
+- ⑤ Writing canonical 포함(Gate candidate 금지를 "canonical 허용 + 미승인 candidate 금지"로 정련), event/open_question 의미적 resolution(D2 semantic seam).
 - 곁가지(막힘/저우선): worker→real Chroma live smoke(sandbox 밖), ES lexical(브리프 필요), embedding 이미지 최적화(최후순위).

@@ -29,6 +29,7 @@ from services.application.app.memory.repository import (
     DuplicatePromotionRequest,
     MemoryRepository,
 )
+from services.application.app.memory.scope import derive_scope
 
 
 class MemoryError(ValueError):
@@ -131,6 +132,7 @@ class MemoryService:
             source_candidate_id=candidate.id,
             promotion_mode=mode,
             applied_threshold=applied_threshold,
+            scope=derive_scope(candidate.candidate_type, candidate.payload),
         )
         try:
             self._repo.put_memory(entry)
