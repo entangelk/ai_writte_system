@@ -33,7 +33,17 @@ from services.application.app.analysis.service import (
     InvalidAnalysisCandidate,
     InvalidCandidateSource,
 )
+from services.application.app.analysis.compare import (
+    AnalysisCompareService,
+    CompareJudgeNotConfigured,
+    InvalidJudgeResult,
+)
+from services.application.app.analysis.compare_judge import (
+    TerminalJsonCompareJudge,
+    seed_analysis_compare_template,
+)
 from services.application.app.analysis.source import CoreSotSourceAdapter
+from services.llm_gateway.app.errors import ProviderError
 from services.application.app.memory.models import PromotionMode
 from services.application.app.memory.service import (
     InMemoryMemoryRepository,
@@ -41,6 +51,7 @@ from services.application.app.memory.service import (
     MemoryService,
 )
 from services.application.app.context_search.models import (
+    AnalysisContextRequest,
     ContextNeed,
     ContextSearchPurpose,
     ContextSearchRequest,
@@ -50,6 +61,11 @@ from services.application.app.context_search.models import (
 from services.application.app.context_search.planner import (
     TerminalJsonSearchPlanner,
     seed_context_search_plan_template,
+)
+from services.application.app.context_search.prior_memory import (
+    AnalysisContextService,
+    DeterministicPriorMemoryBackend,
+    evaluate_analysis_context_gate,
 )
 from services.application.app.context_search.service import (
     ContextSearchBudgetExceeded,
@@ -257,6 +273,30 @@ def _default_analysis_runner(
     )
 
 
+def _default_compare_service(memory: MemoryService) -> AnalysisCompareService:
+    # Phase 2B.3.2: wire the real terminal-JSON compare judge when a Gateway is
+    # configured; otherwise no judge (matched pairs → 503, deterministic
+    # no-match/duplicate proposals still serve). Mirrors the analysis runner /
+    # context search planner env gating.
+    base_url = os.environ.get("LLM_GATEWAY_BASE_URL")
+    if not base_url:
+        return AnalysisCompareService(memory_service=memory)
+    prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
+    seed_analysis_compare_template(prompt_templates)
+    provider = GatewayGenerateProvider(
+        base_url=base_url,
+        timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
+        trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False),
+    )
+    judge = TerminalJsonCompareJudge(
+        provider,
+        prompt_templates=prompt_templates,
+        model=os.environ.get("LLM_GATEWAY_MODEL") or None,
+        max_tokens=int(os.environ.get("ANALYSIS_COMPARE_MAX_TOKENS", "512")),
+    )
+    return AnalysisCompareService(memory_service=memory, judge=judge)
+
+
 def _default_context_search_service(
     core_sot: CoreSotService,
     *,
@@ -384,12 +424,24 @@ def create_app(
     memory_service: MemoryService | None = None,
     index_sync_outbox: IndexSyncOutboxService | None = None,
     context_search_service: ContextSearchService | None = None,
+    compare_service: AnalysisCompareService | None = None,
     vector_index: InMemoryVectorIndexAdapter | None = None,
 ) -> FastAPI:
     app = FastAPI(title="AI Writing System Application")
     core_sot = service or _default_core_sot_service()
     analysis = analysis_service or _default_analysis_service(core_sot)
     memory = memory_service or _default_memory_service()
+    # Phase 2B.2: prior-memory search/packaging over the canonical memory store.
+    # Deterministic backend now; a semantic backend plugs into the same seam
+    # (docs/plans/02b-2-analysis-context-package-decisions.md, D2=A).
+    analysis_context = AnalysisContextService(
+        backend=DeterministicPriorMemoryBackend(memory)
+    )
+    # Phase 2B.3: candidate↔canonical compare. The real terminal-JSON Gateway
+    # judge is a follow-up increment (2B.3.2); until injected, matched pairs
+    # return 503 while no-match (create) and duplicate-canonical (conflict)
+    # proposals are served deterministically.
+    compare = compare_service or _default_compare_service(memory)
     sync_outbox = index_sync_outbox or _default_index_sync_outbox_service()
     runner = analysis_runner
     if runner is None:
@@ -491,7 +543,13 @@ def create_app(
             "source_candidate_id": entry.source_candidate_id,
             "promotion_mode": str(entry.promotion_mode),
             "applied_threshold": entry.applied_threshold,
+            "scope": _scope_payload(entry.scope),
         }
+
+    def _scope_payload(scope) -> dict[str, object] | None:
+        if scope is None:
+            return None
+        return {"scope_type": scope.scope_type, "scope_id": scope.scope_id}
 
     def _source_ref_payload(source_ref) -> dict[str, object]:
         return {
@@ -963,6 +1021,116 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return _memory_payload(entry)
 
+    def _prior_memory_item_payload(item) -> dict[str, object]:
+        return {
+            "memory_id": item.memory_id,
+            "memory_type": item.memory_type.value,
+            "value": dict(item.value),
+            "status": item.status.value,
+            "version": item.version,
+            "source_ref_ids": list(item.source_ref_ids),
+            "match_reason": item.match_reason,
+            "scope": _scope_payload(item.scope),
+        }
+
+    def _analysis_context_payload(package, gate) -> dict[str, object]:
+        return {
+            "package": {
+                "project_id": package.project_id,
+                "purpose": package.purpose.value,
+                "status": package.status,
+                "degraded": package.degraded,
+                "token_estimate_total": package.token_estimate_total,
+                "prior_memories": [
+                    _prior_memory_item_payload(item)
+                    for item in package.prior_memories
+                ],
+            },
+            "gate": {
+                "decision": gate.decision,
+                "findings": [
+                    {"check": finding.check, "detail": finding.detail}
+                    for finding in gate.findings
+                ],
+            },
+        }
+
+    @app.post("/projects/{project_id}/analysis/jobs/{job_id}/context")
+    async def analysis_context_endpoint(
+        project_id: str, job_id: str
+    ) -> dict[str, object]:
+        # Job-aware entry surface (D4=B): derive the coarse candidate group
+        # (the memory_types this job produced) and search prior canonical
+        # memories of those types, excluding this job's own memories (F4).
+        try:
+            _require_project_exists(project_id)
+            job = analysis.get_job(project_id=project_id, job_id=job_id)
+            candidates = analysis.list_candidates(
+                project_id=project_id, job_id=job_id
+            )
+        except (AnalysisNotFound, NotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        memory_types = tuple(
+            dict.fromkeys(candidate.candidate_type for candidate in candidates)
+        )
+        # needs is fixed to (PRIOR_MEMORY,) here, so the service request is
+        # always valid — no InvalidAnalysisContextRequest→400 branch to add
+        # (the request validation is a service-level contract, locked at that
+        # layer). Only job/project 404 is reachable from this endpoint.
+        request = AnalysisContextRequest(
+            project_id=project_id,
+            needs=(ContextNeed.PRIOR_MEMORY,),
+            memory_types=memory_types,
+            exclude_job_id=job.id,
+        )
+        package = analysis_context.build_prior_memory_package(request)
+        gate = evaluate_analysis_context_gate(package=package, request=request)
+        return _analysis_context_payload(package, gate)
+
+    def _action_proposal_payload(proposal) -> dict[str, object]:
+        return {
+            "candidate_id": proposal.candidate_id,
+            "candidate_type": proposal.candidate_type.value,
+            "action": proposal.action.value,
+            "matched_memory_id": proposal.matched_memory_id,
+            "rationale": proposal.rationale,
+        }
+
+    @app.post("/projects/{project_id}/analysis/jobs/{job_id}/compare")
+    async def analysis_compare_endpoint(
+        project_id: str, job_id: str
+    ) -> dict[str, object]:
+        # Phase 2B.3 (D7): compare a job's candidates against canonical memory
+        # and return one action proposal per candidate (proposal only — no
+        # memory write, D4=A).
+        try:
+            _require_project_exists(project_id)
+            job = analysis.get_job(project_id=project_id, job_id=job_id)
+            candidates = analysis.list_candidates(
+                project_id=project_id, job_id=job_id
+            )
+        except (AnalysisNotFound, NotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        try:
+            proposals = await compare.compare_job(
+                project_id=project_id, job_id=job.id, candidates=candidates
+            )
+        except CompareJudgeNotConfigured as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except InvalidJudgeResult as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except ProviderError as exc:
+            # A Gateway/provider failure during the matched-pair judge turn
+            # (timeout/unavailable/5xx) is an LLM error → 502, applying the
+            # v1.6.34 error taxonomy to this endpoint. Without this the
+            # ProviderError raised by GatewayGenerateProvider propagates as an
+            # unhandled 500.
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {
+            "job_id": job.id,
+            "proposals": [_action_proposal_payload(p) for p in proposals],
+        }
+
     def _context_item_payload(item) -> dict[str, object]:
         return {
             "need": item.need.value,
@@ -1092,6 +1260,10 @@ def _build_context_search_request(
         purpose = ContextSearchPurpose(body.purpose)
     except ValueError as exc:
         raise ValueError(f"unsupported purpose: {body.purpose}") from exc
+    # /context-search serves Writing only; analysis_context has its own
+    # job-scoped endpoint. Keep the two purposes on separate surfaces.
+    if purpose is not ContextSearchPurpose.WRITING_CONTEXT:
+        raise ValueError(f"unsupported purpose: {body.purpose}")
     needs: list[ContextNeed] = []
     for raw_need in body.needs:
         try:

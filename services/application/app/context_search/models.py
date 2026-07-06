@@ -9,8 +9,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any, Mapping
 
+from services.application.app.analysis.models import AnalysisCandidateType
 from services.application.app.indexing.models import IndexPointer
+from services.application.app.memory.models import MemoryStatus
+from services.application.app.memory.scope import MemoryScope
 
 
 CONTEXT_PACKAGE_STATUS_CANDIDATE = "candidate"
@@ -21,6 +25,10 @@ BUDGET_EXCLUDED_REASON = "budget_exceeded"
 
 class ContextSearchPurpose(StrEnum):
     WRITING_CONTEXT = "writing_context"
+    # Phase 2B.2: prior-memory comparison view consumed by Analysis compare
+    # (2B.3), not by Writing. The two purposes share this package schema but
+    # branch on serialization, Gate rules, and which section is filled.
+    ANALYSIS_CONTEXT = "analysis_context"
 
 
 class ContextNeed(StrEnum):
@@ -28,6 +36,8 @@ class ContextNeed(StrEnum):
     RECENT_SCENES = "recent_scenes"
     EVENT_CONTEXT = "event_context"
     SOURCE_QUOTE = "source_quote"
+    # Phase 2B.2: canonical prior memories retrieved for Analysis comparison.
+    PRIOR_MEMORY = "prior_memory"
 
 
 class SearchTool(StrEnum):
@@ -111,6 +121,46 @@ class ContextItem:
 
 
 @dataclass(frozen=True, slots=True)
+class PriorMemoryItem:
+    """Phase 2B.2 comparison view of one canonical prior memory (§8 ⑧).
+
+    Carries the taxonomy's five required comparison fields — existing value,
+    status, source, version, and the reason it was retrieved — plus the
+    memory identity. ``value`` is the MemoryEntry ``payload`` (MemoryEntry has
+    no ``value`` field; F3). ``scope`` (scope_type/scope_id) is not carried
+    here because MemoryEntry lacks it (D1=A defers scope to 2B.3), so §8 ⑧
+    stays open until 2B.3.
+    """
+
+    memory_id: str
+    memory_type: AnalysisCandidateType
+    value: Mapping[str, Any]
+    status: MemoryStatus
+    version: int
+    source_ref_ids: tuple[str, ...]
+    match_reason: str
+    # Phase 2B.3: deterministic identity scope (character → name; else None).
+    # Completes §8 ⑧ (memory type/scope/status/version/retrieval reason).
+    scope: MemoryScope | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisContextRequest:
+    """Deterministic prior-memory search primitive (D4 memory_type layer).
+
+    ``memory_types`` is the coarse candidate-group filter (D1=A). An empty
+    tuple yields an empty package — there is no comparison target — never the
+    whole project memory. ``exclude_job_id`` implements the F4 self-exclusion
+    default so a job does not compare against memories it just promoted.
+    """
+
+    project_id: str
+    needs: tuple[ContextNeed, ...]
+    memory_types: tuple[AnalysisCandidateType, ...] = ()
+    exclude_job_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class StepFailure:
     error_type: ContextSearchErrorType
     detail: str
@@ -150,7 +200,11 @@ class ContextPackage:
     do_not_use: tuple[str, ...]
     token_estimate_total: int
     degraded: bool
-    trace: ContextSearchTrace
+    # Writing packages carry a full search trace; the analysis_context package
+    # has no planner/vector plan, so trace is None there (D3=A: one schema,
+    # purpose branches which section is filled).
+    trace: ContextSearchTrace | None = None
+    prior_memories: tuple[PriorMemoryItem, ...] = ()
     status: str = CONTEXT_PACKAGE_STATUS_CANDIDATE
 
 

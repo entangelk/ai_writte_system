@@ -20,6 +20,7 @@ from services.application.app.memory.models import (
     PromotionMode,
 )
 from services.application.app.memory.repository import DuplicatePromotionRequest
+from services.application.app.memory.scope import MemoryScope
 
 
 class MongoMemoryRepositorySetupError(RuntimeError):
@@ -116,10 +117,19 @@ def _memory_doc(entry: MemoryEntry) -> dict[str, Any]:
         "source_candidate_id": entry.source_candidate_id,
         "promotion_mode": str(entry.promotion_mode),
         "applied_threshold": entry.applied_threshold,
+        "scope": (
+            None
+            if entry.scope is None
+            else {
+                "scope_type": entry.scope.scope_type,
+                "scope_id": entry.scope.scope_id,
+            }
+        ),
     }
 
 
 def _to_memory(doc: dict[str, Any]) -> MemoryEntry:
+    scope_doc = doc.get("scope")
     return MemoryEntry(
         id=doc["_id"],
         project_id=doc["project_id"],
@@ -134,4 +144,12 @@ def _to_memory(doc: dict[str, Any]) -> MemoryEntry:
         source_candidate_id=doc["source_candidate_id"],
         promotion_mode=PromotionMode(doc["promotion_mode"]),
         applied_threshold=doc.get("applied_threshold"),
+        scope=(
+            None
+            if scope_doc is None
+            else MemoryScope(
+                scope_type=scope_doc["scope_type"],
+                scope_id=scope_doc["scope_id"],
+            )
+        ),
     )
