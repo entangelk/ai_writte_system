@@ -163,6 +163,29 @@ class AnalysisCompareApiTest(unittest.TestCase):
         self.assertEqual(proposal["rationale"], "corroborates")
         self.assertIsNotNone(proposal["matched_memory_id"])
 
+    def test_judge_returning_create_maps_to_502(self):
+        # G2: a judge that returns the deterministic-only `create` for a matched
+        # pair is an InvalidJudgeResult → 502 at the HTTP boundary.
+        client, analysis, memory, project_id = _build(
+            judge=FakeJudge(CompareAction.CREATE)
+        )
+        _pj, prior = _seed_candidate(
+            analysis, project_id=project_id, logical_key="prior",
+            payload={"name": "Ariel", "observation": "brave"},
+        )
+        memory.promote_candidate(
+            project_id=project_id, candidate=prior, mode=PromotionMode.MANUAL
+        )
+        job, _c = _seed_candidate(
+            analysis, project_id=project_id, logical_key="cur",
+            payload={"name": "Ariel", "observation": "braver"},
+        )
+
+        response = client.post(
+            f"/projects/{project_id}/analysis/jobs/{job.id}/compare"
+        )
+        self.assertEqual(response.status_code, 502)
+
     def test_promoted_character_memory_serializes_scope(self):
         # §8 ⑧ completion: scope is stored at promotion and exposed on the
         # memory envelope.

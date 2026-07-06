@@ -134,6 +134,6 @@ D2의 scope key를 어디에 실체화하는가.
 | D2 | A | character만 결정적 name key, event/open_question은 대조 제외(semantic seam 후속) |
 | D3 | A | 하이브리드: 결정적 key 매칭 → LLM action 라벨, merge/split 제외 |
 | D4 | A | proposal only, 실쓰기는 2B.4 |
-| D5 | A | scope를 MemoryEntry/candidate/PriorMemoryItem에 저장, 승격 시 산출(2B.1 경계 확장 확인 필요) |
+| D5 | A | scope를 MemoryEntry/PriorMemoryItem에 저장(승격 시 산출), candidate 측은 compare 시 즉석 산출(2A 스키마 미변경). 오너가 2B.1 승격 확장 승인 |
 | D6 | fixture로 확정 | self-exclusion 유지 무게, 근거 기록 |
 | D7 | A | `POST .../jobs/{job_id}/compare` |
