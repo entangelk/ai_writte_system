@@ -17,6 +17,7 @@ class IndexSyncTarget(StrEnum):
 
 class IndexSyncBackend(StrEnum):
     IN_MEMORY_FAKE = "in_memory_fake"
+    CHROMA = "chroma"
 
 
 class IndexSyncEvent(StrEnum):

@@ -13,7 +13,10 @@ from services.application.app.analysis.extractor import (
     VersionedPromptAnalysisExtractionAdapter,
 )
 from services.application.app.analysis.gateway_provider import GatewayGenerateProvider
-from services.application.app.analysis.models import AnalysisJobStatus
+from services.application.app.analysis.models import (
+    AnalysisCandidateStatus,
+    AnalysisJobStatus,
+)
 from services.application.app.analysis.prompt_templates import (
     InMemoryPromptTemplateRepository,
     PromptTemplateService,
@@ -31,6 +34,12 @@ from services.application.app.analysis.service import (
     InvalidCandidateSource,
 )
 from services.application.app.analysis.source import CoreSotSourceAdapter
+from services.application.app.memory.models import PromotionMode
+from services.application.app.memory.service import (
+    InMemoryMemoryRepository,
+    MemoryNotFound,
+    MemoryService,
+)
 from services.application.app.context_search.models import (
     ContextNeed,
     ContextSearchPurpose,
@@ -58,7 +67,9 @@ from services.application.app.core_sot.service import (
     UnsupportedExportFormat,
 )
 from services.application.app.indexing.service import (
+    CHROMA_VECTOR_BACKEND,
     DeterministicFakeEmbeddingProvider,
+    EmbeddingProvider,
     FAKE_VECTOR_BACKEND,
     IndexSyncOutboxService,
     InMemoryIndexSyncRepository,
@@ -66,6 +77,12 @@ from services.application.app.indexing.service import (
     SourceBlockIndexingService,
     rebuild_source_block_index_summary,
 )
+from services.application.app.indexing.chroma import (
+    DEFAULT_COLLECTION_NAME,
+    ChromaVectorIndexAdapter,
+    connect_chroma_collection,
+)
+from services.application.app.indexing.embedding import RemoteEmbeddingProvider
 
 
 class AnalysisJobRunner(Protocol):
@@ -133,6 +150,32 @@ def _default_analysis_service(core_sot: CoreSotService) -> AnalysisService:
         repository,
         source_ref_resolver=CoreSotSourceAdapter(core_sot),
     )
+
+
+def _default_memory_service() -> MemoryService:
+    # Conservative default: auto-promotion is off unless a threshold is set,
+    # so no canonical memory is minted from a guessed value (SoT v1.6.39 D2=B).
+    threshold_raw = os.environ.get("MEMORY_AUTO_PROMOTION_THRESHOLD")
+    auto_threshold = float(threshold_raw) if threshold_raw else None
+
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if not uri:
+        return MemoryService(
+            InMemoryMemoryRepository(),
+            auto_promotion_threshold=auto_threshold,
+        )
+
+    # Imported lazily so the in-memory path needs no pymongo install.
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+    from services.application.app.memory.mongo_repository import (
+        MongoMemoryRepository,
+    )
+
+    repository = MongoMemoryRepository.from_uri(
+        uri,
+        db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME),
+    )
+    return MemoryService(repository, auto_promotion_threshold=auto_threshold)
 
 
 def _default_prompt_template_service() -> PromptTemplateService:
@@ -216,6 +259,9 @@ def _default_analysis_runner(
 
 def _default_context_search_service(
     core_sot: CoreSotService,
+    *,
+    vector_index: InMemoryVectorIndexAdapter | ChromaVectorIndexAdapter,
+    embeddings: EmbeddingProvider,
 ) -> ContextSearchService | None:
     base_url = os.environ.get("LLM_GATEWAY_BASE_URL")
     if not base_url:
@@ -233,12 +279,13 @@ def _default_context_search_service(
         model=os.environ.get("LLM_GATEWAY_MODEL") or None,
         max_tokens=int(os.environ.get("CONTEXT_SEARCH_PLAN_MAX_TOKENS", "1024")),
     )
-    # The vector adapter is the non-persistent fake (real Chroma is a later
-    # slice); with no shared persistent index, vector needs return no hits in a
-    # deployed app, while Mongo-direct needs (current/recent scenes) serve from
-    # the Core SOT. See docs/plans/04-agentic-search-kickoff-decisions.md.
-    embeddings = DeterministicFakeEmbeddingProvider()
-    vector_index = InMemoryVectorIndexAdapter()
+    # The vector adapter and embeddings are the process-shared instances the
+    # rebuild endpoint also writes into, so a rebuild followed by a context
+    # search yields real vector hits. Depending on env (B.4) these are either the
+    # persistent Chroma backend with real embeddings or the in-memory fake with
+    # deterministic fake embeddings. Mongo-direct needs (current/recent scenes)
+    # serve from the Core SOT. See docs/plans/04-shared-vector-index-decisions.md
+    # and docs/plans/04-real-vector-backend-decisions.md.
     indexing = SourceBlockIndexingService(
         core_sot=core_sot,
         embeddings=embeddings,
@@ -250,6 +297,39 @@ def _default_context_search_service(
         vector_search=vector_index,
         embeddings=embeddings,
         planner=planner,
+    )
+
+
+def _build_embedding_provider():
+    # Real embedding service (B.2) when configured, else the deterministic fake.
+    # expected_dimensions activates the B.1 dimension guard in deployment so a
+    # misconfigured model dimension fails fast (B.2 verification follow-up).
+    base_url = os.environ.get("EMBEDDING_SERVICE_URL")
+    if not base_url:
+        return DeterministicFakeEmbeddingProvider()
+    return RemoteEmbeddingProvider(
+        base_url=base_url,
+        timeout_seconds=_env_float("EMBEDDING_TIMEOUT_SECONDS", 30.0),
+        trust_env=_env_bool("EMBEDDING_TRUST_ENV", False),
+        expected_dimensions=int(os.environ.get("EMBEDDING_DIMENSIONS", "1024")),
+    )
+
+
+def _build_chroma_vector_index():
+    # Real persistent Chroma (B.3) when CHROMA_HOST is set, else None so the
+    # caller falls back to the in-memory fake. chromadb is imported lazily inside
+    # connect_chroma_collection, so unconfigured environments/tests never need it.
+    host = os.environ.get("CHROMA_HOST")
+    if not host:
+        return None
+    return ChromaVectorIndexAdapter(
+        connect_chroma_collection(
+            host=host,
+            port=int(os.environ.get("CHROMA_PORT", "8000")),
+            collection_name=os.environ.get(
+                "CHROMA_COLLECTION", DEFAULT_COLLECTION_NAME
+            ),
+        )
     )
 
 
@@ -301,19 +381,47 @@ def create_app(
     service: CoreSotService | None = None,
     analysis_service: AnalysisService | None = None,
     analysis_runner: AnalysisJobRunner | None = None,
+    memory_service: MemoryService | None = None,
     index_sync_outbox: IndexSyncOutboxService | None = None,
     context_search_service: ContextSearchService | None = None,
+    vector_index: InMemoryVectorIndexAdapter | None = None,
 ) -> FastAPI:
     app = FastAPI(title="AI Writing System Application")
     core_sot = service or _default_core_sot_service()
     analysis = analysis_service or _default_analysis_service(core_sot)
+    memory = memory_service or _default_memory_service()
     sync_outbox = index_sync_outbox or _default_index_sync_outbox_service()
     runner = analysis_runner
     if runner is None:
         runner = _default_analysis_runner(core_sot=core_sot, analysis=analysis)
+    # A single shared vector index is owned here so the rebuild endpoint writes
+    # into the same instance the default context search reads from. It is created
+    # regardless of the planner env (rebuild works without LLM_GATEWAY_BASE_URL).
+    # When CHROMA_HOST is set it is the real persistent Chroma backend (B.4),
+    # else the in-memory fake (non-durable, lost on restart). An injected
+    # vector_index (tests) always uses the fake in-memory backend label.
+    # See docs/plans/04-shared-vector-index-decisions.md and
+    # docs/plans/04-real-vector-backend-decisions.md.
+    if vector_index is not None:
+        shared_vector_index = vector_index
+        shared_embeddings = DeterministicFakeEmbeddingProvider()
+        shared_backend = FAKE_VECTOR_BACKEND
+    else:
+        shared_embeddings = _build_embedding_provider()
+        chroma_index = _build_chroma_vector_index()
+        if chroma_index is not None:
+            shared_vector_index = chroma_index
+            shared_backend = CHROMA_VECTOR_BACKEND
+        else:
+            shared_vector_index = InMemoryVectorIndexAdapter()
+            shared_backend = FAKE_VECTOR_BACKEND
     context_search = context_search_service
     if context_search is None:
-        context_search = _default_context_search_service(core_sot)
+        context_search = _default_context_search_service(
+            core_sot,
+            vector_index=shared_vector_index,
+            embeddings=shared_embeddings,
+        )
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -368,6 +476,23 @@ def create_app(
             "payload": dict(candidate.payload),
         }
 
+    def _memory_payload(entry) -> dict[str, object]:
+        return {
+            "id": entry.id,
+            "project_id": entry.project_id,
+            "memory_type": str(entry.memory_type),
+            "status": str(entry.status),
+            "provenance": str(entry.provenance),
+            "confidence": entry.confidence,
+            "source_ref_ids": list(entry.source_ref_ids),
+            "payload": dict(entry.payload),
+            "version": entry.version,
+            "analysis_job_id": entry.analysis_job_id,
+            "source_candidate_id": entry.source_candidate_id,
+            "promotion_mode": str(entry.promotion_mode),
+            "applied_threshold": entry.applied_threshold,
+        }
+
     def _source_ref_payload(source_ref) -> dict[str, object]:
         return {
             "id": source_ref.id,
@@ -399,8 +524,10 @@ def create_app(
             core_sot=core_sot,
             project_id=project_id,
             snapshot_id=snapshot_id,
+            vector_index=shared_vector_index,
+            embeddings=shared_embeddings,
         )
-        return summary.to_dict(backend=FAKE_VECTOR_BACKEND)
+        return summary.to_dict(backend=shared_backend)
 
     def _require_project_exists(project_id: str) -> None:
         core_sot.get_project(project_id=project_id)
@@ -761,6 +888,80 @@ def create_app(
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         return _analysis_run_payload(result)
+
+    @app.post(
+        "/projects/{project_id}/analysis/candidates/{candidate_id}/promote"
+    )
+    async def promote_candidate(
+        project_id: str, candidate_id: str
+    ) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+            candidate = analysis.get_candidate(
+                project_id=project_id, candidate_id=candidate_id
+            )
+            result = memory.promote_candidate(
+                project_id=project_id,
+                candidate=candidate,
+                mode=PromotionMode.MANUAL,
+            )
+        except (AnalysisNotFound, MemoryNotFound, NotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {
+            "memory": _memory_payload(result.memory),
+            "idempotent_replay": result.idempotent_replay,
+        }
+
+    @app.post("/projects/{project_id}/analysis/jobs/{job_id}/auto-promote")
+    async def auto_promote_job(
+        project_id: str, job_id: str
+    ) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+            candidates = analysis.list_candidates(
+                project_id=project_id, job_id=job_id
+            )
+        except (AnalysisNotFound, NotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # ``promoted`` reports only memories newly created by this call. A
+        # candidate already promoted (a re-run of the gate) replays idempotently
+        # and is excluded, so the count stays consistent with the idempotency
+        # semantics instead of growing on every re-call.
+        promoted = []
+        for candidate in candidates:
+            if candidate.status is not AnalysisCandidateStatus.NEEDS_REVIEW:
+                continue
+            result = memory.auto_promote_candidate(
+                project_id=project_id, candidate=candidate
+            )
+            if result is not None and not result.idempotent_replay:
+                promoted.append(_memory_payload(result.memory))
+        return {
+            "auto_promotion_threshold": memory.auto_promotion_threshold,
+            "promoted": promoted,
+        }
+
+    @app.get("/projects/{project_id}/memory")
+    async def list_memory(project_id: str) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {
+            "memory": [
+                _memory_payload(entry)
+                for entry in memory.list_memories(project_id=project_id)
+            ]
+        }
+
+    @app.get("/projects/{project_id}/memory/{memory_id}")
+    async def get_memory(project_id: str, memory_id: str) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+            entry = memory.get_memory(project_id=project_id, memory_id=memory_id)
+        except (MemoryNotFound, NotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _memory_payload(entry)
 
     def _context_item_payload(item) -> dict[str, object]:
         return {

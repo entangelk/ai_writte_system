@@ -2174,6 +2174,78 @@ db.index_sync_outbox.createIndex(
 
 ---
 
+## 39B. memory_entries
+
+### 39B.1 Purpose
+
+Canonical (approved) narrative memory store. Phase 2B.1 creates the first
+version of a memory by promoting a Phase 2A `needs_review` analysis candidate.
+It preserves the candidate's payload, provenance, source refs, and confidence
+and records the promotion audit trail. Entity/scope key resolution and versioned
+upsert are later slices (2B.3/2B.4).
+
+Promotion paths:
+
+```text
+manual          # user approval; always canonical, confidence-independent
+auto_threshold  # deterministic system threshold gate; only when confidence >= threshold
+```
+
+Status is `canonical` (single literal). Candidates below the auto-promotion
+threshold stay `needs_review` in `analysis_candidates`; they do not appear here.
+
+### 39B.2 Document Example
+
+```json
+{
+  "_id": "mem_001",
+  "project_id": "project_001",
+  "memory_type": "character_observation",
+  "status": "canonical",
+  "provenance": "source_observed",
+  "confidence": 0.9,
+  "source_ref_ids": ["source_ref_001"],
+  "payload": { "name": "Ariel", "observation": "brave under pressure" },
+  "version": 1,
+  "analysis_job_id": "analysis_job_001",
+  "source_candidate_id": "candidate_001",
+  "promotion_mode": "auto_threshold",
+  "applied_threshold": 0.9
+}
+```
+
+`applied_threshold` is `null` for manual promotion.
+
+### 39B.3 Idempotency
+
+Promoting the same candidate twice returns the same memory (no duplicate).
+
+Dedup key:
+
+```javascript
+{ project_id: 1, source_candidate_id: 1 }
+```
+
+Phase 2B.1 uniqueness is scoped to `source_candidate_id` only. Deterministic
+entity/scope key matching (`memory_type + scope_type + scope_id + name`) and the
+reconciliation of duplicate canonical entries for the same entity are compare
+(2B.3) concerns and are not enforced here.
+
+### 39B.4 Indexes
+
+```javascript
+db.memory_entries.createIndex(
+  { project_id: 1, source_candidate_id: 1 },
+  { unique: true, name: "uniq_memory_candidate_promotion" }
+)
+db.memory_entries.createIndex(
+  { project_id: 1 },
+  { name: "memory_entries_by_project" }
+)
+```
+
+---
+
 ## 39. index_sync_logs
 
 ### 39.1 Purpose
