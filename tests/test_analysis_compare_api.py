@@ -10,6 +10,7 @@ from services.application.app.analysis.compare import (
     CompareAction,
     JudgeResult,
 )
+from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
 from services.llm_gateway.app.provider import GenerationResult
 from services.application.app.analysis.models import (
     AnalysisCandidateAction,
@@ -65,6 +66,18 @@ class FakeJudge:
 
     def judge(self, *, candidate, memory):
         return JudgeResult(action=self._action, rationale=self._rationale)
+
+
+class _ProviderErrorJudge:
+    """A judge whose turn raises a Gateway ProviderError (timeout/unavailable/5xx)."""
+
+    async def judge(self, *, candidate, memory):
+        raise ProviderError(
+            code=ProviderErrorCode.UNAVAILABLE,
+            message="gateway is unavailable",
+            retryable=True,
+            provider="llm_gateway",
+        )
 
 
 def _seed_candidate(
@@ -171,6 +184,33 @@ class AnalysisCompareApiTest(unittest.TestCase):
         # pair is an InvalidJudgeResult → 502 at the HTTP boundary.
         client, analysis, memory, project_id = _build(
             judge=FakeJudge(CompareAction.CREATE)
+        )
+        _pj, prior = _seed_candidate(
+            analysis, project_id=project_id, logical_key="prior",
+            payload={"name": "Ariel", "observation": "brave"},
+        )
+        memory.promote_candidate(
+            project_id=project_id, candidate=prior, mode=PromotionMode.MANUAL
+        )
+        job, _c = _seed_candidate(
+            analysis, project_id=project_id, logical_key="cur",
+            payload={"name": "Ariel", "observation": "braver"},
+        )
+
+        response = client.post(
+            f"/projects/{project_id}/analysis/jobs/{job.id}/compare"
+        )
+        self.assertEqual(response.status_code, 502)
+
+    def test_provider_error_during_judge_maps_to_502(self):
+        # Pattern-sweep follow-up: a Gateway/provider failure during the
+        # matched-pair judge turn (the real TerminalJsonCompareJudge raises
+        # ProviderError from provider.generate on timeout/unavailable/5xx) is
+        # an LLM error → 502 per the v1.6.34 error taxonomy. Under-strict: with
+        # the endpoint's ProviderError catch removed this leaks as an unhandled
+        # 500 (reproven during verification).
+        client, analysis, memory, project_id = _build(
+            judge=_ProviderErrorJudge()
         )
         _pj, prior = _seed_candidate(
             analysis, project_id=project_id, logical_key="prior",

@@ -43,6 +43,7 @@ from services.application.app.analysis.compare_judge import (
     seed_analysis_compare_template,
 )
 from services.application.app.analysis.source import CoreSotSourceAdapter
+from services.llm_gateway.app.errors import ProviderError
 from services.application.app.memory.models import PromotionMode
 from services.application.app.memory.service import (
     InMemoryMemoryRepository,
@@ -1117,6 +1118,13 @@ def create_app(
         except CompareJudgeNotConfigured as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except InvalidJudgeResult as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except ProviderError as exc:
+            # A Gateway/provider failure during the matched-pair judge turn
+            # (timeout/unavailable/5xx) is an LLM error → 502, applying the
+            # v1.6.34 error taxonomy to this endpoint. Without this the
+            # ProviderError raised by GatewayGenerateProvider propagates as an
+            # unhandled 500.
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         return {
             "job_id": job.id,
