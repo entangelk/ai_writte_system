@@ -15,6 +15,8 @@ records. Two promotion paths exist:
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from services.application.app.analysis.models import (
     AnalysisCandidate,
     immutable_payload,
@@ -30,6 +32,16 @@ from services.application.app.memory.repository import (
     MemoryRepository,
 )
 from services.application.app.memory.scope import derive_scope
+
+
+def _union_source_refs(
+    existing: tuple[str, ...], incoming: tuple[str, ...]
+) -> tuple[str, ...]:
+    """Order-preserving union: existing refs first, then new ones, deduped."""
+    merged = dict.fromkeys(existing)
+    for ref in incoming:
+        merged.setdefault(ref, None)
+    return tuple(merged)
 
 
 class MemoryError(ValueError):
@@ -66,6 +78,12 @@ class InMemoryMemoryRepository:
             )
         self.memories[entry.id] = entry
         self._candidate_index[key] = entry.id
+
+    def update_memory(self, entry: MemoryEntry) -> None:
+        # In-place replacement of an existing entry (e.g. superseding a prior
+        # version). The candidate index is keyed on source_candidate_id, which
+        # a status transition does not change, so it stays intact.
+        self.memories[entry.id] = entry
 
     def list_memories_for_project(
         self, project_id: str
@@ -159,6 +177,116 @@ class MemoryService:
             candidate=candidate,
             mode=PromotionMode.AUTO_THRESHOLD,
         )
+
+    def record_updated_version(
+        self,
+        *,
+        project_id: str,
+        candidate: AnalysisCandidate,
+        target_memory_id: str,
+    ) -> PromoteMemoryResult:
+        """Phase 2B.4 ``update``: value changed → new version.
+
+        Replaces the payload with the candidate's, unions source refs, and takes
+        the candidate's confidence/provenance (D3).
+        """
+        return self._versioned_upsert(
+            project_id=project_id,
+            candidate=candidate,
+            target_memory_id=target_memory_id,
+            evidence_only=False,
+        )
+
+    def record_evidence_version(
+        self,
+        *,
+        project_id: str,
+        candidate: AnalysisCandidate,
+        target_memory_id: str,
+    ) -> PromoteMemoryResult:
+        """Phase 2B.4 ``add_evidence``: same value, new source → new version.
+
+        Preserves the prior payload/provenance, unions source refs, and keeps the
+        higher confidence (D3).
+        """
+        return self._versioned_upsert(
+            project_id=project_id,
+            candidate=candidate,
+            target_memory_id=target_memory_id,
+            evidence_only=True,
+        )
+
+    def _versioned_upsert(
+        self,
+        *,
+        project_id: str,
+        candidate: AnalysisCandidate,
+        target_memory_id: str,
+        evidence_only: bool,
+    ) -> PromoteMemoryResult:
+        if candidate.project_id != project_id:
+            raise MemoryNotFound("analysis candidate not found")
+
+        # D5 idempotency: a candidate produces at most one memory write. A
+        # re-application replays the version it already created.
+        existing_id = self._repo.find_memory_by_candidate(project_id, candidate.id)
+        if existing_id is not None:
+            return PromoteMemoryResult(
+                memory=self._require_memory(project_id, existing_id),
+                idempotent_replay=True,
+            )
+
+        target = self._require_memory(project_id, target_memory_id)
+        if target.status is not MemoryStatus.CANONICAL:
+            raise MemoryError("cannot version a non-canonical memory entry")
+        if candidate.candidate_type is not target.memory_type:
+            raise MemoryError(
+                "candidate type does not match the target memory type"
+            )
+
+        source_ref_ids = _union_source_refs(
+            target.source_ref_ids, candidate.source_ref_ids
+        )
+        if evidence_only:
+            payload = target.payload
+            confidence = max(target.confidence, candidate.confidence)
+            provenance = target.provenance
+        else:
+            payload = immutable_payload(candidate.payload)
+            confidence = candidate.confidence
+            provenance = candidate.provenance
+
+        new_entry = MemoryEntry(
+            id=self._repo.next_memory_id(),
+            project_id=project_id,
+            memory_type=target.memory_type,
+            status=MemoryStatus.CANONICAL,
+            provenance=provenance,
+            confidence=confidence,
+            source_ref_ids=source_ref_ids,
+            payload=payload,
+            version=target.version + 1,
+            analysis_job_id=candidate.job_id,
+            source_candidate_id=candidate.id,
+            promotion_mode=PromotionMode.MANUAL,
+            applied_threshold=None,
+            scope=target.scope,
+            supersedes=target.id,
+        )
+        try:
+            self._repo.put_memory(new_entry)
+        except DuplicatePromotionRequest:
+            # Concurrent apply of the same candidate: replay the winner.
+            return PromoteMemoryResult(
+                memory=self._require_memory_by_candidate(project_id, candidate.id),
+                idempotent_replay=True,
+            )
+        # Append-only: mint the new version first (canonical), then supersede the
+        # prior entry so it is preserved immutably rather than overwritten.
+        self._repo.update_memory(
+            replace(target, status=MemoryStatus.SUPERSEDED)
+        )
+        return PromoteMemoryResult(memory=new_entry, idempotent_replay=False)
 
     def get_memory(self, *, project_id: str, memory_id: str) -> MemoryEntry:
         return self._require_memory(project_id, memory_id)

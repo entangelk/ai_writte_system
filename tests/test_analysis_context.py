@@ -47,12 +47,13 @@ def _memory(
     payload=None,
     version: int = 1,
     source_ref_ids=("source-ref-1",),
+    status: MemoryStatus = MemoryStatus.CANONICAL,
 ) -> MemoryEntry:
     return MemoryEntry(
         id=memory_id,
         project_id=project_id,
         memory_type=memory_type,
-        status=MemoryStatus.CANONICAL,
+        status=status,
         provenance=AnalysisProvenance.SOURCE_OBSERVED,
         confidence=0.5,
         source_ref_ids=source_ref_ids,
@@ -106,6 +107,25 @@ class PriorMemorySearchTest(unittest.TestCase):
         self.assertIsNone(package.trace)
         self.assertEqual(
             {item.memory_id for item in package.prior_memories}, {"m1", "m2"}
+        )
+
+    def test_superseded_memories_excluded_from_prior_memory(self):
+        # 2B.2 O1, now testable: Phase 2B.4 introduced MemoryStatus.SUPERSEDED.
+        # The canonical-only prior filter must exclude a superseded version and
+        # keep the current canonical one (both directions in one case).
+        service = _service(
+            _memory(memory_id="old", memory_type=CHARACTER,
+                    status=MemoryStatus.SUPERSEDED),
+            _memory(memory_id="cur", memory_type=CHARACTER,
+                    status=MemoryStatus.CANONICAL),
+        )
+
+        package = service.build_prior_memory_package(
+            _request(memory_types=(CHARACTER,))
+        )
+
+        self.assertEqual(
+            {item.memory_id for item in package.prior_memories}, {"cur"}
         )
 
     def test_prior_memory_item_carries_five_required_comparison_fields(self):
