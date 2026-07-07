@@ -463,6 +463,11 @@ def create_app(
     # Phase 2B.4: apply safe compare actions to the canonical store. Deterministic
     # writes only (no LLM), so no env/injection seam is needed
     # (docs/plans/02b-4-memory-versioned-upsert-decisions.md, D1=A).
+    # Phase 2B.5 (D3=B): apply can enqueue a MEMORY_UPSERTED reindex, but the
+    # live wiring (real Chroma memory adapter + worker drain) lands in the next
+    # increment; until the drain side exists, create_app leaves reindex_outbox
+    # unwired so no undrainable entries are produced. The enqueue seam is unit
+    # tested (tests/test_memory_vector_index.py).
     apply_service = MemoryApplyService(memory_service=memory)
     sync_outbox = index_sync_outbox or _default_index_sync_outbox_service()
     runner = analysis_runner

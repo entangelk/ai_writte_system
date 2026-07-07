@@ -9,6 +9,8 @@ from enum import StrEnum
 
 class IndexRecordKind(StrEnum):
     SOURCE_BLOCK = "source_block"
+    # Phase 2B.5: a canonical MemoryEntry projected into the vector index.
+    MEMORY = "memory"
 
 
 class IndexSyncTarget(StrEnum):
@@ -23,6 +25,8 @@ class IndexSyncBackend(StrEnum):
 class IndexSyncEvent(StrEnum):
     PROJECT_ARCHIVED = "project_archived"
     DRAFT_ARCHIVED = "draft_archived"
+    # Phase 2B.5: apply minted/versioned a canonical memory; reindex it.
+    MEMORY_UPSERTED = "memory_upserted"
 
 
 class IndexSyncStatus(StrEnum):
@@ -126,6 +130,27 @@ class SourceBlockIndexRecord:
     vector: tuple[float, ...]
     project_archived: bool
     draft_archived: bool
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryIndexRecord:
+    """Phase 2B.5: a canonical MemoryEntry projected into the vector index.
+
+    ``id`` is the memory version's own id (``MemoryEntry.id``); each version is a
+    distinct entry (2B.4 append-only), so the vector for a superseded version is
+    removed when its successor is indexed. See
+    docs/plans/02b-5-memory-vector-reindex-decisions.md (D4).
+    """
+
+    id: str
+    kind: IndexRecordKind
+    project_id: str
+    memory_id: str
+    memory_type: str
+    version: int
+    status: str
+    text: str
+    vector: tuple[float, ...]
 
 
 @dataclass(frozen=True, slots=True)

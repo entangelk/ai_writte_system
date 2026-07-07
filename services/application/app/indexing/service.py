@@ -39,6 +39,7 @@ INDEX_SYNC_CLAIM_TIMEOUT_SECONDS = 600
 INDEX_SYNC_BACKOFF_SECONDS = (60, 300)
 PROJECTS_COLLECTION = "projects"
 DRAFTS_COLLECTION = "drafts"
+MEMORIES_COLLECTION = "memory_entries"
 CHROMA_TARGET = "chroma"
 
 
@@ -52,6 +53,10 @@ class VectorIndexAdapter(Protocol):
 
 class ArchiveIndexMutationAdapter(Protocol):
     def mark_archived(self, entry: IndexSyncOutboxEntry) -> None: ...
+
+
+class MemoryIndexMutationAdapter(Protocol):
+    def index_memory(self, entry: IndexSyncOutboxEntry) -> None: ...
 
 
 class IndexSyncRepository(Protocol):
@@ -278,7 +283,7 @@ class IndexSyncOutboxService:
     def enqueue_project_archived(
         self, *, project_id: str
     ) -> IndexSyncOutboxEntry:
-        return self._enqueue_archive_event(
+        return self._enqueue_event(
             project_id=project_id,
             event=IndexSyncEvent.PROJECT_ARCHIVED,
             source=IndexSyncSource(
@@ -290,7 +295,7 @@ class IndexSyncOutboxService:
     def enqueue_draft_archived(
         self, *, project_id: str, draft_id: str
     ) -> IndexSyncOutboxEntry:
-        return self._enqueue_archive_event(
+        return self._enqueue_event(
             project_id=project_id,
             event=IndexSyncEvent.DRAFT_ARCHIVED,
             source=IndexSyncSource(
@@ -299,7 +304,23 @@ class IndexSyncOutboxService:
             ),
         )
 
-    def _enqueue_archive_event(
+    def enqueue_memory_upserted(
+        self, *, project_id: str, memory_id: str, version: int
+    ) -> IndexSyncOutboxEntry:
+        # Phase 2B.5 (D3=B): apply enqueues; the worker loads the memory and
+        # reindexes it. Dedup is per memory_id, so a replay collapses onto the
+        # same pending entry. See memory_index.MemoryIndexSyncAdapter.
+        return self._enqueue_event(
+            project_id=project_id,
+            event=IndexSyncEvent.MEMORY_UPSERTED,
+            source=IndexSyncSource(
+                mongo_collection=MEMORIES_COLLECTION,
+                mongo_id=memory_id,
+                mongo_version=version,
+            ),
+        )
+
+    def _enqueue_event(
         self,
         *,
         project_id: str,
@@ -362,10 +383,12 @@ class IndexSyncWorker:
         *,
         repository: IndexSyncRepository,
         archive_adapter: ArchiveIndexMutationAdapter,
+        memory_adapter: MemoryIndexMutationAdapter | None = None,
         claim_timeout_seconds: int = INDEX_SYNC_CLAIM_TIMEOUT_SECONDS,
     ) -> None:
         self._repo = repository
         self._archive_adapter = archive_adapter
+        self._memory_adapter = memory_adapter
         self._claim_timeout_seconds = claim_timeout_seconds
 
     def run_once(
@@ -429,6 +452,13 @@ class IndexSyncWorker:
             IndexSyncEvent.DRAFT_ARCHIVED,
         }:
             self._archive_adapter.mark_archived(entry)
+            return
+        if entry.event is IndexSyncEvent.MEMORY_UPSERTED:
+            if self._memory_adapter is None:
+                raise RuntimeError(
+                    "memory index adapter is not configured for MEMORY_UPSERTED"
+                )
+            self._memory_adapter.index_memory(entry)
             return
         raise RuntimeError(f"unsupported index sync event: {entry.event.value}")
 
