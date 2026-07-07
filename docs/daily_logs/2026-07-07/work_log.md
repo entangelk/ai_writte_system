@@ -128,10 +128,35 @@
 
 - 오너가 **promote 경로도 재색인 enqueue**를 택했다(정기 backfill-only 아님). 근거: 수동 승격한 canonical memory가 다음 backfill을 기다리지 않고 즉시 analysis compare의 prior 검색에 반영돼야 한다(incremental correctness). 이 결정이 enqueue를 `MemoryService` choke point로 중앙화하는 설계로 이어졌고, 증분 1의 apply-seam을 흡수했다.
 
+## Writing ContextPackage에 canonical memory 포함 (⑤ §5 B, 2026-07-07, SoT v1.6.48)
+
+Phase 2B 완결 후 오너가 "a부터 브리프 진행"(a = ⑤ Writing canonical 포함) 지시.
+
+### 착수 결정 브리프 + 오너 결정
+
+- 브리프 `docs/plans/04-writing-canonical-context-decisions.md`(Resolved). **framing 전환(CLAUDE.md §1)**: 2026-07-05 `04-context-package-completion-decisions.md`가 `needs_review` candidate 포함을 canonical store 부재로 D1=B로 미뤘는데, Phase 2B(2B.1~2B.6)가 canonical store를 제공해 종속을 해소했다. 또한 조사로 **Gate는 이미 candidate 금지·canonical 허용**이고, `_gate_stale_findings`가 `get_snapshot`+content_hash로 **source-block을 하드 가정**해 memory item을 넣으면 무조건 `stale_item` reject됨을 확인 — 실제 작업은 (1) canonical **memory** 포함 + (2) memory item의 별도 Gate 검증 lineage임을 surface했다.
+- **오너 논의 후 결정**: **D1=A**(canonical만). 오너가 "B(candidate 포함)가 더 확장적/뚫어놓기"를 제기했으나, 확장성 직관이 반대임을 설명 — 이 slice의 machinery(memory→ContextItem, `pointer.collection` origin 분기, Gate origin별 재검증)를 candidate 포함이 그대로 재사용하므로 **A 먼저 = B가 작은 후속**이고, B를 지금 다 하면 두 origin·두 안전 자세를 섞고 review 지위(Phase 6) 미정을 추측해야 한다. 오너가 "잘못 이해했으면 A"로 위임 → A 확정, candidate 포함은 **바로 다음 slice**로 명시.
+- **D2=A**(Mongo-direct 먼저). 오너가 서비스 진짜 그림("벡터에서 찾고 → SoT인 Mongo 찔러 권위 재유도")과 검색엔진 확장 고려를 지시 → **retrieval 레이어(지금 Mongo-direct)와 권위 재유도(항상 memory store)를 분리 설계**해 후속에서 retrieval을 vector(`memory_vectors`)·ES로 교체해도 item 변환·Gate가 불변이도록 했다. D3~D7 추천 잠금.
+
+### 구현
+
+- 변경 파일: `context_search/models.py`(`ContextNeed.CANONICAL_MEMORY` + `NEED_ALLOWED_TOOLS`), `context_search/service.py`(retriever seam·step·item·gate 분기), `main.py`(배선), 테스트 `test_context_search_canonical_memory.py`(신규).
+- **need(D6)**: `CANONICAL_MEMORY`(tool `mongo`, `MACRO_NEEDS` 미포함=micro). planner 프롬프트는 need를 동적으로 받으므로 enum 추가만으로 planner가 계획 가능.
+- **retrieval(D2)**: `CanonicalMemoryRetriever` Protocol + `MongoDirectCanonicalMemoryRetriever`(`list_memories` canonical-only + limit, query 무시=랭킹 후속). vector/ES는 같은 seam 교체점.
+- **step/item(D3)**: `_run_canonical_memory_step`이 retriever로 canonical `MemoryEntry`를 받아 `_item_from_memory`로 변환 — status=CANONICAL, pointer(collection=`memory_entries`, document_id=memory_id, version_id=str(version), content_hash=""), snapshot_id="", text=`derive_memory_index_text`(쓰기와 동일 projection 재사용). retriever 미주입 시 빈 step(무실패).
+- **Gate(D4)**: `evaluate_context_gate`에 `memory_service` param 추가 + item origin(`pointer.collection==memory_entries`) 분기. memory item은 `_gate_memory_findings`가 `get_memory`로 (존재+`status is CANONICAL`+project) 재검증(없거나 superseded면 `stale_item`, memory_service 없으면 `memory_gate_unconfigured`), source-block item은 현행 SOT snapshot 유지. candidate 금지 유지(status is CANDIDATE → `candidate_item_not_allowed`).
+- **wiring**: `_default_context_search_service(memory=)`가 `MongoDirectCanonicalMemoryRetriever(memory)` 주입, gate 호출이 `memory_service=memory`. retriever/memory_service 모두 optional 기본이라 기존 회귀 무변.
+
+### 회귀 8개 + 검증
+
+- `tests/test_context_search_canonical_memory.py`(8): canonical_memory가 micro 배치+memory pointer(macro 빈), retriever 미주입→빈 무실패, retriever canonical-only+limit, gate pass(canonical), **gate reject 3방향**(superseded-stale under-strict·missing-stale·memory_service 없음), **candidate status memory item 여전히 금지**.
+- **mutation 재실증**: Gate memory canonical 검사 무력화 시 superseded 거절 재실패; retriever canonical 필터 무력화 시 retriever+step 재실패.
+- `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **618 passed / 45 skipped**(2B.6 610 → +8). `git diff --check` 통과. 기존 context search 55개 무변(retriever/memory_service optional).
+
 ## Next steps
 
 - **2B.6 threshold 실 캘리브레이션(sandbox 밖, 코드 완료)**: semantic 매칭은 off 기본(D4=A)이라, 실 embedding(BGE-m3-ko) + 실 event/open_question 데이터로 `ANALYSIS_SEMANTIC_MATCH_THRESHOLD` 실값을 잡아야 발화한다. 배포 stack에서 유사/비유사 event pair의 cosine 분포를 관찰해 임계 확정 → env 설정. 이때 2B.5 live(promote→outbox→worker→memory_vectors)도 함께 관통 확인.
 - **Phase 2B.5 live 실행(sandbox 밖, 코드 완료)**: `scripts/phase2b5_memory_reindex_live_smoke.py`를 배포 stack(실 Mongo+Chroma+embedding)에서 실행해 promote→outbox→worker→실제 `memory_vectors` Chroma record를 관통 확인. 필요 시 backfill `scripts/phase2b5_reindex_memory.py`로 기존 canonical 전수 재색인.
-- **후속 slice**: character 별칭/동명이인 semantic 보강(2B.3 D2=A 확장), ⑤ Writing canonical 포함, conflict/merge/split review queue 영속화.
+- **후속 slice**: `needs_review` candidate의 Writing 포함(⑤ canonical은 v1.6.48로 닫힘 — candidate는 이 machinery 재사용 + review 지위 Phase 6), Writing canonical retrieval의 vector/검색엔진 확장(v1.6.48 retrieval 레이어 교체), character 별칭 semantic 보강(2B.3 D2=A 확장), conflict/merge/split review queue 영속화.
 - **곁가지(막힘 없음, sandbox 밖)**: 2B.3.2 compare judge live smoke, worker→real Chroma archive live smoke.
 - **추적 부채(2026-07-06 이월)**: `ProviderError`→502 패턴이 `/context-search`·2A extraction adapter에 미적용(HANDOFF Next Tasks #8).

@@ -44,11 +44,15 @@ from services.application.app.indexing.models import (
     IndexPointer,
     SourceBlockIndexRecord,
 )
+from services.application.app.indexing.memory_index import derive_memory_index_text
 from services.application.app.indexing.service import (
     EmbeddingProvider,
+    MEMORIES_COLLECTION,
     SOURCE_BLOCK_COLLECTION,
     SourceBlockIndexingService,
 )
+from services.application.app.memory.models import MemoryEntry, MemoryStatus
+from services.application.app.memory.service import MemoryNotFound, MemoryService
 
 
 DEFAULT_WALL_CLOCK_SECONDS = 60
@@ -90,6 +94,45 @@ class VectorSearchAdapter(Protocol):
     ) -> tuple[SourceBlockIndexRecord, ...]: ...
 
 
+DEFAULT_CANONICAL_MEMORY_LIMIT = 8
+
+
+class CanonicalMemoryRetriever(Protocol):
+    """Writing canonical inclusion retrieval seam (⑤ §5 B, D2).
+
+    Returns the authoritative canonical ``MemoryEntry`` records to surface as
+    Writing evidence. The Mongo-direct implementation lists the store; a later
+    vector/search-engine layer implements the same method (retrieval finds the
+    ids, the memory store stays the authority) without changing item or Gate
+    logic. See docs/plans/04-writing-canonical-context-decisions.md (D2=A).
+    """
+
+    def retrieve(
+        self, *, project_id: str, query: str, limit: int
+    ) -> tuple[MemoryEntry, ...]: ...
+
+
+class MongoDirectCanonicalMemoryRetriever:
+    """D2=A: list a project's canonical memories from the store (no ranking).
+
+    The ``query`` is ignored for now — relevance ranking arrives with the vector
+    retrieval layer. Only ``CANONICAL`` entries are returned (superseded versions
+    are prior history, not current knowledge)."""
+
+    def __init__(self, memory_service: MemoryService) -> None:
+        self._memory = memory_service
+
+    def retrieve(
+        self, *, project_id: str, query: str, limit: int
+    ) -> tuple[MemoryEntry, ...]:
+        canonical = [
+            entry
+            for entry in self._memory.list_memories(project_id=project_id)
+            if entry.status is MemoryStatus.CANONICAL
+        ]
+        return tuple(canonical[:limit])
+
+
 def estimate_tokens(text: str) -> int:
     return max(1, (len(text) + 3) // 4)
 
@@ -103,9 +146,11 @@ class ContextSearchService:
         vector_search: VectorSearchAdapter,
         embeddings: EmbeddingProvider,
         planner: SearchPlanner,
+        canonical_memory_retriever: CanonicalMemoryRetriever | None = None,
         wall_clock_seconds: float = DEFAULT_WALL_CLOCK_SECONDS,
         vector_hit_limit: int = DEFAULT_VECTOR_HIT_LIMIT,
         recent_scene_block_limit: int = DEFAULT_RECENT_SCENE_BLOCK_LIMIT,
+        canonical_memory_limit: int = DEFAULT_CANONICAL_MEMORY_LIMIT,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if wall_clock_seconds <= 0:
@@ -115,9 +160,14 @@ class ContextSearchService:
         self._vector_search = vector_search
         self._embeddings = embeddings
         self._planner = planner
+        # Writing canonical inclusion (⑤ §5 B). When absent, a canonical_memory
+        # step produces no items (the need is simply unserved), so existing
+        # Writing requests without it are unchanged.
+        self._canonical_memory_retriever = canonical_memory_retriever
         self._wall_clock_seconds = wall_clock_seconds
         self._vector_hit_limit = vector_hit_limit
         self._recent_scene_block_limit = recent_scene_block_limit
+        self._canonical_memory_limit = canonical_memory_limit
         self._clock = clock
 
     async def build_context_package(
@@ -234,9 +284,91 @@ class ContextSearchService:
         tool: SearchTool,
         request: ContextSearchRequest,
     ) -> tuple[SearchStepTrace, tuple[ContextItem, ...]]:
+        if step.need is ContextNeed.CANONICAL_MEMORY:
+            return self._run_canonical_memory_step(step, request)
         if tool is SearchTool.VECTOR:
             return self._run_vector_step(step, request)
         return self._run_mongo_step(step, request)
+
+    def _run_canonical_memory_step(
+        self, step, request: ContextSearchRequest
+    ) -> tuple[SearchStepTrace, tuple[ContextItem, ...]]:
+        if self._canonical_memory_retriever is None:
+            # The need is unserved in this deployment; emit an empty (non-failing)
+            # step so an unwired canonical_memory request degrades to no memories.
+            return (
+                SearchStepTrace(
+                    step_id=step.step_id,
+                    need=step.need,
+                    tool=SearchTool.MONGO,
+                    hits_considered=0,
+                    items_produced=0,
+                    excluded=(),
+                    failure=None,
+                ),
+                (),
+            )
+        try:
+            entries = self._canonical_memory_retriever.retrieve(
+                project_id=request.project_id,
+                query=step.query or request.query,
+                limit=self._canonical_memory_limit,
+            )
+        except Exception as exc:
+            return (
+                SearchStepTrace(
+                    step_id=step.step_id,
+                    need=step.need,
+                    tool=SearchTool.MONGO,
+                    hits_considered=0,
+                    items_produced=0,
+                    excluded=(),
+                    failure=StepFailure(
+                        error_type=ContextSearchErrorType.BACKEND_ERROR,
+                        detail=f"canonical memory retrieval failed: {exc}",
+                    ),
+                ),
+                (),
+            )
+        items = tuple(self._item_from_memory(step.need, entry) for entry in entries)
+        return (
+            SearchStepTrace(
+                step_id=step.step_id,
+                need=step.need,
+                tool=SearchTool.MONGO,
+                hits_considered=len(entries),
+                items_produced=len(items),
+                excluded=(),
+                failure=None,
+            ),
+            items,
+        )
+
+    def _item_from_memory(
+        self, need: ContextNeed, entry: MemoryEntry
+    ) -> ContextItem:
+        # The memory store is the authority (there is no source-block snapshot),
+        # so the pointer names the memory collection/version and the Gate
+        # re-validates against the store, not a SOT snapshot (D3/D4). Text uses
+        # the same projection as the vector index (derive_memory_index_text) for
+        # a stable rendering.
+        text = derive_memory_index_text(entry.memory_type, entry.payload)
+        return ContextItem(
+            need=need,
+            status=ContextItemStatus.CANONICAL,
+            text=text,
+            pointer=IndexPointer(
+                project_id=entry.project_id,
+                collection=MEMORIES_COLLECTION,
+                document_id=entry.id,
+                version_id=str(entry.version),
+                content_hash="",
+            ),
+            snapshot_id="",
+            sot_reloaded=True,
+            token_estimate=estimate_tokens(text),
+            source_ref_ids=entry.source_ref_ids,
+        )
 
     def _run_vector_step(
         self, step, request: ContextSearchRequest
@@ -471,11 +603,15 @@ def evaluate_context_gate(
     package: ContextPackage,
     request: ContextSearchRequest,
     core_sot: CoreSotService,
+    memory_service: MemoryService | None = None,
 ) -> GateDecision:
     """Independent Context Gate check; never replaced by loop preflight.
 
-    Re-derives item validity from the SOT instead of trusting the
-    orchestration flags where possible.
+    Re-derives item validity from the authority instead of trusting the
+    orchestration flags: source-block items reload from the SOT snapshot, and
+    canonical-memory items (Writing canonical inclusion, ⑤) re-validate against
+    the memory store — still present and still ``canonical`` (D4). The candidate
+    prohibition stays: only canonical is allowed into Writing context.
     """
     findings: list[GateFinding] = []
     items = package.macro_items + package.micro_evidence
@@ -502,10 +638,16 @@ def evaluate_context_gate(
                 GateFinding(
                     check="candidate_item_not_allowed",
                     detail=f"item {item.pointer.document_id} carries "
-                    "candidate-status memory, which is a later slice",
+                    "candidate-status memory, which is not allowed in Writing "
+                    "context (canonical only)",
                 )
             )
-        findings.extend(_gate_stale_findings(item, request, core_sot))
+        if item.pointer.collection == MEMORIES_COLLECTION:
+            findings.extend(
+                _gate_memory_findings(item, request, memory_service)
+            )
+        else:
+            findings.extend(_gate_stale_findings(item, request, core_sot))
     total = sum(item.token_estimate for item in items)
     if total > request.context_budget.max_tokens:
         findings.append(
@@ -518,6 +660,45 @@ def evaluate_context_gate(
     if findings:
         return GateDecision(decision=GATE_REJECT, findings=tuple(findings))
     return GateDecision(decision=GATE_PASS, findings=())
+
+
+def _gate_memory_findings(
+    item: ContextItem,
+    request: ContextSearchRequest,
+    memory_service: MemoryService | None,
+) -> tuple[GateFinding, ...]:
+    # Canonical-memory items have no SOT snapshot; the authority is the memory
+    # store. Re-validate that the memory still exists, is still canonical (a
+    # superseded/deleted version is stale), and belongs to the project (D4).
+    if memory_service is None:
+        return (
+            GateFinding(
+                check="memory_gate_unconfigured",
+                detail=f"memory item {item.pointer.document_id} cannot be "
+                "validated without a memory service",
+            ),
+        )
+    try:
+        entry = memory_service.get_memory(
+            project_id=request.project_id, memory_id=item.pointer.document_id
+        )
+    except MemoryNotFound:
+        return (
+            GateFinding(
+                check="stale_item",
+                detail=f"memory {item.pointer.document_id} is missing or "
+                "belongs to another project",
+            ),
+        )
+    if entry.status is not MemoryStatus.CANONICAL:
+        return (
+            GateFinding(
+                check="stale_item",
+                detail=f"memory {item.pointer.document_id} is no longer "
+                f"canonical (status {entry.status.value})",
+            ),
+        )
+    return ()
 
 
 def _gate_stale_findings(

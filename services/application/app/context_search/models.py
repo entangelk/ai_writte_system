@@ -38,6 +38,11 @@ class ContextNeed(StrEnum):
     SOURCE_QUOTE = "source_quote"
     # Phase 2B.2: canonical prior memories retrieved for Analysis comparison.
     PRIOR_MEMORY = "prior_memory"
+    # Writing canonical inclusion (⑤ §5 B): approved canonical memories surfaced
+    # as micro evidence for Writing. Served Mongo-direct now; the retrieval layer
+    # extends to vector/search-engine later (docs/plans/
+    # 04-writing-canonical-context-decisions.md, D2=A).
+    CANONICAL_MEMORY = "canonical_memory"
 
 
 class SearchTool(StrEnum):
@@ -66,6 +71,9 @@ NEED_ALLOWED_TOOLS: dict[ContextNeed, tuple[SearchTool, ...]] = {
     ContextNeed.RECENT_SCENES: (SearchTool.MONGO,),
     ContextNeed.EVENT_CONTEXT: (SearchTool.VECTOR,),
     ContextNeed.SOURCE_QUOTE: (SearchTool.VECTOR,),
+    # canonical_memory is served Mongo-direct (D2=A); when the retrieval layer
+    # gains a vector path it adds VECTOR here without touching item/Gate logic.
+    ContextNeed.CANONICAL_MEMORY: (SearchTool.MONGO,),
 }
 
 # Needs whose items land in macro context; the rest are micro evidence.

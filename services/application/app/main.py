@@ -81,6 +81,7 @@ from services.application.app.context_search.service import (
     ContextSearchFailed,
     ContextSearchService,
     InvalidContextSearchRequest,
+    MongoDirectCanonicalMemoryRetriever,
     evaluate_context_gate,
 )
 from services.application.app.core_sot.service import (
@@ -369,6 +370,7 @@ def _default_context_search_service(
     *,
     vector_index: InMemoryVectorIndexAdapter | ChromaVectorIndexAdapter,
     embeddings: EmbeddingProvider,
+    memory: MemoryService,
 ) -> ContextSearchService | None:
     base_url = os.environ.get("LLM_GATEWAY_BASE_URL")
     if not base_url:
@@ -404,6 +406,9 @@ def _default_context_search_service(
         vector_search=vector_index,
         embeddings=embeddings,
         planner=planner,
+        # Writing canonical inclusion (⑤ §5 B, D2=A): Mongo-direct retrieval of
+        # canonical memories; the retrieval layer extends to vector later.
+        canonical_memory_retriever=MongoDirectCanonicalMemoryRetriever(memory),
     )
 
 
@@ -560,6 +565,7 @@ def create_app(
             core_sot,
             vector_index=shared_vector_index,
             embeddings=shared_embeddings,
+            memory=memory,
         )
 
     @app.get("/health")
@@ -1396,7 +1402,10 @@ def create_app(
         try:
             package = await context_search.build_context_package(request)
             gate = evaluate_context_gate(
-                package=package, request=request, core_sot=core_sot
+                package=package,
+                request=request,
+                core_sot=core_sot,
+                memory_service=memory,
             )
         except InvalidContextSearchRequest as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
