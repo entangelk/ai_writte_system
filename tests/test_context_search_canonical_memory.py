@@ -21,6 +21,7 @@ from services.application.app.context_search.models import (
     ContextItemStatus,
     ContextNeed,
     ContextPackage,
+    ContextSearchErrorType,
     ContextSearchPurpose,
     ContextSearchRequest,
     GATE_PASS,
@@ -67,6 +68,17 @@ class _StaticPlanner:
         return self.plan
 
 
+class _RaisingRetriever:
+    """CanonicalMemoryRetriever whose retrieve() always raises.
+
+    Simulates a memory-store failure (e.g. pymongo outage) so the canonical
+    memory step's error mapping can be exercised end-to-end.
+    """
+
+    def retrieve(self, *, project_id, query, limit):
+        raise RuntimeError("memory store unreachable")
+
+
 def _memory(memory_id, *, payload, status=MemoryStatus.CANONICAL, version=1,
             project_id="project-1"):
     return MemoryEntry(
@@ -86,7 +98,7 @@ def _memory(memory_id, *, payload, status=MemoryStatus.CANONICAL, version=1,
     )
 
 
-def _service(memory_service, *, with_retriever=True):
+def _service(memory_service, *, with_retriever=True, retriever=None):
     core_sot = CoreSotService(InMemoryCoreSotRepository())
     vector_index = InMemoryVectorIndexAdapter()
     indexing = SourceBlockIndexingService(
@@ -94,11 +106,12 @@ def _service(memory_service, *, with_retriever=True):
         embeddings=DeterministicFakeEmbeddingProvider(),
         vector_index=vector_index,
     )
-    retriever = (
-        MongoDirectCanonicalMemoryRetriever(memory_service)
-        if with_retriever
-        else None
-    )
+    if retriever is not None:
+        resolved_retriever = retriever
+    elif with_retriever:
+        resolved_retriever = MongoDirectCanonicalMemoryRetriever(memory_service)
+    else:
+        resolved_retriever = None
     return ContextSearchService(
         core_sot=core_sot,
         indexing_service=indexing,
@@ -118,7 +131,7 @@ def _service(memory_service, *, with_retriever=True):
                 ),
             )
         ),
-        canonical_memory_retriever=retriever,
+        canonical_memory_retriever=resolved_retriever,
     )
 
 
@@ -317,6 +330,31 @@ class CanonicalMemoryGateTest(unittest.TestCase):
         self.assertEqual(decision.decision, GATE_REJECT)
         self.assertTrue(
             any(f.check == "candidate_item_not_allowed" for f in decision.findings)
+        )
+
+
+class CanonicalMemoryRetrieverFailureTest(unittest.TestCase):
+    def test_retriever_failure_maps_to_backend_error_without_crashing(self):
+        # Boundary cell #10 (⑤ §5 B verification): a failing canonical-memory
+        # retriever must map to a BACKEND_ERROR step failure and degrade the
+        # package, NOT crash the whole search. Guards run both directions —
+        # removing the try/except (under-strict: exception propagates) or
+        # failing to record BACKEND_ERROR (over-strict: silent/empty step)
+        # both re-fail this test.
+        memory = MemoryService(InMemoryMemoryRepository())
+        service = _service(memory, retriever=_RaisingRetriever())
+        package = asyncio.run(service.build_context_package(_request()))
+        # over-strict: the failure is contained to the step; the package is
+        # still built and marked degraded instead of raising.
+        self.assertTrue(package.degraded)
+        self.assertEqual(package.micro_evidence, ())
+        # under-strict: the canonical_memory step records a BACKEND_ERROR.
+        self.assertEqual(len(package.trace.steps), 1)
+        step = package.trace.steps[0]
+        self.assertEqual(step.need, ContextNeed.CANONICAL_MEMORY)
+        self.assertIsNotNone(step.failure)
+        self.assertEqual(
+            step.failure.error_type, ContextSearchErrorType.BACKEND_ERROR
         )
 
 

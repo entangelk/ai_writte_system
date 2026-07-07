@@ -351,7 +351,10 @@ class ContextSearchService:
         # so the pointer names the memory collection/version and the Gate
         # re-validates against the store, not a SOT snapshot (D3/D4). Text uses
         # the same projection as the vector index (derive_memory_index_text) for
-        # a stable rendering.
+        # a stable rendering. snapshot_id/content_hash/sot_reloaded are required
+        # ContextItem fields but inert here: the Gate's origin branch
+        # (pointer.collection == MEMORIES_COLLECTION) bypasses the source-block
+        # _gate_stale_findings that would otherwise read them.
         text = derive_memory_index_text(entry.memory_type, entry.payload)
         return ContextItem(
             need=need,

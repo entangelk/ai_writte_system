@@ -153,6 +153,15 @@ Phase 2B 완결 후 오너가 "a부터 브리프 진행"(a = ⑤ Writing canonic
 - **mutation 재실증**: Gate memory canonical 검사 무력화 시 superseded 거절 재실패; retriever canonical 필터 무력화 시 retriever+step 재실패.
 - `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **618 passed / 45 skipped**(2B.6 610 → +8). `git diff --check` 통과. 기존 context search 55개 무변(retriever/memory_service optional).
 
+### ⑤ §5 B 검증 후속 보강 (독립 검증 조건부 합격 → 폐쇄)
+
+독립 검증 기록 `docs/verifications/2026-07-07/writing_canonical_memory_inclusion.md`는 **조건부 합격**(차단 1건 + 비차단 관찰 2건)이었다. 차단을 닫고 비차단 1건을 보강했다(인계: 구현 AI가 `ContextSearchErrorType` import 추가 후 중단 → 검증 AI가 폐쇄 인계 수행).
+
+- **차단 폐쇄(boundary matrix cell #10)**: SoT §5 "retriever step 실패 error taxonomy=`backend_error`/…"가 규정하는 canonical_memory step(=retriever step)의 실패 매핑 분기(`_run_canonical_memory_step`의 `try/except Exception → StepFailure(BACKEND_ERROR)`, `service.py:311-332`)에 회귀가 없었다(프로덕션 Mongo memory store 장애로 도달 가능). `CanonicalMemoryRetrieverFailureTest.test_retriever_failure_maps_to_backend_error_without_crashing` 추가 — `_RaisingRetriever`(항상 raise)를 `_service(retriever=…)` override로 주입해 (a) 예외가 전파되지 않고 `BACKEND_ERROR` failure로 기록됨(under-strict), (b) failure가 step에 격리되어 package가 `degraded=True`로 완성되고 search 전체가 crash하지 않음(over-strict)을 잠갔다. **mutation 재실증(양방향)**: `except Exception`→`except TypeError`(RuntimeError 미포착→전파) 시 재실패(under-strict); `BACKEND_ERROR`→`SYSTEM_ERROR` 시 재실패(over-strict, 특정 매핑 lock). v1.6.45 행16 폐쇄 선례와 동형.
+- **비차단 #2 보강(inert placeholder 문서화)**: `_item_from_memory`가 memory item에 `snapshot_id=""`·`sot_reloaded=True`를 두는데, 이 필드들의 유일 소비자(`if not item.sot_reloaded`, `_gate_stale_findings` 내 `snapshot_id`)는 memory-origin Gate 분기가 우회해 **의미상 inert**(dataclass 필수 필드 채움). 필드명이 memory origin에서 오도적이므로 `_item_from_memory` 주석에 이유(origin 분기가 `_gate_stale_findings`를 bypass)를 문서화했다(코드 동작 변경 없음).
+- **비차단 #3(무조치)**: 샌드박스 `pytest`(ignore 없음)가 `test_memory_mongo.py` 4개를 fail. 부모 커밋 `f730791`에서 동일 재현 + ce60cdb는 `memory/` 미변경 → 사전-존재 Mongo env artifact(회귀 아님). 프로젝트 검증 관례(`--ignore=tests/test_memory_mongo.py`) 기준 "618 passed"는 본 sandbox에서도 정확히 일치. 코드 변경 불요.
+- 재검증: `python3 -m pytest tests/test_context_search_canonical_memory.py -q` → **9 passed**(8→9). `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **619 passed / 45 skipped**(618→+1). `git diff --check` 통과.
+
 ## Next steps
 
 - **2B.6 threshold 실 캘리브레이션(sandbox 밖, 코드 완료)**: semantic 매칭은 off 기본(D4=A)이라, 실 embedding(BGE-m3-ko) + 실 event/open_question 데이터로 `ANALYSIS_SEMANTIC_MATCH_THRESHOLD` 실값을 잡아야 발화한다. 배포 stack에서 유사/비유사 event pair의 cosine 분포를 관찰해 임계 확정 → env 설정. 이때 2B.5 live(promote→outbox→worker→memory_vectors)도 함께 관통 확인.
