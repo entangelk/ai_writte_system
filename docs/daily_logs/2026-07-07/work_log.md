@@ -118,6 +118,12 @@
 - 오너가 **D1=A**(compare `_find_matches`)를 택했다. HANDOFF/2B.2의 "PriorMemoryBackend 교체"는 seam 위치 오기였고, 누적 문제의 실제 지점이 compare임을 확인해 그쪽에 semantic을 넣었다.
 - 오너가 **D4=A**(off 기본)를 택했다. 추측 threshold로 canonical을 잘못 병합하지 않도록, seam+query 인프라만 안전하게 세우고 실 매칭은 실 embedding 캘리브레이션 후 켠다(D2=B 선례).
 
+### 2B.6 검증 후속 보강 (독립 검증 합격 후)
+
+- 독립 검증 `docs/verifications/2026-07-07/phase_2b_6_semantic_identity_resolution.md` **합격**(차단 없음). 비차단 관찰 4건 중 코드로 닫을 수 있는 #1을 보강했다.
+- **관찰 #1(운영 footgun) 보강**: `_build_semantic_matcher` wiring이 threshold+`CHROMA_HOST`만 검사해, `EMBEDDING_SERVICE_URL`을 빠뜨리고 semantic을 켜면 query vector가 fake embedding(차원 불일치)으로 나가 실 `memory_vectors`(1024-dim) query에서 실패한다. 이를 startup에서 명확히 `RuntimeError`로 fail-fast하도록 guard를 추가했다(첫 candidate의 혼란스러운 차원 오류 대신). 회귀 2개(`test_semantic_wiring_without_embedding_url_fails_fast` fail-fast + `test_semantic_wiring_off_by_default_returns_none` off-기본 over-strict), guard 제거 mutation 시 fail-fast 소실 재실증. pytest 608→**610 passed**.
+- **관찰 #2/#3/#4(무조치)**: #2(superseded leak)은 index canonical-only 불변식 + matcher 2차 canonical 필터로 정확성 보장(검증도 동의), #3(read-after-write)은 D8 수용 경계, #4(실 캘리브레이션)는 sandbox 밖 정상 후속 — 코드 변경 불요.
+
 ## User Decisions and Rationale (증분 2)
 
 - 오너가 **promote 경로도 재색인 enqueue**를 택했다(정기 backfill-only 아님). 근거: 수동 승격한 canonical memory가 다음 backfill을 기다리지 않고 즉시 analysis compare의 prior 검색에 반영돼야 한다(incremental correctness). 이 결정이 enqueue를 `MemoryService` choke point로 중앙화하는 설계로 이어졌고, 증분 1의 apply-seam을 흡수했다.

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import unittest
+from unittest import mock
 
 import httpx
 
@@ -310,6 +311,39 @@ class AnalysisCompareApiTest(unittest.TestCase):
             if original_base is not None:
                 main_module.os.environ["LLM_GATEWAY_BASE_URL"] = original_base
         self.assertIsNone(compare._judge)
+
+    def test_semantic_wiring_without_embedding_url_fails_fast(self):
+        # Phase 2B.6 verification obs #1: enabling semantic matching (threshold +
+        # CHROMA_HOST) without EMBEDDING_SERVICE_URL would query the real
+        # memory_vectors collection with the fake embedding's dimensions. The
+        # wiring must fail fast with a clear message, not defer to a cryptic
+        # dimension error at query time.
+        with mock.patch.dict(
+            main_module.os.environ,
+            {
+                "ANALYSIS_SEMANTIC_MATCH_THRESHOLD": "0.85",
+                "CHROMA_HOST": "chroma",
+            },
+            clear=False,
+        ):
+            main_module.os.environ.pop("EMBEDDING_SERVICE_URL", None)
+            with self.assertRaises(RuntimeError) as ctx:
+                main_module._build_semantic_matcher(
+                    MemoryService(InMemoryMemoryRepository())
+                )
+        self.assertIn("EMBEDDING_SERVICE_URL", str(ctx.exception))
+
+    def test_semantic_wiring_off_by_default_returns_none(self):
+        # Over-strict guard: absent the threshold on-switch, no matcher is built
+        # (event/open_question stay always-create), regardless of CHROMA_HOST.
+        with mock.patch.dict(
+            main_module.os.environ, {"CHROMA_HOST": "chroma"}, clear=False
+        ):
+            main_module.os.environ.pop("ANALYSIS_SEMANTIC_MATCH_THRESHOLD", None)
+            matcher = main_module._build_semantic_matcher(
+                MemoryService(InMemoryMemoryRepository())
+            )
+        self.assertIsNone(matcher)
 
     def test_missing_project_returns_404(self):
         client, analysis, _memory, project_id = _build()

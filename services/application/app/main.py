@@ -336,6 +336,16 @@ def _build_semantic_matcher(memory: MemoryService):
     host = os.environ.get("CHROMA_HOST")
     if not threshold_raw or not host:
         return None
+    # Fail fast on a misconfiguration: enabling semantic matching without a real
+    # embedding service would query the 1024-dim memory_vectors collection with
+    # the fake embedding's dimensions. Surface it clearly at wiring time instead
+    # of a cryptic dimension mismatch on the first candidate (verification obs #1).
+    if not os.environ.get("EMBEDDING_SERVICE_URL"):
+        raise RuntimeError(
+            "ANALYSIS_SEMANTIC_MATCH_THRESHOLD + CHROMA_HOST enable semantic "
+            "memory matching, which requires EMBEDDING_SERVICE_URL — the fake "
+            "embedding does not match the memory_vectors collection dimensions."
+        )
     vector_search = ChromaMemoryVectorIndexAdapter(
         connect_chroma_collection(
             host=host,
