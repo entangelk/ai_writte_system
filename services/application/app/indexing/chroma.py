@@ -337,6 +337,29 @@ class ChromaMemoryVectorIndexAdapter:
         records = _memory_records_from_get(result)
         return tuple(sorted(records, key=lambda record: record.id))
 
+    def query_similar(
+        self,
+        *,
+        project_id: str,
+        memory_type: str,
+        vector: tuple[float, ...],
+        limit: int,
+    ) -> tuple[MemoryIndexRecord, ...]:
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        result = self._collection.query(
+            query_embeddings=[list(vector)],
+            n_results=limit,
+            where={
+                "$and": [
+                    {"project_id": project_id},
+                    {"memory_type": memory_type},
+                ]
+            },
+            include=self._INCLUDE,
+        )
+        return _memory_records_from_query(result)
+
 
 def _memory_records_from_get(result: dict[str, Any]) -> list[MemoryIndexRecord]:
     ids = result.get("ids")
@@ -352,6 +375,28 @@ def _memory_records_from_get(result: dict[str, Any]) -> list[MemoryIndexRecord]:
         memory_record_from_chroma(record_id, embedding, metadata)
         for record_id, embedding, metadata in zip(ids, embeddings, metadatas)
     ]
+
+
+def _memory_records_from_query(
+    result: dict[str, Any],
+) -> tuple[MemoryIndexRecord, ...]:
+    # query nests one list per query embedding; we send exactly one.
+    ids_by_query = result.get("ids")
+    if ids_by_query is None:
+        ids_by_query = [[]]
+    ids = ids_by_query[0]
+    embeddings_by_query = result.get("embeddings")
+    if embeddings_by_query is None:
+        embeddings_by_query = [[None] * len(ids)]
+    metadatas_by_query = result.get("metadatas")
+    if metadatas_by_query is None:
+        metadatas_by_query = [[]]
+    embeddings = embeddings_by_query[0]
+    metadatas = metadatas_by_query[0]
+    return tuple(
+        memory_record_from_chroma(record_id, embedding, metadata)
+        for record_id, embedding, metadata in zip(ids, embeddings, metadatas)
+    )
 
 
 def connect_chroma_collection(

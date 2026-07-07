@@ -88,15 +88,34 @@ class CompareJudge(Protocol):
     ) -> JudgeResult | Awaitable[JudgeResult]: ...
 
 
+class SemanticMemoryMatcher(Protocol):
+    """Phase 2B.6 (D1=A): identity resolution for scope-less candidates.
+
+    event/open_question have no deterministic scope key, so instead of always
+    treating them as new, a semantic backend queries the memory vector index for
+    the closest prior canonical memory of the same type. Returns the matched
+    canonical memories (top-1 per D6=A; empty when nothing clears the threshold),
+    which then flow through the same 0/1 judge logic as the character path.
+    """
+
+    def match(
+        self, *, project_id: str, job_id: str, candidate: AnalysisCandidate
+    ) -> tuple[MemoryEntry, ...]: ...
+
+
 class AnalysisCompareService:
     def __init__(
         self,
         *,
         memory_service: MemoryService,
         judge: CompareJudge | None = None,
+        semantic_matcher: SemanticMemoryMatcher | None = None,
     ) -> None:
         self._memory = memory_service
         self._judge = judge
+        # Phase 2B.6 (D4=A): off by default. Without a matcher, scope-less
+        # candidates (event/open_question) stay always-create, exactly as before.
+        self._semantic_matcher = semantic_matcher
 
     async def compare_job(
         self,
@@ -170,7 +189,14 @@ class AnalysisCompareService:
         scope: MemoryScope | None,
     ) -> tuple[MemoryEntry, ...]:
         if scope is None:
-            return ()
+            # event/open_question: no deterministic key. Phase 2B.6 (D1=A) —
+            # a semantic matcher (when configured, D4=A off by default) resolves
+            # the closest prior canonical; otherwise stay always-create.
+            if self._semantic_matcher is None:
+                return ()
+            return self._semantic_matcher.match(
+                project_id=project_id, job_id=job_id, candidate=candidate
+            )
         return tuple(
             entry
             for entry in self._memory.list_memories(project_id=project_id)

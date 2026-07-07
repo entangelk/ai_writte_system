@@ -104,10 +104,15 @@ from services.application.app.indexing.service import (
 )
 from services.application.app.indexing.chroma import (
     DEFAULT_COLLECTION_NAME,
+    ChromaMemoryVectorIndexAdapter,
     ChromaVectorIndexAdapter,
     connect_chroma_collection,
 )
 from services.application.app.indexing.embedding import RemoteEmbeddingProvider
+from services.application.app.indexing.memory_index import MEMORY_VECTOR_COLLECTION
+from services.application.app.analysis.semantic_matcher import (
+    EmbeddingSemanticMatcher,
+)
 
 
 class AnalysisJobRunner(Protocol):
@@ -297,23 +302,56 @@ def _default_compare_service(memory: MemoryService) -> AnalysisCompareService:
     # configured; otherwise no judge (matched pairs → 503, deterministic
     # no-match/duplicate proposals still serve). Mirrors the analysis runner /
     # context search planner env gating.
+    judge = None
     base_url = os.environ.get("LLM_GATEWAY_BASE_URL")
-    if not base_url:
-        return AnalysisCompareService(memory_service=memory)
-    prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-    seed_analysis_compare_template(prompt_templates)
-    provider = GatewayGenerateProvider(
-        base_url=base_url,
-        timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
-        trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False),
+    if base_url:
+        prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
+        seed_analysis_compare_template(prompt_templates)
+        provider = GatewayGenerateProvider(
+            base_url=base_url,
+            timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
+            trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False),
+        )
+        judge = TerminalJsonCompareJudge(
+            provider,
+            prompt_templates=prompt_templates,
+            model=os.environ.get("LLM_GATEWAY_MODEL") or None,
+            max_tokens=int(os.environ.get("ANALYSIS_COMPARE_MAX_TOKENS", "512")),
+        )
+    return AnalysisCompareService(
+        memory_service=memory,
+        judge=judge,
+        semantic_matcher=_build_semantic_matcher(memory),
     )
-    judge = TerminalJsonCompareJudge(
-        provider,
-        prompt_templates=prompt_templates,
-        model=os.environ.get("LLM_GATEWAY_MODEL") or None,
-        max_tokens=int(os.environ.get("ANALYSIS_COMPARE_MAX_TOKENS", "512")),
+
+
+def _build_semantic_matcher(memory: MemoryService):
+    # Phase 2B.6 (D4=A): off by default. The threshold env is the on-switch; a
+    # guessed value must not silently merge canon, so absent it, event/
+    # open_question stay always-create. Semantic matching also needs the real
+    # shared memory_vectors collection — the in-memory fake in this process is
+    # separate from the worker's, so without CHROMA_HOST there is nothing to
+    # query. See docs/plans/02b-6-semantic-identity-resolution-decisions.md.
+    threshold_raw = os.environ.get("ANALYSIS_SEMANTIC_MATCH_THRESHOLD")
+    host = os.environ.get("CHROMA_HOST")
+    if not threshold_raw or not host:
+        return None
+    vector_search = ChromaMemoryVectorIndexAdapter(
+        connect_chroma_collection(
+            host=host,
+            port=int(os.environ.get("CHROMA_PORT", "8000")),
+            collection_name=os.environ.get(
+                "CHROMA_MEMORY_COLLECTION", MEMORY_VECTOR_COLLECTION
+            ),
+        )
     )
-    return AnalysisCompareService(memory_service=memory, judge=judge)
+    return EmbeddingSemanticMatcher(
+        embeddings=_build_embedding_provider(),
+        vector_search=vector_search,
+        memory_service=memory,
+        similarity_threshold=float(threshold_raw),
+        limit=int(os.environ.get("ANALYSIS_SEMANTIC_MATCH_LIMIT", "5")),
+    )
 
 
 def _default_context_search_service(

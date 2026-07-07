@@ -27,6 +27,7 @@ from services.application.app.indexing.models import (
     IndexSyncOutboxEntry,
     MemoryIndexRecord,
 )
+from services.application.app.indexing.service import _cosine_similarity
 from services.application.app.memory.models import MemoryEntry, MemoryStatus
 from services.application.app.memory.service import MemoryNotFound, MemoryService
 
@@ -66,6 +67,15 @@ class MemoryVectorIndexAdapter(Protocol):
         self, *, project_id: str
     ) -> tuple[MemoryIndexRecord, ...]: ...
 
+    def query_similar(
+        self,
+        *,
+        project_id: str,
+        memory_type: str,
+        vector: tuple[float, ...],
+        limit: int,
+    ) -> tuple[MemoryIndexRecord, ...]: ...
+
 
 class InMemoryMemoryVectorIndexAdapter:
     """No-infra vector backend for unit tests and the deterministic fallback."""
@@ -84,6 +94,31 @@ class InMemoryMemoryVectorIndexAdapter:
         existing = self.records.get(memory_id)
         if existing is not None and existing.project_id == project_id:
             del self.records[memory_id]
+
+    def query_similar(
+        self,
+        *,
+        project_id: str,
+        memory_type: str,
+        vector: tuple[float, ...],
+        limit: int,
+    ) -> tuple[MemoryIndexRecord, ...]:
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        candidates = [
+            record
+            for record in self.records.values()
+            if record.project_id == project_id
+            and record.memory_type == memory_type
+        ]
+        ranked = sorted(
+            candidates,
+            key=lambda record: (
+                -_cosine_similarity(vector, record.vector),
+                record.id,
+            ),
+        )
+        return tuple(ranked[:limit])
 
     def list_memory_records(
         self, *, project_id: str

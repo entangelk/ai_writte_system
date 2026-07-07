@@ -87,13 +87,45 @@
 - **mutation 재실증**: `MemoryService._enqueue_reindex` 본문 무력화 시 전체 스위트에서 **10개** 재실패(promote-path 4 + apply HTTP wiring 1 + worker index 경로 5: update/idempotent 등). choke-point가 3경로 전체의 재색인을 지탱함이 확정(독립 검증이 카운트 정정 — 최초 기록의 "4개"는 promote-path 하위집합만 센 과소보고였다).
 - `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **598 passed / 45 skipped**(증분 1 580 → +18). `git diff --check` 통과. 스크립트 `--help`/usage-error 경로 확인(실 live는 sandbox 밖).
 
+## Phase 2B.6 — event/open_question 의미적 identity resolution (2026-07-07, SoT v1.6.47)
+
+2B.5 커밋 후 오너가 "다음 작업 진행" 지시. 2B.5 쓰기 경로 다음은 읽기(semantic 대조)라 착수 브리프를 썼다.
+
+### 착수 결정 브리프 + 오너 결정
+
+- 브리프 `docs/plans/02b-6-semantic-identity-resolution-decisions.md`(Resolved). **헤드라인 긴장 2건**:
+  - (1) **seam 위치 문서 간 모호성(CLAUDE.md §1)**: HANDOFF/2B.2는 "`PriorMemoryBackend`를 semantic으로 교체"라 했으나, `PriorMemoryBackend`(2B.2)는 coarse 패키징(별도 endpoint·memory_type 필터)이고 event/open_question을 실제로 always-`create`로 만드는 지점은 2B.3 compare의 `_find_matches`(`scope is None → ()`)다. 두 seam이 다른 의미라 임의 선택 없이 surface.
+  - (2) **threshold 추측값**: 유사도 임계는 실 embedding+데이터 fixture 없이는 추측값(auto-promotion threshold D2=B와 동형).
+- **오너 결정**: **D1=A**(semantic은 compare `_find_matches`; `PriorMemoryBackend` 무관, HANDOFF 표현 정정), **D4=A**(threshold 주입값·기본 off → 설정 전까지 always-create 보존, 캘리브레이션 후 발화). D2/D3/D5/D6/D7/D8 추천 잠금.
+
+### 구현
+
+- 변경/신규 파일: `indexing/memory_index.py`(`query_similar` fake), `indexing/chroma.py`(`ChromaMemoryVectorIndexAdapter.query_similar` + `_memory_records_from_query`), `analysis/compare.py`(`SemanticMemoryMatcher` Protocol + `semantic_matcher` 주입 + `_find_matches` scope-None 분기), `analysis/semantic_matcher.py`(신규 `EmbeddingSemanticMatcher`), `main.py`(`_build_semantic_matcher` env-gate 배선), 테스트 `test_analysis_semantic_matcher.py`(신규)·`test_chroma_memory_adapter.py`(query_similar +2).
+- **query 경로(D2)**: `MemoryVectorIndexAdapter`에 `query_similar(project_id, memory_type, vector, limit)` 추가 — fake는 cosine 랭킹, Chroma는 `collection.query` + `{$and:[project_id, memory_type]}` where. canonical-only는 index 불변식(2B.5)이라 status 필터 불필요.
+- **matcher(D1/D3/D6)**: `EmbeddingSemanticMatcher`가 candidate를 **쓰기와 동일한** `derive_memory_index_text` projection + 동일 embedding으로 embed → `query_similar` → 각 record에 cosine 재계산, ≥ threshold이고 canonical이며 self-exclusion(`analysis_job_id != job_id`) 통과하는 **top-1**(D6=A)을 `get_memory`로 resolve해 반환. 미달·미매치는 `()` → compare가 `create`.
+- **seam(D1/D4)**: `AnalysisCompareService(semantic_matcher=None)` 기본. `_find_matches`의 `scope is None` 분기가 matcher 있으면 위임, 없으면 종전 `()`(always-create 보존). compare/memory 순환 회피 위해 matcher concrete는 `analysis/semantic_matcher.py`에 두고 compare는 Protocol만.
+- **wiring(D4/D8)**: `_default_compare_service`가 env `ANALYSIS_SEMANTIC_MATCH_THRESHOLD`(on-switch) + `CHROMA_HOST`(실 공유 index 필요, in-memory fake는 worker와 분리) 둘 다 있을 때만 matcher를 붙인다. read-after-write eventual consistency는 수용 경계.
+
+### 회귀 +10 + 검증
+
+- `tests/test_analysis_semantic_matcher.py`(8): 제어 StubEmbedding(text→vector)으로 유사 event→매칭, **비유사→threshold 미달 무매치(over-strict)**, top-1(다중 above-threshold), memory_type scope(event가 open_question 미매칭), self-exclusion, superseded index record skip, judge 관통(add_evidence proposal), **matcher 없으면 always-create(off 기본 over-strict)**.
+- `tests/test_chroma_memory_adapter.py`(+2): query_similar 랭킹+memory_type scope, limit<1 거절.
+- **mutation 재실증**: threshold 검사 무력화 시 비유사-무매치 재실패, query_similar memory_type 필터 무력화 시 scope 테스트 재실패.
+- `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **608 passed / 45 skipped**(2B.5 598 → +10). `git diff --check` 통과. semantic off 기본이라 기존 compare 회귀 30개 무변.
+
+### User Decisions and Rationale (2B.6)
+
+- 오너가 **D1=A**(compare `_find_matches`)를 택했다. HANDOFF/2B.2의 "PriorMemoryBackend 교체"는 seam 위치 오기였고, 누적 문제의 실제 지점이 compare임을 확인해 그쪽에 semantic을 넣었다.
+- 오너가 **D4=A**(off 기본)를 택했다. 추측 threshold로 canonical을 잘못 병합하지 않도록, seam+query 인프라만 안전하게 세우고 실 매칭은 실 embedding 캘리브레이션 후 켠다(D2=B 선례).
+
 ## User Decisions and Rationale (증분 2)
 
 - 오너가 **promote 경로도 재색인 enqueue**를 택했다(정기 backfill-only 아님). 근거: 수동 승격한 canonical memory가 다음 backfill을 기다리지 않고 즉시 analysis compare의 prior 검색에 반영돼야 한다(incremental correctness). 이 결정이 enqueue를 `MemoryService` choke point로 중앙화하는 설계로 이어졌고, 증분 1의 apply-seam을 흡수했다.
 
 ## Next steps
 
+- **2B.6 threshold 실 캘리브레이션(sandbox 밖, 코드 완료)**: semantic 매칭은 off 기본(D4=A)이라, 실 embedding(BGE-m3-ko) + 실 event/open_question 데이터로 `ANALYSIS_SEMANTIC_MATCH_THRESHOLD` 실값을 잡아야 발화한다. 배포 stack에서 유사/비유사 event pair의 cosine 분포를 관찰해 임계 확정 → env 설정. 이때 2B.5 live(promote→outbox→worker→memory_vectors)도 함께 관통 확인.
 - **Phase 2B.5 live 실행(sandbox 밖, 코드 완료)**: `scripts/phase2b5_memory_reindex_live_smoke.py`를 배포 stack(실 Mongo+Chroma+embedding)에서 실행해 promote→outbox→worker→실제 `memory_vectors` Chroma record를 관통 확인. 필요 시 backfill `scripts/phase2b5_reindex_memory.py`로 기존 canonical 전수 재색인.
-- **후속 slice**: event/open_question 의미적 resolution — `PriorMemoryBackend`를 vector semantic 검색으로 교체(2B.5가 채운 `memory_vectors` index 소비). ⑤ Writing canonical 포함, conflict/merge/split review queue 영속화.
+- **후속 slice**: character 별칭/동명이인 semantic 보강(2B.3 D2=A 확장), ⑤ Writing canonical 포함, conflict/merge/split review queue 영속화.
 - **곁가지(막힘 없음, sandbox 밖)**: 2B.3.2 compare judge live smoke, worker→real Chroma archive live smoke.
 - **추적 부채(2026-07-06 이월)**: `ProviderError`→502 패턴이 `/context-search`·2A extraction adapter에 미적용(HANDOFF Next Tasks #8).

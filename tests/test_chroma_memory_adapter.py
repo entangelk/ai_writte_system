@@ -89,6 +89,24 @@ class FakeChromaCollection:
         for record_id in to_remove:
             del self._store[record_id]
 
+    def query(self, *, query_embeddings, n_results, where, include):
+        from services.application.app.indexing.service import _cosine_similarity
+
+        q = tuple(query_embeddings[0])
+        matched = [
+            (rid, emb, meta)
+            for rid, (emb, meta) in self._store.items()
+            if self._match(meta, where)
+        ]
+        matched.sort(key=lambda it: (-_cosine_similarity(q, tuple(it[1])), it[0]))
+        top = matched[:n_results]
+        result: dict[str, Any] = {"ids": [[it[0] for it in top]]}
+        if "embeddings" in include:
+            result["embeddings"] = [[it[1] for it in top]]
+        if "metadatas" in include:
+            result["metadatas"] = [[it[2] for it in top]]
+        return result
+
     def stored_ids(self) -> set[str]:
         return set(self._store)
 
@@ -133,6 +151,34 @@ class ChromaMemoryAdapterTest(unittest.TestCase):
         self.adapter.upsert_memory_records((_record("m1"), _record("m2")))
         self.adapter.delete_memory_record(project_id="project-1", memory_id="m1")
         self.assertEqual(self.collection.stored_ids(), {"m2"})
+
+    def test_query_similar_ranks_and_scopes_by_memory_type(self):
+        self.adapter.upsert_memory_records(
+            (
+                _record("m1", memory_type="event_observation", vector=(1.0, 0.0, 0.0)),
+                _record("m2", memory_type="event_observation", vector=(0.0, 1.0, 0.0)),
+                _record(
+                    "q1", memory_type="open_question_observation",
+                    vector=(1.0, 0.0, 0.0),
+                ),
+            )
+        )
+        results = self.adapter.query_similar(
+            project_id="project-1",
+            memory_type="event_observation",
+            vector=(1.0, 0.0, 0.0),
+            limit=5,
+        )
+        # open_question record excluded by memory_type; event ranked by cosine.
+        self.assertEqual([r.memory_id for r in results], ["m1", "m2"])
+        self.assertTrue(all(r.memory_type == "event_observation" for r in results))
+
+    def test_query_similar_rejects_nonpositive_limit(self):
+        with self.assertRaises(ValueError):
+            self.adapter.query_similar(
+                project_id="project-1", memory_type="event_observation",
+                vector=(1.0,), limit=0,
+            )
 
     def test_delete_is_project_scoped(self):
         # over-strict guard: a record with the same memory_id in another project
