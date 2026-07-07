@@ -126,6 +126,8 @@ memory 색인을 **동기(apply 내부)**로 붙이면 slice가 작다(record �
 - apply(`MemoryApplyService`)가 create/update/add_evidence 반영 직후 outbox enqueue. no_change/conflict는 enqueue 없음.
 - backfill 스크립트는 outbox를 우회해 canonical 전수를 직접 embed+upsert(또는 전수 enqueue 후 worker drain) — 둘 중 택1은 구현 시 결정(직접 쪽이 단순).
 
+**live 후속 다듬 항목 (독립 검증 관찰 #3, 비차단)**: backfill(`phase2b5_reindex_memory.py`)은 `upsert_memory_records`를 단일 배치로 호출해 원자적(exit 0=성공/2=usage·config error)이라, source_block rebuild 스크립트의 partial-write exit 1 구분은 현재 없다. 실 Chroma/embedding 실패는 uncaught로 전파돼 traceback+non-zero exit이 된다. 실 관통 live에서 대량 재색인 실패 양상을 관찰한 뒤(배치 분할/부분 실패 리포팅 필요 여부) exit-code·오류 리포팅을 다듬는다 — 추측으로 미리 넣지 않는다(CLAUDE.md §2).
+
 ### 패턴 스윕 발견 — canonical 생성 경로가 apply만이 아니다 (오너 확인 → 해소됨)
 
 증분 1은 enqueue를 `MemoryApplyService`(2B.4 apply: create/update/add_evidence)에만 붙였다. 그러나 canonical `MemoryEntry`를 만드는 경로는 셋이다:
@@ -136,3 +138,5 @@ memory 색인을 **동기(apply 내부)**로 붙이면 slice가 작다(record �
 **오너 결정(2026-07-07): promote 경로도 enqueue 배선**(정기 backfill-only 아님). 승격된 memory가 곧바로 analysis compare 검색에 반영되도록 incremental correctness를 택했다.
 
 **증분 2 해소 방식 — `MemoryService` 단일 choke point로 중앙화**: 세 경로에 각각 enqueue를 붙이면 중복/누락 위험이 있어, canonical mint가 실제로 일어나는 유일한 지점인 `MemoryService.promote_candidate`/`_versioned_upsert`(둘 다 `PromoteMemoryResult(idempotent_replay)` 반환)의 비-replay 성공 return에서 `_enqueue_reindex`를 호출한다. apply·수동 promote·auto-promote가 모두 이 두 메서드를 지나므로 한 번에 커버되고, 증분 1의 `MemoryApplyService.reindex_outbox` seam은 중복이 되어 제거했다. memory→indexing 순환을 피하려 `MemoryReindexOutbox` Protocol을 `memory/service.py`에 로컬 정의(구조적 타이핑). `create_app`은 `_default_memory_service(reindex_outbox=sync_outbox)`로 이를 켠다.
+
+**수용된 경계 — commit-후-enqueue skew (독립 검증 관찰 #1, D3=B 본질)**: `put_memory`(canonical commit)가 먼저 성공하고 그 뒤 `_enqueue_reindex`가 outbox에 쓴다. 이 둘은 한 트랜잭션이 아니므로, 사이에서 프로세스가 죽거나 outbox 쓰기가 실패하면 "Mongo엔 canonical, vector엔 없음" skew가 남는다. **중요**: 같은 mint의 재시도는 `find_memory_by_candidate`가 이미 승격된 것을 찾아 **replay 분기로 빠져 enqueue를 재시도하지 않는다** → 이 skew는 결정적 재시도로 self-heal되지 않고 **정기 backfill(`scripts/phase2b5_reindex_memory.py`)이 유일한 수렴 수단**이다. 이는 D3=B(skew 무관용·outbox 내구성으로 수렴)를 택할 때의 알려진 표면이며 결함이 아니다 — 운영에서 memory backfill을 주기 실행(예: 일 1회 project 전수)하는 것을 권고한다. replay에서도 enqueue하도록 바꾸면 self-heal되지만 정상 replay마다 재색인이 돌아 낭비가 되므로 채택하지 않았다(비용/수렴 트레이드오프, 오너 재검토 대상으로 남김).

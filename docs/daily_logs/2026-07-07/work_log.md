@@ -84,7 +84,7 @@
 - `test_analysis_apply_api.py`(+1): create_app 기본 배선에서 apply HTTP→MEMORY_UPSERTED enqueue(end-to-end).
 - `test_index_sync_worker_script.py`(+2): `_build_memory_adapter` fake/chroma backend 분기(from_uri patch).
 - `test_phase2b5_reindex_memory_script.py`(4): canonical-only 필터·project 격리·main 배관·usage error.
-- **mutation 재실증**: `MemoryService._enqueue_reindex` 본문 무력화 시 promote-path 4개 + apply wiring 재실패(choke-point load-bearing 확인).
+- **mutation 재실증**: `MemoryService._enqueue_reindex` 본문 무력화 시 전체 스위트에서 **10개** 재실패(promote-path 4 + apply HTTP wiring 1 + worker index 경로 5: update/idempotent 등). choke-point가 3경로 전체의 재색인을 지탱함이 확정(독립 검증이 카운트 정정 — 최초 기록의 "4개"는 promote-path 하위집합만 센 과소보고였다).
 - `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **598 passed / 45 skipped**(증분 1 580 → +18). `git diff --check` 통과. 스크립트 `--help`/usage-error 경로 확인(실 live는 sandbox 밖).
 
 ## User Decisions and Rationale (증분 2)
