@@ -8,6 +8,11 @@ from unittest import mock
 from scripts import index_sync_worker
 from services.application.app.indexing.chroma import (
     ChromaArchiveIndexMutationAdapter,
+    ChromaMemoryVectorIndexAdapter,
+)
+from services.application.app.indexing.memory_index import (
+    InMemoryMemoryVectorIndexAdapter,
+    MemoryIndexSyncAdapter,
 )
 from services.application.app.indexing.service import (
     RecordingArchiveIndexMutationAdapter,
@@ -86,6 +91,50 @@ class BuildArchiveAdapterTest(unittest.TestCase):
         self.assertEqual(backend, "chroma")
         connect.assert_called_once_with(
             host="chroma", port=8000, collection_name="project_memory_vectors"
+        )
+
+
+class BuildMemoryAdapterTest(unittest.TestCase):
+    # from_uri eagerly ensures Mongo indexes, so patch it — the adapter's backend
+    # selection is the logic under test, not the Mongo connection.
+    _REPO_PATH = (
+        "services.application.app.memory.mongo_repository."
+        "MongoMemoryRepository.from_uri"
+    )
+
+    def test_without_chroma_host_uses_in_memory_fake(self):
+        with mock.patch.dict(
+            index_sync_worker.os.environ, {}, clear=True
+        ), mock.patch(self._REPO_PATH, return_value=object()):
+            adapter, backend = index_sync_worker._build_memory_adapter(
+                mongo_uri="mongodb://localhost:27017", mongo_db="db"
+            )
+        self.assertIsInstance(adapter, MemoryIndexSyncAdapter)
+        self.assertIsInstance(
+            adapter._vector_index, InMemoryMemoryVectorIndexAdapter
+        )
+        self.assertEqual(backend, "in_memory_fake")
+
+    def test_with_chroma_host_builds_chroma_memory_adapter(self):
+        sentinel_collection = object()
+        with mock.patch.dict(
+            index_sync_worker.os.environ,
+            {"CHROMA_HOST": "chroma", "CHROMA_PORT": "8000"},
+            clear=True,
+        ), mock.patch(self._REPO_PATH, return_value=object()), mock.patch(
+            "services.application.app.indexing.chroma.connect_chroma_collection",
+            return_value=sentinel_collection,
+        ) as connect:
+            adapter, backend = index_sync_worker._build_memory_adapter(
+                mongo_uri="mongodb://localhost:27017", mongo_db="db"
+            )
+        self.assertIsInstance(adapter, MemoryIndexSyncAdapter)
+        self.assertIsInstance(
+            adapter._vector_index, ChromaMemoryVectorIndexAdapter
+        )
+        self.assertEqual(backend, "chroma")
+        connect.assert_called_once_with(
+            host="chroma", port=8000, collection_name="memory_vectors"
         )
 
 

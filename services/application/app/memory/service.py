@@ -16,6 +16,7 @@ records. Two promotion paths exist:
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Protocol
 
 from services.application.app.analysis.models import (
     AnalysisCandidate,
@@ -42,6 +43,16 @@ def _union_source_refs(
     for ref in incoming:
         merged.setdefault(ref, None)
     return tuple(merged)
+
+
+class MemoryReindexOutbox(Protocol):
+    """Phase 2B.5 (D3=B): enqueue a memory reindex when a canonical version is
+    minted. Structural type (defined here, not imported from ``indexing``) so the
+    memory service stays free of an indexing dependency."""
+
+    def enqueue_memory_upserted(
+        self, *, project_id: str, memory_id: str, version: int
+    ) -> object: ...
 
 
 class MemoryError(ValueError):
@@ -101,9 +112,15 @@ class MemoryService:
         repository: MemoryRepository,
         *,
         auto_promotion_threshold: float | None = None,
+        reindex_outbox: MemoryReindexOutbox | None = None,
     ) -> None:
         self._repo = repository
         self._auto_promotion_threshold = auto_promotion_threshold
+        # Phase 2B.5 (D3=B): the single choke point for memory reindexing. Every
+        # canonical version mint (manual promote, auto-promote, versioned upsert
+        # via apply) enqueues here, so no write path can forget to index. Owner
+        # decision 2026-07-07: promote paths reindex too, not backfill-only.
+        self._reindex_outbox = reindex_outbox
 
     @property
     def auto_promotion_threshold(self) -> float | None:
@@ -160,6 +177,7 @@ class MemoryService:
                 memory=self._require_memory_by_candidate(project_id, candidate.id),
                 idempotent_replay=True,
             )
+        self._enqueue_reindex(entry)
         return PromoteMemoryResult(memory=entry, idempotent_replay=False)
 
     def auto_promote_candidate(
@@ -286,7 +304,18 @@ class MemoryService:
         self._repo.update_memory(
             replace(target, status=MemoryStatus.SUPERSEDED)
         )
+        self._enqueue_reindex(new_entry)
         return PromoteMemoryResult(memory=new_entry, idempotent_replay=False)
+
+    def _enqueue_reindex(self, memory: MemoryEntry) -> None:
+        # Only fresh canonical mints reach here (replays return earlier). Enqueue
+        # is idempotent (dedup per memory_id) so this is safe under retries.
+        if self._reindex_outbox is not None:
+            self._reindex_outbox.enqueue_memory_upserted(
+                project_id=memory.project_id,
+                memory_id=memory.id,
+                version=memory.version,
+            )
 
     def get_memory(self, *, project_id: str, memory_id: str) -> MemoryEntry:
         return self._require_memory(project_id, memory_id)

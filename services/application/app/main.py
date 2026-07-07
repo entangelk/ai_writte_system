@@ -56,6 +56,7 @@ from services.application.app.memory.service import (
     InMemoryMemoryRepository,
     MemoryError,
     MemoryNotFound,
+    MemoryReindexOutbox,
     MemoryService,
 )
 from services.application.app.context_search.models import (
@@ -176,17 +177,23 @@ def _default_analysis_service(core_sot: CoreSotService) -> AnalysisService:
     )
 
 
-def _default_memory_service() -> MemoryService:
+def _default_memory_service(
+    reindex_outbox: MemoryReindexOutbox | None = None,
+) -> MemoryService:
     # Conservative default: auto-promotion is off unless a threshold is set,
     # so no canonical memory is minted from a guessed value (SoT v1.6.39 D2=B).
     threshold_raw = os.environ.get("MEMORY_AUTO_PROMOTION_THRESHOLD")
     auto_threshold = float(threshold_raw) if threshold_raw else None
 
+    # Phase 2B.5 (D3=B): every canonical mint (promote/auto-promote/apply
+    # versioned upsert) enqueues a reindex through the service, so the index-sync
+    # worker keeps the memory_vectors collection current.
     uri = os.environ.get("CORE_SOT_MONGO_URI")
     if not uri:
         return MemoryService(
             InMemoryMemoryRepository(),
             auto_promotion_threshold=auto_threshold,
+            reindex_outbox=reindex_outbox,
         )
 
     # Imported lazily so the in-memory path needs no pymongo install.
@@ -199,7 +206,11 @@ def _default_memory_service() -> MemoryService:
         uri,
         db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME),
     )
-    return MemoryService(repository, auto_promotion_threshold=auto_threshold)
+    return MemoryService(
+        repository,
+        auto_promotion_threshold=auto_threshold,
+        reindex_outbox=reindex_outbox,
+    )
 
 
 def _default_prompt_template_service() -> PromptTemplateService:
@@ -448,7 +459,13 @@ def create_app(
     app = FastAPI(title="AI Writing System Application")
     core_sot = service or _default_core_sot_service()
     analysis = analysis_service or _default_analysis_service(core_sot)
-    memory = memory_service or _default_memory_service()
+    sync_outbox = index_sync_outbox or _default_index_sync_outbox_service()
+    # Phase 2B.5 (D3=B): the default memory service enqueues a MEMORY_UPSERTED
+    # reindex on every canonical mint (manual promote / auto-promote / apply
+    # versioned upsert) through the shared index-sync outbox; the index-sync
+    # worker drains it into the memory_vectors collection. An injected
+    # memory_service (tests) keeps its own wiring.
+    memory = memory_service or _default_memory_service(reindex_outbox=sync_outbox)
     # Phase 2B.2: prior-memory search/packaging over the canonical memory store.
     # Deterministic backend now; a semantic backend plugs into the same seam
     # (docs/plans/02b-2-analysis-context-package-decisions.md, D2=A).
@@ -461,15 +478,10 @@ def create_app(
     # proposals are served deterministically.
     compare = compare_service or _default_compare_service(memory)
     # Phase 2B.4: apply safe compare actions to the canonical store. Deterministic
-    # writes only (no LLM), so no env/injection seam is needed
+    # writes only (no LLM); reindex enqueue is owned by MemoryService (2B.5 D3=B
+    # choke point), so apply needs no index hook
     # (docs/plans/02b-4-memory-versioned-upsert-decisions.md, D1=A).
-    # Phase 2B.5 (D3=B): apply can enqueue a MEMORY_UPSERTED reindex, but the
-    # live wiring (real Chroma memory adapter + worker drain) lands in the next
-    # increment; until the drain side exists, create_app leaves reindex_outbox
-    # unwired so no undrainable entries are produced. The enqueue seam is unit
-    # tested (tests/test_memory_vector_index.py).
     apply_service = MemoryApplyService(memory_service=memory)
-    sync_outbox = index_sync_outbox or _default_index_sync_outbox_service()
     runner = analysis_runner
     if runner is None:
         runner = _default_analysis_runner(core_sot=core_sot, analysis=analysis)

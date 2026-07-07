@@ -1,6 +1,6 @@
 # Phase 2B.5 착수 결정 브리프 — memory→vector 재색인
 
-**상태**: Resolved (오너 결정 완료 2026-07-07)
+**상태**: Resolved (오너 결정 완료 2026-07-07) — 증분 1(계약+fake, SoT v1.6.45)·증분 2(라이브 배선, SoT v1.6.46) 구현 완료. 실 Chroma 관통 live 실행만 sandbox 밖 후속.
 **정본 SoT**: `docs/system-contract-sot.md` (현재 v1.6.44)
 **선행**: 2B.1(store)·2B.2(prior 검색)·2B.3(scope key+compare)·2B.3.2(실 judge)·2B.4(versioned upsert) 완료.
 
@@ -126,11 +126,13 @@ memory 색인을 **동기(apply 내부)**로 붙이면 slice가 작다(record �
 - apply(`MemoryApplyService`)가 create/update/add_evidence 반영 직후 outbox enqueue. no_change/conflict는 enqueue 없음.
 - backfill 스크립트는 outbox를 우회해 canonical 전수를 직접 embed+upsert(또는 전수 enqueue 후 worker drain) — 둘 중 택1은 구현 시 결정(직접 쪽이 단순).
 
-### 패턴 스윕 발견 — canonical 생성 경로가 apply만이 아니다 (증분 2 open item, 오너 확인)
+### 패턴 스윕 발견 — canonical 생성 경로가 apply만이 아니다 (오너 확인 → 해소됨)
 
 증분 1은 enqueue를 `MemoryApplyService`(2B.4 apply: create/update/add_evidence)에만 붙였다. 그러나 canonical `MemoryEntry`를 만드는 경로는 셋이다:
 1. **2B.4 apply** — enqueue seam 배선(증분 1).
-2. **2B.1 수동 promote** (`POST .../analysis/candidates/{cid}/promote`) — canonical 생성, enqueue 없음.
-3. **2B.1 auto-promote** (`POST .../analysis/jobs/{jid}/auto-promote`) — canonical 생성, enqueue 없음.
+2. **2B.1 수동 promote** (`POST .../analysis/candidates/{cid}/promote`) — canonical 생성, enqueue 없음(증분 1 시점).
+3. **2B.1 auto-promote** (`POST .../analysis/jobs/{jid}/auto-promote`) — canonical 생성, enqueue 없음(증분 1 시점).
 
-backfill(D7)이 기존 canonical(2·3 포함) 전수를 catch-up하지만, **증분 correctness**(2·3로 새로 생기는 canonical이 곧바로 index에 반영)를 위해선 promote 경로도 reindex enqueue가 필요하다. 이는 브리프 결정 범위(apply 중심) 밖이라 **증분 2에서 (a) promote 경로에도 동일 enqueue 배선, 또는 (b) 정기 backfill로만 수렴 중 택1을 오너 확인**한다. 현 시스템에서 auto-promote는 `MEMORY_AUTO_PROMOTION_THRESHOLD` 기본 off라 3은 비활성이고, 2(수동 promote)는 활성 경로다.
+**오너 결정(2026-07-07): promote 경로도 enqueue 배선**(정기 backfill-only 아님). 승격된 memory가 곧바로 analysis compare 검색에 반영되도록 incremental correctness를 택했다.
+
+**증분 2 해소 방식 — `MemoryService` 단일 choke point로 중앙화**: 세 경로에 각각 enqueue를 붙이면 중복/누락 위험이 있어, canonical mint가 실제로 일어나는 유일한 지점인 `MemoryService.promote_candidate`/`_versioned_upsert`(둘 다 `PromoteMemoryResult(idempotent_replay)` 반환)의 비-replay 성공 return에서 `_enqueue_reindex`를 호출한다. apply·수동 promote·auto-promote가 모두 이 두 메서드를 지나므로 한 번에 커버되고, 증분 1의 `MemoryApplyService.reindex_outbox` seam은 중복이 되어 제거했다. memory→indexing 순환을 피하려 `MemoryReindexOutbox` Protocol을 `memory/service.py`에 로컬 정의(구조적 타이핑). `create_app`은 `_default_memory_service(reindex_outbox=sync_outbox)`로 이를 켠다.

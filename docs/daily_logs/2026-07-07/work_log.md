@@ -59,8 +59,41 @@
 - **판단 보류(행 17)**: `derive_memory_index_text`의 미지원 type `ValueError`는 enum 3종 고정이라 현재 도달 불가한 fail-fast 방어 코드다(CLAUDE.md §2). 검증도 non-blocking으로 뒀고, 4번째 type 추가 시 조용한 None 대신 즉시 실패하는 것이 안전해 유지한다(회귀 미추가).
 - 재검증: `python3 -m unittest tests.test_memory_vector_index` → **15 OK**. 신규/강화 guard 2개 mutation 각각 재실패 확인(복원). `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **580 passed / 45 skipped**. `git diff --check` 통과. 회귀 14→15.
 
+## Phase 2B.5 증분 2 — 라이브 배선 (2026-07-07, SoT v1.6.46)
+
+증분 1 커밋(`67b5362`) 후 오너가 "main 직접 커밋(브랜치 불필요) + 다음작업" 지시. 증분 2 착수 전 브리프가 오너 확인으로 이월한 결정을 받았다.
+
+### 오너 결정 + 설계
+
+- **오너 결정**: canonical 생성 3경로(2B.4 apply·2B.1 수동 promote·auto-promote)가 **모두 재색인 enqueue**(정기 backfill-only 아님). 승격 memory 즉시 검색 반영(incremental correctness).
+- **설계 — `MemoryService` 단일 choke point 중앙화**: 세 경로에 각각 붙이면 중복/누락 위험 → canonical mint의 유일 지점인 `promote_candidate`/`_versioned_upsert`(둘 다 `PromoteMemoryResult(idempotent_replay)` 반환)의 비-replay 성공 return에서 `_enqueue_reindex` 호출. apply·수동 promote·auto-promote가 모두 이 두 메서드를 지나 한 번에 커버. **증분 1의 `MemoryApplyService.reindex_outbox` seam은 중복이 되어 제거**(apply는 promote/versioned를 호출하므로 자동 커버). memory→indexing 순환 회피 위해 `MemoryReindexOutbox` Protocol을 `memory/service.py`에 로컬 정의.
+
+### 구현
+
+- 변경/신규 파일: `memory/service.py`(reindex_outbox param·`MemoryReindexOutbox` Protocol·`_enqueue_reindex`·두 mint 사이트 enqueue), `analysis/apply.py`(증분 1 seam 제거), `indexing/chroma.py`(`ChromaMemoryVectorIndexAdapter`+memory record 직렬화), `main.py`(`_default_memory_service(reindex_outbox=)`·create_app outbox→memory 순서), `scripts/index_sync_worker.py`(`_build_memory_adapter`·summary `memory_backend`), `scripts/phase2b5_reindex_memory.py`(신규 backfill), `scripts/phase2b5_memory_reindex_live_smoke.py`(신규 live), 테스트 `test_chroma_memory_adapter.py`(신규)·`test_phase2b5_reindex_memory_script.py`(신규)·`test_memory_vector_index.py`(promote-path +4)·`test_analysis_apply_api.py`(HTTP enqueue wiring +1)·`test_index_sync_worker_script.py`(memory adapter 분기 +2).
+- **실 Chroma adapter**: `ChromaMemoryVectorIndexAdapter`가 `MemoryVectorIndexAdapter` seam(upsert/delete/list)을 실 collection에 구현. delete는 `{$and:[project_id, memory_id]}` where(project-scoped, cross-project id 충돌 방지). record↔chroma metadata round-trip. collection `memory_vectors`(env `CHROMA_MEMORY_COLLECTION`), source_block과 분리.
+- **create_app 배선**: outbox를 memory보다 먼저 만들고 `_default_memory_service(reindex_outbox=sync_outbox)`로 3경로 enqueue를 켠다. 주입 memory_service(테스트)는 자체 wiring 유지.
+- **worker**: `_build_memory_adapter`가 Mongo MemoryService + embedding(`EMBEDDING_SERVICE_URL` 실/fake) + Chroma/fake memory collection으로 `MemoryIndexSyncAdapter`를 만들어 `MEMORY_UPSERTED`를 drain. summary에 `memory_backend`.
+- **backfill**: `phase2b5_reindex_memory.py`가 project canonical 전수를 직접 embed+upsert(superseded 제외, outbox 우회 D7). 기존(2B.5 이전) canonical catch-up.
+- **live smoke**: `phase2b5_memory_reindex_live_smoke.py`가 promote→outbox→worker→실 Chroma record 확인(sandbox 밖 실행, 테스트 project·Chroma record 정리).
+
+### 회귀 +20 + 검증
+
+- `test_chroma_memory_adapter.py`(11): record round-trip·chroma id=memory_id·upsert/list·empty short-circuit·project scope·delete target·delete project-scoped(over-strict).
+- `test_memory_vector_index.py` PromotePathEnqueueTest(4): 수동 promote enqueue·promote replay 미중복(over-strict)·auto-promote threshold 발화 enqueue·threshold 미만 미enqueue(over-strict).
+- `test_analysis_apply_api.py`(+1): create_app 기본 배선에서 apply HTTP→MEMORY_UPSERTED enqueue(end-to-end).
+- `test_index_sync_worker_script.py`(+2): `_build_memory_adapter` fake/chroma backend 분기(from_uri patch).
+- `test_phase2b5_reindex_memory_script.py`(4): canonical-only 필터·project 격리·main 배관·usage error.
+- **mutation 재실증**: `MemoryService._enqueue_reindex` 본문 무력화 시 promote-path 4개 + apply wiring 재실패(choke-point load-bearing 확인).
+- `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **598 passed / 45 skipped**(증분 1 580 → +18). `git diff --check` 통과. 스크립트 `--help`/usage-error 경로 확인(실 live는 sandbox 밖).
+
+## User Decisions and Rationale (증분 2)
+
+- 오너가 **promote 경로도 재색인 enqueue**를 택했다(정기 backfill-only 아님). 근거: 수동 승격한 canonical memory가 다음 backfill을 기다리지 않고 즉시 analysis compare의 prior 검색에 반영돼야 한다(incremental correctness). 이 결정이 enqueue를 `MemoryService` choke point로 중앙화하는 설계로 이어졌고, 증분 1의 apply-seam을 흡수했다.
+
 ## Next steps
 
-- **Phase 2B.5 증분 2(sandbox 밖 live)**: 실 Chroma `memory_vectors` collection adapter(`record_to_chroma` memory 대응 + `connect` memory collection) + worker 스크립트(`index_sync_worker.py`)에 memory adapter 배선 + `create_app`이 apply에 `reindex_outbox` 배선(+ memory vector backend) + `scripts/phase2b5_reindex_memory.py` backfill(기존 canonical 전수 재색인) + live smoke(배포 stack에서 apply→outbox→worker→실제 Chroma record 확인).
-- **후속 slice**: event/open_question 의미적 resolution — `PriorMemoryBackend`를 vector semantic 검색으로 교체(2B.5가 채운 index 소비). ⑤ Writing canonical 포함, conflict/merge/split review queue 영속화.
-- **곁가지(막힘 없음, sandbox 밖)**: 2B.3.2 compare judge live smoke 실행(`scripts/phase2b3_compare_judge_live_smoke.py`), worker→real Chroma live smoke.
+- **Phase 2B.5 live 실행(sandbox 밖, 코드 완료)**: `scripts/phase2b5_memory_reindex_live_smoke.py`를 배포 stack(실 Mongo+Chroma+embedding)에서 실행해 promote→outbox→worker→실제 `memory_vectors` Chroma record를 관통 확인. 필요 시 backfill `scripts/phase2b5_reindex_memory.py`로 기존 canonical 전수 재색인.
+- **후속 slice**: event/open_question 의미적 resolution — `PriorMemoryBackend`를 vector semantic 검색으로 교체(2B.5가 채운 `memory_vectors` index 소비). ⑤ Writing canonical 포함, conflict/merge/split review queue 영속화.
+- **곁가지(막힘 없음, sandbox 밖)**: 2B.3.2 compare judge live smoke, worker→real Chroma archive live smoke.
+- **추적 부채(2026-07-06 이월)**: `ProviderError`→502 패턴이 `/context-search`·2A extraction adapter에 미적용(HANDOFF Next Tasks #8).

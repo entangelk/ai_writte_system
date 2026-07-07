@@ -90,10 +90,10 @@ def _proposal(candidate, action, matched_memory_id=None):
 
 
 def _wire():
-    memory = MemoryService(InMemoryMemoryRepository())
     repo = InMemoryIndexSyncRepository()
     outbox = IndexSyncOutboxService(repo)
-    apply_service = MemoryApplyService(memory_service=memory, reindex_outbox=outbox)
+    memory = MemoryService(InMemoryMemoryRepository(), reindex_outbox=outbox)
+    apply_service = MemoryApplyService(memory_service=memory)
     vector_index = InMemoryMemoryVectorIndexAdapter()
     worker = IndexSyncWorker(
         repository=repo,
@@ -192,6 +192,63 @@ class EnqueueTest(unittest.TestCase):
             apply_service, [_proposal(candidate, CompareAction.CREATE)], [candidate]
         )
         self.assertEqual(len(repo.outbox_entries), 1)
+
+
+class PromotePathEnqueueTest(unittest.TestCase):
+    """Owner decision 2026-07-07: manual/auto promote paths reindex too, not just
+    apply. MemoryService is the single choke point, so promote_candidate and
+    auto_promote_candidate enqueue MEMORY_UPSERTED like apply does."""
+
+    def _memory_with_outbox(self, **kwargs):
+        repo = InMemoryIndexSyncRepository()
+        outbox = IndexSyncOutboxService(repo)
+        memory = MemoryService(
+            InMemoryMemoryRepository(), reindex_outbox=outbox, **kwargs
+        )
+        return memory, repo
+
+    def test_manual_promote_enqueues_reindex(self):
+        memory, repo = self._memory_with_outbox()
+        result = memory.promote_candidate(
+            project_id="project-1",
+            candidate=_candidate(),
+            mode=PromotionMode.MANUAL,
+        )
+        entries = list(repo.outbox_entries.values())
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].event, IndexSyncEvent.MEMORY_UPSERTED)
+        self.assertEqual(entries[0].source.mongo_id, result.memory.id)
+
+    def test_manual_promote_replay_does_not_double_enqueue(self):
+        # over-strict guard: an idempotent replay must not enqueue a second time.
+        memory, repo = self._memory_with_outbox()
+        candidate = _candidate()
+        memory.promote_candidate(
+            project_id="project-1", candidate=candidate, mode=PromotionMode.MANUAL
+        )
+        replay = memory.promote_candidate(
+            project_id="project-1", candidate=candidate, mode=PromotionMode.MANUAL
+        )
+        self.assertTrue(replay.idempotent_replay)
+        self.assertEqual(len(repo.outbox_entries), 1)
+
+    def test_auto_promote_enqueues_when_threshold_fires(self):
+        memory, repo = self._memory_with_outbox(auto_promotion_threshold=0.4)
+        result = memory.auto_promote_candidate(
+            project_id="project-1", candidate=_candidate(confidence=0.9)
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(len(repo.outbox_entries), 1)
+
+    def test_auto_promote_below_threshold_does_not_enqueue(self):
+        # over-strict guard: below-threshold candidate stays needs_review, so no
+        # canonical is minted and nothing is enqueued.
+        memory, repo = self._memory_with_outbox(auto_promotion_threshold=0.8)
+        result = memory.auto_promote_candidate(
+            project_id="project-1", candidate=_candidate(confidence=0.3)
+        )
+        self.assertIsNone(result)
+        self.assertEqual(len(repo.outbox_entries), 0)
 
 
 class WorkerIndexTest(unittest.TestCase):

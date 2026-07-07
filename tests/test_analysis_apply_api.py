@@ -16,6 +16,11 @@ from services.application.app.core_sot.service import (
     CoreSotService,
     InMemoryCoreSotRepository,
 )
+from services.application.app.indexing.models import IndexSyncEvent
+from services.application.app.indexing.service import (
+    IndexSyncOutboxService,
+    InMemoryIndexSyncRepository,
+)
 from services.application.app.main import create_app
 from services.application.app.memory.models import MemoryStatus, PromotionMode
 from services.application.app.memory.service import (
@@ -274,6 +279,42 @@ class AnalysisApplyApiTest(unittest.TestCase):
             f"/projects/{project_id}/analysis/jobs/nope/apply", json=body
         )
         self.assertEqual(missing_job.status_code, 404)
+
+
+class ApplyReindexEnqueueWiringTest(unittest.TestCase):
+    """Phase 2B.5 (D3=B): the default create_app wires the memory service to the
+    index-sync outbox, so an apply through the HTTP endpoint enqueues a
+    MEMORY_UPSERTED reindex (end-to-end, not just the service unit)."""
+
+    def test_apply_create_enqueues_memory_upserted(self):
+        core_sot = CoreSotService(InMemoryCoreSotRepository())
+        analysis = AnalysisService(InMemoryAnalysisRepository())
+        sync_repo = InMemoryIndexSyncRepository()
+        # No memory_service injected → create_app builds the default one wired to
+        # this outbox.
+        app = create_app(
+            service=core_sot,
+            analysis_service=analysis,
+            index_sync_outbox=IndexSyncOutboxService(sync_repo),
+        )
+        client = TestClient(app)
+        project_id = client.post("/projects", json={"name": "Novel"}).json()["id"]
+        job, candidate = _seed_candidate(
+            analysis, project_id=project_id, logical_key="c1",
+            payload={"name": "Ariel", "observation": "brave"},
+        )
+
+        response = client.post(
+            f"/projects/{project_id}/analysis/jobs/{job.id}/apply",
+            json={"proposals": [{"candidate_id": candidate.id, "action": "create"}]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        memory_id = response.json()["applied"][0]["memory_id"]
+        entries = tuple(sync_repo.outbox_entries.values())
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].event, IndexSyncEvent.MEMORY_UPSERTED)
+        self.assertEqual(entries[0].source.mongo_id, memory_id)
 
 
 if __name__ == "__main__":

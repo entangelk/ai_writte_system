@@ -14,9 +14,15 @@ if __package__ in {None, ""}:
 
 from services.application.app.indexing.service import (
     CHROMA_VECTOR_BACKEND,
+    DeterministicFakeEmbeddingProvider,
     FAKE_VECTOR_BACKEND,
     IndexSyncWorker,
     RecordingArchiveIndexMutationAdapter,
+)
+from services.application.app.indexing.memory_index import (
+    InMemoryMemoryVectorIndexAdapter,
+    MemoryIndexSyncAdapter,
+    MEMORY_VECTOR_COLLECTION,
 )
 
 DEFAULT_MONGO_DB = "ai_writing_system"
@@ -42,6 +48,63 @@ def _build_archive_adapter() -> tuple[object, str]:
         collection_name=os.environ.get("CHROMA_COLLECTION", DEFAULT_COLLECTION_NAME),
     )
     return ChromaArchiveIndexMutationAdapter(collection), CHROMA_VECTOR_BACKEND
+
+
+def _build_embedding_provider():
+    # Real embedding service when EMBEDDING_SERVICE_URL is set (same convention as
+    # create_app), else the deterministic fake.
+    base_url = os.environ.get("EMBEDDING_SERVICE_URL")
+    if not base_url:
+        return DeterministicFakeEmbeddingProvider()
+    from services.application.app.indexing.embedding import RemoteEmbeddingProvider
+
+    return RemoteEmbeddingProvider(
+        base_url=base_url,
+        timeout_seconds=float(os.environ.get("EMBEDDING_TIMEOUT_SECONDS", "30")),
+        expected_dimensions=int(os.environ.get("EMBEDDING_DIMENSIONS", "1024")),
+    )
+
+
+def _build_memory_adapter(
+    *, mongo_uri: str, mongo_db: str
+) -> tuple[MemoryIndexSyncAdapter, str]:
+    # Phase 2B.5 (D3=B): the memory-reindex side of the worker. Loads the memory a
+    # MEMORY_UPSERTED entry points at (Mongo-backed) and reindexes it into the
+    # memory_vectors collection — real Chroma when CHROMA_HOST is set, else the
+    # in-memory fake so the worker still exercises the lifecycle without Chroma.
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+    from services.application.app.memory.mongo_repository import MongoMemoryRepository
+    from services.application.app.memory.service import MemoryService
+
+    memory = MemoryService(
+        MongoMemoryRepository.from_uri(mongo_uri, db_name=mongo_db or DEFAULT_DB_NAME)
+    )
+    embeddings = _build_embedding_provider()
+
+    host = os.environ.get("CHROMA_HOST")
+    if not host:
+        vector_index = InMemoryMemoryVectorIndexAdapter()
+        backend = FAKE_VECTOR_BACKEND
+    else:
+        from services.application.app.indexing.chroma import (
+            ChromaMemoryVectorIndexAdapter,
+            connect_chroma_collection,
+        )
+
+        vector_index = ChromaMemoryVectorIndexAdapter(
+            connect_chroma_collection(
+                host=host,
+                port=int(os.environ.get("CHROMA_PORT", "8000")),
+                collection_name=os.environ.get(
+                    "CHROMA_MEMORY_COLLECTION", MEMORY_VECTOR_COLLECTION
+                ),
+            )
+        )
+        backend = CHROMA_VECTOR_BACKEND
+    adapter = MemoryIndexSyncAdapter(
+        memory_service=memory, embeddings=embeddings, vector_index=vector_index
+    )
+    return adapter, backend
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -72,13 +135,18 @@ def run_worker(args: argparse.Namespace) -> dict[str, Any]:
         db_name=args.mongo_db,
     )
     archive_adapter, archive_backend = _build_archive_adapter()
+    memory_adapter, memory_backend = _build_memory_adapter(
+        mongo_uri=args.mongo_uri, mongo_db=args.mongo_db
+    )
     worker = IndexSyncWorker(
         repository=repository,
         archive_adapter=archive_adapter,
+        memory_adapter=memory_adapter,
     )
     summary = worker.run_once(limit=args.limit)
     return {
         "archive_backend": archive_backend,
+        "memory_backend": memory_backend,
         "entries_claimed": summary.entries_claimed,
         "entries_succeeded": summary.entries_succeeded,
         "entries_failed": summary.entries_failed,

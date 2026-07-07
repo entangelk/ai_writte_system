@@ -19,20 +19,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol
 
 from services.application.app.analysis.compare import ActionProposal, CompareAction
 from services.application.app.analysis.models import AnalysisCandidate
 from services.application.app.memory.models import PromotionMode
 from services.application.app.memory.service import MemoryService
-
-
-class MemoryReindexOutbox(Protocol):
-    """Phase 2B.5 (D3=B): enqueue a memory reindex; the worker drains it."""
-
-    def enqueue_memory_upserted(
-        self, *, project_id: str, memory_id: str, version: int
-    ) -> object: ...
 
 
 class ApplyOutcome(StrEnum):
@@ -66,14 +57,8 @@ class AppliedProposal:
 
 
 class MemoryApplyService:
-    def __init__(
-        self,
-        *,
-        memory_service: MemoryService,
-        reindex_outbox: MemoryReindexOutbox | None = None,
-    ) -> None:
+    def __init__(self, *, memory_service: MemoryService) -> None:
         self._memory = memory_service
-        self._reindex_outbox = reindex_outbox
 
     def apply_proposals(
         self,
@@ -82,28 +67,13 @@ class MemoryApplyService:
         proposals: tuple[ActionProposal, ...],
         candidates: tuple[AnalysisCandidate, ...],
     ) -> tuple[AppliedProposal, ...]:
+        # Reindex enqueue is owned by MemoryService (Phase 2B.5 D3=B choke point):
+        # create → promote_candidate, update/add_evidence → record_*_version all
+        # enqueue there, so apply needs no separate index hook. no_change/conflict
+        # never call a mint method, so they never enqueue.
         by_id = {candidate.id: candidate for candidate in candidates}
-        applied = tuple(
+        return tuple(
             self._apply_one(project_id, proposal, by_id) for proposal in proposals
-        )
-        if self._reindex_outbox is not None:
-            for result in applied:
-                self._enqueue_reindex(project_id, result)
-        return applied
-
-    def _enqueue_reindex(
-        self, project_id: str, result: AppliedProposal
-    ) -> None:
-        # Only writes that touched a canonical version need reindexing;
-        # no_change/conflict wrote nothing (D4: no enqueue). memory_id/version
-        # are always set for CREATED/VERSIONED.
-        if result.outcome not in (ApplyOutcome.CREATED, ApplyOutcome.VERSIONED):
-            return
-        assert result.memory_id is not None and result.version is not None
-        self._reindex_outbox.enqueue_memory_upserted(
-            project_id=project_id,
-            memory_id=result.memory_id,
-            version=result.version,
         )
 
     def _apply_one(

@@ -20,8 +20,10 @@ from services.application.app.indexing.models import (
     IndexRecordKind,
     IndexSyncEvent,
     IndexSyncOutboxEntry,
+    MemoryIndexRecord,
     SourceBlockIndexRecord,
 )
+from services.application.app.indexing.memory_index import MEMORY_VECTOR_COLLECTION
 from services.application.app.indexing.service import DerivedIndexRecordNotFound
 
 
@@ -248,6 +250,108 @@ class ChromaArchiveIndexMutationAdapter:
                 f"{entry.source.mongo_id}"
             )
         self._collection.delete(where=where)
+
+
+def memory_record_to_chroma(
+    record: MemoryIndexRecord,
+) -> tuple[str, list[float], dict[str, Any]]:
+    """Flatten a memory index record into (id, embedding, metadata). The chroma
+    id is the memory version's own id (== record.memory_id, 2B.4 append-only)."""
+    metadata = {
+        "kind": record.kind.value,
+        "project_id": record.project_id,
+        "memory_id": record.memory_id,
+        "memory_type": record.memory_type,
+        "version": record.version,
+        "status": record.status,
+        "text": record.text,
+    }
+    return record.id, list(record.vector), metadata
+
+
+def memory_record_from_chroma(
+    record_id: str, embedding: Any, metadata: dict[str, Any]
+) -> MemoryIndexRecord:
+    return MemoryIndexRecord(
+        id=record_id,
+        kind=IndexRecordKind(metadata["kind"]),
+        project_id=metadata["project_id"],
+        memory_id=metadata["memory_id"],
+        memory_type=metadata["memory_type"],
+        version=int(metadata["version"]),
+        status=metadata["status"],
+        text=metadata["text"],
+        vector=tuple(float(value) for value in embedding),
+    )
+
+
+class ChromaMemoryVectorIndexAdapter:
+    """Real persistent Chroma backend for the memory_vectors collection (2B.5).
+
+    Implements the `MemoryVectorIndexAdapter` seam (upsert/delete/list) against an
+    injected collection, so the logic is unit-tested with a fake collection and
+    needs no `chromadb`. Records survive a restart, unlike the in-memory fake.
+    """
+
+    _INCLUDE = ["embeddings", "metadatas"]
+
+    def __init__(self, collection: ChromaCollection) -> None:
+        self._collection = collection
+
+    def upsert_memory_records(
+        self, records: tuple[MemoryIndexRecord, ...]
+    ) -> int:
+        if not records:
+            return 0
+        ids: list[str] = []
+        embeddings: list[list[float]] = []
+        metadatas: list[dict[str, Any]] = []
+        for record in records:
+            record_id, embedding, metadata = memory_record_to_chroma(record)
+            ids.append(record_id)
+            embeddings.append(embedding)
+            metadatas.append(metadata)
+        self._collection.upsert(
+            ids=ids, embeddings=embeddings, metadatas=metadatas
+        )
+        return len(records)
+
+    def delete_memory_record(self, *, project_id: str, memory_id: str) -> None:
+        # Project-scoped delete by the record's own id (== memory_id). Kept
+        # project-scoped so a cross-project id can never collide.
+        self._collection.delete(
+            where={
+                "$and": [
+                    {"project_id": project_id},
+                    {"memory_id": memory_id},
+                ]
+            }
+        )
+
+    def list_memory_records(
+        self, *, project_id: str
+    ) -> tuple[MemoryIndexRecord, ...]:
+        result = self._collection.get(
+            where={"project_id": project_id}, include=self._INCLUDE
+        )
+        records = _memory_records_from_get(result)
+        return tuple(sorted(records, key=lambda record: record.id))
+
+
+def _memory_records_from_get(result: dict[str, Any]) -> list[MemoryIndexRecord]:
+    ids = result.get("ids")
+    if ids is None:
+        ids = []
+    embeddings = result.get("embeddings")
+    if embeddings is None:
+        embeddings = [None] * len(ids)
+    metadatas = result.get("metadatas")
+    if metadatas is None:
+        metadatas = []
+    return [
+        memory_record_from_chroma(record_id, embedding, metadata)
+        for record_id, embedding, metadata in zip(ids, embeddings, metadatas)
+    ]
 
 
 def connect_chroma_collection(
