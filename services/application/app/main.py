@@ -83,6 +83,7 @@ from services.application.app.context_search.service import (
     InvalidContextSearchRequest,
     MongoDirectCanonicalMemoryRetriever,
     MongoDirectCandidateMemoryRetriever,
+    VectorCanonicalMemoryRetriever,
     evaluate_context_gate,
 )
 from services.application.app.core_sot.service import (
@@ -408,12 +409,40 @@ def _default_context_search_service(
         vector_search=vector_index,
         embeddings=embeddings,
         planner=planner,
-        # Writing canonical inclusion (⑤ §5 B, D2=A): Mongo-direct retrieval of
-        # canonical memories; the retrieval layer extends to vector later.
-        canonical_memory_retriever=MongoDirectCanonicalMemoryRetriever(memory),
+        # Writing canonical inclusion (⑤ §5 B, D2 follow-up): relevance-ranked
+        # vector retrieval over memory_vectors when the shared collection exists,
+        # else Mongo-direct. The item/Gate authority re-derivation is unchanged.
+        canonical_memory_retriever=_build_canonical_memory_retriever(memory),
         # Writing candidate inclusion (⑤ §5 B follow-up, D2=A): Mongo-direct
         # retrieval of needs_review candidates, labeled candidate at the Gate.
         candidate_memory_retriever=MongoDirectCandidateMemoryRetriever(analysis),
+    )
+
+
+def _build_canonical_memory_retriever(memory: MemoryService):
+    # ⑤ §5 B D2 follow-up: relevance-ranked vector retrieval over the shared
+    # memory_vectors collection when it exists, else the deterministic Mongo-direct
+    # listing. Like _build_semantic_matcher, the in-memory fake in this process is
+    # separate from the worker's, so without CHROMA_HOST there is nothing to query;
+    # and the real 1024-dim collection needs a real embedding service (the fake
+    # embedding's dimensions do not match). With either absent, fall back to
+    # Mongo-direct — the item/Gate authority re-derivation is identical either way.
+    host = os.environ.get("CHROMA_HOST")
+    if not host or not os.environ.get("EMBEDDING_SERVICE_URL"):
+        return MongoDirectCanonicalMemoryRetriever(memory)
+    vector_index = ChromaMemoryVectorIndexAdapter(
+        connect_chroma_collection(
+            host=host,
+            port=int(os.environ.get("CHROMA_PORT", "8000")),
+            collection_name=os.environ.get(
+                "CHROMA_MEMORY_COLLECTION", MEMORY_VECTOR_COLLECTION
+            ),
+        )
+    )
+    return VectorCanonicalMemoryRetriever(
+        memory_service=memory,
+        embeddings=_build_embedding_provider(),
+        vector_index=vector_index,
     )
 
 

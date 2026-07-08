@@ -42,20 +42,26 @@ from services.application.app.context_search.models import (
 )
 from services.application.app.indexing.models import (
     IndexPointer,
+    MemoryIndexRecord,
     SourceBlockIndexRecord,
 )
-from services.application.app.indexing.memory_index import derive_memory_index_text
+from services.application.app.indexing.memory_index import (
+    MemoryVectorIndexAdapter,
+    derive_memory_index_text,
+)
 from services.application.app.indexing.service import (
     EmbeddingProvider,
     MEMORIES_COLLECTION,
     SOURCE_BLOCK_COLLECTION,
     SourceBlockIndexingService,
+    _cosine_similarity,
 )
 from services.application.app.memory.models import MemoryEntry, MemoryStatus
 from services.application.app.memory.service import MemoryNotFound, MemoryService
 from services.application.app.analysis.models import (
     AnalysisCandidate,
     AnalysisCandidateStatus,
+    AnalysisCandidateType,
 )
 from services.application.app.analysis.service import (
     AnalysisNotFound,
@@ -145,6 +151,79 @@ class MongoDirectCanonicalMemoryRetriever:
             if entry.status is MemoryStatus.CANONICAL
         ]
         return tuple(canonical[:limit])
+
+
+class VectorCanonicalMemoryRetriever:
+    """D2 follow-up: relevance-ranked canonical retrieval over ``memory_vectors``.
+
+    Vector similarity finds the ids; the memory store stays the authority
+    (D2=A: "벡터에서 찾고 Mongo를 찔러 권위 레코드 재유도"), so every hit is
+    reloaded via ``get_memory`` and only ``CANONICAL`` survivors are returned. A
+    stale vector (a superseded/deleted memory whose vector lingers before the
+    reindex drain catches up) is dropped here, and would be caught again by the
+    Gate. The ``.retrieve()`` seam and return type are identical to the
+    Mongo-direct retriever, so step/item/Gate logic is unchanged.
+
+    Canonical memories are indexed per ``memory_type``, so each type is queried
+    and the hits are merged into one relevance-ranked pool. ``_merge_hits`` is
+    the isolated swap point for a future per-type selection strategy (owner D2:
+    single pool for the MVP, kept separable)."""
+
+    # The three canonical memory taxonomies (== MemoryEntry.memory_type domain).
+    _MEMORY_TYPES: tuple[AnalysisCandidateType, ...] = tuple(AnalysisCandidateType)
+
+    def __init__(
+        self,
+        *,
+        memory_service: MemoryService,
+        embeddings: EmbeddingProvider,
+        vector_index: MemoryVectorIndexAdapter,
+    ) -> None:
+        self._memory = memory_service
+        self._embeddings = embeddings
+        self._vector_index = vector_index
+
+    def retrieve(
+        self, *, project_id: str, query: str, limit: int
+    ) -> tuple[MemoryEntry, ...]:
+        vector = self._embeddings.embed(query)
+        hits: list[MemoryIndexRecord] = []
+        for memory_type in self._MEMORY_TYPES:
+            hits.extend(
+                self._vector_index.query_similar(
+                    project_id=project_id,
+                    memory_type=memory_type.value,
+                    vector=vector,
+                    limit=limit,
+                )
+            )
+        entries: list[MemoryEntry] = []
+        for hit in self._merge_hits(hits, vector):
+            try:
+                entry = self._memory.get_memory(
+                    project_id=project_id, memory_id=hit.memory_id
+                )
+            except MemoryNotFound:
+                # The vector outlived its memory (deleted before the reindex
+                # drain); skip it rather than surfacing a phantom.
+                continue
+            if entry.status is MemoryStatus.CANONICAL:
+                entries.append(entry)
+            if len(entries) >= limit:
+                break
+        return tuple(entries)
+
+    def _merge_hits(
+        self, hits: list[MemoryIndexRecord], vector: tuple[float, ...]
+    ) -> list[MemoryIndexRecord]:
+        # MVP (owner D2): merge every type's hits into one pool ranked by cosine
+        # similarity, id as a deterministic tie-break (the fake adapter's own
+        # ordering convention). Isolated so a later per-type selection strategy
+        # can replace it without touching the authority re-derivation above.
+        return sorted(
+            hits,
+            key=lambda hit: (-_cosine_similarity(vector, hit.vector), hit.id),
+        )
 
 
 DEFAULT_CANDIDATE_MEMORY_LIMIT = 8

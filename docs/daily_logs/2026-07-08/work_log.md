@@ -87,6 +87,36 @@
 - **경계 위험(무조치)**: 감사가 지적한 "Gate origin 분기의 `else` fallback이 새 collection을 source-block으로 처리" 위험은 현재 3 collection만 존재하는 forward concern이라 코드 변경 불요(오너도 비차단·경계로 분류).
 - **재검증**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **631 passed / 45 skipped**(630 → +1). mutation 복원(`git checkout`) 후 clean. `git diff --check` clean.
 
+### (b) Writing canonical memory retrieval의 vector 확장 (SoT v1.6.51)
+
+- **리듬**: 착수 브리프(`plans/04-writing-memory-vector-retrieval-decisions.md`) → 오너 결정 → 구현. v1.6.48/v1.6.50 canonical D2=A가 "retrieval 레이어 교체·권위 재유도 불변"으로 명시 위임한 후속.
+- **조사에서 드러난 헤드라인 긴장(§1 — surface)**: HANDOFF Next Tasks #1(b)는 "canonical·candidate **둘 다** vector로 함께 확장(같은 seam)"이라 적었으나, 코드 재확인 결과 **candidate는 어떤 vector index에도 색인돼 있지 않다**(`memory_vectors`는 canonical `MemoryEntry` 전용, 2B.5; `indexing/`에 candidate 참조 0건). → candidate vector는 색인 파이프라인(2B.5 규모) 선행이 필요해 별도 slice. 또 **ES lexical(§8)은 인프라 전무**(compose·코드에 ES 없음, SoT 아키텍처 표 line 128에 의도만). 이 둘을 브리프에 명시하고 오너 결정으로 slice를 canonical vector만으로 좁혔다.
+- **오너 결정**: **D0=A**(canonical vector만), **D1=A**(권위 재유도), **D2=단일 풀 병합**(단 `_merge_hits` 격리로 per-type 후속 분리 가능), **D3=A**(env 배선 fallback), **D4=A**(fake 회귀, 실 Chroma 후속), **D5=A**(ES 별도 — 단 머신에 ES 8.13.4+nori 컨테이너 `tf-ai-harness-elasticsearch-step1`가 9201에 있어 후속 실 테스트 활용 가능성 확인 대상).
+- **구현(순수 주입 교체 — step/item/Gate 무변)**:
+  - `context_search/service.py`: 신설 `VectorCanonicalMemoryRetriever`. `retrieve(project_id, query, limit)`가 (1) `embeddings.embed(query)`, (2) 3종 `AnalysisCandidateType`을 각각 `MemoryVectorIndexAdapter.query_similar(memory_type=…)`로 조회, (3) `_merge_hits`(cosine 유사도 단일 풀 정렬, id tie-break — 격리된 swap point), (4) hit `memory_id`로 `MemoryService.get_memory` 권위 재유도(삭제 memory 잔존 벡터는 `MemoryNotFound`로 skip), (5) `status is CANONICAL`만 global limit까지 반환. `MemoryIndexRecord`·`MemoryVectorIndexAdapter`·`_cosine_similarity`·`AnalysisCandidateType` import 추가.
+  - `main.py`: `_build_canonical_memory_retriever(memory)` 신설 — `CHROMA_HOST`+`EMBEDDING_SERVICE_URL` 둘 다면 `ChromaMemoryVectorIndexAdapter`(memory_vectors) 위 `VectorCanonicalMemoryRetriever`, 아니면 종전 `MongoDirectCanonicalMemoryRetriever` fallback(`_build_semantic_matcher`의 memory_vectors 배선 선례 재사용). `_default_context_search_service`가 이 빌더를 호출. candidate retriever·Gate·item 배선 전부 무변.
+- **회귀 +5**(`tests/test_context_search_memory_vector_retrieval.py`): 권위 재유도+relevance 순서(index text가 아니라 store payload 반환으로 authority 실증)·global limit·stale 벡터 격리(삭제→MemoryNotFound, superseded→CANONICAL 필터)·**단일 풀 병합이 per-type 아님**(같은 type 2 hit이 다른 type 1 hit을 limit 안에서 이김)·seam 불변(vector retriever가 canonical_memory step으로 micro memory item 산출). **mutation 양방향**: CANONICAL 필터 무력화→stale 테스트 재실패(under-strict); `_merge_hits`를 round-robin으로→병합 테스트 재실패(over-strict). 각 복원 확인.
+- **검증**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **636 passed / 45 skipped**(631 → +5). 기존 canonical/candidate/context_search 회귀 전부 무변(seam 불변 실증). `git diff --check` clean.
+
+## User Decisions and Rationale (v1.6.51)
+
+- 오너가 **D0=A**(canonical vector만)를 택했다. HANDOFF의 "둘 다 함께 확장"은 candidate 쪽에 뒷받침 index가 없다는 사실을 놓친 것으로, candidate를 억지로 묶으면 색인 파이프라인 선행으로 slice가 비대해지고 §62 색인 표면이 확대된다. canonical만 하면 인프라가 이미 있어 순수 주입 교체.
+- 오너가 **D2=단일 풀 병합(MVP)**을 택하되 "언제든 per-type 분리 가능하게 설계"를 명시 지시했다. → 병합 로직을 `_merge_hits` 단일 메서드로 격리(추측적 전략 프레임워크는 짓지 않음 — §2)해, 후속에서 per-type 선발로 교체할 지점만 명확히 남겼다.
+- 오너가 **D5=A**(ES 별도)를 택하되, 머신에 이미 떠 있는 ES 컨테이너(nori 한국어 분석기 포함)를 ES leg 착수 시 실 테스트에 쓸 수 있는지 확인하라고 했다. 이번 slice에서는 조사만(위치·버전 기록), 활용은 §8 착수 브리프의 몫.
+
 ## Next steps
 
-- **다음 구현 slice 선택 대기**(HANDOFF Next Tasks #1 후보 b~e). b(vector/ES retrieval 확장)는 canonical·candidate 두 retriever가 같은 seam이라 함께 확장 가능. e(canonical↔candidate dedup)는 v1.6.50 D7 후속.
+- **candidate vector**(D0 후속): candidate 색인 파이프라인(outbox→worker→candidate vector collection) 선행 후 `VectorCandidateMemoryRetriever`로 같은 seam 확장.
+- **ES lexical(§8)**: 별도 착수 브리프. 머신의 `tf-ai-harness-elasticsearch-step1`(9201, nori) 실 테스트 활용 가능성 확인 포함.
+- **실 관통(sandbox 밖)**: `VectorCanonicalMemoryRetriever` live smoke(실 Chroma memory_vectors + BGE-m3-ko relevance), relevance 품질 spike.
+- 그 외 HANDOFF Next Tasks #1 후보 c/d/e 잔존.
+
+### (b) 검증 후속 보강 (2026-07-08, 오너 독립 감사 → 비차단 관찰 보강)
+
+오너의 독립 감사 기록 `docs/verifications/2026-07-08/canonical_memory_vector_retrieval.md`는 **합격**(차단 없음, boundary matrix 14 cell 중 13 pinned, 잔여 1은 D4=A로 live smoke에 명시 위임). 비차단 관찰 4건 중 cheap·in-scope 3건을 보강했다(#2는 감사자도 pre-existing·범위 밖으로 분류 → CLAUDE.md §3에 따라 미조치).
+
+- **관찰 #1(doc nit, 반복 패턴)**: `HANDOFF.md:100` Project Structure의 SoT 버전 주석이 `v1.6.50`으로 stale(Current Status `:8`은 이미 v1.6.51) → `v1.6.51`로 정정. 직전 candidate slice 보강에서 같은 줄 v1.6.48→50을 고쳤던 동일 패턴 반복.
+- **관찰 #3(doc 일관성)**: SoT Phase 4 섹션 prose(`system-contract-sot.md:407`)가 v1.6.48까지만 서술 → v1.6.50(candidate 포함)·v1.6.51(canonical vector) 1문장씩 추가. changelog는 권위 있고 완전했으나 phase 요약 prose가 뒤처진 누락 보강(literal 모순 아님).
+- **관찰 #4(test-coverage, cheap 보강)**: `embed(query)`의 query 인자가 랭킹에 반영됨을 lock하는 테스트 부재였다(기존 `_FixedEmbeddings`는 query-무지각이라 embed(query)를 상수로 hardcode해도 통과 = boundary cell #1의 mechanism은 pinned지만 query-flow는 미lock). `_QuerySensitiveEmbeddings`(query 문자열→구별 벡터) + `test_query_drives_ranking` 추가 — 같은 벡터 index에서 query "toward-a"→mem-a, "toward-b"→mem-b 상위. **mutation 재실증**: `retrieve`가 `embed(query)` 대신 상수 벡터 하드코드 시 이 테스트가 두 방향 중 하나로 재실패(query→embed→랭킹 flow가 load-bearing). 복원 후 통과.
+- **재검증**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **637 passed / 45 skipped**(636 → +1). SoT v1.6.51 changelog·HANDOFF 테스트 수(636→637) 동기화. mutation 복원 후 `git diff --check` clean.
+- **미조치(범위 밖)**: 관찰 #2(`system-contract-sot.md:100` "문서 역할" 표 v1.6.43 누적 stale)는 본 slice diff가 건드린 줄이 아니고 감사자도 범위 밖으로 분류 → 선재 stale은 요청 없이 건드리지 않음(§3). 관찰의 "경계 위험"(per-type limit 캡 + stale 필터 결합 시 yield<limit 가능)은 Mongo-direct도 동일한 설계적 속성이라 코드 편차 아님(무조치).
