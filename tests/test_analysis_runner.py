@@ -30,6 +30,7 @@ from services.application.app.core_sot.service import (
     InMemoryCoreSotRepository,
     NotFound,
 )
+from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
 from services.llm_gateway.app.provider import FakeLLMProvider, GenerationResult
 
 
@@ -334,6 +335,20 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
             ),
             expected=AnalysisJobFailureReason.SCHEMA_INVALID,
             expected_exc=AnalysisExtractionError,
+        )
+
+    async def test_runner_provider_error_propagates_unwrapped_as_provider_error(self):
+        # Tracked debt #8 reinforcement (2026-07-08 audit issue #3): drive the
+        # REAL extraction adapter with a provider that raises a Gateway
+        # ProviderError. The extractor must NOT wrap it (that would misclassify
+        # it as schema_invalid → 400); it propagates unwrapped, the runner maps
+        # the failure to provider_error, and re-raises the original ProviderError
+        # (which the /run endpoint then maps to 502). Closes the extractor→runner
+        # link that the endpoint stub tests could not exercise.
+        await self._assert_failed_reason(
+            extractor=AnalysisExtractionAdapter(_ProviderErrorProvider()),
+            expected=AnalysisJobFailureReason.PROVIDER_ERROR,
+            expected_exc=ProviderError,
         )
 
     async def test_runner_marks_failed_schema_invalid_on_base_validation(self):
@@ -716,6 +731,23 @@ class _RaisingExtractor:
 
     async def extract(self, _snapshot):
         raise self._error
+
+
+class _ProviderErrorProvider:
+    """LLM provider whose generate() raises a real Gateway ProviderError.
+
+    Fed into the REAL extraction adapter so the extractor→runner chain is
+    exercised end-to-end (the extractor must NOT wrap the ProviderError into an
+    AnalysisExtractionError, which would misclassify it as schema_invalid/400).
+    """
+
+    async def generate(self, request):
+        raise ProviderError(
+            code=ProviderErrorCode.UNAVAILABLE,
+            message="gateway is unavailable",
+            retryable=True,
+            provider="llm_gateway",
+        )
 
 
 class _DuplicateOnWriteRepo(InMemoryAnalysisRepository):

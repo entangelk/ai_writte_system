@@ -16,7 +16,7 @@
   - **Indexing(Phase 3A/3B)**: source block index rebuild(HTTP/CLI/deployed smoke), index sync outbox + one-shot worker(archive drain + memory reindex drain).
   - **Context search(Phase 4)**: LLM planner + orchestration + Context Gate, HTTP API, 공유 in-process vector index, real Chroma+embedding 백엔드(env 구성 시), canonical memory 포함(⑤ §5 B) + `needs_review` candidate 포함(라벨·micro·권위필드 배제, Gate가 candidate origin만 예외 허용).
 - **Compose 런타임**: base `docker-compose.yml`(application + Mongo replica set + gateway[외부 llama 클라이언트] + embedding + chroma). opt-in `docker-compose.llama.yml`로 in-stack llama.cpp GPU 서버(port 9080)를 띄운다. runbook: `docs/runbooks/local-llama-server.md`.
-- **테스트**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **630 passed / 45 skipped**(2026-07-08 기준). skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
+- **테스트**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **631 passed / 45 skipped**(2026-07-08 기준). skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
 
 ## Active Decisions
 
@@ -82,7 +82,7 @@
 
 ## Verification
 
-- 현재 시스템 전체 스위트: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **630 passed / 45 skipped**. `git diff --check` clean.
+- 현재 시스템 전체 스위트: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **631 passed / 45 skipped**. `git diff --check` clean.
   - `--ignore=tests/test_memory_mongo.py`는 프로젝트 검증 관례다(해당 4개는 사전-존재 localhost Mongo env artifact이며 코드 회귀가 아니다).
   - skip 45개는 live Mongo/Chroma/embedding 미가용 통합·smoke 테스트(sandbox 밖에서 실행).
 - live/배포 검증 이력은 `docs/verifications/YYYY-MM-DD/`에 있다. 각 slice의 자체 회귀·mutation 재실증 상세는 `docs/daily_logs/YYYY-MM-DD/work_log.md`에 있다.
@@ -96,7 +96,7 @@ docker-compose.llama.yml         # opt-in override: in-stack llama.cpp GPU 서�
 docs/
 ├── runbooks/local-llama-server.md   # 로컬 llama.cpp GPU 서버 opt-in 기동/설정/smoke runbook
 ├── README.md                    # 문서 분류와 진입점
-├── system-contract-sot.md       # 정본 계약 SoT(Approved, v1.6.48)
+├── system-contract-sot.md       # 정본 계약 SoT(Approved, v1.6.50)
 ├── abstract.md / *.md           # 보존된 아이디에이션 원본과 주제별 상세
 ├── plans/                       # 계획 + 착수 결정 브리프(README 인덱스)
 │   ├── README.md · 00-foundations.md · implementation-plan.md
@@ -104,8 +104,8 @@ docs/
 │   ├── flat-loop-gate.md · llm-gateway.md · gemma4-reuse.md · product-shell.md · analysis-memory-taxonomy.md
 │   ├── 02-* / 02b-* / 03-* / 04-*-decisions.md   # slice별 착수 결정 브리프(대부분 Resolved)
 ├── benchmarks/2026-06-30/       # Gemma Q4 budget 기본값 근거
-├── daily_logs/2026-06-24 … 2026-07-07/work_log.md   # 상세 이력
-└── verifications/2026-06-24 … 2026-07-07/           # 독립 검증 기록
+├── daily_logs/2026-06-24 … 2026-07-08/work_log.md   # 상세 이력
+└── verifications/2026-06-24 … 2026-07-08/           # 독립 검증 기록
 services/
 ├── llm_gateway/app/             # main(shell) · payload · provider · errors · transport · client · httpx_transport
 ├── embedding/app/main.py        # FastAPI /embed·/health, dragonkue/BGE-m3-ko lazy 로드

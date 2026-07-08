@@ -77,6 +77,16 @@
 - 오너가 **D4=B**(review_status 필드 지금 신설)를 택했다. status=candidate 단일 라벨(A)보다 Phase 6 confirmed/rejected 소비 계약을 미리 forward-compat하는 쪽. 현재 값은 needs_review 고정(2A needs_review 고정 선례와 유사).
 - 오너가 **안전선=A**(라벨 + 권위필드 배제)를 택했다. Phase 6 §62(승인 전 canonical 위장 금지)를 candidate를 아예 막는 대신 명시 라벨 + micro 한정 + constraints/do_not_use 배제로 지키며 포함한다.
 
+## 검증 후속 보강 (2026-07-08, 오너 독립 감사 → 비차단 3건 폐쇄)
+
+오너의 독립 감사 기록 `docs/verifications/2026-07-08/sot_v1_6_49_50_audit.md`는 **세 커밋 모두 합격**(차단 없음). 비차단 관찰 3건을 오너 지시로 보강했다.
+
+- **이슈 #1(doc nit)**: `HANDOFF.md:99` Project Structure의 SoT 버전 주석이 `v1.6.48`로 stale → `v1.6.50`으로 정정(line 8 Current Status는 이미 정확했음).
+- **이슈 #2(doc nit)**: `HANDOFF.md:107` daily_logs/verifications 범위가 `…2026-07-07` → `…2026-07-08`로 갱신.
+- **이슈 #3(test-coverage)**: (e) `/run` 502 회귀가 stub runner만 사용해 실제 extractor→runner 체인(ProviderError wrap 없음)이 코드 검사로만 확인됐던 gap을 닫음. `tests/test_analysis_runner.py`에 `test_runner_provider_error_propagates_unwrapped_as_provider_error` 추가 — **실제** `AnalysisExtractionAdapter`에 `ProviderError`를 던지는 `_ProviderErrorProvider`를 물려 runner를 구동, (a) `ProviderError`가 wrap 없이 전파(expected_exc=ProviderError → extractor가 400으로 오분류하지 않음 확인), (b) runner가 `failure_reason=provider_error`로 매핑 후 원예외 재던짐을 잠갔다. **mutation 실증**: `AnalysisExtractionAdapter.extract`가 provider 호출을 `except ProviderError → AnalysisExtractionError`로 감싸도록 변형 시 이 테스트가 `AnalysisExtractionError`(≠ProviderError)로 재실패(extractor 비-wrap이 load-bearing). 종점 `ProviderError→502` 매핑은 종전대로 endpoint stub 테스트가 잠그므로, 이제 extractor→runner→endpoint 전 체인이 회귀로 lock됨.
+- **경계 위험(무조치)**: 감사가 지적한 "Gate origin 분기의 `else` fallback이 새 collection을 source-block으로 처리" 위험은 현재 3 collection만 존재하는 forward concern이라 코드 변경 불요(오너도 비차단·경계로 분류).
+- **재검증**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **631 passed / 45 skipped**(630 → +1). mutation 복원(`git checkout`) 후 clean. `git diff --check` clean.
+
 ## Next steps
 
 - **다음 구현 slice 선택 대기**(HANDOFF Next Tasks #1 후보 b~e). b(vector/ES retrieval 확장)는 canonical·candidate 두 retriever가 같은 seam이라 함께 확장 가능. e(canonical↔candidate dedup)는 v1.6.50 D7 후속.
