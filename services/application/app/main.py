@@ -1035,6 +1035,15 @@ def create_app(
             InvalidAnalysisCandidate,
         ) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except ProviderError as exc:
+            # A Gateway/provider failure (timeout/unavailable/5xx) re-raised by
+            # the runner after it marks the job failed(provider_error) is an LLM
+            # error → 502, mirroring the compare endpoint's explicit branch. The
+            # generic catch below also maps to 502; this explicit branch keeps
+            # the intent legible and refactor-safe. (It must precede the generic
+            # ``except Exception`` catch; the 400/404/409 mappings above are for
+            # unrelated types, so their order is unaffected.)
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
         except HTTPException:
             raise
         except Exception as exc:

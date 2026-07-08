@@ -37,6 +37,25 @@
 - 문서 전용 변경. 참조 경로 유효성 확인: `docs/runbooks/local-llama-server.md`, `docs/benchmarks/2026-06-30/gemma_q4_llama_cpp_repeats3_warmup1.json`, `docs/system-contract-sot.md`, `services/embedding/app/main.py`, `services/application/app/memory/service.py`, `scripts/phase2b5_*` 전부 존재. SoT 버전 문구(v1.6.48)·테스트 수(619 passed/45 skipped)는 정본/직전 로그와 일치.
 - `git diff --check` clean. 코드 미변경이라 테스트 스위트 영향 없음.
 
+### 추적 부채 #8 조사·폐쇄 (SoT v1.6.49)
+
+- **지시**: 오너가 작은 cleanup slice로 부채 #8(`ProviderError`→502 패턴을 `/context-search`·2A extraction adapter에 적용)을 먼저, 그다음 (a) candidate Writing 포함 순으로 지시. e가 후속(a)의 영향을 받으면 a부터 하라는 조건 첨부.
+- **의존성 판단**: (e)는 두 경로의 provider 오류 매핑, (a)는 context_search에 candidate retriever step/gate 분기 추가 — 직교. (e)는 (a)의 영향을 받지 않으므로 e→a 순서 유지.
+- **조사 결과 — 부채는 stale(CLAUDE.md §1)**: 코드를 읽으니 부채 노트(2026-07-06)의 "uncaught → HTTP 500"이 현재 코드와 어긋났다.
+  - `/context-search`: service `_build_plan`(`context_search/service.py`)이 planner 호출을 `try`로 감싸고 async `await`까지 포함해 `except Exception → ContextSearchFailed(llm_error)`로 매핑(slice 4.1 원본 커밋 `44da077`부터 존재). 엔드포인트가 `ContextSearchFailed → 502`. → 이미 502.
+  - 2A `/run`: 엔드포인트에 `except Exception → 502` catch-all(main.py). runner가 `ProviderError`를 mark_job_failed(provider_error) 후 재던지면 catch-all이 502로. → 이미 502.
+  - 노트가 지목한 **compare** 엔드포인트만 catch-all이 없어 실제 누출했고 그래서 명시적 `except ProviderError`(v1.6.34)가 필요했다. 노트 작성자가 compare 구조를 형제 경로에도 있다고 가정한 것.
+  - **재현 실증**: scratchpad에서 async planner가 실제 `ProviderError`를 await에서 던지도록 구성 → `/context-search` 응답 `502 llm_error: planner failed: ...` 확인(500 아님).
+- **오너 결정(surface 후)**: 부채 stale임을 보고하고 "회귀 lock만 + 부채 닫기" vs "명시적 except ProviderError 추가" 중 택일 요청 → 오너가 **명시적 분기 추가** 선택(compare와 대칭·의도 가독·미래 refactor 방어).
+- **구현**: 동작 변경 없이(이미 502) 실제 provider 호출 지점에 명시적 분기 추가.
+  - `main.py` `/run` 엔드포인트: catch-all 앞에 `except ProviderError → 502(str(exc))`.
+  - `context_search/service.py` `_build_plan`: generic catch 앞에 `except ProviderError → ContextSearchFailed(llm_error, "planner provider error: …")`. `ProviderError` import 추가.
+  - **2A extraction adapter에는 wrap하지 않음**: adapter에서 감싸면 `AnalysisExtractionError`→400으로 **오분류**되므로 502 경계(엔드포인트)에 둔다.
+- **회귀 +2 + mutation 재실증**:
+  - `test_context_search_api.py::test_planner_provider_error_maps_to_502_llm_error`: `_AsyncProviderErrorPlanner`(coroutine이 await에서 실 `ProviderError`)→502 + detail "provider error". **mutation**: 명시 분기 무력화 시 detail이 "planner failed"로 바뀌어 assert 실패(분기 load-bearing, over-strict).
+  - `test_application_api.py::test_analysis_run_endpoint_maps_real_provider_error_to_502`: `_ApiRealProviderErrorRunner`(실 `ProviderError` 재던지기)→502 + failure_reason=provider_error. **mutation**: `/run`의 명시+generic catch 둘 다 무력화 시 uncaught 500으로 재실패(계약 load-bearing, under-strict).
+- **검증**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **621 passed / 45 skipped**(619 → +2). `git diff --check` clean. 계약(ProviderError→502) 변경 없음 — 명시화·회귀 lock·부채 폐쇄만.
+
 ## Next steps
 
-- **다음 구현 slice 선택 대기**(HANDOFF Next Tasks #1 후보 a~d). 오너 결정 후 착수 브리프 → 구현 리듬.
+- **다음 구현 slice: (a) `needs_review` candidate의 Writing 포함**(오너 지시). v1.6.48이 남긴 "바로 다음 slice". canonical inclusion machinery(memory→ContextItem, `pointer.collection` origin 분기, Gate origin별 재검증) 재사용 + candidate origin/`status=candidate` 라벨(micro 전용). Phase 6 review 지위 라벨/소비 계약 동반 결정. 착수 브리프부터.

@@ -53,6 +53,7 @@ from services.application.app.indexing.service import (
 )
 from services.application.app.memory.models import MemoryEntry, MemoryStatus
 from services.application.app.memory.service import MemoryNotFound, MemoryService
+from services.llm_gateway.app.errors import ProviderError
 
 
 DEFAULT_WALL_CLOCK_SECONDS = 60
@@ -236,6 +237,19 @@ class ContextSearchService:
             # The terminal-JSON planner already classifies its own failures
             # (e.g. llm_error); preserve that lineage instead of re-wrapping.
             raise
+        except ProviderError as exc:
+            # A Gateway/provider failure (timeout/unavailable/5xx) raised by
+            # the planner's provider turn is an LLM-tier error → llm_error →
+            # 502 at the HTTP boundary. This is the context-search counterpart
+            # of the compare endpoint's explicit ``except ProviderError`` (the
+            # provider call lives at the service layer here, so the Context
+            # SearchFailed lineage is applied here, not at the endpoint). The
+            # generic catch below would also reach llm_error; this explicit
+            # branch keeps the intent legible and refactor-safe.
+            raise ContextSearchFailed(
+                ContextSearchErrorType.LLM_ERROR,
+                f"planner provider error: {exc}",
+            ) from exc
         except Exception as exc:
             raise ContextSearchFailed(
                 ContextSearchErrorType.LLM_ERROR,

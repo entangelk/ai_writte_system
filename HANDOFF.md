@@ -5,7 +5,7 @@
 
 ## Current Status
 
-- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.48**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
+- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.49**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
 - 개발 진입점은 `docs/plans/README.md`. `docs/` 루트의 설계 문서는 초기 아이디에이션 자료다.
 - 구현된 계층(모두 회귀로 잠김, 아래는 현재 동작하는 표면):
   - **LLM Gateway**: FastAPI shell(`/health/live`·`/health/ready`·`/v1/generate`), llama.cpp 호환 provider + httpx async adapter, provider error 5종→HTTP status 매핑.
@@ -16,7 +16,7 @@
   - **Indexing(Phase 3A/3B)**: source block index rebuild(HTTP/CLI/deployed smoke), index sync outbox + one-shot worker(archive drain + memory reindex drain).
   - **Context search(Phase 4)**: LLM planner + orchestration + Context Gate, HTTP API, 공유 in-process vector index, real Chroma+embedding 백엔드(env 구성 시), canonical memory 포함(⑤ §5 B).
 - **Compose 런타임**: base `docker-compose.yml`(application + Mongo replica set + gateway[외부 llama 클라이언트] + embedding + chroma). opt-in `docker-compose.llama.yml`로 in-stack llama.cpp GPU 서버(port 9080)를 띄운다. runbook: `docs/runbooks/local-llama-server.md`.
-- **테스트**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **619 passed / 45 skipped**(2026-07-07 기준). skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
+- **테스트**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **621 passed / 45 skipped**(2026-07-08 기준). skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
 
 ## Active Decisions
 
@@ -60,7 +60,7 @@
 - Writing ContextPackage의 canonical memory 포함(⑤ §5 B, D1=A canonical만): retrieval 레이어(현재 Mongo-direct, 랭킹 없음)와 권위 재유도(항상 memory store 재검증)를 분리 설계했다. 후속에서 retrieval을 vector(`memory_vectors`)·ES로 교체해도 item 변환·Gate는 불변. candidate 포함은 이 machinery를 재사용하는 다음 slice.
 
 ### 추적 부채
-- `ProviderError`→502 패턴이 `/context-search`(planner)·2A extraction adapter에 미적용이다. 두 동기 LLM endpoint는 Gateway 장애 시 `ProviderError`가 uncaught → HTTP 500 누출. 별도 slice에서 (a) 동일 `except ProviderError→502` 추가 또는 (b) adapter에서 도메인 에러로 wrap 중 택일. (Next Tasks #8)
+- 없음. (이전 부채 #8 `ProviderError`→502는 조사 결과 stale — 두 경로 모두 이미 502였음 — 로 v1.6.49에서 명시 분기+회귀 lock으로 폐쇄했다.)
 
 ## Owner Decisions Needed
 
@@ -78,12 +78,11 @@
    - 2B.5 live smoke(`scripts/phase2b5_memory_reindex_live_smoke.py`: promote→outbox→worker→실 `memory_vectors` 관통) + 필요 시 backfill(`scripts/phase2b5_reindex_memory.py`).
    - 곁가지: 2B.3.2 compare judge live smoke, worker→real Chroma archive live smoke.
 3. **Phase 4 real vector 잔여**: worker→real Chroma live smoke(archive→outbox→worker→실 Chroma record 삭제), ES lexical 경로(§8, 착수 브리프 필요), real embedding quality spike. embedding 이미지 CPU-only torch pin은 오너 지시로 최후순위(GPU 기본 유지). 운영 주의: `docker compose restart chroma application`은 `depends_on: service_healthy`를 보장하지 않아 application이 Chroma ready 전에 실패할 수 있다 — Chroma까지 재시작한 뒤 `docker compose -f docker-compose.yml -f docker-compose.llama.yml up -d application`처럼 health dependency를 다시 적용한다.
-4. **추적 부채**: `ProviderError`→502 패턴을 `/context-search`·2A extraction adapter에 적용(Active Decisions 추적 부채 참조).
-5. **보류 계약층**: `/v1/generate-structured`(비용 확인으로 보류, adapter가 JSON 검증+1회 repair 소유), domain tool-call branch(상류 의존 해소 후), task별 `artifact_present`(payload schema 확정 시).
+4. **보류 계약층**: `/v1/generate-structured`(비용 확인으로 보류, adapter가 JSON 검증+1회 repair 소유), domain tool-call branch(상류 의존 해소 후), task별 `artifact_present`(payload schema 확정 시).
 
 ## Verification
 
-- 현재 시스템 전체 스위트: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **619 passed / 45 skipped**. `git diff --check` clean.
+- 현재 시스템 전체 스위트: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **621 passed / 45 skipped**. `git diff --check` clean.
   - `--ignore=tests/test_memory_mongo.py`는 프로젝트 검증 관례다(해당 4개는 사전-존재 localhost Mongo env artifact이며 코드 회귀가 아니다).
   - skip 45개는 live Mongo/Chroma/embedding 미가용 통합·smoke 테스트(sandbox 밖에서 실행).
 - live/배포 검증 이력은 `docs/verifications/YYYY-MM-DD/`에 있다. 각 slice의 자체 회귀·mutation 재실증 상세는 `docs/daily_logs/YYYY-MM-DD/work_log.md`에 있다.

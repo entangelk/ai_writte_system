@@ -36,6 +36,7 @@ from services.application.app.indexing.service import (
     PROJECTS_COLLECTION,
 )
 from services.application.app.main import create_app
+from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
 from services.llm_gateway.app.provider import FakeLLMProvider, GenerationResult
 
 
@@ -1319,6 +1320,36 @@ class ApplicationApiTest(unittest.TestCase):
         self.assertEqual(fetched.json()["status"], "failed")
         self.assertEqual(fetched.json()["failure_reason"], "provider_error")
 
+    def test_analysis_run_endpoint_maps_real_provider_error_to_502(self):
+        # Tracked debt #8 lock: a real Gateway ProviderError re-raised by the
+        # runner (not just a generic RuntimeError) hits the endpoint's explicit
+        # ``except ProviderError`` branch → 502, and the job stays failed with
+        # failure_reason=provider_error. Under-strict: removing both the
+        # explicit branch and the generic catch re-fails this via an unhandled
+        # 500.
+        core_sot = CoreSotService(InMemoryCoreSotRepository())
+        analysis = AnalysisService(InMemoryAnalysisRepository())
+        client = TestClient(
+            create_app(
+                core_sot,
+                analysis_service=analysis,
+                analysis_runner=_ApiRealProviderErrorRunner(analysis),
+            )
+        )
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        job = analysis.create_job(
+            project_id=project["id"],
+            snapshot_id="snapshot-1",
+            idempotency_key="analysis-run-1",
+        ).job
+
+        failed = client.post(f"/projects/{project['id']}/analysis/jobs/{job.id}/run")
+        fetched = client.get(f"/projects/{project['id']}/analysis/jobs/{job.id}")
+
+        self.assertEqual(failed.status_code, 502)
+        self.assertEqual(fetched.json()["status"], "failed")
+        self.assertEqual(fetched.json()["failure_reason"], "provider_error")
+
     def test_analysis_run_endpoint_maps_snapshot_not_found_to_404(self):
         core_sot = CoreSotService(InMemoryCoreSotRepository())
         analysis = AnalysisService(InMemoryAnalysisRepository())
@@ -1433,6 +1464,31 @@ class _ApiProviderErrorRunner:
     async def run_job(self, *, project_id: str, job_id: str):
         self._analysis_service.mark_job_running(project_id=project_id, job_id=job_id)
         error = RuntimeError("gateway down")
+        self._analysis_service.mark_job_failed(
+            project_id=project_id,
+            job_id=job_id,
+            failure_reason=AnalysisJobFailureReason.PROVIDER_ERROR,
+            failure_detail=str(error),
+        )
+        raise error
+
+
+class _ApiRealProviderErrorRunner:
+    """Re-raises a real Gateway ``ProviderError`` (timeout/unavailable/5xx),
+    matching AnalysisExtractionRunner.run_job which marks the job failed then
+    re-raises the original provider exception."""
+
+    def __init__(self, analysis_service):
+        self._analysis_service = analysis_service
+
+    async def run_job(self, *, project_id: str, job_id: str):
+        self._analysis_service.mark_job_running(project_id=project_id, job_id=job_id)
+        error = ProviderError(
+            code=ProviderErrorCode.UNAVAILABLE,
+            message="gateway is unavailable",
+            retryable=True,
+            provider="llm_gateway",
+        )
         self._analysis_service.mark_job_failed(
             project_id=project_id,
             job_id=job_id,

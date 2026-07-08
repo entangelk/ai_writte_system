@@ -32,6 +32,7 @@ from services.application.app.indexing.service import (
     SourceBlockIndexingService,
 )
 from services.application.app.main import create_app
+from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
 
 
 RAW_TEXT = (
@@ -73,6 +74,25 @@ class _FailingPlanner:
 
     def build_plan(self, request):
         raise RuntimeError("provider unavailable")
+
+
+class _AsyncProviderErrorPlanner:
+    """Mirrors the real (async) LLM planner: build_plan returns a coroutine
+    whose await raises a Gateway ProviderError (timeout/unavailable/5xx)."""
+
+    def __init__(self, _plan=None):
+        pass
+
+    def build_plan(self, request):
+        async def _turn():
+            raise ProviderError(
+                code=ProviderErrorCode.UNAVAILABLE,
+                message="gateway is unavailable",
+                retryable=True,
+                provider="llm_gateway",
+            )
+
+        return _turn()
 
 
 class _AdvancingClock:
@@ -212,6 +232,24 @@ class ContextSearchApiTest(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 502)
         self.assertIn("llm_error", resp.json()["detail"])
+
+    def test_planner_provider_error_maps_to_502_llm_error(self):
+        """Tracked debt #8 lock: a real Gateway ProviderError raised during the
+        planner's async provider turn maps to 502/llm_error (not an uncaught
+        500). Under-strict: removing the service's ``except ProviderError`` (and
+        the generic catch) re-fails this via a 500. Over-strict: the explicit
+        branch is pinned by asserting the ``provider error`` detail, which only
+        that branch (not the generic ``planner failed`` catch) produces."""
+        app, project_id, draft_id, version_id = _fixture(
+            _AsyncProviderErrorPlanner
+        )
+        resp = TestClient(app).post(
+            f"/projects/{project_id}/context-search",
+            json=_body(draft_id, version_id),
+        )
+        self.assertEqual(resp.status_code, 502)
+        self.assertIn("llm_error", resp.json()["detail"])
+        self.assertIn("provider error", resp.json()["detail"])
 
     def test_wall_clock_budget_exceeded_is_504(self):
         """E1 should-fire: ContextSearchBudgetExceeded (wall-clock) maps to 504
