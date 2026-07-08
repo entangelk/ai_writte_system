@@ -81,6 +81,8 @@ from services.application.app.context_search.service import (
     ContextSearchFailed,
     ContextSearchService,
     InvalidContextSearchRequest,
+    HybridCanonicalMemoryRetriever,
+    LexicalCanonicalMemoryRetriever,
     MongoDirectCanonicalMemoryRetriever,
     MongoDirectCandidateMemoryRetriever,
     VectorCanonicalMemoryRetriever,
@@ -113,6 +115,10 @@ from services.application.app.indexing.chroma import (
 )
 from services.application.app.indexing.embedding import RemoteEmbeddingProvider
 from services.application.app.indexing.memory_index import MEMORY_VECTOR_COLLECTION
+from services.application.app.indexing.memory_lexical_index import (
+    MEMORY_LEXICAL_INDEX,
+    connect_elasticsearch_memory_index,
+)
 from services.application.app.analysis.semantic_matcher import (
     EmbeddingSemanticMatcher,
 )
@@ -420,16 +426,32 @@ def _default_context_search_service(
 
 
 def _build_canonical_memory_retriever(memory: MemoryService):
-    # ⑤ §5 B D2 follow-up: relevance-ranked vector retrieval over the shared
-    # memory_vectors collection when it exists, else the deterministic Mongo-direct
-    # listing. Like _build_semantic_matcher, the in-memory fake in this process is
-    # separate from the worker's, so without CHROMA_HOST there is nothing to query;
-    # and the real 1024-dim collection needs a real embedding service (the fake
-    # embedding's dimensions do not match). With either absent, fall back to
-    # Mongo-direct — the item/Gate authority re-derivation is identical either way.
+    # ⑤ §5 B canonical retrieval backend, chosen by env (D3/E6): vector over the
+    # shared memory_vectors collection, lexical over the Elasticsearch memory
+    # index, both fused by RRF when configured, else the deterministic Mongo-direct
+    # listing. The item/Gate authority re-derivation is identical for every
+    # backend — only the retrieval layer changes.
+    vector = _build_vector_canonical_retriever(memory)
+    lexical = _build_lexical_canonical_retriever(memory)
+    if vector is not None and lexical is not None:
+        return HybridCanonicalMemoryRetriever(
+            vector_retriever=vector, lexical_retriever=lexical
+        )
+    if vector is not None:
+        return vector
+    if lexical is not None:
+        return lexical
+    return MongoDirectCanonicalMemoryRetriever(memory)
+
+
+def _build_vector_canonical_retriever(memory: MemoryService):
+    # Like _build_semantic_matcher, the in-memory fake in this process is separate
+    # from the worker's, so without CHROMA_HOST there is nothing to query; and the
+    # real 1024-dim collection needs a real embedding service (the fake embedding's
+    # dimensions do not match). With either absent, no vector backend.
     host = os.environ.get("CHROMA_HOST")
     if not host or not os.environ.get("EMBEDDING_SERVICE_URL"):
-        return MongoDirectCanonicalMemoryRetriever(memory)
+        return None
     vector_index = ChromaMemoryVectorIndexAdapter(
         connect_chroma_collection(
             host=host,
@@ -443,6 +465,24 @@ def _build_canonical_memory_retriever(memory: MemoryService):
         memory_service=memory,
         embeddings=_build_embedding_provider(),
         vector_index=vector_index,
+    )
+
+
+def _build_lexical_canonical_retriever(memory: MemoryService):
+    # §8 lexical leg: the Elasticsearch memory index when ELASTICSEARCH_URL is set.
+    # The real ES client is imported lazily inside connect_elasticsearch_memory_index,
+    # so unconfigured environments never need the package.
+    url = os.environ.get("ELASTICSEARCH_URL")
+    if not url:
+        return None
+    lexical_index = connect_elasticsearch_memory_index(
+        url=url,
+        index_name=os.environ.get(
+            "ELASTICSEARCH_MEMORY_INDEX", MEMORY_LEXICAL_INDEX
+        ),
+    )
+    return LexicalCanonicalMemoryRetriever(
+        memory_service=memory, lexical_index=lexical_index
     )
 
 

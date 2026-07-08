@@ -49,6 +49,9 @@ from services.application.app.indexing.memory_index import (
     MemoryVectorIndexAdapter,
     derive_memory_index_text,
 )
+from services.application.app.indexing.memory_lexical_index import (
+    MemoryLexicalIndexAdapter,
+)
 from services.application.app.indexing.service import (
     EmbeddingProvider,
     MEMORIES_COLLECTION,
@@ -224,6 +227,92 @@ class VectorCanonicalMemoryRetriever:
             hits,
             key=lambda hit: (-_cosine_similarity(vector, hit.vector), hit.id),
         )
+
+
+class LexicalCanonicalMemoryRetriever:
+    """§8 lexical leg: BM25/nori keyword retrieval over the Elasticsearch memory
+    index (⑤ §5 B, E2). Symmetric to the vector retriever — the lexical index
+    finds the ids (ranked by keyword relevance), and the memory store stays the
+    authority (contracts.md §1.3: an ES hit is reloaded from Mongo before it can
+    ground). Only ``CANONICAL`` survivors are returned; the ``.retrieve()`` seam
+    and return type are identical, so step/item/Gate are unchanged."""
+
+    def __init__(
+        self,
+        *,
+        memory_service: MemoryService,
+        lexical_index: MemoryLexicalIndexAdapter,
+    ) -> None:
+        self._memory = memory_service
+        self._lexical = lexical_index
+
+    def retrieve(
+        self, *, project_id: str, query: str, limit: int
+    ) -> tuple[MemoryEntry, ...]:
+        hits = self._lexical.search(
+            project_id=project_id, query=query, limit=limit
+        )
+        entries: list[MemoryEntry] = []
+        for hit in hits:
+            try:
+                entry = self._memory.get_memory(
+                    project_id=project_id, memory_id=hit.memory_id
+                )
+            except MemoryNotFound:
+                # The lexical doc outlived its memory (deleted before drain); skip.
+                continue
+            if entry.status is MemoryStatus.CANONICAL:
+                entries.append(entry)
+        return tuple(entries)
+
+
+DEFAULT_RRF_K = 60
+
+
+class HybridCanonicalMemoryRetriever:
+    """E3: Reciprocal Rank Fusion of the vector and lexical canonical retrievers.
+
+    Each sub-retriever returns a ranked, authority-resolved (canonical-only)
+    ``MemoryEntry`` list; RRF fuses by rank (``1/(k + rank)``, rank 1-based) keyed
+    by memory id, so a memory ranked well by either signal surfaces near the top
+    and one ranked well by both is boosted. Authority re-derivation already
+    happened inside each sub-retriever, so fusion is a pure rank merge; dedup is
+    by ``MemoryEntry.id``. The ``.retrieve()`` seam is unchanged."""
+
+    def __init__(
+        self,
+        *,
+        vector_retriever: CanonicalMemoryRetriever,
+        lexical_retriever: CanonicalMemoryRetriever,
+        rrf_k: int = DEFAULT_RRF_K,
+    ) -> None:
+        self._vector = vector_retriever
+        self._lexical = lexical_retriever
+        self._rrf_k = rrf_k
+
+    def retrieve(
+        self, *, project_id: str, query: str, limit: int
+    ) -> tuple[MemoryEntry, ...]:
+        ranked_lists = (
+            self._vector.retrieve(
+                project_id=project_id, query=query, limit=limit
+            ),
+            self._lexical.retrieve(
+                project_id=project_id, query=query, limit=limit
+            ),
+        )
+        scores: dict[str, float] = {}
+        entries: dict[str, MemoryEntry] = {}
+        for ranked in ranked_lists:
+            for rank, entry in enumerate(ranked):
+                scores[entry.id] = scores.get(entry.id, 0.0) + 1.0 / (
+                    self._rrf_k + rank + 1
+                )
+                entries.setdefault(entry.id, entry)
+        fused = sorted(
+            entries.values(), key=lambda entry: (-scores[entry.id], entry.id)
+        )
+        return tuple(fused[:limit])
 
 
 DEFAULT_CANDIDATE_MEMORY_LIMIT = 8

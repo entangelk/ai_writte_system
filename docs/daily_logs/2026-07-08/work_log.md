@@ -120,3 +120,30 @@
 - **관찰 #4(test-coverage, cheap 보강)**: `embed(query)`의 query 인자가 랭킹에 반영됨을 lock하는 테스트 부재였다(기존 `_FixedEmbeddings`는 query-무지각이라 embed(query)를 상수로 hardcode해도 통과 = boundary cell #1의 mechanism은 pinned지만 query-flow는 미lock). `_QuerySensitiveEmbeddings`(query 문자열→구별 벡터) + `test_query_drives_ranking` 추가 — 같은 벡터 index에서 query "toward-a"→mem-a, "toward-b"→mem-b 상위. **mutation 재실증**: `retrieve`가 `embed(query)` 대신 상수 벡터 하드코드 시 이 테스트가 두 방향 중 하나로 재실패(query→embed→랭킹 flow가 load-bearing). 복원 후 통과.
 - **재검증**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **637 passed / 45 skipped**(636 → +1). SoT v1.6.51 changelog·HANDOFF 테스트 수(636→637) 동기화. mutation 복원 후 `git diff --check` clean.
 - **미조치(범위 밖)**: 관찰 #2(`system-contract-sot.md:100` "문서 역할" 표 v1.6.43 누적 stale)는 본 slice diff가 건드린 줄이 아니고 감사자도 범위 밖으로 분류 → 선재 stale은 요청 없이 건드리지 않음(§3). 관찰의 "경계 위험"(per-type limit 캡 + stale 필터 결합 시 yield<limit 가능)은 Mongo-direct도 동일한 설계적 속성이라 코드 편차 아님(무조치).
+
+### (b-3) ES lexical + hybrid(RRF) 확장 (SoT v1.6.52)
+
+- **리듬**: ES 컨테이너 실측(가용 확인) → 착수 브리프(`plans/04-writing-memory-lexical-retrieval-decisions.md`) → 오너 결정 → 구현. v1.6.51 vector leg에 이은 §8 lexical leg.
+- **ES 컨테이너 실측**: 이 머신의 `tf-ai-harness-elasticsearch-step1`가 **ES 8.13.4·인증 없음·analysis-nori(한국어 형태소) 설치·host 9201**로 가용. 기존 인덱스는 `tf_ai_harness_*` 네임스페이스라 `ai_writte_*`로 충돌 없음(단 공유 컨테이너 → ephemeral 취급).
+- **오너 결정**: E0/E1=A(색인 파이프라인+retriever 한 slice), E2=A(lexical=vector 대칭 권위 재유도), **E3=hybrid(RRF) 지금**(추천 A 상향 — vector+lexical RRF 결합), E4=A(nori 문서), E5=A(fake+실 smoke), E6=A(env 배선).
+- **구현**:
+  - `indexing/memory_lexical_index.py`(신규): `MemoryLexicalRecord`, `MemoryLexicalIndexAdapter` Protocol, `InMemoryMemoryLexicalIndexAdapter`(토큰-overlap fake), `ElasticsearchMemoryIndexAdapter`(ES 8.x `query`/`size` kwargs, project+canonical filter, delete 멱등[NotFound swallow]), `MemoryLexicalIndexSyncAdapter`(worker drain: canonical→index/superseded·deleted→delete + supersedes 삭제, vector leg 대칭), nori settings/mappings, `connect_elasticsearch_memory_index`.
+  - `context_search/service.py`: `LexicalCanonicalMemoryRetriever`(ES search→`memory_id`→`get_memory`→canonical-only, seam 불변) + `HybridCanonicalMemoryRetriever`(각 sub-retriever의 canonical-resolved 순위 리스트를 RRF `1/(k+rank)` k=60로 융합, id dedup).
+  - `indexing/memory_index.py`: `CompositeMemoryIndexSyncAdapter`(worker memory drain 팬아웃).
+  - `main.py`: `_build_canonical_memory_retriever`를 `_build_vector_canonical_retriever`+`_build_lexical_canonical_retriever`로 분리 → 둘 다면 hybrid, 하나면 그 backend, 없으면 Mongo-direct. `index_sync_worker.py`: `ELASTICSEARCH_URL` 있으면 composite drain. `requirements.txt`에 `elasticsearch>=8,<9`.
+- **구현 중 정정(§1 — outbox 계약 보호)**: 브리프 E1의 "outbox `targets.elasticsearch` 추가"는 **worker composite fan-out(substance)로 구현하고 persisted envelope의 per-target bookkeeping은 미뤘다**. enqueue는 Mongo choke point라 배포의 ES 구성을 모르는데, 무조건 ES target을 심으면 ES 없는 배포에서 **영구 pending** target이 생긴다. v1.6.26 outbox envelope·Mongo repo 직렬화(실 테스트 sandbox-skip)를 건드리지 않고, worker가 configured sink로만 fan-out하도록 했다. per-target status 추적은 outbox multi-target 추적 확보 시 후속.
+- **회귀 +13**(`tests/test_context_search_memory_lexical_retrieval.py`): InMemory lexical 토큰-overlap 랭킹·project scope; ES adapter 포인터 문서·필터드 query(size 포함)·멱등 delete(fake client); lexical retriever 권위 재유도(index text 아니라 store payload)·canonical-only(superseded/deleted 격리)·query-drives-ranking; hybrid RRF 양신호 융합([b,a,c] = RRF 고유 순서)·dedup·단일 backend 저하; worker drain canonical 색인/superseded·missing 삭제; composite fan-out. **mutation 양방향**: RRF lexical 신호 제거→융합 테스트 재실패, lexical CANONICAL 필터 무력화→authority 테스트 재실패, 각 복원.
+- **실 ES live smoke 통과**(`scripts/phase4_lexical_memory_live_smoke.py`): 실 ES 8.13.4+nori에 ephemeral 인덱스 생성→worker drain(superseded 미색인)→한국어 "폭풍" query가 canonical storm memory("폭풍이 항구를 덮쳤다")만 매칭·권위 재유도·hybrid RRF→인덱스 삭제. 출력 `{"ok": true, "lexical_ids": ["storm"], "hybrid_ids": ["storm","calm"], "nori": true}`, 공유 컨테이너에 잔여 인덱스 0.
+- **검증**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **650 passed / 45 skipped**(637 → +13). 기존 context_search/canonical/candidate/vector/memory-reindex 회귀 무변(seam·vector leg 불변 실증). `git diff --check` clean.
+
+## User Decisions and Rationale (v1.6.52)
+
+- 오너가 **E3=hybrid(RRF)를 지금** 택했다(추천 A "MVP 택1, hybrid 후속"보다 상향). vector 관련성 + lexical(nori 한국어 키워드)을 Reciprocal Rank Fusion으로 결합해 두 신호를 동시에 쓰길 원함. 구현은 각 sub-retriever의 이미-권위화된 순위 리스트를 RRF로 융합(별도 score 정규화 불요)해 v1.6.51 코드를 그대로 재사용.
+- 오너가 **머신의 기존 ES 컨테이너를 실 테스트에 활용**하도록 승인했다(E5). 공유 컨테이너라 `ai_writte_smoke_*` 네임스페이스 + 생성/삭제 격리로 다른 프로젝트 인덱스를 건드리지 않는다.
+
+## Next steps
+
+- **candidate lexical/vector**: candidate 색인 파이프라인(outbox→worker→candidate lexical/vector) 선행 후 같은 seam 확장.
+- **hybrid 튜닝**: RRF k, per-signal 가중치, sub-retriever fetch depth(현재 각 limit)를 실 데이터로 캘리브레이션.
+- **compose 전용 ES 서비스**: 배포용 ES를 `docker-compose.yml`에 추가(테스트는 기존 컨테이너, 배포 ES는 별도).
+- **outbox per-target bookkeeping**: ES sink를 envelope에 명시적으로 추적하려면 outbox multi-target status 확장(위 정정 참조).

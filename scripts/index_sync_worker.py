@@ -104,6 +104,32 @@ def _build_memory_adapter(
     adapter = MemoryIndexSyncAdapter(
         memory_service=memory, embeddings=embeddings, vector_index=vector_index
     )
+    # §8 lexical leg: when ELASTICSEARCH_URL is set, fan the memory drain out to
+    # the Elasticsearch index alongside the vector index so both stay current.
+    es_url = os.environ.get("ELASTICSEARCH_URL")
+    if es_url:
+        from services.application.app.indexing.memory_index import (
+            CompositeMemoryIndexSyncAdapter,
+        )
+        from services.application.app.indexing.memory_lexical_index import (
+            MEMORY_LEXICAL_INDEX,
+            MemoryLexicalIndexSyncAdapter,
+            connect_elasticsearch_memory_index,
+        )
+
+        lexical_adapter = MemoryLexicalIndexSyncAdapter(
+            memory_service=memory,
+            lexical_index=connect_elasticsearch_memory_index(
+                url=es_url,
+                index_name=os.environ.get(
+                    "ELASTICSEARCH_MEMORY_INDEX", MEMORY_LEXICAL_INDEX
+                ),
+            ),
+        )
+        return (
+            CompositeMemoryIndexSyncAdapter((adapter, lexical_adapter)),
+            f"{backend}+elasticsearch",
+        )
     return adapter, backend
 
 

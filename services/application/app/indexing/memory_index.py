@@ -196,3 +196,17 @@ class MemoryIndexSyncAdapter:
             self._vector_index.delete_memory_record(
                 project_id=project_id, memory_id=memory.supersedes
             )
+
+
+class CompositeMemoryIndexSyncAdapter:
+    """Fan a MEMORY_UPSERTED drain out to every configured memory sink (vector +
+    lexical), so one outbox entry keeps both indexes current. Each sink's
+    ``index_memory`` is idempotent, so a replay after a partial failure re-drains
+    both; if any sink raises, the entry fails and requeues (worker contract)."""
+
+    def __init__(self, adapters: tuple[object, ...]) -> None:
+        self._adapters = tuple(adapters)
+
+    def index_memory(self, entry: IndexSyncOutboxEntry) -> None:
+        for adapter in self._adapters:
+            adapter.index_memory(entry)
