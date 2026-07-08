@@ -88,7 +88,11 @@ def run() -> dict:
     index_name = f"ai_writte_smoke_{uuid.uuid4().hex[:12]}"
     from elasticsearch import Elasticsearch
 
-    client = Elasticsearch(url)
+    # A cold nori index create can take several seconds; the client default (10s)
+    # can time out on a busy shared cluster and — worse — leave the ephemeral
+    # index behind because the finally-delete times out too. A generous
+    # request_timeout keeps the create AND the cleanup delete within budget.
+    client = Elasticsearch(url, request_timeout=30)
     client.indices.create(
         index=index_name,
         settings=ELASTICSEARCH_MEMORY_SETTINGS,
@@ -161,7 +165,20 @@ def run() -> dict:
             "nori": True,
         }
     finally:
-        client.indices.delete(index=index_name, ignore_unavailable=True)
+        # Best-effort cleanup that never masks the smoke's own result: a delete
+        # failure is reported to stderr (leftover index on the shared cluster) but
+        # does not raise over the real outcome. One retry covers a transient blip.
+        for attempt in range(2):
+            try:
+                client.indices.delete(index=index_name, ignore_unavailable=True)
+                break
+            except Exception as exc:  # transient/timeout — warn, don't mask
+                if attempt == 1:
+                    print(
+                        f"WARNING: failed to delete ephemeral index {index_name}: "
+                        f"{exc!r}",
+                        file=sys.stderr,
+                    )
 
 
 def main() -> int:

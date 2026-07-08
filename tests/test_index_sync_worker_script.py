@@ -11,8 +11,12 @@ from services.application.app.indexing.chroma import (
     ChromaMemoryVectorIndexAdapter,
 )
 from services.application.app.indexing.memory_index import (
+    CompositeMemoryIndexSyncAdapter,
     InMemoryMemoryVectorIndexAdapter,
     MemoryIndexSyncAdapter,
+)
+from services.application.app.indexing.memory_lexical_index import (
+    MemoryLexicalIndexSyncAdapter,
 )
 from services.application.app.indexing.service import (
     RecordingArchiveIndexMutationAdapter,
@@ -135,6 +139,35 @@ class BuildMemoryAdapterTest(unittest.TestCase):
         self.assertEqual(backend, "chroma")
         connect.assert_called_once_with(
             host="chroma", port=8000, collection_name="memory_vectors"
+        )
+
+    def test_with_elasticsearch_url_builds_composite_memory_adapter(self):
+        # §8 wiring glue: with ELASTICSEARCH_URL set, the worker fans the memory
+        # drain out to a composite of the vector sink (in-memory fake here) and
+        # the lexical (ES) sink, so an ES+Chroma deployment keeps both current.
+        # Broken, this branch silently degrades to vector-only.
+        sentinel_lexical = object()
+        with mock.patch.dict(
+            index_sync_worker.os.environ,
+            {"ELASTICSEARCH_URL": "http://es:9200"},
+            clear=True,
+        ), mock.patch(self._REPO_PATH, return_value=object()), mock.patch(
+            "services.application.app.indexing.memory_lexical_index."
+            "connect_elasticsearch_memory_index",
+            return_value=sentinel_lexical,
+        ) as connect:
+            adapter, backend = index_sync_worker._build_memory_adapter(
+                mongo_uri="mongodb://localhost:27017", mongo_db="db"
+            )
+        self.assertIsInstance(adapter, CompositeMemoryIndexSyncAdapter)
+        self.assertEqual(backend, "in_memory_fake+elasticsearch")
+        # The composite fans out to exactly the vector sink then the lexical sink.
+        self.assertEqual(len(adapter._adapters), 2)
+        self.assertIsInstance(adapter._adapters[0], MemoryIndexSyncAdapter)
+        self.assertIsInstance(adapter._adapters[1], MemoryLexicalIndexSyncAdapter)
+        self.assertIs(adapter._adapters[1]._lexical, sentinel_lexical)
+        connect.assert_called_once_with(
+            url="http://es:9200", index_name="memory_lexical"
         )
 
 

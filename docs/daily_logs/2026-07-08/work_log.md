@@ -147,3 +147,12 @@
 - **hybrid 튜닝**: RRF k, per-signal 가중치, sub-retriever fetch depth(현재 각 limit)를 실 데이터로 캘리브레이션.
 - **compose 전용 ES 서비스**: 배포용 ES를 `docker-compose.yml`에 추가(테스트는 기존 컨테이너, 배포 ES는 별도).
 - **outbox per-target bookkeeping**: ES sink를 envelope에 명시적으로 추적하려면 outbox multi-target status 확장(위 정정 참조).
+
+### (b-3) 검증 후속 보강 (2026-07-08, 오너 독립 감사 → 비차단 관찰 #1·#2)
+
+오너의 독립 감사 기록 `docs/verifications/2026-07-08/canonical_memory_lexical_hybrid_rrf.md`는 **합격**(boundary matrix 21 cell 중 20 pinned, 잔여 1 = worker ES 배선 wiring glue). 감사자가 보강 권장한 비차단 관찰 2건(slice 최약 두 점)을 닫았다.
+
+- **관찰 #1(test-coverage, slice 최약점)**: worker `_build_memory_adapter`의 `ELASTICSEARCH_URL` composite 분기가 단위테스트·live smoke 모두에서 미실증이었다(broken 시 ES+Chroma 배포가 vector-only로 silent 저하). `tests/test_index_sync_worker_script.py`에 `test_with_elasticsearch_url_builds_composite_memory_adapter` 추가 — `connect_elasticsearch_memory_index` mock으로 `ELASTICSEARCH_URL` 시 반환 adapter가 `CompositeMemoryIndexSyncAdapter`(sub-adapter = [vector `MemoryIndexSyncAdapter`, lexical `MemoryLexicalIndexSyncAdapter`], backend `"in_memory_fake+elasticsearch"`)임을 잠금. **mutation 실증**: ES 분기(`if es_url:`)를 `if False:`로 무력화 시 이 테스트가 vector-only 반환으로 재실패, 복원 통과.
+- **관찰 #2(smoke 견고성, 감사자 실측)**: live smoke가 `Elasticsearch(url)` 기본 timeout(10s)이라 cold nori create(~4s, 부하 시 초과) 시 `ConnectionTimeout` + `finally` delete도 timeout으로 공유 컨테이너에 잔여 인덱스가 남을 수 있었다(E5 "생성/삭제 격리" 의도 붕괴). `request_timeout=30`(create·cleanup 모두 커버) + `finally` delete를 best-effort 재시도(1회)·실패 시 stderr 경고(원 결과 미마스킹)로 견고화. 재실행 통과, 잔여 0 확인.
+- **미조치(§3)**: 관찰 #3(필드명 `memory_id` vs 브리프 `mongo_id` — SoT 미pin, 내부 일관), #4(ES search에 memory_type 필터 없음 — cross-type BM25 유효), #5(ES delete 광역 catch — narrow catch는 fake test의 커스텀 예외와 결합되고 stale doc은 retrieval에서 거름), #6(SoT:101 "문서 역할" 표 v1.6.43 pre-existing stale — 범위 밖), #7(브리프 E3 options 섹션 stale — 정규 계약 SoT는 명확) 모두 감사자 비차단 분류, 선재/미세 편차라 요청 없이 미조치.
+- **재검증**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **651 passed / 45 skipped**(650 → +1). mutation 복원 후 `git diff --check` clean.
