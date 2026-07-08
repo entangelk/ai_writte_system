@@ -43,6 +43,12 @@ class ContextNeed(StrEnum):
     # extends to vector/search-engine later (docs/plans/
     # 04-writing-canonical-context-decisions.md, D2=A).
     CANONICAL_MEMORY = "canonical_memory"
+    # Writing candidate inclusion (⑤ §5 B follow-up): unreviewed needs_review
+    # candidates surfaced as micro evidence, labeled candidate so a consumer
+    # never mistakes them for approved knowledge (Phase 6 §62). Served
+    # Mongo-direct now (docs/plans/04-writing-candidate-context-decisions.md,
+    # D1=A/D2=A).
+    CANDIDATE_MEMORY = "candidate_memory"
 
 
 class SearchTool(StrEnum):
@@ -74,6 +80,8 @@ NEED_ALLOWED_TOOLS: dict[ContextNeed, tuple[SearchTool, ...]] = {
     # canonical_memory is served Mongo-direct (D2=A); when the retrieval layer
     # gains a vector path it adds VECTOR here without touching item/Gate logic.
     ContextNeed.CANONICAL_MEMORY: (SearchTool.MONGO,),
+    # candidate_memory is Mongo-direct too (D2=A); vector path is a later add.
+    ContextNeed.CANDIDATE_MEMORY: (SearchTool.MONGO,),
 }
 
 # Needs whose items land in macro context; the rest are micro evidence.
@@ -126,6 +134,11 @@ class ContextItem:
     sot_reloaded: bool
     token_estimate: int
     source_ref_ids: tuple[str, ...] = ()
+    # Review posture of a candidate-origin item (⑤ §5 B follow-up, D4=B).
+    # Only meaningful for candidate items; carries the analysis candidate
+    # status (currently always "needs_review"; Phase 6 adds confirmed/rejected).
+    # Empty for canonical/source-block items (not applicable).
+    review_status: str = ""
 
 
 @dataclass(frozen=True, slots=True)

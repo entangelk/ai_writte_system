@@ -1,0 +1,317 @@
+"""Writing candidate inclusion (⑤ §5 B follow-up) regressions.
+
+Locks: the candidate_memory step surfaces needs_review candidates as micro
+evidence labeled ``candidate`` with a candidate pointer + review_status (never
+macro, never constraints/do_not_use — Phase 6 §62); the retriever returns
+needs_review-only; the Context Gate allows candidate items ONLY through the
+candidate origin, re-validating against the analysis store (present +
+needs_review), and still rejects candidate-status items on any other origin.
+Guards run both directions.
+"""
+
+import asyncio
+import unittest
+from types import SimpleNamespace
+
+from services.application.app.analysis.models import (
+    AnalysisCandidate,
+    AnalysisCandidateAction,
+    AnalysisCandidateStatus,
+    AnalysisCandidateType,
+    AnalysisProvenance,
+)
+from services.application.app.analysis.service import (
+    AnalysisService,
+    InMemoryAnalysisRepository,
+)
+from services.application.app.context_search.models import (
+    ContextBudget,
+    ContextItem,
+    ContextItemStatus,
+    ContextNeed,
+    ContextPackage,
+    ContextSearchPurpose,
+    ContextSearchRequest,
+    GATE_PASS,
+    GATE_REJECT,
+    SearchPlan,
+    SearchPlanStep,
+    SearchTool,
+)
+from services.application.app.context_search.service import (
+    CANDIDATES_COLLECTION,
+    ContextSearchService,
+    MongoDirectCandidateMemoryRetriever,
+    evaluate_context_gate,
+)
+from services.application.app.core_sot.service import (
+    CoreSotService,
+    InMemoryCoreSotRepository,
+)
+from services.application.app.indexing.models import IndexPointer
+from services.application.app.indexing.service import (
+    MEMORIES_COLLECTION,
+    DeterministicFakeEmbeddingProvider,
+    InMemoryVectorIndexAdapter,
+    SourceBlockIndexingService,
+)
+
+
+EVENT = AnalysisCandidateType.EVENT_OBSERVATION
+
+
+class _StaticPlanner:
+    def __init__(self, plan):
+        self.plan = plan
+
+    def build_plan(self, request):
+        return self.plan
+
+
+class _RaisingRetriever:
+    """CandidateMemoryRetriever whose retrieve() always raises (store outage)."""
+
+    def retrieve(self, *, project_id, query, limit):
+        raise RuntimeError("analysis store unreachable")
+
+
+def _candidate(candidate_id, *, payload, status=AnalysisCandidateStatus.NEEDS_REVIEW,
+               project_id="project-1", job_id="job-1"):
+    return AnalysisCandidate(
+        id=candidate_id,
+        project_id=project_id,
+        job_id=job_id,
+        task_id="task-1",
+        candidate_type=EVENT,
+        action=AnalysisCandidateAction.CREATE,
+        status=status,
+        provenance=AnalysisProvenance.SOURCE_OBSERVED,
+        confidence=0.5,
+        source_ref_ids=("s1",),
+        payload=payload,
+    )
+
+
+def _analysis_with(*candidates):
+    analysis = AnalysisService(InMemoryAnalysisRepository())
+    for candidate in candidates:
+        analysis._repo.put_candidate(candidate, logical_key=f"lk-{candidate.id}")
+    return analysis
+
+
+def _service(analysis, *, with_retriever=True, retriever=None):
+    core_sot = CoreSotService(InMemoryCoreSotRepository())
+    vector_index = InMemoryVectorIndexAdapter()
+    indexing = SourceBlockIndexingService(
+        core_sot=core_sot,
+        embeddings=DeterministicFakeEmbeddingProvider(),
+        vector_index=vector_index,
+    )
+    if retriever is not None:
+        resolved = retriever
+    elif with_retriever:
+        resolved = MongoDirectCandidateMemoryRetriever(analysis)
+    else:
+        resolved = None
+    return ContextSearchService(
+        core_sot=core_sot,
+        indexing_service=indexing,
+        vector_search=vector_index,
+        embeddings=DeterministicFakeEmbeddingProvider(),
+        planner=_StaticPlanner(
+            SearchPlan(
+                plan_id="plan-1",
+                project_id="project-1",
+                steps=(
+                    SearchPlanStep(
+                        step_id="s1",
+                        need=ContextNeed.CANDIDATE_MEMORY,
+                        tools=(SearchTool.MONGO,),
+                        query="storm",
+                    ),
+                ),
+            )
+        ),
+        candidate_memory_retriever=resolved,
+    )
+
+
+def _request():
+    return ContextSearchRequest(
+        project_id="project-1",
+        purpose=ContextSearchPurpose.WRITING_CONTEXT,
+        needs=(ContextNeed.CANDIDATE_MEMORY,),
+        query="storm",
+        current_position=None,  # candidate_memory is micro, no position needed
+        context_budget=ContextBudget(max_tokens=10_000),
+    )
+
+
+def _candidate_item(candidate_id, *, project_id="project-1",
+                    status=ContextItemStatus.CANDIDATE,
+                    collection=CANDIDATES_COLLECTION):
+    return ContextItem(
+        need=ContextNeed.CANDIDATE_MEMORY,
+        status=status,
+        text="the storm hit",
+        pointer=IndexPointer(
+            project_id=project_id,
+            collection=collection,
+            document_id=candidate_id,
+            version_id="",
+            content_hash="",
+        ),
+        snapshot_id="",
+        sot_reloaded=True,
+        token_estimate=4,
+        review_status="needs_review",
+    )
+
+
+class CandidateMemoryStepTest(unittest.TestCase):
+    def _seed(self):
+        return _analysis_with(
+            _candidate("c1", payload={"event": "the storm hit"}),
+            _candidate("c2", payload={"event": "the calm after"}),
+        )
+
+    def test_candidate_lands_in_micro_labeled_with_candidate_pointer(self):
+        analysis = self._seed()
+        package = asyncio.run(_service(analysis).build_context_package(_request()))
+        # micro only — candidate_memory is not a MACRO need, and candidates must
+        # never become authoritative constraints/do_not_use (Phase 6 §62).
+        self.assertEqual(package.macro_items, ())
+        self.assertEqual(package.constraints, ())
+        self.assertEqual(package.do_not_use, ())
+        ids = {item.pointer.document_id for item in package.micro_evidence}
+        self.assertEqual(ids, {"c1", "c2"})
+        item = package.micro_evidence[0]
+        self.assertEqual(item.status, ContextItemStatus.CANDIDATE)
+        self.assertEqual(item.pointer.collection, CANDIDATES_COLLECTION)
+        self.assertEqual(item.review_status, "needs_review")
+        self.assertTrue(item.text)
+
+    def test_unwired_retriever_yields_empty_without_failure(self):
+        analysis = self._seed()
+        package = asyncio.run(
+            _service(analysis, with_retriever=False).build_context_package(_request())
+        )
+        self.assertEqual(package.micro_evidence, ())
+        self.assertFalse(package.degraded)
+
+    def test_retriever_failure_maps_to_backend_error_without_crashing(self):
+        # Mirrors the canonical cell #10 lock: a failing retriever degrades the
+        # package with a BACKEND_ERROR step failure instead of crashing.
+        analysis = _analysis_with()
+        service = _service(analysis, retriever=_RaisingRetriever())
+        package = asyncio.run(service.build_context_package(_request()))
+        self.assertTrue(package.degraded)
+        self.assertEqual(package.micro_evidence, ())
+        self.assertEqual(len(package.trace.steps), 1)
+        step = package.trace.steps[0]
+        self.assertEqual(step.need, ContextNeed.CANDIDATE_MEMORY)
+        self.assertIsNotNone(step.failure)
+        self.assertEqual(step.failure.error_type.value, "backend_error")
+
+
+class MongoDirectCandidateRetrieverTest(unittest.TestCase):
+    def test_returns_needs_review_only_and_respects_limit(self):
+        # A candidate whose status is no longer needs_review (Phase 6 confirmed/
+        # rejected, simulated) must not be returned. Uses a fake status because
+        # the enum currently only has needs_review.
+        analysis = _analysis_with(
+            _candidate("c1", payload={"event": "a"}),
+            _candidate("c3", payload={"event": "c"}),
+        )
+        promoted = SimpleNamespace(
+            id="c2", project_id="project-1", job_id="job-1", task_id="task-1",
+            candidate_type=EVENT, action=AnalysisCandidateAction.CREATE,
+            status=SimpleNamespace(value="confirmed"),
+            provenance=AnalysisProvenance.SOURCE_OBSERVED, confidence=0.5,
+            source_ref_ids=("s1",), payload={"event": "b"},
+        )
+        analysis._repo.put_candidate(promoted, logical_key="lk-c2")
+        retriever = MongoDirectCandidateMemoryRetriever(analysis)
+        got = retriever.retrieve(project_id="project-1", query="x", limit=1)
+        self.assertEqual(len(got), 1)
+        self.assertTrue(
+            all(c.status is AnalysisCandidateStatus.NEEDS_REVIEW for c in got)
+        )
+        all_got = retriever.retrieve(project_id="project-1", query="x", limit=10)
+        self.assertEqual({c.id for c in all_got}, {"c1", "c3"})  # confirmed excluded
+
+
+class _PromotedCandidateAnalysis:
+    """Analysis stub whose candidate is no longer needs_review (Phase 6 state)."""
+
+    def get_candidate(self, *, project_id, candidate_id):
+        return SimpleNamespace(status=SimpleNamespace(value="confirmed"))
+
+
+class CandidateMemoryGateTest(unittest.TestCase):
+    def _package(self, item):
+        return ContextPackage(
+            project_id="project-1",
+            purpose=ContextSearchPurpose.WRITING_CONTEXT,
+            macro_items=(),
+            micro_evidence=(item,),
+            constraints=(),
+            do_not_use=(),
+            token_estimate_total=4,
+            degraded=False,
+        )
+
+    def _gate(self, item, analysis):
+        return evaluate_context_gate(
+            package=self._package(item),
+            request=_request(),
+            core_sot=CoreSotService(InMemoryCoreSotRepository()),
+            analysis_service=analysis,
+        )
+
+    def test_needs_review_candidate_item_passes(self):
+        analysis = _analysis_with(_candidate("c1", payload={"event": "the storm hit"}))
+        decision = self._gate(_candidate_item("c1"), analysis)
+        self.assertEqual(decision.decision, GATE_PASS)
+
+    def test_missing_candidate_is_stale(self):
+        analysis = _analysis_with()  # c1 absent (removed or cross-project)
+        decision = self._gate(_candidate_item("c1"), analysis)
+        self.assertEqual(decision.decision, GATE_REJECT)
+        self.assertTrue(any(f.check == "stale_item" for f in decision.findings))
+
+    def test_no_longer_needs_review_candidate_is_stale(self):
+        # Over-strict forward-defense (Phase 6 confirmed/rejected): a candidate
+        # that left needs_review must be rejected as stale, not surfaced as an
+        # unreviewed candidate. Removing the status check re-fails this.
+        decision = self._gate(_candidate_item("c1"), _PromotedCandidateAnalysis())
+        self.assertEqual(decision.decision, GATE_REJECT)
+        self.assertTrue(any(f.check == "stale_item" for f in decision.findings))
+
+    def test_unconfigured_analysis_service_rejects(self):
+        decision = self._gate(_candidate_item("c1"), None)
+        self.assertEqual(decision.decision, GATE_REJECT)
+        self.assertTrue(
+            any(f.check == "candidate_gate_unconfigured" for f in decision.findings)
+        )
+
+    def test_candidate_status_on_non_candidate_origin_still_rejected(self):
+        # The safety line is narrowed, not lifted: a candidate-status item that
+        # does NOT come through the candidate origin (here a memory-collection
+        # pointer) is still candidate_item_not_allowed. Over-strict guard.
+        analysis = _analysis_with(_candidate("c1", payload={"event": "x"}))
+        item = _candidate_item("c1", collection=MEMORIES_COLLECTION)
+        decision = evaluate_context_gate(
+            package=self._package(item),
+            request=_request(),
+            core_sot=CoreSotService(InMemoryCoreSotRepository()),
+            analysis_service=analysis,
+        )
+        self.assertEqual(decision.decision, GATE_REJECT)
+        self.assertTrue(
+            any(f.check == "candidate_item_not_allowed" for f in decision.findings)
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

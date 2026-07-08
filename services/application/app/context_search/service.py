@@ -53,8 +53,21 @@ from services.application.app.indexing.service import (
 )
 from services.application.app.memory.models import MemoryEntry, MemoryStatus
 from services.application.app.memory.service import MemoryNotFound, MemoryService
+from services.application.app.analysis.models import (
+    AnalysisCandidate,
+    AnalysisCandidateStatus,
+)
+from services.application.app.analysis.service import (
+    AnalysisNotFound,
+    AnalysisService,
+)
 from services.llm_gateway.app.errors import ProviderError
 
+
+# Candidate store collection (Writing candidate inclusion origin). Matches the
+# analysis Mongo repository's candidate collection so the Gate can tell a
+# candidate-origin item from a canonical-memory or source-block one.
+CANDIDATES_COLLECTION = "analysis_candidates"
 
 DEFAULT_WALL_CLOCK_SECONDS = 60
 DEFAULT_VECTOR_HIT_LIMIT = 8
@@ -134,6 +147,43 @@ class MongoDirectCanonicalMemoryRetriever:
         return tuple(canonical[:limit])
 
 
+DEFAULT_CANDIDATE_MEMORY_LIMIT = 8
+
+
+class CandidateMemoryRetriever(Protocol):
+    """Writing candidate inclusion retrieval seam (⑤ §5 B follow-up, D2).
+
+    Returns ``needs_review`` candidate records to surface as *labeled* Writing
+    evidence. Mongo-direct now; a later vector/search-engine layer implements
+    the same method (retrieval finds the ids, the analysis store stays the
+    authority) without changing item or Gate logic. See docs/plans/
+    04-writing-candidate-context-decisions.md (D2=A).
+    """
+
+    def retrieve(
+        self, *, project_id: str, query: str, limit: int
+    ) -> tuple[AnalysisCandidate, ...]: ...
+
+
+class MongoDirectCandidateMemoryRetriever:
+    """D2=A: list a project's needs_review candidates from the store (no ranking).
+
+    The ``query`` is ignored for now — relevance ranking arrives with the vector
+    retrieval layer. Only ``needs_review`` candidates are returned; promoted
+    candidates are served by the canonical path instead (D5=A)."""
+
+    def __init__(self, analysis_service: AnalysisService) -> None:
+        self._analysis = analysis_service
+
+    def retrieve(
+        self, *, project_id: str, query: str, limit: int
+    ) -> tuple[AnalysisCandidate, ...]:
+        candidates = self._analysis.list_needs_review_candidates(
+            project_id=project_id
+        )
+        return tuple(candidates[:limit])
+
+
 def estimate_tokens(text: str) -> int:
     return max(1, (len(text) + 3) // 4)
 
@@ -148,10 +198,12 @@ class ContextSearchService:
         embeddings: EmbeddingProvider,
         planner: SearchPlanner,
         canonical_memory_retriever: CanonicalMemoryRetriever | None = None,
+        candidate_memory_retriever: CandidateMemoryRetriever | None = None,
         wall_clock_seconds: float = DEFAULT_WALL_CLOCK_SECONDS,
         vector_hit_limit: int = DEFAULT_VECTOR_HIT_LIMIT,
         recent_scene_block_limit: int = DEFAULT_RECENT_SCENE_BLOCK_LIMIT,
         canonical_memory_limit: int = DEFAULT_CANONICAL_MEMORY_LIMIT,
+        candidate_memory_limit: int = DEFAULT_CANDIDATE_MEMORY_LIMIT,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if wall_clock_seconds <= 0:
@@ -165,10 +217,14 @@ class ContextSearchService:
         # step produces no items (the need is simply unserved), so existing
         # Writing requests without it are unchanged.
         self._canonical_memory_retriever = canonical_memory_retriever
+        # Writing candidate inclusion (⑤ §5 B follow-up). Same absent-is-unserved
+        # contract as canonical, so requests without it are unchanged.
+        self._candidate_memory_retriever = candidate_memory_retriever
         self._wall_clock_seconds = wall_clock_seconds
         self._vector_hit_limit = vector_hit_limit
         self._recent_scene_block_limit = recent_scene_block_limit
         self._canonical_memory_limit = canonical_memory_limit
+        self._candidate_memory_limit = candidate_memory_limit
         self._clock = clock
 
     async def build_context_package(
@@ -300,6 +356,8 @@ class ContextSearchService:
     ) -> tuple[SearchStepTrace, tuple[ContextItem, ...]]:
         if step.need is ContextNeed.CANONICAL_MEMORY:
             return self._run_canonical_memory_step(step, request)
+        if step.need is ContextNeed.CANDIDATE_MEMORY:
+            return self._run_candidate_memory_step(step, request)
         if tool is SearchTool.VECTOR:
             return self._run_vector_step(step, request)
         return self._run_mongo_step(step, request)
@@ -385,6 +443,92 @@ class ContextSearchService:
             sot_reloaded=True,
             token_estimate=estimate_tokens(text),
             source_ref_ids=entry.source_ref_ids,
+        )
+
+    def _run_candidate_memory_step(
+        self, step, request: ContextSearchRequest
+    ) -> tuple[SearchStepTrace, tuple[ContextItem, ...]]:
+        if self._candidate_memory_retriever is None:
+            # Unserved in this deployment; emit an empty (non-failing) step so an
+            # unwired candidate_memory request degrades to no candidates.
+            return (
+                SearchStepTrace(
+                    step_id=step.step_id,
+                    need=step.need,
+                    tool=SearchTool.MONGO,
+                    hits_considered=0,
+                    items_produced=0,
+                    excluded=(),
+                    failure=None,
+                ),
+                (),
+            )
+        try:
+            candidates = self._candidate_memory_retriever.retrieve(
+                project_id=request.project_id,
+                query=step.query or request.query,
+                limit=self._candidate_memory_limit,
+            )
+        except Exception as exc:
+            return (
+                SearchStepTrace(
+                    step_id=step.step_id,
+                    need=step.need,
+                    tool=SearchTool.MONGO,
+                    hits_considered=0,
+                    items_produced=0,
+                    excluded=(),
+                    failure=StepFailure(
+                        error_type=ContextSearchErrorType.BACKEND_ERROR,
+                        detail=f"candidate memory retrieval failed: {exc}",
+                    ),
+                ),
+                (),
+            )
+        items = tuple(
+            self._item_from_candidate(step.need, candidate)
+            for candidate in candidates
+        )
+        return (
+            SearchStepTrace(
+                step_id=step.step_id,
+                need=step.need,
+                tool=SearchTool.MONGO,
+                hits_considered=len(candidates),
+                items_produced=len(items),
+                excluded=(),
+                failure=None,
+            ),
+            items,
+        )
+
+    def _item_from_candidate(
+        self, need: ContextNeed, candidate: AnalysisCandidate
+    ) -> ContextItem:
+        # Candidate items are labeled ``candidate`` (never disguised as canonical,
+        # Phase 6 §62) and carry review_status so a consumer knows they are
+        # unreviewed (D4=B). The authority is the analysis store; the Gate's
+        # candidate-origin branch (pointer.collection == CANDIDATES_COLLECTION)
+        # re-validates against it. Text reuses derive_memory_index_text (the
+        # same projection as memory), so it never leaks the vector index text.
+        # snapshot_id/content_hash/sot_reloaded are inert here (same as memory).
+        text = derive_memory_index_text(candidate.candidate_type, candidate.payload)
+        return ContextItem(
+            need=need,
+            status=ContextItemStatus.CANDIDATE,
+            text=text,
+            pointer=IndexPointer(
+                project_id=candidate.project_id,
+                collection=CANDIDATES_COLLECTION,
+                document_id=candidate.id,
+                version_id="",
+                content_hash="",
+            ),
+            snapshot_id="",
+            sot_reloaded=True,
+            token_estimate=estimate_tokens(text),
+            source_ref_ids=candidate.source_ref_ids,
+            review_status=str(candidate.status),
         )
 
     def _run_vector_step(
@@ -621,14 +765,18 @@ def evaluate_context_gate(
     request: ContextSearchRequest,
     core_sot: CoreSotService,
     memory_service: MemoryService | None = None,
+    analysis_service: AnalysisService | None = None,
 ) -> GateDecision:
     """Independent Context Gate check; never replaced by loop preflight.
 
     Re-derives item validity from the authority instead of trusting the
-    orchestration flags: source-block items reload from the SOT snapshot, and
-    canonical-memory items (Writing canonical inclusion, ⑤) re-validate against
-    the memory store — still present and still ``canonical`` (D4). The candidate
-    prohibition stays: only canonical is allowed into Writing context.
+    orchestration flags, by item origin (``pointer.collection``): source-block
+    items reload from the SOT snapshot; canonical-memory items (⑤) re-validate
+    against the memory store (still ``canonical``); candidate items (⑤ follow-up)
+    re-validate against the analysis store (still ``needs_review``). Candidate
+    status is allowed ONLY through the candidate origin — a candidate-status item
+    on any other origin stays rejected (the Writing safety line is narrowed, not
+    lifted; Phase 6 §62).
     """
     findings: list[GateFinding] = []
     items = package.macro_items + package.micro_evidence
@@ -650,18 +798,27 @@ def evaluate_context_gate(
                     "reloaded from SOT",
                 )
             )
-        if item.status is ContextItemStatus.CANDIDATE:
+        is_candidate_origin = item.pointer.collection == CANDIDATES_COLLECTION
+        # Candidate status is allowed ONLY through the candidate origin. On any
+        # other origin (memory or source-block) a candidate-status item is still
+        # prohibited — the Writing safety line is narrowed to the sanctioned
+        # candidate path, not lifted (v1.6.48 contract retained, Phase 6 §62).
+        if item.status is ContextItemStatus.CANDIDATE and not is_candidate_origin:
             findings.append(
                 GateFinding(
                     check="candidate_item_not_allowed",
                     detail=f"item {item.pointer.document_id} carries "
-                    "candidate-status memory, which is not allowed in Writing "
-                    "context (canonical only)",
+                    "candidate-status memory from a non-candidate origin, "
+                    "which is not allowed in Writing context",
                 )
             )
         if item.pointer.collection == MEMORIES_COLLECTION:
             findings.extend(
                 _gate_memory_findings(item, request, memory_service)
+            )
+        elif is_candidate_origin:
+            findings.extend(
+                _gate_candidate_findings(item, request, analysis_service)
             )
         else:
             findings.extend(_gate_stale_findings(item, request, core_sot))
@@ -713,6 +870,47 @@ def _gate_memory_findings(
                 check="stale_item",
                 detail=f"memory {item.pointer.document_id} is no longer "
                 f"canonical (status {entry.status.value})",
+            ),
+        )
+    return ()
+
+
+def _gate_candidate_findings(
+    item: ContextItem,
+    request: ContextSearchRequest,
+    analysis_service: AnalysisService | None,
+) -> tuple[GateFinding, ...]:
+    # Candidate items have no SOT snapshot; the authority is the analysis store.
+    # Re-validate that the candidate still exists, is still needs_review (a
+    # promoted/removed candidate is stale — it must not linger as unreviewed
+    # evidence), and belongs to the project (D3=A). Mirrors _gate_memory_findings.
+    if analysis_service is None:
+        return (
+            GateFinding(
+                check="candidate_gate_unconfigured",
+                detail=f"candidate item {item.pointer.document_id} cannot be "
+                "validated without an analysis service",
+            ),
+        )
+    try:
+        candidate = analysis_service.get_candidate(
+            project_id=request.project_id,
+            candidate_id=item.pointer.document_id,
+        )
+    except AnalysisNotFound:
+        return (
+            GateFinding(
+                check="stale_item",
+                detail=f"candidate {item.pointer.document_id} is missing or "
+                "belongs to another project",
+            ),
+        )
+    if candidate.status is not AnalysisCandidateStatus.NEEDS_REVIEW:
+        return (
+            GateFinding(
+                check="stale_item",
+                detail=f"candidate {item.pointer.document_id} is no longer "
+                f"needs_review (status {candidate.status.value})",
             ),
         )
     return ()

@@ -5,7 +5,7 @@
 
 ## Current Status
 
-- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.49**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
+- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.50**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
 - 개발 진입점은 `docs/plans/README.md`. `docs/` 루트의 설계 문서는 초기 아이디에이션 자료다.
 - 구현된 계층(모두 회귀로 잠김, 아래는 현재 동작하는 표면):
   - **LLM Gateway**: FastAPI shell(`/health/live`·`/health/ready`·`/v1/generate`), llama.cpp 호환 provider + httpx async adapter, provider error 5종→HTTP status 매핑.
@@ -14,9 +14,9 @@
   - **Analysis(Phase 2A)**: taxonomy 3종 extraction, job 상태 전이, provider/Gateway wiring + JSON repair, job/candidate/run HTTP API.
   - **Memory(Phase 2B.1~2B.6)**: canonical `MemoryEntry` store + candidate 승격(수동/threshold), compare→ActionProposal→versioned upsert(append-only), compare judge(Gateway 1-turn), memory→vector 재색인(async outbox→worker), event/open_question semantic identity(off 기본).
   - **Indexing(Phase 3A/3B)**: source block index rebuild(HTTP/CLI/deployed smoke), index sync outbox + one-shot worker(archive drain + memory reindex drain).
-  - **Context search(Phase 4)**: LLM planner + orchestration + Context Gate, HTTP API, 공유 in-process vector index, real Chroma+embedding 백엔드(env 구성 시), canonical memory 포함(⑤ §5 B).
+  - **Context search(Phase 4)**: LLM planner + orchestration + Context Gate, HTTP API, 공유 in-process vector index, real Chroma+embedding 백엔드(env 구성 시), canonical memory 포함(⑤ §5 B) + `needs_review` candidate 포함(라벨·micro·권위필드 배제, Gate가 candidate origin만 예외 허용).
 - **Compose 런타임**: base `docker-compose.yml`(application + Mongo replica set + gateway[외부 llama 클라이언트] + embedding + chroma). opt-in `docker-compose.llama.yml`로 in-stack llama.cpp GPU 서버(port 9080)를 띄운다. runbook: `docs/runbooks/local-llama-server.md`.
-- **테스트**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **621 passed / 45 skipped**(2026-07-08 기준). skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
+- **테스트**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **630 passed / 45 skipped**(2026-07-08 기준). skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
 
 ## Active Decisions
 
@@ -57,7 +57,7 @@
 - 기억 갱신은 AI가 직접 덮어쓰지 않고 검색·대조·Gate·검토·versioned upsert를 거친다. memory는 append-only(version마다 새 id, 이전 id는 `superseded`).
 - canonical memory는 별도 `memory_vectors` collection(`IndexRecordKind.MEMORY`)에 **canonical-only**로 색인한다. 트리거 = async outbox→worker(2B.5 D3=B). commit-후-enqueue skew는 정기 memory backfill이 유일 수렴 수단이다. enqueue는 `MemoryService` choke point로 중앙화(promote/versioned upsert 3경로를 한 번에 커버).
 - event/open_question semantic identity는 compare `_find_matches`에서 처리한다(2B.6 D1=A). semantic 매칭은 **off 기본**(D4=A): `ANALYSIS_SEMANTIC_MATCH_THRESHOLD` 미설정 시 always-create 보존, 실 embedding 캘리브레이션 후 발화. character는 결정적 name-key 유지.
-- Writing ContextPackage의 canonical memory 포함(⑤ §5 B, D1=A canonical만): retrieval 레이어(현재 Mongo-direct, 랭킹 없음)와 권위 재유도(항상 memory store 재검증)를 분리 설계했다. 후속에서 retrieval을 vector(`memory_vectors`)·ES로 교체해도 item 변환·Gate는 불변. candidate 포함은 이 machinery를 재사용하는 다음 slice.
+- Writing ContextPackage의 memory 포함(⑤ §5 B, v1.6.48 canonical + v1.6.50 candidate): retrieval 레이어(현재 Mongo-direct, 랭킹 없음)와 권위 재유도(항상 store 재검증)를 분리 설계했다. 후속에서 retrieval을 vector(`memory_vectors`)·ES로 교체해도 item 변환·Gate는 불변. **candidate 포함(v1.6.50)**: candidate는 `status=candidate`·`review_status` 라벨 + `micro_evidence`만 + 권위필드(constraints/do_not_use) 배제(Phase 6 §62 위장 금지). Gate candidate 금지는 폐지가 아니라 candidate origin(`analysis_candidates`)만 예외로 좁힘. `needs_review→confirmed/rejected` 전이는 Phase 6이라 현재 승격 candidate는 canonical·candidate 양쪽 노출 가능(D7 no-dedup 수용).
 
 ### 추적 부채
 - 없음. (이전 부채 #8 `ProviderError`→502는 조사 결과 stale — 두 경로 모두 이미 502였음 — 로 v1.6.49에서 명시 분기+회귀 lock으로 폐쇄했다.)
@@ -68,11 +68,11 @@
 
 ## Next Tasks
 
-1. **다음 구현 slice 선택**(각 후보는 착수 브리프 필요). Phase 2B(2B.1~2B.6) + ⑤ Writing canonical inclusion까지 관통 완료(SoT v1.6.40~v1.6.48). 후보:
-   - **(a) `needs_review` candidate의 Writing 포함** — v1.6.48이 명시적으로 남긴 "바로 다음 slice". canonical inclusion machinery(memory→ContextItem, `pointer.collection` origin 분기, Gate origin별 재검증)를 재사용해 candidate origin + `status=candidate` 라벨(micro 전용·라벨 필수). Phase 6 review 지위 라벨/소비 계약 동반 결정.
-   - **(b) Writing canonical retrieval의 vector/검색엔진 확장** — v1.6.48은 Mongo-direct(랭킹 없음). retrieval 레이어를 `memory_vectors` vector(relevance)·ES lexical로 교체(item 변환·Gate 불변).
+1. **다음 구현 slice 선택**(각 후보는 착수 브리프 필요). Phase 2B(2B.1~2B.6) + ⑤ Writing canonical(v1.6.48)·candidate(v1.6.50) inclusion까지 관통 완료. 후보:
+   - **(b) Writing memory retrieval의 vector/검색엔진 확장** — canonical·candidate 둘 다 현재 Mongo-direct(랭킹 없음). retrieval 레이어를 `memory_vectors` vector(relevance)·ES lexical로 교체(item 변환·Gate 불변; 두 retriever가 같은 seam).
    - **(c) character 별칭/동명이인 semantic 보강**(2B.3 D2=A 확장).
    - **(d) conflict/merge/split review queue 영속화.**
+   - **(e) canonical↔candidate semantic dedup**(v1.6.50 D7 후속 — 같은 지식이 승격 후 canonical·candidate 양쪽에 나타나는 것 정리; Phase 6 review 상태 전이와 함께 검토).
 2. **sandbox 밖 실행(코드 완료, 여기서 막힘)**:
    - 2B.6 threshold 실 캘리브레이션 — 실 embedding(BGE-m3-ko)+데이터로 유사/비유사 event pair cosine 분포 관찰 → `ANALYSIS_SEMANTIC_MATCH_THRESHOLD` 확정·env 설정(off 기본이라 미설정 시 미발화).
    - 2B.5 live smoke(`scripts/phase2b5_memory_reindex_live_smoke.py`: promote→outbox→worker→실 `memory_vectors` 관통) + 필요 시 backfill(`scripts/phase2b5_reindex_memory.py`).
@@ -82,7 +82,7 @@
 
 ## Verification
 
-- 현재 시스템 전체 스위트: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **621 passed / 45 skipped**. `git diff --check` clean.
+- 현재 시스템 전체 스위트: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **630 passed / 45 skipped**. `git diff --check` clean.
   - `--ignore=tests/test_memory_mongo.py`는 프로젝트 검증 관례다(해당 4개는 사전-존재 localhost Mongo env artifact이며 코드 회귀가 아니다).
   - skip 45개는 live Mongo/Chroma/embedding 미가용 통합·smoke 테스트(sandbox 밖에서 실행).
 - live/배포 검증 이력은 `docs/verifications/YYYY-MM-DD/`에 있다. 각 slice의 자체 회귀·mutation 재실증 상세는 `docs/daily_logs/YYYY-MM-DD/work_log.md`에 있다.
@@ -116,9 +116,9 @@ services/
     │                            #   + compare · compare_judge · semantic_matcher(2B.6) · apply(2B.4)
     ├── memory/                  # 2B.1 canonical store: models · scope · service · repository · mongo_repository
     ├── indexing/               # models · embedding · chroma · memory_index(2B.5/6) · service · mongo_repository
-    ├── context_search/          # models · planner · service(⑤ canonical memory retriever/gate)
+    ├── context_search/          # models · planner · service(⑤ canonical+candidate memory retriever/gate)
     └── agent_loop/              # decision · budget · registry · parser · completion · resolution · runner
-tests/                           # 64개 모듈(도메인별 회귀 + live/smoke skip-aware) + fixtures/core_sot.py
+tests/                           # 65개 모듈(도메인별 회귀 + live/smoke skip-aware) + fixtures/core_sot.py
 scripts/
 ├── smoke_llm_provider.py · benchmark_llm_provider.py
 ├── phase2a_*_smoke.py · phase3a_*_smoke.py · phase4_context_search_*_smoke.py

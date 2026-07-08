@@ -161,6 +161,16 @@ class InMemoryAnalysisRepository:
             if candidate.project_id == project_id and candidate.job_id == job_id
         )
 
+    def list_needs_review_candidates(
+        self, project_id: str
+    ) -> tuple[AnalysisCandidate, ...]:
+        return tuple(
+            candidate
+            for candidate in self.candidates.values()
+            if candidate.project_id == project_id
+            and candidate.status is AnalysisCandidateStatus.NEEDS_REVIEW
+        )
+
 
 class AnalysisService:
     def __init__(
@@ -424,6 +434,14 @@ class AnalysisService:
     ) -> tuple[AnalysisCandidate, ...]:
         self._require_job(project_id, job_id)
         return self._repo.list_candidates_for_job(project_id, job_id)
+
+    def list_needs_review_candidates(
+        self, *, project_id: str
+    ) -> tuple[AnalysisCandidate, ...]:
+        # Project-wide needs_review candidates (across jobs) for Writing
+        # candidate inclusion (⑤ §5 B follow-up, D5=A). Promoted candidates
+        # leave this set — they are served by the canonical path instead.
+        return self._repo.list_needs_review_candidates(project_id)
 
     def get_candidate(
         self, *, project_id: str, candidate_id: str

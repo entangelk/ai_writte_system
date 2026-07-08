@@ -63,3 +63,7 @@ class AnalysisRepository(Protocol):
     def list_candidates_for_job(
         self, project_id: str, job_id: str
     ) -> tuple[AnalysisCandidate, ...]: ...
+
+    def list_needs_review_candidates(
+        self, project_id: str
+    ) -> tuple[AnalysisCandidate, ...]: ...

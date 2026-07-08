@@ -56,6 +56,27 @@
   - `test_application_api.py::test_analysis_run_endpoint_maps_real_provider_error_to_502`: `_ApiRealProviderErrorRunner`(실 `ProviderError` 재던지기)→502 + failure_reason=provider_error. **mutation**: `/run`의 명시+generic catch 둘 다 무력화 시 uncaught 500으로 재실패(계약 load-bearing, under-strict).
 - **검증**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **621 passed / 45 skipped**(619 → +2). `git diff --check` clean. 계약(ProviderError→502) 변경 없음 — 명시화·회귀 lock·부채 폐쇄만.
 
+### (a) `needs_review` candidate의 Writing 포함 (SoT v1.6.50)
+
+- **리듬**: 착수 브리프(`plans/04-writing-candidate-context-decisions.md`) → 오너 결정 → 구현. v1.6.48이 명시한 "바로 다음 slice".
+- **조사**: v1.6.48 canonical machinery(retriever seam→step→item→Gate origin 분기)를 그대로 재사용 가능. `ContextItemStatus`에 CANDIDATE/CANONICAL 이미 존재. Gate는 현재 전역 `candidate_item_not_allowed`. candidate 리스팅은 job별만 있어 project-wide `needs_review` 리스팅 신설 필요. candidate payload는 memory와 같은 taxonomy라 `derive_memory_index_text` 재사용.
+- **헤드라인 긴장(§1)**: (1) v1.6.38이 candidate 포함을 미룬 이유="canonical 위장으로 Writing 안전선 완화" → Phase 2B가 종속 해소했으나 **Phase 6 §62("승인 전 candidate가 canonical/검색 constraint로 위장 금지")** 불변식 준수 필요. (2) Gate 전역 candidate 금지를 통째로 여는 게 아니라 candidate origin만 좁혀 허용.
+- **오너 결정**: **D1/D2/D3/D5/D6/D7=A**(canonical 대칭) + **D4=B**(review_status 필드 지금 신설) + **안전선=A**(라벨 + micro만 + 권위필드 배제).
+- **구현**:
+  - `context_search/models.py`: `ContextNeed.CANDIDATE_MEMORY`(micro, mongo) + `ContextItem.review_status` 필드(candidate만 의미, 현재 needs_review; canonical/source-block은 빈값).
+  - `context_search/service.py`: `CandidateMemoryRetriever` seam + `MongoDirectCandidateMemoryRetriever`(needs_review-only, limit). `_run_candidate_memory_step`(retriever 미주입→빈, 예외→BACKEND_ERROR) + `_item_from_candidate`(status=CANDIDATE·pointer.collection=`analysis_candidates`·review_status). `_execute_step_tool` 분기. `evaluate_context_gate`에 `analysis_service` param + `_gate_candidate_findings`(get_candidate로 존재+needs_review+project 재검증).
+  - `analysis/`: project-wide `list_needs_review_candidates`(service·Protocol·in-memory·mongo).
+  - `main.py`: `_default_context_search_service(analysis=)` + candidate retriever 주입 + gate `analysis_service=analysis` + item payload `review_status`.
+- **Gate 재편 정정(구현 중, §1)**: 처음엔 candidate 검사를 else(source-block) 분기로만 옮겨 v1.6.48 `test_candidate_status_memory_item_still_rejected`(memory-origin candidate-status 거부)를 깼다. 정정: candidate 금지를 폐지가 아니라 "candidate origin만 예외"로 좁힘(`status is CANDIDATE and not is_candidate_origin → candidate_item_not_allowed`). v1.6.48 계약 보존 + 신규 origin 허용 양립.
+- **D5 문구 정정(§1)**: "승격된 candidate가 needs_review set을 떠난다"는 아직 참이 아님 — needs_review→confirmed/rejected 전이는 Phase 6. 현재 승격은 canonical memory만 mint하고 candidate 상태 불변 → 승격 지식은 canonical·candidate 양쪽 노출 가능(D7=A no-dedup 수용). Gate의 status≠needs_review→stale은 Phase 6 forward-defense(회귀는 stub으로 실증).
+- **회귀 +9**(`tests/test_context_search_candidate_memory.py`): micro 라벨 배치 + §62 권위필드(constraints/do_not_use) 배제, retriever 미주입 무실패, retriever needs_review-only+limit, retriever 예외→BACKEND_ERROR, Gate 4방향(pass/missing-stale/status-stale[stub]/unconfigured), 비-candidate-origin candidate-status 여전히 거부(over-strict). **mutation 양방향**: Gate status-check 무력화→status-stale 재실패; candidate-origin 예외(`not is_candidate_origin`) 제거→pass 재실패. 각 복원.
+- **검증**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **630 passed / 45 skipped**(621 → +9). 기존 context_search/canonical/analysis 회귀 무변(v1.6.48 candidate 금지 테스트 포함). `git diff --check` clean.
+
+## User Decisions and Rationale (v1.6.50)
+
+- 오너가 **D4=B**(review_status 필드 지금 신설)를 택했다. status=candidate 단일 라벨(A)보다 Phase 6 confirmed/rejected 소비 계약을 미리 forward-compat하는 쪽. 현재 값은 needs_review 고정(2A needs_review 고정 선례와 유사).
+- 오너가 **안전선=A**(라벨 + 권위필드 배제)를 택했다. Phase 6 §62(승인 전 canonical 위장 금지)를 candidate를 아예 막는 대신 명시 라벨 + micro 한정 + constraints/do_not_use 배제로 지키며 포함한다.
+
 ## Next steps
 
-- **다음 구현 slice: (a) `needs_review` candidate의 Writing 포함**(오너 지시). v1.6.48이 남긴 "바로 다음 slice". canonical inclusion machinery(memory→ContextItem, `pointer.collection` origin 분기, Gate origin별 재검증) 재사용 + candidate origin/`status=candidate` 라벨(micro 전용). Phase 6 review 지위 라벨/소비 계약 동반 결정. 착수 브리프부터.
+- **다음 구현 slice 선택 대기**(HANDOFF Next Tasks #1 후보 b~e). b(vector/ES retrieval 확장)는 canonical·candidate 두 retriever가 같은 seam이라 함께 확장 가능. e(canonical↔candidate dedup)는 v1.6.50 D7 후속.

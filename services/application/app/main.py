@@ -82,6 +82,7 @@ from services.application.app.context_search.service import (
     ContextSearchService,
     InvalidContextSearchRequest,
     MongoDirectCanonicalMemoryRetriever,
+    MongoDirectCandidateMemoryRetriever,
     evaluate_context_gate,
 )
 from services.application.app.core_sot.service import (
@@ -371,6 +372,7 @@ def _default_context_search_service(
     vector_index: InMemoryVectorIndexAdapter | ChromaVectorIndexAdapter,
     embeddings: EmbeddingProvider,
     memory: MemoryService,
+    analysis: AnalysisService,
 ) -> ContextSearchService | None:
     base_url = os.environ.get("LLM_GATEWAY_BASE_URL")
     if not base_url:
@@ -409,6 +411,9 @@ def _default_context_search_service(
         # Writing canonical inclusion (⑤ §5 B, D2=A): Mongo-direct retrieval of
         # canonical memories; the retrieval layer extends to vector later.
         canonical_memory_retriever=MongoDirectCanonicalMemoryRetriever(memory),
+        # Writing candidate inclusion (⑤ §5 B follow-up, D2=A): Mongo-direct
+        # retrieval of needs_review candidates, labeled candidate at the Gate.
+        candidate_memory_retriever=MongoDirectCandidateMemoryRetriever(analysis),
     )
 
 
@@ -566,6 +571,7 @@ def create_app(
             vector_index=shared_vector_index,
             embeddings=shared_embeddings,
             memory=memory,
+            analysis=analysis,
         )
 
     @app.get("/health")
@@ -1321,6 +1327,7 @@ def create_app(
             "sot_reloaded": item.sot_reloaded,
             "token_estimate": item.token_estimate,
             "source_ref_ids": list(item.source_ref_ids),
+            "review_status": item.review_status,
         }
 
     def _context_trace_payload(trace) -> dict[str, object]:
@@ -1415,6 +1422,7 @@ def create_app(
                 request=request,
                 core_sot=core_sot,
                 memory_service=memory,
+                analysis_service=analysis,
             )
         except InvalidContextSearchRequest as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

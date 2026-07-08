@@ -223,6 +223,17 @@ class MongoAnalysisRepository:
         ).sort("_id", ASCENDING)
         return tuple(_to_candidate(doc) for doc in cursor)
 
+    def list_needs_review_candidates(
+        self, project_id: str
+    ) -> tuple[AnalysisCandidate, ...]:
+        cursor = self._candidates.find(
+            {
+                "project_id": project_id,
+                "status": str(AnalysisCandidateStatus.NEEDS_REVIEW),
+            }
+        ).sort("_id", ASCENDING)
+        return tuple(_to_candidate(doc) for doc in cursor)
+
     def _put_candidates_transactional(
         self, candidates: Sequence[tuple[AnalysisCandidate, str]]
     ) -> None:
