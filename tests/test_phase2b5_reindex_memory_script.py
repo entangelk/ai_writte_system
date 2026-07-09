@@ -68,6 +68,10 @@ def _seeded_repo():
 
 class RunReindexTest(unittest.TestCase):
     def test_reindexes_only_project_canonical(self):
+        # Under-strict guard: dropping the canonical filter would index the
+        # superseded m2 too (count 2, not 1). Over-strict guard: dropping the
+        # lexical leg would drop lexical_records_written / make it 0. Project
+        # isolation: project-2's m3 must not leak into project-1's backfill.
         args = phase2b5_reindex_memory.parse_args(
             ["--project-id", "project-1", "--mongo-uri", "mongodb://x", "--mongo-db", "db"]
         )
@@ -76,9 +80,11 @@ class RunReindexTest(unittest.TestCase):
         ), mock.patch(_REPO_PATH, return_value=_seeded_repo()):
             summary = phase2b5_reindex_memory.run_reindex(args)
         self.assertEqual(summary["project_id"], "project-1")
-        self.assertEqual(summary["memory_backend"], "in_memory_fake")
+        self.assertEqual(summary["vector_backend"], "in_memory_fake")
+        self.assertEqual(summary["lexical_backend"], "in_memory_fake")
         self.assertEqual(summary["canonical_count"], 1)
-        self.assertEqual(summary["records_written"], 1)
+        self.assertEqual(summary["vector_records_written"], 1)
+        self.assertEqual(summary["lexical_records_written"], 1)
 
     def test_requires_mongo_uri(self):
         args = phase2b5_reindex_memory.parse_args(["--project-id", "p", "--mongo-uri", ""])
@@ -92,9 +98,11 @@ class MainTest(unittest.TestCase):
             self.assertEqual(args.project_id, "p1")
             return {
                 "project_id": "p1",
-                "memory_backend": "chroma",
+                "vector_backend": "chroma",
+                "lexical_backend": "elasticsearch",
                 "canonical_count": 3,
-                "records_written": 3,
+                "vector_records_written": 3,
+                "lexical_records_written": 3,
             }
 
         stdout = StringIO()
@@ -104,7 +112,7 @@ class MainTest(unittest.TestCase):
             stdout=stdout,
         )
         self.assertEqual(code, 0)
-        self.assertEqual(json.loads(stdout.getvalue())["records_written"], 3)
+        self.assertEqual(json.loads(stdout.getvalue())["vector_records_written"], 3)
 
     def test_main_reports_usage_error(self):
         stderr = StringIO()

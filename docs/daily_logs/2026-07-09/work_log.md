@@ -215,3 +215,66 @@
 - **ES-lexical backfill 부재**: backfill(`phase2b5_reindex_memory.py`)은 vector-only. G4-B 아래 per-sink-max로 terminal drop된 ES 실패는 수렴 수단이 없다(accepted limitation) — ES-lexical backfill 스크립트는 별도 후속.
 - **실 배포 per-sink 관통(sandbox 밖)**: 전체 스택에서 한 sink만 죽였을 때 outbox `targets`가 per-sink 상태를 반영하고 healthy sink가 재색인되지 않는지 end-to-end 확인.
 - commit-후-enqueue skew(transaction 부재)는 증분2가 넓히지 않음(빈 targets는 enqueue를 더 단순하게 함).
+
+---
+
+## ES-lexical backfill 스크립트 (SoT v1.6.58)
+
+오너가 b-6 증분2 완료 후 다음 slice로 **ES-lexical backfill**을 선택(6-후보 병렬 조사 Workflow → 추천) → 착수 브리프(`plans/04-es-lexical-backfill-decisions.md`) → 오너 결정(G1=A·G2=A·G3=A·G4=A) → 구현·검증.
+
+### 배경/성격
+
+- v1.6.57(b-6 증분2)이 per-sink bookkeeping로 ES-only 실패를 관측 가능하게 했으나, accepted limitation #1("per-sink-max로 terminal drop된 ES 실패는 수렴 수단 없음")을 남겼다. worker는 outbox-driven increment drain만 하므로 과거 데이터·DLQ drop 실패의 일괄 재적재 경로가 없었다.
+- 이 slice는 `scripts/phase2b5_reindex_memory.py`(vector-only)의 ES 대칭을 지어 그 gap을 닫는다. **성격: 순수 운영 스크립트 + 회귀 — 새 계약 literal 없음, forward-defense stub과 무관**(candidate는 needs_review 단일이라 upsert-only). 필요 helper는 v1.6.52/54/55에서 전부 구현·잠금됨.
+
+### 구현
+
+- **memory ES backfill(G1=A, 기존 스크립트 확장)**: `scripts/phase2b5_reindex_memory.py`에 `_build_memory_lexical_index`(`ELASTICSEARCH_URL` 시 `connect_elasticsearch_memory_index`, 아니면 `InMemoryMemoryLexicalIndexAdapter` fake dry-run) 추가. `run_reindex`가 같은 canonical 순회에서 vector+lexical 동시 적재(`build_memory_index_record` + `build_memory_lexical_record`, text 한 번 계산해 양쪽 재사용). summary를 `memory_backend`/`records_written` → `vector_backend`/`lexical_backend`/`vector_records_written`/`lexical_records_written`로 개환(worker `_build_memory_adapter` composite 대칭).
+- **candidate backfill(G2=A, 신규 스크립트)**: `scripts/phase2b5_reindex_candidate.py` 신규 — `AnalysisService.list_needs_review_candidates`(needs_review만, 필터 불필요) 전수 → `candidate_index_text`+embed → `build_candidate_index_record`+`build_candidate_lexical_record` → vector+lexical 동시 적재. b-2 검증 관찰 (a)(candidate vector backfill 부재)까지 닫음.
+- 둘 다 outbox 우회 일괄 재적재(D7 자세), ES 미구성 시 InMemory fake dry-run(vector backfill과 동일 자세). memory/candidate는 service/list/상태가 달라 분리(G3=A).
+
+### 회귀 + mutation
+
+- `tests/test_phase2b5_reindex_memory_script.py`: summary rename + lexical 양방향 guard 갱신(canonical 필터 under-strict·lexical leg over-strict·project 격리).
+- 신규 `tests/test_phase2b5_reindex_candidate_script.py`(4): needs_review 적재·project 격리·summary + main/usage error.
+- **mutation 양방향 4건 재실증**(백업-적용-pytest-복원): memory canonical 필터 제거(under-strict, 2→1)·memory lexical leg 제거(over-strict)·candidate lexical leg 제거(over-strict)·candidate vector leg 제거(over-strict) — 전부 mutation 시 1 failed / 복원 시 1 passed(CAUGHT). post-mutation `git diff --stat`로 원본 복원 확인.
+
+### Issues found
+
+- **환경 의존 실패(`ConnectElasticsearchTest` 3개)**: 전체 스위트에서 `tests/test_context_search_memory_lexical_retrieval.py::ConnectElasticsearchTest` 3개가 `ModuleNotFoundError: No module named 'elasticsearch'`로 failed. 원인: sandbox에 `elasticsearch` 패키지가 없고, b-5에서 도입한 이 테스트가 skip guard 없이 `from elasticsearch import Elasticsearch`를 직접 import. **제 slice와 무관** — memory.py를 HEAD로 되돌려도 동일 3개 failed 재현(인과관계 단절). b-5/b-6 작업 환경(elasticsearch 패키지 있음, "703 passed")과 이 sandbox의 환경 차이. 제 slice 회귀(candidate +4, memory 갱신)는 전부 passed, 기존 테스트를 깨뜨리지 않음. 이 테스트 설계 결함(skip guard 부재)은 b-5 후속으로 추적(제 slice 범위 밖).
+
+### 검증
+
+- `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **704 passed / 45 skipped + 3 failed**(환경 의존 `ConnectElasticsearchTest`, 상세 Issues found). b-6의 "703 passed"는 elasticsearch 패키지 있는 환경 기록; 이 sandbox는 패키지 부재로 3개 failed. 제 변경이 추가한 candidate +4 + memory 갱신은 passed. `git diff --check` clean.
+- focused: memory + candidate 회귀 8 passed.
+
+### Decisions
+
+- **summary 필드 rename(`memory_backend`→`vector_backend` 등)**: 이 slice가 memory backfill에 lexical leg를 추가해 두 sink가 공존하므로, summary를 vector/lexical 명시적으로 개환. CLI output(public interface) 변경이라 기존 회귀 2개 갱신. §4 "Public interfaces" 준수.
+- **candidate lexical+vector 함께(G2=A)**: b-2 관찰 (a) candidate vector backfill 부재까지 한번에 닫아 accepted limitation 완전 해소. small→medium 확장 수용.
+
+### User Decisions and Rationale
+
+- 오너가 6-후보 병렬 조사(Workflow 6 에이전트) 후 추천을 받아 **ES-lexical backfill** 선택. b-6 증분2 accepted limitation #1을 직접 닫고, 상류 의존 없이 helper가 전부 구현되어 sandbox 안 코드-완료 가능하다는 점이 근거.
+- **G1=A**(기존 스크립트 확장): memory vector+lexical이 같은 canonical 순회·projection이므로 한 스크립트가 자연스럽다(worker composite 대칭).
+- **G2=A**(candidate lexical+vector 함께): b-2 관찰 (a) candidate vector backfill 부재까지 닫음. 별도 후속으로 두면 "대칭 부재" 잔존.
+- **G3=A**(분리): memory/candidate는 service/list/상태가 달라 분리.
+- **G4=A**(bump, 새 literal 없음): b-6 G6=A 선례. accepted limitation #1 해소는 계약급 기록이라 버전 bump 동반.
+
+### Next steps
+
+- **실 backfill live 실행(sandbox 밖)**: 실 Mongo + real ES nori에 `memory_lexical`/`candidate_lexical`/`memory_vectors`/`candidate_vectors` 일괄 적재 end-to-end. 기존 vector backfill과 동일 자세.
+- **`ConnectElasticsearchTest` skip guard(b-5 후속)**: elasticsearch 패키지 없는 환경에서 skip되도록 `@unittest.skipUnless` 추가 — 제 slice 범위 밖, 별도. (또는 sandbox에 elasticsearch 패키지 설치.)
+- HANDOFF Next Tasks #1 잔존 후보: (b-4) hybrid 튜닝·(c)~(e)·Phase 6.
+
+---
+
+## 검증 후속 보강 (2026-07-09, 오너 독립 감사 → PASS)
+
+오너 독립 감사(`docs/verifications/2026-07-09/es_lexical_backfill_v1_6_58.md`, max effort)가 slice 코드·회귀·계약 일관성을 관통한 뒤 **합격(PASS)** 판정. 경계 매트릭스 8분기 빈 셀 없음·helper 시그니처(worker `memory_index.py:194`와 `derive_memory_index_text` 동일 = composite 대칭 확증)·mutation 4건 독립 재실증·전체 스위트 704/45+3 failed 정확 재현·3 failed 인과단절(`git show HEAD:` memory.py로도 동일 3개 재현) 전부 확증. 비차단 정정 3건 중 actionable 1건을 닫았다.
+
+- **정정 #1 — mutation 분류 어휘(본문 + SoT changelog)**: "candidate vector leg 제거(under-strict)"라 기술했으나, leg 제거는 **over-strict** 성격(정상 leg 제거 시 assertion이 잡는지; under-strict는 원 버그·잘못된 동작 재도입 감지). 본문 :240·SoT v1.6.58 changelog의 동일 어휘를 `over-strict`로 정정. mutation이 CAUGHT됐다는 **본질 주장은 검증됨**(감사 §5). 추가로 감사가 확인한 빈 셀 아님: candidate backfill 자체엔 under-strict guard(비-needs_review 상태 포함 감지)가 없으나 — `list_needs_review_candidates`에 위임 + `AnalysisCandidateStatus`가 `NEEDS_REVIEW` 단일(`analysis/models.py:26-27`, CONFIRMED/REJECTED는 Phase 6 전 미존재)로 자명. 위임이 test 주석(:65-67)에 명시되어 빈 셀 아님.
+- **관찰 #2(추적유지, 미조치)**: `ConnectElasticsearchTest` skip guard 부재(b-5 도입). `elasticsearch` 파이썬 패키지 없는 sandbox에서 3개 hard-fail — 이 slice 범위 밖이나, green bar가 3 failed로 오해될 수 있음. 회피 수단: `@unittest.skipUnless(importlib.util.find_spec("elasticsearch"), ...)` skip guard 추가(b-5 후속) 또는 sandbox `pip install -r services/application/requirements.txt` / 컨테이너 실행(`docker compose run application pytest`). b-5 후속으로 추적.
+- **관찰 #3(한계#1, 미조치)**: live backfill 미실행. 회귀는 InMemory fake + `DeterministicFakeEmbeddingProvider`로 sandbox 안 결정성. 실 Mongo + real ES nori backfill은 sandbox 밖(브리프 한계#1·본문 Next steps). 코드-완료 + 회귀-잠금 slice로 오너 "정지" 선택에서 후속 추적 합리.
+
+**재검증**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **704 passed / 45 skipped + 3 failed**(환경 의존, 무변). 어휘 정정만이라 코드·회귀 무변. `git diff --check` clean.

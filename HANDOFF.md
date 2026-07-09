@@ -5,7 +5,7 @@
 
 ## Current Status
 
-- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.57**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
+- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.58**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
 - 개발 진입점은 `docs/plans/README.md`. `docs/` 루트의 설계 문서는 초기 아이디에이션 자료다.
 - 구현된 계층(모두 회귀로 잠김, 아래는 현재 동작하는 표면):
   - **LLM Gateway**: FastAPI shell(`/health/live`·`/health/ready`·`/v1/generate`), llama.cpp 호환 provider + httpx async adapter, provider error 5종→HTTP status 매핑.
@@ -13,10 +13,10 @@
   - **Agent loop 계약층**: decision 7종·budget 5차원·tool registry·self-report parser·completion 판정·minimal provider composition runner. (tool-call branch는 상류 의존으로 보류 — Active Decisions 참조.)
   - **Analysis(Phase 2A)**: taxonomy 3종 extraction, job 상태 전이, provider/Gateway wiring + JSON repair, job/candidate/run HTTP API.
   - **Memory(Phase 2B.1~2B.6)**: canonical `MemoryEntry` store + candidate 승격(수동/threshold), compare→ActionProposal→versioned upsert(append-only), compare judge(Gateway 1-turn), memory→vector 재색인(async outbox→worker), event/open_question semantic identity(off 기본).
-  - **Indexing(Phase 3A/3B + b-2)**: source block index rebuild(HTTP/CLI/deployed smoke), index sync outbox + worker(archive drain + memory reindex drain + **candidate 색인 drain**; one-shot CLI + b-6 증분1 `--loop` compose 서비스). candidate 색인 파이프라인(v1.6.54): `record_candidate(s)` → `CANDIDATE_UPSERTED` outbox → worker composite(vector `candidate_vectors` + lexical ES `candidate_lexical`). candidate 상태가 `needs_review` 하나뿐이라 색인은 upsert-only(de-index는 Phase 6 forward-defense).
+  - **Indexing(Phase 3A/3B + b-2)**: source block index rebuild(HTTP/CLI/deployed smoke), index sync outbox + worker(archive drain + memory reindex drain + **candidate 색인 drain**; one-shot CLI + b-6 증분1 `--loop` compose 서비스). candidate 색인 파이프라인(v1.6.54): `record_candidate(s)` → `CANDIDATE_UPSERTED` outbox → worker composite(vector `candidate_vectors` + lexical ES `candidate_lexical`). candidate 상태가 `needs_review` 하나뿐이라 색인은 upsert-only(de-index는 Phase 6 forward-defense). **ES-lexical backfill(v1.6.58)**: `scripts/phase2b5_reindex_memory.py`(memory vector+lexical)·`scripts/phase2b5_reindex_candidate.py`(candidate vector+lexical) 일괄 backfill — b-6 증분2 accepted limitation #1 해소, outbox 우회 D7 자세, live 실행은 sandbox 밖.
   - **Context search(Phase 4)**: LLM planner + orchestration + Context Gate, HTTP API, 공유 in-process vector index, real Chroma+embedding 백엔드(env 구성 시), canonical memory 포함(⑤ §5 B) + `needs_review` candidate 포함(라벨·micro·권위필드 배제, Gate가 candidate origin만 예외 허용). **canonical·candidate memory retrieval 모두** env로 backend 선택(canonical v1.6.51/52, candidate v1.6.55): `CHROMA_HOST`+`EMBEDDING_SERVICE_URL` 시 **vector relevance**, `ELASTICSEARCH_URL` 시 **ES lexical(nori)**, 둘 다면 **hybrid(RRF)**, 없으면 Mongo-direct — 모두 권위는 Mongo/analysis store 재유도(seam·item·Gate 불변). worker memory/candidate drain은 ES 구성 시 vector+lexical composite.
 - **Compose 런타임**: base `docker-compose.yml`(application + Mongo replica set + gateway[외부 llama 클라이언트] + embedding + chroma + **elasticsearch**[nori, v1.6.53] + **worker**[b-6 증분1]). application에 `ELASTICSEARCH_URL` 배선 → 배포 canonical·candidate retriever 기본 = **hybrid(vector+lexical RRF)**. ES는 자체 `services/elasticsearch/Dockerfile`(공식 ES + analysis-nori, single-node·보안 off). opt-in `docker-compose.llama.yml`로 in-stack llama.cpp GPU 서버(port 9080)를 띄운다. runbook: `docs/runbooks/local-llama-server.md`. **worker(index 색인 적재 drain)는 상시 compose 서비스**(`--loop` drain + SIGTERM graceful shutdown, b-6 증분1 / SoT v1.6.56) — 이전 수동/out-of-band에서 전환. atomic outbox claim이 이미 이중 실행을 막아 single-replica로 안전. **outbox per-sink bookkeeping 완료**(b-6 증분2 / SoT v1.6.57, G3=B/G4=B): enqueue는 targets 빈 dict(sink-agnostic)로 두고 worker가 claim 시 configured sink(vector/lexical)를 materialize, 각 sink가 독립 `attempt_count`/`last_error`를 가져 한 sink가 죽어도 healthy sink는 SUCCESS로 동결·재색인되지 않고 all-terminal 시에만 entry 삭제. composite `drain(entry, skip=SUCCESS)`가 per-sink `SinkOutcome`을 반환(all-or-nothing raise 폐지). retriever는 인덱스 비어도 graceful.
-- **테스트**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **703 passed / 45 skipped**(2026-07-09, b-6 증분2). skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
+- **테스트**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **704 passed / 45 skipped + 3 환경 의존 failed**(2026-07-09, ES-lexical backfill v1.6.58). 3 failed는 `ConnectElasticsearchTest`(b-5 도입, skip guard 없이 `from elasticsearch import` 직접 import)로 sandbox에 `elasticsearch` 패키지 부재 시 발생 — v1.6.58 slice와 무관, HEAD에서도 동일 failed 재현(인과 단절). skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
 
 ## Active Decisions
 
@@ -64,12 +64,11 @@
 
 ## Owner Decisions Needed
 
-- (b-6) 증분1(worker compose 서비스, v1.6.56)·증분2(outbox per-sink bookkeeping, v1.6.57) **모두 완료**. b-6 브리프의 슬라이스는 소진됐다. **다음 작업은 오너의 slice 선택 대기** — Next Tasks #1의 후보(b-4 hybrid 튜닝 / (c)~(e) / Phase 6 / ES-lexical backfill) 중 하나를 고르면 착수 브리프 → 결정 → 구현 리듬으로 진행. 각 후보는 (b-6 제외) 착수 전 결정 브리프가 필요하다.
+- (b-6) 증분1/2(v1.6.56/57)·**ES-lexical backfill(v1.6.58) 모두 완료**. b-6 브리프 슬라이스 + accepted limitation #1 fix 소진. **다음 작업은 오너의 slice 선택 대기** — Next Tasks #1의 후보(b-4 hybrid 튜닝 / (c)~(e) / Phase 6) 중 하나를 고르면 착수 브리프 → 결정 → 구현 리듬으로 진행. 각 후보는 착수 전 결정 브리프가 필요하다.
 
 ## Next Tasks
 
-1. **다음 slice는 오너 선택 대기**(b-6 증분1/2 모두 완료). 후보는 각 착수 브리프 필요. 관통 완료: ⑤ retrieval·색인(canonical v1.6.48~55, candidate v1.6.54/55)·compose ES(v1.6.53)·b-6 worker compose(증분1 v1.6.56 + 증분2 per-sink bookkeeping v1.6.57). 후보:
-   - **ES-lexical backfill 스크립트 [b-6 증분2 accepted limitation의 fix]**: 현재 backfill(`scripts/phase2b5_reindex_memory.py`)은 vector-only다. per-sink bookkeeping(v1.6.57)이 ES-only 실패를 관측 가능하게 했으나, per-sink-max로 terminal drop된 ES 실패는 **수렴 수단이 없다**. `phase2b5_reindex_memory.py` 대칭의 ES(memory_lexical/candidate_lexical) backfill이 그 gap을 닫는다.
+1. **다음 slice는 오너 선택 대기**(b-6 증분1/2·ES-lexical backfill 모두 완료). 후보는 각 착수 브리프 필요. 관통 완료: ⑤ retrieval·색인(canonical v1.6.48~55, candidate v1.6.54/55)·compose ES(v1.6.53)·b-6 worker compose(증분1 v1.6.56 + 증분2 per-sink bookkeeping v1.6.57)·**ES-lexical backfill(v1.6.58, b-6 증분2 accepted limitation #1 fix — memory/candidate vector+lexical backfill 스크립트)**. 후보:
    - **(b-4) hybrid 튜닝** — RRF k(현재 60)·per-signal 가중치·sub-retriever fetch depth를 실 데이터로 캘리브레이션(canonical·candidate 공통).
    - **(c) character 별칭/동명이인 semantic 보강**(2B.3 D2=A 확장).
    - **(d) conflict/merge/split review queue 영속화.**
@@ -86,7 +85,8 @@
 
 ## Verification
 
-- 현재 시스템 전체 스위트: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **703 passed / 45 skipped**. `git diff --check` clean.
+- 현재 시스템 전체 스위트: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **704 passed / 45 skipped + 3 환경 의존 failed**. `git diff --check` clean.
+  - 3 failed = `ConnectElasticsearchTest`(b-5 도입, skip guard 없이 `from elasticsearch import` 직접 import) — sandbox에 `elasticsearch` 패키지 부재 시 발생, v1.6.58 slice와 무관(HEAD에서도 동일). b-5/b-6 "703 passed"는 패키지 있는 환경 기록. 후속: skip guard 추가(b-5 범위) 또는 sandbox 패키지 설치.
   - `--ignore=tests/test_memory_mongo.py`는 프로젝트 검증 관례다(해당 4개는 사전-존재 localhost Mongo env artifact이며 코드 회귀가 아니다).
   - skip 45개는 live Mongo/Chroma/embedding 미가용 통합·smoke 테스트(sandbox 밖에서 실행).
 - live/배포 검증 이력은 `docs/verifications/YYYY-MM-DD/`에 있다. 각 slice의 자체 회귀·mutation 재실증 상세는 `docs/daily_logs/YYYY-MM-DD/work_log.md`에 있다.
