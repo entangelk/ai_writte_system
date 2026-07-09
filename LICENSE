@@ -1,0 +1,64 @@
+AI Writing System — License
+
+Copyright (c) 2026 entangelk
+
+The original source code and documentation in this repository are licensed
+under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0
+International License (CC BY-NC-SA 4.0).
+
+  Full legal code (binding):  https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+  Human-readable summary:     https://creativecommons.org/licenses/by-nc-sa/4.0/
+
+--------------------------------------------------------------------------------
+You are free to:
+  - Share  — copy and redistribute the material in any medium or format.
+  - Adapt  — remix, transform, and build upon the material.
+
+The licensor cannot revoke these freedoms as long as you follow the license
+terms.
+
+Under the following terms:
+  - Attribution (BY)   — You must give appropriate credit, provide a link to the
+                         license, and indicate if changes were made. You may do
+                         so in any reasonable manner, but not in any way that
+                         suggests the licensor endorses you or your use.
+  - NonCommercial (NC) — You may not use the material for commercial purposes.
+  - ShareAlike (SA)    — If you remix, transform, or build upon the material,
+                         you must distribute your contributions under the same
+                         license as the original.
+  - No additional restrictions — You may not apply legal terms or technological
+                         measures that legally restrict others from doing
+                         anything the license permits.
+
+This is a human-readable summary of (and not a substitute for) the license.
+The binding terms are the full legal code linked above.
+
+--------------------------------------------------------------------------------
+Scope and third-party components
+--------------------------------------------------------------------------------
+This license applies ONLY to the original source code and documentation authored
+in this repository. It does NOT cover, sublicense, or alter the license of any
+third-party software, services, models, or data that this project depends on,
+integrates with, or invokes. Each of those is governed by its own license or
+terms, including (but not limited to):
+
+  - MongoDB            (c) MongoDB, Inc. — server under SSPL; official drivers
+                       (e.g. pymongo) under Apache-2.0. Used here as an external
+                       service; not redistributed in this repository.
+  - Elasticsearch      (c) Elasticsearch B.V. — Elastic License 2.0 / SSPL.
+                       Used as an external service; not redistributed here.
+  - ChromaDB           Apache License 2.0.
+  - Google Gemma model Governed by the Google "Gemma Terms of Use" and the
+                       Gemma Prohibited Use Policy. Model weights are NOT
+                       included in this repository; the project calls an
+                       external llama.cpp-compatible endpoint. Any deployment
+                       that uses Gemma must independently comply with Google's
+                       terms.
+  - Python packages    (FastAPI, pymongo, httpx, elasticsearch, chromadb,
+                       pydantic, etc.) — each under its own license, typically
+                       MIT, Apache-2.0, or BSD.
+
+Nothing in this license grants any rights to those components. You are
+responsible for complying with their respective licenses and terms of use.
+
+For commercial-licensing inquiries, contact the copyright holder.
