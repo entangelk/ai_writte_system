@@ -82,6 +82,7 @@
    - 곁가지: 2B.3.2 compare judge live smoke, worker→real Chroma archive live smoke.
 3. **Phase 4 real vector 잔여**: worker→real Chroma live smoke(archive→outbox→worker→실 Chroma record 삭제), ES lexical 경로(§8, 착수 브리프 필요), real embedding quality spike. embedding 이미지 CPU-only torch pin은 오너 지시로 최후순위(GPU 기본 유지). 운영 주의: `docker compose restart chroma application`은 `depends_on: service_healthy`를 보장하지 않아 application이 Chroma ready 전에 실패할 수 있다 — Chroma까지 재시작한 뒤 `docker compose -f docker-compose.yml -f docker-compose.llama.yml up -d application`처럼 health dependency를 다시 적용한다.
 4. **보류 계약층**: `/v1/generate-structured`(비용 확인으로 보류, adapter가 JSON 검증+1회 repair 소유), domain tool-call branch(상류 의존 해소 후), task별 `artifact_present`(payload schema 확정 시).
+5. **Phase 7(대화형 수정·아이디에이션·저작 감독) 계획 수립됨** — 신규 페이즈 계획 `plans/07-conversational-authoring.md`(아이디에이션 원본 `docs/chat-revision-ideation.md`). **순차 구현**이라 Phase 5(글 생성)·Phase 6(검토) 이후 착수하며, directive 감독면(P5)은 Phase 6와 공동 설계. 확정 결정 D1~D10·슬라이스 P1~P5는 계획 문서에 있고, 슬라이스별 착수 브리프는 구현 시점에. *지금 당장 착수 대상 아님(현재 실 타깃은 Next Tasks #1 후보 / 순차상 Phase 5·6 선행).*
 
 ## Verification
 

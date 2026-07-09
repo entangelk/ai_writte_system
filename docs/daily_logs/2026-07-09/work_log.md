@@ -122,3 +122,23 @@
 **재검증**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **689 passed / 45 skipped**(682 → +7: 증분2 +2[lexical transitioned·hybrid degradation] + 증분1 +5[worker builder×3·composite failure propagation·batch record_candidates enqueue]). mutation 양방향 4건(lexical needs_review 필터·ES needs_review 필터·G1 candidate collection·batch iteration early-return) 재실증. `git diff --check` clean.
 
 **커밋 분할(G0=A)**: 증분1(v1.6.54 색인 파이프라인, +23 회귀) → 증분2(v1.6.55 retriever + 전체 b-2 문서, +11 회귀) 2커밋. `main.py`만 양 증분에 걸쳐(reindex_outbox 배선=증분1 / retriever builder=증분2) hunk 분할; 나머지 문서(SoT·CHANGELOG·work_log·HANDOFF)는 증분2에 일괄.
+
+---
+
+## Phase 7 신규 기획 — 대화형 수정·아이디에이션·저작 감독 (docs 전용)
+
+레포를 다른 작업/검증 AI가 함께 쓰는 중이라 **docs 신규 문서 작성에만** 한정해 진행(코드·SoT·다른 AI 파일 무변).
+
+- **요청(오너 아이디어)**: 생성된 글에 대한 챗봇 확장 — (1) 부분 수정, (2) 아이디에이션 회의, (3) 저작 지시 메타데이터(맥거핀 use/skip·중요도), 내부 컨텍스트 제공은 동일, 분석에도 확장, 생성물은 메모리 캐시가 아닌 DB 단위 관리.
+- **진행**: 아이디에이션 문서 `docs/chat-revision-ideation.md` 신규 작성 → 오너와 3라운드 논의로 결정 잠금 → 정식 페이즈 `docs/plans/07-conversational-authoring.md`로 **승격**(plans/README 인덱스·Phase/MVP 표 갱신).
+- **잠긴 결정(D1~D10)**: 회의⟂수정 분리(advisory→patch 자동승격 금지) / 3계층 영속(version=명시 시그널) / think 채널 분리 / span⟂mode 직교 / 정보관리 대상=(b) 별개 개체 레지스트리(추출 3종 유지) / directive=저작 감독 모드(macro·micro, micro는 draft patch+memory atomic) / **서사 사실 우선순위 트리(저자 directive > canonical > candidate, latest-win)** / §7 경계(AI 자동 canon 확정 금지, 저자만 override)+Phase 6 공동설계 / importance≠confidence / Core SOT 앵커 계약 재사용.
+- **슬라이스**: P1 대화·생성물 영속 → P2 수정 → P5 저작 감독 → P3 아이디에이션 → P4 분석 대화. 순차상 Phase 5(생성)·6(검토) 이후 착수, 슬라이스별 착수 브리프는 구현 시점.
+- **검토에서 오너에게 surface한 것(CLAUDE.md §1)**: 분석대화(D)가 근거 없으면 저작 지시(E)로 흡수 / directive는 memory 버전 id 아닌 scope key에 앵커(append-only 고아 방지) / 분위기·톤은 개체 아님(scope key 부적합→scene/style 태그) / timeline은 회상 때문에 전순서 아님(chapter-scene 서수 proxy) / 감독 모드는 Phase 6 review와 중복(공동 설계).
+
+### User Decisions and Rationale (Phase 7 기획)
+
+- 오너가 신규 기능으로 "생성 글에 대한 대화형 부분수정·아이디에이션 + 저작 정보관리(맥거핀 등)"를 제시. 근거: 완전 재생성만 있는 현 구조에 반복 편집 루프가 필요하고, 그러려면 생성물이 DB 1급이어야 함.
+- **정보관리 대상 확장 = (b)**(별개 개체 레지스트리): 분석 추출 taxonomy 3종 축소(2A D5=A)를 다시 열지 않고 directive만 별도 레지스트리에 얹는다.
+- **directive = 저작 감독 모드 + 우선순위 트리**(오너 제안): "메모리가 메인, 저자가 저장 버전을 감독", latest-win이되 directive에 더 힘("글은 쓰면서 수정된다"). AI는 canon 자동 확정 불가(저자만 override).
+- **micro directive 원자성**: draft patch+memory 교정은 같은 것에서 파생이라 한 트랜잭션으로 묶는다.
+- **Phase 7로 승격 + 순차 구현**: 페이즈는 순차이므로 5→6→7 순서. 착수 브리프는 지금까지처럼 슬라이스별로.
