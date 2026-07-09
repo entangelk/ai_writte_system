@@ -32,6 +32,7 @@ from services.application.app.indexing.memory_lexical_index import (
     MemoryLexicalIndexSyncAdapter,
     MemoryLexicalRecord,
     build_memory_lexical_record,
+    connect_elasticsearch_memory_index,
     memory_lexical_text,
 )
 from services.application.app.indexing.service import (
@@ -176,6 +177,68 @@ class ElasticsearchAdapterTest(unittest.TestCase):
         adapter = ElasticsearchMemoryIndexAdapter(client, index_name="mem")
         # absent doc: must not raise (idempotent drain).
         adapter.delete_memory_record(project_id="project-1", memory_id="ghost")
+
+
+class ConnectElasticsearchTest(unittest.TestCase):
+    """The deploy connect_ path (b-5): the client must carry request_timeout so a
+    cold nori index create at app/worker boot does not flake on the stock 10s
+    timeout, and the nori index is created only when absent (idempotent)."""
+
+    class _FakeIndices:
+        def __init__(self, exists):
+            self._exists = exists
+            self.created = None
+
+        def exists(self, *, index):
+            return self._exists
+
+        def create(self, *, index, settings, mappings):
+            self.created = {"index": index, "settings": settings, "mappings": mappings}
+
+    class _FakeES:
+        instances = []
+
+        def __init__(self, url, *, request_timeout, exists=False):
+            self.url = url
+            self.request_timeout = request_timeout
+            self.indices = ConnectElasticsearchTest._FakeIndices(exists)
+            ConnectElasticsearchTest._FakeES.instances.append(self)
+
+    def _connect(self, *, exists, **kwargs):
+        from elasticsearch import Elasticsearch as _real  # noqa: F401
+        from unittest import mock
+
+        self._FakeES.instances = []
+
+        def factory(url, *, request_timeout):
+            return self._FakeES(url, request_timeout=request_timeout, exists=exists)
+
+        with mock.patch("elasticsearch.Elasticsearch", side_effect=factory):
+            connect_elasticsearch_memory_index(
+                url="http://es:9200", index_name="mem", **kwargs
+            )
+        return self._FakeES.instances[0]
+
+    def test_default_request_timeout_is_30_and_creates_nori_index_when_absent(self):
+        es = self._connect(exists=False)
+        self.assertEqual(es.request_timeout, 30)
+        self.assertIsNotNone(es.indices.created)
+        settings = es.indices.created["settings"]
+        # nori analyzer must be on the created index (Korean morphology).
+        self.assertEqual(
+            settings["analysis"], {"analyzer": {"korean": {"type": "nori"}}}
+        )
+        # single-node steady-state green: no replica shard to leave unassigned.
+        self.assertEqual(settings["number_of_replicas"], 0)
+
+    def test_request_timeout_is_plumbed_not_hardcoded(self):
+        # Over-strict guard: the param must reach the client, not a constant.
+        es = self._connect(exists=True, request_timeout=5)
+        self.assertEqual(es.request_timeout, 5)
+
+    def test_existing_index_is_not_recreated(self):
+        es = self._connect(exists=True)
+        self.assertIsNone(es.indices.created)
 
 
 class LexicalRetrieverTest(unittest.TestCase):

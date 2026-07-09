@@ -5,7 +5,7 @@
 
 ## Current Status
 
-- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.52**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
+- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.53**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
 - 개발 진입점은 `docs/plans/README.md`. `docs/` 루트의 설계 문서는 초기 아이디에이션 자료다.
 - 구현된 계층(모두 회귀로 잠김, 아래는 현재 동작하는 표면):
   - **LLM Gateway**: FastAPI shell(`/health/live`·`/health/ready`·`/v1/generate`), llama.cpp 호환 provider + httpx async adapter, provider error 5종→HTTP status 매핑.
@@ -15,8 +15,8 @@
   - **Memory(Phase 2B.1~2B.6)**: canonical `MemoryEntry` store + candidate 승격(수동/threshold), compare→ActionProposal→versioned upsert(append-only), compare judge(Gateway 1-turn), memory→vector 재색인(async outbox→worker), event/open_question semantic identity(off 기본).
   - **Indexing(Phase 3A/3B)**: source block index rebuild(HTTP/CLI/deployed smoke), index sync outbox + one-shot worker(archive drain + memory reindex drain).
   - **Context search(Phase 4)**: LLM planner + orchestration + Context Gate, HTTP API, 공유 in-process vector index, real Chroma+embedding 백엔드(env 구성 시), canonical memory 포함(⑤ §5 B) + `needs_review` candidate 포함(라벨·micro·권위필드 배제, Gate가 candidate origin만 예외 허용). canonical memory retrieval은 env로 backend 선택(v1.6.51/52): `CHROMA_HOST`+`EMBEDDING_SERVICE_URL` 시 `memory_vectors` **vector relevance**, `ELASTICSEARCH_URL` 시 **ES lexical(nori)**, 둘 다면 **hybrid(RRF)**, 없으면 Mongo-direct — 모두 권위는 Mongo 재유도(seam·item·Gate 불변). worker memory drain은 ES 구성 시 vector+lexical composite. candidate retrieval은 아직 Mongo-direct(색인 index 미존재).
-- **Compose 런타임**: base `docker-compose.yml`(application + Mongo replica set + gateway[외부 llama 클라이언트] + embedding + chroma). opt-in `docker-compose.llama.yml`로 in-stack llama.cpp GPU 서버(port 9080)를 띄운다. runbook: `docs/runbooks/local-llama-server.md`.
-- **테스트**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **651 passed / 45 skipped**(2026-07-08 기준). skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
+- **Compose 런타임**: base `docker-compose.yml`(application + Mongo replica set + gateway[외부 llama 클라이언트] + embedding + chroma + **elasticsearch**[nori, v1.6.53]). application에 `ELASTICSEARCH_URL` 배선 → 배포 canonical retriever 기본 = **hybrid(vector+lexical RRF)**. ES는 자체 `services/elasticsearch/Dockerfile`(공식 ES + analysis-nori, single-node·보안 off). opt-in `docker-compose.llama.yml`로 in-stack llama.cpp GPU 서버(port 9080)를 띄운다. runbook: `docs/runbooks/local-llama-server.md`. **worker(index 색인 적재 drain)는 compose 서비스가 아니다** — 수동/out-of-band 실행(Chroma memory reindex·ES lexical 색인 모두 동일; retriever는 인덱스 비어도 graceful).
+- **테스트**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **654 passed / 45 skipped**(2026-07-09 기준). skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
 
 ## Active Decisions
 
@@ -68,10 +68,10 @@
 
 ## Next Tasks
 
-1. **다음 구현 slice 선택**(각 후보는 착수 브리프 필요). Phase 2B(2B.1~2B.6) + ⑤ Writing canonical(v1.6.48)·candidate(v1.6.50) inclusion + canonical retrieval vector(v1.6.51)·ES lexical/hybrid RRF(v1.6.52)까지 관통 완료. 후보:
+1. **다음 구현 slice 선택**(각 후보는 착수 브리프 필요). Phase 2B(2B.1~2B.6) + ⑤ Writing canonical(v1.6.48)·candidate(v1.6.50) inclusion + canonical retrieval vector(v1.6.51)·ES lexical/hybrid RRF(v1.6.52) + compose 전용 ES 배포 서비스(v1.6.53)까지 관통 완료. 후보:
    - **(b-2) candidate lexical/vector retrieval** — candidate는 색인 index가 없어(memory_vectors/ES memory index는 canonical 전용) vector·lexical로 바로 못 바꾼다. candidate 색인 파이프라인(outbox→worker→candidate vector/lexical) 선행 후 같은 seam 확장.
    - **(b-4) hybrid 튜닝** — RRF k(현재 60)·per-signal 가중치·sub-retriever fetch depth를 실 데이터로 캘리브레이션.
-   - **(b-5) compose 전용 ES 서비스** — 배포용 ES를 `docker-compose.yml`에 추가(테스트는 기존 `tf-ai-harness-elasticsearch-step1` 9201/nori, 배포 ES는 별도). outbox per-target(ES) bookkeeping은 outbox multi-target 추적 확보 시.
+   - **(b-6) worker compose 서비스 / outbox per-target bookkeeping** — index_sync_worker drain을 compose로 올리려면 restart/loop·health·중복 실행 설계 필요(v1.6.53 G6 후속). ES sink를 persisted envelope에 명시 추적하려면 outbox multi-target status 확장(v1.6.52 정정 참조).
    - **(c) character 별칭/동명이인 semantic 보강**(2B.3 D2=A 확장).
    - **(d) conflict/merge/split review queue 영속화.**
    - **(e) canonical↔candidate semantic dedup**(v1.6.50 D7 후속 — 같은 지식이 승격 후 canonical·candidate 양쪽에 나타나는 것 정리; Phase 6 review 상태 전이와 함께 검토).
@@ -92,7 +92,7 @@
 ## Project Structure
 
 ```text
-docker-compose.yml               # base: application + Mongo replica set + gateway(외부 llama 클라이언트) + embedding + chroma
+docker-compose.yml               # base: application + Mongo replica set + gateway(외부 llama 클라이언트) + embedding + chroma + elasticsearch(nori)
 docker-compose.llama.yml         # opt-in override: in-stack llama.cpp GPU 서버(server-cuda, -hf 12B QAT, port 9080)
 .dockerignore / .gitignore
 docs/
@@ -109,6 +109,7 @@ docs/
 ├── daily_logs/2026-06-24 … 2026-07-08/work_log.md   # 상세 이력
 └── verifications/2026-06-24 … 2026-07-08/           # 독립 검증 기록
 services/
+├── elasticsearch/Dockerfile     # 배포 ES = 공식 ES 8.13.4 + analysis-nori(v1.6.53); compose build 컨텍스트
 ├── llm_gateway/app/             # main(shell) · payload · provider · errors · transport · client · httpx_transport
 ├── embedding/app/main.py        # FastAPI /embed·/health, dragonkue/BGE-m3-ko lazy 로드
 └── application/app/

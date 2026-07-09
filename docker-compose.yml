@@ -42,6 +42,10 @@ services:
       EMBEDDING_DIMENSIONS: "${EMBEDDING_DIMENSIONS:-1024}"
       CHROMA_HOST: "chroma"
       CHROMA_PORT: "8000"
+      # §8 lexical leg (v1.6.52): with Elasticsearch configured alongside the
+      # vector backend, the canonical memory retriever is hybrid (vector+lexical
+      # RRF). Without it the app falls back to vector-only / Mongo-direct.
+      ELASTICSEARCH_URL: "http://elasticsearch:9200"
     ports:
       - "${APPLICATION_PORT:-8000}:8000"
     depends_on:
@@ -52,6 +56,8 @@ services:
       embedding:
         condition: service_healthy
       chroma:
+        condition: service_healthy
+      elasticsearch:
         condition: service_healthy
     healthcheck:
       # The slim image has no curl; probe /health with stdlib urllib instead.
@@ -151,7 +157,41 @@ services:
       retries: 10
       start_period: 30s
 
+  elasticsearch:
+    # §8 lexical/hybrid backend: canonical memory nori (Korean) index. Built from
+    # the official image + analysis-nori (services/elasticsearch/Dockerfile). The
+    # code connects plaintext without auth, so security is disabled — this is the
+    # local single-user MVP posture (matches the test container); enabling auth is
+    # a separate slice that needs client credential wiring.
+    build:
+      context: .
+      dockerfile: services/elasticsearch/Dockerfile
+      args:
+        ELASTICSEARCH_VERSION: "${ELASTICSEARCH_VERSION:-8.13.4}"
+    environment:
+      discovery.type: "single-node"
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "${ELASTICSEARCH_JAVA_OPTS:--Xms512m -Xmx512m}"
+    ports:
+      - "${ELASTICSEARCH_PORT:-9200}:9200"
+    volumes:
+      # Persist the lexical index across container recreation. Like Chroma it is a
+      # derived index rebuildable from Mongo, but keeping it avoids a reindex on
+      # every restart.
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      # The ES image ships curl (no python); probe cluster health. A 200 (green or
+      # yellow — single-node leaves replicas unassigned = yellow) means responsive.
+      test:
+        - "CMD-SHELL"
+        - "curl -sf http://localhost:9200/_cluster/health || exit 1"
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
 volumes:
   mongo_data:
   embedding_cache:
   chroma_data:
+  es_data:

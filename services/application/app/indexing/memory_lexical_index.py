@@ -225,8 +225,15 @@ class ElasticsearchMemoryIndexAdapter:
 # Elasticsearch index definition: nori (Korean morphological) analyzer on
 # ``text``, keyword filters on the metadata. Split into settings/mappings for the
 # 8.x indices.create kwargs. Used by connect_... and the live smoke.
+#
+# ``number_of_replicas: 0``: the deploy is single-node (discovery.type=single-node),
+# so a default replica shard can never be allocated and the cluster would sit
+# perpetually yellow once this index exists. The lexical index is derived and
+# rebuildable from Mongo (SoT §166), so no replica is needed for durability;
+# 0 keeps the single-node cluster steady-state green.
 ELASTICSEARCH_MEMORY_SETTINGS: dict[str, Any] = {
-    "analysis": {"analyzer": {"korean": {"type": "nori"}}}
+    "number_of_replicas": 0,
+    "analysis": {"analyzer": {"korean": {"type": "nori"}}},
 }
 ELASTICSEARCH_MEMORY_MAPPINGS: dict[str, Any] = {
     "properties": {
@@ -282,15 +289,20 @@ class MemoryLexicalIndexSyncAdapter:
 
 
 def connect_elasticsearch_memory_index(
-    *, url: str, index_name: str
+    *, url: str, index_name: str, request_timeout: int = 30
 ) -> ElasticsearchMemoryIndexAdapter:
     """Lazily build a real ES adapter, creating the nori index if it is absent.
 
     ``elasticsearch`` is imported here so unconfigured environments/tests never
-    need the package (mirrors chroma.connect_chroma_collection)."""
+    need the package (mirrors chroma.connect_chroma_collection).
+
+    ``request_timeout`` (default 30s) covers the cold nori index create at
+    startup: the client's stock 10s timeout can be exceeded by the ~4s create
+    under load, so app/worker boot would otherwise flake (the live smoke was
+    hardened the same way)."""
     from elasticsearch import Elasticsearch  # lazy: optional dependency
 
-    client = Elasticsearch(url)
+    client = Elasticsearch(url, request_timeout=request_timeout)
     if not client.indices.exists(index=index_name):
         client.indices.create(
             index=index_name,
