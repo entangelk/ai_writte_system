@@ -82,10 +82,13 @@ from services.application.app.context_search.service import (
     ContextSearchService,
     InvalidContextSearchRequest,
     HybridCanonicalMemoryRetriever,
+    HybridCandidateMemoryRetriever,
     LexicalCanonicalMemoryRetriever,
+    LexicalCandidateMemoryRetriever,
     MongoDirectCanonicalMemoryRetriever,
     MongoDirectCandidateMemoryRetriever,
     VectorCanonicalMemoryRetriever,
+    VectorCandidateMemoryRetriever,
     evaluate_context_gate,
 )
 from services.application.app.core_sot.service import (
@@ -109,6 +112,7 @@ from services.application.app.indexing.service import (
 )
 from services.application.app.indexing.chroma import (
     DEFAULT_COLLECTION_NAME,
+    ChromaCandidateVectorIndexAdapter,
     ChromaMemoryVectorIndexAdapter,
     ChromaVectorIndexAdapter,
     connect_chroma_collection,
@@ -118,6 +122,13 @@ from services.application.app.indexing.memory_index import MEMORY_VECTOR_COLLECT
 from services.application.app.indexing.memory_lexical_index import (
     MEMORY_LEXICAL_INDEX,
     connect_elasticsearch_memory_index,
+)
+from services.application.app.indexing.candidate_index import (
+    CANDIDATE_VECTOR_COLLECTION,
+)
+from services.application.app.indexing.candidate_lexical_index import (
+    CANDIDATE_LEXICAL_INDEX,
+    connect_elasticsearch_candidate_index,
 )
 from services.application.app.analysis.semantic_matcher import (
     EmbeddingSemanticMatcher,
@@ -163,12 +174,20 @@ def _default_core_sot_service() -> CoreSotService:
     return CoreSotService(repository)
 
 
-def _default_analysis_service(core_sot: CoreSotService) -> AnalysisService:
+def _default_analysis_service(
+    core_sot: CoreSotService,
+    *,
+    reindex_outbox: "IndexSyncOutboxService | None" = None,
+) -> AnalysisService:
+    # b-2 (G2): recording a needs_review candidate enqueues a CANDIDATE_UPSERTED
+    # index sync through the shared outbox; the worker drains it into the
+    # candidate index. An injected analysis_service (tests) keeps its own wiring.
     uri = os.environ.get("CORE_SOT_MONGO_URI")
     if not uri:
         return AnalysisService(
             InMemoryAnalysisRepository(),
             source_ref_resolver=CoreSotSourceAdapter(core_sot),
+            reindex_outbox=reindex_outbox,
         )
 
     # Imported lazily so the in-memory path needs no pymongo install.
@@ -188,6 +207,7 @@ def _default_analysis_service(core_sot: CoreSotService) -> AnalysisService:
     return AnalysisService(
         repository,
         source_ref_resolver=CoreSotSourceAdapter(core_sot),
+        reindex_outbox=reindex_outbox,
     )
 
 
@@ -419,9 +439,10 @@ def _default_context_search_service(
         # vector retrieval over memory_vectors when the shared collection exists,
         # else Mongo-direct. The item/Gate authority re-derivation is unchanged.
         canonical_memory_retriever=_build_canonical_memory_retriever(memory),
-        # Writing candidate inclusion (⑤ §5 B follow-up, D2=A): Mongo-direct
-        # retrieval of needs_review candidates, labeled candidate at the Gate.
-        candidate_memory_retriever=MongoDirectCandidateMemoryRetriever(analysis),
+        # Writing candidate inclusion (⑤ §5 B follow-up): vector/lexical/hybrid
+        # over the candidate index when configured, else Mongo-direct. Labeled
+        # candidate at the Gate; the authority re-derivation is unchanged (b-2).
+        candidate_memory_retriever=_build_candidate_memory_retriever(analysis),
     )
 
 
@@ -483,6 +504,64 @@ def _build_lexical_canonical_retriever(memory: MemoryService):
     )
     return LexicalCanonicalMemoryRetriever(
         memory_service=memory, lexical_index=lexical_index
+    )
+
+
+def _build_candidate_memory_retriever(analysis: AnalysisService):
+    # b-2: candidate retrieval backend, chosen by the same env switches as the
+    # canonical path — vector over candidate_vectors, lexical over the ES candidate
+    # index, both fused by RRF when configured, else the deterministic Mongo-direct
+    # listing. The item/Gate authority re-derivation is identical for every backend.
+    vector = _build_vector_candidate_retriever(analysis)
+    lexical = _build_lexical_candidate_retriever(analysis)
+    if vector is not None and lexical is not None:
+        return HybridCandidateMemoryRetriever(
+            vector_retriever=vector, lexical_retriever=lexical
+        )
+    if vector is not None:
+        return vector
+    if lexical is not None:
+        return lexical
+    return MongoDirectCandidateMemoryRetriever(analysis)
+
+
+def _build_vector_candidate_retriever(analysis: AnalysisService):
+    # Symmetric to _build_vector_canonical_retriever: needs a real Chroma
+    # collection and a real embedding service (fake dims do not match), else None.
+    host = os.environ.get("CHROMA_HOST")
+    if not host or not os.environ.get("EMBEDDING_SERVICE_URL"):
+        return None
+    vector_index = ChromaCandidateVectorIndexAdapter(
+        connect_chroma_collection(
+            host=host,
+            port=int(os.environ.get("CHROMA_PORT", "8000")),
+            collection_name=os.environ.get(
+                "CHROMA_CANDIDATE_COLLECTION", CANDIDATE_VECTOR_COLLECTION
+            ),
+        )
+    )
+    return VectorCandidateMemoryRetriever(
+        analysis_service=analysis,
+        embeddings=_build_embedding_provider(),
+        vector_index=vector_index,
+    )
+
+
+def _build_lexical_candidate_retriever(analysis: AnalysisService):
+    # b-2 lexical leg: the Elasticsearch candidate index when ELASTICSEARCH_URL is
+    # set. The real ES client is imported lazily inside connect_..., so
+    # unconfigured environments never need the package.
+    url = os.environ.get("ELASTICSEARCH_URL")
+    if not url:
+        return None
+    lexical_index = connect_elasticsearch_candidate_index(
+        url=url,
+        index_name=os.environ.get(
+            "ELASTICSEARCH_CANDIDATE_INDEX", CANDIDATE_LEXICAL_INDEX
+        ),
+    )
+    return LexicalCandidateMemoryRetriever(
+        analysis_service=analysis, lexical_index=lexical_index
     )
 
 
@@ -585,8 +664,10 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="AI Writing System Application")
     core_sot = service or _default_core_sot_service()
-    analysis = analysis_service or _default_analysis_service(core_sot)
     sync_outbox = index_sync_outbox or _default_index_sync_outbox_service()
+    analysis = analysis_service or _default_analysis_service(
+        core_sot, reindex_outbox=sync_outbox
+    )
     # Phase 2B.5 (D3=B): the default memory service enqueues a MEMORY_UPSERTED
     # reindex on every canonical mint (manual promote / auto-promote / apply
     # versioned upsert) through the shared index-sync outbox; the index-sync

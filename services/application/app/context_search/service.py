@@ -41,6 +41,7 @@ from services.application.app.context_search.models import (
     StepFailure,
 )
 from services.application.app.indexing.models import (
+    CandidateIndexRecord,
     IndexPointer,
     MemoryIndexRecord,
     SourceBlockIndexRecord,
@@ -51,6 +52,12 @@ from services.application.app.indexing.memory_index import (
 )
 from services.application.app.indexing.memory_lexical_index import (
     MemoryLexicalIndexAdapter,
+)
+from services.application.app.indexing.candidate_index import (
+    CandidateVectorIndexAdapter,
+)
+from services.application.app.indexing.candidate_lexical_index import (
+    CandidateLexicalIndexAdapter,
 )
 from services.application.app.indexing.service import (
     EmbeddingProvider,
@@ -322,10 +329,12 @@ class CandidateMemoryRetriever(Protocol):
     """Writing candidate inclusion retrieval seam (⑤ §5 B follow-up, D2).
 
     Returns ``needs_review`` candidate records to surface as *labeled* Writing
-    evidence. Mongo-direct now; a later vector/search-engine layer implements
-    the same method (retrieval finds the ids, the analysis store stays the
-    authority) without changing item or Gate logic. See docs/plans/
-    04-writing-candidate-context-decisions.md (D2=A).
+    evidence. The backend is chosen by env (v1.6.54/55): vector/lexical/hybrid
+    over the candidate index when configured, else Mongo-direct listing. Every
+    backend finds candidate ids then re-derives authority from the analysis
+    store (only ``needs_review`` survivors ground) without changing item or Gate
+    logic. See docs/plans/04-writing-candidate-context-decisions.md (D2=A) and
+    04-writing-candidate-retrieval-decisions.md.
     """
 
     def retrieve(
@@ -350,6 +359,166 @@ class MongoDirectCandidateMemoryRetriever:
             project_id=project_id
         )
         return tuple(candidates[:limit])
+
+
+class VectorCandidateMemoryRetriever:
+    """b-2: relevance-ranked candidate retrieval over ``candidate_vectors``.
+
+    Symmetric to ``VectorCanonicalMemoryRetriever``: vector similarity finds the
+    ids, and the analysis store stays the authority (each hit is reloaded via
+    ``get_candidate`` and only ``needs_review`` survivors are returned). A stale
+    vector (a removed/transitioned candidate whose vector lingers before the
+    reindex drain catches up) is dropped here. The ``.retrieve()`` seam and
+    return type are identical, so step/item/Gate logic is unchanged."""
+
+    _CANDIDATE_TYPES: tuple[AnalysisCandidateType, ...] = tuple(AnalysisCandidateType)
+
+    def __init__(
+        self,
+        *,
+        analysis_service: AnalysisService,
+        embeddings: EmbeddingProvider,
+        vector_index: CandidateVectorIndexAdapter,
+    ) -> None:
+        self._analysis = analysis_service
+        self._embeddings = embeddings
+        self._vector_index = vector_index
+
+    def retrieve(
+        self, *, project_id: str, query: str, limit: int
+    ) -> tuple[AnalysisCandidate, ...]:
+        vector = self._embeddings.embed(query)
+        hits: list[CandidateIndexRecord] = []
+        for candidate_type in self._CANDIDATE_TYPES:
+            hits.extend(
+                self._vector_index.query_similar(
+                    project_id=project_id,
+                    candidate_type=candidate_type.value,
+                    vector=vector,
+                    limit=limit,
+                )
+            )
+        candidates: list[AnalysisCandidate] = []
+        for hit in self._merge_hits(hits, vector):
+            candidate = self._resolve_needs_review(project_id, hit.candidate_id)
+            if candidate is not None:
+                candidates.append(candidate)
+            if len(candidates) >= limit:
+                break
+        return tuple(candidates)
+
+    def _resolve_needs_review(
+        self, project_id: str, candidate_id: str
+    ) -> AnalysisCandidate | None:
+        try:
+            candidate = self._analysis.get_candidate(
+                project_id=project_id, candidate_id=candidate_id
+            )
+        except AnalysisNotFound:
+            # The vector outlived its candidate (removed before drain); skip it.
+            return None
+        if candidate.status is not AnalysisCandidateStatus.NEEDS_REVIEW:
+            return None
+        return candidate
+
+    def _merge_hits(
+        self, hits: list[CandidateIndexRecord], vector: tuple[float, ...]
+    ) -> list[CandidateIndexRecord]:
+        # MVP: merge every type's hits into one pool ranked by cosine similarity,
+        # id as a deterministic tie-break — symmetric to the canonical retriever's
+        # single-pool merge (isolated so a per-type strategy can replace it).
+        return sorted(
+            hits,
+            key=lambda hit: (-_cosine_similarity(vector, hit.vector), hit.id),
+        )
+
+
+class LexicalCandidateMemoryRetriever:
+    """b-2: BM25/nori keyword candidate retrieval over the Elasticsearch candidate
+    index. Symmetric to ``LexicalCanonicalMemoryRetriever`` — the lexical index
+    finds the ids, the analysis store stays the authority (a hit is reloaded via
+    ``get_candidate`` before it can ground), and only ``needs_review`` survivors
+    are returned. The ``.retrieve()`` seam and return type are identical."""
+
+    def __init__(
+        self,
+        *,
+        analysis_service: AnalysisService,
+        lexical_index: CandidateLexicalIndexAdapter,
+    ) -> None:
+        self._analysis = analysis_service
+        self._lexical = lexical_index
+
+    def retrieve(
+        self, *, project_id: str, query: str, limit: int
+    ) -> tuple[AnalysisCandidate, ...]:
+        hits = self._lexical.search(
+            project_id=project_id, query=query, limit=limit
+        )
+        candidates: list[AnalysisCandidate] = []
+        for hit in hits:
+            candidate = self._resolve_needs_review(project_id, hit.candidate_id)
+            if candidate is not None:
+                candidates.append(candidate)
+        return tuple(candidates)
+
+    def _resolve_needs_review(
+        self, project_id: str, candidate_id: str
+    ) -> AnalysisCandidate | None:
+        try:
+            candidate = self._analysis.get_candidate(
+                project_id=project_id, candidate_id=candidate_id
+            )
+        except AnalysisNotFound:
+            return None
+        if candidate.status is not AnalysisCandidateStatus.NEEDS_REVIEW:
+            return None
+        return candidate
+
+
+class HybridCandidateMemoryRetriever:
+    """b-2: Reciprocal Rank Fusion of the vector and lexical candidate retrievers.
+
+    Symmetric to ``HybridCanonicalMemoryRetriever``: each sub-retriever returns a
+    ranked, authority-resolved (needs_review-only) candidate list; RRF fuses by
+    rank (``1/(k + rank)``) keyed by candidate id. Authority re-derivation already
+    happened inside each sub-retriever, so fusion is a pure rank merge."""
+
+    def __init__(
+        self,
+        *,
+        vector_retriever: CandidateMemoryRetriever,
+        lexical_retriever: CandidateMemoryRetriever,
+        rrf_k: int = DEFAULT_RRF_K,
+    ) -> None:
+        self._vector = vector_retriever
+        self._lexical = lexical_retriever
+        self._rrf_k = rrf_k
+
+    def retrieve(
+        self, *, project_id: str, query: str, limit: int
+    ) -> tuple[AnalysisCandidate, ...]:
+        ranked_lists = (
+            self._vector.retrieve(
+                project_id=project_id, query=query, limit=limit
+            ),
+            self._lexical.retrieve(
+                project_id=project_id, query=query, limit=limit
+            ),
+        )
+        scores: dict[str, float] = {}
+        candidates: dict[str, AnalysisCandidate] = {}
+        for ranked in ranked_lists:
+            for rank, candidate in enumerate(ranked):
+                scores[candidate.id] = scores.get(candidate.id, 0.0) + 1.0 / (
+                    self._rrf_k + rank + 1
+                )
+                candidates.setdefault(candidate.id, candidate)
+        fused = sorted(
+            candidates.values(),
+            key=lambda candidate: (-scores[candidate.id], candidate.id),
+        )
+        return tuple(fused[:limit])
 
 
 def estimate_tokens(text: str) -> int:
