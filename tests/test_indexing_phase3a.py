@@ -9,7 +9,6 @@ from services.application.app.core_sot.service import (
     InMemoryCoreSotRepository,
 )
 from services.application.app.indexing.models import (
-    IndexSyncBackend,
     IndexSyncErrorType,
     IndexSyncEvent,
     IndexSyncLastError,
@@ -20,7 +19,6 @@ from services.application.app.indexing.models import (
     IndexSyncTarget,
 )
 from services.application.app.indexing.service import (
-    CHROMA_TARGET,
     DeterministicFakeEmbeddingProvider,
     DerivedIndexRecordNotFound,
     DRAFTS_COLLECTION,
@@ -257,7 +255,7 @@ class IndexSyncOutboxServiceTest(unittest.TestCase):
             {event.value for event in IndexSyncEvent},
         )
 
-    def test_project_archive_creates_pending_chroma_outbox_entry(self):
+    def test_project_archive_creates_sink_agnostic_pending_outbox_entry(self):
         repo = InMemoryIndexSyncRepository()
         service = IndexSyncOutboxService(repo)
 
@@ -275,15 +273,9 @@ class IndexSyncOutboxServiceTest(unittest.TestCase):
         self.assertEqual(INDEX_SYNC_MAX_ATTEMPTS, 3)
         self.assertIsNone(entry.next_attempt_at)
         self.assertIsNone(entry.last_error)
-        self.assertEqual(set(entry.targets), {CHROMA_TARGET})
-        self.assertEqual(
-            entry.targets[CHROMA_TARGET].status,
-            IndexSyncStatus.PENDING,
-        )
-        self.assertEqual(
-            entry.targets[CHROMA_TARGET].backend,
-            IndexSyncBackend.IN_MEMORY_FAKE,
-        )
+        # b-6 증분2: enqueue is sink-agnostic — the worker materializes per-sink
+        # targets on claim, so the entry starts with no targets.
+        self.assertEqual(entry.targets, {})
 
     def test_draft_archive_creates_distinct_dedup_source(self):
         service = IndexSyncOutboxService(InMemoryIndexSyncRepository())

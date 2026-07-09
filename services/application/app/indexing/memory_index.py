@@ -24,8 +24,11 @@ from typing import Any, Mapping, Protocol
 from services.application.app.analysis.models import AnalysisCandidateType
 from services.application.app.indexing.models import (
     IndexRecordKind,
+    IndexSyncErrorType,
+    IndexSyncLastError,
     IndexSyncOutboxEntry,
     MemoryIndexRecord,
+    SinkOutcome,
 )
 from services.application.app.indexing.service import _cosine_similarity
 from services.application.app.memory.models import MemoryEntry, MemoryStatus
@@ -200,13 +203,41 @@ class MemoryIndexSyncAdapter:
 
 class CompositeMemoryIndexSyncAdapter:
     """Fan a MEMORY_UPSERTED drain out to every configured memory sink (vector +
-    lexical), so one outbox entry keeps both indexes current. Each sink's
-    ``index_memory`` is idempotent, so a replay after a partial failure re-drains
-    both; if any sink raises, the entry fails and requeues (worker contract)."""
+    lexical), so one outbox entry keeps both indexes current (b-6 증분2).
 
-    def __init__(self, adapters: tuple[object, ...]) -> None:
-        self._adapters = tuple(adapters)
+    Each sink is named ``(target, backend, adapter)`` — e.g. ``("vector",
+    "chroma", ...)`` / ``("lexical", "elasticsearch", ...)`` — and each
+    ``index_memory`` is idempotent. ``drain`` runs every sink NOT already in
+    ``skip`` (targets that reached SUCCESS on a prior attempt) under try/except and
+    returns one ``SinkOutcome`` per sink, so the worker records per-sink state and
+    a persistently-down sink no longer poisons a healthy one (G4=B)."""
 
-    def index_memory(self, entry: IndexSyncOutboxEntry) -> None:
-        for adapter in self._adapters:
-            adapter.index_memory(entry)
+    def __init__(self, sinks: tuple[tuple[str, str, Any], ...]) -> None:
+        self._sinks = tuple(sinks)
+
+    def drain(
+        self, entry: IndexSyncOutboxEntry, *, skip: frozenset[str]
+    ) -> tuple[SinkOutcome, ...]:
+        outcomes: list[SinkOutcome] = []
+        for target, backend, adapter in self._sinks:
+            if target in skip:
+                continue
+            try:
+                adapter.index_memory(entry)
+            except Exception as exc:  # per-sink isolation (G4=B)
+                outcomes.append(
+                    SinkOutcome(
+                        target=target,
+                        backend=backend,
+                        ok=False,
+                        error=IndexSyncLastError(
+                            error_type=IndexSyncErrorType.BACKEND_ERROR,
+                            detail=str(exc),
+                        ),
+                    )
+                )
+            else:
+                outcomes.append(
+                    SinkOutcome(target=target, backend=backend, ok=True, error=None)
+                )
+        return tuple(outcomes)

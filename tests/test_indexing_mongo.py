@@ -22,14 +22,12 @@ except ImportError:
     _PYMONGO_AVAILABLE = False
 
 from services.application.app.indexing.models import (
-    IndexSyncBackend,
     IndexSyncErrorType,
     IndexSyncEvent,
     IndexSyncSource,
     IndexSyncStatus,
 )
 from services.application.app.indexing.service import (
-    CHROMA_TARGET,
     DRAFTS_COLLECTION,
     INDEX_SYNC_CLAIM_TIMEOUT_SECONDS,
     INDEX_SYNC_MAX_ATTEMPTS,
@@ -102,11 +100,8 @@ class MongoIndexSyncOutboxSmokeTests(unittest.TestCase):
         self.assertEqual(entry.max_attempts, INDEX_SYNC_MAX_ATTEMPTS)
         self.assertIsNone(entry.next_attempt_at)
         self.assertIsNone(entry.last_error)
-        self.assertEqual(
-            entry.targets[CHROMA_TARGET].backend,
-            IndexSyncBackend.IN_MEMORY_FAKE,
-        )
-        self.assertEqual(entry.targets[CHROMA_TARGET].status, IndexSyncStatus.PENDING)
+        # b-6 증분2: enqueue is sink-agnostic — empty targets round-trip through Mongo.
+        self.assertEqual(entry.targets, {})
 
     def test_repeated_project_archive_replays_same_live_outbox_document(self):
         first = self.service.enqueue_project_archived(project_id="project-1")
@@ -140,7 +135,7 @@ class MongoIndexSyncOutboxSmokeTests(unittest.TestCase):
 
         self.assertEqual(recovered, entry)
         self.assertEqual(entry.status, IndexSyncStatus.PENDING)
-        self.assertEqual(entry.targets[CHROMA_TARGET].status, IndexSyncStatus.PENDING)
+        self.assertEqual(entry.targets, {})
 
 
 class _FailingArchiveAdapter:

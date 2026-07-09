@@ -17,9 +17,12 @@ if __package__ in {None, ""}:
 from services.application.app.indexing.service import (
     CHROMA_VECTOR_BACKEND,
     DeterministicFakeEmbeddingProvider,
+    ELASTICSEARCH_BACKEND,
     FAKE_VECTOR_BACKEND,
     IndexSyncWorker,
+    LEXICAL_TARGET,
     RecordingArchiveIndexMutationAdapter,
+    VECTOR_TARGET,
 )
 from services.application.app.indexing.memory_index import (
     InMemoryMemoryVectorIndexAdapter,
@@ -69,7 +72,7 @@ def _build_embedding_provider():
 
 def _build_memory_adapter(
     *, mongo_uri: str, mongo_db: str
-) -> tuple[MemoryIndexSyncAdapter, str]:
+) -> tuple[object, str]:
     # Phase 2B.5 (D3=B): the memory-reindex side of the worker. Loads the memory a
     # MEMORY_UPSERTED entry points at (Mongo-backed) and reindexes it into the
     # memory_vectors collection — real Chroma when CHROMA_HOST is set, else the
@@ -103,16 +106,20 @@ def _build_memory_adapter(
             )
         )
         backend = CHROMA_VECTOR_BACKEND
+    from services.application.app.indexing.memory_index import (
+        CompositeMemoryIndexSyncAdapter,
+    )
+
     adapter = MemoryIndexSyncAdapter(
         memory_service=memory, embeddings=embeddings, vector_index=vector_index
     )
+    # b-6 증분2: always a composite (named sinks) so the worker records per-sink
+    # state uniformly — a single vector sink, or vector + lexical when ES is set.
+    sinks: list[tuple[str, str, object]] = [(VECTOR_TARGET, backend, adapter)]
     # §8 lexical leg: when ELASTICSEARCH_URL is set, fan the memory drain out to
     # the Elasticsearch index alongside the vector index so both stay current.
     es_url = os.environ.get("ELASTICSEARCH_URL")
     if es_url:
-        from services.application.app.indexing.memory_index import (
-            CompositeMemoryIndexSyncAdapter,
-        )
         from services.application.app.indexing.memory_lexical_index import (
             MEMORY_LEXICAL_INDEX,
             MemoryLexicalIndexSyncAdapter,
@@ -128,11 +135,12 @@ def _build_memory_adapter(
                 ),
             ),
         )
+        sinks.append((LEXICAL_TARGET, ELASTICSEARCH_BACKEND, lexical_adapter))
         return (
-            CompositeMemoryIndexSyncAdapter((adapter, lexical_adapter)),
+            CompositeMemoryIndexSyncAdapter(tuple(sinks)),
             f"{backend}+elasticsearch",
         )
-    return adapter, backend
+    return CompositeMemoryIndexSyncAdapter(tuple(sinks)), backend
 
 
 def _build_candidate_adapter(
@@ -179,14 +187,17 @@ def _build_candidate_adapter(
             )
         )
         backend = CHROMA_VECTOR_BACKEND
+    from services.application.app.indexing.candidate_index import (
+        CompositeCandidateIndexSyncAdapter,
+    )
+
     adapter = CandidateIndexSyncAdapter(
         analysis_service=analysis, embeddings=embeddings, vector_index=vector_index
     )
+    # b-6 증분2: always a composite (named sinks), mirroring the memory leg.
+    sinks: list[tuple[str, str, object]] = [(VECTOR_TARGET, backend, adapter)]
     es_url = os.environ.get("ELASTICSEARCH_URL")
     if es_url:
-        from services.application.app.indexing.candidate_index import (
-            CompositeCandidateIndexSyncAdapter,
-        )
         from services.application.app.indexing.candidate_lexical_index import (
             CANDIDATE_LEXICAL_INDEX,
             CandidateLexicalIndexSyncAdapter,
@@ -202,11 +213,12 @@ def _build_candidate_adapter(
                 ),
             ),
         )
+        sinks.append((LEXICAL_TARGET, ELASTICSEARCH_BACKEND, lexical_adapter))
         return (
-            CompositeCandidateIndexSyncAdapter((adapter, lexical_adapter)),
+            CompositeCandidateIndexSyncAdapter(tuple(sinks)),
             f"{backend}+elasticsearch",
         )
-    return adapter, backend
+    return CompositeCandidateIndexSyncAdapter(tuple(sinks)), backend
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

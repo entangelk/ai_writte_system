@@ -30,7 +30,10 @@ from services.application.app.indexing.memory_index import (
 from services.application.app.indexing.models import (
     CandidateIndexRecord,
     IndexRecordKind,
+    IndexSyncErrorType,
+    IndexSyncLastError,
     IndexSyncOutboxEntry,
+    SinkOutcome,
 )
 from services.application.app.indexing.service import _cosine_similarity
 
@@ -188,13 +191,39 @@ class CandidateIndexSyncAdapter:
 
 class CompositeCandidateIndexSyncAdapter:
     """Fan a CANDIDATE_UPSERTED drain out to every configured candidate sink
-    (vector + lexical), so one outbox entry keeps both indexes current. Each
-    sink's ``index_candidate`` is idempotent, so a replay after a partial failure
-    re-drains both; if any sink raises, the entry fails and requeues."""
+    (vector + lexical), so one outbox entry keeps both indexes current (b-6 증분2).
 
-    def __init__(self, adapters: tuple[Any, ...]) -> None:
-        self._adapters = tuple(adapters)
+    Named-sink mirror of ``CompositeMemoryIndexSyncAdapter``: each sink is
+    ``(target, backend, adapter)`` and ``drain`` runs every sink NOT in ``skip``
+    under try/except, returning a per-sink ``SinkOutcome`` so the worker tracks a
+    per-sink retry budget (G4=B)."""
 
-    def index_candidate(self, entry: IndexSyncOutboxEntry) -> None:
-        for adapter in self._adapters:
-            adapter.index_candidate(entry)
+    def __init__(self, sinks: tuple[tuple[str, str, Any], ...]) -> None:
+        self._sinks = tuple(sinks)
+
+    def drain(
+        self, entry: IndexSyncOutboxEntry, *, skip: frozenset[str]
+    ) -> tuple[SinkOutcome, ...]:
+        outcomes: list[SinkOutcome] = []
+        for target, backend, adapter in self._sinks:
+            if target in skip:
+                continue
+            try:
+                adapter.index_candidate(entry)
+            except Exception as exc:  # per-sink isolation (G4=B)
+                outcomes.append(
+                    SinkOutcome(
+                        target=target,
+                        backend=backend,
+                        ok=False,
+                        error=IndexSyncLastError(
+                            error_type=IndexSyncErrorType.BACKEND_ERROR,
+                            detail=str(exc),
+                        ),
+                    )
+                )
+            else:
+                outcomes.append(
+                    SinkOutcome(target=target, backend=backend, ok=True, error=None)
+                )
+        return tuple(outcomes)

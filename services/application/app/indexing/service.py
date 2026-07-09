@@ -5,13 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 import hashlib
 import math
 from typing import Callable, Protocol
 
 from services.application.app.core_sot.service import CoreSotService, NotFound
 from services.application.app.indexing.models import (
-    IndexSyncBackend,
     IndexSyncErrorType,
     IndexSyncEvent,
     IndexSyncLastError,
@@ -27,6 +27,7 @@ from services.application.app.indexing.models import (
     IndexSyncStatus,
     IndexSyncTarget,
     IndexSyncTargetState,
+    SinkOutcome,
     SourceBlockIndexRecord,
 )
 
@@ -41,7 +42,16 @@ PROJECTS_COLLECTION = "projects"
 DRAFTS_COLLECTION = "drafts"
 MEMORIES_COLLECTION = "memory_entries"
 CANDIDATES_COLLECTION = "analysis_candidates"
-CHROMA_TARGET = "chroma"
+# b-6 증분2: free-form per-sink target keys (G6=A — no new SoT enum literal). The
+# worker materializes these on the outbox entry when it drains a composite sink.
+VECTOR_TARGET = "vector"
+LEXICAL_TARGET = "lexical"
+ELASTICSEARCH_BACKEND = "elasticsearch"
+# Events whose drain fans out to per-sink (vector + lexical) bookkeeping. Archive
+# events stay on the single-sink whole-event path (only a vector sink exists).
+_PER_SINK_EVENTS = frozenset(
+    {IndexSyncEvent.MEMORY_UPSERTED, IndexSyncEvent.CANDIDATE_UPSERTED}
+)
 
 
 class EmbeddingProvider(Protocol):
@@ -57,11 +67,18 @@ class ArchiveIndexMutationAdapter(Protocol):
 
 
 class MemoryIndexMutationAdapter(Protocol):
-    def index_memory(self, entry: IndexSyncOutboxEntry) -> None: ...
+    # b-6 증분2: the composite drains every configured sink and reports a
+    # SinkOutcome per sink; ``skip`` holds targets that already reached SUCCESS on
+    # a prior attempt so a replay does not re-index a healthy sink (G4=B).
+    def drain(
+        self, entry: IndexSyncOutboxEntry, *, skip: frozenset[str]
+    ) -> tuple[SinkOutcome, ...]: ...
 
 
 class CandidateIndexMutationAdapter(Protocol):
-    def index_candidate(self, entry: IndexSyncOutboxEntry) -> None: ...
+    def drain(
+        self, entry: IndexSyncOutboxEntry, *, skip: frozenset[str]
+    ) -> tuple[SinkOutcome, ...]: ...
 
 
 class IndexSyncRepository(Protocol):
@@ -92,6 +109,7 @@ class IndexSyncRepository(Protocol):
         *,
         started_at: datetime,
         finished_at: datetime,
+        targets: dict[str, IndexSyncTargetState] | None = None,
     ) -> IndexSyncLog: ...
 
     def record_outbox_failure(
@@ -101,6 +119,8 @@ class IndexSyncRepository(Protocol):
         error: IndexSyncLastError,
         started_at: datetime,
         finished_at: datetime,
+        targets: dict[str, IndexSyncTargetState] | None = None,
+        terminal: bool | None = None,
     ) -> IndexSyncLog: ...
 
 
@@ -172,6 +192,7 @@ class InMemoryIndexSyncRepository:
         *,
         started_at: datetime,
         finished_at: datetime,
+        targets: dict[str, IndexSyncTargetState] | None = None,
     ) -> IndexSyncLog:
         log = _sync_log(
             repository=self,
@@ -181,6 +202,7 @@ class InMemoryIndexSyncRepository:
             error=None,
             started_at=started_at,
             finished_at=finished_at,
+            targets=targets,
         )
         self._remove_outbox_entry(entry)
         self.logs.append(log)
@@ -193,9 +215,16 @@ class InMemoryIndexSyncRepository:
         error: IndexSyncLastError,
         started_at: datetime,
         finished_at: datetime,
+        targets: dict[str, IndexSyncTargetState] | None = None,
+        terminal: bool | None = None,
     ) -> IndexSyncLog:
+        # b-6 증분2: per-sink callers pass merged ``targets`` + a worker-computed
+        # ``terminal`` (all sinks SUCCESS or per-sink-max FAILED). The single-sink
+        # archive path passes neither and keeps whole-event attempt-count DLQ.
         attempt_count = entry.attempt_count + 1
-        terminal = attempt_count >= entry.max_attempts
+        effective_targets = targets if targets is not None else entry.targets
+        if terminal is None:
+            terminal = attempt_count >= entry.max_attempts
         log = _sync_log(
             repository=self,
             entry=entry,
@@ -204,6 +233,7 @@ class InMemoryIndexSyncRepository:
             error=error,
             started_at=started_at,
             finished_at=finished_at,
+            targets=effective_targets,
         )
         self.logs.append(log)
         if terminal:
@@ -217,6 +247,7 @@ class InMemoryIndexSyncRepository:
             + timedelta(seconds=_backoff_seconds(attempt_count)),
             claimed_at=None,
             last_error=error,
+            targets=effective_targets,
         )
         self.outbox_entries[retry.sync_request_id] = retry
         return log
@@ -360,12 +391,10 @@ class IndexSyncOutboxService:
             user_id=None,
             event=event,
             source=source,
-            targets={
-                CHROMA_TARGET: IndexSyncTargetState(
-                    status=IndexSyncStatus.PENDING,
-                    backend=IndexSyncBackend.IN_MEMORY_FAKE,
-                )
-            },
+            # b-6 증분2 (step 2): enqueue stays sink-agnostic — the choke point
+            # cannot know which sinks the deployment configured, so it leaves
+            # targets empty and the worker materializes per-sink state on claim.
+            targets={},
             status=IndexSyncStatus.PENDING,
             attempt_count=0,
             max_attempts=INDEX_SYNC_MAX_ATTEMPTS,
@@ -437,36 +466,17 @@ class IndexSyncWorker:
             if entry is None:
                 break
             claimed += 1
-            try:
-                self._process_entry(entry)
-            except DerivedIndexRecordNotFound:
-                self._repo.record_outbox_success(
-                    entry,
-                    started_at=clock,
-                    finished_at=clock,
-                )
-                succeeded += 1
-            except Exception as exc:
-                will_requeue = entry.attempt_count + 1 < entry.max_attempts
-                self._repo.record_outbox_failure(
-                    entry,
-                    error=IndexSyncLastError(
-                        error_type=IndexSyncErrorType.BACKEND_ERROR,
-                        detail=str(exc),
-                    ),
-                    started_at=clock,
-                    finished_at=clock,
-                )
-                failed += 1
-                if will_requeue:
-                    requeued += 1
+            if entry.event in _PER_SINK_EVENTS:
+                disposition = self._drain_sinks(entry, clock)
             else:
-                self._repo.record_outbox_success(
-                    entry,
-                    started_at=clock,
-                    finished_at=clock,
-                )
+                disposition = self._drain_archive(entry, clock)
+            if disposition is _Disposition.SUCCEEDED:
                 succeeded += 1
+            elif disposition is _Disposition.REQUEUED:
+                failed += 1
+                requeued += 1
+            else:
+                failed += 1
         return IndexSyncWorkerSummary(
             entries_claimed=claimed,
             entries_succeeded=succeeded,
@@ -474,28 +484,85 @@ class IndexSyncWorker:
             entries_requeued=requeued,
         )
 
-    def _process_entry(self, entry: IndexSyncOutboxEntry) -> None:
-        if entry.event in {
-            IndexSyncEvent.PROJECT_ARCHIVED,
-            IndexSyncEvent.DRAFT_ARCHIVED,
-        }:
+    def _drain_archive(
+        self, entry: IndexSyncOutboxEntry, clock: datetime
+    ) -> "_Disposition":
+        # Single-sink whole-event path (only a vector sink exists for archive):
+        # unchanged from before b-6 증분2.
+        try:
             self._archive_adapter.mark_archived(entry)
-            return
-        if entry.event is IndexSyncEvent.MEMORY_UPSERTED:
-            if self._memory_adapter is None:
-                raise RuntimeError(
-                    "memory index adapter is not configured for MEMORY_UPSERTED"
-                )
-            self._memory_adapter.index_memory(entry)
-            return
-        if entry.event is IndexSyncEvent.CANDIDATE_UPSERTED:
-            if self._candidate_adapter is None:
-                raise RuntimeError(
-                    "candidate index adapter is not configured for CANDIDATE_UPSERTED"
-                )
-            self._candidate_adapter.index_candidate(entry)
-            return
-        raise RuntimeError(f"unsupported index sync event: {entry.event.value}")
+        except DerivedIndexRecordNotFound:
+            self._repo.record_outbox_success(
+                entry, started_at=clock, finished_at=clock
+            )
+            return _Disposition.SUCCEEDED
+        except Exception as exc:
+            will_requeue = entry.attempt_count + 1 < entry.max_attempts
+            self._repo.record_outbox_failure(
+                entry,
+                error=_backend_error(exc),
+                started_at=clock,
+                finished_at=clock,
+            )
+            return _Disposition.REQUEUED if will_requeue else _Disposition.FAILED
+        self._repo.record_outbox_success(entry, started_at=clock, finished_at=clock)
+        return _Disposition.SUCCEEDED
+
+    def _drain_sinks(
+        self, entry: IndexSyncOutboxEntry, clock: datetime
+    ) -> "_Disposition":
+        # Per-sink path (b-6 증분2, G3=B/G4=B): the composite drains every
+        # configured sink except those that already reached SUCCESS, and reports a
+        # SinkOutcome per sink. The worker merges these into per-sink target state
+        # (each sink carries its own attempt_count), then deletes the entry only
+        # when every sink is terminal (SUCCESS, or FAILED at its own max) so one
+        # persistently-down sink never poisons a healthy one.
+        adapter = (
+            self._memory_adapter
+            if entry.event is IndexSyncEvent.MEMORY_UPSERTED
+            else self._candidate_adapter
+        )
+        if adapter is None:
+            will_requeue = entry.attempt_count + 1 < entry.max_attempts
+            self._repo.record_outbox_failure(
+                entry,
+                error=IndexSyncLastError(
+                    error_type=IndexSyncErrorType.BACKEND_ERROR,
+                    detail=f"index adapter is not configured for {entry.event.value}",
+                ),
+                started_at=clock,
+                finished_at=clock,
+            )
+            return _Disposition.REQUEUED if will_requeue else _Disposition.FAILED
+
+        skip = frozenset(
+            target
+            for target, state in entry.targets.items()
+            if state.status is IndexSyncStatus.SUCCESS
+        )
+        outcomes = adapter.drain(entry, skip=skip)
+        targets = _merge_target_states(entry, outcomes)
+        # On the per-sink path the terminal/requeue decision is driven entirely by
+        # per-sink state (``_classify_targets``); the entry-level attempt_count that
+        # ``record_outbox_failure`` still bumps only feeds the requeue backoff — it
+        # no longer gates DLQ (that is each sink's own budget). ``terminal`` is
+        # always passed explicitly so the whole-event max-attempts fallback (archive
+        # only) never fires here.
+        disposition, error = _classify_targets(targets, entry.max_attempts)
+        if disposition is _Disposition.SUCCEEDED:
+            self._repo.record_outbox_success(
+                entry, started_at=clock, finished_at=clock, targets=targets
+            )
+            return _Disposition.SUCCEEDED
+        self._repo.record_outbox_failure(
+            entry,
+            error=error,
+            started_at=clock,
+            finished_at=clock,
+            targets=targets,
+            terminal=disposition is _Disposition.FAILED,
+        )
+        return disposition
 
 
 @dataclass(frozen=True, slots=True)
@@ -747,6 +814,72 @@ def _backoff_seconds(attempt_count: int) -> int:
     return INDEX_SYNC_BACKOFF_SECONDS[index]
 
 
+class _Disposition(Enum):
+    """Outcome of draining one outbox entry, driving the worker summary counters."""
+
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    REQUEUED = "requeued"
+
+
+def _backend_error(exc: Exception) -> IndexSyncLastError:
+    return IndexSyncLastError(
+        error_type=IndexSyncErrorType.BACKEND_ERROR,
+        detail=str(exc),
+    )
+
+
+def _merge_target_states(
+    entry: IndexSyncOutboxEntry, outcomes: tuple[SinkOutcome, ...]
+) -> dict[str, IndexSyncTargetState]:
+    # Carry forward frozen SUCCESS sinks (they were skipped this pass), then fold in
+    # this pass's outcomes — each sink's attempt_count advances on its own budget.
+    merged = dict(entry.targets)
+    for outcome in outcomes:
+        prior = entry.targets.get(outcome.target)
+        prior_attempts = prior.attempt_count if prior is not None else 0
+        merged[outcome.target] = IndexSyncTargetState(
+            status=(
+                IndexSyncStatus.SUCCESS if outcome.ok else IndexSyncStatus.FAILED
+            ),
+            backend=outcome.backend,
+            attempt_count=prior_attempts + 1,
+            last_error=None if outcome.ok else outcome.error,
+        )
+    return merged
+
+
+def _classify_targets(
+    targets: dict[str, IndexSyncTargetState], max_attempts: int
+) -> tuple[_Disposition, IndexSyncLastError | None]:
+    # A missing/empty target set means there is nothing to keep retrying — drop it
+    # (should not happen: a composite always has at least one sink).
+    if not targets or all(
+        state.status is IndexSyncStatus.SUCCESS for state in targets.values()
+    ):
+        return _Disposition.SUCCEEDED, None
+    error = next(
+        (
+            state.last_error
+            for state in targets.values()
+            if state.status is IndexSyncStatus.FAILED and state.last_error is not None
+        ),
+        None,
+    )
+    if all(_sink_terminal(state, max_attempts) for state in targets.values()):
+        return _Disposition.FAILED, error
+    return _Disposition.REQUEUED, error
+
+
+def _sink_terminal(state: IndexSyncTargetState, max_attempts: int) -> bool:
+    if state.status is IndexSyncStatus.SUCCESS:
+        return True
+    return (
+        state.status is IndexSyncStatus.FAILED
+        and state.attempt_count >= max_attempts
+    )
+
+
 def _sync_log(
     *,
     repository: IndexSyncRepository,
@@ -756,6 +889,7 @@ def _sync_log(
     error: IndexSyncLastError | None,
     started_at: datetime,
     finished_at: datetime,
+    targets: dict[str, IndexSyncTargetState] | None = None,
 ) -> IndexSyncLog:
     return IndexSyncLog(
         sync_log_id=repository.next_sync_log_id(),
@@ -764,7 +898,7 @@ def _sync_log(
         user_id=entry.user_id,
         event=entry.event,
         source=entry.source,
-        targets=entry.targets,
+        targets=targets if targets is not None else entry.targets,
         status=status,
         attempt_count=attempt_count,
         error=error,

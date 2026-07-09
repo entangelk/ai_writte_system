@@ -20,6 +20,7 @@ from services.application.app.analysis.models import (
     AnalysisProvenance,
 )
 from services.application.app.indexing.memory_index import (
+    CompositeMemoryIndexSyncAdapter,
     InMemoryMemoryVectorIndexAdapter,
     MemoryIndexSyncAdapter,
     build_memory_index_record,
@@ -32,10 +33,20 @@ from services.application.app.indexing.models import (
 )
 from services.application.app.indexing.service import (
     DeterministicFakeEmbeddingProvider,
+    FAKE_VECTOR_BACKEND,
     InMemoryIndexSyncRepository,
     IndexSyncOutboxService,
     IndexSyncWorker,
+    VECTOR_TARGET,
 )
+
+
+def _memory_composite(adapter):
+    # b-6 증분2: the worker drains memory events through a composite of named
+    # sinks; a single vector sink mirrors the no-Elasticsearch deployment.
+    return CompositeMemoryIndexSyncAdapter(
+        ((VECTOR_TARGET, FAKE_VECTOR_BACKEND, adapter),)
+    )
 from services.application.app.memory.models import (
     MemoryEntry,
     MemoryStatus,
@@ -98,10 +109,12 @@ def _wire():
     worker = IndexSyncWorker(
         repository=repo,
         archive_adapter=object(),  # never reached for memory events
-        memory_adapter=MemoryIndexSyncAdapter(
-            memory_service=memory,
-            embeddings=DeterministicFakeEmbeddingProvider(),
-            vector_index=vector_index,
+        memory_adapter=_memory_composite(
+            MemoryIndexSyncAdapter(
+                memory_service=memory,
+                embeddings=DeterministicFakeEmbeddingProvider(),
+                vector_index=vector_index,
+            )
         ),
     )
     return memory, apply_service, repo, worker, vector_index
@@ -380,7 +393,9 @@ class WorkerIndexTest(unittest.TestCase):
             project_id="project-1", memory_id="ghost", version=1
         )
         worker = IndexSyncWorker(
-            repository=repo, archive_adapter=object(), memory_adapter=adapter
+            repository=repo,
+            archive_adapter=object(),
+            memory_adapter=_memory_composite(adapter),
         )
         summary = worker.run_once(limit=5)
         self.assertEqual(summary.entries_succeeded, 1)
@@ -409,7 +424,7 @@ class WorkerIndexTest(unittest.TestCase):
         self.assertEqual(
             entry.last_error.error_type, IndexSyncErrorType.BACKEND_ERROR
         )
-        self.assertIn("memory index adapter is not configured", entry.last_error.detail)
+        self.assertIn("index adapter is not configured", entry.last_error.detail)
 
     def test_reindex_is_idempotent(self):
         _memory, apply_service, _repo, worker, vector_index = _wire()

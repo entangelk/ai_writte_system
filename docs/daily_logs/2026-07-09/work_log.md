@@ -187,3 +187,31 @@
 - **오너 결정 대기**: (1) 6-1 방향 확정(finish-in-flight = a 확정), (2) SoT v1.6.56 bump + CHANGELOG 타이밍(즉시 vs 증분2 일괄 — b-2 선례는 증분2 일괄).
 - **증분2(v1.6.57, G3=B/G4=B per-sink bookkeeping)**: `IndexSyncTargetState` per-sink `attempt_count`/`last_error` 확장 + composite all-or-nothing→per-sink outcome 전환 + worker claim 시 sink target materialize·갱신 + **all-terminal 시 entry 삭제** + per-sink 재시도 예산 + dedup 조정 + `test_sink_failure_propagates_not_swallowed` 재방문.
 - **실 배포 관통(sandbox 밖)**: 전체 스택 기동 시 worker 서비스가 hybrid composite drain으로 실 `memory_lexical`/`candidate_lexical`을 채우는 end-to-end.
+
+## (b-6) 증분2 — outbox per-sink bookkeeping (SoT v1.6.57)
+
+### 배경/성격
+
+- 브리프 `plans/04-worker-compose-outbox-bookkeeping-decisions.md`(Resolved) 잠긴 결정 **G3=B / G4=B / G6=A**로 오너 재확인 없이 착수. v1.6.52/54가 두 번 미룬 per-target bookkeeping를 해소하는 슬라이스.
+- **핵심 사실(검증 확정)**: outbox `targets` 필드는 이미 존재·round-trip 되나 **inert**였다 — `record_outbox_success`=entry 즉시 삭제, `record_outbox_failure`=whole-event `$set`, 어느 쪽도 `targets[].status`를 전이하지 않음. 따라서 이 증분은 "필드 신설"이 아니라 "inert 표면을 worker가 실제로 갱신하도록 wire-up"이다.
+- **성격**: 성공-경로 dedup 의미가 "성공=즉시 삭제"에서 "all-terminal 삭제"로 이동하고 `IndexSyncRepository` Protocol에 per-target 표면이 추가됨(changelog 대상). **새 SoT public literal 없음**(G6=A — 내부 `IndexSyncStatus` + free-form target key `"vector"`/`"lexical"` 재사용). enqueue의 sink-agnosticism은 targets를 빈 dict로 두고 worker가 claim 시 configured sink를 materialize하는 것으로 보존.
+
+### 구현
+
+- `indexing/models.py`: `IndexSyncTargetState`에 per-sink `attempt_count`/`last_error` 추가, `backend`를 `IndexSyncBackend`→`str` 완화(ES `"elasticsearch"` 허용, enum member 미추가). 신설 `SinkOutcome`(target/backend/ok/error). `IndexSyncLastError`를 `IndexSyncTargetState` 위로 이동(참조 순서).
+- `indexing/service.py`: 상수 `VECTOR_TARGET`/`LEXICAL_TARGET`/`ELASTICSEARCH_BACKEND`·`_PER_SINK_EVENTS`. `_enqueue_event`가 placeholder targets → **빈 dict**. `IndexSyncWorker.run_once`가 event 종류로 분기 — `_drain_archive`(단일-sink whole-event, 종전 동작 보존) vs `_drain_sinks`(per-sink). `_drain_sinks`는 `skip=SUCCESS targets` 계산 → `adapter.drain(entry, skip=)` → `_merge_target_states`(SUCCESS sink 동결·outcome sink attempt_count+1) → `_classify_targets`(all-SUCCESS=삭제 / all-terminal=삭제 / else=requeue). `record_outbox_success`/`record_outbox_failure`에 `targets`/`terminal` optional 인자 추가(archive는 미전달 후진호환). `_Disposition` enum·`_backend_error` 헬퍼. `CHROMA_TARGET` 상수·`IndexSyncBackend` import 제거(내 변경이 만든 orphan).
+- `indexing/memory_index.py`·`candidate_index.py`: composite 생성자가 `(target, backend, adapter)` named sink 튜플을 받고, `index_memory`/`index_candidate`(all-or-nothing raise) → `drain(entry, *, skip)`(각 sink try/except → `SinkOutcome` tuple, skip된 SUCCESS sink 미실행)으로 전환.
+- `indexing/mongo_repository.py`: `_target_state_doc`/`_to_target_state` str backend·attempt_count·last_error round-trip; `record_outbox_success`/`record_outbox_failure` per-sink(targets/terminal) 지원, failure requeue 시 `targets` `$set` 영속. `IndexSyncBackend` import 제거.
+- `scripts/index_sync_worker.py`: `_build_memory_adapter`/`_build_candidate_adapter`가 ES 무관 **항상 composite**(단일 vector sink or vector+lexical, named sink) 반환 → worker가 per-sink를 균일 처리.
+
+### 회귀
+
+- `tests/test_candidate_index.py`: `test_sink_failure_propagates_not_swallowed`(all-or-nothing propagate) → `test_sink_failure_is_isolated_not_swallowed_not_propagated`(per-sink 격리 — healthy ok=True·failing ok=False+BACKEND_ERROR, 양방향). 신설 `test_drain_skips_already_succeeded_targets`(over-strict: skip된 sink 미실행). 신설 `PerSinkBookkeepingTest`: (1) failing lexical이 자기만 requeue하며 per-sink attempt 1→2→3, healthy vector는 **미재색인**(calls==1), attempt 3==max에서 all-terminal → entry 삭제(under+over-strict); (2) transient 실패가 복구되면 all-SUCCESS로 entry 삭제(DLQ 아님). WorkerDispatch는 composite 경유로 갱신 + all-success 삭제 확인.
+- enqueue 빈 targets: `test_indexing_phase3a`(assert `targets == {}`)·`test_indexing_mongo`(Mongo round-trip 빈 targets). composite drain: `test_context_search_memory_lexical_retrieval`. builder 항상-composite: `test_index_sync_worker_script`(vector leaf = `_sinks[0][2]`, named sink identity). worker construction: `test_memory_vector_index`(`_memory_composite` 헬퍼로 래핑).
+- `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **703 passed / 45 skipped**, `git diff --check` clean.
+
+### 수용 한계 / Next steps (b-6)
+
+- **ES-lexical backfill 부재**: backfill(`phase2b5_reindex_memory.py`)은 vector-only. G4-B 아래 per-sink-max로 terminal drop된 ES 실패는 수렴 수단이 없다(accepted limitation) — ES-lexical backfill 스크립트는 별도 후속.
+- **실 배포 per-sink 관통(sandbox 밖)**: 전체 스택에서 한 sink만 죽였을 때 outbox `targets`가 per-sink 상태를 반영하고 healthy sink가 재색인되지 않는지 end-to-end 확인.
+- commit-후-enqueue skew(transaction 부재)는 증분2가 넓히지 않음(빈 targets는 enqueue를 더 단순하게 함).

@@ -69,15 +69,34 @@ class IndexSyncSource:
 
 
 @dataclass(frozen=True, slots=True)
-class IndexSyncTargetState:
-    status: IndexSyncStatus
-    backend: IndexSyncBackend
-
-
-@dataclass(frozen=True, slots=True)
 class IndexSyncLastError:
     error_type: IndexSyncErrorType
     detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class IndexSyncTargetState:
+    # b-6 증분2 (G3=B/G4=B): one sink's state inside a multi-sink drain. ``backend``
+    # is a free-form string (not ``IndexSyncBackend``) so a lexical sink can record
+    # ``"elasticsearch"`` without a new SoT enum literal (G6=A). ``attempt_count`` /
+    # ``last_error`` give each sink its own retry budget, so a persistently-down
+    # sink no longer poisons a healthy one.
+    status: IndexSyncStatus
+    backend: str
+    attempt_count: int = 0
+    last_error: IndexSyncLastError | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SinkOutcome:
+    """Result of draining one named sink (b-6 증분2). The composite adapters run
+    each configured sink under try/except and return one of these per sink so the
+    worker can materialize per-sink target state on the outbox entry."""
+
+    target: str
+    backend: str
+    ok: bool
+    error: IndexSyncLastError | None
 
 
 @dataclass(frozen=True, slots=True)

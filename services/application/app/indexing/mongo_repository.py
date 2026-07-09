@@ -10,7 +10,6 @@ from pymongo.errors import DuplicateKeyError, OperationFailure
 
 from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
 from services.application.app.indexing.models import (
-    IndexSyncBackend,
     IndexSyncEvent,
     IndexSyncLastError,
     IndexSyncLog,
@@ -158,6 +157,7 @@ class MongoIndexSyncRepository:
         *,
         started_at: datetime,
         finished_at: datetime,
+        targets: dict[str, IndexSyncTargetState] | None = None,
     ) -> IndexSyncLog:
         log = _sync_log(
             repository=self,
@@ -167,6 +167,7 @@ class MongoIndexSyncRepository:
             error=None,
             started_at=started_at,
             finished_at=finished_at,
+            targets=targets,
         )
         self._logs.insert_one(_log_doc(log))
         self._outbox.delete_one({"_id": entry.sync_request_id})
@@ -179,8 +180,16 @@ class MongoIndexSyncRepository:
         error: IndexSyncLastError,
         started_at: datetime,
         finished_at: datetime,
+        targets: dict[str, IndexSyncTargetState] | None = None,
+        terminal: bool | None = None,
     ) -> IndexSyncLog:
+        # b-6 증분2: per-sink callers pass merged ``targets`` + a worker-computed
+        # ``terminal`` (all sinks SUCCESS or per-sink-max FAILED). The single-sink
+        # archive path passes neither and keeps whole-event attempt-count DLQ.
         attempt_count = entry.attempt_count + 1
+        effective_targets = targets if targets is not None else entry.targets
+        if terminal is None:
+            terminal = attempt_count >= entry.max_attempts
         log = _sync_log(
             repository=self,
             entry=entry,
@@ -189,9 +198,10 @@ class MongoIndexSyncRepository:
             error=error,
             started_at=started_at,
             finished_at=finished_at,
+            targets=effective_targets,
         )
         self._logs.insert_one(_log_doc(log))
-        if attempt_count >= entry.max_attempts:
+        if terminal:
             self._outbox.delete_one({"_id": entry.sync_request_id})
             return log
         self._outbox.update_one(
@@ -204,6 +214,10 @@ class MongoIndexSyncRepository:
                     + timedelta(seconds=_backoff_seconds(attempt_count)),
                     "claimed_at": None,
                     "last_error": _last_error_doc(error),
+                    "targets": {
+                        name: _target_state_doc(target)
+                        for name, target in effective_targets.items()
+                    },
                 }
             },
         )
@@ -244,9 +258,18 @@ def _source_doc(source: IndexSyncSource) -> dict:
 
 
 def _target_state_doc(target: IndexSyncTargetState) -> dict:
+    # b-6 증분2: backend is a free-form string and each sink carries its own
+    # attempt_count / last_error so a partial-failure replay re-drains only the
+    # failed sink.
     return {
         "status": target.status.value,
-        "backend": target.backend.value,
+        "backend": target.backend,
+        "attempt_count": target.attempt_count,
+        "last_error": (
+            _last_error_doc(target.last_error)
+            if target.last_error is not None
+            else None
+        ),
     }
 
 
@@ -292,7 +315,13 @@ def _to_source(doc: dict) -> IndexSyncSource:
 def _to_target_state(doc: dict) -> IndexSyncTargetState:
     return IndexSyncTargetState(
         status=IndexSyncStatus(doc["status"]),
-        backend=IndexSyncBackend(doc["backend"]),
+        backend=doc["backend"],
+        attempt_count=doc.get("attempt_count", 0),
+        last_error=(
+            _to_last_error(doc["last_error"])
+            if doc.get("last_error") is not None
+            else None
+        ),
     )
 
 
@@ -322,6 +351,7 @@ def _sync_log(
     error: IndexSyncLastError | None,
     started_at: datetime,
     finished_at: datetime,
+    targets: dict[str, IndexSyncTargetState] | None = None,
 ) -> IndexSyncLog:
     return IndexSyncLog(
         sync_log_id=repository.next_sync_log_id(),
@@ -330,7 +360,7 @@ def _sync_log(
         user_id=entry.user_id,
         event=entry.event,
         source=entry.source,
-        targets=entry.targets,
+        targets=targets if targets is not None else entry.targets,
         status=status,
         attempt_count=attempt_count,
         error=error,

@@ -7,8 +7,13 @@ enqueue (idempotent replay) and a missing self-heal (stale vector/doc left
 behind) both re-fail.
 """
 
+from datetime import datetime, timezone
 import types
 import unittest
+
+
+def _utc(*args):
+    return datetime(*args, tzinfo=timezone.utc)
 
 from services.application.app.analysis.models import (
     AnalysisCandidate,
@@ -44,17 +49,22 @@ from services.application.app.indexing.chroma import (
 from services.application.app.indexing.models import (
     CandidateIndexRecord,
     IndexRecordKind,
+    IndexSyncErrorType,
     IndexSyncEvent,
     IndexSyncOutboxEntry,
     IndexSyncSource,
     IndexSyncStatus,
 )
 from services.application.app.indexing.service import (
+    CHROMA_VECTOR_BACKEND,
     DeterministicFakeEmbeddingProvider,
+    ELASTICSEARCH_BACKEND,
     InMemoryIndexSyncRepository,
     IndexSyncOutboxService,
     IndexSyncWorker,
+    LEXICAL_TARGET,
     RecordingArchiveIndexMutationAdapter,
+    VECTOR_TARGET,
 )
 
 CHARACTER = AnalysisCandidateType.CHARACTER_OBSERVATION
@@ -533,32 +543,73 @@ class ElasticsearchCandidateAdapterTest(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 # Composite fan-out + worker dispatch
 # --------------------------------------------------------------------------- #
+class _RecordingSink:
+    def __init__(self, *, fail=False):
+        self.calls = 0
+        self.fail = fail
+
+    def index_candidate(self, entry):
+        self.calls += 1
+        if self.fail:
+            raise RuntimeError("sink down")
+
+
+def _composite(*sinks):
+    return CompositeCandidateIndexSyncAdapter(tuple(sinks))
+
+
 class CompositeDrainTest(unittest.TestCase):
-    def test_fans_out_to_every_sink(self):
-        calls = []
+    def test_drain_fans_out_to_every_sink_and_reports_ok_outcomes(self):
+        vector = _RecordingSink()
+        lexical = _RecordingSink()
+        outcomes = _composite(
+            (VECTOR_TARGET, CHROMA_VECTOR_BACKEND, vector),
+            (LEXICAL_TARGET, ELASTICSEARCH_BACKEND, lexical),
+        ).drain(_entry(), skip=frozenset())
 
-        class _Sink:
-            def __init__(self, name):
-                self.name = name
-
-            def index_candidate(self, entry):
-                calls.append(self.name)
-
-        CompositeCandidateIndexSyncAdapter((_Sink("v"), _Sink("l"))).index_candidate(
-            _entry()
+        self.assertEqual((vector.calls, lexical.calls), (1, 1))
+        self.assertEqual(
+            [(o.target, o.backend, o.ok) for o in outcomes],
+            [
+                (VECTOR_TARGET, CHROMA_VECTOR_BACKEND, True),
+                (LEXICAL_TARGET, ELASTICSEARCH_BACKEND, True),
+            ],
         )
-        self.assertEqual(calls, ["v", "l"])
 
-    def test_sink_failure_propagates_not_swallowed(self):
-        # under-strict: a sink that raises must propagate so the worker marks the
-        # entry failed+requeued — it must NOT be silently swallowed (which would
-        # leave the entry "succeeded" with one sink stale).
-        class _Boom:
-            def index_candidate(self, entry):
-                raise RuntimeError("sink down")
+    def test_sink_failure_is_isolated_not_swallowed_not_propagated(self):
+        # b-6 증분2 re-lock (was all-or-nothing propagate): a raising sink is
+        # neither propagated (which would fail the whole event, re-indexing a
+        # healthy sink) nor swallowed as success. It becomes a FAILED SinkOutcome
+        # so the worker retries only that sink. Two-directional: the healthy
+        # co-sink still reports ok=True (isolation up), the failing sink reports
+        # ok=False + BACKEND_ERROR (isolation down).
+        healthy = _RecordingSink()
+        broken = _RecordingSink(fail=True)
+        outcomes = _composite(
+            (VECTOR_TARGET, CHROMA_VECTOR_BACKEND, healthy),
+            (LEXICAL_TARGET, ELASTICSEARCH_BACKEND, broken),
+        ).drain(_entry(), skip=frozenset())
 
-        with self.assertRaises(RuntimeError):
-            CompositeCandidateIndexSyncAdapter((_Boom(),)).index_candidate(_entry())
+        by_target = {o.target: o for o in outcomes}
+        self.assertTrue(by_target[VECTOR_TARGET].ok)
+        self.assertFalse(by_target[LEXICAL_TARGET].ok)
+        self.assertEqual(
+            by_target[LEXICAL_TARGET].error.error_type,
+            IndexSyncErrorType.BACKEND_ERROR,
+        )
+
+    def test_drain_skips_already_succeeded_targets(self):
+        # over-strict: a target listed in ``skip`` (it reached SUCCESS on a prior
+        # attempt) must NOT be re-run, so a replay never re-indexes a healthy sink.
+        vector = _RecordingSink()
+        lexical = _RecordingSink(fail=True)
+        outcomes = _composite(
+            (VECTOR_TARGET, CHROMA_VECTOR_BACKEND, vector),
+            (LEXICAL_TARGET, ELASTICSEARCH_BACKEND, lexical),
+        ).drain(_entry(), skip=frozenset({VECTOR_TARGET}))
+
+        self.assertEqual(vector.calls, 0)
+        self.assertEqual([o.target for o in outcomes], [LEXICAL_TARGET])
 
 
 class WorkerDispatchTest(unittest.TestCase):
@@ -573,7 +624,7 @@ class WorkerDispatchTest(unittest.TestCase):
             archive_adapter=RecordingArchiveIndexMutationAdapter(),
             candidate_adapter=candidate_adapter,
         )
-        return worker
+        return repo, worker
 
     def test_candidate_upserted_dispatches_to_candidate_adapter(self):
         seen = []
@@ -582,15 +633,113 @@ class WorkerDispatchTest(unittest.TestCase):
             def index_candidate(self, entry):
                 seen.append(entry.source.mongo_id)
 
-        summary = self._worker(_Adapter()).run_once(limit=10)
+        repo, worker = self._worker(
+            _composite((VECTOR_TARGET, CHROMA_VECTOR_BACKEND, _Adapter()))
+        )
+        summary = worker.run_once(limit=10)
         self.assertEqual(seen, ["cand-1"])  # single entry (deduped)
         self.assertEqual(summary.entries_succeeded, 1)
+        self.assertEqual(repo.outbox_entries, {})  # all-success deletes the entry
 
     def test_unconfigured_candidate_adapter_fails_entry(self):
-        summary = self._worker(None).run_once(limit=10)
+        _repo, worker = self._worker(None)
+        summary = worker.run_once(limit=10)
         # missing adapter must fail the entry, not silently succeed.
         self.assertEqual(summary.entries_succeeded, 0)
         self.assertEqual(summary.entries_failed, 1)
+
+
+class PerSinkBookkeepingTest(unittest.TestCase):
+    """b-6 증분2 (G3=B/G4=B): the core new behavior — one down sink must not poison
+    a healthy one, each sink carries its own retry budget, and the entry is deleted
+    only when every sink is terminal."""
+
+    def _wire(self, vector, lexical):
+        repo = InMemoryIndexSyncRepository()
+        outbox = IndexSyncOutboxService(repo)
+        outbox.enqueue_candidate_upserted(project_id="project-1", candidate_id="cand-1")
+        worker = IndexSyncWorker(
+            repository=repo,
+            archive_adapter=RecordingArchiveIndexMutationAdapter(),
+            candidate_adapter=_composite(
+                (VECTOR_TARGET, CHROMA_VECTOR_BACKEND, vector),
+                (LEXICAL_TARGET, ELASTICSEARCH_BACKEND, lexical),
+            ),
+        )
+        return repo, worker
+
+    def _entry_now(self, repo):
+        return next(iter(repo.outbox_entries.values()))
+
+    def test_failing_sink_requeues_only_itself_until_per_sink_max(self):
+        vector = _RecordingSink()
+        lexical = _RecordingSink(fail=True)
+        repo, worker = self._wire(vector, lexical)
+
+        # Pass 1: vector SUCCESS, lexical FAILED → entry requeued (not deleted),
+        # per-sink state materialized.
+        s1 = worker.run_once(limit=1, now=_utc(2026, 7, 9, 12, 0, 0))
+        self.assertEqual((s1.entries_failed, s1.entries_requeued), (1, 1))
+        entry = self._entry_now(repo)
+        self.assertEqual(entry.targets[VECTOR_TARGET].status, IndexSyncStatus.SUCCESS)
+        self.assertEqual(entry.targets[LEXICAL_TARGET].status, IndexSyncStatus.FAILED)
+        self.assertEqual(entry.targets[LEXICAL_TARGET].attempt_count, 1)
+
+        # Pass 2: vector is SUCCESS so it is skipped (over-strict: healthy sink not
+        # re-indexed); only lexical retries → attempt 2, still requeued.
+        worker.run_once(limit=1, now=_utc(2026, 7, 9, 12, 5, 0))
+        entry = self._entry_now(repo)
+        self.assertEqual(vector.calls, 1)  # NOT re-indexed
+        self.assertEqual(entry.targets[LEXICAL_TARGET].attempt_count, 2)
+
+        # Pass 3: lexical fails a third time → per-sink max (3) reached → every
+        # target terminal → entry deleted (all-terminal deletion).
+        s3 = worker.run_once(limit=1, now=_utc(2026, 7, 9, 12, 15, 0))
+        self.assertEqual(vector.calls, 1)
+        self.assertEqual(lexical.calls, 3)
+        self.assertEqual((s3.entries_failed, s3.entries_requeued), (1, 0))
+        self.assertEqual(repo.outbox_entries, {})
+
+    def test_both_sinks_fail_requeue_together_then_dlq_together(self):
+        # Boundary: when EVERY sink fails, none is frozen (skip stays empty), so
+        # both retry on their own budget and the entry is deleted only once ALL
+        # sinks are terminal (per-sink-max). Distinct from the single-sink-fail
+        # path — this pins that "no healthy sink to preserve" still deletes
+        # exactly at all-terminal, not early (under-strict) and not never
+        # (over-strict against an infinite requeue).
+        vector = _RecordingSink(fail=True)
+        lexical = _RecordingSink(fail=True)
+        repo, worker = self._wire(vector, lexical)
+
+        s1 = worker.run_once(limit=1, now=_utc(2026, 7, 9, 12, 0, 0))
+        self.assertEqual((s1.entries_failed, s1.entries_requeued), (1, 1))
+        entry = self._entry_now(repo)
+        self.assertEqual(entry.targets[VECTOR_TARGET].attempt_count, 1)
+        self.assertEqual(entry.targets[LEXICAL_TARGET].attempt_count, 1)
+
+        worker.run_once(limit=1, now=_utc(2026, 7, 9, 12, 5, 0))  # attempt 2, requeue
+        s3 = worker.run_once(limit=1, now=_utc(2026, 7, 9, 12, 15, 0))  # attempt 3
+
+        self.assertEqual((vector.calls, lexical.calls), (3, 3))
+        self.assertEqual((s3.entries_failed, s3.entries_requeued), (1, 0))
+        self.assertEqual(repo.outbox_entries, {})  # both terminal → deleted together
+
+    def test_failed_sink_recovers_on_retry_then_entry_deleted(self):
+        # under-strict: if the down sink comes back before its budget runs out, the
+        # entry completes (all SUCCESS) and is deleted — the requeue is not a
+        # permanent DLQ for a transient failure.
+        vector = _RecordingSink()
+        lexical = _RecordingSink(fail=True)
+        repo, worker = self._wire(vector, lexical)
+
+        worker.run_once(limit=1, now=_utc(2026, 7, 9, 12, 0, 0))
+        lexical.fail = False  # sink recovers
+        s2 = worker.run_once(limit=1, now=_utc(2026, 7, 9, 12, 5, 0))
+
+        self.assertEqual(s2.entries_succeeded, 1)
+        self.assertEqual(vector.calls, 1)  # still not re-indexed
+        self.assertEqual(lexical.calls, 2)
+        self.assertEqual(repo.outbox_entries, {})
 
 
 if __name__ == "__main__":

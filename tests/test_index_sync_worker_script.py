@@ -123,9 +123,14 @@ class BuildMemoryAdapterTest(unittest.TestCase):
             adapter, backend = index_sync_worker._build_memory_adapter(
                 mongo_uri="mongodb://localhost:27017", mongo_db="db"
             )
-        self.assertIsInstance(adapter, MemoryIndexSyncAdapter)
+        # b-6 증분2: the builder always returns a composite of named sinks; the
+        # no-ES deployment is a single vector sink.
+        self.assertIsInstance(adapter, CompositeMemoryIndexSyncAdapter)
+        vector_leaf = adapter._sinks[0][2]
+        self.assertEqual(adapter._sinks[0][:2], ("vector", "in_memory_fake"))
+        self.assertIsInstance(vector_leaf, MemoryIndexSyncAdapter)
         self.assertIsInstance(
-            adapter._vector_index, InMemoryMemoryVectorIndexAdapter
+            vector_leaf._vector_index, InMemoryMemoryVectorIndexAdapter
         )
         self.assertEqual(backend, "in_memory_fake")
 
@@ -142,9 +147,12 @@ class BuildMemoryAdapterTest(unittest.TestCase):
             adapter, backend = index_sync_worker._build_memory_adapter(
                 mongo_uri="mongodb://localhost:27017", mongo_db="db"
             )
-        self.assertIsInstance(adapter, MemoryIndexSyncAdapter)
+        self.assertIsInstance(adapter, CompositeMemoryIndexSyncAdapter)
+        vector_leaf = adapter._sinks[0][2]
+        self.assertEqual(adapter._sinks[0][:2], ("vector", "chroma"))
+        self.assertIsInstance(vector_leaf, MemoryIndexSyncAdapter)
         self.assertIsInstance(
-            adapter._vector_index, ChromaMemoryVectorIndexAdapter
+            vector_leaf._vector_index, ChromaMemoryVectorIndexAdapter
         )
         self.assertEqual(backend, "chroma")
         connect.assert_called_once_with(
@@ -171,11 +179,14 @@ class BuildMemoryAdapterTest(unittest.TestCase):
             )
         self.assertIsInstance(adapter, CompositeMemoryIndexSyncAdapter)
         self.assertEqual(backend, "in_memory_fake+elasticsearch")
-        # The composite fans out to exactly the vector sink then the lexical sink.
-        self.assertEqual(len(adapter._adapters), 2)
-        self.assertIsInstance(adapter._adapters[0], MemoryIndexSyncAdapter)
-        self.assertIsInstance(adapter._adapters[1], MemoryLexicalIndexSyncAdapter)
-        self.assertIs(adapter._adapters[1]._lexical, sentinel_lexical)
+        # The composite fans out to exactly the vector sink then the lexical sink,
+        # each carrying its (target, backend) identity for per-sink bookkeeping.
+        self.assertEqual(len(adapter._sinks), 2)
+        self.assertEqual(adapter._sinks[0][:2], ("vector", "in_memory_fake"))
+        self.assertEqual(adapter._sinks[1][:2], ("lexical", "elasticsearch"))
+        self.assertIsInstance(adapter._sinks[0][2], MemoryIndexSyncAdapter)
+        self.assertIsInstance(adapter._sinks[1][2], MemoryLexicalIndexSyncAdapter)
+        self.assertIs(adapter._sinks[1][2]._lexical, sentinel_lexical)
         connect.assert_called_once_with(
             url="http://es:9200", index_name="memory_lexical"
         )
@@ -197,9 +208,12 @@ class BuildCandidateAdapterTest(unittest.TestCase):
             adapter, backend = index_sync_worker._build_candidate_adapter(
                 mongo_uri="mongodb://localhost:27017", mongo_db="db"
             )
-        self.assertIsInstance(adapter, CandidateIndexSyncAdapter)
+        self.assertIsInstance(adapter, CompositeCandidateIndexSyncAdapter)
+        vector_leaf = adapter._sinks[0][2]
+        self.assertEqual(adapter._sinks[0][:2], ("vector", "in_memory_fake"))
+        self.assertIsInstance(vector_leaf, CandidateIndexSyncAdapter)
         self.assertIsInstance(
-            adapter._vector_index, InMemoryCandidateVectorIndexAdapter
+            vector_leaf._vector_index, InMemoryCandidateVectorIndexAdapter
         )
         self.assertEqual(backend, index_sync_worker.FAKE_VECTOR_BACKEND)
 
@@ -216,11 +230,14 @@ class BuildCandidateAdapterTest(unittest.TestCase):
             adapter, backend = index_sync_worker._build_candidate_adapter(
                 mongo_uri="mongodb://localhost:27017", mongo_db="db"
             )
-        self.assertIsInstance(adapter, CandidateIndexSyncAdapter)
+        self.assertIsInstance(adapter, CompositeCandidateIndexSyncAdapter)
+        vector_leaf = adapter._sinks[0][2]
+        self.assertEqual(adapter._sinks[0][:2], ("vector", "chroma"))
+        self.assertIsInstance(vector_leaf, CandidateIndexSyncAdapter)
         self.assertIsInstance(
-            adapter._vector_index, ChromaCandidateVectorIndexAdapter
+            vector_leaf._vector_index, ChromaCandidateVectorIndexAdapter
         )
-        self.assertIs(adapter._vector_index._collection, sentinel_collection)
+        self.assertIs(vector_leaf._vector_index._collection, sentinel_collection)
         self.assertEqual(backend, index_sync_worker.CHROMA_VECTOR_BACKEND)
         connect.assert_called_once_with(
             host="chroma",
@@ -250,11 +267,14 @@ class BuildCandidateAdapterTest(unittest.TestCase):
             backend,
             f"{index_sync_worker.FAKE_VECTOR_BACKEND}+elasticsearch",
         )
-        # The composite fans out to exactly the vector sink then the lexical sink.
-        self.assertEqual(len(adapter._adapters), 2)
-        self.assertIsInstance(adapter._adapters[0], CandidateIndexSyncAdapter)
-        self.assertIsInstance(adapter._adapters[1], CandidateLexicalIndexSyncAdapter)
-        self.assertIs(adapter._adapters[1]._lexical, sentinel_lexical)
+        # The composite fans out to exactly the vector sink then the lexical sink,
+        # each carrying its (target, backend) identity for per-sink bookkeeping.
+        self.assertEqual(len(adapter._sinks), 2)
+        self.assertEqual(adapter._sinks[0][:2], ("vector", "in_memory_fake"))
+        self.assertEqual(adapter._sinks[1][:2], ("lexical", "elasticsearch"))
+        self.assertIsInstance(adapter._sinks[0][2], CandidateIndexSyncAdapter)
+        self.assertIsInstance(adapter._sinks[1][2], CandidateLexicalIndexSyncAdapter)
+        self.assertIs(adapter._sinks[1][2]._lexical, sentinel_lexical)
         connect.assert_called_once_with(
             url="http://es:9200", index_name="candidate_lexical"
         )

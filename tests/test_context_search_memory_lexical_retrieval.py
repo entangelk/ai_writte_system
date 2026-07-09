@@ -36,8 +36,12 @@ from services.application.app.indexing.memory_lexical_index import (
     memory_lexical_text,
 )
 from services.application.app.indexing.service import (
+    CHROMA_VECTOR_BACKEND,
+    ELASTICSEARCH_BACKEND,
     IndexSyncOutboxService,
     InMemoryIndexSyncRepository,
+    LEXICAL_TARGET,
+    VECTOR_TARGET,
 )
 from services.application.app.memory.models import (
     MemoryEntry,
@@ -369,17 +373,26 @@ class CompositeDrainTest(unittest.TestCase):
         def index_memory(self, entry):
             self.entries.append(entry)
 
-    def test_fans_out_to_every_sink(self):
+    def test_drain_fans_out_to_every_sink_with_per_sink_outcomes(self):
         vector = self._Recorder()
         lexical = self._Recorder()
-        composite = CompositeMemoryIndexSyncAdapter((vector, lexical))
+        composite = CompositeMemoryIndexSyncAdapter(
+            (
+                (VECTOR_TARGET, CHROMA_VECTOR_BACKEND, vector),
+                (LEXICAL_TARGET, ELASTICSEARCH_BACKEND, lexical),
+            )
+        )
         outbox = IndexSyncOutboxService(InMemoryIndexSyncRepository())
         entry = outbox.enqueue_memory_upserted(
             project_id="project-1", memory_id="m1", version=1
         )
-        composite.index_memory(entry)
+        outcomes = composite.drain(entry, skip=frozenset())
         self.assertEqual(vector.entries, [entry])
         self.assertEqual(lexical.entries, [entry])
+        self.assertEqual(
+            [(o.target, o.ok) for o in outcomes],
+            [(VECTOR_TARGET, True), (LEXICAL_TARGET, True)],
+        )
 
 
 if __name__ == "__main__":
