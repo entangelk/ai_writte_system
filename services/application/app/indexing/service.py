@@ -40,6 +40,7 @@ INDEX_SYNC_BACKOFF_SECONDS = (60, 300)
 PROJECTS_COLLECTION = "projects"
 DRAFTS_COLLECTION = "drafts"
 MEMORIES_COLLECTION = "memory_entries"
+CANDIDATES_COLLECTION = "analysis_candidates"
 CHROMA_TARGET = "chroma"
 
 
@@ -57,6 +58,10 @@ class ArchiveIndexMutationAdapter(Protocol):
 
 class MemoryIndexMutationAdapter(Protocol):
     def index_memory(self, entry: IndexSyncOutboxEntry) -> None: ...
+
+
+class CandidateIndexMutationAdapter(Protocol):
+    def index_candidate(self, entry: IndexSyncOutboxEntry) -> None: ...
 
 
 class IndexSyncRepository(Protocol):
@@ -320,6 +325,21 @@ class IndexSyncOutboxService:
             ),
         )
 
+    def enqueue_candidate_upserted(
+        self, *, project_id: str, candidate_id: str
+    ) -> IndexSyncOutboxEntry:
+        # b-2: record_candidate(s) enqueues; the worker loads the candidate and
+        # indexes it. Dedup is per candidate_id, so a replay collapses onto the
+        # same pending entry. See candidate_index.CandidateIndexSyncAdapter.
+        return self._enqueue_event(
+            project_id=project_id,
+            event=IndexSyncEvent.CANDIDATE_UPSERTED,
+            source=IndexSyncSource(
+                mongo_collection=CANDIDATES_COLLECTION,
+                mongo_id=candidate_id,
+            ),
+        )
+
     def _enqueue_event(
         self,
         *,
@@ -384,11 +404,13 @@ class IndexSyncWorker:
         repository: IndexSyncRepository,
         archive_adapter: ArchiveIndexMutationAdapter,
         memory_adapter: MemoryIndexMutationAdapter | None = None,
+        candidate_adapter: CandidateIndexMutationAdapter | None = None,
         claim_timeout_seconds: int = INDEX_SYNC_CLAIM_TIMEOUT_SECONDS,
     ) -> None:
         self._repo = repository
         self._archive_adapter = archive_adapter
         self._memory_adapter = memory_adapter
+        self._candidate_adapter = candidate_adapter
         self._claim_timeout_seconds = claim_timeout_seconds
 
     def run_once(
@@ -459,6 +481,13 @@ class IndexSyncWorker:
                     "memory index adapter is not configured for MEMORY_UPSERTED"
                 )
             self._memory_adapter.index_memory(entry)
+            return
+        if entry.event is IndexSyncEvent.CANDIDATE_UPSERTED:
+            if self._candidate_adapter is None:
+                raise RuntimeError(
+                    "candidate index adapter is not configured for CANDIDATE_UPSERTED"
+                )
+            self._candidate_adapter.index_candidate(entry)
             return
         raise RuntimeError(f"unsupported index sync event: {entry.event.value}")
 

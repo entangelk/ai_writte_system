@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from services.application.app.indexing.models import (
+    CandidateIndexRecord,
     IndexPointer,
     IndexRecordKind,
     IndexSyncEvent,
@@ -395,6 +396,151 @@ def _memory_records_from_query(
     metadatas = metadatas_by_query[0]
     return tuple(
         memory_record_from_chroma(record_id, embedding, metadata)
+        for record_id, embedding, metadata in zip(ids, embeddings, metadatas)
+    )
+
+
+def candidate_record_to_chroma(
+    record: CandidateIndexRecord,
+) -> tuple[str, list[float], dict[str, Any]]:
+    """Flatten a candidate index record into (id, embedding, metadata). The
+    chroma id is the candidate's id (== record.candidate_id)."""
+    metadata = {
+        "kind": record.kind.value,
+        "project_id": record.project_id,
+        "candidate_id": record.candidate_id,
+        "candidate_type": record.candidate_type,
+        "status": record.status,
+        "text": record.text,
+    }
+    return record.id, list(record.vector), metadata
+
+
+def candidate_record_from_chroma(
+    record_id: str, embedding: Any, metadata: dict[str, Any]
+) -> CandidateIndexRecord:
+    return CandidateIndexRecord(
+        id=record_id,
+        kind=IndexRecordKind(metadata["kind"]),
+        project_id=metadata["project_id"],
+        candidate_id=metadata["candidate_id"],
+        candidate_type=metadata["candidate_type"],
+        status=metadata["status"],
+        text=metadata["text"],
+        vector=tuple(float(value) for value in embedding),
+    )
+
+
+class ChromaCandidateVectorIndexAdapter:
+    """Real persistent Chroma backend for the candidate_vectors collection (b-2).
+
+    Implements the `CandidateVectorIndexAdapter` seam against an injected
+    collection, so the logic is unit-tested with a fake collection and needs no
+    `chromadb`. Mirror of `ChromaMemoryVectorIndexAdapter`.
+    """
+
+    _INCLUDE = ["embeddings", "metadatas"]
+
+    def __init__(self, collection: ChromaCollection) -> None:
+        self._collection = collection
+
+    def upsert_candidate_records(
+        self, records: tuple[CandidateIndexRecord, ...]
+    ) -> int:
+        if not records:
+            return 0
+        ids: list[str] = []
+        embeddings: list[list[float]] = []
+        metadatas: list[dict[str, Any]] = []
+        for record in records:
+            record_id, embedding, metadata = candidate_record_to_chroma(record)
+            ids.append(record_id)
+            embeddings.append(embedding)
+            metadatas.append(metadata)
+        self._collection.upsert(
+            ids=ids, embeddings=embeddings, metadatas=metadatas
+        )
+        return len(records)
+
+    def delete_candidate_record(
+        self, *, project_id: str, candidate_id: str
+    ) -> None:
+        self._collection.delete(
+            where={
+                "$and": [
+                    {"project_id": project_id},
+                    {"candidate_id": candidate_id},
+                ]
+            }
+        )
+
+    def list_candidate_records(
+        self, *, project_id: str
+    ) -> tuple[CandidateIndexRecord, ...]:
+        result = self._collection.get(
+            where={"project_id": project_id}, include=self._INCLUDE
+        )
+        records = _candidate_records_from_get(result)
+        return tuple(sorted(records, key=lambda record: record.id))
+
+    def query_similar(
+        self,
+        *,
+        project_id: str,
+        candidate_type: str,
+        vector: tuple[float, ...],
+        limit: int,
+    ) -> tuple[CandidateIndexRecord, ...]:
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        result = self._collection.query(
+            query_embeddings=[list(vector)],
+            n_results=limit,
+            where={
+                "$and": [
+                    {"project_id": project_id},
+                    {"candidate_type": candidate_type},
+                ]
+            },
+            include=self._INCLUDE,
+        )
+        return _candidate_records_from_query(result)
+
+
+def _candidate_records_from_get(result: dict[str, Any]) -> list[CandidateIndexRecord]:
+    ids = result.get("ids")
+    if ids is None:
+        ids = []
+    embeddings = result.get("embeddings")
+    if embeddings is None:
+        embeddings = [None] * len(ids)
+    metadatas = result.get("metadatas")
+    if metadatas is None:
+        metadatas = []
+    return [
+        candidate_record_from_chroma(record_id, embedding, metadata)
+        for record_id, embedding, metadata in zip(ids, embeddings, metadatas)
+    ]
+
+
+def _candidate_records_from_query(
+    result: dict[str, Any],
+) -> tuple[CandidateIndexRecord, ...]:
+    # query nests one list per query embedding; we send exactly one.
+    ids_by_query = result.get("ids")
+    if ids_by_query is None:
+        ids_by_query = [[]]
+    ids = ids_by_query[0]
+    embeddings_by_query = result.get("embeddings")
+    if embeddings_by_query is None:
+        embeddings_by_query = [[None] * len(ids)]
+    metadatas_by_query = result.get("metadatas")
+    if metadatas_by_query is None:
+        metadatas_by_query = [[]]
+    embeddings = embeddings_by_query[0]
+    metadatas = metadatas_by_query[0]
+    return tuple(
+        candidate_record_from_chroma(record_id, embedding, metadata)
         for record_id, embedding, metadata in zip(ids, embeddings, metadatas)
     )
 

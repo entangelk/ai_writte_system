@@ -11,6 +11,8 @@ class IndexRecordKind(StrEnum):
     SOURCE_BLOCK = "source_block"
     # Phase 2B.5: a canonical MemoryEntry projected into the vector index.
     MEMORY = "memory"
+    # b-2: a needs_review AnalysisCandidate projected into its own index.
+    CANDIDATE = "candidate"
 
 
 class IndexSyncTarget(StrEnum):
@@ -27,6 +29,8 @@ class IndexSyncEvent(StrEnum):
     DRAFT_ARCHIVED = "draft_archived"
     # Phase 2B.5: apply minted/versioned a canonical memory; reindex it.
     MEMORY_UPSERTED = "memory_upserted"
+    # b-2: extraction recorded a needs_review candidate; index it.
+    CANDIDATE_UPSERTED = "candidate_upserted"
 
 
 class IndexSyncStatus(StrEnum):
@@ -148,6 +152,26 @@ class MemoryIndexRecord:
     memory_id: str
     memory_type: str
     version: int
+    status: str
+    text: str
+    vector: tuple[float, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateIndexRecord:
+    """b-2: a ``needs_review`` AnalysisCandidate projected into the vector index.
+
+    Physically separate from ``MemoryIndexRecord`` (own collection): the
+    authority re-derivation source (analysis store) and lifecycle (candidates
+    are immutable/no versioning today, unlike append-only memories) differ. See
+    docs/plans/04-writing-candidate-retrieval-decisions.md (G1).
+    """
+
+    id: str
+    kind: IndexRecordKind
+    project_id: str
+    candidate_id: str
+    candidate_type: str
     status: str
     text: str
     vector: tuple[float, ...]

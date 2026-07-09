@@ -133,6 +133,80 @@ def _build_memory_adapter(
     return adapter, backend
 
 
+def _build_candidate_adapter(
+    *, mongo_uri: str, mongo_db: str
+) -> tuple[object, str]:
+    # b-2: the candidate-index side of the worker. Loads the candidate a
+    # CANDIDATE_UPSERTED entry points at (Mongo-backed) and indexes it into the
+    # candidate_vectors collection (+ candidate_lexical ES index when configured)
+    # — real backends when CHROMA_HOST / ELASTICSEARCH_URL are set, else the
+    # in-memory fake so the worker still exercises the lifecycle.
+    from services.application.app.analysis.mongo_repository import (
+        MongoAnalysisRepository,
+    )
+    from services.application.app.analysis.service import AnalysisService
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+    from services.application.app.indexing.candidate_index import (
+        CANDIDATE_VECTOR_COLLECTION,
+        CandidateIndexSyncAdapter,
+        InMemoryCandidateVectorIndexAdapter,
+    )
+
+    analysis = AnalysisService(
+        MongoAnalysisRepository.from_uri(mongo_uri, db_name=mongo_db or DEFAULT_DB_NAME)
+    )
+    embeddings = _build_embedding_provider()
+
+    host = os.environ.get("CHROMA_HOST")
+    if not host:
+        vector_index = InMemoryCandidateVectorIndexAdapter()
+        backend = FAKE_VECTOR_BACKEND
+    else:
+        from services.application.app.indexing.chroma import (
+            ChromaCandidateVectorIndexAdapter,
+            connect_chroma_collection,
+        )
+
+        vector_index = ChromaCandidateVectorIndexAdapter(
+            connect_chroma_collection(
+                host=host,
+                port=int(os.environ.get("CHROMA_PORT", "8000")),
+                collection_name=os.environ.get(
+                    "CHROMA_CANDIDATE_COLLECTION", CANDIDATE_VECTOR_COLLECTION
+                ),
+            )
+        )
+        backend = CHROMA_VECTOR_BACKEND
+    adapter = CandidateIndexSyncAdapter(
+        analysis_service=analysis, embeddings=embeddings, vector_index=vector_index
+    )
+    es_url = os.environ.get("ELASTICSEARCH_URL")
+    if es_url:
+        from services.application.app.indexing.candidate_index import (
+            CompositeCandidateIndexSyncAdapter,
+        )
+        from services.application.app.indexing.candidate_lexical_index import (
+            CANDIDATE_LEXICAL_INDEX,
+            CandidateLexicalIndexSyncAdapter,
+            connect_elasticsearch_candidate_index,
+        )
+
+        lexical_adapter = CandidateLexicalIndexSyncAdapter(
+            analysis_service=analysis,
+            lexical_index=connect_elasticsearch_candidate_index(
+                url=es_url,
+                index_name=os.environ.get(
+                    "ELASTICSEARCH_CANDIDATE_INDEX", CANDIDATE_LEXICAL_INDEX
+                ),
+            ),
+        )
+        return (
+            CompositeCandidateIndexSyncAdapter((adapter, lexical_adapter)),
+            f"{backend}+elasticsearch",
+        )
+    return adapter, backend
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run one bounded Phase 3B index sync worker pass."
@@ -164,15 +238,20 @@ def run_worker(args: argparse.Namespace) -> dict[str, Any]:
     memory_adapter, memory_backend = _build_memory_adapter(
         mongo_uri=args.mongo_uri, mongo_db=args.mongo_db
     )
+    candidate_adapter, candidate_backend = _build_candidate_adapter(
+        mongo_uri=args.mongo_uri, mongo_db=args.mongo_db
+    )
     worker = IndexSyncWorker(
         repository=repository,
         archive_adapter=archive_adapter,
         memory_adapter=memory_adapter,
+        candidate_adapter=candidate_adapter,
     )
     summary = worker.run_once(limit=args.limit)
     return {
         "archive_backend": archive_backend,
         "memory_backend": memory_backend,
+        "candidate_backend": candidate_backend,
         "entries_claimed": summary.entries_claimed,
         "entries_succeeded": summary.entries_succeeded,
         "entries_failed": summary.entries_failed,

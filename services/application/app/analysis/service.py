@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from numbers import Real
-from typing import Any
+from typing import Any, Protocol
 
 from services.application.app.analysis.models import (
     AnalysisCandidate,
@@ -29,6 +29,17 @@ from services.application.app.analysis.schema import (
     validate_candidate_payload,
 )
 from services.application.app.analysis.source import SourceRefResolver
+
+
+class CandidateReindexOutbox(Protocol):
+    """b-2: enqueue a candidate index sync when a needs_review candidate is
+    recorded. Structural type (defined here, not imported from ``indexing``) so
+    the analysis service stays free of an indexing dependency — mirror of
+    memory.service.MemoryReindexOutbox."""
+
+    def enqueue_candidate_upserted(
+        self, *, project_id: str, candidate_id: str
+    ) -> object: ...
 
 
 class AnalysisError(ValueError):
@@ -178,9 +189,14 @@ class AnalysisService:
         repository: AnalysisRepository,
         *,
         source_ref_resolver: SourceRefResolver | None = None,
+        reindex_outbox: CandidateReindexOutbox | None = None,
     ) -> None:
         self._repo = repository
         self._source_ref_resolver = source_ref_resolver
+        # b-2: recording a needs_review candidate enqueues a CANDIDATE_UPSERTED
+        # index sync here, so no extraction path can forget to index. Absent
+        # (unwired) leaves the deterministic Mongo-direct retrieval intact.
+        self._reindex_outbox = reindex_outbox
 
     @property
     def source_validation_enabled(self) -> bool:
@@ -400,7 +416,20 @@ class AnalysisService:
 
         if new_candidates:
             self._repo.put_candidates(tuple(new_candidates))
+            self._enqueue_candidate_reindex(new_candidates)
         return tuple(results)
+
+    def _enqueue_candidate_reindex(
+        self, new_candidates: Sequence[tuple[AnalysisCandidate, str]]
+    ) -> None:
+        # b-2 (G2): enqueue only newly minted candidates (idempotent replays are
+        # skipped by never reaching this list). Absent outbox is a no-op.
+        if self._reindex_outbox is None:
+            return
+        for candidate, _logical_key in new_candidates:
+            self._reindex_outbox.enqueue_candidate_upserted(
+                project_id=candidate.project_id, candidate_id=candidate.id
+            )
 
     def validate_candidate(
         self,

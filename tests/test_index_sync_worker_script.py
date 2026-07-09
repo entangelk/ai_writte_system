@@ -8,6 +8,7 @@ from unittest import mock
 from scripts import index_sync_worker
 from services.application.app.indexing.chroma import (
     ChromaArchiveIndexMutationAdapter,
+    ChromaCandidateVectorIndexAdapter,
     ChromaMemoryVectorIndexAdapter,
 )
 from services.application.app.indexing.memory_index import (
@@ -17,6 +18,14 @@ from services.application.app.indexing.memory_index import (
 )
 from services.application.app.indexing.memory_lexical_index import (
     MemoryLexicalIndexSyncAdapter,
+)
+from services.application.app.indexing.candidate_index import (
+    CandidateIndexSyncAdapter,
+    CompositeCandidateIndexSyncAdapter,
+    InMemoryCandidateVectorIndexAdapter,
+)
+from services.application.app.indexing.candidate_lexical_index import (
+    CandidateLexicalIndexSyncAdapter,
 )
 from services.application.app.indexing.service import (
     RecordingArchiveIndexMutationAdapter,
@@ -168,6 +177,85 @@ class BuildMemoryAdapterTest(unittest.TestCase):
         self.assertIs(adapter._adapters[1]._lexical, sentinel_lexical)
         connect.assert_called_once_with(
             url="http://es:9200", index_name="memory_lexical"
+        )
+
+
+class BuildCandidateAdapterTest(unittest.TestCase):
+    # b-2 (G6): the candidate-index side of the worker. Mirrors
+    # BuildMemoryAdapterTest — from_uri eagerly ensures Mongo indexes, so patch
+    # it; the adapter's backend selection is the logic under test.
+    _REPO_PATH = (
+        "services.application.app.analysis.mongo_repository."
+        "MongoAnalysisRepository.from_uri"
+    )
+
+    def test_without_chroma_host_uses_in_memory_fake(self):
+        with mock.patch.dict(
+            index_sync_worker.os.environ, {}, clear=True
+        ), mock.patch(self._REPO_PATH, return_value=object()):
+            adapter, backend = index_sync_worker._build_candidate_adapter(
+                mongo_uri="mongodb://localhost:27017", mongo_db="db"
+            )
+        self.assertIsInstance(adapter, CandidateIndexSyncAdapter)
+        self.assertIsInstance(
+            adapter._vector_index, InMemoryCandidateVectorIndexAdapter
+        )
+        self.assertEqual(backend, index_sync_worker.FAKE_VECTOR_BACKEND)
+
+    def test_with_chroma_host_builds_chroma_candidate_adapter(self):
+        sentinel_collection = object()
+        with mock.patch.dict(
+            index_sync_worker.os.environ,
+            {"CHROMA_HOST": "chroma", "CHROMA_PORT": "8000"},
+            clear=True,
+        ), mock.patch(self._REPO_PATH, return_value=object()), mock.patch(
+            "services.application.app.indexing.chroma.connect_chroma_collection",
+            return_value=sentinel_collection,
+        ) as connect:
+            adapter, backend = index_sync_worker._build_candidate_adapter(
+                mongo_uri="mongodb://localhost:27017", mongo_db="db"
+            )
+        self.assertIsInstance(adapter, CandidateIndexSyncAdapter)
+        self.assertIsInstance(
+            adapter._vector_index, ChromaCandidateVectorIndexAdapter
+        )
+        self.assertIs(adapter._vector_index._collection, sentinel_collection)
+        self.assertEqual(backend, index_sync_worker.CHROMA_VECTOR_BACKEND)
+        connect.assert_called_once_with(
+            host="chroma",
+            port=8000,
+            collection_name="candidate_vectors",
+        )
+
+    def test_with_elasticsearch_url_builds_composite_candidate_adapter(self):
+        # With ELASTICSEARCH_URL set, the worker fans the candidate drain out to a
+        # composite of the vector sink (in-memory fake here) and the lexical (ES)
+        # sink. Broken, this branch silently degrades to vector-only.
+        sentinel_lexical = object()
+        with mock.patch.dict(
+            index_sync_worker.os.environ,
+            {"ELASTICSEARCH_URL": "http://es:9200"},
+            clear=True,
+        ), mock.patch(self._REPO_PATH, return_value=object()), mock.patch(
+            "services.application.app.indexing.candidate_lexical_index."
+            "connect_elasticsearch_candidate_index",
+            return_value=sentinel_lexical,
+        ) as connect:
+            adapter, backend = index_sync_worker._build_candidate_adapter(
+                mongo_uri="mongodb://localhost:27017", mongo_db="db"
+            )
+        self.assertIsInstance(adapter, CompositeCandidateIndexSyncAdapter)
+        self.assertEqual(
+            backend,
+            f"{index_sync_worker.FAKE_VECTOR_BACKEND}+elasticsearch",
+        )
+        # The composite fans out to exactly the vector sink then the lexical sink.
+        self.assertEqual(len(adapter._adapters), 2)
+        self.assertIsInstance(adapter._adapters[0], CandidateIndexSyncAdapter)
+        self.assertIsInstance(adapter._adapters[1], CandidateLexicalIndexSyncAdapter)
+        self.assertIs(adapter._adapters[1]._lexical, sentinel_lexical)
+        connect.assert_called_once_with(
+            url="http://es:9200", index_name="candidate_lexical"
         )
 
 
