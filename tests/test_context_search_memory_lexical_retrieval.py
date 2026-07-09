@@ -13,6 +13,7 @@ Locks:
   concat), with dedup by memory id.
 """
 
+import importlib.util
 import unittest
 
 from services.application.app.analysis.models import (
@@ -183,6 +184,10 @@ class ElasticsearchAdapterTest(unittest.TestCase):
         adapter.delete_memory_record(project_id="project-1", memory_id="ghost")
 
 
+@unittest.skipUnless(
+    importlib.util.find_spec("elasticsearch") is not None,
+    "elasticsearch package not installed (this test patches elasticsearch.Elasticsearch)",
+)
 class ConnectElasticsearchTest(unittest.TestCase):
     """The deploy connect_ path (b-5): the client must carry request_timeout so a
     cold nori index create at app/worker boot does not flake on the stock 10s

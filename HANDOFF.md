@@ -16,7 +16,7 @@
   - **Indexing(Phase 3A/3B + b-2)**: source block index rebuild(HTTP/CLI/deployed smoke), index sync outbox + worker(archive drain + memory reindex drain + **candidate 색인 drain**; one-shot CLI + b-6 증분1 `--loop` compose 서비스). candidate 색인 파이프라인(v1.6.54): `record_candidate(s)` → `CANDIDATE_UPSERTED` outbox → worker composite(vector `candidate_vectors` + lexical ES `candidate_lexical`). candidate 상태가 `needs_review` 하나뿐이라 색인은 upsert-only(de-index는 Phase 6 forward-defense). **ES-lexical backfill(v1.6.58)**: `scripts/phase2b5_reindex_memory.py`(memory vector+lexical)·`scripts/phase2b5_reindex_candidate.py`(candidate vector+lexical) 일괄 backfill — b-6 증분2 accepted limitation #1 해소, outbox 우회 D7 자세, live 실행은 sandbox 밖.
   - **Context search(Phase 4)**: LLM planner + orchestration + Context Gate, HTTP API, 공유 in-process vector index, real Chroma+embedding 백엔드(env 구성 시), canonical memory 포함(⑤ §5 B) + `needs_review` candidate 포함(라벨·micro·권위필드 배제, Gate가 candidate origin만 예외 허용). **canonical·candidate memory retrieval 모두** env로 backend 선택(canonical v1.6.51/52, candidate v1.6.55): `CHROMA_HOST`+`EMBEDDING_SERVICE_URL` 시 **vector relevance**, `ELASTICSEARCH_URL` 시 **ES lexical(nori)**, 둘 다면 **hybrid(RRF)**, 없으면 Mongo-direct — 모두 권위는 Mongo/analysis store 재유도(seam·item·Gate 불변). worker memory/candidate drain은 ES 구성 시 vector+lexical composite.
 - **Compose 런타임**: base `docker-compose.yml`(application + Mongo replica set + gateway[외부 llama 클라이언트] + embedding + chroma + **elasticsearch**[nori, v1.6.53] + **worker**[b-6 증분1]). application에 `ELASTICSEARCH_URL` 배선 → 배포 canonical·candidate retriever 기본 = **hybrid(vector+lexical RRF)**. ES는 자체 `services/elasticsearch/Dockerfile`(공식 ES + analysis-nori, single-node·보안 off). opt-in `docker-compose.llama.yml`로 in-stack llama.cpp GPU 서버(port 9080)를 띄운다. runbook: `docs/runbooks/local-llama-server.md`. **worker(index 색인 적재 drain)는 상시 compose 서비스**(`--loop` drain + SIGTERM graceful shutdown, b-6 증분1 / SoT v1.6.56) — 이전 수동/out-of-band에서 전환. atomic outbox claim이 이미 이중 실행을 막아 single-replica로 안전. **outbox per-sink bookkeeping 완료**(b-6 증분2 / SoT v1.6.57, G3=B/G4=B): enqueue는 targets 빈 dict(sink-agnostic)로 두고 worker가 claim 시 configured sink(vector/lexical)를 materialize, 각 sink가 독립 `attempt_count`/`last_error`를 가져 한 sink가 죽어도 healthy sink는 SUCCESS로 동결·재색인되지 않고 all-terminal 시에만 entry 삭제. composite `drain(entry, skip=SUCCESS)`가 per-sink `SinkOutcome`을 반환(all-or-nothing raise 폐지). retriever는 인덱스 비어도 graceful.
-- **테스트**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **704 passed / 45 skipped + 3 환경 의존 failed**(2026-07-09, ES-lexical backfill v1.6.58). 3 failed는 `ConnectElasticsearchTest`(b-5 도입, skip guard 없이 `from elasticsearch import` 직접 import)로 sandbox에 `elasticsearch` 패키지 부재 시 발생 — v1.6.58 slice와 무관, HEAD에서도 동일 failed 재현(인과 단절). skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
+- **테스트**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **704 passed / 48 skipped**(2026-07-10). 종전 3 환경-의존 failed(`ConnectElasticsearchTest`, b-5 도입 — sandbox에 `elasticsearch` 패키지 부재 시 hard-fail)는 **skip guard(`@unittest.skipUnless(find_spec("elasticsearch"))`)로 해소**(2026-07-10, 테스트 전용, 계약·프로덕션 코드 무변) → 패키지 없으면 skip(45→48), 있으면 종전대로 실행. skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
 
 ## Active Decisions
 
@@ -85,8 +85,8 @@
 
 ## Verification
 
-- 현재 시스템 전체 스위트: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **704 passed / 45 skipped + 3 환경 의존 failed**. `git diff --check` clean.
-  - 3 failed = `ConnectElasticsearchTest`(b-5 도입, skip guard 없이 `from elasticsearch import` 직접 import) — sandbox에 `elasticsearch` 패키지 부재 시 발생, v1.6.58 slice와 무관(HEAD에서도 동일). b-5/b-6 "703 passed"는 패키지 있는 환경 기록. 후속: skip guard 추가(b-5 범위) 또는 sandbox 패키지 설치.
+- 현재 시스템 전체 스위트: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **704 passed / 48 skipped**. `git diff --check` clean.
+  - 종전 3 환경-의존 failed(`ConnectElasticsearchTest`, b-5 도입)는 2026-07-10 skip guard(`@unittest.skipUnless(importlib.util.find_spec("elasticsearch"))`)로 해소 — 패키지 없는 sandbox에선 skip(45→48), 있는 환경에선 종전대로 3개 실행(회귀 잠금 유지). 테스트 전용 수정, 계약·프로덕션 코드 무변. **양방향 실증됨**(2026-07-10 검증 보강): 패키지 격리 설치(PYTHONPATH 주입, 시스템 무오염) 시 전체 스위트 **707 passed/45 skipped**로 3개 실행·PASS, 미주입 시 704/48로 원상복구.
   - `--ignore=tests/test_memory_mongo.py`는 프로젝트 검증 관례다(해당 4개는 사전-존재 localhost Mongo env artifact이며 코드 회귀가 아니다).
   - skip 45개는 live Mongo/Chroma/embedding 미가용 통합·smoke 테스트(sandbox 밖에서 실행).
 - live/배포 검증 이력은 `docs/verifications/YYYY-MM-DD/`에 있다. 각 slice의 자체 회귀·mutation 재실증 상세는 `docs/daily_logs/YYYY-MM-DD/work_log.md`에 있다.
@@ -100,7 +100,7 @@ docker-compose.llama.yml         # opt-in override: in-stack llama.cpp GPU 서�
 docs/
 ├── runbooks/local-llama-server.md   # 로컬 llama.cpp GPU 서버 opt-in 기동/설정/smoke runbook
 ├── README.md                    # 문서 분류와 진입점
-├── system-contract-sot.md       # 정본 계약 SoT(Approved, v1.6.57)
+├── system-contract-sot.md       # 정본 계약 SoT(Approved, v1.6.58)
 ├── abstract.md / *.md           # 보존된 아이디에이션 원본과 주제별 상세
 ├── plans/                       # 계획 + 착수 결정 브리프(README 인덱스)
 │   ├── README.md · 00-foundations.md · implementation-plan.md
