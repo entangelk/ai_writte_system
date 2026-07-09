@@ -142,3 +142,48 @@
 - **directive = 저작 감독 모드 + 우선순위 트리**(오너 제안): "메모리가 메인, 저자가 저장 버전을 감독", latest-win이되 directive에 더 힘("글은 쓰면서 수정된다"). AI는 canon 자동 확정 불가(저자만 override).
 - **micro directive 원자성**: draft patch+memory 교정은 같은 것에서 파생이라 한 트랜잭션으로 묶는다.
 - **Phase 7로 승격 + 순차 구현**: 페이즈는 순차이므로 5→6→7 순서. 착수 브리프는 지금까지처럼 슬라이스별로.
+
+---
+
+## (b-6) 증분1 — worker compose 서비스 (SoT v1.6.56 예정)
+
+오너가 다음 slice로 **(b-6) worker compose 서비스 + outbox per-sink bookkeeping**를 선택 → 착수 브리프(`plans/04-worker-compose-outbox-bookkeeping-decisions.md`) → 오너 결정(G0=A·G1=A·G2=A·G3=B·G4=B·G5=A·G6=A·#8) → **2증분** 구현·검증. 본 절은 **증분1(worker compose 서비스, G0/G1/G2)**.
+
+### 배경/성격
+
+- v1.6.53(b-5) G6=A가 "worker는 compose 미추가(수동/out-of-band)"로 남기며, "restart/loop 정책·health·중복 실행 설계가 붙어 별도 slice"로 b-6을 지정. 색인 적재 worker가 수동 실행이라 배포에서 ES `memory_lexical`/`candidate_lexical`이 채워지지 않는 gap을, worker를 **상시 compose 서비스**로 올려 닫는다.
+- 핵심 계약 사실(워크플로 6에이전트 병렬 조사 + 1차 소스 직독): per-target 필드 `targets: dict[str, IndexSyncTargetState]`가 **이미 존재·영속화되나 inert** — `_enqueue_event`가 모든 이벤트에 단일 placeholder `targets={chroma: PENDING/IN_MEMORY_FAKE}`를 하드코드(`service.py:363-368`), `record_outbox_success`(삭제)·`record_outbox_failure`(whole-event `$set`) 어느 경로도 `targets[].status`를 전이하지 않는다(`mongo_repository.py:155-210`). → 증분2는 "필드 추가"가 아니라 "inert 표면 wire-up". 또한 **중복실행 방지는 이미 claim 계층에 존재** — `claim_next_outbox_entry`가 atomic `find_one_and_update` PENDING→RUNNING + `claimed_at` lease(600s) + stale-reclaim(`mongo_repository.py:118-153`)이라 replica 수와 무관하게 이중 claim 불가 → leader guard 불필요.
+
+### 구현 (증분1 — outbox 모델 미접촉, G5 준수)
+
+- **`service.py`**: `IndexSyncWorker.run_once`에 `stop_check: Callable[[], bool] | None = None` 추가 — for-loop **각 claim 직전** 검사 → 이미 claim된 in-flight entry는 그 iteration 내에서 끝까지 처리되고 **다음 claim 경계**에서 정지. G2=A("현재 entry 처리 완료 후 루프 종료") 정확히 실현. 기본값 None이면 guard short-circuit → one-shot 후진호환 불변.
+- **`scripts/index_sync_worker.py`**: `--loop`/`--interval`(기본 30, `INDEX_SYNC_INTERVAL` env override) 추가. `_GracefulShutdown`(SIGTERM/SIGINT → `request` → `is_requested` flag) + `_install_signal_handlers` + `run_loop`(worker를 **1회** build 후 `run_once` 반복: busy(claimed>0)면 즉시 재drain, idle(claimed==0)일 때만 `sleep_fn(interval)`, `stop_check=stop.is_requested` 주입, per-pass JSON emit → `loop_started`/`pass`/`loop_stopped`). `_build_index_sync_worker` 추출(양 경로 공유). `main`이 `--loop` 시 handler install + `run_loop`, 아니면 종전 one-shot. exit-code map 양 모드 보존(0/2).
+- **`docker-compose.yml`**: `worker` 서비스 추가 — application 이미지 공유, `command: python scripts/index_sync_worker.py --loop`, env(CORE_SOT_MONGO_URI/EMBEDDING_SERVICE_URL/CHROMA_HOST/ELASTICSEARCH_URL/INDEX_SYNC_INTERVAL), `depends_on` mongo/embedding/chroma/elasticsearch `service_healthy`, `restart: unless-stopped`, `stop_grace_period: 120s`(composite 순차 fan-out 합 timeout 초과 방지 — 3-1 경계). healthcheck 없음(G1=A).
+- **`services/application/Dockerfile`**: `COPY scripts/ ./scripts/` 추가(`COPY services/` 후 — deps 캐시 레이어 보존). **`.dockerignore`**: `scripts/` 제외 해제(worker 공유 이미지에 필요).
+
+### 회귀 +10
+
+- `test_indexing_phase3a.py::IndexSyncWorkerTest::test_run_once_stop_check_finishes_in_flight_entry_then_stops`: 3 시나리오(baseline full / stop_after_first→claimed=1·succeeded=1·잔여 2 / never_stop→claimed=3) **양방향** pin.
+- `test_index_sync_worker_script.py::WorkerLoopTest`(3)·`ParseArgsLoopTest`(2).
+- **검증 후속 보강 +4**(`Increment1SignalAndEdgeTest`, 오너 독립 감사 2-1/2-2 폐쇄): `test_install_signal_handlers_binds_stop_request`(SIGTERM/SIGINT→`stop.request` 등록)·`test_real_sigterm_flips_stop_flag`(실 `os.kill(SIGTERM)` → flag flip end-to-end) — **2-1 blocking test-gap 폐쇄**; `test_run_loop_exits_immediately_if_stop_already_requested`(退化: stop 선요청 시 passes=0·sleep 0)·`test_interval_reads_index_sync_interval_env`(env override) — 2-2 폐쇄. mutation 양방향: handler 미등록/stop_check 무시 시 각 재실패.
+
+### 검증
+
+- `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **699 passed / 45 skipped**(689 baseline → 증분1 +10). `git diff --check` clean.
+- worker 이미지 빌드 + 이미지 내 `scripts.index_sync_worker`/`run_loop` import 확인. `docker compose config` `worker` 서비스 파싱 OK.
+- **실 Mongo end-to-end drain smoke**(격리 standalone mongo:27117): entry 적재 → `--loop` → pass1 claimed=1/succeeded=1(drain) → pass2-5 idle → SIGTERM → `loop_stopped passes=5`·exit 0·outbox 0·success log.
+- **오너 독립 감사**(`docs/verifications/2026-07-09/worker_compose_increment1_b6.md`): 6 감사자 + 반박 21건 전부 CONFIRMED, 독립 실 Mongo smoke(27018) 재현 → **조건부 합격**, 구현 결함 0.
+
+### 검증 후속 보강 (오너 독립 감사 → 조건부→합격 전제 폐쇄)
+
+- **6-1(브리프 G2 lease-release 자기모순, blocking)**: 결정 본문은 "finish-in-flight + lease 유지"인데 검증계획/한계#2/질문#3에 "lease-release → PENDING 복귀" 잔존. 구현은 canonical(finish-in-flight)을 따르고 있었으므로 **브리프 4곳 정정**(lease-release 언급 제거/수정). 오너 확인 대기.
+- **6-3(HANDOFF 능동 모순)**: "worker는 compose 서비스가 아니다"가 신규 코드와 정면 충돌 → HANDOFF 현행(worker 상시 compose 서비스)으로 정정.
+- **6-5(#8 정정)**: `docs/verifications/2026-07-08/canonical_memory_lexical_hybrid_rrf.md`의 "envelope `targets.chroma.status`가 combined 결과 반영"이 1차 소스와 모순(targets.status 결코 전이 안 됨) → **[2026-07-09 정정]** 마킹 후 사실 정정.
+- **2-1/2-2**: 상기 +4 보강 테스트로 폐쇄. **3-1(비차단)**: `stop_grace_period` 60s→**120s** 상향 + 관계 주석. `INDEX_SYNC_INTERVAL`(30) < grace 만족.
+
+### Decisions / Next steps
+
+- **stop_check로 finish-in-flight 실현**(G2=A): lease-release(강제 PENDING 복귀)가 아닌 run_once 내 stop_check로 현재 entry 완료 후 다음 claim 경계 종료. lease 600s 유지(ungraceful crash만 bound).
+- **오너 결정 대기**: (1) 6-1 방향 확정(finish-in-flight = a 확정), (2) SoT v1.6.56 bump + CHANGELOG 타이밍(즉시 vs 증분2 일괄 — b-2 선례는 증분2 일괄).
+- **증분2(v1.6.57, G3=B/G4=B per-sink bookkeeping)**: `IndexSyncTargetState` per-sink `attempt_count`/`last_error` 확장 + composite all-or-nothing→per-sink outcome 전환 + worker claim 시 sink target materialize·갱신 + **all-terminal 시 entry 삭제** + per-sink 재시도 예산 + dedup 조정 + `test_sink_failure_propagates_not_swallowed` 재방문.
+- **실 배포 관통(sandbox 밖)**: 전체 스택 기동 시 worker 서비스가 hybrid composite drain으로 실 `memory_lexical`/`candidate_lexical`을 채우는 end-to-end.

@@ -437,6 +437,55 @@ class IndexSyncWorkerTest(unittest.TestCase):
         self.assertEqual(repo.logs[0].status, IndexSyncStatus.SUCCESS)
         self.assertIsNone(repo.logs[0].error)
 
+    def test_run_once_stop_check_finishes_in_flight_entry_then_stops(self):
+        # b-6 (G2): stop_check lets a drain loop request exit at the next entry
+        # boundary. Under-strict: ignoring stop_check would drain all entries.
+        repo = InMemoryIndexSyncRepository()
+        outbox = IndexSyncOutboxService(repo)
+        for i in range(3):
+            outbox.enqueue_project_archived(project_id=f"p{i}")
+        worker = IndexSyncWorker(
+            repository=repo, archive_adapter=RecordingArchiveIndexMutationAdapter()
+        )
+        full = worker.run_once(limit=10, now=_utc(2026, 7, 3, 12, 0, 0))
+        self.assertEqual(full.entries_claimed, 3)
+
+        # stop_check requested after the first claim boundary: the in-flight
+        # entry finishes, then run_once stops before claiming the next.
+        repo2 = InMemoryIndexSyncRepository()
+        outbox2 = IndexSyncOutboxService(repo2)
+        for i in range(3):
+            outbox2.enqueue_project_archived(project_id=f"p{i}")
+        worker2 = IndexSyncWorker(
+            repository=repo2, archive_adapter=RecordingArchiveIndexMutationAdapter()
+        )
+        checks = {"n": 0}
+
+        def stop_after_first() -> bool:
+            checks["n"] += 1
+            return checks["n"] > 1
+
+        partial = worker2.run_once(
+            limit=10, now=_utc(2026, 7, 3, 12, 0, 0), stop_check=stop_after_first
+        )
+        self.assertEqual(partial.entries_claimed, 1)
+        self.assertEqual(partial.entries_succeeded, 1)
+        self.assertEqual(len(repo2.outbox_entries), 2)
+
+        # Over-strict: a stop_check that never requests stop drains everything
+        # (no over-trigger).
+        repo3 = InMemoryIndexSyncRepository()
+        outbox3 = IndexSyncOutboxService(repo3)
+        for i in range(3):
+            outbox3.enqueue_project_archived(project_id=f"p{i}")
+        worker3 = IndexSyncWorker(
+            repository=repo3, archive_adapter=RecordingArchiveIndexMutationAdapter()
+        )
+        never_stop = worker3.run_once(
+            limit=10, now=_utc(2026, 7, 3, 12, 0, 0), stop_check=lambda: False
+        )
+        self.assertEqual(never_stop.entries_claimed, 3)
+
 
 def _fixture(*, project_name="Novel"):
     core_sot = CoreSotService(InMemoryCoreSotRepository())

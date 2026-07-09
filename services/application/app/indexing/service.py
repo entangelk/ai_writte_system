@@ -7,7 +7,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import math
-from typing import Protocol
+from typing import Callable, Protocol
 
 from services.application.app.core_sot.service import CoreSotService, NotFound
 from services.application.app.indexing.models import (
@@ -418,12 +418,18 @@ class IndexSyncWorker:
         *,
         limit: int,
         now: datetime | None = None,
+        stop_check: Callable[[], bool] | None = None,
     ) -> IndexSyncWorkerSummary:
         if limit < 1:
             raise ValueError("limit must be positive")
         clock = now or datetime.now(timezone.utc)
         claimed = succeeded = failed = requeued = 0
         for _ in range(limit):
+            # b-6 (G2): a drain loop passes stop_check so SIGTERM finishes the
+            # in-flight entry then exits at the next claim boundary. Checked
+            # before claiming so a partially-drained pass never starts a new one.
+            if stop_check is not None and stop_check():
+                break
             entry = self._repo.claim_next_outbox_entry(
                 now=clock,
                 claim_timeout_seconds=self._claim_timeout_seconds,

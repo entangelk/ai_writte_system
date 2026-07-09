@@ -190,6 +190,48 @@ services:
       retries: 20
       start_period: 60s
 
+  worker:
+    # b-6 (G0=A): the index-sync drain as an always-on compose service instead
+    # of manual/out-of-band execution. Shares the application image (same Python
+    # runtime + deps + indexing code); the command runs the draining loop. With
+    # CHROMA_HOST + ELASTICSEARCH_URL set it drains the composite (vector+lexical)
+    # sinks; the atomic outbox claim (find_one_and_update + lease) makes this safe
+    # to run as a single replica (G2=A). G1=A: no health port — restart + the
+    # per-pass stdout JSON is the observability channel, and each sink call is
+    # bounded by its request_timeout so the loop cannot wedge indefinitely.
+    build:
+      context: .
+      dockerfile: services/application/Dockerfile
+    command: ["python", "scripts/index_sync_worker.py", "--loop"]
+    environment:
+      CORE_SOT_MONGO_URI: "mongodb://mongo:27017/?replicaSet=rs0"
+      CORE_SOT_MONGO_DB: "ai_writing_system"
+      EMBEDDING_SERVICE_URL: "http://embedding:8002"
+      EMBEDDING_DIMENSIONS: "${EMBEDDING_DIMENSIONS:-1024}"
+      CHROMA_HOST: "chroma"
+      CHROMA_PORT: "8000"
+      ELASTICSEARCH_URL: "http://elasticsearch:9200"
+      INDEX_SYNC_INTERVAL: "${INDEX_SYNC_INTERVAL:-30}"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      embedding:
+        condition: service_healthy
+      chroma:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+    # A composite drain (MEMORY/CANDIDATE) fans one entry out to embedding ->
+    # Chroma -> ES sequentially, each call bounded by its request_timeout; under
+    # a degraded backend those timeouts can add up. stop_grace_period must exceed
+    # that per-entry worst case so SIGTERM can finish the in-flight entry
+    # (stop_check exits at the next claim boundary, leaving no RUNNING entry)
+    # instead of being SIGKILL'd mid-drain — a SIGKILL would strand the entry as
+    # RUNNING until the 600s lease stale-reclaims it. 120s bounds ~3 sequential
+    # 30s timeouts with headroom. NOTE: keep INDEX_SYNC_INTERVAL <= this.
+    stop_grace_period: 120s
+
 volumes:
   mongo_data:
   embedding_cache:

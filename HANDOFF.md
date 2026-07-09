@@ -5,7 +5,7 @@
 
 ## Current Status
 
-- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.55**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
+- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.56**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
 - 개발 진입점은 `docs/plans/README.md`. `docs/` 루트의 설계 문서는 초기 아이디에이션 자료다.
 - 구현된 계층(모두 회귀로 잠김, 아래는 현재 동작하는 표면):
   - **LLM Gateway**: FastAPI shell(`/health/live`·`/health/ready`·`/v1/generate`), llama.cpp 호환 provider + httpx async adapter, provider error 5종→HTTP status 매핑.
@@ -13,10 +13,10 @@
   - **Agent loop 계약층**: decision 7종·budget 5차원·tool registry·self-report parser·completion 판정·minimal provider composition runner. (tool-call branch는 상류 의존으로 보류 — Active Decisions 참조.)
   - **Analysis(Phase 2A)**: taxonomy 3종 extraction, job 상태 전이, provider/Gateway wiring + JSON repair, job/candidate/run HTTP API.
   - **Memory(Phase 2B.1~2B.6)**: canonical `MemoryEntry` store + candidate 승격(수동/threshold), compare→ActionProposal→versioned upsert(append-only), compare judge(Gateway 1-turn), memory→vector 재색인(async outbox→worker), event/open_question semantic identity(off 기본).
-  - **Indexing(Phase 3A/3B + b-2)**: source block index rebuild(HTTP/CLI/deployed smoke), index sync outbox + one-shot worker(archive drain + memory reindex drain + **candidate 색인 drain**). candidate 색인 파이프라인(v1.6.54): `record_candidate(s)` → `CANDIDATE_UPSERTED` outbox → worker composite(vector `candidate_vectors` + lexical ES `candidate_lexical`). candidate 상태가 `needs_review` 하나뿐이라 색인은 upsert-only(de-index는 Phase 6 forward-defense).
+  - **Indexing(Phase 3A/3B + b-2)**: source block index rebuild(HTTP/CLI/deployed smoke), index sync outbox + worker(archive drain + memory reindex drain + **candidate 색인 drain**; one-shot CLI + b-6 증분1 `--loop` compose 서비스). candidate 색인 파이프라인(v1.6.54): `record_candidate(s)` → `CANDIDATE_UPSERTED` outbox → worker composite(vector `candidate_vectors` + lexical ES `candidate_lexical`). candidate 상태가 `needs_review` 하나뿐이라 색인은 upsert-only(de-index는 Phase 6 forward-defense).
   - **Context search(Phase 4)**: LLM planner + orchestration + Context Gate, HTTP API, 공유 in-process vector index, real Chroma+embedding 백엔드(env 구성 시), canonical memory 포함(⑤ §5 B) + `needs_review` candidate 포함(라벨·micro·권위필드 배제, Gate가 candidate origin만 예외 허용). **canonical·candidate memory retrieval 모두** env로 backend 선택(canonical v1.6.51/52, candidate v1.6.55): `CHROMA_HOST`+`EMBEDDING_SERVICE_URL` 시 **vector relevance**, `ELASTICSEARCH_URL` 시 **ES lexical(nori)**, 둘 다면 **hybrid(RRF)**, 없으면 Mongo-direct — 모두 권위는 Mongo/analysis store 재유도(seam·item·Gate 불변). worker memory/candidate drain은 ES 구성 시 vector+lexical composite.
-- **Compose 런타임**: base `docker-compose.yml`(application + Mongo replica set + gateway[외부 llama 클라이언트] + embedding + chroma + **elasticsearch**[nori, v1.6.53]). application에 `ELASTICSEARCH_URL` 배선 → 배포 canonical·candidate retriever 기본 = **hybrid(vector+lexical RRF)**. ES는 자체 `services/elasticsearch/Dockerfile`(공식 ES + analysis-nori, single-node·보안 off). opt-in `docker-compose.llama.yml`로 in-stack llama.cpp GPU 서버(port 9080)를 띄운다. runbook: `docs/runbooks/local-llama-server.md`. **worker(index 색인 적재 drain)는 compose 서비스가 아니다** — 수동/out-of-band 실행(Chroma memory reindex·candidate 색인·ES lexical 모두 동일; retriever는 인덱스 비어도 graceful).
-- **테스트**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **689 passed / 45 skipped**(2026-07-09 기준). skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
+- **Compose 런타임**: base `docker-compose.yml`(application + Mongo replica set + gateway[외부 llama 클라이언트] + embedding + chroma + **elasticsearch**[nori, v1.6.53] + **worker**[b-6 증분1]). application에 `ELASTICSEARCH_URL` 배선 → 배포 canonical·candidate retriever 기본 = **hybrid(vector+lexical RRF)**. ES는 자체 `services/elasticsearch/Dockerfile`(공식 ES + analysis-nori, single-node·보안 off). opt-in `docker-compose.llama.yml`로 in-stack llama.cpp GPU 서버(port 9080)를 띄운다. runbook: `docs/runbooks/local-llama-server.md`. **worker(index 색인 적재 drain)는 상시 compose 서비스**(`--loop` drain + SIGTERM graceful shutdown, b-6 증분1 / SoT v1.6.56) — 이전 수동/out-of-band에서 전환. atomic outbox claim이 이미 이중 실행을 막아 single-replica로 안전. outbox per-sink bookkeeping는 증분2(v1.6.57) 대기. retriever는 인덱스 비어도 graceful.
+- **테스트**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **699 passed / 45 skipped**(2026-07-09, b-6 증분1 +10). skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
 
 ## Active Decisions
 
@@ -64,13 +64,13 @@
 
 ## Owner Decisions Needed
 
-- 없음. **다음 구현 slice 선택은 대기 중**(Next Tasks #1 후보 참조).
+- (b-6) 증분1(worker compose 서비스, v1.6.56) 완료·검증 합격. **(b-6) 증분2(outbox per-sink bookkeeping, G3=B/G4=B)가 활성 다음 작업** — 결정은 브리프에 잠겨 있어 오너 재결정 없이 착수 가능(자명 메모는 Next Tasks #1 (b-6)).
 
 ## Next Tasks
 
-1. **다음 구현 slice 선택**(각 후보는 착수 브리프 필요). Phase 2B(2B.1~2B.6) + ⑤ Writing canonical(v1.6.48)·candidate(v1.6.50) inclusion + canonical retrieval vector(v1.6.51)·ES lexical/hybrid RRF(v1.6.52) + compose 전용 ES 배포 서비스(v1.6.53) + candidate 색인 파이프라인(v1.6.54)·retrieval(v1.6.55)까지 관통 완료. 후보:
+1. **(b-6) 증분2가 활성 다음 작업**(결정 잠김, 착수 가능 — 아래 자명 메모). 그 외 후보는 각 착수 브리프 필요. 관통 완료: ⑤ retrieval·색인(canonical v1.6.48~55, candidate v1.6.54/55)·compose ES(v1.6.53)·b-6 증분1 worker compose(v1.6.56). 후보:
+   - **(b-6) 증분2 — outbox per-sink bookkeeping [활성, 결정 잠김, SoT v1.6.57]**: 증분1(worker compose 서비스 v1.6.56) 완료. 증분2는 vector·lexical 각 sink의 성공/실패를 개별 추적해 한 sink가 다른 sink를 poison하지 않게 한다. **결정 브리프**: `docs/plans/04-worker-compose-outbox-bookkeeping-decisions.md`(Resolved). **잠긴 결정(오너 재확인 불필요)**: G3=B(full per-sink status + per-sink 재시도 예산)·G4=B(실패 sink만 재시도·성공 sink SUCCESS 유지·all-terminal 시 entry 삭제)·G6=A(새 SoT literal 없음 — 내부 `IndexSyncStatus`·free-form target key 재사용). **구현 scope**: (1) `indexing/models.py` `IndexSyncTargetState`에 per-sink `attempt_count`/`last_error` 추가(backend → str 완화로 ES 허용); (2) `_enqueue_event`(`indexing/service.py:363-368`) placeholder targets → **빈 dict**(enqueue sink-agnostic 불변, worker가 claim 시 materialize); (3) composite adapter(`indexing/memory_index.py:200-212`·`indexing/candidate_index.py:189-200`) all-or-nothing(raise) → **per-sink outcome 수집**(각 sink try/except·결과 반환); (4) `IndexSyncWorker`(`indexing/service.py:416-469`)가 claim 시 sink target materialize·per-sink 갱신·**all-terminal(SUCCESS 또는 per-sink-max FAILED) 시 entry 삭제**; (5) `record_outbox_success`/`record_outbox_failure`(`indexing/mongo_repository.py:155-210`) per-sink 전이 + `IndexSyncRepository` Protocol(`service.py:66-103`) per-target 표면; (6) dedup 의미 조정(성공=삭제가 all-terminal로 이동). **재방문 회귀**: `tests/test_candidate_index.py::test_sink_failure_propagates_not_swallowed`(all-or-nothing pin → per-sink로 의미 변경, 양방향 재 lock). **핵심 사실(검증 확정)**: targets 필드는 이미 존재하나 **inert** — 성공=삭제·실패=whole-event `$set`, 어느 쪽도 targets 미전이(`docs/verifications/2026-07-09/worker_compose_increment1_b6.md` §5, `docs/verifications/2026-07-08/canonical_memory_lexical_hybrid_rrf.md` #8 정정). worker가 유일하게 configured sink를 아는 주체(`scripts/index_sync_worker.py` `_build_memory_adapter`/`_build_candidate_adapter`). **수용 한계**: ES-lexical backfill 부재(backfill은 vector-only) → DLQ ES 실패는 수렴 수단 없음(별도 후속). **commit**: 단일(증분1은 이미 별도 commit됨).
    - **(b-4) hybrid 튜닝** — RRF k(현재 60)·per-signal 가중치·sub-retriever fetch depth를 실 데이터로 캘리브레이션(canonical·candidate 공통).
-   - **(b-6) worker compose 서비스 / outbox per-target bookkeeping** — index_sync_worker drain(archive+memory+candidate)을 compose로 올리려면 restart/loop·health·중복 실행 설계 필요(v1.6.53 G6 후속). ES sink를 persisted envelope에 명시 추적하려면 outbox multi-target status 확장(v1.6.52/54 정정 참조).
    - **(c) character 별칭/동명이인 semantic 보강**(2B.3 D2=A 확장).
    - **(d) conflict/merge/split review queue 영속화.**
    - **(e) canonical↔candidate semantic dedup**(v1.6.50 D7 후속 — 같은 지식이 승격 후 canonical·candidate 양쪽에 나타나는 것 정리; Phase 6 review 상태 전이와 함께 검토).

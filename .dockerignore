@@ -1,11 +1,12 @@
 # Keep the build context small and the dependency-install cache layer stable.
+# NOTE: scripts/ is NOT excluded — the b-6 index-sync worker shares the
+# application image and needs scripts/index_sync_worker.py in the context.
 **/__pycache__/
 **/*.pyc
 .git/
 .gitignore
 docs/
 tests/
-scripts/
 *.md
 .venv/
 venv/

@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import sys
+import time
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -209,7 +211,8 @@ def _build_candidate_adapter(
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run one bounded Phase 3B index sync worker pass."
+        description="Run a Phase 3B index sync worker pass (one-shot by default; "
+        "--loop runs a draining daemon until SIGTERM)."
     )
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--mongo-uri", default=os.environ.get("CORE_SOT_MONGO_URI"))
@@ -217,10 +220,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--mongo-db",
         default=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_MONGO_DB),
     )
+    parser.add_argument(
+        "--loop",
+        action="store_true",
+        help="Run as a long-lived draining daemon: loop run_once until SIGTERM/SIGINT.",
+    )
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=float(os.environ.get("INDEX_SYNC_INTERVAL", "30")),
+        help="Seconds to idle-sleep between drain passes when no entry is claimable.",
+    )
     return parser.parse_args(argv)
 
 
-def run_worker(args: argparse.Namespace) -> dict[str, Any]:
+def _build_index_sync_worker(
+    args: argparse.Namespace,
+) -> tuple[IndexSyncWorker, dict[str, str]]:
     if not args.mongo_uri:
         raise ValueError("CORE_SOT_MONGO_URI or --mongo-uri is required")
     if args.limit < 1:
@@ -247,11 +263,19 @@ def run_worker(args: argparse.Namespace) -> dict[str, Any]:
         memory_adapter=memory_adapter,
         candidate_adapter=candidate_adapter,
     )
-    summary = worker.run_once(limit=args.limit)
-    return {
+    backends = {
         "archive_backend": archive_backend,
         "memory_backend": memory_backend,
         "candidate_backend": candidate_backend,
+    }
+    return worker, backends
+
+
+def run_worker(args: argparse.Namespace) -> dict[str, Any]:
+    worker, backends = _build_index_sync_worker(args)
+    summary = worker.run_once(limit=args.limit)
+    return {
+        **backends,
         "entries_claimed": summary.entries_claimed,
         "entries_succeeded": summary.entries_succeeded,
         "entries_failed": summary.entries_failed,
@@ -259,16 +283,111 @@ def run_worker(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+class _GracefulShutdown:
+    """Stop flag set by SIGTERM/SIGINT so the drain loop exits at the next entry
+    boundary (the in-flight entry finishes first). The atomic outbox claim
+    (find_one_and_update + lease) is what makes concurrent/replica execution
+    safe; this only governs orderly shutdown of a single loop (b-6 G2=A)."""
+
+    def __init__(self) -> None:
+        self.requested = False
+
+    def request(self, *_args: object) -> None:
+        self.requested = True
+
+    def is_requested(self) -> bool:
+        return self.requested
+
+
+def _install_signal_handlers(stop: _GracefulShutdown) -> None:
+    # SIGTERM (compose stop) and SIGINT (ctrl-c) both request a graceful exit.
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, stop.request)
+
+
+def run_loop(
+    args: argparse.Namespace,
+    *,
+    build_worker_fn=_build_index_sync_worker,
+    stop: _GracefulShutdown,
+    sleep_fn=time.sleep,
+    stdout: TextIO | None = None,
+) -> int:
+    # b-6 G0=A: a long-lived draining daemon. Builds the worker (and its sink
+    # adapters) ONCE, then loops run_once — draining immediately while entries
+    # are claimable and idle-sleeping when the queue is empty. stop_check is
+    # threaded into run_once so SIGTERM finishes the in-flight entry then exits
+    # at the next claim boundary (G2 graceful shutdown).
+    worker, backends = build_worker_fn(args)
+    stream = stdout if stdout is not None else sys.stdout
+    print(
+        json.dumps(
+            {
+                "event": "loop_started",
+                "limit": args.limit,
+                "interval_seconds": args.interval,
+                **backends,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        file=stream,
+    )
+    stream.flush()
+    passes = 0
+    while True:
+        if stop.is_requested():
+            break
+        summary = worker.run_once(limit=args.limit, stop_check=stop.is_requested)
+        passes += 1
+        print(
+            json.dumps(
+                {
+                    "event": "pass",
+                    "pass": passes,
+                    "entries_claimed": summary.entries_claimed,
+                    "entries_succeeded": summary.entries_succeeded,
+                    "entries_failed": summary.entries_failed,
+                    "entries_requeued": summary.entries_requeued,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            file=stream,
+        )
+        stream.flush()
+        if stop.is_requested():
+            break
+        if summary.entries_claimed == 0:
+            sleep_fn(args.interval)
+    print(
+        json.dumps(
+            {"event": "loop_stopped", "passes": passes},
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        file=stream,
+    )
+    stream.flush()
+    return 0
+
+
 def main(
     argv: list[str] | None = None,
     *,
     run_worker_fn=run_worker,
+    run_loop_fn=run_loop,
+    install_signal_handlers_fn=_install_signal_handlers,
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
 ) -> int:
     args = parse_args(argv)
     err = stderr if stderr is not None else sys.stderr
     try:
+        if args.loop:
+            stop = _GracefulShutdown()
+            install_signal_handlers_fn(stop)
+            return run_loop_fn(args, stop=stop, stdout=stdout)
         summary = run_worker_fn(args)
     except ValueError as exc:
         print(str(exc), file=err)

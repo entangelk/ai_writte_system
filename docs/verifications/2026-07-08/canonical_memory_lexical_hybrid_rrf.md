@@ -33,7 +33,7 @@
 
 - SoT v1.6.52 changelog(`system-contract-sot.md:36`)와 브리프 오너 결정(E0/E1=A, E2=A, E3=hybrid, E4=A, E5=A, E6=A)이 일치. E3는 브리프 본문 "A(추천)=결합 안 함"에서 **오너가 hybrid(RRF)로 상향** — 브리프 상단 "오너 결정"에 "(추천 A 대신 오너가 상향)" 명시, SoT가 E3=hybrid로 기록. 정규 계약(SoT)은 명확.
 - **§1 정정 정합**: 브리프 E1 "outbox `targets.elasticsearch` 추가"를 **worker composite fan-out로 구현, persisted envelope per-target bookkeeping은 미룄**. SoT changelog가 이 정정을 명시. `IndexSyncOutboxEntry`/`indexing/models.py`/`indexing/service.py`에 `elasticsearch`/`targets.elasticsearch` 참조 0건(grep 확인) → **v1.6.26 outbox envelope 무변경 확인**. 사유(enqueue는 배포 ES 구성을 몰라 무조건 ES target 시 비-ES 배포에서 영구 pending)은 코드로 실증됨: worker `_build_memory_adapter`가 `ELASTICSEARCH_URL` 있을 때만 composite build(`index_sync_worker.py:107-129`), 없으면 vector-only.
-- **all-or-nothing semantics**: `CompositeMemoryIndexSyncAdapter.index_memory`(`memory_index.py:211-213`)가 각 sink의 `index_memory`를 순차 호출, any-raises→entry 실패·requeue. idempotent replay로 부분 상태(vector만 색인·ES 누락) 방지. envelope `targets.chroma.status`가 combined 결과 반영 → per-target ES bookkeeping 미지연이 추적/관측 gap일 뿐 정합성 gap 아님.
+- **all-or-nothing semantics**: `CompositeMemoryIndexSyncAdapter.index_memory`(`memory_index.py:211-213`)가 각 sink의 `index_memory`를 순차 호출, any-raises→entry 실패·requeue. idempotent replay로 부분 상태(vector만 색인·ES 누락) 방지. **[2026-07-09 정정]** envelope `targets.chroma.status`는 **enqueue 시 1회 기재 후 갱신되지 않는다** — `record_outbox_success`(entry 삭제)·`record_outbox_failure`(whole-event `$set`) 어느 경로도 `targets[].status`를 전이하지 않음(`mongo_repository.py:155-210` 직독 확정). 즉 per-target ES bookkeeping은 현재 **inert**이며, 이전 문장의 "combined 결과 반영"은 사실 관계 오류였다. per-target bookkeeping wire-up은 (b-6) 증분2에서 수행.
 
 ### 2. 구현 — `LexicalCanonicalMemoryRetriever`(`service.py:232-266`)
 
