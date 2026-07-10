@@ -83,6 +83,15 @@
 - 문서: SoT v1.6.59 버전 로그·헤더, CHANGELOG, HANDOFF(Current Status·Active Decisions·Owner Decisions·Next Tasks·Verification·Project Structure) 갱신.
 - **미검증(sandbox 밖)**: `MongoReviewQueueRepository` 실 Mongo round-trip(in-memory repo·mongo repo 대칭 구조로 작성, 실 upsert/index는 sandbox 밖 후속 — 프로젝트의 mongo repo 검증 관례와 동일).
 
+## 검증 후속 보강 (오너 독립 감사 PASS → 비차단 관찰 3건 closure)
+
+오너 독립 검증(`docs/verifications/2026-07-10/review_queue_persistence.md`)이 **합격(PASS)** — 브리프 D1~D4↔구현 literal 전량 일치, boundary matrix 16셀 전수 추적, mutation 3종 양방향 bite 독립 실증, 717/48 재현. 검증자가 남긴 비차단 관찰 3건을 전부 닫았다.
+
+- **I1 — over-strict guard partial parametrization**: `test_safe_actions_do_not_enqueue`가 safe action 4종 중 create+no_change 2종만 cover했다. **update+add_evidence 2종을 추가**해 4종 전량 parametrize(각 leg에 promote한 prior 매칭). CLAUDE.md "parametrized cases cover every enumerated boundary value" 충족. mutation 재실증: UPDATE 분기에 잘못 enqueue 추가 → 이 test FAIL(이제 update leg도 bite).
+- **I2 — conflict+ghost candidate raise 경로 회귀 부재**: `apply.py`가 review_queue configured일 때 conflict 분기에서 candidate 부재 시 `UnknownCandidate` raise하는데 회귀가 없었다. **`test_conflict_with_queue_and_ghost_candidate_raises` 신규**(raise + 큐 미적재 동시 검증). mutation 재실증: raise를 skip으로 교체 → 이 test FAIL. SoT v1.6.44 D6("candidate 부재 거절")의 conflict 분기 확장으로 정합.
+- **I3 — SoT 본문 §380 stale prose**: "미확정으로 남은 것" 목록이 "conflict/merge/split review queue 영속화"를 여전히 미해소로 나열했다. **conflict 영속화가 v1.6.59로 닫힘**(merge/split 산출·resolve/dismiss 전이는 Phase 6 잔여)을 peer 항목 스타일의 추적 괄호로 정정. changelog(canonical)와 본문 prose 정합.
+- 보강 후: focused 37 passed(+1 ghost), 전체 **718 passed / 48 skipped**(종전 717 + I2 신규 1; I1은 기존 test 확장이라 카운트 무변). `git diff --check` clean. mutation 2종 후 `apply.py` revert diff empty 확인.
+
 ## Next steps
 
 - HANDOFF Next Tasks #1의 남은 slice는 **오너 선택 대기**((b-4) hybrid 튜닝[최후순위 지시]·(c) 별칭 semantic·(e) canonical↔candidate dedup·Phase 6). 각 후보는 착수 결정 브리프 선행.

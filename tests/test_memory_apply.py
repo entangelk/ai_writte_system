@@ -356,23 +356,43 @@ class ApplyReviewQueuePersistenceTest(unittest.TestCase):
         self.assertEqual(len(memory.list_memories(project_id="project-1")), 0)
 
     def test_safe_actions_do_not_enqueue(self):
-        # Over-strict guard: create/no_change (safe/handled actions) must NEVER
-        # land in the review queue — only review-only actions do.
+        # Over-strict guard: EVERY safe/handled action (create/update/
+        # add_evidence/no_change) must NEVER land in the review queue — only
+        # review-only actions do. All 4 enumerated boundary values are covered,
+        # not just a sample, so an errant enqueue on any branch re-fails.
         memory, apply_service, queue = self._service_apply_queue()
+        prior_u = _promote(
+            memory, _candidate(candidate_id="prior-u", job_id="job-pu")
+        )
+        prior_e = _promote(
+            memory, _candidate(candidate_id="prior-e", job_id="job-pe")
+        )
+        prior_n = _promote(
+            memory, _candidate(candidate_id="prior-n", job_id="job-pn")
+        )
         create_cand = _candidate(candidate_id="new")
-        prior = _promote(memory, _candidate(candidate_id="prior", job_id="job-prior"))
+        update_cand = _candidate(candidate_id="upd")
+        evidence_cand = _candidate(candidate_id="evi")
         nochange_cand = _candidate(candidate_id="nc")
         _apply(
             apply_service,
             [
                 _proposal(create_cand, CompareAction.CREATE),
                 _proposal(
+                    update_cand, CompareAction.UPDATE, matched_memory_id=prior_u.id
+                ),
+                _proposal(
+                    evidence_cand,
+                    CompareAction.ADD_EVIDENCE,
+                    matched_memory_id=prior_e.id,
+                ),
+                _proposal(
                     nochange_cand,
                     CompareAction.NO_CHANGE,
-                    matched_memory_id=prior.id,
+                    matched_memory_id=prior_n.id,
                 ),
             ],
-            [create_cand, nochange_cand],
+            [create_cand, update_cand, evidence_cand, nochange_cand],
         )
         self.assertEqual(len(queue.list_open(project_id="project-1")), 0)
 
@@ -384,6 +404,18 @@ class ApplyReviewQueuePersistenceTest(unittest.TestCase):
         _apply(apply_service, [proposal], [cand])
         _apply(apply_service, [proposal], [cand])
         self.assertEqual(len(queue.list_open(project_id="project-1")), 1)
+
+    def test_conflict_with_queue_and_ghost_candidate_raises(self):
+        # When a review_queue is configured the conflict branch needs the
+        # candidate (for its job_id), so a proposal referencing a candidate not
+        # in the job raises UnknownCandidate — parallels the create-branch guard
+        # and extends SoT v1.6.44 D6 (candidate 부재 거절) into the conflict path.
+        # Nothing is enqueued on the raise.
+        _, apply_service, queue = self._service_apply_queue()
+        ghost = _candidate(candidate_id="ghost")
+        with self.assertRaises(UnknownCandidate):
+            _apply(apply_service, [_proposal(ghost, CompareAction.CONFLICT)], [])
+        self.assertEqual(len(queue.list_open(project_id="project-1")), 0)
 
     def test_conflict_without_queue_is_still_review_only(self):
         # Backward-compat: no review_queue injected → behavior unchanged, no raise.
