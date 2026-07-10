@@ -8,7 +8,9 @@ never inside compare):
 * ``update``       → new version, prior entry superseded (payload replaced).
 * ``add_evidence`` → new version, prior entry superseded (payload preserved).
 * ``no_change``    → no write.
-* ``conflict`` (and future ``merge``/``split``) → review-only, no write (D7).
+* ``conflict`` (and future ``merge``/``split``) → review-only, no write (D7);
+  persisted to the durable review queue when one is configured (2B.4 follow-up,
+  ``docs/plans/02b-4-review-queue-persistence-decisions.md``).
 
 The write itself is a deterministic system operation (not the Analysis AI): the
 proposals carry the already-decided labels. ``merge``/``split`` are not emitted
@@ -22,6 +24,7 @@ from enum import StrEnum
 
 from services.application.app.analysis.compare import ActionProposal, CompareAction
 from services.application.app.analysis.models import AnalysisCandidate
+from services.application.app.analysis.review_queue import ReviewQueueService
 from services.application.app.memory.models import PromotionMode
 from services.application.app.memory.service import MemoryService
 
@@ -57,8 +60,17 @@ class AppliedProposal:
 
 
 class MemoryApplyService:
-    def __init__(self, *, memory_service: MemoryService) -> None:
+    def __init__(
+        self,
+        *,
+        memory_service: MemoryService,
+        review_queue: ReviewQueueService | None = None,
+    ) -> None:
         self._memory = memory_service
+        # 2B.4 follow-up: when configured, review-only (conflict) proposals are
+        # persisted to a durable review queue instead of being dropped after the
+        # apply response. Optional so existing callers/tests keep their behavior.
+        self._review_queue = review_queue
 
     def apply_proposals(
         self,
@@ -88,7 +100,24 @@ class MemoryApplyService:
             return self._skip(proposal, ApplyOutcome.NO_CHANGE)
         if action is CompareAction.CONFLICT:
             # D7: conflict (and future merge/split) is review-only — never an
-            # automatic write.
+            # automatic write. Persist it to the durable review queue (when
+            # configured) so the unresolved conflict is reconcilable later
+            # instead of being lost after the apply response.
+            if self._review_queue is not None:
+                candidate = by_id.get(proposal.candidate_id)
+                if candidate is None:
+                    raise UnknownCandidate(
+                        f"candidate {proposal.candidate_id} is not part of this job"
+                    )
+                self._review_queue.enqueue(
+                    project_id=project_id,
+                    job_id=candidate.job_id,
+                    candidate_id=proposal.candidate_id,
+                    candidate_type=proposal.candidate_type,
+                    action=action,
+                    matched_memory_id=proposal.matched_memory_id,
+                    rationale=proposal.rationale,
+                )
             return self._skip(proposal, ApplyOutcome.SKIPPED_REVIEW)
 
         candidate = by_id.get(proposal.candidate_id)

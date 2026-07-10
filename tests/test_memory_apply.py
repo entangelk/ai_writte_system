@@ -7,6 +7,11 @@ from services.application.app.analysis.apply import (
     UnknownCandidate,
 )
 from services.application.app.analysis.compare import ActionProposal, CompareAction
+from services.application.app.analysis.review_queue import (
+    InMemoryReviewQueueRepository,
+    ReviewQueueService,
+    ReviewQueueStatus,
+)
 from services.application.app.analysis.models import (
     AnalysisCandidate,
     AnalysisCandidateAction,
@@ -318,6 +323,76 @@ class ApplySkipTest(unittest.TestCase):
         self.assertEqual(applied.outcome, ApplyOutcome.SKIPPED_REVIEW)
         self.assertIsNone(applied.memory_id)
         self.assertEqual(len(memory.list_memories(project_id="project-1")), 0)
+
+
+class ApplyReviewQueuePersistenceTest(unittest.TestCase):
+    """2B.4 follow-up: review-only (conflict) proposals persist to the queue."""
+
+    def _service_apply_queue(self):
+        memory = MemoryService(InMemoryMemoryRepository())
+        queue = ReviewQueueService(InMemoryReviewQueueRepository())
+        return memory, MemoryApplyService(
+            memory_service=memory, review_queue=queue
+        ), queue
+
+    def test_conflict_persists_open_review_entry(self):
+        # Under-strict guard: if apply stops enqueuing conflicts, the queue is
+        # empty and this re-fails.
+        memory, apply_service, queue = self._service_apply_queue()
+        cand = _candidate(candidate_id="cur", job_id="job-current")
+        [applied] = _apply(
+            apply_service,
+            [_proposal(cand, CompareAction.CONFLICT, matched_memory_id="mem-x")],
+            [cand],
+        )
+        self.assertEqual(applied.outcome, ApplyOutcome.SKIPPED_REVIEW)
+        [entry] = queue.list_open(project_id="project-1")
+        self.assertEqual(entry.action, CompareAction.CONFLICT)
+        self.assertEqual(entry.candidate_id, "cur")
+        self.assertEqual(entry.job_id, "job-current")
+        self.assertEqual(entry.matched_memory_id, "mem-x")
+        self.assertEqual(entry.status, ReviewQueueStatus.OPEN)
+        # still no canonical write (D7)
+        self.assertEqual(len(memory.list_memories(project_id="project-1")), 0)
+
+    def test_safe_actions_do_not_enqueue(self):
+        # Over-strict guard: create/no_change (safe/handled actions) must NEVER
+        # land in the review queue — only review-only actions do.
+        memory, apply_service, queue = self._service_apply_queue()
+        create_cand = _candidate(candidate_id="new")
+        prior = _promote(memory, _candidate(candidate_id="prior", job_id="job-prior"))
+        nochange_cand = _candidate(candidate_id="nc")
+        _apply(
+            apply_service,
+            [
+                _proposal(create_cand, CompareAction.CREATE),
+                _proposal(
+                    nochange_cand,
+                    CompareAction.NO_CHANGE,
+                    matched_memory_id=prior.id,
+                ),
+            ],
+            [create_cand, nochange_cand],
+        )
+        self.assertEqual(len(queue.list_open(project_id="project-1")), 0)
+
+    def test_reapplying_same_conflict_does_not_duplicate(self):
+        # D3: apply replay is idempotent; the deterministic entry id upserts.
+        _, apply_service, queue = self._service_apply_queue()
+        cand = _candidate(candidate_id="cur", job_id="job-current")
+        proposal = _proposal(cand, CompareAction.CONFLICT)
+        _apply(apply_service, [proposal], [cand])
+        _apply(apply_service, [proposal], [cand])
+        self.assertEqual(len(queue.list_open(project_id="project-1")), 1)
+
+    def test_conflict_without_queue_is_still_review_only(self):
+        # Backward-compat: no review_queue injected → behavior unchanged, no raise.
+        memory, apply_service = _service_and_apply()
+        cand = _candidate(candidate_id="cur")
+        [applied] = _apply(
+            apply_service, [_proposal(cand, CompareAction.CONFLICT)], [cand]
+        )
+        self.assertEqual(applied.outcome, ApplyOutcome.SKIPPED_REVIEW)
 
 
 class ApplyUnknownCandidateTest(unittest.TestCase):

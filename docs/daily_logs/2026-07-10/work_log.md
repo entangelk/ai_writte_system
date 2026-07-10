@@ -60,7 +60,31 @@
 - `git diff --check` clean. 변경은 `HANDOFF.md` Project Structure 2행뿐(계약 literal·SoT 버전·프로덕션 코드 무변 → SoT bump 없음).
 - 각 수정 항목을 primary source로 재확인: worker candidate drain/`--loop`은 `scripts/index_sync_worker.py`에서, backfill 스크립트 존재는 `ls scripts/`에서 실증.
 
+## 3차 작업 — (d) conflict review queue 영속화 (SoT v1.6.59)
+
+- **선택 근거**: 오너가 "c,d,e 중 작은 것" 지시. 조사 결과 **(d)가 최소·자족**: (c)는 embedding semantic 매칭+캘리브레이션(live 의존), (e)는 semantic dedup+Phase 6 결합이라 규모/상류 의존이 큼. (d)는 상류 의존 없는 순수 additive 영속화 — 현재 `conflict` proposal이 `apply.py`에서 `SKIPPED_REVIEW`로 버려지던 것을 durable store에 영속화.
+- **오너 결정**(AskUserQuestion 2문): **D1=최소 영속화만**(status=`open` 단일, resolve/dismiss 전이는 Phase 6 forward-defense — candidate needs_review-only 동형)·**D2=GET list 엔드포인트 추가**. 브리프 `docs/plans/02b-4-review-queue-persistence-decisions.md`에 D1~D4(+D3 결정적 id 멱등·D4 action generic) 기록.
+- **구현**:
+  - 신규 `services/application/app/analysis/review_queue.py`: `ReviewQueueEntry`·`ReviewQueueStatus(OPEN)`·`ReviewQueueRepository` Protocol·`InMemoryReviewQueueRepository`·`ReviewQueueService`(enqueue/list_open)·`derive_review_queue_id`(`(project_id,job_id,candidate_id,action)` canonical-JSON SHA-256 — 2A `logical_key` 선례, apply replay 멱등 upsert).
+  - 신규 `services/application/app/analysis/review_queue_mongo_repository.py`: `MongoReviewQueueRepository`(collection `review_queue`, deterministic `_id` upsert, project+status index).
+  - `analysis/apply.py`: `MemoryApplyService`에 optional `review_queue` 주입. conflict 분기에서 candidate.job_id로 enqueue. **미주입 시 동작 불변**(하위호환) — 기존 conflict 테스트 무영향.
+  - `main.py`: `_default_review_queue_service`(Mongo 구성 시 Mongo repo, 없으면 in-memory) + `create_app`에 `review_queue_service` 주입 param + apply_service 배선 + `GET /projects/{id}/analysis/review-queue`(open 조회, missing project 404) + `_review_queue_entry_payload`.
+- **회귀 +13**(양방향 guard):
+  - `tests/test_review_queue.py`(신규, 5): enqueue 필드·결정적 id·**멱등 upsert 미중복(under-strict)**·**서로 다른 candidate는 별개 entry(over-strict)**·project scope.
+  - `tests/test_memory_apply.py`(+4): **conflict→enqueue(under-strict: enqueue 제거 시 재실패)**·**safe action(create/no_change) 미enqueue(over-strict)**·재적용 미중복·queue 미주입 하위호환.
+  - `tests/test_analysis_apply_api.py`(+4): conflict apply→GET 관통·재적용 미중복·빈 큐 `[]`·missing project 404.
+- **성격**: 새 public HTTP 엔드포인트 + store 계약 신설 → SoT v1.6.59 bump. 기존 계약 literal 무변경(2B.4 apply conflict posture를 "버림"→"영속화"로 확장).
+
+### Verification (3차)
+
+- `python3 -m pytest tests/test_review_queue.py tests/test_memory_apply.py tests/test_analysis_apply_api.py -q` → **36 passed**.
+- 전체: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **717 passed / 48 skipped**(종전 704 + 13). `git diff --check` clean.
+- `create_app()` 부팅 확인: `/projects/{project_id}/analysis/review-queue` 라우트 등록·`derive_review_queue_id` 결정성 실증.
+- 문서: SoT v1.6.59 버전 로그·헤더, CHANGELOG, HANDOFF(Current Status·Active Decisions·Owner Decisions·Next Tasks·Verification·Project Structure) 갱신.
+- **미검증(sandbox 밖)**: `MongoReviewQueueRepository` 실 Mongo round-trip(in-memory repo·mongo repo 대칭 구조로 작성, 실 upsert/index는 sandbox 밖 후속 — 프로젝트의 mongo repo 검증 관례와 동일).
+
 ## Next steps
 
-- HANDOFF Next Tasks #1의 다음 slice는 여전히 **오너 선택 대기**((b-4) hybrid 튜닝[최후순위 지시]·(c)~(e)·Phase 6). 각 후보는 착수 결정 브리프 선행.
+- HANDOFF Next Tasks #1의 남은 slice는 **오너 선택 대기**((b-4) hybrid 튜닝[최후순위 지시]·(c) 별칭 semantic·(e) canonical↔candidate dedup·Phase 6). 각 후보는 착수 결정 브리프 선행.
+- (d) 후속: resolve/dismiss/reconcile 전이·merge/split 산출·큐 기반 재조정 write는 Phase 6. `MongoReviewQueueRepository` 실 Mongo round-trip은 sandbox 밖.
 - sandbox 밖 후속(코드 완료, 여기서 막힘)은 무변: 2B.6 threshold 캘리브레이션·2B.5/b-2/b-6 live 관통·ES-lexical/vector live backfill.

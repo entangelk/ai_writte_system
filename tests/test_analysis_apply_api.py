@@ -317,5 +317,64 @@ class ApplyReindexEnqueueWiringTest(unittest.TestCase):
         self.assertEqual(entries[0].source.mongo_id, memory_id)
 
 
+class ReviewQueueApiTest(unittest.TestCase):
+    """2B.4 follow-up: applying a conflict persists it to the review queue, and
+    the GET list endpoint (D2) surfaces the open entry end-to-end."""
+
+    def _apply_conflict(self, client, project_id, job, candidate):
+        return client.post(
+            f"/projects/{project_id}/analysis/jobs/{job.id}/apply",
+            json={
+                "proposals": [
+                    {"candidate_id": candidate.id, "action": "conflict"}
+                ]
+            },
+        )
+
+    def test_conflict_apply_surfaces_in_review_queue(self):
+        client, analysis, _memory, project_id = _build()
+        job, candidate = _seed_candidate(
+            analysis, project_id=project_id, logical_key="c1",
+            payload={"name": "Ariel", "observation": "brave"},
+        )
+
+        applied = self._apply_conflict(client, project_id, job, candidate)
+        self.assertEqual(applied.status_code, 200)
+        self.assertEqual(
+            applied.json()["applied"][0]["outcome"], "skipped_review"
+        )
+
+        listed = client.get(f"/projects/{project_id}/analysis/review-queue")
+        self.assertEqual(listed.status_code, 200)
+        entries = listed.json()["entries"]
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["candidate_id"], candidate.id)
+        self.assertEqual(entries[0]["job_id"], job.id)
+        self.assertEqual(entries[0]["action"], "conflict")
+        self.assertEqual(entries[0]["status"], "open")
+
+    def test_reapplying_conflict_does_not_duplicate(self):
+        client, analysis, _memory, project_id = _build()
+        job, candidate = _seed_candidate(
+            analysis, project_id=project_id, logical_key="c1",
+            payload={"name": "Ariel", "observation": "brave"},
+        )
+        self._apply_conflict(client, project_id, job, candidate)
+        self._apply_conflict(client, project_id, job, candidate)
+        listed = client.get(f"/projects/{project_id}/analysis/review-queue")
+        self.assertEqual(len(listed.json()["entries"]), 1)
+
+    def test_empty_queue_returns_empty_list(self):
+        client, _analysis, _memory, project_id = _build()
+        listed = client.get(f"/projects/{project_id}/analysis/review-queue")
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.json()["entries"], [])
+
+    def test_missing_project_returns_404(self):
+        client, _analysis, _memory, _project_id = _build()
+        listed = client.get("/projects/missing/analysis/review-queue")
+        self.assertEqual(listed.status_code, 404)
+
+
 if __name__ == "__main__":
     unittest.main()

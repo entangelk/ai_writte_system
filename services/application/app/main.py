@@ -49,6 +49,10 @@ from services.application.app.analysis.compare_judge import (
     TerminalJsonCompareJudge,
     seed_analysis_compare_template,
 )
+from services.application.app.analysis.review_queue import (
+    InMemoryReviewQueueRepository,
+    ReviewQueueService,
+)
 from services.application.app.analysis.source import CoreSotSourceAdapter
 from services.llm_gateway.app.errors import ProviderError
 from services.application.app.memory.models import PromotionMode
@@ -244,6 +248,26 @@ def _default_memory_service(
         repository,
         auto_promotion_threshold=auto_threshold,
         reindex_outbox=reindex_outbox,
+    )
+
+
+def _default_review_queue_service() -> ReviewQueueService:
+    # 2B.4 follow-up: durable review queue for review-only (conflict) proposals.
+    # Mongo-backed when configured, else the non-durable in-memory repo.
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if not uri:
+        return ReviewQueueService(InMemoryReviewQueueRepository())
+
+    from services.application.app.analysis.review_queue_mongo_repository import (
+        MongoReviewQueueRepository,
+    )
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+
+    return ReviewQueueService(
+        MongoReviewQueueRepository.from_uri(
+            uri,
+            db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME),
+        )
     )
 
 
@@ -660,6 +684,7 @@ def create_app(
     index_sync_outbox: IndexSyncOutboxService | None = None,
     context_search_service: ContextSearchService | None = None,
     compare_service: AnalysisCompareService | None = None,
+    review_queue_service: ReviewQueueService | None = None,
     vector_index: InMemoryVectorIndexAdapter | None = None,
 ) -> FastAPI:
     app = FastAPI(title="AI Writing System Application")
@@ -689,7 +714,12 @@ def create_app(
     # writes only (no LLM); reindex enqueue is owned by MemoryService (2B.5 D3=B
     # choke point), so apply needs no index hook
     # (docs/plans/02b-4-memory-versioned-upsert-decisions.md, D1=A).
-    apply_service = MemoryApplyService(memory_service=memory)
+    # 2B.4 follow-up: review-only (conflict) proposals persist to a durable
+    # review queue (docs/plans/02b-4-review-queue-persistence-decisions.md).
+    review_queue = review_queue_service or _default_review_queue_service()
+    apply_service = MemoryApplyService(
+        memory_service=memory, review_queue=review_queue
+    )
     runner = analysis_runner
     if runner is None:
         runner = _default_analysis_runner(core_sot=core_sot, analysis=analysis)
@@ -1401,6 +1431,18 @@ def create_app(
             "idempotent_replay": applied.idempotent_replay,
         }
 
+    def _review_queue_entry_payload(entry) -> dict[str, object]:
+        return {
+            "id": entry.id,
+            "job_id": entry.job_id,
+            "candidate_id": entry.candidate_id,
+            "candidate_type": entry.candidate_type.value,
+            "action": entry.action.value,
+            "matched_memory_id": entry.matched_memory_id,
+            "rationale": entry.rationale,
+            "status": entry.status.value,
+        }
+
     @app.post("/projects/{project_id}/analysis/jobs/{job_id}/apply")
     async def analysis_apply_endpoint(
         project_id: str, job_id: str, request: ApplyMemoryRequest
@@ -1459,6 +1501,21 @@ def create_app(
         return {
             "job_id": job.id,
             "applied": [_applied_proposal_payload(a) for a in applied],
+        }
+
+    @app.get("/projects/{project_id}/analysis/review-queue")
+    def analysis_review_queue_endpoint(project_id: str) -> dict[str, object]:
+        # 2B.4 follow-up: list the project's open review-only (conflict) entries
+        # persisted by apply, so an unresolved conflict is observable/reconcilable
+        # (docs/plans/02b-4-review-queue-persistence-decisions.md, D2).
+        try:
+            _require_project_exists(project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        entries = review_queue.list_open(project_id)
+        return {
+            "project_id": project_id,
+            "entries": [_review_queue_entry_payload(e) for e in entries],
         }
 
     def _context_item_payload(item) -> dict[str, object]:
