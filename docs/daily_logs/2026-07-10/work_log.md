@@ -44,6 +44,22 @@
 - **outstanding #1 — over-strict 실행 경로 실증**(종전 논리-only): 이 sandbox에 `elasticsearch>=8,<9`(requirements.txt 핀, 설치 8.19.3)를 scratchpad 격리 디렉토리에 `pip install --target`으로 설치하고 **PYTHONPATH 주입으로만** 노출(시스템 Python 무오염, 가역적). 패키지 present 시 guard가 skip하지 않고 3개 실행·전부 PASS(파일 단독 16 passed/0 skipped, 전체 스위트 **707 passed/45 skipped**) → over-strict 방향(`find_spec is not None`→실행) 실증, b-5 회귀 잠금이 패키지 있는 환경에서 유지됨을 확인. PYTHONPATH 미주입 시 `find_spec`=None·파일 단독 13/3으로 원상복구 확인(격리 무오염). under/over 양방향 실증 완료.
 - **outstanding #2 — HANDOFF:103 stale 정정**: 오너 승인 하에 `HANDOFF.md:103` Project Structure 주석 `(Approved, v1.6.57)`→`(Approved, v1.6.58)` 1행 정정(8행과 정합). 선재 stale 독립 정정.
 
+## 2차 작업 — HANDOFF Project Structure 정합 소청소 (문서 전용)
+
+- **선택 근거**: 오너가 "튜닝 제외·브리프 불필요·자족적 소슬라이스" 3후보(b-2 candidate live smoke 드라이버 / (d) review queue 착수 브리프 / 문서 정합) 중 **문서 정합**을 선택. 100% sandbox 안 검증 가능하고 계약·프로덕션 코드 무변.
+- **문제**: `HANDOFF.md` Project Structure의 `scripts/` 블록 2곳이 stale:
+  1. `index_sync_worker.py` 주석이 `# 3B archive drain + 2B.5 memory reindex drain` — 실제로는 **b-2 candidate 색인 drain**(v1.6.54)과 **`--loop` compose 데몬 모드**(b-6 증분1 / v1.6.56)까지 하는데 미반영. (`scripts/index_sync_worker.py:146` `_build_candidate_adapter`, `:236` `--loop`, `:320` `run_loop`로 실증.)
+  2. `phase2b5_reindex_candidate.py`(v1.6.58 신설, candidate vector+lexical backfill)가 목록에서 **완전 누락**. 디스크엔 존재.
+- **수정**(외과적, 문서 1파일 2행):
+  - `index_sync_worker.py` 주석 → `# 3B archive + 2B.5 memory reindex + b-2 candidate 색인 drain (--loop compose 서비스, b-6 증분1)`.
+  - 마지막 줄에 `phase2b5_reindex_candidate.py(둘 다 vector+lexical backfill, v1.6.58)` 추가.
+- **인접 gap(수정 안 함, §3 준수)**: `scripts/phase3a_rebuild_source_block_index.py`(CLI rebuild)는 `phase3a_*_smoke.py` glob에 안 잡혀 Project Structure에 표현이 없다. 다만 이는 최근 버전 작업과 무관한 **선재 누락**이고 오너가 승인한 스코프(위 2개 항목) 밖이라 이번엔 손대지 않고 기록만 남긴다 — 필요 시 별도 정합에서 처리.
+
+### Verification (2차)
+
+- `git diff --check` clean. 변경은 `HANDOFF.md` Project Structure 2행뿐(계약 literal·SoT 버전·프로덕션 코드 무변 → SoT bump 없음).
+- 각 수정 항목을 primary source로 재확인: worker candidate drain/`--loop`은 `scripts/index_sync_worker.py`에서, backfill 스크립트 존재는 `ls scripts/`에서 실증.
+
 ## Next steps
 
 - HANDOFF Next Tasks #1의 다음 slice는 여전히 **오너 선택 대기**((b-4) hybrid 튜닝[최후순위 지시]·(c)~(e)·Phase 6). 각 후보는 착수 결정 브리프 선행.

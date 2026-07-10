@@ -127,7 +127,7 @@ tests/                           # 67개 모듈(도메인별 회귀 + live/smoke
 scripts/
 ├── smoke_llm_provider.py · benchmark_llm_provider.py
 ├── phase2a_*_smoke.py · phase3a_*_smoke.py · phase4_context_search_*_smoke.py · phase4_lexical_memory_live_smoke.py
-├── index_sync_worker.py         # 3B archive drain + 2B.5 memory reindex drain
+├── index_sync_worker.py         # 3B archive + 2B.5 memory reindex + b-2 candidate 색인 drain (--loop compose 서비스, b-6 증분1)
 ├── phase2b3_compare_judge_live_smoke.py
-└── phase2b5_reindex_memory.py · phase2b5_memory_reindex_live_smoke.py
+└── phase2b5_reindex_memory.py · phase2b5_reindex_candidate.py(둘 다 vector+lexical backfill, v1.6.58) · phase2b5_memory_reindex_live_smoke.py
 ```
