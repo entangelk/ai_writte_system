@@ -10,6 +10,7 @@ behind) both re-fail.
 from datetime import datetime, timezone
 import types
 import unittest
+from dataclasses import replace
 
 
 def _utc(*args):
@@ -276,7 +277,7 @@ class VectorDrainTest(unittest.TestCase):
         # under-strict: a removed candidate's vector must be dropped (self-heal).
         self.assertEqual(index.list_candidate_records(project_id="project-1"), ())
 
-    def test_non_needs_review_status_deletes_vector_forward_defense(self):
+    def test_non_needs_review_status_deletes_vector(self):
         index = InMemoryCandidateVectorIndexAdapter()
         index.upsert_candidate_records(
             (
@@ -285,10 +286,11 @@ class VectorDrainTest(unittest.TestCase):
                 ),
             )
         )
-        # Phase 6 forward-defense: a candidate whose status left needs_review is
-        # de-indexed (unreachable while the enum is single-valued, so use a stub).
-        transitioned = types.SimpleNamespace(id="cand-1", project_id="project-1",
-                                             status=object())
+        # Phase 6 (v1.6.61) real path: a confirmed/rejected candidate left
+        # needs_review, so a CANDIDATE_REMOVED (or upsert) drain de-indexes it.
+        transitioned = replace(
+            _candidate(), status=AnalysisCandidateStatus.CONFIRMED
+        )
         self._adapter(_StubAnalysis(transitioned), index).index_candidate(_entry())
         self.assertEqual(index.list_candidate_records(project_id="project-1"), ())
 
@@ -432,7 +434,7 @@ class LexicalDrainTest(unittest.TestCase):
         )
         self.assertEqual(index.search(project_id="project-1", query="storm", limit=5), ())
 
-    def test_non_needs_review_deletes_doc_forward_defense(self):
+    def test_non_needs_review_deletes_doc(self):
         index = InMemoryCandidateLexicalIndexAdapter()
         index.index_candidate_records(
             (
@@ -442,8 +444,11 @@ class LexicalDrainTest(unittest.TestCase):
                 ),
             )
         )
-        transitioned = types.SimpleNamespace(id="cand-1", project_id="project-1",
-                                             status=object())
+        # Phase 6 (v1.6.61) real path: a confirmed candidate is de-indexed.
+        transitioned = replace(
+            _candidate(payload={"event": "storm"}, candidate_type=EVENT),
+            status=AnalysisCandidateStatus.CONFIRMED,
+        )
         self._adapter(_StubAnalysis(transitioned), index).index_candidate(_entry())
         self.assertEqual(index.search(project_id="project-1", query="storm", limit=5), ())
 
@@ -647,6 +652,38 @@ class WorkerDispatchTest(unittest.TestCase):
         # missing adapter must fail the entry, not silently succeed.
         self.assertEqual(summary.entries_succeeded, 0)
         self.assertEqual(summary.entries_failed, 1)
+
+    def test_candidate_removed_routes_to_candidate_adapter_and_deletes(self):
+        # Phase 6 (v1.6.61): a CANDIDATE_REMOVED event must route through the same
+        # per-sink candidate path (_PER_SINK_EVENTS) and reconcile-delete the stale
+        # vector of a candidate that left needs_review. Locks the enqueue + routing
+        # end-to-end, not just the adapter's delete branch. Removing CANDIDATE_REMOVED
+        # from _PER_SINK_EVENTS re-fails this (it would fall to the archive path).
+        repo = InMemoryIndexSyncRepository()
+        outbox = IndexSyncOutboxService(repo)
+        index = InMemoryCandidateVectorIndexAdapter()
+        index.upsert_candidate_records(
+            (build_candidate_index_record(
+                _candidate(), text="x", vector=(1.0, 0.0, 0.0, 0.0)),)
+        )
+        confirmed = replace(_candidate(), status=AnalysisCandidateStatus.CONFIRMED)
+        adapter = CandidateIndexSyncAdapter(
+            analysis_service=_StubAnalysis(confirmed),
+            embeddings=DeterministicFakeEmbeddingProvider(),
+            vector_index=index,
+        )
+        worker = IndexSyncWorker(
+            repository=repo,
+            archive_adapter=RecordingArchiveIndexMutationAdapter(),
+            candidate_adapter=_composite(
+                (VECTOR_TARGET, CHROMA_VECTOR_BACKEND, adapter)
+            ),
+        )
+        outbox.enqueue_candidate_removed(project_id="project-1", candidate_id="cand-1")
+        summary = worker.run_once(limit=10)
+        self.assertEqual(summary.entries_succeeded, 1)
+        self.assertEqual(index.list_candidate_records(project_id="project-1"), ())
+        self.assertEqual(repo.outbox_entries, {})
 
 
 class PerSinkBookkeepingTest(unittest.TestCase):

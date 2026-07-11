@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from numbers import Real
 from typing import Any, Protocol
 
@@ -41,6 +41,10 @@ class CandidateReindexOutbox(Protocol):
         self, *, project_id: str, candidate_id: str
     ) -> object: ...
 
+    def enqueue_candidate_removed(
+        self, *, project_id: str, candidate_id: str
+    ) -> object: ...
+
 
 class AnalysisError(ValueError):
     pass
@@ -60,6 +64,29 @@ class InvalidCandidateSource(InvalidAnalysisCandidate):
 
 class InvalidJobStateTransition(AnalysisError):
     pass
+
+
+class InvalidCandidateStateTransition(AnalysisError):
+    """A candidate status transition is not one of the legal edges (Phase 6)."""
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateTransition:
+    candidate: AnalysisCandidate
+    changed: bool
+
+
+# Phase 6 (v1.6.61): a needs_review candidate is confirmed or rejected. Both are
+# terminal — there is no path back to needs_review or across to the other
+# terminal (that would silently overturn a review).
+_ALLOWED_CANDIDATE_TRANSITIONS: frozenset[
+    tuple[AnalysisCandidateStatus, AnalysisCandidateStatus]
+] = frozenset(
+    {
+        (AnalysisCandidateStatus.NEEDS_REVIEW, AnalysisCandidateStatus.CONFIRMED),
+        (AnalysisCandidateStatus.NEEDS_REVIEW, AnalysisCandidateStatus.REJECTED),
+    }
+)
 
 
 _ALLOWED_JOB_TRANSITIONS: frozenset[tuple[AnalysisJobStatus, AnalysisJobStatus]] = (
@@ -162,6 +189,12 @@ class InMemoryAnalysisRepository:
             ] = candidate.id
         self.candidates = next_candidates
         self._candidate_request_index = next_candidate_index
+
+    def update_candidate(self, candidate: AnalysisCandidate) -> None:
+        # Phase 6 status transition: replace the stored candidate in place
+        # (mirrors update_job). The request index is keyed on logical_key, which
+        # a status transition does not change, so it stays intact.
+        self.candidates = {**self.candidates, candidate.id: candidate}
 
     def list_candidates_for_job(
         self, project_id: str, job_id: str
@@ -476,6 +509,28 @@ class AnalysisService:
         self, *, project_id: str, candidate_id: str
     ) -> AnalysisCandidate:
         return self._require_candidate(project_id, candidate_id)
+
+    def transition_candidate(
+        self,
+        *,
+        project_id: str,
+        candidate_id: str,
+        target: AnalysisCandidateStatus,
+    ) -> "CandidateTransition":
+        """Phase 6 candidate status state machine (mirror of ``_transition_job``).
+
+        Idempotent (D4): re-applying the current status is a no-op replay
+        (``changed=False``). A cross-terminal or backward edge is rejected."""
+        candidate = self._require_candidate(project_id, candidate_id)
+        if candidate.status is target:
+            return CandidateTransition(candidate=candidate, changed=False)
+        if (candidate.status, target) not in _ALLOWED_CANDIDATE_TRANSITIONS:
+            raise InvalidCandidateStateTransition(
+                f"cannot transition candidate from {candidate.status} to {target}"
+            )
+        updated = replace(candidate, status=target)
+        self._repo.update_candidate(updated)
+        return CandidateTransition(candidate=updated, changed=True)
 
     def _validate_candidate_request(
         self,

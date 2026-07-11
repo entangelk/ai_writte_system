@@ -50,7 +50,13 @@ ELASTICSEARCH_BACKEND = "elasticsearch"
 # Events whose drain fans out to per-sink (vector + lexical) bookkeeping. Archive
 # events stay on the single-sink whole-event path (only a vector sink exists).
 _PER_SINK_EVENTS = frozenset(
-    {IndexSyncEvent.MEMORY_UPSERTED, IndexSyncEvent.CANDIDATE_UPSERTED}
+    {
+        IndexSyncEvent.MEMORY_UPSERTED,
+        IndexSyncEvent.CANDIDATE_UPSERTED,
+        # Phase 6 (v1.6.61): removal reconciles the same candidate sinks; the
+        # adapter re-derives status and deletes when not needs_review.
+        IndexSyncEvent.CANDIDATE_REMOVED,
+    }
 )
 
 
@@ -365,6 +371,22 @@ class IndexSyncOutboxService:
         return self._enqueue_event(
             project_id=project_id,
             event=IndexSyncEvent.CANDIDATE_UPSERTED,
+            source=IndexSyncSource(
+                mongo_collection=CANDIDATES_COLLECTION,
+                mongo_id=candidate_id,
+            ),
+        )
+
+    def enqueue_candidate_removed(
+        self, *, project_id: str, candidate_id: str
+    ) -> IndexSyncOutboxEntry:
+        # Phase 6 (v1.6.61): a candidate left needs_review (confirmed/rejected);
+        # the worker deletes it from the candidate index. Dedup is per
+        # candidate_id, so a replay collapses onto the same pending entry. See
+        # candidate_index.CandidateIndexSyncAdapter.drain (removed branch).
+        return self._enqueue_event(
+            project_id=project_id,
+            event=IndexSyncEvent.CANDIDATE_REMOVED,
             source=IndexSyncSource(
                 mongo_collection=CANDIDATES_COLLECTION,
                 mongo_id=candidate_id,

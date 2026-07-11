@@ -87,5 +87,47 @@ class ReviewQueueScopeTest(unittest.TestCase):
         self.assertEqual(len(service.list_open("project-3")), 0)
 
 
+class ReviewQueueTransitionTest(unittest.TestCase):
+    """Phase 6 (v1.6.61): open→resolved/dismissed candidate transitions."""
+
+    def test_resolve_for_candidate_closes_open_entries(self):
+        # under-strict: a resolved entry leaves the open list.
+        service = _service()
+        _enqueue(service, candidate_id="cand-1")
+        [closed] = service.resolve_for_candidate(
+            project_id="project-1", candidate_id="cand-1"
+        )
+        self.assertEqual(closed.status, ReviewQueueStatus.RESOLVED)
+        self.assertEqual(service.list_open("project-1"), ())
+
+    def test_dismiss_for_candidate_closes_open_entries(self):
+        service = _service()
+        _enqueue(service, candidate_id="cand-1")
+        [closed] = service.dismiss_for_candidate(
+            project_id="project-1", candidate_id="cand-1"
+        )
+        self.assertEqual(closed.status, ReviewQueueStatus.DISMISSED)
+        self.assertEqual(service.list_open("project-1"), ())
+
+    def test_transition_is_candidate_scoped(self):
+        # over-strict: resolving one candidate must not touch another's entry.
+        service = _service()
+        _enqueue(service, candidate_id="cand-1")
+        _enqueue(service, candidate_id="cand-2")
+        service.resolve_for_candidate(project_id="project-1", candidate_id="cand-1")
+        open_ids = {e.candidate_id for e in service.list_open("project-1")}
+        self.assertEqual(open_ids, {"cand-2"})
+
+    def test_transition_is_idempotent_noop_when_no_open_entries(self):
+        # D4: a replay (nothing open) transitions nothing and does not error.
+        service = _service()
+        _enqueue(service, candidate_id="cand-1")
+        service.resolve_for_candidate(project_id="project-1", candidate_id="cand-1")
+        replay = service.resolve_for_candidate(
+            project_id="project-1", candidate_id="cand-1"
+        )
+        self.assertEqual(replay, ())
+
+
 if __name__ == "__main__":
     unittest.main()

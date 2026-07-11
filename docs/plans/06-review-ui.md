@@ -65,7 +65,7 @@ review inbox → 후보와 근거 확인
 
 ## 착수 전 결정사항
 
-- [ ] 사용자가 승인하면 `confirmed`인지 `canonical`인지
+- [x] 사용자가 승인하면 `confirmed`인지 `canonical`인지 — **v1.6.61 확정**(브리프 `06-candidate-state-transition-decisions.md`, D1=분리 모델: 둘 다 — candidate는 `confirmed`, canonical `MemoryEntry`로 promotion). 백엔드 상태 전이만 구현; 아래 UI/merge/split은 계속 미확정.
 - [ ] 후보 수정이 원 후보의 새 version인지 별도 사용자 기억인지
 - [ ] entity merge/split을 MVP UI에 포함할지
 - [ ] create/update/add_evidence/conflict별 승인 UI와 권한

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Protocol
 
@@ -33,9 +33,12 @@ from services.application.app.analysis.models import AnalysisCandidateType
 
 
 class ReviewQueueStatus(StrEnum):
-    # Single state this slice mints. open→resolved/dismissed transitions are the
-    # Phase 6 review state machine (docs/plans/06-review-ui.md), not here.
     OPEN = "open"
+    # Phase 6 (v1.6.61): a candidate transition closes its open conflict entries.
+    # confirm → resolved (the conflict was decided in favor of the candidate),
+    # reject → dismissed (the candidate and its conflict are set aside).
+    RESOLVED = "resolved"
+    DISMISSED = "dismissed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +78,10 @@ class ReviewQueueRepository(Protocol):
         self, project_id: str
     ) -> tuple[ReviewQueueEntry, ...]: ...
 
+    def list_open_for_candidate(
+        self, project_id: str, candidate_id: str
+    ) -> tuple[ReviewQueueEntry, ...]: ...
+
 
 class InMemoryReviewQueueRepository:
     """Non-durable ``ReviewQueueRepository`` for tests / the no-Mongo path."""
@@ -92,6 +99,17 @@ class InMemoryReviewQueueRepository:
             entry
             for entry in self._entries.values()
             if entry.project_id == project_id
+            and entry.status is ReviewQueueStatus.OPEN
+        )
+
+    def list_open_for_candidate(
+        self, project_id: str, candidate_id: str
+    ) -> tuple[ReviewQueueEntry, ...]:
+        return tuple(
+            entry
+            for entry in self._entries.values()
+            if entry.project_id == project_id
+            and entry.candidate_id == candidate_id
             and entry.status is ReviewQueueStatus.OPEN
         )
 
@@ -133,3 +151,43 @@ class ReviewQueueService:
 
     def list_open(self, project_id: str) -> tuple[ReviewQueueEntry, ...]:
         return self._repository.list_open_for_project(project_id)
+
+    def resolve_for_candidate(
+        self, *, project_id: str, candidate_id: str
+    ) -> tuple[ReviewQueueEntry, ...]:
+        """Close a candidate's open conflict entries as RESOLVED (confirm path).
+
+        Idempotent: a replay finds no open entries and is a no-op."""
+        return self._transition_candidate_entries(
+            project_id=project_id,
+            candidate_id=candidate_id,
+            target=ReviewQueueStatus.RESOLVED,
+        )
+
+    def dismiss_for_candidate(
+        self, *, project_id: str, candidate_id: str
+    ) -> tuple[ReviewQueueEntry, ...]:
+        """Close a candidate's open conflict entries as DISMISSED (reject path).
+
+        Idempotent: a replay finds no open entries and is a no-op."""
+        return self._transition_candidate_entries(
+            project_id=project_id,
+            candidate_id=candidate_id,
+            target=ReviewQueueStatus.DISMISSED,
+        )
+
+    def _transition_candidate_entries(
+        self,
+        *,
+        project_id: str,
+        candidate_id: str,
+        target: ReviewQueueStatus,
+    ) -> tuple[ReviewQueueEntry, ...]:
+        transitioned: list[ReviewQueueEntry] = []
+        for entry in self._repository.list_open_for_candidate(
+            project_id, candidate_id
+        ):
+            closed = replace(entry, status=target)
+            self._repository.upsert_entry(closed)
+            transitioned.append(closed)
+        return tuple(transitioned)

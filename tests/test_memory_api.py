@@ -232,5 +232,74 @@ class AutoPromotionApiTest(unittest.TestCase):
         )
 
 
+class CandidateReviewApiTest(unittest.TestCase):
+    """Phase 6 (v1.6.61): confirm/reject candidate HTTP endpoints."""
+
+    def _confirm(self, client, project_id, candidate_id):
+        return client.post(
+            f"/projects/{project_id}/analysis/candidates/{candidate_id}/confirm"
+        )
+
+    def _reject(self, client, project_id, candidate_id):
+        return client.post(
+            f"/projects/{project_id}/analysis/candidates/{candidate_id}/reject"
+        )
+
+    def test_confirm_transitions_and_promotes(self):
+        client, analysis, project_id = _build()
+        candidate = _seed_candidate(analysis, project_id=project_id)
+        response = self._confirm(client, project_id, candidate.id)
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "confirmed")
+        self.assertIsNotNone(body["memory_id"])
+        self.assertFalse(body["idempotent_replay"])
+        # promoted to a canonical memory
+        listed = client.get(f"/projects/{project_id}/memory").json()["memory"]
+        self.assertEqual([m["id"] for m in listed], [body["memory_id"]])
+
+    def test_confirm_is_idempotent(self):
+        client, analysis, project_id = _build()
+        candidate = _seed_candidate(analysis, project_id=project_id)
+        first = self._confirm(client, project_id, candidate.id).json()
+        replay = self._confirm(client, project_id, candidate.id).json()
+        self.assertFalse(first["idempotent_replay"])
+        self.assertTrue(replay["idempotent_replay"])
+        self.assertEqual(replay["memory_id"], first["memory_id"])
+        listed = client.get(f"/projects/{project_id}/memory").json()["memory"]
+        self.assertEqual(len(listed), 1)
+
+    def test_reject_transitions_without_promotion(self):
+        client, analysis, project_id = _build()
+        candidate = _seed_candidate(analysis, project_id=project_id)
+        response = self._reject(client, project_id, candidate.id)
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "rejected")
+        self.assertIsNone(body["memory_id"])
+        listed = client.get(f"/projects/{project_id}/memory").json()["memory"]
+        self.assertEqual(listed, [])
+
+    def test_confirm_after_reject_conflicts_409(self):
+        client, analysis, project_id = _build()
+        candidate = _seed_candidate(analysis, project_id=project_id)
+        self._reject(client, project_id, candidate.id)
+        response = self._confirm(client, project_id, candidate.id)
+        self.assertEqual(response.status_code, 409)
+
+    def test_confirm_missing_candidate_returns_404(self):
+        client, _analysis, project_id = _build()
+        self.assertEqual(
+            self._confirm(client, project_id, "nope").status_code, 404
+        )
+
+    def test_confirm_missing_project_returns_404(self):
+        client, analysis, project_id = _build()
+        candidate = _seed_candidate(analysis, project_id=project_id)
+        self.assertEqual(
+            self._confirm(client, "missing", candidate.id).status_code, 404
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

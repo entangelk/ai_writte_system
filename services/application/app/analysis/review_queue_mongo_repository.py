@@ -69,6 +69,18 @@ class MongoReviewQueueRepository:
         ).sort("_id", ASCENDING)
         return tuple(_to_entry(doc) for doc in cursor)
 
+    def list_open_for_candidate(
+        self, project_id: str, candidate_id: str
+    ) -> tuple[ReviewQueueEntry, ...]:
+        cursor = self._entries.find(
+            {
+                "project_id": project_id,
+                "candidate_id": candidate_id,
+                "status": ReviewQueueStatus.OPEN.value,
+            }
+        ).sort("_id", ASCENDING)
+        return tuple(_to_entry(doc) for doc in cursor)
+
 
 def _entry_doc(entry: ReviewQueueEntry) -> dict[str, Any]:
     return {

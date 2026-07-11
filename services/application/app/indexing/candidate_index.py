@@ -5,13 +5,15 @@ physically separate (own collection) because the authority source and lifecycle
 differ (G1). Write path only: ``record_candidate(s)`` enqueues a
 ``CANDIDATE_UPSERTED`` outbox event and the worker drains it here.
 
-Candidates are immutable today (a single ``needs_review`` status, no versioning)
-so the drain is upsert-only in the common case. The delete branches are
-forward-defense: they become reachable when Phase 6 introduces
-``confirmed``/``rejected`` transitions that leave the candidate set. Both the
-status-changed and the removed branches drop the stale vector so a later drain
-converges on "exactly the current needs_review candidates are indexed" — the
-same self-healing invariant as the canonical leg.
+The drain is a *reconcile* keyed on the candidate id, not a blind upsert:
+``index_candidate`` re-derives the candidate's current status from the store and
+either upserts (still ``needs_review``) or deletes (missing, or left needs_review).
+So ``CANDIDATE_UPSERTED`` and the Phase 6 (v1.6.61) ``CANDIDATE_REMOVED`` event
+share **one** code path — the event only decides *when* to reconcile, the store's
+current truth decides *what*. A ``confirmed``/``rejected`` candidate is therefore
+de-indexed by either event, giving the self-healing invariant "exactly the current
+needs_review candidates are indexed" (same as the canonical leg). The worker routes
+both events through the per-sink candidate path (``_PER_SINK_EVENTS``).
 """
 
 from __future__ import annotations

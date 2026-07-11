@@ -249,6 +249,15 @@ class MongoAnalysisRepository:
                     ) from exc
                 raise
 
+    def update_candidate(self, candidate: AnalysisCandidate) -> None:
+        # Phase 6 status transition: only the status field changes (logical_key
+        # and the unique request index are untouched), so a targeted $set keeps
+        # the idempotency index intact (mirrors update_job's in-place replace).
+        self._candidates.update_one(
+            {"_id": candidate.id},
+            {"$set": {"status": str(candidate.status)}},
+        )
+
     def _put_candidates_fallback(
         self, candidates: Sequence[tuple[AnalysisCandidate, str]]
     ) -> None:

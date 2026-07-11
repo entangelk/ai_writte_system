@@ -31,6 +31,9 @@ class IndexSyncEvent(StrEnum):
     MEMORY_UPSERTED = "memory_upserted"
     # b-2: extraction recorded a needs_review candidate; index it.
     CANDIDATE_UPSERTED = "candidate_upserted"
+    # Phase 6 (v1.6.61): a candidate left needs_review (confirmed/rejected); the
+    # worker deletes it from the candidate index (upsert-only stub → real path).
+    CANDIDATE_REMOVED = "candidate_removed"
 
 
 class IndexSyncStatus(StrEnum):

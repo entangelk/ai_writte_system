@@ -32,6 +32,10 @@ from services.application.app.analysis.service import (
     InMemoryAnalysisRepository,
     InvalidAnalysisCandidate,
     InvalidCandidateSource,
+    InvalidCandidateStateTransition,
+)
+from services.application.app.analysis.candidate_review import (
+    CandidateReviewService,
 )
 from services.application.app.analysis.apply import (
     MemoryApplyError,
@@ -724,6 +728,16 @@ def create_app(
     apply_service = MemoryApplyService(
         memory_service=memory, review_queue=review_queue
     )
+    # Phase 6 (v1.6.61): candidate review state transitions. confirm promotes and
+    # de-indexes + resolves the conflict queue; reject de-indexes + dismisses. The
+    # de-index rides the same shared index-sync outbox
+    # (docs/plans/06-candidate-state-transition-decisions.md).
+    candidate_review = CandidateReviewService(
+        analysis_service=analysis,
+        memory_service=memory,
+        removal_outbox=sync_outbox,
+        review_queue=review_queue,
+    )
     runner = analysis_runner
     if runner is None:
         runner = _default_analysis_runner(core_sot=core_sot, analysis=analysis)
@@ -1262,6 +1276,50 @@ def create_app(
             "memory": _memory_payload(result.memory),
             "idempotent_replay": result.idempotent_replay,
         }
+
+    def _candidate_review_payload(result) -> dict[str, object]:
+        return {
+            "candidate_id": result.candidate_id,
+            "status": str(result.status),
+            "memory_id": result.memory_id,
+            "idempotent_replay": result.idempotent_replay,
+        }
+
+    @app.post(
+        "/projects/{project_id}/analysis/candidates/{candidate_id}/confirm"
+    )
+    async def confirm_candidate(
+        project_id: str, candidate_id: str
+    ) -> dict[str, object]:
+        # Phase 6 (v1.6.61): approve → confirmed + promotion + de-index + resolve.
+        try:
+            _require_project_exists(project_id)
+            result = candidate_review.confirm(
+                project_id=project_id, candidate_id=candidate_id
+            )
+        except (AnalysisNotFound, MemoryNotFound, NotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except InvalidCandidateStateTransition as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _candidate_review_payload(result)
+
+    @app.post(
+        "/projects/{project_id}/analysis/candidates/{candidate_id}/reject"
+    )
+    async def reject_candidate(
+        project_id: str, candidate_id: str
+    ) -> dict[str, object]:
+        # Phase 6 (v1.6.61): reject → rejected (no promotion) + de-index + dismiss.
+        try:
+            _require_project_exists(project_id)
+            result = candidate_review.reject(
+                project_id=project_id, candidate_id=candidate_id
+            )
+        except (AnalysisNotFound, NotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except InvalidCandidateStateTransition as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _candidate_review_payload(result)
 
     @app.post("/projects/{project_id}/analysis/jobs/{job_id}/auto-promote")
     async def auto_promote_job(

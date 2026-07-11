@@ -67,9 +67,45 @@
 - 보강 후: `CanonicalCandidateDedupTest` 5→7, 전체 **726 passed / 48 skipped**(종전 724 + I1/I2 2). `git diff --check` clean.
 - **커밋**: working tree uncommitted. 프로젝트 관례상 커밋은 오너 지시 대기(작업자 임의 커밋 안 함).
 
+## 3차 작업 — Phase 6 candidate 상태 전이 (백엔드 계약, SoT v1.6.61)
+
+- **선택 근거**: v1.6.60 커밋/푸시 후 "다음 작업" 요청. 조사 결과 남은 후보((b-4)·(c)는 실 embedding/데이터 의존으로 서브 머신 막힘)와 달리 **Phase 6 candidate 상태 전이의 백엔드 계약은 결정적 로직이라 라이브 불요**. 여러 slice가 남긴 5개 forward-defense stub(candidate de-index·retriever needs_review 필터·drain self-heal·review queue resolve/dismiss·(e) dedup)의 **수렴점**. 오너가 AskUserQuestion으로 이 후보를 선택.
+- **오너 결정**(브리프 `docs/plans/06-candidate-state-transition-decisions.md`, D1~D5): **D1=분리 모델**(승인=candidate `needs_review→confirmed` + canonical `MemoryEntry` promotion[`source_candidate_id` 링크]; 거절=`needs_review→rejected` 무promotion; confirmed=검토 결정 기록·canonical=물질화)·**D2=`CANDIDATE_REMOVED` 대칭 이벤트**·**D3=review_queue `resolved`/`dismissed`**(confirm→resolve·reject→dismiss)·**D4=idempotent 단건 전이**·**D5=rejected 보존**(권장 진행). SoT §464(`confirmed`/`canonical`)·§465(idempotency) 미확정 확정.
+- **구현**(7 파트):
+  - `analysis/models.py`: `AnalysisCandidateStatus`에 `CONFIRMED`/`REJECTED` 추가.
+  - `analysis/service.py`: `transition_candidate`(상태 머신, `_transition_job` 미러 — legal `needs_review→confirmed/rejected`만, cross-terminal/backward 거부, idempotent no-op replay) + `CandidateTransition` + `InvalidCandidateStateTransition` + `_ALLOWED_CANDIDATE_TRANSITIONS`; repo Protocol/InMemory `update_candidate`; `CandidateReindexOutbox.enqueue_candidate_removed` 추가.
+  - `analysis/mongo_repository.py`: `update_candidate`(`$set status`, update_job 미러).
+  - `indexing/models.py`·`service.py`: `IndexSyncEvent.CANDIDATE_REMOVED` + `enqueue_candidate_removed` + `_PER_SINK_EVENTS`에 추가(worker `index_candidate` 재유도가 not-needs_review면 delete — 기존 forward-defense stub이 실경로화, 로직 변경 0).
+  - `analysis/review_queue.py`(+mongo): `ReviewQueueStatus.RESOLVED`/`DISMISSED` + `resolve_for_candidate`/`dismiss_for_candidate`(candidate 단위, idempotent) + repo `list_open_for_candidate`.
+  - 신설 `analysis/candidate_review.py`: `CandidateReviewService.confirm/reject` 오케스트레이션(전이+promote+de-index enqueue+queue 전이; optional removal_outbox/review_queue 미주입 시 전이만; 부작용은 `transition.changed`에 게이트해 replay 무중복).
+  - `main.py`: `CandidateReviewService` 배선(sync_outbox 재사용) + `POST /projects/{id}/analysis/candidates/{cid}/confirm|reject`(404 missing·409 illegal 전이).
+- **회귀 +22**(경계 매트릭스 8셀 양방향): `tests/test_candidate_review.py`(12: 상태머신 legal/idempotent/illegal-cross-terminal/scope·confirm 전이+promote+de-index+resolve[under-strict]·confirmed가 needs_review set에서 제외[retriever forward-defense 실경로]·reject dismiss·replay 무중복[over-strict idempotency]·optional deps 하위호환)·`tests/test_review_queue.py`(+4: resolve/dismiss/scope/idempotent)·`tests/test_memory_api.py`(+6: confirm/reject/idempotent/409/404×2). `tests/test_candidate_index.py` 2개 forward-defense stub 테스트를 실 `CONFIRMED` status로 갱신(stale "unreachable" 주석 정정).
+- **mutation 재실증**(cp 백업, git checkout 금지): M1 불법 전이 검증 무력화(`... not in _ALLOWED... ` → `False and ...`) → 3 test FAIL(상태머신·orchestration·API 409); M2 idempotency 게이트 제거(`if transition.changed:` → `if True:`) → 2 replay test FAIL. 둘 다 cp로 sha 정확 복원.
+- **성격**: 새 status/이벤트 literal 4종 + 오케스트레이션 서비스 + HTTP → SoT v1.6.61 minor bump. UI·source deep link·merge/split·부분 승인은 계속 Phase 6 UI slice 미확정.
+
+### 사고/복구 기록 (git checkout 오용)
+
+- mutation 재실증 중 `git checkout services/.../service.py`로 **미커밋 상태의 v1.6.61 service.py 변경을 전부 날림**(uncommitted라 HEAD=v1.6.60으로 복귀). 다른 파일은 무사(단일 파일 checkout). service.py 편집 5건을 conversation 이력에서 재적용해 복구, 748 passed 재확인. **교훈: 미커밋 변경이 있는 파일에 `git checkout` 금지 — mutation 재실증은 반드시 `cp` 백업/복원으로.**
+
+### Verification (3차)
+
+- `python3 -m pytest tests/test_candidate_review.py tests/test_review_queue.py tests/test_memory_api.py tests/test_candidate_index.py -q` → 관련 전량 통과.
+- 전체: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **748 passed / 48 skipped**(종전 726 + 22). `git diff --check` clean.
+- `create_app` boot: confirm/reject 라우트 등록 확인. 오케스트레이션 smoke(confirm→promote+de-index+resolve·replay 무중복·reject 무promote·불법 전이 raise) 실증.
+- 문서: SoT v1.6.61 버전 로그·헤더·Phase 6 body·미확정 목록, `plans/06-review-ui.md` 착수 결정 checkbox, CHANGELOG, HANDOFF(전 섹션), 브리프 신설.
+- **미검증(sandbox 밖)**: `MongoReviewQueueRepository`/analysis mongo `update_candidate` 실 round-trip·실 배포 de-index live 관통(InMemory 대칭 검증만; 프로젝트 mongo repo 검증 관례와 동일).
+
+## 검증 후속 보강 (오너 독립 검토 CONDITIONAL PASS → 비차단 관찰 2건 closure)
+
+오너 독립 검토가 v1.6.61을 **CONDITIONAL PASS**로 판정, 비차단 관찰 2건 제기. 각 항목을 **코드로 재확인**(단순 수용 아님) → 둘 다 실제 gap이라 보강. 독립 검증 기록: `docs/verifications/2026-07-11/candidate_state_transition.md`(최종 합격).
+
+- **Obs1 — `rejected→needs_review` 거부 미명시/미테스트**: illegal 전이 테스트(`test_cross_terminal_and_backward_edges_are_rejected`)가 confirmed↔rejected·confirmed→needs_review 3종만 cover, **rejected→needs_review 누락**(코드는 `_ALLOWED_CANDIDATE_TRANSITIONS`에 없어 거부하나 untested boundary). 테스트 illegal 목록에 `(REJECTED, NEEDS_REVIEW)` 추가(4종 전수) + 브리프 boundary matrix에 명시. CLAUDE.md "untraced branch is blocking" 충족.
+- **Obs2 — `CANDIDATE_REMOVED` worker routing 무테스트 + 경로 공유 미문서**: `enqueue_candidate_removed`가 stub(`_RecordingRemovalOutbox`)으로만 검증되고, **실 outbox→worker `_PER_SINK_EVENTS` routing→실 delete 경로가 무테스트**(신규 routing 코드). `test_candidate_removed_routes_to_candidate_adapter_and_deletes` 신규(실 `CandidateIndexSyncAdapter`+seeded vector+CONFIRMED stub analysis로 관통, entry 삭제·record 삭제 검증). **mutation M3**: `CANDIDATE_REMOVED`를 `_PER_SINK_EVENTS`에서 제거 → 이 test FAIL(archive 경로 오라우팅, cp 복원). + `candidate_index.py` docstring 재작성: `CANDIDATE_UPSERTED`/`CANDIDATE_REMOVED`가 event는 *언제*·store 현재 진실이 *무엇*을 정하는 **단일 reconcile 경로 공유**임을 명시(stale "forward-defense/unreachable" 정정). + 브리프 matrix에 routing 행 추가.
+- 보강 후: `tests/test_candidate_index.py` +1(routing), illegal edge +1(기존 test 확장, 카운트 무변). 전체 **748→749 passed**. `git diff --check` clean.
+
 ## Next steps
 
-- HANDOFF Next Tasks #1의 남은 실 후보는 **오너 선택 대기**이며 **전부 라이브/규모 의존**((b-4) hybrid 튜닝[실 데이터, 최후순위]·(c) character 별칭 semantic[실 embedding]·Phase 6[신규 페이즈]) — 서브 머신에서 라이브 없이 진행 가능한 후보는 현재 소진.
-- **오너 지시 시 v1.6.60 커밋**(구현 + 검증 후속 보강 포함).
-- (e) 후속: candidate de-index 실경로·resolve/dismiss 전이는 Phase 6에서 이 억제를 상위집합으로 흡수. 실 Mongo 승격 dedup live 관통은 sandbox 밖.
-- sandbox 밖 후속(코드 완료, 여기서 막힘)은 무변: 2B.6 threshold 캘리브레이션·2B.5/b-2/b-6 live 관통·ES-lexical/vector live backfill.
+- HANDOFF Next Tasks #1의 남은 후보는 **오너 선택 대기**: (b-4) hybrid 튜닝[실 데이터, 최후순위]·(c) character 별칭 semantic[실 embedding] — 둘 다 서브 머신 막힘. **Phase 6 UI slice**(source deep link·merge/split·부분 승인·Gate inbox·frontend)는 frontend framework 미확정(보류)이라 백엔드 API 확장(candidate 상세 diff·review inbox 목록 API 등) 위주만 서브 머신 가능.
+- **오너 지시 시 v1.6.61 커밋**(Phase 6 백엔드 전이).
+- Phase 6 UI slice 후속: entity merge/split 산출·부분 승인/부분 retry 정책(§465 잔여)·editor route deep link 계약은 미확정 유지.
+- sandbox 밖 후속(코드 완료, 여기서 막힘)은 무변: 2B.6 threshold 캘리브레이션·2B.5/b-2/b-6 live 관통·ES-lexical/vector live backfill·실 Mongo `update_candidate`/de-index live.

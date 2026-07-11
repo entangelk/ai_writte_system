@@ -25,6 +25,11 @@ class AnalysisCandidateAction(StrEnum):
 
 class AnalysisCandidateStatus(StrEnum):
     NEEDS_REVIEW = "needs_review"
+    # Phase 6 review state transition (v1.6.61): a reviewer confirms (approved →
+    # promoted to canonical) or rejects a candidate. Both leave needs_review, so
+    # the candidate is de-indexed and no longer surfaces as candidate evidence.
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
 
 
 class AnalysisJobStatus(StrEnum):
