@@ -105,6 +105,25 @@ class ManualPromotionTest(unittest.TestCase):
             )
 
 
+class IsCandidatePromotedTest(unittest.TestCase):
+    """(e) v1.6.60 dedup key: the promotion link is deterministic via
+    source_candidate_id, so is_candidate_promoted mirrors it exactly."""
+
+    def test_reflects_promotion_link_both_directions(self):
+        service, _repo = _service()
+        candidate = _candidate(candidate_id="cand-1")
+        # under-strict: unknown candidate is not promoted.
+        self.assertFalse(service.is_candidate_promoted("project-1", "cand-1"))
+        service.promote_candidate(
+            project_id="project-1", candidate=candidate, mode=PromotionMode.MANUAL
+        )
+        # after promotion the link exists -> promoted.
+        self.assertTrue(service.is_candidate_promoted("project-1", "cand-1"))
+        # over-strict: the link is project+candidate scoped, not global.
+        self.assertFalse(service.is_candidate_promoted("project-2", "cand-1"))
+        self.assertFalse(service.is_candidate_promoted("project-1", "cand-2"))
+
+
 class ThresholdGateTest(unittest.TestCase):
     def test_gate_is_off_by_default_and_promotes_nothing(self):
         # Over-strict guard: with no threshold configured a high-confidence

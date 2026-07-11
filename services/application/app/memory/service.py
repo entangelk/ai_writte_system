@@ -131,6 +131,20 @@ class MemoryService:
         threshold = self._auto_promotion_threshold
         return threshold is not None and candidate.confidence >= threshold
 
+    def is_candidate_promoted(self, project_id: str, candidate_id: str) -> bool:
+        """Whether an analysis candidate has been promoted to a canonical entry.
+
+        The promotion link is deterministic: a promote mints a MemoryEntry with
+        ``source_candidate_id == candidate.id`` (see ``promote_candidate``). This
+        is the canonical↔candidate dedup key ((e), v1.6.60): a promoted candidate
+        still carries ``needs_review`` status (the transition is Phase 6), so the
+        candidate retriever keeps surfacing it — context search suppresses it here
+        instead. See docs/plans/04-canonical-candidate-dedup-decisions.md."""
+        return (
+            self._repo.find_memory_by_candidate(project_id, candidate_id)
+            is not None
+        )
+
     def promote_candidate(
         self,
         *,

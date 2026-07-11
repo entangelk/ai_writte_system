@@ -467,6 +467,10 @@ def _default_context_search_service(
         # over the candidate index when configured, else Mongo-direct. Labeled
         # candidate at the Gate; the authority re-derivation is unchanged (b-2).
         candidate_memory_retriever=_build_candidate_memory_retriever(analysis),
+        # canonical↔candidate dedup ((e), v1.6.60): suppress a candidate that has
+        # been promoted (its canonical copy already grounds the knowledge). The
+        # MemoryService satisfies the resolver seam structurally.
+        promoted_candidate_resolver=memory,
     )
 
 

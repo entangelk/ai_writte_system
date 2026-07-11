@@ -5,7 +5,7 @@
 
 ## Current Status
 
-- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.59**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
+- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.60**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
 - 개발 진입점은 `docs/plans/README.md`. `docs/` 루트의 설계 문서는 초기 아이디에이션 자료다.
 - 구현된 계층(모두 회귀로 잠김, 아래는 현재 동작하는 표면):
   - **LLM Gateway**: FastAPI shell(`/health/live`·`/health/ready`·`/v1/generate`), llama.cpp 호환 provider + httpx async adapter, provider error 5종→HTTP status 매핑.
@@ -14,9 +14,9 @@
   - **Analysis(Phase 2A)**: taxonomy 3종 extraction, job 상태 전이, provider/Gateway wiring + JSON repair, job/candidate/run HTTP API.
   - **Memory(Phase 2B.1~2B.6)**: canonical `MemoryEntry` store + candidate 승격(수동/threshold), compare→ActionProposal→versioned upsert(append-only), compare judge(Gateway 1-turn), memory→vector 재색인(async outbox→worker), event/open_question semantic identity(off 기본). **conflict review queue 영속화(v1.6.59)**: 2B.4 apply가 review-only(`conflict`) proposal을 durable `review_queue` store(in-memory+Mongo)에 결정적 id upsert(멱등) — status=`open` 단일, `GET /projects/{id}/analysis/review-queue`로 조회. resolve/dismiss 전이·merge/split 산출은 Phase 6 forward-defense.
   - **Indexing(Phase 3A/3B + b-2)**: source block index rebuild(HTTP/CLI/deployed smoke), index sync outbox + worker(archive drain + memory reindex drain + **candidate 색인 drain**; one-shot CLI + b-6 증분1 `--loop` compose 서비스). candidate 색인 파이프라인(v1.6.54): `record_candidate(s)` → `CANDIDATE_UPSERTED` outbox → worker composite(vector `candidate_vectors` + lexical ES `candidate_lexical`). candidate 상태가 `needs_review` 하나뿐이라 색인은 upsert-only(de-index는 Phase 6 forward-defense). **ES-lexical backfill(v1.6.58)**: `scripts/phase2b5_reindex_memory.py`(memory vector+lexical)·`scripts/phase2b5_reindex_candidate.py`(candidate vector+lexical) 일괄 backfill — b-6 증분2 accepted limitation #1 해소, outbox 우회 D7 자세, live 실행은 sandbox 밖.
-  - **Context search(Phase 4)**: LLM planner + orchestration + Context Gate, HTTP API, 공유 in-process vector index, real Chroma+embedding 백엔드(env 구성 시), canonical memory 포함(⑤ §5 B) + `needs_review` candidate 포함(라벨·micro·권위필드 배제, Gate가 candidate origin만 예외 허용). **canonical·candidate memory retrieval 모두** env로 backend 선택(canonical v1.6.51/52, candidate v1.6.55): `CHROMA_HOST`+`EMBEDDING_SERVICE_URL` 시 **vector relevance**, `ELASTICSEARCH_URL` 시 **ES lexical(nori)**, 둘 다면 **hybrid(RRF)**, 없으면 Mongo-direct — 모두 권위는 Mongo/analysis store 재유도(seam·item·Gate 불변). worker memory/candidate drain은 ES 구성 시 vector+lexical composite.
+  - **Context search(Phase 4)**: LLM planner + orchestration + Context Gate, HTTP API, 공유 in-process vector index, real Chroma+embedding 백엔드(env 구성 시), canonical memory 포함(⑤ §5 B) + `needs_review` candidate 포함(라벨·micro·권위필드 배제, Gate가 candidate origin만 예외 허용). **canonical·candidate memory retrieval 모두** env로 backend 선택(canonical v1.6.51/52, candidate v1.6.55): `CHROMA_HOST`+`EMBEDDING_SERVICE_URL` 시 **vector relevance**, `ELASTICSEARCH_URL` 시 **ES lexical(nori)**, 둘 다면 **hybrid(RRF)**, 없으면 Mongo-direct — 모두 권위는 Mongo/analysis store 재유도(seam·item·Gate 불변). worker memory/candidate drain은 ES 구성 시 vector+lexical composite. **canonical↔candidate 승격 dedup(v1.6.60)**: candidate_memory step이 승격된 candidate(memory store `find_memory_by_candidate` 링크 존재)를 억제 — `PromotedCandidateResolver` seam(`MemoryService.is_candidate_promoted`, 미주입 시 억제 없음=종전 D7), canonical이 같은 package에 있든 없든 store 권위로 판정(D1), `ExcludedHit reason="candidate_promoted"` trace. `source_candidate_id` identity dedup이라 라이브 불요. Phase 6 candidate de-index 도입 시 상위집합 흡수(forward-defense).
 - **Compose 런타임**: base `docker-compose.yml`(application + Mongo replica set + gateway[외부 llama 클라이언트] + embedding + chroma + **elasticsearch**[nori, v1.6.53] + **worker**[b-6 증분1]). application에 `ELASTICSEARCH_URL` 배선 → 배포 canonical·candidate retriever 기본 = **hybrid(vector+lexical RRF)**. ES는 자체 `services/elasticsearch/Dockerfile`(공식 ES + analysis-nori, single-node·보안 off). opt-in `docker-compose.llama.yml`로 in-stack llama.cpp GPU 서버(port 9080)를 띄운다. runbook: `docs/runbooks/local-llama-server.md`. **worker(index 색인 적재 drain)는 상시 compose 서비스**(`--loop` drain + SIGTERM graceful shutdown, b-6 증분1 / SoT v1.6.56) — 이전 수동/out-of-band에서 전환. atomic outbox claim이 이미 이중 실행을 막아 single-replica로 안전. **outbox per-sink bookkeeping 완료**(b-6 증분2 / SoT v1.6.57, G3=B/G4=B): enqueue는 targets 빈 dict(sink-agnostic)로 두고 worker가 claim 시 configured sink(vector/lexical)를 materialize, 각 sink가 독립 `attempt_count`/`last_error`를 가져 한 sink가 죽어도 healthy sink는 SUCCESS로 동결·재색인되지 않고 all-terminal 시에만 entry 삭제. composite `drain(entry, skip=SUCCESS)`가 per-sink `SinkOutcome`을 반환(all-or-nothing raise 폐지). retriever는 인덱스 비어도 graceful.
-- **테스트**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **718 passed / 48 skipped**(2026-07-10, v1.6.59 review queue +13 + 검증 후속 보강 +1). 종전 3 환경-의존 failed(`ConnectElasticsearchTest`, b-5 도입 — sandbox에 `elasticsearch` 패키지 부재 시 hard-fail)는 **skip guard(`@unittest.skipUnless(find_spec("elasticsearch"))`)로 해소**(2026-07-10, 테스트 전용, 계약·프로덕션 코드 무변) → 패키지 없으면 skip(45→48), 있으면 종전대로 실행. skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
+- **테스트**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **726 passed / 48 skipped**(2026-07-11, v1.6.60 dedup +6 + 검증 후속 보강 I1/I2 +2; 종전 718). 종전 3 환경-의존 failed(`ConnectElasticsearchTest`, b-5 도입 — sandbox에 `elasticsearch` 패키지 부재 시 hard-fail)는 **skip guard(`@unittest.skipUnless(find_spec("elasticsearch"))`)로 해소**(2026-07-10, 테스트 전용, 계약·프로덕션 코드 무변) → 패키지 없으면 skip(45→48), 있으면 종전대로 실행. skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
 
 ## Active Decisions
 
@@ -57,7 +57,8 @@
 - 기억 갱신은 AI가 직접 덮어쓰지 않고 검색·대조·Gate·검토·versioned upsert를 거친다. memory는 append-only(version마다 새 id, 이전 id는 `superseded`).
 - canonical memory는 별도 `memory_vectors` collection(`IndexRecordKind.MEMORY`)에 **canonical-only**로 색인한다. 트리거 = async outbox→worker(2B.5 D3=B). commit-후-enqueue skew는 정기 memory backfill이 유일 수렴 수단이다. enqueue는 `MemoryService` choke point로 중앙화(promote/versioned upsert 3경로를 한 번에 커버).
 - event/open_question semantic identity는 compare `_find_matches`에서 처리한다(2B.6 D1=A). semantic 매칭은 **off 기본**(D4=A): `ANALYSIS_SEMANTIC_MATCH_THRESHOLD` 미설정 시 always-create 보존, 실 embedding 캘리브레이션 후 발화. character는 결정적 name-key 유지.
-- Writing ContextPackage의 memory 포함(⑤ §5 B, v1.6.48 canonical + v1.6.50 candidate): retrieval 레이어와 권위 재유도(항상 store 재검증)를 분리 설계했다 — retrieval을 교체해도 item 변환·Gate는 불변. **canonical retrieval은 v1.6.51 vector + v1.6.52 ES lexical/hybrid(RRF)로 실현**(`VectorCanonicalMemoryRetriever` `memory_vectors` cosine, `LexicalCanonicalMemoryRetriever` ES nori, `HybridCanonicalMemoryRetriever` RRF 융합; 전부 `get_memory` 권위 재유도→canonical-only; env로 backend 선택, 없으면 Mongo-direct). worker drain은 ES 시 vector+lexical composite. **outbox per-target bookkeeping은 미룸**(enqueue는 배포 ES 구성 모름→영구 pending 회피, worker가 configured sink로만 fan-out). **candidate retrieval도 v1.6.54 색인 파이프라인 + v1.6.55 retriever로 실현**(`VectorCandidateMemoryRetriever`·`LexicalCandidateMemoryRetriever`·`HybridCandidateMemoryRetriever`, 전부 `get_candidate` 권위 재유도→needs_review-only, canonical과 동형 env 선택; 색인은 별도 `candidate_vectors`/`candidate_lexical` 물리 분리). candidate는 `needs_review` 단일 상태라 색인 upsert-only·retriever needs_review 필터·drain self-heal delete는 Phase 6 전이 도입 시 도달하는 forward-defense. **candidate 포함(v1.6.50)**: candidate는 `status=candidate`·`review_status` 라벨 + `micro_evidence`만 + 권위필드(constraints/do_not_use) 배제(Phase 6 §62 위장 금지). Gate candidate 금지는 폐지가 아니라 candidate origin(`analysis_candidates`)만 예외로 좁힘. `needs_review→confirmed/rejected` 전이는 Phase 6이라 현재 승격 candidate는 canonical·candidate 양쪽 노출 가능(D7 no-dedup 수용).
+- Writing ContextPackage의 memory 포함(⑤ §5 B, v1.6.48 canonical + v1.6.50 candidate): retrieval 레이어와 권위 재유도(항상 store 재검증)를 분리 설계했다 — retrieval을 교체해도 item 변환·Gate는 불변. **canonical retrieval은 v1.6.51 vector + v1.6.52 ES lexical/hybrid(RRF)로 실현**(`VectorCanonicalMemoryRetriever` `memory_vectors` cosine, `LexicalCanonicalMemoryRetriever` ES nori, `HybridCanonicalMemoryRetriever` RRF 융합; 전부 `get_memory` 권위 재유도→canonical-only; env로 backend 선택, 없으면 Mongo-direct). worker drain은 ES 시 vector+lexical composite. **outbox per-target bookkeeping은 미룸**(enqueue는 배포 ES 구성 모름→영구 pending 회피, worker가 configured sink로만 fan-out). **candidate retrieval도 v1.6.54 색인 파이프라인 + v1.6.55 retriever로 실현**(`VectorCandidateMemoryRetriever`·`LexicalCandidateMemoryRetriever`·`HybridCandidateMemoryRetriever`, 전부 `get_candidate` 권위 재유도→needs_review-only, canonical과 동형 env 선택; 색인은 별도 `candidate_vectors`/`candidate_lexical` 물리 분리). candidate는 `needs_review` 단일 상태라 색인 upsert-only·retriever needs_review 필터·drain self-heal delete는 Phase 6 전이 도입 시 도달하는 forward-defense. **candidate 포함(v1.6.50)**: candidate는 `status=candidate`·`review_status` 라벨 + `micro_evidence`만 + 권위필드(constraints/do_not_use) 배제(Phase 6 §62 위장 금지). Gate candidate 금지는 폐지가 아니라 candidate origin(`analysis_candidates`)만 예외로 좁힘. `needs_review→confirmed/rejected` 전이는 Phase 6이지만, **승격 candidate 양쪽 노출은 v1.6.60 dedup으로 닫힘**(retrieval-time 억제, 아래 항목).
+- **canonical↔candidate 승격 dedup(v1.6.50 D7 후속, v1.6.60)**: 승격 candidate는 status가 `needs_review`로 남아 candidate retriever가 계속 반환하는데, 그 canonical 사본이 같은 지식을 이미 grounding하므로 candidate_memory step이 억제한다(브리프 `plans/04-canonical-candidate-dedup-decisions.md`). **D1=승격됐으면 항상 억제**(store 권위 `find_memory_by_candidate`, `source_candidate_id` identity 링크 — canonical이 같은 package에 있든 없든; D5=A "승격 candidate는 canonical 경로로만 서빙"에 부합)·**D2=retrieval-time interim 억제**(context_search 조립 단계 additive, 상태 모델·색인 무변). `PromotedCandidateResolver` seam(`MemoryService.is_candidate_promoted`)은 optional — 미주입 시 억제 없음(종전 D7 하위호환). embedding 아닌 identity dedup이라 라이브 불요. Phase 6 candidate de-index 도입 시 상위집합으로 흡수되는 forward-defense.
 - **conflict review queue 영속화(2B.4 후속, v1.6.59)**: 2B.3 compare가 산출한 `conflict`(review-only, D7)는 2B.4 apply에서 canonical write 없이 durable `review_queue` store에 영속화한다(브리프 `plans/02b-4-review-queue-persistence-decisions.md`). **D1=최소 영속화만**: status=`open` 단일, resolve/dismiss/reconcile 전이는 Phase 6 review 상태 전이 영역(candidate needs_review-only와 동형 forward-defense). **D3=결정적 id**(`(project_id,job_id,candidate_id,action)` SHA-256)로 apply replay 시 멱등 upsert. **D4=action generic 저장**(merge/split 미발화, 스키마만 열어둠). `MemoryApplyService.review_queue`는 optional(미주입 시 동작 불변). `GET /projects/{id}/analysis/review-queue`가 read surface(D2). 큐 기반 실제 재조정 write는 Phase 6 후속.
 
 ### 추적 부채
@@ -65,15 +66,14 @@
 
 ## Owner Decisions Needed
 
-- (b-6) 증분1/2(v1.6.56/57)·ES-lexical backfill(v1.6.58)·**(d) conflict review queue 영속화(v1.6.59) 완료**. **다음 작업은 오너의 slice 선택 대기** — Next Tasks #1의 남은 후보(b-4 hybrid 튜닝 / (c) / (e) / Phase 6) 중 하나를 고르면 착수 브리프 → 결정 → 구현 리듬으로 진행. 각 후보는 착수 전 결정 브리프가 필요하다.
+- (b-6) 증분1/2(v1.6.56/57)·ES-lexical backfill(v1.6.58)·(d) conflict review queue 영속화(v1.6.59)·**(e) canonical↔candidate 승격 dedup(v1.6.60) 완료**. **다음 작업은 오너의 slice 선택 대기** — Next Tasks #1의 남은 후보(b-4 hybrid 튜닝[최후순위] / (c) character 별칭 semantic / Phase 6) 중 하나를 고르면 착수 브리프 → 결정 → 구현 리듬으로 진행. 각 후보는 착수 전 결정 브리프가 필요하다. **(c)·b-4는 실 embedding/데이터 의존이라 서브 머신에선 막힘** — 라이브 없이 진행 가능한 후보는 현재 소진(Phase 6은 규모가 큰 신규 페이즈).
 
 ## Next Tasks
 
-1. **다음 slice는 오너 선택 대기**(b-6 증분1/2·ES-lexical backfill·(d) review queue 영속화 완료). 후보는 각 착수 브리프 필요. 관통 완료: ⑤ retrieval·색인(canonical v1.6.48~55, candidate v1.6.54/55)·compose ES(v1.6.53)·b-6 worker compose(증분1 v1.6.56 + 증분2 per-sink bookkeeping v1.6.57)·ES-lexical backfill(v1.6.58)·**(d) conflict review queue 영속화(v1.6.59)**. 남은 후보:
-   - **(b-4) hybrid 튜닝** — RRF k(현재 60)·per-signal 가중치·sub-retriever fetch depth를 실 데이터로 캘리브레이션(canonical·candidate 공통).
-   - **(c) character 별칭/동명이인 semantic 보강**(2B.3 D2=A 확장).
-   - **(e) canonical↔candidate semantic dedup**(v1.6.50 D7 후속 — 같은 지식이 승격 후 canonical·candidate 양쪽에 나타나는 것 정리; Phase 6 review 상태 전이와 함께 검토).
-   - **Phase 6 candidate 상태 전이(confirmed/rejected)** — 도입 시 candidate de-index(현재 forward-defense stub)가 실경로가 되고, retriever needs_review 필터·drain self-heal·**review queue resolve/dismiss 전이**가 실제로 도달한다.
+1. **다음 slice는 오너 선택 대기**(b-6 증분1/2·ES-lexical backfill·(d) review queue 영속화·(e) 승격 dedup 완료). 후보는 각 착수 브리프 필요. 관통 완료: ⑤ retrieval·색인(canonical v1.6.48~55, candidate v1.6.54/55)·compose ES(v1.6.53)·b-6 worker compose(증분1 v1.6.56 + 증분2 per-sink bookkeeping v1.6.57)·ES-lexical backfill(v1.6.58)·(d) conflict review queue 영속화(v1.6.59)·**(e) canonical↔candidate 승격 dedup(v1.6.60)**. 남은 후보(모두 라이브/규모 의존 — 서브 머신에선 착수 제약):
+   - **(b-4) hybrid 튜닝** — RRF k(현재 60)·per-signal 가중치·sub-retriever fetch depth를 실 데이터로 캘리브레이션(canonical·candidate 공통). *실 embedding/데이터 의존 → 서브 머신 막힘, 최후순위.*
+   - **(c) character 별칭/동명이인 semantic 보강**(2B.3 D2=A 확장). *실 embedding semantic 매칭+캘리브레이션 의존 → 서브 머신 막힘.*
+   - **Phase 6 candidate 상태 전이(confirmed/rejected)** — 도입 시 candidate de-index(현재 forward-defense stub)가 실경로가 되고, retriever needs_review 필터·drain self-heal·**review queue resolve/dismiss 전이**·**(e) 승격 dedup**이 상위집합으로 흡수된다. *신규 페이즈 규모.*
 2. **sandbox 밖 실행(코드 완료, 여기서 막힘)**:
    - 2B.6 threshold 실 캘리브레이션 — 실 embedding(BGE-m3-ko)+데이터로 유사/비유사 event pair cosine 분포 관찰 → `ANALYSIS_SEMANTIC_MATCH_THRESHOLD` 확정·env 설정(off 기본이라 미설정 시 미발화).
    - 2B.5 live smoke(`scripts/phase2b5_memory_reindex_live_smoke.py`: promote→outbox→worker→실 `memory_vectors` 관통) + 필요 시 backfill(`scripts/phase2b5_reindex_memory.py`).
@@ -85,7 +85,7 @@
 
 ## Verification
 
-- 현재 시스템 전체 스위트: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **718 passed / 48 skipped**(v1.6.59 review queue +13, 검증 후속 보강 +1). `git diff --check` clean. v1.6.59 독립 감사 합격(`docs/verifications/2026-07-10/review_queue_persistence.md`), 비차단 관찰 I1~I3 closure.
+- 현재 시스템 전체 스위트: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **726 passed / 48 skipped**(v1.6.60 dedup +6 + 검증 후속 보강 I1/I2 +2; 종전 718). `git diff --check` clean. v1.6.60 독립 검토 조건부 합격 → 최종 합격(`docs/verifications/2026-07-11/canonical_candidate_dedup.md`), 비차단 관찰 I1~I3 closure(N>1 승격·project scope 배선 회귀 +2, mutation sha256 정확 복원 재실증). v1.6.59 독립 감사 합격(`docs/verifications/2026-07-10/review_queue_persistence.md`).
   - 종전 3 환경-의존 failed(`ConnectElasticsearchTest`, b-5 도입)는 2026-07-10 skip guard(`@unittest.skipUnless(importlib.util.find_spec("elasticsearch"))`)로 해소 — 패키지 없는 sandbox에선 skip(45→48), 있는 환경에선 종전대로 3개 실행(회귀 잠금 유지). 테스트 전용 수정, 계약·프로덕션 코드 무변. **양방향 실증됨**(2026-07-10 검증 보강): 패키지 격리 설치(PYTHONPATH 주입, 시스템 무오염) 시 전체 스위트 **707 passed/45 skipped**로 3개 실행·PASS, 미주입 시 704/48로 원상복구.
   - `--ignore=tests/test_memory_mongo.py`는 프로젝트 검증 관례다(해당 4개는 사전-존재 localhost Mongo env artifact이며 코드 회귀가 아니다).
   - skip 45개는 live Mongo/Chroma/embedding 미가용 통합·smoke 테스트(sandbox 밖에서 실행).
@@ -100,7 +100,7 @@ docker-compose.llama.yml         # opt-in override: in-stack llama.cpp GPU 서�
 docs/
 ├── runbooks/local-llama-server.md   # 로컬 llama.cpp GPU 서버 opt-in 기동/설정/smoke runbook
 ├── README.md                    # 문서 분류와 진입점
-├── system-contract-sot.md       # 정본 계약 SoT(Approved, v1.6.58)
+├── system-contract-sot.md       # 정본 계약 SoT(Approved, v1.6.60)
 ├── abstract.md / *.md           # 보존된 아이디에이션 원본과 주제별 상세
 ├── plans/                       # 계획 + 착수 결정 브리프(README 인덱스)
 │   ├── README.md · 00-foundations.md · implementation-plan.md
@@ -121,12 +121,12 @@ services/
     │                            #   + compare · compare_judge · semantic_matcher(2B.6) · apply(2B.4) · review_queue(+mongo, 2B.4 후속 v1.6.59)
     ├── memory/                  # 2B.1 canonical store: models · scope · service · repository · mongo_repository
     ├── indexing/               # models · embedding · chroma · memory_index(2B.5/6) · memory_lexical_index(§8 ES) · candidate_index(b-2 vector) · candidate_lexical_index(b-2 ES) · service · mongo_repository
-    ├── context_search/          # models · planner · service(⑤ canonical+candidate memory retriever/gate)
+    ├── context_search/          # models · planner · service(⑤ canonical+candidate memory retriever/gate + 승격 dedup resolver, (e) v1.6.60)
     └── agent_loop/              # decision · budget · registry · parser · completion · resolution · runner
 tests/                           # 71개 모듈(도메인별 회귀 + live/smoke skip-aware) + fixtures/core_sot.py
 scripts/
 ├── smoke_llm_provider.py · benchmark_llm_provider.py
-├── phase2a_*_smoke.py · phase3a_*_smoke.py · phase4_context_search_*_smoke.py · phase4_lexical_memory_live_smoke.py
+├── phase2a_*_smoke.py · phase3a_rebuild_source_block_index.py(CLI rebuild) · phase3a_*_smoke.py · phase4_context_search_*_smoke.py · phase4_lexical_memory_live_smoke.py
 ├── index_sync_worker.py         # 3B archive + 2B.5 memory reindex + b-2 candidate 색인 drain (--loop compose 서비스, b-6 증분1)
 ├── phase2b3_compare_judge_live_smoke.py
 └── phase2b5_reindex_memory.py · phase2b5_reindex_candidate.py(둘 다 vector+lexical backfill, v1.6.58) · phase2b5_memory_reindex_live_smoke.py

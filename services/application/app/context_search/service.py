@@ -342,6 +342,22 @@ class CandidateMemoryRetriever(Protocol):
     ) -> tuple[AnalysisCandidate, ...]: ...
 
 
+class PromotedCandidateResolver(Protocol):
+    """canonical↔candidate 승격 dedup seam ((e), v1.6.60).
+
+    A promoted candidate keeps ``needs_review`` status (the transition is Phase
+    6), so the candidate retriever still surfaces it even though its canonical
+    version already exists — the v1.6.50 D7 duplication. This seam lets the
+    candidate step suppress a candidate that has been promoted (store-authoritative
+    via the deterministic ``source_candidate_id`` link, D1), regardless of whether
+    the canonical copy is in the same package. ``MemoryService`` satisfies it
+    structurally. When unwired, no suppression happens (prior D7 behavior). See
+    docs/plans/04-canonical-candidate-dedup-decisions.md.
+    """
+
+    def is_candidate_promoted(self, project_id: str, candidate_id: str) -> bool: ...
+
+
 class MongoDirectCandidateMemoryRetriever:
     """D2=A: list a project's needs_review candidates from the store (no ranking).
 
@@ -536,6 +552,7 @@ class ContextSearchService:
         planner: SearchPlanner,
         canonical_memory_retriever: CanonicalMemoryRetriever | None = None,
         candidate_memory_retriever: CandidateMemoryRetriever | None = None,
+        promoted_candidate_resolver: PromotedCandidateResolver | None = None,
         wall_clock_seconds: float = DEFAULT_WALL_CLOCK_SECONDS,
         vector_hit_limit: int = DEFAULT_VECTOR_HIT_LIMIT,
         recent_scene_block_limit: int = DEFAULT_RECENT_SCENE_BLOCK_LIMIT,
@@ -557,6 +574,9 @@ class ContextSearchService:
         # Writing candidate inclusion (⑤ §5 B follow-up). Same absent-is-unserved
         # contract as canonical, so requests without it are unchanged.
         self._candidate_memory_retriever = candidate_memory_retriever
+        # canonical↔candidate dedup ((e), v1.6.60). When absent, a promoted
+        # candidate can still appear alongside its canonical copy (prior D7).
+        self._promoted_candidate_resolver = promoted_candidate_resolver
         self._wall_clock_seconds = wall_clock_seconds
         self._vector_hit_limit = vector_hit_limit
         self._recent_scene_block_limit = recent_scene_block_limit
@@ -806,6 +826,24 @@ class ContextSearchService:
                 query=step.query or request.query,
                 limit=self._candidate_memory_limit,
             )
+            # canonical↔candidate dedup ((e), D1=store-authoritative): a promoted
+            # candidate keeps needs_review status (transition is Phase 6) so the
+            # retriever still returns it, but its canonical copy already grounds
+            # the knowledge. Suppress it here regardless of whether the canonical
+            # is in this package. Unwired resolver -> no suppression (prior D7).
+            # A resolver failure folds into the same backend_error degrade below.
+            kept: list[AnalysisCandidate] = []
+            suppressed: list[AnalysisCandidate] = []
+            for candidate in candidates:
+                if (
+                    self._promoted_candidate_resolver is not None
+                    and self._promoted_candidate_resolver.is_candidate_promoted(
+                        request.project_id, candidate.id
+                    )
+                ):
+                    suppressed.append(candidate)
+                else:
+                    kept.append(candidate)
         except Exception as exc:
             return (
                 SearchStepTrace(
@@ -824,7 +862,11 @@ class ContextSearchService:
             )
         items = tuple(
             self._item_from_candidate(step.need, candidate)
-            for candidate in candidates
+            for candidate in kept
+        )
+        excluded = tuple(
+            ExcludedHit(record_id=candidate.id, reason="candidate_promoted")
+            for candidate in suppressed
         )
         return (
             SearchStepTrace(
@@ -833,7 +875,7 @@ class ContextSearchService:
                 tool=SearchTool.MONGO,
                 hits_considered=len(candidates),
                 items_produced=len(items),
-                excluded=(),
+                excluded=excluded,
                 failure=None,
             ),
             items,

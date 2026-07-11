@@ -75,6 +75,38 @@ class _RaisingRetriever:
         raise RuntimeError("analysis store unreachable")
 
 
+class _PromotedResolver:
+    """PromotedCandidateResolver stub: the given ids report as promoted."""
+
+    def __init__(self, *promoted_ids):
+        self._promoted = set(promoted_ids)
+
+    def is_candidate_promoted(self, project_id, candidate_id):
+        return candidate_id in self._promoted
+
+
+class _RaisingResolver:
+    """PromotedCandidateResolver whose lookup always raises (memory outage)."""
+
+    def is_candidate_promoted(self, project_id, candidate_id):
+        raise RuntimeError("memory store unreachable")
+
+
+class _ProjectRecordingResolver:
+    """PromotedCandidateResolver that reports promoted only for a given project
+    and records every project_id it is queried with (locks the wiring passes the
+    request's project_id, not a hardcoded/candidate-derived one)."""
+
+    def __init__(self, promoted_project, *promoted_ids):
+        self.seen_projects = []
+        self._project = promoted_project
+        self._ids = set(promoted_ids)
+
+    def is_candidate_promoted(self, project_id, candidate_id):
+        self.seen_projects.append(project_id)
+        return project_id == self._project and candidate_id in self._ids
+
+
 def _candidate(candidate_id, *, payload, status=AnalysisCandidateStatus.NEEDS_REVIEW,
                project_id="project-1", job_id="job-1"):
     return AnalysisCandidate(
@@ -99,7 +131,8 @@ def _analysis_with(*candidates):
     return analysis
 
 
-def _service(analysis, *, with_retriever=True, retriever=None):
+def _service(analysis, *, with_retriever=True, retriever=None,
+             promoted_resolver=None):
     core_sot = CoreSotService(InMemoryCoreSotRepository())
     vector_index = InMemoryVectorIndexAdapter()
     indexing = SourceBlockIndexingService(
@@ -133,6 +166,7 @@ def _service(analysis, *, with_retriever=True, retriever=None):
             )
         ),
         candidate_memory_retriever=resolved,
+        promoted_candidate_resolver=promoted_resolver,
     )
 
 
@@ -311,6 +345,117 @@ class CandidateMemoryGateTest(unittest.TestCase):
         self.assertTrue(
             any(f.check == "candidate_item_not_allowed" for f in decision.findings)
         )
+
+
+class CanonicalCandidateDedupTest(unittest.TestCase):
+    """(e) v1.6.60: a promoted candidate is suppressed from the candidate step
+    (its canonical copy already grounds the knowledge), store-authoritative (D1),
+    at retrieval time (D2). Guards run both directions. See
+    docs/plans/04-canonical-candidate-dedup-decisions.md.
+    """
+
+    def _seed(self):
+        return _analysis_with(
+            _candidate("c1", payload={"event": "the storm hit"}),
+            _candidate("c2", payload={"event": "the calm after"}),
+        )
+
+    def test_promoted_candidate_suppressed_and_traced(self):
+        # under-strict: c1 promoted -> absent from micro, recorded as an
+        # excluded hit with reason candidate_promoted. Removing the suppression
+        # re-fails this (c1 would reappear in micro and excluded would be empty).
+        analysis = _analysis_with(_candidate("c1", payload={"event": "storm"}))
+        service = _service(analysis, promoted_resolver=_PromotedResolver("c1"))
+        package = asyncio.run(service.build_context_package(_request()))
+        self.assertEqual(package.micro_evidence, ())
+        self.assertFalse(package.degraded)
+        step = package.trace.steps[0]
+        self.assertEqual(step.hits_considered, 1)
+        self.assertEqual(step.items_produced, 0)
+        self.assertEqual(len(step.excluded), 1)
+        self.assertEqual(step.excluded[0].record_id, "c1")
+        self.assertEqual(step.excluded[0].reason, "candidate_promoted")
+
+    def test_mixed_only_suppresses_promoted(self):
+        # both directions: c1 promoted is dropped, c2 (needs_review, not promoted)
+        # survives. A too-broad suppression (dropping c2) or a too-narrow one
+        # (keeping c1) both fail this.
+        analysis = self._seed()
+        service = _service(analysis, promoted_resolver=_PromotedResolver("c1"))
+        package = asyncio.run(service.build_context_package(_request()))
+        ids = {item.pointer.document_id for item in package.micro_evidence}
+        self.assertEqual(ids, {"c2"})
+        step = package.trace.steps[0]
+        self.assertEqual(step.hits_considered, 2)
+        self.assertEqual(step.items_produced, 1)
+        self.assertEqual({h.record_id for h in step.excluded}, {"c1"})
+
+    def test_all_candidates_promoted_all_suppressed(self):
+        # N>1 boundary (independent review I1): when EVERY candidate is promoted,
+        # ALL are suppressed — the loop has no early-stop and drops the whole set,
+        # not just the first. A mutation that stops after the first suppression
+        # (break/candidates[0]) leaves c2 in micro and re-fails this.
+        analysis = self._seed()
+        service = _service(
+            analysis, promoted_resolver=_PromotedResolver("c1", "c2")
+        )
+        package = asyncio.run(service.build_context_package(_request()))
+        self.assertEqual(package.micro_evidence, ())
+        step = package.trace.steps[0]
+        self.assertEqual(step.hits_considered, 2)
+        self.assertEqual(step.items_produced, 0)
+        self.assertEqual(
+            {h.record_id for h in step.excluded}, {"c1", "c2"}
+        )
+        self.assertTrue(
+            all(h.reason == "candidate_promoted" for h in step.excluded)
+        )
+
+    def test_resolver_is_queried_with_request_project_id(self):
+        # Wiring lock (independent review I2): the suppression check is scoped to
+        # the request's project_id. A resolver that only promotes for a DIFFERENT
+        # project must not suppress c1 here, and every query it sees is project-1.
+        # Guards against passing a hardcoded/candidate-derived project.
+        analysis = _analysis_with(_candidate("c1", payload={"event": "storm"}))
+        resolver = _ProjectRecordingResolver("project-2", "c1")
+        service = _service(analysis, promoted_resolver=resolver)
+        package = asyncio.run(service.build_context_package(_request()))
+        ids = {item.pointer.document_id for item in package.micro_evidence}
+        self.assertEqual(ids, {"c1"})  # not suppressed: wrong project in resolver
+        self.assertEqual(package.trace.steps[0].excluded, ())
+        self.assertEqual(set(resolver.seen_projects), {"project-1"})
+
+    def test_no_candidate_promoted_keeps_all(self):
+        # over-strict: resolver reports nothing promoted -> both surface, none
+        # excluded. A candidate is never dropped just because a resolver is wired.
+        analysis = self._seed()
+        service = _service(analysis, promoted_resolver=_PromotedResolver())
+        package = asyncio.run(service.build_context_package(_request()))
+        ids = {item.pointer.document_id for item in package.micro_evidence}
+        self.assertEqual(ids, {"c1", "c2"})
+        self.assertEqual(package.trace.steps[0].excluded, ())
+
+    def test_no_resolver_is_prior_d7_behavior(self):
+        # over-strict backward-compat: with no resolver wired, suppression is
+        # inert even for an id that would be promoted -> both surface (prior D7).
+        analysis = self._seed()
+        service = _service(analysis)  # promoted_resolver defaults to None
+        package = asyncio.run(service.build_context_package(_request()))
+        ids = {item.pointer.document_id for item in package.micro_evidence}
+        self.assertEqual(ids, {"c1", "c2"})
+        self.assertEqual(package.trace.steps[0].excluded, ())
+
+    def test_resolver_failure_degrades_to_backend_error(self):
+        # A resolver outage folds into the candidate step's backend_error degrade
+        # (honest degrade, not a silent pass-through).
+        analysis = _analysis_with(_candidate("c1", payload={"event": "storm"}))
+        service = _service(analysis, promoted_resolver=_RaisingResolver())
+        package = asyncio.run(service.build_context_package(_request()))
+        self.assertTrue(package.degraded)
+        self.assertEqual(package.micro_evidence, ())
+        step = package.trace.steps[0]
+        self.assertIsNotNone(step.failure)
+        self.assertEqual(step.failure.error_type.value, "backend_error")
 
 
 if __name__ == "__main__":
