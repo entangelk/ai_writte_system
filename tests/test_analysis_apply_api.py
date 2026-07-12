@@ -12,6 +12,10 @@ from services.application.app.analysis.service import (
     AnalysisService,
     InMemoryAnalysisRepository,
 )
+from services.application.app.analysis.review_queue import (
+    InMemoryReviewQueueRepository,
+    ReviewQueueService,
+)
 from services.application.app.core_sot.service import (
     CoreSotService,
     InMemoryCoreSotRepository,
@@ -76,8 +80,11 @@ def _build():
     core_sot = CoreSotService(InMemoryCoreSotRepository())
     analysis = AnalysisService(InMemoryAnalysisRepository())
     memory = MemoryService(InMemoryMemoryRepository())
+    sync_outbox = IndexSyncOutboxService(InMemoryIndexSyncRepository())
     app = create_app(
-        service=core_sot, analysis_service=analysis, memory_service=memory
+        service=core_sot, analysis_service=analysis, memory_service=memory,
+        index_sync_outbox=sync_outbox,
+        review_queue_service=ReviewQueueService(InMemoryReviewQueueRepository()),
     )
     client = TestClient(app)
     project_id = client.post("/projects", json={"name": "Novel"}).json()["id"]
@@ -374,6 +381,119 @@ class ReviewQueueApiTest(unittest.TestCase):
         client, _analysis, _memory, _project_id = _build()
         listed = client.get("/projects/missing/analysis/review-queue")
         self.assertEqual(listed.status_code, 404)
+
+
+class CharacterReconciliationApiTest(unittest.TestCase):
+    def _open_conflict(self, client, analysis, memory, project_id):
+        _prior_job, prior = _seed_candidate(
+            analysis, project_id=project_id, logical_key="prior-reconcile",
+            payload={"name": "Ariel", "observation": "brave"},
+        )
+        prior_memory = memory.promote_candidate(
+            project_id=project_id, candidate=prior, mode=PromotionMode.MANUAL
+        ).memory
+        job, current = _seed_candidate(
+            analysis, project_id=project_id, logical_key="current-reconcile",
+            payload={"name": "Song", "observation": "brave"},
+        )
+        applied = client.post(
+            f"/projects/{project_id}/analysis/jobs/{job.id}/apply",
+            json={"proposals": [{
+                "candidate_id": current.id,
+                "action": "conflict",
+                "matched_memory_id": prior_memory.id,
+            }]},
+        )
+        self.assertEqual(applied.status_code, 200)
+        entry = client.get(
+            f"/projects/{project_id}/analysis/review-queue"
+        ).json()["entries"][0]
+        return entry, prior_memory, current
+
+    def test_merge_response_envelope_and_same_action_replay(self):
+        client, analysis, memory, project_id = _build()
+        entry, prior, _current = self._open_conflict(
+            client, analysis, memory, project_id
+        )
+        url = (
+            f"/projects/{project_id}/analysis/review-queue/"
+            f"{entry['id']}/reconcile"
+        )
+
+        first = client.post(url, json={"action": "merge"})
+        replay = client.post(url, json={"action": "merge"})
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(
+            set(first.json()),
+            {"entry_id", "action", "memory_id", "superseded_memory_id",
+             "idempotent_replay"},
+        )
+        self.assertEqual(first.json()["action"], "merge")
+        self.assertEqual(first.json()["superseded_memory_id"], prior.id)
+        self.assertFalse(first.json()["idempotent_replay"])
+        self.assertEqual(replay.status_code, 200)
+        self.assertTrue(replay.json()["idempotent_replay"])
+        self.assertEqual(replay.json()["memory_id"], first.json()["memory_id"])
+
+    def test_different_and_invalid_actions_return_409(self):
+        client, analysis, memory, project_id = _build()
+        entry, _prior, _current = self._open_conflict(
+            client, analysis, memory, project_id
+        )
+        url = (
+            f"/projects/{project_id}/analysis/review-queue/"
+            f"{entry['id']}/reconcile"
+        )
+        self.assertEqual(client.post(url, json={"action": "split"}).status_code, 200)
+        self.assertEqual(client.post(url, json={"action": "merge"}).status_code, 409)
+
+        client2, _analysis2, _memory2, project2 = _build()
+        invalid = client2.post(
+            f"/projects/{project2}/analysis/review-queue/anything/reconcile",
+            json={"action": "invalid"},
+        )
+        self.assertEqual(invalid.status_code, 409)
+
+    def test_missing_project_and_entry_return_404(self):
+        client, _analysis, _memory, project_id = _build()
+        body = {"action": "merge"}
+        self.assertEqual(
+            client.post(
+                f"/projects/{project_id}/analysis/review-queue/missing/reconcile",
+                json=body,
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            client.post(
+                "/projects/missing/analysis/review-queue/missing/reconcile",
+                json=body,
+            ).status_code,
+            404,
+        )
+
+    def test_merge_to_superseded_target_returns_409(self):
+        client, analysis, memory, project_id = _build()
+        entry, prior, _current = self._open_conflict(
+            client, analysis, memory, project_id
+        )
+        _job, updater = _seed_candidate(
+            analysis, project_id=project_id, logical_key="supersede-target",
+            payload={"name": "Ariel", "observation": "changed"},
+        )
+        memory.record_updated_version(
+            project_id=project_id, candidate=updater,
+            target_memory_id=prior.id,
+        )
+
+        response = client.post(
+            f"/projects/{project_id}/analysis/review-queue/{entry['id']}/reconcile",
+            json={"action": "merge"},
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("non-canonical", response.json()["detail"])
 
 
 if __name__ == "__main__":

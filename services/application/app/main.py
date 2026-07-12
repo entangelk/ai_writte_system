@@ -57,6 +57,10 @@ from services.application.app.analysis.review_queue import (
     InMemoryReviewQueueRepository,
     ReviewQueueService,
 )
+from services.application.app.analysis.reconciliation import (
+    CharacterReconciliationService,
+    ReconciliationAction,
+)
 from services.application.app.analysis.source import CoreSotSourceAdapter
 from services.llm_gateway.app.errors import ProviderError
 from services.application.app.memory.models import PromotionMode
@@ -139,6 +143,7 @@ from services.application.app.indexing.candidate_lexical_index import (
     connect_elasticsearch_candidate_index,
 )
 from services.application.app.analysis.semantic_matcher import (
+    EmbeddingCharacterIdentityVerifier,
     EmbeddingSemanticMatcher,
 )
 
@@ -380,6 +385,7 @@ def _default_compare_service(memory: MemoryService) -> AnalysisCompareService:
         judge=judge,
         semantic_matcher=_build_semantic_matcher(memory),
         alias_matcher=_build_character_alias_matcher(memory),
+        homonym_verifier=_build_character_homonym_verifier(),
     )
 
 
@@ -402,6 +408,21 @@ def _build_character_alias_matcher(memory: MemoryService):
     # docs/plans/02b-7-character-alias-homonym-decisions.md.
     return _build_memory_semantic_matcher(
         memory, threshold_env="ANALYSIS_CHARACTER_ALIAS_MATCH_THRESHOLD"
+    )
+
+
+def _build_character_homonym_verifier():
+    threshold_raw = os.environ.get("ANALYSIS_CHARACTER_HOMONYM_MATCH_THRESHOLD")
+    if not threshold_raw:
+        return None
+    if not os.environ.get("EMBEDDING_SERVICE_URL"):
+        raise RuntimeError(
+            "ANALYSIS_CHARACTER_HOMONYM_MATCH_THRESHOLD requires "
+            "EMBEDDING_SERVICE_URL"
+        )
+    return EmbeddingCharacterIdentityVerifier(
+        embeddings=_build_embedding_provider(),
+        similarity_floor=float(threshold_raw),
     )
 
 
@@ -697,6 +718,10 @@ class ApplyMemoryRequest(BaseModel):
     proposals: list[ApplyProposalBody]
 
 
+class ReconcileCharacterRequest(BaseModel):
+    action: str
+
+
 class ContextSearchHttpRequest(BaseModel):
     query: str
     needs: list[str]
@@ -758,6 +783,10 @@ def create_app(
         memory_service=memory,
         removal_outbox=sync_outbox,
         review_queue=review_queue,
+    )
+    character_reconciliation = CharacterReconciliationService(
+        analysis_service=analysis, memory_service=memory,
+        review_queue=review_queue, removal_outbox=sync_outbox,
     )
     runner = analysis_runner
     if runner is None:
@@ -1587,7 +1616,7 @@ def create_app(
         }
 
     @app.get("/projects/{project_id}/analysis/review-queue")
-    def analysis_review_queue_endpoint(project_id: str) -> dict[str, object]:
+    async def analysis_review_queue_endpoint(project_id: str) -> dict[str, object]:
         # 2B.4 follow-up: list the project's open review-only (conflict) entries
         # persisted by apply, so an unresolved conflict is observable/reconcilable
         # (docs/plans/02b-4-review-queue-persistence-decisions.md, D2).
@@ -1599,6 +1628,32 @@ def create_app(
         return {
             "project_id": project_id,
             "entries": [_review_queue_entry_payload(e) for e in entries],
+        }
+
+    @app.post(
+        "/projects/{project_id}/analysis/review-queue/{entry_id}/reconcile"
+    )
+    async def reconcile_character_conflict(
+        project_id: str, entry_id: str, request: ReconcileCharacterRequest
+    ) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+            action = ReconciliationAction(request.action)
+            result = character_reconciliation.reconcile(
+                project_id=project_id, entry_id=entry_id, action=action
+            )
+        except (NotFound, AnalysisNotFound, MemoryNotFound, KeyError) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (MemoryError, InvalidCandidateStateTransition) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {
+            "entry_id": result.entry_id,
+            "action": result.action.value,
+            "memory_id": result.memory_id,
+            "superseded_memory_id": result.superseded_memory_id,
+            "idempotent_replay": result.idempotent_replay,
         }
 
     def _context_item_payload(item) -> dict[str, object]:

@@ -5,7 +5,7 @@
 
 ## Current Status
 
-- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.62**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
+- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.63**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
 - 개발 진입점은 `docs/plans/README.md`. `docs/` 루트의 설계 문서는 초기 아이디에이션 자료다.
 - 구현된 계층(모두 회귀로 잠김, 아래는 현재 동작하는 표면):
   - **LLM Gateway**: FastAPI shell(`/health/live`·`/health/ready`·`/v1/generate`), llama.cpp 호환 provider + httpx async adapter, provider error 5종→HTTP status 매핑.
@@ -17,7 +17,7 @@
   - **Context search(Phase 4)**: LLM planner + orchestration + Context Gate, HTTP API, 공유 in-process vector index, real Chroma+embedding 백엔드(env 구성 시), canonical memory 포함(⑤ §5 B) + `needs_review` candidate 포함(라벨·micro·권위필드 배제, Gate가 candidate origin만 예외 허용). **canonical·candidate memory retrieval 모두** env로 backend 선택(canonical v1.6.51/52, candidate v1.6.55): `CHROMA_HOST`+`EMBEDDING_SERVICE_URL` 시 **vector relevance**, `ELASTICSEARCH_URL` 시 **ES lexical(nori)**, 둘 다면 **hybrid(RRF)**, 없으면 Mongo-direct — 모두 권위는 Mongo/analysis store 재유도(seam·item·Gate 불변). worker memory/candidate drain은 ES 구성 시 vector+lexical composite. **canonical↔candidate 승격 dedup(v1.6.60)**: candidate_memory step이 승격된 candidate(memory store `find_memory_by_candidate` 링크 존재)를 억제 — `PromotedCandidateResolver` seam(`MemoryService.is_candidate_promoted`, 미주입 시 억제 없음=종전 D7), canonical이 같은 package에 있든 없든 store 권위로 판정(D1), `ExcludedHit reason="candidate_promoted"` trace. `source_candidate_id` identity dedup이라 라이브 불요. Phase 6 candidate de-index 도입 시 상위집합 흡수(forward-defense — v1.6.61로 실경로화).
   - **Review 상태 전이(Phase 6 백엔드, v1.6.61)**: candidate `needs_review→confirmed/rejected` 전이 백엔드 계약(브리프 `plans/06-candidate-state-transition-decisions.md`). 이전 slice들이 남긴 5개 forward-defense stub의 수렴점. **D1=분리 모델**(confirm=`needs_review→confirmed` + canonical promotion[`source_candidate_id`], reject=`needs_review→rejected` 무promotion, 보존[D5]). `AnalysisService.transition_candidate`(상태 머신·legal 2개만·cross-terminal/backward 거부·idempotent) + `analysis/candidate_review.py::CandidateReviewService`(confirm/reject 오케스트레이션: 전이+promote+de-index enqueue+queue 전이). de-index=`CANDIDATE_REMOVED`(D2, worker `index_candidate` 재유도가 not-needs_review면 delete). review_queue `open→resolved`(confirm)/`dismissed`(reject)(D3). idempotent 단건(D4). `POST /projects/{id}/analysis/candidates/{cid}/confirm|reject`(404/409). **미확정 유지(Phase 6 UI slice)**: source deep link·merge/split·부분 승인·Gate finding inbox 통합·frontend.
 - **Compose 런타임**: base `docker-compose.yml`(application + Mongo replica set + gateway[외부 llama 클라이언트] + embedding + chroma + **elasticsearch**[nori, v1.6.53] + **worker**[b-6 증분1]). application에 `ELASTICSEARCH_URL` 배선 → 배포 canonical·candidate retriever 기본 = **hybrid(vector+lexical RRF)**. ES는 자체 `services/elasticsearch/Dockerfile`(공식 ES + analysis-nori, single-node·보안 off). opt-in `docker-compose.llama.yml`로 in-stack llama.cpp GPU 서버(port 9080)를 띄운다. runbook: `docs/runbooks/local-llama-server.md`. **worker(index 색인 적재 drain)는 상시 compose 서비스**(`--loop` drain + SIGTERM graceful shutdown, b-6 증분1 / SoT v1.6.56) — 이전 수동/out-of-band에서 전환. atomic outbox claim이 이미 이중 실행을 막아 single-replica로 안전. **outbox per-sink bookkeeping 완료**(b-6 증분2 / SoT v1.6.57, G3=B/G4=B): enqueue는 targets 빈 dict(sink-agnostic)로 두고 worker가 claim 시 configured sink(vector/lexical)를 materialize, 각 sink가 독립 `attempt_count`/`last_error`를 가져 한 sink가 죽어도 healthy sink는 SUCCESS로 동결·재색인되지 않고 all-terminal 시에만 entry 삭제. composite `drain(entry, skip=SUCCESS)`가 per-sink `SinkOutcome`을 반환(all-or-nothing raise 폐지). retriever는 인덱스 비어도 graceful.
-- **테스트**: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **757 passed / 48 skipped**(2026-07-12, v1.6.62 (c) character 별칭 semantic +6 + 독립 감사 후속 보강 +2; 종전 749). 종전 3 환경-의존 failed(`ConnectElasticsearchTest`, b-5 도입 — sandbox에 `elasticsearch` 패키지 부재 시 hard-fail)는 **skip guard(`@unittest.skipUnless(find_spec("elasticsearch"))`)로 해소**(2026-07-10, 테스트 전용, 계약·프로덕션 코드 무변) → 패키지 없으면 skip(45→48), 있으면 종전대로 실행. skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
+- **테스트**: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **767 passed / 48 skipped / 99 subtests**(2026-07-12, v1.6.63 + 독립 감사 Obs2/Obs4 HTTP 보강). skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
 
 ## Active Decisions
 
@@ -67,13 +67,15 @@
 
 ## Owner Decisions Needed
 
-- (d) review queue 영속화(v1.6.59)·(e) 승격 dedup(v1.6.60)·**Phase 6 candidate 상태 전이 백엔드(v1.6.61)·(c) character 별칭 semantic(v1.6.62) 완료**(별칭 방향, 라이브 관통 PASS). **다음 작업은 오너의 slice 선택 대기** — 남은 후보((b-4) hybrid 튜닝[최후순위] / (c-2) 동명이인 false-positive 반증 + character alias threshold 캘리브레이션 / Phase 6 UI slice) 중 하나. 각 후보는 착수 전 결정 브리프가 필요하다. **(b-4)·(c-2 캘리브레이션)은 실 embedding/데이터 튜닝 의존**. **Phase 6 UI slice(source deep link·merge/split·부분 승인·Gate inbox·frontend)는 백엔드 전이 위에 얹지만 frontend framework 미확정(보류)이라 백엔드 API 확장 위주 슬라이스만 서브 머신 가능.**
+- **(c-2) 완료(v1.6.63)**: 동명이인 직접 semantic 반증(off 기본), 라벨 기반 calibration harness, review-entry 기반 append-only merge/split write. production threshold 실값 채택은 실제 라벨 데이터 실행 결과 검토 대기.
+
+- (d) review queue(v1.6.59)·(e) 승격 dedup(v1.6.60)·Phase 6 candidate 전이(v1.6.61)·(c) character alias(v1.6.62)·**(c-2) 동명이인 반증/calibration harness/merge-split write(v1.6.63) 완료**. production threshold 실값 채택은 라벨 데이터 실행 결과 검토 대기다. 다음 slice는 오너 선택 대기((b-4) hybrid 튜닝 / Phase 6 UI 잔여).
 
 ## Next Tasks
 
 1. **다음 slice는 오너 선택 대기**((d) review queue 영속화·(e) 승격 dedup·Phase 6 candidate 상태 전이 백엔드(v1.6.61)·**(c) character 별칭 semantic(v1.6.62)** 완료). 후보는 각 착수 브리프 필요. 관통 완료: ⑤ retrieval·색인(canonical v1.6.48~55, candidate v1.6.54/55)·compose ES(v1.6.53)·b-6 worker compose(v1.6.56/57)·ES-lexical backfill(v1.6.58)·(d) review queue(v1.6.59)·(e) 승격 dedup(v1.6.60)·Phase 6 candidate 상태 전이(v1.6.61)·**(c) character 별칭 semantic(v1.6.62, 라이브 관통 PASS)**. 남은 후보:
    - **(b-4) hybrid 튜닝** — RRF k(현재 60)·per-signal 가중치·sub-retriever fetch depth를 실 데이터로 캘리브레이션(canonical·candidate 공통). *실 embedding/데이터 의존 → 서브 머신 막힘, 최후순위.*
-   - **(c-2) 동명이인 semantic 반증 + character alias threshold 캘리브레이션** — (c) 별칭 방향은 v1.6.62 완료. 남은 것: 동명이인 false-positive 반증(name-key=1 분기, 메커니즘 반대라 별도 증분)·alias threshold 실값 확정(라이브 cosine 분포 배치, off→발화)·merge/split write. *캘리브레이션은 실 데이터 튜닝 의존.*
+   - **(c-2) 완료(v1.6.63)** — 동명이인 반증·calibration harness·merge/split write 완료. 남은 것은 실제 라벨 데이터로 threshold 값을 산출·검토해 production env를 발화하는 운영 튜닝이다.
    - **Phase 6 UI slice** — 백엔드 전이(v1.6.61)는 완료. 남은 것: source deep link(editor route 계약)·entity merge/split 산출·부분 승인/부분 retry 정책·Gate finding+candidate inbox 통합·frontend(framework 미확정 보류). *frontend는 보류라 백엔드 API 확장(예: candidate 상세 diff·review inbox 목록 API) 위주만 서브 머신 가능.*
 2. **sandbox 밖 실행 — 비-튜닝 live 검증 배치 소진(2026-07-12, 풀스택 머신)**:
    - **✅ 인덱싱 live 4종**: 2B.5 memory reindex·⑤ §8 ES lexical/hybrid·b-2 candidate 색인·Phase 3B archive→실 Chroma delete(DRAFT+PROJECT) — 실 Mongo·Chroma·ES·embedding 위에서 PASS(`docs/verifications/2026-07-12/indexing_live_smokes.md`, 오너 독립 감사 PASS). 실행법: `docker compose up -d mongo chroma elasticsearch embedding` 후 `docker compose run --rm --no-deps worker python scripts/<smoke>.py`.
@@ -85,7 +87,8 @@
 
 ## Verification
 
-- 현재 시스템 전체 스위트: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **757 passed / 48 skipped**(v1.6.62 (c) character 별칭 semantic +6 + 독립 감사 후속 보강 +2; 종전 749). `git diff --check` clean.
+- 현재 시스템 전체 스위트: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **767 passed / 48 skipped / 99 subtests**. `git diff --check` clean.
+- **(c-2) 오너 독립 적대적 검증 PASS(조건 없음)**: `docs/verifications/2026-07-12/character_homonym_reconciliation.md`. Obs1 전체 suite 결과를 정정했고, Obs2 reconcile HTTP 200/404/409 영속 회귀 4개와 Obs4 `MemoryError`/`InvalidCandidateStateTransition` 명시 409 매핑을 보강했다.
 - **(c) character 별칭 semantic 라이브 관통(2026-07-12, 풀스택 머신) — PASS**: `scripts/phase2b7_character_alias_live_smoke.py` — Mongo promote→worker drain→실 Chroma `memory_vectors`→compare alias(실 BGE-m3-ko + Chroma query_similar). `철수`(별칭)→`conflict`+canonical id·`영희`(타인)→`create`, threshold 0.7, `memory_backend: chroma+elasticsearch`, self-cleaning. **관통·wiring 검증이며 라벨 정확도·threshold 실값 캘리브레이션은 후속**(D5/D7).
 - **(c) 오너 독립 적대적 검증 PASS(조건 없음)**: `docs/verifications/2026-07-12/character_alias_semantic.md` — 경계 매트릭스 10행 빈 cell 없음(직접 5+위임 5), judge 우회·apply review_queue 전달·scope character 한정 재도출 확인, pytest 755/48 독립 재현. 비차단 관찰 4건 중 **Obs2(alias self-exclusion)·Obs4(scope-less 미영향)를 회귀로 실경로 보강**(mutation bite 재실증, 757 passed); Obs1(SoT 산문 순서, 기존 부채)·Obs3(rationale id, 계약 미고정)은 코드 무변.
 - **live 관통 검증(2026-07-12, 풀스택 머신) — 2배치**:

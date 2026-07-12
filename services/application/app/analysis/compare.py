@@ -107,6 +107,12 @@ class SemanticMemoryMatcher(Protocol):
     ) -> tuple[MemoryEntry, ...]: ...
 
 
+class CharacterIdentityVerifier(Protocol):
+    def supports_same_identity(
+        self, *, candidate: AnalysisCandidate, memory: MemoryEntry
+    ) -> bool: ...
+
+
 class AnalysisCompareService:
     def __init__(
         self,
@@ -115,6 +121,7 @@ class AnalysisCompareService:
         judge: CompareJudge | None = None,
         semantic_matcher: SemanticMemoryMatcher | None = None,
         alias_matcher: SemanticMemoryMatcher | None = None,
+        homonym_verifier: CharacterIdentityVerifier | None = None,
     ) -> None:
         self._memory = memory_service
         self._judge = judge
@@ -127,6 +134,7 @@ class AnalysisCompareService:
         # canonical character is the same subject. A hit is surfaced as conflict
         # for merge/split review — never an automatic merge (D2=A boundary).
         self._alias_matcher = alias_matcher
+        self._homonym_verifier = homonym_verifier
 
     async def compare_job(
         self,
@@ -195,6 +203,23 @@ class AnalysisCompareService:
                 ),
             )
         memory = matches[0]
+        if (
+            scope is not None
+            and self._homonym_verifier is not None
+            and not self._homonym_verifier.supports_same_identity(
+                candidate=candidate, memory=memory
+            )
+        ):
+            return ActionProposal(
+                candidate_id=candidate.id,
+                candidate_type=candidate.candidate_type,
+                action=CompareAction.CONFLICT,
+                matched_memory_id=memory.id,
+                rationale=(
+                    "semantic homonym counter-evidence: same normalized name "
+                    f"does not clear the identity floor for canonical memory {memory.id}"
+                ),
+            )
         if self._judge is None:
             raise CompareJudgeNotConfigured(
                 "a candidate matched an existing memory but no compare judge "

@@ -164,3 +164,11 @@ HANDOFF Next Tasks #1 후보 **(c) character 별칭/동명이인 semantic 보강
   - D6 = A: top-1(2B.6 D6=A 미러).
   - D7 = 계약+fake 회귀 + 라이브 관통(라벨 미assert — 관통·wiring 검증이지 판별 정확도 아님).
   - D8 = env-gate + 2B.6 `_build_semantic_matcher` wiring guard 재사용.
+
+## (c-2) Owner decisions — 2026-07-12
+
+- name-key=1이어도 선택 canonical과 candidate의 직접 semantic similarity가 주입 하한 미만이면 judge 대신 `conflict`; `ANALYSIS_CHARACTER_HOMONYM_MATCH_THRESHOLD` 미설정은 off. 검색 miss/index lag는 반증으로 쓰지 않는다.
+- 라벨된 same/different identity text pair로 threshold와 confusion matrix를 산출하되 production 값을 자동 설정하지 않는다.
+- merge는 open review entry의 `matched_memory_id`에 candidate evidence를 append-only 새 version으로 합치고 canonical payload/name을 보존한다.
+- split은 open review entry가 가리키는 candidate를 별도 canonical로 승격한다. 자동 evidence 분할은 하지 않는다.
+- reconcile action은 `merge|split`; resolution action/result memory를 기록해 같은 action replay는 멱등, 다른 action replay는 거부한다.

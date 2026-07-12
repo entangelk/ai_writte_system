@@ -95,6 +95,16 @@ class FakeJudge:
         return JudgeResult(action=self._action, rationale=self._rationale)
 
 
+class FakeIdentityVerifier:
+    def __init__(self, supports):
+        self.supports = supports
+        self.calls = []
+
+    def supports_same_identity(self, *, candidate, memory):
+        self.calls.append((candidate, memory))
+        return self.supports
+
+
 def _compare(service, candidates):
     return asyncio.run(
         service.compare_job(
@@ -147,6 +157,30 @@ class CompareNoMatchTest(unittest.TestCase):
 
 
 class CompareMatchTest(unittest.TestCase):
+    def test_same_name_below_identity_floor_is_conflict_without_judge(self):
+        prior = _candidate(candidate_id="prior", job_id="job-prior")
+        judge = FakeJudge(CompareAction.UPDATE)
+        verifier = FakeIdentityVerifier(False)
+        service = AnalysisCompareService(
+            memory_service=_memory_service_with(prior), judge=judge,
+            homonym_verifier=verifier,
+        )
+        [proposal] = _compare(service, [_candidate(candidate_id="cur")])
+        self.assertEqual(proposal.action, CompareAction.CONFLICT)
+        self.assertEqual(len(verifier.calls), 1)
+        self.assertEqual(judge.calls, [])
+
+    def test_same_name_above_identity_floor_keeps_judge_path(self):
+        prior = _candidate(candidate_id="prior", job_id="job-prior")
+        judge = FakeJudge(CompareAction.UPDATE)
+        service = AnalysisCompareService(
+            memory_service=_memory_service_with(prior), judge=judge,
+            homonym_verifier=FakeIdentityVerifier(True),
+        )
+        [proposal] = _compare(service, [_candidate(candidate_id="cur")])
+        self.assertEqual(proposal.action, CompareAction.UPDATE)
+        self.assertEqual(len(judge.calls), 1)
+
     def test_single_match_is_labeled_by_judge(self):
         prior = _candidate(candidate_id="prior", job_id="job-prior")
         judge = FakeJudge(CompareAction.ADD_EVIDENCE, rationale="corroborates")

@@ -96,3 +96,24 @@ class EmbeddingSemanticMatcher:
         except MemoryNotFound:
             # Stale vector for a deleted memory; skip it.
             return None
+
+
+class EmbeddingCharacterIdentityVerifier:
+    """Compare a same-name candidate directly with its selected canonical."""
+
+    def __init__(
+        self, *, embeddings: EmbeddingProvider, similarity_floor: float
+    ) -> None:
+        self._embeddings = embeddings
+        self._floor = similarity_floor
+
+    def supports_same_identity(
+        self, *, candidate: AnalysisCandidate, memory: MemoryEntry
+    ) -> bool:
+        candidate_vector = self._embeddings.embed(
+            derive_memory_index_text(candidate.candidate_type, candidate.payload)
+        )
+        memory_vector = self._embeddings.embed(
+            derive_memory_index_text(memory.memory_type, memory.payload)
+        )
+        return _cosine_similarity(candidate_vector, memory_vector) >= self._floor

@@ -81,6 +81,10 @@ class MongoReviewQueueRepository:
         ).sort("_id", ASCENDING)
         return tuple(_to_entry(doc) for doc in cursor)
 
+    def get_entry(self, entry_id: str) -> ReviewQueueEntry | None:
+        doc = self._entries.find_one({"_id": entry_id})
+        return _to_entry(doc) if doc is not None else None
+
 
 def _entry_doc(entry: ReviewQueueEntry) -> dict[str, Any]:
     return {
@@ -93,6 +97,8 @@ def _entry_doc(entry: ReviewQueueEntry) -> dict[str, Any]:
         "matched_memory_id": entry.matched_memory_id,
         "rationale": entry.rationale,
         "status": str(entry.status),
+        "resolution_action": entry.resolution_action,
+        "resolution_memory_id": entry.resolution_memory_id,
     }
 
 
@@ -107,4 +113,6 @@ def _to_entry(doc: dict[str, Any]) -> ReviewQueueEntry:
         matched_memory_id=doc.get("matched_memory_id"),
         rationale=doc["rationale"],
         status=ReviewQueueStatus(doc["status"]),
+        resolution_action=doc.get("resolution_action"),
+        resolution_memory_id=doc.get("resolution_memory_id"),
     )

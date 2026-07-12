@@ -52,6 +52,8 @@ class ReviewQueueEntry:
     matched_memory_id: str | None
     rationale: str
     status: ReviewQueueStatus
+    resolution_action: str | None = None
+    resolution_memory_id: str | None = None
 
 
 def derive_review_queue_id(
@@ -81,6 +83,8 @@ class ReviewQueueRepository(Protocol):
     def list_open_for_candidate(
         self, project_id: str, candidate_id: str
     ) -> tuple[ReviewQueueEntry, ...]: ...
+
+    def get_entry(self, entry_id: str) -> ReviewQueueEntry | None: ...
 
 
 class InMemoryReviewQueueRepository:
@@ -112,6 +116,9 @@ class InMemoryReviewQueueRepository:
             and entry.candidate_id == candidate_id
             and entry.status is ReviewQueueStatus.OPEN
         )
+
+    def get_entry(self, entry_id: str) -> ReviewQueueEntry | None:
+        return self._entries.get(entry_id)
 
 
 class ReviewQueueService:
@@ -151,6 +158,27 @@ class ReviewQueueService:
 
     def list_open(self, project_id: str) -> tuple[ReviewQueueEntry, ...]:
         return self._repository.list_open_for_project(project_id)
+
+    def get(self, *, project_id: str, entry_id: str) -> ReviewQueueEntry:
+        entry = self._repository.get_entry(entry_id)
+        if entry is None or entry.project_id != project_id:
+            raise KeyError("review queue entry not found")
+        return entry
+
+    def mark_resolved(
+        self, entry: ReviewQueueEntry, *, action: str | None = None,
+        memory_id: str | None = None
+    ) -> ReviewQueueEntry:
+        if entry.status is ReviewQueueStatus.RESOLVED:
+            return entry
+        if entry.status is not ReviewQueueStatus.OPEN:
+            raise ValueError("review queue entry is not open")
+        resolved = replace(
+            entry, status=ReviewQueueStatus.RESOLVED,
+            resolution_action=action, resolution_memory_id=memory_id,
+        )
+        self._repository.upsert_entry(resolved)
+        return resolved
 
     def resolve_for_candidate(
         self, *, project_id: str, candidate_id: str

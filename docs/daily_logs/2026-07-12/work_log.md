@@ -2,10 +2,18 @@
 
 ## Goals
 
+- 오너가 선택한 (c-2): 동명이인 반증, character threshold calibration, merge/split write를 구현한다.
+
 - HANDOFF와 2026-07-11 work log를 읽고 다음 작업을 진행한다.
 - 오너 지시: "여기는 테스트도 가능한 머신이니까 확인해서 진행" → 이전 세션이 서브 머신에서 막았던 **live 관통 검증**(HANDOFF Next Tasks #2/#3, "코드 완료, sandbox 밖 막힘")을 실 인프라 위에서 실행한다.
 
 ## Completed work
+
+### (c-2) character identity reconciliation
+
+- same-name 단일 canonical을 직접 embedding pair로 검증하는 optional homonym verifier를 추가했다. 하한 미달은 matched id를 실은 conflict이며 env 미설정은 종전 judge 경로다.
+- 라벨 JSONL text pair를 실 embedding으로 점수화해 balanced accuracy 최대 threshold/confusion을 출력하는 calibration CLI를 추가했다. 양 라벨이 없으면 거부하고 env는 자동 변경하지 않는다.
+- review entry ID 기반 merge/split API를 추가했다. merge는 canonical payload 보존+evidence union append-only version, split은 명시 candidate 별도 canonical이다. resolution action/result를 저장해 replay를 잠갔다.
 
 ### 상황 확인
 
@@ -40,11 +48,18 @@
 
 ## Decisions
 
+- 오너는 semantic 반증은 conflict만, threshold는 라벨 근거 전까지 off, merge는 evidence 합성, split은 명시 candidate 귀속만 허용하는 안전 경계를 승인했다.
+
 - **live 검증을 다음 작업으로 선택**: HANDOFF Next Tasks #1(다음 slice)은 전부 오너 선택 + 착수 브리프 선행이라 임의 착수 불가. 반면 #2/#3의 live 관통은 "코드 완료, sandbox 밖 막힘"으로 명시적으로 남겨진 자족 검증이고, 오너가 "테스트 가능한 머신이니 확인"을 명시 → 정확히 이 머신에서 채울 gap.
 - **SoT bump 없음**: 신규 smoke 2개는 검증 도구. 계약 literal·public 표면·프로덕션 코드 무변, 동작 변화 0.
 - **미커밋 유지**: 프로젝트 관례상 커밋은 오너 지시 대기.
 
 ## Verification
+
+- 신규 핵심 회귀: `python3 -m pytest -q tests/test_character_threshold.py tests/test_character_reconciliation.py tests/test_analysis_compare.py` → **21 passed**.
+- compare wiring 포함: `tests/test_analysis_compare.py tests/test_analysis_compare_api.py` → **31 passed**.
+- 독립 검증이 최초 실행기의 hang 보고를 비재현하고 **763 passed / 48 skipped**를 확인했다. 후속 Obs2/Obs4 보강으로 reconcile HTTP 200/404/409 envelope·same-action replay·cross-action/invalid action·superseded target을 4개 회귀로 추가했다. 동기 review route의 AnyIO test-loop 교착을 확인해 blocking 작업이 없는 GET/reconcile을 `async def`로 정렬했다.
+- 최종 전체 suite: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **767 passed / 48 skipped / 99 subtests**, exit 0. `git diff --check` 통과.
 
 - 전체 스위트 회귀 무변: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **749 passed / 48 skipped**(신규 스크립트는 pytest 미수집). `git diff --check` clean(신규 untracked 2파일 외 변경 없음).
 - live 관통 4종 전부 exit 0 + `status:ok`/`ok:true`. 상세·재현 명령은 `docs/verifications/2026-07-12/indexing_live_smokes.md`.
