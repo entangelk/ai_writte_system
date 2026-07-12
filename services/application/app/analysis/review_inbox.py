@@ -3,7 +3,9 @@
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from services.application.app.analysis.models import AnalysisCandidate
+from services.application.app.analysis.models import (
+    AnalysisCandidate, AnalysisCandidateType,
+)
 from services.application.app.analysis.review_queue import (
     ReviewQueueEntry, ReviewQueueService,
 )
@@ -93,4 +95,58 @@ def _payload_diff(before: Mapping[str, Any], after: Mapping[str, Any]) -> tuple[
         FieldDiff(field=field, before=before.get(field), after=after.get(field))
         for field in sorted(set(before) | set(after))
         if before.get(field) != after.get(field)
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ActionAffordance:
+    """Declares whether a review action is available on an inbox item, and when
+    not, why (v1.6.67) — so a frontend can render disabled controls with a
+    tooltip. Eligibility is recomputed at read time from item state; the write
+    endpoints remain the authority (an eligible=True affordance does not skip the
+    write's own validation). See docs/plans/06-review-inbox-affordances-decisions.md."""
+
+    action: str
+    eligible: bool
+    reason: str | None = None
+
+
+_CHARACTER = AnalysisCandidateType.CHARACTER_OBSERVATION
+
+
+def candidate_affordances() -> tuple[ActionAffordance, ...]:
+    """The inbox only surfaces needs_review, non-promoted candidates, so all
+    three candidate review actions are always available (v1.6.61/66)."""
+    return (
+        ActionAffordance("confirm", True),
+        ActionAffordance("reject", True),
+        ActionAffordance("edit", True),
+    )
+
+
+def conflict_affordances(conflict: ConflictDetail) -> tuple[ActionAffordance, ...]:
+    """merge/split reconciliation is character-only; merge additionally needs a
+    resolvable matched canonical (``reconciliation.py`` reconcile guard)."""
+    is_character = conflict.entry.candidate_type is _CHARACTER
+    has_matched = conflict.matched_memory is not None
+    if not is_character:
+        merge_reason = split_reason = "merge/split is character-only"
+    else:
+        split_reason = None
+        merge_reason = (
+            None if has_matched
+            else "merge requires a matched canonical memory"
+        )
+    return (
+        ActionAffordance("merge", is_character and has_matched, merge_reason),
+        ActionAffordance("split", is_character, split_reason),
+    )
+
+
+def gate_finding_affordances(*, is_open: bool) -> tuple[ActionAffordance, ...]:
+    """A gate finding can be resolved/dismissed only while open (v1.6.65)."""
+    reason = None if is_open else "gate finding is already terminal"
+    return (
+        ActionAffordance("resolve", is_open, reason),
+        ActionAffordance("dismiss", is_open, reason),
     )

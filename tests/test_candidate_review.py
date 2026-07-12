@@ -180,7 +180,7 @@ class ConfirmTest(unittest.TestCase):
     def test_confirm_transitions_promotes_deindexes_and_resolves(self):
         # under-strict: every confirm side effect fires exactly once.
         service, analysis, memory, outbox, queue = _fixture("c1")
-        _enqueue_conflict(queue, "c1")
+        entry = _enqueue_conflict(queue, "c1")
         result = service.confirm(project_id="p1", candidate_id="c1")
         self.assertEqual(result.status, AnalysisCandidateStatus.CONFIRMED)
         self.assertFalse(result.idempotent_replay)
@@ -196,6 +196,12 @@ class ConfirmTest(unittest.TestCase):
         self.assertEqual(outbox.removed, [("p1", "c1")])
         # conflict queue resolved (no longer open)
         self.assertEqual(queue.list_open("p1"), ())
+        # over-strict: the entry is RESOLVED (confirm), not DISMISSED —
+        # list_open() emptiness alone cannot tell the two apart.
+        self.assertIs(
+            queue.get(project_id="p1", entry_id=entry.id).status,
+            ReviewQueueStatus.RESOLVED,
+        )
 
     def test_confirm_replay_is_idempotent_without_duplicate_side_effects(self):
         # over-strict idempotency (D4): a second confirm repeats no de-index/queue.
@@ -236,7 +242,7 @@ class ConfirmTest(unittest.TestCase):
 class RejectTest(unittest.TestCase):
     def test_reject_transitions_deindexes_dismisses_without_promotion(self):
         service, analysis, memory, outbox, queue = _fixture("c1")
-        _enqueue_conflict(queue, "c1")
+        entry = _enqueue_conflict(queue, "c1")
         result = service.reject(project_id="p1", candidate_id="c1")
         self.assertEqual(result.status, AnalysisCandidateStatus.REJECTED)
         self.assertIsNone(result.memory_id)
@@ -250,6 +256,11 @@ class RejectTest(unittest.TestCase):
         self.assertEqual(outbox.removed, [("p1", "c1")])
         # conflict queue dismissed
         self.assertEqual(queue.list_open("p1"), ())
+        # over-strict: the entry is DISMISSED (reject), not RESOLVED.
+        self.assertIs(
+            queue.get(project_id="p1", entry_id=entry.id).status,
+            ReviewQueueStatus.DISMISSED,
+        )
 
     def test_reject_replay_is_idempotent(self):
         service, analysis, memory, outbox, queue = _fixture("c1")

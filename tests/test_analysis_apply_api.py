@@ -12,9 +12,18 @@ from services.application.app.analysis.service import (
     AnalysisService,
     InMemoryAnalysisRepository,
 )
+from services.application.app.analysis.compare import CompareAction
+from services.application.app.analysis.review_inbox import (
+    ConflictDetail,
+    candidate_affordances,
+    conflict_affordances,
+    gate_finding_affordances,
+)
 from services.application.app.analysis.review_queue import (
     InMemoryReviewQueueRepository,
+    ReviewQueueEntry,
     ReviewQueueService,
+    ReviewQueueStatus,
 )
 from services.application.app.core_sot.service import (
     CoreSotService,
@@ -671,6 +680,120 @@ class ReviewInboxApiTest(unittest.TestCase):
             ).status_code,
             404,
         )
+
+    def test_affordances_declared_on_list_detail_and_gate_findings(self):
+        # v1.6.67 (rows 2/8/9/10): list item + detail item declare candidate
+        # actions; a character conflict with a matched canonical declares
+        # merge/split eligible; gate findings in the inbox declare resolve/dismiss.
+        gate_service = GateFindingService(InMemoryGateFindingRepository())
+        client, analysis, memory, project_id = _build(
+            gate_finding_service=gate_service
+        )
+        _entry, _prior, current = self._open_conflict(
+            client, analysis, memory, project_id
+        )
+        _persist_gate_finding(gate_service, project_id)
+
+        listed = client.get(
+            f"/projects/{project_id}/analysis/review-inbox"
+        ).json()
+        [item] = listed["items"]
+        self.assertEqual(
+            [(a["action"], a["eligible"]) for a in item["actions"]],
+            [("confirm", True), ("reject", True), ("edit", True)],
+        )
+        [gate] = listed["gate_findings"]
+        self.assertEqual(
+            [(a["action"], a["eligible"]) for a in gate["actions"]],
+            [("resolve", True), ("dismiss", True)],
+        )
+
+        detail = client.get(
+            f"/projects/{project_id}/analysis/review-inbox/{current.id}"
+        ).json()
+        self.assertEqual(
+            [a["action"] for a in detail["actions"]],
+            ["confirm", "reject", "edit"],
+        )
+        [conflict] = detail["conflicts"]
+        afford = {a["action"]: a for a in conflict["actions"]}
+        self.assertTrue(afford["merge"]["eligible"])
+        self.assertIsNone(afford["merge"]["reason"])
+        self.assertTrue(afford["split"]["eligible"])
+
+    def test_gate_finding_actions_present_on_dedicated_endpoint(self):
+        # row 10: the shared gate-finding serializer carries actions everywhere.
+        gate_service = GateFindingService(InMemoryGateFindingRepository())
+        client, _analysis, _memory, project_id = _build(
+            gate_finding_service=gate_service
+        )
+        _persist_gate_finding(gate_service, project_id)
+        [gate] = client.get(
+            f"/projects/{project_id}/analysis/gate-findings"
+        ).json()["gate_findings"]
+        self.assertEqual(
+            [a["action"] for a in gate["actions"]], ["resolve", "dismiss"]
+        )
+
+
+class ReviewInboxAffordanceTest(unittest.TestCase):
+    """Pure review action affordance eligibility rules (v1.6.67).
+
+    Locks the boundary matrix rows the write endpoints enforce, so the declared
+    affordances never lie about what a reconcile/transition would accept. See
+    docs/plans/06-review-inbox-affordances-decisions.md."""
+
+    def _conflict(self, candidate_type):
+        # matched_memory=None: covers the "no matched canonical" branch. The
+        # matched-canonical (merge-eligible) branch flows through real objects in
+        # ReviewInboxApiTest.test_affordances_declared_...
+        entry = ReviewQueueEntry(
+            id="rq-1", project_id="p1", job_id="j1", candidate_id="c1",
+            candidate_type=candidate_type, action=CompareAction.CONFLICT,
+            matched_memory_id=None, rationale="dup",
+            status=ReviewQueueStatus.OPEN,
+        )
+        return ConflictDetail(entry=entry, matched_memory=None, diff=())
+
+    def test_candidate_actions_all_eligible(self):
+        actions = candidate_affordances()
+        self.assertEqual(
+            [a.action for a in actions], ["confirm", "reject", "edit"]
+        )
+        self.assertTrue(all(a.eligible and a.reason is None for a in actions))
+
+    def test_character_conflict_without_matched_blocks_merge_only(self):
+        # over/under: split needs no matched, merge does.
+        merge, split = conflict_affordances(self._conflict(CHARACTER))
+        self.assertEqual((merge.action, split.action), ("merge", "split"))
+        self.assertFalse(merge.eligible)
+        self.assertEqual(merge.reason, "merge requires a matched canonical memory")
+        self.assertTrue(split.eligible)
+        self.assertIsNone(split.reason)
+
+    def test_non_character_conflict_blocks_merge_and_split(self):
+        # over-strict: neither action is offered for a non-character conflict.
+        merge, split = conflict_affordances(
+            self._conflict(AnalysisCandidateType.EVENT_OBSERVATION)
+        )
+        self.assertFalse(merge.eligible)
+        self.assertFalse(split.eligible)
+        self.assertEqual(merge.reason, "merge/split is character-only")
+        self.assertEqual(split.reason, "merge/split is character-only")
+
+    def test_gate_finding_open_allows_resolve_and_dismiss(self):
+        resolve, dismiss = gate_finding_affordances(is_open=True)
+        self.assertEqual((resolve.action, dismiss.action), ("resolve", "dismiss"))
+        self.assertTrue(resolve.eligible and dismiss.eligible)
+        self.assertIsNone(resolve.reason)
+
+    def test_gate_finding_terminal_blocks_resolve_and_dismiss(self):
+        # over-strict: a resolved/dismissed finding offers no further action.
+        resolve, dismiss = gate_finding_affordances(is_open=False)
+        self.assertFalse(resolve.eligible)
+        self.assertFalse(dismiss.eligible)
+        self.assertEqual(resolve.reason, "gate finding is already terminal")
+        self.assertEqual(dismiss.reason, "gate finding is already terminal")
 
 
 class EditCandidateApiTest(unittest.TestCase):

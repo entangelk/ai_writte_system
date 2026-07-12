@@ -64,6 +64,9 @@ from services.application.app.analysis.reconciliation import (
 from services.application.app.analysis.review_inbox import (
     ReviewInboxNotFound,
     ReviewInboxService,
+    candidate_affordances,
+    conflict_affordances,
+    gate_finding_affordances,
 )
 from services.application.app.analysis.source import CoreSotSourceAdapter
 from services.llm_gateway.app.errors import ProviderError
@@ -1744,6 +1747,13 @@ def create_app(
             "content_hash": ref.content_hash,
         }
 
+    def _affordance_payload(affordance) -> dict[str, object]:
+        return {
+            "action": affordance.action,
+            "eligible": affordance.eligible,
+            "reason": affordance.reason,
+        }
+
     def _review_inbox_payload(item, *, include_detail: bool) -> dict[str, object]:
         candidate = item.candidate
         payload: dict[str, object] = {
@@ -1754,6 +1764,10 @@ def create_app(
             "confidence": candidate.confidence,
             "provenance": candidate.provenance.value,
             "conflict_count": len(item.conflicts),
+            # v1.6.67: available review actions per item (list + detail, D3).
+            "actions": [
+                _affordance_payload(a) for a in candidate_affordances()
+            ],
         }
         if include_detail:
             payload.update({
@@ -1775,6 +1789,10 @@ def create_app(
                             {"field": diff.field, "before": diff.before,
                              "after": diff.after}
                             for diff in conflict.diff
+                        ],
+                        "actions": [
+                            _affordance_payload(a)
+                            for a in conflict_affordances(conflict)
                         ],
                     }
                     for conflict in item.conflicts
@@ -1827,6 +1845,12 @@ def create_app(
                 finding.terminal_at.isoformat()
                 if finding.terminal_at is not None else None
             ),
+            "actions": [
+                _affordance_payload(a)
+                for a in gate_finding_affordances(
+                    is_open=finding.status is GateFindingStatus.OPEN
+                )
+            ],
         }
 
     @app.get("/projects/{project_id}/analysis/gate-findings")

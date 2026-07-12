@@ -205,9 +205,46 @@
   - 전체 **798 passed / 48 skipped**(assertion 추가는 기존 테스트 보강이라 카운트 불변), `git diff --check` clean.
 - **비차단 H1~H3(acknowledged, 결함 아님)**: H1 edit 2-연산 원자성(successor insert + 원본 supersede 별도 write, live 후속 acknowledged)·H2 status(409) vs payload(400) 우선순위 계약 미명시(현재 status 우선, 합리적)·H3 in-memory duplicate 미감지(동시성 잠금은 mongo에서만 live, 기존 구조). 코드 무변.
 
+## 6차 작업 — Phase 6 Review Inbox 액션 어포던스 (SoT v1.6.67)
+
+오너 선택: 튜닝 제외 다음 Phase 6 UI 백엔드 slice → **Review Inbox 액션 어포던스**(候補: 부분 승인 / merge-split 일반화 중 오너 선택). 방금 커밋한 AGENTS.md 가이드라인(owner-level 결정 blocking 시 코드 전 decision brief)대로 옵션 테이블로 D1~D3 확정 후 구현.
+
+### 착수 결정 브리프 + 오너 결정
+
+- 신규 브리프 `plans/06-review-inbox-affordances-decisions.md`(새 AGENTS.md 구조: Decision needed·Options table·Recommendation·Follow-up·Deferred + 경계 매트릭스 11행).
+- **오너 결정 D1=자격 주석형 descriptor**(`{action, eligible, reason}` — 불가 이유까지)·**D2=candidate+conflict+gate finding 전부**·**D3=list+detail 둘 다**.
+
+### 구현 (read-only 어포던스 계산, 도메인 write·상태 무변)
+
+- `analysis/review_inbox.py`: `ActionAffordance` descriptor + 순수 함수 `candidate_affordances`(confirm/reject/edit 항상 eligible — inbox는 needs_review·미승격만 노출)·`conflict_affordances`(reconciliation.py 자격 규칙 그대로: merge=character+matched canonical, split=character; 불가 이유 문자열)·`gate_finding_affordances(is_open)`(resolve/dismiss=open일 때만). gate 함수는 `is_open: bool`을 받아 review_inbox가 context_search.gate_findings에 의존하지 않게 함(모듈 경계).
+- `main.py`: `_affordance_payload` serializer + `_review_inbox_payload`에 candidate `actions`(list+detail) + detail conflict `actions` + `_gate_finding_payload`에 `actions`(review-inbox·`/gate-findings` 양쪽 공유 serializer라 어디서든 노출).
+- **자격이 거짓말 안 하도록** reconcile 실제 authority와 일치 확인: 둘 다 character-only, merge만 matched 필요(reconciliation.py:69-74). merge 자격은 resolved `matched_memory` 실체 기준(matched_memory_id 있으나 memory 유실 시 merge 실패하므로 eligible=false가 정직, inbox detail이 이미 resolved만 노출하는 것과 정합).
+
+### 회귀 (양방향 guard)
+
+- 회귀 +7: `ReviewInboxAffordanceTest` 5(pure: candidate 전부 eligible·character-no-matched merge만 차단[split은 matched 불요]·비-character 둘 다 차단·gate open eligible·gate terminal 차단) + `ReviewInboxApiTest` 2(HTTP: list item+gate 어포던스·detail item+character-matched conflict merge/split eligible·전용 `/gate-findings` actions).
+- character+matched(merge eligible) 경계는 실객체가 흐르는 HTTP detail 테스트로 잠금(순수 테스트는 matched=None 케이스만 → MemoryEntry 구성 회피).
+- 전체 **805 passed / 48 skipped / 101 subtests**(종전 798). `git diff --check` clean.
+
+### 남은 미확정 (Phase 6 UI slice 유지)
+
+- 부분 승인/부분 retry·merge/split를 event/open_question로 일반화·상태 변경 invalidate 범위·frontend(framework 미확정). 어포던스는 선언만 추가.
+- descriptor에 action별 href/route(HATEOAS)는 미포함(프론트가 이름→경로 매핑, 필요 시 additive 확장 여지).
+
+### 오너 독립 검증 2건 합격 + 비차단 hardening 보강
+
+- **검증 기록**: `docs/verifications/2026-07-12/candidate_edit_b1_closure.md`(v1.6.66 B1 closure 재검증 → **조건부→합격 승격**)·`docs/verifications/2026-07-12/review_inbox_affordances.md`(v1.6.67 → **합격, 조건 없음**). 어포던스 매트릭스 11행 전수 잠금, 자격 규칙 변형 4종(MA·MB·MC·MD) 전부 bite.
+- **보강 적용(사용자 지시 "보강 후 커밋")**:
+  - **B1 H1(confirm/reject `list_open==()` gap)**: edit는 B1 closure로 잠갔으나 confirm/reject(이전 슬라이스)는 여전히 `list_open==()`만 검사해 resolve/dismiss 구분 못 하던 기존 부채. 이번에 사용자 명시 지시로 §3 예외 적용 — `test_confirm_...`에 `status is RESOLVED`, `test_reject_...`에 `status is DISMISSED` over-strict assertion 추가. **이제 3개 review action(confirm→resolve·reject→dismiss·edit→resolve) 모두 conflict-queue 상태 방향 일관 잠금.**
+    - **bite 재실증**: reject `dismiss→resolve`(고유) → reject 테스트 260行 FAIL; confirm/edit `resolve→dismiss`(전역) → confirm 테스트 201行 FAIL. 복원 무결성 grep 확인(96 resolve/117 dismiss/154 resolve).
+    - **repro 정정(검증자 지적)**: 이전 candidate_edit_backend.md의 M3 sed가 동일 들여쓰기라 confirm 첫 매치를 바꿨음(결론은 유효했으나 repro 부정확) — 이번엔 고유 문자열(dismiss)·전역+타겟 테스트로 정확히 타겟.
+  - **어포던스 H2(reason 문자열 계약 미고정)**: `reason`은 display text이고 **machine contract는 `action`+`eligible`**임을 브리프·SoT에 명시(소비자는 reason 문자열 pattern-match 금지, localization은 계약 bump 불요).
+  - **어포던스 H1(row 11 read-only)**: 순수 함수라 side effect 자체가 없어 의미 있는 assertion 부재 → 정적 커버 유지(검증자 판정 수용, 코드 무변).
+- 전체 **805 passed / 48 skipped**(confirm/reject assertion 추가는 기존 테스트 보강이라 카운트 불변), `git diff --check` clean.
+
 ## Next steps
 
-- **(Phase 6 UI 잔여)**: 부분 승인/부분 retry·merge/split inbox 액션·candidate edit **실 Mongo live** 관통·frontend(보류). 각 착수 브리프 필요.
+- **(Phase 6 UI 잔여)**: 부분 승인/부분 retry·merge/split 일반화(event/open_question)·candidate edit **실 Mongo live** 관통·frontend(보류). 각 착수 브리프 필요.
 - **(c) 후속 잔여**: 동명이인 false-positive 반증(name-key=1 분기, 별도 증분), character alias threshold 실값 캘리브레이션(라이브 cosine 분포 배치, off→발화), merge/split write 경로(Phase 6 UI).
 - **여전히 sandbox 밖 남은 것**: 2B.6 event/open_question semantic threshold 실 캘리브레이션, compare judge J1 프롬프트 판별 튜닝(deterministic 벤치마크 요), (b-4) hybrid 튜닝(실 데이터).
 - HANDOFF Next Tasks #1 남은 후보: (b-4)·Phase 6 UI(frontend 미확정이라 백엔드 API 확장 위주). 다음 slice 오너 선택 대기.
