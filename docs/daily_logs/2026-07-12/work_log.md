@@ -78,6 +78,16 @@
 - **#2 compare judge 라벨 품질 live 미검증**: smoke가 라벨 assert 안 함 → 프롬프트 판별 정확도는 live로 영원히 미검증. **J1 튜닝 브리프에 별도 deterministic 벤치마크(fake 회귀 라벨 + real 정확도) 설계를 포함해야 함**. 검증 기록 §3 범위 한계 명시.
 - **#3 비결정성 정밀화**: 감사 재실행 → `update`→conflict 2회 일관(체계적 편향, J1 우선 타깃), `no_change` 변동(샘플링). 검증 기록 §3 반영.
 
+## 3차 작업 — 감사 비차단 항목 코드 보강 (문서 아닌 실제 코드/테스트)
+
+오너 지시: 검증기록(문서)이 아니라 개발한 것 중 **테스트/비차단 항목을 실제로 코드 보강**. 두 감사의 비차단 관찰 중 코드로 고칠 수 있는 것(튜닝 제외)을 실제 수정:
+
+- **LLM 감사 #1 (gateway 컨테이너 관통 편중) → 신규 smoke로 해소**: provider/planner/compare judge는 인프로세스 ASGI라 gateway *컨테이너* HTTP는 deployed e2e에서만 간접 검증됐다. `scripts/gateway_generate_live_smoke.py` 신규 — gateway 컨테이너 `GET /health` + `POST /v1/generate`를 직접 POST해 계약 응답 shape(text·finish_reason·usage.*_tokens) assert. 실행 PASS(`ok:true`, "연결 확인 완료" 에코, usage 28 tokens). 격리된 컨테이너 gateway→llama 경로 커버.
+- **인덱싱 감사 #3 (Mongo smoke doc 누적) → self-cleanup + 일회성 sweep**: `phase2b_candidate_index_live_smoke.py`(내 스크립트) + `phase2b5_memory_reindex_live_smoke.py`에 `_cleanup_mongo_docs`(best-effort, 결과 안 가림) 추가 — 각 run이 자기 project_id의 job/task/candidate·memory/index_sync_log doc을 삭제. 재실행 시 누적 0 실증(cleanup 추가 후 run → `remaining smoke-* docs: 0`). 기존 누적분(analysis 7×3 + index_sync_logs 14 + memory_entries 2 = 37건)은 일회성 sweep으로 삭제(0 잔여).
+- **LLM 감사 #2 (라벨 품질 벤치마크)**: J1 튜닝 과제라 이번 제외(오너 지시). 착수 브리프에 deterministic 벤치마크 요건으로 남김.
+
+검증: 회귀 749 passed / 48 skipped(신규 smoke·cleanup 모두 pytest 미수집·프로덕션 코드 무변). candidate/memory smoke 재실행 PASS + cleanup 0 잔여, gateway smoke PASS.
+
 ## Next steps
 
 - **여전히 sandbox 밖 남은 것**(이번 미포함): 2B.6 semantic threshold 실 캘리브레이션(실 embedding 유사/비유사 cosine 분포 관찰), compare judge / context_search planner live smoke(실 llama 12B gateway 기동 필요 — 이번엔 gateway 미기동), (b-4) hybrid 튜닝(실 데이터).

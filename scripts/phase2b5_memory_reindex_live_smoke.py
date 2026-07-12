@@ -40,6 +40,23 @@ from services.application.app.memory.models import PromotionMode
 DEFAULT_MONGO_DB = "ai_writing_system"
 
 
+def _cleanup_mongo_docs(mongo_uri: str, db_name: str, project_id: str) -> None:
+    """Delete the memory + index-sync-log docs this smoke wrote for its project
+    id. Best-effort: a cleanup failure must not mask the smoke's real result."""
+    try:
+        from pymongo import MongoClient
+
+        client = MongoClient(mongo_uri)
+        try:
+            db = client[db_name]
+            for collection in ("memory_entries", "index_sync_logs"):
+                db[collection].delete_many({"project_id": project_id})
+        finally:
+            client.close()
+    except Exception as exc:  # transient/driver — warn, don't mask the result
+        print(f"WARNING: Mongo cleanup failed for {project_id}: {exc!r}", file=sys.stderr)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mongo-uri", default=os.environ.get("CORE_SOT_MONGO_URI"))
@@ -113,8 +130,11 @@ def run_smoke(args: argparse.Namespace) -> dict:
     records = adapter.list_memory_records(project_id=project_id)
     indexed_ids = [r.memory_id for r in records]
 
-    # Best-effort cleanup of the Chroma record (Mongo memory doc left as-is).
+    # Best-effort cleanup of the Chroma record AND the Mongo docs this smoke
+    # wrote (memory entry + index-sync log), so repeated live runs do not
+    # accumulate smoke-* documents in the shared database.
     adapter.delete_memory_record(project_id=project_id, memory_id=promoted.id)
+    _cleanup_mongo_docs(args.mongo_uri, db_name, project_id)
 
     ok = promoted.id in indexed_ids and len(records) == 1
     return {

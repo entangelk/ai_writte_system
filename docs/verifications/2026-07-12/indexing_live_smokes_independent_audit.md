@@ -147,4 +147,4 @@ python3 -m pytest -q --ignore=tests/test_memory_mongo.py     # 749 passed / 48 s
 
 1. **§Issues 비차단 #1 (refresh flaky 재현성 표기)** — 작업자 검증 기록 `indexing_live_smokes.md` §4 관찰에 "timing-dependent flaky(4회 중 3회 `[]` 재현, 1회 우연 PASS)" 명시 추가. 진단 결론은 불변.
 2. **§Issues 비차단 (PROJECT_ARCHIVED live 미검증)** — `scripts/phase3b_archive_chroma_live_smoke.py`를 **2단계**로 확장: Phase 1 DRAFT_ARCHIVED(narrowing, 종전) + **Phase 2 PROJECT_ARCHIVED(project 전체 wipe) 신규**. 실 인프라 재실행 → `remaining_after_project_archived == []` 확인. 이로써 감사가 지적한 live boundary-matrix 빈 셀(PROJECT_ARCHIVED)이 회귀 의존에서 live 검증으로 승격됨. 검증 기록 §5 갱신.
-3. **§Issues 비차단 (Mongo `smoke-*` 누적)** — 검증 기록 `indexing_live_smokes.md` §Issues에 ops 관심사로 명시(주기적 cleanup은 운영 판단 사항, 현재 결함 아님).
+3. **§Issues 비차단 (Mongo `smoke-*` 누적) → 코드 보강**: 검증 기록 명시에 더해, 오너 재지시("실제 코드 보강")에 따라 `phase2b_candidate_index_live_smoke.py`·`phase2b5_memory_reindex_live_smoke.py`에 `_cleanup_mongo_docs`(project_id 기준 job/task/candidate·memory/index_sync_log 삭제, best-effort) 추가 — 재실행 누적 0 실증. 기존 누적분 37건(analysis 21 + index_sync_logs 14 + memory 2)은 일회성 sweep으로 삭제(0 잔여).

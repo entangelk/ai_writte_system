@@ -125,9 +125,9 @@ python3 -m pytest -q --ignore=tests/test_memory_mongo.py                   # 749
 
 ## 보강 반영 (2026-07-12 후속, 작업자)
 
-오너 지시("보강할 부분 보강 후 커밋")에 따라 본 감사의 비차단 관찰 3건을 작업자 검증 기록 `llm_path_live_smokes.md`에 반영(원 findings 보존, 후속 조치 기록). 이번엔 **코드/스크립트 무변**(관찰 3건 모두 문서/범위 정밀화이고 코드 결함이 아님) — 검증 기록 문서만 보강.
+오너 지시에 따라 본 감사의 비차단 관찰을 반영. 1차로 검증 기록 문서에 정밀화했고, 이후 오너 재지시("문서 말고 실제 코드/테스트를 보강")에 따라 **#1은 신규 smoke로 실제 코드 보강**했다.
 
-1. **비차단 #1 (gateway 컨테이너 관통 편중)** — 검증 기록 §5 말미 + Issues #1에 "provider/planner/compare judge는 인프로세스 ASGI, gateway *컨테이너* 관통은 deployed e2e(§5) 하나뿐(코드 동일→기능 무문제)" 명시.
+1. **비차단 #1 (gateway 컨테이너 관통 편중) → 코드 보강**: 검증 기록 §5/Issues 명시에 더해 `scripts/gateway_generate_live_smoke.py` 신규 — gateway 컨테이너 `GET /health` + `POST /v1/generate`를 직접 POST해 계약 응답(text·finish_reason·usage) assert(실행 PASS: `ok:true`, usage 28 tokens). deployed e2e에만 의존하던 gateway 컨테이너 HTTP 커버리지를 격리 smoke로 보강.
 2. **비차단 #2 (compare judge 라벨 품질 live 미검증)** — §3 "범위 한계" + Issues #2에 "smoke가 라벨 assert 안 함 → 프롬프트 판별 정확도는 live smoke로 영원히 미검증, J1은 별도 deterministic 벤치마크(fake 회귀 라벨 + real 정확도) 선행 필요" 명시.
 3. **비차단 #3 (비결정성)** — §3 "비결정성 정밀화"에 감사 재실행 결과 반영: `update`→conflict 2회 일관(체계적 편향, J1 우선 타깃), `no_change` 변동(샘플링). wiring 판정은 안정.
 

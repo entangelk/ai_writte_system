@@ -131,7 +131,7 @@ scripts/
 ├── smoke_llm_provider.py · benchmark_llm_provider.py
 ├── phase2a_*_smoke.py · phase3a_rebuild_source_block_index.py(CLI rebuild) · phase3a_*_smoke.py · phase4_context_search_*_smoke.py · phase4_lexical_memory_live_smoke.py
 ├── index_sync_worker.py         # 3B archive + 2B.5 memory reindex + b-2 candidate 색인 drain (--loop compose 서비스, b-6 증분1)
-├── phase2b3_compare_judge_live_smoke.py
-├── phase2b_candidate_index_live_smoke.py · phase3b_archive_chroma_live_smoke.py   # b-2 candidate·3B archive live 관통 smoke(2026-07-12 신규)
+├── phase2b3_compare_judge_live_smoke.py · gateway_generate_live_smoke.py(gateway 컨테이너 /v1/generate 직접, 2026-07-12 신규)
+├── phase2b_candidate_index_live_smoke.py · phase3b_archive_chroma_live_smoke.py   # b-2 candidate·3B archive live 관통 smoke(2026-07-12 신규, Mongo doc self-cleanup)
 └── phase2b5_reindex_memory.py · phase2b5_reindex_candidate.py(둘 다 vector+lexical backfill, v1.6.58) · phase2b5_memory_reindex_live_smoke.py
 ```

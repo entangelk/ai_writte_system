@@ -43,6 +43,23 @@ from services.application.app.indexing.candidate_lexical_index import (
 DEFAULT_MONGO_DB = "ai_writing_system"
 
 
+def _cleanup_mongo_docs(mongo_uri: str, db_name: str, project_id: str) -> None:
+    """Delete the job/task/candidate docs this smoke wrote for its project id.
+    Best-effort: a cleanup failure must not mask the smoke's real result."""
+    try:
+        from pymongo import MongoClient
+
+        client = MongoClient(mongo_uri)
+        try:
+            db = client[db_name]
+            for collection in ("analysis_jobs", "analysis_tasks", "analysis_candidates"):
+                db[collection].delete_many({"project_id": project_id})
+        finally:
+            client.close()
+    except Exception as exc:  # transient/driver — warn, don't mask the result
+        print(f"WARNING: Mongo cleanup failed for {project_id}: {exc!r}", file=sys.stderr)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mongo-uri", default=os.environ.get("CORE_SOT_MONGO_URI"))
@@ -144,13 +161,16 @@ def run_smoke(args: argparse.Namespace) -> dict:
     )
     lexical_ids = [r.candidate_id for r in lexical_hits]
 
-    # Best-effort cleanup of both index records (Mongo candidate doc left as-is).
+    # Best-effort cleanup of both index records AND the Mongo docs this smoke
+    # created (job/task/candidate), so repeated live runs do not accumulate
+    # smoke-* documents in the shared database.
     vector_adapter.delete_candidate_record(
         project_id=project_id, candidate_id=recorded.id
     )
     lexical_adapter.delete_candidate_record(
         project_id=project_id, candidate_id=recorded.id
     )
+    _cleanup_mongo_docs(args.mongo_uri, db_name, project_id)
 
     ok = (
         vector_ids == [recorded.id]
