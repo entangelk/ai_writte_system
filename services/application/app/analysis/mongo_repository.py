@@ -337,6 +337,7 @@ def _candidate_doc(candidate: AnalysisCandidate, logical_key: str) -> dict[str, 
         "confidence": candidate.confidence,
         "source_ref_ids": list(candidate.source_ref_ids),
         "payload": dict(candidate.payload),
+        "supersedes_candidate_id": candidate.supersedes_candidate_id,
     }
 
 
@@ -353,4 +354,5 @@ def _to_candidate(doc: dict[str, Any]) -> AnalysisCandidate:
         confidence=doc["confidence"],
         source_ref_ids=tuple(doc["source_ref_ids"]),
         payload=immutable_payload(doc["payload"]),
+        supersedes_candidate_id=doc.get("supersedes_candidate_id"),
     )

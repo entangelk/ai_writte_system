@@ -747,6 +747,10 @@ class ReconcileCharacterRequest(BaseModel):
     action: str
 
 
+class EditCandidateRequest(BaseModel):
+    payload: dict[str, object]
+
+
 class ContextSearchHttpRequest(BaseModel):
     idempotency_key: str
     query: str
@@ -1367,6 +1371,15 @@ def create_app(
             "idempotent_replay": result.idempotent_replay,
         }
 
+    def _candidate_edit_payload(result) -> dict[str, object]:
+        return {
+            "original_candidate_id": result.original_candidate_id,
+            "candidate_id": result.candidate_id,
+            "status": str(result.status),
+            "memory_id": result.memory_id,
+            "idempotent_replay": result.idempotent_replay,
+        }
+
     @app.post(
         "/projects/{project_id}/analysis/candidates/{candidate_id}/confirm"
     )
@@ -1402,6 +1415,31 @@ def create_app(
         except InvalidCandidateStateTransition as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return _candidate_review_payload(result)
+
+    @app.post(
+        "/projects/{project_id}/analysis/candidates/{candidate_id}/edit"
+    )
+    async def edit_candidate(
+        project_id: str, candidate_id: str, body: EditCandidateRequest
+    ) -> dict[str, object]:
+        # Phase 6 (v1.6.66): edit → new confirmed candidate version + promotion +
+        # de-index of the superseded original + resolve. The edited payload is
+        # revalidated against the candidate_type schema (invalid → 400); editing a
+        # non-needs_review candidate is a 409.
+        try:
+            _require_project_exists(project_id)
+            result = candidate_review.edit(
+                project_id=project_id,
+                candidate_id=candidate_id,
+                payload=body.payload,
+            )
+        except (AnalysisNotFound, MemoryNotFound, NotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except InvalidCandidateStateTransition as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except InvalidAnalysisCandidate as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _candidate_edit_payload(result)
 
     @app.post("/projects/{project_id}/analysis/jobs/{job_id}/auto-promote")
     async def auto_promote_job(

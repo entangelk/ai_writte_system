@@ -30,6 +30,13 @@ class AnalysisCandidateStatus(StrEnum):
     # the candidate is de-indexed and no longer surfaces as candidate evidence.
     CONFIRMED = "confirmed"
     REJECTED = "rejected"
+    # Phase 6 candidate edit (v1.6.66): a reviewer corrects a candidate's payload.
+    # The edited value becomes a new candidate version (append-only) that is
+    # confirmed + promoted; the original candidate is retained as ``superseded``
+    # (audit history) and de-indexed. Reachable only via the edit path, not via
+    # the confirm/reject transition channel. See
+    # docs/plans/06-candidate-edit-decisions.md.
+    SUPERSEDED = "superseded"
 
 
 class AnalysisJobStatus(StrEnum):
@@ -79,6 +86,10 @@ class AnalysisCandidate:
     confidence: float
     source_ref_ids: tuple[str, ...]
     payload: Mapping[str, Any]
+    # Phase 6 candidate edit (v1.6.66): set on an edit successor to link back to
+    # the candidate version it replaced (append-only). ``None`` for every
+    # extraction-minted candidate, so existing constructions stay valid.
+    supersedes_candidate_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -168,8 +168,46 @@
   - **Obs3(rationale에 canonical id 사용) → 코드 무변**: SoT/브리프가 rationale 리터럴을 계약으로 고정 안 함. id가 이름보다 정확한 영구 참조라 그대로 유지(검증자도 무방 판정).
 - 회귀 +6→**+8**, 전체 **757 passed / 48 skipped**. Obs4 가드 mutation bite 재실증.
 
+## 5차 작업 — Phase 6 candidate edit (SoT v1.6.66)
+
+오너 선택: 튜닝 계열((b-4)·(c-2) threshold·2B.6·J1)을 제외한 다음작업 → **Phase 6 UI 잔여**. 남은 항목이 전부 미확정 오너 결정에 묶여 있어(README §37·SoT 변경 규칙 #3) 먼저 결정을 받음. 오너 결정: **다음 slice=Candidate edit 백엔드**, **edit 반영=원 후보의 새 version**.
+
+### 착수 결정 브리프 + 오너 결정
+
+- 신규 브리프 `plans/06-candidate-edit-decisions.md`. review action 3종(approve/reject/edit) 중 approve·reject는 v1.6.61 완료, 마지막 edit을 연다(수용 기준 §60).
+- **오너 결정 D1=원 후보의 새 version**: 편집값으로 candidate의 새 version(append-only)을 mint→confirm→canonical 승격, 원 후보는 보존.
+- D2~D6은 D1이 강제하는 파생 계약 — 임의 선택이 아니라 기존 패턴 재사용임을 브리프에 명시(edit-and-confirm 단일 액션·`superseded` terminal·기존 unique index 재사용 idempotency·근거/provenance/confidence 보존·confirm 선례 재사용). 경계 매트릭스 13행.
+
+### 구현 (기존 머신 재사용, 신규 repo 메서드 0)
+
+- `analysis/models.py`: `AnalysisCandidateStatus.SUPERSEDED` 신규 terminal(edit 전용) + `AnalysisCandidate.supersedes_candidate_id: str | None = None`(default None → 기존 생성부 전부 유효, surgical).
+- `analysis/service.py`: `AnalysisService.edit_candidate`(+`CandidateEdit`). idempotency는 successor의 `logical_key=f"edit:{원본id}"`가 기존 `(project,task,logical_key)` unique index를 재사용 — `find_candidate_request`로 replay 감지, 동시성은 두 번째 insert가 `DuplicateAnalysisCandidateRequest`→승자 재조회(promote 선례 동형). 신규 repo 메서드 불필요. append-only: successor(confirmed) insert 먼저 → 원본 `superseded` `update_candidate`.
+- `analysis/candidate_review.py`: `CandidateReviewService.edit`(+`CandidateEditResult`). confirm 선례 미러 — edit_candidate → promote_candidate(successor, MANUAL) → 원본 de-index(CANDIDATE_REMOVED) + 원본 conflict resolve(edit=승인 계열이라 dismiss 아님). replay면 side effect 미반복.
+- `analysis/mongo_repository.py`: `_candidate_doc`/`_to_candidate`에 `supersedes_candidate_id` 직렬화(`.get()` 하위호환). 원본 status 전이는 기존 `update_candidate`의 `$set status`가 그대로 커버.
+- `main.py`: `EditCandidateRequest{payload}` + `POST /projects/{id}/analysis/candidates/{cid}/edit` + `_candidate_edit_payload`. 에러 매핑: 404(missing/cross-project) / 409(terminal 후보) / 400(invalid payload, `InvalidAnalysisCandidate`).
+
+### 회귀 (양방향 guard)
+
+- 회귀 +15: `tests/test_candidate_review.py::EditTest` 9(version mint+supersede+promote[링크=successor]·근거 보존·replay 무중복·one-shot 2차 payload가 첫 version replay·needs_review set에서 원본+successor 배제·invalid payload 원본 불변·terminal 후보 409·optional deps·404×2) + `TransitionStateMachineTest.test_superseded_is_not_a_transition_target` 1(over-strict: `superseded`가 confirm/reject 전이 채널로 도달 불가) + `tests/test_analysis_apply_api.py::EditCandidateApiTest` 5(200 flow+inbox drop·replay·400·409·404×2).
+- 전체 **798 passed / 48 skipped / 101 subtests**(종전 783). `git diff --check` clean.
+
+### 남은 미확정 (Phase 6 UI slice 유지)
+
+- 부분 승인/부분 retry(create/update/add_evidence/conflict별 세분 승인)·entity merge/split inbox 액션 노출·상태 변경 invalidate 범위·frontend(framework 미확정). candidate edit 반영 위치만 v1.6.66으로 확정.
+- **실 Mongo edit round-trip**(원본 superseded `$set` + successor insert 원자성, unique index 동시성)은 sandbox 밖 live 후속.
+
+### 오너 독립 적대적 검증 조건부 합격 → B1 closure
+
+- **검증 기록**: `docs/verifications/2026-07-12/candidate_edit_backend.md` — 브리프 매트릭스 13행을 lock list로 세워 코드·테스트·스펙을 대입하고 6개 mutation으로 guard bite를 적대적 증명. **조건부 합격**: 12/13행 잠김, 5/6 mutation(M1·M2·M4·M5·M6) bite 실증, 계약 자체 무모순, 798/48/101 독립 재도출.
+- **B1(차단) — 매트릭스 행 7 "원본 conflict resolve(dismiss 아님)"의 over-strict 미잠금**: 기존 edit 테스트가 `queue.list_open("p1")==()`만 검사 → RESOLVED/DISMISSED 구분 불가. 검증자 mutation M3(`resolve_for_candidate`→`dismiss_for_candidate`)가 bite하지 않음(22 passed). 구현 자체는 correct(`candidate_review.py:154` resolve 호출), 결함은 테스트 coverage.
+  - **보강**: `_enqueue_conflict` 헬퍼가 엔트리를 반환(additive)하도록 하고, `test_edit_mints_confirmed_version_supersedes_and_promotes`에 `queue.get(...).status is ReviewQueueStatus.RESOLVED` over-strict assertion 추가. `ReviewQueueService.get`이 status를 노출하므로 헬퍼 신설 불요.
+  - **bite 재실증**: M3 재적용 시 `AssertionError: DISMISSED is not RESOLVED`로 FAIL, 복원 후 22 passed. edit 경로만 잠금(기존 confirm/reject의 동일 `list_open==()` 패턴은 내가 만든 mess가 아니라 §3 surgical로 미변경).
+  - 전체 **798 passed / 48 skipped**(assertion 추가는 기존 테스트 보강이라 카운트 불변), `git diff --check` clean.
+- **비차단 H1~H3(acknowledged, 결함 아님)**: H1 edit 2-연산 원자성(successor insert + 원본 supersede 별도 write, live 후속 acknowledged)·H2 status(409) vs payload(400) 우선순위 계약 미명시(현재 status 우선, 합리적)·H3 in-memory duplicate 미감지(동시성 잠금은 mongo에서만 live, 기존 구조). 코드 무변.
+
 ## Next steps
 
+- **(Phase 6 UI 잔여)**: 부분 승인/부분 retry·merge/split inbox 액션·candidate edit **실 Mongo live** 관통·frontend(보류). 각 착수 브리프 필요.
 - **(c) 후속 잔여**: 동명이인 false-positive 반증(name-key=1 분기, 별도 증분), character alias threshold 실값 캘리브레이션(라이브 cosine 분포 배치, off→발화), merge/split write 경로(Phase 6 UI).
 - **여전히 sandbox 밖 남은 것**: 2B.6 event/open_question semantic threshold 실 캘리브레이션, compare judge J1 프롬프트 판별 튜닝(deterministic 벤치마크 요), (b-4) hybrid 튜닝(실 데이터).
 - HANDOFF Next Tasks #1 남은 후보: (b-4)·Phase 6 UI(frontend 미확정이라 백엔드 API 확장 위주). 다음 slice 오너 선택 대기.

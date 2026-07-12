@@ -66,7 +66,7 @@ review inbox → 후보와 근거 확인
 ## 착수 전 결정사항
 
 - [x] 사용자가 승인하면 `confirmed`인지 `canonical`인지 — **v1.6.61 확정**(브리프 `06-candidate-state-transition-decisions.md`, D1=분리 모델: 둘 다 — candidate는 `confirmed`, canonical `MemoryEntry`로 promotion). 백엔드 상태 전이만 구현; 아래 UI/merge/split은 계속 미확정.
-- [ ] 후보 수정이 원 후보의 새 version인지 별도 사용자 기억인지
+- [x] 후보 수정이 원 후보의 새 version인지 별도 사용자 기억인지 — **v1.6.66 확정**(브리프 `06-candidate-edit-decisions.md`, D1=원 후보의 새 version): edit이 편집값으로 candidate 새 version(append-only)을 mint→confirm→canonical 승격, 원 후보는 `superseded` 보존. 백엔드 계약만 구현; 부분 승인/merge-split UI는 계속 미확정.
 - [ ] entity merge/split을 MVP UI에 포함할지
 - [ ] create/update/add_evidence/conflict별 승인 UI와 권한
 - [x] Gate finding과 Analysis candidate를 하나의 inbox에 합칠지 — **v1.6.64 결정/v1.6.65 구현**: Analysis candidate+open conflict를 먼저 통합하고, durable Context Gate reject finding을 `gate_findings` additive section(`origin=context_gate`)으로 확장. Gate 전용 list/detail API도 제공.

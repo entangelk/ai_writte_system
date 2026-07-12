@@ -47,6 +47,18 @@ class CandidateReviewResult:
     idempotent_replay: bool
 
 
+@dataclass(frozen=True, slots=True)
+class CandidateEditResult:
+    """Phase 6 candidate edit (v1.6.66). ``candidate_id`` is the new confirmed
+    version; ``original_candidate_id`` is the superseded source."""
+
+    original_candidate_id: str
+    candidate_id: str
+    status: AnalysisCandidateStatus
+    memory_id: str | None
+    idempotent_replay: bool
+
+
 class CandidateReviewService:
     def __init__(
         self,
@@ -110,6 +122,44 @@ class CandidateReviewService:
             status=AnalysisCandidateStatus.REJECTED,
             memory_id=None,
             idempotent_replay=not transition.changed,
+        )
+
+    def edit(
+        self, *, project_id: str, candidate_id: str, payload
+    ) -> CandidateEditResult:
+        """Phase 6 candidate edit (v1.6.66): correct a candidate's payload into a
+        new confirmed version, then promote it to canonical.
+
+        Orchestration (D6, confirm-path mirror): edit mints the ``confirmed``
+        successor (``AnalysisService.edit_candidate``), promotes it to canonical
+        (idempotent, linked to the successor's id), de-indexes the now-superseded
+        original, and resolves the original's open conflict entries (edit is an
+        approval, like confirm — not dismiss). Idempotent: an edit replay repeats
+        no de-index/queue side effect.
+        """
+        edit = self._analysis.edit_candidate(
+            project_id=project_id, candidate_id=candidate_id, payload=payload
+        )
+        successor = edit.candidate
+        promotion = self._memory.promote_candidate(
+            project_id=project_id,
+            candidate=successor,
+            mode=PromotionMode.MANUAL,
+        )
+        if not edit.idempotent_replay:
+            # De-index the original (it was indexed as needs_review); the new
+            # confirmed successor never entered the candidate index.
+            self._enqueue_removed(project_id, candidate_id)
+            if self._review_queue is not None:
+                self._review_queue.resolve_for_candidate(
+                    project_id=project_id, candidate_id=candidate_id
+                )
+        return CandidateEditResult(
+            original_candidate_id=candidate_id,
+            candidate_id=successor.id,
+            status=successor.status,
+            memory_id=promotion.memory.id,
+            idempotent_replay=edit.idempotent_replay,
         )
 
     def _enqueue_removed(self, project_id: str, candidate_id: str) -> None:

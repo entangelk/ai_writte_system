@@ -23,7 +23,10 @@ from services.application.app.analysis.models import (
     RecordAnalysisCandidateResult,
     immutable_payload,
 )
-from services.application.app.analysis.repository import AnalysisRepository
+from services.application.app.analysis.repository import (
+    AnalysisRepository,
+    DuplicateAnalysisCandidateRequest,
+)
 from services.application.app.analysis.schema import (
     InvalidAnalysisPayload,
     validate_candidate_payload,
@@ -74,6 +77,16 @@ class InvalidCandidateStateTransition(AnalysisError):
 class CandidateTransition:
     candidate: AnalysisCandidate
     changed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateEdit:
+    """Phase 6 candidate edit (v1.6.66): the confirmed successor version minted
+    from a reviewer's payload correction. ``idempotent_replay`` is True when the
+    original had already been edited (the successor is returned unchanged)."""
+
+    candidate: AnalysisCandidate
+    idempotent_replay: bool
 
 
 # Phase 6 (v1.6.61): a needs_review candidate is confirmed or rejected. Both are
@@ -531,6 +544,80 @@ class AnalysisService:
         updated = replace(candidate, status=target)
         self._repo.update_candidate(updated)
         return CandidateTransition(candidate=updated, changed=True)
+
+    def edit_candidate(
+        self,
+        *,
+        project_id: str,
+        candidate_id: str,
+        payload: Mapping[str, Any],
+    ) -> "CandidateEdit":
+        """Phase 6 candidate edit (v1.6.66, D1=new candidate version).
+
+        A reviewer corrects the candidate's ``payload``. The edit mints a new
+        candidate version (append-only, new id) carrying the corrected payload
+        and the original's source grounding/provenance/confidence (D5); the new
+        version is ``confirmed`` (edit is an approve-with-correction, D2), and
+        the original is retained as ``superseded`` (audit, D3).
+
+        Idempotency (D4): an original is edited at most once. The successor's
+        ``logical_key = f"edit:{original_id}"`` reuses the existing
+        ``(project, task, logical_key)`` uniqueness — a replay returns the
+        existing successor, and a concurrent second edit loses on the unique
+        index and replays the winner. No client idempotency key is required.
+        """
+        original = self._require_candidate(project_id, candidate_id)
+        edit_logical_key = f"edit:{original.id}"
+        existing_successor_id = self._repo.find_candidate_request(
+            project_id, original.task_id, edit_logical_key
+        )
+        if existing_successor_id is not None:
+            return CandidateEdit(
+                candidate=self._require_candidate(
+                    project_id, existing_successor_id
+                ),
+                idempotent_replay=True,
+            )
+        if original.status is not AnalysisCandidateStatus.NEEDS_REVIEW:
+            raise InvalidCandidateStateTransition(
+                f"cannot edit candidate in status {original.status}"
+            )
+        normalized_payload = self._validate_payload(
+            original.candidate_type, payload
+        )
+        successor = AnalysisCandidate(
+            id=self._repo.next_candidate_id(),
+            project_id=project_id,
+            job_id=original.job_id,
+            task_id=original.task_id,
+            candidate_type=original.candidate_type,
+            action=original.action,
+            status=AnalysisCandidateStatus.CONFIRMED,
+            provenance=original.provenance,
+            confidence=original.confidence,
+            source_ref_ids=original.source_ref_ids,
+            payload=immutable_payload(normalized_payload),
+            supersedes_candidate_id=original.id,
+        )
+        # Append-only: insert the successor first (its unique logical_key locks
+        # idempotency and concurrent double-edit), then supersede the original —
+        # mirrors memory's "mint new version, then supersede prior".
+        try:
+            self._repo.put_candidate(successor, logical_key=edit_logical_key)
+        except DuplicateAnalysisCandidateRequest:
+            return CandidateEdit(
+                candidate=self._require_candidate(
+                    project_id,
+                    self._repo.find_candidate_request(
+                        project_id, original.task_id, edit_logical_key
+                    ),
+                ),
+                idempotent_replay=True,
+            )
+        self._repo.update_candidate(
+            replace(original, status=AnalysisCandidateStatus.SUPERSEDED)
+        )
+        return CandidateEdit(candidate=successor, idempotent_replay=False)
 
     def _validate_candidate_request(
         self,

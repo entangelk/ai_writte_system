@@ -673,6 +673,115 @@ class ReviewInboxApiTest(unittest.TestCase):
         )
 
 
+class EditCandidateApiTest(unittest.TestCase):
+    """Phase 6 candidate edit HTTP surface (v1.6.66)."""
+
+    def test_edit_mints_confirmed_version_and_drops_original_from_inbox(self):
+        client, analysis, memory, project_id = _build()
+        _job, candidate = _seed_candidate(
+            analysis, project_id=project_id, logical_key="edit-me",
+            payload={"name": "Ariel", "observation": "brave"},
+        )
+        response = client.post(
+            f"/projects/{project_id}/analysis/candidates/{candidate.id}/edit",
+            json={"payload": {"name": "Ariel", "observation": "courageous"}},
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["original_candidate_id"], candidate.id)
+        self.assertNotEqual(body["candidate_id"], candidate.id)
+        self.assertEqual(body["status"], "confirmed")
+        self.assertIsNotNone(body["memory_id"])
+        self.assertFalse(body["idempotent_replay"])
+        # original superseded and dropped from the review inbox
+        self.assertEqual(
+            analysis.get_candidate(
+                project_id=project_id, candidate_id=candidate.id
+            ).status.value,
+            "superseded",
+        )
+        listed = client.get(
+            f"/projects/{project_id}/analysis/review-inbox"
+        ).json()
+        self.assertEqual(listed["items"], [])
+        self.assertTrue(memory.is_candidate_promoted(project_id, body["candidate_id"]))
+
+    def test_edit_replay_is_idempotent(self):
+        client, analysis, memory, project_id = _build()
+        _job, candidate = _seed_candidate(
+            analysis, project_id=project_id, logical_key="edit-idem",
+            payload={"name": "Ariel", "observation": "brave"},
+        )
+        edited = {"payload": {"name": "Ariel", "observation": "courageous"}}
+        first = client.post(
+            f"/projects/{project_id}/analysis/candidates/{candidate.id}/edit",
+            json=edited,
+        ).json()
+        replay = client.post(
+            f"/projects/{project_id}/analysis/candidates/{candidate.id}/edit",
+            json=edited,
+        ).json()
+        self.assertTrue(replay["idempotent_replay"])
+        self.assertEqual(replay["candidate_id"], first["candidate_id"])
+        self.assertEqual(replay["memory_id"], first["memory_id"])
+
+    def test_edit_invalid_payload_returns_400_and_leaves_original(self):
+        client, analysis, memory, project_id = _build()
+        _job, candidate = _seed_candidate(
+            analysis, project_id=project_id, logical_key="edit-bad",
+            payload={"name": "Ariel", "observation": "brave"},
+        )
+        response = client.post(
+            f"/projects/{project_id}/analysis/candidates/{candidate.id}/edit",
+            json={"payload": {"name": "Ariel"}},  # missing observation
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            analysis.get_candidate(
+                project_id=project_id, candidate_id=candidate.id
+            ).status.value,
+            "needs_review",
+        )
+
+    def test_edit_terminal_candidate_returns_409(self):
+        client, analysis, memory, project_id = _build()
+        _job, candidate = _seed_candidate(
+            analysis, project_id=project_id, logical_key="edit-terminal",
+            payload={"name": "Ariel", "observation": "brave"},
+        )
+        client.post(
+            f"/projects/{project_id}/analysis/candidates/{candidate.id}/confirm"
+        )
+        response = client.post(
+            f"/projects/{project_id}/analysis/candidates/{candidate.id}/edit",
+            json={"payload": {"name": "Ariel", "observation": "courageous"}},
+        )
+        self.assertEqual(response.status_code, 409)
+
+    def test_edit_missing_and_cross_project_return_404(self):
+        client, analysis, memory, project_id = _build()
+        _job, candidate = _seed_candidate(
+            analysis, project_id=project_id, logical_key="edit-404",
+            payload={"name": "Ariel", "observation": "brave"},
+        )
+        other = client.post("/projects", json={"name": "Other"}).json()["id"]
+        body = {"payload": {"name": "Ariel", "observation": "x"}}
+        self.assertEqual(
+            client.post(
+                f"/projects/{project_id}/analysis/candidates/ghost/edit",
+                json=body,
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            client.post(
+                f"/projects/{other}/analysis/candidates/{candidate.id}/edit",
+                json=body,
+            ).status_code,
+            404,
+        )
+
+
 class GateFindingInboxIsolationTest(unittest.TestCase):
     def test_candidate_confirm_and_reject_do_not_close_gate_finding(self):
         for action in ("confirm", "reject"):
