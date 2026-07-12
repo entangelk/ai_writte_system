@@ -125,6 +125,7 @@ def _shared_app():
 
 def _search_body(draft_id, version_id):
     return {
+        "idempotency_key": "shared-index-search-1",
         "query": "아린이 낡은 단검을 발견한다",
         "needs": ["source_quote"],
         "current_position": {"draft_id": draft_id, "version_id": version_id},

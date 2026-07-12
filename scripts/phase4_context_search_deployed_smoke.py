@@ -102,6 +102,7 @@ async def run_deployed_context_search_smoke(
     search_response = await client.post(
         f"/projects/{project['id']}/context-search",
         json={
+            "idempotency_key": "phase4-deployed-smoke-search",
             "query": "아린이 항구에서 낡은 단검을 발견하는 장면을 이어 쓴다",
             "needs": ["current_scene", "source_quote"],
             "current_position": {"draft_id": draft["id"], "version_id": version_id},

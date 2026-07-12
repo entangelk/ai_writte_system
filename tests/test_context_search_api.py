@@ -17,9 +17,15 @@ import httpx
 
 from services.application.app.context_search.models import (
     ContextNeed,
+    GateDecision,
+    GateFinding,
     SearchPlan,
     SearchPlanStep,
     SearchTool,
+)
+from services.application.app.context_search.gate_findings import (
+    GateFindingService,
+    InMemoryGateFindingRepository,
 )
 from services.application.app.context_search.service import ContextSearchService
 from services.application.app.core_sot.service import (
@@ -57,6 +63,15 @@ class TestClient:
             ) as client:
                 return await client.post(path, **kwargs)
 
+        return asyncio.run(send())
+
+    def get(self, path, **kwargs):
+        async def send():
+            transport = httpx.ASGITransport(app=self._app)
+            async with httpx.AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
+                return await client.get(path, **kwargs)
         return asyncio.run(send())
 
 
@@ -108,7 +123,15 @@ class _AdvancingClock:
         return value
 
 
-def _fixture(planner_factory, **service_kwargs):
+class _FailingGateFindingService:
+    def persist_rejection(self, **_kwargs):
+        raise RuntimeError("store unavailable")
+
+    def list_open(self, _project_id):
+        return ()
+
+
+def _fixture(planner_factory, *, gate_finding_service=None, **service_kwargs):
     core_sot = CoreSotService(InMemoryCoreSotRepository())
     project = core_sot.create_project(name="Novel")
     draft = core_sot.create_draft(project_id=project.id, title="Episode 1")
@@ -153,12 +176,16 @@ def _fixture(planner_factory, **service_kwargs):
         planner=planner_factory(plan),
         **service_kwargs,
     )
-    app = create_app(service=core_sot, context_search_service=css)
+    app = create_app(
+        service=core_sot, context_search_service=css,
+        gate_finding_service=gate_finding_service,
+    )
     return app, project.id, draft.id, saved.draft_version.id
 
 
 def _body(draft_id, version_id, *, needs=("current_scene", "source_quote"), **over):
     payload = {
+        "idempotency_key": "context-search-1",
         "query": "아린이 항구에서 낡은 단검을 발견한다",
         "needs": list(needs),
         "current_position": {"draft_id": draft_id, "version_id": version_id},
@@ -169,6 +196,96 @@ def _body(draft_id, version_id, *, needs=("current_scene", "source_quote"), **ov
 
 
 class ContextSearchApiTest(unittest.TestCase):
+    def test_gate_finding_routes_return_404_for_missing_scope_or_id(self):
+        app, project_id, _draft_id, _version_id = _fixture(_StaticPlanner)
+        client = TestClient(app)
+        self.assertEqual(
+            client.get("/projects/missing/analysis/gate-findings").status_code,
+            404,
+        )
+        self.assertEqual(
+            client.get(
+                f"/projects/{project_id}/analysis/gate-findings/missing"
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            client.post(
+                f"/projects/{project_id}/analysis/gate-findings/missing/resolve"
+            ).status_code,
+            404,
+        )
+
+    def test_gate_finding_persistence_failure_is_502(self):
+        app, project_id, draft_id, version_id = _fixture(
+            _StaticPlanner,
+            gate_finding_service=_FailingGateFindingService(),
+        )
+        rejected = GateDecision(decision="reject", findings=(
+            GateFinding(check="x", detail="y"),
+        ))
+        with patch(
+            "services.application.app.main.evaluate_context_gate",
+            return_value=rejected,
+        ):
+            response = TestClient(app).post(
+                f"/projects/{project_id}/context-search",
+                json=_body(draft_id, version_id),
+            )
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("persistence failed", response.json()["detail"])
+
+    def test_reject_persists_to_inbox_and_transitions(self):
+        store = GateFindingService(InMemoryGateFindingRepository())
+        app, project_id, draft_id, version_id = _fixture(
+            _StaticPlanner, gate_finding_service=store
+        )
+        rejected = GateDecision(decision="reject", findings=(
+            GateFinding(check="test_check", detail="test detail"),
+        ))
+        with patch(
+            "services.application.app.main.evaluate_context_gate",
+            return_value=rejected,
+        ):
+            first = TestClient(app).post(
+                f"/projects/{project_id}/context-search",
+                json=_body(draft_id, version_id),
+            )
+            replay = TestClient(app).post(
+                f"/projects/{project_id}/context-search",
+                json=_body(draft_id, version_id),
+            )
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(replay.status_code, 200)
+        inbox = TestClient(app).get(
+            f"/projects/{project_id}/analysis/review-inbox"
+        ).json()
+        [finding] = inbox["gate_findings"]
+        self.assertEqual(finding["origin"], "context_gate")
+        self.assertEqual(finding["check"], "test_check")
+        self.assertTrue(finding["request_fingerprint"])
+        resolved = TestClient(app).post(
+            f"/projects/{project_id}/analysis/gate-findings/{finding['id']}/resolve"
+        )
+        self.assertEqual(resolved.status_code, 200)
+        self.assertFalse(resolved.json()["idempotent_replay"])
+        repeated = TestClient(app).post(
+            f"/projects/{project_id}/analysis/gate-findings/{finding['id']}/resolve"
+        )
+        self.assertTrue(repeated.json()["idempotent_replay"])
+        crossed = TestClient(app).post(
+            f"/projects/{project_id}/analysis/gate-findings/{finding['id']}/dismiss"
+        )
+        self.assertEqual(crossed.status_code, 409)
+
+    def test_empty_idempotency_key_is_400(self):
+        app, project_id, draft_id, version_id = _fixture(_StaticPlanner)
+        response = TestClient(app).post(
+            f"/projects/{project_id}/context-search",
+            json=_body(draft_id, version_id, idempotency_key=""),
+        )
+        self.assertEqual(response.status_code, 400)
+
     def test_returns_package_and_gate_decision(self):
         app, project_id, draft_id, version_id = _fixture(_StaticPlanner)
         resp = TestClient(app).post(

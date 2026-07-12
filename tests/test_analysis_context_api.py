@@ -247,6 +247,7 @@ class AnalysisContextApiTest(unittest.TestCase):
         response = client.post(
             f"/projects/{project_id}/context-search",
             json={
+                "idempotency_key": "analysis-purpose-reject",
                 "purpose": "analysis_context",
                 "needs": ["prior_memory"],
                 "query": "x",

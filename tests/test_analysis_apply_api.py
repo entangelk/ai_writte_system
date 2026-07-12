@@ -20,6 +20,13 @@ from services.application.app.core_sot.service import (
     CoreSotService,
     InMemoryCoreSotRepository,
 )
+from services.application.app.context_search.gate_findings import (
+    GateFindingService, InMemoryGateFindingRepository,
+)
+from services.application.app.context_search.models import (
+    ContextBudget, ContextNeed, ContextPackage, ContextSearchPurpose,
+    ContextSearchRequest, GateDecision, GateFinding,
+)
 from services.application.app.indexing.models import IndexSyncEvent
 from services.application.app.indexing.service import (
     IndexSyncOutboxService,
@@ -79,7 +86,7 @@ def _seed_candidate(
     return job, candidate
 
 
-def _build():
+def _build(*, gate_finding_service=None):
     core_sot = CoreSotService(InMemoryCoreSotRepository())
     analysis = AnalysisService(InMemoryAnalysisRepository())
     memory = MemoryService(InMemoryMemoryRepository())
@@ -88,10 +95,31 @@ def _build():
         service=core_sot, analysis_service=analysis, memory_service=memory,
         index_sync_outbox=sync_outbox,
         review_queue_service=ReviewQueueService(InMemoryReviewQueueRepository()),
+        gate_finding_service=gate_finding_service,
     )
     client = TestClient(app)
     project_id = client.post("/projects", json={"name": "Novel"}).json()["id"]
     return client, analysis, memory, project_id
+
+
+def _persist_gate_finding(service, project_id):
+    request = ContextSearchRequest(
+        project_id=project_id, purpose=ContextSearchPurpose.WRITING_CONTEXT,
+        needs=(ContextNeed.CURRENT_SCENE,), query="continue",
+        current_position=None, context_budget=ContextBudget(max_tokens=100),
+    )
+    package = ContextPackage(
+        project_id=project_id, purpose=ContextSearchPurpose.WRITING_CONTEXT,
+        macro_items=(), micro_evidence=(), constraints=(), do_not_use=(),
+        token_estimate_total=0, degraded=False,
+    )
+    [finding] = service.persist_rejection(
+        request=request, idempotency_key="gate-review-1", package=package,
+        gate=GateDecision(decision="reject", findings=(
+            GateFinding(check="stale_item", detail="stale"),
+        )),
+    )
+    return finding
 
 
 class AnalysisApplyApiTest(unittest.TestCase):
@@ -643,6 +671,57 @@ class ReviewInboxApiTest(unittest.TestCase):
             ).status_code,
             404,
         )
+
+
+class GateFindingInboxIsolationTest(unittest.TestCase):
+    def test_candidate_confirm_and_reject_do_not_close_gate_finding(self):
+        for action in ("confirm", "reject"):
+            with self.subTest(action=action):
+                gate_service = GateFindingService(InMemoryGateFindingRepository())
+                client, analysis, _memory, project_id = _build(
+                    gate_finding_service=gate_service
+                )
+                finding = _persist_gate_finding(gate_service, project_id)
+                _job, candidate = _seed_candidate(
+                    analysis, project_id=project_id,
+                    logical_key=f"candidate-{action}",
+                    payload={"name": "Ariel", "observation": "brave"},
+                )
+
+                response = client.post(
+                    f"/projects/{project_id}/analysis/candidates/"
+                    f"{candidate.id}/{action}"
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    gate_service.get(
+                        project_id=project_id, finding_id=finding.id
+                    ).status.value,
+                    "open",
+                )
+
+    def test_gate_findings_are_additive_without_changing_candidate_items(self):
+        gate_service = GateFindingService(InMemoryGateFindingRepository())
+        client, analysis, _memory, project_id = _build(
+            gate_finding_service=gate_service
+        )
+        _job, candidate = _seed_candidate(
+            analysis, project_id=project_id, logical_key="candidate-inbox",
+            payload={"name": "Ariel", "observation": "brave"},
+        )
+        before = client.get(
+            f"/projects/{project_id}/analysis/review-inbox"
+        ).json()
+        _persist_gate_finding(gate_service, project_id)
+        after = client.get(
+            f"/projects/{project_id}/analysis/review-inbox"
+        ).json()
+
+        self.assertEqual(before["items"], after["items"])
+        self.assertEqual(before["items"][0]["candidate_id"], candidate.id)
+        self.assertEqual(before["gate_findings"], [])
+        self.assertEqual(len(after["gate_findings"]), 1)
 
 
 if __name__ == "__main__":

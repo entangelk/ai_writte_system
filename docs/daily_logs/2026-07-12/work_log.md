@@ -2,6 +2,8 @@
 
 ## Goals
 
+- 다음 비튜닝 slice인 Gate finding persistence/Review Inbox 통합을 오너가 검토할 수 있도록 착수 결정 브리프를 작성한다.
+
 - 튜닝을 제외한 다음 작업으로 Phase 6 Review Inbox 백엔드 목록/상세 slice를 구현한다.
 
 - 오너가 선택한 (c-2): 동명이인 반증, character threshold calibration, merge/split write를 구현한다.
@@ -10,6 +12,23 @@
 - 오너 지시: "여기는 테스트도 가능한 머신이니까 확인해서 진행" → 이전 세션이 서브 머신에서 막았던 **live 관통 검증**(HANDOFF Next Tasks #2/#3, "코드 완료, sandbox 밖 막힘")을 실 인프라 위에서 실행한다.
 
 ## Completed work
+
+### Gate finding persistence decision brief
+
+- `plans/06-gate-finding-persistence-decisions.md` Draft를 추가했다. transient GateFinding의 저장 대상, persistence 실패 자세, identity/idempotency, lifecycle, candidate action 연동, payload, inbox 표현, API를 D1~D8로 분리하고 각 선택지·추천·tradeoff를 명시했다.
+- 추천 묶음은 reject-only, persistence 강보장, client idempotency key, open→resolved/dismissed, candidate action 자동 연동 없음, 최소 재현 envelope, 기존 inbox additive section, 명시 transition API다. 오너 결정 전 구현하지 않는다.
+- 오너 피드백에 따라 최초 독립 형식 브리프를 프로젝트 기존 관례인 `03-indexing-kickoff-decisions.md` 구조로 전면 재작성했다. `현재 확정된 경계 → 구현을 막는 미확정 항목 → 번호별 선택지/장단점 표/추천 → 첫 구현 slice → 제외 범위 → 승인 결과` 순서를 따른다.
+
+### Gate finding persistence implementation
+
+- 오너가 D1~D8=A를 승인했다. reject-only로 시작하되 pass 감사 이력 확장 가능, persistence 실패 502, client idempotency key, open→resolved/dismissed, candidate action 자동 연동 없음, 최소 재현 envelope, additive inbox, Gate 전용 API를 잠갔다.
+- `gate_findings.py` domain/store와 in-memory repository, Mongo adapter를 추가했다. deterministic id와 request/result fingerprint, 안정 pointer ids를 저장한다.
+- `/context-search`에 필수 `idempotency_key`를 추가하고 reject findings만 저장한다. Review Inbox `items`는 불변이고 `gate_findings`가 additive로 추가된다.
+- Gate finding list/detail/resolve/dismiss API를 추가했다. same terminal replay는 멱등, cross-terminal은 409다.
+- 완전 재현은 immutable GateRun manifest(pointer version/hash + planner/prompt/model/backend manifest) 후속으로 브리프에 기록했다.
+- focused Gate/context/inbox 회귀 **41 passed**. 전체 `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **778 passed / 48 skipped / 99 subtests**, exit 0. `/context-search` 호출부 pattern sweep으로 모든 실제 request fixture/smoke에 idempotency key를 반영했다.
+- 독립 검증 `gate_finding_persistence.md`가 §9 boundary matrix의 빈 셀 2개로 조건부 합격을 판정했다. 필수 D5(candidate confirm/reject 후 finding OPEN 유지)와 D7(candidate items envelope additive 불변)을 HTTP 관통 회귀로 추가했다. 권장 404 missing project/finding 및 Mongo compound index/upsert/get/open 정렬 round-trip도 보강했다. 향후에는 구현 전에 브리프 boundary matrix 각 행을 named test에 먼저 매핑한다.
+- 보강 focused **43 passed + confirm/reject 2 subtests**. 최종 전체 **783 passed / 48 skipped / 101 subtests**, exit 0. `git diff --check` clean.
 
 ### Phase 6 Review Inbox backend
 

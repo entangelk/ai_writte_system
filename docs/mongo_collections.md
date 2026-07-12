@@ -2597,6 +2597,7 @@ MongoDB collections
 
 index_sync_outbox records pending sync requests.
 index_sync_logs records derived index sync attempts/results.
+gate_findings records durable Context Gate reject findings for Phase 6 review.
 ```
 
 Indexing is one-way.

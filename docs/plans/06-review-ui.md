@@ -69,7 +69,7 @@ review inbox → 후보와 근거 확인
 - [ ] 후보 수정이 원 후보의 새 version인지 별도 사용자 기억인지
 - [ ] entity merge/split을 MVP UI에 포함할지
 - [ ] create/update/add_evidence/conflict별 승인 UI와 권한
-- [x] Gate finding과 Analysis candidate를 하나의 inbox에 합칠지 — **v1.6.64 결정**: 현재 영속 surface인 Analysis candidate+open conflict를 먼저 통합. Gate finding store가 생기면 origin literal로 additive 확장.
+- [x] Gate finding과 Analysis candidate를 하나의 inbox에 합칠지 — **v1.6.64 결정/v1.6.65 구현**: Analysis candidate+open conflict를 먼저 통합하고, durable Context Gate reject finding을 `gate_findings` additive section(`origin=context_gate`)으로 확장. Gate 전용 list/detail API도 제공.
 - [x] source deep link에 필요한 editor route/selection 계약 — **v1.6.64 결정**: frontend route는 보류하고 source_ref 정본 pointer(snapshot/block/offset/hash/quote)만 백엔드가 제공.
 - [ ] 상태 변경이 영향받는 기억과 인덱스를 어디까지 invalidate할지
 

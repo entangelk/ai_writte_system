@@ -83,6 +83,14 @@ from services.application.app.context_search.models import (
     ContextBudget,
     CurrentPosition,
 )
+from services.application.app.context_search.gate_findings import (
+    GateFindingError,
+    GateFindingNotFound,
+    GateFindingService,
+    GateFindingStatus,
+    InMemoryGateFindingRepository,
+    InvalidGateFindingTransition,
+)
 from services.application.app.context_search.planner import (
     TerminalJsonSearchPlanner,
     seed_context_search_plan_template,
@@ -282,6 +290,19 @@ def _default_review_queue_service() -> ReviewQueueService:
             db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME),
         )
     )
+
+
+def _default_gate_finding_service() -> GateFindingService:
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if not uri:
+        return GateFindingService(InMemoryGateFindingRepository())
+    from services.application.app.context_search.gate_findings_mongo import (
+        MongoGateFindingRepository,
+    )
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+    return GateFindingService(MongoGateFindingRepository.from_uri(
+        uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
+    ))
 
 
 def _default_prompt_template_service() -> PromptTemplateService:
@@ -727,6 +748,7 @@ class ReconcileCharacterRequest(BaseModel):
 
 
 class ContextSearchHttpRequest(BaseModel):
+    idempotency_key: str
     query: str
     needs: list[str]
     purpose: str = ContextSearchPurpose.WRITING_CONTEXT.value
@@ -743,6 +765,7 @@ def create_app(
     context_search_service: ContextSearchService | None = None,
     compare_service: AnalysisCompareService | None = None,
     review_queue_service: ReviewQueueService | None = None,
+    gate_finding_service: GateFindingService | None = None,
     vector_index: InMemoryVectorIndexAdapter | None = None,
 ) -> FastAPI:
     app = FastAPI(title="AI Writing System Application")
@@ -796,6 +819,7 @@ def create_app(
         analysis_service=analysis, memory_service=memory,
         review_queue=review_queue,
     )
+    gate_findings = gate_finding_service or _default_gate_finding_service()
     runner = analysis_runner
     if runner is None:
         runner = _default_analysis_runner(core_sot=core_sot, analysis=analysis)
@@ -1732,6 +1756,10 @@ def create_app(
                 _review_inbox_payload(item, include_detail=False)
                 for item in review_inbox.list_items(project_id=project_id)
             ],
+            "gate_findings": [
+                _gate_finding_payload(finding)
+                for finding in gate_findings.list_open(project_id)
+            ],
         }
 
     @app.get("/projects/{project_id}/analysis/review-inbox/{candidate_id}")
@@ -1746,6 +1774,71 @@ def create_app(
         except (NotFound, ReviewInboxNotFound) as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return _review_inbox_payload(item, include_detail=True)
+
+    def _gate_finding_payload(finding) -> dict[str, object]:
+        return {
+            "id": finding.id, "origin": "context_gate",
+            "status": finding.status.value, "check": finding.check,
+            "detail": finding.detail, "query": finding.query,
+            "purpose": finding.purpose, "needs": list(finding.needs),
+            "pointer_ids": list(finding.pointer_ids),
+            "request_fingerprint": finding.request_fingerprint,
+            "result_fingerprint": finding.result_fingerprint,
+            "created_at": finding.created_at.isoformat(),
+            "terminal_at": (
+                finding.terminal_at.isoformat()
+                if finding.terminal_at is not None else None
+            ),
+        }
+
+    @app.get("/projects/{project_id}/analysis/gate-findings")
+    async def list_gate_findings(project_id: str) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"project_id": project_id, "gate_findings": [
+            _gate_finding_payload(finding)
+            for finding in gate_findings.list_open(project_id)
+        ]}
+
+    @app.get("/projects/{project_id}/analysis/gate-findings/{finding_id}")
+    async def get_gate_finding(project_id: str, finding_id: str):
+        try:
+            _require_project_exists(project_id)
+            finding = gate_findings.get(
+                project_id=project_id, finding_id=finding_id
+            )
+        except (NotFound, GateFindingNotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _gate_finding_payload(finding)
+
+    async def _transition_gate_finding(
+        project_id: str, finding_id: str, target: GateFindingStatus
+    ) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+            finding, replay = gate_findings.transition(
+                project_id=project_id, finding_id=finding_id, target=target
+            )
+        except (NotFound, GateFindingNotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except InvalidGateFindingTransition as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"finding": _gate_finding_payload(finding),
+                "idempotent_replay": replay}
+
+    @app.post("/projects/{project_id}/analysis/gate-findings/{finding_id}/resolve")
+    async def resolve_gate_finding(project_id: str, finding_id: str):
+        return await _transition_gate_finding(
+            project_id, finding_id, GateFindingStatus.RESOLVED
+        )
+
+    @app.post("/projects/{project_id}/analysis/gate-findings/{finding_id}/dismiss")
+    async def dismiss_gate_finding(project_id: str, finding_id: str):
+        return await _transition_gate_finding(
+            project_id, finding_id, GateFindingStatus.DISMISSED
+        )
 
     def _context_item_payload(item) -> dict[str, object]:
         return {
@@ -1860,6 +1953,13 @@ def create_app(
                 memory_service=memory,
                 analysis_service=analysis,
             )
+            try:
+                gate_findings.persist_rejection(
+                    request=request, idempotency_key=body.idempotency_key,
+                    package=package, gate=gate,
+                )
+            except Exception as exc:
+                raise GateFindingError(str(exc)) from exc
         except InvalidContextSearchRequest as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except ContextSearchBudgetExceeded as exc:
@@ -1869,6 +1969,10 @@ def create_app(
                 status_code=502,
                 detail=f"{exc.error_type.value}: {exc.detail}",
             ) from exc
+        except GateFindingError as exc:
+            raise HTTPException(
+                status_code=502, detail=f"gate finding persistence failed: {exc}"
+            ) from exc
         return _context_package_payload(package, gate)
 
     return app
@@ -1877,6 +1981,8 @@ def create_app(
 def _build_context_search_request(
     project_id: str, body: ContextSearchHttpRequest
 ) -> ContextSearchRequest:
+    if not body.idempotency_key.strip():
+        raise ValueError("idempotency_key is required")
     try:
         purpose = ContextSearchPurpose(body.purpose)
     except ValueError as exc:
