@@ -1,0 +1,67 @@
+# Work Log — 2026-07-12
+
+## Goals
+
+- HANDOFF와 2026-07-11 work log를 읽고 다음 작업을 진행한다.
+- 오너 지시: "여기는 테스트도 가능한 머신이니까 확인해서 진행" → 이전 세션이 서브 머신에서 막았던 **live 관통 검증**(HANDOFF Next Tasks #2/#3, "코드 완료, sandbox 밖 막힘")을 실 인프라 위에서 실행한다.
+
+## Completed work
+
+### 상황 확인
+
+- 세션 시작 git 스냅샷은 stale(최상단 d217f54=v1.6.58)이었으나 실제 HEAD는 **47d63a6(SoT v1.6.61)**, working tree clean. v1.6.59/60/61 전부 커밋 완료 상태.
+- baseline `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **749 passed / 48 skipped**(HANDOFF와 일치).
+- 머신 능력 프로브: Docker 28.5.1 + compose v2.40.2(daemon 실행), RTX 3060(12B QAT 구동 가능), 호스트 python에 pymongo/httpx/fastapi(torch/chromadb/ES는 컨테이너 소관). → **풀스택 머신**. 서브 머신에서 막혔던 live 검증을 실행 가능하다고 판단.
+
+### 인프라 스택 bring-up
+
+- `docker compose build worker elasticsearch` → worker=현재 코드(v1.6.61) 이미지, elasticsearch=official 8.13.4 + analysis-nori 빌드. (기존 application/gateway/embedding 이미지는 6일 전 것이라 worker 이미지 재빌드로 현재 코드 확보.)
+- `docker compose up -d mongo chroma elasticsearch embedding` → 전부 healthy. embedding 모델(`dragonkue/BGE-m3-ko`)은 `embedding_cache` 볼륨에 2.1G 캐시돼 재다운로드 없이 즉시 ready. mongo replica set은 기존 볼륨에서 이미 초기화.
+
+### live 관통 4종 실행 — 전부 PASS
+
+전부 worker 이미지 컨테이너 안에서 실행(정확한 의존성 버전 + in-network DNS + 호스트 무오염). 독립 검증 기록: `docs/verifications/2026-07-12/indexing_live_smokes.md`(PASS).
+
+1. **2B.5 memory reindex**(`scripts/phase2b5_memory_reindex_live_smoke.py`, 기존): promote→MEMORY_UPSERTED outbox→worker composite drain→실 Chroma `memory_vectors` 착지. `status:ok`, `memory_backend: chroma+elasticsearch`(벡터+lexical 양 sink fan-out 실증), worker_succeeded 1.
+2. **⑤ §8 ES lexical/hybrid**(`scripts/phase4_lexical_memory_live_smoke.py`, 기존): 한국어 "폭풍"→nori 매칭 `storm`, superseded 배제, hybrid RRF 표면화. `ok:true, nori:true`. (스크립트가 sys.path 미삽입이라 `-e PYTHONPATH=/app` 필요.)
+3. **b-2 candidate 색인**(`scripts/phase2b_candidate_index_live_smoke.py`, **신규 작성**): record_candidate→CANDIDATE_UPSERTED outbox→worker composite→실 Chroma `candidate_vectors` + 실 ES `candidate_lexical` 양쪽 착지. `status:ok`, `candidate_backend: chroma+elasticsearch`.
+4. **Phase 3B archive→Chroma delete**(`scripts/phase3b_archive_chroma_live_smoke.py`, **신규 작성**): 실 Chroma에 2 draft source-block seed→DRAFT_ARCHIVED outbox→worker archive mutation drain→해당 draft만 삭제, control draft 생존. `status:ok`, `archive_backend: chroma`. 2026-07-05 mutation/코드 감사의 live 후속 공백을 채움.
+
+### 신규 스크립트 2개
+
+- `scripts/phase2b_candidate_index_live_smoke.py` — b-2 candidate 관통 live smoke. 기존 candidate live smoke가 없어(HANDOFF가 이 gap을 명시) 2B.5 memory smoke와 동형으로 신규 작성.
+- `scripts/phase3b_archive_chroma_live_smoke.py` — archive→실 Chroma delete live smoke. 기존 archive live smoke가 없어 신규 작성.
+- 성격: **검증 도구**(test/smoke). 프로덕션 코드·계약·SoT 무변 → SoT bump 없음.
+
+## Issues found
+
+- **b-2 smoke 최초 mismatch — ES refresh 지연**: `lexical_candidate_ids: []`. 원인은 파이프라인 결함이 아니라 `index_candidate_records`가 프로덕션 정상대로 `refresh` 없이 색인(검색은 생성 시점이지 색인 직후 μs가 아님) → 색인 직후 read-back이 refresh_interval(1s) 전에 조회. smoke에 명시적 `indices.refresh` 추가(phase4 lexical smoke가 이미 쓰는 패턴)로 해소. 프로덕션 무변.
+- **3B smoke 최초 예외 — Chroma dim mismatch**: `InvalidDimensionException: dimension 3 != 1024`. 배포 `project_memory_vectors`가 실 BGE-m3-ko(1024-dim)로 고정돼 3-dim seed 거부. archive 삭제는 metadata where 기반이라 벡터값 무관 → seed를 1024-dim으로 맞춰 해소. 프로덕션 무관.
+
+## Decisions
+
+- **live 검증을 다음 작업으로 선택**: HANDOFF Next Tasks #1(다음 slice)은 전부 오너 선택 + 착수 브리프 선행이라 임의 착수 불가. 반면 #2/#3의 live 관통은 "코드 완료, sandbox 밖 막힘"으로 명시적으로 남겨진 자족 검증이고, 오너가 "테스트 가능한 머신이니 확인"을 명시 → 정확히 이 머신에서 채울 gap.
+- **SoT bump 없음**: 신규 smoke 2개는 검증 도구. 계약 literal·public 표면·프로덕션 코드 무변, 동작 변화 0.
+- **미커밋 유지**: 프로젝트 관례상 커밋은 오너 지시 대기.
+
+## Verification
+
+- 전체 스위트 회귀 무변: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **749 passed / 48 skipped**(신규 스크립트는 pytest 미수집). `git diff --check` clean(신규 untracked 2파일 외 변경 없음).
+- live 관통 4종 전부 exit 0 + `status:ok`/`ok:true`. 상세·재현 명령은 `docs/verifications/2026-07-12/indexing_live_smokes.md`.
+
+## 오너 독립 감사 + 보강
+
+오너가 별도 세션에서 **적대적 독립 감사**를 수행 → **PASS(조건 없음)**. 4점 의심(refresh=진짜 smoke 문제?/dim=진짜 seed 문제?/smoke 순환논리?/749 진짜?)을 1차 소스+실 인프라 재실행+관찰 재현으로 전부 작업자 클레임 쪽 확정. 감사 기록: `docs/verifications/2026-07-12/indexing_live_smokes_independent_audit.md`. 비차단 관찰 3건을 반영:
+
+- **refresh flaky 재현성**: 감사가 refresh 제거 변형 4회 실행 → 3회 `[]` mismatch/1회 우연 PASS(timing-dependent flaky) 재현. 검증 기록 §4에 재현성 명시 추가(진단 결론 불변).
+- **PROJECT_ARCHIVED live gap 닫음**: `phase3b_archive_chroma_live_smoke.py`를 2단계로 확장 — Phase 1 DRAFT_ARCHIVED(narrowing) + **Phase 2 PROJECT_ARCHIVED(project 전체 wipe) 신규**. 실 재실행 → `remaining_after_project_archived: []` 확인. 감사가 지적한 boundary-matrix 빈 셀(회귀 의존)을 live 검증으로 승격. 검증 기록 §5 갱신.
+- **Mongo `smoke-*` 누적**: ops 관심사로 검증 기록 §Issues에 명시(현재 결함 아님).
+
+보강 후 회귀 무변(**749 passed / 48 skipped**), archive smoke 2단계 재실행 PASS.
+
+## Next steps
+
+- **여전히 sandbox 밖 남은 것**(이번 미포함): 2B.6 semantic threshold 실 캘리브레이션(실 embedding 유사/비유사 cosine 분포 관찰), compare judge / context_search planner live smoke(실 llama 12B gateway 기동 필요 — 이번엔 gateway 미기동), (b-4) hybrid 튜닝(실 데이터).
+- HANDOFF Next Tasks #1 다음 slice는 여전히 **오너 선택 대기**((b-4)·(c)·Phase 6 UI). Phase 6 UI는 frontend 미확정이라 백엔드 API 확장 위주만 가능.
+- **오너 지시 시** 신규 smoke 2개 커밋.
+- 인프라 스택은 기동 상태로 남겨둠(추가 live 검증 시 재사용 가능); 정리 필요 시 `docker compose down`.

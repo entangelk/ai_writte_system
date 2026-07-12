@@ -75,18 +75,17 @@
    - **(b-4) hybrid 튜닝** — RRF k(현재 60)·per-signal 가중치·sub-retriever fetch depth를 실 데이터로 캘리브레이션(canonical·candidate 공통). *실 embedding/데이터 의존 → 서브 머신 막힘, 최후순위.*
    - **(c) character 별칭/동명이인 semantic 보강**(2B.3 D2=A 확장). *실 embedding semantic 매칭+캘리브레이션 의존 → 서브 머신 막힘.*
    - **Phase 6 UI slice** — 백엔드 전이(v1.6.61)는 완료. 남은 것: source deep link(editor route 계약)·entity merge/split 산출·부분 승인/부분 retry 정책·Gate finding+candidate inbox 통합·frontend(framework 미확정 보류). *frontend는 보류라 백엔드 API 확장(예: candidate 상세 diff·review inbox 목록 API) 위주만 서브 머신 가능.*
-2. **sandbox 밖 실행(코드 완료, 여기서 막힘)**:
-   - 2B.6 threshold 실 캘리브레이션 — 실 embedding(BGE-m3-ko)+데이터로 유사/비유사 event pair cosine 분포 관찰 → `ANALYSIS_SEMANTIC_MATCH_THRESHOLD` 확정·env 설정(off 기본이라 미설정 시 미발화).
-   - 2B.5 live smoke(`scripts/phase2b5_memory_reindex_live_smoke.py`: promote→outbox→worker→실 `memory_vectors` 관통) + 필요 시 backfill(`scripts/phase2b5_reindex_memory.py`).
-   - b-2 candidate 색인 live 관통(코드 완료): 전체 스택에서 `record_candidate`→`CANDIDATE_UPSERTED`→worker `_build_candidate_adapter` composite drain→실 `candidate_vectors`/`candidate_lexical` 적재 후 hybrid retriever 서빙 확인(retriever는 index 비어도 graceful).
-   - 곁가지: 2B.3.2 compare judge live smoke, worker→real Chroma archive live smoke.
-3. **Phase 4 real vector 잔여**: worker→real Chroma live smoke(archive→outbox→worker→실 Chroma record 삭제), ES lexical 경로(§8, 착수 브리프 필요), real embedding quality spike. embedding 이미지 CPU-only torch pin은 오너 지시로 최후순위(GPU 기본 유지). 운영 주의: `docker compose restart chroma application`은 `depends_on: service_healthy`를 보장하지 않아 application이 Chroma ready 전에 실패할 수 있다 — Chroma까지 재시작한 뒤 `docker compose -f docker-compose.yml -f docker-compose.llama.yml up -d application`처럼 health dependency를 다시 적용한다.
+2. **sandbox 밖 실행**:
+   - **✅ live 관통 4종 완료(2026-07-12, 풀스택 머신)**: 2B.5 memory reindex·⑤ §8 ES lexical/hybrid·b-2 candidate 색인·Phase 3B archive→실 Chroma delete 전부 실 Mongo·Chroma·ES·embedding(BGE-m3-ko) 위에서 관통 확인(`docs/verifications/2026-07-12/indexing_live_smokes.md`, PASS). worker composite(vector+lexical) drain이 MEMORY·CANDIDATE 양 이벤트에서 실증. 실행법: `docker compose up -d mongo chroma elasticsearch embedding` 후 `docker compose run --rm --no-deps worker python scripts/<smoke>.py`.
+   - **아직 막힘(코드 완료, 이번 미포함)**: 2B.6 threshold 실 캘리브레이션 — 실 embedding(BGE-m3-ko)+데이터로 유사/비유사 event pair cosine 분포 관찰 → `ANALYSIS_SEMANTIC_MATCH_THRESHOLD` 확정·env 설정(off 기본이라 미설정 시 미발화). compare judge / context_search planner live smoke는 실 llama 12B gateway 기동 필요(이번엔 gateway 미기동).
+3. **Phase 4 real vector 잔여**: real embedding quality spike, ES lexical 튜닝(§8 (b-4)). embedding 이미지 CPU-only torch pin은 오너 지시로 최후순위(GPU 기본 유지). 운영 주의: `docker compose restart chroma application`은 `depends_on: service_healthy`를 보장하지 않아 application이 Chroma ready 전에 실패할 수 있다 — Chroma까지 재시작한 뒤 `docker compose -f docker-compose.yml -f docker-compose.llama.yml up -d application`처럼 health dependency를 다시 적용한다.
 4. **보류 계약층**: `/v1/generate-structured`(비용 확인으로 보류, adapter가 JSON 검증+1회 repair 소유), domain tool-call branch(상류 의존 해소 후), task별 `artifact_present`(payload schema 확정 시).
 5. **Phase 7(대화형 수정·아이디에이션·저작 감독) 계획 수립됨** — 신규 페이즈 계획 `plans/07-conversational-authoring.md`(아이디에이션 원본 `docs/chat-revision-ideation.md`). **순차 구현**이라 Phase 5(글 생성)·Phase 6(검토) 이후 착수하며, directive 감독면(P5)은 Phase 6와 공동 설계. 확정 결정 D1~D10·슬라이스 P1~P5는 계획 문서에 있고, 슬라이스별 착수 브리프는 구현 시점에. *지금 당장 착수 대상 아님(현재 실 타깃은 Next Tasks #1 후보 / 순차상 Phase 5·6 선행).*
 
 ## Verification
 
-- 현재 시스템 전체 스위트: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **749 passed / 48 skipped**(v1.6.61 Phase 6 candidate 상태 전이 +22 + 검증 후속 보강 +1; 종전 726). `git diff --check` clean. v1.6.61 독립 검토 CONDITIONAL PASS → 최종 합격(`docs/verifications/2026-07-11/candidate_state_transition.md`), 비차단 관찰 2건 closure(Obs1 rejected→needs_review 거부 테스트·Obs2 CANDIDATE_REMOVED routing 테스트+docstring). mutation 3종 양방향 bite(불법 전이·idempotency·routing, cp 복원). v1.6.60 독립 검토 조건부 합격 → 최종 합격(`docs/verifications/2026-07-11/canonical_candidate_dedup.md`), 비차단 관찰 I1~I3 closure.
+- 현재 시스템 전체 스위트: `python3 -m pytest -q --ignore=tests/test_memory_mongo.py` → **749 passed / 48 skipped**(v1.6.61 Phase 6 candidate 상태 전이 +22 + 검증 후속 보강 +1; 종전 726). `git diff --check` clean.
+- **live 관통 검증(2026-07-12, 풀스택 머신)**: 2B.5 memory reindex·⑤ §8 ES lexical/hybrid·b-2 candidate 색인·Phase 3B archive→실 Chroma delete(DRAFT+PROJECT archived 2분기) 4종을 실 Mongo·Chroma·ES(nori)·embedding(BGE-m3-ko) 위에서 관통, 전부 PASS(`docs/verifications/2026-07-12/indexing_live_smokes.md`). **오너 독립 적대적 감사 PASS(조건 없음)**(`docs/verifications/2026-07-12/indexing_live_smokes_independent_audit.md`) — 비차단 관찰 3건(refresh flaky 재현성·PROJECT_ARCHIVED live gap·Mongo smoke 누적) 보강 완료(PROJECT_ARCHIVED는 archive smoke Phase 2로 live 승격). 신규 smoke 2개(candidate·archive) 프로덕션·계약·SoT 무변. v1.6.61 독립 검토 CONDITIONAL PASS → 최종 합격(`docs/verifications/2026-07-11/candidate_state_transition.md`), 비차단 관찰 2건 closure(Obs1 rejected→needs_review 거부 테스트·Obs2 CANDIDATE_REMOVED routing 테스트+docstring). mutation 3종 양방향 bite(불법 전이·idempotency·routing, cp 복원). v1.6.60 독립 검토 조건부 합격 → 최종 합격(`docs/verifications/2026-07-11/canonical_candidate_dedup.md`), 비차단 관찰 I1~I3 closure.
   - 종전 3 환경-의존 failed(`ConnectElasticsearchTest`, b-5 도입)는 2026-07-10 skip guard(`@unittest.skipUnless(importlib.util.find_spec("elasticsearch"))`)로 해소 — 패키지 없는 sandbox에선 skip(45→48), 있는 환경에선 종전대로 3개 실행(회귀 잠금 유지). 테스트 전용 수정, 계약·프로덕션 코드 무변. **양방향 실증됨**(2026-07-10 검증 보강): 패키지 격리 설치(PYTHONPATH 주입, 시스템 무오염) 시 전체 스위트 **707 passed/45 skipped**로 3개 실행·PASS, 미주입 시 704/48로 원상복구.
   - `--ignore=tests/test_memory_mongo.py`는 프로젝트 검증 관례다(해당 4개는 사전-존재 localhost Mongo env artifact이며 코드 회귀가 아니다).
   - skip 45개는 live Mongo/Chroma/embedding 미가용 통합·smoke 테스트(sandbox 밖에서 실행).
@@ -130,5 +129,6 @@ scripts/
 ├── phase2a_*_smoke.py · phase3a_rebuild_source_block_index.py(CLI rebuild) · phase3a_*_smoke.py · phase4_context_search_*_smoke.py · phase4_lexical_memory_live_smoke.py
 ├── index_sync_worker.py         # 3B archive + 2B.5 memory reindex + b-2 candidate 색인 drain (--loop compose 서비스, b-6 증분1)
 ├── phase2b3_compare_judge_live_smoke.py
+├── phase2b_candidate_index_live_smoke.py · phase3b_archive_chroma_live_smoke.py   # b-2 candidate·3B archive live 관통 smoke(2026-07-12 신규)
 └── phase2b5_reindex_memory.py · phase2b5_reindex_candidate.py(둘 다 vector+lexical backfill, v1.6.58) · phase2b5_memory_reindex_live_smoke.py
 ```
