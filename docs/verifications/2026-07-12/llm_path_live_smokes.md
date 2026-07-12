@@ -59,7 +59,10 @@ exit 0, `run_http_status: 200`, `final_job.status: succeeded`, **candidates=3**(
 | no_change | add_evidence | ✗ |
 | conflict | conflict | ✓ |
 
-**wiring은 PASS**(4/4 terminal outcome). **J1 empirical 신호(비차단, 튜닝 대상)**: 2/4가 의도 라벨과 불일치 — `update`(단검 다룰 수 있게 됨 vs 못 다룸)를 conflict로, `no_change`(검은 머리 동의어)를 add_evidence로 과잉 판정. 프롬프트가 conflict/add_evidence 쪽으로 편향된다는 신호이며, 이는 **deferred J1 프롬프트 튜닝** 입력 데이터일 뿐 wiring 결함이 아니다(smoke의 exit 조건 = terminal outcome 도달이며 라벨 일치 아님). 오너 지시대로 튜닝은 이번 범위 밖 — 신호만 기록.
+**wiring은 PASS**(4/4 terminal outcome). **J1 empirical 신호(비차단, 튜닝 대상)**: 2/4가 의도 라벨과 불일치 — `update`(단검 다룰 수 있게 됨 vs 못 다룸)를 conflict로, `no_change`(검은 머리 동의어)를 add_evidence로 과잉 판정. 프롬프트가 conflict/add_evidence 쪽으로 편향된다는 신호이며, 이는 **deferred J1 프롬프트 튜닝** 입력 데이터일 뿐 wiring 결함이 아니다(smoke의 exit 조건 = terminal outcome 도달이며 라벨 일치 아님; `phase2b3_compare_judge_live_smoke.py:116-121`가 `_BOUNDARY_PAIRS`를 "smoke INPUTS, not assertions"로 명시, `:204-208` exit 조건 = `all(status in {succeeded, invalid})`). 오너 지시대로 튜닝은 이번 범위 밖 — 신호만 기록.
+
+- **비결정성 정밀화(오너 독립 감사 재실행)**: 감사가 compare judge를 재실행 → `update`→conflict는 **2회 모두 일관**(체계적 프롬프트 편향, 샘플링 노이즈 아님), `no_change`는 add_evidence→**no_change로 변동**(샘플링 경계). 즉 이번 실행의 `no_change`→add_evidence 불일치는 borderline/샘플링 변동이고, `update`→conflict 불일치는 **재현되는 체계적 편향**이다. J1 튜닝 시 `update` 경계가 우선 타깃임을 시사. wiring 판정(terminal outcome)은 두 실행 모두 안정.
+- **범위 한계(오너 독립 감사 비차단 #2)**: 이 smoke는 라벨을 assert하지 않으므로(설계 의도) "프롬프트가 4 boundary를 올바로 구분하는가"는 **live smoke로는 영원히 검증되지 않는다**. J1 착수 시 별도 deterministic 벤치마크(fake 회귀 라벨 고정 + real 정확도 측정)가 필요하며, live smoke 하나로는 품질 검증에 불충분하다.
 
 ### 4. Phase 4 planner — PASS
 
@@ -72,13 +75,14 @@ exit 0, `rebuild_http_status: 200`, `search_http_status: 200`.
 - **planner**: 실 llama가 2-step plan(mongo+vector) 산출.
 - **retrieval + Gate**: `gate_decision: pass`, `macro_count: 2`, `micro_count: 6`, **`degraded: False`**(fallback/degrade 없이 완전 정상 경로).
 
-application HTTP→rebuild(실 Chroma)→context-search→gateway 컨테이너→실 llama planner→orchestration→mongo+실 Chroma vector retrieval→Context Gate→ContextPackage 전 경로가 실 인프라 위에서 관통. degraded=False라 어떤 sub-retriever도 fallback으로 접히지 않음.
+application HTTP→rebuild(실 Chroma)→context-search→gateway 컨테이너→실 llama planner→orchestration→mongo+실 Chroma vector retrieval→Context Gate→ContextPackage 전 경로가 실 인프라 위에서 관통. degraded=False라 어떤 sub-retriever도 fallback으로 접히지 않음. **이 e2e만이 gateway를 실 컨테이너(네트워크 transport)로 관통한다**(아래 Issues #1).
 
 ## Issues / Risks
 
 - **wiring 결함 없음**. 4종 전부 exit 0 + 각 계약 산출물(candidates/action/SearchPlan/ContextPackage) 정상.
-- **비차단 (compare judge J1 신호)**: §3 표대로 2/4 boundary가 의도 라벨과 불일치. 프롬프트 판별 품질 개선(J1)은 **튜닝 과제로 최후속**(오너 지시로 이번 제외). 이번 실행은 그 튜닝에 쓸 empirical 근거를 남김.
-- **비차단 (비결정성)**: LLM 산출은 매 실행 달라질 수 있음(온도·샘플링). wiring 통과 판정(terminal outcome/HTTP 200/plan 구조)은 안정적이나, 정확한 action 라벨·plan query 문구는 재실행 시 변동 가능. 판정 신호는 구조·상태이지 문자열 동일성이 아님.
+- **비차단 #1 (gateway 컨테이너 관통 편중, 오너 독립 감사)**: provider·planner·compare judge smoke는 gateway를 **인프로세스 ASGITransport**로 돌린다(§2~4). 따라서 gateway *컨테이너*(네트워크 transport·컨테이너 헬스·에러 매핑)를 실제로 타는 live 경로는 **deployed e2e(§5) 하나뿐**이다. gateway 코드는 두 경우 동일하므로 기능 검증엔 문제없으나, "gateway 컨테이너 배포면"의 live 커버리지는 §5에 집중돼 있음을 명시.
+- **비차단 #2 (compare judge 라벨 품질 live 미검증, 오너 독립 감사)**: §3대로 smoke가 라벨을 assert하지 않아, 프롬프트의 boundary 판별 정확도는 live smoke로 잡히지 않는다. J1은 별도 deterministic 벤치마크가 선행돼야 함(§3 범위 한계 참조).
+- **비차단 #3 (비결정성)**: LLM 산출은 매 실행 달라질 수 있음(온도·샘플링). wiring 통과 판정(terminal outcome/HTTP 200/plan 구조)은 안정적이나, 정확한 action 라벨·plan query 문구는 재실행 시 변동 가능(감사 재실행이 실증: §3 비결정성 정밀화). 판정 신호는 구조·상태이지 문자열 동일성이 아님.
 - **운영**: llama 컨테이너는 GPU 점유(≈7GB). 유휴 시 `docker compose -f docker-compose.yml -f docker-compose.llama.yml down` 또는 llama만 stop.
 
 ## Verdict

@@ -70,6 +70,14 @@
 
 이로써 비-튜닝 live 검증 배치 소진: 인덱싱 4종(1차) + LLM 경로 4종(2차). 남은 sandbox-밖은 전부 튜닝(2B.6 threshold·(b-4) hybrid·J1 프롬프트) = 최후속.
 
+### 오너 독립 감사(LLM 배치) + 보강
+
+오너가 LLM 배치를 **적대적 독립 감사** → **PASS(조건 없음)**. "wiring/품질 분리가 2/4 불일치를 숨기는 회피인가?" 반박 가설을 smoke 코드(`_BOUNDARY_PAIRS`=INPUTS not assertions, exit=terminal outcome)로 기각. 4종 재실행 전부 PASS 재현. 감사 기록: `docs/verifications/2026-07-12/llm_path_live_smokes_independent_audit.md`. 비차단 관찰 3건 반영(코드 무변, 검증 기록 문서만 보강):
+
+- **#1 gateway 컨테이너 관통 편중**: provider/planner/compare judge는 인프로세스 ASGI → gateway 컨테이너 관통은 deployed e2e 하나뿐(코드 동일→기능 무문제). 검증 기록 §5/Issues 명시.
+- **#2 compare judge 라벨 품질 live 미검증**: smoke가 라벨 assert 안 함 → 프롬프트 판별 정확도는 live로 영원히 미검증. **J1 튜닝 브리프에 별도 deterministic 벤치마크(fake 회귀 라벨 + real 정확도) 설계를 포함해야 함**. 검증 기록 §3 범위 한계 명시.
+- **#3 비결정성 정밀화**: 감사 재실행 → `update`→conflict 2회 일관(체계적 편향, J1 우선 타깃), `no_change` 변동(샘플링). 검증 기록 §3 반영.
+
 ## Next steps
 
 - **여전히 sandbox 밖 남은 것**(이번 미포함): 2B.6 semantic threshold 실 캘리브레이션(실 embedding 유사/비유사 cosine 분포 관찰), compare judge / context_search planner live smoke(실 llama 12B gateway 기동 필요 — 이번엔 gateway 미기동), (b-4) hybrid 튜닝(실 데이터).
