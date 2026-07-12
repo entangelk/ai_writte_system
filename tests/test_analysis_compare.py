@@ -16,11 +16,31 @@ from services.application.app.analysis.models import (
     AnalysisCandidateType,
     AnalysisProvenance,
 )
+from services.application.app.analysis.semantic_matcher import (
+    EmbeddingSemanticMatcher,
+)
+from services.application.app.indexing.memory_index import (
+    InMemoryMemoryVectorIndexAdapter,
+    build_memory_index_record,
+    derive_memory_index_text,
+)
 from services.application.app.memory.models import PromotionMode
 from services.application.app.memory.service import (
     InMemoryMemoryRepository,
     MemoryService,
 )
+
+
+class StubEmbedding:
+    """Deterministic text→vector map so cosine (and the threshold) is exact."""
+
+    def __init__(self, table):
+        self._table = table
+
+    def embed(self, text: str) -> tuple[float, ...]:
+        if text not in self._table:
+            raise AssertionError(f"unexpected embed text: {text!r}")
+        return self._table[text]
 
 
 CHARACTER = AnalysisCandidateType.CHARACTER_OBSERVATION
@@ -214,6 +234,159 @@ class CompareSelfExclusionTest(unittest.TestCase):
         )
         [proposal2] = _compare(service2, [_candidate(candidate_id="cur2", job_id="job-current")])
         self.assertEqual(proposal2.action, CompareAction.UPDATE)
+
+
+class CharacterAliasTest(unittest.TestCase):
+    """Phase 2B.7 (c): character alias detection (D1=A/D2=A/D3=A).
+
+    When the deterministic name key finds no same-name canonical, a separately-
+    thresholded semantic matcher checks whether a differently-named canonical
+    character is the same subject. A hit → conflict (review), never an automatic
+    merge (D1=A); off by default (D5). The matcher reuses 2B.6's
+    EmbeddingSemanticMatcher over the same memory_vectors projection.
+    """
+
+    # Deterministic text→vector map keyed on the character write projection
+    # (`derive_memory_index_text` = "name\nobservation").
+    _TABLE = {
+        "김철수\n검을 든 기사": (1.0, 0.0, 0.0),
+        "철수\n검을 든 기사": (0.99, 0.1, 0.0),      # ~0.995: same subject, alias
+        "영희\n조용한 사서": (0.0, 1.0, 0.0),         # far: different subject
+        "Ariel\nbrave": (0.5, 0.5, 0.0),
+    }
+
+    def _alias_matcher(self, canonical_payload, *, table, threshold=0.9,
+                       canonical_job="job-prior"):
+        memory = _memory_service_with(
+            _candidate(candidate_id="prior", job_id=canonical_job,
+                       payload=canonical_payload)
+        )
+        vector_index = InMemoryMemoryVectorIndexAdapter()
+        embeddings = StubEmbedding(table)
+        for entry in memory.list_memories(project_id="project-1"):
+            text = derive_memory_index_text(entry.memory_type, entry.payload)
+            vector_index.upsert_memory_records(
+                (build_memory_index_record(
+                    entry, text=text, vector=embeddings.embed(text)),)
+            )
+        matcher = EmbeddingSemanticMatcher(
+            embeddings=embeddings, vector_search=vector_index,
+            memory_service=memory, similarity_threshold=threshold,
+        )
+        canonical_id = memory.list_memories(project_id="project-1")[0].id
+        return memory, matcher, canonical_id
+
+    def test_alias_surfaces_conflict_without_auto_merge(self):
+        # Under-strict: a differently-named but semantically-near canonical is
+        # detected. Over-strict (D1=A): the action is conflict, NOT an automatic
+        # update/merge — and the judge is never consulted on the alias path.
+        memory, matcher, canonical_id = self._alias_matcher(
+            {"name": "김철수", "observation": "검을 든 기사"}, table=self._TABLE,
+        )
+        judge = FakeJudge(CompareAction.UPDATE)
+        service = AnalysisCompareService(
+            memory_service=memory, judge=judge, alias_matcher=matcher
+        )
+        [proposal] = _compare(
+            service,
+            [_candidate(candidate_id="cur",
+                        payload={"name": "철수", "observation": "검을 든 기사"})],
+        )
+        self.assertEqual(proposal.action, CompareAction.CONFLICT)
+        self.assertEqual(proposal.matched_memory_id, canonical_id)
+        self.assertEqual(len(judge.calls), 0)
+
+    def test_alias_below_threshold_is_create(self):
+        # Over-strict: a far character (different subject) must not be flagged as
+        # an alias → stays create.
+        memory, matcher, _ = self._alias_matcher(
+            {"name": "김철수", "observation": "검을 든 기사"}, table=self._TABLE,
+        )
+        service = AnalysisCompareService(
+            memory_service=memory, alias_matcher=matcher
+        )
+        [proposal] = _compare(
+            service,
+            [_candidate(candidate_id="cur",
+                        payload={"name": "영희", "observation": "조용한 사서"})],
+        )
+        self.assertEqual(proposal.action, CompareAction.CREATE)
+        self.assertIsNone(proposal.matched_memory_id)
+
+    def test_alias_off_by_default_is_create(self):
+        # Over-strict (D5): without an alias matcher, a differently-named but
+        # semantically-identical prior still gets create — deterministic only.
+        memory, _, _ = self._alias_matcher(
+            {"name": "김철수", "observation": "검을 든 기사"}, table=self._TABLE,
+        )
+        service = AnalysisCompareService(memory_service=memory)  # no alias matcher
+        [proposal] = _compare(
+            service,
+            [_candidate(candidate_id="cur",
+                        payload={"name": "철수", "observation": "검을 든 기사"})],
+        )
+        self.assertEqual(proposal.action, CompareAction.CREATE)
+
+    def test_alias_self_exclusion_same_job(self):
+        # Under-strict (D6 in the alias path): when the canonical was promoted by
+        # the SAME job as the candidate, self-exclusion drops it — the alias path
+        # must not surface a conflict against memory this very job created. This
+        # is the exact scenario the live smoke first tripped on (a differently-
+        # named same-subject pair that WOULD clear the threshold, yet must not
+        # match because it is the candidate's own job's promotion).
+        memory, matcher, _ = self._alias_matcher(
+            {"name": "김철수", "observation": "검을 든 기사"}, table=self._TABLE,
+            canonical_job="job-current",  # same job as _compare's job-current
+        )
+        service = AnalysisCompareService(
+            memory_service=memory, alias_matcher=matcher
+        )
+        [proposal] = _compare(
+            service,
+            [_candidate(candidate_id="cur", job_id="job-current",
+                        payload={"name": "철수", "observation": "검을 든 기사"})],
+        )
+        self.assertEqual(proposal.action, CompareAction.CREATE)
+
+    def test_alias_matcher_does_not_affect_scopeless_candidates(self):
+        # Over-strict (D2=A): the alias seam is character-only (scope is not
+        # None). With an alias matcher configured but no semantic matcher, an
+        # event candidate (scope None) must stay always-create — the alias branch
+        # must not fire for scope-less types. The StubEmbedding table omits the
+        # event text, so a wrongful alias.match() on it would raise.
+        memory, matcher, _ = self._alias_matcher(
+            {"name": "김철수", "observation": "검을 든 기사"}, table=self._TABLE,
+        )
+        service = AnalysisCompareService(
+            memory_service=memory, alias_matcher=matcher
+        )
+        [proposal] = _compare(
+            service,
+            [_candidate(candidate_id="ev", candidate_type=EVENT,
+                        payload={"event": "the storm hit"})],
+        )
+        self.assertEqual(proposal.action, CompareAction.CREATE)
+
+    def test_same_name_uses_deterministic_path_not_alias(self):
+        # Over-strict: a same-name candidate matches deterministically (name key),
+        # so the alias matcher must NOT be consulted. The StubEmbedding table
+        # omits the candidate text, so any wrongful alias.match() call raises.
+        memory, matcher, _ = self._alias_matcher(
+            {"name": "Ariel", "observation": "brave"},
+            table={"Ariel\nbrave": (1.0, 0.0, 0.0)},  # no candidate-text entry
+        )
+        judge = FakeJudge(CompareAction.UPDATE)
+        service = AnalysisCompareService(
+            memory_service=memory, judge=judge, alias_matcher=matcher
+        )
+        [proposal] = _compare(
+            service,
+            [_candidate(candidate_id="cur",
+                        payload={"name": "Ariel", "observation": "bold"})],
+        )
+        # Deterministic name-key match → judge path, alias never touched.
+        self.assertEqual(proposal.action, CompareAction.UPDATE)
+        self.assertEqual(len(judge.calls), 1)
 
 
 if __name__ == "__main__":

@@ -379,17 +379,38 @@ def _default_compare_service(memory: MemoryService) -> AnalysisCompareService:
         memory_service=memory,
         judge=judge,
         semantic_matcher=_build_semantic_matcher(memory),
+        alias_matcher=_build_character_alias_matcher(memory),
     )
 
 
 def _build_semantic_matcher(memory: MemoryService):
     # Phase 2B.6 (D4=A): off by default. The threshold env is the on-switch; a
     # guessed value must not silently merge canon, so absent it, event/
-    # open_question stay always-create. Semantic matching also needs the real
-    # shared memory_vectors collection — the in-memory fake in this process is
-    # separate from the worker's, so without CHROMA_HOST there is nothing to
-    # query. See docs/plans/02b-6-semantic-identity-resolution-decisions.md.
-    threshold_raw = os.environ.get("ANALYSIS_SEMANTIC_MATCH_THRESHOLD")
+    # open_question stay always-create. See
+    # docs/plans/02b-6-semantic-identity-resolution-decisions.md.
+    return _build_memory_semantic_matcher(
+        memory, threshold_env="ANALYSIS_SEMANTIC_MATCH_THRESHOLD"
+    )
+
+
+def _build_character_alias_matcher(memory: MemoryService):
+    # Phase 2B.7 (D4/D5): off by default, on its own threshold env (character's
+    # name signal warrants a threshold distinct from event/open_question). When
+    # set, a character candidate with no same-name canonical is checked against
+    # semantically-near canonical characters; a hit → conflict (review), never
+    # an automatic merge (D1=A/D2=A). See
+    # docs/plans/02b-7-character-alias-homonym-decisions.md.
+    return _build_memory_semantic_matcher(
+        memory, threshold_env="ANALYSIS_CHARACTER_ALIAS_MATCH_THRESHOLD"
+    )
+
+
+def _build_memory_semantic_matcher(memory: MemoryService, *, threshold_env: str):
+    # Shared builder for the compare semantic seams (2B.6 event/open_question and
+    # 2B.7 character alias). Semantic matching needs the real shared
+    # memory_vectors collection — the in-memory fake in this process is separate
+    # from the worker's, so without CHROMA_HOST there is nothing to query.
+    threshold_raw = os.environ.get(threshold_env)
     host = os.environ.get("CHROMA_HOST")
     if not threshold_raw or not host:
         return None
@@ -399,9 +420,9 @@ def _build_semantic_matcher(memory: MemoryService):
     # of a cryptic dimension mismatch on the first candidate (verification obs #1).
     if not os.environ.get("EMBEDDING_SERVICE_URL"):
         raise RuntimeError(
-            "ANALYSIS_SEMANTIC_MATCH_THRESHOLD + CHROMA_HOST enable semantic "
-            "memory matching, which requires EMBEDDING_SERVICE_URL — the fake "
-            "embedding does not match the memory_vectors collection dimensions."
+            f"{threshold_env} + CHROMA_HOST enable semantic memory matching, "
+            "which requires EMBEDDING_SERVICE_URL — the fake embedding does not "
+            "match the memory_vectors collection dimensions."
         )
     vector_search = ChromaMemoryVectorIndexAdapter(
         connect_chroma_collection(

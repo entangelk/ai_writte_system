@@ -5,6 +5,10 @@ produce one action proposal per candidate. The judgment is a hybrid (D3=A):
 
 * the deterministic scope key (D2=A, character-only) decides *which* canonical
   memories a candidate could refer to;
+* if none match and an alias matcher is configured (2B.7 D1=A/D2=A, off by
+  default), a semantic query decides whether a differently-named canonical
+  character is the same subject; a hit becomes ``conflict`` for merge/split
+  review (never an automatic merge), otherwise the action is ``create``;
 * if none match, the action is ``create`` deterministically (no LLM);
 * if exactly one matches, an injected ``CompareJudge`` (terminal-JSON LLM,
   D1=A) labels it ``update``/``add_evidence``/``no_change``/``conflict``;
@@ -110,12 +114,19 @@ class AnalysisCompareService:
         memory_service: MemoryService,
         judge: CompareJudge | None = None,
         semantic_matcher: SemanticMemoryMatcher | None = None,
+        alias_matcher: SemanticMemoryMatcher | None = None,
     ) -> None:
         self._memory = memory_service
         self._judge = judge
         # Phase 2B.6 (D4=A): off by default. Without a matcher, scope-less
         # candidates (event/open_question) stay always-create, exactly as before.
         self._semantic_matcher = semantic_matcher
+        # Phase 2B.7 (D1=A/D2=A/D4/D5): character alias detection, off by default.
+        # When the deterministic name key finds no same-name canonical, this
+        # (separately-thresholded) matcher checks whether a differently-named
+        # canonical character is the same subject. A hit is surfaced as conflict
+        # for merge/split review — never an automatic merge (D2=A boundary).
+        self._alias_matcher = alias_matcher
 
     async def compare_job(
         self,
@@ -137,6 +148,30 @@ class AnalysisCompareService:
         scope = derive_scope(candidate.candidate_type, candidate.payload)
         matches = self._find_matches(project_id, job_id, candidate, scope)
         if not matches:
+            # Phase 2B.7 (D1=A/D2=A/D3=A): character alias detection. The
+            # deterministic name key found no same-name canonical (scope is not
+            # None ⇒ character); an alias matcher (when configured, off by
+            # default) checks whether a *differently-named* canonical character
+            # is the same subject. A hit is surfaced as ``conflict`` for
+            # merge/split review — never an automatic merge — with the matched
+            # id carried so the review queue can reconcile it later.
+            if scope is not None and self._alias_matcher is not None:
+                aliases = self._alias_matcher.match(
+                    project_id=project_id, job_id=job_id, candidate=candidate
+                )
+                if aliases:
+                    alias = aliases[0]
+                    return ActionProposal(
+                        candidate_id=candidate.id,
+                        candidate_type=candidate.candidate_type,
+                        action=CompareAction.CONFLICT,
+                        matched_memory_id=alias.id,
+                        rationale=(
+                            f"semantic alias candidate: character "
+                            f"'{candidate.payload.get('name')}' resembles "
+                            f"canonical memory {alias.id}"
+                        ),
+                    )
             # No deterministic identity match (includes event/open_question,
             # which have no scope key): treat as a new subject.
             return ActionProposal(

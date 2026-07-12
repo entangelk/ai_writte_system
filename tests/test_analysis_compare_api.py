@@ -345,6 +345,40 @@ class AnalysisCompareApiTest(unittest.TestCase):
             )
         self.assertIsNone(matcher)
 
+    def test_character_alias_wiring_without_embedding_url_fails_fast(self):
+        # Phase 2B.7 (D8): the character alias seam reuses the same guard — its
+        # threshold + CHROMA_HOST without EMBEDDING_SERVICE_URL must fail fast,
+        # naming the alias env in the message.
+        with mock.patch.dict(
+            main_module.os.environ,
+            {
+                "ANALYSIS_CHARACTER_ALIAS_MATCH_THRESHOLD": "0.9",
+                "CHROMA_HOST": "chroma",
+            },
+            clear=False,
+        ):
+            main_module.os.environ.pop("EMBEDDING_SERVICE_URL", None)
+            with self.assertRaises(RuntimeError) as ctx:
+                main_module._build_character_alias_matcher(
+                    MemoryService(InMemoryMemoryRepository())
+                )
+        self.assertIn("EMBEDDING_SERVICE_URL", str(ctx.exception))
+        self.assertIn("ANALYSIS_CHARACTER_ALIAS_MATCH_THRESHOLD", str(ctx.exception))
+
+    def test_character_alias_wiring_off_by_default_returns_none(self):
+        # Over-strict guard (2B.7 D5): absent its own threshold, no alias matcher
+        # is built — character stays deterministic name-key only.
+        with mock.patch.dict(
+            main_module.os.environ, {"CHROMA_HOST": "chroma"}, clear=False
+        ):
+            main_module.os.environ.pop(
+                "ANALYSIS_CHARACTER_ALIAS_MATCH_THRESHOLD", None
+            )
+            matcher = main_module._build_character_alias_matcher(
+                MemoryService(InMemoryMemoryRepository())
+            )
+        self.assertIsNone(matcher)
+
     def test_missing_project_returns_404(self):
         client, analysis, _memory, project_id = _build()
         job, _c = _seed_candidate(

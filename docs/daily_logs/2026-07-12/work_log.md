@@ -88,9 +88,43 @@
 
 검증: 회귀 749 passed / 48 skipped(신규 smoke·cleanup 모두 pytest 미수집·프로덕션 코드 무변). candidate/memory smoke 재실행 PASS + cleanup 0 잔여, gateway smoke PASS.
 
+## 4차 작업 — (c) character 별칭 semantic 보강 (SoT v1.6.62)
+
+오너 선택: 풀스택 머신 확인 → 서브 머신 막힘 후보였던 **(c) character 별칭/동명이인 semantic**을 여기서 진행.
+
+### 착수 결정 브리프 + 오너 결정
+
+- 신규 브리프 `plans/02b-7-character-alias-homonym-decisions.md`. **계약 충돌을 먼저 surface**: 2B.3 D2=A가 "별칭/동명이인은 merge/split review 후보(**자동 병합 없음**)"로 잠갔고, (c)는 그 경계를 확장 → 임의 구현 금지, 오너 확정 요청(CLAUDE.md §1).
+- 두 실패 모드가 메커니즘 반대임을 명시: 별칭(false-negative, name-key=0에서 매칭 *추가*) vs 동명이인(false-positive, name-key=1에서 매칭 *반증*).
+- **오너 결정: D1=A(탐지만, 자동 병합 없음)·D2=A(별칭만 먼저)**. D3~D8 추천 잠금.
+
+### 구현 (계약 확장 + off 기본)
+
+- `analysis/compare.py`: `AnalysisCompareService.alias_matcher: SemanticMemoryMatcher | None` 주입 seam 추가. `_compare_candidate`가 결정적 name-key 매칭 0 + scope≠None(character)일 때만 alias 조회 — 히트 시 `conflict`(matched_memory_id=canonical, judge 미호출). name-key≥1은 종전 judge 경로 불변(alias 미호출). 2B.6 `EmbeddingSemanticMatcher`를 그대로 재사용(character candidate → `memory_type="character_observation"` 필터 + `name\nobservation` projection이 쓰기와 일치).
+- `main.py`: `_build_semantic_matcher`를 `_build_memory_semantic_matcher(threshold_env)` 공유 빌더로 리팩터 + 신규 `_build_character_alias_matcher`(env `ANALYSIS_CHARACTER_ALIAS_MATCH_THRESHOLD`, 기본 off). fail-fast guard(CHROMA_HOST 有·EMBEDDING_SERVICE_URL 無)는 env명 동적 포함으로 재사용.
+- `apply.py`는 무변경 확인 — conflict 브랜치가 이미 `matched_memory_id`를 review_queue로 전달(alias conflict가 review 큐를 풍부하게 함, 안전).
+
+### 회귀 + 라이브
+
+- 회귀 +6: `tests/test_analysis_compare.py::CharacterAliasTest` 4(alias→conflict+matched id·judge 미호출 / below-threshold create / off 기본 create / same-name 결정적 우선 — StubEmbedding에 candidate 텍스트를 빼서 alias 오호출 시 raise로 증명) + `tests/test_analysis_compare_api.py` 2(alias wiring fail-fast·off 기본 none). **755 passed / 48 skipped**(종전 749). `git diff --check` clean.
+- **라이브 관통 PASS**: 신규 `scripts/phase2b7_character_alias_live_smoke.py` — Mongo promote→worker drain→실 Chroma `memory_vectors`→compare alias(실 BGE-m3-ko embedding + Chroma query_similar). `철수`(별칭)→`conflict`+canonical id, `영희`(타인)→`create`, threshold 0.7. `memory_backend: chroma+elasticsearch`, self-cleaning.
+  - **구현 중 잡은 smoke 버그**: canonical을 compare와 같은 job_id로 승격 → self-exclusion(D6)이 배제해 첫 run이 `create`로 나옴. canonical job을 `smoke-job-prior`로 분리해 해소(프로덕션 코드 아닌 smoke 결함).
+  - **정직성(D5/D7)**: 이 smoke는 **관통·wiring 검증**이지 라벨 정확도·threshold 실값 캘리브레이션이 아니다. 별칭/타인 2경계만 확인. 실 cosine 분포 관찰→threshold 확정은 후속.
+
+### 오너 독립 적대적 검증 PASS + 후속 보강
+
+- **검증 기록**: `docs/verifications/2026-07-12/character_alias_semantic.md` — **PASS(조건 없음)**. 경계 매트릭스 10행 빈 cell 없음(직접 5 + 위임 5, `EmbeddingSemanticMatcher` 동일 클래스 인스턴스라 위임 타당), judge 물리적 우회·`apply.py:118` review_queue 전달·`scope.py:37` character 한정을 재도출로 확인, pytest 755/48 독립 재현.
+- **비차단 관찰 4건 처리**:
+  - **Obs2(alias 경로 self-exclusion 직접 회귀 부재) → 보강**: `test_alias_self_exclusion_same_job` 추가 — canonical을 같은 job으로 승격 시 alias 경로가 self-exclusion으로 canonical을 drop해 `create`(conflict 아님). **라이브 smoke가 처음 밟은 그 시나리오를 직접 잠금**(under-strict).
+  - **Obs4(alias on + scope-less 조합 회귀 부재) → 보강**: `test_alias_matcher_does_not_affect_scopeless_candidates` 추가 — alias matcher 있어도 event(scope=None)는 alias 분기 미진입 → `create`. mutation(`scope is not None` 제거)으로 event 테스트 FAIL 실증(가드 bite).
+  - **Obs1(SoT 산문 단락 버전 순서) → 보류**: v1.6.62는 47(직전 최대) 뒤라 오름차순상 타당. 45/46/47 역순은 **내가 만들지 않은 기존 부채**라 §3 surgical(내 mess만 정리) 원칙으로 미변경.
+  - **Obs3(rationale에 canonical id 사용) → 코드 무변**: SoT/브리프가 rationale 리터럴을 계약으로 고정 안 함. id가 이름보다 정확한 영구 참조라 그대로 유지(검증자도 무방 판정).
+- 회귀 +6→**+8**, 전체 **757 passed / 48 skipped**. Obs4 가드 mutation bite 재실증.
+
 ## Next steps
 
-- **여전히 sandbox 밖 남은 것**(이번 미포함): 2B.6 semantic threshold 실 캘리브레이션(실 embedding 유사/비유사 cosine 분포 관찰), compare judge / context_search planner live smoke(실 llama 12B gateway 기동 필요 — 이번엔 gateway 미기동), (b-4) hybrid 튜닝(실 데이터).
-- HANDOFF Next Tasks #1 다음 slice는 여전히 **오너 선택 대기**((b-4)·(c)·Phase 6 UI). Phase 6 UI는 frontend 미확정이라 백엔드 API 확장 위주만 가능.
-- **오너 지시 시** 신규 smoke 2개 커밋.
-- 인프라 스택은 기동 상태로 남겨둠(추가 live 검증 시 재사용 가능); 정리 필요 시 `docker compose down`.
+- **(c) 후속 잔여**: 동명이인 false-positive 반증(name-key=1 분기, 별도 증분), character alias threshold 실값 캘리브레이션(라이브 cosine 분포 배치, off→발화), merge/split write 경로(Phase 6 UI).
+- **여전히 sandbox 밖 남은 것**: 2B.6 event/open_question semantic threshold 실 캘리브레이션, compare judge J1 프롬프트 판별 튜닝(deterministic 벤치마크 요), (b-4) hybrid 튜닝(실 데이터).
+- HANDOFF Next Tasks #1 남은 후보: (b-4)·Phase 6 UI(frontend 미확정이라 백엔드 API 확장 위주). 다음 slice 오너 선택 대기.
+- **오너 지시 시** 신규 smoke 3개(gateway·candidate·**alias**) + (c) 구현 커밋.
+- 인프라 스택은 기동 상태로 남겨둠; 정리 필요 시 `docker compose down`.
