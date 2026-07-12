@@ -59,6 +59,17 @@
 
 보강 후 회귀 무변(**749 passed / 48 skipped**), archive smoke 2단계 재실행 PASS.
 
+## 2차 작업 — 실 LLM(12B) 경로 live 관통 4종 (튜닝 제외)
+
+오너가 "다음 작업 이어서, 튜닝 빼고 진행할 수 있는 걸로"(튜닝=최후속) 지시. 남은 live 검증 중 **실 llama 12B 의존 smoke 4종**이 오너 브리프 불필요한 비-튜닝 검증이라 선택. in-stack llama 서버(`docker-compose.llama.yml`, RTX 3060, 모델 캐시 6.7GB)를 기동해 관통. 검증 기록: `docs/verifications/2026-07-12/llm_path_live_smokes.md`(PASS). **신규 코드/스크립트 없음**(4 smoke 사전 존재), 문서만 산출.
+
+- **Phase 2A provider 추출**: exit 0, HTTP 200, job `succeeded`, candidates=3. App→Gateway→llama 추출 관통.
+- **Phase 2B.3.2 compare judge**: 4 boundary pair 전부 `succeeded`(terminal-JSON). **wiring PASS**. J1 empirical 신호(비차단, 튜닝 대상): update→conflict·no_change→add_evidence 과잉 판정(2/4 의도 라벨 불일치) — 프롬프트 판별 튜닝은 오너 지시로 제외, 신호만 기록.
+- **Phase 4 planner**: exit 0, `succeeded`, 유효 2-step SearchPlan(structured JSON).
+- **Phase 4 deployed e2e**: rebuild(실 Chroma 6건)→실 llama planner 2-step→gate `pass`→macro 2/micro 6, `degraded: False`(완전 정상 경로). application HTTP→gateway→llama→orchestration→retrieval→Gate 전 경로 관통.
+
+이로써 비-튜닝 live 검증 배치 소진: 인덱싱 4종(1차) + LLM 경로 4종(2차). 남은 sandbox-밖은 전부 튜닝(2B.6 threshold·(b-4) hybrid·J1 프롬프트) = 최후속.
+
 ## Next steps
 
 - **여전히 sandbox 밖 남은 것**(이번 미포함): 2B.6 semantic threshold 실 캘리브레이션(실 embedding 유사/비유사 cosine 분포 관찰), compare judge / context_search planner live smoke(실 llama 12B gateway 기동 필요 — 이번엔 gateway 미기동), (b-4) hybrid 튜닝(실 데이터).
