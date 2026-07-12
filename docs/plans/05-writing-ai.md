@@ -73,12 +73,12 @@ MVP에서 최소한 요청 적합성, 프로젝트 격리, hard constraint 위�
 
 ## 착수 전 결정사항
 
-- [ ] 첫 task type을 `continue_scene` 하나로 제한할지
-- [ ] 출력이 full text인지 patch인지, editor 적용 단위
-- [ ] Gate decision literal과 각 decision의 자동/수동 처리
-- [ ] Continuity/POV 검사를 규칙, LLM, hybrid 중 어떻게 구성할지
-- [ ] 후보가 새 설정을 만든 경우 memory hint를 어떻게 다룰지
-- [ ] 첫 모델의 context/output budget과 timeout
+- [x] 첫 task type을 `continue_scene` 하나로 제한할지 — **v1.6.68 확정**(브리프 `05-writing-generation-decisions.md`, D3=continue_scene 하나. enum은 후속 task로 확장).
+- [x] 출력이 full text인지 patch인지, editor 적용 단위 — **v1.6.68 부분 확정**(Q2=평문 프로즈, output_type=draft_patch[이어쓸 새 프로즈]. editor 삽입 적용 단위는 accept→save slice로 보류).
+- [ ] Gate decision literal과 각 decision의 자동/수동 처리 — Writing Gate slice(후보 literal pass/revise/retrieve_more/needs_user_review/block).
+- [ ] Continuity/POV 검사를 규칙, LLM, hybrid 중 어떻게 구성할지 — Writing Gate slice(의미 검증은 LLM 기반 필요).
+- [ ] 후보가 새 설정을 만든 경우 memory hint를 어떻게 다룰지 — 구조적 self-report(new_memory_hints) slice.
+- [x] 첫 모델의 context/output budget과 timeout — **벤치마크값 사용**(writing_generate 1/120s/1024, `plans/flat-loop-gate.md`; `WRITING_GENERATE_MAX_TOKENS` env로 조정).
 
 ## 원문 및 상세 참고
 

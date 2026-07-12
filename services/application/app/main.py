@@ -68,6 +68,15 @@ from services.application.app.analysis.review_inbox import (
     conflict_affordances,
     gate_finding_affordances,
 )
+from services.application.app.writing.models import (
+    WritingRequest,
+    WritingTaskType,
+)
+from services.application.app.writing.service import (
+    WritingError,
+    WritingService,
+    seed_writing_template,
+)
 from services.application.app.analysis.source import CoreSotSourceAdapter
 from services.llm_gateway.app.errors import ProviderError
 from services.application.app.memory.models import PromotionMode
@@ -417,6 +426,38 @@ def _default_compare_service(memory: MemoryService) -> AnalysisCompareService:
     )
 
 
+# Fixed retrieval needs for a continue_scene generation (Phase 5.1). Mongo-served
+# needs (current/recent scene) require a current_position; when absent they yield
+# empty sections and generation proceeds with whatever context was retrieved.
+_WRITING_CONTINUE_SCENE_NEEDS = (
+    ContextNeed.CURRENT_SCENE,
+    ContextNeed.RECENT_SCENES,
+    ContextNeed.CANONICAL_MEMORY,
+)
+
+
+def _default_writing_service() -> WritingService | None:
+    # Phase 5.1: wire the Writing generation service when a Gateway is configured;
+    # otherwise the endpoint reports 503 (mirrors the analysis runner / compare
+    # judge / context search planner env gating).
+    base_url = os.environ.get("LLM_GATEWAY_BASE_URL")
+    if not base_url:
+        return None
+    prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
+    seed_writing_template(prompt_templates)
+    provider = GatewayGenerateProvider(
+        base_url=base_url,
+        timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
+        trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False),
+    )
+    return WritingService(
+        provider,
+        prompt_templates=prompt_templates,
+        model=os.environ.get("LLM_GATEWAY_MODEL") or None,
+        max_tokens=int(os.environ.get("WRITING_GENERATE_MAX_TOKENS", "1024")),
+    )
+
+
 def _build_semantic_matcher(memory: MemoryService):
     # Phase 2B.6 (D4=A): off by default. The threshold env is the on-switch; a
     # guessed value must not silently merge canon, so absent it, event/
@@ -763,6 +804,17 @@ class ContextSearchHttpRequest(BaseModel):
     max_tokens: int = 4096
 
 
+class WritingGenerateRequest(BaseModel):
+    request_id: str
+    instruction: str
+    task_type: str = WritingTaskType.CONTINUE_SCENE.value
+    draft_excerpt: str = ""
+    # Retrieval query for the internal context search; defaults to the instruction.
+    query: str | None = None
+    current_position: ContextPositionBody | None = None
+    max_tokens: int = 4096
+
+
 def create_app(
     service: CoreSotService | None = None,
     analysis_service: AnalysisService | None = None,
@@ -773,6 +825,7 @@ def create_app(
     compare_service: AnalysisCompareService | None = None,
     review_queue_service: ReviewQueueService | None = None,
     gate_finding_service: GateFindingService | None = None,
+    writing_service: WritingService | None = None,
     vector_index: InMemoryVectorIndexAdapter | None = None,
 ) -> FastAPI:
     app = FastAPI(title="AI Writing System Application")
@@ -827,6 +880,7 @@ def create_app(
         review_queue=review_queue,
     )
     gate_findings = gate_finding_service or _default_gate_finding_service()
+    writing = writing_service or _default_writing_service()
     runner = analysis_runner
     if runner is None:
         runner = _default_analysis_runner(core_sot=core_sot, analysis=analysis)
@@ -2036,6 +2090,86 @@ def create_app(
                 status_code=502, detail=f"gate finding persistence failed: {exc}"
             ) from exc
         return _context_package_payload(package, gate)
+
+    def _writing_candidate_payload(candidate) -> dict[str, object]:
+        return {
+            "request_id": candidate.request_id,
+            "project_id": candidate.project_id,
+            "task_type": candidate.task_type.value,
+            "output_type": candidate.output_type.value,
+            "text": candidate.text,
+            "status": candidate.status,
+            "self_reported_constraints": list(candidate.self_reported_constraints),
+            "candidate_id": candidate.candidate_id,
+            "generated_by_model": candidate.generated_by_model,
+        }
+
+    @app.post("/projects/{project_id}/writing/generate")
+    async def writing_generate_endpoint(
+        project_id: str, body: WritingGenerateRequest
+    ) -> dict[str, object]:
+        # Phase 5.1: continue_scene generation. The intended flow is
+        # context request → ContextPackage → Writing AI (핵심 흐름), so the
+        # endpoint builds the package via context search, then generates.
+        try:
+            _require_project_exists(project_id)
+            task_type = WritingTaskType(body.task_type)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400, detail=f"unsupported task_type: {body.task_type}"
+            ) from exc
+        if writing is None:
+            raise HTTPException(
+                status_code=503, detail="writing service is not configured"
+            )
+        if context_search is None:
+            raise HTTPException(
+                status_code=503, detail="context search service is not configured"
+            )
+        position = (
+            CurrentPosition(
+                draft_id=body.current_position.draft_id,
+                version_id=body.current_position.version_id,
+            )
+            if body.current_position is not None
+            else None
+        )
+        search_request = ContextSearchRequest(
+            project_id=project_id,
+            purpose=ContextSearchPurpose.WRITING_CONTEXT,
+            needs=_WRITING_CONTINUE_SCENE_NEEDS,
+            query=body.query or body.instruction,
+            current_position=position,
+            context_budget=ContextBudget(max_tokens=body.max_tokens),
+        )
+        try:
+            package = await context_search.build_context_package(search_request)
+            candidate = await writing.generate(
+                request=WritingRequest(
+                    request_id=body.request_id,
+                    project_id=project_id,
+                    task_type=task_type,
+                    instruction=body.instruction,
+                    draft_excerpt=body.draft_excerpt,
+                ),
+                package=package,
+            )
+        except WritingError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except InvalidContextSearchRequest as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except ContextSearchBudgetExceeded as exc:
+            raise HTTPException(status_code=504, detail=str(exc)) from exc
+        except ContextSearchFailed as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"{exc.error_type.value}: {exc.detail}",
+            ) from exc
+        except ProviderError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return _writing_candidate_payload(candidate)
 
     return app
 

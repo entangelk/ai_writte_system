@@ -242,9 +242,47 @@
   - **어포던스 H1(row 11 read-only)**: 순수 함수라 side effect 자체가 없어 의미 있는 assertion 부재 → 정적 커버 유지(검증자 판정 수용, 코드 무변).
 - 전체 **805 passed / 48 skipped**(confirm/reject assertion 추가는 기존 테스트 보강이라 카운트 불변), `git diff --check` clean.
 
+## 7차 작업 — Phase 5.1 Writing 생성 (SoT v1.6.68)
+
+방향 결정: Phase 6 리뷰 백엔드는 거의 완성(frontend 미확정으로 소비자 없음)이고, 순차 계획상 앞이던 **Phase 5(글 생성)가 미구현**임을 확인 → 오너가 Phase 5 착수 선택. `agent_loop/registry.py`에 `WRITING_GENERATE` 프로파일만 있고 실제 생성 서비스는 없었음(입력 인프라 ContextPackage·Gateway는 준비 완료).
+
+### 착수 결정 브리프 + 오너 결정
+
+- 신규 브리프 `plans/05-writing-generation-decisions.md`(AGENTS.md 구조 + 경계 매트릭스 10행). Phase 5는 대형이라 첫 slice를 최소 end-to-end로 스코프.
+- 핵심 판단: **의미 있는 Writing Gate(do_not_use/POV 위반을 프로즈에서 탐지)는 결정적 문자열 매칭 불가·LLM 기반 필요** → Gate는 독립 slice.
+- **오너 결정 Q1=생성만**(Gate 다음 slice)·**Q2=평문 프로즈**(모델은 프로즈만, 서비스가 WritingCandidate 래핑 — 로컬 Gemma의 긴 한국어 창작 프로즈를 JSON string에 넣는 fragility 회피). 파생 D3~D7은 코드베이스 패턴에서 도출(continue_scene 한정·직접 Gateway 1-turn·draft_patch·project isolation·context_search→generate).
+
+### 구현 (신규 writing/ 패키지)
+
+- `writing/models.py`: `WritingRequest`/`WritingBrief`/`WritingCandidate` + `WritingTaskType`(continue_scene)/`WritingOutputType`(draft_patch). WritingCandidate는 self-report 필드(self_reported_constraints)를 계약에 정의하되 slice 1은 비움(Gate slice가 채움). status는 항상 candidate.
+- `writing/prompt.py`: master system prompt(writing_agent_prompt §6.1 로컬변형 §17.1) + `format_context_package`(§8.1 컴팩트: do_not_use→constraints→macro→micro 우선순위, candidate origin "candidate (uncertain)" 라벨) + `build_writing_request`(system+user 조립).
+- `writing/service.py`: `WritingService.generate` — 1-turn Gateway(compare_judge 패턴, 단 평문이라 JSON parse/repair 불요), 평문→WritingCandidate 래핑. `WritingError`(validation)·`seed_writing_template`. ProviderError는 삼키지 않고 전파(성공 위장 금지). 결정적 안전선: task_type≠continue_scene·빈 instruction·project isolation(request.project_id≠package.project_id)·brief project.
+- `main.py`: `_default_writing_service`(LLM_GATEWAY_BASE_URL env gating, compare judge 선례)·create_app `writing_service` 주입·`POST /projects/{id}/writing/generate`(context_search로 package 조립→generate; 미구성 503·WritingError/task 400·ProviderError 502·budget 504)·`_WRITING_CONTINUE_SCENE_NEEDS`(CURRENT_SCENE/RECENT_SCENES/CANONICAL_MEMORY).
+
+### 회귀 (양방향 guard)
+
+- 회귀 +17: `tests/test_writing.py` — prompt 조립 4(do_not_use 우선·canonical/candidate 라벨·instruction/excerpt/context 포함·brief) + generate 7(평문 래핑·status candidate·ProviderError 전파·task/instruction/project isolation/brief project 검증·template 부재) + HTTP 6(200 orchestration+query=instruction·writing 미구성 503·context_search 미구성 503·unsupported task 400·missing project 404·ProviderError 502).
+- 테스트 셋업 버그 1건 잡음: fake context search가 고정 project_id를 반환해 project isolation 검증에 걸림 → `replace(package, project_id=request.project_id)`로 실제 동작 미러링(수정).
+- 전체 **822 passed / 48 skipped / 101 subtests**(종전 805). `git diff --check` clean.
+
+### 남은 미확정 (후속 slice)
+
+- Writing Gate(pass/revise/retrieve_more/needs_user_review/block, LLM 기반 do_not_use/POV 검증)·accept→save→analysis 재진입·revise/retrieve_more 재생성 루프·구조적 self-report(candidate_claims/new_memory_hints/risk_notes)·revise/outline/critique/rewrite_style task·Continuity/POV/Voice Gate 고도화·editor 적용 단위.
+- **실 LLM(12B) live smoke**(실제 continue_scene 생성 품질·do_not_use 준수 관찰)는 sandbox 밖 후속.
+
+### 오너 독립 검증 합격(조건 없음) + 비차단 hardening 보강
+
+- **검증 기록**: `docs/verifications/2026-07-12/writing_generation.md` — **합격(조건 없음)**. 핵심 클레임 3개(평문이라 JSON parse/repair 불요·ProviderError 전파·status 항상 candidate) 코드로 직접 확인, 매트릭스 10행 전수 named test 잠금, mutation 6종(MW1~MW6: status→final·ProviderError 삼킴·isolation 제거·task 체크 제거·do_not_use 순서 뒤바꿈·candidate 라벨 오) 전부 bite.
+- **보강 적용(사용자 지시 "보강 후 커밋")**:
+  - **H2(orchestration 에러 브랜치 회귀 부재)**: 코드는 `ContextSearchBudgetExceeded→504`·`ContextSearchFailed→502`를 매핑하나 회귀가 없어 orchestration 에러 매핑이 부분만 잠겨 있었다(검증자는 "보고 정확성"으로 표현했으나 이면에 untested branch). HTTP 회귀 +2 추가(504 budget·502 context 실패). `_FakeContextSearch`에 `error` 주입 경로 추가. **bite 재실증**: `status_code=504→500` 변형 시 504 테스트 FAIL, 복원 후 통과(504 매핑 2개 grep 확인).
+  - **H1**(self_reported_constraints 빈 값): Gate slice가 채우는 forward-defense(models docstring·브리프·SoT 명시). 코드 무변, Gate slice 착수 시 실제 채움 추적.
+  - **H3**(평문 보장은 master prompt 지시 의존, live에서만 검증)·**H4**(budget 5차원 중 max_tokens만, agent_loop runner 보류 연동): 기존 범위/아키텍처 제약, 코드 무변.
+- 회귀 +17→**+19**, 전체 **824 passed / 48 skipped**. `git diff --check` clean.
+
 ## Next steps
 
-- **(Phase 6 UI 잔여)**: 부분 승인/부분 retry·merge/split 일반화(event/open_question)·candidate edit **실 Mongo live** 관통·frontend(보류). 각 착수 브리프 필요.
+- **(Phase 5 후속)**: Writing Gate slice(LLM 기반 do_not_use/POV 검증) → accept→save 재진입 → 구조적 self-report. 각 착수 브리프 필요.
+- **(Phase 6 UI 잔여)**: 부분 승인/부분 retry·merge/split 일반화(event/open_question)·candidate edit **실 Mongo live** 관통·frontend(보류).
 - **(c) 후속 잔여**: 동명이인 false-positive 반증(name-key=1 분기, 별도 증분), character alias threshold 실값 캘리브레이션(라이브 cosine 분포 배치, off→발화), merge/split write 경로(Phase 6 UI).
 - **여전히 sandbox 밖 남은 것**: 2B.6 event/open_question semantic threshold 실 캘리브레이션, compare judge J1 프롬프트 판별 튜닝(deterministic 벤치마크 요), (b-4) hybrid 튜닝(실 데이터).
 - HANDOFF Next Tasks #1 남은 후보: (b-4)·Phase 6 UI(frontend 미확정이라 백엔드 API 확장 위주). 다음 slice 오너 선택 대기.
