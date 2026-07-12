@@ -69,8 +69,16 @@ from services.application.app.analysis.review_inbox import (
     gate_finding_affordances,
 )
 from services.application.app.writing.models import (
+    WritingCandidate,
+    WritingOutputType,
     WritingRequest,
     WritingTaskType,
+)
+from services.application.app.writing.gate import (
+    InvalidWritingGateResult,
+    WritingGateError,
+    WritingGateService,
+    seed_writing_gate_template,
 )
 from services.application.app.writing.service import (
     WritingError,
@@ -78,7 +86,7 @@ from services.application.app.writing.service import (
     seed_writing_template,
 )
 from services.application.app.analysis.source import CoreSotSourceAdapter
-from services.llm_gateway.app.errors import ProviderError
+from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
 from services.application.app.memory.models import PromotionMode
 from services.application.app.memory.service import (
     InMemoryMemoryRepository,
@@ -458,6 +466,24 @@ def _default_writing_service() -> WritingService | None:
     )
 
 
+def _default_writing_gate_service() -> WritingGateService | None:
+    base_url = os.environ.get("LLM_GATEWAY_BASE_URL")
+    if not base_url:
+        return None
+    prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
+    seed_writing_gate_template(prompt_templates)
+    provider = GatewayGenerateProvider(
+        base_url=base_url,
+        timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
+        trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False),
+    )
+    return WritingGateService(
+        provider, prompt_templates=prompt_templates,
+        model=os.environ.get("LLM_GATEWAY_MODEL") or None,
+        max_tokens=int(os.environ.get("WRITING_GATE_MAX_TOKENS", "1024")),
+    )
+
+
 def _build_semantic_matcher(memory: MemoryService):
     # Phase 2B.6 (D4=A): off by default. The threshold env is the on-switch; a
     # guessed value must not silently merge canon, so absent it, event/
@@ -815,6 +841,17 @@ class WritingGenerateRequest(BaseModel):
     max_tokens: int = 4096
 
 
+class WritingGateRequest(BaseModel):
+    request_id: str
+    instruction: str
+    candidate_text: str
+    task_type: str = WritingTaskType.CONTINUE_SCENE.value
+    draft_excerpt: str = ""
+    query: str | None = None
+    current_position: ContextPositionBody | None = None
+    max_tokens: int = 4096
+
+
 def create_app(
     service: CoreSotService | None = None,
     analysis_service: AnalysisService | None = None,
@@ -826,6 +863,7 @@ def create_app(
     review_queue_service: ReviewQueueService | None = None,
     gate_finding_service: GateFindingService | None = None,
     writing_service: WritingService | None = None,
+    writing_gate_service: WritingGateService | None = None,
     vector_index: InMemoryVectorIndexAdapter | None = None,
 ) -> FastAPI:
     app = FastAPI(title="AI Writing System Application")
@@ -881,6 +919,7 @@ def create_app(
     )
     gate_findings = gate_finding_service or _default_gate_finding_service()
     writing = writing_service or _default_writing_service()
+    writing_gate = writing_gate_service or _default_writing_gate_service()
     runner = analysis_runner
     if runner is None:
         runner = _default_analysis_runner(core_sot=core_sot, analysis=analysis)
@@ -2170,6 +2209,83 @@ def create_app(
         except ProviderError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         return _writing_candidate_payload(candidate)
+
+    @app.post("/projects/{project_id}/writing/gate")
+    async def writing_gate_endpoint(
+        project_id: str, body: WritingGateRequest
+    ) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+            task_type = WritingTaskType(body.task_type)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400, detail=f"unsupported task_type: {body.task_type}"
+            ) from exc
+        if writing_gate is None:
+            raise HTTPException(
+                status_code=503, detail="writing gate service is not configured"
+            )
+        if context_search is None:
+            raise HTTPException(
+                status_code=503, detail="context search service is not configured"
+            )
+        position = (
+            CurrentPosition(draft_id=body.current_position.draft_id,
+                            version_id=body.current_position.version_id)
+            if body.current_position is not None else None
+        )
+        search_request = ContextSearchRequest(
+            project_id=project_id,
+            purpose=ContextSearchPurpose.WRITING_CONTEXT,
+            needs=_WRITING_CONTINUE_SCENE_NEEDS,
+            query=body.query or body.instruction,
+            current_position=position,
+            context_budget=ContextBudget(max_tokens=body.max_tokens),
+        )
+        request = WritingRequest(
+            request_id=body.request_id, project_id=project_id,
+            task_type=task_type, instruction=body.instruction,
+            draft_excerpt=body.draft_excerpt,
+        )
+        candidate = WritingCandidate(
+            request_id=body.request_id, project_id=project_id,
+            task_type=task_type, output_type=WritingOutputType.DRAFT_PATCH,
+            text=body.candidate_text,
+        )
+        try:
+            package = await context_search.build_context_package(search_request)
+            result = await writing_gate.evaluate(
+                request=request, candidate=candidate, package=package)
+        except (WritingGateError, InvalidContextSearchRequest) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except InvalidWritingGateResult as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except ContextSearchBudgetExceeded as exc:
+            raise HTTPException(status_code=504, detail=str(exc)) from exc
+        except ContextSearchFailed as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"{exc.error_type.value}: {exc.detail}",
+            ) from exc
+        except ProviderError as exc:
+            status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
+        return {
+            "request_id": result.request_id,
+            "project_id": result.project_id,
+            "decision": result.decision.value,
+            "findings": [{
+                "type": item.finding_type.value,
+                "severity": item.severity.value,
+                "message": item.message,
+                "evidence": item.evidence,
+                "recommended_decision": item.recommended_decision.value,
+            } for item in result.findings],
+            "checked_constraints": list(result.checked_constraints),
+            "evaluated_by_model": result.evaluated_by_model,
+        }
 
     return app
 

@@ -923,23 +923,21 @@ Output:
 ```json
 {
   "gate_result_id": "writing_gate_001",
-  "decision": "revise",
+  "decision": "block",
   "findings": [
     {
-      "type": "pov_violation",
-      "severity": "high",
+      "type": "pov",
+      "severity": "error",
       "message": "아린은 현재 scene_014 시점에서 레온의 배신을 알 수 없음.",
-      "violating_text": "아린은 레온의 배신을 떠올렸다.",
-      "pointers": [
-        {
-          "mongo_collection": "timeline_facts",
-          "mongo_id": "timeline_fact_023"
-        }
-      ]
+      "evidence": "아린은 레온의 배신을 떠올렸다.",
+      "recommended_decision": "block"
     }
   ]
 }
 ```
+
+Finding shape는 SoT v1.6.69의 exact API 계약이다. Gate result persistence와
+canonical pointer 추가는 별도 후속이며 현재 응답 finding에 임의 필드를 더하지 않는다.
 
 Checks:
 
@@ -1509,4 +1507,3 @@ User owns final acceptance and canon approval.
 ```
 
 No component should violate these boundaries.
-

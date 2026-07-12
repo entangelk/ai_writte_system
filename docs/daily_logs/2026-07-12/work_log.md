@@ -288,3 +288,85 @@
 - HANDOFF Next Tasks #1 남은 후보: (b-4)·Phase 6 UI(frontend 미확정이라 백엔드 API 확장 위주). 다음 slice 오너 선택 대기.
 - **오너 지시 시** 신규 smoke 3개(gateway·candidate·**alias**) + (c) 구현 커밋.
 - 인프라 스택은 기동 상태로 남겨둠; 정리 필요 시 `docker compose down`.
+
+## 8차 작업 — Phase 5.2 Writing Gate 착수 브리프
+
+### Goals
+
+- HANDOFF의 권장 다음 타깃인 Writing Gate의 정본 범위를 확인하고, 구현 전에 필요한 owner-level public contract 결정을 표면화한다.
+
+### Completed work
+
+- `docs/plans/05-writing-gate-decisions.md`를 신규 작성했다.
+  - 기존 정본이 잠근 다섯 decision literal과 LLM 의미 검증 요구를 보존했다.
+  - D1 판정 방식, D2 공개 결과 schema, D3 decision 처리 의미/우선순위, D4 첫 API 경계의 현실적인 선택지를 장단점과 함께 정리했다.
+  - 추천안을 D1=A(별도 1-turn)·D2=B(구조화 findings)·D3=A(판정 전용)·D4=A(별도 evaluate API first)로 제시하고, 양방향 회귀 경계 9개를 적었다.
+- `HANDOFF.md`의 Owner Decisions Needed와 Next Tasks를 현재 blocking 상태로 갱신했다.
+
+### Issues found
+
+- 문제: `05-writing-ai.md`는 Gate decision 후보와 LLM 기반 필요성만 정의하고, finding schema·decision별 자동 처리·API 경계는 미확정이었다.
+- 원인: v1.6.68에서 생성만 의도적으로 먼저 구현하고 Gate를 별도 slice로 유예했다.
+- 해결/결과: 구현자가 public contract를 추측하지 않도록 owner decision brief로 전환했다. 오너 선택 전 코드 변경은 하지 않았다.
+
+### Decisions
+
+- 사용자 결정: HANDOFF 후보 중 Writing Gate를 다음 실 타깃으로 선택했다. 생성 slice의 자연스러운 후속이며 accept/save와 구조적 self-report보다 먼저 진행한다.
+- 아직 필요한 결정: D1~D4. 추천 이유는 로컬 Gemma 단계에서 평문 생성 계약을 보존하고 fake provider로 Gate 계약을 독립 검증하기 위함이다.
+
+### Next steps
+
+- 오너가 `05-writing-gate-decisions.md`의 D1~D4를 선택하면, 선택을 브리프·SoT에 반영하고 경계 테스트부터 구현한다.
+
+## 9차 작업 — Phase 5.2 Writing Gate 구현 (SoT v1.6.69)
+
+### Goals
+
+- 승인된 D1=A·D2=B·D3=A·D4=A를 정본에 반영하고, 생성과 분리된 LLM Writing Gate를 public API까지 구현한다.
+- do_not_use/POV/continuity의 under-strict와 정상 prose의 over-strict 경계를 구조화 findings와 다섯 decision으로 잠근다.
+
+### Completed work
+
+- `writing/models.py`: `WritingGateDecision`, `WritingGateFindingType`, `WritingGateSeverity`, `WritingGateFinding`, `WritingGateResult` 계약을 추가했다.
+- `writing/gate_prompt.py`: ContextPackage·원 요청·candidate를 별도 1-turn terminal JSON 판정 prompt로 조립했다.
+- `writing/gate.py`: strict parser와 side-effect-free `WritingGateService.evaluate`를 구현했다.
+  - 우선순위 `block > needs_user_review > retrieve_more > revise > pass`를 모델 주장에 맡기지 않고 findings로 재계산·검증한다.
+  - do_not_use/POV finding은 blocking error로 약화 불가하며, evidence가 실제 candidate text에 포함되는지 재검증한다.
+  - request/candidate/package project와 request id를 provider 호출 전에 검증한다.
+- `main.py`: 기본 Gate wiring과 `POST /projects/{id}/writing/gate`를 추가했다. Gate는 project-scoped ContextPackage를 다시 구성하되 검색·재생성·저장은 자동 실행하지 않는다. malformed model output/기타 provider=502, provider timeout=504, invalid input=400, 미구성=503이다.
+- `tests/test_writing_gate.py`: contract/service/HTTP 회귀 19개(+26 subtests)를 추가했다. 다섯 decision, 우선순위, hard finding 약화 금지, evidence grounding, malformed schema, project/request/package isolation, dependency/provider/context-search error mapping을 양방향으로 검사한다.
+- 브리프·`05-writing-ai.md`·SoT·CHANGELOG·HANDOFF를 v1.6.69 상태로 갱신했다.
+
+### Issues found
+
+- D3 오해 가능성: 브리프의 B는 즉시 자동 전체 재생성이고, 오너 의도는 위반 판정 단위만 부분 재생성하는 느슨한 연결이었다. 현재 부분 patch anchor가 없어 B를 택하면 의도와 반대가 된다. D3=A로 확정하고 finding별 evidence/recommended_decision을 후속 연결점으로 남겼다.
+- 초기 HTTP 분류에서 malformed LLM JSON이 입력 오류 400으로 합쳐질 수 있었다. 입력 `WritingGateError`와 `InvalidWritingGateResult`를 분리해 provider 결과 오류 502로 바로잡았다.
+- 브리프 HTTP matrix의 candidate-not-found는 candidate가 아직 비영속 inline 입력인 현재 API와 맞지 않았다. project 404만 남기고 candidate 영속화 후속 전까지 해당 분기를 제거했다.
+
+### Decisions
+
+- 사용자 결정 D1=A: 내부 LLM 호출 수보다 정확도를 우선한다.
+- 사용자 결정 D2=B: decision과 구조화 findings를 함께 반환한다.
+- 사용자 의도를 반영한 D3=A: Gate는 판정만 하며, 부분 revise는 evidence anchor를 소비하는 후속으로 느슨하게 연결한다.
+- 사용자 결정 D4=A first: 별도 evaluate API로 시작하고 generate→gate 합성은 additive 확장 가능하게 둔다.
+
+### Verification
+
+- focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_gate.py tests/test_writing.py` → **38 passed / 26 subtests**.
+- full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **843 passed / 48 skipped / 127 subtests**.
+- `python3 -m py_compile`(Gate/prompt/main) 및 `git diff --check` 통과.
+
+### Next steps
+
+- 후보: accept→save→analysis 재진입, finding evidence 기반 부분 revise/retrieve_more orchestration, 구조적 self-report.
+- 실 Gemma live에서는 strict JSON 준수와 한국어 do_not_use/POV/continuity 판정 품질을 별도로 관찰한다.
+
+### 독립 검증 조건부 합격 closure
+
+- 검증 기록 `docs/verifications/2026-07-12/writing_gate.md`를 직접 대조했다. 구현은 correct지만 contract-required named test 3곳이 비어 있다는 B1~B3 판정이 타당했다.
+- **B1 closure**: lower `revise` finding을 `retrieve_more|needs_user_review|block`으로 과대 판정하는 세 경우를 모두 reject하는 over-strict 회귀 추가. H4도 함께 닫아 `revise→retrieve_more→needs_user_review→block` 전 사슬의 strongest finding 계산을 잠갔다.
+- **B2 closure**: `do_not_use|pov` × `(error, revise/retrieve_more/needs_user_review)` 및 `(warning, block/revise/retrieve_more/needs_user_review)` 14개 invalid 조합을 전부 reject하도록 parametrized lock 추가.
+- **B3 closure**: 빈 instruction·빈 candidate text·unsupported task type이 각각 HTTP 400인지 직접 단언했다.
+- 추가 hardening: package-only cross-project provider-before-call 거부(H5), Gate endpoint context-search budget→504/backend→502, prompt의 evidence 필수 문구(H3), SoT stale 미확정 문구(H2), `writing_agent_prompt.md` §16.2 finding shape(H1)를 v1.6.69와 정합화했다.
+- pattern sweep에서 같은 구형 `pov_violation`/`violating_text` 예제가 `contracts.md`와 `mongo_collections.md`에도 반복됨을 확인하고(`git blame`: 2026-06-24 초기 아이디에이션), v1.6.69 exact finding shape로 정합화했다. `mongo_collections.md`에는 Gate persistence/pointer가 아직 후속임을 명시했다. 원본 `abstract.md`는 보존 정책에 따라 변경하지 않았다.
+- production Gate 코드는 검증자가 확인한 correct 상태를 유지했다. prompt/doc/test만 보강했다.

@@ -31,6 +31,25 @@ class WritingOutputType(StrEnum):
     DRAFT_PATCH = "draft_patch"
 
 
+class WritingGateDecision(StrEnum):
+    PASS = "pass"
+    REVISE = "revise"
+    RETRIEVE_MORE = "retrieve_more"
+    NEEDS_USER_REVIEW = "needs_user_review"
+    BLOCK = "block"
+
+
+class WritingGateFindingType(StrEnum):
+    DO_NOT_USE = "do_not_use"
+    POV = "pov"
+    CONTINUITY = "continuity"
+
+
+class WritingGateSeverity(StrEnum):
+    WARNING = "warning"
+    ERROR = "error"
+
+
 @dataclass(frozen=True, slots=True)
 class WritingBrief:
     """Optional style guidance. Not project memory — never a fact source."""
@@ -67,3 +86,24 @@ class WritingCandidate:
     # Assigned when the candidate is accepted and saved (a later slice).
     candidate_id: str | None = None
     generated_by_model: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class WritingGateFinding:
+    finding_type: WritingGateFindingType
+    severity: WritingGateSeverity
+    message: str
+    evidence: str
+    # A later revise/retrieve orchestrator may consume this recommendation and
+    # evidence. The Gate itself remains side-effect free (owner D3=A).
+    recommended_decision: WritingGateDecision
+
+
+@dataclass(frozen=True, slots=True)
+class WritingGateResult:
+    request_id: str
+    project_id: str
+    decision: WritingGateDecision
+    findings: tuple[WritingGateFinding, ...]
+    checked_constraints: tuple[str, ...]
+    evaluated_by_model: str = ""

@@ -1285,9 +1285,11 @@ Writing Agent receives:
   "previous_candidate": {},
   "gate_findings": [
     {
-      "type": "pov_violation",
+      "type": "pov",
+      "severity": "error",
       "message": "아린은 레온의 배신을 알 수 없음.",
-      "violating_text": "아린은 레온의 배신을 떠올렸다."
+      "evidence": "아린은 레온의 배신을 떠올렸다.",
+      "recommended_decision": "block"
     }
   ],
   "revision_instruction": "Fix the candidate while preserving the user's original request."
@@ -1306,6 +1308,9 @@ Rules:
 - Do not remove required constraints.
 - Output a new WritingCandidate JSON.
 ```
+
+이 예시는 v1.6.69 Writing Gate finding schema를 따른다. 실제 부분 revise는
+`evidence`를 patch anchor로 변환하는 계약을 별도 slice에서 확정한 뒤 연결한다.
 
 ---
 

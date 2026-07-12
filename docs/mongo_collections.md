@@ -2027,25 +2027,23 @@ Stores verification results.
   "gate_type": "writing_gate",
   "target_type": "writing_candidate",
   "target_id": "draft_candidate_001",
-  "decision": "revise",
+  "decision": "block",
   "severity": "high",
   "findings": [
     {
-      "type": "pov_violation",
-      "severity": "high",
+      "type": "pov",
+      "severity": "error",
       "message": "아린은 현재 scene_014 시점에서 레온의 배신을 알 수 없음.",
-      "violating_text": "아린은 레온의 배신을 떠올렸다.",
-      "pointers": [
-        {
-          "mongo_collection": "timeline_facts",
-          "mongo_id": "timeline_fact_023"
-        }
-      ]
+      "evidence": "아린은 레온의 배신을 떠올렸다.",
+      "recommended_decision": "block"
     }
   ],
   "created_at": "2026-06-23T00:00:00Z"
 }
 ```
+
+이 문서는 future persistence sketch다. v1.6.69 Writing Gate는 비영속이며,
+실제 저장 collection·pointer envelope는 별도 persistence 결정 전까지 미확정이다.
 
 ### 38.3 Gate Types
 

@@ -18,7 +18,7 @@
   - **Review 백엔드(Phase 6, v1.6.61~67)**: candidate confirm/reject+de-index, conflict resolve/dismiss, 사람 승인 merge/split, Review Inbox candidate/detail/source pointer, Context Gate reject finding durable persistence+inbox additive+명시 lifecycle API, candidate edit(v1.6.66), **Review Inbox 액션 어포던스(v1.6.67: list/detail·conflict·gate finding payload에 `{action,eligible,reason}` — candidate confirm/reject/edit·conflict merge[character+matched]/split[character]·gate resolve/dismiss[open]; read-time 재계산·write가 authority·additive)** 까지 구현. 남은 UI 결정은 부분 승인/retry·merge/split 일반화·frontend다.
   - **Writing AI(Phase 5.1, v1.6.68 — 생성만)**: `services/application/app/writing/` — continue_scene 글 생성. ContextPackage(Phase 4)+WritingRequest → prompt 조립(do_not_use/constraints 우선·candidate 라벨) → Gateway 1-turn 평문 생성 → `WritingCandidate`(status 항상 candidate) 래핑. `POST /projects/{id}/writing/generate`가 context_search→generate 오케스트레이션. 결정적 안전선=project isolation+task/instruction 검증(do_not_use/POV 의미검증은 Gate slice·LLM 기반). **Writing Gate·accept→save 재진입·구조적 self-report·revise/outline/critique task는 후속 slice.**
 - **Compose 런타임**: base `docker-compose.yml`(application + Mongo replica set + gateway[외부 llama 클라이언트] + embedding + chroma + **elasticsearch**[nori, v1.6.53] + **worker**[b-6 증분1]). application에 `ELASTICSEARCH_URL` 배선 → 배포 canonical·candidate retriever 기본 = **hybrid(vector+lexical RRF)**. ES는 자체 `services/elasticsearch/Dockerfile`(공식 ES + analysis-nori, single-node·보안 off). opt-in `docker-compose.llama.yml`로 in-stack llama.cpp GPU 서버(port 9080)를 띄운다. runbook: `docs/runbooks/local-llama-server.md`. **worker(index 색인 적재 drain)는 상시 compose 서비스**(`--loop` drain + SIGTERM graceful shutdown, b-6 증분1 / SoT v1.6.56) — 이전 수동/out-of-band에서 전환. atomic outbox claim이 이미 이중 실행을 막아 single-replica로 안전. **outbox per-sink bookkeeping 완료**(b-6 증분2 / SoT v1.6.57, G3=B/G4=B): enqueue는 targets 빈 dict(sink-agnostic)로 두고 worker가 claim 시 configured sink(vector/lexical)를 materialize, 각 sink가 독립 `attempt_count`/`last_error`를 가져 한 sink가 죽어도 healthy sink는 SUCCESS로 동결·재색인되지 않고 all-terminal 시에만 entry 삭제. composite `drain(entry, skip=SUCCESS)`가 per-sink `SinkOutcome`을 반환(all-or-nothing raise 폐지). retriever는 인덱스 비어도 graceful.
-- **테스트**: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **824 passed / 48 skipped / 101 subtests**(2026-07-12, v1.6.68 Writing 생성 +19). skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
+- **테스트**: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **843 passed / 48 skipped / 127 subtests**(2026-07-12, v1.6.69 Writing Gate 검증 B1~B3+hardening closure). skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
 
 ## Active Decisions
 
@@ -68,6 +68,8 @@
 
 ## Owner Decisions Needed
 
+- **Phase 5.2 Writing Gate 결정·구현 완료(v1.6.69)**: D1=A(별도 1-turn LLM Gate)·D2=B(decision+구조화 findings)·D3=A(side-effect-free 판정, finding evidence/recommended_decision으로 후속 부분 revise 연결)·D4=A first(별도 evaluate API, generate 합성 확장 가능).
+
 - **Gate finding persistence + Review Inbox 통합 완료(v1.6.65)**: reject-only durable store, idempotency/lifecycle, fingerprint/pointer 기반 최소 재현, inbox additive + Gate API. pass 감사 이력과 immutable GateRun manifest는 서비스화 시 후속.
 
 - **Phase 6 Review Inbox 백엔드 완료(v1.6.64/65)**: candidate+open conflict+Gate finding 통합, matched canonical diff, source_ref pointer. **candidate edit(v1.6.66)로 review action 3종(approve/reject/edit) 백엔드 완결. 액션 어포던스(v1.6.67)로 inbox가 항목별 가용 action+자격을 선언(프론트가 한 계약으로 구동).** 남은 Phase 6 결정은 부분 승인/retry·merge/split 일반화·frontend.
@@ -78,8 +80,7 @@
 
 ## Next Tasks
 
-1. **현재 실 타깃 = Phase 5 후속(Writing)** — v1.6.68로 Writing 생성 첫 slice(생성만) 착수됨. 다음 slice 후보(각 착수 브리프 필요):
-   - **Writing Gate slice(권장 다음)** — LLM 기반 do_not_use/POV/continuity 검증, decision literal(pass/revise/retrieve_more/needs_user_review/block), editor 처리. Writing 생성 slice가 남긴 핵심 후속. *실 LLM 의존이나 계약·회귀는 fake로 완결 가능.*
+1. **Phase 5.2 Writing Gate 구현 완료(v1.6.69)** — 별도 LLM Gate service/prompt/models + `POST /projects/{id}/writing/gate`, 구조화 findings와 다섯 decision/우선순위, project isolation·strict JSON/provider error mapping을 회귀로 잠갔다. 다음 핵심 후보:
    - **accept→save→analysis 재진입** — 사용자 accept 시 Phase 1 save + Phase 2 분석 재진입(핵심 흐름 닫기).
    - **구조적 self-report** — candidate_claims/new_memory_hints/risk_notes(Gate·analysis 소비). revise/outline/critique/rewrite_style task 확장.
    - **Phase 6 UI 잔여**(대안 트랙) — 부분 승인/부분 retry·merge/split를 event/open_question로 일반화·frontend(framework 미확정 보류).
