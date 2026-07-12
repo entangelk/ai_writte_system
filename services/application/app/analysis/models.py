@@ -63,6 +63,7 @@ class AnalysisJob:
     status: AnalysisJobStatus = AnalysisJobStatus.PENDING
     failure_reason: AnalysisJobFailureReason | None = None
     failure_detail: str | None = None
+    writing_candidate_report: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +134,7 @@ class SnapshotText:
     raw_text: str
     content_hash: str
     block_ids: tuple[str, ...]
+    writing_candidate_report: Mapping[str, Any] | None = None
 
 
 def immutable_payload(payload: Mapping[str, Any]) -> Mapping[str, Any]:

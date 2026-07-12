@@ -37,6 +37,13 @@ from services.application.app.analysis.prompt_templates import (
     PromptTemplateService,
 )
 from services.application.app.writing.models import (
+    CandidateClaim,
+    CandidateClaimType,
+    MemoryHintType,
+    NewMemoryHint,
+    RiskNote,
+    RiskNoteType,
+    RiskSeverity,
     WritingBrief,
     WritingCandidate,
     WritingOutputType,
@@ -106,10 +113,34 @@ class _FakeProvider:
         )
 
 
-def _service(provider):
+class _FakeReporter:
+    # Phase 5.4 report extractor stub: enriches a plain-prose candidate with the
+    # four structured report fields so the HTTP serialization path is exercised
+    # with non-empty values (v1.6.71 보강 B1).
+    def __init__(self):
+        self.calls = 0
+
+    async def enrich(self, candidate, package):
+        self.calls += 1
+        return replace(
+            candidate,
+            self_reported_constraints=("제한 시점",),
+            candidate_claims=(
+                CandidateClaim("문이 열렸다", CandidateClaimType.NARRATIVE_EVENT, True),
+            ),
+            new_memory_hints=(
+                NewMemoryHint(MemoryHintType.EVENT, "문이 열림", 0.8, True),
+            ),
+            risk_notes=(
+                RiskNote(RiskNoteType.POV, RiskSeverity.HIGH, "시점 확인"),
+            ),
+        )
+
+
+def _service(provider, *, reporter=None):
     templates = PromptTemplateService(InMemoryPromptTemplateRepository())
     seed_writing_template(templates)
-    return WritingService(provider, prompt_templates=templates)
+    return WritingService(provider, prompt_templates=templates, reporter=reporter)
 
 
 def _run(coro):
@@ -280,9 +311,12 @@ class _FakeContextSearch:
         return replace(self._package, project_id=request.project_id)
 
 
-def _http(provider=None, *, package=None, with_context=True, context_error=None):
+def _http(provider=None, *, package=None, with_context=True, context_error=None,
+          reporter=None):
     core_sot = CoreSotService(InMemoryCoreSotRepository())
-    writing_service = _service(provider) if provider is not None else None
+    writing_service = (
+        _service(provider, reporter=reporter) if provider is not None else None
+    )
     context = (
         _FakeContextSearch(
             package if package is not None else _package(),
@@ -321,6 +355,36 @@ class WritingGenerateApiTest(unittest.TestCase):
         # the context search ran for this project with the instruction as query
         self.assertEqual(context.last_request.project_id, project_id)
         self.assertEqual(context.last_request.query, "이어서 써줘.")
+
+    def test_generate_enriches_candidate_report_in_http_response(self):
+        # v1.6.71 후속 보강 (B1): a wired reporter enriches the candidate and the
+        # HTTP response surfaces the four report fields under the PUBLIC schema
+        # key `type` — the internal dataclass names (claim_type/hint_type/risk_type)
+        # must not leak. Mutating the HTTP serializer to emit the internal name
+        # re-fails this test.
+        reporter = _FakeReporter()
+        client, project_id, _ = _http(
+            _FakeProvider(content="이어진 장면."),
+            package=_package(),
+            reporter=reporter,
+        )
+        response = client.post(
+            f"/projects/{project_id}/writing/generate",
+            json={"request_id": "wr1", "instruction": "이어서 써줘."},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(reporter.calls, 1)
+        body = response.json()
+        self.assertEqual(body["self_reported_constraints"], ["제한 시점"])
+        claim = body["candidate_claims"][0]
+        self.assertEqual(claim["type"], "narrative_event")
+        self.assertNotIn("claim_type", claim)
+        hint = body["new_memory_hints"][0]
+        self.assertEqual(hint["type"], "event")
+        self.assertNotIn("hint_type", hint)
+        risk = body["risk_notes"][0]
+        self.assertEqual(risk["type"], "pov")
+        self.assertNotIn("risk_type", risk)
 
     def test_writing_not_configured_returns_503(self):
         client, project_id, _ = _http(provider=None, with_context=True)

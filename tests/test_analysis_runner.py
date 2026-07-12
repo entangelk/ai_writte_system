@@ -620,6 +620,49 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.candidates, ())
         self.assertEqual(len(analysis_repo.candidates), 0)
 
+    async def test_runner_attaches_writing_candidate_report_to_extract_snapshot(self):
+        # v1.6.71 보강 (B2): a pending job's immutable advisory report is attached
+        # to the snapshot the extractor receives, so analysis consumes it as an
+        # advisory extract input. Removing the runner attach re-fails this test.
+        saved = self._saved_source()
+        analysis_service, _analysis_repo, source_adapter = self._analysis(
+            saved["core_sot"]
+        )
+        report = {"candidate_claims": [
+            {"type": "narrative_event", "text": "문이 열렸다"}]}
+        job = analysis_service.create_job(
+            project_id=saved["project_id"],
+            snapshot_id=saved["snapshot_id"],
+            idempotency_key="analysis-report-attach",
+            writing_candidate_report=report,
+        ).job
+        extractor = _RecordingExtractor(())
+        runner = AnalysisExtractionRunner(
+            analysis_service=analysis_service,
+            snapshot_loader=source_adapter,
+            extractor=extractor,
+        )
+        await runner.run_job(project_id=saved["project_id"], job_id=job.id)
+        self.assertIsNotNone(extractor.last_snapshot)
+        self.assertEqual(
+            extractor.last_snapshot.writing_candidate_report, report)
+
+    def test_create_job_preserves_writing_candidate_report(self):
+        # v1.6.71 보강 (B2): the advisory report survives a create→get round-trip
+        # (immutable_payload wrapping) so a replayed job reuses the same copy.
+        saved = self._saved_source()
+        analysis_service, _repo, _adapter = self._analysis(saved["core_sot"])
+        report = {"risk_notes": [{"type": "pov", "severity": "high"}]}
+        job = analysis_service.create_job(
+            project_id=saved["project_id"],
+            snapshot_id=saved["snapshot_id"],
+            idempotency_key="analysis-report-rt",
+            writing_candidate_report=report,
+        ).job
+        fetched = analysis_service.get_job(
+            project_id=saved["project_id"], job_id=job.id)
+        self.assertEqual(fetched.writing_candidate_report, report)
+
     def _analysis(self, core_sot):
         repo = InMemoryAnalysisRepository()
         source_adapter = CoreSotSourceAdapter(core_sot)
@@ -731,6 +774,18 @@ class _RaisingExtractor:
 
     async def extract(self, _snapshot):
         raise self._error
+
+
+class _RecordingExtractor:
+    # Captures the snapshot the runner passes to extract, so a test can assert
+    # the runner attached the advisory writing_candidate_report (v1.6.71 보강 B2).
+    def __init__(self, drafts):
+        self._drafts = drafts
+        self.last_snapshot = None
+
+    async def extract(self, snapshot):
+        self.last_snapshot = snapshot
+        return self._drafts
 
 
 class _ProviderErrorProvider:

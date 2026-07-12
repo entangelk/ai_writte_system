@@ -431,6 +431,67 @@
 - 구조적 self-report 또는 finding evidence 기반 부분 revise/retrieve orchestration 중 다음 slice 선택.
 - D5 C(background Analysis run)는 pending job identity를 그대로 소비하는 additive worker/orchestration으로 확장.
 
+## 12차 작업 — Phase 5.4 structured candidate report 착수 브리프
+
+### Goals
+
+- v1.6.68이 forward-defense로 남긴 빈 구조 필드를 실제로 채우되 평문 prose와 Analysis/canon 경계를 보존한다.
+
+### Completed work
+
+- `docs/plans/05-writing-self-report-decisions.md` 신규 작성: 생성 주체, 최소 typed schema, generate 결합, repair/failure, Gate/Analysis 소비 경계 D1~D5 옵션과 추천.
+- HANDOFF Owner Decisions Needed/Next Tasks를 Phase 5.4 결정 대기로 갱신했다.
+
+### Issues found
+
+- prose+JSON 단일 응답은 v1.6.68 Q2 평문 결정을 뒤집는다.
+- 아이디에이션의 `related_context_pointers`는 현재 모델 입력에 stable pointer가 없어 그대로 구현하면 id hallucination 위험이 있다.
+- agent-loop 종료채널 `self_report=finalize|defer`와 candidate data report가 이름상 혼동될 수 있어 wire field를 분리해야 한다.
+
+### Decisions
+
+- 사용자 지시: v1.6.70 커밋 후 다음 작업 진행. HANDOFF 순서의 구조적 candidate report를 다음 타깃으로 선택했다.
+- D1~D5는 public schema와 실패 의미를 바꾸므로 추천안을 제시하고 선택 전 코드는 시작하지 않았다.
+
+### Next steps
+
+- 오너 D1~D5 확정 후 SoT 반영→strict parser 회귀→extractor→generate/Gate 합성 순서로 구현.
+
+### 후속 owner 결정과 D6 blocking
+
+- 사용자 결정: D2=A first→B pointer schema 확장, D3=A 후 별도 B report API 후속 구현 확정, D5=B(Gate+Analysis 모두 report 소비). D1=A/D4=A는 추천 유지.
+- D5=B는 Analysis 소비 authority를 새로 연다. source_ref 없이 report에서 candidate를 직접 mint하면 기존 정본/validation 경계를 우회하므로 D6 옵션을 추가했다. 추천 D6=A는 report를 AnalysisJob의 advisory immutable 입력으로 영속하고 runner가 snapshot 독립 extraction prompt에만 보조로 사용하며 direct candidate/memory write를 금지한다.
+
+## 13차 작업 — Phase 5.4 structured candidate report 구현 (SoT v1.6.71)
+
+### Goals
+
+- 평문 생성 계약을 보존하면서 candidate report를 실제 생성하고 Gate·Analysis advisory 경로에 안전하게 연결한다.
+
+### Completed work
+
+- typed claim/hint/risk 모델과 strict report parser(필드/enum/confidence/NaN·bool guard), 별도 extractor+1회 repair를 추가했다.
+- 기본 generate가 평문 생성 후 reporter를 느슨하게 합성해 네 필드를 채운다.
+- Gate prompt가 report를 typed JSON으로 받고, accept runtime은 서버 report를 pending AnalysisJob advisory copy로 연결한다.
+- AnalysisJob/Mongo/SnapshotText/runner prompt가 advisory report를 보존·소비하되 snapshot/source_ref 독립 extraction과 direct candidate/memory mint 금지를 유지한다.
+- payload sweep에서 dataclass 내부명(`claim_type/hint_type/risk_type`)이 advisory wire로 샐 가능성을 발견해 public schema의 `type`으로 명시 직렬화하고 회귀로 잠갔다.
+- D6=A first→C 확정: 현재 embedded advisory, stable candidate identity 후 별도 report entity+report_id로 승격.
+
+### Issues found
+
+- 아이디에이션 full pointer schema는 현재 extractor 입력에 stable pointer가 없어 id hallucination 위험이 있으므로 A first로 제한했다.
+- dataclass 내부 enum field 이름이 advisory wire에 노출될 가능성을 payload sweep에서 발견해 public `type` schema로 명시 직렬화했다.
+
+### Verification
+
+- focused(report/writing/gate/accept/analysis prompt+runner+mongo): **86 passed / 8 skipped / 45 subtests**.
+- full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **868 passed / 48 skipped / 146 subtests**.
+- `python3 -m py_compile`(report/accept/main), `git diff --check` 통과.
+
+### Next steps
+
+- 확정 후속: D3 B `/writing/report` API, D2 B stable context pointers, D6 C candidate/report persistence.
+
 ### 독립 검증 PASS 후 hardening
 
 - 검증 기록 `docs/verifications/2026-07-12/writing_accept.md`의 합격 verdict와 H1~H6를 직접 대조했다. 차단 사항은 없었다.
@@ -451,3 +512,13 @@
 - 추가 hardening: package-only cross-project provider-before-call 거부(H5), Gate endpoint context-search budget→504/backend→502, prompt의 evidence 필수 문구(H3), SoT stale 미확정 문구(H2), `writing_agent_prompt.md` §16.2 finding shape(H1)를 v1.6.69와 정합화했다.
 - pattern sweep에서 같은 구형 `pov_violation`/`violating_text` 예제가 `contracts.md`와 `mongo_collections.md`에도 반복됨을 확인하고(`git blame`: 2026-06-24 초기 아이디에이션), v1.6.69 exact finding shape로 정합화했다. `mongo_collections.md`에는 Gate persistence/pointer가 아직 후속임을 명시했다. 원본 `abstract.md`는 보존 정책에 따라 변경하지 않았다.
 - production Gate 코드는 검증자가 확인한 correct 상태를 유지했다. prompt/doc/test만 보강했다.
+
+### 독립 검증 조건부 합격 closure (self-report v1.6.71)
+
+- 검증 기록 `docs/verifications/2026-07-12/writing_self_report.md`를 직접 대조했다. producer 측(extractor·strict parser·enrich·1회 repair·gate prompt 수신·accept advisory copy + name-leakage guard)은 correct하고 accept 경로 이름 노출 가드는 강하게 잠겨 있으나, contract-required consumer 표면 2곳이 named test로 잠기지 않았다는 B1/B2 판정이 타당했다.
+- **사용자 결정**: 오너가 "B1, B2 테스트 추가 + 전체 커밋 + 보강할 부분 다 보강"을 지시했다(구현자 대신 검증자가 보강·커밋 수행). 코드는 correct하므로 production 무변경·test 추가만으로 잠근다.
+- **B1 closure**: generate HTTP 테스트가 reporter를 배선하지 않아 응답의 report 필드가 항상 빈 채로 직렬되던 gap을 닫았다. `_FakeReporter`로 4개 report 필드를 채운 candidate를 반환하게 하고, `test_generate_enriches_candidate_report_in_http_response`가 HTTP 응답의 public `type` key + 내부명(`claim_type`/`hint_type`/`risk_type`) 미노출을 단언. HTTP 직렬화를 내부명으로 망가뜨리는 mutation(MUT-2)이 이 test를 FAIL시킴을 실증.
+- **B2 closure**: analysis-side advisory 소비 3종을 잠갔다. (1) `_RecordingExtractor`로 report가 부착된 pending job을 run_job했을 때 extractor가 받은 `snapshot.writing_candidate_report`를 단언(runner replace — MUT-B2a FAIL), (2) `build_analysis_extract_request`가 present report를 extract payload에 포함·absent면 null(KeyError 아님)을 단언(prompt_builder — MUT-B2b FAIL), (3) create_job→get_job round-trip으로 advisory 보존을 단언.
+- **H3**: gate prompt 직렬화 회귀가 risk_notes만 잠그던 것을 claims·hints의 `type` key + 내부명 미노출까지 확장(MUT-3 FAIL).
+- production 코드는 무변경(검증자가 확인한 correct 상태 유지). test만 추가(회귀 +5). mutation 4종 전부 bite, 복구 clean(`diff -q`).
+- full suite **873 passed / 48 skipped / 146 subtests**. `py_compile`, `git diff --check` 통과.

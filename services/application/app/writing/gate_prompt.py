@@ -44,7 +44,19 @@ def build_writing_gate_request(*, request: WritingRequest,
             "draft_excerpt": request.draft_excerpt,
         },
         "candidate": {"output_type": candidate.output_type.value,
-                      "text": candidate.text},
+                      "text": candidate.text,
+                      "self_reported_constraints": list(candidate.self_reported_constraints),
+                      "candidate_claims": [{"text": x.text,
+                          "type": x.claim_type.value,
+                          "requires_gate_check": x.requires_gate_check}
+                          for x in candidate.candidate_claims],
+                      "new_memory_hints": [{"type": x.hint_type.value,
+                          "text": x.text, "confidence": x.confidence,
+                          "should_analyze_after_save": x.should_analyze_after_save}
+                          for x in candidate.new_memory_hints],
+                      "risk_notes": [{"type": x.risk_type.value,
+                          "severity": x.severity.value, "message": x.message}
+                          for x in candidate.risk_notes]},
         "context_package": format_context_package(package),
     }
     return ChatCompletionRequest(

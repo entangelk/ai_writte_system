@@ -4,6 +4,7 @@ import asyncio
 import os
 import unittest
 from unittest.mock import patch
+from dataclasses import replace
 
 import httpx
 
@@ -24,7 +25,8 @@ from services.application.app.writing.accept import (
     _append_patch,
 )
 from services.application.app.writing.models import (
-    WritingCandidate, WritingGateDecision, WritingGateResult,
+    CandidateClaim, CandidateClaimType, WritingCandidate,
+    WritingGateDecision, WritingGateResult,
     WritingOutputType, WritingRequest, WritingTaskType,
 )
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
@@ -79,6 +81,12 @@ class _Context:
         return _package(request.project_id)
 
 
+class _Reporter:
+    async def enrich(self, candidate, package):
+        return replace(candidate, candidate_claims=(CandidateClaim(
+            "문이 열렸다", CandidateClaimType.NARRATIVE_EVENT, True),))
+
+
 class WritingAcceptServiceTest(unittest.TestCase):
     def setUp(self):
         self.core = CoreSotService(InMemoryCoreSotRepository())
@@ -91,9 +99,10 @@ class WritingAcceptServiceTest(unittest.TestCase):
         self.analysis = AnalysisService(self.analysis_repo)
         self.gate = _Gate()
 
-    def _service(self, analysis=None):
+    def _service(self, analysis=None, reporter=None):
         return WritingAcceptService(core_sot=self.core,
-            analysis=analysis or self.analysis, gate=self.gate)
+            analysis=analysis or self.analysis, gate=self.gate,
+            reporter=reporter)
 
     def _accept(self, *, key="accept-1", base=None, candidate=None):
         return asyncio.run(self._service().accept(
@@ -199,6 +208,19 @@ class WritingAcceptServiceTest(unittest.TestCase):
                     idempotency_key="cross", request=_request(self.project),
                     candidate=candidate, package=package))
         self.assertEqual(self.gate.calls, 0)
+
+    def test_accepted_report_is_copied_to_pending_analysis_job(self):
+        result = asyncio.run(self._service(reporter=_Reporter()).accept(
+            draft_id=self.draft.id,
+            base_version_id=self.base.draft_version.id,
+            idempotency_key="report", request=_request(self.project),
+            candidate=_candidate(self.project), package=_package(self.project)))
+        report = result.analysis_job.writing_candidate_report
+        self.assertEqual(report["candidate_claims"][0]["text"], "문이 열렸다")
+        self.assertEqual(report["candidate_claims"][0]["type"],
+                         "narrative_event")
+        self.assertNotIn("claim_type", report["candidate_claims"][0])
+        self.assertIs(result.analysis_job.status, AnalysisJobStatus.PENDING)
 
 
 class WritingAcceptApiTest(unittest.TestCase):

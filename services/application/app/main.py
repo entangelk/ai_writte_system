@@ -87,6 +87,9 @@ from services.application.app.writing.accept import (
     WritingAcceptError,
     WritingAcceptService,
 )
+from services.application.app.writing.report import (
+    InvalidCandidateReport, WritingCandidateReportService, seed_report_template,
+)
 from services.application.app.writing.service import (
     WritingError,
     WritingService,
@@ -465,12 +468,23 @@ def _default_writing_service() -> WritingService | None:
         timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
         trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False),
     )
+    reporter = _build_report_service(provider)
     return WritingService(
         provider,
         prompt_templates=prompt_templates,
         model=os.environ.get("LLM_GATEWAY_MODEL") or None,
         max_tokens=int(os.environ.get("WRITING_GENERATE_MAX_TOKENS", "1024")),
+        reporter=reporter,
     )
+
+
+def _build_report_service(provider) -> WritingCandidateReportService:
+    templates = PromptTemplateService(InMemoryPromptTemplateRepository())
+    seed_report_template(templates)
+    return WritingCandidateReportService(
+        provider, prompt_templates=templates,
+        model=os.environ.get("LLM_GATEWAY_MODEL") or None,
+        max_tokens=int(os.environ.get("WRITING_REPORT_MAX_TOKENS", "1024")))
 
 
 def _default_writing_gate_service() -> WritingGateService | None:
@@ -942,9 +956,15 @@ def create_app(
     gate_findings = gate_finding_service or _default_gate_finding_service()
     writing = writing_service or _default_writing_service()
     writing_gate = writing_gate_service or _default_writing_gate_service()
+    writing_report = None
+    if os.environ.get("LLM_GATEWAY_BASE_URL"):
+        writing_report = _build_report_service(GatewayGenerateProvider(
+            base_url=os.environ["LLM_GATEWAY_BASE_URL"],
+            timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
+            trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False)))
     writing_accept = (
         WritingAcceptService(core_sot=core_sot, analysis=analysis,
-                             gate=writing_gate)
+                             gate=writing_gate, reporter=writing_report)
         if writing_gate is not None else None
     )
     runner = analysis_runner
@@ -2166,6 +2186,18 @@ def create_app(
             "text": candidate.text,
             "status": candidate.status,
             "self_reported_constraints": list(candidate.self_reported_constraints),
+            "candidate_claims": [
+                {"text": x.text, "type": x.claim_type.value,
+                 "requires_gate_check": x.requires_gate_check}
+                for x in candidate.candidate_claims],
+            "new_memory_hints": [
+                {"type": x.hint_type.value, "text": x.text,
+                 "confidence": x.confidence,
+                 "should_analyze_after_save": x.should_analyze_after_save}
+                for x in candidate.new_memory_hints],
+            "risk_notes": [
+                {"type": x.risk_type.value, "severity": x.severity.value,
+                 "message": x.message} for x in candidate.risk_notes],
             "candidate_id": candidate.candidate_id,
             "generated_by_model": candidate.generated_by_model,
         }
@@ -2248,6 +2280,8 @@ def create_app(
             )
         except WritingError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except InvalidCandidateReport as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
         except InvalidContextSearchRequest as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except ContextSearchBudgetExceeded as exc:

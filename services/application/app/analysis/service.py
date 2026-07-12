@@ -249,7 +249,8 @@ class AnalysisService:
         return self._source_ref_resolver is not None
 
     def create_job(
-        self, *, project_id: str, snapshot_id: str, idempotency_key: str
+        self, *, project_id: str, snapshot_id: str, idempotency_key: str,
+        writing_candidate_report: Mapping[str, Any] | None = None,
     ) -> CreateAnalysisJobResult:
         if not idempotency_key:
             raise AnalysisError("idempotency_key is required")
@@ -267,6 +268,9 @@ class AnalysisService:
             project_id=project_id,
             snapshot_id=snapshot_id,
             idempotency_key=idempotency_key,
+            writing_candidate_report=(
+                immutable_payload(writing_candidate_report)
+                if writing_candidate_report is not None else None),
         )
         self._repo.put_job(job)
         return CreateAnalysisJobResult(job=job, idempotent_replay=False)

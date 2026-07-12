@@ -43,6 +43,9 @@ def build_analysis_extract_request(
             "raw_text": snapshot.raw_text,
         },
         "source_ref_catalog": [_source_ref_payload(ref) for ref in source_refs],
+        "writing_candidate_report": (
+            dict(snapshot.writing_candidate_report)
+            if snapshot.writing_candidate_report is not None else None),
         "output_contract": {
             "type": "json_object",
             "top_level_key": "candidates",

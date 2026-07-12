@@ -33,6 +33,12 @@ from services.application.app.analysis.prompt_templates import (
     PromptTemplateService,
 )
 from services.llm_gateway.app.provider import LLMProvider
+from typing import Protocol
+
+
+class CandidateReporter(Protocol):
+    async def enrich(self, candidate: WritingCandidate,
+                     package: ContextPackage) -> WritingCandidate: ...
 
 
 class WritingError(ValueError):
@@ -60,6 +66,7 @@ class WritingService:
         model: str | None = None,
         max_tokens: int = 1024,
         temperature: float | None = None,
+        reporter: CandidateReporter | None = None,
     ) -> None:
         self._provider = provider
         self._prompt_templates = prompt_templates
@@ -68,6 +75,7 @@ class WritingService:
         self._model = model
         self._max_tokens = max_tokens
         self._temperature = temperature
+        self._reporter = reporter
 
     async def generate(
         self,
@@ -97,7 +105,7 @@ class WritingService:
         # A provider fault (ProviderError) is not swallowed — it propagates so the
         # HTTP layer maps it to 502 (never a success disguising a failure).
         result = await self._provider.generate(chat_request)
-        return WritingCandidate(
+        candidate = WritingCandidate(
             request_id=request.request_id,
             project_id=request.project_id,
             task_type=request.task_type,
@@ -106,6 +114,9 @@ class WritingService:
             status=WRITING_CANDIDATE_STATUS,
             generated_by_model=result.model,
         )
+        if self._reporter is not None:
+            return await self._reporter.enrich(candidate, package)
+        return candidate
 
     @staticmethod
     def _validate(

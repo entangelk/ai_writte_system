@@ -10,6 +10,7 @@ from services.application.app.context_search.models import ContextPackage
 from services.application.app.core_sot.models import SaveDraftResult
 from services.application.app.core_sot.service import Archived, CoreSotService
 from services.application.app.writing.gate import WritingGateService
+from services.application.app.writing.service import CandidateReporter
 from services.application.app.writing.models import (
     WritingCandidate, WritingGateDecision, WritingGateResult, WritingOutputType,
     WritingRequest, WritingTaskType,
@@ -41,10 +42,12 @@ class WritingAcceptResult:
 
 class WritingAcceptService:
     def __init__(self, *, core_sot: CoreSotService,
-                 analysis: AnalysisService, gate: WritingGateService) -> None:
+                 analysis: AnalysisService, gate: WritingGateService,
+                 reporter: CandidateReporter | None = None) -> None:
         self._core_sot = core_sot
         self._analysis = analysis
         self._gate = gate
+        self._reporter = reporter
 
     async def accept(self, *, draft_id: str, base_version_id: str,
                      idempotency_key: str, request: WritingRequest,
@@ -52,6 +55,8 @@ class WritingAcceptService:
                      package: ContextPackage) -> WritingAcceptResult:
         self._validate(draft_id, base_version_id, idempotency_key,
                        request, candidate, package)
+        if self._reporter is not None:
+            candidate = await self._reporter.enrich(candidate, package)
         save_key = f"writing-accept:{idempotency_key}"
         draft = self._core_sot.get_draft(
             project_id=request.project_id, draft_id=draft_id)
@@ -64,7 +69,8 @@ class WritingAcceptService:
         if replay is not None:
             saved = self._save_result(request.project_id, draft_id, replay.id)
             try:
-                job = self._create_job(request.project_id, saved, idempotency_key)
+                job = self._create_job(request.project_id, saved, idempotency_key,
+                                       candidate)
             except Exception as exc:
                 raise WritingAcceptAnalysisError(str(exc), saved=saved) from exc
             return WritingAcceptResult(True, None, saved, job, True)
@@ -83,16 +89,19 @@ class WritingAcceptService:
             project_id=request.project_id, draft_id=draft_id,
             raw_text=raw_text, idempotency_key=save_key)
         try:
-            job = self._create_job(request.project_id, saved, idempotency_key)
+            job = self._create_job(request.project_id, saved, idempotency_key,
+                                   candidate)
         except Exception as exc:
             raise WritingAcceptAnalysisError(str(exc), saved=saved) from exc
         return WritingAcceptResult(True, gate, saved, job, saved.idempotent_replay)
 
     def _create_job(self, project_id: str, saved: SaveDraftResult,
-                    key: str) -> AnalysisJob:
+                    key: str, candidate: WritingCandidate) -> AnalysisJob:
         return self._analysis.create_job(
             project_id=project_id, snapshot_id=saved.snapshot.id,
-            idempotency_key=f"writing-accept:{key}").job
+            idempotency_key=f"writing-accept:{key}",
+            writing_candidate_report=_candidate_report_payload(
+                candidate)).job
 
     def _save_result(self, project_id: str, draft_id: str,
                      version_id: str) -> SaveDraftResult:
@@ -118,6 +127,22 @@ class WritingAcceptService:
             raise WritingAcceptError("candidate belongs to a different request")
         if candidate.project_id != request.project_id or package.project_id != request.project_id:
             raise WritingAcceptError("writing accept inputs belong to different projects")
+
+
+def _candidate_report_payload(candidate: WritingCandidate) -> dict[str, object]:
+    return {
+        "self_reported_constraints": list(candidate.self_reported_constraints),
+        "candidate_claims": [{"text": x.text, "type": x.claim_type.value,
+            "requires_gate_check": x.requires_gate_check}
+            for x in candidate.candidate_claims],
+        "new_memory_hints": [{"type": x.hint_type.value, "text": x.text,
+            "confidence": x.confidence,
+            "should_analyze_after_save": x.should_analyze_after_save}
+            for x in candidate.new_memory_hints],
+        "risk_notes": [{"type": x.risk_type.value,
+            "severity": x.severity.value, "message": x.message}
+            for x in candidate.risk_notes],
+    }
 
 
 def _append_patch(base: str, patch: str) -> str:

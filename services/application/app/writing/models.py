@@ -50,6 +50,66 @@ class WritingGateSeverity(StrEnum):
     ERROR = "error"
 
 
+class CandidateClaimType(StrEnum):
+    NARRATIVE_EVENT = "narrative_event"
+    CHARACTER_STATE = "character_state"
+    LOCATION_STATE = "location_state"
+    RELATION_CHANGE = "relation_change"
+    TIMELINE_FACT = "timeline_fact"
+    FORESHADOWING_USE = "foreshadowing_use"
+    FACTUAL_CLAIM = "factual_claim"
+    INTERPRETATION = "interpretation"
+
+
+class MemoryHintType(StrEnum):
+    EVENT = "event"
+    CHARACTER_FACT = "character_fact"
+    LOCATION_FACT = "location_fact"
+    RELATION = "relation"
+    FORESHADOWING = "foreshadowing"
+    TIMELINE_FACT = "timeline_fact"
+    STYLE_SIGNAL = "style_signal"
+
+
+class RiskNoteType(StrEnum):
+    POV = "pov"
+    TIMELINE = "timeline"
+    CANON = "canon"
+    FORESHADOWING = "foreshadowing"
+    RELATION = "relation"
+    STYLE = "style"
+    FACTUALITY = "factuality"
+
+
+class RiskSeverity(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateClaim:
+    text: str
+    claim_type: CandidateClaimType
+    requires_gate_check: bool
+
+
+@dataclass(frozen=True, slots=True)
+class NewMemoryHint:
+    hint_type: MemoryHintType
+    text: str
+    confidence: float
+    should_analyze_after_save: bool
+
+
+@dataclass(frozen=True, slots=True)
+class RiskNote:
+    risk_type: RiskNoteType
+    severity: RiskSeverity
+    message: str
+
+
 @dataclass(frozen=True, slots=True)
 class WritingBrief:
     """Optional style guidance. Not project memory — never a fact source."""
@@ -83,6 +143,9 @@ class WritingCandidate:
     # Populated by the Writing Gate slice (structured self-report); empty here
     # because slice 1 emits plain prose (owner Q2).
     self_reported_constraints: tuple[str, ...] = ()
+    candidate_claims: tuple[CandidateClaim, ...] = ()
+    new_memory_hints: tuple[NewMemoryHint, ...] = ()
+    risk_notes: tuple[RiskNote, ...] = ()
     # Assigned when the candidate is accepted and saved (a later slice).
     candidate_id: str | None = None
     generated_by_model: str = ""

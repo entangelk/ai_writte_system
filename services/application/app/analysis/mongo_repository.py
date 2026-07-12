@@ -285,6 +285,9 @@ def _job_doc(job: AnalysisJob) -> dict[str, Any]:
             str(job.failure_reason) if job.failure_reason is not None else None
         ),
         "failure_detail": job.failure_detail,
+        "writing_candidate_report": (
+            dict(job.writing_candidate_report)
+            if job.writing_candidate_report is not None else None),
     }
 
 
@@ -302,6 +305,9 @@ def _to_job(doc: dict[str, Any]) -> AnalysisJob:
             else None
         ),
         failure_detail=doc.get("failure_detail"),
+        writing_candidate_report=(
+            immutable_payload(doc["writing_candidate_report"])
+            if doc.get("writing_candidate_report") is not None else None),
     )
 
 

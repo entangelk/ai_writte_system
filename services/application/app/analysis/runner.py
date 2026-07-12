@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 
 from services.application.app.analysis.extractor import (
@@ -130,6 +130,10 @@ class AnalysisExtractionRunner:
                 project_id=project_id,
                 snapshot_id=snapshot_id,
             )
+            if job.writing_candidate_report is not None:
+                snapshot = replace(
+                    snapshot,
+                    writing_candidate_report=job.writing_candidate_report)
             drafts = await self._extractor.extract(snapshot)
             prepared = self._dedupe_prepared(
                 tuple(
