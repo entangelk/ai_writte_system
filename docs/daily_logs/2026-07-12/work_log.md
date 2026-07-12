@@ -2,12 +2,23 @@
 
 ## Goals
 
+- 튜닝을 제외한 다음 작업으로 Phase 6 Review Inbox 백엔드 목록/상세 slice를 구현한다.
+
 - 오너가 선택한 (c-2): 동명이인 반증, character threshold calibration, merge/split write를 구현한다.
 
 - HANDOFF와 2026-07-11 work log를 읽고 다음 작업을 진행한다.
 - 오너 지시: "여기는 테스트도 가능한 머신이니까 확인해서 진행" → 이전 세션이 서브 머신에서 막았던 **live 관통 검증**(HANDOFF Next Tasks #2/#3, "코드 완료, sandbox 밖 막힘")을 실 인프라 위에서 실행한다.
 
 ## Completed work
+
+### Phase 6 Review Inbox backend
+
+- 오너 승인 권장안을 `plans/06-review-inbox-backend-decisions.md`에 잠갔다: candidate+open conflict 통합, matched canonical field diff, editor URL 대신 source_ref pointer, 부분 승인/edit/Gate store 제외.
+- `ReviewInboxService`를 추가해 미승격 needs_review candidate 한 행에 open conflict를 중첩했다. legacy 직접 승격 candidate는 canonical promotion link로 억제한다.
+- `GET /projects/{id}/analysis/review-inbox`와 `GET .../review-inbox/{candidate_id}`를 추가했다. 상세은 payload, source pointer, matched memory, sorted field diff를 반환한다. missing/cross-project/non-review candidate는 404다.
+- HTTP 회귀 4개로 목록 통합, 상세 diff/source missing 표시, reconciliation 후 inbox 제거, project 격리를 잠갔다.
+- focused `tests/test_analysis_apply_api.py` **22 passed**. 전체 `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` **771 passed / 48 skipped / 99 subtests**, exit 0. 최초 테스트 클래스 상속이 기존 4개를 중복 수집해 775로 보인 것을 발견하고 helper-only 재사용으로 교정했다.
+- 독립 적대적 검증 `review_inbox_backend.md` PASS 후 Obs1/Obs2를 보강했다. 실제 Core SOT snapshot/source_ref를 만들어 resolved pointer 8필드를 잠그고, direct promote 후 status가 needs_review에 남아도 inbox list/detail에서 억제됨을 직접 검증했다. focused ReviewInbox **6 passed**, 전체 **773 passed / 48 skipped / 99 subtests**.
 
 ### (c-2) character identity reconciliation
 
@@ -47,6 +58,8 @@
 - **3B smoke 최초 예외 — Chroma dim mismatch**: `InvalidDimensionException: dimension 3 != 1024`. 배포 `project_memory_vectors`가 실 BGE-m3-ko(1024-dim)로 고정돼 3-dim seed 거부. archive 삭제는 metadata where 기반이라 벡터값 무관 → seed를 1024-dim으로 맞춰 해소. 프로덕션 무관.
 
 ## Decisions
+
+- Review Inbox는 현재 영속 가능한 Analysis candidate+conflict만 먼저 통합한다. Gate finding은 store가 생길 때 additive origin으로 확장한다. frontend/editor route는 고정하지 않고 정본 source pointer까지만 제공한다. 부분 승인/retry와 candidate edit는 별도 계약으로 남긴다.
 
 - 오너는 semantic 반증은 conflict만, threshold는 라벨 근거 전까지 off, merge는 evidence 합성, split은 명시 candidate 귀속만 허용하는 안전 경계를 승인했다.
 

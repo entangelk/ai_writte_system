@@ -61,6 +61,10 @@ from services.application.app.analysis.reconciliation import (
     CharacterReconciliationService,
     ReconciliationAction,
 )
+from services.application.app.analysis.review_inbox import (
+    ReviewInboxNotFound,
+    ReviewInboxService,
+)
 from services.application.app.analysis.source import CoreSotSourceAdapter
 from services.llm_gateway.app.errors import ProviderError
 from services.application.app.memory.models import PromotionMode
@@ -787,6 +791,10 @@ def create_app(
     character_reconciliation = CharacterReconciliationService(
         analysis_service=analysis, memory_service=memory,
         review_queue=review_queue, removal_outbox=sync_outbox,
+    )
+    review_inbox = ReviewInboxService(
+        analysis_service=analysis, memory_service=memory,
+        review_queue=review_queue,
     )
     runner = analysis_runner
     if runner is None:
@@ -1655,6 +1663,89 @@ def create_app(
             "superseded_memory_id": result.superseded_memory_id,
             "idempotent_replay": result.idempotent_replay,
         }
+
+    def _review_source_pointer(project_id: str, source_ref_id: str) -> dict[str, object]:
+        try:
+            ref = core_sot.get_source_ref(
+                project_id=project_id, source_ref_id=source_ref_id
+            )
+        except NotFound:
+            return {"source_ref_id": source_ref_id, "status": "missing"}
+        return {
+            "source_ref_id": ref.id,
+            "status": "resolved",
+            "snapshot_id": ref.snapshot_id,
+            "block_id": ref.block_id,
+            "start_offset": ref.start_offset,
+            "end_offset": ref.end_offset,
+            "quote": ref.quote,
+            "content_hash": ref.content_hash,
+        }
+
+    def _review_inbox_payload(item, *, include_detail: bool) -> dict[str, object]:
+        candidate = item.candidate
+        payload: dict[str, object] = {
+            "candidate_id": candidate.id,
+            "job_id": candidate.job_id,
+            "candidate_type": candidate.candidate_type.value,
+            "status": candidate.status.value,
+            "confidence": candidate.confidence,
+            "provenance": candidate.provenance.value,
+            "conflict_count": len(item.conflicts),
+        }
+        if include_detail:
+            payload.update({
+                "payload": dict(candidate.payload),
+                "source_refs": [
+                    _review_source_pointer(candidate.project_id, source_ref_id)
+                    for source_ref_id in candidate.source_ref_ids
+                ],
+                "conflicts": [
+                    {
+                        "entry_id": conflict.entry.id,
+                        "action": conflict.entry.action.value,
+                        "rationale": conflict.entry.rationale,
+                        "matched_memory": (
+                            _memory_payload(conflict.matched_memory)
+                            if conflict.matched_memory is not None else None
+                        ),
+                        "diff": [
+                            {"field": diff.field, "before": diff.before,
+                             "after": diff.after}
+                            for diff in conflict.diff
+                        ],
+                    }
+                    for conflict in item.conflicts
+                ],
+            })
+        return payload
+
+    @app.get("/projects/{project_id}/analysis/review-inbox")
+    async def list_review_inbox(project_id: str) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {
+            "project_id": project_id,
+            "items": [
+                _review_inbox_payload(item, include_detail=False)
+                for item in review_inbox.list_items(project_id=project_id)
+            ],
+        }
+
+    @app.get("/projects/{project_id}/analysis/review-inbox/{candidate_id}")
+    async def get_review_inbox_item(
+        project_id: str, candidate_id: str
+    ) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+            item = review_inbox.get_item(
+                project_id=project_id, candidate_id=candidate_id
+            )
+        except (NotFound, ReviewInboxNotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _review_inbox_payload(item, include_detail=True)
 
     def _context_item_payload(item) -> dict[str, object]:
         return {

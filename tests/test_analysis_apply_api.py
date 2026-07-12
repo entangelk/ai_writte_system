@@ -59,7 +59,10 @@ class TestClient:
         return asyncio.run(send())
 
 
-def _seed_candidate(analysis, *, project_id, logical_key, payload):
+def _seed_candidate(
+    analysis, *, project_id, logical_key, payload,
+    source_ref_ids=("source-ref-1",),
+):
     job = analysis.create_job(
         project_id=project_id, snapshot_id="snapshot-1",
         idempotency_key=f"run-{logical_key}",
@@ -71,7 +74,7 @@ def _seed_candidate(analysis, *, project_id, logical_key, payload):
         project_id=project_id, task_id=task.id, logical_key=logical_key,
         candidate_type=CHARACTER, action=AnalysisCandidateAction.CREATE,
         provenance=AnalysisProvenance.SOURCE_OBSERVED, confidence=0.5,
-        source_ref_ids=("source-ref-1",), payload=payload,
+        source_ref_ids=source_ref_ids, payload=payload,
     ).candidate
     return job, candidate
 
@@ -384,7 +387,10 @@ class ReviewQueueApiTest(unittest.TestCase):
 
 
 class CharacterReconciliationApiTest(unittest.TestCase):
-    def _open_conflict(self, client, analysis, memory, project_id):
+    def _open_conflict(
+        self, client, analysis, memory, project_id,
+        current_source_ref_ids=("source-ref-1",),
+    ):
         _prior_job, prior = _seed_candidate(
             analysis, project_id=project_id, logical_key="prior-reconcile",
             payload={"name": "Ariel", "observation": "brave"},
@@ -395,6 +401,7 @@ class CharacterReconciliationApiTest(unittest.TestCase):
         job, current = _seed_candidate(
             analysis, project_id=project_id, logical_key="current-reconcile",
             payload={"name": "Song", "observation": "brave"},
+            source_ref_ids=current_source_ref_ids,
         )
         applied = client.post(
             f"/projects/{project_id}/analysis/jobs/{job.id}/apply",
@@ -494,6 +501,148 @@ class CharacterReconciliationApiTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
         self.assertIn("non-canonical", response.json()["detail"])
+
+
+class ReviewInboxApiTest(unittest.TestCase):
+    def _open_conflict(
+        self, client, analysis, memory, project_id,
+        current_source_ref_ids=("source-ref-1",),
+    ):
+        return CharacterReconciliationApiTest._open_conflict(
+            self, client, analysis, memory, project_id,
+            current_source_ref_ids=current_source_ref_ids,
+        )
+
+    def test_list_unifies_candidate_with_open_conflict(self):
+        client, analysis, memory, project_id = _build()
+        entry, _prior, current = self._open_conflict(
+            client, analysis, memory, project_id
+        )
+
+        response = client.get(f"/projects/{project_id}/analysis/review-inbox")
+
+        self.assertEqual(response.status_code, 200)
+        [item] = response.json()["items"]
+        self.assertEqual(item["candidate_id"], current.id)
+        self.assertEqual(item["status"], "needs_review")
+        self.assertEqual(item["conflict_count"], 1)
+        self.assertNotIn("payload", item)
+        self.assertTrue(entry["id"])
+
+    def test_detail_returns_payload_source_status_memory_and_field_diff(self):
+        client, analysis, memory, project_id = _build()
+        _entry, prior, current = self._open_conflict(
+            client, analysis, memory, project_id
+        )
+
+        response = client.get(
+            f"/projects/{project_id}/analysis/review-inbox/{current.id}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        detail = response.json()
+        self.assertEqual(detail["payload"]["name"], "Song")
+        self.assertEqual(
+            detail["source_refs"],
+            [{"source_ref_id": "source-ref-1", "status": "missing"}],
+        )
+        [conflict] = detail["conflicts"]
+        self.assertEqual(conflict["matched_memory"]["id"], prior.id)
+        self.assertEqual(
+            conflict["diff"],
+            [{"field": "name", "before": "Ariel", "after": "Song"}],
+        )
+
+    def test_detail_resolves_source_ref_pointer_from_core_sot(self):
+        client, analysis, memory, project_id = _build()
+        draft = client.post(
+            f"/projects/{project_id}/drafts", json={"title": "Episode 1"}
+        ).json()
+        raw_text = "Ariel found the blue letter."
+        saved = client.post(
+            f"/projects/{project_id}/drafts/{draft['id']}/versions",
+            json={"raw_text": raw_text, "idempotency_key": "review-source"},
+        ).json()
+        quote = "blue letter"
+        start = raw_text.index(quote)
+        source_ref = client.post(
+            f"/projects/{project_id}/snapshots/{saved['snapshot']['id']}/source-refs",
+            json={"start_offset": start, "end_offset": start + len(quote)},
+        ).json()
+        _entry, _prior, current = self._open_conflict(
+            client, analysis, memory, project_id,
+            current_source_ref_ids=(source_ref["id"],),
+        )
+
+        detail = client.get(
+            f"/projects/{project_id}/analysis/review-inbox/{current.id}"
+        ).json()
+
+        self.assertEqual(detail["source_refs"], [{
+            "source_ref_id": source_ref["id"],
+            "status": "resolved",
+            "snapshot_id": saved["snapshot"]["id"],
+            "block_id": source_ref["block_id"],
+            "start_offset": start,
+            "end_offset": start + len(quote),
+            "quote": quote,
+            "content_hash": saved["snapshot"]["content_hash"],
+        }])
+
+    def test_directly_promoted_needs_review_candidate_is_suppressed(self):
+        client, analysis, memory, project_id = _build()
+        _job, candidate = _seed_candidate(
+            analysis, project_id=project_id, logical_key="legacy-promoted",
+            payload={"name": "Ariel", "observation": "brave"},
+        )
+        memory.promote_candidate(
+            project_id=project_id, candidate=candidate, mode=PromotionMode.MANUAL
+        )
+        self.assertEqual(candidate.status.value, "needs_review")
+
+        listed = client.get(f"/projects/{project_id}/analysis/review-inbox")
+        detail = client.get(
+            f"/projects/{project_id}/analysis/review-inbox/{candidate.id}"
+        )
+
+        self.assertEqual(listed.json()["items"], [])
+        self.assertEqual(detail.status_code, 404)
+
+    def test_confirmed_candidate_leaves_inbox(self):
+        client, analysis, memory, project_id = _build()
+        entry, _prior, current = self._open_conflict(
+            client, analysis, memory, project_id
+        )
+        reconciled = client.post(
+            f"/projects/{project_id}/analysis/review-queue/{entry['id']}/reconcile",
+            json={"action": "split"},
+        )
+        self.assertEqual(reconciled.status_code, 200)
+
+        listed = client.get(f"/projects/{project_id}/analysis/review-inbox")
+        detail = client.get(
+            f"/projects/{project_id}/analysis/review-inbox/{current.id}"
+        )
+        self.assertEqual(listed.json()["items"], [])
+        self.assertEqual(detail.status_code, 404)
+
+    def test_missing_project_and_cross_project_candidate_return_404(self):
+        client, analysis, memory, project_id = _build()
+        _entry, _prior, current = self._open_conflict(
+            client, analysis, memory, project_id
+        )
+        other_project = client.post("/projects", json={"name": "Other"}).json()["id"]
+
+        self.assertEqual(
+            client.get("/projects/missing/analysis/review-inbox").status_code,
+            404,
+        )
+        self.assertEqual(
+            client.get(
+                f"/projects/{other_project}/analysis/review-inbox/{current.id}"
+            ).status_code,
+            404,
+        )
 
 
 if __name__ == "__main__":
