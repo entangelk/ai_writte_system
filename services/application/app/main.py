@@ -6,6 +6,7 @@ import os
 from typing import Protocol
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from services.application.app.analysis.extractor import (
@@ -79,6 +80,12 @@ from services.application.app.writing.gate import (
     WritingGateError,
     WritingGateService,
     seed_writing_gate_template,
+)
+from services.application.app.writing.accept import (
+    StaleWritingBase,
+    WritingAcceptAnalysisError,
+    WritingAcceptError,
+    WritingAcceptService,
 )
 from services.application.app.writing.service import (
     WritingError,
@@ -852,6 +859,21 @@ class WritingGateRequest(BaseModel):
     max_tokens: int = 4096
 
 
+class WritingAcceptRequest(BaseModel):
+    request_id: str
+    draft_id: str
+    base_version_id: str
+    idempotency_key: str
+    instruction: str
+    candidate_text: str
+    task_type: str = WritingTaskType.CONTINUE_SCENE.value
+    output_type: str = WritingOutputType.DRAFT_PATCH.value
+    draft_excerpt: str = ""
+    query: str | None = None
+    current_position: ContextPositionBody | None = None
+    max_tokens: int = 4096
+
+
 def create_app(
     service: CoreSotService | None = None,
     analysis_service: AnalysisService | None = None,
@@ -920,6 +942,11 @@ def create_app(
     gate_findings = gate_finding_service or _default_gate_finding_service()
     writing = writing_service or _default_writing_service()
     writing_gate = writing_gate_service or _default_writing_gate_service()
+    writing_accept = (
+        WritingAcceptService(core_sot=core_sot, analysis=analysis,
+                             gate=writing_gate)
+        if writing_gate is not None else None
+    )
     runner = analysis_runner
     if runner is None:
         runner = _default_analysis_runner(core_sot=core_sot, analysis=analysis)
@@ -2143,6 +2170,30 @@ def create_app(
             "generated_by_model": candidate.generated_by_model,
         }
 
+    def _writing_gate_payload(result) -> dict[str, object]:
+        return {
+            "request_id": result.request_id,
+            "project_id": result.project_id,
+            "decision": result.decision.value,
+            "findings": [{
+                "type": item.finding_type.value,
+                "severity": item.severity.value,
+                "message": item.message,
+                "evidence": item.evidence,
+                "recommended_decision": item.recommended_decision.value,
+            } for item in result.findings],
+            "checked_constraints": list(result.checked_constraints),
+            "evaluated_by_model": result.evaluated_by_model,
+        }
+
+    def _accepted_save_payload(saved) -> dict[str, object]:
+        return {
+            "draft_version_id": saved.draft_version.id,
+            "version_number": saved.draft_version.version_number,
+            "snapshot_id": saved.snapshot.id,
+            "content_hash": saved.snapshot.content_hash,
+        }
+
     @app.post("/projects/{project_id}/writing/generate")
     async def writing_generate_endpoint(
         project_id: str, body: WritingGenerateRequest
@@ -2272,19 +2323,82 @@ def create_app(
         except ProviderError as exc:
             status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
             raise HTTPException(status_code=status, detail=str(exc)) from exc
+        return _writing_gate_payload(result)
+
+    @app.post("/projects/{project_id}/writing/accept")
+    async def writing_accept_endpoint(
+        project_id: str, body: WritingAcceptRequest
+    ) -> object:
+        try:
+            _require_project_exists(project_id)
+            task_type = WritingTaskType(body.task_type)
+            output_type = WritingOutputType(body.output_type)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if writing_accept is None:
+            raise HTTPException(status_code=503,
+                                detail="writing accept service is not configured")
+        if context_search is None:
+            raise HTTPException(status_code=503,
+                                detail="context search service is not configured")
+        position = (CurrentPosition(
+            draft_id=body.current_position.draft_id,
+            version_id=body.current_position.version_id)
+            if body.current_position is not None else None)
+        search_request = ContextSearchRequest(
+            project_id=project_id,
+            purpose=ContextSearchPurpose.WRITING_CONTEXT,
+            needs=_WRITING_CONTINUE_SCENE_NEEDS,
+            query=body.query or body.instruction,
+            current_position=position,
+            context_budget=ContextBudget(max_tokens=body.max_tokens),
+        )
+        request = WritingRequest(body.request_id, project_id, task_type,
+                                 body.instruction, body.draft_excerpt)
+        candidate = WritingCandidate(
+            body.request_id, project_id, task_type, output_type,
+            body.candidate_text)
+        try:
+            package = await context_search.build_context_package(search_request)
+            result = await writing_accept.accept(
+                draft_id=body.draft_id,
+                base_version_id=body.base_version_id,
+                idempotency_key=body.idempotency_key,
+                request=request, candidate=candidate, package=package)
+        except (NotFound,) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (Archived, StaleWritingBase) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (WritingAcceptError, WritingGateError,
+                InvalidContextSearchRequest) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except InvalidWritingGateResult as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except WritingAcceptAnalysisError as exc:
+            return JSONResponse(status_code=502, content={
+                "accepted": True,
+                "saved": _accepted_save_payload(exc.saved),
+                "analysis_job": None,
+                "analysis_error": str(exc),
+            })
+        except ContextSearchBudgetExceeded as exc:
+            raise HTTPException(status_code=504, detail=str(exc)) from exc
+        except ContextSearchFailed as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except ProviderError as exc:
+            status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
         return {
-            "request_id": result.request_id,
-            "project_id": result.project_id,
-            "decision": result.decision.value,
-            "findings": [{
-                "type": item.finding_type.value,
-                "severity": item.severity.value,
-                "message": item.message,
-                "evidence": item.evidence,
-                "recommended_decision": item.recommended_decision.value,
-            } for item in result.findings],
-            "checked_constraints": list(result.checked_constraints),
-            "evaluated_by_model": result.evaluated_by_model,
+            "accepted": result.accepted,
+            "gate": (_writing_gate_payload(result.gate)
+                     if result.gate is not None else None),
+            "saved": (_accepted_save_payload(result.saved)
+                      if result.saved is not None else None),
+            "analysis_job": (_analysis_job_payload(result.analysis_job)
+                             if result.analysis_job is not None else None),
+            "idempotent_replay": result.idempotent_replay,
         }
 
     return app

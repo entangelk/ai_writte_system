@@ -361,6 +361,87 @@
 - 후보: accept→save→analysis 재진입, finding evidence 기반 부분 revise/retrieve_more orchestration, 구조적 self-report.
 - 실 Gemma live에서는 strict JSON 준수와 한국어 do_not_use/POV/continuity 판정 품질을 별도로 관찰한다.
 
+## 10차 작업 — Phase 5.3 accept→save→analysis 착수 브리프
+
+### Goals
+
+- Writing Gate 다음 핵심 흐름인 accept→Core SOT save→Analysis 재진입의 미확정 public write 계약을 구현 전에 분리한다.
+
+### Completed work
+
+- `docs/plans/05-writing-accept-decisions.md` 신규 작성: D1 base version/stale, D2 append literal, D3 Gate 신뢰, D4 idempotency, D5 analysis 재진입 깊이의 전체 옵션과 추천을 정리했다.
+- HANDOFF Owner Decisions Needed/Next Tasks에 Phase 5.3 결정 대기를 반영했다.
+
+### Issues found
+
+- 현재 save API는 완성 `raw_text`만 받고 WritingCandidate는 `draft_patch`라 merge literal이 없다.
+- GateResult는 비영속이라 client 제출 결과를 신뢰할 수 없고, accept 시 재평가 또는 persistence 결정이 필요하다.
+- save는 정본 commit이고 analysis run은 LLM failure가 가능해 한 HTTP 성공/실패로 묶으면 partial-success 의미가 생긴다.
+
+### Decisions
+
+- 사용자 지시: Writing Gate 커밋 후 HANDOFF의 다음 작업을 진행한다. 다음 타깃을 accept→save→analysis 재진입으로 선택했다.
+- D1~D5는 owner-level public contract라 추천안을 제시하고 선택 전 코드는 시작하지 않았다.
+
+### Next steps
+
+- 오너가 D1~D5를 확정하면 브리프/SoT에 rationale을 기록하고 경계 테스트부터 구현한다.
+
+### 후속 owner 결정 반영 및 추가 blocking 발견
+
+- D1=A·D3=A·D4=A를 추천안대로, D2=A first→C 확장·D5=A first→C 확장으로 사용자 결정 반영했다.
+- 구현 직전 HTTP 경계를 매트릭스로 옮기며 D6(Gate non-pass status/envelope)와 D7(save commit 후 analysis job write 실패 partial-success)을 새로 발견했다. 두 항목은 public 성공/재시도 의미이므로 추천 D6=A·D7=A를 추가하고 코드 착수 전 결정을 요청했다.
+
+## 11차 작업 — Phase 5.3 accept→save→analysis 구현 (SoT v1.6.70)
+
+### Goals
+
+- Gate를 통과한 continue_scene patch만 latest draft에 idempotent 저장하고 새 snapshot으로 pending Analysis job을 생성한다.
+- non-pass와 cross-store partial failure를 정본 commit 여부가 숨겨지지 않는 public envelope로 잠근다.
+
+### Completed work
+
+- `writing/accept.py`: `WritingAcceptService`, result/error 계약, 결정적 `_append_patch` 추가.
+  - accept replay는 파생 save key의 기존 version을 먼저 찾아 Gate/save를 반복하지 않고 Analysis job을 재유도한다.
+  - stale/missing/cross-project/archived를 Gate 전에 검증한다.
+  - Gate pass만 save; non-pass는 side effect 없는 정상 result.
+  - job write 실패는 saved artifact를 가진 `WritingAcceptAnalysisError`; 계속 실패하는 replay도 같은 partial-success를 보존한다.
+- `main.py`: `WritingAcceptRequest`와 `POST /projects/{id}/writing/accept` 추가. 200 accepted/non-pass, 400 invalid, 404 missing, 409 stale/archive, 502 malformed/provider/partial, 504 timeout을 분리했다.
+- `tests/test_writing_accept.py`: service 8 + HTTP 7 회귀(+5 invalid subtests). append 3방향, pass/non-pass, stale-before-Gate, same/different key, partial retry convergence, archived replay, missing/invalid/API envelope를 잠갔다.
+- 브리프 D1~D7 Resolved, SoT/plan/HANDOFF/CHANGELOG v1.6.70 반영.
+
+### Issues found
+
+- replay에서도 Analysis store가 계속 실패하면 최초 구현은 raw 500으로 샐 수 있었다. replay job 생성도 같은 `WritingAcceptAnalysisError`로 감싸 502 partial-success 계약을 유지했다.
+- missing base를 stale 409로 오분류할 가능성을 발견해 base detail 404 확인 후 latest 비교 순서로 고정했다.
+- pattern sweep에서 replay lookup이 active-state 검사보다 앞이면 accept 후 archive된 draft가 같은 key replay로 job side effect를 만들 수 있음을 발견했다. Core SOT archive write 정책과 맞춰 project/draft active 검사를 replay보다 앞으로 이동하고 archived replay 회귀를 추가했다.
+
+### Decisions
+
+- 사용자 확정: D2=A first→C client patch 확장, D5=A first→C background run 확장, D6=A, D7=A. D1/D3/D4는 추천 A 유지.
+
+### Verification
+
+- focused(검증 hardening 후): `tests/test_writing_accept.py tests/test_writing_gate.py tests/test_writing.py` → **56 passed / 41 subtests**.
+- full(검증 hardening 후): `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **861 passed / 48 skipped / 142 subtests**.
+- `python3 -m py_compile`(accept/main), `git diff --check` 통과.
+
+### Next steps
+
+- 구조적 self-report 또는 finding evidence 기반 부분 revise/retrieve orchestration 중 다음 slice 선택.
+- D5 C(background Analysis run)는 pending job identity를 그대로 소비하는 additive worker/orchestration으로 확장.
+
+### 독립 검증 PASS 후 hardening
+
+- 검증 기록 `docs/verifications/2026-07-12/writing_accept.md`의 합격 verdict와 H1~H6를 직접 대조했다. 차단 사항은 없었다.
+- H1: accept 표면에서 Gate provider unavailable→502/timeout→504, context budget→504/backend→502를 직접 관통하는 HTTP 회귀 추가.
+- H2: gate/context 미구성 accept 503 회귀 추가.
+- H3: non-pass 4종(revise/retrieve_more/needs_user_review/block)을 전부 parametrize해 동일 no-write outcome 잠금.
+- H4: candidate/package 각각의 cross-project 입력이 Gate 전 거부됨을 accept service에서 직접 단언.
+- H5: SoT stale 문구를 v1.6.70 paragraph append 확정과 후속 부분 patch 분리로 정정.
+- H6: candidate 외곽 whitespace `strip()` 후 append, 내부 whitespace 보존을 브리프에 명문화.
+- 직전 Gate B1/B2/B3는 커밋 `ea81eaf`의 named tests(`overstated`, hard finding full boundary, invalid HTTP 400)로 반영되어 있음을 확인했다.
+
 ### 독립 검증 조건부 합격 closure
 
 - 검증 기록 `docs/verifications/2026-07-12/writing_gate.md`를 직접 대조했다. 구현은 correct지만 contract-required named test 3곳이 비어 있다는 B1~B3 판정이 타당했다.

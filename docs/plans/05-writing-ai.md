@@ -16,7 +16,7 @@
 - `WritingCandidate`/`draft_candidate`
 - Writing Gate의 기본 계약
 - editor에 full text 또는 patch 제안
-- 사용자 accept 후 Phase 1 save 흐름 재진입
+- 사용자 accept 후 Phase 1 save 흐름 재진입 (**v1.6.70 구현: pass Gate→immutable version save→pending Analysis job**)
 
 후속 증분:
 
@@ -79,6 +79,7 @@ MVP에서 최소한 요청 적합성, 프로젝트 격리, hard constraint 위�
 - [x] Continuity/POV 검사를 규칙, LLM, hybrid 중 어떻게 구성할지 — **v1.6.69 확정**: 생성과 분리된 별도 1-turn LLM Gate, 구조화 findings.
 - [ ] 후보가 새 설정을 만든 경우 memory hint를 어떻게 다룰지 — 구조적 self-report(new_memory_hints) slice.
 - [x] 첫 모델의 context/output budget과 timeout — **벤치마크값 사용**(writing_generate 1/120s/1024, `plans/flat-loop-gate.md`; `WRITING_GENERATE_MAX_TOKENS` env로 조정).
+- [x] accept→save→analysis 재진입 — **v1.6.70 확정/구현**: latest base+paragraph append, Gate pass only, idempotent save+pending job. background run과 client offset patch는 additive 후속.
 
 ## 원문 및 상세 참고
 
