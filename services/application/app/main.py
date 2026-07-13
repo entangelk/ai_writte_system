@@ -120,6 +120,11 @@ from services.application.app.writing.service import (
     WritingService,
     seed_writing_template,
 )
+from services.application.app.writing.loop_audit import (
+    InMemoryWritingLoopAuditRepository,
+    WritingLoopAuditNotFound,
+    WritingLoopAuditService,
+)
 from services.application.app.analysis.source import CoreSotSourceAdapter
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
 from services.application.app.memory.models import PromotionMode
@@ -356,6 +361,19 @@ def _default_gate_finding_service() -> GateFindingService:
     )
     from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
     return GateFindingService(MongoGateFindingRepository.from_uri(
+        uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
+    ))
+
+
+def _default_writing_loop_audit_service() -> WritingLoopAuditService:
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if not uri:
+        return WritingLoopAuditService(InMemoryWritingLoopAuditRepository())
+    from services.application.app.writing.loop_audit_mongo import (
+        MongoWritingLoopAuditRepository,
+    )
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+    return WritingLoopAuditService(MongoWritingLoopAuditRepository.from_uri(
         uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
     ))
 
@@ -955,6 +973,9 @@ class WritingReviseRequest(BaseModel):
     query: str | None = None
     current_position: ContextPositionBody | None = None
     max_tokens: int = 4096
+    # Phase 5.9 L9 B (P2=B opt-in, 2026-07-13): persist this loop's audit only
+    # when requested. None → env default (WRITING_LOOP_AUDIT_DEFAULT, off).
+    persist_audit: bool | None = None
 
 
 class WritingAcceptRequest(BaseModel):
@@ -988,6 +1009,7 @@ def create_app(
     writing_revision_service: WritingRevisionService | None = None,
     writing_retrieval_planner: TerminalJsonWritingRetrievalPlanner | None = None,
     writing_loop_policy: WritingLoopPolicy | None = None,
+    writing_loop_audit_service: WritingLoopAuditService | None = None,
     vector_index: InMemoryVectorIndexAdapter | None = None,
 ) -> FastAPI:
     app = FastAPI(title="AI Writing System Application")
@@ -1042,6 +1064,12 @@ def create_app(
         review_queue=review_queue,
     )
     gate_findings = gate_finding_service or _default_gate_finding_service()
+    # Phase 5.9 L9 B: every bounded-loop termination is recorded to a durable,
+    # append-only audit trail. Always available (in-memory default) so no loop
+    # run goes unaudited (P2=A); a Mongo URI upgrades it to the durable adapter.
+    writing_loop_audit = (
+        writing_loop_audit_service or _default_writing_loop_audit_service()
+    )
     writing = writing_service or _default_writing_service()
     writing_gate = writing_gate_service or _default_writing_gate_service()
     writing_report = writing_report_service
@@ -2358,6 +2386,38 @@ def create_app(
             "status": item.status.value,
         } for item in stages]
 
+    def _writing_loop_audit_summary_payload(run) -> dict[str, object]:
+        return {
+            "audit_id": run.id,
+            "request_id": run.request_id,
+            "loop_status": run.loop_status,
+            "error_type": run.error_type,
+            "revision_rounds": run.revision_rounds,
+            "retrieval_rounds": run.retrieval_rounds,
+            "gate_evaluations": run.gate_evaluations,
+            "created_at": run.created_at.isoformat(),
+        }
+
+    def _writing_loop_audit_payload(run) -> dict[str, object]:
+        return {
+            **_writing_loop_audit_summary_payload(run),
+            "trigger_finding_fingerprint": run.trigger_finding_fingerprint,
+            "initial_candidate_hash": run.initial_candidate_hash,
+            "final_candidate_hash": run.final_candidate_hash,
+            "final_candidate_text": run.final_candidate_text,
+            "final_gate_decision": run.final_gate_decision,
+            "final_gate_finding_fingerprints": list(
+                run.final_gate_finding_fingerprints
+            ),
+            "stages": [{
+                "stage": stage.stage, "ordinal": stage.ordinal,
+                "status": stage.status,
+                "candidate_hash": stage.candidate_hash,
+                "finding_fingerprint": stage.finding_fingerprint,
+                "pointer_ids": list(stage.pointer_ids),
+            } for stage in run.stages],
+        }
+
     def _accepted_save_payload(saved) -> dict[str, object]:
         return {
             "draft_version_id": saved.draft_version.id,
@@ -2704,6 +2764,35 @@ def create_app(
             output_type=WritingOutputType.DRAFT_PATCH,
             text=body.candidate_text,
         )
+
+        persist_audit = (
+            body.persist_audit if body.persist_audit is not None
+            else _env_bool("WRITING_LOOP_AUDIT_DEFAULT", False)
+        )
+
+        def _record_loop_audit(*, summary, stages, final_candidate, gate,
+                               error_type) -> tuple[str | None, dict | None]:
+            # Phase 5.9 L9 B (P2=B opt-in): audit this loop termination only when
+            # persist_audit is on. Only outcomes that produced a WritingLoopSummary
+            # are loop runs; pre-loop request rejections (400/502/504) are never
+            # audited. The persist is isolated from the loop critical path — a write
+            # failure returns the loop result with audit_id=null + audit_error, it
+            # never breaks the loop outcome (folds the prior H3 question).
+            if not persist_audit:
+                return None, None
+            try:
+                run_id = writing_loop_audit.record(
+                    project_id=project_id, request_id=body.request_id,
+                    trigger_finding=finding,
+                    initial_candidate_text=body.candidate_text,
+                    summary=summary, stages=stages,
+                    final_candidate=final_candidate, gate=gate,
+                    error_type=error_type,
+                ).id
+                return run_id, None
+            except Exception as exc:  # noqa: BLE001 — deliberate isolation boundary
+                return None, {"type": "audit_persist_error", "detail": str(exc)}
+
         try:
             writing_revision.validate_inputs(candidate, finding, body.instruction)
             package = await context_search.build_context_package(search_request)
@@ -2738,6 +2827,11 @@ def create_app(
                 status, error_type = 502, "invalid_candidate_report"
             else:
                 status, error_type = 502, "report_error"
+            audit_id, audit_error = _record_loop_audit(
+                summary=exc.loop, stages=exc.stages,
+                final_candidate=exc.candidate, gate=exc.gate,
+                error_type=error_type,
+            )
             return JSONResponse(
                 status_code=status,
                 content={
@@ -2748,6 +2842,8 @@ def create_app(
                     ),
                     "loop": _writing_loop_payload(exc.loop),
                     "stages": _writing_stages_payload(exc.stages),
+                    "audit_id": audit_id,
+                    "audit_error": audit_error,
                     "report_error": {
                         "type": error_type,
                         "detail": str(cause),
@@ -2765,6 +2861,11 @@ def create_app(
                 status, error_type = 502, "invalid_writing_revision"
             else:
                 status, error_type = 502, "revision_error"
+            audit_id, audit_error = _record_loop_audit(
+                summary=exc.loop, stages=exc.stages,
+                final_candidate=exc.candidate, gate=exc.gate,
+                error_type=error_type,
+            )
             return JSONResponse(
                 status_code=status,
                 content={
@@ -2775,6 +2876,8 @@ def create_app(
                     ),
                     "loop": _writing_loop_payload(exc.loop),
                     "stages": _writing_stages_payload(exc.stages),
+                    "audit_id": audit_id,
+                    "audit_error": audit_error,
                     "revision_error": {
                         "type": error_type,
                         "detail": str(cause),
@@ -2800,6 +2903,11 @@ def create_app(
                 status, error_type = 502, cause.error_type.value
             else:
                 status, error_type = 502, "retrieval_error"
+            audit_id, audit_error = _record_loop_audit(
+                summary=exc.loop, stages=exc.stages,
+                final_candidate=exc.candidate, gate=exc.gate,
+                error_type=error_type,
+            )
             return JSONResponse(
                 status_code=status,
                 content={
@@ -2807,6 +2915,8 @@ def create_app(
                     "gate": _writing_gate_payload(exc.gate),
                     "loop": _writing_loop_payload(exc.loop),
                     "stages": _writing_stages_payload(exc.stages),
+                    "audit_id": audit_id,
+                    "audit_error": audit_error,
                     "retrieval_error": {
                         "type": error_type,
                         "detail": str(cause),
@@ -2824,6 +2934,11 @@ def create_app(
                 status, error_type = 400, "writing_gate_error"
             else:
                 status, error_type = 502, "gate_error"
+            audit_id, audit_error = _record_loop_audit(
+                summary=exc.loop, stages=exc.stages,
+                final_candidate=exc.candidate, gate=exc.gate,
+                error_type=error_type,
+            )
             return JSONResponse(
                 status_code=status,
                 content={
@@ -2834,18 +2949,54 @@ def create_app(
                     ),
                     "loop": _writing_loop_payload(exc.loop),
                     "stages": _writing_stages_payload(exc.stages),
+                    "audit_id": audit_id,
+                    "audit_error": audit_error,
                     "gate_error": {
                         "type": error_type,
                         "detail": str(cause),
                     },
                 },
             )
+        audit_id, audit_error = _record_loop_audit(
+            summary=result.loop, stages=result.stages,
+            final_candidate=result.candidate, gate=result.gate,
+            error_type=None,
+        )
         return {
             "candidate": _writing_candidate_payload(result.candidate),
             "gate": _writing_gate_payload(result.gate),
             "loop": _writing_loop_payload(result.loop),
             "stages": _writing_stages_payload(result.stages),
+            "audit_id": audit_id,
+            "audit_error": audit_error,
         }
+
+    @app.get("/projects/{project_id}/writing/loop-audits")
+    async def writing_loop_audits_endpoint(project_id: str) -> dict[str, object]:
+        # Phase 5.9 L9 B: durable, append-only loop audit summaries, newest
+        # first. Project-scoped; retained for later verification reference.
+        try:
+            _require_project_exists(project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        runs = writing_loop_audit.list_runs(project_id)
+        return {
+            "project_id": project_id,
+            "items": [_writing_loop_audit_summary_payload(run) for run in runs],
+        }
+
+    @app.get("/projects/{project_id}/writing/loop-audits/{audit_id}")
+    async def writing_loop_audit_detail_endpoint(
+        project_id: str, audit_id: str
+    ) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+            run = writing_loop_audit.get(project_id=project_id, run_id=audit_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except WritingLoopAuditNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _writing_loop_audit_payload(run)
 
     @app.post("/projects/{project_id}/writing/accept")
     async def writing_accept_endpoint(

@@ -13,6 +13,11 @@ from services.application.app.context_search.models import (
     ContextSearchRequest,
     CurrentPosition,
 )
+from services.application.app.writing.audit_hash import (
+    finding_fingerprint,
+    hash_text,
+    package_pointer_ids,
+)
 from services.application.app.writing.models import (
     WritingCandidate,
     WritingGateDecision,
@@ -107,6 +112,12 @@ class WritingLoopStage:
     stage: WritingLoopStageName
     ordinal: int
     status: WritingLoopStageStatus
+    # Per-stage audit detail (Phase 5.9 L9 B, P1=B). The ephemeral HTTP
+    # response exposes only stage/ordinal/status; the persisted loop audit
+    # reads these bodyless hashes/fingerprints/pointers.
+    candidate_hash: str | None = None
+    finding_fingerprint: str | None = None
+    pointer_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,8 +212,17 @@ class WritingReviseGateService:
 
         def record(
             stage: WritingLoopStageName, status: WritingLoopStageStatus,
+            *, finding: WritingGateFinding | None = None,
+            pointer_ids: tuple[str, ...] = (),
         ) -> None:
-            stages.append(WritingLoopStage(stage, len(stages) + 1, status))
+            stages.append(WritingLoopStage(
+                stage, len(stages) + 1, status,
+                candidate_hash=hash_text(current_candidate.text),
+                finding_fingerprint=(
+                    None if finding is None else finding_fingerprint(finding)
+                ),
+                pointer_ids=pointer_ids,
+            ))
 
         def summary(status: WritingLoopStatus) -> WritingLoopSummary:
             return WritingLoopSummary(
@@ -255,12 +275,14 @@ class WritingReviseGateService:
                 package=current_package,
             )
         except Exception as exc:
-            record(WritingLoopStageName.REVISE, WritingLoopStageStatus.FAILED)
+            record(WritingLoopStageName.REVISE, WritingLoopStageStatus.FAILED,
+                   finding=finding)
             raise WritingLoopRevisionFailure(
                 current_candidate, exc, gate=None,
                 loop=summary(WritingLoopStatus.FAILED), stages=tuple(stages),
             ) from exc
-        record(WritingLoopStageName.REVISE, WritingLoopStageStatus.COMPLETED)
+        record(WritingLoopStageName.REVISE, WritingLoopStageStatus.COMPLETED,
+               finding=finding)
         await refresh_report()
         await evaluate_gate()
 
@@ -294,12 +316,14 @@ class WritingReviseGateService:
                     record(
                         WritingLoopStageName.REVISE,
                         WritingLoopStageStatus.NO_CHANGE,
+                        finding=eligible,
                     )
                     return result(WritingLoopStatus.NO_CHANGE)
                 except Exception as exc:
                     record(
                         WritingLoopStageName.REVISE,
                         WritingLoopStageStatus.FAILED,
+                        finding=eligible,
                     )
                     raise WritingLoopRevisionFailure(
                         current_candidate, exc, gate=last_gate,
@@ -310,6 +334,7 @@ class WritingReviseGateService:
                 record(
                     WritingLoopStageName.REVISE,
                     WritingLoopStageStatus.COMPLETED,
+                    finding=eligible,
                 )
                 await refresh_report()
                 await evaluate_gate()
@@ -353,6 +378,7 @@ class WritingReviseGateService:
                     record(
                         WritingLoopStageName.CONTEXT_SEARCH,
                         WritingLoopStageStatus.COMPLETED,
+                        pointer_ids=package_pointer_ids(delta),
                     )
                     failed_stage = WritingLoopStageName.MERGE
                     current_package = merge_context_packages(
@@ -362,6 +388,7 @@ class WritingReviseGateService:
                     record(
                         WritingLoopStageName.MERGE,
                         WritingLoopStageStatus.COMPLETED,
+                        pointer_ids=package_pointer_ids(current_package),
                     )
                 except Exception as exc:
                     record(failed_stage, WritingLoopStageStatus.FAILED)

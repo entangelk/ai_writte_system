@@ -536,3 +536,62 @@
 
 - bounded-loop slice는 독립 PASS와 H1/H2 closure까지 완료됐다. 다음 Writing 후보 B2를 진행해도 되는 상태다.
 - Mongo index 생성 실패는 Writing과 분리된 인프라 진단 과제로만 추적한다.
+
+## Phase 5.9 L9 B persisted loop audit 착수 브리프 + 구현 (SoT v1.6.78)
+
+### Goals
+
+- HANDOFF 다음 작업 후보 중 오너 선택으로 **persisted loop 감사 API** 트랙을 착수한다.
+- bounded loop(v1.6.77) L9=A first→B의 후속으로 loop 실행을 durable 감사 trail로 영속화한다.
+
+### Completed work
+
+- 착수 전 정본 스코프를 대조했다: SoT v1.6.77 로그, `05-writing-bounded-loop-decisions.md`(L6=A first→C·L9=A first→B·follow-up considerations line 129), 선례 `06-gate-finding-persistence-decisions.md`(v1.6.65 durable store 패턴). 현재 loop 표면(`revise_gate.py`의 5개 종료 경로가 `loop`+`stages`를 실어 나름)과 endpoint 직렬화를 매핑했다.
+- persistence 모델·identity·트리거·읽기 API·lifecycle이 기존 계약에서 하나로 도출되지 않아 CLAUDE.md §1 Owner decision brief를 먼저 작성했다(`docs/plans/05-writing-persisted-loop-audit-decisions.md`): P1 입도, P2 트리거, P3 identity, P4 읽기 API, P5 lifecycle.
+- 신설 `writing/audit_hash.py`(공유 fingerprint: `hash_text`·`finding_fingerprint`·`package_pointer_ids` — loop와 audit가 같은 규칙을 써 `final_candidate_hash==마지막 stage candidate_hash`가 성립하고 순환 import를 피함).
+- `WritingLoopStage`에 per-stage 감사 필드(`candidate_hash`·`finding_fingerprint`·`pointer_ids`)를 default와 함께 additive로 추가했다. `record()`는 closure의 `current_candidate`를 읽어 stage별 hash를 자동 계산하고, revise stage엔 trigger finding, retrieval stage엔 package pointer를 실는다. ephemeral 응답(`_writing_stages_payload`)은 여전히 `{stage,ordinal,status}` 3키만 노출하고 감사 필드는 persisted trail만 읽는다.
+- 신설 `writing/loop_audit.py`(`StoredLoopStage`·`StoredWritingLoopRun`·`WritingLoopAuditRepository` Protocol·`InMemory*`·`WritingLoopAuditService.record/list_runs/get`)와 `writing/loop_audit_mongo.py`(`writing_loop_audits` 컬렉션, insert-only append, project+created_at desc index).
+- `main.py`: `_default_writing_loop_audit_service()`(Mongo URI 시 어댑터, 없으면 in-memory — 항상 가용해 P2=A), `create_app` 파라미터 배선, `/writing/revise-and-gate`의 5개 종료(성공+4 실패)에서 `_record_loop_audit()`로 감사 1건 기록 후 `audit_id` additive 응답, 읽기 endpoint 2종(`GET .../writing/loop-audits`, `GET .../writing/loop-audits/{audit_id}`).
+
+### Decisions
+
+- 오너가 추천 묶음 **P1=B, P2=A, P3=A, P4=A, P5=A**를 승인했다.
+- **P3=A(append-only uuid)의 근거**: loop는 provider 샘플링으로 비결정적이라 같은 요청의 재시도는 다른 candidate/Gate/stages를 낳는 별개의 감사 사건이다. 선례(Gate finding)는 결정적 id였지만 그건 idempotent dedup 대상이었기 때문이고, loop에 결정적 id를 쓰면 두 번째 실행이 감사에서 사라진다.
+- **오너 추가 지시(P5/P3)**: 오래된 run은 검증 보조자료로 쓰일 수 있으니 보존을 기본으로 둔다. append-only(P3)로 재시도까지 전부 남기고 immutable(P5)로 자동 삭제하지 않는다. **retention(TTL/archive)은 이 슬라이스에서 구현하지 않되 스키마가 막지 않도록 두고 명시된 운영과제로 남긴다** — P5 미룸은 "정리 로직 없음"이지 "run 폐기"가 아니다. 브리프에 이 결정을 기록했다.
+- P1=B의 per-stage hash/pointer/fingerprint는 loop 내부 상태에서만 얻을 수 있어 `WritingLoopStage`를 enrich하는 것이 브리프 승인 계약(under-narrow 금지)에 맞다고 판단했다. ephemeral 응답 3키 계약은 그대로 유지했다.
+
+### Issues found
+
+- 테스트 작성 중 `ContextItemStatus.OK`가 존재하지 않아(`CANONICAL`/`CANDIDATE`) retrieval pointer fixture가 context_search 단계에서 502로 실패했다 — 테스트 fixture 오류였고 프로덕션 무관, `CANONICAL`로 정정했다.
+
+### Verification
+
+- 신규 회귀 `tests/test_writing_loop_audit.py` +12(service 5·HTTP 7): 재시도=distinct id·immutable(frozen), bodyless per-stage trail+final text, failed run error_type/null gate, project-scoped newest-first list, cross-project/missing 404 / 성공 loop 전체 trail+`final_candidate_hash==stages[-1].candidate_hash`, 모든 종료 감사(성공+gate 실패), 재시도 append+요약 bodyless newest-first, retrieval pointer_ids 캡처, no Core SOT save, **pre-loop 거부(400) 미기록(over-strict guard)**.
+- Writing focused(7파일) → **128 passed / 108 subtests**.
+- full non-Mongo: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **940 passed / 45 skipped / 209 subtests**. `git diff --check` clean, `py_compile` 통과.
+- HTTP 통합 테스트가 실제 ASGI로 context build→loop→감사 persist→GET list/detail 관통을 구동하므로 런타임 표면을 관측 검증했다.
+
+### Next steps
+
+- 다음 Writing 후보는 B2(provider usage/latency/search 계측→aggregate token/time 기본값 브리프). 이후 multi-finding, stable pointer.
+- persisted 감사 후속: retention(TTL/archive) 운영과제, 전체 중간 artifact 본문(P1=C)/byte-for-byte replay, B2 usage 필드 additive, stable candidate/GateRun pointer로 hash 대체.
+- 독립 검증은 후속 verifier 대상(sandbox 밖 live 불요 — in-memory/Mongo 결정적 경로).
+
+### 독립 검증 조건부 합격 closure + hardening (v1.6.78)
+
+- 오너 독립 적대적 검증(`docs/verifications/2026-07-13/writing_persisted_loop_audit.md`)이 **조건부 합격**으로, 차단 발견 **B1**(detail trail 표면에 token/latency 부재·stage 본문 부재 forward-defense lock 없음 — 브리프 §102/§106)을 지적했다. mutation으로 실증됨: detail payload에 `token_usage`+stage `candidate_text` 주입 시 12 tests 전부 통과(빈 셀).
+- **B1 closure(test-only, production 무변)**: `test_success_loop_persists_full_trail_and_returns_audit_id`에 detail top-level 15키 exact-set + stage row 6키 exact-set assertion을 추가했다. 재-mutation 시 `1 failed`로 bite 확인 후 원복(잔여 0). summary(8키)·ephemeral stages(3키)에 이어 detail 표면까지 잠가 B2 stage-level usage가 붙을 자리를 강제로 계약 변경 대상으로 만든다.
+- **H1 보강**: 선례 `test_gate_findings_mongo.py` 패턴(브리프가 "채택된 기본값"으로 인용)을 따라 `tests/test_writing_loop_audit_mongo.py` 신설 — fake collection round-trip(`_doc`↔`_run` 필드 대칭), append-only insert(중복 `_id` raise), newest-first·project isolation·stable index name.
+- **H2 보강**: `test_each_non_pass_200_status_leaves_a_record_with_that_status`로 나머지 4종 200 status(terminal_decision/not_eligible/budget_exhausted/no_change)가 각각 매칭 `loop_status` 감사 레코드를 남김을 잠갔다(uniform success site 회귀 방어).
+- **H3 미구현(오너 결정 대기)**: `_record_loop_audit`가 감사 쓰기 실패를 catch하지 않아 Mongo `insert_one` 실패 시 성공한 loop 결과를 잃고 raw 500이 된다. 정본 미규정이고 fail-loud vs degrade-gracefully는 오너 정책 결정이라 임의 구현하지 않고 surface했다.
+- Verification: `tests/test_writing_loop_audit*.py` → 16 passed/4 subtests, full non-Mongo → **944 passed / 45 skipped / 213 subtests**, `git diff --check` clean.
+
+### 감사 opt-in 재개정 P2=A→B (SoT v1.6.79)
+
+- H3(감사 쓰기 실패 정책)를 오너에게 질문하자, 오너가 더 근본적 방향을 지시했다: **감사와 실제 loop 작업을 분리하고, 항상이 아니라 필요할 때만, on/off 토글로 loop 실행 시 바로 적용.** 이는 같은 날 승인·잠근 **P2=A(항상 감사)와 충돌**하므로 CLAUDE.md §5대로 충돌을 명시하고 어느 쪽이 canonical인지 확인한 뒤 진행했다.
+- 오너 확정: **A(request 플래그) + 기본 off**. 브리프에 "P2 재개정" 섹션을 추가하고 SoT를 v1.6.79로 올렸다.
+- 구현: `WritingReviseRequest.persist_audit: bool | None = None`(null→env `WRITING_LOOP_AUDIT_DEFAULT` 기본 off, 요청 플래그 override). 엔드포인트에서 `persist_audit`를 1회 resolve하고, `_record_loop_audit`를 `(audit_id, audit_error)` 반환으로 리팩터 — 플래그 off면 `(None, None)`, on이면 `record()` 결과 id, 예외면 `(None, {"type":"audit_persist_error","detail":...})`. 5개 종료 응답에 `audit_error` additive.
+- **H3 구조적 해소**: persist를 loop critical path 밖에서 try/except로 격리했으므로 쓰기 실패가 loop 결과를 죽이지 못한다. degrade vs fail-loud 질문 자체가 소멸했다(감사는 부차 side-effect, loop 결과 보존 우선).
+- 회귀: 기존 HTTP 테스트는 `_post`가 기본 `persist_audit=true`를 싣도록 하고, 신규 3종 추가 — `test_opt_in_default_off_persists_nothing`(플래그 없음/false → audit_id·audit_error null, 목록 빈), `test_env_default_enables_audit_without_request_flag`(env true→플래그 없이 감사, false override), `test_persist_failure_is_isolated_from_the_loop_result`(raising repo → loop 200+pass 유지, audit_id null, audit_error=audit_persist_error). pre-loop 거부 미기록은 플래그 on에서도 유효.
+- **바뀐 계약(문서화)**: boundary 1a/1b "모든 종료 감사"는 "persist on일 때만 감사"로 re-scope. 검증 기록 closure addendum에 H3 해소와 re-scope를 명시했다.
+- Verification: loop-audit focused → 19 passed/6 subtests, full non-Mongo → **947 passed / 45 skipped / 215 subtests**, `py_compile`·`git diff --check` clean. B1 detail lock은 감사 detail payload(무변)에 그대로 유효.

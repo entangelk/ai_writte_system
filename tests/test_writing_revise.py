@@ -328,9 +328,10 @@ class _Reporter:
 
 def _http(provider=None, *, context_error=None, core_service=None,
           gate_service=None, report_service=None, retrieval_planner=None,
-          context_error_on_call=1, loop_policy=None):
+          context_error_on_call=1, loop_policy=None, loop_audit_service=None,
+          context_service=None):
     core = core_service or CoreSotService(InMemoryCoreSotRepository())
-    context = _Context(
+    context = context_service or _Context(
         _package(), error=context_error, error_on_call=context_error_on_call
     )
     app = create_app(
@@ -341,6 +342,7 @@ def _http(provider=None, *, context_error=None, core_service=None,
         writing_report_service=report_service,
         writing_retrieval_planner=retrieval_planner,
         writing_loop_policy=loop_policy,
+        writing_loop_audit_service=loop_audit_service,
     )
     client = _Client(app)
     project = client.post("/projects", {"name": "Novel"}).json()["id"]
