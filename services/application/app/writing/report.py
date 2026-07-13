@@ -19,7 +19,36 @@ from services.llm_gateway.app.provider import LLMProvider
 
 TASK = "writing_candidate_report"
 VERSION = "writing_candidate_report_v1"
-TEMPLATE = """Analyze candidate prose and return JSON only with exactly self_reported_constraints, candidate_claims, new_memory_hints, risk_notes. Use the supplied enum literals. Do not invent database ids or pointers. Empty arrays are valid."""
+TEMPLATE = """Analyze candidate prose and return one JSON object only. Do not use Markdown or explanatory text.
+
+The object must have exactly these four fields:
+{
+  "self_reported_constraints": ["non-empty string"],
+  "candidate_claims": [
+    {
+      "text": "non-empty string",
+      "type": "narrative_event|character_state|location_state|relation_change|timeline_fact|foreshadowing_use|factual_claim|interpretation",
+      "requires_gate_check": true
+    }
+  ],
+  "new_memory_hints": [
+    {
+      "type": "event|character_fact|location_fact|relation|foreshadowing|timeline_fact|style_signal",
+      "text": "non-empty string",
+      "confidence": 0.0,
+      "should_analyze_after_save": true
+    }
+  ],
+  "risk_notes": [
+    {
+      "type": "pov|timeline|canon|foreshadowing|relation|style|factuality",
+      "severity": "low|medium|high|critical",
+      "message": "non-empty string"
+    }
+  ]
+}
+
+Each `type` and `severity` must be one literal from its pipe-separated list, not the whole list. Confidence must be a finite number from 0 through 1. Empty arrays are valid and preferred over invented facts. Do not invent database ids or pointers."""
 
 
 class InvalidCandidateReport(RuntimeError): pass

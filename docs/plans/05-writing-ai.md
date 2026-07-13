@@ -80,6 +80,7 @@ MVP에서 최소한 요청 적합성, 프로젝트 격리, hard constraint 위�
 - [ ] 후보가 새 설정을 만든 경우 memory hint를 어떻게 다룰지 — 구조적 self-report(new_memory_hints) slice.
 - [x] 첫 모델의 context/output budget과 timeout — **벤치마크값 사용**(writing_generate 1/120s/1024, `plans/flat-loop-gate.md`; `WRITING_GENERATE_MAX_TOKENS` env로 조정).
 - [x] accept→save→analysis 재진입 — **v1.6.70 확정/구현**: latest base+paragraph append, Gate pass only, idempotent save+pending job. background run과 client offset patch는 additive 후속.
+- [x] candidate report 별도 재평가 — **v1.6.72 확정/구현**: side-effect-free inline `/writing/report`, 서버 ContextPackage 재구성. persisted candidate/report 감사 이력과 id 기반 API는 additive 후속.
 
 ## 원문 및 상세 참고
 

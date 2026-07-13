@@ -26,9 +26,11 @@ def _payload():
 
 
 class _Provider:
-    def __init__(self, outputs): self.outputs=list(outputs); self.calls=0
+    def __init__(self, outputs):
+        self.outputs=list(outputs); self.calls=0; self.requests=[]
     async def generate(self, request):
         self.calls += 1
+        self.requests.append(request)
         return GenerationResult("fake", self.outputs.pop(0), "stop", TokenUsage(1,1))
 
 
@@ -63,6 +65,11 @@ class WritingReportTest(unittest.TestCase):
         enriched=asyncio.run(service.enrich(candidate, package))
         self.assertEqual(provider.calls,2)
         self.assertEqual(enriched.risk_notes[0].severity.value,"high")
+        system_prompt = provider.requests[0].messages[0].content
+        self.assertIn('"requires_gate_check": true', system_prompt)
+        self.assertIn("narrative_event|character_state", system_prompt)
+        self.assertIn("low|medium|high|critical", system_prompt)
+        self.assertEqual(provider.requests[1].messages[0].content, system_prompt)
 
     def test_invalid_repair_fails(self):
         provider=_Provider(["bad","still bad"])

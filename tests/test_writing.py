@@ -25,6 +25,7 @@ from services.application.app.context_search.models import (
 from services.application.app.context_search.service import (
     ContextSearchBudgetExceeded,
     ContextSearchFailed,
+    InvalidContextSearchRequest,
 )
 from services.application.app.core_sot.service import (
     CoreSotService,
@@ -59,6 +60,7 @@ from services.application.app.writing.service import (
     WritingService,
     seed_writing_template,
 )
+from services.application.app.writing.report import InvalidCandidateReport
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
 from services.llm_gateway.app.provider import GenerationResult, TokenUsage
 
@@ -117,11 +119,18 @@ class _FakeReporter:
     # Phase 5.4 report extractor stub: enriches a plain-prose candidate with the
     # four structured report fields so the HTTP serialization path is exercised
     # with non-empty values (v1.6.71 보강 B1).
-    def __init__(self):
+    def __init__(self, *, error=None):
         self.calls = 0
+        self.error = error
+        self.last_candidate = None
+        self.last_package = None
 
     async def enrich(self, candidate, package):
         self.calls += 1
+        self.last_candidate = candidate
+        self.last_package = package
+        if self.error is not None:
+            raise self.error
         return replace(
             candidate,
             self_reported_constraints=("제한 시점",),
@@ -311,9 +320,19 @@ class _FakeContextSearch:
         return replace(self._package, project_id=request.project_id)
 
 
+class _NoWriteCoreSotService(CoreSotService):
+    def __init__(self):
+        super().__init__(InMemoryCoreSotRepository())
+        self.save_calls = 0
+
+    def save_draft(self, **kwargs):
+        self.save_calls += 1
+        raise AssertionError("writing/report must not save a draft")
+
+
 def _http(provider=None, *, package=None, with_context=True, context_error=None,
-          reporter=None):
-    core_sot = CoreSotService(InMemoryCoreSotRepository())
+          reporter=None, report_service=None, core_service=None):
+    core_sot = core_service or CoreSotService(InMemoryCoreSotRepository())
     writing_service = (
         _service(provider, reporter=reporter) if provider is not None else None
     )
@@ -327,6 +346,7 @@ def _http(provider=None, *, package=None, with_context=True, context_error=None,
     app = create_app(
         service=core_sot,
         writing_service=writing_service,
+        writing_report_service=report_service,
         context_search_service=context,
     )
     client = _TestClient(app)
@@ -456,6 +476,128 @@ class WritingGenerateApiTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 502)
 
+
+class WritingReportApiTest(unittest.TestCase):
+    def _post(self, client, project_id, **overrides):
+        payload = {
+            "request_id": "wr1",
+            "instruction": "이어서 써줘.",
+            "candidate_text": "문이 열렸다.",
+        }
+        payload.update(overrides)
+        return client.post(
+            f"/projects/{project_id}/writing/report", json=payload
+        )
+
+    def test_inline_candidate_is_re_evaluated_with_server_context(self):
+        # Under-strict guard: the endpoint must rebuild context server-side and
+        # return the enriched public candidate envelope without persisting it.
+        reporter = _FakeReporter()
+        client, project_id, context = _http(
+            package=_package(), report_service=reporter
+        )
+
+        response = self._post(client, project_id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(reporter.calls, 1)
+        self.assertEqual(context.last_request.project_id, project_id)
+        self.assertEqual(context.last_request.query, "이어서 써줘.")
+        self.assertEqual(reporter.last_candidate.text, "문이 열렸다.")
+        self.assertEqual(reporter.last_package.project_id, project_id)
+        body = response.json()
+        self.assertEqual(body["request_id"], "wr1")
+        self.assertEqual(body["candidate_claims"][0]["type"], "narrative_event")
+        self.assertNotIn("claim_type", body["candidate_claims"][0])
+        self.assertIsNone(body["candidate_id"])
+
+    def test_invalid_inline_input_is_rejected_before_reporter(self):
+        # Over-strict guard: malformed inline candidates are not sent to the LLM.
+        reporter = _FakeReporter()
+        client, project_id, _ = _http(report_service=reporter)
+
+        for field in ("request_id", "instruction", "candidate_text"):
+            with self.subTest(field=field):
+                response = self._post(client, project_id, **{field: "   "})
+                self.assertEqual(response.status_code, 400)
+        self.assertEqual(reporter.calls, 0)
+
+    def test_unsupported_task_type_is_rejected_before_reporter(self):
+        # B1 closure: this is the report endpoint's own task-type boundary, not
+        # the older generate endpoint guard.
+        reporter = _FakeReporter()
+        client, project_id, _ = _http(report_service=reporter)
+
+        response = self._post(client, project_id, task_type="revise")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(reporter.calls, 0)
+
+    def test_explicit_query_and_current_position_are_forwarded(self):
+        reporter = _FakeReporter()
+        client, project_id, context = _http(report_service=reporter)
+
+        response = self._post(
+            client,
+            project_id,
+            query="명시 검색어",
+            current_position={"draft_id": "draft-1", "version_id": "version-2"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(context.last_request.query, "명시 검색어")
+        self.assertEqual(context.last_request.current_position.draft_id, "draft-1")
+        self.assertEqual(
+            context.last_request.current_position.version_id, "version-2"
+        )
+
+    def test_report_does_not_save_draft(self):
+        # H2 direct guard: candidate_id=None is only an envelope proxy; a save
+        # spy proves the report endpoint itself leaves Core SOT untouched.
+        core_sot = _NoWriteCoreSotService()
+        client, project_id, _ = _http(
+            report_service=_FakeReporter(), core_service=core_sot
+        )
+
+        response = self._post(client, project_id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(core_sot.save_calls, 0)
+
+    def test_report_dependencies_and_project_scope_are_enforced(self):
+        client, project_id, _ = _http(with_context=False,
+                                      report_service=_FakeReporter())
+        self.assertEqual(self._post(client, project_id).status_code, 503)
+
+        client, project_id, _ = _http()
+        self.assertEqual(self._post(client, project_id).status_code, 503)
+
+        client, _project_id, _ = _http(report_service=_FakeReporter())
+        response = client.post("/projects/ghost/writing/report", json={
+            "request_id": "wr1", "instruction": "x", "candidate_text": "본문"
+        })
+        self.assertEqual(response.status_code, 404)
+
+    def test_report_and_context_failures_keep_public_mapping(self):
+        cases = (
+            (_FakeReporter(error=InvalidCandidateReport("invalid report")), None, 502),
+            (_FakeReporter(error=ProviderError(
+                code=ProviderErrorCode.TIMEOUT, message="timeout",
+                retryable=True, provider="llm_gateway")), None, 504),
+            (_FakeReporter(error=ProviderError(
+                code=ProviderErrorCode.UNAVAILABLE, message="down",
+                retryable=True, provider="llm_gateway")), None, 502),
+            (_FakeReporter(), InvalidContextSearchRequest("invalid context"), 400),
+            (_FakeReporter(), ContextSearchBudgetExceeded("budget"), 504),
+            (_FakeReporter(), ContextSearchFailed(
+                ContextSearchErrorType.LLM_ERROR, "planner failed"), 502),
+        )
+        for reporter, context_error, expected in cases:
+            with self.subTest(expected=expected, error=type(context_error).__name__):
+                client, project_id, _ = _http(
+                    report_service=reporter, context_error=context_error
+                )
+                self.assertEqual(self._post(client, project_id).status_code, expected)
 
 if __name__ == "__main__":
     unittest.main()

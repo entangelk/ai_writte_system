@@ -873,6 +873,17 @@ class WritingGateRequest(BaseModel):
     max_tokens: int = 4096
 
 
+class WritingReportRequest(BaseModel):
+    request_id: str
+    instruction: str
+    candidate_text: str
+    task_type: str = WritingTaskType.CONTINUE_SCENE.value
+    draft_excerpt: str = ""
+    query: str | None = None
+    current_position: ContextPositionBody | None = None
+    max_tokens: int = 4096
+
+
 class WritingAcceptRequest(BaseModel):
     request_id: str
     draft_id: str
@@ -900,6 +911,7 @@ def create_app(
     gate_finding_service: GateFindingService | None = None,
     writing_service: WritingService | None = None,
     writing_gate_service: WritingGateService | None = None,
+    writing_report_service: WritingCandidateReportService | None = None,
     vector_index: InMemoryVectorIndexAdapter | None = None,
 ) -> FastAPI:
     app = FastAPI(title="AI Writing System Application")
@@ -956,8 +968,8 @@ def create_app(
     gate_findings = gate_finding_service or _default_gate_finding_service()
     writing = writing_service or _default_writing_service()
     writing_gate = writing_gate_service or _default_writing_gate_service()
-    writing_report = None
-    if os.environ.get("LLM_GATEWAY_BASE_URL"):
+    writing_report = writing_report_service
+    if writing_report is None and os.environ.get("LLM_GATEWAY_BASE_URL"):
         writing_report = _build_report_service(GatewayGenerateProvider(
             base_url=os.environ["LLM_GATEWAY_BASE_URL"],
             timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
@@ -2358,6 +2370,75 @@ def create_app(
             status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
             raise HTTPException(status_code=status, detail=str(exc)) from exc
         return _writing_gate_payload(result)
+
+    @app.post("/projects/{project_id}/writing/report")
+    async def writing_report_endpoint(
+        project_id: str, body: WritingReportRequest
+    ) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+            task_type = WritingTaskType(body.task_type)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400, detail=f"unsupported task_type: {body.task_type}"
+            ) from exc
+        if not body.request_id.strip():
+            raise HTTPException(status_code=400, detail="request_id must not be empty")
+        if not body.instruction.strip():
+            raise HTTPException(status_code=400, detail="instruction must not be empty")
+        if not body.candidate_text.strip():
+            raise HTTPException(status_code=400, detail="candidate_text must not be empty")
+        if writing_report is None:
+            raise HTTPException(
+                status_code=503, detail="writing report service is not configured"
+            )
+        if context_search is None:
+            raise HTTPException(
+                status_code=503, detail="context search service is not configured"
+            )
+        position = (
+            CurrentPosition(
+                draft_id=body.current_position.draft_id,
+                version_id=body.current_position.version_id,
+            )
+            if body.current_position is not None
+            else None
+        )
+        search_request = ContextSearchRequest(
+            project_id=project_id,
+            purpose=ContextSearchPurpose.WRITING_CONTEXT,
+            needs=_WRITING_CONTINUE_SCENE_NEEDS,
+            query=body.query or body.instruction,
+            current_position=position,
+            context_budget=ContextBudget(max_tokens=body.max_tokens),
+        )
+        candidate = WritingCandidate(
+            request_id=body.request_id,
+            project_id=project_id,
+            task_type=task_type,
+            output_type=WritingOutputType.DRAFT_PATCH,
+            text=body.candidate_text,
+        )
+        try:
+            package = await context_search.build_context_package(search_request)
+            enriched = await writing_report.enrich(candidate, package)
+        except InvalidContextSearchRequest as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except InvalidCandidateReport as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except ContextSearchBudgetExceeded as exc:
+            raise HTTPException(status_code=504, detail=str(exc)) from exc
+        except ContextSearchFailed as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"{exc.error_type.value}: {exc.detail}",
+            ) from exc
+        except ProviderError as exc:
+            status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
+        return _writing_candidate_payload(enriched)
 
     @app.post("/projects/{project_id}/writing/accept")
     async def writing_accept_endpoint(
