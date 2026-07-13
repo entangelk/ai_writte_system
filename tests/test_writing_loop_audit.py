@@ -245,6 +245,9 @@ class WritingLoopAuditApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         audit_id = response.json()["audit_id"]
         self.assertTrue(audit_id)
+        # B2 forward-defense (SoT v1.6.79): persist-success leaves audit_error
+        # null — the failure-only signal must not bleed into a clean run.
+        self.assertIsNone(response.json()["audit_error"])
 
         got = _get(client, f"/projects/{project}/writing/loop-audits/{audit_id}")
         self.assertEqual(got.status_code, 200)

@@ -595,3 +595,12 @@
 - 회귀: 기존 HTTP 테스트는 `_post`가 기본 `persist_audit=true`를 싣도록 하고, 신규 3종 추가 — `test_opt_in_default_off_persists_nothing`(플래그 없음/false → audit_id·audit_error null, 목록 빈), `test_env_default_enables_audit_without_request_flag`(env true→플래그 없이 감사, false override), `test_persist_failure_is_isolated_from_the_loop_result`(raising repo → loop 200+pass 유지, audit_id null, audit_error=audit_persist_error). pre-loop 거부 미기록은 플래그 on에서도 유효.
 - **바뀐 계약(문서화)**: boundary 1a/1b "모든 종료 감사"는 "persist on일 때만 감사"로 re-scope. 검증 기록 closure addendum에 H3 해소와 re-scope를 명시했다.
 - Verification: loop-audit focused → 19 passed/6 subtests, full non-Mongo → **947 passed / 45 skipped / 215 subtests**, `py_compile`·`git diff --check` clean. B1 detail lock은 감사 detail payload(무변)에 그대로 유효.
+
+### v1.6.79 opt-in delta 독립 재검증 + B2 closure
+
+- 오너 요청("의심하고 또 의심해줘")으로 v1.6.79 opt-in delta의 독립 재검증을 수행했다(별도 verifier 컨텍스트). 검증 기록: `docs/verifications/2026-07-13/writing_loop_audit_optin_reverification.md`.
+- boundary matrix(opt-in O1-O10): opt-in 게이트(O1-O5, 양방향)·persist 실패 격리·`audit_error` taxonomy(O6-O8)·pre-loop 미감사(O10)는 모두 filled. B1 detail exact-set(15키/6키)은 mutation re-bite로 두 독립 assertion(`:278` stage / `:271` top)에서 각각 bite함을 확인했다. `final_candidate_hash == stages[-1].candidate_hash`의 "by construction" 주장도 정밀 추적으로 반박 실패(주장 확인).
+- **발견(B2, blocking)**: SoT v1.6.79가 "persist 미요청/**성공** 시 `audit_error`=null"을 명시하지만, "persist 성공 시 null"을 assertion하는 테스트가 없었다. mutation으로 `_record_loop_audit` 성공 return에 `audit_error`를 채우니 **16 passed**(bite 없음)로 빈 셀을 증명.
+- **B2 closure(test-only, 1 line)**: `test_success_loop_persists_full_trail_and_returns_audit_id`에 `self.assertIsNone(response.json()["audit_error"])` 추가. 동일 mutation이 이제 `:250`에서 bite(1 failed). 빈 셀 filled.
+- smoke: full non-Mongo **944 passed/48 skipped/215 subtests**(verifier 머신, ES 미설치). 작업자 머신(ES 설치) 기준 947/45/215 — 차이 3은 `elasticsearch` package skip, subtests 215 일치, HANDOFF에 문서화된 환경 차이.
+- 결정: B2를 SoT 명시 contract-required로 보아 blocking을 유지(closure 조건으로). trivial test-only fix로 합격 re-promote.
