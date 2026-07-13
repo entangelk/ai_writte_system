@@ -85,6 +85,10 @@ from services.application.app.writing.revise import (
     WritingRevisionService,
     seed_writing_revise_template,
 )
+from services.application.app.writing.revise_gate import (
+    WritingReviseGateFailure,
+    WritingReviseGateService,
+)
 from services.application.app.writing.gate import (
     InvalidWritingGateResult,
     WritingGateError,
@@ -1021,6 +1025,10 @@ def create_app(
             base_url=os.environ["LLM_GATEWAY_BASE_URL"],
             timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
             trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False)))
+    writing_revise_gate = (
+        WritingReviseGateService(reviser=writing_revision, gate=writing_gate)
+        if writing_revision is not None and writing_gate is not None else None
+    )
     writing_accept = (
         WritingAcceptService(core_sot=core_sot, analysis=analysis,
                              gate=writing_gate, reporter=writing_report)
@@ -2564,6 +2572,114 @@ def create_app(
             status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
             raise HTTPException(status_code=status, detail=str(exc)) from exc
         return _writing_candidate_payload(revised)
+
+    @app.post("/projects/{project_id}/writing/revise-and-gate")
+    async def writing_revise_and_gate_endpoint(
+        project_id: str, body: WritingReviseRequest
+    ) -> object:
+        try:
+            _require_project_exists(project_id)
+            task_type = WritingTaskType(body.task_type)
+            finding = WritingGateFinding(
+                finding_type=WritingGateFindingType(body.finding.type),
+                severity=WritingGateSeverity(body.finding.severity),
+                message=body.finding.message,
+                evidence=body.finding.evidence,
+                recommended_decision=WritingGateDecision(
+                    body.finding.recommended_decision
+                ),
+            )
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if writing_revise_gate is None:
+            raise HTTPException(
+                status_code=503,
+                detail="writing revise-and-gate service is not configured",
+            )
+        if context_search is None:
+            raise HTTPException(
+                status_code=503, detail="context search service is not configured"
+            )
+        position = (
+            CurrentPosition(
+                draft_id=body.current_position.draft_id,
+                version_id=body.current_position.version_id,
+            )
+            if body.current_position is not None
+            else None
+        )
+        search_request = ContextSearchRequest(
+            project_id=project_id,
+            purpose=ContextSearchPurpose.WRITING_CONTEXT,
+            needs=_WRITING_CONTINUE_SCENE_NEEDS,
+            query=body.query or body.instruction,
+            current_position=position,
+            context_budget=ContextBudget(max_tokens=body.max_tokens),
+        )
+        request = WritingRequest(
+            request_id=body.request_id,
+            project_id=project_id,
+            task_type=task_type,
+            instruction=body.instruction,
+        )
+        candidate = WritingCandidate(
+            request_id=body.request_id,
+            project_id=project_id,
+            task_type=task_type,
+            output_type=WritingOutputType.DRAFT_PATCH,
+            text=body.candidate_text,
+        )
+        try:
+            writing_revision.validate_inputs(candidate, finding, body.instruction)
+            package = await context_search.build_context_package(search_request)
+            result = await writing_revise_gate.run(
+                request=request,
+                candidate=candidate,
+                finding=finding,
+                package=package,
+            )
+        except (WritingRevisionError, InvalidContextSearchRequest) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except InvalidWritingRevision as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except ContextSearchBudgetExceeded as exc:
+            raise HTTPException(status_code=504, detail=str(exc)) from exc
+        except ContextSearchFailed as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"{exc.error_type.value}: {exc.detail}",
+            ) from exc
+        except ProviderError as exc:
+            status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
+        except WritingReviseGateFailure as exc:
+            cause = exc.cause
+            if isinstance(cause, ProviderError):
+                status = 504 if cause.code is ProviderErrorCode.TIMEOUT else 502
+                error_type = cause.code.value
+            elif isinstance(cause, InvalidWritingGateResult):
+                status, error_type = 502, "invalid_gate_result"
+            elif isinstance(cause, WritingGateError):
+                status, error_type = 400, "writing_gate_error"
+            else:
+                status, error_type = 502, "gate_error"
+            return JSONResponse(
+                status_code=status,
+                content={
+                    "candidate": _writing_candidate_payload(exc.candidate),
+                    "gate": None,
+                    "gate_error": {
+                        "type": error_type,
+                        "detail": str(cause),
+                    },
+                },
+            )
+        return {
+            "candidate": _writing_candidate_payload(result.candidate),
+            "gate": _writing_gate_payload(result.gate),
+        }
 
     @app.post("/projects/{project_id}/writing/accept")
     async def writing_accept_endpoint(

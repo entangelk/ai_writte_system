@@ -5,7 +5,7 @@
 
 ## Current Status
 
-- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.73**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
+- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.74**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
 - 개발 진입점은 `docs/plans/README.md`. `docs/` 루트의 설계 문서는 초기 아이디에이션 자료다.
 - 구현된 계층(모두 회귀로 잠김, 아래는 현재 동작하는 표면):
   - **LLM Gateway**: FastAPI shell(`/health/live`·`/health/ready`·`/v1/generate`), llama.cpp 호환 provider + httpx async adapter, provider error 5종→HTTP status 매핑.
@@ -16,9 +16,9 @@
   - **Indexing(Phase 3A/3B + b-2)**: source block index rebuild(HTTP/CLI/deployed smoke), index sync outbox + worker(archive drain + memory reindex drain + **candidate 색인 drain**; one-shot CLI + b-6 증분1 `--loop` compose 서비스). candidate 색인 파이프라인(v1.6.54): `record_candidate(s)` → `CANDIDATE_UPSERTED` outbox → worker composite(vector `candidate_vectors` + lexical ES `candidate_lexical`). candidate 상태 전이(v1.6.61)로 **de-index 실경로화**: `CANDIDATE_REMOVED` 이벤트 → worker `index_candidate` 재유도가 not-needs_review면 delete(색인 self-heal). **ES-lexical backfill(v1.6.58)**: `scripts/phase2b5_reindex_memory.py`(memory vector+lexical)·`scripts/phase2b5_reindex_candidate.py`(candidate vector+lexical) 일괄 backfill — b-6 증분2 accepted limitation #1 해소, outbox 우회 D7 자세, live 실행은 sandbox 밖.
   - **Context search(Phase 4)**: LLM planner + orchestration + Context Gate, HTTP API, 공유 in-process vector index, real Chroma+embedding 백엔드(env 구성 시), canonical memory 포함(⑤ §5 B) + `needs_review` candidate 포함(라벨·micro·권위필드 배제, Gate가 candidate origin만 예외 허용). **canonical·candidate memory retrieval 모두** env로 backend 선택(canonical v1.6.51/52, candidate v1.6.55): `CHROMA_HOST`+`EMBEDDING_SERVICE_URL` 시 **vector relevance**, `ELASTICSEARCH_URL` 시 **ES lexical(nori)**, 둘 다면 **hybrid(RRF)**, 없으면 Mongo-direct — 모두 권위는 Mongo/analysis store 재유도(seam·item·Gate 불변). worker memory/candidate drain은 ES 구성 시 vector+lexical composite. **canonical↔candidate 승격 dedup(v1.6.60)**: candidate_memory step이 승격된 candidate(memory store `find_memory_by_candidate` 링크 존재)를 억제 — `PromotedCandidateResolver` seam(`MemoryService.is_candidate_promoted`, 미주입 시 억제 없음=종전 D7), canonical이 같은 package에 있든 없든 store 권위로 판정(D1), `ExcludedHit reason="candidate_promoted"` trace. `source_candidate_id` identity dedup이라 라이브 불요. Phase 6 candidate de-index 도입 시 상위집합 흡수(forward-defense — v1.6.61로 실경로화).
   - **Review 백엔드(Phase 6, v1.6.61~67)**: candidate confirm/reject+de-index, conflict resolve/dismiss, 사람 승인 merge/split, Review Inbox candidate/detail/source pointer, Context Gate reject finding durable persistence+inbox additive+명시 lifecycle API, candidate edit(v1.6.66), **Review Inbox 액션 어포던스(v1.6.67: list/detail·conflict·gate finding payload에 `{action,eligible,reason}` — candidate confirm/reject/edit·conflict merge[character+matched]/split[character]·gate resolve/dismiss[open]; read-time 재계산·write가 authority·additive)** 까지 구현. 남은 UI 결정은 부분 승인/retry·merge/split 일반화·frontend다.
-  - **Writing AI(Phase 5.1~5.6, v1.6.68~73)**: 평문 candidate 생성→typed report→Writing Gate→accept/save→pending Analysis job. inline `/writing/report` 재평가와 exact evidence 단일 anchor `/writing/revise`(모델 replacement 평문, Application deterministic splice)가 구현됐다. 모델은 호출/응답, Application은 anchor·validation·splice·loop/budget 제어를 소유한다. persisted 감사 이력·full pointer·retrieve_more/multi-finding/자동 Gate loop는 후속.
+  - **Writing AI(Phase 5.1~5.7, v1.6.68~74)**: 평문 candidate 생성→typed report→Writing Gate→accept/save→pending Analysis job. inline report/revise와 별도 `/writing/revise-and-gate` 1회 합성까지 구현. 동일 package로 revise+Gate, Gate 실패 시 partial candidate 보존. 모델은 호출/응답, Application은 anchor·validation·splice·합성·loop/budget 제어를 소유한다. report 최신화 합성·retrieve_more/multi-finding/내부 loop·persisted 감사 이력은 후속.
 - **Compose 런타임**: base `docker-compose.yml`(application + Mongo replica set + gateway[외부 llama 클라이언트] + embedding + chroma + **elasticsearch**[nori, v1.6.53] + **worker**[b-6 증분1]). application에 `ELASTICSEARCH_URL` 배선 → 배포 canonical·candidate retriever 기본 = **hybrid(vector+lexical RRF)**. ES는 자체 `services/elasticsearch/Dockerfile`(공식 ES + analysis-nori, single-node·보안 off). opt-in `docker-compose.llama.yml`로 in-stack llama.cpp GPU 서버(port 9080)를 띄운다. runbook: `docs/runbooks/local-llama-server.md`. **worker(index 색인 적재 drain)는 상시 compose 서비스**(`--loop` drain + SIGTERM graceful shutdown, b-6 증분1 / SoT v1.6.56) — 이전 수동/out-of-band에서 전환. atomic outbox claim이 이미 이중 실행을 막아 single-replica로 안전. **outbox per-sink bookkeeping 완료**(b-6 증분2 / SoT v1.6.57, G3=B/G4=B): enqueue는 targets 빈 dict(sink-agnostic)로 두고 worker가 claim 시 configured sink(vector/lexical)를 materialize, 각 sink가 독립 `attempt_count`/`last_error`를 가져 한 sink가 죽어도 healthy sink는 SUCCESS로 동결·재색인되지 않고 all-terminal 시에만 entry 삭제. composite `drain(entry, skip=SUCCESS)`가 per-sink `SinkOutcome`을 반환(all-or-nothing raise 폐지). retriever는 인덱스 비어도 graceful.
-- **테스트**: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **896 passed / 45 skipped / 169 subtests**(2026-07-13, v1.6.73 부분 revise 검증 B1 closure+H1~H4; 이 머신은 ES Python dependency가 있어 종전 skip 3개가 실행됨). skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
+- **테스트**: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **905 passed / 45 skipped / 181 subtests**(2026-07-13, v1.6.74 revise→Gate 합성 검증 closure; 이 머신은 ES Python dependency가 있어 종전 skip 3개가 실행됨). skip은 대부분 live Mongo/Chroma/embedding 미가용 통합 테스트.
 
 ## Active Decisions
 
@@ -68,6 +68,8 @@
 
 ## Owner Decisions Needed
 
+- **Phase 5.7 revise→Gate 1회 합성 완료(v1.6.74)**: G1~G8 첫 slice 구현. 후속은 G3 B(report 최신화), G8 B(policy/budget 내부 loop), retrieve_more 재검색/메모리 재접근.
+
 - **Phase 5.6 부분 revise 완료(v1.6.73)**: D1~D8 확정·첫 slice 구현. 순차 후속은 retrieve_more 별도 브리프, multi-finding C 비용 측정, 자동 Gate B→bounded loop C 정책, offset/hash, persisted revision 감사 API.
 
 - **Phase 5.5 inline `/writing/report` 완료(v1.6.72)**: A=inline+서버 ContextPackage 재구성 구현. B=persisted candidate/report 감사 이력과 id 기반 API는 확정 additive 후속. full pointer는 stable pointer 입력 이후, agent-loop 종료 `self_report`와는 별도 데이터 계약.
@@ -88,7 +90,7 @@
 
 1. **Phase 5.2 Writing Gate 구현 완료(v1.6.69)** — 별도 LLM Gate service/prompt/models + `POST /projects/{id}/writing/gate`, 구조화 findings와 다섯 decision/우선순위, project isolation·strict JSON/provider error mapping을 회귀로 잠갔다. 다음 핵심 후보:
    - **accept→save→analysis 재진입 완료(v1.6.70)** — 다음 Writing 후보는 구조적 self-report 또는 finding evidence 기반 부분 revise/retrieve orchestration.
-   - **구조적 report + inline 재평가 + 부분 revise 완료(v1.6.71~73)** — 다음 순차 후보는 retrieve_more 착수 브리프 또는 partial revise D5 B(자동 Gate 1회) 브리프. 이후 multi-finding/loop, stable pointer, persisted 감사 API.
+   - **report + 부분 revise + Gate 1회 합성 완료(v1.6.71~74)** — 다음 후보는 G3 B(report 최신화 합성) 또는 retrieve_more 브리프. 이후 multi-finding/loop, stable pointer, persisted 감사 API.
    - **Phase 6 UI 잔여**(대안 트랙) — 부분 승인/부분 retry·merge/split를 event/open_question로 일반화·frontend(framework 미확정 보류).
    - **(b-4) hybrid 튜닝**(최후순위) — RRF k·가중치·fetch depth 실 데이터 캘리브레이션. *실 embedding/데이터 의존 → 서브 머신 막힘.*
    - **(c-2) production threshold** — 실 라벨 데이터로 threshold 값 산출(운영 튜닝).
@@ -103,10 +105,11 @@
 ## Verification
 
 - **Writing partial revise(v1.6.73) 독립 검증 조건부 합격 → B1 closure**: `docs/verifications/2026-07-13/writing_partial_revise.md`. context budget→504/backend→502 HTTP 빈 셀을 닫고, 빈 입력 pre-context guard·no-save spy·Markdown fence Application unwrap을 보강했다. focused 84/68, full 896/45/169.
+- **Writing revise→Gate(v1.6.74) 독립 검증 조건부 합격 → B1 closure**: `docs/verifications/2026-07-13/writing_revise_gate.md`. composition 전용 revise validation→400·provider timeout→504 빈 셀과 Gate 미호출을 잠갔다. Gate validation 400·예상 밖 평가 실패 502 partial envelope도 보강하고 SoT taxonomy를 명시했다. focused 93/80, full 905/45/181.
 
 - **Writing report API(v1.6.72) 독립 검증 조건부 합격 → B1 closure**: `docs/verifications/2026-07-13/writing_report_api.md`. report endpoint 전용 unsupported task→400 빈 셀을 named test로 닫았다. 비차단 H1 invalid-context→400을 SoT+test로 명시하고 H2 Core SOT no-save spy, H3 explicit query, H4 current_position wiring도 보강했다. focused 71/54, full 883/45/155.
 
-- 현재 시스템 전체 스위트: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **896 passed / 45 skipped / 169 subtests**. `git diff --check` clean.
+- 현재 시스템 전체 스위트: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **905 passed / 45 skipped / 181 subtests**. `git diff --check` clean.
 - **Writing 생성(v1.6.68) 오너 독립 검증 합격(조건 없음)**: `docs/verifications/2026-07-12/writing_generation.md`(매트릭스 10행+mutation 6종 bite). 자체 회귀 +19(prompt 조립 4·generate 7·HTTP 8). 비차단 H2(504/502 orchestration 브랜치) HTTP +2 보강(504 mutation bite). H1(self_reported forward-defense)·H3(평문 live)·H4(budget 1차원) 코드 무변. 실 LLM live smoke는 후속.
 - **Review Inbox 액션 어포던스(v1.6.67) 오너 독립 검증 합격(조건 없음)**: `docs/verifications/2026-07-12/review_inbox_affordances.md`. 매트릭스 11행 전수 잠금, 자격 변형 4종 bite. 자체 회귀 +7(pure 자격 5 + HTTP envelope 2).
 - **candidate edit B1 closure 재검증 합격(조건부→승격)**: `docs/verifications/2026-07-12/candidate_edit_b1_closure.md`. 비차단 hardening 보강: confirm/reject 테스트에도 conflict-queue `status is RESOLVED/DISMISSED` over-strict assertion 추가(3개 review action 일관 잠금, mutation bite 재실증). 어포던스 `reason`은 display text·machine contract는 `action`+`eligible`임을 SoT/브리프 명시(H2).
@@ -142,7 +145,7 @@ docs/
 │   ├── 02-* / 02b-* / 03-* / 04-*-decisions.md   # slice별 착수 결정 브리프(대부분 Resolved)
 ├── benchmarks/2026-06-30/       # Gemma Q4 budget 기본값 근거
 ├── daily_logs/2026-06-24 … 2026-07-08/work_log.md   # 상세 이력
-└── verifications/2026-06-24 … 2026-07-08/           # 독립 검증 기록
+└── verifications/2026-06-24 … 2026-07-13/           # 독립 검증 기록
 services/
 ├── elasticsearch/Dockerfile     # 배포 ES = 공식 ES 8.13.4 + analysis-nori(v1.6.53); compose build 컨텍스트
 ├── llm_gateway/app/             # main(shell) · payload · provider · errors · transport · client · httpx_transport

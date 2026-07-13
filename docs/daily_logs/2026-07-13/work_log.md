@@ -133,3 +133,74 @@
 - **H4**: 명백한 Markdown triple-backtick fence만 Application이 결정적으로 unwrap한다. 정상 대화문 따옴표는 의미를 훼손할 수 있어 제거하지 않는다.
 - validation 이동 patch가 처음 유사한 Gate endpoint에 오삽입됐으나 focused Gate 회귀가 즉시 잡았다. 오삽입을 제거하고 `validate_inputs` 호출이 revise endpoint에만 남음을 grep/회귀로 확인했다.
 - closure focused: **84 passed / 68 subtests**. closure full: **896 passed / 45 skipped / 169 subtests**.
+
+## Phase 5.7 partial revise → Gate 1회 합성 착수 브리프
+
+### Goals
+
+- v1.6.73 D5 로드맵의 다음 단계 B(자동 Gate 1회)를 구현하기 전에 public API와 partial-success 계약을 확정한다.
+
+### Completed work
+
+- clean commit `d8231cf` 이후 D5 B의 정본 범위와 accept partial-success 선례를 대조했다.
+- `docs/plans/05-writing-revise-gate-decisions.md`를 작성해 API 경계, ContextPackage, report 위치, Gate 실패 envelope, non-pass, response shape, dependency/error, 반복 종료를 G1~G8로 분리했다.
+
+### Issues found
+
+- 기존 `/writing/revise`를 변경하면 v1.6.73의 flat candidate 응답·latency·dependency를 깨므로 additive endpoint 여부가 필요하다.
+- revised candidate는 비영속이라 Gate 실패 시 오류만 반환하면 성공 artifact가 유실된다. 반대로 200 failed는 transport 실패를 성공처럼 보일 수 있어 partial-success status/envelope 결정이 필요하다.
+- revised report는 비어 있어 report 재추출을 합성하면 LLM 3회와 새 partial 단계가 생긴다.
+
+### Decisions
+
+- 작업자 추천은 별도 `/writing/revise-and-gate`, 동일 package, report 없이 Gate, Gate 실패 502/504 partial candidate, non-pass 200, `{candidate,gate}` 중첩, revise/Gate 각 1회다.
+- G1~G8은 owner-level public contract이므로 승인 전 production code를 시작하지 않는다.
+
+### Next steps
+
+- 오너가 G1~G8을 확정하면 SoT 반영→boundary tests→합성 service/API→전체 회귀→원격 LLM 2-turn live 순서로 진행한다.
+
+## Phase 5.7 partial revise → Gate 1회 합성 구현 (SoT v1.6.74)
+
+### Goals
+
+- 승인된 G1~G8에 따라 기존 `/writing/revise`를 보존하면서 revise 성공 artifact를 잃지 않는 Gate 1회 합성 API를 구현한다.
+
+### Completed work
+
+- 오너 결정: G1=A, G2=A, G3=A first→B, G4=A, G5=A, G6=A, G7=A, G8=A first→B. 중간 수정 후 retrieve_more일 때만 재검색/메모리 재접근을 후속 설계한다.
+- `writing/revise_gate.py`에 `WritingReviseGateService`, result, `WritingReviseGateFailure(candidate,cause)`를 추가했다. 동일 ContextPackage 객체로 reviser 1회→Gate 1회를 실행한다.
+- `POST /projects/{id}/writing/revise-and-gate`를 추가했다. 성공은 `{candidate,gate}`, Gate non-pass 5종도 200이다.
+- revise 성공 뒤 Gate 실패는 `{candidate,gate:null,gate_error:{type,detail}}`로 비영속 revised artifact를 보존한다. 입력/설정 검증은 400, provider·invalid 결과·예기치 않은 평가 실패는 502, timeout은 504다. revise/context 실패는 candidate가 없으므로 기존 400/502/504를 유지하고 Gate를 호출하지 않는다.
+- report 재추출·두 번째 revise·save/accept/Analysis는 호출하지 않는다. revised candidate의 빈 report가 Gate에 전달된다.
+- HTTP 회귀로 동일 package identity, revise/Gate 각 1회, 다섯 decision 200, Gate timeout/unavailable/invalid partial envelope, revise 실패 Gate 미호출, missing dependencies 503, context 504/502, no-save를 잠갔다.
+
+### Issues found
+
+- G4는 D8 unchanged와 다르다. D8은 revised candidate가 없고, G4는 candidate 생성 후 Gate만 실패하므로 partial artifact envelope가 필요하다.
+- 원격 실모델 2-turn에서 revise는 성공했으나 Gate가 invalid/empty JSON을 반환했다. 합성 service가 `WritingReviseGateFailure`로 revised candidate를 보존해 `partial_ok`를 확인했다. Gate JSON 품질/repair는 v1.6.69 Gate 자체의 별도 후속이며 이번 합성은 실패를 숨기지 않는다.
+
+### Verification
+
+- focused: writing revise/gate/generate/report/accept → **91 passed / 78 subtests**.
+- remote live: revise 성공 후 Gate `InvalidWritingGateResult`; partial candidate text 보존, `status=partial_ok`.
+- full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **903 passed / 45 skipped / 179 subtests**.
+- `python3 -m py_compile`(main/revise_gate/test)·`git diff --check` 통과.
+
+### Next steps
+
+- G3 B(report 최신화 후 Gate)의 latency/partial 단계 계약을 별도 브리프로 연다.
+- G8 B 내부 loop 전에 자동 반복 decision/finding, 사람 확인, budget, retrieve_more 재검색 lifecycle을 잠근다.
+
+### 독립 검증 조건부 합격 closure + hardening
+
+- 독립 검증 `docs/verifications/2026-07-13/writing_revise_gate.md`를 정본·코드·테스트와 대조했다. 합성 계약과 실모델 partial candidate 보존은 통과했으나, composition endpoint 자체의 revise validation 400과 revise provider timeout 504가 전용 회귀 없이 비어 있다는 B1 판정이 타당했다.
+- **B1 closure**: duplicate evidence를 제출하면 context/revise/Gate 호출 전 400이고, 정상 unique evidence는 같은 fixture에서 200으로 관통하도록 under/over-strict 양방향을 잠갔다. revise provider timeout은 context/reviser까지만 호출하고 Gate 호출 0인 채 504임을 별도 테스트로 잠갔다.
+- **H1**: Gate의 `WritingGateError→400 writing_gate_error`와 예상 밖 평가 예외 `→502 gate_error`도 실제 partial candidate envelope를 보존하는지 기존 table test에 추가했다. 전자는 템플릿 부재 같은 Gate 설정 실패에서도 도달 가능하므로 방어 분기로만 남기지 않았다.
+- **H2**: G4 문구를 기존 동작 및 전체 taxonomy와 맞춰 보정했다. Gate 입력/설정 검증은 400, provider·invalid result·예기치 않은 평가 실패는 502, provider timeout은 504이며 모두 revised candidate를 포함한다. production 동작 변경은 없다.
+
+### Verification
+
+- focused: writing revise/gate/generate/report/accept → **93 passed / 80 subtests**.
+- full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **905 passed / 45 skipped / 181 subtests**.
+- `python3 -m py_compile`(main/revise_gate/test)·`git diff --check` 통과.
