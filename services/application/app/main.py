@@ -87,6 +87,7 @@ from services.application.app.writing.revise import (
 )
 from services.application.app.writing.revise_gate import (
     WritingReviseGateFailure,
+    WritingReviseReportFailure,
     WritingReviseGateService,
 )
 from services.application.app.writing.gate import (
@@ -1026,8 +1027,11 @@ def create_app(
             timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
             trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False)))
     writing_revise_gate = (
-        WritingReviseGateService(reviser=writing_revision, gate=writing_gate)
-        if writing_revision is not None and writing_gate is not None else None
+        WritingReviseGateService(
+            reviser=writing_revision, reporter=writing_report, gate=writing_gate
+        )
+        if (writing_revision is not None and writing_report is not None
+            and writing_gate is not None) else None
     )
     writing_accept = (
         WritingAcceptService(core_sot=core_sot, analysis=analysis,
@@ -2654,6 +2658,26 @@ def create_app(
         except ProviderError as exc:
             status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
             raise HTTPException(status_code=status, detail=str(exc)) from exc
+        except WritingReviseReportFailure as exc:
+            cause = exc.cause
+            if isinstance(cause, ProviderError):
+                status = 504 if cause.code is ProviderErrorCode.TIMEOUT else 502
+                error_type = cause.code.value
+            elif isinstance(cause, InvalidCandidateReport):
+                status, error_type = 502, "invalid_candidate_report"
+            else:
+                status, error_type = 502, "report_error"
+            return JSONResponse(
+                status_code=status,
+                content={
+                    "candidate": _writing_candidate_payload(exc.candidate),
+                    "gate": None,
+                    "report_error": {
+                        "type": error_type,
+                        "detail": str(cause),
+                    },
+                },
+            )
         except WritingReviseGateFailure as exc:
             cause = exc.cause
             if isinstance(cause, ProviderError):

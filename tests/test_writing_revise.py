@@ -2,6 +2,7 @@
 
 import asyncio
 import unittest
+from dataclasses import replace
 
 import httpx
 
@@ -45,6 +46,7 @@ from services.application.app.writing.gate import (
     InvalidWritingGateResult,
     WritingGateError,
 )
+from services.application.app.writing.report import InvalidCandidateReport
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
 from services.llm_gateway.app.provider import GenerationResult, TokenUsage
 
@@ -216,8 +218,26 @@ class _Gate:
         )
 
 
+class _Reporter:
+    def __init__(self, *, error=None):
+        self.error = error
+        self.calls = 0
+        self.last_candidate = None
+        self.last_package = None
+
+    async def enrich(self, candidate, package):
+        self.calls += 1
+        self.last_candidate = candidate
+        self.last_package = package
+        if self.error:
+            raise self.error
+        return replace(candidate, candidate_claims=(CandidateClaim(
+            "fresh", CandidateClaimType.NARRATIVE_EVENT, True
+        ),))
+
+
 def _http(provider=None, *, context_error=None, core_service=None,
-          gate_service=None):
+          gate_service=None, report_service=None):
     core = core_service or CoreSotService(InMemoryCoreSotRepository())
     context = _Context(_package(), error=context_error)
     app = create_app(
@@ -225,6 +245,7 @@ def _http(provider=None, *, context_error=None, core_service=None,
         context_search_service=context,
         writing_revision_service=_service(provider) if provider else None,
         writing_gate_service=gate_service,
+        writing_report_service=report_service,
     )
     client = _Client(app)
     project = client.post("/projects", {"name": "Novel"}).json()["id"]
@@ -335,7 +356,10 @@ class WritingReviseGateApiTest(unittest.TestCase):
     def test_composes_one_revise_and_one_gate_with_same_context(self):
         provider = _Provider()
         gate = _Gate()
-        client, project, context = _http(provider, gate_service=gate)
+        reporter = _Reporter()
+        client, project, context = _http(
+            provider, gate_service=gate, report_service=reporter
+        )
 
         response = self._post(client, project)
 
@@ -344,20 +368,28 @@ class WritingReviseGateApiTest(unittest.TestCase):
         self.assertEqual(body["candidate"]["text"], "앞 문장. 고친 문장. 뒤 문장.")
         self.assertEqual(body["gate"]["decision"], "pass")
         self.assertEqual(provider.calls, 1)
+        self.assertEqual(reporter.calls, 1)
         self.assertEqual(gate.calls, 1)
+        self.assertIs(reporter.last_package, context.last_package)
         self.assertIs(gate.last_package, context.last_package)
-        self.assertEqual(gate.last_candidate.candidate_claims, ())
+        self.assertEqual(reporter.last_candidate.candidate_claims, ())
+        self.assertEqual(gate.last_candidate.candidate_claims[0].text, "fresh")
+        self.assertEqual(body["candidate"]["candidate_claims"][0]["text"], "fresh")
 
     def test_all_gate_decisions_are_200_without_second_revise(self):
         for decision in WritingGateDecision:
             provider = _Provider()
             gate = _Gate(decision)
-            client, project, _ = _http(provider, gate_service=gate)
+            reporter = _Reporter()
+            client, project, _ = _http(
+                provider, gate_service=gate, report_service=reporter
+            )
             with self.subTest(decision=decision):
                 response = self._post(client, project)
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.json()["gate"]["decision"], decision.value)
                 self.assertEqual(provider.calls, 1)
+                self.assertEqual(reporter.calls, 1)
                 self.assertEqual(gate.calls, 1)
 
     def test_gate_failure_returns_partial_candidate(self):
@@ -373,13 +405,19 @@ class WritingReviseGateApiTest(unittest.TestCase):
             (RuntimeError("unexpected gate failure"), 502, "gate_error"),
         )
         for error, expected, error_type in cases:
-            client, project, _ = _http(_Provider(), gate_service=_Gate(error=error))
+            client, project, _ = _http(
+                _Provider(), gate_service=_Gate(error=error),
+                report_service=_Reporter(),
+            )
             with self.subTest(error=type(error).__name__):
                 response = self._post(client, project)
                 self.assertEqual(response.status_code, expected)
                 body = response.json()
                 self.assertEqual(
                     body["candidate"]["text"], "앞 문장. 고친 문장. 뒤 문장."
+                )
+                self.assertEqual(
+                    body["candidate"]["candidate_claims"][0]["text"], "fresh"
                 )
                 self.assertIsNone(body["gate"])
                 self.assertEqual(body["gate_error"]["type"], error_type)
@@ -388,7 +426,10 @@ class WritingReviseGateApiTest(unittest.TestCase):
         """Reject an invalid anchor, but keep a valid unique anchor accepted."""
         provider = _Provider()
         gate = _Gate()
-        client, project, context = _http(provider, gate_service=gate)
+        reporter = _Reporter()
+        client, project, context = _http(
+            provider, gate_service=gate, report_service=reporter
+        )
 
         response = self._post(
             client, project,
@@ -398,12 +439,14 @@ class WritingReviseGateApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(context.calls, 0)
         self.assertEqual(provider.calls, 0)
+        self.assertEqual(reporter.calls, 0)
         self.assertEqual(gate.calls, 0)
 
         accepted = self._post(client, project)
         self.assertEqual(accepted.status_code, 200)
         self.assertEqual(context.calls, 1)
         self.assertEqual(provider.calls, 1)
+        self.assertEqual(reporter.calls, 1)
         self.assertEqual(gate.calls, 1)
 
     def test_revise_provider_timeout_is_504_without_calling_gate(self):
@@ -413,30 +456,47 @@ class WritingReviseGateApiTest(unittest.TestCase):
             retryable=True, provider="gateway",
         ))
         gate = _Gate()
-        client, project, context = _http(provider, gate_service=gate)
+        reporter = _Reporter()
+        client, project, context = _http(
+            provider, gate_service=gate, report_service=reporter
+        )
 
         response = self._post(client, project)
 
         self.assertEqual(response.status_code, 504)
         self.assertEqual(context.calls, 1)
         self.assertEqual(provider.calls, 1)
+        self.assertEqual(reporter.calls, 0)
         self.assertEqual(gate.calls, 0)
 
     def test_revise_failure_never_calls_gate(self):
         gate = _Gate()
+        reporter = _Reporter()
         client, project, _ = _http(
-            _Provider("잘못된 문장."), gate_service=gate
+            _Provider("잘못된 문장."), gate_service=gate,
+            report_service=reporter,
         )
         response = self._post(client, project)
         self.assertEqual(response.status_code, 502)
+        self.assertEqual(reporter.calls, 0)
         self.assertEqual(gate.calls, 0)
 
     def test_missing_gate_or_reviser_is_503(self):
-        client, project, _ = _http(_Provider())
+        client, project, _ = _http(_Provider(), report_service=_Reporter())
         self.assertEqual(self._post(client, project).status_code, 503)
 
-        client, project, _ = _http(gate_service=_Gate())
+        client, project, _ = _http(
+            gate_service=_Gate(), report_service=_Reporter()
+        )
         self.assertEqual(self._post(client, project).status_code, 503)
+
+        provider = _Provider()
+        gate = _Gate()
+        client, project, context = _http(provider, gate_service=gate)
+        self.assertEqual(self._post(client, project).status_code, 503)
+        self.assertEqual(context.calls, 0)
+        self.assertEqual(provider.calls, 0)
+        self.assertEqual(gate.calls, 0)
 
     def test_context_failures_map_without_revise_or_gate_calls(self):
         cases = (
@@ -447,21 +507,57 @@ class WritingReviseGateApiTest(unittest.TestCase):
         for error, expected in cases:
             provider = _Provider()
             gate = _Gate()
+            reporter = _Reporter()
             client, project, _ = _http(
-                provider, gate_service=gate, context_error=error
+                provider, gate_service=gate, context_error=error,
+                report_service=reporter,
             )
             with self.subTest(error=type(error).__name__):
                 self.assertEqual(self._post(client, project).status_code, expected)
                 self.assertEqual(provider.calls, 0)
+                self.assertEqual(reporter.calls, 0)
                 self.assertEqual(gate.calls, 0)
 
     def test_composition_does_not_save_draft(self):
         core = _NoWriteCoreSotService()
         client, project, _ = _http(
-            _Provider(), gate_service=_Gate(), core_service=core
+            _Provider(), gate_service=_Gate(), report_service=_Reporter(),
+            core_service=core,
         )
         self.assertEqual(self._post(client, project).status_code, 200)
         self.assertEqual(core.save_calls, 0)
+
+    def test_report_failure_returns_partial_candidate_without_calling_gate(self):
+        cases = (
+            (ProviderError(
+                code=ProviderErrorCode.TIMEOUT, message="report timeout",
+                retryable=True, provider="gateway"), 504, "provider_timeout"),
+            (ProviderError(
+                code=ProviderErrorCode.UNAVAILABLE, message="report down",
+                retryable=True, provider="gateway"), 502, "provider_unavailable"),
+            (InvalidCandidateReport("bad report"), 502,
+             "invalid_candidate_report"),
+            (RuntimeError("unexpected report failure"), 502, "report_error"),
+        )
+        for error, expected, error_type in cases:
+            gate = _Gate()
+            reporter = _Reporter(error=error)
+            client, project, _ = _http(
+                _Provider(), gate_service=gate, report_service=reporter
+            )
+
+            with self.subTest(error=type(error).__name__):
+                response = self._post(client, project)
+                self.assertEqual(response.status_code, expected)
+                body = response.json()
+                self.assertEqual(
+                    body["candidate"]["text"], "앞 문장. 고친 문장. 뒤 문장."
+                )
+                self.assertEqual(body["candidate"]["candidate_claims"], [])
+                self.assertIsNone(body["gate"])
+                self.assertEqual(body["report_error"]["type"], error_type)
+                self.assertEqual(reporter.calls, 1)
+                self.assertEqual(gate.calls, 0)
 
 
 if __name__ == "__main__":

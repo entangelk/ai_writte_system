@@ -170,7 +170,7 @@
 
 - 오너 결정: G1=A, G2=A, G3=A first→B, G4=A, G5=A, G6=A, G7=A, G8=A first→B. 중간 수정 후 retrieve_more일 때만 재검색/메모리 재접근을 후속 설계한다.
 - `writing/revise_gate.py`에 `WritingReviseGateService`, result, `WritingReviseGateFailure(candidate,cause)`를 추가했다. 동일 ContextPackage 객체로 reviser 1회→Gate 1회를 실행한다.
-- `POST /projects/{id}/writing/revise-and-gate`를 추가했다. 성공은 `{candidate,gate}`, Gate non-pass 5종도 200이다.
+- `POST /projects/{id}/writing/revise-and-gate`를 추가했다. 성공은 `{candidate,gate}`, Gate decision 5종(pass + non-pass 4종) 모두 200이다.
 - revise 성공 뒤 Gate 실패는 `{candidate,gate:null,gate_error:{type,detail}}`로 비영속 revised artifact를 보존한다. 입력/설정 검증은 400, provider·invalid 결과·예기치 않은 평가 실패는 502, timeout은 504다. revise/context 실패는 candidate가 없으므로 기존 400/502/504를 유지하고 Gate를 호출하지 않는다.
 - report 재추출·두 번째 revise·save/accept/Analysis는 호출하지 않는다. revised candidate의 빈 report가 Gate에 전달된다.
 - HTTP 회귀로 동일 package identity, revise/Gate 각 1회, 다섯 decision 200, Gate timeout/unavailable/invalid partial envelope, revise 실패 Gate 미호출, missing dependencies 503, context 504/502, no-save를 잠갔다.
@@ -204,3 +204,81 @@
 - focused: writing revise/gate/generate/report/accept → **93 passed / 80 subtests**.
 - full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **905 passed / 45 skipped / 181 subtests**.
 - `python3 -m py_compile`(main/revise_gate/test)·`git diff --check` 통과.
+
+## Phase 5.7 G3 B revise → report → Gate 착수 브리프
+
+### Goals
+
+- HANDOFF 우선순위에 따라 G3 B를 retrieve_more·G8 내부 loop보다 먼저 열고, LLM 3단계 및 report 실패 partial envelope 계약을 구현 전에 확정한다.
+
+### Completed work
+
+- SoT v1.6.71~74, 기존 revise→Gate 브리프, `/writing/report`, `WritingCandidateReportService`, Gate 실패 partial envelope 선례를 대조했다.
+- `docs/plans/05-writing-revise-report-gate-decisions.md`를 작성해 endpoint 전환, ContextPackage lifecycle, report 실패 envelope/taxonomy, 성공 shape, dependency/호출 수를 R1~R6으로 분리했다.
+- HANDOFF의 owner decision과 Next Tasks를 G3 B 브리프 대기 상태로 갱신했다.
+
+### Issues found
+
+- G3는 A first→B 목표만 승인됐고, 기존 endpoint를 승격할지 새 endpoint/flag로 열지는 확정되지 않았다.
+- revise 성공 뒤 report가 실패하면 비영속 revised candidate가 이미 존재한다. 오류만 반환하면 artifact가 유실되고, 빈 report로 Gate를 계속 실행하면 G3 B가 조용히 종전 G3 A로 퇴행한다.
+- report service는 논리 단계 1회 안에서 invalid JSON repair를 최대 1회 수행하므로, “LLM 3단계”와 실제 provider 최대 호출 수를 구분해야 한다.
+
+### Decisions
+
+- 사용자 방향: 다음 Writing 작업은 G3 부채를 우선한다. retrieve_more, G8 loop, persisted 감사 이력과 이후 확장은 그 뒤 후보로 둔다.
+- 작업자 추천: R1~R6 모두 A. 기존 합성 endpoint를 같은 ContextPackage의 revise→report→Gate로 승격하고, report 실패는 502/504 + revised candidate + `report_error`, `gate=null`로 보존한다. Gate는 report 성공 뒤에만 호출한다.
+- R1~R6은 owner-level public contract이므로 오너 승인 전 production code는 변경하지 않는다.
+
+### Next steps
+
+- 오너가 R1~R6을 확정하면 SoT 반영→boundary tests 우선→최소 합성 service/API 변경→focused/full 비-LLM 회귀→원격 3단계 live smoke 순서로 구현한다.
+
+## Phase 5.7 G3 B revise → report → Gate 구현 (SoT v1.6.75)
+
+### Goals
+
+- 승인된 R1~R6에 따라 기존 합성 endpoint를 동일 ContextPackage의 revise→report 최신화→Gate 순서로 승격한다.
+- report 실패 때 비영속 revised candidate를 보존하고 Gate를 호출하지 않는 양방향 회귀를 먼저 잠근다.
+
+### Completed work
+
+- 사용자 결정: R1/R2/R3/R4/R6=A. R5는 다회 합성 확장성을 원했으며, 현재 `{candidate,gate}`에 `stages`를 additive로 붙이는 비용이 작다는 확인에 따라 **A first→C later**로 확정했다. 다회 합성을 실제로 열 때 stage item/status/attempt/usage schema와 loop budget을 함께 결정한다.
+- `WritingReviseGateService`에 `CandidateReporter`와 `WritingReviseReportFailure`를 추가했다. Application이 revise→report enrich→Gate를 순서대로 실행하며 세 단계가 같은 ContextPackage 객체를 사용한다.
+- report 성공 candidate만 Gate에 전달하고 응답에도 반환한다. report 실패는 `{candidate,gate:null,report_error:{type,detail}}`로 revised candidate를 보존하며 Gate를 호출하지 않는다.
+- report error는 provider timeout 504, provider unavailable/invalid report/예상 밖 실패 502로 구분한다. reporter가 없으면 합성 service 자체가 구성되지 않아 503이며 context/revise/Gate 호출은 0이다.
+- 성공 envelope는 기존 `{candidate,gate}`를 유지했다. save/accept/Analysis/재검색/두 번째 revise와 `stages`는 추가하지 않았다.
+- 브리프를 Resolved로 전환하고 SoT v1.6.75, Phase 5 계획, CHANGELOG, HANDOFF를 현재 동작으로 갱신했다.
+
+### Issues found
+
+- R5 C를 지금 구현하려면 단순 배열 추가가 아니라 stage item의 안정 literal(status, error, attempt, model/usage)을 새 public contract로 결정해야 했다. 반면 일반 JSON object에 `stages`를 나중에 additive로 붙이는 구현 비용은 작다.
+- “report 1회”는 합성 단계 1회를 뜻하지만 strict parser가 invalid JSON을 받으면 기존 report service 내부에서 provider repair를 최대 1회 더 호출한다. 합성 service는 별도 retry를 추가하지 않았다.
+
+### Decisions
+
+- 사용자 결정과 이유: 다회 합성 가능성을 닫지 않는다. 현재 additive 확장 비용이 작으므로 R5=A first→C를 채택해 G3에 불필요한 stage schema를 선행 도입하지 않는다.
+- report 실패 뒤 빈 report로 Gate를 계속 실행하지 않는다. 이는 G3 B가 종전 G3 A로 조용히 퇴행하는 것을 막는다.
+- retrieve_more의 package 교체와 DB·메모리 재접근은 이번 동일-package 계약에 섞지 않고 다음 전용 브리프로 남긴다.
+
+### Verification
+
+- red-first: 새 합성 회귀가 종전 2단계 구현에서 reporter 0회, missing reporter 200, report failure 200으로 실패함을 확인했다.
+- focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_revise.py tests/test_writing_report.py tests/test_writing.py tests/test_writing_gate.py tests/test_writing_accept.py` → **94 passed / 84 subtests**.
+- full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **906 passed / 45 skipped / 185 subtests**.
+- `python3 -m py_compile services/application/app/main.py services/application/app/writing/revise_gate.py tests/test_writing_revise.py` 통과.
+- pattern sweep: `WritingReviseGateService`, `revise-and-gate`, 빈 `candidate_claims` 전달 패턴을 repo-wide grep하고 관련 기존 라인에 `git blame`을 확인했다. 추가로 report를 건너뛰는 합성 경로는 없었다.
+
+### Next steps
+
+- 다음 우선 후보는 `retrieve_more`의 query/needs, ContextPackage 교체, DB·메모리 재접근 lifecycle 결정 브리프다.
+- 그 뒤 G8 B 내부 loop의 자동 반복 decision/finding, 사람 확인 조건, 전체 호출/token/time budget을 결정한다.
+- persisted candidate/revision/report/GateRun identity와 `stages` 감사 envelope는 loop/persistence 경계가 실제로 열릴 때 함께 정한다.
+
+### 독립 검증 B1 closure + H1 문구 보정
+
+- 독립 검증 `docs/verifications/2026-07-13/writing_revise_report_gate.md`의 조건부 합격을 대조했다. 구현은 Gate 실패에서 enriched candidate를 보존하지만, 전용 partial envelope 테스트가 text와 taxonomy만 검사해 최신 report 보존 회귀를 잡지 못한다는 B1 판정이 타당했다.
+- **B1 closure**: `test_gate_failure_returns_partial_candidate`가 모든 Gate 실패 taxonomy case에서 `candidate_claims[0].text == "fresh"`를 직접 단언한다. report 실패의 `candidate_claims == []` assertion과 대칭이며, `WritingReviseGateFailure(enriched, exc)`를 `revised`로 퇴행시키면 실패한다.
+- 동일 `enriched→revised` mutation을 재주입해 전용 테스트가 5개 taxonomy subtest 모두 `IndexError`로 실패하는 것을 확인한 뒤 즉시 원복했다. 정상 구현 재실행은 통과했다.
+- **H1**: `WritingGateDecision`은 전체 5종이고 non-pass는 4종이다. SoT v1.6.74/75, G3 B 브리프, CHANGELOG, 작업 로그의 “non-pass 5종” 오기를 “Gate decision 5종(pass + non-pass 4종)”으로 정정했다. 동작·public literal은 변경하지 않았다.
+- H2(report repair/합성 retry)와 H3(accept/Analysis side-effect)는 검증 기록대로 현재 전용 report service 회귀와 합성 service 구조/no-save 회귀가 충분하므로 추가 코드를 만들지 않았다.
+- closure focused: **94 passed / 84 subtests**. closure full: **906 passed / 45 skipped / 185 subtests**. `py_compile`·`git diff --check` 통과.

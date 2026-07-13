@@ -1,4 +1,4 @@
-"""One-shot partial-revise then Writing Gate composition."""
+"""One-shot partial-revise, report refresh, then Writing Gate composition."""
 
 from __future__ import annotations
 
@@ -28,6 +28,12 @@ class CandidateGate(Protocol):
     ) -> WritingGateResult: ...
 
 
+class CandidateReporter(Protocol):
+    async def enrich(
+        self, candidate: WritingCandidate, package: ContextPackage,
+    ) -> WritingCandidate: ...
+
+
 @dataclass(frozen=True, slots=True)
 class WritingReviseGateResult:
     candidate: WritingCandidate
@@ -41,9 +47,18 @@ class WritingReviseGateFailure(RuntimeError):
         self.cause = cause
 
 
+class WritingReviseReportFailure(RuntimeError):
+    def __init__(self, candidate: WritingCandidate, cause: Exception) -> None:
+        super().__init__(str(cause))
+        self.candidate = candidate
+        self.cause = cause
+
+
 class WritingReviseGateService:
-    def __init__(self, *, reviser: CandidateReviser, gate: CandidateGate) -> None:
+    def __init__(self, *, reviser: CandidateReviser, reporter: CandidateReporter,
+                 gate: CandidateGate) -> None:
         self._reviser = reviser
+        self._reporter = reporter
         self._gate = gate
 
     async def run(
@@ -61,9 +76,13 @@ class WritingReviseGateService:
             package=package,
         )
         try:
+            enriched = await self._reporter.enrich(revised, package)
+        except Exception as exc:
+            raise WritingReviseReportFailure(revised, exc) from exc
+        try:
             gate = await self._gate.evaluate(
-                request=request, candidate=revised, package=package
+                request=request, candidate=enriched, package=package
             )
         except Exception as exc:
-            raise WritingReviseGateFailure(revised, exc) from exc
-        return WritingReviseGateResult(candidate=revised, gate=gate)
+            raise WritingReviseGateFailure(enriched, exc) from exc
+        return WritingReviseGateResult(candidate=enriched, gate=gate)
