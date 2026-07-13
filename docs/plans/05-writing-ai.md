@@ -83,6 +83,7 @@ MVP에서 최소한 요청 적합성, 프로젝트 격리, hard constraint 위�
 - [x] candidate report 별도 재평가 — **v1.6.72 확정/구현**: side-effect-free inline `/writing/report`, 서버 ContextPackage 재구성. persisted candidate/report 감사 이력과 id 기반 API는 additive 후속.
 - [x] finding evidence 기반 부분 revise 첫 slice — **v1.6.73 확정/구현**: continuity+revise 단일 finding, exact evidence 단일 anchor, 모델 replacement 평문+Application splice, inline `/writing/revise`. retrieve_more·multi-finding·자동 Gate/loop·persisted revision은 순차 후속.
 - [x] partial revise→report→Gate 1회 합성 — **v1.6.75 확정/구현**: 별도 `/writing/revise-and-gate`, 동일 ContextPackage로 revise→report 최신화→Gate, non-pass 200. report 실패는 revised candidate+`report_error` partial envelope(502/504)와 Gate 미호출, Gate 실패는 최신 report candidate+`gate_error` partial envelope(400/502/504). 성공 `{candidate,gate}`는 다회 합성 시 `stages` additive 확장 가능. 내부 loop·retrieve_more 재검색은 후속.
+- [x] `retrieve_more` targeted 1회 lifecycle — **v1.6.76 확정/구현**: 기존 합성의 첫 Gate가 retrieve_more일 때 follow-up retrieval planner가 `query+canonical needs`를 선택하고 이전 package+delta를 merge한다. candidate/report는 유지하고 merged package로 Gate만 최대 한 번 재평가한다. 성공 shape 무변, retrieval 실패는 candidate+첫 Gate+`retrieval_error`; 다회 loop와 `stages`는 후속.
 
 ## 원문 및 상세 참고
 

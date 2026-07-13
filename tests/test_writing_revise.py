@@ -11,6 +11,7 @@ from services.application.app.analysis.prompt_templates import (
     PromptTemplateService,
 )
 from services.application.app.context_search.models import (
+    ContextNeed,
     ContextPackage,
     ContextSearchErrorType,
     ContextSearchPurpose,
@@ -18,6 +19,7 @@ from services.application.app.context_search.models import (
 from services.application.app.context_search.service import (
     ContextSearchBudgetExceeded,
     ContextSearchFailed,
+    InvalidContextSearchRequest,
 )
 from services.application.app.core_sot.service import (
     CoreSotService,
@@ -47,6 +49,11 @@ from services.application.app.writing.gate import (
     WritingGateError,
 )
 from services.application.app.writing.report import InvalidCandidateReport
+from services.application.app.writing.retrieval import (
+    InvalidWritingRetrievalPlan,
+    WritingRetrievalPlan,
+    WritingRetrievalPlannerError,
+)
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
 from services.llm_gateway.app.provider import GenerationResult, TokenUsage
 
@@ -161,16 +168,17 @@ class WritingRevisionServiceTest(unittest.TestCase):
 
 
 class _Context:
-    def __init__(self, package, *, error=None):
+    def __init__(self, package, *, error=None, error_on_call=1):
         self.package = package
         self.error = error
+        self.error_on_call = error_on_call
         self.last_request = None
         self.calls = 0
 
     async def build_context_package(self, request):
         self.calls += 1
         self.last_request = request
-        if self.error:
+        if self.error and self.calls >= self.error_on_call:
             raise self.error
         self.last_package = _package(request.project_id)
         return self.last_package
@@ -213,8 +221,47 @@ class _Gate:
         self.last_package = package
         if self.error:
             raise self.error
+        findings = (
+            (WritingGateFinding(
+                WritingGateFindingType.CONTINUITY,
+                WritingGateSeverity.WARNING,
+                "정본 근거가 부족함",
+                candidate.text,
+                WritingGateDecision.RETRIEVE_MORE,
+            ),)
+            if self.decision is WritingGateDecision.RETRIEVE_MORE else ()
+        )
         return WritingGateResult(
-            request.request_id, request.project_id, self.decision, (), (), "fake-gate"
+            request.request_id, request.project_id, self.decision, findings, (),
+            "fake-gate"
+        )
+
+
+class _SequenceGate(_Gate):
+    def __init__(self, decisions):
+        super().__init__()
+        self.decisions = list(decisions)
+
+    async def evaluate(self, *, request, candidate, package):
+        self.decision = self.decisions.pop(0)
+        return await super().evaluate(
+            request=request, candidate=candidate, package=package
+        )
+
+
+class _RetrievalPlanner:
+    def __init__(self, *, error=None):
+        self.error = error
+        self.calls = 0
+        self.last_gate = None
+
+    async def plan(self, *, request, candidate, gate, current_position=None):
+        self.calls += 1
+        self.last_gate = gate
+        if self.error:
+            raise self.error
+        return WritingRetrievalPlan(
+            query="부족한 사건 근거", needs=(ContextNeed.EVENT_CONTEXT,)
         )
 
 
@@ -237,15 +284,19 @@ class _Reporter:
 
 
 def _http(provider=None, *, context_error=None, core_service=None,
-          gate_service=None, report_service=None):
+          gate_service=None, report_service=None, retrieval_planner=None,
+          context_error_on_call=1):
     core = core_service or CoreSotService(InMemoryCoreSotRepository())
-    context = _Context(_package(), error=context_error)
+    context = _Context(
+        _package(), error=context_error, error_on_call=context_error_on_call
+    )
     app = create_app(
         service=core,
         context_search_service=context,
         writing_revision_service=_service(provider) if provider else None,
         writing_gate_service=gate_service,
         writing_report_service=report_service,
+        writing_retrieval_planner=retrieval_planner,
     )
     client = _Client(app)
     project = client.post("/projects", {"name": "Novel"}).json()["id"]
@@ -376,13 +427,19 @@ class WritingReviseGateApiTest(unittest.TestCase):
         self.assertEqual(gate.last_candidate.candidate_claims[0].text, "fresh")
         self.assertEqual(body["candidate"]["candidate_claims"][0]["text"], "fresh")
 
-    def test_all_gate_decisions_are_200_without_second_revise(self):
+    def test_all_gate_decisions_are_200_with_at_most_one_retrieval_round(self):
         for decision in WritingGateDecision:
             provider = _Provider()
-            gate = _Gate(decision)
+            gate = (
+                _SequenceGate((decision, decision))
+                if decision is WritingGateDecision.RETRIEVE_MORE
+                else _Gate(decision)
+            )
             reporter = _Reporter()
+            retrieval = _RetrievalPlanner()
             client, project, _ = _http(
-                provider, gate_service=gate, report_service=reporter
+                provider, gate_service=gate, report_service=reporter,
+                retrieval_planner=retrieval,
             )
             with self.subTest(decision=decision):
                 response = self._post(client, project)
@@ -390,7 +447,130 @@ class WritingReviseGateApiTest(unittest.TestCase):
                 self.assertEqual(response.json()["gate"]["decision"], decision.value)
                 self.assertEqual(provider.calls, 1)
                 self.assertEqual(reporter.calls, 1)
+                expected_rounds = 2 if decision is WritingGateDecision.RETRIEVE_MORE else 1
+                self.assertEqual(gate.calls, expected_rounds)
+                self.assertEqual(retrieval.calls, expected_rounds - 1)
+
+    def test_retrieve_more_merges_and_regates_without_rereport(self):
+        provider = _Provider()
+        gate = _SequenceGate((
+            WritingGateDecision.RETRIEVE_MORE, WritingGateDecision.PASS,
+        ))
+        reporter = _Reporter()
+        retrieval = _RetrievalPlanner()
+        core = _NoWriteCoreSotService()
+        client, project, context = _http(
+            provider, gate_service=gate, report_service=reporter,
+            retrieval_planner=retrieval, core_service=core,
+        )
+
+        response = self._post(client, project)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["gate"]["decision"], "pass")
+        self.assertEqual(body["candidate"]["request_id"], "r1")
+        self.assertEqual(body["candidate"]["project_id"], project)
+        self.assertIsNone(body["candidate"]["candidate_id"])
+        self.assertEqual(context.calls, 2)
+        self.assertEqual(context.last_request.needs, (ContextNeed.EVENT_CONTEXT,))
+        self.assertEqual(retrieval.calls, 1)
+        self.assertEqual(reporter.calls, 1)
+        self.assertEqual(gate.calls, 2)
+        self.assertEqual(gate.last_candidate.candidate_claims[0].text, "fresh")
+        self.assertEqual(core.save_calls, 0)
+
+    def test_retrieval_failure_preserves_candidate_and_first_gate(self):
+        retrieval = _RetrievalPlanner(error=RuntimeError("planner exploded"))
+        gate = _Gate(WritingGateDecision.RETRIEVE_MORE)
+        reporter = _Reporter()
+        client, project, _ = _http(
+            _Provider(), gate_service=gate, report_service=reporter,
+            retrieval_planner=retrieval,
+        )
+
+        response = self._post(client, project)
+
+        self.assertEqual(response.status_code, 502)
+        body = response.json()
+        self.assertEqual(body["candidate"]["candidate_claims"][0]["text"], "fresh")
+        self.assertEqual(body["gate"]["decision"], "retrieve_more")
+        self.assertEqual(body["retrieval_error"]["type"], "retrieval_error")
+        self.assertEqual(gate.calls, 1)
+        self.assertEqual(reporter.calls, 1)
+
+    def test_retrieval_dependency_and_context_failures_are_partial(self):
+        cases = (
+            (None, None, 1, 503, "retrieval_not_configured"),
+            (_RetrievalPlanner(error=ProviderError(
+                code=ProviderErrorCode.TIMEOUT, message="planner timeout",
+                retryable=True, provider="gateway",
+            )), None, 1, 504, "provider_timeout"),
+            (_RetrievalPlanner(error=ProviderError(
+                code=ProviderErrorCode.UNAVAILABLE, message="planner down",
+                retryable=True, provider="gateway",
+            )), None, 1, 502, "provider_unavailable"),
+            (_RetrievalPlanner(error=InvalidWritingRetrievalPlan(
+                "invalid plan"
+            )), None, 1, 502, "invalid_retrieval_plan"),
+            (_RetrievalPlanner(error=WritingRetrievalPlannerError(
+                "missing planner template"
+            )), None, 1, 503, "retrieval_planner_error"),
+            (_RetrievalPlanner(), ContextSearchFailed(
+                ContextSearchErrorType.BACKEND_ERROR, "delta backend down"
+            ), 2, 502, "backend_error"),
+            (_RetrievalPlanner(), InvalidContextSearchRequest(
+                "position required"
+            ), 2, 400, "invalid_context_request"),
+            (_RetrievalPlanner(), ContextSearchBudgetExceeded(
+                "delta budget"
+            ), 2, 504, "context_budget_exceeded"),
+        )
+        for planner, context_error, error_on_call, expected, error_type in cases:
+            gate = _Gate(WritingGateDecision.RETRIEVE_MORE)
+            reporter = _Reporter()
+            client, project, _ = _http(
+                _Provider(), gate_service=gate, report_service=reporter,
+                retrieval_planner=planner, context_error=context_error,
+                context_error_on_call=error_on_call,
+            )
+            with self.subTest(error_type=error_type):
+                response = self._post(client, project)
+                self.assertEqual(response.status_code, expected)
+                body = response.json()
+                self.assertEqual(body["gate"]["decision"], "retrieve_more")
+                self.assertEqual(
+                    body["candidate"]["candidate_claims"][0]["text"], "fresh"
+                )
+                self.assertEqual(body["retrieval_error"]["type"], error_type)
                 self.assertEqual(gate.calls, 1)
+                self.assertEqual(reporter.calls, 1)
+
+    def test_second_gate_failure_keeps_latest_report_without_rereport(self):
+        class _SecondGateFailure(_SequenceGate):
+            async def evaluate(self, *, request, candidate, package):
+                if self.calls == 1:
+                    raise InvalidWritingGateResult("second gate invalid")
+                return await super().evaluate(
+                    request=request, candidate=candidate, package=package
+                )
+
+        gate = _SecondGateFailure((WritingGateDecision.RETRIEVE_MORE,))
+        reporter = _Reporter()
+        client, project, _ = _http(
+            _Provider(), gate_service=gate, report_service=reporter,
+            retrieval_planner=_RetrievalPlanner(),
+        )
+
+        response = self._post(client, project)
+
+        self.assertEqual(response.status_code, 502)
+        body = response.json()
+        self.assertIsNone(body["gate"])
+        self.assertEqual(body["gate_error"]["detail"], "second gate invalid")
+        self.assertEqual(body["gate_error"]["type"], "invalid_gate_result")
+        self.assertEqual(body["candidate"]["candidate_claims"][0]["text"], "fresh")
+        self.assertEqual(reporter.calls, 1)
 
     def test_gate_failure_returns_partial_candidate(self):
         cases = (

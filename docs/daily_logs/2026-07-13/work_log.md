@@ -282,3 +282,132 @@
 - **H1**: `WritingGateDecision`은 전체 5종이고 non-pass는 4종이다. SoT v1.6.74/75, G3 B 브리프, CHANGELOG, 작업 로그의 “non-pass 5종” 오기를 “Gate decision 5종(pass + non-pass 4종)”으로 정정했다. 동작·public literal은 변경하지 않았다.
 - H2(report repair/합성 retry)와 H3(accept/Analysis side-effect)는 검증 기록대로 현재 전용 report service 회귀와 합성 service 구조/no-save 회귀가 충분하므로 추가 코드를 만들지 않았다.
 - closure focused: **94 passed / 84 subtests**. closure full: **906 passed / 45 skipped / 185 subtests**. `py_compile`·`git diff --check` 통과.
+
+## Phase 5.8 `retrieve_more` 1회 lifecycle 착수 브리프
+
+### Goals
+
+- HANDOFF의 다음 순차 작업인 `retrieve_more`를 구현하기 전에 query/needs, ContextPackage 교체, report·Gate 재실행과 반복 종료의 public contract를 확정 가능한 결정 단위로 나눈다.
+
+### Completed work
+
+- 정본 우선순위가 `docs/system-contract-sot.md` → Approved/구현으로 잠긴 Phase 계획 → 미구현 계획 순으로 이미 정의돼 있음을 확인했다.
+- SoT v1.6.69/v1.6.73~75, Writing Gate·partial revise·revise→report→Gate 브리프, Phase 4 `ContextSearchRequest`/`ContextNeed`, 현재 endpoint와 합성 service를 대조했다.
+- `docs/plans/05-writing-retrieve-more-decisions.md`를 작성해 public API, trigger 입력, query 소유권, need 집합, package lifecycle, 재검색 뒤 순서, envelope, 반복/identity를 T1~T8로 분리했다.
+- 모든 현실적인 선택지와 장단점을 남기고 T1~T8=A를 추천했다. 오너 결정 전 production code와 SoT 버전은 변경하지 않았다.
+- `HANDOFF.md`의 Owner Decisions Needed와 Next Tasks를 Phase 5.8 결정 대기 상태로 갱신했다.
+
+### Issues found
+
+- 문제: Gate finding은 candidate exact evidence와 `retrieve_more` recommendation만 제공하며 검색 query/need를 제공하지 않는다. 기존 continue-scene 검색은 `current_scene|recent_scenes|canonical_memory`라 같은 요청을 반복해도 검색 범위가 실제로 넓어지지 않을 수 있다.
+- 원인: v1.6.69는 side-effect-free 판정만, v1.6.75는 동일-package revise→report→Gate까지만 잠갔고 retrieval lifecycle은 의도적으로 후속으로 남겼다.
+- 해결/결과: 임의 구현을 중단하고 결정 브리프로 전환했다. 추천안은 새 Gate schema 없이 instruction+finding message+evidence의 결정적 query fallback과 `event_context|source_quote`를 더한 canonical 확장 needs로 fresh package를 만든다.
+- 충돌 점검: scoped 정본 안에서 자기모순은 발견하지 않았다. 다만 “재검색한다”는 목표만 있고 public contract가 비어 있어 오너 결정 없이는 구현할 수 없다.
+
+### Decisions
+
+- 작업자 추천: 별도 `/writing/retrieve-and-gate`가 candidate+단일 retrieve finding을 받아 fresh ContextPackage를 한 번 만들고, 새 package에서 report→Gate를 한 번 실행한다(T1~T8=A).
+- 추천안은 candidate memory를 canonical 근거 부족 해소 수단에서 제외하고, candidate text 수정·두 번째 검색·자동 revise·save/accept/Analysis·persistence를 이번 slice 밖에 둔다.
+- 이번 기록은 추천이며 사용자 결정이 아니다. 승인 전 계약 literal이나 SoT를 확정 상태로 올리지 않는다.
+
+### Verification
+
+- 문서 참조 확인: 브리프가 인용한 `05-writing-gate-decisions.md`, `05-writing-revise-report-gate-decisions.md`, SoT v1.6.69/v1.6.75, Phase 4 `ContextSearchRequest`/`ContextNeed`가 모두 존재하고 기술한 현재 literal과 일치함을 grep/원문 대조했다.
+- production code 무변. `git diff --check`로 문서 diff와 Markdown whitespace 이상이 없음을 확인했다.
+
+### Next steps
+
+- 오너가 `05-writing-retrieve-more-decisions.md` T1~T8을 확정하면 결정을 SoT/브리프/작업 로그에 반영한다.
+- 승인 후 boundary tests red-first → 최소 search→report→Gate service/API → focused/full 비-LLM 회귀 → 필요 시 live retrieval/Gate smoke 순서로 진행한다.
+- 그 뒤 G8 B의 자동 반복 decision/finding, 사람 확인 조건과 전체 search/provider/token/time budget을 별도 브리프로 연다.
+
+## Phase 5.8 targeted `retrieve_more` 구현 (SoT v1.6.76)
+
+### Goals
+
+- 필요한 needs만 내부 LLM이 선택해 재조회하고, 이전 ContextPackage와 이어지는 targeted retrieval을 최대 한 번 실행한다.
+- candidate/report를 불필요하게 다시 만들지 않으면서 merged grounding으로 Writing Gate를 재평가한다.
+
+### Completed work
+
+- 사용자 결정에 따라 브리프를 T1=B, T2=B, T3/T4=E, T5/T6=B, T7/T8=A first→B로 확정하고 SoT를 v1.6.76으로 올렸다.
+- `writing/retrieval.py`에 strict terminal-JSON follow-up retrieval planner를 추가했다. 첫 Gate의 모든 retrieve_more finding, candidate, instruction과 현재 사용 가능한 canonical need allowlist를 입력으로 `query+needs`를 선택하며 malformed/out-of-set 결과는 1회 repair한다.
+- 현재 position이 없으면 `current_scene|recent_scenes`를 planner allowlist에서 제외한다. `candidate_memory`, 빈/중복/미지원 needs와 빈 query는 검색 전에 거부한다.
+- `merge_context_packages`가 targeted delta를 먼저 배치하고 pointer `(collection,document_id,version_id,content_hash)`로 dedup한 뒤 전체 max_tokens budget을 다시 적용한다. 기존 package가 예산을 모두 점유해 새 근거를 굶기는 문제를 막는다.
+- `WritingReviseGateService`가 revise→report→첫 Gate 뒤 retrieve_more일 때만 planner→targeted context search→merge→두 번째 Gate를 실행한다. report는 candidate text가 변하지 않으므로 재호출하지 않고 최신 report 필드를 그대로 보존한다.
+- `max_retrieval_rounds=1`을 강제했다. 두 번째 Gate도 retrieve_more면 200 정상 outcome으로 종료하며 추가 planner/search/Gate는 없다.
+- endpoint 성공 `{candidate,gate}`는 최종 Gate로 유지했다. 첫 Gate 뒤 planner/context 실패는 `{candidate,gate:<첫 Gate>,retrieval_error}` 400/502/503/504 partial envelope로 candidate와 판정 artifact를 보존한다.
+- 신규 `tests/test_writing_retrieval.py`와 확장 `tests/test_writing_revise.py`가 planner/repair/allowlist, merge 양방향, no-rereport, 1회 상한, partial taxonomy와 두 번째 Gate failure를 잠근다.
+
+### Issues found
+
+- 문제: 기존 Phase 4 LLM planner는 전달받은 needs 안에서 step/query/tool을 계획할 뿐 needs 자체를 선택하지 않는다.
+- 원인: ContextSearchRequest의 needs가 planner 호출 전에 이미 확정되는 계약이다.
+- 해결/결과: Writing Gate schema를 확장하지 않고 그 앞에 follow-up retrieval planner를 두었다. 두 planner는 각각 “무엇을 찾을지”와 “선택된 need를 어떤 tool/step으로 찾을지”를 소유한다.
+- 문제: T5=B merge는 이전 package가 필요하지만 ContextPackage는 비영속이고 public response에도 없다.
+- 해결/결과: 독립 endpoint(T1=A) 추천을 폐기하고 기존 합성 호출 내부(T1=B)에서 첫 Gate 직후 이어가도록 했다.
+- 문제: 전체 budget을 base-first로 재적용하면 이미 찬 package 때문에 targeted delta가 모두 탈락할 수 있다.
+- 해결/결과: delta-first+pointer dedup으로 새 근거를 우선하고 남는 예산에 이전 context를 유지한다.
+
+### Decisions
+
+- 사용자 결정과 이유: 로컬 LLM 재호출 비용은 감당 가능하지만 부분적으로 충분한 package에서 고정 3종/5종을 전부 재실행하는 낭비는 피한다. 별도 LLM이 필요한 needs를 내부 판단한다.
+- 사용자 결정: 이전 결과와 이어지는 package merge(T5=B), candidate/report 유지 후 Gate만 재평가(T6=B), 성공 envelope A first→후속 stages(B), retrieval 상한 1 first→후속 다회(B)를 채택한다.
+- 파생 결정: 새 LLM은 판정 authority가 아니므로 Writing Gate가 아닌 `follow-up retrieval planner`로 명명한다. 기존 Phase 4 planner와 책임이 겹치지 않는다.
+- tradeoff: report prompt도 ContextPackage를 입력받으므로 context-relative report가 달라질 수 있으나, candidate text는 불변이고 최종 Gate가 merged package를 직접 보므로 이번 slice는 report 재호출 비용을 생략한다.
+
+### Verification
+
+- red-first: 신규 테스트는 `services.application.app.writing.retrieval` 부재로 collection error가 발생해 구현 전 실패를 확인했다.
+- lifecycle focused: `tests/test_writing_retrieval.py tests/test_writing_revise.py` → **34 passed / 39 subtests**.
+- Writing focused: retrieval/revise/report/generate/gate/accept → **105 passed / 93 subtests**.
+- full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **917 passed / 45 skipped / 194 subtests**.
+- `python3 -m py_compile`(main/retrieval/revise_gate/tests)·`git diff --check` 통과.
+- pattern sweep: `RETRIEVE_MORE|retrieve_more|max_retrieval|merge_context_packages|build_context_package`를 repo-wide grep하고 기존 합성 service/endpoint 라인에 `git blame`을 확인했다. 자동 retrieve_more를 중복 실행하는 다른 Writing 경로는 없었다.
+
+### Next steps
+
+- G8 B에서 `max_retrieval_rounds>1` 또는 retrieve→revise 자동 분기를 열기 전에 사람 확인 decision/finding, 반복별 report 정책과 전체 search/provider/token/time budget을 결정한다.
+- 성공 단계 관측성이 필요해지면 R5/T7의 `stages` additive schema를 persisted candidate/GateRun identity와 함께 연다.
+- 실 LLM smoke에서는 planner가 fixture별 최소 needs를 고르는지와 merged package가 Gate 결정을 바꾸는지 관찰한다. wiring은 fake 회귀로 완결됐으며 production 품질 채택은 live 라벨과 분리한다.
+
+## Phase 5.8 독립 검증 B2 closure + H1~H3 hardening
+
+### Goals
+
+- `docs/verifications/2026-07-13/writing_retrieve_more.md`의 조건부 합격 사유 B2를 정본과 코드가 같은 경계를 말하도록 폐쇄한다.
+- 비차단 H1~H3 중 작은 전용 회귀로 직접 잠글 수 있는 retrieval taxonomy, no-save, identity/candidate_id를 보강한다.
+
+### Completed work
+
+- 검증 기록을 전수 읽고 9행 boundary matrix, 코드, 테스트와 대조했다. B2의 `current_position` 부재 시 `MACRO_NEEDS` 제외가 코드·테스트에는 있으나 브리프/SoT에는 없는 spec-silent gap이라는 판정이 타당했다.
+- `05-writing-retrieve-more-decisions.md`의 Owner T3/T4, T4 채택문, boundary 3과 SoT v1.6.76에 “`current_position` 부재 시 `current_scene|recent_scenes` 제외”를 명시했다. CHANGELOG에도 같은 position 조건을 반영했다.
+- H1: endpoint retrieval taxonomy에서 빠졌던 `provider_unavailable`(502), `invalid_retrieval_plan`(502), `retrieval_planner_error`(503), `invalid_context_request`(400)를 기존 partial table test에 추가했다. 기존 5종과 함께 candidate+첫 Gate 보존을 직접 검사한다.
+- H2: 실제 retrieve_more 성공 경로에 `_NoWriteCoreSotService`를 주입해 두 번째 Gate까지 완료돼도 `save_draft` 호출이 0임을 단언했다.
+- H3: 같은 성공 경로 응답에서 `request_id` 유지, `project_id` 유지, `candidate_id is None`을 직접 단언했다.
+- production code는 변경하지 않았다. 검증 기록 자체는 독립 감사 원문으로 보존하고 HANDOFF에 closure 및 독립 재판정 대기를 기록했다.
+
+### Issues found
+
+- 문제: T4/경계 3이 canonical 5종을 position 조건 없이 서술해, position 없을 때 3종으로 좁히는 코드가 정본보다 엄격했다.
+- 원인: 구현 시 Phase 4 `ContextSearchService._validate_request`의 position-required 계약을 planner 앞에서 선제 적용했지만 브리프와 SoT에는 파생 조건을 옮기지 않았다.
+- 해결/결과: 합리적인 코드 동작을 완화하지 않고 정본에 조건을 명시했다. repo-wide pattern sweep에서 `MACRO_NEEDS`는 Phase 4가 동일하게 `current_position is None`을 거부하므로 기존 상위 계약과 일치한다.
+
+### Decisions
+
+- 사용자 요청: 독립 검증 기록의 보강 필요 항목을 확인해 반영한다.
+- 파생 결정: B2 선택지 중 코드 완화가 아니라 정본 보충을 채택한다. position 없는 current/recent는 Phase 4에서 실행 불가능하므로 5종 항상 허용은 downstream 400을 늦출 뿐이다.
+- H1~H3은 public literal과 side-effect/identity boundary를 직접 잠그는 저비용 회귀라 함께 보강한다. 새 기능이나 error taxonomy는 추가하지 않는다.
+
+### Verification
+
+- lifecycle focused: `tests/test_writing_retrieval.py tests/test_writing_revise.py` → **34 passed / 43 subtests**.
+- Writing focused(6파일): **105 passed / 97 subtests**.
+- full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **917 passed / 45 skipped / 198 subtests**.
+- `python3 -m py_compile`(main/retrieval/revise_gate/tests)·`git diff --check` 통과.
+- pattern sweep: `current_position is None|is not None|MACRO_NEEDS`를 repo-wide grep했다. Phase 4 request validation이 같은 position dependency를 이미 강제하며, 다른 spec-silent Writing allowlist는 발견하지 못했다.
+
+### Next steps
+
+- 독립 verifier가 B2 closure를 재판정하면 `writing_retrieve_more.md` verdict를 조건부 합격에서 합격으로 승격할 수 있다.
+- working tree는 아직 미커밋 상태다. 오너가 원하면 v1.6.76 구현+closure를 한 커밋으로 묶는다.

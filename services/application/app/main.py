@@ -86,9 +86,17 @@ from services.application.app.writing.revise import (
     seed_writing_revise_template,
 )
 from services.application.app.writing.revise_gate import (
+    WritingRetrievalConfigurationError,
+    WritingRetrievalFailure,
     WritingReviseGateFailure,
     WritingReviseReportFailure,
     WritingReviseGateService,
+)
+from services.application.app.writing.retrieval import (
+    InvalidWritingRetrievalPlan,
+    TerminalJsonWritingRetrievalPlanner,
+    WritingRetrievalPlannerError,
+    seed_writing_retrieval_template,
 )
 from services.application.app.writing.gate import (
     InvalidWritingGateResult,
@@ -510,6 +518,17 @@ def _build_revise_service(provider) -> WritingRevisionService:
         prompt_templates=templates,
         model=os.environ.get("LLM_GATEWAY_MODEL") or None,
         max_tokens=int(os.environ.get("WRITING_REVISE_MAX_TOKENS", "512")),
+    )
+
+
+def _build_writing_retrieval_planner(provider):
+    templates = PromptTemplateService(InMemoryPromptTemplateRepository())
+    seed_writing_retrieval_template(templates)
+    return TerminalJsonWritingRetrievalPlanner(
+        provider,
+        prompt_templates=templates,
+        model=os.environ.get("LLM_GATEWAY_MODEL") or None,
+        max_tokens=int(os.environ.get("WRITING_RETRIEVAL_PLAN_MAX_TOKENS", "512")),
     )
 
 
@@ -958,6 +977,7 @@ def create_app(
     writing_gate_service: WritingGateService | None = None,
     writing_report_service: WritingCandidateReportService | None = None,
     writing_revision_service: WritingRevisionService | None = None,
+    writing_retrieval_planner: TerminalJsonWritingRetrievalPlanner | None = None,
     vector_index: InMemoryVectorIndexAdapter | None = None,
 ) -> FastAPI:
     app = FastAPI(title="AI Writing System Application")
@@ -1026,13 +1046,6 @@ def create_app(
             base_url=os.environ["LLM_GATEWAY_BASE_URL"],
             timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
             trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False)))
-    writing_revise_gate = (
-        WritingReviseGateService(
-            reviser=writing_revision, reporter=writing_report, gate=writing_gate
-        )
-        if (writing_revision is not None and writing_report is not None
-            and writing_gate is not None) else None
-    )
     writing_accept = (
         WritingAcceptService(core_sot=core_sot, analysis=analysis,
                              gate=writing_gate, reporter=writing_report)
@@ -1071,6 +1084,27 @@ def create_app(
             memory=memory,
             analysis=analysis,
         )
+    retrieval_planner = writing_retrieval_planner
+    if retrieval_planner is None and os.environ.get("LLM_GATEWAY_BASE_URL"):
+        retrieval_planner = _build_writing_retrieval_planner(
+            GatewayGenerateProvider(
+                base_url=os.environ["LLM_GATEWAY_BASE_URL"],
+                timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
+                trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False),
+            )
+        )
+    writing_revise_gate = (
+        WritingReviseGateService(
+            reviser=writing_revision,
+            reporter=writing_report,
+            gate=writing_gate,
+            retrieval_planner=retrieval_planner,
+            context_search=context_search,
+            max_retrieval_rounds=1,
+        )
+        if (writing_revision is not None and writing_report is not None
+            and writing_gate is not None) else None
+    )
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -2643,6 +2677,8 @@ def create_app(
                 candidate=candidate,
                 finding=finding,
                 package=package,
+                current_position=position,
+                context_budget=search_request.context_budget,
             )
         except (WritingRevisionError, InvalidContextSearchRequest) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -2673,6 +2709,36 @@ def create_app(
                     "candidate": _writing_candidate_payload(exc.candidate),
                     "gate": None,
                     "report_error": {
+                        "type": error_type,
+                        "detail": str(cause),
+                    },
+                },
+            )
+        except WritingRetrievalFailure as exc:
+            cause = exc.cause
+            if isinstance(cause, ProviderError):
+                status = 504 if cause.code is ProviderErrorCode.TIMEOUT else 502
+                error_type = cause.code.value
+            elif isinstance(cause, InvalidWritingRetrievalPlan):
+                status, error_type = 502, "invalid_retrieval_plan"
+            elif isinstance(cause, WritingRetrievalConfigurationError):
+                status, error_type = 503, "retrieval_not_configured"
+            elif isinstance(cause, WritingRetrievalPlannerError):
+                status, error_type = 503, "retrieval_planner_error"
+            elif isinstance(cause, InvalidContextSearchRequest):
+                status, error_type = 400, "invalid_context_request"
+            elif isinstance(cause, ContextSearchBudgetExceeded):
+                status, error_type = 504, "context_budget_exceeded"
+            elif isinstance(cause, ContextSearchFailed):
+                status, error_type = 502, cause.error_type.value
+            else:
+                status, error_type = 502, "retrieval_error"
+            return JSONResponse(
+                status_code=status,
+                content={
+                    "candidate": _writing_candidate_payload(exc.candidate),
+                    "gate": _writing_gate_payload(exc.gate),
+                    "retrieval_error": {
                         "type": error_type,
                         "detail": str(cause),
                     },
