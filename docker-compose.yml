@@ -35,6 +35,11 @@ services:
       LLM_GATEWAY_BASE_URL: "http://gateway:8001"
       LLM_GATEWAY_MODEL: "${LLAMA_DEFAULT_MODEL:-gemma-local}"
       LLM_GATEWAY_TIMEOUT_SECONDS: "${LLAMA_TIMEOUT_SECONDS:-120}"
+      # Phase 5.9 bounded Writing loop structural caps. These include the
+      # initial requested revision/Gate and can be tuned after observing stages.
+      WRITING_LOOP_MAX_REVISION_ROUNDS: "${WRITING_LOOP_MAX_REVISION_ROUNDS:-2}"
+      WRITING_LOOP_MAX_RETRIEVAL_ROUNDS: "${WRITING_LOOP_MAX_RETRIEVAL_ROUNDS:-1}"
+      WRITING_LOOP_MAX_GATE_EVALUATIONS: "${WRITING_LOOP_MAX_GATE_EVALUATIONS:-3}"
       # Real vector backend (B.4): the embedding service and Chroma. When these
       # are set the shared vector index is the persistent Chroma backend with
       # real 1024-dim embeddings; without them the app falls back to the fake.

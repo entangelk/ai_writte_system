@@ -40,7 +40,10 @@ from services.application.app.writing.retrieval import (
     parse_writing_retrieval_plan,
     seed_writing_retrieval_template,
 )
-from services.application.app.writing.revise_gate import WritingReviseGateService
+from services.application.app.writing.revise_gate import (
+    WritingLoopPolicy,
+    WritingReviseGateService,
+)
 from services.llm_gateway.app.provider import GenerationResult, TokenUsage
 
 
@@ -269,7 +272,7 @@ class WritingRetrieveLifecycleTest(unittest.TestCase):
         service = WritingReviseGateService(
             reviser=_Reviser(), reporter=reporter, gate=gate,
             retrieval_planner=planner, context_search=context,
-            max_retrieval_rounds=1,
+            policy=WritingLoopPolicy(max_retrieval_rounds=1),
         )
 
         result = asyncio.run(service.run(
@@ -320,7 +323,7 @@ class WritingRetrieveLifecycleTest(unittest.TestCase):
         service = WritingReviseGateService(
             reviser=_Reviser(), reporter=reporter, gate=gate,
             retrieval_planner=planner, context_search=context,
-            max_retrieval_rounds=1,
+            policy=WritingLoopPolicy(max_retrieval_rounds=1),
         )
         result = asyncio.run(service.run(
             request=WritingRequest(

@@ -1,8 +1,10 @@
 """Phase 5.6 exact-evidence partial revise regressions."""
 
 import asyncio
+import os
 import unittest
 from dataclasses import replace
+from unittest.mock import patch
 
 import httpx
 
@@ -49,6 +51,7 @@ from services.application.app.writing.gate import (
     WritingGateError,
 )
 from services.application.app.writing.report import InvalidCandidateReport
+from services.application.app.writing.revise_gate import WritingLoopPolicy
 from services.application.app.writing.retrieval import (
     InvalidWritingRetrievalPlan,
     WritingRetrievalPlan,
@@ -95,6 +98,21 @@ class _Provider:
         if self.error:
             raise self.error
         return GenerationResult("fake-reviser", self.content, "stop", TokenUsage(1, 1))
+
+
+class _SequenceProvider(_Provider):
+    def __init__(self, contents):
+        super().__init__()
+        self.contents = list(contents)
+
+    async def generate(self, request):
+        next_result = self.contents.pop(0)
+        if isinstance(next_result, Exception):
+            self.error = next_result
+        else:
+            self.error = None
+            self.content = next_result
+        return await super().generate(request)
 
 
 def _service(provider):
@@ -249,6 +267,31 @@ class _SequenceGate(_Gate):
         )
 
 
+class _LoopGate(_Gate):
+    def __init__(self, decisions, *, revise_evidence="고친 문장."):
+        super().__init__()
+        self.decisions = list(decisions)
+        self.revise_evidence = revise_evidence
+
+    async def evaluate(self, *, request, candidate, package):
+        self.calls += 1
+        self.last_candidate = candidate
+        self.last_package = package
+        decision = self.decisions.pop(0)
+        if decision is WritingGateDecision.REVISE:
+            findings = (_finding(self.revise_evidence),)
+        elif decision is WritingGateDecision.RETRIEVE_MORE:
+            findings = (_finding(
+                candidate.text, decision=WritingGateDecision.RETRIEVE_MORE
+            ),)
+        else:
+            findings = ()
+        return WritingGateResult(
+            request.request_id, request.project_id, decision, findings, (),
+            "fake-gate"
+        )
+
+
 class _RetrievalPlanner:
     def __init__(self, *, error=None):
         self.error = error
@@ -285,7 +328,7 @@ class _Reporter:
 
 def _http(provider=None, *, context_error=None, core_service=None,
           gate_service=None, report_service=None, retrieval_planner=None,
-          context_error_on_call=1):
+          context_error_on_call=1, loop_policy=None):
     core = core_service or CoreSotService(InMemoryCoreSotRepository())
     context = _Context(
         _package(), error=context_error, error_on_call=context_error_on_call
@@ -297,6 +340,7 @@ def _http(provider=None, *, context_error=None, core_service=None,
         writing_gate_service=gate_service,
         writing_report_service=report_service,
         writing_retrieval_planner=retrieval_planner,
+        writing_loop_policy=loop_policy,
     )
     client = _Client(app)
     project = client.post("/projects", {"name": "Novel"}).json()["id"]
@@ -404,6 +448,25 @@ class WritingReviseGateApiTest(unittest.TestCase):
             f"/projects/{project}/writing/revise-and-gate", body or _body()
         )
 
+    def test_loop_policy_accepts_tunable_caps_and_rejects_invalid_settings(self):
+        policy = WritingLoopPolicy(
+            max_revision_rounds=3, max_retrieval_rounds=2,
+            max_gate_evaluations=5,
+        )
+        self.assertEqual(
+            (policy.max_revision_rounds, policy.max_retrieval_rounds,
+             policy.max_gate_evaluations),
+            (3, 2, 5),
+        )
+        invalid = (
+            {"max_revision_rounds": 0},
+            {"max_retrieval_rounds": -1},
+            {"max_gate_evaluations": 0},
+        )
+        for override in invalid:
+            with self.subTest(override=override), self.assertRaises(ValueError):
+                WritingLoopPolicy(**override)
+
     def test_composes_one_revise_and_one_gate_with_same_context(self):
         provider = _Provider()
         gate = _Gate()
@@ -426,6 +489,255 @@ class WritingReviseGateApiTest(unittest.TestCase):
         self.assertEqual(reporter.last_candidate.candidate_claims, ())
         self.assertEqual(gate.last_candidate.candidate_claims[0].text, "fresh")
         self.assertEqual(body["candidate"]["candidate_claims"][0]["text"], "fresh")
+
+    def test_auto_revise_refreshes_report_and_reaches_pass(self):
+        provider = _SequenceProvider(("고친 문장.", "다시 고친 문장."))
+        gate = _LoopGate((WritingGateDecision.REVISE, WritingGateDecision.PASS))
+        reporter = _Reporter()
+        client, project, context = _http(
+            provider, gate_service=gate, report_service=reporter,
+        )
+
+        response = self._post(client, project)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["candidate"]["text"],
+                         "앞 문장. 다시 고친 문장. 뒤 문장.")
+        self.assertEqual(body["gate"]["decision"], "pass")
+        self.assertEqual(body["loop"], {
+            "status": "pass", "revision_rounds": 2,
+            "retrieval_rounds": 0, "gate_evaluations": 2,
+        })
+        self.assertEqual(
+            [(stage["stage"], stage["ordinal"], stage["status"])
+             for stage in body["stages"]],
+            [("revise", 1, "completed"), ("report", 2, "completed"),
+             ("gate", 3, "completed"), ("revise", 4, "completed"),
+             ("report", 5, "completed"), ("gate", 6, "completed")],
+        )
+        self.assertTrue(all(set(stage) == {"stage", "ordinal", "status"}
+                            for stage in body["stages"]))
+        self.assertEqual(provider.calls, 2)
+        self.assertEqual(reporter.calls, 2)
+        self.assertEqual(gate.calls, 2)
+        self.assertEqual(context.calls, 1)
+
+    def test_retrieve_then_revise_uses_each_action_once_and_three_gates(self):
+        provider = _SequenceProvider(("고친 문장.", "다시 고친 문장."))
+        gate = _LoopGate((
+            WritingGateDecision.RETRIEVE_MORE,
+            WritingGateDecision.REVISE,
+            WritingGateDecision.PASS,
+        ))
+        reporter = _Reporter()
+        retrieval = _RetrievalPlanner()
+        client, project, context = _http(
+            provider, gate_service=gate, report_service=reporter,
+            retrieval_planner=retrieval,
+        )
+
+        response = self._post(client, project)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["loop"], {
+            "status": "pass", "revision_rounds": 2,
+            "retrieval_rounds": 1, "gate_evaluations": 3,
+        })
+        self.assertEqual(
+            [stage["stage"] for stage in body["stages"]],
+            ["revise", "report", "gate", "retrieve_plan", "context_search",
+             "merge", "gate", "revise", "report", "gate"],
+        )
+        self.assertEqual(context.calls, 2)
+        self.assertEqual(retrieval.calls, 1)
+        self.assertEqual(provider.calls, 2)
+        self.assertEqual(reporter.calls, 2)
+        self.assertEqual(gate.calls, 3)
+
+    def test_revise_then_retrieve_also_reaches_pass_with_same_caps(self):
+        provider = _SequenceProvider(("고친 문장.", "다시 고친 문장."))
+        gate = _LoopGate((
+            WritingGateDecision.REVISE,
+            WritingGateDecision.RETRIEVE_MORE,
+            WritingGateDecision.PASS,
+        ))
+        retrieval = _RetrievalPlanner()
+        reporter = _Reporter()
+        client, project, context = _http(
+            provider, gate_service=gate, report_service=reporter,
+            retrieval_planner=retrieval,
+        )
+
+        response = self._post(client, project)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["loop"], {
+            "status": "pass", "revision_rounds": 2,
+            "retrieval_rounds": 1, "gate_evaluations": 3,
+        })
+        self.assertEqual(
+            [stage["stage"] for stage in body["stages"]],
+            ["revise", "report", "gate", "revise", "report", "gate",
+             "retrieve_plan", "context_search", "merge", "gate"],
+        )
+        self.assertEqual(context.calls, 2)
+        self.assertEqual(retrieval.calls, 1)
+        self.assertEqual(reporter.calls, 2)
+        self.assertEqual(gate.calls, 3)
+
+    def test_configurable_revision_cap_stops_before_auto_revise(self):
+        gate = _LoopGate((WritingGateDecision.REVISE,))
+        reporter = _Reporter()
+        policy = WritingLoopPolicy(
+            max_revision_rounds=1, max_retrieval_rounds=1,
+            max_gate_evaluations=3,
+        )
+        client, project, _ = _http(
+            _Provider(), gate_service=gate, report_service=reporter,
+            loop_policy=policy,
+        )
+
+        response = self._post(client, project)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["loop"], {
+            "status": "budget_exhausted", "revision_rounds": 1,
+            "retrieval_rounds": 0, "gate_evaluations": 1,
+        })
+        self.assertEqual(gate.calls, 1)
+        self.assertEqual(reporter.calls, 1)
+
+    def test_loop_caps_are_loaded_from_environment_settings(self):
+        with patch.dict(os.environ, {
+            "WRITING_LOOP_MAX_REVISION_ROUNDS": "1",
+            "WRITING_LOOP_MAX_RETRIEVAL_ROUNDS": "0",
+            "WRITING_LOOP_MAX_GATE_EVALUATIONS": "1",
+        }):
+            gate = _LoopGate((WritingGateDecision.REVISE,))
+            client, project, _ = _http(
+                _Provider(), gate_service=gate, report_service=_Reporter(),
+            )
+            response = self._post(client, project)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["loop"]["status"], "budget_exhausted")
+        self.assertEqual(response.json()["loop"]["gate_evaluations"], 1)
+
+    def test_auto_revise_unchanged_is_typed_no_change_not_standalone_error(self):
+        provider = _SequenceProvider(("고친 문장.", "고친 문장."))
+        gate = _LoopGate((WritingGateDecision.REVISE,))
+        client, project, _ = _http(
+            provider, gate_service=gate, report_service=_Reporter(),
+        )
+
+        response = self._post(client, project)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["loop"]["status"], "no_change")
+        self.assertEqual(body["loop"]["revision_rounds"], 2)
+        self.assertEqual(body["stages"][-1], {
+            "stage": "revise", "ordinal": 4, "status": "no_change",
+        })
+        self.assertEqual(body["candidate"]["text"],
+                         "앞 문장. 고친 문장. 뒤 문장.")
+        self.assertEqual(body["gate"]["decision"], "revise")
+
+        standalone, standalone_project, _ = _http(_Provider("잘못된 문장."))
+        self.assertEqual(standalone.post(
+            f"/projects/{standalone_project}/writing/revise", _body()
+        ).status_code, 502)
+
+    def test_auto_revise_failure_preserves_previous_candidate_gate_and_stages(self):
+        provider = _SequenceProvider((
+            "고친 문장.",
+            ProviderError(
+                code=ProviderErrorCode.UNAVAILABLE, message="auto revise down",
+                retryable=True, provider="gateway",
+            ),
+        ))
+        gate = _LoopGate((WritingGateDecision.REVISE,))
+        client, project, _ = _http(
+            provider, gate_service=gate, report_service=_Reporter(),
+        )
+
+        response = self._post(client, project)
+
+        self.assertEqual(response.status_code, 502)
+        body = response.json()
+        self.assertEqual(body["candidate"]["text"],
+                         "앞 문장. 고친 문장. 뒤 문장.")
+        self.assertEqual(body["gate"]["decision"], "revise")
+        self.assertEqual(body["revision_error"]["type"],
+                         "provider_unavailable")
+        self.assertEqual(body["loop"], {
+            "status": "failed", "revision_rounds": 2,
+            "retrieval_rounds": 0, "gate_evaluations": 1,
+        })
+        self.assertEqual(body["stages"][-1], {
+            "stage": "revise", "ordinal": 4, "status": "failed",
+        })
+
+    def test_ineligible_or_human_gate_decision_never_auto_revises(self):
+        cases = (
+            (_LoopGate((WritingGateDecision.NEEDS_USER_REVIEW,)),
+             "terminal_decision"),
+            (_LoopGate((WritingGateDecision.BLOCK,)), "terminal_decision"),
+            (_Gate(WritingGateDecision.REVISE), "not_eligible"),
+        )
+        for gate, expected_status in cases:
+            provider = _Provider()
+            reporter = _Reporter()
+            client, project, _ = _http(
+                provider, gate_service=gate, report_service=reporter,
+            )
+            with self.subTest(expected_status=expected_status):
+                response = self._post(client, project)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()["loop"]["status"],
+                                 expected_status)
+                self.assertEqual(provider.calls, 1)
+                self.assertEqual(reporter.calls, 1)
+                self.assertEqual(gate.calls, 1)
+
+    def test_revise_eligibility_rejects_every_broader_boundary(self):
+        class _FindingGate(_Gate):
+            def __init__(self, findings):
+                super().__init__()
+                self.findings = findings
+
+            async def evaluate(self, *, request, candidate, package):
+                self.calls += 1
+                return WritingGateResult(
+                    request.request_id, request.project_id,
+                    WritingGateDecision.REVISE, self.findings, (), "fake-gate",
+                )
+
+        invalid_findings = (
+            (),
+            (_finding("고친 문장."), _finding("뒤 문장.")),
+            (_finding("고친 문장.", finding_type=WritingGateFindingType.POV),),
+            (_finding("존재하지 않는 문장."),),
+            (_finding("문장.",),),
+        )
+        for findings in invalid_findings:
+            provider = _Provider()
+            gate = _FindingGate(findings)
+            reporter = _Reporter()
+            client, project, _ = _http(
+                provider, gate_service=gate, report_service=reporter,
+            )
+            with self.subTest(findings=findings):
+                response = self._post(client, project)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()["loop"]["status"],
+                                 "not_eligible")
+                self.assertEqual(provider.calls, 1)
+                self.assertEqual(reporter.calls, 1)
+                self.assertEqual(gate.calls, 1)
 
     def test_all_gate_decisions_are_200_with_at_most_one_retrieval_round(self):
         for decision in WritingGateDecision:
@@ -566,7 +878,12 @@ class WritingReviseGateApiTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 502)
         body = response.json()
-        self.assertIsNone(body["gate"])
+        self.assertEqual(body["gate"]["decision"], "retrieve_more")
+        self.assertEqual(body["loop"], {
+            "status": "failed", "revision_rounds": 1,
+            "retrieval_rounds": 1, "gate_evaluations": 2,
+        })
+        self.assertEqual(body["stages"][-1]["status"], "failed")
         self.assertEqual(body["gate_error"]["detail"], "second gate invalid")
         self.assertEqual(body["gate_error"]["type"], "invalid_gate_result")
         self.assertEqual(body["candidate"]["candidate_claims"][0]["text"], "fresh")
@@ -644,6 +961,16 @@ class WritingReviseGateApiTest(unittest.TestCase):
         response = self._post(client, project)
 
         self.assertEqual(response.status_code, 504)
+        body = response.json()
+        self.assertIsNone(body["gate"])
+        self.assertEqual(body["loop"], {
+            "status": "failed", "revision_rounds": 1,
+            "retrieval_rounds": 0, "gate_evaluations": 0,
+        })
+        self.assertEqual(body["stages"], [{
+            "stage": "revise", "ordinal": 1, "status": "failed",
+        }])
+        self.assertEqual(body["revision_error"]["type"], "provider_timeout")
         self.assertEqual(context.calls, 1)
         self.assertEqual(provider.calls, 1)
         self.assertEqual(reporter.calls, 0)

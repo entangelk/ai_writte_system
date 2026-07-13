@@ -410,4 +410,92 @@
 ### Next steps
 
 - 독립 verifier가 B2 closure를 재판정하면 `writing_retrieve_more.md` verdict를 조건부 합격에서 합격으로 승격할 수 있다.
-- working tree는 아직 미커밋 상태다. 오너가 원하면 v1.6.76 구현+closure를 한 커밋으로 묶는다.
+- v1.6.76 구현+closure는 `51f2723 feat: add targeted writing retrieval loop`로 커밋했다.
+
+## Phase 5.9 G8 bounded loop 착수 결정 브리프
+
+### Goals
+
+- targeted retrieval 다음 단계인 G8 내부 loop의 자동 decision/finding, 사람 확인, report/package 갱신과 종료 예산을 구현 전에 확정 가능한 선택지로 분리한다.
+- 현재 계측 가능한 구조적 반복 상한과 아직 강제 불가능한 aggregate token/time budget을 혼동하지 않는다.
+
+### Completed work
+
+- G8/D4/D5/D7/D8, R5, T7/T8과 generic flat-loop budget 선례를 scoped 정본으로 대조했다.
+- `docs/plans/05-writing-bounded-loop-decisions.md`를 작성해 public 경계, 자동 자격, 상태 전이, 구조적 상한, budget 도입 순서, stages/종료 literal, unchanged/partial error, identity/persistence를 L1~L9로 분리했다.
+- 추천안은 기존 endpoint에서 single continuity finding auto-revise 1회와 targeted retrieval 1회를 순서와 무관하게 허용하고, 총 revision 2·retrieval 1·Gate 3으로 종료한다. 사람 decision과 multi-finding은 자동화하지 않는다.
+- HANDOFF Owner Decisions Needed와 Next Tasks를 오너 결정 대기 상태로 갱신했다. production code와 SoT는 변경하지 않았다.
+
+### Issues found
+
+- 문제: 기존 generic AgentLoop는 5차원 budget 모델을 갖지만 Writing domain service 결과가 provider token usage를 전달하지 않아 aggregate token budget을 실제로 집계할 수 없다.
+- 원인: 현재 Writing slice는 component별 1-turn 호출/repair와 Application의 retrieval round만 소유하며, domain result에 usage/latency를 승격하지 않았다.
+- 해결/결과: 근거 없는 token/time 숫자를 박거나 generic runner를 억지로 재사용하지 않고, 실제 강제 가능한 call cap을 B1로 제안했다. usage plumbing·live 계측·aggregate 기본값은 명시적 B2 후속 선택지로 남겼다.
+- scoped 정본 안에서 `needs_user_review|block` 사람 경계와 candidate 변경 뒤 report refresh는 일치한다. 다만 unchanged를 loop 정상 종료로 볼지 현행 502를 유지할지는 계약 fork라 L8에 노출했다.
+
+### Decisions
+
+- 작업자 추천이며 아직 사용자 결정이 아니다: L1~L9=A.
+- 추천 이유: 로컬 호출 비용이 낮아도 partial pass에서 전체 단계를 재실행할 이유는 없고, 현재 single-finding/exact-anchor 안전 경계를 보존한 최소 loop가 먼저다.
+- aggregate token/time은 폐기하지 않는다. 관측값과 usage contract가 생긴 뒤 B2에서 운영 기본값을 확정한다.
+
+### Verification
+
+- 브리프가 인용한 G8/D4/D5/D7/D8/R5/T7/T8와 `flat-loop-gate.md` budget 차원을 원문 대조했다.
+- documentation-only 변경이며 production code/정본 version 무변이다. `git diff --check`와 참조 파일 존재 여부를 확인한다.
+
+### Next steps
+
+- 오너가 L1~L9를 확정하면 결정을 work log와 SoT에 반영한다.
+- 승인 후 boundary tests red-first → 최소 state machine/response model → focused/full 비-LLM 회귀 순서로 구현한다.
+- L5=B를 선택하면 loop 구현 전에 provider usage plumbing과 aggregate 기본값을 별도 수치 결정으로 먼저 잠가야 한다.
+
+## Phase 5.9 G8 bounded revise/retrieve loop 구현 (SoT v1.6.77)
+
+### Goals
+
+- 단일 continuity finding auto-revise와 targeted retrieval을 부분 pass 결과에서 필요한 만큼만 이어가되 설정 가능한 구조적 상한 안에서 결정적으로 종료한다.
+- 최초/standalone unchanged 오류와 자동 loop의 정상 no-change를 타입과 public literal로 구분하고, 각 단계의 최소 관측/partial artifact를 보존한다.
+
+### Completed work
+
+- 사용자 L1~L9 결정을 브리프와 SoT v1.6.77에 반영했다. L4 기본값은 총 revision 2·retrieval 1·Gate 3이며 `WritingLoopPolicy`, `WRITING_LOOP_MAX_REVISION_ROUNDS`, `WRITING_LOOP_MAX_RETRIEVAL_ROUNDS`, `WRITING_LOOP_MAX_GATE_EVALUATIONS`로 조정 가능하다. Compose application 환경에도 세 설정을 노출했다.
+- `WritingReviseGateService`를 bounded state machine으로 승격했다. `pass`는 성공, `needs_user_review|block`은 사람 terminal, 자격 밖 revise는 `not_eligible`, 잔여 action/Gate 상한 부족은 `budget_exhausted`로 호출 전에 종료한다.
+- 자동 revise 자격을 Gate finding 정확히 1개, continuity, recommended revise, candidate exact evidence 1회로 제한했다. revise 뒤 현재 merged package로 report→Gate를 수행하고, retrieval 뒤 candidate/report를 유지한 채 targeted delta merge→Gate만 수행한다.
+- 성공/정상 종료에 `loop:{status,revision_rounds,retrieval_rounds,gate_evaluations}`와 최소 `stages[{stage,ordinal,status}]`를 additive 공개했다. 단계는 `revise|report|gate|retrieve_plan|context_search|merge`, 상태는 `completed|failed|no_change`다.
+- `UnchangedWritingRevision`을 `InvalidWritingRevision`의 명시적 하위 타입으로 추가했다. 최초 합성/standalone은 기존 502를 유지하고 자동 후속 revise만 200 `loop.status=no_change`로 소비한다.
+- initial/auto revision, report, retrieval, Gate 실패는 마지막 완전한 candidate와 이전 Gate(있으면), `loop.status=failed`, 실패 stage를 partial envelope에 보존한다. auto revision에는 `revision_error` taxonomy를 추가했다.
+- L6=A first→C, L9=A first→B에 따라 전체 중간 candidate/report/context payload와 persistence는 추가하지 않았다. save/accept/Analysis side effect도 열지 않았다.
+
+### Issues found
+
+- 문제: v1.6.76의 `max_retrieval_rounds`는 생성자에서 0/1만 받는 코드 literal이라 관측 뒤 운영값을 바꿀 수 없었다.
+- 원인: targeted retrieval 1회 slice가 일반 G8 policy보다 먼저 구현돼 의도적으로 상한을 고정했다.
+- 해결/결과: revision/retrieval/Gate 상한을 하나의 validated policy로 승격하고 env/Compose까지 배선했다. 기본 동작은 retrieval 1회를 유지하지만 설정이 실제 상태 전이를 바꾼다는 양방향 회귀를 추가했다.
+- 문제: 기존 `InvalidWritingRevision("replacement did not change...")` 문자열만으로는 standalone 502와 auto-loop 정상 `no_change`를 안전하게 구분할 수 없었다.
+- 해결/결과: 전용 하위 타입을 사용해 메시지 문자열에 의존하지 않는다. 빈 replacement 등 다른 invalid 결과는 여전히 502다.
+- pattern sweep: `max_retrieval_rounds=1|max_retrieval_rounds not in|replacement did not change|InvalidWritingRevision`을 repo-wide 확인했다. 이전 T8 문구는 “G8 결정 전 기본 1”이라는 역사적 경계이며 v1.6.77 후속 채택문으로 명시 승계했다. 동일한 문자열 분기나 고정 production 상한은 남지 않았다.
+- `git blame` 확인: 고정 retrieval 0/1 제한은 v1.6.76 targeted slice에서 의도적으로 도입됐고, unchanged 502는 v1.6.73 최초 partial revise 계약이었다. 둘 다 이번 사용자 결정의 순차 확장 대상과 일치했다.
+
+### Decisions
+
+- 사용자 결정: **L1~L9 추천 A를 기본 채택**한다.
+- 사용자 결정: L4 기본 A 상한은 관측 뒤 설정에서 관리할 수 있도록 변수화한다. 호출 횟수 증가는 코드 변경 없이 policy/env 값으로 가능하다.
+- 사용자 결정: L6은 최소 stages A first, 전체 artifact C는 필요 가능성을 보존한다. L9도 ephemeral A first, persisted loop 감사 B까지 확장 가능성을 보존한다.
+- 사용자 결정: L8 auto no-change와 standalone 오류의 의미 차이는 명시적으로 구분해 혼동을 예방한다. 구현은 전용 exception type과 서로 다른 public envelope로 잠갔다.
+- 파생 결정: stage/provider 실패는 정상 business outcome과 섞이지 않는 `loop.status=failed`를 사용한다. action count는 완료 횟수가 아니라 시작된 호출/round를 세어 실패/no-change도 budget 관측에 포함한다.
+
+### Verification
+
+- red-first: 신규 테스트는 `WritingLoopPolicy`가 없어 import collection error로 실패해 구현 전 경계를 확인했다.
+- lifecycle focused: `tests/test_writing_revise.py tests/test_writing_retrieval.py` → **43 passed / 51 subtests**.
+- Writing focused(6파일) → **115 passed / 108 subtests**.
+- full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **927 passed / 45 skipped / 209 subtests**.
+- `python3 -m py_compile`(main/revise/revise_gate/tests), `docker compose config --quiet`, `git diff --check` 통과.
+- 양방향 lock: 기본 상한은 revise↔retrieve 두 순서를 모두 pass까지 허용하고, 축소 policy/env는 action 전에 budget_exhausted로 멈춘다. exact 단일 continuity는 자동 수정되지만 0/다중/non-continuity/없는·중복 anchor는 provider 0회 `not_eligible`이다. auto unchanged는 200 no_change지만 standalone unchanged는 502다.
+
+### Next steps
+
+- aggregate token/time budget은 provider usage/latency/search 계측을 domain result에 전달한 뒤 실측값으로 별도 결정한다.
+- L6 C/L9 B를 열 때 stage ordinal과 trigger finding fingerprint, candidate hash, ContextPackage pointer를 persisted loop 감사 모델에 연결한다.
+- multi-finding과 non-continuity 자동 수정은 현재 자격 경계를 넓히지 않고 별도 정책/anchor drift 브리프로 다룬다.

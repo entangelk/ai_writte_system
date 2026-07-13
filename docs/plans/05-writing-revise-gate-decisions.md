@@ -1,6 +1,6 @@
 # 착수 결정 브리프 — Phase 5.7 partial revise → Gate 1회 합성
 
-상태: `Resolved — G1=A, G2=A, G3=A first→B, G4=A, G5=A, G6=A, G7=A, G8=A first→B`
+상태: `Resolved — G1=A, G2=A, G3=B adopted(v1.6.75), G4=A, G5=A, G6=A, G7=A, G8=B adopted(v1.6.77)`
 
 관련 정본: SoT v1.6.69 Writing Gate, v1.6.73 partial revise D5=A→B→C, `05-writing-partial-revise-decisions.md`
 
@@ -16,6 +16,8 @@
 - G4=A: Gate 실패는 partial-success에 revised candidate와 `gate_error`를 포함한다. Gate 입력/설정 검증 실패는 400, provider·invalid result·예기치 않은 평가 실패는 502, provider timeout은 504다. D8 unchanged(후보 자체 없음)와 달리 이 분기는 candidate artifact가 이미 존재한다.
 - G5=A, G6=A, G7=A: non-pass 200, nested envelope, 의존성/오류 명시.
 - G8=A first→B after: 첫 slice는 revise 1회+Gate 1회. 후속에는 정책·budget을 잠근 내부 반복을 추가한다.
+
+후속 채택(v1.6.77): **G8=B**. 단일 continuity finding auto-revise와 targeted retrieval을 설정 가능한 구조적 budget 안에서 반복하고 최소 `loop`/`stages`를 공개한다. 상세 현재 계약은 `05-writing-bounded-loop-decisions.md`가 소유한다.
 
 ## 현재 확정된 경계
 

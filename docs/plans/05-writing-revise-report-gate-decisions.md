@@ -1,6 +1,6 @@
 # 착수 결정 브리프 — Phase 5.7 partial revise → report → Gate 합성
 
-상태: `Resolved — R1=A, R2=A, R3=A, R4=A, R5=A first→C, R6=A`
+상태: `Resolved — R1=A, R2=A, R3=A, R4=A, R5=C adopted(v1.6.77), R6=A`
 
 관련 정본: SoT v1.6.71 Writing self-report, v1.6.72 report 재평가 API, v1.6.74 partial revise→Gate G3=A first→B, `05-writing-revise-gate-decisions.md`
 
@@ -12,6 +12,8 @@
 
 - R1=A, R2=A, R3=A, R4=A, R6=A.
 - R5는 다회 합성 확장을 열어두기 위해 C를 검토했으나, 현재 `{candidate, gate}`에 `stages`를 additive field로 붙이는 확장 비용이 작고 지금 C를 열면 stage item/status/attempt/usage schema를 추가 결정해야 한다. 따라서 **A first→C later**로 확정한다.
+
+후속 채택(v1.6.77): **R5=C**. `{candidate,gate}`에 최소 `loop`와 `stages[{stage,ordinal,status}]`를 additive로 열었다. 전체 중간 artifact/model/usage는 후속 persisted 감사까지 보류한다.
 - 이번 slice는 성공 `{candidate, gate}`를 유지한다. 추후 다회 합성을 실제로 열 때 `stages` schema와 loop budget을 함께 결정한다.
 
 ## 현재 확정된 경계

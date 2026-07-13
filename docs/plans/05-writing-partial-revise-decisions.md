@@ -1,6 +1,6 @@
 # 착수 결정 브리프 — Phase 5.6 finding evidence 기반 부분 revise
 
-상태: `Resolved — D1=A→follow-up brief, D2=A first→C, D3=A, D4=A first→C, D5=A→B→C, D6=C, D7=A first→C, D8=A first→C`
+상태: `Resolved — D1=A→follow-up brief, D2=A first→C, D3=A, D4=A first→C, D5=C adopted(v1.6.77), D6=C, D7=structural C adopted(v1.6.77), D8=A standalone/C auto-loop`
 
 관련 정본: SoT v1.6.69~72, `05-writing-gate-decisions.md` D3/Follow-up, `05-writing-accept-decisions.md` revision patch 후속, `writing_agent_prompt.md` §16.2
 
@@ -18,6 +18,8 @@ Writing Gate finding의 exact `evidence`를 어떤 patch anchor와 public 결과
 - D6=C: inline API를 먼저 열고 persisted candidate/GateRun/revision 감사 이력 기반 id API를 additive 후속으로 둔다.
 - D7=A first→C: 첫 slice는 LLM 1회. 장기에는 Application 소유 AgentLoopRunner budget으로 확장하되 tool-call 상류 의존을 우회하지 않는다.
 - D8=A first→C: unchanged는 첫 slice에서 invalid provider result 502. 장기에는 `200 + changed=false + revision_status` business outcome으로 승격해 transport 실패와 분리한다. 한 응답에 502와 200을 동시에 쓸 수 없으므로 순차 migration으로 해석한다.
+
+후속 채택(v1.6.77): **D5=C**, **D7=Application 구조적 budget**, **D8=경로별 분리**. bounded loop의 자동 후속 revise만 전용 `UnchangedWritingRevision`을 200 `loop.status=no_change`로 소비하고, 최초/standalone revise unchanged는 기존 502를 유지한다. aggregate token/time은 usage 계측 후속이다.
 - 파생 안전선: revised text는 기존 candidate report를 stale하게 만들므로 새 candidate의 report 네 필드는 비우고 `/writing/report` 재평가로 다시 채운다.
 
 ## 현재 확정된 경계

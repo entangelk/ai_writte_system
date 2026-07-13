@@ -38,6 +38,10 @@ class InvalidWritingRevision(RuntimeError):
     pass
 
 
+class UnchangedWritingRevision(InvalidWritingRevision):
+    """A valid replacement request produced the exact anchored evidence again."""
+
+
 def seed_writing_revise_template(
     service: PromptTemplateService,
 ) -> PromptTemplate:
@@ -109,7 +113,9 @@ class WritingRevisionService:
         if not replacement:
             raise InvalidWritingRevision("replacement must not be empty")
         if replacement == finding.evidence:
-            raise InvalidWritingRevision("replacement did not change the evidence")
+            raise UnchangedWritingRevision(
+                "replacement did not change the evidence"
+            )
         start = candidate.text.index(finding.evidence)
         end = start + len(finding.evidence)
         return replace(

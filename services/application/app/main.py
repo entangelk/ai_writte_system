@@ -86,6 +86,8 @@ from services.application.app.writing.revise import (
     seed_writing_revise_template,
 )
 from services.application.app.writing.revise_gate import (
+    WritingLoopPolicy,
+    WritingLoopRevisionFailure,
     WritingRetrievalConfigurationError,
     WritingRetrievalFailure,
     WritingReviseGateFailure,
@@ -401,6 +403,13 @@ def _env_float(name: str, default: float) -> float:
     if raw is None:
         return default
     return float(raw)
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return int(raw)
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -978,6 +987,7 @@ def create_app(
     writing_report_service: WritingCandidateReportService | None = None,
     writing_revision_service: WritingRevisionService | None = None,
     writing_retrieval_planner: TerminalJsonWritingRetrievalPlanner | None = None,
+    writing_loop_policy: WritingLoopPolicy | None = None,
     vector_index: InMemoryVectorIndexAdapter | None = None,
 ) -> FastAPI:
     app = FastAPI(title="AI Writing System Application")
@@ -1100,7 +1110,17 @@ def create_app(
             gate=writing_gate,
             retrieval_planner=retrieval_planner,
             context_search=context_search,
-            max_retrieval_rounds=1,
+            policy=writing_loop_policy or WritingLoopPolicy(
+                max_revision_rounds=_env_int(
+                    "WRITING_LOOP_MAX_REVISION_ROUNDS", 2
+                ),
+                max_retrieval_rounds=_env_int(
+                    "WRITING_LOOP_MAX_RETRIEVAL_ROUNDS", 1
+                ),
+                max_gate_evaluations=_env_int(
+                    "WRITING_LOOP_MAX_GATE_EVALUATIONS", 3
+                ),
+            ),
         )
         if (writing_revision is not None and writing_report is not None
             and writing_gate is not None) else None
@@ -2323,6 +2343,21 @@ def create_app(
             "evaluated_by_model": result.evaluated_by_model,
         }
 
+    def _writing_loop_payload(loop) -> dict[str, object]:
+        return {
+            "status": loop.status.value,
+            "revision_rounds": loop.revision_rounds,
+            "retrieval_rounds": loop.retrieval_rounds,
+            "gate_evaluations": loop.gate_evaluations,
+        }
+
+    def _writing_stages_payload(stages) -> list[dict[str, object]]:
+        return [{
+            "stage": item.stage.value,
+            "ordinal": item.ordinal,
+            "status": item.status.value,
+        } for item in stages]
+
     def _accepted_save_payload(saved) -> dict[str, object]:
         return {
             "draft_version_id": saved.draft_version.id,
@@ -2707,8 +2742,40 @@ def create_app(
                 status_code=status,
                 content={
                     "candidate": _writing_candidate_payload(exc.candidate),
-                    "gate": None,
+                    "gate": (
+                        _writing_gate_payload(exc.gate)
+                        if exc.gate is not None else None
+                    ),
+                    "loop": _writing_loop_payload(exc.loop),
+                    "stages": _writing_stages_payload(exc.stages),
                     "report_error": {
+                        "type": error_type,
+                        "detail": str(cause),
+                    },
+                },
+            )
+        except WritingLoopRevisionFailure as exc:
+            cause = exc.cause
+            if isinstance(cause, ProviderError):
+                status = 504 if cause.code is ProviderErrorCode.TIMEOUT else 502
+                error_type = cause.code.value
+            elif isinstance(cause, WritingRevisionError):
+                status, error_type = 400, "writing_revision_error"
+            elif isinstance(cause, InvalidWritingRevision):
+                status, error_type = 502, "invalid_writing_revision"
+            else:
+                status, error_type = 502, "revision_error"
+            return JSONResponse(
+                status_code=status,
+                content={
+                    "candidate": _writing_candidate_payload(exc.candidate),
+                    "gate": (
+                        _writing_gate_payload(exc.gate)
+                        if exc.gate is not None else None
+                    ),
+                    "loop": _writing_loop_payload(exc.loop),
+                    "stages": _writing_stages_payload(exc.stages),
+                    "revision_error": {
                         "type": error_type,
                         "detail": str(cause),
                     },
@@ -2738,6 +2805,8 @@ def create_app(
                 content={
                     "candidate": _writing_candidate_payload(exc.candidate),
                     "gate": _writing_gate_payload(exc.gate),
+                    "loop": _writing_loop_payload(exc.loop),
+                    "stages": _writing_stages_payload(exc.stages),
                     "retrieval_error": {
                         "type": error_type,
                         "detail": str(cause),
@@ -2759,7 +2828,12 @@ def create_app(
                 status_code=status,
                 content={
                     "candidate": _writing_candidate_payload(exc.candidate),
-                    "gate": None,
+                    "gate": (
+                        _writing_gate_payload(exc.gate)
+                        if exc.gate is not None else None
+                    ),
+                    "loop": _writing_loop_payload(exc.loop),
+                    "stages": _writing_stages_payload(exc.stages),
                     "gate_error": {
                         "type": error_type,
                         "detail": str(cause),
@@ -2769,6 +2843,8 @@ def create_app(
         return {
             "candidate": _writing_candidate_payload(result.candidate),
             "gate": _writing_gate_payload(result.gate),
+            "loop": _writing_loop_payload(result.loop),
+            "stages": _writing_stages_payload(result.stages),
         }
 
     @app.post("/projects/{project_id}/writing/accept")

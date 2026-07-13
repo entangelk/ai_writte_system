@@ -1,6 +1,6 @@
 # 착수 결정 브리프 — Phase 5.8 Writing `retrieve_more` 1회 lifecycle
 
-상태: `Resolved — T1=B, T2=B, T3=E, T4=E, T5=B, T6=B, T7=A first→B, T8=A first→B`
+상태: `Resolved — T1=B, T2=B, T3=E, T4=E, T5=B, T6=B, T7=B adopted(v1.6.77), T8=B adopted(v1.6.77)`
 
 관련 정본: SoT v1.6.69 Writing Gate, v1.6.75 revise→report→Gate 합성, `05-writing-gate-decisions.md`, `05-writing-revise-report-gate-decisions.md`, Phase 4 `ContextSearchRequest`
 
@@ -16,6 +16,8 @@ Writing Gate의 `retrieve_more` 결과를 실제 재검색으로 연결할 때 q
 - **T6=B**: candidate text가 변하지 않으므로 v1.6.75의 최신 report를 보존하고 merged package로 Gate만 재평가한다. report는 context-relative로 달라질 수 있다는 tradeoff를 수용하되, 최종 Gate가 merged package를 직접 본다.
 - **T7=A first→B**: 성공은 기존 `{candidate,gate}`를 유지하고 최종 Gate만 노출한다. 후속 다회 합성에서 `stages`를 additive로 연다. 첫 Gate 뒤 retrieval 실패는 `{candidate,gate:<첫 Gate>,retrieval_error}` partial envelope로 이미 생긴 artifact를 보존한다.
 - **T8=A first→B**: Application의 `max_retrieval_rounds=1`로 첫 Gate 뒤 targeted retrieval+Gate 재평가를 최대 한 번 허용한다. 두 번째 Gate도 `retrieve_more`면 200 정상 outcome으로 종료하며, 1보다 큰 값은 G8 budget/policy 결정 뒤 연다.
+
+후속 채택(v1.6.77): **T7/T8=B**. 최소 `loop`/`stages`를 공개하고 retrieval 상한은 `WritingLoopPolicy`/`WRITING_LOOP_MAX_RETRIEVAL_ROUNDS`로 설정 가능하다. 기본값 1은 유지하며 전체 bounded 상태 전이는 `05-writing-bounded-loop-decisions.md`가 소유한다.
 
 ## 현재 확정된 경계
 
