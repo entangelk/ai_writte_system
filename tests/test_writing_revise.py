@@ -449,6 +449,13 @@ class WritingReviseGateApiTest(unittest.TestCase):
         )
 
     def test_loop_policy_accepts_tunable_caps_and_rejects_invalid_settings(self):
+        """Lock exact defaults in both drift directions while allowing tuning."""
+        defaults = WritingLoopPolicy()
+        self.assertEqual(
+            (defaults.max_revision_rounds, defaults.max_retrieval_rounds,
+             defaults.max_gate_evaluations),
+            (2, 1, 3),
+        )
         policy = WritingLoopPolicy(
             max_revision_rounds=3, max_retrieval_rounds=2,
             max_gate_evaluations=5,
@@ -609,6 +616,33 @@ class WritingReviseGateApiTest(unittest.TestCase):
         })
         self.assertEqual(gate.calls, 1)
         self.assertEqual(reporter.calls, 1)
+
+    def test_default_revision_cap_stops_before_third_revise(self):
+        """Allow the second revision, but never start a third at default policy."""
+        provider = _SequenceProvider(("고친 문장.", "다시 고친 문장."))
+        gate = _LoopGate((
+            WritingGateDecision.REVISE,
+            WritingGateDecision.REVISE,
+        ), revise_evidence="고친 문장.")
+        reporter = _Reporter()
+        client, project, _ = _http(
+            provider, gate_service=gate, report_service=reporter,
+        )
+
+        response = self._post(client, project)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["loop"], {
+            "status": "budget_exhausted", "revision_rounds": 2,
+            "retrieval_rounds": 0, "gate_evaluations": 2,
+        })
+        self.assertEqual(body["candidate"]["text"],
+                         "앞 문장. 다시 고친 문장. 뒤 문장.")
+        self.assertEqual(body["gate"]["decision"], "revise")
+        self.assertEqual(provider.calls, 2)
+        self.assertEqual(reporter.calls, 2)
+        self.assertEqual(gate.calls, 2)
 
     def test_loop_caps_are_loaded_from_environment_settings(self):
         with patch.dict(os.environ, {

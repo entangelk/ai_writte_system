@@ -499,3 +499,40 @@
 - aggregate token/time budget은 provider usage/latency/search 계측을 domain result에 전달한 뒤 실측값으로 별도 결정한다.
 - L6 C/L9 B를 열 때 stage ordinal과 trigger finding fingerprint, candidate hash, ContextPackage pointer를 persisted loop 감사 모델에 연결한다.
 - multi-finding과 non-continuity 자동 수정은 현재 자격 경계를 넓히지 않고 별도 정책/anchor drift 브리프로 다룬다.
+
+## Phase 5.9 독립 PASS 후 H1/H2 hardening
+
+### Goals
+
+- `docs/verifications/2026-07-13/writing_bounded_loop.md`의 비차단 보강 후보를 원문·코드와 대조하고, 실제 계약 drift를 잡는 저비용 회귀를 추가한다.
+
+### Completed work
+
+- 독립 검증의 boundary matrix, literal 삼관교차, H1~H3와 Mongo 환경 관찰을 전수 확인했다. PASS 판정과 “slice 차단 없음”은 코드/테스트 상태와 일치했다.
+- H1: 기존 policy validation test에 `WritingLoopPolicy()` 기본값이 정확히 `(max_revision_rounds=2,max_retrieval_rounds=1,max_gate_evaluations=3)`임을 단언했다. 상향/하향 drift를 모두 막되 비기본 `(3,2,5)` 설정 허용은 함께 보존한다.
+- H2: 기본 policy에서 첫 Gate revise→두 번째 revise/report/Gate까지 허용한 뒤 다시 revise가 나와도 세 번째 reviser 호출 전에 200 `budget_exhausted`로 종료하는 endpoint 회귀를 추가했다. candidate/마지막 Gate와 round count 2/0/2, provider/reporter/Gate 각 2회를 직접 잠갔다.
+- H3: `/writing/revise-and-gate`의 직접 `InvalidWritingRevision` catch는 현재 loop wrapping 아래에서는 도달하지 않지만, endpoint taxonomy 방어선이고 제거해도 동작 이득이 없다. production code는 유지했다.
+- 독립 검증 기록 자체는 감사 원문이므로 수정하지 않았다.
+
+### Issues found
+
+- H1의 기존 pass-reaching 테스트는 기본 revision/gate 하한만 암시해 기본값이 3/2/5로 상향 drift해도 통과할 수 있었다. exact default assertion으로 폐쇄했다.
+- H2의 configurable cap=1 테스트는 분기 구현을 증명하지만 기본 revision=2에서 action 직전 검사 순서를 직접 샘플링하지 않았다. 기본값 전용 실행 회귀로 폐쇄했다.
+- 독립 검증에서 보고한 `test_memory_mongo.py` 4개 실패는 Writing 변경과 byte-independent인 부분 도달 Mongo index 환경 문제다. 프로젝트 관례의 non-Mongo 전체 명령을 유지하며 이번 slice에서 Mongo 코드/인프라는 변경하지 않았다.
+
+### Decisions
+
+- 사용자 요청에 따라 PASS 뒤에도 비차단 보강 후보를 검토해 H1/H2를 반영한다.
+- H3는 dead-code 정리가 아니라 public 502 fallback 방어선으로 보고 유지한다. 인접 코드를 정리하기 위한 제거는 이번 요청 범위가 아니다.
+
+### Verification
+
+- lifecycle focused: `tests/test_writing_revise.py tests/test_writing_retrieval.py` → **45 passed / 54 subtests**.
+- Writing focused(6파일) → **116 passed / 108 subtests**.
+- full non-Mongo: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **928 passed / 45 skipped / 209 subtests**.
+- 기본값/환경값/Compose 값의 `2|1|3`과 `WritingLoopPolicy` 사용처를 repo-wide 대조했다. `python3 -m py_compile`, `docker compose config --quiet`, `git diff --check` 통과.
+
+### Next steps
+
+- bounded-loop slice는 독립 PASS와 H1/H2 closure까지 완료됐다. 다음 Writing 후보 B2를 진행해도 되는 상태다.
+- Mongo index 생성 실패는 Writing과 분리된 인프라 진단 과제로만 추적한다.
