@@ -71,9 +71,19 @@ from services.application.app.analysis.review_inbox import (
 )
 from services.application.app.writing.models import (
     WritingCandidate,
+    WritingGateDecision,
+    WritingGateFinding,
+    WritingGateFindingType,
+    WritingGateSeverity,
     WritingOutputType,
     WritingRequest,
     WritingTaskType,
+)
+from services.application.app.writing.revise import (
+    InvalidWritingRevision,
+    WritingRevisionError,
+    WritingRevisionService,
+    seed_writing_revise_template,
 )
 from services.application.app.writing.gate import (
     InvalidWritingGateResult,
@@ -487,6 +497,17 @@ def _build_report_service(provider) -> WritingCandidateReportService:
         max_tokens=int(os.environ.get("WRITING_REPORT_MAX_TOKENS", "1024")))
 
 
+def _build_revise_service(provider) -> WritingRevisionService:
+    templates = PromptTemplateService(InMemoryPromptTemplateRepository())
+    seed_writing_revise_template(templates)
+    return WritingRevisionService(
+        provider,
+        prompt_templates=templates,
+        model=os.environ.get("LLM_GATEWAY_MODEL") or None,
+        max_tokens=int(os.environ.get("WRITING_REVISE_MAX_TOKENS", "512")),
+    )
+
+
 def _default_writing_gate_service() -> WritingGateService | None:
     base_url = os.environ.get("LLM_GATEWAY_BASE_URL")
     if not base_url:
@@ -884,6 +905,25 @@ class WritingReportRequest(BaseModel):
     max_tokens: int = 4096
 
 
+class WritingReviseFindingRequest(BaseModel):
+    type: str
+    severity: str
+    message: str
+    evidence: str
+    recommended_decision: str
+
+
+class WritingReviseRequest(BaseModel):
+    request_id: str
+    instruction: str
+    candidate_text: str
+    finding: WritingReviseFindingRequest
+    task_type: str = WritingTaskType.CONTINUE_SCENE.value
+    query: str | None = None
+    current_position: ContextPositionBody | None = None
+    max_tokens: int = 4096
+
+
 class WritingAcceptRequest(BaseModel):
     request_id: str
     draft_id: str
@@ -912,6 +952,7 @@ def create_app(
     writing_service: WritingService | None = None,
     writing_gate_service: WritingGateService | None = None,
     writing_report_service: WritingCandidateReportService | None = None,
+    writing_revision_service: WritingRevisionService | None = None,
     vector_index: InMemoryVectorIndexAdapter | None = None,
 ) -> FastAPI:
     app = FastAPI(title="AI Writing System Application")
@@ -971,6 +1012,12 @@ def create_app(
     writing_report = writing_report_service
     if writing_report is None and os.environ.get("LLM_GATEWAY_BASE_URL"):
         writing_report = _build_report_service(GatewayGenerateProvider(
+            base_url=os.environ["LLM_GATEWAY_BASE_URL"],
+            timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
+            trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False)))
+    writing_revision = writing_revision_service
+    if writing_revision is None and os.environ.get("LLM_GATEWAY_BASE_URL"):
+        writing_revision = _build_revise_service(GatewayGenerateProvider(
             base_url=os.environ["LLM_GATEWAY_BASE_URL"],
             timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
             trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False)))
@@ -2439,6 +2486,84 @@ def create_app(
             status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
             raise HTTPException(status_code=status, detail=str(exc)) from exc
         return _writing_candidate_payload(enriched)
+
+    @app.post("/projects/{project_id}/writing/revise")
+    async def writing_revise_endpoint(
+        project_id: str, body: WritingReviseRequest
+    ) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+            task_type = WritingTaskType(body.task_type)
+            finding = WritingGateFinding(
+                finding_type=WritingGateFindingType(body.finding.type),
+                severity=WritingGateSeverity(body.finding.severity),
+                message=body.finding.message,
+                evidence=body.finding.evidence,
+                recommended_decision=WritingGateDecision(
+                    body.finding.recommended_decision
+                ),
+            )
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if writing_revision is None:
+            raise HTTPException(
+                status_code=503, detail="writing revision service is not configured"
+            )
+        if context_search is None:
+            raise HTTPException(
+                status_code=503, detail="context search service is not configured"
+            )
+        position = (
+            CurrentPosition(
+                draft_id=body.current_position.draft_id,
+                version_id=body.current_position.version_id,
+            )
+            if body.current_position is not None
+            else None
+        )
+        search_request = ContextSearchRequest(
+            project_id=project_id,
+            purpose=ContextSearchPurpose.WRITING_CONTEXT,
+            needs=_WRITING_CONTINUE_SCENE_NEEDS,
+            query=body.query or body.instruction,
+            current_position=position,
+            context_budget=ContextBudget(max_tokens=body.max_tokens),
+        )
+        candidate = WritingCandidate(
+            request_id=body.request_id,
+            project_id=project_id,
+            task_type=task_type,
+            output_type=WritingOutputType.DRAFT_PATCH,
+            text=body.candidate_text,
+        )
+        try:
+            # Validate cheap deterministic boundaries before context search so
+            # invalid requests never spend a planner round-trip.
+            writing_revision.validate_inputs(candidate, finding, body.instruction)
+            package = await context_search.build_context_package(search_request)
+            revised = await writing_revision.revise(
+                candidate=candidate,
+                finding=finding,
+                instruction=body.instruction,
+                package=package,
+            )
+        except (WritingRevisionError, InvalidContextSearchRequest) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except InvalidWritingRevision as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except ContextSearchBudgetExceeded as exc:
+            raise HTTPException(status_code=504, detail=str(exc)) from exc
+        except ContextSearchFailed as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"{exc.error_type.value}: {exc.detail}",
+            ) from exc
+        except ProviderError as exc:
+            status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
+        return _writing_candidate_payload(revised)
 
     @app.post("/projects/{project_id}/writing/accept")
     async def writing_accept_endpoint(

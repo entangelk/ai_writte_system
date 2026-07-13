@@ -64,3 +64,72 @@
 - persisted WritingCandidate/report의 identity·revision·retention·idempotency를 별도 착수 브리프로 결정한 뒤 B의 감사 이력과 id 기반 API를 additive로 구현한다.
 - stable ContextPackage pointer가 extractor 입력에 제공되면 full `related_context_pointers` schema를 연다.
 - 다음 Writing 후보는 finding evidence 기반 부분 revise/retrieve orchestration이다.
+
+## Phase 5.6 finding evidence 기반 부분 revise 착수 브리프
+
+### Goals
+
+- v1.6.72 커밋 후 HANDOFF의 다음 Writing 후보인 finding evidence 기반 부분 revise/retrieve orchestration의 구현 전 계약을 확정 가능한 결정 단위로 분리한다.
+
+### Completed work
+
+- v1.6.72 구현·독립 검증·closure 전체를 커밋 `25be309`(`feat: add writing report reevaluation API`)으로 묶었다.
+- `05-writing-gate-decisions.md` D3/Follow-up, `05-writing-accept-decisions.md` revision patch 후속, SoT v1.6.69~72, `writing_agent_prompt.md` §16.2를 대조했다.
+- `docs/plans/05-writing-partial-revise-decisions.md`를 작성해 첫 범위, evidence anchor, 모델 출력/splice 책임, finding 수, 재검증, public identity, budget/실패 의미와 unchanged 결과를 D1~D8로 분리했다.
+
+### Issues found
+
+- 기존 정본은 자동 전체 재생성을 금지하고 evidence 기반 부분 revise를 요구하지만, evidence 중복·overlap·replacement 형식·새 candidate identity·Gate 재평가·반복 budget을 확정하지 않았다.
+- `retrieve_more`는 query/needs와 ContextPackage identity까지 추가로 결정해야 하므로 부분 revise와 한 slice에 묶으면 public 실패/budget 계약이 과도하게 커진다.
+
+### Decisions
+
+- 작업자 추천은 revise-only, 단일 continuity finding, evidence exact 단일 발생, 평문 replacement+서버 splice, Gate 별도 호출, inline API first+persistence 감사 이력 additive 후속, LLM 1회다.
+- D1~D8은 owner-level public contract이므로 오너 승인 전 production code를 시작하지 않는다.
+
+### Next steps
+
+- 오너가 `05-writing-partial-revise-decisions.md` D1~D8을 확정하면 SoT 반영→boundary tests 우선→최소 revise service/API→비-LLM 전체 회귀→`192.168.1.22:9080` live smoke 순서로 진행한다.
+
+## Phase 5.6 finding evidence 기반 부분 revise 구현 (SoT v1.6.73)
+
+### Goals
+
+- 승인된 D1~D8에 따라 모델은 replacement fragment만 생성하고 Application이 exact anchor 검증과 splice를 소유하는 첫 부분 revise slice를 구현한다.
+
+### Completed work
+
+- 오너 결정: D1=A, D2=A first→C, D3=A, D4=A first→C, D5=A→B→C, D6=C, D7=A first→C, D8=A first→C. 모델/provider는 호출·응답에 집중하고 anchor 산술·검증·splice·loop/budget은 Application이 소유한다는 원칙을 SoT v1.6.73에 잠갔다.
+- `writing/revise.py`에 `WritingRevisionService`와 전용 평문 replacement prompt를 추가했다. continuity+revise finding 하나, evidence exact 단일 발생만 provider에 전달한다.
+- provider 응답은 replacement fragment로만 취급하고 Application이 `prefix + replacement + suffix`를 splice한다. 빈/unchanged replacement는 `InvalidWritingRevision`이며 첫 slice에서 502다.
+- revised candidate는 기존 task/output/status를 유지하되 변경된 text와 불일치하는 report 네 필드를 비우고 `candidate_id=null`로 반환한다.
+- `main.py`에 `WritingReviseRequest`, 주입/default revise service, `POST /projects/{id}/writing/revise`를 추가했다. ContextPackage는 서버가 재구성하며 저장·Gate·report·accept·Analysis는 자동 호출하지 않는다.
+- `tests/test_writing_revise.py`를 추가해 prefix/suffix 보존, stale report reset, missing/duplicate anchor, non-continuity/non-revise, empty/unchanged, project isolation, prompt 책임 문구, HTTP server context/query/current_position, 400/404/502/503/504를 양방향으로 잠갔다.
+
+### Issues found
+
+- D8의 “502와 200+상태”는 한 응답에서 동시에 표현할 수 없다. 첫 slice A=502로 성공 위장을 막고, 후속 C=`200 changed=false revision_status=...`로 transport 실패와 분리하는 순차 migration으로 확정했다.
+- revised text에 원 report를 보존하면 advisory가 stale해진다. report를 비우고 기존 `/writing/report`로 재평가하는 파생 안전선을 적용했다.
+
+### Verification
+
+- focused: `tests/test_writing_revise.py` + writing/gate/report/accept → **80 passed / 62 subtests**.
+- remote live: `192.168.1.22:9080`에서 replacement=`그녀는 성문 앞에 서 있었다.`를 반환했고 Application splice 결과가 prefix/suffix를 그대로 보존, `status=ok`.
+- full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **892 passed / 45 skipped / 163 subtests**.
+- `python3 -m py_compile`(main/revise/test)·`git diff --check` 통과.
+
+### Next steps
+
+- D5 B 자동 Gate 1회 합성 또는 D1 후속 retrieve_more를 별도 착수 브리프로 결정한다.
+- D4 C multi-finding은 작은 replacement 호출의 실제 비용/latency를 측정한 뒤 structured mapping 계약을 연다.
+- D5 C bounded pass loop 전에 사람 확인 대상과 자동 반복 허용 finding을 정책·fixture로 잠근다.
+
+### 독립 검증 조건부 합격 closure + hardening
+
+- 독립 검증 `docs/verifications/2026-07-13/writing_partial_revise.md`를 대조했다. splice/D8/live/SoT 원칙은 통과했으나 context budget 504/backend 502 HTTP 셀이 비어 있다는 B1 판정이 타당했다.
+- **B1 closure**: `_Context`에 예외 주입을 추가해 `ContextSearchBudgetExceeded→504`, `ContextSearchFailed→502`를 revise endpoint에서 직접 잠갔다.
+- **H1/H2**: 빈 instruction/request_id/candidate_text/evidence 4종을 `WritingRevisionService.validate_inputs`로 context search 전에 거부한다. context와 revise provider 호출이 모두 0임을 HTTP subtest로 단언했다.
+- **H3**: `_NoWriteCoreSotService.save_draft` spy로 revise 200 동안 save 호출 0을 직접 잠갔다.
+- **H4**: 명백한 Markdown triple-backtick fence만 Application이 결정적으로 unwrap한다. 정상 대화문 따옴표는 의미를 훼손할 수 있어 제거하지 않는다.
+- validation 이동 patch가 처음 유사한 Gate endpoint에 오삽입됐으나 focused Gate 회귀가 즉시 잡았다. 오삽입을 제거하고 `validate_inputs` 호출이 revise endpoint에만 남음을 grep/회귀로 확인했다.
+- closure focused: **84 passed / 68 subtests**. closure full: **896 passed / 45 skipped / 169 subtests**.
