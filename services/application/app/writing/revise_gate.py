@@ -270,6 +270,8 @@ class WritingReviseGateService:
             return int((self._clock() - started_at) * 1000)
 
         def token_over_budget() -> bool:
+            # Token is post-accounting (`>`); deadline is a pre-stage check
+            # (`>=`). This intentional asymmetry mirrors flat-loop-gate §Budget.
             policy = self._policy
             return (
                 policy.max_total_tokens is not None

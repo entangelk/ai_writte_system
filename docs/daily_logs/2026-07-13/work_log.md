@@ -688,3 +688,39 @@
 - B2b: full-stack Gemma Q4에서 `revise→report→gate`, `retrieve→gate`, 반복 조합의 aggregate token/wall-clock p95를 측정하고 production 기본값 off→on 여부와 숫자를 결정한다.
 - 그 전까지 aggregate cap은 env opt-in이며 구조적 revision/retrieval/Gate 상한이 기본 안전선이다.
 - 이후 후보는 multi-finding/stable pointer, persisted audit retention/전체 artifact 또는 Phase 6 UI 잔여다.
+
+## Phase 5.10 aggregate budget 독립 검증 B1 closure
+
+### Goals
+
+- 독립 검증 기록 `docs/verifications/2026-07-13/writing_loop_aggregate_budget.md`의 blocking B1을 닫고 H1~H3 보강 후보를 계약 범위 안에서 판정한다.
+
+### Completed work
+
+- B1 test-only closure: `test_legacy_doc_without_aggregate_fields_reads_zero`가 v1.6.80 이전 Mongo 문서를 재현하도록 저장 doc에서 `total_tokens`/`wall_clock_ms`를 제거하고 두 값이 모두 0으로 복원됨을 단언한다. 기존 field-for-field round-trip(`123`/`456`)이 present-value 방향을 계속 잠근다.
+- H2: `token_over_budget()`에 token strict `>`(post-accounting)와 deadline `>=`(pre-stage)의 의도적 비대칭 및 `flat-loop-gate` §Budget 근거를 주석으로 추가했다. 동작은 무변이다.
+- 검증 기록에 owner-authorized closure addendum을 추가해 B1 closure, M7 재-bite, H1/H3 보류 근거와 재현 결과를 남겼다. 원 독립 verdict는 역사적 기록으로 유지하고 독립 재판정을 가장하지 않았다.
+
+### Issues found
+
+- B1 원인: 기존 Mongo round-trip fixture가 신규 aggregate 필드를 항상 포함해 `doc.get(key, 0)`을 `doc[key]`로 바꿔도 legacy-doc 경로가 실행되지 않았다.
+- 해결/결과: field-less legacy doc을 직접 구성하는 named regression을 추가했다. M7 변이에서 신규 test가 `KeyError: total_tokens`로 1 failed, 원복 뒤 1 passed해 guard bite를 확인했다.
+- H1은 production 네 collaborator가 모두 `*_metered`를 가지므로 현재 도달 불가다. active token cap에서 bare fallback을 fail-fast로 바꾸면 새 collaborator injection/configuration 오류와 HTTP taxonomy가 생겨 현 정본 밖이므로 보류했다.
+- H3은 token-overrun planner 결과를 채택하지 않는 M4 규칙과 Gate-overrun 대칭이다. 이를 `completed`로 기록하면 거짓이고 새 `budget_exhausted` stage literal은 M5=C per-stage 관측 schema 결정이므로 보류했다.
+
+### Decisions
+
+- 사용자 요청에 따라 contract-required B1과 의미 무변 H2만 즉시 보강한다.
+- H1/H3은 비차단 권고이며 현재 계약을 넓히므로 구현하지 않고 각각 injection fail-fast 결정과 M5=C stage schema 후속으로 남긴다.
+
+### Verification
+
+- focused audit/B2: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_loop_audit_mongo.py tests/test_writing_loop_audit.py tests/test_writing_loop_budget.py` → **39 passed / 6 subtests**.
+- B1 mutation re-bite: `doc.get(key, 0)`→`doc[key]` 임시 변이 시 신규 test **1 failed**(`KeyError`), 원복 뒤 **1 passed**.
+- full non-Mongo: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **972 passed / 48 skipped / 215 subtests**. warnings 3개는 기존 `TestClient` collection warning이다.
+- `python3 -m py_compile services/application/app/writing/revise_gate.py services/application/app/writing/loop_audit_mongo.py`, `git diff --check` 통과.
+
+### Next steps
+
+- 독립 재검증이 필요하면 같은 verification record의 B1 cell과 M7 mutation만 재판정한다.
+- H1은 production collaborator 교체/외부 injection이 실제 요구가 될 때 fail-fast taxonomy 브리프로, H3은 M5=C per-stage usage/artifact 관측 schema와 함께 결정한다.

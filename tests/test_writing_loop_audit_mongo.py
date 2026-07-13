@@ -127,6 +127,22 @@ class MongoWritingLoopAuditRepositoryTest(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.repo.add(_run("wla:a"))
 
+    def test_legacy_doc_without_aggregate_fields_reads_zero(self):
+        """Under-strict: pre-v1.6.80 docs default both aggregates to zero.
+
+        The present-field direction remains pinned by the field-for-field
+        round-trip assertion in ``test_add_get_and_list_round_trip_newest_first``.
+        """
+        self.repo.add(_run("wla:legacy"))
+        legacy = self.collection.docs["wla:legacy"]
+        legacy.pop("total_tokens")
+        legacy.pop("wall_clock_ms")
+
+        restored = self.repo.get("wla:legacy")
+
+        self.assertEqual(restored.total_tokens, 0)
+        self.assertEqual(restored.wall_clock_ms, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
