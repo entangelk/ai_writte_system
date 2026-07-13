@@ -40,6 +40,7 @@ from services.application.app.writing.models import (
     WritingOutputType,
     WritingTaskType,
 )
+from services.application.app.writing.metering import MeteredCallError
 from services.application.app.writing.revise import (
     InvalidWritingRevision,
     WritingRevisionError,
@@ -134,6 +135,26 @@ class WritingRevisionServiceTest(unittest.TestCase):
         self.assertEqual(revised.generated_by_model, "fake-reviser")
         self.assertEqual(provider.calls, 1)
         self.assertIn("replacement prose fragment", provider.last_request.messages[0].content)
+
+    def test_revise_metered_returns_provider_usage(self):
+        # Phase 5.10 ("B2"): revise_metered surfaces the provider TokenUsage so
+        # the bounded loop can aggregate it (bare revise still drops it).
+        provider = _Provider()
+        revised, usage = asyncio.run(_service(provider).revise_metered(
+            candidate=_candidate(), finding=_finding(), instruction="고쳐줘",
+            package=_package(),
+        ))
+        self.assertEqual(revised.text, "앞 문장. 고친 문장. 뒤 문장.")
+        self.assertEqual(usage.total_tokens, 2)
+
+    def test_revise_metered_invalid_result_carries_usage(self):
+        with self.assertRaises(MeteredCallError) as caught:
+            asyncio.run(_service(_Provider("")).revise_metered(
+                candidate=_candidate(), finding=_finding(), instruction="고쳐줘",
+                package=_package(),
+            ))
+        self.assertIsInstance(caught.exception.cause, InvalidWritingRevision)
+        self.assertEqual(caught.exception.usage.total_tokens, 2)
 
     def test_missing_or_duplicate_anchor_rejected_before_provider(self):
         for text in ("anchor 없음", "잘못된 문장. 그리고 잘못된 문장."):

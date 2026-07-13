@@ -17,9 +17,10 @@ from services.application.app.writing.models import (
     WritingGateFinding,
     WritingGateFindingType,
 )
+from services.application.app.writing.metering import MeteredCallError
 from services.application.app.writing.prompt import format_context_package
 from services.llm_gateway.app.payload import ChatCompletionRequest, ChatMessage
-from services.llm_gateway.app.provider import LLMProvider
+from services.llm_gateway.app.provider import LLMProvider, TokenUsage
 
 
 TASK = "writing_partial_revise"
@@ -70,6 +71,23 @@ class WritingRevisionService:
         instruction: str,
         package: ContextPackage,
     ) -> WritingCandidate:
+        try:
+            revised, _usage = await self.revise_metered(
+                candidate=candidate, finding=finding,
+                instruction=instruction, package=package,
+            )
+        except MeteredCallError as exc:
+            raise exc.cause from exc
+        return revised
+
+    async def revise_metered(
+        self,
+        *,
+        candidate: WritingCandidate,
+        finding: WritingGateFinding,
+        instruction: str,
+        package: ContextPackage,
+    ) -> tuple[WritingCandidate, TokenUsage]:
         self.validate_inputs(candidate, finding, instruction)
         if candidate.project_id != package.project_id:
             raise WritingRevisionError("candidate and context belong to different projects")
@@ -109,16 +127,21 @@ class WritingRevisionService:
                 thinking=False,
             )
         )
-        replacement = _replacement_text(result.content)
+        try:
+            replacement = _replacement_text(result.content)
+        except Exception as exc:
+            raise MeteredCallError(exc, result.usage) from exc
         if not replacement:
-            raise InvalidWritingRevision("replacement must not be empty")
+            cause = InvalidWritingRevision("replacement must not be empty")
+            raise MeteredCallError(cause, result.usage)
         if replacement == finding.evidence:
-            raise UnchangedWritingRevision(
+            cause = UnchangedWritingRevision(
                 "replacement did not change the evidence"
             )
+            raise MeteredCallError(cause, result.usage)
         start = candidate.text.index(finding.evidence)
         end = start + len(finding.evidence)
-        return replace(
+        revised = replace(
             candidate,
             text=candidate.text[:start] + replacement + candidate.text[end:],
             self_reported_constraints=(),
@@ -128,6 +151,7 @@ class WritingRevisionService:
             candidate_id=None,
             generated_by_model=result.model,
         )
+        return revised, result.usage
 
     @staticmethod
     def validate_inputs(

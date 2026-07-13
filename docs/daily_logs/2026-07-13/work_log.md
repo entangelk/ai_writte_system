@@ -604,3 +604,87 @@
 - **B2 closure(test-only, 1 line)**: `test_success_loop_persists_full_trail_and_returns_audit_id`에 `self.assertIsNone(response.json()["audit_error"])` 추가. 동일 mutation이 이제 `:250`에서 bite(1 failed). 빈 셀 filled.
 - smoke: full non-Mongo **944 passed/48 skipped/215 subtests**(verifier 머신, ES 미설치). 작업자 머신(ES 설치) 기준 947/45/215 — 차이 3은 `elasticsearch` package skip, subtests 215 일치, HANDOFF에 문서화된 환경 차이.
 - 결정: B2를 SoT 명시 contract-required로 보아 blocking을 유지(closure 조건으로). trivial test-only fix로 합격 re-promote.
+
+## Phase 5.10 Writing loop aggregate budget ("B2 increment") 착수 결정 브리프
+
+> 주의: 여기의 "B2 increment"는 L5=A에서 미룬 **aggregate token/time budget 후속**(SoT v1.6.77/78이 "B2"로 참조)이다. 바로 위 v1.6.79 재검증의 "B2 closure"(verification blocking finding 2)와는 다른 개념이다.
+
+### Goals
+
+- HANDOFF Next Tasks #1의 다음 Writing 후보 "B2 provider usage/latency/search 계측→aggregate token/time 기본값 브리프"를 구현 전 결정 단위로 분리한다.
+- 계측 기계(전파·집계·강제)와 live 계측이 필요한 숫자 기본값을 혼동하지 않는다.
+
+### Completed work
+
+- 착수 전 정본 스코프를 대조했다: SoT v1.6.77 L5(구조적 call cap first, aggregate는 usage 계측 뒤 B2)·v1.6.78(token/latency 집계는 B2 후속)·§251-252(usage 누락→`provider_invalid_response`)·§292-293(budget 5차원 literal), `05-writing-bounded-loop-decisions.md` L4/L5/L6, `flat-loop-gate.md` §Budget 계약과 §production 기본값(2026-06-30 Gemma Q4 benchmark 절차).
+- 코드 표면을 매핑했다: provider 경계는 이미 `GenerationResult.usage: TokenUsage`(prompt/completion/total, `provider.py:12-27`)를 반환하지만, **모든 Writing domain service**(`service.generate`·`revise`·`report.enrich`[+repair]·`gate.evaluate`·`retrieval.plan`[+repair])가 `result.usage`를 버리고 `.content`/`.model`만 소비한다. 구조적 cap(L4)은 round만 세고 token/시간/repair 호출은 안 센다. 5차원 중 실제로 비어 있는 loop 차원은 **total-token**과 **wall-clock** 둘뿐(search-hit/context-token은 Context Gate `ContextBudget` 소관).
+- `docs/plans/05-writing-loop-budget-decisions.md`를 작성해 M1(범위 분리)·M2(강제 차원)·M3(usage 전파 방식)·M4(강제 시맨틱)·M5(관측 표면)·M6(기본값 posture/숫자 출처)를 owner-level 결정으로 분리했다. 각 선택지의 장단점을 남기고 추천 묶음 **M1=A, M2=A, M3=A, M4=A, M5=A first→B, M6=A first(ceiling B 후속)**를 근거와 함께 기록했다.
+
+### Issues found
+
+- 문제: aggregate token/time budget은 정의상 두 층으로 갈린다 — (1) usage plumbing·집계·강제 기계(fake provider로 결정적 검증 가능)와 (2) production 기본 숫자값(loop-level live 계측 없이 추측 불가). 한 slice로 묶으면 "근거 없는 숫자 금지"(L5 기각 논리)를 재현한다.
+- 원인: 현재 domain 결과가 provider usage를 loop까지 전달하지 않고, loop-level aggregate 실측값이 없다(단일 turn benchmark만 존재).
+- 해결/결과: 임의 구현을 중단하고 결정 브리프로 전환했다. 기계는 이번 slice(M1=A), 숫자는 B2b(full-stack 머신 loop-level benchmark)로 명시 분리했다. M3=A(내부 채널)로 public envelope 무변, M6=A(off/opt-in 기본)로 v1.6.79 opt-in posture와 대칭.
+- 충돌 점검: scoped 정본 안에서 자기모순은 없었다. `flat-loop-gate.md` 5차원과 Writing loop L4 구조적 cap의 관계(중복 없이 total-token·wall-clock만 비어 있음)를 브리프 §"현재 확정된 경계"에 명시했다.
+
+### Decisions
+
+- 작업자 추천이며 아직 사용자 결정이 아니다: M1~M6 추천 묶음(위). 오너 승인 전 production code·SoT 버전은 변경하지 않았다.
+- 추천 이유: 로컬 1인 프로젝트 단계에서 이 increment의 가치는 aggregate 차원을 "강제 가능한 형태로 확정"하는 것이지 검증 안 된 숫자를 박는 게 아니다. 기계를 지금 결정적으로 잠그고 숫자만 live 계측 뒤로 미룬다.
+
+### Verification
+
+- documentation-only 변경. 브리프가 인용한 파일/라인(벤치마크 JSON, SoT §251-252/§292-293, `provider.py:12-27`, 5개 domain service의 usage-drop)을 grep/원문 대조로 확인했다.
+- `git diff --check` clean. production code·SoT 버전 무변.
+
+### Next steps
+
+- 오너가 `05-writing-loop-budget-decisions.md` M1~M6을 확정하면 결정을 이 로그와 SoT에 반영한다.
+- 승인 후 boundary tests red-first → domain 결과 usage 내부 전파 + loop 집계/강제 → focused/full 비-LLM 회귀 순서로 구현한다. production 숫자값은 B2b(full-stack 머신 loop-level benchmark)로 별도 확정한다.
+
+## Phase 5.10 Writing loop aggregate budget 구현 (SoT v1.6.80)
+
+### Goals
+
+- 중단된 B2 increment 작업을 승인된 M1~M6 계약에 맞게 완성한다.
+- aggregate token/wall-clock을 강제하되 ephemeral loop payload와 standalone Writing endpoint 계약을 보존한다.
+- success뿐 아니라 repair·최종 parse 실패가 소비한 provider usage도 감사 aggregate에 정확히 반영한다.
+
+### Completed work
+
+- 사용자 승인 기록을 복원했다: **M1=A**(기계 지금·production 숫자 B2b 후속), **M3=A**(내부 채널), **M6=A**(off 기본)를 직접 선택했고 **M2=A/M4=A/M5=A first→B**는 추천대로 확정했다. 브리프를 `Resolved`로, SoT를 v1.6.80으로 승격했다.
+- `writing/metering.py`에 usage 합산과 내부 `MeteredCallError(error+usage)` 채널을 추가했다. revise/report/Gate/retrieval planner는 기존 public 메서드를 유지하고 loop 전용 `*_metered` 변형에서 success usage를 반환한다. provider 응답 뒤 parsing/repair가 실패하면 usage를 예외와 함께 전달하며, standalone 호출은 원래 domain/provider 예외를 그대로 다시 던져 HTTP taxonomy를 보존한다.
+- `WritingLoopPolicy`에 optional `max_total_tokens`/`max_wall_clock_ms`를 추가했다. token은 논리 provider 단계 직후 누적해 `> limit` 결과를 채택하지 않고 `budget_exhausted`, `== limit` 완료는 허용한다. wall-clock은 revise/report/Gate/retrieval planner/context search 시작 전에 monotonic deadline을 검사한다. 첫 Gate 전 소진은 원 candidate 또는 마지막 완전 candidate를 보존하고 정상 200 `gate=null`을 반환한다.
+- `main.py`와 Compose에 `WRITING_LOOP_MAX_TOTAL_TOKENS`/`WRITING_LOOP_MAX_WALL_CLOCK_MS`를 배선했다. unset/빈 값은 `None`(off)이며 구조적 round cap은 계속 유효하다.
+- persisted audit `StoredWritingLoopRun`·Mongo doc·list/detail payload에 run-level `total_tokens`/`wall_clock_ms`를 additive로 추가했다. Mongo 구문서는 두 필드 부재 시 0으로 읽는다. ephemeral `loop` 4키와 stage row 공개 shape는 그대로다.
+- boundary tests를 추가/보강했다: 네 concrete collaborator의 success·repair·parse-failure usage, failed-stage 누적, initial/revise/report/Gate/planner token 경계, retrieval planner 정확히 1회 집계, deadline pre-initial·pre-report·pre-context-search, provider timeout 분리, env on/empty-off, persisted audit aggregate와 legacy Mongo default를 직접 잠갔다.
+- 주요 변경 파일: `services/application/app/writing/{metering,revise,report,gate,retrieval,revise_gate,loop_audit,loop_audit_mongo}.py`, `services/application/app/main.py`, `docker-compose.yml`, `tests/test_writing_{loop_budget,revise,report,gate,retrieval,loop_audit,loop_audit_mongo}.py`, SoT/브리프/HANDOFF/CHANGELOG.
+
+### Issues found
+
+- 문제: 중단된 구현은 token 초과를 각 provider 단계 직후가 아니라 다음 revise/retrieve 분기에서 검사해, 초과 Gate 결과를 채택하거나 report/Gate를 추가 호출할 수 있었다. wall-clock도 report/Gate/context-search 앞에서 검사하지 않았다.
+- 원인: `over_budget()`가 while decision 분기에만 배치돼 M4의 post-accounting/deadline 경계가 stage lifecycle에 연결되지 않았다.
+- 해결/결과: stage별 결과를 임시 변수로 받은 뒤 token 검사를 통과할 때만 current candidate/Gate에 채택하고, provider/search 전 deadline guard를 공통 배치했다. `gate`를 optional로 좁혀 첫 Gate 전 정상 budget 소진도 partial artifact를 잃지 않는다.
+- 문제: provider는 성공 응답했지만 revise/Gate parser 또는 report/retrieval repair가 최종 실패하면 반환형 채널이 열리지 않아 소비 token이 failed audit에서 누락됐다.
+- 해결/결과: 내부 `MeteredCallError`가 usage와 원인 예외를 함께 운반하고 loop이 usage를 먼저 합산한 뒤 원인을 복원한다. 이 응답으로 token이 초과되면 generic runner 선례대로 parse 오류보다 `budget_exhausted`가 먼저다. standalone error mapping은 기존 회귀로 무변을 확인했다.
+- pattern sweep: `over_budget|max_total_tokens|deadline_reached`를 repo-wide 확인했다. Writing의 지연 검사 외 동일 결함은 없었고 generic `AgentLoopRunner`는 이미 provider usage 기록 직후 token overrun을 completion보다 먼저 판정한다. `git blame`상 `flat-loop-gate.md:83-93`의 post-accounting/deadline 계약은 2026-06-24 최초 결정으로 의도된 선례라 그대로 미러했다.
+
+### Decisions
+
+- 사용자 결정과 이유: 계측·강제 기계는 지금 확정하되 근거 없는 production 숫자를 넣지 않는다. 실제 기본 한도는 B2b full-stack loop benchmark 이후 결정한다.
+- public candidate/Gate dataclass에 usage를 넣지 않고 내부 return/error 채널만 사용한다. aggregate 관측은 opt-in persisted audit에 한정하고 ephemeral `loop`/`stages`는 유지한다.
+- search-hit/context-token은 Context Gate `ContextBudget` 소관으로 유지하며 이번 loop aggregate 차원에 중복 추가하지 않는다.
+- 전체 중간 artifact/per-stage usage, standalone usage 공개, save/accept/Analysis side effect, B2b 숫자는 이번 커밋 범위 밖이다.
+
+### Verification
+
+- focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_loop_budget.py tests/test_writing_gate.py tests/test_writing_revise.py tests/test_writing_retrieval.py tests/test_writing_report.py tests/test_writing_loop_audit.py tests/test_writing_loop_audit_mongo.py` → **116 passed / 90 subtests**.
+- full non-Mongo: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **971 passed / 48 skipped / 215 subtests**, warnings 3개는 기존 `TestClient` collection warning이다.
+- `python3 -m py_compile`(변경된 Application/Writing 모듈), `docker compose config --quiet`, `git diff --check` 통과.
+- 이번 검증은 자체 구현의 routine self-check이므로 별도 `docs/verifications/` 기록은 생성하지 않았다.
+
+### Next steps
+
+- B2b: full-stack Gemma Q4에서 `revise→report→gate`, `retrieve→gate`, 반복 조합의 aggregate token/wall-clock p95를 측정하고 production 기본값 off→on 여부와 숫자를 결정한다.
+- 그 전까지 aggregate cap은 env opt-in이며 구조적 revision/retrieval/Gate 상한이 기본 안전선이다.
+- 이후 후보는 multi-finding/stable pointer, persisted audit retention/전체 artifact 또는 Phase 6 UI 잔여다.

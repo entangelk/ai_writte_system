@@ -29,7 +29,8 @@ from services.llm_gateway.app.payload import (
     ChatCompletionRequest,
     ChatMessage,
 )
-from services.llm_gateway.app.provider import LLMProvider
+from services.application.app.writing.metering import MeteredCallError, add_usage
+from services.llm_gateway.app.provider import LLMProvider, TokenUsage
 
 
 TASK = "writing_retrieval_plan"
@@ -93,6 +94,23 @@ class TerminalJsonWritingRetrievalPlanner:
         gate: WritingGateResult,
         current_position: CurrentPosition | None = None,
     ) -> WritingRetrievalPlan:
+        try:
+            planned, _usage = await self.plan_metered(
+                request=request, candidate=candidate, gate=gate,
+                current_position=current_position,
+            )
+        except MeteredCallError as exc:
+            raise exc.cause from exc
+        return planned
+
+    async def plan_metered(
+        self,
+        *,
+        request: WritingRequest,
+        candidate: WritingCandidate,
+        gate: WritingGateResult,
+        current_position: CurrentPosition | None = None,
+    ) -> tuple[WritingRetrievalPlan, TokenUsage]:
         if gate.decision is not WritingGateDecision.RETRIEVE_MORE:
             raise WritingRetrievalPlannerError(
                 "retrieval planner requires a retrieve_more Gate result"
@@ -126,23 +144,30 @@ class TerminalJsonWritingRetrievalPlanner:
         try:
             return parse_writing_retrieval_plan(
                 result.content, allowed_needs=allowed_needs
-            )
+            ), result.usage
         except InvalidWritingRetrievalPlan as first:
-            repair = await self._provider.generate(ChatCompletionRequest(
-                messages=(
-                    ChatMessage(role="system", content=TEMPLATE),
-                    ChatMessage(role="user", content=json.dumps({
-                        "invalid": result.content,
-                        "error": str(first),
-                    }, ensure_ascii=False)),
-                ),
-                model=self._model,
-                max_tokens=self._max_tokens,
-                thinking=False,
-            ))
-            return parse_writing_retrieval_plan(
-                repair.content, allowed_needs=allowed_needs
-            )
+            try:
+                repair = await self._provider.generate(ChatCompletionRequest(
+                    messages=(
+                        ChatMessage(role="system", content=TEMPLATE),
+                        ChatMessage(role="user", content=json.dumps({
+                            "invalid": result.content,
+                            "error": str(first),
+                        }, ensure_ascii=False)),
+                    ),
+                    model=self._model,
+                    max_tokens=self._max_tokens,
+                    thinking=False,
+                ))
+            except Exception as exc:
+                raise MeteredCallError(exc, result.usage) from exc
+            usage = add_usage(result.usage, repair.usage)
+            try:
+                return parse_writing_retrieval_plan(
+                    repair.content, allowed_needs=allowed_needs
+                ), usage
+            except InvalidWritingRetrievalPlan as second:
+                raise MeteredCallError(second, usage) from second
 
     def _request(self, *, request, candidate, findings, template, allowed_needs):
         payload = {

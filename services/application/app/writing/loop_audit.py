@@ -60,6 +60,10 @@ class StoredWritingLoopRun:
     final_gate_finding_fingerprints: tuple[str, ...]
     stages: tuple[StoredLoopStage, ...]
     created_at: datetime
+    # Phase 5.10 ("B2") aggregate metering: token/wall-clock across all loop
+    # provider stages. Defaulted so older direct constructions stay valid.
+    total_tokens: int = 0
+    wall_clock_ms: int = 0
 
 
 class WritingLoopAuditRepository(Protocol):
@@ -138,6 +142,8 @@ class WritingLoopAuditService:
             ),
             stages=tuple(_stored_stage(stage) for stage in stages),
             created_at=self._clock(),
+            total_tokens=summary.total_tokens,
+            wall_clock_ms=summary.wall_clock_ms,
         )
         self._repo.add(run)
         return run

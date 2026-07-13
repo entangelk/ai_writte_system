@@ -26,6 +26,7 @@ from services.application.app.writing.models import (
     WritingCandidate, WritingGateDecision, WritingOutputType, WritingRequest,
     WritingTaskType,
 )
+from services.application.app.writing.metering import MeteredCallError
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
 from services.llm_gateway.app.provider import GenerationResult, TokenUsage
 
@@ -167,6 +168,22 @@ class GateContractTest(unittest.TestCase):
         self.assertIs(result.decision, WritingGateDecision.BLOCK)
         self.assertEqual(provider.calls, 1)
         self.assertIn("배신을 밝히지 않는다", provider.last_request.messages[1].content)
+
+    def test_evaluate_metered_returns_provider_usage(self):
+        provider = _Provider()
+        result, usage = asyncio.run(_service(provider).evaluate_metered(
+            request=_request(), candidate=_candidate(), package=_package(),
+        ))
+        self.assertIs(result.decision, WritingGateDecision.PASS)
+        self.assertEqual(usage.total_tokens, 2)
+
+    def test_evaluate_metered_invalid_result_carries_usage(self):
+        with self.assertRaises(MeteredCallError) as caught:
+            asyncio.run(_service(_Provider("bad")).evaluate_metered(
+                request=_request(), candidate=_candidate(), package=_package(),
+            ))
+        self.assertIsInstance(caught.exception.cause, InvalidWritingGateResult)
+        self.assertEqual(caught.exception.usage.total_tokens, 2)
 
     def test_evidence_must_be_grounded_in_candidate_text(self):
         provider = _Provider(_output("revise", [_finding(

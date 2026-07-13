@@ -14,7 +14,9 @@ from services.application.app.writing.models import (
     RiskNote, RiskNoteType, RiskSeverity, WritingCandidate,
 )
 from services.application.app.writing.prompt import format_context_package
+from services.application.app.writing.metering import MeteredCallError, add_usage
 from services.llm_gateway.app.payload import ChatCompletionRequest, ChatMessage
+from services.llm_gateway.app.provider import TokenUsage
 from services.llm_gateway.app.provider import LLMProvider
 
 TASK = "writing_candidate_report"
@@ -66,23 +68,38 @@ class WritingCandidateReportService:
 
     async def enrich(self, candidate: WritingCandidate,
                      package: ContextPackage) -> WritingCandidate:
+        try:
+            enriched, _usage = await self.enrich_metered(candidate, package)
+        except MeteredCallError as exc:
+            raise exc.cause from exc
+        return enriched
+
+    async def enrich_metered(self, candidate: WritingCandidate,
+                             package: ContextPackage
+                             ) -> tuple[WritingCandidate, TokenUsage]:
         if candidate.project_id != package.project_id:
             raise InvalidCandidateReport("candidate and context belong to different projects")
         template = self.templates.get_template(task_type=TASK, version=VERSION)
         request = self._request(candidate, package, template.template)
         result = await self.provider.generate(request)
+        usage = result.usage
         try:
             report = parse_report(result.content)
         except ValueError as first:
-            repair = await self.provider.generate(ChatCompletionRequest(messages=(
-                ChatMessage(role="system", content=TEMPLATE),
-                ChatMessage(role="user", content=json.dumps({"invalid": result.content,
-                    "error": str(first)}, ensure_ascii=False))),
-                model=self.model, max_tokens=self.max_tokens, thinking=False))
+            try:
+                repair = await self.provider.generate(ChatCompletionRequest(messages=(
+                    ChatMessage(role="system", content=TEMPLATE),
+                    ChatMessage(role="user", content=json.dumps({"invalid": result.content,
+                        "error": str(first)}, ensure_ascii=False))),
+                    model=self.model, max_tokens=self.max_tokens, thinking=False))
+            except Exception as exc:
+                raise MeteredCallError(exc, usage) from exc
+            usage = add_usage(usage, repair.usage)
             try: report = parse_report(repair.content)
             except ValueError as second:
-                raise InvalidCandidateReport(str(second)) from second
-        return replace(candidate, **report)
+                cause = InvalidCandidateReport(str(second))
+                raise MeteredCallError(cause, usage) from second
+        return replace(candidate, **report), usage
 
     def _request(self, candidate, package, template):
         payload = {"candidate_text": candidate.text,

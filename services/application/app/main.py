@@ -430,6 +430,14 @@ def _env_int(name: str, default: int) -> int:
     return int(raw)
 
 
+def _env_opt_int(name: str) -> int | None:
+    # Unset or empty means "no limit" (None) for the aggregate loop budget.
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return None
+    return int(raw)
+
+
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.environ.get(name)
     if raw is None:
@@ -1147,6 +1155,10 @@ def create_app(
                 ),
                 max_gate_evaluations=_env_int(
                     "WRITING_LOOP_MAX_GATE_EVALUATIONS", 3
+                ),
+                max_total_tokens=_env_opt_int("WRITING_LOOP_MAX_TOTAL_TOKENS"),
+                max_wall_clock_ms=_env_opt_int(
+                    "WRITING_LOOP_MAX_WALL_CLOCK_MS"
                 ),
             ),
         )
@@ -2395,6 +2407,11 @@ def create_app(
             "revision_rounds": run.revision_rounds,
             "retrieval_rounds": run.retrieval_rounds,
             "gate_evaluations": run.gate_evaluations,
+            # Phase 5.10 ("B2") aggregate metering — bodyless run-level metric,
+            # exposed only on the persisted audit (M5=A), never on the ephemeral
+            # loop response.
+            "total_tokens": run.total_tokens,
+            "wall_clock_ms": run.wall_clock_ms,
             "created_at": run.created_at.isoformat(),
         }
 
@@ -2964,7 +2981,10 @@ def create_app(
         )
         return {
             "candidate": _writing_candidate_payload(result.candidate),
-            "gate": _writing_gate_payload(result.gate),
+            "gate": (
+                _writing_gate_payload(result.gate)
+                if result.gate is not None else None
+            ),
             "loop": _writing_loop_payload(result.loop),
             "stages": _writing_stages_payload(result.stages),
             "audit_id": audit_id,

@@ -4,8 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol
+from time import monotonic
+from typing import Callable, Protocol
 
+from services.application.app.writing.metering import (
+    EMPTY_USAGE,
+    MeteredCallError,
+    add_usage,
+)
+from services.llm_gateway.app.provider import TokenUsage
 from services.application.app.context_search.models import (
     ContextBudget,
     ContextPackage,
@@ -92,11 +99,21 @@ class WritingLoopStageStatus(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class WritingLoopPolicy:
-    """Configurable structural caps; counts include the initial requested work."""
+    """Configurable structural caps; counts include the initial requested work.
+
+    ``max_total_tokens``/``max_wall_clock_ms`` are the Phase 5.10 ("B2") aggregate
+    budget dimensions. They default to ``None`` (unbounded): the structural round
+    caps already bound the loop, and production numbers wait on live loop-level
+    calibration (B2b). When set they enforce, mirroring ``flat-loop-gate.md``:
+    token is post-accounting (a cumulative ``> limit`` result is not adopted),
+    wall-clock is a monotonic deadline checked before the next stage.
+    """
 
     max_revision_rounds: int = 2
     max_retrieval_rounds: int = 1
     max_gate_evaluations: int = 3
+    max_total_tokens: int | None = None
+    max_wall_clock_ms: int | None = None
 
     def __post_init__(self) -> None:
         if self.max_revision_rounds < 1:
@@ -105,6 +122,10 @@ class WritingLoopPolicy:
             raise ValueError("max_retrieval_rounds must not be negative")
         if self.max_gate_evaluations < 1:
             raise ValueError("max_gate_evaluations must be at least 1")
+        if self.max_total_tokens is not None and self.max_total_tokens < 1:
+            raise ValueError("max_total_tokens must be at least 1 when set")
+        if self.max_wall_clock_ms is not None and self.max_wall_clock_ms < 1:
+            raise ValueError("max_wall_clock_ms must be at least 1 when set")
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,12 +147,16 @@ class WritingLoopSummary:
     revision_rounds: int
     retrieval_rounds: int
     gate_evaluations: int
+    # Phase 5.10 ("B2") aggregate metering. Always computed; the ephemeral HTTP
+    # `loop` payload does not expose these (M5=A) — only the persisted audit does.
+    total_tokens: int = 0
+    wall_clock_ms: int = 0
 
 
 @dataclass(frozen=True, slots=True)
 class WritingReviseGateResult:
     candidate: WritingCandidate
-    gate: WritingGateResult
+    gate: WritingGateResult | None
     loop: WritingLoopSummary
     stages: tuple[WritingLoopStage, ...]
 
@@ -174,6 +199,10 @@ class WritingRetrievalFailure(_WritingLoopFailure):
     pass
 
 
+class _PostAccountingBudgetExceeded(RuntimeError):
+    pass
+
+
 class WritingReviseGateService:
     def __init__(
         self,
@@ -184,6 +213,7 @@ class WritingReviseGateService:
         retrieval_planner: FollowupRetrievalPlanner | None = None,
         context_search: ContextPackageSearch | None = None,
         policy: WritingLoopPolicy | None = None,
+        clock: Callable[[], float] | None = None,
     ) -> None:
         self._reviser = reviser
         self._reporter = reporter
@@ -191,6 +221,8 @@ class WritingReviseGateService:
         self._retrieval_planner = retrieval_planner
         self._context_search = context_search
         self._policy = policy or WritingLoopPolicy()
+        # Monotonic seconds for the wall-clock budget; injectable for tests.
+        self._clock = clock or monotonic
 
     async def run(
         self,
@@ -209,6 +241,47 @@ class WritingReviseGateService:
         current_candidate = candidate
         current_package = package
         last_gate: WritingGateResult | None = None
+        started_at = self._clock()
+        accumulated: TokenUsage = EMPTY_USAGE
+
+        async def metered(collaborator: object, method: str, /, **kwargs):
+            # M3=A internal channel: prefer the ``*_metered`` variant so provider
+            # TokenUsage rides on the return; fall back to the bare method (zero
+            # usage) for collaborators that don't surface usage. With the default
+            # unbounded policy, zero usage keeps behaviour byte-identical.
+            nonlocal accumulated
+            variant = getattr(collaborator, method + "_metered", None)
+            if variant is not None:
+                try:
+                    value, usage = await variant(**kwargs)
+                except MeteredCallError as exc:
+                    accumulated = add_usage(accumulated, exc.usage)
+                    if token_over_budget():
+                        raise _PostAccountingBudgetExceeded from exc
+                    raise exc.cause from exc
+            else:
+                value, usage = await getattr(collaborator, method)(**kwargs), EMPTY_USAGE
+            accumulated = add_usage(accumulated, usage)
+            if token_over_budget():
+                raise _PostAccountingBudgetExceeded
+            return value
+
+        def elapsed_ms() -> int:
+            return int((self._clock() - started_at) * 1000)
+
+        def token_over_budget() -> bool:
+            policy = self._policy
+            return (
+                policy.max_total_tokens is not None
+                and accumulated.total_tokens > policy.max_total_tokens
+            )
+
+        def deadline_reached() -> bool:
+            policy = self._policy
+            return (
+                policy.max_wall_clock_ms is not None
+                and elapsed_ms() >= policy.max_wall_clock_ms
+            )
 
         def record(
             stage: WritingLoopStageName, status: WritingLoopStageStatus,
@@ -226,37 +299,49 @@ class WritingReviseGateService:
 
         def summary(status: WritingLoopStatus) -> WritingLoopSummary:
             return WritingLoopSummary(
-                status, revision_rounds, retrieval_rounds, gate_evaluations
+                status, revision_rounds, retrieval_rounds, gate_evaluations,
+                total_tokens=accumulated.total_tokens, wall_clock_ms=elapsed_ms(),
             )
 
         def result(status: WritingLoopStatus) -> WritingReviseGateResult:
-            assert last_gate is not None
             return WritingReviseGateResult(
                 current_candidate, last_gate, summary(status), tuple(stages)
             )
 
-        async def refresh_report() -> None:
+        async def refresh_report() -> bool:
             nonlocal current_candidate
+            if deadline_reached():
+                return False
             try:
-                current_candidate = await self._reporter.enrich(
-                    current_candidate, current_package
+                enriched = await metered(
+                    self._reporter, "enrich",
+                    candidate=current_candidate, package=current_package,
                 )
+            except _PostAccountingBudgetExceeded:
+                return False
             except Exception as exc:
                 record(WritingLoopStageName.REPORT, WritingLoopStageStatus.FAILED)
                 raise WritingReviseReportFailure(
                     current_candidate, exc, gate=last_gate,
                     loop=summary(WritingLoopStatus.FAILED), stages=tuple(stages),
                 ) from exc
+            current_candidate = enriched
             record(WritingLoopStageName.REPORT, WritingLoopStageStatus.COMPLETED)
+            return True
 
-        async def evaluate_gate() -> None:
+        async def evaluate_gate() -> bool:
             nonlocal gate_evaluations, last_gate
+            if deadline_reached():
+                return False
             gate_evaluations += 1
             try:
-                evaluated = await self._gate.evaluate(
+                evaluated = await metered(
+                    self._gate, "evaluate",
                     request=request, candidate=current_candidate,
                     package=current_package,
                 )
+            except _PostAccountingBudgetExceeded:
+                return False
             except Exception as exc:
                 record(WritingLoopStageName.GATE, WritingLoopStageStatus.FAILED)
                 raise WritingReviseGateFailure(
@@ -265,15 +350,21 @@ class WritingReviseGateService:
                 ) from exc
             last_gate = evaluated
             record(WritingLoopStageName.GATE, WritingLoopStageStatus.COMPLETED)
+            return True
 
+        if deadline_reached():
+            return result(WritingLoopStatus.BUDGET_EXHAUSTED)
         revision_rounds += 1
         try:
-            current_candidate = await self._reviser.revise(
+            revised = await metered(
+                self._reviser, "revise",
                 candidate=current_candidate,
                 finding=finding,
                 instruction=request.instruction,
                 package=current_package,
             )
+        except _PostAccountingBudgetExceeded:
+            return result(WritingLoopStatus.BUDGET_EXHAUSTED)
         except Exception as exc:
             record(WritingLoopStageName.REVISE, WritingLoopStageStatus.FAILED,
                    finding=finding)
@@ -281,10 +372,13 @@ class WritingReviseGateService:
                 current_candidate, exc, gate=None,
                 loop=summary(WritingLoopStatus.FAILED), stages=tuple(stages),
             ) from exc
+        current_candidate = revised
         record(WritingLoopStageName.REVISE, WritingLoopStageStatus.COMPLETED,
                finding=finding)
-        await refresh_report()
-        await evaluate_gate()
+        if not await refresh_report():
+            return result(WritingLoopStatus.BUDGET_EXHAUSTED)
+        if not await evaluate_gate():
+            return result(WritingLoopStatus.BUDGET_EXHAUSTED)
 
         while True:
             assert last_gate is not None
@@ -302,16 +396,20 @@ class WritingReviseGateService:
                 if eligible is None:
                     return result(WritingLoopStatus.NOT_ELIGIBLE)
                 if (revision_rounds >= self._policy.max_revision_rounds
-                        or gate_evaluations >= self._policy.max_gate_evaluations):
+                        or gate_evaluations >= self._policy.max_gate_evaluations
+                        or deadline_reached()):
                     return result(WritingLoopStatus.BUDGET_EXHAUSTED)
                 revision_rounds += 1
                 try:
-                    revised = await self._reviser.revise(
+                    revised = await metered(
+                        self._reviser, "revise",
                         candidate=current_candidate,
                         finding=eligible,
                         instruction=request.instruction,
                         package=current_package,
                     )
+                except _PostAccountingBudgetExceeded:
+                    return result(WritingLoopStatus.BUDGET_EXHAUSTED)
                 except UnchangedWritingRevision:
                     record(
                         WritingLoopStageName.REVISE,
@@ -336,13 +434,16 @@ class WritingReviseGateService:
                     WritingLoopStageStatus.COMPLETED,
                     finding=eligible,
                 )
-                await refresh_report()
-                await evaluate_gate()
+                if not await refresh_report():
+                    return result(WritingLoopStatus.BUDGET_EXHAUSTED)
+                if not await evaluate_gate():
+                    return result(WritingLoopStatus.BUDGET_EXHAUSTED)
                 continue
 
             if last_gate.decision is WritingGateDecision.RETRIEVE_MORE:
                 if (retrieval_rounds >= self._policy.max_retrieval_rounds
-                        or gate_evaluations >= self._policy.max_gate_evaluations):
+                        or gate_evaluations >= self._policy.max_gate_evaluations
+                        or deadline_reached()):
                     return result(WritingLoopStatus.BUDGET_EXHAUSTED)
                 retrieval_rounds += 1
                 failed_stage = WritingLoopStageName.RETRIEVE_PLAN
@@ -356,7 +457,8 @@ class WritingReviseGateService:
                         raise WritingRetrievalConfigurationError(
                             "context budget is required for retrieve_more"
                         )
-                    retrieval = await self._retrieval_planner.plan(
+                    retrieval = await metered(
+                        self._retrieval_planner, "plan",
                         request=request, candidate=current_candidate,
                         gate=last_gate, current_position=current_position,
                     )
@@ -365,6 +467,8 @@ class WritingReviseGateService:
                         WritingLoopStageStatus.COMPLETED,
                     )
                     failed_stage = WritingLoopStageName.CONTEXT_SEARCH
+                    if deadline_reached():
+                        return result(WritingLoopStatus.BUDGET_EXHAUSTED)
                     delta = await self._context_search.build_context_package(
                         ContextSearchRequest(
                             project_id=request.project_id,
@@ -390,6 +494,8 @@ class WritingReviseGateService:
                         WritingLoopStageStatus.COMPLETED,
                         pointer_ids=package_pointer_ids(current_package),
                     )
+                except _PostAccountingBudgetExceeded:
+                    return result(WritingLoopStatus.BUDGET_EXHAUSTED)
                 except Exception as exc:
                     record(failed_stage, WritingLoopStageStatus.FAILED)
                     raise WritingRetrievalFailure(
@@ -397,7 +503,8 @@ class WritingReviseGateService:
                         loop=summary(WritingLoopStatus.FAILED),
                         stages=tuple(stages),
                     ) from exc
-                await evaluate_gate()
+                if not await evaluate_gate():
+                    return result(WritingLoopStatus.BUDGET_EXHAUSTED)
                 continue
 
             return result(WritingLoopStatus.TERMINAL_DECISION)

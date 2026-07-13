@@ -40,6 +40,7 @@ from services.application.app.writing.retrieval import (
     parse_writing_retrieval_plan,
     seed_writing_retrieval_template,
 )
+from services.application.app.writing.metering import MeteredCallError
 from services.application.app.writing.revise_gate import (
     WritingLoopPolicy,
     WritingReviseGateService,
@@ -181,6 +182,53 @@ class WritingRetrievalPlannerTest(unittest.TestCase):
 
         self.assertEqual(plan.needs, (ContextNeed.EVENT_CONTEXT,))
         self.assertEqual(provider.calls, 2)
+
+    def test_plan_metered_sums_initial_and_repair_usage(self):
+        # Phase 5.10 ("B2"): plan_metered returns the summed usage of the initial
+        # call plus the JSON-repair retry (1+1 tokens each → 4 total).
+        provider = _Provider((
+            json.dumps({"query": "현재 장면", "needs": ["current_scene"]}),
+            json.dumps({"query": "선행 사건", "needs": ["event_context"]}),
+        ))
+        templates = PromptTemplateService(InMemoryPromptTemplateRepository())
+        seed_writing_retrieval_template(templates)
+        planner = TerminalJsonWritingRetrievalPlanner(
+            provider, prompt_templates=templates
+        )
+        gate = WritingGateResult(
+            "r1", "p1", WritingGateDecision.RETRIEVE_MORE,
+            (_retrieve_finding(),), (), "first-gate",
+        )
+        plan, usage = asyncio.run(planner.plan_metered(
+            request=WritingRequest(
+                "r1", "p1", WritingTaskType.CONTINUE_SCENE, "계속 써줘"
+            ), candidate=_candidate(), gate=gate, current_position=None,
+        ))
+        self.assertEqual(plan.needs, (ContextNeed.EVENT_CONTEXT,))
+        self.assertEqual(provider.calls, 2)
+        self.assertEqual(usage.total_tokens, 4)
+
+    def test_plan_metered_invalid_repair_carries_both_usages(self):
+        provider = _Provider(("bad", "still bad"))
+        templates = PromptTemplateService(InMemoryPromptTemplateRepository())
+        seed_writing_retrieval_template(templates)
+        planner = TerminalJsonWritingRetrievalPlanner(
+            provider, prompt_templates=templates
+        )
+        gate = WritingGateResult(
+            "r1", "p1", WritingGateDecision.RETRIEVE_MORE,
+            (_retrieve_finding(),), (), "first-gate",
+        )
+        with self.assertRaises(MeteredCallError) as caught:
+            asyncio.run(planner.plan_metered(
+                request=WritingRequest(
+                    "r1", "p1", WritingTaskType.CONTINUE_SCENE, "계속 써줘"
+                ), candidate=_candidate(), gate=gate, current_position=None,
+            ))
+        self.assertIsInstance(
+            caught.exception.cause, InvalidWritingRetrievalPlan
+        )
+        self.assertEqual(caught.exception.usage.total_tokens, 4)
 
 
 class MergeContextPackagesTest(unittest.TestCase):

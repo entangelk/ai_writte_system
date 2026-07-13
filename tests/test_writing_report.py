@@ -11,6 +11,7 @@ from services.application.app.writing.report import (
     InvalidCandidateReport, WritingCandidateReportService, parse_report,
     seed_report_template,
 )
+from services.application.app.writing.metering import MeteredCallError
 from services.application.app.writing.gate_prompt import build_writing_gate_request
 from services.application.app.analysis.prompt_templates import PromptTemplate
 from services.llm_gateway.app.provider import GenerationResult, TokenUsage
@@ -70,6 +71,38 @@ class WritingReportTest(unittest.TestCase):
         self.assertIn("narrative_event|character_state", system_prompt)
         self.assertIn("low|medium|high|critical", system_prompt)
         self.assertEqual(provider.requests[1].messages[0].content, system_prompt)
+
+    def test_enrich_metered_sums_initial_and_repair_usage(self):
+        # Phase 5.10 ("B2"): enrich_metered returns the summed provider usage of
+        # the initial call plus the JSON-repair retry (1+1 tokens each → 4 total).
+        provider=_Provider(["bad", json.dumps(_payload(), ensure_ascii=False)])
+        templates=PromptTemplateService(InMemoryPromptTemplateRepository())
+        seed_report_template(templates)
+        service=WritingCandidateReportService(provider, prompt_templates=templates)
+        candidate=WritingCandidate("r","p",WritingTaskType.CONTINUE_SCENE,
+                                   WritingOutputType.DRAFT_PATCH,"본문")
+        package=ContextPackage("p",ContextSearchPurpose.WRITING_CONTEXT,(),(),(),(),0,False)
+        enriched, usage = asyncio.run(service.enrich_metered(candidate, package))
+        self.assertEqual(provider.calls, 2)
+        self.assertEqual(usage.total_tokens, 4)
+        self.assertEqual(enriched.risk_notes[0].severity.value, "high")
+
+    def test_enrich_metered_failure_carries_both_response_usages(self):
+        provider = _Provider(["bad", "still bad"])
+        templates = PromptTemplateService(InMemoryPromptTemplateRepository())
+        seed_report_template(templates)
+        service = WritingCandidateReportService(
+            provider, prompt_templates=templates
+        )
+        with self.assertRaises(MeteredCallError) as caught:
+            asyncio.run(service.enrich_metered(
+                WritingCandidate("r", "p", WritingTaskType.CONTINUE_SCENE,
+                                 WritingOutputType.DRAFT_PATCH, "본문"),
+                ContextPackage("p", ContextSearchPurpose.WRITING_CONTEXT,
+                               (), (), (), (), 0, False),
+            ))
+        self.assertIsInstance(caught.exception.cause, InvalidCandidateReport)
+        self.assertEqual(caught.exception.usage.total_tokens, 4)
 
     def test_invalid_repair_fails(self):
         provider=_Provider(["bad","still bad"])

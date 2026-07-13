@@ -269,11 +269,13 @@ class WritingLoopAuditApiTest(unittest.TestCase):
         self.assertTrue(payload["stages"][0]["finding_fingerprint"])
         self.assertIsNone(payload["stages"][2]["finding_fingerprint"])
         # B1 forward-defense: the detail surface is bodyless beyond the final
-        # candidate text, and carries no token/latency fields (brief §102/§106 —
-        # "존재하면 회귀 실패"). B2 stage-level usage must break this exact set.
+        # candidate text. Phase 5.10 ("B2") added run-level `total_tokens`/
+        # `wall_clock_ms` (M5=A). Stage rows stay bodyless — per-stage usage is
+        # still deferred (M5=C); any future stage-level usage must break this set.
         self.assertEqual(set(payload), {
             "audit_id", "request_id", "loop_status", "error_type",
             "revision_rounds", "retrieval_rounds", "gate_evaluations",
+            "total_tokens", "wall_clock_ms",
             "created_at", "trigger_finding_fingerprint", "initial_candidate_hash",
             "final_candidate_hash", "final_candidate_text", "final_gate_decision",
             "final_gate_finding_fingerprints", "stages",
@@ -412,7 +414,7 @@ class WritingLoopAuditApiTest(unittest.TestCase):
             self.assertEqual(set(item), {
                 "audit_id", "request_id", "loop_status", "error_type",
                 "revision_rounds", "retrieval_rounds", "gate_evaluations",
-                "created_at",
+                "total_tokens", "wall_clock_ms", "created_at",
             })
 
     def test_retrieval_stages_capture_context_pointer_ids(self):

@@ -40,6 +40,10 @@ services:
       WRITING_LOOP_MAX_REVISION_ROUNDS: "${WRITING_LOOP_MAX_REVISION_ROUNDS:-2}"
       WRITING_LOOP_MAX_RETRIEVAL_ROUNDS: "${WRITING_LOOP_MAX_RETRIEVAL_ROUNDS:-1}"
       WRITING_LOOP_MAX_GATE_EVALUATIONS: "${WRITING_LOOP_MAX_GATE_EVALUATIONS:-3}"
+      # Phase 5.10 ("B2") aggregate token/wall-clock budget. Unset = unbounded
+      # (structural caps still apply); set after live loop-level calibration (B2b).
+      WRITING_LOOP_MAX_TOTAL_TOKENS: "${WRITING_LOOP_MAX_TOTAL_TOKENS:-}"
+      WRITING_LOOP_MAX_WALL_CLOCK_MS: "${WRITING_LOOP_MAX_WALL_CLOCK_MS:-}"
       # Real vector backend (B.4): the embedding service and Chroma. When these
       # are set the shared vector index is the persistent Chroma backend with
       # real 1024-dim embeddings; without them the app falls back to the fake.

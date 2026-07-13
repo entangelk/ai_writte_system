@@ -82,6 +82,7 @@ def _run(run_id, *, project="p", minute=0, loop_status="pass",
                             ("d1", "s1")),
         ),
         created_at=datetime(2026, 7, 13, 0, minute, tzinfo=UTC),
+        total_tokens=123, wall_clock_ms=456,
     )
 
 

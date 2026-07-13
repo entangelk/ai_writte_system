@@ -17,7 +17,8 @@ from services.application.app.writing.models import (
     WritingGateFindingType, WritingGateResult, WritingGateSeverity,
     WritingRequest,
 )
-from services.llm_gateway.app.provider import LLMProvider
+from services.application.app.writing.metering import MeteredCallError
+from services.llm_gateway.app.provider import LLMProvider, TokenUsage
 
 
 class WritingGateError(ValueError):
@@ -53,6 +54,17 @@ class WritingGateService:
     async def evaluate(self, *, request: WritingRequest,
                        candidate: WritingCandidate,
                        package: ContextPackage) -> WritingGateResult:
+        try:
+            evaluated, _usage = await self.evaluate_metered(
+                request=request, candidate=candidate, package=package)
+        except MeteredCallError as exc:
+            raise exc.cause from exc
+        return evaluated
+
+    async def evaluate_metered(self, *, request: WritingRequest,
+                               candidate: WritingCandidate,
+                               package: ContextPackage
+                               ) -> tuple[WritingGateResult, TokenUsage]:
         self._validate(request, candidate, package)
         try:
             template = self._templates.get_template(
@@ -69,14 +81,15 @@ class WritingGateService:
             if any(item.evidence not in candidate.text for item in findings):
                 raise ValueError("finding evidence must occur in candidate text")
         except ValueError as exc:
-            raise InvalidWritingGateResult(
+            cause = InvalidWritingGateResult(
                 f"writing gate produced an invalid result: {exc}"
-            ) from exc
+            )
+            raise MeteredCallError(cause, result.usage) from exc
         return WritingGateResult(request_id=request.request_id,
                                  project_id=request.project_id,
                                  decision=decision, findings=findings,
                                  checked_constraints=checked,
-                                 evaluated_by_model=result.model)
+                                 evaluated_by_model=result.model), result.usage
 
     @staticmethod
     def _validate(request: WritingRequest, candidate: WritingCandidate,

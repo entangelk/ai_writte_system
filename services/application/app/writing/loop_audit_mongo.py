@@ -57,6 +57,8 @@ def _doc(run: StoredWritingLoopRun) -> dict:
         ),
         "stages": [_stage_doc(stage) for stage in run.stages],
         "created_at": run.created_at,
+        "total_tokens": run.total_tokens,
+        "wall_clock_ms": run.wall_clock_ms,
     }
 
 
@@ -87,6 +89,8 @@ def _run(doc: dict) -> StoredWritingLoopRun:
         ),
         stages=tuple(_stage(stage) for stage in doc.get("stages", ())),
         created_at=doc["created_at"],
+        total_tokens=doc.get("total_tokens", 0),
+        wall_clock_ms=doc.get("wall_clock_ms", 0),
     )
 
 
