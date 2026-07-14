@@ -80,6 +80,15 @@
 - **새로 드러난 실패 층(fence와 무관)**: `unexpected_loop_trace` 8건(loop 200 종료 but 기대 trace 아님 — 대부분 `not_eligible`, Gate가 continuity finding 내도 자동-revise 자격 미충족→loop 종료; 모델이 benchmark instruction 안 따르는 prompt-following 문제, by design 보존) + `http_502`/`invalid_candidate_report` 3건(report parser schema 위반 "report field must be an array", tracked debt `report.py:113` 영역이나 이번은 fence 아닌 schema 위반).
 - **결론**: fence fix는 done & validated. 단 success 1/12로 production aggregate default/ceiling 확정엔 표본 부족. 남은 이슈는 fence scope 밖 별개 slice(report schema·모델 prompt-following).
 
+### Phase 5.10 D1=A operator-only report live diagnostics 구현 (SoT v1.6.84)
+
+- 사용자 결정: 재측정 결과 후 **"Report 진단 도입"** 선택. gate D1=A와 동일 패턴(report raw output + parse error 관측, remediation은 D2=A 별도 브리프)로 진행.
+- `services/application/app/writing/report_live_diag.py` 추가. `run_report_diagnosis`는 context→revise→report(`enrich_metered`) 사전 파이프라인을 재현. report는 1-call repair가 있어 **first + repair 두 raw response**를 모두 `RawCaptureProvider`(gate_live_diag에서 재사용 import)로 캡처하고, report system prompt(`report.py` `TEMPLATE`) 일치 항목만 추출. report service는 repair 실패 시 second error만 노출하므로, first error는 캡처한 first raw를 `parse_report`로 re-parse해 복원. `format_report_diagnosis`는 first/repair raw 블록 + 각 parse error + usage를 stdout 전용 텍스트로 출력.
+- `scripts/diagnose_writing_report.py` 추가. `build_services`가 `_build_report_service(capture)`로 report provider를 raw-capturing wrapper와 함께 production config 재사용(prompt template·`LLM_GATEWAY_MODEL`/`WRITING_REPORT_MAX_TOKENS`). gate 진단 script의 shared helper(`seed_context`·`build_search_request`·`_finding_from_dict`·defaults·`_PositionAction`)를 import해 중복 제거. 실행: `docker compose run --rm --no-deps application python scripts/diagnose_writing_report.py --project-id <id>`.
+- **쓰기 없음**: `run_report_diagnosis`는 읽기/판정 메서드(`build_context_package`·`revise`·`enrich_metered`)만 호출, Mongo/audit/file write 0.
+- 회귀(`tests/test_writing_report_live_diag.py` 11개): report request parity(`_build_report_service` 기반 model/max_tokens/thinking=`false`/`REPORT_TEMPLATE`)·first+repair raw capture(schema 위반 under-strict·성공 over-strict)·**fence 미strip 관측**(report는 gate와 달리 fence를 안 벗겨 fenced valid JSON이 parse 실패하는 점을 diagnostic이 노출 → tracked debt 근거)·upstream 실패 분류·provider fault·no-write spy·format(SENSITIVE/first/repair/error).
+- SoT v1.6.84, 결정 브리프(`05-writing-report-live-diagnostics-decisions.md`), work_log, HANDOFF, CHANGELOG, plans/README에 반영. public literal·schema·서비스 경계 변화 없음.
+
 ## Issues found
 
 - SoT v1.6.80과 M6는 B2b가 필요하다는 사실과 예시 loop 조합만 확정한다. deployed HTTP 여부, representative branch set, failure를 p95에서 처리하는 방식, p95를 env default로 바꾸는 권한은 정하지 않는다.
@@ -97,6 +106,8 @@
 - 구현 결정: diagnostic는 Gate config를 production factory(`_default_writing_gate_service(provider=None)` 신규 seam)로 재사용해 환경 중복·drift를 없애고, 회귀로 env contract(model/max_tokens/thinking/template)를 직접 잠갔다. ContextPackage 조립도 엔드포인트와 동일한 `_default_context_search_service` + needs/purpose/query/budget을 쓴다. 진단 출력은 operator terminal에만 두고 file/Mongo/audit write를 하지 않는다.
 - 사용자 결정: **D2=A (a)+(c) 진행** — root cause가 fence 래핑으로 확정됐으므로 parser 정규화(fence strip) + prompt 금지 추가. 제공된 파싱 스니펫 중 `{[\s\S]*}` greedy 추출·rule-based fallback은 거부(구조 완화·N/A).
 - 구현 결정: fence strip은 whole-content fence만 정규화하고 prose 추출은 하지 않는다(strict 계약 약화 방지). strict 검증은 parsed dict에 그대로 적용. 같은 root-cause를 가진 다른 5개 parser는 repair로 완충돼 있어 Gate만 우선 수정하고 나머지는 tracked debt.
+- 사용자 결정: 재측정(1/12 success) 후 **"Report 진단 도입"** 선택 — `invalid_candidate_report` 502의 raw report output(first+repair)을 관측하는 operator-only 진단(gate D1=A 동일 패턴). remediation은 D2=A 별도 브리프.
+- 구현 결정: report 진단은 gate 진단 script의 shared helper를 import해 중복을 제거했고, report의 1-call repair로 인해 first+repair 두 raw를 모두 캡처한다(first error는 캡처 raw를 re-parse해 복원).
 
 ## Next steps
 
@@ -109,8 +120,9 @@
 - **독립 검증 PASS**: `docs/verifications/2026-07-14/writing_gate_live_diag.md`. 정본 계약 부합·회귀 양방향 guard·main.py seam 무변·**live 실행으로 no-write+parity 실측**. root cause(fence) 확보. 비차단 hardening(prompt_version 연동)은 본 작업에서 반영 후 아래 회귀로 재확인.
 - D1=A diagnostic focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_gate_live_diag.py` → **13 passed**(prompt_version 연동 hardening 후에도 동일).
 - D2=A fence-strip focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_gate.py` → **30 passed / 29 subtests**(신규 `GateFenceStrippingTest` 9개 + 양방향). mutation(strip 제거) 시 9개 fence test가 양방향 bite 확인.
+- D1=A report-diag focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_report_live_diag.py` → **11 passed**(parity·first+repair raw capture·fence 미strip 관측·upstream·no-write).
 - D1=A 회귀 + main.py seam 회귀: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_gate.py tests/test_writing.py tests/test_writing_revise.py tests/test_writing_report.py tests/test_writing_loop_budget.py tests/test_writing_loop_audit.py tests/test_writing_retrieval.py tests/test_writing_accept.py tests/test_application_api.py` → **210 passed / 114 subtests passed**(provider seam 무변 확인).
-- full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1008 passed / 45 skipped / 220 subtests**(본 환경은 elasticsearch 패키지가 설치돼 종전 3 skip이 실행됨; diagnostic 13개 + fence 9개 포함, fail 없음).
+- full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1019 passed / 45 skipped / 220 subtests**(본 환경은 elasticsearch 패키지가 설치돼 종전 3 skip이 실행됨; diagnostic 13개 + fence 9개 + report diag 11개 포함, fail 없음).
 - `python3 -m py_compile services/application/app/writing/gate_live_diag.py scripts/diagnose_writing_gate.py`, `docker compose config --quiet`, `git diff --check` 통과.
 - focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_loop_benchmark_script.py tests/test_llm_benchmark_script.py tests/test_writing_loop_budget.py tests/test_writing_loop_audit.py` → **52 passed / 8 subtests passed**.
 - full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **981 passed / 48 skipped / 217 subtests**.
