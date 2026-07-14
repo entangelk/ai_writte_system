@@ -1,6 +1,12 @@
 # 착수 결정 브리프 — Phase 5.10 Writing Gate live diagnostics
 
-상태: `Proposed — 2026-07-14`
+상태: `Resolved — 2026-07-14 (오너 채택: D1=A, D2=A)`
+
+> **결과**: 오너가 D1=A(operator-only one-shot CLI)·D2=A(raw evidence 확보 뒤 별도 prompt/repair 브리프)를 채택했다. D1=A 진단 표면은 v1.6.82로 구현됐다(`services/application/app/writing/gate_live_diag.py`, `scripts/diagnose_writing_gate.py`, `tests/test_writing_gate_live_diag.py`).
+>
+> **D2=A evidence 확보 완료(독립 검증 `docs/verifications/2026-07-14/writing_gate_live_diag.md`)**: 검증자가 `scripts/diagnose_writing_gate.py`를 live(image rebuild ≈6초 후 `--current-position` read-only 경로, 2회)로 실행해 exact 위반 clause를 확보했다. root cause는 JSON 구조·enum·priority·evidence가 아니라 **markdown code fence 래핑**이다 — Gate raw output이 ```` ```json … ``` ```` 로 감싸져 `gate_prompt.py:71` `json_object()`가 fence strip 없이 `json.loads(content)` → `JSONDecodeError` → "content must be JSON". fence만 벗기면 JSON 자체는 유효(decision/findings/checked_constraints 정상 enum). Gate 추론은 정상이고 출력 포맷(fence)만 strict parser에 걸렸다. 참고로 `revise.py` `_replacement_text`는 이미 fence strip을 하고 `report.py`는 repair가 있어 Gate만 유독 엄격한 불일치 상태.
+>
+> **D2=A remediation은 별도 결정 브리프(오너 결정)**: 권장은 (a) `json_object()`에서 ```json/``` fence strip 후 parse(`revise.py` 선례, parser 완화 아님 — JSON이 유효하므로 public contract 약화 없음) + (c) Gate prompt에 fence 금지 지시. fence strip이 채택되면 parser 회귀에 fence 케이스 추가가 필수다.
 
 관련 정본: `docs/system-contract-sot.md` v1.6.81, `05-writing-loop-benchmark-decisions.md` B1~B4, `05-writing-bounded-loop-decisions.md` L6/L9, `05-writing-persisted-loop-audit-decisions.md` P1/P2/P5
 

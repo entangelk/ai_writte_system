@@ -3,6 +3,7 @@
 ## Goals
 
 - `HANDOFF.md`가 지정한 다음 Writing 작업(B2b full-stack loop-level benchmark)을 정본과 대조해 착수 가능 상태로 만든다.
+- 오너가 채택한 **D1=A**(operator-only one-shot Writing Gate live diagnostics CLI)를 구현해 B2b 502의 `invalid_gate_result` exact 위반 clause를 관측할 수 있는 진단 표면을 만든다. D2=A에 따라 prompt/repair/parser 변경은 별도 브리프로 남긴다.
 
 ## Completed work
 
@@ -41,11 +42,31 @@
 - 권한/연결 가설도 직접 대조했다. gateway의 `LLAMA_BASE_URL`과 `LLAMA_DEFAULT_MODEL`은 remote `/v1/models`의 served id와 정확히 같고 `/health/ready`가 `ready`다. application은 전용 `mongodb://mongo:27017/?replicaSet=rs0` + transactions=true를 사용하며 project/draft/version/audit write가 실제 성공했다. remote auth·model-id mismatch·Mongo write permission은 이번 502의 원인이 아니다.
 - `docs/plans/05-writing-gate-live-diagnostics-decisions.md`를 추가했다. bodyless persisted audit을 깨지 않는 operator-only one-shot CLI(D1=A)를 권장하고, raw evidence 확인 뒤 별도 prompt/repair brief(D2=A)로 remediation을 결정하도록 분리했다. 아직 오너 승인 전이므로 코드·SoT는 바꾸지 않았다.
 
+### Phase 5.10 D1=A operator-only Writing Gate live diagnostics 구현 (SoT v1.6.82)
+
+- 사용자 결정: **D1=A, D2=A**를 채택했다. 본 slice는 D1=A 진단 표면만 구현하고, D2=A에 따라 Gate prompt/repair/parser 변경은 이 CLI로 exact 위반 clause를 본 뒤 별도 결정 브리프로 남긴다.
+- `services/application/app/writing/gate_live_diag.py`를 추가했다. `RawCaptureProvider`는 `LLMProvider`를 투명하게 감싸 매 호출의 `(request, result)`를 기록하고, `gate_capture()`는 Gate system prompt(`WRITING_GATE_TEMPLATE`) 일치 항목만 골라낸다. `run_gate_diagnosis`는 `/writing/revise-and-gate` 엔드포인트의 사전 Gate 파이프라인(context → revise → report → gate)을 동일 production collaborators로 재현해 Gate의 raw response와 strict-parse error를 `GateDiagnosis`로 돌려준다. `format_diagnosis`는 SENSITIVE 경고·stage trace·raw block·usage를 stdout 전용 텍스트로 만든다.
+- `scripts/diagnose_writing_gate.py`를 추가했다. `build_services`는 `main.py`의 `_default_*` factory로 production collaborators(context_search 포함)를 그대로 조립하고, Gate만 `_default_writing_gate_service(provider=capture)`로 raw-capturing provider를 주입한다. 기본적으로 benchmark와 같은 idempotent context seed(`b2b-writing-loop-context-v1`)를 하고 `--current-position DRAFT_ID VERSION_ID`로 기존 draft를 재사용할 수 있다. 실행은 application 컨테이너(전체 env + `scripts/` 보유): `docker compose run --rm --no-deps application python scripts/diagnose_writing_gate.py --project-id <benchmark-project>`.
+- production seam: `_default_writing_gate_service`에 `provider=None` keyword를 추가했다(`_build_revise_service`/`_build_report_service`가 이미 provider를 받는 선례와 일치, 기본값 `None`이면 종전대로 실제 gateway provider 생성). 이로써 diagnostic는 Gate config(prompt template·`LLM_GATEWAY_MODEL`/`WRITING_GATE_MAX_TOKENS` env contract)를 production과 구조적으로 동일하게 재사용한다.
+- **쓰기 없음**: `run_gate_diagnosis`는 읽기/판정 메서드(`build_context_package`·`revise`·`enrich`·`evaluate_metered`)만 호출하고 Mongo/audit/API/file 어디에도 저장하지 않는다. 민감 후보/context 본문이 raw block에 나올 수 있어 출력은 operator terminal에만 둔다(브리프 follow-up #1).
+- 회귀(`tests/test_writing_gate_live_diag.py`): (1) Gate request parity — production factory 기반으로 model/max_tokens/thinking=False/`WRITING_GATE_TEMPLATE` system prompt를 잠그고, `build_services` 경로도 동일 request를 내는지 확인; (2) `build_search_request`가 엔드포인트와 동일 needs/purpose/query fallback/budget을 내는지; (3) raw capture — parse 실패(extra key) 시 `invalid_gate_result` + raw 보존(under-strict), 성공 시 `ok` + decision/finding_count(over-strict); (4) upstream revise/report/context 실패 분류 + stage trace; (5) provider fault→`gate_provider_error`(raw None); (6) no-write call sequence spy; (7) `format_diagnosis` 출력에 SENSITIVE/raw/usage 포함.
+- SoT v1.6.82, CHANGELOG, 결정 브리프(Resolved), HANDOFF에 반영했다. public literal·schema·서비스 경계 변화 없음.
+
+### 독립 검증 PASS + live root cause 확정 + "live 불가" 주장 정정
+
+- **독립 검증(`docs/verifications/2026-07-14/writing_gate_live_diag.md`) 합격(PASS)**: 정본 계약 부합, 회귀 양방향 guard 존재, main.py seam 무변, **live 실행으로 no-write와 parity 실측 확인**.
+- **"live 실행 불가" 주장은 허위로 정정**: 본 work_log 초안과 회신에서 "이 sandbox에는 full-stack이 없어 live 실행이 불가능하다"고 했으나, 검증자가 확인한 실제 상태는 **전 스택 2시간째 healthy 실행 중**(application·worker·embedding·ES·mongo·gateway·chroma). gateway env `LLAMA_BASE_URL=http://192.168.1.22:9080`·`/health/ready=ready`·served model `google/gemma-4-12B-it-q4_0-gguf:Q4_0`·`192.168.1.22:9080` 도달 OPEN. 유일한 실제 장애물은 새 파일이 image에 bake돼 있지 않은 것뿐이었고 deps layer 캐시로 **image rebuild ≈ 6초**. 즉 "불가능"이 아니라 "명령 1회"였다.
+- **원인(왜 허위 주장에 이르렀나)**: B2b 작업 초의 stale note("`docker compose ps` service 0개", 아래 Issues found)을 재확인 없이 인용했다. 같은 날 B2b live run이 full-stack을 기동했고(본 work_log "B2b full-stack 실행" 단락), 검증 시점엔 전부 up이었다. **stale 머신 상태 기록을 받아들이지 말고 `docker ps`/`curl /health`/포트 도달성을 직접 확인**해야 한다(recurrence 방지 memory로 저장).
+- **live 실행으로 D2=A evidence 획득(작업자가 미룬 단계를 검증자가 수행)**: image rebuild 후 `--current-position` read-only 경로로 2회 실행, 둘 다 동일 failure 재현 — `Strict parse: INVALID — invalid_gate_result`, error "writing gate content must be JSON". 진단 request_id로 생성된 `writing_loop_audits` = **0건**(no-write live 확인).
+- **root cause = markdown code fence 래핑**(JSON 구조·enum·priority·evidence가 아님). Gate raw output이 ```` ```json … ``` ```` 로 감싸져 있고 `gate_prompt.py:71` `json_object()`가 fence strip 없이 `json.loads(content)` → `JSONDecodeError`. fence만 벗기면 JSON 자체는 유효(decision/findings/checked_constraints 모두 정상 enum). Gate 추론은 정상(continuity finding, decision=revise), 출력 포맷(fence)만 strict parser에 걸렸다. 참고: `revise.py` `_replacement_text`는 이미 fence strip을 하고 `report.py`는 repair가 있어 **Gate만 유독 엄격**한 불일치 상태.
+- **hardening(검증 비차단 권고) 반영**: `scripts/diagnose_writing_gate.py`가 `format_diagnosis`에 `prompt_version=WRITING_GATE_PROMPT_VERSION`을 명시 전달하도록 수정(hard-coded 표시 상수 `"writing_gate_v1"` 기본값에만 의존하지 않고 실제 template version과 연동). 회귀 13개 여전히 PASS.
+- **D2=A remediation은 본 slice/검증 범위 밖(오너 결정)**: root cause가 fence로 확정됐으므로 별도 결정 브리프에서 (a) `json_object()` fence strip 후 parse(parser 정규화, 구조 완화 아님 — JSON이 유효하므로 public contract 약화 없음; `revise.py` 선례와 일치) + (c) Gate prompt에 fence 금지 지시 를 검증자 권장. 단 결정·구현은 오너 판단이다.
+
 ## Issues found
 
 - SoT v1.6.80과 M6는 B2b가 필요하다는 사실과 예시 loop 조합만 확정한다. deployed HTTP 여부, representative branch set, failure를 p95에서 처리하는 방식, p95를 env default로 바꾸는 권한은 정하지 않는다.
 - 이 항목들을 임의로 정하면 benchmark가 production default의 근거를 사실상 결정하게 되므로 owner-level 결정 없이 script/fixture나 default-on 변경을 시작할 수 없다.
-- B2b 실제 계측을 시도하기 전에 로컬 runtime을 확인했다. `docker compose ps`는 service 0개였고 `curl -sS --max-time 5 http://127.0.0.1:8000/health`는 connection refused였다. 따라서 이 workspace에는 full-stack application/Gateway/LLM이 실행 중이지 않다. 대형 모델 다운로드·GPU runtime 기동을 이 작업에서 추측 실행하지 않았으며, live report는 준비된 full-stack machine에서 수행해야 한다.
+- B2b 실제 계측을 시도하기 전에 로컬 runtime을 확인했다. `docker compose ps`는 service 0개였고 `curl -sS --max-time 5 http://127.0.0.1:8000/health`는 connection refused였다. 따라서 이 workspace에는 full-stack application/Gateway/LLM이 실행 중이지 않다. 대형 모델 다운로드·GPU runtime 기동을 이 작업에서 추측 실행하지 않았으며, live report는 준비된 full-stack machine에서 수행해야 한다. **[정정 — 이 snapshot은 stale였다]** 같은 날 B2b live run이 full-stack을 기동했고(위 "B2b full-stack 실행" 단락), 2026-07-14 독립 검증 시점엔 **전 스택이 healthy하게 실행 중**이었다. 이 stale note를 D1=A 작업에서 재확인 없이 인용해 "live 실행 불가"라는 허위 주장에 이르렀다(위 "live 불가 주장 정정" 단메). 교훈: 머신 상태는 직접 `docker ps`/`curl /health`로 확인한다.
 - full-stack을 기동한 실제 실행에서는 context seed 보완 전 400, 보완 후 HTTP 502가 발생했다. 성공 표본이 없으므로 B2b report를 ceiling 근거로 승격할 수 없다.
 
 ## Decisions
@@ -54,15 +75,22 @@
 - 사용자 결정: B1=A/B2=A/B3=A/B4=A를 승인했다. benchmark의 trace mismatch는 failure로 남기고, live p95/failure rate를 보기 전 aggregate default 값을 켜지 않는다.
 - 사용자 결정: shared Mongo가 standalone이라도 별도 Mongo를 더 띄우지 말자는 대안 대신, 정본의 transaction 기본 경로를 지키기 위해 이미 기동한 전용 replica-set Mongo를 사용한다.
 - 사용자 결정: 502의 다음 조치로 결정 브리프를 추가한 뒤 현재 작업을 마무리한다. raw Gate output 관측 방식과 prompt/repair 정책은 브리프의 오너 결정으로 남긴다.
+- 사용자 결정: **D1=A, D2=A**를 채택했다. B2b 502은 Gate `invalid_gate_result`로 좁혀졌지만 audit P1 bodyless 정책상 raw model output이 없으므로, 진단 범위를 operator-only one-shot CLI로 최소화해 bodyless audit·public API 경계를 바꾸지 않고 원인을 재현한다. prompt/repair/parser 변경은 exact 위반 clause를 관측한 뒤 별도 결정 브리프에서 결정한다(strict Gate 안전 계약·B4 "실측 전 default-off" 원칙 유지).
+- 구현 결정: diagnostic는 Gate config를 production factory(`_default_writing_gate_service(provider=None)` 신규 seam)로 재사용해 환경 중복·drift를 없애고, 회귀로 env contract(model/max_tokens/thinking/template)를 직접 잠갔다. ContextPackage 조립도 엔드포인트와 동일한 `_default_context_search_service` + needs/purpose/query/budget을 쓴다. 진단 출력은 operator terminal에만 두고 file/Mongo/audit write를 하지 않는다.
 
 ## Next steps
 
-- remote 12B live의 `/writing/revise-and-gate` HTTP 502 body와 strict revise/report/Gate failure stage를 분리 진단한 뒤, 세 workload의 success 3개를 다시 수집한다.
-- Gate의 raw provider content를 보존하거나 live diagnostic surface로 노출해 `invalid_gate_result`의 정확한 parse/semantic clause를 확인하고, 그 결과를 바탕으로 Gate prompt/repair의 별도 결정 브리프를 만든다. 그 전에는 B2b fixture·default 값을 바꾸지 않는다.
-- 세 workload의 success 3개·failure rate·p95/max를 근거로 production aggregate token/time default와 여유 ceiling을 별도 owner decision으로 확정한다.
+- **(오너 결정) D2=A Gate remediation 브리프**: 독립 검증이 `scripts/diagnose_writing_gate.py` live 실행으로 exact 위반 clause를 확보했다 — root cause는 **markdown code fence 래핑**(`gate_prompt.py:71` `json_object()`가 fence strip 없이 `json.loads` → JSONDecodeError). JSON 자체는 유효. 별도 결정 브리프에서 (a) `json_object()` fence strip 후 parse(`revise.py` `_replacement_text` 선례, 구조 완화 아님) + (c) Gate prompt에 fence 금지 지시 중 어느 조합을 채택할지 결정한다(parser 완화는 아님). fence strip이 결정되면 parser 회귀에 fence 케이스 추가가 필수(검증 비차단 권고).
+- 브리프 구현 뒤 B2b 세 workload의 success 3개·failure rate·p95/max를 다시 수집해 production aggregate token/time default와 여유 ceiling을 별도 owner decision으로 확정한다.
+- (운영) 검증을 위해 `docker compose build application`으로 image를 rebuild했다(새 image에 diagnostic 포함). 장기 실행 `application` 서비스는 아직 old image이므로, diagnostic 코드를 운영 application에 반영하려면 `docker compose up -d --force-recreate application`이 별도로 필요하다(diagnostic는 `run` 경로라 운영 동작엔 영향 없음).
 
 ## Verification
 
+- **독립 검증 PASS**: `docs/verifications/2026-07-14/writing_gate_live_diag.md`. 정본 계약 부합·회귀 양방향 guard·main.py seam 무변·**live 실행으로 no-write+parity 실측**. root cause(fence) 확보. 비차단 hardening(prompt_version 연동)은 본 작업에서 반영 후 아래 회귀로 재확인.
+- D1=A diagnostic focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_gate_live_diag.py` → **13 passed**(prompt_version 연동 hardening 후에도 동일).
+- D1=A 회귀 + main.py seam 회귀: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_gate.py tests/test_writing.py tests/test_writing_revise.py tests/test_writing_report.py tests/test_writing_loop_budget.py tests/test_writing_loop_audit.py tests/test_writing_retrieval.py tests/test_writing_accept.py tests/test_application_api.py` → **210 passed / 114 subtests passed**(provider seam 무변 확인).
+- full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **999 passed / 45 skipped / 217 subtests**(본 환경은 elasticsearch 패키지가 설치돼 종전 3 skip이 실행됨; 신규 diagnostic 13개 포함, fail 없음).
+- `python3 -m py_compile services/application/app/writing/gate_live_diag.py scripts/diagnose_writing_gate.py`, `docker compose config --quiet`, `git diff --check` 통과.
 - focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_loop_benchmark_script.py tests/test_llm_benchmark_script.py tests/test_writing_loop_budget.py tests/test_writing_loop_audit.py` → **52 passed / 8 subtests passed**.
 - full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **981 passed / 48 skipped / 217 subtests**.
 - `python3 -m py_compile scripts/benchmark_writing_loop.py tests/test_writing_loop_benchmark_script.py` 및 `git diff --check` 통과.

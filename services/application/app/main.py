@@ -127,6 +127,7 @@ from services.application.app.writing.loop_audit import (
 )
 from services.application.app.analysis.source import CoreSotSourceAdapter
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
+from services.llm_gateway.app.provider import LLMProvider
 from services.application.app.memory.models import PromotionMode
 from services.application.app.memory.service import (
     InMemoryMemoryRepository,
@@ -567,19 +568,26 @@ def _build_writing_retrieval_planner(provider):
     )
 
 
-def _default_writing_gate_service() -> WritingGateService | None:
+def _default_writing_gate_service(
+    *, provider: LLMProvider | None = None,
+) -> WritingGateService | None:
     base_url = os.environ.get("LLM_GATEWAY_BASE_URL")
     if not base_url:
         return None
     prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
     seed_writing_gate_template(prompt_templates)
-    provider = GatewayGenerateProvider(
+    # ``provider`` lets an operator-only diagnostic reuse this exact config
+    # (prompt template + LLM_GATEWAY_MODEL / WRITING_GATE_MAX_TOKENS env
+    # contract) with a raw-capturing wrapper, mirroring _build_revise_service /
+    # _build_report_service which already accept a provider. Default builds the
+    # real gateway provider (unchanged behaviour).
+    gate_provider = provider or GatewayGenerateProvider(
         base_url=base_url,
         timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
         trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False),
     )
     return WritingGateService(
-        provider, prompt_templates=prompt_templates,
+        gate_provider, prompt_templates=prompt_templates,
         model=os.environ.get("LLM_GATEWAY_MODEL") or None,
         max_tokens=int(os.environ.get("WRITING_GATE_MAX_TOKENS", "1024")),
     )
