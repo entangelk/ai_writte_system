@@ -6,7 +6,7 @@
 >
 > **D2=A evidence 확보 완료(독립 검증 `docs/verifications/2026-07-14/writing_gate_live_diag.md`)**: 검증자가 `scripts/diagnose_writing_gate.py`를 live(image rebuild ≈6초 후 `--current-position` read-only 경로, 2회)로 실행해 exact 위반 clause를 확보했다. root cause는 JSON 구조·enum·priority·evidence가 아니라 **markdown code fence 래핑**이다 — Gate raw output이 ```` ```json … ``` ```` 로 감싸져 `gate_prompt.py:71` `json_object()`가 fence strip 없이 `json.loads(content)` → `JSONDecodeError` → "content must be JSON". fence만 벗기면 JSON 자체는 유효(decision/findings/checked_constraints 정상 enum). Gate 추론은 정상이고 출력 포맷(fence)만 strict parser에 걸렸다. 참고로 `revise.py` `_replacement_text`는 이미 fence strip을 하고 `report.py`는 repair가 있어 Gate만 유독 엄격한 불일치 상태.
 >
-> **D2=A remediation은 별도 결정 브리프(오너 결정)**: 권장은 (a) `json_object()`에서 ```json/``` fence strip 후 parse(`revise.py` 선례, parser 완화 아님 — JSON이 유효하므로 public contract 약화 없음) + (c) Gate prompt에 fence 금지 지시. fence strip이 채택되면 parser 회귀에 fence 케이스 추가가 필수다.
+> **D2=A remediation 구현 완료(SoT v1.6.83, 오너 결정 (a)+(c))**: 오너가 제공된 파싱 스니펫을 참조해 (a)+(c) 진행을 승인했다. 스니펫 3단계 중 1단계(fence strip)만 채택·3단계(`{[\s\S]*}` greedy 추출)와 fallback은 거부(구조 완화·N/A). (a) `json_object()`에 `_strip_code_fence`(whole-content ```` ```lang…``` ```` fence, 임의 lang tag) 추가 + (c) `WRITING_GATE_TEMPLATE`에 "Return raw JSON only (no markdown code fence)" 금지. parser 정규화(구조 완화 아님)로 strict schema/enum/priority/evidence는 parsed dict에 동일 적용 → public contract 무변. 양방향 회귀 9개(`tests/test_writing_gate.py::GateFenceStrippingTest`, mutation bite 실증). 동일 root-cause 5곳(report/compare/extractor/planner/retrieval)은 repair로 완충돼 tracked debt.
 
 관련 정본: `docs/system-contract-sot.md` v1.6.81, `05-writing-loop-benchmark-decisions.md` B1~B4, `05-writing-bounded-loop-decisions.md` L6/L9, `05-writing-persisted-loop-audit-decisions.md` P1/P2/P5
 

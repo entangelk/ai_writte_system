@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 
 from services.application.app.analysis.prompt_templates import PromptTemplate
@@ -16,7 +17,7 @@ WRITING_GATE_TASK_TYPE = "writing_gate"
 WRITING_GATE_PROMPT_VERSION = "writing_gate_v1"
 WRITING_GATE_TEMPLATE = """You are the Writing Gate. Evaluate candidate prose against the supplied ContextPackage and original writing request.
 
-Check only: do_not_use, POV, and continuity. Return JSON only with exactly:
+Check only: do_not_use, POV, and continuity. Return raw JSON only (no markdown code fence, no surrounding prose) with exactly:
 - decision: pass|revise|retrieve_more|needs_user_review|block
 - findings: array of objects with exactly type, severity, message, evidence, recommended_decision
 - checked_constraints: array of strings
@@ -68,9 +69,27 @@ def build_writing_gate_request(*, request: WritingRequest,
     )
 
 
+# A whole-content markdown code fence: ``` optional-lang \n body \n ```. The
+# model occasionally wraps an otherwise-valid JSON object in a ```json``` fence
+# even when told to return raw JSON; _strip_code_fence removes that wrapping so
+# the strict schema/enum/priority/evidence checks apply unchanged. This
+# normalizes the format — it does NOT relax the contract (no prose extraction,
+# no {…} salvage). revise.py _replacement_text does the equivalent for prose.
+_CODE_FENCE_RE = re.compile(
+    r"^\s*```[ \t]*(?:[A-Za-z0-9_+-]+)?[ \t]*\r?\n([\s\S]*?)\r?\n?[ \t]*```\s*$"
+)
+
+
+def _strip_code_fence(content: str) -> str:
+    match = _CODE_FENCE_RE.match(content)
+    if match is None:
+        return content
+    return match.group(1).strip()
+
+
 def json_object(content: str) -> Mapping[str, object]:
     try:
-        value = json.loads(content)
+        value = json.loads(_strip_code_fence(content))
     except json.JSONDecodeError as exc:
         raise ValueError("writing gate content must be JSON") from exc
     if not isinstance(value, Mapping):

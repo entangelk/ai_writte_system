@@ -213,6 +213,85 @@ class GateContractTest(unittest.TestCase):
         self.assertEqual(provider.calls, 0)
 
 
+class GateFenceStrippingTest(unittest.TestCase):
+    """Markdown code-fence normalization (D2=A root-cause fix, SoT v1.6.83).
+
+    A model may wrap an otherwise-valid Gate JSON object in a ``\\`\\`\\`json``
+    fence. ``json_object`` strips a whole-content fence before parsing; the
+    strict schema/enum/priority/evidence checks are unchanged. Both directions
+    locked: fenced valid JSON must parse (under-strict — removing the strip
+    re-fails the B2b ``invalid_gate_result`` 502), and fenced invalid JSON must
+    still be rejected (over-strict — the strip normalizes format, not contract).
+    """
+
+    @staticmethod
+    def _fence(inner, tag="json"):
+        return f"```{tag}\n{inner}\n```"
+
+    def test_fenced_valid_json_is_parsed(self):
+        # under-strict: without the strip this raises JSONDecodeError (the B2b
+        # invalid_gate_result 502). With the strip the valid object parses.
+        decision, findings, checked = parse_writing_gate_result(
+            self._fence(_output()))
+        self.assertIs(decision, WritingGateDecision.PASS)
+        self.assertEqual(findings, ())
+        self.assertEqual(checked, ("POV 제한 시점",))
+
+    def test_bare_and_other_language_tags_are_stripped(self):
+        for tag in ("", "text", "json"):
+            with self.subTest(tag=tag):
+                decision, _, _ = parse_writing_gate_result(
+                    self._fence(_output(), tag=tag))
+                self.assertIs(decision, WritingGateDecision.PASS)
+
+    def test_unfenced_content_is_unchanged(self):
+        # No fence → behaviour identical to before the strip.
+        decision, _, _ = parse_writing_gate_result(_output())
+        self.assertIs(decision, WritingGateDecision.PASS)
+
+    def test_fenced_surrounding_whitespace_is_tolerated(self):
+        decision, _, _ = parse_writing_gate_result(
+            "  \n" + self._fence(_output()) + "\n  ")
+        self.assertIs(decision, WritingGateDecision.PASS)
+
+    def test_fence_does_not_weaken_schema_check(self):
+        # over-strict: a rogue key inside a fence is still rejected exactly as
+        # an unfenced rogue key would be. The strip normalizes format only.
+        rogue = json.dumps({"decision": "pass", "findings": [],
+                            "checked_constraints": ["POV 제한 시점"],
+                            "rogue_key": "schema violation"}, ensure_ascii=False)
+        with self.assertRaisesRegex(ValueError, "fields do not match schema"):
+            parse_writing_gate_result(self._fence(rogue))
+
+    def test_fence_does_not_weaken_priority_check(self):
+        fenced = self._fence(_output("block", [_finding(recommendation="revise")]))
+        with self.assertRaisesRegex(ValueError, "priority"):
+            parse_writing_gate_result(fenced)
+
+    def test_fence_around_non_json_still_rejected(self):
+        with self.assertRaisesRegex(ValueError, "must be JSON"):
+            parse_writing_gate_result(self._fence("not json at all"))
+
+    def test_gate_service_accepts_fenced_valid_output(self):
+        # Full service path: the provider returns a fenced valid pass; the Gate
+        # strips and evaluates normally in one turn (no repair needed).
+        provider = _Provider(self._fence(_output()))
+        result = asyncio.run(_service(provider).evaluate(
+            request=_request(), candidate=_candidate(), package=_package()))
+        self.assertIs(result.decision, WritingGateDecision.PASS)
+        self.assertEqual(provider.calls, 1)
+
+    def test_fence_does_not_weaken_evidence_containment(self):
+        # over-strict at the service level: a fenced finding whose evidence is
+        # absent from the candidate still fails the grounding check post-strip.
+        provider = _Provider(self._fence(_output("revise", [_finding(
+            recommendation="revise")])))
+        with self.assertRaisesRegex(InvalidWritingGateResult, "evidence"):
+            asyncio.run(_service(provider).evaluate(
+                request=_request(), candidate=_candidate(text="다른 문장."),
+                package=_package()))
+
+
 class _Context:
     def __init__(self, package=None, *, error=None):
         self.package = package or _package()

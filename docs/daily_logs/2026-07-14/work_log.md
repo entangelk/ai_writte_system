@@ -62,6 +62,15 @@
 - **hardening(검증 비차단 권고) 반영**: `scripts/diagnose_writing_gate.py`가 `format_diagnosis`에 `prompt_version=WRITING_GATE_PROMPT_VERSION`을 명시 전달하도록 수정(hard-coded 표시 상수 `"writing_gate_v1"` 기본값에만 의존하지 않고 실제 template version과 연동). 회귀 13개 여전히 PASS.
 - **D2=A remediation은 본 slice/검증 범위 밖(오너 결정)**: root cause가 fence로 확정됐으므로 별도 결정 브리프에서 (a) `json_object()` fence strip 후 parse(parser 정규화, 구조 완화 아님 — JSON이 유효하므로 public contract 약화 없음; `revise.py` 선례와 일치) + (c) Gate prompt에 fence 금지 지시 를 검증자 권장. 단 결정·구현은 오너 판단이다.
 
+### Phase 5.10 D2=A Gate fence-strip remediation 구현 (SoT v1.6.83)
+
+- 사용자 결정: **D2=A (a)+(c) 진행**. 검증이 확정한 root cause(markdown fence 래핑)에 대해 제공된 파싱 스니펫을 참조해 검토했고, 스니펫의 1단계(fence strip)만 채택·3단계(`{[\s\S]*}` greedy 추출)와 fallback은 **거부**했다(구조 완화라 strict 계약 약화 + 관측되지 않은 failure mode에 대한 speculative 처리).
+- **(a) parser 정규화**: `gate_prompt.py`에 `_strip_code_fence`(whole-content ```` ```lang…``` ```` fence 정규식, 임의 lang tag 포함)를 추가하고 `json_object`가 parse 전에 호출. strict schema/enum/priority/evidence 검증은 parsed dict에 그대로 적용 → **public literal·schema·서비스 경계 무변**, fence-wrapped 유효 JSON이 502에서 정상 parse로 바뀐 게 유일한 동작 변화. `revise.py` `_replacement_text`와 동등한 정규화라 Gate가 드디어 reviser와 같은 선으로 정렬.
+- **(c) prompt 금지**: `WRITING_GATE_TEMPLATE`의 "Return JSON only"를 "Return raw JSON only (no markdown code fence, no surrounding prose)"로 보강. 발생 빈도 감소가 목적(parser strip이 진짜 보장). version `writing_gate_v1` 유지(persisted prompt DB 없이 InMemory seed만이라 마이그레이션 불필요; test가 template 문자열을 hardcode하지 않음을 확인).
+- **양방향 회귀**(`tests/test_writing_gate.py::GateFenceStrippingTest` 9개): under-strict(fence-wrapped valid parse·bare/`text`/`json` tag·fenced ws·service full-path pass) + over-strict(fence-wrapped invalid가 여전히 schema/priority/evidence 올바른 이유로 거부). mutation(strip 제거)으로 9개가 양방향 bite함을 실증(제거 시 under-strict는 "must be JSON"로 valid 거부, over-strict는 잘못된 error로 마스킹).
+- **패턴 스윕(CLAUDE.md §4)**: 동일 root-cause(`json.loads` 직접, fence strip 없음)를 `grep`으로 스윕 — `report.py:113`·`analysis/compare_judge.py:202`·`analysis/extractor.py:281`·`context_search/planner.py:239`·`writing/retrieval.py:212`에도 존재. 단 이들은 repair(1회 재호출)로 부분 완충돼 있고 Gate만 repair도 strip도 없어 실제 502가 발생했으므로 Gate만 우선 수정, 나머지는 tracked debt(HANDOFF 추적 부채)로 기록. `agent_loop/parser.py`·`registry.py`는 tool-call contract 보류 상태라 제외.
+- SoT v1.6.83, work_log, HANDOFF(추적 부채·Verification), CHANGELOG, 결정 브리프에 반영.
+
 ## Issues found
 
 - SoT v1.6.80과 M6는 B2b가 필요하다는 사실과 예시 loop 조합만 확정한다. deployed HTTP 여부, representative branch set, failure를 p95에서 처리하는 방식, p95를 env default로 바꾸는 권한은 정하지 않는다.
@@ -77,6 +86,8 @@
 - 사용자 결정: 502의 다음 조치로 결정 브리프를 추가한 뒤 현재 작업을 마무리한다. raw Gate output 관측 방식과 prompt/repair 정책은 브리프의 오너 결정으로 남긴다.
 - 사용자 결정: **D1=A, D2=A**를 채택했다. B2b 502은 Gate `invalid_gate_result`로 좁혀졌지만 audit P1 bodyless 정책상 raw model output이 없으므로, 진단 범위를 operator-only one-shot CLI로 최소화해 bodyless audit·public API 경계를 바꾸지 않고 원인을 재현한다. prompt/repair/parser 변경은 exact 위반 clause를 관측한 뒤 별도 결정 브리프에서 결정한다(strict Gate 안전 계약·B4 "실측 전 default-off" 원칙 유지).
 - 구현 결정: diagnostic는 Gate config를 production factory(`_default_writing_gate_service(provider=None)` 신규 seam)로 재사용해 환경 중복·drift를 없애고, 회귀로 env contract(model/max_tokens/thinking/template)를 직접 잠갔다. ContextPackage 조립도 엔드포인트와 동일한 `_default_context_search_service` + needs/purpose/query/budget을 쓴다. 진단 출력은 operator terminal에만 두고 file/Mongo/audit write를 하지 않는다.
+- 사용자 결정: **D2=A (a)+(c) 진행** — root cause가 fence 래핑으로 확정됐으므로 parser 정규화(fence strip) + prompt 금지 추가. 제공된 파싱 스니펫 중 `{[\s\S]*}` greedy 추출·rule-based fallback은 거부(구조 완화·N/A).
+- 구현 결정: fence strip은 whole-content fence만 정규화하고 prose 추출은 하지 않는다(strict 계약 약화 방지). strict 검증은 parsed dict에 그대로 적용. 같은 root-cause를 가진 다른 5개 parser는 repair로 완충돼 있어 Gate만 우선 수정하고 나머지는 tracked debt.
 
 ## Next steps
 
@@ -88,8 +99,9 @@
 
 - **독립 검증 PASS**: `docs/verifications/2026-07-14/writing_gate_live_diag.md`. 정본 계약 부합·회귀 양방향 guard·main.py seam 무변·**live 실행으로 no-write+parity 실측**. root cause(fence) 확보. 비차단 hardening(prompt_version 연동)은 본 작업에서 반영 후 아래 회귀로 재확인.
 - D1=A diagnostic focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_gate_live_diag.py` → **13 passed**(prompt_version 연동 hardening 후에도 동일).
+- D2=A fence-strip focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_gate.py` → **30 passed / 29 subtests**(신규 `GateFenceStrippingTest` 9개 + 양방향). mutation(strip 제거) 시 9개 fence test가 양방향 bite 확인.
 - D1=A 회귀 + main.py seam 회귀: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_gate.py tests/test_writing.py tests/test_writing_revise.py tests/test_writing_report.py tests/test_writing_loop_budget.py tests/test_writing_loop_audit.py tests/test_writing_retrieval.py tests/test_writing_accept.py tests/test_application_api.py` → **210 passed / 114 subtests passed**(provider seam 무변 확인).
-- full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **999 passed / 45 skipped / 217 subtests**(본 환경은 elasticsearch 패키지가 설치돼 종전 3 skip이 실행됨; 신규 diagnostic 13개 포함, fail 없음).
+- full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1008 passed / 45 skipped / 220 subtests**(본 환경은 elasticsearch 패키지가 설치돼 종전 3 skip이 실행됨; diagnostic 13개 + fence 9개 포함, fail 없음).
 - `python3 -m py_compile services/application/app/writing/gate_live_diag.py scripts/diagnose_writing_gate.py`, `docker compose config --quiet`, `git diff --check` 통과.
 - focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_loop_benchmark_script.py tests/test_llm_benchmark_script.py tests/test_writing_loop_budget.py tests/test_writing_loop_audit.py` → **52 passed / 8 subtests passed**.
 - full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **981 passed / 48 skipped / 217 subtests**.
