@@ -130,6 +130,25 @@ class WritingRetrievalPlannerTest(unittest.TestCase):
             ):
                 parse_writing_retrieval_plan(json.dumps(payload))
 
+    def test_fenced_valid_plan_is_extracted(self):
+        # Under-strict: a whole-content markdown fence is stripped before
+        # json.loads. Removing strip_code_fence re-fails with a JSON error.
+        valid = json.dumps({"query": "선행 사건", "needs": ["event_context"]})
+        for tag in ("json", "", "text"):
+            with self.subTest(tag=tag):
+                plan = parse_writing_retrieval_plan(f"```{tag}\n{valid}\n```")
+                self.assertEqual(plan.needs, (ContextNeed.EVENT_CONTEXT,))
+
+    def test_fence_does_not_weaken_schema_check(self):
+        # Over-strict: extraction unwraps format only — a fenced schema-invalid
+        # object is still rejected for the RIGHT reason (allowed-need check, not
+        # a coincidental JSON error), exactly as an unfenced one would be.
+        bad = json.dumps({"query": "q", "needs": ["candidate_memory"]})
+        with self.assertRaisesRegex(
+            InvalidWritingRetrievalPlan, "not allowed for Writing retrieval"
+        ):
+            parse_writing_retrieval_plan(f"```json\n{bad}\n```")
+
     def test_planner_sees_all_retrieve_findings_and_allowed_needs(self):
         provider = _Provider((json.dumps({
             "query": "선행 사건",

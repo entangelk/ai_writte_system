@@ -178,6 +178,23 @@ class ParseSearchPlanTest(unittest.TestCase):
                 with self.assertRaises(SearchPlanParseError):
                     parse_search_plan(content, "project-1")
 
+    def test_fenced_valid_plan_is_extracted(self):
+        # Under-strict: a whole-content markdown fence is stripped before
+        # json.loads. Removing strip_code_fence re-fails with a JSON error.
+        for tag in ("json", "", "text"):
+            with self.subTest(tag=tag):
+                plan = parse_search_plan(f"```{tag}\n{_plan_content()}\n```", "project-1")
+                self.assertEqual(len(plan.steps), 2)
+
+    def test_fence_does_not_weaken_object_check(self):
+        # Over-strict: extraction unwraps format only — a fenced JSON array is
+        # still rejected for the RIGHT reason (object check, not a coincidental
+        # JSON error), exactly as an unfenced one.
+        with self.assertRaisesRegex(
+            SearchPlanParseError, "must be a JSON object"
+        ):
+            parse_search_plan("```json\n[]\n```", "project-1")
+
 
 class TerminalJsonSearchPlannerTest(unittest.IsolatedAsyncioTestCase):
     async def test_valid_first_response_parses_without_repair(self):
@@ -200,14 +217,16 @@ class TerminalJsonSearchPlannerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(needs["current_scene"], ["mongo"])
         self.assertEqual(needs["source_quote"], ["vector"])
 
-    async def test_markdown_fenced_first_response_repairs_once(self):
+    async def test_markdown_fenced_first_response_parses_without_repair(self):
+        # Under-strict guard: parse_search_plan strips a whole-content markdown
+        # fence before json.loads, so a fenced valid plan parses on the FIRST
+        # call — no repair. Removing strip_code_fence forces a second request.
         provider = FakeLLMProvider(
-            [_result("```json\n" + _plan_content() + "\n```"),
-             _result(_plan_content())]
+            [_result("```json\n" + _plan_content() + "\n```")]
         )
         plan = await _planner(provider).build_plan(_request())
         self.assertEqual(len(plan.steps), 2)
-        self.assertEqual(len(provider.requests), 2)
+        self.assertEqual(len(provider.requests), 1)
 
     async def test_invalid_literal_first_response_repairs_once(self):
         bad = _plan_content(

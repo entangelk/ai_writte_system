@@ -102,15 +102,15 @@ class CompareJudgeParseTest(unittest.TestCase):
                 provider = FakeLLMProvider([_result(_judge_content(action))])
                 self.assertEqual(_run(provider).action, CompareAction(action))
 
-    def test_markdown_fenced_output_repairs_once(self):
+    def test_markdown_fenced_valid_output_parses_without_repair(self):
+        # Under-strict guard: parse_judge_result strips a whole-content markdown
+        # fence before json.loads, so a fenced valid object parses on the FIRST
+        # call — no repair. Removing strip_code_fence forces a second request.
         provider = FakeLLMProvider(
-            [
-                _result("```json\n" + _judge_content("no_change") + "\n```"),
-                _result(_judge_content("no_change")),
-            ]
+            [_result("```json\n" + _judge_content("no_change") + "\n```")]
         )
         self.assertEqual(_run(provider).action, CompareAction.NO_CHANGE)
-        self.assertEqual(len(provider.requests), 2)
+        self.assertEqual(len(provider.requests), 1)
 
     def test_unknown_action_repairs_then_succeeds(self):
         provider = FakeLLMProvider(
@@ -170,6 +170,26 @@ class ParseJudgeResultDirectTest(unittest.TestCase):
         with self.assertRaises(CompareJudgeParseError):
             parse_judge_result(
                 json.dumps({"action": "update", "rationale": "x", "extra": 1})
+            )
+
+    def test_fenced_valid_output_is_extracted(self):
+        # Under-strict: the whole-content fence is stripped before json.loads.
+        for tag in ("json", "", "text"):
+            with self.subTest(tag=tag):
+                result = parse_judge_result(
+                    f"```{tag}\n" + _judge_content("no_change") + "\n```"
+                )
+                self.assertEqual(result.action, CompareAction.NO_CHANGE)
+
+    def test_fence_does_not_weaken_schema_check(self):
+        # Over-strict: extraction unwraps format only — a fenced schema-invalid
+        # object is still rejected for the RIGHT reason (schema check, not a
+        # coincidental JSON error), exactly as an unfenced one would be.
+        with self.assertRaisesRegex(
+            CompareJudgeParseError, "result fields do not match schema"
+        ):
+            parse_judge_result(
+                "```json\n" + json.dumps({"action": "update"}) + "\n```"
             )
 
 

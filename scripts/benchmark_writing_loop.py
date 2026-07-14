@@ -13,7 +13,7 @@ import asyncio
 import hashlib
 import json
 import sys
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,6 +24,8 @@ import httpx
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from services.application.app.writing.revise_gate import WritingLoopPolicy
 
 
 class AsyncHttpClient(Protocol):
@@ -397,6 +399,71 @@ def build_report(
         "fixtures": fixture,
         "summary": summarize_runs(run_list),
         "runs": [run.to_dict() for run in run_list],
+    }
+
+
+# --- Option A: analytical worst-case ceiling composition -------------------
+# (docs/plans/05-writing-loop-ceiling-composition-decisions.md)
+# The Writing Gate is an independent evaluator and cannot be prose-steered into
+# retrieve_more (confirmed live: 0/12), so the real model never walks the max
+# structural path. But the aggregate budget is a SUM of per-stage provider usage
+# (revise_gate.py metered channel) and the structural caps bound stage counts —
+# so the worst-case ceiling is composed from per-stage costs measured in
+# isolation, without making the model walk the whole loop.
+#
+# metered() accumulates provider usage for revise, report, gate and
+# retrieve_plan into the aggregate token budget. context_search runs outside
+# metered() (revise_gate.py) so it adds wall-clock but NOT aggregate tokens;
+# merge is in-process (negligible).
+_TOKEN_STAGES = ("revise", "report", "gate", "retrieve_plan")
+_WALL_CLOCK_STAGES = ("revise", "report", "gate", "retrieve_plan", "context_search")
+
+
+def worst_case_stage_counts(policy: WritingLoopPolicy) -> dict[str, int]:
+    """Worst-case per-stage invocation counts under the policy's structural caps.
+
+    Mirrors the revise_gate loop: report follows every revise; a gate runs once
+    initially, once per additional revise round, and once per retrieval round,
+    all capped by max_gate_evaluations. Re-derives from the policy so a changed
+    cap (env-tunable) automatically re-composes the ceiling.
+    """
+    revises = policy.max_revision_rounds
+    retrievals = policy.max_retrieval_rounds
+    gates = min(policy.max_gate_evaluations, 1 + (revises - 1) + retrievals)
+    return {
+        "revise": revises,
+        "report": revises,
+        "gate": gates,
+        "retrieve_plan": retrievals,
+        "context_search": retrievals,
+    }
+
+
+def compose_worst_case_ceiling(
+    *,
+    stage_tokens: Mapping[str, int],
+    stage_ms: Mapping[str, int],
+    policy: WritingLoopPolicy,
+) -> dict[str, Any]:
+    """Compose the raw worst-case aggregate ceiling from per-stage costs.
+
+    stage_tokens/stage_ms map a stage name to its conservatively-measured (max
+    observed, repair included) single-invocation cost. Only token-contributing
+    stages count toward max_total_tokens; context_search adds wall-clock only.
+    Returns the RAW worst case — the owner adds a B4 safety margin before
+    promoting it to a production default.
+    """
+    counts = worst_case_stage_counts(policy)
+    max_total_tokens = sum(
+        counts[stage] * int(stage_tokens.get(stage, 0)) for stage in _TOKEN_STAGES
+    )
+    max_wall_clock_ms = sum(
+        counts[stage] * int(stage_ms.get(stage, 0)) for stage in _WALL_CLOCK_STAGES
+    )
+    return {
+        "max_total_tokens": max_total_tokens,
+        "max_wall_clock_ms": max_wall_clock_ms,
+        "stage_counts": counts,
     }
 
 

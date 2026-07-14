@@ -120,6 +120,26 @@ class _MeteredRetrievalPlanner(_RetrievalPlanner):
         return plan, self._usage
 
 
+class _MeteredContext(_Context):
+    """A context search that WOULD surface provider usage via a _metered variant.
+
+    The loop calls the bare build_context_package directly (revise_gate.py), so
+    this variant stays dormant and its usage never enters the aggregate. It is a
+    tripwire: if the loop is ever changed to route context_search through
+    metered(), metered() picks up build_context_package_metered and its usage
+    inflates total_tokens — caught by the excluded-from-aggregate test.
+    """
+
+    def __init__(self, package, *, usage):
+        super().__init__(package)
+        self._usage = usage
+        self.metered_calls = 0
+
+    async def build_context_package_metered(self, request):
+        self.metered_calls += 1
+        return await self.build_context_package(request), self._usage
+
+
 def _build(*, reviser_provider, gate, reporter, policy, clock=None,
            retrieval_planner=None, context_search=None):
     return WritingReviseGateService(
@@ -190,6 +210,34 @@ class WritingLoopAggregationTest(unittest.TestCase):
         self.assertEqual(result.loop.total_tokens, 22)
         self.assertEqual(planner.calls, 1)
         self.assertEqual(context.calls, 1)
+
+    def test_context_search_usage_excluded_from_aggregate_tokens(self):
+        # Invariant behind the Option A ceiling composition
+        # (05-writing-loop-ceiling-composition-decisions.md): context_search runs
+        # OUTSIDE the loop's metered() channel (revise_gate.py), so even a search
+        # that surfaces provider usage must not inflate total_tokens. If someone
+        # routes it through metered(), metered() prefers the _metered variant and
+        # its 999 tokens enter the aggregate → total != 22 and metered_calls != 0,
+        # failing here. Without this guard the B2b ceiling would silently
+        # under-bound (context_search cost double-counted into max_total_tokens).
+        context = _MeteredContext(_package(), usage=TokenUsage(0, 999))
+        service = _build(
+            reviser_provider=_Provider(),
+            gate=_MeteredLoopGate(
+                (WritingGateDecision.RETRIEVE_MORE, WritingGateDecision.PASS),
+                usage=TokenUsage(0, 5),
+            ),
+            reporter=_MeteredReporter(usage=TokenUsage(0, 3)),
+            policy=WritingLoopPolicy(),
+            retrieval_planner=_MeteredRetrievalPlanner(usage=TokenUsage(0, 7)),
+            context_search=context,
+        )
+        result = _run(service)
+        self.assertIs(result.loop.status, WritingLoopStatus.PASS)
+        # Same 22 as above: the 999-token context search is excluded.
+        self.assertEqual(result.loop.total_tokens, 22)
+        self.assertEqual(context.calls, 1)          # bare method used
+        self.assertEqual(context.metered_calls, 0)  # metered variant NOT used
 
     def test_off_by_default_never_enforces_despite_usage(self):
         # Usage accrues but the default (None) caps never stop the loop.

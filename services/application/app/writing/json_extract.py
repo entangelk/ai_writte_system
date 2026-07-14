@@ -7,10 +7,11 @@ helpers strip a whole-content code fence (any language tag) before ``json.loads`
 so the strict schema/enum/priority/evidence checks downstream apply unchanged —
 **extraction, not contract relaxation** (no prose salvage, no ``{…}`` regex).
 
-Used by ``gate_prompt.json_object`` and ``report.parse_report``. The other
-terminal-JSON parsers (``compare_judge``, ``extractor``, ``planner``,
-``retrieval``) are repair-buffered tracked debt and adopt this as they are
-hardened.
+Shared by every strict terminal-JSON parser: ``gate_prompt.json_object``,
+``report.parse_report``, ``compare_judge._json_object``,
+``extractor._json_object``, ``planner._json_object`` and
+``retrieval.parse_writing_retrieval_plan`` (the last four adopted it in
+v1.6.86, closing the fence-strip tracked debt).
 """
 
 from __future__ import annotations

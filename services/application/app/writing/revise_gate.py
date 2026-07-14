@@ -471,6 +471,14 @@ class WritingReviseGateService:
                     failed_stage = WritingLoopStageName.CONTEXT_SEARCH
                     if deadline_reached():
                         return result(WritingLoopStatus.BUDGET_EXHAUSTED)
+                    # Called directly (NOT via metered()): context_search owns
+                    # its own ContextBudget, so its provider usage stays out of
+                    # the loop's aggregate total_tokens. The B2b ceiling
+                    # composition depends on this boundary (benchmark_writing_loop
+                    # _TOKEN_STAGES excludes context_search); routing this through
+                    # metered() would silently inflate the aggregate — locked by
+                    # test_writing_loop_budget
+                    # ::test_context_search_usage_excluded_from_aggregate_tokens.
                     delta = await self._context_search.build_context_package(
                         ContextSearchRequest(
                             project_id=request.project_id,

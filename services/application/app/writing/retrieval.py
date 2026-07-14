@@ -30,6 +30,7 @@ from services.llm_gateway.app.payload import (
     ChatMessage,
 )
 from services.application.app.writing.metering import MeteredCallError, add_usage
+from services.application.app.writing.json_extract import strip_code_fence
 from services.llm_gateway.app.provider import LLMProvider, TokenUsage
 
 
@@ -43,7 +44,7 @@ Return JSON only with exactly:
   "needs": ["one or more allowed need literals"]
 }
 
-Choose only the minimum needs required to verify the supplied candidate claims. Never choose candidate_memory and never invent a need literal. Do not evaluate or rewrite the prose."""
+Choose only the minimum needs required to verify the supplied candidate claims. Never choose candidate_memory and never invent a need literal. Do not evaluate or rewrite the prose. Do not wrap the JSON in markdown fences and do not add prose."""
 
 ALLOWED_WRITING_RETRIEVAL_NEEDS = (
     ContextNeed.CURRENT_SCENE,
@@ -209,7 +210,7 @@ def parse_writing_retrieval_plan(
     allowed_needs: tuple[ContextNeed, ...] = ALLOWED_WRITING_RETRIEVAL_NEEDS,
 ) -> WritingRetrievalPlan:
     try:
-        root = json.loads(content)
+        root = json.loads(strip_code_fence(content))
     except json.JSONDecodeError as exc:
         raise InvalidWritingRetrievalPlan(
             "writing retrieval plan must be JSON"

@@ -245,11 +245,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             [
                 GenerationResult(
                     model="fake-gemma",
-                    content=(
-                        "```json\n"
-                        '{"candidates":[{"source_ref_id":"source-ref-1","quote":"민아"}]}'
-                        "\n```"
-                    ),
+                    content='{"candidates": [ this is not valid json',
                     finish_reason="stop",
                 ),
                 GenerationResult(
@@ -474,7 +470,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             [
                 GenerationResult(
                     model="fake-gemma",
-                    content="```json\n{\"candidates\":[]}\n```",
+                    content="{not valid json",
                     finish_reason="stop",
                 ),
                 GenerationResult(
@@ -611,6 +607,24 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
 
     def test_empty_candidates_array_is_valid_empty_extraction(self):
         self.assertEqual(parse_analysis_extraction(json.dumps({"candidates": []})), ())
+
+    def test_fenced_valid_extraction_is_extracted(self):
+        # Under-strict: a whole-content markdown fence is stripped before
+        # json.loads. Removing strip_code_fence re-fails with a JSON error.
+        content = _content(
+            [_candidate("character_observation",
+                        {"name": "민아", "observation": "민아가 편지를 발견했다."})]
+        )
+        for tag in ("json", "", "text"):
+            with self.subTest(tag=tag):
+                drafts = parse_analysis_extraction(f"```{tag}\n{content}\n```")
+                self.assertEqual(len(drafts), 1)
+
+    def test_fence_does_not_weaken_object_check(self):
+        # Over-strict: extraction unwraps format only — a fenced JSON array is
+        # still rejected as "not a JSON object", exactly as an unfenced one.
+        with self.assertRaisesRegex(AnalysisExtractionError, "must be a JSON object"):
+            parse_analysis_extraction("```json\n[]\n```")
 
     def test_logical_key_is_stable_but_changes_when_payload_changes(self):
         """Over/under guard: retry identity is deterministic, not over-collapsed."""

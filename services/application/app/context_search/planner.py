@@ -36,6 +36,7 @@ from services.application.app.analysis.prompt_templates import (
     PromptTemplateError,
     PromptTemplateService,
 )
+from services.application.app.writing.json_extract import strip_code_fence
 from services.llm_gateway.app.payload import ChatCompletionRequest, ChatMessage
 from services.llm_gateway.app.provider import LLMProvider
 
@@ -236,7 +237,7 @@ def _tools(value: object) -> tuple[SearchTool, ...]:
 
 def _json_object(content: str) -> Mapping[str, object]:
     try:
-        payload = json.loads(content)
+        payload = json.loads(strip_code_fence(content))
     except json.JSONDecodeError as exc:
         raise SearchPlanParseError("planner content must be JSON") from exc
     if not isinstance(payload, Mapping):

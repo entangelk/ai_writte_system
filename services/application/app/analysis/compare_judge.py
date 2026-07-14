@@ -32,6 +32,7 @@ from services.application.app.analysis.prompt_templates import (
     PromptTemplateService,
 )
 from services.application.app.memory.models import MemoryEntry
+from services.application.app.writing.json_extract import strip_code_fence
 from services.llm_gateway.app.payload import ChatCompletionRequest, ChatMessage
 from services.llm_gateway.app.provider import LLMProvider
 
@@ -199,7 +200,7 @@ def _action(value: object) -> CompareAction:
 
 def _json_object(content: str) -> Mapping[str, object]:
     try:
-        payload = json.loads(content)
+        payload = json.loads(strip_code_fence(content))
     except json.JSONDecodeError as exc:
         raise CompareJudgeParseError("judge content must be JSON") from exc
     if not isinstance(payload, Mapping):

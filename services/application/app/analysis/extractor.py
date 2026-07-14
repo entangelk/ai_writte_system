@@ -28,6 +28,7 @@ from services.application.app.analysis.prompt_templates import (
 from services.application.app.analysis.schema import validate_candidate_payload
 from services.application.app.analysis.schema import InvalidAnalysisPayload
 from services.application.app.core_sot.models import SourceRef
+from services.application.app.writing.json_extract import strip_code_fence
 from services.llm_gateway.app.payload import ChatCompletionRequest, ChatMessage
 from services.llm_gateway.app.provider import LLMProvider
 
@@ -278,7 +279,7 @@ def _candidate_draft(item: object) -> AnalysisCandidateDraft:
 
 def _json_object(content: str) -> Mapping[str, object]:
     try:
-        payload = json.loads(content)
+        payload = json.loads(strip_code_fence(content))
     except json.JSONDecodeError as exc:
         raise AnalysisExtractionError("provider content must be JSON") from exc
     if not isinstance(payload, Mapping):

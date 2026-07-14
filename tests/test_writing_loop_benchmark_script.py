@@ -11,11 +11,14 @@ import httpx
 from scripts.benchmark_writing_loop import (
     WritingLoopBenchmarkCase,
     build_report,
+    compose_worst_case_ceiling,
     main,
     run_benchmark,
     seed_benchmark_context,
     summarize_runs,
+    worst_case_stage_counts,
 )
+from services.application.app.writing.revise_gate import WritingLoopPolicy
 
 
 CASE = WritingLoopBenchmarkCase(
@@ -241,6 +244,67 @@ class WritingLoopBenchmarkScriptTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--project-id", result.stdout)
+
+
+class WorstCaseCeilingCompositionTests(unittest.TestCase):
+    """Option A analytical ceiling composition.
+
+    docs/plans/05-writing-loop-ceiling-composition-decisions.md. The real 12B
+    cannot be prose-steered through the max structural path, so the worst-case
+    ceiling is composed from per-stage costs + the policy's structural caps.
+    """
+
+    def test_default_policy_counts_match_max_structural_path(self):
+        # Under-strict: the derived counts must reproduce the max_structural_path
+        # fixture (revise 2, report 2, gate 3, retrieve_plan 1, context_search 1).
+        self.assertEqual(
+            worst_case_stage_counts(WritingLoopPolicy()),
+            {"revise": 2, "report": 2, "gate": 3,
+             "retrieve_plan": 1, "context_search": 1},
+        )
+
+    def test_gate_count_is_capped_by_max_gate_evaluations(self):
+        # Over-strict: raising revise/retrieval must not push gates past the cap.
+        counts = worst_case_stage_counts(
+            WritingLoopPolicy(max_revision_rounds=3, max_retrieval_rounds=2,
+                              max_gate_evaluations=3)
+        )
+        # 1 + (3-1) + 2 = 5, capped at 3.
+        self.assertEqual(counts["gate"], 3)
+        self.assertEqual(counts["revise"], 3)
+        self.assertEqual(counts["retrieve_plan"], 2)
+
+    def test_gate_count_uncapped_when_evaluations_allow(self):
+        counts = worst_case_stage_counts(
+            WritingLoopPolicy(max_revision_rounds=2, max_retrieval_rounds=1,
+                              max_gate_evaluations=9)
+        )
+        self.assertEqual(counts["gate"], 3)  # 1 + 1 + 1, below the cap
+
+    def test_context_search_adds_wall_clock_but_not_tokens(self):
+        # The decisive Option A invariant: context_search runs outside the loop's
+        # metered() channel, so its tokens must NOT enter max_total_tokens, while
+        # its latency DOES enter max_wall_clock_ms.
+        result = compose_worst_case_ceiling(
+            stage_tokens={"revise": 100, "report": 200, "gate": 50,
+                          "retrieve_plan": 30, "context_search": 9999},
+            stage_ms={"revise": 1000, "report": 2000, "gate": 500,
+                      "retrieve_plan": 300, "context_search": 400},
+            policy=WritingLoopPolicy(),
+        )
+        # tokens: 2*100 + 2*200 + 3*50 + 1*30 = 780 (context_search excluded).
+        self.assertEqual(result["max_total_tokens"], 780)
+        # ms: 2*1000 + 2*2000 + 3*500 + 1*300 + 1*400 = 8200 (context_search in).
+        self.assertEqual(result["max_wall_clock_ms"], 8200)
+
+    def test_missing_stage_cost_treated_as_zero(self):
+        # A stage the operator did not measure contributes zero, not a KeyError.
+        result = compose_worst_case_ceiling(
+            stage_tokens={"gate": 40}, stage_ms={"gate": 100},
+            policy=WritingLoopPolicy(),
+        )
+        self.assertEqual(result["max_total_tokens"], 3 * 40)
+        self.assertEqual(result["max_wall_clock_ms"], 3 * 100)
 
 
 if __name__ == "__main__":

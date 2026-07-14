@@ -107,6 +107,42 @@
 - B2b 실제 계측을 시도하기 전에 로컬 runtime을 확인했다. `docker compose ps`는 service 0개였고 `curl -sS --max-time 5 http://127.0.0.1:8000/health`는 connection refused였다. 따라서 이 workspace에는 full-stack application/Gateway/LLM이 실행 중이지 않다. 대형 모델 다운로드·GPU runtime 기동을 이 작업에서 추측 실행하지 않았으며, live report는 준비된 full-stack machine에서 수행해야 한다. **[정정 — 이 snapshot은 stale였다]** 같은 날 B2b live run이 full-stack을 기동했고(위 "B2b full-stack 실행" 단락), 2026-07-14 독립 검증 시점엔 **전 스택이 healthy하게 실행 중**이었다. 이 stale note를 D1=A 작업에서 재확인 없이 인용해 "live 실행 불가"라는 허위 주장에 이르렀다(위 "live 불가 주장 정정" 단메). 교훈: 머신 상태는 직접 `docker ps`/`curl /health`로 확인한다.
 - full-stack을 기동한 실제 실행에서는 context seed 보완 전 400, 보완 후 HTTP 502가 발생했다. 성공 표본이 없으므로 B2b report를 ceiling 근거로 승격할 수 없다.
 
+### 잔존 4개 strict JSON parser fence-strip 스윕 (SoT v1.6.86)
+
+- HANDOFF Next Tasks #1(잔존 tracked debt parser fence 추출)을 진행했다. gate(v1.6.83)·report(v1.6.85)가 남긴 추적 부채 4곳 — `analysis/compare_judge.py::_json_object`·`analysis/extractor.py::_json_object`·`context_search/planner.py::_json_object`·`writing/retrieval.py::parse_writing_retrieval_plan` — 에 공유 `services/application/app/writing/json_extract.py::strip_code_fence`를 적용했다(각 `json.loads(content)` → `json.loads(strip_code_fence(content))`).
+- `analysis`/`context_search`에서 `writing.json_extract`를 import하는 방향이 생기지만, `json_extract`는 `re`만 import하고 대상 패키지 `__init__`도 부작용이 없어 순환 import가 없음을 import 실행으로 확인했다.
+- template 정합: compare_judge/planner 기본 template과 extractor/compare_judge repair prompt는 이미 "Do not wrap the JSON in markdown fences"를 갖고 있었고, 유일하게 없던 `retrieval.TEMPLATE`(first·repair 공용)에 fence 금지 문구를 추가했다.
+- **SoT 정합**: Phase 2A extraction 계약 clause가 "첫 provider content가 markdown-fenced JSON으로 실패하면 repair 재호출"로 fence를 first-parse **실패**로 규정하고 있었다(`system-contract-sot.md`). fence 추출 정책과 정면 충돌하므로, 이를 "markdown code fence로 감싼 유효 JSON은 실패가 아니라 추출 대상 — v1.6.86부터 strip 후 parse, malformed/schema mismatch만 repair"로 정정했다. 오너가 이미 gate/report에서 D2=A 추출 프레이밍을 확정했고 추적 부채가 이 4개를 명시 대상으로 스코프했으므로 새 결정 없이 기존 정책을 적용했다.
+- 기존 fence 의존 테스트 정정: compare_judge `test_markdown_fenced_output_repairs_once`, planner `test_markdown_fenced_first_response_repairs_once`는 fence가 first-parse 실패라는 옛 전제였다. 새 계약(fenced valid=first-call 통과, no repair)에 맞게 이름·assertion을 고쳤다. extractor의 두 repair 테스트는 fenced **valid** JSON으로 "invalid JSON"을 흉내 냈던 것이라(이제 strip돼 통과) genuinely-malformed JSON 문자열로 교체해 repair-path intent를 보존했다. planner의 `test_non_json_and_bad_shape` 안 `` ```json\n{}\n``` `` 항목은 strip 후 `{}`가 여전히 "steps must be an array"로 거부돼 그대로 유지(부수적 over-strict guard).
+- 각 parser에 양방향 fence 회귀 2종 추가(총 +8 test/+12 subtest): under-strict(fenced valid가 first-call에 그대로 추출·파싱; strip 제거 시 재실패) + over-strict(fenced schema/object-invalid는 여전히 올바른 이유로 거부 — 추출은 포맷만 벗기고 strict 검증 무변). 다중 lang tag(`json`/``/`text`)를 subtest로 커버.
+- `json_extract.py` module docstring을 "4개 parser는 아직 미채택 tracked debt"에서 "v1.6.86에 채택 완료"로 갱신했다.
+
+### Task 2 조사 — `unexpected_loop_trace` (B2b 재측정 8건) 근본 원인
+
+- **대상**: B2b 재측정(`docs/benchmarks/2026-07-14/writing_loop_b2b_q4_post_fence_fix.json`, fence fix 후) 12 run 중 terminal_pass 1건만 success, 나머지 대부분 `unexpected_loop_trace`. HANDOFF가 "모델 prompt-following"으로 요약했으나 실 run trace를 뜯어보니 **세 개의 서로 다른 현상**이었다.
+- **harness 판정 지점**: `scripts/benchmark_writing_loop.py:282` — 실제 `loop.status`/`stage_trace`가 case의 **정확한** `expected_stages`와 다르면 `unexpected_loop_trace`. 3 case(terminal_pass/retrieve_more_then_pass/max_structural_path)의 prompt가 특정 Gate 경로를 지시하지만 harness 주석(`:86-87`)대로 "real model remains the authority".
+- **실 run trace 분해**(12 run):
+  - **terminal_pass**(pass 기대): 1× pass ✓, 2× `revise→revise→budget_exhausted`(trace `[revise,report,gate,revise,report,gate]`) — Gate가 seed와 **동일한** 후보에도 continuity finding을 내 revise를 과다 유발. 1× http_502(warmup).
+  - **retrieve_more_then_pass**(retrieve_more 기대): 2× 즉시 `pass`, 1× `not_eligible` — Gate가 retrieve_more를 **한 번도** 내지 않음.
+  - **max_structural_path**(revise→retrieve_more→pass 기대): 3× `not_eligible` — Gate revise finding이 `_eligible_revision_finding`(`revise_gate.py:515`)의 strict 조건(정확히 1개·continuity·recommended=revise·evidence 후보 내 정확히 1회)을 통과 못 함.
+- **근본 원인(코드로 확인)**:
+  1. **Gate 독립성(D3=A)**: loop routing은 오직 `last_gate.decision`으로 결정된다(`revise_gate.py:387-512`). `request.instruction`은 **reviser**에만 전달되고(`:365,:410`), Gate에는 `gate_prompt.py:44`에서 `original_request.instruction`으로 payload에 들어가나 Gate 템플릿(`gate_prompt.py:18-29`)은 "Check only: do_not_use, POV, continuity … pass only with no findings … Do not … execute the recommendation"로 **객관 평가**를 지시한다. 즉 prose로 Gate 경로를 steer할 수 없다 → **retrieve_more 0/12**가 필연.
+  2. **fixture 자명성**: 3 case 모두 후보 텍스트가 context seed(`_CONTEXT_SEED_TEXT`)와 거의 동일해, continuity fix 후 Gate가 평가할 근거 부족/불일치가 없다 → 자연히 pass 지향. retrieve_more가 나오려면 후보가 context에 없는 주장을 해야 하는데 fixture가 그렇지 않다.
+  3. **12B Gate 노이즈**: 그럼에도 Gate가 pass 대신 revise를 자주 내고(terminal_pass 2/3), 그 finding이 eligibility strict 조건을 자주 못 맞춰 `not_eligible`. 이는 fixture 문제와 별개인 **Gate 프롬프트 판별 튜닝** 신호(compare judge J1 튜닝의 Gate 판).
+- **결론**: `unexpected_loop_trace`는 harness 버그가 아니라 **의도된 동작**(trace mismatch를 실패로 기록, `:86-87`). 진짜 문제는 **B2b 다단계 case의 설계 전제**(실 12B를 prose로 특정 Gate 경로에 태울 수 있다)가 Gate 독립성상 성립하지 않는다는 것. terminal_pass만 실 모델로 재현 가능하나 이는 최저비용 3-stage 경로라 최악(10-stage max_structural) ceiling을 bound하지 못한다.
+- **오너 결정: Option A(per-stage 합성)** 채택. 각하 B/C/D. 브리프 `docs/plans/05-writing-loop-ceiling-composition-decisions.md` 작성(조사 결론 + 합성 공식 + 측정 메커니즘 sub-decision).
+- **합성 코어 구현(결정적, sandbox 내 검증)**: `scripts/benchmark_writing_loop.py`에 `worst_case_stage_counts(policy)`(정책 상한→최악경로 stage 카운트 재도출: revise=R·report=R·gate=min(G,1+(R-1)+T)·retrieve_plan=T·context_search=T)와 `compose_worst_case_ceiling(stage_tokens, stage_ms, policy)`를 추가. **핵심 불변식**: `context_search`는 loop `metered()` 밖 호출이라 aggregate **token 미포함**(`_TOKEN_STAGES`=revise/report/gate/retrieve_plan)이나 **wall-clock은 포함**(`_WALL_CLOCK_STAGES`). merge=0. 기본 정책(2/1/3)에서 카운트가 `max_structural_path` expected_stages와 정확히 일치. 회귀 5개(`WorstCaseCeilingCompositionTests`): 기본 카운트 = max_structural, gate cap 상/하한(over-strict), context_search token 제외·ms 포함(불변식), 미측정 stage=0. focused 16, full 1040/45/235.
+- **Deferred(측정 메커니즘 확정 후)**: M-i per-stage 측정 script(선례 `diagnose_writing_gate/report` 패턴, in-process 실 gateway, write 0) — live 실행은 sandbox 밖 full-stack 필요. 실 수치 → 합성 → B4 여유율/default-on 오너 승인.
+- **별도 트랙(기록만)**: 12B Gate 과민 revise / not_eligible finding = Gate 프롬프트 판별 튜닝(compare judge J1의 Gate 판).
+
+### Option A 합성 코어 독립 검증 후 hardening (검증 기록 non-blocking#1 반영)
+
+- 오너 독립 검증 `docs/verifications/2026-07-14/writing_loop_ceiling_and_fence_hardening.md` **PASS**(blocking 없음). 불변식(context_search token 제외)을 `revise_gate.py:474` 직접 호출 vs `:462` retrieve_plan metered() 경유 대조로 코드 확인, n_gate 공식 loop 구조 일치, mutation 2건(context_search 누출·gate off-by-one) bite, "retrieve_more 0/12" benchmark JSON empirical 확인.
+- **비차단 hardening#1 반영**: 합성 함수의 token 제외 정확성이 순수 함수라 `revise_gate.py:474`가 나중에 metered() 경유로 바뀌면 ceiling이 조용히 under-bound하고 어떤 테스트도 못 잡는다는 지적. 검증자가 권한 (a)+(b)를 **둘 다** 반영:
+  - **(a) 교차참조 주석**: `revise_gate.py`의 context_search 호출 지점에 "metered() 밖 직접 호출 → aggregate token 제외; B2b ceiling 합성(`_TOKEN_STAGES`)이 이 경계에 의존; metered() 경유 시 조용히 팽창 — test로 잠금" 명시.
+  - **(b) loop 레벨 불변식 테스트**: `test_writing_loop_budget.py::test_context_search_usage_excluded_from_aggregate_tokens` 추가 — usage(999)를 노출하는 `_MeteredContext`(dormant `build_context_package_metered` 변형)를 retrieve_more 경로에 주입하고 `total_tokens==22`(999 제외)·`metered_calls==0`을 단정. **mutation 실증**: `:474`를 `metered()` 경유로 바꾸니 total_tokens 22→**1021**로 테스트 fail(정확히 그 회귀를 잡음), 복원 후 통과. 코멘트(CI 미검출)를 넘어 실 회귀 tripwire 확보.
+- hardening 후: budget focused 20, full 1041/45/235, `git diff --check` clean.
+
 ## Decisions
 
 - 작업자 추천: deployed public HTTP full-stack 경계, terminal/retrieve_more/max-structural-path 세 case, warmup 1 + measured success 3(실패 별도 보고), 결과 확인 후 owner가 여유 ceiling과 default-on 여부를 승인하는 B1=A/B2=A/B3=A/B4=A.
@@ -121,6 +157,7 @@
 - 구현 결정: report 진단은 gate 진단 script의 shared helper를 import해 중복을 제거했고, report의 1-call repair로 인해 first+repair 두 raw를 모두 캡처한다(first error는 캡처 raw를 re-parse해 복원).
 - 사용자 결정: report D2=A **(a)+(c) 진행** + 프레이밍("버그가 아니라 추출 과정 — 모델 fence는 정상 포맷 변형, parser가 JSON 추출; repair에서 ```` ```json ```` 나와도 처리"). `parse_report`에 추출을 넣어 first·repair 양쪽 커버.
 - 구현 결정: fence 추출을 공유 유틸리티 `writing/json_extract.py::strip_code_fence`로 추출(gate_prompt의 private helper 이동·공용화). gate·report 양 parser가 같은 추출 재사용, 잔존 4개 tracked debt parser도 같은 유틸로 수렴 예정.
+- 구현 결정(v1.6.86): 잔존 4개 parser를 같은 `strip_code_fence`로 수렴시켰다. 새 owner 결정 없이 진행 — gate/report에서 확정된 D2=A 추출 프레이밍의 적용이고 추적 부채가 이 4곳을 명시 대상으로 스코프했기 때문. 단, SoT Phase 2A extraction clause가 fence를 first-parse 실패로 규정해 새 정책과 충돌했으므로 그 clause를 정정했다(silent pick 아님 — 계약 정합까지 이 slice에 포함).
 
 ## Next steps
 
@@ -145,3 +182,20 @@
 - runtime readiness check: `docker compose ps` → 실행 service 없음; `curl -sS --max-time 5 http://127.0.0.1:8000/health` → connection refused. live benchmark는 미실행이다.
 - live readiness: remote llama `/health` = `{"status":"ok"}`; Compose application/Mongo/gateway/embedding/Chroma/Elasticsearch healthy. initial full run은 pre-context 400, seed 보완 후 live `POST /writing/revise-and-gate`는 HTTP 502(성공 표본 0)로 종료했다.
 - seed 보완 focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_loop_benchmark_script.py tests/test_writing_revise.py tests/test_writing_report.py tests/test_writing_gate.py` → **80 passed / 81 subtests passed**. `py_compile`와 `git diff --check` 통과. 전체 suite는 58% 진행 후 실행 세션이 끊겨 이번 상태에서는 완료 결과를 주장하지 않는다.
+
+### v1.6.86 fence-strip 스윕 검증
+
+- 순환 import 확인: `python3 -c "import services.application.app.analysis.compare_judge, ...extractor, ...context_search.planner, ...writing.retrieval"` → OK(import 부작용 없음).
+- 4개 parser focused: `python3 -m pytest -q -p no:cacheprovider tests/test_analysis_compare_judge.py tests/test_analysis_extractor_schema.py tests/test_context_search_planner.py tests/test_writing_retrieval.py` → **60 passed / 39 subtests passed**.
+- full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1035 passed / 45 skipped / 235 subtests**(v1.6.85 대비 +8 test/+12 subtest = 신규 fence 회귀 8개). fail 없음.
+- `python3 -m py_compile` 4개 parser + `json_extract.py`, `docker compose config --quiet`, `git diff --check` 통과.
+- live 12B 관통(fence-wrapped 유효 출력이 first-call 통과)은 gate(v1.6.83)·report(v1.6.85)와 동일 정규화라 sandbox 밖 후속으로 둔다.
+
+### v1.6.86 독립 검증 후 hardening (검증 기록 non-blocking 반영)
+
+- 오너 독립 검증 `docs/verifications/2026-07-14/residual_parser_fence_strip_sweep.md`가 **PASS**(blocking 없음). mutation으로 under-strict 15건 bite 실증, boundary matrix empty cell 없음, live 12B 관통(compare·planner) 확인. 검증이 남긴 non-blocking hardening 3건을 처리했다:
+  - **(item 1) over-strict message-pin 통일**: compare/planner/retrieval over-strict 테스트가 bare `assertRaises`였는데, extractor만 message-regex를 pin해 불일치했다. **더 정밀한 방향(pin)으로 통일** — over-strict guard는 "reject가 우연한 JSON parse error가 아니라 실제 object/schema check에서 나온다"를 assert해야 정확하다(strip이 subtly broken돼 content를 망가뜨리면 JSONDecodeerror로 reject돼도 bare assertRaises는 통과=false confidence). compare `"result fields do not match schema"`, planner `"must be a JSON object"`, retrieval `"not allowed for Writing retrieval"`로 pin. focused 60/39 유지.
+  - **(item 2) 문서 카운트 정정**: HANDOFF·CHANGELOG의 "기존 fence→repair 테스트 3개 정정" → **4개(compare 1·extractor 2·planner 1)**로 정정.
+  - **(item 3) 역사 문서 stale 테스트명 참조는 의도적으로 미수정**: rename된 테스트명이 `plans/04-...:204`(slice 4.2 kickoff 결정, 2026-07-04)·`verifications/2026-07-04/context_search_slice_4_2.md`·`verifications/2026-07-06/phase_2b_3_2_compare_judge.md`에 남아 있으나, 이들은 **작성 시점 상태를 기술하는 불변 역사 기록**이다(테스트는 그 때 실제로 그 이름이었음). CLAUDE.md의 검증/결정 기록 보존 원칙 + 정본 우선순위(현재 계약은 SoT가 canonical, 정정 완료)에 따라 역사 기록을 소급 수정하지 않는다. 검증자도 "선택적·정본 우선순위에서 허용"으로 분류했다.
+- **오너 인지 2건(검증 F6·F10)**: (F10) 이 4개 strip은 실 12B에서 defensive/parity(모델이 raw JSON 반환) — 이론적 위험 제거이며 gate/report식 live-remedial 아님. (F6) 이 slice가 SoT 정본 텍스트를 수정한 유일한 지점이라 오너 1회 확인 권장.
+- hardening 후: focused 60/39, full 1035/45/235 유지, `git diff --check` OK.
