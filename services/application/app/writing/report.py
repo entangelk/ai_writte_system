@@ -9,6 +9,7 @@ from dataclasses import replace
 
 from services.application.app.analysis.prompt_templates import PromptTemplateService
 from services.application.app.context_search.models import ContextPackage
+from services.application.app.writing.json_extract import strip_code_fence
 from services.application.app.writing.models import (
     CandidateClaim, CandidateClaimType, MemoryHintType, NewMemoryHint,
     RiskNote, RiskNoteType, RiskSeverity, WritingCandidate,
@@ -21,7 +22,7 @@ from services.llm_gateway.app.provider import LLMProvider
 
 TASK = "writing_candidate_report"
 VERSION = "writing_candidate_report_v1"
-TEMPLATE = """Analyze candidate prose and return one JSON object only. Do not use Markdown or explanatory text.
+TEMPLATE = """Analyze candidate prose and return one JSON object only. Do not use Markdown or explanatory text, and do not wrap the JSON in a ``` code fence.
 
 The object must have exactly these four fields:
 {
@@ -110,7 +111,7 @@ class WritingCandidateReportService:
 
 
 def parse_report(content: str) -> dict[str, object]:
-    root = json.loads(content)
+    root = json.loads(strip_code_fence(content))
     if not isinstance(root, Mapping) or set(root) != {"self_reported_constraints",
             "candidate_claims", "new_memory_hints", "risk_notes"}:
         raise ValueError("candidate report fields do not match schema")

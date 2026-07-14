@@ -89,6 +89,17 @@
 - 회귀(`tests/test_writing_report_live_diag.py` 11개): report request parity(`_build_report_service` 기반 model/max_tokens/thinking=`false`/`REPORT_TEMPLATE`)·first+repair raw capture(schema 위반 under-strict·성공 over-strict)·**fence 미strip 관측**(report는 gate와 달리 fence를 안 벗겨 fenced valid JSON이 parse 실패하는 점을 diagnostic이 노출 → tracked debt 근거)·upstream 실패 분류·provider fault·no-write spy·format(SENSITIVE/first/repair/error).
 - SoT v1.6.84, 결정 브리프(`05-writing-report-live-diagnostics-decisions.md`), work_log, HANDOFF, CHANGELOG, plans/README에 반영. public literal·schema·서비스 경계 변화 없음.
 
+### Phase 5.10 D2=A report fence-strip remediation 구현 (SoT v1.6.85)
+
+- report 진단(v1.6.84) live 4회 실행으로 D2=A evidence 확보 — RUN 1의 report first output이 ```` ```json ```` fence로 감싸져 있었고, `parse_report`가 fence strip 없이 `json.loads`해 first 실패 → 1-call repair가 unfenced valid JSON을 내어 성공. 즉 report는 gate v1.6.83과 **동일 root cause**(fence 래핑)이며 repair로 완충돼 있었음. benchmark의 `invalid_candidate_report` 3건은 first·repair 둘 다 fence/invalid일 때 발생.
+- 사용자 결정: **D2=A (a)+(c) 진행** + 프레이밍 — "이건 버그가 아니라 추출 과정. 모델이 fence로 감싸는 건 정상 출력 포맷 변형이고 parser가 JSON을 추출하는 것. repair에서 ```` ```json ```` 이 나와도 처리해야." `(a)+(c)` + repair 경로도 커버.
+- **공유 추출 유틸리티 도입**: gate_prompt의 private `_strip_code_fence`를 `writing/json_extract.py::strip_code_fence`(공용)로 추출. gate·report 양 parser가 같은 추출을 재사용(이제 5개 tracked debt parser가 같은 유틸로 수렴 가능). "추출 과정"을 코드 구조로 명확화.
+- **(a) report `parse_report`에 `strip_code_fence` 적용** — first·repair 모두 `parse_report`를 거치므로 **양쪽 fence 자동 커버**(repair가 ```` ```json ```` 을 내도 추출). gate와 동일 정규화(parser 완화 아님, strict 4-field schema/item 검증은 parsed dict에 동일 적용).
+- **(c) `TEMPLATE` fence 금지** — "Do not use Markdown… and do not wrap the JSON in a ``` code fence" 보강(이미 "Do not use Markdown"이 있었으나 명시화).
+- **진단 presentation 버그 fix(387a29d)**: report 진단 success 경로가 first raw(fenced) + "OK"만 보여 repair를 숨기던 문제를 success-via-repair 구분(first failed + repair succeeded)으로 정정. 이것이 RUN 1 시나리오를 정확히 묘사.
+- 양방향 회귀(`tests/test_writing_report.py::ReportFenceStrippingTest` 7개): under-strict(fenced valid parse·first+repair fence 추출·enrich 1-call repair 스킵) + over-strict(fenced invalid still rejected for right reason). mutation(strip 제거) 시 8개 양방향 bite. 진단 테스트 2개도 새 동작(report가 fence 추출)으로 갱신.
+- tracked debt 갱신: `report.py:113` **해소**. 잔존 4개(`compare_judge`·`extractor`·`planner`·`retrieval`, repair 완충). SoT v1.6.85, work_log, HANDOFF, CHANGELOG, 결정 브리프에 반영.
+
 ## Issues found
 
 - SoT v1.6.80과 M6는 B2b가 필요하다는 사실과 예시 loop 조합만 확정한다. deployed HTTP 여부, representative branch set, failure를 p95에서 처리하는 방식, p95를 env default로 바꾸는 권한은 정하지 않는다.
@@ -108,6 +119,8 @@
 - 구현 결정: fence strip은 whole-content fence만 정규화하고 prose 추출은 하지 않는다(strict 계약 약화 방지). strict 검증은 parsed dict에 그대로 적용. 같은 root-cause를 가진 다른 5개 parser는 repair로 완충돼 있어 Gate만 우선 수정하고 나머지는 tracked debt.
 - 사용자 결정: 재측정(1/12 success) 후 **"Report 진단 도입"** 선택 — `invalid_candidate_report` 502의 raw report output(first+repair)을 관측하는 operator-only 진단(gate D1=A 동일 패턴). remediation은 D2=A 별도 브리프.
 - 구현 결정: report 진단은 gate 진단 script의 shared helper를 import해 중복을 제거했고, report의 1-call repair로 인해 first+repair 두 raw를 모두 캡처한다(first error는 캡처 raw를 re-parse해 복원).
+- 사용자 결정: report D2=A **(a)+(c) 진행** + 프레이밍("버그가 아니라 추출 과정 — 모델 fence는 정상 포맷 변형, parser가 JSON 추출; repair에서 ```` ```json ```` 나와도 처리"). `parse_report`에 추출을 넣어 first·repair 양쪽 커버.
+- 구현 결정: fence 추출을 공유 유틸리티 `writing/json_extract.py::strip_code_fence`로 추출(gate_prompt의 private helper 이동·공용화). gate·report 양 parser가 같은 추출 재사용, 잔존 4개 tracked debt parser도 같은 유틸로 수렴 예정.
 
 ## Next steps
 
@@ -120,9 +133,10 @@
 - **독립 검증 PASS**: `docs/verifications/2026-07-14/writing_gate_live_diag.md`. 정본 계약 부합·회귀 양방향 guard·main.py seam 무변·**live 실행으로 no-write+parity 실측**. root cause(fence) 확보. 비차단 hardening(prompt_version 연동)은 본 작업에서 반영 후 아래 회귀로 재확인.
 - D1=A diagnostic focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_gate_live_diag.py` → **13 passed**(prompt_version 연동 hardening 후에도 동일).
 - D2=A fence-strip focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_gate.py` → **30 passed / 29 subtests**(신규 `GateFenceStrippingTest` 9개 + 양방향). mutation(strip 제거) 시 9개 fence test가 양방향 bite 확인.
-- D1=A report-diag focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_report_live_diag.py` → **11 passed**(parity·first+repair raw capture·fence 미strip 관측·upstream·no-write).
+- D1=A report-diag focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_report_live_diag.py` → **12 passed**(parity·first+repair raw capture·success-via-repair·upstream·no-write).
+- D2=A report fence-strip focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_report.py` → report fence 회귀 7개 포함 PASS. mutation(strip 제거) 시 8개 양방향 bite.
 - D1=A 회귀 + main.py seam 회귀: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_gate.py tests/test_writing.py tests/test_writing_revise.py tests/test_writing_report.py tests/test_writing_loop_budget.py tests/test_writing_loop_audit.py tests/test_writing_retrieval.py tests/test_writing_accept.py tests/test_application_api.py` → **210 passed / 114 subtests passed**(provider seam 무변 확인).
-- full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1019 passed / 45 skipped / 220 subtests**(본 환경은 elasticsearch 패키지가 설치돼 종전 3 skip이 실행됨; diagnostic 13개 + fence 9개 + report diag 11개 포함, fail 없음).
+- full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1027 passed / 45 skipped / 223 subtests**(본 환경은 elasticsearch 패키지가 설치돼 종전 3 skip이 실행됨; gate diag 13 + fence 9 + report diag 12 + report fence 7 포함, fail 없음).
 - `python3 -m py_compile services/application/app/writing/gate_live_diag.py scripts/diagnose_writing_gate.py`, `docker compose config --quiet`, `git diff --check` 통과.
 - focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_loop_benchmark_script.py tests/test_llm_benchmark_script.py tests/test_writing_loop_budget.py tests/test_writing_loop_audit.py` → **52 passed / 8 subtests passed**.
 - full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **981 passed / 48 skipped / 217 subtests**.

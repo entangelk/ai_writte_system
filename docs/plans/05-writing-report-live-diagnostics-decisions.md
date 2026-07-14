@@ -6,7 +6,7 @@
 >
 > **결과**: 오너가 gate D1=A와 동일 패턴을 채택했다 — D1=A operator-only report 진단 CLI로 report raw output(first + repair)과 exact strict-parse error를 stdout에서 관측하고, D2=A에 따라 remediation(report fence strip / prompt / parser)은 별도 결정 브리프로 연기. D1=A 진단 표면은 v1.6.84로 구현됐다(`services/application/app/writing/report_live_diag.py`, `scripts/diagnose_writing_report.py`, `tests/test_writing_report_live_diag.py`).
 >
-> **D2=A remediation은 별도 결정 브리프(오너 결정)**: 관측한 exact clause로 (a) `report.py:parse_report`에 fence strip 추가(tracked debt `report.py:113`, gate `json_object` 선례) (b) report prompt에 fence 금지 (c) schema 위반에 대한 prompt 보강 중 어느 조합을 채택할지 결정. report는 이미 repair가 있으므로 gate보다 완충돼 있지만, first+repair 모두 같은 방식으로 실패하면 repair도 소용없다는 점이 관측으로 드러난다.
+> **D2=A remediation 구현 완료(SoT v1.6.85, 오너 결정 (a)+(c) + 추출 프레이밍)**: report 진단(v1.6.84) live 실행으로 D2=A evidence 확보 — report first output이 gate와 동일하게 ```` ```json ```` fence로 감싸져 있었고(1-call repair가 살림). 오너 결정 (a)+(c) + 프레이밍("버그가 아니라 추출 과정 — 모델이 fence로 감싸는 건 정상 출력 포맷 변형이고 parser가 JSON을 추출; repair에서 ```` ```json ```` 나와도 처리"). (a) `report.py:parse_report`에 fence 추출 적용 — **first·repair 모두 parse_report를 거쳐 양쪽 fence 자동 커버**. (c) `TEMPLATE`에 fence 금지. fence 추출을 공유 유틸리티 `writing/json_extract.py::strip_code_fence`로 추출(gate_prompt private helper 이동·공용화, gate·report 양 parser 재사용). parser 정규화(완화 아님)로 strict 4-field schema/item 검증은 parsed dict에 동일 적용 → public contract 무변. 양방향 회귀 7개(`tests/test_writing_report.py::ReportFenceStrippingTest`, mutation bite 실증). tracked debt `report.py:113` 해소(잔존 4: compare/extractor/planner/retrieval).
 
 ## Decision needed
 

@@ -140,3 +140,88 @@ class WritingReportTest(unittest.TestCase):
         self.assertNotIn("hint_type", candidate["new_memory_hints"][0])
         self.assertEqual(candidate["risk_notes"][0]["type"], "pov")
         self.assertNotIn("risk_type", candidate["risk_notes"][0])
+
+
+class ReportFenceStrippingTest(unittest.TestCase):
+    """Markdown code-fence extraction in parse_report (D2=A v1.6.85).
+
+    Mirror of GateFenceStrippingTest. parse_report strips a whole-content
+    ```` ```lang…``` ```` fence before json.loads — extraction, not contract
+    relaxation: the strict 4-field schema/item checks still apply. Both the
+    first and the 1-call repair outputs go through parse_report, so a fence on
+    EITHER attempt is handled. Two directions locked: fenced valid parses
+    (under-strict — removing the strip re-fails), fenced invalid is still
+    rejected for the right reason (over-strict — the strip does not weaken).
+    """
+
+    @staticmethod
+    def _fence(inner, tag="json"):
+        return f"```{tag}\n{inner}\n```"
+
+    def _service(self, provider):
+        templates = PromptTemplateService(InMemoryPromptTemplateRepository())
+        seed_report_template(templates)
+        return WritingCandidateReportService(provider, prompt_templates=templates)
+
+    @staticmethod
+    def _candidate():
+        return WritingCandidate(request_id="wr1", project_id="p1",
+            task_type=WritingTaskType.CONTINUE_SCENE,
+            output_type=WritingOutputType.DRAFT_PATCH, text="아린은 문을 열었다.")
+
+    @staticmethod
+    def _package():
+        return ContextPackage(project_id="p1", purpose=ContextSearchPurpose.WRITING_CONTEXT,
+            macro_items=(), micro_evidence=(), constraints=(), do_not_use=(),
+            token_estimate_total=0, degraded=False)
+
+    def test_fenced_valid_report_is_parsed(self):
+        # under-strict: without the strip this raises JSONDecodeError. With the
+        # strip the fenced valid object parses.
+        report = parse_report(self._fence(json.dumps(_payload(), ensure_ascii=False)))
+        self.assertEqual(report["candidate_claims"][0].text, "문이 열렸다")
+
+    def test_bare_and_other_language_tags_are_stripped(self):
+        valid = json.dumps(_payload(), ensure_ascii=False)
+        for tag in ("", "text", "json"):
+            with self.subTest(tag=tag):
+                self.assertEqual(parse_report(self._fence(valid, tag=tag))
+                                 ["risk_notes"][0].severity, "high")
+
+    def test_unfenced_report_is_unchanged(self):
+        report = parse_report(json.dumps(_payload(), ensure_ascii=False))
+        self.assertEqual(report["self_reported_constraints"], ("제한 시점",))
+
+    def test_fence_does_not_weaken_schema_check(self):
+        # over-strict: a rogue key inside a fence is still rejected exactly as
+        # an unfenced rogue key would be. The strip normalizes format only.
+        rogue = {**_payload(), "rogue_key": "schema violation"}
+        with self.assertRaisesRegex(ValueError, "fields do not match schema"):
+            parse_report(self._fence(json.dumps(rogue, ensure_ascii=False)))
+
+    def test_fence_does_not_weaken_array_field_check(self):
+        # over-strict: a non-array field inside a fence is still rejected.
+        bad = {**_payload(), "candidate_claims": "not-an-array"}
+        with self.assertRaisesRegex(ValueError, "must be an array"):
+            parse_report(self._fence(json.dumps(bad, ensure_ascii=False)))
+
+    def test_enrich_strips_fenced_first_and_skips_repair(self):
+        # Service-level under-strict: a fenced valid first output parses via the
+        # strip → enrich succeeds in ONE call (no repair needed). Removing the
+        # strip would force a repair call.
+        provider = _Provider([self._fence(json.dumps(_payload(), ensure_ascii=False))])
+        asyncio.run(self._service(provider).enrich_metered(self._candidate(), self._package()))
+        self.assertEqual(provider.calls, 1)  # no repair
+
+    def test_repair_output_fence_is_also_stripped(self):
+        # The repair path also calls parse_report, so a fenced repair output is
+        # extracted too. First attempt is schema-invalid (triggers repair); the
+        # repair returns a fenced valid object → stripped → success via repair.
+        provider = _Provider([
+            json.dumps({**_payload(), "candidate_claims": "not-an-array"}, ensure_ascii=False),
+            self._fence(json.dumps(_payload(), ensure_ascii=False)),
+        ])
+        enriched, _usage = asyncio.run(self._service(provider).enrich_metered(
+            self._candidate(), self._package()))
+        self.assertEqual(provider.calls, 2)  # first failed (schema) + repair
+        self.assertEqual(enriched.candidate_claims[0].text, "문이 열렸다")

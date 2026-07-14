@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping
 
 from services.application.app.analysis.prompt_templates import PromptTemplate
 from services.application.app.context_search.models import ContextPackage
+from services.application.app.writing.json_extract import strip_code_fence
 from services.application.app.writing.models import WritingCandidate, WritingRequest
 from services.application.app.writing.prompt import format_context_package
 from services.llm_gateway.app.payload import ChatCompletionRequest, ChatMessage
@@ -69,27 +69,14 @@ def build_writing_gate_request(*, request: WritingRequest,
     )
 
 
-# A whole-content markdown code fence: ``` optional-lang \n body \n ```. The
-# model occasionally wraps an otherwise-valid JSON object in a ```json``` fence
-# even when told to return raw JSON; _strip_code_fence removes that wrapping so
-# the strict schema/enum/priority/evidence checks apply unchanged. This
-# normalizes the format — it does NOT relax the contract (no prose extraction,
-# no {…} salvage). revise.py _replacement_text does the equivalent for prose.
-_CODE_FENCE_RE = re.compile(
-    r"^\s*```[ \t]*(?:[A-Za-z0-9_+-]+)?[ \t]*\r?\n([\s\S]*?)\r?\n?[ \t]*```\s*$"
-)
-
-
-def _strip_code_fence(content: str) -> str:
-    match = _CODE_FENCE_RE.match(content)
-    if match is None:
-        return content
-    return match.group(1).strip()
+# A fenced Gate JSON object is unwrapped via the shared strip_code_fence
+# extraction (see writing/json_extract.py) before parsing; the strict
+# schema/enum/priority/evidence checks then apply unchanged.
 
 
 def json_object(content: str) -> Mapping[str, object]:
     try:
-        value = json.loads(_strip_code_fence(content))
+        value = json.loads(strip_code_fence(content))
     except json.JSONDecodeError as exc:
         raise ValueError("writing gate content must be JSON") from exc
     if not isinstance(value, Mapping):

@@ -181,17 +181,16 @@ class RunReportDiagnosisTest(unittest.TestCase):
         self.assertEqual([s for s, _ in diag.stage_trace],
                          ["context", "revise", "report"])
 
-    def test_reveals_report_does_not_strip_fence(self):
-        # The report parser (unlike the now-fixed gate) does NOT strip a code
-        # fence — a fenced valid JSON fails to parse (raw JSONDecodeError, since
-        # parse_report does not wrap it as "must be JSON" the way the gate does).
-        # The diagnostic surfaces this raw so the tracked-debt fence strip can
-        # be decided.
+    def test_report_strips_fence_so_fenced_valid_parses(self):
+        # The report parser now strips a code fence (D2=A v1.6.85, mirroring the
+        # gate): a fenced valid JSON parses on the first attempt — no repair.
+        # The diagnostic surfaces the fenced raw + OK (first_error None).
         fenced = "```json\n" + _report_json() + "\n```"
-        diag, _ = _drive([_gen(fenced), _gen(fenced)])
-        self.assertEqual(diag.parse_status, INVALID_CANDIDATE_REPORT)
+        diag, capture = _drive([_gen(fenced)])
+        self.assertEqual(diag.parse_status, REPORT_PARSED_OK)
         self.assertEqual(diag.first_raw, fenced)
-        self.assertIsNotNone(diag.first_error)  # JSON parse failure, no fence strip
+        self.assertIsNone(diag.first_error)  # stripped → parsed
+        self.assertEqual(len(capture.captures), 1)  # no repair needed
 
     def test_successful_parse_captures_first_raw_and_counts(self):
         diag, capture = _drive([_gen(_report_json(
@@ -207,15 +206,16 @@ class RunReportDiagnosisTest(unittest.TestCase):
         self.assertEqual(len(capture.captures), 1)  # no repair on success
 
     def test_success_via_repair_surfaces_first_failure_and_repair(self):
-        # First attempt is fenced (parse fails — report does not strip fences)
-        # → repair produces valid JSON → report succeeds via repair. The
-        # diagnosis must surface the first failure + repair raw, not misread
-        # the fenced first as "parsed OK". (This is the live RUN 1 scenario.)
-        fenced = "```json\n" + _report_json() + "\n```"
-        diag, capture = _drive([_gen(fenced), _gen(_report_json())])
+        # First attempt is schema-invalid (a field is not an array — NOT a
+        # fence, so the v1.6.85 strip does not rescue it) → repair produces
+        # valid JSON → report succeeds via repair. The diagnosis surfaces the
+        # first failure + repair raw, not misreading the first as "parsed OK".
+        bad = _report_json(constraints='"not-an-array"')
+        diag, capture = _drive([_gen(bad), _gen(_report_json())])
         self.assertEqual(diag.parse_status, REPORT_PARSED_OK)
-        self.assertEqual(diag.first_raw, fenced)
-        self.assertIsNotNone(diag.first_error)  # first failed (fence not stripped)
+        self.assertEqual(diag.first_raw, bad)
+        self.assertIsNotNone(diag.first_error)  # first failed (schema)
+        self.assertIn("must be an array", diag.first_error)
         self.assertEqual(diag.repair_raw, _report_json())
         self.assertEqual(len(capture.captures), 2)  # first + repair
 
