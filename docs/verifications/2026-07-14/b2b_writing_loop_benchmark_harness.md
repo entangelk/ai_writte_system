@@ -196,4 +196,39 @@ python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider
 python3 -m pytest -q tests/test_writing_loop_benchmark_script.py \
   ::WritingLoopBenchmarkScriptTests::test_warmup_http_failure_is_retained_and_measured_run_continues
 # → 분기 제거 시 AssertionError [1] != [0, 1] (RED). 복원 시 9 passed/2 subtests (GREEN).
+
+# 8. 2차 재검증(아래 섹션) 카운트
+python3 -m pytest -q -p no:cacheprovider \
+  tests/test_writing_loop_benchmark_script.py tests/test_writing_revise.py \
+  tests/test_writing_report.py tests/test_writing_gate.py   # → 80 passed, 81 subtests
+python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider  # → 986 passed, 45 skipped, 217 subtests
+
+
+## 재검증 2차 — live context-seed 보완 + provenance (2026-07-14)
+
+작업자가 full-stack live를 돌리며 발견한 harness 누락을 보완했다(원본 1차 검증이 잡지 못한 latent defect).
+
+### 무엇이 바뀌었는지
+- **current_position seed**: `seed_benchmark_context()`가 계측 전 `POST /projects/{id}/drafts` → `POST /projects/{id}/drafts/{draft_id}/versions`(`raw_text`=`_CONTEXT_SEED_TEXT`, `idempotency_key`)로 실제 draft/version을 만들고 `{draft_id, version_id}`를 반환. 이 `current_position`을 warmup·measured 모든 `_run_case`에 전달. seed는 `_run_live`에서 `run_benchmark` 이전에 1회(측정 latency 밖).
+- **provenance(H1 폐쇄)**: `--model`/`--quant`/`--compose-revision` required CLI 추가, `build_report` metadata에 기록.
+- 회귀 +2: `test_current_position_is_forwarded_to_each_benchmark_request`(전달 값·under-strict), `test_seed_benchmark_context_creates_draft_and_version_before_measurement`(draft→version 순서·응답 shape).
+
+### 검증 결과(1차 사료 재도출)
+- **current_position shape 정확**: `CurrentPosition`(`context_search/models.py:97`)와 endpoint 사용(`main.py:3039`)이 `draft_id`/`version_id`. seed 반환 모양 일치.
+- **seed 응답 파싱 정확**: `POST /drafts`→`_draft_payload`=`{"id":...}`(`main.py:1457,1176-1188`), `POST /drafts/{id}/versions`→`{"draft_version":{"id":...}}`(`main.py:1476-1481`). seed가 파싱하는 `json()["id"]`/`json()["draft_version"]["id"]`와 정확히 일치 → 런타임 파싱 break 없음.
+- **B1~B4 준수 유지**: seed는 측정 latency 밖, 3 fixture·warmup/failure 처리·default off 불변. seed는 브리프 execution outline의 "deterministic seeded project/context fixture" 요구를 이제야 구현한 것(원본 harness가 빠뜨린 것).
+- **문서 정합**: 브리프 Live execution(명령 블록 포함 `--model`/`--quant`/`--compose-revision`)·HANDOFF·work_log가 현재 CLI·동작과 일치.
+- **카운트**: 4종 focused **80 passed / 81 subtests**(독립 재현 일치). full **986 passed / 45 skipped / 217 subtests**(+2 test / +0 subtest, production code 미변경으로 회귀 없음). `py_compile`·`git diff --check` 통과.
+
+### 판정(2차)
+**합격(pass) — harness 보완 코드/테스트/문서 관점.** seed·provenance·forwarding이 모두 정확하고 회귀로 잠겼으며, 브리프와 정합이다.
+
+### 단, 남은 runtime blocker(코드 defect 아님) — 502 원인 미확정
+- 보완 후 live `POST /writing/revise-and-gate`가 HTTP 502로 종료(성공 표본 0). 작업자는 p95/ceiling 승격을 보류했고(B4 준수, 숫자 날조 없음 — 올바름).
+- **502 원인은 미검증**. 502는 `InvalidWritingRevision`/`ContextSearchFailed`/`ProviderError(non-timeout)`/report·gate failure 중 하나로 매핑되며(`main.py:2824-2837`), 현재 502 응답 body(error_type/detail)가 기록에 없다.
+- **오너 힌트(권한문제) 검증 권장**: 작업자의 Mongo 추론은 사실에 부합한다 — `core_sot/mongo_repository.py:241-243`·`analysis/mongo_repository.py:241-243`가 `start_session`+`start_transaction`을 쓰고, Mongo transaction은 replica set이 필수이므로 standalone 불가. 단, (a) shared Mongo에서 실제로 관측한 게 topology 오류인지 permission 오류인지, (b) 502 자체가 권한/인증 문제인지는 502 body로 확인해야 한다. 구체적 가설:
+  - remote LLM gateway(192.168.1.22:9080) 인증 — `/health`·`/v1/models`는 통과해도 generation endpoint가 API key/auth를 요구할 수 있음. app provider 설정의 auth 확인.
+  - served model id(`google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`)와 app 설정 model명이 정확히 일치하는지(불일치 → provider 404 → 502).
+  - 전용 replica set Mongo의 app 사용자 권한 — loop/audit/context 경로가 쓰는 컬렉션 쓰기 권한.
+- 작업자의 다음 계획(502 body·stage 분리 진단)은 올바른 방향이나, 위 권한/인증 가설을 1순위로 확인할 것.
 ```

@@ -13,6 +13,7 @@ from scripts.benchmark_writing_loop import (
     build_report,
     main,
     run_benchmark,
+    seed_benchmark_context,
     summarize_runs,
 )
 
@@ -87,6 +88,45 @@ class WritingLoopBenchmarkScriptTests(unittest.TestCase):
         self.assertEqual(client.posts[0][0], "http://app.test/projects/p1/writing/revise-and-gate")
         self.assertTrue(client.posts[0][1]["persist_audit"])
         self.assertTrue(client.gets[0].endswith("/wla:1"))
+
+    def test_current_position_is_forwarded_to_each_benchmark_request(self):
+        client = _Client(loop_payload={
+            "loop": {"status": "pass"},
+            "stages": [{"stage": value} for value in CASE.expected_stages],
+            "audit_id": "wla:1", "audit_error": None,
+        })
+
+        asyncio.run(run_benchmark(
+            client, base_url="http://app.test", project_id="p1", cases=(CASE,),
+            repeats=1, warmups=0, current_position={"draft_id": "d1", "version_id": "v1"},
+            now=_Clock(0, 1),
+        ))
+
+        self.assertEqual(
+            client.posts[0][1]["current_position"],
+            {"draft_id": "d1", "version_id": "v1"},
+        )
+
+    def test_seed_benchmark_context_creates_draft_and_version_before_measurement(self):
+        class _SeedClient:
+            def __init__(self):
+                self.posts = []
+
+            async def post(self, url, *, json):
+                self.posts.append((url, json))
+                if url.endswith("/drafts"):
+                    return _Response(200, {"id": "draft-1"})
+                return _Response(200, {"draft_version": {"id": "version-1"}})
+
+        client = _SeedClient()
+        position = asyncio.run(seed_benchmark_context(
+            client, base_url="http://app.test/", project_id="p1"
+        ))
+
+        self.assertEqual(position, {"draft_id": "draft-1", "version_id": "version-1"})
+        self.assertEqual(client.posts[0][0], "http://app.test/projects/p1/drafts")
+        self.assertEqual(client.posts[1][0], "http://app.test/projects/p1/drafts/draft-1/versions")
+        self.assertIn("raw_text", client.posts[1][1])
 
     def test_unexpected_trace_fails_instead_of_being_measured_as_requested_case(self):
         client = _Client(loop_payload={

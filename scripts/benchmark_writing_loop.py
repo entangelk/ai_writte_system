@@ -42,8 +42,10 @@ class WritingLoopBenchmarkCase:
     expected_loop_status: str
     expected_stages: tuple[str, ...]
 
-    def request_body(self, *, request_id: str) -> dict[str, Any]:
-        return {
+    def request_body(
+        self, *, request_id: str, current_position: dict[str, str] | None = None
+    ) -> dict[str, Any]:
+        body = {
             "request_id": request_id,
             "instruction": self.instruction,
             "candidate_text": self.candidate_text,
@@ -52,6 +54,9 @@ class WritingLoopBenchmarkCase:
             "max_tokens": 4096,
             "persist_audit": True,
         }
+        if current_position is not None:
+            body["current_position"] = current_position
+        return body
 
     def fixture_dict(self) -> dict[str, Any]:
         return {
@@ -71,6 +76,11 @@ _FINDING = {
     "evidence": "민아는 역 플랫폼에 서 있었다.",
     "recommended_decision": "revise",
 }
+
+_CONTEXT_SEED_TEXT = (
+    "민아는 역 플랫폼에 서 있었다. 비는 이미 그쳤고, "
+    "그녀는 파란 편지를 주머니에 넣었다."
+)
 
 # The prompts request a particular Gate route, but the real model remains the
 # authority. A trace mismatch is a recorded failure, never silently measured as
@@ -167,6 +177,7 @@ async def run_benchmark(
     cases: Iterable[WritingLoopBenchmarkCase] = BENCHMARK_CASES,
     repeats: int,
     warmups: int,
+    current_position: dict[str, str] | None = None,
     now: Callable[[], float] = perf_counter,
 ) -> list[WritingLoopBenchmarkRun]:
     if repeats < 1:
@@ -180,14 +191,16 @@ async def run_benchmark(
         for warmup in range(1, warmups + 1):
             run = await _run_case(
                 client, root=root, project_id=project_id, case=case,
-                iteration=0, request_id=f"b2b-{case.name}-warmup-{warmup}", now=now,
+                iteration=0, request_id=f"b2b-{case.name}-warmup-{warmup}",
+                current_position=current_position, now=now,
             )
             if not run.success:
                 runs.append(run)
         for iteration in range(1, repeats + 1):
             runs.append(await _run_case(
                 client, root=root, project_id=project_id, case=case,
-                iteration=iteration, request_id=f"b2b-{case.name}-{iteration}", now=now,
+                iteration=iteration, request_id=f"b2b-{case.name}-{iteration}",
+                current_position=current_position, now=now,
             ))
     return runs
 
@@ -200,13 +213,16 @@ async def _run_case(
     case: WritingLoopBenchmarkCase,
     iteration: int,
     request_id: str,
+    current_position: dict[str, str] | None,
     now: Callable[[], float],
 ) -> WritingLoopBenchmarkRun:
     started = now()
     try:
         response = await client.post(
             f"{root}/projects/{project_id}/writing/revise-and-gate",
-            json=case.request_body(request_id=request_id),
+            json=case.request_body(
+                request_id=request_id, current_position=current_position
+            ),
         )
     except httpx.HTTPError as exc:
         return WritingLoopBenchmarkRun(
@@ -280,6 +296,48 @@ async def _run_case(
     )
 
 
+async def seed_benchmark_context(
+    client: AsyncHttpClient, *, base_url: str, project_id: str
+) -> dict[str, str]:
+    """Create the real current-scene pointer required by Writing context search.
+
+    Setup is outside measured POST latency. The benchmark project is dedicated
+    because this seed and each opt-in audit are durable records.
+    """
+    root = base_url.rstrip("/")
+    draft_response = await client.post(
+        f"{root}/projects/{project_id}/drafts",
+        json={"title": "B2b benchmark context"},
+    )
+    if draft_response.status_code != 200:
+        raise RuntimeError(
+            f"benchmark context draft failed: HTTP {draft_response.status_code}: "
+            f"{draft_response.text}"
+        )
+    try:
+        draft_id = draft_response.json()["id"]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError("benchmark context draft response is invalid") from exc
+
+    version_response = await client.post(
+        f"{root}/projects/{project_id}/drafts/{draft_id}/versions",
+        json={
+            "raw_text": _CONTEXT_SEED_TEXT,
+            "idempotency_key": "b2b-writing-loop-context-v1",
+        },
+    )
+    if version_response.status_code != 200:
+        raise RuntimeError(
+            f"benchmark context version failed: HTTP {version_response.status_code}: "
+            f"{version_response.text}"
+        )
+    try:
+        version_id = version_response.json()["draft_version"]["id"]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError("benchmark context version response is invalid") from exc
+    return {"draft_id": draft_id, "version_id": version_id}
+
+
 def summarize_runs(runs: Iterable[WritingLoopBenchmarkRun]) -> dict[str, Any]:
     grouped: dict[str, list[WritingLoopBenchmarkRun]] = {}
     for run in runs:
@@ -316,6 +374,7 @@ def build_report(
     compose_revision: str, repeats: int, warmups: int,
     cases: Iterable[WritingLoopBenchmarkCase],
     runs: Iterable[WritingLoopBenchmarkRun],
+    context_position: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     case_list = list(cases)
     fixture = [case.fixture_dict() for case in case_list]
@@ -330,6 +389,7 @@ def build_report(
             "compose_revision": compose_revision,
             "repeats": repeats,
             "warmups": warmups,
+            "context_position": context_position,
             "fixture_sha256": hashlib.sha256(
                 json.dumps(fixture, ensure_ascii=False, sort_keys=True).encode("utf-8")
             ).hexdigest(),
@@ -351,15 +411,19 @@ def _percentile(values: list[float | int], percentile: int) -> float | int | Non
 async def _run_live(args: argparse.Namespace) -> dict[str, Any]:
     async with httpx.AsyncClient(base_url=args.application_base_url,
                                  timeout=args.timeout) as client:
+        current_position = await seed_benchmark_context(
+            client, base_url=args.application_base_url, project_id=args.project_id
+        )
         runs = await run_benchmark(
             client, base_url=args.application_base_url, project_id=args.project_id,
             repeats=args.repeats, warmups=args.warmups,
+            current_position=current_position,
         )
     return build_report(
         base_url=args.application_base_url, project_id=args.project_id,
         model=args.model, quant=args.quant, compose_revision=args.compose_revision,
         repeats=args.repeats, warmups=args.warmups, cases=BENCHMARK_CASES,
-        runs=runs,
+        runs=runs, context_position=current_position,
     )
 
 

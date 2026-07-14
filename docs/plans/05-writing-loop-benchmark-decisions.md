@@ -85,7 +85,7 @@
 
 ## Live execution
 
-1. full-stack Compose를 올린 뒤 `POST /projects`로 benchmark 전용 project를 하나 만든다. benchmark는 audit record를 append-only로 남기므로, 일반 작업 project는 사용하지 않는다.
+1. full-stack Compose를 올린 뒤 `POST /projects`로 benchmark 전용 project를 하나 만든다. harness는 계측 전 해당 project에 결정적 context draft/version을 seed하고 그 `current_position`을 모든 loop 요청에 보낸다. benchmark는 audit record를 append-only로 남기므로, 일반 작업 project는 사용하지 않는다.
 2. application host에서 아래를 실행한다. 기본은 B3의 warmup 1 / measured 3이다.
 
    ```bash
