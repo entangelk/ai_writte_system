@@ -71,6 +71,15 @@
 - **패턴 스윕(CLAUDE.md §4)**: 동일 root-cause(`json.loads` 직접, fence strip 없음)를 `grep`으로 스윕 — `report.py:113`·`analysis/compare_judge.py:202`·`analysis/extractor.py:281`·`context_search/planner.py:239`·`writing/retrieval.py:212`에도 존재. 단 이들은 repair(1회 재호출)로 부분 완충돼 있고 Gate만 repair도 strip도 없어 실제 502가 발생했으므로 Gate만 우선 수정, 나머지는 tracked debt(HANDOFF 추적 부채)로 기록. `agent_loop/parser.py`·`registry.py`는 tool-call contract 보류 상태라 제외.
 - SoT v1.6.83, work_log, HANDOFF(추적 부채·Verification), CHANGELOG, 결정 브리프에 반영.
 
+### B2b 재측정 (fence fix 적용 후, live)
+
+- 운영 반영: `docker compose build application` 후 `--no-deps`+env 명시 없이 `--force-recreate`를 돌려 stack이 잠시 다운됐다 복구(실패 container 제거 + 원 env `MONGO_PORT=27019 GATEWAY_PORT=8011 LLAMA_BASE_URL=… LLAMA_DEFAULT_MODEL=…`로 `up -d mongo gateway application`, volume 보존). 교훈은 `dev-stack-env-overrides` memory로 저장.
+- diagnostic 1회로 gate 정상 동작 확인(`gate: ok`, parse OK, decision=revise). running image에 `_strip_code_fence` 포함 확인.
+- benchmark(`scripts/benchmark_writing_loop.py`, project `6a5591e39b2af0f7bf826937`, model `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`, compose-revision `8ea5779`, repeats 3/warmup 1) → **1/12 success**(terminal_pass it2: HTTP 14.2s·loop 11.0s·2310 tokens). 보고서 `docs/benchmarks/2026-07-14/writing_loop_b2b_q4_post_fence_fix.json`.
+- **fence fix validated**: 이번 run에 `invalid_gate_result` 502 **0건**(이전 dominant failure). Gate가 fenced output을 정상 parse.
+- **새로 드러난 실패 층(fence와 무관)**: `unexpected_loop_trace` 8건(loop 200 종료 but 기대 trace 아님 — 대부분 `not_eligible`, Gate가 continuity finding 내도 자동-revise 자격 미충족→loop 종료; 모델이 benchmark instruction 안 따르는 prompt-following 문제, by design 보존) + `http_502`/`invalid_candidate_report` 3건(report parser schema 위반 "report field must be an array", tracked debt `report.py:113` 영역이나 이번은 fence 아닌 schema 위반).
+- **결론**: fence fix는 done & validated. 단 success 1/12로 production aggregate default/ceiling 확정엔 표본 부족. 남은 이슈는 fence scope 밖 별개 slice(report schema·모델 prompt-following).
+
 ## Issues found
 
 - SoT v1.6.80과 M6는 B2b가 필요하다는 사실과 예시 loop 조합만 확정한다. deployed HTTP 여부, representative branch set, failure를 p95에서 처리하는 방식, p95를 env default로 바꾸는 권한은 정하지 않는다.

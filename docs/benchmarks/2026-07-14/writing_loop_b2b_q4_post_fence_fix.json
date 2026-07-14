@@ -1,0 +1,329 @@
+
+{
+  "metadata": {
+    "created_at": "2026-07-14T05:14:52.139162+00:00",
+    "application_base_url": "http://application:8000",
+    "project_id": "6a5591e39b2af0f7bf826937",
+    "model": "google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0",
+    "quant": "Q4_0",
+    "compose_revision": "8ea5779",
+    "repeats": 3,
+    "warmups": 1,
+    "context_position": {
+      "draft_id": "6a55c4ba286f8dd162f1d9d0",
+      "version_id": "6a55c4ba286f8dd162f1d9d1"
+    },
+    "fixture_sha256": "4201cf1b7d33fe185665b426bdc558630967e813ca778eb8b7df24a47c62a89a"
+  },
+  "fixtures": [
+    {
+      "name": "terminal_pass",
+      "instruction": "아래 후보의 연속성만 고친 뒤 Writing Gate는 pass로 종료하세요. 추가 검색이나 추가 수정은 요청하지 마세요.",
+      "candidate_text": "민아는 역 플랫폼에 서 있었다. 비는 이미 그쳤고, 그녀는 파란 편지를 주머니에 넣었다.",
+      "finding": {
+        "type": "continuity",
+        "severity": "warning",
+        "message": "직전 장면의 위치 연속성이 맞지 않습니다.",
+        "evidence": "민아는 역 플랫폼에 서 있었다.",
+        "recommended_decision": "revise"
+      },
+      "expected_loop_status": "pass",
+      "expected_stages": [
+        "revise",
+        "report",
+        "gate"
+      ]
+    },
+    {
+      "name": "retrieve_more_then_pass",
+      "instruction": "첫 Writing Gate는 사건 근거가 부족하다고 판단해 retrieve_more를 한 번 요청하고, 검색 결과 뒤 두 번째 Gate는 pass로 종료하세요.",
+      "candidate_text": "민아는 역 플랫폼에 서 있었다. 비는 이미 그쳤고, 그녀는 파란 편지를 주머니에 넣었다.",
+      "finding": {
+        "type": "continuity",
+        "severity": "warning",
+        "message": "직전 장면의 위치 연속성이 맞지 않습니다.",
+        "evidence": "민아는 역 플랫폼에 서 있었다.",
+        "recommended_decision": "revise"
+      },
+      "expected_loop_status": "pass",
+      "expected_stages": [
+        "revise",
+        "report",
+        "gate",
+        "retrieve_plan",
+        "context_search",
+        "merge",
+        "gate"
+      ]
+    },
+    {
+      "name": "max_structural_path",
+      "instruction": "첫 Writing Gate는 continuity revise를 한 번 요청하고, 두 번째 Gate는 retrieve_more를 한 번 요청한 뒤, 세 번째 Gate는 pass로 종료하세요. 각 revise finding의 evidence는 현재 후보 본문에서 정확히 한 번 나타나는 문장으로 반환하세요.",
+      "candidate_text": "민아는 역 플랫폼에 서 있었다. 비는 이미 그쳤고, 그녀는 파란 편지를 주머니에 넣었다.",
+      "finding": {
+        "type": "continuity",
+        "severity": "warning",
+        "message": "직전 장면의 위치 연속성이 맞지 않습니다.",
+        "evidence": "민아는 역 플랫폼에 서 있었다.",
+        "recommended_decision": "revise"
+      },
+      "expected_loop_status": "pass",
+      "expected_stages": [
+        "revise",
+        "report",
+        "gate",
+        "revise",
+        "report",
+        "gate",
+        "retrieve_plan",
+        "context_search",
+        "merge",
+        "gate"
+      ]
+    }
+  ],
+  "summary": {
+    "max_structural_path": {
+      "runs": 4,
+      "successes": 0,
+      "failures": 4,
+      "http_latency_ms_p50": null,
+      "http_latency_ms_p95": null,
+      "loop_wall_clock_ms_p95": null,
+      "max_total_tokens": null,
+      "error_codes": [
+        "http_502",
+        "unexpected_loop_trace"
+      ]
+    },
+    "retrieve_more_then_pass": {
+      "runs": 4,
+      "successes": 0,
+      "failures": 4,
+      "http_latency_ms_p50": null,
+      "http_latency_ms_p95": null,
+      "loop_wall_clock_ms_p95": null,
+      "max_total_tokens": null,
+      "error_codes": [
+        "http_502",
+        "unexpected_loop_trace"
+      ]
+    },
+    "terminal_pass": {
+      "runs": 4,
+      "successes": 1,
+      "failures": 3,
+      "http_latency_ms_p50": 14203.763,
+      "http_latency_ms_p95": 14203.763,
+      "loop_wall_clock_ms_p95": 11036,
+      "max_total_tokens": 2310,
+      "error_codes": [
+        "http_502",
+        "unexpected_loop_trace"
+      ]
+    }
+  },
+  "runs": [
+    {
+      "case": "terminal_pass",
+      "iteration": 0,
+      "success": false,
+      "http_latency_ms": 27121.174,
+      "total_tokens": 0,
+      "loop_wall_clock_ms": 0,
+      "loop_status": null,
+      "stage_trace": [],
+      "http_status": 502,
+      "error_code": "http_502",
+      "error_message": "{\"candidate\":{\"request_id\":\"b2b-terminal_pass-warmup-1\",\"project_id\":\"6a5591e39b2af0f7bf826937\",\"task_type\":\"continue_scene\",\"output_type\":\"draft_patch\",\"text\":\"민아는 역 안으로 들어섰다. 민아는 역 안으로 들어섰다. 비는 이미 그쳤고, 그녀는 파란 편지를 주머니에 넣었다.\",\"status\":\"candidate\",\"self_reported_constraints\":[],\"candidate_claims\":[],\"new_memory_hints\":[],\"risk_notes\":[],\"candidate_id\":null,\"generated_by_model\":\"google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0\"},\"gate\":{\"request_id\":\"b2b-terminal_pass-warmup-1\",\"project_id\":\"6a5591e39b2af0f7bf826937\",\"decision\":\"revise\",\"findings\":[{\"type\":\"continuity\",\"severity\":\"warning\",\"message\":\"The sentence '비는 이미 그쳤고, 그녀는 파란 편지를 주머니에 넣었다.' is repeated twice in the candidate text.\",\"evidence\":\"비는 이미 그쳤고, 그녀는 파란 편지를 주머니에 넣었다. 비는 이미 그쳤고, 그녀는 파란 편지를 주머니에 넣었다.\",\"recommended_decision\":\"revise\"}],\"checked_constraints\":[\"do_not_use\",\"POV\",\"continuity\"],\"evaluated_by_model\":\"google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0\"},\"loop\":{\"status\":\"failed\",\"revision_rounds\":2,\"retrieval_rounds\":0,\"gate_evaluations\":1},\"stages\":[{\"stage\":\"revise\",\"ordinal\":1,\"status\":\"completed\"},{\"stage\":\"report\",\"ordinal\":2,\"status\":\"completed\"},{\"stage\":\"gate\",\"ordinal\":3,\"status\":\"completed\"},{\"stage\":\"revise\",\"ordinal\":4,\"status\":\"completed\"},{\"stage\":\"report\",\"ordinal\":5,\"status\":\"failed\"}],\"audit_id\":\"wla:cbb82b507f5d48d0ad7e896c24570fe1\",\"audit_error\":null,\"report_error\":{\"type\":\"invalid_candidate_report\",\"detail\":\"report field must be an array\"}}"
+    },
+    {
+      "case": "terminal_pass",
+      "iteration": 1,
+      "success": false,
+      "http_latency_ms": 25439.132,
+      "total_tokens": 3667,
+      "loop_wall_clock_ms": 19658,
+      "loop_status": "budget_exhausted",
+      "stage_trace": [
+        "revise",
+        "report",
+        "gate",
+        "revise",
+        "report",
+        "gate"
+      ],
+      "http_status": 200,
+      "error_code": "unexpected_loop_trace",
+      "error_message": "expected status=pass, stages=['revise', 'report', 'gate']"
+    },
+    {
+      "case": "terminal_pass",
+      "iteration": 2,
+      "success": true,
+      "http_latency_ms": 14203.763,
+      "total_tokens": 2310,
+      "loop_wall_clock_ms": 11036,
+      "loop_status": "pass",
+      "stage_trace": [
+        "revise",
+        "report",
+        "gate"
+      ],
+      "http_status": 200,
+      "error_code": null,
+      "error_message": null
+    },
+    {
+      "case": "terminal_pass",
+      "iteration": 3,
+      "success": false,
+      "http_latency_ms": 26876.765,
+      "total_tokens": 3861,
+      "loop_wall_clock_ms": 22163,
+      "loop_status": "budget_exhausted",
+      "stage_trace": [
+        "revise",
+        "report",
+        "gate",
+        "revise",
+        "report",
+        "gate"
+      ],
+      "http_status": 200,
+      "error_code": "unexpected_loop_trace",
+      "error_message": "expected status=pass, stages=['revise', 'report', 'gate']"
+    },
+    {
+      "case": "retrieve_more_then_pass",
+      "iteration": 0,
+      "success": false,
+      "http_latency_ms": 36173.253,
+      "total_tokens": 0,
+      "loop_wall_clock_ms": 0,
+      "loop_status": null,
+      "stage_trace": [],
+      "http_status": 502,
+      "error_code": "http_502",
+      "error_message": "{\"candidate\":{\"request_id\":\"b2b-retrieve_more_then_pass-warmup-1\",\"project_id\":\"6a5591e39b2af0f7bf826937\",\"task_type\":\"continue_scene\",\"output_type\":\"draft_patch\",\"text\":\"민아는 역 플랫폼에서 내려와 건물 안으로 들어섰다. 비는 이미 그쳤고, 그녀는 파란 편지를 주머니에 넣었다.\",\"status\":\"candidate\",\"self_reported_constraints\":[],\"candidate_claims\":[{\"text\":\"민아는 역 플랫폼에서 내려와 건물 안으로 들어섰다.\",\"type\":\"narrative_event\",\"requires_gate_check\":true},{\"text\":\"비는 이미 그쳤고\",\"type\":\"location_state\",\"requires_gate_check\":true},{\"text\":\"그녀는 파란 편지를 주머니에 넣었다.\",\"type\":\"narrative_event\",\"requires_gate_check\":true}],\"new_memory_hints\":[{\"type\":\"event\",\"text\":\"민아는 역 플랫폼에서 내려와 건물 안으로 이동했다.\",\"confidence\":1.0,\"should_analyze_after_save\":true}],\"risk_notes\":[],\"candidate_id\":null,\"generated_by_model\":\"google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0\"},\"gate\":{\"request_id\":\"b2b-retrieve_more_then_pass-warmup-1\",\"project_id\":\"6a5591e39b2af0f7bf826937\",\"decision\":\"retrieve_more\",\"findings\":[{\"type\":\"continuity\",\"severity\":\"warning\",\"message\":\"The candidate states that Mina entered a building from the platform, but the context only places her standing on the platform without mentioning a building.\",\"evidence\":\"민아는 역 플랫폼에서 내려와 건물 안으로 들어섰다.\",\"recommended_decision\":\"retrieve_more\"}],\"checked_constraints\":[\"do_not_use\",\"POV\",\"continuity\"],\"evaluated_by_model\":\"google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0\"},\"loop\":{\"status\":\"failed\",\"revision_rounds\":2,\"retrieval_rounds\":1,\"gate_evaluations\":2},\"stages\":[{\"stage\":\"revise\",\"ordinal\":1,\"status\":\"completed\"},{\"stage\":\"report\",\"ordinal\":2,\"status\":\"completed\"},{\"stage\":\"gate\",\"ordinal\":3,\"status\":\"completed\"},{\"stage\":\"revise\",\"ordinal\":4,\"status\":\"completed\"},{\"stage\":\"report\",\"ordinal\":5,\"status\":\"completed\"},{\"stage\":\"gate\",\"ordinal\":6,\"status\":\"completed\"},{\"stage\":\"retrieve_plan\",\"ordinal\":7,\"status\":\"failed\"}],\"audit_id\":\"wla:91045dc5151849e7b6e0d2cd57c80961\",\"audit_error\":null,\"retrieval_error\":{\"type\":\"invalid_retrieval_plan\",\"detail\":\"writing retrieval plan must be JSON\"}}"
+    },
+    {
+      "case": "retrieve_more_then_pass",
+      "iteration": 1,
+      "success": false,
+      "http_latency_ms": 14910.651,
+      "total_tokens": 1758,
+      "loop_wall_clock_ms": 8517,
+      "loop_status": "pass",
+      "stage_trace": [
+        "revise",
+        "report",
+        "gate"
+      ],
+      "http_status": 200,
+      "error_code": "unexpected_loop_trace",
+      "error_message": "expected status=pass, stages=['revise', 'report', 'gate', 'retrieve_plan', 'context_search', 'merge', 'gate']"
+    },
+    {
+      "case": "retrieve_more_then_pass",
+      "iteration": 2,
+      "success": false,
+      "http_latency_ms": 12743.593,
+      "total_tokens": 1688,
+      "loop_wall_clock_ms": 7791,
+      "loop_status": "pass",
+      "stage_trace": [
+        "revise",
+        "report",
+        "gate"
+      ],
+      "http_status": 200,
+      "error_code": "unexpected_loop_trace",
+      "error_message": "expected status=pass, stages=['revise', 'report', 'gate', 'retrieve_plan', 'context_search', 'merge', 'gate']"
+    },
+    {
+      "case": "retrieve_more_then_pass",
+      "iteration": 3,
+      "success": false,
+      "http_latency_ms": 17672.169,
+      "total_tokens": 2050,
+      "loop_wall_clock_ms": 13015,
+      "loop_status": "not_eligible",
+      "stage_trace": [
+        "revise",
+        "report",
+        "gate"
+      ],
+      "http_status": 200,
+      "error_code": "unexpected_loop_trace",
+      "error_message": "expected status=pass, stages=['revise', 'report', 'gate', 'retrieve_plan', 'context_search', 'merge', 'gate']"
+    },
+    {
+      "case": "max_structural_path",
+      "iteration": 0,
+      "success": false,
+      "http_latency_ms": 20459.031,
+      "total_tokens": 0,
+      "loop_wall_clock_ms": 0,
+      "loop_status": null,
+      "stage_trace": [],
+      "http_status": 502,
+      "error_code": "http_502",
+      "error_message": "{\"candidate\":{\"request_id\":\"b2b-max_structural_path-warmup-1\",\"project_id\":\"6a5591e39b2af0f7bf826937\",\"task_type\":\"continue_scene\",\"output_type\":\"draft_patch\",\"text\":\"민아는 기차역 플랫폼에 서 있었다. 비는 이미 그쳤고, 그녀는 파란 편지를 주머니에 넣었다. 비는 이미 그쳤고, 그녀는 파란 편지를 주머니에 넣었다.\",\"status\":\"candidate\",\"self_reported_constraints\":[],\"candidate_claims\":[],\"new_memory_hints\":[],\"risk_notes\":[],\"candidate_id\":null,\"generated_by_model\":\"google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0\"},\"gate\":null,\"loop\":{\"status\":\"failed\",\"revision_rounds\":1,\"retrieval_rounds\":0,\"gate_evaluations\":0},\"stages\":[{\"stage\":\"revise\",\"ordinal\":1,\"status\":\"completed\"},{\"stage\":\"report\",\"ordinal\":2,\"status\":\"failed\"}],\"audit_id\":\"wla:802e48c738be44d39e3918d22a519689\",\"audit_error\":null,\"report_error\":{\"type\":\"invalid_candidate_report\",\"detail\":\"report field must be an array\"}}"
+    },
+    {
+      "case": "max_structural_path",
+      "iteration": 1,
+      "success": false,
+      "http_latency_ms": 18074.703,
+      "total_tokens": 2086,
+      "loop_wall_clock_ms": 12268,
+      "loop_status": "not_eligible",
+      "stage_trace": [
+        "revise",
+        "report",
+        "gate"
+      ],
+      "http_status": 200,
+      "error_code": "unexpected_loop_trace",
+      "error_message": "expected status=pass, stages=['revise', 'report', 'gate', 'revise', 'report', 'gate', 'retrieve_plan', 'context_search', 'merge', 'gate']"
+    },
+    {
+      "case": "max_structural_path",
+      "iteration": 2,
+      "success": false,
+      "http_latency_ms": 23672.296,
+      "total_tokens": 2960,
+      "loop_wall_clock_ms": 18581,
+      "loop_status": "not_eligible",
+      "stage_trace": [
+        "revise",
+        "report",
+        "gate"
+      ],
+      "http_status": 200,
+      "error_code": "unexpected_loop_trace",
+      "error_message": "expected status=pass, stages=['revise', 'report', 'gate', 'revise', 'report', 'gate', 'retrieve_plan', 'context_search', 'merge', 'gate']"
+    },
+    {
+      "case": "max_structural_path",
+      "iteration": 3,
+      "success": false,
+      "http_latency_ms": 36405.386,
+      "total_tokens": 5067,
+      "loop_wall_clock_ms": 30992,
+      "loop_status": "not_eligible",
+      "stage_trace": [
+        "revise",
+        "report",
+        "gate",
+        "revise",
+        "report",
+        "gate"
+      ],
+      "http_status": 200,
+      "error_code": "unexpected_loop_trace",
+      "error_message": "expected status=pass, stages=['revise', 'report', 'gate', 'revise', 'report', 'gate', 'retrieve_plan', 'context_search', 'merge', 'gate']"
+    }
+  ]
+}
