@@ -39,6 +39,7 @@
 - 보완 뒤 live 요청은 remote gateway까지 도달했으나 `/writing/revise-and-gate`가 HTTP 502로 종료했다. 따라서 p95/max 성공 표본은 0이며 production aggregate default는 계속 off다. 비어 있는 생성 report는 남기지 않았다.
 - 502 audit 진단: persisted audit 목록에서 provider token(대체로 1,600~3,100)이 실제 기록됐고, 최근 run은 `revise`·`report` 완료 뒤 `gate` stage만 failed, `error_type="invalid_gate_result"`였다. 일부 run은 `invalid_writing_revision` 또는 `invalid_candidate_report`였지만, dominant failure는 Gate의 strict JSON/enum/priority/evidence validation이다. 따라서 권한 오류가 아니라 remote 12B의 structured Gate 출력 적합성 문제로 분류한다.
 - 권한/연결 가설도 직접 대조했다. gateway의 `LLAMA_BASE_URL`과 `LLAMA_DEFAULT_MODEL`은 remote `/v1/models`의 served id와 정확히 같고 `/health/ready`가 `ready`다. application은 전용 `mongodb://mongo:27017/?replicaSet=rs0` + transactions=true를 사용하며 project/draft/version/audit write가 실제 성공했다. remote auth·model-id mismatch·Mongo write permission은 이번 502의 원인이 아니다.
+- `docs/plans/05-writing-gate-live-diagnostics-decisions.md`를 추가했다. bodyless persisted audit을 깨지 않는 operator-only one-shot CLI(D1=A)를 권장하고, raw evidence 확인 뒤 별도 prompt/repair brief(D2=A)로 remediation을 결정하도록 분리했다. 아직 오너 승인 전이므로 코드·SoT는 바꾸지 않았다.
 
 ## Issues found
 
@@ -52,6 +53,7 @@
 - 작업자 추천: deployed public HTTP full-stack 경계, terminal/retrieve_more/max-structural-path 세 case, warmup 1 + measured success 3(실패 별도 보고), 결과 확인 후 owner가 여유 ceiling과 default-on 여부를 승인하는 B1=A/B2=A/B3=A/B4=A.
 - 사용자 결정: B1=A/B2=A/B3=A/B4=A를 승인했다. benchmark의 trace mismatch는 failure로 남기고, live p95/failure rate를 보기 전 aggregate default 값을 켜지 않는다.
 - 사용자 결정: shared Mongo가 standalone이라도 별도 Mongo를 더 띄우지 말자는 대안 대신, 정본의 transaction 기본 경로를 지키기 위해 이미 기동한 전용 replica-set Mongo를 사용한다.
+- 사용자 결정: 502의 다음 조치로 결정 브리프를 추가한 뒤 현재 작업을 마무리한다. raw Gate output 관측 방식과 prompt/repair 정책은 브리프의 오너 결정으로 남긴다.
 
 ## Next steps
 

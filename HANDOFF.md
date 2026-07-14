@@ -69,6 +69,8 @@
 
 ## Owner Decisions Needed
 
+- **Phase 5.10 Gate live diagnostics D1/D2**: B2b 502은 Gate `invalid_gate_result`로 좁혀졌지만 audit P1 bodyless 정책상 raw model output이 없다. `docs/plans/05-writing-gate-live-diagnostics-decisions.md`에서 **D1=A operator-only one-shot CLI / B=request opt-in response / C=persisted audit body**, **D2=A evidence 뒤 별도 prompt/repair brief / B=즉시 repair / C=parser 완화**를 결정해야 한다. 작업자 추천은 **D1=A, D2=A**다.
+
 - **B2b harness independently re-verified PASS (v1.6.81), live run blocked by structured Gate output.** `scripts/benchmark_writing_loop.py`는 benchmark project에 deterministic draft/version을 seed해 required `current_position`을 각 deployed POST에 전달한다. persisted audit으로 502을 재도출했다: provider token은 실제 기록되고 revise/report는 완료되지만 dominant failure가 Gate stage `invalid_gate_result`다(일부 `invalid_writing_revision`·`invalid_candidate_report`). gateway upstream ready·served model id exact match·전용 replica-set Mongo transaction writes도 확인되어 auth/model-id/Mongo permission 원인은 배제됐다. raw Gate content가 저장되지 않아 exact parse/semantic clause는 아직 모른다. 이를 diagnostic surface로 확보한 뒤 Gate prompt/repair의 별도 결정 브리프를 만들고, 성공 report의 p95/failure rate로 aggregate default off→on 및 token/time 여유 ceiling을 owner가 확정한다.
 
 - **Phase 5.9 L9 B persisted loop audit 완료(v1.6.78→80)**: P1=B/P3=A/P4=A/P5=A + **P2=B opt-in**(v1.6.79 재개정). loop 종료를 append-only immutable 레코드로 영속화하고 list/detail로 읽는다. v1.6.80에서 run-level `total_tokens`/`wall_clock_ms`를 summary/detail에 additive로 추가했다(구문서 default 0). **retention(TTL/archive)은 명시된 운영과제 후속** — 오래된 run 보존, 자동 삭제 없음. 전체 중간 artifact 본문(P1=C)은 후속.

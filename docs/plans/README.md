@@ -32,6 +32,7 @@
 22. [`07-conversational-authoring.md`](07-conversational-authoring.md) — Phase 7: 대화형 수정·아이디에이션·저작 감독(directive). 아이디에이션 원본 [`../chat-revision-ideation.md`](../chat-revision-ideation.md)
 23. [`flat-loop-gate.md`](flat-loop-gate.md) — flat agent loop 종료 decision, tool registry, budget policy, task별 completion criteria와 benchmark 기반 숫자 기본 한도. Phase 2/4/5가 소비하는 횡단 계약
 24. [`05-writing-loop-benchmark-decisions.md`](05-writing-loop-benchmark-decisions.md) — Phase 5.10 B2b full-stack loop benchmark의 계측 경계·대표 workload·기본값 승격 결정 브리프
+25. [`05-writing-gate-live-diagnostics-decisions.md`](05-writing-gate-live-diagnostics-decisions.md) — Phase 5.10 live `invalid_gate_result`의 raw output 관측 경계와 remediation 순서 결정 브리프
 
 ## 문서 지위와 우선순위
 
