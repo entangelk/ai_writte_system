@@ -195,11 +195,19 @@ async def run_report_diagnosis(
         )
     stages.append((_REPORT_STAGE, "ok"))
 
+    # On success the report may still have used its 1-call repair (first attempt
+    # failed, e.g. a fenced output, and the repair parsed). Two captures ⇒ the
+    # first failed and the repair succeeded; surface both so the operator sees
+    # the first failure rather than misreading a fenced first raw as "parsed OK".
     caps = _report_captures(capture)
     first = caps[0] if caps else None
+    repair = caps[1] if len(caps) >= 2 else None
+    first_content = first.result.content if first is not None else None
     return ReportDiagnosis(
         parse_status=REPORT_PARSED_OK, stage_trace=tuple(stages),
-        first_raw=first.result.content if first is not None else None,
+        first_raw=first_content,
+        first_error=_reparse_error(first_content),
+        repair_raw=repair.result.content if repair is not None else None,
         claim_count=len(enriched.candidate_claims),
         hint_count=len(enriched.new_memory_hints),
         risk_count=len(enriched.risk_notes),
@@ -251,11 +259,25 @@ def format_report_diagnosis(
 
     if diagnosis.parse_status == REPORT_PARSED_OK:
         lines.append("")
-        lines.append(
-            f"Strict parse: OK (claims={diagnosis.claim_count}, "
-            f"hints={diagnosis.hint_count}, risks={diagnosis.risk_count})"
-        )
-        _block("Report provider raw response (first)", diagnosis.first_raw, None)
+        if diagnosis.first_error is not None and diagnosis.repair_raw is not None:
+            # First attempt failed (e.g. fenced output) and the 1-call repair
+            # produced the parsed result — show both so the first failure is
+            # not misread as a successful parse of the fenced raw.
+            lines.append(
+                f"Strict parse: OK via repair (first attempt failed; "
+                f"claims={diagnosis.claim_count}, hints={diagnosis.hint_count}, "
+                f"risks={diagnosis.risk_count})"
+            )
+            _block("Report provider raw response (first attempt — failed)",
+                   diagnosis.first_raw, diagnosis.first_error)
+            _block("Report provider raw response (repair attempt — succeeded)",
+                   diagnosis.repair_raw, None)
+        else:
+            lines.append(
+                f"Strict parse: OK (claims={diagnosis.claim_count}, "
+                f"hints={diagnosis.hint_count}, risks={diagnosis.risk_count})"
+            )
+            _block("Report provider raw response (first)", diagnosis.first_raw, None)
     elif diagnosis.parse_status == INVALID_CANDIDATE_REPORT:
         lines.append("")
         lines.append("Strict parse: INVALID — invalid_candidate_report")

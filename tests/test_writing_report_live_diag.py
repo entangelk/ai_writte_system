@@ -203,7 +203,21 @@ class RunReportDiagnosisTest(unittest.TestCase):
         self.assertEqual(diag.hint_count, 1)
         self.assertEqual(diag.risk_count, 1)
         self.assertIsNotNone(diag.first_raw)
+        self.assertIsNone(diag.first_error)  # first parsed, no repair
         self.assertEqual(len(capture.captures), 1)  # no repair on success
+
+    def test_success_via_repair_surfaces_first_failure_and_repair(self):
+        # First attempt is fenced (parse fails — report does not strip fences)
+        # → repair produces valid JSON → report succeeds via repair. The
+        # diagnosis must surface the first failure + repair raw, not misread
+        # the fenced first as "parsed OK". (This is the live RUN 1 scenario.)
+        fenced = "```json\n" + _report_json() + "\n```"
+        diag, capture = _drive([_gen(fenced), _gen(_report_json())])
+        self.assertEqual(diag.parse_status, REPORT_PARSED_OK)
+        self.assertEqual(diag.first_raw, fenced)
+        self.assertIsNotNone(diag.first_error)  # first failed (fence not stripped)
+        self.assertEqual(diag.repair_raw, _report_json())
+        self.assertEqual(len(capture.captures), 2)  # first + repair
 
     def test_upstream_revise_failure_stops_before_report(self):
         class _FailReviser:
