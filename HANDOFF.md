@@ -69,7 +69,7 @@
 
 ## Owner Decisions Needed
 
-- **B2b harness independently re-verified PASS (v1.6.81), live run blocked by 502.** `scripts/benchmark_writing_loop.py`는 현재 benchmark project에 deterministic draft/version을 seed해 required `current_position`을 각 deployed POST에 전달한다. 이전 live 400(pre-context)을 이 보완으로 닫았으나, remote `192.168.1.22:9080` 12B path의 `/writing/revise-and-gate`가 HTTP 502로 실패해 success/p95 표본은 0이다. 먼저 strict revise/report/Gate의 live 502 stage/body를 분리 진단해야 한다. 그 뒤 성공 report의 p95/failure rate로 aggregate default off→on 및 token/time 여유 ceiling을 owner가 확정한다.
+- **B2b harness independently re-verified PASS (v1.6.81), live run blocked by structured Gate output.** `scripts/benchmark_writing_loop.py`는 benchmark project에 deterministic draft/version을 seed해 required `current_position`을 각 deployed POST에 전달한다. persisted audit으로 502을 재도출했다: provider token은 실제 기록되고 revise/report는 완료되지만 dominant failure가 Gate stage `invalid_gate_result`다(일부 `invalid_writing_revision`·`invalid_candidate_report`). gateway upstream ready·served model id exact match·전용 replica-set Mongo transaction writes도 확인되어 auth/model-id/Mongo permission 원인은 배제됐다. raw Gate content가 저장되지 않아 exact parse/semantic clause는 아직 모른다. 이를 diagnostic surface로 확보한 뒤 Gate prompt/repair의 별도 결정 브리프를 만들고, 성공 report의 p95/failure rate로 aggregate default off→on 및 token/time 여유 ceiling을 owner가 확정한다.
 
 - **Phase 5.9 L9 B persisted loop audit 완료(v1.6.78→80)**: P1=B/P3=A/P4=A/P5=A + **P2=B opt-in**(v1.6.79 재개정). loop 종료를 append-only immutable 레코드로 영속화하고 list/detail로 읽는다. v1.6.80에서 run-level `total_tokens`/`wall_clock_ms`를 summary/detail에 additive로 추가했다(구문서 default 0). **retention(TTL/archive)은 명시된 운영과제 후속** — 오래된 run 보존, 자동 삭제 없음. 전체 중간 artifact 본문(P1=C)은 후속.
 - **Phase 5.9 G8 bounded loop 완료(v1.6.77)**: L1~L9 승인·구현. 상한은 `WritingLoopPolicy`와 `WRITING_LOOP_MAX_REVISION_ROUNDS|MAX_RETRIEVAL_ROUNDS|MAX_GATE_EVALUATIONS`(Compose 노출)로 조정 가능하다.
@@ -96,7 +96,7 @@
 
 1. **Phase 5.2 Writing Gate 구현 완료(v1.6.69)** — 별도 LLM Gate service/prompt/models + `POST /projects/{id}/writing/gate`, 구조화 findings와 다섯 decision/우선순위, project isolation·strict JSON/provider error mapping을 회귀로 잠갔다. 다음 핵심 후보:
    - **accept→save→analysis 재진입 완료(v1.6.70)** — 다음 Writing 후보는 구조적 self-report 또는 finding evidence 기반 부분 revise/retrieve orchestration.
-   - **bounded revise/retrieve loop + persisted audit + aggregate budget 완료(v1.6.71~81)** — B2b context seed 보완 후 remote 12B live가 HTTP 502로 막혔다. strict revise/report/Gate stage의 live failure를 분리한 뒤 `scripts/benchmark_writing_loop.py`로 success report를 다시 만들고, p95/failure rate로 production token/time default·여유 ceiling을 owner가 확정한다. 이후 multi-finding, stable pointer, persisted 감사 retention(TTL/archive 운영과제)·전체 중간 artifact(P1=C).
+   - **bounded revise/retrieve loop + persisted audit + aggregate budget 완료(v1.6.71~81)** — B2b context seed 보완 후 remote 12B live는 Gate stage `invalid_gate_result`가 주로 발생해 502가 된다. raw Gate content를 보존/진단해 exact strict-validation clause를 확정하고, 필요한 prompt/repair 변경은 별도 결정 브리프 후 구현한다. 그 뒤 `scripts/benchmark_writing_loop.py`로 success report를 만들고 p95/failure rate로 production token/time default·여유 ceiling을 owner가 확정한다. 이후 multi-finding, stable pointer, persisted 감사 retention(TTL/archive 운영과제)·전체 중간 artifact(P1=C).
    - **Phase 6 UI 잔여**(대안 트랙) — 부분 승인/부분 retry·merge/split를 event/open_question로 일반화·frontend(framework 미확정 보류).
    - **(b-4) hybrid 튜닝**(최후순위) — RRF k·가중치·fetch depth 실 데이터 캘리브레이션. *실 embedding/데이터 의존 → 서브 머신 막힘.*
    - **(c-2) production threshold** — 실 라벨 데이터로 threshold 값 산출(운영 튜닝).

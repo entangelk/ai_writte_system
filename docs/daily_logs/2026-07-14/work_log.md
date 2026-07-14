@@ -37,6 +37,8 @@
 - 첫 live harness 실행은 `current_position is required for current_scene, recent_scenes` HTTP 400만 기록했다. 원인은 harness가 B2b 브리프의 deterministic context fixture 요구를 구현하지 않은 것이었다.
 - `scripts/benchmark_writing_loop.py`가 benchmark 전용 project에 draft/version을 seed하고 그 실제 `current_position`을 모든 POST에 전달하도록 보완했다. seed setup은 caller-observed POST latency 밖에 두고, report metadata에 position을 남긴다. 회귀는 current_position forward와 draft→version seed 순서를 직접 잠근다.
 - 보완 뒤 live 요청은 remote gateway까지 도달했으나 `/writing/revise-and-gate`가 HTTP 502로 종료했다. 따라서 p95/max 성공 표본은 0이며 production aggregate default는 계속 off다. 비어 있는 생성 report는 남기지 않았다.
+- 502 audit 진단: persisted audit 목록에서 provider token(대체로 1,600~3,100)이 실제 기록됐고, 최근 run은 `revise`·`report` 완료 뒤 `gate` stage만 failed, `error_type="invalid_gate_result"`였다. 일부 run은 `invalid_writing_revision` 또는 `invalid_candidate_report`였지만, dominant failure는 Gate의 strict JSON/enum/priority/evidence validation이다. 따라서 권한 오류가 아니라 remote 12B의 structured Gate 출력 적합성 문제로 분류한다.
+- 권한/연결 가설도 직접 대조했다. gateway의 `LLAMA_BASE_URL`과 `LLAMA_DEFAULT_MODEL`은 remote `/v1/models`의 served id와 정확히 같고 `/health/ready`가 `ready`다. application은 전용 `mongodb://mongo:27017/?replicaSet=rs0` + transactions=true를 사용하며 project/draft/version/audit write가 실제 성공했다. remote auth·model-id mismatch·Mongo write permission은 이번 502의 원인이 아니다.
 
 ## Issues found
 
@@ -54,6 +56,7 @@
 ## Next steps
 
 - remote 12B live의 `/writing/revise-and-gate` HTTP 502 body와 strict revise/report/Gate failure stage를 분리 진단한 뒤, 세 workload의 success 3개를 다시 수집한다.
+- Gate의 raw provider content를 보존하거나 live diagnostic surface로 노출해 `invalid_gate_result`의 정확한 parse/semantic clause를 확인하고, 그 결과를 바탕으로 Gate prompt/repair의 별도 결정 브리프를 만든다. 그 전에는 B2b fixture·default 값을 바꾸지 않는다.
 - 세 workload의 success 3개·failure rate·p95/max를 근거로 production aggregate token/time default와 여유 ceiling을 별도 owner decision으로 확정한다.
 
 ## Verification
