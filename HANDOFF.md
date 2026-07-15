@@ -5,7 +5,8 @@
 
 ## Current Status
 
-- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.92**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
+- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.93**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
+- **다음 작업 = 프론트엔드 첫 슬라이스(오너 지시, 착수 브리프 Resolved)**. `plans/frontend-kickoff-decisions.md` **D1=A React+TS+Vite · D2=B 별도 nginx compose 서비스(`/api` reverse-proxy, CORS 미개방) · D3=A Product shell 척추 우선**. 백엔드는 이미 **50 endpoint**로 완성돼 있어 프론트는 신규 백엔드 없이 조립한다. 프론트 이후 순서: A→C(Writing 작업공간)→B(Review Inbox)→**Phase 7**.
 - **Phase 5.10 verification closure ready**: 독립 검증 기록 `docs/verifications/2026-07-13/writing_loop_aggregate_budget.md`와 B1 legacy-Mongo test closure + H2 의미 주석이 반영되었다. 검증은 972/48/215로 green이다.
 - 개발 진입점은 `docs/plans/README.md`. `docs/` 루트의 설계 문서는 초기 아이디에이션 자료다.
 - **Latest Writing increment (v1.6.90)**: Gate 과민 `revise`/`not_eligible` 튜닝의 전치로 5 decision 전부를 7개 라벨 fixture로 고정한 read-only 품질 벤치마크를 추가했다. `writing/gate_quality.py` + `scripts/benchmark_writing_gate.py` (repeats 기본 3)가 production Gate factory/prompt/model/thinking/max_tokens를 재사용해 expected/actual decision·finding type·token·error·accuracy를 bodyless JSON으로 출력한다. 정상 역내 이동·정본과 양립하는 새 행동이 `pass` over-strict guard다. runtime prompt/schema/literal 무변, 쓰기 0, raw prose 미출력. 실 12B baseline→prompt 변경 브리프→동일 fixture 재측정은 후속.
@@ -35,7 +36,8 @@
 ### 아키텍처
 - monorepo + 독립 LLM Gateway/Worker, Application API backend = FastAPI. Worker는 Application 코드/계약을 공유하되 느슨히 결합하고 나중에 별도 entrypoint/process로 분리 가능하게 둔다.
 - MVP는 계정/인증 없는 단일 사용자 시스템이며 프로젝트 경계는 `project_id`로 유지한다.
-- frontend framework는 보류(필요해지면 React/Vue 후보). editor shell(frontend)은 현재 범위 밖.
+- **frontend = React + TypeScript + Vite로 확정**(v1.6.93, 오너 D1=A — 종전 "보류" 해소). **서빙 = 별도 compose 서비스(nginx)**(D2=B): 프론트를 application 이미지에 섞지 않고 Gateway/Worker/embedding/ES와 같은 독립 서비스 경계로 둔다. nginx가 `/api`를 application으로 reverse-proxy해 **단일 origin 유지 · CORS 미개방**(인증 없는 단일 사용자 API의 노출을 늘리지 않는다). **editor shell(frontend)은 이제 범위 안**이며 첫 슬라이스는 Product shell 척추(D3=A). 근거·각하 대안은 `plans/frontend-kickoff-decisions.md`.
+- 프론트 기본값(별도 결정 아님): OpenAPI→TS 타입 생성, 얇은 `fetch` 래퍼(캐시 라이브러리는 필요해질 때), 평문 `textarea` 에디터 + 명시적 저장(Core SOT "명시적 version save only" 계약 그대로). **autosave는 도입 시 "저장=version mint" 계약 변경 여부를 먼저 결정**한다(version 폭증 위험).
 - 초기 local runtime은 외부 queue 제품을 전제하지 않고 in-process/background boundary로 시작한다.
 - Dockerfile/Compose는 dependency manifest 복사·설치 레이어를 소스 복사보다 앞에 두어 빌드 캐시를 보존한다.
 - 외부 `/mnt/d/devel/gemma4_12b`는 선택적 provenance이며 현재 repo runtime dependency가 아니다. model/quant = 공식 QAT GGUF Q4_0.
@@ -100,13 +102,14 @@
 
 ## Next Tasks
 
-- **Writing 다음 선택지**: 즉시 실행 가능한 code slice는 없다 — stable pointer(v1.6.92)로 Writing의 확정 계약 잔여가 소진됐다. 남은 Writing 항목은 전부 **owner brief 선행**이거나 **풀스택 실행**이다: (1) persisted audit retention(P5=A "자동 삭제 없음" 변경 브리프 필요), (2) Gate 프롬프트 튜닝(21/21 baseline으로 보류 — 실 오판 재현 fixture가 먼저), (3) 실 12B pointer 준수 관측(아래). 대안 트랙은 Phase 6 UI 잔여(부분 승인/retry·merge/split 일반화·frontend framework 미확정)다.
+- **★ 다음 작업 = 프론트 첫 슬라이스(D3=A Product shell 척추)**. 브리프가 Resolved라 **별도 오너 결정 없이 착수**한다. 제안 순서: (1) `frontend/` scaffold(Vite+React+TS) + compose `frontend` 서비스(nginx, `/api`→`application:8000` reverse-proxy) + OpenAPI→TS 타입 생성 배선 → (2) 프로젝트 목록/생성(`GET/POST /projects`) → (3) 원고 목록 → 에디터(편집·**명시적 저장**·version 목록; `drafts` 8 + `snapshots` 3 endpoint). 슬라이스가 크면 (2)/(3) 분리. **백엔드·회귀 무변이 목표**(프론트는 조립만). 착수 전 `plans/product-shell.md`(최소 사용자 표면)와 `plans/frontend-kickoff-decisions.md`(기본값·Deferred)를 읽는다. 이후 A→C(Writing 작업공간: generate→gate→accept)→B(Review Inbox: v1.6.67 어포던스 `{action,eligible,reason}` 구동)→**Phase 7**(계획·D1~D10 확정, 슬라이스 P1~P5, 브리프는 착수 시점).
+- **Writing 잔여**: 즉시 실행 가능한 code slice는 없다 — stable pointer(v1.6.92)로 Writing의 확정 계약 잔여가 소진됐다. 남은 Writing 항목은 전부 **owner brief 선행**이거나 **풀스택 실행**이다: (1) persisted audit retention(P5=A "자동 삭제 없음" 변경 브리프 필요), (2) Gate 프롬프트 튜닝(21/21 baseline으로 보류 — 실 오판 재현 fixture가 먼저), (3) 실 12B pointer 준수 관측(아래). Phase 6 UI 잔여 중 **frontend는 위 ★ 트랙으로 이관**(framework 확정 v1.6.93)이며, 부분 승인/retry·merge/split 일반화는 여전히 오너 결정 대기다.
 - **실 12B pointer 준수 관측(오너 풀스택, v1.6.92 후속)**: 새 report 지시문("package item의 pointer object를 정확히 복사, 없으면 `[]`")에 대한 12B 준수율은 sandbox에서 검증 불가다. 실 gateway로 `/writing/report`나 `/writing/revise-and-gate`를 돌려 `invalid_candidate_report` 502가 늘지 않는지 확인하고, 실패하면 `scripts/diagnose_writing_report.py`가 first+repair raw로 exact 절을 보여준다(1회 repair는 기존대로 완충). 실패가 재현될 때만 프롬프트를 손댄다 — Gate quality baseline 선례.
 
 1. **Phase 5.2 Writing Gate 구현 완료(v1.6.69)** — 별도 LLM Gate service/prompt/models + `POST /projects/{id}/writing/gate`, 구조화 findings와 다섯 decision/우선순위, project isolation·strict JSON/provider error mapping을 회귀로 잠갔다. 다음 핵심 후보:
    - **accept→save→analysis 재진입 완료(v1.6.70)** — 다음 Writing 후보는 구조적 self-report 또는 finding evidence 기반 부분 revise/retrieve orchestration.
    - **bounded revise/retrieve loop + persisted audit + aggregate budget 완료(v1.6.71~85)** — B2b context seed 보완 후 remote 12B live는 Gate stage `invalid_gate_result`(root cause: markdown fence 래핑)로 502가 됐다. **gate D1=A diagnostic(v1.6.82) + D2=A fence-strip(v1.6.83) + 재측정 + report D1=A diagnostic(v1.6.84) + D2=A fence-strip(v1.6.85) 완료** — gate·report 양 parser의 fence 추출 해소. 재측정 1/12 success(나머진 `unexpected_loop_trace`). **잔존 4개 tracked debt parser fence 추출은 v1.6.86으로 완료(추적 부채 0).** **`unexpected_loop_trace` 조사 완료** → Gate 독립성(prose steer 불가, retrieve_more live 0/12)이 근본 원인, harness 버그 아님. **오너가 ceiling 도출 Option A(per-stage 합성) 선택**, 합성 코어 구현·회귀(`docs/plans/05-writing-loop-ceiling-composition-decisions.md`). 측정 메커니즘 M-i 확정·도구 v1.6.87 구현 → **B2b 종결(v1.6.89)**: 라이브 per-stage 수집(실 12B) → raw ceiling 4991tok/51755ms → 오너 B4 ~2x default-on(10000tok/60000ms, compose 배포 기본). **multi-finding revise는 v1.6.88로 완료(D1=A/D2=A/D3=A)**. **stable context pointer도 v1.6.92로 완료**(D1=A/D2=A/D3=A + 오너 sub-decision P-i origin 불변식 테이블 — self-report D2=A first→B의 B 종결). 잔여는 persisted 감사 retention·전체 중간 artifact(P1=C), Gate 프롬프트 튜닝(J1의 Gate 판), 실 12B pointer 준수 관측이며 전부 owner brief 또는 풀스택 선행이다.
-   - **Phase 6 UI 잔여**(대안 트랙) — 부분 승인/부분 retry·merge/split를 event/open_question로 일반화·frontend(framework 미확정 보류).
+   - **Phase 6 UI 잔여** — frontend는 ★ 트랙으로 이관(v1.6.93 React+TS+Vite 확정, Review Inbox는 프론트 순서상 A→C→**B**). 부분 승인/부분 retry·merge/split의 event/open_question 일반화는 오너 결정 대기.
    - **(b-4) hybrid 튜닝**(최후순위) — RRF k·가중치·fetch depth 실 데이터 캘리브레이션. *실 embedding/데이터 의존 → 서브 머신 막힘.*
    - **(c-2) production threshold** — 실 라벨 데이터로 threshold 값 산출(운영 튜닝).
 2. **sandbox 밖 실행 — 비-튜닝 live 검증 배치 소진(2026-07-12, 풀스택 머신)**:
