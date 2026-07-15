@@ -2,18 +2,28 @@
 
 ## Goals
 
+- Gate quality slice를 커밋한 뒤, 다음 작업에서 즉시 구현할 수 있도록 Writing 잔여 중 더 작은 stable context pointer owner decision brief를 준비한다.
 - HANDOFF·오늘 로그의 Writing 잔여 3종(Gate 과민 튜닝, stable pointer, persisted audit retention)을 재확인하고 owner 정책을 선점하지 않는 작은 slice 하나를 완료한다.
 - HANDOFF와 2026-07-14 work_log이 지정한 다음 작업(B2b ceiling Option A의 **측정 메커니즘 M-i 확정 → per-stage 측정 도구 구현**)을 진행한다.
 - 측정 메커니즘(M-i vs M-ii)은 감사 계약(P1=B bodyless)을 건드릴지 갈리는 오너 결정이므로(CLAUDE.md §1) 임의 선택하지 않고 확인한 뒤 착수한다.
 
 ## User Decisions and Rationale
 
+- **Gate quality slice 커밋 후 다음 작은 브리프 준비**: 오너는 완료된 작업을 먼저 커밋하고, 남은 작업 중 작은 하나의 브리프만 확정해 다음 턴에 즉시 구현 가능하게 준비하도록 지시했다. Gate quality slice는 commit `6c190da` (`feat: add labelled writing gate benchmark`)로 분리했다. retention보다 신규 persistence/삭제 정책이 없고 기존 `IndexPointer`를 재사용하는 stable context pointer를 다음 작은 브리프로 선택했다.
 - **남은 Writing 트랙 중 작은 slice 하나 진행**: 오너는 Gate 과민 튜닝·stable pointer·persisted audit retention 중 현재 상태를 확인해 작은 작업 하나를 골라 진행하도록 지시했다. retention은 P5=A(자동 삭제 없음)를 바꾸는 운영정책, stable pointer는 정본/수명 계약 선행이라 즉시 구현에 부적합했다. 따라서 기록된 J1 선례의 필수 조건(라벨된 결정적 벤치마크)만 먼저 구현해 현 Gate 프롬프트 동작을 바꾸지 않고 튜닝 근거를 만든다.
 - **측정 메커니즘 M-i 확정**: `docs/plans/05-writing-loop-ceiling-composition-decisions.md`의 sub-decision에서 오너가 **M-i(in-process per-stage 측정 script)**를 선택했다. 각하된 M-ii(persisted audit에 per-stage token/ms 노출)는 P1=B "bodyless" 감사 결정을 수정해야 하고 retrieve_plan/context_search stage가 terminal_pass run에 없어 Gate 독립성 문제를 재발생시킨다. M-i는 audit 계약을 건드리지 않고(정본 보존, 로컬 1인 프로젝트 단계) `diagnose_writing_gate/report` 선례 패턴을 재사용하며 Gate 독립성 문제를 합성 retrieve_more Gate로 원천 회피한다. full-stack HTTP 지연은 wall-clock 여유율(B4)로 흡수한다.
 - **B2b ceiling B4 default-on 확정(~2x 여유율)**: 오너가 외부 llama(9080) 연결로 풀스택 라이브 측정을 승인해, v1.6.87 M-i 도구로 실 12B per-stage를 수집했다(raw ceiling 4991tok/51755ms, steady-state wall-clock ~28.8s). 오너 B4 결정: `WRITING_LOOP_MAX_TOTAL_TOKENS=10000`(raw 4991×2)·`WRITING_LOOP_MAX_WALL_CLOCK_MS=60000`(steady-state 28.8s×2), **default-on**. 근거: token은 작은 seed context라 실 프로덕션 context package 확대 여지를 2x로 흡수; wall-clock은 프로덕션 상시 app이 context_search warm이라 콜드 27s 대신 steady-state 기준 2x. code 기본(env 미설정)은 off 유지(M6=A 무변), 배포 기본만 발화.
 - **다음 slice로 multi-finding revise 선택 + D1=A/D2=A/D3=A 확정**: B2b ceiling live 수집이 풀스택 다운으로 막혀(오너/풀스택 과제), sandbox-내 병렬 후속 중 오너가 **Writing loop multi-finding revise**를 골랐다. 결정 브리프(`plans/05-writing-multi-finding-revise-decisions.md`)로 forks를 surface: **D1=A**(continuity-only 유지 — do_not_use/pov 자동 splice 제외, canon 보존)·**D2=A**(sequential, 라운드당 1 finding — 아키텍처가 이미 매 revise 뒤 re-gate하므로 자격 함수 완화만으로 순차 소진 성립; batch D2=B는 splice/계약 대규모 재작성이라 §2 위배)·D3=A(error severity 먼저). 근거: 로컬 1인 프로젝트지만 정본 보존 정책상 canon-민감 자동수정은 review 경로로 두고, 최소 변경으로 gap을 닫는다.
 
 ## Completed work
+
+### Stable context pointer 착수 결정 브리프 준비
+
+- 신규 `docs/plans/05-writing-stable-context-pointer-decisions.md`는 D1 identity/wire, D2 모델 노출·allowlist 검증, D3 report schema 필수성의 실제 fork를 전부 표면화한 뒤 오너 승인으로 `Resolved` 전환했다.
+- 추천 조합 **D1=A/D2=A/D3=A**: 기존 `IndexPointer`의 `{collection,document_id,version_id,content_hash}` projection, report extractor용 ContextPackage에만 노출 + current-package exact allowlist, `CandidateClaim.related_context_pointers` required array(empty 허용).
+- **오너 확정(2026-07-15)**: 추천 조합 D1=A/D2=A/D3=A를 그대로 승인했다. 특히 기존 self-report **D2=A first→B**를 확실히 보존하라는 지시에 따라, A(pointer 없는 최소 schema)는 완료 상태이고 이번 결정이 B(full `related_context_pointers`) 확장을 승인한다는 점을 브리프·self-report 결정문·SoT v1.6.91·HANDOFF에 명시했다. 새 브리프의 D2=A는 별도 축인 report extractor-only 노출 + exact allowlist이며 A→B 단계와 혼동하지 않는다.
+- 승인 즉시 구현할 수 있도록 잠김 계약 6개·양방향 회귀 매트릭스·follow-up·deferred를 기록했다. 신규 persistence/registry·retention·dereference API·hint/risk pointer는 범위 밖.
+- 브리프 확정과 함께 SoT v1.6.91·CHANGELOG·HANDOFF를 갱신했다. 구현은 시작하지 않았다.
 
 ### Writing Gate 판별 품질 라벨 벤치마크 (SoT v1.6.90)
 
@@ -76,6 +86,7 @@
 
 ## Decisions
 
+- 문서: stable pointer 브리프는 오너가 추천 D1=A/D2=A/D3=A를 확정해 `Resolved`로 닫고 SoT v1.6.91에 올렸다. 이 턴은 계약 기록만이며 구현은 다음 code slice로 남긴다.
 - 운영: 실 12B baseline이 21/21 match이므로 **Gate prompt 튜닝은 지금 진행하지 않는다**. 현 `writing_gate_v1`을 기준으로 보존하고, 실 오판을 결정적으로 재현하는 fixture가 추가될 때만 owner brief→prompt 변경→동일 매트릭스 재측정 순서로 재개한다.
 - 구현: fixture label은 신규 정책이 아니라 `05-writing-gate-decisions.md` D3의 이미 확정된 decision 의미를 구체 예제로 내린 것이다. 이로써 prompt 문구·public contract·runtime 판정은 바꾸지 않았다.
 - 구현: 점수는 정확한 top-level decision과 예상 finding type 포함을 모두 요구한다. 비정상 출력을 accuracy 분모에서 빼지 않고 mismatch로 계산해 성공한 case만의 정확도로 오독하지 못하게 했다.
@@ -121,5 +132,6 @@
 
 ## Next steps
 
+- **Stable pointer 구현 준비 완료**: `05-writing-stable-context-pointer-decisions.md` D1=A/D2=A/D3=A와 기존 self-report D2=A first→B의 B 전환이 확정됐다. 다음 작업은 별도 결정 없이 dataclass→report formatter/parser→HTTP/Gate/accept advisory→양방향 회귀 순으로 바로 시작한다.
 - Gate 튜닝은 보류. 실 오판이 다시 관측되면 candidate/context를 bodyless 정책 내에서 재현 가능한 fixture로 축소해 벤치마크에 먼저 추가한다.
-- 다른 작업으로 넘어가도 됨. Writing 독립 잔여는 stable pointer 계약 브리프와 persisted audit retention(P5=A 변경) 브리프다.
+- 다른 작업으로 넘어가도 됨. Writing의 바로 실행 가능한 후속은 stable pointer 구현이고, 별도 owner brief 잔여는 persisted audit retention(P5=A 변경)이다.

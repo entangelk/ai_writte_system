@@ -1,6 +1,6 @@
 # 착수 결정 브리프 — Phase 5.4 Writing candidate structured report
 
-상태: `Resolved` (D1=A·D4=A·D6=A first→C, D2=A first→B, D3=A then B committed, D5=B)
+상태: `Resolved` (D1=A·D4=A·D6=A first→C, D2=A first→B — B expansion authorized 2026-07-15, implementation pending, D3=A then B committed, D5=B)
 관련: SoT v1.6.70, `05-writing-generation-decisions.md` Q2(평문 prose), `05-writing-gate-decisions.md`, `writing_agent_prompt.md` §12, agent-loop top-level `self_report=finalize|defer` 종료채널(별도 계약)
 
 ## Decision needed
@@ -10,7 +10,7 @@ WritingCandidate의 `self_reported_constraints`, `candidate_claims`, `new_memory
 ## Owner decisions — 2026-07-12
 
 - **D1=A, D4=A**: 별도 1-turn extractor, strict parse+1회 repair/계속 실패 502.
-- **D2=A first→B**: 첫 slice는 pointer 없는 최소 typed schema. stable ContextPackage pointer가 extractor 입력에 제공되는 후속에서 full `related_context_pointers` schema로 확장한다.
+- **D2=A first→B**: 첫 slice는 pointer 없는 최소 typed schema. stable ContextPackage pointer가 extractor 입력에 제공되는 후속에서 full `related_context_pointers` schema로 확장한다. **2026-07-15 오너가 B 확장을 승인**했으며 identity·노출·필수성은 `05-writing-stable-context-pointer-decisions.md`의 D1=A/D2=A/D3=A로 잠갔다. 여기서 새 브리프의 D2=A는 report extractor-only 노출 결정으로, 본 문서의 A→B 단계와 별도 축이다.
 - **D3=A then B committed**: generate 기본 합성을 먼저 구현하고, 동일 extractor를 재사용하는 별도 `/writing/report` 재평가 API를 후속 필수 기능으로 확정한다.
 - **D5=B**: Gate와 Analysis가 candidate report를 모두 소비한다. Analysis 소비의 authority/provenance 방식은 D6에서 확정한다.
 - **D6=A first→C**: accepted report를 AnalysisJob에 immutable advisory copy로 영속하고 snapshot 독립 extraction의 보조 prompt로만 사용한다. WritingCandidate/stable candidate id 영속화 후 별도 report entity(C)+`report_id` 참조로 승격한다. direct candidate/memory mint는 금지한다.

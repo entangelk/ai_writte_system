@@ -5,10 +5,11 @@
 
 ## Current Status
 
-- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.90**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
+- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.91**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
 - **Phase 5.10 verification closure ready**: 독립 검증 기록 `docs/verifications/2026-07-13/writing_loop_aggregate_budget.md`와 B1 legacy-Mongo test closure + H2 의미 주석이 반영되었다. 검증은 972/48/215로 green이다.
 - 개발 진입점은 `docs/plans/README.md`. `docs/` 루트의 설계 문서는 초기 아이디에이션 자료다.
 - **Latest Writing increment (v1.6.90)**: Gate 과민 `revise`/`not_eligible` 튜닝의 전치로 5 decision 전부를 7개 라벨 fixture로 고정한 read-only 품질 벤치마크를 추가했다. `writing/gate_quality.py` + `scripts/benchmark_writing_gate.py` (repeats 기본 3)가 production Gate factory/prompt/model/thinking/max_tokens를 재사용해 expected/actual decision·finding type·token·error·accuracy를 bodyless JSON으로 출력한다. 정상 역내 이동·정본과 양립하는 새 행동이 `pass` over-strict guard다. runtime prompt/schema/literal 무변, 쓰기 0, raw prose 미출력. 실 12B baseline→prompt 변경 브리프→동일 fixture 재측정은 후속.
+- **Latest Writing contract decision (v1.6.91, implementation pending)**: stable context pointer 브리프를 **D1=A/D2=A/D3=A**로 확정했다. 기존 self-report **D2=A first→B**의 B(full claim pointer schema) 확장을 승인했으며, 새 브리프 D2=A는 별도 축인 report extractor-only 노출 + current-package exact allowlist다. wire=`{collection,document_id,version_id,content_hash}`, claim array required(empty 허용), 신규 persistence/retention 없음.
 - **Gate quality live baseline 완료**: `192.168.1.22:9080` / `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`, 7 case×3에서 **21/21 match, accuracy 1.0, complete=true**, fault 0. 아티팩트 `docs/benchmarks/2026-07-15/writing_gate_quality_q4_baseline.json`. 명확한 경계에서 과민 판정이 재현되지 않아 **현 prompt 튜닝은 보류**. 실 오판을 재현하는 fixture가 생길 때만 재개한다.
 - 구현된 계층(모두 회귀로 잠김, 아래는 현재 동작하는 표면):
   - **LLM Gateway**: FastAPI shell(`/health/live`·`/health/ready`·`/v1/generate`), llama.cpp 호환 provider + httpx async adapter, provider error 5종→HTTP status 매핑.
@@ -99,7 +100,8 @@
 
 ## Next Tasks
 
-- **Writing 다음 선택지**: Gate 튜닝은 21/21 baseline으로 보류됐으므로 다른 작업으로 넘어가도 된다. 잔여는 stable pointer 계약 브리프와 persisted audit retention(P5=A 변경) 브리프. 실 Gate 오판이 재관측될 때는 프롬프트보다 재현 fixture를 먼저 추가한다.
+- **Writing 다음 선택지**: Gate 튜닝은 21/21 baseline으로 보류됐으므로 다른 작업으로 넘어가도 된다. stable pointer 계약은 확정돼 다음 code slice에서 바로 구현 가능하고, 별도 잔여는 persisted audit retention(P5=A 변경) 브리프다. 실 Gate 오판이 재관측될 때는 프롬프트보다 재현 fixture를 먼저 추가한다.
+- **Stable context pointer 브리프 RESOLVED(v1.6.91)**: `docs/plans/05-writing-stable-context-pointer-decisions.md`, **D1=A** 기존 `IndexPointer` 4필드 projection·**D2=A** report extractor에만 pointer 표시 + package exact allowlist·**D3=A** claim의 required array(empty 허용). 기존 self-report **D2=A first→B**의 B 확장이 승인됐고 구현만 남았다. 신규 persistence 없이 dataclass/formatter/parser/serializer와 HTTP/Gate/accept advisory 회귀로 제한한다.
 
 1. **Phase 5.2 Writing Gate 구현 완료(v1.6.69)** — 별도 LLM Gate service/prompt/models + `POST /projects/{id}/writing/gate`, 구조화 findings와 다섯 decision/우선순위, project isolation·strict JSON/provider error mapping을 회귀로 잠갔다. 다음 핵심 후보:
    - **accept→save→analysis 재진입 완료(v1.6.70)** — 다음 Writing 후보는 구조적 self-report 또는 finding evidence 기반 부분 revise/retrieve orchestration.
@@ -169,7 +171,7 @@ docker-compose.llama.yml         # opt-in override: in-stack llama.cpp GPU 서�
 docs/
 ├── runbooks/local-llama-server.md   # 로컬 llama.cpp GPU 서버 opt-in 기동/설정/smoke runbook
 ├── README.md                    # 문서 분류와 진입점
-├── system-contract-sot.md       # 정본 계약 SoT(Approved, v1.6.90)
+├── system-contract-sot.md       # 정본 계약 SoT(Approved, v1.6.91)
 ├── abstract.md / *.md           # 보존된 아이디에이션 원본과 주제별 상세
 ├── plans/                       # 계획 + 착수 결정 브리프(README 인덱스)
 │   ├── README.md · 00-foundations.md · implementation-plan.md
