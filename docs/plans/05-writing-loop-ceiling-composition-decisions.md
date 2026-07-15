@@ -1,6 +1,6 @@
 # 착수 결정 브리프 — Phase 5.10 B2b aggregate ceiling per-stage 합성 (Option A)
 
-상태: `In progress — 2026-07-14 (오너 Option A 선택; 합성 코어 구현, 측정 메커니즘 확정 대기)`
+상태: `In progress — 2026-07-15 (오너 Option A + 측정 메커니즘 M-i 확정; 합성 코어 v1.6.86 + M-i 측정 도구 v1.6.87 구현. 남은 것: sandbox 밖 live per-stage 수집 → 합성 → B4 여유율/default-on 오너 승인)`
 
 관련 정본: `docs/system-contract-sot.md` v1.6.86, `05-writing-loop-benchmark-decisions.md`(B1~B4), `05-writing-loop-budget-decisions.md`(M1~M6), `flat-loop-gate.md` §Budget, `revise_gate.py`(loop 구조·metering), `docs/benchmarks/2026-07-14/writing_loop_b2b_q4_post_fence_fix.json`(재측정)
 
@@ -40,7 +40,7 @@ loop `metered()`가 합산하는 token 기여 stage = **revise, report, gate, re
 
 per-stage 입력은 **보수적으로 관측 최댓값(또는 p95)**을 쓴다(각 stage의 repair 발생 case 포함). 이렇게 합성한 값은 raw 최악경로이며, 오너 B4에 따라 여기에 **여유율**을 얹어 default-on을 승인한다.
 
-## 측정 메커니즘 sub-decision (확정 대기 — 작업자 추천 M-i)
+## 측정 메커니즘 sub-decision (오너 결정 2026-07-15: **M-i** 채택 → v1.6.87 구현)
 
 per-stage 실 12B 비용(revise/report/gate/retrieve_plan/context_search token·ms)을 어떻게 얻는가.
 
@@ -53,8 +53,9 @@ M-i 추천 이유: 로컬 1인 프로젝트 단계에서 audit 계약을 건드�
 
 ## 이번 slice 범위 / Deferred
 
-- **이번 slice(결정적, sandbox 내 검증 가능)**: 합성 코어 — `worst_case_stage_counts(policy)` + `compose_worst_case_ceiling(...)` 순수 함수 + 회귀. 측정 메커니즘과 무관하게 per-stage 비용 dict를 입력받아 ceiling을 산출.
-- **Deferred(측정 메커니즘 확정 후)**: M-i per-stage 측정 script 구현(live 실행은 sandbox 밖 full-stack 필요). 실 수치 수집 → 합성 → B4 여유율/ default-on 오너 승인.
+- **합성 코어(v1.6.86, 결정적, sandbox 내 검증 완료·독립 검증 PASS)**: `worst_case_stage_counts(policy)` + `compose_worst_case_ceiling(...)` 순수 함수 + 회귀. 측정 메커니즘과 무관하게 per-stage 비용 dict를 입력받아 ceiling을 산출.
+- **M-i 측정 도구(v1.6.87, 오너 M-i 확정 후 구현, sandbox 내 회귀 검증 완료)**: `services/application/app/writing/per_stage_measure.py`(`run_per_stage_measurement`)와 `scripts/measure_writing_stages.py` CLI. 각 stage를 production seam으로 조립·실 gateway로 격리 측정(`TokenUsage`+`perf_counter`), `context_search` token 제외·wall-clock만, `retrieve_plan`은 합성 `retrieve_more` Gate, `repeats`간 보수적 MAX, stage fault surface. CLI가 측정 dict→`compose_worst_case_ceiling`→raw ceiling JSON. 쓰기 0. 회귀 10개(`tests/test_writing_per_stage_measure.py`).
+- **Deferred(sandbox 밖 풀스택 — 오너)**: `docker compose run --rm --no-deps application python scripts/measure_writing_stages.py --project-id <id> --repeats 3`으로 실 12B per-stage 수치 수집 → 합성 → **B4 여유율/default-on 오너 승인**.
 - **별도 트랙**: 12B Gate 과민 revise / not_eligible finding은 **Gate 프롬프트 판별 튜닝**(compare judge J1 튜닝의 Gate 판) — 이 ceiling slice와 독립. 신호만 기록.
 
 ## Follow-up considerations
