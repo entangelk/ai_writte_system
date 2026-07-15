@@ -8,6 +8,7 @@
 ## User Decisions and Rationale
 
 - **측정 메커니즘 M-i 확정**: `docs/plans/05-writing-loop-ceiling-composition-decisions.md`의 sub-decision에서 오너가 **M-i(in-process per-stage 측정 script)**를 선택했다. 각하된 M-ii(persisted audit에 per-stage token/ms 노출)는 P1=B "bodyless" 감사 결정을 수정해야 하고 retrieve_plan/context_search stage가 terminal_pass run에 없어 Gate 독립성 문제를 재발생시킨다. M-i는 audit 계약을 건드리지 않고(정본 보존, 로컬 1인 프로젝트 단계) `diagnose_writing_gate/report` 선례 패턴을 재사용하며 Gate 독립성 문제를 합성 retrieve_more Gate로 원천 회피한다. full-stack HTTP 지연은 wall-clock 여유율(B4)로 흡수한다.
+- **다음 slice로 multi-finding revise 선택 + D1=A/D2=A/D3=A 확정**: B2b ceiling live 수집이 풀스택 다운으로 막혀(오너/풀스택 과제), sandbox-내 병렬 후속 중 오너가 **Writing loop multi-finding revise**를 골랐다. 결정 브리프(`plans/05-writing-multi-finding-revise-decisions.md`)로 forks를 surface: **D1=A**(continuity-only 유지 — do_not_use/pov 자동 splice 제외, canon 보존)·**D2=A**(sequential, 라운드당 1 finding — 아키텍처가 이미 매 revise 뒤 re-gate하므로 자격 함수 완화만으로 순차 소진 성립; batch D2=B는 splice/계약 대규모 재작성이라 §2 위배)·D3=A(error severity 먼저). 근거: 로컬 1인 프로젝트지만 정본 보존 정책상 canon-민감 자동수정은 review 경로로 두고, 최소 변경으로 gap을 닫는다.
 
 ## Completed work
 
@@ -30,6 +31,14 @@
   - 실행: `docker compose run --rm --no-deps application python scripts/measure_writing_stages.py --project-id <id> --repeats 3`. `--current-position DRAFT_ID VERSION_ID`로 idempotent context seed 생략 가능.
 
 - **회귀(`tests/test_writing_per_stage_measure.py`, +10)**: per-stage token/wall-clock 캡처·**context_search token 제외**(under/over-strict: ms 존재하나 stage_tokens에 부재)·synthetic retrieve_more Gate가 planner에 전달됨(실 Gate가 PASS여도)·repeats간 보수적 MAX(alternating usage에서 max 채택)·stage fault surface + incomplete_stages(fault 전 stage는 complete)·default 정책 ceiling round-trip(tokens=500·ms=9000)·no-write call sequence spy·`measurement_to_dict` JSON 키·repeats≥1 검증·CLI main/arg parser wiring.
+
+### Writing loop multi-finding revise 구현 (SoT v1.6.88)
+
+- **gap**: bounded loop의 `_eligible_revision_finding`(`revise_gate.py`)이 자동 revise 대상을 **정확히 1개**(`len(findings) != 1 → None`)로 제한했다. Gate 계약상(`gate.py:_PRIORITY`) loop가 revise 분기에 오면 decision=findings의 recommended_decision 최대 우선순위=revise이므로 **그 순간 모든 finding이 revise 추천**인데, 다수면 `len != 1` 이유만으로 `not_eligible` 종료 — 실 Gate가 다수 continuity 문제를 지적하는 정상 상황을 처리 못 했다.
+- **구현(D2=A sequential)**: 아키텍처가 이미 매 revise 뒤 report→re-gate를 돌므로, 자격 함수만 "정확히 1개"→"N개 중 최우선 1개 선택"으로 완화하면 남은 finding이 다음 라운드 gate 결과에서 다시 선택돼 순차 소진된다. per-finding 자격을 `_is_eligible_continuity_revise`로 추출(continuity+revise+evidence 후보 내 1회 — 단일 규칙 그대로, **D1=A** do_not_use/pov 제외)하고, `_eligible_revision_finding`은 자격 finding 중 **severity desc→gate순서(D3=A)** 최우선 1개를 선택. 변경 표면 = 자격 함수 1개 + `WritingGateSeverity` import; loop·reviser·report·Gate·audit·budget 계약 무변.
+- **동작 변화**: 유일한 변화 = 다수 continuity finding이 `not_eligible` 대신 순차 소진. loop status/stages/HTTP envelope/public literal 동일. finding당 revision round 1 소비라 `max_revision_rounds`가 총량을 그대로 bound(기본 2 → 2개까지, env 상향 가능).
+- **회귀 +7**: `EligibleRevisionFindingTest` 5(자격 0→None under-strict[empty·POV·retrieve_more·evidence 부재·multi-occurrence]·단일 반환·2개 첫 선택·error 우선 order-independent[D3]·ineligible 혼재 시 eligible 선택[old len≠1 dead-end 제거 증명])·`MultiFindingSequentialLoopTest` 2(실 `WritingRevisionService` reviser 관통 2-finding 순차→pass·기본 상한 budget_exhausted over-strict bound). 기존 `test_revise_eligibility_rejects_every_broader_boundary`의 "2 continuity findings→not_eligible" case를 새 계약(eligible)으로 정정(주석으로 multi-finding 테스트 상호참조).
+- **패턴 스윕(§4)**: `grep`으로 `len(findings)`/`findings[0]`/`_eligible_revision_finding` 소비처 확인 — writing source에서 `_eligible_revision_finding`이 유일 소비처(`revise_gate.py:396`), 다른 단일-finding 가정 없음.
 
 ## Issues found
 
@@ -58,6 +67,13 @@
 - full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1055 passed / 45 skipped / 235 subtests**(v1.6.86 1041 대비 +14 신규 테스트). fail 없음.
 - `python3 -m py_compile services/application/app/writing/per_stage_measure.py scripts/measure_writing_stages.py tests/test_writing_per_stage_measure.py`, `docker compose config --quiet`, `git diff --check` 통과.
 - **live per-stage 수집 실행은 sandbox 밖 풀스택 후속**: 착수 시점 스택은 다운(worker만 up, 8011/8000 연결 거부)이었다. 측정 도구 자체는 sandbox 내 결정적 회귀로 검증했고, 실 12B per-stage 수치 수집→합성→B4 여유율/default-on 승인은 오너의 풀스택 실행 과제다.
+
+### multi-finding revise 검증 (SoT v1.6.88)
+
+- focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_revise.py` → **47 passed / 53 subtests**(신규 `EligibleRevisionFindingTest` 5 + `MultiFindingSequentialLoopTest` 2 포함, 정정된 boundary 테스트 포함).
+- full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1062 passed / 45 skipped / 239 subtests**(v1.6.87 1055 대비 +7). fail 없음.
+- `python3 -m py_compile services/application/app/writing/revise_gate.py tests/test_writing_revise.py`, `docker compose config --quiet`, `git diff --check` 통과.
+- 동작 실측: `MultiFindingSequentialLoopTest`가 실 `WritingReviseGateService.run` + 실 `WritingRevisionService` reviser를 관통해 2-finding 순차 revise→pass를 검증(단위 아닌 end-to-end 경로 관측).
 
 ## Next steps
 

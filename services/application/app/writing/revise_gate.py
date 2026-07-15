@@ -31,6 +31,7 @@ from services.application.app.writing.models import (
     WritingGateFinding,
     WritingGateFindingType,
     WritingGateResult,
+    WritingGateSeverity,
     WritingRequest,
 )
 from services.application.app.writing.retrieval import (
@@ -520,19 +521,43 @@ class WritingReviseGateService:
             return result(WritingLoopStatus.TERMINAL_DECISION)
 
 
+def _is_eligible_continuity_revise(
+    candidate: WritingCandidate, finding: WritingGateFinding,
+) -> bool:
+    """Per-finding eligibility, unchanged from the single-finding rule: a
+    continuity finding recommending revise whose evidence occurs exactly once in
+    the candidate (unambiguous splice anchor). do_not_use/pov stay out of the
+    auto-splice path (owner D1=A) — the Gate contract routes those to
+    block/needs_user_review, and continuity is the only auto-revisable type.
+    """
+    return (
+        finding.finding_type is WritingGateFindingType.CONTINUITY
+        and finding.recommended_decision is WritingGateDecision.REVISE
+        and bool(finding.evidence.strip())
+        and candidate.text.count(finding.evidence) == 1
+    )
+
+
 def _eligible_revision_finding(
     candidate: WritingCandidate,
     findings: tuple[WritingGateFinding, ...],
 ) -> WritingGateFinding | None:
-    """Lock both directions: one exact continuity revise, nothing broader."""
+    """Select the single best eligible continuity revise finding, or None.
 
-    if len(findings) != 1:
+    Multi-finding (owner D1=A continuity-only, D2=A sequential, D3=A severity
+    desc): a Gate revise result may carry several revise-recommended findings.
+    The loop revises one per round and re-gates, so this picks the highest-
+    priority eligible one rather than requiring exactly one (the old "len != 1 →
+    None" dead-ended a normal multi-continuity Gate result). Ordering: error
+    severity before warning, then Gate return order (stable). Returns None when
+    no finding is eligible (empty, or all ineligible) → loop yields
+    ``not_eligible``, unchanged.
+    """
+    eligible = [f for f in findings if _is_eligible_continuity_revise(candidate, f)]
+    if not eligible:
         return None
-    finding = findings[0]
-    if finding.finding_type is not WritingGateFindingType.CONTINUITY:
-        return None
-    if finding.recommended_decision is not WritingGateDecision.REVISE:
-        return None
-    if not finding.evidence.strip() or candidate.text.count(finding.evidence) != 1:
-        return None
-    return finding
+    # error before warning (D3=A); ties broken by Gate order via smallest index.
+    return max(
+        enumerate(eligible),
+        key=lambda item: (item[1].severity is WritingGateSeverity.ERROR, -item[0]),
+    )[1]

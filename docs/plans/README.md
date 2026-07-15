@@ -34,7 +34,8 @@
 24. [`05-writing-loop-benchmark-decisions.md`](05-writing-loop-benchmark-decisions.md) — Phase 5.10 B2b full-stack loop benchmark의 계측 경계·대표 workload·기본값 승격 결정 브리프
 25. [`05-writing-gate-live-diagnostics-decisions.md`](05-writing-gate-live-diagnostics-decisions.md) — Phase 5.10 live `invalid_gate_result`의 raw output 관측 경계와 remediation 순서 결정 브리프
 26. [`05-writing-report-live-diagnostics-decisions.md`](05-writing-report-live-diagnostics-decisions.md) — Phase 5.10 live `invalid_candidate_report`의 raw report output(first+repair) 관측 경계와 remediation 순서 결정 브리프
-27. [`05-writing-loop-ceiling-composition-decisions.md`](05-writing-loop-ceiling-composition-decisions.md) — Phase 5.10 B2b aggregate ceiling을 per-stage 비용에서 최악경로로 합성하는 Option A 결정 브리프(`unexpected_loop_trace` 조사 결론 + Gate 독립성)
+27. [`05-writing-loop-ceiling-composition-decisions.md`](05-writing-loop-ceiling-composition-decisions.md) — Phase 5.10 B2b aggregate ceiling을 per-stage 비용에서 최악경로로 합성하는 Option A 결정 브리프(`unexpected_loop_trace` 조사 결론 + Gate 독립성) + 측정 메커니즘 M-i
+28. [`05-writing-multi-finding-revise-decisions.md`](05-writing-multi-finding-revise-decisions.md) — Writing loop이 Gate revise 분기의 다수 continuity finding을 순차 소진하도록 자격 함수를 완화하는 결정 브리프(D1=A continuity-only·D2=A sequential·D3=A severity desc)
 
 ## 문서 지위와 우선순위
 

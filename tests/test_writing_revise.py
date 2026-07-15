@@ -38,6 +38,7 @@ from services.application.app.writing.models import (
     WritingGateResult,
     WritingGateSeverity,
     WritingOutputType,
+    WritingRequest,
     WritingTaskType,
 )
 from services.application.app.writing.metering import MeteredCallError
@@ -52,7 +53,12 @@ from services.application.app.writing.gate import (
     WritingGateError,
 )
 from services.application.app.writing.report import InvalidCandidateReport
-from services.application.app.writing.revise_gate import WritingLoopPolicy
+from services.application.app.writing.revise_gate import (
+    WritingLoopPolicy,
+    WritingLoopStatus,
+    WritingReviseGateService,
+    _eligible_revision_finding,
+)
 from services.application.app.writing.retrieval import (
     InvalidWritingRetrievalPlan,
     WritingRetrievalPlan,
@@ -773,9 +779,12 @@ class WritingReviseGateApiTest(unittest.TestCase):
                     WritingGateDecision.REVISE, self.findings, (), "fake-gate",
                 )
 
+        # Multi-finding (D1=A/D2=A): TWO eligible continuity findings is no
+        # longer ineligible — it is revised sequentially (see
+        # test_multi_finding_revise_processes_sequentially). These remain
+        # ineligible: empty, non-continuity, evidence absent, evidence not unique.
         invalid_findings = (
             (),
-            (_finding("고친 문장."), _finding("뒤 문장.")),
             (_finding("고친 문장.", finding_type=WritingGateFindingType.POV),),
             (_finding("존재하지 않는 문장."),),
             (_finding("문장.",),),
@@ -1122,6 +1131,151 @@ class WritingReviseGateApiTest(unittest.TestCase):
                 self.assertEqual(body["report_error"]["type"], error_type)
                 self.assertEqual(reporter.calls, 1)
                 self.assertEqual(gate.calls, 0)
+
+
+class EligibleRevisionFindingTest(unittest.TestCase):
+    """Multi-finding selection (owner D1=A continuity-only, D3=A severity desc).
+
+    Unit-locks `_eligible_revision_finding`: the loop revises one finding per
+    round, so this must pick the single best-eligible continuity revise finding
+    among N — no longer requiring exactly one.
+    """
+
+    @staticmethod
+    def _cont(evidence, *, severity=WritingGateSeverity.WARNING,
+              decision=WritingGateDecision.REVISE,
+              finding_type=WritingGateFindingType.CONTINUITY):
+        return WritingGateFinding(finding_type, severity, "m", evidence, decision)
+
+    def test_none_when_no_finding_eligible(self):
+        # under-strict: empty / non-continuity / evidence absent / not unique
+        # still dead-end to not_eligible (unchanged from single-finding rule).
+        cand = _candidate()  # "앞 문장. 잘못된 문장. 뒤 문장."
+        for findings in (
+            (),
+            (self._cont("잘못된 문장.", finding_type=WritingGateFindingType.POV),),
+            (self._cont("잘못된 문장.", decision=WritingGateDecision.RETRIEVE_MORE),),
+            (self._cont("없는 문장."),),
+            (self._cont("문장."),),  # occurs 3x → ambiguous anchor
+        ):
+            with self.subTest(findings=findings):
+                self.assertIsNone(_eligible_revision_finding(cand, findings))
+
+    def test_single_eligible_returned(self):
+        cand = _candidate()
+        f = self._cont("잘못된 문장.")
+        self.assertIs(_eligible_revision_finding(cand, (f,)), f)
+
+    def test_two_eligible_selects_first_in_gate_order(self):
+        # The old contract dead-ended on 2 findings; now both are eligible and
+        # the first (stable order, equal severity) is picked this round.
+        cand = _candidate()
+        f0 = self._cont("잘못된 문장.")
+        f1 = self._cont("뒤 문장.")
+        self.assertIs(_eligible_revision_finding(cand, (f0, f1)), f0)
+
+    def test_error_severity_selected_before_warning_order_independent(self):
+        # D3=A: error before warning regardless of Gate return order.
+        cand = _candidate()
+        warn = self._cont("잘못된 문장.", severity=WritingGateSeverity.WARNING)
+        err = self._cont("뒤 문장.", severity=WritingGateSeverity.ERROR)
+        self.assertIs(_eligible_revision_finding(cand, (warn, err)), err)
+        self.assertIs(_eligible_revision_finding(cand, (err, warn)), err)
+
+    def test_ineligible_findings_do_not_dead_end_eligible_one(self):
+        # A POV (ineligible, D1=A) alongside a continuity finding → the
+        # continuity one is still selected (presence of ineligible does not
+        # force not_eligible, unlike the old len != 1 rule).
+        cand = _candidate()
+        pov = self._cont("잘못된 문장.", finding_type=WritingGateFindingType.POV)
+        cont = self._cont("뒤 문장.")
+        self.assertIs(_eligible_revision_finding(cand, (pov, cont)), cont)
+
+
+class _MultiFindingGate:
+    """Returns a scripted (decision, findings) per call so a multi-finding Gate
+    result can drive several sequential auto-revise rounds."""
+
+    def __init__(self, script):
+        self._script = list(script)
+        self.calls = 0
+        self.seen = []
+
+    async def evaluate(self, *, request, candidate, package):
+        self.calls += 1
+        self.seen.append(candidate.text)
+        decision, findings = self._script.pop(0)
+        return WritingGateResult(
+            request.request_id, request.project_id, decision, findings, (),
+            "fake-gate",
+        )
+
+
+class MultiFindingSequentialLoopTest(unittest.TestCase):
+    """D2=A: a Gate revise result with several findings is revised one per round
+    (re-gate between), rather than dead-ending on the first."""
+
+    @staticmethod
+    def _request():
+        return WritingRequest("r1", "p1", WritingTaskType.CONTINUE_SCENE, "고쳐줘")
+
+    @staticmethod
+    def _cont(evidence):
+        return WritingGateFinding(
+            WritingGateFindingType.CONTINUITY, WritingGateSeverity.WARNING,
+            "m", evidence, WritingGateDecision.REVISE,
+        )
+
+    def test_multi_finding_revise_processes_sequentially(self):
+        provider = _SequenceProvider(("고친1.", "고친2.", "뒤2."))
+        gate = _MultiFindingGate((
+            # gate 1: two eligible continuity findings → select first ("고친1.")
+            (WritingGateDecision.REVISE,
+             (self._cont("고친1."), self._cont("뒤 문장."))),
+            # gate 2: remaining finding → select it ("뒤 문장.")
+            (WritingGateDecision.REVISE, (self._cont("뒤 문장."),)),
+            # gate 3: clean → pass
+            (WritingGateDecision.PASS, ()),
+        ))
+        service = WritingReviseGateService(
+            reviser=_service(provider), reporter=_Reporter(), gate=gate,
+            policy=WritingLoopPolicy(max_revision_rounds=3,
+                                     max_gate_evaluations=4),
+        )
+        result = asyncio.run(service.run(
+            request=self._request(),
+            candidate=_candidate("앞 문장. 잘못된 문장. 뒤 문장."),
+            finding=self._cont("잘못된 문장."), package=_package(),
+        ))
+        self.assertIs(result.loop.status, WritingLoopStatus.PASS)
+        # both continuity findings were revised in sequence, then pass.
+        self.assertEqual(result.candidate.text, "앞 문장. 고친2. 뒤2.")
+        self.assertEqual(result.loop.revision_rounds, 3)
+        self.assertEqual(provider.calls, 3)
+        self.assertEqual(gate.calls, 3)
+
+    def test_second_eligible_bounded_by_revision_rounds(self):
+        # over-strict on budget: with the default cap (2 revisions) two eligible
+        # findings do NOT run unbounded — the loop stops at budget_exhausted
+        # after the second revise instead of a third.
+        provider = _SequenceProvider(("고친1.", "고친2."))
+        gate = _MultiFindingGate((
+            (WritingGateDecision.REVISE,
+             (self._cont("고친1."), self._cont("뒤 문장."))),
+            (WritingGateDecision.REVISE, (self._cont("뒤 문장."),)),
+        ))
+        service = WritingReviseGateService(
+            reviser=_service(provider), reporter=_Reporter(), gate=gate,
+            policy=WritingLoopPolicy(),  # defaults: 2 revision rounds
+        )
+        result = asyncio.run(service.run(
+            request=self._request(),
+            candidate=_candidate("앞 문장. 잘못된 문장. 뒤 문장."),
+            finding=self._cont("잘못된 문장."), package=_package(),
+        ))
+        self.assertIs(result.loop.status, WritingLoopStatus.BUDGET_EXHAUSTED)
+        self.assertEqual(result.loop.revision_rounds, 2)
+        self.assertEqual(provider.calls, 2)
 
 
 if __name__ == "__main__":
