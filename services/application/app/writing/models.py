@@ -89,10 +89,34 @@ class RiskSeverity(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class ContextPointer:
+    """Stable pointer to one ContextPackage item (kickoff brief
+    ``docs/plans/05-writing-stable-context-pointer-decisions.md`` D1=A).
+
+    A projection of ``IndexPointer`` without ``project_id``: the project comes
+    from the trusted request/candidate context, never from the model. Which of
+    the four fields may be empty is an origin-specific invariant (sub-decision
+    P-i) enforced in ``writing/context_pointer.py`` — a store only fills the
+    fields it actually has.
+    """
+
+    collection: str
+    document_id: str
+    version_id: str
+    content_hash: str
+
+
+@dataclass(frozen=True, slots=True)
 class CandidateClaim:
     text: str
     claim_type: CandidateClaimType
     requires_gate_check: bool
+    # D3=A: required array in the report wire (empty allowed). A claim with no
+    # package evidence carries (); one grounded in the package carries the exact
+    # pointers of the items it used. The dataclass default keeps non-report
+    # constructions (revise resets, tests) valid — requiredness is a wire
+    # contract enforced by ``report.parse_report``.
+    related_context_pointers: tuple[ContextPointer, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

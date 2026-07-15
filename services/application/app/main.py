@@ -112,6 +112,7 @@ from services.application.app.writing.accept import (
     WritingAcceptError,
     WritingAcceptService,
 )
+from services.application.app.writing.context_pointer import pointer_wire
 from services.application.app.writing.report import (
     InvalidCandidateReport, WritingCandidateReportService, seed_report_template,
 )
@@ -2361,7 +2362,9 @@ def create_app(
             "self_reported_constraints": list(candidate.self_reported_constraints),
             "candidate_claims": [
                 {"text": x.text, "type": x.claim_type.value,
-                 "requires_gate_check": x.requires_gate_check}
+                 "requires_gate_check": x.requires_gate_check,
+                 "related_context_pointers": [
+                     pointer_wire(p) for p in x.related_context_pointers]}
                 for x in candidate.candidate_claims],
             "new_memory_hints": [
                 {"type": x.hint_type.value, "text": x.text,

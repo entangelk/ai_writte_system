@@ -1,6 +1,6 @@
 # 착수 결정 브리프 — Phase 5.x Writing stable context pointer
 
-상태: `Resolved — D1=A · D2=A · D3=A (owner confirmed 2026-07-15)`
+상태: `Resolved — D1=A · D2=A · D3=A · P-i (owner confirmed 2026-07-15) — 구현 완료 SoT v1.6.92`
 
 관련 정본: `docs/system-contract-sot.md` v1.6.91, `05-writing-self-report-decisions.md` D2=A first→B·D5=B·D6=A first→C, `05-writing-report-api-decisions.md`, `context_search/models.py::ContextItem`, `indexing/models.py::IndexPointer`, `writing/prompt.py::format_context_package`
 
@@ -61,7 +61,15 @@ Writing candidate report의 `candidate_claims[].related_context_pointers`를 열
 
 ## 승인 시 잠김 구현 계약
 
-1. 신규 immutable `ContextPointer` = `collection`, `document_id`, `version_id`, `content_hash` 네 non-empty string. public/model key도 동일 literal을 쓴다.
+1. 신규 immutable `ContextPointer` = `collection`, `document_id`, `version_id`, `content_hash` 네 string. public/model key도 동일 literal을 쓴다. non-empty 요구는 **origin별 테이블**이다(sub-decision P-i, 오너 확정 2026-07-15 — 원 문구 "네 non-empty string"은 memory/candidate 실경로와 모순이라 개정됨):
+
+   | collection | non-empty 필수 | 반드시 `""` |
+   |---|---|---|
+   | `source_blocks` | `document_id`·`version_id`·`content_hash` | — |
+   | `memory_entries` | `document_id`·`version_id` | `content_hash` |
+   | `analysis_candidates` | `document_id` | `version_id`·`content_hash` |
+
+   빈값은 store에 그 필드가 존재하지 않는 origin에만 허용한다. 미지 collection은 pointable이 아니며, 테이블 위반은 provider 호출 전 거부한다(계약 2 선례).
 2. `project_id`는 pointer object에 실지 않고 trusted candidate/package project에서 유도. package item pointer가 다른 project면 provider 호출 전 거부.
 3. report extractor용 formatter만 ContextItem text 앞에 canonical JSON pointer를 표시한다. generation/revise 평문 formatter는 무변하도록 별도 함수/옵션을 쓴다.
 4. `CandidateClaim` / public HTTP wire / accept→Analysis advisory copy에 `related_context_pointers` required array를 additive 추가. Gate prompt가 받는 candidate claim에도 동일 pointer를 실어 D5=B 소비 경계를 보존하되, Gate decision schema는 무변.
@@ -75,6 +83,44 @@ Writing candidate report의 `candidate_claims[].related_context_pointers`를 열
 - hallucinated document/version/hash·다른 package의 valid-looking pointer·cross-project item·rogue/missing pointer field·duplicate는 모두 거부.
 - 마크다운 fence 추출은 유효 pointer JSON에도 동일하게 적용되지만 schema/allowlist를 완화하지 않음.
 - pointer 추가 후도 generation/revise prompt·Gate decision literal·report provider repair 횟수·loop stage/audit bodyless schema·Core SOT/Analysis candidate mint 수는 무변.
+
+## Pointer 필드 불변식 sub-decision (오너 결정 2026-07-15: **P-i** 채택 → 잠김 계약 1 개정)
+
+Follow-up의 "구현 전 source-block·memory·candidate 세 origin의 non-empty 불변식을 fixture로 재확인하고, 현 실경로에서 empty가 가능하면 owner 승인 없이 빈값을 허용하지 않는다"를 실행한 결과, **잠김 계약 1(네 non-empty string)이 현 실경로와 모순**된다.
+
+### 관측된 사실 (1차 소스)
+
+| origin | collection | document_id | version_id | content_hash |
+|---|---|---|---|---|
+| source block (`context_search/service.py:1057-1080`) | `source_blocks` | `block.id` | `detail.snapshot.version_id` (non-empty) | `detail.snapshot.content_hash` (raw UTF-8 SHA-256, non-empty) |
+| memory (`context_search/service.py:775-802`) | `memory_entries` | `entry.id` — 2B.4 append-only라 **버전마다 고유 id** | `str(entry.version)` (non-empty) | **`""` 하드코딩** |
+| candidate (`context_search/service.py:885-912`) | `analysis_candidates` | `candidate.id` — v1.6.66 edit successor마다 **고유 id** | **`""` 하드코딩** | **`""` 하드코딩** |
+
+빈값은 사고가 아니라 구조적이다. `MemoryEntry`(`memory/models.py:36`)·`AnalysisCandidate`(`analysis/models.py:78`) 어디에도 content hash 필드가 없고 candidate에는 version 필드도 없다. 두 origin은 SOT snapshot이 아니라 store 권위이며 text는 `derive_memory_index_text` 파생값이라 해시할 raw 정본이 없다. 기존 주석도 이 필드들을 "inert"로 명시하고 Gate가 origin 분기로 우회한다(`service.py:1194`).
+
+### 모순
+
+- 잠김 계약 1은 네 필드 **non-empty**를 요구한다.
+- 회귀 매트릭스 under-strict 행은 **source-block·memory·candidate 세 origin 포인터가 각각 claim에서 round-trip**할 것을 요구한다.
+- 현 실경로에서 두 조건은 동시에 만족 불가능하다(memory·candidate가 non-empty 4필드를 만들 수 없음).
+
+### 선택지
+
+| 선택지 | 설명 | 장점 | 단점 |
+|---|---|---|---|
+| **P-i. origin별 불변식 테이블 (추천)** | wire는 exact 4 key 유지. 서버 projection이 origin별로 검사: `source_blocks`=4필드 전부 non-empty, `memory_entries`=collection/document_id/version_id non-empty + `content_hash==""`, `analysis_candidates`=collection/document_id non-empty + version_id·content_hash `""`. 미지 collection은 pointable 아님(거부). 위반은 provider 호출 전 거부(계약 2 선례). | "근거 없는 빈값 금지" 취지 유지 — store에 필드가 실제로 없는 자리에만 빈값 허용. 세 origin 전부 인용 가능(매트릭스 무변). source block의 빈 hash 같은 실제 결함은 fails-closed로 잡힘. 테이블 ~5줄. | 잠김 계약 1 문구를 "네 non-empty"→origin별 테이블로 개정해야 함. |
+| P-ii. 균일 완화 | 4 key present + string이면 되고 빈값은 어디서나 허용. | 가장 단순, 코드 최소. | source-block pointer의 빈 version/hash(=실제 결함)도 조용히 통과. 계약이 origin별 실제를 기술하지 못함. |
+| P-iii. source-block 전용 pointer | 계약 1(4 non-empty) 유지. memory/candidate item은 pointer 미표시 → claim이 인용 불가. | 계약 1 문구 무변, 가장 엄격. | 회귀 매트릭스 under-strict 행(memory/candidate round-trip)을 폐기해야 함. canonical memory가 Writing의 주요 grounding 원천인데 그 claim이 근거를 못 붙임 → 기능 가치 훼손. |
+| P-iv. 서버가 결측 필드 mint | memory/candidate의 hash를 파생 text로 계산, version은 "1" 등으로 채움. | 4 non-empty 형태 유지. | store가 만든 적 없는 identity를 서버가 발명 → 후속 stale/dereference 검증이 허구 기준과 비교. D1=A의 "기존 authority 재사용" 근거와 정면 충돌. **각하 권고.** |
+
+### 추천
+
+**P-i.** 로컬 1인 프로젝트·정본 보존 제약에서, 빈값을 "store에 그 필드가 존재하지 않는 origin"에만 좁혀 허용하는 것이 follow-up의 의도("승인 없이 빈값 허용 금지")를 문자 그대로 지키면서 세 origin 인용 가능성(매트릭스)을 보존한다. 식별력도 유지된다 — memory는 버전마다, candidate는 edit마다 `document_id`가 고유해서 hash 없이도 pointer가 특정 버전을 가리킨다. 검증 자체는 exact allowlist membership가 이미 담당하므로 이 테이블은 서버 projection의 자기 점검용이다.
+
+### 결정 시 반영 지점
+
+- 잠김 계약 1 문구 개정(+ SoT v1.6.91 row).
+- 회귀: origin별 유효 pointer 3종 round-trip(under-strict) + origin 불변식 위반 시 provider 호출 전 거부(over-strict).
 
 ## Follow-up considerations
 

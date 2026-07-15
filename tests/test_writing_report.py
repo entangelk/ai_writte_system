@@ -18,9 +18,12 @@ from services.llm_gateway.app.provider import GenerationResult, TokenUsage
 
 
 def _payload():
+    # related_context_pointers is required on every claim (stable-pointer brief
+    # D3=A); [] is the valid value for a claim with no package evidence.
     return {"self_reported_constraints": ["제한 시점"],
         "candidate_claims": [{"text": "문이 열렸다", "type": "narrative_event",
-                              "requires_gate_check": True}],
+                              "requires_gate_check": True,
+                              "related_context_pointers": []}],
         "new_memory_hints": [{"type": "event", "text": "문이 열림",
                               "confidence": 0.8, "should_analyze_after_save": True}],
         "risk_notes": [{"type": "pov", "severity": "high", "message": "시점 확인"}]}

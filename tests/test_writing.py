@@ -40,6 +40,7 @@ from services.application.app.analysis.prompt_templates import (
 from services.application.app.writing.models import (
     CandidateClaim,
     CandidateClaimType,
+    ContextPointer,
     MemoryHintType,
     NewMemoryHint,
     RiskNote,
@@ -115,6 +116,12 @@ class _FakeProvider:
         )
 
 
+# A claim's evidence pointer (stable-pointer brief D1=A/D3=A). Real pointers are
+# projected from the request's package; here it is a serialization fixture so the
+# HTTP wire is exercised with a non-empty pointer array.
+_CLAIM_POINTER = ContextPointer("source_blocks", "b1", "ver1", "hash1")
+
+
 class _FakeReporter:
     # Phase 5.4 report extractor stub: enriches a plain-prose candidate with the
     # four structured report fields so the HTTP serialization path is exercised
@@ -135,7 +142,8 @@ class _FakeReporter:
             candidate,
             self_reported_constraints=("제한 시점",),
             candidate_claims=(
-                CandidateClaim("문이 열렸다", CandidateClaimType.NARRATIVE_EVENT, True),
+                CandidateClaim("문이 열렸다", CandidateClaimType.NARRATIVE_EVENT, True,
+                               (_CLAIM_POINTER,)),
             ),
             new_memory_hints=(
                 NewMemoryHint(MemoryHintType.EVENT, "문이 열림", 0.8, True),
@@ -399,6 +407,11 @@ class WritingGenerateApiTest(unittest.TestCase):
         claim = body["candidate_claims"][0]
         self.assertEqual(claim["type"], "narrative_event")
         self.assertNotIn("claim_type", claim)
+        # Stable-pointer brief D3=A: the claim's evidence pointers reach the HTTP
+        # wire as the exact 4-field object, project_id excluded (D1=A).
+        self.assertEqual(claim["related_context_pointers"], [
+            {"collection": "source_blocks", "document_id": "b1",
+             "version_id": "ver1", "content_hash": "hash1"}])
         hint = body["new_memory_hints"][0]
         self.assertEqual(hint["type"], "event")
         self.assertNotIn("hint_type", hint)

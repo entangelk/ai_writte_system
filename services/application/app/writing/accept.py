@@ -9,6 +9,7 @@ from services.application.app.analysis.service import AnalysisService
 from services.application.app.context_search.models import ContextPackage
 from services.application.app.core_sot.models import SaveDraftResult
 from services.application.app.core_sot.service import Archived, CoreSotService
+from services.application.app.writing.context_pointer import pointer_wire
 from services.application.app.writing.gate import WritingGateService
 from services.application.app.writing.service import CandidateReporter
 from services.application.app.writing.models import (
@@ -133,7 +134,9 @@ def _candidate_report_payload(candidate: WritingCandidate) -> dict[str, object]:
     return {
         "self_reported_constraints": list(candidate.self_reported_constraints),
         "candidate_claims": [{"text": x.text, "type": x.claim_type.value,
-            "requires_gate_check": x.requires_gate_check}
+            "requires_gate_check": x.requires_gate_check,
+            "related_context_pointers": [
+                pointer_wire(p) for p in x.related_context_pointers]}
             for x in candidate.candidate_claims],
         "new_memory_hints": [{"type": x.hint_type.value, "text": x.text,
             "confidence": x.confidence,

@@ -28,7 +28,9 @@ from services.application.app.writing.gate_live_diag import (
     RawCaptureProvider,
 )
 from services.application.app.writing.metering import MeteredCallError
+from services.application.app.writing.context_pointer import package_pointers
 from services.application.app.writing.models import (
+    ContextPointer,
     WritingCandidate,
     WritingGateFinding,
     WritingRequest,
@@ -109,11 +111,16 @@ def _report_captures(capture: RawCaptureProvider) -> list[CapturedGeneration]:
     return [c for c in capture.captures if c.system == REPORT_TEMPLATE]
 
 
-def _reparse_error(content: str | None) -> str | None:
+def _reparse_error(
+    content: str | None, allowed: tuple[ContextPointer, ...]
+) -> str | None:
     if content is None:
         return None
     try:
-        parse_report(content)
+        # Same allowlist the report service used, so a pointer clause the
+        # operator sees is the one production hit — not an artifact of
+        # re-parsing without the package (stable-pointer brief D2=A).
+        parse_report(content, allowed_pointers=allowed)
     except Exception as exc:  # noqa: BLE001 — surface the exact parse clause
         return str(exc)
     return None
@@ -181,7 +188,8 @@ async def run_report_diagnosis(
         return ReportDiagnosis(
             parse_status=parse_status, stage_trace=tuple(stages),
             first_raw=first.result.content if first is not None else None,
-            first_error=_reparse_error(first.result.content if first else None),
+            first_error=_reparse_error(
+                first.result.content if first else None, package_pointers(package)),
             repair_raw=repair.result.content if repair is not None else None,
             repair_error=str(cause),
             report_usage=exc.usage,
@@ -206,7 +214,7 @@ async def run_report_diagnosis(
     return ReportDiagnosis(
         parse_status=REPORT_PARSED_OK, stage_trace=tuple(stages),
         first_raw=first_content,
-        first_error=_reparse_error(first_content),
+        first_error=_reparse_error(first_content, package_pointers(package)),
         repair_raw=repair.result.content if repair is not None else None,
         claim_count=len(enriched.candidate_claims),
         hint_count=len(enriched.new_memory_hints),

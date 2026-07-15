@@ -7,6 +7,7 @@ from collections.abc import Mapping
 
 from services.application.app.analysis.prompt_templates import PromptTemplate
 from services.application.app.context_search.models import ContextPackage
+from services.application.app.writing.context_pointer import pointer_wire
 from services.application.app.writing.json_extract import strip_code_fence
 from services.application.app.writing.models import WritingCandidate, WritingRequest
 from services.application.app.writing.prompt import format_context_package
@@ -47,9 +48,14 @@ def build_writing_gate_request(*, request: WritingRequest,
         "candidate": {"output_type": candidate.output_type.value,
                       "text": candidate.text,
                       "self_reported_constraints": list(candidate.self_reported_constraints),
+                      # The Gate reads the claim's pointers as evidence of what
+                      # the claim was grounded in (D5=B consumption boundary);
+                      # its own decision schema is unchanged.
                       "candidate_claims": [{"text": x.text,
                           "type": x.claim_type.value,
-                          "requires_gate_check": x.requires_gate_check}
+                          "requires_gate_check": x.requires_gate_check,
+                          "related_context_pointers": [
+                              pointer_wire(p) for p in x.related_context_pointers]}
                           for x in candidate.candidate_claims],
                       "new_memory_hints": [{"type": x.hint_type.value,
                           "text": x.text, "confidence": x.confidence,

@@ -14,6 +14,10 @@ from services.application.app.context_search.models import (
     ContextItemStatus,
     ContextPackage,
 )
+from services.application.app.writing.context_pointer import (
+    context_pointer_of,
+    pointer_json,
+)
 from services.application.app.writing.models import (
     WritingBrief,
     WritingRequest,
@@ -44,9 +48,17 @@ Rules, in priority order:
 Output the continuation prose only. No JSON, no headings, no meta commentary, no explanation."""
 
 
-def format_context_package(package: ContextPackage) -> str:
+def format_context_package(
+    package: ContextPackage, *, include_pointers: bool = False
+) -> str:
     """Compact context format (writing_agent_prompt.md §8.1). do_not_use and
-    constraints come first (§8.2 hierarchy)."""
+    constraints come first (§8.2 hierarchy).
+
+    ``include_pointers`` prefixes each item with its stable ContextPointer so the
+    report extractor can cite the item it used (stable-pointer brief D2=A). Only
+    that one turn opts in: the generation and revise prompts produce prose, not
+    pointers, so their format stays unchanged (contract 3).
+    """
     sections: list[str] = []
     if package.do_not_use:
         sections.append(
@@ -63,20 +75,28 @@ def format_context_package(package: ContextPackage) -> str:
     if package.macro_items:
         sections.append(
             "<macro_context>\n"
-            + "\n".join(_format_item(item) for item in package.macro_items)
+            + "\n".join(
+                _format_item(item, package, include_pointers)
+                for item in package.macro_items
+            )
             + "\n</macro_context>"
         )
     if package.micro_evidence:
         sections.append(
             "<micro_evidence>\n"
-            + "\n".join(_format_item(item) for item in package.micro_evidence)
+            + "\n".join(
+                _format_item(item, package, include_pointers)
+                for item in package.micro_evidence
+            )
             + "\n</micro_evidence>"
         )
     body = "\n\n".join(sections) if sections else "(no project memory retrieved)"
     return f"<context_package project=\"{package.project_id}\">\n{body}\n</context_package>"
 
 
-def _format_item(item: ContextItem) -> str:
+def _format_item(
+    item: ContextItem, package: ContextPackage, include_pointers: bool
+) -> str:
     # Candidate-origin items are labeled so the model never treats them as
     # approved knowledge (writing_agent_prompt.md §2.2).
     label = (
@@ -84,7 +104,10 @@ def _format_item(item: ContextItem) -> str:
         if item.status is ContextItemStatus.CANDIDATE
         else "canonical"
     )
-    return f"- [{label}] {item.text}"
+    if not include_pointers:
+        return f"- [{label}] {item.text}"
+    pointer = context_pointer_of(item.pointer, project_id=package.project_id)
+    return f"- [{label}] {pointer_json(pointer)} {item.text}"
 
 
 def _format_brief(brief: WritingBrief) -> str:

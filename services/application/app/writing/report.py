@@ -9,10 +9,13 @@ from dataclasses import replace
 
 from services.application.app.analysis.prompt_templates import PromptTemplateService
 from services.application.app.context_search.models import ContextPackage
+from services.application.app.writing.context_pointer import (
+    InvalidContextPointer, POINTER_KEYS, package_pointers,
+)
 from services.application.app.writing.json_extract import strip_code_fence
 from services.application.app.writing.models import (
-    CandidateClaim, CandidateClaimType, MemoryHintType, NewMemoryHint,
-    RiskNote, RiskNoteType, RiskSeverity, WritingCandidate,
+    CandidateClaim, CandidateClaimType, ContextPointer, MemoryHintType,
+    NewMemoryHint, RiskNote, RiskNoteType, RiskSeverity, WritingCandidate,
 )
 from services.application.app.writing.prompt import format_context_package
 from services.application.app.writing.metering import MeteredCallError, add_usage
@@ -31,7 +34,10 @@ The object must have exactly these four fields:
     {
       "text": "non-empty string",
       "type": "narrative_event|character_state|location_state|relation_change|timeline_fact|foreshadowing_use|factual_claim|interpretation",
-      "requires_gate_check": true
+      "requires_gate_check": true,
+      "related_context_pointers": [
+        {"collection": "string", "document_id": "string", "version_id": "string", "content_hash": "string"}
+      ]
     }
   ],
   "new_memory_hints": [
@@ -51,7 +57,9 @@ The object must have exactly these four fields:
   ]
 }
 
-Each `type` and `severity` must be one literal from its pipe-separated list, not the whole list. Confidence must be a finite number from 0 through 1. Empty arrays are valid and preferred over invented facts. Do not invent database ids or pointers."""
+Each `type` and `severity` must be one literal from its pipe-separated list, not the whole list. Confidence must be a finite number from 0 through 1. Empty arrays are valid and preferred over invented facts.
+
+`related_context_pointers` is required on every claim. Each context_package item is shown as `- [label] {pointer JSON} text`. When a claim uses an item, copy that item's pointer object exactly — every field verbatim, including empty strings. Never invent, edit, merge, or repeat a pointer, and never use a pointer that is not shown in this request. When a claim has no supporting item, return `[]`."""
 
 
 class InvalidCandidateReport(RuntimeError): pass
@@ -80,12 +88,19 @@ class WritingCandidateReportService:
                              ) -> tuple[WritingCandidate, TokenUsage]:
         if candidate.project_id != package.project_id:
             raise InvalidCandidateReport("candidate and context belong to different projects")
+        # Both the allowlist and the prompt's pointer rendering project every
+        # item, so a cross-project or invariant-violating item is rejected here,
+        # before the provider is called (stable-pointer brief contracts 2/P-i).
+        try:
+            allowed = package_pointers(package)
+        except InvalidContextPointer as exc:
+            raise InvalidCandidateReport(str(exc)) from exc
         template = self.templates.get_template(task_type=TASK, version=VERSION)
         request = self._request(candidate, package, template.template)
         result = await self.provider.generate(request)
         usage = result.usage
         try:
-            report = parse_report(result.content)
+            report = parse_report(result.content, allowed_pointers=allowed)
         except ValueError as first:
             try:
                 repair = await self.provider.generate(ChatCompletionRequest(messages=(
@@ -96,7 +111,7 @@ class WritingCandidateReportService:
             except Exception as exc:
                 raise MeteredCallError(exc, usage) from exc
             usage = add_usage(usage, repair.usage)
-            try: report = parse_report(repair.content)
+            try: report = parse_report(repair.content, allowed_pointers=allowed)
             except ValueError as second:
                 cause = InvalidCandidateReport(str(second))
                 raise MeteredCallError(cause, usage) from second
@@ -104,19 +119,26 @@ class WritingCandidateReportService:
 
     def _request(self, candidate, package, template):
         payload = {"candidate_text": candidate.text,
-                   "context_package": format_context_package(package)}
+                   "context_package": format_context_package(
+                       package, include_pointers=True)}
         return ChatCompletionRequest(messages=(ChatMessage(role="system", content=template),
             ChatMessage(role="user", content=json.dumps(payload, ensure_ascii=False))),
             model=self.model, max_tokens=self.max_tokens, thinking=False)
 
 
-def parse_report(content: str) -> dict[str, object]:
+def parse_report(content: str, *,
+                 allowed_pointers: tuple[ContextPointer, ...] = ()) -> dict[str, object]:
+    """Strict parse. ``allowed_pointers`` is the current package's exact pointer
+    set (D2=A): a claim may only cite a member of it, so a pointer the model did
+    not see fails closed — the default empty allowlist admits ``[]`` claims only.
+    """
+    allowed = frozenset(allowed_pointers)
     root = json.loads(strip_code_fence(content))
     if not isinstance(root, Mapping) or set(root) != {"self_reported_constraints",
             "candidate_claims", "new_memory_hints", "risk_notes"}:
         raise ValueError("candidate report fields do not match schema")
     constraints = tuple(_string(x) for x in _list(root["self_reported_constraints"]))
-    claims = tuple(_claim(x) for x in _list(root["candidate_claims"]))
+    claims = tuple(_claim(x, allowed) for x in _list(root["candidate_claims"]))
     hints = tuple(_hint(x) for x in _list(root["new_memory_hints"]))
     risks = tuple(_risk(x) for x in _list(root["risk_notes"]))
     return dict(self_reported_constraints=constraints, candidate_claims=claims,
@@ -130,10 +152,21 @@ def _string(v):
     return v
 def _exact(v, keys):
     if not isinstance(v, Mapping) or set(v) != set(keys): raise ValueError("report item fields do not match schema")
-def _claim(v):
-    _exact(v, ("text", "type", "requires_gate_check"))
+def _claim(v, allowed):
+    _exact(v, ("text", "type", "requires_gate_check", "related_context_pointers"))
     if not isinstance(v["requires_gate_check"], bool): raise ValueError("requires_gate_check must be boolean")
-    return CandidateClaim(_string(v["text"]), CandidateClaimType(v["type"]), v["requires_gate_check"])
+    pointers = tuple(_pointer(x, allowed) for x in _list(v["related_context_pointers"]))
+    if len(set(pointers)) != len(pointers): raise ValueError("claim pointers must not repeat")
+    return CandidateClaim(_string(v["text"]), CandidateClaimType(v["type"]),
+                          v["requires_gate_check"], pointers)
+def _pointer(v, allowed):
+    _exact(v, POINTER_KEYS)
+    if any(not isinstance(v[key], str) for key in POINTER_KEYS):
+        raise ValueError("pointer fields must be strings")
+    pointer = ContextPointer(**{key: v[key] for key in POINTER_KEYS})
+    if pointer not in allowed:
+        raise ValueError("claim pointer is not an item of this context package")
+    return pointer
 def _hint(v):
     _exact(v, ("type", "text", "confidence", "should_analyze_after_save"))
     c=v["confidence"]

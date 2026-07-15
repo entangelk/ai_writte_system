@@ -13,9 +13,30 @@
 - **남은 Writing 트랙 중 작은 slice 하나 진행**: 오너는 Gate 과민 튜닝·stable pointer·persisted audit retention 중 현재 상태를 확인해 작은 작업 하나를 골라 진행하도록 지시했다. retention은 P5=A(자동 삭제 없음)를 바꾸는 운영정책, stable pointer는 정본/수명 계약 선행이라 즉시 구현에 부적합했다. 따라서 기록된 J1 선례의 필수 조건(라벨된 결정적 벤치마크)만 먼저 구현해 현 Gate 프롬프트 동작을 바꾸지 않고 튜닝 근거를 만든다.
 - **측정 메커니즘 M-i 확정**: `docs/plans/05-writing-loop-ceiling-composition-decisions.md`의 sub-decision에서 오너가 **M-i(in-process per-stage 측정 script)**를 선택했다. 각하된 M-ii(persisted audit에 per-stage token/ms 노출)는 P1=B "bodyless" 감사 결정을 수정해야 하고 retrieve_plan/context_search stage가 terminal_pass run에 없어 Gate 독립성 문제를 재발생시킨다. M-i는 audit 계약을 건드리지 않고(정본 보존, 로컬 1인 프로젝트 단계) `diagnose_writing_gate/report` 선례 패턴을 재사용하며 Gate 독립성 문제를 합성 retrieve_more Gate로 원천 회피한다. full-stack HTTP 지연은 wall-clock 여유율(B4)로 흡수한다.
 - **B2b ceiling B4 default-on 확정(~2x 여유율)**: 오너가 외부 llama(9080) 연결로 풀스택 라이브 측정을 승인해, v1.6.87 M-i 도구로 실 12B per-stage를 수집했다(raw ceiling 4991tok/51755ms, steady-state wall-clock ~28.8s). 오너 B4 결정: `WRITING_LOOP_MAX_TOTAL_TOKENS=10000`(raw 4991×2)·`WRITING_LOOP_MAX_WALL_CLOCK_MS=60000`(steady-state 28.8s×2), **default-on**. 근거: token은 작은 seed context라 실 프로덕션 context package 확대 여지를 2x로 흡수; wall-clock은 프로덕션 상시 app이 context_search warm이라 콜드 27s 대신 steady-state 기준 2x. code 기본(env 미설정)은 off 유지(M6=A 무변), 배포 기본만 발화.
+- **Stable pointer 필드 불변식 sub-decision: P-i(origin별 불변식 테이블) 확정**: stable pointer 구현 착수 전, 브리프 follow-up이 지정한 "세 origin의 non-empty 불변식 재확인"을 실행한 결과 **잠김 계약 1("네 non-empty string")이 실경로와 모순**임이 드러났다 — memory는 `content_hash`가, candidate는 `version_id`·`content_hash`가 하드코딩 빈값이고(두 store에 해당 필드 자체가 없음: `MemoryEntry`·`AnalysisCandidate`에 hash 없음, candidate엔 version도 없음), 동시에 회귀 매트릭스 under-strict 행은 세 origin 포인터가 모두 claim에서 round-trip할 것을 요구한다. 두 조건은 동시 만족 불가능하므로 CLAUDE.md §1과 브리프 follow-up("현 실경로에서 empty가 가능하면 owner 승인 없이 빈값을 허용하지 않는다")에 따라 구현을 멈추고 4선택지 브리프를 만들어 오너 확인을 받았다. **오너 P-i 확정**: wire는 exact 4 key를 유지하되 non-empty 요구를 origin별 테이블로 개정한다(`source_blocks`=4필드 non-empty, `memory_entries`=`content_hash`만 `""`, `analysis_candidates`=`version_id`·`content_hash` `""`, 미지 collection은 pointable 아님). 근거: 빈값을 "store에 그 필드가 존재하지 않는 origin"에만 좁혀 허용하면 follow-up의 취지(근거 없는 빈값 금지)를 지키면서 세 origin 인용 가능성(매트릭스)을 보존하고, source-block의 빈 version/hash 같은 실제 결함은 fails-closed로 남는다. 식별력도 유지된다 — memory id는 버전별, candidate id는 edit별로 고유해 hash 없이도 pointer가 특정 버전을 가리킨다. 각하: P-ii(균일 완화 — 실 결함도 조용히 통과), P-iii(source-block 전용 — canonical memory 기반 claim이 근거를 잃고 매트릭스 폐기 필요), P-iv(서버가 결측 필드 mint — store가 만든 적 없는 identity를 발명해 D1=A "기존 authority 재사용" 근거와 충돌).
 - **다음 slice로 multi-finding revise 선택 + D1=A/D2=A/D3=A 확정**: B2b ceiling live 수집이 풀스택 다운으로 막혀(오너/풀스택 과제), sandbox-내 병렬 후속 중 오너가 **Writing loop multi-finding revise**를 골랐다. 결정 브리프(`plans/05-writing-multi-finding-revise-decisions.md`)로 forks를 surface: **D1=A**(continuity-only 유지 — do_not_use/pov 자동 splice 제외, canon 보존)·**D2=A**(sequential, 라운드당 1 finding — 아키텍처가 이미 매 revise 뒤 re-gate하므로 자격 함수 완화만으로 순차 소진 성립; batch D2=B는 splice/계약 대규모 재작성이라 §2 위배)·D3=A(error severity 먼저). 근거: 로컬 1인 프로젝트지만 정본 보존 정책상 canon-민감 자동수정은 review 경로로 두고, 최소 변경으로 gap을 닫는다.
 
 ## Completed work
+
+### Stable context pointer 구현 (SoT v1.6.92, D1=A/D2=A/D3=A + P-i)
+
+- **착수 전 확인이 계약 모순을 잡음**: 브리프 follow-up이 요구한 origin 불변식 재확인(위 User Decisions P-i)에서 잠김 계약 1과 실경로가 충돌해, 코드를 쓰기 전에 오너 결정을 받아 계약 1을 origin별 테이블로 개정했다. 브리프에 sub-decision 섹션(관측 사실 표·모순·4선택지·추천·반영 지점)을 남겼다.
+- **`services/application/app/writing/context_pointer.py`(신규 코어)**: `context_pointer_of(IndexPointer, project_id)`가 P-i 테이블(`_NON_EMPTY_FIELDS`)로 origin별 필드를 검사하고 `project_id`를 떨어뜨린 `ContextPointer`를 만든다(D1=A). collection 리터럴은 정본 위치에서 import(`indexing/service.py`의 `SOURCE_BLOCK_COLLECTION`/`MEMORIES_COLLECTION`, `context_search/service.py`의 `CANDIDATES_COLLECTION`)해 2차 정의를 만들지 않았다. `package_pointers(package)`가 macro+micro 전체의 allowlist를, `pointer_wire`/`pointer_json`이 public wire와 canonical 렌더링을 담당한다.
+- **`writing/models.py`**: `ContextPointer` 4-string frozen dataclass + `CandidateClaim.related_context_pointers` additive(dataclass 기본 `()` — wire requiredness는 parser가 강제, revise의 claim reset 등 비-report 구성은 그대로 유효).
+- **노출 경계(D2=A, 계약 3)**: `format_context_package(package, *, include_pointers=False)` opt-in. report `_request`만 `True`로 호출해 item 줄이 `- [label] {pointer JSON} text`가 되고, generation/revise/Gate prompt는 기본값이라 **출력 무변**(D2=B "모든 prompt에 pointer 노출"은 오너가 각하한 축).
+- **검증(계약 5)**: `parse_report(content, *, allowed_pointers=())`가 exact 4-key/string 검사 후 **current-package exact membership**를 확인하고 claim 내 중복을 거부한다. 기본 빈 allowlist는 fails-closed(=`[]` claim만 통과). `enrich_metered`는 allowlist를 **provider 호출 전** 만들어 cross-project·P-i 위반 item을 `InvalidCandidateReport`로 거부(기존 HTTP taxonomy 무변, repair 횟수 무변).
+- **소비 표면(계약 4)**: HTTP `_writing_candidate_payload`(main.py)·Gate prompt payload·accept→Analysis advisory copy 세 곳에 `pointer_wire`로 동일 literal 직렬화. Gate decision schema·loop audit bodyless schema는 무변(audit은 claim을 만지지 않음 — 스윕으로 확인).
+- **fixture 정정(D3=A 귀결)**: pointer 없는 기존 report JSON은 신 parser에서 invalid — 브리프가 명시적으로 수용한 계약 변경이다(report는 비영속·재추출 가능). `tests/test_writing_report.py::_payload`와 report live-diag fixture의 claim에 `related_context_pointers: []`를 넣어 새 계약으로 정정했다.
+- **진단 충실성**: `report_live_diag._reparse_error`가 production과 같은 allowlist로 재파싱하도록 인자를 추가했다 — 안 그러면 operator가 보는 pointer 절이 production이 겪은 절이 아니라 재파싱 아티팩트가 된다. 두 호출 지점 모두 report stage 이후라 projection은 이미 성공한 상태다.
+- **패턴 스윕(§4)**: `related_context_pointers`/`candidate_claims`/`format_context_package` repo-wide 확인 — claim 직렬화는 정확히 4곳(report parse·gate prompt·accept·main), formatter opt-in은 report 한 곳, loop audit은 claim 미접촉. 누락·중복 없음.
+
+#### 독립 검증 PASS(조건 없음) + 비차단 hardening 반영 (v1.6.92)
+
+- 오너 요청으로 독립 검증 실행됨(`docs/verifications/2026-07-15/writing_stable_context_pointer.md`). **평결 PASS(조건 없음)** — 경계 매트릭스 빈 셀 없음(계약 1~6의 should-fire/should-NOT-fire 전부 named 회귀 매핑), 착수 전 모순 포착·P-i 개정 절차가 CLAUDE.md §1에 정합, spec↔코드 literal 일치·불변 표면 무변 독립 확인, focused 28/17·full 1093/48/257·`provider.calls==0`·정적 검사 전부 재현. 차단 findings 0. 비차단 hardening 3건 중 **2건 반영**(H3은 반영 대상 아님):
+  - **H2(실효성 가장 높음) — generation/revise service-seam no-pointer 테스트 부재**: D2=B 각하 축(평문 prompt에 pointer 미노출)이 formatter 단위 테스트 + 호출처 grep으로만 잠겨 있어, 누군가 call site에 `include_pointers=True`를 끼워 넣으면 formatter 테스트는 통과해 버린다. `test_generation_service_sends_no_pointer`(실 `WritingService.generate`)·`test_revise_service_sends_no_pointer`(실 `WritingRevisionService.revise`)를 추가해 실제 provider request 본문에 pointer JSON·collection literal이 없음을 assert. **bite 실증**: 두 call site(`prompt.py:147`·`revise.py:119`)에 `include_pointers=True` mutation을 넣자 **정확히 이 2개만 실패**(나머지 29 통과) → formatter 테스트가 못 잡는 분기를 새 테스트가 잡음을 확인, mutation 복원 후 green.
+  - **H1 — `related_context_pointers` 비-배열 전용 회귀 부재**: 공유 `_list` 헬퍼가 이미 거부하고 `test_writing_report.py`가 메커니즘을 lock하므로 slice 고유 분기는 아니나, pointer 계약 클래스의 자체 완결성을 위해 `test_non_array_pointer_field_is_rejected`(str/dict/int 매개변수화)를 추가. **bite 실증**: `_claim`이 `_list`를 우회하도록 mutation하자 3개 subtest 전부 실패, 복원 후 green.
+  - **H3 — 실 12B pointer 준수율 sandbox 검증 불가**: 검증자도 "slice 결함이 아닌 본질적 한계"로 분류했고, 이미 work_log·HANDOFF·Next steps에 오너 풀스택 후속으로 명시돼 있어 **추가 조치 없음**. 실패 재현 전 prompt 미건드림이 올바른 태도(Gate quality 21/21 선례).
+- **프로덕션 코드 무변**: 이 hardening 턴은 테스트만 추가했다(`git diff --stat services/`가 slice 이전과 동일, mutation 복원 exact — `revise.py` 미변경 확인). focused 31/20(28/17 대비 +3/+3), full **1096 passed / 48 skipped / 260 subtests**. `py_compile`·`git diff --check` 통과.
 
 ### Stable context pointer 착수 결정 브리프 준비
 
@@ -76,6 +97,9 @@
 
 ## Issues found
 
+- **stable pointer 잠김 계약 1이 실경로와 모순(구현 전 발견 → 오너 P-i로 해소)**: 브리프 follow-up이 지정한 사전 확인이 실제로 작동했다. 계약 1은 pointer 4필드 non-empty를 요구했으나 memory/candidate origin은 구조적으로 빈 필드를 갖고, 매트릭스는 세 origin 인용을 요구해 동시 만족이 불가능했다. 원인은 두 store가 SOT snapshot이 아니라 store 권위이고 text가 `derive_memory_index_text` 파생값이라 해시할 raw 정본이 없다는 점이다(기존 코드도 해당 필드를 "inert"로 주석하고 Gate가 origin 분기로 우회). 임의 선택 없이 오너 결정(P-i)을 받아 계약 1을 origin별 테이블로 개정하고 SoT/브리프에 반영했다.
+- **기존 report fixture가 신 parser에서 invalid**: D3=A가 명시적으로 수용한 계약 변경(브리프: "신규 필드 없는 이전 report JSON은 신 parser에서 invalid — 현 report는 비영속·재추출 가능")이라 회귀가 아니다. `_payload` 등 fixture를 새 계약으로 정정했고, 영속 데이터가 없어 migration은 불필요하다.
+
 - **호스트 첫 실행은 sandbox 네트워크로 무효**: `127.0.0.1:8011` Gateway를 호스트 Python에서 호출한 첫 run은 21건 전부 `gateway unavailable`로 fail-closed했다. LLM `/health` 및 Compose는 healthy였으므로 모델 실패가 아니다. 신규 script/module을 현 application 컨테이너에 복사해 production 네트워크로 재실행해 성공. 첫 실패는 baseline artifact에 포함하지 않음.
 - **명확한 fixture에서 과민 판정 미재현**: 21/21 정답이므로 현 프롬프트를 바꿀 근거가 없다. 종전 B2b 과민 신호는 revise/report가 만든 더 모호한 candidate/context 조합 또는 샘플링 변동에 의존했을 가능성이 있다. 실패 재현 fixture 없이 prompt를 완화하면 under-strict 회귀 위험이 더 크다.
 - **세 잔여 항목의 착수 성격이 다름**: retention은 P5=A 변경 owner brief가 필수하고 stable pointer는 pointer 정본/수명 계약을 먼저 정해야 한다. Gate 튜닝도 즉시 prompt 변경은 라벨 accuracy 근거가 없어 부적합하므로, 이번 slice는 판별 벤치마크로 제한했다.
@@ -105,6 +129,13 @@
 
 ## Verification
 
+- **Stable context pointer(v1.6.92)**:
+  - focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_context_pointer.py` → **31 passed / 20 subtests**(초기 28/17 + 검증 hardening H2 2 + H1 1[3 subtest]).
+  - full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1096 passed / 48 skipped / 260 subtests**(hardening 전 1093/48/257). 본 환경은 ES 패키지 **미설치**(48 skip)라 baseline이 1065이며 정확히 +31/+20이다(v1.6.90의 1068/45/240은 ES 설치 환경 기준).
+  - `py_compile`(신규/변경 8개 모듈+테스트), `docker compose config --quiet`, `git diff --check` 통과. import cycle 없음을 `import services.application.app.main`으로 실측(`prompt`→`context_pointer`→`context_search.service`→`planner`→`writing.json_extract`는 `writing/__init__.py`가 비어 있어 순환 아님).
+  - 양방향 회귀 매트릭스(브리프): **under-strict** — 세 origin 포인터 각각 projection·parse round-trip(exact object), 다중 pointer claim, 두 claim이 같은 item 인용, extractor prompt가 pointer JSON 노출 + 실 service 관통 claim 보존, HTTP/Gate/accept advisory wire. **over-strict** — 근거 없는 claim의 `[]` 정상 통과, generation/revise formatter는 pointer 미노출(D2=B 각하 축 lock), candidate 라벨 불변. **거부** — hallucinated 4필드 각각·다른 package의 valid-looking pointer·rogue/missing key·non-string·claim 내 중복·미지 collection·cross-project(provider 호출 0 실증)·P-i 위반(source-block 빈 version/hash/document_id, memory 채워진 hash, candidate 채워진 version/hash — provider 호출 0 실증)·fence 안의 unknown pointer.
+  - **실 12B live 미실행**: 이 slice는 sandbox 내 결정적 회귀로 검증했다. 새 pointer 지시문에 대한 12B의 실 준수율(모델이 pointer를 정확히 복사하는지, `[]` 남용/hallucination 빈도)은 **오너의 풀스택 실행 후속**이며, 실패 시 `scripts/diagnose_writing_report.py`가 first+repair raw로 exact 절을 보여준다.
+
 - **Writing Gate quality benchmark(v1.6.90)**:
   - focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_gate_quality.py` → **6 passed**.
   - Gate focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_gate.py tests/test_writing_gate_quality.py` → **36 passed / 29 subtests**.
@@ -132,6 +163,7 @@
 
 ## Next steps
 
-- **Stable pointer 구현 준비 완료**: `05-writing-stable-context-pointer-decisions.md` D1=A/D2=A/D3=A와 기존 self-report D2=A first→B의 B 전환이 확정됐다. 다음 작업은 별도 결정 없이 dataclass→report formatter/parser→HTTP/Gate/accept advisory→양방향 회귀 순으로 바로 시작한다.
+- **Stable pointer 구현 완료(v1.6.92)**: self-report D2=A first→B의 B가 닫혔다. 남은 후속은 브리프 Deferred 그대로 — opaque pointer registry·dereference API, persisted candidate/report entity, hint/risk pointer, frontend citation UI. 지금 열 필요는 없다.
+- **실 12B pointer 준수 관측(오너 풀스택)**: 새 지시문에 대한 12B의 pointer 복사 정확도는 sandbox에서 검증 불가다. `/writing/report` 또는 `/writing/revise-and-gate`를 실 gateway로 한 번 돌려 `invalid_candidate_report` 502가 늘지 않는지 확인하고, 실패 시 `scripts/diagnose_writing_report.py`로 exact 절을 본다. Gate quality baseline(21/21)처럼 실패가 재현될 때만 프롬프트를 손댄다.
 - Gate 튜닝은 보류. 실 오판이 다시 관측되면 candidate/context를 bodyless 정책 내에서 재현 가능한 fixture로 축소해 벤치마크에 먼저 추가한다.
-- 다른 작업으로 넘어가도 됨. Writing의 바로 실행 가능한 후속은 stable pointer 구현이고, 별도 owner brief 잔여는 persisted audit retention(P5=A 변경)이다.
+- Writing의 별도 owner brief 잔여는 persisted audit retention(P5=A 변경)이며, 대안 트랙은 Phase 6 UI 잔여다.

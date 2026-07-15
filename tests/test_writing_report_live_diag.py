@@ -194,7 +194,8 @@ class RunReportDiagnosisTest(unittest.TestCase):
 
     def test_successful_parse_captures_first_raw_and_counts(self):
         diag, capture = _drive([_gen(_report_json(
-            claims='[{"text":"x","type":"narrative_event","requires_gate_check":true}]',
+            claims='[{"text":"x","type":"narrative_event","requires_gate_check":true,'
+                   '"related_context_pointers":[]}]',
             hints='[{"type":"event","text":"y","confidence":0.5,"should_analyze_after_save":false}]',
             risks='[{"type":"pov","severity":"low","message":"z"}]'))])
         self.assertEqual(diag.parse_status, REPORT_PARSED_OK)
