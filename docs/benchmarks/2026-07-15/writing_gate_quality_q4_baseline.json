@@ -1,0 +1,80 @@
+{
+  "accuracy": 1.0,
+  "attempt_count": 21,
+  "case_count": 7,
+  "complete": true,
+  "fixture_version": "writing_gate_quality_v1",
+  "gateway_base_url": "http://gateway:8001",
+  "llama_base_url": "http://192.168.1.22:9080",
+  "matched_count": 21,
+  "max_tokens": 1024,
+  "model": "google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0",
+  "prompt_version": "writing_gate_v1",
+  "repeats": 3,
+  "cases": [
+    {
+      "actual_decisions": ["pass", "pass", "pass"],
+      "actual_finding_types": [[], [], []],
+      "case_id": "pass_live_seed_transition",
+      "expected_decision": "pass",
+      "expected_finding_types": [],
+      "matched": [true, true, true],
+      "total_tokens": [557, 557, 557]
+    },
+    {
+      "actual_decisions": ["pass", "pass", "pass"],
+      "actual_finding_types": [[], [], []],
+      "case_id": "pass_compatible_new_action",
+      "expected_decision": "pass",
+      "expected_finding_types": [],
+      "matched": [true, true, true],
+      "total_tokens": [518, 518, 506]
+    },
+    {
+      "actual_decisions": ["revise", "revise", "revise"],
+      "actual_finding_types": [["continuity"], ["continuity"], ["continuity"]],
+      "case_id": "revise_repairable_continuity",
+      "expected_decision": "revise",
+      "expected_finding_types": ["continuity"],
+      "matched": [true, true, true],
+      "total_tokens": [578, 568, 564]
+    },
+    {
+      "actual_decisions": ["retrieve_more", "retrieve_more", "retrieve_more"],
+      "actual_finding_types": [["continuity"], ["continuity"], ["continuity"]],
+      "case_id": "retrieve_more_missing_canon",
+      "expected_decision": "retrieve_more",
+      "expected_finding_types": ["continuity"],
+      "matched": [true, true, true],
+      "total_tokens": [573, 595, 562]
+    },
+    {
+      "actual_decisions": ["needs_user_review", "needs_user_review", "needs_user_review"],
+      "actual_finding_types": [["continuity"], ["continuity"], ["continuity"]],
+      "case_id": "needs_review_conflicting_context",
+      "expected_decision": "needs_user_review",
+      "expected_finding_types": ["continuity"],
+      "matched": [true, true, true],
+      "total_tokens": [605, 613, 612]
+    },
+    {
+      "actual_decisions": ["block", "block", "block"],
+      "actual_finding_types": [["do_not_use"], ["do_not_use"], ["do_not_use"]],
+      "case_id": "block_do_not_use",
+      "expected_decision": "block",
+      "expected_finding_types": ["do_not_use"],
+      "matched": [true, true, true],
+      "total_tokens": [582, 586, 564]
+    },
+    {
+      "actual_decisions": ["block", "block", "block"],
+      "actual_finding_types": [["pov"], ["pov"], ["pov"]],
+      "case_id": "block_explicit_pov",
+      "expected_decision": "block",
+      "expected_finding_types": ["pov"],
+      "matched": [true, true, true],
+      "total_tokens": [606, 612, 608]
+    }
+  ],
+  "succeeded_count": 21
+}

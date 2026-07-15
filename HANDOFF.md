@@ -5,9 +5,11 @@
 
 ## Current Status
 
-- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.86**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
+- 정본 SoT는 `docs/system-contract-sot.md`이며 현재 **v1.6.90**(Approved). SoT가 정본 우선순위이고, 미확정 항목은 추측 구현하지 않는다.
 - **Phase 5.10 verification closure ready**: 독립 검증 기록 `docs/verifications/2026-07-13/writing_loop_aggregate_budget.md`와 B1 legacy-Mongo test closure + H2 의미 주석이 반영되었다. 검증은 972/48/215로 green이다.
 - 개발 진입점은 `docs/plans/README.md`. `docs/` 루트의 설계 문서는 초기 아이디에이션 자료다.
+- **Latest Writing increment (v1.6.90)**: Gate 과민 `revise`/`not_eligible` 튜닝의 전치로 5 decision 전부를 7개 라벨 fixture로 고정한 read-only 품질 벤치마크를 추가했다. `writing/gate_quality.py` + `scripts/benchmark_writing_gate.py` (repeats 기본 3)가 production Gate factory/prompt/model/thinking/max_tokens를 재사용해 expected/actual decision·finding type·token·error·accuracy를 bodyless JSON으로 출력한다. 정상 역내 이동·정본과 양립하는 새 행동이 `pass` over-strict guard다. runtime prompt/schema/literal 무변, 쓰기 0, raw prose 미출력. 실 12B baseline→prompt 변경 브리프→동일 fixture 재측정은 후속.
+- **Gate quality live baseline 완료**: `192.168.1.22:9080` / `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`, 7 case×3에서 **21/21 match, accuracy 1.0, complete=true**, fault 0. 아티팩트 `docs/benchmarks/2026-07-15/writing_gate_quality_q4_baseline.json`. 명확한 경계에서 과민 판정이 재현되지 않아 **현 prompt 튜닝은 보류**. 실 오판을 재현하는 fixture가 생길 때만 재개한다.
 - 구현된 계층(모두 회귀로 잠김, 아래는 현재 동작하는 표면):
   - **LLM Gateway**: FastAPI shell(`/health/live`·`/health/ready`·`/v1/generate`), llama.cpp 호환 provider + httpx async adapter, provider error 5종→HTTP status 매핑.
   - **Core SOT**: project/draft CRUD·version read/export(txt·markdown)·source_ref catalog HTTP API. pymongo(sync) adapter(transaction 기본 + single-writer fallback), idempotency는 unique index 강제.
@@ -97,6 +99,8 @@
 
 ## Next Tasks
 
+- **Writing 다음 선택지**: Gate 튜닝은 21/21 baseline으로 보류됐으므로 다른 작업으로 넘어가도 된다. 잔여는 stable pointer 계약 브리프와 persisted audit retention(P5=A 변경) 브리프. 실 Gate 오판이 재관측될 때는 프롬프트보다 재현 fixture를 먼저 추가한다.
+
 1. **Phase 5.2 Writing Gate 구현 완료(v1.6.69)** — 별도 LLM Gate service/prompt/models + `POST /projects/{id}/writing/gate`, 구조화 findings와 다섯 decision/우선순위, project isolation·strict JSON/provider error mapping을 회귀로 잠갔다. 다음 핵심 후보:
    - **accept→save→analysis 재진입 완료(v1.6.70)** — 다음 Writing 후보는 구조적 self-report 또는 finding evidence 기반 부분 revise/retrieve orchestration.
    - **bounded revise/retrieve loop + persisted audit + aggregate budget 완료(v1.6.71~85)** — B2b context seed 보완 후 remote 12B live는 Gate stage `invalid_gate_result`(root cause: markdown fence 래핑)로 502가 됐다. **gate D1=A diagnostic(v1.6.82) + D2=A fence-strip(v1.6.83) + 재측정 + report D1=A diagnostic(v1.6.84) + D2=A fence-strip(v1.6.85) 완료** — gate·report 양 parser의 fence 추출 해소. 재측정 1/12 success(나머진 `unexpected_loop_trace`). **잔존 4개 tracked debt parser fence 추출은 v1.6.86으로 완료(추적 부채 0).** **`unexpected_loop_trace` 조사 완료** → Gate 독립성(prose steer 불가, retrieve_more live 0/12)이 근본 원인, harness 버그 아님. **오너가 ceiling 도출 Option A(per-stage 합성) 선택**, 합성 코어 구현·회귀(`docs/plans/05-writing-loop-ceiling-composition-decisions.md`). 측정 메커니즘 M-i 확정·도구 v1.6.87 구현 → **B2b 종결(v1.6.89)**: 라이브 per-stage 수집(실 12B) → raw ceiling 4991tok/51755ms → 오너 B4 ~2x default-on(10000tok/60000ms, compose 배포 기본). **multi-finding revise는 v1.6.88로 완료(D1=A/D2=A/D3=A)**. 이후 stable pointer, persisted 감사 retention·전체 중간 artifact(P1=C), Gate 프롬프트 튜닝(J1의 Gate 판).
@@ -112,6 +116,9 @@
 5. **Phase 7(대화형 수정·아이디에이션·저작 감독) 계획 수립됨** — 신규 페이즈 계획 `plans/07-conversational-authoring.md`(아이디에이션 원본 `docs/chat-revision-ideation.md`). **순차 구현**이라 Phase 5(글 생성)·Phase 6(검토) 이후 착수하며, directive 감독면(P5)은 Phase 6와 공동 설계. 확정 결정 D1~D10·슬라이스 P1~P5는 계획 문서에 있고, 슬라이스별 착수 브리프는 구현 시점에. *지금 당장 착수 대상 아님(현재 실 타깃은 Next Tasks #1 후보 / 순차상 Phase 5·6 선행).*
 
 ## Verification
+
+- **Writing Gate quality benchmark(v1.6.90)**: 7개 fixture가 5 decision을 전부 커버하고, `pass_live_seed_transition`·`pass_compatible_new_action`이 과민 판정 over-strict guard를 담당한다. scorer는 decision + required finding type을 채점하며 wrong decision·invalid parse를 mismatch로 fails-closed, case별 fault 격리, repeats 분리 채점. script는 `_default_writing_gate_service` production config parity. focused 6 passed; full 수치는 오늘 work log의 최종 Verification 참조.
+- **Writing Gate quality live**: application 컨테이너 production network에서 7×3 실행 → **21/21 match, accuracy 1.0, complete=true**, token 506~613, fault 0. 호스트 첫 실행의 sandbox `gateway unavailable` 21건은 모델 결과가 아니므로 artifact에서 제외.
 
 - **Writing loop multi-finding revise(v1.6.88, D1=A/D2=A/D3=A)**: `docs/plans/05-writing-multi-finding-revise-decisions.md`. `_eligible_revision_finding`을 "정확히 1개"→"자격 continuity revise finding 중 severity desc→gate순서 최우선 1개 선택"으로 완화(per-finding 자격 `_is_eligible_continuity_revise` 추출, do_not_use/pov 제외 유지). loop 기존 re-gate가 남은 finding을 다음 라운드에 선택해 순차 소진; finding당 revision round 1이라 구조 상한이 총량 bound. 변경 표면=자격 함수 1개(reviser/splice/report/Gate/audit/budget·public literal·schema·서비스 경계 무변). 회귀 +7(`EligibleRevisionFindingTest` 5: 자격 0→None·단일·2개 첫 선택·error 우선 order-independent·ineligible 혼재 시 eligible 선택 / `MultiFindingSequentialLoopTest` 2: 실 reviser 관통 순차→pass·기본 상한 budget_exhausted). 기존 "2 findings→not_eligible" boundary case를 새 계약으로 정정. 패턴 스윕: `_eligible_revision_finding`이 유일 소비처(다른 단일-finding 가정 없음). **오너 독립 검증 PASS(조건 없음)**(`docs/verifications/2026-07-15/writing_multi_finding_revise.md`) — 경계 매트릭스 11 cell 전부 lock, 순차 소진 전제(re-gate) loop 본체 확인, 실 service+reviser end-to-end 관통. 비차단 hardening 3건 반영: H1(브리프 "revise 분기 모든 finding revise 추천" → "recommended_decision=revise만 선택하므로 pass 혼재 안전"으로 정밀화)·H2(DO_NOT_USE 명시 ineligible 케이스)·H3(first-round finding=client 제공, selector는 후속 라운드만 — 설계 비대칭 문서화). focused 47/54, full 1062/45/240. `py_compile`·`docker compose config --quiet`·`git diff --check` 통과.
 - **B2b ceiling Option A per-stage 측정 도구(v1.6.87, M-i)**: `docs/plans/05-writing-loop-ceiling-composition-decisions.md`. 오너 M-i 확정 후 `writing/per_stage_measure.py`(`run_per_stage_measurement`)+`scripts/measure_writing_stages.py`가 각 loop stage를 production seam으로 조립·실 gateway 격리 호출해 `TokenUsage`+`perf_counter` 기록. context_search token 제외(합성 코어 `_TOKEN_STAGES` 동형)·retrieve_plan 합성 retrieve_more Gate(Gate 독립성 회피)·repeats 보수적 MAX·stage fault→`incomplete_stages`·쓰기 0. **오너 독립 검증 PASS(조건 없음)**(`docs/verifications/2026-07-15/writing_per_stage_measure_mi.md`) — 경계 매트릭스 빈 cell 없음, load-bearing 동형성 3건 1차 소스 CONFIRMED, tripwire bite 실증. 비차단 hardening 3건 반영: **H6**(CLI가 incomplete 측정에서 ceiling 무조건 합성→과소 산출 footgun; `compose_ceiling` 래퍼가 fails-closed — incomplete면 `ceiling.complete=false`+숫자 null)·**H2**(env→policy wiring 회귀)·**H1**(SoT v1.6.86 row에 합성 코어 역참조 보강). H3/H4/H5는 일반 메커니즘 커버·cosmetic·scope-외라 보류. 회귀 14개(초기 10 + hardening 4). focused 14, full 1055/45/235. `py_compile`·`docker compose config --quiet`·`git diff --check` 통과. **live per-stage 수집→합성→B4 승인은 sandbox 밖 풀스택 후속(오너)**.
@@ -162,14 +169,14 @@ docker-compose.llama.yml         # opt-in override: in-stack llama.cpp GPU 서�
 docs/
 ├── runbooks/local-llama-server.md   # 로컬 llama.cpp GPU 서버 opt-in 기동/설정/smoke runbook
 ├── README.md                    # 문서 분류와 진입점
-├── system-contract-sot.md       # 정본 계약 SoT(Approved, v1.6.81)
+├── system-contract-sot.md       # 정본 계약 SoT(Approved, v1.6.90)
 ├── abstract.md / *.md           # 보존된 아이디에이션 원본과 주제별 상세
 ├── plans/                       # 계획 + 착수 결정 브리프(README 인덱스)
 │   ├── README.md · 00-foundations.md · implementation-plan.md
 │   ├── 01-core-sot.md ~ 06-review-ui.md   # Phase별 계획
 │   ├── flat-loop-gate.md · llm-gateway.md · gemma4-reuse.md · product-shell.md · analysis-memory-taxonomy.md
 │   ├── 02-* / 02b-* / 03-* / 04-*-decisions.md   # slice별 착수 결정 브리프(대부분 Resolved)
-├── benchmarks/2026-06-30/       # Gemma Q4 budget 기본값 근거
+├── benchmarks/2026-06-30 … 2026-07-15/   # Gemma Q4 budget·Writing loop·Gate quality live 근거
 ├── daily_logs/2026-06-24 … 2026-07-08/work_log.md   # 상세 이력
 └── verifications/2026-06-24 … 2026-07-13/           # 독립 검증 기록
 services/
@@ -191,6 +198,7 @@ services/
     │                            #   + report_live_diag(v1.6.84 operator-only raw report diagnostics D1=A, first+repair capture)
     │                            #   + json_extract(v1.6.85 공유 strip_code_fence — gate/report fence 추출)
     │                            #   + per_stage_measure(v1.6.87 M-i per-stage 비용 측정 코어 — synthetic retrieve_more Gate, context_search token 제외, no-write)
+    │                            #   + gate_quality(v1.6.90 7-case labelled Gate quality benchmark core, no-write)
 tests/                           # 85개 test 모듈(도메인별 회귀 + live/smoke skip-aware) + fixtures/core_sot.py
 scripts/
 ├── smoke_llm_provider.py · benchmark_llm_provider.py
@@ -201,5 +209,6 @@ scripts/
 ├── phase2b_candidate_index_live_smoke.py · phase3b_archive_chroma_live_smoke.py   # b-2 candidate·3B archive live 관통 smoke(2026-07-12 신규, Mongo doc self-cleanup)
 ├── benchmark_writing_loop.py   # B2b deployed Writing loop benchmark(v1.6.81) + 합성 코어 worst_case_stage_counts/compose_worst_case_ceiling(v1.6.86 Option A) + diagnose_writing_gate.py(v1.6.82 D1=A operator-only raw Gate diagnostics) + diagnose_writing_report.py(v1.6.84 D1=A raw report diagnostics)
 ├── measure_writing_stages.py   # v1.6.87 M-i per-stage 비용 측정 CLI(production seam 조립·실 gateway 격리 측정→compose_worst_case_ceiling, no-write, JSON 출력)
+├── benchmark_writing_gate.py   # v1.6.90 production Gate 7-case labelled quality benchmark(repeats, fail-closed JSON, no-write)
 └── phase2b5_reindex_memory.py · phase2b5_reindex_candidate.py(둘 다 vector+lexical backfill, v1.6.58) · phase2b5_memory_reindex_live_smoke.py
 ```

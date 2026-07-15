@@ -2,16 +2,27 @@
 
 ## Goals
 
+- HANDOFF·오늘 로그의 Writing 잔여 3종(Gate 과민 튜닝, stable pointer, persisted audit retention)을 재확인하고 owner 정책을 선점하지 않는 작은 slice 하나를 완료한다.
 - HANDOFF와 2026-07-14 work_log이 지정한 다음 작업(B2b ceiling Option A의 **측정 메커니즘 M-i 확정 → per-stage 측정 도구 구현**)을 진행한다.
 - 측정 메커니즘(M-i vs M-ii)은 감사 계약(P1=B bodyless)을 건드릴지 갈리는 오너 결정이므로(CLAUDE.md §1) 임의 선택하지 않고 확인한 뒤 착수한다.
 
 ## User Decisions and Rationale
 
+- **남은 Writing 트랙 중 작은 slice 하나 진행**: 오너는 Gate 과민 튜닝·stable pointer·persisted audit retention 중 현재 상태를 확인해 작은 작업 하나를 골라 진행하도록 지시했다. retention은 P5=A(자동 삭제 없음)를 바꾸는 운영정책, stable pointer는 정본/수명 계약 선행이라 즉시 구현에 부적합했다. 따라서 기록된 J1 선례의 필수 조건(라벨된 결정적 벤치마크)만 먼저 구현해 현 Gate 프롬프트 동작을 바꾸지 않고 튜닝 근거를 만든다.
 - **측정 메커니즘 M-i 확정**: `docs/plans/05-writing-loop-ceiling-composition-decisions.md`의 sub-decision에서 오너가 **M-i(in-process per-stage 측정 script)**를 선택했다. 각하된 M-ii(persisted audit에 per-stage token/ms 노출)는 P1=B "bodyless" 감사 결정을 수정해야 하고 retrieve_plan/context_search stage가 terminal_pass run에 없어 Gate 독립성 문제를 재발생시킨다. M-i는 audit 계약을 건드리지 않고(정본 보존, 로컬 1인 프로젝트 단계) `diagnose_writing_gate/report` 선례 패턴을 재사용하며 Gate 독립성 문제를 합성 retrieve_more Gate로 원천 회피한다. full-stack HTTP 지연은 wall-clock 여유율(B4)로 흡수한다.
 - **B2b ceiling B4 default-on 확정(~2x 여유율)**: 오너가 외부 llama(9080) 연결로 풀스택 라이브 측정을 승인해, v1.6.87 M-i 도구로 실 12B per-stage를 수집했다(raw ceiling 4991tok/51755ms, steady-state wall-clock ~28.8s). 오너 B4 결정: `WRITING_LOOP_MAX_TOTAL_TOKENS=10000`(raw 4991×2)·`WRITING_LOOP_MAX_WALL_CLOCK_MS=60000`(steady-state 28.8s×2), **default-on**. 근거: token은 작은 seed context라 실 프로덕션 context package 확대 여지를 2x로 흡수; wall-clock은 프로덕션 상시 app이 context_search warm이라 콜드 27s 대신 steady-state 기준 2x. code 기본(env 미설정)은 off 유지(M6=A 무변), 배포 기본만 발화.
 - **다음 slice로 multi-finding revise 선택 + D1=A/D2=A/D3=A 확정**: B2b ceiling live 수집이 풀스택 다운으로 막혀(오너/풀스택 과제), sandbox-내 병렬 후속 중 오너가 **Writing loop multi-finding revise**를 골랐다. 결정 브리프(`plans/05-writing-multi-finding-revise-decisions.md`)로 forks를 surface: **D1=A**(continuity-only 유지 — do_not_use/pov 자동 splice 제외, canon 보존)·**D2=A**(sequential, 라운드당 1 finding — 아키텍처가 이미 매 revise 뒤 re-gate하므로 자격 함수 완화만으로 순차 소진 성립; batch D2=B는 splice/계약 대규모 재작성이라 §2 위배)·D3=A(error severity 먼저). 근거: 로컬 1인 프로젝트지만 정본 보존 정책상 canon-민감 자동수정은 review 경로로 두고, 최소 변경으로 gap을 닫는다.
 
 ## Completed work
+
+### Writing Gate 판별 품질 라벨 벤치마크 (SoT v1.6.90)
+
+- **실 12B baseline 완료**: `192.168.1.22:9080` LLM을 보는 healthy Compose Gateway(`http://gateway:8001`)를 통해 application 컨테이너 안에서 7 case×3 repeats 실행. `complete=true`, `succeeded_count=21`, **matched 21/21, accuracy 1.0**, parse/provider fault 0. token 범위 506~613. 아티팩트 `docs/benchmarks/2026-07-15/writing_gate_quality_q4_baseline.json`.
+- `services/application/app/writing/gate_quality.py` 신규: Gate 5 decision을 7개 라벨 fixture로 고정. 실 B2b 과민 신호의 양방향 guard로 `pass_live_seed_transition`(플랫폼→역내 이동)·`pass_compatible_new_action`(편지 소지 상태와 양립하는 새 행동)을 `pass`로 잠금. 나머지는 repairable continuity contradiction=`revise`, canon 근거 부족=`retrieve_more`, context 상충=`needs_user_review`, do_not_use/POV hard violation=`block`.
+- `run_gate_quality_benchmark`: case×repeat를 독립 실행해 decision + required finding type을 채점. parse/provider fault는 다른 case를 중단하지 않고 `invalid_result|error`로 격리하며 mismatch로 fails-closed. token usage·complete·accuracy를 JSON-safe dict로 반환.
+- `scripts/benchmark_writing_gate.py` 신규: `_default_writing_gate_service` production factory를 재사용해 prompt/model/`thinking=false`/`WRITING_GATE_MAX_TOKENS`와 동형. repeats 기본 3, 정답 전부 match·complete일 때만 exit 0. 쓰기 0, 출력에 raw candidate/context 미포함.
+- `tests/test_writing_gate_quality.py` +6: 5 decision 매트릭스 + PASS over-strict guard 2건, 정답 전체 채점, wrong decision + invalid JSON fail-closed/격리, repeats 분리, production factory config parity, repeats<1 pre-provider 거부.
+- 변경 없음: `WRITING_GATE_TEMPLATE` 문구, prompt version, parser/schema/literal, HTTP/API, loop, audit/retention, stable pointer.
 
 ### Phase 5.10 Option A (M-i) per-stage 측정 도구 구현 (SoT v1.6.87)
 
@@ -55,6 +66,9 @@
 
 ## Issues found
 
+- **호스트 첫 실행은 sandbox 네트워크로 무효**: `127.0.0.1:8011` Gateway를 호스트 Python에서 호출한 첫 run은 21건 전부 `gateway unavailable`로 fail-closed했다. LLM `/health` 및 Compose는 healthy였으므로 모델 실패가 아니다. 신규 script/module을 현 application 컨테이너에 복사해 production 네트워크로 재실행해 성공. 첫 실패는 baseline artifact에 포함하지 않음.
+- **명확한 fixture에서 과민 판정 미재현**: 21/21 정답이므로 현 프롬프트를 바꿀 근거가 없다. 종전 B2b 과민 신호는 revise/report가 만든 더 모호한 candidate/context 조합 또는 샘플링 변동에 의존했을 가능성이 있다. 실패 재현 fixture 없이 prompt를 완화하면 under-strict 회귀 위험이 더 크다.
+- **세 잔여 항목의 착수 성격이 다름**: retention은 P5=A 변경 owner brief가 필수하고 stable pointer는 pointer 정본/수명 계약을 먼저 정해야 한다. Gate 튜닝도 즉시 prompt 변경은 라벨 accuracy 근거가 없어 부적합하므로, 이번 slice는 판별 벤치마크로 제한했다.
 - **context_search 콜드스타트(측정 하네스 아티팩트, 결함 아님)**: 위 참조. 1회성 컨테이너 첫 호출 비용이라 프로덕션 상시 app엔 미적용. steady-state 기준(B)을 wall-clock ceiling 근거로 채택.
 - 초기 테스트에서 두 가지가 드러났다:
   1. **부분 samples 유실**: `_measure_once`가 fault 시 `_StageMeasurementError`를 raise할 때 그때까지 모은 samples를 caller가 못 받아 모든 stage가 `incomplete`로 잘못 표시됐다. → `_measure_once`가 caller-provided `samples` 리스트에 append하도록 바꿔, fault 시에도 완료 stage를 보존(retain)하게 수정.
@@ -62,6 +76,9 @@
 
 ## Decisions
 
+- 운영: 실 12B baseline이 21/21 match이므로 **Gate prompt 튜닝은 지금 진행하지 않는다**. 현 `writing_gate_v1`을 기준으로 보존하고, 실 오판을 결정적으로 재현하는 fixture가 추가될 때만 owner brief→prompt 변경→동일 매트릭스 재측정 순서로 재개한다.
+- 구현: fixture label은 신규 정책이 아니라 `05-writing-gate-decisions.md` D3의 이미 확정된 decision 의미를 구체 예제로 내린 것이다. 이로써 prompt 문구·public contract·runtime 판정은 바꾸지 않았다.
+- 구현: 점수는 정확한 top-level decision과 예상 finding type 포함을 모두 요구한다. 비정상 출력을 accuracy 분모에서 빼지 않고 mismatch로 계산해 성공한 case만의 정확도로 오독하지 못하게 했다.
 - 오너: 측정 메커니즘 **M-i** 확정(위 User Decisions).
 - 구현: 측정 코어는 감사/API/파일 어디에도 쓰지 않는 read-only orchestration이며, gate/report live diagnostics와 동형 seam(production factory 재사용)을 쓴다. 출력이 숫자만이라 진단(raw prose, terminal-only)과 달리 JSON을 persist해도 안전 — 그래서 CLI는 machine-usable JSON을 낸다.
 - 구현: `context_search` token 제외·`retrieve_plan` 합성 Gate는 합성 코어 불변식(`_TOKEN_STAGES`)과 조사 결론(Gate 독립성)을 그대로 반영한 것이며, 새 계약 결정이 아니다.
@@ -77,6 +94,13 @@
 
 ## Verification
 
+- **Writing Gate quality benchmark(v1.6.90)**:
+  - focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_gate_quality.py` → **6 passed**.
+  - Gate focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_gate.py tests/test_writing_gate_quality.py` → **36 passed / 29 subtests**.
+  - full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1068 passed / 45 skipped / 240 subtests**(v1.6.88 1062 대비 +6). fail 없음; 기존 `TestClient` collection warning 3건만 유지.
+  - `python3 -m py_compile services/application/app/writing/gate_quality.py scripts/benchmark_writing_gate.py tests/test_writing_gate_quality.py`, CLI `--help`, `git diff --check` 통과.
+  - pattern sweep: `Gate quality|gate_quality|benchmark_writing_gate`를 repo-wide 탐색해 종전 J1/live smoke가 라벨을 assert하지 않는 관측기임을 재확인. 중복 품질 scorer 없음.
+  - live: application 컨테이너 안 `python scripts/benchmark_writing_gate.py --repeats 3` → **21/21 match, accuracy 1.0, complete=true**, model `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`, llama `192.168.1.22:9080`. Chroma telemetry warning 3건은 비차단이며 Gate 결과와 무관.
 - focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_per_stage_measure.py` → **14 passed**(초기 10 + hardening 4).
 - full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1055 passed / 45 skipped / 235 subtests**(v1.6.86 1041 대비 +14 신규 테스트). fail 없음.
 - `python3 -m py_compile services/application/app/writing/per_stage_measure.py scripts/measure_writing_stages.py tests/test_writing_per_stage_measure.py`, `docker compose config --quiet`, `git diff --check` 통과.
@@ -97,7 +121,5 @@
 
 ## Next steps
 
-- **(오너, sandbox 밖)** 풀스택 기동 후 `docker compose run --rm --no-deps application python scripts/measure_writing_stages.py --project-id <benchmark-project> --repeats 3`으로 실 12B per-stage token·ms를 수집한다. 출력 `ceiling.max_total_tokens`/`max_wall_clock_ms`가 raw 최악경로다.
-- **(오너)** raw ceiling에 **B4 여유율**을 얹어 `WRITING_LOOP_MAX_TOTAL_TOKENS`/`WRITING_LOOP_MAX_WALL_CLOCK_MS` production 기본값(default-on)을 확정한다.
-- **(별도 트랙)** 12B Gate 과민 revise/not_eligible finding = Gate 프롬프트 판별 튜닝(compare judge J1의 Gate 판) — 이 ceiling slice와 독립, 신호만 기록.
-- (선택) 측정 도구가 새 CLI/JSON 계약이므로 오너가 원하면 독립 검증 대상. 본 slice는 자체 회귀로 결정적 표면을 잠갔다.
+- Gate 튜닝은 보류. 실 오판이 다시 관측되면 candidate/context를 bodyless 정책 내에서 재현 가능한 fixture로 축소해 벤치마크에 먼저 추가한다.
+- 다른 작업으로 넘어가도 됨. Writing 독립 잔여는 stable pointer 계약 브리프와 persisted audit retention(P5=A 변경) 브리프다.
