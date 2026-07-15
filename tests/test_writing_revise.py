@@ -1154,6 +1154,8 @@ class EligibleRevisionFindingTest(unittest.TestCase):
         for findings in (
             (),
             (self._cont("잘못된 문장.", finding_type=WritingGateFindingType.POV),),
+            (self._cont("잘못된 문장.",
+                        finding_type=WritingGateFindingType.DO_NOT_USE),),
             (self._cont("잘못된 문장.", decision=WritingGateDecision.RETRIEVE_MORE),),
             (self._cont("없는 문장."),),
             (self._cont("문장."),),  # occurs 3x → ambiguous anchor

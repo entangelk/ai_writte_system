@@ -70,10 +70,16 @@
 
 ### multi-finding revise 검증 (SoT v1.6.88)
 
-- focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_revise.py` → **47 passed / 53 subtests**(신규 `EligibleRevisionFindingTest` 5 + `MultiFindingSequentialLoopTest` 2 포함, 정정된 boundary 테스트 포함).
-- full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1062 passed / 45 skipped / 239 subtests**(v1.6.87 1055 대비 +7). fail 없음.
+- focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_revise.py` → **47 passed / 54 subtests**(신규 `EligibleRevisionFindingTest` 5 + `MultiFindingSequentialLoopTest` 2 포함, 정정된 boundary 테스트 포함).
+- full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1062 passed / 45 skipped / 240 subtests**(v1.6.87 1055 대비 +7). fail 없음.
 - `python3 -m py_compile services/application/app/writing/revise_gate.py tests/test_writing_revise.py`, `docker compose config --quiet`, `git diff --check` 통과.
 - 동작 실측: `MultiFindingSequentialLoopTest`가 실 `WritingReviseGateService.run` + 실 `WritingRevisionService` reviser를 관통해 2-finding 순차 revise→pass를 검증(단위 아닌 end-to-end 경로 관측).
+
+- **오너 독립 검증 PASS(조건 없음)**(`docs/verifications/2026-07-15/writing_multi_finding_revise.md`) — 경계 매트릭스 11 cell 전부 회귀 lock, 변경 표면 격리(자격 함수 유일 hunk), 순차 소진 전제 loop 본체 확인, worker claim 정규 명령 재현. 비차단 hardening 3건 반영:
+  - **H1(브리프 정밀도)**: 브리프 `05:27`의 "revise 분기의 모든 finding이 revise 추천"이 부정확(Gate decision priority상 `pass` 추천 finding이 섞일 수 있음). 코드는 `recommended_decision is REVISE` 필터로 정확 처리(브리프보다 robust)하나, 브리프/SoT 산문을 "revise 분기엔 retrieve_more/needs_review/block 추천 finding이 없고, 자격 함수가 recommended_decision=revise인 continuity finding만 선택하므로 pass 혼재도 안전"으로 정밀화.
+  - **H2(DO_NOT_USE 명시)**: 비-continuity ineligible 테스트가 POV만 썼다. `test_none_when_no_finding_eligible`에 `DO_NOT_USE` 케이스 추가(동일 필터링이나 별도 finding type 명시 커버). subtests 239→240.
+  - **H3(first-round 비대칭 문서화)**: `/writing/revise-and-gate` 진입의 첫 revise finding은 client 제공이고 selector는 후속 라운드만 다수 finding을 선택한다(진입 계약상 의도된 비대칭, `test_multi_finding_revise_processes_sequentially`가 관통). 브리프 Follow-up에 명시.
+  - hardening 후 focused 47/54, full 1062/45/240 유지.
 
 ## Next steps
 

@@ -7,7 +7,7 @@
 - **D1=A continuity-only 유지**: 각 선택 finding은 continuity + revise + evidence 후보 내 정확히 1회. do_not_use/pov는 revise 추천이어도 자동 splice 제외(Gate 계약이 block/needs_review로 라우팅).
 - **D2=A sequential**: `_eligible_revision_finding`을 "정확히 1개"에서 "N개 중 최우선 1개 선택"으로 완화. loop 기존 re-gate가 다음 라운드 finding을 선택, finding당 revision round 1 소비(구조 상한 bound). reviser/splice/report/gate/audit/budget 계약 무변.
 - **D3=A** (기본 적용): error severity 먼저, 동급이면 Gate 반환 순서(안정 정렬).
-- 구현: `revise_gate.py`에 per-finding 자격 `_is_eligible_continuity_revise` 추출 + `_eligible_revision_finding`이 자격 finding 중 severity desc→gate순서 최우선 1개 선택. 변경 표면 = 자격 함수 1개(loop·reviser·report·Gate 무변). 회귀 +7(`EligibleRevisionFindingTest` 5: 자격 0→None·단일·2개 첫 선택·error 우선 order-independent·ineligible 혼재 시 eligible 선택 / `MultiFindingSequentialLoopTest` 2: 실 reviser 관통 sequential 2-finding→pass·기본 상한 budget_exhausted bound). 기존 `test_revise_eligibility_rejects_every_broader_boundary`의 "2 continuity findings→not_eligible" case를 새 계약(eligible)으로 정정. full 1062/45/239.
+- 구현: `revise_gate.py`에 per-finding 자격 `_is_eligible_continuity_revise` 추출 + `_eligible_revision_finding`이 자격 finding 중 severity desc→gate순서 최우선 1개 선택. 변경 표면 = 자격 함수 1개(loop·reviser·report·Gate 무변). 회귀 +7(`EligibleRevisionFindingTest` 5: 자격 0→None[empty·POV·DO_NOT_USE·retrieve_more·evidence 부재·multi-occurrence]·단일·2개 첫 선택·error 우선 order-independent·ineligible 혼재 시 eligible 선택 / `MultiFindingSequentialLoopTest` 2: 실 reviser 관통 sequential 2-finding→pass·기본 상한 budget_exhausted bound). 기존 `test_revise_eligibility_rejects_every_broader_boundary`의 "2 continuity findings→not_eligible" case를 새 계약(eligible)으로 정정. full 1062/45/240. **독립 검증 PASS(조건 없음)** `docs/verifications/2026-07-15/writing_multi_finding_revise.md`; 비차단 hardening 3건 반영(H1 브리프 정밀도[revise 분기 finding 추론]·H2 DO_NOT_USE 명시 케이스·H3 first-round finding 비대칭 문서화).
 
 관련 정본: `docs/system-contract-sot.md` v1.6.87, `05-writing-loop-ceiling-composition-decisions.md`, `flat-loop-gate.md` §Budget, `revise_gate.py`(loop·`_eligible_revision_finding`), `gate.py`(`_PRIORITY`·finding 파싱), `gate_prompt.py`(finding 계약), Phase 5.6 부분 revise(v1.6.73) D4=C 후속.
 
@@ -24,7 +24,7 @@ if finding.recommended_decision is not REVISE: return None
 if not finding.evidence.strip() or candidate.text.count(finding.evidence) != 1: return None
 ```
 
-**Gate 계약상**(`gate.py:32-36,123-125`) loop가 revise 분기에 있으면 decision = findings의 `recommended_decision` 최대 우선순위 = `revise`이므로, **그 순간의 모든 finding이 `revise` 추천**이다(retrieve_more/needs_review/block 추천 finding이 있으면 decision이 그쪽으로 올라가 revise 분기 자체에 안 온다). 즉 revise 분기에서 finding이 2개+면 전부 revise 추천 continuity/기타인데, 현재는 **1개가 아니라는 이유만으로 자동 개선을 포기**(`not_eligible` 종료)한다.
+**Gate 계약상**(`gate.py:32-36,123-125`) loop가 revise 분기에 있으면 decision = findings의 `recommended_decision` 최대 우선순위 = `revise`이므로, **그 순간 어떤 finding도 `retrieve_more`/`needs_user_review`/`block`를 추천하지 않는다**(그들이 있으면 decision이 그쪽으로 올라가 revise 분기 자체에 안 온다). 남는 finding 추천은 `revise` 또는 `pass`인데(검증 H1: `pass` 추천 finding이 섞일 수 있음), **자격 함수가 `recommended_decision is REVISE`인 continuity finding만 선택**하므로 `pass` 추천이 섞여도 안전하다. 즉 revise 분기에서 revise-추천 continuity finding이 2개+면 정상적인 다수 지적인데, 현재는 **1개가 아니라는 이유만으로 자동 개선을 포기**(`not_eligible` 종료)한다.
 
 B2b 재측정에서 `not_eligible`이 다수 관측된 한 원인이기도 하다(다만 그건 finding 자격 strict 조건 미달이 주였다 — work_log 2026-07-14 Task 2). 실 Gate가 다수 continuity 문제를 한 번에 지적하는 정상 상황을 loop가 처리 못 하는 게 이 slice의 gap이다.
 
@@ -52,7 +52,7 @@ Gate가 revise 분기에서 **다수 finding**을 낼 때 loop가 이를 bounded
 
 ## D3 — 다수 자격 finding 중 선택 순서
 
-revise 분기에선 모든 finding이 revise 추천이므로 순서 기준이 필요하다.
+자격 함수가 revise-추천 continuity finding만 남기므로, 그중 다수일 때 순서 기준이 필요하다.
 
 | 선택지 | 설명 | 장점 | 단점 |
 |---|---|---|---|
@@ -72,3 +72,4 @@ revise 분기에선 모든 finding이 revise 추천이므로 순서 기준이 �
 - 완화 후에도 `evidence 후보 내 정확히 1회` 조건은 finding별 유지(splice 모호성 방지). 선택된 finding revise 후 candidate 텍스트가 바뀌므로 다음 라운드 gate가 새 텍스트로 재평가 — 남은 finding evidence가 여전히 1회인지 자연히 재검증된다.
 - `UnchangedWritingRevision`(no_change) + `max_revision_rounds`/`max_gate_evaluations`가 무한 루프를 이미 bound.
 - 선택 함수만 바뀌므로 loop `stages`/audit/aggregate budget 계약 무변(각 revise round가 기존대로 기록).
+- **first-round finding 비대칭(검증 H3, 설계상 의도)**: `/writing/revise-and-gate` 진입의 **첫 revise finding은 client 제공**(request body의 `finding`)이고 relaxed selector를 거치지 않는다. selector(`_eligible_revision_finding`)는 첫 Gate 이후 while-loop의 후속 라운드에서만 다수 finding을 선택한다. 진입 계약(첫 finding = 호출자 지정)상 의도된 비대칭이며, `test_multi_finding_revise_processes_sequentially`가 client 첫 finding + re-gate 2개 경로를 관통한다.

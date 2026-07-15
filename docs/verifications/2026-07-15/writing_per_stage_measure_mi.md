@@ -3,6 +3,7 @@
 ## Subject metadata
 
 - **Date**: 2026-07-15
+- **Post-verification note (2026-07-15, added during v1.6.88 audit)**: 본 기록은 **10-test pre-hardening** working tree를 검증했다. 커밋된 v1.6.87(`24d14fd`)이 본 기록의 비차단 hardening을 **반영** — H6(CLI ceiling incomplete 시 fails-closed: `measure_writing_stages.py:207-225`에 정상 구현, `compose_ceiling`이 `complete=not incomplete_stages and error is None`로 numeric ceiling null), H2(env→policy wiring 회귀), H1(SoT v1.6.86 역참조). per-stage test **10→14**. 따라서 본 기록의 H6/H2/H1은 **closed**(committed 코드에 반영, suite green 확인). 심층 재감사는 v1.6.88 검증(`writing_multi_finding_revise.md` Observations) 참조. 베이스라인은 1051→1055.
 - **Requester**: owner ("작업 AI가 작업한거 확인해서 검증하고 의심하고 또 의심해줄래?")
 - **Verifier**: independent audit (this session)
 - **Target slice/artifact**: B2b ceiling Option A 의 **측정 메커니즘 M-i** 구현
