@@ -1,6 +1,13 @@
 # 착수 결정 브리프 — Phase 5.10 B2b aggregate ceiling per-stage 합성 (Option A)
 
-상태: `In progress — 2026-07-15 (오너 Option A + 측정 메커니즘 M-i 확정; 합성 코어 v1.6.86 + M-i 측정 도구 v1.6.87 구현. 남은 것: sandbox 밖 live per-stage 수집 → 합성 → B4 여유율/default-on 오너 승인)`
+상태: `Resolved — 2026-07-15 (Option A 종결: 합성 코어 v1.6.86 + M-i 측정 도구 v1.6.87 + 라이브 per-stage 수집 + B4 default-on v1.6.89)`
+
+## Resolution (Option A 종결, 2026-07-15)
+
+- **live per-stage 수집 완료**: v1.6.87 M-i 도구를 풀스택(외부 llama `192.168.1.22:9080`)에서 실 12B로 3-pass 실행(`complete=true`). per-stage MAX = revise 323tok/1018ms·report 766/5578·gate 815/3368·retrieve_plan 368/1435·context_search 0tok(제외)/27024ms. 합성 raw = max_total_tokens **4991**·max_wall_clock_ms **51755**. raw 아티팩트 `docs/benchmarks/2026-07-15/writing_loop_per_stage_ceiling_q4.json`(+ 노트).
+- **context_search 콜드스타트 caveat**: 27s(pass1)는 측정 하네스 1회성 컨테이너의 Chroma/embedding 콜드스타트. 프로덕션 상시 app에선 warm(pass2/3 ~4s)이라 재현 안 됨 → steady-state wall-clock ≈ **28824ms**. token은 콜드 무관.
+- **오너 B4 결정(~2x 여유율, default-on)**: `WRITING_LOOP_MAX_TOTAL_TOKENS=10000`(raw 4991×2)·`WRITING_LOOP_MAX_WALL_CLOCK_MS=60000`(steady-state 28.8s×2). `docker-compose.yml` 배포 기본을 off→발화로 변경(SoT v1.6.89). code 기본(env 미설정)은 계속 off이라 M6=A 무변.
+- Option A(측정 메커니즘 M-i → live 수집 → 합성 → B4)로 B2b 종결.
 
 관련 정본: `docs/system-contract-sot.md` v1.6.86, `05-writing-loop-benchmark-decisions.md`(B1~B4), `05-writing-loop-budget-decisions.md`(M1~M6), `flat-loop-gate.md` §Budget, `revise_gate.py`(loop 구조·metering), `docs/benchmarks/2026-07-14/writing_loop_b2b_q4_post_fence_fix.json`(재측정)
 

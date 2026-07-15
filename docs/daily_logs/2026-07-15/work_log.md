@@ -8,6 +8,7 @@
 ## User Decisions and Rationale
 
 - **측정 메커니즘 M-i 확정**: `docs/plans/05-writing-loop-ceiling-composition-decisions.md`의 sub-decision에서 오너가 **M-i(in-process per-stage 측정 script)**를 선택했다. 각하된 M-ii(persisted audit에 per-stage token/ms 노출)는 P1=B "bodyless" 감사 결정을 수정해야 하고 retrieve_plan/context_search stage가 terminal_pass run에 없어 Gate 독립성 문제를 재발생시킨다. M-i는 audit 계약을 건드리지 않고(정본 보존, 로컬 1인 프로젝트 단계) `diagnose_writing_gate/report` 선례 패턴을 재사용하며 Gate 독립성 문제를 합성 retrieve_more Gate로 원천 회피한다. full-stack HTTP 지연은 wall-clock 여유율(B4)로 흡수한다.
+- **B2b ceiling B4 default-on 확정(~2x 여유율)**: 오너가 외부 llama(9080) 연결로 풀스택 라이브 측정을 승인해, v1.6.87 M-i 도구로 실 12B per-stage를 수집했다(raw ceiling 4991tok/51755ms, steady-state wall-clock ~28.8s). 오너 B4 결정: `WRITING_LOOP_MAX_TOTAL_TOKENS=10000`(raw 4991×2)·`WRITING_LOOP_MAX_WALL_CLOCK_MS=60000`(steady-state 28.8s×2), **default-on**. 근거: token은 작은 seed context라 실 프로덕션 context package 확대 여지를 2x로 흡수; wall-clock은 프로덕션 상시 app이 context_search warm이라 콜드 27s 대신 steady-state 기준 2x. code 기본(env 미설정)은 off 유지(M6=A 무변), 배포 기본만 발화.
 - **다음 slice로 multi-finding revise 선택 + D1=A/D2=A/D3=A 확정**: B2b ceiling live 수집이 풀스택 다운으로 막혀(오너/풀스택 과제), sandbox-내 병렬 후속 중 오너가 **Writing loop multi-finding revise**를 골랐다. 결정 브리프(`plans/05-writing-multi-finding-revise-decisions.md`)로 forks를 surface: **D1=A**(continuity-only 유지 — do_not_use/pov 자동 splice 제외, canon 보존)·**D2=A**(sequential, 라운드당 1 finding — 아키텍처가 이미 매 revise 뒤 re-gate하므로 자격 함수 완화만으로 순차 소진 성립; batch D2=B는 splice/계약 대규모 재작성이라 §2 위배)·D3=A(error severity 먼저). 근거: 로컬 1인 프로젝트지만 정본 보존 정책상 canon-민감 자동수정은 review 경로로 두고, 최소 변경으로 gap을 닫는다.
 
 ## Completed work
@@ -40,8 +41,21 @@
 - **회귀 +7**: `EligibleRevisionFindingTest` 5(자격 0→None under-strict[empty·POV·retrieve_more·evidence 부재·multi-occurrence]·단일 반환·2개 첫 선택·error 우선 order-independent[D3]·ineligible 혼재 시 eligible 선택[old len≠1 dead-end 제거 증명])·`MultiFindingSequentialLoopTest` 2(실 `WritingRevisionService` reviser 관통 2-finding 순차→pass·기본 상한 budget_exhausted over-strict bound). 기존 `test_revise_eligibility_rejects_every_broader_boundary`의 "2 continuity findings→not_eligible" case를 새 계약(eligible)으로 정정(주석으로 multi-finding 테스트 상호참조).
 - **패턴 스윕(§4)**: `grep`으로 `len(findings)`/`findings[0]`/`_eligible_revision_finding` 소비처 확인 — writing source에서 `_eligible_revision_finding`이 유일 소비처(`revise_gate.py:396`), 다른 단일-finding 가정 없음.
 
+### B2b ceiling 라이브 per-stage 수집 + B4 default-on (SoT v1.6.89)
+
+- **풀스택 기동**: 오너가 외부 llama 엔드포인트(`192.168.1.22:9080`) 연결로 풀스택 라이브를 승인. application 이미지 재빌드(신규 `measure_writing_stages.py` bake), env override(`MONGO_PORT=27019`/`GATEWAY_PORT=8011`/`LLAMA_BASE_URL=http://192.168.1.22:9080`/`LLAMA_DEFAULT_MODEL=google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`)로 `docker compose up -d`. gateway `/health/ready=ready`, 전 서비스 healthy. 포트 충돌(shared-mongo 27017·agent-memory-chroma 8001) 회피 확인.
+- **측정 실행**: benchmark 프로젝트(`6a573f8e6d46c52c517d02e7`) 생성 후 `docker compose run --rm --no-deps application python scripts/measure_writing_stages.py --project-id <id> --repeats 3`. 결과 `complete=true`, `incomplete_stages=[]`, 실 12B 관통.
+  - per-stage MAX: revise 323tok/1018ms·report 766/5578·gate 815/3368·retrieve_plan 368/1435·context_search 0tok(제외)/27024ms.
+  - 합성 raw ceiling(기본 정책 2/1/3): **max_total_tokens 4991·max_wall_clock_ms 51755**.
+- **context_search 콜드스타트 발견**: pass별 27024→3924→4093ms. 27s(pass1)는 측정 하네스(1회성 `docker compose run` 컨테이너)의 Chroma 클라이언트+embedding 첫 호출 콜드스타트다. **프로덕션 loop는 상시 application에서 돌아 context_search가 warm**이라 재현 안 됨 → steady-state wall-clock ≈ **28824ms**. token은 콜드 무관(4991 동일). 두 해석(A raw 51.8s / B steady-state 28.8s)을 오너에게 명시.
+- **오너 B4 결정**: ~2x 여유율 → `WRITING_LOOP_MAX_TOTAL_TOKENS=10000`(raw 4991×2)·`WRITING_LOOP_MAX_WALL_CLOCK_MS=60000`(steady-state 28.8s×2, B 기준), **default-on**.
+- **반영**: `docker-compose.yml` application 아래 두 env 기본을 `${...:-}`(off)에서 `${...:-10000}`/`${...:-60000}`으로 변경 → **배포 기본 발화**. **code 기본(env 미설정)은 계속 unbounded=off**(M6=A 코드 회귀 무변, 구조 상한만으로 off-deployment bound). 주석에 측정 근거·override 지침 명시.
+- **라이브 검증**: `docker compose config`가 10000/60000 노출 확인. application 컨테이너 `--force-recreate --no-deps` 재생성 후 `printenv`로 `WRITING_LOOP_MAX_TOTAL_TOKENS=10000`·`WRITING_LOOP_MAX_WALL_CLOCK_MS=60000` 적재 + `/health=ok` 확인 — 배포 기본이 실제 런타임에 발화됨을 실측.
+- raw 아티팩트: `docs/benchmarks/2026-07-15/writing_loop_per_stage_ceiling_q4.json` + 노트(provenance·콜드스타트 caveat·A/B 해석). Option A(측정 메커니즘 M-i → live 수집 → 합성 → B4)로 B2b 종결.
+
 ## Issues found
 
+- **context_search 콜드스타트(측정 하네스 아티팩트, 결함 아님)**: 위 참조. 1회성 컨테이너 첫 호출 비용이라 프로덕션 상시 app엔 미적용. steady-state 기준(B)을 wall-clock ceiling 근거로 채택.
 - 초기 테스트에서 두 가지가 드러났다:
   1. **부분 samples 유실**: `_measure_once`가 fault 시 `_StageMeasurementError`를 raise할 때 그때까지 모은 samples를 caller가 못 받아 모든 stage가 `incomplete`로 잘못 표시됐다. → `_measure_once`가 caller-provided `samples` 리스트에 append하도록 바꿔, fault 시에도 완료 stage를 보존(retain)하게 수정.
   2. **테스트 clock float 오차**: step=0.1 누적이 `int((clock()-start)*1000)` 절삭에서 99ms로 떨어졌다. → 테스트 clock을 binary-exact step=1.0(=1000ms/stage)로 바꿔 결정성 확보. 실 코드(`perf_counter`+`int` 절삭)는 무변.
