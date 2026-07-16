@@ -245,6 +245,32 @@ services:
     # 30s timeouts with headroom. NOTE: keep INDEX_SYNC_INTERVAL <= this.
     stop_grace_period: 120s
 
+  frontend:
+    # Product shell SPA (decisions D1=A React+TS+Vite / D2=B separate service
+    # locked in SoT v1.6.93; implemented as this service in v1.6.94).
+    # nginx serves the built bundle and reverse-proxies /api to the application,
+    # so the browser stays on one origin and the unauthenticated API needs no
+    # CORS opening. The build stage compiles the bundle inside the image, so no
+    # host node_modules/dist is required (see services/frontend/Dockerfile).
+    build:
+      context: .
+      dockerfile: services/frontend/Dockerfile
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    depends_on:
+      application:
+        condition: service_healthy
+    healthcheck:
+      # The alpine nginx image ships wget (busybox), not curl.
+      test:
+        - "CMD-SHELL"
+        - "wget -q -O /dev/null http://localhost/ || exit 1"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
 volumes:
   mongo_data:
   embedding_cache:

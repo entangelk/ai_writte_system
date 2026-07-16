@@ -30,6 +30,12 @@ build/
 dist/
 *.egg-info/
 
+# Frontend. node_modules and the bundle are build output; package-lock.json and
+# the generated src/api/schema.d.ts ARE committed (the image build has no Python
+# to regenerate the schema from the FastAPI app).
+node_modules/
+frontend/openapi.json
+
 # Editor / OS
 .idea/
 .vscode/

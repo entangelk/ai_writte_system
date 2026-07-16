@@ -1,8 +1,8 @@
 # 착수 결정 브리프 — Frontend (제품 껍데기 + Writing 작업공간 + Review UI)
 
-상태: `Resolved — D1=A · D2=B · D3=A (owner confirmed 2026-07-15)` · 구현 대기(다음 세션 착수)
+상태: `Resolved — D1=A · D2=B · D3=A (owner confirmed 2026-07-15)` · **첫 슬라이스 구현됨(SoT v1.6.94, 2026-07-16)** — scaffold + 프로젝트 목록/생성까지. 원고 목록→에디터는 다음 슬라이스(오너 범위 분할, D3 각주 "크면 둘로 쪼갠다"의 발화). 미결정으로 남겼던 **프론트 테스트 도구는 Vitest + RTL로 확정**(v1.6.94, 오너 결정).
 
-관련 정본: `docs/system-contract-sot.md` v1.6.92, `plans/product-shell.md`(제품 경계·최소 사용자 표면), `plans/06-review-ui.md`(화면 단위·사용자 흐름), `plans/05-writing-ai.md`, HANDOFF Active Decisions(아키텍처)
+관련 정본: `docs/system-contract-sot.md` v1.6.94(브리프 작성 시점 v1.6.92 → 결정 기록 v1.6.93 → 첫 슬라이스 구현 v1.6.94), `plans/product-shell.md`(제품 경계·최소 사용자 표면), `plans/06-review-ui.md`(화면 단위·사용자 흐름), `plans/05-writing-ai.md`, HANDOFF Active Decisions(아키텍처)
 
 ## Owner decision and rationale (2026-07-15)
 
@@ -68,10 +68,10 @@
 
 브리프를 부풀리지 않기 위해, 아래는 관례적 기본값으로 두고 필요해질 때 바꾼다:
 
-- **타입 계약 동기화**: FastAPI가 이미 OpenAPI를 노출하므로 스키마→TS 타입 **생성**을 기본으로 한다(50 endpoint를 손으로 타이핑하지 않는다).
+- **타입 계약 동기화**: FastAPI가 이미 OpenAPI를 노출하므로 스키마→TS 타입 **생성**을 기본으로 한다(50 endpoint를 손으로 타이핑하지 않는다). → **v1.6.94 구현에서 드러난 실제 범위**: 생성 타입은 **경로와 요청 바디만** 잠근다. 엔드포인트가 `-> dict[str, object]`로 주석돼 있어 OpenAPI 응답 schema가 `additionalProperties: true`(빈 object)로 나오기 때문이며, **응답 shape는 `frontend/src/api/client.ts`에 손으로 선언**한다. 갭 해소(백엔드 `response_model`)는 오너 결정 대기 — HANDOFF Owner Decisions Needed 참조.
 - **데이터 계층**: 우선 얇은 `fetch` 래퍼. 캐시/무효화가 실제로 아플 때 TanStack Query 등을 도입한다(§2 — 미리 넣지 않는다).
 - **에디터**: 1차는 `textarea` 수준의 평문 편집 + 명시적 저장. 리치 에디터(ProseMirror 등)는 실제 필요가 확인된 뒤.
-- **테스트**: 프론트 테스트 도구는 첫 슬라이스에서 결정한다(백엔드 회귀 계약은 무변).
+- **테스트**: 프론트 테스트 도구는 첫 슬라이스에서 결정한다(백엔드 회귀 계약은 무변). → **v1.6.94에서 Vitest + React Testing Library로 확정**(오너 결정): Vite와 설정/트랜스폼을 공유해 추가 빌드 체인이 없고, 이 저장소의 양방향 회귀 관례를 프론트에도 그대로 적용한다. 각하: 도구 미도입(첫 회귀가 늦어짐), Playwright e2e(1인 로컬 스택에 운영 표면 증가).
 - **스타일**: 최소 CSS로 시작, 디자인 시스템 미도입.
 
 ## Follow-up considerations

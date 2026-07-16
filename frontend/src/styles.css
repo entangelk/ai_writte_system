@@ -1,0 +1,38 @@
+/* Minimal CSS only — no design system until a real need shows up (kickoff brief). */
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+
+main {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+input {
+  flex: 1;
+  padding: 0.4rem;
+}
+
+ul {
+  list-style: none;
+  padding: 0;
+}
+
+li {
+  padding: 0.6rem 0;
+  border-bottom: 1px solid #e2e2e2;
+}
+
+[role="alert"] {
+  color: #b00020;
+}

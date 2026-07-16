@@ -10,3 +10,8 @@ tests/
 *.md
 .venv/
 venv/
+
+# Frontend: the image builds the bundle from source (services/frontend/Dockerfile),
+# so host install/build output must not enter the context or shadow the npm ci layer.
+frontend/node_modules/
+frontend/dist/
