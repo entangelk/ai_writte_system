@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, createProject, listProjects, type Project } from "../api/client";
+import { Link } from "react-router";
+import {
+  createProject,
+  describeApiError,
+  listProjects,
+  type Project,
+} from "../api/client";
 
 export function ProjectList() {
   const [projects, setProjects] = useState<Project[] | null>(null);
@@ -13,7 +19,7 @@ export function ProjectList() {
       setProjects(projects);
       setError(null);
     } catch (err) {
-      setError(describe(err));
+      setError(describeApiError(err));
     }
   }, []);
 
@@ -34,52 +40,65 @@ export function ProjectList() {
       setError(null);
       await load();
     } catch (err) {
-      setError(describe(err));
+      setError(describeApiError(err));
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <section>
-      <h1>프로젝트</h1>
+    <section className="workspace-page page-enter">
+      <header className="page-heading">
+        <p className="eyebrow">작품 서재</p>
+        <h1>프로젝트</h1>
+        <p>작품을 선택하거나 새 원고 공간을 만드세요.</p>
+      </header>
 
-      <form onSubmit={submit}>
-        <label htmlFor="project-name">새 프로젝트 이름</label>
-        <input
-          id="project-name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          autoComplete="off"
-        />
-        <button type="submit" disabled={name.trim() === "" || saving}>
-          만들기
-        </button>
+      <form className="creation-form" onSubmit={submit}>
+        <div className="form-copy">
+          <label htmlFor="project-name">새 프로젝트 이름</label>
+          <span>작품별 원고와 기억은 서로 분리됩니다.</span>
+        </div>
+        <div className="form-controls">
+          <input
+            id="project-name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            autoComplete="off"
+            placeholder="예: 겨울 이야기"
+          />
+          <button type="submit" disabled={name.trim() === "" || saving}>
+            만들기
+          </button>
+        </div>
       </form>
 
-      {error !== null && <p role="alert">{error}</p>}
+      {error !== null && <p className="alert" role="alert">{error}</p>}
 
       {projects === null ? (
-        <p>불러오는 중…</p>
+        <p className="status-copy">불러오는 중…</p>
       ) : projects.length === 0 ? (
-        <p>아직 프로젝트가 없습니다. 첫 프로젝트를 만들어 시작하세요.</p>
+        <div className="empty-state">
+          <p>아직 프로젝트가 없습니다.</p>
+          <span>위에서 첫 프로젝트를 만들어 집필을 시작하세요.</span>
+        </div>
       ) : (
-        <ul>
+        <ul className="resource-list" aria-label="프로젝트 목록">
           {projects.map((project) => (
-            <li key={project.id}>
-              <span>{project.name}</span>
-              {project.archived && <span> (보관됨)</span>}
+            <li className="resource-row" key={project.id}>
+              <Link
+                aria-label={project.name}
+                className="resource-link"
+                to={`/projects/${project.id}`}
+              >
+                <span>{project.name}</span>
+                <span className="row-arrow" aria-hidden="true">→</span>
+              </Link>
+              {project.archived && <span className="status-badge">(보관됨)</span>}
             </li>
           ))}
         </ul>
       )}
     </section>
   );
-}
-
-function describe(err: unknown): string {
-  if (err instanceof ApiError) {
-    return `${err.status}: ${err.detail}`;
-  }
-  return err instanceof Error ? err.message : String(err);
 }

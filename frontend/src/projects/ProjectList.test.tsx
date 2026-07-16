@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectList } from "./ProjectList";
 
@@ -23,6 +24,14 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function renderProjectList() {
+  return render(
+    <MemoryRouter>
+      <ProjectList />
+    </MemoryRouter>,
+  );
+}
+
 describe("ProjectList", () => {
   it("lists projects returned by GET /projects", async () => {
     mockFetch({
@@ -34,10 +43,14 @@ describe("ProjectList", () => {
       },
     });
 
-    render(<ProjectList />);
+    renderProjectList();
 
     expect(await screen.findByText("겨울 이야기")).toBeInTheDocument();
     expect(screen.getByText("묵은 초고")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "겨울 이야기" })).toHaveAttribute(
+      "href",
+      "/projects/p1",
+    );
     // Archived projects are readable but marked (Core SOT: archive = read + write 409).
     expect(screen.getByText("(보관됨)")).toBeInTheDocument();
   });
@@ -47,7 +60,7 @@ describe("ProjectList", () => {
     // proxy (D2=B). An absolute API base would silently require CORS.
     const fetchMock = mockFetch({ body: { projects: [] } });
 
-    render(<ProjectList />);
+    renderProjectList();
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(fetchMock.mock.calls[0][0]).toBe("/api/projects");
@@ -56,7 +69,7 @@ describe("ProjectList", () => {
   it("shows an empty state instead of a list when there are no projects", async () => {
     mockFetch({ body: { projects: [] } });
 
-    render(<ProjectList />);
+    renderProjectList();
 
     expect(await screen.findByText(/아직 프로젝트가 없습니다/)).toBeInTheDocument();
     expect(screen.queryByRole("listitem")).not.toBeInTheDocument();
@@ -69,7 +82,7 @@ describe("ProjectList", () => {
       { body: { projects: [{ id: "p1", name: "새 작품", archived: false }] } },
     );
 
-    render(<ProjectList />);
+    renderProjectList();
     await screen.findByText(/아직 프로젝트가 없습니다/);
 
     await userEvent.type(screen.getByLabelText("새 프로젝트 이름"), "새 작품");
@@ -93,7 +106,7 @@ describe("ProjectList", () => {
       { body: { projects: [{ id: "p1", name: "새 작품", archived: false }] } },
     );
 
-    render(<ProjectList />);
+    renderProjectList();
     await screen.findByText(/아직 프로젝트가 없습니다/);
 
     const field = screen.getByLabelText("새 프로젝트 이름");
@@ -108,7 +121,7 @@ describe("ProjectList", () => {
     // Over-strict guard on the trim: blank input must not reach the API at all.
     const fetchMock = mockFetch({ body: { projects: [] } });
 
-    render(<ProjectList />);
+    renderProjectList();
     await screen.findByText(/아직 프로젝트가 없습니다/);
 
     await userEvent.type(screen.getByLabelText("새 프로젝트 이름"), "   ");
@@ -142,7 +155,7 @@ describe("ProjectList", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const { container } = render(<ProjectList />);
+    const { container } = renderProjectList();
     await screen.findByText(/아직 프로젝트가 없습니다/);
 
     const form = container.querySelector("form");
@@ -176,7 +189,7 @@ describe("ProjectList", () => {
   it("surfaces the API error detail when the list request fails", async () => {
     mockFetch({ status: 500, body: { detail: "core sot unavailable" } });
 
-    render(<ProjectList />);
+    renderProjectList();
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "500: core sot unavailable",
@@ -189,7 +202,7 @@ describe("ProjectList", () => {
       { status: 409, body: { detail: "project is archived" } },
     );
 
-    render(<ProjectList />);
+    renderProjectList();
     await screen.findByText(/아직 프로젝트가 없습니다/);
 
     await userEvent.type(screen.getByLabelText("새 프로젝트 이름"), "새 작품");
@@ -210,7 +223,7 @@ describe("ProjectList", () => {
       { body: { projects: [{ id: "p1", name: "새 작품", archived: false }] } },
     );
 
-    render(<ProjectList />);
+    renderProjectList();
     await screen.findByText(/아직 프로젝트가 없습니다/);
 
     const button = screen.getByRole("button", { name: "만들기" });

@@ -196,3 +196,94 @@ D2=B(별도 서비스)는 D2=A가 공짜로 주던 단일 origin을 잃는다. �
 - 즉시 다음 작업은 변함없이 A의 나머지인 원고 목록→에디터다.
 - A slice 종료 시 backlog의 `ARCH-1` 트리거를 확인하되, 백엔드 변경이 없으면 Waiting을 유지한다.
 - C Writing UI 종료 시 `OPS-1`을 Ready로 올릴지 확인하고 2주 dogfood 실행 경로를 준비한다.
+
+---
+
+## Task 4 — Product shell 원고 목록 slice 착수 점검
+
+### Goals
+
+- 사용자 지시대로 다음 원래 작업인 Product shell A를 작은 slice로 재개한다.
+- 이번 slice를 프로젝트 선택→원고 목록/생성으로 제한하고 editor/save/version/export를 다음 slice로 분리한다.
+- 프로젝트 상세 화면이 처음 생기며 발생한 routing owner fork를 코드 전에 표면화한다.
+
+### Completed work
+
+- `product-shell.md`·`frontend-kickoff-decisions.md`·`product-readiness-backlog.md`·HANDOFF와 현재 React/API/test를 다시 읽어 governing scope를 고정했다.
+- 백엔드의 draft list/create 응답 모델과 endpoint가 이미 완성돼 있어 이번 slice가 프론트 조립만으로 가능함을 확인했다. `ARCH-1`은 backend route/model을 수정하지 않으므로 아직 미발화다.
+- `docs/plans/frontend-project-navigation-decisions.md`를 작성해 A React Router Declarative BrowserRouter, B 자체 History API, C state-only, D HashRouter를 빠짐없이 비교했다.
+- 공식 React Router 현재 문서의 Vite declarative 설치(`npm i react-router`)·BrowserRouter·dynamic segment·nested route 방식을 확인했다. 현재 React 19/Vite 7 구성과 맞고, nginx SPA fallback도 이미 준비돼 있다.
+- 오너 선택 A를 브리프에 Resolved로 기록하고 `react-router@8.2.0`을 추가했다. 이 버전의 peer requirement가 재설치 때도 manifest에 드러나도록 React/React DOM 선언을 `^19.2.7`로 맞췄다.
+- 회귀를 먼저 추가해 기존 프로젝트 행의 `/projects/:id` 진입, direct route, project별 exact API path, 원고 목록/빈 상태, 생성 후 서버 재조회, trim/공백-only, in-flight 이중 submit, archived read-only, 오류/입력 보존, 뒤로가기와 404 shell을 잠갔다.
+- `frontend/src/App.tsx`·`main.tsx` — `BrowserRouter`와 `/`·`/projects/:projectId`·`*` route spine. Data/Framework mode와 loader/action은 추가하지 않았다.
+- `frontend/src/drafts/DraftList.tsx` — URL의 `projectId`로 프로젝트와 원고를 병렬 조회하고, 생성 성공 후 서버 목록을 다시 읽는다. 보관 프로젝트는 기존 원고를 표시하되 생성 form을 숨긴다.
+- `frontend/src/api/client.ts` — 생성 OpenAPI 타입을 쓰는 `getProject`·`listDrafts`·`createDraft`와 공유 API 오류 표시를 추가했다. backend route/model은 바꾸지 않았다.
+- `frontend/src/projects/ProjectList.tsx`·`styles.css` — 프로젝트 이름을 상세 route 링크로 만들고 종이/잉크 계열의 조용한 작업면, resource row, 짧은 전환과 reduced-motion 대응을 구현했다. 별도 디자인 시스템·card grid는 만들지 않았다.
+- SoT를 v1.6.96으로 올리고 브리프·Product shell 진행 상태·plans 인덱스·CHANGELOG·HANDOFF를 현재 구현과 다음 editor/save slice로 동기화했다.
+
+### Issues found
+
+- HANDOFF가 “프로젝트 상세 라우팅이 여기서 처음 필요 — 라우터 도입 여부를 그때 정한다”고 남긴 genuine fork가 실제로 도달했다.
+- state-only를 조용히 택하면 바로 다음 editor에서 project+draft 선택 상태가 중첩되고 URL/deep-link/back 동작을 다시 설계해야 한다. 반대로 router dependency 도입도 이후 구조를 구속하므로 오너 선택 없이 진행할 수 없다.
+- 최초 dependency install은 sandbox DNS 제한으로 실패해 승인된 외부 실행으로 재시도했다. 설치 후 Node 22.22.2·React 19.2.7·React Router 8.2.0의 engine/peer 조건을 확인했다.
+- 개발 `StrictMode` smoke 로그에서 초기 GET이 두 번 보였으나 React 개발 검증 동작이며 mutation 요청은 submit handler에만 있어 중복 write는 없었다. 이 slice의 create 중복은 별도 in-flight 회귀로 잠갔다.
+
+### Decisions
+
+- **오너 결정 A**: 오너는 B(자체 History API)의 무의존·직접 제어를 개인적으로 선호하지만, editor·Writing·Review까지 이어질 project/draft route 확장성을 우선해 A(React Router Declarative BrowserRouter)를 선택했다.
+- **A의 승인 경계**: `react-router` Declarative mode만 사용한다. Data/Framework mode, loader/action은 범위 밖으로 두고 기존 얇은 fetch client를 유지한다.
+- **UI 기준**: 마케팅 hero나 card grid 없이 따뜻한 종이/잉크 계열의 조용한 작업면, 명확한 프로젝트→원고 계층, 절제된 route/list 전환을 사용한다(frontend-skill 적용).
+
+### Next steps
+
+- 다음 작은 slice는 `/projects/:projectId/drafts/:draftId` editor다: 평문 `textarea` → 명시적 save/version mint → version 목록 → txt/markdown export.
+- 착수 전에 `idempotency_key` 생성·재시도 수명과 version 선택을 URL에 둘지 현재 선택 state로 둘지 기존 계약/선례에서 확정 가능한지 확인한다. genuine fork일 때만 새 브리프를 만든다.
+- Product shell A 전체가 끝날 때 `product-readiness-backlog.md`의 `ARCH-1` trigger를 점검한다. 이번 slice는 backend 파일 무변이라 아직 발화하지 않았다.
+
+### Verification
+
+- red-first: 새 project link와 `DraftList` module이 없을 때 focused 회귀가 실패함을 확인한 뒤 구현했다.
+- `cd frontend && npm test -- --reporter=dot` → **22 passed / 3 files**.
+- `cd frontend && npm run build` → PASS, 89 modules, CSS 4.53 kB(gzip 1.62), JS 234.46 kB(gzip 75.18).
+- `cd frontend && npm run gen:api` → PASS, 생성 `schema.d.ts` diff 없음.
+- in-memory application + Vite 실 API smoke → 프로젝트 `겨울 이야기`·원고 `1장 — 첫눈` 생성 후 `/`와 direct `/projects/project-1` 렌더/GET·POST 200 확인.
+- `services/`·`tests/`·`scripts/`·`docker-compose.yml` diff 0, `git diff --check` PASS. 자체 구현의 routine self-check이므로 독립 verification record는 만들지 않았다.
+
+---
+
+## Task 5 — 프로젝트 내비게이션 독립 검증 hardening 반영·커밋 준비
+
+### Goals
+
+- `docs/verifications/2026-07-16/frontend_project_navigation.md`의 PASS 판정과 hardening 4건을 1차 소스에서 확인한다.
+- 계약 경계를 넓히지 않고 실제 회귀 가치가 있는 보강만 반영한다.
+- 전체 프론트 검증과 문서 동기화를 마친 뒤 v1.6.96 슬라이스를 커밋 가능한 상태로 만든다.
+
+### Completed work
+
+- 독립 검증 기록의 boundary matrix 16행, 백엔드 endpoint/409 정합, 타입 재생성, 비차단 H1~H4 근거를 전부 읽었다. PASS(조건 없음) 판정과 백엔드 무변 결론은 타당하다.
+- **H3 반영**: `DraftList.test.tsx` 공백-only 케이스가 disabled 버튼 확인에 그치지 않고 `fireEvent.submit(form)`으로 submit 경계를 직접 우회하도록 보강했다. 프로덕션의 `trimmed === ""` 가드를 독립적으로 잠근다.
+- **H2 명확화**: `frontend-project-navigation-decisions.md`의 interaction thesis에서 이번 slice의 의무를 “생성 후 서버 목록 재조회”로 명확히 했다. 새 항목 강조는 실제 사용에서 재조회 후 위치 상실이 관측될 때만 추가한다.
+- 검증 기록에 post-verification disposition을 추가해 H3 반영, H2 명확화, H1/H4 보류 이유를 원 독립 판정과 구분해 남겼다.
+
+### Issues found
+
+- H3의 기존 테스트는 버튼 disabled와 fetch 미증가를 확인했지만, `submit()` 내부 공백 가드만 제거하는 mutation에는 실패하지 않았다. UI 버튼 외의 submit 경계도 프로덕션이 방어하고 있으므로 테스트가 그 방어를 직접 pin해야 했다.
+- H4를 CSS animation 때문에 route component에 `key`를 부여하면 단순 polish를 넘어 입력·조회 state 수명까지 바꾼다. 현재 계약과 사용자 문제 없이 적용할 변경이 아니다.
+
+### Decisions
+
+- **즉시 반영 = H3**, **문서 명확화 = H2**, **보류 = H1/H4**. H1은 editor slice의 404 UX와 함께, H4는 실제 route 전환 polish 문제가 관측될 때 다룬다.
+- 새 항목 강조·route remount·전용 404를 검증 목록에 있다는 이유만으로 미리 구현하지 않는다. 현재 slice의 최소 계약과 되돌리기 쉬운 UI 원칙을 유지한다.
+
+### Next steps
+
+- v1.6.96 전체 변경과 독립 검증 기록을 한 커밋으로 묶는다.
+- 다음 code slice는 HANDOFF의 editor/save 경계에서 새로 시작한다.
+
+### Verification
+
+- mutation: `DraftList.submit()`에서 `trimmed === ""`만 제거 → focused 회귀가 **1 failed / 8 passed**, `expected fetch 2, got 3`으로 정확히 bite. 가드 복원.
+- 가드 복원 후 `cd frontend && npm test` → **22 passed / 3 files**.
+- `npm run build` → PASS, 89 modules, CSS 4.53 kB(gzip 1.62), JS 234.46 kB(gzip 75.18).
+- `npm run gen:api` → PASS, `schema.d.ts` diff 없음. backend 범위 diff 0, `git diff --check` clean.

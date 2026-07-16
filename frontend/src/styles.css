@@ -1,38 +1,328 @@
-/* Minimal CSS only — no design system until a real need shows up (kickoff brief). */
+:root {
+  font-family: Inter, Pretendard, "Noto Sans KR", system-ui, sans-serif;
+  color: #25231f;
+  background: #f4f0e7;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --ink: #25231f;
+  --muted: #746f65;
+  --line: #d8d0c1;
+  --accent: #a4452f;
+  --accent-dark: #7f3324;
+  --danger: #9d2f2f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
 body {
+  min-width: 20rem;
+  min-height: 100vh;
   margin: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  line-height: 1.5;
+  background:
+    linear-gradient(90deg, rgba(64, 53, 37, 0.035) 1px, transparent 1px) 0 0 / 4rem 4rem,
+    #f4f0e7;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.app-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  max-width: 68rem;
+  margin: 0 auto;
+  padding: 1.6rem 2rem 1.1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.app-header .brand {
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+}
+
+.app-header > span {
+  color: var(--muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
 }
 
 main {
-  max-width: 48rem;
+  max-width: 68rem;
   margin: 0 auto;
-  padding: 2rem 1rem;
+  padding: 0 2rem 5rem;
 }
 
-form {
+.workspace-page {
+  width: min(100%, 52rem);
+  padding-top: clamp(3.5rem, 8vw, 7rem);
+}
+
+.page-heading {
+  max-width: 42rem;
+  margin-bottom: 3.25rem;
+}
+
+.page-heading h1,
+.workspace-page > h1 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2.8rem, 7vw, 5.4rem);
+  font-weight: 500;
+  letter-spacing: -0.055em;
+  line-height: 0.96;
+}
+
+.project-heading h1 {
+  font-size: clamp(2.5rem, 6vw, 4.7rem);
+}
+
+.page-heading > p:last-child {
+  max-width: 34rem;
+  margin: 1.25rem 0 0;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.eyebrow {
+  margin: 0 0 0.9rem;
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 2.5rem;
+  color: var(--muted);
+  font-size: 0.86rem;
+  text-decoration: none;
+  transition: color 160ms ease, transform 160ms ease;
+}
+
+.back-link:hover,
+.back-link:focus-visible {
+  color: var(--accent);
+  transform: translateX(-0.2rem);
+}
+
+.creation-form {
+  display: grid;
+  grid-template-columns: minmax(12rem, 0.8fr) minmax(18rem, 1.4fr);
+  gap: 2rem;
+  align-items: end;
+  padding: 1.5rem 0 2rem;
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--line);
+}
+
+.form-copy {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.form-copy label {
+  font-weight: 700;
+}
+
+.form-copy span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.form-controls {
   display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  margin-bottom: 1rem;
+  gap: 0.65rem;
 }
 
-input {
+.form-controls input {
+  min-width: 0;
   flex: 1;
-  padding: 0.4rem;
+  padding: 0.8rem 0.1rem;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #aca392;
+  border-radius: 0;
+  outline: none;
 }
 
-ul {
-  list-style: none;
+.form-controls input::placeholder {
+  color: #9b9488;
+}
+
+.form-controls input:focus {
+  border-bottom-color: var(--accent);
+}
+
+.form-controls button {
+  padding: 0.72rem 1.1rem;
+  color: #fffaf1;
+  background: var(--accent);
+  border: 0;
+  cursor: pointer;
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.form-controls button:hover:not(:disabled) {
+  background: var(--accent-dark);
+  transform: translateY(-1px);
+}
+
+.form-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.resource-list {
+  margin: 1.5rem 0 0;
   padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
 }
 
-li {
-  padding: 0.6rem 0;
-  border-bottom: 1px solid #e2e2e2;
+.resource-row {
+  display: flex;
+  min-height: 4.4rem;
+  align-items: center;
+  gap: 1rem;
+  border-bottom: 1px solid var(--line);
 }
 
-[role="alert"] {
-  color: #b00020;
+.resource-link {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 0;
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.3rem;
+  text-decoration: none;
+}
+
+.resource-link .row-arrow {
+  color: var(--accent);
+  transition: transform 160ms ease;
+}
+
+.resource-link:hover .row-arrow,
+.resource-link:focus-visible .row-arrow {
+  transform: translateX(0.35rem);
+}
+
+.resource-title {
+  flex: 1;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.22rem;
+}
+
+.status-badge {
+  color: var(--muted);
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+.empty-state,
+.status-copy,
+.read-only-note,
+.alert {
+  margin: 1.5rem 0 0;
+  padding: 1.4rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.empty-state p {
+  margin: 0 0 0.35rem;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.3rem;
+}
+
+.empty-state span,
+.status-copy,
+.read-only-note {
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+.read-only-note {
+  border-top: 1px solid var(--ink);
+}
+
+.alert {
+  color: var(--danger);
+  font-size: 0.88rem;
+}
+
+.page-enter {
+  animation: page-enter 280ms ease-out both;
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 42rem) {
+  .app-header,
+  main {
+    padding-right: 1.1rem;
+    padding-left: 1.1rem;
+  }
+
+  .workspace-page {
+    padding-top: 3.2rem;
+  }
+
+  .creation-form {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .form-controls {
+    align-items: stretch;
+  }
+
+  .resource-link {
+    font-size: 1.14rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

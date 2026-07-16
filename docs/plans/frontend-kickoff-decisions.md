@@ -68,7 +68,7 @@
 
 브리프를 부풀리지 않기 위해, 아래는 관례적 기본값으로 두고 필요해질 때 바꾼다:
 
-- **타입 계약 동기화**: FastAPI가 이미 OpenAPI를 노출하므로 스키마→TS 타입 **생성**을 기본으로 한다(50 endpoint를 손으로 타이핑하지 않는다). → **v1.6.94 구현에서 드러난 실제 범위**: 생성 타입은 **경로와 요청 바디만** 잠근다. 엔드포인트가 `-> dict[str, object]`로 주석돼 있어 OpenAPI 응답 schema가 `additionalProperties: true`(빈 object)로 나오기 때문이며, **응답 shape는 `frontend/src/api/client.ts`에 손으로 선언**한다. 갭 해소(백엔드 `response_model`)는 오너 결정 대기 — HANDOFF Owner Decisions Needed 참조.
+- **타입 계약 동기화**: FastAPI가 이미 OpenAPI를 노출하므로 스키마→TS 타입 **생성**을 기본으로 한다(50 endpoint를 손으로 타이핑하지 않는다). → v1.6.94에서 드러난 응답 무타입 갭은 **v1.6.95에서 Product shell 척추 14 endpoint에 `response_model`을 붙여 해소**했다. v1.6.96 프로젝트/원고 화면은 생성 응답 타입을 직접 소비하며, 나머지 34 endpoint는 해당 UI slice에서 확장한다.
 - **데이터 계층**: 우선 얇은 `fetch` 래퍼. 캐시/무효화가 실제로 아플 때 TanStack Query 등을 도입한다(§2 — 미리 넣지 않는다).
 - **에디터**: 1차는 `textarea` 수준의 평문 편집 + 명시적 저장. 리치 에디터(ProseMirror 등)는 실제 필요가 확인된 뒤.
 - **테스트**: 프론트 테스트 도구는 첫 슬라이스에서 결정한다(백엔드 회귀 계약은 무변). → **v1.6.94에서 Vitest + React Testing Library로 확정**(오너 결정): Vite와 설정/트랜스폼을 공유해 추가 빌드 체인이 없고, 이 저장소의 양방향 회귀 관례를 프론트에도 그대로 적용한다. 각하: 도구 미도입(첫 회귀가 늦어짐), Playwright e2e(1인 로컬 스택에 운영 표면 증가).

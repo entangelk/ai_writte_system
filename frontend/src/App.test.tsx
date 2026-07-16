@@ -1,0 +1,72 @@
+import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { App } from "./App";
+
+function mockFetch(...bodies: unknown[]) {
+  const fetchMock = vi.fn();
+  for (const body of bodies) {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: "",
+      json: async () => body,
+    });
+  }
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+describe("App routes", () => {
+  it("renders the project index at the root route", async () => {
+    mockFetch({ projects: [] });
+
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "프로젝트" })).toBeInTheDocument();
+  });
+
+  it("renders a directly addressed project workspace", async () => {
+    const fetchMock = mockFetch(
+      { id: "p1", name: "겨울 이야기", archived: false },
+      { drafts: [] },
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/projects/p1"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "겨울 이야기" }),
+    ).toBeInTheDocument();
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/projects/p1",
+      "/api/projects/p1/drafts",
+    ]);
+  });
+
+  it("keeps an unknown route inside the product shell", async () => {
+    render(
+      <MemoryRouter initialEntries={["/missing"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("heading", { name: "이 작업 공간은 없습니다." })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "프로젝트로 돌아가기" })).toHaveAttribute(
+      "href",
+      "/",
+    );
+  });
+});

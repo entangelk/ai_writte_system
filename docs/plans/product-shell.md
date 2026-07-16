@@ -3,6 +3,8 @@
 상태: `Draft`  
 적용 범위: Phase 1의 프로젝트/원고 저장 위에 구축하고 Phase 2~6의 상태와 기능을 한 작업 공간으로 연결
 
+구현 진행: SoT v1.6.96에서 `/` 프로젝트 목록/생성과 `/projects/:projectId` 원고 목록/생성까지 연결했다. 본문 editor·명시적 version save·version 목록·export가 다음 Product shell slice이며, 전체 수용 기준이 닫힐 때까지 본 문서 상태는 `Draft`를 유지한다.
+
 ## 확정된 제품 경계
 
 - 이 제품은 우선 혼자 사용하는 단일 사용자 시스템이다.

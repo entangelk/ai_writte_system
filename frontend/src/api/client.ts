@@ -48,6 +48,9 @@ async function readDetail(response: Response): Promise<string> {
 export type CreateProjectRequest = components["schemas"]["CreateProjectRequest"];
 export type Project = components["schemas"]["ProjectPayload"];
 export type ProjectListResponse = components["schemas"]["ProjectListResponse"];
+export type CreateDraftRequest = components["schemas"]["CreateDraftRequest"];
+export type Draft = components["schemas"]["DraftPayload"];
+export type DraftListResponse = components["schemas"]["DraftListResponse"];
 
 export function listProjects(): Promise<ProjectListResponse> {
   return request("/projects");
@@ -55,4 +58,29 @@ export function listProjects(): Promise<ProjectListResponse> {
 
 export function createProject(body: CreateProjectRequest): Promise<Project> {
   return request("/projects", { method: "POST", body: JSON.stringify(body) });
+}
+
+export function getProject(projectId: string): Promise<Project> {
+  return request(`/projects/${projectId}`);
+}
+
+export function listDrafts(projectId: string): Promise<DraftListResponse> {
+  return request(`/projects/${projectId}/drafts`);
+}
+
+export function createDraft(
+  projectId: string,
+  body: CreateDraftRequest,
+): Promise<Draft> {
+  return request(`/projects/${projectId}/drafts`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function describeApiError(err: unknown): string {
+  if (err instanceof ApiError) {
+    return `${err.status}: ${err.detail}`;
+  }
+  return err instanceof Error ? err.message : String(err);
 }

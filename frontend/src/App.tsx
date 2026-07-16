@@ -1,9 +1,30 @@
+import { Link, Route, Routes } from "react-router";
+import { DraftList } from "./drafts/DraftList";
 import { ProjectList } from "./projects/ProjectList";
 
 export function App() {
   return (
-    <main>
-      <ProjectList />
-    </main>
+    <div className="app-shell">
+      <header className="app-header">
+        <Link className="brand" to="/">AI Writing System</Link>
+        <span>로컬 집필실</span>
+      </header>
+      <main>
+        <Routes>
+          <Route path="/" element={<ProjectList />} />
+          <Route path="/projects/:projectId" element={<DraftList />} />
+          <Route
+            path="*"
+            element={
+              <section className="workspace-page page-enter">
+                <p className="eyebrow">찾을 수 없음</p>
+                <h1>이 작업 공간은 없습니다.</h1>
+                <Link className="back-link" to="/">프로젝트로 돌아가기</Link>
+              </section>
+            }
+          />
+        </Routes>
+      </main>
+    </div>
   );
 }
