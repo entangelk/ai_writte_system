@@ -67,6 +67,54 @@ const gateRevise = {
   evaluated_by_model: "fake-gate",
 };
 
+const gateEligibleRevise = {
+  ...gateRevise,
+  findings: [
+    {
+      ...gateRevise.findings[0],
+      evidence: "도시로 들어섰다",
+    },
+  ],
+};
+
+const revisedCandidate = {
+  ...candidate,
+  text: "아린은 열린 성문을 지나 조심스럽게 도시로 들어섰다.",
+  generated_by_model: "fake-reviser",
+};
+
+const loopStages = [
+  { stage: "revise", ordinal: 1, status: "completed" },
+  { stage: "report", ordinal: 2, status: "completed" },
+  { stage: "gate", ordinal: 3, status: "completed" },
+];
+
+function loopResponse(
+  status:
+    | "pass"
+    | "terminal_decision"
+    | "not_eligible"
+    | "budget_exhausted"
+    | "no_change"
+    | "failed",
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    candidate: revisedCandidate,
+    gate: status === "pass" ? gatePass : gateEligibleRevise,
+    loop: {
+      status,
+      revision_rounds: 1,
+      retrieval_rounds: 0,
+      gate_evaluations: 1,
+    },
+    stages: loopStages,
+    audit_id: null,
+    audit_error: null,
+    ...overrides,
+  };
+}
+
 const saved = {
   draft_version_id: "v4",
   version_number: 4,
@@ -113,6 +161,7 @@ async function generateAndGate(fetchMock: ReturnType<typeof mockFetch>) {
   await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
   await userEvent.click(generateButton());
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(generateButton()).toBeEnabled());
 }
 
 beforeEach(() => {
@@ -249,6 +298,228 @@ describe("WritingPanel — generate → gate", () => {
     expect(screen.getByText(candidate.text)).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("gate down");
     expect(acceptButton()).toBeDisabled();
+  });
+});
+
+describe("WritingPanel — automatic revise/retrieve loop", () => {
+  it("enters revise-and-gate only for an eligible finding and sends the exact request", async () => {
+    const warning = {
+      ...gateEligibleRevise.findings[0],
+      severity: "warning",
+      evidence: "성문을 지나",
+      message: "경미한 연결 문제",
+    };
+    const error = {
+      ...gateEligibleRevise.findings[0],
+      evidence: "도시로 들어섰다",
+      message: "중대한 연결 문제",
+    };
+    const laterError = {
+      ...gateEligibleRevise.findings[0],
+      evidence: "아린은",
+      message: "뒤에 나온 중대한 연결 문제",
+    };
+    const fetchMock = mockFetch(
+      { body: candidate },
+      { body: { ...gateEligibleRevise, findings: [warning, error, laterError] } },
+      { body: loopResponse("pass") },
+    );
+    renderPanel();
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    await userEvent.click(generateButton());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+
+    const [url, init] = fetchMock.mock.calls[2];
+    expect(url).toBe("/api/projects/p1/writing/revise-and-gate");
+    expect(JSON.parse(init.body)).toEqual({
+      request_id: "uuid-1",
+      instruction: "이어서 써줘",
+      candidate_text: candidate.text,
+      finding: error,
+      max_tokens: 4096,
+      task_type: "continue_scene",
+      current_position: { draft_id: "d1", version_id: "v3" },
+      persist_audit: false,
+    });
+    expect(screen.getByText(revisedCandidate.text)).toBeInTheDocument();
+    expect(screen.getByText("자동 개선 완료")).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "자동 개선 단계" })).toHaveTextContent(
+      "1. 후보 수정완료",
+    );
+    expect(acceptButton()).toBeEnabled();
+  });
+
+  it("does not enter the loop for a non-continuity or non-unique evidence finding", async () => {
+    // Both directions of the safe subset: a normal eligible finding enters in
+    // the previous test; broader revise findings remain manual and make no call.
+    const unsafe = {
+      ...gateRevise,
+      findings: [
+        { ...gateRevise.findings[0], type: "pov", evidence: "성문을 지나" },
+        { ...gateRevise.findings[0], evidence: "문장" },
+      ],
+    };
+    const fetchMock = mockFetch({ body: candidate }, { body: unsafe });
+    renderPanel();
+    await generateAndGate(fetchMock);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByText(candidate.text)).toBeInTheDocument();
+  });
+
+  it("does not enter the loop when eligible evidence appears more than once", async () => {
+    // over-strict counterpart to the eligible one-occurrence case: changing the
+    // production guard from === 1 to >= 1 must make this test fail.
+    const repeatedCandidate = {
+      ...candidate,
+      text: `${candidate.text} 다시 도시로 들어섰다.`,
+    };
+    const fetchMock = mockFetch(
+      { body: repeatedCandidate },
+      { body: gateEligibleRevise },
+    );
+    renderPanel();
+    await generateAndGate(fetchMock);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByText(repeatedCandidate.text)).toBeInTheDocument();
+  });
+
+  it("does not enter the loop for a non-revise Gate decision", async () => {
+    const fetchMock = mockFetch(
+      { body: candidate },
+      { body: { ...gateEligibleRevise, decision: "retrieve_more" } },
+    );
+    renderPanel();
+    await generateAndGate(fetchMock);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByText(candidate.text)).toBeInTheDocument();
+  });
+
+  it.each([
+    ["pass", "자동 개선 완료", "채택해 저장할 수 있습니다."],
+    ["terminal_decision", "자동 개선 중단", "사용자 판단이 필요한 Gate 결과입니다."],
+    ["not_eligible", "자동 수정 대상 아님", "안전하게 자동 수정할 수 없는 지적입니다."],
+    ["budget_exhausted", "자동 개선 한도 도달", "마지막 후보를 보존했습니다."],
+    ["no_change", "수정 결과 변화 없음", "후보가 달라지지 않았습니다."],
+    ["failed", "자동 개선 실패", "오류 안내에 따라 재시도하거나 새로 생성하세요."],
+  ] as const)("maps %s to a distinct next action", async (status, label, action) => {
+    const fetchMock = mockFetch(
+      { body: candidate },
+      { body: gateEligibleRevise },
+      { body: loopResponse(status) },
+    );
+    renderPanel();
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    await userEvent.click(generateButton());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(await screen.findByText(label)).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(action))).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "자동 개선 다시 시도" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("preserves a 5xx partial candidate, shows its typed error, and retries the same intent", async () => {
+    const partial = loopResponse("failed", {
+      gate: null,
+      stages: [
+        { stage: "revise", ordinal: 1, status: "completed" },
+        { stage: "report", ordinal: 2, status: "failed" },
+      ],
+      report_error: { type: "provider_timeout", detail: "report timed out" },
+    });
+    const fetchMock = mockFetch(
+      { body: candidate },
+      { body: gateEligibleRevise },
+      { status: 504, body: partial },
+      { body: loopResponse("pass") },
+    );
+    renderPanel();
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    await userEvent.click(generateButton());
+
+    expect(await screen.findByText(revisedCandidate.text)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "504 · provider_timeout: report timed out",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("다시 시도할 수 있습니다.");
+    const retry = screen.getByRole("button", { name: "자동 개선 다시 시도" });
+    await userEvent.click(retry);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(JSON.parse(fetchMock.mock.calls[3][1].body)).toEqual(
+      JSON.parse(fetchMock.mock.calls[2][1].body),
+    );
+    expect(await screen.findByText("자동 개선 완료")).toBeInTheDocument();
+  });
+
+  it("preserves a 400 partial candidate and marks it non-retryable", async () => {
+    const partial = loopResponse("failed", {
+      candidate,
+      gate: null,
+      stages: [{ stage: "revise", ordinal: 1, status: "failed" }],
+      revision_error: {
+        type: "writing_revision_error",
+        detail: "finding is no longer valid",
+      },
+    });
+    const fetchMock = mockFetch(
+      { body: candidate },
+      { body: gateEligibleRevise },
+      { status: 400, body: partial },
+    );
+    renderPanel();
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    await userEvent.click(generateButton());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+
+    expect(await screen.findByText(candidate.text)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "400 · writing_revision_error: finding is no longer valid",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "같은 요청 재시도보다 지시나 후보를 수정해야 합니다.",
+    );
+    expect(
+      screen.queryByRole("button", { name: "자동 개선 다시 시도" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["gate_error", "invalid_gate_result", "gate output was invalid"],
+    ["retrieval_error", "retrieval_not_configured", "retrieval is unavailable"],
+  ] as const)("shows the %s partial discriminator", async (key, type, detail) => {
+    const partial = loopResponse("failed", {
+      gate: null,
+      stages: [{ stage: "gate", ordinal: 1, status: "failed" }],
+      [key]: { type, detail },
+    });
+    const fetchMock = mockFetch(
+      { body: candidate },
+      { body: gateEligibleRevise },
+      { status: 502, body: partial },
+    );
+    renderPanel();
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    await userEvent.click(generateButton());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(screen.getByRole("alert")).toHaveTextContent(`502 · ${type}: ${detail}`);
+  });
+
+  it("accepts the loop's final candidate text (candidate-change safety)", async () => {
+    const fetchMock = mockFetch(
+      { body: candidate },
+      { body: gateEligibleRevise },
+      { body: loopResponse("pass") },
+      { body: acceptOk },
+    );
+    renderPanel();
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    await userEvent.click(generateButton());
+    await screen.findByText(revisedCandidate.text);
+    await userEvent.click(acceptButton());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    const accepted = JSON.parse(fetchMock.mock.calls[3][1].body);
+    expect(accepted.candidate_text).toBe(revisedCandidate.text);
+    expect(accepted.idempotency_key).toBe("uuid-2");
   });
 });
 

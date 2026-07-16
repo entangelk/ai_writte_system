@@ -681,3 +681,80 @@ D2=B(별도 서비스)는 D2=A가 공짜로 주던 단일 origin을 잃는다. �
 - **H3 코드 무변** — 실 LLM 관통(compose generate→Gate→accept)은 12B gateway 의존이라 sandbox 불가. 검증자도 "결함 아님, OPS-1 추적 항목"으로 판정 → 오너 풀스택 후속 유지.
 
 hardening 후 WritingPanel 15→**18**, 전체 **67 passed/5 files**.
+
+---
+
+## Task 14 — C2 자동 revise/retrieve loop UI (SoT v1.7.3)
+
+### Goals
+
+- C1의 generate→Gate 뒤 backend와 같은 eligible revise finding 경계에서만 `/writing/revise-and-gate` 자동 loop에 진입한다.
+- C0가 생성한 `WritingReviseGateResponse`·`WritingReviseGatePartial` 타입을 손선언 없이 소비한다.
+- 마지막 candidate·Gate·loop status·stage progress를 성공과 partial 응답 모두에서 보존하고, status 6종을 사용자 행동으로 매핑한다.
+- candidate 가변화 뒤에도 C1 H1 exact-body accept intent 안전망이 새 candidate에 새 key를 발급하도록 유지한다.
+
+### Completed work
+
+**`frontend/src/api/client.ts`** — revise-and-gate 전용 typed outcome을 추가했다.
+
+- 200 응답은 `WritingReviseGateResponse`, non-2xx 중 candidate를 가진 C0 partial envelope은 `WritingReviseGatePartial`로 반환한다.
+- partial 5xx만 `retryable=true`, 4xx는 `retryable=false`로 구분한다. 일반 `ErrorDetailResponse`는 기존 `ApiError`로 유지한다.
+- 공개 요청/응답 타입은 전부 `schema.d.ts` 생성 타입 alias이며 별도 수동 interface를 만들지 않았다.
+
+**`frontend/src/writing/WritingPanel.tsx`** — C1 패널에 bounded loop 소비를 연결했다.
+
+- generate→Gate가 `decision=revise`이고 finding type이 continuity, recommendation이 `revise`, nonblank evidence가 candidate에 정확히 1회 존재할 때만 자동 호출한다. 여러 eligible finding은 backend와 같이 error severity 우선, 동급 Gate 순서를 사용한다.
+- 요청은 기존 candidate·finding·C1 context를 그대로 전달하고 `persist_audit=false`로 ephemeral UI loop만 실행한다. 최초 retrieve-only 진입은 만들지 않고 retrieval은 서버 loop가 담당한다.
+- 성공·partial 응답의 마지막 candidate/Gate/loop/stages로 화면을 갱신한다. stage `revise|report|gate|retrieve_plan|context_search|merge`와 `completed|failed|no_change`를 표시한다.
+- `pass|terminal_decision|not_eligible|budget_exhausted|no_change|failed` 6종을 각각 완료·사용자 검토·수동 처리·재시도/재생성 안내로 매핑했다.
+- partial discriminator `revision_error|report_error|gate_error|retrieval_error`를 우선 표시하고 없으면 `audit_error`를 표시한다. 5xx는 원 요청 exact body의 재시도 버튼을 제공하고 4xx는 조건 확인 안내만 제공한다.
+- loop가 candidate를 바꾸면 기존 accept intent를 폐기한다. 이후 accept 시 C1 H1 body signature guard가 revised candidate에 새 idempotency key를 생성한다.
+
+**`frontend/src/writing/WritingPanel.test.tsx`·`frontend/src/styles.css`** — C2 회귀와 loop 결과 UI를 추가했다.
+
+- eligible 자동 진입·exact request body·ineligible/non-unique 차단을 양방향으로 잠갔다.
+- status 6종, stage 표시, partial 5xx exact-body retry, partial 400 non-retry, 최종 revised candidate accept를 회귀로 고정했다.
+- loop 결과·상태·count·stage·error 표시를 기존 종이/잉크 디자인 토큰에 맞춰 스타일했다.
+
+### Issues found
+
+- 같은 endpoint가 200 success와 400/502/503/504 partial JSON envelope을 함께 내므로 공통 `request()`의 비-2xx throw 경로로는 candidate를 보존할 수 없다. `reviseAndGateWriting`에서 status와 candidate discriminator를 읽어 success/partial union으로 정규화했다.
+- 자동 진입 조건을 프론트가 느슨하게 해석하면 서버의 `not_eligible`를 불필요하게 호출하게 된다. backend `_eligible_revision_finding`과 동일한 finding type·recommendation·evidence uniqueness·priority를 작은 helper에 그대로 반영하고 회귀로 잠갔다.
+- partial 재시도는 candidate만 재조립하면 finding/context가 달라질 수 있다. 최초 요청 body를 ref에 보존해 5xx 재시도가 exact body를 다시 보내도록 했다.
+- 실 12B generate→Gate→revise/retrieve→accept 관통은 현재 sandbox에서 실행할 수 없다. unit/build/schema 증거로 대체하고 오너 풀스택 후속으로 유지한다.
+
+### Decisions
+
+- 새 owner-level 결정은 없다. 승인된 C2 경계와 D1~D5=A를 그대로 구현했다.
+- persisted audit UI는 범위 밖이므로 `persist_audit=false`를 명시했다.
+- partial 4xx는 같은 요청 재시도를 제공하지 않고 조건 확인을 안내한다. 5xx만 exact-body retry를 제공한다.
+- C Writing 작업공간은 C0/C1/C2로 완료됐다. 다음 frontend slice는 B Review Inbox 최소 action UI다.
+- C 종료 시 `OPS-1` trigger를 재점검했으나 **Waiting을 유지**했다. A+C 코드 UI는 완료됐지만 실 12B 관통이 미실행이고 dogfood 착수는 아직 오너가 결정하지 않았다. 오너가 실 스택 기본 루프를 확인하고 dogfood를 시작하기로 할 때 Ready로 올린다.
+
+### Next steps
+
+- **B Review Inbox 최소 action UI**: `docs/plans/06-review-ui.md`와 직접 참조되는 Phase 6 list/detail·affordance 계약을 범위화하고, 서버가 `{action,eligible,reason}`으로 선언한 eligible action만 노출·실행한다.
+- 부분 승인/부분 retry·merge/split 일반화는 오너 결정 전 추측 구현하지 않는다.
+- 오너 풀스택에서 실 12B `generate→Gate→자동 revise/retrieve→accept` 관통과 pointer/report 오류 taxonomy를 확인한 뒤 dogfood 착수 여부를 결정한다.
+
+### Verification
+
+- `cd frontend && npm test -- --run src/writing/WritingPanel.test.tsx` → **29 passed**.
+- `cd frontend && npm test` → **78 passed / 5 files**.
+- `cd frontend && npm run build` → PASS, **91 modules**, CSS 9.99 kB(gzip 2.56), JS 252.51 kB(gzip 80.34).
+- `cd frontend && npm run gen:api` 후 `schema.d.ts` **IDENTICAL**.
+- pattern sweep에서 revise eligibility·client 호출은 의도된 `WritingPanel`/`client.ts` 표면만 확인했다.
+- backend/schema diff 0, `git diff --check` clean.
+
+### 독립 검증 PASS + hardening closure
+
+독립 검증 `docs/verifications/2026-07-16/c2_writing_loop_ui.md`는 **PASS(조건 없음), blocking 0**으로 판정했다. 검증자가 backend와 프론트 자격 함수의 enum·filter·evidence count·severity/Gate-order 선택을 1차 소스에서 재도출했고, partial 4종의 discriminator/status/candidate 보존과 정량 29/78·build·gen:api를 독립 재현했다.
+
+- **H1 반영**: candidate에 같은 evidence가 2회 등장하면 자동 loop에 진입하지 않는 explicit over-strict 회귀를 추가했다. `=== 1`을 `>= 1`로 완화하는 mutation을 잡는다.
+- **H2 반영**: 기존 `revision_error`·`report_error`에 더해 `gate_error`·`retrieval_error`의 type/detail 표시를 각각 직접 잠갔다.
+- **H3 반영**: finding 자체가 eligible처럼 보여도 Gate decision이 `retrieve_more`이면 자동 loop에 진입하지 않는 explicit 회귀를 추가했다.
+- **H4 반영**: 성공 loop status 6종 모두에서 “자동 개선 다시 시도” 버튼이 렌더되지 않음을 기존 status 매트릭스에 추가했다.
+- **H5 보류(프로덕션 코드 무변)**: 설정성 503도 현재 계약상 5xx라 retryable이다. 503만 제외하면 C2의 “5xx 재시도” 의미 변경이므로 owner-level UX/contract 판단 전 고정하지 않는다. B/OPS UX 점검의 후속 후보로 유지한다.
+- **OPS-1 정합**: A+C 코드 UI 완료만으로 Ready로 올리지 않는다. 실 12B 관통 확인과 오너 dogfood 착수 결정 전까지 Waiting이 canonical이다.
+
+hardening 후 focused **33 passed**, 프론트 전체 **82 passed/5 files**, build 91 modules(CSS 9.99 kB gzip 2.56, JS 252.51 kB gzip 80.34), `gen:api` IDENTICAL.

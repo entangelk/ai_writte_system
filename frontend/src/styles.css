@@ -500,7 +500,8 @@ main {
 }
 
 .writing-actions button,
-.candidate-actions button {
+.candidate-actions button,
+.loop-retry {
   padding: 0.72rem 1.5rem;
   color: #fffaf1;
   background: var(--accent);
@@ -510,12 +511,14 @@ main {
 }
 
 .writing-actions button:hover:not(:disabled),
-.candidate-actions button:hover:not(:disabled) {
+.candidate-actions button:hover:not(:disabled),
+.loop-retry:hover:not(:disabled) {
   background: var(--accent-dark);
 }
 
 .writing-actions button:disabled,
-.candidate-actions button:disabled {
+.candidate-actions button:disabled,
+.loop-retry:disabled {
   cursor: not-allowed;
   opacity: 0.42;
 }
@@ -609,6 +612,59 @@ main {
 
 .finding-evidence {
   color: var(--muted);
+}
+
+.loop-result {
+  margin-top: 1.2rem;
+  padding: 1rem;
+  background: rgba(164, 69, 47, 0.055);
+  border: 1px solid var(--line);
+}
+
+.loop-status,
+.loop-action,
+.loop-counts,
+.loop-error {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.6;
+}
+
+.loop-action,
+.loop-counts {
+  margin-top: 0.35rem;
+  color: var(--muted);
+}
+
+.loop-stages {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.8rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.loop-stages li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid rgba(116, 111, 101, 0.2);
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.loop-stages strong {
+  color: var(--ink);
+}
+
+.loop-error {
+  margin-top: 0.9rem;
+  color: var(--danger);
+}
+
+.loop-retry {
+  margin-top: 0.9rem;
 }
 
 .candidate-actions {

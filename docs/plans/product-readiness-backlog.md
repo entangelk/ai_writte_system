@@ -33,9 +33,9 @@
 
 | ID | 상태 | 항목 | 착수 트리거 | 그때 할 일 | 종료 조건 | 다음 점검 시점 |
 |---|---|---|---|---|---|---|
-| UX-1 | **In progress** | 실제 작가 기본 루프 닫기 | 이미 발생: Frontend 첫 slice 완료 | A: 원고 목록·생성→`textarea`→명시적 저장→version→export, C: generate→Gate 근거→accept/save, B: Review Inbox 최소 action UI 순서로 연결 | 화면에서 `프로젝트 생성 → 원고 입력·저장 → 이어쓰기 생성 → Gate 확인 → 채택·새 version → Review action`을 API 수동 씨딩 없이 관통하고 회귀·live smoke가 존재 | 매 frontend slice 종료 |
+| UX-1 | **In progress** | 실제 작가 기본 루프 닫기 | 이미 발생: Frontend 첫 slice 완료 | A: 원고 목록·생성→`textarea`→명시적 저장→version→export, C: generate→Gate 근거→eligible bounded revise/retrieve→accept/save, B: Review Inbox 최소 action UI 순서로 연결 | 화면에서 `프로젝트 생성 → 원고 입력·저장 → 이어쓰기 생성 → Gate/자동 개선 확인 → 채택·새 version → Review action`을 API 수동 씨딩 없이 관통하고 회귀·live smoke가 존재 | 매 frontend slice 종료 |
 | ARCH-1 | **Done** | `main.py` 점진 분리 | **발화: C D3=A 확정으로 Writing response/partial model을 실제 수정해야 함**. 단순 프론트 조립만이면 미발화 | ~~C0에서 먼저 Writing `http_models.py`를 분리한다. 의존성 전달이 명확할 때만 router를 추출하며 전 도메인 일괄 이동은 금지한다.~~ **완료(v1.7.1)**: Writing HTTP 모델을 `services/application/app/writing/http_models.py`로 분리, route는 추출하지 않음(의존성 전달이 아직 복잡). | ✅ Writing HTTP 모델이 별도 모듈로 분리돼 `main.py`는 모델 정의를 늘리지 않았고, focused/full 회귀(1117 passed)와 OpenAPI exact-key 계약(`Writing*EnvelopeKeyTest` 9)이 유지됨 | — (완료) |
-| OPS-1 | Waiting | Lite / Full 실행 모드 | A+C 최소 UI가 동작하고 2주 dogfood를 시작하기 직전 | Lite의 보장 기능과 degraded 기능, worker/outbox backlog 처리, Mongo-direct fallback을 먼저 고정한 뒤 `mongo + application + gateway + frontend` 중심 실행 경로와 Full 경로를 제공 | Lite 기동 명령 하나로 편집·저장·generate·accept가 관통하고, 제외 기능·Full 전환·pending outbox 동작이 문서화·검증 | C 완료 직후 |
+| OPS-1 | Waiting | Lite / Full 실행 모드 | A+C 최소 UI가 동작하고 2주 dogfood를 시작하기 직전 | Lite의 보장 기능과 degraded 기능, worker/outbox backlog 처리, Mongo-direct fallback을 먼저 고정한 뒤 `mongo + application + gateway + frontend` 중심 실행 경로와 Full 경로를 제공 | Lite 기동 명령 하나로 편집·저장·generate·accept가 관통하고, 제외 기능·Full 전환·pending outbox 동작이 문서화·검증 | 실 12B 관통 확인 + 오너 dogfood 착수 결정 시 |
 | QUAL-1 | Waiting | 실제 원고 dogfood와 제품 품질 지표 | A+C가 UI에서 사용 가능하고 Lite 또는 Full 중 시험 실행 경로가 안정화됐을 때 | 새 telemetry 백엔드를 만들지 않고 우선 수동 기록: 생성/채택, 채택 후 대폭 수정 여부, Gate 경고 유용성, 장면 완료 시간. 최소 2주 실제 장편에 사용 | 최소 2주·5회 이상 집필 세션의 기록과 반복 문제 목록이 있고, 다음 백엔드/UX 우선순위를 실사용 근거로 결정 | A+C·OPS-1 후 시작, 1주/2주차 검토 |
 | PROC-1 | **Standing** | 문서화 비용 계층화 | 지금부터 모든 변경 | work log는 유지하되, 결정 브리프는 genuine fork에만, 독립 verification record는 명시적 검증 요청에만, SoT/CHANGELOG는 계약·주요 설계·기능 변화에만 사용한다. 일반 UI/CSS는 구현 후 간단 기록 | 각 slice 기록이 해당 artifact의 trigger와 맞고, 되돌리기 쉬운 UI 선택 때문에 구현이 멈추지 않음 | 모든 slice 종료 |
 | REPO-1 | Waiting | `ai_writte_system` 이름 정정 | 공개 포트폴리오 URL 확정, 첫 외부 협업자 초대, 또는 외부 배포 설정 추가 중 가장 이른 시점 | 제품명과 저장소 slug를 결정한 뒤 remote·문서 링크·경로 의존 설정을 한 번에 갱신 | 새 이름으로 clone/build/run 가능하고 repo-wide 이전 slug 검색 결과가 의도된 이력 외 0건 | 외부 공개/협업 직전 |
@@ -52,16 +52,18 @@
 
 2026-07-16 C1 종료 체크포인트: 기본 Writing 작업공간(generate→Gate 근거→pass accept/save, D1=A 게이팅+설명 텍스트)을 구현했다(SoT v1.7.2, `WritingPanel`). 이로써 A(편집/저장/history/export)+C1(기본 집필 루프)이 UI에서 동작한다. **`OPS-1` trigger 점검**: OPS-1은 "A+C 최소 UI가 동작하고 2주 dogfood를 시작하기 직전"에 발화한다. C1이 최소 집필 루프를 닫았으나 (1) **실 LLM 관통(compose generate→Gate→accept smoke)이 아직 미실행**(12B 필요, sandbox 불가)이고 (2) dogfood 착수는 오너 결정이라 **OPS-1은 Waiting 유지**한다 — 오너가 실 스택에서 기본 루프를 관통 확인하고 dogfood를 시작하기로 할 때 Ready로 올린다. `ARCH-1`은 C1이 backend/schema 무변(순수 소비)이라 재발화하지 않는다. 다음은 C2 bounded loop UI다.
 
+2026-07-16 C2 종료 체크포인트: `/writing/revise-and-gate` 자동 loop UI와 6종 status·partial 재시도 매핑을 구현해 C 전체를 완료했다(SoT v1.7.3). **`OPS-1` trigger 재점검**: A+C 코드 UI는 완료됐지만 실 12B generate→Gate→loop→accept 관통이 미실행이고 dogfood 착수는 아직 오너가 결정하지 않아 **Waiting을 유지**한다. 두 조건이 충족될 때 Ready로 올린다. 프론트 고정 순서의 다음 작업은 B Review Inbox다.
+
 ```text
 현재
   → A: 원고·에디터·저장·version·export
       [ARCH-1 점검]
-  → C: Writing generate·Gate·accept
+  → C: Writing generate·Gate·bounded revise/retrieve·accept
       [ARCH-1, OPS-1 점검]
-  → 실제 원고 dogfood 시작
-      [QUAL-1 1주/2주 점검]
   → B: Review Inbox 최소 UI
       [ARCH-1 점검]
+  → Lite/Full 준비 + 실제 원고 dogfood 시작
+      [OPS-1 착수, QUAL-1 1주/2주 점검]
   → UX-1 + QUAL-1 충족
       [GATE-1: Phase 7 착수 여부 결정]
 

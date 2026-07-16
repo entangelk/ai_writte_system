@@ -2,7 +2,7 @@
 
 상태: `Resolved — D1=A · D2=A · D3=A · D4=A · D5=A, owner confirmed 2026-07-16`
 
-관련 정본: `docs/system-contract-sot.md` v1.7.0, `frontend-editor-save-decisions.md`, `frontend-api-contract-decisions.md`, `05-writing-ai.md`, `product-shell.md`, `product-readiness-backlog.md`, HANDOFF Next Tasks
+관련 정본: `docs/system-contract-sot.md` v1.7.3, `frontend-editor-save-decisions.md`, `frontend-api-contract-decisions.md`, `05-writing-ai.md`, `product-shell.md`, `product-readiness-backlog.md`, HANDOFF Next Tasks
 
 ## Decision needed
 
@@ -168,19 +168,22 @@ accept intent lock:
 
 다음은 C2 자동 loop(아래).
 
-### C2 — 자동 revise/retrieve loop
+### C2 — 자동 revise/retrieve loop — **구현 완료(SoT v1.7.3, 2026-07-16)**
 
-1. eligible revise finding에서만 `revise-and-gate`를 호출한다.
-2. 마지막 candidate·Gate·loop status·stage progress를 표시한다.
-3. partial 4xx/5xx에서도 candidate를 보존하고 error 종류와 재시도 가능성을 구분한다.
-4. `pass|terminal_decision|not_eligible|budget_exhausted|no_change|failed`를 사용자 행동으로 매핑한다.
+1. ~~eligible revise finding에서만 `revise-and-gate`를 호출한다.~~ ✅ generate→Gate 뒤 continuity/revise/nonblank evidence/candidate 내 정확히 1회 조건을 만족할 때 자동 호출. error severity 우선·동급 Gate 순서.
+2. ~~마지막 candidate·Gate·loop status·stage progress를 표시한다.~~ ✅ 성공·partial 모두 마지막 완전 candidate를 보존하고 Gate, status, stage name/status를 표시.
+3. ~~partial 4xx/5xx에서도 candidate를 보존하고 error 종류와 재시도 가능성을 구분한다.~~ ✅ discriminator(`revision_error|report_error|gate_error|retrieval_error`, 없으면 `audit_error`) 표시. 5xx만 원 요청 exact body 재시도, 4xx는 확정 실패.
+4. ~~`pass|terminal_decision|not_eligible|budget_exhausted|no_change|failed`를 사용자 행동으로 매핑한다.~~ ✅ 6종 전부 완료·사용자 검토·수동 처리·재시도/재생성 행동으로 매핑하고 회귀로 잠금. 독립 검증 후 evidence 2회·non-revise·4 discriminator·성공 retry 숨김까지 보강(전체 82, WritingPanel 33).
+5. persisted loop audit 목록 UI는 Deferred이므로 interactive 요청은 `persist_audit=false`를 명시한다.
+
+C Writing 작업공간은 완료됐다. 다음 frontend slice는 B Review Inbox다. 실 compose generate→Gate→revise/retrieve→accept 관통은 12B 필요라 오너 풀스택 후속이다.
 
 ## Follow-up considerations
 
 - candidate를 채택 전에 자주 수정한다면 D4=B를 열고 “편집 후 report/Gate 재평가”를 함께 결정한다.
 - D4 재검토는 단순히 editable textarea를 붙이는 문제가 아니다. 후보 일부 수정 뒤 기존 report/Gate 근거가 stale해지는지, 저장 후 editor 수정→재생성이 충분한지, 사용자가 어느 흐름을 더 자연스럽게 느끼는지를 C1 UX에서 관찰한 뒤 결정한다.
 - dirty context 생성 요구가 반복되면 D1=B를 검토하되, base 저장 후 candidate stale 판정과 재Gate가 한 계약으로 설계돼야 한다.
-- C1 종료 직후 `OPS-1` trigger를 점검해 dogfood용 Lite/Full 실행 경로를 정한다.
+- C2 종료로 A+C 최소 UI는 완료됐다. 다만 실 12B 관통과 오너의 dogfood 착수 결정이 아직 없어 `OPS-1`은 Waiting을 유지하며, 두 조건이 충족될 때 Ready로 올린다.
 - Writing 화면에서 loop stage가 실제 사용자에게 과도한 내부 정보라면 C2는 상세 접기 또는 운영 진단 전용으로 축소할 수 있다.
 - 실 12B pointer 준수 관측은 C1 live smoke의 candidate report에서 함께 확인할 수 있으나, 실패가 재현되기 전 prompt를 변경하지 않는다.
 

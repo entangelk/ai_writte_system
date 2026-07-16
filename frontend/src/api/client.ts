@@ -62,6 +62,13 @@ export type WritingCandidate = components["schemas"]["WritingCandidatePayload"];
 export type WritingGateRequest = components["schemas"]["WritingGateRequest"];
 export type WritingGate = components["schemas"]["WritingGatePayload"];
 export type WritingGateFinding = components["schemas"]["WritingGateFindingPayload"];
+export type WritingReviseRequest = components["schemas"]["WritingReviseRequest"];
+export type WritingReviseGateResponse =
+  components["schemas"]["WritingReviseGateResponse"];
+export type WritingReviseGatePartial =
+  components["schemas"]["WritingReviseGatePartial"];
+export type WritingLoop = components["schemas"]["WritingLoopPayload"];
+export type WritingLoopStage = components["schemas"]["WritingStagePayload"];
 export type WritingAcceptRequest = components["schemas"]["WritingAcceptRequest"];
 export type WritingAcceptResponse = components["schemas"]["WritingAcceptResponse"];
 export type WritingAcceptAnalysisPartial =
@@ -154,6 +161,55 @@ export function gateWriting(
     method: "POST",
     body: JSON.stringify(body),
   });
+}
+
+export type WritingReviseGateOutcome =
+  | {
+      partial: false;
+      status: 200;
+      data: WritingReviseGateResponse;
+      retryable: false;
+    }
+  | {
+      partial: true;
+      status: number;
+      data: WritingReviseGatePartial;
+      retryable: boolean;
+    };
+
+export async function reviseAndGateWriting(
+  projectId: string,
+  body: WritingReviseRequest,
+): Promise<WritingReviseGateOutcome> {
+  const response = await fetch(
+    `${API_BASE}/projects/${projectId}/writing/revise-and-gate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  const data = (await response.json()) as
+    | WritingReviseGateResponse
+    | WritingReviseGatePartial
+    | components["schemas"]["ErrorDetailResponse"];
+  if (response.ok) {
+    return {
+      partial: false,
+      status: 200,
+      data: data as WritingReviseGateResponse,
+      retryable: false,
+    };
+  }
+  if ("candidate" in data) {
+    return {
+      partial: true,
+      status: response.status,
+      data,
+      retryable: response.status >= 500,
+    };
+  }
+  throw new ApiError(response.status, data.detail);
 }
 
 // A normalized accept outcome. The endpoint's load-bearing behaviour is that a
