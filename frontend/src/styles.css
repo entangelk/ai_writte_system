@@ -26,7 +26,8 @@ body {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -92,6 +93,14 @@ main {
 
 .project-heading h1 {
   font-size: clamp(2.5rem, 6vw, 4.7rem);
+}
+
+.editor-heading {
+  margin-bottom: 2rem;
+}
+
+.editor-heading h1 {
+  font-size: clamp(2.4rem, 5vw, 4.2rem);
 }
 
 .page-heading > p:last-child {
@@ -251,6 +260,77 @@ main {
   margin: 1.5rem 0 0;
   padding: 1.4rem 0;
   border-bottom: 1px solid var(--line);
+}
+
+.editor-form {
+  border-top: 1px solid var(--ink);
+}
+
+.editor-meta,
+.editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.editor-meta {
+  padding: 0.9rem 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.editor-meta label {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.editor-form textarea {
+  width: 100%;
+  min-height: 28rem;
+  resize: vertical;
+  padding: 1.8rem 0;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  outline: none;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.12rem;
+  line-height: 1.85;
+}
+
+.editor-form textarea:focus {
+  border-bottom-color: var(--accent);
+}
+
+.editor-form textarea:read-only {
+  color: #5f5a52;
+}
+
+.editor-actions {
+  min-height: 4.5rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.editor-actions button {
+  padding: 0.72rem 1.5rem;
+  color: #fffaf1;
+  background: var(--accent);
+  border: 0;
+  cursor: pointer;
+}
+
+.editor-actions button:hover:not(:disabled) {
+  background: var(--accent-dark);
+}
+
+.editor-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
 .empty-state p {

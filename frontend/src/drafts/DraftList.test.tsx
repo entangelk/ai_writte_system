@@ -55,6 +55,10 @@ describe("DraftList", () => {
       await screen.findByRole("heading", { name: "겨울 이야기" }),
     ).toBeInTheDocument();
     expect(screen.getByText("첫 장면")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "첫 장면" })).toHaveAttribute(
+      "href",
+      "/projects/p1/drafts/d1",
+    );
     expect(screen.getByText("묵은 장면")).toBeInTheDocument();
     expect(screen.getByText("(보관됨)")).toBeInTheDocument();
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([

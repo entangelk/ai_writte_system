@@ -329,3 +329,90 @@ D2=B(별도 서비스)는 D2=A가 공짜로 주던 단일 origin을 잃는다. �
 - 브리프 작성 시 문서 링크·관련 파일명·당시 SoT v1.6.96·HANDOFF precedence를 확인했다.
 - 확정 후 현재 SoT v1.6.97·브리프 Resolved 상태·HANDOFF owner-decision 제거를 확인했다.
 - docs 경로·plans 인덱스·CHANGELOG 링크가 모두 존재하고 `git diff --check`가 clean임을 확인했다.
+
+---
+
+## Task 7 — Frontend editor/save A1 구현
+
+### Goals
+
+- 확정된 D1=A·D2=A·D3=A에 따라 draft deep link에서 latest/empty 본문을 열고 명시적 version save까지 첫 실제 집필 write loop를 닫는다.
+- 저장 intent의 UUID+exact body 결박, ambiguous retry, unchanged/empty 양방향 경계를 회귀로 먼저 잠근다.
+- backend/Core SOT 계약을 바꾸지 않고 생성 OpenAPI 타입만 소비한다.
+
+### Completed work
+
+- `frontend/src/drafts/DraftEditor.tsx`를 추가하고 `/projects/:projectId/drafts/:draftId` route 및 원고 목록 링크를 연결했다. project·draft·version list를 병렬 조회하고, version 0개는 빈 baseline, 1개 이상은 최대 `version_number` detail의 `snapshot.raw_text`를 verbatim 표시한다.
+- `frontend/src/api/client.ts`에 생성 타입 기반 `getDraft`·`listDraftVersions`·`getDraftVersion`·`saveDraft`를 추가했다. 손선언 응답 타입과 backend 수정은 없다.
+- Save는 `savingRef`로 동기 in-flight 중복 submit을 차단하고 `{key: crypto.randomUUID(), rawText}` intent를 메모리에 보존한다. transport/5xx/parse fault 뒤 동일 본문은 같은 key, 본문 변경은 새 key를 쓰며 2xx 또는 400/404/409/422 뒤 intent를 폐기한다.
+- 저장 성공 응답 version을 새 baseline으로 채택한다. unchanged 상태와 brand-new empty는 POST하지 않지만 nonempty→empty dirty save는 허용한다. `idempotent_replay=true`도 동일 version baseline으로 정상 처리해 별도 version을 만들지 않는다.
+- project/draft archive는 처음부터 read-only이며, save 409는 현재 입력을 보존한 채 read-only로 전환한다. dirty 편집에는 브라우저 새로고침/종료 경고(`beforeunload`)를 최소 적용했다.
+- `DraftEditor.test.tsx` 13개와 기존 route/list 회귀를 추가해 direct URL 격리, empty/latest, exact body, duplicate, ambiguous same/changed body, replay, archive, version list/detail/save 오류와 입력 보존을 잠갔다.
+- SoT를 v1.6.98로 올리고 Product shell·브리프·CHANGELOG·HANDOFF를 A1 완료/A2 다음 작업으로 동기화했다.
+
+### Issues found
+
+- React state의 `saving` 값만으로는 같은 event turn에 연속 `submit()`이 들어올 때 두 번째 호출이 stale 값을 볼 수 있다. 동기 ref를 write lock으로 두고 state는 UI 표시만 맡겨 1 POST 경계를 보장했다.
+- latest version은 현재 backend가 오름차순을 보장하지만, UI가 배열 마지막 원소라는 암묵적 순서에 의존하지 않도록 명시적으로 최대 `version_number`를 선택했다.
+- 새로고침 횡단 ambiguous intent 복구는 `idempotency_key`가 read surface에 없어서 A1 범위에서는 불가능하다. 승인된 D1=A 한계 그대로이며 sessionStorage journal은 도입하지 않았다.
+
+### Decisions
+
+- 새 오너 결정은 없다. 구현은 기록된 D1=A(UUID+exact body), D2=A(draft route+component state), D3=A(A1→A2 분리)를 그대로 따른다.
+- A1은 history/export를 섞지 않는다. 다음 slice A2가 version 선택·dirty 전환 확인·txt/Markdown export를 소유한다.
+- backend 파일을 수정하지 않았으므로 `ARCH-1` trigger는 아직 발화하지 않는다. Product shell A 종료 체크포인트에서 다시 점검한다.
+
+### Next steps
+
+- A2에서 version 목록과 selected detail, dirty 상태의 version 전환 확인, 선택 version txt/Markdown download를 구현한다.
+- A2 완료 후 Product shell A smoke와 `product-readiness-backlog.md`의 `ARCH-1` trigger를 점검한다.
+
+### Verification
+
+- red-first: `DraftEditor` 모듈이 없을 때 focused suite가 import resolution 실패로 red인 것을 확인한 뒤 구현했다.
+- `cd frontend && npx vitest run src/drafts/DraftEditor.test.tsx` → **13 passed / 1 file**.
+- `cd frontend && npm test -- --reporter=dot` → **36 passed / 4 files**.
+- `cd frontend && npm run build` → PASS, **90 modules**, CSS 5.62 kB(gzip 1.79), JS 238.19 kB(gzip 76.18).
+- `cd frontend && npm run gen:api` → PASS, 생성 `schema.d.ts` diff 없음.
+- `services/`·`tests/`·`scripts/`·`docker-compose.yml` diff 0, `git diff --check` PASS. 자체 구현 routine self-check이므로 독립 verification record는 만들지 않았다.
+
+---
+
+## Task 8 — Editor/save 독립 검증 B1 closure·hardening·커밋 준비
+
+### Goals
+
+- 독립 검증 `frontend_editor_save.md`의 CONDITIONAL PASS와 B1 재현을 1차 소스에서 확인한다.
+- 저장 중 추가 입력 silent loss를 최소 수정과 양방향 회귀로 폐쇄한다.
+- 비차단 H1~H3를 범위에 맞게 처리하고 전체 A1 변경을 커밋 가능한 상태로 만든다.
+
+### Completed work
+
+- 검증 기록의 boundary matrix 16행, Core SOT key-only idempotency 근거, B1 임시 mutation 결과를 읽고 실제 코드와 대조했다.
+- B1 전용 회귀를 먼저 추가했다. 빈 draft에 `A`를 입력해 save를 pending으로 둔 동안 `B`를 추가한 뒤 응답을 완료하면 원본 코드에서 **Expected `AB` / Received `A`**로 정확히 실패했다.
+- `DraftEditor` 저장 성공 경로의 `setRawText(intent.rawText)` 1줄을 제거했다. 응답은 저장된 본문 `A`를 baseline으로만 채택하고 textarea의 최신 `AB`는 보존하므로 dirty 상태와 다음 Save가 유지된다.
+- **H1 반영**: changed-body/new-key 테스트의 불가능한 `idempotent_replay=true` mock을 false로 정정했다. 별도 테스트가 5xx 뒤 동일 key+동일 body 재시도에서 replay true와 “재확인됨”을 검증한다.
+- **H3 반영**: cancelable `beforeunload`를 직접 dispatch해 dirty일 때만 prevent되고 성공 저장 후 clean일 때는 prevent되지 않는 양방향 회귀를 추가했다.
+- 검증 기록에 post-verification disposition을 추가해 원 CONDITIONAL PASS를 보존하면서 B1/H1/H3 closure와 H2 보류를 구분했다. SoT v1.6.98 행·CHANGELOG·HANDOFF의 정량과 현재 상태를 39개 회귀로 동기화했다.
+
+### Issues found
+
+- B1은 계약 boundary matrix 밖의 UI concurrency 결함이었다. 저장된 baseline과 현재 editor state를 같은 값으로 강제한 한 줄이 저장 도중 사용자 입력을 덮었으며, request body/idempotency는 정상이라 기존 계약 회귀만으로는 검출되지 않았다.
+- H1의 mock은 표시 분기 자체는 검증했지만 서버가 만들 수 없는 envelope 조합이었다. 실제 ambiguous replay 시퀀스로 분리해야 테스트가 공급 계약과도 정합한다.
+
+### Decisions
+
+- **오너 지시대로 B1을 수리 후 커밋한다.** 저장 중 textarea를 read-only로 잠그는 대안은 집필 흐름을 불필요하게 막으므로, 검증자가 부수효과 0으로 실증한 1줄 제거를 채택했다.
+- **H1/H3 즉시 반영, H2 trigger 전 보류**. 현재 version API는 전체 목록을 반환하므로 max 선택은 정확하다. pagination/cap이 실제 도입될 때 latest 권한을 서버 계약과 함께 재검토한다.
+
+### Next steps
+
+- A2에서 version 목록 선택·dirty 전환 확인·txt/Markdown export를 구현한다.
+
+### Verification
+
+- red-first B1: 원본 코드에서 focused **1 failed / 15 passed**, `Expected AB / Received A`; 1줄 제거 후 **16 passed / 1 file**.
+- `cd frontend && npm test -- --reporter=dot` → **39 passed / 4 files**.
+- `cd frontend && npm run build` → PASS, **90 modules**, CSS 5.62 kB(gzip 1.79), JS 238.17 kB(gzip 76.18).
+- `cd frontend && npm run gen:api` → PASS, 생성 `schema.d.ts` diff 없음.
+- backend 범위 diff 0, `git diff --check` PASS.

@@ -1,5 +1,6 @@
 import { Link, Route, Routes } from "react-router";
 import { DraftList } from "./drafts/DraftList";
+import { DraftEditor } from "./drafts/DraftEditor";
 import { ProjectList } from "./projects/ProjectList";
 
 export function App() {
@@ -13,6 +14,10 @@ export function App() {
         <Routes>
           <Route path="/" element={<ProjectList />} />
           <Route path="/projects/:projectId" element={<DraftList />} />
+          <Route
+            path="/projects/:projectId/drafts/:draftId"
+            element={<DraftEditor />}
+          />
           <Route
             path="*"
             element={

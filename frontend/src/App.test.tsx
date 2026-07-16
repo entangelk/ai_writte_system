@@ -56,6 +56,27 @@ describe("App routes", () => {
     ]);
   });
 
+  it("renders a directly addressed draft editor", async () => {
+    const fetchMock = mockFetch(
+      { id: "p1", name: "겨울 이야기", archived: false },
+      { id: "d1", project_id: "p1", title: "첫 장면", archived: false },
+      { versions: [] },
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/projects/p1/drafts/d1"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "첫 장면" })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/projects/p1",
+      "/api/projects/p1/drafts/d1",
+      "/api/projects/p1/drafts/d1/versions",
+    ]);
+  });
+
   it("keeps an unknown route inside the product shell", async () => {
     render(
       <MemoryRouter initialEntries={["/missing"]}>

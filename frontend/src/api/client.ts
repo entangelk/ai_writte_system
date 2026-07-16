@@ -51,6 +51,11 @@ export type ProjectListResponse = components["schemas"]["ProjectListResponse"];
 export type CreateDraftRequest = components["schemas"]["CreateDraftRequest"];
 export type Draft = components["schemas"]["DraftPayload"];
 export type DraftListResponse = components["schemas"]["DraftListResponse"];
+export type DraftVersion = components["schemas"]["DraftVersionMetaPayload"];
+export type DraftVersionListResponse = components["schemas"]["DraftVersionListResponse"];
+export type DraftVersionDetail = components["schemas"]["DraftVersionDetailResponse"];
+export type SaveDraftRequest = components["schemas"]["SaveDraftRequest"];
+export type SaveDraftResponse = components["schemas"]["SaveDraftResponse"];
 
 export function listProjects(): Promise<ProjectListResponse> {
   return request("/projects");
@@ -73,6 +78,38 @@ export function createDraft(
   body: CreateDraftRequest,
 ): Promise<Draft> {
   return request(`/projects/${projectId}/drafts`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function getDraft(projectId: string, draftId: string): Promise<Draft> {
+  return request(`/projects/${projectId}/drafts/${draftId}`);
+}
+
+export function listDraftVersions(
+  projectId: string,
+  draftId: string,
+): Promise<DraftVersionListResponse> {
+  return request(`/projects/${projectId}/drafts/${draftId}/versions`);
+}
+
+export function getDraftVersion(
+  projectId: string,
+  draftId: string,
+  versionId: string,
+): Promise<DraftVersionDetail> {
+  return request(
+    `/projects/${projectId}/drafts/${draftId}/versions/${versionId}`,
+  );
+}
+
+export function saveDraft(
+  projectId: string,
+  draftId: string,
+  body: SaveDraftRequest,
+): Promise<SaveDraftResponse> {
+  return request(`/projects/${projectId}/drafts/${draftId}/versions`, {
     method: "POST",
     body: JSON.stringify(body),
   });

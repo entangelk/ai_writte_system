@@ -2,7 +2,9 @@
 
 상태: `Resolved — D1=A · D2=A · D3=A, owner confirmed 2026-07-16`
 
-관련 정본: `docs/system-contract-sot.md` v1.6.97, `frontend-kickoff-decisions.md` D3=A, `frontend-project-navigation-decisions.md` follow-up, `product-shell.md`, HANDOFF Next Tasks
+관련 정본: `docs/system-contract-sot.md` v1.6.98, `frontend-kickoff-decisions.md` D3=A, `frontend-project-navigation-decisions.md` follow-up, `product-shell.md`, HANDOFF Next Tasks
+
+구현 진행: **A1 완료(v1.6.98)** — draft deep link·latest/empty load·평문 textarea·명시적 save intent·archive/409 read-only를 구현했다. **A2(version history selection·dirty 전환 확인·txt/Markdown export)는 다음 slice**다.
 
 ## Decision needed
 

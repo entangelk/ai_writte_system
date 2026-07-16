@@ -129,7 +129,14 @@ export function DraftList() {
             <ul className="resource-list" aria-label="원고 목록">
               {drafts.map((draft) => (
                 <li className="resource-row draft-row" key={draft.id}>
-                  <span className="resource-title">{draft.title}</span>
+                  <Link
+                    aria-label={draft.title}
+                    className="resource-link"
+                    to={`/projects/${projectId}/drafts/${draft.id}`}
+                  >
+                    <span>{draft.title}</span>
+                    <span className="row-arrow" aria-hidden="true">→</span>
+                  </Link>
                   {draft.archived && <span className="status-badge">(보관됨)</span>}
                 </li>
               ))}
