@@ -13,7 +13,7 @@
 브리프의 추측을 줄이기 위해 `services/application/app/main.py`(3148줄)를 직접 셌다:
 
 - **endpoint 50개** 중 `-> dict[str, object]` 주석이 원인이 되어 OpenAPI 응답 schema가 빈 object(`additionalProperties: true`)로 나온다. 이것이 v1.6.94가 기록한 갭의 기계적 원인이다.
-- **48개는 `response_model`이 정상 동작**한다. 그러나 **2개(`/writing/revise-and-gate`, `/writing/accept`)는 `JSONResponse`를 직접 반환**한다 — **FastAPI는 `JSONResponse` 직접 반환에 `response_model`을 적용하지 않는다**(검증도 OpenAPI 문서화도 우회). 이 2개는 partial-failure envelope(`candidate`/`gate`/`loop`/`stages`/`audit_id`/`audit_error`/`*_error`)이 계약의 핵심이라 단순히 모델을 붙여서 덮이지 않는다. **H1이 구조적으로 못 덮는 구멍이며, 하필 Writing 트랙(C 슬라이스)이 소비할 표면이다.**
+- **성공 경로는 50개 모두 `response_model`이 동작**한다. 그러나 **`/writing/revise-and-gate`·`/writing/accept`의 partial-failure 응답은 `JSONResponse`로 직접 반환**되고 — **FastAPI는 `JSONResponse` 직접 반환에 `response_model`을 적용하지 않는다**(검증도 OpenAPI 문서화도 우회) — 이 두 endpoint에서는 그 partial envelope(`candidate`/`gate`/`loop`/`stages`/`audit_id`/`audit_error`/`*_error`)이 **실패 시에도 계약의 일부**라(부분 산출물 보존) 모델만 붙여선 덮이지 않는다. **H1이 구조적으로 못 덮는 구멍이며, 하필 Writing 트랙(C 슬라이스)이 소비할 표면이다.** *(정정: 이 브리프 초안은 "2개 endpoint가 JSONResponse 직접 반환 → response_model 적용 불가"로 썼으나 **부정확**했다 — 두 endpoint의 성공 경로는 dict를 반환한다. uncoverable한 것은 endpoint 전체가 아니라 **partial-failure envelope**이다. 결론과 Deferred는 불변. 독립 검증 H1-d2, 2026-07-16.)*
 - 중첩 payload 헬퍼 **20개**(`_project_payload` … `_gate_finding_payload`). 응답 모델은 endpoint 수가 아니라 이 헬퍼들의 중첩 구조만큼 필요하다.
 - **`Field`/`field_validator`/`min_length` 사용처 = 0**. 요청 모델 5종(`CreateProjectRequest{name}` 등)은 전부 제약 없는 `str`이다. **H2는 이 저장소의 첫 입력 제약**이 된다.
 - `core_sot/service.py:195` `create_project(name)`은 `Project(id=…, name=name)` 직접 생성 — 빈/공백 검증 없음(H2가 지적한 지점).
@@ -24,7 +24,7 @@
 
 | 선택지 | 설명 | 장점 | 단점 |
 |---|---|---|---|
-| **D1=A. Product shell 척추 13개 먼저 (추천)** | 프론트가 지금·다음 슬라이스에서 실제 소비하는 것만: projects 2 + drafts 8 + snapshots 3. | 손선언이 **실제로 존재하는 자리**(`client.ts`)를 정확히 덮는다. 에디터 슬라이스가 붙기 직전에 계약이 잠긴다. payload가 단순(`{id,name,archived}` 수준)해 silent-field-loss 위험이 가장 낮고 회귀가 이미 두껍다. diff가 작아 검증 가능. | 나머지 37개는 계속 무타입. "언제 나머지를 하나"가 남는다. |
+| **D1=A. Product shell 척추 14개 먼저 (추천)** | 프론트가 지금·다음 슬라이스에서 실제 소비하는 것만: projects 5(create/list/get/rename/archive) + drafts 5(create/list/get/rename/archive) + versions 4(list/detail/save/export). *(구현 시 정정: 초안의 "13개(projects 2+drafts 8+snapshots 3)"는 endpoint 분류가 부정확했다 — 실제 척추 구성은 위 14개이고 source-refs/index rebuild는 척추가 아니다. 범위 의도는 동일.)* | 손선언이 **실제로 존재하는 자리**(`client.ts`)를 정확히 덮는다. 에디터 슬라이스가 붙기 직전에 계약이 잠긴다. payload가 단순(`{id,name,archived}` 수준)해 silent-field-loss 위험이 가장 낮고 회귀가 이미 두껍다. diff가 작아 검증 가능. | 나머지 37개는 계속 무타입. "언제 나머지를 하나"가 남는다. |
 | D1=B. 48개 전체 한 번에 | 적용 가능한 모든 endpoint에 응답 모델. | 갭이 한 번에 닫히고 이후 슬라이스는 생성 타입만 쓴다. 계약 표면이 균일. | **20개 중첩 헬퍼 전부를 모델링**해야 한다(analysis·memory·context_search·writing·review inbox 어포던스 중첩까지). 큰 기계적 diff + silent-field-loss가 복잡한 envelope에서 가장 위험. **아직 UI가 만나보지 않은 envelope**(Writing·Review)까지 지금 고정하는데, C·B 슬라이스에서 모양이 바뀔 여지가 크다. 2개 JSONResponse 구멍은 어차피 안 덮인다. |
 | D1=C. 슬라이스마다 그때그때 | 프론트가 소비하는 시점에 해당 endpoint만. | 낭비 0, 항상 실사용 근거. | A와 실질 차이는 "계획 없음". 에디터 슬라이스 중간에 계약 작업이 끼어들어 슬라이스 경계가 흐려진다. |
 
@@ -54,7 +54,7 @@
 
 ## Follow-up considerations
 
-- **JSONResponse 2개(`revise-and-gate`·`accept`)**: H1이 구조적으로 못 덮는다. Writing 작업공간(C 슬라이스)이 이 envelope을 소비할 때 (a) 성공 경로만 `response_model`+에러는 `responses={}`로 문서화할지, (b) partial envelope을 그대로 두고 프론트가 손선언할지를 그때 정한다. **지금 정하지 않는다** — UI가 무엇을 요구하는지 보고 정하는 게 싸다.
+- **`revise-and-gate`·`accept`의 partial-failure envelope**: 두 endpoint의 성공 경로는 dict라 `response_model`을 붙일 수 있지만, `JSONResponse`로 나가는 partial 응답은 H1이 구조적으로 못 덮는다. Writing 작업공간(C 슬라이스)이 이 envelope을 소비할 때 (a) 성공 경로만 `response_model`+에러는 `responses={}`로 문서화할지, (b) partial envelope을 그대로 두고 프론트가 손선언할지를 그때 정한다. **지금 정하지 않는다** — UI가 무엇을 요구하는지 보고 정하는 게 싸다.
 - **silent-field-loss 안전망**: D1=A 적용 후 회귀가 여전히 green이면 "모델이 payload를 좁히지 않았다"의 증거다. 척추 회귀가 실제로 envelope 키를 assert하는지 착수 시 확인하고, 부족하면 exact-key assertion을 먼저 보강한 뒤 모델을 붙인다(그래야 필드 유실이 테스트로 잡힌다).
 - **프론트 후속**: D1=A가 끝나면 `npm run gen:api` 재생성 → `client.ts`의 손선언 `Project` 삭제하고 생성 타입 소비. 이때 H5(경로 타입 call-site 미소비)도 자연 해소된다.
 - **422 vs 400**: D3=A는 422를 도입한다. 프론트 `ApiError`는 이미 status+detail을 보존하지만, 422 detail은 FastAPI validation error 구조(배열)라 현재 `readDetail`이 JSON.stringify로 떨어뜨린다. 사용자에게 보일 문구가 필요하면 그때 매핑한다.

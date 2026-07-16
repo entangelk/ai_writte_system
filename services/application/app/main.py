@@ -953,8 +953,10 @@ class DraftVersionDetailResponse(BaseModel):
 
 # The save surface is deliberately narrower than the read surface above and
 # reuses the same key names (draft_version/snapshot/blocks) with fewer fields.
-# Sharing the read models here would silently delete fields from the save
-# response — hence the separate declarations.
+# Sharing one model across both breaks in whichever direction it is shared:
+# the wide read model on this narrow payload fails validation (missing fields),
+# and the narrow model on the read payload silently drops fields. Hence the
+# separate declarations.
 
 
 class SavedDraftVersionPayload(BaseModel):

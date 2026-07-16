@@ -68,7 +68,7 @@ D2=B(별도 서비스)는 D2=A가 공짜로 주던 단일 origin을 잃는다. �
 
 **착수 전 실측이 브리프의 그림을 바꾼 것** (추측으로 썼으면 틀렸을 지점):
 
-- 50 endpoint 중 **48개만 `response_model` 적용 가능**. **`/writing/revise-and-gate`·`/writing/accept` 2개는 `JSONResponse` 직접 반환**이라 FastAPI가 response_model을 **검증도 문서화도 우회**한다. H1이 구조적으로 못 덮는 구멍이고, 하필 Writing 트랙(C 슬라이스)이 소비할 표면이다. → 브리프에 "H1은 이걸 못 덮는다"를 명시하고 Deferred로 넘겼다.
+- **`/writing/revise-and-gate`·`/writing/accept`의 partial-failure 응답은 `JSONResponse` 직접 반환**이라 FastAPI가 response_model을 **검증도 문서화도 우회**한다. H1이 구조적으로 못 덮는 구멍이고, 하필 Writing 트랙(C 슬라이스)이 소비할 표면이다. → 브리프에 명시하고 Deferred로 넘겼다. **(검증 후속 정정, H1-d2)**: 착수 당시 이를 "48개만 적용 가능 / 2개는 JSONResponse 직접 반환이라 불가"로 적었으나 **부정확**했다 — 두 endpoint의 **성공 경로는 dict를 반환하므로 `response_model` 적용이 가능**하고, uncoverable한 것은 endpoint 전체가 아니라 **partial-failure envelope**뿐이다. 결론(D1=A 척추 한정 + Deferred)과 fork 서술 (a)/(b)는 불변이라 정본 문구만 정확한 진술로 고쳤다.
 - 요청 모델 5종 전부 제약 없는 `str`(`Field`/validator 사용처 **0**) → H2는 이 저장소의 첫 입력 제약.
 
 **H1 구현 (D1=A 척추 14 endpoint, D2=A `response_model=` 파라미터)**
@@ -90,6 +90,17 @@ D2=B(별도 서비스)는 D2=A가 공짜로 주던 단일 origin을 잃는다. �
 - `SpineEnvelopeKeyTest` 5: 척추 전 envelope exact-key. mutation ① `ProjectPayload.archived` 제거 → 새 회귀 + 기존 3개 bite / ② `SnapshotDetailPayload.project_id` 제거 → **새 회귀만** bite(안전망의 고유 가치 실증).
 - `BlankNameRejectionTest` 7(subtest 13): 공백-only 4종 거부·rename 거부·**빈 이름이 store에 안 닿음**(over-strict) · **padding은 거부가 아니라 strip**(under-strict — 과교정 방지) · 일반 이름 통과 · **내부 공백 보존**(strip이 중간까지 정규화하지 않음). mutation ① 제약 제거 → 12 실패 / ② strip 누락(min_length만) → 10 실패.
 
+### v1.6.95 독립 검증 PASS(조건 없음) + 비차단 정정 반영 (코드 무변, 주석 1곳 포함)
+
+오너가 H1/H2 슬라이스 독립 검증을 요청·완료했다(`docs/verifications/2026-07-16/backend_contract_tightening.md`). **판정 합격(조건 없음), blocking 0.** 검증자가 mutation 4종(A 안전망 단독 bite·B 프론트 `tsc` rename 검출·C/D H2 양방향)과 정량·live 키 집합을 전부 독립 재현했고, "안전망 먼저" 판단이 옳았음을 A로 재입증했다(1111개 중 1개만 bite).
+
+비차단 4건 중 **3건 반영**:
+
+- **H1-d2 반영 — 내 진술이 부정확했다(가장 중요)**: 착수 실측에서 "48개만 적용 가능 / 2개는 `JSONResponse` 직접 반환이라 response_model 불가"로 적었으나, 1차 소스 재확인 결과 **두 endpoint 모두 성공 경로는 평범한 dict를 반환**하고 `JSONResponse`는 **partial-failure에만** 쓰인다. 즉 `response_model`은 그 성공 경로에도 **적용 가능**하고, uncoverable한 것은 **partial-failure envelope**뿐이다. 결론(D1=A 척추 한정)과 Deferred fork (a)/(b)는 영향 없지만, **이유가 틀리면 다음 사람이 잘못된 전제로 판단**하므로 SoT 계약 절·버전 로그·HANDOFF 2곳·브리프 2곳·work_log를 정확한 진술로 고쳤다.
+- **H1-d1 반영** — 브리프 D1=A 행이 "척추 13개(projects 2+drafts 8+snapshots 3)"였으나 실제 구성은 **14개(projects 5+drafts 5+versions 4)**이고 source-refs/index rebuild는 척추가 아니다. SoT·HANDOFF·코드는 처음부터 14로 정확했고 브리프 option 텍스트만 부정확 → 정정(범위 의도 동일).
+- **H1-d3 반영** — `main.py` 모델 분리 주석이 "공유하면 save 응답에서 필드가 사라진다"고 방향을 뭉갰다. 정확히는 **양방향으로 다르게 깨진다**: 넓은 read 모델을 좁은 save payload에 쓰면 **필드 누락 검증 에러**, 좁은 save 모델을 read payload에 쓰면 **조용한 필드 삭제**. 결론(모델 분리)은 불변이고 주석만 정정.
+- **422 detail 표시**는 기존 follow-up 유지(프론트 trim+disable로 현재 사용자가 볼 일 없음).
+
 ## Issues found
 
 ### `vite.config.ts`의 `process` 타입 부재로 빌드 실패
@@ -105,7 +116,7 @@ D2=B(별도 서비스)는 D2=A가 공짜로 주던 단일 origin을 잃는다. �
 - 원인: HTTP 엔드포인트가 `-> dict[str, object]`로 주석돼 있어 FastAPI가 응답 schema를 `additionalProperties: true`(빈 object)로 내보낸다. 요청 바디는 pydantic 모델(`CreateProjectRequest` 등)이라 정상 생성된다.
 - 조치: 이번 슬라이스가 소비하는 응답 shape(`Project{id,name,archived}`)만 `client.ts`에 손으로 선언하고 그 이유를 주석에 남겼다. SoT v1.6.94 계약 절에도 "타입 계약 동기화의 실제 범위"로 명시했다.
 - 미해결(오너 결정 필요): 갭을 닫으려면 백엔드 엔드포인트에 `response_model`을 붙여야 하는데, 이는 50 endpoint의 public envelope에 pydantic 검증·직렬화를 도입하는 변경이라 "백엔드 무변" 목표 밖이고 별도 결정 사안이다. **현 상태의 실질 위험**: 백엔드 payload가 바뀌어도 프론트는 컴파일 타임에 못 잡고 런타임에 깨진다.
-- **→ 같은 날 해소(척추 한정)**: 오너가 H1 착수를 지시해 **SoT v1.6.95에서 척추 14 endpoint에 `response_model` 적용**(위 "백엔드 공개 계약 조이기" 참조). 그 구역은 이제 컴파일 타임에 잡힌다(rename mutation으로 실증). **나머지 34 endpoint는 여전히 무타입**이고, `/writing/revise-and-gate`·`/writing/accept` 2개는 `JSONResponse` 직접 반환이라 **구조적으로 response_model이 안 먹는다** — Writing 슬라이스에서 별도 처리.
+- **→ 같은 날 해소(척추 한정)**: 오너가 H1 착수를 지시해 **SoT v1.6.95에서 척추 14 endpoint에 `response_model` 적용**(위 "백엔드 공개 계약 조이기" 참조). 그 구역은 이제 컴파일 타임에 잡힌다(rename mutation으로 실증). **나머지 34 endpoint는 여전히 무타입**이고, `/writing/revise-and-gate`·`/writing/accept`의 **partial-failure envelope**은 `JSONResponse` 직접 반환이라 **구조적으로 response_model이 안 먹는다**(성공 경로는 dict라 적용 가능 — H1-d2 정정) — Writing 슬라이스에서 별도 처리.
 
 ## Decisions
 
@@ -142,6 +153,6 @@ D2=B(별도 서비스)는 D2=A가 공짜로 주던 단일 origin을 잃는다. �
 
 - **다음 슬라이스 = 척추 A의 나머지(원고 목록 → 에디터)**: `GET /projects/{id}/drafts`·`POST /projects/{id}/drafts` 목록/생성 → 에디터(평문 `textarea` + **명시적 저장** + version 목록). 붙는 계약: `POST /projects/{id}/drafts/{did}/versions`는 `idempotency_key` 필수이고 같은 키 재시도는 같은 version을 반환한다(프론트가 키를 mint·재시도에 재사용해야 함), archive된 project/draft 쓰기는 409, export는 `?format=txt|markdown`. **프로젝트 상세 라우팅이 이 슬라이스에서 처음 필요해진다** — 현재 SPA는 라우터가 없고 `try_files`만 깔려 있으니 라우터 도입(또는 최소 상태 기반 화면 전환) 여부를 그때 정한다.
 - 이후: C(Writing 작업공간: generate→gate→accept, 진행 표시는 60s 동기 요청 후속 결정) → B(Review Inbox: v1.6.67 어포던스 `{action,eligible,reason}` 구동) → Phase 7.
-- **~~오너 결정 대기(H1/H2)~~ → 같은 날 확정·구현 완료**(SoT v1.6.95, D1=A/D2=A/D3=A). 남은 후속: (1) **나머지 34 endpoint 응답 모델**은 해당 UI 슬라이스에서(D1=A 계약), (2) **`/writing/revise-and-gate`·`/writing/accept`의 `JSONResponse` partial envelope**은 response_model이 구조적으로 안 먹으므로 Writing 작업공간 슬라이스에서 별도 결정(성공 경로만 모델+에러는 `responses={}` 문서화 vs 손선언 유지), (3) `raw_text`·`idempotency_key` 제약은 에디터 슬라이스에서 실제 필요가 보일 때.
+- **~~오너 결정 대기(H1/H2)~~ → 같은 날 확정·구현 완료**(SoT v1.6.95, D1=A/D2=A/D3=A). 남은 후속: (1) **나머지 34 endpoint 응답 모델**은 해당 UI 슬라이스에서(D1=A 계약), (2) **`/writing/revise-and-gate`·`/writing/accept`의 partial-failure envelope** — 성공 경로는 dict라 `response_model`을 붙일 수 있으나 `JSONResponse`로 나가는 partial 응답은 구조적으로 안 덮이므로 Writing 작업공간 슬라이스에서 별도 결정(성공 경로만 모델+에러는 `responses={}` 문서화 vs 손선언 유지), (3) `raw_text`·`idempotency_key` 제약은 에디터 슬라이스에서 실제 필요가 보일 때.
 - **422 detail 표시**: D3=A가 422를 도입했다. 프론트 `ApiError`는 status+detail을 보존하지만 422 detail은 FastAPI validation error 구조(배열)라 현재 `readDetail`이 `JSON.stringify`로 떨어뜨린다. 지금은 프론트가 trim+disable로 막아 사용자가 볼 일이 없지만, 사용자에게 보일 문구가 필요해지면 그때 매핑한다(브리프 follow-up).
 - **autosave**는 에디터 슬라이스에서 사용자가 가장 먼저 기대할 기능이지만 "저장=version mint" 계약 변경 위험이 있어 여전히 별도 오너 결정이다(브리프 follow-up).
