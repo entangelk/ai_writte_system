@@ -3,7 +3,7 @@
 상태: `Draft`  
 적용 범위: Phase 1의 프로젝트/원고 저장 위에 구축하고 Phase 2~6의 상태와 기능을 한 작업 공간으로 연결
 
-구현 진행: SoT v1.6.99에서 `/` 프로젝트 목록/생성 → `/projects/:projectId` 원고 목록/생성 → `/projects/:projectId/drafts/:draftId` latest/empty 평문 editor·명시적 version save·history 선택·dirty 전환 확인·선택 version txt/Markdown export까지 **Product shell A 기본 경로를 완료**했다. 다음 frontend 순서는 C(Writing 작업공간)이며, 분석 상태·검토·설정 등 전체 Product shell 수용 기준이 남아 본 문서 상태는 `Draft`를 유지한다.
+구현 진행: SoT v1.6.99에서 `/` 프로젝트 목록/생성 → `/projects/:projectId` 원고 목록/생성 → `/projects/:projectId/drafts/:draftId` latest/empty 평문 editor·명시적 version save·history 선택·dirty 전환 확인·선택 version txt/Markdown export까지 **Product shell A 기본 경로를 완료**했다. SoT v1.7.0에서 C(Writing 작업공간) D1~D5를 확정했고 다음은 C0 Writing HTTP contract 구현이다. 분석 상태·검토·설정 등 전체 Product shell 수용 기준이 남아 본 문서 상태는 `Draft`를 유지한다.
 
 ## 확정된 제품 경계
 

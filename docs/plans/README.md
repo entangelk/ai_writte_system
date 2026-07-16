@@ -42,6 +42,7 @@
 32. [`product-readiness-backlog.md`](product-readiness-backlog.md) — 프론트 핵심 루프를 우선 완성하면서 `main.py` 점진 분리·Lite/Full·dogfood 품질 지표·문서 절차·저장소 이름·라이선스를 **각 착수 트리거가 왔을 때 하나씩 닫는 횡단 개선 백로그**(새 Phase/public contract 아님)
 33. [`frontend-project-navigation-decisions.md`](frontend-project-navigation-decisions.md) — 프로젝트 목록→원고 작업 공간의 첫 상세 내비게이션 결정 브리프(Resolved: A `react-router` Declarative BrowserRouter; 오너는 B를 선호했으나 editor·Writing·Review 확장성을 우선, v1.6.96 구현)
 34. [`frontend-editor-save-decisions.md`](frontend-editor-save-decisions.md) — Product shell A1/A2 editor·명시적 save 착수 브리프(Resolved: D1=A 저장 intent별 UUID/exact payload 결박 · D2=A draft route+version component state, B query는 additive 후속 · D3=A A1 editor/save→A2 history/export 분리; SoT v1.6.97)
+35. [`frontend-writing-workspace-decisions.md`](frontend-writing-workspace-decisions.md) — Product shell C Writing 작업공간 착수 브리프(Resolved: D1=A clean latest+사용자 설명 · D2=A 기본 generate→Gate→accept 먼저 · D3=A 성공/partial HTTP model+OpenAPI · D4=A read-only candidate first, 부분 수정 UX는 C1 후 재검토 · D5=A C0→C1→C2)
 
 ## 문서 지위와 우선순위
 

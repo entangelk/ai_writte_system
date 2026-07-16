@@ -460,6 +460,50 @@ D2=B(별도 서비스)는 D2=A가 공짜로 주던 단일 origin을 잃는다. �
 
 ---
 
+## Task 11 — Frontend Writing 작업공간 착수 결정 브리프
+
+### Goals
+
+- Product shell A 다음 순서인 C Writing 작업공간의 genuine owner fork를 구현 전에 표면화한다.
+- 다음 세션이 결정 직후 C0 code slice를 시작할 수 있도록 옵션·추천·구현 lock·deferred 범위를 문서화한다.
+- 오늘 작업을 구현 완료 상태와 결정 대기 상태로 구분해 HANDOFF에 정리한다.
+
+### Completed work
+
+- `docs/plans/frontend-writing-workspace-decisions.md`를 추가했다.
+- 실제 `/writing/generate`·`/writing/gate`·`/writing/revise-and-gate`·`/writing/accept` 요청/응답과 `WritingAcceptService`의 latest base·Gate 재평가·idempotent save·Analysis partial-success를 1차 소스에서 다시 확인했다.
+- **D1** Writing 기준 version/dirty 정책, **D2** 첫 사용자 흐름 범위, **D3** 성공·partial response 타입 계약, **D4** candidate 편집 가능성, **D5** code slice 경계를 각각 현실적인 옵션 표와 추천으로 작성했다.
+- 추천 조합은 **D1=A · D2=A · D3=A · D4=A · D5=A**다: clean latest only, 기본 generate→Gate→accept 먼저, backend HTTP model+partial OpenAPI, read-only candidate panel, C0 contract→C1 basic UI→C2 loop.
+- `docs/plans/README.md` 읽는 순서에 새 브리프를 등록했다.
+
+### Issues found
+
+- dirty editor를 그대로 생성에 허용하면 `draft_excerpt`는 미저장 text를 참고할 수 있지만 `/writing/accept`는 저장된 `base_version_id`에 candidate를 append한다. 화면 context와 저장 결과가 갈라져 미저장 수정이 반영되지 않는 위험이 있으므로 D1 owner decision으로 올렸다.
+- accept의 Analysis job 실패는 **HTTP 502이지만 `accepted=true`이고 `saved` version이 존재**한다. 일반 오류 처리로 뭉개면 이미 저장된 version을 숨기거나 새 key 재시도로 중복 의도를 만들 수 있어 partial envelope은 UI와 타입 계약의 load-bearing 경계다.
+- `revise-and-gate`는 최초 생성 endpoint가 아니라 candidate+revise finding을 요구하는 후속 loop다. 첫 C UI에서 이를 generate 대신 사용할 수 없다.
+
+### Decisions
+
+- **오너 확정: D1=A · D2=A · D3=A · D4=A · D5=A.**
+- **D1 rationale**: clean latest only는 사용자에게 이유를 설명해야 하는 운영 제약이다. C1에서 zero-version·과거 version·dirty 상태 각각에 실행 불가 이유와 첫 저장·최신 복귀·현재 변경 저장이라는 해소 행동을 설명하는 text를 함께 구현한다. disabled만 두지 않는다.
+- **D4 rationale**: 첫 구현은 read-only candidate가 맞다. 다만 후보 일부 수정과 저장 후 수정·재생성의 실제 의미는 아직 완전히 닫지 않고 C1 UX 뒤 재검토한다. editable candidate는 각하가 아니라 additive 후속이다.
+- D2는 기본 generate→Gate→accept/save 먼저, D3는 성공+partial HTTP model/OpenAPI, D5는 C0→C1→C2다.
+- SoT를 v1.7.0으로 올렸고 D3=A로 `ARCH-1`을 Ready로 전환했다. C0는 Writing HTTP model만 분리하며 전 `main.py` 일괄 분리는 하지 않는다.
+
+### Next steps
+
+- **C0 Writing HTTP contract**: 현재 payload exact-key 회귀 → response/partial 모델 → OpenAPI 생성 타입 순서로 착수한다.
+- C0 뒤 C1 generate→Gate→accept/save UI, 이후 C2 bounded loop UI를 진행한다.
+
+### Verification
+
+- 새 브리프의 endpoint literal·status·partial envelope·loop status를 `main.py`, `writing/models.py`, `writing/revise_gate.py`, `writing/accept.py`, 관련 회귀와 대조했다.
+- 문서 링크와 `docs/plans/README.md` 항목을 확인했다.
+- `git diff --check` PASS.
+- runtime 코드·현재 public payload는 변경하지 않았다. 결정 계약과 문서만 갱신했다.
+
+---
+
 ## Task 9 — Frontend editor/save A2: version history·dirty 확인·export
 
 ### Goals

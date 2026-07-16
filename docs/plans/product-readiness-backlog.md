@@ -34,7 +34,7 @@
 | ID | 상태 | 항목 | 착수 트리거 | 그때 할 일 | 종료 조건 | 다음 점검 시점 |
 |---|---|---|---|---|---|---|
 | UX-1 | **In progress** | 실제 작가 기본 루프 닫기 | 이미 발생: Frontend 첫 slice 완료 | A: 원고 목록·생성→`textarea`→명시적 저장→version→export, C: generate→Gate 근거→accept/save, B: Review Inbox 최소 action UI 순서로 연결 | 화면에서 `프로젝트 생성 → 원고 입력·저장 → 이어쓰기 생성 → Gate 확인 → 채택·새 version → Review action`을 API 수동 씨딩 없이 관통하고 회귀·live smoke가 존재 | 매 frontend slice 종료 |
-| ARCH-1 | Waiting | `main.py` 점진 분리 | UI slice가 해당 도메인의 route/request/response model을 실제로 수정해야 할 때. 단순 프론트 조립만이면 미발화 | 먼저 해당 도메인의 `http_models/`를 분리하고, 의존성 전달이 명확할 때 router를 추출한다. 전 도메인 일괄 이동 금지 | 그 slice가 새로 만진 HTTP 모델·route가 더 이상 `main.py` 비대화를 늘리지 않고 기존 focused/full 회귀가 유지 | A 완료 시, 이후 C/B 착수 시 |
+| ARCH-1 | **Ready** | `main.py` 점진 분리 | **발화: C D3=A 확정으로 Writing response/partial model을 실제 수정해야 함**. 단순 프론트 조립만이면 미발화 | C0에서 먼저 Writing `http_models.py`를 분리한다. 의존성 전달이 명확할 때만 router를 추출하며 전 도메인 일괄 이동은 금지한다. | C0가 새로 만진 Writing HTTP 모델이 `main.py` 비대화를 늘리지 않고 focused/full 회귀와 OpenAPI exact-key 계약이 유지 | C0 종료 시 |
 | OPS-1 | Waiting | Lite / Full 실행 모드 | A+C 최소 UI가 동작하고 2주 dogfood를 시작하기 직전 | Lite의 보장 기능과 degraded 기능, worker/outbox backlog 처리, Mongo-direct fallback을 먼저 고정한 뒤 `mongo + application + gateway + frontend` 중심 실행 경로와 Full 경로를 제공 | Lite 기동 명령 하나로 편집·저장·generate·accept가 관통하고, 제외 기능·Full 전환·pending outbox 동작이 문서화·검증 | C 완료 직후 |
 | QUAL-1 | Waiting | 실제 원고 dogfood와 제품 품질 지표 | A+C가 UI에서 사용 가능하고 Lite 또는 Full 중 시험 실행 경로가 안정화됐을 때 | 새 telemetry 백엔드를 만들지 않고 우선 수동 기록: 생성/채택, 채택 후 대폭 수정 여부, Gate 경고 유용성, 장면 완료 시간. 최소 2주 실제 장편에 사용 | 최소 2주·5회 이상 집필 세션의 기록과 반복 문제 목록이 있고, 다음 백엔드/UX 우선순위를 실사용 근거로 결정 | A+C·OPS-1 후 시작, 1주/2주차 검토 |
 | PROC-1 | **Standing** | 문서화 비용 계층화 | 지금부터 모든 변경 | work log는 유지하되, 결정 브리프는 genuine fork에만, 독립 verification record는 명시적 검증 요청에만, SoT/CHANGELOG는 계약·주요 설계·기능 변화에만 사용한다. 일반 UI/CSS는 구현 후 간단 기록 | 각 slice 기록이 해당 artifact의 trigger와 맞고, 되돌리기 쉬운 UI 선택 때문에 구현이 멈추지 않음 | 모든 slice 종료 |
@@ -45,6 +45,8 @@
 ## 고정 순서와 체크포인트
 
 2026-07-16 A 체크포인트: editor/save/history/export 구현과 프론트 회귀를 완료했다. backend route/request/response model을 수정하지 않은 순수 프론트 조립이므로 **ARCH-1은 Waiting 유지(미발화)**하며 다음은 C(Writing generate·Gate·accept)다.
+
+2026-07-16 C 착수 결정 체크포인트: D3=A로 Writing 성공·partial response model과 OpenAPI 계약을 C0에서 실제 수정하기로 확정했다. 따라서 **ARCH-1은 Ready로 전환**하며, 범위는 Writing `http_models.py` 우선 분리까지다. 전 `main.py` 또는 타 도메인 router 일괄 이동은 여전히 범위 밖이다.
 
 ```text
 현재
