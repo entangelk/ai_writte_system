@@ -13,6 +13,7 @@ import {
   type DraftVersion,
   type Project,
 } from "../api/client";
+import { WritingPanel } from "../writing/WritingPanel";
 
 type SaveIntent = {
   key: string;
@@ -20,6 +21,16 @@ type SaveIntent = {
 };
 
 const DEFINITIVE_SAVE_FAILURES = new Set([400, 404, 409, 422]);
+
+function latestOf(versions: DraftVersion[]): DraftVersion | null {
+  return versions.reduce<DraftVersion | null>(
+    (selected, version) =>
+      selected === null || version.version_number > selected.version_number
+        ? version
+        : selected,
+    null,
+  );
+}
 
 export function DraftEditor() {
   const { projectId, draftId } = useParams<{
@@ -60,13 +71,7 @@ export function DraftEditor() {
       listDraftVersions(projectId, draftId),
     ])
       .then(async ([nextProject, nextDraft, { versions }]) => {
-        const latest = versions.reduce<(typeof versions)[number] | null>(
-          (selected, version) =>
-            selected === null || version.version_number > selected.version_number
-              ? version
-              : selected,
-          null,
-        );
+        const latest = latestOf(versions);
         const detail = latest === null
           ? null
           : await getDraftVersion(projectId, draftId, latest.id);
@@ -96,6 +101,8 @@ export function DraftEditor() {
 
   const dirty = rawText !== baseline;
   const readOnly = forcedReadOnly || project?.archived === true || draft?.archived === true;
+  const latestVersionId = latestOf(versions)?.id ?? null;
+  const onLatest = selectedVersionId !== null && selectedVersionId === latestVersionId;
 
   useEffect(() => {
     if (!dirty) return;
@@ -238,6 +245,30 @@ export function DraftEditor() {
     }
   }
 
+  // After a Writing candidate is accepted (a new version is saved, including the
+  // 502-partial case where only the Analysis job failed), reload the latest from
+  // the server so the editor baseline/history reflect the new version.
+  async function reloadLatest() {
+    if (projectId === undefined || draftId === undefined) return;
+    try {
+      const { versions: nextVersions } = await listDraftVersions(projectId, draftId);
+      const latest = latestOf(nextVersions);
+      const detail = latest === null
+        ? null
+        : await getDraftVersion(projectId, draftId, latest.id);
+      const nextText = detail?.snapshot.raw_text ?? "";
+      setRawText(nextText);
+      setBaseline(nextText);
+      setVersions(nextVersions);
+      setSelectedVersionId(detail?.draft_version.id ?? null);
+      setVersionNumber(detail?.draft_version.version_number ?? null);
+      setNotice(null);
+      setError(null);
+    } catch (err) {
+      setError(describeApiError(err));
+    }
+  }
+
   return (
     <section className="workspace-page editor-page page-enter">
       <Link className="back-link" to={`/projects/${projectId ?? ""}`}>
@@ -339,6 +370,19 @@ export function DraftEditor() {
               </ul>
             )}
           </section>
+
+          {projectId !== undefined && draftId !== undefined && (
+            <WritingPanel
+              projectId={projectId}
+              draftId={draftId}
+              latestVersionId={latestVersionId}
+              onLatest={onLatest}
+              dirty={dirty}
+              hasVersions={versions.length > 0}
+              readOnly={readOnly}
+              onAccepted={() => void reloadLatest()}
+            />
+          )}
         </>
       )}
     </section>

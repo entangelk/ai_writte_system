@@ -50,6 +50,8 @@
 
 2026-07-16 C0 종료 체크포인트: Writing HTTP 모델을 `services/application/app/writing/http_models.py`로 분리하고 4 endpoint에 성공 `response_model`·partial `responses={}`를 연결했다(SoT v1.7.1). router는 추출하지 않았다(의존성 전달이 아직 복잡). **ARCH-1은 Done**으로 종결한다 — 범위였던 "Writing HTTP 모델 우선 분리"가 완료됐고, 이후 다른 도메인 router 추출은 그 도메인의 실제 트리거가 다시 발생할 때만 판단한다. 다음은 C1 기본 generate→Gate→accept/save UI다.
 
+2026-07-16 C1 종료 체크포인트: 기본 Writing 작업공간(generate→Gate 근거→pass accept/save, D1=A 게이팅+설명 텍스트)을 구현했다(SoT v1.7.2, `WritingPanel`). 이로써 A(편집/저장/history/export)+C1(기본 집필 루프)이 UI에서 동작한다. **`OPS-1` trigger 점검**: OPS-1은 "A+C 최소 UI가 동작하고 2주 dogfood를 시작하기 직전"에 발화한다. C1이 최소 집필 루프를 닫았으나 (1) **실 LLM 관통(compose generate→Gate→accept smoke)이 아직 미실행**(12B 필요, sandbox 불가)이고 (2) dogfood 착수는 오너 결정이라 **OPS-1은 Waiting 유지**한다 — 오너가 실 스택에서 기본 루프를 관통 확인하고 dogfood를 시작하기로 할 때 Ready로 올린다. `ARCH-1`은 C1이 backend/schema 무변(순수 소비)이라 재발화하지 않는다. 다음은 C2 bounded loop UI다.
+
 ```text
 현재
   → A: 원고·에디터·저장·version·export

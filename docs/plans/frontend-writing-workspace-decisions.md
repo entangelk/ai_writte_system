@@ -157,14 +157,16 @@ accept intent lock:
 
 다음은 C1 기본 Writing 작업공간(아래).
 
-### C1 — 기본 Writing 작업공간
+### C1 — 기본 Writing 작업공간 — **구현 완료(SoT v1.7.2, 2026-07-16)**
 
-1. latest clean editor에 instruction 입력과 generate action을 추가한다.
-2. candidate prose·Gate decision/findings를 read-only panel에 표시한다.
-3. pass candidate의 accept intent를 exact payload에 결박한다.
-4. accepted save의 version detail을 재조회해 editor baseline/history를 새 latest로 갱신한다.
-5. accepted=false·partial analysis failure·409 stale·provider/context failure에서 입력과 candidate를 보존한다.
-6. focused frontend 회귀, full build/OpenAPI, 실제 compose generate→Gate→accept smoke를 수행한다.
+1. ~~latest clean editor에 instruction 입력과 generate action을 추가한다.~~ ✅ `WritingPanel`이 editor 안에 렌더, D1=A 게이팅(설명 텍스트 동반).
+2. ~~candidate prose·Gate decision/findings를 read-only panel에 표시한다.~~ ✅ generate→별도 gate 호출, read-only candidate + decision/findings(type/severity/message/evidence/recommended).
+3. ~~pass candidate의 accept intent를 exact payload에 결박한다.~~ ✅ idempotency key를 exact accept body(minus key)에 결박, pass만 accept 활성.
+4. ~~accepted save의 version detail을 재조회해 editor baseline/history를 새 latest로 갱신한다.~~ ✅ `onAccepted`→`reloadLatest` (200 accepted=true·502 partial 모두).
+5. ~~accepted=false·partial analysis failure·409 stale·provider/context failure에서 입력과 candidate를 보존한다.~~ ✅ accepted=false=재-Gate 결과, 502 partial=저장 성공+분석 재시도, 409=재생성 안내, 400/404/422=확정 거부, 5xx=candidate·intent 보존.
+6. ~~focused frontend 회귀, full build/OpenAPI, 실제 compose generate→Gate→accept smoke를 수행한다.~~ ✅ 프론트 회귀 +20(67 passed/5 files; 검증 hardening H1/H2 포함), build 91 modules, `gen:api` IDENTICAL. **실 compose generate→Gate→accept smoke는 12B 필요라 풀스택 후속**(sandbox 불가).
+
+다음은 C2 자동 loop(아래).
 
 ### C2 — 자동 revise/retrieve loop
 

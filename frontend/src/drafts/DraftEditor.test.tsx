@@ -671,4 +671,80 @@ describe("DraftEditor", () => {
     expect(JSON.parse(fetchMock.mock.calls[3][1].body).idempotency_key).toBe("intent-1");
     expect(JSON.parse(fetchMock.mock.calls[4][1].body).idempotency_key).toBe("intent-2");
   });
+
+  // C1 Writing panel wiring: DraftEditor derives the D1=A gating props (dirty /
+  // onLatest / hasVersions / readOnly) and reloads after an accept. The Writing
+  // flow itself is unit-locked in WritingPanel.test.tsx; these two lock the seam.
+  it("derives the dirty block for the Writing panel from editor state", async () => {
+    mockFetch(
+      { body: project },
+      { body: draft },
+      { body: { versions: [version1] } },
+      { body: detail(version1, "기존 본문") },
+    );
+    renderEditor();
+    const editor = await screen.findByLabelText("원고 본문");
+    // clean latest → Writing available (no block, generate present).
+    expect(
+      screen.queryByText("저장하지 않은 변경 사항이 있습니다."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "이어쓰기 생성" })).toBeInTheDocument();
+    await userEvent.type(editor, "!");
+    // dirty → block with reason + resolution, generate disabled.
+    expect(screen.getByText("저장하지 않은 변경 사항이 있습니다.")).toBeInTheDocument();
+    expect(
+      screen.getByText("현재 변경을 먼저 저장한 뒤 이어쓰기를 생성하세요."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "이어쓰기 생성" })).toBeDisabled();
+  });
+
+  it("reloads the editor to the new latest after a Writing candidate is accepted", async () => {
+    const randomUUID = vi.fn()
+      .mockReturnValueOnce("req-1")
+      .mockReturnValueOnce("accept-1");
+    vi.stubGlobal("crypto", { randomUUID });
+    const version4 = { ...version1, id: "v4", version_number: 4, snapshot_id: "s4" };
+    const candidate = {
+      request_id: "req-1", project_id: "p1", task_type: "continue_scene",
+      output_type: "draft_patch", text: "아린은 도시로 들어섰다.", status: "candidate",
+      self_reported_constraints: [], candidate_claims: [], new_memory_hints: [],
+      risk_notes: [], candidate_id: null, generated_by_model: "fake-writer",
+    };
+    const gatePass = {
+      request_id: "req-1", project_id: "p1", decision: "pass", findings: [],
+      checked_constraints: [], evaluated_by_model: "fake-gate",
+    };
+    const fetchMock = mockFetch(
+      { body: project },
+      { body: draft },
+      { body: { versions: [version1] } },
+      { body: detail(version1, "기존.") },
+      { body: candidate },
+      { body: gatePass },
+      {
+        body: {
+          accepted: true, gate: gatePass,
+          saved: { draft_version_id: "v4", version_number: 4, snapshot_id: "s4", content_hash: "h4" },
+          analysis_job: { id: "j1", project_id: "p1", snapshot_id: "s4", status: "pending", failure_reason: null, failure_detail: null },
+          idempotent_replay: false,
+        },
+      },
+      { body: { versions: [version1, version4] } },
+      { body: detail(version4, "기존.\n\n아린은 도시로 들어섰다.") },
+    );
+
+    renderEditor();
+    await screen.findByLabelText("원고 본문");
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    await userEvent.click(screen.getByRole("button", { name: "이어쓰기 생성" }));
+    await userEvent.click(await screen.findByRole("button", { name: "채택하고 저장" }));
+
+    // The editor reloaded to the new latest saved by accept.
+    await waitFor(() =>
+      expect(screen.getByLabelText("원고 본문")).toHaveValue("기존.\n\n아린은 도시로 들어섰다."),
+    );
+    expect(screen.getByText("현재 version 4")).toBeInTheDocument();
+    expect(fetchMock.mock.calls[6][0]).toBe("/api/projects/p1/writing/accept");
+    expect(fetchMock.mock.calls[7][0]).toBe("/api/projects/p1/drafts/d1/versions");
+  });
 });

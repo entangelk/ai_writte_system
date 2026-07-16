@@ -57,6 +57,15 @@ export type DraftVersionDetail = components["schemas"]["DraftVersionDetailRespon
 export type DraftVersionExport = components["schemas"]["DraftVersionExportResponse"];
 export type SaveDraftRequest = components["schemas"]["SaveDraftRequest"];
 export type SaveDraftResponse = components["schemas"]["SaveDraftResponse"];
+export type WritingGenerateRequest = components["schemas"]["WritingGenerateRequest"];
+export type WritingCandidate = components["schemas"]["WritingCandidatePayload"];
+export type WritingGateRequest = components["schemas"]["WritingGateRequest"];
+export type WritingGate = components["schemas"]["WritingGatePayload"];
+export type WritingGateFinding = components["schemas"]["WritingGateFindingPayload"];
+export type WritingAcceptRequest = components["schemas"]["WritingAcceptRequest"];
+export type WritingAcceptResponse = components["schemas"]["WritingAcceptResponse"];
+export type WritingAcceptAnalysisPartial =
+  components["schemas"]["WritingAcceptAnalysisPartial"];
 
 export function listProjects(): Promise<ProjectListResponse> {
   return request("/projects");
@@ -125,6 +134,77 @@ export function exportDraftVersion(
   return request(
     `/projects/${projectId}/drafts/${draftId}/versions/${versionId}/export?format=${format}`,
   );
+}
+
+export function generateWriting(
+  projectId: string,
+  body: WritingGenerateRequest,
+): Promise<WritingCandidate> {
+  return request(`/projects/${projectId}/writing/generate`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function gateWriting(
+  projectId: string,
+  body: WritingGateRequest,
+): Promise<WritingGate> {
+  return request(`/projects/${projectId}/writing/gate`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+// A normalized accept outcome. The endpoint's load-bearing behaviour is that a
+// version can be saved even on a 502 (Analysis job failed after the save): a
+// `502 + accepted=true + saved` is a successful write, not a plain error, and
+// must never discard the saved version. `acceptWriting` folds the 200 success,
+// the 200 non-pass, and the 502 partial into one discriminated result; only a
+// true error (400/404/409/422, or a 502 without `saved`) throws ApiError.
+export type WritingAcceptOutcome =
+  | { accepted: true; savedVersionId: string; analysisFailed: boolean }
+  | { accepted: false; gate: WritingGate | null };
+
+export async function acceptWriting(
+  projectId: string,
+  body: WritingAcceptRequest,
+): Promise<WritingAcceptOutcome> {
+  const response = await fetch(`${API_BASE}/projects/${projectId}/writing/accept`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (response.ok) {
+    const data = (await response.json()) as WritingAcceptResponse;
+    if (data.accepted && data.saved !== null) {
+      return {
+        accepted: true,
+        savedVersionId: data.saved.draft_version_id,
+        analysisFailed: false,
+      };
+    }
+    return { accepted: false, gate: data.gate };
+  }
+  if (response.status === 502) {
+    const partial = (await response.json()) as Partial<WritingAcceptAnalysisPartial> & {
+      detail?: unknown;
+    };
+    if (partial.accepted === true && partial.saved != null) {
+      return {
+        accepted: true,
+        savedVersionId: partial.saved.draft_version_id,
+        analysisFailed: true,
+      };
+    }
+    throw new ApiError(
+      502,
+      typeof partial.detail === "string"
+        ? partial.detail
+        : JSON.stringify(partial.detail ?? partial),
+    );
+  }
+  throw new ApiError(response.status, await readDetail(response));
 }
 
 export function describeApiError(err: unknown): string {

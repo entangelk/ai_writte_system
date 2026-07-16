@@ -618,3 +618,66 @@ D2=B(별도 서비스)는 D2=A가 공짜로 주던 단일 origin을 잃는다. �
 - **H2 반영(코드)** — accept partial envelope-key 테스트가 `accepted` **키 존재**만 잠그고 값은 안 잠갔다(값 true는 기존 `test_partial_failure_is_502_and_retry_converges`에 있어 cell은 채워졌으나 응집이 흩어짐). load-bearing `502 + accepted=true + saved present`를 C0 envelope 테스트 자체에 `assertTrue(body["accepted"])`+`assertIsNotNone(body["saved"])`로 옮겨 계약을 self-contained하게 만들었다.
 - **H1 반영(문서)** — "성공 4 + union 6 literal" 카운트가 오독 소지가 있었다(실제 응답-레벨 union arm은 **5개** = revise-and-gate 4 status + accept 502; "6"은 discriminator error 필드 수). work_log·SoT·CHANGELOG·브리프를 "성공 4 + union arm 5(discriminator 필드 6)"로 정정. 기능 표면은 원래부터 정확했다.
 - **H3 코드 무변** — `WritingAcceptAnalysisPartial.analysis_job`이 `AnalysisJobPayload | None`으로 runtime(항상 None)보다 넓은 건 documentation-only 모델(JSONResponse, runtime 검증 없음)의 의도된 여유로, 검증자도 "결함 아님, 조치 불필요"로 판정 → 유지(§3 surgical).
+
+---
+
+## Task 13 — C1 기본 Writing 작업공간 UI (SoT v1.7.2, D1=A·D2=A·D4=A)
+
+### Goals
+
+- C0(v1.7.1)가 낸 성공/partial 생성 타입을 소비해 editor 안에서 **generate → Gate 근거 → pass accept/save** 기본 집필 루프를 닫는다.
+- D1=A(clean latest only) 게이팅을 disabled control로만 두지 않고 각 상태의 이유+해소 행동을 설명 텍스트로 함께 보인다.
+- accept intent를 exact request body에 결박하고, `502 + accepted=true + saved`를 저장 성공으로 처리한다(저장된 version을 generic error로 잃지 않는다).
+- backend·schema·회귀는 무변(순수 프론트 소비). 실 LLM 관통 smoke는 12B 필요라 풀스택 후속.
+
+### Completed work
+
+**신규 `frontend/src/writing/WritingPanel.tsx`** — editor 안에 렌더되는 이어쓰기 패널.
+
+- **D1=A 게이팅**: `availabilityOf(props)`가 readOnly/hasVersions/dirty/onLatest에서 blocked 여부와 **reason+resolution 텍스트**를 낸다(archived·zero-version·dirty·과거 version 4-state). blocked면 generate 비활성 + 설명 표시. 한국어 문구는 localizable display text.
+- **generate → gate**: `generateWriting` 성공 후 `gateWriting`을 별도 호출. base version id + request id를 후보 lifetime 동안 `contextRef`에 고정(generate/gate/accept 동일 base). instruction 공백-only 미전송·`busyRef` in-flight 중복 차단. gate 실패해도 candidate 보존(accept는 pass 전까지 비활성).
+- **read-only candidate panel(D4=A)**: candidate prose + Gate decision(라벨 매핑) + findings(type/severity/message/evidence/recommended_decision). accept 전 editor 본문 무변.
+- **pass-only accept + intent 결박**: `canAccept = candidate && gate.decision==="pass"`. accept body(minus key)를 서명해 `intentRef`에 결박 — 같은 body 재시도는 같은 key, 다른 candidate/base는 새 key.
+- **outcome 처리**: `onAccepted`(=editor reload) 호출 조건은 저장 성공(200 accepted=true / 502 partial). `200 accepted=false`는 재-Gate 결과로 표시(실패 아님, candidate 보존). `409`는 candidate 보존+최신 재조회 안내(intent 폐기). `400/404/422`는 확정 거부(intent 폐기). transport/5xx는 candidate·intent 보존.
+
+**신규 `frontend/src/api/client.ts` Writing 호출** — `generateWriting`·`gateWriting`은 표준 `request`(비-2xx→throw). `acceptWriting`은 3분기 정규화: 200 accepted=true/502-partial(saved)→`{accepted:true, savedVersionId, analysisFailed}`, 200 accepted=false→`{accepted:false, gate}`, 그 외(400/404/409/422·saved 없는 502)→`ApiError`. **`502 + accepted=true + saved`가 저장 성공**임을 클라이언트 계약으로 못박음.
+
+**`frontend/src/drafts/DraftEditor.tsx` 배선** — `latestOf` 헬퍼 추출(초기 load·render·reload 공유), `latestVersionId`/`onLatest`/`hasVersions`/`readOnly`/`dirty` 파생해 `WritingPanel`에 전달. `reloadLatest()`(accept 후 versions+latest detail 재조회→baseline/rawText/history 갱신)를 `onAccepted`로 연결. version panel 아래 렌더.
+
+**`frontend/src/styles.css`** — writing-panel/block/hint/form, candidate-panel/text, gate-result/findings(severity별 border), candidate-actions를 기존 종이·잉크 토큰으로 스타일. reduced-motion·모바일 media는 기존 규칙이 커버.
+
+### Issues found
+
+- accept의 `502 + accepted=true + saved`는 HTTP 실패지만 **데이터가 이미 커밋된 상태**다. `request` 헬퍼(비-2xx→throw)로는 이 envelope의 `saved`를 못 읽는다 → `acceptWriting`을 별도 `fetch`로 작성해 502-with-saved를 성공 outcome으로 접었다. 이것이 C0가 partial을 계약화한 이유의 프론트 소비 지점이다.
+- React state `busy`만으로는 같은 turn 연속 클릭에 stale일 수 있어 `busyRef`(동기 lock)로 generate/accept 중복을 막고 state는 표시만 담당(A1 save 선례 동형).
+- 실 LLM 관통(compose generate→Gate→accept)은 12B gateway가 필요해 sandbox에서 불가. 이전 프론트 슬라이스 관례대로 unit/build/gen:api 증거로 대체하고 live smoke를 풀스택 후속으로 남겼다.
+
+### Decisions
+
+- 새 owner-level 계약 결정은 없다. 구현은 확정된 D1=A·D2=A·D4=A와 brief C1 lock을 그대로 따른다.
+- `WritingPanel`을 별도 컴포넌트로 분리(§3): D1 게이팅 display·generate/accept 상태를 격리 단위로 테스트하고, `DraftEditor`는 editor-state→props 파생과 reload seam만 담당한다.
+- candidate panel은 read-only(D4=A). editable candidate(D4=B)·C2 자동 loop는 후속.
+
+### Next steps
+
+- **C2 자동 revise/retrieve loop UI**: eligible revise finding에서만 `/writing/revise-and-gate` 호출, 마지막 candidate·Gate·loop status·stage progress 표시, partial 4xx/5xx candidate 보존, `pass|terminal_decision|not_eligible|budget_exhausted|no_change|failed` 매핑. C0가 낸 `WritingReviseGateResponse`/`WritingReviseGatePartial` 타입 소비.
+- **실 LLM 관통(오너 풀스택)**: 실 12B로 compose generate→Gate→accept smoke를 돌려 pointer 준수·502 taxonomy를 확인한다.
+- C 완료(C2까지) 시 `OPS-1` Ready 판정, 이후 B(Review Inbox).
+
+### Verification
+
+- **mutation 실증(후 복원)**: WritingPanel의 pass-only guard 제거 → 3 failed·dirty D1 block 제거 → 3 failed(WritingPanel+DraftEditor seam)·signature 가드 제거 → 1 failed(H1). 세 mutation 모두 정확히 해당 테스트만 bite, `git diff --stat` 복원 확인.
+- `cd frontend && npm test` → **67 passed / 5 files**(이전 47 + WritingPanel 18 + DraftEditor seam 2).
+- `npm run build`(`tsc --noEmit && vite build`) → PASS, **91 modules**, CSS 9.31 kB(gzip 2.43), JS 247.97 kB(gzip 78.97).
+- `npm run gen:api` → 생성 `schema.d.ts` **IDENTICAL**(backend 무변 → 타입 재생성 무변, 순수 소비 슬라이스 확인).
+- `services/`·`tests/`·`scripts/`·`docker-compose.yml` diff **0**, `git diff --check` clean.
+
+### 독립 검증 PASS(조건 없음) + 비차단 hardening 반영
+
+오너가 C1 독립 검증을 요청·완료했다(`docs/verifications/2026-07-16/c1_writing_basic_ui.md`). **판정 합격(조건 없음), blocking 0.** 검증자가 정량(67 이전 64·build 91·gen:api IDENTICAL·backend diff 0)·mutation 2종(pass-only·dirty D1)·502 정규화·D1 4-state 게이팅을 전부 독립 재현했다. 비차단 hardening 3건 중 **2건 반영(테스트만, 프로덕션 코드 무변)**:
+
+- **H1 반영 — idempotency over-strict pin**: `intentRef` signature 가드(같은 body 재시도만 같은 key)를 pin하는 회귀가 없었다(가드 제거해도 17개 green). generate 후 **instruction을 바꾸면(재생성 없이) accept body가 달라지는 도달 가능 경로**로 "body 변경→새 key"를 잠갔다 — signature 가드 제거 mutation에서 **정확히 이 1개만** bite(uuid-3 기대 → uuid-2 재사용). candidate가 가변이 되는 C2/D4=B 전 안전망 선제(검증자 권고). under-strict("같은 body→같은 key")와 짝.
+- **H2 반영 — 400/422 definitive 거부 회귀**: `it.each([400,422])`로 확정 거부 시 error 표시·candidate 보존·`onAccepted` 미호출을 잠갔다(브리프 D2=A "400/404/422 확정 거부").
+- **H3 코드 무변** — 실 LLM 관통(compose generate→Gate→accept)은 12B gateway 의존이라 sandbox 불가. 검증자도 "결함 아님, OPS-1 추적 항목"으로 판정 → 오너 풀스택 후속 유지.
+
+hardening 후 WritingPanel 15→**18**, 전체 **67 passed/5 files**.

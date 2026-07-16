@@ -427,6 +427,202 @@ main {
   font-size: 0.88rem;
 }
 
+.writing-panel {
+  margin-top: 3rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--ink);
+}
+
+.writing-block,
+.writing-hint {
+  margin: 1.2rem 0 0;
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+.writing-hint {
+  color: var(--muted);
+}
+
+.writing-block {
+  display: grid;
+  gap: 0.3rem;
+  padding: 1rem 1.1rem;
+  background: rgba(164, 69, 47, 0.06);
+  border-left: 2px solid var(--accent);
+}
+
+.writing-block-reason {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.writing-block-resolution {
+  color: var(--muted);
+}
+
+.writing-form {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 1.4rem;
+}
+
+.writing-form label {
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.writing-form textarea {
+  width: 100%;
+  min-height: 5.5rem;
+  resize: vertical;
+  padding: 0.9rem 1rem;
+  color: var(--ink);
+  background: #fbf8f1;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  outline: none;
+  line-height: 1.7;
+}
+
+.writing-form textarea:focus {
+  border-color: var(--accent);
+}
+
+.writing-form textarea:read-only {
+  color: #5f5a52;
+}
+
+.writing-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.writing-actions button,
+.candidate-actions button {
+  padding: 0.72rem 1.5rem;
+  color: #fffaf1;
+  background: var(--accent);
+  border: 0;
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+
+.writing-actions button:hover:not(:disabled),
+.candidate-actions button:hover:not(:disabled) {
+  background: var(--accent-dark);
+}
+
+.writing-actions button:disabled,
+.candidate-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.writing-notice {
+  margin: 1.1rem 0 0;
+  color: var(--accent-dark);
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+
+.candidate-panel {
+  margin-top: 1.8rem;
+  padding: 1.4rem 1.5rem;
+  background: #fbf8f1;
+  border: 1px solid var(--line);
+}
+
+.candidate-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.candidate-heading .eyebrow {
+  margin-bottom: 0;
+}
+
+.candidate-model {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.candidate-text {
+  margin: 1rem 0 0;
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.08rem;
+  line-height: 1.85;
+  white-space: pre-wrap;
+}
+
+.gate-result {
+  margin-top: 1.5rem;
+  padding-top: 1.2rem;
+  border-top: 1px solid var(--line);
+}
+
+.gate-decision {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.gate-empty {
+  margin: 0.6rem 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.gate-findings {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0.9rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gate-finding {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.7rem 0.9rem;
+  background: #f4f0e7;
+  border-left: 2px solid var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+.gate-finding.severity-error {
+  border-left-color: var(--danger);
+}
+
+.gate-finding.severity-warning {
+  border-left-color: var(--accent);
+}
+
+.finding-head {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.finding-evidence {
+  color: var(--muted);
+}
+
+.candidate-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1.6rem;
+}
+
+.candidate-accept-note {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
 .page-enter {
   animation: page-enter 280ms ease-out both;
 }
