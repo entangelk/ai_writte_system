@@ -1386,6 +1386,264 @@ class ApplicationApiTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 503)
 
+
+class SpineEnvelopeKeyTest(unittest.TestCase):
+    """Exact-key locks on the Product shell spine envelopes (SoT v1.6.95).
+
+    ``response_model`` silently drops any field the model does not declare, so a
+    model that is narrower than its payload would delete fields from the public
+    envelope with no error. The per-key assertions elsewhere in this module do
+    not catch that: they only read the keys they care about. These tests pin the
+    complete key set of every spine response, so a too-narrow model bites here.
+
+    Note the same key name carries different shapes per endpoint: ``save_draft``
+    returns a narrow ``draft_version``/``snapshot``/``blocks`` while
+    ``get_draft_version`` returns the wide read surface. They must not share a
+    model, and these tests are what enforces that.
+    """
+
+    def setUp(self):
+        self.client = TestClient(create_app())
+        self.project = self.client.post("/projects", json={"name": "Novel"}).json()
+        self.draft = self.client.post(
+            f"/projects/{self.project['id']}/drafts",
+            json={"title": "Episode 1"},
+        ).json()
+        self.saved = self.client.post(
+            f"/projects/{self.project['id']}/drafts/{self.draft['id']}/versions",
+            json={"raw_text": "# Title\n\nBody.", "idempotency_key": "save-1"},
+        ).json()
+
+    def _version_id(self) -> str:
+        return self.saved["draft_version"]["id"]
+
+    def test_project_payload_keys(self):
+        expected = {"id", "name", "archived"}
+
+        self.assertEqual(set(self.project), expected)
+        self.assertEqual(
+            set(self.client.get(f"/projects/{self.project['id']}").json()), expected
+        )
+        listed = self.client.get("/projects").json()
+        self.assertEqual(set(listed), {"projects"})
+        self.assertEqual(set(listed["projects"][0]), expected)
+        self.assertEqual(
+            set(
+                self.client.patch(
+                    f"/projects/{self.project['id']}", json={"name": "Renamed"}
+                ).json()
+            ),
+            expected,
+        )
+        self.assertEqual(
+            set(self.client.delete(f"/projects/{self.project['id']}").json()), expected
+        )
+
+    def test_draft_payload_keys(self):
+        expected = {"id", "project_id", "title", "archived"}
+
+        self.assertEqual(set(self.draft), expected)
+        self.assertEqual(
+            set(
+                self.client.get(
+                    f"/projects/{self.project['id']}/drafts/{self.draft['id']}"
+                ).json()
+            ),
+            expected,
+        )
+        listed = self.client.get(f"/projects/{self.project['id']}/drafts").json()
+        self.assertEqual(set(listed), {"drafts"})
+        self.assertEqual(set(listed["drafts"][0]), expected)
+        self.assertEqual(
+            set(
+                self.client.patch(
+                    f"/projects/{self.project['id']}/drafts/{self.draft['id']}",
+                    json={"title": "Renamed"},
+                ).json()
+            ),
+            expected,
+        )
+        self.assertEqual(
+            set(
+                self.client.delete(
+                    f"/projects/{self.project['id']}/drafts/{self.draft['id']}"
+                ).json()
+            ),
+            expected,
+        )
+
+    def test_save_draft_envelope_keys_are_the_narrow_save_surface(self):
+        self.assertEqual(
+            set(self.saved),
+            {"draft_version", "snapshot", "blocks", "idempotent_replay"},
+        )
+        # Narrower than the read surface on purpose: no project_id/draft_id here.
+        self.assertEqual(
+            set(self.saved["draft_version"]), {"id", "version_number", "snapshot_id"}
+        )
+        self.assertEqual(set(self.saved["snapshot"]), {"id", "content_hash"})
+        self.assertEqual(
+            set(self.saved["blocks"][0]),
+            {"id", "kind", "start_offset", "end_offset"},
+        )
+
+    def test_version_list_and_detail_envelope_keys(self):
+        listed = self.client.get(
+            f"/projects/{self.project['id']}/drafts/{self.draft['id']}/versions"
+        ).json()
+        self.assertEqual(set(listed), {"versions"})
+        # idempotency_key stays out of the public read surface.
+        self.assertEqual(
+            set(listed["versions"][0]),
+            {"id", "project_id", "draft_id", "version_number", "snapshot_id"},
+        )
+
+        detail = self.client.get(
+            f"/projects/{self.project['id']}/drafts/{self.draft['id']}"
+            f"/versions/{self._version_id()}"
+        ).json()
+        self.assertEqual(set(detail), {"draft_version", "snapshot", "blocks"})
+        self.assertEqual(
+            set(detail["draft_version"]),
+            {"id", "project_id", "draft_id", "version_number", "snapshot_id"},
+        )
+        self.assertEqual(
+            set(detail["snapshot"]),
+            {
+                "id",
+                "project_id",
+                "draft_id",
+                "version_id",
+                "raw_text",
+                "content_hash",
+            },
+        )
+        self.assertEqual(
+            set(detail["blocks"][0]),
+            {
+                "id",
+                "project_id",
+                "snapshot_id",
+                "block_index",
+                "kind",
+                "start_offset",
+                "end_offset",
+                "text",
+            },
+        )
+
+    def test_export_envelope_keys(self):
+        export = self.client.get(
+            f"/projects/{self.project['id']}/drafts/{self.draft['id']}"
+            f"/versions/{self._version_id()}/export?format=markdown"
+        ).json()
+
+        self.assertEqual(
+            set(export),
+            {
+                "format",
+                "filename",
+                "content_type",
+                "body",
+                "project_id",
+                "draft_id",
+                "version_id",
+                "version_number",
+                "snapshot_id",
+                "content_hash",
+            },
+        )
+
+
+class BlankNameRejectionTest(unittest.TestCase):
+    """Project/draft naming constraint at the HTTP boundary (SoT v1.6.95, D3=A).
+
+    Before this, `create_project` accepted any string, so a blank name reached the
+    canonical store. The frontend trimmed as a UX nicety, but that is not a
+    contract: any other client bypassed it. Validation sits at the HTTP boundary
+    because every client reaches Core SOT through it, so the Core SOT contract
+    itself is unchanged.
+    """
+
+    def setUp(self):
+        self.client = TestClient(create_app())
+        self.project = self.client.post("/projects", json={"name": "Novel"}).json()
+        self.draft = self.client.post(
+            f"/projects/{self.project['id']}/drafts",
+            json={"title": "Episode 1"},
+        ).json()
+
+    def test_blank_project_name_is_rejected(self):
+        for name in ["", " ", "   ", "\t", "\n", " \t\n "]:
+            with self.subTest(name=name):
+                response = self.client.post("/projects", json={"name": name})
+
+                self.assertEqual(response.status_code, 422)
+
+    def test_blank_draft_title_is_rejected(self):
+        for title in ["", "   ", "\n"]:
+            with self.subTest(title=title):
+                response = self.client.post(
+                    f"/projects/{self.project['id']}/drafts", json={"title": title}
+                )
+
+                self.assertEqual(response.status_code, 422)
+
+    def test_blank_rename_is_rejected_for_project_and_draft(self):
+        self.assertEqual(
+            self.client.patch(
+                f"/projects/{self.project['id']}", json={"name": "  "}
+            ).status_code,
+            422,
+        )
+        self.assertEqual(
+            self.client.patch(
+                f"/projects/{self.project['id']}/drafts/{self.draft['id']}",
+                json={"title": "  "},
+            ).status_code,
+            422,
+        )
+
+    def test_blank_name_does_not_reach_the_store(self):
+        # Over-strict on the boundary: a rejected create must mint nothing.
+        before = len(self.client.get("/projects").json()["projects"])
+
+        self.client.post("/projects", json={"name": "   "})
+
+        self.assertEqual(
+            len(self.client.get("/projects").json()["projects"]), before
+        )
+
+    def test_surrounding_whitespace_is_stripped_not_rejected(self):
+        # Under-strict guard: the constraint must not reject a real name that
+        # merely carries padding — it strips and stores the trimmed value.
+        created = self.client.post("/projects", json={"name": "  겨울 이야기  "})
+
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(created.json()["name"], "겨울 이야기")
+
+        draft = self.client.post(
+            f"/projects/{self.project['id']}/drafts", json={"title": "  1화  "}
+        )
+        self.assertEqual(draft.status_code, 200)
+        self.assertEqual(draft.json()["title"], "1화")
+
+    def test_ordinary_names_still_pass(self):
+        # Over-strict guard on the constraint itself: normal input is unaffected.
+        for name in ["A", "겨울 이야기", "Episode 1: 시작", "a" * 200]:
+            with self.subTest(name=name):
+                response = self.client.post("/projects", json={"name": name})
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()["name"], name)
+
+    def test_inner_whitespace_is_preserved(self):
+        # The constraint strips only the edges; it must not normalize the middle.
+        response = self.client.post("/projects", json={"name": "겨울  이야기"})
+
+        self.assertEqual(response.json()["name"], "겨울  이야기")
+
+
 class _ApiFakeAnalysisRunner:
     def __init__(self, analysis_service):
         self._analysis_service = analysis_service

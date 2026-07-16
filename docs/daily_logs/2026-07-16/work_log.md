@@ -8,6 +8,11 @@
 
 ## User Decisions and Rationale
 
+- **H1(응답 모델) → H2(입력 검증) 순서로 백엔드 공개 계약을 조인다**: 오너가 v1.6.94 독립 검증의 H1/H2를 보고 "커밋해주고 H1 응답모델 먼저 한 다음 H2까지 하는게 맞겠네"로 지시했다. 이로써 v1.6.94가 "별도 결정"으로 남긴 갭(응답 무타입)과 검증자가 발견한 spec-silent 입력 검증이 함께 닫힌다. 세부 3결정은 브리프(`plans/frontend-api-contract-decisions.md`)로 표면화해 확정:
+  - **D1=A(척추 14 endpoint 먼저)** — 추천 채택. 문제는 "50 endpoint에 타입이 없다"가 아니라 "프론트가 손선언하는 자리에 없다"이고 그 자리는 지금 척추뿐이다. Writing·Review envelope은 UI가 아직 만나지 않아 지금 고정하면 계약을 두 번 만지게 되고, 그 트랙의 핵심 2 endpoint는 `JSONResponse`라 어차피 안 덮인다. 나머지 34개는 해당 UI 슬라이스에서.
+  - **D2=A(`response_model=` 파라미터, 헬퍼 dict 유지)** — 추천 채택. payload 생성 헬퍼 20개를 한 줄도 건드리지 않고 OpenAPI가 실제 schema를 내게 한다(§3 surgical). 각하: D2=B(반환 타입 주석 — dict를 반환하며 모델 반환이라 주석하는 거짓말), D2=C(헬퍼가 모델 반환 — 이 문제를 푸는 데 필요한 것보다 훨씬 큰 재작성, §2).
+  - **D3=A(HTTP 경계 pydantic `Field` → 422)** — 추천 채택. 검증자가 든 우회 시나리오가 전부 HTTP를 지나므로 경계에서 보고된 위험이 닫히고 **Core SOT 정본 계약은 무변**이다. 각하: D3=B(서비스 계층 — 정본 계약을 여는 값에 비해 "scripts가 빈 이름 생성"만 추가로 삼), D3=C(이중화 — 같은 규칙 두 곳, 드리프트 위험).
+
 - **슬라이스 범위 = scaffold + 프로젝트 목록/생성까지(에디터는 다음 슬라이스)**: 오너가 두 선택지(① scaffold+목록/생성 ② 척추 A 전체) 중 ①을 택했다. 근거로 제시하고 오너가 수용한 것: 스택 배선(Vite+nginx+타입 생성)이 실제로 도는지 먼저 확인하는 편이 안전하고, 에디터는 Core SOT 계약(명시적 version save only + `idempotency_key` 필수)이 두꺼워 독립 슬라이스로 다루는 게 낫다. 이는 브리프 D3 각주("A 자체도 한 슬라이스로 크면 `프로젝트 목록+생성` / `에디터+저장+version` 둘로 쪼갠다")의 발화이지 결정 변경이 아니다.
 - **프론트 테스트 도구 = Vitest + React Testing Library**: 브리프 "이번 결정에 포함하지 않는 것"이 테스트 도구를 첫 슬라이스로 미뤄뒀고, 이번이 그 첫 슬라이스라 오너에게 확인했다. 오너가 추천(Vitest+RTL)을 채택했다. 근거: Vite와 설정/트랜스폼을 공유해 추가 빌드 체인이 0이고, 이 저장소의 양방향 회귀 관례(under-strict/over-strict guard)를 프론트에도 그대로 적용할 수 있다. 각하: 도구 미도입(§2에 가장 부합하나 첫 회귀가 늦어짐), Playwright e2e 추가(1인 로컬 스택에 운영 표면 증가, 첫 슬라이스 과대).
 
@@ -57,6 +62,34 @@ D2=B(별도 서비스)는 D2=A가 공짜로 주던 단일 origin을 잃는다. �
 - **H1 코드 무변** — 이미 상향된 항목이고 검증은 "에디터 슬라이스 전이 가장 싸다"는 권고를 강화했다.
 - **H5 코드 무변** — 생성된 경로 타입이 call-site에서 아직 미소비. 검증자도 "결함 아님, 엔드포인트 배선이 늘면 자연 소비"로 판단했다. 지금 억지로 소비시키는 건 §2 speculative이라 보류한다.
 
+### 백엔드 공개 계약 조이기 — H1 척추 응답 모델 + H2 이름 검증 (SoT v1.6.95, D1=A/D2=A/D3=A)
+
+오너가 검증 H1/H2를 보고 **"H1 먼저 → H2"** 순서로 착수를 지시했다. 방향은 정해졌으나 범위·방식·검증 위치가 공개 계약을 구속해 브리프(`plans/frontend-api-contract-decisions.md`)로 fork를 표면화한 뒤 구현했다.
+
+**착수 전 실측이 브리프의 그림을 바꾼 것** (추측으로 썼으면 틀렸을 지점):
+
+- 50 endpoint 중 **48개만 `response_model` 적용 가능**. **`/writing/revise-and-gate`·`/writing/accept` 2개는 `JSONResponse` 직접 반환**이라 FastAPI가 response_model을 **검증도 문서화도 우회**한다. H1이 구조적으로 못 덮는 구멍이고, 하필 Writing 트랙(C 슬라이스)이 소비할 표면이다. → 브리프에 "H1은 이걸 못 덮는다"를 명시하고 Deferred로 넘겼다.
+- 요청 모델 5종 전부 제약 없는 `str`(`Field`/validator 사용처 **0**) → H2는 이 저장소의 첫 입력 제약.
+
+**H1 구현 (D1=A 척추 14 endpoint, D2=A `response_model=` 파라미터)**
+
+- **안전망을 모델보다 먼저 깔았다** — 이게 이 슬라이스의 핵심 절차다. `response_model`은 모델이 선언하지 않은 필드를 **조용히 삭제**하는데(오류·경고 0), 기존 회귀에는 exact-key set assertion이 **하나도 없었다**(개별 키만 읽음). 즉 모델부터 붙였으면 필드 유실이 green으로 통과했다. 신규 `SpineEnvelopeKeyTest` 5개로 척추 전 envelope의 완전한 키 집합을 잠그고, **현 dict payload에서 통과함을 먼저 확인**한 뒤 모델을 적용했다.
+- **필드 유실 실증**: `SnapshotDetailPayload`에서 `project_id`를 빼면 공개 API 응답에서 그 필드가 사라지는데, **1104개 테스트 중 이 exact-key 회귀 1개만** 잡았다(나머지 1103개 통과). 안전망 없이 진행했다면 그대로 배포됐을 실패 양식이다.
+- **save/read surface 모델 분리 강제**: `save_draft`와 `get_draft_version`이 **같은 키 이름(`draft_version`/`snapshot`/`blocks`)에 다른 shape**을 담는다(save는 `{id,version_number,snapshot_id}`, read는 `project_id`/`draft_id`까지). 모델을 공유했으면 save 응답에서 필드가 사라지거나 read가 좁아졌다. `SavedDraftVersionPayload`/`SavedSnapshotPayload`/`SavedSourceBlockPayload`를 read 모델과 별도로 선언하고 그 이유를 주석에 남겼다.
+- **H1이 실제로 값을 내는지 실증**: 백엔드 `ProjectPayload.archived` → `is_archived` rename + `npm run gen:api` 재생성 → **프론트 `tsc`가 `ProjectList.tsx(71,24)`를 짚어 실패**. v1.6.94가 기록한 "백엔드 payload 변경이 컴파일 타임에 안 잡힌다"가 척추 구역에서 닫혔다. 이후 전부 복원.
+- `client.ts`의 손선언 `Project` 삭제 → `components["schemas"]["ProjectPayload"]` 소비. v1.6.94 검증 H5(경로 타입 call-site 미소비)도 자연 해소됐다.
+
+**H2 구현 (D3=A HTTP 경계)**
+
+- `NonBlankName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]`를 project/draft의 create·rename 요청 모델 4종에 적용. **strip이 min_length보다 먼저** 돌아 `"  겨울 이야기  "`는 `"겨울 이야기"`로 저장되고 `"   "`는 **422**다(pydantic 2.12.5에서 순서 직접 확인 후 채택).
+- **Core SOT 정본 계약은 건드리지 않았다**. 검증자가 든 우회 시나리오(다른 클라이언트·trim 안 하는 미래 화면)가 **전부 HTTP를 지나므로** 경계에서 막으면 보고된 위험이 닫힌다. D3=B(서비스 계층)는 정본 계약을 여는 값을 치르고 "scripts가 빈 이름을 만드는 것"만 추가로 사는데, 그건 지금 실재하는 위험이 아니다.
+- 프론트 trim은 **UX 편의일 뿐 계약이 아니고**, 이제 계약은 이 경계 제약이라는 점을 SoT에 명시했다.
+
+**회귀 +12 (양방향, mutation 전부 bite 실증)**
+
+- `SpineEnvelopeKeyTest` 5: 척추 전 envelope exact-key. mutation ① `ProjectPayload.archived` 제거 → 새 회귀 + 기존 3개 bite / ② `SnapshotDetailPayload.project_id` 제거 → **새 회귀만** bite(안전망의 고유 가치 실증).
+- `BlankNameRejectionTest` 7(subtest 13): 공백-only 4종 거부·rename 거부·**빈 이름이 store에 안 닿음**(over-strict) · **padding은 거부가 아니라 strip**(under-strict — 과교정 방지) · 일반 이름 통과 · **내부 공백 보존**(strip이 중간까지 정규화하지 않음). mutation ① 제약 제거 → 12 실패 / ② strip 누락(min_length만) → 10 실패.
+
 ## Issues found
 
 ### `vite.config.ts`의 `process` 타입 부재로 빌드 실패
@@ -72,6 +105,7 @@ D2=B(별도 서비스)는 D2=A가 공짜로 주던 단일 origin을 잃는다. �
 - 원인: HTTP 엔드포인트가 `-> dict[str, object]`로 주석돼 있어 FastAPI가 응답 schema를 `additionalProperties: true`(빈 object)로 내보낸다. 요청 바디는 pydantic 모델(`CreateProjectRequest` 등)이라 정상 생성된다.
 - 조치: 이번 슬라이스가 소비하는 응답 shape(`Project{id,name,archived}`)만 `client.ts`에 손으로 선언하고 그 이유를 주석에 남겼다. SoT v1.6.94 계약 절에도 "타입 계약 동기화의 실제 범위"로 명시했다.
 - 미해결(오너 결정 필요): 갭을 닫으려면 백엔드 엔드포인트에 `response_model`을 붙여야 하는데, 이는 50 endpoint의 public envelope에 pydantic 검증·직렬화를 도입하는 변경이라 "백엔드 무변" 목표 밖이고 별도 결정 사안이다. **현 상태의 실질 위험**: 백엔드 payload가 바뀌어도 프론트는 컴파일 타임에 못 잡고 런타임에 깨진다.
+- **→ 같은 날 해소(척추 한정)**: 오너가 H1 착수를 지시해 **SoT v1.6.95에서 척추 14 endpoint에 `response_model` 적용**(위 "백엔드 공개 계약 조이기" 참조). 그 구역은 이제 컴파일 타임에 잡힌다(rename mutation으로 실증). **나머지 34 endpoint는 여전히 무타입**이고, `/writing/revise-and-gate`·`/writing/accept` 2개는 `JSONResponse` 직접 반환이라 **구조적으로 response_model이 안 먹는다** — Writing 슬라이스에서 별도 처리.
 
 ## Decisions
 
@@ -84,7 +118,7 @@ D2=B(별도 서비스)는 D2=A가 공짜로 주던 단일 origin을 잃는다. �
 
 - **프론트 회귀**: `cd frontend && npm test` → **10 passed (1 file)**(초기 9 + 검증 hardening H6 이중 제출 1). H6는 가드 제거 mutation에서 단독 bite 실증 후 구현 복원.
 - **프론트 빌드/타입**: `npm run build`(`tsc --noEmit && vite build`) → 통과, 31 modules transformed.
-- **백엔드 회귀 무변**: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1099 passed / 45 skipped / 260 subtests**. HANDOFF에 기록된 ES 패키지 설치 환경 기준선(1099/45)과 정확히 일치 → 백엔드 무변 확인.
+- **백엔드 회귀**: 프론트 슬라이스 시점 `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1099 passed / 45 skipped / 260 subtests** = 착수 전 기준선과 정확히 일치(백엔드 무변 확인). 이후 v1.6.95(H1/H2)로 회귀 +12 → **1111 passed / 45 skipped / 273 subtests**.
 - **compose**: `docker compose config --quiet` 통과. `docker compose build frontend` 성공.
 - **live 관통(격리 네트워크, frontend+application 컨테이너)**: application을 in-memory(`CORE_SOT_MONGO_URI` 미설정) 단독 기동 + frontend 컨테이너를 같은 네트워크(`--network-alias application`)에 붙여 nginx 프록시를 실제로 관통시켰다:
   - SPA index `GET /` → **200 text/html**
@@ -96,9 +130,18 @@ D2=B(별도 서비스)는 D2=A가 공짜로 주던 단일 origin을 잃는다. �
   - 스모크 컨테이너·네트워크는 정리했다(`docker rm -f` + `docker network rm`).
 - `git diff --check` clean.
 
+### v1.6.95 (H1/H2) 검증
+
+- **회귀**: 백엔드 **1111 passed / 45 skipped / 273 subtests**(+12: 척추 exact-key 5, blank name 7/subtest 13). 프론트 **10 passed**, `npm run build`(`tsc --noEmit && vite build`) 통과.
+- **mutation 4종 전부 bite 실증(후 복원)**: ① `ProjectPayload.archived` 제거 → 새 회귀 + 기존 3개 / ② `SnapshotDetailPayload.project_id` 제거 → **1104개 중 새 회귀 1개만**(안전망 고유 가치) / ③ `NonBlankName`→`str` → 12 실패 / ④ strip 누락(min_length만) → 10 실패.
+- **H1 성과 실증**: 백엔드 `archived`→`is_archived` rename + `gen:api` 재생성 → 프론트 `tsc`가 `ProjectList.tsx(71,24)` 짚어 실패(이전이라면 조용히 빌드). 복원 후 `tsc` clean.
+- **live 관통(격리 네트워크, frontend+application, trap 정리)**: padding strip(`"  겨울 이야기  "`→`"겨울 이야기"`) · 공백-only **422** · 척추 envelope 키 전부 보존(가장 넓은 version detail의 `draft_version` 5키·`snapshot` 6키·`blocks` 8키) · `BlockKind` enum이 `"heading"`으로 직렬화 · export body 원문(`# 제목\n\n본문.`) PASS.
+- `docker compose config --quiet`·`py_compile`·`git diff --check` 통과.
+
 ## Next steps
 
 - **다음 슬라이스 = 척추 A의 나머지(원고 목록 → 에디터)**: `GET /projects/{id}/drafts`·`POST /projects/{id}/drafts` 목록/생성 → 에디터(평문 `textarea` + **명시적 저장** + version 목록). 붙는 계약: `POST /projects/{id}/drafts/{did}/versions`는 `idempotency_key` 필수이고 같은 키 재시도는 같은 version을 반환한다(프론트가 키를 mint·재시도에 재사용해야 함), archive된 project/draft 쓰기는 409, export는 `?format=txt|markdown`. **프로젝트 상세 라우팅이 이 슬라이스에서 처음 필요해진다** — 현재 SPA는 라우터가 없고 `try_files`만 깔려 있으니 라우터 도입(또는 최소 상태 기반 화면 전환) 여부를 그때 정한다.
 - 이후: C(Writing 작업공간: generate→gate→accept, 진행 표시는 60s 동기 요청 후속 결정) → B(Review Inbox: v1.6.67 어포던스 `{action,eligible,reason}` 구동) → Phase 7.
-- **오너 결정 대기(신규, 묶어서 정할 것)**: (1) 백엔드 `response_model` 도입 여부 — 안 하면 프론트 응답 타입은 계속 손으로 선언되고 백엔드 payload 변경이 컴파일 타임에 안 잡힌다. 화면이 늘수록 손 선언 표면도 는다. (2) 입력 검증을 프론트 전용으로 둘지 백엔드가 잡을지(검증 H2 — `create_project`에 빈/공백 이름 검증 없음). 둘 다 "백엔드 공개 계약을 얼마나 조일지"의 같은 축이고, 입력·화면이 함께 늘어나는 **에디터 슬라이스 전이 비용 최소**다.
+- **~~오너 결정 대기(H1/H2)~~ → 같은 날 확정·구현 완료**(SoT v1.6.95, D1=A/D2=A/D3=A). 남은 후속: (1) **나머지 34 endpoint 응답 모델**은 해당 UI 슬라이스에서(D1=A 계약), (2) **`/writing/revise-and-gate`·`/writing/accept`의 `JSONResponse` partial envelope**은 response_model이 구조적으로 안 먹으므로 Writing 작업공간 슬라이스에서 별도 결정(성공 경로만 모델+에러는 `responses={}` 문서화 vs 손선언 유지), (3) `raw_text`·`idempotency_key` 제약은 에디터 슬라이스에서 실제 필요가 보일 때.
+- **422 detail 표시**: D3=A가 422를 도입했다. 프론트 `ApiError`는 status+detail을 보존하지만 422 detail은 FastAPI validation error 구조(배열)라 현재 `readDetail`이 `JSON.stringify`로 떨어뜨린다. 지금은 프론트가 trim+disable로 막아 사용자가 볼 일이 없지만, 사용자에게 보일 문구가 필요해지면 그때 매핑한다(브리프 follow-up).
 - **autosave**는 에디터 슬라이스에서 사용자가 가장 먼저 기대할 기능이지만 "저장=version mint" 계약 변경 위험이 있어 여전히 별도 오너 결정이다(브리프 follow-up).

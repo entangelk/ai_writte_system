@@ -41,19 +41,15 @@ async function readDetail(response: Response): Promise<string> {
   }
 }
 
-// Request bodies come from the generated OpenAPI types. Response payloads are
-// hand-declared: the endpoints are annotated `dict[str, object]`, so OpenAPI
-// types them as open objects and generation carries no response shape (see
-// work log 2026-07-16 — closing that gap needs backend `response_model`).
+// Both request bodies and response payloads come from the generated OpenAPI
+// types (SoT v1.6.95 put `response_model` on the Product shell spine, so the
+// schema now carries real response shapes). Nothing here is hand-declared: a
+// backend payload change fails the type check after `npm run gen:api`.
 export type CreateProjectRequest = components["schemas"]["CreateProjectRequest"];
+export type Project = components["schemas"]["ProjectPayload"];
+export type ProjectListResponse = components["schemas"]["ProjectListResponse"];
 
-export interface Project {
-  id: string;
-  name: string;
-  archived: boolean;
-}
-
-export function listProjects(): Promise<{ projects: Project[] }> {
+export function listProjects(): Promise<ProjectListResponse> {
   return request("/projects");
 }
 

@@ -744,6 +744,11 @@ export interface components {
             /** Matched Memory Id */
             matched_memory_id?: string | null;
         };
+        /**
+         * BlockKind
+         * @enum {string}
+         */
+        BlockKind: "heading" | "scene_marker" | "paragraph";
         /** ContextPositionBody */
         ContextPositionBody: {
             /** Draft Id */
@@ -795,6 +800,70 @@ export interface components {
             /** Start Offset */
             start_offset: number;
         };
+        /** DraftListResponse */
+        DraftListResponse: {
+            /** Drafts */
+            drafts: components["schemas"]["DraftPayload"][];
+        };
+        /** DraftPayload */
+        DraftPayload: {
+            /** Archived */
+            archived: boolean;
+            /** Id */
+            id: string;
+            /** Project Id */
+            project_id: string;
+            /** Title */
+            title: string;
+        };
+        /** DraftVersionDetailResponse */
+        DraftVersionDetailResponse: {
+            /** Blocks */
+            blocks: components["schemas"]["SourceBlockDetailPayload"][];
+            draft_version: components["schemas"]["DraftVersionMetaPayload"];
+            snapshot: components["schemas"]["SnapshotDetailPayload"];
+        };
+        /** DraftVersionExportResponse */
+        DraftVersionExportResponse: {
+            /** Body */
+            body: string;
+            /** Content Hash */
+            content_hash: string;
+            /** Content Type */
+            content_type: string;
+            /** Draft Id */
+            draft_id: string;
+            /** Filename */
+            filename: string;
+            /** Format */
+            format: string;
+            /** Project Id */
+            project_id: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Version Id */
+            version_id: string;
+            /** Version Number */
+            version_number: number;
+        };
+        /** DraftVersionListResponse */
+        DraftVersionListResponse: {
+            /** Versions */
+            versions: components["schemas"]["DraftVersionMetaPayload"][];
+        };
+        /** DraftVersionMetaPayload */
+        DraftVersionMetaPayload: {
+            /** Draft Id */
+            draft_id: string;
+            /** Id */
+            id: string;
+            /** Project Id */
+            project_id: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Version Number */
+            version_number: number;
+        };
         /** EditCandidateRequest */
         EditCandidateRequest: {
             /** Payload */
@@ -806,6 +875,20 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** ProjectListResponse */
+        ProjectListResponse: {
+            /** Projects */
+            projects: components["schemas"]["ProjectPayload"][];
+        };
+        /** ProjectPayload */
+        ProjectPayload: {
+            /** Archived */
+            archived: boolean;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
         };
         /** ReconcileCharacterRequest */
         ReconcileCharacterRequest: {
@@ -828,6 +911,74 @@ export interface components {
             idempotency_key: string;
             /** Raw Text */
             raw_text: string;
+        };
+        /** SaveDraftResponse */
+        SaveDraftResponse: {
+            /** Blocks */
+            blocks: components["schemas"]["SavedSourceBlockPayload"][];
+            draft_version: components["schemas"]["SavedDraftVersionPayload"];
+            /** Idempotent Replay */
+            idempotent_replay: boolean;
+            snapshot: components["schemas"]["SavedSnapshotPayload"];
+        };
+        /** SavedDraftVersionPayload */
+        SavedDraftVersionPayload: {
+            /** Id */
+            id: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Version Number */
+            version_number: number;
+        };
+        /** SavedSnapshotPayload */
+        SavedSnapshotPayload: {
+            /** Content Hash */
+            content_hash: string;
+            /** Id */
+            id: string;
+        };
+        /** SavedSourceBlockPayload */
+        SavedSourceBlockPayload: {
+            /** End Offset */
+            end_offset: number;
+            /** Id */
+            id: string;
+            kind: components["schemas"]["BlockKind"];
+            /** Start Offset */
+            start_offset: number;
+        };
+        /** SnapshotDetailPayload */
+        SnapshotDetailPayload: {
+            /** Content Hash */
+            content_hash: string;
+            /** Draft Id */
+            draft_id: string;
+            /** Id */
+            id: string;
+            /** Project Id */
+            project_id: string;
+            /** Raw Text */
+            raw_text: string;
+            /** Version Id */
+            version_id: string;
+        };
+        /** SourceBlockDetailPayload */
+        SourceBlockDetailPayload: {
+            /** Block Index */
+            block_index: number;
+            /** End Offset */
+            end_offset: number;
+            /** Id */
+            id: string;
+            kind: components["schemas"]["BlockKind"];
+            /** Project Id */
+            project_id: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Start Offset */
+            start_offset: number;
+            /** Text */
+            text: string;
         };
         /** ValidationError */
         ValidationError: {
@@ -1039,9 +1190,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ProjectListResponse"];
                 };
             };
         };
@@ -1065,9 +1214,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ProjectPayload"];
                 };
             };
             /** @description Validation Error */
@@ -1098,9 +1245,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ProjectPayload"];
                 };
             };
             /** @description Validation Error */
@@ -1131,9 +1276,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ProjectPayload"];
                 };
             };
             /** @description Validation Error */
@@ -1168,9 +1311,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ProjectPayload"];
                 };
             };
             /** @description Validation Error */
@@ -1924,9 +2065,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DraftListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1961,9 +2100,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DraftPayload"];
                 };
             };
             /** @description Validation Error */
@@ -1995,9 +2132,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DraftPayload"];
                 };
             };
             /** @description Validation Error */
@@ -2029,9 +2164,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DraftPayload"];
                 };
             };
             /** @description Validation Error */
@@ -2067,9 +2200,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DraftPayload"];
                 };
             };
             /** @description Validation Error */
@@ -2101,9 +2232,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DraftVersionListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2139,9 +2268,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SaveDraftResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2174,9 +2301,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DraftVersionDetailResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2211,9 +2336,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DraftVersionExportResponse"];
                 };
             };
             /** @description Validation Error */

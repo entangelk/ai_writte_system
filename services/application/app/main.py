@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import os
-from typing import Protocol
+from typing import Annotated, Protocol
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, StringConstraints
 
 from services.application.app.analysis.extractor import (
     AnalysisExtractionError,
@@ -177,6 +177,7 @@ from services.application.app.context_search.service import (
     VectorCandidateMemoryRetriever,
     evaluate_context_gate,
 )
+from services.application.app.core_sot.models import BlockKind
 from services.application.app.core_sot.service import (
     Archived,
     CoreSotError,
@@ -877,8 +878,133 @@ def _build_chroma_vector_index():
     )
 
 
-class CreateProjectRequest(BaseModel):
+# Product shell spine response models (SoT v1.6.95, D1=A/D2=A).
+#
+# These are declared as `response_model=` on the spine endpoints so OpenAPI emits
+# a real response schema and the frontend generates its types instead of hand-
+# declaring them. The endpoints keep returning hand-built dicts (D2=A): FastAPI
+# validates the dict against the model, so no payload helper changes.
+#
+# WARNING: response_model silently DROPS any field a model does not declare. Keep
+# each model exactly as wide as its payload; `SpineEnvelopeKeyTest` pins the full
+# key set of every envelope below and bites if a model narrows one.
+
+
+class ProjectPayload(BaseModel):
+    id: str
     name: str
+    archived: bool
+
+
+class ProjectListResponse(BaseModel):
+    projects: list[ProjectPayload]
+
+
+class DraftPayload(BaseModel):
+    id: str
+    project_id: str
+    title: str
+    archived: bool
+
+
+class DraftListResponse(BaseModel):
+    drafts: list[DraftPayload]
+
+
+class DraftVersionMetaPayload(BaseModel):
+    # idempotency_key is intentionally absent: an internal save token, not part
+    # of the public read surface (mirrors _version_meta_payload).
+    id: str
+    project_id: str
+    draft_id: str
+    version_number: int
+    snapshot_id: str
+
+
+class DraftVersionListResponse(BaseModel):
+    versions: list[DraftVersionMetaPayload]
+
+
+class SnapshotDetailPayload(BaseModel):
+    id: str
+    project_id: str
+    draft_id: str
+    version_id: str
+    raw_text: str
+    content_hash: str
+
+
+class SourceBlockDetailPayload(BaseModel):
+    id: str
+    project_id: str
+    snapshot_id: str
+    block_index: int
+    kind: BlockKind
+    start_offset: int
+    end_offset: int
+    text: str
+
+
+class DraftVersionDetailResponse(BaseModel):
+    draft_version: DraftVersionMetaPayload
+    snapshot: SnapshotDetailPayload
+    blocks: list[SourceBlockDetailPayload]
+
+
+# The save surface is deliberately narrower than the read surface above and
+# reuses the same key names (draft_version/snapshot/blocks) with fewer fields.
+# Sharing the read models here would silently delete fields from the save
+# response — hence the separate declarations.
+
+
+class SavedDraftVersionPayload(BaseModel):
+    id: str
+    version_number: int
+    snapshot_id: str
+
+
+class SavedSnapshotPayload(BaseModel):
+    id: str
+    content_hash: str
+
+
+class SavedSourceBlockPayload(BaseModel):
+    id: str
+    kind: BlockKind
+    start_offset: int
+    end_offset: int
+
+
+class SaveDraftResponse(BaseModel):
+    draft_version: SavedDraftVersionPayload
+    snapshot: SavedSnapshotPayload
+    blocks: list[SavedSourceBlockPayload]
+    idempotent_replay: bool
+
+
+class DraftVersionExportResponse(BaseModel):
+    format: str
+    filename: str
+    content_type: str
+    body: str
+    project_id: str
+    draft_id: str
+    version_id: str
+    version_number: int
+    snapshot_id: str
+    content_hash: str
+
+
+# Project/draft naming constraint (SoT v1.6.95, D3=A). Validation lives at the
+# HTTP boundary: every client reaches Core SOT through it, so rejecting here
+# closes the blank-name hole without changing the Core SOT contract. Whitespace
+# is stripped BEFORE min_length runs, so "  x  " is stored as "x" and a
+# whitespace-only name is a 422 rather than a blank name in the canonical store.
+NonBlankName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
+class CreateProjectRequest(BaseModel):
+    name: NonBlankName
 
 
 class CreateAnalysisJobRequest(BaseModel):
@@ -887,15 +1013,15 @@ class CreateAnalysisJobRequest(BaseModel):
 
 
 class CreateDraftRequest(BaseModel):
-    title: str
+    title: NonBlankName
 
 
 class RenameProjectRequest(BaseModel):
-    name: str
+    name: NonBlankName
 
 
 class RenameDraftRequest(BaseModel):
-    title: str
+    title: NonBlankName
 
 
 class SaveDraftRequest(BaseModel):
@@ -1291,16 +1417,16 @@ def create_app(
     def _require_project_exists(project_id: str) -> None:
         core_sot.get_project(project_id=project_id)
 
-    @app.post("/projects")
+    @app.post("/projects", response_model=ProjectPayload)
     async def create_project(request: CreateProjectRequest) -> dict[str, object]:
         project = core_sot.create_project(name=request.name)
         return _project_payload(project)
 
-    @app.get("/projects")
+    @app.get("/projects", response_model=ProjectListResponse)
     async def list_projects() -> dict[str, object]:
         return {"projects": [_project_payload(p) for p in core_sot.list_projects()]}
 
-    @app.get("/projects/{project_id}")
+    @app.get("/projects/{project_id}", response_model=ProjectPayload)
     async def get_project(project_id: str) -> dict[str, object]:
         try:
             project = core_sot.get_project(project_id=project_id)
@@ -1308,7 +1434,7 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return _project_payload(project)
 
-    @app.patch("/projects/{project_id}")
+    @app.patch("/projects/{project_id}", response_model=ProjectPayload)
     async def rename_project(
         project_id: str, request: RenameProjectRequest
     ) -> dict[str, object]:
@@ -1322,7 +1448,9 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return _project_payload(project)
 
-    @app.patch("/projects/{project_id}/drafts/{draft_id}")
+    @app.patch(
+        "/projects/{project_id}/drafts/{draft_id}", response_model=DraftPayload
+    )
     async def rename_draft(
         project_id: str, draft_id: str, request: RenameDraftRequest
     ) -> dict[str, object]:
@@ -1336,7 +1464,7 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return _draft_payload(draft)
 
-    @app.delete("/projects/{project_id}")
+    @app.delete("/projects/{project_id}", response_model=ProjectPayload)
     async def archive_project(project_id: str) -> dict[str, object]:
         # MVP: delete is archive (soft delete); SOT data is preserved (§115).
         # Re-archiving is idempotent.
@@ -1347,7 +1475,9 @@ def create_app(
         sync_outbox.enqueue_project_archived(project_id=project_id)
         return _project_payload(project)
 
-    @app.delete("/projects/{project_id}/drafts/{draft_id}")
+    @app.delete(
+        "/projects/{project_id}/drafts/{draft_id}", response_model=DraftPayload
+    )
     async def archive_draft(project_id: str, draft_id: str) -> dict[str, object]:
         try:
             draft = core_sot.archive_draft(project_id=project_id, draft_id=draft_id)
@@ -1359,7 +1489,7 @@ def create_app(
         )
         return _draft_payload(draft)
 
-    @app.get("/projects/{project_id}/drafts")
+    @app.get("/projects/{project_id}/drafts", response_model=DraftListResponse)
     async def list_drafts(project_id: str) -> dict[str, object]:
         try:
             drafts = core_sot.list_drafts(project_id=project_id)
@@ -1367,7 +1497,9 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"drafts": [_draft_payload(d) for d in drafts]}
 
-    @app.get("/projects/{project_id}/drafts/{draft_id}")
+    @app.get(
+        "/projects/{project_id}/drafts/{draft_id}", response_model=DraftPayload
+    )
     async def get_draft(project_id: str, draft_id: str) -> dict[str, object]:
         try:
             draft = core_sot.get_draft(project_id=project_id, draft_id=draft_id)
@@ -1375,7 +1507,10 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return _draft_payload(draft)
 
-    @app.get("/projects/{project_id}/drafts/{draft_id}/versions")
+    @app.get(
+        "/projects/{project_id}/drafts/{draft_id}/versions",
+        response_model=DraftVersionListResponse,
+    )
     async def list_draft_versions(project_id: str, draft_id: str) -> dict[str, object]:
         try:
             versions = core_sot.list_draft_versions(
@@ -1385,7 +1520,10 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"versions": [_version_meta_payload(v) for v in versions]}
 
-    @app.get("/projects/{project_id}/drafts/{draft_id}/versions/{version_id}")
+    @app.get(
+        "/projects/{project_id}/drafts/{draft_id}/versions/{version_id}",
+        response_model=DraftVersionDetailResponse,
+    )
     async def get_draft_version(
         project_id: str, draft_id: str, version_id: str
     ) -> dict[str, object]:
@@ -1421,7 +1559,8 @@ def create_app(
         }
 
     @app.get(
-        "/projects/{project_id}/drafts/{draft_id}/versions/{version_id}/export"
+        "/projects/{project_id}/drafts/{draft_id}/versions/{version_id}/export",
+        response_model=DraftVersionExportResponse,
     )
     async def export_draft_version(
         project_id: str,
@@ -1453,7 +1592,7 @@ def create_app(
             "content_hash": export.content_hash,
         }
 
-    @app.post("/projects/{project_id}/drafts")
+    @app.post("/projects/{project_id}/drafts", response_model=DraftPayload)
     async def create_draft(
         project_id: str, request: CreateDraftRequest
     ) -> dict[str, object]:
@@ -1465,7 +1604,10 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return _draft_payload(draft)
 
-    @app.post("/projects/{project_id}/drafts/{draft_id}/versions")
+    @app.post(
+        "/projects/{project_id}/drafts/{draft_id}/versions",
+        response_model=SaveDraftResponse,
+    )
     async def save_draft(
         project_id: str, draft_id: str, request: SaveDraftRequest
     ) -> dict[str, object]:
