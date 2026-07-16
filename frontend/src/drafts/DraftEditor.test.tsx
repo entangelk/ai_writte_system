@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -46,9 +46,55 @@ const version1 = {
 };
 const version3 = { ...version1, id: "v3", version_number: 3, snapshot_id: "s3" };
 
+function detail(version: typeof version1, rawText: string) {
+  return {
+    draft_version: version,
+    snapshot: {
+      id: version.snapshot_id,
+      project_id: "p1",
+      draft_id: "d1",
+      version_id: version.id,
+      raw_text: rawText,
+      content_hash: `hash-${version.version_number}`,
+    },
+    blocks: [],
+  };
+}
+
+function mockBlobDownload() {
+  const createObjectURL = vi.fn<(blob: Blob) => string>(() => "blob:download");
+  const revokeObjectURL = vi.fn<(url: string) => void>();
+  const clickedAnchors: HTMLAnchorElement[] = [];
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true,
+    value: createObjectURL,
+  });
+  Object.defineProperty(URL, "revokeObjectURL", {
+    configurable: true,
+    value: revokeObjectURL,
+  });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+    this: HTMLAnchorElement,
+  ) {
+    clickedAnchors.push(this);
+  });
+  return { createObjectURL, revokeObjectURL, click, clickedAnchors };
+}
+
+function readBlob(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(String(reader.result)));
+    reader.addEventListener("error", () => reject(reader.error));
+    reader.readAsText(blob);
+  });
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  Reflect.deleteProperty(URL, "createObjectURL");
+  Reflect.deleteProperty(URL, "revokeObjectURL");
 });
 
 describe("DraftEditor", () => {
@@ -326,6 +372,201 @@ describe("DraftEditor", () => {
     const cleanEvent = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(cleanEvent);
     expect(cleanEvent.defaultPrevented).toBe(false);
+  });
+
+  it("lists versions newest-first and loads a selected historical version", async () => {
+    const fetchMock = mockFetch(
+      { body: project }, { body: draft }, { body: { versions: [version1, version3] } },
+      { body: detail(version3, "셋째 원고") },
+      { body: detail(version1, "첫 원고") },
+    );
+
+    renderEditor();
+    expect(await screen.findByLabelText("원고 본문")).toHaveValue("셋째 원고");
+    const history = screen.getByRole("list", { name: "버전 기록" });
+    expect(within(history).getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "version 3",
+      "version 1",
+    ]);
+    expect(screen.getByRole("button", { name: "version 3" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "version 1" }));
+
+    expect(await screen.findByLabelText("원고 본문")).toHaveValue("첫 원고");
+    expect(screen.getByText("현재 version 1")).toBeInTheDocument();
+    expect(fetchMock.mock.calls[4][0]).toBe("/api/projects/p1/drafts/d1/versions/v1");
+  });
+
+  it("cancels a dirty version switch, then discards only after confirmation", async () => {
+    const confirm = vi.spyOn(window, "confirm")
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    const fetchMock = mockFetch(
+      { body: project }, { body: draft }, { body: { versions: [version1, version3] } },
+      { body: detail(version3, "셋째 원고") },
+      { body: detail(version1, "첫 원고") },
+    );
+
+    renderEditor();
+    const editor = await screen.findByLabelText("원고 본문");
+    await userEvent.type(editor, " 수정");
+    await userEvent.click(screen.getByRole("button", { name: "version 1" }));
+
+    expect(editor).toHaveValue("셋째 원고 수정");
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(confirm).toHaveBeenCalledTimes(1);
+
+    await userEvent.click(screen.getByRole("button", { name: "version 1" }));
+    expect(await screen.findByLabelText("원고 본문")).toHaveValue("첫 원고");
+    expect(confirm).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves the current text when a confirmed version load fails", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    mockFetch(
+      { body: project }, { body: draft }, { body: { versions: [version1, version3] } },
+      { body: detail(version3, "셋째 원고") },
+      { status: 404, body: { detail: "version not found" } },
+    );
+
+    renderEditor();
+    const editor = await screen.findByLabelText("원고 본문");
+    await userEvent.type(editor, " 수정");
+    await userEvent.click(screen.getByRole("button", { name: "version 1" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("404: version not found");
+    expect(editor).toHaveValue("셋째 원고 수정");
+    expect(screen.getByRole("button", { name: "version 3" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+  });
+
+  it("locks editing only while a version selection is in flight", async () => {
+    let releaseSelection!: (value: unknown) => void;
+    const pendingSelection = new Promise((resolve) => { releaseSelection = resolve; });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ body: project }))
+      .mockResolvedValueOnce(response({ body: draft }))
+      .mockResolvedValueOnce(response({ body: { versions: [version1, version3] } }))
+      .mockResolvedValueOnce(response({ body: detail(version3, "셋째 원고") }))
+      .mockReturnValueOnce(pendingSelection);
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderEditor();
+    const editor = await screen.findByLabelText("원고 본문");
+    await userEvent.click(screen.getByRole("button", { name: "version 1" }));
+
+    await waitFor(() => expect(editor).toHaveAttribute("aria-busy", "true"));
+    expect(editor).toHaveAttribute("readonly");
+    expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "version 1" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "version 3" })).toBeDisabled();
+
+    releaseSelection(response({ body: detail(version1, "첫 원고") }));
+
+    expect(await screen.findByLabelText("원고 본문")).toHaveValue("첫 원고");
+    await waitFor(() => expect(editor).not.toHaveAttribute("readonly"));
+    expect(editor).toHaveAttribute("aria-busy", "false");
+    expect(screen.getByRole("button", { name: "version 1" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "version 3" })).toBeEnabled();
+  });
+
+  it("selects a newly saved version without mutating historical versions", async () => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "intent-4") });
+    mockFetch(
+      { body: project }, { body: draft }, { body: { versions: [version1, version3] } },
+      { body: detail(version3, "셋째 원고") },
+      { body: detail(version1, "첫 원고") },
+      {
+        body: {
+          draft_version: { id: "v4", version_number: 4, snapshot_id: "s4" },
+          snapshot: { id: "s4", content_hash: "hash-4" }, blocks: [],
+          idempotent_replay: false,
+        },
+      },
+    );
+
+    renderEditor();
+    await userEvent.click(await screen.findByRole("button", { name: "version 1" }));
+    await userEvent.type(screen.getByLabelText("원고 본문"), "에서 이어쓰기");
+    await userEvent.click(screen.getByRole("button", { name: "저장" }));
+
+    expect(await screen.findByText("version 4 저장됨")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "version 4" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "version 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "version 3" })).toBeInTheDocument();
+  });
+
+  it.each([
+    [
+      "TXT 내보내기",
+      "txt",
+      "d1-v3.txt",
+      "text/plain; charset=utf-8",
+      "원문 그대로",
+    ],
+    [
+      "Markdown 내보내기",
+      "markdown",
+      "d1-v3.md",
+      "text/markdown; charset=utf-8",
+      "# 원문 그대로",
+    ],
+  ])("downloads the selected version through %s", async (
+    buttonName,
+    format,
+    filename,
+    contentType,
+    body,
+  ) => {
+    const download = mockBlobDownload();
+    const fetchMock = mockFetch(
+      { body: project }, { body: draft }, { body: { versions: [version3] } },
+      { body: detail(version3, body) },
+      {
+        body: {
+          format, filename, content_type: contentType, body,
+          project_id: "p1", draft_id: "d1", version_id: "v3",
+          version_number: 3, snapshot_id: "s3", content_hash: "hash-3",
+        },
+      },
+    );
+
+    renderEditor();
+    await userEvent.click(await screen.findByRole("button", { name: buttonName }));
+
+    expect(fetchMock.mock.calls[4][0]).toBe(
+      `/api/projects/p1/drafts/d1/versions/v3/export?format=${format}`,
+    );
+    const blob = download.createObjectURL.mock.calls[0][0];
+    expect(blob.type).toBe(contentType);
+    expect(await readBlob(blob)).toBe(body);
+    expect(download.click).toHaveBeenCalledTimes(1);
+    expect(download.clickedAnchors[0].download).toBe(filename);
+    expect(download.revokeObjectURL).toHaveBeenCalledWith("blob:download");
+  });
+
+  it("surfaces export failure without changing the selected text", async () => {
+    const download = mockBlobDownload();
+    mockFetch(
+      { body: project }, { body: draft }, { body: { versions: [version3] } },
+      { body: detail(version3, "셋째 원고") },
+      { status: 404, body: { detail: "version not found" } },
+    );
+
+    renderEditor();
+    await userEvent.click(await screen.findByRole("button", { name: "TXT 내보내기" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("404: version not found");
+    expect(screen.getByLabelText("원고 본문")).toHaveValue("셋째 원고");
+    expect(download.createObjectURL).not.toHaveBeenCalled();
   });
 
   it("keeps archived drafts readable and turns a save 409 into read-only", async () => {

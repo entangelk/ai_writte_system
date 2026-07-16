@@ -2,9 +2,9 @@
 
 상태: `Resolved — D1=A · D2=A · D3=A, owner confirmed 2026-07-16`
 
-관련 정본: `docs/system-contract-sot.md` v1.6.98, `frontend-kickoff-decisions.md` D3=A, `frontend-project-navigation-decisions.md` follow-up, `product-shell.md`, HANDOFF Next Tasks
+관련 정본: `docs/system-contract-sot.md` v1.6.99, `frontend-kickoff-decisions.md` D3=A, `frontend-project-navigation-decisions.md` follow-up, `product-shell.md`, HANDOFF Next Tasks
 
-구현 진행: **A1 완료(v1.6.98)** — draft deep link·latest/empty load·평문 textarea·명시적 save intent·archive/409 read-only를 구현했다. **A2(version history selection·dirty 전환 확인·txt/Markdown export)는 다음 slice**다.
+구현 진행: **A1 완료(v1.6.98) + A2 완료(v1.6.99), Product shell A 종료** — draft deep link·latest/empty editor·명시적 save intent·archive/409 read-only에 이어 version history 선택·dirty 전환 확인·선택 version txt/Markdown export를 구현했다. D2=B query는 dogfood 요구가 생길 때 additive 후속이다.
 
 ## Decision needed
 

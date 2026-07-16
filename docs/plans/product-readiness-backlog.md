@@ -44,6 +44,8 @@
 
 ## 고정 순서와 체크포인트
 
+2026-07-16 A 체크포인트: editor/save/history/export 구현과 프론트 회귀를 완료했다. backend route/request/response model을 수정하지 않은 순수 프론트 조립이므로 **ARCH-1은 Waiting 유지(미발화)**하며 다음은 C(Writing generate·Gate·accept)다.
+
 ```text
 현재
   → A: 원고·에디터·저장·version·export

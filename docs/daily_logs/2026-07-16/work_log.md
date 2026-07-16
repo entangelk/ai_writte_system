@@ -416,3 +416,89 @@ D2=B(별도 서비스)는 D2=A가 공짜로 주던 단일 origin을 잃는다. �
 - `cd frontend && npm run build` → PASS, **90 modules**, CSS 5.62 kB(gzip 1.79), JS 238.17 kB(gzip 76.18).
 - `cd frontend && npm run gen:api` → PASS, 생성 `schema.d.ts` diff 없음.
 - backend 범위 diff 0, `git diff --check` PASS.
+
+---
+
+## Task 10 — Frontend editor/save A2 독립 검증 hardening closure
+
+### Goals
+
+- 독립 검증 PASS 기록의 비차단 H1~H5를 확인하고 회귀 가치가 있는 보강을 반영한다.
+- A2 전체 변경을 다시 검증해 한 커밋으로 닫는다.
+
+### Completed work
+
+- **H1 반영**: txt/Markdown export fixture를 실제 backend 공급 계약과 같은 `d1-v3.txt`/`d1-v3.md`, `text/plain; charset=utf-8`/`text/markdown; charset=utf-8`로 정렬했다. MIME 파라미터를 잘라내는 회귀가 이제 실패한다.
+- **H2 반영**: version detail 요청을 보류한 상태에서 textarea `readOnly`·`aria-busy=true`, Save/history 버튼 disabled를 확인하고, 응답 뒤 잠금이 해제되는 양방향 회귀를 추가했다.
+- **H3 반영**: 지역 상수 `version4.version_number` 자체를 검사하던 무의미 단언을 제거했다. UI notice와 `aria-current`가 실제 계약을 계속 잠근다.
+- **H4 반영**: SoT v1.6.99 surface 목록에 `frontend/src/api/client.ts`와 `frontend/src/styles.css`를 추가했다.
+- 검증 기록에 post-verification disposition을 추가해 원 PASS 판정을 보존하면서 H1~H4 closure와 H5 유지 이유를 구분했다.
+
+### Issues found
+
+- H1의 기존 fixture는 pass-through 일반성은 검증했지만 실제 backend의 charset 포함 MIME을 grounding하지 않아 `.split(";")[0]` 같은 훼손을 잡지 못했다.
+- H2 guard는 프로덕션에 있었지만 전용 회귀가 없어 A1 B1과 동형인 비동기 입력 손실 방어가 제거돼도 suite가 green일 수 있었다.
+
+### Decisions
+
+- **H1~H4 반영**.
+- **H5 코드 무변**: export와 selection은 각각 호출 시점의 selected version id를 캡처하며 현재 교차 동작은 안전하다. 두 작업을 서로 disable하면 계약 근거 없이 사용 가능한 동작을 줄이므로 실제 문제가 관측될 때만 재검토한다.
+- 새 owner-level 계약 결정은 없으며 SoT 버전은 v1.6.99를 유지한다.
+
+### Next steps
+
+- C Writing 작업공간 착수 브리프로 이동한다.
+- live browser 다운로드 smoke는 프론트 스택을 실제 구동하는 dogfood 시점에 확인한다.
+
+### Verification
+
+- `cd frontend && npx vitest run src/drafts/DraftEditor.test.tsx --reporter=dot` → **24 passed / 1 file**.
+- `cd frontend && npm test -- --reporter=dot` → **47 passed / 4 files**.
+- `cd frontend && npm run build` → PASS, **90 modules**, CSS 6.74 kB(gzip 2.00), JS 240.55 kB(gzip 76.88).
+- `cd frontend && npm run gen:api` → PASS, 생성 `schema.d.ts` diff 없음.
+- backend 범위 diff 0, `git diff --check` PASS.
+
+---
+
+## Task 9 — Frontend editor/save A2: version history·dirty 확인·export
+
+### Goals
+
+- 기존 브리프의 A2 범위대로 version 목록/선택, dirty 전환 확인, 선택 version txt/Markdown export를 구현해 Product shell A를 닫는다.
+- export body·filename·content-type과 과거 version append-only save를 공개 UI 회귀로 잠근다.
+- A 종료 체크포인트에서 ARCH-1 trigger를 판정한다.
+
+### Completed work
+
+- `DraftEditor`가 초기 version list를 state로 보존하고 최신순 history를 렌더한다. 선택 version은 `aria-current`로 표시하며 route/query를 바꾸지 않는다(D2=A 유지).
+- version 선택은 동일 선택·save/selection in-flight를 차단한다. dirty면 최소 `window.confirm`을 사용해 취소 시 fetch와 state를 전혀 바꾸지 않고, 확인 후 detail 조회가 성공할 때만 본문·baseline·selected version을 함께 교체한다. 404 등 실패는 현재 편집값과 선택을 보존한다.
+- selection fetch 동안 textarea를 read-only로 두고 save/history 버튼을 비활성화해 비동기 응답이 새 입력을 덮는 경쟁을 막았다.
+- 과거 version을 편집해 Save하면 save 응답으로 새 `DraftVersion` meta를 구성해 history에 추가·선택하고 기존 version은 그대로 유지한다. replay id는 중복 추가하지 않는다.
+- `exportDraftVersion` 생성 타입 client를 추가했다. 선택 version의 export envelope으로 `Blob([body], {type: content_type})`을 만들고 서버 filename을 anchor download에 그대로 사용한 뒤 object URL을 해제한다.
+- A2 회귀 7개를 red-first로 추가했다: 최신순/선택, dirty 취소→확인, selection 404 보존, 과거 version→새 latest, txt/Markdown URL·body·MIME·filename, export 404 무다운로드.
+- SoT를 v1.6.99로 올리고 editor 브리프·Product shell·readiness backlog·CHANGELOG·HANDOFF를 A 완료/다음 C로 동기화했다.
+
+### Issues found
+
+- version detail을 확인 즉시 화면에 적용하면 조회 중 추가 입력을 덮을 수 있어 A1 B1과 같은 race가 재발한다. selection 동안만 textarea를 read-only로 두고 성공 시 원자 교체해 막았다.
+- jsdom `Blob`에는 `text()`가 없어 export body 회귀는 `FileReader.readAsText`로 검증했다. 브라우저 프로덕션 코드는 표준 Blob/ObjectURL 경로를 그대로 사용한다.
+- 종료 smoke 시 compose에는 worker만 실행 중이었다. 새 스택 기동은 이번 프론트 조립 검증에 필요하지 않아 live browser smoke를 임의 실행하지 않고 unit/build/OpenAPI 증거로 대체했다.
+
+### Decisions
+
+- 새 오너 결정은 없다. D2=A component state, D3=A A1→A2, plain text+Markdown export 계약에서 구현이 하나로 도출됐다.
+- dirty 확인은 새 modal 체계를 만들지 않고 되돌리기 쉬운 `window.confirm` 최소 UI를 사용한다.
+- **ARCH-1 미발화**: A 전체가 backend route/request/response model을 수정하지 않은 프론트 조립이므로 Waiting을 유지한다.
+
+### Next steps
+
+- C Writing 작업공간 착수 브리프에서 첫 generate→Gate→accept 흐름과 Writing partial-failure envelope 처리 방식을 확정한다.
+
+### Verification
+
+- red-first: A2 UI 부재 상태에서 focused **7 failed / 16 passed**.
+- 구현 후 `cd frontend && npx vitest run src/drafts/DraftEditor.test.tsx` → **23 passed / 1 file**.
+- `cd frontend && npm test -- --reporter=dot` → **46 passed / 4 files**.
+- `cd frontend && npm run build` → PASS, **90 modules**, CSS 6.74 kB(gzip 2.00), JS 240.55 kB(gzip 76.88).
+- `cd frontend && npm run gen:api` → PASS, 생성 `schema.d.ts` diff 없음.
+- backend 범위 diff 0, `git diff --check` PASS.

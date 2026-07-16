@@ -54,6 +54,7 @@ export type DraftListResponse = components["schemas"]["DraftListResponse"];
 export type DraftVersion = components["schemas"]["DraftVersionMetaPayload"];
 export type DraftVersionListResponse = components["schemas"]["DraftVersionListResponse"];
 export type DraftVersionDetail = components["schemas"]["DraftVersionDetailResponse"];
+export type DraftVersionExport = components["schemas"]["DraftVersionExportResponse"];
 export type SaveDraftRequest = components["schemas"]["SaveDraftRequest"];
 export type SaveDraftResponse = components["schemas"]["SaveDraftResponse"];
 
@@ -113,6 +114,17 @@ export function saveDraft(
     method: "POST",
     body: JSON.stringify(body),
   });
+}
+
+export function exportDraftVersion(
+  projectId: string,
+  draftId: string,
+  versionId: string,
+  format: "txt" | "markdown",
+): Promise<DraftVersionExport> {
+  return request(
+    `/projects/${projectId}/drafts/${draftId}/versions/${versionId}/export?format=${format}`,
+  );
 }
 
 export function describeApiError(err: unknown): string {
