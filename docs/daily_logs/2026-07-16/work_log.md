@@ -287,3 +287,45 @@ D2=B(별도 서비스)는 D2=A가 공짜로 주던 단일 origin을 잃는다. �
 - 가드 복원 후 `cd frontend && npm test` → **22 passed / 3 files**.
 - `npm run build` → PASS, 89 modules, CSS 4.53 kB(gzip 1.62), JS 234.46 kB(gzip 75.18).
 - `npm run gen:api` → PASS, `schema.d.ts` diff 없음. backend 범위 diff 0, `git diff --check` clean.
+
+---
+
+## Task 6 — Frontend editor/save 착수 결정 브리프
+
+### Goals
+
+- 다음 Product shell A1을 구현하기 전에 브라우저 `idempotency_key` 수명과 version 선택 route 경계를 표면화한다.
+- 사용자가 요청한 작은 slice 원칙에 맞춰 editor/save와 history/export의 구현 경계를 결정 가능한 형태로 제시한다.
+
+### Completed work
+
+- SoT v1.6.96·Core SOT service·HTTP response model·생성 schema·회귀를 대조했다. backend는 editor에 필요한 draft get, version list/detail/save/export typed endpoint를 이미 제공한다.
+- 같은 key로 다른 `raw_text`를 재시도하면 새 본문이 아니라 최초 version을 replay하는 load-bearing 동작을 확인했다. 따라서 key 수명은 단순 UI 구현 세부가 아니라 본문 보존에 영향을 주는 genuine owner fork다.
+- `docs/plans/frontend-editor-save-decisions.md`를 작성했다:
+  - D1: intent별 UUID+exact payload 결박 / 매 시도 새 UUID / sessionStorage journal / content-hash key.
+  - D2: draft route+component state / query / nested version route / version route 필수.
+  - D3: A1 editor/save→A2 history/export / 단일 slice / 3단 분리.
+- 추천 조합은 **D1=A · D2=A · D3=A**다. plans 인덱스와 HANDOFF Owner Decisions/Next Tasks에 연결했다.
+
+### Issues found
+
+- `idempotency_key`는 read surface에 노출되지 않으므로 새로고침 뒤 서버에서 기존 intent를 조회해 복구할 방법이 없다. 첫 slice에서 이를 완전히 해결하려면 sessionStorage journal이라는 새 상태 계약이 필요하다.
+- 같은 key에 mutated body를 보내도 서버가 오류를 내지 않고 최초 snapshot을 정상 replay한다. 프론트가 key와 exact body를 함께 보존하지 않으면 성공 응답처럼 보이는 본문 유실이 가능하다.
+
+### Decisions
+
+- **오너 확정: D1=A · D2=A · D3=A.** D1은 저장 intent별 UUID+exact `rawText` 결박, D2는 draft route 고정+version component state, D3는 A1 editor/save→A2 history/export 분리다.
+- 오너는 D2에서 B(query parameter)의 과거 version 공유·새로고침 복원 가치 때문에 A와 고민했지만, B는 현재 기본 집필 루프가 아니라 **추가 기능격**이라고 판단해 A를 우선 확정했다. B는 dogfood에서 공유/복원 요구가 나타날 때 additive 후속으로 유지한다.
+- autosave·offline journal·rich editor는 이번 결정에 끼워 넣지 않고 명시적으로 Deferred했다. backend/Core SOT 계약은 바꾸지 않는다.
+- 결정-only SoT를 v1.6.97로 올리고 브리프·plans 인덱스·CHANGELOG·HANDOFF를 동기화했다.
+
+### Next steps
+
+- A1 code slice에서 계약 boundary 회귀를 먼저 작성한 뒤 draft link·latest/empty editor·명시적 save·archive read-only를 구현한다.
+- A1 완료 후 독립 slice A2에서 history selection·dirty confirmation·txt/Markdown export를 구현한다.
+
+### Verification
+
+- 브리프 작성 시 문서 링크·관련 파일명·당시 SoT v1.6.96·HANDOFF precedence를 확인했다.
+- 확정 후 현재 SoT v1.6.97·브리프 Resolved 상태·HANDOFF owner-decision 제거를 확인했다.
+- docs 경로·plans 인덱스·CHANGELOG 링크가 모두 존재하고 `git diff --check`가 clean임을 확인했다.
