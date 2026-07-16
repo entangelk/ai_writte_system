@@ -39,6 +39,7 @@
 29. [`05-writing-stable-context-pointer-decisions.md`](05-writing-stable-context-pointer-decisions.md) — candidate claim full schema의 stable `related_context_pointers` identity·모델 노출/검증·필수성을 잠근 결정 브리프(Resolved: D1=A·D2=A·D3=A; 기존 self-report D2=A first→B의 B 확장 승인)
 30. [`frontend-kickoff-decisions.md`](frontend-kickoff-decisions.md) — 프론트엔드 착수의 framework/toolchain·서빙 경계·첫 슬라이스 범위 결정 브리프(Resolved: D1=A React+TS+Vite · D2=B 별도 nginx compose 서비스 · D3=A Product shell 척추 우선; v1.1부터의 "frontend framework 보류" 해소)
 31. [`frontend-api-contract-decisions.md`](frontend-api-contract-decisions.md) — 백엔드 공개 계약 조이기(H1 응답 모델 · H2 이름 입력 검증)의 범위·방식·검증 위치 결정 브리프(Resolved: D1=A 척추 14 endpoint · D2=A `response_model=` 파라미터 · D3=A HTTP 경계 422; `JSONResponse` 2개는 구조적 예외로 Deferred)
+32. [`product-readiness-backlog.md`](product-readiness-backlog.md) — 프론트 핵심 루프를 우선 완성하면서 `main.py` 점진 분리·Lite/Full·dogfood 품질 지표·문서 절차·저장소 이름·라이선스를 **각 착수 트리거가 왔을 때 하나씩 닫는 횡단 개선 백로그**(새 Phase/public contract 아님)
 
 ## 문서 지위와 우선순위
 

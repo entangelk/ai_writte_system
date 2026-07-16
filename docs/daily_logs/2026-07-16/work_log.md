@@ -156,3 +156,43 @@ D2=B(별도 서비스)는 D2=A가 공짜로 주던 단일 origin을 잃는다. �
 - **~~오너 결정 대기(H1/H2)~~ → 같은 날 확정·구현 완료**(SoT v1.6.95, D1=A/D2=A/D3=A). 남은 후속: (1) **나머지 34 endpoint 응답 모델**은 해당 UI 슬라이스에서(D1=A 계약), (2) **`/writing/revise-and-gate`·`/writing/accept`의 partial-failure envelope** — 성공 경로는 dict라 `response_model`을 붙일 수 있으나 `JSONResponse`로 나가는 partial 응답은 구조적으로 안 덮이므로 Writing 작업공간 슬라이스에서 별도 결정(성공 경로만 모델+에러는 `responses={}` 문서화 vs 손선언 유지), (3) `raw_text`·`idempotency_key` 제약은 에디터 슬라이스에서 실제 필요가 보일 때.
 - **422 detail 표시**: D3=A가 422를 도입했다. 프론트 `ApiError`는 status+detail을 보존하지만 422 detail은 FastAPI validation error 구조(배열)라 현재 `readDetail`이 `JSON.stringify`로 떨어뜨린다. 지금은 프론트가 trim+disable로 막아 사용자가 볼 일이 없지만, 사용자에게 보일 문구가 필요해지면 그때 매핑한다(브리프 follow-up).
 - **autosave**는 에디터 슬라이스에서 사용자가 가장 먼저 기대할 기능이지만 "저장=version mint" 계약 변경 위험이 있어 여전히 별도 오너 결정이다(브리프 follow-up).
+
+---
+
+## Task 3 — 제품화 준비 트리거 기반 개선 백로그
+
+### Goals
+
+- 전체 리팩터링·운영 경량화·품질 측정·공개 준비를 지금 한꺼번에 수행하지 않고, 각 항목을 **실제 착수 시점과 종료 조건**으로 관리한다.
+- 현재 제품 우선순위인 A→C→B 프론트 기본 루프를 보호하고 Phase 7의 진입 조건을 명시한다.
+- 새 계획을 plans 인덱스·HANDOFF·CHANGELOG에 연결해 다음 작업자가 트리거를 놓치거나 Waiting 항목을 선행 구현하지 않게 한다.
+
+### Completed work
+
+- `docs/plans/product-readiness-backlog.md` 신설:
+  - 문서 성격을 새 Phase/public contract가 아닌 **횡단 리스크·개선 백로그**로 고정했다.
+  - `UX-1`, `ARCH-1`, `OPS-1`, `QUAL-1`, `PROC-1`, `REPO-1`, `LEGAL-1`, `GATE-1` 각각에 상태·착수 트리거·그때 할 일·종료 조건·다음 점검 시점을 부여했다.
+  - 현재는 UX-1만 `In progress`, 문서 계층화 PROC-1은 `Standing`, 나머지는 트리거 전 `Waiting`으로 뒀다.
+  - A 종료→ARCH 점검, C 종료→ARCH+OPS 점검, dogfood 1/2주→QUAL 점검, B+dogfood 종료→Phase 7 게이트라는 체크포인트를 고정했다.
+- `docs/plans/README.md`: 읽기 순서에 backlog를 추가하고 SoT보다 아래인 보조 계획의 역할을 명시했다.
+- `docs/plans/07-conversational-authoring.md`·`frontend-kickoff-decisions.md`: 종전의 넓은 “프론트 이후 Phase 7” 순서에 후속 `GATE-1`을 연결해 새 진입 조건이 선택적으로 보이지 않게 했다.
+- `HANDOFF.md`: Current Status와 Next Tasks에 활성 상태·점검 시점을 연결했다. 다음 작업 자체는 원고 목록→에디터로 유지했다.
+- `CHANGELOG.md`: 오너의 관리 방식 결정과 이유, 새 backlog 링크를 문서 전용 변경으로 기록했다. SoT/public contract/code는 변경하지 않았다.
+
+### Issues found
+
+- 처음 표현 후보였던 “별도 Phase”는 이 항목들의 성격과 맞지 않았다. Phase는 순차 기능 개발로 읽히지만 `main.py` 분리·Lite/Full·라이선스는 서로 다른 사건에서 발화하는 횡단 과제다.
+- 해결: **트리거 기반 개선 백로그**로 이름을 고정하고, 트리거 전 구현 금지와 완료 증거 갱신 규칙을 함께 뒀다.
+
+### Decisions
+
+- **사용자 결정과 이유**: 오너는 우려 항목 전체를 지금 한 번에 처리하지 않고, 적절한 시기가 올 때마다 체크해 하나씩 제거하는 방식을 선택했다. 목적은 개선점을 잊지 않으면서도 현재 프론트 핵심 루프를 중단하지 않는 것이다.
+- **새 Phase로 만들지 않음**: 기능 의존 순서가 아니라 사건 기반 착수 조건을 가진 항목들이므로 backlog가 더 정확하다.
+- **Phase 7 기본 진입 게이트**: UX-1 기본 루프와 QUAL-1 2주 dogfood 검토를 완료한 뒤 첫 Phase 7 slice를 고른다. 새 근거로 오너가 우선순위를 바꾸면 해당 결정을 기록하고 갱신할 수 있다.
+- **선행 구현 금지**: 이번 task는 문서화만 수행한다. `main.py`, Compose, telemetry, repository name, LICENSE는 변경하지 않는다.
+
+### Next steps
+
+- 즉시 다음 작업은 변함없이 A의 나머지인 원고 목록→에디터다.
+- A slice 종료 시 backlog의 `ARCH-1` 트리거를 확인하되, 백엔드 변경이 없으면 Waiting을 유지한다.
+- C Writing UI 종료 시 `OPS-1`을 Ready로 올릴지 확인하고 2주 dogfood 실행 경로를 준비한다.

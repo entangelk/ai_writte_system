@@ -3,6 +3,7 @@
 상태: `Draft` (계획) — 구현 착수 전 슬라이스별 착수 브리프(`plans/07-*-decisions.md`)로 세부 확정.
 아이디에이션 원본: [`../chat-revision-ideation.md`](../chat-revision-ideation.md)(근거·논의 이력).
 의존: Phase 5(글 생성 + Writing Gate), Phase 6(후보 검토/큐레이션 — directive 감독면 **공동 설계**), Core SOT(draft/version·raw-offset·source_ref 앵커), ⑤ ContextPackage(검색 컨텍스트 재사용), Phase 2B(memory·scope key).
+착수 게이트: [`product-readiness-backlog.md`](product-readiness-backlog.md) `GATE-1` — 프론트 기본 루프 `UX-1`과 실제 원고 2주 검토 `QUAL-1` 뒤, 재현된 문제와 P1~P5를 대조해 첫 slice를 고른다(오너가 새 근거로 우선순위를 명시 변경할 수 있음).
 
 ---
 

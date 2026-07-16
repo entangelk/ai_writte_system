@@ -27,7 +27,7 @@
 - **Review Inbox는 프론트를 위해 이미 설계됨**: v1.6.67 액션 어포던스가 list/detail·conflict·gate finding payload에 `{action, eligible, reason}`을 실어 "프론트가 한 계약으로 구동"하도록 만들어져 있다. `reason`은 display text, machine contract는 `action`+`eligible`.
 - **Writing 흐름은 서버 오케스트레이션**: `/writing/generate`(context_search→generate), `/writing/revise-and-gate`(bounded loop), `/writing/accept`. 프론트는 상태 기계를 재구현하지 않고 결과를 표시한다.
 - **Core SOT 계약**: 명시적 version save only(autosave 후속), draft save는 `idempotency_key` 필수, archive=읽기 허용+쓰기 409. 에디터는 이 계약을 그대로 따른다(자동 저장 도입은 별도 결정).
-- Phase 7(대화형 수정·아이디에이션·저작 감독)은 계획·D1~D10 확정 상태이나 **순차상 프론트 이후**이며 슬라이스별 착수 브리프는 구현 시점에 만든다.
+- Phase 7(대화형 수정·아이디에이션·저작 감독)은 계획·D1~D10 확정 상태이나 **순차상 프론트 이후**다. 후속 오너 결정으로 `product-readiness-backlog.md` `GATE-1`이 추가돼, A→C→B 기본 루프와 실제 원고 dogfood 검토 뒤 첫 slice를 고르고 슬라이스별 착수 브리프를 만든다.
 
 ## D1 — framework / toolchain
 
@@ -87,4 +87,4 @@
 - 관계 graph visualization, 완전한 timeline 편집기, bulk review, style/voice 콘솔(`06-review-ui.md` 후속 범위)
 - 리치 텍스트 에디터, 오프라인/PWA, 모바일 레이아웃
 - 프론트 배포 파이프라인·CDN, 다중 사용자 동시 편집
-- Phase 7 구현(순차상 프론트 이후, 슬라이스별 브리프 별도)
+- Phase 7 구현(순차상 프론트 이후 + `product-readiness-backlog.md` `GATE-1`, 슬라이스별 브리프 별도)
