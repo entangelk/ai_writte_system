@@ -490,6 +490,51 @@ class WritingGenerateApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 502)
 
 
+class WritingGenerateEnvelopeKeyTest(unittest.TestCase):
+    """C0 exact-key safety net for the generate envelope (SoT v1.7.1, D3=A).
+
+    ``response_model`` silently DROPS any field a model does not declare, so a
+    model narrower than ``_writing_candidate_payload`` would delete fields from
+    the public envelope with no error. These assertions pin the COMPLETE key set
+    of the candidate payload and every nested object BEFORE the model is applied,
+    so a too-narrow ``WritingCandidatePayload`` bites here rather than shipping a
+    silently-narrowed response. Runs both directions: a too-wide model would also
+    fail behavioural tests (extra key never emitted).
+    """
+
+    def test_candidate_envelope_keys_are_complete(self):
+        # A fully-populated candidate (claims/hints/risks/pointers) so every
+        # nested key set is exercised, not just the empty top level.
+        client, project_id, _ = _http(
+            _FakeProvider(content="이어진 장면."),
+            package=_package(),
+            reporter=_FakeReporter(),
+        )
+        body = client.post(
+            f"/projects/{project_id}/writing/generate",
+            json={"request_id": "wr1", "instruction": "이어서 써줘."},
+        ).json()
+        self.assertEqual(set(body), {
+            "request_id", "project_id", "task_type", "output_type", "text",
+            "status", "self_reported_constraints", "candidate_claims",
+            "new_memory_hints", "risk_notes", "candidate_id",
+            "generated_by_model",
+        })
+        self.assertEqual(set(body["candidate_claims"][0]), {
+            "text", "type", "requires_gate_check", "related_context_pointers",
+        })
+        self.assertEqual(
+            set(body["candidate_claims"][0]["related_context_pointers"][0]),
+            {"collection", "document_id", "version_id", "content_hash"},
+        )
+        self.assertEqual(set(body["new_memory_hints"][0]), {
+            "type", "text", "confidence", "should_analyze_after_save",
+        })
+        self.assertEqual(
+            set(body["risk_notes"][0]), {"type", "severity", "message"},
+        )
+
+
 class WritingReportApiTest(unittest.TestCase):
     def _post(self, client, project_id, **overrides):
         payload = {

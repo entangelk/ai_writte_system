@@ -126,6 +126,14 @@ from services.application.app.writing.loop_audit import (
     WritingLoopAuditNotFound,
     WritingLoopAuditService,
 )
+from services.application.app.writing.http_models import (
+    ACCEPT_RESPONSES,
+    REVISE_AND_GATE_RESPONSES,
+    WritingAcceptResponse,
+    WritingCandidatePayload,
+    WritingGatePayload,
+    WritingReviseGateResponse,
+)
 from services.application.app.analysis.source import CoreSotSourceAdapter
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
 from services.llm_gateway.app.provider import LLMProvider
@@ -2598,7 +2606,8 @@ def create_app(
             "content_hash": saved.snapshot.content_hash,
         }
 
-    @app.post("/projects/{project_id}/writing/generate")
+    @app.post("/projects/{project_id}/writing/generate",
+              response_model=WritingCandidatePayload)
     async def writing_generate_endpoint(
         project_id: str, body: WritingGenerateRequest
     ) -> dict[str, object]:
@@ -2667,7 +2676,8 @@ def create_app(
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         return _writing_candidate_payload(candidate)
 
-    @app.post("/projects/{project_id}/writing/gate")
+    @app.post("/projects/{project_id}/writing/gate",
+              response_model=WritingGatePayload)
     async def writing_gate_endpoint(
         project_id: str, body: WritingGateRequest
     ) -> dict[str, object]:
@@ -2878,7 +2888,9 @@ def create_app(
             raise HTTPException(status_code=status, detail=str(exc)) from exc
         return _writing_candidate_payload(revised)
 
-    @app.post("/projects/{project_id}/writing/revise-and-gate")
+    @app.post("/projects/{project_id}/writing/revise-and-gate",
+              response_model=WritingReviseGateResponse,
+              responses=REVISE_AND_GATE_RESPONSES)
     async def writing_revise_and_gate_endpoint(
         project_id: str, body: WritingReviseRequest
     ) -> object:
@@ -3173,7 +3185,9 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return _writing_loop_audit_payload(run)
 
-    @app.post("/projects/{project_id}/writing/accept")
+    @app.post("/projects/{project_id}/writing/accept",
+              response_model=WritingAcceptResponse,
+              responses=ACCEPT_RESPONSES)
     async def writing_accept_endpoint(
         project_id: str, body: WritingAcceptRequest
     ) -> object:

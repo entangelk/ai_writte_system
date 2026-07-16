@@ -730,6 +730,32 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AcceptedSavePayload */
+        AcceptedSavePayload: {
+            /** Content Hash */
+            content_hash: string;
+            /** Draft Version Id */
+            draft_version_id: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Version Number */
+            version_number: number;
+        };
+        /** AnalysisJobPayload */
+        AnalysisJobPayload: {
+            /** Failure Detail */
+            failure_detail: string | null;
+            /** Failure Reason */
+            failure_reason: string | null;
+            /** Id */
+            id: string;
+            /** Project Id */
+            project_id: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Status */
+            status: string;
+        };
         /** ApplyMemoryRequest */
         ApplyMemoryRequest: {
             /** Proposals */
@@ -749,6 +775,32 @@ export interface components {
          * @enum {string}
          */
         BlockKind: "heading" | "scene_marker" | "paragraph";
+        /** CandidateClaimPayload */
+        CandidateClaimPayload: {
+            /** Related Context Pointers */
+            related_context_pointers: components["schemas"]["ContextPointerPayload"][];
+            /** Requires Gate Check */
+            requires_gate_check: boolean;
+            /** Text */
+            text: string;
+            type: components["schemas"]["CandidateClaimType"];
+        };
+        /**
+         * CandidateClaimType
+         * @enum {string}
+         */
+        CandidateClaimType: "narrative_event" | "character_state" | "location_state" | "relation_change" | "timeline_fact" | "foreshadowing_use" | "factual_claim" | "interpretation";
+        /** ContextPointerPayload */
+        ContextPointerPayload: {
+            /** Collection */
+            collection: string;
+            /** Content Hash */
+            content_hash: string;
+            /** Document Id */
+            document_id: string;
+            /** Version Id */
+            version_id: string;
+        };
         /** ContextPositionBody */
         ContextPositionBody: {
             /** Draft Id */
@@ -871,11 +923,31 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** ErrorDetailResponse */
+        ErrorDetailResponse: {
+            /** Detail */
+            detail: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** MemoryHintPayload */
+        MemoryHintPayload: {
+            /** Confidence */
+            confidence: number;
+            /** Should Analyze After Save */
+            should_analyze_after_save: boolean;
+            /** Text */
+            text: string;
+            type: components["schemas"]["MemoryHintType"];
+        };
+        /**
+         * MemoryHintType
+         * @enum {string}
+         */
+        MemoryHintType: "event" | "character_fact" | "location_fact" | "relation" | "foreshadowing" | "timeline_fact" | "style_signal";
         /** ProjectListResponse */
         ProjectListResponse: {
             /** Projects */
@@ -905,6 +977,23 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** RiskNotePayload */
+        RiskNotePayload: {
+            /** Message */
+            message: string;
+            severity: components["schemas"]["RiskSeverity"];
+            type: components["schemas"]["RiskNoteType"];
+        };
+        /**
+         * RiskNoteType
+         * @enum {string}
+         */
+        RiskNoteType: "pov" | "timeline" | "canon" | "foreshadowing" | "relation" | "style" | "factuality";
+        /**
+         * RiskSeverity
+         * @enum {string}
+         */
+        RiskSeverity: "low" | "medium" | "high" | "critical";
         /** SaveDraftRequest */
         SaveDraftRequest: {
             /** Idempotency Key */
@@ -989,6 +1078,15 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /** WritingAcceptAnalysisPartial */
+        WritingAcceptAnalysisPartial: {
+            /** Accepted */
+            accepted: boolean;
+            /** Analysis Error */
+            analysis_error: string;
+            analysis_job: components["schemas"]["AnalysisJobPayload"] | null;
+            saved: components["schemas"]["AcceptedSavePayload"];
+        };
         /** WritingAcceptRequest */
         WritingAcceptRequest: {
             /** Base Version Id */
@@ -1027,6 +1125,75 @@ export interface components {
              */
             task_type: string;
         };
+        /** WritingAcceptResponse */
+        WritingAcceptResponse: {
+            /** Accepted */
+            accepted: boolean;
+            analysis_job: components["schemas"]["AnalysisJobPayload"] | null;
+            gate: components["schemas"]["WritingGatePayload"] | null;
+            /** Idempotent Replay */
+            idempotent_replay: boolean;
+            saved: components["schemas"]["AcceptedSavePayload"] | null;
+        };
+        /** WritingCandidatePayload */
+        WritingCandidatePayload: {
+            /** Candidate Claims */
+            candidate_claims: components["schemas"]["CandidateClaimPayload"][];
+            /** Candidate Id */
+            candidate_id: string | null;
+            /** Generated By Model */
+            generated_by_model: string;
+            /** New Memory Hints */
+            new_memory_hints: components["schemas"]["MemoryHintPayload"][];
+            output_type: components["schemas"]["WritingOutputType"];
+            /** Project Id */
+            project_id: string;
+            /** Request Id */
+            request_id: string;
+            /** Risk Notes */
+            risk_notes: components["schemas"]["RiskNotePayload"][];
+            /** Self Reported Constraints */
+            self_reported_constraints: string[];
+            /** Status */
+            status: string;
+            task_type: components["schemas"]["WritingTaskType"];
+            /** Text */
+            text: string;
+        };
+        /**
+         * WritingGateDecision
+         * @enum {string}
+         */
+        WritingGateDecision: "pass" | "revise" | "retrieve_more" | "needs_user_review" | "block";
+        /** WritingGateFindingPayload */
+        WritingGateFindingPayload: {
+            /** Evidence */
+            evidence: string;
+            /** Message */
+            message: string;
+            recommended_decision: components["schemas"]["WritingGateDecision"];
+            severity: components["schemas"]["WritingGateSeverity"];
+            type: components["schemas"]["WritingGateFindingType"];
+        };
+        /**
+         * WritingGateFindingType
+         * @enum {string}
+         */
+        WritingGateFindingType: "do_not_use" | "pov" | "continuity";
+        /** WritingGatePayload */
+        WritingGatePayload: {
+            /** Checked Constraints */
+            checked_constraints: string[];
+            decision: components["schemas"]["WritingGateDecision"];
+            /** Evaluated By Model */
+            evaluated_by_model: string;
+            /** Findings */
+            findings: components["schemas"]["WritingGateFindingPayload"][];
+            /** Project Id */
+            project_id: string;
+            /** Request Id */
+            request_id: string;
+        };
         /** WritingGateRequest */
         WritingGateRequest: {
             /** Candidate Text */
@@ -1054,6 +1221,11 @@ export interface components {
              */
             task_type: string;
         };
+        /**
+         * WritingGateSeverity
+         * @enum {string}
+         */
+        WritingGateSeverity: "warning" | "error";
         /** WritingGenerateRequest */
         WritingGenerateRequest: {
             current_position?: components["schemas"]["ContextPositionBody"] | null;
@@ -1079,6 +1251,36 @@ export interface components {
              */
             task_type: string;
         };
+        /** WritingLoopPayload */
+        WritingLoopPayload: {
+            /** Gate Evaluations */
+            gate_evaluations: number;
+            /** Retrieval Rounds */
+            retrieval_rounds: number;
+            /** Revision Rounds */
+            revision_rounds: number;
+            status: components["schemas"]["WritingLoopStatus"];
+        };
+        /**
+         * WritingLoopStageName
+         * @enum {string}
+         */
+        WritingLoopStageName: "revise" | "report" | "gate" | "retrieve_plan" | "context_search" | "merge";
+        /**
+         * WritingLoopStageStatus
+         * @enum {string}
+         */
+        WritingLoopStageStatus: "completed" | "failed" | "no_change";
+        /**
+         * WritingLoopStatus
+         * @enum {string}
+         */
+        WritingLoopStatus: "pass" | "terminal_decision" | "not_eligible" | "budget_exhausted" | "no_change" | "failed";
+        /**
+         * WritingOutputType
+         * @enum {string}
+         */
+        WritingOutputType: "draft_patch";
         /** WritingReportRequest */
         WritingReportRequest: {
             /** Candidate Text */
@@ -1119,6 +1321,32 @@ export interface components {
             /** Type */
             type: string;
         };
+        /** WritingReviseGatePartial */
+        WritingReviseGatePartial: {
+            audit_error: components["schemas"]["WritingStageError"] | null;
+            /** Audit Id */
+            audit_id: string | null;
+            candidate: components["schemas"]["WritingCandidatePayload"];
+            gate: components["schemas"]["WritingGatePayload"] | null;
+            gate_error?: components["schemas"]["WritingStageError"] | null;
+            loop: components["schemas"]["WritingLoopPayload"];
+            report_error?: components["schemas"]["WritingStageError"] | null;
+            retrieval_error?: components["schemas"]["WritingStageError"] | null;
+            revision_error?: components["schemas"]["WritingStageError"] | null;
+            /** Stages */
+            stages: components["schemas"]["WritingStagePayload"][];
+        };
+        /** WritingReviseGateResponse */
+        WritingReviseGateResponse: {
+            audit_error: components["schemas"]["WritingStageError"] | null;
+            /** Audit Id */
+            audit_id: string | null;
+            candidate: components["schemas"]["WritingCandidatePayload"];
+            gate: components["schemas"]["WritingGatePayload"] | null;
+            loop: components["schemas"]["WritingLoopPayload"];
+            /** Stages */
+            stages: components["schemas"]["WritingStagePayload"][];
+        };
         /** WritingReviseRequest */
         WritingReviseRequest: {
             /** Candidate Text */
@@ -1144,6 +1372,25 @@ export interface components {
              */
             task_type: string;
         };
+        /** WritingStageError */
+        WritingStageError: {
+            /** Detail */
+            detail: string;
+            /** Type */
+            type: string;
+        };
+        /** WritingStagePayload */
+        WritingStagePayload: {
+            /** Ordinal */
+            ordinal: number;
+            stage: components["schemas"]["WritingLoopStageName"];
+            status: components["schemas"]["WritingLoopStageStatus"];
+        };
+        /**
+         * WritingTaskType
+         * @enum {string}
+         */
+        WritingTaskType: "continue_scene";
     };
     responses: never;
     parameters: never;
@@ -2578,7 +2825,34 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["WritingAcceptResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2588,6 +2862,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WritingAcceptAnalysisPartial"] | components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Gateway Timeout */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -2613,9 +2914,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["WritingGatePayload"];
                 };
             };
             /** @description Validation Error */
@@ -2650,9 +2949,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["WritingCandidatePayload"];
                 };
             };
             /** @description Validation Error */
@@ -2828,7 +3125,25 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["WritingReviseGateResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WritingReviseGatePartial"] | components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2838,6 +3153,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WritingReviseGatePartial"] | components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WritingReviseGatePartial"] | components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Gateway Timeout */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WritingReviseGatePartial"] | components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };

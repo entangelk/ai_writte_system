@@ -387,3 +387,25 @@ class WritingGateApiTest(unittest.TestCase):
         client, project = self._client(with_gate=False)
         self.assertEqual(self._post(client, project).status_code, 503)
         asyncio.run(client.aclose())
+
+
+class WritingGateEnvelopeKeyTest(unittest.TestCase):
+    """C0 exact-key safety net for the gate envelope (SoT v1.7.1, D3=A).
+
+    Pins the COMPLETE key set of ``_writing_gate_payload`` and its nested
+    findings before ``response_model=WritingGatePayload`` is applied, so a
+    too-narrow model bites here instead of silently dropping a field.
+    """
+
+    def test_gate_envelope_keys_are_complete(self):
+        client, project = WritingGateApiTest()._client(_Provider(_output(
+            "revise", [_finding(recommendation="revise")])))
+        body = WritingGateApiTest()._post(client, project).json()
+        self.assertEqual(set(body), {
+            "request_id", "project_id", "decision", "findings",
+            "checked_constraints", "evaluated_by_model",
+        })
+        self.assertEqual(set(body["findings"][0]), {
+            "type", "severity", "message", "evidence", "recommended_decision",
+        })
+        asyncio.run(client.aclose())

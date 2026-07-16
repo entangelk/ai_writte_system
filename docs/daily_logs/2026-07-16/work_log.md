@@ -546,3 +546,75 @@ D2=B(별도 서비스)는 D2=A가 공짜로 주던 단일 origin을 잃는다. �
 - `cd frontend && npm run build` → PASS, **90 modules**, CSS 6.74 kB(gzip 2.00), JS 240.55 kB(gzip 76.88).
 - `cd frontend && npm run gen:api` → PASS, 생성 `schema.d.ts` diff 없음.
 - backend 범위 diff 0, `git diff --check` PASS.
+
+---
+
+## Task 12 — C0 Writing HTTP contract 구현 (SoT v1.7.1, D3=A)
+
+### Goals
+
+- v1.7.0 D3=A가 **계약만** 잠근 C0(Writing HTTP contract)를 구현한다: generate/gate/revise-and-gate/accept 4 endpoint의 응답을 OpenAPI에서 실제 타입으로 노출한다.
+- v1.6.95 "안전망 먼저" 절차를 재사용한다 — `response_model`은 미선언 필드를 조용히 삭제하므로 exact-key 회귀를 **모델보다 먼저** 깐다.
+- `ARCH-1` 첫 단계로 Writing HTTP 모델만 별도 모듈로 분리한다(전 `main.py` router 일괄 분리 금지).
+- payload 빌더(`_writing_*_payload`)와 프론트 소비 코드는 무변으로 둔다(C0는 backend + 타입 생성 slice, UI는 C1).
+
+### Completed work
+
+**안전망 먼저 — exact-key 회귀 9개 (모델 적용 전 현 dict payload에서 통과 확인)**
+
+- `tests/test_writing.py::WritingGenerateEnvelopeKeyTest` — `_FakeReporter`로 claims/hints/risks/pointers를 채운 후보의 top-level 12키 + `candidate_claims`(4)·`related_context_pointers`(4)·`new_memory_hints`(4)·`risk_notes`(3) 중첩 키를 잠근다.
+- `tests/test_writing_gate.py::WritingGateEnvelopeKeyTest` — gate envelope 6키 + `findings`(5) 중첩.
+- `tests/test_writing_accept.py::WritingAcceptEnvelopeKeyTest` — 성공(5키)+`saved`(4)·`analysis_job`(6)·`gate`(6), partial(analysis 실패 502) 4키+`saved`(4).
+- `tests/test_writing_revise.py::WritingReviseGateEnvelopeKeyTest` — 성공 6키+`loop`(4)·`stages`(3)·`candidate`(12), **4개 partial**(report_error/revision_error/retrieval_error/gate_error) 각각 공통 6키+정확히 하나의 `*_error`(2키) discriminator.
+- 착수 시점 실행: **9 passed** — 현 dict payload가 이미 이 키 집합임을 확인한 뒤 모델을 붙였다.
+
+**Writing HTTP 모델 분리 (`ARCH-1` 첫 단계)**
+
+- 신규 `services/application/app/writing/http_models.py`:
+  - 재사용 component: `ContextPointerPayload`·`CandidateClaimPayload`·`MemoryHintPayload`·`RiskNotePayload`·`WritingCandidatePayload`·`WritingGateFindingPayload`·`WritingGatePayload`·`WritingLoopPayload`·`WritingStagePayload`·`WritingStageError`(audit_error·`*_error` 공용)·`AcceptedSavePayload`·`AnalysisJobPayload`·`ErrorDetailResponse`.
+  - 성공 모델: generate→`WritingCandidatePayload`, gate→`WritingGatePayload`(직접 재사용), `WritingReviseGateResponse`, `WritingAcceptResponse`.
+  - partial 모델(문서화 전용): `WritingReviseGatePartial`(4 `*_error`를 optional union으로 표현), `WritingAcceptAnalysisPartial`.
+  - `REVISE_AND_GATE_RESPONSES`/`ACCEPT_RESPONSES` `responses={}` 맵(partial-capable status = `partial | ErrorDetailResponse` union, plain error status = detail).
+  - enum은 `writing/models.py`·`writing/revise_gate.py`에서 import해 OpenAPI가 string literal union을 낸다. **왜 str vs enum**: `status`("candidate")만 고정 마커라 `str`, 나머지 taxonomy는 실제 enum.
+
+**route 배선 (`main.py`, payload 빌더 무변)**
+
+- generate `response_model=WritingCandidatePayload`, gate `response_model=WritingGatePayload`.
+- revise-and-gate `response_model=WritingReviseGateResponse, responses=REVISE_AND_GATE_RESPONSES` — 성공 dict는 검증, 4개 partial `JSONResponse`는 통과(response_model 우회). accept 동형(`WritingAcceptResponse` + `ACCEPT_RESPONSES`).
+
+**타입 생성 + 프론트**
+
+- `npm ci`(node_modules 부재 → 195 packages 설치) 후 `npm run gen:api` → `schema.d.ts` +350줄. Writing 성공 4 endpoint가 실제 응답 타입을 갖고, partial status는 `WritingReviseGatePartial | ErrorDetailResponse`/`WritingAcceptAnalysisPartial | ErrorDetailResponse` union으로 문서화됨.
+
+### Issues found
+
+- `response_model`을 `-> object`(JSONResponse OR dict) endpoint에 붙일 때 걱정: FastAPI는 `Response` 인스턴스(JSONResponse) 반환을 그대로 통과시키고 dict 반환에만 모델을 적용한다. 따라서 성공 dict만 검증되고 partial `JSONResponse`는 우회 — 의도대로다. partial의 유일한 runtime lock은 exact-key 회귀다.
+- partial envelope은 실제로 공통 6키+**한 개**의 `*_error`만 담는데(다른 3개 error 키는 아예 없음), `WritingReviseGatePartial`은 4개를 optional로 선언한다. 이는 `JSONResponse`라 검증을 안 받는 **OpenAPI union 문서화 전용**이며, 프론트가 present discriminator로 분기하도록 하는 의도된 표현이다(runtime 키는 exact-key 회귀가 잠금).
+
+### Decisions
+
+- 새 owner-level 계약 결정은 없다. 구현은 확정된 D3=A(성공 `response_model` + partial `responses={}` + exact-key 회귀, Writing 모델 별도 모듈)를 그대로 따른다.
+- `main.py` router는 추출하지 않았다 — D3=A lock("우선 Writing HTTP 모델만 분리, route 추출은 의존성 전달이 실제로 단순해질 때") 그대로. 따라서 `ARCH-1`을 한 slice로 **Done** 종결.
+- `AnalysisJobPayload`를 writing/http_models.py에 두었다(accept의 유일 소비처). analysis 도메인이 나중에 타이핑하면 재사용하거나 자체 선언한다 — C0 범위는 Writing.
+
+### Next steps
+
+- **C1 기본 Writing 작업공간**: latest clean editor의 instruction+generate → candidate/Gate read-only panel → pass accept intent(exact body 결박) → saved detail 재조회로 baseline/history 갱신. accepted=false·502 partial save·409 stale·provider/context 실패에서 입력·candidate 보존.
+- C1은 생성된 성공/partial 타입을 소비하고 `client.ts`에 Writing 호출을 추가한다(손선언 없이).
+
+### Verification
+
+- **안전망 먼저**: 모델 적용 전 exact-key 회귀 **9 passed**(현 dict payload).
+- **모델 적용 후**: 4 Writing 스위트 **132 passed / 107 subtests**, 전체 백엔드 `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1117 passed / 48 skipped / 273 subtests**(이 환경 ES 미설치 기준선 1108 + 새 9).
+- **모델=payload 정확히 같은 너비 실증(후 복원)**: `WritingGatePayload`에서 `evaluated_by_model` 제거 → gate·accept(중첩 gate) exact-key 회귀가 **2 failed**로 bite(모델 공유 실증), 6 passed. 복원 후 전부 green.
+- **타입 생성**: `npm run gen:api` → `schema.d.ts` +350줄, Writing 성공 4 + partial union arm 5(revise-and-gate 400/502/503/504 + accept 502; discriminator error 필드는 6개) 확인.
+- **프론트**: `npm run build` → PASS, **90 modules**(소비 코드 무변). `npm test` → **47 passed / 4 files**.
+- `py_compile`(main.py+http_models.py)·`docker compose config --quiet`·`git diff --check` PASS. `frontend/openapi.json`은 gitignored(커밋 대상 아님).
+
+### 독립 검증 PASS(조건 없음) + 비차단 hardening 반영
+
+오너가 C0 독립 검증을 요청·완료했다(`docs/verifications/2026-07-16/c0_writing_http_contract.md`). **판정 합격(조건 없음), blocking 0.** 검증자가 mutation A(모델 공유 2-bite)·정량(1117/48/273·132/107·9·47/90)·`gen:api` 재생성 IDENTICAL·boundary matrix 빈 셀 없음을 전부 독립 재현했다. 비차단 hardening 3건 중 **2건 반영**:
+
+- **H2 반영(코드)** — accept partial envelope-key 테스트가 `accepted` **키 존재**만 잠그고 값은 안 잠갔다(값 true는 기존 `test_partial_failure_is_502_and_retry_converges`에 있어 cell은 채워졌으나 응집이 흩어짐). load-bearing `502 + accepted=true + saved present`를 C0 envelope 테스트 자체에 `assertTrue(body["accepted"])`+`assertIsNotNone(body["saved"])`로 옮겨 계약을 self-contained하게 만들었다.
+- **H1 반영(문서)** — "성공 4 + union 6 literal" 카운트가 오독 소지가 있었다(실제 응답-레벨 union arm은 **5개** = revise-and-gate 4 status + accept 502; "6"은 discriminator error 필드 수). work_log·SoT·CHANGELOG·브리프를 "성공 4 + union arm 5(discriminator 필드 6)"로 정정. 기능 표면은 원래부터 정확했다.
+- **H3 코드 무변** — `WritingAcceptAnalysisPartial.analysis_job`이 `AnalysisJobPayload | None`으로 runtime(항상 None)보다 넓은 건 documentation-only 모델(JSONResponse, runtime 검증 없음)의 의도된 여유로, 검증자도 "결함 아님, 조치 불필요"로 판정 → 유지(§3 surgical).

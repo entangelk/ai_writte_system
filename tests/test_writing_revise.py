@@ -1133,6 +1133,85 @@ class WritingReviseGateApiTest(unittest.TestCase):
                 self.assertEqual(gate.calls, 0)
 
 
+class WritingReviseGateEnvelopeKeyTest(unittest.TestCase):
+    """C0 exact-key safety net for the revise-and-gate envelopes (SoT v1.7.1).
+
+    The success dict is validated by ``response_model=WritingReviseGateResponse``
+    (a too-narrow model silently drops a field), while each partial envelope is a
+    ``JSONResponse`` that bypasses ``response_model`` — so the partial key sets
+    are locked HERE as their only guard. Every partial carries exactly one of the
+    four ``*_error`` discriminators; this pins each one.
+    """
+
+    _COMMON = {"candidate", "gate", "loop", "stages", "audit_id", "audit_error"}
+
+    def _post(self, client, project):
+        return WritingReviseGateApiTest()._post(client, project)
+
+    def test_success_envelope_keys_are_complete(self):
+        client, project, _ = _http(
+            _Provider(), gate_service=_Gate(WritingGateDecision.PASS),
+            report_service=_Reporter(),
+        )
+        body = self._post(client, project).json()
+        self.assertEqual(set(body), self._COMMON)
+        self.assertEqual(set(body["loop"]), {
+            "status", "revision_rounds", "retrieval_rounds", "gate_evaluations",
+        })
+        self.assertEqual(set(body["stages"][0]), {"stage", "ordinal", "status"})
+        self.assertEqual(set(body["candidate"]), {
+            "request_id", "project_id", "task_type", "output_type", "text",
+            "status", "self_reported_constraints", "candidate_claims",
+            "new_memory_hints", "risk_notes", "candidate_id",
+            "generated_by_model",
+        })
+
+    def test_report_error_partial_envelope_keys(self):
+        client, project, _ = _http(
+            _Provider(), gate_service=_Gate(),
+            report_service=_Reporter(error=InvalidCandidateReport("bad report")),
+        )
+        body = self._post(client, project).json()
+        self.assertEqual(set(body), self._COMMON | {"report_error"})
+        self.assertEqual(set(body["report_error"]), {"type", "detail"})
+
+    def test_revision_error_partial_envelope_keys(self):
+        provider = _SequenceProvider((
+            "고친 문장.",
+            ProviderError(code=ProviderErrorCode.UNAVAILABLE,
+                          message="auto revise down", retryable=True,
+                          provider="gateway"),
+        ))
+        client, project, _ = _http(
+            provider, gate_service=_LoopGate((WritingGateDecision.REVISE,)),
+            report_service=_Reporter(),
+        )
+        body = self._post(client, project).json()
+        self.assertEqual(set(body), self._COMMON | {"revision_error"})
+        self.assertEqual(set(body["revision_error"]), {"type", "detail"})
+
+    def test_retrieval_error_partial_envelope_keys(self):
+        client, project, _ = _http(
+            _Provider(), gate_service=_Gate(WritingGateDecision.RETRIEVE_MORE),
+            report_service=_Reporter(),
+            retrieval_planner=_RetrievalPlanner(
+                error=RuntimeError("planner exploded")),
+        )
+        body = self._post(client, project).json()
+        self.assertEqual(set(body), self._COMMON | {"retrieval_error"})
+        self.assertEqual(set(body["retrieval_error"]), {"type", "detail"})
+
+    def test_gate_error_partial_envelope_keys(self):
+        client, project, _ = _http(
+            _Provider(),
+            gate_service=_Gate(error=InvalidWritingGateResult("bad gate")),
+            report_service=_Reporter(),
+        )
+        body = self._post(client, project).json()
+        self.assertEqual(set(body), self._COMMON | {"gate_error"})
+        self.assertEqual(set(body["gate_error"]), {"type", "detail"})
+
+
 class EligibleRevisionFindingTest(unittest.TestCase):
     """Multi-finding selection (owner D1=A continuity-only, D3=A severity desc).
 

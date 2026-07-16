@@ -371,3 +371,58 @@ class WritingAcceptApiTest(unittest.TestCase):
                         "base_version_id": "v", "idempotency_key": "k",
                         "instruction": "x", "candidate_text": "y"})
         self.assertEqual(asyncio.run(call()).status_code, 503)
+
+
+class WritingAcceptEnvelopeKeyTest(unittest.TestCase):
+    """C0 exact-key safety net for the accept envelopes (SoT v1.7.1, D3=A).
+
+    Pins the COMPLETE key set of both the success dict and the partial
+    ``JSONResponse`` (analysis failure) before the models are applied. The
+    success dict is validated by ``response_model=WritingAcceptResponse`` so a
+    too-narrow model would silently drop a field; the partial envelope bypasses
+    ``response_model`` (JSONResponse) so its keys are locked here as the only
+    guard. Nested ``saved``/``analysis_job``/``gate`` key sets are pinned too.
+    """
+
+    def test_success_envelope_keys_are_complete(self):
+        client, project, draft, base, _ = WritingAcceptApiTest()._setup()
+        body = WritingAcceptApiTest()._post(
+            client, project, draft, base.draft_version.id).json()
+        self.assertEqual(set(body), {
+            "accepted", "gate", "saved", "analysis_job", "idempotent_replay",
+        })
+        self.assertEqual(set(body["saved"]), {
+            "draft_version_id", "version_number", "snapshot_id", "content_hash",
+        })
+        self.assertEqual(set(body["analysis_job"]), {
+            "id", "project_id", "snapshot_id", "status", "failure_reason",
+            "failure_detail",
+        })
+        self.assertEqual(set(body["gate"]), {
+            "request_id", "project_id", "decision", "findings",
+            "checked_constraints", "evaluated_by_model",
+        })
+        asyncio.run(client.aclose())
+
+    def test_partial_analysis_failure_envelope_keys_are_complete(self):
+        analysis = _FailingAnalysis(InMemoryAnalysisRepository())
+        client, project, draft, base, _ = WritingAcceptApiTest()._setup(
+            analysis=analysis)
+        response = WritingAcceptApiTest()._post(
+            client, project, draft, base.draft_version.id)
+        self.assertEqual(response.status_code, 502)
+        body = response.json()
+        self.assertEqual(set(body), {
+            "accepted", "saved", "analysis_job", "analysis_error",
+        })
+        self.assertEqual(set(body["saved"]), {
+            "draft_version_id", "version_number", "snapshot_id", "content_hash",
+        })
+        # Load-bearing values (not just key existence): this partial is
+        # `502 + accepted=true + saved present`. It must never be mistaken for a
+        # plain error that discards the already-saved version. Keeping the value
+        # lock in the C0 envelope test itself (not only in the accept behaviour
+        # suite) keeps the contract self-contained (verification H2).
+        self.assertTrue(body["accepted"])
+        self.assertIsNotNone(body["saved"])
+        asyncio.run(client.aclose())

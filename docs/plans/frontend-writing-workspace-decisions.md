@@ -147,13 +147,15 @@ accept intent lock:
 
 ## 선택 후 첫 구현 순서
 
-### C0 — Writing HTTP contract
+### C0 — Writing HTTP contract — **구현 완료(SoT v1.7.1, 2026-07-16)**
 
-1. 기존 generate/gate/revise-and-gate/accept payload exact-key 회귀를 현재 dict 응답에서 먼저 통과시킨다.
-2. Writing HTTP response/error 모델을 `services/application/app/writing/http_models.py`에 추가한다.
-3. 성공 `response_model`과 partial `responses={}`를 route에 연결한다.
-4. OpenAPI를 재생성하고 frontend generated type에서 성공·partial envelope literal을 확인한다.
-5. C0 착수 시 `ARCH-1`을 Ready→In progress로, HTTP model 분리와 검증 완료 시 Done으로 갱신한다.
+1. ~~기존 generate/gate/revise-and-gate/accept payload exact-key 회귀를 현재 dict 응답에서 먼저 통과시킨다.~~ ✅ `Writing*EnvelopeKeyTest` 9개(generate·gate·accept 성공+partial·revise-and-gate 성공+4 partial)를 모델보다 먼저 추가해 현 dict payload에서 통과 확인.
+2. ~~Writing HTTP response/error 모델을 `services/application/app/writing/http_models.py`에 추가한다.~~ ✅ 재사용 component + 성공 + partial + `responses={}` 맵.
+3. ~~성공 `response_model`과 partial `responses={}`를 route에 연결한다.~~ ✅ generate/gate/revise-and-gate/accept 4 endpoint.
+4. ~~OpenAPI를 재생성하고 frontend generated type에서 성공·partial envelope literal을 확인한다.~~ ✅ `gen:api` 재생성 → 성공 4 + partial union arm 5(revise-and-gate 4 status + accept 502; discriminator 필드 6) 확인, 프론트 build 90 modules·47 passed.
+5. ~~C0 착수 시 `ARCH-1`을 Ready→In progress로, HTTP model 분리와 검증 완료 시 Done으로 갱신한다.~~ ✅ 한 slice로 완료 → `ARCH-1` **Done**.
+
+다음은 C1 기본 Writing 작업공간(아래).
 
 ### C1 — 기본 Writing 작업공간
 
