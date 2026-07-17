@@ -90,3 +90,59 @@
 - **다음 B 슬라이스 = candidate edit + conflict merge/split**: candidate edit(payload 편집 폼 → `POST .../candidates/{id}/edit`, 편집값 400 재검증)·conflict merge/split(`POST .../review-queue/{entry_id}/reconcile`, 자격은 이미 어포던스로 실려 있어 소비만). 부분 승인/retry·merge/split의 event/open_question 일반화는 오너 결정 전 구현하지 않는다.
 - **실 데이터 관통(오너 풀스택)**: compose 스택에서 분석 candidate/gate finding을 실제로 만들어 검토함 목록→근거 detail→승인/거절→재색인을 관통 확인한다. sandbox는 12B·실 Mongo/Chroma 불가라 unit/build/gen:api 증거로 대체했다.
 - **트리거 체크**: 이 슬라이스는 backend 무변이라 `ARCH-1` 재발화 없음. `OPS-1`은 실 12B 관통·dogfood 착수 결정 전까지 Waiting 유지.
+
+---
+
+## Task 2 — B Review Inbox 두 번째 슬라이스: candidate edit + conflict merge/split (SoT v1.7.5)
+
+### Goals
+
+- 첫 슬라이스(v1.7.4)가 다음으로 남긴 두 무거운 표면(candidate edit·conflict merge/split)을 detail에서 소비 확장한다.
+- 어포던스는 v1.6.67에 이미 확정돼 있으므로 새 owner fork 없이 소비만 확장한다(backend/schema 무변).
+- v1.7.4 독립 검증 교훈(각 write endpoint를 named 회귀에 pin)을 적용한다.
+
+### User Decisions and Rationale
+
+- 새 오너 결정 없음. 첫 슬라이스 브리프(`plans/frontend-review-inbox-decisions.md`)와 오너의 "두번째 슬라이스 진행" 지시에 따라 candidate edit + conflict merge/split를 구현했다. 자격 규칙은 서버 어포던스가 이미 선언하므로 프론트는 소비만 한다.
+
+### Completed work
+
+**착수 전 계약 범위화**
+
+- **edit**(`POST .../candidates/{id}/edit`, body `{payload: dict}`): 200 `_candidate_edit_payload`, 400 `InvalidAnalysisCandidate`(편집값 schema 위반), 409 `InvalidCandidateStateTransition`(non-needs_review), 404. taxonomy payload = 타입별 정확한 키 집합의 non-empty 문자열(`analysis/schema.py:15-43`: character=name/observation·event=event·open_question=question).
+- **reconcile**(`POST .../review-queue/{entry_id}/reconcile`, body `{action: "merge"|"split"}`): 200 {entry_id,action,memory_id,superseded_memory_id,idempotent_replay}, 404, 409. 자격(merge=character+matched·split=character)은 `conflict_affordances`(`review_inbox.py:127-143`)가 read-time 선언.
+
+**변경 파일**
+
+- `frontend/src/api/client.ts` — `editCandidate(projectId, candidateId, payload)`·`reconcileConflict(projectId, entryId, action)` 추가. 둘 다 UI가 성공 시 목록으로 이동하므로 응답 body 미사용(`Promise<void>`, confirm/reject 선례와 동형).
+- `frontend/src/review/ReviewInboxDetail.tsx` — (1) **candidate edit**: read-only payload `<dl>`를 "수정" 버튼(edit 어포던스)으로 필드별 `<textarea>` 폼(`draft` 상태)으로 토글. 기존 키 in-place 편집(키 추가/삭제 금지 — 서버 재검증 400). 빈 필드가 하나라도 있으면 "저장" disabled(UX 편의; 서버가 최종 authority). 저장 성공→목록 이동, 400/409→폼 유지+error, "취소"→read-only 복귀. (2) **conflict merge/split**: conflict card에 merge/split 버튼을 `conflict.actions` 어포던스로 렌더(disabled=`!eligible`, title=`reason`). 성공→목록 이동. (3) edit 모드(draft≠null) 중에는 confirm/reject·merge/split 버튼을 숨겨 상태 혼선을 막는다. 공통 `submit(op)` 헬퍼가 성공 시 목록으로 navigate(서버 재조회, 낙관적 패치 없음).
+- `frontend/src/styles.css` — edit-form/edit-field/textarea 스타일 additive.
+
+**회귀 (양방향, +9 — `ReviewInboxDetail.test.tsx`)**
+
+- 첫 슬라이스의 "conflict merge/split 미렌더" 테스트를 **교체**(이 슬라이스가 렌더): merge/split 버튼 렌더 · **merge eligible=false(matched 없음)→disabled+reason**(over-strict 어포던스 소비) · merge→reconcile endpoint+`{action:"merge"}` body+목록 이동 · split→`{action:"split"}` body · edit→"수정" 폼 prefill→값 변경→저장→edit endpoint+`{payload}` body+목록 이동 · 빈 필드 저장 disabled(under-strict UX guard) · 취소→read-only 복귀 · edit 400→폼 유지+error.
+- **mutation bite 2종 실증**: (1) editCandidate URL을 `/edit`→`/confirm` 변이 → "edits the candidate payload…" 회귀 단독 실패(1 failed/14 passed), 원복. (2) reconcileConflict body를 `{action}`→`{action:"merge"}` 하드코딩 → "splits a conflict…" 회귀 단독 실패(`expected {action:'merge'} to deeply equal {action:'split'}`), 원복. 각 write endpoint가 named 회귀에 pin됨을 확인(v1.7.4 dismiss 빈 셀 교훈 적용).
+
+### Issues found
+
+- 첫 슬라이스 fixture의 character payload가 `{name, trait}`였으나 실제 taxonomy는 `{name, observation}`이다. edit 테스트가 `observation` 필드를 편집하므로 fixture를 실제 스키마에 맞게 `{name:"철수", observation:"말이 없었다"}`로 정정했다(diff 검증은 유니크한 `수다스러움` before 값으로 유지).
+
+### Decisions
+
+- **edit = 필드별 textarea 폼(raw JSON 아님)**: payload가 타입별 정확한 키 집합의 문자열이라 기존 필드를 in-place 편집하는 폼이 raw JSON textarea보다 안전하고 UX가 낫다. 키 추가/삭제는 서버가 400으로 막으므로 폼이 키를 고정하는 것이 계약과 정합.
+- **write 성공 후 목록 이동(재조회)**: edit는 candidate를 supersede하고 merge/split는 conflict를 resolve하므로, detail을 reload하면 candidate/conflict가 사라져 404 위험이 있다. 목록으로 이동해 서버 재조회하는 것이 안전하고 confirm/reject 선례와 일관.
+- **각 write endpoint를 named 회귀에 pin**: v1.7.4 독립 검증이 dismiss 빈 셀을 지적했으므로, 이 슬라이스는 착수부터 edit/merge/split 각각을 URL/action body로 pin하고 mutation bite로 실증했다.
+
+### Verification
+
+- **프론트 회귀**: `npx vitest run src/review/` → **24 passed / 2 files**(ReviewInbox 9 + ReviewInboxDetail 15). 전체 `npm test -- --run` → **106 passed / 7 files**.
+- **mutation bite 2종**: 위 Completed work 참조(edit URL·reconcile action 각각 단독 bite 후 원복).
+- **빌드/타입**: `npm run build` → PASS, **93 modules**. **gen:api** schema diff **0**(IDENTICAL).
+- **backend/scope diff 0**: `git status --porcelain services/ tests/ scripts/ docker-compose.yml schemas/` → 0건. `git diff --check` clean.
+- 자체 구현 routine self-check. 오너가 검증을 요청하면 독립 verification record를 생성한다.
+
+### Next steps
+
+- **실 데이터 dogfood 관통(오너 풀스택)**: compose 스택에서 분석 candidate/gate finding 생성 → 검토함 목록 → 근거 detail → 승인/거절/수정·병합/분리 → 재색인 관통. sandbox는 12B·실 Mongo/Chroma 불가.
+- 남은 Phase 6 UI: memory card·미회수 foreshadowing view(별도 화면), 부분 승인/retry·merge/split의 event/open_question 일반화(오너 결정 대기).
+- `OPS-1`/`QUAL-1`/`GATE-1` 트리거는 실 데이터 관통·dogfood 착수 결정과 함께 검토.

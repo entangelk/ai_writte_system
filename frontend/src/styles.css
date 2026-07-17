@@ -874,6 +874,37 @@ main {
   font-weight: 600;
 }
 
+.edit-form {
+  margin: 1rem 0 0;
+}
+
+.edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.7rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.edit-field label {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-family: system-ui, sans-serif;
+}
+
+.edit-field textarea {
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line);
+  background: #fffdf8;
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  resize: vertical;
+}
+
+.edit-form .row-actions {
+  margin-top: 1rem;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

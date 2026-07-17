@@ -380,6 +380,36 @@ export function rejectCandidate(
   );
 }
 
+// Edit re-versions the candidate with the edited payload (server re-validates
+// against the candidate_type schema → 400 on invalid, 409 on non-needs_review).
+// The payload fields are the taxonomy's exact key set of non-empty strings
+// (character=name/observation, event=event, open_question=question). The UI
+// navigates away on success, so the response body is unused (void).
+export function editCandidate(
+  projectId: string,
+  candidateId: string,
+  payload: Record<string, string>,
+): Promise<void> {
+  return request(
+    `/projects/${projectId}/analysis/candidates/${candidateId}/edit`,
+    { method: "POST", body: JSON.stringify({ payload }) },
+  );
+}
+
+// Reconcile a character conflict — `action` is the affordance literal
+// ("merge" | "split"). Eligibility is already declared on the conflict's
+// `actions`; the write endpoint remains the authority.
+export function reconcileConflict(
+  projectId: string,
+  entryId: string,
+  action: string,
+): Promise<void> {
+  return request(
+    `/projects/${projectId}/analysis/review-queue/${entryId}/reconcile`,
+    { method: "POST", body: JSON.stringify({ action }) },
+  );
+}
+
 export function resolveGateFinding(
   projectId: string,
   findingId: string,

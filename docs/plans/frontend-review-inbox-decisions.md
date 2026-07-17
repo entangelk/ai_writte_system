@@ -31,6 +31,8 @@ A는 "일단 어포던스 배선이 도는지"만 보려면 더 작지만, revie
 
 **오너 결정 = B**(추천 채택). v1.7.4로 구현 완료: 목록(`/projects/:projectId/review`) + 근거 detail(`/review/:candidateId`) + candidate confirm/reject + gate finding resolve/dismiss. candidate edit·conflict merge/split은 다음 슬라이스로 남겼다.
 
+**두 번째 슬라이스 = candidate edit + conflict merge/split (v1.7.5 구현 완료)**. 첫 슬라이스가 남긴 두 무거운 표면을 detail에서 소비 확장했다 — candidate edit은 payload 필드별 textarea 폼(taxonomy 정확 키 집합·non-empty 문자열), conflict merge/split은 conflict card에 어포던스 소비 버튼(merge=character+matched·split=character 자격은 서버 선언). 새 owner fork 없음(어포던스는 v1.6.67에 이미 확정, 소비만 확장). 각 write endpoint(edit/reconcile)를 named 회귀에 pin(v1.7.4 검증 교훈). 이로써 Review Inbox 핵심 검토 루프가 완결됐다. 남은 Phase 6 UI = memory card·미회수 foreshadowing view(별도 화면)·부분 승인/retry 일반화(오너 결정 대기).
+
 ## Follow-up considerations (열어둘 문)
 
 - **route**: `/projects/:projectId/review`(목록) + B면 `/projects/:projectId/review/:candidateId`(detail). 기존 route 관례와 정합, nginx SPA fallback 이미 준비.

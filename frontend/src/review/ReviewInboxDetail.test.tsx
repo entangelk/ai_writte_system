@@ -32,7 +32,7 @@ function detailBody(overrides: Record<string, unknown> = {}) {
       { action: "reject", eligible: true, reason: null },
       { action: "edit", eligible: true, reason: null },
     ],
-    payload: { name: "철수", trait: "과묵함" },
+    payload: { name: "철수", observation: "말이 없었다" },
     source_refs: [
       {
         source_ref_id: "s1",
@@ -137,15 +137,149 @@ describe("ReviewInboxDetail", () => {
     );
   });
 
-  it("does not render conflict merge/split actions in this slice", async () => {
-    // over-strict: conflicts are shown read-only here; merge/split is a later slice
-    // even though the affordance payload carries eligible=true for them.
+  it("renders conflict merge/split buttons from the affordances", async () => {
     mockFetch({ body: detailBody() });
     renderDetail();
     await screen.findByText("철수");
 
-    expect(screen.queryByRole("button", { name: "병합" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "분리" })).toBeNull();
+    expect(screen.getByRole("button", { name: "병합" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "분리" })).toBeEnabled();
+  });
+
+  it("disables merge from the conflict affordance rather than recomputing", async () => {
+    // over-strict: merge is character+matched-only. When the server declares
+    // eligible=false, the button must be disabled with the server reason — the
+    // frontend must not recompute character/matched itself.
+    mockFetch({
+      body: detailBody({
+        conflicts: [
+          {
+            entry_id: "e1",
+            action: "conflict",
+            rationale: "matched 없음",
+            matched_memory: null,
+            diff: [],
+            actions: [
+              {
+                action: "merge",
+                eligible: false,
+                reason: "merge requires a matched canonical memory",
+              },
+              { action: "split", eligible: true, reason: null },
+            ],
+          },
+        ],
+      }),
+    });
+    renderDetail();
+    await screen.findByText("철수");
+
+    const merge = screen.getByRole("button", { name: "병합" });
+    expect(merge).toBeDisabled();
+    expect(merge).toHaveAttribute(
+      "title",
+      "merge requires a matched canonical memory",
+    );
+    expect(screen.getByRole("button", { name: "분리" })).toBeEnabled();
+  });
+
+  it("merges a conflict via the reconcile endpoint then returns to the inbox list", async () => {
+    const fetchMock = mockFetch(
+      { body: detailBody() },
+      { body: { entry_id: "e1", action: "merge", memory_id: "m1", superseded_memory_id: null, idempotent_replay: false } },
+    );
+    renderDetail();
+
+    await userEvent.click(await screen.findByRole("button", { name: "병합" }));
+
+    expect(await screen.findByText("검토함 목록")).toBeInTheDocument();
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      "/api/projects/p1/analysis/review-queue/e1/reconcile",
+    );
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+      action: "merge",
+    });
+  });
+
+  it("splits a conflict via the reconcile endpoint with the split action", async () => {
+    const fetchMock = mockFetch(
+      { body: detailBody() },
+      { body: { entry_id: "e1", action: "split", memory_id: "m1", superseded_memory_id: null, idempotent_replay: false } },
+    );
+    renderDetail();
+
+    await userEvent.click(await screen.findByRole("button", { name: "분리" }));
+
+    expect(await screen.findByText("검토함 목록")).toBeInTheDocument();
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+      action: "split",
+    });
+  });
+
+  it("edits the candidate payload then re-versions via the edit endpoint", async () => {
+    const fetchMock = mockFetch(
+      { body: detailBody() },
+      { body: { original_candidate_id: "c1", candidate_id: "c2", status: "confirmed", memory_id: "m1", idempotent_replay: false } },
+    );
+    renderDetail();
+
+    await userEvent.click(await screen.findByRole("button", { name: "수정" }));
+    // form is prefilled from the payload
+    const observation = screen.getByLabelText("observation");
+    await userEvent.clear(observation);
+    await userEvent.type(observation, "말수가 적다");
+    await userEvent.click(screen.getByRole("button", { name: "저장" }));
+
+    expect(await screen.findByText("검토함 목록")).toBeInTheDocument();
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      "/api/projects/p1/analysis/candidates/c1/edit",
+    );
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+      payload: { name: "철수", observation: "말수가 적다" },
+    });
+  });
+
+  it("disables save while an edited field is blank (server rejects empty)", async () => {
+    // under-strict guard: the taxonomy requires non-empty strings; blanking a
+    // field must not POST (the server would 400). Not a contract literal — a UX
+    // convenience mirroring the repo's NonBlankName pattern.
+    mockFetch({ body: detailBody() });
+    renderDetail();
+
+    await userEvent.click(await screen.findByRole("button", { name: "수정" }));
+    await userEvent.clear(screen.getByLabelText("observation"));
+
+    expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
+  });
+
+  it("cancels an edit and restores the read-only payload", async () => {
+    mockFetch({ body: detailBody() });
+    renderDetail();
+
+    await userEvent.click(await screen.findByRole("button", { name: "수정" }));
+    expect(screen.getByLabelText("observation")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "취소" }));
+    expect(screen.queryByLabelText("observation")).toBeNull();
+    // read-only actions are back
+    expect(screen.getByRole("button", { name: "수정" })).toBeInTheDocument();
+  });
+
+  it("keeps the edit form and surfaces the error when the edit is rejected", async () => {
+    mockFetch(
+      { body: detailBody() },
+      { status: 400, body: { detail: "payload fields must be non-empty strings" } },
+    );
+    renderDetail();
+
+    await userEvent.click(await screen.findByRole("button", { name: "수정" }));
+    await userEvent.click(screen.getByRole("button", { name: "저장" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "payload fields must be non-empty strings",
+    );
+    // still on the form (did not navigate away)
+    expect(screen.getByLabelText("observation")).toBeInTheDocument();
   });
 
   it("disables confirm from the server affordance rather than recomputing", async () => {
