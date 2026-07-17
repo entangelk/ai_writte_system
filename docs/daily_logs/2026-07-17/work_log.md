@@ -153,3 +153,44 @@
 - **실 데이터 dogfood 관통(오너 풀스택)**: compose 스택에서 분석 candidate/gate finding 생성 → 검토함 목록 → 근거 detail → 승인/거절/수정·병합/분리 → 재색인 관통. sandbox는 12B·실 Mongo/Chroma 불가.
 - 남은 Phase 6 UI: memory card·미회수 foreshadowing view(별도 화면), 부분 승인/retry·merge/split의 event/open_question 일반화(오너 결정 대기).
 - `OPS-1`/`QUAL-1`/`GATE-1` 트리거는 실 데이터 관통·dogfood 착수 결정과 함께 검토.
+
+---
+
+## Task 3 — B Review Inbox 실 스택 dogfood 관통 (오너 요청)
+
+### Goals
+
+- 오너 지시("관통 테스트 해보자, 이 머신은 내부 풀스택")대로 Review Inbox B 슬라이스(v1.7.4/v1.7.5)가 소비하는 백엔드 표면을 실 스택·실 12B로 end-to-end 확인한다.
+- 외부 `192.168.1.22`는 이 환경에서 불가라 in-stack llama(`docker-compose.llama.yml`)를 쓴다.
+
+### Completed work
+
+- **풀스택 기동**: base + llama override. 비자명한 두 장애를 우회: (1) `-hf` llama가 repo 새 revision(52fc21bb)을 재다운로드하며 param 출력 후 정체(GPU 미로드) → 캐시된 완성 blob(`faff1a63` 6.97GB)을 `-m .../snapshots/f6e7774e/gemma-4-12b-it-qat-q4_0.gguf`로 직접 지정 + `--alias`로 우회(scratchpad override) → 정상 로드. (2) application/frontend 이미지가 11일 전 빌드라 review-inbox/gate-findings/reconcile/edit 라우트 부재(OpenAPI 미노출, 404) → `docker compose build application frontend` 재빌드 후 정상.
+- **관통(브라우저 동등 nginx `/api` 경로)**:
+  - candidate 파이프라인: project→draft→version→**source_ref catalog**→analysis job→run(실 12B)→5 needs_review candidates.
+  - review-inbox 목록/detail가 `{action,eligible,reason}` 어포던스를 실 서버에서 방출(candidate confirm/reject/edit 전부 eligible).
+  - **confirm/reject/edit** 각각 실 Mongo 상태 전이(confirmed 승격·rejected)·목록 재조회로 항목 이탈 확인.
+  - **conflict merge/split**: apply `conflict` proposal로 결정적 conflict 생성 → detail 어포던스 `{merge:(true), split:(true)}`(character+matched) → **reconcile merge** 200(memory 승격·이전 superseded)·victim 이탈.
+  - 프론트 번들에 Review Inbox UI 포함(`검토함`·`병합`·`분리`·`analysis/review-inbox`), SPA 딥링크 200.
+- **독립 라이브 스모크 기록**: `docs/verifications/2026-07-17/review_inbox_live_e2e.md`. 스크립트 3종 scratchpad 보존.
+
+### Issues found
+
+- **추출 anchor echo 단일 라인 요구**: 여러 줄 문단 source_ref는 12B가 anchor(quote/offset/content_hash 64-hex)를 정확히 echo 못 해 `source_ref anchor mismatch` 400. 단일 라인 문단으로 해소(5 candidate 안정 추출). 추출은 비결정적(0 또는 5) — 재시도로 흡수.
+- **gate finding 라이브 미유발**: gate finding은 Context Gate `reject` 시만 영속화되는데, context-search package가 비어(current_scene step status=None, source-block 인덱스 적재 의존) budget 체크를 못 넘겨 gate가 pass. resolve/dismiss 엔드포인트·어포던스·이진 패턴은 candidate와 동일해 뒷받침되나 라이브 실행은 인덱싱 경로 보완 후 후속.
+
+### Decisions
+
+- 프로덕션/저장소 코드는 **무변**(순수 소비 관통). 스크립트/override는 scratchpad에만.
+- gate finding 라이브 유발은 슬라이스 결함이 아니라 상류 검색/인덱싱 과제로 분리.
+
+### Verification
+
+- 7 write action 중 5개(confirm/reject/edit/merge/split) 실 스택·실 12B·실 Mongo 완전 관통. 프론트 서빙 확인. 상세: 위 라이브 스모크 기록.
+- 스택은 실행 중(오너가 종료 미선택). 브라우저 확인 후 `docker compose ... down`으로 회수 가능(Mongo volume 유지).
+
+### Next steps
+
+- `OPS-1` Ready 승격·본격 dogfood 착수 오너 결정.
+- gate finding 라이브 유발(source-block 인덱스 적재 경로 보완).
+- 운영 발견 반영: 스택 기동 전 이미지 재빌드, `-hf` 대신 캐시 blob 고정 검토.
