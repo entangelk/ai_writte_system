@@ -183,6 +183,59 @@ describe("ReviewInboxDetail", () => {
     expect(screen.getByRole("button", { name: "분리" })).toBeEnabled();
   });
 
+  it("disables split from the conflict affordance rather than recomputing", async () => {
+    // over-strict: split is character-only. Symmetric to the merge guard —
+    // when the server declares eligible=false, the button is disabled + reason;
+    // the frontend must not recompute the candidate_type itself.
+    mockFetch({
+      body: detailBody({
+        conflicts: [
+          {
+            entry_id: "e1",
+            action: "conflict",
+            rationale: "비-character",
+            matched_memory: null,
+            diff: [],
+            actions: [
+              {
+                action: "merge",
+                eligible: false,
+                reason: "merge/split is character-only",
+              },
+              {
+                action: "split",
+                eligible: false,
+                reason: "merge/split is character-only",
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    renderDetail();
+    await screen.findByText("철수");
+
+    const split = screen.getByRole("button", { name: "분리" });
+    expect(split).toBeDisabled();
+    expect(split).toHaveAttribute("title", "merge/split is character-only");
+  });
+
+  it("hides confirm/reject and merge/split while editing", async () => {
+    // over-strict: entering edit mode must hide the other actions so the user
+    // can't confirm/reject/merge a candidate mid-edit (state confusion).
+    mockFetch({ body: detailBody() });
+    renderDetail();
+
+    await userEvent.click(await screen.findByRole("button", { name: "수정" }));
+
+    expect(screen.queryByRole("button", { name: "승인" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "거절" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "병합" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "분리" })).toBeNull();
+    // the edit form controls are present instead
+    expect(screen.getByRole("button", { name: "저장" })).toBeInTheDocument();
+  });
+
   it("merges a conflict via the reconcile endpoint then returns to the inbox list", async () => {
     const fetchMock = mockFetch(
       { body: detailBody() },

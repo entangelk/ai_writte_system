@@ -118,9 +118,9 @@
 - `frontend/src/review/ReviewInboxDetail.tsx` — (1) **candidate edit**: read-only payload `<dl>`를 "수정" 버튼(edit 어포던스)으로 필드별 `<textarea>` 폼(`draft` 상태)으로 토글. 기존 키 in-place 편집(키 추가/삭제 금지 — 서버 재검증 400). 빈 필드가 하나라도 있으면 "저장" disabled(UX 편의; 서버가 최종 authority). 저장 성공→목록 이동, 400/409→폼 유지+error, "취소"→read-only 복귀. (2) **conflict merge/split**: conflict card에 merge/split 버튼을 `conflict.actions` 어포던스로 렌더(disabled=`!eligible`, title=`reason`). 성공→목록 이동. (3) edit 모드(draft≠null) 중에는 confirm/reject·merge/split 버튼을 숨겨 상태 혼선을 막는다. 공통 `submit(op)` 헬퍼가 성공 시 목록으로 navigate(서버 재조회, 낙관적 패치 없음).
 - `frontend/src/styles.css` — edit-form/edit-field/textarea 스타일 additive.
 
-**회귀 (양방향, +9 — `ReviewInboxDetail.test.tsx`)**
+**회귀 (양방향, 순 +9 — `ReviewInboxDetail.test.tsx` 8→17: 추가 10·삭제 1)**
 
-- 첫 슬라이스의 "conflict merge/split 미렌더" 테스트를 **교체**(이 슬라이스가 렌더): merge/split 버튼 렌더 · **merge eligible=false(matched 없음)→disabled+reason**(over-strict 어포던스 소비) · merge→reconcile endpoint+`{action:"merge"}` body+목록 이동 · split→`{action:"split"}` body · edit→"수정" 폼 prefill→값 변경→저장→edit endpoint+`{payload}` body+목록 이동 · 빈 필드 저장 disabled(under-strict UX guard) · 취소→read-only 복귀 · edit 400→폼 유지+error.
+- 첫 슬라이스의 "conflict merge/split 미렌더" 테스트를 **제거**(이 슬라이스가 렌더). 추가: merge/split 버튼 렌더 · **merge eligible=false(matched 없음)→disabled+reason**·**split eligible=false(비-character)→disabled+reason**(over-strict 어포던스 소비 대칭) · merge→reconcile endpoint+`{action:"merge"}` body+목록 이동 · split→`{action:"split"}` body · edit→"수정" 폼 prefill→값 변경→저장→edit endpoint+`{payload}` body+목록 이동 · 빈 필드 저장 disabled(under-strict UX guard) · 취소→read-only 복귀 · edit 400→폼 유지+error · **edit 모드 중 confirm/reject·merge/split 숨김**(over-strict 상태 계약).
 - **mutation bite 2종 실증**: (1) editCandidate URL을 `/edit`→`/confirm` 변이 → "edits the candidate payload…" 회귀 단독 실패(1 failed/14 passed), 원복. (2) reconcileConflict body를 `{action}`→`{action:"merge"}` 하드코딩 → "splits a conflict…" 회귀 단독 실패(`expected {action:'merge'} to deeply equal {action:'split'}`), 원복. 각 write endpoint가 named 회귀에 pin됨을 확인(v1.7.4 dismiss 빈 셀 교훈 적용).
 
 ### Issues found
@@ -135,11 +135,18 @@
 
 ### Verification
 
-- **프론트 회귀**: `npx vitest run src/review/` → **24 passed / 2 files**(ReviewInbox 9 + ReviewInboxDetail 15). 전체 `npm test -- --run` → **106 passed / 7 files**.
+- **프론트 회귀**: `npx vitest run src/review/` → **26 passed / 2 files**(ReviewInbox 9 + ReviewInboxDetail 17). 전체 `npm test -- --run` → **108 passed / 7 files**.
 - **mutation bite 2종**: 위 Completed work 참조(edit URL·reconcile action 각각 단독 bite 후 원복).
-- **빌드/타입**: `npm run build` → PASS, **93 modules**. **gen:api** schema diff **0**(IDENTICAL).
+- **빌드/타입**: `npm run build` → PASS, **93 modules**(CSS 12.28 kB gzip 2.94, JS 261.92 kB gzip 82.36). **gen:api** schema diff **0**(IDENTICAL).
 - **backend/scope diff 0**: `git status --porcelain services/ tests/ scripts/ docker-compose.yml schemas/` → 0건. `git diff --check` clean.
-- 자체 구현 routine self-check. 오너가 검증을 요청하면 독립 verification record를 생성한다.
+
+### 독립 검증 합격(조건 없음) + 비차단 문서 정정·선택 보강
+
+오너가 독립 검증을 요청·완료했다(`docs/verifications/2026-07-17/b_review_inbox_second_slice.md`). **판정 합격(조건 없음), blocking 0.** 검증자가 7개 write action(confirm/reject/edit·merge/split·resolve/dismiss) 전부 named 회귀 pin·mutation bite 2종·구현 정합·backend 무변을 독립 재현했다. 비차단 소견 3건을 반영:
+
+- **소견 1(회귀 수 "+9" 오기) 반영**: 최초 커밋 시점 순 회귀는 ReviewInboxDetail 8→15 = **순 +7**(추가 8·삭제 1)인데 "+9"로 적었다(자기모순). SoT·CHANGELOG·work_log를 순증가 표기로 정정하고, 아래 선택 보강 2건을 더해 **순 +9(추가 10·삭제 1)**로 확정했다.
+- **소견 2(HANDOFF 번들 사이즈 stale) 반영**: HANDOFF의 CSS 11.85/JS 260.18(v1.7.4 수치)을 실제 현재 값 **CSS 12.28/JS 261.92**로 정정(edit-form 스타일 추가분).
+- **소견 3(선택 보강) 반영**: (a) **split eligible=false→disabled+reason** 대칭 회귀(merge guard와 대칭 — split의 character-only 자격도 서버 선언 소비를 pin), (b) **edit 모드 중 confirm/reject·merge/split 숨김** over-strict 회귀(상태 계약). review 24→**26**, 전체 106→**108**. 프로덕션 코드 무변(테스트만).
 
 ### Next steps
 
