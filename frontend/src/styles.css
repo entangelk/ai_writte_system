@@ -729,6 +729,151 @@ main {
   }
 }
 
+/* Review Inbox (Phase 6 B) */
+.section-link {
+  display: inline-block;
+  margin-top: 1rem;
+  color: var(--accent);
+  font-size: 0.86rem;
+  text-decoration: none;
+}
+
+.section-link:hover,
+.section-link:focus-visible {
+  color: var(--accent-dark);
+}
+
+.section-title {
+  margin: 2.4rem 0 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.25rem;
+  font-weight: 500;
+}
+
+.review-row {
+  justify-content: space-between;
+}
+
+.review-row .resource-link {
+  flex: 1;
+}
+
+.row-meta {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-family: system-ui, sans-serif;
+}
+
+.finding-copy {
+  flex: 1;
+  padding: 1.25rem 0;
+}
+
+.finding-check {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.15rem;
+}
+
+.row-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-shrink: 0;
+}
+
+.detail-actions {
+  margin-top: 1.5rem;
+}
+
+.row-actions button {
+  padding: 0.5rem 1.1rem;
+  color: #fffaf1;
+  background: var(--accent);
+  border: 0;
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+
+.row-actions button:hover:not(:disabled) {
+  background: var(--accent-dark);
+}
+
+.row-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.row-actions button.ghost {
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+}
+
+.detail-fields {
+  margin: 1rem 0 0;
+}
+
+.detail-field {
+  display: flex;
+  gap: 1rem;
+  padding: 0.7rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.detail-field dt {
+  width: 8rem;
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-family: system-ui, sans-serif;
+}
+
+.detail-field dd {
+  margin: 0;
+  flex: 1;
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+.quote-list {
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.quote-row blockquote {
+  margin: 0 0 1rem;
+  padding: 0.8rem 1.1rem;
+  border-left: 3px solid var(--accent);
+  background: rgba(164, 69, 47, 0.05);
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+.conflict-card {
+  margin-top: 1rem;
+  padding: 1.1rem;
+  border: 1px solid var(--line);
+}
+
+.diff-table {
+  margin-top: 0.7rem;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.diff-table th,
+.diff-table td {
+  padding: 0.5rem 0.7rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+
+.diff-table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

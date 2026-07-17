@@ -263,6 +263,143 @@ export async function acceptWriting(
   throw new ApiError(response.status, await readDetail(response));
 }
 
+// --- Review Inbox (Phase 6 B) ---------------------------------------------
+// The review-inbox / gate-finding read endpoints return `dict[str, object]`, so
+// the generated schema has no response body for them (SoT: the remaining
+// untyped endpoints are hand-declared in their consuming UI slice, as the very
+// first Product-shell slice did before the spine got `response_model`). These
+// shapes mirror `_review_inbox_payload` / `_gate_finding_payload` in main.py.
+// The frontend never recomputes eligibility: it renders each `actions` entry's
+// button `disabled` from `eligible` and branches only on `action` — `reason` is
+// human display text, never pattern-matched (affordance contract v1.6.67).
+
+/** One review action's availability. `reason` is display text only. */
+export interface ReviewAffordance {
+  action: string;
+  eligible: boolean;
+  reason: string | null;
+}
+
+/** A review-inbox candidate row (list) — detail adds payload/source_refs/conflicts. */
+export interface ReviewInboxItem {
+  candidate_id: string;
+  job_id: string;
+  candidate_type: string;
+  status: string;
+  confidence: number;
+  provenance: string;
+  conflict_count: number;
+  actions: ReviewAffordance[];
+}
+
+/** A resolved (or missing) source_ref pointer for a candidate's evidence quote. */
+export interface ReviewSourcePointer {
+  source_ref_id: string;
+  status: "resolved" | "missing";
+  snapshot_id?: string;
+  block_id?: string;
+  start_offset?: number;
+  end_offset?: number;
+  quote?: string;
+  content_hash?: string;
+}
+
+export interface ReviewFieldDiff {
+  field: string;
+  before: unknown;
+  after: unknown;
+}
+
+/** A conflict attached to a candidate — shown read-only in this slice (no merge/split yet). */
+export interface ReviewConflict {
+  entry_id: string;
+  action: string;
+  rationale: string;
+  matched_memory: { id: string; payload: Record<string, unknown> } | null;
+  diff: ReviewFieldDiff[];
+  actions: ReviewAffordance[];
+}
+
+export interface ReviewInboxDetailItem extends ReviewInboxItem {
+  payload: Record<string, unknown>;
+  source_refs: ReviewSourcePointer[];
+  conflicts: ReviewConflict[];
+}
+
+export interface GateFinding {
+  id: string;
+  origin: string;
+  status: string;
+  check: string;
+  detail: string;
+  query: string;
+  purpose: string;
+  needs: string[];
+  pointer_ids: string[];
+  actions: ReviewAffordance[];
+}
+
+export interface ReviewInboxListResponse {
+  project_id: string;
+  items: ReviewInboxItem[];
+  gate_findings: GateFinding[];
+}
+
+export function listReviewInbox(
+  projectId: string,
+): Promise<ReviewInboxListResponse> {
+  return request(`/projects/${projectId}/analysis/review-inbox`);
+}
+
+export function getReviewInboxItem(
+  projectId: string,
+  candidateId: string,
+): Promise<ReviewInboxDetailItem> {
+  return request(
+    `/projects/${projectId}/analysis/review-inbox/${candidateId}`,
+  );
+}
+
+export function confirmCandidate(
+  projectId: string,
+  candidateId: string,
+): Promise<void> {
+  return request(
+    `/projects/${projectId}/analysis/candidates/${candidateId}/confirm`,
+    { method: "POST" },
+  );
+}
+
+export function rejectCandidate(
+  projectId: string,
+  candidateId: string,
+): Promise<void> {
+  return request(
+    `/projects/${projectId}/analysis/candidates/${candidateId}/reject`,
+    { method: "POST" },
+  );
+}
+
+export function resolveGateFinding(
+  projectId: string,
+  findingId: string,
+): Promise<void> {
+  return request(
+    `/projects/${projectId}/analysis/gate-findings/${findingId}/resolve`,
+    { method: "POST" },
+  );
+}
+
+export function dismissGateFinding(
+  projectId: string,
+  findingId: string,
+): Promise<void> {
+  return request(
+    `/projects/${projectId}/analysis/gate-findings/${findingId}/dismiss`,
+    { method: "POST" },
+  );
+}
+
 export function describeApiError(err: unknown): string {
   if (err instanceof ApiError) {
     return `${err.status}: ${err.detail}`;

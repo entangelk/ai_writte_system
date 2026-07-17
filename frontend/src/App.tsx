@@ -2,6 +2,8 @@ import { Link, Route, Routes } from "react-router";
 import { DraftList } from "./drafts/DraftList";
 import { DraftEditor } from "./drafts/DraftEditor";
 import { ProjectList } from "./projects/ProjectList";
+import { ReviewInbox } from "./review/ReviewInbox";
+import { ReviewInboxDetail } from "./review/ReviewInboxDetail";
 
 export function App() {
   return (
@@ -14,6 +16,14 @@ export function App() {
         <Routes>
           <Route path="/" element={<ProjectList />} />
           <Route path="/projects/:projectId" element={<DraftList />} />
+          <Route
+            path="/projects/:projectId/review"
+            element={<ReviewInbox />}
+          />
+          <Route
+            path="/projects/:projectId/review/:candidateId"
+            element={<ReviewInboxDetail />}
+          />
           <Route
             path="/projects/:projectId/drafts/:draftId"
             element={<DraftEditor />}

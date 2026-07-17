@@ -87,6 +87,11 @@ export function DraftList() {
         <p className="eyebrow">원고 작업 공간</p>
         <h1>{project?.name ?? "프로젝트"}</h1>
         <p>장면이나 장을 원고 단위로 나누어 관리합니다.</p>
+        {projectId !== undefined && (
+          <Link className="section-link" to={`/projects/${projectId}/review`}>
+            검토함 →
+          </Link>
+        )}
       </header>
 
       {error !== null && <p className="alert" role="alert">{error}</p>}
