@@ -34,6 +34,7 @@ from services.application.app.analysis.service import (
     InvalidAnalysisCandidate,
     InvalidCandidateSource,
     InvalidCandidateStateTransition,
+    InvalidJobStateTransition,
 )
 from services.application.app.analysis.candidate_review import (
     CandidateReviewService,
@@ -394,6 +395,8 @@ def _default_prompt_template_service() -> PromptTemplateService:
     if not uri:
         service = PromptTemplateService(InMemoryPromptTemplateRepository())
         service.seed_analysis_extract_v1()
+        service.seed_analysis_extract_v2()
+        service.seed_analysis_extract_v3()
         return service
 
     from services.application.app.analysis.prompt_template_mongo_repository import (
@@ -407,6 +410,8 @@ def _default_prompt_template_service() -> PromptTemplateService:
     )
     service = PromptTemplateService(repository)
     service.seed_analysis_extract_v1()
+    service.seed_analysis_extract_v2()
+    service.seed_analysis_extract_v3()
     return service
 
 
@@ -1757,6 +1762,17 @@ def create_app(
                 _analysis_candidate_payload(candidate) for candidate in candidates
             ]
         }
+
+    @app.post("/projects/{project_id}/analysis/jobs/{job_id}/retry")
+    async def retry_analysis_job(project_id: str, job_id: str) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+            job = analysis.retry_failed_job(project_id=project_id, job_id=job_id)
+        except (AnalysisNotFound, NotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except InvalidJobStateTransition as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _analysis_job_payload(job)
 
     @app.post("/projects/{project_id}/analysis/jobs/{job_id}/run")
     async def run_analysis_job(project_id: str, job_id: str) -> dict[str, object]:

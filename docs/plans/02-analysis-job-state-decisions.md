@@ -46,6 +46,16 @@
 - runner는 **새로 생성한 job(=`pending`)일 때만** 추출을 실행한다. `find_job_request`가 기존 job을 찾으면(어떤 상태든) replay로 보고 재실행하지 않는다.
 - crash 등으로 `pending`/`running`에 멈춘 stale job의 복구는 MVP 범위 밖이다. 본 계약은 replay 시 "기존 job을 그대로 반환"으로 한정하고 자동 복구/재개를 규정하지 않는다.
 
+#### 2026-07-18 dogfood amendment — D5=A same-job 명시 retry
+
+후속 D5=A가 analysis key를 `analyze:{snapshot_id}`로 고정해 snapshot당 job 1개를 정본화한 뒤, accept 확장 snapshot의 첫 run이 `source_invalid`로 실패하면 원 결정의 “새 key로 새 job”과 D5=A가 충돌해 같은 snapshot이 영구 dead-end가 되는 것이 실검수에서 확인됐다. 오너 결정 C(`docs/live_review_briefs/2026-07-18/analysis_retry_after_accept.md`)로 다음처럼 개정한다.
+
+- 일반 create/run replay에서 FAILED는 계속 terminal이며 자동 재실행하지 않는다.
+- 신규 명시 retry command만 **같은 job ID를 `failed → pending`**으로 전이하고 `failure_reason`/`failure_detail`을 비운다. 이는 자동 idempotent replay가 아니라 사용자 retry intent다.
+- `pending`/`running`/`succeeded`에 retry command는 409로 거절한다. 특히 succeeded는 계속 불변/replay-only다.
+- same-job task/candidate identity를 재사용해 retry 성공 후 candidate 중복을 만들지 않는다. strict validation과 candidate all-or-nothing은 무변이다.
+- 새 key/new job 재시도 권고는 D5=A trigger 경로에는 더 이상 적용하지 않는다. 비-D5 내부 caller의 별도 key 생성 가능성은 공개 retry UX가 아니다.
+
 ### 4. 실패 상태 저장 — 닫힌 enum + detail
 
 결정: `failed` job은 닫힌 `failure_reason` enum과 free-text `failure_detail`을 저장한다. runner의 실제 실패 지점에 매핑한다.
@@ -76,6 +86,6 @@
 - 상태는 job-level만, task는 무상태.
 - job 상태는 `pending → running → succeeded|failed`이고 terminal은 불변.
 - runner는 새 job(`pending`)만 실행하고 기존 job은 replay로 반환(재실행 없음).
-- failed는 terminal이며 재실행은 새 `idempotency_key`(새 job)로 한다.
+- failed는 일반 replay에서 terminal이다. D5=A 공개 trigger는 명시 retry command로만 같은 job을 `failed → pending` 전이하며, 자동 replay·succeeded 재실행은 금지한다.
 - 실패는 닫힌 `failure_reason` enum(`snapshot_not_found`, `source_invalid`, `schema_invalid`, `provider_error`, `duplicate_conflict`) + free-text `failure_detail`로 저장한다.
 - stale 비terminal job의 자동 복구/재개는 MVP 범위 밖이다.

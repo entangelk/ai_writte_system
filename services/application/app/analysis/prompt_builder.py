@@ -42,10 +42,14 @@ def build_analysis_extract_request(
             "block_ids": list(snapshot.block_ids),
             "raw_text": snapshot.raw_text,
         },
-        "source_ref_catalog": [_source_ref_payload(ref) for ref in source_refs],
         "writing_candidate_report": (
             dict(snapshot.writing_candidate_report)
             if snapshot.writing_candidate_report is not None else None),
+        # Keep the authoritative namespace after the advisory report in the
+        # serialized prompt. Small local models overweight the last identifier
+        # namespace they see; putting the current catalog here makes the
+        # contract structural as well as instructional.
+        "source_ref_catalog": [_source_ref_payload(ref) for ref in source_refs],
         "output_contract": {
             "type": "json_object",
             "top_level_key": "candidates",
@@ -60,7 +64,6 @@ def build_analysis_extract_request(
                 content=json.dumps(
                     user_payload,
                     ensure_ascii=False,
-                    sort_keys=True,
                     separators=(",", ":"),
                 ),
             ),

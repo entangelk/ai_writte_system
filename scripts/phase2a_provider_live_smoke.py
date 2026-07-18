@@ -98,6 +98,8 @@ async def main() -> int:
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
         prompt_templates.seed_analysis_extract_v1()
+        prompt_templates.seed_analysis_extract_v2()
+        prompt_templates.seed_analysis_extract_v3()
         gateway_provider = _RecordingProvider(
             GatewayGenerateProvider(
                 base_url="http://gateway-smoke",

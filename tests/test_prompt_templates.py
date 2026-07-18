@@ -4,8 +4,12 @@ import unittest
 
 from services.application.app.analysis.prompt_templates import (
     ANALYSIS_EXTRACT_PROMPT_VERSION,
+    ANALYSIS_EXTRACT_PROMPT_VERSION_V1,
+    ANALYSIS_EXTRACT_PROMPT_VERSION_V2,
     ANALYSIS_EXTRACT_TASK_TYPE,
     ANALYSIS_EXTRACT_TEMPLATE,
+    ANALYSIS_EXTRACT_TEMPLATE_V1,
+    ANALYSIS_EXTRACT_TEMPLATE_V2,
     InMemoryPromptTemplateRepository,
     PromptTemplateConflict,
     PromptTemplateError,
@@ -21,11 +25,27 @@ class PromptTemplateServiceTest(unittest.TestCase):
         seeded = service.seed_analysis_extract_v1()
         fetched = service.get_template(
             task_type=ANALYSIS_EXTRACT_TASK_TYPE,
-            version=ANALYSIS_EXTRACT_PROMPT_VERSION,
+            version=ANALYSIS_EXTRACT_PROMPT_VERSION_V1,
         )
 
         self.assertEqual(fetched, seeded)
-        self.assertEqual(fetched.template, ANALYSIS_EXTRACT_TEMPLATE)
+        self.assertEqual(fetched.template, ANALYSIS_EXTRACT_TEMPLATE_V1)
+
+    def test_seed_analysis_extract_v3_is_current_and_keeps_v1_v2(self):
+        service = PromptTemplateService(InMemoryPromptTemplateRepository())
+
+        legacy = service.seed_analysis_extract_v1()
+        v2 = service.seed_analysis_extract_v2()
+        current = service.seed_analysis_extract_v3()
+
+        self.assertEqual(current.version, ANALYSIS_EXTRACT_PROMPT_VERSION)
+        self.assertEqual(current.template, ANALYSIS_EXTRACT_TEMPLATE)
+        self.assertEqual(legacy.version, ANALYSIS_EXTRACT_PROMPT_VERSION_V1)
+        self.assertEqual(v2.version, ANALYSIS_EXTRACT_PROMPT_VERSION_V2)
+        self.assertEqual(v2.template, ANALYSIS_EXTRACT_TEMPLATE_V2)
+        self.assertNotEqual(current.version, legacy.version)
+        self.assertIn("advisory provenance", current.template)
+        self.assertIn("source_ref_catalog", current.template)
 
     def test_seed_same_template_version_is_idempotent(self):
         service = PromptTemplateService(InMemoryPromptTemplateRepository())
@@ -37,7 +57,7 @@ class PromptTemplateServiceTest(unittest.TestCase):
 
     def test_same_version_different_template_is_conflict(self):
         service = PromptTemplateService(InMemoryPromptTemplateRepository())
-        service.seed_analysis_extract_v1()
+        service.seed_analysis_extract_v3()
 
         with self.assertRaises(PromptTemplateConflict):
             service.seed_template(

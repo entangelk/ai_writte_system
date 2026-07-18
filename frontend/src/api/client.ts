@@ -498,6 +498,8 @@ export function describeWritingError(err: unknown): {
 interface AnalysisJobRef {
   id: string;
   status: string;
+  failure_reason?: string | null;
+  failure_detail?: string | null;
 }
 
 // Analysis anchors candidates to source_refs; without a catalog the extraction
@@ -576,10 +578,27 @@ export async function analyzeVersion(
       }),
     },
   );
-  const run = await request<{ candidates: unknown[] }>(
+  let job = created.job;
+  if (job.status === "failed") {
+    job = await request<AnalysisJobRef>(
+      `/projects/${projectId}/analysis/jobs/${job.id}/retry`,
+      { method: "POST" },
+    );
+    if (job.status !== "pending") {
+      throw new ApiError(409, `분석 재시도 준비에 실패했습니다 (상태: ${job.status}).`);
+    }
+  }
+  const run = await request<{ job: AnalysisJobRef; candidates: unknown[] }>(
     `/projects/${projectId}/analysis/jobs/${created.job.id}/run`,
     { method: "POST" },
   );
+  if (run.job.status !== "succeeded") {
+    throw new ApiError(
+      409,
+      run.job.failure_detail ??
+        `분석이 완료되지 않았습니다 (상태: ${run.job.status}).`,
+    );
+  }
   return {
     jobId: created.job.id,
     candidateCount: run.candidates.length,

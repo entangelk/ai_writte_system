@@ -156,3 +156,57 @@
 - gate finding 라이브 유발(Task 1)과 함께 `OPS-1` Ready·dogfood 착수 오너 결정.
 - frontend healthcheck false-negative(`localhost`→`::1`)를 별도 운영 소수정으로 처리할지 결정.
 - 스택 실행 중(오너 종료 미선택).
+
+---
+
+## Task 3 — 이어쓰기 후 재분석 `400 source_ref not found` 진단·보수
+
+### Goals
+
+- 오너 dogfood 재현(첫 분석 후보 미채택 → AI 이어쓰기 accept → 확장 snapshot 재분석)의 400 원인을 라이브 로그·Mongo 정본·코드 계약에서 재도출한다.
+- 예방과 실패 복구에 필요한 오너 결정 경계를 분리하고, 승인안 C를 양방향 회귀·재배포·동일 job 라이브로 닫는다.
+
+### Completed work
+
+- application 로그에서 실제 실패를 프로젝트 `6a59899206eb78cecda6d4a6`, snapshot `6a5aeba0b339f88750c0a94f`, job `6a5aeba1b339f88750c0a950`으로 식별했다. 새 snapshot source_ref 생성 9건과 deterministic create는 모두 200이고 run만 400이었다.
+- Mongo 정본 대조: 새 snapshot catalog는 9개 block span/quote/hash에 정확히 결박돼 있어 catalog 누락·부분 빌드가 아니다. job은 `failed/source_invalid`, detail `source_ref not found`.
+- accept가 job에 저장한 `writing_candidate_report`는 생성 당시 구 snapshot `6a59899206eb78cecda6d4a9`의 `source_blocks` pointer 2개(block 3/4, 구 version/hash)를 보유한다. runner가 report를 새 snapshot에 붙이고(`runner.py:133-136`), prompt builder가 새 `source_ref_catalog`와 report를 나란히 직렬화한다(`prompt_builder.py:45-48`).
+- strict extraction은 catalog 밖 anchor를 1회 repair한 뒤에도 invalid면 downstream resolver가 거절한다(`extractor.py:139-149`, `service.py:751-756`; SoT v1.6.19/§ Phase 2A의 의도된 fail-closed). raw provider output은 저장되지 않아 모델이 구 block pointer ID를 source_ref_id로 직접 복사했는지는 확정할 수 없지만, 성공한 accept-report 라이브(related pointer 비어 있음)와 달리 이번 실패 report만 구 source pointer를 함께 노출해 namespace 혼동이 강한 유발 요인이다.
+- 재클릭 복구도 공개 API로 재현했다. deterministic create는 같은 failed job을 `idempotent_replay=true`로 반환하고, run은 HTTP 200 + `status=failed` + candidates `[]`로 재추출하지 않는다. `analyzeVersion`은 run job status를 검사하지 않고 candidate 수만 반환해 UI가 “새 후보 없음” 성공으로 오인한다.
+- pattern sweep + blame: failed terminal/no re-run은 `tests/test_analysis_job_state.py::test_failed_is_terminal`의 **Fork B**와 runner replay 회귀로 의도적으로 잠겼다. 따라서 조용히 reset/retry를 구현하면 기존 owner-level 상태 계약과 충돌한다.
+
+### Issues found
+
+- **P1 — prompt namespace 충돌 가능성**: advisory report의 stable `related_context_pointers.document_id`(구 snapshot source block)와 현재 snapshot의 authoritative `source_ref_catalog.source_ref_id`가 같은 prompt에 들어가 12B가 anchor identity를 혼동할 수 있다. strict validator는 오염 저장을 막지만 사용자는 400 dead-end를 만난다.
+- **P2 — D5=A와 FAILED terminal의 조합**: snapshot당 job 1개는 중복을 막지만, 한 번 실패한 job을 같은 snapshot에서 다시 실행할 수 없다. 현재 “다시 분석” 버튼은 실질 retry가 아니다.
+- **P3 — terminal failure 응답 오판**: 첫 실패는 HTTP 400이라 보이지만 다음 클릭은 HTTP 200 failed envelope를 클라이언트가 성공/0 candidates로 처리한다.
+- 첫 분석 후보를 승인·저장하지 않은 상태는 직접 원인이 아니다. 실패 job의 입력 충돌은 accept report의 구 snapshot source pointer와 새 catalog 사이에서 발생했다.
+
+### User Decisions and Rationale
+
+- 오너는 실검수 브리프의 **C(prompt 예방 + same-job 명시 retry + failed UX)**를 선택했다. strict source validation, 자동 remap 금지, repair 1회 상한, snapshot당 job 1개와 succeeded replay는 유지한다.
+- 브리프는 새 기록 분류 `docs/live_review_briefs/2026-07-18/analysis_retry_after_accept.md`에 보존하고 `docs/README.md`에 역할을 등록했다.
+
+### Completed implementation
+
+- prompt: v1 보존 + 초기 `analysis_extract_v2`를 seed했으나 동일 실패 job 라이브에서 주의 문구만으로 `source_invalid`가 재발했다. 이미 seed된 v2를 덮어쓰지 않고 보존하고, exact candidate taxonomy/payload/full-anchor shape, advisory report→authoritative catalog 직렬화 순서, report identifier를 제외한 repair payload를 구조화한 **`analysis_extract_v3`**를 새 기본값으로 승격했다.
+- backend: 상태 전이에 명시적 `FAILED→PENDING`만 추가하고 `retry_failed_job` + `POST /projects/{project_id}/analysis/jobs/{job_id}/retry`를 배선했다. failure fields clear, 다른 상태 409, cross-project/unknown 404. 일반 create/run replay는 failed를 자동 실행하지 않는다.
+- frontend: create가 failed면 같은 job retry 후 run하며 run 응답이 HTTP 200이어도 `job.status !== succeeded`면 오류로 표시한다. succeeded replay는 retry하지 않는다. OpenAPI schema를 재생성했다.
+- 양방향 회귀: prompt v1/v2/v3 불변 보존, report-before-catalog, repair catalog 격리, strict invalid anchor, failed same-ID reset/필드 clear, pending/running/succeeded retry 409, project 격리, frontend failed→retry→run, 200 failed 오판 방지, succeeded no-retry를 잠갔다.
+
+### Live reinspection
+
+- application/frontend 재빌드·재배포. 초기 v2 반례 뒤 v3로 application 재배포했다. v2 template 변경 시 startup `PromptTemplateConflict`가 발생해 immutable 보호가 작동함을 확인했고 v3 추가로 정상화했다.
+- 원 실패 job `6a5aeba1b339f88750c0a950`: retry가 같은 ID로 pending/failure clear. 첫 v3 실제 run은 원 source_ref 오류 대신 비결정적 malformed JSON으로 1회 실패했으나, 진단 first output은 현재 catalog ID와 full anchor를 사용함을 확인했다. 다음 명시 retry/run이 **succeeded**, candidate **5개** 저장. 재클릭 run은 `idempotent_replay=true`, candidate ID 5개 불변·중복 0.
+- health: application 200/healthy, frontend HTTP 200(기존 localhost→::1 healthcheck false-negative는 별도 비차단).
+
+### Verification
+
+- backend: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1126 passed / 48 skipped / 276 subtests**.
+- frontend: `npm test -- --run` → **8 files / 124 passed**; `npm run build` PASS(94 modules); `npm run gen:api` PASS.
+- `git diff --check` PASS.
+- 독립 검증 `docs/verifications/2026-07-18/analysis_retry_v3_live.md` 최종 **합격**. Mongo에서 원 job succeeded/failure null/report present/candidate 5 unique/snapshot job 1을 재도출했다. 커밋 전 재검토에서 repair payload key는 `authoritative_source_ref_catalog`인데 system prompt가 구 `original_user_payload`를 지칭하는 내부 literal 드리프트를 추가 발견해 교정했다. 구 report pointer fixture가 old ID 미노출·authoritative ID 노출·실제 payload key 지칭을 함께 잠그도록 회귀를 강화했다.
+
+### Next steps
+
+- 오너 브라우저에서 동일 원고의 “다시 분석” UX를 체감 확인한다. 비결정적 provider JSON 실패가 반복 관측되면 raw Analysis output 관측/품질은 별도 실검수 브리프로 연다.

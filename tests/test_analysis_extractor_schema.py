@@ -201,7 +201,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        template = prompt_templates.seed_analysis_extract_v1()
+        template = prompt_templates.seed_analysis_extract_v3()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -266,7 +266,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        prompt_templates.seed_analysis_extract_v1()
+        prompt_templates.seed_analysis_extract_v3()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -350,7 +350,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        prompt_templates.seed_analysis_extract_v1()
+        prompt_templates.seed_analysis_extract_v3()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -377,6 +377,21 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
                 raw_text="민아",
                 content_hash="hash-1",
                 block_ids=("block-1",),
+                writing_candidate_report={
+                    "candidate_claims": [
+                        {
+                            "text": "민아가 편지를 발견했다.",
+                            "related_context_pointers": [
+                                {
+                                    "collection": "source_blocks",
+                                    "document_id": "old-snapshot:block:4",
+                                    "version_id": "old-version",
+                                    "content_hash": "old-hash",
+                                }
+                            ],
+                        }
+                    ]
+                },
             )
         )
 
@@ -385,6 +400,19 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn(
             "source_ref_id must exactly match the source_ref catalog",
             provider.requests[1].messages[1].content,
+        )
+        self.assertIn("advisory provenance", provider.requests[1].messages[0].content)
+        self.assertIn("Never copy document_id", provider.requests[1].messages[0].content)
+        repair_payload = json.loads(provider.requests[1].messages[1].content)
+        self.assertEqual(
+            repair_payload["authoritative_source_ref_catalog"][0]["source_ref_id"],
+            "source-ref-1",
+        )
+        self.assertNotIn("writing_candidate_report", repair_payload)
+        self.assertNotIn("old-snapshot:block:4", provider.requests[1].messages[1].content)
+        self.assertIn(
+            "authoritative_source_ref_catalog in the repair payload",
+            provider.requests[1].messages[0].content,
         )
 
     async def test_versioned_prompt_adapter_repairs_catalog_anchor_drift_once(self):
@@ -428,7 +456,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        prompt_templates.seed_analysis_extract_v1()
+        prompt_templates.seed_analysis_extract_v3()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -481,7 +509,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        prompt_templates.seed_analysis_extract_v1()
+        prompt_templates.seed_analysis_extract_v3()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -517,7 +545,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
     async def test_versioned_prompt_adapter_rejects_missing_catalog_before_provider(self):
         provider = FakeLLMProvider([])
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        prompt_templates.seed_analysis_extract_v1()
+        prompt_templates.seed_analysis_extract_v3()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,

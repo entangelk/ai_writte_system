@@ -129,6 +129,58 @@ class AnalysisJobStateTests(unittest.TestCase):
         with self.assertRaises(InvalidJobStateTransition):
             service.mark_job_running(project_id="project-1", job_id=job.id)
 
+    def test_explicit_retry_failed_to_pending_clears_failure_fields(self):
+        service, repo = _service()
+        job = _job(service)
+        service.mark_job_running(project_id="project-1", job_id=job.id)
+        service.mark_job_failed(
+            project_id="project-1",
+            job_id=job.id,
+            failure_reason=AnalysisJobFailureReason.SOURCE_INVALID,
+            failure_detail="source_ref not found",
+        )
+
+        retried = service.retry_failed_job(
+            project_id="project-1", job_id=job.id
+        )
+
+        self.assertEqual(retried.id, job.id)
+        self.assertEqual(retried.status, AnalysisJobStatus.PENDING)
+        self.assertIsNone(retried.failure_reason)
+        self.assertIsNone(retried.failure_detail)
+        self.assertEqual(repo.get_job(job.id), retried)
+
+    def test_explicit_retry_rejects_every_non_failed_state(self):
+        for status in (
+            AnalysisJobStatus.PENDING,
+            AnalysisJobStatus.RUNNING,
+            AnalysisJobStatus.SUCCEEDED,
+        ):
+            with self.subTest(status=status):
+                service, _ = _service()
+                job = _job(service)
+                if status is not AnalysisJobStatus.PENDING:
+                    service.mark_job_running(project_id="project-1", job_id=job.id)
+                if status is AnalysisJobStatus.SUCCEEDED:
+                    service.mark_job_succeeded(project_id="project-1", job_id=job.id)
+                with self.assertRaises(InvalidJobStateTransition):
+                    service.retry_failed_job(
+                        project_id="project-1", job_id=job.id
+                    )
+
+    def test_explicit_retry_enforces_project_isolation(self):
+        service, _ = _service()
+        job = _job(service)
+        service.mark_job_running(project_id="project-1", job_id=job.id)
+        service.mark_job_failed(
+            project_id="project-1",
+            job_id=job.id,
+            failure_reason=AnalysisJobFailureReason.SOURCE_INVALID,
+        )
+
+        with self.assertRaises(AnalysisNotFound):
+            service.retry_failed_job(project_id="project-2", job_id=job.id)
+
     def test_running_cannot_repeat(self):
         service, _ = _service()
         job = _job(service)

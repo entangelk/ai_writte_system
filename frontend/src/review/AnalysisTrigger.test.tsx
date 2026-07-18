@@ -39,6 +39,17 @@ const CATALOG_FULL = {
 const CATALOG_PARTIAL = { body: { source_refs: [{ start_offset: 0, end_offset: 10 }] } };
 const CATALOG_EMPTY = { body: { source_refs: [] } };
 const JOB_CREATED = { body: { job: { id: "j1", status: "pending" }, idempotent_replay: false } };
+const JOB_FAILED = {
+  body: {
+    job: {
+      id: "j1",
+      status: "failed",
+      failure_reason: "source_invalid",
+      failure_detail: "source_ref not found",
+    },
+    idempotent_replay: true,
+  },
+};
 const runResult = (n: number) => ({
   body: { job: { id: "j1", status: "succeeded" }, candidates: Array.from({ length: n }, () => ({})) },
 });
@@ -174,6 +185,60 @@ describe("AnalysisTrigger", () => {
     expect(
       await screen.findByText(/새 검토 후보가 추출되지 않았습니다/),
     ).toBeInTheDocument();
+  });
+
+  it("explicitly retries the same failed snapshot job before running it", async () => {
+    const fetchMock = mockFetch(
+      CATALOG_FULL,
+      VERSION_DETAIL,
+      JOB_FAILED,
+      { body: { id: "j1", status: "pending", failure_reason: null, failure_detail: null } },
+      runResult(1),
+    );
+    renderTrigger();
+    await userEvent.click(runButton());
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
+    expect(fetchMock.mock.calls[3][0]).toBe("/api/projects/p1/analysis/jobs/j1/retry");
+    expect(fetchMock.mock.calls[4][0]).toBe("/api/projects/p1/analysis/jobs/j1/run");
+    expect(await screen.findByText(/1개 검토 후보가 생성/)).toBeInTheDocument();
+  });
+
+  it("does not retry a succeeded replay and reports its existing candidates", async () => {
+    const fetchMock = mockFetch(
+      CATALOG_FULL,
+      VERSION_DETAIL,
+      { body: { job: { id: "j1", status: "succeeded" }, idempotent_replay: true } },
+      runResult(2),
+    );
+    renderTrigger();
+    await userEvent.click(runButton());
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(fetchMock.mock.calls.map((call) => call[0])).not.toContain(
+      "/api/projects/p1/analysis/jobs/j1/retry",
+    );
+    expect(await screen.findByText(/2개 검토 후보가 생성/)).toBeInTheDocument();
+  });
+
+  it("treats a 200 failed run envelope as an error instead of an empty success", async () => {
+    mockFetch(CATALOG_FULL, VERSION_DETAIL, JOB_CREATED, {
+      body: {
+        job: {
+          id: "j1",
+          status: "failed",
+          failure_reason: "source_invalid",
+          failure_detail: "source_ref not found",
+        },
+        candidates: [],
+      },
+    });
+    renderTrigger();
+    await userEvent.click(runButton());
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("source_ref not found");
+    expect(screen.queryByText(/새 검토 후보가 추출되지 않았습니다/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "다시 분석" })).toBeInTheDocument();
   });
 
   it("disables the button and states why when there is no saved version", () => {

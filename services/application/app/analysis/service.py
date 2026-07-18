@@ -108,6 +108,7 @@ _ALLOWED_JOB_TRANSITIONS: frozenset[tuple[AnalysisJobStatus, AnalysisJobStatus]]
             (AnalysisJobStatus.PENDING, AnalysisJobStatus.RUNNING),
             (AnalysisJobStatus.RUNNING, AnalysisJobStatus.SUCCEEDED),
             (AnalysisJobStatus.RUNNING, AnalysisJobStatus.FAILED),
+            (AnalysisJobStatus.FAILED, AnalysisJobStatus.PENDING),
         }
     )
 )
@@ -306,6 +307,14 @@ class AnalysisService:
             target=AnalysisJobStatus.FAILED,
             failure_reason=failure_reason,
             failure_detail=failure_detail,
+        )
+
+    def retry_failed_job(self, *, project_id: str, job_id: str) -> AnalysisJob:
+        """Explicitly reset one failed job; ordinary replay remains terminal."""
+        return self._transition_job(
+            project_id=project_id,
+            job_id=job_id,
+            target=AnalysisJobStatus.PENDING,
         )
 
     def _transition_job(

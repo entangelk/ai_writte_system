@@ -90,6 +90,15 @@
 
 구체 payload 예시는 구현 slice에서 test fixture와 함께 고정한다. `analysis_extract_v1`과 `analysis_extract`는 Phase 2A provider wiring의 첫 prompt/template literal로 사용한다.
 
+#### 2026-07-18 dogfood amendment — `analysis_extract_v2` → `analysis_extract_v3`
+
+accept report의 구 snapshot `related_context_pointers.document_id`와 새 snapshot의 `source_ref_catalog.source_ref_id`가 같은 prompt payload에 들어갈 때 실 12B가 anchor namespace를 혼동할 수 있음이 확인됐다. 오너 결정 C(`docs/live_review_briefs/2026-07-18/analysis_retry_after_accept.md`)로 immutable literal `analysis_extract_v2`를 추가했으나, 실제 실패 job 재실행에서 주의 문구만으로는 같은 `source_invalid`가 재현됐다. 이미 seed된 v2는 덮어쓰지 않고 보존하며, 출력 필드 계약·advisory→authoritative 직렬화 순서·report 식별자를 제외한 repair catalog를 구조적으로 잠근 새 immutable **`analysis_extract_v3`**를 기본 prompt로 승격한다.
+
+- `writing_candidate_report.related_context_pointers`는 advisory provenance이며 Analysis output의 source anchor가 아니다.
+- `source_anchors[].source_ref_id`는 현재 payload의 `source_ref_catalog[].source_ref_id` literal만 복사한다. report의 `document_id`/`version_id`/`content_hash`를 source anchor identity로 사용하지 않는다.
+- 위 구분을 first system prompt와 repair prompt 양쪽에 명시한다.
+- v1 template은 이력/재현을 위해 보존하고 v2를 새로 seed한다. strict schema/catalog validation과 repair 1회 상한은 무변이다.
+
 ### 5. Gateway 호출 surface는 어느 것을 쓰는가?
 
 결정: **첫 구현 slice는 `/v1/generate` 임시 사용으로 진행한다.**

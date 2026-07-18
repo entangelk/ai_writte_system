@@ -1219,6 +1219,60 @@ class ApplicationApiTest(unittest.TestCase):
             "provider_error",
         )
 
+    def test_analysis_retry_endpoint_resets_only_failed_job_in_place(self):
+        core_sot = CoreSotService(InMemoryCoreSotRepository())
+        analysis = AnalysisService(InMemoryAnalysisRepository())
+        client = TestClient(create_app(core_sot, analysis_service=analysis))
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        job = analysis.create_job(
+            project_id=project["id"],
+            snapshot_id="snapshot-1",
+            idempotency_key="analyze:snapshot-1",
+        ).job
+        analysis.mark_job_running(project_id=project["id"], job_id=job.id)
+        analysis.mark_job_failed(
+            project_id=project["id"],
+            job_id=job.id,
+            failure_reason=AnalysisJobFailureReason.SOURCE_INVALID,
+            failure_detail="source_ref not found",
+        )
+
+        response = client.post(
+            f"/projects/{project['id']}/analysis/jobs/{job.id}/retry"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["id"], job.id)
+        self.assertEqual(response.json()["status"], "pending")
+        self.assertIsNone(response.json()["failure_reason"])
+        self.assertIsNone(response.json()["failure_detail"])
+
+    def test_analysis_retry_endpoint_rejects_non_failed_and_cross_project(self):
+        core_sot = CoreSotService(InMemoryCoreSotRepository())
+        analysis = AnalysisService(InMemoryAnalysisRepository())
+        client = TestClient(create_app(core_sot, analysis_service=analysis))
+        project_a = client.post("/projects", json={"name": "A"}).json()
+        project_b = client.post("/projects", json={"name": "B"}).json()
+        pending = analysis.create_job(
+            project_id=project_a["id"],
+            snapshot_id="snapshot-1",
+            idempotency_key="analyze:snapshot-1",
+        ).job
+
+        non_failed = client.post(
+            f"/projects/{project_a['id']}/analysis/jobs/{pending.id}/retry"
+        )
+        cross_project = client.post(
+            f"/projects/{project_b['id']}/analysis/jobs/{pending.id}/retry"
+        )
+        missing = client.post(
+            f"/projects/{project_a['id']}/analysis/jobs/nope/retry"
+        )
+
+        self.assertEqual(non_failed.status_code, 409)
+        self.assertEqual(cross_project.status_code, 404)
+        self.assertEqual(missing.status_code, 404)
+
     def test_analysis_run_endpoint_missing_and_cross_project_returns_404(self):
         core_sot = CoreSotService(InMemoryCoreSotRepository())
         analysis = AnalysisService(InMemoryAnalysisRepository())

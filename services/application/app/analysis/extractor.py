@@ -206,6 +206,8 @@ Each candidate must contain exactly these fields:
 - payload: character_observation requires {"name": "...", "observation": "..."}; event_observation requires {"event": "..."}; open_question_observation requires {"question": "..."}
 
 Use only source_ref_id values from the original source_ref catalog. If no valid candidate can be produced, return {"candidates":[]}.
+Treat writing_candidate_report pointers as advisory provenance only. Never copy document_id, block_id, or any report identifier into source_anchors.
+Every source anchor must come from authoritative_source_ref_catalog in the repair payload.
 """
 
 
@@ -215,10 +217,16 @@ def _repair_request(
     invalid_content: str,
     parser_error: str,
 ) -> ChatCompletionRequest:
+    original_payload = json.loads(original_request.messages[-1].content)
     payload = {
         "parser_error": parser_error,
         "invalid_output": invalid_content,
-        "original_user_payload": original_request.messages[-1].content,
+        # Repair needs the source text and authoritative anchors, not the
+        # advisory report's old-snapshot pointer namespace. Keeping those IDs
+        # out of the repair turn prevents the exact namespace collision this
+        # second chance is meant to correct.
+        "snapshot_raw_text": original_payload["snapshot"]["raw_text"],
+        "authoritative_source_ref_catalog": original_payload["source_ref_catalog"],
     }
     return ChatCompletionRequest(
         messages=(
@@ -228,7 +236,6 @@ def _repair_request(
                 content=json.dumps(
                     payload,
                     ensure_ascii=False,
-                    sort_keys=True,
                     separators=(",", ":"),
                 ),
             ),
