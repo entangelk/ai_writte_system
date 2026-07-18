@@ -200,7 +200,7 @@ C Writing 작업공간은 완료됐다. 다음 frontend slice는 B Review Inbox�
 
 ## 2026-07-18 dogfood amendment — Writing Workspace V2
 
-상태: `Resolved — owner approved, W0 complete (W1 next)`
+상태: `Resolved — owner approved, W0/W1 complete (W2 next)`
 
 기존 C0~C2의 clean-latest generate→Gate→bounded loop→same-draft accept 계약은 현재 동작하는 호환 기준선으로 유지한다. 오너 dogfood에서 기능별 관통과 별개로 작품 시작 정보·원고 순서·생성 대상·분석/검토 배치가 하나의 작업공간 의미로 연결되지 않는 문제가 확인됐다.
 
@@ -213,4 +213,4 @@ C Writing 작업공간은 완료됐다. 다음 frontend slice는 B Review Inbox�
 - overview는 canonical-only이며 pending은 별도 count/link다.
 - project export는 ordered latest TXT/Markdown과 별도 manifest다.
 
-W0 계약/migration slice는 [`writing-workspace-v2-w0-contract.md`](writing-workspace-v2-w0-contract.md)와 `schemas/writing-workspace-v2-w0.schema.json`으로 완료됐다(SoT v1.7.10). ProjectBrief exact schema/API/version, ordered unit position/reorder/migration, 두 intent의 request/accept/idempotency/원자성, 양방향 boundary matrix **50행(PB12+OU14+WI22+SC2)**이 잠겼다. 독립 검증의 blocking empty cell 7개도 closure됐다. runtime 구현은 아직 없으며 다음은 **W1 editor+docked right rail+analysis/review/source deep-link**다. chapter→scene 중첩, ProjectBrief→Draft provenance, 미채택 candidate 영속, 관계 graph·완전 timeline, saved publication manifest는 계속 Deferred다.
+W0 계약/migration slice는 [`writing-workspace-v2-w0-contract.md`](writing-workspace-v2-w0-contract.md)와 `schemas/writing-workspace-v2-w0.schema.json`으로 완료됐다(SoT v1.7.10). 이어 W1은 SoT v1.7.11에서 기존 editor route를 docked right rail(`이어쓰기|분석|검토`)과 좁은 화면 동형 tab 구조로 바꾸고, `panel/candidate/source` query 복원과 exact snapshot/version + Unicode code-point offset source jump, stale/latest 표시를 구현했다. backend API/OpenAPI는 무변이다. 다음은 **W2 ProjectBrief onboarding+canonical overview**이며, chapter→scene 중첩, ProjectBrief→Draft provenance, 미채택 candidate 영속, 관계 graph·완전 timeline, saved publication manifest는 계속 Deferred다.

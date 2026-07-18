@@ -3,7 +3,7 @@
 상태: `Draft`  
 적용 범위: Phase 1의 프로젝트/원고 저장 위에 구축하고 Phase 2~6의 상태와 기능을 한 작업 공간으로 연결
 
-구현 진행: SoT v1.6.99에서 Product shell A, v1.7.1~v1.7.5에서 Writing C와 Review Inbox B를 완료했다. 2026-07-18 dogfood 뒤 SoT v1.7.9에서 Writing Workspace V2 방향을 확정하고 v1.7.10에서 W0 exact contract/migration/schema를 완료했다. runtime 구현은 아직 v1.7.8과 동일하며 다음은 W1 editor+docked right rail/source deep-link다. 전체 Product shell 수용 기준이 남아 본 문서 상태는 `Draft`를 유지한다.
+구현 진행: SoT v1.6.99에서 Product shell A, v1.7.1~v1.7.5에서 Writing C와 Review Inbox B를 완료했다. 2026-07-18 dogfood 뒤 SoT v1.7.9에서 Writing Workspace V2 방향을 확정하고 v1.7.10 W0 exact contract/migration/schema, v1.7.11 W1 editor+docked right rail/source deep-link를 완료했다. 다음은 W2 ProjectBrief onboarding+canonical overview다. 전체 Product shell 수용 기준이 남아 본 문서 상태는 `Draft`를 유지한다.
 
 ## 확정된 제품 경계
 

@@ -60,6 +60,8 @@
 
 2026-07-18 W0 종료 체크포인트: SoT v1.7.10과 `writing-workspace-v2-w0-contract.md`가 ProjectBrief·ordered unit migration/reorder·두 intent accept의 exact contract를 잠갔다. 독립 검증의 blocking empty cell 7개를 closure하고 양방향 matrix를 50행(PB12+OU14+WI22+SC2)으로 보강했다. runtime code는 무변이므로 **UX-1은 In progress 유지**, 다음 독립 slice는 W1 editor+docked right rail/source deep-link다. OPS-1·QUAL-1·GATE-1 상태는 W0 문서 완료만으로 바꾸지 않는다.
 
+2026-07-18 W1 종료 체크포인트: SoT v1.7.11에서 editor+docked right rail(`이어쓰기|분석|검토`), 좁은 화면 동형 tab, 상태줄, `panel/candidate/source` query 복원, exact snapshot/version+offset source jump와 stale/latest 표시를 구현했다. 기존 backend API/action을 재사용해 OpenAPI와 W2/W3 runtime은 바꾸지 않았다. **UX-1은 In progress 유지**, 다음 독립 slice는 W2 ProjectBrief onboarding+canonical overview다. OPS-1·QUAL-1·GATE-1 상태는 W1만으로 바꾸지 않는다.
+
 ```text
 현재
   → A: 원고·에디터·저장·version·export

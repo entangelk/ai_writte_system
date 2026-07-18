@@ -747,4 +747,141 @@ describe("DraftEditor", () => {
     expect(fetchMock.mock.calls[6][0]).toBe("/api/projects/p1/writing/accept");
     expect(fetchMock.mock.calls[7][0]).toBe("/api/projects/p1/drafts/d1/versions");
   });
+
+  it("restores a historical source by exact snapshot and code-point offsets", async () => {
+    const reviewItem = {
+      candidate_id: "c1", job_id: "j1", candidate_type: "character_observation",
+      status: "needs_review", confidence: 0.9, provenance: "ai_inferred",
+      conflict_count: 0,
+      actions: [
+        { action: "confirm", eligible: true, reason: null },
+        { action: "reject", eligible: true, reason: null },
+      ],
+    };
+    const fetchMock = mockFetch(
+      { body: project },
+      { body: draft },
+      { body: { versions: [version3, version1] } },
+      { body: detail(version3, "최신 본문") },
+      { body: { project_id: "p1", items: [reviewItem], gate_findings: [] } },
+      {
+        body: {
+          ...reviewItem,
+          payload: { name: "민아", observation: "근거를 봄" },
+          source_refs: [{
+            source_ref_id: "sr1", status: "resolved", snapshot_id: "s1",
+            block_id: "b1", start_offset: 1, end_offset: 3,
+            quote: "근거", content_hash: "hash-1",
+          }],
+          conflicts: [],
+        },
+      },
+      { body: detail(version1, "😀근거 끝") },
+    );
+
+    renderEditor("/projects/p1/drafts/d1?panel=review&candidate=c1&source=sr1");
+
+    const editor = await screen.findByLabelText("원고 본문");
+    await waitFor(() => expect(editor).toHaveValue("😀근거 끝"));
+    expect(screen.getByText(/과거 version 1 근거 · 현재 최신 원고가 아님/)).toBeInTheDocument();
+    // Server offsets count Unicode code points; textarea selection counts UTF-16
+    // code units. The leading emoji therefore moves the browser span by one.
+    expect((editor as HTMLTextAreaElement).selectionStart).toBe(2);
+    expect((editor as HTMLTextAreaElement).selectionEnd).toBe(4);
+    expect(fetchMock.mock.calls[6][0]).toBe(
+      "/api/projects/p1/drafts/d1/versions/v1",
+    );
+  });
+
+  it("keeps latest source evidence labeled latest instead of marking it stale", async () => {
+    const reviewItem = {
+      candidate_id: "c1", job_id: "j1", candidate_type: "event_observation",
+      status: "needs_review", confidence: 0.7, provenance: "ai_inferred",
+      conflict_count: 0, actions: [],
+    };
+    const fetchMock = mockFetch(
+      { body: project },
+      { body: draft },
+      { body: { versions: [version3, version1] } },
+      { body: detail(version3, "최신 본문") },
+      { body: { project_id: "p1", items: [reviewItem], gate_findings: [] } },
+      {
+        body: {
+          ...reviewItem, payload: { event: "최신 사건" }, conflicts: [],
+          source_refs: [{
+            source_ref_id: "sr3", status: "resolved", snapshot_id: "s3",
+            block_id: "b3", start_offset: 0, end_offset: 2,
+            quote: "최신", content_hash: "hash-3",
+          }],
+        },
+      },
+    );
+
+    renderEditor("/projects/p1/drafts/d1?panel=review&candidate=c1&source=sr3");
+
+    expect(await screen.findByText(/최신 version 3 근거 · 선택 영역 0–2/)).toBeInTheDocument();
+    expect(screen.queryByText(/현재 최신 원고가 아님/)).toBeNull();
+    // The already-open exact snapshot is selected in place; no version refetch.
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  it("follows a source snapshot into another draft and restores the exact selection", async () => {
+    const otherDraft = { ...draft, id: "d2", title: "둘째 장면" };
+    const otherVersion = {
+      ...version1,
+      id: "v2",
+      draft_id: "d2",
+      version_number: 2,
+      snapshot_id: "s2",
+    };
+    const reviewItem = {
+      candidate_id: "c2", job_id: "j2", candidate_type: "event_observation",
+      status: "needs_review", confidence: 0.8, provenance: "ai_inferred",
+      conflict_count: 0, actions: [],
+    };
+    const reviewDetail = {
+      ...reviewItem, payload: { event: "타 원고 사건" }, conflicts: [],
+      source_refs: [{
+        source_ref_id: "sr2", status: "resolved", snapshot_id: "s2",
+        block_id: "b2", start_offset: 0, end_offset: 2,
+        quote: "둘째", content_hash: "hash-2",
+      }],
+    };
+    const fetchMock = vi.fn(async (input: string) => {
+      const bodies: Record<string, unknown> = {
+        "/api/projects/p1": project,
+        "/api/projects/p1/drafts": { drafts: [draft, otherDraft] },
+        "/api/projects/p1/drafts/d1": draft,
+        "/api/projects/p1/drafts/d2": otherDraft,
+        "/api/projects/p1/drafts/d1/versions": { versions: [version3] },
+        "/api/projects/p1/drafts/d2/versions": { versions: [otherVersion] },
+        "/api/projects/p1/drafts/d1/versions/v3": detail(version3, "첫 원고"),
+        "/api/projects/p1/drafts/d2/versions/v2": {
+          ...detail(otherVersion, "둘째 원고"),
+          snapshot: {
+            ...detail(otherVersion, "둘째 원고").snapshot,
+            draft_id: "d2",
+          },
+        },
+        "/api/projects/p1/analysis/review-inbox": {
+          project_id: "p1", items: [reviewItem], gate_findings: [],
+        },
+        "/api/projects/p1/analysis/review-inbox/c2": reviewDetail,
+      };
+      return response({ body: bodies[input] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderEditor("/projects/p1/drafts/d1?panel=review&candidate=c2&source=sr2");
+
+    expect(await screen.findByRole("heading", { name: "둘째 장면" })).toBeInTheDocument();
+    const editor = screen.getByLabelText("원고 본문") as HTMLTextAreaElement;
+    await waitFor(() => expect(editor).toHaveValue("둘째 원고"));
+    expect(await screen.findByText(/최신 version 2 근거 · 선택 영역 0–2/)).toBeInTheDocument();
+    expect(editor.selectionStart).toBe(0);
+    expect(editor.selectionEnd).toBe(2);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toContain(
+      "/api/projects/p1/drafts",
+    );
+  });
 });

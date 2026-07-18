@@ -11,6 +11,7 @@ type AnalysisTriggerProps = {
   latestSnapshotId: string | null;
   readOnly: boolean;
   dirty: boolean;
+  onStatusChange?: (status: "idle" | "running" | "failed" | "complete") => void;
 };
 
 type Result = { candidateCount: number };
@@ -20,8 +21,15 @@ type Result = { candidateCount: number };
 // which then appear in the Review Inbox. Without this the review surface stays
 // empty and the loop is unreachable from the editor.
 export function AnalysisTrigger(props: AnalysisTriggerProps) {
-  const { projectId, draftId, latestVersionId, latestSnapshotId, readOnly, dirty } =
-    props;
+  const {
+    projectId,
+    draftId,
+    latestVersionId,
+    latestSnapshotId,
+    readOnly,
+    dirty,
+    onStatusChange,
+  } = props;
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +58,7 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
       return;
     busyRef.current = true;
     setBusy(true);
+    onStatusChange?.("running");
     setError(null);
     setResult(null);
     try {
@@ -60,8 +69,10 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
         latestSnapshotId,
       );
       setResult({ candidateCount: outcome.candidateCount });
+      onStatusChange?.("complete");
     } catch (err) {
       setError(describeApiError(err));
+      onStatusChange?.("failed");
     } finally {
       busyRef.current = false;
       setBusy(false);

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   ApiError,
   describeApiError,
@@ -7,14 +7,17 @@ import {
   getDraft,
   getDraftVersion,
   getProject,
+  listDrafts,
   listDraftVersions,
   saveDraft,
   type Draft,
   type DraftVersion,
   type Project,
+  type ReviewSourcePointer,
 } from "../api/client";
 import { WritingPanel } from "../writing/WritingPanel";
 import { AnalysisTrigger } from "../review/AnalysisTrigger";
+import { WorkspaceReviewPanel } from "../review/WorkspaceReviewPanel";
 
 type SaveIntent = {
   key: string;
@@ -33,17 +36,34 @@ function latestOf(versions: DraftVersion[]): DraftVersion | null {
   );
 }
 
+function codePointSpan(rawText: string, start: number, end: number) {
+  const points = Array.from(rawText);
+  if (start < 0 || end <= start || end > points.length) return null;
+  return {
+    quote: points.slice(start, end).join(""),
+    start: points.slice(0, start).join("").length,
+    end: points.slice(0, end).join("").length,
+  };
+}
+
 export function DraftEditor() {
   const { projectId, draftId } = useParams<{
     projectId: string;
     draftId: string;
   }>();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedPanel = searchParams.get("panel");
+  const activePanel = requestedPanel === "analysis" || requestedPanel === "review"
+    ? requestedPanel
+    : "writing";
   const [project, setProject] = useState<Project | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [rawText, setRawText] = useState("");
   const [baseline, setBaseline] = useState("");
   const [versions, setVersions] = useState<DraftVersion[]>([]);
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+  const [selectedContentHash, setSelectedContentHash] = useState<string | null>(null);
   const [versionNumber, setVersionNumber] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -52,10 +72,20 @@ export function DraftEditor() {
   const [selecting, setSelecting] = useState(false);
   const [exporting, setExporting] = useState<"txt" | "markdown" | null>(null);
   const [forcedReadOnly, setForcedReadOnly] = useState(false);
+  const [analysisStatus, setAnalysisStatus] = useState<
+    "idle" | "running" | "failed" | "complete"
+  >("idle");
+  const [pendingReviewCount, setPendingReviewCount] = useState<number | null>(null);
+  const [sourceNotice, setSourceNotice] = useState<string | null>(null);
+  const [pendingSelection, setPendingSelection] = useState<{
+    start: number;
+    end: number;
+  } | null>(null);
   const savingRef = useRef(false);
   const selectingRef = useRef(false);
   const exportingRef = useRef(false);
   const intentRef = useRef<SaveIntent | null>(null);
+  const editorRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     if (projectId === undefined || draftId === undefined) {
@@ -85,6 +115,7 @@ export function DraftEditor() {
         setBaseline(nextText);
         setVersions(versions);
         setSelectedVersionId(detail?.draft_version.id ?? null);
+        setSelectedContentHash(detail?.snapshot.content_hash ?? null);
         setVersionNumber(detail?.draft_version.version_number ?? null);
         setError(null);
       })
@@ -108,6 +139,10 @@ export function DraftEditor() {
   const onLatest = selectedVersionId !== null && selectedVersionId === latestVersionId;
 
   useEffect(() => {
+    setAnalysisStatus("idle");
+  }, [latestSnapshotId]);
+
+  useEffect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
@@ -115,6 +150,25 @@ export function DraftEditor() {
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
+
+  useEffect(() => {
+    if (pendingSelection === null) return;
+    const editor = editorRef.current;
+    if (editor === null) return;
+    editor.focus();
+    editor.setSelectionRange(pendingSelection.start, pendingSelection.end);
+    setPendingSelection(null);
+  }, [pendingSelection, rawText]);
+
+  function selectPanel(panel: "writing" | "analysis" | "review"): void {
+    const next = new URLSearchParams(searchParams);
+    next.set("panel", panel);
+    if (panel !== "review") {
+      next.delete("candidate");
+      next.delete("source");
+    }
+    setSearchParams(next);
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -154,6 +208,7 @@ export function DraftEditor() {
         ...current.filter((version) => version.id !== savedVersion.id),
       ]);
       setSelectedVersionId(savedVersion.id);
+      setSelectedContentHash(result.snapshot.content_hash);
       setVersionNumber(result.draft_version.version_number);
       setError(null);
       setNotice(
@@ -198,6 +253,7 @@ export function DraftEditor() {
       setRawText(detail.snapshot.raw_text);
       setBaseline(detail.snapshot.raw_text);
       setSelectedVersionId(detail.draft_version.id);
+      setSelectedContentHash(detail.snapshot.content_hash);
       setVersionNumber(detail.draft_version.version_number);
       setError(null);
       setNotice(null);
@@ -209,6 +265,115 @@ export function DraftEditor() {
       setSelecting(false);
     }
   }
+
+  const openSource = useCallback(async (source: ReviewSourcePointer) => {
+    if (
+      projectId === undefined ||
+      draftId === undefined ||
+      source.snapshot_id === undefined ||
+      source.start_offset === undefined ||
+      source.end_offset === undefined ||
+      savingRef.current ||
+      selectingRef.current
+    ) return;
+
+    let targetDraftId = draftId;
+    let targetVersions = versions;
+    let target = targetVersions.find(
+      (version) => version.snapshot_id === source.snapshot_id,
+    );
+
+    try {
+      if (target === undefined) {
+        const { drafts } = await listDrafts(projectId);
+        for (const candidateDraft of drafts) {
+          if (candidateDraft.id === draftId) continue;
+          const listed = await listDraftVersions(projectId, candidateDraft.id);
+          const matched = listed.versions.find(
+            (version) => version.snapshot_id === source.snapshot_id,
+          );
+          if (matched !== undefined) {
+            targetDraftId = candidateDraft.id;
+            targetVersions = listed.versions;
+            target = matched;
+            break;
+          }
+        }
+      }
+
+      if (target === undefined) {
+        setError("이 근거가 가리키는 원고 version을 찾을 수 없습니다.");
+        return;
+      }
+
+      if (targetDraftId !== draftId) {
+        const next = new URLSearchParams(searchParams);
+        next.set("panel", "review");
+        next.set("source", source.source_ref_id);
+        navigate(
+          `/projects/${projectId}/drafts/${targetDraftId}?${next.toString()}`,
+        );
+        return;
+      }
+
+      if (
+        dirty &&
+        target.id !== selectedVersionId &&
+        !window.confirm("저장하지 않은 변경 사항을 버리고 근거 version을 여시겠습니까?")
+      ) return;
+
+      selectingRef.current = true;
+      setSelecting(true);
+      const detail = target.id === selectedVersionId
+        ? null
+        : await getDraftVersion(projectId, targetDraftId, target.id);
+      const targetText = detail?.snapshot.raw_text ?? rawText;
+      const targetHash = detail?.snapshot.content_hash ?? selectedContentHash;
+      const span = codePointSpan(targetText, source.start_offset, source.end_offset);
+      if (
+        span === null ||
+        (source.quote !== undefined && span.quote !== source.quote) ||
+        (source.content_hash !== undefined && targetHash !== undefined &&
+          source.content_hash !== targetHash)
+      ) {
+        setError("근거의 offset 또는 내용이 저장된 version과 일치하지 않습니다.");
+        return;
+      }
+
+      if (detail !== null) {
+        setRawText(targetText);
+        setBaseline(targetText);
+        setSelectedVersionId(detail.draft_version.id);
+        setSelectedContentHash(detail.snapshot.content_hash);
+        setVersionNumber(detail.draft_version.version_number);
+        intentRef.current = null;
+      }
+      const newest = latestOf(targetVersions);
+      setSourceNotice(
+        target.id === newest?.id
+          ? `최신 version ${target.version_number} 근거 · 선택 영역 ${source.start_offset}–${source.end_offset}`
+          : `과거 version ${target.version_number} 근거 · 현재 최신 원고가 아님 · 선택 영역 ${source.start_offset}–${source.end_offset}`,
+      );
+      setPendingSelection({ start: span.start, end: span.end });
+      setError(null);
+      setNotice(null);
+    } catch (err) {
+      setError(describeApiError(err));
+    } finally {
+      selectingRef.current = false;
+      setSelecting(false);
+    }
+  }, [
+    dirty,
+    draftId,
+    navigate,
+    projectId,
+    rawText,
+    searchParams,
+    selectedContentHash,
+    selectedVersionId,
+    versions,
+  ]);
 
   async function download(format: "txt" | "markdown") {
     if (
@@ -264,6 +429,7 @@ export function DraftEditor() {
       setBaseline(nextText);
       setVersions(nextVersions);
       setSelectedVersionId(detail?.draft_version.id ?? null);
+      setSelectedContentHash(detail?.snapshot.content_hash ?? null);
       setVersionNumber(detail?.draft_version.version_number ?? null);
       setNotice(null);
       setError(null);
@@ -284,23 +450,30 @@ export function DraftEditor() {
           <h1>{draft?.title ?? "원고"}</h1>
           <p>{project?.name ?? "프로젝트"}</p>
         </div>
-        <Link className="review-link" to={`/projects/${projectId ?? ""}/review`}>
-          검토함 →
-        </Link>
       </header>
 
       {error !== null && <p className="alert" role="alert">{error}</p>}
 
-      {loading ? (
+      {loading || (draft !== null && draft.id !== draftId) ? (
         <p className="status-copy">원고를 불러오는 중…</p>
       ) : project === null || draft === null ? null : (
         <>
-          {readOnly && (
-            <p className="read-only-note">
-              보관된 원고는 읽기 전용입니다. 저장된 본문은 계속 읽을 수 있습니다.
-            </p>
-          )}
-          <form className="editor-form" onSubmit={submit}>
+          <div className="workspace-status" aria-label="작업 상태">
+            <span>{dirty ? "저장 안 됨" : "저장됨"}</span>
+            <span>분석 {analysisStatus === "idle" ? "미실행" : analysisStatus === "running" ? "진행 중" : analysisStatus === "failed" ? "실패" : "완료"}</span>
+            <span>검토 대기 {pendingReviewCount === null ? "—" : `${pendingReviewCount}건`}</span>
+          </div>
+          <div className="split-workspace">
+            <div className="editor-canvas">
+              {readOnly && (
+                <p className="read-only-note">
+                  보관된 원고는 읽기 전용입니다. 저장된 본문은 계속 읽을 수 있습니다.
+                </p>
+              )}
+              {sourceNotice !== null && (
+                <p className="source-jump-notice" role="status">{sourceNotice}</p>
+              )}
+              <form className="editor-form" onSubmit={submit}>
             <div className="editor-meta">
               <label htmlFor="draft-body">원고 본문</label>
               <span>
@@ -308,6 +481,7 @@ export function DraftEditor() {
               </span>
             </div>
             <textarea
+              ref={editorRef}
               id="draft-body"
               value={rawText}
               onChange={(event) => {
@@ -329,9 +503,9 @@ export function DraftEditor() {
                 </button>
               )}
             </div>
-          </form>
+              </form>
 
-          <section className="version-panel" aria-labelledby="version-history-title">
+              <section className="version-panel" aria-labelledby="version-history-title">
             <div className="version-panel-heading">
               <div>
                 <p className="eyebrow">저장 기록</p>
@@ -377,30 +551,60 @@ export function DraftEditor() {
                   ))}
               </ul>
             )}
-          </section>
+              </section>
+            </div>
 
-          {projectId !== undefined && draftId !== undefined && (
-            <>
-              <WritingPanel
-                projectId={projectId}
-                draftId={draftId}
-                latestVersionId={latestVersionId}
-                onLatest={onLatest}
-                dirty={dirty}
-                hasVersions={versions.length > 0}
-                readOnly={readOnly}
-                onAccepted={() => void reloadLatest()}
-              />
-              <AnalysisTrigger
-                projectId={projectId}
-                draftId={draftId}
-                latestVersionId={latestVersionId}
-                latestSnapshotId={latestSnapshotId}
-                readOnly={readOnly}
-                dirty={dirty}
-              />
-            </>
-          )}
+            {projectId !== undefined && draftId !== undefined && (
+              <aside className="workspace-rail" aria-label="집필 도구">
+                <div className="rail-tabs" role="tablist" aria-label="집필 도구 선택">
+                  {(["writing", "analysis", "review"] as const).map((panel) => (
+                    <button
+                      key={panel}
+                      type="button"
+                      role="tab"
+                      aria-selected={activePanel === panel}
+                      onClick={() => selectPanel(panel)}
+                    >
+                      {panel === "writing" ? "이어쓰기" : panel === "analysis" ? "분석" : "검토"}
+                    </button>
+                  ))}
+                </div>
+                <div className="rail-panel" role="tabpanel">
+                  {activePanel === "writing" && (
+                    <WritingPanel
+                      projectId={projectId}
+                      draftId={draftId}
+                      latestVersionId={latestVersionId}
+                      onLatest={onLatest}
+                      dirty={dirty}
+                      hasVersions={versions.length > 0}
+                      readOnly={readOnly}
+                      onAccepted={() => void reloadLatest()}
+                    />
+                  )}
+                  {activePanel === "analysis" && (
+                    <AnalysisTrigger
+                      projectId={projectId}
+                      draftId={draftId}
+                      latestVersionId={latestVersionId}
+                      latestSnapshotId={latestSnapshotId}
+                      readOnly={readOnly}
+                      dirty={dirty}
+                      onStatusChange={setAnalysisStatus}
+                    />
+                  )}
+                  {activePanel === "review" && (
+                    <WorkspaceReviewPanel
+                      key={draftId}
+                      projectId={projectId}
+                      onSourceSelect={(source) => void openSource(source)}
+                      onPendingCountChange={setPendingReviewCount}
+                    />
+                  )}
+                </div>
+              </aside>
+            )}
+          </div>
         </>
       )}
     </section>

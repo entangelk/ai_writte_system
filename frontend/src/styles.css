@@ -99,6 +99,182 @@ main {
   margin-bottom: 2rem;
 }
 
+.editor-page {
+  width: min(100%, 68rem);
+}
+
+.workspace-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 1rem;
+  margin-bottom: 1rem;
+  padding: 0.7rem 0;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  font-size: 0.78rem;
+}
+
+.split-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(19rem, 22rem);
+  gap: clamp(1.5rem, 4vw, 3.5rem);
+  align-items: start;
+}
+
+.editor-canvas {
+  min-width: 0;
+}
+
+.workspace-rail {
+  position: sticky;
+  top: 1rem;
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: rgba(251, 248, 241, 0.72);
+}
+
+.rail-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-bottom: 1px solid var(--line);
+}
+
+.rail-tabs button {
+  padding: 0.75rem 0.35rem;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.rail-tabs button:last-child {
+  border-right: 0;
+}
+
+.rail-tabs button[aria-selected="true"] {
+  color: var(--ink);
+  box-shadow: inset 0 -2px var(--accent);
+  font-weight: 700;
+}
+
+.rail-panel {
+  max-height: calc(100vh - 7rem);
+  overflow-y: auto;
+  padding: 1.15rem;
+}
+
+.rail-panel .writing-panel,
+.rail-panel .analysis-trigger {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.rail-panel .version-panel-heading {
+  align-items: start;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.source-jump-notice {
+  margin: 0 0 1rem;
+  padding: 0.75rem 0.9rem;
+  color: var(--accent-dark);
+  background: rgba(164, 69, 47, 0.08);
+  border-left: 2px solid var(--accent);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.rail-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.rail-section-heading h2,
+.workspace-review h3 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 500;
+}
+
+.rail-section-heading h2 {
+  font-size: 1.35rem;
+}
+
+.rail-section-heading span,
+.rail-review-list small {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.rail-review-list,
+.rail-source-list {
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rail-review-list button,
+.rail-source-list button {
+  display: grid;
+  width: 100%;
+  gap: 0.25rem;
+  padding: 0.85rem 0;
+  text-align: left;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.rail-source-list q {
+  line-height: 1.55;
+}
+
+.rail-source-list button span {
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.rail-back {
+  margin: 0 0 1rem;
+  padding: 0;
+  color: var(--accent);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.rail-detail-fields {
+  margin: 1rem 0;
+}
+
+.rail-detail-fields div {
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.rail-detail-fields dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.rail-detail-fields dd {
+  margin: 0.2rem 0 0;
+  line-height: 1.5;
+}
+
+.rail-actions {
+  margin-bottom: 1.4rem;
+}
+
 .editor-heading h1 {
   font-size: clamp(2.4rem, 5vw, 4.2rem);
 }
@@ -726,6 +902,19 @@ main {
 
   .export-actions {
     flex-wrap: wrap;
+  }
+
+  .split-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-rail {
+    position: static;
+    grid-row: 1;
+  }
+
+  .rail-panel {
+    max-height: none;
   }
 }
 

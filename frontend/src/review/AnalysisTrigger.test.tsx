@@ -90,7 +90,8 @@ afterEach(() => {
 describe("AnalysisTrigger", () => {
   it("runs the job and reports the candidate count with a review link when the catalog is complete", async () => {
     const fetchMock = mockFetch(CATALOG_FULL, VERSION_DETAIL, JOB_CREATED, runResult(2));
-    renderTrigger();
+    const onStatusChange = vi.fn();
+    renderTrigger({ onStatusChange });
     await userEvent.click(runButton());
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
@@ -108,6 +109,10 @@ describe("AnalysisTrigger", () => {
     expect(
       screen.getByRole("link", { name: /검토함에서 확인/ }),
     ).toHaveAttribute("href", "/projects/p1/review");
+    expect(onStatusChange.mock.calls.map(([status]) => status)).toEqual([
+      "running",
+      "complete",
+    ]);
   });
 
   it("builds a source_ref catalog per uncovered block when none exists", async () => {
@@ -261,9 +266,14 @@ describe("AnalysisTrigger", () => {
 
   it("surfaces an error and offers retry when the run fails", async () => {
     mockFetch(CATALOG_FULL, VERSION_DETAIL, JOB_CREATED, { status: 502, body: { detail: "extraction failed" } });
-    renderTrigger();
+    const onStatusChange = vi.fn();
+    renderTrigger({ onStatusChange });
     await userEvent.click(runButton());
     expect(await screen.findByRole("alert")).toHaveTextContent("extraction failed");
     expect(screen.getByRole("button", { name: "다시 분석" })).toBeInTheDocument();
+    expect(onStatusChange.mock.calls.map(([status]) => status)).toEqual([
+      "running",
+      "failed",
+    ]);
   });
 });

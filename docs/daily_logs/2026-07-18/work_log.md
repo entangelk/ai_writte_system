@@ -1,5 +1,51 @@
 # Work Log — 2026-07-18
 
+## Task — Writing Workspace V2 W1 split workspace
+
+### Goals
+
+- W0가 지정한 기존 DraftEditor route 안에서 editor+docked right rail(`이어쓰기|분석|검토`)을 구현한다.
+- tab/candidate/source 상태를 URL로 복원하고 source quote를 exact version/offset으로 선택하며 stale/latest를 숨기지 않는다.
+- 기존 backend API/action을 재사용하고 W2 ProjectBrief·W3 ordered unit runtime을 선행 구현하지 않는다.
+
+### User Decisions and Rationale
+
+- **W1 추가 승인 없이 진행**: 오너가 W0 인계의 고정 순서에 따라 W1 착수를 승인했다. 이미 확정된 D4=A와 W1 수용 기준을 구현했으며 새 architecture/public backend fork는 만들지 않았다.
+
+### Completed work
+
+- `DraftEditor.tsx`: 넓은 화면 2열 editor+sticky rail, 42rem 이하 같은 tab 정보구조의 단일 열. 상태줄은 저장 상태, analysis `idle|running|failed|complete`, 검토 탭에서 서버 재조회한 project pending count를 구분한다.
+- `WorkspaceReviewPanel.tsx`: 기존 review-inbox list/detail API를 rail에서 소비하고 `panel/candidate/source` query를 갱신·복원한다. candidate confirm/reject는 서버 `{action,eligible,reason}`을 재계산 없이 사용하고 성공 후 inbox를 재조회한다. edit/merge/split 전체 표면은 기존 detail route 링크로 유지한다.
+- source jump: pointer `snapshot_id`를 현재 Draft versions에 먼저 대조하고 없으면 project의 다른 Draft version 목록에서 찾는다. exact version의 `quote`와 `content_hash`가 pointer와 다르면 이동하지 않는다. 서버 raw offset(Unicode code point)을 브라우저 textarea selection(UTF-16 code unit)으로 변환해 이모지 앞 근거도 정확히 선택한다. latest와 historical version 문구를 분리한다.
+- `AnalysisTrigger.tsx`: 실행 상태 callback을 추가해 rail이 unmount돼도 parent status가 유지되며 snapshot이 바뀔 때만 idle로 초기화한다.
+- `styles.css`: docked rail/tab/status/source notice와 mobile 단일 열을 추가했다. backend, OpenAPI 생성물, W0 schema는 변경하지 않았다.
+
+### Issues found
+
+- **offset 단위 차이**: Core SOT offset은 raw Unicode code point지만 textarea `selectionStart/End`는 UTF-16 code unit이다. 단순 숫자 대입은 선행 astral 문자(emoji) 뒤에서 한 칸씩 어긋난다. code-point span을 quote 검증한 뒤 UTF-16 길이로 변환하고 선행 emoji 회귀로 잠갔다.
+- **다른 Draft source query 유실 가능성**: source 버튼이 query 갱신과 route 이동을 같은 event에서 수행하면 이전 query snapshot을 읽을 수 있다. 이동 URL에서 `panel=review`와 `source`를 명시하고 target Draft에서 review panel을 remount해 detail/source 복원을 다시 실행한다.
+
+### Decisions
+
+- **backend envelope 확장 없음**: review source pointer에 draft/version을 추가하지 않고 기존 `listDrafts`+`listDraftVersions`의 `snapshot_id`로 target을 찾는다. W1의 기존 API 재사용 경계를 지키며 source authority는 immutable snapshot에 둔다.
+- **URL이 복원 정본**: component-only tab state 대신 `panel`, candidate detail은 `candidate`, exact source는 `source` query로 둔다. 미해결 pointer나 quote/hash mismatch는 selection을 만들지 않는다.
+- **좁은 화면도 같은 정보구조**: 별도 mobile 기능 축소 없이 rail tab을 editor 위로 이동한다.
+
+### Verification
+
+- focused: `npx vitest run src/drafts/DraftEditor.test.tsx src/review/WorkspaceReviewPanel.test.tsx --reporter=verbose` → **32 passed/2 files**.
+- full frontend: `npm test` → **130 passed/9 files**.
+- build: `npm run build` → TypeScript + Vite PASS, **95 modules**.
+- contract/scope: backend·OpenAPI·schema diff 0, `git diff --check` PASS.
+- routine self-verification이므로 별도 `docs/verifications/` 기록은 만들지 않았다.
+
+### Next steps
+
+- W2: W0 §1의 ProjectBrief append-only version/API를 runtime+OpenAPI+양방향 회귀로 구현하고 onboarding+canonical overview를 연결한다. clear는 “이력 보존”으로 설명한다.
+- 이후 고정 순서: W3 ordered unit/intent → W4 project export. W3 의미를 W2에서 미리 구현하지 않는다.
+
+---
+
 ## Goals
 
 - HANDOFF·2026-07-17 로그가 지정한 다음 작업 중 오너가 선택한 트랙(**gate finding 라이브 유발**)을 진행한다.
