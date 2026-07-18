@@ -3,7 +3,7 @@
 상태: `Draft`  
 적용 범위: Phase 1의 프로젝트/원고 저장 위에 구축하고 Phase 2~6의 상태와 기능을 한 작업 공간으로 연결
 
-구현 진행: SoT v1.6.99에서 Product shell A, v1.7.1~v1.7.5에서 Writing C와 Review Inbox B를 완료했다. 2026-07-18 dogfood 뒤 SoT v1.7.9에서 Writing Workspace V2의 ProjectBrief·ordered unit·명시 generation intent·split workspace·canonical overview·project export 방향을 확정했다. runtime 구현은 아직 v1.7.8과 동일하며 다음은 W0 계약/migration slice다. 전체 Product shell 수용 기준이 남아 본 문서 상태는 `Draft`를 유지한다.
+구현 진행: SoT v1.6.99에서 Product shell A, v1.7.1~v1.7.5에서 Writing C와 Review Inbox B를 완료했다. 2026-07-18 dogfood 뒤 SoT v1.7.9에서 Writing Workspace V2 방향을 확정하고 v1.7.10에서 W0 exact contract/migration/schema를 완료했다. runtime 구현은 아직 v1.7.8과 동일하며 다음은 W1 editor+docked right rail/source deep-link다. 전체 Product shell 수용 기준이 남아 본 문서 상태는 `Draft`를 유지한다.
 
 ## 확정된 제품 경계
 
@@ -85,8 +85,8 @@
 ## 착수 전 결정사항
 
 - [ ] desktop/local web 중 첫 실행 형태
-- [x] 작품 시작 정보의 위치: Project core 확장이 아닌 별도 optional `ProjectBrief` 정본(SoT v1.7.9). exact schema/API/version은 W0
-- [x] draft/chapter/scene 첫 경계: `unit_kind=chapter|scene|other` + `position`의 평면 ordered unit. 중첩 tree는 보류(SoT v1.7.9)
+- [x] 작품 시작 정보의 위치와 계약: Project core 확장이 아닌 append-only version의 optional `ProjectBrief` 정본(SoT v1.7.10, W0 exact schema/API/version 완료)
+- [x] draft/chapter/scene 첫 경계와 W0 계약: `unit_kind=chapter|scene|other` + `position`의 평면 ordered unit. 중첩 tree는 보류(SoT v1.7.10)
 - [ ] autosave, 명시적 save, version 생성 UX
 - [ ] 제작 관리에서 실제 필요한 진행 정보
 - [x] 첫 export 형식: plain text + Markdown(SoT v1.6.14). 파일 구성/DOCX/PDF/EPUB은 후속

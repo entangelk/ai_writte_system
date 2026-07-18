@@ -247,3 +247,68 @@
 - 다음 작업자는 추가 owner 승인 없이 W0 계약/migration slice를 시작한다.
 - W0에서 ProjectBrief exact schema/API/version, ordered unit position/reorder/migration, `append_current|start_next_unit` request/accept/idempotency/원자성, 양방향 boundary matrix를 먼저 잠근다.
 - W0 완료 뒤 W1(editor+right rail+analysis/review/source jump)을 착수한다. W2~W4는 승인된 순서를 유지한다.
+
+---
+
+## Task 5 — Writing Workspace V2 W0 계약/migration
+
+### Goals
+
+- 오너가 확정한 D1=A/D2=A/D3=C를 W2/W3가 구현할 수 있는 exact public/data contract로 내린다.
+- ProjectBrief version/API, ordered unit reorder/legacy migration, 두 Writing intent accept의 멱등·원자성 경계를 정본과 기계 판독 schema에 잠근다.
+- should-fire/should-NOT-fire branch마다 named 양방향 회귀 계획을 만들고 W1 착수 금지 경계를 해제한다.
+
+### Completed work
+
+- 신규 정본 계획 `docs/plans/writing-workspace-v2-w0-contract.md`를 추가했다.
+  - ProjectBrief는 project 1:1 논리 정본/append-only version으로 확정했다. public content는 `premise/genre/tone/pov` nullable scalar와 ordered unique `constraints`; GET current null, optimistic-base+idempotent PUT, versions list/detail의 exact envelope을 정의했다.
+  - Draft에 required `unit_kind=chapter|scene|other`, archived 포함 project-wide contiguous `position=1..N`을 정의했다. reorder는 현재 전체 Draft id의 완전 순열 PUT이며 부분 move/fractional position은 열지 않았다.
+  - legacy migration은 기존 repository list order(ObjectId/삽입 순서 선례)를 보존해 `other`/`1..N`으로 부여한다. all-missing만 migration, all-valid no-op, mixed/invalid는 project 단위 fail-closed다.
+  - `intent=append_current|start_next_unit`을 request/candidate/accept identity에 결박했다. legacy intent 생략은 append로 호환하고, start는 current 뒤 position shift+Draft+v1+snapshot+blocks+accept receipt를 한 Core SOT transaction으로 commit한다. Analysis job은 기존 저장소 경계대로 commit 뒤 `analyze:{snapshot_id}`로 생성한다.
+  - 최초 ProjectBrief 11행, ordered unit 10행, Writing intent 16행으로 37행 named bidirectional regression matrix를 만들었고, 아래 독립 검증 closure에서 PB12+OU14+WI22+SC2의 총 50행으로 확장했다.
+- `schemas/writing-workspace-v2-w0.schema.json`에 ProjectBrief/Draft/reorder/next-unit/accept request-response의 Draft 2020-12 exact schema catalog를 추가했다.
+- SoT를 v1.7.10으로 올리고 CHANGELOG, Product Shell, Writing 계획, UX 브리프, 제품화 백로그, 계획 README, HANDOFF를 W0 완료/W1 next로 정렬했다.
+- runtime code, Mongo collection/index, OpenAPI, frontend는 변경하지 않았다. W0의 문서/schema-only 경계를 지켰다.
+
+### Issues found
+
+- 기존 Draft 순서는 정본 spec에 없었지만 두 repository와 `test_lists_preserve_creation_order`가 생성 순서를 deterministic하게 잠그고 있었다. 새 owner fork 없이 이 선례를 legacy migration authority로 승격했다.
+- next-unit accept는 Core SOT와 Analysis를 한 transaction으로 묶을 수 없다. 기존 accept partial-success 경계를 유지해 Draft/첫 version 원자성은 Core SOT transaction이 소유하고 Analysis는 snapshot-derived key로 사후 수렴하도록 분리했다.
+- ProjectBrief의 별도 hard delete는 append-only audit·optional onboarding과 충돌한다. all-null/empty version을 clear로 정의하고 hard delete를 열지 않았다.
+
+### Decisions
+
+- 오너의 기존 결정(별도 ProjectBrief, 최소 ordered unit, 명시 두 intent, W0→W4 세로 순서)을 그대로 구현 기준으로 사용했다.
+- ProjectBrief update는 mutable overwrite가 아니라 current base를 요구하는 append-only replacement다. 이유는 작품 정보의 변경 이력/권위 경계를 보존하면서 stale overwrite를 막기 위해서다.
+- position은 archived 포함 전체 Draft의 연속 정수 순열이다. archive 뒤 복원/삽입/export에서 collision이나 제목 추론을 만들지 않고 full reorder를 원자 검증할 수 있기 때문이다.
+- legacy Writing client는 intent 생략 시 `append_current`로 유지한다. W0가 기존 single-draft edit/save/history/export와 `continue_scene` 흐름을 깨지 않는다는 수용 기준을 따른다.
+
+### Verification
+
+- `python3 -m json.tool schemas/writing-workspace-v2-w0.schema.json` — PASS.
+- `jsonschema.Draft202012Validator.check_schema` — PASS.
+- append/start valid sample과 start+`next_unit=null` invalid sample — 양방향 schema validation PASS.
+- 연결 문서의 W0/v1.7.9 stale 상태와 v1.7.10 링크를 repo-wide 검색해 정렬했다.
+- `git diff --check` — PASS.
+
+### Next steps
+
+- W1: 기존 DraftEditor route에 editor+docked right rail(`이어쓰기/분석/검토`)을 만들고 좁은 화면은 같은 정보구조의 tab/drawer로 전환한다.
+- analysis status/pending count, query 기반 candidate/detail 복원, source quote→exact version/offset highlight와 stale/latest 표시를 함께 잠근다.
+- W1은 기존 API/action만 소비한다. ProjectBrief runtime(W2), ordered unit/intent runtime(W3), project export(W4)를 미리 구현하거나 UI에서 추정하지 않는다.
+
+### Independent verification blocking closure
+
+- 독립 기록 `docs/verifications/2026-07-18/w0_contract_migration.md`의 조건부 합격과 blocking B1~B4/C1~C3를 모두 재대조했다. 오너가 검증 기록을 바탕으로 보강과 커밋을 지시했다.
+- 포괄 행/framework routing으로 분류하지 않고 7개 empty cell을 전부 독립 named 행으로 추가했다: current brief missing/cross-project 404, reorder archived 409/missing 404, non-transaction fallback failure recovery, legacy append save-only read-through, replay precedence, append partial 502/convergence.
+- 두 방향을 함께 잠그기 위해 fallback 정상 성공·append different-key 정상 version도 추가하고, hardening H-502/H-analyze-key를 exact literal 행으로 승격했다. schema catalog fragment-only 소비/whole-root 금지 2행까지 추가해 최종 matrix는 **50행(PB 12+OU 14+WI 22+SC 2; fire 22/not-fire 28)**이다.
+- hardening 반영: raw `uniqueItems`와 trim 후 runtime 중복 검증의 역할 분리, ObjectId가 아닌 repository list behavior가 선례라는 한계, migration maintenance window/단일 runner/모든 project 성공 뒤 index 설치, W3 신규 6-surface atomicity 표현, archived slot visible ordinal, ProjectBrief clear 문구, legacy `other` 재분류 안내, delivery manifest와 saved publication manifest 구분.
+- ProjectBrief→Draft provenance는 새 persistence field를 요구하므로 조용히 결정하지 않고 Deferred로 명시했다.
+- verification record는 closure 전 working tree에 대한 독립 감사 결과이므로 수정하지 않고 역사적으로 보존했다. 독립 재판정은 수행하지 않았다.
+
+#### Closure verification
+
+- JSON Schema: `python3 -m json.tool` + `Draft202012Validator.check_schema` PASS. 19 `$defs` fragment에서 append/start 정상·교차 discriminator 거부, duplicate/unknown/version 0 거부를 재확인했다. `["a"," a"]`는 raw schema 통과 후 HTTP trim validator가 422를 소유한다는 역할 분리도 의도대로 확인했다.
+- Matrix: PB 12 + OU 14 + WI 22 + SC 2 = 50, fire 22/not-fire 28, named test 50개 중복 0 PASS.
+- 문서/schema trailing whitespace 0, `git diff --check` PASS.
+- runtime scope: `services/`·`frontend/` 변경 0. W0 문서/schema slice 경계를 유지했다.

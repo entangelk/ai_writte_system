@@ -1,0 +1,277 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.ai-writing-system/schemas/writing-workspace-v2-w0.schema.json",
+  "title": "Writing Workspace V2 W0 public contract",
+  "description": "Schema catalog. Consumers MUST select an exact operation or entity through a #/$defs/... fragment; the permissive catalog root is never an endpoint schema.",
+  "x-contract-version": "v1.7.10",
+  "$defs": {
+    "nonBlankString": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "nullableNonBlankString": {
+      "oneOf": [
+        { "$ref": "#/$defs/nonBlankString" },
+        { "type": "null" }
+      ]
+    },
+    "unitKind": {
+      "enum": ["chapter", "scene", "other"]
+    },
+    "writingIntent": {
+      "enum": ["append_current", "start_next_unit"]
+    },
+    "projectBriefVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "project_id", "version_number", "premise", "genre", "tone", "pov", "constraints"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonBlankString" },
+        "project_id": { "$ref": "#/$defs/nonBlankString" },
+        "version_number": { "type": "integer", "minimum": 1 },
+        "premise": { "$ref": "#/$defs/nullableNonBlankString" },
+        "genre": { "$ref": "#/$defs/nullableNonBlankString" },
+        "tone": { "$ref": "#/$defs/nullableNonBlankString" },
+        "pov": { "$ref": "#/$defs/nullableNonBlankString" },
+        "constraints": {
+          "type": "array",
+          "uniqueItems": true,
+          "$comment": "uniqueItems checks the raw array. HTTP validation trims each item first and rejects post-trim duplicates such as ['a', ' a'].",
+          "items": { "$ref": "#/$defs/nonBlankString" }
+        }
+      }
+    },
+    "projectBriefPutRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base_version_id", "idempotency_key", "premise", "genre", "tone", "pov", "constraints"],
+      "properties": {
+        "base_version_id": {
+          "oneOf": [
+            { "$ref": "#/$defs/nonBlankString" },
+            { "type": "null" }
+          ]
+        },
+        "idempotency_key": { "$ref": "#/$defs/nonBlankString" },
+        "premise": { "$ref": "#/$defs/nullableNonBlankString" },
+        "genre": { "$ref": "#/$defs/nullableNonBlankString" },
+        "tone": { "$ref": "#/$defs/nullableNonBlankString" },
+        "pov": { "$ref": "#/$defs/nullableNonBlankString" },
+        "constraints": {
+          "type": "array",
+          "uniqueItems": true,
+          "$comment": "uniqueItems checks the raw array. HTTP validation trims each item first and rejects post-trim duplicates such as ['a', ' a'].",
+          "items": { "$ref": "#/$defs/nonBlankString" }
+        }
+      }
+    },
+    "projectBriefGetResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["brief"],
+      "properties": {
+        "brief": {
+          "oneOf": [
+            { "$ref": "#/$defs/projectBriefVersion" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "projectBriefPutResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["brief", "idempotent_replay"],
+      "properties": {
+        "brief": { "$ref": "#/$defs/projectBriefVersion" },
+        "idempotent_replay": { "type": "boolean" }
+      }
+    },
+    "projectBriefVersionListResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["versions"],
+      "properties": {
+        "versions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/projectBriefVersion" }
+        }
+      }
+    },
+    "draftV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "project_id", "title", "archived", "unit_kind", "position"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonBlankString" },
+        "project_id": { "$ref": "#/$defs/nonBlankString" },
+        "title": { "$ref": "#/$defs/nonBlankString" },
+        "archived": { "type": "boolean" },
+        "unit_kind": { "$ref": "#/$defs/unitKind" },
+        "position": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "draftOrderPutRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ordered_draft_ids"],
+      "properties": {
+        "ordered_draft_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonBlankString" }
+        }
+      }
+    },
+    "draftOrderPutResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["drafts"],
+      "properties": {
+        "drafts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/draftV2" }
+        }
+      }
+    },
+    "nextUnitSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "unit_kind", "goal"],
+      "properties": {
+        "title": { "$ref": "#/$defs/nonBlankString" },
+        "unit_kind": { "$ref": "#/$defs/unitKind" },
+        "goal": { "$ref": "#/$defs/nullableNonBlankString" }
+      }
+    },
+    "contextPosition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["draft_id", "version_id"],
+      "properties": {
+        "draft_id": { "$ref": "#/$defs/nonBlankString" },
+        "version_id": { "$ref": "#/$defs/nonBlankString" }
+      }
+    },
+    "writingAcceptCommon": {
+      "type": "object",
+      "required": [
+        "request_id", "draft_id", "base_version_id", "idempotency_key",
+        "instruction", "candidate_text", "task_type", "output_type",
+        "draft_excerpt", "query", "current_position", "max_tokens",
+        "intent", "next_unit"
+      ],
+      "properties": {
+        "request_id": { "$ref": "#/$defs/nonBlankString" },
+        "draft_id": { "$ref": "#/$defs/nonBlankString" },
+        "base_version_id": { "$ref": "#/$defs/nonBlankString" },
+        "idempotency_key": { "$ref": "#/$defs/nonBlankString" },
+        "instruction": { "$ref": "#/$defs/nonBlankString" },
+        "candidate_text": { "$ref": "#/$defs/nonBlankString" },
+        "task_type": { "const": "continue_scene" },
+        "output_type": { "const": "draft_patch" },
+        "draft_excerpt": { "type": "string" },
+        "query": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "null" }
+          ]
+        },
+        "current_position": { "$ref": "#/$defs/contextPosition" },
+        "max_tokens": { "type": "integer", "minimum": 1 },
+        "intent": { "$ref": "#/$defs/writingIntent" },
+        "next_unit": {
+          "oneOf": [
+            { "$ref": "#/$defs/nextUnitSpec" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "writingAcceptRequestV2": {
+      "oneOf": [
+        {
+          "allOf": [
+            { "$ref": "#/$defs/writingAcceptCommon" },
+            {
+              "type": "object",
+              "properties": {
+                "intent": { "const": "append_current" },
+                "next_unit": { "type": "null" }
+              }
+            }
+          ],
+          "unevaluatedProperties": false
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/writingAcceptCommon" },
+            {
+              "type": "object",
+              "properties": {
+                "intent": { "const": "start_next_unit" },
+                "next_unit": { "$ref": "#/$defs/nextUnitSpec" }
+              }
+            }
+          ],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "savedWritingTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["draft_id", "draft_version_id", "version_number", "snapshot_id", "content_hash", "unit_kind", "position"],
+      "properties": {
+        "draft_id": { "$ref": "#/$defs/nonBlankString" },
+        "draft_version_id": { "$ref": "#/$defs/nonBlankString" },
+        "version_number": { "type": "integer", "minimum": 1 },
+        "snapshot_id": { "$ref": "#/$defs/nonBlankString" },
+        "content_hash": { "$ref": "#/$defs/nonBlankString" },
+        "unit_kind": { "$ref": "#/$defs/unitKind" },
+        "position": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "writingAcceptResponseV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted", "intent", "gate", "saved", "analysis_job", "idempotent_replay"],
+      "properties": {
+        "accepted": { "type": "boolean" },
+        "intent": { "$ref": "#/$defs/writingIntent" },
+        "gate": {
+          "oneOf": [
+            { "type": "object" },
+            { "type": "null" }
+          ]
+        },
+        "saved": {
+          "oneOf": [
+            { "$ref": "#/$defs/savedWritingTarget" },
+            { "type": "null" }
+          ]
+        },
+        "analysis_job": {
+          "oneOf": [
+            { "type": "object" },
+            { "type": "null" }
+          ]
+        },
+        "idempotent_replay": { "type": "boolean" }
+      }
+    },
+    "writingAcceptAnalysisPartialV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted", "intent", "saved", "analysis_job", "analysis_error"],
+      "properties": {
+        "accepted": { "const": true },
+        "intent": { "$ref": "#/$defs/writingIntent" },
+        "saved": { "$ref": "#/$defs/savedWritingTarget" },
+        "analysis_job": { "type": "null" },
+        "analysis_error": { "$ref": "#/$defs/nonBlankString" }
+      }
+    }
+  }
+}

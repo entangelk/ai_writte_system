@@ -58,6 +58,8 @@
 
 2026-07-18 Writing Workspace V2 결정 체크포인트: dogfood가 A+C+B의 기능 관통과 별개로 작품 정보·원고 순서·생성 대상·분석/검토 동선의 구조 결손을 드러냈다. 오너는 `docs/live_review_briefs/2026-07-18/writing_workspace_ux_restructure.md`의 D1=A·D2=A·D3=C·D4=A·D5=A·D6=A·전체 C를 확정했다(SoT v1.7.9). 따라서 **UX-1은 완료가 아니라 In progress 유지**하며 다음 독립 slice는 W0 계약/migration이다. OPS-1·QUAL-1·GATE-1 상태는 이번 문서 결정만으로 바꾸지 않는다.
 
+2026-07-18 W0 종료 체크포인트: SoT v1.7.10과 `writing-workspace-v2-w0-contract.md`가 ProjectBrief·ordered unit migration/reorder·두 intent accept의 exact contract를 잠갔다. 독립 검증의 blocking empty cell 7개를 closure하고 양방향 matrix를 50행(PB12+OU14+WI22+SC2)으로 보강했다. runtime code는 무변이므로 **UX-1은 In progress 유지**, 다음 독립 slice는 W1 editor+docked right rail/source deep-link다. OPS-1·QUAL-1·GATE-1 상태는 W0 문서 완료만으로 바꾸지 않는다.
+
 ```text
 현재
   → A: 원고·에디터·저장·version·export

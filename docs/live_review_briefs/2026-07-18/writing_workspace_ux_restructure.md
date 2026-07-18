@@ -1,6 +1,6 @@
 # 실검수 브리프 — Writing Workspace UX 구조 개편
 
-상태: `Resolved — owner approved, implementation not started (W0 next)`
+상태: `Resolved — owner approved, W0 complete (W1 next)`
 작성일: `2026-07-18`
 발견 경로: 오너 실제 집필 dogfood
 정본 연결: [`system-contract-sot.md`](../../system-contract-sot.md), [`product-shell.md`](../../plans/product-shell.md), [`frontend-writing-workspace-decisions.md`](../../plans/frontend-writing-workspace-decisions.md), [`06-review-ui.md`](../../plans/06-review-ui.md), [`07-conversational-authoring.md`](../../plans/07-conversational-authoring.md), [`product-readiness-backlog.md`](../../plans/product-readiness-backlog.md)
@@ -161,7 +161,7 @@
 - ProjectBrief, ordered unit, Writing intent/accept의 public contract와 기존 데이터 기본값을 확정.
 - 기존 Draft는 migration 시 `unit_kind=other`, 현재 저장 순서를 deterministic position으로 둘지 결정한다.
 
-다음 작업자는 **W0부터 시작**한다. W0의 산출물은 (1) ProjectBrief exact schema/API/version 경계, (2) ordered unit position·reorder·기존 데이터 migration 규칙, (3) `append_current|start_next_unit` request/accept/idempotency·원자성 계약, (4) 각 should-fire/should-NOT-fire branch의 named 양방향 회귀 계획이다. 이 네 항목이 정본 문서와 schema에 반영되기 전에는 W1 UI 코드를 시작하지 않는다. 기존 데이터 순서나 position 충돌 처리처럼 저장소 precedent로 하나가 도출되지 않는 새 fork가 발견되면 별도 owner brief로 올린다.
+W0는 [`writing-workspace-v2-w0-contract.md`](../../plans/writing-workspace-v2-w0-contract.md)와 [`writing-workspace-v2-w0.schema.json`](../../../schemas/writing-workspace-v2-w0.schema.json)으로 완료됐다(SoT v1.7.10). (1) ProjectBrief exact schema/API/version, (2) ordered unit position·reorder·기존 데이터 migration, (3) `append_current|start_next_unit` request/accept/idempotency·원자성, (4) should-fire/should-NOT-fire named 양방향 회귀 **50행(PB12+OU14+WI22+SC2)**이 정본화됐다. 독립 검증의 blocking empty cell 7개는 전부 named 행으로 닫았다. W1 착수 금지 경계는 해제됐고 다음은 W1 UI다.
 
 ### Slice W1 — 한 화면 집필 루프
 
@@ -209,4 +209,4 @@
 
 ## 인계 상태
 
-오너 결정은 완료됐으며 추가 승인 없이 **W0 계약·migration slice**를 착수할 수 있다. W0가 닫히면 첫 code slice는 W1(editor + right rail + analysis/review/source jump)이다. W1의 source deep-link는 version/offset selection 계약을 함께 잠그며 단순 CSS 2열로 끝내지 않는다.
+오너 결정과 W0 계약은 완료됐으며 추가 승인 없이 **W1(editor + right rail + analysis/review/source jump)**를 착수할 수 있다. W1의 source deep-link는 version/offset selection 계약을 함께 잠그며 단순 CSS 2열로 끝내지 않는다.
