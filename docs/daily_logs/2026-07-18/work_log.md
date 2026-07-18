@@ -66,12 +66,15 @@
 ### Goals
 
 - 오너가 실 브라우저 dogfood에서 발견한 3건을 해결해 테스트베드를 실제로 관측·조작 가능하게 만든다: (A) 이어쓰기 502 "report field must be an array", (B) 검토 트리거 버튼 부재·집필↔검토 분리, (C) 진행/판정/에러가 안 보이는 블랙박스.
+- 독립 검증과 커밋이 끝난 D5=A snapshot-scoped analysis job 변경을 application/frontend에 재배포하고, 같은 snapshot 재호출이 job 1개·candidate 중복 0으로 수렴하는지 라이브에서 닫는다.
+- 독립 검증이 non-blocking으로 남긴 accept `writing_candidate_report` 소비 축을 실 12B 라이브로 보강한 뒤 검증 기록·HANDOFF와 함께 커밋한다.
 - 차후(오너 명시 보류): 멀티턴 대화, 스트리밍 모드, 2중 탭 작업공간 세분화.
 
 ### User Decisions and Rationale
 
 - **범위 = A+B+C 통합**(오너 선택): 세 문제가 "테스트를 위해 먼저 충족돼야 할 것"으로 묶여 한 슬라이스로 처리.
 - **502 처리 = UI 재시도 + 백엔드 2차 repair**(오너 선택): 세 후보(파서 관대화 null→[] / UI 재시도만 / UI+2차 repair) 중. 근거로 제시·수용: 502가 **간헐적·입력 의존**(새 장면 generate 4/4 성공)이라 결정적 버그가 아니며, report가 간헐 실패이므로 repair를 1→2회로 늘려 실패율을 낮추되 strict 계약(엄격 스키마)은 건드리지 않고, UI에서 사람이 읽을 안내+재시도로 dead-end를 없앤다. 파서 관대화(null→[])는 계약 완화라 이번엔 보류.
+- **D5=A 검증 hardening까지 보강 후 커밋**(오너 요청): 독립 검증의 핵심 판정은 합격이지만 accept report 소비가 코드 추론으로만 남았으므로, 문구만 낮추지 않고 accept→동일 job trigger→run 라이브 1회로 마지막 축을 닫아 문서 3개를 함께 커밋한다.
 
 ### Completed work
 
@@ -131,6 +134,19 @@
 - **효과**: `create_job` `(project,snapshot,key)` 멱등이 **snapshot당 한 job**으로 수렴 — accept가 심은 job을 trigger가 재사용(orphan 0), 재클릭도 같은 job(중복 후보 0; 이미 SUCCEEDED면 재추출 없이 기존 후보 반환), accept가 job에 실은 `writing_candidate_report`도 run에서 소비(효율성 #14 부수 해소). accept-replay 멱등 보존(같은 accept→같은 snapshot→같은 job).
 - **회귀**: 백엔드 `test_writing_accept.py::test_analysis_job_key_is_snapshot_scoped_and_shared_with_trigger`(snapshot-scope key·trigger create_job 재사용·job 1개). 프론트 AnalysisTrigger 첫 테스트에 deterministic key(`analyze:s1`) pin(random uuid 회귀 bite). 기존 accept replay 회귀 무영향. 계약 개정 기록: `docs/plans/05-writing-accept-decisions.md`(2026-07-18 amendment) + SoT v1.7.7.
 
+### D5=A 재배포·라이브 closure
+
+- **배포**: 실행 컨테이너 label에서 기존 compose 조합(base + llama + cached-GGUF scratchpad override)을 재도출했다. Compose 2.40.2 Bake 경로가 `doBuildBake` slice-bounds panic으로 즉시 실패해 실행 컨테이너는 건드리지 않은 채, 저장소 선례대로 `COMPOSE_BAKE=false`로 application/frontend를 재빌드했다(application `sha256:b40e529a...`, frontend `sha256:02e9314d...`, Vite 94 modules). 동일 조합으로 두 서비스만 재생성했고 application healthy, frontend와 application HTTP 200을 확인했다.
+- **브라우저 동등 라이브**: `http://127.0.0.1:5173/api` 경로에서 별도 프로젝트/원고/snapshot(`6a5ae7f6b339f88750c0a92c`)을 만들고 저장 block offset으로 source_ref catalog를 구성했다. `analyze:{snapshot_id}` create→run을 반복한 뒤 추가 replay로 공개 응답을 고정했다: job ID `6a5ae7f6b339f88750c0a92f` 동일, create/run `idempotent_replay=true`, candidate **2→2**, candidate ID 집합 불변·유일. Mongo 정본 대조도 해당 snapshot **analysis_jobs=1**, 해당 job **analysis_candidates=2**, candidate ID 중복 0. 따라서 같은 snapshot 재클릭의 job/candidate 적산이 라이브에서 발생하지 않았다.
+- **검증 수치 인계 확인**: 직전 독립 검증자가 `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` **1119 passed / 48 skipped / 273 subtests**, 프론트 Vitest **121 passed / 8 files**, build·schema diff 0을 재현하고 커밋 `965e34e`에 반영했다. 이번 작업은 그 clean commit을 배포하고 live D5를 닫는 범위라 전체 스위트를 중복 실행하지 않았다.
+- **운영 이슈(비차단)**: frontend nginx는 `127.0.0.1:80`/호스트 `:5173`에서 200이나 healthcheck `http://localhost/`가 Alpine 컨테이너에서 `::1`로 해석되어 connection refused, compose status만 `unhealthy`인 false-negative다. D5 동작과 무관하고 기존 설정이라 이번 범위에서는 수정하지 않았으며, 후속 운영 소수정으로 `127.0.0.1` 고정을 남긴다.
+
+### D5=A 독립 검증 hardening — accept report 소비 라이브 closure
+
+- 독립 검증 `docs/verifications/2026-07-18/d5a_live_deploy.md`는 배포·snapshot 재클릭 dedup을 **합격**시켰지만, 당시 Mongo 22개 job 중 `writing_candidate_report` 보유가 0이라 accept report 소비를 non-blocking 미실증으로 남겼다. 오너 요청에 따라 별도 프로젝트에서 해당 축을 추가 관통했다.
+- 브라우저 동등 `:5173/api` + 실 12B: base 원고→`POST /writing/accept`가 Gate `pass`, snapshot `6a5aeb6ab339f88750c0a947`과 pending job `6a5aeb6ab339f88750c0a948` 생성. 저장 block offset으로 source_ref catalog를 만든 뒤 동일 `analyze:{snapshot_id}` create는 같은 job + `idempotent_replay=true`; 첫 run은 `false`(실제 소비), 둘째 run은 `true`.
+- Mongo 정본: 해당 snapshot job **1**, job status `succeeded`, `writing_candidate_report` 존재. report claim `민아는 탁자 위에서 은빛 열쇠를 발견했다.`/event hint가 저장됐고, run candidate **1**의 payload도 같은 사건, ID 중복 0. accept report 저장→동일 job 재사용→runner 소비 전 축이 라이브로 닫혔다.
+
 ### 남은 비차단/효율성 소견 (오너 판단, 미구현)
 
 - full-span catalog anchor 정밀도(#12), 이어쓰기마다 catalog 재빌드(#13 — 단, 재클릭 재추출은 D5=A 정렬로 해소), `describeWritingError` dead 매처(#8), DraftEditor 검토함 링크 회귀(#11 nit) 등은 오너 판단 영역으로 남긴다.
@@ -138,4 +154,5 @@
 ### Next steps
 - 오너 브라우저 dogfood로 A/B/C 체감 확인 → 남은 UX(멀티턴·스트리밍·2중 탭)는 별도 슬라이스.
 - gate finding 라이브 유발(Task 1)과 함께 `OPS-1` Ready·dogfood 착수 오너 결정.
+- frontend healthcheck false-negative(`localhost`→`::1`)를 별도 운영 소수정으로 처리할지 결정.
 - 스택 실행 중(오너 종료 미선택).
