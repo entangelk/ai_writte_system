@@ -210,3 +210,40 @@
 ### Next steps
 
 - 오너 브라우저에서 동일 원고의 “다시 분석” UX를 체감 확인한다. 비결정적 provider JSON 실패가 반복 관측되면 raw Analysis output 관측/품질은 별도 실검수 브리프로 연다.
+
+---
+
+## Task 4 — Writing Workspace UX 구조 개편 분석
+
+### Goals
+
+- 오너 dogfood에서 제기된 작품 시작 정보 부재, 이어쓰기 대상 모호성, editor↔review 왕복, 작품 overview·전체 export 부재를 개별 UI 불편이 아닌 정보구조/정본 경계 문제로 분석한다.
+- 프롬프트 지시가 아니라 구조화 정본·명시 intent·validator·작업공간 layout으로 해결할 범위를 나누고 구현 전 decision brief를 남긴다.
+
+### Completed work
+
+- 현 정본/API/UI를 대조했다. `Project`는 name, `Draft`는 title만 있고 작품 brief·unit kind/order/parent가 없다. Writing은 `continue_scene + draft_patch`와 same-draft accept만 지원해 “현재 append”와 “다음 장 시작”을 구조적으로 구분하지 못한다.
+- editor와 Review Inbox가 별도 route이고 source pointer의 editor selection/highlight 계약이 없다. Writing candidate는 component state라 route 이동/새로고침에서 미채택 산출을 잃을 수 있다.
+- canonical memory list API는 존재하지만 frontend overview가 없다. 프로젝트 export는 ordered draft/version 선택 계약이 없어 현재 단일 version export를 안전하게 확장할 수 없다.
+- 추가 UX 후보로 상태 바, 근거 점프, 이전/다음 원고 이동, pane/query 복원, responsive fallback, canonical/pending 권위 배지, 다음 미처리 candidate 이동, progressive onboarding을 도출했다.
+- 신규 실검수 브리프 `docs/live_review_briefs/2026-07-18/writing_workspace_ux_restructure.md`에 D1~D6와 전체 접근 옵션, 추천, W0~W4 실행 순서와 수용 기준을 기록했다.
+
+### Issues found
+
+- UI-only split pane을 먼저 꾸미면 project brief, draft order, generation target authority가 없어 의미를 다시 뜯을 위험이 있다.
+- 반대로 ProjectBrief·chapter tree·generation intent·overview·export를 한 번에 설계하면 dogfood feedback이 늦고 migration 표면이 과도하다.
+- 작품 종합 화면에서 `needs_review`와 canonical을 혼합하면 승인 전 후보가 정본처럼 보이는 기존 권위 계약을 위반한다.
+- 전체 export는 제목/생성 순서를 서사 순서로 추정해서는 안 되며 backend ordered-unit 계약이 선행돼야 한다.
+
+### Decisions
+
+- 오너가 작업자 권장 조합을 전부 확정했다: `D1=A(ProjectBrief 별도 정본), D2=A(최소 ordered unit), D3=C(append_current/start_next_unit 명시 intent), D4=A(editor+docked right rail), D5=A(canonical-only overview), D6=A(ordered latest export), 전체 접근=C(구조 세로 슬라이스)`.
+- 결정 이유: prompt/UI 문구가 작품 권위·원고 순서·저장 target을 추론하게 두지 않고 정본과 명시 discriminator로 강제하되, big-bang 대신 dogfood 가능한 W0~W4 행동 단위로 검증한다.
+- 프롬프트는 구조화 intent/authority를 반복 설명하는 defense-in-depth로 유지하고, 저장 target이나 권위 결정을 맡기지 않는다.
+- SoT를 v1.7.9로 올리고 Product Shell·Writing 결정 계획·제품화 백로그를 같은 방향으로 정렬했다. runtime code/schema/API는 아직 v1.7.8과 동일하다.
+
+### Next steps
+
+- 다음 작업자는 추가 owner 승인 없이 W0 계약/migration slice를 시작한다.
+- W0에서 ProjectBrief exact schema/API/version, ordered unit position/reorder/migration, `append_current|start_next_unit` request/accept/idempotency/원자성, 양방향 boundary matrix를 먼저 잠근다.
+- W0 완료 뒤 W1(editor+right rail+analysis/review/source jump)을 착수한다. W2~W4는 승인된 순서를 유지한다.

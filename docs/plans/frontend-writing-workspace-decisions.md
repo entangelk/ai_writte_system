@@ -197,3 +197,20 @@ C Writing 작업공간은 완료됐다. 다음 frontend slice는 B Review Inbox�
 - Review Inbox UI, memory card, source deep link
 - `main.py` 전 도메인 router 일괄 분리
 - Phase 7 대화형 수정·아이디에이션·directive 감독
+
+## 2026-07-18 dogfood amendment — Writing Workspace V2
+
+상태: `Resolved — owner approved, W0 implementation pending`
+
+기존 C0~C2의 clean-latest generate→Gate→bounded loop→same-draft accept 계약은 현재 동작하는 호환 기준선으로 유지한다. 오너 dogfood에서 기능별 관통과 별개로 작품 시작 정보·원고 순서·생성 대상·분석/검토 배치가 하나의 작업공간 의미로 연결되지 않는 문제가 확인됐다.
+
+오너는 [`writing_workspace_ux_restructure.md`](../live_review_briefs/2026-07-18/writing_workspace_ux_restructure.md)의 **D1=A · D2=A · D3=C · D4=A · D5=A · D6=A · 전체 접근=C**를 확정했다.
+
+- 별도 `ProjectBrief` 정본을 두고 Writing context가 구조화 item으로 소비한다.
+- Draft는 `unit_kind=chapter|scene|other`와 `position`을 가진 평면 ordered unit으로 확장한다.
+- `append_current|start_next_unit`을 공개 discriminator로 구분하며, 후자는 accept 시 새 Draft+첫 version을 원자적·멱등으로 만든다.
+- editor는 docked right rail의 Writing/Analysis/Review/Overview와 결합하고, 좁은 화면은 같은 정보구조의 tab/drawer를 쓴다.
+- overview는 canonical-only이며 pending은 별도 count/link다.
+- project export는 ordered latest TXT/Markdown과 별도 manifest다.
+
+다음 작업은 **W0 계약/migration slice**다. ProjectBrief exact schema/API/version, ordered unit position/reorder/migration, 두 intent의 request/accept/idempotency/원자성, 양방향 boundary matrix를 먼저 정본과 테스트 계획으로 잠근다. 이 작업이 끝나기 전 W1 UI를 구현하지 않는다. chapter→scene 중첩, 미채택 candidate 영속, 관계 graph·완전 timeline, saved publication manifest는 계속 Deferred다.
