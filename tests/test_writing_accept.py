@@ -22,7 +22,7 @@ from services.application.app.core_sot.service import (
 from services.application.app.main import create_app
 from services.application.app.writing.accept import (
     StaleWritingBase, WritingAcceptAnalysisError, WritingAcceptService,
-    _append_patch,
+    _append_patch, analysis_job_key,
 )
 from services.application.app.writing.models import (
     CandidateClaim, CandidateClaimType, WritingCandidate,
@@ -125,6 +125,23 @@ class WritingAcceptServiceTest(unittest.TestCase):
         self.assertEqual(result.analysis_job.snapshot_id, result.saved.snapshot.id)
         self.assertEqual(len(self.core.list_draft_versions(
             project_id=self.project, draft_id=self.draft.id)), 2)
+
+    def test_analysis_job_key_is_snapshot_scoped_and_shared_with_trigger(self):
+        # D5=A alignment: accept's analysis job key is derived from the snapshot,
+        # so the explicit "이 원고 분석" trigger — which only knows the snapshot —
+        # reuses the SAME job via create_job's (project, snapshot, key)
+        # idempotency, instead of minting a new one (no orphan, no duplicate).
+        result = self._accept()
+        snapshot_id = result.saved.snapshot.id
+        self.assertEqual(result.analysis_job.idempotency_key,
+                         analysis_job_key(snapshot_id))
+        # The trigger's create_job with the same derived key replays accept's job.
+        replay = self.analysis.create_job(
+            project_id=self.project, snapshot_id=snapshot_id,
+            idempotency_key=analysis_job_key(snapshot_id))
+        self.assertTrue(replay.idempotent_replay)
+        self.assertEqual(replay.job.id, result.analysis_job.id)
+        self.assertEqual(len(self.analysis_repo.jobs), 1)  # one shared job
 
     def test_non_pass_is_normal_no_write_outcome(self):
         for decision in (WritingGateDecision.REVISE,

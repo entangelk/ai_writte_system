@@ -65,6 +65,13 @@ Each `type` and `severity` must be one literal from its pipe-separated list, not
 class InvalidCandidateReport(RuntimeError): pass
 
 
+# A real 12B occasionally emits a malformed report (e.g. a non-array field) that
+# the first repair does not fix; a second bounded repair recovers most of these
+# before the whole candidate is discarded. Each retry's usage is still metered so
+# the aggregate budget (B2) accounts for it.
+MAX_REPORT_REPAIRS = 2
+
+
 def seed_report_template(service: PromptTemplateService):
     return service.seed_template(task_type=TASK, version=VERSION, template=TEMPLATE)
 
@@ -99,22 +106,33 @@ class WritingCandidateReportService:
         request = self._request(candidate, package, template.template)
         result = await self.provider.generate(request)
         usage = result.usage
+        raw = result.content
         try:
-            report = parse_report(result.content, allowed_pointers=allowed)
-        except ValueError as first:
+            report = parse_report(raw, allowed_pointers=allowed)
+        except ValueError as exc:
+            report, error = None, exc
+        # Bounded repair loop: feed the latest malformed output + its parse error
+        # back for up to MAX_REPORT_REPAIRS retries before discarding the candidate.
+        repairs = 0
+        while report is None and repairs < MAX_REPORT_REPAIRS:
+            repairs += 1
             try:
-                repair = await self.provider.generate(ChatCompletionRequest(messages=(
+                retry = await self.provider.generate(ChatCompletionRequest(messages=(
                     ChatMessage(role="system", content=TEMPLATE),
-                    ChatMessage(role="user", content=json.dumps({"invalid": result.content,
-                        "error": str(first)}, ensure_ascii=False))),
+                    ChatMessage(role="user", content=json.dumps({"invalid": raw,
+                        "error": str(error)}, ensure_ascii=False))),
                     model=self.model, max_tokens=self.max_tokens, thinking=False))
             except Exception as exc:
                 raise MeteredCallError(exc, usage) from exc
-            usage = add_usage(usage, repair.usage)
-            try: report = parse_report(repair.content, allowed_pointers=allowed)
-            except ValueError as second:
-                cause = InvalidCandidateReport(str(second))
-                raise MeteredCallError(cause, usage) from second
+            usage = add_usage(usage, retry.usage)
+            raw = retry.content
+            try:
+                report = parse_report(raw, allowed_pointers=allowed)
+            except ValueError as exc:
+                report, error = None, exc
+        if report is None:
+            cause = InvalidCandidateReport(str(error))
+            raise MeteredCallError(cause, usage) from error
         return replace(candidate, **report), usage
 
     def _request(self, candidate, package, template):

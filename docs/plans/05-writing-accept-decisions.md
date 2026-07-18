@@ -14,6 +14,12 @@
 - **D5=A first, C 확장 고려**: 첫 slice는 pending Analysis job 생성. job identity/상태를 응답해 후속 background run이 같은 job을 소비할 수 있게 둔다.
 - **D6=A, D7=A**: Gate non-pass는 `200 accepted=false`; save 후 job 생성 실패는 saved artifact를 포함한 `502 partial-success`로 반환하고 same-key retry로 수렴한다.
 
+## Owner decision amendment — 2026-07-18 (D4=A analysis-key literal, D5=A 정렬)
+
+- **맥락**: 프론트 `AnalysisTrigger`("이 원고 분석")가 검토 후보를 만드는 유일 실경로가 됐는데(SoT v1.7.6 B), 이 trigger는 accept의 idempotency key를 모르고 **snapshot만** 안다. 원 D4=A의 analysis key literal `writing-accept:{idempotency_key}`는 accept 요청에 묶여 있어, trigger가 매번 새 job(random key)을 만들면 (a) accept의 pending job은 orphan, (b) 같은 snapshot 재분석 시 job-scope dedup(`service.py:420`)이 안 걸려 **같은 후보가 검토함에 중복 적산**됐다. 이는 D5=A 본문("후속 run이 **같은 job**을 소비")의 의도와 어긋난다(독립 검증 2026-07-18 지적).
+- **오너 결정(완전 D5=A 정렬)**: **analysis job key를 snapshot 유도(`analyze:{snapshot_id}`)로 개정**한다. accept와 trigger가 동일 literal(`writing/accept.py::analysis_job_key`, 프론트 `client.ts::analyzeVersion`이 미러)을 파생하므로 `create_job`의 `(project, snapshot, key)` 멱등이 **snapshot당 한 job**으로 수렴한다 — accept가 심은 job을 trigger가 재사용(orphan 0), 재클릭도 같은 job(중복 후보 0, 이미 SUCCEEDED면 재추출 없이 기존 후보 반환), accept가 job에 실은 `writing_candidate_report`도 실제 run에서 소비된다.
+- **범위**: **analysis key literal만** 개정한다. **save key는 `writing-accept:{idempotency_key}` 무변**(정본 version replay는 accept intent 단위 유지). accept-replay 멱등은 보존된다 — 같은 accept는 같은 snapshot을 재도출하므로 여전히 같은 job으로 replay된다(회귀 `test_writing_accept.py::test_analysis_job_key_is_snapshot_scoped_and_shared_with_trigger`, `test_same_key_replays_without_gate_or_duplicate`).
+
 ## Options table
 
 ### D1 — 적용 대상과 stale base 처리

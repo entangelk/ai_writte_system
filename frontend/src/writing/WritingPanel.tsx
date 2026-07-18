@@ -3,6 +3,7 @@ import {
   ApiError,
   acceptWriting,
   describeApiError,
+  describeWritingError,
   gateWriting,
   generateWriting,
   reviseAndGateWriting,
@@ -198,7 +199,11 @@ export function WritingPanel(props: WritingPanelProps) {
     "generating" | "improving" | "accepting" | null
   >(null);
   const [error, setError] = useState<string | null>(null);
+  const [retryable, setRetryable] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // Coarse phase label so the server-side pipeline (근거 검색 → 초안 생성 → 보고서
+  // → Gate) is not a black box while the two calls run.
+  const [progress, setProgress] = useState<string | null>(null);
   const busyRef = useRef(false);
   const intentRef = useRef<AcceptIntent | null>(null);
   const loopIntentRef = useRef<WritingReviseRequest | null>(null);
@@ -214,8 +219,12 @@ export function WritingPanel(props: WritingPanelProps) {
       ? eligibleRevisionFinding(candidate, gate)
       : null;
 
-  async function generate(event: React.FormEvent) {
+  function onSubmitGenerate(event: React.FormEvent) {
     event.preventDefault();
+    void runGenerate();
+  }
+
+  async function runGenerate() {
     const trimmed = instruction.trim();
     if (
       trimmed === "" ||
@@ -228,6 +237,7 @@ export function WritingPanel(props: WritingPanelProps) {
     busyRef.current = true;
     setBusy("generating");
     setError(null);
+    setRetryable(false);
     setNotice(null);
     setCandidate(null);
     setGate(null);
@@ -239,6 +249,7 @@ export function WritingPanel(props: WritingPanelProps) {
     const requestId = crypto.randomUUID();
     const position = { draft_id: draftId, version_id: baseVersionId };
     try {
+      setProgress("근거를 검색하고 초안을 생성하는 중…");
       const produced = await generateWriting(projectId, {
         request_id: requestId,
         instruction: trimmed,
@@ -251,6 +262,7 @@ export function WritingPanel(props: WritingPanelProps) {
       // preserves the candidate); accept stays disabled until a pass Gate.
       setCandidate(produced);
       contextRef.current = { baseVersionId, requestId };
+      setProgress("Gate로 근거를 평가하는 중…");
       const evaluated = await gateWriting(projectId, {
         request_id: requestId,
         instruction: trimmed,
@@ -281,8 +293,11 @@ export function WritingPanel(props: WritingPanelProps) {
         });
       }
     } catch (err) {
-      setError(describeApiError(err));
+      const described = describeWritingError(err);
+      setError(described.message);
+      setRetryable(described.retryable);
     } finally {
+      setProgress(null);
       busyRef.current = false;
       setBusy(null);
     }
@@ -292,8 +307,10 @@ export function WritingPanel(props: WritingPanelProps) {
     busyRef.current = true;
     setBusy("improving");
     setError(null);
+    setRetryable(false);
     setNotice(null);
     setLoopResult(null);
+    setProgress("후보를 자동으로 개선하는 중…");
     loopIntentRef.current = body;
     try {
       const outcome = await reviseAndGateWriting(projectId, body);
@@ -315,8 +332,11 @@ export function WritingPanel(props: WritingPanelProps) {
         loopIntentRef.current = null;
       }
     } catch (err) {
-      setError(describeApiError(err));
+      const described = describeWritingError(err);
+      setError(described.message);
+      setRetryable(described.retryable);
     } finally {
+      setProgress(null);
       busyRef.current = false;
       setBusy(null);
     }
@@ -430,7 +450,7 @@ export function WritingPanel(props: WritingPanelProps) {
         </p>
       )}
 
-      <form className="writing-form" onSubmit={generate}>
+      <form className="writing-form" onSubmit={onSubmitGenerate}>
         <label htmlFor="writing-instruction">이어쓰기 지시</label>
         <textarea
           id="writing-instruction"
@@ -454,10 +474,26 @@ export function WritingPanel(props: WritingPanelProps) {
         </div>
       </form>
 
-      {error !== null && (
-        <p className="alert" role="alert">
-          {error}
+      {progress !== null && (
+        <p className="writing-progress" role="status" aria-live="polite">
+          <span className="spinner" aria-hidden="true" />
+          {progress}
         </p>
+      )}
+      {error !== null && (
+        <div className="writing-error" role="alert">
+          <p className="alert">{error}</p>
+          {retryable && (
+            <button
+              type="button"
+              className="writing-retry"
+              disabled={busy !== null || availability.blocked || instruction.trim() === ""}
+              onClick={() => void runGenerate()}
+            >
+              다시 생성
+            </button>
+          )}
+        </div>
       )}
       {notice !== null && (
         <p className="writing-notice" role="status">
@@ -474,6 +510,13 @@ export function WritingPanel(props: WritingPanelProps) {
             )}
           </div>
           <p className="candidate-text">{candidate.text}</p>
+          <p className="candidate-summary">
+            근거 주장 {candidate.candidate_claims.length}개
+            {candidate.new_memory_hints.length > 0 &&
+              ` · 기억 후보 ${candidate.new_memory_hints.length}개`}
+            {candidate.risk_notes.length > 0 &&
+              ` · 위험 지적 ${candidate.risk_notes.length}개`}
+          </p>
 
           {busy === "improving" ? (
             <p className="status-copy" role="status">후보를 자동으로 개선하는 중…</p>

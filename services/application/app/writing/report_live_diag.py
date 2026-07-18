@@ -179,7 +179,9 @@ async def run_report_diagnosis(
         stages.append((_REPORT_STAGE, "failed"))
         caps = _report_captures(capture)
         first = caps[0] if len(caps) >= 1 else None
-        repair = caps[1] if len(caps) >= 2 else None
+        # The report now retries up to MAX_REPORT_REPAIRS times; surface the
+        # FINAL repair raw (the one whose error is the reported cause).
+        repair = caps[-1] if len(caps) >= 2 else None
         parse_status = (
             INVALID_CANDIDATE_REPORT
             if isinstance(cause, InvalidCandidateReport)
@@ -209,7 +211,7 @@ async def run_report_diagnosis(
     # the first failure rather than misreading a fenced first raw as "parsed OK".
     caps = _report_captures(capture)
     first = caps[0] if caps else None
-    repair = caps[1] if len(caps) >= 2 else None
+    repair = caps[-1] if len(caps) >= 2 else None
     first_content = first.result.content if first is not None else None
     return ReportDiagnosis(
         parse_status=REPORT_PARSED_OK, stage_trace=tuple(stages),

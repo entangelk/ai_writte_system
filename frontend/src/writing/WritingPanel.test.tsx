@@ -290,14 +290,89 @@ describe("WritingPanel — generate → gate", () => {
     await screen.findByText(candidate.text);
   });
 
-  it("preserves the candidate when the gate call fails after generate", async () => {
+  it("preserves the candidate and offers retry when the gate call fails after generate", async () => {
     // transport/5xx on gate: keep the candidate, no gate, accept stays disabled.
+    // The raw detail is mapped to human guidance + a retry affordance (2026-07-18
+    // test-bed UX) so a 5xx is not a dead-end.
     const fetchMock = mockFetch({ body: candidate }, { status: 502, body: { detail: "gate down" } });
     renderPanel();
     await generateAndGate(fetchMock);
     expect(screen.getByText(candidate.text)).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent("gate down");
+    expect(screen.getByRole("alert")).toHaveTextContent("다시 생성해 주세요");
+    expect(screen.getByRole("button", { name: "다시 생성" })).toBeInTheDocument();
     expect(acceptButton()).toBeDisabled();
+  });
+
+  it("maps a 502 report failure on generate to human guidance and retries", async () => {
+    // The owner's real 502 (intermittent 12B non-array report). It must not be a
+    // raw dead-end: friendly copy + a retry that re-invokes generate.
+    const fetchMock = mockFetch(
+      { status: 502, body: { detail: "invalid_candidate_report: report field must be an array" } },
+      { body: candidate }, // retry generate succeeds
+      { body: gatePass }, // its gate
+    );
+    renderPanel();
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    await userEvent.click(generateButton());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "근거 보고서를 형식에 맞게 만들지 못했습니다",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "다시 생성" }));
+    await screen.findByText(candidate.text);
+    expect(fetchMock).toHaveBeenCalledTimes(3); // failed generate + retry generate + gate
+  });
+
+  it("shows coarse pipeline progress: generate phase then Gate phase (SoT v1.7.6 C)", async () => {
+    // Observability contract: the server-side pipeline is surfaced as phases so
+    // it is not a black box. Removing setProgress must fail this (under-strict).
+    let releaseGen!: (v: unknown) => void;
+    const genPending = new Promise((r) => { releaseGen = r; });
+    let releaseGate!: (v: unknown) => void;
+    const gatePending = new Promise((r) => { releaseGate = r; });
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(genPending)
+      .mockReturnValueOnce(gatePending);
+    vi.stubGlobal("fetch", fetchMock);
+    renderPanel();
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    fireEvent.submit(screen.getByLabelText("이어쓰기 지시").closest("form")!);
+    // generate in flight → generate-phase progress.
+    expect(
+      await screen.findByText("근거를 검색하고 초안을 생성하는 중…"),
+    ).toBeInTheDocument();
+    // generate resolves → gate in flight → gate-phase progress.
+    releaseGen(response({ body: candidate }));
+    expect(
+      await screen.findByText("Gate로 근거를 평가하는 중…"),
+    ).toBeInTheDocument();
+    // gate resolves → progress cleared.
+    releaseGate(response({ body: gatePass }));
+    await screen.findByText(candidate.text);
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Gate로 근거를 평가하는 중…"),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("summarizes the candidate's report output (근거 주장 count) (SoT v1.7.6 C)", async () => {
+    // The report enrichment result must be visible as a count — removing the
+    // candidate-summary render must fail this (under-strict).
+    const withClaims = {
+      ...candidate,
+      candidate_claims: [
+        { text: "a", type: "narrative_event", requires_gate_check: true, related_context_pointers: [] },
+        { text: "b", type: "character_state", requires_gate_check: false, related_context_pointers: [] },
+      ],
+      risk_notes: [{ type: "pov", severity: "low", message: "m" }],
+    };
+    const fetchMock = mockFetch({ body: withClaims }, { body: gatePass });
+    renderPanel();
+    await generateAndGate(fetchMock);
+    expect(screen.getByText(/근거 주장 2개/)).toBeInTheDocument();
+    expect(screen.getByText(/위험 지적 1개/)).toBeInTheDocument();
   });
 });
 

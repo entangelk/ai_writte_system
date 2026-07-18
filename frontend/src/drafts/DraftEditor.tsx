@@ -14,6 +14,7 @@ import {
   type Project,
 } from "../api/client";
 import { WritingPanel } from "../writing/WritingPanel";
+import { AnalysisTrigger } from "../review/AnalysisTrigger";
 
 type SaveIntent = {
   key: string;
@@ -101,7 +102,9 @@ export function DraftEditor() {
 
   const dirty = rawText !== baseline;
   const readOnly = forcedReadOnly || project?.archived === true || draft?.archived === true;
-  const latestVersionId = latestOf(versions)?.id ?? null;
+  const latest = latestOf(versions);
+  const latestVersionId = latest?.id ?? null;
+  const latestSnapshotId = latest?.snapshot_id ?? null;
   const onLatest = selectedVersionId !== null && selectedVersionId === latestVersionId;
 
   useEffect(() => {
@@ -276,9 +279,14 @@ export function DraftEditor() {
       </Link>
 
       <header className="page-heading editor-heading">
-        <p className="eyebrow">원고 편집기</p>
-        <h1>{draft?.title ?? "원고"}</h1>
-        <p>{project?.name ?? "프로젝트"}</p>
+        <div>
+          <p className="eyebrow">원고 편집기</p>
+          <h1>{draft?.title ?? "원고"}</h1>
+          <p>{project?.name ?? "프로젝트"}</p>
+        </div>
+        <Link className="review-link" to={`/projects/${projectId ?? ""}/review`}>
+          검토함 →
+        </Link>
       </header>
 
       {error !== null && <p className="alert" role="alert">{error}</p>}
@@ -372,16 +380,26 @@ export function DraftEditor() {
           </section>
 
           {projectId !== undefined && draftId !== undefined && (
-            <WritingPanel
-              projectId={projectId}
-              draftId={draftId}
-              latestVersionId={latestVersionId}
-              onLatest={onLatest}
-              dirty={dirty}
-              hasVersions={versions.length > 0}
-              readOnly={readOnly}
-              onAccepted={() => void reloadLatest()}
-            />
+            <>
+              <WritingPanel
+                projectId={projectId}
+                draftId={draftId}
+                latestVersionId={latestVersionId}
+                onLatest={onLatest}
+                dirty={dirty}
+                hasVersions={versions.length > 0}
+                readOnly={readOnly}
+                onAccepted={() => void reloadLatest()}
+              />
+              <AnalysisTrigger
+                projectId={projectId}
+                draftId={draftId}
+                latestVersionId={latestVersionId}
+                latestSnapshotId={latestSnapshotId}
+                readOnly={readOnly}
+                dirty={dirty}
+              />
+            </>
           )}
         </>
       )}

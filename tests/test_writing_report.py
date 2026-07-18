@@ -90,8 +90,10 @@ class WritingReportTest(unittest.TestCase):
         self.assertEqual(usage.total_tokens, 4)
         self.assertEqual(enriched.risk_notes[0].severity.value, "high")
 
-    def test_enrich_metered_failure_carries_both_response_usages(self):
-        provider = _Provider(["bad", "still bad"])
+    def test_enrich_metered_failure_carries_all_response_usages(self):
+        # With MAX_REPORT_REPAIRS=2 a persistent failure spans the initial call
+        # plus two repair retries (1+1+1 tokens each → 6 total).
+        provider = _Provider(["bad", "still bad", "still bad again"])
         templates = PromptTemplateService(InMemoryPromptTemplateRepository())
         seed_report_template(templates)
         service = WritingCandidateReportService(
@@ -105,10 +107,27 @@ class WritingReportTest(unittest.TestCase):
                                (), (), (), (), 0, False),
             ))
         self.assertIsInstance(caught.exception.cause, InvalidCandidateReport)
-        self.assertEqual(caught.exception.usage.total_tokens, 4)
+        self.assertEqual(provider.calls, 3)  # initial + two repairs
+        self.assertEqual(caught.exception.usage.total_tokens, 6)
 
-    def test_invalid_repair_fails(self):
-        provider=_Provider(["bad","still bad"])
+    def test_second_repair_recovers_after_first_repair_fails(self):
+        # The bounded repair loop tries twice: initial + first repair both fail,
+        # the second repair returns a valid report → success (3 calls). Removing
+        # the second repair (MAX_REPORT_REPAIRS=1) would make this 502 instead.
+        provider=_Provider(["bad","still bad", json.dumps(_payload(), ensure_ascii=False)])
+        templates=PromptTemplateService(InMemoryPromptTemplateRepository())
+        seed_report_template(templates)
+        service=WritingCandidateReportService(provider, prompt_templates=templates)
+        candidate=WritingCandidate("r","p",WritingTaskType.CONTINUE_SCENE,
+                                   WritingOutputType.DRAFT_PATCH,"본문")
+        package=ContextPackage("p",ContextSearchPurpose.WRITING_CONTEXT,(),(),(),(),0,False)
+        enriched, usage=asyncio.run(service.enrich_metered(candidate,package))
+        self.assertEqual(provider.calls, 3)
+        self.assertEqual(usage.total_tokens, 6)
+        self.assertEqual(enriched.risk_notes[0].severity.value, "high")
+
+    def test_invalid_after_all_repairs_fails(self):
+        provider=_Provider(["bad","still bad","still bad again"])
         templates=PromptTemplateService(InMemoryPromptTemplateRepository())
         seed_report_template(templates)
         service=WritingCandidateReportService(provider, prompt_templates=templates)
@@ -117,6 +136,7 @@ class WritingReportTest(unittest.TestCase):
         package=ContextPackage("p",ContextSearchPurpose.WRITING_CONTEXT,(),(),(),(),0,False)
         with self.assertRaises(InvalidCandidateReport):
             asyncio.run(service.enrich(candidate,package))
+        self.assertEqual(provider.calls, 3)
 
     def test_gate_receives_structured_report_not_repr(self):
         provider=_Provider([json.dumps(_payload(), ensure_ascii=False)])

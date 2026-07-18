@@ -172,7 +172,9 @@ class RunReportDiagnosisTest(unittest.TestCase):
         # and BOTH raw outputs + their parse errors are recovered. The report
         # service only surfaces the repair error; the first is re-derived here.
         bad = _report_json(constraints='"not-an-array"')  # field not an array
-        diag, _ = _drive([_gen(bad), _gen(bad)])
+        # first + two repairs all fail (MAX_REPORT_REPAIRS=2) → the final repair
+        # raw is surfaced alongside the re-derived first.
+        diag, _ = _drive([_gen(bad), _gen(bad), _gen(bad)])
         self.assertEqual(diag.parse_status, INVALID_CANDIDATE_REPORT)
         self.assertEqual(diag.first_raw, bad)
         self.assertIn("must be an array", diag.first_error)
@@ -253,7 +255,7 @@ class RunReportDiagnosisTest(unittest.TestCase):
 class FormatReportDiagnosisTest(unittest.TestCase):
     def test_invalid_output_carries_first_repair_and_warning(self):
         bad = _report_json(constraints='"not-an-array"')
-        diag, _ = _drive([_gen(bad), _gen(bad)])
+        diag, _ = _drive([_gen(bad), _gen(bad), _gen(bad)])
         text = format_report_diagnosis(
             diag, request_id=_REQUEST_ID, project_id=_PROJECT,
             model="m", max_tokens=1024)

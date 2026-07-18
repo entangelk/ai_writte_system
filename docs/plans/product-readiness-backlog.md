@@ -54,6 +54,8 @@
 
 2026-07-16 C2 종료 체크포인트: `/writing/revise-and-gate` 자동 loop UI와 6종 status·partial 재시도 매핑을 구현해 C 전체를 완료했다(SoT v1.7.3). **`OPS-1` trigger 재점검**: A+C 코드 UI는 완료됐지만 실 12B generate→Gate→loop→accept 관통이 미실행이고 dogfood 착수는 아직 오너가 결정하지 않아 **Waiting을 유지**한다. 두 조건이 충족될 때 Ready로 올린다. 프론트 고정 순서의 다음 작업은 B Review Inbox다.
 
+2026-07-18 Review Inbox 라이브 관통 종료 체크포인트: B Review Inbox의 7 write action이 실 스택·실 12B로 전부 라이브 검증됐다(2026-07-17 candidate/conflict 5개 + 2026-07-18 gate finding resolve/dismiss 2개, `docs/verifications/2026-07-18/gate_finding_live_trigger.md`). **`OPS-1` trigger 재점검**: OPS-1의 두 조건 중 **"실 12B 관통 확인"은 이제 gate finding 표면까지 완결돼 충족**됐고, 남은 조건 **"오너 dogfood 착수 결정"만 대기**한다. 따라서 **Waiting 유지** — 오너가 dogfood 착수를 결정할 때 Ready로 올린다(그 시점에 Lite의 보장/degraded 기능·worker/outbox backlog·Mongo-direct fallback을 먼저 고정하는 결정 브리프가 선행). 프론트 고정 순서의 다음 단계는 dogfood 시작이다.
+
 ```text
 현재
   → A: 원고·에디터·저장·version·export

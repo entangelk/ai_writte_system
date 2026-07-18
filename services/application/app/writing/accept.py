@@ -18,6 +18,17 @@ from services.application.app.writing.models import (
 )
 
 
+def analysis_job_key(snapshot_id: str) -> str:
+    """Per-snapshot analysis-job idempotency key (D5=A alignment).
+
+    Both accept (which enqueues the pending job) and the explicit "이 원고 분석"
+    trigger derive the SAME key from the snapshot, so create_job's
+    (project, snapshot, key) tuple resolves to one shared job per snapshot. The
+    frontend `analyzeVersion` (client.ts) mirrors this exact literal.
+    """
+    return f"analyze:{snapshot_id}"
+
+
 class WritingAcceptError(ValueError):
     pass
 
@@ -70,8 +81,7 @@ class WritingAcceptService:
         if replay is not None:
             saved = self._save_result(request.project_id, draft_id, replay.id)
             try:
-                job = self._create_job(request.project_id, saved, idempotency_key,
-                                       candidate)
+                job = self._create_job(request.project_id, saved, candidate)
             except Exception as exc:
                 raise WritingAcceptAnalysisError(str(exc), saved=saved) from exc
             return WritingAcceptResult(True, None, saved, job, True)
@@ -90,17 +100,24 @@ class WritingAcceptService:
             project_id=request.project_id, draft_id=draft_id,
             raw_text=raw_text, idempotency_key=save_key)
         try:
-            job = self._create_job(request.project_id, saved, idempotency_key,
-                                   candidate)
+            job = self._create_job(request.project_id, saved, candidate)
         except Exception as exc:
             raise WritingAcceptAnalysisError(str(exc), saved=saved) from exc
         return WritingAcceptResult(True, gate, saved, job, saved.idempotent_replay)
 
     def _create_job(self, project_id: str, saved: SaveDraftResult,
-                    key: str, candidate: WritingCandidate) -> AnalysisJob:
+                    candidate: WritingCandidate) -> AnalysisJob:
+        # D5=A alignment (owner, 2026-07-18): the analysis job key is derived from
+        # the SNAPSHOT, not the accept idempotency key, so the explicit "이 원고
+        # 분석" trigger (which only knows the snapshot) reuses THIS same job
+        # instead of minting a new one — realizing D5=A "후속 run이 같은 job을
+        # 소비". create_job's idempotency tuple is (project, snapshot, key), so a
+        # per-snapshot key gives one job per snapshot: accept-replay (same accept
+        # → same snapshot) and the trigger both converge on it. (Amends the D4=A
+        # `writing-accept:{key}` analysis-key literal; the save key is unchanged.)
         return self._analysis.create_job(
             project_id=project_id, snapshot_id=saved.snapshot.id,
-            idempotency_key=f"writing-accept:{key}",
+            idempotency_key=analysis_job_key(saved.snapshot.id),
             writing_candidate_report=_candidate_report_payload(
                 candidate)).job
 

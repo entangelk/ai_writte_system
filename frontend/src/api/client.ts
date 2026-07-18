@@ -436,3 +436,153 @@ export function describeApiError(err: unknown): string {
   }
   return err instanceof Error ? err.message : String(err);
 }
+
+// Human-facing guidance for the writing loop's known failure signatures. A real
+// 12B occasionally emits a report/revision the strict parser rejects; the
+// backend already retries, so for these the actionable answer is "generate
+// again". `retryable` drives whether the panel offers a retry affordance.
+export function describeWritingError(err: unknown): {
+  message: string;
+  retryable: boolean;
+} {
+  if (err instanceof ApiError) {
+    const d = err.detail;
+    if (d.includes("invalid_candidate_report") || d.includes("report field")) {
+      return {
+        message: "AI가 근거 보고서를 형식에 맞게 만들지 못했습니다. 다시 생성해 주세요.",
+        retryable: true,
+      };
+    }
+    if (d.includes("invalid_writing_revision")) {
+      return {
+        message: "AI가 후보를 형식에 맞게 수정하지 못했습니다. 다시 생성하거나 지시를 바꿔 주세요.",
+        retryable: true,
+      };
+    }
+    if (d.includes("invalid_gate_result")) {
+      return {
+        message: "Gate 평가 결과를 해석하지 못했습니다. 다시 생성해 주세요.",
+        retryable: true,
+      };
+    }
+    if (err.status === 503) {
+      return {
+        message: "AI 서비스가 아직 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.",
+        retryable: true,
+      };
+    }
+    if (err.status === 504) {
+      return {
+        message: "AI 응답이 제한 시간 안에 오지 않았습니다. 다시 생성해 주세요.",
+        retryable: true,
+      };
+    }
+    if (err.status >= 500) {
+      return {
+        message: "AI 생성 중 오류가 발생했습니다. 다시 생성해 주세요.",
+        retryable: true,
+      };
+    }
+    return { message: `${err.status}: ${err.detail}`, retryable: false };
+  }
+  return {
+    message: err instanceof Error ? err.message : String(err),
+    retryable: true,
+  };
+}
+
+// Analysis trigger (review candidates). The jobs create/run endpoints are
+// untyped (dict responses), so these shapes are hand-declared (v1.6.94 precedent
+// for review reads). Running a job extracts needs_review candidates for the
+// snapshot; they then surface in the Review Inbox.
+interface AnalysisJobRef {
+  id: string;
+  status: string;
+}
+
+// Analysis anchors candidates to source_refs; without a catalog the extraction
+// 400s "source_ref catalog is required". A saved snapshot has none until spans
+// are cited, so the test-bed trigger catalogs every block (full-block span; the
+// server derives quote/hash from the offsets).
+//
+// Coverage-based + idempotent so a partial failure self-heals: we create a
+// full-span ref only for blocks not already covered (matched by exact offsets).
+// A previous run that died after k of N creates leaves k refs; the retry sees
+// them, skips those blocks, and creates only the missing ones — instead of the
+// old "any refs exist → skip", which would leave the catalog permanently
+// incomplete and run extraction against missing anchors. A mid-loop failure
+// still throws (the caller surfaces it and can retry to completion); we never
+// run the job against a partial catalog.
+async function ensureSourceRefCatalog(
+  projectId: string,
+  draftId: string,
+  versionId: string,
+  snapshotId: string,
+): Promise<number> {
+  const existing = await request<{
+    source_refs: { start_offset: number; end_offset: number }[];
+  }>(`/projects/${projectId}/snapshots/${snapshotId}/source-refs`);
+  const covered = new Set(
+    existing.source_refs.map((ref) => `${ref.start_offset}:${ref.end_offset}`),
+  );
+  const detail = await getDraftVersion(projectId, draftId, versionId);
+  let created = 0;
+  for (const block of detail.blocks) {
+    if (block.end_offset <= block.start_offset) continue;
+    if (covered.has(`${block.start_offset}:${block.end_offset}`)) continue;
+    await request(`/projects/${projectId}/snapshots/${snapshotId}/source-refs`, {
+      method: "POST",
+      body: JSON.stringify({
+        start_offset: block.start_offset,
+        end_offset: block.end_offset,
+      }),
+    });
+    created += 1;
+  }
+  if (existing.source_refs.length + created === 0) {
+    // No anchorable spans at all → extraction would 400. Surface a clear signal
+    // instead of running into an opaque backend error.
+    throw new ApiError(
+      422,
+      "분석할 본문 블록이 없습니다. 원고에 내용을 채운 뒤 다시 시도하세요.",
+    );
+  }
+  return created;
+}
+
+export async function analyzeVersion(
+  projectId: string,
+  draftId: string,
+  versionId: string,
+  snapshotId: string,
+): Promise<{ jobId: string; candidateCount: number; sourceRefsCreated: number }> {
+  const sourceRefsCreated = await ensureSourceRefCatalog(
+    projectId,
+    draftId,
+    versionId,
+    snapshotId,
+  );
+  const created = await request<{ job: AnalysisJobRef }>(
+    `/projects/${projectId}/analysis/jobs`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        snapshot_id: snapshotId,
+        // D5=A alignment: a per-snapshot deterministic key (mirrors accept's
+        // `analysis_job_key`, accept.py) so accept's pending job AND repeat
+        // clicks converge on ONE job per snapshot — no orphan jobs, and no
+        // duplicate candidates from re-analyzing the same snapshot.
+        idempotency_key: `analyze:${snapshotId}`,
+      }),
+    },
+  );
+  const run = await request<{ candidates: unknown[] }>(
+    `/projects/${projectId}/analysis/jobs/${created.job.id}/run`,
+    { method: "POST" },
+  );
+  return {
+    jobId: created.job.id,
+    candidateCount: run.candidates.length,
+    sourceRefsCreated,
+  };
+}
