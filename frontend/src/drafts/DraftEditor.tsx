@@ -117,6 +117,7 @@ export function DraftEditor() {
         setSelectedVersionId(detail?.draft_version.id ?? null);
         setSelectedContentHash(detail?.snapshot.content_hash ?? null);
         setVersionNumber(detail?.draft_version.version_number ?? null);
+        setSourceNotice(null);
         setError(null);
       })
       .catch((err: unknown) => {
@@ -137,6 +138,10 @@ export function DraftEditor() {
   const latestVersionId = latest?.id ?? null;
   const latestSnapshotId = latest?.snapshot_id ?? null;
   const onLatest = selectedVersionId !== null && selectedVersionId === latestVersionId;
+  const allowNavigationAway = useCallback(
+    () => !dirty || window.confirm("저장하지 않은 변경 사항을 버리고 페이지를 이동하시겠습니까?"),
+    [dirty],
+  );
 
   useEffect(() => {
     setAnalysisStatus("idle");
@@ -210,6 +215,7 @@ export function DraftEditor() {
       setSelectedVersionId(savedVersion.id);
       setSelectedContentHash(result.snapshot.content_hash);
       setVersionNumber(result.draft_version.version_number);
+      setSourceNotice(null);
       setError(null);
       setNotice(
         result.idempotent_replay
@@ -255,6 +261,7 @@ export function DraftEditor() {
       setSelectedVersionId(detail.draft_version.id);
       setSelectedContentHash(detail.snapshot.content_hash);
       setVersionNumber(detail.draft_version.version_number);
+      setSourceNotice(null);
       setError(null);
       setNotice(null);
       intentRef.current = null;
@@ -307,6 +314,10 @@ export function DraftEditor() {
       }
 
       if (targetDraftId !== draftId) {
+        if (
+          dirty &&
+          !window.confirm("저장하지 않은 변경 사항을 버리고 다른 원고의 근거를 여시겠습니까?")
+        ) return;
         const next = new URLSearchParams(searchParams);
         next.set("panel", "review");
         next.set("source", source.source_ref_id);
@@ -431,6 +442,7 @@ export function DraftEditor() {
       setSelectedVersionId(detail?.draft_version.id ?? null);
       setSelectedContentHash(detail?.snapshot.content_hash ?? null);
       setVersionNumber(detail?.draft_version.version_number ?? null);
+      setSourceNotice(null);
       setNotice(null);
       setError(null);
     } catch (err) {
@@ -440,7 +452,13 @@ export function DraftEditor() {
 
   return (
     <section className="workspace-page editor-page page-enter">
-      <Link className="back-link" to={`/projects/${projectId ?? ""}`}>
+      <Link
+        className="back-link"
+        to={`/projects/${projectId ?? ""}`}
+        onClick={(event) => {
+          if (!allowNavigationAway()) event.preventDefault();
+        }}
+      >
         ← 원고 목록으로 돌아가기
       </Link>
 
@@ -487,6 +505,7 @@ export function DraftEditor() {
               onChange={(event) => {
                 setRawText(event.target.value);
                 setNotice(null);
+                setSourceNotice(null);
               }}
               readOnly={readOnly || selecting}
               aria-busy={selecting}
@@ -591,6 +610,7 @@ export function DraftEditor() {
                       readOnly={readOnly}
                       dirty={dirty}
                       onStatusChange={setAnalysisStatus}
+                      onBeforeNavigateAway={allowNavigationAway}
                     />
                   )}
                   {activePanel === "review" && (
@@ -599,6 +619,7 @@ export function DraftEditor() {
                       projectId={projectId}
                       onSourceSelect={(source) => void openSource(source)}
                       onPendingCountChange={setPendingReviewCount}
+                      onBeforeNavigateAway={allowNavigationAway}
                     />
                   )}
                 </div>

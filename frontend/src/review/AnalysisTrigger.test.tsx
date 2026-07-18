@@ -258,6 +258,17 @@ describe("AnalysisTrigger", () => {
     expect(screen.getByText(/먼저 저장한 뒤 분석/)).toBeInTheDocument();
   });
 
+  it("lets the editor guard cancel an in-app review link while text is dirty", async () => {
+    const onBeforeNavigateAway = vi.fn(() => false);
+    renderTrigger({ dirty: true, onBeforeNavigateAway });
+
+    await userEvent.click(screen.getByRole("link", { name: "검토함 →" }));
+
+    expect(onBeforeNavigateAway).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("heading", { name: "원고 분석" })).toBeInTheDocument();
+    expect(screen.queryByText("검토함 페이지")).toBeNull();
+  });
+
   it("disables the button for an archived (read-only) draft", () => {
     renderTrigger({ readOnly: true });
     expect(runButton()).toBeDisabled();

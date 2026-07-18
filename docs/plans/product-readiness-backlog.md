@@ -62,6 +62,8 @@
 
 2026-07-18 W1 종료 체크포인트: SoT v1.7.11에서 editor+docked right rail(`이어쓰기|분석|검토`), 좁은 화면 동형 tab, 상태줄, `panel/candidate/source` query 복원, exact snapshot/version+offset source jump와 stale/latest 표시를 구현했다. 기존 backend API/action을 재사용해 OpenAPI와 W2/W3 runtime은 바꾸지 않았다. **UX-1은 In progress 유지**, 다음 독립 slice는 W2 ProjectBrief onboarding+canonical overview다. OPS-1·QUAL-1·GATE-1 상태는 W1만으로 바꾸지 않는다.
 
+2026-07-18 W1 검증 closure 체크포인트: 독립 검증 `verifications/2026-07-18/w1_split_workspace.md`의 cross-Draft dirty 데이터 손실 B1과 회귀 empty cell B2~B6을 SoT v1.7.12에서 닫았다. 같은 SPA navigation pattern과 stale source notice도 함께 보강했다. 원 conditional verdict은 closure 전 commit의 역사로 보존하며 **UX-1은 W2~W4가 남아 In progress 유지**한다.
+
 ```text
 현재
   → A: 원고·에디터·저장·version·export

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type MouseEvent } from "react";
 import { Link } from "react-router";
 import { analyzeVersion, describeApiError } from "../api/client";
 
@@ -12,6 +12,7 @@ type AnalysisTriggerProps = {
   readOnly: boolean;
   dirty: boolean;
   onStatusChange?: (status: "idle" | "running" | "failed" | "complete") => void;
+  onBeforeNavigateAway?: () => boolean;
 };
 
 type Result = { candidateCount: number };
@@ -29,6 +30,7 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
     readOnly,
     dirty,
     onStatusChange,
+    onBeforeNavigateAway,
   } = props;
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
@@ -37,6 +39,10 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
   // pass the state check and launch two jobs (WritingPanel uses the same busyRef
   // pattern). The ref flips immediately.
   const busyRef = useRef(false);
+
+  function guardNavigation(event: MouseEvent<HTMLAnchorElement>): void {
+    if (onBeforeNavigateAway?.() === false) event.preventDefault();
+  }
 
   const noVersion = latestSnapshotId === null || latestVersionId === null;
   const blocked =
@@ -86,7 +92,11 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
           <p className="eyebrow">검토 후보 생성</p>
           <h2 id="analysis-title">원고 분석</h2>
         </div>
-        <Link className="review-link" to={`/projects/${projectId}/review`}>
+        <Link
+          className="review-link"
+          to={`/projects/${projectId}/review`}
+          onClick={guardNavigation}
+        >
           검토함 →
         </Link>
       </div>
@@ -132,7 +142,9 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
           {result.candidateCount > 0 ? (
             <>
               {result.candidateCount}개 검토 후보가 생성됐습니다.{" "}
-              <Link to={`/projects/${projectId}/review`}>검토함에서 확인하세요 →</Link>
+              <Link to={`/projects/${projectId}/review`} onClick={guardNavigation}>
+                검토함에서 확인하세요 →
+              </Link>
             </>
           ) : (
             "이번 분석에서는 새 검토 후보가 추출되지 않았습니다. 본문을 보완한 뒤 다시 시도해 보세요."

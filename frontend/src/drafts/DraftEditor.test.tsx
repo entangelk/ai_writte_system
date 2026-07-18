@@ -374,6 +374,29 @@ describe("DraftEditor", () => {
     expect(cleanEvent.defaultPrevented).toBe(false);
   });
 
+  it("confirms dirty text before an in-app link leaves the editor", async () => {
+    const confirm = vi.spyOn(window, "confirm")
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    mockFetch(
+      { body: project },
+      { body: draft },
+      { body: { versions: [] } },
+    );
+
+    renderEditor();
+    await userEvent.type(await screen.findByLabelText("원고 본문"), "미저장 본문");
+    const back = screen.getByRole("link", { name: "← 원고 목록으로 돌아가기" });
+
+    await userEvent.click(back);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText("원고 본문")).toHaveValue("미저장 본문");
+
+    await userEvent.click(back);
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText("원고 목록")).toBeInTheDocument();
+  });
+
   it("lists versions newest-first and loads a selected historical version", async () => {
     const fetchMock = mockFetch(
       { body: project }, { body: draft }, { body: { versions: [version1, version3] } },
@@ -748,6 +771,57 @@ describe("DraftEditor", () => {
     expect(fetchMock.mock.calls[7][0]).toBe("/api/projects/p1/drafts/d1/versions");
   });
 
+  it("renders and updates the save, analysis, and pending-review status bar", async () => {
+    mockFetch(
+      { body: project },
+      { body: draft },
+      { body: { versions: [version1] } },
+      { body: detail(version1, "본문") },
+      { body: { source_refs: [{ start_offset: 0, end_offset: 2 }] } },
+      {
+        body: {
+          ...detail(version1, "본문"),
+          blocks: [{ start_offset: 0, end_offset: 2, kind: "paragraph" }],
+        },
+      },
+      { body: { job: { id: "j1", status: "pending" }, idempotent_replay: false } },
+      { body: { job: { id: "j1", status: "succeeded" }, candidates: [] } },
+      {
+        body: {
+          project_id: "p1",
+          items: [{
+            candidate_id: "c1", job_id: "j1", candidate_type: "event_observation",
+            status: "needs_review", confidence: 0.8, provenance: "ai_inferred",
+            conflict_count: 0, actions: [],
+          }],
+          gate_findings: [{
+            id: "g1", origin: "context_gate", status: "open", check: "stale_item",
+            detail: "stale", query: "q", purpose: "p", needs: [], pointer_ids: [], actions: [],
+          }],
+        },
+      },
+    );
+
+    renderEditor();
+
+    const status = await screen.findByLabelText("작업 상태");
+    expect(within(status).getByText("저장됨")).toBeInTheDocument();
+    expect(within(status).getByText("분석 미실행")).toBeInTheDocument();
+    expect(within(status).getByText("검토 대기 —")).toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText("원고 본문"), "!");
+    expect(within(status).getByText("저장 안 됨")).toBeInTheDocument();
+    await userEvent.clear(screen.getByLabelText("원고 본문"));
+    await userEvent.type(screen.getByLabelText("원고 본문"), "본문");
+
+    await userEvent.click(screen.getByRole("tab", { name: "분석" }));
+    await userEvent.click(screen.getByRole("button", { name: "이 원고 분석" }));
+    expect(await within(status).findByText("분석 완료")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("tab", { name: "검토" }));
+    expect(await within(status).findByText("검토 대기 2건")).toBeInTheDocument();
+  });
+
   it("restores a historical source by exact snapshot and code-point offsets", async () => {
     const reviewItem = {
       candidate_id: "c1", job_id: "j1", candidate_type: "character_observation",
@@ -777,6 +851,7 @@ describe("DraftEditor", () => {
         },
       },
       { body: detail(version1, "😀근거 끝") },
+      { body: detail(version3, "최신 본문") },
     );
 
     renderEditor("/projects/p1/drafts/d1?panel=review&candidate=c1&source=sr1");
@@ -791,6 +866,126 @@ describe("DraftEditor", () => {
     expect(fetchMock.mock.calls[6][0]).toBe(
       "/api/projects/p1/drafts/d1/versions/v1",
     );
+
+    await userEvent.click(screen.getByRole("button", { name: "version 3" }));
+    await waitFor(() => expect(editor).toHaveValue("최신 본문"));
+    expect(screen.queryByText(/과거 version 1 근거/)).toBeNull();
+  });
+
+  it("confirms before replacing dirty text with a same-draft source version", async () => {
+    const reviewItem = {
+      candidate_id: "c1", job_id: "j1", candidate_type: "event_observation",
+      status: "needs_review", confidence: 0.7, provenance: "ai_inferred",
+      conflict_count: 0, actions: [],
+    };
+    const confirm = vi.spyOn(window, "confirm")
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    const fetchMock = mockFetch(
+      { body: project },
+      { body: draft },
+      { body: { versions: [version3, version1] } },
+      { body: detail(version3, "최신 본문") },
+      { body: { project_id: "p1", items: [reviewItem], gate_findings: [] } },
+      {
+        body: {
+          ...reviewItem, payload: { event: "과거 사건" }, conflicts: [],
+          source_refs: [{
+            source_ref_id: "sr1", status: "resolved", snapshot_id: "s1",
+            block_id: "b1", start_offset: 0, end_offset: 2,
+            quote: "과거", content_hash: "hash-1",
+          }],
+        },
+      },
+      { body: detail(version1, "과거 본문") },
+    );
+
+    renderEditor("/projects/p1/drafts/d1?panel=review&candidate=c1");
+    const editor = await screen.findByLabelText("원고 본문");
+    await userEvent.type(editor, "!");
+    const sourceButton = await screen.findByRole("button", { name: /원고에서 보기/ });
+
+    await userEvent.click(sourceButton);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(editor).toHaveValue("최신 본문!");
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+
+    await userEvent.click(sourceButton);
+    await waitFor(() => expect(editor).toHaveValue("과거 본문"));
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[6][0]).toBe(
+      "/api/projects/p1/drafts/d1/versions/v1",
+    );
+  });
+
+  it("reports a source snapshot that no project draft version owns", async () => {
+    const reviewItem = {
+      candidate_id: "c1", job_id: "j1", candidate_type: "event_observation",
+      status: "needs_review", confidence: 0.7, provenance: "ai_inferred",
+      conflict_count: 0, actions: [],
+    };
+    mockFetch(
+      { body: project },
+      { body: draft },
+      { body: { versions: [version3] } },
+      { body: detail(version3, "최신 본문") },
+      { body: { project_id: "p1", items: [reviewItem], gate_findings: [] } },
+      {
+        body: {
+          ...reviewItem, payload: { event: "유실 근거" }, conflicts: [],
+          source_refs: [{
+            source_ref_id: "missing", status: "resolved", snapshot_id: "missing-snapshot",
+            block_id: "b1", start_offset: 0, end_offset: 2,
+            quote: "유실", content_hash: "missing-hash",
+          }],
+        },
+      },
+      { body: { drafts: [draft] } },
+    );
+
+    renderEditor("/projects/p1/drafts/d1?panel=review&candidate=c1&source=missing");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "이 근거가 가리키는 원고 version을 찾을 수 없습니다.",
+    );
+    expect(screen.getByLabelText("원고 본문")).toHaveValue("최신 본문");
+  });
+
+  it.each([
+    ["quote", { quote: "틀린 인용", content_hash: "hash-1" }],
+    ["content hash", { quote: "과거", content_hash: "wrong-hash" }],
+  ])("rejects a source whose %s does not match the immutable version", async (_label, mismatch) => {
+    const reviewItem = {
+      candidate_id: "c1", job_id: "j1", candidate_type: "event_observation",
+      status: "needs_review", confidence: 0.7, provenance: "ai_inferred",
+      conflict_count: 0, actions: [],
+    };
+    mockFetch(
+      { body: project },
+      { body: draft },
+      { body: { versions: [version3, version1] } },
+      { body: detail(version3, "최신 본문") },
+      { body: { project_id: "p1", items: [reviewItem], gate_findings: [] } },
+      {
+        body: {
+          ...reviewItem, payload: { event: "과거 사건" }, conflicts: [],
+          source_refs: [{
+            source_ref_id: "sr1", status: "resolved", snapshot_id: "s1",
+            block_id: "b1", start_offset: 0, end_offset: 2,
+            ...mismatch,
+          }],
+        },
+      },
+      { body: detail(version1, "과거 본문") },
+    );
+
+    renderEditor("/projects/p1/drafts/d1?panel=review&candidate=c1&source=sr1");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "근거의 offset 또는 내용이 저장된 version과 일치하지 않습니다.",
+    );
+    expect(screen.getByLabelText("원고 본문")).toHaveValue("최신 본문");
+    expect(screen.queryByText(/과거 version 1 근거/)).toBeNull();
   });
 
   it("keeps latest source evidence labeled latest instead of marking it stale", async () => {
@@ -872,14 +1067,27 @@ describe("DraftEditor", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    renderEditor("/projects/p1/drafts/d1?panel=review&candidate=c2&source=sr2");
+    const confirm = vi.spyOn(window, "confirm")
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    renderEditor("/projects/p1/drafts/d1?panel=review&candidate=c2");
 
+    const editor = await screen.findByLabelText("원고 본문") as HTMLTextAreaElement;
+    await userEvent.type(editor, "미저장");
+    const sourceButton = await screen.findByRole("button", { name: /원고에서 보기/ });
+    await userEvent.click(sourceButton);
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("heading", { name: "첫 장면" })).toBeInTheDocument();
+    expect(editor).toHaveValue("첫 원고미저장");
+
+    await userEvent.click(sourceButton);
     expect(await screen.findByRole("heading", { name: "둘째 장면" })).toBeInTheDocument();
-    const editor = screen.getByLabelText("원고 본문") as HTMLTextAreaElement;
-    await waitFor(() => expect(editor).toHaveValue("둘째 원고"));
+    const targetEditor = screen.getByLabelText("원고 본문") as HTMLTextAreaElement;
+    await waitFor(() => expect(targetEditor).toHaveValue("둘째 원고"));
+    expect(confirm).toHaveBeenCalledTimes(2);
     expect(await screen.findByText(/최신 version 2 근거 · 선택 영역 0–2/)).toBeInTheDocument();
-    expect(editor.selectionStart).toBe(0);
-    expect(editor.selectionEnd).toBe(2);
+    expect(targetEditor.selectionStart).toBe(0);
+    expect(targetEditor.selectionEnd).toBe(2);
     expect(fetchMock.mock.calls.map(([url]) => url)).toContain(
       "/api/projects/p1/drafts",
     );

@@ -1,5 +1,49 @@
 # Work Log — 2026-07-18
 
+## Task — W1 독립 검증 blocking closure
+
+### Goals
+
+- 독립 검증 `docs/verifications/2026-07-18/w1_split_workspace.md`의 blocking B1~B6을 모두 닫는다.
+- 데이터 손실 수정은 red-first 양방향 회귀로 잠그고 backend/OpenAPI/W0 schema를 건드리지 않는다.
+
+### User Decisions and Rationale
+
+- **옵션 A 진행**: 오너가 검증 기록 확인 후 blocking 수정·회귀 보강·커밋을 지시했다. owner 해석이 필요한 C1(tab 전환 시 candidate/source query 삭제)은 현 의미를 유지하고, 단순 표시 정확성 결함 C2(source notice 잔류)는 함께 보강했다.
+
+### Completed work
+
+- **B1 데이터 손실 폐쇄**: cross-Draft source `navigate()` 앞에 dirty confirm을 추가했다. 취소는 현재 draft/본문/query 이동을 보존하고 승인 후에만 target Draft로 이동한다.
+- **동일 root pattern sweep**: SPA Link는 `beforeunload`를 우회하므로 editor 목록 링크와 Analysis/Review rail의 검토함·detail 링크에도 parent의 공통 `allowNavigationAway` guard를 전달했다.
+- **B2~B6 named 회귀**: 상태줄의 저장/analysis/pending 전이, reject 전용 endpoint+서버 재조회, same-Draft dirty cancel→confirm, project 어디에도 없는 snapshot error, quote mismatch와 content-hash mismatch를 각각 잠갔다.
+- **C2 표시 정확성**: text edit, save 성공, 수동 version switch, Writing accept reload, route Draft reload에서 `sourceNotice`를 clear해 이전 version의 근거 문구가 남지 않게 했다.
+- 검증 기록은 `b0d9203`에 대한 독립 감사 원문/conditional verdict 그대로 보존하고 closure 결과는 SoT v1.7.12·HANDOFF·이 로그에 분리 기록했다.
+
+### Issues found
+
+- 원 결함은 source cross-Draft 한 분기만의 문제가 아니라 SPA navigation이 `beforeunload`를 우회하는 공통 패턴이었다. `rg '<Link|navigate\('` + `git blame`으로 W1 신규 Review rail 링크와 기존 editor back link까지 확인해 공통 guard로 닫았다.
+- 최초 상태줄 fixture가 실제 ReviewInbox item 필수 필드 없이 count만 흉내 내 rail 렌더에서 실패했다. production shape(confidence/type/actions 포함)로 고쳐 public consumer와 동형으로 만들었다.
+
+### Decisions
+
+- **C1 유지**: writing/analysis tab으로 떠날 때 candidate/source query를 지우는 현 동작은 “숨은 source 자동 재점프 방지”와 “review 컨텍스트 보존” 사이 owner fork다. 이번 blocking closure에서 의미를 바꾸지 않았다.
+- **기타 hardening 보류**: ARIA tab controls, 모바일 scroll, gate finding count 정의, action 후 reload 실패 UX, randomUUID guard는 현재 정본 의무가 아니므로 별도 후속 후보로 유지한다.
+
+### Verification
+
+- red-first: 원 `b0d9203` 코드에서 cross-Draft dirty source가 confirm **0회**로 이동해 회귀 실패; source notice도 version 전환 뒤 잔류해 실패. 수정 후 green.
+- focused: DraftEditor 35 + WorkspaceReviewPanel 5 = **40 passed/2 files**.
+- W1 관련: DraftEditor 35 + WorkspaceReviewPanel 5 + AnalysisTrigger 14 = **54 passed/3 files**.
+- full frontend: **139 passed/9 files**.
+- build: TypeScript/Vite PASS, **95 modules**.
+- backend/OpenAPI/W0 schema diff 0, `git diff --check` PASS.
+
+### Next steps
+
+- 추가 승인 없이 W2 ProjectBrief onboarding+canonical overview 착수. 독립 재검증 전까지 W1 verification의 원 conditional verdict은 역사적 상태로 읽는다.
+
+---
+
 ## Task — Writing Workspace V2 W1 split workspace
 
 ### Goals

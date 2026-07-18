@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceReviewPanel } from "./WorkspaceReviewPanel";
 
@@ -88,7 +88,7 @@ describe("WorkspaceReviewPanel", () => {
     expect(screen.queryByRole("button", { name: /원고에서 보기/ })).toBeNull();
   });
 
-  it("runs a server-declared candidate action and reloads the list", async () => {
+  it("runs the server-declared confirm action and reloads the list", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response(list))
       .mockResolvedValueOnce(response(detail))
@@ -107,5 +107,55 @@ describe("WorkspaceReviewPanel", () => {
     expect(fetchMock.mock.calls[2][0]).toBe(
       "/api/projects/p1/analysis/candidates/c1/confirm",
     );
+  });
+
+  it("runs the distinct server-declared reject action and reloads the list", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(list))
+      .mockResolvedValueOnce(response(detail))
+      .mockResolvedValueOnce(response({ candidate_id: "c1", status: "rejected" }))
+      .mockResolvedValueOnce(response({ ...list, items: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <MemoryRouter initialEntries={["/?panel=review&candidate=c1"]}>
+        <WorkspaceReviewPanel projectId="p1" onSourceSelect={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "거절" }));
+    expect(await screen.findByText("검토할 기억 후보가 없습니다.")).toBeInTheDocument();
+    expect(fetchMock.mock.calls[2][0]).toBe(
+      "/api/projects/p1/analysis/candidates/c1/reject",
+    );
+  });
+
+  it("lets the editor guard cancel a full-inbox link while text is dirty", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(response(list)));
+    const onBeforeNavigateAway = vi.fn(() => false);
+
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <WorkspaceReviewPanel
+                projectId="p1"
+                onSourceSelect={vi.fn()}
+                onBeforeNavigateAway={onBeforeNavigateAway}
+              />
+            }
+          />
+          <Route path="/projects/:projectId/review" element={<p>전체 검토함 route</p>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(await screen.findByRole("link", { name: "전체 검토함 열기 →" }));
+
+    expect(onBeforeNavigateAway).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("전체 검토함 route")).toBeNull();
+    expect(screen.getByRole("heading", { name: "검토 대기" })).toBeInTheDocument();
   });
 });

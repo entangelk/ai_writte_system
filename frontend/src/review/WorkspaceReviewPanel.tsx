@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import { Link, useSearchParams } from "react-router";
 import {
   confirmCandidate,
@@ -15,6 +15,7 @@ type Props = {
   projectId: string;
   onSourceSelect: (source: ReviewSourcePointer) => void;
   onPendingCountChange?: (count: number) => void;
+  onBeforeNavigateAway?: () => boolean;
 };
 
 const TYPE_LABELS: Record<string, string> = {
@@ -40,6 +41,7 @@ export function WorkspaceReviewPanel({
   projectId,
   onSourceSelect,
   onPendingCountChange,
+  onBeforeNavigateAway,
 }: Props) {
   const [searchParams, setSearchParams] = useSearchParams();
   const candidateId = searchParams.get("candidate");
@@ -53,6 +55,10 @@ export function WorkspaceReviewPanel({
   const restoredSourceRef = useRef<string | null>(null);
   const confirm = detail?.actions.find((action) => action.action === "confirm");
   const reject = detail?.actions.find((action) => action.action === "reject");
+
+  function guardNavigation(event: MouseEvent<HTMLAnchorElement>): void {
+    if (onBeforeNavigateAway?.() === false) event.preventDefault();
+  }
 
   const load = useCallback(async () => {
     const response = await listReviewInbox(projectId);
@@ -177,7 +183,11 @@ export function WorkspaceReviewPanel({
           {(data?.gate_findings.length ?? 0) > 0 && (
             <p className="status-copy">게이트 지적 {data!.gate_findings.length}건은 전체 검토함에서 처리할 수 있습니다.</p>
           )}
-          <Link className="section-link" to={`/projects/${projectId}/review`}>전체 검토함 열기 →</Link>
+          <Link
+            className="section-link"
+            to={`/projects/${projectId}/review`}
+            onClick={guardNavigation}
+          >전체 검토함 열기 →</Link>
         </>
       ) : detailLoading ? (
         <p className="status-copy">후보 상세를 불러오는 중…</p>
@@ -226,7 +236,11 @@ export function WorkspaceReviewPanel({
               </li>
             ))}
           </ul>
-          <Link className="section-link" to={`/projects/${projectId}/review/${candidateId}`}>수정·충돌 처리 열기 →</Link>
+          <Link
+            className="section-link"
+            to={`/projects/${projectId}/review/${candidateId}`}
+            onClick={guardNavigation}
+          >수정·충돌 처리 열기 →</Link>
         </>
       )}
     </div>
