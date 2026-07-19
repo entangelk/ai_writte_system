@@ -113,6 +113,11 @@ class WritingService:
             text=result.content.strip(),
             status=WRITING_CANDIDATE_STATUS,
             generated_by_model=result.model,
+            # §3.1: the candidate echoes the request's exact intent/next_unit so
+            # the accept boundary can bind them. Defaults keep append callers
+            # unchanged.
+            intent=request.intent,
+            next_unit=request.next_unit,
         )
         if self._reporter is not None:
             return await self._reporter.enrich(candidate, package)

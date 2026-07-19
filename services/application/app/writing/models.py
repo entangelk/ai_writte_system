@@ -12,10 +12,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from services.application.app.core_sot.models import UnitKind
+
 
 # The Writing AI never decides canon: its output is always a review candidate
 # (writing_agent_prompt.md §5.2).
 WRITING_CANDIDATE_STATUS = "candidate"
+
+
+class WritingIntent(StrEnum):
+    # W3 Writing intent (W0 contract §3.1). ``append_current`` continues the
+    # current draft's latest version; ``start_next_unit`` atomically opens the
+    # next ordered unit. Legacy clients omit the field → append_current.
+    APPEND_CURRENT = "append_current"
+    START_NEXT_UNIT = "start_next_unit"
 
 
 class WritingTaskType(StrEnum):
@@ -146,6 +156,20 @@ class WritingBrief:
 
 
 @dataclass(frozen=True, slots=True)
+class NextUnit:
+    """Target for ``start_next_unit`` (W0 contract §3.1).
+
+    ``title`` is nonblank, ``unit_kind`` is chapter|scene|other, and ``goal`` is
+    an optional nonblank generation hint that is NEVER persisted as prose
+    (WI-16). Validation lives at the accept boundary, not in this container.
+    """
+
+    title: str
+    unit_kind: UnitKind
+    goal: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class WritingRequest:
     request_id: str
     project_id: str
@@ -154,6 +178,11 @@ class WritingRequest:
     # The current text to continue from (continue_scene). Provided by the caller
     # in slice 1; a later slice may resolve it from the draft pointer via Core SOT.
     draft_excerpt: str = ""
+    # W3 Writing intent (§3.1). The save target's meaning is owned solely by
+    # ``intent``; the prompt never re-decides it. ``next_unit`` is required for
+    # start_next_unit and must be null for append_current.
+    intent: WritingIntent = WritingIntent.APPEND_CURRENT
+    next_unit: NextUnit | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,6 +202,10 @@ class WritingCandidate:
     # Assigned when the candidate is accepted and saved (a later slice).
     candidate_id: str | None = None
     generated_by_model: str = ""
+    # W3 (§3.1): the candidate echoes the request's exact intent/next_unit. The
+    # accept boundary rejects any candidate whose echo diverges from the request.
+    intent: WritingIntent = WritingIntent.APPEND_CURRENT
+    next_unit: NextUnit | None = None
 
 
 @dataclass(frozen=True, slots=True)

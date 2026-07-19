@@ -321,9 +321,53 @@ class WorkspaceW0SchemaIntegrationTest(unittest.TestCase):
                 "uniqueItems"
             ]
         )
+        # --- W3 ordered unit + Writing intent fragments (SC-01 final closure) ---
+        self.assertEqual(
+            set(schemas["DraftPayload"]["required"]),
+            set(self.catalog["draftV2"]["required"]),
+        )
+        self.assertEqual(
+            set(schemas["DraftOrderPutRequest"]["required"]),
+            set(self.catalog["draftOrderPutRequest"]["required"]),
+        )
+        self.assertTrue(
+            schemas["DraftOrderPutRequest"]["properties"]["ordered_draft_ids"][
+                "uniqueItems"
+            ]
+        )
+        self.assertEqual(
+            set(schemas["DraftOrderPutResponse"]["required"]),
+            set(self.catalog["draftOrderPutResponse"]["required"]),
+        )
+        self.assertEqual(
+            schemas["UnitKind"]["enum"], self.catalog["unitKind"]["enum"]
+        )
+        self.assertEqual(
+            schemas["WritingIntent"]["enum"], self.catalog["writingIntent"]["enum"]
+        )
+        self.assertEqual(
+            set(schemas["NextUnitBody"]["required"]),
+            set(self.catalog["nextUnitSpec"]["required"]),  # goal is a required key
+        )
+        self.assertFalse(schemas["NextUnitBody"]["additionalProperties"])
+        self.assertEqual(
+            set(schemas["AcceptedSavePayload"]["required"]),
+            set(self.catalog["savedWritingTarget"]["required"]),
+        )
+        self.assertEqual(
+            set(schemas["WritingAcceptResponse"]["required"]),
+            set(self.catalog["writingAcceptResponseV2"]["required"]),
+        )
+        self.assertEqual(
+            set(schemas["WritingAcceptAnalysisPartial"]["required"]),
+            set(self.catalog["writingAcceptAnalysisPartialV2"]["required"]),
+        )
+
         paths = self.openapi["paths"]
         self.assertIn("put", paths["/projects/{project_id}/brief"])
         self.assertIn("get", paths["/projects/{project_id}/brief/versions"])
+        self.assertIn("put", paths["/projects/{project_id}/draft-order"])
+        self.assertIn("post", paths["/projects/{project_id}/writing/accept"])
 
     def test_endpoints_do_not_reference_catalog_root(self):
         encoded = json.dumps(
@@ -332,6 +376,21 @@ class WorkspaceW0SchemaIntegrationTest(unittest.TestCase):
         self.assertNotIn("writing-workspace-v2-w0.schema.json", encoded)
         self.assertIn("PutProjectBriefRequest", encoded)
         self.assertIn("ProjectBriefPutResponse", encoded)
+        # W3 endpoints reference their named components, never the catalog root.
+        reorder = json.dumps(
+            self.openapi["paths"]["/projects/{project_id}/draft-order"],
+            sort_keys=True,
+        )
+        self.assertNotIn("writing-workspace-v2-w0.schema.json", reorder)
+        self.assertIn("DraftOrderPutRequest", reorder)
+        self.assertIn("DraftOrderPutResponse", reorder)
+        accept = json.dumps(
+            self.openapi["paths"]["/projects/{project_id}/writing/accept"],
+            sort_keys=True,
+        )
+        self.assertNotIn("writing-workspace-v2-w0.schema.json", accept)
+        self.assertIn("WritingAcceptRequest", accept)
+        self.assertIn("WritingAcceptResponse", accept)
 
 
 class ProjectBriefWritingContextTest(unittest.TestCase):

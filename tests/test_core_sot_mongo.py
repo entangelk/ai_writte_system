@@ -760,5 +760,67 @@ class TransactionMongoTest(_MongoContractMixin, unittest.TestCase):
         self.assertIsNone(self.repo.get_snapshot("txn-conflict-snapshot"))
 
 
+@unittest.skipUnless(
+    _MONGO_AVAILABLE and _TXN_SUPPORTED,
+    "MongoDB deployment does not support transactions (needs a replica set)",
+)
+class WritingIntentMongoTest(_MongoContractMixin, unittest.TestCase):
+    use_transactions = True
+
+    def test_start_next_transaction_rolls_back_entire_write_set(self):  # WI-11
+        # An injected mid-write failure must leave zero of the six start-next
+        # surfaces: position shift, Draft, version, snapshot, block, receipt.
+        project = self.service.create_project(name="Ordered")
+        current = self.service.create_draft(
+            project_id=project.id, title="현재", unit_kind=UnitKind.CHAPTER)
+        self.service.save_draft(project_id=project.id, draft_id=current.id,
+            raw_text="현재 본문.", idempotency_key="base")
+        following = self.service.create_draft(
+            project_id=project.id, title="다음", unit_kind=UnitKind.SCENE)
+        before = [(d.id, d.position) for d in self.repo.list_drafts(project.id)]
+        # Capture the full write-set counts so every one of the six surfaces is
+        # pinned explicitly (H1): draft/position, version, snapshot, block,
+        # receipt — none may gain a row from the aborted transaction.
+        versions_before = self.repo._versions.count_documents({})
+        snapshots_before = self.repo._snapshots.count_documents({})
+        blocks_before = self.repo._blocks.count_documents({})
+        receipts_before = self.repo._writing_accept_receipts.count_documents({})
+
+        original_hook = self.repo._after_start_next_write
+
+        def fail(new_draft):
+            raise RuntimeError("injected start-next transaction failure")
+
+        self.repo._after_start_next_write = fail
+        try:
+            with self.assertRaises(RuntimeError):
+                self.service.start_next_unit(
+                    project_id=project.id, current_draft_id=current.id,
+                    raw_text="새 유닛 본문.", title="2장",
+                    unit_kind=UnitKind.CHAPTER, goal_intent="start_next_unit",
+                    idempotency_key="writing-accept:acc1")
+        finally:
+            self.repo._after_start_next_write = original_hook
+
+        # 1-2. Draft/position surface: positions restored, no new Draft.
+        self.assertEqual(
+            [(d.id, d.position) for d in self.repo.list_drafts(project.id)],
+            before)
+        # 3. Version surface: no orphan version (neither on `following` nor anywhere).
+        self.assertEqual(self.repo.version_count(following.id), 0)
+        self.assertEqual(self.repo._versions.count_documents({}), versions_before)
+        # 4. Snapshot surface: the new unit's snapshot never survived.
+        self.assertEqual(self.repo._snapshots.count_documents({}), snapshots_before)
+        self.assertEqual(
+            self.repo._snapshots.count_documents({"raw_text": "새 유닛 본문."}), 0)
+        # 5. Block surface: no block from the rolled-back snapshot.
+        self.assertEqual(self.repo._blocks.count_documents({}), blocks_before)
+        # 6. Receipt surface: no receipt for the aborted accept.
+        self.assertEqual(
+            self.repo._writing_accept_receipts.count_documents({}), receipts_before)
+        self.assertIsNone(self.repo.get_writing_accept_receipt(
+            project.id, "writing-accept:acc1"))
+
+
 if __name__ == "__main__":
     unittest.main()

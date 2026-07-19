@@ -192,6 +192,15 @@ export function WritingPanel(props: WritingPanelProps) {
     onAccepted,
   } = props;
   const [instruction, setInstruction] = useState("");
+  // W3 Writing intent (§3.1): append to the current unit, or open the next
+  // ordered unit. The next-unit fields are only used for start_next_unit.
+  const [writingIntent, setWritingIntent] =
+    useState<"append_current" | "start_next_unit">("append_current");
+  const [nextTitle, setNextTitle] = useState("");
+  const [nextKind, setNextKind] = useState<"chapter" | "scene" | "other">(
+    "chapter",
+  );
+  const [nextGoal, setNextGoal] = useState("");
   const [candidate, setCandidate] = useState<WritingCandidate | null>(null);
   const [gate, setGate] = useState<WritingGate | null>(null);
   const [loopResult, setLoopResult] = useState<LoopResult | null>(null);
@@ -213,7 +222,11 @@ export function WritingPanel(props: WritingPanelProps) {
   const contextRef = useRef<{ baseVersionId: string; requestId: string } | null>(null);
 
   const availability = availabilityOf(props);
-  const canAccept = candidate !== null && gate?.decision === "pass";
+  const startingNextUnit = writingIntent === "start_next_unit";
+  // A new unit needs a nonblank title; the backend rejects a blank one with 400.
+  const nextUnitReady = !startingNextUnit || nextTitle.trim() !== "";
+  const canAccept =
+    candidate !== null && gate?.decision === "pass" && nextUnitReady;
   const eligibleFinding =
     candidate !== null && gate !== null
       ? eligibleRevisionFinding(candidate, gate)
@@ -346,6 +359,7 @@ export function WritingPanel(props: WritingPanelProps) {
     if (
       candidate === null ||
       gate?.decision !== "pass" ||
+      !nextUnitReady ||
       busyRef.current ||
       contextRef.current === null
     ) {
@@ -367,6 +381,14 @@ export function WritingPanel(props: WritingPanelProps) {
       task_type: TASK_TYPE,
       output_type: OUTPUT_TYPE,
       current_position: { draft_id: draftId, version_id: baseVersionId },
+      intent: writingIntent,
+      next_unit: startingNextUnit
+        ? {
+            title: nextTitle.trim(),
+            unit_kind: nextKind,
+            goal: nextGoal.trim() === "" ? null : nextGoal.trim(),
+          }
+        : null,
     };
     // Bind the idempotency key to the EXACT accept body (minus the key): a
     // transport/5xx retry of the same candidate replays with the same key, while
@@ -392,10 +414,17 @@ export function WritingPanel(props: WritingPanelProps) {
         intentRef.current = null;
         loopIntentRef.current = null;
         setInstruction("");
+        const savedNextUnit = startingNextUnit;
+        setWritingIntent("append_current");
+        setNextTitle("");
+        setNextKind("chapter");
+        setNextGoal("");
         setNotice(
           outcome.analysisFailed
             ? "채택되어 새 version으로 저장됐습니다. 분석 작업은 실패해 재시도가 필요합니다."
-            : "채택되어 새 version으로 저장됐습니다.",
+            : savedNextUnit
+              ? "새 유닛으로 채택·저장됐습니다."
+              : "채택되어 새 version으로 저장됐습니다.",
         );
         onAccepted();
       } else {
@@ -460,6 +489,67 @@ export function WritingPanel(props: WritingPanelProps) {
           rows={3}
           placeholder="예: 아린이 성문을 지나 도시로 들어가는 장면을 이어써줘."
         />
+
+        <fieldset className="writing-intent" disabled={readOnly}>
+          <legend>채택 방식</legend>
+          <label>
+            <input
+              type="radio"
+              name="writing-intent"
+              value="append_current"
+              checked={!startingNextUnit}
+              onChange={() => setWritingIntent("append_current")}
+            />
+            현재 유닛에 이어쓰기
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="writing-intent"
+              value="start_next_unit"
+              checked={startingNextUnit}
+              onChange={() => setWritingIntent("start_next_unit")}
+            />
+            다음 유닛 시작
+          </label>
+        </fieldset>
+
+        {startingNextUnit && (
+          <div className="writing-next-unit">
+            <label htmlFor="next-unit-title">새 유닛 제목</label>
+            <input
+              id="next-unit-title"
+              type="text"
+              value={nextTitle}
+              onChange={(event) => setNextTitle(event.target.value)}
+              readOnly={readOnly}
+              placeholder="예: 2장 — 성 안에서"
+            />
+            <label htmlFor="next-unit-kind">유닛 종류</label>
+            <select
+              id="next-unit-kind"
+              value={nextKind}
+              onChange={(event) =>
+                setNextKind(event.target.value as "chapter" | "scene" | "other")
+              }
+              disabled={readOnly}
+            >
+              <option value="chapter">chapter</option>
+              <option value="scene">scene</option>
+              <option value="other">other</option>
+            </select>
+            <label htmlFor="next-unit-goal">유닛 목표(선택)</label>
+            <input
+              id="next-unit-goal"
+              type="text"
+              value={nextGoal}
+              onChange={(event) => setNextGoal(event.target.value)}
+              readOnly={readOnly}
+              placeholder="생성에만 쓰이며 본문에는 저장되지 않습니다."
+            />
+          </div>
+        )}
+
         <div className="writing-actions">
           <button
             type="submit"
@@ -598,7 +688,12 @@ export function WritingPanel(props: WritingPanelProps) {
             >
               {busy === "accepting" ? "채택 중…" : "채택하고 저장"}
             </button>
-            {gate !== null && !canAccept && (
+            {gate?.decision === "pass" && !nextUnitReady && (
+              <span className="candidate-accept-note">
+                새 유닛 제목을 입력해야 채택할 수 있습니다.
+              </span>
+            )}
+            {gate !== null && gate.decision !== "pass" && !canAccept && (
               <>
                 <span className="candidate-accept-note">
                   Gate 판정이 pass일 때만 채택할 수 있습니다.

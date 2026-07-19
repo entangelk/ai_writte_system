@@ -23,13 +23,16 @@ from services.application.app.core_sot.models import (
     SourceRef,
     SourceSnapshot,
     SourceSnapshotDetail,
+    StartNextUnitResult,
     UnitKind,
+    WritingAcceptReceipt,
 )
 from services.application.app.core_sot.repository import (
     CoreSotRepository,
     DraftSetChanged,
     DuplicateProjectBriefRequest,
     DuplicateSaveRequest,
+    DuplicateWritingAcceptReceipt,
 )
 from services.application.app.core_sot.splitter import (
     content_hash,
@@ -98,6 +101,9 @@ class InMemoryCoreSotRepository:
         self.source_refs: dict[str, SourceRef] = {}
         self._version_ids_by_draft: dict[str, list[str]] = {}
         self._save_request_index: dict[tuple[str, str, str], str] = {}
+        self._writing_accept_receipts: dict[
+            tuple[str, str], WritingAcceptReceipt
+        ] = {}
 
     def next_project_id(self) -> str:
         self._project_seq += 1
@@ -268,6 +274,59 @@ class InMemoryCoreSotRepository:
         self._save_request_index[
             (version.project_id, version.draft_id, idempotency_key)
         ] = version.id
+
+    def get_writing_accept_receipt(
+        self, project_id: str, idempotency_key: str
+    ) -> WritingAcceptReceipt | None:
+        return self._writing_accept_receipts.get((project_id, idempotency_key))
+
+    def record_start_next_unit(
+        self,
+        *,
+        shifted_drafts: tuple[Draft, ...],
+        new_draft: Draft,
+        idempotency_key: str,
+        version: DraftVersion,
+        snapshot: SourceSnapshot,
+        blocks: tuple[SourceBlock, ...],
+        receipt: WritingAcceptReceipt,
+    ) -> None:
+        receipt_key = (receipt.project_id, receipt.idempotency_key)
+        if receipt_key in self._writing_accept_receipts:
+            raise DuplicateWritingAcceptReceipt(receipt.idempotency_key)
+        # Snapshot the exact before-image of every mutated draft so a mid-write
+        # failure leaves zero of the six surfaces (WI-11 semantics on the
+        # single-writer path; the transaction path enforces the same on Mongo).
+        before = {draft.id: self.drafts[draft.id] for draft in shifted_drafts}
+        try:
+            for draft in shifted_drafts:
+                self.drafts[draft.id] = draft
+                self._after_draft_metadata_write(draft)
+            self.drafts[new_draft.id] = new_draft
+            self.versions[version.id] = version
+            self.snapshots[snapshot.id] = snapshot
+            self.blocks_by_snapshot[snapshot.id] = blocks
+            self._version_ids_by_draft.setdefault(
+                version.draft_id, []
+            ).append(version.id)
+            self._save_request_index[
+                (version.project_id, version.draft_id, idempotency_key)
+            ] = version.id
+            self._writing_accept_receipts[receipt_key] = receipt
+        except Exception:
+            self.drafts.update(before)
+            self.drafts.pop(new_draft.id, None)
+            self.versions.pop(version.id, None)
+            self.snapshots.pop(snapshot.id, None)
+            self.blocks_by_snapshot.pop(snapshot.id, None)
+            version_ids = self._version_ids_by_draft.get(version.draft_id)
+            if version_ids and version.id in version_ids:
+                version_ids.remove(version.id)
+            self._save_request_index.pop(
+                (version.project_id, version.draft_id, idempotency_key), None
+            )
+            self._writing_accept_receipts.pop(receipt_key, None)
+            raise
 
 
 class CoreSotService:
@@ -568,6 +627,94 @@ class CoreSotService:
             blocks=blocks,
             idempotent_replay=False,
         )
+
+    def get_writing_accept_receipt(
+        self, *, project_id: str, idempotency_key: str
+    ) -> WritingAcceptReceipt | None:
+        return self._repo.get_writing_accept_receipt(project_id, idempotency_key)
+
+    def start_next_unit(
+        self,
+        *,
+        project_id: str,
+        current_draft_id: str,
+        raw_text: str,
+        title: str,
+        unit_kind: UnitKind,
+        goal_intent: str,
+        idempotency_key: str,
+    ) -> StartNextUnitResult:
+        """Atomically open the unit that follows ``current_draft_id`` (W0 §3.2).
+
+        Shifts every position after the current unit (archived included) up by
+        one, creates the new active Draft at ``current position + 1``, mints its
+        version 1 / snapshot / blocks, and writes the accept receipt — all six
+        surfaces in one transaction. ``goal_intent`` is the stored intent string,
+        NOT prose: the generation goal itself is never persisted (WI-16).
+        """
+        if not idempotency_key:
+            raise CoreSotError("idempotency_key is required")
+        if not isinstance(unit_kind, UnitKind):
+            raise InvalidDraftOrder("draft unit_kind is invalid")
+        self._require_active_project_and_draft(project_id, current_draft_id)
+        drafts = self._repo.list_drafts(project_id)
+        self._require_ordered_drafts(drafts)
+        current = next(d for d in drafts if d.id == current_draft_id)
+        current_position = current.position
+        shifted = tuple(
+            replace(draft, position=draft.position + 1)
+            for draft in drafts
+            if draft.position > current_position
+        )
+        new_draft = Draft(
+            id=self._repo.next_draft_id(),
+            project_id=project_id,
+            title=title,
+            unit_kind=unit_kind,
+            position=current_position + 1,
+        )
+        version_id = self._repo.next_version_id()
+        snapshot_id = self._repo.next_snapshot_id()
+        version = DraftVersion(
+            id=version_id,
+            project_id=project_id,
+            draft_id=new_draft.id,
+            version_number=1,
+            snapshot_id=snapshot_id,
+            idempotency_key=idempotency_key,
+        )
+        snapshot = SourceSnapshot(
+            id=snapshot_id,
+            project_id=project_id,
+            draft_id=new_draft.id,
+            version_id=version_id,
+            raw_text=raw_text,
+            content_hash=content_hash(raw_text),
+        )
+        blocks = materialize_blocks(
+            project_id=project_id,
+            snapshot_id=snapshot_id,
+            raw_blocks=split_source_blocks(raw_text),
+        )
+        receipt = WritingAcceptReceipt(
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            intent=goal_intent,
+            draft_id=new_draft.id,
+            draft_version_id=version_id,
+        )
+        self._repo.record_start_next_unit(
+            shifted_drafts=shifted,
+            new_draft=new_draft,
+            idempotency_key=idempotency_key,
+            version=version,
+            snapshot=snapshot,
+            blocks=blocks,
+            receipt=receipt,
+        )
+        return StartNextUnitResult(
+            draft=new_draft, draft_version=version,
+            snapshot=snapshot, blocks=blocks)
 
     def create_source_ref(
         self,

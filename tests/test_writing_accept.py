@@ -16,6 +16,7 @@ from services.application.app.context_search.models import (
 from services.application.app.context_search.service import (
     ContextSearchBudgetExceeded, ContextSearchFailed,
 )
+from services.application.app.core_sot.models import UnitKind
 from services.application.app.core_sot.service import (
     Archived, CoreSotService, InMemoryCoreSotRepository,
 )
@@ -25,8 +26,8 @@ from services.application.app.writing.accept import (
     _append_patch, analysis_job_key,
 )
 from services.application.app.writing.models import (
-    CandidateClaim, CandidateClaimType, WritingCandidate,
-    WritingGateDecision, WritingGateResult,
+    CandidateClaim, CandidateClaimType, NextUnit, WritingCandidate,
+    WritingGateDecision, WritingGateResult, WritingIntent,
     WritingOutputType, WritingRequest, WritingTaskType,
 )
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
@@ -406,10 +407,12 @@ class WritingAcceptEnvelopeKeyTest(unittest.TestCase):
         body = WritingAcceptApiTest()._post(
             client, project, draft, base.draft_version.id).json()
         self.assertEqual(set(body), {
-            "accepted", "gate", "saved", "analysis_job", "idempotent_replay",
+            "accepted", "intent", "gate", "saved", "analysis_job",
+            "idempotent_replay",
         })
         self.assertEqual(set(body["saved"]), {
-            "draft_version_id", "version_number", "snapshot_id", "content_hash",
+            "draft_id", "draft_version_id", "version_number", "snapshot_id",
+            "content_hash", "unit_kind", "position",
         })
         self.assertEqual(set(body["analysis_job"]), {
             "id", "project_id", "snapshot_id", "status", "failure_reason",
@@ -430,10 +433,11 @@ class WritingAcceptEnvelopeKeyTest(unittest.TestCase):
         self.assertEqual(response.status_code, 502)
         body = response.json()
         self.assertEqual(set(body), {
-            "accepted", "saved", "analysis_job", "analysis_error",
+            "accepted", "intent", "saved", "analysis_job", "analysis_error",
         })
         self.assertEqual(set(body["saved"]), {
-            "draft_version_id", "version_number", "snapshot_id", "content_hash",
+            "draft_id", "draft_version_id", "version_number", "snapshot_id",
+            "content_hash", "unit_kind", "position",
         })
         # Load-bearing values (not just key existence): this partial is
         # `502 + accepted=true + saved present`. It must never be mistaken for a
@@ -443,3 +447,443 @@ class WritingAcceptEnvelopeKeyTest(unittest.TestCase):
         self.assertTrue(body["accepted"])
         self.assertIsNotNone(body["saved"])
         asyncio.run(client.aclose())
+
+
+# --- W3 Writing intent (W0 contract §3, WI-01~22) --------------------------
+
+
+def _next_unit(title="새 장", kind=UnitKind.CHAPTER, goal=None):
+    return NextUnit(title=title, unit_kind=kind, goal=goal)
+
+
+def _start_request(project, next_unit):
+    return WritingRequest("wr1", project, WritingTaskType.CONTINUE_SCENE,
+                          "이어서 써줘", intent=WritingIntent.START_NEXT_UNIT,
+                          next_unit=next_unit)
+
+
+def _start_candidate(project, next_unit, text="새 유닛 본문."):
+    return WritingCandidate("wr1", project, WritingTaskType.CONTINUE_SCENE,
+        WritingOutputType.DRAFT_PATCH, text,
+        intent=WritingIntent.START_NEXT_UNIT, next_unit=next_unit)
+
+
+class _IntentBase(unittest.TestCase):
+    """Seeds an ordered project: current(1)·following(2)·archived following(3)."""
+
+    def setUp(self):
+        self.core = CoreSotService(InMemoryCoreSotRepository())
+        project = self.core.create_project(name="Novel")
+        self.project = project.id
+        self.current = self.core.create_draft(
+            project_id=self.project, title="현재 장", unit_kind=UnitKind.CHAPTER)
+        self.base = self.core.save_draft(project_id=self.project,
+            draft_id=self.current.id, raw_text="현재 본문.",
+            idempotency_key="base")
+        self.following = self.core.create_draft(
+            project_id=self.project, title="기존 다음", unit_kind=UnitKind.SCENE)
+        self.archived_following = self.core.create_draft(
+            project_id=self.project, title="보관됨", unit_kind=UnitKind.OTHER)
+        self.core.archive_draft(project_id=self.project,
+            draft_id=self.archived_following.id)
+        self.analysis_repo = InMemoryAnalysisRepository()
+        self.analysis = AnalysisService(self.analysis_repo)
+        self.gate = _Gate()
+
+    def _service(self, analysis=None, reporter=None):
+        return WritingAcceptService(core_sot=self.core,
+            analysis=analysis or self.analysis, gate=self.gate,
+            reporter=reporter)
+
+    def _positions(self):
+        return [(d.title, d.position) for d in
+                self.core.list_drafts(project_id=self.project)]
+
+    def _draft_count(self):
+        return len(self.core.list_drafts(project_id=self.project))
+
+    def _accept_start(self, *, key="acc-start", next_unit=None, candidate=None,
+                      base=None, service=None):
+        nu = next_unit if next_unit is not None else _next_unit()
+        return asyncio.run((service or self._service()).accept(
+            draft_id=self.current.id,
+            base_version_id=base or self.base.draft_version.id,
+            idempotency_key=key, request=_start_request(self.project, nu),
+            candidate=candidate or _start_candidate(self.project, nu),
+            package=_package(self.project)))
+
+    def _accept_append(self, *, key="acc-append", base=None, service=None,
+                       text="추가 문단."):
+        return asyncio.run((service or self._service()).accept(
+            draft_id=self.current.id,
+            base_version_id=base or self.base.draft_version.id,
+            idempotency_key=key, request=_request(self.project),
+            candidate=_candidate(self.project, text),
+            package=_package(self.project)))
+
+
+class WritingIntentAcceptTest(_IntentBase):
+    def test_start_next_unit_creates_atomic_first_version(self):  # WI-03
+        result = self._accept_start(next_unit=_next_unit("2장", UnitKind.CHAPTER))
+        self.assertTrue(result.accepted)
+        self.assertIs(result.intent, WritingIntent.START_NEXT_UNIT)
+        self.assertEqual(result.saved.draft_version.version_number, 1)
+        self.assertEqual(result.saved.snapshot.raw_text, "새 유닛 본문.")
+        self.assertEqual(result.target_draft.title, "2장")
+        self.assertIs(result.target_draft.unit_kind, UnitKind.CHAPTER)
+        self.assertEqual(result.target_draft.position, 2)  # current + 1
+
+    def test_start_next_unit_preserves_current_unit(self):  # WI-04
+        before = self.core.get_draft_version(project_id=self.project,
+            draft_id=self.current.id, version_id=self.base.draft_version.id)
+        self._accept_start()
+        current = self.core.get_draft(project_id=self.project,
+            draft_id=self.current.id)
+        versions = self.core.list_draft_versions(project_id=self.project,
+            draft_id=self.current.id)
+        self.assertEqual(current.position, 1)
+        self.assertEqual(len(versions), 1)
+        self.assertEqual(versions[-1].id, self.base.draft_version.id)
+        after = self.core.get_draft_version(project_id=self.project,
+            draft_id=self.current.id, version_id=self.base.draft_version.id)
+        self.assertEqual(after.snapshot.raw_text, before.snapshot.raw_text)
+
+    def test_start_next_unit_shifts_following_positions(self):  # WI-05
+        result = self._accept_start()
+        positions = self._positions()
+        self.assertEqual(positions, [
+            ("현재 장", 1), (result.target_draft.title, 2),
+            ("기존 다음", 3), ("보관됨", 4)])
+        archived = self.core.get_draft(project_id=self.project,
+            draft_id=self.archived_following.id)
+        self.assertTrue(archived.archived)  # archived unit is shifted, still archived
+
+    def test_invalid_current_target_creates_nothing(self):  # WI-07
+        before = self._draft_count()
+        # stale base
+        self.core.save_draft(project_id=self.project, draft_id=self.current.id,
+            raw_text="수동 저장", idempotency_key="manual")
+        with self.assertRaises(StaleWritingBase):
+            self._accept_start(key="stale", base=self.base.draft_version.id)
+        # cross-project candidate
+        with self.assertRaisesRegex(ValueError, "different projects"):
+            asyncio.run(self._service().accept(
+                draft_id=self.current.id,
+                base_version_id=self.base.draft_version.id,
+                idempotency_key="cross",
+                request=_start_request(self.project, _next_unit()),
+                candidate=_start_candidate("other", _next_unit()),
+                package=_package(self.project)))
+        # archived current
+        self.core.archive_draft(project_id=self.project,
+            draft_id=self.current.id)
+        with self.assertRaises(Archived):
+            self._accept_start(key="arch")
+        self.assertEqual(self._draft_count(), before)  # no new unit from any branch
+        self.assertEqual(self.gate.calls, 0)
+        self.assertEqual(self.analysis_repo.jobs, {})
+
+    def test_nonpass_gate_has_no_start_next_side_effects(self):  # WI-08
+        before = self._positions()
+        for decision in (WritingGateDecision.REVISE, WritingGateDecision.BLOCK):
+            with self.subTest(decision=decision):
+                self.gate.decision = decision
+                result = self._accept_start(key=f"nonpass-{decision.value}")
+                self.assertFalse(result.accepted)
+                self.assertIsNone(result.saved)
+        self.assertEqual(self._positions(), before)
+        self.assertEqual(self.analysis_repo.jobs, {})
+
+    def test_start_next_same_key_replays_same_unit(self):  # WI-09
+        first = self._accept_start(key="acc1")
+        count = self._draft_count()
+        positions = self._positions()
+        calls = self.gate.calls
+        replay = self._accept_start(key="acc1",
+            candidate=_start_candidate(self.project, _next_unit(), "완전히 다른 글"))
+        self.assertTrue(replay.idempotent_replay)
+        self.assertEqual(replay.target_draft.id, first.target_draft.id)
+        self.assertEqual(replay.saved.draft_version.id,
+                         first.saved.draft_version.id)
+        self.assertEqual(self.gate.calls, calls)  # no second Gate
+        self.assertEqual(self._draft_count(), count)  # no duplicate unit
+        self.assertEqual(self._positions(), positions)
+
+    def test_start_next_different_key_creates_distinct_unit(self):  # WI-10
+        first = self._accept_start(key="acc1", next_unit=_next_unit("2장"))
+        second = self._accept_start(key="acc2", next_unit=_next_unit("사이 장"))
+        self.assertNotEqual(first.target_draft.id, second.target_draft.id)
+        # The newer next-unit lands directly after the current unit.
+        self.assertEqual(second.target_draft.position, 2)
+        self.assertEqual(len(self.analysis_repo.jobs), 2)
+
+    def test_start_next_partial_replay_converges(self):  # WI-14
+        failing = _FailingAnalysis(InMemoryAnalysisRepository())
+        service = self._service(analysis=failing)
+        with self.assertRaises(WritingAcceptAnalysisError) as raised:
+            self._accept_start(key="acc1", service=service)
+        target_id = raised.exception.target_draft.id
+        count = self._draft_count()
+        # retry while still failing: no duplicate unit, same target.
+        with self.assertRaises(WritingAcceptAnalysisError) as again:
+            self._accept_start(key="acc1", service=service)
+        self.assertEqual(again.exception.target_draft.id, target_id)
+        self.assertEqual(self._draft_count(), count)
+        # recover: converges on the same snapshot-scoped job, still one unit.
+        failing.fail = False
+        replay = self._accept_start(key="acc1", service=service)
+        self.assertTrue(replay.idempotent_replay)
+        self.assertEqual(replay.target_draft.id, target_id)
+        self.assertEqual(self._draft_count(), count)
+        self.assertEqual(len(failing._repo.jobs), 1)
+
+    def test_next_unit_goal_is_not_persisted_as_prose(self):  # WI-16
+        goal = "주인공을 죽이는 반전"
+        result = self._accept_start(
+            next_unit=_next_unit("2장", UnitKind.CHAPTER, goal=goal))
+        self.assertNotIn(goal, result.saved.snapshot.raw_text)
+        self.assertNotIn(goal, result.target_draft.title)
+        receipt = self.core.get_writing_accept_receipt(
+            project_id=self.project, idempotency_key="writing-accept:acc-start")
+        self.assertEqual(receipt.intent, "start_next_unit")
+
+    def test_replay_precedes_stale_base_and_gate(self):  # WI-19
+        first = self._accept_start(key="acc1")
+        calls = self.gate.calls
+        # Make the current unit's latest version diverge from the accept base.
+        self.core.save_draft(project_id=self.project, draft_id=self.current.id,
+            raw_text="수동 편집", idempotency_key="manual")
+        replay = self._accept_start(key="acc1",
+            base=self.base.draft_version.id)  # now a stale base
+        self.assertTrue(replay.idempotent_replay)
+        self.assertEqual(replay.target_draft.id, first.target_draft.id)
+        self.assertEqual(self.gate.calls, calls)  # replay preceded the Gate
+
+    def test_append_partial_replay_converges(self):  # WI-21
+        failing = _FailingAnalysis(InMemoryAnalysisRepository())
+        service = self._service(analysis=failing)
+        with self.assertRaises(WritingAcceptAnalysisError) as raised:
+            self._accept_append(key="acc1", service=service)
+        saved_id = raised.exception.saved.draft_version.id
+        self.assertIs(raised.exception.intent, WritingIntent.APPEND_CURRENT)
+        versions = len(self.core.list_draft_versions(
+            project_id=self.project, draft_id=self.current.id))
+        failing.fail = False
+        replay = self._accept_append(key="acc1", service=service)
+        self.assertTrue(replay.idempotent_replay)
+        self.assertEqual(replay.saved.draft_version.id, saved_id)
+        self.assertEqual(len(self.core.list_draft_versions(
+            project_id=self.project, draft_id=self.current.id)), versions)
+        self.assertEqual(len(failing._repo.jobs), 1)
+
+    def test_append_current_saves_same_draft(self):  # WI-02
+        result = self._accept_append(text="이어지는 문단.")
+        self.assertTrue(result.accepted)
+        self.assertIs(result.intent, WritingIntent.APPEND_CURRENT)
+        self.assertEqual(result.saved.draft_version.draft_id, self.current.id)
+        self.assertEqual(result.saved.snapshot.raw_text, "현재 본문.\n\n이어지는 문단.")
+        self.assertEqual(result.target_draft.id, self.current.id)
+
+    def test_both_intents_use_snapshot_scoped_analysis_key(self):  # WI-22
+        appended = self._accept_append(key="a1")
+        started = self._accept_start(key="s1",
+            base=appended.saved.draft_version.id)
+        for result in (appended, started):
+            with self.subTest(intent=result.intent):
+                self.assertEqual(
+                    result.analysis_job.idempotency_key,
+                    analysis_job_key(result.saved.snapshot.id))
+
+
+class WritingIntentCompatibilityTest(_IntentBase):
+    def test_omitted_intent_preserves_append_current(self):  # WI-01
+        # A legacy request/candidate that omits intent entirely defaults to
+        # append_current and behaves byte-for-byte like the pre-W3 append.
+        request = WritingRequest("wr1", self.project,
+            WritingTaskType.CONTINUE_SCENE, "이어서 써줘")
+        candidate = _candidate(self.project, "이어지는 문단.")
+        self.assertIs(request.intent, WritingIntent.APPEND_CURRENT)
+        self.assertIsNone(request.next_unit)
+        result = asyncio.run(self._service().accept(
+            draft_id=self.current.id,
+            base_version_id=self.base.draft_version.id,
+            idempotency_key="legacy", request=request, candidate=candidate,
+            package=_package(self.project)))
+        self.assertIs(result.intent, WritingIntent.APPEND_CURRENT)
+        self.assertEqual(result.saved.snapshot.raw_text, "현재 본문.\n\n이어지는 문단.")
+        self.assertEqual(result.saved.draft_version.draft_id, self.current.id)
+
+    def test_existing_append_accept_contract_remains_green(self):  # WI-12
+        first = self._accept_append(key="one")
+        second = self._accept_append(key="two",
+            base=first.saved.draft_version.id, text="세 번째.")
+        self.assertEqual(second.saved.draft_version.version_number, 3)
+        self.assertNotEqual(first.saved.draft_version.id,
+                            second.saved.draft_version.id)
+        self.assertEqual(len(self.analysis_repo.jobs), 2)
+
+    def test_legacy_append_save_record_replays_without_receipt(self):  # WI-17
+        first = self._accept_append(key="acc1")
+        # Append never writes an accept receipt (§3.3): the replay is a
+        # read-through of the version idempotency key alone.
+        self.assertIsNone(self.core.get_writing_accept_receipt(
+            project_id=self.project,
+            idempotency_key="writing-accept:acc1"))
+        replay = self._accept_append(key="acc1", text="바뀐 글")
+        self.assertTrue(replay.idempotent_replay)
+        self.assertEqual(replay.saved.draft_version.id,
+                         first.saved.draft_version.id)
+
+    def test_append_different_key_creates_next_version(self):  # WI-18
+        first = self._accept_append(key="one")
+        second = self._accept_append(key="two",
+            base=first.saved.draft_version.id)
+        self.assertFalse(second.idempotent_replay)
+        self.assertEqual(second.saved.draft_version.version_number, 3)
+
+
+class WritingIntentApiTest(unittest.TestCase):
+    def _setup(self, *, decision=WritingGateDecision.PASS, analysis=None):
+        core = CoreSotService(InMemoryCoreSotRepository())
+        project = core.create_project(name="Novel")
+        current = core.create_draft(project_id=project.id, title="현재 장",
+            unit_kind=UnitKind.CHAPTER)
+        base = core.save_draft(project_id=project.id, draft_id=current.id,
+            raw_text="현재 본문.", idempotency_key="base")
+        following = core.create_draft(project_id=project.id, title="기존 다음",
+            unit_kind=UnitKind.SCENE)
+        analysis = analysis or AnalysisService(InMemoryAnalysisRepository())
+        gate = _Gate(decision)
+        app = create_app(service=core, analysis_service=analysis,
+            context_search_service=_Context(), writing_gate_service=gate)
+        async def open_client():
+            return httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://test")
+        return (asyncio.run(open_client()), project.id, current.id,
+                base.draft_version.id, gate)
+
+    def _post(self, client, project, body):
+        return asyncio.run(client.post(
+            f"/projects/{project}/writing/accept", json=body))
+
+    def _start_body(self, draft, base, **overrides):
+        body = {"request_id": "wr1", "draft_id": draft, "base_version_id": base,
+                "idempotency_key": "acc1", "instruction": "이어서 써줘",
+                "candidate_text": "새 유닛 본문.", "intent": "start_next_unit",
+                "next_unit": {"title": "2장", "unit_kind": "chapter", "goal": None}}
+        body.update(overrides)
+        return body
+
+    def test_mismatched_intent_binding_rejected_before_provider(self):  # WI-06
+        client, project, draft, base, gate = self._setup()
+        # append_current carrying a next_unit → 400, before the Gate.
+        bad_append = self._post(client, project, {
+            "request_id": "wr1", "draft_id": draft, "base_version_id": base,
+            "idempotency_key": "a", "instruction": "이어서", "candidate_text": "글.",
+            "intent": "append_current",
+            "next_unit": {"title": "2장", "unit_kind": "chapter", "goal": None}})
+        self.assertEqual(bad_append.status_code, 400)
+        # start_next_unit missing next_unit → 400, before the Gate.
+        bad_start = self._post(client, project, {
+            "request_id": "wr1", "draft_id": draft, "base_version_id": base,
+            "idempotency_key": "b", "instruction": "이어서", "candidate_text": "글.",
+            "intent": "start_next_unit"})
+        self.assertEqual(bad_start.status_code, 400)
+        self.assertEqual(gate.calls, 0)
+        asyncio.run(client.aclose())
+
+    def test_accept_response_exact_keys_for_both_intents(self):  # WI-15
+        client, project, draft, base, _ = self._setup()
+        started = self._post(client, project, self._start_body(draft, base))
+        self.assertEqual(started.status_code, 200)
+        started_body = started.json()
+        self.assertEqual(started_body["intent"], "start_next_unit")
+        self.assertEqual(set(started_body["saved"]), {
+            "draft_id", "draft_version_id", "version_number", "snapshot_id",
+            "content_hash", "unit_kind", "position"})
+        self.assertEqual(started_body["saved"]["unit_kind"], "chapter")
+        self.assertEqual(started_body["saved"]["position"], 2)
+        appended = self._post(client, project, {
+            "request_id": "wr1", "draft_id": draft,
+            "base_version_id": base, "idempotency_key": "acc2",
+            "instruction": "이어서", "candidate_text": "덧붙임.",
+            "intent": "append_current"})
+        self.assertEqual(appended.status_code, 200)
+        self.assertEqual(appended.json()["intent"], "append_current")
+        self.assertEqual(appended.json()["saved"]["unit_kind"], "chapter")
+        self.assertEqual(appended.json()["saved"]["position"], 1)
+        asyncio.run(client.aclose())
+
+    def test_start_next_analysis_failure_returns_saved_partial(self):  # WI-13
+        analysis = _FailingAnalysis(InMemoryAnalysisRepository())
+        client, project, draft, base, _ = self._setup(analysis=analysis)
+        response = self._post(client, project, self._start_body(draft, base))
+        self.assertEqual(response.status_code, 502)
+        body = response.json()
+        self.assertTrue(body["accepted"])
+        self.assertEqual(body["intent"], "start_next_unit")
+        self.assertEqual(body["saved"]["position"], 2)
+        self.assertEqual(body["saved"]["unit_kind"], "chapter")
+        self.assertIsNone(body["analysis_job"])
+        asyncio.run(client.aclose())
+
+    def test_append_analysis_failure_returns_saved_partial(self):  # WI-20
+        analysis = _FailingAnalysis(InMemoryAnalysisRepository())
+        client, project, draft, base, _ = self._setup(analysis=analysis)
+        response = self._post(client, project, {
+            "request_id": "wr1", "draft_id": draft, "base_version_id": base,
+            "idempotency_key": "acc1", "instruction": "이어서",
+            "candidate_text": "덧붙임.", "intent": "append_current"})
+        self.assertEqual(response.status_code, 502)
+        body = response.json()
+        self.assertTrue(body["accepted"])
+        self.assertEqual(body["intent"], "append_current")
+        self.assertEqual(body["saved"]["draft_id"], draft)
+        self.assertIsNone(body["analysis_job"])
+        asyncio.run(client.aclose())
+
+
+class WritingIntentInMemoryRollbackTest(_IntentBase):
+    """Hardening (not a WI row): the in-memory single-writer rollback restores
+    every one of the six start-next surfaces on a mid-write failure. The
+    contract-named Mongo transaction guard is WI-11 in test_core_sot_mongo.py.
+    """
+
+    def test_mid_write_failure_leaves_no_partial_unit(self):
+        class _FailingRepo(InMemoryCoreSotRepository):
+            def _after_draft_metadata_write(self, draft):
+                raise RuntimeError("injected start-next write failure")
+
+        repo = _FailingRepo()
+        core = CoreSotService(repo)
+        project = core.create_project(name="Novel")
+        current = core.create_draft(project_id=project.id, title="현재",
+            unit_kind=UnitKind.CHAPTER)
+        core.save_draft(project_id=project.id, draft_id=current.id,
+            raw_text="본문.", idempotency_key="base")
+        following = core.create_draft(project_id=project.id, title="다음",
+            unit_kind=UnitKind.SCENE)
+        before = [(d.id, d.position) for d in
+                  core.list_drafts(project_id=project.id)]
+        # Pin every one of the six surfaces explicitly (H1): draft/position,
+        # version, snapshot, block, receipt — none may gain a row.
+        versions_before = len(repo.versions)
+        snapshots_before = len(repo.snapshots)
+        blocks_before = len(repo.blocks_by_snapshot)
+        with self.assertRaises(RuntimeError):
+            core.start_next_unit(project_id=project.id,
+                current_draft_id=current.id, raw_text="새 유닛.",
+                title="2장", unit_kind=UnitKind.CHAPTER,
+                goal_intent="start_next_unit",
+                idempotency_key="writing-accept:acc1")
+        # 1-2. Draft/position surface: positions restored, no new unit.
+        self.assertEqual(
+            [(d.id, d.position) for d in core.list_drafts(project_id=project.id)],
+            before)
+        # 3-5. Version/snapshot/block surfaces: no orphan write survived.
+        self.assertEqual(len(repo.versions), versions_before)
+        self.assertEqual(len(repo.snapshots), snapshots_before)
+        self.assertEqual(len(repo.blocks_by_snapshot), blocks_before)
+        # 6. Receipt surface: no receipt for the aborted accept.
+        self.assertIsNone(core.get_writing_accept_receipt(
+            project_id=project.id, idempotency_key="writing-accept:acc1"))

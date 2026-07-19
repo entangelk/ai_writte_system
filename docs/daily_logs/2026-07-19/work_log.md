@@ -300,3 +300,85 @@
 
 - W3 Writing Intent WI-01~22를 구현한다.
 - WI 완료 뒤 SC-01/02의 ProjectBrief+OU+Writing Intent fragment 전체를 자동 대조해 W3를 최종 closure한다.
+
+---
+
+## Task — Writing Workspace V2 W3 증분 2: explicit Writing intent + W3 전체 closure
+
+### Goals
+
+- W0 §3의 `append_current|start_next_unit` discriminator, candidate binding, start-next six-surface Core SOT transaction, accept receipt/replay와 Analysis partial 수렴을 WI-01~22로 구현한다.
+- WI 완료 뒤 SC-01/02로 ProjectBrief + OU + Writing intent fragment 전체를 W0 schema catalog와 자동 대조해 W3를 최종 closure한다.
+- LLM 없이 결정적 계약만 구현·검증한다.
+
+### User Decisions and Rationale
+
+- 사용자는 HANDOFF와 오늘 로그의 다음 작업(WI-01~22 → SC-01/02)을 이어서 진행하도록 지시했다. W0 v1.7.10에 exact 계약과 named matrix가 이미 확정돼 있어 새 owner fork 없이 §3부터 독립 증분으로 구현했다.
+- `nextUnitSpec`의 `goal`은 W0 prose가 "optional"이라 표현하지만 정본 schema catalog `$defs`는 `goal`을 `required`(nullable)로 명시한다. 구조 계약(schema catalog)이 wire shape의 정본이므로 `goal`을 required-nullable 키로 맞추고 "optional"은 "값이 null 가능"으로 해석했다. 프론트는 항상 `goal`(값 또는 null)을 보낸다.
+
+### Completed work
+
+- **모델/계약**: `writing/models.py`에 `WritingIntent` enum과 `NextUnit{title,unit_kind,goal}`를 추가하고 `WritingRequest`/`WritingCandidate`에 `intent`/`next_unit`(append 기본)를 실었다. generate 서비스는 candidate가 request의 intent/next_unit를 echo하게 했다(기본값으로 append 호환).
+- **accept 검증**: `_validate`가 provider/write 전에 append+next_unit·start+missing next_unit·candidate/request intent·next_unit 불일치·blank title·blank goal을 400으로 막는다.
+- **Core SOT 6-surface 원자 write**: `WritingAcceptReceipt` 모델과 `start_next_unit`을 추가했다. current 뒤 position을 archived 포함 +1 shift하고 current+1에 새 active Draft, version 1/snapshot/blocks, accept receipt를 한 transaction으로 commit한다. in-memory before-image rollback과 Mongo transaction/single-writer fallback rollback을 구현하고, `(project_id,idempotency_key)` unique index와 실패 주입 seam(`_after_start_next_write`)을 추가했다.
+- **accept 서비스**: intent로 분기해 append는 기존 3-surface 저장+save-key read-through replay, start_next는 receipt replay+원자 저장을 사용한다. replay lookup은 stale base·Gate보다 먼저 수행한다. `WritingAcceptResult`/`WritingAcceptAnalysisError`가 `intent`와 `target_draft`(unit_kind/position)를 싣고 두 intent 모두 `analyze:{snapshot_id}` job으로 수렴한다.
+- **HTTP**: `NextUnitBody`(extra=forbid, goal required-nullable)와 `WritingAcceptRequest`의 `intent`/`next_unit`, 응답 `intent`, `AcceptedSavePayload`의 `draft_id/unit_kind/position`, partial 502의 `intent`+넓힌 saved를 추가했다.
+- **회귀**: WI-01~22 named 행을 `WritingIntentAcceptTest`/`WritingIntentCompatibilityTest`/`WritingIntentApiTest`/`WritingIntentMongoTest`(WI-11)로 구현하고, in-memory rollback hardening과 mongo index under-strict guard를 보강했다. SC-01/02(`WorkspaceW0SchemaIntegrationTest`)를 W3 OU·Writing intent fragment까지 확장했다.
+- **프론트**: WritingPanel에 채택 방식 라디오(현재 이어쓰기|다음 유닛 시작)와 새 유닛 title/kind/goal 입력을 추가하고 accept body에 intent/next_unit를 배선했다. 제목 미입력 시 accept 차단·안내를 추가했다. `gen:api`로 타입 재생성 후 build·테스트를 통과시켰다.
+
+### Issues found
+
+- 기존 accept envelope-key 회귀 2개와 WritingPanel accept-body 단정 2개가 새 `intent`/넓힌 `saved` 필드로 실패해 새 계약에 맞게 갱신했다(예상된 계약 변경).
+- `NextUnitBody`가 catalog `additionalProperties:false`와 어긋나 `extra="forbid"`를 붙였고, `goal` optional↔required 불일치는 정본 catalog에 맞춰 required-nullable로 정렬했다. WI API 테스트 body에 `goal: null`을 명시했다.
+- 첫 live Mongo 실행은 샌드박스 socket 차단으로 skip됐다. WI-11 등 Mongo transaction 회귀는 실 replica-set 실행이 남는 항목이다.
+
+### Decisions
+
+- append 경로는 receipt를 쓰지 않고 기존 save-key read-through replay를 유지해 legacy 호환(WI-17)과 byte-identical append 동작을 보존했다. receipt는 target draft가 사전 미지인 start_next에만 필요하다.
+- 계약이 accept 중심이라 generate HTTP 표면은 intent를 받지 않고, candidate echo만 서비스 계층에서 유지했다. goal은 본문에 저장하지 않으며(WI-16) 프론트가 생성 지시로만 전달한다.
+- accept 요청은 W0 catalog의 `writingAcceptRequestV2` oneOf를 literal FastAPI oneOf로 강제하지 않고 §3.1의 flat/backward-compat shape을 유지했다. SC-01은 동형이 성립하는 response·reorder·enum·nextUnit fragment를 대조한다.
+
+### Verification
+
+- `python3 -m pytest tests/test_writing_accept.py tests/test_project_brief.py -q` → **62 passed / 24 subtests**.
+- backend full `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1181 passed / 73 skipped(Mongo-gated) / 297 subtests**.
+- frontend `npm test -- --run` → **146 passed / 10 files**.
+- `npm run gen:api` 두 번째 생성물과 tracked `schema.d.ts` **byte-identical**; `npm run build` → **96 modules**; `git diff --check` clean.
+- LLM 호출 없음(결정적 계약, 사용자 제약).
+
+### Next steps
+
+- Docker/replica-set 테스트 머신에서 WI-11(`WritingIntentMongoTest`) six-surface transaction rollback과 Mongo start_next 경로를 실행해 마지막 live 축을 닫는다.
+- W3 전체 closure에 대한 독립 검증(요청 시)과 W4 export 착수.
+
+---
+
+## Task — W3 증분 2 독립 검증 PASS 후 H1 hardening + 커밋
+
+### Goals
+
+- 독립 검증 `docs/verifications/2026-07-19/w3_writing_intent.md`의 PASS(조건 없음)와 hardening H1/H2를 확인하고 보강 가능한 부분을 반영한다.
+- 검증 대상 uncommitted 변경을 하나의 커밋으로 묶는다.
+
+### User Decisions and Rationale
+
+- 사용자는 독립 검증 기록을 근거로 보강 가능한 부분을 보강한 뒤 커밋하도록 지시했다. 독립 검증 기록 자체는 감사 artifact이므로 수정하지 않고, 그 H1 권고만 테스트에 반영했다.
+
+### Completed work
+
+- **H1 hardening**: WI-11(`WritingIntentMongoTest`)이 6-surface 중 version·block surface를 간접 cover하던 것을 명시적으로 pin했다. 실패 주입 전 versions/snapshots/blocks/receipts count를 캡처하고 rollback 후 모두 불변임을 단정한다. 로컬에서 실제 실행되는 `WritingIntentInMemoryRollbackTest`에도 동일하게 version/snapshot/block surface 명시 단정을 추가해 6-surface 전부(draft/position·version·snapshot·block·receipt)를 로컬에서도 잠갔다.
+- **H2**: uncommitted 변경 전체(W3 증분 2 + H1 hardening)를 하나의 커밋으로 묶어 다음 worker가 깨끗한 base에서 W4를 착수할 수 있게 했다.
+
+### Decisions
+
+- 독립 검증의 verdict은 조건 없는 합격이므로 계약·구현 변경은 하지 않고 H1(명시적 surface pin)만 테스트 강화로 반영했다. 이는 W0 §3.2 "transaction 실패 시 6 surface 모두 0건"을 회귀에서 완전히 명시화한다.
+
+### Verification
+
+- `python3 -m pytest tests/test_writing_accept.py::WritingIntentInMemoryRollbackTest tests/test_core_sot_mongo.py -q` → **1 passed / 54 skipped(Mongo-gated)**.
+- backend full → **1181 passed / 73 skipped / 297 subtests**(H1은 기존 테스트에 단정 추가라 수치 불변).
+
+### Next steps
+
+- Docker/replica-set 머신에서 WI-11의 명시적 6-surface pin이 실 transaction에서 통과하는지 확인한다.
+- W4 ordered-latest export 착수.

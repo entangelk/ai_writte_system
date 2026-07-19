@@ -1,4 +1,16 @@
-"""Phase 5.3 accept orchestration: Gate pass → SOT save → pending analysis job."""
+"""Phase 5.3 accept orchestration: Gate pass → SOT save → pending analysis job.
+
+W3 (W0 contract §3) adds an explicit Writing ``intent``:
+
+* ``append_current`` keeps the original three-surface append and its legacy
+  save-key-only replay (WI-17): no receipt is written.
+* ``start_next_unit`` opens the next ordered unit through Core SOT's six-surface
+  atomic write (positions, Draft, version, snapshot, block, receipt) and replays
+  via the durable accept receipt.
+
+Both intents converge on the same snapshot-scoped Analysis job (§3.2) and the
+same partial-success contract when that job cannot be created.
+"""
 
 from __future__ import annotations
 
@@ -7,14 +19,19 @@ from dataclasses import dataclass
 from services.application.app.analysis.models import AnalysisJob
 from services.application.app.analysis.service import AnalysisService
 from services.application.app.context_search.models import ContextPackage
-from services.application.app.core_sot.models import SaveDraftResult
+from services.application.app.core_sot.models import (
+    Draft, SaveDraftResult,
+)
+from services.application.app.core_sot.repository import (
+    DuplicateWritingAcceptReceipt,
+)
 from services.application.app.core_sot.service import Archived, CoreSotService
 from services.application.app.writing.context_pointer import pointer_wire
 from services.application.app.writing.gate import WritingGateService
 from services.application.app.writing.service import CandidateReporter
 from services.application.app.writing.models import (
-    WritingCandidate, WritingGateDecision, WritingGateResult, WritingOutputType,
-    WritingRequest, WritingTaskType,
+    WritingCandidate, WritingGateDecision, WritingGateResult, WritingIntent,
+    WritingOutputType, WritingRequest, WritingTaskType,
 )
 
 
@@ -38,9 +55,12 @@ class StaleWritingBase(WritingAcceptError):
 
 
 class WritingAcceptAnalysisError(RuntimeError):
-    def __init__(self, message: str, *, saved: SaveDraftResult) -> None:
+    def __init__(self, message: str, *, saved: SaveDraftResult,
+                 intent: WritingIntent, target_draft: Draft) -> None:
         super().__init__(message)
         self.saved = saved
+        self.intent = intent
+        self.target_draft = target_draft
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +69,11 @@ class WritingAcceptResult:
     gate: WritingGateResult | None
     saved: SaveDraftResult | None
     analysis_job: AnalysisJob | None
+    intent: WritingIntent = WritingIntent.APPEND_CURRENT
+    # The Draft the save targeted (append: the current draft; start: the new
+    # unit). Carries unit_kind/position for the response `saved` envelope. None
+    # only when nothing was saved (Gate non-pass).
+    target_draft: Draft | None = None
     idempotent_replay: bool = False
 
 
@@ -70,40 +95,98 @@ class WritingAcceptService:
         if self._reporter is not None:
             candidate = await self._reporter.enrich(candidate, package)
         save_key = f"writing-accept:{idempotency_key}"
+        intent = request.intent
         draft = self._core_sot.get_draft(
             project_id=request.project_id, draft_id=draft_id)
         project = self._core_sot.get_project(project_id=request.project_id)
         if project.archived or draft.archived:
             raise Archived("project or draft is archived")
-        versions = self._core_sot.list_draft_versions(
-            project_id=request.project_id, draft_id=draft_id)
-        replay = next((v for v in versions if v.idempotency_key == save_key), None)
+
+        # Replay lookup precedes stale-base and Gate (§3.3, WI-19).
+        replay = self._replay(request.project_id, draft_id, save_key, intent)
         if replay is not None:
-            saved = self._save_result(request.project_id, draft_id, replay.id)
-            try:
-                job = self._create_job(request.project_id, saved, candidate)
-            except Exception as exc:
-                raise WritingAcceptAnalysisError(str(exc), saved=saved) from exc
-            return WritingAcceptResult(True, None, saved, job, True)
+            saved, target = replay
+            return self._finalize(request.project_id, saved, candidate,
+                                  intent, target, gate=None, replay=True)
 
         base = self._core_sot.get_draft_version(
             project_id=request.project_id, draft_id=draft_id,
             version_id=base_version_id)
+        versions = self._core_sot.list_draft_versions(
+            project_id=request.project_id, draft_id=draft_id)
         if versions[-1].id != base.draft_version.id:
             raise StaleWritingBase("base draft version is not the latest version")
         gate = await self._gate.evaluate(
             request=request, candidate=candidate, package=package)
         if gate.decision is not WritingGateDecision.PASS:
-            return WritingAcceptResult(False, gate, None, None)
-        raw_text = _append_patch(base.snapshot.raw_text, candidate.text.strip())
-        saved = self._core_sot.save_draft(
-            project_id=request.project_id, draft_id=draft_id,
-            raw_text=raw_text, idempotency_key=save_key)
+            return WritingAcceptResult(False, gate, None, None, intent, None)
+
+        text = candidate.text.strip()
+        if intent is WritingIntent.START_NEXT_UNIT:
+            try:
+                result = self._core_sot.start_next_unit(
+                    project_id=request.project_id, current_draft_id=draft_id,
+                    raw_text=text, title=request.next_unit.title,
+                    unit_kind=request.next_unit.unit_kind,
+                    goal_intent=intent.value, idempotency_key=save_key)
+            except DuplicateWritingAcceptReceipt:
+                # Concurrent same-key race: converge on the committed unit.
+                saved, target = self._replay(
+                    request.project_id, draft_id, save_key, intent)
+                return self._finalize(request.project_id, saved, candidate,
+                                      intent, target, gate=None, replay=True)
+            saved = SaveDraftResult(result.draft_version, result.snapshot,
+                                    result.blocks, idempotent_replay=False)
+            target = result.draft
+        else:
+            raw_text = _append_patch(base.snapshot.raw_text, text)
+            saved = self._core_sot.save_draft(
+                project_id=request.project_id, draft_id=draft_id,
+                raw_text=raw_text, idempotency_key=save_key)
+            target = draft
+        return self._finalize(request.project_id, saved, candidate, intent,
+                              target, gate=gate, replay=saved.idempotent_replay)
+
+    def _replay(self, project_id: str, draft_id: str, save_key: str,
+                intent: WritingIntent) -> tuple[SaveDraftResult, Draft] | None:
+        """Return (saved, target_draft) for a same-key replay, else None.
+
+        start_next uses the durable receipt (whose target may be a different
+        draft); append reads through the legacy version idempotency key so
+        pre-receipt append records still replay (WI-17).
+        """
+        if intent is WritingIntent.START_NEXT_UNIT:
+            receipt = self._core_sot.get_writing_accept_receipt(
+                project_id=project_id, idempotency_key=save_key)
+            if receipt is None:
+                return None
+            saved = self._save_result(
+                project_id, receipt.draft_id, receipt.draft_version_id)
+            target = self._core_sot.get_draft(
+                project_id=project_id, draft_id=receipt.draft_id)
+            return saved, target
+        versions = self._core_sot.list_draft_versions(
+            project_id=project_id, draft_id=draft_id)
+        version = next(
+            (v for v in versions if v.idempotency_key == save_key), None)
+        if version is None:
+            return None
+        saved = self._save_result(project_id, draft_id, version.id)
+        target = self._core_sot.get_draft(
+            project_id=project_id, draft_id=draft_id)
+        return saved, target
+
+    def _finalize(self, project_id: str, saved: SaveDraftResult,
+                  candidate: WritingCandidate, intent: WritingIntent,
+                  target: Draft, *, gate: WritingGateResult | None,
+                  replay: bool) -> WritingAcceptResult:
         try:
-            job = self._create_job(request.project_id, saved, candidate)
+            job = self._create_job(project_id, saved, candidate)
         except Exception as exc:
-            raise WritingAcceptAnalysisError(str(exc), saved=saved) from exc
-        return WritingAcceptResult(True, gate, saved, job, saved.idempotent_replay)
+            raise WritingAcceptAnalysisError(
+                str(exc), saved=saved, intent=intent,
+                target_draft=target) from exc
+        return WritingAcceptResult(True, gate, saved, job, intent, target, replay)
 
     def _create_job(self, project_id: str, saved: SaveDraftResult,
                     candidate: WritingCandidate) -> AnalysisJob:
@@ -145,6 +228,25 @@ class WritingAcceptService:
             raise WritingAcceptError("candidate belongs to a different request")
         if candidate.project_id != request.project_id or package.project_id != request.project_id:
             raise WritingAcceptError("writing accept inputs belong to different projects")
+        # Intent/next_unit binding, before any provider or write (§3.1).
+        if candidate.intent != request.intent:
+            raise WritingAcceptError("candidate intent does not match request")
+        if candidate.next_unit != request.next_unit:
+            raise WritingAcceptError("candidate next_unit does not match request")
+        if request.intent is WritingIntent.APPEND_CURRENT:
+            if request.next_unit is not None:
+                raise WritingAcceptError(
+                    "append_current must not carry next_unit")
+        else:
+            next_unit = request.next_unit
+            if next_unit is None:
+                raise WritingAcceptError(
+                    "start_next_unit requires next_unit")
+            if not next_unit.title.strip():
+                raise WritingAcceptError("next_unit.title must not be blank")
+            if next_unit.goal is not None and not next_unit.goal.strip():
+                raise WritingAcceptError(
+                    "next_unit.goal must be a nonblank string or null")
 
 
 def _candidate_report_payload(candidate: WritingCandidate) -> dict[str, object]:

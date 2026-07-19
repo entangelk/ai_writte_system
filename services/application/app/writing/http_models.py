@@ -26,6 +26,7 @@ from typing import Union
 
 from pydantic import BaseModel
 
+from services.application.app.core_sot.models import UnitKind
 from services.application.app.writing.models import (
     CandidateClaimType,
     MemoryHintType,
@@ -34,6 +35,7 @@ from services.application.app.writing.models import (
     WritingGateDecision,
     WritingGateFindingType,
     WritingGateSeverity,
+    WritingIntent,
     WritingOutputType,
     WritingTaskType,
 )
@@ -132,10 +134,16 @@ class WritingStageError(BaseModel):
 
 
 class AcceptedSavePayload(BaseModel):
+    # W3 (§3.3): both intents expose the target Draft's kind/position. For
+    # append the target is the current draft; for start_next_unit it is the new
+    # unit created at current position + 1.
+    draft_id: str
     draft_version_id: str
     version_number: int
     snapshot_id: str
     content_hash: str
+    unit_kind: UnitKind
+    position: int
 
 
 class AnalysisJobPayload(BaseModel):
@@ -169,6 +177,7 @@ class WritingReviseGateResponse(BaseModel):
 
 class WritingAcceptResponse(BaseModel):
     accepted: bool
+    intent: WritingIntent
     gate: WritingGatePayload | None
     saved: AcceptedSavePayload | None
     analysis_job: AnalysisJobPayload | None
@@ -198,9 +207,11 @@ class WritingReviseGatePartial(BaseModel):
 
 
 class WritingAcceptAnalysisPartial(BaseModel):
-    # 502 after the version is already saved: accepted=true + saved present, but
-    # the pending Analysis job could not be created. Distinct from a plain error.
+    # 502 after the unit is already saved: accepted=true + intent + saved
+    # present, but the pending Analysis job could not be created. Distinct from a
+    # plain error. Applies to both intents (§3.3, WI-13/WI-20).
     accepted: bool
+    intent: WritingIntent
     saved: AcceptedSavePayload
     analysis_job: AnalysisJobPayload | None
     analysis_error: str

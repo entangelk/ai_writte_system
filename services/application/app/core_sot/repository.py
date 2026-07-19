@@ -18,7 +18,17 @@ from services.application.app.core_sot.models import (
     SourceBlock,
     SourceRef,
     SourceSnapshot,
+    WritingAcceptReceipt,
 )
+
+
+class DuplicateWritingAcceptReceipt(Exception):
+    """Raised when a ``start_next_unit`` accept loses a receipt-key race.
+
+    The committed receipt already exists for the same
+    ``(project_id, idempotency_key)``. Callers resolve it as an idempotent
+    replay of the original unit.
+    """
 
 
 class DuplicateSaveRequest(Exception):
@@ -105,6 +115,22 @@ class CoreSotRepository(Protocol):
         snapshot: SourceSnapshot,
         blocks: tuple[SourceBlock, ...],
     ) -> None: ...
+
+    def record_start_next_unit(
+        self,
+        *,
+        shifted_drafts: tuple[Draft, ...],
+        new_draft: Draft,
+        idempotency_key: str,
+        version: DraftVersion,
+        snapshot: SourceSnapshot,
+        blocks: tuple[SourceBlock, ...],
+        receipt: WritingAcceptReceipt,
+    ) -> None: ...
+
+    def get_writing_accept_receipt(
+        self, project_id: str, idempotency_key: str
+    ) -> WritingAcceptReceipt | None: ...
 
     def get_version(self, version_id: str) -> DraftVersion | None: ...
 

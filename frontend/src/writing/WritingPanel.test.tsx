@@ -116,14 +116,18 @@ function loopResponse(
 }
 
 const saved = {
+  draft_id: "d1",
   draft_version_id: "v4",
   version_number: 4,
   snapshot_id: "s4",
   content_hash: "h4",
+  unit_kind: "chapter",
+  position: 1,
 };
 
 const acceptOk = {
   accepted: true,
+  intent: "append_current",
   gate: gatePass,
   saved,
   analysis_job: {
@@ -635,12 +639,54 @@ describe("WritingPanel — accept (pass only)", () => {
       task_type: "continue_scene",
       output_type: "draft_patch",
       current_position: { draft_id: "d1", version_id: "v3" },
+      intent: "append_current",
+      next_unit: null,
       idempotency_key: "uuid-2",
     });
     expect(onAccepted).toHaveBeenCalledTimes(1);
     // Candidate consumed after a successful save.
     await waitFor(() => expect(screen.queryByText(candidate.text)).not.toBeInTheDocument());
     expect(screen.getByRole("status")).toHaveTextContent("채택되어 새 version으로 저장됐습니다.");
+  });
+
+  it("sends intent=start_next_unit with the next-unit metadata (goal not persisted client-side)", async () => {
+    const startAccept = { ...acceptOk, intent: "start_next_unit" };
+    const fetchMock = mockFetch(
+      { body: candidate },
+      { body: gatePass },
+      { body: startAccept },
+    );
+    renderPanel();
+    await userEvent.click(screen.getByLabelText("다음 유닛 시작"));
+    await userEvent.type(screen.getByLabelText("새 유닛 제목"), "2장 — 성 안");
+    await userEvent.selectOptions(screen.getByLabelText("유닛 종류"), "scene");
+    await userEvent.type(screen.getByLabelText("유닛 목표(선택)"), "반전을 심는다");
+    await generateAndGate(fetchMock);
+    expect(acceptButton()).toBeEnabled();
+    await userEvent.click(acceptButton());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    const body = JSON.parse(fetchMock.mock.calls[2][1].body);
+    expect(body.intent).toBe("start_next_unit");
+    expect(body.next_unit).toEqual({
+      title: "2장 — 성 안",
+      unit_kind: "scene",
+      goal: "반전을 심는다",
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("새 유닛으로 채택·저장됐습니다.");
+  });
+
+  it("blocks accept when starting the next unit without a title", async () => {
+    const fetchMock = mockFetch({ body: candidate }, { body: gatePass });
+    renderPanel();
+    await userEvent.click(screen.getByLabelText("다음 유닛 시작"));
+    await generateAndGate(fetchMock);
+    // Gate passed, but a blank next-unit title keeps accept disabled.
+    expect(acceptButton()).toBeDisabled();
+    expect(
+      screen.getByText("새 유닛 제목을 입력해야 채택할 수 있습니다."),
+    ).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("새 유닛 제목"), "2장");
+    expect(acceptButton()).toBeEnabled();
   });
 
   it("treats 200 accepted=false as a Gate result, not a failure (candidate kept)", async () => {

@@ -106,6 +106,35 @@ class SourceRef:
 
 
 @dataclass(frozen=True, slots=True)
+class WritingAcceptReceipt:
+    """Durable record of a completed ``start_next_unit`` accept (W0 §3.3).
+
+    Identity is ``(project_id, idempotency_key)`` where the key is the accept
+    save key ``writing-accept:{key}``. It records which unit the accept created
+    so a same-key replay reconstructs the exact original target without a second
+    Gate/write. ``intent`` is stored as a plain string to keep Core SOT free of
+    the Writing intent enum. Legacy append accepts intentionally have NO receipt
+    (they replay via the version idempotency key — WI-17).
+    """
+
+    project_id: str
+    idempotency_key: str
+    intent: str
+    draft_id: str
+    draft_version_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class StartNextUnitResult:
+    """Six-surface atomic result of ``start_next_unit`` (W0 §3.2)."""
+
+    draft: Draft
+    draft_version: DraftVersion
+    snapshot: SourceSnapshot
+    blocks: tuple[SourceBlock, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class SaveDraftResult:
     draft_version: DraftVersion
     snapshot: SourceSnapshot

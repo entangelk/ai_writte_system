@@ -820,10 +820,15 @@ export interface components {
         AcceptedSavePayload: {
             /** Content Hash */
             content_hash: string;
+            /** Draft Id */
+            draft_id: string;
             /** Draft Version Id */
             draft_version_id: string;
+            /** Position */
+            position: number;
             /** Snapshot Id */
             snapshot_id: string;
+            unit_kind: components["schemas"]["UnitKind"];
             /** Version Number */
             version_number: number;
         };
@@ -1049,6 +1054,15 @@ export interface components {
          * @enum {string}
          */
         MemoryHintType: "event" | "character_fact" | "location_fact" | "relation" | "foreshadowing" | "timeline_fact" | "style_signal";
+        /** NextUnitBody */
+        NextUnitBody: {
+            /** Goal */
+            goal: string | null;
+            /** Title */
+            title: string;
+            /** Unit Kind */
+            unit_kind: string;
+        };
         /** ProjectBriefGetResponse */
         ProjectBriefGetResponse: {
             brief: components["schemas"]["ProjectBriefVersionPayload"] | null;
@@ -1242,6 +1256,7 @@ export interface components {
             /** Analysis Error */
             analysis_error: string;
             analysis_job: components["schemas"]["AnalysisJobPayload"] | null;
+            intent: components["schemas"]["WritingIntent"];
             saved: components["schemas"]["AcceptedSavePayload"];
         };
         /** WritingAcceptRequest */
@@ -1263,10 +1278,16 @@ export interface components {
             /** Instruction */
             instruction: string;
             /**
+             * Intent
+             * @default append_current
+             */
+            intent: string;
+            /**
              * Max Tokens
              * @default 4096
              */
             max_tokens: number;
+            next_unit?: components["schemas"]["NextUnitBody"] | null;
             /**
              * Output Type
              * @default draft_patch
@@ -1290,6 +1311,7 @@ export interface components {
             gate: components["schemas"]["WritingGatePayload"] | null;
             /** Idempotent Replay */
             idempotent_replay: boolean;
+            intent: components["schemas"]["WritingIntent"];
             saved: components["schemas"]["AcceptedSavePayload"] | null;
         };
         /** WritingCandidatePayload */
@@ -1408,6 +1430,11 @@ export interface components {
              */
             task_type: string;
         };
+        /**
+         * WritingIntent
+         * @enum {string}
+         */
+        WritingIntent: "append_current" | "start_next_unit";
         /** WritingLoopPayload */
         WritingLoopPayload: {
             /** Gate Evaluations */

@@ -71,11 +71,13 @@ from services.application.app.analysis.review_inbox import (
     gate_finding_affordances,
 )
 from services.application.app.writing.models import (
+    NextUnit,
     WritingCandidate,
     WritingGateDecision,
     WritingGateFinding,
     WritingGateFindingType,
     WritingGateSeverity,
+    WritingIntent,
     WritingOutputType,
     WritingRequest,
     WritingTaskType,
@@ -1222,6 +1224,17 @@ class WritingReviseRequest(BaseModel):
     persist_audit: bool | None = None
 
 
+class NextUnitBody(BaseModel):
+    # W3 start_next_unit target (§3.1). unit_kind is validated at the endpoint
+    # by converting to UnitKind. `goal` is a required-but-nullable key (W0 catalog
+    # `nextUnitSpec`): the value is optional (null allowed), the key is not.
+    # extra="forbid" matches the catalog's additionalProperties:false.
+    model_config = ConfigDict(extra="forbid")
+    title: str
+    unit_kind: str
+    goal: str | None
+
+
 class WritingAcceptRequest(BaseModel):
     request_id: str
     draft_id: str
@@ -1235,6 +1248,9 @@ class WritingAcceptRequest(BaseModel):
     query: str | None = None
     current_position: ContextPositionBody | None = None
     max_tokens: int = 4096
+    # W3 Writing intent (§3.1). Legacy clients omit both → append_current/null.
+    intent: str = WritingIntent.APPEND_CURRENT.value
+    next_unit: NextUnitBody | None = None
 
 
 def create_app(
@@ -2807,12 +2823,15 @@ def create_app(
             } for stage in run.stages],
         }
 
-    def _accepted_save_payload(saved) -> dict[str, object]:
+    def _accepted_save_payload(saved, target_draft) -> dict[str, object]:
         return {
+            "draft_id": saved.draft_version.draft_id,
             "draft_version_id": saved.draft_version.id,
             "version_number": saved.draft_version.version_number,
             "snapshot_id": saved.snapshot.id,
             "content_hash": saved.snapshot.content_hash,
+            "unit_kind": target_draft.unit_kind.value,
+            "position": target_draft.position,
         }
 
     @app.post("/projects/{project_id}/writing/generate",
@@ -3404,6 +3423,15 @@ def create_app(
             _require_project_exists(project_id)
             task_type = WritingTaskType(body.task_type)
             output_type = WritingOutputType(body.output_type)
+            intent = WritingIntent(body.intent)
+            next_unit = (
+                NextUnit(
+                    title=body.next_unit.title,
+                    unit_kind=UnitKind(body.next_unit.unit_kind),
+                    goal=body.next_unit.goal,
+                )
+                if body.next_unit is not None else None
+            )
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
@@ -3427,10 +3455,11 @@ def create_app(
             context_budget=ContextBudget(max_tokens=body.max_tokens),
         )
         request = WritingRequest(body.request_id, project_id, task_type,
-                                 body.instruction, body.draft_excerpt)
+                                 body.instruction, body.draft_excerpt,
+                                 intent=intent, next_unit=next_unit)
         candidate = WritingCandidate(
             body.request_id, project_id, task_type, output_type,
-            body.candidate_text)
+            body.candidate_text, intent=intent, next_unit=next_unit)
         try:
             package = await context_search.build_context_package(search_request)
             result = await writing_accept.accept(
@@ -3450,7 +3479,8 @@ def create_app(
         except WritingAcceptAnalysisError as exc:
             return JSONResponse(status_code=502, content={
                 "accepted": True,
-                "saved": _accepted_save_payload(exc.saved),
+                "intent": exc.intent.value,
+                "saved": _accepted_save_payload(exc.saved, exc.target_draft),
                 "analysis_job": None,
                 "analysis_error": str(exc),
             })
@@ -3463,9 +3493,10 @@ def create_app(
             raise HTTPException(status_code=status, detail=str(exc)) from exc
         return {
             "accepted": result.accepted,
+            "intent": result.intent.value,
             "gate": (_writing_gate_payload(result.gate)
                      if result.gate is not None else None),
-            "saved": (_accepted_save_payload(result.saved)
+            "saved": (_accepted_save_payload(result.saved, result.target_draft)
                       if result.saved is not None else None),
             "analysis_job": (_analysis_job_payload(result.analysis_job)
                              if result.analysis_job is not None else None),

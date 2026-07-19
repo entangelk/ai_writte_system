@@ -42,6 +42,7 @@ def _repo_with_indexes(*, fail_on_name: str | None = None):
     repo._blocks = _FakeCollection(fail_on_name=fail_on_name)
     repo._source_refs = _FakeCollection(fail_on_name=fail_on_name)
     repo._drafts = _FakeCollection(fail_on_name=fail_on_name)
+    repo._writing_accept_receipts = _FakeCollection(fail_on_name=fail_on_name)
     return repo
 
 
@@ -119,6 +120,16 @@ class MongoIndexSetupTests(unittest.TestCase):
                         ("_id", 1),
                     ],
                     {"name": "source_refs_by_project_snapshot"},
+                )
+            ],
+        )
+        # W3: the accept receipt idempotency boundary (§3.3) must be requested.
+        self.assertEqual(
+            repo._writing_accept_receipts.calls,
+            [
+                (
+                    [("project_id", 1), ("idempotency_key", 1)],
+                    {"unique": True, "name": "uniq_writing_accept_receipt"},
                 )
             ],
         )

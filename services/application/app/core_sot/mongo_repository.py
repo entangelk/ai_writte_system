@@ -38,10 +38,12 @@ from services.application.app.core_sot.models import (
     SourceRef,
     SourceSnapshot,
     UnitKind,
+    WritingAcceptReceipt,
 )
 from services.application.app.core_sot.repository import (
     DuplicateProjectBriefRequest,
     DuplicateSaveRequest,
+    DuplicateWritingAcceptReceipt,
     DraftSetChanged,
 )
 
@@ -72,6 +74,7 @@ class MongoCoreSotRepository:
         self._snapshots = self._db["source_snapshots"]
         self._blocks = self._db["source_blocks"]
         self._source_refs = self._db["source_refs"]
+        self._writing_accept_receipts = self._db["writing_accept_receipts"]
         self.ensure_indexes()
 
     @classmethod
@@ -122,6 +125,11 @@ class MongoCoreSotRepository:
                     ("_id", ASCENDING),
                 ],
                 name="source_refs_by_project_snapshot",
+            )
+            self._writing_accept_receipts.create_index(
+                [("project_id", ASCENDING), ("idempotency_key", ASCENDING)],
+                unique=True,
+                name="uniq_writing_accept_receipt",
             )
         except OperationFailure as exc:
             raise MongoRepositorySetupError(
@@ -417,6 +425,98 @@ class MongoCoreSotRepository:
             self._blocks.delete_many({"snapshot_id": snapshot.id})
             raise DuplicateSaveRequest(idempotency_key) from exc
 
+    # -- start next unit (W3 six-surface atomic accept) -----------------------
+
+    def get_writing_accept_receipt(
+        self, project_id: str, idempotency_key: str
+    ) -> WritingAcceptReceipt | None:
+        doc = self._writing_accept_receipts.find_one(
+            {"project_id": project_id, "idempotency_key": idempotency_key}
+        )
+        return _to_receipt(doc) if doc else None
+
+    def record_start_next_unit(
+        self,
+        *,
+        shifted_drafts: tuple[Draft, ...],
+        new_draft: Draft,
+        idempotency_key: str,
+        version: DraftVersion,
+        snapshot: SourceSnapshot,
+        blocks: tuple[SourceBlock, ...],
+        receipt: WritingAcceptReceipt,
+    ) -> None:
+        if self._use_transactions:
+            with self._client.start_session() as session:
+                with session.start_transaction():
+                    self._start_next_unit(
+                        shifted_drafts, new_draft, idempotency_key,
+                        version, snapshot, blocks, receipt, session=session)
+            return
+
+        # Single-writer fallback: capture the full project draft set before-image
+        # so a mid-write failure restores exactly the pre-accept order.
+        before = tuple(
+            self._drafts.find({"project_id": new_draft.project_id})
+        )
+        try:
+            self._start_next_unit(
+                shifted_drafts, new_draft, idempotency_key,
+                version, snapshot, blocks, receipt, session=None)
+        except Exception:
+            self._drafts.delete_many({"project_id": new_draft.project_id})
+            if before:
+                self._drafts.insert_many(before)
+            self._versions.delete_many({"_id": version.id})
+            self._snapshots.delete_many({"_id": snapshot.id})
+            self._blocks.delete_many({"snapshot_id": snapshot.id})
+            self._writing_accept_receipts.delete_many(
+                {"project_id": receipt.project_id,
+                 "idempotency_key": receipt.idempotency_key})
+            raise
+
+    def _start_next_unit(
+        self, shifted_drafts, new_draft, idempotency_key,
+        version, snapshot, blocks, receipt, *, session
+    ) -> None:
+        # Shift the tail up by one. Park each shifted draft at a temporary
+        # negative position first so the new unit's target slot is free without
+        # violating the unique (project_id, position) index mid-write.
+        for draft in shifted_drafts:
+            self._drafts.update_one(
+                {"_id": draft.id, "project_id": draft.project_id},
+                {"$set": {"position": -draft.position}},
+                session=session,
+            )
+        self._drafts.insert_one(_draft_doc(new_draft), session=session)
+        for draft in shifted_drafts:
+            self._drafts.update_one(
+                {"_id": draft.id, "project_id": draft.project_id},
+                {"$set": {"position": draft.position}},
+                session=session,
+            )
+        self._after_start_next_write(new_draft)
+        try:
+            self._versions.insert_one(_version_doc(version), session=session)
+        except DuplicateKeyError as exc:
+            raise DuplicateSaveRequest(idempotency_key) from exc
+        self._snapshots.insert_one(
+            _snapshot_doc(snapshot, idempotency_key), session=session)
+        block_docs = [
+            _block_doc(block, idempotency_key, version.draft_id)
+            for block in blocks
+        ]
+        if block_docs:
+            self._blocks.insert_many(block_docs, session=session)
+        try:
+            self._writing_accept_receipts.insert_one(
+                _receipt_doc(receipt), session=session)
+        except DuplicateKeyError as exc:
+            raise DuplicateWritingAcceptReceipt(receipt.idempotency_key) from exc
+
+    def _after_start_next_write(self, new_draft: Draft) -> None:
+        """Failure-injection seam for the WI-11 six-surface rollback test."""
+
 
 def _project_doc(project: Project) -> dict:
     return {"_id": project.id, "name": project.name, "archived": project.archived}
@@ -576,4 +676,24 @@ def _to_source_ref(doc: dict) -> SourceRef:
         end_offset=doc["end_offset"],
         quote=doc["quote"],
         content_hash=doc["content_hash"],
+    )
+
+
+def _receipt_doc(receipt: WritingAcceptReceipt) -> dict:
+    return {
+        "project_id": receipt.project_id,
+        "idempotency_key": receipt.idempotency_key,
+        "intent": receipt.intent,
+        "draft_id": receipt.draft_id,
+        "draft_version_id": receipt.draft_version_id,
+    }
+
+
+def _to_receipt(doc: dict) -> WritingAcceptReceipt:
+    return WritingAcceptReceipt(
+        project_id=doc["project_id"],
+        idempotency_key=doc["idempotency_key"],
+        intent=doc["intent"],
+        draft_id=doc["draft_id"],
+        draft_version_id=doc["draft_version_id"],
     )
