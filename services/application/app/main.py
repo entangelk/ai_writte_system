@@ -1103,16 +1103,12 @@ class CreateDraftRequest(BaseModel):
 class DraftOrderPutRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    # Keep the structural constraint discoverable in OpenAPI, but route runtime
+    # duplicate detection through CoreSotService so every incomplete/full-set
+    # permutation violation has the W0 §2.2 exact 409 outcome (not Pydantic 422).
     ordered_draft_ids: list[NonBlankName] = Field(
         json_schema_extra={"uniqueItems": True}
     )
-
-    @field_validator("ordered_draft_ids")
-    @classmethod
-    def reject_duplicate_draft_ids(cls, value: list[str]) -> list[str]:
-        if len(value) != len(set(value)):
-            raise ValueError("ordered_draft_ids must not contain duplicates")
-        return value
 
 
 class DraftOrderPutResponse(BaseModel):

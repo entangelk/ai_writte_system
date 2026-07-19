@@ -252,3 +252,51 @@
 
 - W0 §3의 `append_current|start_next_unit` discriminator, candidate binding, start-next six-surface Core SOT transaction, accept receipt/replay와 Analysis partial convergence를 WI-01~22로 구현한다.
 - WI 완료 뒤 W0 schema fragment와 실제 OpenAPI를 SC-01/02로 다시 대조하고 W3 전체 closure를 수행한다.
+
+---
+
+## Task — W3 ordered-unit 독립 검증 B1 closure
+
+### Goals
+
+- 독립 검증의 조건부 합격 사유인 duplicate reorder 422↔§2.2 exact 409 불일치를 재현하고 닫는다.
+- OU-08이 모든 invalid full-permutation branch의 status와 write 0을 직접 잠그게 한다.
+- 비차단 hardening 중 현재 증분에 안전하게 포함 가능한 ID 보존·프론트 계약 fixture/표시를 보강한다.
+
+### User Decisions and Rationale
+
+- 사용자는 독립 검증 기록을 확인해 보강한 뒤 커밋하도록 지시했다. W0 §2.2는 누락·중복·foreign/unknown·평가 중 set-change를 모두 409로 명시하므로 status authority는 option (a)로 정본에서 도출했다.
+- schema `uniqueItems:true`는 유효 요청의 구조를 설명하지만 HTTP 오류 코드를 정하지 않는다. 따라서 schema를 바꾸지 않고 runtime 중복 판정 위치만 Core SOT service로 내리는 것이 최소 변경이며 §2.2와 schema를 동시에 보존한다.
+
+### Completed work
+
+- `DraftOrderPutRequest`의 duplicate field validator를 제거했다. OpenAPI `uniqueItems:true`는 유지하고 service의 기존 complete-set/duplicate 검사가 `InvalidDraftOrder`를 내어 409로 매핑한다.
+- OU-08의 `(409,422)` 허용을 제거하고 missing/duplicate/foreign/unknown 전부 exact 409와 repository state/write count 불변을 단정했다.
+- OU-04에 migration 전후 Draft ID 보존을 직접 단정했다.
+- DraftList fixture를 required `unit_kind/position` shape로 정렬하고 canonical position 표기를 “정본 순서”로 명확히 해 visible ordinal과 혼동하지 않게 했다.
+- 독립 검증 record는 피감사 시점의 conditional verdict를 보존하고 수정하지 않았다.
+
+### Issues found
+
+- 강화된 OU-08은 수정 전 duplicate subtest에서 `422 != 409`로 정확히 실패해 감사 B1을 재현했다. validator 제거 후 같은 test가 14 passed/12 subtests로 green이 됐다.
+- H1(SC-01/02 OU fragment 자동 대조)은 SoT v1.7.14가 WI 완료 후 W3 전체 closure로 명시한 필수 후속이므로 이번 보강에서 앞당기지 않았다.
+
+### Decisions
+
+- Pydantic 구조 검증 실패 422와 domain full-permutation conflict 409를 구분했다. duplicate ID는 JSON 구조 오류가 아니라 현재 project Draft set과의 의미적 충돌이므로 service 409가 authority다.
+- 독립 검증의 H2는 현재 UI가 archived Draft도 숨기지 않아 canonical/visible order가 우연히 같지만, 향후 active-only UI에서도 오해하지 않도록 canonical position label을 명시했다.
+
+### Verification
+
+- red: `OrderedUnitApiTest::test_invalid_permutation_rejected_without_write` duplicate case → **422 != 409**.
+- green: `tests/test_ordered_units.py` → **14 passed / 12 subtests**.
+- backend full → **1159 passed / 60 skipped / 293 subtests**.
+- live replica-set Mongo → **37 passed / 0 skipped**; 검증용 컨테이너 종료·자동 삭제 완료.
+- DraftList focused → **10 passed**.
+- frontend full → **144 passed / 10 files**.
+- `npm run gen:api && npm run build` → PASS, **96 modules**; CSS 17.81 kB(gzip 4.00), JS 285.39 kB(gzip 88.20).
+
+### Next steps
+
+- W3 Writing Intent WI-01~22를 구현한다.
+- WI 완료 뒤 SC-01/02의 ProjectBrief+OU+Writing Intent fragment 전체를 자동 대조해 W3를 최종 closure한다.

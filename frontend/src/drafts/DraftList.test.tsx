@@ -42,8 +42,14 @@ describe("DraftList", () => {
       {
         body: {
           drafts: [
-            { id: "d1", project_id: "p1", title: "첫 장면", archived: false },
-            { id: "d2", project_id: "p1", title: "묵은 장면", archived: true },
+            {
+              id: "d1", project_id: "p1", title: "첫 장면", archived: false,
+              unit_kind: "scene", position: 1,
+            },
+            {
+              id: "d2", project_id: "p1", title: "묵은 장면", archived: true,
+              unit_kind: "other", position: 2,
+            },
           ],
         },
       },
@@ -60,6 +66,8 @@ describe("DraftList", () => {
       "/projects/p1/drafts/d1",
     );
     expect(screen.getByText("묵은 장면")).toBeInTheDocument();
+    expect(screen.getByText("정본 순서 1 · 장면")).toBeInTheDocument();
+    expect(screen.getByText("정본 순서 2 · 기타")).toBeInTheDocument();
     expect(screen.getByText("(보관됨)")).toBeInTheDocument();
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       "/api/projects/p1",
@@ -83,11 +91,19 @@ describe("DraftList", () => {
     const fetchMock = mockFetch(
       { body: { id: "p1", name: "겨울 이야기", archived: false } },
       { body: { drafts: [] } },
-      { body: { id: "d1", project_id: "p1", title: "첫 장면", archived: false } },
+      {
+        body: {
+          id: "d1", project_id: "p1", title: "첫 장면", archived: false,
+          unit_kind: "scene", position: 1,
+        },
+      },
       {
         body: {
           drafts: [
-            { id: "d1", project_id: "p1", title: "첫 장면", archived: false },
+            {
+              id: "d1", project_id: "p1", title: "첫 장면", archived: false,
+              unit_kind: "scene", position: 1,
+            },
           ],
         },
       },
@@ -142,11 +158,19 @@ describe("DraftList", () => {
     const fetchMock = mockFetch(
       { body: { id: "p1", name: "겨울 이야기", archived: false } },
       { body: { drafts: [] } },
-      { body: { id: "d1", project_id: "p1", title: "첫 장면", archived: false } },
+      {
+        body: {
+          id: "d1", project_id: "p1", title: "첫 장면", archived: false,
+          unit_kind: "other", position: 1,
+        },
+      },
       {
         body: {
           drafts: [
-            { id: "d1", project_id: "p1", title: "첫 장면", archived: false },
+            {
+              id: "d1", project_id: "p1", title: "첫 장면", archived: false,
+              unit_kind: "other", position: 1,
+            },
           ],
         },
       },
@@ -202,7 +226,10 @@ describe("DraftList", () => {
         statusText: "",
         json: async () => ({
           drafts: [
-            { id: "d1", project_id: "p1", title: "첫 장면", archived: false },
+            {
+              id: "d1", project_id: "p1", title: "첫 장면", archived: false,
+              unit_kind: "other", position: 1,
+            },
           ],
         }),
       });
@@ -226,7 +253,10 @@ describe("DraftList", () => {
       ok: true,
       status: 200,
       statusText: "",
-      json: async () => ({ id: "d1", project_id: "p1", title: "첫 장면", archived: false }),
+      json: async () => ({
+        id: "d1", project_id: "p1", title: "첫 장면", archived: false,
+        unit_kind: "other", position: 1,
+      }),
     });
 
     expect(await screen.findByText("첫 장면")).toBeInTheDocument();
@@ -240,7 +270,10 @@ describe("DraftList", () => {
       {
         body: {
           drafts: [
-            { id: "d1", project_id: "p1", title: "남은 원고", archived: false },
+            {
+              id: "d1", project_id: "p1", title: "남은 원고", archived: false,
+              unit_kind: "other", position: 1,
+            },
           ],
         },
       },

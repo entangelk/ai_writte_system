@@ -185,7 +185,9 @@ export function DraftList() {
                     <span className="row-arrow" aria-hidden="true">→</span>
                   </Link>
                   <span className="status-badge">
-                    {draft.position}. {draft.unit_kind === "chapter" ? "장" : draft.unit_kind === "scene" ? "장면" : "기타"}
+                    정본 순서 {draft.position} · {draft.unit_kind === "chapter"
+                      ? "장"
+                      : draft.unit_kind === "scene" ? "장면" : "기타"}
                   </span>
                   {draft.archived && <span className="status-badge">(보관됨)</span>}
                   {!project.archived && (

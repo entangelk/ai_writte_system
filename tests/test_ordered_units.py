@@ -136,6 +136,7 @@ class OrderedUnitMigrationTest(unittest.TestCase):
 
         OrderedUnitMigrationService(self.repo).run()
 
+        self.assertEqual(tuple(self.repo.drafts), (draft.id,))
         self.assertEqual(
             (self.repo.versions, self.repo.snapshots, self.repo.blocks_by_snapshot),
             before,
@@ -296,7 +297,7 @@ class OrderedUnitApiTest(unittest.TestCase):
                     f"/projects/{project['id']}/draft-order",
                     json={"ordered_draft_ids": ids},
                 )
-                self.assertIn(response.status_code, (409, 422))
+                self.assertEqual(response.status_code, 409)
                 self.assertEqual(tuple(self.repo.list_drafts(project["id"])), before)
         self.repo.fail_with_set_change = True
         changed_during_write = self.request(
