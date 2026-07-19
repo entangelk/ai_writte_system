@@ -554,3 +554,24 @@
   - **H-new skip(이미 커버)**: combined manifest-off 방향은 위 exact-equality pin이 잠금.
   - **H5 known limitation(기록만)**: version 없는 non-archived draft만 있는 project는 `canExport=true`(비보관이므로)지만 backend가 version 없는 unit을 skip해 빈 body가 된다. `listDrafts`가 version 유무를 주지 않아 추가 fetch 없이는 프론트가 구분 불가 — 희귀(생성 후 미저장)하고 무해(빈 파일)해 고치지 않고 HANDOFF에 한계로 남긴다. version-aware gating은 별도 슬라이스.
 - 보강 후 frontend **155 passed / 10 files**(수 불변, H2는 기존 테스트 강화), backend 무변.
+
+## Task — "미채택 Writing candidate 영속" 결정 브리프 작성 (구현 미착수)
+
+### User Decisions and Rationale
+
+- 오너가 export UI 트랙 종료 후 다음 후보로 (a) 미채택 Writing candidate 영속을 골랐고, **브리프까지 작성하되 결정 확정은 다음 세션에 오너가 직접 한다**고 지시했다(오늘 작업 마무리). 따라서 구현·owner-decision 채움은 하지 않고 제안 브리프만 남겼다.
+
+### Completed work
+
+- `docs/plans/unaccepted-candidate-persistence-decisions.md` 작성(상태 `Draft — 오너 결정 대기, 구현 미착수`). CLAUDE.md 브리프 구조(Decision needed·Options table·Recommendation·Follow-up·Deferred) 준수.
+- **핵심 계약 충돌 선surface**: 미채택 산출 영속 = Phase 7 P1 영역(`07-conversational-authoring.md` §4 P1 "미채택 산출 별도 1급 여부", §3 D2 3계층 영속)이고 Phase 7은 **GATE-1(UX-1+QUAL-1 dogfood)로 진입 게이팅**된다(HANDOFF "UX-1+QUAL-1 전 Phase 7 착수 금지"). 현재 dogfood 미착수 = GATE-1 미충족. 그래서 브리프의 D0를 "지금 최소 복구가 pre-Phase-7 UX 안전망인지 Phase 7 진입인지"의 게이트 질문으로 두고, 추측 구현을 막았다.
+- 제안 추천(오너 확정 대기): D0=B(조건부, 오너 명시 승인 시)·D1=A(마지막 미채택 1건/draft)·D2=A(별도 `writing_drafts_scratch`, 정본 무변). 현재 동작(candidate는 accept 전 in-memory·소실, loop_audit는 opt-in 감사)도 grounding으로 기록.
+- HANDOFF Next Tasks를 "다음 작업 = 오너가 이 브리프 확정"으로 갱신, `plans/README.md` 인덱스에 추가.
+
+### Verification
+
+- 문서 전용 변경. `git diff --check` clean. 코드/테스트 무변, LLM 미사용.
+
+### Next steps
+
+- **다음 세션: 오너가 브리프의 D0(게이트)→D1→D2를 확정**한다. D0=A(게이트 우선, 미룸)면 구현 없이 Phase 7 대기, D0=B면 D1=A/D2=A 최소 슬라이스를 착수 브리프로 확정 후 구현.
