@@ -466,3 +466,38 @@
 
 - **W1~W4 전체 완료.** 다음은 오너 dogfood/OPS-1 착수 결정 또는 Deferred 항목(중첩 chapter→scene tree, saved publication manifest, ProjectBrief→Draft provenance 등)이다.
 - 프론트 export UI 배선(다운로드 버튼)은 별도 소비 슬라이스로 미착수(backend 계약만 확정).
+
+## Task — 프로젝트 export 프론트 UI 배선 + 회차별 개별 ZIP(bulk)
+
+### Goals
+
+- W4 backend export 계약(v1.7.17)을 프론트에서 소비해 사용자가 UI에서 프로젝트 전체 원고를 내보낼 수 있게 한다.
+- 오너 질문("각 회차 개별 파일로도 되는가")에 답해, 통합 단일 파일 외에 **회차별 개별 파일 bulk export**도 제공한다.
+
+### User Decisions and Rationale
+
+- 오너가 dogfood 전 기본 기능들을 작은 슬라이스로 진행하도록 지시했다. 가장 자연스러운 첫 슬라이스로 W4 export의 프론트 소비를 골랐다.
+- 오너가 "전체 통합 하나 + 각 회차 개별 파일 둘 다 되는가"를 물었고, 현재는 개별=회차별 하나씩(DraftEditor)만·통합=하나로만 가능함을 설명했다. **오너 결정: 회차별 개별 파일 bulk export를 ZIP으로 추가**(순차 다운로드/미도입 대비). ZIP은 브라우저 라이브러리가 필요하므로 `jszip` 의존성을 추가했다.
+- **파생 결정(오너 fork 아님)**: bulk는 신규 backend endpoint 없이 **기존 endpoint 재사용**으로 구현한다 — `GET /projects/{id}/export?manifest=true`로 포함 unit을 열거하고, 각 unit을 기존 단일 version export(`.../versions/{vid}/export`)로 받아 verbatim 본문(제목 heading 없는 순수 본문)을 zip에 담는다. zip 항목명(`{position2자리}-{제목}.{ext}`, path-unsafe 문자 `\/:*?"<>|`만 `_`로 치환)은 canonical 계약이 아니라 프론트 표현 결정이다. 추적용 `manifest.json`도 zip에 포함한다.
+
+### Completed work
+
+- **client.ts**: `exportProject(projectId, format, {manifest?, includeArchived?})`를 추가하고(`ProjectExport` 타입 별칭), 쿼리 조립을 `URLSearchParams`로 했다. bulk는 기존 `exportDraftVersion`을 재사용한다.
+- **DraftList.tsx**(`/projects/:projectId`): 원고 목록 하단에 "전체 원고를 한 파일로"(TXT/Markdown)와 "회차별 개별 파일 (ZIP)"(TXT/Markdown) 컨트롤을 추가했다. `runExport(kind, format)`가 combined는 body를 Blob 다운로드, bundle은 manifest→per-unit fetch→JSZip→`.zip` 다운로드한다. `exportingRef`로 동시 실행을 막고 진행 중 전 버튼 disable, 실패는 `describeApiError`. drafts 0개면 컨트롤 미표시. 보관 원고 제외(backend 기본).
+- **styles.css**: `.export-controls`/`.export-group`/`.export-buttons` 레이아웃 추가, 기존 `.export-actions` 버튼 스타일 셀렉터를 `.export-controls`에도 확장.
+
+### Regression
+
+- `src/drafts/DraftList.test.tsx` +4: (1) combined 다운로드가 manifest 없이 전체 export endpoint 호출·`p1.txt` 다운로드, (2) bulk가 `manifest=true`→unit별 fetch 2회→**실제 zip을 언팩해 `01-1장.md`/`02-2장.md`/`manifest.json` 항목·본문 검증**, (3) in-flight 중 재클릭 무시+전 버튼 disable(양방향 가드), (4) unit 0개면 컨트롤 미표시.
+
+### Verification
+
+- frontend `npm test -- --run` → **150 passed / 10 files**(직전 146 + 4).
+- `npm run build` 성공(JS 388.62 kB — JSZip 포함으로 287→388 증가, gzip 119.89 kB).
+- `npm run gen:api` → `schema.d.ts` **byte-identical**(backend/OpenAPI 무변, 순수 소비 슬라이스).
+- backend 미변경(1198 passed 유지). `jszip@^3.10.1` 의존성 추가.
+- LLM 미사용.
+
+### Next steps
+
+- 후속 옵션(오너 결정): export에 `include_archived` 토글 UI, 통합 파일에도 manifest 동시 제공, saved publication manifest 정본화. 그 외 Deferred 기본 기능(미채택 candidate 영속 등)은 별도 슬라이스.

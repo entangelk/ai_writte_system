@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
+import JSZip from "jszip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DraftList } from "./DraftList";
 
@@ -330,5 +331,199 @@ describe("DraftList", () => {
     );
 
     expect(await screen.findByText("프로젝트 홈")).toBeInTheDocument();
+  });
+
+  /** Capture browser downloads triggered via URL.createObjectURL + anchor. */
+  function captureDownloads() {
+    const blobs: Blob[] = [];
+    const downloads: string[] = [];
+    (URL as unknown as { createObjectURL: (b: Blob) => string }).createObjectURL = (
+      blob: Blob,
+    ) => {
+      blobs.push(blob);
+      return "blob:mock";
+    };
+    (URL as unknown as { revokeObjectURL: (u: string) => void }).revokeObjectURL = () => {};
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      downloads.push(this.download);
+    });
+    return { blobs, downloads };
+  }
+
+  const twoDrafts = {
+    drafts: [
+      {
+        id: "d1", project_id: "p1", title: "1장", archived: false,
+        unit_kind: "chapter", position: 1,
+      },
+      {
+        id: "d2", project_id: "p1", title: "2장", archived: false,
+        unit_kind: "chapter", position: 2,
+      },
+    ],
+  };
+
+  it("downloads the whole project as one combined file", async () => {
+    const fetchMock = mockFetch(
+      { body: { id: "p1", name: "겨울 이야기", archived: false } },
+      { body: twoDrafts },
+      {
+        body: {
+          format: "txt",
+          filename: "p1.txt",
+          content_type: "text/plain; charset=utf-8",
+          body: "1장\n\nfirst\n\n2장\n\nsecond",
+          project_id: "p1",
+          include_archived: false,
+          manifest: null,
+        },
+      },
+    );
+    const { downloads } = captureDownloads();
+
+    renderDraftList();
+    await screen.findByRole("heading", { name: "겨울 이야기" });
+    await userEvent.click(screen.getByRole("button", { name: "TXT로 내보내기" }));
+
+    await waitFor(() => expect(downloads).toEqual(["p1.txt"]));
+    // The combined export hits the whole-project endpoint without a manifest.
+    const exportCall = fetchMock.mock.calls.find((call) =>
+      String(call[0]).includes("/projects/p1/export?"),
+    );
+    expect(String(exportCall?.[0])).toContain("format=txt");
+    expect(String(exportCall?.[0])).not.toContain("manifest=true");
+  });
+
+  it("bundles each unit as its own file inside a zip", async () => {
+    const fetchMock = mockFetch(
+      { body: { id: "p1", name: "겨울 이야기", archived: false } },
+      { body: twoDrafts },
+      {
+        // manifest=true response: enumerates the included units.
+        body: {
+          format: "markdown",
+          filename: "p1.md",
+          content_type: "text/markdown; charset=utf-8",
+          body: "# 1장\n\nfirst\n\n# 2장\n\nsecond",
+          project_id: "p1",
+          include_archived: false,
+          manifest: {
+            project_id: "p1",
+            format: "markdown",
+            include_archived: false,
+            units: [
+              {
+                draft_id: "d1", title: "1장", unit_kind: "chapter", position: 1,
+                version_id: "v1", version_number: 1, snapshot_id: "s1",
+                content_hash: "h1",
+              },
+              {
+                draft_id: "d2", title: "2장", unit_kind: "chapter", position: 2,
+                version_id: "v2", version_number: 1, snapshot_id: "s2",
+                content_hash: "h2",
+              },
+            ],
+          },
+        },
+      },
+      // Per-unit verbatim bodies, one fetch each.
+      {
+        body: {
+          format: "markdown", filename: "d1-v1.md",
+          content_type: "text/markdown; charset=utf-8", body: "first",
+          project_id: "p1", draft_id: "d1", version_id: "v1", version_number: 1,
+          snapshot_id: "s1", content_hash: "h1",
+        },
+      },
+      {
+        body: {
+          format: "markdown", filename: "d2-v1.md",
+          content_type: "text/markdown; charset=utf-8", body: "second",
+          project_id: "p1", draft_id: "d2", version_id: "v2", version_number: 1,
+          snapshot_id: "s2", content_hash: "h2",
+        },
+      },
+    );
+    const { blobs, downloads } = captureDownloads();
+
+    renderDraftList();
+    await screen.findByRole("heading", { name: "겨울 이야기" });
+    await userEvent.click(screen.getByRole("button", { name: "Markdown ZIP" }));
+
+    await waitFor(() => expect(downloads).toEqual(["p1.zip"]));
+    // Manifest was requested, then each unit's latest version was fetched.
+    const manifestCall = fetchMock.mock.calls.find((call) =>
+      String(call[0]).includes("manifest=true"),
+    );
+    expect(manifestCall).toBeDefined();
+    const perUnit = fetchMock.mock.calls.filter((call) =>
+      /\/drafts\/d\d\/versions\/v\d\/export/.test(String(call[0])),
+    );
+    expect(perUnit).toHaveLength(2);
+    // The bundle is a real zip whose entries include each unit and the manifest.
+    const zip = await JSZip.loadAsync(blobs.at(-1)!);
+    expect(Object.keys(zip.files).sort()).toEqual([
+      "01-1장.md",
+      "02-2장.md",
+      "manifest.json",
+    ]);
+    expect(await zip.file("01-1장.md")!.async("string")).toBe("first");
+  });
+
+  it("does not start a second export while the first is in flight", async () => {
+    let releaseExport!: (response: unknown) => void;
+    const pendingExport = new Promise((resolve) => {
+      releaseExport = resolve;
+    });
+    const fetchMock = vi.fn();
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true, status: 200, statusText: "",
+        json: async () => ({ id: "p1", name: "겨울 이야기", archived: false }),
+      })
+      .mockResolvedValueOnce({
+        ok: true, status: 200, statusText: "",
+        json: async () => twoDrafts,
+      })
+      .mockReturnValueOnce(pendingExport);
+    vi.stubGlobal("fetch", fetchMock);
+    captureDownloads();
+
+    renderDraftList();
+    await screen.findByRole("heading", { name: "겨울 이야기" });
+    await userEvent.click(screen.getByRole("button", { name: "TXT로 내보내기" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    // Every export button is disabled while one export is running.
+    expect(screen.getByRole("button", { name: "내보내는 중…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Markdown ZIP" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Markdown ZIP" }));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    releaseExport({
+      ok: true, status: 200, statusText: "",
+      json: async () => ({
+        format: "txt", filename: "p1.txt", content_type: "text/plain; charset=utf-8",
+        body: "1장\n\nfirst\n\n2장\n\nsecond", project_id: "p1",
+        include_archived: false, manifest: null,
+      }),
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "TXT로 내보내기" })).toBeEnabled(),
+    );
+  });
+
+  it("hides export controls when the project has no units", async () => {
+    mockFetch(
+      { body: { id: "p1", name: "겨울 이야기", archived: false } },
+      { body: { drafts: [] } },
+    );
+
+    renderDraftList();
+    await screen.findByText(/아직 원고가 없습니다/);
+
+    expect(screen.queryByRole("button", { name: "TXT로 내보내기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Markdown ZIP" })).toBeNull();
   });
 });

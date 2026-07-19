@@ -63,6 +63,7 @@ export type DraftVersion = components["schemas"]["DraftVersionMetaPayload"];
 export type DraftVersionListResponse = components["schemas"]["DraftVersionListResponse"];
 export type DraftVersionDetail = components["schemas"]["DraftVersionDetailResponse"];
 export type DraftVersionExport = components["schemas"]["DraftVersionExportResponse"];
+export type ProjectExport = components["schemas"]["ProjectExportResponse"];
 export type SaveDraftRequest = components["schemas"]["SaveDraftRequest"];
 export type SaveDraftResponse = components["schemas"]["SaveDraftResponse"];
 export type WritingGenerateRequest = components["schemas"]["WritingGenerateRequest"];
@@ -195,6 +196,21 @@ export function exportDraftVersion(
   return request(
     `/projects/${projectId}/drafts/${draftId}/versions/${versionId}/export?format=${format}`,
   );
+}
+
+export function exportProject(
+  projectId: string,
+  format: "txt" | "markdown",
+  options: { manifest?: boolean; includeArchived?: boolean } = {},
+): Promise<ProjectExport> {
+  const query = new URLSearchParams({ format });
+  if (options.manifest) {
+    query.set("manifest", "true");
+  }
+  if (options.includeArchived) {
+    query.set("include_archived", "true");
+  }
+  return request(`/projects/${projectId}/export?${query.toString()}`);
 }
 
 export function generateWriting(

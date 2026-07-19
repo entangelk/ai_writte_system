@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
+import JSZip from "jszip";
 import {
   createDraft,
   describeApiError,
+  exportDraftVersion,
+  exportProject,
   getProject,
   listDrafts,
   putDraftOrder,
@@ -10,6 +13,38 @@ import {
   type Draft,
   type Project,
 } from "../api/client";
+
+type ExportFormat = "txt" | "markdown";
+type ExportKind = "combined" | "bundle";
+
+const EXTENSION: Record<ExportFormat, string> = { txt: "txt", markdown: "md" };
+
+// Zip entry names are a presentation concern, not a canonical contract: order
+// by canonical position (zero-padded) and carry the human title, sanitizing the
+// characters a filesystem/zip path cannot hold. Falls back to the draft id when
+// a title sanitizes to empty.
+function bundleEntryName(
+  draftId: string,
+  title: string,
+  position: number | null,
+  format: ExportFormat,
+): string {
+  const safeTitle = title.replace(/[\\/:*?"<>|]/g, "_").trim();
+  const stem = safeTitle === "" ? draftId : safeTitle;
+  const prefix = String(position ?? 0).padStart(2, "0");
+  return `${prefix}-${stem}.${EXTENSION[format]}`;
+}
+
+function triggerDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
 
 export function DraftList() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -20,6 +55,10 @@ export function DraftList() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState<{ kind: ExportKind; format: ExportFormat } | null>(
+    null,
+  );
+  const exportingRef = useRef(false);
 
   const loadDrafts = useCallback(async () => {
     if (projectId === undefined) {
@@ -103,6 +142,53 @@ export function DraftList() {
       setError(describeApiError(err));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function runExport(kind: ExportKind, format: ExportFormat) {
+    if (projectId === undefined || exportingRef.current) {
+      return;
+    }
+    exportingRef.current = true;
+    setExporting({ kind, format });
+    try {
+      if (kind === "combined") {
+        const exported = await exportProject(projectId, format);
+        triggerDownload(
+          new Blob([exported.body], { type: exported.content_type }),
+          exported.filename,
+        );
+      } else {
+        // Bulk: enumerate the exact included units from the delivery manifest,
+        // fetch each unit's latest version body verbatim (no heading synthesis),
+        // and bundle them plus the manifest as one zip.
+        const { manifest } = await exportProject(projectId, format, { manifest: true });
+        if (manifest === null) {
+          return;
+        }
+        const zip = new JSZip();
+        for (const unit of manifest.units) {
+          const exported = await exportDraftVersion(
+            projectId,
+            unit.draft_id,
+            unit.version_id,
+            format,
+          );
+          zip.file(
+            bundleEntryName(unit.draft_id, unit.title, unit.position, format),
+            exported.body,
+          );
+        }
+        zip.file("manifest.json", JSON.stringify(manifest, null, 2));
+        const blob = await zip.generateAsync({ type: "blob" });
+        triggerDownload(blob, `${projectId}.zip`);
+      }
+      setError(null);
+    } catch (err) {
+      setError(describeApiError(err));
+    } finally {
+      exportingRef.current = false;
+      setExporting(null);
     }
   }
 
@@ -209,6 +295,58 @@ export function DraftList() {
                 </li>
               ))}
             </ul>
+          )}
+
+          {drafts.length > 0 && (
+            <section className="export-controls" aria-label="원고 내보내기">
+              <div className="export-group">
+                <p className="export-label">전체 원고를 한 파일로</p>
+                <div className="export-buttons">
+                  <button
+                    type="button"
+                    disabled={exporting !== null}
+                    onClick={() => void runExport("combined", "txt")}
+                  >
+                    {exporting?.kind === "combined" && exporting.format === "txt"
+                      ? "내보내는 중…"
+                      : "TXT로 내보내기"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={exporting !== null}
+                    onClick={() => void runExport("combined", "markdown")}
+                  >
+                    {exporting?.kind === "combined" && exporting.format === "markdown"
+                      ? "내보내는 중…"
+                      : "Markdown으로 내보내기"}
+                  </button>
+                </div>
+              </div>
+              <div className="export-group">
+                <p className="export-label">회차별 개별 파일 (ZIP)</p>
+                <div className="export-buttons">
+                  <button
+                    type="button"
+                    disabled={exporting !== null}
+                    onClick={() => void runExport("bundle", "txt")}
+                  >
+                    {exporting?.kind === "bundle" && exporting.format === "txt"
+                      ? "묶는 중…"
+                      : "TXT ZIP"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={exporting !== null}
+                    onClick={() => void runExport("bundle", "markdown")}
+                  >
+                    {exporting?.kind === "bundle" && exporting.format === "markdown"
+                      ? "묶는 중…"
+                      : "Markdown ZIP"}
+                  </button>
+                </div>
+              </div>
+              <p className="export-note">보관된 원고는 제외됩니다.</p>
+            </section>
           )}
         </>
       )}
