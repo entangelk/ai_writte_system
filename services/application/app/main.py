@@ -1057,6 +1057,34 @@ class DraftVersionExportResponse(BaseModel):
     content_hash: str
 
 
+class ProjectExportUnitModel(BaseModel):
+    draft_id: str
+    title: str
+    unit_kind: str | None
+    position: int | None
+    version_id: str
+    version_number: int
+    snapshot_id: str
+    content_hash: str
+
+
+class ProjectExportManifest(BaseModel):
+    project_id: str
+    format: str
+    include_archived: bool
+    units: list[ProjectExportUnitModel]
+
+
+class ProjectExportResponse(BaseModel):
+    format: str
+    filename: str
+    content_type: str
+    body: str
+    project_id: str
+    include_archived: bool
+    manifest: ProjectExportManifest | None
+
+
 # Project/draft naming constraint (SoT v1.6.95, D3=A). Validation lives at the
 # HTTP boundary: every client reaches Core SOT through it, so rejecting here
 # closes the blank-name hole without changing the Core SOT contract. Whitespace
@@ -1787,6 +1815,56 @@ def create_app(
             "version_number": export.version_number,
             "snapshot_id": export.snapshot_id,
             "content_hash": export.content_hash,
+        }
+
+    @app.get(
+        "/projects/{project_id}/export",
+        response_model=ProjectExportResponse,
+    )
+    async def export_project(
+        project_id: str,
+        format: str = Query("txt"),
+        manifest: bool = Query(False),
+        include_archived: bool = Query(False),
+    ) -> dict[str, object]:
+        try:
+            export = core_sot.export_project(
+                project_id=project_id,
+                fmt=format,
+                include_archived=include_archived,
+            )
+        except UnsupportedExportFormat as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        manifest_payload: dict[str, object] | None = None
+        if manifest:
+            manifest_payload = {
+                "project_id": export.project_id,
+                "format": export.format,
+                "include_archived": export.include_archived,
+                "units": [
+                    {
+                        "draft_id": unit.draft_id,
+                        "title": unit.title,
+                        "unit_kind": unit.unit_kind,
+                        "position": unit.position,
+                        "version_id": unit.version_id,
+                        "version_number": unit.version_number,
+                        "snapshot_id": unit.snapshot_id,
+                        "content_hash": unit.content_hash,
+                    }
+                    for unit in export.units
+                ],
+            }
+        return {
+            "format": export.format,
+            "filename": export.filename,
+            "content_type": export.content_type,
+            "body": export.body,
+            "project_id": export.project_id,
+            "include_archived": export.include_archived,
+            "manifest": manifest_payload,
         }
 
     @app.post("/projects/{project_id}/drafts", response_model=DraftPayload)

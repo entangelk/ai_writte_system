@@ -665,5 +665,219 @@ class CoreSotExportTest(unittest.TestCase):
         self.assertEqual(export.body, "archived body")
 
 
+class ProjectExportContractTest(unittest.TestCase):
+    """Writing Workspace V2 W4 whole-project export (D6=A, SoT v1.7.17).
+
+    Ordered-latest export joins each non-archived unit's latest version in
+    ``position`` order. Owner decisions locked here: a per-unit title heading
+    (Markdown ``# {title}``, plain title line for txt), archived units excluded
+    by default with an opt-in ``include_archived`` flag, and an on-request
+    delivery manifest at the HTTP layer (covered by ProjectExportApiTest).
+    """
+
+    def _project_with_units(self, service):
+        project = service.create_project(name="Novel")
+        d1 = service.create_draft(project_id=project.id, title="1장. 출발")
+        d2 = service.create_draft(project_id=project.id, title="2장. 도착")
+        service.save_draft(
+            project_id=project.id,
+            draft_id=d1.id,
+            raw_text="첫 장의 본문.",
+            idempotency_key="d1-save-1",
+        )
+        service.save_draft(
+            project_id=project.id,
+            draft_id=d2.id,
+            raw_text="둘째 장의 본문.",
+            idempotency_key="d2-save-1",
+        )
+        return project, d1, d2
+
+    def test_export_joins_ordered_latest_non_archived(self):
+        # EX-01 (fire): non-archived units joined in position order, each latest
+        # version, with a plain title line per unit for txt.
+        service, _repo = _service()
+        project, d1, d2 = self._project_with_units(service)
+
+        export = service.export_project(project_id=project.id, fmt="txt")
+
+        self.assertEqual(
+            export.body,
+            "1장. 출발\n\n첫 장의 본문.\n\n2장. 도착\n\n둘째 장의 본문.",
+        )
+        self.assertEqual(
+            [unit.draft_id for unit in export.units], [d1.id, d2.id]
+        )
+        self.assertEqual([unit.position for unit in export.units], [1, 2])
+        self.assertEqual(export.include_archived, False)
+        self.assertEqual(export.filename, f"{project.id}.txt")
+
+    def test_archived_units_excluded_by_default(self):
+        # EX-02 (not fire): archived units must not leak into body or units.
+        service, _repo = _service()
+        project, d1, d2 = self._project_with_units(service)
+        service.archive_draft(project_id=project.id, draft_id=d1.id)
+
+        export = service.export_project(project_id=project.id, fmt="txt")
+
+        self.assertEqual(export.body, "2장. 도착\n\n둘째 장의 본문.")
+        self.assertEqual([unit.draft_id for unit in export.units], [d2.id])
+
+    def test_include_archived_flag_includes_archived_units(self):
+        # EX-03 (fire): the opt-in flag reinstates archived units in position
+        # order (archive does not renumber position).
+        service, _repo = _service()
+        project, d1, d2 = self._project_with_units(service)
+        service.archive_draft(project_id=project.id, draft_id=d1.id)
+
+        export = service.export_project(
+            project_id=project.id, fmt="txt", include_archived=True
+        )
+
+        self.assertEqual(
+            export.body,
+            "1장. 출발\n\n첫 장의 본문.\n\n2장. 도착\n\n둘째 장의 본문.",
+        )
+        self.assertEqual(
+            [unit.draft_id for unit in export.units], [d1.id, d2.id]
+        )
+        self.assertEqual(export.include_archived, True)
+
+    def test_export_uses_latest_version_per_unit(self):
+        # EX-04 (fire): a second save must make export pick v2, never v1.
+        service, _repo = _service()
+        project = service.create_project(name="Novel")
+        draft = service.create_draft(project_id=project.id, title="1장")
+        service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text="v1 body",
+            idempotency_key="save-1",
+        )
+        v2 = service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text="v2 body",
+            idempotency_key="save-2",
+        )
+
+        export = service.export_project(project_id=project.id, fmt="txt")
+
+        self.assertEqual(export.body, "1장\n\nv2 body")
+        self.assertEqual(export.units[0].version_id, v2.draft_version.id)
+        self.assertEqual(export.units[0].version_number, 2)
+        self.assertEqual(export.units[0].content_hash, v2.snapshot.content_hash)
+
+    def test_body_has_headings_and_verbatim_bodies_only(self):
+        # EX-05 (not fire): no AI metadata is injected; only the title heading
+        # and the verbatim snapshot bodies appear.
+        service, _repo = _service()
+        project = service.create_project(name="Novel")
+        draft = service.create_draft(project_id=project.id, title="1장")
+        raw = "본문 문단 하나.\n\n두 번째 문단."
+        service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text=raw,
+            idempotency_key="save-1",
+        )
+
+        export = service.export_project(project_id=project.id, fmt="txt")
+
+        self.assertEqual(export.body, f"1장\n\n{raw}")
+
+    def test_txt_and_markdown_heading_shapes(self):
+        # EX-06 (fire): markdown uses '# {title}'; txt uses a plain title line.
+        # The unit bodies are byte-identical across formats (no transformation).
+        service, _repo = _service()
+        project = service.create_project(name="Novel")
+        draft = service.create_draft(project_id=project.id, title="1장")
+        service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text="# already a heading\n\nbody",
+            idempotency_key="save-1",
+        )
+
+        txt = service.export_project(project_id=project.id, fmt="txt")
+        md = service.export_project(project_id=project.id, fmt="markdown")
+
+        self.assertEqual(txt.body, "1장\n\n# already a heading\n\nbody")
+        self.assertEqual(md.body, "# 1장\n\n# already a heading\n\nbody")
+        self.assertTrue(txt.filename.endswith(".txt"))
+        self.assertTrue(md.filename.endswith(".md"))
+        self.assertIn("text/plain", txt.content_type)
+        self.assertIn("text/markdown", md.content_type)
+
+    def test_versionless_unit_is_skipped(self):
+        # EX-07 (not fire): a draft with no saved version has no snapshot to
+        # export and must be skipped from both body and units, without shifting
+        # the order of the saved units.
+        service, _repo = _service()
+        project = service.create_project(name="Novel")
+        d1 = service.create_draft(project_id=project.id, title="1장")
+        service.create_draft(project_id=project.id, title="2장 (미저장)")
+        d3 = service.create_draft(project_id=project.id, title="3장")
+        service.save_draft(
+            project_id=project.id,
+            draft_id=d1.id,
+            raw_text="first",
+            idempotency_key="d1-save",
+        )
+        service.save_draft(
+            project_id=project.id,
+            draft_id=d3.id,
+            raw_text="third",
+            idempotency_key="d3-save",
+        )
+
+        export = service.export_project(project_id=project.id, fmt="txt")
+
+        self.assertEqual(export.body, "1장\n\nfirst\n\n3장\n\nthird")
+        self.assertEqual(
+            [unit.draft_id for unit in export.units], [d1.id, d3.id]
+        )
+
+    def test_unsupported_format_is_rejected(self):
+        # Over-strict guard mirror for whole-project export.
+        service, _repo = _service()
+        project = service.create_project(name="Novel")
+        with self.assertRaises(UnsupportedExportFormat):
+            service.export_project(project_id=project.id, fmt="pdf")
+
+    def test_missing_project_raises_not_found(self):
+        service, _repo = _service()
+        with self.assertRaises(NotFound):
+            service.export_project(project_id="nope", fmt="txt")
+
+    def test_archived_project_export_survives(self):
+        # EX-11 mirror: archiving the project blocks writes, not reads; export
+        # still returns the ordered units.
+        service, _repo = _service()
+        project, d1, _d2 = self._project_with_units(service)
+        service.archive_project(project_id=project.id)
+
+        export = service.export_project(project_id=project.id, fmt="txt")
+
+        self.assertEqual(
+            export.body,
+            "1장. 출발\n\n첫 장의 본문.\n\n2장. 도착\n\n둘째 장의 본문.",
+        )
+
+    def test_empty_project_returns_empty_body(self):
+        # EX-13 (not fire): a project with no exportable unit (no drafts, or all
+        # drafts version-less) yields an empty body and empty units, with no
+        # synthesized heading or separator. Locks W0 contract §6.3
+        # ("포함 unit이 0개면 body는 빈 문자열이다").
+        service, _repo = _service()
+        empty = service.create_project(name="Empty")
+        service.create_draft(project_id=empty.id, title="아직 안 쓴 장")
+
+        export = service.export_project(project_id=empty.id, fmt="markdown")
+
+        self.assertEqual(export.body, "")
+        self.assertEqual(export.units, ())
+
+
 if __name__ == "__main__":
     unittest.main()

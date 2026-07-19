@@ -416,3 +416,53 @@
 ### Next steps
 
 - W4 ordered-latest export 착수. W3는 live Mongo까지 포함해 전부 닫혔다.
+
+## Task — Writing Workspace V2 W4 프로젝트 전체 ordered-latest export (D6=A)
+
+### Goals
+
+- W0 §범위의 마지막 slice인 W4를 구현한다: 프로젝트의 비archived unit을 position 순으로, 각 latest version body를 이어 붙인 TXT/Markdown export + 요청 시 delivery manifest.
+- D6=A가 방향만 확정하고 브리프가 W4로 이관한 계약 리터럴(heading separator·manifest 전달·archived 포함)을 오너 결정으로 확정한 뒤 runtime+OpenAPI+양방향 회귀로 잠근다.
+- saved publication manifest(§5 Deferred)는 착수하지 않는다.
+
+### User Decisions and Rationale
+
+- 사용자가 HANDOFF의 "다음 = W4 export"를 진행하도록 지시했다.
+- **계약 리터럴 3건은 D6=A/브리프가 W4로 명시 이관**했고 조용히 정할 수 없어 결정 브리프(3지선다)를 제시해 오너가 확정했다:
+  - **unit 구분자/제목 = "제목+구분선(md만)"**: Markdown은 `# {title}` heading, TXT는 제목 줄(plain). unit_kind별 heading 레벨 매핑은 하지 않는다. 근거: 단일 version export의 verbatim·무합성 선례를 지키면서(본문에 AI metadata 미삽입) unit 경계만 최소 합성으로 표시. 장/절 레벨 구분보다 단순·예측가능성을 우선.
+  - **manifest 전달 = "같은 endpoint 쿼리 플래그"**: `?manifest=true`일 때만 응답 `manifest`에 싣고 미요청 시 `null`. 별도 endpoint를 만들지 않아 표면 최소.
+  - **archived 포함 = "옵트인 include_archived 플래그"**: 기본 제외 + `include_archived=true`. 보관 원고까지 내보내는 요구를 미리 수용하되 기본은 안전(제외).
+- 파생 결정(오너 fork 아님, 문서화): version이 하나도 없는 Draft는 내보낼 snapshot이 없어 body/manifest에서 skip한다(순서 변형 없음). filename은 `{project_id}.{ext}`(제목 슬러그 합성 대신 결정적·추적가능).
+
+### Completed work
+
+- **Core SOT 모델**: `core_sot/models.py`에 `ProjectExportUnit`(draft_id/title/unit_kind/position + version/snapshot/hash 포인터)와 `ProjectExport`(format/filename/content_type/body/project_id/include_archived/units)를 추가했다. docstring에 verbatim·heading 규칙·skip·manifest 근거를 명시했다.
+- **Core SOT 서비스**: `core_sot/service.py::export_project(project_id, fmt, include_archived)`를 추가했다. `_EXPORT_FORMATS`(단일 version export와 공유)로 format 검증→400, `_require_project`(archived read 허용)→404, `list_drafts`(position 순)+`_require_ordered_drafts`, archived 필터, unit별 `max(version_number)` latest 선택, version 없는 unit skip. body = unit block(`{heading}\n\n{raw_text}`)들을 `\n\n`으로 join, heading은 md=`# title`/txt=`title`.
+- **HTTP**: `main.py`에 `GET /projects/{project_id}/export` + `ProjectExportResponse/ProjectExportManifest/ProjectExportUnitModel` Pydantic 모델. `manifest=true`일 때만 manifest payload 조립(미요청 null). CLAUDE.md response_model 규칙대로 exact-key 회귀를 먼저 확보한 뒤 모델을 붙였다.
+- **정본 반영**: SoT v1.7.17 changelog, W0 contract 상태/버전, §4 matrix에 **EX-01~13**(fire 6/not-fire 7), 신규 **§6 W4 export exact contract**(API·unit 선택·body 조립·manifest)를 추가했다.
+
+### Regression (양방향)
+
+- `tests/test_core_sot.py::ProjectExportContractTest` 11종: ordered-latest join·archived 기본 제외·include_archived 포함·latest version 선택·verbatim body·txt/md heading shape·versionless skip·unsupported/missing/archived-project·**빈 project 빈 body(EX-13)**.
+- `tests/test_application_api.py::ProjectExportApiTest` 6종: manifest traceability·manifest omit(null)·include_archived over-http·format400/project404·archived project 200·**exact-key envelope+manifest+unit keys**.
+- fire(EX-01/03/04/06/08/12): 기능 제거 시 실패. not-fire(EX-02/05/07/09/10/11/13): 과잉 포함/합성/누락 시 실패.
+
+### 독립 검증 후 보강 (2026-07-19, 오너 검증 PASS/조건 없음 뒤)
+
+- 오너 독립 검증(`docs/verifications/2026-07-19/w4_project_export.md`, PASS)이 non-blocking hardening 후보 6건과 표기 오류 1건을 남겼다. 판단 후 계약 clause의 빈 셀 1건만 보강했다:
+  - **H4 보강**: W0 §6.3 "포함 unit이 0개면 body는 빈 문자열" clause에 회귀가 없어 **EX-13**(`test_empty_project_returns_empty_body`, not-fire)로 잠갔다. 빈 body·빈 units·합성 없음.
+  - **H1/H2/H5/H6/H3 skip(선례 일치)**: H1(InvalidDraftOrder 미매핑)은 기존 `GET /projects/{id}/drafts`도 동일하게 `NotFound`만 잡고 ordered invariant는 불가능 시나리오라 선례 유지. H2(`assert snapshot`)는 선례 `get_draft_version`과 동일 패턴. H5(assertIn content_type)·H6(400/404 OpenAPI 미문서화)·H3(Mongo 전용 회귀 부재, 간접 보증)도 모두 이웃 코드와 일관돼 surgical하게 두었다.
+  - **표기 오류 수정**: 위 Regression 섹션의 클래스별 개수를 실제(ContractTest 11 + ApiTest 6)로 정정.
+
+### Verification
+
+- 신규 17종: **17 passed**.
+- backend full(Mongo 미기동) `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1198 passed / 73 skipped(Mongo-gated) / 297 subtests**(직전 1181 + 17).
+- frontend `npm test -- --run` → **146 passed / 10 files**(export는 backend slice, 프론트 소비 미배선이라 무변).
+- `npm run gen:api` → `schema.d.ts`에 export path/타입 98줄 추가(`ProjectExportResponse/Manifest/UnitModel`). `npm run build` 성공(JS 287.30 kB).
+- LLM 미사용.
+
+### Next steps
+
+- **W1~W4 전체 완료.** 다음은 오너 dogfood/OPS-1 착수 결정 또는 Deferred 항목(중첩 chapter→scene tree, saved publication manifest, ProjectBrief→Draft provenance 등)이다.
+- 프론트 export UI 배선(다운로드 버튼)은 별도 소비 슬라이스로 미착수(backend 계약만 확정).

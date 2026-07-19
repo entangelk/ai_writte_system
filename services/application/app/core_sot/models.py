@@ -176,3 +176,44 @@ class DraftVersionExport:
     version_number: int
     snapshot_id: str
     content_hash: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectExportUnit:
+    """One ordered unit inside a whole-project export.
+
+    Every field is a traceability pointer to the exact latest version this unit
+    contributed to the exported body, so a delivery manifest can reproduce the
+    export from the immutable snapshots it was built from.
+    """
+
+    draft_id: str
+    title: str
+    unit_kind: UnitKind | None
+    position: int | None
+    version_id: str
+    version_number: int
+    snapshot_id: str
+    content_hash: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectExport:
+    """An ordered-latest export of a whole project (W4, D6=A).
+
+    ``body`` joins each included unit's latest snapshot ``raw_text`` verbatim in
+    ``position`` order. The only synthesized text is a per-unit title line
+    (Markdown ``# {title}`` heading, plain title line for txt); no AI analysis
+    metadata is injected. Units are non-archived by default; ``include_archived``
+    opts archived units back in. Units with no saved version are skipped because
+    they have no snapshot to export. ``units`` backs the on-request delivery
+    manifest and always matches the order the bodies were joined.
+    """
+
+    format: str
+    filename: str
+    content_type: str
+    body: str
+    project_id: str
+    include_archived: bool
+    units: tuple[ProjectExportUnit, ...]

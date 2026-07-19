@@ -1616,6 +1616,151 @@ class SpineEnvelopeKeyTest(unittest.TestCase):
         )
 
 
+class ProjectExportApiTest(unittest.TestCase):
+    """Whole-project export HTTP contract (W4, D6=A, SoT v1.7.17).
+
+    The on-request delivery manifest lives entirely at this HTTP boundary: the
+    service always computes the ordered units, but the ``manifest`` query flag
+    decides whether the response carries the traceability manifest or ``null``.
+    """
+
+    def setUp(self):
+        self.client = TestClient(create_app())
+        self.project = self.client.post("/projects", json={"name": "Novel"}).json()
+        self.d1 = self.client.post(
+            f"/projects/{self.project['id']}/drafts",
+            json={"title": "1장", "unit_kind": "chapter"},
+        ).json()
+        self.d2 = self.client.post(
+            f"/projects/{self.project['id']}/drafts",
+            json={"title": "2장", "unit_kind": "chapter"},
+        ).json()
+        self.saved1 = self.client.post(
+            f"/projects/{self.project['id']}/drafts/{self.d1['id']}/versions",
+            json={"raw_text": "first", "idempotency_key": "d1-save"},
+        ).json()
+        self.saved2 = self.client.post(
+            f"/projects/{self.project['id']}/drafts/{self.d2['id']}/versions",
+            json={"raw_text": "second", "idempotency_key": "d2-save"},
+        ).json()
+
+    def test_manifest_records_traceability_for_included_units(self):
+        # EX-08 (fire): manifest lists project/unit/version/snapshot/hash in the
+        # exact order the bodies were joined.
+        resp = self.client.get(
+            f"/projects/{self.project['id']}/export?format=markdown&manifest=true"
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["body"], "# 1장\n\nfirst\n\n# 2장\n\nsecond")
+        manifest = body["manifest"]
+        self.assertEqual(manifest["project_id"], self.project["id"])
+        self.assertEqual(manifest["format"], "markdown")
+        self.assertEqual(manifest["include_archived"], False)
+        self.assertEqual(
+            [u["draft_id"] for u in manifest["units"]],
+            [self.d1["id"], self.d2["id"]],
+        )
+        self.assertEqual(
+            manifest["units"][0],
+            {
+                "draft_id": self.d1["id"],
+                "title": "1장",
+                "unit_kind": "chapter",
+                "position": 1,
+                "version_id": self.saved1["draft_version"]["id"],
+                "version_number": 1,
+                "snapshot_id": self.saved1["snapshot"]["id"],
+                "content_hash": self.saved1["snapshot"]["content_hash"],
+            },
+        )
+
+    def test_manifest_omitted_unless_requested(self):
+        # EX-09 (not fire): without the flag, manifest must be null, never a
+        # populated object leaking on every export.
+        resp = self.client.get(f"/projects/{self.project['id']}/export")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNone(resp.json()["manifest"])
+
+    def test_include_archived_flag_over_http(self):
+        # EX-03 mirror at HTTP: default excludes archived, opt-in includes it.
+        self.client.delete(
+            f"/projects/{self.project['id']}/drafts/{self.d1['id']}"
+        )
+
+        default = self.client.get(
+            f"/projects/{self.project['id']}/export"
+        ).json()
+        opted_in = self.client.get(
+            f"/projects/{self.project['id']}/export?include_archived=true"
+        ).json()
+
+        self.assertEqual(default["body"], "2장\n\nsecond")
+        self.assertEqual(default["include_archived"], False)
+        self.assertEqual(opted_in["body"], "1장\n\nfirst\n\n2장\n\nsecond")
+        self.assertEqual(opted_in["include_archived"], True)
+
+    def test_unsupported_format_and_missing_project_rejected(self):
+        # EX-10 (not fire): bad format 400, missing project 404.
+        self.assertEqual(
+            self.client.get(
+                f"/projects/{self.project['id']}/export?format=pdf"
+            ).status_code,
+            400,
+        )
+        self.assertEqual(
+            self.client.get("/projects/nope/export").status_code, 404
+        )
+
+    def test_archived_project_export_survives(self):
+        # EX-11 (not fire): archiving the project blocks writes, not reads.
+        self.client.delete(f"/projects/{self.project['id']}")
+
+        resp = self.client.get(f"/projects/{self.project['id']}/export")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["body"], "1장\n\nfirst\n\n2장\n\nsecond")
+
+    def test_export_response_exact_keys(self):
+        # EX-12 (fire): lock the exact top-level envelope keys so a future
+        # response_model change cannot silently drop or add a field.
+        body = self.client.get(
+            f"/projects/{self.project['id']}/export?manifest=true"
+        ).json()
+
+        self.assertEqual(
+            set(body),
+            {
+                "format",
+                "filename",
+                "content_type",
+                "body",
+                "project_id",
+                "include_archived",
+                "manifest",
+            },
+        )
+        self.assertEqual(
+            set(body["manifest"]),
+            {"project_id", "format", "include_archived", "units"},
+        )
+        self.assertEqual(
+            set(body["manifest"]["units"][0]),
+            {
+                "draft_id",
+                "title",
+                "unit_kind",
+                "position",
+                "version_id",
+                "version_number",
+                "snapshot_id",
+                "content_hash",
+            },
+        )
+
+
 class BlankNameRejectionTest(unittest.TestCase):
     """Project/draft naming constraint at the HTTP boundary (SoT v1.6.95, D3=A).
 

@@ -1,8 +1,8 @@
 # Writing Workspace V2 W0 계약과 migration
 
-상태: `Approved — W0 complete, runtime implementation pending (W1 next)`
+상태: `Approved — W0~W4 구현 완료 (matrix PB/OU/WI/SC/EX 전부 채움)`
 
-정본 버전: `system-contract-sot.md` v1.7.10
+정본 버전: `system-contract-sot.md` v1.7.17
 
 근거: 오너 승인 D1=A, D2=A, D3=C, D4=A, D5=A, D6=A, 전체 접근=C
 
@@ -190,6 +190,19 @@ accepted response는 exact top-level `{accepted,intent,gate,saved,analysis_job,i
 | WI-22 | fire | 두 intent 모두 Analysis job key가 exact `analyze:{snapshot_id}` | `WritingIntentAcceptTest::test_both_intents_use_snapshot_scoped_analysis_key` |
 | SC-01 | fire | W2/W3 OpenAPI가 각 exact `$defs`와 동형 request/response schema 노출 | `WorkspaceW0SchemaIntegrationTest::test_openapi_components_match_w0_fragments` |
 | SC-02 | not fire | schema catalog root 전체를 permissive endpoint schema로 사용 금지 | `WorkspaceW0SchemaIntegrationTest::test_endpoints_do_not_reference_catalog_root` |
+| EX-01 | fire | 비archived unit을 position 순으로 latest version body를 이어 붙임 | `ProjectExportContractTest::test_export_joins_ordered_latest_non_archived` |
+| EX-02 | not fire | archived unit은 기본 body/manifest에서 제외 | `ProjectExportContractTest::test_archived_units_excluded_by_default` |
+| EX-03 | fire | `include_archived=true`가 archived unit을 position 순으로 포함 | `ProjectExportContractTest::test_include_archived_flag_includes_archived_units` |
+| EX-04 | fire | unit별 latest version 선택(과거 version 아님) | `ProjectExportContractTest::test_export_uses_latest_version_per_unit` |
+| EX-05 | not fire | body에 AI metadata 미삽입, 제목 heading + verbatim body만 | `ProjectExportContractTest::test_body_has_headings_and_verbatim_bodies_only` |
+| EX-06 | fire | markdown `# {title}`·txt 제목 줄, unit body는 포맷 무관 동일 | `ProjectExportContractTest::test_txt_and_markdown_heading_shapes` |
+| EX-07 | not fire | version 없는 unit은 순서 변형 없이 body/manifest에서 skip | `ProjectExportContractTest::test_versionless_unit_is_skipped` |
+| EX-08 | fire | manifest가 body 순서와 동형인 project/unit/version/snapshot/hash 기록 | `ProjectExportApiTest::test_manifest_records_traceability_for_included_units` |
+| EX-09 | not fire | `manifest` 미요청 시 응답 manifest는 null | `ProjectExportApiTest::test_manifest_omitted_unless_requested` |
+| EX-10 | not fire | unsupported format 400, missing project 404 | `ProjectExportApiTest::test_unsupported_format_and_missing_project_rejected` |
+| EX-11 | not fire | archived project export는 read라 200 유지 | `ProjectExportApiTest::test_archived_project_export_survives` |
+| EX-12 | fire | 응답 top-level·manifest·unit exact keys | `ProjectExportApiTest::test_export_response_exact_keys` |
+| EX-13 | not fire | 내보낼 unit 0개 project는 빈 body·빈 units(합성 없음) | `ProjectExportContractTest::test_empty_project_returns_empty_body` |
 
 ## 5. Deferred / out of scope
 
@@ -201,3 +214,34 @@ accepted response는 exact top-level `{accepted,intent,gate,saved,analysis_job,i
 - 미채택 Writing candidate 영속
 - saved publication manifest: W4의 요청 시 생성되는 **export delivery manifest**와 달리 version 선택을 저장하는 별도 정본 publication manifest를 뜻한다.
 - cross-store Core SOT+Analysis transaction
+
+## 6. W4 export exact contract (D6=A)
+
+D6=A는 방향(ordered-latest export + 별도 delivery manifest)만 확정했고, heading separator·manifest 전달·archived 포함은 브리프가 W4로 명시 이관했다. 아래는 구현 착수 시 오너가 확정한 리터럴이다.
+
+### 6.1 API
+
+`GET /projects/{project_id}/export?format=txt|markdown&manifest=<bool>&include_archived=<bool>`
+
+- `format` 미지정 기본 `txt`. `_EXPORT_FORMATS`(txt=`text/plain; charset=utf-8`, markdown=`text/markdown; charset=utf-8`)를 단일 version export와 공유한다. 지원 밖 format은 400.
+- missing/cross-project는 404. archived project는 read이므로 200(export는 읽기).
+- 응답 exact top-level: `{format,filename,content_type,body,project_id,include_archived,manifest}`. `filename`은 `{project_id}.{txt|md}`.
+
+### 6.2 unit 선택과 순서
+
+- project의 Draft를 `position` 오름차순으로 읽는다(W0 §2의 contiguous 1..N 보장 재사용).
+- archived Draft는 **기본 제외**, `include_archived=true`일 때만 같은 position 순으로 포함한다(오너 결정).
+- 각 unit은 **latest version**(최대 `version_number`)의 snapshot을 쓴다. version이 하나도 없는 Draft는 내보낼 snapshot이 없어 body/manifest 양쪽에서 skip한다(순서 변형 없음).
+
+### 6.3 body 조립
+
+- 각 unit block = `{heading}\n\n{raw_text}`. unit block들을 `\n\n`으로 잇는다.
+- heading은 **Markdown = `# {title}`**, **TXT = 제목 줄(plain)**(오너 결정). unit_kind별 heading 레벨 매핑은 하지 않는다.
+- `raw_text`는 snapshot 원문 그대로다. 단일 version export 선례처럼 **AI metadata를 삽입하지 않는다**. 제목 heading이 유일한 합성 텍스트다.
+- 포함 unit이 0개면 body는 빈 문자열이다.
+
+### 6.4 delivery manifest
+
+- **요청 시에만**(같은 endpoint `manifest=true`) 응답 `manifest`에 실리고, 미요청 시 `manifest=null`이다(오너 결정: 별도 endpoint 아님).
+- shape: `{project_id,format,include_archived,units[]}`. 각 unit = `{draft_id,title,unit_kind,position,version_id,version_number,snapshot_id,content_hash}`로 body에 실린 unit과 같은 순서·집합이다.
+- 이는 export 재현용 traceability manifest이며 version 선택을 저장하는 **saved publication manifest(§5 Deferred)**와 다르다.

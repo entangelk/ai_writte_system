@@ -17,6 +17,8 @@ from services.application.app.core_sot.models import (
     DraftVersionExport,
     Project,
     ProjectBriefVersion,
+    ProjectExport,
+    ProjectExportUnit,
     PutProjectBriefResult,
     SaveDraftResult,
     SourceBlock,
@@ -554,6 +556,59 @@ class CoreSotService:
             version_number=version.version_number,
             snapshot_id=detail.snapshot.id,
             content_hash=detail.snapshot.content_hash,
+        )
+
+    def export_project(
+        self,
+        *,
+        project_id: str,
+        fmt: str = "txt",
+        include_archived: bool = False,
+    ) -> ProjectExport:
+        if fmt not in _EXPORT_FORMATS:
+            raise UnsupportedExportFormat(f"unsupported export format: {fmt!r}")
+        # Read-only: archived projects still export (SoT archive read-allowed).
+        self._require_project(project_id)
+        drafts = self._repo.list_drafts(project_id)
+        self._require_ordered_drafts(drafts)
+        content_type, extension = _EXPORT_FORMATS[fmt]
+
+        units: list[ProjectExportUnit] = []
+        blocks: list[str] = []
+        for draft in drafts:
+            if draft.archived and not include_archived:
+                continue
+            versions = self._repo.list_versions(draft.id)
+            if not versions:
+                # Nothing saved yet: no snapshot to export, so the unit is
+                # skipped from both body and manifest.
+                continue
+            latest = max(versions, key=lambda version: version.version_number)
+            snapshot = self._repo.get_snapshot(latest.snapshot_id)
+            assert snapshot is not None
+            units.append(
+                ProjectExportUnit(
+                    draft_id=draft.id,
+                    title=draft.title,
+                    unit_kind=draft.unit_kind,
+                    position=draft.position,
+                    version_id=latest.id,
+                    version_number=latest.version_number,
+                    snapshot_id=snapshot.id,
+                    content_hash=snapshot.content_hash,
+                )
+            )
+            heading = f"# {draft.title}" if fmt == "markdown" else draft.title
+            blocks.append(f"{heading}\n\n{snapshot.raw_text}")
+
+        return ProjectExport(
+            format=fmt,
+            filename=f"{project_id}.{extension}",
+            content_type=content_type,
+            body="\n\n".join(blocks),
+            project_id=project_id,
+            include_archived=include_archived,
+            units=tuple(units),
         )
 
     def get_snapshot(

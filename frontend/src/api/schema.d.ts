@@ -590,6 +590,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{project_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export Project */
+        get: operations["export_project_projects__project_id__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{project_id}/memory": {
         parameters: {
             query?: never;
@@ -1094,6 +1111,52 @@ export interface components {
             project_id: string;
             /** Tone */
             tone: string | null;
+            /** Version Number */
+            version_number: number;
+        };
+        /** ProjectExportManifest */
+        ProjectExportManifest: {
+            /** Format */
+            format: string;
+            /** Include Archived */
+            include_archived: boolean;
+            /** Project Id */
+            project_id: string;
+            /** Units */
+            units: components["schemas"]["ProjectExportUnitModel"][];
+        };
+        /** ProjectExportResponse */
+        ProjectExportResponse: {
+            /** Body */
+            body: string;
+            /** Content Type */
+            content_type: string;
+            /** Filename */
+            filename: string;
+            /** Format */
+            format: string;
+            /** Include Archived */
+            include_archived: boolean;
+            manifest: components["schemas"]["ProjectExportManifest"] | null;
+            /** Project Id */
+            project_id: string;
+        };
+        /** ProjectExportUnitModel */
+        ProjectExportUnitModel: {
+            /** Content Hash */
+            content_hash: string;
+            /** Draft Id */
+            draft_id: string;
+            /** Position */
+            position: number | null;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Title */
+            title: string;
+            /** Unit Kind */
+            unit_kind: string | null;
+            /** Version Id */
+            version_id: string;
             /** Version Number */
             version_number: number;
         };
@@ -2966,6 +3029,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DraftVersionExportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_project_projects__project_id__export_get: {
+        parameters: {
+            query?: {
+                format?: string;
+                manifest?: boolean;
+                include_archived?: boolean;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectExportResponse"];
                 };
             };
             /** @description Validation Error */
