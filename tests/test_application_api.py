@@ -1494,7 +1494,14 @@ class SpineEnvelopeKeyTest(unittest.TestCase):
         )
 
     def test_draft_payload_keys(self):
-        expected = {"id", "project_id", "title", "archived"}
+        expected = {
+            "id",
+            "project_id",
+            "title",
+            "archived",
+            "unit_kind",
+            "position",
+        }
 
         self.assertEqual(set(self.draft), expected)
         self.assertEqual(

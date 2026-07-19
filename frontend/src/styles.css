@@ -475,7 +475,8 @@ main {
   gap: 0.65rem;
 }
 
-.form-controls input {
+.form-controls input,
+.form-controls select {
   min-width: 0;
   flex: 1;
   padding: 0.8rem 0.1rem;
@@ -485,6 +486,10 @@ main {
   border-bottom: 1px solid #aca392;
   border-radius: 0;
   outline: none;
+}
+
+.form-controls select {
+  flex: 0 0 auto;
 }
 
 .form-controls input::placeholder {
@@ -561,6 +566,23 @@ main {
   color: var(--muted);
   font-size: 0.74rem;
   white-space: nowrap;
+}
+
+.order-controls {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.order-controls button {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.order-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
 }
 
 .empty-state,

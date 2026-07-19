@@ -23,9 +23,11 @@ from services.application.app.core_sot.models import (
     SourceRef,
     SourceSnapshot,
     SourceSnapshotDetail,
+    UnitKind,
 )
 from services.application.app.core_sot.repository import (
     CoreSotRepository,
+    DraftSetChanged,
     DuplicateProjectBriefRequest,
     DuplicateSaveRequest,
 )
@@ -57,6 +59,10 @@ class UnsupportedExportFormat(CoreSotError):
 
 
 class StaleProjectBriefBase(CoreSotError):
+    pass
+
+
+class InvalidDraftOrder(CoreSotError):
     pass
 
 
@@ -175,9 +181,37 @@ class InMemoryCoreSotRepository:
         self.drafts[draft.id] = draft
 
     def list_drafts(self, project_id: str) -> tuple[Draft, ...]:
-        return tuple(
+        drafts = tuple(
             draft for draft in self.drafts.values() if draft.project_id == project_id
         )
+        if drafts and all(draft.position is not None for draft in drafts):
+            return tuple(sorted(drafts, key=lambda draft: draft.position))
+        return drafts
+
+    def replace_draft_metadata(
+        self, project_id: str, drafts: tuple[Draft, ...]
+    ) -> None:
+        before = {
+            draft.id: self.drafts[draft.id]
+            for draft in drafts
+            if draft.id in self.drafts
+        }
+        try:
+            for draft in drafts:
+                if draft.project_id != project_id or draft.id not in self.drafts:
+                    raise DraftSetChanged("draft set changed during write")
+                self.drafts[draft.id] = draft
+                self._after_draft_metadata_write(draft)
+        except Exception:
+            self.drafts.update(before)
+            raise
+
+    def _after_draft_metadata_write(self, draft: Draft) -> None:
+        """Failure-injection seam for ordered-unit fallback regressions."""
+
+    def ensure_draft_position_index(self) -> None:
+        # Dict-backed tests enforce uniqueness in service validation.
+        return None
 
     def get_version(self, version_id: str) -> DraftVersion | None:
         return self.versions.get(version_id)
@@ -245,14 +279,26 @@ class CoreSotService:
         self._repo.put_project(project)
         return project
 
-    def create_draft(self, *, project_id: str, title: str) -> Draft:
+    def create_draft(
+        self,
+        *,
+        project_id: str,
+        title: str,
+        unit_kind: UnitKind = UnitKind.OTHER,
+    ) -> Draft:
         project = self._require_project(project_id)
         if project.archived:
             raise Archived("project is archived")
+        if not isinstance(unit_kind, UnitKind):
+            raise InvalidDraftOrder("draft unit_kind is invalid")
+        drafts = self._repo.list_drafts(project_id)
+        self._require_ordered_drafts(drafts)
         draft = Draft(
             id=self._repo.next_draft_id(),
             project_id=project_id,
             title=title,
+            unit_kind=unit_kind,
+            position=len(drafts) + 1,
         )
         self._repo.put_draft(draft)
         return draft
@@ -362,7 +408,40 @@ class CoreSotService:
 
     def list_drafts(self, *, project_id: str) -> tuple[Draft, ...]:
         self._require_project(project_id)
-        return self._repo.list_drafts(project_id)
+        drafts = self._repo.list_drafts(project_id)
+        self._require_ordered_drafts(drafts)
+        return drafts
+
+    def reorder_drafts(
+        self, *, project_id: str, ordered_draft_ids: tuple[str, ...]
+    ) -> tuple[Draft, ...]:
+        project = self._require_project(project_id)
+        if project.archived:
+            raise Archived("project is archived")
+        current = self._repo.list_drafts(project_id)
+        self._require_ordered_drafts(current)
+        current_ids = tuple(draft.id for draft in current)
+        if (
+            len(ordered_draft_ids) != len(current_ids)
+            or len(set(ordered_draft_ids)) != len(ordered_draft_ids)
+            or set(ordered_draft_ids) != set(current_ids)
+        ):
+            raise InvalidDraftOrder("ordered_draft_ids must be the complete draft set")
+        if ordered_draft_ids == current_ids:
+            return current
+        by_id = {draft.id: draft for draft in current}
+        reordered = tuple(
+            replace(by_id[draft_id], position=index)
+            for index, draft_id in enumerate(ordered_draft_ids, start=1)
+        )
+        try:
+            self._repo.replace_draft_metadata(project_id, reordered)
+        except DraftSetChanged as exc:
+            raise InvalidDraftOrder("draft set changed during reorder") from exc
+        committed = self._repo.list_drafts(project_id)
+        if tuple(draft.id for draft in committed) != ordered_draft_ids:
+            raise InvalidDraftOrder("draft set changed during reorder")
+        return committed
 
     def list_draft_versions(
         self, *, project_id: str, draft_id: str
@@ -587,3 +666,18 @@ class CoreSotService:
             raise Archived("project is archived")
         if draft.archived:
             raise Archived("draft is archived")
+
+    @staticmethod
+    def _require_ordered_drafts(drafts: tuple[Draft, ...]) -> None:
+        if any(
+            draft.unit_kind is None
+            or not isinstance(draft.unit_kind, UnitKind)
+            or draft.position is None
+            or not _is_int(draft.position)
+            or draft.position < 1
+            for draft in drafts
+        ):
+            raise InvalidDraftOrder("draft metadata migration is required")
+        positions = tuple(draft.position for draft in drafts)
+        if positions != tuple(range(1, len(drafts) + 1)):
+            raise InvalidDraftOrder("draft positions must be a contiguous permutation")

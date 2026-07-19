@@ -5,6 +5,8 @@ import {
   describeApiError,
   getProject,
   listDrafts,
+  putDraftOrder,
+  type CreateDraftRequest,
   type Draft,
   type Project,
 } from "../api/client";
@@ -14,6 +16,7 @@ export function DraftList() {
   const [project, setProject] = useState<Project | null>(null);
   const [drafts, setDrafts] = useState<Draft[] | null>(null);
   const [title, setTitle] = useState("");
+  const [unitKind, setUnitKind] = useState<CreateDraftRequest["unit_kind"]>("other");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -68,10 +71,34 @@ export function DraftList() {
     }
     setSaving(true);
     try {
-      await createDraft(projectId, { title: trimmed });
+      await createDraft(projectId, { title: trimmed, unit_kind: unitKind });
       setTitle("");
       setError(null);
       await loadDrafts();
+    } catch (err) {
+      setError(describeApiError(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function moveDraft(index: number, offset: -1 | 1) {
+    if (projectId === undefined || drafts === null || saving || project?.archived) {
+      return;
+    }
+    const target = index + offset;
+    if (target < 0 || target >= drafts.length) {
+      return;
+    }
+    const reordered = [...drafts];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    setSaving(true);
+    try {
+      const response = await putDraftOrder(projectId, {
+        ordered_draft_ids: reordered.map((draft) => draft.id),
+      });
+      setDrafts(response.drafts);
+      setError(null);
     } catch (err) {
       setError(describeApiError(err));
     } finally {
@@ -116,6 +143,16 @@ export function DraftList() {
                 <span>본문과 version 저장은 다음 단계에서 연결됩니다.</span>
               </div>
               <div className="form-controls">
+                <label className="sr-only" htmlFor="draft-unit-kind">원고 단위</label>
+                <select
+                  id="draft-unit-kind"
+                  value={unitKind}
+                  onChange={(event) => setUnitKind(event.target.value as CreateDraftRequest["unit_kind"])}
+                >
+                  <option value="chapter">장</option>
+                  <option value="scene">장면</option>
+                  <option value="other">기타</option>
+                </select>
                 <input
                   id="draft-title"
                   value={title}
@@ -137,7 +174,7 @@ export function DraftList() {
             </div>
           ) : (
             <ul className="resource-list" aria-label="원고 목록">
-              {drafts.map((draft) => (
+              {drafts.map((draft, index) => (
                 <li className="resource-row draft-row" key={draft.id}>
                   <Link
                     aria-label={draft.title}
@@ -147,7 +184,26 @@ export function DraftList() {
                     <span>{draft.title}</span>
                     <span className="row-arrow" aria-hidden="true">→</span>
                   </Link>
+                  <span className="status-badge">
+                    {draft.position}. {draft.unit_kind === "chapter" ? "장" : draft.unit_kind === "scene" ? "장면" : "기타"}
+                  </span>
                   {draft.archived && <span className="status-badge">(보관됨)</span>}
+                  {!project.archived && (
+                    <span className="order-controls">
+                      <button
+                        aria-label={`${draft.title} 위로`}
+                        disabled={saving || index === 0}
+                        onClick={() => void moveDraft(index, -1)}
+                        type="button"
+                      >↑</button>
+                      <button
+                        aria-label={`${draft.title} 아래로`}
+                        disabled={saving || index === drafts.length - 1}
+                        onClick={() => void moveDraft(index, 1)}
+                        type="button"
+                      >↓</button>
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>

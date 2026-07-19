@@ -484,6 +484,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{project_id}/draft-order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put Draft Order */
+        put: operations["put_draft_order_projects__project_id__draft_order_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{project_id}/drafts": {
         parameters: {
             query?: never;
@@ -908,6 +925,8 @@ export interface components {
         CreateDraftRequest: {
             /** Title */
             title: string;
+            /** @default other */
+            unit_kind: components["schemas"]["UnitKind"];
         };
         /** CreateProjectRequest */
         CreateProjectRequest: {
@@ -926,16 +945,29 @@ export interface components {
             /** Drafts */
             drafts: components["schemas"]["DraftPayload"][];
         };
+        /** DraftOrderPutRequest */
+        DraftOrderPutRequest: {
+            /** Ordered Draft Ids */
+            ordered_draft_ids: string[];
+        };
+        /** DraftOrderPutResponse */
+        DraftOrderPutResponse: {
+            /** Drafts */
+            drafts: components["schemas"]["DraftPayload"][];
+        };
         /** DraftPayload */
         DraftPayload: {
             /** Archived */
             archived: boolean;
             /** Id */
             id: string;
+            /** Position */
+            position: number;
             /** Project Id */
             project_id: string;
             /** Title */
             title: string;
+            unit_kind: components["schemas"]["UnitKind"];
         };
         /** DraftVersionDetailResponse */
         DraftVersionDetailResponse: {
@@ -1189,6 +1221,11 @@ export interface components {
             /** Text */
             text: string;
         };
+        /**
+         * UnitKind
+         * @enum {string}
+         */
+        UnitKind: "chapter" | "scene" | "other";
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -2565,6 +2602,41 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_draft_order_projects__project_id__draft_order_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DraftOrderPutRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftOrderPutResponse"];
                 };
             };
             /** @description Validation Error */

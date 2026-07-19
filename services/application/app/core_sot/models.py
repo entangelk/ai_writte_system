@@ -17,6 +17,12 @@ class BlockKind(StrEnum):
     PARAGRAPH = "paragraph"
 
 
+class UnitKind(StrEnum):
+    CHAPTER = "chapter"
+    SCENE = "scene"
+    OTHER = "other"
+
+
 @dataclass(frozen=True, slots=True)
 class Project:
     id: str
@@ -49,6 +55,10 @@ class Draft:
     project_id: str
     title: str
     archived: bool = False
+    # ``None`` exists only while the explicit W3 legacy migration is inspecting
+    # pre-v1.7.14 documents. Every runtime-created/migrated Draft has both fields.
+    unit_kind: UnitKind | None = None
+    position: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

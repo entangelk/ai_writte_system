@@ -57,6 +57,8 @@ export type ProjectBriefVersionListResponse =
 export type CreateDraftRequest = components["schemas"]["CreateDraftRequest"];
 export type Draft = components["schemas"]["DraftPayload"];
 export type DraftListResponse = components["schemas"]["DraftListResponse"];
+export type DraftOrderPutRequest = components["schemas"]["DraftOrderPutRequest"];
+export type DraftOrderPutResponse = components["schemas"]["DraftOrderPutResponse"];
 export type DraftVersion = components["schemas"]["DraftVersionMetaPayload"];
 export type DraftVersionListResponse = components["schemas"]["DraftVersionListResponse"];
 export type DraftVersionDetail = components["schemas"]["DraftVersionDetailResponse"];
@@ -138,6 +140,16 @@ export function createDraft(
 ): Promise<Draft> {
   return request(`/projects/${projectId}/drafts`, {
     method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function putDraftOrder(
+  projectId: string,
+  body: DraftOrderPutRequest,
+): Promise<DraftOrderPutResponse> {
+  return request(`/projects/${projectId}/draft-order`, {
+    method: "PUT",
     body: JSON.stringify(body),
   });
 }

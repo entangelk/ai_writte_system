@@ -40,6 +40,10 @@ except ImportError:
 from services.application.app.core_sot.models import (
     DraftVersion,
     SourceSnapshot,
+    UnitKind,
+)
+from services.application.app.core_sot.ordered_unit_migration import (
+    OrderedUnitMigrationService,
 )
 from services.application.app.core_sot.repository import DuplicateSaveRequest
 from services.application.app.core_sot.service import (
@@ -249,6 +253,30 @@ class _MongoContractMixin:
         )
         with self.assertRaises(NotFound):
             reread.get_draft(project_id=project_b.id, draft_id=draft_a1.id)
+
+    def test_ordered_unit_fields_and_full_reorder_persist(self):
+        project = self.service.create_project(name="Ordered")
+        first = self.service.create_draft(
+            project_id=project.id, title="One", unit_kind=UnitKind.CHAPTER
+        )
+        second = self.service.create_draft(
+            project_id=project.id, title="Two", unit_kind=UnitKind.SCENE
+        )
+        third = self.service.create_draft(project_id=project.id, title="Three")
+        self.service.archive_draft(project_id=project.id, draft_id=second.id)
+
+        reordered = self.service.reorder_drafts(
+            project_id=project.id,
+            ordered_draft_ids=(third.id, second.id, first.id),
+        )
+
+        self.assertEqual([draft.id for draft in reordered], [third.id, second.id, first.id])
+        self.assertEqual([draft.position for draft in reordered], [1, 2, 3])
+        self.assertEqual(
+            [draft.unit_kind for draft in reordered],
+            [UnitKind.OTHER, UnitKind.SCENE, UnitKind.CHAPTER],
+        )
+        self.assertTrue(reordered[1].archived)
 
     def test_rename_persists_for_project_and_draft(self):
         project = self.service.create_project(name="Old")
@@ -526,6 +554,59 @@ class _MongoContractMixin:
 @unittest.skipUnless(_MONGO_AVAILABLE, "no MongoDB reachable for integration tests")
 class FallbackMongoTest(_MongoContractMixin, unittest.TestCase):
     use_transactions = False
+
+    def test_ordered_unit_migration_fallback_restores_raw_before_image(self):
+        project = self.service.create_project(name="Legacy")
+        legacy = [
+            {
+                "_id": f"legacy-{index}",
+                "project_id": project.id,
+                "title": f"Legacy {index}",
+                "archived": index == 2,
+            }
+            for index in range(1, 4)
+        ]
+        self.repo._drafts.insert_many(legacy)
+        before = list(self.repo._drafts.find({"project_id": project.id}).sort("_id", 1))
+        original_hook = self.repo._after_draft_metadata_write
+
+        def fail_second(index, draft):
+            if index == 2:
+                raise RuntimeError("injected ordered-unit failure")
+
+        self.repo._after_draft_metadata_write = fail_second
+        try:
+            report = OrderedUnitMigrationService(self.repo).run()
+        finally:
+            self.repo._after_draft_metadata_write = original_hook
+
+        after = list(self.repo._drafts.find({"project_id": project.id}).sort("_id", 1))
+        self.assertFalse(report.succeeded)
+        self.assertEqual(after, before)
+        self.assertNotIn("uniq_draft_position", self.repo._drafts.index_information())
+
+    def test_ordered_unit_migration_fallback_commits_and_installs_index(self):
+        project = self.service.create_project(name="Legacy")
+        self.repo._drafts.insert_many(
+            [
+                {
+                    "_id": f"legacy-{index}",
+                    "project_id": project.id,
+                    "title": f"Legacy {index}",
+                    "archived": False,
+                }
+                for index in range(1, 4)
+            ]
+        )
+
+        report = OrderedUnitMigrationService(self.repo).run()
+
+        self.assertTrue(report.succeeded)
+        self.assertEqual(
+            [draft.position for draft in self.repo.list_drafts(project.id)],
+            [1, 2, 3],
+        )
+        self.assertIn("uniq_draft_position", self.repo._drafts.index_information())
 
     def test_fallback_cleans_orphans_from_prior_failed_attempt(self):
         # Simulate an attempt that wrote immutable dependents but crashed before

@@ -37,10 +37,12 @@ from services.application.app.core_sot.models import (
     SourceBlock,
     SourceRef,
     SourceSnapshot,
+    UnitKind,
 )
 from services.application.app.core_sot.repository import (
     DuplicateProjectBriefRequest,
     DuplicateSaveRequest,
+    DraftSetChanged,
 )
 
 DEFAULT_DB_NAME = "ai_writing_system"
@@ -207,7 +209,75 @@ class MongoCoreSotRepository:
 
     def list_drafts(self, project_id: str) -> tuple[Draft, ...]:
         cursor = self._drafts.find({"project_id": project_id}).sort("_id", ASCENDING)
-        return tuple(_to_draft(doc) for doc in cursor)
+        drafts = tuple(_to_draft(doc) for doc in cursor)
+        if drafts and all(draft.position is not None for draft in drafts):
+            return tuple(sorted(drafts, key=lambda draft: draft.position))
+        return drafts
+
+    def replace_draft_metadata(
+        self, project_id: str, drafts: tuple[Draft, ...]
+    ) -> None:
+        if self._use_transactions:
+            with self._client.start_session() as session:
+                with session.start_transaction():
+                    self._replace_draft_metadata(project_id, drafts, session=session)
+            return
+
+        before = tuple(self._drafts.find({"project_id": project_id}))
+        try:
+            self._replace_draft_metadata(project_id, drafts, session=None)
+        except Exception:
+            self._drafts.delete_many({"project_id": project_id})
+            if before:
+                self._drafts.insert_many(before)
+            raise
+
+    def _replace_draft_metadata(self, project_id, drafts, *, session) -> None:
+        current_ids = {
+            doc["_id"]
+            for doc in self._drafts.find(
+                {"project_id": project_id}, {"_id": 1}, session=session
+            )
+        }
+        if current_ids != {draft.id for draft in drafts}:
+            raise DraftSetChanged("draft set changed during write")
+        # Temporary negative positions avoid collisions with the unique index
+        # while a full permutation is being replaced.
+        for index, draft in enumerate(drafts, start=1):
+            self._drafts.update_one(
+                {"_id": draft.id, "project_id": project_id},
+                {"$set": {"position": -index}},
+                session=session,
+            )
+        for index, draft in enumerate(drafts, start=1):
+            result = self._drafts.update_one(
+                {"_id": draft.id, "project_id": project_id},
+                {
+                    "$set": {
+                        "unit_kind": str(draft.unit_kind),
+                        "position": draft.position,
+                    }
+                },
+                session=session,
+            )
+            if result.matched_count != 1:
+                raise DraftSetChanged("draft set changed during write")
+            self._after_draft_metadata_write(index, draft)
+
+    def _after_draft_metadata_write(self, index: int, draft: Draft) -> None:
+        """Failure-injection seam for the single-writer fallback regression."""
+
+    def ensure_draft_position_index(self) -> None:
+        try:
+            self._drafts.create_index(
+                [("project_id", ASCENDING), ("position", ASCENDING)],
+                unique=True,
+                name="uniq_draft_position",
+            )
+        except OperationFailure as exc:
+            raise MongoRepositorySetupError(
+                "failed to create draft position index"
+            ) from exc
 
     # -- save / lookups -------------------------------------------------------
 
@@ -390,6 +460,8 @@ def _draft_doc(draft: Draft) -> dict:
         "project_id": draft.project_id,
         "title": draft.title,
         "archived": draft.archived,
+        "unit_kind": str(draft.unit_kind) if draft.unit_kind is not None else None,
+        "position": draft.position,
     }
 
 
@@ -399,6 +471,12 @@ def _to_draft(doc: dict) -> Draft:
         project_id=doc["project_id"],
         title=doc["title"],
         archived=doc["archived"],
+        unit_kind=(
+            UnitKind(doc["unit_kind"])
+            if doc.get("unit_kind") is not None
+            else None
+        ),
+        position=doc.get("position"),
     )
 
 

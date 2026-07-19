@@ -186,12 +186,13 @@ from services.application.app.context_search.service import (
     VectorCandidateMemoryRetriever,
     evaluate_context_gate,
 )
-from services.application.app.core_sot.models import BlockKind
+from services.application.app.core_sot.models import BlockKind, UnitKind
 from services.application.app.core_sot.service import (
     Archived,
     CoreSotError,
     CoreSotService,
     InMemoryCoreSotRepository,
+    InvalidDraftOrder,
     NotFound,
     StaleProjectBriefBase,
     UnsupportedExportFormat,
@@ -954,10 +955,14 @@ class ProjectBriefVersionListResponse(BaseModel):
 
 
 class DraftPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str
     project_id: str
     title: str
     archived: bool
+    unit_kind: UnitKind
+    position: int = Field(ge=1)
 
 
 class DraftListResponse(BaseModel):
@@ -1089,7 +1094,31 @@ class CreateAnalysisJobRequest(BaseModel):
 
 
 class CreateDraftRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: NonBlankName
+    unit_kind: UnitKind = UnitKind.OTHER
+
+
+class DraftOrderPutRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ordered_draft_ids: list[NonBlankName] = Field(
+        json_schema_extra={"uniqueItems": True}
+    )
+
+    @field_validator("ordered_draft_ids")
+    @classmethod
+    def reject_duplicate_draft_ids(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("ordered_draft_ids must not contain duplicates")
+        return value
+
+
+class DraftOrderPutResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    drafts: list[DraftPayload]
 
 
 class RenameProjectRequest(BaseModel):
@@ -1397,11 +1426,15 @@ def create_app(
         }
 
     def _draft_payload(draft) -> dict[str, object]:
+        assert draft.unit_kind is not None
+        assert draft.position is not None
         return {
             "id": draft.id,
             "project_id": draft.project_id,
             "title": draft.title,
             "archived": draft.archived,
+            "unit_kind": draft.unit_kind,
+            "position": draft.position,
         }
 
     def _version_meta_payload(version) -> dict[str, object]:
@@ -1749,12 +1782,34 @@ def create_app(
         project_id: str, request: CreateDraftRequest
     ) -> dict[str, object]:
         try:
-            draft = core_sot.create_draft(project_id=project_id, title=request.title)
+            draft = core_sot.create_draft(
+                project_id=project_id,
+                title=request.title,
+                unit_kind=request.unit_kind,
+            )
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Archived as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return _draft_payload(draft)
+
+    @app.put(
+        "/projects/{project_id}/draft-order",
+        response_model=DraftOrderPutResponse,
+    )
+    async def put_draft_order(
+        project_id: str, request: DraftOrderPutRequest
+    ) -> dict[str, object]:
+        try:
+            drafts = core_sot.reorder_drafts(
+                project_id=project_id,
+                ordered_draft_ids=tuple(request.ordered_draft_ids),
+            )
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (Archived, InvalidDraftOrder) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"drafts": [_draft_payload(draft) for draft in drafts]}
 
     @app.post(
         "/projects/{project_id}/drafts/{draft_id}/versions",

@@ -97,14 +97,45 @@ describe("DraftList", () => {
     await screen.findByText(/아직 원고가 없습니다/);
 
     await userEvent.type(screen.getByLabelText("새 원고 제목"), "첫 장면");
+    await userEvent.selectOptions(screen.getByLabelText("원고 단위"), "scene");
     await userEvent.click(screen.getByRole("button", { name: "원고 만들기" }));
 
     expect(await screen.findByText("첫 장면")).toBeInTheDocument();
     const [url, init] = fetchMock.mock.calls[2];
     expect(url).toBe("/api/projects/p1/drafts");
     expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body)).toEqual({ title: "첫 장면" });
+    expect(JSON.parse(init.body)).toEqual({ title: "첫 장면", unit_kind: "scene" });
     expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("reorders the complete server-owned draft permutation", async () => {
+    const one = {
+      id: "d1", project_id: "p1", title: "첫 장", archived: false,
+      unit_kind: "chapter", position: 1,
+    };
+    const two = {
+      id: "d2", project_id: "p1", title: "둘째 장면", archived: true,
+      unit_kind: "scene", position: 2,
+    };
+    const fetchMock = mockFetch(
+      { body: { id: "p1", name: "겨울 이야기", archived: false } },
+      { body: { drafts: [one, two] } },
+      { body: { drafts: [{ ...two, position: 1 }, { ...one, position: 2 }] } },
+    );
+
+    renderDraftList();
+    await screen.findByText("첫 장");
+    await userEvent.click(screen.getByRole("button", { name: "첫 장 아래로" }));
+
+    await waitFor(() => {
+      const rows = screen.getAllByRole("listitem");
+      expect(rows[0]).toHaveTextContent("둘째 장면");
+      expect(rows[1]).toHaveTextContent("첫 장");
+    });
+    const [url, init] = fetchMock.mock.calls[2];
+    expect(url).toBe("/api/projects/p1/draft-order");
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(init.body)).toEqual({ ordered_draft_ids: ["d2", "d1"] });
   });
 
   it("trims a normal title but never posts a whitespace-only title", async () => {
@@ -139,7 +170,10 @@ describe("DraftList", () => {
     await userEvent.click(screen.getByRole("button", { name: "원고 만들기" }));
 
     await waitFor(() => expect(field).toHaveValue(""));
-    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({ title: "첫 장면" });
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({
+      title: "첫 장면",
+      unit_kind: "other",
+    });
   });
 
   it("does not mint two drafts while the first create is in flight", async () => {

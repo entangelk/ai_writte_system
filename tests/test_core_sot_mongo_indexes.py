@@ -41,11 +41,30 @@ def _repo_with_indexes(*, fail_on_name: str | None = None):
     repo._project_briefs = _FakeCollection(fail_on_name=fail_on_name)
     repo._blocks = _FakeCollection(fail_on_name=fail_on_name)
     repo._source_refs = _FakeCollection(fail_on_name=fail_on_name)
+    repo._drafts = _FakeCollection(fail_on_name=fail_on_name)
     return repo
 
 
 @unittest.skipUnless(_PYMONGO_AVAILABLE, "pymongo is not installed")
 class MongoIndexSetupTests(unittest.TestCase):
+    def test_ordered_unit_index_is_installed_only_by_explicit_migration(self):
+        """OU migration installs the unique project/position boundary explicitly."""
+        repo = _repo_with_indexes()
+
+        repo.ensure_indexes()
+        self.assertEqual(repo._drafts.calls, [])
+
+        repo.ensure_draft_position_index()
+        self.assertEqual(
+            repo._drafts.calls,
+            [
+                (
+                    [("project_id", 1), ("position", 1)],
+                    {"unique": True, "name": "uniq_draft_position"},
+                )
+            ],
+        )
+
     def test_ensure_indexes_creates_required_absent_indexes(self):
         """Under-strict guard: every required query index must be requested."""
 

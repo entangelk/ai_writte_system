@@ -34,6 +34,10 @@ class DuplicateProjectBriefRequest(Exception):
     """Raised when a ProjectBrief version loses a unique-index race."""
 
 
+class DraftSetChanged(Exception):
+    """Raised when an ordered-unit write no longer targets the full draft set."""
+
+
 class CoreSotRepository(Protocol):
     """Storage operations the Core SOT service requires."""
 
@@ -78,6 +82,12 @@ class CoreSotRepository(Protocol):
     def put_draft(self, draft: Draft) -> None: ...
 
     def list_drafts(self, project_id: str) -> tuple[Draft, ...]: ...
+
+    def replace_draft_metadata(
+        self, project_id: str, drafts: tuple[Draft, ...]
+    ) -> None: ...
+
+    def ensure_draft_position_index(self) -> None: ...
 
     def version_count(self, draft_id: str) -> int: ...
 

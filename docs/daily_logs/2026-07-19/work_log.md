@@ -205,3 +205,50 @@
 
 - 재감사 합격 조건 B1/B2가 모두 닫혔으므로 W3를 착수할 수 있다.
 - OpenAPI 생성환경 pin/CI check는 실제 CI 또는 dependency 재현성 정비 trigger에서 별도 처리한다.
+
+---
+
+## Task — Writing Workspace V2 W3 증분 1: ordered unit
+
+### Goals
+
+- W0 §2의 Draft `unit_kind/position`, archived-inclusive total order와 full-permutation reorder를 구현한다.
+- legacy Draft를 명시 one-shot으로 이관하고 transaction/fallback 원자 경계를 실제 Mongo까지 검증한다.
+- 프론트가 생성 단위와 서버 소유 순서를 소비하게 하고 OpenAPI 생성→build 회귀를 유지한다.
+
+### User Decisions and Rationale
+
+- 사용자는 W2 closure 커밋 뒤 다음 작업 진행을 승인했다. W3의 ordered unit과 Writing Intent는 W0 v1.7.10에 이미 exact 계약과 named matrix가 확정돼 있어 새 owner fork 없이 §2부터 독립 증분으로 진행했다.
+- W3 전체 완료로 과장하지 않고 OU-01~14만 이번 증분에서 닫고, 원자 accept receipt가 필요한 Writing Intent WI-01~22는 다음 증분으로 분리했다.
+
+### Completed work
+
+- **Core SOT/API**: Draft에 `unit_kind`와 `position`을 추가하고 create default `other`/N+1, position-order list, archive slot 보존을 구현했다. `PUT /projects/{project_id}/draft-order`는 archived 포함 전체 draft ID의 정확한 완전순열만 받고 exact 1..N을 반환한다.
+- **Mongo/migration**: repository metadata replace와 `(project_id,position)` unique-index 설치 경계를 추가했다. 명시 `scripts/migrate_ordered_units.py`가 legacy repository order를 `other/1..N`으로 이관하고 mixed/unknown/duplicate/gapped 상태는 project 단위 fail-closed하며 전체 성공 뒤에만 index를 설치한다. non-transaction local/test 경로는 project raw before-image를 복구한다.
+- **프론트/OpenAPI**: generated Draft/CreateDraft/reorder 타입을 반영하고 생성 폼 단위 선택, 목록 position/kind 표시, 전체순열 위/아래 reorder를 연결했다.
+- **회귀**: canonical 이름 그대로 OU-01~14를 추가했다. 실제 replica-set에는 ordered field/reorder 공통 회귀와 fallback 중간 실패 raw before-image 복구·정상 commit/index 설치를 추가했다.
+
+### Issues found
+
+- fresh OpenAPI 생성 직후 `CreateDraftRequest.unit_kind`를 기존 프론트 호출이 보내지 않아 TypeScript build가 실패했다. 서버의 호환 기본값은 유지하면서 새 UI가 명시 단위를 보내도록 정렬했다.
+- 첫 live Mongo 실행은 샌드박스의 localhost socket 차단으로 37개가 skip됐다. 권한 있는 동일 명령으로 다시 실행해 37 passed/0 skipped를 확보했으며 skip 결과는 판정에 사용하지 않았다.
+
+### Decisions
+
+- position은 client create 입력으로 받지 않고 서버만 N+1을 부여한다. reorder만 full ID permutation으로 순서를 바꿔 fractional/partial move를 열지 않았다.
+- migration은 read-time default를 두지 않고 배포 전 maintenance-window 명시 runner로 유지했다. 한 project 실패 시 index를 설치하지 않지만 이미 성공한 project는 재실행에서 valid no-op으로 재사용한다.
+- Writing Intent는 ordered-unit 기반 위의 별도 원자 write/receipt 경계이므로 이번 커밋에 반쪽 구현하지 않았다.
+
+### Verification
+
+- OU named + Core/API focused: **111 passed / 27 subtests**.
+- backend full: **1159 passed / 60 skipped / 293 subtests**.
+- live replica-set Mongo: **37 passed / 0 skipped**.
+- frontend full: **144 passed / 10 files**.
+- `npm run gen:api && npm run build`: PASS, **96 modules**; CSS 17.81 kB(gzip 4.00), JS 285.37 kB(gzip 88.19).
+- `git diff --check`: PASS.
+
+### Next steps
+
+- W0 §3의 `append_current|start_next_unit` discriminator, candidate binding, start-next six-surface Core SOT transaction, accept receipt/replay와 Analysis partial convergence를 WI-01~22로 구현한다.
+- WI 완료 뒤 W0 schema fragment와 실제 OpenAPI를 SC-01/02로 다시 대조하고 W3 전체 closure를 수행한다.
