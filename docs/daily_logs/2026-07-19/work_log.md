@@ -101,3 +101,107 @@
 
 - Docker/Node/Mongo 테스트 머신에서 HANDOFF의 W2 운영 closure를 먼저 수행한다. 특히 신규 `test_concurrent_project_brief_version_collision_has_one_success_one_stale`가 transaction/fallback 양쪽에서 실제 통과해야 H3 live 축이 닫힌다.
 - 그 뒤 W3 ordered unit/explicit intent를 착수한다.
+
+---
+
+## Task — W2 테스트 머신 운영 closure 독립 검증
+
+### Goals
+
+- 서브 머신에서 미실행이던 지원 Node, Docker image, 실제 Mongo 동시성, nginx/API/browser 축을 독립 검증한다.
+- W2의 LLM 비의존 경계를 유지하면서 canonical-only/pending 분리를 실제 배포 이미지에서 확인한다.
+- 재현 가능한 독립 검증 기록을 남기고 HANDOFF의 완료/다음 작업 상태를 현재 사실로 갱신한다.
+
+### User Decisions and Rationale
+
+- 사용자는 `HANDOFF.md`와 오늘 로그를 기준으로 서브 머신에서 못 했던 검증부터 진행하도록 지시했다. 따라서 W3 구현보다 W2 운영 closure를 우선했고, 검증 중 발견한 결함은 임의 수정하지 않는 독립 감사 범위를 유지했다.
+
+### Completed work
+
+- **지원 Node 프론트 재현**: `node:22-slim` v22.23.1/npm 10.9.8에서 fresh `npm ci`(195 packages, 취약점 0), Vitest 143/10, production build 96 modules를 통과했다.
+- **OpenAPI 생성 타입(후속 정정)**: 당시 현재 Python app에서 git-ignored `openapi.json`을 다시 만들고 byte-identical이라고 기록했으나 독립 재감사가 이를 반박했다. 실제로는 ProjectBrief 영역만 일치하고 전체 schema는 stale Writing `-Input/-Output` component 때문에 달랐다. 아래 후속 task에서 기록과 코드를 정렬했다.
+- **이미지**: 최신 source로 application/frontend image를 빌드했다. frontend image의 지원 Node stage에서 `npm ci`와 build가 실제 실행됐다.
+- **실 Mongo**: replica-set Mongo에서 `tests/test_core_sot_mongo.py` 33개를 skip 없이 통과했다. 신규 ProjectBrief 동시 충돌 회귀가 fallback/transaction 양쪽에서 success 1/stale 1, replay false, version 1개를 유지해 H3 live 축을 닫았다.
+- **nginx/API/UI**: 격리 DB와 최신 image의 일회성 application/frontend를 사용해 nginx `/api` PUT/current/history/version/same-key replay를 확인했다. 실제 Chrome DOM에서 ProjectBrief version 1, canonical memory 1건, pending count 1을 확인하고 pending 이름/본문이 canonical grid에 노출되지 않음을 기계 단정했다.
+- **정리/문서**: 격리 DB를 drop하고 일회성 컨테이너와 검증용 Mongo를 정지했다. `docs/verifications/2026-07-19/w2_operational_closure.md`를 신설하고 HANDOFF에서 W2 운영 closure를 완료 처리했다.
+
+### Issues found
+
+- **Compose Bake panic**: Compose v2.40.2 기본 Bake 경로가 내부 slice-bounds panic을 냈다. source 결함이 아니며 기존 전례와 같은 `COMPOSE_BAKE=false`로 동일 image build가 성공했다.
+- **경량 compose smoke 지시 정밀도**: base compose application은 Chroma/embedding/ES 주소를 주입하므로 `--no-deps`로 Mongo/application/frontend만 띄우면 app import 시 Chroma 연결 실패가 난다. W2가 LLM 비의존이라는 계약은 유지되지만, 경량 smoke는 optional backend env를 제외한 일회성 app 또는 full non-LLM dependency stack이 필요하다.
+- **호스트 Node 미달**: 호스트 v22.17.0은 여전히 `react-router@8.2.0`의 `>=22.22.0`보다 낮다. 이번 deployment/test 근거는 지원 범위인 container v22.23.1에서 확보했다.
+- **샌드박스 false skip**: 호스트 Docker 포트가 샌드박스에서 차단되어 Mongo 첫 실행이 33 skipped였다. 권한 있는 동일 명령으로 33 passed/0 skipped를 재도출했고 첫 결과는 판정에서 제외했다.
+
+### Decisions
+
+- 검증 전용 DB와 일회성 컨테이너를 사용해 기존 사용자 데이터/볼륨을 변경하지 않았다.
+- application의 optional backend 환경을 빼는 일회성 runtime을 사용해 W2 image/nginx/API를 검증하되 LLM·embedding·Chroma·ES는 기동하지 않았다.
+- Compose/buildx 및 호스트 Node 정비는 W2 계약 결함이 아닌 운영 hardening으로 분리해 W3 진입을 차단하지 않는다.
+
+### Verification
+
+- 지원 Node: **v22.23.1**, npm **10.9.8**.
+- fresh install: **195 packages**, audit vulnerability **0**.
+- frontend: **143 passed / 10 files**.
+- OpenAPI→TypeScript: 최초 **byte-identical 주장은 재감사에서 반박됨**(fresh 106805 vs committed 106941 bytes). 아래 후속 closure 전까지 conditional이었다.
+- production build: **96 modules**, CSS 17.54 kB(gzip 3.94), JS 284.19 kB(gzip 87.85).
+- Docker image: application/frontend **PASS**(`COMPOSE_BAKE=false` 우회).
+- live Mongo: **33 passed / 0 skipped**(fallback+transaction).
+- Chrome overview DOM: `required_missing=[]`, `pending_body_leaked=[]`, `deep_link_rendered=True`.
+- 상세 명령·근거·판정: `docs/verifications/2026-07-19/w2_operational_closure.md` — 최초 PASS 주장은 정정, 독립 재감사 conditional 뒤 아래 B1/B2 closure로 최종 PASS.
+
+### Next steps
+
+- W2 운영 closure가 끝났으므로 W3 ordered unit/explicit Writing intent를 착수한다.
+- 호스트 Node upgrade와 Compose/buildx 정비는 별도 운영 hardening으로 처리한다.
+
+---
+
+## Task — W2 운영 closure 독립 재감사 B1/B2 보강
+
+### Goals
+
+- `w2_operational_closure_audit.md`의 전체 schema 재현 불가와 fresh gen→build break를 직접 재현한다.
+- 승인된 Writing C0 계약과 git precedent에서 정렬 방향을 재도출하고 최소 변경으로 gen:api 재현성을 복구한다.
+- 잘못된 최초 검증 주장과 현재 상태 문서를 투명하게 정정한다.
+
+### User Decisions and Rationale
+
+- 사용자는 독립 재감사 기록을 제시하고 보강 가능한 부분을 보강하도록 요청했다. 재감사가 제시한 두 옵션 중 방향을 임의 선택하지 않고 먼저 정본과 이력을 확인했다.
+- 확인 결과 `-Input/-Output`은 승인된 공개 literal이 아니라 W2 커밋에서만 생긴 generator artifact였다. C0의 승인 계약은 성공/partial envelope를 OpenAPI 생성 타입으로 소비하는 것이고, W2 직전과 현재 app 모두 단일 `WritingCandidatePayload`/`WritingGatePayload`를 낸다. 따라서 owner-level fork가 아니라 정본/precedent로 답할 수 있는 drift로 판정해 옵션 (b)(현재 app에 schema/client 정렬)를 적용했다.
+
+### Completed work
+
+- **red 재현**: fresh `openapi.json`에서 tracked `schema.d.ts`를 재생성하자 `client.ts`의 `WritingCandidatePayload-Output`/`WritingGatePayload-Output` 두 참조가 TS2339로 실패했고, 그 결과 WritingPanel의 finding callback 네 곳이 implicit-any로 연쇄 실패했다.
+- **최소 정렬**: generated `schema.d.ts`를 현재 app의 단일 component 출력으로 갱신하고, client alias 두 곳을 `WritingCandidatePayload`/`WritingGatePayload`로 복원했다. backend/public payload/runtime 동작은 변경하지 않았다.
+- **재현성 확인**: 같은 fresh `openapi.json`을 지원 Node/openapi-typescript 7.13.0으로 두 번째 생성해 tracked schema와 byte-identical임을 확인했다.
+- **기록 정정**: `w2_operational_closure.md`에 최초 PASS→재감사 conditional→B1/B2 closure→최종 PASS의 시간 순서를 명시했다. 독립 재감사 기록은 감사 artifact라 수정하지 않았다. HANDOFF도 conditional과 closure를 함께 반영했다.
+- **재감사 H1 정리**: 검증 전용 `ai_writte_system-frontend-w2-verify` image(377MB)를 최종 지원 Node 검증 후 삭제했다. application/frontend 제품 image는 유지했다.
+
+### Issues found
+
+- **B1 확인**: 최초 운영 기록의 전체 `schema.d.ts` byte-identical 주장은 사실이 아니었다. 재감사의 106805/106941 bytes 차이와 Writing component drift를 직접 확인했다.
+- **B2 확인**: stale generated file을 현재 app에 맞춰 갱신하면 기존 client가 실제로 build를 깨뜨렸다. green bar는 stale schema를 사용한 결과였고 gen:api 재현성을 증명하지 못했다.
+- **환경성 테스트 강제 종료**: Windows bind mount 위의 Node 컨테이너 테스트가 로그 없이 종료됐다. 현재 source를 build-stage image 내부 `/app`에 복사한 뒤 같은 지원 Node에서 재실행해 143/143을 확보했다. 코드 실패 근거로 사용하지 않았다.
+- **비차단 생성환경 차이**: FastAPI 허용 범위가 넓어 host/application image가 일부 OpenAPI 표현을 다르게 낸다. 이번 blocker의 `-Input/-Output` 부재는 두 환경에서 동일하지만, 장기 재현성은 생성환경 고정 후보로 남는다.
+
+### Decisions
+
+- `-Input/-Output` generator 이름을 새 public contract로 승격시키지 않았다. 의미적으로 같은 단일 Pydantic model을 app authority로 유지하고 frontend generated artifact/alias만 정렬했다.
+- 새 CI/생성 컨테이너 도입이나 FastAPI pin은 이번 blocking closure보다 범위가 크므로 비차단 hardening으로 남겼다.
+- 독립 재감사 기록은 수정하지 않고, 잘못된 피감사 기록과 HANDOFF만 정정했다.
+
+### Verification
+
+- red: fresh gen 후 `client.ts:67,69` **TS2339 2건** + 파생 TS7006 4건.
+- schema determinism: 같은 fresh input의 두 번째 openapi-typescript 생성물과 tracked `schema.d.ts` **byte-identical**.
+- focused backend PB/SC + Writing envelope: **27 passed / 5 subtests**.
+- 지원 Node v22.23.1 frontend: **143 passed / 10 files**.
+- production build: **96 modules**, CSS 17.54 kB(gzip 3.94), JS 284.19 kB(gzip 87.85).
+- 프로젝트 exact pipeline `npm run gen:api && npm run build`: PASS.
+- 검증 전용 image: 삭제 완료.
+
+### Next steps
+
+- 재감사 합격 조건 B1/B2가 모두 닫혔으므로 W3를 착수할 수 있다.
+- OpenAPI 생성환경 pin/CI check는 실제 CI 또는 dependency 재현성 정비 trigger에서 별도 처리한다.
