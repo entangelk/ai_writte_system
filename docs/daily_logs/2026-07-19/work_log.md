@@ -375,10 +375,44 @@
 
 ### Verification
 
-- `python3 -m pytest tests/test_writing_accept.py::WritingIntentInMemoryRollbackTest tests/test_core_sot_mongo.py -q` → **1 passed / 54 skipped(Mongo-gated)**.
-- backend full → **1181 passed / 73 skipped / 297 subtests**(H1은 기존 테스트에 단정 추가라 수치 불변).
+- `python3 -m pytest tests/test_writing_accept.py::WritingIntentInMemoryRollbackTest tests/test_core_sot_mongo.py -q` → **1 passed / 54 skipped(Mongo-gated)** (Mongo 미기동 시).
+- backend full(Mongo 미기동) → **1181 passed / 73 skipped / 297 subtests**(H1은 기존 테스트에 단정 추가라 수치 불변).
 
 ### Next steps
 
-- Docker/replica-set 머신에서 WI-11의 명시적 6-surface pin이 실 transaction에서 통과하는지 확인한다.
+- ~~Docker/replica-set 머신에서 WI-11의 명시적 6-surface pin이 실 transaction에서 통과하는지 확인한다.~~ → 아래 live 검증에서 완료.
 - W4 ordered-latest export 착수.
+
+---
+
+## Task — WI-11 + Mongo 통합 live replica-set 실증 (이 머신 = 풀테스트 머신)
+
+### Goals
+
+- 앞 task가 "테스트 머신에 남김"으로 처리한 WI-11 six-surface transaction rollback을 이 머신에서 실제 replica-set Mongo로 실행해 닫는다.
+
+### User Decisions and Rationale
+
+- 사용자가 이 머신이 Docker/Mongo를 갖춘 **풀테스트 머신**임을 지적했다. 앞 task는 서브 머신 컨텍스트(Docker CLI 없음)를 그대로 넘겨짚어 Mongo를 시도조차 하지 않고 skip으로 남긴 잘못이 있었다. 실제로 이 머신엔 `docker 28.5.1`/`compose v2.40.2`가 있어 replica-set을 띄울 수 있었다.
+
+### Completed work
+
+- `COMPOSE_BAKE=false docker compose up -d mongo`로 단일 노드 replica-set(`rs0`)을 기동했다. RS member가 `mongo:27017`로 광고되고 호스트 `/etc/hosts` 수정 권한이 없어, 검증 동안만 RS member host를 `localhost:27017`로 `rs.reconfig`한 뒤 호스트 pytest가 트랜잭션까지 붙는 것을 확인했다.
+- `CORE_SOT_TEST_MONGO_URI=mongodb://localhost:27017/?replicaSet=rs0`로 실행:
+  - `WritingIntentMongoTest`(WI-11 포함) → **17 passed / 0 skipped**. WI-11 `test_start_next_transaction_rolls_back_entire_write_set`가 실 transaction에서 6-surface(draft/position·version·snapshot·block·receipt) 명시 pin으로 통과.
+  - `tests/test_core_sot_mongo.py` 전체 → **54 passed / 0 skipped**.
+  - backend full(Mongo 포함, ignore 없음) → **1254 passed / 4 skipped / 297 subtests**. 남은 4 skip은 W3와 무관한 live Chroma 1 + Elasticsearch 3(패키지 미설치)뿐이다.
+- 검증 후 RS member host를 `mongo:27017`로 원복(compose 스택 정상 동작 보장)하고 mongo 컨테이너를 정지해 머신을 원래(미기동) 상태로 되돌렸다. data volume은 보존.
+
+### Issues found
+
+- 앞 task의 "Mongo-gated 73 skipped"는 이 머신에서는 인프라 부재가 아니라 **Mongo 미기동** 때문이었다. 기동하면 73→4로 줄고 전부 통과한다. skip 수를 인프라 한계로 오인해 시도하지 않은 것이 실책이다.
+
+### Verification
+
+- WI-11 + Mongo core sot: **17 / 54 passed, 0 skipped**(live replica-set).
+- backend full(Mongo 포함): **1254 passed / 4 skipped(Chroma 1 + ES 3, W3 무관) / 297 subtests**.
+
+### Next steps
+
+- W4 ordered-latest export 착수. W3는 live Mongo까지 포함해 전부 닫혔다.
