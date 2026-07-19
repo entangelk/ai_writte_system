@@ -38,6 +38,7 @@ class _FakeCollection:
 def _repo_with_indexes(*, fail_on_name: str | None = None):
     repo = object.__new__(MongoCoreSotRepository)
     repo._versions = _FakeCollection(fail_on_name=fail_on_name)
+    repo._project_briefs = _FakeCollection(fail_on_name=fail_on_name)
     repo._blocks = _FakeCollection(fail_on_name=fail_on_name)
     repo._source_refs = _FakeCollection(fail_on_name=fail_on_name)
     return repo
@@ -72,6 +73,19 @@ class MongoIndexSetupTests(unittest.TestCase):
                     [("snapshot_id", 1), ("block_index", 1)],
                     {"name": "blocks_by_snapshot"},
                 )
+            ],
+        )
+        self.assertEqual(
+            repo._project_briefs.calls,
+            [
+                (
+                    [("project_id", 1), ("version_number", 1)],
+                    {"unique": True, "name": "uniq_project_brief_version"},
+                ),
+                (
+                    [("project_id", 1), ("idempotency_key", 1)],
+                    {"unique": True, "name": "uniq_project_brief_request"},
+                ),
             ],
         )
         self.assertEqual(

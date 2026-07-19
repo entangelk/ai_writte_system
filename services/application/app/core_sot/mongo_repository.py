@@ -33,11 +33,15 @@ from services.application.app.core_sot.models import (
     Draft,
     DraftVersion,
     Project,
+    ProjectBriefVersion,
     SourceBlock,
     SourceRef,
     SourceSnapshot,
 )
-from services.application.app.core_sot.repository import DuplicateSaveRequest
+from services.application.app.core_sot.repository import (
+    DuplicateProjectBriefRequest,
+    DuplicateSaveRequest,
+)
 
 DEFAULT_DB_NAME = "ai_writing_system"
 
@@ -60,6 +64,7 @@ class MongoCoreSotRepository:
         self._db = client[db_name]
         self._use_transactions = use_transactions
         self._projects = self._db["projects"]
+        self._project_briefs = self._db["project_brief_versions"]
         self._drafts = self._db["drafts"]
         self._versions = self._db["draft_versions"]
         self._snapshots = self._db["source_snapshots"]
@@ -92,6 +97,16 @@ class MongoCoreSotRepository:
                 unique=True,
                 name="uniq_save_request",
             )
+            self._project_briefs.create_index(
+                [("project_id", ASCENDING), ("version_number", ASCENDING)],
+                unique=True,
+                name="uniq_project_brief_version",
+            )
+            self._project_briefs.create_index(
+                [("project_id", ASCENDING), ("idempotency_key", ASCENDING)],
+                unique=True,
+                name="uniq_project_brief_request",
+            )
             self._blocks.create_index(
                 [("snapshot_id", ASCENDING), ("block_index", ASCENDING)],
                 name="blocks_by_snapshot",
@@ -114,6 +129,9 @@ class MongoCoreSotRepository:
     # -- identifier generation ------------------------------------------------
 
     def next_project_id(self) -> str:
+        return str(ObjectId())
+
+    def next_project_brief_version_id(self) -> str:
         return str(ObjectId())
 
     def next_draft_id(self) -> str:
@@ -142,6 +160,43 @@ class MongoCoreSotRepository:
     def list_projects(self) -> tuple[Project, ...]:
         cursor = self._projects.find().sort("_id", ASCENDING)
         return tuple(_to_project(doc) for doc in cursor)
+
+    def get_current_project_brief(
+        self, project_id: str
+    ) -> ProjectBriefVersion | None:
+        doc = self._project_briefs.find_one(
+            {"project_id": project_id}, sort=[("version_number", -1)]
+        )
+        return _to_project_brief(doc) if doc else None
+
+    def get_project_brief_version(
+        self, version_id: str
+    ) -> ProjectBriefVersion | None:
+        doc = self._project_briefs.find_one({"_id": version_id})
+        return _to_project_brief(doc) if doc else None
+
+    def list_project_brief_versions(
+        self, project_id: str
+    ) -> tuple[ProjectBriefVersion, ...]:
+        cursor = self._project_briefs.find({"project_id": project_id}).sort(
+            "version_number", ASCENDING
+        )
+        return tuple(_to_project_brief(doc) for doc in cursor)
+
+    def find_project_brief_request(
+        self, project_id: str, idempotency_key: str
+    ) -> str | None:
+        doc = self._project_briefs.find_one(
+            {"project_id": project_id, "idempotency_key": idempotency_key},
+            {"_id": 1},
+        )
+        return doc["_id"] if doc else None
+
+    def record_project_brief(self, brief: ProjectBriefVersion) -> None:
+        try:
+            self._project_briefs.insert_one(_project_brief_doc(brief))
+        except DuplicateKeyError as exc:
+            raise DuplicateProjectBriefRequest(brief.idempotency_key) from exc
 
     def get_draft(self, draft_id: str) -> Draft | None:
         doc = self._drafts.find_one({"_id": draft_id})
@@ -299,6 +354,34 @@ def _project_doc(project: Project) -> dict:
 
 def _to_project(doc: dict) -> Project:
     return Project(id=doc["_id"], name=doc["name"], archived=doc["archived"])
+
+
+def _project_brief_doc(brief: ProjectBriefVersion) -> dict:
+    return {
+        "_id": brief.id,
+        "project_id": brief.project_id,
+        "version_number": brief.version_number,
+        "premise": brief.premise,
+        "genre": brief.genre,
+        "tone": brief.tone,
+        "pov": brief.pov,
+        "constraints": list(brief.constraints),
+        "idempotency_key": brief.idempotency_key,
+    }
+
+
+def _to_project_brief(doc: dict) -> ProjectBriefVersion:
+    return ProjectBriefVersion(
+        id=doc["_id"],
+        project_id=doc["project_id"],
+        version_number=doc["version_number"],
+        premise=doc["premise"],
+        genre=doc["genre"],
+        tone=doc["tone"],
+        pov=doc["pov"],
+        constraints=tuple(doc["constraints"]),
+        idempotency_key=doc["idempotency_key"],
+    )
 
 
 def _draft_doc(draft: Draft) -> dict:

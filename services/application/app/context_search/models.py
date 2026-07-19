@@ -15,6 +15,7 @@ from services.application.app.analysis.models import AnalysisCandidateType
 from services.application.app.indexing.models import IndexPointer
 from services.application.app.memory.models import MemoryStatus
 from services.application.app.memory.scope import MemoryScope
+from services.application.app.core_sot.models import ProjectBriefVersion
 
 
 CONTEXT_PACKAGE_STATUS_CANDIDATE = "candidate"
@@ -227,6 +228,9 @@ class ContextPackage:
     trace: ContextSearchTrace | None = None
     prior_memories: tuple[PriorMemoryItem, ...] = ()
     status: str = CONTEXT_PACKAGE_STATUS_CANDIDATE
+    # W2: current append-only ProjectBrief version is a separate authoritative
+    # item, never flattened into retrieved memory or candidate evidence.
+    project_brief: ProjectBriefVersion | None = None
 
 
 @dataclass(frozen=True, slots=True)

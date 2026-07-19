@@ -72,6 +72,21 @@ def format_context_package(
             + "\n".join(f"- {rule}" for rule in package.constraints)
             + "\n</constraints>"
         )
+    if package.project_brief is not None:
+        brief = package.project_brief
+        brief_lines = [
+            f"- premise: {brief.premise}" if brief.premise is not None else "",
+            f"- genre: {brief.genre}" if brief.genre is not None else "",
+            f"- tone: {brief.tone}" if brief.tone is not None else "",
+            f"- pov: {brief.pov}" if brief.pov is not None else "",
+            *(f"- constraint: {rule}" for rule in brief.constraints),
+        ]
+        populated = [line for line in brief_lines if line]
+        sections.append(
+            f'<project_brief authority="canonical" version="{brief.version_number}">\n'
+            + ("\n".join(populated) if populated else "(empty)")
+            + "\n</project_brief>"
+        )
     if package.macro_items:
         sections.append(
             "<macro_context>\n"

@@ -16,6 +16,8 @@ from services.application.app.core_sot.models import (
     DraftVersionDetail,
     DraftVersionExport,
     Project,
+    ProjectBriefVersion,
+    PutProjectBriefResult,
     SaveDraftResult,
     SourceBlock,
     SourceRef,
@@ -24,6 +26,7 @@ from services.application.app.core_sot.models import (
 )
 from services.application.app.core_sot.repository import (
     CoreSotRepository,
+    DuplicateProjectBriefRequest,
     DuplicateSaveRequest,
 )
 from services.application.app.core_sot.splitter import (
@@ -53,6 +56,10 @@ class UnsupportedExportFormat(CoreSotError):
     pass
 
 
+class StaleProjectBriefBase(CoreSotError):
+    pass
+
+
 _EXPORT_FORMATS: dict[str, tuple[str, str]] = {
     # format -> (content_type, filename extension)
     "txt": ("text/plain; charset=utf-8", "txt"),
@@ -69,11 +76,15 @@ class InMemoryCoreSotRepository:
 
     def __init__(self) -> None:
         self._project_seq = 0
+        self._project_brief_version_seq = 0
         self._draft_seq = 0
         self._version_seq = 0
         self._snapshot_seq = 0
         self._source_ref_seq = 0
         self.projects: dict[str, Project] = {}
+        self.project_brief_versions: dict[str, ProjectBriefVersion] = {}
+        self._project_brief_ids_by_project: dict[str, list[str]] = {}
+        self._project_brief_request_index: dict[tuple[str, str], str] = {}
         self.drafts: dict[str, Draft] = {}
         self.versions: dict[str, DraftVersion] = {}
         self.snapshots: dict[str, SourceSnapshot] = {}
@@ -85,6 +96,10 @@ class InMemoryCoreSotRepository:
     def next_project_id(self) -> str:
         self._project_seq += 1
         return f"project-{self._project_seq}"
+
+    def next_project_brief_version_id(self) -> str:
+        self._project_brief_version_seq += 1
+        return f"project-brief-version-{self._project_brief_version_seq}"
 
     def next_draft_id(self) -> str:
         self._draft_seq += 1
@@ -119,6 +134,39 @@ class InMemoryCoreSotRepository:
 
     def list_projects(self) -> tuple[Project, ...]:
         return tuple(self.projects.values())
+
+    def get_current_project_brief(
+        self, project_id: str
+    ) -> ProjectBriefVersion | None:
+        ids = self._project_brief_ids_by_project.get(project_id, ())
+        return self.project_brief_versions[ids[-1]] if ids else None
+
+    def get_project_brief_version(
+        self, version_id: str
+    ) -> ProjectBriefVersion | None:
+        return self.project_brief_versions.get(version_id)
+
+    def list_project_brief_versions(
+        self, project_id: str
+    ) -> tuple[ProjectBriefVersion, ...]:
+        return tuple(
+            self.project_brief_versions[version_id]
+            for version_id in self._project_brief_ids_by_project.get(project_id, ())
+        )
+
+    def find_project_brief_request(
+        self, project_id: str, idempotency_key: str
+    ) -> str | None:
+        return self._project_brief_request_index.get((project_id, idempotency_key))
+
+    def record_project_brief(self, brief: ProjectBriefVersion) -> None:
+        self.project_brief_versions[brief.id] = brief
+        self._project_brief_ids_by_project.setdefault(brief.project_id, []).append(
+            brief.id
+        )
+        self._project_brief_request_index[
+            (brief.project_id, brief.idempotency_key)
+        ] = brief.id
 
     def get_draft(self, draft_id: str) -> Draft | None:
         return self.drafts.get(draft_id)
@@ -233,6 +281,80 @@ class CoreSotService:
 
     def list_projects(self) -> tuple[Project, ...]:
         return self._repo.list_projects()
+
+    def get_project_brief(self, *, project_id: str) -> ProjectBriefVersion | None:
+        self._require_project(project_id)
+        return self._repo.get_current_project_brief(project_id)
+
+    def get_project_brief_version(
+        self, *, project_id: str, version_id: str
+    ) -> ProjectBriefVersion:
+        self._require_project(project_id)
+        brief = self._repo.get_project_brief_version(version_id)
+        if brief is None or brief.project_id != project_id:
+            raise NotFound("project brief version not found")
+        return brief
+
+    def list_project_brief_versions(
+        self, *, project_id: str
+    ) -> tuple[ProjectBriefVersion, ...]:
+        self._require_project(project_id)
+        return self._repo.list_project_brief_versions(project_id)
+
+    def put_project_brief(
+        self,
+        *,
+        project_id: str,
+        base_version_id: str | None,
+        idempotency_key: str,
+        premise: str | None,
+        genre: str | None,
+        tone: str | None,
+        pov: str | None,
+        constraints: tuple[str, ...],
+    ) -> PutProjectBriefResult:
+        if not idempotency_key:
+            raise CoreSotError("idempotency_key is required")
+        project = self._require_project(project_id)
+        if project.archived:
+            raise Archived("project is archived")
+
+        replay_id = self._repo.find_project_brief_request(
+            project_id, idempotency_key
+        )
+        if replay_id is not None:
+            replay = self._repo.get_project_brief_version(replay_id)
+            assert replay is not None
+            return PutProjectBriefResult(brief=replay, idempotent_replay=True)
+
+        current = self._repo.get_current_project_brief(project_id)
+        expected_base = current.id if current is not None else None
+        if base_version_id != expected_base:
+            raise StaleProjectBriefBase("project brief base is stale")
+
+        brief = ProjectBriefVersion(
+            id=self._repo.next_project_brief_version_id(),
+            project_id=project_id,
+            version_number=(current.version_number + 1 if current else 1),
+            premise=premise,
+            genre=genre,
+            tone=tone,
+            pov=pov,
+            constraints=constraints,
+            idempotency_key=idempotency_key,
+        )
+        try:
+            self._repo.record_project_brief(brief)
+        except DuplicateProjectBriefRequest:
+            replay_id = self._repo.find_project_brief_request(
+                project_id, idempotency_key
+            )
+            if replay_id is None:
+                raise StaleProjectBriefBase("project brief base is stale")
+            replay = self._repo.get_project_brief_version(replay_id)
+            assert replay is not None
+            return PutProjectBriefResult(brief=replay, idempotent_replay=True)
+        return PutProjectBriefResult(brief=brief, idempotent_replay=False)
 
     def get_draft(self, *, project_id: str, draft_id: str) -> Draft:
         self._require_project(project_id)

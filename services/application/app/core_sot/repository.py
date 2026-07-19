@@ -14,6 +14,7 @@ from services.application.app.core_sot.models import (
     Draft,
     DraftVersion,
     Project,
+    ProjectBriefVersion,
     SourceBlock,
     SourceRef,
     SourceSnapshot,
@@ -29,10 +30,16 @@ class DuplicateSaveRequest(Exception):
     """
 
 
+class DuplicateProjectBriefRequest(Exception):
+    """Raised when a ProjectBrief version loses a unique-index race."""
+
+
 class CoreSotRepository(Protocol):
     """Storage operations the Core SOT service requires."""
 
     def next_project_id(self) -> str: ...
+
+    def next_project_brief_version_id(self) -> str: ...
 
     def next_draft_id(self) -> str: ...
 
@@ -47,6 +54,24 @@ class CoreSotRepository(Protocol):
     def put_project(self, project: Project) -> None: ...
 
     def list_projects(self) -> tuple[Project, ...]: ...
+
+    def get_current_project_brief(
+        self, project_id: str
+    ) -> ProjectBriefVersion | None: ...
+
+    def get_project_brief_version(
+        self, version_id: str
+    ) -> ProjectBriefVersion | None: ...
+
+    def list_project_brief_versions(
+        self, project_id: str
+    ) -> tuple[ProjectBriefVersion, ...]: ...
+
+    def find_project_brief_request(
+        self, project_id: str, idempotency_key: str
+    ) -> str | None: ...
+
+    def record_project_brief(self, brief: ProjectBriefVersion) -> None: ...
 
     def get_draft(self, draft_id: str) -> Draft | None: ...
 

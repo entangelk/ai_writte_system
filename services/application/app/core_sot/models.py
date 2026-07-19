@@ -25,6 +25,25 @@ class Project:
 
 
 @dataclass(frozen=True, slots=True)
+class ProjectBriefVersion:
+    id: str
+    project_id: str
+    version_number: int
+    premise: str | None
+    genre: str | None
+    tone: str | None
+    pov: str | None
+    constraints: tuple[str, ...]
+    idempotency_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class PutProjectBriefResult:
+    brief: ProjectBriefVersion
+    idempotent_replay: bool
+
+
+@dataclass(frozen=True, slots=True)
 class Draft:
     id: str
     project_id: str

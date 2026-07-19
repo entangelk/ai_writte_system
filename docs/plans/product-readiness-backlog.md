@@ -64,6 +64,8 @@
 
 2026-07-18 W1 검증 closure 체크포인트: 독립 검증 `verifications/2026-07-18/w1_split_workspace.md`의 cross-Draft dirty 데이터 손실 B1과 회귀 empty cell B2~B6을 SoT v1.7.12에서 닫았다. 같은 SPA navigation pattern과 stale source notice도 함께 보강했다. 원 conditional verdict은 closure 전 commit의 역사로 보존하며 **UX-1은 W2~W4가 남아 In progress 유지**한다.
 
+2026-07-19 W2 종료 체크포인트: SoT v1.7.13에서 append-only ProjectBrief persistence/API/OpenAPI, progressive onboarding·이력 보존 clear, Writing ContextPackage authoritative brief, canonical-only overview+pending 분리를 구현했다. **UX-1은 W3~W4가 남아 In progress 유지**하며 OPS-1·QUAL-1·GATE-1 상태는 W2만으로 바꾸지 않는다.
+
 ```text
 현재
   → A: 원고·에디터·저장·version·export

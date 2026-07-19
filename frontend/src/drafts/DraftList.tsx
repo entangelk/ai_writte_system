@@ -88,9 +88,14 @@ export function DraftList() {
         <h1>{project?.name ?? "프로젝트"}</h1>
         <p>장면이나 장을 원고 단위로 나누어 관리합니다.</p>
         {projectId !== undefined && (
-          <Link className="section-link" to={`/projects/${projectId}/review`}>
-            검토함 →
-          </Link>
+          <div className="section-links">
+            <Link className="section-link" to={`/projects/${projectId}/overview`}>
+              작품 정보·개요 →
+            </Link>
+            <Link className="section-link" to={`/projects/${projectId}/review`}>
+              검토함 →
+            </Link>
+          </div>
         )}
       </header>
 

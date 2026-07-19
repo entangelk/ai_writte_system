@@ -16,6 +16,8 @@ isolated and leave no residue.
 import os
 import unittest
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 # pymongo (and the Mongo adapter that imports it) is an optional dependency for
 # the test suite: when it is absent these integration tests skip rather than
@@ -44,6 +46,7 @@ from services.application.app.core_sot.service import (
     Archived,
     CoreSotService,
     NotFound,
+    StaleProjectBriefBase,
 )
 from services.application.app.core_sot.splitter import (
     content_hash,
@@ -113,6 +116,92 @@ class _MongoContractMixin:
         project = self.service.create_project(name="Novel")
         draft = self.service.create_draft(project_id=project.id, title="Episode 1")
         return project, draft
+
+    def test_project_brief_versions_persist_in_order_and_replay(self):
+        project = self.service.create_project(name="Novel")
+        first = self.service.put_project_brief(
+            project_id=project.id,
+            base_version_id=None,
+            idempotency_key="brief-1",
+            premise="First",
+            genre=None,
+            tone=None,
+            pov=None,
+            constraints=(),
+        )
+        second = self.service.put_project_brief(
+            project_id=project.id,
+            base_version_id=first.brief.id,
+            idempotency_key="brief-2",
+            premise="Second",
+            genre="Mystery",
+            tone=None,
+            pov=None,
+            constraints=("Keep the secret",),
+        )
+        replay = self.service.put_project_brief(
+            project_id=project.id,
+            base_version_id=None,
+            idempotency_key="brief-2",
+            premise="must not replace",
+            genre=None,
+            tone=None,
+            pov=None,
+            constraints=(),
+        )
+
+        self.assertTrue(replay.idempotent_replay)
+        self.assertEqual(replay.brief, second.brief)
+        self.assertEqual(
+            self.service.list_project_brief_versions(project_id=project.id),
+            (first.brief, second.brief),
+        )
+
+    def test_concurrent_project_brief_version_collision_has_one_success_one_stale(self):
+        """Live Mongo guard for W2 verification H3.
+
+        Both writers observe the same empty base. The unique project/version
+        index permits exactly one version 1; the losing different key is a
+        stale conflict, never an idempotent replay.
+        """
+
+        project = self.service.create_project(name="Concurrent brief")
+        original_current = self.repo.get_current_project_brief
+        both_read_base = Barrier(2)
+
+        def synchronized_current(project_id):
+            current = original_current(project_id)
+            both_read_base.wait(timeout=5)
+            return current
+
+        self.repo.get_current_project_brief = synchronized_current
+
+        def put(key):
+            try:
+                return self.service.put_project_brief(
+                    project_id=project.id,
+                    base_version_id=None,
+                    idempotency_key=key,
+                    premise=key,
+                    genre=None,
+                    tone=None,
+                    pov=None,
+                    constraints=(),
+                )
+            except StaleProjectBriefBase as exc:
+                return exc
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = tuple(executor.map(put, ("brief-a", "brief-b")))
+
+        successes = [result for result in results if not isinstance(result, Exception)]
+        stale = [result for result in results if isinstance(result, StaleProjectBriefBase)]
+        self.assertEqual(len(successes), 1)
+        self.assertEqual(len(stale), 1)
+        self.assertFalse(successes[0].idempotent_replay)
+        self.assertEqual(
+            len(self.service.list_project_brief_versions(project_id=project.id)), 1
+        )
 
     def test_save_persists_and_reconstructs_snapshot_blocks_and_version(self):
         project, draft = self._project_and_draft()

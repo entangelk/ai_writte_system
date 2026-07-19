@@ -624,7 +624,18 @@ class ContextSearchService:
                 steps=tuple(step_traces),
                 budget_excluded=budget_excluded,
             ),
+            project_brief=self._load_project_brief(request.project_id),
         )
+
+    def _load_project_brief(self, project_id: str):
+        # The HTTP boundary already requires the project. Some lower-level
+        # retrieval seam tests intentionally use a project-less fake Core SOT;
+        # preserve that established seam while treating an absent brief as no
+        # authoritative item. Real cross-project reads still cannot reach here.
+        try:
+            return self._core_sot.get_project_brief(project_id=project_id)
+        except NotFound:
+            return None
 
     def _validate_request(self, request: ContextSearchRequest) -> None:
         if not request.needs:

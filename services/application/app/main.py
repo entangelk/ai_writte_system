@@ -7,7 +7,7 @@ from typing import Annotated, Protocol
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from services.application.app.analysis.extractor import (
     AnalysisExtractionError,
@@ -193,6 +193,7 @@ from services.application.app.core_sot.service import (
     CoreSotService,
     InMemoryCoreSotRepository,
     NotFound,
+    StaleProjectBriefBase,
     UnsupportedExportFormat,
 )
 from services.application.app.indexing.service import (
@@ -913,6 +914,45 @@ class ProjectListResponse(BaseModel):
     projects: list[ProjectPayload]
 
 
+NonBlankBriefString = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, pattern=r"\S")
+]
+
+
+class ProjectBriefVersionPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: NonBlankBriefString
+    project_id: NonBlankBriefString
+    version_number: Annotated[int, Field(ge=1)]
+    premise: NonBlankBriefString | None
+    genre: NonBlankBriefString | None
+    tone: NonBlankBriefString | None
+    pov: NonBlankBriefString | None
+    constraints: list[NonBlankBriefString] = Field(
+        json_schema_extra={"uniqueItems": True}
+    )
+
+
+class ProjectBriefGetResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    brief: ProjectBriefVersionPayload | None
+
+
+class ProjectBriefPutResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    brief: ProjectBriefVersionPayload
+    idempotent_replay: bool
+
+
+class ProjectBriefVersionListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    versions: list[ProjectBriefVersionPayload]
+
+
 class DraftPayload(BaseModel):
     id: str
     project_id: str
@@ -1020,6 +1060,27 @@ NonBlankName = Annotated[str, StringConstraints(strip_whitespace=True, min_lengt
 
 class CreateProjectRequest(BaseModel):
     name: NonBlankName
+
+
+class PutProjectBriefRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    base_version_id: NonBlankBriefString | None
+    idempotency_key: NonBlankBriefString
+    premise: NonBlankBriefString | None
+    genre: NonBlankBriefString | None
+    tone: NonBlankBriefString | None
+    pov: NonBlankBriefString | None
+    constraints: list[NonBlankBriefString] = Field(
+        json_schema_extra={"uniqueItems": True}
+    )
+
+    @field_validator("constraints")
+    @classmethod
+    def reject_normalized_duplicates(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("constraints must not contain duplicates")
+        return value
 
 
 class CreateAnalysisJobRequest(BaseModel):
@@ -1323,6 +1384,18 @@ def create_app(
     def _project_payload(project) -> dict[str, object]:
         return {"id": project.id, "name": project.name, "archived": project.archived}
 
+    def _project_brief_payload(brief) -> dict[str, object]:
+        return {
+            "id": brief.id,
+            "project_id": brief.project_id,
+            "version_number": brief.version_number,
+            "premise": brief.premise,
+            "genre": brief.genre,
+            "tone": brief.tone,
+            "pov": brief.pov,
+            "constraints": list(brief.constraints),
+        }
+
     def _draft_payload(draft) -> dict[str, object]:
         return {
             "id": draft.id,
@@ -1448,6 +1521,70 @@ def create_app(
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return _project_payload(project)
+
+    @app.get(
+        "/projects/{project_id}/brief", response_model=ProjectBriefGetResponse
+    )
+    async def get_project_brief(project_id: str) -> dict[str, object]:
+        try:
+            brief = core_sot.get_project_brief(project_id=project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {
+            "brief": _project_brief_payload(brief) if brief is not None else None
+        }
+
+    @app.put(
+        "/projects/{project_id}/brief", response_model=ProjectBriefPutResponse
+    )
+    async def put_project_brief(
+        project_id: str, request: PutProjectBriefRequest
+    ) -> dict[str, object]:
+        try:
+            result = core_sot.put_project_brief(
+                project_id=project_id,
+                base_version_id=request.base_version_id,
+                idempotency_key=request.idempotency_key,
+                premise=request.premise,
+                genre=request.genre,
+                tone=request.tone,
+                pov=request.pov,
+                constraints=tuple(request.constraints),
+            )
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (Archived, StaleProjectBriefBase) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {
+            "brief": _project_brief_payload(result.brief),
+            "idempotent_replay": result.idempotent_replay,
+        }
+
+    @app.get(
+        "/projects/{project_id}/brief/versions",
+        response_model=ProjectBriefVersionListResponse,
+    )
+    async def list_project_brief_versions(project_id: str) -> dict[str, object]:
+        try:
+            versions = core_sot.list_project_brief_versions(project_id=project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"versions": [_project_brief_payload(brief) for brief in versions]}
+
+    @app.get(
+        "/projects/{project_id}/brief/versions/{version_id}",
+        response_model=ProjectBriefGetResponse,
+    )
+    async def get_project_brief_version(
+        project_id: str, version_id: str
+    ) -> dict[str, object]:
+        try:
+            brief = core_sot.get_project_brief_version(
+                project_id=project_id, version_id=version_id
+            )
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"brief": _project_brief_payload(brief)}
 
     @app.patch("/projects/{project_id}", response_model=ProjectPayload)
     async def rename_project(
@@ -2461,6 +2598,11 @@ def create_app(
                 ],
                 "constraints": list(package.constraints),
                 "do_not_use": list(package.do_not_use),
+                "project_brief": (
+                    _project_brief_payload(package.project_brief)
+                    if package.project_brief is not None
+                    else None
+                ),
                 "trace": _context_trace_payload(package.trace),
             },
             "gate": {

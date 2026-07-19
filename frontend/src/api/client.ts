@@ -48,6 +48,12 @@ async function readDetail(response: Response): Promise<string> {
 export type CreateProjectRequest = components["schemas"]["CreateProjectRequest"];
 export type Project = components["schemas"]["ProjectPayload"];
 export type ProjectListResponse = components["schemas"]["ProjectListResponse"];
+export type ProjectBrief = components["schemas"]["ProjectBriefVersionPayload"];
+export type ProjectBriefGetResponse = components["schemas"]["ProjectBriefGetResponse"];
+export type PutProjectBriefRequest = components["schemas"]["PutProjectBriefRequest"];
+export type ProjectBriefPutResponse = components["schemas"]["ProjectBriefPutResponse"];
+export type ProjectBriefVersionListResponse =
+  components["schemas"]["ProjectBriefVersionListResponse"];
 export type CreateDraftRequest = components["schemas"]["CreateDraftRequest"];
 export type Draft = components["schemas"]["DraftPayload"];
 export type DraftListResponse = components["schemas"]["DraftListResponse"];
@@ -58,9 +64,9 @@ export type DraftVersionExport = components["schemas"]["DraftVersionExportRespon
 export type SaveDraftRequest = components["schemas"]["SaveDraftRequest"];
 export type SaveDraftResponse = components["schemas"]["SaveDraftResponse"];
 export type WritingGenerateRequest = components["schemas"]["WritingGenerateRequest"];
-export type WritingCandidate = components["schemas"]["WritingCandidatePayload"];
+export type WritingCandidate = components["schemas"]["WritingCandidatePayload-Output"];
 export type WritingGateRequest = components["schemas"]["WritingGateRequest"];
-export type WritingGate = components["schemas"]["WritingGatePayload"];
+export type WritingGate = components["schemas"]["WritingGatePayload-Output"];
 export type WritingGateFinding = components["schemas"]["WritingGateFindingPayload"];
 export type WritingReviseRequest = components["schemas"]["WritingReviseRequest"];
 export type WritingReviseGateResponse =
@@ -84,6 +90,42 @@ export function createProject(body: CreateProjectRequest): Promise<Project> {
 
 export function getProject(projectId: string): Promise<Project> {
   return request(`/projects/${projectId}`);
+}
+
+export function getProjectBrief(
+  projectId: string,
+): Promise<ProjectBriefGetResponse> {
+  return request(`/projects/${projectId}/brief`);
+}
+
+export function putProjectBrief(
+  projectId: string,
+  body: PutProjectBriefRequest,
+): Promise<ProjectBriefPutResponse> {
+  return request(`/projects/${projectId}/brief`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export function listProjectBriefVersions(
+  projectId: string,
+): Promise<ProjectBriefVersionListResponse> {
+  return request(`/projects/${projectId}/brief/versions`);
+}
+
+export interface CanonicalMemory {
+  id: string;
+  memory_type: string;
+  status: string;
+  payload: Record<string, unknown>;
+  version: number;
+}
+
+export function listCanonicalMemory(
+  projectId: string,
+): Promise<{ memory: CanonicalMemory[] }> {
+  return request(`/projects/${projectId}/memory`);
 }
 
 export function listDrafts(projectId: string): Promise<DraftListResponse> {

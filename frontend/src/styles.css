@@ -95,6 +95,140 @@ main {
   font-size: clamp(2.5rem, 6vw, 4.7rem);
 }
 
+.section-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1.2rem;
+}
+
+.overview-page {
+  width: min(100%, 62rem);
+}
+
+.overview-section {
+  margin: 0 0 2rem;
+  padding: 1.5rem;
+  border: 1px solid var(--line);
+  background: rgba(251, 248, 241, 0.72);
+}
+
+.overview-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.overview-heading h2 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.75rem;
+  font-weight: 500;
+}
+
+.overview-heading > span,
+.overview-heading > a {
+  color: var(--accent);
+  font-size: 0.78rem;
+}
+
+.brief-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.brief-form label {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.brief-form label:first-child,
+.brief-form label:last-of-type,
+.brief-actions {
+  grid-column: 1 / -1;
+}
+
+.brief-form input,
+.brief-form textarea {
+  width: 100%;
+  padding: 0.75rem;
+  color: var(--ink);
+  background: #fffdf8;
+  border: 1px solid var(--line);
+}
+
+.brief-form textarea {
+  min-height: 5.5rem;
+  resize: vertical;
+}
+
+.brief-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 0.5rem;
+}
+
+.brief-summary {
+  margin: 0;
+}
+
+.brief-summary div {
+  display: grid;
+  grid-template-columns: 5rem 1fr;
+  gap: 1rem;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.brief-summary dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.brief-summary dd {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.memory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.memory-grid li {
+  display: grid;
+  gap: 0.4rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+}
+
+.memory-grid li span {
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.secondary-button {
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+}
+
+.danger-button {
+  color: var(--danger);
+  background: transparent;
+  border: 1px solid rgba(157, 47, 47, 0.35);
+}
+
 .editor-heading {
   margin-bottom: 2rem;
 }
@@ -884,6 +1018,15 @@ main {
   .creation-form {
     grid-template-columns: 1fr;
     gap: 1rem;
+  }
+
+  .brief-form {
+    grid-template-columns: 1fr;
+  }
+
+  .overview-heading {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .form-controls {
