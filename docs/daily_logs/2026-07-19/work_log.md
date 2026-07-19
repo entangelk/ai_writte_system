@@ -545,3 +545,12 @@
 ### Next steps
 
 - 후속(오너 결정): saved publication manifest 정본화(별도 정본, brief 선행) 또는 Deferred 기본 기능(미채택 Writing candidate 영속 — brief 선행). export UI 트랙은 이 슬라이스로 실용 범위를 채웠다.
+
+### 독립 검증 후 보강 (export UI 옵션화, 오너 검증 PASS/조건 없음 뒤)
+
+- 오너 독립 검증(`docs/verifications/2026-07-19/w4_export_ui_options.md`, PASS, mutation 3종으로 bundle-manifest-opt-in·canExport·include_archived clause 실증, 행동 변경 투명성 중심)이 non-blocking 잔존 후보를 남겼다. 판단:
+  - **H2 보강**: combined+manifest 2파일 테스트가 manifest blob만 검증하던 것을 body(first) blob 내용/`content_type`도 단정하도록 강화(두 파일 모두 검증). combined-off 방향은 기존 `downloads).toEqual(["p1.txt"])` over-strict pin이 이미 커버.
+  - **H1 skip(선례)**: `exportingRef`는 user-facing 가드가 disabled(state)이고 in-flight 테스트가 이미 검증, ref는 safety net.
+  - **H-new skip(이미 커버)**: combined manifest-off 방향은 위 exact-equality pin이 잠금.
+  - **H5 known limitation(기록만)**: version 없는 non-archived draft만 있는 project는 `canExport=true`(비보관이므로)지만 backend가 version 없는 unit을 skip해 빈 body가 된다. `listDrafts`가 version 유무를 주지 않아 추가 fetch 없이는 프론트가 구분 불가 — 희귀(생성 후 미저장)하고 무해(빈 파일)해 고치지 않고 HANDOFF에 한계로 남긴다. version-aware gating은 별도 슬라이스.
+- 보강 후 frontend **155 passed / 10 files**(수 불변, H2는 기존 테스트 강화), backend 무변.

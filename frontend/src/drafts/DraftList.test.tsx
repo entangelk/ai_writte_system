@@ -714,9 +714,13 @@ describe("DraftList", () => {
     await userEvent.click(screen.getByLabelText("추적 정보(manifest) 함께"));
     await userEvent.click(screen.getByRole("button", { name: "TXT로 내보내기" }));
 
-    // Two downloads: the combined body, then the manifest json.
+    // Two downloads: the combined body first, then the manifest json. Verify
+    // both — the body is unchanged from the manifest-off path, and the manifest
+    // is a real JSON sidecar.
     await waitFor(() => expect(downloads).toEqual(["p1.txt", "p1.manifest.json"]));
-    const manifestBlob = blobs.at(-1)!;
+    const [bodyBlob, manifestBlob] = blobs;
+    expect(bodyBlob.type).toBe("text/plain; charset=utf-8");
+    expect(await blobText(bodyBlob)).toBe("1장\n\nfirst\n\n2장\n\nsecond");
     expect(manifestBlob.type).toBe("application/json");
     expect(JSON.parse(await blobText(manifestBlob)).project_id).toBe("p1");
   });
