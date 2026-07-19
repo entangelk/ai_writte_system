@@ -297,7 +297,10 @@ export function DraftList() {
             </ul>
           )}
 
-          {drafts.length > 0 && (
+          {/* Export excludes archived units by default, so gate the controls on
+              at least one non-archived unit: an archived-only project would only
+              ever produce an empty file / manifest-only zip. */}
+          {drafts.some((draft) => !draft.archived) && (
             <section className="export-controls" aria-label="원고 내보내기">
               <div className="export-group">
                 <p className="export-label">전체 원고를 한 파일로</p>

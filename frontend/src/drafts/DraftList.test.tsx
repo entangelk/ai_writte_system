@@ -333,6 +333,16 @@ describe("DraftList", () => {
     expect(await screen.findByText("프로젝트 홈")).toBeInTheDocument();
   });
 
+  /** Read a Blob's text (jsdom's Blob lacks the async .text() helper). */
+  function blobText(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+  }
+
   /** Capture browser downloads triggered via URL.createObjectURL + anchor. */
   function captureDownloads() {
     const blobs: Blob[] = [];
@@ -381,7 +391,7 @@ describe("DraftList", () => {
         },
       },
     );
-    const { downloads } = captureDownloads();
+    const { blobs, downloads } = captureDownloads();
 
     renderDraftList();
     await screen.findByRole("heading", { name: "겨울 이야기" });
@@ -394,6 +404,11 @@ describe("DraftList", () => {
     );
     expect(String(exportCall?.[0])).toContain("format=txt");
     expect(String(exportCall?.[0])).not.toContain("manifest=true");
+    // The downloaded blob carries the server body verbatim with its content type
+    // (no client-side transformation).
+    const blob = blobs.at(-1)!;
+    expect(await blobText(blob)).toBe("1장\n\nfirst\n\n2장\n\nsecond");
+    expect(blob.type).toBe("text/plain; charset=utf-8");
   });
 
   it("bundles each unit as its own file inside a zip", async () => {
@@ -525,5 +540,104 @@ describe("DraftList", () => {
 
     expect(screen.queryByRole("button", { name: "TXT로 내보내기" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Markdown ZIP" })).toBeNull();
+  });
+
+  it("hides export controls when every unit is archived", async () => {
+    // Archived units are excluded by default, so an archived-only project would
+    // only ever export an empty file / manifest-only zip. Don't offer controls
+    // that produce nothing.
+    mockFetch(
+      { body: { id: "p1", name: "겨울 이야기", archived: false } },
+      {
+        body: {
+          drafts: [
+            {
+              id: "d1", project_id: "p1", title: "묵은 장", archived: true,
+              unit_kind: "chapter", position: 1,
+            },
+          ],
+        },
+      },
+    );
+
+    renderDraftList();
+    // The archived unit still renders in the list…
+    await screen.findByText("묵은 장");
+    // …but no export control is offered.
+    expect(screen.queryByRole("button", { name: "TXT로 내보내기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Markdown ZIP" })).toBeNull();
+  });
+
+  it("sanitizes unit titles and falls back to the draft id for zip entry names", async () => {
+    const trickyDrafts = {
+      drafts: [
+        {
+          id: "d1", project_id: "p1", title: 'a/b:c*?"<>|', archived: false,
+          unit_kind: "other", position: 1,
+        },
+        {
+          id: "draft-xyz", project_id: "p1", title: "   ", archived: false,
+          unit_kind: "other", position: 2,
+        },
+      ],
+    };
+    mockFetch(
+      { body: { id: "p1", name: "겨울 이야기", archived: false } },
+      { body: trickyDrafts },
+      {
+        body: {
+          format: "txt", filename: "p1.txt",
+          content_type: "text/plain; charset=utf-8", body: "x", project_id: "p1",
+          include_archived: false,
+          manifest: {
+            project_id: "p1", format: "txt", include_archived: false,
+            units: [
+              {
+                draft_id: "d1", title: 'a/b:c*?"<>|', unit_kind: "other",
+                position: 1, version_id: "v1", version_number: 1,
+                snapshot_id: "s1", content_hash: "h1",
+              },
+              {
+                draft_id: "draft-xyz", title: "   ", unit_kind: "other",
+                position: 2, version_id: "v2", version_number: 1,
+                snapshot_id: "s2", content_hash: "h2",
+              },
+            ],
+          },
+        },
+      },
+      {
+        body: {
+          format: "txt", filename: "d1-v1.txt",
+          content_type: "text/plain; charset=utf-8", body: "one",
+          project_id: "p1", draft_id: "d1", version_id: "v1", version_number: 1,
+          snapshot_id: "s1", content_hash: "h1",
+        },
+      },
+      {
+        body: {
+          format: "txt", filename: "draft-xyz-v1.txt",
+          content_type: "text/plain; charset=utf-8", body: "two",
+          project_id: "p1", draft_id: "draft-xyz", version_id: "v2",
+          version_number: 1, snapshot_id: "s2", content_hash: "h2",
+        },
+      },
+    );
+    const { blobs, downloads } = captureDownloads();
+
+    renderDraftList();
+    await screen.findByRole("heading", { name: "겨울 이야기" });
+    await userEvent.click(screen.getByRole("button", { name: "TXT ZIP" }));
+
+    await waitFor(() => expect(downloads).toEqual(["p1.zip"]));
+    const zip = await JSZip.loadAsync(blobs.at(-1)!);
+    expect(Object.keys(zip.files).sort()).toEqual([
+      // path-unsafe chars (/ : * ? " < > |) each replaced with "_"; a title that
+      // sanitizes to empty (whitespace-only) falls back to the draft id; position
+      // is zero-padded to two digits.
+      "01-a_b_c______.txt",
+      "02-draft-xyz.txt",
+      "manifest.json",
+    ]);
   });
 });

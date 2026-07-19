@@ -498,6 +498,15 @@
 - backend 미변경(1198 passed 유지). `jszip@^3.10.1` 의존성 추가.
 - LLM 미사용.
 
+### 독립 검증 후 보강 (오너 검증 PASS/조건 없음 뒤)
+
+- 오너 독립 검증(`docs/verifications/2026-07-19/w4_export_frontend_zip.md`, PASS, mutation 4종으로 verbatim/entry명/guard/empty clause 실증)이 non-blocking hardening 후보 5건을 남겼다. 선별해 3건을 반영했다:
+  - **H4 보강(UX 불일치)**: 컨트롤 표시 조건을 `drafts.length > 0` → `drafts.some(!archived)`로 바꿨다. archived-only project는 기본 제외라 빈 파일/manifest-only zip만 나오므로 컨트롤을 아예 감춘다. 회귀 +1(전부 보관된 project는 목록엔 뜨지만 export 버튼 없음).
+  - **H2 보강(테스트 대칭)**: combined 다운로드 회귀가 blob 본문/`content_type`을 직접 단정하도록 강화했다(bundle은 이미 zip 언팩 검증). `FileReader` 기반 `blobText` 헬퍼로 jsdom Blob의 `.text()` 부재를 우회했다.
+  - **H3 보강(sanitize 회귀)**: `bundleEntryName`의 path-unsafe(`\/:*?"<>|`→`_`) 치환·빈 title(공백-only)→draft_id fallback·position zero-pad를 tricky title zip으로 잠갔다(`01-a_b_c______.txt`·`02-draft-xyz.txt`). 회귀 +1.
+  - **H1/H5 skip(선례/무해)**: H1(`exportingRef` 미노출)은 user-facing 가드가 disabled(state)이고 이미 테스트됨, ref는 safety net. H5(version 없는 unit만 → manifest-only zip)는 프론트가 version 유무를 추가 fetch 없이 알 수 없는 깊은 edge이며 무해해 작은 슬라이스 밖으로 둔다.
+- 보강 후 frontend **152 passed / 10 files**(직전 150 + 2), build 388.63 kB, backend 무변.
+
 ### Next steps
 
 - 후속 옵션(오너 결정): export에 `include_archived` 토글 UI, 통합 파일에도 manifest 동시 제공, saved publication manifest 정본화. 그 외 Deferred 기본 기능(미채택 candidate 영속 등)은 별도 슬라이스.
