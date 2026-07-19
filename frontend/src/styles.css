@@ -767,6 +767,22 @@ main {
   font-size: 0.8rem;
 }
 
+.export-options {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.2rem;
+}
+
+.export-option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.84rem;
+  cursor: pointer;
+}
+
 .version-empty {
   margin: 1.4rem 0 0;
   color: var(--muted);

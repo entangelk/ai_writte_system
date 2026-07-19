@@ -58,6 +58,8 @@ export function DraftList() {
   const [exporting, setExporting] = useState<{ kind: ExportKind; format: ExportFormat } | null>(
     null,
   );
+  const [includeArchived, setIncludeArchived] = useState(false);
+  const [withManifest, setWithManifest] = useState(false);
   const exportingRef = useRef(false);
 
   const loadDrafts = useCallback(async () => {
@@ -153,16 +155,30 @@ export function DraftList() {
     setExporting({ kind, format });
     try {
       if (kind === "combined") {
-        const exported = await exportProject(projectId, format);
+        const exported = await exportProject(projectId, format, {
+          includeArchived,
+          manifest: withManifest,
+        });
         triggerDownload(
           new Blob([exported.body], { type: exported.content_type }),
           exported.filename,
         );
+        if (withManifest && exported.manifest !== null) {
+          triggerDownload(
+            new Blob([JSON.stringify(exported.manifest, null, 2)], {
+              type: "application/json",
+            }),
+            `${projectId}.manifest.json`,
+          );
+        }
       } else {
         // Bulk: enumerate the exact included units from the delivery manifest,
         // fetch each unit's latest version body verbatim (no heading synthesis),
-        // and bundle them plus the manifest as one zip.
-        const { manifest } = await exportProject(projectId, format, { manifest: true });
+        // and bundle them (plus the manifest when requested) as one zip.
+        const { manifest } = await exportProject(projectId, format, {
+          includeArchived,
+          manifest: true,
+        });
         if (manifest === null) {
           return;
         }
@@ -179,7 +195,9 @@ export function DraftList() {
             exported.body,
           );
         }
-        zip.file("manifest.json", JSON.stringify(manifest, null, 2));
+        if (withManifest) {
+          zip.file("manifest.json", JSON.stringify(manifest, null, 2));
+        }
         const blob = await zip.generateAsync({ type: "blob" });
         triggerDownload(blob, `${projectId}.zip`);
       }
@@ -191,6 +209,12 @@ export function DraftList() {
       setExporting(null);
     }
   }
+
+  // At least one unit would actually be exported under the current archived
+  // toggle. Archived units are excluded unless the user opts them in, so an
+  // archived-only project can only export once "보관된 원고 포함" is on.
+  const canExport =
+    drafts !== null && drafts.some((draft) => includeArchived || !draft.archived);
 
   return (
     <section className="workspace-page page-enter">
@@ -297,17 +321,36 @@ export function DraftList() {
             </ul>
           )}
 
-          {/* Export excludes archived units by default, so gate the controls on
-              at least one non-archived unit: an archived-only project would only
-              ever produce an empty file / manifest-only zip. */}
-          {drafts.some((draft) => !draft.archived) && (
+          {drafts.length > 0 && (
             <section className="export-controls" aria-label="원고 내보내기">
+              <div className="export-options">
+                {drafts.some((draft) => draft.archived) && (
+                  <label className="export-option">
+                    <input
+                      type="checkbox"
+                      checked={includeArchived}
+                      disabled={exporting !== null}
+                      onChange={(event) => setIncludeArchived(event.target.checked)}
+                    />
+                    보관된 원고 포함
+                  </label>
+                )}
+                <label className="export-option">
+                  <input
+                    type="checkbox"
+                    checked={withManifest}
+                    disabled={exporting !== null}
+                    onChange={(event) => setWithManifest(event.target.checked)}
+                  />
+                  추적 정보(manifest) 함께
+                </label>
+              </div>
               <div className="export-group">
                 <p className="export-label">전체 원고를 한 파일로</p>
                 <div className="export-buttons">
                   <button
                     type="button"
-                    disabled={exporting !== null}
+                    disabled={exporting !== null || !canExport}
                     onClick={() => void runExport("combined", "txt")}
                   >
                     {exporting?.kind === "combined" && exporting.format === "txt"
@@ -316,7 +359,7 @@ export function DraftList() {
                   </button>
                   <button
                     type="button"
-                    disabled={exporting !== null}
+                    disabled={exporting !== null || !canExport}
                     onClick={() => void runExport("combined", "markdown")}
                   >
                     {exporting?.kind === "combined" && exporting.format === "markdown"
@@ -330,7 +373,7 @@ export function DraftList() {
                 <div className="export-buttons">
                   <button
                     type="button"
-                    disabled={exporting !== null}
+                    disabled={exporting !== null || !canExport}
                     onClick={() => void runExport("bundle", "txt")}
                   >
                     {exporting?.kind === "bundle" && exporting.format === "txt"
@@ -339,7 +382,7 @@ export function DraftList() {
                   </button>
                   <button
                     type="button"
-                    disabled={exporting !== null}
+                    disabled={exporting !== null || !canExport}
                     onClick={() => void runExport("bundle", "markdown")}
                   >
                     {exporting?.kind === "bundle" && exporting.format === "markdown"
@@ -348,7 +391,13 @@ export function DraftList() {
                   </button>
                 </div>
               </div>
-              <p className="export-note">보관된 원고는 제외됩니다.</p>
+              <p className="export-note">
+                {canExport
+                  ? includeArchived
+                    ? "보관된 원고를 포함해 정본 순서대로 내보냅니다."
+                    : "보관된 원고는 제외됩니다."
+                  : "내보낼 원고가 없습니다. 보관된 원고만 있어요 — ‘보관된 원고 포함’을 켜세요."}
+              </p>
             </section>
           )}
         </>

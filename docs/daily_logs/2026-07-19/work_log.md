@@ -510,3 +510,38 @@
 ### Next steps
 
 - 후속 옵션(오너 결정): export에 `include_archived` 토글 UI, 통합 파일에도 manifest 동시 제공, saved publication manifest 정본화. 그 외 Deferred 기본 기능(미채택 candidate 영속 등)은 별도 슬라이스.
+
+## Task — export UI 옵션화: include_archived 토글 + manifest 토글
+
+### Goals
+
+- 오너가 후속으로 제시한 (a) include_archived 토글 UI와 (b) 통합 파일에도 manifest 동시 제공을, 서로 맞물린 한 슬라이스로 구현한다(토글이 생기면 archived-only gating 재검토 필요).
+- backend W4 계약은 이미 두 파라미터를 지원하므로 frontend 전용으로 소비한다.
+
+### User Decisions and Rationale
+
+- 오너가 "다음 작업 진행"으로 앞서 추천한 (a)+(b) 묶음 슬라이스를 승인했다.
+- **설계 결정(파생, 오너 fork 아님)**:
+  - **include_archived 토글**("보관된 원고 포함", default off): combined·bundle 양쪽에 적용. 이로써 archived-only project의 gating을 재정의했다 — v1.7.18의 "비보관 unit 없으면 컨트롤 숨김"(H4)을 **"컨트롤은 표시하되 내보낼 unit이 없으면 버튼 disable + 토글로 활성화"**로 바꿨다. H4 의도(빈 export 방지)는 disable로 보존하고, 토글이 archived-only에서 export하는 탈출구가 된다. 토글 자체는 archived draft가 하나라도 있을 때만 노출한다.
+  - **manifest 토글**("추적 정보(manifest) 함께", default off): combined은 body 파일 + 별도 `{project_id}.manifest.json` 2파일 다운로드, bundle은 zip에 `manifest.json` 추가. **bundle의 manifest.json을 v1.7.18의 always-on → opt-in으로 변경**해 두 export가 한 토글로 일관되게 만들었다(default는 최소 산출물). 이 변경으로 v1.7.18 검증 기록의 "zip에 manifest.json 항상 포함" 단정은 그 시점 동작의 역사 기록으로 남는다.
+
+### Completed work
+
+- **DraftList.tsx**: `includeArchived`/`withManifest` state 추가. `runExport`가 combined는 `{includeArchived, manifest: withManifest}`로 호출하고 withManifest 시 manifest json을 별도 다운로드, bundle은 `{includeArchived, manifest: true}`로 unit을 열거하되 zip의 manifest.json은 withManifest일 때만 추가한다. `canExport = drafts.some(includeArchived || !archived)`로 버튼 disable을 계산하고, export-controls 섹션은 `drafts.length>0`이면 표시한다. note를 상태별(정상/보관 포함/내보낼 것 없음)로 동적 처리했다.
+- **styles.css**: `.export-options`/`.export-option`(체크박스 행) 스타일 추가.
+
+### Regression
+
+- 기존 회귀 갱신: bundle·sanitize 테스트의 zip 기대값에서 `manifest.json` 제거(이제 opt-in), archived-only 테스트를 "숨김"→"버튼 disable + 토글로 활성화"로 재작성.
+- 신규 +3: (1) include_archived 토글 on → export 쿼리에 `include_archived=true`, (2) manifest 토글 on + combined → `p1.txt`·`p1.manifest.json` 2파일 다운로드·2번째 blob이 JSON, (3) manifest 토글 on + bundle → zip에 `manifest.json` 포함.
+
+### Verification
+
+- `npx vitest run src/drafts/DraftList.test.tsx` → **19 passed**(직전 16 + 3).
+- frontend `npm test -- --run` → **155 passed / 10 files**(직전 152 + 3).
+- `npm run build` 성공(JS 389.54 kB). `npm run gen:api` → `schema.d.ts` byte-identical(backend/OpenAPI 무변). `npx tsc --noEmit` clean.
+- LLM 미사용.
+
+### Next steps
+
+- 후속(오너 결정): saved publication manifest 정본화(별도 정본, brief 선행) 또는 Deferred 기본 기능(미채택 Writing candidate 영속 — brief 선행). export UI 트랙은 이 슬라이스로 실용 범위를 채웠다.
