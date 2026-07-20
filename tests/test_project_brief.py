@@ -2,7 +2,9 @@
 
 import asyncio
 import json
+import os
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import httpx
@@ -68,6 +70,10 @@ def _brief_body(**overrides):
         "tone": "Quiet",
         "pov": "Third person",
         "constraints": ["No time travel"],
+        "style_rules": ["Use restrained sensory detail"],
+        "preferred_patterns": ["Short sentence after a reveal"],
+        "forbidden_patterns": ["As fate would have it"],
+        "style_examples": ["Snow gathered silently along the sill."],
     }
     body.update(overrides)
     return body
@@ -111,9 +117,13 @@ class ProjectBriefContractTest(unittest.TestCase):
 
     def _put(self, **overrides):
         body = _brief_body(**overrides)
+        for field in (
+            "constraints", "style_rules", "preferred_patterns",
+            "forbidden_patterns", "style_examples",
+        ):
+            body[field] = tuple(body[field])
         return self.service.put_project_brief(
             project_id=self.project.id,
-            constraints=tuple(body.pop("constraints")),
             **body,
         )
 
@@ -134,7 +144,10 @@ class ProjectBriefContractTest(unittest.TestCase):
 
     def test_same_key_replays_original_version(self):
         first = self._put()
-        replay = self._put(premise="must not replace")
+        replay = self._put(
+            premise="must not replace",
+            style_examples=["must not replace style examples"],
+        )
         self.assertTrue(replay.idempotent_replay)
         self.assertEqual(replay.brief, first.brief)
         self.assertEqual(len(self.repo.project_brief_versions), 1)
@@ -156,6 +169,10 @@ class ProjectBriefContractTest(unittest.TestCase):
             tone=None,
             pov=None,
             constraints=[],
+            style_rules=[],
+            preferred_patterns=[],
+            forbidden_patterns=[],
+            style_examples=[],
         )
         self.assertEqual(cleared.brief.version_number, 2)
         self.assertIsNone(cleared.brief.premise)
@@ -182,6 +199,10 @@ class ProjectBriefContractTest(unittest.TestCase):
                 tone=None,
                 pov=None,
                 constraints=(),
+                style_rules=(),
+                preferred_patterns=(),
+                forbidden_patterns=(),
+                style_examples=(),
             )
 
 
@@ -224,6 +245,10 @@ class ProjectBriefApiTest(unittest.TestCase):
                 tone="  Quiet ",
                 pov=None,
                 constraints=["  Rule one ", "Rule two  "],
+                style_rules=["  Restrained  "],
+                preferred_patterns=["  Short ending "],
+                forbidden_patterns=["  Fate  "],
+                style_examples=["  Snow fell.  "],
             ),
         )
         self.assertEqual(response.status_code, 200)
@@ -231,23 +256,101 @@ class ProjectBriefApiTest(unittest.TestCase):
         brief = response.json()["brief"]
         self.assertEqual(
             set(brief),
-            {"id", "project_id", "version_number", "premise", "genre", "tone", "pov", "constraints"},
+            {
+                "id", "project_id", "version_number", "premise", "genre",
+                "tone", "pov", "constraints", "style_rules",
+                "preferred_patterns", "forbidden_patterns", "style_examples",
+            },
         )
         self.assertEqual(brief["premise"], "Premise")
         self.assertEqual(brief["constraints"], ["Rule one", "Rule two"])
+        self.assertEqual(brief["style_examples"], ["Snow fell."])
 
     def test_invalid_content_rejected_without_write(self):
         invalid = [
             _brief_body(premise="  "),
             _brief_body(constraints=["ok", "  "]),
             _brief_body(constraints=["same", " same "]),
+            _brief_body(style_rules=["same", " same "]),
+            _brief_body(preferred_patterns=["ok", "  "]),
+            _brief_body(forbidden_patterns=["same", " same "]),
+            _brief_body(style_examples=["same", " same "]),
+            _brief_body(style_examples=["a", "b", "c", "d"]),
+            _brief_body(style_examples=["x" * 1001]),
             {**_brief_body(), "unknown": True},
             {key: value for key, value in _brief_body().items() if key != "tone"},
+            *(
+                {key: value for key, value in _brief_body().items() if key != field}
+                for field in (
+                    "style_rules", "preferred_patterns",
+                    "forbidden_patterns", "style_examples",
+                )
+            ),
         ]
         for body in invalid:
             with self.subTest(body=body):
                 self.assertEqual(self.client.put(self.path, json=body).status_code, 422)
                 self.assertEqual(self.client.get(f"{self.path}/versions").json(), {"versions": []})
+
+    def test_style_example_limits_are_environment_adjustable_both_directions(self):
+        with patch.dict(
+            os.environ,
+            {
+                "PROJECT_BRIEF_STYLE_EXAMPLES_MAX_ITEMS": "4",
+                "PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS": "1001",
+            },
+        ):
+            accepted = self.client.put(
+                self.path,
+                json=_brief_body(
+                    style_examples=["a", "b", "c", "x" * 1001]
+                ),
+            )
+        self.assertEqual(accepted.status_code, 200)
+
+    def test_lowered_style_example_limits_do_not_break_existing_reads(self):
+        created = self.client.put(
+            self.path,
+            json=_brief_body(style_examples=["one", "two", "three"]),
+        ).json()["brief"]
+
+        with patch.dict(
+            os.environ,
+            {
+                "PROJECT_BRIEF_STYLE_EXAMPLES_MAX_ITEMS": "1",
+                "PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS": "1",
+            },
+        ):
+            current = self.client.get(self.path)
+            history = self.client.get(f"{self.path}/versions")
+            detail = self.client.get(f"{self.path}/versions/{created['id']}")
+
+        self.assertEqual(
+            (current.status_code, history.status_code, detail.status_code),
+            (200, 200, 200),
+        )
+        self.assertEqual(current.json()["brief"]["style_examples"], ["one", "two", "three"])
+        self.assertEqual(history.json()["versions"][0]["style_examples"], ["one", "two", "three"])
+        self.assertEqual(detail.json()["brief"]["style_examples"], ["one", "two", "three"])
+
+    def test_invalid_style_example_limits_fail_app_creation(self):
+        invalid = (
+            ("PROJECT_BRIEF_STYLE_EXAMPLES_MAX_ITEMS", "0"),
+            ("PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS", "0"),
+            ("PROJECT_BRIEF_STYLE_EXAMPLES_MAX_ITEMS", "not-an-integer"),
+            ("PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS", "not-an-integer"),
+        )
+        for name, value in invalid:
+            with self.subTest(name=name, value=value), patch.dict(
+                os.environ,
+                {
+                    "PROJECT_BRIEF_STYLE_EXAMPLES_MAX_ITEMS": "3",
+                    "PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS": "1000",
+                    name: value,
+                },
+            ):
+                with self.assertRaises(ValueError):
+                    create_app()
 
     def test_version_read_is_project_isolated(self):
         version = self.client.put(self.path, json=_brief_body()).json()["brief"]
@@ -321,6 +424,20 @@ class WorkspaceW0SchemaIntegrationTest(unittest.TestCase):
                 "uniqueItems"
             ]
         )
+        for field in (
+            "style_rules", "preferred_patterns", "forbidden_patterns",
+            "style_examples",
+        ):
+            self.assertTrue(
+                schemas["ProjectBriefVersionPayload"]["properties"][field][
+                    "uniqueItems"
+                ]
+            )
+            self.assertTrue(
+                schemas["PutProjectBriefRequest"]["properties"][field][
+                    "uniqueItems"
+                ]
+            )
         # --- W3 ordered unit + Writing intent fragments (SC-01 final closure) ---
         self.assertEqual(
             set(schemas["DraftPayload"]["required"]),
@@ -407,6 +524,10 @@ class ProjectBriefWritingContextTest(unittest.TestCase):
             tone=None,
             pov="Close third",
             constraints=("Do not reveal the traitor.",),
+            style_rules=("Keep description restrained.",),
+            preferred_patterns=("End reveals with a short sentence.",),
+            forbidden_patterns=("As fate would have it",),
+            style_examples=("Snow gathered silently along the sill.",),
         )
         package = asyncio.run(
             _context_service(core).build_context_package(_context_request(project.id))
@@ -419,6 +540,10 @@ class ProjectBriefWritingContextTest(unittest.TestCase):
         self.assertIn('<project_brief authority="canonical" version="1">', rendered)
         self.assertIn("- premise: A hidden key changes hands.", rendered)
         self.assertIn("- constraint: Do not reveal the traitor.", rendered)
+        self.assertIn("- style rule: Keep description restrained.", rendered)
+        self.assertIn("- prefer: End reveals with a short sentence.", rendered)
+        self.assertIn("- avoid: As fate would have it", rendered)
+        self.assertIn("- style example: Snow gathered silently along the sill.", rendered)
 
     def test_missing_brief_does_not_invent_an_authoritative_item(self):
         from services.application.app.context_search.models import ContextPackage

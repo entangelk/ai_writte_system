@@ -15,7 +15,6 @@ from __future__ import annotations
 from services.application.app.context_search.models import ContextPackage
 from services.application.app.writing.models import (
     WRITING_CANDIDATE_STATUS,
-    WritingBrief,
     WritingCandidate,
     WritingOutputType,
     WritingRequest,
@@ -82,9 +81,8 @@ class WritingService:
         *,
         request: WritingRequest,
         package: ContextPackage,
-        brief: WritingBrief | None = None,
     ) -> WritingCandidate:
-        self._validate(request, package, brief)
+        self._validate(request, package)
         try:
             prompt_template = self._prompt_templates.get_template(
                 task_type=self._task_type,
@@ -97,7 +95,6 @@ class WritingService:
             request=request,
             package=package,
             prompt_template=prompt_template,
-            brief=brief,
             model=self._model,
             max_tokens=self._max_tokens,
             temperature=self._temperature,
@@ -127,7 +124,6 @@ class WritingService:
     def _validate(
         request: WritingRequest,
         package: ContextPackage,
-        brief: WritingBrief | None,
     ) -> None:
         if request.task_type is not WritingTaskType.CONTINUE_SCENE:
             raise WritingError("only continue_scene is supported")
@@ -137,5 +133,3 @@ class WritingService:
         # ContextPackage that grounds this generation must be the same project.
         if package.project_id != request.project_id:
             raise WritingError("context package belongs to a different project")
-        if brief is not None and brief.project_id != request.project_id:
-            raise WritingError("writing brief belongs to a different project")

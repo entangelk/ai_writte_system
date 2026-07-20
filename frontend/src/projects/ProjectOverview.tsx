@@ -18,6 +18,10 @@ type BriefForm = {
   tone: string;
   pov: string;
   constraints: string;
+  styleRules: string;
+  preferredPatterns: string;
+  forbiddenPatterns: string;
+  styleExamples: string[];
 };
 
 const EMPTY_FORM: BriefForm = {
@@ -26,6 +30,10 @@ const EMPTY_FORM: BriefForm = {
   tone: "",
   pov: "",
   constraints: "",
+  styleRules: "",
+  preferredPatterns: "",
+  forbiddenPatterns: "",
+  styleExamples: [""],
 };
 
 function briefForm(brief: ProjectBrief | null): BriefForm {
@@ -36,12 +44,24 @@ function briefForm(brief: ProjectBrief | null): BriefForm {
     tone: brief.tone ?? "",
     pov: brief.pov ?? "",
     constraints: brief.constraints.join("\n"),
+    styleRules: brief.style_rules.join("\n"),
+    preferredPatterns: brief.preferred_patterns.join("\n"),
+    forbiddenPatterns: brief.forbidden_patterns.join("\n"),
+    styleExamples: brief.style_examples.length > 0 ? [...brief.style_examples] : [""],
   };
 }
 
 function optional(value: string): string | null {
   const trimmed = value.trim();
   return trimmed === "" ? null : trimmed;
+}
+
+function lines(value: string): string[] {
+  return value.split("\n").map((item) => item.trim()).filter(Boolean);
+}
+
+function examples(values: string[]): string[] {
+  return values.map((value) => value.trim()).filter(Boolean);
 }
 
 function memoryTitle(memory: CanonicalMemory): string {
@@ -111,10 +131,6 @@ export function ProjectOverview() {
   async function save(clear = false) {
     if (projectId === undefined || saving || project?.archived) return;
     const next = clear ? EMPTY_FORM : form;
-    const constraints = next.constraints
-      .split("\n")
-      .map((value) => value.trim())
-      .filter(Boolean);
     setSaving(true);
     setNotice(null);
     try {
@@ -125,7 +141,11 @@ export function ProjectOverview() {
         genre: optional(next.genre),
         tone: optional(next.tone),
         pov: optional(next.pov),
-        constraints,
+        constraints: lines(next.constraints),
+        style_rules: lines(next.styleRules),
+        preferred_patterns: lines(next.preferredPatterns),
+        forbidden_patterns: lines(next.forbiddenPatterns),
+        style_examples: examples(next.styleExamples),
       });
       setBrief(response.brief);
       setForm(briefForm(response.brief));
@@ -180,6 +200,42 @@ export function ProjectOverview() {
               <label>톤<input value={form.tone} onChange={(e) => setForm({ ...form, tone: e.target.value })} /></label>
               <label>시점(POV)<input value={form.pov} onChange={(e) => setForm({ ...form, pov: e.target.value })} /></label>
               <label>핵심 제약 <span>한 줄에 하나</span><textarea value={form.constraints} onChange={(e) => setForm({ ...form, constraints: e.target.value })} /></label>
+              <label>문체 규칙 <span>한 줄에 하나</span><textarea value={form.styleRules} onChange={(e) => setForm({ ...form, styleRules: e.target.value })} /></label>
+              <label>선호 표현 <span>한 줄에 하나</span><textarea value={form.preferredPatterns} onChange={(e) => setForm({ ...form, preferredPatterns: e.target.value })} /></label>
+              <label>피할 표현 <span>한 줄에 하나</span><textarea value={form.forbiddenPatterns} onChange={(e) => setForm({ ...form, forbiddenPatterns: e.target.value })} /></label>
+              <fieldset className="brief-style-examples">
+                <legend>문체 예시 <span>예시 안의 줄바꿈 유지 · 기본 최대 3개</span></legend>
+                {form.styleExamples.map((example, index) => (
+                  <div key={index}>
+                    <label htmlFor={`style-example-${index}`}>문체 예시 {index + 1}</label>
+                    <textarea
+                      id={`style-example-${index}`}
+                      value={example}
+                      onChange={(event) => setForm({
+                        ...form,
+                        styleExamples: form.styleExamples.map((value, itemIndex) =>
+                          itemIndex === index ? event.target.value : value),
+                      })}
+                    />
+                    {form.styleExamples.length > 1 && (
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        aria-label={`문체 예시 ${index + 1} 삭제`}
+                        onClick={() => setForm({
+                          ...form,
+                          styleExamples: form.styleExamples.filter((_, itemIndex) => itemIndex !== index),
+                        })}
+                      >삭제</button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => setForm({ ...form, styleExamples: [...form.styleExamples, ""] })}
+                >문체 예시 추가</button>
+              </fieldset>
               <div className="brief-actions">
                 <button type="button" onClick={() => void save(false)} disabled={saving}>저장</button>
                 {brief === null ? (
@@ -189,7 +245,7 @@ export function ProjectOverview() {
                 )}
               </div>
             </div>
-          ) : brief === null || [brief.premise, brief.genre, brief.tone, brief.pov].every((value) => value === null) && brief.constraints.length === 0 ? (
+          ) : brief === null || [brief.premise, brief.genre, brief.tone, brief.pov].every((value) => value === null) && [brief.constraints, brief.style_rules, brief.preferred_patterns, brief.forbidden_patterns, brief.style_examples].every((value) => value.length === 0) ? (
             <div className="empty-state">
               <p>아직 작품 정보가 없습니다.</p>
               <span>필수 입력은 없습니다. 필요할 때 점진적으로 채울 수 있습니다.</span>
@@ -203,6 +259,10 @@ export function ProjectOverview() {
                 <div><dt>톤</dt><dd>{brief.tone ?? "—"}</dd></div>
                 <div><dt>시점</dt><dd>{brief.pov ?? "—"}</dd></div>
                 <div><dt>제약</dt><dd>{brief.constraints.length > 0 ? brief.constraints.join(" · ") : "—"}</dd></div>
+                <div><dt>문체 규칙</dt><dd>{brief.style_rules.length > 0 ? brief.style_rules.join(" · ") : "—"}</dd></div>
+                <div><dt>선호 표현</dt><dd>{brief.preferred_patterns.length > 0 ? brief.preferred_patterns.join(" · ") : "—"}</dd></div>
+                <div><dt>피할 표현</dt><dd>{brief.forbidden_patterns.length > 0 ? brief.forbidden_patterns.join(" · ") : "—"}</dd></div>
+                <div><dt>문체 예시</dt><dd>{brief.style_examples.length > 0 ? brief.style_examples.join(" / ") : "—"}</dd></div>
               </dl>
               {!project.archived && (
                 <div className="brief-actions">

@@ -952,6 +952,27 @@ NonBlankBriefString = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, pattern=r"\S")
 ]
 
+PROJECT_BRIEF_STYLE_EXAMPLES_MAX_ITEMS = 3
+PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS = 1000
+
+
+def _project_brief_style_example_limits() -> tuple[int, int]:
+    max_items = _env_int(
+        "PROJECT_BRIEF_STYLE_EXAMPLES_MAX_ITEMS",
+        PROJECT_BRIEF_STYLE_EXAMPLES_MAX_ITEMS,
+    )
+    max_chars = _env_int(
+        "PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS",
+        PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS,
+    )
+    for name, value in (
+        ("PROJECT_BRIEF_STYLE_EXAMPLES_MAX_ITEMS", max_items),
+        ("PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS", max_chars),
+    ):
+        if value < 1:
+            raise ValueError(f"{name} must be at least 1")
+    return max_items, max_chars
+
 
 class ProjectBriefVersionPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -966,7 +987,18 @@ class ProjectBriefVersionPayload(BaseModel):
     constraints: list[NonBlankBriefString] = Field(
         json_schema_extra={"uniqueItems": True}
     )
-
+    style_rules: list[NonBlankBriefString] = Field(
+        json_schema_extra={"uniqueItems": True}
+    )
+    preferred_patterns: list[NonBlankBriefString] = Field(
+        json_schema_extra={"uniqueItems": True}
+    )
+    forbidden_patterns: list[NonBlankBriefString] = Field(
+        json_schema_extra={"uniqueItems": True}
+    )
+    style_examples: list[NonBlankBriefString] = Field(
+        json_schema_extra={"uniqueItems": True}
+    )
 
 class ProjectBriefGetResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -1140,12 +1172,39 @@ class PutProjectBriefRequest(BaseModel):
     constraints: list[NonBlankBriefString] = Field(
         json_schema_extra={"uniqueItems": True}
     )
+    style_rules: list[NonBlankBriefString] = Field(
+        json_schema_extra={"uniqueItems": True}
+    )
+    preferred_patterns: list[NonBlankBriefString] = Field(
+        json_schema_extra={"uniqueItems": True}
+    )
+    forbidden_patterns: list[NonBlankBriefString] = Field(
+        json_schema_extra={"uniqueItems": True}
+    )
+    style_examples: list[NonBlankBriefString] = Field(
+        json_schema_extra={"uniqueItems": True}
+    )
 
-    @field_validator("constraints")
+    @field_validator(
+        "constraints", "style_rules", "preferred_patterns",
+        "forbidden_patterns", "style_examples",
+    )
     @classmethod
     def reject_normalized_duplicates(cls, value: list[str]) -> list[str]:
         if len(value) != len(set(value)):
-            raise ValueError("constraints must not contain duplicates")
+            raise ValueError("brief arrays must not contain duplicates")
+        return value
+
+    @field_validator("style_examples")
+    @classmethod
+    def enforce_style_example_limits(cls, value: list[str]) -> list[str]:
+        max_items, max_chars = _project_brief_style_example_limits()
+        if len(value) > max_items:
+            raise ValueError(f"style_examples must contain at most {max_items} items")
+        if any(len(example) > max_chars for example in value):
+            raise ValueError(
+                f"style_examples entries must contain at most {max_chars} characters"
+            )
         return value
 
 
@@ -1332,6 +1391,8 @@ def create_app(
     writing_scratch_service: WritingScratchService | None = None,
     vector_index: InMemoryVectorIndexAdapter | None = None,
 ) -> FastAPI:
+    # Fail startup loudly for invalid environment-adjustable public bounds.
+    _project_brief_style_example_limits()
     app = FastAPI(title="AI Writing System Application")
     core_sot = service or _default_core_sot_service()
     sync_outbox = index_sync_outbox or _default_index_sync_outbox_service()
@@ -1500,6 +1561,10 @@ def create_app(
             "tone": brief.tone,
             "pov": brief.pov,
             "constraints": list(brief.constraints),
+            "style_rules": list(brief.style_rules),
+            "preferred_patterns": list(brief.preferred_patterns),
+            "forbidden_patterns": list(brief.forbidden_patterns),
+            "style_examples": list(brief.style_examples),
         }
 
     def _draft_payload(draft) -> dict[str, object]:
@@ -1660,6 +1725,10 @@ def create_app(
                 tone=request.tone,
                 pov=request.pov,
                 constraints=tuple(request.constraints),
+                style_rules=tuple(request.style_rules),
+                preferred_patterns=tuple(request.preferred_patterns),
+                forbidden_patterns=tuple(request.forbidden_patterns),
+                style_examples=tuple(request.style_examples),
             )
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

@@ -1,10 +1,10 @@
 # Decision brief — 문체/어투 계약(설정·관찰·검증)과 생성 분량 제어
 
-상태: `결정 확정 (2026-07-20) — D0=B / D1=A / D2=A / D3=A / D4=B / D5=A / D6=A, 구현 미착수`
+상태: `결정 확정 (2026-07-20) — D0=B / D1=A / D2=A / D3=A / D4=B / D5=A / D6=A; 증분 1(D1+D2) 구현 완료`
 정본 연결: [`../system-contract-sot.md`](../system-contract-sot.md) (v1.7.20), [`writing-workspace-v2-w0-contract.md`](writing-workspace-v2-w0-contract.md) (§ProjectBrief), [`05-writing-ai.md`](05-writing-ai.md), [`02-analysis-pipeline.md`](02-analysis-pipeline.md), [`07-conversational-authoring.md`](07-conversational-authoring.md), [`product-readiness-backlog.md`](product-readiness-backlog.md)
 작성: 2026-07-20 (오너 분석 반영 개정)
 
-> **오너 결정 완료(2026-07-20)** — D0~D6이 아래 "Owner decisions" 절에 확정 기입됐다. 각 D절의 옵션 표와 추천은 그 결정에 이른 분석 기록이며, **충돌 시 "Owner decisions" 절이 우선**한다. 구현은 아직 착수하지 않았다.
+> **오너 결정 완료(2026-07-20)** — D0~D6이 아래 "Owner decisions" 절에 확정 기입됐다. 각 D절의 옵션 표와 추천은 그 결정에 이른 분석 기록이며, **충돌 시 "Owner decisions" 절이 우선**한다. 증분 1(D1+D2)은 SoT v1.7.21로 구현됐고 D3, D4~D6은 순차 미구현이다.
 
 ## Decision needed
 
@@ -167,8 +167,10 @@
 - **D0 = B** — 작품 문체 + 캐릭터 어투 + Gate 정합 검증 + 분량을 한 슬라이스로. 분위기/mood는 키가 없어 Phase 7 몫으로 제외한다.
 
 - **D1 = A** — `ProjectBrief` 확장, **`WritingBrief`는 삭제**. W2의 append-only version·idempotency·history·UI를 재사용하고 tone 중복 모순을 소멸시킨다.
+  - **구현 literal 보완 결정(2026-07-20, 오너 1=A)**: 죽은 `WritingBrief`가 갖던 문체 기능을 일부 조용히 버리지 않고 `style_rules`, `preferred_patterns`, `forbidden_patterns`를 모두 옮기며, D2의 `style_examples`까지 합쳐 **네 배열을 `ProjectBrief`의 required key**로 둔다. 각 배열은 기존 `constraints`와 같이 항목 trim 후 blank·중복을 422로 거부한다.
 
 - **D2 = A only** — 자유 텍스트 예시만. **원고 구간 참조(B)는 채택하지 않는다**(후속 후보로도 두지 않음). 오너 근거: 초기 원고 작성 시 아이디에이션 단계를 거치게 되며, 특정 구간을 예시로 쓰고 싶으면 **그 구간을 직접 자유 텍스트로 붙여넣는 편이 낫다**. (확인: 오너가 기억한 아이디에이션 단계는 **Phase 7 P3 `ideate`로 계획만 있고 미구현**이다. 따라서 현재 동작하는 경로는 자유 텍스트뿐이며 D2=A로 충분하다.)
+  - **상한 literal 보완 결정(2026-07-20, 오너 2=B)**: `style_examples`는 기본 **최대 3개·항목당 1,000자**이며 `PROJECT_BRIEF_STYLE_EXAMPLES_MAX_ITEMS`·`PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS`로 조정한다. 두 값은 1 이상이어야 하며, 잘못된 값은 조용히 무제한 처리하지 않고 app 기동을 실패시킨다. 상한 초과는 HTTP 422다. 환경별 상한은 OpenAPI 정적 `maxItems`/`maxLength`가 아니라 이 운영 계약과 HTTP **write** validator가 authority다. 상한을 낮춰도 이미 저장된 append-only version의 current/history/detail read에는 적용하지 않는다.
 
 - **D3 = A**, 프리셋 매핑 **1024 / 2048 / 4096**:
   | 프리셋 | 출력 토큰 | 의미 | 실측 예상 시간(≈45 tok/s) |

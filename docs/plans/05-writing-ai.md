@@ -6,11 +6,11 @@
 
 ## 목표
 
-사용자 요청과 WritingBrief, 검증된 ContextPackage만을 사용해 글 후보를 만들고, 기존 기억과의 충돌을 검사한 뒤 editor에 제안한다.
+사용자 요청과 ProjectBrief 문체 설정, 검증된 ContextPackage만을 사용해 글 후보를 만들고, 기존 기억과의 충돌을 검사한 뒤 editor에 제안한다.
 
 ## MVP 범위
 
-- `WritingRequest`와 `WritingBrief`
+- `WritingRequest`와 append-only `ProjectBrief` 문체 설정
 - `continue_scene` 중심의 최소 task type
 - ContextPackage prompt assembly
 - `WritingCandidate`/`draft_candidate`
@@ -28,7 +28,7 @@
 ## 핵심 흐름
 
 ```text
-user instruction + editor pointers + WritingBrief
+user instruction + editor pointers + ProjectBrief style fields
 → context request → Phase 4 ContextPackage
 → prompt assembly → Writing AI → WritingCandidate
 → Writing Gate → editor 제안/revise/retrieve_more/review/block
@@ -51,11 +51,11 @@ MVP에서 최소한 요청 적합성, 프로젝트 격리, hard constraint 위�
 - Continuity: 죽은 인물, 관계, 장소, 사건의 모순
 - POV: 현재 장면에서 인물이 알 수 없는 사실
 - Foreshadowing: 의도하지 않은 회수/재등장/과잉 노출
-- Voice: WritingBrief 및 승인된 voice sample 위반
+- Voice: ProjectBrief 문체 설정 및 승인된 voice sample 위반
 
 ## 산출물
 
-1. WritingRequest/Brief/Candidate 계약
+1. WritingRequest/ProjectBrief style/Candidate 계약
 2. 최소 Writing Agent system contract와 prompt
 3. ContextPackage formatter
 4. Writing Gate와 decision 처리

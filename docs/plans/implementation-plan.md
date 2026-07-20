@@ -294,7 +294,7 @@ tests/
 목표: ContextPackage 기반 이어쓰기 후보를 만들고 사용자가 채택하면 저장 루프로 되돌린다.
 
 - continue_scene
-- WritingBrief/prompt assembly
+- ProjectBrief style/prompt assembly
 - Writing Gate
 - editor candidate/accept
 

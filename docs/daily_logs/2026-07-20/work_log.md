@@ -269,3 +269,89 @@
 
 - **오너가 잠정 보존/만료 정책(상한 20·accept 즉시 삭제·시간 만료 없음)을 SoT로 승격·확정**해야 한다. 그때까지 정본 계약이 아니다.
 - 복구 UX 후속 후보: "복사"가 아니라 이어쓰기 패널 candidate로 직접 되살리기(WritingPanel 내부 상태 결합 필요), 502 partial 경로 정리, Phase 7 `conversation_turn` 흡수.
+
+## Task — 문체/분량 슬라이스 증분 1: ProjectBrief 문체 정본 통합 (D1+D2)
+
+### Goals
+
+- 확정된 D1=A/D2=A에 따라 죽은 `WritingBrief`를 제거하고 작품 문체 입력을 append-only `ProjectBrief` 정본으로 통합한다.
+- 정본 저장·Mongo 호환·HTTP/OpenAPI·Writing 프롬프트·ProjectOverview UI가 같은 required 필드 네 개를 왕복하도록 잠근다.
+- 양방향 회귀, 전체 backend/frontend, 타입 생성과 build로 완료를 검증한다.
+
+### User Decisions and Rationale
+
+- 구현 직전 브리프의 `style_examples`·`forbidden_patterns` “등”이 exact 공개 필드 집합을, 상한 권고가 숫자·조정 방식을 잠그지 않은 공백을 발견해 오너에게 결정 브리프를 제시했다. 이는 슬라이스 분할로 새 요구가 생긴 것이 아니라 기존 승인 방향을 구현 literal로 내리는 보완 결정이다.
+- 오너 **1=A**: 죽은 `WritingBrief`의 `style_rules`·`preferred_patterns`·`forbidden_patterns`를 일부 버리지 않고 모두 이전하고 `style_examples`까지 네 배열로 통합한다.
+- 오너 **2=B**: `style_examples`는 기본 최대 3개·항목당 1,000자이고 환경변수로 조정한다. dogfood에서 유용한 예시 규모가 달라질 수 있어 코드 수정 없이 조정 가능한 방향을 택했다.
+
+### Completed work
+
+- SoT를 v1.7.21로 올리고 브리프 Owner decisions, W0 schema catalog(required/nonblank/unique), plans index와 현행 Phase 문서 표현을 `ProjectBrief` 기준으로 갱신했다.
+- `ProjectBriefVersion`/CoreSotService/Mongo document/public payload/request에 `style_rules`, `preferred_patterns`, `forbidden_patterns`, `style_examples`를 추가했다. 기존 Mongo 문서는 `doc.get(..., ())`로 빈 배열 복원해 append-only 과거 version을 rewrite하지 않는다.
+- HTTP는 네 배열을 trim하고 blank·정규화 후 중복을 422로 거부한다. `style_examples` 상한은 `PROJECT_BRIEF_STYLE_EXAMPLES_MAX_ITEMS`(기본 3)와 `PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS`(기본 1000)로 조정하며 1 미만은 app 기동 실패다. compose에도 두 값을 노출했다.
+- `WritingBrief`, `_format_brief`, `brief=` service/prompt 배선을 삭제했다. ContextPackage의 authoritative `<project_brief>`가 네 문체 배열을 직렬화하므로 별도 비정본 계약이 사라졌다.
+- ProjectOverview에 네 입력/요약 표면을 추가하고 clear 시 네 배열도 비우도록 연결했다. `style_examples`는 예시별 독립 textarea로 입력해 항목 내부의 여러 문장·줄바꿈을 보존한다. OpenAPI와 TypeScript 생성 타입을 재생성했다.
+
+### Issues found
+
+- 승인 브리프에 방향은 있었지만 exact 필드 집합과 상한 literal이 없었다. public contract를 임의 선택하지 않고 오너 결정을 받은 뒤 구현했다.
+- 환경변수 상한은 배포마다 달라 정적 OpenAPI `maxItems/maxLength`로 표현하면 실제 validator와 모순된다. schema는 required/nonblank/unique shape를, 환경 계약과 HTTP validator는 동적 상한을 authority로 분리했다.
+- 구 Mongo ProjectBrief 문서에는 신규 배열이 없다. strict key access는 기존 이력을 읽지 못하게 하므로 empty-array 호환 read를 추가하고 live adapter 회귀를 붙였다.
+
+### Decisions
+
+- 모든 배열은 `constraints`와 같은 trim/blank/duplicate 정책을 재사용한다. 문체 배열만 별도 정규화 규칙을 만들 이유가 없고 UI/HTTP 동작을 일관되게 유지한다.
+- 상한은 write 경계에만 적용한다. 운영자가 상한을 낮춰도 이미 저장된 append-only version read가 실패해서는 안 되므로 response model/read adapter는 기존 값을 그대로 허용한다.
+- D3 출력 분량, D4 character `aspect`, D5/D6 Gate style warning은 이번 증분에서 선행 구현하지 않았다.
+
+### Verification
+
+- 회귀 선행: 구현 전 focused suite가 신규 계약 미구현으로 **14 failed / 32 passed**해 under-strict guard가 bite함을 확인했다.
+- focused backend(최종 closure 포함): `python3 -m pytest tests/test_project_brief.py tests/test_writing.py tests/test_core_sot_mongo.py -q -p no:cacheprovider` → **47 passed / 57 skipped / 28 subtests**.
+- backend(최종 closure 포함): `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1226 passed / 76 skipped / 313 subtests**.
+- frontend: `npm test -- --run --reporter=dot` → **159 passed / 11 files**; ProjectOverview focused **4 passed**.
+- `npm run gen:api` 성공, `npm run build` 성공(**101 modules**, JS 394.03 kB), `git diff --check` clean. LLM은 사용하지 않았다.
+
+### Next steps
+
+- 증분 2(D3): 새 `output_length` 프리셋 1024/2048/4096을 구현하되 기존 입력 context `max_tokens` 의미를 유지하고 4096은 단일 generate로 제한한다.
+- 증분 3(D4+D5+D6): character `aspect`와 Gate `style` warning/설정 우선·사용자 최종 선택을 구현한다.
+
+## Task — ProjectBrief 문체 통합 독립 검증 B-1 closure + hardening
+
+### Goals
+
+- 독립 검증의 조건부 합격 사유 B-1(read 상한 무관 should-NOT-fire 빈 셀)을 정본 clause와 named regression으로 닫는다.
+- H1~H5를 재평가해 계약·회귀·인계 정확도를 높이는 항목을 반영하고 검증 기록의 원 판결은 보존한다.
+- 전체 검증 후 문체 통합 변경을 한 커밋으로 고정한다.
+
+### User Decisions and Rationale
+
+- 오너가 독립 검증 기록을 확인해 필요한 보강을 한 뒤 커밋하도록 지시했다. B-1 해결안 중 append-only read를 깨지 않는 권장안(a: regression + 정본 명시)을 채택했다.
+
+### Completed work / Issues found
+
+- **B-1 closure**: 기본 상한으로 3개 예시 brief를 저장한 뒤 env를 1개/1자로 낮추고 current/history/detail 세 GET이 모두 200이며 3개 원문을 그대로 반환함을 한 named regression으로 잠갔다. SoT v1.7.21, decision brief, W0 §1 clause/schema comment와 PB-13에 write-only 상한/read 무관 경계를 축자 명시했다.
+- PB-13의 over-strict 방향은 response model에 write 상한 validator를 일시 복사하는 mutation으로 직접 확인했다. 예상대로 `ResponseValidationError`로 bite했고 즉시 원복 후 targeted green·mutation literal 잔여 0을 확인했다.
+- **H1/H2 반영**: `MAX_CHARS=0`, 두 env 각각 비숫자인 경우 app 기동 `ValueError`를 subTest로 추가했다. 기존 `MAX_ITEMS=0`과 함께 네 기동 실패 분기를 각각 잠근다.
+- **H3 반영**: stale W0 §1 필드표/PUT request/clear/trim 규칙을 네 문체 배열로 확장했다. schema file만 v1.7.21이던 비대칭을 제거했다.
+- **H4 반영**: 독립 검증 재실측과 closure 후 최종 수치로 work log/HANDOFF/CHANGELOG를 갱신했다.
+- **H5 평가 후 코드 무변**: duplicate error detail 문구를 pattern-match하는 소비자가 저장소에 없음을 `rg`로 확인했다. FastAPI validation detail은 안정 public literal이 아니므로 별도 호환 분기를 만들지 않았다.
+- 패턴 스윕에서 response model과 request model의 비대칭은 의도된 write/read 경계임을 `git blame`과 현재 diff로 확인했고, 동일 env 상한을 response에 적용하는 다른 위치는 없었다.
+
+### Decisions
+
+- B-1 회귀는 current GET 하나의 표본이 아니라 current/history/detail 세 공개 read surface를 모두 다룬다. 하나만 잠그면 다른 response model이 향후 과잉 validator를 받을 수 있다.
+- original verification의 조건부 합격 본문은 감사 이력으로 수정하지 않고, 파일 끝 closure note에 조건 충족과 최종 PASS를 덧붙인다.
+
+### Verification
+
+- focused backend: **47 passed / 57 skipped / 28 subtests**.
+- 전체 backend: **1226 passed / 76 skipped / 313 subtests**.
+- frontend: **159 passed / 11 files**.
+- `npm run gen:api`, `npm run build` 성공(101 modules, JS 394.03 kB).
+- `git diff --check`, JSON schema parse, mutation 잔여 `if False and` 0, duplicate error detail 소비자 0 확인. LLM 미사용.
+
+### Next steps
+
+- 커밋 후 다음 구현 경계는 D3 출력 분량 프리셋이다.

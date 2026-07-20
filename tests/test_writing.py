@@ -46,7 +46,6 @@ from services.application.app.writing.models import (
     RiskNote,
     RiskNoteType,
     RiskSeverity,
-    WritingBrief,
     WritingCandidate,
     WritingOutputType,
     WritingRequest,
@@ -202,20 +201,6 @@ class PromptAssemblyTest(unittest.TestCase):
         self.assertIn("금지 사실.", user.content)
         self.assertFalse(chat.thinking)
 
-    def test_build_request_includes_brief_when_present(self):
-        templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        template = seed_writing_template(templates)
-        chat = build_writing_request(
-            request=_request(),
-            package=_package(),
-            prompt_template=template,
-            brief=WritingBrief(project_id="p1", tone=("불길함",),
-                               forbidden_patterns=("운명처럼",)),
-        )
-        self.assertIn("Tone: 불길함", chat.messages[1].content)
-        self.assertIn("Avoid: 운명처럼", chat.messages[1].content)
-
-
 class GenerateTest(unittest.TestCase):
     def test_plain_prose_is_wrapped_into_candidate(self):
         # under-strict (rows 2/8): prose → candidate, status always "candidate".
@@ -274,14 +259,6 @@ class GenerateTest(unittest.TestCase):
                 package=_package(project_id="p2"),
             ))
         self.assertIsNone(provider.last_request)
-
-    def test_cross_project_brief_rejected(self):
-        provider = _FakeProvider()
-        with self.assertRaises(WritingError):
-            _run(_service(provider).generate(
-                request=_request(project_id="p1"), package=_package("p1"),
-                brief=WritingBrief(project_id="p2"),
-            ))
 
     def test_template_unavailable_raises_writing_error(self):
         # empty template store → WritingError (not a silent empty prompt).

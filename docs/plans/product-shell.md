@@ -34,7 +34,7 @@
 - 원고 작성, 수정, 저장과 version 확인
 - 분석·색인·검색 준비 상태 확인
 - 검토 대기 후보와 Gate finding 진입
-- 프로젝트 설정과 WritingBrief 진입
+- 프로젝트 설정과 ProjectBrief 문체 설정 진입
 
 ### 제작 관리
 

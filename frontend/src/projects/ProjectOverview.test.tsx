@@ -51,6 +51,10 @@ describe("ProjectOverview", () => {
           tone: null,
           pov: null,
           constraints: ["시간 여행 금지"],
+          style_rules: ["절제된 감각 묘사"],
+          preferred_patterns: ["반전 뒤 짧은 문장"],
+          forbidden_patterns: ["운명처럼"],
+          style_examples: ["눈은 소리 없이 창틀에 쌓였다.\n바람도 잠잠했다."],
         },
         idempotent_replay: false,
       },
@@ -60,6 +64,13 @@ describe("ProjectOverview", () => {
     await screen.findByRole("heading", { name: "겨울 이야기" });
     await userEvent.type(screen.getByLabelText("작품 전제"), "  겨울 항구의 비밀  ");
     await userEvent.type(screen.getByLabelText(/핵심 제약/), " 시간 여행 금지 ");
+    await userEvent.type(screen.getByLabelText(/문체 규칙/), " 절제된 감각 묘사 ");
+    await userEvent.type(screen.getByLabelText(/선호 표현/), " 반전 뒤 짧은 문장 ");
+    await userEvent.type(screen.getByLabelText(/피할 표현/), " 운명처럼 ");
+    await userEvent.type(
+      screen.getByLabelText("문체 예시 1"),
+      " 눈은 소리 없이 창틀에 쌓였다.\n바람도 잠잠했다. ",
+    );
     await userEvent.click(screen.getByRole("button", { name: "저장" }));
 
     expect(await screen.findByText(/version 1을 저장/)).toBeInTheDocument();
@@ -72,6 +83,10 @@ describe("ProjectOverview", () => {
       tone: null,
       pov: null,
       constraints: ["시간 여행 금지"],
+      style_rules: ["절제된 감각 묘사"],
+      preferred_patterns: ["반전 뒤 짧은 문장"],
+      forbidden_patterns: ["운명처럼"],
+      style_examples: ["눈은 소리 없이 창틀에 쌓였다.\n바람도 잠잠했다."],
     });
   });
 
@@ -83,6 +98,8 @@ describe("ProjectOverview", () => {
           id: "pb2", project_id: "p1", version_number: 2,
           premise: "전제", genre: "미스터리", tone: null, pov: null,
           constraints: [],
+          style_rules: [], preferred_patterns: [], forbidden_patterns: [],
+          style_examples: ["눈은 소리 없이 창틀에 쌓였다."],
         },
       },
       {
@@ -103,6 +120,7 @@ describe("ProjectOverview", () => {
       "/projects/p1/review",
     );
     expect(screen.getByText(/인물 · 정본/)).toBeInTheDocument();
+    expect(screen.getByText("눈은 소리 없이 창틀에 쌓였다.")).toBeInTheDocument();
   });
 
   it("clears by appending an empty version and tells the user history remains", async () => {
@@ -110,6 +128,7 @@ describe("ProjectOverview", () => {
     const current = {
       id: "pb1", project_id: "p1", version_number: 1,
       premise: "전제", genre: null, tone: null, pov: null, constraints: [],
+      style_rules: [], preferred_patterns: [], forbidden_patterns: [], style_examples: [],
     };
     const fetchMock = mockFetch(
       { id: "p1", name: "겨울 이야기", archived: false },
@@ -132,13 +151,17 @@ describe("ProjectOverview", () => {
       base_version_id: "pb1",
       premise: null,
       constraints: [],
+      style_rules: [],
+      preferred_patterns: [],
+      forbidden_patterns: [],
+      style_examples: [],
     });
   });
 
   it("keeps archived projects readable without edit actions", async () => {
     mockFetch(
       { id: "p1", name: "보관 작품", archived: true },
-      { brief: { id: "pb1", project_id: "p1", version_number: 1, premise: "남은 전제", genre: null, tone: null, pov: null, constraints: [] } },
+      { brief: { id: "pb1", project_id: "p1", version_number: 1, premise: "남은 전제", genre: null, tone: null, pov: null, constraints: [], style_rules: [], preferred_patterns: [], forbidden_patterns: [], style_examples: [] } },
       { memory: [] },
       { project_id: "p1", items: [], gate_findings: [] },
     );

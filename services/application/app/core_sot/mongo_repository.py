@@ -536,6 +536,10 @@ def _project_brief_doc(brief: ProjectBriefVersion) -> dict:
         "tone": brief.tone,
         "pov": brief.pov,
         "constraints": list(brief.constraints),
+        "style_rules": list(brief.style_rules),
+        "preferred_patterns": list(brief.preferred_patterns),
+        "forbidden_patterns": list(brief.forbidden_patterns),
+        "style_examples": list(brief.style_examples),
         "idempotency_key": brief.idempotency_key,
     }
 
@@ -551,6 +555,13 @@ def _to_project_brief(doc: dict) -> ProjectBriefVersion:
         pov=doc["pov"],
         constraints=tuple(doc["constraints"]),
         idempotency_key=doc["idempotency_key"],
+        # v1.7.13 ProjectBrief documents predate the style arrays. Reading them
+        # as empty preserves their immutable historical meaning without a
+        # migration that rewrites append-only versions.
+        style_rules=tuple(doc.get("style_rules", ())),
+        preferred_patterns=tuple(doc.get("preferred_patterns", ())),
+        forbidden_patterns=tuple(doc.get("forbidden_patterns", ())),
+        style_examples=tuple(doc.get("style_examples", ())),
     )
 
 

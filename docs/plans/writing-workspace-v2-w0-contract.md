@@ -36,23 +36,29 @@ W0는 W1~W4가 소비할 public/data/migration 계약을 잠그는 문서 slice�
 | `tone` | string \| null | optional, nonblank when string |
 | `pov` | string \| null | optional, nonblank when string |
 | `constraints` | string[] | ordered, 각 원소 nonblank, 중복 금지; empty 허용 |
+| `style_rules` | string[] | ordered, 각 원소 nonblank, 중복 금지; empty 허용 (v1.7.21) |
+| `preferred_patterns` | string[] | ordered, 각 원소 nonblank, 중복 금지; empty 허용 (v1.7.21) |
+| `forbidden_patterns` | string[] | ordered, 각 원소 nonblank, 중복 금지; empty 허용 (v1.7.21) |
+| `style_examples` | string[] | ordered 자유 텍스트 예시, 각 원소 nonblank, 중복 금지; empty 허용 (v1.7.21) |
 
 저장 문서는 public 필드와 내부 `idempotency_key`를 가진다. `idempotency_key`는 read response에 노출하지 않는다. timestamp, character/event, synopsis, status, completion score는 W0 schema가 아니다.
 
-HTTP 경계는 string의 바깥 whitespace를 제거한다. optional scalar는 client가 값 없음에 `null`을 명시하며 whitespace-only string은 422다. `constraints`도 각 원소를 trim한 뒤 blank/duplicate면 422다. content의 key 생략과 unknown key는 422다. JSON Schema의 `uniqueItems`는 전처리 전 raw array 중복만 표현하므로 `["a"," a"]` 같은 trim 후 중복의 422 authority는 HTTP validator다. Schema와 runtime validator는 모순이 아니라 각각 구조와 정규화 후 의미 검증을 담당한다.
+HTTP 경계는 string의 바깥 whitespace를 제거한다. optional scalar는 client가 값 없음에 `null`을 명시하며 whitespace-only string은 422다. `constraints`와 네 문체 배열도 각 원소를 trim한 뒤 blank/duplicate면 422다. content의 key 생략과 unknown key는 422다. JSON Schema의 `uniqueItems`는 전처리 전 raw array 중복만 표현하므로 `["a"," a"]` 같은 trim 후 중복의 422 authority는 HTTP validator다. Schema와 runtime validator는 모순이 아니라 각각 구조와 정규화 후 의미 검증을 담당한다.
+
+`style_examples`의 runtime 상한은 write request에만 적용한다(기본 최대 3개·항목당 1,000자, env 조정). append-only 과거 version의 current/history/detail **read response에는 현재 runtime 상한을 적용하지 않는다**. 운영자가 상한을 낮춰도 이미 저장된 예시를 읽을 수 있어야 하며, 이 read 경계는 response model에 write validator를 대칭 복사하지 않는 것으로 구현한다.
 
 ### 1.2 API와 exact envelope
 
 | Method/path | request | response/outcome |
 |---|---|---|
 | `GET /projects/{project_id}/brief` | 없음 | `200 {"brief": ProjectBriefVersion|null}`. project가 있으나 아직 version이 없으면 `brief=null`; project 없음/cross-project는 404 |
-| `PUT /projects/{project_id}/brief` | `{base_version_id:string|null,idempotency_key:string,premise:string|null,genre:string|null,tone:string|null,pov:string|null,constraints:string[]}` | `200 {"brief":ProjectBriefVersion,"idempotent_replay":bool}` |
+| `PUT /projects/{project_id}/brief` | `{base_version_id:string|null,idempotency_key:string,premise:string|null,genre:string|null,tone:string|null,pov:string|null,constraints:string[],style_rules:string[],preferred_patterns:string[],forbidden_patterns:string[],style_examples:string[]}` | `200 {"brief":ProjectBriefVersion,"idempotent_replay":bool}` |
 | `GET /projects/{project_id}/brief/versions` | 없음 | `200 {"versions":ProjectBriefVersion[]}` version_number 오름차순 |
 | `GET /projects/{project_id}/brief/versions/{version_id}` | 없음 | `200 {"brief":ProjectBriefVersion}`; 없음/cross-project 404 |
 
 첫 PUT은 `base_version_id=null`만 허용한다. version이 이미 있는데 null이거나, base가 current가 아니면 409다. 같은 `(project_id,idempotency_key)` replay는 base stale 검사/provider 호출/version 생성 없이 최초 version을 반환한다. 다른 key는 current base를 요구하고 다음 version을 만든다. write는 active project만 허용하며 archived project는 409다.
 
-별도 DELETE/hard delete는 없다. 모든 값 `null` + `constraints=[]`인 version이 “비어 있음/온보딩 건너뜀/내용 지움”을 표현하고 과거 version은 보존한다. 따라서 W2의 “CRUD”는 create/read/versioned replace/clear이며 정본 삭제를 뜻하지 않는다. W2 UI는 이를 “작품 정보 지우기(이력 보존)”로 설명하고 hard delete처럼 표현하지 않는다.
+별도 DELETE/hard delete는 없다. 모든 scalar 값 `null` + `constraints=[]` + 네 문체 배열 `[]`인 version이 “비어 있음/온보딩 건너뜀/내용 지움”을 표현하고 과거 version은 보존한다. 따라서 W2의 “CRUD”는 create/read/versioned replace/clear이며 정본 삭제를 뜻하지 않는다. W2 UI는 이를 “작품 정보 지우기(이력 보존)”로 설명하고 hard delete처럼 표현하지 않는다.
 
 ## 2. ordered unit과 migration
 
@@ -146,12 +152,13 @@ accepted response는 exact top-level `{accepted,intent,gate,saved,analysis_job,i
 | PB-04 | not fire | stale/null base는 기존 version을 바꾸지 않고 409 | `ProjectBriefApiTest::test_stale_base_rejected_without_write` |
 | PB-05 | fire | same key replay는 같은 version, duplicate 0 | `ProjectBriefContractTest::test_same_key_replays_original_version` |
 | PB-06 | not fire | 다른 key는 replay로 오인하지 않고 새 version | `ProjectBriefContractTest::test_different_key_creates_distinct_version` |
-| PB-07 | fire | optional scalar/constraint trim과 exact public keys | `ProjectBriefApiTest::test_put_normalizes_and_returns_exact_envelope` |
-| PB-08 | not fire | blank/duplicate constraint·unknown key는 422/write 0 | `ProjectBriefApiTest::test_invalid_content_rejected_without_write` |
+| PB-07 | fire | optional scalar/5개 배열 trim과 exact public keys | `ProjectBriefApiTest::test_put_normalizes_and_returns_exact_envelope` |
+| PB-08 | not fire | blank/duplicate 배열·unknown/missing key·예시 write 상한 위반은 422/write 0 | `ProjectBriefApiTest::test_invalid_content_rejected_without_write` |
 | PB-09 | fire | all-null/empty version은 clear하되 history 보존 | `ProjectBriefContractTest::test_empty_version_clears_current_and_preserves_history` |
 | PB-10 | not fire | cross-project version read 미노출 | `ProjectBriefApiTest::test_version_read_is_project_isolated` |
 | PB-11 | not fire | archived project PUT은 409, GET/history는 유지 | `ProjectBriefApiTest::test_archived_project_blocks_write_but_allows_read` |
 | PB-12 | not fire | missing/cross-project current brief GET은 null로 위장하지 않고 404 | `ProjectBriefApiTest::test_current_brief_read_is_project_isolated` |
+| PB-13 | not fire | runtime 예시 상한 하향은 기존 current/history/detail read를 거부하지 않음 | `ProjectBriefApiTest::test_lowered_style_example_limits_do_not_break_existing_reads` |
 | OU-01 | fire | legacy creation order→other/1..N(archived 포함) | `OrderedUnitMigrationTest::test_legacy_drafts_migrate_in_repository_order` |
 | OU-02 | not fire | valid migrated project rerun은 byte-for-byte no-op | `OrderedUnitMigrationTest::test_valid_project_rerun_is_noop` |
 | OU-03 | fire | mixed/duplicate/gapped/unknown은 fail-closed | `OrderedUnitMigrationTest::test_invalid_partial_state_fails_without_write` |

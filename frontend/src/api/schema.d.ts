@@ -1117,16 +1117,24 @@ export interface components {
         ProjectBriefVersionPayload: {
             /** Constraints */
             constraints: string[];
+            /** Forbidden Patterns */
+            forbidden_patterns: string[];
             /** Genre */
             genre: string | null;
             /** Id */
             id: string;
             /** Pov */
             pov: string | null;
+            /** Preferred Patterns */
+            preferred_patterns: string[];
             /** Premise */
             premise: string | null;
             /** Project Id */
             project_id: string;
+            /** Style Examples */
+            style_examples: string[];
+            /** Style Rules */
+            style_rules: string[];
             /** Tone */
             tone: string | null;
             /** Version Number */
@@ -1198,14 +1206,22 @@ export interface components {
             base_version_id: string | null;
             /** Constraints */
             constraints: string[];
+            /** Forbidden Patterns */
+            forbidden_patterns: string[];
             /** Genre */
             genre: string | null;
             /** Idempotency Key */
             idempotency_key: string;
             /** Pov */
             pov: string | null;
+            /** Preferred Patterns */
+            preferred_patterns: string[];
             /** Premise */
             premise: string | null;
+            /** Style Examples */
+            style_examples: string[];
+            /** Style Rules */
+            style_rules: string[];
             /** Tone */
             tone: string | null;
         };

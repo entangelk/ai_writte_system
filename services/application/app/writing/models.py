@@ -145,17 +145,6 @@ class RiskNote:
 
 
 @dataclass(frozen=True, slots=True)
-class WritingBrief:
-    """Optional style guidance. Not project memory — never a fact source."""
-
-    project_id: str
-    style_rules: tuple[str, ...] = ()
-    forbidden_patterns: tuple[str, ...] = ()
-    preferred_patterns: tuple[str, ...] = ()
-    tone: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
 class NextUnit:
     """Target for ``start_next_unit`` (W0 contract §3.1).
 

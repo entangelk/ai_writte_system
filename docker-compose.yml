@@ -54,6 +54,11 @@ services:
       # (docs/plans/unaccepted-candidate-persistence-decisions.md). Must be >= 1 —
       # the app refuses to start otherwise rather than silently discard drafts.
       WRITING_SCRATCH_MAX_PER_DRAFT: "${WRITING_SCRATCH_MAX_PER_DRAFT:-20}"
+      # ProjectBrief few-shot examples share the Writing context budget. Keep a
+      # conservative default while allowing dogfood tuning without code changes.
+      # Both values must be >= 1 or the application refuses to start.
+      PROJECT_BRIEF_STYLE_EXAMPLES_MAX_ITEMS: "${PROJECT_BRIEF_STYLE_EXAMPLES_MAX_ITEMS:-3}"
+      PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS: "${PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS:-1000}"
       # Real vector backend (B.4): the embedding service and Chroma. When these
       # are set the shared vector index is the persistent Chroma backend with
       # real 1024-dim embeddings; without them the app falls back to the fake.

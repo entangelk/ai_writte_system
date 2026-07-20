@@ -41,6 +41,10 @@ class ProjectBriefVersion:
     pov: str | None
     constraints: tuple[str, ...]
     idempotency_key: str
+    style_rules: tuple[str, ...] = ()
+    preferred_patterns: tuple[str, ...] = ()
+    forbidden_patterns: tuple[str, ...] = ()
+    style_examples: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

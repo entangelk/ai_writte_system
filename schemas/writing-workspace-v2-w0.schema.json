@@ -3,7 +3,7 @@
   "$id": "https://local.ai-writing-system/schemas/writing-workspace-v2-w0.schema.json",
   "title": "Writing Workspace V2 W0 public contract",
   "description": "Schema catalog. Consumers MUST select an exact operation or entity through a #/$defs/... fragment; the permissive catalog root is never an endpoint schema.",
-  "x-contract-version": "v1.7.10",
+  "x-contract-version": "v1.7.21",
   "$defs": {
     "nonBlankString": {
       "type": "string",
@@ -25,7 +25,7 @@
     "projectBriefVersion": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "project_id", "version_number", "premise", "genre", "tone", "pov", "constraints"],
+      "required": ["id", "project_id", "version_number", "premise", "genre", "tone", "pov", "constraints", "style_rules", "preferred_patterns", "forbidden_patterns", "style_examples"],
       "properties": {
         "id": { "$ref": "#/$defs/nonBlankString" },
         "project_id": { "$ref": "#/$defs/nonBlankString" },
@@ -39,13 +39,30 @@
           "uniqueItems": true,
           "$comment": "uniqueItems checks the raw array. HTTP validation trims each item first and rejects post-trim duplicates such as ['a', ' a'].",
           "items": { "$ref": "#/$defs/nonBlankString" }
+        },
+        "style_rules": {
+          "type": "array", "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonBlankString" }
+        },
+        "preferred_patterns": {
+          "type": "array", "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonBlankString" }
+        },
+        "forbidden_patterns": {
+          "type": "array", "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonBlankString" }
+        },
+        "style_examples": {
+          "type": "array", "uniqueItems": true,
+          "$comment": "Runtime max items/chars are environment-adjustable and apply only to writes; existing version reads ignore the current runtime limit. HTTP request validation is authoritative.",
+          "items": { "$ref": "#/$defs/nonBlankString" }
         }
       }
     },
     "projectBriefPutRequest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["base_version_id", "idempotency_key", "premise", "genre", "tone", "pov", "constraints"],
+      "required": ["base_version_id", "idempotency_key", "premise", "genre", "tone", "pov", "constraints", "style_rules", "preferred_patterns", "forbidden_patterns", "style_examples"],
       "properties": {
         "base_version_id": {
           "oneOf": [
@@ -62,6 +79,23 @@
           "type": "array",
           "uniqueItems": true,
           "$comment": "uniqueItems checks the raw array. HTTP validation trims each item first and rejects post-trim duplicates such as ['a', ' a'].",
+          "items": { "$ref": "#/$defs/nonBlankString" }
+        },
+        "style_rules": {
+          "type": "array", "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonBlankString" }
+        },
+        "preferred_patterns": {
+          "type": "array", "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonBlankString" }
+        },
+        "forbidden_patterns": {
+          "type": "array", "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonBlankString" }
+        },
+        "style_examples": {
+          "type": "array", "uniqueItems": true,
+          "$comment": "Runtime max items/chars are environment-adjustable and apply only to writes; existing version reads ignore the current runtime limit. HTTP request validation is authoritative.",
           "items": { "$ref": "#/$defs/nonBlankString" }
         }
       }

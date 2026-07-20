@@ -18,10 +18,7 @@ from services.application.app.writing.context_pointer import (
     context_pointer_of,
     pointer_json,
 )
-from services.application.app.writing.models import (
-    WritingBrief,
-    WritingRequest,
-)
+from services.application.app.writing.models import WritingRequest
 from services.llm_gateway.app.payload import ChatCompletionRequest, ChatMessage
 from services.application.app.analysis.prompt_templates import PromptTemplate
 
@@ -80,6 +77,10 @@ def format_context_package(
             f"- tone: {brief.tone}" if brief.tone is not None else "",
             f"- pov: {brief.pov}" if brief.pov is not None else "",
             *(f"- constraint: {rule}" for rule in brief.constraints),
+            *(f"- style rule: {rule}" for rule in brief.style_rules),
+            *(f"- prefer: {pattern}" for pattern in brief.preferred_patterns),
+            *(f"- avoid: {pattern}" for pattern in brief.forbidden_patterns),
+            *(f"- style example: {example}" for example in brief.style_examples),
         ]
         populated = [line for line in brief_lines if line]
         sections.append(
@@ -125,25 +126,11 @@ def _format_item(
     return f"- [{label}] {pointer_json(pointer)} {item.text}"
 
 
-def _format_brief(brief: WritingBrief) -> str:
-    lines: list[str] = []
-    if brief.tone:
-        lines.append("Tone: " + ", ".join(brief.tone))
-    for rule in brief.style_rules:
-        lines.append(f"Style: {rule}")
-    for pattern in brief.preferred_patterns:
-        lines.append(f"Prefer: {pattern}")
-    for pattern in brief.forbidden_patterns:
-        lines.append(f"Avoid: {pattern}")
-    return "\n".join(lines)
-
-
 def build_writing_request(
     *,
     request: WritingRequest,
     package: ContextPackage,
     prompt_template: PromptTemplate,
-    brief: WritingBrief | None = None,
     model: str | None = None,
     max_tokens: int = 1024,
     temperature: float | None = None,
@@ -155,10 +142,6 @@ def build_writing_request(
         "[INSTRUCTION]",
         request.instruction,
     ]
-    if brief is not None:
-        brief_text = _format_brief(brief)
-        if brief_text:
-            parts += ["", "[WRITING BRIEF]", brief_text]
     parts += ["", "[CONTEXT PACKAGE]", format_context_package(package)]
     if request.draft_excerpt:
         parts += ["", "[CURRENT DRAFT EXCERPT]", request.draft_excerpt]

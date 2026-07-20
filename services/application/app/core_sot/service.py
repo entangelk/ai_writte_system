@@ -419,6 +419,10 @@ class CoreSotService:
         tone: str | None,
         pov: str | None,
         constraints: tuple[str, ...],
+        style_rules: tuple[str, ...] = (),
+        preferred_patterns: tuple[str, ...] = (),
+        forbidden_patterns: tuple[str, ...] = (),
+        style_examples: tuple[str, ...] = (),
     ) -> PutProjectBriefResult:
         if not idempotency_key:
             raise CoreSotError("idempotency_key is required")
@@ -449,6 +453,10 @@ class CoreSotService:
             pov=pov,
             constraints=constraints,
             idempotency_key=idempotency_key,
+            style_rules=style_rules,
+            preferred_patterns=preferred_patterns,
+            forbidden_patterns=forbidden_patterns,
+            style_examples=style_examples,
         )
         try:
             self._repo.record_project_brief(brief)

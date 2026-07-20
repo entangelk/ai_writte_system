@@ -142,6 +142,10 @@ class _MongoContractMixin:
             tone=None,
             pov=None,
             constraints=("Keep the secret",),
+            style_rules=("Keep descriptions restrained",),
+            preferred_patterns=("Short reveal endings",),
+            forbidden_patterns=("As fate would have it",),
+            style_examples=("Snow gathered silently.",),
         )
         replay = self.service.put_project_brief(
             project_id=project.id,
@@ -160,6 +164,28 @@ class _MongoContractMixin:
             self.service.list_project_brief_versions(project_id=project.id),
             (first.brief, second.brief),
         )
+        self.assertEqual(second.brief.style_examples, ("Snow gathered silently.",))
+
+    def test_legacy_project_brief_document_reads_with_empty_style_arrays(self):
+        project = self.service.create_project(name="Legacy brief")
+        self.repo._project_briefs.insert_one({
+            "_id": "legacy-brief-1",
+            "project_id": project.id,
+            "version_number": 1,
+            "premise": "Before style fields",
+            "genre": None,
+            "tone": None,
+            "pov": None,
+            "constraints": [],
+            "idempotency_key": "legacy-key",
+        })
+
+        brief = self.service.get_project_brief(project_id=project.id)
+
+        self.assertEqual(brief.style_rules, ())
+        self.assertEqual(brief.preferred_patterns, ())
+        self.assertEqual(brief.forbidden_patterns, ())
+        self.assertEqual(brief.style_examples, ())
 
     def test_concurrent_project_brief_version_collision_has_one_success_one_stale(self):
         """Live Mongo guard for W2 verification H3.
