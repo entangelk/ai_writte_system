@@ -45,7 +45,7 @@
 35. [`frontend-writing-workspace-decisions.md`](frontend-writing-workspace-decisions.md) — Product shell C Writing 작업공간 착수 브리프(Resolved: D1=A clean latest+사용자 설명 · D2=A 기본 generate→Gate→accept 먼저 · D3=A 성공/partial HTTP model+OpenAPI · D4=A read-only candidate first, 부분 수정 UX는 C1 후 재검토 · D5=A C0→C1→C2)
 36. [`writing-workspace-v2-w0-contract.md`](writing-workspace-v2-w0-contract.md) — 오너 승인 Workspace V2의 W0 exact contract(ProjectBrief version/API, ordered unit/reorder/migration, `append_current|start_next_unit` accept 원자성·멱등, 양방향 regression matrix). W0 완료, runtime 구현은 W2/W3에서 수행. W4 export 계약은 §6
 37. [`unaccepted-candidate-persistence-decisions.md`](unaccepted-candidate-persistence-decisions.md) — 미채택 Writing candidate 영속. **완료** (D0=B/D1=B/D2=A, 구현·독립 검증 2회 합격, 보존/만료 정책은 SoT v1.7.20 정본 승격)
-38. [`writing-style-and-length-control-decisions.md`](writing-style-and-length-control-decisions.md) — 문체 지시(few-shot 예시)와 생성 분량 제어 **제안 브리프(오너 결정 대기, 구현 미착수)**. **어투 계약이 `ProjectBrief.tone`(정본·배선됨)과 `WritingBrief.tone`(Phase 5·죽은 경로)로 중복 존재하는 모순을 D1에서 정리해야 함**
+38. [`writing-style-and-length-control-decisions.md`](writing-style-and-length-control-decisions.md) — 문체/어투 계약(**설정·관찰·검증 3층**)과 생성 분량 제어 **제안 브리프(오너 결정 대기, 구현 미착수, D0~D6)**. 문체를 **키 유무로 3축 분해**(작품 문체=project / **캐릭터 어투=character** / 분위기=키 없음→Phase 7 몫). **어투 계약이 `ProjectBrief.tone`(정본·배선됨)과 `WritingBrief.tone`(Phase 5·죽은 경로)로 중복 존재하는 모순을 D1에서 정리**해야 하고, **D4(캐릭터 어투 payload)는 오너가 "taxonomy 동결"의 의미를 3종 유지인지 payload까지 불변인지 확인해 줘야 진행 가능**
 
 ## 문서 지위와 우선순위
 

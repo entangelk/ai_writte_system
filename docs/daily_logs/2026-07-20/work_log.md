@@ -168,6 +168,35 @@
 - **D1 추천을 A(ProjectBrief 확장 + WritingBrief 삭제)로 잡은 근거**: W2가 이미 append-only version·optimistic base·idempotency·history·archived 경계를 문체에도 그대로 필요한 형태로 구현해 뒀다. B(WritingBrief 부활)는 그걸 재구현하면서 tone 중복도 남긴다. 죽은 경로를 살리는 것보다 **살아 있는 계약으로 모으는 편**이 모순을 자연 소멸시킨다.
 - **분량 필드는 새 이름을 쓰도록 브리프에 명시**했다. 기존 `max_tokens`(입력 예산)의 의미를 바꾸면 5개 endpoint의 기존 계약이 흔들린다.
 
+## Task — 문체 브리프 개정 (오너 3축 분석 반영)
+
+### User Decisions and Rationale
+
+- 오너가 결정적 분석을 제시했다: **전체 문서의 어투와 캐릭터의 어투는 분리되어야 하고**, Phase 7에 있는 톤 항목은 *쓴 글에 대한 분석* 쪽일 것이며, 따라서 **분석의 어투 관찰은 글 전체 분위기가 아니라 각 캐릭터에 대한 것**이어야 한다. 나아가 이를 **별도 Gate로 활용**해 "설정한 문장체 vs 작성된 문장체"의 일치를 검증할 수 있다고 제안했다.
+- 검증 결과 **오너 가설이 맞았고, 더 나아가 Phase 7이 막혔던 지점을 푼다**: 아이디에이션 원문(`chat-revision-ideation.md:200`)이 분위기·톤을 directive에서 뺀 이유는 **"'아린'처럼 키를 못 박으므로"** — 즉 차단 사유가 **안정적 키의 부재**다. **캐릭터 어투는 캐릭터라는 키를 갖는다.** 따라서 캐릭터 축으로 좁히는 것은 Phase 7 판단을 뒤집는 게 아니라 **그 전제를 만족시키는 유일한 하위 사례**다. 분위기/mood는 여전히 키가 없어 Phase 7 몫으로 남긴다.
+- 오너가 "한꺼번에 결정하겠다"고 하여 D0~D6을 한 브리프에 담았다.
+
+### Completed work
+
+- 브리프를 **3축 프레이밍**(작품 문체 / 캐릭터 어투 / 분위기)으로 재작성하고 D0~D6으로 확장했다: D0 범위, D1 작품 문체 위치(모순 해소), D2 few-shot 형태, D3 분량, **D4 캐릭터 어투 관찰의 모양(★핵심)**, **D5 Gate 정합 검증**, **D6 설정↔관찰 우선순위**.
+- `plans/README.md` 인덱스를 3축·D4 전제 확인 필요까지 반영해 갱신.
+
+### Issues found (브리프 작성 중 확인한 제약)
+
+- **Gate 배관은 이미 있다**: Gate가 `format_context_package(package)`를 쓰므로 **`<project_brief>`(tone·pov 포함)를 이미 프롬프트에서 본다**(`gate_prompt.py:67`). 게다가 **"설정 vs 작성" 대조는 이미 작동하는 선례가 있다 — POV다**(`ProjectBrief.pov` ↔ `pov` finding). 따라서 검증 층의 실제 증분은 새 인프라가 아니라 **finding type 1개 + 템플릿 절**이다(현재 템플릿이 `Check only: do_not_use, POV, and continuity`로 닫혀 있음, `gate_prompt.py:21`).
+- **taxonomy 동결이 D4를 좌우한다**: `character_observation` payload가 **exact-match `("name","observation")`**이고(`analysis/schema.py:34`) Phase 7 §2가 taxonomy 확장을 금지한다. 그래서 캐릭터 어투는 (A) 자유 텍스트 `observation`에 서술 — schema 무변이나 **Gate가 기계적으로 대조 불가**, (B) `aspect` payload 필드 추가 — taxonomy 3종은 유지하며 식별 가능, (C) 신규 type — **명시적 위반** 중 택일이다. **B의 합법성은 "동결"이 3종 유지를 뜻하는지 payload 불변까지 뜻하는지에 달려 있어, 오너 확인 없이는 진행 불가**임을 브리프에 명시했다.
+- **새 finding type은 자동 revise 정책을 건드린다**: 자동 revise는 **continuity 전용**이라(`_eligible_revision_finding` → `_is_eligible_continuity_revise`, `revise_gate.py:541`) 새 type은 기본적으로 루프가 무시한다. 정하지 않으면 "finding은 뜨는데 루프가 무시하는" 어중간한 상태가 된다.
+
+### Decisions
+
+- **D5 추천을 A(warning 전용·자동 revise 제외)로 잡은 근거**: Gate quality baseline 21/21은 **경계가 명확한 케이스**에서 나온 수치다. 문체 일치는 본질적으로 흐릿해 오탐이 구조적으로 높고, 자동 revise에 넣으면 **Gate가 틀렸을 때 멀쩡한 산문을 고쳐 놓는다**. "실 오판 fixture가 생길 때만 Gate를 손댄다"는 기존 자세와 일관된다.
+- **D6 추천을 A(Phase 7 D7 트리 재사용)로 잡은 근거**: `저자 directive > canonical 관찰 > candidate 관찰`은 이미 잠긴 원칙이고 문체에도 타당하다. 다만 D7 원문이 서사 사실을 상정하므로 **"문체에도 적용"을 이 브리프가 명시**해야 잠긴다.
+- **분위기/mood는 Deferred로 명확히 분리**했다. 키가 없다는 성격 차이가 Phase 7이 별도 설계를 남긴 이유이므로, 여기서 끌어오면 그 설계를 선점한다.
+
+### Verification
+
+- 브리프의 신규 `file:line` 인용 8건과 링크 대상 3건을 전수 재확인(전부 OK). 코드 변경 0.
+
 ### Next steps
 
 - **오너가 잠정 보존/만료 정책(상한 20·accept 즉시 삭제·시간 만료 없음)을 SoT로 승격·확정**해야 한다. 그때까지 정본 계약이 아니다.
