@@ -129,6 +129,10 @@ from services.application.app.writing.loop_audit import (
     WritingLoopAuditNotFound,
     WritingLoopAuditService,
 )
+from services.application.app.writing.scratch import (
+    InMemoryWritingScratchRepository,
+    WritingScratchService,
+)
 from services.application.app.writing.http_models import (
     ACCEPT_RESPONSES,
     REVISE_AND_GATE_RESPONSES,
@@ -390,6 +394,22 @@ def _default_writing_loop_audit_service() -> WritingLoopAuditService:
     )
     from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
     return WritingLoopAuditService(MongoWritingLoopAuditRepository.from_uri(
+        uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
+    ))
+
+
+def _default_writing_scratch_service() -> WritingScratchService:
+    # Unaccepted-candidate recovery store (brief D2=A). In-memory default keeps
+    # the safety net working with no infra; a Mongo URI upgrades it to durable
+    # ``writing_drafts_scratch`` (Core-SOT-external).
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if not uri:
+        return WritingScratchService(InMemoryWritingScratchRepository())
+    from services.application.app.writing.scratch_mongo import (
+        MongoWritingScratchRepository,
+    )
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+    return WritingScratchService(MongoWritingScratchRepository.from_uri(
         uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
     ))
 
@@ -1298,6 +1318,7 @@ def create_app(
     writing_retrieval_planner: TerminalJsonWritingRetrievalPlanner | None = None,
     writing_loop_policy: WritingLoopPolicy | None = None,
     writing_loop_audit_service: WritingLoopAuditService | None = None,
+    writing_scratch_service: WritingScratchService | None = None,
     vector_index: InMemoryVectorIndexAdapter | None = None,
 ) -> FastAPI:
     app = FastAPI(title="AI Writing System Application")
@@ -1357,6 +1378,11 @@ def create_app(
     # run goes unaudited (P2=A); a Mongo URI upgrades it to the durable adapter.
     writing_loop_audit = (
         writing_loop_audit_service or _default_writing_loop_audit_service()
+    )
+    # Unaccepted-candidate recovery store (brief D0=B/D1=B/D2=A). Always
+    # available (in-memory default) so generate can always leave a safety net.
+    writing_scratch = (
+        writing_scratch_service or _default_writing_scratch_service()
     )
     writing = writing_service or _default_writing_service()
     writing_gate = writing_gate_service or _default_writing_gate_service()
@@ -2980,6 +3006,23 @@ def create_app(
             ) from exc
         except ProviderError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+        # Safety net (brief D0=B): persist the just-generated candidate to the
+        # recovery store so a refresh/navigation before accept doesn't lose it.
+        # Keyed by the draft being continued; skipped when there's no draft key.
+        # Best-effort — a scratch failure must never fail generation.
+        if body.current_position is not None:
+            try:
+                writing_scratch.save(
+                    project_id=project_id,
+                    draft_id=body.current_position.draft_id,
+                    request_id=body.request_id,
+                    task_type=candidate.task_type.value,
+                    output_type=candidate.output_type.value,
+                    instruction=body.instruction,
+                    candidate_text=candidate.text,
+                )
+            except Exception:  # noqa: BLE001 — safety net never blocks generate
+                pass
         return _writing_candidate_payload(candidate)
 
     @app.post("/projects/{project_id}/writing/gate",
@@ -3538,6 +3581,25 @@ def create_app(
         candidate = WritingCandidate(
             body.request_id, project_id, task_type, output_type,
             body.candidate_text, intent=intent, next_unit=next_unit)
+
+        def _clear_scratch_for_saved_accept() -> None:
+            # A *saved* accept means the canonical version now exists, so the
+            # draft's unaccepted scratch history is moot (brief: accept 시 즉시
+            # 삭제). Called from BOTH saved outcomes — the clean 200 and the 502
+            # partial where the version saved but the analysis job failed. A
+            # non-PASS Gate result (accepted=false, nothing saved) must NOT clear:
+            # the user still has a bounced draft worth recovering. Key on the same
+            # draft generate used (current_position), falling back to the accept
+            # target. Best-effort — cleanup never fails the accept.
+            cleanup_draft_id = (
+                body.current_position.draft_id
+                if body.current_position is not None else body.draft_id
+            )
+            try:
+                writing_scratch.clear_draft(project_id, cleanup_draft_id)
+            except Exception:  # noqa: BLE001 — cleanup never blocks accept
+                pass
+
         try:
             package = await context_search.build_context_package(search_request)
             result = await writing_accept.accept(
@@ -3555,6 +3617,10 @@ def create_app(
         except InvalidWritingGateResult as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         except WritingAcceptAnalysisError as exc:
+            # The version WAS saved here (only the analysis job failed), so the
+            # canonical draft exists and the scratch history is moot — same
+            # rationale as the clean success path below.
+            _clear_scratch_for_saved_accept()
             return JSONResponse(status_code=502, content={
                 "accepted": True,
                 "intent": exc.intent.value,
@@ -3569,6 +3635,8 @@ def create_app(
         except ProviderError as exc:
             status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
             raise HTTPException(status_code=status, detail=str(exc)) from exc
+        if result.accepted:
+            _clear_scratch_for_saved_accept()
         return {
             "accepted": result.accepted,
             "intent": result.intent.value,
@@ -3579,6 +3647,52 @@ def create_app(
             "analysis_job": (_analysis_job_payload(result.analysis_job)
                              if result.analysis_job is not None else None),
             "idempotent_replay": result.idempotent_replay,
+        }
+
+    def _writing_scratch_payload(entry) -> dict[str, object]:
+        return {
+            "id": entry.id,
+            "draft_id": entry.draft_id,
+            "request_id": entry.request_id,
+            "task_type": entry.task_type,
+            "output_type": entry.output_type,
+            "instruction": entry.instruction,
+            "candidate_text": entry.candidate_text,
+            "intent": entry.intent,
+            "created_at": entry.created_at.isoformat(),
+        }
+
+    @app.get("/projects/{project_id}/writing/scratch")
+    async def writing_scratch_list_endpoint(
+        project_id: str, draft_id: str
+    ) -> dict[str, object]:
+        # Recovery surface (brief D1=B): unaccepted candidates for a draft,
+        # newest first, so the editor can offer to restore an in-progress draft.
+        try:
+            _require_project_exists(project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        entries = writing_scratch.list_for_draft(project_id, draft_id)
+        return {
+            "project_id": project_id,
+            "draft_id": draft_id,
+            "items": [_writing_scratch_payload(e) for e in entries],
+        }
+
+    @app.delete("/projects/{project_id}/writing/scratch")
+    async def writing_scratch_discard_endpoint(
+        project_id: str, draft_id: str
+    ) -> dict[str, object]:
+        # Explicit "버리기": drop the draft's unaccepted scratch history.
+        try:
+            _require_project_exists(project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        deleted = writing_scratch.clear_draft(project_id, draft_id)
+        return {
+            "project_id": project_id,
+            "draft_id": draft_id,
+            "deleted": deleted,
         }
 
     return app

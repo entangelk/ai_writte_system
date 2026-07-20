@@ -829,6 +829,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{project_id}/writing/scratch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Writing Scratch List Endpoint */
+        get: operations["writing_scratch_list_endpoint_projects__project_id__writing_scratch_get"];
+        put?: never;
+        post?: never;
+        /** Writing Scratch Discard Endpoint */
+        delete: operations["writing_scratch_discard_endpoint_projects__project_id__writing_scratch_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3660,6 +3678,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WritingReviseGatePartial"] | components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    writing_scratch_list_endpoint_projects__project_id__writing_scratch_get: {
+        parameters: {
+            query: {
+                draft_id: string;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    writing_scratch_discard_endpoint_projects__project_id__writing_scratch_delete: {
+        parameters: {
+            query: {
+                draft_id: string;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

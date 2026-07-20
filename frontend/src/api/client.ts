@@ -333,6 +333,52 @@ export async function acceptWriting(
   throw new ApiError(response.status, await readDetail(response));
 }
 
+// --- Unaccepted candidate recovery (brief D0=B/D1=B/D2=A) ------------------
+// The scratch list/discard endpoints return `dict[str, object]` (no
+// response_model), so the generated schema carries no shape for them — the
+// payloads are hand-declared here, mirroring `_writing_scratch_payload` in
+// main.py. This is the pre-dogfood safety net: a generated candidate is
+// persisted to `writing_drafts_scratch` so a refresh before accept doesn't lose
+// it. Cleared on a saved accept; the draft keeps a bounded newest-first history.
+
+/** One recoverable unaccepted candidate (newest-first in the list). */
+export interface ScratchCandidate {
+  id: string;
+  draft_id: string;
+  request_id: string;
+  task_type: string;
+  output_type: string;
+  instruction: string;
+  candidate_text: string;
+  intent: string | null;
+  created_at: string;
+}
+
+export interface ScratchListResponse {
+  project_id: string;
+  draft_id: string;
+  items: ScratchCandidate[];
+}
+
+export function listWritingScratch(
+  projectId: string,
+  draftId: string,
+): Promise<ScratchListResponse> {
+  return request(
+    `/projects/${projectId}/writing/scratch?draft_id=${encodeURIComponent(draftId)}`,
+  );
+}
+
+export function discardWritingScratch(
+  projectId: string,
+  draftId: string,
+): Promise<{ project_id: string; draft_id: string; deleted: number }> {
+  return request(
+    `/projects/${projectId}/writing/scratch?draft_id=${encodeURIComponent(draftId)}`,
+    { method: "DELETE" },
+  );
+}
+
 // --- Review Inbox (Phase 6 B) ---------------------------------------------
 // The review-inbox / gate-finding read endpoints return `dict[str, object]`, so
 // the generated schema has no response body for them (SoT: the remaining

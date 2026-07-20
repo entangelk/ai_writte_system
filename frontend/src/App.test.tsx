@@ -3,17 +3,25 @@ import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
+function ok(body: unknown) {
+  return { ok: true, status: 200, statusText: "", json: async () => body };
+}
+
 function mockFetch(...bodies: unknown[]) {
   const fetchMock = vi.fn();
   for (const body of bodies) {
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      statusText: "",
-      json: async () => body,
-    });
+    fetchMock.mockResolvedValueOnce(ok(body));
   }
-  vi.stubGlobal("fetch", fetchMock);
+  // The draft editor's unaccepted-candidate recovery banner (ScratchRecovery)
+  // fetches its own list on mount. That call is orthogonal to the routing these
+  // tests pin, so it is served an empty list *outside* the recorded mock —
+  // otherwise the expected request sequences below would gain a stray entry.
+  vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
+    if (typeof url === "string" && url.includes("/writing/scratch")) {
+      return Promise.resolve(ok({ project_id: "p1", draft_id: "d1", items: [] }));
+    }
+    return fetchMock(url, init);
+  });
   return fetchMock;
 }
 

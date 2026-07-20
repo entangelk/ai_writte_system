@@ -16,6 +16,7 @@ import {
   type ReviewSourcePointer,
 } from "../api/client";
 import { WritingPanel } from "../writing/WritingPanel";
+import { ScratchRecovery } from "../writing/ScratchRecovery";
 import { AnalysisTrigger } from "../review/AnalysisTrigger";
 import { WorkspaceReviewPanel } from "../review/WorkspaceReviewPanel";
 
@@ -72,6 +73,9 @@ export function DraftEditor() {
   const [selecting, setSelecting] = useState(false);
   const [exporting, setExporting] = useState<"txt" | "markdown" | null>(null);
   const [forcedReadOnly, setForcedReadOnly] = useState(false);
+  // Bumped after a successful accept so the scratch-recovery banner re-fetches
+  // and clears (the accept dropped the draft's scratch server-side).
+  const [scratchRefresh, setScratchRefresh] = useState(0);
   const [analysisStatus, setAnalysisStatus] = useState<
     "idle" | "running" | "failed" | "complete"
   >("idle");
@@ -590,16 +594,26 @@ export function DraftEditor() {
                 </div>
                 <div className="rail-panel" role="tabpanel">
                   {activePanel === "writing" && (
-                    <WritingPanel
-                      projectId={projectId}
-                      draftId={draftId}
-                      latestVersionId={latestVersionId}
-                      onLatest={onLatest}
-                      dirty={dirty}
-                      hasVersions={versions.length > 0}
-                      readOnly={readOnly}
-                      onAccepted={() => void reloadLatest()}
-                    />
+                    <>
+                      <ScratchRecovery
+                        projectId={projectId}
+                        draftId={draftId}
+                        refreshKey={scratchRefresh}
+                      />
+                      <WritingPanel
+                        projectId={projectId}
+                        draftId={draftId}
+                        latestVersionId={latestVersionId}
+                        onLatest={onLatest}
+                        dirty={dirty}
+                        hasVersions={versions.length > 0}
+                        readOnly={readOnly}
+                        onAccepted={() => {
+                          setScratchRefresh((n) => n + 1);
+                          void reloadLatest();
+                        }}
+                      />
+                    </>
                   )}
                   {activePanel === "analysis" && (
                     <AnalysisTrigger

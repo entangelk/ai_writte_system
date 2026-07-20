@@ -15,13 +15,28 @@ function response({ status = 200, body }: MockResponse) {
   };
 }
 
+// The unaccepted-candidate recovery banner (ScratchRecovery) fetches its own
+// list when the editor mounts, which is orthogonal to every flow pinned in this
+// file. Serve it an empty list *outside* the recorded mock so the ordered
+// indices and call counts below keep describing the editor's own requests only.
+function stubFetch<T extends ReturnType<typeof vi.fn>>(fetchMock: T): T {
+  vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
+    if (typeof url === "string" && url.includes("/writing/scratch")) {
+      return Promise.resolve(
+        response({ body: { project_id: "p1", draft_id: "d1", items: [] } }),
+      );
+    }
+    return fetchMock(url, init);
+  });
+  return fetchMock;
+}
+
 function mockFetch(...responses: MockResponse[]) {
   const fetchMock = vi.fn();
   for (const next of responses) {
     fetchMock.mockResolvedValueOnce(response(next));
   }
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
+  return stubFetch(fetchMock);
 }
 
 function renderEditor(path = "/projects/p1/drafts/d1") {
@@ -229,7 +244,7 @@ describe("DraftEditor", () => {
       .mockResolvedValueOnce(response({ body: draft }))
       .mockResolvedValueOnce(response({ body: { versions: [] } }))
       .mockReturnValueOnce(pending);
-    vi.stubGlobal("fetch", fetchMock);
+    stubFetch(fetchMock);
 
     const { container } = renderEditor();
     await userEvent.type(await screen.findByLabelText("원고 본문"), "첫 문장");
@@ -259,7 +274,7 @@ describe("DraftEditor", () => {
       .mockResolvedValueOnce(response({ body: draft }))
       .mockResolvedValueOnce(response({ body: { versions: [] } }))
       .mockReturnValueOnce(pending);
-    vi.stubGlobal("fetch", fetchMock);
+    stubFetch(fetchMock);
 
     renderEditor();
     const editor = await screen.findByLabelText("원고 본문");
@@ -477,7 +492,7 @@ describe("DraftEditor", () => {
       .mockResolvedValueOnce(response({ body: { versions: [version1, version3] } }))
       .mockResolvedValueOnce(response({ body: detail(version3, "셋째 원고") }))
       .mockReturnValueOnce(pendingSelection);
-    vi.stubGlobal("fetch", fetchMock);
+    stubFetch(fetchMock);
 
     renderEditor();
     const editor = await screen.findByLabelText("원고 본문");
@@ -1065,7 +1080,7 @@ describe("DraftEditor", () => {
       };
       return response({ body: bodies[input] });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    stubFetch(fetchMock);
 
     const confirm = vi.spyOn(window, "confirm")
       .mockReturnValueOnce(false)
