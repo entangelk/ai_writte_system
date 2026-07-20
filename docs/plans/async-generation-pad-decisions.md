@@ -69,9 +69,11 @@
 | 선택지 | 설명 | 장점 | 단점 |
 |---|---|---|---|
 | A. in-process background task | FastAPI/asyncio 태스크 | 가장 단순, 신규 인프라 0 | **앱 재시작 시 진행 중인 3분짜리 생성이 증발**, 관측·재시도 없음 |
-| B. **worker 서비스 확장 + outbox 이벤트 신설** | 기존 상시 worker가 생성 job을 claim해 실행 | **재시작에 살아남음**, atomic claim이 이중 실행 방지, worker가 이미 application 코드 공유 | outbox 이벤트 타입·job 저장 신설 |
+| B. **worker 서비스 확장 + 독립 job 테이블** | 기존 상시 worker가 **생성 job 테이블**을 claim해 실행 | **재시작에 살아남음**, atomic claim이 이중 실행 방지, worker가 이미 application 코드 공유 | job 저장소·claim 루프 신설 |
 
 **추천: B.** 몇 분짜리 작업이 앱 재시작으로 사라지면 비동기를 만든 이유가 사라진다. worker는 이미 compose 상시 서비스이고 중복 실행 방지도 이미 갖췄다.
+
+**★ 메커니즘 명확화(검증 H3 반영)**: 여기서 말하는 claim 소스는 **독립 job 테이블(Analysis 선례)이며, 색인 sync outbox가 아니다.** 둘은 성격이 다르다 — 색인 outbox는 **데이터 변경 CDC**(`IndexSyncEvent`가 전부 `*_ARCHIVED`/`*_UPSERTED`)로 멱등·단발 drain이고, 생성 job은 **사용자 요청 기반의 장시간·비멱등 작업**이다. 생성을 색인 outbox에 얹으면 "생성-via-색인-outbox"라는 어색한 결합이 되고 `03-index-sync-outbox-decisions.md`의 계약까지 흔든다. **따라서 이 슬라이스는 색인 outbox를 건드리지 않는다.** worker는 기존 색인 drain 루프에 더해 **생성 job 큐를 폴링·claim하는 별도 루프**를 갖는다.
 
 ## D4 — job 상태를 어디에 둘 것인가
 
@@ -112,8 +114,8 @@
 ## Owner decisions — 확정 (2026-07-20)
 
 - **D1 = A** — `writing_drafts_scratch`를 패드 저장소로 재사용하고 **SoT v1.7.20을 개정**한다(용도 문구 + 정리 규칙).
-- **D2 = A** — accept는 **채택된 항목만** 삭제한다(`request_id` 대응). 구현 시 accept가 generate의 `request_id`를 싣는지 확인하고, 대응이 없으면 no-op.
-- **D3 = B** — **worker 서비스 확장 + outbox 이벤트 신설**. 앱 재시작에도 진행 중 생성이 살아남아야 한다.
+- **D2 = A** — accept는 **채택된 항목만** 삭제한다(`request_id` 대응). **연결 수단은 이미 존재한다(검증 H1)**: accept 요청이 `request_id`를 필수로 싣고(`main.py:1298`) accept 서비스가 candidate와의 일치를 검증한다(`accept.py:227`). 따라서 per-item 삭제에 신규 식별자가 필요 없다. 대응 항목이 없으면 no-op으로 안전 처리한다.
+- **D3 = B** — **worker 서비스 확장 + 독립 job 테이블 claim**. 앱 재시작에도 진행 중 생성이 살아남아야 한다. **claim 소스는 Analysis식 job 테이블이며 색인 sync outbox는 건드리지 않는다**(검증 H3 — 색인 outbox는 멱등·단발 CDC, 생성 job은 사용자 요청 기반 장시간·비멱등이라 성격이 다르다). worker는 기존 색인 drain에 더해 **생성 job 폴링·claim 루프**를 갖는다.
 - **D4 = A** — job 레코드를 분리한다(job=실행 상태, scratch=결과). 상태 모델은 Analysis 선례대로 `pending/running/succeeded/failed`, orphan/retry도 Analysis 계약을 재사용한다.
 - **D5 = A** — 프리셋 기준 분기: **1024=동기, 2048/4096=비동기**.
 - **D6 = A** — **배지/인앱 표시 + 폴링 5초**(생성 중일 때만). 오너는 "분 단위 대기라 10초도 괜찮다"고 했으나 **5초로 확정**했다. 브라우저 Notification API는 쓰지 않는다.
@@ -122,6 +124,7 @@
 ## 구현 시 필수 사항
 
 - **SoT v1.7.20 개정 2곳**(구현과 함께): (1) scratch 용도를 "복구 전용"에서 **"복구 + 비동기 생성 결과 보관"**으로, (2) accept 정리 규칙을 "draft 전체"에서 **"채택된 항목만"**으로. 기존 회귀(`test_partial_analysis_failure_still_clears_scratch` 등)가 전체 삭제를 단정하므로 **함께 갱신**해야 한다.
+- **★ 개정 시 granularity를 문구로 못박을 것(검증 H2)**: 현행 v1.7.20 문구 "정리한다"는 **전체 삭제인지 항목 단위인지 침묵**하고 있고, whole-draft라는 의미는 rationale과 구현에만 존재했다(승격 당시의 정밀도 결함). 개정문에는 **"채택된 항목(`request_id` 일치)만 삭제한다"**를 명시해 같은 모호함이 재발하지 않게 한다.
 - **상한 상호작용**: per-draft 상한(기본 20, `WRITING_SCRATCH_MAX_PER_DRAFT`)이 이제 **복구분 + 패드분을 함께** 담는다. 비동기 결과가 쌓여 복구분을 밀어낼 수 있으므로 dogfood에서 관찰하고, 필요하면 기본값을 올린다(계약은 이미 "기본값 + 운영자 조정 가능"이라 **재개정 불요**).
 - **worker는 LLM을 호출하게 된다** — 현재 색인 drain 전용이므로 gateway 접근·타임아웃·실패 분류를 명시적으로 다룬다.
 

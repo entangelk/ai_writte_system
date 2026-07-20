@@ -125,6 +125,8 @@
   - **⚠ 이 슬라이스는 SoT v1.7.20 개정을 요구한다(구현과 함께)**: (1) scratch 용도를 "복구 전용"에서 **"복구 + 비동기 결과 보관"**으로, (2) **accept 정리 규칙을 "draft 전체 삭제"에서 "채택된 항목만"으로**. 현행 규칙은 동기 경로에서 한 번만 채택해도 **패드를 통째로 날린다**. 기존 회귀가 전체 삭제를 단정하므로(`test_writing_scratch.py`) 함께 갱신해야 한다.
   - **상한 상호작용**: per-draft 상한(기본 20)이 이제 **복구분 + 패드분을 함께** 담는다. 밀어냄이 관찰되면 **기본값만** 올리면 되고 계약 재개정은 불요(SoT가 이미 "기본 20 + 운영자 조정 가능").
   - **worker가 LLM을 호출하게 된다** — 현재 색인 outbox drain 전용이므로 gateway 접근·타임아웃·실패 분류를 새로 다뤄야 한다.
+  - **★ claim 소스는 독립 job 테이블이며 색인 sync outbox가 아니다**(검증 H3): 색인 outbox는 멱등·단발 **CDC**(`IndexSyncEvent`가 전부 `*_ARCHIVED`/`*_UPSERTED`)이고 생성 job은 **사용자 요청 기반 장시간·비멱등**이라 성격이 다르다. 생성을 색인 outbox에 얹으면 `03-index-sync-outbox-decisions.md` 계약까지 흔들린다. **이 슬라이스는 색인 outbox를 건드리지 않는다.**
+  - **두 슬라이스의 순서(검증 H4로 표현 정정)**: 문체 슬라이스의 **결정은 이미 끝났고**(8192a1b), 비동기가 기다리는 것은 그 **구현**이다 — 현재 출력 길이는 `WRITING_GENERATE_MAX_TOKENS=1024` 단일값이라 2048/4096 **프리셋 자체가 없고**, 그 프리셋을 만드는 것이 문체 D3이다. 프리셋이 없으면 비동기 D5의 분기 기준(1024 동기 / 2048·4096 비동기)이 성립하지 않는다. 다만 이는 **hard block이 아니라 soft ordering**이다 — 비동기 인프라(job 테이블·worker claim 루프·패드 UI)는 프리셋과 무관하게 병행 scaffold할 수 있다.
 - 미채택 candidate 복구 안전망 슬라이스는 **SoT v1.7.20 정본 승격까지 완료되어 닫혔다**(구현·독립 검증 2회 합격·정책 승격). **dogfood 착수가 여전히 가장 큰 갈림길**이다(UX-1+QUAL-1 = Phase 7 진입 게이트 GATE-1).
   - scratch 후속으로 남은 것은 **상한 기본값 조정뿐**이다 — dogfood에서 실제로 몇 건이 쓸모 있었는지 관찰되면 `WRITING_SCRATCH_MAX_PER_DRAFT` 기본값만 바꾸면 되고, **계약 자체는 다시 열지 않는다**(SoT v1.7.20이 "기본 20 + 운영자 조정 가능"을 계약했으므로 숫자 변경은 계약 변경이 아니다).
 - Writing Workspace V2 W1~W4 완료 + 프로젝트 export UI(통합/개별 ZIP + include_archived/manifest 토글) 완료(v1.7.19). export 계약 상세는 W0 contract §6·SoT v1.7.17, export UI는 v1.7.18·v1.7.19. dogfood는 오너가 "어느정도 완성되면" 착수한다.

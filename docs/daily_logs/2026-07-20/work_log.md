@@ -246,6 +246,25 @@
 
 - 브리프 주장 6건(scratch에 version_id 부재 · worker 상시 서비스 · Analysis 4상태 선례 · `delete_for_draft` 전체 삭제 · 전체삭제 단정 회귀 존재 · SSE/WebSocket 미사용)과 링크 4건 전수 확인. 코드 변경 0.
 
+## Task — 비동기 브리프 독립 검증 합격 + hardening 4건 반영
+
+### User Decisions and Rationale
+
+- 오너가 독립 검증(`docs/verifications/2026-07-20/async_generation_pad_brief.md`)을 돌려 **합격** 판정을 주고, 보강/스킵 판단 후 커밋을 지시했다. 검증자는 브리프의 하중 큰 주장 3건(정본 write 0 · accept가 패드 전체 삭제 · 내 자기 정정의 타당성)과 사실 6건·링크 4건을 1차 사료에서 재도출했다.
+- non-blocking 4건이었으나 **전부 반영**했다. 셋은 브리프 정밀도를 실제로 높였고, 하나(H3)는 **내 서술의 모호함이라 방치하면 구현이 잘못 갈 수 있었다**.
+
+### Completed work / Issues found
+
+- **H3(가장 실질적) — 내 브리프의 모호함이었다**: D3에 "outbox 이벤트 신설", D4에 "job 레코드(Analysis 선례)"라고 써서 **서로 다른 메커니즘을 가리켰다**. 직접 확인하니 `IndexSyncEvent`는 전부 `*_ARCHIVED`/`*_UPSERTED`인 **데이터 변경 CDC**(멱등·단발 drain)이고, 생성 job은 **사용자 요청 기반 장시간·비멱등**이라 성격이 다르다. 글자 그대로 읽으면 "생성-via-색인-outbox"라는 어색한 결합으로 가고 `03-index-sync-outbox-decisions.md` 계약까지 흔들렸을 것이다. D3 옵션·확정문을 **"독립 job 테이블 claim"**으로 고치고 **"색인 outbox는 건드리지 않는다"**를 브리프·HANDOFF에 명시했다("outbox 이벤트 신설" 표현 0건 확인).
+- **H1 — 과잉 헤지 제거**: "구현 시 accept가 `request_id`를 싣는지 확인"이라 썼으나 **이미 확정적으로 존재**한다(`main.py:1298` 필수 필드, `accept.py:227` candidate 일치 검증 — 둘 다 재확인). 헤지를 **검증된 사실 + 인용**으로 교체했다. 안전 방향이라 남겨도 됐지만, **확인 가능한 것을 "나중에 확인"으로 미루면 구현자가 같은 조사를 반복**하므로 지금 닫는 편이 낫다.
+- **H2 — 승격 당시 정밀도 결함 인지**: v1.7.20의 "정리한다"가 **whole-vs-per-item에 침묵**하고 whole-draft 의미는 rationale·구현에만 있었다. 개정 시 **"채택된 항목(`request_id` 일치)만"을 문구로 못박을 것**을 "구현 시 필수 사항"에 추가했다.
+- **H4 — 순서 표현 정정**: 내가 채팅에서 "의존 관계상 문체 먼저"라고 했으나, 의존 대상은 **결정이 아니라 구현**이고 **hard block이 아닌 soft ordering**이다(비동기 인프라는 프리셋 없이 병행 scaffold 가능). HANDOFF에 정확한 형태로 남겼다.
+- 검증 기록에는 **closure note만 덧붙이고 원 본문은 수정하지 않았다**(판정 불변, 감사 이력 보존).
+
+### Verification
+
+- H1/H3 인용 재확인(`main.py:1298`·`accept.py:227`·`IndexSyncEvent` 값 집합), 4건 반영 여부 기계 확인. **코드 변경 0**(문서만).
+
 ### Next steps
 
 - **오너가 잠정 보존/만료 정책(상한 20·accept 즉시 삭제·시간 만료 없음)을 SoT로 승격·확정**해야 한다. 그때까지 정본 계약이 아니다.
