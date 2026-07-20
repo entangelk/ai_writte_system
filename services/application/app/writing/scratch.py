@@ -99,8 +99,9 @@ class WritingScratchService:
         # exactly what it exists to protect. Fail loudly at construction instead.
         if max_per_draft < 1:
             raise ValueError(
-                "max_per_draft must be >= 1 "
-                f"(WRITING_SCRATCH_MAX_PER_DRAFT={max_per_draft})"
+                f"max_per_draft must be >= 1, got {max_per_draft} "
+                "(when configured from the environment, this is "
+                "WRITING_SCRATCH_MAX_PER_DRAFT)"
             )
         self._repo = repository
         self._clock = clock or (lambda: datetime.now(UTC))

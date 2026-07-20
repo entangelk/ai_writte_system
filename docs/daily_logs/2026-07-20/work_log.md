@@ -91,6 +91,28 @@
 - backend **1227 passed / 70 skipped / 299 subtests**(+5).
 - mutation 4종 전부 bite: env 무시(하드코딩 복귀), 파싱했지만 서비스에 미전달, `<1` 검증 제거, 기본 상수 20→50.
 
+## Task — 최종 재검증 합격 + 잔여 nit 3건 처리
+
+### User Decisions and Rationale
+
+- 오너가 재검증을 돌려 **합격(조건 없음)** 판정을 주고, 잔여 nit 보강 후 커밋을 지시했다. 검증자는 closure note를 신뢰하지 않고 mutation(`scratch_mongo` sort 반전)을 손수 재현해 bite를 독립 입증했다.
+
+### Completed work
+
+- **nit (1) HANDOFF markdown**: env 문장의 `**` 짝이 열린 채 끝나 "테스트 하네스 주의"까지 bold가 번지던 것을 닫았다. 파일 전체를 재검사해 line 12 balanced 확인.
+- **nit (2) Mongo factory 분기 coverage**: `test_durable_branch_also_receives_the_cap` 추가(`from_uri` stub으로 Mongo 연결 없이).
+- **nit (3) 검증 메시지**: `max_per_draft must be >= 1, got N (when configured from the environment, this is WRITING_SCRATCH_MAX_PER_DRAFT)`.
+
+### Issues found
+
+- **nit (2)는 "trivial hardening"보다 실질적이었다**: 캡을 in-memory 분기에만 남기고 Mongo 분기에서 빼는 mutation을 걸었더니 **오직 신규 테스트만** 실패했다. 즉 기존 20건으로는 **배포에서 실제로 쓰이는 durable 분기의 wiring 누락을 전혀 잡지 못했다**. 검증자 분류는 보수적이었고, 실측이 그것을 정정했다 — factory에 분기가 둘이면 양쪽 다 pin해야 한다.
+- **line 63의 `**` 불균형은 오탐**: `` `***` `` scene marker를 세는 내 counter 문제이고 `835215d`의 기존 줄이라 손대지 않았다(CLAUDE.md §3 — 인접 코드 임의 수정 금지).
+
+### Verification
+
+- backend **1228 passed / 70 skipped / 299 subtests**(+1), scratch 양 파일 **27 passed / 2 subtests**.
+- mutation: durable 분기 캡 누락 → 신규 테스트 1건만 실패(정확히 의도한 감지).
+
 ### Next steps
 
 - **오너가 잠정 보존/만료 정책(상한 20·accept 즉시 삭제·시간 만료 없음)을 SoT로 승격·확정**해야 한다. 그때까지 정본 계약이 아니다.

@@ -9,6 +9,37 @@
 > - **H-3 — 근거 기록**: 브리프 Follow-up에 `next_unit` 제외 근거(generate 시점 부재 → 항상 None 필드 선점은 Simplicity First 역행, Phase 7에서 `intent`와 동반 추가)를 명시했다.
 > - **재실행**: backend **1222 passed / 70 skipped / 297 subtests**(+10: Mongo 6 + H-1/H-2/H-4 4), frontend 159 passed / 11 files(무변), tsc clean.
 > - **판정 갱신**: B-1 closure로 **합격(pass)** 조건 충족. 최종 재검증은 오너/검증자 몫이다.
+>
+> ---
+>
+> **Re-verification (2026-07-20, 검증자 — 커밋 088e587 + 30bafbd 최종 재검증 + env-tunability 추가 검증)**
+>
+> 오너가 "다음작업 검증해줘"로 요청한 것은 (a) 위 closure가 진짜인지 독립 재확인, (b) 동일 커밋 시퀀스에 얹힌 **env-tunability 후속 작업(30bafbd)** 검증이다. tree는 clean(HEAD=30bafbd). 본 재검증은 closure note의 self-claim을 신뢰하지 않고 직접 재유도했다.
+>
+> - **Closure 독립 확인 (088e587)**:
+>   - `tests/test_writing_scratch_mongo.py`(6건) 존재·통과 확인. loop_audit/gate_findings의 `_Collection`/`_Cursor` fake 패턴을 복제하되, scratch가 mutable라는 점을 반영해 `delete_many`+`$in` fake와 delete-query 기록까지 구현한 점은 적절하다. field-for-field dataclass 비교(`assertEqual(listed, (later, with_intent, earlier))`)가 drift 감지의 핵심.
+>   - **mutation bite를 손수 실증**(`scratch_mongo.py`의 `list_for_draft` sort를 `DESCENDING`→`ASCENDING`으로 반전 → `test_add_and_list_round_trip_newest_first`가 `wds:a`(oldest) 우선으로 FAIL, 복구 후 `git diff` 빈). closure note "mutation 6/6 bite"의 대표 1종을 독립 입증. 나머지(field 오타·`intent` 누락·index name·empty-ids 가드·`delete_for_draft` draft 무시)도 동일 dataclass/구조적 단언 구조상 bite가 확실.
+>   - H-2: `_clear_scratch_for_saved_accept()` 헬퍼가 502 partial(`main.py:3634`, return 직전)과 정상(`3650`, `if result.accepted`) **양쪽**에서 호출되는지 코드로 확인. 비-PASS는 미호출. `test_partial_analysis_failure_still_clears_scratch` 통과.
+>   - H-1/H-4: `_ExplodingScratch`(save/clear raise) → generate·accept 200 통과; `test_failed_generate_leaves_no_scratch`(empty instruction→400→0건) 통과.
+> - **Env-tunability 검증 (30bafbd)** — 명시적 "다음작업":
+>   - 배선: `_env_int("WRITING_SCRATCH_MAX_PER_DRAFT", MAX_SCRATCH_PER_DRAFT)`(기존 헬퍼, 기본 20)가 in-memory·Mongo **양쪽** factory 분기에 `max_per_draft=`로 전달됨을 diff로 확인. `WRITING_LOOP_MAX_*` 선례와 동형(자체 파서 未발明).
+>   - **1 미만 거부 판단의 건전성을 코드로 교차 검증**: `WritingScratchService.__init__`의 `if max_per_draft < 1: raise ValueError` — `max_per_draft=0`은 save 직후 `_trim`이 `entries[0:]`(=전체)를 지워 방금 저장한 것까지 삭제(안전망 자가파괴), 음수는 `entries[-1:]`로 **최신**을 지우는 비합리 동작. 거부가 정당. 직접 실행으로 `0`·`-1` 모두 `ValueError`, env 미설정 시 factory 기본 20 확인. 검증 위치가 `__init__`이라 env 경로뿐 아니라 모든 생성 경로 보호(작업 AI 주장과 일치).
+>   - **5종 신규 회귀**(default 20 / env override / configured-cap-actually-trims / <1 거부 subtests / non-numeric 거부) 통과. 특히 `test_configured_cap_actually_trims`는 실제 `_default_writing_scratch_service()` factory를 타서 "파싱은 됐으나 서비스에 미연결" mutation을 잡는다 → 작업 AI의 "mutation 4종 bite" 주장 성립(env-ignored / parsed-not-wired / validation-removed / default-changed 각각 대응 테스트 존재).
+>   - `docker compose config`가 `WRITING_SCRATCH_MAX_PER_DRAFT: "20"`으로 해석함을 직접 확인(compose default 주장 입증).
+> - **수치 재현 (정확 일치)**: backend 전체 **1227 passed / 70 skipped / 299 subtests**, scratch 양 파일 **26 passed / 2 subtests**(20+6). frontend는 본 작업에서 무변이라 재실행 생략(직전 검증 159/11 유효).
+> - **문서 정합**: 브리프 "잠정 보존/만료 정책" 절이 "기본 20 + `WRITING_SCRATCH_MAX_PER_DRAFT` 조정 + 1 미만 거부 + 세 정리 분기(200/502-partial/비-PASS)"로 갱신됨. HANDOFF ★ 다음 작업이 승격 대상 변경("20"이 아니라 "기본 20 + 운영자 조정 가능" 계약, dogfood 관찰이 숫자 근거)을 반영함.
+>
+> **최종 판정: 합격 (pass) — 조건 없음.** B-1(closure) + env-tunability 모두 독립 재검증으로 확정. 새로운 blocking 발견 없음. 잔여 nits(비차단): (1) HANDOFF Current Status의 env 문장에 `**` 짝이 어긋나 "테스트 하네스 주의"까지 bold가 번지는 markdown cosmetic, (2) Mongo factory **분기**에 max_per_draft가 전달됨이 in-memory 분기 테스트로만 간접 coverage(공유 `_env_int` 라인과 서비스 `__init__` 검증은 커버하므로 선례 일치 수준의 trivial hardening), (3) `__init__` 검증 메시지가 비-env 직접 생성에서도 `WRITING_SCRATCH_MAX_PER_DRAFT`를 지칭(harmless cosmetic).
+
+> ---
+>
+> **Nit closure (2026-07-20, 구현자 후속 — 최종 합격 판정 이후)**
+> 최종 판정은 **합격(조건 없음)**이었고 아래 3건은 명시적 비차단 nit이었으나, 셋 다 저렴해 모두 처리했다. 판정을 바꾸지 않으며 위 재검증 본문도 수정하지 않았다.
+>
+> - **nit (1) HANDOFF markdown**: Current Status env 문장의 `**` 짝을 닫아 "테스트 하네스 주의"까지 bold가 번지던 렌더링을 고쳤다. 파일 전체 재검사에서 line 12는 balanced가 됐다. (line 63의 불균형은 `` `***` `` scene marker를 세는 counter의 오탐이고 내 변경이 아니라(`835215d`) 손대지 않았다 — CLAUDE.md §3.)
+> - **nit (2) Mongo factory 분기 coverage**: `test_durable_branch_also_receives_the_cap` 추가. `from_uri`를 stub해 Mongo 연결 없이 **durable 분기**가 `max_per_draft`를 받는지 pin한다. **이 gap이 실재했음을 mutation으로 확인**: 캡을 in-memory 분기에만 남기고 Mongo 분기에서 빼자 **오직 이 신규 테스트만** 실패했다 — 기존 회귀로는 배포에서 실제로 쓰이는 분기의 누락을 잡을 수 없었다는 뜻이다. 검증자가 "trivial hardening"으로 분류했으나 실측상 유일한 감지 수단이었다.
+> - **nit (3) 검증 메시지**: `max_per_draft must be >= 1, got N (when configured from the environment, this is WRITING_SCRATCH_MAX_PER_DRAFT)`으로 바꿔, 직접 생성 경로에서 존재하지도 않는 env 설정을 지목하지 않게 했다.
+> - **재실행**: backend **1228 passed / 70 skipped / 299 subtests**(+1), scratch 양 파일 **27 passed / 2 subtests**.
 
 ## Subject metadata
 

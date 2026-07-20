@@ -178,6 +178,26 @@ class ScratchCapConfigTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self._service()
 
+    def test_durable_branch_also_receives_the_cap(self):
+        # The factory has TWO branches; the in-memory one is covered above.
+        # Without this, wiring the cap into only one branch would go unnoticed —
+        # and the durable branch is the one that actually matters in deployment.
+        # `from_uri` is stubbed so no Mongo connection is attempted.
+        sentinel = object()
+        with patch.dict(os.environ, {
+            "WRITING_SCRATCH_MAX_PER_DRAFT": "7",
+            "CORE_SOT_MONGO_URI": "mongodb://example/?replicaSet=rs0",
+        }), patch(
+            "services.application.app.writing.scratch_mongo"
+            ".MongoWritingScratchRepository.from_uri",
+            return_value=sentinel,
+        ) as from_uri:
+            service = self._service()
+
+        self.assertEqual(service._max_per_draft, 7)
+        self.assertIs(service._repo, sentinel)
+        self.assertTrue(from_uri.called)
+
 
 class _ScratchClient:
     __test__ = False
