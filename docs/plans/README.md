@@ -46,6 +46,7 @@
 36. [`writing-workspace-v2-w0-contract.md`](writing-workspace-v2-w0-contract.md) — 오너 승인 Workspace V2의 W0 exact contract(ProjectBrief version/API, ordered unit/reorder/migration, `append_current|start_next_unit` accept 원자성·멱등, 양방향 regression matrix). W0 완료, runtime 구현은 W2/W3에서 수행. W4 export 계약은 §6
 37. [`unaccepted-candidate-persistence-decisions.md`](unaccepted-candidate-persistence-decisions.md) — 미채택 Writing candidate 영속. **완료** (D0=B/D1=B/D2=A, 구현·독립 검증 2회 합격, 보존/만료 정책은 SoT v1.7.20 정본 승격)
 38. [`writing-style-and-length-control-decisions.md`](writing-style-and-length-control-decisions.md) — 문체/어투 계약(**설정·관찰·검증 3층**)과 생성 분량 제어. **결정 확정(2026-07-20) D0=B/D1=A/D2=A/D3=A/D4=B/D5=A/D6=A, 구현 미착수**. 문체를 **키 유무로 3축 분해**(작품 문체=project / **캐릭터 어투=character** / 분위기=키 없음→Phase 7 몫). `WritingBrief` 삭제 후 `ProjectBrief`로 통합(tone 중복 모순 해소), 캐릭터 어투는 `character_observation`에 `aspect` 필드 추가(**오너가 taxonomy 동결=3종 유지로 확정**), Gate `style` finding은 **warning 전용·자동 revise 제외**, 분량 프리셋 1024/2048/4096(**4096은 루프 wall-clock 60초 초과라 단일 generate 전용**). **비동기 생성은 별도 브리프 후보**(정본 stale-base 계약 결정 동반)
+39. [`async-generation-pad-decisions.md`](async-generation-pad-decisions.md) — 비동기 생성 + 결과 패드. **결정 확정(2026-07-20) D1~D7, 구현 미착수**. 긴 프리셋(2048/4096)을 **worker 백그라운드**로 돌리고 결과를 오른쪽 rail의 **읽기 전용 패드**에 쌓아 작가가 복사해 쓴다. **accept를 타지 않아 정본 계약(stale base·명시 save) 변경이 불필요**하나, **SoT v1.7.20 scratch 조항 2곳(용도·accept 정리 규칙) 개정은 필수** — 현행 "accept가 draft scratch 전체 삭제"가 패드를 통째로 날리기 때문
 
 ## 문서 지위와 우선순위
 
