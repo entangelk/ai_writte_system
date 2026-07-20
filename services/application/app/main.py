@@ -130,6 +130,7 @@ from services.application.app.writing.loop_audit import (
     WritingLoopAuditService,
 )
 from services.application.app.writing.scratch import (
+    MAX_SCRATCH_PER_DRAFT,
     InMemoryWritingScratchRepository,
     WritingScratchService,
 )
@@ -401,17 +402,27 @@ def _default_writing_loop_audit_service() -> WritingLoopAuditService:
 def _default_writing_scratch_service() -> WritingScratchService:
     # Unaccepted-candidate recovery store (brief D2=A). In-memory default keeps
     # the safety net working with no infra; a Mongo URI upgrades it to durable
-    # ``writing_drafts_scratch`` (Core-SOT-external).
+    # ``writing_drafts_scratch`` (Core-SOT-external). The per-draft history cap
+    # is env-tunable (default 20) because the useful depth differs per writer and
+    # the value is still provisional pending SoT ratification.
+    max_per_draft = _env_int(
+        "WRITING_SCRATCH_MAX_PER_DRAFT", MAX_SCRATCH_PER_DRAFT
+    )
     uri = os.environ.get("CORE_SOT_MONGO_URI")
     if not uri:
-        return WritingScratchService(InMemoryWritingScratchRepository())
+        return WritingScratchService(
+            InMemoryWritingScratchRepository(), max_per_draft=max_per_draft
+        )
     from services.application.app.writing.scratch_mongo import (
         MongoWritingScratchRepository,
     )
     from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
-    return WritingScratchService(MongoWritingScratchRepository.from_uri(
-        uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
-    ))
+    return WritingScratchService(
+        MongoWritingScratchRepository.from_uri(
+            uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
+        ),
+        max_per_draft=max_per_draft,
+    )
 
 
 def _default_prompt_template_service() -> PromptTemplateService:

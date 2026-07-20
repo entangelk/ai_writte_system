@@ -48,6 +48,12 @@ services:
       # structural caps alone still bound the loop off-deployment.
       WRITING_LOOP_MAX_TOTAL_TOKENS: "${WRITING_LOOP_MAX_TOTAL_TOKENS:-10000}"
       WRITING_LOOP_MAX_WALL_CLOCK_MS: "${WRITING_LOOP_MAX_WALL_CLOCK_MS:-60000}"
+      # Unaccepted-candidate recovery store: how many unaccepted drafts are kept
+      # per 원고 before the oldest is dropped. Useful depth differs per writer, so
+      # this stays tunable; the value is provisional pending SoT ratification
+      # (docs/plans/unaccepted-candidate-persistence-decisions.md). Must be >= 1 —
+      # the app refuses to start otherwise rather than silently discard drafts.
+      WRITING_SCRATCH_MAX_PER_DRAFT: "${WRITING_SCRATCH_MAX_PER_DRAFT:-20}"
       # Real vector backend (B.4): the embedding service and Chroma. When these
       # are set the shared vector index is the persistent Chroma backend with
       # real 1024-dim embeddings; without them the app falls back to the fake.

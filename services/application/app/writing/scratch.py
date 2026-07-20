@@ -23,8 +23,10 @@ from datetime import UTC, datetime
 from typing import Callable, Protocol
 from uuid import uuid4
 
-# Provisional per-draft history cap (owner SoT ratification pending). Bounds the
-# unbounded append growth that D1=B (history) would otherwise allow.
+# Default per-draft history cap, overridable via WRITING_SCRATCH_MAX_PER_DRAFT
+# (owner: "how many drafts are worth keeping differs per person" — the value is
+# still provisional pending SoT ratification, so it is tunable without a code
+# change). Bounds the unbounded append growth that D1=B (history) allows.
 MAX_SCRATCH_PER_DRAFT = 20
 
 
@@ -92,6 +94,14 @@ class WritingScratchService:
         id_factory: Callable[[], str] | None = None,
         max_per_draft: int = MAX_SCRATCH_PER_DRAFT,
     ) -> None:
+        # A cap below 1 would make every save trim itself away (or, negative,
+        # trim nonsensically) — a misconfigured safety net that silently discards
+        # exactly what it exists to protect. Fail loudly at construction instead.
+        if max_per_draft < 1:
+            raise ValueError(
+                "max_per_draft must be >= 1 "
+                f"(WRITING_SCRATCH_MAX_PER_DRAFT={max_per_draft})"
+            )
         self._repo = repository
         self._clock = clock or (lambda: datetime.now(UTC))
         self._id_factory = id_factory or (lambda: "wds:" + uuid4().hex)

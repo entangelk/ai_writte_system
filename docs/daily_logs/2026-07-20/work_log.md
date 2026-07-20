@@ -67,6 +67,30 @@
 - backend: **1222 passed / 70 skipped / 297 subtests**(+10 — Mongo 6, H-1/H-2/H-4 4).
 - frontend: 159 passed / 11 files(이번 보강은 backend 한정이라 무변), tsc clean.
 
+## Task — scratch per-draft 상한 환경변수화
+
+### User Decisions and Rationale
+
+- 오너가 하드코딩된 상한 20을 걸고 넘어졌다: **"실제로 어떻게 될지는 사람에 따라 달라서"** 환경변수로 조정 가능하게 하고 기본값 20으로 두자는 결정. 근거가 정확하다 — 이 값은 아직 SoT 승격 전 잠정값이고, 오너가 dogfood 중에 실제로 몇 건이 쓸모 있는지 관찰해봐야 승격 때 근거 있는 숫자를 올릴 수 있다. 코드 상수로 굳히면 그 관찰 자체가 코드 수정을 요구하게 된다.
+- 이로써 **SoT 승격 시 확정할 대상이 바뀐다**: "상한 = 20"이 아니라 **"기본 20 + 운영자 조정 가능"**이라는 계약이 승격 대상이다.
+
+### Completed work
+
+- **`WRITING_SCRATCH_MAX_PER_DRAFT` 추가**: `_default_writing_scratch_service()`가 기존 `_env_int(name, default)` 헬퍼로 파싱(`WRITING_LOOP_MAX_*` 선례와 동형), 기본값은 `MAX_SCRATCH_PER_DRAFT = 20` 상수. in-memory/Mongo 두 경로 모두에 전달한다.
+- **compose 노출**: `WRITING_SCRATCH_MAX_PER_DRAFT: "${WRITING_SCRATCH_MAX_PER_DRAFT:-20}"`.
+- **1 미만 거부**: `WritingScratchService.__init__`에서 `max_per_draft < 1`이면 `ValueError`. 서비스 생성자에 둬서 env 경로뿐 아니라 모든 생성 경로가 보호된다.
+- **회귀 5건 추가**(총 20건): env 미설정 시 기본 20, env override, **설정값이 실제 trim에 도달**, 0/-1 거부(subTest 2), 비수치 거부.
+
+### Decisions
+
+- **0을 "비활성화"로 해석하지 않고 거부했다.** 0을 허용하면 save 직후 스스로를 trim해 안전망이 지켜야 할 초안을 조용히 삭제한다 — 오타 하나가 조용한 데이터 손실이 되는 구조다. 오너가 요청한 것은 "조정 가능한 상한"이지 "끄는 스위치"가 아니므로, 비활성화 기능을 발명하지 않고(Simplicity First) 잘못된 구성은 기동 실패로 시끄럽게 알린다.
+- 파싱은 기존 `_env_int`를 그대로 썼다(비수치 입력은 `int()`가 raise = 기동 실패). 자체 파서를 만들면 저장소의 다른 env 처리와 동작이 갈린다.
+
+### Verification
+
+- backend **1227 passed / 70 skipped / 299 subtests**(+5).
+- mutation 4종 전부 bite: env 무시(하드코딩 복귀), 파싱했지만 서비스에 미전달, `<1` 검증 제거, 기본 상수 20→50.
+
 ### Next steps
 
 - **오너가 잠정 보존/만료 정책(상한 20·accept 즉시 삭제·시간 만료 없음)을 SoT로 승격·확정**해야 한다. 그때까지 정본 계약이 아니다.

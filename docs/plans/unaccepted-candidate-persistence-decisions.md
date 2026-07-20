@@ -62,7 +62,9 @@ D1=B(이력)가 요구하는 보존/만료 정책을 오너 위임에 따라 구
 
 - **키**: scratch entry는 `(project_id, draft_id)`로 묶는다. `draft_id`는 generate 요청의 `current_position.draft_id`에서 온다. `current_position`이 없으면 scratch를 남기지 않는다(키 없음 = 안전망 대상 아님).
 - **append(이력)**: generate 성공마다 candidate 1건을 append한다.
-- **per-draft 상한 = 20건**(최신 우선, 초과분은 오래된 것부터 삭제). D1=B의 무한 증가를 막는 잠정 상한.
+- **per-draft 상한 = 기본 20건**(최신 우선, 초과분은 오래된 것부터 삭제). D1=B의 무한 증가를 막는 잠정 상한.
+  - **환경변수 `WRITING_SCRATCH_MAX_PER_DRAFT`로 조정 가능**(오너 결정 2026-07-20): "몇 건이 쓸모 있는지는 사람마다 다르다"는 이유로, 아직 SoT 승격 전 잠정값인 이 숫자를 코드 상수로 굳히지 않는다. compose에 `${WRITING_SCRATCH_MAX_PER_DRAFT:-20}`로 노출한다(`WRITING_LOOP_MAX_*` 선례와 동형). **SoT 승격 시 확정할 것은 "20"이라는 숫자가 아니라 "기본 20 + 운영자 조정 가능"이라는 계약이다.**
+  - **1 미만은 거부한다**(구성 오류 시 기동 실패). 0/음수를 허용하면 save 직후 스스로를 trim해 **안전망이 지켜야 할 초안을 조용히 삭제**하게 되므로, 조용한 데이터 손실 대신 시끄러운 실패를 택했다.
 - **accept 성공 시 즉시 삭제**: 해당 draft의 scratch 전체를 정리한다(사용자가 정본을 확정했으므로 미채택 이력은 무의미). **"성공"의 기준은 정본 version이 저장됐는가**이며, 따라서 다음 두 경로가 모두 정리 대상이다 — (1) 정상 200 accept, (2) **analysis job만 실패한 502 partial**(version은 저장됨, `accepted=true`+`saved` 존재). 반대로 **비-PASS Gate 결과(`accepted=false`, 저장된 것 없음)는 정리하지 않는다** — 사용자에게 아직 복구할 초안이 남아 있으므로 여기서 지우면 안전망이 오히려 초안을 죽인다. 세 분기 모두 회귀로 잠겨 있다(2026-07-20 검증 H-2).
 - **명시적 버리기**: 복구 UI의 "버리기"는 draft scratch 전체를 삭제한다.
 - **시간 기반 자동 만료 없음**(P5=A "자동 삭제 없음" 정신). per-draft 상한과 accept/명시 삭제만이 수렴 수단.

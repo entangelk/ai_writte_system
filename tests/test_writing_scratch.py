@@ -18,8 +18,10 @@ SoT ratification (see the brief's "잠정 보존/만료 정책").
 """
 
 import asyncio
+import os
 import unittest
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import httpx
 
@@ -31,9 +33,13 @@ from services.application.app.core_sot.service import (
     CoreSotService,
     InMemoryCoreSotRepository,
 )
-from services.application.app.main import create_app
+from services.application.app.main import (
+    _default_writing_scratch_service,
+    create_app,
+)
 from services.application.app.writing.models import WritingGateDecision
 from services.application.app.writing.scratch import (
+    MAX_SCRATCH_PER_DRAFT,
     InMemoryWritingScratchRepository,
     WritingScratchService,
 )
@@ -117,6 +123,60 @@ class ScratchServiceTest(unittest.TestCase):
         svc.clear_draft("p1", "d1")
         self.assertEqual(len(svc.list_for_draft("p1", "d2")), 1)
         self.assertEqual(len(svc.list_for_draft("p2", "d1")), 1)
+
+
+class ScratchCapConfigTest(unittest.TestCase):
+    """The per-draft cap is env-tunable (owner, 2026-07-20): the useful history
+    depth differs per writer, and the value is provisional pending SoT
+    ratification, so it must not be a code constant.
+    """
+
+    def _service(self):
+        return _default_writing_scratch_service()
+
+    def test_default_cap_is_twenty_when_env_unset(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("WRITING_SCRATCH_MAX_PER_DRAFT", None)
+            os.environ.pop("CORE_SOT_MONGO_URI", None)
+            self.assertEqual(MAX_SCRATCH_PER_DRAFT, 20)
+            self.assertEqual(self._service()._max_per_draft, 20)
+
+    def test_env_overrides_the_cap(self):
+        with patch.dict(os.environ, {"WRITING_SCRATCH_MAX_PER_DRAFT": "3"}):
+            os.environ.pop("CORE_SOT_MONGO_URI", None)
+            service = self._service()
+        self.assertEqual(service._max_per_draft, 3)
+
+    def test_configured_cap_actually_trims(self):
+        # The knob has to reach the trim path, not just be parsed.
+        with patch.dict(os.environ, {"WRITING_SCRATCH_MAX_PER_DRAFT": "2"}):
+            os.environ.pop("CORE_SOT_MONGO_URI", None)
+            service = self._service()
+        for i in range(3):
+            service.save(project_id="p1", draft_id="d1", request_id="wr",
+                         task_type="continue_scene", output_type="draft_patch",
+                         instruction="이어서", candidate_text=f"초안{i}")
+        self.assertEqual(
+            [e.candidate_text for e in service.list_for_draft("p1", "d1")],
+            ["초안2", "초안1"])
+
+    def test_cap_below_one_is_rejected_loudly(self):
+        # over-strict: a misconfigured cap must not silently trim away the very
+        # drafts the safety net exists to protect — it fails at construction.
+        for raw in ("0", "-1"):
+            with self.subTest(raw=raw):
+                with patch.dict(
+                    os.environ, {"WRITING_SCRATCH_MAX_PER_DRAFT": raw}
+                ):
+                    os.environ.pop("CORE_SOT_MONGO_URI", None)
+                    with self.assertRaises(ValueError):
+                        self._service()
+
+    def test_non_numeric_cap_is_rejected_loudly(self):
+        with patch.dict(os.environ, {"WRITING_SCRATCH_MAX_PER_DRAFT": "many"}):
+            os.environ.pop("CORE_SOT_MONGO_URI", None)
+            with self.assertRaises(ValueError):
+                self._service()
 
 
 class _ScratchClient:
