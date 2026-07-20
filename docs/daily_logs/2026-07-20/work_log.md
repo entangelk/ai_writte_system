@@ -144,6 +144,30 @@
 - backend **1228 passed / 70 skipped / 299 subtests**(승격 전후 무변 — 코드 미변경 확인).
 - 문서 검증: SoT 내부 앵커(`#source-of-truth`) 유효, 브리프↔SoT 상호 참조 일치, 승격된 계약 문구가 코드/테스트의 실제 동작과 일치하는지 대조(상한 기본 20·1 미만 거부·세 정리 분기·best-effort).
 
+## Task — 문체/분량 제어 결정 브리프 작성
+
+### User Decisions and Rationale
+
+- 오너가 **AI에게 직접 주는 입력 축**을 넓히고 싶어했다: 문체/어투를 **few-shot 또는 one-shot 형식**으로 주는 수단, 그리고 생성 분량이 고정인지(소/중/대 구분이 있는지) 확인. 먼저 현황 분석을 요청했고, 이어서 브리프 작성을 지시했다.
+- 오너 질문 "별도 Phase로 진행할 정도는 아니지?"에 대한 분석 결론: **프로젝트 단위면 Phase 7이 아니다**. 문체 지시는 `WritingBrief` 독스트링이 이미 "Not project memory — never a fact source"로 계약해 둔 축이라, 메모리 거버넌스인 Phase 7 P5와 다르다. **단 장면/인물 단위로 내려가면 Phase 7 §6(4)를 선점**하므로 그 경계를 D0로 세웠다.
+
+### Issues found
+
+- **내 직전 분석이 틀렸고 오너에게 정정했다**: "사용자가 어투를 지정할 방법이 전혀 없다"고 보고했으나 **거짓이었다**. `ProjectBriefVersion.tone`이 존재하고(`core_sot/models.py:40`), ProjectOverview UI에서 편집 가능하며(`ProjectOverview.tsx:18`), 프롬프트에 `<project_brief authority="canonical">- tone:`로 실제로 실린다(`prompt.py:80`). `WritingBrief` 하나만 grep하고 성급히 결론냈다. **교훈: "기능이 없다"는 주장은 한 심볼이 아니라 그 기능의 모든 후보 경로를 훑고 나서 해야 한다.**
+- **계약 모순 발견 — 어투가 두 곳에 있다**: `ProjectBriefVersion.tone`(정본, version/API/UI/프롬프트 전부 배선)과 `WritingBrief.tone`(Phase 5, `style_rules`/`preferred_patterns`/`forbidden_patterns`까지 설계되고 `_format_brief`·서비스 시그니처까지 완성됐으나 **`main.py`가 `brief=`를 넘기지 않아 런타임 도달 불가**). 테스트가 서비스 레벨로 직접 주입해 살아 있는 것처럼 보인다(`tests/test_writing.py:212`). CLAUDE.md §1대로 조용히 한쪽을 고르지 않고 브리프 D1로 올렸다.
+- **분량 관련 사실 확인**: 출력 길이는 `WRITING_GENERATE_MAX_TOKENS` 기본 1024 **서버 전역 고정**(요청 파라미터 아님 → UI 조절 불가, 소/중/대 없음). 요청 필드 `max_tokens`는 **출력이 아니라 입력 컨텍스트 예산**이라 이름이 충돌한다. 원고 분량 제한은 **전무**(`raw_text` 제약 없음, `maxLength` 없음, `UnitKind`는 분류일 뿐).
+
+### Completed work
+
+- `docs/plans/writing-style-and-length-control-decisions.md` 작성: 계약 모순 선surface, Phase 경계 분석(D0 근거), 현황 grounding(file:line), D0~D3 옵션 표 + 추천, Follow-up, Deferred.
+- `plans/README.md` 인덱스 추가 + 이전 브리프(37번)를 완료 상태로 갱신.
+- HANDOFF ★ 다음 작업을 이 브리프 확정으로 전환하고, 핵심 발견 2가지와 분량 현황을 요약.
+
+### Decisions
+
+- **D1 추천을 A(ProjectBrief 확장 + WritingBrief 삭제)로 잡은 근거**: W2가 이미 append-only version·optimistic base·idempotency·history·archived 경계를 문체에도 그대로 필요한 형태로 구현해 뒀다. B(WritingBrief 부활)는 그걸 재구현하면서 tone 중복도 남긴다. 죽은 경로를 살리는 것보다 **살아 있는 계약으로 모으는 편**이 모순을 자연 소멸시킨다.
+- **분량 필드는 새 이름을 쓰도록 브리프에 명시**했다. 기존 `max_tokens`(입력 예산)의 의미를 바꾸면 5개 endpoint의 기존 계약이 흔들린다.
+
 ### Next steps
 
 - **오너가 잠정 보존/만료 정책(상한 20·accept 즉시 삭제·시간 만료 없음)을 SoT로 승격·확정**해야 한다. 그때까지 정본 계약이 아니다.
