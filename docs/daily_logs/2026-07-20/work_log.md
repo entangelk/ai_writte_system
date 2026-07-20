@@ -113,6 +113,37 @@
 - backend **1228 passed / 70 skipped / 299 subtests**(+1), scratch 양 파일 **27 passed / 2 subtests**.
 - mutation: durable 분기 캡 누락 → 신규 테스트 1건만 실패(정확히 의도한 감지).
 
+## Task — 보존/만료 정책 SoT 정본 승격 (v1.7.20)
+
+### User Decisions and Rationale
+
+- 오너가 **승격을 승인**했다("승격까지 문서 작업 마무리"). 이로써 D1=B가 요구하던 보존/만료 정책이 구현자 잠정값에서 **정본 계약**이 됐다.
+- **승격 대상의 성격이 이전 결정으로 이미 바뀌어 있었다**: 오너가 상한을 환경변수화하라고 지시했을 때, 승격 대상은 "상한 = 20"이라는 숫자에서 **"기본 20 + 운영자 조정 가능"이라는 계약**으로 이동했다. 그 결과 dogfood에서 실사용 상한이 관찰되면 **기본값만** 조정하면 되고 계약을 다시 열 필요가 없다 — 승격이 미래의 조정을 막지 않는 구조가 됐다.
+
+### Completed work
+
+- **SoT v1.7.19 → v1.7.20**: 헤더 버전/갱신일, 계약 변경 이력 최상단 entry 추가.
+- **Source of Truth 절에 정본 계약 추가**(가장 하중이 큰 위치 — 이 절이 "무엇이 정본인가"를 정의하므로): `writing_drafts_scratch`가 **Core SOT 외부·정본 아님·복구 전용 low-stakes tier**임을 먼저 못박고, 그 아래 키 규칙(`current_position` 없으면 미저장)·상한(기본 20 / `WRITING_SCRATCH_MAX_PER_DRAFT` / 1 미만 기동 실패)·정리 분기(저장된 accept만 = 정상 200 + analysis만 실패한 502 partial, **비-PASS는 미정리**)·시간 만료 없음·best-effort 격리·schema seam(`intent` nullable, `next_unit` 제외)을 계약화했다.
+- **Phase 5 Writing AI 절**: "accept 전 candidate는 소실되지 않는다"를 추가하되, 기존 "사용자가 accept하기 전에는 draft version이나 canon이 바뀌지 않는다"와 **충돌하지 않음을 명시**했다(scratch는 정본이 아니라 복구 tier). 정본 계약끼리 모순으로 읽히지 않게 하는 것이 이 문장의 목적이다.
+- **브리프**: 상태를 `완료 — ... SoT v1.7.20으로 정본 승격`으로 바꾸고, "잠정 보존/만료 정책" 절 제목을 승격 완료로 교체하며 **정본 위치는 SoT이고 충돌 시 SoT 우선**임을 명시했다(브리프가 정본 사본으로 오인되지 않게).
+- **HANDOFF**: ★ 다음 작업을 "오너 선택 대기"로 교체(dogfood 착수가 최대 갈림길). Current Status의 잠정 표기를 승격 완료로 갱신. **stale했던 "정본 SoT ... v1.7.16" 표기를 v1.7.20으로 정정**(실제 SoT는 이미 v1.7.19였다 — 승격과 무관하게 틀린 상태였음).
+- **CHANGELOG**: v1.7.20 entry.
+
+### Issues found
+
+- **HANDOFF의 SoT 버전 표기가 stale이었다**: "현재 v1.7.16"이라고 적혀 있었으나 실제 SoT는 v1.7.19였다(W4 export·export UI 슬라이스에서 SoT는 올랐는데 HANDOFF 첫 줄은 갱신되지 않았다). 승격 작업 중 발견해 정정했다. 이 줄은 "정본 우선순위"를 선언하는 자리라 stale하면 다음 작업자가 잘못된 계약 버전을 기준으로 삼게 된다.
+
+### Decisions
+
+- **계약을 Source of Truth 절에 넣었다**(Phase 5 절에만 두지 않고). scratch의 핵심 위험은 "복구 저장소가 정본으로 오해되는 것"이고, 그 오해를 막는 자리는 정본 정의 절이기 때문이다. Phase 5에는 포인터만 두고 충돌 없음을 명시했다.
+- **버전은 patch(v1.7.20)**. 최근 슬라이스들(v1.7.17~19)이 실제 기능 계약 추가에도 patch를 쓴 관행을 따랐다.
+- **코드 변경 0**: 승격은 문서 작업이다. 구현은 이미 정책대로 동작하고 회귀로 잠겨 있어, 승격이 코드에 요구하는 변경이 없음을 확인했다.
+
+### Verification
+
+- backend **1228 passed / 70 skipped / 299 subtests**(승격 전후 무변 — 코드 미변경 확인).
+- 문서 검증: SoT 내부 앵커(`#source-of-truth`) 유효, 브리프↔SoT 상호 참조 일치, 승격된 계약 문구가 코드/테스트의 실제 동작과 일치하는지 대조(상한 기본 20·1 미만 거부·세 정리 분기·best-effort).
+
 ### Next steps
 
 - **오너가 잠정 보존/만료 정책(상한 20·accept 즉시 삭제·시간 만료 없음)을 SoT로 승격·확정**해야 한다. 그때까지 정본 계약이 아니다.
