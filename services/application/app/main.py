@@ -135,6 +135,14 @@ from services.application.app.writing.scratch import (
     InMemoryWritingScratchRepository,
     WritingScratchService,
 )
+from services.application.app.writing.generation_job import (
+    DEFAULT_CLAIM_TIMEOUT_SECONDS,
+    InMemoryWritingGenerationJobRepository,
+    WritingGenerationJobService,
+)
+from services.application.app.writing.generation_worker import (
+    GenerationCollaborators,
+)
 from services.application.app.writing.http_models import (
     ACCEPT_RESPONSES,
     REVISE_AND_GATE_RESPONSES,
@@ -423,6 +431,32 @@ def _default_writing_scratch_service() -> WritingScratchService:
             uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
         ),
         max_per_draft=max_per_draft,
+    )
+
+
+def _default_writing_generation_job_service() -> WritingGenerationJobService:
+    # Async generation job store (async-pad D4=A). In-memory default; a Mongo URI
+    # upgrades it to the durable ``writing_generation_jobs`` with the atomic
+    # find_one_and_update claim. The claim lease is env-tunable (default 600s) so
+    # a long generate fits comfortably under it.
+    claim_timeout = _env_int(
+        "WRITING_GENERATION_CLAIM_TIMEOUT_SECONDS", DEFAULT_CLAIM_TIMEOUT_SECONDS
+    )
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if not uri:
+        return WritingGenerationJobService(
+            InMemoryWritingGenerationJobRepository(),
+            claim_timeout_seconds=claim_timeout,
+        )
+    from services.application.app.writing.generation_job_mongo import (
+        MongoWritingGenerationJobRepository,
+    )
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+    return WritingGenerationJobService(
+        MongoWritingGenerationJobRepository.from_uri(
+            uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
+        ),
+        claim_timeout_seconds=claim_timeout,
     )
 
 
@@ -1397,6 +1431,45 @@ class WritingAcceptRequest(BaseModel):
     # W3 Writing intent (§3.1). Legacy clients omit both → append_current/null.
     intent: str = WritingIntent.APPEND_CURRENT.value
     next_unit: NextUnitBody | None = None
+
+
+def build_async_generation_collaborators() -> GenerationCollaborators | None:
+    """Assemble the env-configured collaborators the async generation worker
+    (async-pad 증분 2b) drives, reusing the same factories create_app wires from.
+    Returns ``None`` when the gateway is unconfigured (nothing to run).
+
+    Kept next to create_app (not in the worker script) so all gateway/env wiring
+    lives in one place; the worker imports just this one seam.
+    """
+    writing = _default_writing_service()
+    if writing is None:
+        return None
+    core_sot = _default_core_sot_service()
+    memory = _default_memory_service()
+    analysis = _default_analysis_service(core_sot)
+    # Same shared vector index / embeddings selection as create_app's non-inject
+    # path: real Chroma when configured, else the in-memory fake.
+    shared_embeddings = _build_embedding_provider()
+    chroma_index = _build_chroma_vector_index()
+    shared_vector_index = (
+        chroma_index if chroma_index is not None else InMemoryVectorIndexAdapter()
+    )
+    context_search = _default_context_search_service(
+        core_sot,
+        vector_index=shared_vector_index,
+        embeddings=shared_embeddings,
+        memory=memory,
+        analysis=analysis,
+    )
+    if context_search is None:
+        return None
+    return GenerationCollaborators(
+        context_search=context_search,
+        writing=writing,
+        scratch=_default_writing_scratch_service(),
+        jobs=_default_writing_generation_job_service(),
+        needs=_WRITING_CONTINUE_SCENE_NEEDS,
+    )
 
 
 def create_app(

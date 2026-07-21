@@ -256,6 +256,59 @@ services:
     # 30s timeouts with headroom. NOTE: keep INDEX_SYNC_INTERVAL <= this.
     stop_grace_period: 120s
 
+  generation_worker:
+    # async-pad 증분 2b (D3=B): the background generation worker. Separate from
+    # the index-sync `worker` above — the index outbox is idempotent single-shot
+    # CDC, generation jobs are long-lived non-idempotent user requests (brief
+    # verification H3), so a distinct service rather than a second outbox sink.
+    # Shares the application image (same runtime + generate pipeline). Unlike the
+    # index worker it calls the LLM gateway, so it needs the same gateway +
+    # context env as `application`; the atomic claim (find_one_and_update + lease)
+    # makes a single replica safe. Observability = restart + per-pass stdout JSON.
+    build:
+      context: .
+      dockerfile: services/application/Dockerfile
+    command: ["python", "scripts/generation_job_worker.py", "--loop"]
+    environment:
+      CORE_SOT_MONGO_URI: "mongodb://mongo:27017/?replicaSet=rs0"
+      CORE_SOT_MONGO_DB: "ai_writing_system"
+      CORE_SOT_MONGO_TRANSACTIONS: "true"
+      LLM_GATEWAY_BASE_URL: "http://gateway:8001"
+      LLM_GATEWAY_MODEL: "${LLAMA_DEFAULT_MODEL:-gemma-local}"
+      LLM_GATEWAY_TIMEOUT_SECONDS: "${LLAMA_TIMEOUT_SECONDS:-120}"
+      # Same per-draft scratch cap as application (the pad shares the store).
+      WRITING_SCRATCH_MAX_PER_DRAFT: "${WRITING_SCRATCH_MAX_PER_DRAFT:-20}"
+      # Output-length presets the endpoint enqueues (server owns the mapping).
+      WRITING_OUTPUT_LENGTH_MEDIUM: "${WRITING_OUTPUT_LENGTH_MEDIUM:-2048}"
+      WRITING_OUTPUT_LENGTH_LONG: "${WRITING_OUTPUT_LENGTH_LONG:-4096}"
+      # Claim lease: a crashed worker's in-flight job is reclaimable past this.
+      # Must exceed the longest generate (long≈91s bounded by the gateway timeout).
+      WRITING_GENERATION_CLAIM_TIMEOUT_SECONDS: "${WRITING_GENERATION_CLAIM_TIMEOUT_SECONDS:-600}"
+      GENERATION_WORKER_INTERVAL: "${GENERATION_WORKER_INTERVAL:-5}"
+      # Context search needs the same real backends as application.
+      EMBEDDING_SERVICE_URL: "http://embedding:8002"
+      EMBEDDING_DIMENSIONS: "${EMBEDDING_DIMENSIONS:-1024}"
+      CHROMA_HOST: "chroma"
+      CHROMA_PORT: "8000"
+      ELASTICSEARCH_URL: "http://elasticsearch:9200"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+      embedding:
+        condition: service_healthy
+      chroma:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+    # SIGTERM exits at the next job boundary (the in-flight generate finishes),
+    # so the grace period must exceed the longest generate — bounded by
+    # LLM_GATEWAY_TIMEOUT_SECONDS (120s) plus headroom. A SIGKILL mid-job only
+    # strands the job RUNNING until the claim lease stale-reclaims it.
+    stop_grace_period: 180s
+
   frontend:
     # Product shell SPA (decisions D1=A React+TS+Vite / D2=B separate service
     # locked in SoT v1.6.93; implemented as this service in v1.6.94).

@@ -253,3 +253,38 @@
 
 - **증분 2b(D3)**: 위 "2b 착수 가이드"대로 worker 실행 루프 + §261 개정. seeded pending job으로 테스트(endpoint 불필요). 배포 후에도 endpoint가 아직 sync라 async 경로는 dormant(2c까지).
 - **증분 2c(D5)**: generate endpoint 2048/4096 → job enqueue(pending 반환, 블록 안 함)·1024 동기 유지; async 프리셋 + no `current_position` → 400; `GET .../generation-jobs/{id}` 상태 read(증분 3 폴링용). 이 flip이 async end-to-end 개통.
+
+## Task — 비동기 생성 + 결과 패드 증분 2b: 생성 worker 실행 루프 (D3=B, SoT v1.7.26)
+
+### Goals
+
+- 2a 저장소에 이어, worker가 job을 claim해 **실제로 실행**하는 조각. **worker 최초 LLM/gateway 호출**이라 가장 위험. 2a 검증 hardening H-2(catch-all)·H-3(reclaim 멱등)을 설계에 반영.
+
+### User Decisions and Rationale
+
+- 오너 확정 결정(D3=B)의 구현 + "다른 작업자 인계 고려" 지시. 새 오너 결정 없음. 오너가 외부 LLM(192.168.1.22:9080) 접근 가능함을 알려 라이브 스모크 경로를 열었다.
+
+### Completed work
+
+- **`writing/generation_worker.py`(테스트 가능한 실행 코어)**: `execute_generation_job(job, collaborators)` async — 동기 generate와 같은 파이프라인(ContextSearch build → WritingService.generate)을 돌리고 결과를 `scratch.save(version_id=job.version_id)` 후 `jobs.mark_succeeded(result_scratch_id=)`. 예외는 taxonomy대로 `mark_failed`. `GenerationCollaborators` frozen dataclass(context_search·writing·scratch·jobs·needs). CLI/loop와 분리해 fake provider로 단위 테스트(no Mongo/gateway/daemon).
+- **H-2 catch-all**: `WritingGenerationJobFailureReason`에 `INTERNAL` 추가 + executor 최외곽 `except Exception → mark_failed(INTERNAL)`. 이제 caller가 생겼으므로 dead 분기 아님(2a에서 미리 안 넣은 이유가 여기서 해소). 매핑 안 된 infra/버그도 종료 상태 → RUNNING livelock 방지.
+- **H-3 reclaim 멱등**: 성공 저장 직전 `scratch.clear_accepted_item(project, draft, request_id)`로 이전 (crash) 시도의 scratch를 지우고 다시 써, reclaim 재실행에도 draft당 job 결과가 정확히 1건. 2a의 per-request delete 재사용.
+- **`scripts/generation_job_worker.py`(CLI/daemon)**: `index_sync_worker.py`의 `_GracefulShutdown`·`run_loop`·SIGTERM·JSON 이벤트 패턴 미러. async per-job 실행(`asyncio.run(execute_generation_job)` per pass). claim 없으면 interval idle-sleep, 있으면 즉시 다음 pass. `--loop`/one-shot. gateway 미구성이면 exit 2. 주입 seam(build_fn·run_pass_fn·stop·sleep_fn·stdout)으로 결정적 테스트.
+- **`main.build_async_generation_collaborators()`**: create_app과 같은 env 팩토리 재사용(core_sot·memory·analysis·embeddings·vector_index·context_search·writing·scratch·job) → worker는 이 한 seam만 import. `_default_writing_generation_job_service()`(scratch 팩토리 동형, Mongo/in-memory env 게이팅, claim lease env `WRITING_GENERATION_CLAIM_TIMEOUT_SECONDS` 기본 600). create_app 무변(순수 additive 함수).
+- **compose `generation_worker` 서비스**: `worker`(색인) 옆에 신설. application과 같은 gateway+context env(색인 outbox와 무관, 브리프 H3). `stop_grace_period: 180s`(SIGTERM이 in-flight generate를 끝내도록, gateway timeout 120s 초과). command `python scripts/generation_job_worker.py --loop`.
+- **SoT v1.7.26**: §261 (2) 비동기 결과 보관 용도 확장(증분 1에서 지연했던 유일한 개정 — worker가 결과를 실제로 scratch에 append하는 시점) + 신규 `writing_generation_jobs`/worker 계약 clause(claim 원자성·lease·상태·taxonomy 6+catch-all·H-2/H-3 멱등). **endpoint 배선(D5)은 2c**라 현재 async 경로 dormant임을 명시.
+
+### Decisions (구현자 판단)
+
+- **endpoint enqueue/400/sync-split(D5)은 SoT에 "2c" forward로 표기**: 2b 후 저장소·worker는 갖췄으나 생산자(endpoint)가 없어 production async 경로는 dormant. 지금 endpoint 동작을 현재형으로 쓰면 SoT가 없는 동작을 서술한다(증분 1 §261 지연과 같은 원칙). §261 (2)도 "worker append(2b) / 패드 read(증분 3)"로 단계 분리.
+- **context search live는 2b 새 리스크 아님**: 파이프라인의 context 빌드 부분은 Phase 4 deployed e2e에서 이미 라이브 검증됨(HANDOFF). 2b의 새 표면은 worker가 gateway로 generate를 호출하고 결과를 scratch에 쓰는 wiring이다.
+
+### Verification
+
+- backend: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1295 passed / 73 skipped / 326 subtests**(신규 16: `test_writing_generation_worker.py` executor 성공·실패 매핑 7종·catch-all INTERNAL·H-3 멱등 / `test_generation_job_worker.py` run_pass·loop drain/idle-sleep·gateway 게이팅·one-shot). `docker compose config` OK(generation_worker 유효). frontend·gen:api 무변(endpoint 미배선). `git diff --check` clean.
+- **실 12B 라이브 스모크**: 외부 llama(192.168.1.22:9080) 관통 — [아래 별도 기록].
+
+### Next steps
+
+- **증분 2c(D5)**: generate endpoint 2048/4096 → job enqueue(pending 반환)·1024 동기 유지·async+no current_position=400·`GET .../generation-jobs/{id}` 상태 read. 이 flip이 async 개통(2b worker가 처리).
+- 증분 3(D6): 읽기 전용 패드 + 완료 배지 + 생성 중에만 5초 폴링.

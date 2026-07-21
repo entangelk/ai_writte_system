@@ -1,0 +1,122 @@
+"""Async generation execution — the worker's per-job core (async-pad 증분 2b).
+
+Runs one claimed ``WritingGenerationJob`` through the same pipeline the sync
+generate endpoint uses (context build → generate) and appends the result to the
+scratch store (D1=A) for the pad, then marks the job terminal. Kept separate
+from the CLI/loop (``scripts/generation_job_worker.py``) so the execution
+contract is unit-testable with a fake provider — no Mongo, no gateway, no daemon.
+
+Failure taxonomy is the ``WritingGenerationJobFailureReason`` contract: each
+mapped generate-pipeline exception → its reason, and an outermost catch-all →
+``INTERNAL`` so an unmapped infra/bug fault still reaches a terminal state
+(verification H-2 — otherwise the job livelocks RUNNING → reclaim → re-fail).
+
+Reclaim idempotency (verification H-3): a worker that generated then crashed
+before marking the job leaves a scratch entry; on reclaim the re-run would
+append a second. ``execute_generation_job`` clears this job's prior scratch
+(keyed by ``request_id``, reusing the 2a per-request delete) before saving, so
+each job leaves at most one scratch entry regardless of reclaims.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
+from services.application.app.context_search.models import (
+    ContextBudget,
+    ContextNeed,
+    ContextSearchPurpose,
+    ContextSearchRequest,
+    CurrentPosition,
+)
+from services.application.app.context_search.service import (
+    ContextSearchBudgetExceeded,
+    ContextSearchFailed,
+    ContextSearchService,
+    InvalidContextSearchRequest,
+)
+from services.application.app.writing.generation_job import (
+    WritingGenerationJob,
+    WritingGenerationJobFailureReason,
+    WritingGenerationJobService,
+)
+from services.application.app.writing.models import WritingRequest, WritingTaskType
+from services.application.app.writing.report import InvalidCandidateReport
+from services.application.app.writing.scratch import WritingScratchService
+from services.application.app.writing.service import WritingError, WritingService
+
+
+@dataclass(frozen=True)
+class GenerationCollaborators:
+    """The env-configured services the executor drives. Assembled by
+    ``main.build_async_generation_collaborators`` (production/worker) or by hand
+    (tests)."""
+
+    context_search: ContextSearchService
+    writing: WritingService
+    scratch: WritingScratchService
+    jobs: WritingGenerationJobService
+    needs: tuple[ContextNeed, ...]
+
+
+async def execute_generation_job(
+    job: WritingGenerationJob, collaborators: GenerationCollaborators
+) -> WritingGenerationJob:
+    """Run one claimed (RUNNING) job to a terminal state and return it."""
+    c = collaborators
+    fail = c.jobs.mark_failed
+    reasons = WritingGenerationJobFailureReason
+    try:
+        search_request = ContextSearchRequest(
+            project_id=job.project_id,
+            purpose=ContextSearchPurpose.WRITING_CONTEXT,
+            needs=c.needs,
+            query=job.query or job.instruction,
+            current_position=CurrentPosition(
+                draft_id=job.draft_id, version_id=job.version_id),
+            context_budget=ContextBudget(max_tokens=job.max_tokens),
+        )
+        package = await c.context_search.build_context_package(search_request)
+        candidate = await c.writing.generate(
+            request=WritingRequest(
+                request_id=job.request_id,
+                project_id=job.project_id,
+                task_type=WritingTaskType(job.task_type),
+                instruction=job.instruction,
+                draft_excerpt=job.draft_excerpt,
+            ),
+            package=package,
+            max_output_tokens=job.max_output_tokens,
+        )
+    except (WritingError, InvalidContextSearchRequest) as exc:
+        return fail(job, reason=reasons.INVALID_REQUEST, detail=str(exc))
+    except InvalidCandidateReport as exc:
+        return fail(job, reason=reasons.INVALID_REPORT, detail=str(exc))
+    except ContextSearchBudgetExceeded as exc:
+        return fail(job, reason=reasons.CONTEXT_BUDGET_EXCEEDED, detail=str(exc))
+    except ContextSearchFailed as exc:
+        return fail(job, reason=reasons.CONTEXT_SEARCH_FAILED,
+                    detail=f"{exc.error_type.value}: {exc.detail}")
+    except ProviderError as exc:
+        reason = (reasons.PROVIDER_TIMEOUT
+                  if exc.code is ProviderErrorCode.TIMEOUT
+                  else reasons.PROVIDER_ERROR)
+        return fail(job, reason=reason, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001 — H-2 catch-all: never livelock
+        return fail(job, reason=reasons.INTERNAL, detail=repr(exc))
+
+    # H-3: drop any scratch this job left on a prior (crashed) attempt before
+    # saving, so a reclaim replaces rather than duplicates the pad result.
+    c.scratch.clear_accepted_item(job.project_id, job.draft_id, job.request_id)
+    entry = c.scratch.save(
+        project_id=job.project_id,
+        draft_id=job.draft_id,
+        request_id=job.request_id,
+        task_type=candidate.task_type.value,
+        output_type=candidate.output_type.value,
+        instruction=job.instruction,
+        candidate_text=candidate.text,
+        version_id=job.version_id,
+    )
+    return c.jobs.mark_succeeded(job, result_scratch_id=entry.id)

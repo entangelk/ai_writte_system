@@ -69,11 +69,11 @@ class WritingGenerationJobFailureReason(StrEnum):
     endpoint itself collapses all ProviderError to one status), and the worker
     keeps them apart so the pad can tell "timed out" from other provider faults.
 
-    NOTE for 2b (verification H-2): these cover only the *mapped* generate-
-    pipeline exceptions. The worker loop must also handle **unmapped** infra
-    faults (pymongo/httpx) and bugs — either add a catch-all reason here or a
-    fallback ``mark_failed`` — otherwise such a job never reaches a terminal
-    state and livelocks RUNNING → lease-reclaim → re-fail.
+    ``INTERNAL`` is the catch-all (verification H-2): the mapped reasons cover
+    only the generate pipeline's *known* exceptions, so the worker's outermost
+    handler maps any **unmapped** fault (a pymongo/httpx infra error, a bug) onto
+    ``INTERNAL`` and marks the job FAILED. Without it such a job would never reach
+    a terminal state and would livelock RUNNING → lease-reclaim → re-fail.
     """
 
     INVALID_REQUEST = "invalid_request"
@@ -82,6 +82,7 @@ class WritingGenerationJobFailureReason(StrEnum):
     CONTEXT_SEARCH_FAILED = "context_search_failed"
     PROVIDER_ERROR = "provider_error"
     PROVIDER_TIMEOUT = "provider_timeout"
+    INTERNAL = "internal"
 
 
 @dataclass(frozen=True, slots=True)
