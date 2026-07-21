@@ -52,15 +52,28 @@ class WritingGenerationJobStatus(StrEnum):
 
 class WritingGenerationJobFailureReason(StrEnum):
     """Failure taxonomy the worker (증분 2b) maps the generate pipeline's
-    exceptions onto. Grounded in the sync generate endpoint's ``except`` blocks
-    (``main.py`` writing_generate_endpoint) so 2b has an exact mapping:
+    exceptions onto. The *exception set* is grounded in the sync generate
+    endpoint's ``except`` blocks (``main.py`` writing_generate_endpoint); the
+    worker classifies those same exceptions into a job reason, not an HTTP
+    status (it produces no HTTP response), so no status codes are implied here:
 
-    - ``INVALID_REQUEST``      ← WritingError / InvalidContextSearchRequest (400)
-    - ``INVALID_REPORT``       ← InvalidCandidateReport (502)
-    - ``CONTEXT_BUDGET_EXCEEDED`` ← ContextSearchBudgetExceeded (504)
-    - ``CONTEXT_SEARCH_FAILED`` ← ContextSearchFailed (502)
-    - ``PROVIDER_ERROR``       ← ProviderError, non-timeout (502)
-    - ``PROVIDER_TIMEOUT``     ← ProviderError with code TIMEOUT (504)
+    - ``INVALID_REQUEST``      ← WritingError / InvalidContextSearchRequest
+    - ``INVALID_REPORT``       ← InvalidCandidateReport
+    - ``CONTEXT_BUDGET_EXCEEDED`` ← ContextSearchBudgetExceeded
+    - ``CONTEXT_SEARCH_FAILED`` ← ContextSearchFailed
+    - ``PROVIDER_ERROR``       ← ProviderError (non-timeout)
+    - ``PROVIDER_TIMEOUT``     ← ProviderError with code ProviderErrorCode.TIMEOUT
+
+    The timeout split follows the writing endpoints' established convention —
+    ``accept`` distinguishes ``ProviderErrorCode.TIMEOUT`` (the generate
+    endpoint itself collapses all ProviderError to one status), and the worker
+    keeps them apart so the pad can tell "timed out" from other provider faults.
+
+    NOTE for 2b (verification H-2): these cover only the *mapped* generate-
+    pipeline exceptions. The worker loop must also handle **unmapped** infra
+    faults (pymongo/httpx) and bugs — either add a catch-all reason here or a
+    fallback ``mark_failed`` — otherwise such a job never reaches a terminal
+    state and livelocks RUNNING → lease-reclaim → re-fail.
     """
 
     INVALID_REQUEST = "invalid_request"
