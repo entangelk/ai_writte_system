@@ -9,8 +9,10 @@ docs/plans/05-writing-generation-decisions.md.
 """
 
 import asyncio
+import os
 import unittest
 from dataclasses import replace
+from unittest.mock import patch
 
 import httpx
 
@@ -32,7 +34,12 @@ from services.application.app.core_sot.service import (
     InMemoryCoreSotRepository,
 )
 from services.application.app.indexing.models import IndexPointer
-from services.application.app.main import create_app
+from services.application.app.main import (
+    WritingGenerateRequest,
+    WritingReviseRequest,
+    _writing_output_length_tokens,
+    create_app,
+)
 from services.application.app.analysis.prompt_templates import (
     InMemoryPromptTemplateRepository,
     PromptTemplateService,
@@ -43,6 +50,7 @@ from services.application.app.writing.models import (
     ContextPointer,
     MemoryHintType,
     NewMemoryHint,
+    OutputLength,
     RiskNote,
     RiskNoteType,
     RiskSeverity,
@@ -465,6 +473,130 @@ class WritingGenerateApiTest(unittest.TestCase):
             json={"request_id": "wr1", "instruction": "이어서 써줘."},
         )
         self.assertEqual(response.status_code, 502)
+
+
+class WritingOutputLengthPresetTest(unittest.TestCase):
+    """증분 2 (D3=A): the output-length preset maps to output tokens server-side.
+
+    Boundary matrix — the request field `output_length` selects the output token
+    cap the generation runs with, and the SERVER owns the mapping:
+      - default (field omitted)   → short → 1024  (backward compat, pre-slice value)
+      - short/medium/long         → 1024/2048/4096 (confirmed defaults)
+      - unknown value             → 400 (never a silent default; model not reached)
+      - env override / short base → the mapped value changes
+      - value < 1 / non-int env   → app startup fails loudly
+    The preset governs OUTPUT tokens only; `max_tokens` (the input ContextPackage
+    budget) is a separate axis the preset must not move (over-strict guard). And
+    `long` (4096, ~91s) exceeds WRITING_LOOP_MAX_WALL_CLOCK_MS, so the preset is a
+    generate-only knob and must not exist on the revise-and-gate loop request.
+    """
+
+    def _generated_output_tokens(self, extra):
+        provider = _FakeProvider(content="이어진 장면.")
+        client, project_id, _ = _http(provider, package=_package())
+        response = client.post(
+            f"/projects/{project_id}/writing/generate",
+            json={"request_id": "wr1", "instruction": "이어서 써줘.", **extra},
+        )
+        self.assertEqual(response.status_code, 200)
+        return provider.last_request.max_tokens
+
+    def test_default_preset_is_short_1024(self):
+        # under-strict: omitting the field keeps the pre-slice single value.
+        self.assertEqual(self._generated_output_tokens({}), 1024)
+
+    def test_short_preset_override_reaches_generation(self):
+        # Load-bearing guard for the short/base path SPECIFICALLY. The service's
+        # own construction default is also 1024, so `test_default_preset_is_short`
+        # alone cannot prove the endpoint resolves+passes the preset (both paths
+        # give 1024). Overriding short to a value the service default is NOT makes
+        # the omitted-field request bite: dropping `max_output_tokens=` from the
+        # endpoint re-fails this (provider would get the service default 1024).
+        provider = _FakeProvider(content="x")
+        with patch.dict(os.environ, {"WRITING_OUTPUT_LENGTH_SHORT": "1500"}):
+            client, project_id, _ = _http(provider, package=_package())
+            response = client.post(
+                f"/projects/{project_id}/writing/generate",
+                json={"request_id": "wr1", "instruction": "이어서 써줘."},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(provider.last_request.max_tokens, 1500)
+
+    def test_presets_map_to_confirmed_tokens(self):
+        for preset, expected in (
+            ("short", 1024), ("medium", 2048), ("long", 4096),
+        ):
+            with self.subTest(preset=preset):
+                self.assertEqual(
+                    self._generated_output_tokens({"output_length": preset}),
+                    expected,
+                )
+
+    def test_unknown_preset_is_400_and_never_reaches_model(self):
+        provider = _FakeProvider()
+        client, project_id, _ = _http(provider, package=_package())
+        response = client.post(
+            f"/projects/{project_id}/writing/generate",
+            json={"request_id": "wr1", "instruction": "x",
+                  "output_length": "epic"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIsNone(provider.last_request)
+
+    def test_preset_is_independent_of_input_max_tokens(self):
+        # over-strict guard: input budget (max_tokens) and output preset are
+        # separate axes — moving one must not move the other.
+        provider = _FakeProvider(content="x")
+        client, project_id, context = _http(provider, package=_package())
+        client.post(
+            f"/projects/{project_id}/writing/generate",
+            json={"request_id": "wr1", "instruction": "이어서 써줘.",
+                  "max_tokens": 512, "output_length": "long"},
+        )
+        self.assertEqual(provider.last_request.max_tokens, 4096)  # output → preset
+        self.assertEqual(
+            context.last_request.context_budget.max_tokens, 512  # input → max_tokens
+        )
+
+    def test_env_override_remaps_preset(self):
+        with patch.dict(os.environ, {"WRITING_OUTPUT_LENGTH_MEDIUM": "3000"}):
+            self.assertEqual(
+                _writing_output_length_tokens()[OutputLength.MEDIUM], 3000,
+            )
+
+    def test_short_defaults_to_generate_max_tokens_env(self):
+        # backward compat: the existing WRITING_GENERATE_MAX_TOKENS still tunes the
+        # short/base preset unless a dedicated override wins.
+        with patch.dict(os.environ, {"WRITING_GENERATE_MAX_TOKENS": "800"}):
+            self.assertEqual(
+                _writing_output_length_tokens()[OutputLength.SHORT], 800,
+            )
+        with patch.dict(os.environ, {"WRITING_GENERATE_MAX_TOKENS": "800",
+                                     "WRITING_OUTPUT_LENGTH_SHORT": "900"}):
+            self.assertEqual(
+                _writing_output_length_tokens()[OutputLength.SHORT], 900,
+            )
+
+    def test_invalid_env_fails_app_creation(self):
+        invalid = (
+            ("WRITING_OUTPUT_LENGTH_SHORT", "0"),
+            ("WRITING_OUTPUT_LENGTH_MEDIUM", "-1"),
+            ("WRITING_OUTPUT_LENGTH_LONG", "0"),
+            ("WRITING_OUTPUT_LENGTH_MEDIUM", "not-an-integer"),
+        )
+        for name, value in invalid:
+            with self.subTest(name=name, value=value), patch.dict(
+                os.environ, {name: value}
+            ):
+                with self.assertRaises(ValueError):
+                    create_app()
+
+    def test_output_length_is_a_generate_only_knob(self):
+        # The long preset must not enter the revise-and-gate loop (91s > 60s loop
+        # wall clock). Pinned structurally: the field is on generate, not on the
+        # loop request model.
+        self.assertIn("output_length", WritingGenerateRequest.model_fields)
+        self.assertNotIn("output_length", WritingReviseRequest.model_fields)
 
 
 class WritingGenerateEnvelopeKeyTest(unittest.TestCase):

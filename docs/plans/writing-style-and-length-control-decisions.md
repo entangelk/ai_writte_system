@@ -1,10 +1,10 @@
 # Decision brief — 문체/어투 계약(설정·관찰·검증)과 생성 분량 제어
 
-상태: `결정 확정 (2026-07-20) — D0=B / D1=A / D2=A / D3=A / D4=B / D5=A / D6=A; 증분 1(D1+D2) 구현 완료`
+상태: `결정 확정 (2026-07-20) — D0=B / D1=A / D2=A / D3=A / D4=B / D5=A / D6=A; 증분 1(D1+D2)·증분 2(D3) 구현 완료 (v1.7.22)`
 정본 연결: [`../system-contract-sot.md`](../system-contract-sot.md) (v1.7.20), [`writing-workspace-v2-w0-contract.md`](writing-workspace-v2-w0-contract.md) (§ProjectBrief), [`05-writing-ai.md`](05-writing-ai.md), [`02-analysis-pipeline.md`](02-analysis-pipeline.md), [`07-conversational-authoring.md`](07-conversational-authoring.md), [`product-readiness-backlog.md`](product-readiness-backlog.md)
 작성: 2026-07-20 (오너 분석 반영 개정)
 
-> **오너 결정 완료(2026-07-20)** — D0~D6이 아래 "Owner decisions" 절에 확정 기입됐다. 각 D절의 옵션 표와 추천은 그 결정에 이른 분석 기록이며, **충돌 시 "Owner decisions" 절이 우선**한다. 증분 1(D1+D2)은 SoT v1.7.21로 구현됐고 D3, D4~D6은 순차 미구현이다.
+> **오너 결정 완료(2026-07-20)** — D0~D6이 아래 "Owner decisions" 절에 확정 기입됐다. 각 D절의 옵션 표와 추천은 그 결정에 이른 분석 기록이며, **충돌 시 "Owner decisions" 절이 우선**한다. 증분 1(D1+D2)은 SoT v1.7.21로, 증분 2(D3 출력 분량 프리셋)는 SoT v1.7.22로 구현됐고 D4~D6(증분 3)은 순차 미구현이다.
 
 ## Decision needed
 

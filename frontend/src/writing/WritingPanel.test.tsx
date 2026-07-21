@@ -253,6 +253,7 @@ describe("WritingPanel — generate → gate", () => {
       instruction: "이어서 써줘",
       draft_excerpt: "",
       max_tokens: 4096,
+      output_length: "short",
       task_type: "continue_scene",
       current_position: { draft_id: "d1", version_id: "v3" },
     });
@@ -599,6 +600,44 @@ describe("WritingPanel — automatic revise/retrieve loop", () => {
     const accepted = JSON.parse(fetchMock.mock.calls[3][1].body);
     expect(accepted.candidate_text).toBe(revisedCandidate.text);
     expect(accepted.idempotency_key).toBe("uuid-2");
+  });
+});
+
+describe("WritingPanel — output-length preset (증분 2)", () => {
+  it("defaults to short and sends the selected preset on generate", async () => {
+    const fetchMock = mockFetch({ body: candidate }, { body: gatePass });
+    renderPanel();
+    // The select starts on short; picking medium must flow to the generate body.
+    expect((screen.getByLabelText("생성 분량") as HTMLSelectElement).value).toBe(
+      "short",
+    );
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    await userEvent.selectOptions(screen.getByLabelText("생성 분량"), "medium");
+    await userEvent.click(generateButton());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).output_length).toBe(
+      "medium",
+    );
+  });
+
+  it("skips the auto revise/gate loop for the long preset (single-generate only)", async () => {
+    // long (4096, ~91s) exceeds the loop wall clock, so an eligible finding must
+    // NOT trigger revise-and-gate. over-strict guard: dropping the outputLength
+    // check would make a 3rd fetch (the loop) and break the call count.
+    const fetchMock = mockFetch(
+      { body: candidate },
+      { body: gateEligibleRevise },
+    );
+    renderPanel();
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    await userEvent.selectOptions(screen.getByLabelText("생성 분량"), "long");
+    await userEvent.click(generateButton());
+    await waitFor(() => expect(generateButton()).toBeEnabled());
+    expect(fetchMock).toHaveBeenCalledTimes(2); // generate + gate, no loop
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).output_length).toBe("long");
+    expect(
+      screen.getByText(/긴 분량.*자동 개선을 실행하지 않습니다/),
+    ).toBeInTheDocument();
   });
 });
 

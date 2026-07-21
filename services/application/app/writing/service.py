@@ -81,7 +81,11 @@ class WritingService:
         *,
         request: WritingRequest,
         package: ContextPackage,
+        max_output_tokens: int | None = None,
     ) -> WritingCandidate:
+        # ``max_output_tokens`` is the resolved output-length preset (증분 2 D3);
+        # the HTTP layer owns the preset→token mapping and passes the value here.
+        # None keeps the service's construction-time default (direct callers/tests).
         self._validate(request, package)
         try:
             prompt_template = self._prompt_templates.get_template(
@@ -96,7 +100,10 @@ class WritingService:
             package=package,
             prompt_template=prompt_template,
             model=self._model,
-            max_tokens=self._max_tokens,
+            max_tokens=(
+                max_output_tokens if max_output_tokens is not None
+                else self._max_tokens
+            ),
             temperature=self._temperature,
         )
         # A provider fault (ProviderError) is not swallowed — it propagates so the

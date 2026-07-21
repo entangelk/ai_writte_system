@@ -34,6 +34,17 @@ class WritingTaskType(StrEnum):
     CONTINUE_SCENE = "continue_scene"
 
 
+class OutputLength(StrEnum):
+    # 문체/분량 슬라이스 증분 2 (D3=A). The client picks a symbolic preset in the
+    # writer's language; the SERVER owns the preset→output-token mapping so the
+    # wire contract stays invariant to model swaps. Distinct from the request's
+    # ``max_tokens`` (the input ContextPackage budget). Legacy clients omit the
+    # field → ``short`` (the current single-value default).
+    SHORT = "short"
+    MEDIUM = "medium"
+    LONG = "long"
+
+
 class WritingOutputType(StrEnum):
     # continue_scene emits new prose to append (a patch), not a whole draft
     # (writing_agent_prompt.md §9.1). Editor application semantics are a later

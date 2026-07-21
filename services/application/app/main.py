@@ -72,6 +72,7 @@ from services.application.app.analysis.review_inbox import (
 )
 from services.application.app.writing.models import (
     NextUnit,
+    OutputLength,
     WritingCandidate,
     WritingGateDecision,
     WritingGateFinding,
@@ -974,6 +975,28 @@ def _project_brief_style_example_limits() -> tuple[int, int]:
     return max_items, max_chars
 
 
+def _writing_output_length_tokens() -> dict[OutputLength, int]:
+    # 문체/분량 슬라이스 증분 2 (D3=A). The SERVER owns the preset→output-token
+    # mapping; the confirmed defaults are 1024/2048/4096 and each is env-adjustable
+    # with fail-loud validation (mirrors `_project_brief_style_example_limits`,
+    # increment 1's sibling precedent). `short` defaults to the existing
+    # WRITING_GENERATE_MAX_TOKENS so operators who already tuned it keep that value.
+    presets = {
+        OutputLength.SHORT: _env_int(
+            "WRITING_OUTPUT_LENGTH_SHORT",
+            _env_int("WRITING_GENERATE_MAX_TOKENS", 1024),
+        ),
+        OutputLength.MEDIUM: _env_int("WRITING_OUTPUT_LENGTH_MEDIUM", 2048),
+        OutputLength.LONG: _env_int("WRITING_OUTPUT_LENGTH_LONG", 4096),
+    }
+    for length, value in presets.items():
+        if value < 1:
+            raise ValueError(
+                f"WRITING_OUTPUT_LENGTH_{length.name} must be at least 1"
+            )
+    return presets
+
+
 class ProjectBriefVersionPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1296,6 +1319,11 @@ class WritingGenerateRequest(BaseModel):
     query: str | None = None
     current_position: ContextPositionBody | None = None
     max_tokens: int = 4096
+    # 증분 2 (D3=A): output-length preset (short|medium|long). The server maps it
+    # to output tokens (1024/2048/4096 by default). Distinct from ``max_tokens``,
+    # which is the input ContextPackage budget. Legacy clients omit it → short.
+    # `long` (4096) is single-generate only; it is not a knob on revise-and-gate.
+    output_length: str = OutputLength.SHORT.value
 
 
 class WritingGateRequest(BaseModel):
@@ -1393,6 +1421,7 @@ def create_app(
 ) -> FastAPI:
     # Fail startup loudly for invalid environment-adjustable public bounds.
     _project_brief_style_example_limits()
+    _writing_output_length_tokens()
     app = FastAPI(title="AI Writing System Application")
     core_sot = service or _default_core_sot_service()
     sync_outbox = index_sync_outbox or _default_index_sync_outbox_service()
@@ -3035,6 +3064,16 @@ def create_app(
             raise HTTPException(
                 status_code=400, detail=f"unsupported task_type: {body.task_type}"
             ) from exc
+        # 증분 2 (D3=A): resolve the output-length preset to a token cap. The server
+        # owns the mapping; an unknown preset is a 400 (same shape as task_type).
+        try:
+            output_length = OutputLength(body.output_length)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unsupported output_length: {body.output_length}",
+            ) from exc
+        output_tokens = _writing_output_length_tokens()[output_length]
         if writing is None:
             raise HTTPException(
                 status_code=503, detail="writing service is not configured"
@@ -3070,6 +3109,7 @@ def create_app(
                     draft_excerpt=body.draft_excerpt,
                 ),
                 package=package,
+                max_output_tokens=output_tokens,
             )
         except WritingError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -201,6 +201,11 @@ export function WritingPanel(props: WritingPanelProps) {
     "chapter",
   );
   const [nextGoal, setNextGoal] = useState("");
+  // 증분 2 (D3=A): output-length preset. The server owns the preset→token mapping
+  // (short/medium/long → 1024/2048/4096). `long` is single-generate only — it is
+  // not run through the auto revise/retrieve loop (exceeds the loop wall clock).
+  const [outputLength, setOutputLength] =
+    useState<"short" | "medium" | "long">("short");
   const [candidate, setCandidate] = useState<WritingCandidate | null>(null);
   const [gate, setGate] = useState<WritingGate | null>(null);
   const [loopResult, setLoopResult] = useState<LoopResult | null>(null);
@@ -268,6 +273,7 @@ export function WritingPanel(props: WritingPanelProps) {
         instruction: trimmed,
         draft_excerpt: "",
         max_tokens: MAX_TOKENS,
+        output_length: outputLength,
         task_type: TASK_TYPE,
         current_position: position,
       });
@@ -287,7 +293,13 @@ export function WritingPanel(props: WritingPanelProps) {
       });
       setGate(evaluated);
       const finding = eligibleRevisionFinding(produced, evaluated);
-      if (finding !== null) {
+      // `long` is single-generate only: a 4096-token write exceeds the auto-loop
+      // wall clock, so the loop is skipped and the finding is left for the writer.
+      if (finding !== null && outputLength === "long") {
+        setNotice(
+          "긴 분량(전체 작성)은 자동 개선을 실행하지 않습니다. Gate 지적을 확인한 뒤 직접 판단하세요.",
+        );
+      } else if (finding !== null) {
         await executeLoop({
           request_id: requestId,
           instruction: trimmed,
@@ -489,6 +501,20 @@ export function WritingPanel(props: WritingPanelProps) {
           rows={3}
           placeholder="예: 아린이 성문을 지나 도시로 들어가는 장면을 이어써줘."
         />
+
+        <label htmlFor="writing-output-length">생성 분량</label>
+        <select
+          id="writing-output-length"
+          value={outputLength}
+          onChange={(event) =>
+            setOutputLength(event.target.value as "short" | "medium" | "long")
+          }
+          disabled={readOnly}
+        >
+          <option value="short">짧은 수정</option>
+          <option value="medium">중간부터 이어쓰기</option>
+          <option value="long">전체 작성 (자동 개선 없음)</option>
+        </select>
 
         <fieldset className="writing-intent" disabled={readOnly}>
           <legend>채택 방식</legend>

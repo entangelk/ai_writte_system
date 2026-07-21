@@ -1517,6 +1517,11 @@ export interface components {
              * @default 4096
              */
             max_tokens: number;
+            /**
+             * Output Length
+             * @default short
+             */
+            output_length: string;
             /** Query */
             query?: string | null;
             /** Request Id */
