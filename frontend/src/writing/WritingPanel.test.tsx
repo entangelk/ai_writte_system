@@ -641,6 +641,37 @@ describe("WritingPanel — output-length preset (증분 2)", () => {
   });
 });
 
+describe("WritingPanel — style advisory (증분 3)", () => {
+  const gatePassWithStyle = {
+    ...gatePass,
+    findings: [
+      {
+        type: "style",
+        severity: "warning",
+        message: "설정한 문체와 어조가 다릅니다.",
+        evidence: "그는 말했다",
+        recommended_decision: "needs_user_review",
+      },
+    ],
+  };
+
+  it("keeps accept enabled on a pass and shows the style finding as advisory", async () => {
+    // D5=A/D6=A: a style finding is advisory — decision stays pass, so accept is
+    // enabled and the author sees the note. If style escalated the decision, accept
+    // would be disabled and this fails.
+    const fetchMock = mockFetch({ body: candidate }, { body: gatePassWithStyle });
+    renderPanel();
+    await generateAndGate(fetchMock);
+    expect(acceptButton()).toBeEnabled();
+    expect(screen.getByText("설정한 문체와 어조가 다릅니다.")).toBeInTheDocument();
+    expect(
+      screen.getByText(/문체 참고 사항입니다.*채택할 수 있습니다/),
+    ).toBeInTheDocument();
+    // style is not auto-revise eligible → no loop call, only generate + gate.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("WritingPanel — accept (pass only)", () => {
   it("enables accept only on a pass gate", async () => {
     const fetchMock = mockFetch({ body: candidate }, { body: gateRevise });

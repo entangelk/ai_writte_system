@@ -23,8 +23,8 @@ from services.application.app.writing.gate import (
     seed_writing_gate_template,
 )
 from services.application.app.writing.models import (
-    WritingCandidate, WritingGateDecision, WritingOutputType, WritingRequest,
-    WritingTaskType,
+    WritingCandidate, WritingGateDecision, WritingGateFindingType,
+    WritingOutputType, WritingRequest, WritingTaskType,
 )
 from services.application.app.writing.metering import MeteredCallError
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
@@ -211,6 +211,62 @@ class GateContractTest(unittest.TestCase):
                 request=_request(), candidate=_candidate(),
                 package=_package("p2")))
         self.assertEqual(provider.calls, 0)
+
+
+class GateStyleFindingTest(unittest.TestCase):
+    """증분 3 (D5=A/D6=A): ``style`` findings are ADVISORY. They must be warning
+    severity recommending needs_user_review (never error/block/revise), and they are
+    EXCLUDED from the decision priority so a candidate whose only findings are style
+    still passes — 경고이지 차단 아님, 최종 결정은 사용자. Guards run both directions.
+    """
+
+    def _style(self, *, severity="warning", recommendation="needs_user_review"):
+        return _finding(finding_type="style", severity=severity,
+                        recommendation=recommendation)
+
+    def test_style_only_findings_still_pass(self):
+        # The crux of D6: style must NOT escalate the decision. If style were in the
+        # priority max, decision would be needs_user_review and pass would reject —
+        # this test fails then. The finding stays surfaced for the author to notice.
+        decision, findings, _ = parse_writing_gate_result(
+            _output("pass", [self._style()]))
+        self.assertIs(decision, WritingGateDecision.PASS)
+        self.assertEqual(len(findings), 1)
+        self.assertIs(findings[0].finding_type, WritingGateFindingType.STYLE)
+
+    def test_style_does_not_lift_a_non_style_decision(self):
+        # style alongside a continuity revise: the decision follows continuity only.
+        decision, _, _ = parse_writing_gate_result(_output("revise", [
+            _finding(finding_type="continuity", severity="error",
+                     recommendation="revise"),
+            self._style(),
+        ]))
+        self.assertIs(decision, WritingGateDecision.REVISE)
+
+    def test_style_is_carried_but_not_decision_driving_under_block(self):
+        # do_not_use(block) drives; style rides along in findings, decision=block.
+        decision, findings, _ = parse_writing_gate_result(_output("block", [
+            _finding(finding_type="do_not_use", severity="error",
+                     recommendation="block"),
+            self._style(),
+        ]))
+        self.assertIs(decision, WritingGateDecision.BLOCK)
+        self.assertIn(WritingGateFindingType.STYLE,
+                      {f.finding_type for f in findings})
+
+    def test_style_must_be_warning_not_error(self):
+        # under-strict: a style finding may not masquerade as a blocking error.
+        with self.assertRaises(ValueError):
+            parse_writing_gate_result(
+                _output("pass", [self._style(severity="error")]))
+
+    def test_style_may_only_recommend_needs_user_review(self):
+        # over-strict: warning-only·자동 revise 제외·block 없음 locked at parse.
+        for rec in ("block", "revise", "retrieve_more"):
+            with self.subTest(recommendation=rec):
+                with self.assertRaises(ValueError):
+                    parse_writing_gate_result(
+                        _output("pass", [self._style(recommendation=rec)]))
 
 
 class GateFenceStrippingTest(unittest.TestCase):

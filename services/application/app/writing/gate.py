@@ -119,7 +119,14 @@ def parse_writing_gate_result(content: str):
     findings = tuple(_finding(item) for item in raw_findings)
     checked = tuple(_nonempty_string(item, "checked constraint")
                     for item in raw_checked)
-    expected = max((item.recommended_decision for item in findings),
+    # 증분 3 (D5=A/D6=A): style findings are advisory — excluded from the decision
+    # priority so a candidate whose only findings are style still passes (경고이지
+    # 차단 아님, 최종 결정은 사용자). They remain in `findings` so the author sees them.
+    decision_driving = tuple(
+        item for item in findings
+        if item.finding_type is not WritingGateFindingType.STYLE
+    )
+    expected = max((item.recommended_decision for item in decision_driving),
                    key=_PRIORITY.get, default=WritingGateDecision.PASS)
     if decision is not expected:
         raise ValueError("decision does not match finding priority")
@@ -144,6 +151,16 @@ def _finding(value: object) -> WritingGateFinding:
     } and (severity is not WritingGateSeverity.ERROR or
            recommendation is not WritingGateDecision.BLOCK):
         raise ValueError("do_not_use and POV findings must be blocking errors")
+    # 증분 3 (D5=A): a style finding is advisory — warning severity, and it may only
+    # recommend needs_user_review (never error, never block/revise/retrieve_more).
+    # This locks "warning 전용·자동 revise 제외·block 없음" at the parse boundary.
+    if finding_type is WritingGateFindingType.STYLE and (
+        severity is not WritingGateSeverity.WARNING
+        or recommendation is not WritingGateDecision.NEEDS_USER_REVIEW
+    ):
+        raise ValueError(
+            "style findings must be warning severity recommending needs_user_review"
+        )
     return WritingGateFinding(finding_type=finding_type, severity=severity,
         message=_nonempty_string(value["message"], "message"),
         evidence=_nonempty_string(value["evidence"], "evidence"),

@@ -64,6 +64,12 @@ class WritingGateFindingType(StrEnum):
     DO_NOT_USE = "do_not_use"
     POV = "pov"
     CONTINUITY = "continuity"
+    # 문체/분량 슬라이스 증분 3 (D5=A/D6=A): a style mismatch against the author's
+    # ProjectBrief style settings. ADVISORY only — warning severity, never blocks,
+    # never auto-revised, and excluded from the decision priority so a candidate
+    # whose only findings are style still passes (D6: 경고이지 차단 아님, 최종 결정은
+    # 사용자). The author notices and decides.
+    STYLE = "style"
 
 
 class WritingGateSeverity(StrEnum):

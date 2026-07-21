@@ -1,6 +1,6 @@
 # Decision brief — 문체/어투 계약(설정·관찰·검증)과 생성 분량 제어
 
-상태: `결정 확정 (2026-07-20) — D0=B / D1=A / D2=A / D3=A / D4=B(오너=optional) / D5=A / D6=A; 증분 1(D1+D2)·증분 2(D3)·증분 3 D4 구현 완료 (v1.7.23); 증분 3 D5+D6 미구현`
+상태: `구현 완료 (2026-07-21) — D0=B / D1=A / D2=A / D3=A / D4=B(오너=optional) / D5=A / D6=A; 증분 1(D1+D2, v1.7.21)·증분 2(D3, v1.7.22)·증분 3(D4 v1.7.23, D5+D6 v1.7.24) 전부 구현 완료`
 정본 연결: [`../system-contract-sot.md`](../system-contract-sot.md) (v1.7.20), [`writing-workspace-v2-w0-contract.md`](writing-workspace-v2-w0-contract.md) (§ProjectBrief), [`05-writing-ai.md`](05-writing-ai.md), [`02-analysis-pipeline.md`](02-analysis-pipeline.md), [`07-conversational-authoring.md`](07-conversational-authoring.md), [`product-readiness-backlog.md`](product-readiness-backlog.md)
 작성: 2026-07-20 (오너 분석 반영 개정)
 
@@ -186,6 +186,7 @@
   - **구현 리터럴 보완 결정(2026-07-21, 오너=optional)**: 이 표의 원 리터럴은 exact `(name, observation, aspect)` **필수**였다. 착수 시점 코드 스코핑에서 candidate 생성 경로가 payload를 검증(`record_candidate`→`validate_candidate_payload`, exact-match)해 필수화하면 **테스트 25개 파일 + 저장된 live candidate가 즉시 무효**가 되어 대규모 fixture 수정 + 마이그레이션이 필요함이 드러났고, 이 필드의 핵심 가치(캐릭터 어투 검증)는 아래 Follow-up대로 **설정 저장이 deferred**라 이번 증분에서 forward-defense임이 확인됐다. 오너는 이 blast radius/deferred 근거로 **aspect를 optional**로 확정했다: `character_observation`은 `(name, observation)` 또는 `(name, observation, aspect)` 둘 다 유효(present 시 non-empty string, `event`/`open_question`엔 불허), 기존 payload는 **마이그레이션 없이** 유효. 값은 자유 문자열(enum 아님, 확장 가능)이다. SoT v1.7.23으로 구현.
 
 - **D5 = A** — `style` finding type 추가, **warning 전용 · 자동 revise 제외 · block 없음**. 오너 근거: 어투 이탈은 **저자가 알아차리면 충분**하고, **의도적으로 다르게 쓰는 경우도 정당**하므로 차단하거나 재생성 루프를 태우면 안 된다. (기존 자동 revise가 continuity 전용이라 기본 동작이 이미 이에 부합하며, 명시적으로 잠그면 된다.)
+  - **구현 결정(2026-07-21, SoT v1.7.24) — style은 advisory이며 decision을 escalate하지 않는다**: 착수 시 Gate 계약을 스코핑하니 (a) decision은 findings에서 파생되고(`decision == max(recommendation)`), (b) 프론트 accept는 `decision === "pass"` 조건이었다. style을 needs_user_review로 escalate하면 accept가 막혀 저자가 의도적 이탈을 채택할 수 없고 사실상 재생성을 강요받는데, 이는 D5/D6의 "차단하거나 재생성 루프를 태우면 안 된다 / 최종 결정은 사용자"와 정면충돌한다. 따라서 style finding은 severity=warning·recommendation=needs_user_review로 고정하되 **decision 우선순위 계산에서 제외**해, findings가 style뿐인 후보는 `pass`를 유지(accept 가능)하고 경고만 표시한다. 이는 "pass only with no findings" 불변식을 "pass with no non-style findings"로 완화하는 Gate 계약 변경이며, D6의 "경고이지 차단 아님·최종 결정은 사용자"에서 파생된다(임의 선택 아님).
 
 - **D6 = A + 사용자 확인이 최종** — 우선순위는 **설정 우선**(Phase 7 D7 트리 `저자 설정 > canonical 관찰 > candidate 관찰`을 문체/어투에도 적용). 단 **차단이 아니라 경고**이며, D5와 같은 이유로 **의도적 변경 가능성을 전제**해 **최종 결정은 사용자 선택**이다.
   - **관찰 → 설정 자동 반영 기능은 만들지 않는다.** 저자가 설정을 바꾸고 싶으면 직접 수정한다. (확인: **ProjectBrief는 이미 append-only version + history API**(`GET /projects/{id}/brief/versions`)이므로, 직접 수정하면 **이력이 자동 보존된다**. 오너가 우려한 "설정 변경의 히스토리"는 신규 작업 없이 이미 충족된다.)

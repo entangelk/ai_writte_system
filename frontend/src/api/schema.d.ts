@@ -1455,7 +1455,7 @@ export interface components {
          * WritingGateFindingType
          * @enum {string}
          */
-        WritingGateFindingType: "do_not_use" | "pov" | "continuity";
+        WritingGateFindingType: "do_not_use" | "pov" | "continuity" | "style";
         /** WritingGatePayload */
         WritingGatePayload: {
             /** Checked Constraints */

@@ -783,9 +783,13 @@ class WritingReviseGateApiTest(unittest.TestCase):
         # longer ineligible — it is revised sequentially (see
         # test_multi_finding_revise_processes_sequentially). These remain
         # ineligible: empty, non-continuity, evidence absent, evidence not unique.
+        # 증분 3 (D5=A): a style finding is never auto-revised even if it (wrongly)
+        # recommends revise with unique evidence — only its type excludes it, so
+        # loosening `_is_eligible_continuity_revise` to include style re-fails here.
         invalid_findings = (
             (),
             (_finding("고친 문장.", finding_type=WritingGateFindingType.POV),),
+            (_finding("고친 문장.", finding_type=WritingGateFindingType.STYLE),),
             (_finding("존재하지 않는 문장."),),
             (_finding("문장.",),),
         )

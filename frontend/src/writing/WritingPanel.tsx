@@ -656,6 +656,11 @@ export function WritingPanel(props: WritingPanelProps) {
                       {finding.evidence !== "" && (
                         <span className="finding-evidence">근거: {finding.evidence}</span>
                       )}
+                      {finding.type === "style" && (
+                        <span className="finding-advisory">
+                          문체 참고 사항입니다. 의도한 표현이라면 그대로 채택할 수 있습니다.
+                        </span>
+                      )}
                     </li>
                   ))}
                 </ul>

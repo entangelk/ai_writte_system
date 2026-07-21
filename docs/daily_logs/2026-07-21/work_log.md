@@ -96,4 +96,40 @@
 
 ### Next steps
 
-- **증분 3 D5(Gate `style` finding, warning 전용·자동 revise 제외·block 없음) + D6(우선순위 계약)**: 다음 슬라이스. HANDOFF Next Tasks ★에 착수 전 읽을 파일(`writing/models.py`·`gate_prompt.py`·`revise_gate.py`)과 경계를 기록했다.
+- 증분 3 D5+D6은 같은 날 이어서 구현했다(아래 Task 참조).
+
+## Task — 문체/분량 슬라이스 증분 3(2/2): Gate style finding + 문체 우선순위 (D5=A/D6=A, SoT v1.7.24)
+
+### Goals
+
+- 브리프 D5=A(`style` finding type, warning 전용·자동 revise 제외·block 없음)와 D6=A(우선순위 `저자 설정 > canonical 관찰 > candidate 관찰`을 문체에 적용, 경고이지 차단 아님, 최종 결정은 사용자)를 구현한다.
+
+### User Decisions and Rationale
+
+- 이 슬라이스는 오너 확정 결정(D5=A/D6=A)의 구현이며 새 오너 결정은 없다. 아래 "Decisions"의 advisory-vs-escalate는 D6에서 파생한 구현 판단이다.
+
+### Completed work
+
+- **`WritingGateFindingType`에 `STYLE` 추가**(`writing/models.py`).
+- **Gate 파서(`writing/gate.py`)**: (a) `_finding`에 style 제약 추가 — style은 severity=warning·recommendation=needs_user_review만 허용(그 외 `ValueError`), 즉 error/block/revise/retrieve_more 불가. (b) `parse_writing_gate_result`의 decision 우선순위 계산을 **non-style finding으로 한정**(`decision_driving`) — style은 findings에 남아 저자에게 노출되나 decision을 끌어올리지 않는다.
+- **Gate 프롬프트(`writing/gate_prompt.py`)**: "Check only: do_not_use, POV, and continuity"를 "…, continuity, and style"로 열고, style은 **저자의 project_brief 문체 설정(tone/style_rules/preferred_patterns/forbidden_patterns/style_examples)과만 대조**하는 advisory(warning·needs_user_review·never block/auto-revise)이며 **decision을 non-style로만 계산**함을 명시. 정당한 저자 선택엔 style finding을 내지 말라는 지침 포함.
+- **auto-revise 제외**: `revise_gate._is_eligible_continuity_revise`가 이미 continuity 전용이라 style은 자연 제외되나, 회귀로 명시 잠금(style이 revise를 권해도 type 때문에 ineligible).
+- **프론트(`WritingPanel.tsx`)**: 코어 로직 변경 없음 — findings는 decision 무관 렌더되고 `canAccept`는 `decision==="pass"`만 보므로 `pass`+style이면 accept 유지 + style finding 표시가 이미 성립. style finding에 advisory 안내("문체 참고 사항입니다. 의도한 표현이라면 그대로 채택할 수 있습니다.") 1줄 + `.finding-advisory` CSS만 추가. `gen:api`로 `WritingGateFindingType` enum에 `style` additive.
+
+### Decisions (구현자 판단)
+
+- **style은 advisory이며 decision을 escalate하지 않는다(D6에서 파생)**: Gate 계약상 decision은 findings에서 파생되고(`decision==max(recommendation)`) 프론트 accept는 `decision==="pass"` 조건이다. style을 needs_user_review로 escalate하면 accept가 막혀 저자가 **의도적 이탈을 채택 못 하고 재생성을 강요**받는데, 이는 D5/D6의 "차단하거나 재생성 루프를 태우면 안 된다 / 최종 결정은 사용자"와 정면충돌한다. 따라서 style을 **decision 우선순위에서 제외**해 `pass`를 유지(accept 가능)하고 경고만 표시한다. "pass only with no findings" 불변식을 "no non-style findings"로 완화하는 Gate 계약 변경이며, 임의 선택이 아니라 D6 문언에서 파생된다. style의 recommendation을 needs_user_review로 못박은 것은 "사람이 봐야 함" 신호(decision엔 미반영)이자 warning-only·block 없음의 parse 잠금이다.
+- **캐릭터 어투(D4 aspect) 대조는 이번 범위 밖**: 캐릭터-어투 **설정** 저장이 deferred(Follow-up)라, 이번 style 대조는 **프로젝트 문체 설정**(ProjectBrief)까지다. aspect 관찰(D4)은 forward-defense.
+
+### Verification
+
+- backend: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1250 passed / 73 skipped / 326 subtests**. 신규 `tests/test_writing_gate.py::GateStyleFindingTest` 5건 + `test_writing_revise.py` 회귀에 style ineligible 케이스 1:
+  - over-strict(D6 핵심): style만 있으면 decision=pass(우선순위에 style 포함 시 needs_user_review로 bite), style+continuity(revise)→revise, style+do_not_use(block)→block(style은 findings에 동승하나 decision 미구동).
+  - under-strict: style은 warning이어야(error 거절), needs_user_review만 권고 가능(block/revise/retrieve_more 거절).
+  - auto-revise: style finding은 revise를 권해도 auto-revise 안 됨(type으로 ineligible, `_is_eligible_continuity_revise` 완화 시 bite).
+- frontend: `npx vitest run` → **162 passed / 11 files**(WritingPanel +1: pass+style에서 accept 유지·style finding 메시지·advisory 안내 표시, style은 loop 미진입[2 fetch]). `npx tsc --noEmit` clean. `npm run build` 101 modules(JS 394.79 kB). `gen:api`는 `WritingGateFindingType`에 `style` 1개 additive.
+- `git diff --check` clean. LLM 미사용.
+
+### Next steps
+
+- **문체/분량 슬라이스 전체(증분 1~3) 종료.** 다음 갈림길은 **비동기 생성 + 결과 패드**(`plans/async-generation-pad-decisions.md` D1~D7 확정, 미구현) — 문체/분량 완료로 2048/4096 프리셋이 생겨 D5(1024 동기/2048·4096 비동기) 분기 기준이 성립한다. 캐릭터 어투 **설정** 저장·mood(Phase 7)는 별도 후속.
