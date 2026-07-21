@@ -351,6 +351,9 @@ export interface ScratchCandidate {
   instruction: string;
   candidate_text: string;
   intent: string | null;
+  /** Version the candidate was generated against (async-pad D7); null for
+   * records written before the field existed. */
+  version_id: string | null;
   created_at: string;
 }
 

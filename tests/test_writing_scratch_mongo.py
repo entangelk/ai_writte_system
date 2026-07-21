@@ -90,13 +90,13 @@ class _Client:
 
 
 def _entry(entry_id, *, project="p", draft="d", minute=0, text="초안",
-           intent=None):
+           intent=None, request_id="wr1", version_id=None):
     return ScratchCandidate(
-        id=entry_id, project_id=project, draft_id=draft, request_id="wr1",
+        id=entry_id, project_id=project, draft_id=draft, request_id=request_id,
         task_type="continue_scene", output_type="draft_patch",
         instruction="이어서 써줘", candidate_text=text,
         created_at=datetime(2026, 7, 20, 0, minute, tzinfo=UTC),
-        intent=intent,
+        intent=intent, version_id=version_id,
     )
 
 
@@ -115,7 +115,7 @@ class MongoWritingScratchRepositoryTest(unittest.TestCase):
 
     def test_add_and_list_round_trip_newest_first(self):
         earlier = _entry("wds:a", minute=1, text="오래된")
-        later = _entry("wds:z", minute=5, text="최신")
+        later = _entry("wds:z", minute=5, text="최신", version_id="v9")
         with_intent = _entry("wds:i", minute=3, intent="append_current")
         other_draft = _entry("wds:d2", draft="d2", minute=9)
         other_project = _entry("wds:p2", project="p2", minute=9)
@@ -146,6 +146,27 @@ class MongoWritingScratchRepositoryTest(unittest.TestCase):
         self.assertEqual(
             tuple(e.id for e in self.repo.list_for_draft("p", "d2")),
             ("wds:keep",),
+        )
+
+    def test_delete_for_request_removes_only_the_matching_item(self):
+        # Async-pad D2=A: accept retires only the accepted item (request_id
+        # match), leaving siblings from other generates on the same draft.
+        self.repo.add(_entry("wds:accepted", request_id="wr1"))
+        self.repo.add(_entry("wds:other", request_id="wr2", minute=2))
+        self.repo.add(_entry("wds:d2", draft="d2", request_id="wr1", minute=3))
+
+        self.assertEqual(self.repo.delete_for_request("p", "d", "wr1"), 1)
+
+        # The sibling on the same draft survives...
+        self.assertEqual(
+            tuple(e.id for e in self.repo.list_for_draft("p", "d")),
+            ("wds:other",),
+        )
+        # ...and the same request_id on ANOTHER draft is untouched (keyed by all
+        # three: project, draft, request).
+        self.assertEqual(
+            tuple(e.id for e in self.repo.list_for_draft("p", "d2")),
+            ("wds:d2",),
         )
 
     def test_delete_ids_removes_named_entries_only(self):
@@ -179,6 +200,16 @@ class MongoWritingScratchRepositoryTest(unittest.TestCase):
         restored = self.repo.list_for_draft("p", "d")[0]
 
         self.assertIsNone(restored.intent)
+
+    def test_legacy_doc_without_version_id_reads_none(self):
+        # Under-strict: a doc written before `version_id` (async-pad D7) existed
+        # still loads, reading the absent field as None.
+        self.repo.add(_entry("wds:legacy"))
+        self.collection.docs["wds:legacy"].pop("version_id")
+
+        restored = self.repo.list_for_draft("p", "d")[0]
+
+        self.assertIsNone(restored.version_id)
 
 
 if __name__ == "__main__":

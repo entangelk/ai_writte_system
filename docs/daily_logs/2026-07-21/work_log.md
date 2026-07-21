@@ -164,3 +164,48 @@
 
 - 검증 기록의 hardening #4(D6 "설정 기준만 판정/관찰→설정 자동 반영 없음" LLM 행동)는 code test 불가 → 후속 풀스택 12B smoke에서 관찰.
 - 문체/분량 슬라이스는 이번 보강으로 boundary matrix가 더 조밀해졌고, 여전히 종료 상태. 비동기 생성+결과 패드가 다음.
+
+## Task — 비동기 생성 + 결과 패드 슬라이스 증분 1: scratch tier 패드 준비 (D2=A + D7, SoT v1.7.25)
+
+### Goals
+
+- 브리프 `plans/async-generation-pad-decisions.md`(D1~D7 확정, 2026-07-20)의 착수. 큰 슬라이스라 3증분으로 쪼갠다: **증분 1 = scratch 계약 개정(D2+D7, backend+SoT)**, 증분 2 = 비동기 job 인프라(D4+D3+D5, worker LLM 루프·1024 동기/2048·4096 비동기 분기), 증분 3 = 패드 UI(D6, 읽기 전용 패드·배지·5초 폴링).
+- 증분 1은 패드가 accept를 살아남고("채택 항목만 정리") 어느 version 기준인지 표시할 수 있도록 scratch tier를 준비한다. 비동기 실행 자체는 증분 2.
+
+### Completed work
+
+- **D7 — scratch `version_id`(additive nullable)**: `ScratchCandidate`에 `version_id: str | None = None`을 추가(`intent` seam 선례 동형). generate가 `body.current_position.version_id`를 실어 저장하고(`main.py`), Mongo 어댑터 `_doc`/`_entry`가 write/read(`doc.get("version_id")`)하며, `_writing_scratch_payload`가 노출한다. 기존 레코드는 None으로 읽혀 **마이그레이션 불요**.
+- **D2=A — accept 정리를 draft 전체 → 채택 항목 단위로 축소**: 신규 repo 메서드 `delete_for_request(project_id, draft_id, request_id)`(InMemory+Mongo)와 서비스 `clear_accepted_item(...)`을 추가. `_clear_scratch_for_saved_accept`가 `clear_draft` 대신 `clear_accepted_item(project_id, cleanup_draft_id, body.request_id)`를 호출한다 — 채택된 항목(`request_id` 일치)만 삭제, 같은 draft의 다른 생성 결과는 보존, 대응 항목 없으면 no-op. **연결 수단은 이미 존재**(브리프 검증 H1): accept 요청이 `request_id`를 필수로 싣고 accept 서비스가 candidate와 일치를 검증하므로 신규 식별자 불요. 명시적 버리기(DELETE)는 `clear_draft`로 draft 전체 삭제를 유지.
+- **SoT v1.7.25 개정 2곳(구현과 함께)**: §264 정리 규칙을 "draft 전체" → "채택 항목(`request_id` 일치)만"으로 축소하고 **granularity를 문구로 명시**(검증 H2: v1.7.20 승격 당시 whole-draft 의미가 rationale·구현에만 있고 문구에 없던 정밀도 결함 해소). §267 schema에 `version_id` nullable seam 추가. 버전로그 행 + 헤더 버전 bump.
+- **frontend 미러 동기화**: 무타입 scratch payload를 hand-declare한 `ScratchCandidate`(client.ts, 주석에 "mirroring `_writing_scratch_payload`")에 `version_id: string | null` 추가. 로직 무변(증분 3에서 소비).
+
+### User Decisions and Rationale
+
+- 이 슬라이스는 오너 확정 결정(D1~D7, 2026-07-20)의 구현이며 새 오너 결정은 없다. 증분 경계와 §261 purpose-line 지연은 아래 구현자 판단.
+
+### Decisions (구현자 판단)
+
+- **§261 scratch 용도 확장("복구 전용" → "복구 + 비동기 결과 보관")은 증분 2로 지연**했다. 브리프는 개정 2곳(용도+정리)을 "구현과 함께"로 요구하나, worker가 비동기 결과를 scratch에 **실제로 쓰기 전**에는 용도가 여전히 복구 전용이다 — 지금 용도 문구를 확장하면 SoT가 존재하지 않는 동작을 서술한다(CLAUDE.md "SoT는 현재 사실을 반영"). 정리 granularity(§264)는 이번에 **동작을 바꾸므로** 함께 개정하고, version_id(§267)는 `intent` 선례 동형의 additive forward-defense로 정직하게 기술한다.
+- **D2 per-item 정리는 패드 없이도 정합**: 다른 생성 결과는 accept 뒤에도 복구·복사 가치가 있다는 rationale은 패드 UI 존재와 무관하게 참이라, 증분 1 단독으로도 회귀가 성립한다.
+
+### Verification
+
+- backend: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1257 passed / 73 skipped / 326 subtests**(1253 + 4 net). 회귀:
+  - D2 over-strict(핵심): `test_saved_accept_clears_only_the_accepted_item`·`test_partial_analysis_failure_still_clears_the_accepted_item` — 채택 항목만 삭제하고 sibling(`request_id="wr-other"`)은 생존(whole-draft `clear_draft`로 되돌리면 bite). `test_non_pass_accept_keeps_scratch`는 REVISE→둘 다 생존(len==2). 서비스 단위 `test_clear_accepted_item_removes_only_the_matching_request`·`test_clear_accepted_item_no_match_is_a_no_op`(브리프 "대응 항목 없으면 no-op").
+  - Mongo 어댑터: `test_delete_for_request_removes_only_the_matching_item`(project+draft+request 3키 격리), `test_legacy_doc_without_version_id_reads_none`. round-trip에 version_id 실린 항목 포함(_doc↔_entry drift 잠금).
+  - D7: `test_generate_with_position_persists_scratch`에 `version_id=="v1"` 단정 + list 키셋에 `version_id` 추가.
+  - best-effort: `_ExplodingScratch`에 `clear_accepted_item` raise 추가(accept가 이제 이 메서드 호출).
+- frontend: `npx vitest run` → **162 passed / 11 files**(무변). `npx tsc --noEmit` clean. `npm run gen:api` → `schema.d.ts` byte-identical(scratch endpoint `response_model` 없음).
+- `git diff --check` clean. LLM 미사용.
+
+### 독립 검증 PASS(조건 없음) + 비차단 hardening 2건 반영
+
+- 오너가 증분 1을 독립·적대적으로 재도출(계약→구현→테스트→green bar 전부 재실행, backend 1257·frontend 162·diff 일치)해 **합격(조건 없음)** 판정을 줬다(`docs/verifications/2026-07-21/increment1_d2_d7_scratch_pad_prep.md`). §265 boundary matrix 빈 셀 없음, accept 정리 호출 지점(saved 200·502에만 per-item, DELETE에만 whole-draft, non-PASS 미진입)을 직접 확인. 동작 결함·추적 안 된 분기·누락 가드 0.
+- **H-1(계약 일관성, doc-only)**: §262가 scratch를 "복구 전용"이라 하는데 §265 per-item rationale은 "비동기 결과 패드가 재사용할 기반"을 인용해 표면적 긴장이 있었다. §261 용도 확장을 증분 2로 미룬 건 투명하나, §262에 **전방 포인터 1줄**을 추가해 독자 혼동을 없앴다(규칙 모순은 아니라 non-blocking).
+- **H-2(정밀도, doc-only)**: §268의 `version_id` "(없으면 None)"이 `ContextPositionBody.version_id` 필수 문자열(main.py:1283)과 표면 충돌해 보였다. HTTP generate 경로는 항상 실값을 싣고 None은 **legacy 레코드·필드 생략 직접 호출자**를 위한 seam임을 문구로 분리했다.
+- 두 건 모두 코드/테스트 무변(SoT 문구만) → green bar·검증 verdict 불변. `git diff --check` clean.
+
+### Next steps
+
+- **증분 2(D4+D3+D5)**: Analysis식 생성 job collection(`pending/running/succeeded/failed`), worker에 생성 job 폴링·claim 루프 추가(**worker가 처음으로 LLM/gateway 호출** — 접근·타임아웃·실패 분류 신규), generate endpoint 2048/4096은 동기 실행 대신 job enqueue(1024는 동기 유지). 색인 sync outbox는 **건드리지 않는다**(검증 H3: 성격이 다른 CDC). 이때 §261 scratch 용도 문구를 "복구 + 비동기 결과 보관"으로 확장한다(§262 전방 포인터가 이미 이를 가리킨다).
+- 증분 3(D6): 읽기 전용 패드 + 완료 배지 + 생성 중에만 5초 폴링(브라우저 Notification 미사용).

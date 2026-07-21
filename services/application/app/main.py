@@ -3140,6 +3140,7 @@ def create_app(
                     output_type=candidate.output_type.value,
                     instruction=body.instruction,
                     candidate_text=candidate.text,
+                    version_id=body.current_position.version_id,
                 )
             except Exception:  # noqa: BLE001 — safety net never blocks generate
                 pass
@@ -3704,19 +3705,23 @@ def create_app(
 
         def _clear_scratch_for_saved_accept() -> None:
             # A *saved* accept means the canonical version now exists, so the
-            # draft's unaccepted scratch history is moot (brief: accept 시 즉시
-            # 삭제). Called from BOTH saved outcomes — the clean 200 and the 502
+            # accepted candidate is no longer "unaccepted" and is retired from
+            # scratch. Async-pad D2=A (SoT v1.7.25): remove ONLY the accepted
+            # item (matching request_id), not the draft's whole history — other
+            # generated candidates stay recoverable/copyable (the pad's reason to
+            # exist). Called from BOTH saved outcomes — the clean 200 and the 502
             # partial where the version saved but the analysis job failed. A
             # non-PASS Gate result (accepted=false, nothing saved) must NOT clear:
             # the user still has a bounced draft worth recovering. Key on the same
             # draft generate used (current_position), falling back to the accept
-            # target. Best-effort — cleanup never fails the accept.
+            # target. No matching entry → no-op. Best-effort — never fails accept.
             cleanup_draft_id = (
                 body.current_position.draft_id
                 if body.current_position is not None else body.draft_id
             )
             try:
-                writing_scratch.clear_draft(project_id, cleanup_draft_id)
+                writing_scratch.clear_accepted_item(
+                    project_id, cleanup_draft_id, body.request_id)
             except Exception:  # noqa: BLE001 — cleanup never blocks accept
                 pass
 
@@ -3779,6 +3784,7 @@ def create_app(
             "instruction": entry.instruction,
             "candidate_text": entry.candidate_text,
             "intent": entry.intent,
+            "version_id": entry.version_id,
             "created_at": entry.created_at.isoformat(),
         }
 

@@ -10,10 +10,10 @@ draft. It is explicitly NOT the canonical (version/snapshot) store.
 
 D1=B keeps a short **history** per draft (not just the last one), so the per
 -draft entries are capped (``MAX_SCRATCH_PER_DRAFT``) to bound growth. On
-``accept`` success the draft's scratch is cleared. The retention policy here
-(cap value, immediate accept-clear, no time-based expiry) is a *provisional*
-implementer decision pending owner ratification into the SoT — see the brief's
-"잠정 보존/만료 정책" section.
+``accept`` success only the **accepted item** (matching ``request_id``) is
+cleared — other generated candidates stay recoverable (async-pad D2=A, SoT
+v1.7.25). The retention policy (cap value, per-item accept-clear, no time-based
+expiry) is ratified into the SoT (v1.7.20 → v1.7.25).
 """
 
 from __future__ import annotations
@@ -45,6 +45,10 @@ class ScratchCandidate:
     # saves leave it None. Kept nullable so a later conversation_turn can carry
     # it without a schema change (brief Follow-up considerations).
     intent: str | None = None
+    # Async pad seam (async-generation-pad D7): the version the candidate was
+    # generated against, so the pad can show "이 version 기준으로 생성됨".
+    # Additive + nullable like ``intent`` — pre-pad records read as None.
+    version_id: str | None = None
 
 
 class WritingScratchRepository(Protocol):
@@ -53,6 +57,9 @@ class WritingScratchRepository(Protocol):
         self, project_id: str, draft_id: str
     ) -> tuple[ScratchCandidate, ...]: ...
     def delete_for_draft(self, project_id: str, draft_id: str) -> int: ...
+    def delete_for_request(
+        self, project_id: str, draft_id: str, request_id: str
+    ) -> int: ...
     def delete_ids(self, ids: tuple[str, ...]) -> None: ...
 
 
@@ -77,6 +84,18 @@ class InMemoryWritingScratchRepository:
         victims = [
             e.id for e in self.entries.values()
             if e.project_id == project_id and e.draft_id == draft_id
+        ]
+        for entry_id in victims:
+            del self.entries[entry_id]
+        return len(victims)
+
+    def delete_for_request(
+        self, project_id: str, draft_id: str, request_id: str
+    ) -> int:
+        victims = [
+            e.id for e in self.entries.values()
+            if e.project_id == project_id and e.draft_id == draft_id
+            and e.request_id == request_id
         ]
         for entry_id in victims:
             del self.entries[entry_id]
@@ -112,6 +131,7 @@ class WritingScratchService:
         self, *, project_id: str, draft_id: str, request_id: str,
         task_type: str, output_type: str, instruction: str,
         candidate_text: str, intent: str | None = None,
+        version_id: str | None = None,
     ) -> ScratchCandidate:
         entry = ScratchCandidate(
             id=self._id_factory(),
@@ -124,6 +144,7 @@ class WritingScratchService:
             candidate_text=candidate_text,
             created_at=self._clock(),
             intent=intent,
+            version_id=version_id,
         )
         self._repo.add(entry)
         self._trim(project_id, draft_id)
@@ -136,6 +157,15 @@ class WritingScratchService:
 
     def clear_draft(self, project_id: str, draft_id: str) -> int:
         return self._repo.delete_for_draft(project_id, draft_id)
+
+    def clear_accepted_item(
+        self, project_id: str, draft_id: str, request_id: str
+    ) -> int:
+        # Async-pad D2=A: an accept only retires the *accepted* candidate, not
+        # the draft's whole scratch history. Other generated candidates stay
+        # recoverable (they remain valuable to copy — the pad's reason to exist).
+        # No matching entry → no-op (returns 0).
+        return self._repo.delete_for_request(project_id, draft_id, request_id)
 
     def _trim(self, project_id: str, draft_id: str) -> None:
         # Keep only the newest ``max_per_draft`` entries; drop the oldest excess.

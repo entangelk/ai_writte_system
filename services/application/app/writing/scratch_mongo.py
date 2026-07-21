@@ -41,6 +41,18 @@ class MongoWritingScratchRepository:
         )
         return result.deleted_count
 
+    def delete_for_request(
+        self, project_id: str, draft_id: str, request_id: str
+    ) -> int:
+        result = self._entries.delete_many(
+            {
+                "project_id": project_id,
+                "draft_id": draft_id,
+                "request_id": request_id,
+            }
+        )
+        return result.deleted_count
+
     def delete_ids(self, ids: tuple[str, ...]) -> None:
         if not ids:
             return
@@ -59,6 +71,7 @@ def _doc(entry: ScratchCandidate) -> dict:
         "candidate_text": entry.candidate_text,
         "created_at": entry.created_at,
         "intent": entry.intent,
+        "version_id": entry.version_id,
     }
 
 
@@ -74,4 +87,5 @@ def _entry(doc: dict) -> ScratchCandidate:
         candidate_text=doc["candidate_text"],
         created_at=doc["created_at"],
         intent=doc.get("intent"),
+        version_id=doc.get("version_id"),
     )

@@ -105,6 +105,29 @@ class ScratchServiceTest(unittest.TestCase):
                          ["초안3", "초안2", "초안1"])
         self.assertNotIn("초안0", [e.candidate_text for e in items])
 
+    def test_clear_accepted_item_removes_only_the_matching_request(self):
+        # Async-pad D2=A: accept retires only the accepted candidate; siblings
+        # from other generates on the same draft stay recoverable.
+        svc = _service_with(InMemoryWritingScratchRepository())
+        svc.save(project_id="p1", draft_id="d1", request_id="wr1",
+                 task_type="continue_scene", output_type="draft_patch",
+                 instruction="이어서", candidate_text="채택본")
+        svc.save(project_id="p1", draft_id="d1", request_id="wr2",
+                 task_type="continue_scene", output_type="draft_patch",
+                 instruction="이어서", candidate_text="다른 후보")
+        self.assertEqual(svc.clear_accepted_item("p1", "d1", "wr1"), 1)
+        self.assertEqual(
+            [e.candidate_text for e in svc.list_for_draft("p1", "d1")],
+            ["다른 후보"])
+
+    def test_clear_accepted_item_no_match_is_a_no_op(self):
+        # brief: "대응 항목이 없으면 no-op으로 안전 처리". A stale/absent
+        # request_id must not delete anything.
+        svc = _service_with(InMemoryWritingScratchRepository())
+        self._saved(svc, "p1", "d1", "유일본")
+        self.assertEqual(svc.clear_accepted_item("p1", "d1", "no-such"), 0)
+        self.assertEqual(len(svc.list_for_draft("p1", "d1")), 1)
+
     def test_clear_draft_removes_all_and_returns_count(self):
         svc = _service_with(InMemoryWritingScratchRepository())
         self._saved(svc, "p1", "d1", "a")
@@ -254,6 +277,10 @@ class ScratchGenerateHttpTest(unittest.TestCase):
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0].candidate_text, "복구 대상 초안")
         self.assertIsNone(items[0].intent)
+        # D7 (async-pad): the generating version is recorded so the pad can show
+        # "이 version 기준으로 생성됨". Mutation: dropping the save's version_id
+        # arg re-fails this (falls back to None).
+        self.assertEqual(items[0].version_id, "v1")
 
     def test_generate_without_position_does_not_persist(self):
         # over-strict: no draft key → no orphan scratch entry. The recovery net
@@ -298,7 +325,8 @@ class ScratchListDiscardHttpTest(unittest.TestCase):
         first = body["items"][0]
         self.assertEqual(set(first), {
             "id", "draft_id", "request_id", "task_type", "output_type",
-            "instruction", "candidate_text", "intent", "created_at"})
+            "instruction", "candidate_text", "intent", "version_id",
+            "created_at"})
 
     def test_discard_clears_and_reports_count(self):
         client, project_id = self._app_with_seeded()
@@ -328,9 +356,16 @@ class ScratchAcceptCleanupHttpTest(unittest.TestCase):
         base = core.save_draft(project_id=project.id, draft_id=draft.id,
                                raw_text="기존.", idempotency_key="base")
         scratch = WritingScratchService(InMemoryWritingScratchRepository())
+        # The item the accept below retires (matching request_id="wr1")...
         scratch.save(project_id=project.id, draft_id=draft.id, request_id="wr1",
                      task_type="continue_scene", output_type="draft_patch",
                      instruction="이어서", candidate_text="복구 대상")
+        # ...and a sibling candidate from another generate on the SAME draft.
+        # Async-pad D2=A: it must SURVIVE the accept (still copyable in the pad).
+        scratch.save(project_id=project.id, draft_id=draft.id,
+                     request_id="wr-other",
+                     task_type="continue_scene", output_type="draft_patch",
+                     instruction="이어서", candidate_text="다른 후보")
         app = create_app(
             service=core,
             analysis_service=analysis or AnalysisService(
@@ -348,30 +383,35 @@ class ScratchAcceptCleanupHttpTest(unittest.TestCase):
             "candidate_text": "새 글.",
             "current_position": {"draft_id": draft, "version_id": base}})
 
-    def test_saved_accept_clears_scratch(self):
-        # under-strict: a PASS accept saved a canonical version → scratch history
-        # for the draft is cleared.
+    def test_saved_accept_clears_only_the_accepted_item(self):
+        # under-strict: a PASS accept saved a canonical version → the accepted
+        # item (request_id="wr1") is retired.
+        # over-strict (async-pad D2=A): the sibling from another generate MUST
+        # survive — reverting to whole-draft clear_draft() re-fails this.
         client, project, draft, base, scratch = self._setup()
         response = self._accept(client, project, draft, base)
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["accepted"])
-        self.assertEqual(scratch.list_for_draft(project, draft), ())
+        self.assertEqual(
+            [e.candidate_text for e in scratch.list_for_draft(project, draft)],
+            ["다른 후보"])
 
     def test_non_pass_accept_keeps_scratch(self):
         # over-strict: a REVISE accept saved nothing (accepted=false) → the
-        # recovery net must survive so the user can still restore the draft.
+        # recovery net must survive whole, so the user can still restore either
+        # candidate.
         client, project, draft, base, scratch = self._setup(
             decision=WritingGateDecision.REVISE)
         response = self._accept(client, project, draft, base)
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.json()["accepted"])
-        self.assertEqual(len(scratch.list_for_draft(project, draft)), 1)
+        self.assertEqual(len(scratch.list_for_draft(project, draft)), 2)
 
-    def test_partial_analysis_failure_still_clears_scratch(self):
+    def test_partial_analysis_failure_still_clears_the_accepted_item(self):
         # H-2 (verification 2026-07-20): the 502 partial saved a canonical
-        # version and only the analysis job failed, so the brief's rationale
-        # ("정본 확정 → scratch 무의미") applies here too. Under-strict guard:
-        # moving the cleanup back below the 502 return re-fails this.
+        # version and only the analysis job failed, so the accepted item is
+        # retired here too. Under-strict guard: moving the cleanup back below the
+        # 502 return re-fails this. Over-strict: the sibling still survives.
         client, project, draft, base, scratch = self._setup(
             analysis=_FailingAnalysis(InMemoryAnalysisRepository()))
         response = self._accept(client, project, draft, base)
@@ -379,7 +419,9 @@ class ScratchAcceptCleanupHttpTest(unittest.TestCase):
         body = response.json()
         self.assertTrue(body["accepted"])
         self.assertIsNotNone(body["saved"])
-        self.assertEqual(scratch.list_for_draft(project, draft), ())
+        self.assertEqual(
+            [e.candidate_text for e in scratch.list_for_draft(project, draft)],
+            ["다른 후보"])
 
 
 class _ExplodingScratch(WritingScratchService):
@@ -389,6 +431,9 @@ class _ExplodingScratch(WritingScratchService):
         raise RuntimeError("scratch store down")
 
     def clear_draft(self, project_id, draft_id):
+        raise RuntimeError("scratch store down")
+
+    def clear_accepted_item(self, project_id, draft_id, request_id):
         raise RuntimeError("scratch store down")
 
 
