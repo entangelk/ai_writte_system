@@ -288,3 +288,24 @@
 
 - **증분 2c(D5)**: generate endpoint 2048/4096 → job enqueue(pending 반환)·1024 동기 유지·async+no current_position=400·`GET .../generation-jobs/{id}` 상태 read. 이 flip이 async 개통(2b worker가 처리).
 - 증분 3(D6): 읽기 전용 패드 + 완료 배지 + 생성 중에만 5초 폴링.
+
+## Task — 비동기 패드 증분 2b 독립 검증 후 hardening + 문서 완성 (H-1(2b) catch-all persist 커버리지)
+
+### Goals
+
+- 증분 2b(커밋 9f012fe) 독립 검증(`docs/verifications/2026-07-21/increment2b_d3_generation_worker.md`)에서 건넨 비차단 hardening H-1(2b)을 적용하고, 작업 AI가 핸드오프 작성 중 지쳐 빠뜨린 CHANGELOG(v1.7.25·v1.7.26)을 채운다.
+
+### Completed work
+
+- **H-1(2b) catch-all persist 커버리지 확장**: `execute_generation_job`의 result-persist 단계(`scratch.clear_accepted_item` + `scratch.save`)를 try 블록 안으로 옮겨, 최외곽 `except Exception → INTERNAL` catch-all이 generate 단계뿐 아니라 **저장 단계까지 덮도록** 했다(`generation_worker.py`). 근거: H-2 catch-all이 이미 "fault→terminal"로 색인 worker의 crash-reclaim에서 출발했는데 generate만 덮고 scratch 저장은 안 덮는 게 비일관적. generate 성공 후 scratch 장애 시 이제 INTERNAL로 종료되어 (a) worker 루프 crash, (b) 600s lease 만료 후 비싼 generate를 재실행하는 reclaim 루프, 둘 다 막는다. H-2 docstring("never livelock")이 execute 전체에 참이 됨. trade-off(scratch blip에 성공 생성 상실)는 드문 edge이고 무한 LLM 루프보다 낫다 — H-3가 결과 중복은 여전히 막는다. `mark_succeeded` 자체는 try 밖에 둬(종료 write; jobstore down이면 mark_failed도 실패해 어차피 crash—불가피).
+- **회귀 추가**: `test_persist_failure_terminates_job_not_crash`(`test_writing_generation_worker.py`) — `_RaisingScratch`로 save 실패 시 FAILED/INTERNAL 종료를 잠금(under-strict: persist가 try 밖이면 re-raise로 실패).
+- **CHANGELOG backfill**: v1.7.24에서 멈춘 CHANGELOG에 v1.7.25(증분 1, D2=A/D7)·v1.7.26(증분 2b, D3=B) 행 추가 — 작업 AI가 SoT는 올렸으나 CHANGELOG를 못 채운 결손 마감.
+- **검증 기록 후속**: `increment2b_d3_generation_worker.md`의 Outstanding items 업데이트(라이브 스모크는 5b6ba87에서 이미 PASS, H-1(2b)은 이번에 적용).
+
+### Verification
+
+- backend: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1296 passed / 73 skipped / 326 subtests**(1295 + H-1(2b) 회귀 1). 집중 `test_writing_generation_worker.py`·`test_generation_job_worker.py` → 17 passed. `git diff --check` clean. LLM 미사용.
+
+### Next steps
+
+- 증분 2c(D5): generate endpoint 2048/4096 → job enqueue·1024 동기·async+no current_position=400·`GET .../generation-jobs/{id}` 상태 read.

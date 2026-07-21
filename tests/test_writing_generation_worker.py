@@ -65,6 +65,19 @@ class _RaisingWriting:
         raise self._exc
 
 
+class _RaisingScratch:
+    # H-1(2b): the scratch store failing on save *after* a successful generate.
+    # clear_accepted_item is a no-op so save is the fault site.
+    def clear_accepted_item(self, project_id, draft_id, request_id):
+        return 0
+
+    def save(self, **kwargs):
+        raise RuntimeError("scratch store down")
+
+    def list_for_draft(self, project_id, draft_id):
+        return ()
+
+
 def _collaborators(*, context=None, writing=None, scratch=None, jobs=None):
     return GenerationCollaborators(
         context_search=context or _OkContext(),
@@ -163,6 +176,19 @@ class ExecuteFailureMappingTest(unittest.TestCase):
         self.assertEqual(
             self._fail_with(context=_RaisingContext(ValueError("boom"))),
             WritingGenerationJobFailureReason.INTERNAL)
+
+    def test_persist_failure_terminates_job_not_crash(self):
+        # H-1(2b): a fault in the result-persist phase (scratch down after a
+        # successful generate) must reach terminal FAILED via INTERNAL, not
+        # escape to crash the worker loop and re-run the expensive generate on
+        # every reclaim. Under-strict: with the persist phase outside the
+        # catch-all this re-raises instead of returning a FAILED job.
+        c = _collaborators(scratch=_RaisingScratch())
+        job = _claimed(c.jobs)
+        done = _run(execute_generation_job(job, c))
+        self.assertEqual(done.status, WritingGenerationJobStatus.FAILED)
+        self.assertEqual(done.failure_reason,
+                         WritingGenerationJobFailureReason.INTERNAL)
 
 
 class ExecuteReclaimIdempotencyTest(unittest.TestCase):

@@ -8,8 +8,10 @@ contract is unit-testable with a fake provider — no Mongo, no gateway, no daem
 
 Failure taxonomy is the ``WritingGenerationJobFailureReason`` contract: each
 mapped generate-pipeline exception → its reason, and an outermost catch-all →
-``INTERNAL`` so an unmapped infra/bug fault still reaches a terminal state
-(verification H-2 — otherwise the job livelocks RUNNING → reclaim → re-fail).
+``INTERNAL`` so any unmapped fault — generate-pipeline OR a result-persist
+failure (the scratch store down after a successful generate) — still reaches a
+terminal state (verification H-2 / H-1(2b); otherwise the job livelocks RUNNING
+→ reclaim → re-fail, re-running the expensive generate each time).
 
 Reclaim idempotency (verification H-3): a worker that generated then crashed
 before marking the job leaves a scratch entry; on reclaim the re-run would
@@ -89,6 +91,24 @@ async def execute_generation_job(
             package=package,
             max_output_tokens=job.max_output_tokens,
         )
+        # H-3 + H-1(2b): the result-persist phase lives INSIDE the catch-all so
+        # a scratch-write fault (the store down after a successful generate)
+        # terminates the job via INTERNAL instead of escaping to crash the worker
+        # loop and re-running the expensive generate on every reclaim. H-3 still
+        # holds: clear this job's prior (crashed-attempt) scratch before saving,
+        # so a reclaim replaces rather than duplicates the pad result.
+        c.scratch.clear_accepted_item(
+            job.project_id, job.draft_id, job.request_id)
+        entry = c.scratch.save(
+            project_id=job.project_id,
+            draft_id=job.draft_id,
+            request_id=job.request_id,
+            task_type=candidate.task_type.value,
+            output_type=candidate.output_type.value,
+            instruction=job.instruction,
+            candidate_text=candidate.text,
+            version_id=job.version_id,
+        )
     except (WritingError, InvalidContextSearchRequest) as exc:
         return fail(job, reason=reasons.INVALID_REQUEST, detail=str(exc))
     except InvalidCandidateReport as exc:
@@ -103,20 +123,6 @@ async def execute_generation_job(
                   if exc.code is ProviderErrorCode.TIMEOUT
                   else reasons.PROVIDER_ERROR)
         return fail(job, reason=reason, detail=str(exc))
-    except Exception as exc:  # noqa: BLE001 — H-2 catch-all: never livelock
+    except Exception as exc:  # noqa: BLE001 — H-2 catch-all (now covers persist too): never livelock
         return fail(job, reason=reasons.INTERNAL, detail=repr(exc))
-
-    # H-3: drop any scratch this job left on a prior (crashed) attempt before
-    # saving, so a reclaim replaces rather than duplicates the pad result.
-    c.scratch.clear_accepted_item(job.project_id, job.draft_id, job.request_id)
-    entry = c.scratch.save(
-        project_id=job.project_id,
-        draft_id=job.draft_id,
-        request_id=job.request_id,
-        task_type=candidate.task_type.value,
-        output_type=candidate.output_type.value,
-        instruction=job.instruction,
-        candidate_text=candidate.text,
-        version_id=job.version_id,
-    )
     return c.jobs.mark_succeeded(job, result_scratch_id=entry.id)
