@@ -69,6 +69,13 @@ from services.application.app.writing.service import (
     seed_writing_template,
 )
 from services.application.app.writing.report import InvalidCandidateReport
+from services.application.app.writing.generation_job import (
+    InMemoryWritingGenerationJobRepository,
+    WritingGenerationJob,
+    WritingGenerationJobFailureReason,
+    WritingGenerationJobService,
+    WritingGenerationJobStatus,
+)
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
 from services.llm_gateway.app.provider import GenerationResult, TokenUsage
 
@@ -297,6 +304,16 @@ class _TestClient:
 
         return asyncio.run(send())
 
+    def get(self, path, **kwargs):
+        async def send():
+            transport = httpx.ASGITransport(app=self._app)
+            async with httpx.AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
+                return await client.get(path, **kwargs)
+
+        return asyncio.run(send())
+
 
 class _FakeContextSearch:
     def __init__(self, package, *, error=None):
@@ -324,7 +341,8 @@ class _NoWriteCoreSotService(CoreSotService):
 
 
 def _http(provider=None, *, package=None, with_context=True, context_error=None,
-          reporter=None, report_service=None, core_service=None):
+          reporter=None, report_service=None, core_service=None,
+          writing_generation_job_service=None):
     core_sot = core_service or CoreSotService(InMemoryCoreSotRepository())
     writing_service = (
         _service(provider, reporter=reporter) if provider is not None else None
@@ -341,6 +359,7 @@ def _http(provider=None, *, package=None, with_context=True, context_error=None,
         writing_service=writing_service,
         writing_report_service=report_service,
         context_search_service=context,
+        writing_generation_job_service=writing_generation_job_service,
     )
     client = _TestClient(app)
     project_id = client.post("/projects", json={"name": "Novel"}).json()["id"]
@@ -523,14 +542,32 @@ class WritingOutputLengthPresetTest(unittest.TestCase):
         self.assertEqual(provider.last_request.max_tokens, 1500)
 
     def test_presets_map_to_confirmed_tokens(self):
-        for preset, expected in (
-            ("short", 1024), ("medium", 2048), ("long", 4096),
-        ):
+        # short is synchronous (the provider sees the resolved cap); medium/long are
+        # async under 증분 2c — the endpoint returns 202 and carries the resolved cap
+        # on the enqueued job's ``max_output_tokens`` (the worker consumes it). Both
+        # channels must map the preset to the same confirmed token counts; asserting
+        # only the sync channel would let the async resolution silently drift.
+        self.assertEqual(
+            self._generated_output_tokens({"output_length": "short"}), 1024
+        )
+        for preset, expected in (("medium", 2048), ("long", 4096)):
             with self.subTest(preset=preset):
-                self.assertEqual(
-                    self._generated_output_tokens({"output_length": preset}),
-                    expected,
+                jobs = WritingGenerationJobService(
+                    InMemoryWritingGenerationJobRepository()
                 )
+                client, project_id, _ = _http(
+                    _FakeProvider(), package=_package(),
+                    writing_generation_job_service=jobs,
+                )
+                response = client.post(
+                    f"/projects/{project_id}/writing/generate",
+                    json={"request_id": "wr1", "instruction": "이어서 써줘.",
+                          "output_length": preset,
+                          "current_position": {"draft_id": "d1", "version_id": "v1"}},
+                )
+                self.assertEqual(response.status_code, 202)
+                job_id = response.json()["job"]["job_id"]
+                self.assertEqual(jobs.get(job_id).max_output_tokens, expected)
 
     def test_unknown_preset_is_400_and_never_reaches_model(self):
         provider = _FakeProvider()
@@ -545,18 +582,26 @@ class WritingOutputLengthPresetTest(unittest.TestCase):
 
     def test_preset_is_independent_of_input_max_tokens(self):
         # over-strict guard: input budget (max_tokens) and output preset are
-        # separate axes — moving one must not move the other.
-        provider = _FakeProvider(content="x")
-        client, project_id, context = _http(provider, package=_package())
-        client.post(
+        # separate axes — moving one must not move the other. Under 증분 2c long is
+        # async, so both axes land on the enqueued job: ``max_output_tokens`` (the
+        # output preset) and ``max_tokens`` (the input ContextPackage budget the
+        # worker will pass to context search). Collapsing the two would cross-wire
+        # the axes on the job.
+        jobs = WritingGenerationJobService(InMemoryWritingGenerationJobRepository())
+        client, project_id, _ = _http(
+            _FakeProvider(), package=_package(),
+            writing_generation_job_service=jobs,
+        )
+        response = client.post(
             f"/projects/{project_id}/writing/generate",
             json={"request_id": "wr1", "instruction": "이어서 써줘.",
-                  "max_tokens": 512, "output_length": "long"},
+                  "max_tokens": 512, "output_length": "long",
+                  "current_position": {"draft_id": "d1", "version_id": "v1"}},
         )
-        self.assertEqual(provider.last_request.max_tokens, 4096)  # output → preset
-        self.assertEqual(
-            context.last_request.context_budget.max_tokens, 512  # input → max_tokens
-        )
+        self.assertEqual(response.status_code, 202)
+        job = jobs.get(response.json()["job"]["job_id"])
+        self.assertEqual(job.max_output_tokens, 4096)  # output → preset
+        self.assertEqual(job.max_tokens, 512)          # input → max_tokens
 
     def test_env_override_remaps_preset(self):
         with patch.dict(os.environ, {"WRITING_OUTPUT_LENGTH_MEDIUM": "3000"}):
@@ -642,6 +687,314 @@ class WritingGenerateEnvelopeKeyTest(unittest.TestCase):
         self.assertEqual(
             set(body["risk_notes"][0]), {"type", "severity", "message"},
         )
+
+
+class WritingGenerateAsyncBranchTest(unittest.TestCase):
+    """증분 2c (D5=A): the generate endpoint branches on ``output_length``.
+
+    Boundary matrix — the preset selects sync vs async (the server owns the
+    mapping; the worker owns execution):
+      - short (1024)             → 200 + WritingCandidatePayload (sync, unchanged)
+      - medium (2048)/long (4096)→ 202 + {job, idempotent_replay} (enqueued,
+                                   non-blocking; worker runs it)
+      - async + no current_position → 400 (the pad is keyed per-draft)
+      - short + no current_position → 200 (over-strict: the 400 is async-only)
+      - async does NOT call writing.generate/context_search/scratch (worker's job)
+      - same (project_id, request_id) re-POST → 202 idempotent_replay=true, one job
+      - GET .../generation-jobs/{job_id} → 200 + full status payload
+      - GET 404 not-found / wrong-project; GET surfaces terminal fields
+    """
+
+    _POSITION = {"draft_id": "d1", "version_id": "v1"}
+
+    def _http(self, *, provider=None, jobs=None):
+        return _http(provider, package=_package(),
+                     writing_generation_job_service=jobs)
+
+    def _async_body(self, request_id="wr1", output_length="medium"):
+        return {
+            "request_id": request_id, "instruction": "이어서 써줘.",
+            "output_length": output_length, "current_position": self._POSITION,
+        }
+
+    def test_medium_preset_enqueues_job_and_returns_202(self):
+        # under-strict (async fire): medium + current_position → 202, job pending.
+        provider = _FakeProvider(content="should not be used")
+        jobs = WritingGenerationJobService(InMemoryWritingGenerationJobRepository())
+        client, project_id, context = self._http(provider=provider, jobs=jobs)
+        response = client.post(
+            f"/projects/{project_id}/writing/generate",
+            json=self._async_body(output_length="medium"),
+        )
+        self.assertEqual(response.status_code, 202)
+        body = response.json()
+        self.assertFalse(body["idempotent_replay"])
+        self.assertEqual(body["job"]["status"], "pending")
+        self.assertEqual(body["job"]["output_length"], "medium")
+        self.assertEqual(body["job"]["project_id"], project_id)
+        self.assertEqual(body["job"]["draft_id"], "d1")
+        self.assertEqual(body["job"]["version_id"], "v1")
+        # The endpoint did NOT run the pipeline — that is the worker's job, so the
+        # provider AND context search were never consulted. (Dropping the async
+        # branch would call generate + context and set both last_request fields.)
+        self.assertIsNone(provider.last_request)
+        self.assertIsNone(context.last_request)
+
+    def test_long_preset_also_enqueues(self):
+        provider = _FakeProvider()
+        jobs = WritingGenerationJobService(InMemoryWritingGenerationJobRepository())
+        client, project_id, _ = self._http(provider=provider, jobs=jobs)
+        response = client.post(
+            f"/projects/{project_id}/writing/generate",
+            json=self._async_body(output_length="long"),
+        )
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["job"]["output_length"], "long")
+
+    def test_short_preset_stays_synchronous(self):
+        # over-strict: short must NOT take the async branch. short returns a real
+        # candidate (200) and DID call generate — flipping short into the async
+        # branch would make this 400 (no current_position) and leave last_request
+        # None.
+        provider = _FakeProvider(content="이어진 장면.")
+        client, project_id, _ = self._http(provider=provider)
+        response = client.post(
+            f"/projects/{project_id}/writing/generate",
+            json={"request_id": "wr1", "instruction": "이어서 써줘.",
+                  "output_length": "short"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["text"], "이어진 장면.")
+        self.assertIsNotNone(provider.last_request)
+
+    def test_async_without_current_position_is_400(self):
+        # under-strict: the pad is per-draft, so async with no anchor has nowhere
+        # to display. Removing the 400 would enqueue an unanchored job.
+        provider = _FakeProvider()
+        jobs = WritingGenerationJobService(InMemoryWritingGenerationJobRepository())
+        client, project_id, _ = self._http(provider=provider, jobs=jobs)
+        response = client.post(
+            f"/projects/{project_id}/writing/generate",
+            json={"request_id": "wr1", "instruction": "x",
+                  "output_length": "medium"},  # no current_position
+        )
+        self.assertEqual(response.status_code, 400)
+        # Rejection enqueues nothing.
+        self.assertEqual(jobs.list_for_draft(project_id, "d1"), ())
+
+    def test_short_without_current_position_is_not_400(self):
+        # over-strict guard: the async-only 400 must not bleed into the short path.
+        # short with no current_position still works (positionless generate allowed).
+        provider = _FakeProvider(content="ok")
+        client, project_id, _ = self._http(provider=provider)
+        response = client.post(
+            f"/projects/{project_id}/writing/generate",
+            json={"request_id": "wr1", "instruction": "x",
+                  "output_length": "short"},  # no current_position
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_async_is_idempotent_on_request_id(self):
+        # same (project_id, request_id) re-POST returns the SAME job, not a second
+        # generation. Dropping the idempotency lookup creates a duplicate.
+        provider = _FakeProvider()
+        jobs = WritingGenerationJobService(InMemoryWritingGenerationJobRepository())
+        client, project_id, _ = self._http(provider=provider, jobs=jobs)
+        body = self._async_body()
+        first = client.post(f"/projects/{project_id}/writing/generate", json=body)
+        second = client.post(f"/projects/{project_id}/writing/generate", json=body)
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(second.status_code, 202)
+        self.assertFalse(first.json()["idempotent_replay"])
+        self.assertTrue(second.json()["idempotent_replay"])
+        self.assertEqual(first.json()["job"]["job_id"],
+                         second.json()["job"]["job_id"])
+
+    def test_async_idempotency_key_is_project_plus_request(self):
+        # over-strict complement: the idempotency key is (project_id, request_id),
+        # NOT either axis alone. Two DIFFERENT request_ids in the same project must
+        # each mint a fresh job (idempotent_replay=false, distinct job_ids). A
+        # too-coarse key (project-only or request-only) would collapse these into a
+        # replay — this test bites if the key is narrowed.
+        jobs = WritingGenerationJobService(InMemoryWritingGenerationJobRepository())
+        client, project_id, _ = self._http(provider=_FakeProvider(), jobs=jobs)
+        first = client.post(
+            f"/projects/{project_id}/writing/generate",
+            json=self._async_body(request_id="wr-a"),
+        ).json()
+        second = client.post(
+            f"/projects/{project_id}/writing/generate",
+            json=self._async_body(request_id="wr-b"),
+        ).json()
+        self.assertFalse(first["idempotent_replay"])
+        self.assertFalse(second["idempotent_replay"])
+        self.assertNotEqual(first["job"]["job_id"], second["job"]["job_id"])
+
+    def test_async_bypasses_sync_only_503_checks(self):
+        # SoT §272: the async branch must NOT consult the sync-only writing /
+        # context_search 503 guards — the endpoint uses neither for async (the
+        # worker has its own gateway/context). With BOTH services unconfigured an
+        # async preset still enqueues and returns 202. over-strict mutation: hoisting
+        # either 503 guard above the async branch turns this 202 into a 503.
+        jobs = WritingGenerationJobService(InMemoryWritingGenerationJobRepository())
+        client, project_id, _ = _http(
+            provider=None, with_context=False,
+            writing_generation_job_service=jobs,
+        )
+        response = client.post(
+            f"/projects/{project_id}/writing/generate",
+            json=self._async_body(output_length="medium"),
+        )
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["job"]["status"], "pending")
+
+    def test_async_does_not_write_scratch_at_endpoint(self):
+        # The worker (2b) writes the result to scratch; the endpoint must not, so a
+        # refresh right after enqueue shows no premature candidate. (If the endpoint
+        # re-used the sync scratch-save, an empty-text premature entry would appear.)
+        provider = _FakeProvider()
+        jobs = WritingGenerationJobService(InMemoryWritingGenerationJobRepository())
+        client, project_id, _ = self._http(provider=provider, jobs=jobs)
+        client.post(f"/projects/{project_id}/writing/generate",
+                    json=self._async_body())
+        scratch = client.get(
+            f"/projects/{project_id}/writing/scratch?draft_id=d1"
+        ).json()
+        self.assertEqual(scratch["items"], [])
+
+    def test_get_generation_job_returns_status(self):
+        provider = _FakeProvider()
+        jobs = WritingGenerationJobService(InMemoryWritingGenerationJobRepository())
+        client, project_id, _ = self._http(provider=provider, jobs=jobs)
+        job_id = client.post(
+            f"/projects/{project_id}/writing/generate",
+            json=self._async_body(),
+        ).json()["job"]["job_id"]
+        body = client.get(
+            f"/projects/{project_id}/writing/generation-jobs/{job_id}"
+        ).json()
+        self.assertEqual(body["job_id"], job_id)
+        self.assertEqual(body["status"], "pending")
+        self.assertIsNone(body["result_scratch_id"])
+        self.assertIsNone(body["failure_reason"])
+
+    def test_get_generation_job_404_unknown(self):
+        client, project_id, _ = self._http(provider=_FakeProvider())
+        response = client.get(
+            f"/projects/{project_id}/writing/generation-jobs/wgj:ghost"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_generation_job_404_nonexistent_project(self):
+        # GET falls under the spec's "404 미발견" arm when the path project itself
+        # never existed (_require_project_exists guard). Distinct from unknown-job
+        # and wrong-project: a nonexistent project must 404 before any job lookup.
+        client, _project_id, _ = self._http(provider=_FakeProvider())
+        response = client.get(
+            "/projects/ghost/writing/generation-jobs/wgj:any"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_generation_job_404_wrong_project(self):
+        # project-scoped: a job enqueued under project A is not readable via
+        # project B's path (MVP single-user, but the invariant still holds).
+        provider = _FakeProvider()
+        jobs = WritingGenerationJobService(InMemoryWritingGenerationJobRepository())
+        client, project_a, _ = self._http(provider=provider, jobs=jobs)
+        project_b = client.post("/projects", json={"name": "Other"}).json()["id"]
+        job_id = client.post(
+            f"/projects/{project_a}/writing/generate",
+            json=self._async_body(),
+        ).json()["job"]["job_id"]
+        response = client.get(
+            f"/projects/{project_b}/writing/generation-jobs/{job_id}"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_generation_job_surfaces_terminal_fields(self):
+        # Seed succeeded + failed jobs directly via the service, then GET each. The
+        # terminal fields (result_scratch_id / failure_reason / failure_detail) must
+        # round-trip through the response_model on both terminal states.
+        provider = _FakeProvider()
+        jobs = WritingGenerationJobService(InMemoryWritingGenerationJobRepository())
+        client, project_id, _ = self._http(provider=provider, jobs=jobs)
+
+        def _enqueue(request_id, output_length):
+            return jobs.enqueue(
+                project_id=project_id, draft_id="d1", request_id=request_id,
+                task_type="continue_scene", instruction="x", draft_excerpt="",
+                query=None, output_length=output_length, max_output_tokens=2048,
+                max_tokens=4096, version_id="v1",
+            ).job
+
+        ok = _enqueue("wr-ok", "medium")
+        jobs.mark_succeeded(jobs.claim_next(), result_scratch_id="scratch-1")
+        fail = _enqueue("wr-bad", "long")
+        jobs.mark_failed(
+            jobs.claim_next(),
+            reason=WritingGenerationJobFailureReason.PROVIDER_TIMEOUT,
+            detail="upstream 504",
+        )
+        ok_body = client.get(
+            f"/projects/{project_id}/writing/generation-jobs/{ok.id}").json()
+        self.assertEqual(ok_body["status"], "succeeded")
+        self.assertEqual(ok_body["result_scratch_id"], "scratch-1")
+        self.assertIsNone(ok_body["failure_reason"])
+        fail_body = client.get(
+            f"/projects/{project_id}/writing/generation-jobs/{fail.id}").json()
+        self.assertEqual(fail_body["status"], "failed")
+        self.assertEqual(fail_body["failure_reason"], "provider_timeout")
+        self.assertEqual(fail_body["failure_detail"], "upstream 504")
+        self.assertIsNone(fail_body["result_scratch_id"])
+
+
+class WritingGenerationJobEnvelopeKeyTest(unittest.TestCase):
+    """C0 exact-key safety net for the async generate surface (v1.7.27, 증분 2c).
+
+    ``response_model`` (GET) and the ``responses={}`` doc (202) silently DROP any
+    field a model does not declare, so a model narrower than
+    ``_writing_generation_job_payload`` would delete fields from the public status
+    surface with no error. These pin the COMPLETE key set of the job status payload
+    (GET) and the 202 accepted envelope before the models are applied — a too-narrow
+    WritingGenerationJobPayload / WritingGenerationJobAcceptedPayload bites here.
+    """
+
+    _POSITION = {"draft_id": "d1", "version_id": "v1"}
+
+    def _seed(self):
+        jobs = WritingGenerationJobService(InMemoryWritingGenerationJobRepository())
+        client, project_id, _ = _http(_FakeProvider(),
+                                      writing_generation_job_service=jobs)
+        job_id = client.post(
+            f"/projects/{project_id}/writing/generate",
+            json={"request_id": "wr1", "instruction": "x",
+                  "output_length": "medium", "current_position": self._POSITION},
+        ).json()["job"]["job_id"]
+        return client, project_id, job_id
+
+    _JOB_KEYS = {
+        "job_id", "request_id", "project_id", "draft_id", "version_id",
+        "task_type", "output_length", "status", "created_at",
+        "result_scratch_id", "failure_reason", "failure_detail",
+    }
+
+    def test_get_status_envelope_keys_are_complete(self):
+        client, project_id, job_id = self._seed()
+        body = client.get(
+            f"/projects/{project_id}/writing/generation-jobs/{job_id}").json()
+        self.assertEqual(set(body), self._JOB_KEYS)
+
+    def test_accepted_envelope_keys_are_complete(self):
+        jobs = WritingGenerationJobService(InMemoryWritingGenerationJobRepository())
+        client, project_id, _ = _http(_FakeProvider(),
+                                      writing_generation_job_service=jobs)
+        body = client.post(
+            f"/projects/{project_id}/writing/generate",
+            json={"request_id": "wr1", "instruction": "x",
+                  "output_length": "long", "current_position": self._POSITION},
+        ).json()
+        self.assertEqual(set(body), {"job", "idempotent_replay"})
+        self.assertEqual(set(body["job"]), self._JOB_KEYS)
 
 
 class WritingReportApiTest(unittest.TestCase):

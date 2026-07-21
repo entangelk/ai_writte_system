@@ -68,6 +68,14 @@ export type SaveDraftRequest = components["schemas"]["SaveDraftRequest"];
 export type SaveDraftResponse = components["schemas"]["SaveDraftResponse"];
 export type WritingGenerateRequest = components["schemas"]["WritingGenerateRequest"];
 export type WritingCandidate = components["schemas"]["WritingCandidatePayload"];
+// 증분 2c (D5=A): medium/long presets return a 202 job reference instead of a
+// candidate. generateWriting therefore returns the union; callers narrow with
+// `"job" in produced`. The worker appends the result to scratch (increment 3's
+// pad polls GET .../generation-jobs/{job_id} and re-reads scratch).
+export type WritingGenerationJob =
+  components["schemas"]["WritingGenerationJobPayload"];
+export type WritingGenerationJobAccepted =
+  components["schemas"]["WritingGenerationJobAcceptedPayload"];
 export type WritingGateRequest = components["schemas"]["WritingGateRequest"];
 export type WritingGate = components["schemas"]["WritingGatePayload"];
 export type WritingGateFinding = components["schemas"]["WritingGateFindingPayload"];
@@ -216,7 +224,7 @@ export function exportProject(
 export function generateWriting(
   projectId: string,
   body: WritingGenerateRequest,
-): Promise<WritingCandidate> {
+): Promise<WritingCandidate | WritingGenerationJobAccepted> {
   return request(`/projects/${projectId}/writing/generate`, {
     method: "POST",
     body: JSON.stringify(body),

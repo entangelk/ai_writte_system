@@ -184,6 +184,27 @@ class WritingAcceptResponse(BaseModel):
     idempotent_replay: bool
 
 
+class WritingGenerationJobPayload(BaseModel):
+    # Async generation job status (async-pad D3=B/D4=A/D5=A, v1.7.27 = 증분 2c).
+    # This is the GET .../writing/generation-jobs/{job_id} success body, AND the
+    # nested ``job`` inside the 202 generate-accepted envelope. ``status`` is a
+    # plain str (the StrEnum's value, "pending|running|succeeded|failed") matching
+    # the AnalysisJobPayload precedent; failure_reason likewise. Exact-width — a
+    # too-narrow model would silently drop fields from the public status surface.
+    job_id: str
+    request_id: str
+    project_id: str
+    draft_id: str
+    version_id: str
+    task_type: str
+    output_length: str
+    status: str
+    created_at: str
+    result_scratch_id: str | None = None
+    failure_reason: str | None = None
+    failure_detail: str | None = None
+
+
 # --- Partial-failure envelope models (responses={} documentation only) -----
 #
 # These are returned via JSONResponse and bypass response_model validation, so
@@ -217,6 +238,17 @@ class WritingAcceptAnalysisPartial(BaseModel):
     analysis_error: str
 
 
+class WritingGenerationJobAcceptedPayload(BaseModel):
+    # 202 Accepted body returned by POST .../writing/generate for an async preset
+    # (medium/long). Mirrors the Analysis create_job envelope shape
+    # (``{"job": ..., "idempotent_replay": bool}``). Returned via JSONResponse so it
+    # bypasses response_model validation; this model is responses={} documentation
+    # only, and the exact-key regression is its runtime lock (same pattern as the
+    # partial envelopes above).
+    job: WritingGenerationJobPayload
+    idempotent_replay: bool
+
+
 # --- responses={} maps (OpenAPI docs for the non-200 statuses) -------------
 #
 # A partial-capable status documents the Union of its partial envelope and the
@@ -240,4 +272,18 @@ ACCEPT_RESPONSES: dict[int | str, dict] = {
     502: {"model": Union[WritingAcceptAnalysisPartial, ErrorDetailResponse]},
     503: _DETAIL_ONLY,
     504: _DETAIL_ONLY,
+}
+
+# Async generate (async-pad D5=A, v1.7.27 = 증분 2c): medium/long presets are
+# enqueued for background worker execution and the endpoint returns 202 Accepted
+# with the job reference instead of blocking on a candidate. 200 stays the
+# synchronous short-preset candidate (response_model=WritingCandidatePayload); 202
+# is the divergent success arm, documented here via the established responses={}
+# mechanism (same shape as REVISE_AND_GATE_RESPONSES / ACCEPT_RESPONSES).
+GENERATE_ASYNC_RESPONSES: dict[int | str, dict] = {
+    202: {
+        "model": WritingGenerationJobAcceptedPayload,
+        "description": "Async preset accepted — the generation job was enqueued "
+                       "for background execution; poll GET .../generation-jobs/{job_id}.",
+    },
 }

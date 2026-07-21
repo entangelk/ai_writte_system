@@ -145,9 +145,11 @@ from services.application.app.writing.generation_worker import (
 )
 from services.application.app.writing.http_models import (
     ACCEPT_RESPONSES,
+    GENERATE_ASYNC_RESPONSES,
     REVISE_AND_GATE_RESPONSES,
     WritingAcceptResponse,
     WritingCandidatePayload,
+    WritingGenerationJobPayload,
     WritingGatePayload,
     WritingReviseGateResponse,
 )
@@ -1490,6 +1492,7 @@ def create_app(
     writing_loop_policy: WritingLoopPolicy | None = None,
     writing_loop_audit_service: WritingLoopAuditService | None = None,
     writing_scratch_service: WritingScratchService | None = None,
+    writing_generation_job_service: WritingGenerationJobService | None = None,
     vector_index: InMemoryVectorIndexAdapter | None = None,
 ) -> FastAPI:
     # Fail startup loudly for invalid environment-adjustable public bounds.
@@ -1557,6 +1560,14 @@ def create_app(
     # available (in-memory default) so generate can always leave a safety net.
     writing_scratch = (
         writing_scratch_service or _default_writing_scratch_service()
+    )
+    # Async generation job store (async-pad D3=B/D4=A). The generate endpoint
+    # enqueues medium/long presets here (v1.7.27, 증분 2c); the worker
+    # (scripts/generation_job_worker.py) claims and runs them. Always available
+    # (in-memory default); a Mongo URI upgrades it to the durable adapter, which
+    # the worker also uses so both sides see the same queue.
+    writing_generation_jobs = (
+        writing_generation_job_service or _default_writing_generation_job_service()
     )
     writing = writing_service or _default_writing_service()
     writing_gate = writing_gate_service or _default_writing_gate_service()
@@ -3041,6 +3052,30 @@ def create_app(
             "generated_by_model": candidate.generated_by_model,
         }
 
+    def _writing_generation_job_payload(job) -> dict[str, object]:
+        # Async generation job status (async-pad D5=A, v1.7.27 = 증분 2c). Used by
+        # GET .../writing/generation-jobs/{job_id} (validated through
+        # WritingGenerationJobPayload) and nested under ``job`` in the 202 envelope
+        # the generate endpoint returns for medium/long presets. The terminal
+        # fields (result_scratch_id / failure_reason / failure_detail) are None
+        # until the worker reaches a terminal state.
+        return {
+            "job_id": job.id,
+            "request_id": job.request_id,
+            "project_id": job.project_id,
+            "draft_id": job.draft_id,
+            "version_id": job.version_id,
+            "task_type": job.task_type,
+            "output_length": job.output_length,
+            "status": job.status.value,
+            "created_at": job.created_at.isoformat(),
+            "result_scratch_id": job.result_scratch_id,
+            "failure_reason": (
+                job.failure_reason.value if job.failure_reason is not None else None
+            ),
+            "failure_detail": job.failure_detail,
+        }
+
     def _writing_gate_payload(result) -> dict[str, object]:
         return {
             "request_id": result.request_id,
@@ -3121,7 +3156,8 @@ def create_app(
         }
 
     @app.post("/projects/{project_id}/writing/generate",
-              response_model=WritingCandidatePayload)
+              response_model=WritingCandidatePayload,
+              responses=GENERATE_ASYNC_RESPONSES)
     async def writing_generate_endpoint(
         project_id: str, body: WritingGenerateRequest
     ) -> dict[str, object]:
@@ -3147,6 +3183,41 @@ def create_app(
                 detail=f"unsupported output_length: {body.output_length}",
             ) from exc
         output_tokens = _writing_output_length_tokens()[output_length]
+        # 증분 2c (D5=A): medium/long presets are too slow to block the request, so
+        # enqueue a background generation job and return 202 Accepted immediately
+        # (the worker claims and runs it, appending the result to scratch). short
+        # (1024) stays fully synchronous below. The pad is keyed per-draft, so an
+        # async preset without current_position has nowhere to display → 400 (short
+        # still allows a positionless request, as today). The endpoint does not
+        # touch writing/context_search/scratch here — that is the worker's job, so
+        # the sync-only 503 checks below are not consulted for async.
+        if output_length in (OutputLength.MEDIUM, OutputLength.LONG):
+            if body.current_position is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="current_position is required for async presets "
+                           "(output_length medium/long)",
+                )
+            result = writing_generation_jobs.enqueue(
+                project_id=project_id,
+                draft_id=body.current_position.draft_id,
+                request_id=body.request_id,
+                task_type=task_type.value,
+                instruction=body.instruction,
+                draft_excerpt=body.draft_excerpt,
+                query=body.query,
+                output_length=output_length.value,
+                max_output_tokens=output_tokens,
+                max_tokens=body.max_tokens,
+                version_id=body.current_position.version_id,
+            )
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "job": _writing_generation_job_payload(result.job),
+                    "idempotent_replay": result.idempotent_replay,
+                },
+            )
         if writing is None:
             raise HTTPException(
                 status_code=503, detail="writing service is not configured"
@@ -3218,6 +3289,26 @@ def create_app(
             except Exception:  # noqa: BLE001 — safety net never blocks generate
                 pass
         return _writing_candidate_payload(candidate)
+
+    @app.get("/projects/{project_id}/writing/generation-jobs/{job_id}",
+             response_model=WritingGenerationJobPayload)
+    async def get_writing_generation_job(
+        project_id: str, job_id: str,
+    ) -> dict[str, object]:
+        # 증분 2c (D5=A): status read for an async generation job — the pad (증분 3)
+        # polls this to learn when a medium/long generation finishes, then re-reads
+        # the scratch list to display the result. 404 covers both "no such job" and
+        # "job exists but belongs to another project" (project-scoped isolation).
+        try:
+            _require_project_exists(project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        job = writing_generation_jobs.get(job_id)
+        if job is None or job.project_id != project_id:
+            raise HTTPException(
+                status_code=404, detail="generation job not found"
+            )
+        return _writing_generation_job_payload(job)
 
     @app.post("/projects/{project_id}/writing/gate",
               response_model=WritingGatePayload)

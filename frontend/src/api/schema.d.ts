@@ -744,6 +744,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{project_id}/writing/generation-jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Writing Generation Job */
+        get: operations["get_writing_generation_job_projects__project_id__writing_generation_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{project_id}/writing/loop-audits": {
         parameters: {
             query?: never;
@@ -1531,6 +1548,39 @@ export interface components {
              * @default continue_scene
              */
             task_type: string;
+        };
+        /** WritingGenerationJobAcceptedPayload */
+        WritingGenerationJobAcceptedPayload: {
+            /** Idempotent Replay */
+            idempotent_replay: boolean;
+            job: components["schemas"]["WritingGenerationJobPayload"];
+        };
+        /** WritingGenerationJobPayload */
+        WritingGenerationJobPayload: {
+            /** Created At */
+            created_at: string;
+            /** Draft Id */
+            draft_id: string;
+            /** Failure Detail */
+            failure_detail?: string | null;
+            /** Failure Reason */
+            failure_reason?: string | null;
+            /** Job Id */
+            job_id: string;
+            /** Output Length */
+            output_length: string;
+            /** Project Id */
+            project_id: string;
+            /** Request Id */
+            request_id: string;
+            /** Result Scratch Id */
+            result_scratch_id?: string | null;
+            /** Status */
+            status: string;
+            /** Task Type */
+            task_type: string;
+            /** Version Id */
+            version_id: string;
         };
         /**
          * WritingIntent
@@ -3469,6 +3519,47 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WritingCandidatePayload"];
+                };
+            };
+            /** @description Async preset accepted — the generation job was enqueued for background execution; poll GET .../generation-jobs/{job_id}. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WritingGenerationJobAcceptedPayload"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_writing_generation_job_projects__project_id__writing_generation_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WritingGenerationJobPayload"];
                 };
             };
             /** @description Validation Error */

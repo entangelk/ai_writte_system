@@ -309,3 +309,69 @@
 ### Next steps
 
 - 증분 2c(D5): generate endpoint 2048/4096 → job enqueue·1024 동기·async+no current_position=400·`GET .../generation-jobs/{id}` 상태 read.
+
+## Task — 비동기 생성 + 결과 패드 증분 2c: generate endpoint 동기/비동기 분기 (D5=A, SoT v1.7.27)
+
+### Goals
+
+- 2b의 저장소·worker에 이어 **생산자(endpoint)를 배선**해 async 경로를 end-to-end로 개통한다.
+- `POST .../writing/generate`를 `output_length`로 분기: `short`(1024)=동기, `medium`(2048)/`long`(4096)=job enqueue 후 비블로킹 반환.
+- async 프리셋 + `current_position` 없음 → 400. `GET .../generation-jobs/{job_id}` 상태 read(증분 3 폴링용) 추가.
+- 프론트가 async 응답을 인식해 candidate/Gate/루프를 건너뛰고 "백그라운드 생성 시작" notice만 표시(패드·5초 폴링은 증분 3).
+
+### Completed work
+
+- **응답 모델(`writing/http_models.py`)**: `WritingGenerationJobPayload`(12 필드: job_id·request_id·project_id·draft_id·version_id·task_type·output_length·status·created_at·result_scratch_id·failure_reason·failure_detail — AnalysisJobPayload 선례 동형 status/failure_reason 평문 str) + `WritingGenerationJobAcceptedPayload`(`{job, idempotent_replay}`, Analysis create envelope 동형) + `GENERATE_ASYNC_RESPONSES={202: …}`. GET은 `response_model=WritingGenerationJobPayload`(성공 경로 exact-width), 202 envelope는 `responses={}` 문서 전용(JSONResponse가 검증 우회, exact-key 회귀가 runtime lock — 기존 partial envelope 패턴 동형).
+- **generate endpoint 분기(`main.py`)**: output_length 해석 후 `medium`/`long`이면 `current_position` 필수(else 400) → `writing_generation_jobs.enqueue(...)` → `JSONResponse(202, {job, idempotent_replay})` 즉시 반환. **endpoint는 async 분기에서 writing/context_search/scratch를 부르지 않고**(전부 worker 역할) 동기 전용 503 검사도 우회한다(async는 endpoint에서 둘 다 불필요). `short` 동기 경로 무변. 라우트에 `responses=GENERATE_ASYNC_RESPONSES` 추가.
+- **GET 상태 read**: `GET /projects/{project_id}/writing/generation-jobs/{job_id}`(`response_model=WritingGenerationJobPayload`, 404 if 미발견·타 프로젝트). `_writing_generation_job_payload(job)` 헬퍼(GET + 202 중첩共用).
+- **create_app**: `writing_generation_job_service` 파라미터 + `writing_generation_jobs` 해석(scratch 팩토리 동형, Mongo/in-memory env 게이팅). `build_async_generation_collaborators`(2b)와 같은 `_default_writing_generation_job_service()` — production Mongo로 양측 공유.
+- **SoT v1.7.27**: 버전 bump + changelog 행. §271 endpoint 배선 forward-marker를 현재형으로 전환(202 + envelope + GET path + 400 + 동기/비동기 분기 + 503 우회 명시). §270 라벨에 v1.7.27/2c 추가. §508 "status는 항상 candidate"를 **동기 후보 응답 한정**으로 정밀화(비동기는 candidate가 아닌 job).
+- **frontend**: `client.ts`에 `WritingGenerationJob`/`WritingGenerationJobAccepted` 타입 + `generateWriting` 반환을 `WritingCandidate | WritingGenerationJobAccepted`로 widen. `WritingPanel.runGenerate`가 `"job" in produced` 가드로 async를 감지해 "백그라운드 생성을 시작했습니다. 완료되면 결과 패드에 표시됩니다." notice + early return(candidate/Gate/루프 건너뜀). long이 async가 되어 죽은 long-skip 루프 분기 제거(제 변경이 만든 orphan). `gen:api`로 `schema.d.ts`에 신규 2 스키마 + generate 202 응답 additive.
+
+### User Decisions and Rationale
+
+- 이 슬라이스는 오너 확정 결정(D5=A)의 구현이며 새 오너 결정은 없다. 아래 상태코드 202는 구현자 판단.
+
+### Decisions (구현자 판단)
+
+- **상태코드 202(200 아님)**: async 분기 응답을 200+JSONResponse로 주면 `response_model=WritingCandidatePayload`(200) 선언이 거짓이 된다(runtime은 우회하지만 OpenAPI가 async 본문을 반영 못 함). 200+Union oneOf는 선례 없고 codegen을 복잡하게 한다. **202**면 200=candidate 정직성을 유지하면서 async envelope를 `responses={202}`로 문서화한다 — 이 코드베이스의 유일한 분기 응답 메커니즘(revise-and-gate/accept의 `responses={}`)과 동형이며 HTTP 의미론(202 Accepted=백그라운드 처리 수락)에 정확히 부합. Analysis create가 200을 쓰는 것은 response_model 자체가 없어(untyped plain dict) 정직성 충돌이 없기 때문이고, writing generate는 v1.7.1에서 타입화됐으므로 상황이 다르다.
+- **endpoint는 async에서 writing/context_search/scratch를 부르지 않는다**: worker가 전부 담당(2b). 따라서 동기 전용 503 검사도 async에서 우회한다(worker는 자체 gateway/context config를 갖는다 — endpoint의 writing=None이 worker gateway 부재를 의미하지 않는다).
+- **패드·폴링은 증분 3**: 2c는 endpoint 분기 + GET 상태 read + 프론트 최소 인식(notice)까지만. medium/long 결과 표시(패드)·5초 폴링은 증분 3이 담당한다. 2c와 3 사이에 medium/long 결과를 볼 UI가 일시적으로 없으나, 증분 분할 설계상 허용.
+
+### Verification
+
+- **독립 adversarial self-verification 워크플로 6 dimensional**(spec↔code·boundary-matrix·양방향 가드·envelope-key·SoT 일관성·worker 호환): 5 PASS + 1 CONDITIONAL_PASS(spec↔code). **blocking 1건 폐쇄** + 비차단 load-bearing 보강 반영 후 PASS.
+- **blocking(폐쇄)**: SoT §272 "async는 동기 전용 503 검사도 우회" clause에 회귀 부재 — verifier가 mutation(503 guard를 async 분기 위로)으로 suite가 green임을 입증. `test_async_bypasses_sync_only_503_checks`(provider=None + with_context=False + medium → 202)로 잠갔고, **동일 mutation으로 이 test가 `503 != 202`로 re-fail함을 직접 확인**(양방향 가드 원칙).
+- **비차단 보강 반영**: (1) medium 테스트에 `context.last_request is None` 추가(async가 context_search를 부르지 않는 third invariant 명시), (2) `test_async_idempotency_key_is_project_plus_request`(다른 request_id → distinct job, 둘 다 `idempotent_replay=false` — 멱등키가 `(project_id, request_id)`임을 over-strict로 lock), (3) v1.7.27 changelog 행의 깨진 §NNN locator 제거(verifier 지적 — §NNN은 비공식이라 descriptive text로 대체).
+- backend: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1312 passed / 73 skipped / 325 subtests**(1296 + 신규 16: async 분기 14[medium/long/short-sync/no-position-400/short-no-position-200/idempotent/idempotency-key/503-bypass/no-scratch-write/GET 200/GET 404 unknown/GET 404 nonexistent-project/GET 404 wrong-project/terminal fields] + envelope-key 2; 단, 기존 preset 테스트 2건을 2c 동기/비동기에 맞게 재작성해 증분은 +2). frontend: `npx vitest run` → **163 passed / 11 files**(신규 1 net: medium async·long async·short-stays-sync over-strict — 기존 2건 재작성). `npx tsc --noEmit` clean. `npm run build` 101 modules(JS 394.75 kB). `npm run gen:api` 신규 2 스키마 + 202 응답 additive. `git diff --check` clean. LLM 미사용(단위).
+
+### Next steps
+
+- 증분 3(D6): 읽기 전용 패드 + 완료 배지 + 생성 중에만 5초 폴링. `GET .../generation-jobs/{job_id}`로 종료 감지 → scratch 재조회로 결과 표시. 브라우저 Notification 미사용.
+- verifier 비차단 hardening 후보(필요시 증분 3에서): long-preset per-preset assertion 강화·terminal-state full-envelope·`extra='forbid'`·worker Mongo-미설정 startup warn·producer→worker end-to-end 통합 테스트.
+
+## Task — 증분 2c 오너 독립 검증 PASS 후 보강 + 커밋
+
+### User Decisions and Rationale
+
+- 오너가 증분 2c를 독립·대항(adversarial) 검증해 **PASS(조건 없음, blocking 없음)** 판정을 줬다(`docs/verifications/2026-07-21/increment2c_d5_generate_endpoint_async_branch.md`). 정본→코드→테스트→schema 전 스택 추적 + 4종 mutation(백업→변형→re-fail→`diff -q` 원복)으로 작업자 주장을 refute했다. boundary matrix 18 cell 빈 곳 없음, 카운트 재실행 확정(backend 1311·frontend 163·tsc exit 0).
+- **오너 결정 — 상태코드 202 유지**: 작업자가 "구현자 판단"으로 202를 선택하고 오너 확인을 요청한 항목에 대해, 오너가 검증 근거(response_model 정직성 + `responses={}` 선례 동형 + HTTP 의미론; Analysis create가 200인 것은 response_model 자체가 없어 상황이 다름)를 수용해 **202 유지**를 확정했다. 200을 원하면 `main.py` status_code + `GENERATE_ASYNC_RESPONSES` 키만 국소 변경이나, 오너는 202를 추천했다. → 코드 무변.
+
+### Completed work
+
+- **비차단 hardening #1(SoT 수치 정정, 오너 명시)**: v1.7.27 changelog 행(`system-contract-sot.md:36`)만 "backend 1309 passed" + "async 분기 11"이라고 쓰고 있었고(work_log/HANDOFF/요약은 1311·13). SoT가 정본이므로 수치를 정정했다. 단, 이 보강에서 GET 존재-불가 project 404 테스트 1건을 추가(아래)해 backend가 1311→**1312**, async 분기 13→**14**, 신규 15→**16**로 확정됐으므로, SoT·HANDOFF·본 work_log 모두 **1312/14/16**으로 일치시켰다(1296 baseline + 16 net-new = 14 async-branch-class + 2 envelope-key).
+- **비차단 hardening #3(GET 존재-불가 project 404 잠금)**: 검증 기록이 GET endpoint의 `_require_project_exists` 404 경로(존재 않는 project path)가 테스트에 잠기지 않았다고 지적(unknown job_id·타 프로젝트 job만 cover). `test_get_generation_job_404_nonexistent_project`(`/projects/ghost/writing/generation-jobs/wgj:any` → 404)을 추가해 GET-404 매트릭스 3 arms(존재-불가 project·unknown job·타 프로젝트 job)을 완전히 잠갔다. 코드는 계약대로 동작하므로 비차단이나, "404 미발견" arm의 인접 케이스를 명시 단정.
+- **검증 기록 Outstanding items 갱신**: 202 확정(Outstanding #1 해소)·수치 정정(#3 해소)·존재-불가 project 404 잠금(record hardening #3 해소) 반영.
+
+### 조치 불요 (검증자 판단·오너 수용)
+
+- **record hardening #2(producer→worker end-to-end 통합 테스트)**: 비차단, 증분 3(패드/폴링)에서 추가 시 유효 — 양 절반(2b worker 실행·2c endpoint enqueue)은 독립 입증됐고 seam은 공유 service로 자명. 증분 3으로 지연.
+- **record hardening #4(`extra='forbid'` 미설정)**: 비차단, `WritingGenerationJobEnvelopeKeyTest`가 `set(body)==_JOB_KEYS`로 정확한 키 집합을 pin해 extra key 시 bite. 기존 partial envelope 패턴도 default ignore라 선례 일치. 코드 무변.
+
+### Verification
+
+- backend: **1312 passed / 73 skipped / 325 subtests**(1311 + 존재-불가 project 404 회귀 1). frontend·tsc·build·gen:api는 backend-only 테스트 + 문서 수치 정정이라 무변(163/11, tsc clean, build 101 modules). `git diff --check` clean.
+
+### Next steps
+
+- 커밋 후 증분 3(읽기 전용 패드 + 완료 배지 + 생성 중 5초 폴링). 위 지연된 비차단 hardening(e2e 통합 테스트·`extra='forbid'` 등)은 증분 3에서 재검토.

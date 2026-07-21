@@ -41,6 +41,26 @@ const candidate = {
   generated_by_model: "fake-writer",
 };
 
+// 증분 2c (D5=A): medium/long presets get a 202 job reference instead of a
+// candidate. Shape mirrors WritingGenerationJobAcceptedPayload.
+const generationJobAccepted = {
+  job: {
+    job_id: "wgj-1",
+    request_id: "uuid-1",
+    project_id: "p1",
+    draft_id: "d1",
+    version_id: "v1",
+    task_type: "continue_scene",
+    output_length: "medium",
+    status: "pending",
+    created_at: "2026-07-21T00:00:00Z",
+    result_scratch_id: null,
+    failure_reason: null,
+    failure_detail: null,
+  },
+  idempotent_replay: false,
+};
+
 const gatePass = {
   request_id: "uuid-1",
   project_id: "p1",
@@ -605,7 +625,10 @@ describe("WritingPanel — automatic revise/retrieve loop", () => {
 
 describe("WritingPanel — output-length preset (증분 2)", () => {
   it("defaults to short and sends the selected preset on generate", async () => {
-    const fetchMock = mockFetch({ body: candidate }, { body: gatePass });
+    // medium is async under 증분 2c: generate returns 202 (a job ref), so there is
+    // no Gate fetch (1 fetch total) and a background-started notice shows. The
+    // preset still flows to the request body.
+    const fetchMock = mockFetch({ status: 202, body: generationJobAccepted });
     renderPanel();
     // The select starts on short; picking medium must flow to the generate body.
     expect((screen.getByLabelText("생성 분량") as HTMLSelectElement).value).toBe(
@@ -614,30 +637,55 @@ describe("WritingPanel — output-length preset (증분 2)", () => {
     await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
     await userEvent.selectOptions(screen.getByLabelText("생성 분량"), "medium");
     await userEvent.click(generateButton());
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).output_length).toBe(
       "medium",
     );
+    expect(
+      screen.getByText(
+        "백그라운드 생성을 시작했습니다. 완료되면 결과 패드에 표시됩니다.",
+      ),
+    ).toBeInTheDocument();
   });
 
-  it("skips the auto revise/gate loop for the long preset (single-generate only)", async () => {
-    // long (4096, ~91s) exceeds the loop wall clock, so an eligible finding must
-    // NOT trigger revise-and-gate. over-strict guard: dropping the outputLength
-    // check would make a 3rd fetch (the loop) and break the call count.
-    const fetchMock = mockFetch(
-      { body: candidate },
-      { body: gateEligibleRevise },
-    );
+  it("async presets (long) start background generation and skip Gate/loop", async () => {
+    // long is async under 증분 2c: generate returns 202, so neither Gate nor the
+    // revise-and-gate loop runs (1 fetch total). over-strict guard: dropping the
+    // `"job" in produced` early return would call gateWriting (a 2nd fetch) and
+    // crash reading produced.text on the job-ref body.
+    const fetchMock = mockFetch({ status: 202, body: generationJobAccepted });
     renderPanel();
     await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
     await userEvent.selectOptions(screen.getByLabelText("생성 분량"), "long");
     await userEvent.click(generateButton());
     await waitFor(() => expect(generateButton()).toBeEnabled());
-    expect(fetchMock).toHaveBeenCalledTimes(2); // generate + gate, no loop
+    expect(fetchMock).toHaveBeenCalledTimes(1); // generate only — no gate, no loop
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).output_length).toBe("long");
     expect(
-      screen.getByText(/긴 분량.*자동 개선을 실행하지 않습니다/),
+      screen.getByText(
+        "백그라운드 생성을 시작했습니다. 완료되면 결과 패드에 표시됩니다.",
+      ),
     ).toBeInTheDocument();
+  });
+
+  it("short preset stays synchronous (candidate + Gate, not async)", async () => {
+    // over-strict guard: short must NOT take the async branch. It returns a real
+    // candidate and runs Gate (2 fetches) with no background-started notice.
+    // Flipping short into the async branch would drop this to 1 fetch + notice.
+    const fetchMock = mockFetch({ body: candidate }, { body: gatePass });
+    renderPanel();
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    await userEvent.selectOptions(screen.getByLabelText("생성 분량"), "short");
+    await userEvent.click(generateButton());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).output_length).toBe(
+      "short",
+    );
+    expect(
+      screen.queryByText(
+        "백그라운드 생성을 시작했습니다. 완료되면 결과 패드에 표시됩니다.",
+      ),
+    ).not.toBeInTheDocument();
   });
 });
 

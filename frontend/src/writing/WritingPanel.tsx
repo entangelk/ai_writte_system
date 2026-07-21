@@ -277,8 +277,20 @@ export function WritingPanel(props: WritingPanelProps) {
         task_type: TASK_TYPE,
         current_position: position,
       });
-      // Keep the candidate even if the following Gate call fails (transport/5xx
-      // preserves the candidate); accept stays disabled until a pass Gate.
+      // 증분 2c (D5=A): medium/long presets are async — the server enqueues a
+      // background job and returns 202 with a job reference instead of a
+      // candidate. The worker appends the result to scratch; the pad (increment 3)
+      // polls the job and displays it. Until then there is no candidate to show,
+      // and the Gate/auto-loop must not run (nothing to gate). The finally block
+      // clears progress + busy; the notice carries the "started" signal.
+      if ("job" in produced) {
+        setNotice(
+          "백그라운드 생성을 시작했습니다. 완료되면 결과 패드에 표시됩니다.",
+        );
+        return;
+      }
+      // short (sync): keep the candidate even if the following Gate call fails
+      // (transport/5xx preserves the candidate); accept stays disabled until pass.
       setCandidate(produced);
       contextRef.current = { baseVersionId, requestId };
       setProgress("Gate로 근거를 평가하는 중…");
@@ -293,13 +305,7 @@ export function WritingPanel(props: WritingPanelProps) {
       });
       setGate(evaluated);
       const finding = eligibleRevisionFinding(produced, evaluated);
-      // `long` is single-generate only: a 4096-token write exceeds the auto-loop
-      // wall clock, so the loop is skipped and the finding is left for the writer.
-      if (finding !== null && outputLength === "long") {
-        setNotice(
-          "긴 분량(전체 작성)은 자동 개선을 실행하지 않습니다. Gate 지적을 확인한 뒤 직접 판단하세요.",
-        );
-      } else if (finding !== null) {
+      if (finding !== null) {
         await executeLoop({
           request_id: requestId,
           instruction: trimmed,
