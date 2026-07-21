@@ -209,3 +209,43 @@
 
 - **증분 2(D4+D3+D5)**: Analysis식 생성 job collection(`pending/running/succeeded/failed`), worker에 생성 job 폴링·claim 루프 추가(**worker가 처음으로 LLM/gateway 호출** — 접근·타임아웃·실패 분류 신규), generate endpoint 2048/4096은 동기 실행 대신 job enqueue(1024는 동기 유지). 색인 sync outbox는 **건드리지 않는다**(검증 H3: 성격이 다른 CDC). 이때 §261 scratch 용도 문구를 "복구 + 비동기 결과 보관"으로 확장한다(§262 전방 포인터가 이미 이를 가리킨다).
 - 증분 3(D6): 읽기 전용 패드 + 완료 배지 + 생성 중에만 5초 폴링(브라우저 Notification 미사용).
+
+## Task — 비동기 생성 + 결과 패드 증분 2a: 생성 job 저장소 (D4=A 데이터층, 순수 additive)
+
+### Goals
+
+- 오너가 증분 2를 A(2a/2b/2c 3슬라이스)로 쪼개기로 확정. **2a = 데이터층만**: 생성 job 모델·상태 머신·저장소 경계·atomic claim. worker(2b)·endpoint(2c)의 소비 대상을 먼저 격리해 worker 최초 LLM 실행 diff를 깨끗하게 둔다.
+- **다음 작업자가 이어받을 수 있게** 설계·핸드오프를 명시적으로 남긴다.
+
+### User Decisions and Rationale
+
+- **오너: 증분 2를 작게(A) + 다른 작업자 인계 고려**. 2a는 기존 코드를 전혀 건드리지 않는 신규 파일만이라 회귀 위험 0, 리버트 단위 명확.
+
+### Completed work
+
+- **신규 `writing/generation_job.py`(데이터층 코어)**: `WritingGenerationJobStatus`(pending/running/succeeded/failed) + `WritingGenerationJobFailureReason`(6종: invalid_request·invalid_report·context_budget_exceeded·context_search_failed·provider_error·provider_timeout — **generate endpoint의 except 블록에서 도출**, docstring에 예외→reason 정확 매핑을 남겨 2b가 그대로 구현), frozen `WritingGenerationJob`(generate 재현에 필요한 입력 일체 + version_id[D7 scratch 저장·패드용] 적재), `InMemoryWritingGenerationJobRepository`, `WritingGenerationJobService`(enqueue[idempotent on (project_id,request_id)]·claim_next·mark_succeeded/failed·get·list_for_draft), `_ALLOWED_TRANSITIONS`(PENDING→RUNNING / RUNNING→{SUCCEEDED,FAILED}) + `InvalidJobStateTransition`. Analysis job 선례(`analysis/models.py`·`service.py`) 미러.
+- **신규 `writing/generation_job_mongo.py`(어댑터)**: `MongoWritingGenerationJobRepository`. **claim_next = `find_one_and_update` + lease**(index-sync outbox `claim_next_outbox_entry` 동형): PENDING 또는 lease 만료 RUNNING을 원자적으로 RUNNING 전이 → **동시/replica worker 이중 실행 방지**(D3=B 핵심). unique `(project_id,request_id)` 인덱스가 enqueue 중복을 backstop(add가 DuplicateKeyError swallow). claim/list 인덱스.
+- **테스트 2파일**: `test_writing_generation_job.py`(22 케이스 중 서비스/InMemory: enqueue 멱등 양방향·claim oldest-first·fresh RUNNING skip[이중 실행 방지 over-strict]·stale RUNNING 재claim[크래시 복구 under-strict]·전이 양방향·금지 전이 raise·list 격리), `test_writing_generation_job_mongo.py`(fake-collection round-trip[status/failure_reason StrEnum + nullable 필드 drift 잠금]·중복 swallow·claim lease·update 영속·list). **신규 `*_mongo.py`는 fake-collection round-trip 필수** 관행 준수(선례 인용은 선례의 테스트까지 인용).
+
+### Decisions (구현자 판단 — 2b/2c 작업자가 알아야 할 것)
+
+- **async는 draft anchor를 요구한다**: 패드는 `(project_id, draft_id)` 키라 draft 없이는 표시할 곳이 없다 → 모델의 `draft_id`/`version_id`는 **required**(generate의 `current_position`에서 옴). **2c의 endpoint는 async 프리셋(2048/4096)에 `current_position`이 없으면 400**을 내야 한다(모델이 이미 이를 전제; `main.py` generate는 현재 positionless를 허용하므로 async 분기에서 명시 거부 필요). 이는 "패드가 per-draft"에서 강제되는 것이지 오너 결정 사안이 아니다.
+- **FAILED→PENDING(재시도) 전이는 2a에서 뺐다**: D4=A는 "orphan/retry Analysis 계약 재사용"이나, 2a에 caller가 없어 dead/untested 분기가 된다. 재시도를 실제로 구동하는 public 메서드와 **함께** 추가해(재시도 UI 슬라이스) callerless 전이를 남기지 않는다. crash된 RUNNING 복구는 claim lease가 담당(전이 아님).
+- **job은 resolved `max_output_tokens`를 싣는다**: 서버가 프리셋→토큰 매핑을 소유(D3=A). enqueue 시점(2c)에서 이미 `output_tokens`를 뽑으므로 그 값을 job에 넣으면 worker가 env를 다시 읽지 않아도 된다(자기완결). symbolic `output_length`도 패드/디버그용으로 함께 저장.
+
+### 2b 착수 가이드 (다음 작업자용)
+
+- **worker 스크립트**: `scripts/index_sync_worker.py`의 `_GracefulShutdown`·`run_loop`·SIGTERM 패턴을 그대로 미러한 **별도 스크립트 `scripts/generation_job_worker.py` + 별도 compose 서비스** 권장(실패 격리·독립 확장, 선례 일치). 색인 outbox는 **건드리지 않는다**(H3).
+- **실행 루프**: `service.claim_next()` → 없으면 idle-sleep. 있으면: (1) `ContextSearchService.build_context_package`로 컨텍스트 빌드(main.py generate의 `search_request` 구성 그대로: `needs=_WRITING_CONTINUE_SCENE_NEEDS`, `query=job.query or job.instruction`, `current_position=(job.draft_id, job.version_id)`, `max_tokens=job.max_tokens`), (2) `WritingService.generate(request=WritingRequest(job.request_id, project, task_type, job.instruction, job.draft_excerpt), package, max_output_tokens=job.max_output_tokens)`, (3) 결과를 `WritingScratchService.save(project_id, job.draft_id, job.request_id, candidate.task_type.value, candidate.output_type.value, job.instruction, candidate.text, version_id=job.version_id)`, (4) `service.mark_succeeded(job, result_scratch_id=scratch.id)`. 예외는 `generation_job.py` docstring의 매핑대로 `mark_failed(reason, detail)`.
+- **worker의 gateway 접근**: `main.py`의 `_default_writing_service()`·context search 팩토리(env로 gateway/embedding 구성)를 worker 조립에 재사용. 이게 **worker 최초 LLM/gateway 호출**이라 타임아웃·ProviderError 분류가 신규 표면.
+- **§261 SoT 개정은 2b에서**: worker가 결과를 실제로 scratch에 쓰는 시점 → scratch 용도를 "복구 전용" → "복구 + 비동기 생성 결과 보관"으로 확장(§262 전방 포인터가 이미 가리킴). 버전 bump.
+
+### Verification
+
+- backend: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1279 passed / 73 skipped / 326 subtests**(1257 + 신규 22). 기존 코드 무변이라 회귀 위험 0(신규 파일 2 + 테스트 2뿐).
+- frontend/gen:api 무변(endpoint 미배선). `git diff --check` clean. LLM 미사용.
+
+### Next steps
+
+- **증분 2b(D3)**: 위 "2b 착수 가이드"대로 worker 실행 루프 + §261 개정. seeded pending job으로 테스트(endpoint 불필요). 배포 후에도 endpoint가 아직 sync라 async 경로는 dormant(2c까지).
+- **증분 2c(D5)**: generate endpoint 2048/4096 → job enqueue(pending 반환, 블록 안 함)·1024 동기 유지; async 프리셋 + no `current_position` → 400; `GET .../generation-jobs/{id}` 상태 read(증분 3 폴링용). 이 flip이 async end-to-end 개통.
