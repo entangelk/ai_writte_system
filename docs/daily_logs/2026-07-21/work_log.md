@@ -62,3 +62,38 @@
 ### Verification
 
 - backend: **1238 passed / 73 skipped / 320 subtests**(`WritingOutputLengthPresetTest` 8→9). frontend·tsc·build·gen:api는 무변(백엔드 테스트 1건 + SoT 문구만 추가). `git diff --check` clean.
+
+## Task — 문체/분량 슬라이스 증분 3(1/2): character_observation optional aspect (D4=B, SoT v1.7.23)
+
+### Goals
+
+- 브리프 D4=B(`character_observation` payload에 어투 식별용 `aspect` 필드 추가)를 구현한다.
+- taxonomy 3종 동결(2A D5=A)을 지키면서 payload만 확장한다.
+
+### User Decisions and Rationale
+
+- **D4 aspect = optional (오너 결정, 2026-07-21)**: 브리프 D4=B 옵션 표의 원 리터럴은 exact `(name, observation, aspect)` **필수**였다. 착수 시점 코드 스코핑에서 **candidate 생성 경로가 payload를 검증**함(`record_candidate`→`record_candidates`→`_prepare_candidate_record`→`_validate_payload`→`validate_candidate_payload`, exact-match)을 확인했고, 필수화 시 `{name, observation}`으로 candidate를 만드는 **테스트 25개 파일 + 저장된 live candidate가 즉시 무효**가 되어 대규모 fixture 수정 + 마이그레이션 스크립트가 필요함이 드러났다. 반면 이 필드의 핵심 가치(캐릭터 어투 검증)는 브리프 Follow-up상 **캐릭터-어투 설정 저장이 deferred**라 이번 증분에서는 forward-defense다. 이 blast radius/deferred 근거를 오너에게 제시(required vs optional 선택지 표)했고 오너가 **optional**을 채택했다. CLAUDE.md §1("더 단순한 접근이 있으면 말하고, 정당하면 밀어붙인다") + exact-tuple 리터럴 대비 대폭 축소된 표면.
+
+### Completed work
+
+- **validator(`analysis/schema.py`)**: `_REQUIRED_FIELDS`에 더해 `_OPTIONAL_FIELDS` 매핑을 신설(character = `("aspect",)`). exact-match 단정을 (a) required ⊆ observed(누락 required 거절), (b) observed ⊆ required∪optional(unknown field 거절)로 분해했다. present field는 required든 optional이든 non-empty string 검증, normalized는 required→optional 순으로 결정적 조립. event/open_question은 optional 없음 → aspect가 unknown field로 거절된다.
+- **추출 프롬프트(2곳)**: `prompt_templates.py`(기본)·`extractor.py`(repair)의 character payload 설명에 optional `aspect`("voice"/"trait" 예시, 생략 가능) 안내를 추가했다.
+- **surface(추가 코드 0)**: 저장된 payload는 `main.py`가 `dict(candidate.payload)`로 wholesale 직렬화(1646/2673행)하므로 aspect가 review inbox/candidate detail/conflict diff(`_payload_diff`)에 자동 노출된다. `memory/scope.py`(name만)·`indexing/memory_index.py`(name+observation)는 aspect-agnostic이라 무변(색인 enrich·Gate 대조는 D5).
+
+### Decisions (구현자 판단)
+
+- **aspect는 자유 문자열(enum 아님)**: 브리프 Follow-up "값 집합을 캐릭터 전용으로 못 박지 말고 확장 가능하게 둔다" — validator는 non-empty string만 강제하고 값 어휘(voice/trait/…)는 프롬프트 convention. over-strict 회귀로 임의 값 통과를 잠갔다.
+- **마이그레이션 없음**: optional이라 기존 payload가 그대로 유효 — W3 ordered-unit식 migration script 불요.
+- **색인/Gate 미배선**: aspect를 index text나 Gate 대조에 넣는 것은 D5 범위. D4는 "저장 + surface"까지.
+
+### Verification
+
+- backend: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1245 passed / 73 skipped / 322 subtests**(신규 `tests/test_analysis_extractor_schema.py::CharacterAspectPayloadTest` 7건, boundary matrix):
+  - under-strict: `{name,observation}` 하위호환 유효, `{name,observation,aspect}` aspect 보존, empty aspect 거절, 기타 unknown field(mood) 거절, required 누락 거절.
+  - over-strict: aspect 값이 자유 문자열(enum 아님), aspect가 event/open_question엔 불허(character-only optional).
+- 회귀 무손상: 기존 `test_all_three_phase2a_payload_shapes_are_accepted`(정상 3 shape)·`test_malformed_payload_is_rejected_by_service`(누락/빈/extra/타입혼동) 그대로 통과.
+- frontend/gen:api 무변(payload는 무타입 dict). `git diff --check` clean. LLM 미사용.
+
+### Next steps
+
+- **증분 3 D5(Gate `style` finding, warning 전용·자동 revise 제외·block 없음) + D6(우선순위 계약)**: 다음 슬라이스. HANDOFF Next Tasks ★에 착수 전 읽을 파일(`writing/models.py`·`gate_prompt.py`·`revise_gate.py`)과 경계를 기록했다.

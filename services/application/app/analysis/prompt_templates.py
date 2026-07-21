@@ -34,6 +34,7 @@ candidate_type is character_observation, event_observation, or open_question_obs
 provenance is source_observed or ai_inferred. confidence is a number from 0.0 to 1.0.
 Each source_anchors item must copy source_ref_id, start_offset, end_offset, quote, and content_hash exactly from one current catalog item.
 payload is {"name":"...","observation":"..."} for character, {"event":"..."} for event, or {"question":"..."} for open question.
+For character, you MAY add an optional "aspect" classifying the observation (e.g. "voice" for how the character speaks, "trait" for a personality trait); omit it for a plain observation.
 Do not invent facts outside the supplied snapshot text.
 """
 

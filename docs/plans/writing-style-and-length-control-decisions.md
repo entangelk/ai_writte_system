@@ -1,6 +1,6 @@
 # Decision brief — 문체/어투 계약(설정·관찰·검증)과 생성 분량 제어
 
-상태: `결정 확정 (2026-07-20) — D0=B / D1=A / D2=A / D3=A / D4=B / D5=A / D6=A; 증분 1(D1+D2)·증분 2(D3) 구현 완료 (v1.7.22)`
+상태: `결정 확정 (2026-07-20) — D0=B / D1=A / D2=A / D3=A / D4=B(오너=optional) / D5=A / D6=A; 증분 1(D1+D2)·증분 2(D3)·증분 3 D4 구현 완료 (v1.7.23); 증분 3 D5+D6 미구현`
 정본 연결: [`../system-contract-sot.md`](../system-contract-sot.md) (v1.7.20), [`writing-workspace-v2-w0-contract.md`](writing-workspace-v2-w0-contract.md) (§ProjectBrief), [`05-writing-ai.md`](05-writing-ai.md), [`02-analysis-pipeline.md`](02-analysis-pipeline.md), [`07-conversational-authoring.md`](07-conversational-authoring.md), [`product-readiness-backlog.md`](product-readiness-backlog.md)
 작성: 2026-07-20 (오너 분석 반영 개정)
 
@@ -183,6 +183,7 @@
   - **새 요청 필드는 반드시 다른 이름**(예: `output_length`)을 쓴다. 기존 `max_tokens`는 **입력 컨텍스트 예산**이며 5개 endpoint가 공유한다.
 
 - **D4 = B** — `character_observation` payload에 `aspect` 필드 추가. **오너가 taxonomy 동결의 의미를 "3종 유지"로 확정**했으므로 payload 확장은 합법이다(2A D5=A·Phase 7 §2 위반 아님). 이로써 D5의 기계적 대조가 실효를 갖는다.
+  - **구현 리터럴 보완 결정(2026-07-21, 오너=optional)**: 이 표의 원 리터럴은 exact `(name, observation, aspect)` **필수**였다. 착수 시점 코드 스코핑에서 candidate 생성 경로가 payload를 검증(`record_candidate`→`validate_candidate_payload`, exact-match)해 필수화하면 **테스트 25개 파일 + 저장된 live candidate가 즉시 무효**가 되어 대규모 fixture 수정 + 마이그레이션이 필요함이 드러났고, 이 필드의 핵심 가치(캐릭터 어투 검증)는 아래 Follow-up대로 **설정 저장이 deferred**라 이번 증분에서 forward-defense임이 확인됐다. 오너는 이 blast radius/deferred 근거로 **aspect를 optional**로 확정했다: `character_observation`은 `(name, observation)` 또는 `(name, observation, aspect)` 둘 다 유효(present 시 non-empty string, `event`/`open_question`엔 불허), 기존 payload는 **마이그레이션 없이** 유효. 값은 자유 문자열(enum 아님, 확장 가능)이다. SoT v1.7.23으로 구현.
 
 - **D5 = A** — `style` finding type 추가, **warning 전용 · 자동 revise 제외 · block 없음**. 오너 근거: 어투 이탈은 **저자가 알아차리면 충분**하고, **의도적으로 다르게 쓰는 경우도 정당**하므로 차단하거나 재생성 루프를 태우면 안 된다. (기존 자동 revise가 continuity 전용이라 기본 동작이 이미 이에 부합하며, 명시적으로 잠그면 된다.)
 

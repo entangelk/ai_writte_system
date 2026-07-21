@@ -203,7 +203,7 @@ Each candidate must contain exactly these fields:
 - provenance: source_observed or ai_inferred
 - confidence: number from 0.0 to 1.0
 - source_anchors: non-empty array of catalog anchors, preserving source_ref_id, start_offset, end_offset, quote, content_hash
-- payload: character_observation requires {"name": "...", "observation": "..."}; event_observation requires {"event": "..."}; open_question_observation requires {"question": "..."}
+- payload: character_observation requires {"name": "...", "observation": "..."} and may add an optional "aspect" (e.g. "voice", "trait"); event_observation requires {"event": "..."}; open_question_observation requires {"question": "..."}
 
 Use only source_ref_id values from the original source_ref catalog. If no valid candidate can be produced, return {"candidates":[]}.
 Treat writing_candidate_report pointers as advisory provenance only. Never copy document_id, block_id, or any report identifier into source_anchors.

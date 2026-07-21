@@ -17,6 +17,10 @@ from services.application.app.analysis.prompt_templates import (
     InMemoryPromptTemplateRepository,
     PromptTemplateService,
 )
+from services.application.app.analysis.schema import (
+    InvalidAnalysisPayload,
+    validate_candidate_payload,
+)
 from services.application.app.analysis.service import (
     AnalysisService,
     InMemoryAnalysisRepository,
@@ -132,6 +136,85 @@ class AnalysisTaxonomySchemaTest(unittest.TestCase):
                         source_ref_ids=("source-ref-1",),
                         payload=payload,
                     )
+
+
+class CharacterAspectPayloadTest(unittest.TestCase):
+    """증분 3 (D4=B, owner=optional): character_observation payload may carry an
+    optional ``aspect`` classifier. Taxonomy stays 3-typed (2A D5=A); the field is
+    optional so existing ``{name, observation}`` payloads keep validating.
+
+    Boundary matrix for the validator:
+      - {name, observation}            → accepted (backward compat, no migration)
+      - {name, observation, aspect}    → accepted, aspect preserved
+      - aspect present but empty ""    → rejected (non-empty guard)
+      - aspect on a non-character type → rejected (unknown field)
+      - unknown extra field (mood)     → still rejected
+    """
+
+    def test_aspect_is_optional_and_backward_compatible(self):
+        # under-strict: the pre-slice shape must keep validating unchanged.
+        normalized = validate_candidate_payload(
+            AnalysisCandidateType.CHARACTER_OBSERVATION,
+            {"name": "아린", "observation": "성문 앞에서 멈췄다."},
+        )
+        self.assertEqual(
+            dict(normalized), {"name": "아린", "observation": "성문 앞에서 멈췄다."}
+        )
+
+    def test_aspect_is_accepted_and_preserved(self):
+        # under-strict: a present aspect (free string) is stored, enabling D5.
+        normalized = validate_candidate_payload(
+            AnalysisCandidateType.CHARACTER_OBSERVATION,
+            {"name": "아린", "observation": "짧게 끊어 말한다.", "aspect": "voice"},
+        )
+        self.assertEqual(dict(normalized), {
+            "name": "아린", "observation": "짧게 끊어 말한다.", "aspect": "voice",
+        })
+
+    def test_aspect_value_is_a_free_string_not_an_enum(self):
+        # over-strict guard: aspect is extensible (Follow-up), so an arbitrary
+        # value must validate — pinning it to an enum would re-fail this.
+        normalized = validate_candidate_payload(
+            AnalysisCandidateType.CHARACTER_OBSERVATION,
+            {"name": "아린", "observation": "x", "aspect": "speech-rhythm"},
+        )
+        self.assertEqual(normalized["aspect"], "speech-rhythm")
+
+    def test_empty_aspect_is_rejected(self):
+        # under-strict: a present-but-empty aspect is not a valid classifier.
+        with self.assertRaises(InvalidAnalysisPayload):
+            validate_candidate_payload(
+                AnalysisCandidateType.CHARACTER_OBSERVATION,
+                {"name": "아린", "observation": "x", "aspect": ""},
+            )
+
+    def test_aspect_is_rejected_on_non_character_types(self):
+        # over-strict guard: aspect is a character-only optional; on event/question
+        # it is an unknown field. Making optional fields global would re-fail this.
+        for candidate_type, payload in (
+            (AnalysisCandidateType.EVENT_OBSERVATION,
+             {"event": "문이 열렸다.", "aspect": "voice"}),
+            (AnalysisCandidateType.OPEN_QUESTION_OBSERVATION,
+             {"question": "누구인가?", "aspect": "voice"}),
+        ):
+            with self.subTest(candidate_type=candidate_type.value):
+                with self.assertRaises(InvalidAnalysisPayload):
+                    validate_candidate_payload(candidate_type, payload)
+
+    def test_other_unknown_fields_still_rejected(self):
+        # under-strict: allowing aspect must not open the door to arbitrary keys.
+        with self.assertRaises(InvalidAnalysisPayload):
+            validate_candidate_payload(
+                AnalysisCandidateType.CHARACTER_OBSERVATION,
+                {"name": "아린", "observation": "x", "mood": "불안"},
+            )
+
+    def test_missing_required_field_still_rejected(self):
+        with self.assertRaises(InvalidAnalysisPayload):
+            validate_candidate_payload(
+                AnalysisCandidateType.CHARACTER_OBSERVATION,
+                {"name": "아린", "aspect": "voice"},
+            )
 
 
 class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
