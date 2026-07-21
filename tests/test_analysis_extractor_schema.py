@@ -216,6 +216,27 @@ class CharacterAspectPayloadTest(unittest.TestCase):
                 {"name": "아린", "aspect": "voice"},
             )
 
+    def test_non_string_aspect_is_rejected(self):
+        # hardening (D4): aspect must be a non-empty STRING, not merely truthy.
+        # The contract says "non-empty string"; if the guard ever relaxed to a
+        # truthy check (`if not value`), aspect=123 would slip through — re-fails.
+        with self.assertRaises(InvalidAnalysisPayload):
+            validate_candidate_payload(
+                AnalysisCandidateType.CHARACTER_OBSERVATION,
+                {"name": "아린", "observation": "x", "aspect": 123},
+            )
+
+    def test_aspect_does_not_permit_other_unknown_fields_alongside(self):
+        # hardening (D4): allowing aspect must not open the door to a second
+        # unknown key. {name, observation, aspect, mood} is still malformed; if
+        # allowed_fields were widened to accept any superset, mood would slip in.
+        with self.assertRaises(InvalidAnalysisPayload):
+            validate_candidate_payload(
+                AnalysisCandidateType.CHARACTER_OBSERVATION,
+                {"name": "아린", "observation": "x", "aspect": "voice",
+                 "mood": "불안"},
+            )
+
 
 class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
     async def test_fake_provider_result_parses_into_candidate_drafts(self):

@@ -133,3 +133,34 @@
 ### Next steps
 
 - **문체/분량 슬라이스 전체(증분 1~3) 종료.** 다음 갈림길은 **비동기 생성 + 결과 패드**(`plans/async-generation-pad-decisions.md` D1~D7 확정, 미구현) — 문체/분량 완료로 2048/4096 프리셋이 생겨 D5(1024 동기/2048·4096 비동기) 분기 기준이 성립한다. 캐릭터 어투 **설정** 저장·mood(Phase 7)는 별도 후속.
+
+## Task — 증분 3 독립 검증 후 비차단 hardening 보강 (#1·#2·#3)
+
+### Goals
+
+- 독립 검증(`docs/verifications/2026-07-21/increment3_d4_d5_d6_style_and_aspect.md`, **합격·조건 없음**)이 제시한 비차단 hardening 후보 중 **code-testable 3건**을 회귀 테스트로 채운다. (#4는 LLM 행동 계약이라 code test 불가 → 후속 풀스택 12B smoke 권장으로 남김.)
+
+### Completed work
+
+- **D4 #1 — aspect 비문자열 거절**: `tests/test_analysis_extractor_schema.py::CharacterAspectPayloadTest::test_non_string_aspect_is_rejected`(aspect=123 → `InvalidAnalysisPayload`). 같은 `isinstance` 가드가 잡지만 전용 케이스가 없었음.
+- **D4 #2 — aspect + 다른 unknown 혼합**: `…::test_aspect_does_not_permit_other_unknown_fields_alongside`(`{name,observation,aspect,mood}` → 거절). aspect 허용이 닫힌 집합을 열지 않음을 핀.
+- **D5 #3 — style + 비style `needs_user_review` 혼합**: `tests/test_writing_gate.py::GateStyleFindingTest::test_style_does_not_suppress_a_non_style_needs_user_review`(continuity needs_user_review + style → decision `needs_user_review`, findings 2건). "style advisory 과적용이 genuine needs_user_review를 억제"하는 over-correction 버그를 잡는 셀.
+
+### Decisions (구현자 판단)
+
+- **양방향 가드를 mutation으로 경험적으로 증명했다** (문서 주장만 믿지 않음, 매 mutation 후 `git checkout` 원복):
+  - #1: `isinstance` 가드를 truthy-only(`if not value`)로 완화 → aspect=123 통과 → 테스트 FAIL.
+  - #2: unknown-field 검사를 `if False and …`로 중화 → mood 유입 → 테스트 FAIL.
+  - #3: over-correction(style 존재 시 `expected=PASS` 강제) → 비style needs_user_review 억제 → 테스트 FAIL(`ValueError: decision does not match finding priority`).
+  - 즉 3케이스 모두 under-strict(bug 재발 시 재실패) 방향이 실제로 잡힘.
+
+### Verification
+
+- backend: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1253 passed / 73 skipped / 326 subtests**(1250 + 3 신규, subtest 무변, 회귀 없음).
+- frontend·tsc·gen:api는 backend-only 테스트 추가라 무변(162/11, tsc clean, schema.d.ts 무변).
+- `git diff --check` clean. LLM 미사용. 계약·schema·프롬프트 무변(테스트만 추가).
+
+### Next steps
+
+- 검증 기록의 hardening #4(D6 "설정 기준만 판정/관찰→설정 자동 반영 없음" LLM 행동)는 code test 불가 → 후속 풀스택 12B smoke에서 관찰.
+- 문체/분량 슬라이스는 이번 보강으로 boundary matrix가 더 조밀해졌고, 여전히 종료 상태. 비동기 생성+결과 패드가 다음.

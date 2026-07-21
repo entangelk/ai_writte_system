@@ -268,6 +268,21 @@ class GateStyleFindingTest(unittest.TestCase):
                     parse_writing_gate_result(
                         _output("pass", [self._style(recommendation=rec)]))
 
+    def test_style_does_not_suppress_a_non_style_needs_user_review(self):
+        # hardening (D5): style is advisory, but a genuine non-style
+        # needs_user_review finding must still drive the decision even when style
+        # rides along. If style's advisory nature wrongly swallowed every
+        # needs_user_review (or the non-style finding were dropped from the
+        # priority max), decision would drop to pass and this re-fails.
+        decision, findings, _ = parse_writing_gate_result(_output(
+            "needs_user_review",
+            [_finding(finding_type="continuity", severity="warning",
+                      recommendation="needs_user_review"),
+             self._style()],
+        ))
+        self.assertIs(decision, WritingGateDecision.NEEDS_USER_REVIEW)
+        self.assertEqual(len(findings), 2)
+
 
 class GateFenceStrippingTest(unittest.TestCase):
     """Markdown code-fence normalization (D2=A root-cause fix, SoT v1.6.83).
