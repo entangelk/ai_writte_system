@@ -282,7 +282,7 @@
 ### Verification
 
 - backend: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1295 passed / 73 skipped / 326 subtests**(신규 16: `test_writing_generation_worker.py` executor 성공·실패 매핑 7종·catch-all INTERNAL·H-3 멱등 / `test_generation_job_worker.py` run_pass·loop drain/idle-sleep·gateway 게이팅·one-shot). `docker compose config` OK(generation_worker 유효). frontend·gen:api 무변(endpoint 미배선). `git diff --check` clean.
-- **실 12B 라이브 스모크**: 외부 llama(192.168.1.22:9080) 관통 — [아래 별도 기록].
+- **실 12B 라이브 스모크 PASS**: 외부 llama(192.168.1.22:9080) 관통. gateway를 `LLAMA_BASE_URL=http://192.168.1.22:9080 GATEWAY_PORT=8011 docker compose up -d --no-deps gateway`로 띄우고(`/health/ready`=ready), **실제 `execute_generation_job`을 gateway-backed `WritingService`(_default_writing_service, `LLM_GATEWAY_BASE_URL=http://localhost:8011`)로 실행**. job(medium/2048) enqueue→claim→execute 결과: job `succeeded`, scratch 1건, `version_id="v-live"` 보존, 실 12B가 생성한 자연스러운 한국어 산문 166자("그녀는 가느다란 손가락을 뻗어 차갑게 식은 성문의 쇠손잡이를…"). worker의 **최초 gateway generate 호출 + 결과→scratch 배선 + mark_succeeded**가 실 12B에서 관통 확인. context search는 stub(빈 package) — 2b의 새 리스크는 gateway generate 호출이고 context 빌드는 Phase 4 deployed e2e에서 이미 라이브 검증됨. 실패 taxonomy 매핑은 결정적 라이브 유발이 어려워 fake 단위 테스트로 잠금(7종+catch-all). **완전 스택 e2e(실 context search + Mongo + compose `generation_worker` 서비스, endpoint 배선 2c 후)는 오너 풀스택 후속**. 스모크 스크립트는 scratchpad(throwaway, context stub이라 커밋 안 함).
 
 ### Next steps
 
