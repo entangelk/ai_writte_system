@@ -341,7 +341,12 @@
 - 두 결손 모두 mutation으로 회귀 물림 확인(위 각 항목).
 - 라이브: 수정 반영(6144) 후 report 직접 호출·async job 재측정.
 
+### 수정 반영 후 라이브 재확인
+
+- **6144 반영 상태 async PASS**: medium **succeeded(78s)**, long **succeeded(62s)**. llama 로그가 `n_decoded = 1031 … truncated = 0`으로 **자연 종료**를 직접 보고 — 실제 report 소비가 ~1000토큰이라 1024 상한에 정확히 걸렸던 것이고, 6144는 6배 여유다.
+- **재확인 중 발견한 신규 운영 함정**: `application` 재기동 후 frontend nginx가 **옛 upstream 컨테이너 IP를 계속 물어 `:5173/api`가 전부 502**가 된다. 검증 스크립트가 30분 매달린 실제 원인이 이것이었다(llama는 idle인데 클라이언트만 대기). `docker restart ai_writte_system-frontend-1`로 즉시 복구. 기존에 기록된 healthcheck false-negative(`localhost`→`::1`)와는 다른 문제이며 HANDOFF 차후 검증 7번에 등록했다.
+
 ### Next steps
 
-- 오너 dogfood 착수(GATE-1)가 여전히 가장 큰 갈림길. 이번 e2e로 "실 12B 풀스택 관통" 잔여 후속은 닫혔다.
+- 오너 dogfood 착수(GATE-1)가 여전히 가장 큰 갈림길. 이번 e2e로 "실 12B 풀스택 관통" 잔여 후속은 닫혔다. **단, 관통은 HTTP 경로까지이며 브라우저 UI(패드 렌더·완료 배지·폴링·다시 시도 버튼)는 미검증** — HANDOFF 차후 검증 1번.
 - 잔존 `report field must be an array`(12B 간헐 비-배열 report)는 truncation과 별개 축이며 repair가 흡수한다. 실패율이 dogfood에서 문제가 되면 그때 프롬프트 축으로 별도 판단(Gate quality baseline 선례).
