@@ -948,6 +948,82 @@ class WritingGenerateAsyncBranchTest(unittest.TestCase):
         self.assertIsNone(fail_body["result_scratch_id"])
 
 
+class WritingGenerationJobRetryTest(unittest.TestCase):
+    """Retry slice (async-pad D4=A): POST .../generation-jobs/{job_id}/retry
+    resets a FAILED job to PENDING so the worker re-claims it. Mirrors the
+    Analysis retry endpoint — failed→pending, non-failed 409, 404 missing/wrong
+    project. No separate run call: the worker's claim loop picks up PENDING.
+    """
+
+    def _seed(self):
+        jobs = WritingGenerationJobService(InMemoryWritingGenerationJobRepository())
+        client, project_id, _ = _http(_FakeProvider(), package=_package(),
+                                      writing_generation_job_service=jobs)
+        return client, project_id, jobs
+
+    def _enqueue(self, jobs, project_id, request_id="wr1"):
+        return jobs.enqueue(
+            project_id=project_id, draft_id="d1", request_id=request_id,
+            task_type="continue_scene", instruction="x", draft_excerpt="",
+            query=None, output_length="medium", max_output_tokens=2048,
+            max_tokens=4096, version_id="v1",
+        ).job
+
+    def test_retry_failed_resets_to_pending_and_is_reclaimable(self):
+        # under-strict — the slice's purpose: a failed job becomes PENDING (failure
+        # cleared) and the worker can claim it again.
+        client, project_id, jobs = self._seed()
+        job = self._enqueue(jobs, project_id)
+        jobs.claim_next()
+        jobs.mark_failed(
+            jobs.get(job.id),
+            reason=WritingGenerationJobFailureReason.PROVIDER_TIMEOUT,
+            detail="upstream 504")
+        response = client.post(
+            f"/projects/{project_id}/writing/generation-jobs/{job.id}/retry")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "pending")
+        self.assertIsNone(body["failure_reason"])
+        self.assertIsNone(body["failure_detail"])
+        # the worker's claim loop can now pick it up again
+        self.assertIsNotNone(jobs.claim_next())
+
+    def test_retry_non_failed_states_are_409(self):
+        # over-strict: only FAILED is retryable — pending/running/succeeded raise
+        # InvalidJobStateTransition, mapped to 409 (never silently reset).
+        for state in ("pending", "running", "succeeded"):
+            with self.subTest(state=state):
+                client, project_id, jobs = self._seed()
+                job = self._enqueue(jobs, project_id)
+                if state in ("running", "succeeded"):
+                    jobs.claim_next()
+                if state == "succeeded":
+                    jobs.mark_succeeded(jobs.get(job.id), result_scratch_id="s1")
+                response = client.post(
+                    f"/projects/{project_id}/writing/generation-jobs/{job.id}/retry")
+                self.assertEqual(response.status_code, 409)
+
+    def test_retry_404_unknown_job(self):
+        client, project_id, _ = self._seed()
+        response = client.post(
+            f"/projects/{project_id}/writing/generation-jobs/wgj:ghost/retry")
+        self.assertEqual(response.status_code, 404)
+
+    def test_retry_404_wrong_project(self):
+        # project-scoped: a failed job under project A is not retryable via B's path.
+        client, project_a, jobs = self._seed()
+        project_b = client.post("/projects", json={"name": "Other"}).json()["id"]
+        job = self._enqueue(jobs, project_a)
+        jobs.claim_next()
+        jobs.mark_failed(
+            jobs.get(job.id),
+            reason=WritingGenerationJobFailureReason.PROVIDER_ERROR)
+        response = client.post(
+            f"/projects/{project_b}/writing/generation-jobs/{job.id}/retry")
+        self.assertEqual(response.status_code, 404)
+
+
 class WritingGenerationJobEnvelopeKeyTest(unittest.TestCase):
     """C0 exact-key safety net for the async generate surface (v1.7.27, 증분 2c).
 

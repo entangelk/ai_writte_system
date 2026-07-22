@@ -1386,8 +1386,13 @@ main {
   border-radius: 0.4rem;
 }
 
-.generation-pad-failed button {
+.generation-pad-failed-actions {
   flex: none;
+  display: flex;
+  gap: 0.35rem;
+}
+
+.generation-pad-failed button {
   padding: 0.2rem 0.55rem;
   font-size: 0.78rem;
   color: var(--muted);

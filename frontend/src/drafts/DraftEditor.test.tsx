@@ -925,6 +925,21 @@ describe("DraftEditor", () => {
           response({ body: { project_id: "p1", draft_id: "d1", items } }),
         );
       }
+      if (url.includes("/retry")) {
+        // Retry POST (재시도 슬라이스): the server resets a FAILED job to PENDING
+        // (failure fields cleared), so polling resumes. Must be matched BEFORE the
+        // GET poll branch — the retry URL also contains /generation-jobs/.
+        return Promise.resolve(
+          response({
+            body: {
+              ...asyncJob,
+              status: "pending",
+              failure_reason: null,
+              failure_detail: null,
+            },
+          }),
+        );
+      }
       if (url.includes("/writing/generation-jobs/")) {
         return Promise.resolve(
           response({
@@ -1047,6 +1062,38 @@ describe("DraftEditor", () => {
         "백그라운드 생성 완료 1건",
       ),
     ).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("retries a failed async job end-to-end: failure → 다시 시도 → poll resumes → result (재시도 슬라이스 보강)", async () => {
+    // End-to-end wiring the unit tests can't reach: the pad's "다시 시도" button
+    // is wired through DraftEditor into the hook, and retrying a FAILED job resets
+    // it to PENDING (polling resumes) so the worker's re-run surfaces the result.
+    vi.useFakeTimers();
+    vi.stubGlobal("crypto", { randomUUID: () => "req-1" });
+    const state = { jobStatus: "failed" }; // the first 5s poll sees a failure
+    const fetchMock = routeAsyncPad(state);
+
+    await startAsyncGenerate();
+    await pump(5000); // poll → FAILED → pad shows the failure row + retry button
+
+    expect(screen.getByRole("alert")).toBeInTheDocument(); // failure surfaced
+    expect(screen.getByRole("button", { name: "다시 시도" })).toBeInTheDocument();
+    const pollsBeforeRetry = jobPolls(fetchMock);
+
+    // Author retries. The POST .../retry fires, the server resets to PENDING, so
+    // polling resumes; the worker's re-run is seen on the next poll → result.
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    state.jobStatus = "succeeded";
+    await pump(5000);
+
+    expect(
+      fetchMock.mock.calls.some(
+        (call) => typeof call[0] === "string" && call[0].includes("/retry"),
+      ),
+    ).toBe(true); // the retry button actually hit the retry endpoint
+    expect(jobPolls(fetchMock)).toBeGreaterThan(pollsBeforeRetry); // polling resumed
+    expect(screen.getByText(scratchResult.candidate_text)).toBeInTheDocument(); // result
     vi.useRealTimers();
   });
 

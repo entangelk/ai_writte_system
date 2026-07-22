@@ -247,6 +247,87 @@ describe("useGenerationJobs — 5s polling while active (증분 3 D6)", () => {
   // H-3 (verification 2026-07-22): the poll fans out over ALL active jobs in one
   // tick (Promise.all) and settles them independently — previously only a single
   // job was driven through. Locks succeeded-drop + failed-keep in the same tick.
+  it("retry resets a failed job and resumes polling to completion (재시도 슬라이스)", async () => {
+    // A job fails on the first poll; retry resets it server-side to pending, so it
+    // becomes active again and the next poll drives it to succeeded.
+    let phase = "failing";
+    const fetchMock = vi.fn((url: string) => {
+      if (url.includes("/retry")) {
+        return Promise.resolve(
+          httpResponse(200, job({ status: "pending", failure_reason: null })),
+        );
+      }
+      return Promise.resolve(
+        httpResponse(
+          200,
+          phase === "failing"
+            ? job({ status: "failed", failure_reason: "provider_error" })
+            : job({ status: "succeeded" }),
+        ),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onSettled = vi.fn();
+    const { result } = renderHook(() =>
+      useGenerationJobs("p1", "d1", { onSettled }),
+    );
+
+    act(() => result.current.track(job({ status: "pending" })));
+    await tick();
+    expect(result.current.failedJobs).toHaveLength(1);
+    expect(result.current.activeJobs).toHaveLength(0);
+
+    phase = "succeeding";
+    await act(async () => {
+      await result.current.retry("wgj-1");
+    });
+    expect(result.current.activeJobs).toHaveLength(1); // pending again → active
+    expect(result.current.failedJobs).toHaveLength(0);
+
+    await tick(); // polling resumed → succeeded
+    expect(result.current.activeJobs).toHaveLength(0);
+    expect(onSettled).toHaveBeenCalledTimes(2); // failed once, then succeeded
+  });
+
+  it("retry leaves the job failed when the retry request fails (재시도 슬라이스)", async () => {
+    const fetchMock = vi.fn((url: string) => {
+      if (url.includes("/retry")) return Promise.reject(new Error("boom"));
+      return Promise.resolve(
+        httpResponse(200, job({ status: "failed", failure_reason: "internal" })),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useGenerationJobs("p1", "d1", {}));
+    act(() => result.current.track(job({ status: "pending" })));
+    await tick();
+    expect(result.current.failedJobs).toHaveLength(1);
+
+    await act(async () => {
+      await result.current.retry("wgj-1");
+    });
+    // Retry POST failed → the job stays failed (the user can try again).
+    expect(result.current.failedJobs).toHaveLength(1);
+    expect(result.current.activeJobs).toHaveLength(0);
+  });
+
+  it("retry is a no-op for a job that is not failed (guard)", async () => {
+    const fetchMock = stubJobFetch(
+      new Map([["wgj-1", { body: job({ status: "running" }) }]]),
+    );
+    const { result } = renderHook(() => useGenerationJobs("p1", "d1", {}));
+    act(() => result.current.track(job({ status: "running" })));
+
+    await act(async () => {
+      await result.current.retry("wgj-1");
+    });
+    // No /retry request is issued for an active job — only FAILED jobs retry.
+    expect(
+      fetchMock.mock.calls.some(
+        (call) => typeof call[0] === "string" && call[0].includes("/retry"),
+      ),
+    ).toBe(false);
+  });
+
   it("polls every active job in one tick and settles them independently (H-3)", async () => {
     const state = new Map<string, { body: unknown }>([
       ["wgj-1", { body: job({ job_id: "wgj-1", status: "succeeded" }) }],

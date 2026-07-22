@@ -130,6 +130,7 @@
 
 ## Deferred / out of scope
 
+- 실패한 생성 job의 **재시도** — **✅ 2026-07-22 구현 완료(SoT v1.7.28)**: `POST .../writing/generation-jobs/{job_id}/retry`(FAILED→PENDING, worker 자동 재claim)와 결과 패드 "다시 시도" 버튼. 상세는 `daily_logs/2026-07-22/work_log.md`.
 - accept 경로 자체의 비동기화 — 패드는 복사 방식이므로 accept는 동기 그대로.
 - 편집기 미저장 입력이 accept 후 `reloadLatest()`로 덮이는 문제 — **비동기와 무관하게 존재하는 별개 결손**이며, 패드 설계는 이 경로를 타지 않으므로 이 슬라이스 범위 밖이었다. **✅ 2026-07-22 별도 수정 완료**: `WritingPanel.accept()`에 dirty 시 confirm 가드 추가(앱의 이동/version/근거 dirty-가드 관용구 적용, 차단 아님). 상세는 `daily_logs/2026-07-22/work_log.md`.
 - 패드에서 편집기로 **자동 삽입** — 오너 결정은 수동 복사다.

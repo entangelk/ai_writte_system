@@ -243,6 +243,19 @@ export function getGenerationJob(
   );
 }
 
+// 재시도 슬라이스 (D4=A): reset a FAILED generation job to PENDING so the worker
+// re-claims and re-runs it. Returns the reset job (status pending). 409 if the
+// job is not failed, 404 if unknown/wrong project.
+export function retryGenerationJob(
+  projectId: string,
+  jobId: string,
+): Promise<WritingGenerationJob> {
+  return request(
+    `/projects/${projectId}/writing/generation-jobs/${encodeURIComponent(jobId)}/retry`,
+    { method: "POST" },
+  );
+}
+
 export function gateWriting(
   projectId: string,
   body: WritingGateRequest,

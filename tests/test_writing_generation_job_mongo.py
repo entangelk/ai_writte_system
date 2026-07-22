@@ -202,6 +202,30 @@ class MongoWritingGenerationJobRepositoryTest(unittest.TestCase):
         self.repo.update(done)
         self.assertEqual(self.repo.get("wgj:a"), done)
 
+    def test_update_clears_failure_fields_on_retry(self):
+        # Retry writes a failed job back to PENDING with the failure fields and
+        # lease cleared; the fake round-trip must null them, not leave them stale,
+        # and the job must be claimable again through the same collection.
+        from dataclasses import replace
+        self.repo.add(_job(
+            "wgj:f", status=WritingGenerationJobStatus.FAILED,
+            claimed_at=_NOW + timedelta(seconds=5),
+            failure_reason=WritingGenerationJobFailureReason.PROVIDER_TIMEOUT,
+            failure_detail="timed out"))
+        retried = replace(
+            self.repo.get("wgj:f"),
+            status=WritingGenerationJobStatus.PENDING,
+            failure_reason=None, failure_detail=None, claimed_at=None)
+        self.repo.update(retried)
+        stored = self.repo.get("wgj:f")
+        self.assertEqual(stored.status, WritingGenerationJobStatus.PENDING)
+        self.assertIsNone(stored.failure_reason)
+        self.assertIsNone(stored.failure_detail)
+        self.assertIsNone(stored.claimed_at)
+        claimed = self.repo.claim_next(now=_NOW + timedelta(minutes=10),
+                                       claim_timeout_seconds=600)
+        self.assertEqual(claimed.id, "wgj:f")
+
     def test_list_for_draft_newest_first_isolated(self):
         self.repo.add(_job("wgj:1", draft="d1", request="wr1", minute=1))
         self.repo.add(_job("wgj:2", draft="d1", request="wr2", minute=2))

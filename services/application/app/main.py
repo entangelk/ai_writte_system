@@ -140,6 +140,12 @@ from services.application.app.writing.generation_job import (
     InMemoryWritingGenerationJobRepository,
     WritingGenerationJobService,
 )
+from services.application.app.writing.generation_job import (
+    # Distinct class from analysis.service.InvalidJobStateTransition (imported
+    # above) — the generation job service raises its own, so the retry endpoint
+    # must catch this one to map it to 409.
+    InvalidJobStateTransition as InvalidGenerationJobStateTransition,
+)
 from services.application.app.writing.generation_worker import (
     GenerationCollaborators,
 )
@@ -3308,6 +3314,30 @@ def create_app(
             raise HTTPException(
                 status_code=404, detail="generation job not found"
             )
+        return _writing_generation_job_payload(job)
+
+    @app.post("/projects/{project_id}/writing/generation-jobs/{job_id}/retry",
+              response_model=WritingGenerationJobPayload)
+    async def retry_writing_generation_job(
+        project_id: str, job_id: str,
+    ) -> dict[str, object]:
+        # Retry slice (async-pad D4=A): reset one FAILED generation job to PENDING
+        # so the worker re-claims and re-runs it. Mirrors the Analysis retry
+        # endpoint (failed→pending, others 409). No separate run call: the
+        # generation worker's claim loop picks up any PENDING job on its own.
+        try:
+            _require_project_exists(project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        job = writing_generation_jobs.get(job_id)
+        if job is None or job.project_id != project_id:
+            raise HTTPException(
+                status_code=404, detail="generation job not found"
+            )
+        try:
+            job = writing_generation_jobs.mark_pending_for_retry(job)
+        except InvalidGenerationJobStateTransition as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return _writing_generation_job_payload(job)
 
     @app.post("/projects/{project_id}/writing/gate",

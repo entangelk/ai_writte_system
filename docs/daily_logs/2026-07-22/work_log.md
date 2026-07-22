@@ -88,3 +88,42 @@
 ### Next steps
 
 - 남은 결손·후속: 재시도 UI(실패 job 재생성, D4 deferred), per-draft 상한 기본값 dogfood 관찰, 실 12B 풀스택 e2e. **오너 dogfood 착수(GATE-1)가 가장 큰 갈림길.**
+
+## Task — 비동기 생성 job 재시도 endpoint + 결과 패드 재시도 버튼 (async-pad D4=A 재시도 UI 슬라이스, SoT v1.7.28)
+
+### Goals
+
+- 증분 2b에서 "재시도 UI 슬라이스로 지연"했던 `FAILED→PENDING` 전이를, 그 전이를 구동하는 endpoint·프론트 버튼과 함께 구현해 dead 분기 없이 실패한 백그라운드 생성을 재시도할 수 있게 한다.
+- **worker가 PENDING을 자동 claim**하므로 Analysis retry(retry 후 프론트가 별도 `run` POST)와 달리 **retry만으로 재실행**된다.
+
+### User Decisions and Rationale
+
+- 오너 지시("재시도 UI쪽으로 하자"). **브리프 불필요로 판단**: 재시도 의미는 Analysis retry endpoint(`failed→pending`, 그 외 409, 404) 선례가 정하고, `generation_job.py` 주석이 이미 "retry 슬라이스에서 이 전이를 구동하는 public 메서드와 함께 추가"라고 지연 사유를 명시했다. 새 정책 포크가 아니라 선례+지연-노트 폐쇄라 결정 브리프가 아니라 Think-Before-Coding 범위다. 다만 백엔드 계약 변경(신규 endpoint + 상태 전이)이라 **SoT bump**(v1.7.28)는 필요.
+
+### Decisions (구현자 판단)
+
+- **retry만으로 재실행(별도 run 없음)**: 생성 worker의 claim 루프가 PENDING을 자동으로 집으므로, Analysis처럼 retry→run 2단계가 아니라 retry 1회로 충분하다. 이 차이를 서비스 메서드·SoT·endpoint 주석에 명시.
+- **`InvalidJobStateTransition` 별칭 import(main.py)**: analysis·writing 두 모듈이 각각 동명 예외를 정의한다. retry endpoint가 analysis 것을 catch하면 writing 예외가 새어 500이 된다(구현 중 실제로 재현) → writing 것을 `InvalidGenerationJobStateTransition` 별칭으로 import해 catch. 회귀(`test_retry_non_failed_states_are_409`)가 409를 단정해 이 함정을 잠근다.
+- **프론트 retry는 훅에 둔다**: 실패 job은 세션-추적(`failedJobs`)이므로, 훅의 `retry(jobId)`가 endpoint 호출 후 job을 PENDING(active)으로 되돌려 폴링을 재개한다. retry 요청 실패는 job을 failed로 남겨 재시도 가능하게 한다. GenerationPad는 실패 항목에 "다시 시도"(+"닫기") 버튼만 노출.
+
+### Completed work
+
+- **`writing/generation_job.py`**: `_ALLOWED_TRANSITIONS`에 `(FAILED, PENDING)` 추가 + `mark_pending_for_retry(job)` 서비스 메서드(FAILED→PENDING 전이, failure_reason/detail·claimed_at clear; 비-FAILED는 `InvalidJobStateTransition`). 전이 주석의 "deferred"를 실구현으로 갱신.
+- **`main.py`**: `POST .../writing/generation-jobs/{job_id}/retry`(`response_model=WritingGenerationJobPayload`) — project 존재 검사 → job get(404 미발견/타 프로젝트) → `mark_pending_for_retry`(409 on invalid transition). writing `InvalidJobStateTransition`을 별칭 import.
+- **`frontend`**: `client.ts` `retryGenerationJob`(POST retry) · `useGenerationJobs` `retry(jobId)`(failed 가드→endpoint→job을 pending으로 갱신해 폴링 재개; 요청 실패 시 failed 유지) · `GenerationPad` "다시 시도" 버튼 + `onRetryFailed` prop · `DraftEditor`가 훅의 `retry`를 배선 · styles `.generation-pad-failed-actions` 버튼 그룹.
+- **SoT v1.7.28**: §271 전이 문구(FAILED→PENDING=명시 재시도) + §272 retry endpoint 계약 절 + 변경 이력 행.
+
+### Verification
+
+- **backend `python3 -m pytest --ignore=tests/test_memory_mongo.py -q` → 1322 passed / 73 skipped / 328 subtests**(1312→1322, 신규 10: 서비스 `RetryTest` 5[failed→pending clear·재claim 가능=under-strict·pending/running/succeeded 거절=over-strict] + mongo retry round-trip 1 + endpoint `WritingGenerationJobRetryTest` 4[200 failed·409×3 subtest·404 unknown·404 wrong-project]).
+- **frontend `npx vitest run` → 192 passed / 13 files**(188→192, 신규 4: 훅 retry 3[reset→폴링 재개·retry 실패 시 failed 유지·비-failed no-op] + GenerationPad "다시 시도" 버튼 1). `tsc` clean, `npm run build` 103 modules(JS 398.69 kB), `npm run gen:api` retry path 1개 additive(49줄 삽입·0 삭제, 순수 additive 확인). LLM 미사용.
+- **비차단 후보(오너 검증 시 참고)**: DraftEditor 통합 retry 사슬(생성→실패→"다시 시도"→재개) 테스트 부재 — 훅 retry(폴링 재개)·GenerationPad 버튼(onRetryFailed 호출)·DraftEditor 배선(`void retryGenerationJob(jobId)` 한 줄)이 각각 잠겨 있고, 통합은 fake-timer 비용이 커 단위로 대체. 필요 시 증분 3 배선처럼 추가 가능.
+
+### 검증자 보강 + mongo 환경 진단 (독립 검증 세션)
+
+- **✅ 비차단 보강 완료 — DraftEditor 통합 retry e2e**: 오너 독립 검증(`docs/verifications/2026-07-22/retry_slice_d4_generation_job.md`) 후, fake-timer 통합 패턴(증분 3 `routeAsyncPad`·`pump`·`jobPolls` 재사용)으로 retry 사슬 전체를 관통하는 통합 테스트 1건 추가 — async generate → 첫 5s poll FAILED → 패드 실패 row + "다시 시도" 버튼 → 클릭 시 `POST .../retry` 발화 + 서버 pending 응답 → 폴링 재개 → 다음 poll succeeded → 결과 표시. frontend **192→193 passed / 13 files**(DraftEditor 38→40), `tsc` clean. (accept 결손 fix 테스트 1건이 같은 파일에 있어 38→40.)
+- **mongo 환경 진단(`test_memory_mongo` 실패 원인)**: 본 슬라이스 무관. `test_memory_mongo`는 `CORE_SOT_TEST_MONGO_URI`(기본 `mongodb://localhost:27017`)에 연결하는데, **27017 = `shared-mongo`는 인증 필수**(`Unauthorized, code=13, "Command insert requires authentication"`)라 인증 없는 연결로 read(ping)만 되고 write(`create_index`)가 거부 → `ensure_indexes()`가 `OperationFailure` → `MongoMemoryRepositorySetupError`. ping probe는 read라 `skipUnless`를 통과해 skip 대신 FAILED. **메모리 전용 컨테이너 27018(`agent-memory-mongodb`, mongo 7.0.30)로 돌리면 green** — `CORE_SOT_TEST_MONGO_URI=mongodb://localhost:27018 PYTHONPATH=services/application python3 -m pytest tests/ -q` → **1358 passed / 41 skipped / 0 failed / 328 subtests**(27017 환경의 1322 passed/73 skipped/4 failed에서 mongo를 올바른 컨테이너로 옮기니 +36 passed·-32 skipped·-4 failed, 총 1399 동일). 오너 판단 "몽고는 별도 컨테이너라 스킵/실패가 없어야 맞다" 정확 — 27018이 그 별도 컨테이너.
+
+### Next steps
+
+- **재시도 UI 완료.** 남은 후속: per-draft 상한 기본값 dogfood 관찰, 실 12B 풀스택 e2e(sandbox 12B 불가). **오너 dogfood 착수(GATE-1)가 가장 큰 갈림길.**

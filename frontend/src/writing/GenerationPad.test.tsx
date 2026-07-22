@@ -25,7 +25,7 @@ function job(overrides: Partial<WritingGenerationJob> = {}): WritingGenerationJo
 describe("GenerationPad (증분 3 D6)", () => {
   it("renders nothing when there are no active or failed jobs", () => {
     const { container } = render(
-      <GenerationPad activeJobs={[]} failedJobs={[]} onDismissFailed={vi.fn()} />,
+      <GenerationPad activeJobs={[]} failedJobs={[]} onDismissFailed={vi.fn()} onRetryFailed={vi.fn()} />,
     );
     expect(container).toBeEmptyDOMElement();
   });
@@ -39,6 +39,7 @@ describe("GenerationPad (증분 3 D6)", () => {
         ]}
         failedJobs={[]}
         onDismissFailed={vi.fn()}
+        onRetryFailed={vi.fn()}
       />,
     );
     expect(
@@ -54,6 +55,7 @@ describe("GenerationPad (증분 3 D6)", () => {
         activeJobs={[]}
         failedJobs={[job({ status: "failed", failure_reason: "provider_timeout" })]}
         onDismissFailed={vi.fn()}
+        onRetryFailed={vi.fn()}
       />,
     );
     expect(
@@ -67,6 +69,7 @@ describe("GenerationPad (증분 3 D6)", () => {
         activeJobs={[]}
         failedJobs={[job({ status: "failed", failure_reason: "brand_new_reason" })]}
         onDismissFailed={vi.fn()}
+        onRetryFailed={vi.fn()}
       />,
     );
     expect(screen.getByText(/brand_new_reason/)).toBeInTheDocument();
@@ -79,9 +82,24 @@ describe("GenerationPad (증분 3 D6)", () => {
         activeJobs={[]}
         failedJobs={[job({ job_id: "gone", status: "failed", failure_reason: "internal" })]}
         onDismissFailed={onDismissFailed}
+        onRetryFailed={vi.fn()}
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: "닫기" }));
     expect(onDismissFailed).toHaveBeenCalledWith("gone");
+  });
+
+  it("retries a failed job by id (재시도 슬라이스)", async () => {
+    const onRetryFailed = vi.fn();
+    render(
+      <GenerationPad
+        activeJobs={[]}
+        failedJobs={[job({ job_id: "again", status: "failed", failure_reason: "internal" })]}
+        onDismissFailed={vi.fn()}
+        onRetryFailed={onRetryFailed}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    expect(onRetryFailed).toHaveBeenCalledWith("again");
   });
 });

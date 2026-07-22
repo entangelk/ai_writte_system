@@ -104,6 +104,7 @@ export function DraftEditor() {
     settledUnseen: unseenGenerationJobs,
     acknowledge: acknowledgeGenerationJobs,
     dismissFailed: dismissGenerationJob,
+    retry: retryGenerationJob,
   } = useGenerationJobs(projectId ?? "", draftId ?? "", {
     onSettled: () => setScratchRefresh((count) => count + 1),
   });
@@ -632,6 +633,7 @@ export function DraftEditor() {
                         activeJobs={generationJobs}
                         failedJobs={failedGenerationJobs}
                         onDismissFailed={dismissGenerationJob}
+                        onRetryFailed={(jobId) => void retryGenerationJob(jobId)}
                       />
                       <ScratchRecovery
                         projectId={projectId}

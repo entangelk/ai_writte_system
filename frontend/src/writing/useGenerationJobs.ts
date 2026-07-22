@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getGenerationJob, type WritingGenerationJob } from "../api/client";
+import {
+  getGenerationJob,
+  retryGenerationJob,
+  type WritingGenerationJob,
+} from "../api/client";
 
 // 증분 3 (D6): async medium/long generations run in the background worker. This
 // hook tracks the jobs a session started, polls each every 5s WHILE it is still
@@ -32,8 +36,10 @@ export type GenerationJobsHandle = {
   settledUnseen: number;
   // Clear the unseen count (the editor calls this when the writing tab is shown).
   acknowledge: () => void;
-  // Drop a failed job from the pad (session-local; there is no retry yet).
+  // Drop a failed job from the pad (session-local).
   dismissFailed: (jobId: string) => void;
+  // Retry a failed job: reset it to pending server-side, which resumes polling.
+  retry: (jobId: string) => Promise<void>;
 };
 
 export function useGenerationJobs(
@@ -64,6 +70,26 @@ export function useGenerationJobs(
   const dismissFailed = useCallback((jobId: string) => {
     setJobs((current) => current.filter((job) => job.job_id !== jobId));
   }, []);
+
+  const retry = useCallback(
+    async (jobId: string) => {
+      const target = jobsRef.current.find((job) => job.job_id === jobId);
+      if (target === undefined || target.status !== "failed") return;
+      let next: WritingGenerationJob;
+      try {
+        next = await retryGenerationJob(projectId, jobId);
+      } catch {
+        // Retry request failed: leave the job failed so the user can try again.
+        return;
+      }
+      // The server reset it to pending → it becomes active again, so the poll
+      // effect re-arms and picks up the eventual result.
+      setJobs((current) =>
+        current.map((job) => (job.job_id === jobId ? next : job)),
+      );
+    },
+    [projectId],
+  );
 
   // Switching drafts abandons the previous draft's tracked jobs (jobs are keyed
   // per (project, draft); the previous draft's badge must not bleed over).
@@ -135,5 +161,6 @@ export function useGenerationJobs(
     settledUnseen,
     acknowledge,
     dismissFailed,
+    retry,
   };
 }

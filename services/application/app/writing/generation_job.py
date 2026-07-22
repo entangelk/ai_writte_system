@@ -127,9 +127,11 @@ class CreateWritingGenerationJobResult:
 
 # PENDING→RUNNING is the claim; RUNNING→{SUCCEEDED,FAILED} are the worker's
 # outcomes. A stale RUNNING job is reclaimed by the lease inside ``claim_next``
-# (it stays RUNNING), not by a transition. FAILED→PENDING retry (D4=A: "orphan/
-# retry도 Analysis 계약을 재사용") is deferred to the retry slice — added with the
-# public retry method that drives it, so no allowed transition is left callerless.
+# (it stays RUNNING), not by a transition. FAILED→PENDING is the explicit user
+# retry (D4=A: "orphan/retry도 Analysis 계약을 재사용") — driven by
+# ``mark_pending_for_retry`` below (mirrors AnalysisService.retry_failed_job), so
+# the transition is never callerless. Only FAILED is retryable; succeeded and the
+# in-flight states raise (the endpoint maps that to 409).
 _ALLOWED_TRANSITIONS: frozenset[
     tuple[WritingGenerationJobStatus, WritingGenerationJobStatus]
 ] = frozenset(
@@ -137,6 +139,7 @@ _ALLOWED_TRANSITIONS: frozenset[
         (WritingGenerationJobStatus.PENDING, WritingGenerationJobStatus.RUNNING),
         (WritingGenerationJobStatus.RUNNING, WritingGenerationJobStatus.SUCCEEDED),
         (WritingGenerationJobStatus.RUNNING, WritingGenerationJobStatus.FAILED),
+        (WritingGenerationJobStatus.FAILED, WritingGenerationJobStatus.PENDING),
     }
 )
 
@@ -296,6 +299,27 @@ class WritingGenerationJobService:
             self._transition(job, WritingGenerationJobStatus.FAILED),
             failure_reason=reason,
             failure_detail=detail,
+        )
+        self._repo.update(updated)
+        return updated
+
+    def mark_pending_for_retry(
+        self, job: WritingGenerationJob,
+    ) -> WritingGenerationJob:
+        """Explicitly reset one FAILED job to PENDING so the worker re-claims it.
+
+        Mirrors ``AnalysisService.retry_failed_job``. Unlike Analysis (whose
+        caller then POSTs a separate ``run``), the generation worker's claim loop
+        picks up any PENDING job on its own, so the retry alone resumes execution.
+        Non-FAILED jobs raise ``InvalidJobStateTransition`` (the endpoint maps
+        that to 409) — succeeded and the in-flight states are never retryable.
+        The failure fields and the stale claim lease are cleared on the way back.
+        """
+        updated = replace(
+            self._transition(job, WritingGenerationJobStatus.PENDING),
+            failure_reason=None,
+            failure_detail=None,
+            claimed_at=None,
         )
         self._repo.update(updated)
         return updated

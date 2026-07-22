@@ -26,10 +26,11 @@ type GenerationPadProps = {
   activeJobs: WritingGenerationJob[];
   failedJobs: WritingGenerationJob[];
   onDismissFailed: (jobId: string) => void;
+  onRetryFailed: (jobId: string) => void;
 };
 
 export function GenerationPad(props: GenerationPadProps) {
-  const { activeJobs, failedJobs, onDismissFailed } = props;
+  const { activeJobs, failedJobs, onDismissFailed, onRetryFailed } = props;
   if (activeJobs.length === 0 && failedJobs.length === 0) return null;
 
   return (
@@ -58,9 +59,14 @@ export function GenerationPad(props: GenerationPadProps) {
               job.failure_reason ??
               "알 수 없는 오류"}
           </span>
-          <button type="button" onClick={() => onDismissFailed(job.job_id)}>
-            닫기
-          </button>
+          <span className="generation-pad-failed-actions">
+            <button type="button" onClick={() => onRetryFailed(job.job_id)}>
+              다시 시도
+            </button>
+            <button type="button" onClick={() => onDismissFailed(job.job_id)}>
+              닫기
+            </button>
+          </span>
         </p>
       ))}
     </section>

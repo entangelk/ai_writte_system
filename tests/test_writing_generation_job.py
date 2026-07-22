@@ -201,6 +201,69 @@ class TransitionTest(unittest.TestCase):
                 reason=WritingGenerationJobFailureReason.PROVIDER_ERROR)
 
 
+class RetryTest(unittest.TestCase):
+    """FAILED→PENDING explicit retry (retry slice, D4=A). The worker re-claims
+    any PENDING job, so the reset alone resumes execution."""
+
+    def _failed(self, svc, *, detail="gateway timed out"):
+        _enqueue(svc)
+        job = svc.claim_next()
+        return svc.mark_failed(
+            job,
+            reason=WritingGenerationJobFailureReason.PROVIDER_TIMEOUT,
+            detail=detail,
+        )
+
+    def test_retry_resets_failed_job_to_pending_clearing_failure(self):
+        svc = _service()
+        failed = self._failed(svc)
+        retried = svc.mark_pending_for_retry(failed)
+        self.assertEqual(retried.status, WritingGenerationJobStatus.PENDING)
+        self.assertIsNone(retried.failure_reason)
+        self.assertIsNone(retried.failure_detail)
+        self.assertIsNone(retried.claimed_at)  # stale lease cleared
+        # persisted, not just the returned copy
+        self.assertEqual(svc.get(failed.id).status,
+                         WritingGenerationJobStatus.PENDING)
+
+    def test_retried_job_is_reclaimable_by_the_worker(self):
+        # under-strict — the whole point of the slice: after retry the worker's
+        # claim loop must pick the job up again and re-run it.
+        svc = _service()
+        failed = self._failed(svc)
+        self.assertIsNone(svc.claim_next())  # FAILED is not claimable
+        svc.mark_pending_for_retry(failed)
+        reclaimed = svc.claim_next()
+        self.assertIsNotNone(reclaimed)
+        self.assertEqual(reclaimed.id, failed.id)
+        self.assertEqual(reclaimed.status, WritingGenerationJobStatus.RUNNING)
+
+    def test_retry_on_pending_is_rejected(self):
+        # over-strict: only a FAILED job is retryable — a queued one is not.
+        svc = _service()
+        job = _enqueue(svc).job  # PENDING
+        with self.assertRaises(InvalidJobStateTransition):
+            svc.mark_pending_for_retry(job)
+
+    def test_retry_on_running_is_rejected(self):
+        # over-strict: an in-flight job must not be yanked back to PENDING.
+        svc = _service()
+        _enqueue(svc)
+        running = svc.claim_next()
+        with self.assertRaises(InvalidJobStateTransition):
+            svc.mark_pending_for_retry(running)
+
+    def test_retry_on_succeeded_is_rejected(self):
+        # over-strict: a completed job is terminal — retry cannot resurrect it.
+        svc = _service()
+        _enqueue(svc)
+        job = svc.claim_next()
+        svc.mark_succeeded(job, result_scratch_id="wds:7")
+        succeeded = svc.get(job.id)
+        with self.assertRaises(InvalidJobStateTransition):
+            svc.mark_pending_for_retry(succeeded)
+
+
 class ListForDraftTest(unittest.TestCase):
     def test_lists_draft_jobs_newest_first_isolated_by_draft(self):
         clock = _Clock()
