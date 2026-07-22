@@ -127,3 +127,30 @@
 ### Next steps
 
 - **재시도 UI 완료.** 남은 후속: per-draft 상한 기본값 dogfood 관찰, 실 12B 풀스택 e2e(sandbox 12B 불가). **오너 dogfood 착수(GATE-1)가 가장 큰 갈림길.**
+
+## Task — 실 12B 풀스택 e2e 검증 + GATE-1 정의 명확화 (오너 요청)
+
+### Goals
+
+- 오너 요청: async-pad 슬라이스(2b/2c/3/retry)가 실 12B(`192.168.1.22:9080`)로 엔드투엔드 관통하는지 검증. 2b work_log가 "완전 스택 e2e는 오너 풀스택 후속"으로 남겨둔 것을 폐쇄.
+- GATE-1 정의 명확화(오너 "GATE-1이 정확히 뭔지 모르겠다").
+
+### User Decisions and Rationale
+
+- 오너: "dogfood는 작업 AI가 아니라 내가 하는 거" → GATE-1 본질 확인 요청.
+- **GATE-1 정의**(`docs/plans/product-readiness-backlog.md:43`): **Phase 7(대화형 수정·아이디에이션·저작 감독) 진입 게이트**. 충족 조건 = `UX-1`(프론트 기본 루프) 완료 **+** `QUAL-1`(2주 dogfood 실사용 검토) 완료. 통과 시 dogfood에서 반복 재현된 문제 ↔ Phase 7 P1~P5 대조해 가치 입증된 첫 slice만 선택. 핵심 규칙(HANDOFF) "UX-1+QUAL-1 전 Phase 7 착수 금지". 현재 dogfood 미착수 = GATE-1 미충족. **GATE-1은 코드/검증 작업이 아니라 오너 dogfood 의사결정 게이트** — 작업 AI가 통과할 수 없고, 오너가 직접 실사용해 QUAL-1(2주)을 채워야 다음 기능군(Phase 7)이 열림. 그래서 "가장 큰 갈림길" = 개발이 막힌 게 아니라 오너 실사용 단계로의 분기.
+
+### Completed work — 실 12B 풀스택 e2e (전부 green)
+
+- **host-side 구성**(image rebuild 없이 working-tree, memory `live-smoke-runs-working-tree` 준수): gateway compose(`LLAMA_BASE_URL=http://192.168.1.22:9080 GATEWAY_PORT=8011` → `/health/ready`={"status":"ready"}) + application `uvicorn …:create_app --factory`(127.0.0.1:8010) + `scripts/generation_job_worker.py --loop`, mongo 27018(`agent-memory-mongodb`) 공유(`CORE_SOT_MONGO_TRANSACTIONS=false` non-transaction; job claim은 atomic `find_one_and_update`라 단일 노드에서 안전).
+- **관통 결과**:
+  1. 시드(project/draft/version POST) → async generate(medium) POST **202** (endpoint 배선 2c 정상, async 분기).
+  2. job pending → worker claim → gateway **실 12B 호출** → **succeeded**, `result_scratch_id` 보존, 실 한국어 산문("아린은 거친 질감의 성문을 밀어냈다. 삐걱거리는 소리와 함께 육중한 문이 열렸고…").
+  3. **retry 재실행 live**: 같은 job을 mongo에서 FAILED 강제 마킹 → retry POST **200 `pending`**(`mark_pending_for_retry` failure/lease clear 동작) → worker 재claim → **실 12B 재실행 → 새 scratch → succeeded**. scratch items=1(이전 결과는 H-3가 `request_id`로 정리 → 멱등 관통).
+  4. retry over-strict: succeeded job → retry → **409**(FAILED만 재시도 가능, 정상).
+- worker 로그에 `claim→succeeded` 이벤트(pass 37 `wgj:4447`, pass 42 `wgj:8d69`) 확인. 2b의 "오너 풀스택 후속" 폐쇄 — async-pad 전 슬라이스(저장소·worker·endpoint·패드·폴링·retry)가 실 12B에서 end-to-end 동작.
+- 검증 후 임시 프로세스(application/worker/gateway)·mongo `e2e_async` db 정리.
+
+### Next steps
+
+- **async-pad 슬라이스(1~3 + retry) 실 12B 풀스택 관통 완료.** GATE-1(Phase 7 진입)은 오너 dogfood 의사결정 영역 — 오너가 UX-1 완료 + QUAL-1(2주 실사용)을 채우면 그때 dogfood 반복 문제 ↔ Phase 7 P1~P5 대조해 첫 slice 선택.
