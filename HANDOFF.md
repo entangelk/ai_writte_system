@@ -96,7 +96,8 @@
 - **conflict review queue 영속화(2B.4 후속, v1.6.59)**: conflict를 결정적 id로 durable `review_queue`에 멱등 upsert한다. resolve/dismiss는 v1.6.61, 사람 승인 merge/split reconciliation은 v1.6.63, candidate+conflict Review Inbox read surface는 v1.6.64로 실경로화됐다.
 
 ### 추적 부채
-- 없음. **strict JSON parser fence-strip 스윕은 v1.6.86으로 완료**(잔존 0): `gate_prompt`(v1.6.83)·`report`(v1.6.85)에 이어 `compare_judge`·`extractor`·`planner`·`retrieval` 4곳이 공유 `writing/json_extract.py::strip_code_fence`를 채택했다. Phase 2A extraction 계약 clause("markdown-fenced JSON=first-parse 실패→repair")도 fence 추출 정책에 맞게 정정했다.
+- **`GET /projects/{pid}/drafts` 레거시-데이터 500 (근본 원인 미해결, 다음 작업자 파악 필요)**: 2026-07-22 dogfood에서 발견. ordered-unit 구조(W0) 도입 *이전*에 생성된 draft(즉 `unit_kind`/`position`이 없는 레코드)가 있으면 `list_drafts`가 500을 낸다. 경로: [`service.py:890 _require_ordered_drafts`](services/application/app/core_sot/service.py#L890)가 `InvalidDraftOrder("draft metadata migration is required")`를 던지는데 [`main.py:1942 list_drafts`](services/application/app/main.py#L1942) endpoint는 `NotFound`만 404로 잡아 이 예외가 **미포착 → 500**으로 샌다. dogfood에서는 **mongo dev 볼륨 초기화로 증상만 제거**했고 근본 원인은 미해결. **의도된 해법은 `scripts/migrate_ordered_units.py` 실행**(예외 메시지 자체가 "migration is required"). **다음 작업자 결정 필요**: (a) 배포 전 마이그레이션을 강제/자동화할지, (b) endpoint에서 `InvalidDraftOrder`를 500 아닌 명시적 에러(예: 409+마이그레이션 안내)로 포착할지 — 지울 수 없는 실제 사용자 데이터에서 재현 가능하므로 로컬 폐기가능 데이터가 아니면 반드시 대응해야 한다. 배경 감사: `docs/verifications/2026-07-22/rail-tab-layering.md` "Outstanding items".
+- (parser fence 스윕) **strict JSON parser fence-strip 스윕은 v1.6.86으로 완료**(잔존 0): `gate_prompt`(v1.6.83)·`report`(v1.6.85)에 이어 `compare_judge`·`extractor`·`planner`·`retrieval` 4곳이 공유 `writing/json_extract.py::strip_code_fence`를 채택했다. Phase 2A extraction 계약 clause("markdown-fenced JSON=first-parse 실패→repair")도 fence 추출 정책에 맞게 정정했다.
 - (이전 부채 #8 `ProviderError`→502는 조사 결과 stale — 두 경로 모두 이미 502였음 — 로 v1.6.49에서 명시 분기+회귀 lock으로 폐쇄했다.)
 
 ## Owner Decisions Needed
