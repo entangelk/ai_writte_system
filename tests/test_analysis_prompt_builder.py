@@ -21,7 +21,7 @@ class AnalysisPromptBuilderTest(unittest.TestCase):
     def test_build_request_contains_template_snapshot_and_source_ref_catalog(self):
         template = PromptTemplateService(
             InMemoryPromptTemplateRepository()
-        ).seed_analysis_extract_v3()
+        ).seed_analysis_extract_v4()
         snapshot = SnapshotText(
             project_id="project-1",
             snapshot_id="snapshot-1",
@@ -78,7 +78,7 @@ class AnalysisPromptBuilderTest(unittest.TestCase):
         # advisory input. Removing the inclusion re-fails this test.
         template = PromptTemplateService(
             InMemoryPromptTemplateRepository()
-        ).seed_analysis_extract_v3()
+        ).seed_analysis_extract_v4()
         report = {"risk_notes": [
             {"type": "pov", "severity": "high", "message": "시점"}]}
         snapshot = SnapshotText(
@@ -110,7 +110,7 @@ class AnalysisPromptBuilderTest(unittest.TestCase):
     def test_v2_separates_old_report_pointers_from_current_source_ref_ids(self):
         template = PromptTemplateService(
             InMemoryPromptTemplateRepository()
-        ).seed_analysis_extract_v3()
+        ).seed_analysis_extract_v4()
         report = {
             "candidate_claims": [
                 {
@@ -173,7 +173,7 @@ class AnalysisPromptBuilderTest(unittest.TestCase):
         # candidate report.
         template = PromptTemplateService(
             InMemoryPromptTemplateRepository()
-        ).seed_analysis_extract_v3()
+        ).seed_analysis_extract_v4()
         snapshot = SnapshotText(
             project_id="project-1",
             snapshot_id="snapshot-1",
@@ -202,7 +202,7 @@ class AnalysisPromptBuilderTest(unittest.TestCase):
     def test_empty_source_ref_catalog_is_explicit_error(self):
         template = PromptTemplateService(
             InMemoryPromptTemplateRepository()
-        ).seed_analysis_extract_v3()
+        ).seed_analysis_extract_v4()
         snapshot = SnapshotText(
             project_id="project-1",
             snapshot_id="snapshot-1",
@@ -221,7 +221,7 @@ class AnalysisPromptBuilderTest(unittest.TestCase):
     def test_cross_snapshot_source_ref_is_rejected_before_provider_call(self):
         template = PromptTemplateService(
             InMemoryPromptTemplateRepository()
-        ).seed_analysis_extract_v3()
+        ).seed_analysis_extract_v4()
         snapshot = SnapshotText(
             project_id="project-1",
             snapshot_id="snapshot-1",

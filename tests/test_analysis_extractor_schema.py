@@ -305,7 +305,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        template = prompt_templates.seed_analysis_extract_v3()
+        template = prompt_templates.seed_analysis_extract_v4()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -370,7 +370,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        prompt_templates.seed_analysis_extract_v3()
+        prompt_templates.seed_analysis_extract_v4()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -454,7 +454,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        prompt_templates.seed_analysis_extract_v3()
+        prompt_templates.seed_analysis_extract_v4()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -560,7 +560,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        prompt_templates.seed_analysis_extract_v3()
+        prompt_templates.seed_analysis_extract_v4()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -613,7 +613,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        prompt_templates.seed_analysis_extract_v3()
+        prompt_templates.seed_analysis_extract_v4()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -649,7 +649,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
     async def test_versioned_prompt_adapter_rejects_missing_catalog_before_provider(self):
         provider = FakeLLMProvider([])
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        prompt_templates.seed_analysis_extract_v3()
+        prompt_templates.seed_analysis_extract_v4()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,

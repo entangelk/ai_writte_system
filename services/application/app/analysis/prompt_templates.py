@@ -22,7 +22,21 @@ Never copy document_id, block_id, or any identifier from writing_candidate_repor
 Use source_ref_id values only from the current source_ref_catalog, preserving each catalog anchor exactly.
 Do not invent facts outside the supplied snapshot text.
 """
-ANALYSIS_EXTRACT_PROMPT_VERSION = "analysis_extract_v3"
+ANALYSIS_EXTRACT_PROMPT_VERSION_V3 = "analysis_extract_v3"
+ANALYSIS_EXTRACT_TEMPLATE_V3 = """You extract Phase 2A analysis candidates.
+
+Return one JSON object with a top-level candidates list.
+Treat writing_candidate_report source_blocks and related pointers as advisory provenance only.
+Never copy document_id, block_id, or any identifier from writing_candidate_report into source_anchors.
+Use source_ref_id values only from the current source_ref_catalog, preserving each catalog anchor exactly.
+Each candidate must contain exactly candidate_type, provenance, confidence, source_anchors, and payload.
+candidate_type is character_observation, event_observation, or open_question_observation.
+provenance is source_observed or ai_inferred. confidence is a number from 0.0 to 1.0.
+Each source_anchors item must copy source_ref_id, start_offset, end_offset, quote, and content_hash exactly from one current catalog item.
+payload is {"name":"...","observation":"..."} for character, {"event":"..."} for event, or {"question":"..."} for open question.
+Do not invent facts outside the supplied snapshot text.
+"""
+ANALYSIS_EXTRACT_PROMPT_VERSION = "analysis_extract_v4"
 ANALYSIS_EXTRACT_TEMPLATE = """You extract Phase 2A analysis candidates.
 
 Return one JSON object with a top-level candidates list.
@@ -137,6 +151,13 @@ class PromptTemplateService:
         )
 
     def seed_analysis_extract_v3(self) -> PromptTemplate:
+        return self.seed_template(
+            task_type=ANALYSIS_EXTRACT_TASK_TYPE,
+            version=ANALYSIS_EXTRACT_PROMPT_VERSION_V3,
+            template=ANALYSIS_EXTRACT_TEMPLATE_V3,
+        )
+
+    def seed_analysis_extract_v4(self) -> PromptTemplate:
         return self.seed_template(
             task_type=ANALYSIS_EXTRACT_TASK_TYPE,
             version=ANALYSIS_EXTRACT_PROMPT_VERSION,
