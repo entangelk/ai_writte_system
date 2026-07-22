@@ -668,6 +668,33 @@ describe("WritingPanel — output-length preset (증분 2)", () => {
     ).toBeInTheDocument();
   });
 
+  it("hands the enqueued job to onAsyncJobStarted so the pad can poll it (증분 3)", async () => {
+    // The async branch must forward the 202 job reference to the parent, which
+    // owns polling + the result pad. under-strict: dropping the callback would
+    // leave the background job untracked (result never surfaces). over-strict: a
+    // sync short generate must NOT fire it (asserted in the short test below).
+    mockFetch({ status: 202, body: generationJobAccepted });
+    const onAsyncJobStarted = vi.fn();
+    renderPanel({ onAsyncJobStarted });
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    await userEvent.selectOptions(screen.getByLabelText("생성 분량"), "medium");
+    await userEvent.click(generateButton());
+    await waitFor(() => expect(onAsyncJobStarted).toHaveBeenCalledTimes(1));
+    expect(onAsyncJobStarted.mock.calls[0][0].job_id).toBe("wgj-1");
+  });
+
+  it("does not fire onAsyncJobStarted for a synchronous short generate (증분 3)", async () => {
+    // over-strict guard: short is sync (candidate + Gate), never an async job.
+    mockFetch({ body: candidate }, { body: gatePass });
+    const onAsyncJobStarted = vi.fn();
+    renderPanel({ onAsyncJobStarted });
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    await userEvent.selectOptions(screen.getByLabelText("생성 분량"), "short");
+    await userEvent.click(generateButton());
+    await waitFor(() => expect(screen.getByText(candidate.text)).toBeInTheDocument());
+    expect(onAsyncJobStarted).not.toHaveBeenCalled();
+  });
+
   it("short preset stays synchronous (candidate + Gate, not async)", async () => {
     // over-strict guard: short must NOT take the async branch. It returns a real
     // candidate and runs Gate (2 fetches) with no background-started notice.

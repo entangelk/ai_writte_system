@@ -17,6 +17,8 @@ import {
 } from "../api/client";
 import { WritingPanel } from "../writing/WritingPanel";
 import { ScratchRecovery } from "../writing/ScratchRecovery";
+import { GenerationPad } from "../writing/GenerationPad";
+import { useGenerationJobs } from "../writing/useGenerationJobs";
 import { AnalysisTrigger } from "../review/AnalysisTrigger";
 import { WorkspaceReviewPanel } from "../review/WorkspaceReviewPanel";
 
@@ -91,6 +93,21 @@ export function DraftEditor() {
   const intentRef = useRef<SaveIntent | null>(null);
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
 
+  // 증분 3 (D6): track async (medium/long) generations. Polling lives here (not in
+  // WritingPanel) so it survives tab switches and drives the tab completion badge.
+  // A settled job re-fetches the scratch list — the worker appended a succeeded
+  // result there, so the result pad (ScratchRecovery) resurfaces it.
+  const {
+    activeJobs: generationJobs,
+    failedJobs: failedGenerationJobs,
+    track: trackGenerationJob,
+    settledUnseen: unseenGenerationJobs,
+    acknowledge: acknowledgeGenerationJobs,
+    dismissFailed: dismissGenerationJob,
+  } = useGenerationJobs(projectId ?? "", draftId ?? "", {
+    onSettled: () => setScratchRefresh((count) => count + 1),
+  });
+
   useEffect(() => {
     if (projectId === undefined || draftId === undefined) {
       setError("원고 경로가 올바르지 않습니다.");
@@ -150,6 +167,14 @@ export function DraftEditor() {
   useEffect(() => {
     setAnalysisStatus("idle");
   }, [latestSnapshotId]);
+
+  // Viewing the writing tab counts as seeing the completed generations, so clear
+  // the tab badge. Completions that land while another tab is open keep it lit.
+  useEffect(() => {
+    if (activePanel === "writing" && unseenGenerationJobs > 0) {
+      acknowledgeGenerationJobs();
+    }
+  }, [activePanel, unseenGenerationJobs, acknowledgeGenerationJobs]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -589,12 +614,25 @@ export function DraftEditor() {
                       onClick={() => selectPanel(panel)}
                     >
                       {panel === "writing" ? "이어쓰기" : panel === "analysis" ? "분석" : "검토"}
+                      {panel === "writing" && unseenGenerationJobs > 0 && (
+                        <span
+                          className="tab-badge"
+                          aria-label={`백그라운드 생성 완료 ${unseenGenerationJobs}건`}
+                        >
+                          {unseenGenerationJobs}
+                        </span>
+                      )}
                     </button>
                   ))}
                 </div>
                 <div className="rail-panel" role="tabpanel">
                   {activePanel === "writing" && (
                     <>
+                      <GenerationPad
+                        activeJobs={generationJobs}
+                        failedJobs={failedGenerationJobs}
+                        onDismissFailed={dismissGenerationJob}
+                      />
                       <ScratchRecovery
                         projectId={projectId}
                         draftId={draftId}
@@ -612,6 +650,7 @@ export function DraftEditor() {
                           setScratchRefresh((n) => n + 1);
                           void reloadLatest();
                         }}
+                        onAsyncJobStarted={trackGenerationJob}
                       />
                     </>
                   )}

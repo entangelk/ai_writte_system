@@ -231,6 +231,18 @@ export function generateWriting(
   });
 }
 
+// 증분 3 (D6): the result pad polls this to learn when a medium/long async
+// generation finishes (or fails), then re-reads the scratch list to surface the
+// result. Read-only status; 404 covers both unknown job and wrong project.
+export function getGenerationJob(
+  projectId: string,
+  jobId: string,
+): Promise<WritingGenerationJob> {
+  return request(
+    `/projects/${projectId}/writing/generation-jobs/${encodeURIComponent(jobId)}`,
+  );
+}
+
 export function gateWriting(
   projectId: string,
   body: WritingGateRequest,

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -106,6 +106,9 @@ function readBlob(blob: Blob): Promise<string> {
 }
 
 afterEach(() => {
+  // Restore real timers first so a fake-timer test that throws before its own
+  // cleanup cannot leak faked timers into later tests (they would hang waitFor).
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   Reflect.deleteProperty(URL, "createObjectURL");
@@ -784,6 +787,158 @@ describe("DraftEditor", () => {
     expect(screen.getByText("현재 version 4")).toBeInTheDocument();
     expect(fetchMock.mock.calls[6][0]).toBe("/api/projects/p1/writing/accept");
     expect(fetchMock.mock.calls[7][0]).toBe("/api/projects/p1/drafts/d1/versions");
+  });
+
+  // 증분 3 (D6): a medium/long generate returns a 202 job that the editor tracks
+  // and polls. The in-progress state renders in the pad; on completion the worker
+  // result surfaces via the scratch list.
+  const asyncJob = {
+    job_id: "wgj-1", request_id: "req-1", project_id: "p1", draft_id: "d1",
+    version_id: "v1", task_type: "continue_scene", output_length: "medium",
+    status: "pending", created_at: "2026-07-22T00:00:00Z",
+    result_scratch_id: null, failure_reason: null, failure_detail: null,
+  };
+  const scratchResult = {
+    id: "sc-1", draft_id: "d1", request_id: "req-1", task_type: "continue_scene",
+    output_type: "draft_patch", instruction: "이어서 써줘",
+    candidate_text: "백그라운드로 완성한 긴 산문입니다.", intent: "append_current",
+    version_id: "v1", created_at: "2026-07-22T00:00:00Z",
+  };
+
+  // Routes the async-pad flow by URL so timer-driven polling can be observed.
+  // `state.jobStatus` advances pending → succeeded between polls, and the scratch
+  // list returns the worker's result only once the job has succeeded.
+  function routeAsyncPad(state: { jobStatus: string }) {
+    const fetchMock = vi.fn((url: string) => {
+      if (url.includes("/writing/scratch")) {
+        const items = state.jobStatus === "succeeded" ? [scratchResult] : [];
+        return Promise.resolve(
+          response({ body: { project_id: "p1", draft_id: "d1", items } }),
+        );
+      }
+      if (url.includes("/writing/generation-jobs/")) {
+        return Promise.resolve(
+          response({
+            body: {
+              ...asyncJob,
+              status: state.jobStatus,
+              result_scratch_id: state.jobStatus === "succeeded" ? "sc-1" : null,
+            },
+          }),
+        );
+      }
+      if (url.includes("/writing/generate")) {
+        return Promise.resolve(
+          response({ status: 202, body: { idempotent_replay: false, job: asyncJob } }),
+        );
+      }
+      if (url === "/api/projects/p1") return Promise.resolve(response({ body: project }));
+      if (url === "/api/projects/p1/drafts/d1") return Promise.resolve(response({ body: draft }));
+      if (url.endsWith("/drafts/d1/versions")) {
+        return Promise.resolve(response({ body: { versions: [version1] } }));
+      }
+      if (url.includes("/versions/v1")) {
+        return Promise.resolve(response({ body: detail(version1, "기존.") }));
+      }
+      if (url.includes("/analysis/review-inbox")) {
+        return Promise.resolve(
+          response({ body: { project_id: "p1", items: [], gate_findings: [] } }),
+        );
+      }
+      return Promise.reject(new Error(`unexpected ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  // Fake timers drive the 5s poll. userEvent deadlocks under fake timers even with
+  // delay:null, so inputs use timer-free fireEvent and a multi-round pump flushes
+  // the fetch promise chains. Plain getBy queries are used throughout, since
+  // findBy/waitFor advance timers themselves and would fight the 5s interval.
+  async function pump(ms = 0) {
+    for (let round = 0; round < 6; round += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+    }
+  }
+
+  async function startAsyncGenerate() {
+    renderEditor();
+    await pump();
+    fireEvent.change(screen.getByLabelText("이어쓰기 지시"), {
+      target: { value: "이어서 써줘" },
+    });
+    fireEvent.change(screen.getByLabelText("생성 분량"), {
+      target: { value: "medium" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "이어쓰기 생성" }));
+    await pump();
+  }
+
+  const jobPolls = (fetchMock: ReturnType<typeof vi.fn>) =>
+    fetchMock.mock.calls.filter(
+      (call) => typeof call[0] === "string" && call[0].includes("/generation-jobs/"),
+    ).length;
+
+  it("tracks an async generate and surfaces its result in the pad on completion (증분 3)", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("crypto", { randomUUID: () => "req-1" });
+    const state = { jobStatus: "running" };
+    const fetchMock = routeAsyncPad(state);
+
+    await startAsyncGenerate();
+
+    // The started job shows as in-progress in the pad (no result yet).
+    expect(screen.getByText(/백그라운드 생성 1건 진행 중/)).toBeInTheDocument();
+    expect(screen.queryByText(scratchResult.candidate_text)).not.toBeInTheDocument();
+    const pollsBefore = jobPolls(fetchMock);
+
+    // Worker finished: the next poll (5s) sees succeeded → pad refreshes from scratch.
+    state.jobStatus = "succeeded";
+    await pump(5000);
+
+    expect(screen.getByText(scratchResult.candidate_text)).toBeInTheDocument();
+    expect(screen.queryByText(/진행 중/)).not.toBeInTheDocument();
+    expect(jobPolls(fetchMock)).toBeGreaterThan(pollsBefore); // it actually polled
+
+    // Under-strict guard: a settled job must stop polling (no further job fetches).
+    const pollsAfter = jobPolls(fetchMock);
+    await pump(10000);
+    expect(jobPolls(fetchMock)).toBe(pollsAfter);
+    vi.useRealTimers();
+  });
+
+  it("lights the writing-tab completion badge when a job finishes off-tab, and clears it on return (증분 3)", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("crypto", { randomUUID: () => "req-1" });
+    const state = { jobStatus: "running" };
+    routeAsyncPad(state);
+
+    await startAsyncGenerate();
+    expect(screen.getByText(/백그라운드 생성 1건 진행 중/)).toBeInTheDocument();
+
+    // Leave the writing tab, then let the job finish while away.
+    fireEvent.click(screen.getByRole("tab", { name: "검토" }));
+    await pump();
+    state.jobStatus = "succeeded";
+    await pump(5000);
+
+    // The completion badge appears on the writing tab (author is elsewhere).
+    const writingTab = screen.getByRole("tab", { name: /이어쓰기/ });
+    expect(
+      within(writingTab).getByLabelText("백그라운드 생성 완료 1건"),
+    ).toBeInTheDocument();
+
+    // Returning to the writing tab acknowledges (clears) the badge.
+    fireEvent.click(writingTab);
+    await pump();
+    expect(
+      within(screen.getByRole("tab", { name: /이어쓰기/ })).queryByLabelText(
+        "백그라운드 생성 완료 1건",
+      ),
+    ).not.toBeInTheDocument();
+    vi.useRealTimers();
   });
 
   it("renders and updates the save, analysis, and pending-review status bar", async () => {

@@ -13,6 +13,7 @@ import {
   type WritingGateFinding,
   type WritingLoop,
   type WritingLoopStage,
+  type WritingGenerationJob,
   type WritingReviseGatePartial,
   type WritingReviseRequest,
 } from "../api/client";
@@ -40,6 +41,9 @@ type WritingPanelProps = {
   // Called after a version is saved (accept success or 502 partial) so the
   // editor reloads its baseline/history from the server.
   onAccepted: () => void;
+  // 증분 3 (D6): called when an async (medium/long) generate is accepted as a
+  // background job, so the editor starts polling it for the result pad.
+  onAsyncJobStarted?: (job: WritingGenerationJob) => void;
 };
 
 type WritingBlock =
@@ -190,6 +194,7 @@ export function WritingPanel(props: WritingPanelProps) {
     latestVersionId,
     readOnly,
     onAccepted,
+    onAsyncJobStarted,
   } = props;
   const [instruction, setInstruction] = useState("");
   // W3 Writing intent (§3.1): append to the current unit, or open the next
@@ -284,6 +289,7 @@ export function WritingPanel(props: WritingPanelProps) {
       // and the Gate/auto-loop must not run (nothing to gate). The finally block
       // clears progress + busy; the notice carries the "started" signal.
       if ("job" in produced) {
+        onAsyncJobStarted?.(produced.job);
         setNotice(
           "백그라운드 생성을 시작했습니다. 완료되면 결과 패드에 표시됩니다.",
         );

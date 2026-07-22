@@ -1,6 +1,6 @@
 # Decision brief — 비동기 생성 + 결과 패드
 
-상태: `결정 확정 (2026-07-20) — D1~D7, 구현 미착수`
+상태: `구현 완료 (2026-07-22) — D1~D7, 증분 1~3 전부 완료`
 정본 연결: [`../system-contract-sot.md`](../system-contract-sot.md) (v1.7.20 — **본 슬라이스가 개정을 요구함**), [`unaccepted-candidate-persistence-decisions.md`](unaccepted-candidate-persistence-decisions.md), [`writing-style-and-length-control-decisions.md`](writing-style-and-length-control-decisions.md), [`05-writing-ai.md`](05-writing-ai.md)
 작성: 2026-07-20
 
