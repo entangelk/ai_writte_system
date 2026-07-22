@@ -627,36 +627,49 @@ export function DraftEditor() {
                   ))}
                 </div>
                 <div className="rail-panel" role="tabpanel">
-                  {activePanel === "writing" && (
-                    <>
-                      <GenerationPad
-                        activeJobs={generationJobs}
-                        failedJobs={failedGenerationJobs}
-                        onDismissFailed={dismissGenerationJob}
-                        onRetryFailed={(jobId) => void retryGenerationJob(jobId)}
-                      />
-                      <ScratchRecovery
-                        projectId={projectId}
-                        draftId={draftId}
-                        refreshKey={scratchRefresh}
-                      />
-                      <WritingPanel
-                        projectId={projectId}
-                        draftId={draftId}
-                        latestVersionId={latestVersionId}
-                        onLatest={onLatest}
-                        dirty={dirty}
-                        hasVersions={versions.length > 0}
-                        readOnly={readOnly}
-                        onAccepted={() => {
-                          setScratchRefresh((n) => n + 1);
-                          void reloadLatest();
-                        }}
-                        onAsyncJobStarted={trackGenerationJob}
-                      />
-                    </>
-                  )}
-                  {activePanel === "analysis" && (
+                  {/* Layer tabs (dogfood 결손 수정): panels stay MOUNTED and only the
+                      inactive ones are hidden, so WritingPanel input state and the
+                      background GenerationPad/ScratchRecovery conduit survive tab
+                      switches. The active panel is selected by the `panel` query
+                      param (selectPanel) — unchanged. */}
+                  <div
+                    className={
+                      activePanel === "writing" ? "rail-layer" : "rail-layer hidden"
+                    }
+                    aria-hidden={activePanel !== "writing"}
+                  >
+                    <GenerationPad
+                      activeJobs={generationJobs}
+                      failedJobs={failedGenerationJobs}
+                      onDismissFailed={dismissGenerationJob}
+                      onRetryFailed={(jobId) => void retryGenerationJob(jobId)}
+                    />
+                    <ScratchRecovery
+                      projectId={projectId}
+                      draftId={draftId}
+                      refreshKey={scratchRefresh}
+                    />
+                    <WritingPanel
+                      projectId={projectId}
+                      draftId={draftId}
+                      latestVersionId={latestVersionId}
+                      onLatest={onLatest}
+                      dirty={dirty}
+                      hasVersions={versions.length > 0}
+                      readOnly={readOnly}
+                      onAccepted={() => {
+                        setScratchRefresh((n) => n + 1);
+                        void reloadLatest();
+                      }}
+                      onAsyncJobStarted={trackGenerationJob}
+                    />
+                  </div>
+                  <div
+                    className={
+                      activePanel === "analysis" ? "rail-layer" : "rail-layer hidden"
+                    }
+                    aria-hidden={activePanel !== "analysis"}
+                  >
                     <AnalysisTrigger
                       projectId={projectId}
                       draftId={draftId}
@@ -667,16 +680,22 @@ export function DraftEditor() {
                       onStatusChange={setAnalysisStatus}
                       onBeforeNavigateAway={allowNavigationAway}
                     />
-                  )}
-                  {activePanel === "review" && (
+                  </div>
+                  <div
+                    className={
+                      activePanel === "review" ? "rail-layer" : "rail-layer hidden"
+                    }
+                    aria-hidden={activePanel !== "review"}
+                  >
                     <WorkspaceReviewPanel
                       key={draftId}
                       projectId={projectId}
+                      tabActive={activePanel === "review"}
                       onSourceSelect={(source) => void openSource(source)}
                       onPendingCountChange={setPendingReviewCount}
                       onBeforeNavigateAway={allowNavigationAway}
                     />
-                  )}
+                  </div>
                 </div>
               </aside>
             )}

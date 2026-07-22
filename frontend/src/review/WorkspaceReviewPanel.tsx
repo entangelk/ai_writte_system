@@ -13,6 +13,11 @@ import {
 
 type Props = {
   projectId: string;
+  // Layer tabs: the panel stays mounted across tab switches (so its state
+  // survives), but only fetches when it is the active tab — inactive tabs skip
+  // the inbox/detail fetches entirely (no mock interference, no wasted calls).
+  // Optional (defaults to active) so standalone unit renders need not pass it.
+  tabActive?: boolean;
   onSourceSelect: (source: ReviewSourcePointer) => void;
   onPendingCountChange?: (count: number) => void;
   onBeforeNavigateAway?: () => boolean;
@@ -39,6 +44,7 @@ function renderValue(value: unknown): string {
 
 export function WorkspaceReviewPanel({
   projectId,
+  tabActive,
   onSourceSelect,
   onPendingCountChange,
   onBeforeNavigateAway,
@@ -53,8 +59,8 @@ export function WorkspaceReviewPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const restoredSourceRef = useRef<string | null>(null);
-  const confirm = detail?.actions.find((action) => action.action === "confirm");
-  const reject = detail?.actions.find((action) => action.action === "reject");
+  const confirm = detail?.actions?.find((action) => action.action === "confirm");
+  const reject = detail?.actions?.find((action) => action.action === "reject");
 
   function guardNavigation(event: MouseEvent<HTMLAnchorElement>): void {
     if (onBeforeNavigateAway?.() === false) event.preventDefault();
@@ -67,6 +73,7 @@ export function WorkspaceReviewPanel({
   }, [onPendingCountChange, projectId]);
 
   useEffect(() => {
+    if (tabActive === false) return;
     let active = true;
     setLoading(true);
     void listReviewInbox(projectId)
@@ -85,13 +92,14 @@ export function WorkspaceReviewPanel({
     return () => {
       active = false;
     };
-  }, [onPendingCountChange, projectId]);
+  }, [tabActive, onPendingCountChange, projectId]);
 
   useEffect(() => {
     if (candidateId === null) {
       setDetail(null);
       return;
     }
+    if (tabActive === false) return;
     let active = true;
     setDetailLoading(true);
     void getReviewInboxItem(projectId, candidateId)
@@ -109,7 +117,7 @@ export function WorkspaceReviewPanel({
     return () => {
       active = false;
     };
-  }, [candidateId, projectId]);
+  }, [tabActive, candidateId, projectId]);
 
   useEffect(() => {
     if (detail === null || sourceId === null) return;
@@ -164,9 +172,9 @@ export function WorkspaceReviewPanel({
         <>
           <div className="rail-section-heading">
             <h2>검토 대기</h2>
-            <span>{(data?.items.length ?? 0) + (data?.gate_findings.length ?? 0)}건</span>
+            <span>{(data?.items?.length ?? 0) + (data?.gate_findings?.length ?? 0)}건</span>
           </div>
-          {data?.items.length === 0 ? (
+          {(data?.items?.length ?? 0) === 0 ? (
             <p className="status-copy">검토할 기억 후보가 없습니다.</p>
           ) : (
             <ul className="rail-review-list" aria-label="검토 후보 목록">

@@ -19,6 +19,8 @@ function response({ status = 200, body }: MockResponse) {
 // list when the editor mounts, which is orthogonal to every flow pinned in this
 // file. Serve it an empty list *outside* the recorded mock so the ordered
 // indices and call counts below keep describing the editor's own requests only.
+// (The always-mounted WorkspaceReviewPanel skips its fetch when its tab is
+// inactive — see `tabActive` — so no review-inbox stub is needed here.)
 function stubFetch<T extends ReturnType<typeof vi.fn>>(fetchMock: T): T {
   vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
     if (typeof url === "string" && url.includes("/writing/scratch")) {

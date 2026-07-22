@@ -154,3 +154,37 @@
 ### Next steps
 
 - **async-pad 슬라이스(1~3 + retry) 실 12B 풀스택 관통 완료.** GATE-1(Phase 7 진입)은 오너 dogfood 의사결정 영역 — 오너가 UX-1 완료 + QUAL-1(2주 실사용)을 채우면 그때 dogfood 반복 문제 ↔ Phase 7 P1~P5 대조해 첫 slice 선택.
+
+## Task — dogfood 발견 결손 2건 (오너 실사용 중)
+
+### Goals
+
+- 오너 dogfood(5173 브라우저) 중 발견: (1) 과거 테스트 draft 잔재로 `/drafts` 500, (2) 우측 레일 탭 전환(이어쓰기→분석→검토) 시 백그라운드 소통 통로 + 이어쓰기 입력값이 소실.
+
+### User Decisions and Rationale
+
+- 오너: (1) 잔재 정리, (2) **"URL이 바뀌는 게 아니라 레이어로 작동해야"** — 탭 전환은 컴포넌트 언마운트가 아니라 같은 페이지 내 레이어(display 토글) 전환이어야 state·통로가 유지. **세 탭 전부 레이어화** 선택(두 번 확인: review source 딥링크 테스트 조정 비용을 알고도).
+
+### Issues found
+
+- **이슈 1 (500)**: `GET /projects/{pid}/drafts` → `core_sot/service.py:890 _require_ordered_drafts` 500. 원인 = ordered-unit 구조(W0, SoT v1.7.10) 도입 *이전*의 과거 dev stack 잔재 draft가 현재 코드의 ordered 검증에 걸려 500. → mongo 볼륨 초기화(`docker compose down -v` + `up -d`)로 해결.
+- **이슈 2 (탭 전환 state 소실)**: `DraftEditor.tsx`가 `activePanel === X && <X/>` 조건부 렌더라, (a) writing 탭이 아니면 `WritingPanel` 언마운트 → 입력 state(instruction·의도·next-unit·candidate, `WritingPanel.tsx:200-226`) 소실, (b) `GenerationPad`+`ScratchRecovery`(백그라운드 결과 통로)가 writing 탭 블록 안이라 비활성 탭에서 안 보임. `useGenerationJobs`(폴링/추적, DraftEditor 레벨)은 살아남지만 표시 통로가 closed.
+
+### Completed work
+
+- **잔재 정리**: compose mongo 볼륨 초기화 + 스택 재기동(application healthy / 5173 정상). 과거 ordered-이전 데이터 제거.
+- **탭 레이어화(이슈 2 수정)**:
+  - `DraftEditor.tsx`: `rail-panel` 안의 세 `{activePanel === X && (...)}` → 각각 `<div className="rail-layer"[.hidden] aria-hidden>` **항상 마운트** 레이어로. `panel` query param(selectPanel)·배지 ack·`aria-selected`는 무변경. → WritingPanel 입력 state + GenerationPad/ScratchRecovery 통로가 탭 전환에 유지.
+  - `styles.css`: `.rail-layer { display:block }` + `.hidden { display:none !important }` 추가.
+  - `WorkspaceReviewPanel.tsx`: **`tabActive` 게이트** — 패널은 항상 마운트(state 보존)하되 list/detail `useEffect` fetch를 `tabActive === false`일 때만 스킵. 비활성 탭의 fetch 부작용(기존 단순 테스트 mock 교란)을 0로. 더해 `detail?.actions?.find`·`data?.items?.length`·`data?.gate_findings?.length` 렌더 방어(불완전 응답/undefined 크래시 방지).
+  - `DraftEditor.tsx`: `<WorkspaceReviewPanel tabActive={activePanel === "review"} />`.
+  - `DraftEditor.test.tsx`: 항상 마운트 대응 — `stubFetch` review-inbox 분기는 `tabActive` 게이트로 불필요해져 원복(scratch만).
+
+### Verification
+
+- frontend **193 passed / 13 files** (회귀 없음 — 기존 source/review 테스트 전부 `tabActive` 게이트로 유지), `tsc` clean, build 103 modules(JS 399.03 kB, 레이어 코드로 +0.34 kB).
+- frontend 컨테이너 rebuild → 5173 반영.
+
+### Next steps
+
+- 오너 5173 dogfood에서 확인: 이어쓰기 medium 생성(백그라운드) → 분석/검토 탭 왕복 → **(a) 이어쓰기 입력값 유지 (b) 비활성 탭에서도 완료 배지/패드로 결과 확인**. 추가 dogfood 피드백 대기.

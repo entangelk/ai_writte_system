@@ -326,6 +326,16 @@ main {
   gap: 0.5rem;
 }
 
+/* Layer tabs (dogfood 결손 수정): each tab panel stays MOUNTED; only the inactive
+   ones are hidden so WritingPanel input state and the background pad conduit
+   survive tab switches. */
+.rail-layer {
+  display: block;
+}
+.hidden {
+  display: none !important;
+}
+
 .source-jump-notice {
   margin: 0 0 1rem;
   padding: 0.75rem 0.9rem;
