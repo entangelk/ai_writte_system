@@ -48,6 +48,12 @@ services:
       # structural caps alone still bound the loop off-deployment.
       WRITING_LOOP_MAX_TOTAL_TOKENS: "${WRITING_LOOP_MAX_TOTAL_TOKENS:-10000}"
       WRITING_LOOP_MAX_WALL_CLOCK_MS: "${WRITING_LOOP_MAX_WALL_CLOCK_MS:-60000}"
+      # Self-report OUTPUT budget. Must stay above the longest prose preset
+      # (WRITING_OUTPUT_LENGTH_LONG) — the report is a JSON summary OF the prose,
+      # so a cap at prose length truncates the JSON and fails as `invalid_report`.
+      # Ceiling is the llama per-slot context (LLAMA_CTX_SIZE 8192) shared with the
+      # prompt; 6144 keeps 2048 tokens of prompt headroom.
+      WRITING_REPORT_MAX_TOKENS: "${WRITING_REPORT_MAX_TOKENS:-6144}"
       # Unaccepted-candidate recovery store: how many unaccepted drafts are kept
       # per 원고 before the oldest is dropped. Useful depth differs per writer, so
       # this stays tunable; the value is provisional pending SoT ratification
@@ -281,6 +287,10 @@ services:
       # Output-length presets the endpoint enqueues (server owns the mapping).
       WRITING_OUTPUT_LENGTH_MEDIUM: "${WRITING_OUTPUT_LENGTH_MEDIUM:-2048}"
       WRITING_OUTPUT_LENGTH_LONG: "${WRITING_OUTPUT_LENGTH_LONG:-4096}"
+      # Same self-report budget as application — the worker runs the same
+      # generate→report pipeline, and a 1024 cap truncated the report JSON on
+      # every long-prose job (2026-07-22 live e2e).
+      WRITING_REPORT_MAX_TOKENS: "${WRITING_REPORT_MAX_TOKENS:-6144}"
       # Claim lease: a crashed worker's in-flight job is reclaimable past this.
       # Must exceed the longest generate (long≈91s bounded by the gateway timeout).
       WRITING_GENERATION_CLAIM_TIMEOUT_SECONDS: "${WRITING_GENERATION_CLAIM_TIMEOUT_SECONDS:-600}"

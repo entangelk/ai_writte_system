@@ -35,8 +35,10 @@ from services.application.app.core_sot.service import (
 )
 from services.application.app.indexing.models import IndexPointer
 from services.application.app.main import (
+    WRITING_REPORT_DEFAULT_MAX_TOKENS,
     WritingGenerateRequest,
     WritingReviseRequest,
+    _build_report_service,
     _writing_output_length_tokens,
     create_app,
 )
@@ -642,6 +644,47 @@ class WritingOutputLengthPresetTest(unittest.TestCase):
         # loop request model.
         self.assertIn("output_length", WritingGenerateRequest.model_fields)
         self.assertNotIn("output_length", WritingReviseRequest.model_fields)
+
+
+class WritingReportBudgetTest(unittest.TestCase):
+    """The self-report budget must stay above the longest prose preset.
+
+    The report is a structured JSON summary OF the generated prose, so its output
+    cap has to exceed the prose it describes. When it did not (the 1024 default
+    shipped alongside the 2048/4096 presets of 증분 2), the report JSON was cut
+    off mid-string and every affected generation failed as `invalid_report` —
+    reproduced live on 2026-07-22, where the truncation always landed in the same
+    ~2200-character window no matter how long the prose was.
+
+    This is the lock that makes the coupling explicit: raising
+    WRITING_OUTPUT_LENGTH_LONG without raising the report budget re-fails here.
+    """
+
+    def test_report_budget_exceeds_longest_prose_preset(self):
+        longest = max(_writing_output_length_tokens().values())
+        self.assertGreater(WRITING_REPORT_DEFAULT_MAX_TOKENS, longest)
+
+    def test_raising_the_long_preset_alone_is_caught(self):
+        # under-strict: the coupling is checked against the CURRENT preset values,
+        # not against a hard-coded 4096, so an operator who lifts the prose ceiling
+        # past the report budget trips this instead of hitting truncation live.
+        with patch.dict(
+            os.environ,
+            {"WRITING_OUTPUT_LENGTH_LONG": str(WRITING_REPORT_DEFAULT_MAX_TOKENS)},
+        ):
+            longest = max(_writing_output_length_tokens().values())
+            self.assertFalse(WRITING_REPORT_DEFAULT_MAX_TOKENS > longest)
+
+    def test_default_budget_reaches_the_report_provider(self):
+        # over-strict: the constant must actually be what the report service runs
+        # with. Reverting _build_report_service to a literal 1024 re-fails here.
+        service = _build_report_service(_FakeProvider())
+        self.assertEqual(service.max_tokens, WRITING_REPORT_DEFAULT_MAX_TOKENS)
+
+    def test_report_budget_is_env_adjustable(self):
+        with patch.dict(os.environ, {"WRITING_REPORT_MAX_TOKENS": "2048"}):
+            service = _build_report_service(_FakeProvider())
+        self.assertEqual(service.max_tokens, 2048)
 
 
 class WritingGenerateEnvelopeKeyTest(unittest.TestCase):

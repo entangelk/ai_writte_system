@@ -527,6 +527,20 @@ def _env_int(name: str, default: int) -> int:
     return int(raw)
 
 
+# The self-report's OUTPUT budget. It must exceed the longest prose preset
+# (WRITING_OUTPUT_LENGTH_LONG, 4096): the report is a structured JSON summary OF
+# that prose, so a cap at or below the prose length truncates the JSON mid-string
+# and the parser fails with `invalid_report` — observed live on 2026-07-22 at the
+# old 1024 default, where every failure cut off in the same ~2200-char window
+# regardless of prose length.
+#
+# The ceiling is the llama.cpp per-slot context (LLAMA_CTX_SIZE, 8192), which the
+# prompt and the completion share. 6144 leaves 2048 tokens of prompt headroom, so
+# the cap stays a real limit instead of being silently clamped by the server.
+# Raising it further only pays off together with a larger context window.
+WRITING_REPORT_DEFAULT_MAX_TOKENS = 6144
+
+
 def _env_opt_int(name: str) -> int | None:
     # Unset or empty means "no limit" (None) for the aggregate loop budget.
     raw = os.environ.get(name)
@@ -639,7 +653,7 @@ def _build_report_service(provider) -> WritingCandidateReportService:
     return WritingCandidateReportService(
         provider, prompt_templates=templates,
         model=os.environ.get("LLM_GATEWAY_MODEL") or None,
-        max_tokens=int(os.environ.get("WRITING_REPORT_MAX_TOKENS", "1024")))
+        max_tokens=_env_int("WRITING_REPORT_MAX_TOKENS", WRITING_REPORT_DEFAULT_MAX_TOKENS))
 
 
 def _build_revise_service(provider) -> WritingRevisionService:
