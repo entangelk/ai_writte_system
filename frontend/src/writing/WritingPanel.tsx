@@ -193,6 +193,7 @@ export function WritingPanel(props: WritingPanelProps) {
     draftId,
     latestVersionId,
     readOnly,
+    dirty,
     onAccepted,
     onAsyncJobStarted,
   } = props;
@@ -386,6 +387,19 @@ export function WritingPanel(props: WritingPanelProps) {
       !nextUnitReady ||
       busyRef.current ||
       contextRef.current === null
+    ) {
+      return;
+    }
+    // The candidate's base version is frozen at generate time, so accept saves
+    // base+candidate — it does NOT include edits typed into the editor since.
+    // On success the editor reloads to that new latest, discarding those edits.
+    // Match the app's dirty-guard idiom (navigation/version/source): confirm the
+    // discard before saving, so it is never silent. Cancel aborts the accept.
+    if (
+      dirty &&
+      !window.confirm(
+        "저장하지 않은 편집 내용이 있습니다. 채택하면 그 내용은 사라지고, 채택된 후보가 새 version으로 저장됩니다. 계속할까요?",
+      )
     ) {
       return;
     }

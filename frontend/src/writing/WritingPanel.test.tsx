@@ -950,3 +950,73 @@ describe("WritingPanel — accept (pass only)", () => {
     },
   );
 });
+
+describe("WritingPanel — accept dirty guard (미저장 편집 덮어쓰기 결손 fix)", () => {
+  // The candidate is generated on a clean latest, then the user types into the
+  // editor (dirty=true) before accepting. Accept saves base+candidate and the
+  // editor reloads to it, discarding those edits — this guard confirms first.
+  const dirtyProps: PanelProps = {
+    projectId: "p1",
+    draftId: "d1",
+    latestVersionId: "v3",
+    onLatest: true,
+    dirty: false, // clean at generate time; flipped to dirty before accept
+    hasVersions: true,
+    readOnly: false,
+    onAccepted: vi.fn(),
+  };
+
+  it("aborts the accept when the discard confirm is cancelled (under-strict: the fix)", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const fetchMock = mockFetch({ body: candidate }, { body: gatePass });
+    const onAccepted = vi.fn();
+    const { rerender } = render(
+      <WritingPanel {...dirtyProps} onAccepted={onAccepted} />,
+    );
+    await generateAndGate(fetchMock);
+    // The editor became dirty after generate.
+    rerender(<WritingPanel {...dirtyProps} dirty onAccepted={onAccepted} />);
+    await userEvent.click(acceptButton());
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2); // generate + gate only — no accept
+    expect(onAccepted).not.toHaveBeenCalled();
+    expect(screen.getByText(candidate.text)).toBeInTheDocument(); // candidate kept
+  });
+
+  it("proceeds with the accept once the discard is confirmed", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const fetchMock = mockFetch(
+      { body: candidate },
+      { body: gatePass },
+      { body: acceptOk },
+    );
+    const onAccepted = vi.fn();
+    const { rerender } = render(
+      <WritingPanel {...dirtyProps} onAccepted={onAccepted} />,
+    );
+    await generateAndGate(fetchMock);
+    rerender(<WritingPanel {...dirtyProps} dirty onAccepted={onAccepted} />);
+    await userEvent.click(acceptButton());
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[2][0]).toBe("/api/projects/p1/writing/accept");
+    expect(onAccepted).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not prompt when the editor is clean (over-strict: no needless nag)", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm");
+    const fetchMock = mockFetch(
+      { body: candidate },
+      { body: gatePass },
+      { body: acceptOk },
+    );
+    renderPanel(); // dirty defaults to false
+    await generateAndGate(fetchMock);
+    await userEvent.click(acceptButton());
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+});

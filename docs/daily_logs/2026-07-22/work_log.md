@@ -58,3 +58,33 @@
 
 - **비동기 생성 + 결과 패드 슬라이스(증분 1~3) 전체 완료.** 남은 후속(슬라이스 밖): dogfood에서 per-draft 상한(기본 20, 복구+패드 공유) 밀어냄 관찰 시 `WRITING_SCRATCH_MAX_PER_DRAFT` 기본값 조정(계약 재개정 불요), 재시도 UI(D4 deferred), 실 12B 풀스택에서 medium/long 생성→worker→패드 표시 오너 관통 확인(sandbox 12B 불가).
 - 비차단 hardening 후보(오너 검증 시 참고): DraftEditor 완료 배지의 다중 job 카운트(현재 유닛에서 settledUnseen 누적은 훅이 잠금, 통합은 1건만 관통), 폴링 백오프(현재 고정 5초·transient 실패도 5초 재시도).
+
+## Task — accept 후 미저장 편집 소실 결손 수정 (reloadLatest 덮어쓰기, 비동기와 무관한 별개 결손)
+
+### Goals
+
+- 브리프(`plans/async-generation-pad-decisions.md`)의 Deferred에 "편집기 미저장 입력이 accept 후 `reloadLatest()`로 덮이는 문제 — 비동기와 무관한 별개 결손, 별도로 다룬다"로 명시됐던 실재 데이터 소실 결손을 수정한다.
+- **결손**: generate는 clean+latest에서만 되지만, 후보가 뜬 뒤 사용자가 편집기에 입력하면(dirty) accept는 **frozen base_version_id + 후보 텍스트**로 새 version을 저장하고(편집기 텍스트 미반영), 성공 후 `onAccepted → reloadLatest()`가 `setRawText`로 편집기를 새 latest로 덮어써 **미저장 입력이 조용히 소실**된다([DraftEditor.tsx:434-455], [DraftEditor.tsx:611-615]).
+
+### User Decisions and Rationale
+
+- 오너 지시("결손 작업 진행. 브리프 필요 없으면 바로 진행"). **브리프 불필요로 판단**: 이 앱은 dirty 상태의 파괴적 동작을 전부 `window.confirm`으로 가드한다(페이지 이동 `:163`·version 전환 `:278`·근거 열기 `:347`) — accept만 이 관용구가 빠져 있었다. 따라서 새 아키텍처/정책 포크가 아니라 **선례 관용구를 accept에 적용**하는 일이라 결정 브리프가 아니라 Think-Before-Coding 범위다.
+
+### Decisions (구현자 판단)
+
+- **차단이 아니라 confirm**: generate만 dirty에서 차단하는데 그건 깨끗한 base가 있어야 정합적 후보를 만들기 때문이다. accept의 후보 base는 **이미 frozen**이라 accept 자체는 dirty와 무관하게 유효하고, 문제는 편집기 덮어쓰기 하나뿐 → 이동/version/근거 가드와 동일한 **confirm(경고 후 진행/취소)** 이 정합적이다. (차단하면 저장 강요 → base stale → 409 → 재생성 강요라는 dead-end를 confirm이 회피한다.)
+- **가드 위치 = `WritingPanel.accept()` 최상단**(네트워크 호출·키 민팅 전): accept가 **version을 저장**하므로, `reloadLatest` 시점(이미 저장됨)이 아니라 저장 전에 취소 가능해야 한다.
+
+### Completed work
+
+- **`WritingPanel.tsx`**: `dirty` prop을 destructure에 추가하고 `accept()` 초입 early-return 직후에 가드 삽입 — `dirty && !window.confirm("저장하지 않은 편집 내용이 있습니다. 채택하면 그 내용은 사라지고, 채택된 후보가 새 version으로 저장됩니다. 계속할까요?")`이면 `return`(accept 중단). `dirty`는 이미 부모가 전달 중(availability에만 쓰이던 것을 accept에도 소비).
+
+### Verification
+
+- **frontend `npx vitest run` → 188 passed / 13 files**(183→188, 신규 5): WritingPanel 3(취소 시 accept 미호출=under-strict[결손 자체]·confirm 시 진행·clean이면 confirm 미표시=over-strict) + DraftEditor 통합 2(취소 시 **편집기 텍스트 보존 + version 미저장** / confirm 시 **accept 저장 + 편집기가 새 latest로 재로드**되어 미저장 텍스트 discard). `tsc --noEmit` clean, `npm run build` 103 modules(JS 398.16 kB, 가드 코드로 +0.18 kB). **백엔드/OpenAPI 무변**(프론트 전용)이라 `gen:api` 영향 없음. LLM 미사용.
+- 두 방향 잠금: 취소→accept 미발화+편집 보존(결손 재도입 방지), clean→confirm 미표시(과잉 nag 방지).
+- **오너 독립 검증 PASS(차단 없음)** — `docs/verifications/2026-07-22/accept_dirty_guard_unsaved_edits.md`(boundary matrix·pattern sweep[accept가 유일한 무가드 setRawText 경로였음 확인]·수치 재실행 일치). 검증의 유일한 비차단 보강 후보(**proceed 경로 통합 테스트 부재** — cancel만 통합 관통)를 반영해 DraftEditor 통합 proceed-사슬 테스트 1건 추가(187→188). 이로써 `onAccepted→reloadLatest→setRawText` 사슬이 취소·진행 양방향 모두 통합 레벨에서 잠긴다.
+
+### Next steps
+
+- 남은 결손·후속: 재시도 UI(실패 job 재생성, D4 deferred), per-draft 상한 기본값 dogfood 관찰, 실 12B 풀스택 e2e. **오너 dogfood 착수(GATE-1)가 가장 큰 갈림길.**
