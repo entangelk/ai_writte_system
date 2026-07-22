@@ -1067,6 +1067,38 @@ describe("DraftEditor", () => {
     vi.useRealTimers();
   });
 
+  // Regression (dogfood 결손 — 우측 레일 탭 레이어화, commit eb304ed): leaving the
+  // writing tab and returning must PRESERVE the WritingPanel's local input state
+  // (이어쓰기 지시 등은 컴포넌트 로컬 useState). Before the fix the rail rendered the
+  // panel conditionally (`activePanel === "writing" && …`), so switching tabs
+  // unmounted it and the typed instruction was silently lost on return.
+  //   - under-strict guard: revert to conditional rendering → the panel remounts
+  //     fresh on return → the field reads "" → this test re-fails.
+  //   - the mid-switch "이 원고 분석" assertion pins that the tab actually changed,
+  //     so a no-op tab switch (over-correction) cannot pass this trivially.
+  it("preserves the Writing panel instruction input across a tab switch (탭 전환 state 유지)", async () => {
+    mockFetch(
+      { body: project },
+      { body: draft },
+      { body: { versions: [version1] } },
+      { body: detail(version1, "기존 본문") },
+    );
+    renderEditor();
+    await screen.findByLabelText("원고 본문");
+
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    expect(screen.getByLabelText("이어쓰기 지시")).toHaveValue("이어서 써줘");
+
+    // Leave for the analysis tab (its trigger button proves the switch happened),
+    // then return to the writing tab.
+    await userEvent.click(screen.getByRole("tab", { name: "분석" }));
+    expect(screen.getByRole("button", { name: "이 원고 분석" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: /이어쓰기/ }));
+
+    // The typed instruction survived the round-trip (the layer stayed mounted).
+    expect(screen.getByLabelText("이어쓰기 지시")).toHaveValue("이어서 써줘");
+  });
+
   it("retries a failed async job end-to-end: failure → 다시 시도 → poll resumes → result (재시도 슬라이스 보강)", async () => {
     // End-to-end wiring the unit tests can't reach: the pad's "다시 시도" button
     // is wired through DraftEditor into the hook, and retrying a FAILED job resets

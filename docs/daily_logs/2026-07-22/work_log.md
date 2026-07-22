@@ -185,6 +185,15 @@
 - frontend **193 passed / 13 files** (회귀 없음 — 기존 source/review 테스트 전부 `tabActive` 게이트로 유지), `tsc` clean, build 103 modules(JS 399.03 kB, 레이어 코드로 +0.34 kB).
 - frontend 컨테이너 rebuild → 5173 반영.
 
+### 독립 검증 + 회귀 테스트 보강 (검증자)
+
+- 오너 요청("검증하고 의심하고 또 의심")으로 commit `eb304ed` 독립 감사 → `docs/verifications/2026-07-22/rail-tab-layering.md`.
+- 감사 결과: 코드 수정·부작용(게이트 정확성, AnalysisTrigger 무-useEffect라 게이트 비대칭 정당, `.hidden` 전역 충돌 없음)·green-bar(193 passed, tsc 0) 모두 재현. **그러나 이 커밋의 핵심 행위(WritingPanel 입력 state가 탭 전환에 유지)를 잠그는 회귀 테스트가 부재** — CLAUDE.md §4 미충족(테스트 변경은 코멘트 2줄뿐, 신규 테스트 0). 기존 테스트가 타이핑하는 "원고 본문"은 DraftEditor 소유 state라 원래도 소실 안 됨.
+- **보강**: `DraftEditor.test.tsx`에 "preserves the Writing panel instruction input across a tab switch (탭 전환 state 유지)" 추가.
+  - under-strict 가드 **증명**: writing 레이어를 조건부 렌더로 임시 되돌리면 `이어쓰기 지시` 필드가 `""`로 실패 → 원복 후 통과. 되돌리면 재실패함을 실측.
+  - over-strict 방향: 탭 전환 중 "이 원고 분석" 버튼 존재 assert → no-op 전환 불가.
+- 재검증: 전체 **194 passed / 13 files**, `tsc` clean.
+
 ### Next steps
 
 - 오너 5173 dogfood에서 확인: 이어쓰기 medium 생성(백그라운드) → 분석/검토 탭 왕복 → **(a) 이어쓰기 입력값 유지 (b) 비활성 탭에서도 완료 배지/패드로 결과 확인**. 추가 dogfood 피드백 대기.
