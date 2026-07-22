@@ -273,3 +273,75 @@
 
 - **S1 착수**: SoT 전역 HTTP 에러 계약 섹션 신설 + 503-migration/`start_next_unit` 명문화. 정본(SoT) 편집.
 - 이후 S2(CRUD family 20)부터 각 슬라이스 별도 커밋.
+
+## Task — 실 12B 풀스택 e2e 관통 (오너 테스트 머신) + 라이브 결손 2건 폐쇄
+
+### Goals
+
+- 오너의 실제 사용자 머신(RTX 3060 12GB, in-stack llama 12B)에서 **집필 루프 전체 + 비동기 생성 패드**를 브라우저 동등 경로(`:5173/api`)로 관통 확인한다. sandbox에 12B가 없어 unit/build 증거로 대체돼 있던 축을 실측으로 닫는다.
+- HANDOFF가 남긴 잔여 후속 중 "실 12B 풀스택 medium/long 생성→worker→패드 표시 오너 관통 확인"이 직접 대상.
+
+### 결손 1 — prompt template 본문 변경으로 기존 배포 기동 불가 (스택이 아예 안 뜸)
+
+- **문제**: `docker compose up` 시 application·generation_worker·worker가 전부 `PromptTemplateConflict: prompt template version already exists`로 죽어 스택이 기동되지 않았다. 이 머신의 컨테이너들이 3일 전부터 `Exited (1)`이었던 것도 같은 원인으로 보인다.
+- **원인**: v1.7.23(character aspect, commit `41999ef`)이 `analysis_extract_v3`의 **버전 문자열은 그대로 둔 채 본문에 aspect 안내 1줄을 추가**했다. `seed_template()`([prompt_templates.py:104-108](../../../services/application/app/analysis/prompt_templates.py#L104-L108))은 같은 version에 다른 본문이 이미 저장돼 있으면 `PromptTemplateConflict`를 던지고, 이 호출이 `create_app()` 안에 있어 **기존 Mongo를 가진 배포에서만** 기동이 실패한다. sandbox는 항상 빈 DB로 뜨기 때문에 회귀·CI가 잡을 수 없었다.
+- **확인**: 배포 DB(`ai_writing_system`)의 v3 본문 sha256 `4376310080…b52a` = 복원한 코드 상수와 byte-identical. 코드 v3와의 diff는 aspect 1줄뿐.
+- **오너 결정 A(v4 신설)**: 프로젝트 선례(v1·초기 v2 immutable 보존, 본문이 바뀔 때 v3 신설)와 일치. 과거 candidate 61건의 `prompt_version` 추적성이 보존된다. DB 덮어쓰기(B)는 그 추적성을 거짓으로 만들어 기각.
+
+#### Completed work (결손 1)
+
+- [prompt_templates.py](../../../services/application/app/analysis/prompt_templates.py): `ANALYSIS_EXTRACT_PROMPT_VERSION_V3`/`_TEMPLATE_V3`로 **배포된 구본문을 immutable 복원**하고, aspect 포함 본문을 `analysis_extract_v4`(= 현행 `ANALYSIS_EXTRACT_PROMPT_VERSION`)로 승격. `seed_analysis_extract_v4()` 신설.
+- [main.py](../../../services/application/app/main.py): `_default_prompt_template_service`의 두 분기(in-memory/Mongo)가 v4까지 시딩.
+- 현행 기본을 시딩하려던 호출부를 v4로 이동: `tests/test_analysis_extractor_schema.py`(6), `tests/test_analysis_prompt_builder.py`(6), `scripts/phase2a_provider_live_smoke.py`(1).
+- **재발 방지 회귀 4건**([test_prompt_templates.py](../../../tests/test_prompt_templates.py)) — 이 결손의 본질은 "출시된 본문을 조용히 고칠 수 있다"는 것이라, 그 행위 자체를 잠갔다:
+  - `test_shipped_template_bodies_are_immutable`: v1/v2/v3 본문 sha256 핀(subtest 3). 출시본을 고치면 실패하며, 주석이 "해시를 갱신하지 말고 새 버전을 만들라"고 지시한다.
+  - `test_optional_character_aspect_guidance_is_v4_only`: aspect 줄이 v4에만 존재(under-strict: v3로 되돌리면 재실패 / over-strict: v4에서 빠져도 실패).
+  - `test_seed_sequence_replays_against_previously_seeded_storage`: v1~v3가 이미 시딩된 저장소에 현재 코드가 재시딩 — 이번 기동 실패의 직접 재현.
+  - `test_seed_analysis_extract_v4_is_current_and_keeps_v1_v2_v3`.
+- **mutation 확인**: aspect 줄을 v3 본문에 되돌리자 위 회귀 2건이 재-fail, 복원 시 green.
+
+### 결손 2 — self-report 출력 상한 1024 고정 → `invalid_report` truncation
+
+- **문제**: 비동기 medium/long job이 `invalid_report`로 실패했다(관측 실패율 5회 중 3회). 실패 detail이 전부 JSON parse 오류.
+- **원인**: v1.7.22가 **산문** 출력을 프리셋화(1024/2048/4096)했지만, 그 산문을 요약하는 **self-report의 출력 상한은 `WRITING_REPORT_MAX_TOKENS` 기본 1024로 고정**돼 있었고 compose에 선언조차 없었다([main.py](../../../services/application/app/main.py) `_build_report_service`). report JSON이 상한에서 잘려 파서가 실패한다.
+- **확증(실험)**: 실패 지점이 입력 길이와 무관하게 **항상 같은 구간**에서 끊긴다 — worker 실패 `char 2199`/`2267`, report 직접 호출 실패 `char 2288`/`2344`. 상한만 4096으로 올려 동일 입력을 재현하자 **truncation 시그니처 0건**(직접 호출 4회 + async 4회). 잔존 실패 2건은 `report field must be an array`로 **다른 유형**(HANDOFF에 기록된 12B 간헐 비-배열 report, repair가 흡수하는 축)이다.
+- **범위**: 231자짜리 짧은 산문에서도 재현됐다 → async 전용이 아니라 **동기 short 경로 포함 전 경로**. report가 장황해지면 프리셋과 무관하게 걸린다.
+
+#### User Decisions and Rationale (결손 2)
+
+- **오너 결정**: 비례 매핑은 불필요하고, 산문 최대치(4096)보다 위에 두되 이 시스템의 VRAM(기본 12GB, 최소 8GB) 안에 들어와야 한다. 구체 수치는 구현자 판단에 위임("7~8000 정도?").
+- **구현 판단 = 6144** (오너가 제시한 7~8000에서 하향, 근거 제시 후 적용):
+  - `max_tokens`는 VRAM을 선점하는 값이 아니라 **프롬프트와 함께 llama 슬롯 컨텍스트(`LLAMA_CTX_SIZE` 8192)를 나눠 쓰는 예산**이다. 8000을 주면 프롬프트가 192 토큰만 넘어도 서버가 남은 만큼으로 클램프하므로, 숫자가 게이트 역할을 못 하고 truncation이 그대로 재발한다.
+  - 8000을 실효화하려면 ctx를 함께 키워야 하는데 실측 VRAM 여유가 2.9GB(12288 중 9211 사용)뿐이고, 오너가 하한으로 든 8GB 머신에서는 기동 자체가 어렵다.
+  - 6144 = 산문 최대(4096)의 1.5배로 "최대보다 위" 요구를 충족하면서 프롬프트에 2048 토큰을 남겨 상한이 실제 한계로 작동한다.
+
+#### Completed work (결손 2)
+
+- [main.py](../../../services/application/app/main.py): `WRITING_REPORT_DEFAULT_MAX_TOKENS = 6144` 상수 신설(산문 프리셋과의 결합·ctx 천장 근거를 주석에 명시), `_build_report_service`가 `_env_int`로 이를 읽는다.
+- [docker-compose.yml](../../../docker-compose.yml): `application`·`generation_worker` 양쪽에 `WRITING_REPORT_MAX_TOKENS: "${WRITING_REPORT_MAX_TOKENS:-6144}"` 명시(종전엔 어느 서비스에도 없어 기본값이 암묵적이었다).
+- **회귀 4건**([test_writing.py](../../../tests/test_writing.py) `WritingReportBudgetTest`) — 단순히 숫자를 핀하지 않고 **결합 자체**를 잠갔다:
+  - `test_report_budget_exceeds_longest_prose_preset`: report 예산 > 현재 최대 산문 프리셋(하드코딩 4096이 아니라 `_writing_output_length_tokens()`에서 도출).
+  - `test_raising_the_long_preset_alone_is_caught`: `WRITING_OUTPUT_LENGTH_LONG`만 올리면 불변식이 깨짐을 확인 — 다음 사람이 산문 상한만 올리는 걸 막는다.
+  - `test_default_budget_reaches_the_report_provider`(over-strict) / `test_report_budget_is_env_adjustable`.
+- **mutation 확인**: `_build_report_service`를 옛 `1024` 리터럴로 되돌리자 `test_default_budget_reaches_the_report_provider`가 `1024 != 6144`로 재-fail.
+
+### e2e 관통 결과 (실 12B, 브라우저 동등 `:5173/api`)
+
+전 구간 통과. 각 단계는 프론트(`client.ts`/`WritingPanel`/`useGenerationJobs`)와 같은 호출 순서를 따랐다.
+
+- **집필 루프**: 프로젝트 생성 → ProjectBrief(문체 설정) → 원고 저장(v1) → **동기 이어쓰기 short 200**(실 12B, 193자, 35s) → **Gate `pass`**(10.5s) → **accept 200**(28.6s) → version 2 + snapshot + pending analysis job.
+- **분석 → 검토함**: catalog 2건 생성 → job create가 **accept가 심은 job과 동일 ID로 수렴**(`idempotent_replay=true`) → run **succeeded, candidate 3건**(33.5s, 중복 0) → Review Inbox 3건 + 어포던스 `{confirm,reject,edit}` → **confirm 200 → memory 승격**, inbox 3→2.
+  - **v1.7.23 `aspect`가 라이브에서 처음 확증**됐다: 실 12B가 `{"name":"윤","observation":"…","aspect":"trait"}`, `"aspect":"voice"`를 실제로 추출.
+- **비동기 패드**: medium/long 모두 **202 + job**(D5=A 분기), generation_worker가 claim→실 12B 실행→**scratch에 `version_id` 보존한 채 append**(패드 표시 재료), 같은 `request_id` 재요청은 동일 job으로 수렴. **retry(v1.7.28) 라이브 검증**: FAILED job → retry 200 `pending` → worker 자동 재claim → **succeeded(41s)**; succeeded job에 retry → **409**.
+- **export**: 통합 txt/markdown이 원본+AI 이어쓰기를 verbatim 연결, `manifest=true`가 `version_id`/`content_hash` 포함 traceability 반환.
+
+### Verification
+
+- 백엔드 전체: **1333 passed / 76 skipped / 331 subtests**(`--ignore=tests/test_memory_mongo.py`). 결손 1 수정 시점 1329 → 결손 2 회귀 4건 추가 후 1333.
+- 두 결손 모두 mutation으로 회귀 물림 확인(위 각 항목).
+- 라이브: 수정 반영(6144) 후 report 직접 호출·async job 재측정.
+
+### Next steps
+
+- 오너 dogfood 착수(GATE-1)가 여전히 가장 큰 갈림길. 이번 e2e로 "실 12B 풀스택 관통" 잔여 후속은 닫혔다.
+- 잔존 `report field must be an array`(12B 간헐 비-배열 report)는 truncation과 별개 축이며 repair가 흡수한다. 실패율이 dogfood에서 문제가 되면 그때 프롬프트 축으로 별도 판단(Gate quality baseline 선례).
