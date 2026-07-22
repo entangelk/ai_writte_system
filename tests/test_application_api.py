@@ -23,6 +23,7 @@ from services.application.app.analysis.service import (
     InMemoryAnalysisRepository,
     InvalidAnalysisCandidate,
 )
+from services.application.app.core_sot.models import Draft
 from services.application.app.core_sot.service import (
     CoreSotService,
     InMemoryCoreSotRepository,
@@ -51,6 +52,9 @@ class TestClient:
 
     def post(self, path: str, **kwargs):
         return self._request("POST", path, **kwargs)
+
+    def put(self, path: str, **kwargs):
+        return self._request("PUT", path, **kwargs)
 
     def patch(self, path: str, **kwargs):
         return self._request("PATCH", path, **kwargs)
@@ -1976,6 +1980,97 @@ class _ApiSnapshotNotFoundRunner:
             failure_detail=str(error),
         )
         raise error
+
+
+class LegacyOrderedDraftMigration503Test(unittest.TestCase):
+    """Pre-W3 legacy drafts must yield an actionable 503, never an opaque 500.
+
+    A draft persisted before the v1.7.14 ordered-unit invariant has no
+    ``unit_kind``/``position``; the read endpoints run that invariant and would
+    otherwise leak the resulting ``DraftOrderIntegrityError`` as a 500 (found in
+    2026-07-22 dogfood). The owner decision (503, endpoint defence + migration)
+    maps the three read endpoints that were leaking — list, create, export — to
+    503. ``reorder_drafts`` already caught it as 409 (left unchanged, §3) and
+    ``start_next_unit`` remains tracked debt.
+    """
+
+    def _app_with_legacy_draft(self):
+        repo = InMemoryCoreSotRepository()
+        service = CoreSotService(repo)
+        project = service.create_project(name="Novel")
+        # Inject a legacy document exactly as a pre-migration Mongo record would
+        # deserialize: no unit_kind, no position.
+        repo.drafts["legacy-1"] = Draft(
+            id="legacy-1", project_id=project.id, title="Old Episode"
+        )
+        return TestClient(create_app(service=service)), project.id
+
+    def test_list_drafts_on_legacy_data_returns_503(self):
+        # Under-strict: dropping the endpoint's except clause re-leaks a 500.
+        client, project_id = self._app_with_legacy_draft()
+
+        resp = client.get(f"/projects/{project_id}/drafts")
+
+        self.assertEqual(resp.status_code, 503)
+        self.assertIn("migration is required", resp.json()["detail"])
+
+    def test_create_draft_on_legacy_data_returns_503(self):
+        client, project_id = self._app_with_legacy_draft()
+
+        resp = client.post(
+            f"/projects/{project_id}/drafts", json={"title": "New"}
+        )
+
+        self.assertEqual(resp.status_code, 503)
+
+    def test_project_export_on_legacy_data_returns_503(self):
+        client, project_id = self._app_with_legacy_draft()
+
+        resp = client.get(f"/projects/{project_id}/export")
+
+        self.assertEqual(resp.status_code, 503)
+
+    def test_well_formed_project_is_unaffected(self):
+        # Over-strict: a normally-created (migrated) project must still 200 —
+        # the 503 path must not swallow healthy reads.
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        client.post(f"/projects/{project['id']}/drafts", json={"title": "One"})
+
+        resp = client.get(f"/projects/{project['id']}/drafts")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.json()["drafts"]), 1)
+
+    def test_reorder_on_legacy_data_stays_409_not_500(self):
+        # Locks the intentional asymmetry: reorder already caught the integrity
+        # error via its InvalidDraftOrder clause (409), so it never leaked a 500
+        # and was deliberately left unchanged (work_log §3 scope-out). Without
+        # this test the 409 rested only on the subclass-catch mechanism; here it
+        # is pinned. Two directions: not 500 (if reorder's catch is ever split
+        # out) and not 503 (the 503 mapping stays exclusive to list/create/export).
+        client, project_id = self._app_with_legacy_draft()
+
+        resp = client.put(
+            f"/projects/{project_id}/draft-order",
+            json={"ordered_draft_ids": ["legacy-1"]},
+        )
+
+        self.assertEqual(resp.status_code, 409)
+
+    def test_create_with_bad_unit_kind_is_client_error_not_503(self):
+        # Over-strict: a bad unit_kind is a client input error (422 at the
+        # Pydantic boundary), never the server-integrity 503.
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+
+        resp = client.post(
+            f"/projects/{project['id']}/drafts",
+            json={"title": "Bad", "unit_kind": "volume"},
+        )
+
+        self.assertNotEqual(resp.status_code, 503)
+        self.assertEqual(resp.status_code, 422)
 
 
 if __name__ == "__main__":

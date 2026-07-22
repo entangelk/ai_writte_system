@@ -71,6 +71,19 @@ class InvalidDraftOrder(CoreSotError):
     pass
 
 
+class DraftOrderIntegrityError(InvalidDraftOrder):
+    """The *stored* draft set violates the ordered-unit invariant.
+
+    Distinct from the input-validation faces of ``InvalidDraftOrder`` (a bad
+    ``unit_kind`` on create, a malformed reorder permutation): this signals that
+    persisted data itself is not well-formed — a pre-v1.7.14 legacy document
+    missing ``unit_kind``/``position``, or a corrupt non-contiguous position set.
+    The resolution is the one-shot ``scripts/migrate_ordered_units.py`` migration,
+    not a corrected request, so read endpoints surface it as 503 rather than a
+    4xx client error.
+    """
+
+
 _EXPORT_FORMATS: dict[str, tuple[str, str]] = {
     # format -> (content_type, filename extension)
     "txt": ("text/plain; charset=utf-8", "txt"),
@@ -887,7 +900,9 @@ class CoreSotService:
             or draft.position < 1
             for draft in drafts
         ):
-            raise InvalidDraftOrder("draft metadata migration is required")
+            raise DraftOrderIntegrityError("draft metadata migration is required")
         positions = tuple(draft.position for draft in drafts)
         if positions != tuple(range(1, len(drafts) + 1)):
-            raise InvalidDraftOrder("draft positions must be a contiguous permutation")
+            raise DraftOrderIntegrityError(
+                "draft positions must be a contiguous permutation"
+            )

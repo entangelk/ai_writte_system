@@ -197,3 +197,50 @@
 ### Next steps
 
 - 오너 5173 dogfood에서 확인: 이어쓰기 medium 생성(백그라운드) → 분석/검토 탭 왕복 → **(a) 이어쓰기 입력값 유지 (b) 비활성 탭에서도 완료 배지/패드로 결과 확인**. 추가 dogfood 피드백 대기.
+
+## Task — 레거시-데이터 `/drafts` 500 근본 수정 (dogfood 부채 폐쇄, 오너 결정 A=마이그레이션+endpoint 방어/503)
+
+### Goals
+
+- 커밋 `ef97c6a`로 추적 부채 등록된 `GET /projects/{pid}/drafts` 레거시-데이터 500의 근본 원인을 수정.
+- 성공 기준: 레거시 draft(pre-W3, `unit_kind`/`position` 없음)가 있는 프로젝트에서 목록/생성/export가 500 아닌 명시적 503을 반환하고, 정상 프로젝트·클라이언트 입력 오류는 영향 없음(양방향 회귀로 잠금).
+
+### User Decisions and Rationale
+
+- **결정: A(마이그레이션 + endpoint 방어), 상태코드 503**. 오너에게 결정 브리프(선택지 A 둘 다 / B 마이그레이션만 / C endpoint만)를 제시하고 A + 503을 선택받음.
+- **왜 A(둘 다)**: 로컬 1인 dogfood 단계라 지울 수 없는 실사용자 데이터는 아니나, 재현 가능하고 정본 보존 정책상 draft 손실 불가. `scripts/migrate_ordered_units.py`(docstring "run before deployment")가 데이터를 well-formed로 만드는 실해결이고, endpoint 방어는 미마이그레이션 상태에서도 opaque 500 대신 원인을 알려주는 안전망.
+- **왜 503(409 아님)**: GET 읽기에 대한 409는 어색하고, 이 조건은 **서버 저장 데이터가 미준비**된 상태이므로 503(Service Unavailable)이 의미상 정확. `reorder_drafts`의 기존 409(입력 순열 오류 + 이 통합 케이스 혼재)와는 다른 관점이나, reorder는 500 누수가 없어 이번 수정 범위 밖(§3).
+
+### Issues found
+
+- **문제**: `_require_ordered_drafts`([service.py](../../../services/application/app/core_sot/service.py))가 레거시/손상 데이터에 `InvalidDraftOrder`를 던지는데, `list_drafts`/`create_draft`/`export_project` endpoint가 `NotFound`만 잡아 미포착 → **500**.
+- **원인**: `InvalidDraftOrder`가 (a) 서버 데이터 무결성(마이그레이션 필요, `_require_ordered_drafts` 내부)과 (b) 클라이언트 입력 오류(잘못된 unit_kind `service.py:367`·`:734`, 순열 오류 reorder `:511`/`:522`/`:525` — 서브클래스 추가 후 현재 라인) **양쪽에 재사용**돼 endpoint가 단순 포착하면 입력 오류까지 503으로 잘못 분류될 위험.
+- **패턴 스윕(§4)**: `_require_ordered_drafts` 호출 5개 메서드 → endpoint 노출 4개 중 `list_drafts`·`create_draft`·`export_project`가 500 누수, `reorder_drafts`만 기존 409로 방어. 추가로 `start_next_unit`(writing accept 경로, [accept.py:127](../../../services/application/app/writing/accept.py#L127))도 동일 누수 발견 → 도달성 낮고(list가 상류 가드) 테스트 하네스 무거워 추적 부채 등록(HANDOFF).
+
+### Completed work
+
+- **`DraftOrderIntegrityError(InvalidDraftOrder)` 서브클래스 신설**([core_sot/service.py](../../../services/application/app/core_sot/service.py)): 저장 데이터 무결성 위반 전용. `_require_ordered_drafts` 두 분기(metadata 누락·non-contiguous position)가 이 서브클래스를 던지도록 변경. 입력 오류 경로(354 등)는 기존 `InvalidDraftOrder` 유지.
+- **3개 endpoint 방어**([main.py](../../../services/application/app/main.py)): `list_drafts`·`create_draft`·`export_project`에 `except DraftOrderIntegrityError → 503(detail=str(exc))` 추가. `reorder_drafts`는 서브클래스가 기존 `(Archived, InvalidDraftOrder)`절에 잡혀 409 유지(무변경).
+- **회귀 6건(양방향)**:
+  - service([test_ordered_units.py](../../../tests/test_ordered_units.py)) 1: 레거시 데이터→`DraftOrderIntegrityError`(under-strict), 잘못된 unit_kind→`InvalidDraftOrder`이되 서브클래스 아님(over-strict, 503 오분류 방지).
+  - API([test_application_api.py](../../../tests/test_application_api.py)) 5: `LegacyOrderedDraftMigration503Test` — list/create/export 레거시→503(under-strict, 되돌리면 500 재발), 정상 프로젝트→200(over-strict), 잘못된 unit_kind→422 not 503(over-strict).
+- **효과**: 레거시 데이터가 남아도 목록/생성/export가 opaque 500 대신 "migration is required" 503을 반환. 데이터 실해결은 마이그레이션 스크립트(`scripts/migrate_ordered_units.py` — **W3 선례, commit `56a73a3` Jul 19 산물이며 본 슬라이스에서 신규 작성한 게 아님**. 본 슬라이스는 이를 데이터 해결 경로로 참조만).
+
+### Verification
+
+- 포커스: `test_ordered_units.py` + `test_application_api.py` → **92 passed / 25 subtests**(hardening H-1 반영 후, +1).
+- 전체 백엔드(`CORE_SOT_TEST_MONGO_URI=mongodb://localhost:27018`): **1365 passed / 41 skipped / 328 subtests**(baseline 1358 + 초기 6 + H-1 1). 프론트·OpenAPI 무변경(순수 백엔드 예외 매핑). LLM 미사용.
+
+### 오너 독립 검증 PASS + 비차단 hardening 반영
+
+- **오너 독립 검증 PASS(차단 사유 없음)**: `docs/verifications/2026-07-22/legacy_drafts_500_503_integrity_mapping.md`. 되돌림 실험 2종(endpoint catch 제거 / 서브클래스 되돌림)으로 양방향을 직접 증명, full suite 1364 독립 재도출.
+- 검증이 제기한 비차단 hardening 반영:
+  - **H-1(reorder 잠금 갭)**: `test_reorder_on_legacy_data_stays_409_not_500` 추가 — reorder가 legacy 데이터에 409(500/503 아님)를 유지함을 핀. 종전 기계론+기존 order-error 테스트에만 의존하던 §3 무변경 정당화를 명시 잠금. **1365 passed**로 재도출.
+  - **H-3(문서 정확도)**: work_log 라인 번호를 서브클래스 추가 후 현재값(367·734, 511/522/525)으로 정정, API 테스트 docstring "every endpoint"를 "세 read endpoint(list/create/export) + reorder 409/start_next_unit 부채"로 정확화.
+  - **H-4(스크립트 출처)**: `migrate_ordered_units.py`가 W3 선례(`56a73a3`)이며 본 슬라이스 비작성임을 명시.
+  - **H-2(503을 정본 SoT/OpenAPI에 반영)**: **미반영 결정**. draft CRUD endpoint(list/create/export/reorder)는 404·409조차 OpenAPI `responses=`에 선언하지 않는 일관된 관행(에러 응답 선언은 writing endpoint 3종만) — 세 endpoint에만 503을 넣으면 CRUD 패밀리와 불일치. 또 최근 두 슬라이스(retry·dirty-guard)도 백엔드 전용 상태코드는 SoT bump 안 함. 관행 일치로 skip하되, 오너가 정본 명문화를 원하면 CRUD 패밀리 전체 에러 응답 문서화와 함께 별도 슬라이스로 다루는 게 일관적.
+
+### Next steps
+
+- `start_next_unit` 500 누수(추적 부채, HANDOFF) — writing_accept_endpoint에 `except DraftOrderIntegrityError → 503` + endpoint 에러 매핑 회귀.
+- 실 mongo에 레거시 데이터가 남은 배포/dev stack이 있으면 `scripts/migrate_ordered_units.py` 1회 실행이 정본 해결.

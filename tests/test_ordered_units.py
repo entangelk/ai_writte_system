@@ -12,6 +12,7 @@ from services.application.app.core_sot.ordered_unit_migration import (
 )
 from services.application.app.core_sot.service import (
     CoreSotService,
+    DraftOrderIntegrityError,
     InMemoryCoreSotRepository,
     InvalidDraftOrder,
 )
@@ -189,6 +190,36 @@ class OrderedUnitContractTest(unittest.TestCase):
                 project_id=self.project.id, title="Bad", unit_kind="volume"
             )
         self.assertEqual(len(self.repo.list_drafts(self.project.id)), 2)
+
+    def test_stored_legacy_data_raises_integrity_subclass(self):
+        """Server-integrity vs. input error boundary (503 vs. 4xx classification).
+
+        Under-strict: a stored pre-W3 legacy draft (no unit_kind/position) must
+        raise ``DraftOrderIntegrityError`` from ``list_drafts`` — the marker the
+        HTTP layer maps to 503. If someone reverts ``_require_ordered_drafts`` to
+        the bare ``InvalidDraftOrder``, this fails.
+
+        Over-strict: a bad ``unit_kind`` on create is a *client* input error and
+        must stay a plain ``InvalidDraftOrder`` that is NOT the integrity
+        subclass — otherwise it would be wrongly swept into the 503 path.
+        """
+        _seed_legacy(self.repo, self.project.id, count=2)
+        with self.assertRaises(DraftOrderIntegrityError):
+            self.service.list_drafts(project_id=self.project.id)
+
+        # Over-strict guard: the input-validation face must not be reclassified.
+        fresh = CoreSotService(CountingRepository())
+        project = fresh.create_project(name="Fresh")
+        try:
+            fresh.create_draft(
+                project_id=project.id, title="Bad", unit_kind="volume"
+            )
+        except DraftOrderIntegrityError:  # pragma: no cover - guard trips test
+            self.fail("bad unit_kind must not raise the integrity subclass")
+        except InvalidDraftOrder:
+            pass
+        else:
+            self.fail("bad unit_kind must raise InvalidDraftOrder")
 
     def test_full_permutation_reorders_atomically(self):
         """OU-07: a complete permutation commits exact contiguous positions."""

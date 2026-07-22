@@ -215,6 +215,7 @@ from services.application.app.core_sot.service import (
     Archived,
     CoreSotError,
     CoreSotService,
+    DraftOrderIntegrityError,
     InMemoryCoreSotRepository,
     InvalidDraftOrder,
     NotFound,
@@ -1945,6 +1946,11 @@ def create_app(
             drafts = core_sot.list_drafts(project_id=project_id)
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except DraftOrderIntegrityError as exc:
+            # Stored drafts predate the W3 ordered-unit invariant (or are corrupt).
+            # The fix is the one-shot scripts/migrate_ordered_units.py, not a
+            # corrected request, so surface a 503 instead of leaking an opaque 500.
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         return {"drafts": [_draft_payload(d) for d in drafts]}
 
     @app.get(
@@ -2062,6 +2068,10 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except DraftOrderIntegrityError as exc:
+            # Whole-project export reads the ordered unit set; unmigrated legacy
+            # data blocks it. Same migration-required 503 as list/create.
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         manifest_payload: dict[str, object] | None = None
         if manifest:
             manifest_payload = {
@@ -2104,6 +2114,10 @@ def create_app(
             )
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except DraftOrderIntegrityError as exc:
+            # Appending a unit reads the existing ordered set; unmigrated legacy
+            # data blocks it. Same migration-required 503 as list/export.
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except Archived as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return _draft_payload(draft)
