@@ -238,9 +238,38 @@
   - **H-1(reorder 잠금 갭)**: `test_reorder_on_legacy_data_stays_409_not_500` 추가 — reorder가 legacy 데이터에 409(500/503 아님)를 유지함을 핀. 종전 기계론+기존 order-error 테스트에만 의존하던 §3 무변경 정당화를 명시 잠금. **1365 passed**로 재도출.
   - **H-3(문서 정확도)**: work_log 라인 번호를 서브클래스 추가 후 현재값(367·734, 511/522/525)으로 정정, API 테스트 docstring "every endpoint"를 "세 read endpoint(list/create/export) + reorder 409/start_next_unit 부채"로 정확화.
   - **H-4(스크립트 출처)**: `migrate_ordered_units.py`가 W3 선례(`56a73a3`)이며 본 슬라이스 비작성임을 명시.
-  - **H-2(503을 정본 SoT/OpenAPI에 반영)**: **미반영 결정**. draft CRUD endpoint(list/create/export/reorder)는 404·409조차 OpenAPI `responses=`에 선언하지 않는 일관된 관행(에러 응답 선언은 writing endpoint 3종만) — 세 endpoint에만 503을 넣으면 CRUD 패밀리와 불일치. 또 최근 두 슬라이스(retry·dirty-guard)도 백엔드 전용 상태코드는 SoT bump 안 함. 관행 일치로 skip하되, 오너가 정본 명문화를 원하면 CRUD 패밀리 전체 에러 응답 문서화와 함께 별도 슬라이스로 다루는 게 일관적.
+  - **H-2(503을 정본 SoT/OpenAPI에 반영)**: 최초 "관행 일치로 skip" 권고 → **오너 재검토로 뒤집힘**. 오너가 "선언 안 하는 게 제품성에 실제로 맞는가"를 물었고, 검토 결과 "선언 안 함"은 미덕이 아니라 H1이 남긴 **기존 부채**(성숙한 API 계약은 에러 상태코드를 문서화하는 게 정석)임을 확인. **결정: 부채가 아니라 다음 페이즈(H3)로 정면 처리** — 아래 "Task — H3 착수" 참조. 세 endpoint만 503 넣는 부분 패치는 오히려 최악(불완전+불일치)이라 skip 유지가 맞고, 대신 **CRUD 패밀리 전체 + SoT 전역 정책**을 슬라이스로 처리.
 
 ### Next steps
 
-- `start_next_unit` 500 누수(추적 부채, HANDOFF) — writing_accept_endpoint에 `except DraftOrderIntegrityError → 503` + endpoint 에러 매핑 회귀.
+- `start_next_unit` 500 누수(추적 부채, HANDOFF) — writing_accept_endpoint에 `except DraftOrderIntegrityError → 503` + endpoint 에러 매핑 회귀. **→ H3 페이즈 S5로 흡수**(아래).
 - 실 mongo에 레거시 데이터가 남은 배포/dev stack이 있으면 `scripts/migrate_ordered_units.py` 1회 실행이 정본 해결.
+
+## Task — 공개 계약 조이기 H3(에러 응답 계약) 페이즈 착수 + 계획 문서 (오너 결정 D1~D4=A)
+
+### Goals
+
+- 위 500-fix 검증 H-2(503이 새 public 상태코드인데 정본/OpenAPI 미반영)를 계기로, H1(성공 응답 모델)이 남긴 **에러 응답 계약**을 페이즈로 정면 처리하기 위한 계획 문서 확정.
+
+### User Decisions and Rationale
+
+- **오너 의도**: "선언 안 하는 게 관행이니 맞다"는 약한 근거임을 지적. dogfood 보정마다 동일 갭이 재발하므로 **부채가 아니라 다음 스텝 페이즈로** 처리하고, 계획 문서 + 슬라이스 분해 후 진행하기로 함.
+- **확정 결정(4)**: **D1=A** 균일 `{detail}` 에러 본문 유지(reason 코드는 실사용 근거 시 additive) · **D2=A** spine-first 슬라이싱(H1 선례) · **D3=A** SoT 전역 에러 정책 섹션 + endpoint별 OpenAPI 선언 · **D4=A** 이번 페이즈는 계약/타입만, 프론트 에러 UX 불변.
+- **왜 A 패키지**: `gen:api`가 타입 전용 생성기 + 에러 본문 균일이라 선언의 실익은 타입 안전성이 아닌 **계약 정직성/자기발견성**. spine-first는 H1이 검증한 방식이고 diff가 작아 검증 가능. 프론트 UX·reason 코드는 실사용 근거가 쌓일 때 additive로 분리(Simplicity First).
+
+### Completed work
+
+- **계획 문서 신설**: [`docs/plans/api-error-response-contract-decisions.md`](../../plans/api-error-response-contract-decisions.md). H1/H2 계보의 H3로 프레이밍, 실측, D1~D4 옵션표+추천, 슬라이스 분해(S1 SoT 전역 섹션 → S2 CRUD family 20 → S3 analysis → S4 memory/source → S5 writing 잔여+`start_next_unit` 503 방어), 슬라이스별 검증 방법(런타임 불변 회귀 + openapi.json 재덤프 self-discovery + schema.d.ts 재생성/빌드 + exact-key).
+- 이전 task의 H-2 "미반영 결정" 노트를 오너 재검토 반영으로 갱신(부채→페이즈).
+
+### 독립 검증(조건부 합격) 반영
+
+- **오너 독립 검증 조건부 합격**: `docs/verifications/2026-07-22/h3_error_response_contract_plan.md`. S2 lock 리스트 20 endpoint 전부 실코드 일치, D1~D4 건전 확인. 비차단 3건(F1/F2/F3) 정정:
+  - **F1(분포 숫자)**: 502 20→19(1건 partial JSONResponse), 202×1은 에러 아님(async-generate success arm JSONResponse) 제외, 동적×9 raise+JSONResponse 혼재 명시. 404×62/400×30/503×18/409×16/504×7은 정확 확인됨.
+  - **F2("에러 선언 3개")**: 에러 본문 모델 선언은 2개(revise-and-gate·accept). generate는 202 success만, 에러 모델 없음. 미선언 58→59.
+  - **F3(S2 범위 자기모순)**: lock 리스트 20 나열 vs 라벨 "spine 14" 불일치. **오너 위임 결정: 20으로 재라벨**(spine 14 + CRUD 형제 6[brief 4·draft-order·project-export]). 14로 안 줄인 이유 = 형제 6은 같은 저복잡도 균일-에러 CRUD 표면이고 project-export가 503(페이즈 동기 endpoint) 포함 → 분리 시 동기 집합 분열. D2=A·S2 행·lock 헤딩·S5 문구 정합화.
+
+### Next steps (다음 세션)
+
+- **S1 착수**: SoT 전역 HTTP 에러 계약 섹션 신설 + 503-migration/`start_next_unit` 명문화. 정본(SoT) 편집.
+- 이후 S2(CRUD family 20)부터 각 슬라이스 별도 커밋.
