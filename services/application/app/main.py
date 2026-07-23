@@ -151,6 +151,7 @@ from services.application.app.writing.generation_worker import (
 )
 from services.application.app.writing.http_models import (
     ACCEPT_RESPONSES,
+    ErrorDetailResponse,
     GENERATE_ASYNC_RESPONSES,
     REVISE_AND_GATE_RESPONSES,
     WritingAcceptResponse,
@@ -998,6 +999,42 @@ def _build_chroma_vector_index():
 # key set of every envelope below and bites if a model narrows one.
 
 
+# HTTP error contract declarations (SoT v1.7.29 "HTTP 에러 응답 계약", H3 S2).
+#
+# Every error body in this app is the uniform ``{"detail": <string>}``
+# (``ErrorDetailResponse``), so declaring a status documents *which* failures an
+# endpoint can return — it never changes runtime behaviour. The status codes
+# below are the realistic set each endpoint actually raises, not the full app
+# vocabulary.
+#
+# 422 is deliberately absent everywhere: FastAPI documents request-schema
+# validation automatically and its body shape (``{"detail": [ ... ]}``) differs.
+_ERROR = {"model": ErrorDetailResponse}
+
+# The only 503 in the CRUD family is the data-integrity face: stored drafts that
+# predate the W3 ordered-unit invariant. The fix is the one-shot migration, not a
+# corrected request, so the description says so rather than leaving the reader to
+# infer it from a log (the exact gap H3 exists to close).
+_MIGRATION_503 = {
+    "model": ErrorDetailResponse,
+    "description": "Stored draft metadata predates the ordered-unit invariant "
+                   "(or is corrupt). Run scripts/migrate_ordered_units.py; "
+                   "retrying the request alone cannot succeed.",
+}
+
+_ERRORS_404: dict[int | str, dict] = {404: _ERROR}
+_ERRORS_400_404: dict[int | str, dict] = {400: _ERROR, 404: _ERROR}
+_ERRORS_404_409: dict[int | str, dict] = {404: _ERROR, 409: _ERROR}
+_ERRORS_400_404_409: dict[int | str, dict] = {400: _ERROR, 404: _ERROR, 409: _ERROR}
+_ERRORS_404_MIGRATION: dict[int | str, dict] = {404: _ERROR, 503: _MIGRATION_503}
+_ERRORS_400_404_MIGRATION: dict[int | str, dict] = {
+    400: _ERROR, 404: _ERROR, 503: _MIGRATION_503,
+}
+_ERRORS_404_409_MIGRATION: dict[int | str, dict] = {
+    404: _ERROR, 409: _ERROR, 503: _MIGRATION_503,
+}
+
+
 class ProjectPayload(BaseModel):
     id: str
     name: str
@@ -1825,7 +1862,8 @@ def create_app(
     async def list_projects() -> dict[str, object]:
         return {"projects": [_project_payload(p) for p in core_sot.list_projects()]}
 
-    @app.get("/projects/{project_id}", response_model=ProjectPayload)
+    @app.get("/projects/{project_id}", response_model=ProjectPayload,
+             responses=_ERRORS_404)
     async def get_project(project_id: str) -> dict[str, object]:
         try:
             project = core_sot.get_project(project_id=project_id)
@@ -1834,7 +1872,8 @@ def create_app(
         return _project_payload(project)
 
     @app.get(
-        "/projects/{project_id}/brief", response_model=ProjectBriefGetResponse
+        "/projects/{project_id}/brief", response_model=ProjectBriefGetResponse,
+        responses=_ERRORS_404,
     )
     async def get_project_brief(project_id: str) -> dict[str, object]:
         try:
@@ -1846,7 +1885,8 @@ def create_app(
         }
 
     @app.put(
-        "/projects/{project_id}/brief", response_model=ProjectBriefPutResponse
+        "/projects/{project_id}/brief", response_model=ProjectBriefPutResponse,
+        responses=_ERRORS_404_409,
     )
     async def put_project_brief(
         project_id: str, request: PutProjectBriefRequest
@@ -1878,6 +1918,7 @@ def create_app(
     @app.get(
         "/projects/{project_id}/brief/versions",
         response_model=ProjectBriefVersionListResponse,
+        responses=_ERRORS_404,
     )
     async def list_project_brief_versions(project_id: str) -> dict[str, object]:
         try:
@@ -1889,6 +1930,7 @@ def create_app(
     @app.get(
         "/projects/{project_id}/brief/versions/{version_id}",
         response_model=ProjectBriefGetResponse,
+        responses=_ERRORS_404,
     )
     async def get_project_brief_version(
         project_id: str, version_id: str
@@ -1901,7 +1943,8 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"brief": _project_brief_payload(brief)}
 
-    @app.patch("/projects/{project_id}", response_model=ProjectPayload)
+    @app.patch("/projects/{project_id}", response_model=ProjectPayload,
+               responses=_ERRORS_404_409)
     async def rename_project(
         project_id: str, request: RenameProjectRequest
     ) -> dict[str, object]:
@@ -1916,7 +1959,8 @@ def create_app(
         return _project_payload(project)
 
     @app.patch(
-        "/projects/{project_id}/drafts/{draft_id}", response_model=DraftPayload
+        "/projects/{project_id}/drafts/{draft_id}", response_model=DraftPayload,
+        responses=_ERRORS_404_409,
     )
     async def rename_draft(
         project_id: str, draft_id: str, request: RenameDraftRequest
@@ -1931,7 +1975,8 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return _draft_payload(draft)
 
-    @app.delete("/projects/{project_id}", response_model=ProjectPayload)
+    @app.delete("/projects/{project_id}", response_model=ProjectPayload,
+                responses=_ERRORS_404)
     async def archive_project(project_id: str) -> dict[str, object]:
         # MVP: delete is archive (soft delete); SOT data is preserved (§115).
         # Re-archiving is idempotent.
@@ -1943,7 +1988,8 @@ def create_app(
         return _project_payload(project)
 
     @app.delete(
-        "/projects/{project_id}/drafts/{draft_id}", response_model=DraftPayload
+        "/projects/{project_id}/drafts/{draft_id}", response_model=DraftPayload,
+        responses=_ERRORS_404,
     )
     async def archive_draft(project_id: str, draft_id: str) -> dict[str, object]:
         try:
@@ -1956,7 +2002,8 @@ def create_app(
         )
         return _draft_payload(draft)
 
-    @app.get("/projects/{project_id}/drafts", response_model=DraftListResponse)
+    @app.get("/projects/{project_id}/drafts", response_model=DraftListResponse,
+             responses=_ERRORS_404_MIGRATION)
     async def list_drafts(project_id: str) -> dict[str, object]:
         try:
             drafts = core_sot.list_drafts(project_id=project_id)
@@ -1970,7 +2017,8 @@ def create_app(
         return {"drafts": [_draft_payload(d) for d in drafts]}
 
     @app.get(
-        "/projects/{project_id}/drafts/{draft_id}", response_model=DraftPayload
+        "/projects/{project_id}/drafts/{draft_id}", response_model=DraftPayload,
+        responses=_ERRORS_404,
     )
     async def get_draft(project_id: str, draft_id: str) -> dict[str, object]:
         try:
@@ -1982,6 +2030,7 @@ def create_app(
     @app.get(
         "/projects/{project_id}/drafts/{draft_id}/versions",
         response_model=DraftVersionListResponse,
+        responses=_ERRORS_404,
     )
     async def list_draft_versions(project_id: str, draft_id: str) -> dict[str, object]:
         try:
@@ -1995,6 +2044,7 @@ def create_app(
     @app.get(
         "/projects/{project_id}/drafts/{draft_id}/versions/{version_id}",
         response_model=DraftVersionDetailResponse,
+        responses=_ERRORS_404,
     )
     async def get_draft_version(
         project_id: str, draft_id: str, version_id: str
@@ -2033,6 +2083,7 @@ def create_app(
     @app.get(
         "/projects/{project_id}/drafts/{draft_id}/versions/{version_id}/export",
         response_model=DraftVersionExportResponse,
+        responses=_ERRORS_400_404,
     )
     async def export_draft_version(
         project_id: str,
@@ -2067,6 +2118,7 @@ def create_app(
     @app.get(
         "/projects/{project_id}/export",
         response_model=ProjectExportResponse,
+        responses=_ERRORS_400_404_MIGRATION,
     )
     async def export_project(
         project_id: str,
@@ -2118,7 +2170,8 @@ def create_app(
             "manifest": manifest_payload,
         }
 
-    @app.post("/projects/{project_id}/drafts", response_model=DraftPayload)
+    @app.post("/projects/{project_id}/drafts", response_model=DraftPayload,
+              responses=_ERRORS_404_409_MIGRATION)
     async def create_draft(
         project_id: str, request: CreateDraftRequest
     ) -> dict[str, object]:
@@ -2141,6 +2194,7 @@ def create_app(
     @app.put(
         "/projects/{project_id}/draft-order",
         response_model=DraftOrderPutResponse,
+        responses=_ERRORS_404_409,
     )
     async def put_draft_order(
         project_id: str, request: DraftOrderPutRequest
@@ -2159,6 +2213,7 @@ def create_app(
     @app.post(
         "/projects/{project_id}/drafts/{draft_id}/versions",
         response_model=SaveDraftResponse,
+        responses=_ERRORS_400_404_409,
     )
     async def save_draft(
         project_id: str, draft_id: str, request: SaveDraftRequest

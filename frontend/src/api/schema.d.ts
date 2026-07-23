@@ -1848,6 +1848,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProjectPayload"];
                 };
             };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -1877,6 +1886,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectPayload"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1912,6 +1930,24 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectPayload"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2665,6 +2701,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProjectBriefGetResponse"];
                 };
             };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -2700,6 +2745,24 @@ export interface operations {
                     "application/json": components["schemas"]["ProjectBriefPutResponse"];
                 };
             };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -2729,6 +2792,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectBriefVersionListResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2761,6 +2833,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectBriefGetResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2835,6 +2916,24 @@ export interface operations {
                     "application/json": components["schemas"]["DraftOrderPutResponse"];
                 };
             };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -2866,6 +2965,15 @@ export interface operations {
                     "application/json": components["schemas"]["DraftListResponse"];
                 };
             };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -2873,6 +2981,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Stored draft metadata predates the ordered-unit invariant (or is corrupt). Run scripts/migrate_ordered_units.py; retrying the request alone cannot succeed. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -2901,6 +3018,24 @@ export interface operations {
                     "application/json": components["schemas"]["DraftPayload"];
                 };
             };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -2908,6 +3043,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Stored draft metadata predates the ordered-unit invariant (or is corrupt). Run scripts/migrate_ordered_units.py; retrying the request alone cannot succeed. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -2931,6 +3075,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DraftPayload"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2963,6 +3116,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DraftPayload"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3001,6 +3163,24 @@ export interface operations {
                     "application/json": components["schemas"]["DraftPayload"];
                 };
             };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -3031,6 +3211,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DraftVersionListResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3069,6 +3258,33 @@ export interface operations {
                     "application/json": components["schemas"]["SaveDraftResponse"];
                 };
             };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -3100,6 +3316,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DraftVersionDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3137,6 +3362,24 @@ export interface operations {
                     "application/json": components["schemas"]["DraftVersionExportResponse"];
                 };
             };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -3172,6 +3415,24 @@ export interface operations {
                     "application/json": components["schemas"]["ProjectExportResponse"];
                 };
             };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -3179,6 +3440,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Stored draft metadata predates the ordered-unit invariant (or is corrupt). Run scripts/migrate_ordered_units.py; retrying the request alone cannot succeed. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };

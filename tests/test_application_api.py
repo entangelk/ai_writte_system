@@ -2073,5 +2073,143 @@ class LegacyOrderedDraftMigration503Test(unittest.TestCase):
         self.assertEqual(resp.status_code, 422)
 
 
+class CrudErrorContractDeclarationTest(unittest.TestCase):
+    """OpenAPI must declare the realistic error statuses of the CRUD family.
+
+    SoT v1.7.29 "HTTP 에러 응답 계약" (H3 S2, D3=A): the status code is the
+    machine-readable half of the contract, and the endpoint-by-endpoint set lives
+    in OpenAPI — not in the SoT — so this is where it has to be locked. Before
+    S2 these 20 endpoints raised 404/409/400/503 at runtime while the public
+    contract said nothing, which is exactly how the legacy-data 503 shipped
+    undocumented (verification H-2, 2026-07-22).
+
+    The expected set is exact, so the test bites in both directions:
+    under-strict (a dropped ``responses=`` loses a documented failure) and
+    over-strict (declaring a status the endpoint cannot raise, which would lie to
+    the frontend's generated types just as loudly as silence did).
+    """
+
+    # (path, method) -> exact set of declared statuses besides 200/422.
+    # 422 is excluded because FastAPI emits it automatically for any endpoint
+    # with a validated body/param and its body shape is a different contract.
+    EXPECTED = {
+        ("/projects", "post"): set(),
+        ("/projects", "get"): set(),
+        ("/projects/{project_id}", "get"): {"404"},
+        ("/projects/{project_id}", "patch"): {"404", "409"},
+        ("/projects/{project_id}", "delete"): {"404"},
+        ("/projects/{project_id}/brief", "get"): {"404"},
+        ("/projects/{project_id}/brief", "put"): {"404", "409"},
+        ("/projects/{project_id}/brief/versions", "get"): {"404"},
+        ("/projects/{project_id}/brief/versions/{version_id}", "get"): {"404"},
+        ("/projects/{project_id}/drafts", "get"): {"404", "503"},
+        ("/projects/{project_id}/drafts", "post"): {"404", "409", "503"},
+        ("/projects/{project_id}/drafts/{draft_id}", "get"): {"404"},
+        ("/projects/{project_id}/drafts/{draft_id}", "patch"): {"404", "409"},
+        ("/projects/{project_id}/drafts/{draft_id}", "delete"): {"404"},
+        ("/projects/{project_id}/drafts/{draft_id}/versions", "get"): {"404"},
+        ("/projects/{project_id}/drafts/{draft_id}/versions", "post"):
+            {"400", "404", "409"},
+        ("/projects/{project_id}/drafts/{draft_id}/versions/{version_id}", "get"):
+            {"404"},
+        ("/projects/{project_id}/drafts/{draft_id}/versions/{version_id}/export",
+         "get"): {"400", "404"},
+        ("/projects/{project_id}/export", "get"): {"400", "404", "503"},
+        ("/projects/{project_id}/draft-order", "put"): {"404", "409"},
+    }
+
+    def setUp(self):
+        self.spec = create_app().openapi()
+
+    def _declared(self, path: str, method: str) -> set[str]:
+        responses = self.spec["paths"][path][method]["responses"]
+        return {code for code in responses if code not in ("200", "422")}
+
+    def test_declared_error_statuses_match_the_lock_list(self):
+        self.assertEqual(len(self.EXPECTED), 20)
+        for (path, method), expected in self.EXPECTED.items():
+            with self.subTest(path=path, method=method):
+                self.assertEqual(self._declared(path, method), expected)
+
+    def test_every_declared_error_body_is_the_uniform_detail_model(self):
+        # D1=A: one error body for the whole app. A richer per-status model would
+        # fork the contract silently; this pins the Union-free single reference.
+        for (path, method), expected in self.EXPECTED.items():
+            responses = self.spec["paths"][path][method]["responses"]
+            for code in expected:
+                with self.subTest(path=path, method=method, code=code):
+                    schema = responses[code]["content"]["application/json"]["schema"]
+                    self.assertEqual(
+                        schema.get("$ref"),
+                        "#/components/schemas/ErrorDetailResponse",
+                    )
+
+    def test_migration_503_description_names_the_operator_action(self):
+        # The 503 that shipped undocumented is the one whose fix is an operator
+        # action, so its declaration must say which one instead of leaving the
+        # next reader to infer it from a log.
+        migration_503 = (
+            ("/projects/{project_id}/drafts", "get"),
+            ("/projects/{project_id}/drafts", "post"),
+            ("/projects/{project_id}/export", "get"),
+        )
+        for path, method in migration_503:
+            with self.subTest(path=path, method=method):
+                description = (
+                    self.spec["paths"][path][method]["responses"]["503"]["description"]
+                )
+                self.assertIn("migrate_ordered_units.py", description)
+
+
+class CrudErrorBodyExactKeyTest(unittest.TestCase):
+    """The runtime error body is exactly ``{"detail": <string>}``.
+
+    The declarations above are only honest if the wire body matches them, and
+    ``detail`` being the *only* key is what lets the SoT say "status code is the
+    machine-readable layer, detail is for humans". A future ``reason`` field is
+    an explicit additive decision (D1=B), not something that appears by drift.
+    """
+
+    def _assert_detail_only(self, response, status: int):
+        self.assertEqual(response.status_code, status)
+        body = response.json()
+        self.assertEqual(set(body), {"detail"})
+        self.assertIsInstance(body["detail"], str)
+        self.assertTrue(body["detail"])
+
+    def test_404_body(self):
+        client = TestClient(create_app())
+        self._assert_detail_only(client.get("/projects/missing"), 404)
+
+    def test_409_body(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        client.delete(f"/projects/{project['id']}")
+
+        self._assert_detail_only(
+            client.patch(f"/projects/{project['id']}", json={"name": "Renamed"}),
+            409,
+        )
+
+    def test_400_body(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+
+        self._assert_detail_only(
+            client.get(f"/projects/{project['id']}/export?format=pdf"), 400
+        )
+
+    def test_503_body(self):
+        repo = InMemoryCoreSotRepository()
+        service = CoreSotService(repo)
+        project = service.create_project(name="Novel")
+        repo.drafts["legacy-1"] = Draft(
+            id="legacy-1", project_id=project.id, title="Old Episode"
+        )
+        client = TestClient(create_app(service=service))
+
+        self._assert_detail_only(client.get(f"/projects/{project.id}/drafts"), 503)
+
+
 if __name__ == "__main__":
     unittest.main()
