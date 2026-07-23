@@ -843,6 +843,114 @@ class WritingIntentApiTest(unittest.TestCase):
         asyncio.run(client.aclose())
 
 
+class StartNextUnitLegacyDataTest(unittest.TestCase):
+    """H3 S5: ``intent=start_next_unit`` on legacy drafts is 503, not a 500 leak.
+
+    SoT v1.7.29 recorded this as a *known defect*: the 2026-07-22 fix mapped
+    ``DraftOrderIntegrityError`` to 503 on the three CRUD endpoints but left the
+    accept path uncovered, so a project holding a pre-W3 draft (no
+    ``unit_kind``/``position``) made ``start_next_unit`` raise through every
+    ``except`` clause and escape as an opaque 500.
+
+    Both directions are pinned:
+
+    * under-strict — remove the ``except DraftOrderIntegrityError`` clause in
+      ``writing_accept_endpoint`` and ``test_start_next_unit_on_legacy_data_is_503``
+      re-fails with the original 500.
+    * over-strict — the fix must stay surgical. A project with no legacy draft
+      still accepts normally (200), and ``append_current`` is unaffected even
+      *with* legacy data present, because that path never calls
+      ``_require_ordered_drafts``. Widening the catch (e.g. mapping all of
+      ``InvalidDraftOrder``, or hoisting it above the 400 group's inputs) breaks
+      those two.
+    """
+
+    def _setup(self, *, legacy: bool):
+        core = CoreSotService(InMemoryCoreSotRepository())
+        project = core.create_project(name="Novel")
+        current = core.create_draft(
+            project_id=project.id, title="현재 장", unit_kind=UnitKind.CHAPTER
+        )
+        base = core.save_draft(
+            project_id=project.id, draft_id=current.id,
+            raw_text="현재 본문.", idempotency_key="base",
+        )
+        if legacy:
+            # A draft stored before the W3 ordered-unit invariant: no unit_kind,
+            # no position. Built through the repository because the service
+            # refuses to create one this way today — that is the point.
+            core._repo.drafts["legacy-1"] = replace(
+                current, id="legacy-1", title="구 회차",
+                unit_kind=None, position=None,
+            )
+        app = create_app(
+            service=core, analysis_service=AnalysisService(InMemoryAnalysisRepository()),
+            context_search_service=_Context(),
+            writing_gate_service=_Gate(WritingGateDecision.PASS),
+        )
+        client = asyncio.run(self._open(app))
+        return client, project.id, current.id, base.draft_version.id
+
+    @staticmethod
+    async def _open(app):
+        return httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+    def _accept(self, client, project, body):
+        return asyncio.run(
+            client.post(f"/projects/{project}/writing/accept", json=body))
+
+    def _start_body(self, draft, base, **overrides):
+        body = {"request_id": "wr1", "draft_id": draft, "base_version_id": base,
+                "idempotency_key": "acc1", "instruction": "이어서 써줘",
+                "candidate_text": "새 유닛 본문.", "intent": "start_next_unit",
+                "next_unit": {"title": "2장", "unit_kind": "chapter", "goal": None}}
+        body.update(overrides)
+        return body
+
+    def test_start_next_unit_on_legacy_data_is_503(self):
+        client, project, draft, base = self._setup(legacy=True)
+        response = self._accept(client, project, self._start_body(draft, base))
+        self.assertEqual(response.status_code, 503)
+        # The body stays the uniform error shape (H3 D1=A), and the detail must
+        # not be empty — it is what tells the operator which face they hit.
+        self.assertEqual(set(response.json()), {"detail"})
+        self.assertTrue(response.json()["detail"])
+        asyncio.run(client.aclose())
+
+    def test_start_next_unit_without_legacy_data_still_accepts(self):
+        # Over-strict guard: the 503 must require the integrity failure, not
+        # merely the start_next_unit intent.
+        client, project, draft, base = self._setup(legacy=False)
+        response = self._accept(client, project, self._start_body(draft, base))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["intent"], "start_next_unit")
+        asyncio.run(client.aclose())
+
+    def test_append_current_with_legacy_data_is_unaffected(self):
+        # Over-strict guard: append never reaches _require_ordered_drafts, so
+        # legacy data must not start failing it. This pins the surgical scope of
+        # the 07-22 fix (its deliberate asymmetry, SoT v1.7.29).
+        client, project, draft, base = self._setup(legacy=True)
+        response = self._accept(client, project, {
+            "request_id": "wr1", "draft_id": draft, "base_version_id": base,
+            "idempotency_key": "acc1", "instruction": "이어서",
+            "candidate_text": "덧붙임.", "intent": "append_current"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["intent"], "append_current")
+        asyncio.run(client.aclose())
+
+    def test_binding_errors_still_map_to_400_not_503(self):
+        # Over-strict guard on clause ordering: the integrity catch sits above
+        # the 400 group, so a malformed request must still be the caller's fault
+        # even when legacy data is present.
+        client, project, draft, base = self._setup(legacy=True)
+        response = self._accept(client, project, self._start_body(
+            draft, base, next_unit=None))
+        self.assertEqual(response.status_code, 400)
+        asyncio.run(client.aclose())
+
+
 class WritingIntentInMemoryRollbackTest(_IntentBase):
     """Hardening (not a WI row): the in-memory single-writer rollback restores
     every one of the six start-next surfaces on a mid-write failure. The

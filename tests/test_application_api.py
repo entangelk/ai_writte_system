@@ -2535,5 +2535,185 @@ class MemorySourceErrorBodyExactKeyTest(unittest.TestCase):
         )
 
 
+class WritingErrorContractDeclarationTest(unittest.TestCase):
+    """OpenAPI must declare the realistic error statuses of the writing track.
+
+    H3 S5 — the phase's last slice, closing the surface H1 opened. Two things
+    make this track different from S2/S3/S4:
+
+    * **Dynamic ``ProviderError`` mapping.** All nine dynamic
+      ``status_code=status`` sites live here, every one of them
+      ``504 if TIMEOUT else 502``. So the realistic set is exactly ``{502, 504}``
+      — the brief's "declare the realistic set, do not enumerate everything
+      upstream could produce" applies here and nowhere else.
+    * **Partial envelopes.** ``revise-and-gate`` and ``accept`` were already
+      declared before H3 and document a Union of their partial envelope with the
+      uniform detail on partial-capable statuses. That is not a D1=A violation —
+      the error arm is still the single ``ErrorDetailResponse`` — so the body
+      assertion below accepts either a direct ``$ref`` or an ``anyOf`` arm, and
+      ``UNION_BODIES`` pins exactly where a Union is allowed to appear so a new
+      one cannot arrive by drift.
+
+    ``accept`` also carries the phase's only runtime change: its 503 now covers
+    both faces (collaborator-not-configured *and* the ordered-unit integrity
+    failure that used to leak as a 500), so its declaration names both actions.
+    """
+
+    # (path, method) -> exact set of declared statuses besides 200/422.
+    # 202 on generate is a success arm, not an error, but it is declared via the
+    # same mechanism so it appears here to keep the set exact.
+    EXPECTED = {
+        ("/projects/{project_id}/writing/generate", "post"):
+            {"202", "400", "404", "502", "503", "504"},
+        ("/projects/{project_id}/writing/generation-jobs/{job_id}", "get"):
+            {"404"},
+        ("/projects/{project_id}/writing/generation-jobs/{job_id}/retry", "post"):
+            {"404", "409"},
+        ("/projects/{project_id}/writing/gate", "post"):
+            {"400", "404", "502", "503", "504"},
+        ("/projects/{project_id}/writing/report", "post"):
+            {"400", "404", "502", "503", "504"},
+        ("/projects/{project_id}/writing/revise", "post"):
+            {"400", "404", "502", "503", "504"},
+        ("/projects/{project_id}/writing/revise-and-gate", "post"):
+            {"400", "404", "502", "503", "504"},
+        ("/projects/{project_id}/writing/loop-audits", "get"): {"404"},
+        ("/projects/{project_id}/writing/loop-audits/{audit_id}", "get"): {"404"},
+        ("/projects/{project_id}/writing/accept", "post"):
+            {"400", "404", "409", "502", "503", "504"},
+        ("/projects/{project_id}/writing/scratch", "get"): {"404"},
+        ("/projects/{project_id}/writing/scratch", "delete"): {"404"},
+    }
+
+    # (path, method, code) where the body is a Union of a partial envelope with
+    # the uniform detail. Everything else must be a bare ErrorDetailResponse ref.
+    UNION_BODIES = {
+        ("/projects/{project_id}/writing/revise-and-gate", "post", code)
+        for code in ("400", "502", "503", "504")
+    } | {("/projects/{project_id}/writing/accept", "post", "502")}
+
+    def setUp(self):
+        self.spec = create_app().openapi()
+
+    def _declared(self, path: str, method: str) -> set[str]:
+        responses = self.spec["paths"][path][method]["responses"]
+        return {code for code in responses if code not in ("200", "422")}
+
+    def _schema(self, path: str, method: str, code: str) -> dict:
+        return (self.spec["paths"][path][method]["responses"][code]
+                ["content"]["application/json"]["schema"])
+
+    def test_declared_error_statuses_match_the_lock_list(self):
+        self.assertEqual(len(self.EXPECTED), 12)
+        for (path, method), expected in self.EXPECTED.items():
+            with self.subTest(path=path, method=method):
+                self.assertEqual(self._declared(path, method), expected)
+
+    def test_the_whole_writing_track_is_declared(self):
+        undeclared = {
+            (path, method)
+            for path, operations in self.spec["paths"].items()
+            if "/writing/" in path
+            for method in operations
+            if (path, method) not in self.EXPECTED
+        }
+        self.assertEqual(undeclared, set())
+
+    def test_every_declared_error_body_carries_the_uniform_detail_model(self):
+        detail = "#/components/schemas/ErrorDetailResponse"
+        for (path, method), expected in self.EXPECTED.items():
+            for code in expected:
+                if code == "202":  # success arm, not an error body
+                    continue
+                with self.subTest(path=path, method=method, code=code):
+                    schema = self._schema(path, method, code)
+                    if (path, method, code) in self.UNION_BODIES:
+                        arms = {arm.get("$ref") for arm in schema["anyOf"]}
+                        self.assertIn(detail, arms)
+                    else:
+                        self.assertEqual(schema.get("$ref"), detail)
+
+    def test_union_bodies_appear_only_where_the_contract_allows(self):
+        # Over-strict guard on the exception itself: a partial envelope leaking
+        # onto a status that is always a plain error would fork the uniform error
+        # body without anyone deciding to.
+        actual_unions = {
+            (path, method, code)
+            for (path, method), expected in self.EXPECTED.items()
+            for code in expected
+            if code != "202" and "anyOf" in self._schema(path, method, code)
+        }
+        self.assertEqual(actual_unions, self.UNION_BODIES)
+
+    def test_accept_503_names_both_operator_actions(self):
+        # accept is the only endpoint whose 503 has two faces, so — unlike the
+        # single-face constants — its declaration must name both remedies.
+        description = self.spec["paths"]["/projects/{project_id}/writing/accept"][
+            "post"]["responses"]["503"]["description"]
+        self.assertIn("not configured", description)
+        self.assertIn("migrate_ordered_units.py", description)
+
+    def test_writing_endpoints_declare_the_dynamic_provider_pair_together(self):
+        # The dynamic sites are all `504 if TIMEOUT else 502`, so an endpoint that
+        # can reach one can reach the other. Declaring 502 without 504 (or vice
+        # versa) would document half a branch.
+        #
+        # Read from the live spec, not from EXPECTED: asserting over the lock list
+        # would only prove the lock list is self-consistent and could never fail on
+        # a code change. This bites even when someone drops 504 from both places.
+        for (path, method) in self.EXPECTED:
+            declared = self._declared(path, method)
+            with self.subTest(path=path, method=method):
+                self.assertEqual("502" in declared, "504" in declared)
+
+
+class WritingErrorBodyExactKeyTest(unittest.TestCase):
+    """The writing track's plain error bodies are exactly ``{"detail": str}``.
+
+    The partial-envelope statuses are deliberately not asserted here — their
+    Union arm is a different, already-locked contract (``ACCEPT_RESPONSES`` /
+    ``REVISE_AND_GATE_RESPONSES`` regressions). The 503 migration face is locked
+    where it fires, in ``test_writing_accept.py::StartNextUnitLegacyDataTest``.
+    """
+
+    def _assert_detail_only(self, response, status: int):
+        self.assertEqual(response.status_code, status)
+        body = response.json()
+        self.assertEqual(set(body), {"detail"})
+        self.assertIsInstance(body["detail"], str)
+        self.assertTrue(body["detail"])
+
+    def test_404_body(self):
+        client = TestClient(create_app())
+        self._assert_detail_only(
+            client.get("/projects/missing/writing/scratch?draft_id=d1"), 404
+        )
+
+    def test_503_config_body(self):
+        # No writing service configured — the collaborator face.
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        self._assert_detail_only(
+            client.post(
+                f"/projects/{project['id']}/writing/generate",
+                json={"request_id": "wr1", "task_type": "continue_scene",
+                      "instruction": "이어서 써줘"},
+            ),
+            503,
+        )
+
+    def test_400_body(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        self._assert_detail_only(
+            client.post(
+                f"/projects/{project['id']}/writing/generate",
+                json={"request_id": "wr1", "task_type": "nope",
+                      "instruction": "이어서 써줘"},
+            ),
+            400,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

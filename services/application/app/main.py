@@ -3301,7 +3301,8 @@ def create_app(
 
     @app.post("/projects/{project_id}/writing/generate",
               response_model=WritingCandidatePayload,
-              responses=GENERATE_ASYNC_RESPONSES)
+              responses={**GENERATE_ASYNC_RESPONSES,
+                         **_ERRORS_400_404_502_504_CONFIG})
     async def writing_generate_endpoint(
         project_id: str, body: WritingGenerateRequest
     ) -> dict[str, object]:
@@ -3435,7 +3436,8 @@ def create_app(
         return _writing_candidate_payload(candidate)
 
     @app.get("/projects/{project_id}/writing/generation-jobs/{job_id}",
-             response_model=WritingGenerationJobPayload)
+             response_model=WritingGenerationJobPayload,
+             responses=_ERRORS_404)
     async def get_writing_generation_job(
         project_id: str, job_id: str,
     ) -> dict[str, object]:
@@ -3455,7 +3457,8 @@ def create_app(
         return _writing_generation_job_payload(job)
 
     @app.post("/projects/{project_id}/writing/generation-jobs/{job_id}/retry",
-              response_model=WritingGenerationJobPayload)
+              response_model=WritingGenerationJobPayload,
+              responses=_ERRORS_404_409)
     async def retry_writing_generation_job(
         project_id: str, job_id: str,
     ) -> dict[str, object]:
@@ -3479,7 +3482,8 @@ def create_app(
         return _writing_generation_job_payload(job)
 
     @app.post("/projects/{project_id}/writing/gate",
-              response_model=WritingGatePayload)
+              response_model=WritingGatePayload,
+              responses=_ERRORS_400_404_502_504_CONFIG)
     async def writing_gate_endpoint(
         project_id: str, body: WritingGateRequest
     ) -> dict[str, object]:
@@ -3543,7 +3547,8 @@ def create_app(
             raise HTTPException(status_code=status, detail=str(exc)) from exc
         return _writing_gate_payload(result)
 
-    @app.post("/projects/{project_id}/writing/report")
+    @app.post("/projects/{project_id}/writing/report",
+              responses=_ERRORS_400_404_502_504_CONFIG)
     async def writing_report_endpoint(
         project_id: str, body: WritingReportRequest
     ) -> dict[str, object]:
@@ -3612,7 +3617,8 @@ def create_app(
             raise HTTPException(status_code=status, detail=str(exc)) from exc
         return _writing_candidate_payload(enriched)
 
-    @app.post("/projects/{project_id}/writing/revise")
+    @app.post("/projects/{project_id}/writing/revise",
+              responses=_ERRORS_400_404_502_504_CONFIG)
     async def writing_revise_endpoint(
         project_id: str, body: WritingReviseRequest
     ) -> dict[str, object]:
@@ -3960,7 +3966,8 @@ def create_app(
             "audit_error": audit_error,
         }
 
-    @app.get("/projects/{project_id}/writing/loop-audits")
+    @app.get("/projects/{project_id}/writing/loop-audits",
+             responses=_ERRORS_404)
     async def writing_loop_audits_endpoint(project_id: str) -> dict[str, object]:
         # Phase 5.9 L9 B: durable, append-only loop audit summaries, newest
         # first. Project-scoped; retained for later verification reference.
@@ -3974,7 +3981,8 @@ def create_app(
             "items": [_writing_loop_audit_summary_payload(run) for run in runs],
         }
 
-    @app.get("/projects/{project_id}/writing/loop-audits/{audit_id}")
+    @app.get("/projects/{project_id}/writing/loop-audits/{audit_id}",
+             responses=_ERRORS_404)
     async def writing_loop_audit_detail_endpoint(
         project_id: str, audit_id: str
     ) -> dict[str, object]:
@@ -4068,6 +4076,20 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (Archived, StaleWritingBase) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except DraftOrderIntegrityError as exc:
+            # H3 S5: closes the 500 leak SoT v1.7.29 recorded as a known defect.
+            # intent=start_next_unit reaches core_sot.start_next_unit →
+            # _require_ordered_drafts, which raises this on drafts predating the W3
+            # ordered-unit invariant. No clause here caught it, so it escaped as an
+            # opaque 500. Same mapping and rationale as the CRUD siblings (503, fix
+            # is scripts/migrate_ordered_units.py — not a corrected request).
+            #
+            # Order matters: this must precede the WritingAcceptError clause below.
+            # It is not a subclass today, but the 400 group is the broad
+            # "bad request" bucket and putting the integrity face after it invites a
+            # future re-parent to silently reclassify a server-side data problem as
+            # the caller's fault. The over-strict regression pins 503, not 400.
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except (WritingAcceptError, WritingGateError,
                 InvalidContextSearchRequest) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -4120,7 +4142,7 @@ def create_app(
             "created_at": entry.created_at.isoformat(),
         }
 
-    @app.get("/projects/{project_id}/writing/scratch")
+    @app.get("/projects/{project_id}/writing/scratch", responses=_ERRORS_404)
     async def writing_scratch_list_endpoint(
         project_id: str, draft_id: str
     ) -> dict[str, object]:
@@ -4137,7 +4159,7 @@ def create_app(
             "items": [_writing_scratch_payload(e) for e in entries],
         }
 
-    @app.delete("/projects/{project_id}/writing/scratch")
+    @app.delete("/projects/{project_id}/writing/scratch", responses=_ERRORS_404)
     async def writing_scratch_discard_endpoint(
         project_id: str, draft_id: str
     ) -> dict[str, object]:

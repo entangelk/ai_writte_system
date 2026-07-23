@@ -300,3 +300,50 @@
 - **비차단 1 반영 — "504 처음" 과장 문안 정정**: 검증자 지적이 맞다. `writing/accept`·`writing/revise-and-gate`는 **H3 이전부터** 에러 본문 모델과 함께 504를 선언해 왔다(브리프 "에러 본문 모델을 선언한 건 2개뿐" 항). OpenAPI 덤프에서 504 선언 endpoint가 이 둘 + context-search **3개**임을 직접 재확인했다. 정확한 문장은 **"writing 트랙 밖 endpoint로는 처음"**이며 SoT changelog·HANDOFF·work_log 3곳을 그렇게 고쳤다. **실질 주장(context-search = writing 밖 유일 예산 endpoint)과 선언 자체는 처음부터 정확했다** — 문안만 과장이었다.
   - **커밋 메시지(f0b1d15)는 고치지 않았다**: amend는 해시를 바꿔 검증 기록이 인용한 `f0b1d15`를 무효화한다. 히스토리를 다시 쓰는 대신 정정을 후속 커밋과 이 항목에 남기는 쪽이 감사 추적에 정직하다.
 - **비차단 2 — rebuild 미매핑 500**: 사전 존재이고 S3의 `auto_promote_job`과 동일 부류다. HANDOFF 추적 부채에 이미 등록돼 있으며 S5에서 `start_next_unit` 방어와 함께 점검한다. 이번 슬라이스에서 고치지 않은 이유는 위 Decisions 항(D4=A 선언 전용 스코프)과 같다.
+
+---
+
+## Task — H3 에러 응답 계약 S5: writing 트랙 12 endpoint + `start_next_unit` 500 누수 폐쇄 (SoT v1.7.33) — **페이즈 종료**
+
+### Goals
+
+- 브리프 S5 행을 처리해 H3 페이즈를 닫는다: writing 잔여 10 endpoint 선언 + 기선언 2를 포함한 트랙 12 잠금.
+- **이 페이즈에서 유일하게 런타임을 바꾼다**(브리프 명시 예외): `start_next_unit`의 500 누수를 503으로 폐쇄.
+
+### Completed work
+
+- **런타임 수정 — `writing_accept_endpoint`에 `except DraftOrderIntegrityError → 503`**([`main.py`](../../../services/application/app/main.py)). v1.7.29가 "알려진 결손, 정본이 승인한 동작 아님"으로 기록한 500 누수를 닫았다. 무결성 face 방어 지점 3곳 → **4곳**.
+  - **절 위치는 400 그룹 위**. 오늘은 상속 관계가 없어 순서가 결과를 안 바꾸지만, 400 그룹(`WritingAcceptError`·`WritingGateError`·`InvalidContextSearchRequest`)은 "잘못된 요청" 광의 버킷이라 그 아래 두면 훗날의 재상속이 **서버 데이터 문제를 조용히 호출자 잘못으로 재분류**한다. 회귀가 legacy 데이터에서도 binding 오류=400 / 무결성=503임을 양방향으로 잠근다.
+- **`accept`의 503이 앱에서 유일하게 두 얼굴을 함께 갖게 됐다**(구성 미비 + 데이터 무결성). 신규 `_ACCEPT_503`(`writing/http_models.py`)이 **두 운영 조치를 모두 명시**한다 — 한쪽만 적으면 "어느 쪽에 걸렸는지 로그에서 유추"가 남고 그게 H3가 없애려는 갭이다. 상수를 `http_models.py`에 둔 것은 `ACCEPT_RESPONSES`가 이미 거기 있기 때문이다(writing 도메인 응답 맵의 정의처; S2가 `_ERRORS_*`를 `main.py`에 둔 것과 같은 기준의 반대편 적용).
+- **10 endpoint 선언 부착**(generate·generation-jobs get/retry·gate·report·revise·loop-audits 2·scratch 2). 기선언 2를 합쳐 트랙 12 전체가 lock 대상.
+  - **신규 에러 상수 0**: S4의 `_ERRORS_400_404_502_504_CONFIG`가 generate/gate/report/revise 4곳에 그대로 맞았다. generate는 `{**GENERATE_ASYNC_RESPONSES, **_ERRORS_400_404_502_504_CONFIG}`로 202 success arm과 병합.
+- **회귀 신규 13건**:
+  - `WritingErrorContractDeclarationTest` 6(`test_application_api.py`) — 12행 exact lock(subTest 12) · 트랙 전수 선언 가드 · 본문 uniform-detail(subTest 38, `$ref` 또는 `anyOf` arm) · **Union 허용 지점 exact**(5곳 고정) · accept 503 두 조치 명시 · **502/504 동적 쌍 동반 선언**(subTest 12).
+  - `WritingErrorBodyExactKeyTest` 3(동 파일) — 404·503-config·400 wire 본문.
+  - **`StartNextUnitLegacyDataTest` 4**(`test_writing_accept.py`) — 런타임 수정의 양방향 잠금(아래 Verification).
+
+### Issues found
+
+- **자초한 사고 1건(복구 완료)**: mutation 실험을 되돌릴 때 `git checkout tests/test_application_api.py`를 써서 **커밋 안 된 S5 테스트 추가분을 통째로 날렸다**. 백업 파일로 되돌린 다른 mutation과 달리 이 파일은 작업분이 uncommitted 상태였다. 즉시 재작성해 복구했고 S2~S5 선언 테스트 31건/193 subtest green을 재확인했다. **교훈: 작업 트리에 uncommitted 변경이 있는 파일에 `git checkout`을 mutation revert 수단으로 쓰지 말 것** — mutation 대상 파일은 반드시 `cp` 백업/복원으로 다룬다.
+
+### Decisions (구현자 판단)
+
+- **partial envelope Union을 D1=A 위반으로 보지 않았다**: `revise-and-gate`(400/502/503/504)·`accept`(502)는 H3 이전부터 `Union[<partial>, ErrorDetailResponse]`를 선언한다. 에러 arm이 여전히 단일 `ErrorDetailResponse`라 "균일 에러 본문" 계약은 유지된다. 다만 이 예외를 **묵인하지 않고 회귀로 고정**했다 — `UNION_BODIES`가 Union 허용 지점을 정확히 그 5곳으로 잠가, 새 Union이 아무도 결정하지 않은 채 drift로 생기는 것을 막는다.
+- **`test_writing_endpoints_declare_the_dynamic_provider_pair_together`를 live spec 기준으로 고쳤다**: 처음엔 `EXPECTED`(하드코딩 lock 리스트)를 순회하도록 썼는데, 그러면 **내 lock 리스트의 자기 정합성만 증명**하고 코드 변경으로는 절대 실패할 수 없다. mutation(gate의 504를 코드·lock 리스트 양쪽에서 제거)으로 이 맹점을 실증한 뒤 `self._declared(...)`를 읽도록 바꿔 실제 drift에도 물게 했다.
+- **누적 미매핑 500 부채 2건(`auto_promote_job`·`index/source-blocks/rebuild`)은 고치지 않았다**: 브리프의 런타임 변경 예외는 `start_next_unit` **하나만** 명시한다. 두 건은 H3 이전부터 존재했고 이 페이즈의 계약 위반이 아니므로, 여기서 함께 고치면 오너가 승인한 스코프를 구현자가 넓히는 것이 된다. HANDOFF 추적 부채에 유지하고 별도 슬라이스 후보로 남긴다.
+
+### Verification
+
+- **OpenAPI self-discovery**: 12 endpoint 선언 집합이 코드 직독 도출과 정확히 일치(mismatch 0).
+- **런타임 수정의 양방향 실증**:
+  - **under-strict**: `except DraftOrderIntegrityError` 절을 제거하면 `test_start_next_unit_on_legacy_data_is_503`이 `DraftOrderIntegrityError`가 endpoint 밖으로 새며 재실패(= 폐쇄한 그 500). 절 복원 후 4/4 green.
+  - **over-strict 3종**: legacy 없는 프로젝트는 `start_next_unit` **200** 유지 · `append_current`는 legacy가 있어도 **200**(이 경로는 `_require_ordered_drafts`를 안 탄다 = 07-22 수정의 수술적 범위 보존) · legacy 상태에서도 binding 오류는 **400**(절 순서 계약).
+- **선언 mutation 5종(양방향)**: report 선언 삭제(under) · scratch에 안 던지는 409(over) · accept 503의 두-얼굴 description 제거 · plain-error 상태에 partial Union 누출 · gate가 502만 선언하고 504 누락. **+ 6번째**: gate의 504를 코드·lock 리스트 **양쪽**에서 제거 → 수정된 동적 쌍 테스트가 bite(수정 전이었다면 통과했을 시나리오).
+- **런타임 불변(선언분)**: backend 전체 **1450 passed / 1 skipped / 0 failed / 524 subtests**. 직전 기준선 1437/462 대비 +13 test·+62 subtest = 신규분과 정확히 일치. 기존 writing 상태코드 회귀 전부 green.
+- **프론트 타입**: `gen:api` → **+244행 / -1행**. **유일한 삭제 라인은 accept 503의 JSDoc `@description Service Unavailable`이 두-얼굴 문장으로 교체된 것**이며 diff를 직접 읽어 타입·필드 손실이 0임을 확인했다(S2~S4의 `-0`과 다른 유일한 지점이라 명시 확인 대상이었다). `tsc` clean, build JS 399.03 kB, frontend **194 passed / 13 files**.
+
+### Next steps
+
+- **H3 페이즈 종료.** 누적 60 endpoint 선언(CRUD 20[선언 18]·analysis 21·memory/source 7·writing 12[신규 10]). 브리프의 Deferred는 그대로 열려 있다: 프론트 에러 UX(D4=A로 분리)·`reason` 기계 코드(D1=B, 실사용 근거 시 additive)·외부 소비자 에러 카탈로그.
+- **남은 미매핑 500 부채 2건**(`auto_promote_job` 승격 루프 · `index/source-blocks/rebuild` 협력자 장애)은 별도 슬라이스 후보. 둘 다 `start_next_unit`과 같은 부류이고 같은 해법(`except` 절 + 회귀)이지만, 어느 상태코드로 매핑할지는 각각 판단이 필요하다(전자는 부분 성공 의미론, 후자는 협력자 구성 face).
+- **다음 큰 갈림길은 여전히 오너 dogfood 착수(GATE-1)**다 — H3는 계약 정직성 작업이라 dogfood와 병행 가능했고, 이제 그 트랙이 비었다.

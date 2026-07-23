@@ -265,12 +265,27 @@ REVISE_AND_GATE_RESPONSES: dict[int | str, dict] = {
     504: _REVISE_GATE_PARTIAL,
 }
 
+# accept is the only endpoint whose 503 carries BOTH faces the SoT distinguishes
+# (v1.7.29): a collaborator missing from the deployment, and — since H3 S5 closed
+# the start_next_unit 500 leak — stored draft metadata predating the W3
+# ordered-unit invariant. Neither is fixable by resending the request, but the
+# operator actions differ, so the declaration names both instead of making the
+# reader infer which one they hit from a log.
+_ACCEPT_503 = {
+    "model": ErrorDetailResponse,
+    "description": "Server-side action required before this request can succeed: "
+                   "either a collaborator is not configured in this deployment, "
+                   "or stored draft metadata predates the ordered-unit invariant "
+                   "(run scripts/migrate_ordered_units.py). Retrying the request "
+                   "alone cannot succeed.",
+}
+
 ACCEPT_RESPONSES: dict[int | str, dict] = {
     400: _DETAIL_ONLY,
     404: _DETAIL_ONLY,
     409: _DETAIL_ONLY,
     502: {"model": Union[WritingAcceptAnalysisPartial, ErrorDetailResponse]},
-    503: _DETAIL_ONLY,
+    503: _ACCEPT_503,
     504: _DETAIL_ONLY,
 }
 
