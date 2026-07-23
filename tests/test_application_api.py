@@ -24,6 +24,7 @@ from services.application.app.analysis.service import (
     InvalidAnalysisCandidate,
 )
 from services.application.app.core_sot.models import Draft
+from services.application.app.indexing.embedding import EmbeddingProviderError
 from services.application.app.core_sot.service import (
     CoreSotService,
     InMemoryCoreSotRepository,
@@ -2439,8 +2440,11 @@ class MemorySourceErrorContractDeclarationTest(unittest.TestCase):
         ("/projects/{project_id}/snapshots/{snapshot_id}/source-refs", "get"):
             {"404"},
         ("/projects/{project_id}/source-refs/{source_ref_id}", "get"): {"404"},
+        # 502 added when the embedding-failure 500 leak was closed: the rebuild
+        # embeds every source block, so a configured-but-failing embedding
+        # service is an upstream failure, not a missing collaborator (503).
         ("/projects/{project_id}/snapshots/{snapshot_id}"
-         "/index/source-blocks/rebuild", "post"): {"404"},
+         "/index/source-blocks/rebuild", "post"): {"404", "502"},
         ("/projects/{project_id}/context-search", "post"):
             {"400", "404", "502", "503", "504"},
     }
@@ -2533,6 +2537,89 @@ class MemorySourceErrorBodyExactKeyTest(unittest.TestCase):
             ),
             400,
         )
+
+
+class SourceBlockRebuildEmbeddingFailureTest(unittest.TestCase):
+    """A failing embedding service makes the rebuild a 502, not an opaque 500.
+
+    ``POST …/index/source-blocks/rebuild`` embeds every source block, but the
+    endpoint only caught ``NotFound`` — so a configured-but-failing embedding
+    service escaped as a 500. Nobody in the app caught ``EmbeddingProviderError``
+    at all (it is raised for timeout / unreachable / malformed response alike).
+
+    502 rather than 503 because the collaborator is present and failing, not
+    missing. That is what the SoT taxonomy assigns to upstream failures, and it
+    matches the precedent already in the codebase: context search's vector step
+    maps an embedding failure to ``BACKEND_ERROR``, which surfaces as 502.
+
+    Both directions: removing the ``except EmbeddingProviderError`` clause makes
+    the failure case re-fail (the 500 returns), and the healthy case must stay
+    200 so the catch cannot be widened into swallowing successful rebuilds.
+    """
+
+    def _project_with_snapshot(self, client):
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        saved = client.post(
+            f"/projects/{project['id']}/drafts/{draft['id']}/versions",
+            json={"raw_text": "민아는 파란 편지를 발견했다.", "idempotency_key": "s1"},
+        ).json()
+        return project["id"], saved["snapshot"]["id"]
+
+    def test_embedding_failure_is_502_with_the_uniform_body(self):
+        class _FailingEmbeddings:
+            def embed(self, text):
+                raise EmbeddingProviderError("embedding service is unavailable")
+
+        with patch(
+            "services.application.app.main._build_embedding_provider",
+            return_value=_FailingEmbeddings(),
+        ):
+            client = TestClient(create_app())
+            project_id, snapshot_id = self._project_with_snapshot(client)
+            response = client.post(
+                f"/projects/{project_id}/snapshots/{snapshot_id}"
+                f"/index/source-blocks/rebuild"
+            )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(set(response.json()), {"detail"})
+        self.assertTrue(response.json()["detail"])
+
+    def test_healthy_rebuild_still_succeeds(self):
+        # Over-strict guard: the new clause must not turn working rebuilds into
+        # errors. The default deterministic fake embedding never raises.
+        client = TestClient(create_app())
+        project_id, snapshot_id = self._project_with_snapshot(client)
+        response = client.post(
+            f"/projects/{project_id}/snapshots/{snapshot_id}"
+            f"/index/source-blocks/rebuild"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_unrelated_failure_is_not_relabelled_as_502(self):
+        # Over-strict guard on the clause's *width*. Catching bare ``Exception``
+        # here would pass every other test in this class while quietly
+        # relabelling programming errors as an upstream failure — telling an
+        # operator to go check a healthy embedding service. Only the named type
+        # is a 502; anything else must keep propagating.
+        class _BrokenEmbeddings:
+            def embed(self, text):
+                raise ValueError("not an embedding transport failure")
+
+        with patch(
+            "services.application.app.main._build_embedding_provider",
+            return_value=_BrokenEmbeddings(),
+        ):
+            client = TestClient(create_app())
+            project_id, snapshot_id = self._project_with_snapshot(client)
+            with self.assertRaises(ValueError):
+                client.post(
+                    f"/projects/{project_id}/snapshots/{snapshot_id}"
+                    f"/index/source-blocks/rebuild"
+                )
 
 
 class WritingErrorContractDeclarationTest(unittest.TestCase):

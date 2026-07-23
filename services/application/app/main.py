@@ -241,7 +241,9 @@ from services.application.app.indexing.chroma import (
     ChromaVectorIndexAdapter,
     connect_chroma_collection,
 )
-from services.application.app.indexing.embedding import RemoteEmbeddingProvider
+from services.application.app.indexing.embedding import (
+    EmbeddingProviderError, RemoteEmbeddingProvider,
+)
 from services.application.app.indexing.memory_index import MEMORY_VECTOR_COLLECTION
 from services.application.app.indexing.memory_lexical_index import (
     MEMORY_LEXICAL_INDEX,
@@ -1023,6 +1025,7 @@ _MIGRATION_503 = {
 }
 
 _ERRORS_404: dict[int | str, dict] = {404: _ERROR}
+_ERRORS_404_502: dict[int | str, dict] = {404: _ERROR, 502: _ERROR}
 _ERRORS_400_404: dict[int | str, dict] = {400: _ERROR, 404: _ERROR}
 _ERRORS_404_409: dict[int | str, dict] = {404: _ERROR, 409: _ERROR}
 _ERRORS_400_404_409: dict[int | str, dict] = {400: _ERROR, 404: _ERROR, 409: _ERROR}
@@ -2330,7 +2333,7 @@ def create_app(
 
     @app.post(
         "/projects/{project_id}/snapshots/{snapshot_id}/index/source-blocks/rebuild",
-        responses=_ERRORS_404,
+        responses=_ERRORS_404_502,
     )
     async def rebuild_source_block_index(
         project_id: str,
@@ -2343,6 +2346,15 @@ def create_app(
             )
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except EmbeddingProviderError as exc:
+            # The rebuild embeds every source block, so a configured-but-failing
+            # embedding service (timeout / unreachable / malformed response) used
+            # to escape as an opaque 500. It is an upstream collaborator failure,
+            # not a missing one, so it is 502 rather than 503 — the same call this
+            # endpoint's sibling already makes: context search's vector step maps
+            # an embedding failure to BACKEND_ERROR, which surfaces as 502
+            # (context_search/service.py::_run_vector_step).
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @app.post("/projects/{project_id}/analysis/jobs", responses=_ERRORS_404)
     async def create_analysis_job(

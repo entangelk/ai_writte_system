@@ -354,3 +354,45 @@
 - **비차단 1 반영 — 독스트링의 mutation 주장 과장 정정**: `StartNextUnitLegacyDataTest` 독스트링이 "`InvalidDraftOrder` 전체로 widening하면 over-strict 2건이 깨진다"고 썼는데, **직접 돌려 보니 4건 전부 통과한다**(검증자 지적 재현 완료). 이유까지 1차 소스에서 확인했다: accept 경로에서 도달 가능한 `InvalidDraftOrder`는 무결성 서브클래스뿐이다 — 부모는 `start_next_unit`의 잘못된 `unit_kind`에서도 발생하지만([`core_sot/service.py:734`](../../../services/application/app/core_sot/service.py#L734)), endpoint가 서비스 호출 **전에** `UnitKind(body.next_unit.unit_kind)`로 강제 변환하므로([`main.py:4012`](../../../services/application/app/main.py#L4012)) 그 분기는 이미 HTTP 경계에서 400이고 여기 도달하지 않는다.
   - **테스트를 추가하지 않고 독스트링을 고쳤다**: widening이 이 endpoint를 통해서는 **관측 가능한 효과가 없으므로** 이 층위에서 잠글 대상 자체가 없다. 억지로 쓰려면 서비스를 직접 호출해야 하는데 그건 endpoint의 매핑을 검증하는 게 아니다. 대신 독스트링에 (a) 이 테스트들이 못 잡는 것이 무엇인지, (b) 왜 못 잡는지, (c) 나중에 `UnitKind` 강제 변환이 사라지는 등으로 부모가 도달 가능해지면 그때 잠가야 한다는 것을 명시했다. **좁은 catch는 여전히 의도 표명**("서버 측 데이터 문제가 503이지 호출자의 순서 실수가 아니다")이다.
   - 이 정정은 계약·코드·산출물 무변이며 테스트 4건은 그대로 green이다.
+
+---
+
+## Task — 임베딩 실패 500 누수 폐쇄: source-block rebuild 502 매핑 (SoT v1.7.34)
+
+### Goals
+
+- 오너 지시 "다음 작업 작은 것부터". H3 S5가 별도 슬라이스 후보로 남긴 **미매핑 500 부채 2건** 중 판단이 명확한 쪽을 닫는다.
+- 착수 전 **HANDOFF 추적 부채가 stale**임을 발견해 함께 정리한다.
+
+### Completed work
+
+- **[stale 문서 정리] `start_next_unit` 500 부채 항목 삭제**: HANDOFF 추적 부채 첫 항목이 여전히 "**미수정**, 추적 부채"로 적혀 있었는데 **S5(v1.7.33)가 이미 닫았다**. 다음 작업자가 이미 고친 결함을 다시 조사하게 만드는 항목이라 제거했다(같은 내용은 Current Status의 S5 항과 SoT v1.7.33에 정확히 남아 있다).
+- **런타임 수정 — `rebuild_source_block_index`에 `except EmbeddingProviderError → 502`**: 이 endpoint는 모든 source block을 임베딩하는데 `NotFound`만 잡고 있었다. 구성돼 있지만 실패하는 임베딩 서비스(timeout·연결 불가·비정상 응답이 전부 `EmbeddingProviderError`)가 opaque 500으로 샜다.
+- **선언 갱신**: `{404}` → **`{404,502}`**(신규 `_ERRORS_404_502`). S4의 `MemorySourceErrorContractDeclarationTest` lock 리스트도 동반 갱신했다 — 선언은 코드를 따라간다.
+- **회귀 신규 3건**(`SourceBlockRebuildEmbeddingFailureTest`): 실패 시 502 + `{detail}` 단일 키 · 정상 rebuild 200 유지 · **절 폭 over-strict 가드**.
+
+### Issues found
+
+- **`EmbeddingProviderError`는 앱 어디에서도 잡히지 않고 있었다**(caller 0). 즉 이건 rebuild endpoint만의 결손이 아니라 **타입 전체가 무방비**였다. 패턴 스윕(§4)으로 `.embed()` 호출 지점 9곳을 훑은 결과:
+  - **HTTP 도달 경로는 이 endpoint가 실질적으로 유일**하다. context search 주 경로는 `_run_vector_step`이 광의 `except Exception`으로 이미 잡아 `BACKEND_ERROR`→502로 표면화하고, `candidate_index`·`memory_index`·`indexing/service`는 worker 경로다.
+  - **[추적 부채] `context_search/service.py`의 `retrieve` 2곳(:199·:406)은 같은 무방비 패턴**이나 HTTP 도달성을 확인하지 못했다. 30초 스윕 예산을 넘는 조사라 부채로 등록했다(§4 "발견 시 인라인 수정 또는 file:line 부채 등록, 조용히 넘어가지 않는다").
+
+### Decisions (구현자 판단)
+
+- **502이지 503이 아니다**. 처음 HANDOFF에 부채를 적을 때 나는 이걸 "협력자 구성 face(503)에 가깝다"고 썼는데 **틀렸다**. 503은 협력자가 **없는** 것이고, 여기서는 임베딩 서비스가 **구성돼 있는데 실패**한다. SoT 502 행("상류가 실패")에 정확히 해당하고, 코드 내 선례와도 일치한다 — context search의 vector step이 임베딩 실패를 이미 502로 표면화한다. **오너 브리프를 만들지 않은 이유가 이것**이다: 기존 계약과 선례가 답을 이미 정하고 있어 진짜 갈림길이 아니다.
+- **SoT 502 행에 502/503 구분 규칙을 문장으로 못박았다**: "협력자가 없는 것(503)이 아니라 있는데 실패한 것이 502다". 내가 방금 틀린 구분이면 다음 사람도 틀린다.
+- **`auto_promote_job`은 손대지 않았다**: 남은 부채 1건은 코드 매핑이 아니라 **계약 질문**이다(일부 승격 성공 후 실패하면 무엇을 반환하는가 — 부분 성공 봉투인가, 전체 실패인가). 이건 오너 판단이 필요한 진짜 갈림길이라 임의로 고르지 않았다.
+
+### Verification
+
+- **mutation 2종(양방향)**:
+  - **under-strict**: `except EmbeddingProviderError` 절 제거 → `test_embedding_failure_is_502_with_the_uniform_body`가 예외가 endpoint 밖으로 새며 재실패(= 폐쇄한 그 500).
+  - **절 폭 over-strict**: `except Exception`으로 확대 → `test_unrelated_failure_is_not_relabelled_as_502` FAIL. **이 가드는 mutation이 먼저 부재를 드러내서 추가한 것**이다 — 처음 3건만 있을 때 bare-`Exception` 변형이 전부 통과했고, 그건 무관한 프로그래밍 오류를 "상류 실패"로 오분류해 **운영자에게 멀쩡한 임베딩 서비스를 점검하라고 시키는** 종류의 거짓말이라 잠글 가치가 있었다.
+- **런타임 불변(그 외)**: backend 전체 **1453 passed / 1 skipped / 0 failed / 525 subtests**. 직전 기준선 1450/524 대비 **+3 test·+1 subtest**과 정확히 일치한다 — 신규 3건은 subTest를 쓰지 않고, +1은 S4 body-model 루프가 rebuild의 선언 코드 1개(502)를 더 돌기 때문이다(12→13). *(초안에 +2/526으로 잘못 적었다가 실측 후 정정.)*
+- **프론트 타입**: `gen:api` **+9행 / -0행**(rebuild endpoint의 502 응답만), tsc clean, build JS 399.03 kB, frontend **194 passed / 13 files**.
+
+### Next steps
+
+- **남은 미매핑 500 부채 1건 = `auto_promote_job`** — 오너 판단 필요(부분 성공 의미론).
+- **신규 추적 부채**: `context_search/service.py:199`·`:406`의 무방비 `embed()` — HTTP 도달성 확인이 선행돼야 한다.
+- 큰 갈림길은 여전히 **오너 dogfood 착수(GATE-1)**.
