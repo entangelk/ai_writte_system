@@ -347,3 +347,10 @@
 - **H3 페이즈 종료.** 누적 60 endpoint 선언(CRUD 20[선언 18]·analysis 21·memory/source 7·writing 12[신규 10]). 브리프의 Deferred는 그대로 열려 있다: 프론트 에러 UX(D4=A로 분리)·`reason` 기계 코드(D1=B, 실사용 근거 시 additive)·외부 소비자 에러 카탈로그.
 - **남은 미매핑 500 부채 2건**(`auto_promote_job` 승격 루프 · `index/source-blocks/rebuild` 협력자 장애)은 별도 슬라이스 후보. 둘 다 `start_next_unit`과 같은 부류이고 같은 해법(`except` 절 + 회귀)이지만, 어느 상태코드로 매핑할지는 각각 판단이 필요하다(전자는 부분 성공 의미론, 후자는 협력자 구성 face).
 - **다음 큰 갈림길은 여전히 오너 dogfood 착수(GATE-1)**다 — H3는 계약 정직성 작업이라 dogfood와 병행 가능했고, 이제 그 트랙이 비었다.
+
+### 오너 독립 검증 PASS + 비차단 반영 (S5)
+
+- **오너 독립 검증 합격(조건 없음)**: `docs/verifications/2026-07-23/h3_s5_writing_error_responses.md`. boundary matrix **12/12 빈 cell 없음**. 검증자가 특히 값진 축 하나를 닫았다 — **기선언 2개(`revise-and-gate`·`accept`)의 lock 리스트 값이 선언에서 복사한 순환값이 아님**을 502/504 실제 raise 근거로 입증했다(내 lock 리스트는 그 둘에 대해 기존 선언을 읽고 적은 것이라 자기참조 위험이 실재했다). 런타임 수정 under-strict mutation·수치 전부(1450/1/524 · 194/13 · +244/-1 numstat · 399.03 kB)·`schema.d.ts` 재생성 diff 0행(수동 편집 drift 없음)도 재실행 일치.
+- **비차단 1 반영 — 독스트링의 mutation 주장 과장 정정**: `StartNextUnitLegacyDataTest` 독스트링이 "`InvalidDraftOrder` 전체로 widening하면 over-strict 2건이 깨진다"고 썼는데, **직접 돌려 보니 4건 전부 통과한다**(검증자 지적 재현 완료). 이유까지 1차 소스에서 확인했다: accept 경로에서 도달 가능한 `InvalidDraftOrder`는 무결성 서브클래스뿐이다 — 부모는 `start_next_unit`의 잘못된 `unit_kind`에서도 발생하지만([`core_sot/service.py:734`](../../../services/application/app/core_sot/service.py#L734)), endpoint가 서비스 호출 **전에** `UnitKind(body.next_unit.unit_kind)`로 강제 변환하므로([`main.py:4012`](../../../services/application/app/main.py#L4012)) 그 분기는 이미 HTTP 경계에서 400이고 여기 도달하지 않는다.
+  - **테스트를 추가하지 않고 독스트링을 고쳤다**: widening이 이 endpoint를 통해서는 **관측 가능한 효과가 없으므로** 이 층위에서 잠글 대상 자체가 없다. 억지로 쓰려면 서비스를 직접 호출해야 하는데 그건 endpoint의 매핑을 검증하는 게 아니다. 대신 독스트링에 (a) 이 테스트들이 못 잡는 것이 무엇인지, (b) 왜 못 잡는지, (c) 나중에 `UnitKind` 강제 변환이 사라지는 등으로 부모가 도달 가능해지면 그때 잠가야 한다는 것을 명시했다. **좁은 catch는 여전히 의도 표명**("서버 측 데이터 문제가 503이지 호출자의 순서 실수가 아니다")이다.
+  - 이 정정은 계약·코드·산출물 무변이며 테스트 4건은 그대로 green이다.

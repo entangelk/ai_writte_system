@@ -857,12 +857,27 @@ class StartNextUnitLegacyDataTest(unittest.TestCase):
     * under-strict — remove the ``except DraftOrderIntegrityError`` clause in
       ``writing_accept_endpoint`` and ``test_start_next_unit_on_legacy_data_is_503``
       re-fails with the original 500.
-    * over-strict — the fix must stay surgical. A project with no legacy draft
-      still accepts normally (200), and ``append_current`` is unaffected even
-      *with* legacy data present, because that path never calls
-      ``_require_ordered_drafts``. Widening the catch (e.g. mapping all of
-      ``InvalidDraftOrder``, or hoisting it above the 400 group's inputs) breaks
-      those two.
+    * over-strict — the fix must stay surgical: a project with no legacy draft
+      still accepts normally (200); ``append_current`` is unaffected even *with*
+      legacy data present, because that path never calls
+      ``_require_ordered_drafts``; and a binding error is still 400 rather than
+      being swallowed by the integrity clause sitting above the 400 group.
+
+    What these tests do *not* catch (independent verification, 2026-07-23):
+    broadening the clause to ``except InvalidDraftOrder`` passes all four,
+    because through this endpoint the integrity subclass is the only member of
+    that hierarchy reachable. The parent is also raised for a bad ``unit_kind``
+    (``core_sot/service.py`` in ``start_next_unit``), but the endpoint coerces
+    ``UnitKind(body.next_unit.unit_kind)`` before calling the service, so that
+    branch is already a 400 at the HTTP boundary and never arrives here. So the
+    widening has no observable effect through this endpoint today and there is
+    nothing to assert against it at this layer — writing such a test would mean
+    calling the service directly, which would no longer be testing the
+    endpoint's mapping. The narrow catch stays a deliberate intent statement
+    ("the server-side data problem is what maps to 503, not the caller's
+    ordering mistakes"). If a later change makes the parent reachable here — for
+    instance by dropping the ``UnitKind`` coercion above — the difference
+    becomes observable and must be locked then.
     """
 
     def _setup(self, *, legacy: bool):
