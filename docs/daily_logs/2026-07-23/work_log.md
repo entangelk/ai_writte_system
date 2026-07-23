@@ -404,3 +404,53 @@
   - **부채 성격을 다시 씀**: "도달성 미확인"(= 다음 사람이 재조사해야 함) → **"도달은 하나 호출자 광의 catch로 보호됨 — 그 catch가 좁아지면 누수로 전환"**(= 재조사 불요, 그 catch를 건드릴 때만 주의). 검증자 지적대로 후자가 다음 작업자의 비용을 실제로 줄인다.
   - **내 스윕이 30초 예산에서 멈춘 지점이 정확히 여기였다**: 호출자까지 한 단계 더 올라갔으면 나왔을 결론이다. 스윕 예산은 §4가 의도한 것이지만, "미확인"으로 등록할 때는 **무엇을 확인하면 닫히는지**를 함께 적어야 다음 사람이 같은 지점에서 다시 멈추지 않는다.
   - 코드·계약·산출물 무변(문서 정밀화만).
+
+---
+
+## Task — 가벼운 운영 항목 2건: nginx upstream 항구 수정 + live Chroma 테스트 실행 확립
+
+### Goals
+
+- 오너 지시: "가벼운 거 2개 처리하자 — 크로마 의존성 도커에 넣고, 엔진엑스 항구 수정".
+- 두 건 모두 **런타임 코드 무변**(nginx는 배포 설정 1파일, Chroma는 실행 절차 확립).
+
+### Issues found — 착수 전제가 두 건 다 어긋났다
+
+- **Chroma: "도커에 의존성 넣으면 된다"가 성립하지 않는다.** `chromadb>=0.5,<0.7`은 **이미** `services/application/requirements.txt`에 있다(즉 이미 Docker 안에 있다). skip이 남는 이유는 `python3 -m pytest`를 돌리는 **호스트 파이썬**에 없기 때문이라, 도커에 무엇을 추가해도 호스트 skip은 사라지지 않는다. **오너에게 이 사실을 제시하고 선택을 받았다**(→ User Decisions).
+- **HANDOFF의 Chroma 기록이 틀렸다 — 그리고 위험했다**: "서버 자체는 8001에 떠 있다"고 적혀 있었으나 **8001은 `agent-memory-chroma`(다른 프로젝트 컨테이너)**이고 이 프로젝트 chroma는 **8003**이다. 그 기록을 믿고 `CHROMA_TEST_URL=localhost:8001`을 주면, 컬렉션을 만들고 지우는 이 테스트가 **남의 프로젝트 벡터 저장소를 조작**한다. 단순 오기가 아니라 데이터 손상 가능 지시였다.
+- **nginx: 기록된 증상보다 하나 더 나빴다.** HANDOFF는 "재기동 후 옛 IP를 물어 502"만 적었는데, 실제로는 `application`이 안 떠 있으면 nginx가 `host not found in upstream`으로 **기동 자체를 거부**한다 → SPA 전체 다운. **착수 시점에 frontend 컨테이너가 정확히 그 상태로 crashloop 중이었다**(`Restarting (1)`). 같은 근본 원인(기동 시 1회 해석)의 두 증상이고, 한 수정으로 둘 다 닫힌다.
+
+### Completed work
+
+- **nginx 항구 수정** — [`frontend/nginx.conf`](../../../frontend/nginx.conf):
+  - `resolver 127.0.0.11 valid=10s ipv6=off;` + `set $application_upstream application;` + `proxy_pass http://$application_upstream:8000;`로 **요청 시점 해석**.
+  - **변수 proxy_pass는 location 접두 치환을 하지 않으므로** `rewrite ^/api/(.*)$ /$1 break;`로 `/api`를 명시적으로 제거했다(literal 형태의 trailing slash가 해주던 일). 쿼리스트링은 rewrite가 그대로 보존한다.
+  - 주석에 두 실패 모드(옛 IP 고착 / 기동 거부)와 각각이 왜 닫히는지 기록.
+- **live Chroma 테스트 실행 절차 확립 + 최초 실행**: application 이미지에 `pytest`도 `tests/`도 없지만 대상이 `unittest.TestCase`라 **stdlib `unittest` + tests 볼륨 마운트**로 실행된다. HANDOFF에 명령을 기록했다.
+
+### User Decisions and Rationale
+
+- **오너 결정 = "컨테이너에서 실행 + 문서화"**(제시한 3안 중). 근거: 호스트 파이썬에 무거운 전이 의존성을 심지 않고, repo가 관리하지 않아 **다른 작업자 머신에서 재현되지 않는 상태**를 만들지 않는다. 대가로 호스트 `pytest`의 skip 1건은 남지만, 그건 "이 환경에서 안 돌렸다"는 정직한 신호이고 돌리는 방법이 문서에 있다.
+
+### Verification
+
+- **nginx A/B(동일 조건, `application` 해석 불가)**: 구 config → `nginx -t`가 `[emerg] host not found in upstream`으로 실패. 신 config → `syntax is ok / test is successful`. 기동 거부가 사라진 직접 증거.
+- **격리 샌드박스 3종**(사용자 스택 무접촉, 전용 network + 임시 컨테이너):
+  - **(A) upstream 부재 상태로 nginx 먼저 기동** → 컨테이너 Up, `GET /` **200**(SPA 서빙), `GET /api/x` **502**(nginx는 살아 있고 upstream만 없음).
+  - **(B) 접두 제거·쿼리 보존**: `GET /api/projects?limit=2` → upstream 로그에 `GET /projects?limit=2`.
+  - **(C) IP 추종**: upstream을 지우고 **다른 IP로 재생성**(172.31.0.3 → **172.31.0.4**, 해제된 IP는 filler 컨테이너로 선점해 강제) 후 **nginx 재기동 없이** `GET /api/health`가 새 컨테이너에 도달(새 upstream 로그에 `GET /health`). 구 config였다면 .3에 고착됐을 시나리오다.
+- **실 배포 적용**: `docker compose build frontend` → `up -d --no-deps frontend`. **crashloop(`Restarting (1)`) → `Up`**, `:5173/` **200**, `:5173/api/health` **502**(application이 실제로 down이므로 올바른 응답). 수정 전에는 SPA 자체가 뜨지 않았다.
+- **live Chroma**: `docker compose up -d --no-deps chroma`(8003) 후 컨테이너 내 `python -m unittest tests.test_chroma_adapter.ChromaAdapterLiveTest -v` → **`test_upsert_query_list_and_restart_survival ... ok` (Ran 1 test, OK)**. **이 테스트가 실제로 실행된 것은 이번이 처음**이다 — 그전에는 항상 skip이라 통과 여부 자체가 미확인이었다. 대상이 이 프로젝트 chroma(컨테이너 IP 172.23.0.6)임을 연결 로그로 확인했다.
+- **백엔드/프론트 소스 무변**이라 pytest·vitest·`gen:api` 재실행 대상 없음(nginx.conf는 배포 설정, 테스트 코드 경로 아님).
+
+### Decisions (구현자 판단)
+
+- **`resolver`에 `127.0.0.11` 하드코딩**: Docker 내장 DNS의 고정 주소이고 이 서비스는 compose 네트워크 전용이다. nginx 이미지의 `15-local-resolvers.envsh`가 `$NGINX_LOCAL_RESOLVERS`를 채워 주지만 그건 템플릿(`.conf.template`) 경로에서만 치환되는데 이 파일은 정적 `.conf`라 쓸 수 없다.
+- **`ipv6=off`**: 내장 DNS에 AAAA를 묻는 왕복을 없앤다(기록된 healthcheck false-negative가 `localhost`→`::1`이었던 전례가 있어 IPv6 경로를 굳이 남기지 않았다).
+- **`valid=10s`**: 컨테이너 재생성 후 최대 10초 내 추종. 더 짧게 하면 DNS 질의만 늘고, 더 길면 재기동 후 502 창이 길어진다.
+- **실 스택을 전부 띄우지 않았다**: 이 스택은 shell env 오버라이드로 기동되고 그 값이 repo에 없다(`.env` 없음). 추측 기동은 포트 충돌로 스택을 내릴 위험이 있어(HANDOFF 기록) **검증은 격리 샌드박스에서 하고**, 실 배포에는 이미 죽어 있던 frontend만 `--no-deps`로 교체했다.
+
+### Next steps
+
+- **application 스택 기동은 오너 몫**: 현재 `application`·`gateway`·`mongo`·`elasticsearch`·`embedding`이 6시간 전 `Exited (255)` 상태다(이번 작업과 무관한 선행 상태). frontend는 이제 그 상태에서도 정상 기동하므로 SPA는 뜬다.
+- 남은 가벼운 후보: 배포 `mongo`에 `ulimits.nofile`(4줄, 스택 재생성 필요) · `auto_promote_job` 부분 성공 의미론(결정 브리프 선행).
