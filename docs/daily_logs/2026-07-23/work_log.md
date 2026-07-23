@@ -243,3 +243,53 @@
   - "나머지 **18** endpoint 재사용" → **19**. 재도출: `_ERRORS_404` 11 + `_404_409` 6 + `_400_404_409` 1 + `_400_404` 1 = 19, 신규 상수 2(run·compare) = 21. work_log·SoT changelog 양쪽 정정.
   - "body-model subTest **31**" → **36**(= 21행의 선언 코드 총합 11+12+3+2+3+5). 31이면 총계가 54가 되어 실측 59와 모순됐다. work_log 정정 + 21+36+2=59 산식을 명시.
 - **비차단 2 반영 — 사전 존재 미매핑 500 경로를 추적 부채로 등록**: `auto_promote_job` 승격 루프·일부 list 호출이 `try` 밖이라 예외 시 500이 샌다. **S3 비관여**(선언만 추가, 구조 무변; SoT가 500을 "승인 안 된 알려진 결손"으로 분류하므로 선언 계약 위반 아님)이나 `start_next_unit` 500 누수와 동일 부류라 HANDOFF 추적 부채에 **S5 점검 후보**로 등록했다. 검증자 판단대로 이번 슬라이스에서 고치지 않았다 — 구조 변경은 S3 스코프(D4=A 선언 전용) 밖이다.
+
+---
+
+## Task — H3 에러 응답 계약 S4: memory/source 트랙 7 endpoint 에러 선언 (SoT v1.7.32)
+
+### Goals
+
+- 브리프 S4 행(memory read 2 · snapshots/source-refs · index-rebuild · context-search)에 S2/S3 관용구를 적용한다.
+- 런타임 0줄 변경(D4=A). 선언만 추가해 400·404·502·503·**504**가 OpenAPI·프론트 생성 타입에 나타나게 한다.
+
+### Completed work
+
+- **대상 7 endpoint 확정 — `main.py` 본문 직독으로 도출**:
+  - `{404}` 5곳 (memory list/get · source-ref list/get · index rebuild)
+  - `{400,404}` 1곳 (source-ref create — `except NotFound` 뒤 `except CoreSotError → 400` 순서라 두 갈래가 실제로 분기한다)
+  - `{400,404,502,503,504}` 1곳 (context-search)
+- **신규 상수 1종만**: `_ERRORS_400_404_502_504_CONFIG`. 나머지 6곳은 기존 상수 재사용(`_ERRORS_404` 5 · `_ERRORS_400_404` 1). context-search의 503은 구성 얼굴이라 S3의 `_CONFIG_503`을 그대로 쓴다.
+- **504가 선언 표면에 처음 오른다**: `context-search`는 writing 트랙 밖에서 자기 예산을 소진할 수 있는 유일한 endpoint(`ContextSearchBudgetExceeded` → 504)다. S1이 SoT 표에 적어 둔 504 의미론이 여기서 처음 기계 판독 가능해진다.
+- **회귀 신규 9건**:
+  - `MemorySourceErrorContractDeclarationTest` 4건(`tests/test_application_api.py`) — (a) 7행 exact lock(subTest 7, 양방향), (b) **트랙 전수 선언 가드**(`/memory`·`/snapshots/`·`/source-refs`·`/context-search` 경로 중 lock 리스트 밖 operation이 0), (c) 본문 단일 모델(subTest 12), (d) context-search 503이 구성 얼굴 문안이고 migration 문안을 차용하지 않음.
+  - `MemorySourceErrorBodyExactKeyTest` 2건(동 파일) — 404·400 wire 본문 `{detail}` 단일 키.
+  - **`ContextSearchErrorBodyExactKeyTest` 3건**(`tests/test_context_search_api.py`) — 502·503·**504** 본문.
+
+### Issues found
+
+- 없음.
+
+### Decisions (구현자 판단)
+
+- **502/503/504 본문 락을 `test_context_search_api.py`에 두고 `test_application_api.py`로 모으지 않았다**: 이 셋을 발화시키려면 planner·clock·budget 픽스처(`_fixture`/`_FailingPlanner`/`_AdvancingClock`)가 필요한데 그 하네스는 이미 그 파일에 있다. S4 락을 한 파일에 모으려고 하네스를 복제하는 것이 더 나쁜 거래라고 판단했다(§2·§3). 선언 테스트는 `openapi()`만 있으면 되므로 S2/S3 옆에 그대로 뒀다.
+- **`index/source-blocks/rebuild`는 `{404}`만 선언**: `_rebuild_source_block_index_payload`가 vector index·embedding 협력자를 쓰지만 endpoint가 잡는 것은 `NotFound` 하나뿐이라 나머지는 500이다. 안 잡는 코드를 선언하면 over-strict 거짓말이 된다(D4=A는 선언만 추가하지 매핑을 새로 만들지 않는다). 미매핑 500은 S5 점검 부채와 같은 부류로 남는다.
+- **`create_source_ref`의 400을 확인하고 선언했다**: `except NotFound`가 `except CoreSotError`보다 먼저라 NotFound는 404로 빠지고 나머지 `CoreSotError`(범위 초과 offset 등)가 400이 된다. 순서가 뒤집히면 400이 도달 불가가 되므로 wire 본문 테스트가 실제 400을 발화시켜 이를 잠근다.
+
+### Verification
+
+- **OpenAPI self-discovery**: `create_app().openapi()` 재덤프로 7 endpoint의 선언 집합(200/422 제외)이 코드 직독 도출과 정확히 일치(mismatch 0).
+- **mutation 4종 실증(양방향)**:
+  - context-search `responses=` 삭제 → 선언 exact·본문 모델·503 문안 회귀가 SUBFAIL/FAIL(under-strict).
+  - `GET …/memory`가 안 던지는 409 선언 → `test_declared_error_statuses_match_the_lock_list`가 memory에서만 SUBFAIL(over-strict).
+  - context-search 503을 `_MIGRATION_503`으로 교체 → `test_context_search_503_uses_the_configuration_face` FAIL(두 얼굴 혼입 차단이 실제로 작동).
+  - lock 리스트에 없는 `/projects/{id}/memory-stats` 추가 → 트랙 전수 가드 FAIL.
+  - 각 mutation 후 revert·잔류 0 확인(`grep`으로 mutation 시그니처 0건).
+- **런타임 불변**: backend 전체 **1437 passed / 1 skipped / 0 failed / 462 subtests**. 직전 기준선 1428/1/443 대비 +9 test·+19 subtest = 이번 신규분과 정확히 일치. 기존 context-search 상태코드 회귀(400/404/502/503/504)는 전부 사전 존재분이며 그대로 green.
+- **프론트 타입**: `gen:api` → `schema.d.ts` **+108행 / -0행**(순수 additive), `npx tsc --noEmit` clean, `npm run build` 성공(JS 399.03 kB, S2/S3와 동일 — 프론트 소스 무변), frontend **194 passed / 13 files**.
+- **변경 표면**: `main.py`(선언·상수만), `tests/test_application_api.py`, `tests/test_context_search_api.py`, `schema.d.ts`(생성물), SoT/HANDOFF/work_log. 서비스 로직·프론트 소스 0줄.
+
+### Next steps
+
+- **S5(마지막 슬라이스)**: writing 잔여(generate[202 success만 선언됨]·generation-jobs·gate·report·revise·loop-audits·scratch — 에러 본문 기선언 2[revise-and-gate·accept]는 제외) **+ `start_next_unit` 503 방어**(SoT v1.7.29가 "알려진 결손"으로 기록한 500 누수 폐쇄).
+- **S5에서 처음 실제로 발화하는 것들**: (1) 동적 `ProviderError` 매핑 9곳이 전부 이 구역이라 "realistic 집합만 선언, 전체 열거 안 함" 스코프가 여기서만 의미를 갖는다. (2) S3 검증이 남긴 미매핑 500 부채(`auto_promote_job` 등)와 S4의 index-rebuild 미매핑 경로를 `start_next_unit` 방어와 함께 점검한다.

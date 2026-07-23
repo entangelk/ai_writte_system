@@ -402,5 +402,72 @@ class ContextSearchApiTest(unittest.TestCase):
         self.assertEqual(resp.status_code, 503)
 
 
+class ContextSearchErrorBodyExactKeyTest(unittest.TestCase):
+    """context-search error bodies are exactly ``{"detail": <string>}``.
+
+    H3 S4 declares 400/404/502/503/504 on this endpoint, all pointing at the
+    single ``ErrorDetailResponse``. Those declarations are only honest if the
+    wire body matches, and ``detail`` being the *only* key is what lets the SoT
+    say the status code is the machine-readable layer (a future ``reason`` field
+    is an explicit additive decision, D1=B, not something that arrives by drift).
+
+    These live here rather than in ``test_application_api.py`` because 502/504
+    need this module's planner/clock fixtures; duplicating that harness to keep
+    the S4 locks in one file would be the worse trade.
+    """
+
+    def _assert_detail_only(self, response, status: int):
+        self.assertEqual(response.status_code, status)
+        body = response.json()
+        self.assertEqual(set(body), {"detail"})
+        self.assertIsInstance(body["detail"], str)
+        self.assertTrue(body["detail"])
+
+    def test_502_body(self):
+        app, project_id, draft_id, version_id = _fixture(_FailingPlanner)
+        self._assert_detail_only(
+            TestClient(app).post(
+                f"/projects/{project_id}/context-search",
+                json=_body(draft_id, version_id),
+            ),
+            502,
+        )
+
+    def test_504_body(self):
+        app, project_id, draft_id, version_id = _fixture(
+            _StaticPlanner,
+            wall_clock_seconds=0.01,
+            clock=_AdvancingClock([0.0, 100.0]),
+        )
+        self._assert_detail_only(
+            TestClient(app).post(
+                f"/projects/{project_id}/context-search",
+                json=_body(draft_id, version_id),
+            ),
+            504,
+        )
+
+    def test_503_body(self):
+        core_sot = CoreSotService(InMemoryCoreSotRepository())
+        project = core_sot.create_project(name="Novel")
+        draft = core_sot.create_draft(project_id=project.id, title="Episode 1")
+        saved = core_sot.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text=RAW_TEXT,
+            idempotency_key="save-1",
+        )
+        with patch.dict(os.environ):
+            os.environ.pop("LLM_GATEWAY_BASE_URL", None)
+            app = create_app(service=core_sot)
+        self._assert_detail_only(
+            TestClient(app).post(
+                f"/projects/{project.id}/context-search",
+                json=_body(draft.id, saved.draft_version.id),
+            ),
+            503,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

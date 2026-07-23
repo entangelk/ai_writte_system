@@ -1053,6 +1053,11 @@ _ERRORS_404_502_CONFIG: dict[int | str, dict] = {
 _ERRORS_400_404_409_502_CONFIG: dict[int | str, dict] = {
     400: _ERROR, 404: _ERROR, 409: _ERROR, 502: _ERROR, 503: _CONFIG_503,
 }
+# context-search is the only endpoint outside the writing track that can exhaust
+# its own budget, so 504 first appears in the declared surface here.
+_ERRORS_400_404_502_504_CONFIG: dict[int | str, dict] = {
+    400: _ERROR, 404: _ERROR, 502: _ERROR, 503: _CONFIG_503, 504: _ERROR,
+}
 
 
 class ProjectPayload(BaseModel):
@@ -2273,7 +2278,8 @@ def create_app(
             "idempotent_replay": result.idempotent_replay,
         }
 
-    @app.post("/projects/{project_id}/snapshots/{snapshot_id}/source-refs")
+    @app.post("/projects/{project_id}/snapshots/{snapshot_id}/source-refs",
+              responses=_ERRORS_400_404)
     async def create_source_ref(
         project_id: str,
         snapshot_id: str,
@@ -2292,7 +2298,8 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _source_ref_payload(source_ref)
 
-    @app.get("/projects/{project_id}/snapshots/{snapshot_id}/source-refs")
+    @app.get("/projects/{project_id}/snapshots/{snapshot_id}/source-refs",
+             responses=_ERRORS_404)
     async def list_source_refs(
         project_id: str,
         snapshot_id: str,
@@ -2306,7 +2313,8 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"source_refs": [_source_ref_payload(ref) for ref in source_refs]}
 
-    @app.get("/projects/{project_id}/source-refs/{source_ref_id}")
+    @app.get("/projects/{project_id}/source-refs/{source_ref_id}",
+             responses=_ERRORS_404)
     async def get_source_ref(
         project_id: str,
         source_ref_id: str,
@@ -2320,7 +2328,10 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return _source_ref_payload(source_ref)
 
-    @app.post("/projects/{project_id}/snapshots/{snapshot_id}/index/source-blocks/rebuild")
+    @app.post(
+        "/projects/{project_id}/snapshots/{snapshot_id}/index/source-blocks/rebuild",
+        responses=_ERRORS_404,
+    )
     async def rebuild_source_block_index(
         project_id: str,
         snapshot_id: str,
@@ -2576,7 +2587,7 @@ def create_app(
             "promoted": promoted,
         }
 
-    @app.get("/projects/{project_id}/memory")
+    @app.get("/projects/{project_id}/memory", responses=_ERRORS_404)
     async def list_memory(project_id: str) -> dict[str, object]:
         try:
             _require_project_exists(project_id)
@@ -2589,7 +2600,8 @@ def create_app(
             ]
         }
 
-    @app.get("/projects/{project_id}/memory/{memory_id}")
+    @app.get("/projects/{project_id}/memory/{memory_id}",
+             responses=_ERRORS_404)
     async def get_memory(project_id: str, memory_id: str) -> dict[str, object]:
         try:
             _require_project_exists(project_id)
@@ -3109,7 +3121,8 @@ def create_app(
             },
         }
 
-    @app.post("/projects/{project_id}/context-search")
+    @app.post("/projects/{project_id}/context-search",
+              responses=_ERRORS_400_404_502_504_CONFIG)
     async def context_search_endpoint(
         project_id: str, body: ContextSearchHttpRequest
     ) -> dict[str, object]:

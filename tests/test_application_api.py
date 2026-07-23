@@ -2414,5 +2414,126 @@ class AnalysisErrorBodyExactKeyTest(unittest.TestCase):
         )
 
 
+class MemorySourceErrorContractDeclarationTest(unittest.TestCase):
+    """OpenAPI must declare the realistic error statuses of the memory/source track.
+
+    H3 S4, after S2 (CRUD) and S3 (analysis). Same D3=A contract; what this
+    track adds to the declared surface is **504** — ``context-search`` is the
+    only endpoint outside the writing track that can exhaust its own budget
+    (``ContextSearchBudgetExceeded``), so the timeout semantics S1 wrote into
+    the SoT table first become machine-readable here.
+
+    Exact sets, biting both ways (under-strict: a dropped declaration re-hides a
+    failure; over-strict: declaring a status the endpoint cannot raise).
+    """
+
+    # Path fragments that make up this slice's track, used by the closure guard.
+    TRACK = ("/memory", "/snapshots/", "/source-refs", "/context-search")
+
+    # (path, method) -> exact set of declared statuses besides 200/422.
+    EXPECTED = {
+        ("/projects/{project_id}/memory", "get"): {"404"},
+        ("/projects/{project_id}/memory/{memory_id}", "get"): {"404"},
+        ("/projects/{project_id}/snapshots/{snapshot_id}/source-refs", "post"):
+            {"400", "404"},
+        ("/projects/{project_id}/snapshots/{snapshot_id}/source-refs", "get"):
+            {"404"},
+        ("/projects/{project_id}/source-refs/{source_ref_id}", "get"): {"404"},
+        ("/projects/{project_id}/snapshots/{snapshot_id}"
+         "/index/source-blocks/rebuild", "post"): {"404"},
+        ("/projects/{project_id}/context-search", "post"):
+            {"400", "404", "502", "503", "504"},
+    }
+
+    def setUp(self):
+        self.spec = create_app().openapi()
+
+    def _declared(self, path: str, method: str) -> set[str]:
+        responses = self.spec["paths"][path][method]["responses"]
+        return {code for code in responses if code not in ("200", "422")}
+
+    def test_declared_error_statuses_match_the_lock_list(self):
+        self.assertEqual(len(self.EXPECTED), 7)
+        for (path, method), expected in self.EXPECTED.items():
+            with self.subTest(path=path, method=method):
+                self.assertEqual(self._declared(path, method), expected)
+
+    def test_the_whole_memory_source_track_is_declared(self):
+        # Closure guard (S3 precedent): a new endpoint on this track shipping
+        # without a declaration would leave every row above green while the
+        # "track is closed" claim silently becomes false.
+        undeclared = {
+            (path, method)
+            for path, operations in self.spec["paths"].items()
+            if any(fragment in path for fragment in self.TRACK)
+            for method in operations
+            if (path, method) not in self.EXPECTED
+        }
+        self.assertEqual(undeclared, set())
+
+    def test_every_declared_error_body_is_the_uniform_detail_model(self):
+        # D1=A: one error body app-wide, including the 504 this track introduces.
+        for (path, method), expected in self.EXPECTED.items():
+            responses = self.spec["paths"][path][method]["responses"]
+            for code in expected:
+                with self.subTest(path=path, method=method, code=code):
+                    schema = responses[code]["content"]["application/json"]["schema"]
+                    self.assertEqual(
+                        schema.get("$ref"),
+                        "#/components/schemas/ErrorDetailResponse",
+                    )
+
+    def test_context_search_503_uses_the_configuration_face(self):
+        # context search's 503 is "service is not configured", not the stored-data
+        # integrity face, so it must carry the deployment wording and must not
+        # borrow the migration script wording (S3 precedent).
+        description = self.spec["paths"]["/projects/{project_id}/context-search"][
+            "post"]["responses"]["503"]["description"]
+        self.assertIn("not configured", description)
+        self.assertIn("deployment", description)
+        self.assertNotIn("migrate_ordered_units.py", description)
+
+
+class MemorySourceErrorBodyExactKeyTest(unittest.TestCase):
+    """The memory/source track's error bodies are exactly ``{"detail": str}``.
+
+    Covers the statuses reachable without the context-search fixture stack; the
+    502/503/504 bodies are locked next to their existing runtime fixtures in
+    ``test_context_search_api.py`` rather than duplicating that harness here.
+    """
+
+    def _assert_detail_only(self, response, status: int):
+        self.assertEqual(response.status_code, status)
+        body = response.json()
+        self.assertEqual(set(body), {"detail"})
+        self.assertIsInstance(body["detail"], str)
+        self.assertTrue(body["detail"])
+
+    def test_404_body(self):
+        client = TestClient(create_app())
+        self._assert_detail_only(client.get("/projects/missing/memory"), 404)
+
+    def test_400_body(self):
+        client = TestClient(create_app())
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        draft = client.post(
+            f"/projects/{project['id']}/drafts", json={"title": "Episode 1"}
+        ).json()
+        saved = client.post(
+            f"/projects/{project['id']}/drafts/{draft['id']}/versions",
+            json={"raw_text": "민아는 파란 편지를 발견했다.", "idempotency_key": "save-1"},
+        ).json()
+        snapshot_id = saved["snapshot"]["id"]
+
+        # end_offset beyond the snapshot text is a CoreSotError, not a NotFound.
+        self._assert_detail_only(
+            client.post(
+                f"/projects/{project['id']}/snapshots/{snapshot_id}/source-refs",
+                json={"start_offset": 0, "end_offset": 9999},
+            ),
+            400,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
