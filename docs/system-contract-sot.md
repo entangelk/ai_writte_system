@@ -1,9 +1,9 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`
-계약 버전: `v1.7.28`
+계약 버전: `v1.7.29`
 승인일: `2026-06-26`
-최근 갱신일: `2026-07-22`
+최근 갱신일: `2026-07-23`
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
 적용 범위: 제품 경계, 서비스 책임, 데이터 정본, Gateway, AgentLoopRunner, Gate 합성, 검증 기록.
 
@@ -33,6 +33,7 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.7.29 | 2026-07-23 | **H3 에러 응답 계약 S1 — 전역 HTTP 에러 계약 섹션 신설(D1=A/D3=A, 문서 전용)**. H1 성공 `response_model`(v1.6.95)·H2 입력 검증이 남긴 **에러 응답**의 전역 의미론을 "확정된 전역 계약"에 정본화한다. **에러 본문은 균일한 단일 키 `{"detail": <string>}`**(`ErrorDetailResponse`)이고 계약은 **3층**(상태코드=기계용 의미론 · `detail`=사람용 메시지 · 후속 `reason`=기계용 코드)이며 **`detail` 문자열 자체는 계약이 아니다**(클라이언트 패턴 매칭 금지, 기계 분기가 필요하면 `reason`을 additive로). 400/404/409/422/502/503/504와 동적 `ProviderError` 매핑의 의미론을 표로 고정하되, **endpoint별 realistic 코드 집합은 OpenAPI `responses=`가 기계적 진실**이고 SoT는 endpoint×코드 표를 중복 유지하지 않는다(drift 방지, 검증은 `dump_openapi.py` 재덤프 self-discovery). **503의 두 얼굴**을 명문화: (1) 협력자 미구성(`"<X> is not configured"`, 배포 구성 문제) (2) 저장 데이터 마이그레이션 필요(`DraftOrderIntegrityError` — list/create/project-export 3곳 방어, 해결책은 `scripts/migrate_ordered_units.py`). 공통 규칙 = "요청을 고쳐 성공시킬 수 없고 서버 측 조치가 선행돼야 한다". **`InvalidDraftOrder`의 의도적 비대칭**(reorder는 요청이 전체 순열을 실어 오므로 409 유지)과 **알려진 결손 `start_next_unit` 500 누수**(accept 경로에 `DraftOrderIntegrityError` 절 없음 → H3 S5에서 503으로 폐쇄)도 함께 명문화해 "로그에서 유추" 갭을 닫는다. 422는 FastAPI 자동 생성이라 본문 형태가 다르고 이 계약 밖이다. **런타임·OpenAPI·코드 무변**(문서 전용 슬라이스, `responses=` 선언은 S2부터). 실측 재도출: endpoint 61, 404×62·400×30·502×20(19 raise + 1 partial JSONResponse)·503×18(구성 15 + 무결성 3)·409×16·504×7·동적×9. **오너 독립 검증 PASS(조건 없음)** — `verifications/2026-07-23/h3_error_response_contract_s1_s2.md`(S1+S2 합동); 비차단 H-2로 reorder 비대칭의 **근거 문안**을 정밀화했다(무결성 face는 순열 검사 이전 `_require_ordered_drafts`에서 발화하므로 409는 "입력으로 판별돼서"가 아니라 기존 절 흡수의 무변경 결과 — **행동·선언은 무변**). | 오너 결정 D1~D4=A(`plans/api-error-response-contract-decisions.md`), 독립 검증 `verifications/2026-07-22/h3_error_response_contract_plan.md`(F1/F2/F3 반영), `services/application/app/main.py`·`core_sot/service.py`(의미론 재도출 1차 소스), `daily_logs/2026-07-23/work_log.md` |
 | v1.7.28 | 2026-07-22 | **비동기 생성 job 재시도 endpoint(async-pad D4=A 재시도 UI 슬라이스)**. 증분 2b에서 "재시도 UI 슬라이스로 지연"했던 `FAILED→PENDING` 전이를 그 전이를 구동하는 endpoint와 함께 구현한다(dead 분기 방지 원칙). 신규 `POST .../writing/generation-jobs/{job_id}/retry`(200 + `WritingGenerationJobPayload`)가 **FAILED job을 PENDING으로 되돌려** failure_reason/detail·claim lease를 지우고, 생성 worker의 claim 루프가 이를 다시 집어 재실행한다. **Analysis retry endpoint 미러이되 별도 `run` 호출이 없다** — Analysis는 retry 후 프론트가 `run`을 POST하지만, 생성 worker는 PENDING을 자동 claim하므로 retry만으로 재실행된다. **FAILED만 재시도 가능**하고 그 외 상태(pending/running/succeeded)는 `InvalidJobStateTransition`→**409**, 미발견·타 프로젝트는 **404**다. `generation_job.py` `_ALLOWED_TRANSITIONS`에 `(FAILED,PENDING)` 추가 + `mark_pending_for_retry` 서비스 메서드(failure/claimed_at clear). **main.py 주의**: `InvalidJobStateTransition`이 analysis·writing 두 모듈에 각각 존재하므로 retry endpoint는 writing 것을 별칭(`InvalidGenerationJobStateTransition`)으로 import해 catch한다. 프론트 결과 패드는 실패 job에 "다시 시도" 버튼(`onRetryFailed`→`client.retryGenerationJob`)을 노출하고, 성공하면 훅이 job을 PENDING으로 되돌려 폴링을 재개한다. backend **1322 passed/73 skipped/328 subtests**(신규 10: 서비스 RetryTest 5[failed→pending clear·재claim 가능=under-strict·pending/running/succeeded 거절=over-strict] + mongo retry round-trip 1 + endpoint RetryTest 4[200 failed·409×3 subtest·404 unknown·404 wrong-project]), frontend **192 passed/13 files**(신규 4: 훅 retry 3[reset→재개·retry 실패 시 failed 유지·비-failed no-op] + GenerationPad "다시 시도" 버튼 1), `gen:api`에 retry path 1개 additive(49줄, 0 삭제), tsc clean, build 103 modules(JS 398.69 kB). LLM 미사용(단위). | 오너 지시(재시도 UI 진행), `plans/async-generation-pad-decisions.md` (D4=A "orphan/retry Analysis 계약 재사용"), `services/application/app/writing/generation_job.py`·`main.py`, `frontend/src/writing/{useGenerationJobs,GenerationPad}.tsx`·`api/client.ts`, `tests/test_writing_generation_job.py::RetryTest`·`test_writing.py::WritingGenerationJobRetryTest`, `daily_logs/2026-07-22/work_log.md` |
 | v1.7.27 | 2026-07-21 | **비동기 생성 + 결과 패드 슬라이스 증분 2c — generate endpoint 동기/비동기 분기(D5=A)**. 2b의 저장소·worker에 이어 **생산자(endpoint)를 배선**해 async 경로를 end-to-end로 개통한다. `POST .../writing/generate`가 `output_length`로 분기한다 — **`short`(1024)는 동기**(200 + `WritingCandidatePayload`, 무변), **`medium`(2048)/`long`(4096)은 job을 enqueue하고 `202 Accepted`로 `{job, idempotent_replay}`를 즉시 반환**(비블로킹; worker가 claim해 실행). **async 프리셋에 `current_position`이 없으면 400**(패드는 per-draft 키). 신규 `GET .../writing/generation-jobs/{job_id}`(200 + `WritingGenerationJobPayload`; 404 if not found/wrong project)이 상태 read(증분 3 폴링용)를 담당한다. **상태코드 202는 구현자 판단**: 200 + `response_model=WritingCandidatePayload` 정직성을 유지하면서 async envelope를 `responses={202: …}`로 문서화(revise-and-gate/accept의 분기 응답 메커니즘과 동형)하며 HTTP 의미론(202 Accepted = 백그라운드 처리 수락)에 부합. 대안 200+JSONResponse(response_model 거짓)·200+Union oneOf(선례 없음)은 기각. endpoint는 async 분기에서 writing/context_search/scratch를 부르지 않고(전부 worker 역할) 동기 전용 503 검사도 우회한다. enqueue는 `(project_id, request_id)` 멱등(재POST → 같은 job, `idempotent_replay=true`). endpoint 배선 forward-marker를 현재형으로 전환하고, "status는 항상 candidate"를 **동기 후보 응답 한정**으로 정밀화(비동기는 candidate가 아닌 job을 반환). 프론트 `WritingPanel.runGenerate`는 `"job" in produced` 가드로 async를 감지해 candidate/gate/루프를 건너뛰고 "백그라운드 생성 시작" notice만 표시(패드 + 5초 폴링은 증분 3). backend **1312 passed/73 skipped/325 subtests**(신규 16: async 분기 14 + envelope-key 2 + preset 테스트 2c 동기/비동기 재작성), frontend·gen:api는 async 응답 additive. LLM 미사용(단위). | 오너 결정(D5=A, `plans/async-generation-pad-decisions.md`; 상태코드 202는 구현자 판단), `services/application/app/writing/http_models.py`·`main.py`, `frontend/src/writing/WritingPanel.tsx`·`api/client.ts`, `tests/test_writing.py::WritingGenerateAsyncBranchTest`·`WritingGenerationJobEnvelopeKeyTest`, `daily_logs/2026-07-21/work_log.md` |
 | v1.7.26 | 2026-07-21 | **비동기 생성 + 결과 패드 슬라이스 증분 2b — 생성 worker 실행 루프(D3=B)**. 증분 2a(생성 job 저장소)에 이어, worker가 job을 claim해 실제로 실행하는 조각. **worker의 최초 LLM/gateway 호출**이다. 신규 `scripts/generation_job_worker.py`(색인 worker의 graceful-shutdown/`--loop`/JSON 이벤트 패턴 미러, **별도 compose 서비스** `generation_worker` — 색인 sync outbox와 무관) + `writing/generation_worker.py`(테스트 가능한 실행 코어 `execute_generation_job`). claim된 job을 동기 generate와 같은 파이프라인(ContextSearch build → WritingService.generate)으로 돌리고 결과를 scratch에 append(version_id=D7 포함) 후 `mark_succeeded(result_scratch_id=)`; 예외는 taxonomy대로 `mark_failed`. **검증 hardening 반영**: (H-2) 매핑 안 된 infra/버그 예외용 **catch-all `internal`** reason을 추가해 job이 RUNNING→lease 재claim→재실패 livelock에 빠지지 않게 종료 상태로 보냄; (H-3) reclaim 재실행 시 이전 scratch를 `request_id`로 지우고 다시 써 **결과 저장을 job 기준 멱등**으로. worker 조립은 `main.build_async_generation_collaborators()`(create_app과 같은 env 팩토리 재사용) + `_default_writing_generation_job_service()`. **scratch 용도 문구 확장(§261 (2) 비동기 결과 보관) — 증분 1에서 지연했던 유일한 개정을 여기서 반영**. **endpoint 배선(D5)은 증분 2c**라 현재 generate는 전부 동기이며 job을 enqueue하지 않는다(저장소·worker는 갖췄으나 생산자 없어 async 경로 dormant). backend **1295 passed/73 skipped/326 subtests**(신규 16: 실행 executor 성공/실패 매핑 7종+catch-all+H-3 멱등, worker 루프/CLI/gateway 게이팅). frontend·gen:api 무변(endpoint 미배선). LLM 미사용(단위) — 실 12B 라이브 스모크는 별도. | 오너 결정(2a/2b/2c 분할 + 다른 작업자 인계), `plans/async-generation-pad-decisions.md` (D3=B), `services/application/app/writing/generation_worker.py`·`generation_job.py`, `scripts/generation_job_worker.py`, `docker-compose.yml`, `tests/test_writing_generation_worker.py`·`test_generation_job_worker.py`, `daily_logs/2026-07-21/work_log.md` |
@@ -288,6 +289,42 @@
 - `source_ref`는 snapshot/block/span/quote/hash로 원문을 다시 찾을 수 있어야 한다.
 - 검색 결과와 ContextPackage 항목은 MongoDB pointer로 SOT를 다시 읽고 version/hash를 확인해야 한다.
 - trace에는 provider error detail, loop decision, tool call, Gate finding의 원인을 보존한다.
+
+### HTTP 에러 응답 계약
+
+H3 페이즈(브리프 `plans/api-error-response-contract-decisions.md`, D1~D4=A)의 S1. H1 성공 `response_model`(v1.6.95)·H2 입력 검증이 남긴 **에러 응답**의 전역 의미론을 정본화한다. 계기는 v1.7.28 시점 dogfood의 레거시-데이터 `/drafts` 500→503 수정에서 "503이 새 public 상태코드인데 정본·OpenAPI 어디에도 없어 다음 검증자가 로그에서 유추해야 한다"가 드러난 것이다.
+
+- **에러 본문은 균일한 단일 키 `{"detail": <string>}`다**(D1=A). 모델은 `ErrorDetailResponse{detail: str}`(`writing/http_models.py`)이며 상태코드별 별도 에러 스키마는 두지 않는다.
+- 계약은 **3층**이다: **상태코드 = 기계용 의미론**, **`detail` = 사람용 메시지**, (후속) **`reason` = 기계용 코드**. **`detail` 문자열 자체는 계약이 아니다** — 클라이언트는 표시·로깅에만 쓰고 문자열 패턴 매칭으로 분기하지 않는다. 기계용 분기가 필요해지면 detail을 파싱하는 대신 `reason`을 **additive**로 도입한다(실사용 근거가 생길 때. D1=B의 자리를 이 3층 구조가 열어 둔다).
+- **요청 스키마 검증 실패(422)는 이 계약 밖이다** — FastAPI/Pydantic이 자동 생성하며 본문이 `{"detail": [ …오류 배열… ]}`로 형태부터 다르다. 자동 문서화되므로 endpoint별로 선언하지 않는다.
+- **endpoint별 realistic 코드 집합은 OpenAPI(`responses=`)가 기계적 진실이다**(D3=A). 본 SoT는 코드의 **의미론만** 고정하고 endpoint×코드 표를 중복 유지하지 않는다(이중 관리 drift 방지). 새 endpoint나 새 실패 분기를 만들면 그 endpoint의 `responses=`에 반영하고 `python3 scripts/dump_openapi.py` 재덤프로 실제 노출을 확인한다(코드가 emit할 의도만 믿지 않는다).
+- **선언은 런타임 동작을 바꾸지 않는다**: `responses=` 추가는 문서·타입만 넓히며 상태코드·`detail`·분기는 그대로다. 프론트 에러 UX 변경도 이 페이즈 밖이다(D4=A).
+
+#### 상태코드 의미론
+
+| 코드 | 의미 | 대표 원인(실코드) |
+|---|---|---|
+| 400 | 요청이 이 자원 상태에서 성립하지 않음(도메인 검증 실패). 클라이언트가 요청을 고치면 성공할 수 있다. | `ValueError`/`CoreSotError`, `UnsupportedExportFormat`, `InvalidContextSearchRequest`, Writing intent/next_unit binding 위반, async 프리셋 + `current_position` 없음 |
+| 404 | 대상이 없거나 **다른 project 소유**다. project isolation 위반은 존재를 알리지 않고 404로 수렴한다. | `NotFound`/`AnalysisNotFound`/`MemoryNotFound`/`GateFindingNotFound` 계열 |
+| 409 | 대상은 있으나 **현재 상태**가 그 연산을 허용하지 않음. | `Archived`, stale base(`StaleProjectBriefBase`/`StaleWritingBase`), job/candidate/finding 상태 전이 위반, 잘못된 reorder 순열(`InvalidDraftOrder`) |
+| 422 | 요청 스키마 검증 실패(FastAPI 자동, 본문 형태 다름) | Pydantic 제약(`NonBlankName` 등) |
+| 502 | **상류**(LLM provider·gateway·검색)가 실패했거나 AI 출력이 계약 schema를 만족하지 않음. | `ContextSearchFailed`, `InvalidWritingGateResult`/`InvalidWritingRevision`/`InvalidCandidateReport`/`InvalidJudgeResult` |
+| 503 | 서버가 **지금** 이 연산을 수행할 수 없음. 요청을 고쳐서는 해결되지 않는다(아래 두 얼굴). | 협력자 미구성, `DraftOrderIntegrityError` |
+| 504 | 서버가 소유한 **예산**이 소진됨(소켓 timeout이 아니라 계약된 wall-clock/token budget). | `ContextSearchBudgetExceeded` |
+| 동적 | Gateway `ProviderError` 매핑을 그대로 전달하는 지점(9곳). 가능한 코드 집합이 상류에 달려 있어 endpoint별 realistic 집합만 선언하고 전체 열거는 하지 않는다. | `raise HTTPException(status_code=status, …)` |
+
+#### 503의 두 얼굴
+
+1. **협력자 미구성(configuration)** — LLM/검색이 필요한 endpoint에 그 협력자가 조립되지 않은 배포. detail은 `"<X> is not configured"` 형태이며 writing 6종·context search·analysis runner·compare judge가 여기 속한다. **배포 구성**이 바뀌어야 해결된다.
+2. **저장 데이터 마이그레이션 필요(data integrity)** — `DraftOrderIntegrityError`. pre-v1.7.14 legacy draft(`unit_kind`/`position` 없음)나 비연속 position 집합을 읽을 때 발생하며, 해결책은 요청 수정이 아니라 **one-shot `scripts/migrate_ordered_units.py` 실행**이다. 현재 방어 지점은 `GET …/drafts`(list)·`POST …/drafts`(create)·`GET /projects/{id}/export` 3곳이다.
+
+**공통 규칙**: 503은 "클라이언트가 요청을 고쳐 성공시킬 수 없고 서버 측 조치(구성 변경 또는 마이그레이션)가 선행돼야 한다"를 뜻한다. 그 조치 전의 단순 재시도는 무의미하다.
+
+**`InvalidDraftOrder`의 의도적 비대칭**: 이 예외 계열은 **서버 데이터 무결성**(`DraftOrderIntegrityError` → 503)과 **클라이언트 입력 오류**(잘못된 `unit_kind`, 불완전한 reorder 순열 → 409/400) 양쪽에 쓰인다. `PUT …/draft-order`(reorder)는 서브클래스가 기존 `(Archived, InvalidDraftOrder)` 절에 잡혀 **409를 유지한다**. 다만 그 이유가 "reorder에서는 무결성 위반이 클라이언트 순열로 판별되기 때문"은 **아니다** — `reorder_drafts`도 저장 집합을 `_require_ordered_drafts`로 **순열 검사보다 먼저** 검사하므로, legacy 데이터에서는 입력과 무관하게 같은 무결성 에러가 발생하고 그것이 기존 절에 흡수되어 409가 된다. 즉 reorder의 409는 **입력 오류 face에 대해서만 정확한 의미론**이고 무결성 face에서는 2026-07-22 수정이 500 누수만 닫는 수술적 범위를 지킨 **무변경의 결과**다. 이 상태는 의도적이며 회귀로 잠겨 있고, 503으로의 재분류는 본 계약의 별도 개정 사항이다.
+
+#### 알려진 결손 — `start_next_unit`의 500 누수
+
+`POST …/writing/accept`의 `intent=start_next_unit` 경로는 `CoreSotService.start_next_unit`가 기존 ordered draft 집합을 읽으므로 legacy 데이터에서 `DraftOrderIntegrityError`를 던지는데, accept endpoint에 이를 잡는 절이 없어 **500이 샌다**(list/create/export 3곳과 같은 근본 원인이며 같은 마이그레이션이 해결책이다). H3 **S5**에서 `except DraftOrderIntegrityError → 503`을 추가해 닫는다. 그때까지 이 500은 **알려진 결손**이며 본 정본이 승인한 동작이 아니다.
 
 ## 서비스별 계약 SoT
 
