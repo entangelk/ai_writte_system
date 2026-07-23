@@ -2211,5 +2211,208 @@ class CrudErrorBodyExactKeyTest(unittest.TestCase):
         self._assert_detail_only(client.get(f"/projects/{project.id}/drafts"), 503)
 
 
+class AnalysisErrorContractDeclarationTest(unittest.TestCase):
+    """OpenAPI must declare the realistic error statuses of the analysis track.
+
+    H3 S3, the sibling of :class:`CrudErrorContractDeclarationTest`. Same D3=A
+    contract (status code = machine-readable layer, endpoint-by-endpoint set
+    lives in OpenAPI), applied to the 21 analysis endpoints.
+
+    What makes this track different from S2 is the failure vocabulary: 502
+    (upstream LLM/provider) and the *configuration* face of 503 appear here for
+    the first time outside the writing endpoints. The brief scopes them
+    deliberately: each endpoint declares only the statuses it can actually
+    reach, never the app-wide vocabulary.
+
+    Exact sets, so the test bites both ways — under-strict (a dropped
+    ``responses=`` re-hides a documented failure) and over-strict (declaring a
+    status the endpoint cannot raise, which lies to the generated frontend
+    types).
+    """
+
+    # (path, method) -> exact set of declared statuses besides 200/422.
+    EXPECTED = {
+        ("/projects/{project_id}/analysis/jobs", "post"): {"404"},
+        ("/projects/{project_id}/analysis/jobs/{job_id}", "get"): {"404"},
+        ("/projects/{project_id}/analysis/jobs/{job_id}/candidates", "get"):
+            {"404"},
+        ("/projects/{project_id}/analysis/jobs/{job_id}/retry", "post"):
+            {"404", "409"},
+        ("/projects/{project_id}/analysis/jobs/{job_id}/run", "post"):
+            {"400", "404", "409", "502", "503"},
+        ("/projects/{project_id}/analysis/jobs/{job_id}/auto-promote", "post"):
+            {"404"},
+        ("/projects/{project_id}/analysis/jobs/{job_id}/context", "post"):
+            {"404"},
+        ("/projects/{project_id}/analysis/jobs/{job_id}/compare", "post"):
+            {"404", "502", "503"},
+        ("/projects/{project_id}/analysis/jobs/{job_id}/apply", "post"):
+            {"400", "404"},
+        ("/projects/{project_id}/analysis/candidates/{candidate_id}/promote",
+         "post"): {"404"},
+        ("/projects/{project_id}/analysis/candidates/{candidate_id}/confirm",
+         "post"): {"404", "409"},
+        ("/projects/{project_id}/analysis/candidates/{candidate_id}/reject",
+         "post"): {"404", "409"},
+        ("/projects/{project_id}/analysis/candidates/{candidate_id}/edit",
+         "post"): {"400", "404", "409"},
+        ("/projects/{project_id}/analysis/review-queue", "get"): {"404"},
+        ("/projects/{project_id}/analysis/review-queue/{entry_id}/reconcile",
+         "post"): {"404", "409"},
+        ("/projects/{project_id}/analysis/review-inbox", "get"): {"404"},
+        ("/projects/{project_id}/analysis/review-inbox/{candidate_id}", "get"):
+            {"404"},
+        ("/projects/{project_id}/analysis/gate-findings", "get"): {"404"},
+        ("/projects/{project_id}/analysis/gate-findings/{finding_id}", "get"):
+            {"404"},
+        ("/projects/{project_id}/analysis/gate-findings/{finding_id}/resolve",
+         "post"): {"404", "409"},
+        ("/projects/{project_id}/analysis/gate-findings/{finding_id}/dismiss",
+         "post"): {"404", "409"},
+    }
+
+    def setUp(self):
+        self.spec = create_app().openapi()
+
+    def _declared(self, path: str, method: str) -> set[str]:
+        responses = self.spec["paths"][path][method]["responses"]
+        return {code for code in responses if code not in ("200", "422")}
+
+    def test_declared_error_statuses_match_the_lock_list(self):
+        self.assertEqual(len(self.EXPECTED), 21)
+        for (path, method), expected in self.EXPECTED.items():
+            with self.subTest(path=path, method=method):
+                self.assertEqual(self._declared(path, method), expected)
+
+    def test_the_whole_analysis_track_is_declared(self):
+        # Over-strict guard on the lock list itself: if a new analysis endpoint
+        # ships without a declaration, S3's closure claim is false even though
+        # every row above still passes.
+        undeclared = {
+            (path, method)
+            for path, operations in self.spec["paths"].items()
+            if "/analysis/" in path
+            for method in operations
+            if (path, method) not in self.EXPECTED
+        }
+        self.assertEqual(undeclared, set())
+
+    def test_every_declared_error_body_is_the_uniform_detail_model(self):
+        # D1=A: one error body for the whole app, including the 502/503 this
+        # track introduces to the declared surface.
+        for (path, method), expected in self.EXPECTED.items():
+            responses = self.spec["paths"][path][method]["responses"]
+            for code in expected:
+                with self.subTest(path=path, method=method, code=code):
+                    schema = responses[code]["content"]["application/json"]["schema"]
+                    self.assertEqual(
+                        schema.get("$ref"),
+                        "#/components/schemas/ErrorDetailResponse",
+                    )
+
+    def test_config_503_description_names_the_operator_action(self):
+        # The analysis 503 is the collaborator-not-configured face, not the
+        # migration face. Its declaration must say the fix is a deployment
+        # change so a reader is not left inferring it from a log (S2 precedent),
+        # and must not borrow the migration wording.
+        config_503 = (
+            ("/projects/{project_id}/analysis/jobs/{job_id}/run", "post"),
+            ("/projects/{project_id}/analysis/jobs/{job_id}/compare", "post"),
+        )
+        for path, method in config_503:
+            with self.subTest(path=path, method=method):
+                description = (
+                    self.spec["paths"][path][method]["responses"]["503"]["description"]
+                )
+                self.assertIn("not configured", description)
+                self.assertIn("deployment", description)
+                self.assertNotIn("migrate_ordered_units.py", description)
+
+
+class AnalysisErrorBodyExactKeyTest(unittest.TestCase):
+    """The analysis track's runtime error bodies are exactly ``{"detail": str}``.
+
+    Sibling of :class:`CrudErrorBodyExactKeyTest`, covering the two statuses S2
+    could not reach: 502 (provider) and the configuration face of 503. The
+    declarations above are only honest if the wire body matches them.
+    """
+
+    def _assert_detail_only(self, response, status: int):
+        self.assertEqual(response.status_code, status)
+        body = response.json()
+        self.assertEqual(set(body), {"detail"})
+        self.assertIsInstance(body["detail"], str)
+        self.assertTrue(body["detail"])
+
+    def _project_with_job(self, client):
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        job = client.post(
+            f"/projects/{project['id']}/analysis/jobs",
+            json={"snapshot_id": "snapshot-1", "idempotency_key": "analysis-1"},
+        ).json()["job"]
+        return project, job
+
+    def test_404_body(self):
+        client = TestClient(create_app())
+        self._assert_detail_only(
+            client.get("/projects/missing/analysis/review-inbox"), 404
+        )
+
+    def test_409_body(self):
+        client = TestClient(create_app())
+        project, job = self._project_with_job(client)
+
+        # retry is only legal from failed; a freshly created job is pending.
+        self._assert_detail_only(
+            client.post(
+                f"/projects/{project['id']}/analysis/jobs/{job['id']}/retry"
+            ),
+            409,
+        )
+
+    def test_400_body(self):
+        client = TestClient(create_app())
+        project, job = self._project_with_job(client)
+
+        self._assert_detail_only(
+            client.post(
+                f"/projects/{project['id']}/analysis/jobs/{job['id']}/apply",
+                json={"proposals": [{"candidate_id": "nope", "action": "create"}]},
+            ),
+            400,
+        )
+
+    def test_502_body(self):
+        core_sot = CoreSotService(InMemoryCoreSotRepository())
+        analysis = AnalysisService(InMemoryAnalysisRepository())
+        client = TestClient(
+            create_app(
+                core_sot,
+                analysis_service=analysis,
+                analysis_runner=_ApiProviderErrorRunner(analysis),
+            )
+        )
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        job = analysis.create_job(
+            project_id=project["id"],
+            snapshot_id="snapshot-1",
+            idempotency_key="analysis-1",
+        ).job
+
+        self._assert_detail_only(
+            client.post(f"/projects/{project['id']}/analysis/jobs/{job.id}/run"), 502
+        )
+
+    def test_503_body(self):
+        # No runner configured — the collaborator face of 503.
+        client = TestClient(create_app())
+        project, job = self._project_with_job(client)
+
+        self._assert_detail_only(
+            client.post(f"/projects/{project['id']}/analysis/jobs/{job['id']}/run"),
+            503,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

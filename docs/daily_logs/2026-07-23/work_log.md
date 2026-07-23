@@ -186,3 +186,60 @@
 - **오너 판단 대기**: 배포 `mongo`에도 `ulimits.nofile`을 넣을지(위 추적 부채). 넣는다면 스택 재기동이 필요하다.
 - Chroma live 1건을 0으로 만들려면 `pip install chromadb` + `CHROMA_TEST_URL=http://localhost:8001`.
 - 이제 백엔드 회귀 보고의 기준선은 **1419 passed / 1 skipped**다. 이전 로그의 "1379 passed / 41 skipped"는 standalone 기준이므로 직접 비교하지 말 것.
+
+---
+
+## Task — H3 에러 응답 계약 S3: analysis 트랙 21 endpoint 에러 선언 (SoT v1.7.31)
+
+### Goals
+
+- S2가 CRUD family에 적용한 관용구를 **analysis 구역**에 확장한다. 대상은 브리프 S3 행의 트랙 전체 — jobs/candidates/context/compare/apply/review-queue/review-inbox/gate-findings.
+- 런타임은 한 줄도 바꾸지 않는다(D4=A). 선언만 추가해 404·409·400·**502·503**이 OpenAPI·프론트 생성 타입에 나타나게 한다.
+
+### Completed work
+
+- **대상 21 endpoint 확정 — 브리프가 아니라 `main.py` 본문 직독으로 도출**. 각 endpoint의 `except` 절을 읽어 realistic 집합을 세웠다:
+  - `{404}` 11곳 (jobs create/get/candidates·auto-promote·context·promote·review-queue·review-inbox 2·gate-findings 2)
+  - `{404,409}` 6곳 (jobs retry·confirm·reject·reconcile·gate-finding resolve/dismiss)
+  - `{400,404,409}` 1곳 (candidate edit) · `{400,404}` 1곳 (apply)
+  - `{404,502,503}` 1곳 (compare) · `{400,404,409,502,503}` 1곳 (run)
+- **신규 상수 3종**: `_CONFIG_503` + `_ERRORS_404_502_CONFIG`(compare) + `_ERRORS_400_404_409_502_CONFIG`(run). **나머지 19곳**은 S2 상수를 그대로 재사용했다(`_ERRORS_404` 11 · `_ERRORS_404_409` 6 · `_ERRORS_400_404_409` 1 · `_ERRORS_400_404` 1 = 19, 신규 상수 endpoint 2곳을 더해 21).
+- **503 두 얼굴의 description 분리**: S1이 정본화한 구분(구성 15곳 vs 무결성 3곳)이 이번에 처음으로 **선언 표면에서** 갈린다. `_CONFIG_503`은 "협력자 미구성 → 배포 환경에서 구성하라"를 적고 `migrate_ordered_units.py` 문안을 쓰지 않는다.
+- **회귀 신규 9건**(`tests/test_application_api.py`):
+  - `AnalysisErrorContractDeclarationTest` 4건 — (a) 21행 exact lock(subTest 21, 양방향), (b) **트랙 전수 선언**(spec의 `/analysis/` operation 중 lock 리스트에 없는 것이 0), (c) 본문 단일 `ErrorDetailResponse` 참조(subTest **36** = 21행의 선언 코드 총합), (d) config 503 description 문안(subTest 2 — present 2 + migration 문안 부재). 합계 21+36+2 = **59 subtest**.
+  - `AnalysisErrorBodyExactKeyTest` 5건 — 404/409/400/**502**/**503**의 실제 wire 본문이 정확히 `{detail}` 단일 키. S2가 닿지 못한 502·503-config를 이번에 잠갔다.
+
+### Issues found
+
+- 없음. 다만 브리프의 S3 경고("동적 `ProviderError` 매핑이 섞여 있다")는 **analysis 구역에는 실제로 해당하지 않았다** — 이 구역의 `ProviderError`는 `run`·`compare` 두 곳 모두 **명시 502 분기**이고, `status_code=status` 동적 매핑 9곳은 전부 writing 구역(S5)에 있다. 실코드 확인 결과이며 스코프 축소가 아니라 경고가 발화하지 않은 것이다.
+
+### Decisions (구현자 판단)
+
+- **`_CONFIG_503` 상수 1개를 두 endpoint가 공유**한다(endpoint별 문안으로 쪼개지 않음): 어떤 협력자가 빠졌는지는 런타임 `detail`이 이미 이름을 대고, 운영 조치("배포 환경에서 구성")는 두 곳이 동일하다. S2가 503만 개별화한 근거는 "조치가 없으면 실행 불가능한 정보"였는데 그 조치가 같으면 문안을 나눌 이유가 없다.
+- **트랙 전수 선언 테스트를 추가**했다(S2에는 없던 축). S2는 20행 lock으로 충분했지만, S3는 "트랙을 닫았다"는 주장을 하므로 **lock 리스트 자체의 over-strict 가드**가 필요하다 — 신규 analysis endpoint가 선언 없이 실리면 21행은 여전히 green이지만 closure 주장은 거짓이 된다.
+- **성공 `response_model`을 붙이지 않았다**: 이 구역은 무타입 endpoint(`dict[str, object]`)가 대부분이라 유혹이 크지만 H1 잔여 범위이고, 섞으면 silent field loss 위험(v1.6.95)을 이 페이즈로 끌어온다. S2 work log의 경고를 그대로 지켰다.
+
+### Verification
+
+- **OpenAPI self-discovery**: `create_app().openapi()` 재덤프로 21 endpoint의 선언 집합(200/422 제외)이 코드 직독 도출과 정확히 일치함을 확인(mismatch 0).
+- **mutation 4종 실증(양방향)**:
+  - compare의 `responses=` 삭제 → 선언 exact·본문 모델·config description 3개 회귀가 해당 endpoint에서만 SUBFAIL(under-strict).
+  - `_ERRORS_404_502_CONFIG`에 아무도 안 던지는 504 추가 → `test_declared_error_statuses_match_the_lock_list`가 compare에서 SUBFAIL(over-strict).
+  - `_CONFIG_503` 모델을 `dict`로 교체 → 본문 단일 모델 회귀가 run·compare 두 503에서 SUBFAIL.
+  - lock 리스트에 없는 `/analysis/brand-new` endpoint 추가 → `test_the_whole_analysis_track_is_declared` FAIL(트랙 전수 가드가 실제로 문다).
+- **런타임 불변**: backend 전체 **1428 passed / 1 skipped / 0 failed / 443 subtests**(전용 `docker-compose.test.yml` test-mongo 27020 RS). 직전 기준선 1419/1/384 대비 +9 test·+59 subtest = 이번 신규분과 정확히 일치하고, analysis 상태코드 회귀(run의 400/409/502/404/503 5종 등) 전부 green.
+- **프론트 타입**: `npm run gen:api` → `schema.d.ts` **+324행 / -0행**(순수 additive), `npx tsc --noEmit` clean, `npm run build` 성공(JS 399.03 kB — S2와 동일, 프론트 소스 무변), frontend **194 passed / 13 files**.
+- **변경 표면**: `main.py`(선언·상수만), `tests/test_application_api.py`, `schema.d.ts`(생성물), SoT/HANDOFF/work_log. 서비스 로직·프론트 소스 0줄.
+
+### Next steps
+
+- **S4(memory/source)**: memory read 2, snapshots/source-refs/index-rebuild, context-search.
+- 이후 **S5**(writing 잔여 + `start_next_unit` 503 방어 = SoT v1.7.29가 "알려진 결손"으로 기록한 500 누수 폐쇄). **동적 `ProviderError` 매핑 9곳은 전부 이 구역에 있다** — 브리프의 "realistic 집합만 선언" 경고가 실제로 발화하는 곳은 S5다.
+
+### 오너 독립 검증 PASS + 비차단 반영
+
+- **오너 독립 검증 합격(조건 없음)**: `docs/verifications/2026-07-23/h3_s3_analysis_error_responses.md`. 경계 매트릭스 **21/21 빈 cell 없음**. 검증자가 지적한 authority 관계가 정확하다 — D3=A라 SoT엔 endpoint×코드 표가 없고, 테스트는 `OpenAPI == EXPECTED`만 pin하므로 **EXPECTED 자체의 정확성은 endpoint 본문 직독이 권위**다. 검증자가 21 endpoint를 전수 직독해 선언 집합 == 실제 매핑 raise 집합을 양방향 재확인했고, mutation 4종·OpenAPI self-discovery·수치(1428/1/443 · +324/-0 · 399.03 kB · 194/13)를 전부 재실행해 일치를 확인했다.
+- **비차단 1 반영 — 문서 수치 오기 2건 정정**(코드·테스트·스키마는 정확했고 aggregate도 맞았다):
+  - "나머지 **18** endpoint 재사용" → **19**. 재도출: `_ERRORS_404` 11 + `_404_409` 6 + `_400_404_409` 1 + `_400_404` 1 = 19, 신규 상수 2(run·compare) = 21. work_log·SoT changelog 양쪽 정정.
+  - "body-model subTest **31**" → **36**(= 21행의 선언 코드 총합 11+12+3+2+3+5). 31이면 총계가 54가 되어 실측 59와 모순됐다. work_log 정정 + 21+36+2=59 산식을 명시.
+- **비차단 2 반영 — 사전 존재 미매핑 500 경로를 추적 부채로 등록**: `auto_promote_job` 승격 루프·일부 list 호출이 `try` 밖이라 예외 시 500이 샌다. **S3 비관여**(선언만 추가, 구조 무변; SoT가 500을 "승인 안 된 알려진 결손"으로 분류하므로 선언 계약 위반 아님)이나 `start_next_unit` 500 누수와 동일 부류라 HANDOFF 추적 부채에 **S5 점검 후보**로 등록했다. 검증자 판단대로 이번 슬라이스에서 고치지 않았다 — 구조 변경은 S3 스코프(D4=A 선언 전용) 밖이다.

@@ -1034,6 +1034,26 @@ _ERRORS_404_409_MIGRATION: dict[int | str, dict] = {
     404: _ERROR, 409: _ERROR, 503: _MIGRATION_503,
 }
 
+# The analysis track's 503 is the *other* face: a collaborator the endpoint needs
+# (the extraction runner, the compare judge) is absent from this deployment. The
+# request is fine, so — like the migration face — retrying alone cannot help; the
+# operator action is a deployment change. One constant covers both endpoints
+# because the runtime ``detail`` already names which collaborator is missing, and
+# the semantics are identical.
+_CONFIG_503 = {
+    "model": ErrorDetailResponse,
+    "description": "A collaborator this endpoint requires is not configured in "
+                   "this deployment. Configure it in the deployment environment; "
+                   "retrying the request alone cannot succeed.",
+}
+
+_ERRORS_404_502_CONFIG: dict[int | str, dict] = {
+    404: _ERROR, 502: _ERROR, 503: _CONFIG_503,
+}
+_ERRORS_400_404_409_502_CONFIG: dict[int | str, dict] = {
+    400: _ERROR, 404: _ERROR, 409: _ERROR, 502: _ERROR, 503: _CONFIG_503,
+}
+
 
 class ProjectPayload(BaseModel):
     id: str
@@ -2313,7 +2333,7 @@ def create_app(
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @app.post("/projects/{project_id}/analysis/jobs")
+    @app.post("/projects/{project_id}/analysis/jobs", responses=_ERRORS_404)
     async def create_analysis_job(
         project_id: str, request: CreateAnalysisJobRequest
     ) -> dict[str, object]:
@@ -2331,7 +2351,8 @@ def create_app(
             "idempotent_replay": result.idempotent_replay,
         }
 
-    @app.get("/projects/{project_id}/analysis/jobs/{job_id}")
+    @app.get("/projects/{project_id}/analysis/jobs/{job_id}",
+             responses=_ERRORS_404)
     async def get_analysis_job(project_id: str, job_id: str) -> dict[str, object]:
         try:
             _require_project_exists(project_id)
@@ -2340,7 +2361,8 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return _analysis_job_payload(job)
 
-    @app.get("/projects/{project_id}/analysis/jobs/{job_id}/candidates")
+    @app.get("/projects/{project_id}/analysis/jobs/{job_id}/candidates",
+             responses=_ERRORS_404)
     async def list_analysis_candidates(
         project_id: str, job_id: str
     ) -> dict[str, object]:
@@ -2355,7 +2377,8 @@ def create_app(
             ]
         }
 
-    @app.post("/projects/{project_id}/analysis/jobs/{job_id}/retry")
+    @app.post("/projects/{project_id}/analysis/jobs/{job_id}/retry",
+              responses=_ERRORS_404_409)
     async def retry_analysis_job(project_id: str, job_id: str) -> dict[str, object]:
         try:
             _require_project_exists(project_id)
@@ -2366,7 +2389,8 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return _analysis_job_payload(job)
 
-    @app.post("/projects/{project_id}/analysis/jobs/{job_id}/run")
+    @app.post("/projects/{project_id}/analysis/jobs/{job_id}/run",
+              responses=_ERRORS_400_404_409_502_CONFIG)
     async def run_analysis_job(project_id: str, job_id: str) -> dict[str, object]:
         try:
             _require_project_exists(project_id)
@@ -2418,7 +2442,8 @@ def create_app(
         return _analysis_run_payload(result)
 
     @app.post(
-        "/projects/{project_id}/analysis/candidates/{candidate_id}/promote"
+        "/projects/{project_id}/analysis/candidates/{candidate_id}/promote",
+        responses=_ERRORS_404,
     )
     async def promote_candidate(
         project_id: str, candidate_id: str
@@ -2458,7 +2483,8 @@ def create_app(
         }
 
     @app.post(
-        "/projects/{project_id}/analysis/candidates/{candidate_id}/confirm"
+        "/projects/{project_id}/analysis/candidates/{candidate_id}/confirm",
+        responses=_ERRORS_404_409,
     )
     async def confirm_candidate(
         project_id: str, candidate_id: str
@@ -2476,7 +2502,8 @@ def create_app(
         return _candidate_review_payload(result)
 
     @app.post(
-        "/projects/{project_id}/analysis/candidates/{candidate_id}/reject"
+        "/projects/{project_id}/analysis/candidates/{candidate_id}/reject",
+        responses=_ERRORS_404_409,
     )
     async def reject_candidate(
         project_id: str, candidate_id: str
@@ -2494,7 +2521,8 @@ def create_app(
         return _candidate_review_payload(result)
 
     @app.post(
-        "/projects/{project_id}/analysis/candidates/{candidate_id}/edit"
+        "/projects/{project_id}/analysis/candidates/{candidate_id}/edit",
+        responses=_ERRORS_400_404_409,
     )
     async def edit_candidate(
         project_id: str, candidate_id: str, body: EditCandidateRequest
@@ -2518,7 +2546,8 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _candidate_edit_payload(result)
 
-    @app.post("/projects/{project_id}/analysis/jobs/{job_id}/auto-promote")
+    @app.post("/projects/{project_id}/analysis/jobs/{job_id}/auto-promote",
+              responses=_ERRORS_404)
     async def auto_promote_job(
         project_id: str, job_id: str
     ) -> dict[str, object]:
@@ -2603,7 +2632,8 @@ def create_app(
             },
         }
 
-    @app.post("/projects/{project_id}/analysis/jobs/{job_id}/context")
+    @app.post("/projects/{project_id}/analysis/jobs/{job_id}/context",
+              responses=_ERRORS_404)
     async def analysis_context_endpoint(
         project_id: str, job_id: str
     ) -> dict[str, object]:
@@ -2644,7 +2674,8 @@ def create_app(
             "rationale": proposal.rationale,
         }
 
-    @app.post("/projects/{project_id}/analysis/jobs/{job_id}/compare")
+    @app.post("/projects/{project_id}/analysis/jobs/{job_id}/compare",
+              responses=_ERRORS_404_502_CONFIG)
     async def analysis_compare_endpoint(
         project_id: str, job_id: str
     ) -> dict[str, object]:
@@ -2702,7 +2733,8 @@ def create_app(
             "status": entry.status.value,
         }
 
-    @app.post("/projects/{project_id}/analysis/jobs/{job_id}/apply")
+    @app.post("/projects/{project_id}/analysis/jobs/{job_id}/apply",
+              responses=_ERRORS_400_404)
     async def analysis_apply_endpoint(
         project_id: str, job_id: str, request: ApplyMemoryRequest
     ) -> dict[str, object]:
@@ -2762,7 +2794,8 @@ def create_app(
             "applied": [_applied_proposal_payload(a) for a in applied],
         }
 
-    @app.get("/projects/{project_id}/analysis/review-queue")
+    @app.get("/projects/{project_id}/analysis/review-queue",
+             responses=_ERRORS_404)
     async def analysis_review_queue_endpoint(project_id: str) -> dict[str, object]:
         # 2B.4 follow-up: list the project's open review-only (conflict) entries
         # persisted by apply, so an unresolved conflict is observable/reconcilable
@@ -2778,7 +2811,8 @@ def create_app(
         }
 
     @app.post(
-        "/projects/{project_id}/analysis/review-queue/{entry_id}/reconcile"
+        "/projects/{project_id}/analysis/review-queue/{entry_id}/reconcile",
+        responses=_ERRORS_404_409,
     )
     async def reconcile_character_conflict(
         project_id: str, entry_id: str, request: ReconcileCharacterRequest
@@ -2874,7 +2908,8 @@ def create_app(
             })
         return payload
 
-    @app.get("/projects/{project_id}/analysis/review-inbox")
+    @app.get("/projects/{project_id}/analysis/review-inbox",
+             responses=_ERRORS_404)
     async def list_review_inbox(project_id: str) -> dict[str, object]:
         try:
             _require_project_exists(project_id)
@@ -2892,7 +2927,8 @@ def create_app(
             ],
         }
 
-    @app.get("/projects/{project_id}/analysis/review-inbox/{candidate_id}")
+    @app.get("/projects/{project_id}/analysis/review-inbox/{candidate_id}",
+             responses=_ERRORS_404)
     async def get_review_inbox_item(
         project_id: str, candidate_id: str
     ) -> dict[str, object]:
@@ -2927,7 +2963,8 @@ def create_app(
             ],
         }
 
-    @app.get("/projects/{project_id}/analysis/gate-findings")
+    @app.get("/projects/{project_id}/analysis/gate-findings",
+             responses=_ERRORS_404)
     async def list_gate_findings(project_id: str) -> dict[str, object]:
         try:
             _require_project_exists(project_id)
@@ -2938,7 +2975,8 @@ def create_app(
             for finding in gate_findings.list_open(project_id)
         ]}
 
-    @app.get("/projects/{project_id}/analysis/gate-findings/{finding_id}")
+    @app.get("/projects/{project_id}/analysis/gate-findings/{finding_id}",
+             responses=_ERRORS_404)
     async def get_gate_finding(project_id: str, finding_id: str):
         try:
             _require_project_exists(project_id)
@@ -2964,13 +3002,15 @@ def create_app(
         return {"finding": _gate_finding_payload(finding),
                 "idempotent_replay": replay}
 
-    @app.post("/projects/{project_id}/analysis/gate-findings/{finding_id}/resolve")
+    @app.post("/projects/{project_id}/analysis/gate-findings/{finding_id}/resolve",
+              responses=_ERRORS_404_409)
     async def resolve_gate_finding(project_id: str, finding_id: str):
         return await _transition_gate_finding(
             project_id, finding_id, GateFindingStatus.RESOLVED
         )
 
-    @app.post("/projects/{project_id}/analysis/gate-findings/{finding_id}/dismiss")
+    @app.post("/projects/{project_id}/analysis/gate-findings/{finding_id}/dismiss",
+              responses=_ERRORS_404_409)
     async def dismiss_gate_finding(project_id: str, finding_id: str):
         return await _transition_gate_finding(
             project_id, finding_id, GateFindingStatus.DISMISSED
