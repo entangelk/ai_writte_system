@@ -96,4 +96,46 @@
 
 - **S3(analysis 트랙)**: analysis jobs/candidates/context/compare/apply/review-queue/review-inbox/gate-findings. S2와 달리 **동적 `ProviderError` 매핑 지점이 섞여** 있어 endpoint별 realistic 집합만 선언하고 전체 열거는 하지 않는다(브리프 스코프 밖 명시).
 - 이후 S4(memory/source) → S5(writing 잔여 + `start_next_unit` 503 방어 = SoT v1.7.29가 "알려진 결손"으로 기록한 500 누수 폐쇄).
-- **주의**: S3 이후 구역은 `response_model`이 없는 무타입 endpoint가 많다(`dict[str, object]`). 에러 선언은 성공 모델과 독립이므로 `response_model` 부착을 함께 하려는 유혹을 피할 것 — 그건 H1의 잔여 범위이고, 섞으면 silent field loss 위험(§v1.6.95)이 이 페이즈로 들어온다.
+- **주의**: S3 이후 구역은 `response_model`이 없는 무타입 endpoint가 많다(아래 Mongo skip 규명 task 이후에도 동일).(`dict[str, object]`). 에러 선언은 성공 모델과 독립이므로 `response_model` 부착을 함께 하려는 유혹을 피할 것 — 그건 H1의 잔여 범위이고, 섞으면 silent field loss 위험(§v1.6.95)이 이 페이즈로 들어온다.
+
+## Task — 백엔드 스위트 Mongo skip 41건 원인 규명 (오너 질문: "포트 고정이 안 되었나?")
+
+### Goals
+
+- 오너가 "skip 나는 건 포트 번호 고정으로 처리했던 기억"이라고 지적. 실제로 무엇이 왜 skip되는지 **사유를 직접 뽑아** 확인하고, 고정이 풀린 것인지 다른 축인지 판별한다.
+
+### Issues found
+
+- **문제**: 백엔드 전체 실행이 계속 `41 skipped`. 기존 관행 URI(`CORE_SOT_TEST_MONGO_URI=mongodb://localhost:27018`)를 써도 그대로였다.
+- **원인 — 축이 두 개인데 하나로 섞여 있었다**(`pytest -rs`로 사유 집계):
+  - **41 = replica set 필요 40 + Chroma live 1**. Mongo가 압도적이라는 오너 직감은 정확했다.
+  - **축 1(인증)**: 기본 27017 = `shared-mongo`(외부 프로젝트 컨테이너)는 인증 필수라 `test_memory_mongo`가 write `Unauthorized(code 13)`로 **FAILED**했다. **27018 고정이 고친 것이 이 축이고, 지금도 유효하다**(failed 0).
+  - **축 2(replica set)**: 27018(`agent-memory-mongodb`)은 `db.hello().setName`이 없는 **standalone**이라 트랜잭션 미지원 → `test_core_sot_mongo.py`/`test_analysis_mongo.py` **40건이 skip**. **포트를 고정해도 standalone인 한 이 축은 안 풀린다** — 고정이 풀린 게 아니라 애초에 다른 문제를 고친 것이었다.
+  - **HANDOFF에 적혀 있던 RS 절차가 이 머신에서 막힌 이유**: RS를 주는 것은 프로젝트 자신의 `mongo` 서비스(`--replSet rs0`)인데 그 멤버가 **`mongo:27017`로 광고**돼, 호스트에서 붙으려면 27017 게시 + `/etc/hosts`에 `mongo`→127.0.0.1이 필요하다. 실측: 호스트 **27017은 `shared-mongo`가 점유**, `/etc/hosts`에 `mongo` 매핑 **없음**, 프로젝트 `mongo` 컨테이너 **미기동**. 세 조건이 겹쳐 RS 경로가 성립하지 않았고, 그래서 27018 standalone이 관행이 되며 skip 40이 상수처럼 남았다.
+
+### Completed work
+
+- **작동하는 우회 확인**(기존 컨테이너·프로젝트 `mongo_data` 볼륨 **무손상**): 멤버를 `localhost:PORT`로 광고하는 **일회용 단일노드 RS**를 빈 포트(27020)에 띄우면 `/etc/hosts`도 27017도 필요 없다.
+
+  ```bash
+  docker run -d --name awt-test-rs -p 27020:27020 mongo:7 --replSet rs1 --bind_ip_all --port 27020
+  docker exec awt-test-rs mongosh --quiet --port 27020 --eval \
+    'rs.initiate({_id:"rs1", members:[{_id:0, host:"localhost:27020"}]})'
+  CORE_SOT_TEST_MONGO_URI="mongodb://localhost:27020/?replicaSet=rs1" python3 -m pytest -q -p no:cacheprovider
+  ```
+
+- **결과**: **1419 passed / 1 skipped / 0 failed / 384 subtests**(9분 15초). 27018 대비 **+40 passed**. 남은 skip 1건은 Chroma live 테스트로, 서버는 8001에 떠 있으나 **호스트에 `chromadb` 패키지가 없고 `CHROMA_TEST_URL`도 미설정**이라 나는 것이다(패키지 설치는 요청 범위 밖이라 손대지 않음).
+- **부수 효과(검증 강화)**: H3 S1/S2 검증 당시 수치(1379/41)는 트랜잭션 40건이 **미실행**인 상태였다. 이번 실행으로 그 40건까지 포함해 **전부 green**임이 확인됐다 — S2의 선언 추가가 트랜잭션 경로에 영향 없음을 실측으로 닫았다.
+- HANDOFF에 "백엔드 테스트 Mongo — skip 0으로 돌리는 법" 항을 신설하고, 막혀 있던 종전 절차(W3 live 축 항의 `27017/?replicaSet=rs0`)를 그 항으로 리다이렉트했다.
+
+### Decisions (구현자 판단)
+
+- **프로젝트 `mongo` 서비스의 `rs0`를 `localhost`로 `rs.reconfig`하지 않았다**: 그 설정은 `mongo_data` 볼륨에 **영속**되어 이후 compose 스택(application이 `mongo:27017`로 접속)이 깨진다. 일회용 컨테이너는 그 위험이 없고 `docker rm -f`로 원상복구된다.
+- **`shared-mongo`를 내리지 않았다**: 이 프로젝트 소유가 아닌 컨테이너라 임의 중단은 범위 밖이다.
+- **`chromadb` 설치·`scripts/` 헬퍼 추가는 하지 않았다**(§2 — 요청 없는 인프라/의존성 추가 없음). 절차를 HANDOFF에 고정하고 스크립트화 여부는 오너 판단으로 남겼다.
+
+### Next steps
+
+- **오너 판단 대기**: 이 RS 절차를 `docker-compose.test.yml`이나 `scripts/`로 고정할지. 고정하면 "skip 41"이 매 세션 재발하지 않는다.
+- 일회용 컨테이너 `awt-test-rs`는 **현재 떠 있다**. 불필요하면 `docker rm -f awt-test-rs`.
+- Chroma live 1건을 0으로 만들려면 호스트에 `pip install chromadb` + `CHROMA_TEST_URL=http://localhost:8001`가 필요하다(오너 결정 사항).
