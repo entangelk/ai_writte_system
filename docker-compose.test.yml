@@ -1,0 +1,71 @@
+# Test-only MongoDB — a single-node replica set on a dedicated port.
+#
+# Why this file exists (2026-07-23, owner decision "전용 포트로 고정"):
+# the backend suite's Mongo tests split along two axes, and only one of them is
+# about auth. Transactions require a replica set, so a standalone mongod makes
+# ~40 tests skip no matter which port they are pointed at. The deployed `mongo`
+# service in docker-compose.yml *is* a replica set, but its member advertises
+# itself as `mongo:27017`, which host-side pytest cannot resolve without an
+# /etc/hosts entry — and on this machine 27017 is occupied by an unrelated
+# container anyway.
+#
+# The fix is to advertise the member as `localhost:<port>` on a port nobody else
+# uses. Then the host driver's replica-set discovery resolves without /etc/hosts
+# and without touching the deployed stack or its data volume.
+#
+# Usage:
+#   docker compose -f docker-compose.test.yml up -d
+#   python3 -m pytest -q            # tests default to this deployment
+#   docker compose -f docker-compose.test.yml down
+#
+# Deliberately NOT overlaid on docker-compose.yml: this is test infrastructure,
+# never part of a deployment, and `-f docker-compose.test.yml` alone keeps it
+# impossible to start by accident with a normal `docker compose up`.
+
+services:
+  test-mongo:
+    image: mongo:7
+    # The container port must equal the published port: the replica-set member
+    # is registered as localhost:<port>, and that is the address the host-side
+    # driver reconnects to after discovery.
+    command:
+      - "--replSet"
+      - "rs-test"
+      - "--bind_ip_all"
+      - "--port"
+      - "${TEST_MONGO_PORT:-27020}"
+    ports:
+      - "${TEST_MONGO_PORT:-27020}:${TEST_MONGO_PORT:-27020}"
+    # Required, not tuning. The suite creates and drops a throwaway database per
+    # test, so WiredTiger churns through far more file handles than a normal
+    # deployment. Docker's default soft limit here is 1024 — mongod itself warns
+    # "Soft rlimits for open file descriptors too low (recommendedMinimum 64000)"
+    # at startup, and under the suite it hits EMFILE, panics
+    # (WT_PANIC: __posix_directory_sync ... Too many open files) and aborts with
+    # a fatal assertion mid-run. Observed 2026-07-23; the run dies as failures,
+    # not skips, so it looks like a code regression rather than an fd ceiling.
+    ulimits:
+      nofile:
+        soft: 64000
+        hard: 64000
+    # No volume on purpose. Test databases are throwaway (each test drops its
+    # own), so storage lives in the container layer and `down` leaves nothing
+    # behind. It also cannot collide with the deployed stack's mongo_data.
+    healthcheck:
+      # Idempotently initiate the single-node replica set, then report healthy
+      # only once the node is actually a writable PRIMARY. rs.initiate() returns
+      # ok=1 before the election completes, so reporting on it alone would call
+      # the service ready while writes still fail with NotWritablePrimary.
+      # The member host is localhost:<port> — see the file header for why.
+      test:
+        - "CMD"
+        - "mongosh"
+        - "--quiet"
+        - "--port"
+        - "${TEST_MONGO_PORT:-27020}"
+        - "--eval"
+        - "try { rs.status() } catch (e) { rs.initiate({ _id: 'rs-test', members: [{ _id: 0, host: 'localhost:${TEST_MONGO_PORT:-27020}' }] }) } ; quit(db.hello().isWritablePrimary ? 0 : 1)"
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 5s

@@ -172,18 +172,20 @@
   - **축 1(인증) = 해결됨**: 기본 27017(`shared-mongo`, 외부 프로젝트 컨테이너)은 인증 필수라 `test_memory_mongo`가 write `Unauthorized(code 13)`로 **FAILED**했다. `CORE_SOT_TEST_MONGO_URI=mongodb://localhost:27018`(`agent-memory-mongodb`)로 해결. **이 고정은 지금도 유효하며 failed 0이다.**
   - **축 2(replica set) = 27018로는 절대 안 풀림**: 27018은 **standalone**(`db.hello().setName`이 없음)이라 트랜잭션을 지원하지 않아 `test_core_sot_mongo.py`/`test_analysis_mongo.py`의 **40건이 "MongoDB deployment does not support transactions (needs a replica set)"로 skip**된다. 포트를 아무리 고정해도 standalone인 한 그대로다.
   - **종전 절차가 막힌 이유**: RS를 주는 것은 프로젝트 자신의 `mongo` 서비스(`--replSet rs0`)인데, 그 RS 멤버가 **`mongo:27017`로 광고**돼 호스트에서 붙으려면 27017 게시 + `/etc/hosts`에 `mongo`→127.0.0.1이 필요하다. 이 머신은 **27017을 `shared-mongo`가 점유**하고 `/etc/hosts` 매핑도 없어서 그 경로가 성립하지 않는다(그래서 27018 standalone이 관행이 됐고 skip 40이 상수처럼 남았다).
-  - **작동 확인된 우회(기존 컨테이너·프로젝트 볼륨 무손상)** — 멤버를 `localhost:PORT`로 광고하는 **일회용 단일노드 RS**를 빈 포트에 띄우면 `/etc/hosts`도, 27017도 필요 없다:
+  - **✅ 고정 완료(오너 결정 "전용 포트로 고정", 2026-07-23)** — 신규 [`docker-compose.test.yml`](docker-compose.test.yml)의 `test-mongo`가 **전용 포트 27020**(`TEST_MONGO_PORT`로 조정)에 단일노드 RS `rs-test`를 띄우고, 멤버를 **`localhost:27020`으로 광고**해 `/etc/hosts`도 27017도 필요 없다. healthcheck가 `rs.initiate`를 멱등 수행하므로 healthy = 바로 사용 가능:
 
     ```bash
-    docker run -d --name awt-test-rs -p 27020:27020 mongo:7 --replSet rs1 --bind_ip_all --port 27020
-    docker exec awt-test-rs mongosh --quiet --port 27020 --eval \
-      'rs.initiate({_id:"rs1", members:[{_id:0, host:"localhost:27020"}]})'
-    CORE_SOT_TEST_MONGO_URI="mongodb://localhost:27020/?replicaSet=rs1" python3 -m pytest -q -p no:cacheprovider
+    docker compose -f docker-compose.test.yml up -d      # 기동(healthy까지 ~10초)
+    python3 -m pytest -q                                 # env 변수 불필요 — 테스트 기본값이 이 배포다
+    docker compose -f docker-compose.test.yml down        # 정리(볼륨 없음, 잔여물 0)
     ```
 
-    결과 **1419 passed / 1 skipped / 0 failed / 384 subtests**(2026-07-23 실측). 27018 대비 **+40 passed**이며 남은 skip 1건은 Chroma live 테스트(`chromadb` 미설치 + `CHROMA_TEST_URL` 미설정, 서버 자체는 8001에 떠 있음)다. 정리는 `docker rm -f awt-test-rs`.
-  - **주의**: 프로젝트 `mongo` 서비스의 RS(`rs0`)를 `localhost`로 `rs.reconfig`하는 방법은 **쓰지 말 것** — 그 설정은 `mongo_data` 볼륨에 영속되어 이후 compose 스택(app이 `mongo:27017`로 접속)이 깨진다. 일회용 컨테이너는 그 위험이 없다.
-  - **후속 후보(오너 판단)**: 이 절차를 `scripts/`나 `docker-compose.test.yml`로 고정할지. 지금은 미착수(§2 — 요청 없이 인프라 추가 안 함).
+    **테스트 기본 URI를 `mongodb://localhost:27020/?replicaSet=rs-test`로 바꿨다**(4개 `*_mongo.py`). 이제 **env 변수를 기억할 필요가 없고**, 이 축의 skip이 재발하려면 test-mongo를 안 띄우는 경우뿐이다(그때는 실패가 아니라 skip). `CORE_SOT_TEST_MONGO_URI`는 여전히 override로 동작한다.
+  - **결과**: `python3 -m pytest -q` 단독으로 **1419 passed / 1 skipped / 0 failed / 384 subtests**. 남은 skip 1건은 Chroma live 테스트(`chromadb` **미설치** + `CHROMA_TEST_URL` 미설정 — 서버 자체는 8001에 떠 있다). 0으로 만들려면 호스트에 `pip install chromadb` + env 설정이 필요하며 **오너 결정 사항**(의존성 추가라 임의로 하지 않았다).
+  - **fd 한도는 튜닝이 아니라 필수**: 스위트는 테스트마다 throwaway DB를 만들고 지워서 WiredTiger가 파일 핸들을 대량으로 돌린다. Docker 기본 soft `nofile`은 **1024**이고 mongod 자신이 기동 시 `Soft rlimits for open file descriptors too low (recommendedMinimum 64000)`를 경고하는데, 이 상태로 스위트를 돌리면 **EMFILE → `WT_PANIC: __posix_directory_sync … Too many open files` → fatal assertion으로 mongod가 실행 중 죽는다**(2026-07-23 실측: 19 failed/1 error). **증상이 skip이 아니라 failure라서 코드 회귀처럼 보이는 게 이 함정의 위험**이다. `docker-compose.test.yml`이 `ulimits.nofile 64000`을 명시해 닫았다.
+  - **[추적 부채 — 오너 판단] 배포 `mongo` 서비스에도 `ulimits`가 없다**([docker-compose.yml](docker-compose.yml)의 `mongo:`): 같은 1024 soft 한도라 같은 fatal 크래시 조건을 구조적으로 갖는다. 배포는 DB가 하나뿐이라 지금까지 도달하지 않았을 뿐이며, dogfood가 길어지거나 색인/분석이 쌓이면 재현될 수 있다. 4줄 추가로 닫히지만 **실행 중인 스택의 컨테이너 재생성이 필요**해 이번 범위에서 제외했다.
+  - **`docker-compose.yml`(배포 스택)은 건드리지 않았다**: 앱 컨테이너는 네트워크 내부에서 `mongo:27017`로 붙으므로 테스트용 포트와 무관하다. 배포 `mongo`의 호스트 게시 포트(27017 기본, `shared-mongo`와 충돌)는 이번 범위 밖이며 필요 시 `MONGO_PORT`로 조정한다.
+  - **주의**: 프로젝트 `mongo` 서비스의 RS(`rs0`)를 `localhost`로 `rs.reconfig`하는 방법은 **쓰지 말 것** — 그 설정은 `mongo_data` 볼륨에 영속되어 이후 compose 스택(app이 `mongo:27017`로 접속)이 깨진다. 전용 test-mongo는 볼륨이 없어 그 위험이 구조적으로 없다.
 - **Deferred(W4 이후/오너 결정)**: 중첩 chapter→scene tree, ProjectBrief→Draft provenance, 관계 graph/완전 timeline, saved publication manifest 정본. (미채택 candidate 영속은 2026-07-20 D0=B/D1=B/D2=A 구현 + SoT v1.7.20 정본 승격까지 **완료·종료**.)
 - **✅ C0 HTTP contract(v1.7.1) + C1 기본 Writing UI(v1.7.2) + C2 bounded loop UI(v1.7.3) + B Review Inbox 첫·둘째 슬라이스(v1.7.4·v1.7.5) 완료**: C0는 Writing 4 endpoint 응답 타입화, C1은 generate→Gate→pass accept/save, C2는 eligible revise finding 자동 loop·6 status/stage·partial candidate 보존/5xx exact-body retry, B는 목록+근거 detail+**candidate confirm/reject/edit·conflict merge/split·gate resolve/dismiss** 전체 어포던스 소비를 닫았다. 전부 backend/schema 무변.
 - **✅ Review Inbox 7/7 write action 라이브 검증 완료**: 5개(2026-07-17 `review_inbox_live_e2e.md` — candidate confirm/reject/edit·conflict merge/split) + **2개(2026-07-18 `gate_finding_live_trigger.md` — gate finding resolve/dismiss)**. 07-18 관통: Context Gate `reject`를 **결정적으로** 유발(`stale_item` via **archived draft + `current_scene`** — Mongo-direct라 retrieval-time 배제 없이 gate까지 도달; **`budget_exceeded`는 `_apply_budget` 선-트림으로 엔드포인트에서 도달 불가**라 07-17 max_tokens=1 접근이 실패했던 것) → `persist_rejection` 영속 → review-inbox 어포던스 `{resolve:true,dismiss:true}` → resolve `resolved`·dismiss `dismissed`·open 서버 재조회 0. application 직접(`:8000`)·브라우저 동등 프록시(`:5173/api`) **양 경로 exit 0**. 신규 `scripts/phase6_gate_finding_live_smoke.py`(프로덕션 무변). **운영 발견(07-17)**: (1) 이미지 stale 시 기동 전 `docker compose build application frontend`, (2) `-hf` llama 재다운로드 정체 → 캐시 blob `-m` 직접 지정 우회, (3) 추출 anchor echo는 단일 라인 quote 요구.

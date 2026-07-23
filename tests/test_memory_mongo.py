@@ -27,7 +27,9 @@ from services.application.app.analysis.models import (
 from services.application.app.memory.models import MemoryStatus, PromotionMode
 from services.application.app.memory.service import MemoryService
 
-_MONGO_URI = os.environ.get("CORE_SOT_TEST_MONGO_URI", "mongodb://localhost:27017")
+_MONGO_URI = os.environ.get(
+    "CORE_SOT_TEST_MONGO_URI", "mongodb://localhost:27020/?replicaSet=rs-test"
+)
 
 
 def _probe_mongo() -> bool:

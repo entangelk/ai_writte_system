@@ -3,11 +3,14 @@
 These tests require a reachable MongoDB. They skip (not fail) when none is
 available so the infrastructure-free unit suite stays runnable everywhere.
 
-- Point them at a deployment with ``CORE_SOT_TEST_MONGO_URI`` (default
-  ``mongodb://localhost:27017``).
+- The default deployment is the dedicated test replica set from
+  ``docker-compose.test.yml`` (``mongodb://localhost:27020/?replicaSet=rs-test``);
+  start it with ``docker compose -f docker-compose.test.yml up -d``.
+  ``CORE_SOT_TEST_MONGO_URI`` overrides it.
 - The fallback (non-transaction) contract runs against any ``mongod``.
 - The transaction contract only runs when the deployment supports
-  transactions (a replica set); otherwise it skips.
+  transactions (a replica set); otherwise it skips. Pointing these tests at a
+  standalone mongod is the usual reason ~40 of them silently skip.
 
 Every test uses a throwaway database that is dropped on teardown, so runs are
 isolated and leave no residue.
@@ -58,7 +61,9 @@ from services.application.app.core_sot.splitter import (
     split_source_blocks,
 )
 
-_MONGO_URI = os.environ.get("CORE_SOT_TEST_MONGO_URI", "mongodb://localhost:27017")
+_MONGO_URI = os.environ.get(
+    "CORE_SOT_TEST_MONGO_URI", "mongodb://localhost:27020/?replicaSet=rs-test"
+)
 
 
 def _probe_mongo() -> tuple[bool, bool]:

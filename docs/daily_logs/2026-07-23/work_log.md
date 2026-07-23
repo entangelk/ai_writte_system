@@ -139,3 +139,50 @@
 - **오너 판단 대기**: 이 RS 절차를 `docker-compose.test.yml`이나 `scripts/`로 고정할지. 고정하면 "skip 41"이 매 세션 재발하지 않는다.
 - 일회용 컨테이너 `awt-test-rs`는 **현재 떠 있다**. 불필요하면 `docker rm -f awt-test-rs`.
 - Chroma live 1건을 0으로 만들려면 호스트에 `pip install chromadb` + `CHROMA_TEST_URL=http://localhost:8001`가 필요하다(오너 결정 사항).
+
+## Task — 테스트 Mongo 고정: 전용 포트 단일노드 RS를 compose로 승격 (오너 결정 "고정해버려")
+
+### Goals
+
+- 앞 task가 규명한 replica-set 축을 **일회성 우회가 아니라 리포지토리 자산으로 고정**한다. 오너 결정: "고정해버려. 포트 변경하는게 큰 문제는 아니니까. 별도 포트 사용하면 뭐 더 좋지. 다른 프로젝트랑 안겹칠꺼아녀" — 전용 포트 채택.
+- 성공 기준: **env 변수 없이 `python3 -m pytest -q`만으로 Mongo skip 0**.
+
+### User Decisions and Rationale
+
+- **오너 결정 = 전용 포트로 영구 고정**. 근거(오너): 포트 변경 비용이 작고, 전용 포트를 쓰면 다른 프로젝트(`shared-mongo`·`agent-memory-mongodb`)와 구조적으로 겹치지 않는다. 이 결정으로 "27017을 누가 점유했나"에 의존하던 취약한 절차가 사라진다.
+
+### Completed work
+
+- **신규 [`docker-compose.test.yml`](../../../docker-compose.test.yml)** — `test-mongo` 서비스:
+  - `mongo:7`, `--replSet rs-test --bind_ip_all --port ${TEST_MONGO_PORT:-27020}`, **컨테이너 포트 = 게시 포트**(멤버가 `localhost:<port>`로 등록되므로 discovery 후 호스트 드라이버가 재접속하는 주소와 일치해야 한다).
+  - healthcheck가 `rs.initiate`를 **멱등** 수행하고 **writable PRIMARY일 때만 healthy**를 보고한다(`quit(db.hello().isWritablePrimary ? 0 : 1)`). `rs.initiate()`는 선거 완료 전에 ok=1을 돌려주므로, 그것만 보고 healthy를 주면 write가 `NotWritablePrimary`로 깨지는 창이 생긴다.
+  - **볼륨 없음**(의도): 테스트 DB는 throwaway라 컨테이너 레이어로 충분하고, `down`이 잔여물을 남기지 않으며 배포 스택의 `mongo_data`와 충돌할 수 없다.
+  - **오버레이가 아니라 독립 파일**: 테스트 인프라는 배포의 일부가 절대 아니므로 `-f docker-compose.test.yml`을 명시해야만 뜬다(`docker compose up`으로 실수 기동 불가). 선례 = `docker-compose.llama.yml`.
+- **테스트 기본 URI 변경** — `tests/test_core_sot_mongo.py`·`test_analysis_mongo.py`·`test_memory_mongo.py`의 기본값을 `mongodb://localhost:27017` → **`mongodb://localhost:27020/?replicaSet=rs-test`**로, 기본값이 아예 없던 `test_indexing_mongo.py`에도 동일 기본값을 부여했다. **env 변수를 기억할 필요가 없어진 것이 이번 고정의 본질**이다(`CORE_SOT_TEST_MONGO_URI`는 override로 계속 동작). `test_core_sot_mongo.py` 모듈 docstring도 새 절차와 "standalone을 가리키면 40건이 조용히 skip된다"는 함정을 명시하도록 갱신.
+
+### Issues found
+
+- **fd 한도 1024 → mongod 실행 중 fatal crash**: 고정 직후 재현 실행에서 `19 failed / 1 error`가 났다. 원인은 코드가 아니라 **`Too many open files`(EMFILE)** — 스위트가 테스트마다 throwaway DB를 만들고 지워 WiredTiger가 파일 핸들을 대량으로 돌리는데, Docker 기본 soft `nofile`이 1024다. mongod 자신이 기동 시 `Soft rlimits for open file descriptors too low (currentValue 1024, recommendedMinimum 64000)`를 경고하고 있었고, 한도에 닿자 `WT_PANIC: __posix_directory_sync … Too many open files` → `fassert` → **exit 14로 프로세스 사망**했다.
+  - **이 함정의 위험은 증상이 skip이 아니라 failure라는 점**이다. 인프라 한도 문제인데 코드 회귀처럼 보인다.
+  - **조치**: `test-mongo`에 `ulimits.nofile {soft: 64000, hard: 64000}` 명시(주석에 근거 기록). 적용 후 컨테이너 내부 `ulimit -Sn` = 64000, mongod 경고 **0건**.
+- **[패턴 스윕 → 추적 부채] 배포 `mongo` 서비스에도 `ulimits`가 없다**(`docker-compose.yml`의 `mongo:`). 같은 1024 soft 한도라 **같은 fatal 크래시 조건을 구조적으로 공유**한다. 배포는 DB가 하나뿐이라 아직 도달하지 않았을 뿐이며, dogfood가 길어지거나 색인/분석이 쌓이면 재현 가능하다. 4줄로 닫히지만 **실행 중 스택의 컨테이너 재생성**이 필요해 이번 범위에서 제외하고 HANDOFF에 부채로 등록했다 — 오너 판단 사항.
+
+### Verification
+
+- **성공 기준(env 없이 skip 0)**: `python3 -m pytest -q -p no:cacheprovider` → **1419 passed / 1 skipped / 0 failed / 384 subtests**. 종전 27018(standalone) 대비 **+40 passed**이며, 남은 skip 1건은 Chroma live(호스트에 `chromadb` 미설치 + `CHROMA_TEST_URL` 미설정)다.
+- **양방향 확인 — 미기동 시 실패가 아니라 skip**: `docker compose -f docker-compose.test.yml down` 상태에서 두 mongo 테스트 파일을 돌려 **61 skipped / 0 failed**를 확인했다. 인프라 부재가 회귀로 오인되지 않는다는 기존 계약(모듈 docstring)이 새 기본값에서도 유지된다.
+- **healthcheck 계약**: healthy 도달 시점에 `db.hello().isWritablePrimary` = true, `setName` = `rs-test`, primary = `localhost:27020`.
+- **fd 조치 확인**: 컨테이너 `ulimit -Sn` 64000, mongod 기동 경고 0건, 조치 후 전체 스위트에서 컨테이너 사망·재시작 0.
+- `docker compose -f docker-compose.test.yml config --quiet` 통과. 배포 `docker-compose.yml`은 **무변**.
+
+### Decisions (구현자 판단)
+
+- **배포 `mongo`의 호스트 게시 포트는 바꾸지 않았다**: 앱 컨테이너는 도커 네트워크 내부에서 `mongo:27017`로 접속하므로 테스트용 포트와 무관하고, 게시 포트 변경은 이번 문제를 풀지 않는다(§3 수술적). `shared-mongo`와의 27017 충돌은 필요할 때 `MONGO_PORT`로 조정한다.
+- **`chromadb`를 설치하지 않았다**: 호스트 의존성 추가는 요청 범위 밖이며 skip 1건은 정직한 신호다(§2).
+- **테스트 기본값을 바꾼 것이 핵심**이고 compose 파일만 추가하는 것으로는 부족하다고 판단했다 — 재발 원인이 "절차를 기억해야 한다"였기 때문이다. 이제 잊어도 skip일 뿐 잘못된 green이 되지 않는다.
+
+### Next steps
+
+- **오너 판단 대기**: 배포 `mongo`에도 `ulimits.nofile`을 넣을지(위 추적 부채). 넣는다면 스택 재기동이 필요하다.
+- Chroma live 1건을 0으로 만들려면 `pip install chromadb` + `CHROMA_TEST_URL=http://localhost:8001`.
+- 이제 백엔드 회귀 보고의 기준선은 **1419 passed / 1 skipped**다. 이전 로그의 "1379 passed / 41 skipped"는 standalone 기준이므로 직접 비교하지 말 것.
