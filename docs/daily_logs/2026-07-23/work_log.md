@@ -260,7 +260,7 @@
   - `{400,404}` 1곳 (source-ref create — `except NotFound` 뒤 `except CoreSotError → 400` 순서라 두 갈래가 실제로 분기한다)
   - `{400,404,502,503,504}` 1곳 (context-search)
 - **신규 상수 1종만**: `_ERRORS_400_404_502_504_CONFIG`. 나머지 6곳은 기존 상수 재사용(`_ERRORS_404` 5 · `_ERRORS_400_404` 1). context-search의 503은 구성 얼굴이라 S3의 `_CONFIG_503`을 그대로 쓴다.
-- **504가 선언 표면에 처음 오른다**: `context-search`는 writing 트랙 밖에서 자기 예산을 소진할 수 있는 유일한 endpoint(`ContextSearchBudgetExceeded` → 504)다. S1이 SoT 표에 적어 둔 504 의미론이 여기서 처음 기계 판독 가능해진다.
+- **504가 writing 밖 endpoint로는 처음 선언된다**: `context-search`는 writing 트랙 밖에서 자기 예산을 소진할 수 있는 유일한 endpoint(`ContextSearchBudgetExceeded` → 504)다. **504 선언 자체가 처음인 것은 아니다** — `writing/accept`·`writing/revise-and-gate`는 H3 이전부터 에러 본문 모델과 함께 504를 선언해 왔다(브리프 "에러 본문 모델을 선언한 건 2개뿐" 항).
 - **회귀 신규 9건**:
   - `MemorySourceErrorContractDeclarationTest` 4건(`tests/test_application_api.py`) — (a) 7행 exact lock(subTest 7, 양방향), (b) **트랙 전수 선언 가드**(`/memory`·`/snapshots/`·`/source-refs`·`/context-search` 경로 중 lock 리스트 밖 operation이 0), (c) 본문 단일 모델(subTest 12), (d) context-search 503이 구성 얼굴 문안이고 migration 문안을 차용하지 않음.
   - `MemorySourceErrorBodyExactKeyTest` 2건(동 파일) — 404·400 wire 본문 `{detail}` 단일 키.
@@ -293,3 +293,10 @@
 
 - **S5(마지막 슬라이스)**: writing 잔여(generate[202 success만 선언됨]·generation-jobs·gate·report·revise·loop-audits·scratch — 에러 본문 기선언 2[revise-and-gate·accept]는 제외) **+ `start_next_unit` 503 방어**(SoT v1.7.29가 "알려진 결손"으로 기록한 500 누수 폐쇄).
 - **S5에서 처음 실제로 발화하는 것들**: (1) 동적 `ProviderError` 매핑 9곳이 전부 이 구역이라 "realistic 집합만 선언, 전체 열거 안 함" 스코프가 여기서만 의미를 갖는다. (2) S3 검증이 남긴 미매핑 500 부채(`auto_promote_job` 등)와 S4의 index-rebuild 미매핑 경로를 `start_next_unit` 방어와 함께 점검한다.
+
+### 오너 독립 검증 PASS + 비차단 반영
+
+- **오너 독립 검증 합격(조건 없음)**: `docs/verifications/2026-07-23/h3_s4_memory_source_error_responses.md`. 경계 매트릭스 **7/7 빈 cell 없음**(7 endpoint 본문 직독으로 선언 집합 == 실제 매핑 raise 집합 양방향 재확인). mutation(over-strict 409·트랙 closure)·OpenAPI self-discovery(**TRACK 조각이 정확히 7개만 매칭** — 과잉/과소 없음을 별도로 확인)·수치(1437/1/462 · +108/-0 멱등 · 399.03 kB · 194/13) 전부 재실행 일치. 구현자 판단 2건(rebuild `{404}`-only, 본문 락 파일 배치)도 건전 판정.
+- **비차단 1 반영 — "504 처음" 과장 문안 정정**: 검증자 지적이 맞다. `writing/accept`·`writing/revise-and-gate`는 **H3 이전부터** 에러 본문 모델과 함께 504를 선언해 왔다(브리프 "에러 본문 모델을 선언한 건 2개뿐" 항). OpenAPI 덤프에서 504 선언 endpoint가 이 둘 + context-search **3개**임을 직접 재확인했다. 정확한 문장은 **"writing 트랙 밖 endpoint로는 처음"**이며 SoT changelog·HANDOFF·work_log 3곳을 그렇게 고쳤다. **실질 주장(context-search = writing 밖 유일 예산 endpoint)과 선언 자체는 처음부터 정확했다** — 문안만 과장이었다.
+  - **커밋 메시지(f0b1d15)는 고치지 않았다**: amend는 해시를 바꿔 검증 기록이 인용한 `f0b1d15`를 무효화한다. 히스토리를 다시 쓰는 대신 정정을 후속 커밋과 이 항목에 남기는 쪽이 감사 추적에 정직하다.
+- **비차단 2 — rebuild 미매핑 500**: 사전 존재이고 S3의 `auto_promote_job`과 동일 부류다. HANDOFF 추적 부채에 이미 등록돼 있으며 S5에서 `start_next_unit` 방어와 함께 점검한다. 이번 슬라이스에서 고치지 않은 이유는 위 Decisions 항(D4=A 선언 전용 스코프)과 같다.
