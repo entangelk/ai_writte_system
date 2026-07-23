@@ -108,7 +108,7 @@
 ### 추적 부채
 - **[남은 미매핑 500 부채 1건 — 오너 판단 필요] `auto_promote_job`**: 승격 루프와 일부 list 호출이 `try` **밖**이라 그 지점의 예외가 500으로 샌다([`main.py`](services/application/app/main.py), S3 독립 검증 발견). **이건 코드 매핑이 아니라 계약 질문이라 임의로 고르지 않았다** — 후보 일부를 이미 승격한 뒤 실패하면 무엇을 반환할 것인가(부분 성공 봉투인가, 전체 실패인가)? writing accept의 502 partial(`accepted=true` + `saved` + `analysis_error`) 선례가 참고가 되지만 그쪽은 "정본은 저장됐다"가 명확한 반면 여기는 승격 개수가 가변이다. 착수 시 결정 브리프 권장.
   - (형제였던 `index/source-blocks/rebuild` 협력자 장애는 **v1.7.34에서 502로 폐쇄** — 위 Current Status.)
-- **[신규] `context_search/service.py:199`·`:406`의 무방비 `embed()`**: v1.7.34 패턴 스윕에서 발견. 두 `retrieve` 메서드가 `EmbeddingProviderError`를 잡지 않는다(주 경로 `_run_vector_step`은 광의 catch로 이미 보호됨). **HTTP 도달성 미확인**이라 고치지 않았다 — 도달 가능하면 rebuild와 같은 502 매핑, 도달 불가면 부채 삭제.
+- **[관찰 — live 누수 아님] `context_search/service.py:199`·`:406`의 `embed()`는 호출자 catch에 의존한다**: v1.7.34 패턴 스윕에서 발견하고 독립 검증이 정밀화했다. `VectorCanonicalMemoryRetriever.retrieve`(:199)·`VectorCandidateMemoryRetriever.retrieve`(:406) 자체는 `EmbeddingProviderError`를 잡지 않지만, **둘 다 HTTP로 도달 가능하면서 호출자가 이미 보호**한다 — step runner(:752·:835)가 광의 `except Exception` → `BACKEND_ERROR` → `ContextSearchFailed` → **502**로 수렴시킨다. 따라서 **지금 새는 곳은 없다**. **부채의 성격**: 그 광의 catch가 좁아지면(구체 타입 나열로 리팩터링되는 등) 그 순간 500 누수로 전환된다. 고칠 필요는 없고, 저 catch를 건드리는 사람이 이 의존을 알고 있어야 한다.
 - (parser fence 스윕) **strict JSON parser fence-strip 스윕은 v1.6.86으로 완료**(잔존 0): `gate_prompt`(v1.6.83)·`report`(v1.6.85)에 이어 `compare_judge`·`extractor`·`planner`·`retrieval` 4곳이 공유 `writing/json_extract.py::strip_code_fence`를 채택했다. Phase 2A extraction 계약 clause("markdown-fenced JSON=first-parse 실패→repair")도 fence 추출 정책에 맞게 정정했다.
 - (이전 부채 #8 `ProviderError`→502는 조사 결과 stale — 두 경로 모두 이미 502였음 — 로 v1.6.49에서 명시 분기+회귀 lock으로 폐쇄했다.)
 
