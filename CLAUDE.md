@@ -142,15 +142,36 @@ A regression test should fail in *both* directions, not just one.
 Purpose: what the next worker needs in order to start working *right now*. If a
 line would not change what they do today, it does not belong here.
 
-**Hard limits — check these before you commit, they are not suggestions:**
+**There is no length cap — length is a symptom, not the rule.** A long HANDOFF
+can be entirely correct, and some entries need detail to be usable. A hard cap
+would either block content that earns its place or, worse, invite someone to
+meet the number by collapsing paragraphs into one unreadable line. What actually
+goes wrong is *duplication of finished work*, and that is what to check for.
+
+**Self-audit trigger.** When the file passes **~200 lines** — and roughly every
+100 lines after that — stop before adding more and audit it:
 
 ```bash
-wc -l HANDOFF.md                              # must be <= 150
-awk '{print length}' HANDOFF.md | sort -rn | head -1   # must be <= ~400
+wc -l HANDOFF.md
 ```
 
-Over the limit means **prune**, not reflow. The limits exist because an
-unreadable snapshot is the same as no snapshot.
+Walk the file section by section and ask:
+
+1. Would this change what the next worker does **today**? If not, delete it.
+2. Is this a completion narrative? It is already in `work_log.md`, the SoT
+   version log, and `CHANGELOG.md` — delete it here.
+3. Is it still true? Dated observations expire; re-check or drop them.
+4. Is a long section long because the content genuinely needs it? Then keep it.
+   Passing the trigger is not a failure — failing to look is.
+
+Then record the result in the header line of `HANDOFF.md`:
+
+```markdown
+> 마지막 자가 검수: YYYY-MM-DD · N줄
+```
+
+That line is how the next worker (and you, next time) can tell whether the
+trigger is actually being honored instead of quietly scrolling past it.
 
 **The rule that keeps getting broken — read this one twice:**
 
