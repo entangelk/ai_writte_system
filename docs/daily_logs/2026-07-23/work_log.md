@@ -454,3 +454,49 @@
 
 - **application 스택 기동은 오너 몫**: 현재 `application`·`gateway`·`mongo`·`elasticsearch`·`embedding`이 6시간 전 `Exited (255)` 상태다(이번 작업과 무관한 선행 상태). frontend는 이제 그 상태에서도 정상 기동하므로 SPA는 뜬다.
 - 남은 가벼운 후보: 배포 `mongo`에 `ulimits.nofile`(4줄, 스택 재생성 필요) · `auto_promote_job` 부분 성공 의미론(결정 브리프 선행).
+
+---
+
+## Task — 배포 포트 전용 대역 고정 + HANDOFF 스냅샷 재작성 + 규칙 강화
+
+### Goals
+
+- 오너 지적 2건: (1) "여러 개발 머신을 옮겨 다니니 완전 별도 포트로 하라고 했는데 지금 안 돼 있는 건가?" (2) "HANDOFF 헤더가 선언한 '이력이 아니라 지금 사실만'이 안 지켜지고 있다."
+
+### Issues found — 두 지적 다 사실이고, 둘은 같은 문제였다
+
+- **포트: 절반만 적용돼 있었다.** 테스트 Mongo는 전용 27020으로 고정됐지만(2026-07-23 앞 task), **배포 스택 기본값은 전부 표준 포트**였다(`27017`/`8000`/`8001`/`8002`/`8003`/`9200`/`5173`). 이 머신에서 실제로 **27017은 `shared-mongo`가, 8001은 `agent-memory-chroma`가 점유** 중이라 shell env 오버라이드로 기동해 왔는데, **`.env`가 repo에 없어** 그 값이 어디에도 안 남았다. 포트 규약 문서도 없었다.
+- **두 문제는 인과로 이어져 있다.** 포트가 repo에 고정돼 있지 않으면 작업자는 자기 머신에서 관측한 값을 적을 수밖에 없고, 그게 문서에 프로젝트 사실처럼 굳는다. 앞 task에서 발견한 "HANDOFF가 Chroma를 8001로 기록"이 정확히 그 산물이다(8001은 이 프로젝트에선 원래 **gateway** 기본 포트다).
+- **HANDOFF 실측**: 366줄, 최장 줄 **4811자**, "완료/폐쇄/✅/종료" 마커 **81개**. Current Status가 v1.6.51까지 거슬러 올라가는 완료 서술로 채워져 있었다. 전 항목이 SoT 변경이력과 `CHANGELOG.md`에 이미 있음을 확인했다(삭제 안전성 근거).
+- **내 책임**: 이 위반을 오늘 세션에서 **내가 5번 했다**(S3·S4·S5·rebuild 502·nginx 전부 Current Status 맨 위에 append). 파일 헤더가 금지한 바로 그 행동이다.
+
+### User Decisions and Rationale
+
+- **(1) 전용 대역 + `.env.example` 커밋**. 근거(오너): 여러 머신을 옮겨 다니는 프로젝트라 표준 포트는 구조적으로 충돌한다. 전용 대역이면 env 없이도 어느 머신에서든 같은 포트로 떠서, 문서의 포트 기술이 머신마다 달라지지 않는다.
+- **(2) HANDOFF 전면 재작성 + 재발 방지선을 `CLAUDE.md`·`AGENTS.md` 핸드오프 절에 "더욱 강력하게" 기입**.
+
+### Completed work
+
+- **전용 포트 대역 확정**(`docker-compose.yml` 기본값): application **8520** · gateway **8521** · embedding **8522** · chroma **8523** · elasticsearch **9520** · frontend **5520** · mongo **27520**. test-mongo는 기존 27020 유지.
+- **신규 [`.env.example`](../../../.env.example)** — 값 + **왜 표준 포트를 안 쓰는지**(위 인과)를 적었다. `.gitignore`에 이미 `!.env.example` 예외가 있어 커밋된다.
+- **호스트 접속용 하드코딩 4곳 동반 수정**: `frontend/vite.config.ts` dev 프록시 기본 타깃(8000→8520) · `scripts/migrate_ordered_units.py` 기본 URI(27017→27520) · `docs/runbooks/local-llama-server.md` gateway 헬스체크(8001→8521) · `scripts/gateway_generate_live_smoke.py` docstring. **컨테이너 내부 포트(healthcheck의 `localhost:8000` 등)는 건드리지 않았다** — 서비스 간 통신은 도커 네트워크 내부 이름/포트라 호스트 게시와 무관하다.
+- **HANDOFF 전면 재작성**: 366줄 → **111줄**. 완료 서술 전부 삭제하고 "지금 상태 / 기동·실행법 / 함정 / Active Decisions / 추적 부채 / Owner 결정 / Next Tasks / 구조"로 재구성. 포트 표·테스트 실행법·live Chroma 절차를 최상단 실행 정보로 올렸다.
+- **`CLAUDE.md`·`AGENTS.md`의 `### HANDOFF.md` 절 강화**(양쪽 동일 문안): 검증 가능한 **상한**(150줄 / 400자)과 그 확인 명령, **"완료 문단을 Current Status에 append하지 말 것"**을 실측 수치(366줄·81마커·4811자)와 함께 명시, **머신-로컬 관측치를 프로젝트 사실로 적지 말 것**을 8001 사고와 함께 명시.
+
+### Verification
+
+- **포트**: `docker compose config --quiet` 통과(양 compose 파일), `docker compose config`가 해석한 published 포트 7개가 전부 신규 대역. 신규 대역 7포트 **전부 free** 확인(`ss -ltn`). **실기동 확인** — `docker compose up -d --no-deps chroma frontend`가 **env 없이** `0.0.0.0:8523`·`0.0.0.0:5520`으로 뜨고 `:5520/` **200**, `:8523/api/v2/heartbeat` **200**.
+- **HANDOFF 상한**: 111줄(≤150) · 최장 줄 331자(≤400) · 완료 마커 81→**3**. 본문이 참조하는 파일 7개 존재 확인.
+- **삭제 안전성**: 지웠던 Current Status 항목이 인용하던 버전(v1.6.51·v1.6.67·v1.6.95·v1.7.5·v1.7.8 표본)이 **SoT 변경이력과 `CHANGELOG.md` 양쪽에** 있음을 확인.
+- **회귀**: `tests/test_ordered_units.py`+`tests/test_application_api.py` **126 passed / 219 subtests**. frontend `tsc` clean, build JS 399.03 kB(무변). `vite.config.ts`·migrate 스크립트 기본값 변경은 어떤 테스트도 단정하지 않는다(확인함 — `test_index_sync_worker_script.py`의 27017은 테스트가 명시 전달하는 인자이지 기본값이 아니다).
+
+### Decisions (구현자 판단)
+
+- **test-mongo는 27020을 유지**했다. 이미 전용이고 4개 테스트 파일의 기본 URI에 하드코딩돼 있어, 대역 통일을 위해 바꾸면 이득 없이 그 파일들과 방금 쓴 문서를 전부 흔든다(§3 수술적).
+- **`docs/daily_logs/`의 과거 포트 기술은 고치지 않았다**. 그건 그 시점의 사실 기록이고, 이력을 소급 수정하면 로그의 신뢰가 깨진다. 현재 사실은 `.env.example`과 HANDOFF가 갖는다.
+- **상한을 150줄로 잡은 이유**: 재작성 결과가 111줄이라 여유가 있으면서, 완료 서술을 몇 개만 붙여도 바로 초과해 눈에 띈다.
+
+### Next steps
+
+- 스택 재기동 시 **새 포트로 뜬다**(`:5520`이 브라우저 진입점). 종전 `:5173`을 참조하는 습관·북마크는 갱신 필요.
+- 남은 오너 판단: 배포 `mongo` `ulimits` · `auto_promote_job` 부분 성공 의미론 · dogfood 착수(GATE-1).

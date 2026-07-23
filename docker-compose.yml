@@ -6,7 +6,7 @@ services:
     image: mongo:7
     command: ["--replSet", "rs0", "--bind_ip_all"]
     ports:
-      - "${MONGO_PORT:-27017}:27017"
+      - "${MONGO_PORT:-27520}:27017"
     volumes:
       - mongo_data:/data/db
     healthcheck:
@@ -77,7 +77,7 @@ services:
       # RRF). Without it the app falls back to vector-only / Mongo-direct.
       ELASTICSEARCH_URL: "http://elasticsearch:9200"
     ports:
-      - "${APPLICATION_PORT:-8000}:8000"
+      - "${APPLICATION_PORT:-8520}:8000"
     depends_on:
       mongo:
         condition: service_healthy
@@ -114,7 +114,7 @@ services:
       LLAMA_TIMEOUT_SECONDS: "${LLAMA_TIMEOUT_SECONDS:-120}"
       LLAMA_TRUST_ENV: "${LLAMA_TRUST_ENV:-false}"
     ports:
-      - "${GATEWAY_PORT:-8001}:8001"
+      - "${GATEWAY_PORT:-8521}:8001"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -143,7 +143,7 @@ services:
       # Let the model download reach HuggingFace at first startup.
       HF_HOME: "/root/.cache/huggingface"
     ports:
-      - "${EMBEDDING_PORT:-8002}:8002"
+      - "${EMBEDDING_PORT:-8522}:8002"
     volumes:
       # Cache the model across restarts so it is downloaded only once.
       - embedding_cache:/root/.cache/huggingface
@@ -170,7 +170,7 @@ services:
       IS_PERSISTENT: "TRUE"
       ANONYMIZED_TELEMETRY: "FALSE"
     ports:
-      - "${CHROMA_PORT:-8003}:8000"
+      - "${CHROMA_PORT:-8523}:8000"
     volumes:
       # chromadb/chroma:0.5.23 stores persistent data under /chroma/chroma when
       # IS_PERSISTENT=TRUE. Mount that path so container recreation does not
@@ -203,7 +203,7 @@ services:
       xpack.security.enabled: "false"
       ES_JAVA_OPTS: "${ELASTICSEARCH_JAVA_OPTS:--Xms512m -Xmx512m}"
     ports:
-      - "${ELASTICSEARCH_PORT:-9200}:9200"
+      - "${ELASTICSEARCH_PORT:-9520}:9200"
     volumes:
       # Persist the lexical index across container recreation. Like Chroma it is a
       # derived index rebuildable from Mongo, but keeping it avoids a reindex on
@@ -330,7 +330,7 @@ services:
       context: .
       dockerfile: services/frontend/Dockerfile
     ports:
-      - "${FRONTEND_PORT:-5173}:80"
+      - "${FRONTEND_PORT:-5520}:80"
     depends_on:
       application:
         condition: service_healthy

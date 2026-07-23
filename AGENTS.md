@@ -138,16 +138,59 @@ A regression test should fail in *both* directions, not just one.
 - If a later request conflicts with a recorded user decision, rationale, or established design direction, identify the conflict and ask the user which direction is now canonical before implementing the conflicting change.
 
 ### HANDOFF.md
-- Purpose: current-state snapshot for the next worker, not a changelog or running diary
-- Keep only information that is still true, actionable, or blocking right now
-- If a newer note replaces an older one, rewrite the section instead of appending history
-- Remove completed tasks, stale hypotheses, one-off experiments, and outdated verification notes
-- Keep "Current Status" focused on today's system state and active drafts, not past milestones
-- Keep "Next Tasks" short and prioritized so someone can pick up work immediately
-- Keep "Verification" limited to the latest checks that still describe the current system
-- Put detailed implementation history in `work_log.md`, and major milestones in `CHANGELOG.md`
-- Update project structure if files are added/removed/moved
-- Update MCP interface table if tools/resources change
+
+**HANDOFF.md is a snapshot, not a log. Editing it is mostly *deleting*.**
+
+Purpose: what the next worker needs in order to start working *right now*. If a
+line would not change what they do today, it does not belong here.
+
+**Hard limits — check these before you commit, they are not suggestions:**
+
+```bash
+wc -l HANDOFF.md                              # must be <= 150
+awk '{print length}' HANDOFF.md | sort -rn | head -1   # must be <= ~400
+```
+
+Over the limit means **prune**, not reflow. The limits exist because an
+unreadable snapshot is the same as no snapshot.
+
+**The rule that keeps getting broken — read this one twice:**
+
+- **Never append a "…완료" paragraph to Current Status.** Finishing a slice is not
+  a status update. Status is what the system *is now*, not what you did.
+- When you finish a slice, the HANDOFF edit is: **delete** what stopped being
+  true, **rewrite** the affected section, and put the narrative in `work_log.md`.
+- Completion narratives already live in three places — `work_log.md`, the SoT
+  version log, and `CHANGELOG.md`. A fourth copy here is pure duplication, and it
+  is what buries the parts that actually matter.
+- Measured failure this rule exists for (2026-07-23): the file had reached **366
+  lines, 81 completion markers, and a 4811-character single line**, because
+  slice after slice appended its own summary and nobody deleted. Every one of
+  those entries was already in the SoT log and CHANGELOG.
+
+**Never record machine-local observations as project facts.** Ports, container
+IPs, absolute host paths, and "the server is up on X" are true of *your* machine
+at *this* moment; this project moves between dev machines. State what the repo
+guarantees (`docker-compose.yml`, `.env.example`) — or, if you must record an
+observation, mark it explicitly: "on this machine, as of <date>".
+Measured failure (2026-07-23): HANDOFF recorded Chroma as running on 8001. 8001
+was a *different project's* container; following that note would have pointed a
+test that creates and deletes collections at another project's vector store.
+
+Belongs here:
+- Current system state, active drafts, and anything blocking right now
+- Traps and operational gotchas the next person would otherwise walk into
+- Open debts and pending owner decisions, with `file:line`
+- "Next Tasks" — short, prioritized, immediately actionable
+- Project structure map; MCP interface table when tools/resources change
+
+Does not belong here:
+- Completed work, past milestones, fixed bugs, superseded hypotheses
+- Conversational decision history (that is `work_log.md`)
+- Verification narratives (that is `docs/verifications/`)
+- Numbers nobody re-measured today
+
+If a newer note supersedes an older one, rewrite the section — never stack both.
 
 ### CHANGELOG.md
 - Update on major design or feature changes (not every small edit)

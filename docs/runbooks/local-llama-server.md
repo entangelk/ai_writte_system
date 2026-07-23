@@ -45,7 +45,7 @@ Direct server check:
 
 ```bash
 curl -fsS http://localhost:9080/health
-curl -fsS http://localhost:8001/health/ready   # gateway -> llama upstream readiness
+curl -fsS http://localhost:8521/health/ready   # gateway -> llama upstream readiness
 ```
 
 ## Configuration (env overrides)

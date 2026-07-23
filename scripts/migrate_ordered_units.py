@@ -17,7 +17,7 @@ from services.application.app.core_sot.ordered_unit_migration import (
 
 
 def main() -> int:
-    uri = os.environ.get("CORE_SOT_MONGO_URI", "mongodb://localhost:27017")
+    uri = os.environ.get("CORE_SOT_MONGO_URI", "mongodb://localhost:27520")
     db_name = os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
     use_transactions = os.environ.get(
         "CORE_SOT_MONGO_TRANSACTIONS", "true"

@@ -9,7 +9,7 @@ response shape (`text`, `finish_reason`, `usage.*_tokens`), verifying the
 containerized gateway -> llama path in isolation. Also checks GET /health.
 
 Config: GATEWAY_BASE_URL (default http://gateway:8001 for in-network runs, or
-http://localhost:8001 from the host). Exit 0 pass, 1 an assertion failed, 2 a
+http://localhost:8521 from the host). Exit 0 pass, 1 an assertion failed, 2 a
 connection/config error. Prints a JSON summary.
 """
 
