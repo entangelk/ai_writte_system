@@ -2750,6 +2750,37 @@ class CanonicalStoreFailureHandlerTest(unittest.TestCase):
                 self.assertEqual(set(response.json()), {"detail"})
 
     @unittest.skipIf(_STORAGE_FAILURE is None, "pymongo is not installed")
+    def test_run_endpoint_narrows_storage_failure_to_503_despite_broad_except(self):
+        # SoT v1.7.40 D2=A (owner decision 2026-07-24). The run endpoint wraps its
+        # body in a broad ``except Exception → 502`` to mirror the compare endpoint,
+        # so before this slice a canonical store failure was reclassified as an
+        # upstream 502 — the precision gap v1.7.39 had to record as a pre-existing
+        # exception. The explicit ``except _STORAGE_ERRORS → 503`` now precedes that
+        # catch, so the store face reaches 503 like everywhere else.
+        #
+        # Under-strict: removing the new branch drops the failure into
+        # ``except Exception`` and this re-fails with a 502. Over-strict (that the
+        # store catch must not swallow an actual LLM failure into 503) is held by
+        # test_analysis_run_endpoint_maps_provider_exception_to_502 and
+        # test_analysis_run_endpoint_maps_real_provider_error_to_502, which pin
+        # provider failures at 502.
+        class _ProjectGateFailingRepository(InMemoryCoreSotRepository):
+            def get_project(self, *args, **kwargs):
+                raise _STORAGE_FAILURE(
+                    "connection to the canonical store was lost"
+                )
+
+        client = TestClient(
+            create_app(service=CoreSotService(_ProjectGateFailingRepository()))
+        )
+
+        response = client.post("/projects/p1/analysis/jobs/j1/run")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(set(response.json()), {"detail"})
+        self.assertTrue(response.json()["detail"])
+
+    @unittest.skipIf(_STORAGE_FAILURE is None, "pymongo is not installed")
     def test_handler_registration_is_skipped_when_no_driver(self):
         # Robustness guard (SoT v1.7.38). The app must build and /health must
         # answer even when pymongo is absent — the in-memory path needs no

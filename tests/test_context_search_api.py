@@ -131,6 +131,20 @@ class _FailingGateFindingService:
         return ()
 
 
+try:  # pymongo is optional for the in-memory path
+    from pymongo.errors import AutoReconnect as _STORAGE_FAILURE
+except ModuleNotFoundError:  # pragma: no cover - the driver is present in CI
+    _STORAGE_FAILURE = None
+
+
+class _StorageFailingGateFindingService:
+    def persist_rejection(self, **_kwargs):
+        raise _STORAGE_FAILURE("connection to the canonical store was lost")
+
+    def list_open(self, _project_id):
+        return ()
+
+
 def _fixture(planner_factory, *, gate_finding_service=None, **service_kwargs):
     core_sot = CoreSotService(InMemoryCoreSotRepository())
     project = core_sot.create_project(name="Novel")
@@ -234,6 +248,37 @@ class ContextSearchApiTest(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 502)
         self.assertIn("persistence failed", response.json()["detail"])
+
+    @unittest.skipIf(_STORAGE_FAILURE is None, "pymongo is not installed")
+    def test_gate_finding_storage_failure_is_503(self):
+        # SoT v1.7.40 D2=A (owner decision 2026-07-24). A canonical store failure
+        # (pymongo type) while persisting the gate rejection is the store face of
+        # 503, not the 502 an operational persistence bug gets. Before this the
+        # ``except Exception → GateFindingError`` wrap reclassified it as an
+        # upstream 502; now it re-raises unwrapped and reaches the global handler.
+        #
+        # Under-strict: removing the ``except _STORAGE_ERRORS: raise`` clause drops
+        # the pymongo error back into the wrap and this re-fails at 502. Over-strict
+        # (a non-pymongo persist failure must stay 502) is held by the sibling
+        # test_gate_finding_persistence_failure_is_502, whose fake raises a plain
+        # RuntimeError.
+        app, project_id, draft_id, version_id = _fixture(
+            _StaticPlanner,
+            gate_finding_service=_StorageFailingGateFindingService(),
+        )
+        rejected = GateDecision(decision="reject", findings=(
+            GateFinding(check="x", detail="y"),
+        ))
+        with patch(
+            "services.application.app.main.evaluate_context_gate",
+            return_value=rejected,
+        ):
+            response = TestClient(app).post(
+                f"/projects/{project_id}/context-search",
+                json=_body(draft_id, version_id),
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(set(response.json()), {"detail"})
 
     def test_reject_persists_to_inbox_and_transitions(self):
         store = GateFindingService(InMemoryGateFindingRepository())

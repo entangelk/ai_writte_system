@@ -324,3 +324,42 @@
 
 - (후속 오너 결정 후보) `run` endpoint storage→503 좁히기(B) — 하면 SoT 본문의 `run` 예외 문장을 제거하고 트랙별 runtime 가드에 `run` 케이스를 추가.
 - 여전히 남은 갈림길은 dogfood 착수(GATE-1).
+
+---
+
+## Task — 저장소 장애 502→503 좁히기: `run` + context-search `persist_rejection` (B 채택 + H2 폐쇄, SoT v1.7.40)
+
+### Goals
+
+- v1.7.39가 **후속 오너 결정**으로 남긴 (B)를 오너가 채택했다("run 502→503 좁히기"). run endpoint의 저장소 장애를 v1.7.35 D2=A("저장소는 502가 아니다") 방향과 정렬시키고, v1.7.39가 pre-existing 예외로 기록해야 했던 502/503 정밀도 갭을 닫는다.
+
+### User Decisions and Rationale
+
+- **(B) 채택**: 저장소 부채가 0건이 되어 남은 후보가 전부 오너 결정 선행이던 상황에서, 오너가 (A dogfood/C deferred) 대신 **(B) 작은 코딩 작업**을 선택했다. (B)는 API 응답 분류(502→503)를 바꾸는 행동 변화라 v1.7.39가 임의 구현하지 않고 오너 결정으로 넘겼던 항목이다.
+
+### Completed work
+
+- **[`main.py`](../../../services/application/app/main.py) `run_analysis_job`**: 광의 `except Exception → 502` **앞에** 명시 `except _STORAGE_ERRORS as exc: raise HTTPException(503, str(exc))`를 추가. 저장소 예외(project-exists 게이트·`get_job`·`list_candidates`·runner 내부 저장 쓰기)가 502로 재분류되기 전에 저장소 face로 보낸다. provider 실패의 명시 `except ProviderError → 502`는 이 브랜치보다 앞이라 불변.
+- **선언 무변 확인**: 이 endpoint의 503 선언 `_CONFIG_503`은 이미 `_with_storage_note`로 감싸져 저장소·구성 두 얼굴을 기술한다. 즉 v1.7.39 이전부터 선언은 "저장소→503"을 약속하고 있었고 코드만 502를 내던 불일치였다. 코드가 선언을 따라잡은 것이라 `responses=` 무변 → `gen:api` 재생성해도 `schema.d.ts` 무변(실측 no diff) 확인.
+- **[`system-contract-sot.md`](../../../docs/system-contract-sot.md)**: (1) §"정본 저장소 장애"의 run 예외 문장을 "run도 503을 낸다(명시 절이 광의 catch보다 앞)"로 개정. (2) Phase 2A run 매핑 prose에 "정본 저장소 장애 503" 추가. (3) 버전 v1.7.39→**v1.7.40**, 변경이력 신규 행.
+- **[패턴 스윕 + 독립 검증 H2 → 인라인 폐쇄] `context-search` `persist_rejection`도 같은 잔여였다.** `main.py` `except Exception` 3곳을 스윕: run(폐쇄)·context-search `persist_rejection`(3341, `except Exception → GateFindingError`가 pymongo까지 삼켜 502)·writing audit(3971, `audit_error` soft-fail 반환 — 의도된 isolation, 예외 아님). 독립 검증 `run_endpoint_storage_503_narrowing.md`의 H2가 이 잔여를 재확인했고, 오너가 "지금 503으로 좁히기"를 결정해 같은 슬라이스에서 닫았다. `persist_rejection` 내부 try에 `except _STORAGE_ERRORS: raise`(unwrapped)를 추가 — pymongo 예외가 안팎 try(바깥 except는 pymongo 미매칭)를 빠져나와 전역 handler(503)에 도달. `_require_project_exists`·`build_context_package`는 바깥 try라 이미 503이었고 잔여는 이 한 곳뿐이었다.
+- **회귀 신규 2**:
+  - `CanonicalStoreFailureHandlerTest::test_run_endpoint_narrows_storage_failure_to_503_despite_broad_except`: project-exists 게이트가 `AutoReconnect`를 던지는 repo로 run POST → 503 균일 본문. under-strict = 신규 절 제거 시 502(503→599 mutation 실증). over-strict는 기존 `test_analysis_run_endpoint_maps_provider_exception_to_502`·`_maps_real_provider_error_to_502`(provider→502)가 유지.
+  - `ContextSearchApiTest::test_gate_finding_storage_failure_is_503`: `persist_rejection`이 `AutoReconnect`를 던지는 fake → 503 균일 본문. under-strict = 신규 절 제거 시 502(mutation 실증). over-strict는 기존 `test_gate_finding_persistence_failure_is_502`(RuntimeError→GateFindingError→502)가 유지.
+
+### Issues found (독립 검증 반영)
+
+- **H1 — 근거 진술 정정**: 최초 보고에서 "`CHANGELOG.md`는 존재하지 않는다"고 했으나 **실제로 존재한다**(190KB, tracked). 원인은 앞서 `cd services/application/app` 이후 Bash cwd가 그 하위로 유지된 상태에서 `find .`을 돌려 서브트리만 검색한 것. 다만 CHANGELOG 최신 항목은 v1.7.35–37이고 **v1.7.38·39도 미수록** — 이들 정밀도 슬라이스를 CHANGELOG에 안 넣는 건 선행 관행이라, v1.7.40도 관행대로 SoT 변경이력만 갱신하고 CHANGELOG는 건너뛴다(CLAUDE.md "major 변경만"). 행동은 관행 부합, 근거 진술만 틀렸었다.
+- **H2 — 패턴 스윕 잔여**: 위 context-search 폐쇄로 반영 완료.
+- **H3 — 관찰(결함 아님)**: 전용 테스트 vs parametrized 확장 선택은 run/context-search가 메커니즘이 달라 정당.
+
+### Verification
+
+- backend **1471 passed / 1 skipped / 579 subtests**(test-mongo 기동). 직전 1469/1/579 대비 **+2 passed** = 신규 회귀 2건(run·context-search), 그 외 증감 0. 회귀 없음.
+- `test_application_api.py` 120/261, `test_context_search_api.py` 대상 회귀 green. 양쪽 mutation 실증(신규 절 제거 시 해당 테스트만 502로 재실패, 복원).
+- `frontend/npm run gen:api` 후 `schema.d.ts` no diff — 선언 무변 실증(두 endpoint 모두 503 이미 선언).
+
+### Next steps
+
+- 저장소 503 face가 이제 **예외 없이 전 endpoint 균일**하다(run·context-search 잔여 소멸). HANDOFF "지금 상태" 반영 완료.
+- 여전히 남은 갈림길은 dogfood 착수(GATE-1) 하나.

@@ -2579,6 +2579,18 @@ def create_app(
             # ``except Exception`` catch; the 400/404/409 mappings above are for
             # unrelated types, so their order is unaffected.)
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except _STORAGE_ERRORS as exc:
+            # SoT v1.7.40 D2=A (owner decision 2026-07-24): a canonical store
+            # failure — from the project-exists gate, get_job, list_candidates, or
+            # a store write inside the runner — is not an upstream/LLM failure, so
+            # it is the store face of 503, not the 502 the generic catch below
+            # assigns. The 503 declaration already names this face (``_CONFIG_503``
+            # is wrapped with ``_with_storage_note``), so the declaration is
+            # unchanged; this branch is what makes the runtime match it and closes
+            # the precision gap v1.7.39 had to record as a pre-existing exception.
+            # It must precede the generic ``except Exception`` so the store failure
+            # is not swallowed into 502.
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except HTTPException:
             raise
         except Exception as exc:
@@ -3326,6 +3338,17 @@ def create_app(
                     request=request, idempotency_key=body.idempotency_key,
                     package=package, gate=gate,
                 )
+            except _STORAGE_ERRORS:
+                # SoT v1.7.40 D2=A (owner decision 2026-07-24): a canonical store
+                # failure while persisting the gate rejection is the store face of
+                # 503, not the upstream 502 the ``GateFindingError`` wrap below
+                # assigns. Re-raise it unwrapped so it escapes both this try and
+                # the outer one (no outer clause matches a pymongo type) to the
+                # global handler → 503, matching run and every other storage path.
+                # Non-pymongo persistence failures still become GateFindingError →
+                # 502 (over-strict guard: an operational persist bug is not a store
+                # outage). Empty ``_STORAGE_ERRORS`` (no driver) catches nothing.
+                raise
             except Exception as exc:
                 raise GateFindingError(str(exc)) from exc
         except InvalidContextSearchRequest as exc:
