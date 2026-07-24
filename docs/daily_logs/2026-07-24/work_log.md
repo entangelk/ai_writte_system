@@ -362,4 +362,53 @@
 ### Next steps
 
 - 저장소 503 face가 이제 **예외 없이 전 endpoint 균일**하다(run·context-search 잔여 소멸). HANDOFF "지금 상태" 반영 완료.
-- 여전히 남은 갈림길은 dogfood 착수(GATE-1) 하나.
+- 남은 갈림길은 dogfood 착수(GATE-1). 별개로 아래 관측 페이즈 결정 브리프가 오너 승인 대기.
+
+---
+
+## Decision — LLM 파이프라인 관측(KPI) 페이즈 착수 (오너 지시 2026-07-24)
+
+### User Decisions and Rationale
+
+- **오너 지시**: 실제 운영 단계에서 LLM 성능·검색·작성 진행을 KPI로 잡아 로그화. 쿼리 플래너·판단 AI(게이트) 결정 + 생성 카운트 + **게이트가 이전 LLM 작성 품질을 판단한 정도**를 지표화.
+- **핵심 구분(오너 정정)**: 처음엔 이 요청을 백로그 QUAL-1(제품 품질·수기·dogfood 종속)과 묶어 "dogfood 트리거 전 예방 구현 금지"로 충돌 제기했으나, **오너가 정정** — "KPI와 dogfood-주도 개발은 서로 다른 것". 즉 이 페이즈는 *시스템/LLM 파이프라인* 자동 계측(관측 인프라)으로 QUAL-1(*제품* 품질 수기 기록)과 **별개 트랙**이며 dogfood와 독립. 따라서 백로그 규칙 2·5는 이 오너 직접 지시가 상위 우선한다.
+- **오너 허용 범위**: SoT 수정 OK, LLM output에 관측용 추가 필드 OK, **대시보드는 즉시 아님 — 뒤따르는 다음 페이즈**로 분리.
+- **처리**: 착수 규칙(§1 owner decision brief)에 따라 코드 전에 결정 브리프 작성 → [`../../plans/observability-kpi-decisions.md`](../../plans/observability-kpi-decisions.md)(D1 저장 구조·D2 게이트 판단정도 방식·D3 첫 KPI 범위·D4 노출 방식·D5 계약 반영). 승인 전 코드·스키마·SoT 무변경.
+- **그라운딩 사실**: writing loop은 이미 `StoredWritingLoopRun`으로 카운트·게이트결정·토큰·지연을 영속 → gap은 "수집"이 아니라 "집계/읽기". 게이트도 이미 decision+severity를 방출 → 판단정도 파생 가능. 실제 미계측은 planner·compare_judge·extractor(호출 시 TokenUsage만 계산, 영속 감사 없음).
+
+### Next steps
+
+- 오너가 D1~D5 승인/조정 → 첫 구현 slice(per-call 감사 레코드 + 스키마 lock + 최소 카운트/게이트 파생점수 + read API).
+
+---
+
+## Task — 관측 KPI 첫 slice 기반 증분(1~3): per-call 감사 레코드 + 게이트 파생점수
+
+오너가 D1=B·D2=C(파생 먼저)·D3=A·D4=A·D5(계약 의무대로) 승인. 첫 slice를 검증 가능한 증분으로 나눠 착수, 기반 3증분 완료.
+
+### Completed work
+
+- **증분 1 — 통합 per-call 관측 레코드**: [`observability/llm_call_audit.py`](../../../services/application/app/observability/llm_call_audit.py). `LlmCallSite`(query_planner·writing_gate·compare_judge·analysis_extractor·writing_generation)·`LlmCallOutcome`(success·provider_error·parse_error·budget_exceeded) enum, `StoredLlmCall`(project_id·call_site·correlation_id·model·outcome·decision·gate_quality_score·total_tokens·latency_ms·error_type·created_at), Protocol repo + in-memory + service. `loop_audit` 컨벤션 미러.
+- **증분 1 — 게이트 파생점수(D2-C 헤드라인)**: `gate_quality_score(WritingGateResult)` — decision을 [0,1]로 매핑(PASS 1.0·NEEDS_USER_REVIEW 0.6·RETRIEVE_MORE 0.5·REVISE 0.3·BLOCK 0.0). **decision 기반인 이유(검증 H1 반영, 정정)**: `writing/gate.py`가 `decision == max(recommended_decision)`으로 최우선 finding **하나만** 반영하므로 개수/조합 신호는 버려진다(REVISE+NUR 혼합 → NUR 0.6). 따라서 이건 severity를 더하면 "이중 계산"이라서가 **아니라**, **decision-category 기반 거친 1차 근사(D2-C)**로 단순성 위해 severity/개수를 의도적으로 제외한 것이다(그건 중복이 아니라 손실 신호 — 보충은 D2-B 후속). 단일 소스 dict `_GATE_DECISION_QUALITY`에 둠(게이트 체계 변경 시 한 곳만 갱신).
+- **증분 2 — Mongo 어댑터**: [`llm_call_audit_mongo.py`](../../../services/application/app/observability/llm_call_audit_mongo.py) `MongoLlmCallAuditRepository`(collection `llm_call_audits`, index `llm_call_audits_by_project_created`). append-only insert.
+- **증분 3 — 스키마 lock 관례 확인**: 이 부류 audit collection은 `schemas/`(W0 공개계약 전용)에 등록하지 않는 게 선례(`writing_loop_audits`·`gate_findings`도 미등록). 실제 lock은 `*_mongo.py`의 field round-trip + index-name 테스트. `mongo_collections.md`는 설계기 카탈로그라 sibling도 미등록이므로 편집 안 함(drift 방지). 브리프 D5에 정정 기록.
+
+### Verification
+
+- 신규 회귀 **16개**(subtests 포함): `test_llm_call_audit.py`(파생점수 전 리터럴 매핑 커버·값 고정·순서 의미·레코드 round-trip·에러 케이스·newest-first/project scope), `test_llm_call_audit_mongo.py`(fake-collection round-trip·index-name·append-only·legacy 필드 0 기본). 10 passed / 5 subtests. main.py import sanity OK(신규 모듈 아직 미와이어라 기존 회귀 무영향).
+
+### 독립 검증 반영(합격·조건 없음, 비차단 3건)
+
+- **H1 — 파생점수 "double-count" 근거 정정**: 위 증분1 항목대로 docstring·work_log를 "decision-category 거친 근사, severity 의도적 제외(손실 신호 인지)"로 수정. gate.decision이 최우선 finding 하나만 취해 개수/조합을 버린다는 사실 반영.
+- **H2 — 점수값·decision-only 범위 오너 노출**: 헤드라인 KPI라 구체 값(1.0/0.6/0.5/0.3/0.0)과 근거를 [`observability-kpi-rationale.md`](../../observability-kpi-rationale.md) §3 표로 노출해 오너가 눈으로 확인. 중간 셋 역전(NUR>RETRIEVE_MORE>REVISE)은 `test_score_ordering_reflects_writing_quality`가 의도적 lock(RETRIEVE_MORE는 작성품질 평가가 아닌 중립점).
+- **H3 — D5 SoT 반영**: 이번 커밋에 접음. SoT §"LLM 파이프라인 관측(KPI)" 신규 절 + 버전 v1.7.40→**v1.7.41** + 변경이력 행. call_site·outcome enum·파생점수 정의·거친 근사 한계 명시.
+
+### 산출물(운영기획 포트폴리오)
+
+- [`docs/observability-kpi-rationale.md`](../../observability-kpi-rationale.md): 왜 이 KPI인가·무엇을 기대하는가·설계 원칙·로드맵. 개발이 아니라 운영/제품 기획 관점. 파생점수 한계를 강점(정직한 로드맵)으로 서술.
+
+### Next steps (증분 4~5, 미착수)
+
+- **증분 4 — 호출부 계측**: `create_app`에 `llm_call_audit` 서비스 와이어링(in-memory 기본 / Mongo 구성 시) + 첫 site로 `/writing/gate` endpoint의 `evaluate` 성공 후 레코드(soft-fail 격리 — audit write 실패가 응답을 깨지 않게, `writing_loop_audit`의 isolation 선례). 이후 generation·planner·compare·extractor. **production hot-path 변경이라 endpoint 테스트와 함께 신중히.**
+- **증분 5 — read API**: `GET …/observability/kpi` 집계(호출 수·site별·게이트 평균 파생점수·성공/실패율) + H3 에러 선언(404·503) + 테스트.
+- **SoT 반영**: 레코드 리터럴(call_site·outcome enum)·파생점수 정의를 정본에 명시.

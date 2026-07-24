@@ -8,7 +8,8 @@
 
 ## 지금 상태
 
-- 정본은 `docs/system-contract-sot.md` **v1.7.40**(Approved). 미확정 항목은 추측 구현하지 않는다.
+- 정본은 `docs/system-contract-sot.md` **v1.7.41**(Approved). 미확정 항목은 추측 구현하지 않는다.
+- **진행 중 페이즈 — LLM 파이프라인 관측(KPI)**(브리프 `plans/observability-kpi-decisions.md` 승인 D1=B·D2=C·D3=A). 기반 증분 1~3 완료(통합 `llm_call_audits` per-call 레코드·게이트 파생 품질점수·Mongo 어댑터, 신규 회귀 16, **아직 미와이어**). **다음: 증분4** = `create_app` 와이어링 + `/writing/gate`부터 호출부 계측(감사 write는 hot-path 격리 — 응답 못 깨게), 이어 generation·planner·compare·extractor. 증분5 = `GET …/observability/kpi` 집계 API + H3 에러 선언. 운영기획 포트폴리오 정리는 `docs/observability-kpi-rationale.md`. QUAL-1(제품 품질·수기·dogfood)과 별개 트랙.
 - 공개 API 계약(H3)은 닫혀 있다: **`/health`를 제외한 60개 operation 전부**가 realistic 에러 상태를 OpenAPI에 선언하고 **미매핑 500 부채는 0건**이다. 새 endpoint를 추가하면 **`responses=`도 함께** 붙여야 하며, 트랙별 전수 선언 가드 테스트가 빠뜨림을 잡는다. 저장소 장애 503 face는 이제 **예외 없이 전 endpoint 균일**하다 — v1.7.40이 마지막 두 잔여(광의 catch가 pymongo를 삼켜 502로 내던 곳)를 닫았다: `POST …/analysis/jobs/{id}/run`과 `POST …/context-search`의 `persist_rejection`. 둘 다 광의 catch 앞에 `except _STORAGE_ERRORS`를 두어 저장소 예외를 503으로 보낸다. **주의**: 앞으로 endpoint body를 광의 `except Exception`으로 감싸면 그 순간 저장소 예외가 다시 502/도메인 에러로 새므로, 그런 catch를 둘 때는 반드시 그 앞에 `except _STORAGE_ERRORS`를 둔다.
 - 회귀 기준선: backend **1471 passed / 1 skipped / 579 subtests**(test-mongo 기동 시, 이 머신 실측 ~10분), frontend **194 passed / 13 files**, build JS 399.03 kB.
 - **이 머신, 2026-07-24 기준 스택은 사실상 내려가 있다**: `application`·`gateway`·`mongo`·`elasticsearch`·`embedding`·`chroma`·`test-mongo`가 `Exited`, `frontend`와 두 worker만 떠 있다(worker는 의존 서비스가 없어 무의미하게 도는 중). 기동은 오너 몫.
