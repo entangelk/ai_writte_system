@@ -9,6 +9,18 @@ services:
       - "${MONGO_PORT:-27520}:27017"
     volumes:
       - mongo_data:/data/db
+    # Docker's default soft nofile here is 1024, and mongod warns at startup that
+    # the recommended minimum is 64000. When WiredTiger reaches the ceiling it
+    # does not degrade — it panics (WT_PANIC: __posix_directory_sync ... Too many
+    # open files), fasserts and dies mid-write. Observed on `test-mongo` under the
+    # backend suite (2026-07-23); the deployed node shares the same condition and
+    # only survives because it holds one long-lived database. Indexing and
+    # analysis growth close that gap, so the limit is raised here too rather than
+    # waiting for the crash. Same value as docker-compose.test.yml.
+    ulimits:
+      nofile:
+        soft: 64000
+        hard: 64000
     healthcheck:
       # Idempotently initiate the single-node replica set, then report healthy
       # once it is up. The member host must match the in-network name the
@@ -209,6 +221,17 @@ services:
       # derived index rebuildable from Mongo, but keeping it avoids a reindex on
       # every restart.
       - es_data:/usr/share/elasticsearch/data
+    # Same fd ceiling as `mongo` above, found by the same sweep: the image gets
+    # Docker's default soft nofile 1024 while Elasticsearch's own file-descriptor
+    # requirement is 65535. Normally its bootstrap check refuses to start below
+    # that, but `discovery.type=single-node` runs in development mode where the
+    # check is downgraded to a startup warning — so the node comes up and can
+    # exhaust descriptors later under segment/index churn instead of failing
+    # loudly at boot. memlock is left alone: bootstrap.memory_lock is not enabled.
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     healthcheck:
       # The ES image ships curl (no python); probe cluster health. A 200 (green or
       # yellow — single-node leaves replicas unassigned = yellow) means responsive.
