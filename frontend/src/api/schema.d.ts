@@ -1804,6 +1804,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProjectListResponse"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     create_project_projects_post: {
@@ -1835,6 +1844,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -1877,6 +1895,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     archive_project_projects__project_id__delete: {
@@ -1915,6 +1942,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -1970,6 +2006,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     confirm_candidate_projects__project_id__analysis_candidates__candidate_id__confirm_post: {
@@ -2020,6 +2065,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -2087,6 +2141,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     promote_candidate_projects__project_id__analysis_candidates__candidate_id__promote_post: {
@@ -2128,6 +2191,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -2182,6 +2254,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     list_gate_findings_projects__project_id__analysis_gate_findings_get: {
@@ -2224,6 +2305,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     get_gate_finding_projects__project_id__analysis_gate_findings__finding_id__get: {
@@ -2263,6 +2353,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -2315,6 +2414,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     resolve_gate_finding_projects__project_id__analysis_gate_findings__finding_id__resolve_post: {
@@ -2365,6 +2473,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     create_analysis_job_projects__project_id__analysis_jobs_post: {
@@ -2411,6 +2528,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     get_analysis_job_projects__project_id__analysis_jobs__job_id__get: {
@@ -2452,6 +2578,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -2508,6 +2643,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -2605,6 +2749,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     analysis_compare_endpoint_projects__project_id__analysis_jobs__job_id__compare_post: {
@@ -2657,7 +2810,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
-            /** @description A collaborator this endpoint requires is not configured in this deployment. Configure it in the deployment environment; retrying the request alone cannot succeed. */
+            /** @description A collaborator this endpoint requires is not configured in this deployment. Configure it in the deployment environment; retrying the request alone cannot succeed. The canonical store may also be unreachable or failing; in that case recover it and retry the same request unchanged. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -2707,6 +2860,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -2759,6 +2921,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -2831,7 +3002,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
-            /** @description A collaborator this endpoint requires is not configured in this deployment. Configure it in the deployment environment; retrying the request alone cannot succeed. */
+            /** @description A collaborator this endpoint requires is not configured in this deployment. Configure it in the deployment environment; retrying the request alone cannot succeed. The canonical store may also be unreachable or failing; in that case recover it and retry the same request unchanged. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -2882,6 +3053,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     get_review_inbox_item_projects__project_id__analysis_review_inbox__candidate_id__get: {
@@ -2925,6 +3105,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     analysis_review_queue_endpoint_projects__project_id__analysis_review_queue_get: {
@@ -2965,6 +3154,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -3023,6 +3221,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     get_project_brief_projects__project_id__brief_get: {
@@ -3061,6 +3268,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -3116,6 +3332,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     list_project_brief_versions_projects__project_id__brief_versions_get: {
@@ -3154,6 +3379,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -3195,6 +3429,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -3261,7 +3504,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
-            /** @description A collaborator this endpoint requires is not configured in this deployment. Configure it in the deployment environment; retrying the request alone cannot succeed. */
+            /** @description A collaborator this endpoint requires is not configured in this deployment. Configure it in the deployment environment; retrying the request alone cannot succeed. The canonical store may also be unreachable or failing; in that case recover it and retry the same request unchanged. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -3332,6 +3575,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     list_drafts_projects__project_id__drafts_get: {
@@ -3372,7 +3624,7 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description Stored draft metadata predates the ordered-unit invariant (or is corrupt). Run scripts/migrate_ordered_units.py; retrying the request alone cannot succeed. */
+            /** @description Stored draft metadata predates the ordered-unit invariant (or is corrupt). Run scripts/migrate_ordered_units.py; retrying the request alone cannot succeed. The canonical store may also be unreachable or failing; in that case recover it and retry the same request unchanged. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -3434,7 +3686,7 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description Stored draft metadata predates the ordered-unit invariant (or is corrupt). Run scripts/migrate_ordered_units.py; retrying the request alone cannot succeed. */
+            /** @description Stored draft metadata predates the ordered-unit invariant (or is corrupt). Run scripts/migrate_ordered_units.py; retrying the request alone cannot succeed. The canonical store may also be unreachable or failing; in that case recover it and retry the same request unchanged. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -3484,6 +3736,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     archive_draft_projects__project_id__drafts__draft_id__delete: {
@@ -3523,6 +3784,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -3579,6 +3849,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     list_draft_versions_projects__project_id__drafts__draft_id__versions_get: {
@@ -3618,6 +3897,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -3683,6 +3971,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     get_draft_version_projects__project_id__drafts__draft_id__versions__version_id__get: {
@@ -3723,6 +4020,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -3778,6 +4084,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     export_project_projects__project_id__export_get: {
@@ -3831,7 +4146,7 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description Stored draft metadata predates the ordered-unit invariant (or is corrupt). Run scripts/migrate_ordered_units.py; retrying the request alone cannot succeed. */
+            /** @description Stored draft metadata predates the ordered-unit invariant (or is corrupt). Run scripts/migrate_ordered_units.py; retrying the request alone cannot succeed. The canonical store may also be unreachable or failing; in that case recover it and retry the same request unchanged. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -3882,6 +4197,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     get_memory_projects__project_id__memory__memory_id__get: {
@@ -3923,6 +4247,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -3977,6 +4310,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     list_source_refs_projects__project_id__snapshots__snapshot_id__source_refs_get: {
@@ -4018,6 +4360,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -4076,6 +4427,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     get_source_ref_projects__project_id__source_refs__source_ref_id__get: {
@@ -4117,6 +4477,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -4190,7 +4559,7 @@ export interface operations {
                     "application/json": components["schemas"]["WritingAcceptAnalysisPartial"] | components["schemas"]["ErrorDetailResponse"];
                 };
             };
-            /** @description Server-side action required before this request can succeed: either a collaborator is not configured in this deployment, or stored draft metadata predates the ordered-unit invariant (run scripts/migrate_ordered_units.py). Retrying the request alone cannot succeed. */
+            /** @description Server-side action required before this request can succeed: either a collaborator is not configured in this deployment, or stored draft metadata predates the ordered-unit invariant (run scripts/migrate_ordered_units.py). Retrying the request alone cannot succeed. The canonical store may also be unreachable or failing; in that case recover it and retry the same request unchanged. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -4270,7 +4639,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
-            /** @description A collaborator this endpoint requires is not configured in this deployment. Configure it in the deployment environment; retrying the request alone cannot succeed. */
+            /** @description A collaborator this endpoint requires is not configured in this deployment. Configure it in the deployment environment; retrying the request alone cannot succeed. The canonical store may also be unreachable or failing; in that case recover it and retry the same request unchanged. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -4359,7 +4728,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
-            /** @description A collaborator this endpoint requires is not configured in this deployment. Configure it in the deployment environment; retrying the request alone cannot succeed. */
+            /** @description A collaborator this endpoint requires is not configured in this deployment. Configure it in the deployment environment; retrying the request alone cannot succeed. The canonical store may also be unreachable or failing; in that case recover it and retry the same request unchanged. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -4418,6 +4787,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     retry_writing_generation_job_projects__project_id__writing_generation_jobs__job_id__retry_post: {
@@ -4468,6 +4846,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     writing_loop_audits_endpoint_projects__project_id__writing_loop_audits_get: {
@@ -4508,6 +4895,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -4551,6 +4947,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
@@ -4617,7 +5022,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
-            /** @description A collaborator this endpoint requires is not configured in this deployment. Configure it in the deployment environment; retrying the request alone cannot succeed. */
+            /** @description A collaborator this endpoint requires is not configured in this deployment. Configure it in the deployment environment; retrying the request alone cannot succeed. The canonical store may also be unreachable or failing; in that case recover it and retry the same request unchanged. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -4699,7 +5104,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
-            /** @description A collaborator this endpoint requires is not configured in this deployment. Configure it in the deployment environment; retrying the request alone cannot succeed. */
+            /** @description A collaborator this endpoint requires is not configured in this deployment. Configure it in the deployment environment; retrying the request alone cannot succeed. The canonical store may also be unreachable or failing; in that case recover it and retry the same request unchanged. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -4841,6 +5246,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
         };
     };
     writing_scratch_discard_endpoint_projects__project_id__writing_scratch_delete: {
@@ -4883,6 +5297,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };

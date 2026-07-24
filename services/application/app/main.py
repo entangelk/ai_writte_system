@@ -1069,7 +1069,7 @@ class AutoPromotePartialResponse(BaseModel):
     promotion_error: str
 
 
-_STORAGE_503 = {
+_AUTO_PROMOTE_503 = {
     "model": Union[AutoPromotePartialResponse, ErrorDetailResponse],
     "description": "The canonical store failed mid-promotion. Every memory this "
                    "call minted is returned in `promoted` — including one whose "
@@ -1082,12 +1082,47 @@ _STORAGE_503 = {
                    "by that same retry, because a replayed promotion re-enqueues.",
 }
 
-_ERRORS_404: dict[int | str, dict] = {404: _ERROR}
-_ERRORS_404_502: dict[int | str, dict] = {404: _ERROR, 502: _ERROR}
-_ERRORS_404_STORAGE: dict[int | str, dict] = {404: _ERROR, 503: _STORAGE_503}
-_ERRORS_400_404: dict[int | str, dict] = {400: _ERROR, 404: _ERROR}
-_ERRORS_404_409: dict[int | str, dict] = {404: _ERROR, 409: _ERROR}
-_ERRORS_400_404_409: dict[int | str, dict] = {400: _ERROR, 404: _ERROR, 409: _ERROR}
+# SoT v1.7.38: the storage face of 503 is reachable from *every* endpoint that
+# touches Mongo — which is every endpoint except /health — because a global
+# handler (see create_app) maps a driver failure to 503 instead of letting it
+# leak as an opaque 500. Declaring it everywhere is what keeps OpenAPI the
+# mechanical truth (D3=A): a status the runtime can return must appear here.
+#
+# Endpoints whose 503 already carried another face keep that wording and gain
+# this sentence, because one status code gets one declaration and the reader
+# needs to know both remedies apply.
+_STORAGE_503_NOTE = (
+    " The canonical store may also be unreachable or failing; in that case "
+    "recover it and retry the same request unchanged."
+)
+
+_STORAGE_503 = {
+    "model": ErrorDetailResponse,
+    "description": "The canonical store is unreachable or failing. Recover it "
+                   "and retry the same request; the request itself needs no "
+                   "change.",
+}
+
+
+def _with_storage_note(declaration: dict) -> dict:
+    return {**declaration, "description": declaration["description"] + _STORAGE_503_NOTE}
+
+
+_MIGRATION_503 = _with_storage_note(_MIGRATION_503)
+
+_ERRORS_STORAGE: dict[int | str, dict] = {503: _STORAGE_503}
+_ERRORS_404: dict[int | str, dict] = {404: _ERROR, 503: _STORAGE_503}
+_ERRORS_404_502: dict[int | str, dict] = {404: _ERROR, 502: _ERROR, 503: _STORAGE_503}
+_ERRORS_404_STORAGE: dict[int | str, dict] = {404: _ERROR, 503: _AUTO_PROMOTE_503}
+_ERRORS_400_404: dict[int | str, dict] = {
+    400: _ERROR, 404: _ERROR, 503: _STORAGE_503,
+}
+_ERRORS_404_409: dict[int | str, dict] = {
+    404: _ERROR, 409: _ERROR, 503: _STORAGE_503,
+}
+_ERRORS_400_404_409: dict[int | str, dict] = {
+    400: _ERROR, 404: _ERROR, 409: _ERROR, 503: _STORAGE_503,
+}
 _ERRORS_404_MIGRATION: dict[int | str, dict] = {404: _ERROR, 503: _MIGRATION_503}
 _ERRORS_400_404_MIGRATION: dict[int | str, dict] = {
     400: _ERROR, 404: _ERROR, 503: _MIGRATION_503,
@@ -1102,12 +1137,12 @@ _ERRORS_404_409_MIGRATION: dict[int | str, dict] = {
 # operator action is a deployment change. One constant covers both endpoints
 # because the runtime ``detail`` already names which collaborator is missing, and
 # the semantics are identical.
-_CONFIG_503 = {
+_CONFIG_503 = _with_storage_note({
     "model": ErrorDetailResponse,
     "description": "A collaborator this endpoint requires is not configured in "
                    "this deployment. Configure it in the deployment environment; "
                    "retrying the request alone cannot succeed.",
-}
+})
 
 _ERRORS_404_502_CONFIG: dict[int | str, dict] = {
     404: _ERROR, 502: _ERROR, 503: _CONFIG_503,
@@ -1646,6 +1681,31 @@ def create_app(
     _project_brief_style_example_limits()
     _writing_output_length_tokens()
     app = FastAPI(title="AI Writing System Application")
+
+    # SoT v1.7.38 (owner decision 2026-07-24): the storage face of 503 is closed
+    # app-wide here rather than endpoint by endpoint. Every endpoint but /health
+    # reaches Mongo, so a driver failure could leak an opaque 500 from any of the
+    # 48 that had no 503 clause — H3 spent the whole phase defining exactly that
+    # as a bug. One handler is also the only shape that cannot drift: a new
+    # endpoint inherits the mapping instead of having to remember a clause.
+    #
+    # Endpoint-level clauses still win, because Starlette only consults a handler
+    # for exceptions that escape the route. That ordering is what keeps
+    # auto-promote's 503 *partial envelope* (v1.7.35 D1=B) intact instead of it
+    # being flattened into the uniform body here.
+    for _storage_error in _STORAGE_ERRORS:
+        @app.exception_handler(_storage_error)
+        async def _canonical_store_failed(_request, exc):
+            return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+    @app.exception_handler(MemoryReindexEnqueueFailed)
+    async def _reindex_enqueue_failed(_request, exc):
+        # Also a storage failure, but deliberately not a pymongo type (it carries
+        # the completed mint, see memory/service.py), so the loop above does not
+        # cover it. Endpoints that report the mint catch it themselves; this is
+        # the fallback for the ones that do not, without which that would be the
+        # one storage path still leaking a 500.
+        return JSONResponse(status_code=503, content={"detail": str(exc)})
     core_sot = service or _default_core_sot_service()
     sync_outbox = index_sync_outbox or _default_index_sync_outbox_service()
     analysis = analysis_service or _default_analysis_service(
@@ -1940,12 +2000,14 @@ def create_app(
     def _require_project_exists(project_id: str) -> None:
         core_sot.get_project(project_id=project_id)
 
-    @app.post("/projects", response_model=ProjectPayload)
+    @app.post("/projects", response_model=ProjectPayload,
+              responses=_ERRORS_STORAGE)
     async def create_project(request: CreateProjectRequest) -> dict[str, object]:
         project = core_sot.create_project(name=request.name)
         return _project_payload(project)
 
-    @app.get("/projects", response_model=ProjectListResponse)
+    @app.get("/projects", response_model=ProjectListResponse,
+             responses=_ERRORS_STORAGE)
     async def list_projects() -> dict[str, object]:
         return {"projects": [_project_payload(p) for p in core_sot.list_projects()]}
 

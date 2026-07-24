@@ -247,3 +247,48 @@
 ### Next steps
 
 - 커밋 후 다음 작업. 남은 갈림길은 dogfood 착수(GATE-1)와 저장소 예외 taxonomy 착수 여부.
+
+---
+
+## Task — 저장소 장애 매핑 전역화: 48개 endpoint 500 누수 일괄 폐쇄 (SoT v1.7.38)
+
+### Goals
+
+- 오너 지시 "커밋 다음 작업 이어서". dogfood를 빼면 남은 항목은 저장소 예외 taxonomy 하나이고, 의미론은 v1.7.35가 이미 고정했으므로 **범위만 결정하면 되는 상태**였다.
+- 범위를 추측하면 60개 endpoint를 건드리는 큰 슬라이스가 될 수 있어 **먼저 실측**하고 선택지를 오너에게 제시했다.
+
+### User Decisions and Rationale
+
+- 제시한 4안 중 **"전역 handler + 선언 동시"** 채택. 근거: 런타임만 먼저 닫으면 OpenAPI가 "503 안 남"이라고 거짓말하는 기간이 생겨 **H3의 "OpenAPI가 기계적 진실"(D3=A) 원칙에 부채**가 쌓인다. 오너는 계약 정합을 우선했다.
+
+### Issues found (착수 전 실측)
+
+- **61개 operation 중 48개가 503 미선언**이고 전부 Mongo를 탄다 → 저장소 장애 시 opaque 500. H3가 페이즈 내내 "버그"로 규정한 형태 그대로다.
+- **런타임 폐쇄는 한 지점으로 가능하다**: 앱에 exception handler가 **0개**였다. 전역 handler 1개면 48개가 동시에 닫힌다.
+- **선언 갱신도 예상보다 싸다**: 61개 중 57개가 공유 상수 `_ERRORS_*`를 쓴다 → 상수에 503을 더하면 대부분 커버.
+- **기존 repository의 `except`는 taxonomy가 아니었다**: `analysis/mongo_repository.py:268`의 `PyMongoError` catch와 `core_sot`의 광의 catch 2곳은 전부 **non-transaction fallback의 보상 롤백**이고 재-raise한다. 즉 공백은 손대지 않은 채 그대로였다.
+- **`/health`가 유일한 정직한 제외 대상**: 상수를 반환하고 저장소에 닿지 않는다. 게다가 compose healthcheck 대상이라 허위 503이 특히 위험하다.
+- **v1.7.30이 "도메인 에러가 없다"며 제외한 `GET /projects`·`POST /projects`의 제외 근거가 무효화됐다** — 저장소 face는 도메인 에러가 아니다. 둘 다 선언 대상으로 편입했다.
+
+### Completed work
+
+- [`main.py`](../../../services/application/app/main.py) `create_app`: 전역 handler **2종** — pymongo 예외(지연 해석 `_STORAGE_ERRORS`를 순회하므로 드라이버 부재 시 등록 자체를 건너뜀)와 `MemoryReindexEnqueueFailed`(mint를 실어 나르느라 pymongo 타입이 아니라 별도 등록 — 없으면 이 경로만 500으로 남는다).
+- 선언: 공유 상수에 503 추가, 기존 503(마이그레이션·구성 face)은 **한 상태코드에 선언은 하나**이므로 `_with_storage_note()`로 description에 저장소 문장을 덧붙였다(`_ACCEPT_503` 포함). `GET/POST /projects`에 `_ERRORS_STORAGE` 신규 부착. 결과 **60/61 operation 선언**.
+- 테스트 lock 리스트 4종 전수 갱신.
+- 회귀 신규 5(`CanonicalStoreFailureHandlerTest`): 전역 503 균일 본문 · enqueue-failed도 503 · **`/health` 미선언(over-strict)** · 나머지 60개 전수 선언(under-strict) · **endpoint 자체 절이 handler보다 우선(over-strict)**.
+
+### Verification
+
+- **mutation 3종** — handler 제거 / enqueue handler 제거 / `/health`에 503 선언 추가. 각각 해당 회귀 **하나만** 물었다.
+- **회귀 전량**: backend **1467 passed / 1 skipped / 573 subtests**. 직전 1462/1/526 대비 **+5 passed**(신규 회귀 5건)이고 **+47 subtest**는 lock 4종에서 503을 새로 얻은 (path,method) 항목 수와 정확히 일치한다(503 보유 **13 → 60**, 차이 47 — 본문-균일성 테스트가 코드마다 subtest 하나를 낸다). 설명되지 않는 증감 0.
+- 프론트: `gen:api` **+434/-11** — 삭제 11줄은 전부 `@description` JSDoc이 저장소 문장이 덧붙은 버전으로 **교체**된 것이라 **타입 손실 0**. tsc clean, build JS **399.03 kB**(무변), vitest **194/13**(무변).
+- **회귀가 실제 결함을 하나 잡았다**: 새로 정의한 일반 `_STORAGE_503`이 auto-promote의 **Union 선언을 이름으로 가려버려**(같은 파일 뒤쪽 재정의) partial envelope 선언이 평범한 detail로 바뀌었다. `AnalysisErrorContractDeclarationTest`의 Union 가드 2건이 즉시 물었고 `_AUTO_PROMOTE_503`으로 분리했다. **v1.7.36에서 세운 Union over-strict 가드가 바로 다음 슬라이스에서 값을 했다.**
+
+### Decisions (구현자 판단)
+
+- **repository wrapping(선택지 C)을 택하지 않은 이유를 여기 남긴다**: 계층 경계는 가장 깨끗하지만, 8개 파일을 고치고도 **endpoint별 except 절이 여전히 필요**해 세 안 중 가장 크면서 "새 endpoint가 절을 잊는다"는 근본 문제를 못 없앤다. 전역 handler는 새 endpoint가 매핑을 자동 상속한다.
+- **`main.py`의 `_STORAGE_ERRORS` 지연 임포트 seam은 유지**했다. 전역 handler 등록에도 그 튜플을 그대로 쓰므로 드라이버 없는 배포에서 등록이 건너뛰어지고, 후속 taxonomy가 생겨도 교체 지점은 여전히 한 곳이다.
+
+### Next steps
+
+- 저장소 장애 매핑 부채는 이로써 **0건**. 남은 갈림길은 dogfood 착수(GATE-1) 하나다.

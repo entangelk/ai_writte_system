@@ -277,7 +277,9 @@ _ACCEPT_503 = {
                    "either a collaborator is not configured in this deployment, "
                    "or stored draft metadata predates the ordered-unit invariant "
                    "(run scripts/migrate_ordered_units.py). Retrying the request "
-                   "alone cannot succeed.",
+                   "alone cannot succeed. The canonical store may also be "
+                   "unreachable or failing; in that case recover it and retry the "
+                   "same request unchanged.",
 }
 
 ACCEPT_RESPONSES: dict[int | str, dict] = {

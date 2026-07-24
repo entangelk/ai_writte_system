@@ -38,6 +38,16 @@ from services.application.app.indexing.service import (
     PROJECTS_COLLECTION,
 )
 from services.application.app.main import create_app
+from services.application.app.memory.service import (
+    InMemoryMemoryRepository,
+    MemoryReindexEnqueueFailed,
+    MemoryService,
+)
+
+try:  # pymongo is optional for the in-memory path (main._resolve_storage_error_types)
+    from pymongo.errors import AutoReconnect as _STORAGE_FAILURE
+except ModuleNotFoundError:  # pragma: no cover - the driver is present in CI
+    _STORAGE_FAILURE = None
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
 from services.llm_gateway.app.provider import FakeLLMProvider, GenerationResult
 
@@ -2094,29 +2104,29 @@ class CrudErrorContractDeclarationTest(unittest.TestCase):
     # 422 is excluded because FastAPI emits it automatically for any endpoint
     # with a validated body/param and its body shape is a different contract.
     EXPECTED = {
-        ("/projects", "post"): set(),
-        ("/projects", "get"): set(),
-        ("/projects/{project_id}", "get"): {"404"},
-        ("/projects/{project_id}", "patch"): {"404", "409"},
-        ("/projects/{project_id}", "delete"): {"404"},
-        ("/projects/{project_id}/brief", "get"): {"404"},
-        ("/projects/{project_id}/brief", "put"): {"404", "409"},
-        ("/projects/{project_id}/brief/versions", "get"): {"404"},
-        ("/projects/{project_id}/brief/versions/{version_id}", "get"): {"404"},
+        ("/projects", "post"): {"503"},
+        ("/projects", "get"): {"503"},
+        ("/projects/{project_id}", "get"): {"404", "503"},
+        ("/projects/{project_id}", "patch"): {"404", "409", "503"},
+        ("/projects/{project_id}", "delete"): {"404", "503"},
+        ("/projects/{project_id}/brief", "get"): {"404", "503"},
+        ("/projects/{project_id}/brief", "put"): {"404", "409", "503"},
+        ("/projects/{project_id}/brief/versions", "get"): {"404", "503"},
+        ("/projects/{project_id}/brief/versions/{version_id}", "get"): {"404", "503"},
         ("/projects/{project_id}/drafts", "get"): {"404", "503"},
         ("/projects/{project_id}/drafts", "post"): {"404", "409", "503"},
-        ("/projects/{project_id}/drafts/{draft_id}", "get"): {"404"},
-        ("/projects/{project_id}/drafts/{draft_id}", "patch"): {"404", "409"},
-        ("/projects/{project_id}/drafts/{draft_id}", "delete"): {"404"},
-        ("/projects/{project_id}/drafts/{draft_id}/versions", "get"): {"404"},
+        ("/projects/{project_id}/drafts/{draft_id}", "get"): {"404", "503"},
+        ("/projects/{project_id}/drafts/{draft_id}", "patch"): {"404", "409", "503"},
+        ("/projects/{project_id}/drafts/{draft_id}", "delete"): {"404", "503"},
+        ("/projects/{project_id}/drafts/{draft_id}/versions", "get"): {"404", "503"},
         ("/projects/{project_id}/drafts/{draft_id}/versions", "post"):
-            {"400", "404", "409"},
+            {"400", "404", "409", "503"},
         ("/projects/{project_id}/drafts/{draft_id}/versions/{version_id}", "get"):
-            {"404"},
+            {"404", "503"},
         ("/projects/{project_id}/drafts/{draft_id}/versions/{version_id}/export",
-         "get"): {"400", "404"},
+         "get"): {"400", "404", "503"},
         ("/projects/{project_id}/export", "get"): {"400", "404", "503"},
-        ("/projects/{project_id}/draft-order", "put"): {"404", "409"},
+        ("/projects/{project_id}/draft-order", "put"): {"404", "409", "503"},
     }
 
     def setUp(self):
@@ -2245,43 +2255,43 @@ class AnalysisErrorContractDeclarationTest(unittest.TestCase):
 
     # (path, method) -> exact set of declared statuses besides 200/422.
     EXPECTED = {
-        ("/projects/{project_id}/analysis/jobs", "post"): {"404"},
-        ("/projects/{project_id}/analysis/jobs/{job_id}", "get"): {"404"},
+        ("/projects/{project_id}/analysis/jobs", "post"): {"404", "503"},
+        ("/projects/{project_id}/analysis/jobs/{job_id}", "get"): {"404", "503"},
         ("/projects/{project_id}/analysis/jobs/{job_id}/candidates", "get"):
-            {"404"},
+            {"404", "503"},
         ("/projects/{project_id}/analysis/jobs/{job_id}/retry", "post"):
-            {"404", "409"},
+            {"404", "409", "503"},
         ("/projects/{project_id}/analysis/jobs/{job_id}/run", "post"):
             {"400", "404", "409", "502", "503"},
         ("/projects/{project_id}/analysis/jobs/{job_id}/auto-promote", "post"):
             {"404", "503"},
         ("/projects/{project_id}/analysis/jobs/{job_id}/context", "post"):
-            {"404"},
+            {"404", "503"},
         ("/projects/{project_id}/analysis/jobs/{job_id}/compare", "post"):
             {"404", "502", "503"},
         ("/projects/{project_id}/analysis/jobs/{job_id}/apply", "post"):
-            {"400", "404"},
+            {"400", "404", "503"},
         ("/projects/{project_id}/analysis/candidates/{candidate_id}/promote",
-         "post"): {"404"},
+         "post"): {"404", "503"},
         ("/projects/{project_id}/analysis/candidates/{candidate_id}/confirm",
-         "post"): {"404", "409"},
+         "post"): {"404", "409", "503"},
         ("/projects/{project_id}/analysis/candidates/{candidate_id}/reject",
-         "post"): {"404", "409"},
+         "post"): {"404", "409", "503"},
         ("/projects/{project_id}/analysis/candidates/{candidate_id}/edit",
-         "post"): {"400", "404", "409"},
-        ("/projects/{project_id}/analysis/review-queue", "get"): {"404"},
+         "post"): {"400", "404", "409", "503"},
+        ("/projects/{project_id}/analysis/review-queue", "get"): {"404", "503"},
         ("/projects/{project_id}/analysis/review-queue/{entry_id}/reconcile",
-         "post"): {"404", "409"},
-        ("/projects/{project_id}/analysis/review-inbox", "get"): {"404"},
+         "post"): {"404", "409", "503"},
+        ("/projects/{project_id}/analysis/review-inbox", "get"): {"404", "503"},
         ("/projects/{project_id}/analysis/review-inbox/{candidate_id}", "get"):
-            {"404"},
-        ("/projects/{project_id}/analysis/gate-findings", "get"): {"404"},
+            {"404", "503"},
+        ("/projects/{project_id}/analysis/gate-findings", "get"): {"404", "503"},
         ("/projects/{project_id}/analysis/gate-findings/{finding_id}", "get"):
-            {"404"},
+            {"404", "503"},
         ("/projects/{project_id}/analysis/gate-findings/{finding_id}/resolve",
-         "post"): {"404", "409"},
+         "post"): {"404", "409", "503"},
         ("/projects/{project_id}/analysis/gate-findings/{finding_id}/dismiss",
-         "post"): {"404", "409"},
+         "post"): {"404", "409", "503"},
     }
 
     def setUp(self):
@@ -2468,18 +2478,18 @@ class MemorySourceErrorContractDeclarationTest(unittest.TestCase):
 
     # (path, method) -> exact set of declared statuses besides 200/422.
     EXPECTED = {
-        ("/projects/{project_id}/memory", "get"): {"404"},
-        ("/projects/{project_id}/memory/{memory_id}", "get"): {"404"},
+        ("/projects/{project_id}/memory", "get"): {"404", "503"},
+        ("/projects/{project_id}/memory/{memory_id}", "get"): {"404", "503"},
         ("/projects/{project_id}/snapshots/{snapshot_id}/source-refs", "post"):
-            {"400", "404"},
+            {"400", "404", "503"},
         ("/projects/{project_id}/snapshots/{snapshot_id}/source-refs", "get"):
-            {"404"},
-        ("/projects/{project_id}/source-refs/{source_ref_id}", "get"): {"404"},
+            {"404", "503"},
+        ("/projects/{project_id}/source-refs/{source_ref_id}", "get"): {"404", "503"},
         # 502 added when the embedding-failure 500 leak was closed: the rebuild
         # embeds every source block, so a configured-but-failing embedding
         # service is an upstream failure, not a missing collaborator (503).
         ("/projects/{project_id}/snapshots/{snapshot_id}"
-         "/index/source-blocks/rebuild", "post"): {"404", "502"},
+         "/index/source-blocks/rebuild", "post"): {"404", "502", "503"},
         ("/projects/{project_id}/context-search", "post"):
             {"400", "404", "502", "503", "504"},
     }
@@ -2571,6 +2581,139 @@ class MemorySourceErrorBodyExactKeyTest(unittest.TestCase):
                 json={"start_offset": 0, "end_offset": 9999},
             ),
             400,
+        )
+
+
+class CanonicalStoreFailureHandlerTest(unittest.TestCase):
+    """A failing canonical store is a 503 from every endpoint, not an opaque 500.
+
+    SoT v1.7.38 (owner decision 2026-07-24). Before this, only auto-promote
+    mapped a storage failure; the other 48 undeclared operations leaked a 500 —
+    the exact thing H3 spent the phase defining as a bug. The mapping is one
+    app-wide handler rather than a clause per endpoint, because a clause per
+    endpoint is what a new endpoint forgets.
+
+    Both directions. Under-strict: dropping the handler brings the 500 back.
+    Over-strict: (a) /health must NOT declare 503, since it touches no store and
+    declaring it would lie to the generated types as loudly as silence did;
+    (b) an endpoint that maps the failure itself must keep winning, so
+    auto-promote still answers with its partial envelope instead of being
+    flattened into the uniform body.
+    """
+
+    def _client_with_failing_store(self, error):
+        class _FailingRepository(InMemoryCoreSotRepository):
+            def list_projects(self):
+                raise error
+
+        return TestClient(create_app(service=CoreSotService(_FailingRepository())))
+
+    @unittest.skipIf(_STORAGE_FAILURE is None, "pymongo is not installed")
+    def test_storage_failure_is_503_with_the_uniform_body(self):
+        client = self._client_with_failing_store(
+            _STORAGE_FAILURE("connection to the canonical store was lost")
+        )
+
+        response = client.get("/projects")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(set(response.json()), {"detail"})
+        self.assertTrue(response.json()["detail"])
+
+    def test_reindex_enqueue_failure_is_also_503(self):
+        # The one storage path that is not a pymongo type: it carries the mint it
+        # completed, so it needs its own handler or it stays a 500.
+        class _FailingRepository(InMemoryCoreSotRepository):
+            def list_projects(self):
+                raise MemoryReindexEnqueueFailed(
+                    type("R", (), {"memory": type("M", (), {"id": "memory-1"})()})(),
+                    RuntimeError("outbox write lost"),
+                )
+
+        client = TestClient(create_app(service=CoreSotService(_FailingRepository())))
+
+        response = client.get("/projects")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(set(response.json()), {"detail"})
+        self.assertIn("memory-1", response.json()["detail"])
+
+    def test_health_does_not_declare_the_storage_503(self):
+        # Over-strict guard. /health returns a constant and never reaches Mongo,
+        # so it is the one endpoint for which the storage face is unreachable.
+        # It is also the probe compose uses, so a spurious 503 there would be
+        # read as the app being down.
+        spec = create_app().openapi()
+        self.assertEqual(
+            {c for c in spec["paths"]["/health"]["get"]["responses"]
+             if c not in ("200", "422")},
+            set(),
+        )
+        self.assertEqual(TestClient(create_app()).get("/health").status_code, 200)
+
+    def test_every_other_operation_declares_the_storage_503(self):
+        # Under-strict guard on the declaration side: the handler makes 503
+        # reachable everywhere, and D3=A says OpenAPI is the mechanical truth, so
+        # silence anywhere but /health is a lie.
+        spec = create_app().openapi()
+        missing = {
+            (path, method)
+            for path, operations in spec["paths"].items()
+            for method in operations
+            if path != "/health"
+            and "503" not in spec["paths"][path][method]["responses"]
+        }
+        self.assertEqual(missing, set())
+
+    @unittest.skipIf(_STORAGE_FAILURE is None, "pymongo is not installed")
+    def test_endpoint_level_mapping_still_wins_over_the_handler(self):
+        # Over-strict guard on the handler's reach. Starlette only consults a
+        # handler for exceptions that escape the route, so auto-promote's own
+        # clause must still produce the partial envelope. If the handler ever
+        # swallowed these first, the promoted[] contract (v1.7.35 D1=B) would be
+        # silently replaced by a bare {"detail": ...}.
+        class _FailingMemoryRepository(InMemoryMemoryRepository):
+            def put_memory(self, entry):
+                raise _STORAGE_FAILURE("connection lost")
+
+        analysis = AnalysisService(InMemoryAnalysisRepository())
+        memory = MemoryService(
+            _FailingMemoryRepository(), auto_promotion_threshold=0.9
+        )
+        client = TestClient(create_app(
+            service=CoreSotService(InMemoryCoreSotRepository()),
+            analysis_service=analysis,
+            memory_service=memory,
+        ))
+        project_id = client.post("/projects", json={"name": "Novel"}).json()["id"]
+        job = analysis.create_job(
+            project_id=project_id, snapshot_id="s1", idempotency_key="run-1"
+        ).job
+        task = analysis.create_task(
+            project_id=project_id,
+            job_id=job.id,
+            candidate_type=AnalysisCandidateType.CHARACTER_OBSERVATION,
+        )
+        analysis.record_candidate(
+            project_id=project_id,
+            task_id=task.id,
+            logical_key="k1",
+            candidate_type=AnalysisCandidateType.CHARACTER_OBSERVATION,
+            action=AnalysisCandidateAction.CREATE,
+            provenance=AnalysisProvenance.SOURCE_OBSERVED,
+            confidence=0.95,
+            source_ref_ids=("source-ref-1",),
+            payload={"name": "Ariel", "observation": "brave"},
+        )
+
+        response = client.post(
+            f"/projects/{project_id}/analysis/jobs/{job.id}/auto-promote"
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            set(response.json()),
+            {"auto_promotion_threshold", "promoted", "promotion_error"},
         )
 
 
@@ -2688,9 +2831,9 @@ class WritingErrorContractDeclarationTest(unittest.TestCase):
         ("/projects/{project_id}/writing/generate", "post"):
             {"202", "400", "404", "502", "503", "504"},
         ("/projects/{project_id}/writing/generation-jobs/{job_id}", "get"):
-            {"404"},
+            {"404", "503"},
         ("/projects/{project_id}/writing/generation-jobs/{job_id}/retry", "post"):
-            {"404", "409"},
+            {"404", "409", "503"},
         ("/projects/{project_id}/writing/gate", "post"):
             {"400", "404", "502", "503", "504"},
         ("/projects/{project_id}/writing/report", "post"):
@@ -2699,12 +2842,12 @@ class WritingErrorContractDeclarationTest(unittest.TestCase):
             {"400", "404", "502", "503", "504"},
         ("/projects/{project_id}/writing/revise-and-gate", "post"):
             {"400", "404", "502", "503", "504"},
-        ("/projects/{project_id}/writing/loop-audits", "get"): {"404"},
-        ("/projects/{project_id}/writing/loop-audits/{audit_id}", "get"): {"404"},
+        ("/projects/{project_id}/writing/loop-audits", "get"): {"404", "503"},
+        ("/projects/{project_id}/writing/loop-audits/{audit_id}", "get"): {"404", "503"},
         ("/projects/{project_id}/writing/accept", "post"):
             {"400", "404", "409", "502", "503", "504"},
-        ("/projects/{project_id}/writing/scratch", "get"): {"404"},
-        ("/projects/{project_id}/writing/scratch", "delete"): {"404"},
+        ("/projects/{project_id}/writing/scratch", "get"): {"404", "503"},
+        ("/projects/{project_id}/writing/scratch", "delete"): {"404", "503"},
     }
 
     # (path, method, code) where the body is a Union of a partial envelope with
