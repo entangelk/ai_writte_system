@@ -8,9 +8,9 @@
 
 ## 지금 상태
 
-- 정본은 `docs/system-contract-sot.md` **v1.7.38**(Approved). 미확정 항목은 추측 구현하지 않는다.
-- 공개 API 계약(H3)은 닫혀 있다: **`/health`를 제외한 60개 operation 전부**가 realistic 에러 상태를 OpenAPI에 선언하고 **미매핑 500 부채는 0건**이다. 새 endpoint를 추가하면 **`responses=`도 함께** 붙여야 하며, 트랙별 전수 선언 가드 테스트가 빠뜨림을 잡는다.
-- 회귀 기준선: backend **1467 passed / 1 skipped / 573 subtests**(test-mongo 기동 시, 이 머신 실측 ~11분), frontend **194 passed / 13 files**, build JS 399.03 kB.
+- 정본은 `docs/system-contract-sot.md` **v1.7.39**(Approved). 미확정 항목은 추측 구현하지 않는다.
+- 공개 API 계약(H3)은 닫혀 있다: **`/health`를 제외한 60개 operation 전부**가 realistic 에러 상태를 OpenAPI에 선언하고 **미매핑 500 부채는 0건**이다. 새 endpoint를 추가하면 **`responses=`도 함께** 붙여야 하며, 트랙별 전수 선언 가드 테스트가 빠뜨림을 잡는다. **예외 한 건**: `POST …/analysis/jobs/{id}/run`은 저장소 장애에 502를 낸다(광의 `except → 502`, v1.7.39 계약 명시) — opaque 500은 아니며 503도 runner 미구성 face로 도달 가능.
+- 회귀 기준선: backend **1469 passed / 1 skipped / 579 subtests**(test-mongo 기동 시, 이 머신 실측 ~10분), frontend **194 passed / 13 files**, build JS 399.03 kB.
 - **이 머신, 2026-07-24 기준 스택은 사실상 내려가 있다**: `application`·`gateway`·`mongo`·`elasticsearch`·`embedding`·`chroma`·`test-mongo`가 `Exited`, `frontend`와 두 worker만 떠 있다(worker는 의존 서비스가 없어 무의미하게 도는 중). 기동은 오너 몫.
 - **현존 컨테이너는 전부 구 정의로 만들어졌다** — 옛 포트(`27019`/`8000`/`9200`…)와 `ulimits` 없는 상태다. `docker compose up`이 새 정의로 재생성하므로 별도 조치는 필요 없다.
 

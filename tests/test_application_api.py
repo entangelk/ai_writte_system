@@ -2716,6 +2716,64 @@ class CanonicalStoreFailureHandlerTest(unittest.TestCase):
             {"auto_promotion_threshold", "promoted", "promotion_error"},
         )
 
+    @unittest.skipIf(_STORAGE_FAILURE is None, "pymongo is not installed")
+    def test_storage_failure_is_503_from_routes_across_every_track(self):
+        # Breadth guard (SoT v1.7.38). test_storage_failure_is_503_with_the_
+        # uniform_body proves the handler fires for GET /projects alone. This
+        # samples one route per track through the shared project-exists gate,
+        # so a future endpoint that wraps its body in a broad ``except`` (and so
+        # swallows the storage failure before it escapes to the handler) cannot
+        # pass the declaration guard while leaking a 500 — the declaration test
+        # would stay green in that drift; this runtime sweep would not.
+        class _ProjectGateFailingRepository(InMemoryCoreSotRepository):
+            def get_project(self, *args, **kwargs):
+                raise _STORAGE_FAILURE(
+                    "connection to the canonical store was lost"
+                )
+
+        client = TestClient(
+            create_app(service=CoreSotService(_ProjectGateFailingRepository()))
+        )
+        # One route per track, all through the project-exists gate.
+        routes = [
+            "/projects/p1",                    # core_sot
+            "/projects/p1/drafts",             # drafts
+            "/projects/p1/brief",              # brief
+            "/projects/p1/memory",             # memory
+            "/projects/p1/analysis/jobs/j1",   # analysis
+            "/projects/p1/writing/loop-audits",  # writing
+        ]
+        for path in routes:
+            with self.subTest(path=path):
+                response = client.get(path)
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(set(response.json()), {"detail"})
+
+    @unittest.skipIf(_STORAGE_FAILURE is None, "pymongo is not installed")
+    def test_handler_registration_is_skipped_when_no_driver(self):
+        # Robustness guard (SoT v1.7.38). The app must build and /health must
+        # answer even when pymongo is absent — the in-memory path needs no
+        # driver, and a deployment with no Mongo has no Mongo failure to
+        # classify. An empty ``_STORAGE_ERRORS`` means the registration loop
+        # runs zero times, so no pymongo handler is keyed; the
+        # ``MemoryReindexEnqueueFailed`` handler (registered outside the loop)
+        # is unaffected, as is /health. Both directions: with the driver the
+        # handler IS keyed, without it it is NOT.
+        from pymongo.errors import PyMongoError
+        self.assertIn(PyMongoError, create_app().exception_handlers)
+
+        import services.application.app.main as main_module
+        original = main_module._STORAGE_ERRORS
+        main_module._STORAGE_ERRORS = ()
+        try:
+            app = create_app()
+            self.assertNotIn(PyMongoError, app.exception_handlers)
+            self.assertEqual(
+                TestClient(app).get("/health").status_code, 200,
+            )
+        finally:
+            main_module._STORAGE_ERRORS = original
+
 
 class SourceBlockRebuildEmbeddingFailureTest(unittest.TestCase):
     """A failing embedding service makes the rebuild a 502, not an opaque 500.

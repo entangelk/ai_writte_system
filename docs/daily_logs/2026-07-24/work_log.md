@@ -292,3 +292,35 @@
 ### Next steps
 
 - 저장소 장애 매핑 부채는 이로써 **0건**. 남은 갈림길은 dogfood 착수(GATE-1) 하나다.
+
+---
+
+## Task — v1.7.38 독립 검증 보강 (SoT v1.7.39)
+
+### Goals
+
+- v1.7.38 슬라이스에 대한 독립 검증(`verifications/2026-07-24/storage_503_global_handler.md`)이 non-blocking 보강 후보 3건(H1·H2·H3)을 짚었다. 오너 지시 "보강할 부분 네가 보강해주고 커밋까지"로 이걸 코드/계약으로 반영한다.
+
+### User Decisions and Rationale
+
+- **H3 처리 방향**: `run` endpoint의 저장소→502 재분류를 (B) 코드로 좁혀 503으로 만들지, (A) 계약에 예외로 명시할지가 갈림길이었다. 행동 변화(API 응답 분류)를 수반하는 (B)는 오너 결정 성격이라 이번엔 **(A) 계약 명시**로 가고 (B)는 후속 오너 결정으로 남겼다. 근거: 검증·보강 단계에서 API 응답 분류를 임의로 바꾸는 건 과하고, 계약이 코드를 정확히 기술하면 정밀도 갭은 닫힌다.
+
+### Completed work
+
+- **H2 — runtime 가드 확장** (`CanonicalStoreFailureHandlerTest::test_storage_failure_is_503_from_routes_across_every_track`): 저장소→503 발화를 `GET /projects` 1건에서 트랙별 라우트 6개(core_sot·drafts·brief·memory·analysis·writing)로 넓혔다. 공통 project-exists 게이트가 실패하도록 `InMemoryCoreSotRepository.get_project`를 override. 향후 endpoint가 광의 `except`로 저장소를 삼키면 선언 가드는 green인 채 500이 새는 drift를 이 runtime sweep이 잡는다.
+- **H1 — 드라이버 부재 가드** (`test_handler_registration_is_skipped_when_no_driver`): `_STORAGE_ERRORS = ()`(pymongo 미설치)일 때 handler 등록이 건너뛰어지고도 앱이 정상 기동하며 `/health`가 200임을 양방향(드라이버 있으면 `PyMongoError` 키 존재·없으면 부재)으로 잠갔다.
+- **H3 — 계약 정밀도**: SoT 본문 §"정본 저장소 장애"에 `POST …/analysis/jobs/{job_id}/run`이 저장소 장애에 502를 내는 pre-existing 예외를 명시. 행동 변화 없음.
+
+### Verification
+
+- backend **1469 passed / 1 skipped / 579 subtests**(test-mongo 기동, 이 머신 실측 ~10분). 직전 1467/1/573 대비 **+2 passed** = H1·H2 신규, **+6 subtest** = H2의 6개 트랙 라우트. skip·설명되지 않은 증감 0. 회귀 없음.
+- H1·H2 모두 in-memory로도 단독 green(`pytest CanonicalStoreFailureHandlerTest` → 7 passed / 6 subtests).
+
+### Decisions (구현자 판단)
+
+- **`run` 코드 변경(B)을 보류한 이유**: v1.7.35 D2=A("저장소는 502가 아닌 503") 방향과 일치시키려면 `run`의 광의 `except Exception → 502`(`main.py:2584`) 앞에 `except _STORAGE_ERRORS → 503`을 넣으면 된다(선언은 이미 503이라 무변, provider는 여전히 502). 하지만 이건 API 응답 분류 변경이고 `run`의 광의 catch는 "mirroring compare" 의도이므로 별도 오너 결정 슬라이스로 넘겼다.
+
+### Next steps
+
+- (후속 오너 결정 후보) `run` endpoint storage→503 좁히기(B) — 하면 SoT 본문의 `run` 예외 문장을 제거하고 트랙별 runtime 가드에 `run` 케이스를 추가.
+- 여전히 남은 갈림길은 dogfood 착수(GATE-1).
