@@ -2229,7 +2229,19 @@ class AnalysisErrorContractDeclarationTest(unittest.TestCase):
     ``responses=`` re-hides a documented failure) and over-strict (declaring a
     status the endpoint cannot raise, which lies to the generated frontend
     types).
+
+    ``auto-promote`` later gained the track's third failure code: SoT v1.7.35
+    added the storage face of 503 and, with it, this track's only partial
+    envelope (owner decision D1=B — canonical mints already written are reported
+    rather than hidden). ``UNION_BODIES`` pins where that Union is allowed.
     """
+
+    # (path, method, code) whose body is a Union of a partial envelope with the
+    # uniform detail. Everything else must be a bare ErrorDetailResponse ref.
+    UNION_BODIES = {
+        ("/projects/{project_id}/analysis/jobs/{job_id}/auto-promote",
+         "post", "503"),
+    }
 
     # (path, method) -> exact set of declared statuses besides 200/422.
     EXPECTED = {
@@ -2242,7 +2254,7 @@ class AnalysisErrorContractDeclarationTest(unittest.TestCase):
         ("/projects/{project_id}/analysis/jobs/{job_id}/run", "post"):
             {"400", "404", "409", "502", "503"},
         ("/projects/{project_id}/analysis/jobs/{job_id}/auto-promote", "post"):
-            {"404"},
+            {"404", "503"},
         ("/projects/{project_id}/analysis/jobs/{job_id}/context", "post"):
             {"404"},
         ("/projects/{project_id}/analysis/jobs/{job_id}/compare", "post"):
@@ -2300,16 +2312,39 @@ class AnalysisErrorContractDeclarationTest(unittest.TestCase):
 
     def test_every_declared_error_body_is_the_uniform_detail_model(self):
         # D1=A: one error body for the whole app, including the 502/503 this
-        # track introduces to the declared surface.
+        # track introduces to the declared surface. The single exception is the
+        # partial envelope in UNION_BODIES, whose error arm is still the same
+        # single model (SoT v1.7.35).
+        detail = "#/components/schemas/ErrorDetailResponse"
         for (path, method), expected in self.EXPECTED.items():
             responses = self.spec["paths"][path][method]["responses"]
             for code in expected:
                 with self.subTest(path=path, method=method, code=code):
                     schema = responses[code]["content"]["application/json"]["schema"]
-                    self.assertEqual(
-                        schema.get("$ref"),
-                        "#/components/schemas/ErrorDetailResponse",
-                    )
+                    if (path, method, code) in self.UNION_BODIES:
+                        arms = {arm.get("$ref") for arm in schema["anyOf"]}
+                        self.assertIn(detail, arms)
+                        self.assertIn(
+                            "#/components/schemas/AutoPromotePartialResponse", arms
+                        )
+                    else:
+                        self.assertEqual(schema.get("$ref"), detail)
+
+    def test_union_bodies_appear_only_where_the_contract_allows(self):
+        # Over-strict guard on the exception itself, mirroring the writing
+        # track's. auto-promote's 503 is a Union because canonical mints already
+        # written cannot be rolled back and must not be hidden behind a bare
+        # error body (D1=B). Every *other* analysis status is always a plain
+        # error, and a partial envelope drifting onto one would fork the uniform
+        # error body without anyone deciding to.
+        actual_unions = {
+            (path, method, code)
+            for (path, method), expected in self.EXPECTED.items()
+            for code in expected
+            if "anyOf" in (self.spec["paths"][path][method]["responses"][code]
+                           ["content"]["application/json"]["schema"])
+        }
+        self.assertEqual(actual_unions, self.UNION_BODIES)
 
     def test_config_503_description_names_the_operator_action(self):
         # The analysis 503 is the collaborator-not-configured face, not the

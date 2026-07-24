@@ -63,6 +63,30 @@ class MemoryNotFound(MemoryError):
     pass
 
 
+class MemoryReindexEnqueueFailed(RuntimeError):
+    """The canonical mint succeeded; the reindex outbox write did not.
+
+    The two writes of a promotion are not one transaction — ``put_memory`` makes
+    the memory durable and ``_enqueue_reindex`` then writes the outbox. When only
+    the second fails, the entry exists and is never rolled back, so a caller that
+    reports "promotion failed" without naming the mint would describe a state the
+    store does not have. This carries the completed ``PromoteMemoryResult`` so
+    the caller can report what it actually minted.
+
+    Deliberately **not** a ``MemoryError``: that base is a ``ValueError``, and
+    endpoints that map ``ValueError`` to 400 would turn an infrastructure failure
+    into "the client sent a bad request". ``RuntimeError`` follows the
+    ``DuplicatePromotionRequest`` precedent in ``repository.py``.
+    """
+
+    def __init__(self, result, cause: BaseException) -> None:
+        super().__init__(
+            f"canonical memory {result.memory.id} was minted, but its reindex "
+            f"enqueue failed: {cause}"
+        )
+        self.result = result
+
+
 class InMemoryMemoryRepository:
     def __init__(self) -> None:
         self._seq = 0
@@ -157,10 +181,26 @@ class MemoryService:
 
         existing_id = self._repo.find_memory_by_candidate(project_id, candidate.id)
         if existing_id is not None:
-            return PromoteMemoryResult(
-                memory=self._require_memory(project_id, existing_id),
-                idempotent_replay=True,
-            )
+            # SoT v1.7.37 (owner decision 2026-07-24): a replay re-enqueues too,
+            # making this an *unconditional* choke point — every promotion path
+            # leaves an index request behind, which is the invariant Phase 2B.5
+            # (D3=B) wanted and v1.6.46 weakened by exempting replays.
+            #
+            # It closes the only way a canonical memory could stay unindexed: when
+            # the enqueue following the original mint failed, nothing ever retried
+            # it. The cost is bounded — while an entry is still PENDING/RUNNING the
+            # outbox dedups on (project, event, mongo_id) so this is a no-op; only
+            # after that entry has drained does a replay create a fresh one and
+            # reindex the memory a second time. Reindex is an upsert, so the
+            # redundant pass is wasted work, never corruption.
+            #
+            # Failures here are deliberately NOT wrapped in
+            # MemoryReindexEnqueueFailed: no memory was minted by this call, so a
+            # caller must not report one. The raw storage error propagates and the
+            # HTTP layer maps it to the plain 503 arm.
+            existing = self._require_memory(project_id, existing_id)
+            self._enqueue_reindex(existing)
+            return PromoteMemoryResult(memory=existing, idempotent_replay=True)
 
         applied_threshold = (
             self._auto_promotion_threshold
@@ -191,8 +231,17 @@ class MemoryService:
                 memory=self._require_memory_by_candidate(project_id, candidate.id),
                 idempotent_replay=True,
             )
-        self._enqueue_reindex(entry)
-        return PromoteMemoryResult(memory=entry, idempotent_replay=False)
+        result = PromoteMemoryResult(memory=entry, idempotent_replay=False)
+        # The mint above is already durable. Any failure from here on leaves a
+        # stored memory behind, so the failure must carry the result rather than
+        # discard it (see MemoryReindexEnqueueFailed). The catch is broad on
+        # purpose: every enqueue failure leaves the same state regardless of its
+        # type, and this re-raises with context instead of mapping or swallowing.
+        try:
+            self._enqueue_reindex(entry)
+        except Exception as exc:  # noqa: BLE001 — re-raised with the mint attached
+            raise MemoryReindexEnqueueFailed(result, exc) from exc
+        return result
 
     def auto_promote_candidate(
         self, *, project_id: str, candidate: AnalysisCandidate
@@ -263,10 +312,13 @@ class MemoryService:
         # re-application replays the version it already created.
         existing_id = self._repo.find_memory_by_candidate(project_id, candidate.id)
         if existing_id is not None:
-            return PromoteMemoryResult(
-                memory=self._require_memory(project_id, existing_id),
-                idempotent_replay=True,
-            )
+            # Same unconditional choke point as promote_candidate's replay branch
+            # (SoT v1.7.37) — see the reasoning there. Applying it to only one of
+            # the two write paths would leave the invariant half true, which is
+            # worse than either extreme.
+            existing = self._require_memory(project_id, existing_id)
+            self._enqueue_reindex(existing)
+            return PromoteMemoryResult(memory=existing, idempotent_replay=True)
 
         target = self._require_memory(project_id, target_memory_id)
         if target.status is not MemoryStatus.CANONICAL:

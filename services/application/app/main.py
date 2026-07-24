@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Annotated, Protocol
+from typing import Annotated, Protocol, Union
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -168,6 +168,7 @@ from services.application.app.memory.service import (
     InMemoryMemoryRepository,
     MemoryError,
     MemoryNotFound,
+    MemoryReindexEnqueueFailed,
     MemoryReindexOutbox,
     MemoryService,
 )
@@ -1024,8 +1025,66 @@ _MIGRATION_503 = {
                    "retrying the request alone cannot succeed.",
 }
 
+# SoT v1.7.35 D2=A: the third face of 503 — the canonical store is configured
+# but *failing*. Unlike the other two faces the remedy is not a one-shot human
+# action but storage recovery, after which retrying the same request is the
+# correct recovery (promotion is idempotent, so a retry promotes only what is
+# left).
+#
+# Resolved lazily and exactly once, because main.py must import without pymongo:
+# the in-memory path needs no driver install (see _default_core_sot_service). A
+# missing driver yields an empty tuple, and `except ()` matches nothing — which
+# is the correct behaviour, since a deployment with no Mongo has no Mongo failure
+# to classify.
+#
+# Deliberately ONE named seam rather than a clause per call site: it covers both
+# the memory repository and the reindex outbox (each writes Mongo directly), and
+# the deferred repository-level exception taxonomy replaces this single point
+# instead of every endpoint (brief "Follow-up considerations").
+def _resolve_storage_error_types() -> tuple[type[BaseException], ...]:
+    try:
+        from pymongo.errors import PyMongoError
+    except ModuleNotFoundError:
+        return ()
+    return (PyMongoError,)
+
+
+_STORAGE_ERRORS = _resolve_storage_error_types()
+
+
+class AutoPromotePartialResponse(BaseModel):
+    # SoT v1.7.35 D1=B: 503 raised *after* some candidates were already promoted.
+    # Canonical mints are append-only and are not rolled back, so hiding them
+    # behind a bare error body would make the response disagree with the stored
+    # state. Same shape as the success envelope plus the failure reason; the
+    # partial-envelope precedent is WritingAcceptAnalysisPartial (accept 502).
+    #
+    # Returned via JSONResponse, so this model is responses={} documentation only
+    # and the exact-key regression is its runtime lock (same pattern as the
+    # writing partials). ``promoted`` stays untyped item-wise because the success
+    # arm of this endpoint is an untyped dict today — a narrower model here would
+    # document a wire shape the endpoint does not actually promise.
+    auto_promotion_threshold: float | None
+    promoted: list[dict[str, object]]
+    promotion_error: str
+
+
+_STORAGE_503 = {
+    "model": Union[AutoPromotePartialResponse, ErrorDetailResponse],
+    "description": "The canonical store failed mid-promotion. Every memory this "
+                   "call minted is returned in `promoted` — including one whose "
+                   "mint succeeded but whose reindex enqueue then failed — and "
+                   "none of them are rolled back, so `promoted` always matches "
+                   "what is stored. `promotion_error` names the stage that "
+                   "failed. Recover the store and retry the same request: "
+                   "promotion is idempotent, so the retry promotes only what is "
+                   "left — and a reindex enqueue lost after its mint is repaired "
+                   "by that same retry, because a replayed promotion re-enqueues.",
+}
+
 _ERRORS_404: dict[int | str, dict] = {404: _ERROR}
 _ERRORS_404_502: dict[int | str, dict] = {404: _ERROR, 502: _ERROR}
+_ERRORS_404_STORAGE: dict[int | str, dict] = {404: _ERROR, 503: _STORAGE_503}
 _ERRORS_400_404: dict[int | str, dict] = {400: _ERROR, 404: _ERROR}
 _ERRORS_404_409: dict[int | str, dict] = {404: _ERROR, 409: _ERROR}
 _ERRORS_400_404_409: dict[int | str, dict] = {400: _ERROR, 404: _ERROR, 409: _ERROR}
@@ -2570,7 +2629,7 @@ def create_app(
         return _candidate_edit_payload(result)
 
     @app.post("/projects/{project_id}/analysis/jobs/{job_id}/auto-promote",
-              responses=_ERRORS_404)
+              responses=_ERRORS_404_STORAGE)
     async def auto_promote_job(
         project_id: str, job_id: str
     ) -> dict[str, object]:
@@ -2589,9 +2648,50 @@ def create_app(
         for candidate in candidates:
             if candidate.status is not AnalysisCandidateStatus.NEEDS_REVIEW:
                 continue
-            result = memory.auto_promote_candidate(
-                project_id=project_id, candidate=candidate
-            )
+            try:
+                result = memory.auto_promote_candidate(
+                    project_id=project_id, candidate=candidate
+                )
+            except MemoryNotFound as exc:
+                # SoT v1.7.35 D3. Defensive: promote_candidate raises this on a
+                # project mismatch, which cannot happen here because `candidates`
+                # came from list_candidates(project_id=...). Mapped anyway so the
+                # branch cannot leak a 500, and mapped to 404 like the sibling
+                # manual promote endpoint. It precedes any write for this
+                # candidate, so no mint of this iteration is lost.
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except MemoryReindexEnqueueFailed as exc:
+                # SoT v1.7.36. A promotion is two writes — the mint, then the
+                # reindex outbox — and only the second failed here, so *this*
+                # candidate is durably stored too. Reporting it in ``promoted``
+                # is what keeps the envelope's promise that the response agrees
+                # with the stored state; dropping it (v1.7.35 did) understated the
+                # mints by one and made the SoT claim false in this mode.
+                promoted.append(_memory_payload(exc.result.memory))
+                return JSONResponse(status_code=503, content={
+                    "auto_promotion_threshold": memory.auto_promotion_threshold,
+                    "promoted": promoted,
+                    "promotion_error": str(exc),
+                })
+            except _STORAGE_ERRORS as exc:
+                # SoT v1.7.35 D1=B/D2=A. The loop writes once per candidate with
+                # no transaction spanning them, so a store failure at candidate N
+                # leaves N-1 canonical mints already durable. They are append-only
+                # and are not rolled back, so returning a bare error body would
+                # make the response disagree with the stored state — report what
+                # this call minted alongside the failure instead.
+                #
+                # The message names the stage (brief Follow-up #2): reaching here
+                # means the mint itself did not happen, which is what tells an
+                # operator that ``promoted`` is complete as reported.
+                return JSONResponse(status_code=503, content={
+                    "auto_promotion_threshold": memory.auto_promotion_threshold,
+                    "promoted": promoted,
+                    "promotion_error": (
+                        f"canonical store failure — this candidate was not minted "
+                        f"by this call: {exc}"
+                    ),
+                })
             if result is not None and not result.idempotent_replay:
                 promoted.append(_memory_payload(result.memory))
         return {

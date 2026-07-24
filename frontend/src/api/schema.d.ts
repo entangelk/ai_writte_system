@@ -930,6 +930,17 @@ export interface components {
             /** Matched Memory Id */
             matched_memory_id?: string | null;
         };
+        /** AutoPromotePartialResponse */
+        AutoPromotePartialResponse: {
+            /** Auto Promotion Threshold */
+            auto_promotion_threshold: number | null;
+            /** Promoted */
+            promoted: {
+                [key: string]: unknown;
+            }[];
+            /** Promotion Error */
+            promotion_error: string;
+        };
         /**
          * BlockKind
          * @enum {string}
@@ -2540,6 +2551,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store failed mid-promotion. Every memory this call minted is returned in `promoted` — including one whose mint succeeded but whose reindex enqueue then failed — and none of them are rolled back, so `promoted` always matches what is stored. `promotion_error` names the stage that failed. Recover the store and retry the same request: promotion is idempotent, so the retry promotes only what is left — and a reindex enqueue lost after its mint is repaired by that same retry, because a replayed promotion re-enqueues. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoPromotePartialResponse"] | components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };

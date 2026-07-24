@@ -16,11 +16,21 @@ from services.application.app.core_sot.service import (
     CoreSotService,
     InMemoryCoreSotRepository,
 )
+from services.application.app.indexing.service import (
+    InMemoryIndexSyncRepository,
+    IndexSyncOutboxService,
+)
 from services.application.app.main import create_app
 from services.application.app.memory.service import (
     InMemoryMemoryRepository,
+    MemoryNotFound,
     MemoryService,
 )
+
+try:  # pymongo is optional for the in-memory path (main._resolve_storage_error_types)
+    from pymongo.errors import AutoReconnect as _STORAGE_FAILURE
+except ModuleNotFoundError:  # pragma: no cover - the driver is present in CI
+    _STORAGE_FAILURE = None
 
 
 class TestClient:
@@ -76,11 +86,11 @@ def _seed_candidate(
     ).candidate
 
 
-def _build(*, auto_promotion_threshold=None):
+def _build(*, auto_promotion_threshold=None, memory_repository=None, memory=None):
     core_sot = CoreSotService(InMemoryCoreSotRepository())
     analysis = AnalysisService(InMemoryAnalysisRepository())
-    memory = MemoryService(
-        InMemoryMemoryRepository(),
+    memory = memory or MemoryService(
+        memory_repository or InMemoryMemoryRepository(),
         auto_promotion_threshold=auto_promotion_threshold,
     )
     app = create_app(
@@ -230,6 +240,336 @@ class AutoPromotionApiTest(unittest.TestCase):
         self.assertEqual(
             client.get(f"/projects/{project_id}/memory/nope").status_code, 404
         )
+
+
+class AutoPromoteStorageFailureTest(unittest.TestCase):
+    """A failing canonical store makes auto-promote a 503 partial, not a 500.
+
+    SoT v1.7.35 (brief ``plans/auto-promote-partial-failure-decisions.md``,
+    owner decisions D1=B / D2=A / D3=404). The promotion loop sat outside every
+    ``try``, so a store failure at candidate N escaped as an opaque 500 *after*
+    N-1 canonical mints had already been written.
+
+    Two contract points are locked here, and they are separate claims:
+
+    * **503, not 502 or 500** (D2=A). The canonical store is not an upstream
+      collaborator, so 502 would conflate "the AI/search is misbehaving" with
+      "the database is down" — operationally different responses. A contracted
+      500 was rejected because H3 spent the whole phase defining 500 as an
+      undeclared leak.
+    * **The partial envelope keeps the mints** (D1=B). Promotion is append-only
+      and is never rolled back, so a bare error body would make the response
+      disagree with what is stored. ``promoted`` keeps the same meaning it has on
+      the success path: what *this call* newly minted.
+
+    Both directions. Under-strict: dropping the ``except _STORAGE_ERRORS``
+    clause brings the 500 back. Over-strict: a healthy run must stay 200, and —
+    the guard that matters most — widening the clause to bare ``Exception`` must
+    fail, because that would relabel ordinary programming errors as "the store
+    is down" and send an operator to check a healthy database.
+    """
+
+    THRESHOLD = 0.9
+
+    def _two_candidates_in_one_job(self, analysis, project_id):
+        # The loop must promote one candidate before failing on the next, so
+        # both have to live in the *same* job (_seed_candidate makes a new job
+        # per call) and both have to clear the auto-promotion threshold.
+        job = analysis.create_job(
+            project_id=project_id,
+            snapshot_id="snapshot-1",
+            idempotency_key="run-multi",
+        ).job
+        task = analysis.create_task(
+            project_id=project_id,
+            job_id=job.id,
+            candidate_type=AnalysisCandidateType.CHARACTER_OBSERVATION,
+        )
+        candidates = []
+        for key, name in (("k1", "Ariel"), ("k2", "Boram")):
+            candidates.append(
+                analysis.record_candidate(
+                    project_id=project_id,
+                    task_id=task.id,
+                    logical_key=key,
+                    candidate_type=AnalysisCandidateType.CHARACTER_OBSERVATION,
+                    action=AnalysisCandidateAction.CREATE,
+                    provenance=AnalysisProvenance.SOURCE_OBSERVED,
+                    confidence=0.95,
+                    source_ref_ids=("source-ref-1",),
+                    payload={"name": name, "observation": "brave"},
+                ).candidate
+            )
+        return job.id, candidates
+
+    def _client_failing_on_the_second_put(self, error):
+        # A transient outage: the second write of the run fails, later writes
+        # succeed. Modelling recovery (rather than failing forever) is what lets
+        # the retry test assert the documented recovery path instead of just
+        # re-observing the outage.
+        class _FailingStore(InMemoryMemoryRepository):
+            def __init__(self):
+                super().__init__()
+                self.puts = 0
+
+            def put_memory(self, entry):
+                self.puts += 1
+                if self.puts == 2:
+                    raise error
+                super().put_memory(entry)
+
+        return _build(
+            auto_promotion_threshold=self.THRESHOLD,
+            memory_repository=_FailingStore(),
+        )
+
+    @unittest.skipIf(_STORAGE_FAILURE is None, "pymongo is not installed")
+    def test_store_failure_mid_loop_is_a_503_partial_that_keeps_the_mints(self):
+        client, analysis, project_id = self._client_failing_on_the_second_put(
+            _STORAGE_FAILURE("connection to the canonical store was lost")
+        )
+        job_id, candidates = self._two_candidates_in_one_job(analysis, project_id)
+
+        response = client.post(
+            f"/projects/{project_id}/analysis/jobs/{job_id}/auto-promote"
+        )
+
+        self.assertEqual(response.status_code, 503)
+        body = response.json()
+        # Exact keys: the envelope is returned via JSONResponse, which bypasses
+        # response_model validation, so this assertion is its only runtime lock.
+        self.assertEqual(
+            set(body), {"auto_promotion_threshold", "promoted", "promotion_error"}
+        )
+        self.assertEqual(body["auto_promotion_threshold"], self.THRESHOLD)
+        self.assertEqual(len(body["promoted"]), 1)
+        self.assertEqual(body["promoted"][0]["source_candidate_id"], candidates[0].id)
+        self.assertTrue(body["promotion_error"])
+        # The reported mint is durable, not a claim the failure rolled back. This
+        # is the whole reason D1=B exists: response and stored state must agree.
+        stored = client.get(f"/projects/{project_id}/memory").json()["memory"]
+        self.assertEqual(
+            [m["source_candidate_id"] for m in stored], [candidates[0].id]
+        )
+
+    @unittest.skipIf(_STORAGE_FAILURE is None, "pymongo is not installed")
+    def test_retrying_after_recovery_promotes_only_what_is_left(self):
+        # The recovery path the 503 description promises. Promotion idempotency
+        # ((project_id, source_candidate_id) unique) means the retry must not
+        # re-report or re-mint the candidate that already succeeded.
+        client, analysis, project_id = self._client_failing_on_the_second_put(
+            _STORAGE_FAILURE("connection to the canonical store was lost")
+        )
+        job_id, candidates = self._two_candidates_in_one_job(analysis, project_id)
+        path = f"/projects/{project_id}/analysis/jobs/{job_id}/auto-promote"
+
+        self.assertEqual(client.post(path).status_code, 503)
+        recovered = client.post(path)
+
+        self.assertEqual(recovered.status_code, 200)
+        promoted = recovered.json()["promoted"]
+        self.assertEqual([m["source_candidate_id"] for m in promoted],
+                         [candidates[1].id])
+        stored = client.get(f"/projects/{project_id}/memory").json()["memory"]
+        self.assertEqual(
+            sorted(m["source_candidate_id"] for m in stored),
+            sorted(c.id for c in candidates),
+        )
+
+    def test_healthy_auto_promote_still_returns_200(self):
+        # Over-strict guard: the new clauses must not turn working runs into
+        # errors, and the success envelope must keep its own key set.
+        client, analysis, project_id = _build(
+            auto_promotion_threshold=self.THRESHOLD
+        )
+        job_id, candidates = self._two_candidates_in_one_job(analysis, project_id)
+
+        response = client.post(
+            f"/projects/{project_id}/analysis/jobs/{job_id}/auto-promote"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(set(response.json()),
+                         {"auto_promotion_threshold", "promoted"})
+        self.assertEqual(len(response.json()["promoted"]), 2)
+
+    def test_unrelated_failure_is_not_relabelled_as_a_store_outage(self):
+        # Over-strict guard on the clause's *width*, and the reason the catch is
+        # a named type instead of ``Exception``: a bare catch would pass every
+        # other test in this class while reporting programming errors as 503
+        # "recover the store and retry" — pointing an operator at a healthy DB
+        # and hiding the bug. Only the storage types are a 503.
+        client, analysis, project_id = self._client_failing_on_the_second_put(
+            RuntimeError("not a storage transport failure")
+        )
+        job_id, _candidates = self._two_candidates_in_one_job(analysis, project_id)
+
+        with self.assertRaises(RuntimeError):
+            client.post(
+                f"/projects/{project_id}/analysis/jobs/{job_id}/auto-promote"
+            )
+
+    def _client_with_outbox_failing_on_the_second_enqueue(self, error):
+        # The *other* failure mode, and the one the shipped v1.7.35 regressions
+        # missed: a promotion is two writes (put_memory, then the reindex outbox)
+        # and only the second fails. The default test harness injects no outbox
+        # at all, which is exactly why this mode stayed invisible.
+        #
+        # The real IndexSyncOutboxService is used rather than a stub so the
+        # replay re-enqueue (v1.7.37) runs against real dedup: while an entry is
+        # PENDING a second enqueue for the same memory must collapse onto it.
+        # A stub that just appended would hide that and report false duplicates.
+        # The injected failure is transient — one enqueue fails, later ones work
+        # — because a permanent one cannot model the recovery being asserted.
+        class _FailingOnceOutbox(IndexSyncOutboxService):
+            def __init__(self, repo):
+                super().__init__(repo)
+                self.calls = 0
+                self.failed = False
+
+            def enqueue_memory_upserted(self, **kwargs):
+                self.calls += 1
+                if not self.failed and self.calls == 2:
+                    self.failed = True
+                    raise error
+                return super().enqueue_memory_upserted(**kwargs)
+
+        repo = InMemoryIndexSyncRepository()
+        service = MemoryService(
+            InMemoryMemoryRepository(),
+            auto_promotion_threshold=self.THRESHOLD,
+            reindex_outbox=_FailingOnceOutbox(repo),
+        )
+        client, analysis, project_id = _build(memory=service)
+        return client, analysis, project_id, repo
+
+    @staticmethod
+    def _reindexed_memory_ids(repo):
+        return sorted(
+            entry.source.mongo_id for entry in repo.outbox_entries.values()
+        )
+
+    @unittest.skipIf(_STORAGE_FAILURE is None, "pymongo is not installed")
+    def test_enqueue_failure_after_the_mint_still_reports_that_mint(self):
+        # The envelope's whole promise is that it agrees with the stored state.
+        # Here the candidate IS durably minted and only its reindex enqueue
+        # failed, so leaving it out of ``promoted`` would understate the mints by
+        # one and make the SoT claim false — which is what v1.7.35 shipped and an
+        # independent verification reproduced (F3).
+        client, analysis, project_id, _repo = (
+            self._client_with_outbox_failing_on_the_second_enqueue(
+                _STORAGE_FAILURE("outbox write lost mid-call")
+            )
+        )
+        job_id, candidates = self._two_candidates_in_one_job(analysis, project_id)
+
+        response = client.post(
+            f"/projects/{project_id}/analysis/jobs/{job_id}/auto-promote"
+        )
+
+        self.assertEqual(response.status_code, 503)
+        body = response.json()
+        reported = [m["source_candidate_id"] for m in body["promoted"]]
+        stored = [
+            m["source_candidate_id"]
+            for m in client.get(f"/projects/{project_id}/memory").json()["memory"]
+        ]
+        self.assertEqual(reported, [c.id for c in candidates])
+        self.assertEqual(reported, stored)
+
+    @unittest.skipIf(_STORAGE_FAILURE is None, "pymongo is not installed")
+    def test_promotion_error_names_the_stage_that_failed(self):
+        # Brief Follow-up #2. The two modes leave *different* states behind — one
+        # minted nothing for the failing candidate, the other minted it and lost
+        # only the reindex — and an operator reading the 503 body cannot tell
+        # which without being told. A bare str(exc) (v1.7.35) says neither.
+        failure = _STORAGE_FAILURE("connection lost")
+
+        client, analysis, project_id = self._client_failing_on_the_second_put(failure)
+        job_id, _ = self._two_candidates_in_one_job(analysis, project_id)
+        before_mint = client.post(
+            f"/projects/{project_id}/analysis/jobs/{job_id}/auto-promote"
+        ).json()["promotion_error"]
+
+        client, analysis, project_id, _repo = (
+            self._client_with_outbox_failing_on_the_second_enqueue(failure)
+        )
+        job_id, _ = self._two_candidates_in_one_job(analysis, project_id)
+        after_mint = client.post(
+            f"/projects/{project_id}/analysis/jobs/{job_id}/auto-promote"
+        ).json()["promotion_error"]
+
+        self.assertIn("was not minted by this call", before_mint)
+        self.assertIn("was minted", after_mint)
+        self.assertIn("reindex enqueue failed", after_mint)
+        self.assertNotEqual(before_mint, after_mint)
+
+    @unittest.skipIf(_STORAGE_FAILURE is None, "pymongo is not installed")
+    def test_retry_recovers_a_reindex_enqueue_lost_after_a_mint(self):
+        """Retry recovers the lost reindex — SoT v1.7.37, owner decision.
+
+        Until v1.7.36 this was the documented residue: a reindex enqueue lost
+        *after* its mint was never retried, because ``promote_candidate``
+        short-circuited an already-promoted candidate as an idempotent replay
+        before reaching ``_enqueue_reindex`` (v1.6.46 exempted replays). The
+        memory stayed canonical-but-unindexed until a backfill ran.
+
+        The owner took the fork: the replay now re-enqueues, so the choke point
+        is unconditional and the retry that the 503 body already told the
+        operator to run is what repairs the index too.
+
+        Under-strict: reverting the replay branch leaves the enqueue lost and
+        fails here. Over-strict: the retry must still not re-*promote* — the
+        recovered candidate is a replay, so ``promoted`` stays empty and no
+        second memory is minted.
+        """
+        client, analysis, project_id, repo = (
+            self._client_with_outbox_failing_on_the_second_enqueue(
+                _STORAGE_FAILURE("outbox write lost mid-call")
+            )
+        )
+        job_id, candidates = self._two_candidates_in_one_job(analysis, project_id)
+        path = f"/projects/{project_id}/analysis/jobs/{job_id}/auto-promote"
+
+        first = client.post(path)
+        retry = client.post(path)
+
+        self.assertEqual(first.status_code, 503)
+        # Both candidates are minted, so the retry finds nothing left to promote
+        # (over-strict: recovery must not mint a second memory or re-report one).
+        self.assertEqual(retry.status_code, 200)
+        self.assertEqual(retry.json()["promoted"], [])
+        stored = client.get(f"/projects/{project_id}/memory").json()["memory"]
+        self.assertEqual(len(stored), len(candidates))
+        # ...and the enqueue lost for the second mint is now recovered: every
+        # stored memory has had a reindex requested.
+        self.assertEqual(
+            self._reindexed_memory_ids(repo), sorted(m["id"] for m in stored)
+        )
+
+    def test_memory_not_found_mid_loop_is_404(self):
+        # D3. Unreachable through the HTTP surface today (the candidates come
+        # from list_candidates(project_id=...), so promote_candidate's project
+        # mismatch cannot fire), but the branch existed with no mapping, which is
+        # exactly the 500 leak this slice closes. Injected at the service seam
+        # because no request can produce it.
+        class _MissingMemoryService(MemoryService):
+            def auto_promote_candidate(self, *, project_id, candidate):
+                raise MemoryNotFound("analysis candidate not found")
+
+        service = _MissingMemoryService(
+            InMemoryMemoryRepository(),
+            auto_promotion_threshold=self.THRESHOLD,
+        )
+        client, analysis, project_id = _build(memory=service)
+        job_id, _candidates = self._two_candidates_in_one_job(analysis, project_id)
+
+        response = client.post(
+            f"/projects/{project_id}/analysis/jobs/{job_id}/auto-promote"
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(set(response.json()), {"detail"})
 
 
 class CandidateReviewApiTest(unittest.TestCase):
