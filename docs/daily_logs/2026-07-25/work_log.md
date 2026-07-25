@@ -146,3 +146,55 @@
 - **H2 — 브리프 헤더가 `Pending owner decision`.** 이미 C안 채택·구현·커밋됐으므로 `Approved` + 구현 버전으로 갱신했다.
 
 **검증**: 문서 전용 변경이라 §4 "Documentation-only" 기준. 코드·테스트 무변(`git diff --stat`이 문서 4개만), 따라서 회귀·`gen:api` 재실행 대상 없음. 인용한 파일 경로와 SoT 절 참조를 직독 확인했다.
+
+---
+
+## Task — 관측 증분 B: `writing_gate`를 seam C로 이행 (SoT v1.7.45)
+
+### Goals
+
+- v1.7.42가 endpoint 레벨로 만든 gate 계측을 seam C(provider 데코레이터)로 옮긴다. 검증자 권고대로 **B1 계약 정정을 끝낸 뒤** 착수해, 이행이 깨끗한 계약 위에서 이뤄지게 했다.
+- 성공 기준은 하나로 정했다: **이행 전후 gate 레코드 필드가 동일**할 것. 그래야 "seam을 바꿨을 뿐 관측 결과는 그대로"가 증명된다.
+
+### Completed work
+
+- **[`main.py`](../../../services/application/app/main.py) `_default_writing_gate_service`**: gate provider를 `ObservedProvider(..., call_site=WRITING_GATE)`로 감쌌다. 진단용 `provider` 주입 seam 안쪽을 감싸므로 operator diagnostic도 같은 구조를 탄다.
+- **gate endpoint 이행**: `_record_gate_call` 제거 → `llm_call_scope(correlation_id=body.request_id)` + `annotate_last`. 도메인 판정만 얹는다 — 성공 시 `decision`·`gate_quality_score`, `InvalidWritingGateResult` 시 `outcome=PARSE_ERROR`. model·tokens·latency·provider 실패는 데코레이터가 만든다.
+- **`evaluate_metered` 우회 제거**: `evaluate()`로 되돌렸다. metered 변형은 **endpoint가 토큰을 직접 읽어야 했기에** 쓴 것이고, 데코레이터가 provider 응답 usage를 읽는 지금은 목적이 사라졌다. 도메인의 `*_metered` API 자체는 loop 예산용이라 존치.
+- **§3 orphan 정리**: 이행으로 사용처가 0이 된 `_record_llm_call`·`MeteredCallError` import·`TokenUsage` import·`import time`을 제거했다. 전부 v1.7.42에서 내가 추가했다가 이번 이행으로 불필요해진 것들이다.
+- **테스트 하네스를 실 조립과 동형으로**: `WritingGateApiTest._client`가 provider를 `ObservedProvider`로 감싼다. 감싸지 않으면 **배포되지 않는 형태**를 테스트하게 된다.
+
+### Issues found — 회귀가 못 잡는 갭을 발견해 채웠다
+
+- **실 조립 경로의 계측은 아무 테스트도 잠그지 않고 있었다.** 모든 회귀가 하네스에서 `ObservedProvider`를 직접 만들기 때문에, `_default_*`가 감싸기를 빠뜨려도 전부 green이다. **실측으로 확인**: gate 조립에서 wrapper를 벗기고 돌렸더니 **56 passed**(무손상). 배포에서만 계측이 통째로 사라지는 갭이다.
+  - 증분 A의 extractor에도 같은 갭이 있었다(그때는 인지하지 못했다).
+  - **신규 회귀 2**로 채웠다 — gate는 **행동으로**(팩토리가 만든 서비스를 scope 안에서 호출 → 레코드 1건), extractor는 **구조로**(팩토리가 provider를 내부 생성해 fake를 넣을 seam이 없어 private 속성 확인. 그 이유를 주석에 명시).
+
+### Verification
+
+- **이행 무손실(핵심 기준)**: `tests/test_writing_gate.py` **44 passed / 41 subtests — 이행 전후 완전히 동일**. 응답 계약 37건과 관측 레코드 7건이 **한 건도 수정 없이** 통과했다. 즉 데코레이터가 endpoint 계측과 같은 값(model `fake-gate` · tokens 2 · decision · 파생점수)을 만든다. 특히 `test_parse_failure_records_the_tokens_that_were_really_spent`가 그대로 통과한 것이 중요하다 — 재분류가 `annotate_last`로 옮겨졌는데도 **소진 토큰이 보존**된다.
+- **mutation 4종** — 각각 해당 회귀만 물었다:
+
+  | 변이 | 물린 테스트 |
+  |---|---|
+  | gate 조립에서 `ObservedProvider` 제거 | 조립 가드(gate) 1건 |
+  | extractor 조립에서 `ObservedProvider` 제거 | 조립 가드(extractor) 1건 |
+  | `parse_error` 재분류 제거 | parse 회귀 1건 |
+  | `decision`/파생점수 annotate 제거 | 성공 필드 1 + decision 전수 5 subtest |
+
+- **회귀 전량**: **1499 passed / 4 skipped / 593 subtests**. 직전(v1.7.44) 1497/4/593 대비 **+2 passed** = 신규 조립 가드 2건과 정확히 일치. gate 회귀는 44→44 무변. 설명되지 않는 증감 0.
+- **공개 계약 무변**: `gen:api` 후 `openapi.json`·`schema.d.ts` no diff.
+
+### Decisions (구현자 판단)
+
+- **`analysis_extractor`는 `parse_error` 재분류를 하지 않는다** — 계약에 명문화했다. repair를 유발한 첫 응답은 **실패가 아니라 repair로 회수된** 호출이고, 오너가 보려는 지표는 실패율이 아니라 **repair 빈도**(= 한 `correlation_id`에 레코드 2건)다. 재분류하면 회수된 호출이 실패로 집계돼 성공률이 실제보다 낮게 나온다. 검증 H4가 "gate 이행 증분에서 함께 정하라"고 한 항목을 이렇게 결론지었다 — 훅을 쓸 수 있게 된 것과 **써야 하는 것**은 다르다.
+- **조립 가드의 검증 방식을 site마다 다르게 했다**: gate는 팩토리에 provider 주입 seam이 있어 행동으로 잠글 수 있고, extractor는 없어서 구조(private 속성)로 갔다. 일관성보다 각 팩토리에서 가능한 가장 강한 검증을 택했고 그 이유를 테스트에 적었다.
+
+### Next steps
+
+- **증분 C**: `compare_judge`(candidate당 1회 → N레코드) · `query_planner`(revise loop 내부) · `writing_generation`(reporter 붙으면 2회). 각각 조립 가드를 함께 넣는다.
+- **증분 5**: `GET …/observability/kpi` 집계 API. 집계 규칙 2개가 계약에 이미 고정돼 있다 — 토큰은 `success`+`parse_error`만, repair 빈도는 `correlation_id`당 레코드 수.
+
+### 부수 정정 — HANDOFF 정본 버전 표기 누락
+
+증분 B 중에 발견: HANDOFF "지금 상태"의 정본 버전이 **v1.7.43에 멈춰 있었다.** v1.7.44(문서 정합 슬라이스)에서 SoT 헤더·변경이력은 올렸으나 HANDOFF의 이 줄을 함께 갱신하지 않았다 — **계약 문서 정합을 고치는 슬라이스에서 정작 같은 종류의 누락을 남긴 것**이다. v1.7.45로 정정했다. 교훈은 앞 슬라이스 것과 같다: 버전을 올릴 때 그 버전을 참조하는 곳(SoT 헤더 · 변경이력 · HANDOFF)을 한 번에 훑어야 한다.

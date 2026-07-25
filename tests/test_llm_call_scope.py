@@ -368,3 +368,71 @@ class RunEndpointOpensAScopeTest(unittest.TestCase):
         self.assertEqual(client.post(path).status_code, 200)
 
         self.assertEqual(len(audit.list_calls(project_id)), 1)
+
+
+class DefaultAssemblyIsInstrumentedTest(unittest.TestCase):
+    """The deployed assembly, not the test harness.
+
+    Every other regression builds ``ObservedProvider`` itself, so
+    ``_default_*`` could stop wrapping its provider and they would all stay
+    green while the deployed app records nothing at all. Measured before adding
+    these: stripping the wrapper from the gate assembly left 56 tests passing.
+    """
+
+    def test_gate_assembly_instruments_the_provider_it_builds(self):
+        # Behavioural, not structural: build through the real factory (feeding
+        # it a fake provider the way the operator diagnostic does) and check a
+        # call through it actually lands in the audit.
+        import os  # noqa: PLC0415
+        from unittest import mock  # noqa: PLC0415
+
+        from services.application.app.main import (  # noqa: PLC0415
+            _default_writing_gate_service,
+        )
+        from tests.test_writing_gate import (  # noqa: PLC0415
+            _Provider as _GateProvider, _candidate, _package, _request,
+        )
+
+        with mock.patch.dict(os.environ, {"LLM_GATEWAY_BASE_URL": "http://gw"}):
+            service = _default_writing_gate_service(provider=_GateProvider())
+        audit = _audit()
+
+        async def run():
+            with llm_call_scope(audit, project_id="p1", correlation_id="wr1"):
+                await service.evaluate(request=_request(), candidate=_candidate(),
+                                       package=_package())
+
+        asyncio.run(run())
+        calls = audit.list_calls("p1")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].call_site, LlmCallSite.WRITING_GATE.value)
+
+    def test_extractor_assembly_instruments_the_provider_it_builds(self):
+        # Structural: this factory builds its provider internally, so there is
+        # no seam to feed a fake through. Reaching for the private attribute is
+        # the only way to assert the deployed graph is wrapped.
+        import os  # noqa: PLC0415
+        from unittest import mock  # noqa: PLC0415
+
+        from services.application.app.analysis.service import (  # noqa: PLC0415
+            AnalysisService, InMemoryAnalysisRepository,
+        )
+        from services.application.app.core_sot.service import (  # noqa: PLC0415
+            CoreSotService, InMemoryCoreSotRepository,
+        )
+        from services.application.app.main import (  # noqa: PLC0415
+            _default_analysis_runner,
+        )
+
+        with mock.patch.dict(os.environ, {"LLM_GATEWAY_BASE_URL": "http://gw"}):
+            core_sot = CoreSotService(InMemoryCoreSotRepository())
+            # The runner refuses to build without source validation, so the
+            # resolver has to be present for the factory to run at all.
+            runner = _default_analysis_runner(
+                core_sot=core_sot,
+                analysis=AnalysisService(InMemoryAnalysisRepository(),
+                                         source_ref_resolver=core_sot),
+            )
+        provider = runner._extractor._provider
+        self.assertIsInstance(provider, ObservedProvider)
+        self.assertEqual(provider._call_site, LlmCallSite.ANALYSIS_EXTRACTOR)

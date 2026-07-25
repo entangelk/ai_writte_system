@@ -31,6 +31,7 @@ from services.application.app.observability.llm_call_audit import (
     InMemoryLlmCallAuditRepository, LlmCallAuditService, LlmCallOutcome,
     LlmCallSite,
 )
+from services.application.app.observability.llm_call_scope import ObservedProvider
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
 from services.llm_gateway.app.provider import GenerationResult, TokenUsage
 
@@ -388,8 +389,13 @@ class WritingGateApiTest(unittest.TestCase):
                 context_error=None, llm_call_audit_service=None):
         templates = PromptTemplateService(InMemoryPromptTemplateRepository())
         seed_writing_gate_template(templates)
-        gate = (WritingGateService(provider or _Provider(), prompt_templates=templates)
-                if with_gate else None)
+        # Mirrors _default_writing_gate_service: the real assembly wraps the
+        # provider for observability (seam C), so a harness that skips the
+        # wrapper would test a shape that is never deployed.
+        gate = (WritingGateService(
+            ObservedProvider(provider or _Provider(),
+                             call_site=LlmCallSite.WRITING_GATE),
+            prompt_templates=templates) if with_gate else None)
         app = create_app(service=CoreSotService(InMemoryCoreSotRepository()),
             context_search_service=(_Context(error=context_error)
                                     if with_context else None),
