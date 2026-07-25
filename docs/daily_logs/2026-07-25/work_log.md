@@ -68,3 +68,68 @@
 - **H4 — 조치 없음.** "mutation 5종 중 2종은 직접 재현 대신 코드 리딩"은 검증 범위의 선택이고 lock 누락이 아니라는 검증자 판단에 동의한다.
 
 - **검증자와 측정 절대값이 다른 건**(검증 1409/80 vs 본 작업 1485/4) test-mongo 기동 여부 차이이고, **증분 +7 passed / +9 subtests는 양쪽에서 동일하게 성립**한다. 회귀 결함이 아니다.
+
+---
+
+## Task — 계측 seam 결정 브리프 + seam C 구현·`analysis_extractor` 계측 (SoT v1.7.43)
+
+### Goals
+
+- 증분 4의 잔여 호출부(generation → planner → compare → extractor)를 이어서 계측한다. 앞 슬라이스가 남긴 "각 서비스의 `*_metered` 변형 존재 확인이 선행" 지시부터 시작했다.
+
+### Issues found — 조사가 계획을 뒤집었다
+
+착수 전 실측에서 **gate가 예외였다**는 것이 드러났다. 잔여 4개 중 endpoint 레벨에서 "1 요청 = 1 LLM 호출"인 곳이 **하나도 없다**:
+
+| site | 실제 구조 | endpoint 계측 |
+|---|---|---|
+| `analysis_extractor` | [`extractor.py:129`](../../../services/application/app/analysis/extractor.py#L129) 본 호출 + [`:158`](../../../services/application/app/analysis/extractor.py#L158) `_repair_once` → **비-JSON 시 2회** | ✗ runner 내부 |
+| `compare_judge` | [`compare.py:147-151`](../../../services/application/app/analysis/compare.py#L147-L151) candidate 루프 → **N회** | ✗ 서비스 내부 |
+| `query_planner` | [`main.py:1888`](../../../services/application/app/main.py#L1888)에서 revise-gate에 주입 → **loop 내부** | ✗ |
+| `writing_generation` | endpoint 직접이나 **`generate_metered` 부재** + reporter 시 2회 | △ |
+
+- **결정적 사실**: `extractor`의 repair 재시도는 오너가 dogfood 관측 항목으로 명시한 지표다(HANDOFF "repair가 흡수 — 잦으면 repair 횟수/프롬프트 축 판단"). endpoint 레벨 계측으로는 **원리적으로 얻을 수 없다** — 실패한 첫 호출과 성공한 repair가 하나의 성공 응답 뒤에 가려진다.
+- 이건 남은 4 site 전부와 **이미 출하한 gate 계측까지** 구속하는 아키텍처 결정이라, 임의 선택 대신 §1 결정 브리프를 썼다: [`plans/observability-instrumentation-seam-decisions.md`](../../plans/observability-instrumentation-seam-decisions.md) (A endpoint 반복 / B 도메인 서비스 주입 / C provider 데코레이터 / D 하이브리드).
+
+### User Decisions and Rationale
+
+- **오너 결정: C (provider 데코레이터)**. `LLMProvider`가 단일 메서드 Protocol이라 감싸기 쉽고, **호출하는 행위가 곧 레코드를 만들어** 오계수가 구조적으로 불가능해진다. 도메인 코드 무변(§3)이고 새 호출부가 계측을 자동 상속한다.
+- 추천 시 **A안의 실익도 같은 무게로 적었다** — 지금 필요한 KPI가 D3=A 범위(카운트·성공률·게이트 판단정도)뿐이라면 정밀도는 과잉일 수 있고 A는 검증된 패턴의 반복이라 슬라이스당 위험이 가장 낮다. 오너는 repair 가시성을 우선했다.
+
+### Completed work
+
+- **착수 첫 단계 = `contextvars` 실측**(브리프 Follow-up이 지시한 선행 조건). FastAPI → 서비스 → provider async 경계에서 **동시 20요청 전파 20/20, cross-request 누출 0**, scope 밖 호출은 `None` 관측. 이게 실패했으면 설계를 바꿔야 했으므로 코드보다 먼저 쟀다.
+- **[`observability/llm_call_scope.py`](../../../services/application/app/observability/llm_call_scope.py) 신설**: `ObservedProvider`(모든 `generate()` = 레코드 1건) · `llm_call_scope` contextvar · `PendingLlmCall` · 지연 flush.
+  - **지연 flush가 `parse_error` 문제를 푼다**(브리프가 미결로 남긴 항목): provider는 자기가 답했다는 것만 알고 파싱 거부는 도메인 판정이다. 레코드를 scope에 모았다가 종료 시 쓰므로, 도메인이 write 전에 `annotate_last`로 판정을 얹을 수 있고 **레코드는 여전히 호출당 1건·append-only**다.
+  - **flush는 `finally`**: 요청이 중간에 실패해도 이미 일어난 호출은 실패율 KPI가 필요로 하는 바로 그 데이터다.
+  - **scope 밖 호출 미기록**: worker·script는 request 컨텍스트가 없다. 추측한 `project_id`로 남긴 레코드는 없느니만 못하고, 데코레이터가 audit을 알지 못하므로 이 성질은 **구조적으로 보장**된다.
+- **`analysis_extractor` 적용**: [`main.py`](../../../services/application/app/main.py) `_default_analysis_runner`의 provider를 `ObservedProvider(..., call_site=ANALYSIS_EXTRACTOR)`로 감싸고, `run_analysis_job`이 `llm_call_scope(correlation_id=job_id)`를 연다.
+- **회귀 신규 12** — [`tests/test_llm_call_scope.py`](../../../tests/test_llm_call_scope.py): N호출 N레코드(per-call 토큰/모델) · **실제 extractor의 repair가 2레코드**(seam C의 핵심 주장을 stand-in이 아닌 진짜 어댑터로) · repair 없을 때 1레코드(**over-strict** — 아니면 repair율이 100%로 부풀려진다) · provider 실패 기록 후 재-raise · 실패 시에도 flush · scope 밖 미기록(**over-strict**) · annotation이 방금 그 호출에만 적용 · 무호출 annotation no-op(**over-strict**) · 격리 · **동시 10 scope 비혼선** · endpoint 배선 2건.
+
+### Verification
+
+- **mutation 4종** — 각각 해당 회귀만 물었다:
+
+  | 변이 | 물린 테스트 |
+  |---|---|
+  | endpoint의 `with llm_call_scope(...)` 제거 | endpoint 배선 2건 |
+  | flush를 `finally` → 성공 시만 | 실패 flush 1건 |
+  | `annotate_last`를 전체 호출에 적용 | annotation 대상 1건 |
+  | `scope is None` 가드 제거 | scope 밖 1건 |
+
+- **mutation 하나가 성립하지 않았고, 그게 설계의 성질이었다**: "scope 밖에서도 기록하도록" 바꾸려 했으나 **`ObservedProvider`가 audit을 알지 못해 기록할 수단 자체가 없다.** 테스트가 헐거운 것이 아니라 구조가 그 실수를 불가능하게 만든 것이라, mutation을 "가드 제거"로 바꿔 실증했다.
+- **회귀 전량**: **1497 passed / 4 skipped / 593 subtests**. 직전(v1.7.42 커밋) 1485/4/593 대비 **+12 passed** = 신규 12건과 정확히 일치, subtest 무변(신규 테스트는 `subTest` 미사용). 설명되지 않는 증감 0.
+- **공개 계약 무변**: `responses=`·response_model 무변경 → `gen:api` 후 `openapi.json`·`schema.d.ts` no diff 실측.
+- **endpoint 배선을 별도로 잠근 이유**: scope 유닛 테스트만으로는 `with llm_call_scope(...)`를 지워도 전부 green이다. 그 갭을 확인하고 배선 회귀 2건을 추가했으며, mutation으로 실제로 물리는 것을 확인했다.
+
+### Decisions (구현자 판단)
+
+- **gate(v1.7.42)는 이번에 이행하지 않았다.** endpoint 레벨 계측이 그대로 남아 있고 seam C와 **두 계층이 공존**한다. 한 슬라이스에서 seam 도입과 기존 계측 이행을 함께 하면 회귀가 "새 seam이 맞는가"와 "이행이 무손실인가"를 구분하지 못한다. 이행은 다음 증분이며, **그때까지 gate 레코드는 중복이 아니라 단일**이다(gate provider는 아직 감싸지 않았다).
+- **`correlation_id`를 job_id로 잡았다**: 한 job을 실행하며 일어난 모든 호출(본 호출 + repair)이 하나로 묶여야 repair율이 job 단위로 계산된다.
+- **replay 경로는 scope 밖에 뒀다**: 이미 끝난 job을 다시 POST하면 early-return이라 provider를 안 부른다. over-strict 회귀로 잠갔다 — 아니면 재-POST마다 호출 수가 늘어난다.
+
+### Next steps
+
+- **증분 B**: gate를 seam C로 이행(endpoint 계측 제거 → `ObservedProvider` + `annotate_last`로 decision·파생점수). 이행 전후 gate 레코드 필드가 동일해야 한다.
+- **증분 C**: `compare_judge`(N회) · `query_planner`(loop 내부) · `writing_generation`(reporter 2차 호출) 적용.
+- **증분 5**: `GET …/observability/kpi` 집계 API. seam 확정으로 집계 대상 레코드의 밀도가 정해졌다.

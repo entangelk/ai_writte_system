@@ -139,6 +139,10 @@ from services.application.app.observability.llm_call_audit import (
     LlmCallSite,
     gate_quality_score,
 )
+from services.application.app.observability.llm_call_scope import (
+    ObservedProvider,
+    llm_call_scope,
+)
 from services.application.app.writing.scratch import (
     MAX_SCRATCH_PER_DRAFT,
     InMemoryWritingScratchRepository,
@@ -595,10 +599,13 @@ def _default_analysis_runner(
     if not base_url:
         return None
     prompt_templates = _default_prompt_template_service()
-    provider = GatewayGenerateProvider(
-        base_url=base_url,
-        timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
-        trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False),
+    provider = ObservedProvider(
+        GatewayGenerateProvider(
+            base_url=base_url,
+            timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
+            trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False),
+        ),
+        call_site=LlmCallSite.ANALYSIS_EXTRACTOR,
     )
     return AnalysisExtractionRunner(
         analysis_service=analysis,
@@ -2599,10 +2606,16 @@ def create_app(
                     status_code=503,
                     detail="analysis runner is not configured",
                 )
-            result = await runner.run_job(
-                project_id=project_id,
-                job_id=job_id,
-            )
+            # Observability seam C: the extractor's provider is wrapped, so the
+            # repair retry (extractor.py `_repair_once`) lands as its own record
+            # instead of hiding behind this one endpoint call. correlation_id is
+            # the job — every call made while running it belongs together.
+            with llm_call_scope(llm_call_audit, project_id=project_id,
+                                correlation_id=job_id):
+                result = await runner.run_job(
+                    project_id=project_id,
+                    job_id=job_id,
+                )
         except (AnalysisNotFound, NotFound) as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except DuplicateAnalysisCandidateRequest as exc:
