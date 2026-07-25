@@ -27,8 +27,17 @@ from services.application.app.writing.models import (
     WritingOutputType, WritingRequest, WritingTaskType,
 )
 from services.application.app.writing.metering import MeteredCallError
+from services.application.app.observability.llm_call_audit import (
+    InMemoryLlmCallAuditRepository, LlmCallAuditService, LlmCallOutcome,
+    LlmCallSite,
+)
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
 from services.llm_gateway.app.provider import GenerationResult, TokenUsage
+
+try:  # pymongo is optional for the in-memory path
+    from pymongo.errors import AutoReconnect as _STORAGE_FAILURE
+except ModuleNotFoundError:  # pragma: no cover - the driver is present in CI
+    _STORAGE_FAILURE = None
 
 
 def _package(project_id="p1", *, constraints=(), do_not_use=()):
@@ -376,7 +385,7 @@ class _Context:
 
 class WritingGateApiTest(unittest.TestCase):
     def _client(self, provider=None, *, with_context=True, with_gate=True,
-                context_error=None):
+                context_error=None, llm_call_audit_service=None):
         templates = PromptTemplateService(InMemoryPromptTemplateRepository())
         seed_writing_gate_template(templates)
         gate = (WritingGateService(provider or _Provider(), prompt_templates=templates)
@@ -384,7 +393,8 @@ class WritingGateApiTest(unittest.TestCase):
         app = create_app(service=CoreSotService(InMemoryCoreSotRepository()),
             context_search_service=(_Context(error=context_error)
                                     if with_context else None),
-            writing_gate_service=gate)
+            writing_gate_service=gate,
+            llm_call_audit_service=llm_call_audit_service)
         async def setup():
             transport = httpx.ASGITransport(app=app)
             client = httpx.AsyncClient(transport=transport, base_url="http://test")
@@ -479,4 +489,161 @@ class WritingGateEnvelopeKeyTest(unittest.TestCase):
         self.assertEqual(set(body["findings"][0]), {
             "type", "severity", "message", "evidence", "recommended_decision",
         })
+        asyncio.run(client.aclose())
+
+
+class _FailingAuditRepository:
+    """Audit store that is down. ``list_for_project`` still answers so a test
+    can prove nothing was recorded rather than that the read also blew up."""
+
+    def __init__(self, error=None):
+        self.error = error or RuntimeError("llm call audit store is down")
+        self.attempts = 0
+
+    def add(self, call):
+        self.attempts += 1
+        raise self.error
+
+    def list_for_project(self, project_id):
+        return ()
+
+
+class WritingGateObservabilityTest(unittest.TestCase):
+    """Observability KPI 증분 4 — the ``writing_gate`` call site.
+
+    SoT §"LLM 파이프라인 관측(KPI)": every LLM call leaves one append-only
+    record, and the record is isolated from the request hot path.
+    """
+
+    def _client(self, provider=None, *, repository=None, **kwargs):
+        repo = repository if repository is not None else InMemoryLlmCallAuditRepository()
+        audit = LlmCallAuditService(repo)
+        client, project = WritingGateApiTest()._client(
+            provider, llm_call_audit_service=audit, **kwargs)
+        return client, project, audit
+
+    def _post(self, client, project, **overrides):
+        return WritingGateApiTest()._post(client, project, **overrides)
+
+    def test_successful_gate_call_is_recorded_with_its_derived_quality_score(self):
+        # Under-strict guard: drop the success record and this fails. Pins every
+        # field the KPI aggregation (증분 5) reads, not just that "a row exists".
+        client, project, audit = self._client(_Provider(_output(
+            "revise", [_finding(recommendation="revise")])))
+        self.assertEqual(self._post(client, project).status_code, 200)
+        calls = audit.list_calls(project)
+        self.assertEqual(len(calls), 1)
+        call = calls[0]
+        self.assertEqual(call.call_site, LlmCallSite.WRITING_GATE.value)
+        self.assertEqual(call.outcome, LlmCallOutcome.SUCCESS.value)
+        # The workflow tie-back the KPI groups by: the writing request_id.
+        self.assertEqual(call.correlation_id, "wr1")
+        self.assertEqual(call.project_id, project)
+        self.assertEqual(call.model, "fake-gate")
+        self.assertEqual(call.decision, WritingGateDecision.REVISE.value)
+        self.assertEqual(call.gate_quality_score, 0.3)
+        # _Provider bills TokenUsage(1, 1); a plain ``evaluate`` call would have
+        # discarded this and left 0, which is what the metered form is here for.
+        self.assertEqual(call.total_tokens, 2)
+        self.assertGreaterEqual(call.latency_ms, 0)
+        self.assertIsNone(call.error_type)
+        asyncio.run(client.aclose())
+
+    def test_every_gate_decision_records_its_contract_score(self):
+        # The score literals are contract (SoT §관측 KPI). Parametrized over the
+        # whole decision enum so a new decision without a mapping bites here.
+        expected = {"pass": 1.0, "needs_user_review": 0.6, "retrieve_more": 0.5,
+                    "revise": 0.3, "block": 0.0}
+        self.assertEqual(set(expected),
+                         {d.value for d in WritingGateDecision})
+        for literal, score in expected.items():
+            with self.subTest(decision=literal):
+                findings = ([] if literal == "pass"
+                            else [_finding(recommendation=literal)])
+                client, project, audit = self._client(
+                    _Provider(_output(literal, findings)))
+                self.assertEqual(self._post(client, project).status_code, 200)
+                call = audit.list_calls(project)[0]
+                self.assertEqual(call.decision, literal)
+                self.assertEqual(call.gate_quality_score, score)
+                asyncio.run(client.aclose())
+
+    def test_provider_failure_is_recorded_and_keeps_its_status(self):
+        # A failed call is still a call. Recording only successes would make the
+        # 증분 5 success/failure rate a constant 100%.
+        for code, expected in ((ProviderErrorCode.TIMEOUT, 504),
+                               (ProviderErrorCode.UNAVAILABLE, 502)):
+            with self.subTest(code=code.value):
+                client, project, audit = self._client(_Provider(
+                    error=ProviderError(code=code, message="down",
+                                        retryable=True, provider="gateway")))
+                self.assertEqual(self._post(client, project).status_code, expected)
+                call = audit.list_calls(project)[0]
+                self.assertEqual(call.outcome, LlmCallOutcome.PROVIDER_ERROR.value)
+                # The provider taxonomy is preserved, not flattened to "error".
+                self.assertEqual(call.error_type, code.value)
+                self.assertIsNone(call.decision)
+                self.assertIsNone(call.gate_quality_score)
+                self.assertEqual(call.total_tokens, 0)
+                asyncio.run(client.aclose())
+
+    def test_parse_failure_records_the_tokens_that_were_really_spent(self):
+        # The provider answered and domain parsing rejected it: the tokens were
+        # burned. This is the case ``evaluate`` throws away and ``evaluate_metered``
+        # carries on MeteredCallError.
+        client, project, audit = self._client(_Provider("bad"))
+        self.assertEqual(self._post(client, project).status_code, 502)
+        call = audit.list_calls(project)[0]
+        self.assertEqual(call.outcome, LlmCallOutcome.PARSE_ERROR.value)
+        self.assertEqual(call.error_type, "InvalidWritingGateResult")
+        self.assertEqual(call.total_tokens, 2)
+        self.assertIsNone(call.gate_quality_score)
+        asyncio.run(client.aclose())
+
+    def test_rejections_before_the_provider_is_called_record_nothing(self):
+        # Over-strict guard. Every one of these fails before the gate provider
+        # runs, so recording them would inflate the call count and corrupt every
+        # rate derived from it.
+        cases = (
+            ("context_search_failed",
+             dict(context_error=ContextSearchFailed(
+                 ContextSearchErrorType.BACKEND_ERROR, "es down")), 502),
+            ("context_budget_exceeded",
+             dict(context_error=ContextSearchBudgetExceeded("over budget")), 504),
+        )
+        for name, kwargs, expected in cases:
+            with self.subTest(case=name):
+                client, project, audit = self._client(**kwargs)
+                self.assertEqual(self._post(client, project).status_code, expected)
+                self.assertEqual(audit.list_calls(project), ())
+                asyncio.run(client.aclose())
+        # Bad task_type is rejected at the request boundary, likewise pre-call.
+        client, project, audit = self._client()
+        self.assertEqual(
+            self._post(client, project, task_type="nope").status_code, 400)
+        self.assertEqual(audit.list_calls(project), ())
+        asyncio.run(client.aclose())
+
+    def test_audit_write_failure_does_not_break_the_gate_response(self):
+        # SoT §관측 KPI 격리 조항, under-strict direction: observing a request
+        # must never be able to fail it.
+        repo = _FailingAuditRepository()
+        client, project, _ = self._client(repository=repo)
+        response = self._post(client, project)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["decision"], "pass")
+        self.assertEqual(repo.attempts, 1)
+        asyncio.run(client.aclose())
+
+    @unittest.skipIf(_STORAGE_FAILURE is None, "pymongo not installed")
+    def test_audit_storage_failure_does_not_surface_as_a_503(self):
+        # Over-strict guard against the specific way this could regress: the
+        # app-wide storage handler (SoT v1.7.38) turns any escaping pymongo
+        # error into a 503, so a narrower isolation boundary here would convert
+        # a perfectly good 200 into "canonical store is down".
+        repo = _FailingAuditRepository(_STORAGE_FAILURE("audit mongo unreachable"))
+        client, project, _ = self._client(repository=repo)
+        response = self._post(client, project)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(repo.attempts, 1)
         asyncio.run(client.aclose())

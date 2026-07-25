@@ -8,10 +8,11 @@
 
 ## 지금 상태
 
-- 정본은 `docs/system-contract-sot.md` **v1.7.41**(Approved). 미확정 항목은 추측 구현하지 않는다.
-- **진행 중 페이즈 — LLM 파이프라인 관측(KPI)**(브리프 `plans/observability-kpi-decisions.md` 승인 D1=B·D2=C·D3=A). 기반 증분 1~3 완료(통합 `llm_call_audits` per-call 레코드·게이트 파생 품질점수·Mongo 어댑터, 신규 회귀 16, **아직 미와이어**). **다음: 증분4** = `create_app` 와이어링 + `/writing/gate`부터 호출부 계측(감사 write는 hot-path 격리 — 응답 못 깨게), 이어 generation·planner·compare·extractor. 증분5 = `GET …/observability/kpi` 집계 API + H3 에러 선언. 운영기획 포트폴리오 정리는 `docs/observability-kpi-rationale.md`. QUAL-1(제품 품질·수기·dogfood)과 별개 트랙.
+- 정본은 `docs/system-contract-sot.md` **v1.7.42**(Approved). 미확정 항목은 추측 구현하지 않는다.
+- **진행 중 페이즈 — LLM 파이프라인 관측(KPI)**(브리프 `plans/observability-kpi-decisions.md` 승인 D1=B·D2=C·D3=A). `llm_call_audits` per-call 레코드가 `create_app`에 와이어링돼 있고 **계측된 호출부는 `writing_gate` 하나**다. **다음: 나머지 호출부 계측**(generation → planner → compare → extractor), 이어 증분5 = `GET …/observability/kpi` 집계 API + H3 에러 선언. 운영기획 포트폴리오 정리는 `docs/observability-kpi-rationale.md`. QUAL-1(제품 품질·수기·dogfood)과 별개 트랙.
+- **호출부를 계측할 때 지켜야 하는 것**(SoT §"LLM 파이프라인 관측(KPI)", v1.7.42가 계약화): ① 레코드는 **provider가 실제로 호출된 경우에만** — 호출 전 거부(입력검증·context 실패·budget 초과)를 세면 파생 비율이 전부 틀어진다. ② **실패한 호출은 반드시 센다**(성공만 세면 성공률이 영구히 100%). ③ 토큰은 도메인 서비스의 **`*_metered` 변형**에서 얻는다 — 평범한 변형은 usage를 버려 `total_tokens`가 0이 된다. ④ 감사 write는 `_record_llm_call` 한 곳에서만 격리하고 **그 `except`를 좁히지 않는다** — 좁히면 감사 저장소의 pymongo 예외가 전역 handler(v1.7.38)에 도달해 **정상 200이 503으로 뒤집힌다**.
 - 공개 API 계약(H3)은 닫혀 있다: **`/health`를 제외한 60개 operation 전부**가 realistic 에러 상태를 OpenAPI에 선언하고 **미매핑 500 부채는 0건**이다. 새 endpoint를 추가하면 **`responses=`도 함께** 붙여야 하며, 트랙별 전수 선언 가드 테스트가 빠뜨림을 잡는다. 저장소 장애 503 face는 이제 **예외 없이 전 endpoint 균일**하다 — v1.7.40이 마지막 두 잔여(광의 catch가 pymongo를 삼켜 502로 내던 곳)를 닫았다: `POST …/analysis/jobs/{id}/run`과 `POST …/context-search`의 `persist_rejection`. 둘 다 광의 catch 앞에 `except _STORAGE_ERRORS`를 두어 저장소 예외를 503으로 보낸다. **주의**: 앞으로 endpoint body를 광의 `except Exception`으로 감싸면 그 순간 저장소 예외가 다시 502/도메인 에러로 새므로, 그런 catch를 둘 때는 반드시 그 앞에 `except _STORAGE_ERRORS`를 둔다.
-- 회귀 기준선: backend **1471 passed / 1 skipped / 579 subtests**(test-mongo 기동 시, 이 머신 실측 ~10분), frontend **194 passed / 13 files**, build JS 399.03 kB.
+- 회귀 기준선: backend **1485 passed / 593 subtests**(test-mongo 기동), frontend **194 passed / 13 files**, build JS 399.03 kB. **skip 수는 머신마다 다르다** — live Chroma 1건은 항상 skip이고, `elasticsearch` 파이썬 패키지가 없는 머신에서는 lexical retrieval 3건이 추가로 skip된다(2026-07-25 이 머신 = 4 skipped). 숫자가 안 맞으면 회귀를 의심하기 전에 skip 사유부터 `-rs`로 확인할 것.
 - **이 머신, 2026-07-24 기준 스택은 사실상 내려가 있다**: `application`·`gateway`·`mongo`·`elasticsearch`·`embedding`·`chroma`·`test-mongo`가 `Exited`, `frontend`와 두 worker만 떠 있다(worker는 의존 서비스가 없어 무의미하게 도는 중). 기동은 오너 몫.
 - **현존 컨테이너는 전부 구 정의로 만들어졌다** — 옛 포트(`27019`/`8000`/`9200`…)와 `ulimits` 없는 상태다. `docker compose up`이 새 정의로 재생성하므로 별도 조치는 필요 없다.
 

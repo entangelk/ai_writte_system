@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Annotated, Protocol, Union
 
 from fastapi import FastAPI, HTTPException, Query
@@ -117,6 +118,7 @@ from services.application.app.writing.accept import (
     WritingAcceptService,
 )
 from services.application.app.writing.context_pointer import pointer_wire
+from services.application.app.writing.metering import MeteredCallError
 from services.application.app.writing.report import (
     InvalidCandidateReport, WritingCandidateReportService, seed_report_template,
 )
@@ -129,6 +131,13 @@ from services.application.app.writing.loop_audit import (
     InMemoryWritingLoopAuditRepository,
     WritingLoopAuditNotFound,
     WritingLoopAuditService,
+)
+from services.application.app.observability.llm_call_audit import (
+    InMemoryLlmCallAuditRepository,
+    LlmCallAuditService,
+    LlmCallOutcome,
+    LlmCallSite,
+    gate_quality_score,
 )
 from services.application.app.writing.scratch import (
     MAX_SCRATCH_PER_DRAFT,
@@ -162,7 +171,7 @@ from services.application.app.writing.http_models import (
 )
 from services.application.app.analysis.source import CoreSotSourceAdapter
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
-from services.llm_gateway.app.provider import LLMProvider
+from services.llm_gateway.app.provider import LLMProvider, TokenUsage
 from services.application.app.memory.models import PromotionMode
 from services.application.app.memory.service import (
     InMemoryMemoryRepository,
@@ -417,6 +426,23 @@ def _default_writing_loop_audit_service() -> WritingLoopAuditService:
     )
     from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
     return WritingLoopAuditService(MongoWritingLoopAuditRepository.from_uri(
+        uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
+    ))
+
+
+def _default_llm_call_audit_service() -> LlmCallAuditService:
+    # Observability KPI phase (SoT §"LLM 파이프라인 관측(KPI)"). Always available
+    # (in-memory default) for the same reason the loop audit is: a call site that
+    # only records when infra happens to be configured produces a KPI that
+    # silently undercounts. A Mongo URI upgrades it to the durable adapter.
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if not uri:
+        return LlmCallAuditService(InMemoryLlmCallAuditRepository())
+    from services.application.app.observability.llm_call_audit_mongo import (
+        MongoLlmCallAuditRepository,
+    )
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+    return LlmCallAuditService(MongoLlmCallAuditRepository.from_uri(
         uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
     ))
 
@@ -1673,6 +1699,7 @@ def create_app(
     writing_retrieval_planner: TerminalJsonWritingRetrievalPlanner | None = None,
     writing_loop_policy: WritingLoopPolicy | None = None,
     writing_loop_audit_service: WritingLoopAuditService | None = None,
+    llm_call_audit_service: LlmCallAuditService | None = None,
     writing_scratch_service: WritingScratchService | None = None,
     writing_generation_job_service: WritingGenerationJobService | None = None,
     vector_index: InMemoryVectorIndexAdapter | None = None,
@@ -1763,6 +1790,22 @@ def create_app(
     writing_loop_audit = (
         writing_loop_audit_service or _default_writing_loop_audit_service()
     )
+    # Observability KPI phase, 증분 4: the per-LLM-call audit trail the KPI
+    # aggregation reads. Unlike the loop audit it is not opt-in — a KPI that only
+    # counts when someone remembered to ask for it is not a measurement.
+    llm_call_audit = llm_call_audit_service or _default_llm_call_audit_service()
+
+    def _record_llm_call(**fields: object) -> None:
+        # SoT §"LLM 파이프라인 관측(KPI)" 격리 조항, enforced in exactly one place
+        # so no call site can get it wrong: observing a request must never be
+        # able to fail it. The broad except is the isolation boundary itself
+        # (the `_record_loop_audit` precedent) — an audit write failing for any
+        # reason leaves the original response untouched, and this is deliberately
+        # *not* a place where a storage error should reach the global 503 handler.
+        try:
+            llm_call_audit.record(**fields)  # type: ignore[arg-type]
+        except Exception:  # noqa: BLE001 — deliberate isolation boundary
+            return
     # Unaccepted-candidate recovery store (brief D0=B/D1=B/D2=A). Always
     # available (in-memory default) so generate can always leave a safety net.
     writing_scratch = (
@@ -3724,14 +3767,31 @@ def create_app(
             task_type=task_type, output_type=WritingOutputType.DRAFT_PATCH,
             text=body.candidate_text,
         )
+
+        def _record_gate_call(*, outcome: LlmCallOutcome, model: str | None = None,
+                              decision: str | None = None,
+                              quality: float | None = None,
+                              usage: TokenUsage | None = None,
+                              started: float, error_type: str | None = None) -> None:
+            # Observability KPI 증분 4: this is the writing_gate call site. Only
+            # called once the provider has actually answered — the pre-call
+            # rejections (bad task_type, invalid search request, context budget,
+            # context-search failure) never produce a record, because counting a
+            # call that never happened would make every rate derived from these
+            # records wrong.
+            _record_llm_call(
+                project_id=project_id, call_site=LlmCallSite.WRITING_GATE,
+                correlation_id=body.request_id, outcome=outcome, model=model,
+                decision=decision, gate_quality_score=quality,
+                total_tokens=usage.total_tokens if usage is not None else 0,
+                latency_ms=int((time.perf_counter() - started) * 1000),
+                error_type=error_type,
+            )
+
         try:
             package = await context_search.build_context_package(search_request)
-            result = await writing_gate.evaluate(
-                request=request, candidate=candidate, package=package)
-        except (WritingGateError, InvalidContextSearchRequest) as exc:
+        except InvalidContextSearchRequest as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except InvalidWritingGateResult as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
         except ContextSearchBudgetExceeded as exc:
             raise HTTPException(status_code=504, detail=str(exc)) from exc
         except ContextSearchFailed as exc:
@@ -3739,9 +3799,35 @@ def create_app(
                 status_code=502,
                 detail=f"{exc.error_type.value}: {exc.detail}",
             ) from exc
+        # evaluate_metered rather than evaluate: the contract records
+        # total_tokens, and the plain evaluate() wrapper discards the usage its
+        # metered form returns. The MeteredCallError unwrap below reproduces
+        # exactly what that wrapper does, so the responses are unchanged.
+        started = time.perf_counter()
+        try:
+            result, usage = await writing_gate.evaluate_metered(
+                request=request, candidate=candidate, package=package)
+        except MeteredCallError as exc:
+            # The provider answered and domain parsing rejected it, so the tokens
+            # were really spent — this is the one failure whose usage is known.
+            _record_gate_call(outcome=LlmCallOutcome.PARSE_ERROR, usage=exc.usage,
+                              started=started,
+                              error_type=type(exc.cause).__name__)
+            raise HTTPException(status_code=502, detail=str(exc.cause)) from exc
+        except WritingGateError as exc:
+            # Input validation and an unavailable prompt template, both raised
+            # before the provider is called — so no record, per the contract.
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except ProviderError as exc:
+            _record_gate_call(outcome=LlmCallOutcome.PROVIDER_ERROR,
+                              started=started, error_type=exc.code.value)
             status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
             raise HTTPException(status_code=status, detail=str(exc)) from exc
+        _record_gate_call(outcome=LlmCallOutcome.SUCCESS,
+                          model=result.evaluated_by_model,
+                          decision=result.decision.value,
+                          quality=gate_quality_score(result),
+                          usage=usage, started=started)
         return _writing_gate_payload(result)
 
     @app.post("/projects/{project_id}/writing/report",
