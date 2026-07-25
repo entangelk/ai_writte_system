@@ -173,7 +173,7 @@
 ### Verification
 
 - **이행 무손실(핵심 기준)**: `tests/test_writing_gate.py` **44 passed / 41 subtests — 이행 전후 완전히 동일**. 응답 계약 37건과 관측 레코드 7건이 **한 건도 수정 없이** 통과했다. 즉 데코레이터가 endpoint 계측과 같은 값(model `fake-gate` · tokens 2 · decision · 파생점수)을 만든다. 특히 `test_parse_failure_records_the_tokens_that_were_really_spent`가 그대로 통과한 것이 중요하다 — 재분류가 `annotate_last`로 옮겨졌는데도 **소진 토큰이 보존**된다.
-- **mutation 4종** — 각각 해당 회귀만 물었다:
+- **mutation 4종** — 각각 해당 회귀군만 물었다(앞 3종은 정확히 1건씩, 마지막은 같은 필드를 검사하는 6건):
 
   | 변이 | 물린 테스트 |
   |---|---|
@@ -198,3 +198,17 @@
 ### 부수 정정 — HANDOFF 정본 버전 표기 누락
 
 증분 B 중에 발견: HANDOFF "지금 상태"의 정본 버전이 **v1.7.43에 멈춰 있었다.** v1.7.44(문서 정합 슬라이스)에서 SoT 헤더·변경이력은 올렸으나 HANDOFF의 이 줄을 함께 갱신하지 않았다 — **계약 문서 정합을 고치는 슬라이스에서 정작 같은 종류의 누락을 남긴 것**이다. v1.7.45로 정정했다. 교훈은 앞 슬라이스 것과 같다: 버전을 올릴 때 그 버전을 참조하는 곳(SoT 헤더 · 변경이력 · HANDOFF)을 한 번에 훑어야 한다.
+
+### 독립 검증 반영 — outcome 범위 본문 명시 + mutation 보고 정정 (SoT v1.7.46)
+
+증분 B에 대한 독립 검증(`docs/verifications/2026-07-25/observability_kpi_gate_migration.md`)이 **합격(조건 없음)**. 차단 사유 없이 비차단 2건만 나왔고 둘 다 닫았다.
+
+- **H1 — site별 `outcome` 범위를 본문에 직접 명시.** extractor가 `success`/`provider_error` **둘만** 낸다는 사실이 v1.7.44 변경이력에만 있고 본문 "계측된 호출부" 항목에는 없었다. 즉 증분 5(집계 API)가 그 범위를 알려면 "계측된 호출부"와 "`parse_error` 재분류" **두 조항을 연결해야** 했다 — 집계가 site별 실패율을 낼 때 분모·분자 해석이 걸린 지점이라 한 곳에서 보이게 했다. 각 site 줄에 낼 수 있는 outcome을 적고, **extractor의 `parse_error`=0은 구조적 사실이지 데이터 부족이 아님**을 명시했다(gate는 셋 다 낸다).
+- **H2 — mutation 보고 정확성 정정(내 서술 오류).** v1.7.45의 "mutation 4종이 각각 해당 회귀만 물림"은 **엄격 1:1이 아니었다.** 앞 3종은 정확히 1건씩이지만, decision/파생점수 annotate 제거는 그 필드를 검사하는 **6건**(성공 필드 1 + decision 전수 5 subtest)을 함께 문다. work_log 표에는 그 숫자가 정확히 적혀 있었으나 요약 문장이 "각각 1건"으로 뭉뚱그렸다. SoT 변경이력과 이 로그의 문장을 "**회귀군**"으로 정정했다. 물리는 범위가 넓은 것 자체는 결함이 아니다 — 핵심 필드라 중복 보호되는 것이고, 문제는 **보고가 실제보다 정밀해 보이게 쓴 것**이다.
+
+**검증**: 문서 전용 변경(`git diff --stat`이 문서 3개). 코드·테스트 무변이라 회귀·`gen:api` 재실행 대상 없음.
+
+### Next steps (증분 C 착수 조건)
+
+- 검증자 권고대로 **H1을 증분 5 착수 전에** 닫았으므로, 집계 API는 site별 outcome 범위를 본문 한 곳에서 읽는다.
+- 증분 C(`compare_judge`·`query_planner`·`writing_generation`)는 각 site의 outcome 범위도 **계측과 동시에 본문에 적는다** — 이번 H1이 "나중에 적으면 연결해서 읽어야 한다"를 보여줬다.
