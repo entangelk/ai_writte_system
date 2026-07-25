@@ -133,3 +133,16 @@
 - **증분 B**: gate를 seam C로 이행(endpoint 계측 제거 → `ObservedProvider` + `annotate_last`로 decision·파생점수). 이행 전후 gate 레코드 필드가 동일해야 한다.
 - **증분 C**: `compare_judge`(N회) · `query_planner`(loop 내부) · `writing_generation`(reporter 2차 호출) 적용.
 - **증분 5**: `GET …/observability/kpi` 집계 API. seam 확정으로 집계 대상 레코드의 밀도가 정해졌다.
+
+### 독립 검증 반영 — 계약 자기 모순 해소 (SoT v1.7.44)
+
+오너 요청 독립 검증(`docs/verifications/2026-07-25/observability_kpi_seam_extractor.md`, **조건부 합격**). 구현·회귀·공개계약·mutation은 합격이고 **차단 사유 1건 + 비차단 4건**이 나왔다. 전부 처리했다.
+
+- **B1(차단) — SoT 관측 절이 자기 자신과 모순.** 재도출로 확정했고 **원인은 내 편집 실수였다**: v1.7.43 갱신에서 "계측된 호출부" 문장의 **앞부분만 `Edit`의 `old_string`으로 잡아** 교체하고 v1.7.42의 꼬리를 남겼다. 결과적으로 같은 줄이 `analysis_extractor`를 **"seam C로 계측됨"과 "후속 증분"으로 동시에** 서술했다. 계측/미계측을 하위 항목으로 분리하고 잔재 문장을 삭제했다. **왜 차단인지**: 다음 증분(집계 API)이 이 문단을 읽고 잘못된 범위를 가정하면, 집계가 extractor 레코드를 "아직 없을 것"으로 다룰 수 있다.
+  - 같은 지적에 포함된 **`*_metered` 서술의 범위 오류**도 함께 고쳤다. 그 우회는 **gate endpoint 경로 전용**인데 전역 규칙처럼 읽혔다 — seam C에서는 데코레이터가 provider 응답의 usage를 직접 읽으므로 필요 없다.
+- **H4 → 신규 계약 조항으로 승격**(검증자는 비차단으로 분류했으나 계약 공백이라 판단): `annotate_last` 훅이 **아직 어느 seam C 호출부에서도 쓰이지 않으므로**, extractor에서 도메인이 비-JSON으로 거부해 repair를 유발한 첫 응답도 **provider 관점 `success`로 남는다.** 지금 `parse_error`를 만드는 경로는 gate endpoint 계측 하나뿐이다. 이걸 계약에 안 적으면 집계 증분이 seam C site의 `parse_error`=0을 **결손으로 오독**한다 — 실제로는 현재 범위의 정확한 결과다.
+- **H1 — 격리 시행 지점이 stale.** "`_record_llm_call` 한 곳"이라 적혀 있었으나 seam 도입으로 **지금은 둘**이다(seam C `_flush` + 미이행 gate `_record_llm_call`). 두 경로를 명시하고 gate 이행 시 `_flush`로 수렴함을 적었다. seam C 쪽에는 격리가 필요한 **추가 이유**도 넣었다 — `_flush`가 `finally` 안이라 여기서 예외가 새면 요청이 이미 던지던 예외까지 덮어써 원래 실패가 사라진다.
+- **H3 — 동시성 수치 혼동.** 계약의 "동시 20요청"은 **채택 전 일회성 probe** 실측이고, 상시 잠그는 것은 **회귀의 동시 10 scope** 테스트다. 서로 다른 것을 재므로 문장에서 구분했다(probe는 설계 판단용이라 repo에 남기지 않았음도 명시).
+- **H2 — 브리프 헤더가 `Pending owner decision`.** 이미 C안 채택·구현·커밋됐으므로 `Approved` + 구현 버전으로 갱신했다.
+
+**검증**: 문서 전용 변경이라 §4 "Documentation-only" 기준. 코드·테스트 무변(`git diff --stat`이 문서 4개만), 따라서 회귀·`gen:api` 재실행 대상 없음. 인용한 파일 경로와 SoT 절 참조를 직독 확인했다.

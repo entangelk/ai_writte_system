@@ -1,6 +1,6 @@
 # 관측 KPI — 계측 seam 결정 브리프
 
-상태: `Pending owner decision — 2026-07-25`
+상태: `Approved — 2026-07-25 (오너 결정: C 채택)` · 구현: SoT v1.7.43(seam + `analysis_extractor`), 잔여 호출부·gate 이행은 후속 증분
 관련: `observability-kpi-decisions.md`(승인 D1=B·D2=C·D3=A·D4=A), SoT v1.7.42 §"LLM 파이프라인 관측(KPI)"
 
 ## Decision needed
