@@ -75,6 +75,7 @@ docker compose run --rm --no-deps -v "$PWD/tests:/app/tests" \
 
 ## Owner Decisions Needed
 
+- **★★ 다중 사용자 전환 여부(D0)** — 오너 요청(2026-07-26)으로 로그인·인증·아이디별 관리·CMS 삭제·관리자 기능 계획서를 만들었다: `plans/multi-user-auth-cms-decisions.md`. **이건 SoT §"제품과 프로젝트 경계"의 "계정/인증 없는 단일 사용자"·"`user_id`를 억지로 넣지 않는다" 두 조항의 유예를 해제하는 결정**이라 D0 없이는 착수하지 않는다. 실측 규모: **62 operation 전부**에 인가와 401/403 선언이 붙고, ES/Mongo 무인증(v1.6.53이 "인증 slice 선행 필요"로 미뤄 둔 것)도 함께 온다. dogfood(아래)와 선후를 정해야 한다.
 - **★ dogfood 착수(GATE-1)** — 가장 큰 갈림길. 실 12B 풀스택 관통은 끝났고 기술적 선행 조건은 없다. 착수하면 `OPS-1` Ready 승격.
 - **`analysis_extractor`를 D4로 정렬할지**(v1.7.47): 지금 이 site만 최종 도메인 거부를 `parse_error`로 재분류하지 않아 같은 repair 구조인 `compare_judge`와 정책이 갈린다. 정렬하면 두 site가 같은 규칙을 따르고, 두면 v1.7.46 결정이 유지된다. 어느 쪽이든 이행 무손실 증명이 필요한 별도 증분.
 - **loop의 round별 gate decision 노출 여부**(v1.7.47 공백): 노출하면 loop 내부 gate 레코드에도 파생점수를 얹을 수 있다. 도메인 계약(`WritingLoopStage`) 변경이라 D2-B(파생점수 정교화)와 함께 볼 사안.
