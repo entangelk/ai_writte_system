@@ -51,7 +51,7 @@ CLAUDE.md §5는 "나중 요청이 기록된 결정과 충돌하면 어느 쪽�
 
 | 표면 | 실측 | 인증 도입 시 생기는 일 |
 |---|---|---|
-| 공개 operation | **62개 / 52 path** | `/health` 외 전부가 인가 대상. H3 계약상 **401/403을 `responses=`에 선언**해야 하고 트랙별 전수 가드가 빠뜨림을 잡는다 |
+| 공개 operation | 전체 **62개 / 52 path**, `/health` 제외 **61개 / 51 path** | 인가 대상은 **61/51**(`/health`는 인증 없이 응답해야 하는 유일한 operation이다 — 헬스체크가 로그인을 요구하면 compose healthcheck가 죽는다). H3 계약상 **401/403을 `responses=`에 선언**해야 하고 트랙별 전수 가드가 빠뜨림을 잡는다 |
 | 경계 강제 | 모든 서비스가 `project_id`를 받는다 | `project_id` **소유자 검사**가 추가돼야 한다. 지금은 "존재하면 접근 가능"이다 |
 | soft delete | `DELETE /projects/{id}`·`/drafts/{id}` = **archive**(`main.py:2242`·`2254`) | CMS "삭제"가 archive인지 hard delete인지 결정 필요(D5) |
 | CORS | 열지 않음. nginx가 `/api`를 프록시해 **단일 origin** | 세션 쿠키 방식이면 지금 구조가 그대로 최적(같은 origin이라 CSRF 표면도 작다) |
@@ -61,7 +61,7 @@ CLAUDE.md §5는 "나중 요청이 기록된 결정과 충돌하면 어느 쪽�
 | 관측 KPI | `GET /projects/{id}/observability/kpi` — project 단위 | 관리자 전역 뷰가 필요해진다(D6) |
 | 프론트 | 로그인 화면 없음, `credentials` 미사용 | 로그인/로그아웃·세션 만료·401 리다이렉트·라우트 가드 |
 
-**규모 감각**: 이건 "endpoint 몇 개 추가"가 아니라 **62개 operation 전부의 전제가 바뀌는 변경**이다.
+**규모 감각**: 이건 "endpoint 몇 개 추가"가 아니라 **61개 operation의 전제가 한꺼번에 바뀌는 변경**이다.
 아래 D7이 그 62개를 어떻게 한 번에 닫을지를 정한다.
 
 ---
@@ -191,8 +191,9 @@ project 하나를 파기하면 `source_snapshots`·`draft_versions`·`source_ref
   근거 없이 넓힌다.
 - **비밀번호 저장**은 직접 구현하게 된다(D1=A·D2=A 선택 시). `argon2` 또는 `bcrypt` 중 택1이
   별도 의존성 결정이며, 직접 만들지 않는다(해시 함수를 손으로 짜는 것은 금기).
-- **CORS는 계속 닫아 둔다.** 단일 origin 구조가 유지되는 한 열 이유가 없고, 쿠키 인증에서는
-  여는 순간 CSRF 표면이 커진다.
+- **CORS는 계속 닫아 둔다.** 단일 origin 구조가 유지되는 한 열 이유가 없고, 쿠키 인증에서
+  `Access-Control-Allow-Credentials`를 여는 것은 **다른 origin이 사용자의 인증 상태로 API 응답을
+  읽게** 만드는 일이다. CSRF는 그와 다른 축이며 `SameSite`가 막는다(D2=A) — CORS는 CSRF를 막지 않는다.
 - **`project_id` 강제 조항은 살아남는다.** 소유권은 그 위에 얹히는 두 번째 경계이지 대체가 아니다.
 
 ## Deferred / out of scope

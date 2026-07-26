@@ -4,20 +4,21 @@
 > 완료 서술은 여기 쓰지 않는다 — `docs/daily_logs/`(상세) · `docs/system-contract-sot.md` 변경이력 · `CHANGELOG.md`(마일스톤) · `docs/verifications/`(독립 검증)에 이미 있다.
 > 편집 규칙은 `CLAUDE.md`·`AGENTS.md`의 "HANDOFF.md" 절에 있다. **길이 상한은 없다** — 대신 **~200줄을 넘으면 자가 검수**하고(그 뒤로는 ~100줄마다) 결과를 아래 한 줄로 남긴다. 길어야 할 이유가 있으면 길어도 된다. 안 보는 것이 문제다.
 >
-> 마지막 자가 검수: 2026-07-23 · 111줄
+> 마지막 자가 검수: 2026-07-26 · 124줄 (관측 KPI 페이즈 종료·다중 사용자 단계 전환 반영, stale 3건 제거)
 
 ## 지금 상태
 
-- 정본은 `docs/system-contract-sot.md` **v1.7.49**(Approved). 미확정 항목은 추측 구현하지 않는다.
-- **진행 중 페이즈 — LLM 파이프라인 관측(KPI)**(브리프 `plans/observability-kpi-decisions.md` 승인 D1=B·D2=C·D3=A). **계측 seam은 provider 데코레이터로 확정**(오너 결정 2026-07-25, 브리프 `plans/observability-instrumentation-seam-decisions.md` C안) — `ObservedProvider`가 `generate()` 1회를 레코드 1건으로 만들고, 워크플로 귀속은 `llm_call_scope` contextvar가 나른다. **계측·read-out 완료 — 남은 것은 소비(대시보드)뿐이고 그건 오너가 다음 페이즈로 분리해 뒀다.** 계측된 호출부는 **8종 전부**(`analysis_extractor`·`writing_gate`·`compare_judge`·`query_planner`·`writing_retrieval_planner`·`writing_generation`·`writing_revision`·`writing_report`, 전부 seam C). read-out은 `GET /projects/{id}/observability/kpi`(v1.7.48). 운영기획 포트폴리오는 `docs/observability-kpi-rationale.md`. QUAL-1(제품 품질·수기·dogfood)과 별개 트랙.
+- 정본은 `docs/system-contract-sot.md` **v1.7.50**(Approved). 미확정 항목은 추측 구현하지 않는다.
+- **진행 중 페이즈 없음.** LLM 파이프라인 관측(KPI) 페이즈는 **계측·집계 API·대시보드까지 닫혔다**(2026-07-26). 다음에 무엇을 할지는 아래 "Owner Decisions Needed"의 두 ★ 항목 중 오너가 고르는 것에 달렸다.
+- **관측 KPI 페이즈의 결과물**(다음 작업이 이 위에서 돈다): LLM을 부르는 **8개 호출부 전부**가 seam C(provider 데코레이터)로 계측되고 — `analysis_extractor`·`writing_gate`·`compare_judge`·`query_planner`·`writing_retrieval_planner`·`writing_generation`·`writing_revision`·`writing_report` — `GET /projects/{id}/observability/kpi`가 집계를 내고, `/projects/:id/observability` 화면이 그것을 그린다. QUAL-1(제품 품질·수기·dogfood)과 별개 트랙이며 운영기획 포트폴리오는 `docs/observability-kpi-rationale.md`.
 - **새 호출부를 계측하는 법**(Phase 7 등): ① `main.py` 조립 지점에서 provider를 `ObservedProvider(inner, call_site=…)`로 감싼다(도메인 코드는 건드리지 않는다). ② 그 호출이 일어나는 요청 경로에서 `llm_call_scope(...)`를 연다 — **감싸기와 scope 개방은 항상 함께 간다. 빠뜨리면 레코드가 조용히 0건인데 스위트는 green이다**(scope 유닛 테스트로는 안 물리므로 배선 회귀를 함께 넣는다). ③ **조립 가드도 함께 넣는다** — 하네스는 `ObservedProvider`를 직접 만들기 때문에 `_default_*`가 감싸기를 빠뜨려도 green이고 **배포에서만** 계측이 사라진다(실측: gate 조립에서 wrapper를 벗겨도 56 passed). 가드는 **리터럴까지 단정한다** — 잘못된 site로 감싸는 것은 안 감싸는 것과 똑같이 틀렸다. ④ 도메인만 아는 판정(gate decision·파생점수)은 `scope.annotate_last(...)`, 최종 도메인 거부는 **`scope.reclassify_last_as_parse_error(...)`**(마지막 레코드가 `success`일 때만 동작 — `provider_error` taxonomy를 덮지 않기 위한 가드)로 flush 전에 얹는다. `ContextSearchFailed` 계열은 같은 모듈의 `reclassify_planner_parse_error(scope, exc)`가 `llm_error` 계보만 걸러 준다 — **endpoint와 worker가 같은 정의를 쓴다**(복제하면 두 정책이 조용히 갈라진다).
 - **계측에서 지켜야 하는 계약**(SoT §"LLM 파이프라인 관측(KPI)"): ① 레코드는 **provider가 실제로 호출된 경우에만** — seam C에서는 구조적으로 참이다. ② **실패한 호출도 센다**(성공만 세면 성공률이 영구히 100%). ③ **scope 밖 호출(worker·script)은 기록하지 않는다** — 추측 `project_id`는 오염이다. ④ 격리(`_flush`)를 **좁히지 않는다** — 좁히면 감사 저장소의 pymongo 예외가 전역 handler(v1.7.38)에 도달해 **정상 200이 503으로 뒤집히고**, flush가 `finally`에 있어 요청의 원래 예외까지 덮어쓴다.
 - **`parse_error` 재분류는 호출부가 명시할 때만 일어난다**(데코레이터는 도메인 거부를 모른다). v1.7.47부터 **`analysis_extractor`만 재분류하지 않고 나머지 7 site는 재분류한다** — 재분류가 마지막 호출 1건만 건드리므로 repair로 회수된 첫 호출은 `success`로 남고 repair 빈도 신호가 손상되지 않기 때문이다. 따라서 **extractor의 `parse_error`=0은 구조적 사실이지 데이터 부족이 아니다**(`outcome`이 `success`·`provider_error` 둘뿐). **같은 repair 구조인데 정책이 갈리는 상태**이며, 정렬 여부는 아래 오너 결정 대기 항목이다.
 - **집계 API를 읽을 때의 함정 3가지**(v1.7.48, 전부 응답이 분모를 함께 실어 방어한다): ① `total_tokens`는 `success`+`parse_error` 행만 — 분모는 `tokens_counted_from`. ② **표본이 0이면 비율은 `null`이지 `0.0`이 아니다**(`gate.avg_quality_score`·`loop.non_convergence_rate`) — loop 감사는 opt-in(기본 off)이라 기본 배포에서 `loop.runs_considered`=0이 정상이다. ③ **`multi_call_correlations`는 repair 수가 아니다** — site 고정 후 레코드 2건 이상인 correlation 수이며, repair 구조 site(extractor·compare·planner)에서만 repair를 뜻하고 writing loop에서는 **설계된 라운드**다(gate 최대 3회).
 - **loop 내부 gate 레코드에는 `decision`·`gate_quality_score`가 없다**(v1.7.47 알려진 공백): 파생점수는 endpoint가 `annotate_last`로 얹는데 revise loop이 round별 판정을 결과에 노출하지 않는다(`WritingLoopStage`는 stage/ordinal/status만). 그 필드는 **독립 `POST …/writing/gate` 호출에만** 채워지므로 집계가 전수 커버리지를 가정하면 안 된다.
-- 공개 API 계약(H3)은 닫혀 있다: **`/health`를 제외한 60개 operation 전부**가 realistic 에러 상태를 OpenAPI에 선언하고 **미매핑 500 부채는 0건**이다. 새 endpoint를 추가하면 **`responses=`도 함께** 붙여야 하며, 트랙별 전수 선언 가드 테스트가 빠뜨림을 잡는다. 저장소 장애 503 face는 이제 **예외 없이 전 endpoint 균일**하다 — v1.7.40이 마지막 두 잔여(광의 catch가 pymongo를 삼켜 502로 내던 곳)를 닫았다: `POST …/analysis/jobs/{id}/run`과 `POST …/context-search`의 `persist_rejection`. 둘 다 광의 catch 앞에 `except _STORAGE_ERRORS`를 두어 저장소 예외를 503으로 보낸다. **주의**: 앞으로 endpoint body를 광의 `except Exception`으로 감싸면 그 순간 저장소 예외가 다시 502/도메인 에러로 새므로, 그런 catch를 둘 때는 반드시 그 앞에 `except _STORAGE_ERRORS`를 둔다.
+- 공개 API 계약(H3)은 닫혀 있다: **`/health`를 제외한 61개 operation 전부**가 realistic 에러 상태를 OpenAPI에 선언하고 **미매핑 500 부채는 0건**이다. 새 endpoint를 추가하면 **`responses=`도 함께** 붙여야 하며, 트랙별 전수 선언 가드 테스트가 빠뜨림을 잡는다. 저장소 장애 503 face는 이제 **예외 없이 전 endpoint 균일**하다 — v1.7.40이 마지막 두 잔여(광의 catch가 pymongo를 삼켜 502로 내던 곳)를 닫았다: `POST …/analysis/jobs/{id}/run`과 `POST …/context-search`의 `persist_rejection`. 둘 다 광의 catch 앞에 `except _STORAGE_ERRORS`를 두어 저장소 예외를 503으로 보낸다. **주의**: 앞으로 endpoint body를 광의 `except Exception`으로 감싸면 그 순간 저장소 예외가 다시 502/도메인 에러로 새므로, 그런 catch를 둘 때는 반드시 그 앞에 `except _STORAGE_ERRORS`를 둔다.
 - 회귀 기준선: backend **1556 passed / 612 subtests**(test-mongo 기동), frontend **207 passed / 14 files**, build JS **진입 401.19 kB + 관측 화면 청크 385.67 kB**(차트는 `React.lazy`로 분리 — 관측 화면을 열 때만 내려간다). **skip 수는 머신마다 다르다** — live Chroma 1건은 항상 skip이고, `elasticsearch` 파이썬 패키지가 없는 머신에서는 lexical retrieval 3건이 추가로 skip된다(2026-07-25 이 머신 = 4 skipped). 숫자가 안 맞으면 회귀를 의심하기 전에 skip 사유부터 `-rs`로 확인할 것.
-- **이 머신, 2026-07-24 기준 스택은 사실상 내려가 있다**: `application`·`gateway`·`mongo`·`elasticsearch`·`embedding`·`chroma`·`test-mongo`가 `Exited`, `frontend`와 두 worker만 떠 있다(worker는 의존 서비스가 없어 무의미하게 도는 중). 기동은 오너 몫.
+- **이 머신, 2026-07-26 기준 배포 스택은 내려가 있다**(`application`·`gateway`·`mongo`·`elasticsearch`·`embedding`·`chroma` 미기동). test-mongo는 회귀 실행 때만 올렸다 내린다. 기동은 오너 몫이며, **관측 화면 육안 확인이 스택 기동을 기다리는 유일한 미검증 항목**이다.
 - **현존 컨테이너는 전부 구 정의로 만들어졌다** — 옛 포트(`27019`/`8000`/`9200`…)와 `ulimits` 없는 상태다. `docker compose up`이 새 정의로 재생성하므로 별도 조치는 필요 없다.
 
 ## 기동 · 실행법
@@ -59,7 +60,8 @@ docker compose run --rm --no-deps -v "$PWD/tests:/app/tests" \
 
 - **개발 단계(2026-07-20 오너)**: "Gate 우선" 단계는 끝났다. 지금은 **Gate ↔ UI/UX 왕복**이 주축이다.
 - 아이디에이션·계획이 충돌하면 임의 구현 없이 오너 결정을 받는다. 나중 요청이 기록된 결정과 충돌하면 어느 쪽이 canonical인지 먼저 묻는다.
-- monorepo + 독립 LLM Gateway/Worker, Application = FastAPI. MVP는 계정/인증 없는 단일 사용자이며 경계는 `project_id`.
+- monorepo + 독립 LLM Gateway/Worker, Application = FastAPI. 경계는 `project_id`이며 **모든 저장·검색·Gate·tool handler가 강제한다**.
+- **개발 단계(2026-07-26 오너)**: MVP 단일 사용자 유예가 만료됐다 — 제품은 **다중 사용자로 확장한다**(정본 v1.7.49). **단, 코드는 아직 없다**: 배포 스택은 여전히 무인증이므로 이 조항을 근거로 외부에 노출하면 안 된다. 소유권은 `project_id` 강제를 **대체하지 않고 그 위에 얹힌다**. 설계 결정 D1~D8은 아래 오너 결정 대기.
 - frontend = React + TS + Vite, 서빙은 별도 compose 서비스(nginx). OpenAPI→TS 타입 생성 + 얇은 `fetch` 래퍼.
 - **Core SOT**: offset = raw Unicode code point, `content_hash` = raw UTF-8 SHA-256. `source_ref` span은 단일 `source_block` 안에 든다. persistence는 Mongo transaction 기본이고 non-transaction fallback은 **single-writer local/test 전용**. project/draft는 archive(soft delete)하고 snapshot/version/source_ref는 보존한다(archive = 읽기 허용, 본문 쓰기·rename 409).
 - **memory는 append-only**. AI가 직접 덮어쓰지 않고 검색·대조·Gate·검토·versioned upsert를 거친다. canonical만 `memory_vectors`에 색인하며 트리거는 async outbox→worker다. semantic 매칭은 **off 기본**.
@@ -75,16 +77,19 @@ docker compose run --rm --no-deps -v "$PWD/tests:/app/tests" \
 
 ## Owner Decisions Needed
 
-- **★★ 다중 사용자 확장 D1~D8** — **D0는 결정됐다**(오너 2026-07-26: MVP 단계 제약이 만료됐다 → 정본 **v1.7.49**가 다중 사용자 확장을 방향으로 명시). 남은 것은 설계 결정 8건: `plans/multi-user-auth-cms-decisions.md`(별도 서버 여부·인증 방식·소유권 모델·기존 데이터 귀속·삭제 의미·관리자 범위·인가 시행 지점·슬라이스 순서). **주의 — 정본은 방향을 적었지만 코드는 아직 없다**: 배포 스택은 여전히 무인증이므로 이 조항을 근거로 외부에 노출하면 안 된다. 실측 규모: **62 operation 전부**에 인가와 401/403 선언이 붙고, Mongo·ES 무인증(v1.6.53이 "인증 slice 선행 필요"로 미뤄 둔 것)도 함께 온다. dogfood(아래)와 선후를 정해야 한다.
+- **★★ 다중 사용자 확장 D1~D8** — **D0는 결정됐다**(오너 2026-07-26: MVP 단계 제약이 만료됐다 → 정본 **v1.7.49**가 다중 사용자 확장을 방향으로 명시). 남은 것은 설계 결정 8건: `plans/multi-user-auth-cms-decisions.md`(별도 서버 여부·인증 방식·소유권 모델·기존 데이터 귀속·삭제 의미·관리자 범위·인가 시행 지점·슬라이스 순서). **주의 — 정본은 방향을 적었지만 코드는 아직 없다**: 배포 스택은 여전히 무인증이므로 이 조항을 근거로 외부에 노출하면 안 된다. 실측 규모: **61 operation**(`/health` 제외, 전체는 62/52)에 인가와 401/403 선언이 붙고, Mongo·ES 무인증(v1.6.53이 "인증 slice 선행 필요"로 미뤄 둔 것)도 함께 온다. dogfood(아래)와 선후를 정해야 한다.
 - **★ dogfood 착수(GATE-1)** — 가장 큰 갈림길. 실 12B 풀스택 관통은 끝났고 기술적 선행 조건은 없다. 착수하면 `OPS-1` Ready 승격.
 - **`analysis_extractor`를 D4로 정렬할지**(v1.7.47): 지금 이 site만 최종 도메인 거부를 `parse_error`로 재분류하지 않아 같은 repair 구조인 `compare_judge`와 정책이 갈린다. 정렬하면 두 site가 같은 규칙을 따르고, 두면 v1.7.46 결정이 유지된다. 어느 쪽이든 이행 무손실 증명이 필요한 별도 증분.
 - **loop의 round별 gate decision 노출 여부**(v1.7.47 공백): 노출하면 loop 내부 gate 레코드에도 파생점수를 얹을 수 있다. 도메인 계약(`WritingLoopStage`) 변경이라 D2-B(파생점수 정교화)와 함께 볼 사안.
 
 ## Next Tasks
 
-1. **dogfood 첫 세션에서 관측 화면 육안 확인**(`/projects/:id/observability`) — 이 머신은 스택이 내려가 있어 **브라우저 렌더를 확인하지 못했다.** 차트 라벨 충돌·막대 배치·좁은 화면에서의 표 넘침이 확인 대상이다. 로직·오독 방어는 회귀 10건으로 잠겨 있다.
+**오너가 위 두 ★ 중 무엇을 고르느냐가 1번을 정한다.** 아래는 그와 무관하게 남아 있는 것들.
+
+1. **스택을 올리면 바로 할 것 — 화면 육안 확인 2건**(둘 다 로직은 회귀로 잠겨 있고 **렌더만** 미검증):
+   (a) 관측 화면 `/projects/:id/observability` — 차트 라벨 충돌·막대 배치·좁은 화면 표 넘침.
+   (b) 비동기 패드 — 렌더 · 이어쓰기 탭 완료 배지 · 5초 폴링 · "다시 시도" 버튼 · 탭 전환 후 폴링 생존.
 2. **관측 화면을 더 키우는 것은 API에 시간 창(`?since=`)이 생긴 뒤**가 옳다 — 지금 차트가 그리는 것은 누적 스냅샷이라 추세가 없고 막대는 표와 같은 정보를 말한다. 무엇을 더하든 **`React.lazy` 경계 안**에 둘 것(밖으로 나가면 진입 번들이 다시 두 배가 된다).
-3. **dogfood 첫 세션에서 UI 레벨 확인**(백엔드는 라이브 확증됐고 화면만 미검증): 비동기 패드 렌더 · 이어쓰기 탭 완료 배지 · 5초 폴링 · "다시 시도" 버튼 · 탭 전환 후 폴링 생존.
 4. **dogfood 관찰 항목**: `report field must be an array` 실패율(12B 간헐 비-배열, repair가 흡수 — 잦으면 repair 횟수/프롬프트 축 판단) · `analysis_extract_v4`의 `aspect` 오분류 빈도 · scratch per-draft 상한(기본 20) 밀어냄.
 5. **Deferred(오너 결정 선행)**: 중첩 chapter→scene tree · ProjectBrief→Draft provenance · 관계 graph/완전 timeline · saved publication manifest · Phase 7 대화형 수정(`plans/07-conversational-authoring.md`).
 
