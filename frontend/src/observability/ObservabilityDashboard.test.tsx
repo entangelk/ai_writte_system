@@ -183,6 +183,69 @@ describe("ObservabilityDashboard", () => {
     }
   });
 
+  it("formats the loop rate the API gave instead of re-deriving it", async () => {
+    // The API owns the division; the screen only formats. A rate that cannot be
+    // reconstructed from integers (1/3) is the case where re-deriving it
+    // through `rate * runs / runs` would drift.
+    mockFetch({
+      body: kpiBody({
+        loop: { runs_considered: 3, non_convergence_rate: 1 / 3 },
+      }),
+    });
+    renderDashboard();
+
+    const summary = await screen.findByLabelText("전체 요약");
+    expect(within(summary).getByText("33.3%")).toBeInTheDocument();
+    expect(within(summary).getByText("3회 기준")).toBeInTheDocument();
+  });
+
+  it("hides the summary only when nothing at all was measured", async () => {
+    mockFetch({
+      body: kpiBody({
+        sites: [],
+        totals: {
+          calls: 0,
+          success: 0,
+          provider_error: 0,
+          parse_error: 0,
+          total_tokens: 0,
+          tokens_counted_from: 0,
+        },
+        gate: { scored_calls: 0, avg_quality_score: null },
+        loop: { runs_considered: 0, non_convergence_rate: null },
+      }),
+    });
+    renderDashboard();
+
+    await screen.findByText("아직 기록된 LLM 호출이 없습니다.");
+    expect(screen.queryByLabelText("전체 요약")).not.toBeInTheDocument();
+  });
+
+  it("still shows the summary when only loop runs exist", async () => {
+    // Over-strict guard on the hide: a project can hold loop audits recorded
+    // before per-call instrumentation existed. Hiding on `sites.length === 0`
+    // alone would swallow a real, measured rate.
+    mockFetch({
+      body: kpiBody({
+        sites: [],
+        totals: {
+          calls: 0,
+          success: 0,
+          provider_error: 0,
+          parse_error: 0,
+          total_tokens: 0,
+          tokens_counted_from: 0,
+        },
+        gate: { scored_calls: 0, avg_quality_score: null },
+        loop: { runs_considered: 2, non_convergence_rate: 0.5 },
+      }),
+    });
+    renderDashboard();
+
+    const summary = await screen.findByLabelText("전체 요약");
+    expect(within(summary).getByText("50.0%")).toBeInTheDocument();
+  });
+
   it("shows an empty state instead of charts when nothing was recorded", async () => {
     mockFetch({
       body: kpiBody({
@@ -205,6 +268,7 @@ describe("ObservabilityDashboard", () => {
       await screen.findByText("아직 기록된 LLM 호출이 없습니다."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
 
   it("surfaces an API failure instead of rendering an empty dashboard", async () => {

@@ -56,10 +56,16 @@ function siteLabel(callSite: string): string {
 // "success" but green↔amber collapses under protanopia (ΔE 2.4), so success
 // takes the blue slot. Identity is never colour alone — every series is in the
 // legend and repeated in the table below.
+//
+// The amber and the failure colour move together (verification 2026-07-26 H-3):
+// darkening amber alone for contrast margin pulled it *into* the brick red
+// (normal-vision ΔE 14.0, below the 15 floor), trading a passing contrast for a
+// failing separation. Re-stepping the failure hue to a crimson keeps every check
+// passing and lifts the weakest contrast from 3.55 to 4.14.
 const OUTCOME_COLORS = {
   success: "#1a6d99",
-  providerError: "#9d2f2f",
-  parseError: "#a8742a",
+  providerError: "#8c1f4a",
+  parseError: "#9a6a24",
 } as const;
 
 function percent(part: number, whole: number): string {
@@ -69,6 +75,13 @@ function percent(part: number, whole: number): string {
 
 function score(value: number | null): string {
   return value === null ? "—" : value.toFixed(2);
+}
+
+// The API already computed this rate; the screen only formats it. Re-deriving
+// it from `rate * runs / runs` was arithmetically equal but re-entered the
+// division the contract owns (verification 2026-07-26 H-1).
+function rate(value: number | null): string {
+  return value === null ? "—" : `${(value * 100).toFixed(1)}%`;
 }
 
 type ChartRow = {
@@ -115,6 +128,13 @@ export function ObservabilityDashboard() {
   }, [projectId]);
 
   const rows = kpi === null ? [] : chartRows(kpi.sites);
+  // Nothing measured at all — neither an LLM call nor a loop run. The summary
+  // would be five cards of zeros next to a message that already says it. Loop
+  // runs are counted separately on purpose: an older project can hold loop
+  // audits from before per-call instrumentation existed, and that rate is still
+  // worth showing even with no call rows.
+  const nothingRecorded =
+    kpi !== null && kpi.totals.calls === 0 && kpi.loop.runs_considered === 0;
 
   return (
     <section className="workspace-page page-enter">
@@ -136,6 +156,7 @@ export function ObservabilityDashboard() {
 
       {kpi !== null && !loading && (
         <>
+          {!nothingRecorded && (
           <dl className="kpi-summary" aria-label="전체 요약">
             <div>
               <dt>LLM 호출</dt>
@@ -165,14 +186,7 @@ export function ObservabilityDashboard() {
             </div>
             <div>
               <dt>루프 미수렴율</dt>
-              <dd>
-                {kpi.loop.non_convergence_rate === null
-                  ? "—"
-                  : percent(
-                      kpi.loop.non_convergence_rate * kpi.loop.runs_considered,
-                      kpi.loop.runs_considered,
-                    )}
-              </dd>
+              <dd>{rate(kpi.loop.non_convergence_rate)}</dd>
               <p className="kpi-note">
                 {kpi.loop.non_convergence_rate === null
                   ? "루프 감사가 꺼져 있어 측정되지 않음"
@@ -180,6 +194,7 @@ export function ObservabilityDashboard() {
               </p>
             </div>
           </dl>
+          )}
 
           {kpi.sites.length === 0 ? (
             <div className="empty-state">
