@@ -16,7 +16,7 @@
 - **집계 API를 읽을 때의 함정 3가지**(v1.7.48, 전부 응답이 분모를 함께 실어 방어한다): ① `total_tokens`는 `success`+`parse_error` 행만 — 분모는 `tokens_counted_from`. ② **표본이 0이면 비율은 `null`이지 `0.0`이 아니다**(`gate.avg_quality_score`·`loop.non_convergence_rate`) — loop 감사는 opt-in(기본 off)이라 기본 배포에서 `loop.runs_considered`=0이 정상이다. ③ **`multi_call_correlations`는 repair 수가 아니다** — site 고정 후 레코드 2건 이상인 correlation 수이며, repair 구조 site(extractor·compare·planner)에서만 repair를 뜻하고 writing loop에서는 **설계된 라운드**다(gate 최대 3회).
 - **loop 내부 gate 레코드에는 `decision`·`gate_quality_score`가 없다**(v1.7.47 알려진 공백): 파생점수는 endpoint가 `annotate_last`로 얹는데 revise loop이 round별 판정을 결과에 노출하지 않는다(`WritingLoopStage`는 stage/ordinal/status만). 그 필드는 **독립 `POST …/writing/gate` 호출에만** 채워지므로 집계가 전수 커버리지를 가정하면 안 된다.
 - 공개 API 계약(H3)은 닫혀 있다: **`/health`를 제외한 60개 operation 전부**가 realistic 에러 상태를 OpenAPI에 선언하고 **미매핑 500 부채는 0건**이다. 새 endpoint를 추가하면 **`responses=`도 함께** 붙여야 하며, 트랙별 전수 선언 가드 테스트가 빠뜨림을 잡는다. 저장소 장애 503 face는 이제 **예외 없이 전 endpoint 균일**하다 — v1.7.40이 마지막 두 잔여(광의 catch가 pymongo를 삼켜 502로 내던 곳)를 닫았다: `POST …/analysis/jobs/{id}/run`과 `POST …/context-search`의 `persist_rejection`. 둘 다 광의 catch 앞에 `except _STORAGE_ERRORS`를 두어 저장소 예외를 503으로 보낸다. **주의**: 앞으로 endpoint body를 광의 `except Exception`으로 감싸면 그 순간 저장소 예외가 다시 502/도메인 에러로 새므로, 그런 catch를 둘 때는 반드시 그 앞에 `except _STORAGE_ERRORS`를 둔다.
-- 회귀 기준선: backend **1554 passed / 610 subtests**(test-mongo 기동), frontend **194 passed / 13 files**, build JS 399.03 kB. **skip 수는 머신마다 다르다** — live Chroma 1건은 항상 skip이고, `elasticsearch` 파이썬 패키지가 없는 머신에서는 lexical retrieval 3건이 추가로 skip된다(2026-07-25 이 머신 = 4 skipped). 숫자가 안 맞으면 회귀를 의심하기 전에 skip 사유부터 `-rs`로 확인할 것.
+- 회귀 기준선: backend **1556 passed / 612 subtests**(test-mongo 기동), frontend **194 passed / 13 files**, build JS 399.03 kB. **skip 수는 머신마다 다르다** — live Chroma 1건은 항상 skip이고, `elasticsearch` 파이썬 패키지가 없는 머신에서는 lexical retrieval 3건이 추가로 skip된다(2026-07-25 이 머신 = 4 skipped). 숫자가 안 맞으면 회귀를 의심하기 전에 skip 사유부터 `-rs`로 확인할 것.
 - **이 머신, 2026-07-24 기준 스택은 사실상 내려가 있다**: `application`·`gateway`·`mongo`·`elasticsearch`·`embedding`·`chroma`·`test-mongo`가 `Exited`, `frontend`와 두 worker만 떠 있다(worker는 의존 서비스가 없어 무의미하게 도는 중). 기동은 오너 몫.
 - **현존 컨테이너는 전부 구 정의로 만들어졌다** — 옛 포트(`27019`/`8000`/`9200`…)와 `ulimits` 없는 상태다. `docker compose up`이 새 정의로 재생성하므로 별도 조치는 필요 없다.
 
@@ -81,7 +81,7 @@ docker compose run --rm --no-deps -v "$PWD/tests:/app/tests" \
 
 ## Next Tasks
 
-1. **관측 KPI 대시보드(다음 페이즈)** — 계측·집계 API가 닫혔으므로 남은 것은 소비다. 입력은 `GET /projects/{id}/observability/kpi` 하나이고, `sites`가 배열이라 site가 늘어도 프론트 타입은 안 바뀐다. 착수 전 위 "함정 3가지"를 읽을 것 — 그대로 그리면 오독을 시각화하게 된다.
+1. **관측 KPI 대시보드(다음 페이즈)** — 계측·집계 API가 닫혔으므로 남은 것은 소비다. 입력은 `GET /projects/{id}/observability/kpi` 하나이고, `sites`가 배열이라 site가 늘어도 프론트 타입은 안 바뀐다. 착수 전 위 "함정 3가지"를 읽을 것 — 그대로 그리면 오독을 시각화하게 된다. **정렬·반올림은 API가 보장한다**(`sites`는 이름 오름차순·호출 있던 site만, `avg_latency_ms`는 정수) — 클라이언트가 다시 하지 말 것.
 2. **dogfood 첫 세션에서 UI 레벨 확인**(백엔드는 라이브 확증됐고 화면만 미검증): 비동기 패드 렌더 · 이어쓰기 탭 완료 배지 · 5초 폴링 · "다시 시도" 버튼 · 탭 전환 후 폴링 생존.
 3. **dogfood 관찰 항목**: `report field must be an array` 실패율(12B 간헐 비-배열, repair가 흡수 — 잦으면 repair 횟수/프롬프트 축 판단) · `analysis_extract_v4`의 `aspect` 오분류 빈도 · scratch per-draft 상한(기본 20) 밀어냄.
 4. **Deferred(오너 결정 선행)**: 중첩 chapter→scene tree · ProjectBrief→Draft provenance · 관계 graph/완전 timeline · saved publication manifest · Phase 7 대화형 수정(`plans/07-conversational-authoring.md`).

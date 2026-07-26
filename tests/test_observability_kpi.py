@@ -164,6 +164,15 @@ class GateScoreCoverageTest(unittest.TestCase):
         self.assertEqual(kpi.gate.scored_calls, 0)
         self.assertIsNone(kpi.gate.avg_quality_score)
 
+    def test_a_scored_block_reports_a_real_zero(self):
+        # Under-strict guard mirroring the loop's: ``BLOCK`` maps to 0.0, so a
+        # real zero average must stay reachable. Without this, "null when
+        # unmeasured" could swallow the gate's harshest verdict — the one an
+        # owner most wants to see.
+        kpi = _kpi([_call(LlmCallSite.WRITING_GATE, score=0.0)])
+        self.assertEqual(kpi.gate.scored_calls, 1)
+        self.assertEqual(kpi.gate.avg_quality_score, 0.0)
+
 
 class LoopConvergenceTest(unittest.TestCase):
     def test_every_loop_status_is_classified(self):
@@ -218,6 +227,19 @@ class SiteRowsTest(unittest.TestCase):
         ])
         self.assertEqual([s.call_site for s in kpi.sites],
                          ["analysis_extractor", "writing_gate"])
+
+    def test_latency_is_rounded_to_an_integer_ties_to_even(self):
+        # The contract states the rounding so a dashboard does not re-round and
+        # disagree with the API. Both tie directions are pinned because Python's
+        # round() breaks ties to even, which surprises readers who expect .5 to
+        # always go up.
+        for latencies, expected in (((100, 101), 100), ((101, 102), 102)):
+            with self.subTest(latencies=latencies):
+                kpi = _kpi([
+                    _call(latency_ms=latencies[0], call_id="a"),
+                    _call(latency_ms=latencies[1], call_id="b"),
+                ])
+                self.assertEqual(kpi.sites[0].avg_latency_ms, expected)
 
     def test_latency_averages_over_failures_too(self):
         # A provider timeout really did cost that wall clock; excluding it would
