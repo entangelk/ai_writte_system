@@ -641,6 +641,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{project_id}/observability/kpi": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Observability Kpi Endpoint */
+        get: operations["observability_kpi_endpoint_projects__project_id__observability_kpi_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{project_id}/snapshots/{snapshot_id}/index/source-blocks/rebuild": {
         parameters: {
             query?: never;
@@ -1142,6 +1159,68 @@ export interface components {
             title: string;
             /** Unit Kind */
             unit_kind: string;
+        };
+        /** ObservabilityKpiGatePayload */
+        ObservabilityKpiGatePayload: {
+            /** Avg Quality Score */
+            avg_quality_score: number | null;
+            /** Scored Calls */
+            scored_calls: number;
+        };
+        /** ObservabilityKpiLoopPayload */
+        ObservabilityKpiLoopPayload: {
+            /** Non Convergence Rate */
+            non_convergence_rate: number | null;
+            /** Runs Considered */
+            runs_considered: number;
+        };
+        /** ObservabilityKpiResponse */
+        ObservabilityKpiResponse: {
+            gate: components["schemas"]["ObservabilityKpiGatePayload"];
+            loop: components["schemas"]["ObservabilityKpiLoopPayload"];
+            /** Project Id */
+            project_id: string;
+            /** Sites */
+            sites: components["schemas"]["ObservabilityKpiSitePayload"][];
+            totals: components["schemas"]["ObservabilityKpiTotalsPayload"];
+        };
+        /** ObservabilityKpiSitePayload */
+        ObservabilityKpiSitePayload: {
+            /** Avg Latency Ms */
+            avg_latency_ms: number;
+            /** Call Site */
+            call_site: string;
+            /** Calls */
+            calls: number;
+            /** Correlations */
+            correlations: number;
+            /** Multi Call Correlations */
+            multi_call_correlations: number;
+            /** Parse Error */
+            parse_error: number;
+            /** Provider Error */
+            provider_error: number;
+            /** Success */
+            success: number;
+            /** Tokens Counted From */
+            tokens_counted_from: number;
+            /** Total Tokens */
+            total_tokens: number;
+        };
+        /** ObservabilityKpiTotalsPayload */
+        ObservabilityKpiTotalsPayload: {
+            /** Calls */
+            calls: number;
+            /** Parse Error */
+            parse_error: number;
+            /** Provider Error */
+            provider_error: number;
+            /** Success */
+            success: number;
+            /** Tokens Counted From */
+            tokens_counted_from: number;
+            /** Total Tokens */
+            total_tokens: number;
         };
         /** ProjectBriefGetResponse */
         ProjectBriefGetResponse: {
@@ -4229,6 +4308,55 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    observability_kpi_endpoint_projects__project_id__observability_kpi_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservabilityKpiResponse"];
                 };
             };
             /** @description Not Found */

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import asdict
 from typing import Annotated, Protocol, Union
 
 from fastapi import FastAPI, HTTPException, Query
@@ -136,6 +137,7 @@ from services.application.app.observability.llm_call_audit import (
     LlmCallSite,
     gate_quality_score,
 )
+from services.application.app.observability.kpi import aggregate_kpi
 from services.application.app.observability.llm_call_scope import (
     ObservedProvider,
     llm_call_scope,
@@ -1652,6 +1654,56 @@ class NextUnitBody(BaseModel):
     title: str
     unit_kind: str
     goal: str | None
+
+
+class ObservabilityKpiSitePayload(BaseModel):
+    call_site: str
+    calls: int
+    success: int
+    provider_error: int
+    parse_error: int
+    total_tokens: int
+    # The row count the token total was built from — ``provider_error`` rows are
+    # excluded because their 0 means "unknown" (SoT v1.7.42).
+    tokens_counted_from: int
+    avg_latency_ms: int
+    # Workflows this site served, and how many took more than one call. Not
+    # named "repairs": a second row is a retry at a repair-shaped site but a
+    # designed extra round inside the writing loop.
+    correlations: int
+    multi_call_correlations: int
+
+
+class ObservabilityKpiTotalsPayload(BaseModel):
+    calls: int
+    success: int
+    provider_error: int
+    parse_error: int
+    total_tokens: int
+    tokens_counted_from: int
+
+
+class ObservabilityKpiGatePayload(BaseModel):
+    scored_calls: int
+    # Null, not 0.0, when nothing carried a score (SoT v1.7.47 known gap: loop
+    # gate calls have none).
+    avg_quality_score: float | None
+
+
+class ObservabilityKpiLoopPayload(BaseModel):
+    runs_considered: int
+    non_convergence_rate: float | None
+
+
+class ObservabilityKpiResponse(BaseModel):
+    project_id: str
+    totals: ObservabilityKpiTotalsPayload
+    # A list, not a map keyed by call_site: the literals grow (5→8 in 증분 C,
+    # more with Phase 7) and keying by them would change the generated frontend
+    # type on every new site (owner decision 2026-07-26, D2=A).
+    sites: list[ObservabilityKpiSitePayload]
+    gate: ObservabilityKpiGatePayload
+    loop: ObservabilityKpiLoopPayload
 
 
 class WritingAcceptRequest(BaseModel):
@@ -4335,6 +4387,34 @@ def create_app(
         except WritingLoopAuditNotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return _writing_loop_audit_payload(run)
+
+    @app.get("/projects/{project_id}/observability/kpi",
+             response_model=ObservabilityKpiResponse,
+             responses=_ERRORS_404)
+    async def observability_kpi_endpoint(project_id: str) -> dict[str, object]:
+        # 증분 5 (brief D4=A): the read-out over the per-call audit trail. Pure
+        # aggregation — nothing is measured here that the pipeline did not
+        # already record, so this endpoint calls no provider and opens no scope.
+        try:
+            _require_project_exists(project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        kpi = aggregate_kpi(
+            project_id=project_id,
+            calls=llm_call_audit.list_calls(project_id),
+            # The loop rollup is opt-in (WRITING_LOOP_AUDIT_DEFAULT, off), so
+            # this is empty on a default deployment. That is why the payload
+            # reports ``runs_considered`` next to the rate: a null rate over
+            # zero runs is "never measured", not "never diverged".
+            loop_runs=writing_loop_audit.list_runs(project_id),
+        )
+        return {
+            "project_id": kpi.project_id,
+            "totals": asdict(kpi.totals),
+            "sites": [asdict(site) for site in kpi.sites],
+            "gate": asdict(kpi.gate),
+            "loop": asdict(kpi.loop),
+        }
 
     @app.post("/projects/{project_id}/writing/accept",
               response_model=WritingAcceptResponse,

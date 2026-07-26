@@ -175,3 +175,95 @@ H-1이 추가한 `system_error` 케이스이며 passed 수는 무변(테스트 �
 **검증자와 passed 절대값이 다른 건**(검증 1455 vs 본 작업 1531) 머신별 skip 정책 차이(80 vs 4)로
 완전히 설명되며, subtests와 신규 증분은 양쪽이 정확히 일치했다 — 검증 기록이 이미 교차 확인했다.
 
+---
+
+## Task — 관측 KPI 증분 5: 집계 read-out `GET …/observability/kpi` (SoT v1.7.48)
+
+### Goals
+
+- 증분 4·B·C가 쌓아 온 per-call 레코드를 처음으로 **읽는** 슬라이스. 브리프가 이미 D3=A(범위)·
+  D4=A(read API)로 승인해 둔 것을 구현한다.
+
+### Issues found — 승인된 범위의 두 항목이 이 read-model 밖에 있었다
+
+- **D3=A가 나열한 "루프 미수렴율"은 `writing_loop_audits`에 있고 그 영속은 opt-in·기본 off**다
+  ([`main.py`](../../../services/application/app/main.py) `WRITING_LOOP_AUDIT_DEFAULT` 기본 False).
+  그대로 넣으면 기본 배포에서 분모가 0인 지표가 된다.
+- **"승격 카운트"는 애초에 LLM 호출이 아니다**(memory 도메인). per-call 감사의 정의를 넘는다.
+- 응답 형태는 `openapi.json`→`schema.d.ts`로 흘러가는 **공개 계약**인데 브리프는 "안정적으로 명명"
+  까지만 지시했다. 둘 다 스펙만으로 도출되지 않아 §1에 따라 결정 브리프를 썼다:
+  [`plans/observability-kpi-readout-decisions.md`](../../plans/observability-kpi-readout-decisions.md).
+
+### User Decisions and Rationale
+
+- **D1 = per-call + loop 미수렴율(분모 동반)**. 승인된 D3=A 범위를 **말없이 좁히지 않되**,
+  `runs_considered`를 함께 실어 0을 "데이터 없음"으로 읽게 한다. extractor의 `parse_error`=0을
+  "구조적 사실"로 본문에 적어야 했던 v1.7.46의 교훈을 페이로드 형태로 옮긴 것이다.
+- **D2 = 요약 + `sites` 배열**(map 아님). `call_site` 리터럴은 계속 늘어나므로(증분 C에서 5→8,
+  Phase 7 예정) map으로 두면 site 추가가 매번 프론트 생성 타입 변경이 된다.
+
+### Completed work
+
+- **[`observability/kpi.py`](../../../services/application/app/observability/kpi.py) 신설** — 순수 집계
+  함수. endpoint 밖에 둬서 계약이 고정한 규칙을 HTTP를 통하지 않고 규칙으로 시험한다.
+  집계 대상 집합(`TOKEN_COUNTED_OUTCOMES`)과 루프 상태 분류(`NON_CONVERGED_LOOP_STATUSES`·
+  `NOT_A_LOOP_ATTEMPT`)를 모듈 상수로 단일 정의.
+- **endpoint + 응답 모델 5종** [`main.py`](../../../services/application/app/main.py):
+  `GET /projects/{id}/observability/kpi`, `responses=_ERRORS_404`(404 + 저장소 503),
+  `response_model=ObservabilityKpiResponse`. provider를 부르지 않고 scope도 열지 않는다.
+- **정본** v1.7.47 → **v1.7.48**: read-out 조항(소스·형태·분모 3종·표본 0이면 `null`·
+  `multi_call_correlations`의 의미·지연 평균의 실패 포함·루프 상태 6종 분류).
+- **회귀 신규 23** [`tests/test_observability_kpi.py`](../../../tests/test_observability_kpi.py).
+- **공개 계약 갱신**: `gen:api` 재생성으로 `schema.d.ts` +128줄. 프론트 tsc/build/vitest 194 통과,
+  build JS 399.03 kB 무변(소비 코드는 아직 없다 — 대시보드는 다음 페이즈).
+
+### Issues found — 테스트가 필드 **이름**의 거짓을 잡았다
+
+- endpoint payload 회귀를 쓰다가 기대값이 틀린 것을 발견했는데, 파고들자 **코드가 아니라 이름이
+  문제**였다. 착수 시 `repair_correlations`(레코드 2건 이상인 correlation 수)로 설계했으나,
+  writing loop은 gate·reviser·reporter를 **설계상 여러 번** 부른다
+  (`WRITING_LOOP_MAX_GATE_EVALUATIONS` 기본 3). 즉 loop site에서 "2건 이상 = repair"는 **거짓**이고,
+  그 이름을 출하했으면 대시보드가 정상 루프 라운드를 재시도율로 표시했을 것이다.
+- **`multi_call_correlations`로 바꿨다** — 필드는 **잰 사실**만 말하고, "이것이 repair인가"의 해석은
+  site의 모양(repair 구조 vs loop)에 맡긴다. 계약 본문에 두 해석을 함께 적었다.
+- 브리프의 예시 JSON은 오너가 무엇을 보고 D2=A를 골랐는지의 기록이라 **소급 수정하지 않고**
+  정정 노트를 붙였다(v1.7.42 H2 선례와 같은 처리).
+
+### Verification
+
+- **mutation 6종** — 각각 해당 회귀만 물었다:
+
+  | 변이 | 물린 테스트 |
+  |---|---|
+  | `provider_error`를 토큰 집계에 포함 | 토큰 분모 1 + 집계 집합 over-strict 1 + endpoint payload 1 |
+  | 표본 0일 때 비율을 `0.0`으로 | 루프 null 1 + 빈 프로젝트 1 |
+  | `not_eligible`을 분모에 포함 | 루프 상태 전수 subtest |
+  | 게이트 평균을 미채점 호출까지 0.0으로 포함 | 파생점수 2 + endpoint payload 1 |
+  | site 고정을 풀고 correlation을 전역 집계 | site 고정 양방향 1 |
+  | endpoint의 503 선언 제거 | H3 선언 2 |
+
+- **회귀 전량**: **1554 passed / 4 skipped / 610 subtests**. 직전(v1.7.47 커밋) 1531/4/601 대비
+  **+23 passed / +9 subtests** = 신규 파일과 정확히 일치. 설명되지 않는 증감 0.
+- **프론트**: `gen:api` → `npx tsc --noEmit` 0 → `npm run build` 성공(399.03 kB, 무변) →
+  `npx vitest run` **194 passed / 13 files**.
+
+### Decisions (구현자 판단)
+
+- **루프 상태 6종을 3분류했다**: 수렴 = `pass`·`terminal_decision` / 미수렴 = `budget_exhausted`·
+  `no_change`·`failed` / 분모 제외 = `not_eligible`. `terminal_decision`을 수렴에 넣은 이유는 그것이
+  루프가 판단을 **사람에게 정상 인계**한 설계된 종료이기 때문이고, `not_eligible`을 뺀 이유는 루프가
+  아예 돌지 않아 시도가 아니기 때문이다. 규칙이 열거인 만큼 회귀도 6종 전수 + `len()` 단정으로
+  잠갔다(증분 C 검증 H-1 패턴).
+- **지연 평균에 실패 호출을 포함했다**. provider timeout은 실제로 그 시간을 썼고, 빼면 열화 중인
+  gateway가 빨라 보인다.
+- **시간 창·페이지네이션을 두지 않았다** — 선례(`GET …/writing/loop-audits`)가 프로젝트 전량을
+  반환하고, `project_id` 인덱스가 있으며, 로컬 1인 단계에서 필요가 관측되지 않았다(§2). 필요해지면
+  `?since=`는 additive로 들어간다.
+
+### Next steps
+
+- **관측 KPI 페이즈의 계측·read-out은 이것으로 닫힌다.** 남은 것은 소비(대시보드)이며 오너가 이미
+  다음 페이즈로 분리해 뒀다.
+- **CHANGELOG**: 페이즈가 닫혔으므로 이제 일괄 반영 시점이다(오너 확인 대기).
+- 오너 결정 대기 2건(v1.7.47에서 이월): `analysis_extractor`의 D4 정렬 · loop round별 gate decision 노출.
+
