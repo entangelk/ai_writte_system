@@ -51,6 +51,17 @@ class LlmCallSite(StrEnum):
     COMPARE_JUDGE = "compare_judge"
     ANALYSIS_EXTRACTOR = "analysis_extractor"
     WRITING_GENERATION = "writing_generation"
+    # 증분 C (owner decision 2026-07-26, brief
+    # ``observability-site-mapping-decisions.md`` D1=분리 / D2=신규 리터럴).
+    # Measured at that point: five literals but eight real LLM adapters. The
+    # writing loop's retrieval planner, reviser and self-report each make their
+    # own provider call with their own prompt, token cap and failure mode, so
+    # folding them into a neighbouring site would permanently blend distinct
+    # signals — old records cannot be split apart afterwards, while adding a
+    # member is explicitly not a schema change (see the section above).
+    WRITING_RETRIEVAL_PLANNER = "writing_retrieval_planner"
+    WRITING_REVISION = "writing_revision"
+    WRITING_REPORT = "writing_report"
 
 
 class LlmCallOutcome(StrEnum):

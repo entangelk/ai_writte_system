@@ -43,6 +43,11 @@ from services.application.app.writing.generation_job import (
     WritingGenerationJobFailureReason,
     WritingGenerationJobService,
 )
+from services.application.app.observability.llm_call_audit import LlmCallAuditService
+from services.application.app.observability.llm_call_scope import (
+    llm_call_scope,
+    reclassify_planner_parse_error,
+)
 from services.application.app.writing.models import WritingRequest, WritingTaskType
 from services.application.app.writing.report import InvalidCandidateReport
 from services.application.app.writing.scratch import WritingScratchService
@@ -60,6 +65,14 @@ class GenerationCollaborators:
     scratch: WritingScratchService
     jobs: WritingGenerationJobService
     needs: tuple[ContextNeed, ...]
+    # Observability seam C (증분 C, owner decision 2026-07-26 D3). The worker is
+    # the one path outside a request that may still open an ``llm_call_scope``:
+    # it holds a real ``project_id``/``request_id`` from the claimed job, so
+    # nothing has to be guessed. Without it the medium/long presets — the
+    # expensive generations — would be the only ones missing from the KPI.
+    # Optional so hand-assembled test collaborators stay valid; None simply
+    # records nothing.
+    llm_call_audit: LlmCallAuditService | None = None
 
 
 async def execute_generation_job(
@@ -69,60 +82,68 @@ async def execute_generation_job(
     c = collaborators
     fail = c.jobs.mark_failed
     reasons = WritingGenerationJobFailureReason
-    try:
-        search_request = ContextSearchRequest(
-            project_id=job.project_id,
-            purpose=ContextSearchPurpose.WRITING_CONTEXT,
-            needs=c.needs,
-            query=job.query or job.instruction,
-            current_position=CurrentPosition(
-                draft_id=job.draft_id, version_id=job.version_id),
-            context_budget=ContextBudget(max_tokens=job.max_tokens),
-        )
-        package = await c.context_search.build_context_package(search_request)
-        candidate = await c.writing.generate(
-            request=WritingRequest(
-                request_id=job.request_id,
+    with llm_call_scope(c.llm_call_audit, project_id=job.project_id,
+                        correlation_id=job.request_id) as scope:
+        try:
+            search_request = ContextSearchRequest(
                 project_id=job.project_id,
-                task_type=WritingTaskType(job.task_type),
+                purpose=ContextSearchPurpose.WRITING_CONTEXT,
+                needs=c.needs,
+                query=job.query or job.instruction,
+                current_position=CurrentPosition(
+                    draft_id=job.draft_id, version_id=job.version_id),
+                context_budget=ContextBudget(max_tokens=job.max_tokens),
+            )
+            package = await c.context_search.build_context_package(search_request)
+            candidate = await c.writing.generate(
+                request=WritingRequest(
+                    request_id=job.request_id,
+                    project_id=job.project_id,
+                    task_type=WritingTaskType(job.task_type),
+                    instruction=job.instruction,
+                    draft_excerpt=job.draft_excerpt,
+                ),
+                package=package,
+                max_output_tokens=job.max_output_tokens,
+            )
+            # H-3 + H-1(2b): the result-persist phase lives INSIDE the catch-all so
+            # a scratch-write fault (the store down after a successful generate)
+            # terminates the job via INTERNAL instead of escaping to crash the worker
+            # loop and re-running the expensive generate on every reclaim. H-3 still
+            # holds: clear this job's prior (crashed-attempt) scratch before saving,
+            # so a reclaim replaces rather than duplicates the pad result.
+            c.scratch.clear_accepted_item(
+                job.project_id, job.draft_id, job.request_id)
+            entry = c.scratch.save(
+                project_id=job.project_id,
+                draft_id=job.draft_id,
+                request_id=job.request_id,
+                task_type=candidate.task_type.value,
+                output_type=candidate.output_type.value,
                 instruction=job.instruction,
-                draft_excerpt=job.draft_excerpt,
-            ),
-            package=package,
-            max_output_tokens=job.max_output_tokens,
-        )
-        # H-3 + H-1(2b): the result-persist phase lives INSIDE the catch-all so
-        # a scratch-write fault (the store down after a successful generate)
-        # terminates the job via INTERNAL instead of escaping to crash the worker
-        # loop and re-running the expensive generate on every reclaim. H-3 still
-        # holds: clear this job's prior (crashed-attempt) scratch before saving,
-        # so a reclaim replaces rather than duplicates the pad result.
-        c.scratch.clear_accepted_item(
-            job.project_id, job.draft_id, job.request_id)
-        entry = c.scratch.save(
-            project_id=job.project_id,
-            draft_id=job.draft_id,
-            request_id=job.request_id,
-            task_type=candidate.task_type.value,
-            output_type=candidate.output_type.value,
-            instruction=job.instruction,
-            candidate_text=candidate.text,
-            version_id=job.version_id,
-        )
-    except (WritingError, InvalidContextSearchRequest) as exc:
-        return fail(job, reason=reasons.INVALID_REQUEST, detail=str(exc))
-    except InvalidCandidateReport as exc:
-        return fail(job, reason=reasons.INVALID_REPORT, detail=str(exc))
-    except ContextSearchBudgetExceeded as exc:
-        return fail(job, reason=reasons.CONTEXT_BUDGET_EXCEEDED, detail=str(exc))
-    except ContextSearchFailed as exc:
-        return fail(job, reason=reasons.CONTEXT_SEARCH_FAILED,
-                    detail=f"{exc.error_type.value}: {exc.detail}")
-    except ProviderError as exc:
-        reason = (reasons.PROVIDER_TIMEOUT
-                  if exc.code is ProviderErrorCode.TIMEOUT
-                  else reasons.PROVIDER_ERROR)
-        return fail(job, reason=reason, detail=str(exc))
-    except Exception as exc:  # noqa: BLE001 — H-2 catch-all (now covers persist too): never livelock
-        return fail(job, reason=reasons.INTERNAL, detail=repr(exc))
-    return c.jobs.mark_succeeded(job, result_scratch_id=entry.id)
+                candidate_text=candidate.text,
+                version_id=job.version_id,
+            )
+        except (WritingError, InvalidContextSearchRequest) as exc:
+            return fail(job, reason=reasons.INVALID_REQUEST, detail=str(exc))
+        except InvalidCandidateReport as exc:
+            # Same rule as the sync endpoints (D4): the reporter answered and
+            # the domain rejected that answer, so the last row is a parse_error.
+            scope.reclassify_last_as_parse_error(type(exc).__name__)
+            return fail(job, reason=reasons.INVALID_REPORT, detail=str(exc))
+        except ContextSearchBudgetExceeded as exc:
+            return fail(job, reason=reasons.CONTEXT_BUDGET_EXCEEDED, detail=str(exc))
+        except ContextSearchFailed as exc:
+            # Same shared rule the endpoints use — a second copy here is how
+            # the worker's policy would drift from theirs (verification H-2).
+            reclassify_planner_parse_error(scope, exc)
+            return fail(job, reason=reasons.CONTEXT_SEARCH_FAILED,
+                        detail=f"{exc.error_type.value}: {exc.detail}")
+        except ProviderError as exc:
+            reason = (reasons.PROVIDER_TIMEOUT
+                      if exc.code is ProviderErrorCode.TIMEOUT
+                      else reasons.PROVIDER_ERROR)
+            return fail(job, reason=reason, detail=str(exc))
+        except Exception as exc:  # noqa: BLE001 — H-2 catch-all (now covers persist too): never livelock
+            return fail(job, reason=reasons.INTERNAL, detail=repr(exc))
+        return c.jobs.mark_succeeded(job, result_scratch_id=entry.id)

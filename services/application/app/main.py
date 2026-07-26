@@ -133,13 +133,13 @@ from services.application.app.writing.loop_audit import (
 from services.application.app.observability.llm_call_audit import (
     InMemoryLlmCallAuditRepository,
     LlmCallAuditService,
-    LlmCallOutcome,
     LlmCallSite,
     gate_quality_score,
 )
 from services.application.app.observability.llm_call_scope import (
     ObservedProvider,
     llm_call_scope,
+    reclassify_planner_parse_error,
 )
 from services.application.app.writing.scratch import (
     MAX_SCRATCH_PER_DRAFT,
@@ -628,10 +628,16 @@ def _default_compare_service(memory: MemoryService) -> AnalysisCompareService:
     if base_url:
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
         seed_analysis_compare_template(prompt_templates)
-        provider = GatewayGenerateProvider(
-            base_url=base_url,
-            timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
-            trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False),
+        # Observability seam C (증분 C): one record per judge turn, so a job
+        # that judges N matched pairs leaves N rows — plus a second row when a
+        # non-JSON verdict triggers the repair retry.
+        provider = ObservedProvider(
+            GatewayGenerateProvider(
+                base_url=base_url,
+                timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
+                trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False),
+            ),
+            call_site=LlmCallSite.COMPARE_JUDGE,
         )
         judge = TerminalJsonCompareJudge(
             provider,
@@ -672,9 +678,14 @@ def _default_writing_service() -> WritingService | None:
         timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
         trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False),
     )
+    # The reporter shares this gateway provider but is a *different* call site
+    # (owner decision 2026-07-26, D2): it wraps the raw provider with its own
+    # ``writing_report`` label, so a generate that also self-reports leaves two
+    # rows that can be told apart. Passing the generation-wrapped provider here
+    # instead would label both rows ``writing_generation``.
     reporter = _build_report_service(provider)
     return WritingService(
-        provider,
+        ObservedProvider(provider, call_site=LlmCallSite.WRITING_GENERATION),
         prompt_templates=prompt_templates,
         model=os.environ.get("LLM_GATEWAY_MODEL") or None,
         max_tokens=int(os.environ.get("WRITING_GENERATE_MAX_TOKENS", "1024")),
@@ -686,7 +697,8 @@ def _build_report_service(provider) -> WritingCandidateReportService:
     templates = PromptTemplateService(InMemoryPromptTemplateRepository())
     seed_report_template(templates)
     return WritingCandidateReportService(
-        provider, prompt_templates=templates,
+        ObservedProvider(provider, call_site=LlmCallSite.WRITING_REPORT),
+        prompt_templates=templates,
         model=os.environ.get("LLM_GATEWAY_MODEL") or None,
         max_tokens=_env_int("WRITING_REPORT_MAX_TOKENS", WRITING_REPORT_DEFAULT_MAX_TOKENS))
 
@@ -695,7 +707,7 @@ def _build_revise_service(provider) -> WritingRevisionService:
     templates = PromptTemplateService(InMemoryPromptTemplateRepository())
     seed_writing_revise_template(templates)
     return WritingRevisionService(
-        provider,
+        ObservedProvider(provider, call_site=LlmCallSite.WRITING_REVISION),
         prompt_templates=templates,
         model=os.environ.get("LLM_GATEWAY_MODEL") or None,
         max_tokens=int(os.environ.get("WRITING_REVISE_MAX_TOKENS", "512")),
@@ -706,7 +718,13 @@ def _build_writing_retrieval_planner(provider):
     templates = PromptTemplateService(InMemoryPromptTemplateRepository())
     seed_writing_retrieval_template(templates)
     return TerminalJsonWritingRetrievalPlanner(
-        provider,
+        # A separate site from the context-search planner (owner decision
+        # 2026-07-26, D1): same "what should I retrieve next" job, but a
+        # different prompt, token cap and failure surface, and it runs inside
+        # the revise loop where the other never does.
+        ObservedProvider(
+            provider, call_site=LlmCallSite.WRITING_RETRIEVAL_PLANNER
+        ),
         prompt_templates=templates,
         model=os.environ.get("LLM_GATEWAY_MODEL") or None,
         max_tokens=int(os.environ.get("WRITING_RETRIEVAL_PLAN_MAX_TOKENS", "512")),
@@ -828,10 +846,13 @@ def _default_context_search_service(
         return None
     prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
     seed_context_search_plan_template(prompt_templates)
-    provider = GatewayGenerateProvider(
-        base_url=base_url,
-        timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
-        trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False),
+    provider = ObservedProvider(
+        GatewayGenerateProvider(
+            base_url=base_url,
+            timeout_seconds=_env_float("LLM_GATEWAY_TIMEOUT_SECONDS", 120.0),
+            trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False),
+        ),
+        call_site=LlmCallSite.QUERY_PLANNER,
     )
     planner = TerminalJsonSearchPlanner(
         provider,
@@ -1687,6 +1708,9 @@ def build_async_generation_collaborators() -> GenerationCollaborators | None:
         scratch=_default_writing_scratch_service(),
         jobs=_default_writing_generation_job_service(),
         needs=_WRITING_CONTINUE_SCENE_NEEDS,
+        # Same factory create_app uses, so the worker's records land in the same
+        # store the KPI aggregation reads (증분 C, D3).
+        llm_call_audit=_default_llm_call_audit_service(),
     )
 
 
@@ -2933,21 +2957,35 @@ def create_app(
             )
         except (AnalysisNotFound, NotFound) as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        try:
-            proposals = await compare.compare_job(
-                project_id=project_id, job_id=job.id, candidates=candidates
-            )
-        except CompareJudgeNotConfigured as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        except InvalidJudgeResult as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-        except ProviderError as exc:
-            # A Gateway/provider failure during the matched-pair judge turn
-            # (timeout/unavailable/5xx) is an LLM error → 502, applying the
-            # v1.6.34 error taxonomy to this endpoint. Without this the
-            # ProviderError raised by GatewayGenerateProvider propagates as an
-            # unhandled 500.
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        # Observability seam C (증분 C): one record per judge turn. The scope
+        # ties a job's whole compare run together — N matched pairs leave N
+        # rows under this one correlation_id, plus a repair row where the first
+        # verdict was not JSON. Deterministic proposals (no match / duplicate)
+        # call no provider and so leave nothing, without special handling.
+        with llm_call_scope(llm_call_audit, project_id=project_id,
+                            correlation_id=job.id) as scope:
+            try:
+                proposals = await compare.compare_job(
+                    project_id=project_id, job_id=job.id, candidates=candidates
+                )
+            except CompareJudgeNotConfigured as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+            except InvalidJudgeResult as exc:
+                # The judge answered and repair still failed to parse — the
+                # domain's final rejection of that last answer (owner decision
+                # 2026-07-26, D4). Recovered first attempts keep ``success``:
+                # only the last call is touched, so the repair-frequency signal
+                # (two rows under one correlation_id) stays intact.
+                scope.reclassify_last_as_parse_error(type(exc).__name__)
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            except ProviderError as exc:
+                # A Gateway/provider failure during the matched-pair judge turn
+                # (timeout/unavailable/5xx) is an LLM error → 502, applying the
+                # v1.6.34 error taxonomy to this endpoint. Without this the
+                # ProviderError raised by GatewayGenerateProvider propagates as an
+                # unhandled 500. Already recorded by the decorator with its
+                # taxonomy intact.
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
         return {
             "job_id": job.id,
             "proposals": [_action_proposal_payload(p) for p in proposals],
@@ -3369,46 +3407,52 @@ def create_app(
                 status_code=503,
                 detail="context search service is not configured",
             )
-        try:
-            package = await context_search.build_context_package(request)
-            gate = evaluate_context_gate(
-                package=package,
-                request=request,
-                core_sot=core_sot,
-                memory_service=memory,
-                analysis_service=analysis,
-            )
+        # Observability seam C (증분 C): the query planner's calls (one, or two
+        # when the first plan is not JSON). ``idempotency_key`` is this
+        # endpoint's workflow tie — it is what the caller retries under.
+        with llm_call_scope(llm_call_audit, project_id=project_id,
+                            correlation_id=body.idempotency_key) as scope:
             try:
-                gate_findings.persist_rejection(
-                    request=request, idempotency_key=body.idempotency_key,
-                    package=package, gate=gate,
+                package = await context_search.build_context_package(request)
+                gate = evaluate_context_gate(
+                    package=package,
+                    request=request,
+                    core_sot=core_sot,
+                    memory_service=memory,
+                    analysis_service=analysis,
                 )
-            except _STORAGE_ERRORS:
-                # SoT v1.7.40 D2=A (owner decision 2026-07-24): a canonical store
-                # failure while persisting the gate rejection is the store face of
-                # 503, not the upstream 502 the ``GateFindingError`` wrap below
-                # assigns. Re-raise it unwrapped so it escapes both this try and
-                # the outer one (no outer clause matches a pymongo type) to the
-                # global handler → 503, matching run and every other storage path.
-                # Non-pymongo persistence failures still become GateFindingError →
-                # 502 (over-strict guard: an operational persist bug is not a store
-                # outage). Empty ``_STORAGE_ERRORS`` (no driver) catches nothing.
-                raise
-            except Exception as exc:
-                raise GateFindingError(str(exc)) from exc
-        except InvalidContextSearchRequest as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except ContextSearchBudgetExceeded as exc:
-            raise HTTPException(status_code=504, detail=str(exc)) from exc
-        except ContextSearchFailed as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"{exc.error_type.value}: {exc.detail}",
-            ) from exc
-        except GateFindingError as exc:
-            raise HTTPException(
-                status_code=502, detail=f"gate finding persistence failed: {exc}"
-            ) from exc
+                try:
+                    gate_findings.persist_rejection(
+                        request=request, idempotency_key=body.idempotency_key,
+                        package=package, gate=gate,
+                    )
+                except _STORAGE_ERRORS:
+                    # SoT v1.7.40 D2=A (owner decision 2026-07-24): a canonical store
+                    # failure while persisting the gate rejection is the store face of
+                    # 503, not the upstream 502 the ``GateFindingError`` wrap below
+                    # assigns. Re-raise it unwrapped so it escapes both this try and
+                    # the outer one (no outer clause matches a pymongo type) to the
+                    # global handler → 503, matching run and every other storage path.
+                    # Non-pymongo persistence failures still become GateFindingError →
+                    # 502 (over-strict guard: an operational persist bug is not a store
+                    # outage). Empty ``_STORAGE_ERRORS`` (no driver) catches nothing.
+                    raise
+                except Exception as exc:
+                    raise GateFindingError(str(exc)) from exc
+            except InvalidContextSearchRequest as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except ContextSearchBudgetExceeded as exc:
+                raise HTTPException(status_code=504, detail=str(exc)) from exc
+            except ContextSearchFailed as exc:
+                reclassify_planner_parse_error(scope, exc)
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"{exc.error_type.value}: {exc.detail}",
+                ) from exc
+            except GateFindingError as exc:
+                raise HTTPException(
+                    status_code=502, detail=f"gate finding persistence failed: {exc}"
+                ) from exc
         return _context_package_payload(package, gate)
 
     def _writing_candidate_payload(candidate) -> dict[str, object]:
@@ -3629,34 +3673,43 @@ def create_app(
             current_position=position,
             context_budget=ContextBudget(max_tokens=body.max_tokens),
         )
-        try:
-            package = await context_search.build_context_package(search_request)
-            candidate = await writing.generate(
-                request=WritingRequest(
-                    request_id=body.request_id,
-                    project_id=project_id,
-                    task_type=task_type,
-                    instruction=body.instruction,
-                    draft_excerpt=body.draft_excerpt,
-                ),
-                package=package,
-                max_output_tokens=output_tokens,
-            )
-        except WritingError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except InvalidCandidateReport as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-        except InvalidContextSearchRequest as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except ContextSearchBudgetExceeded as exc:
-            raise HTTPException(status_code=504, detail=str(exc)) from exc
-        except ContextSearchFailed as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"{exc.error_type.value}: {exc.detail}",
-            ) from exc
-        except ProviderError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        # Observability seam C (증분 C): this one request makes up to three
+        # provider calls under three different sites — the query planner, the
+        # generation itself, and the self-report when a reporter is configured.
+        with llm_call_scope(llm_call_audit, project_id=project_id,
+                            correlation_id=body.request_id) as scope:
+            try:
+                package = await context_search.build_context_package(search_request)
+                candidate = await writing.generate(
+                    request=WritingRequest(
+                        request_id=body.request_id,
+                        project_id=project_id,
+                        task_type=task_type,
+                        instruction=body.instruction,
+                        draft_excerpt=body.draft_excerpt,
+                    ),
+                    package=package,
+                    max_output_tokens=output_tokens,
+                )
+            except WritingError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except InvalidCandidateReport as exc:
+                # The reporter answered and its JSON was rejected — the report
+                # call is the last one made, so this marks that row (D4).
+                scope.reclassify_last_as_parse_error(type(exc).__name__)
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            except InvalidContextSearchRequest as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except ContextSearchBudgetExceeded as exc:
+                raise HTTPException(status_code=504, detail=str(exc)) from exc
+            except ContextSearchFailed as exc:
+                reclassify_planner_parse_error(scope, exc)
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"{exc.error_type.value}: {exc.detail}",
+                ) from exc
+            except ProviderError as exc:
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
         # Safety net (brief D0=B): persist the just-generated candidate to the
         # recovery store so a refresh/navigation before accept doesn't lose it.
         # Keyed by the draft being continued; skipped when there's no draft key.
@@ -3786,6 +3839,7 @@ def create_app(
             except ContextSearchBudgetExceeded as exc:
                 raise HTTPException(status_code=504, detail=str(exc)) from exc
             except ContextSearchFailed as exc:
+                reclassify_planner_parse_error(scope, exc)
                 raise HTTPException(
                     status_code=502,
                     detail=f"{exc.error_type.value}: {exc.detail}",
@@ -3797,8 +3851,7 @@ def create_app(
                 # The provider answered and domain parsing rejected it — a
                 # verdict the provider layer cannot reach on its own, so the
                 # success it recorded is corrected here before the flush.
-                scope.annotate_last(outcome=LlmCallOutcome.PARSE_ERROR,
-                                    error_type=type(exc).__name__)
+                scope.reclassify_last_as_parse_error(type(exc).__name__)
                 raise HTTPException(status_code=502, detail=str(exc)) from exc
             except WritingGateError as exc:
                 # Input validation and an unavailable prompt template, both
@@ -3863,23 +3916,28 @@ def create_app(
             output_type=WritingOutputType.DRAFT_PATCH,
             text=body.candidate_text,
         )
-        try:
-            package = await context_search.build_context_package(search_request)
-            enriched = await writing_report.enrich(candidate, package)
-        except InvalidContextSearchRequest as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except InvalidCandidateReport as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-        except ContextSearchBudgetExceeded as exc:
-            raise HTTPException(status_code=504, detail=str(exc)) from exc
-        except ContextSearchFailed as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"{exc.error_type.value}: {exc.detail}",
-            ) from exc
-        except ProviderError as exc:
-            status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
-            raise HTTPException(status_code=status, detail=str(exc)) from exc
+        # Observability seam C (증분 C): planner call(s) then the report call.
+        with llm_call_scope(llm_call_audit, project_id=project_id,
+                            correlation_id=body.request_id) as scope:
+            try:
+                package = await context_search.build_context_package(search_request)
+                enriched = await writing_report.enrich(candidate, package)
+            except InvalidContextSearchRequest as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except InvalidCandidateReport as exc:
+                scope.reclassify_last_as_parse_error(type(exc).__name__)
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            except ContextSearchBudgetExceeded as exc:
+                raise HTTPException(status_code=504, detail=str(exc)) from exc
+            except ContextSearchFailed as exc:
+                reclassify_planner_parse_error(scope, exc)
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"{exc.error_type.value}: {exc.detail}",
+                ) from exc
+            except ProviderError as exc:
+                status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
+                raise HTTPException(status_code=status, detail=str(exc)) from exc
         return _writing_candidate_payload(enriched)
 
     @app.post("/projects/{project_id}/writing/revise",
@@ -3934,31 +3992,36 @@ def create_app(
             output_type=WritingOutputType.DRAFT_PATCH,
             text=body.candidate_text,
         )
-        try:
-            # Validate cheap deterministic boundaries before context search so
-            # invalid requests never spend a planner round-trip.
-            writing_revision.validate_inputs(candidate, finding, body.instruction)
-            package = await context_search.build_context_package(search_request)
-            revised = await writing_revision.revise(
-                candidate=candidate,
-                finding=finding,
-                instruction=body.instruction,
-                package=package,
-            )
-        except (WritingRevisionError, InvalidContextSearchRequest) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except InvalidWritingRevision as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-        except ContextSearchBudgetExceeded as exc:
-            raise HTTPException(status_code=504, detail=str(exc)) from exc
-        except ContextSearchFailed as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"{exc.error_type.value}: {exc.detail}",
-            ) from exc
-        except ProviderError as exc:
-            status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
-            raise HTTPException(status_code=status, detail=str(exc)) from exc
+        # Observability seam C (증분 C): planner call(s) then the revision call.
+        with llm_call_scope(llm_call_audit, project_id=project_id,
+                            correlation_id=body.request_id) as scope:
+            try:
+                # Validate cheap deterministic boundaries before context search so
+                # invalid requests never spend a planner round-trip.
+                writing_revision.validate_inputs(candidate, finding, body.instruction)
+                package = await context_search.build_context_package(search_request)
+                revised = await writing_revision.revise(
+                    candidate=candidate,
+                    finding=finding,
+                    instruction=body.instruction,
+                    package=package,
+                )
+            except (WritingRevisionError, InvalidContextSearchRequest) as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except InvalidWritingRevision as exc:
+                scope.reclassify_last_as_parse_error(type(exc).__name__)
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            except ContextSearchBudgetExceeded as exc:
+                raise HTTPException(status_code=504, detail=str(exc)) from exc
+            except ContextSearchFailed as exc:
+                reclassify_planner_parse_error(scope, exc)
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"{exc.error_type.value}: {exc.detail}",
+                ) from exc
+            except ProviderError as exc:
+                status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
+                raise HTTPException(status_code=status, detail=str(exc)) from exc
         return _writing_candidate_payload(revised)
 
     @app.post("/projects/{project_id}/writing/revise-and-gate",
@@ -4050,170 +4113,183 @@ def create_app(
             except Exception as exc:  # noqa: BLE001 — deliberate isolation boundary
                 return None, {"type": "audit_persist_error", "detail": str(exc)}
 
-        try:
-            writing_revision.validate_inputs(candidate, finding, body.instruction)
-            package = await context_search.build_context_package(search_request)
-            result = await writing_revise_gate.run(
-                request=request,
-                candidate=candidate,
-                finding=finding,
-                package=package,
-                current_position=position,
-                context_budget=search_request.context_budget,
-            )
-        except (WritingRevisionError, InvalidContextSearchRequest) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except InvalidWritingRevision as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-        except ContextSearchBudgetExceeded as exc:
-            raise HTTPException(status_code=504, detail=str(exc)) from exc
-        except ContextSearchFailed as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"{exc.error_type.value}: {exc.detail}",
-            ) from exc
-        except ProviderError as exc:
-            status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
-            raise HTTPException(status_code=status, detail=str(exc)) from exc
-        except WritingReviseReportFailure as exc:
-            cause = exc.cause
-            if isinstance(cause, ProviderError):
-                status = 504 if cause.code is ProviderErrorCode.TIMEOUT else 502
-                error_type = cause.code.value
-            elif isinstance(cause, InvalidCandidateReport):
-                status, error_type = 502, "invalid_candidate_report"
-            else:
-                status, error_type = 502, "report_error"
-            audit_id, audit_error = _record_loop_audit(
-                summary=exc.loop, stages=exc.stages,
-                final_candidate=exc.candidate, gate=exc.gate,
-                error_type=error_type,
-            )
-            return JSONResponse(
-                status_code=status,
-                content={
-                    "candidate": _writing_candidate_payload(exc.candidate),
-                    "gate": (
-                        _writing_gate_payload(exc.gate)
-                        if exc.gate is not None else None
-                    ),
-                    "loop": _writing_loop_payload(exc.loop),
-                    "stages": _writing_stages_payload(exc.stages),
-                    "audit_id": audit_id,
-                    "audit_error": audit_error,
-                    "report_error": {
-                        "type": error_type,
-                        "detail": str(cause),
+        # Observability seam C (증분 C): the loop's calls all land here —
+        # planner, reviser, self-report and gate, once per round. One
+        # correlation_id per request is what makes "how many rounds did this
+        # request cost" answerable at all.
+        with llm_call_scope(llm_call_audit, project_id=project_id,
+                            correlation_id=body.request_id) as scope:
+            try:
+                writing_revision.validate_inputs(candidate, finding, body.instruction)
+                package = await context_search.build_context_package(search_request)
+                result = await writing_revise_gate.run(
+                    request=request,
+                    candidate=candidate,
+                    finding=finding,
+                    package=package,
+                    current_position=position,
+                    context_budget=search_request.context_budget,
+                )
+            except (WritingRevisionError, InvalidContextSearchRequest) as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except InvalidWritingRevision as exc:
+                scope.reclassify_last_as_parse_error(type(exc).__name__)
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            except ContextSearchBudgetExceeded as exc:
+                raise HTTPException(status_code=504, detail=str(exc)) from exc
+            except ContextSearchFailed as exc:
+                reclassify_planner_parse_error(scope, exc)
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"{exc.error_type.value}: {exc.detail}",
+                ) from exc
+            except ProviderError as exc:
+                status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
+                raise HTTPException(status_code=status, detail=str(exc)) from exc
+            except WritingReviseReportFailure as exc:
+                cause = exc.cause
+                if isinstance(cause, ProviderError):
+                    status = 504 if cause.code is ProviderErrorCode.TIMEOUT else 502
+                    error_type = cause.code.value
+                elif isinstance(cause, InvalidCandidateReport):
+                    status, error_type = 502, "invalid_candidate_report"
+                    scope.reclassify_last_as_parse_error(type(cause).__name__)
+                else:
+                    status, error_type = 502, "report_error"
+                audit_id, audit_error = _record_loop_audit(
+                    summary=exc.loop, stages=exc.stages,
+                    final_candidate=exc.candidate, gate=exc.gate,
+                    error_type=error_type,
+                )
+                return JSONResponse(
+                    status_code=status,
+                    content={
+                        "candidate": _writing_candidate_payload(exc.candidate),
+                        "gate": (
+                            _writing_gate_payload(exc.gate)
+                            if exc.gate is not None else None
+                        ),
+                        "loop": _writing_loop_payload(exc.loop),
+                        "stages": _writing_stages_payload(exc.stages),
+                        "audit_id": audit_id,
+                        "audit_error": audit_error,
+                        "report_error": {
+                            "type": error_type,
+                            "detail": str(cause),
+                        },
                     },
-                },
-            )
-        except WritingLoopRevisionFailure as exc:
-            cause = exc.cause
-            if isinstance(cause, ProviderError):
-                status = 504 if cause.code is ProviderErrorCode.TIMEOUT else 502
-                error_type = cause.code.value
-            elif isinstance(cause, WritingRevisionError):
-                status, error_type = 400, "writing_revision_error"
-            elif isinstance(cause, InvalidWritingRevision):
-                status, error_type = 502, "invalid_writing_revision"
-            else:
-                status, error_type = 502, "revision_error"
-            audit_id, audit_error = _record_loop_audit(
-                summary=exc.loop, stages=exc.stages,
-                final_candidate=exc.candidate, gate=exc.gate,
-                error_type=error_type,
-            )
-            return JSONResponse(
-                status_code=status,
-                content={
-                    "candidate": _writing_candidate_payload(exc.candidate),
-                    "gate": (
-                        _writing_gate_payload(exc.gate)
-                        if exc.gate is not None else None
-                    ),
-                    "loop": _writing_loop_payload(exc.loop),
-                    "stages": _writing_stages_payload(exc.stages),
-                    "audit_id": audit_id,
-                    "audit_error": audit_error,
-                    "revision_error": {
-                        "type": error_type,
-                        "detail": str(cause),
+                )
+            except WritingLoopRevisionFailure as exc:
+                cause = exc.cause
+                if isinstance(cause, ProviderError):
+                    status = 504 if cause.code is ProviderErrorCode.TIMEOUT else 502
+                    error_type = cause.code.value
+                elif isinstance(cause, WritingRevisionError):
+                    status, error_type = 400, "writing_revision_error"
+                elif isinstance(cause, InvalidWritingRevision):
+                    status, error_type = 502, "invalid_writing_revision"
+                    scope.reclassify_last_as_parse_error(type(cause).__name__)
+                else:
+                    status, error_type = 502, "revision_error"
+                audit_id, audit_error = _record_loop_audit(
+                    summary=exc.loop, stages=exc.stages,
+                    final_candidate=exc.candidate, gate=exc.gate,
+                    error_type=error_type,
+                )
+                return JSONResponse(
+                    status_code=status,
+                    content={
+                        "candidate": _writing_candidate_payload(exc.candidate),
+                        "gate": (
+                            _writing_gate_payload(exc.gate)
+                            if exc.gate is not None else None
+                        ),
+                        "loop": _writing_loop_payload(exc.loop),
+                        "stages": _writing_stages_payload(exc.stages),
+                        "audit_id": audit_id,
+                        "audit_error": audit_error,
+                        "revision_error": {
+                            "type": error_type,
+                            "detail": str(cause),
+                        },
                     },
-                },
-            )
-        except WritingRetrievalFailure as exc:
-            cause = exc.cause
-            if isinstance(cause, ProviderError):
-                status = 504 if cause.code is ProviderErrorCode.TIMEOUT else 502
-                error_type = cause.code.value
-            elif isinstance(cause, InvalidWritingRetrievalPlan):
-                status, error_type = 502, "invalid_retrieval_plan"
-            elif isinstance(cause, WritingRetrievalConfigurationError):
-                status, error_type = 503, "retrieval_not_configured"
-            elif isinstance(cause, WritingRetrievalPlannerError):
-                status, error_type = 503, "retrieval_planner_error"
-            elif isinstance(cause, InvalidContextSearchRequest):
-                status, error_type = 400, "invalid_context_request"
-            elif isinstance(cause, ContextSearchBudgetExceeded):
-                status, error_type = 504, "context_budget_exceeded"
-            elif isinstance(cause, ContextSearchFailed):
-                status, error_type = 502, cause.error_type.value
-            else:
-                status, error_type = 502, "retrieval_error"
-            audit_id, audit_error = _record_loop_audit(
-                summary=exc.loop, stages=exc.stages,
-                final_candidate=exc.candidate, gate=exc.gate,
-                error_type=error_type,
-            )
-            return JSONResponse(
-                status_code=status,
-                content={
-                    "candidate": _writing_candidate_payload(exc.candidate),
-                    "gate": _writing_gate_payload(exc.gate),
-                    "loop": _writing_loop_payload(exc.loop),
-                    "stages": _writing_stages_payload(exc.stages),
-                    "audit_id": audit_id,
-                    "audit_error": audit_error,
-                    "retrieval_error": {
-                        "type": error_type,
-                        "detail": str(cause),
+                )
+            except WritingRetrievalFailure as exc:
+                cause = exc.cause
+                if isinstance(cause, ProviderError):
+                    status = 504 if cause.code is ProviderErrorCode.TIMEOUT else 502
+                    error_type = cause.code.value
+                elif isinstance(cause, InvalidWritingRetrievalPlan):
+                    status, error_type = 502, "invalid_retrieval_plan"
+                    scope.reclassify_last_as_parse_error(type(cause).__name__)
+                elif isinstance(cause, WritingRetrievalConfigurationError):
+                    status, error_type = 503, "retrieval_not_configured"
+                elif isinstance(cause, WritingRetrievalPlannerError):
+                    status, error_type = 503, "retrieval_planner_error"
+                elif isinstance(cause, InvalidContextSearchRequest):
+                    status, error_type = 400, "invalid_context_request"
+                elif isinstance(cause, ContextSearchBudgetExceeded):
+                    status, error_type = 504, "context_budget_exceeded"
+                elif isinstance(cause, ContextSearchFailed):
+                    status, error_type = 502, cause.error_type.value
+                    reclassify_planner_parse_error(scope, cause)
+                else:
+                    status, error_type = 502, "retrieval_error"
+                audit_id, audit_error = _record_loop_audit(
+                    summary=exc.loop, stages=exc.stages,
+                    final_candidate=exc.candidate, gate=exc.gate,
+                    error_type=error_type,
+                )
+                return JSONResponse(
+                    status_code=status,
+                    content={
+                        "candidate": _writing_candidate_payload(exc.candidate),
+                        "gate": _writing_gate_payload(exc.gate),
+                        "loop": _writing_loop_payload(exc.loop),
+                        "stages": _writing_stages_payload(exc.stages),
+                        "audit_id": audit_id,
+                        "audit_error": audit_error,
+                        "retrieval_error": {
+                            "type": error_type,
+                            "detail": str(cause),
+                        },
                     },
-                },
-            )
-        except WritingReviseGateFailure as exc:
-            cause = exc.cause
-            if isinstance(cause, ProviderError):
-                status = 504 if cause.code is ProviderErrorCode.TIMEOUT else 502
-                error_type = cause.code.value
-            elif isinstance(cause, InvalidWritingGateResult):
-                status, error_type = 502, "invalid_gate_result"
-            elif isinstance(cause, WritingGateError):
-                status, error_type = 400, "writing_gate_error"
-            else:
-                status, error_type = 502, "gate_error"
-            audit_id, audit_error = _record_loop_audit(
-                summary=exc.loop, stages=exc.stages,
-                final_candidate=exc.candidate, gate=exc.gate,
-                error_type=error_type,
-            )
-            return JSONResponse(
-                status_code=status,
-                content={
-                    "candidate": _writing_candidate_payload(exc.candidate),
-                    "gate": (
-                        _writing_gate_payload(exc.gate)
-                        if exc.gate is not None else None
-                    ),
-                    "loop": _writing_loop_payload(exc.loop),
-                    "stages": _writing_stages_payload(exc.stages),
-                    "audit_id": audit_id,
-                    "audit_error": audit_error,
-                    "gate_error": {
-                        "type": error_type,
-                        "detail": str(cause),
+                )
+            except WritingReviseGateFailure as exc:
+                cause = exc.cause
+                if isinstance(cause, ProviderError):
+                    status = 504 if cause.code is ProviderErrorCode.TIMEOUT else 502
+                    error_type = cause.code.value
+                elif isinstance(cause, InvalidWritingGateResult):
+                    status, error_type = 502, "invalid_gate_result"
+                    scope.reclassify_last_as_parse_error(type(cause).__name__)
+                elif isinstance(cause, WritingGateError):
+                    status, error_type = 400, "writing_gate_error"
+                else:
+                    status, error_type = 502, "gate_error"
+                audit_id, audit_error = _record_loop_audit(
+                    summary=exc.loop, stages=exc.stages,
+                    final_candidate=exc.candidate, gate=exc.gate,
+                    error_type=error_type,
+                )
+                return JSONResponse(
+                    status_code=status,
+                    content={
+                        "candidate": _writing_candidate_payload(exc.candidate),
+                        "gate": (
+                            _writing_gate_payload(exc.gate)
+                            if exc.gate is not None else None
+                        ),
+                        "loop": _writing_loop_payload(exc.loop),
+                        "stages": _writing_stages_payload(exc.stages),
+                        "audit_id": audit_id,
+                        "audit_error": audit_error,
+                        "gate_error": {
+                            "type": error_type,
+                            "detail": str(cause),
+                        },
                     },
-                },
-            )
+                )
         audit_id, audit_error = _record_loop_audit(
             summary=result.loop, stages=result.stages,
             final_candidate=result.candidate, gate=result.gate,
@@ -4330,55 +4406,63 @@ def create_app(
             except Exception:  # noqa: BLE001 — cleanup never blocks accept
                 pass
 
-        try:
-            package = await context_search.build_context_package(search_request)
-            result = await writing_accept.accept(
-                draft_id=body.draft_id,
-                base_version_id=body.base_version_id,
-                idempotency_key=body.idempotency_key,
-                request=request, candidate=candidate, package=package)
-        except (NotFound,) as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except (Archived, StaleWritingBase) as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except DraftOrderIntegrityError as exc:
-            # H3 S5: closes the 500 leak SoT v1.7.29 recorded as a known defect.
-            # intent=start_next_unit reaches core_sot.start_next_unit →
-            # _require_ordered_drafts, which raises this on drafts predating the W3
-            # ordered-unit invariant. No clause here caught it, so it escaped as an
-            # opaque 500. Same mapping and rationale as the CRUD siblings (503, fix
-            # is scripts/migrate_ordered_units.py — not a corrected request).
-            #
-            # Order matters: this must precede the WritingAcceptError clause below.
-            # It is not a subclass today, but the 400 group is the broad
-            # "bad request" bucket and putting the integrity face after it invites a
-            # future re-parent to silently reclassify a server-side data problem as
-            # the caller's fault. The over-strict regression pins 503, not 400.
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        except (WritingAcceptError, WritingGateError,
-                InvalidContextSearchRequest) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except InvalidWritingGateResult as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-        except WritingAcceptAnalysisError as exc:
-            # The version WAS saved here (only the analysis job failed), so the
-            # canonical draft exists and the scratch history is moot — same
-            # rationale as the clean success path below.
-            _clear_scratch_for_saved_accept()
-            return JSONResponse(status_code=502, content={
-                "accepted": True,
-                "intent": exc.intent.value,
-                "saved": _accepted_save_payload(exc.saved, exc.target_draft),
-                "analysis_job": None,
-                "analysis_error": str(exc),
-            })
-        except ContextSearchBudgetExceeded as exc:
-            raise HTTPException(status_code=504, detail=str(exc)) from exc
-        except ContextSearchFailed as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-        except ProviderError as exc:
-            status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
-            raise HTTPException(status_code=status, detail=str(exc)) from exc
+        # Observability seam C (증분 C): accept runs the planner and then the
+        # gate (plus the reporter when the gate asks for a fresh report), so
+        # its calls belong to the accept request, not to whatever earlier
+        # request produced the candidate.
+        with llm_call_scope(llm_call_audit, project_id=project_id,
+                            correlation_id=body.request_id) as scope:
+            try:
+                package = await context_search.build_context_package(search_request)
+                result = await writing_accept.accept(
+                    draft_id=body.draft_id,
+                    base_version_id=body.base_version_id,
+                    idempotency_key=body.idempotency_key,
+                    request=request, candidate=candidate, package=package)
+            except (NotFound,) as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except (Archived, StaleWritingBase) as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except DraftOrderIntegrityError as exc:
+                # H3 S5: closes the 500 leak SoT v1.7.29 recorded as a known defect.
+                # intent=start_next_unit reaches core_sot.start_next_unit →
+                # _require_ordered_drafts, which raises this on drafts predating the W3
+                # ordered-unit invariant. No clause here caught it, so it escaped as an
+                # opaque 500. Same mapping and rationale as the CRUD siblings (503, fix
+                # is scripts/migrate_ordered_units.py — not a corrected request).
+                #
+                # Order matters: this must precede the WritingAcceptError clause below.
+                # It is not a subclass today, but the 400 group is the broad
+                # "bad request" bucket and putting the integrity face after it invites a
+                # future re-parent to silently reclassify a server-side data problem as
+                # the caller's fault. The over-strict regression pins 503, not 400.
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+            except (WritingAcceptError, WritingGateError,
+                    InvalidContextSearchRequest) as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except InvalidWritingGateResult as exc:
+                scope.reclassify_last_as_parse_error(type(exc).__name__)
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            except WritingAcceptAnalysisError as exc:
+                # The version WAS saved here (only the analysis job failed), so the
+                # canonical draft exists and the scratch history is moot — same
+                # rationale as the clean success path below.
+                _clear_scratch_for_saved_accept()
+                return JSONResponse(status_code=502, content={
+                    "accepted": True,
+                    "intent": exc.intent.value,
+                    "saved": _accepted_save_payload(exc.saved, exc.target_draft),
+                    "analysis_job": None,
+                    "analysis_error": str(exc),
+                })
+            except ContextSearchBudgetExceeded as exc:
+                raise HTTPException(status_code=504, detail=str(exc)) from exc
+            except ContextSearchFailed as exc:
+                reclassify_planner_parse_error(scope, exc)
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            except ProviderError as exc:
+                status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
+                raise HTTPException(status_code=status, detail=str(exc)) from exc
         if result.accepted:
             _clear_scratch_for_saved_accept()
         return {
