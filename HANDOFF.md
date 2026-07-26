@@ -8,7 +8,7 @@
 
 ## 지금 상태
 
-- 정본은 `docs/system-contract-sot.md` **v1.7.48**(Approved). 미확정 항목은 추측 구현하지 않는다.
+- 정본은 `docs/system-contract-sot.md` **v1.7.49**(Approved). 미확정 항목은 추측 구현하지 않는다.
 - **진행 중 페이즈 — LLM 파이프라인 관측(KPI)**(브리프 `plans/observability-kpi-decisions.md` 승인 D1=B·D2=C·D3=A). **계측 seam은 provider 데코레이터로 확정**(오너 결정 2026-07-25, 브리프 `plans/observability-instrumentation-seam-decisions.md` C안) — `ObservedProvider`가 `generate()` 1회를 레코드 1건으로 만들고, 워크플로 귀속은 `llm_call_scope` contextvar가 나른다. **계측·read-out 완료 — 남은 것은 소비(대시보드)뿐이고 그건 오너가 다음 페이즈로 분리해 뒀다.** 계측된 호출부는 **8종 전부**(`analysis_extractor`·`writing_gate`·`compare_judge`·`query_planner`·`writing_retrieval_planner`·`writing_generation`·`writing_revision`·`writing_report`, 전부 seam C). read-out은 `GET /projects/{id}/observability/kpi`(v1.7.48). 운영기획 포트폴리오는 `docs/observability-kpi-rationale.md`. QUAL-1(제품 품질·수기·dogfood)과 별개 트랙.
 - **새 호출부를 계측하는 법**(Phase 7 등): ① `main.py` 조립 지점에서 provider를 `ObservedProvider(inner, call_site=…)`로 감싼다(도메인 코드는 건드리지 않는다). ② 그 호출이 일어나는 요청 경로에서 `llm_call_scope(...)`를 연다 — **감싸기와 scope 개방은 항상 함께 간다. 빠뜨리면 레코드가 조용히 0건인데 스위트는 green이다**(scope 유닛 테스트로는 안 물리므로 배선 회귀를 함께 넣는다). ③ **조립 가드도 함께 넣는다** — 하네스는 `ObservedProvider`를 직접 만들기 때문에 `_default_*`가 감싸기를 빠뜨려도 green이고 **배포에서만** 계측이 사라진다(실측: gate 조립에서 wrapper를 벗겨도 56 passed). 가드는 **리터럴까지 단정한다** — 잘못된 site로 감싸는 것은 안 감싸는 것과 똑같이 틀렸다. ④ 도메인만 아는 판정(gate decision·파생점수)은 `scope.annotate_last(...)`, 최종 도메인 거부는 **`scope.reclassify_last_as_parse_error(...)`**(마지막 레코드가 `success`일 때만 동작 — `provider_error` taxonomy를 덮지 않기 위한 가드)로 flush 전에 얹는다. `ContextSearchFailed` 계열은 같은 모듈의 `reclassify_planner_parse_error(scope, exc)`가 `llm_error` 계보만 걸러 준다 — **endpoint와 worker가 같은 정의를 쓴다**(복제하면 두 정책이 조용히 갈라진다).
 - **계측에서 지켜야 하는 계약**(SoT §"LLM 파이프라인 관측(KPI)"): ① 레코드는 **provider가 실제로 호출된 경우에만** — seam C에서는 구조적으로 참이다. ② **실패한 호출도 센다**(성공만 세면 성공률이 영구히 100%). ③ **scope 밖 호출(worker·script)은 기록하지 않는다** — 추측 `project_id`는 오염이다. ④ 격리(`_flush`)를 **좁히지 않는다** — 좁히면 감사 저장소의 pymongo 예외가 전역 handler(v1.7.38)에 도달해 **정상 200이 503으로 뒤집히고**, flush가 `finally`에 있어 요청의 원래 예외까지 덮어쓴다.
@@ -75,7 +75,7 @@ docker compose run --rm --no-deps -v "$PWD/tests:/app/tests" \
 
 ## Owner Decisions Needed
 
-- **★★ 다중 사용자 전환 여부(D0)** — 오너 요청(2026-07-26)으로 로그인·인증·아이디별 관리·CMS 삭제·관리자 기능 계획서를 만들었다: `plans/multi-user-auth-cms-decisions.md`. **이건 SoT §"제품과 프로젝트 경계"의 "계정/인증 없는 단일 사용자"·"`user_id`를 억지로 넣지 않는다" 두 조항의 유예를 해제하는 결정**이라 D0 없이는 착수하지 않는다. 실측 규모: **62 operation 전부**에 인가와 401/403 선언이 붙고, ES/Mongo 무인증(v1.6.53이 "인증 slice 선행 필요"로 미뤄 둔 것)도 함께 온다. dogfood(아래)와 선후를 정해야 한다.
+- **★★ 다중 사용자 확장 D1~D8** — **D0는 결정됐다**(오너 2026-07-26: MVP 단계 제약이 만료됐다 → 정본 **v1.7.49**가 다중 사용자 확장을 방향으로 명시). 남은 것은 설계 결정 8건: `plans/multi-user-auth-cms-decisions.md`(별도 서버 여부·인증 방식·소유권 모델·기존 데이터 귀속·삭제 의미·관리자 범위·인가 시행 지점·슬라이스 순서). **주의 — 정본은 방향을 적었지만 코드는 아직 없다**: 배포 스택은 여전히 무인증이므로 이 조항을 근거로 외부에 노출하면 안 된다. 실측 규모: **62 operation 전부**에 인가와 401/403 선언이 붙고, Mongo·ES 무인증(v1.6.53이 "인증 slice 선행 필요"로 미뤄 둔 것)도 함께 온다. dogfood(아래)와 선후를 정해야 한다.
 - **★ dogfood 착수(GATE-1)** — 가장 큰 갈림길. 실 12B 풀스택 관통은 끝났고 기술적 선행 조건은 없다. 착수하면 `OPS-1` Ready 승격.
 - **`analysis_extractor`를 D4로 정렬할지**(v1.7.47): 지금 이 site만 최종 도메인 거부를 `parse_error`로 재분류하지 않아 같은 repair 구조인 `compare_judge`와 정책이 갈린다. 정렬하면 두 site가 같은 규칙을 따르고, 두면 v1.7.46 결정이 유지된다. 어느 쪽이든 이행 무손실 증명이 필요한 별도 증분.
 - **loop의 round별 gate decision 노출 여부**(v1.7.47 공백): 노출하면 loop 내부 gate 레코드에도 파생점수를 얹을 수 있다. 도메인 계약(`WritingLoopStage`) 변경이라 D2-B(파생점수 정교화)와 함께 볼 사안.
