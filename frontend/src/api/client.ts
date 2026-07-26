@@ -103,6 +103,16 @@ export function getProject(projectId: string): Promise<Project> {
   return request(`/projects/${projectId}`);
 }
 
+export type ObservabilityKpi = components["schemas"]["ObservabilityKpiResponse"];
+export type ObservabilityKpiSite =
+  components["schemas"]["ObservabilityKpiSitePayload"];
+
+export function getObservabilityKpi(
+  projectId: string,
+): Promise<ObservabilityKpi> {
+  return request(`/projects/${projectId}/observability/kpi`);
+}
+
 export function getProjectBrief(
   projectId: string,
 ): Promise<ProjectBriefGetResponse> {

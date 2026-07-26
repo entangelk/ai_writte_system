@@ -232,6 +232,12 @@ export function DraftList() {
             <Link className="section-link" to={`/projects/${projectId}/review`}>
               검토함 →
             </Link>
+            <Link
+              className="section-link"
+              to={`/projects/${projectId}/observability`}
+            >
+              파이프라인 관측 →
+            </Link>
           </div>
         )}
       </header>

@@ -1476,3 +1476,72 @@ main {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Pipeline observability (KPI dashboard). The summary is a definition list so
+   each number keeps its label and its denominator note together — those notes
+   are what stop a null or an excluded row from being misread. */
+.kpi-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.9rem;
+  margin: 1.2rem 0 0;
+}
+
+.kpi-summary > div {
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 0.8rem 0.9rem;
+  background: #fbf8f1;
+}
+
+.kpi-summary dt {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.kpi-summary dd {
+  margin: 0.25rem 0 0;
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-note {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.chart-frame {
+  margin-top: 0.7rem;
+  padding: 0.6rem 0.4rem 0;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: #fbf8f1;
+}
+
+.kpi-table {
+  margin-top: 0.7rem;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-table th,
+.kpi-table td {
+  padding: 0.5rem 0.7rem;
+  text-align: right;
+  border-bottom: 1px solid var(--line);
+}
+
+.kpi-table thead th,
+.kpi-table tbody th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.kpi-table tbody th {
+  color: var(--ink);
+}
