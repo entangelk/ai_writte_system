@@ -198,8 +198,9 @@ TypeError**가 재현된다. 복원은 `cp`(백업)로 했다 — `git checkout 
   `HttpOnly; Max-Age=604800; Path=/; SameSite=lax; Secure` 확인) · 쿠키로 me 200 · 쿠키 없이 401 ·
   오답 401 · 미존재 사용자 **동일 메시지** 401 · 로그아웃 200 · 로그아웃 후 me 401 ·
   **세션 없이 `/projects` 200(비-목표 확인)**.
-- **회귀 전량**: backend **1605 passed / 1 skipped / 623 subtests**. 직전 커밋 기준선 1556/612 대비
-  **+49 passed / +11 subtests**. 분해: 신규 auth 46 + **skip 정책 차이 3**(이 베타 머신에는
+- **회귀 전량**(naive datetime 수정 반영 후): backend **1609 passed / 1 skipped / 623 subtests**.
+  직전 커밋 기준선 1556/612 대비 **+53 passed / +11 subtests**. 분해: 신규 auth **50**(1a~1c 46 +
+  naive datetime 회귀 4) + **skip 정책 차이 3**(이 베타 머신에는
   `elasticsearch` 파이썬 패키지가 있어 HANDOFF가 적어 둔 lexical 3건이 skip되지 않는다).
   `-rs`로 잔여 skip 1건이 상시 skip인 live Chroma임을 확인했다. 설명되지 않는 증감 0.
 - **프론트**: `gen:api` 후 `tsc` 0 · build 성공(**진입 401.19 kB 무변** — 이 슬라이스는 프론트 코드 0,
