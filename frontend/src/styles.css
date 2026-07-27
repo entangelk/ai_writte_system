@@ -59,16 +59,162 @@ a {
   text-decoration: none;
 }
 
-.app-header > span {
+.app-header > span,
+.session-menu > span {
   color: var(--muted);
   font-size: 0.75rem;
   letter-spacing: 0.12em;
+}
+
+.session-menu {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.session-menu button {
+  padding: 0;
+  color: var(--accent);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+
+.session-menu button:hover:not(:disabled),
+.session-menu button:focus-visible {
+  color: var(--accent-dark);
+}
+
+.session-menu button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.header-alert {
+  max-width: 68rem;
+  margin: 0 auto;
+  padding: 0.75rem 2rem;
+  color: var(--danger);
+  font-size: 0.82rem;
 }
 
 main {
   max-width: 68rem;
   margin: 0 auto;
   padding: 0 2rem 5rem;
+}
+
+.auth-shell {
+  display: grid;
+  width: 100%;
+  min-height: 100svh;
+  max-width: none;
+  place-items: center;
+  margin: 0;
+  padding: clamp(1.5rem, 5vw, 4rem);
+}
+
+.login-page,
+.auth-status {
+  width: min(100%, 31rem);
+}
+
+.login-heading {
+  margin-bottom: clamp(2.5rem, 7vw, 4.5rem);
+}
+
+.login-heading h1 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(3.2rem, 10vw, 5.6rem);
+  font-weight: 500;
+  letter-spacing: -0.06em;
+  line-height: 0.94;
+}
+
+.login-heading > p:last-child {
+  max-width: 27rem;
+  margin: 1.35rem 0 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.login-form {
+  display: grid;
+  gap: 1.2rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--ink);
+}
+
+.login-form label {
+  display: grid;
+  gap: 0.45rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.login-form input {
+  width: 100%;
+  padding: 0.75rem 0.1rem;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #aca392;
+  border-radius: 0;
+  outline: none;
+  transition: border-color 160ms ease;
+}
+
+.login-form input:focus {
+  border-bottom-color: var(--accent);
+}
+
+.auth-submit {
+  justify-self: start;
+  margin-top: 0.45rem;
+  padding: 0.78rem 1.35rem;
+  color: #fffaf1;
+  background: var(--accent);
+  border: 0;
+  cursor: pointer;
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.auth-submit:hover:not(:disabled),
+.auth-submit:focus-visible {
+  background: var(--accent-dark);
+  transform: translateY(-1px);
+}
+
+.auth-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.login-error,
+.session-expired {
+  margin: 0;
+  padding: 0.8rem 0;
+  color: var(--danger);
+  border-bottom: 1px solid rgba(157, 47, 47, 0.35);
+  font-size: 0.84rem;
+}
+
+.session-expired {
+  margin-bottom: 1.2rem;
+}
+
+.auth-status {
+  color: var(--muted);
+}
+
+.auth-status-title {
+  margin: 0 0 0.55rem;
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.7rem;
 }
 
 .workspace-page {

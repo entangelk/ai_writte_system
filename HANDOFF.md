@@ -4,7 +4,7 @@
 > 완료 서술은 여기 쓰지 않는다 — `docs/daily_logs/`(상세) · `docs/system-contract-sot.md` 변경이력 · `CHANGELOG.md`(마일스톤) · `docs/verifications/`(독립 검증)에 이미 있다.
 > 편집 규칙은 `CLAUDE.md`·`AGENTS.md`의 "HANDOFF.md" 절에 있다. **길이 상한은 없다** — 대신 **~200줄을 넘으면 자가 검수**하고(그 뒤로는 ~100줄마다) 결과를 아래 한 줄로 남긴다. 길어야 할 이유가 있으면 길어도 된다. 안 보는 것이 문제다.
 >
-> 마지막 자가 검수: 2026-07-27 · 173줄 (D8-3을 "브리프 승인 전 착수 금지"로 전환 + E1~E4를 Owner Decisions 최상단에. 다음 검수 트리거는 200줄)
+> 마지막 자가 검수: 2026-07-27 · 176줄 (D8-4 B1~B3 폐쇄·검증 합격 상태로 재작성. 다음 검수 트리거는 200줄)
 
 ## 머신 구성 (알파 · 베타 · 감마)
 
@@ -24,7 +24,7 @@
 
 ## 지금 상태
 
-- 정본은 `docs/system-contract-sot.md` **v1.7.50**(Approved). 미확정 항목은 추측 구현하지 않는다.
+- 정본은 `docs/system-contract-sot.md` **v1.7.51**(Approved). 미확정 항목은 추측 구현하지 않는다.
 - **진행 중 페이즈 = 다중 사용자 인증(D8).** 오너 지시로 **슬라이스를 잘게 쪼개 진행 중**이다(한 번에 큰 덩어리 금지). 진행표:
 
   | 슬라이스 | 상태 | 내용 |
@@ -33,10 +33,13 @@
   | **2a** | **완료** | `Project.owner_id: str \| None` 필드 + Mongo 왕복. `create_project(name, owner_id=None)`. **공개 API 무변** |
   | **2b** | **완료** | `POST /projects`가 세션이 있으면 생성자를 owner로 **기록**. 세션 없으면 unowned로 **여전히 200** |
   | 2c(선택) | 미착수 | `owner_id`를 공개 payload에 노출할지 — **프론트가 읽을 이유가 생길 때** 하면 된다(schema.d.ts 변경이므로 공짜 아님) |
-  | **3** | **오너 결정 대기 — 코딩 금지** | **인가 시행**(D7=A). 착수 전 `plans/auth-d8-3-enforcement-decisions.md`의 **E1~E4 승인 필요** |
+  | **D8-4 선행** | **완료·검증 합격** | B1 flaky 대기 · B2 로그아웃 pending/실패 · B3 `revise-and-gate` 401 회귀 폐쇄 |
+  | **3-a (다음)** | 미착수 | 인증 dependency + 보호 대상 401 선언 + 이 단계의 전수 누락 가드 |
+  | **3-b** | 미착수 | project 소유권 + `GET /projects` 저장소 필터. `owner_id=None` 항상 deny |
+  | **3-c** | 미착수 | 최종 64 operation 전수 가드 |
 
-- **★ D8-3은 브리프 승인 전까지 착수하지 않는다** — `plans/auth-d8-3-enforcement-decisions.md`(2026-07-27 초안). 64개 operation의 전제를 바꾸고 **틀리면 데이터 유출**이라 추측 구현 금지. 결정 4건: **E1** 주인 없는(`owner_id=None`) 프로젝트를 인가가 어떻게 다룰지(★차단) · **E2** 인증만 요구할 곳 vs 소유권까지 볼 곳(+`GET /projects` 본인 것만 반환) · **E3** D8-3 자체의 분할 방식 · **E4** 로그인 화면(D8-4)을 D8-3보다 **먼저** 할지. 추천은 각각 A.
-- **D8-3 착수자를 위한 사실 4가지**(브리프 §1에 근거와 함께 있다): (a) 재료는 이미 다 있다 — `_current_user(request)`(main.py auth 절) + `project.owner_id`. (b) **워커는 HTTP API를 쓰지 않는다** — Mongo에 직접 붙으므로(`scripts/index_sync_worker.py:85·261`) HTTP 인가가 워커를 깨뜨리지 않는다. "서비스 계정"이 필요한 것은 D8-3이 아니라 **인프라 인증(D8-7)**이다. (c) **프론트는 API를 쓴다** — D8-3이 들어가면 로그인 화면이 없어 전부 401이 된다(그래서 E4가 순서 교환을 묻는다). (d) `tests/test_auth_api.py`의 `test_no_non_auth_operation_is_protected_yet`이 **그때 실패하는 것이 정상**이다 — 삭제하지 말고 **역명제로 다시 쓴다**. 이 가드는 `security`·**401·403 세 신호 전부**를 보므로 어떤 상태코드로 설계하든 발화한다.
+- **D8-3 E1~E4 = 전부 A로 확정** — `plans/auth-d8-3-enforcement-decisions.md`(Resolved). `owner_id=None`은 탈퇴·삭제 누락 같은 미래 비정상 잔존도 **항상 deny**. project 경로는 소유권, 그 외는 인증이며 `GET /projects`는 저장소 조회에서 본인 소유만 반환한다. 3-a→3-b→3-c로 작게 나누고, 각 단계에 자기 전수 누락 가드를 둔다.
+- **D8-3 착수자를 위한 사실 4가지**(브리프 §1): (a) 재료는 `_current_user(request)` + `project.owner_id`. (b) **워커는 HTTP API를 쓰지 않는다** — Mongo 직접 접근이므로 서비스 계정은 D8-3이 아니라 **인프라 인증(D8-7)** 사안. (c) 프론트는 이제 로그인/만료/route guard가 서 있어 백엔드를 잠가도 로그인 후 계속 쓸 수 있다. (d) `tests/test_auth_api.py::test_no_non_auth_operation_is_protected_yet`은 3-a에서 **실패하는 것이 정상** — 삭제하지 말고 역명제로 바꾼다(`security`·401·403 세 신호 전부 검사).
 - **⚠ 인가는 아직 없다 — 이것은 의도된 상태다.** 로그인이 생겼고 소유자가 기록되기 시작했지만 **아무것도 그것을 읽어 접근을 막지 않는다**: `/auth/*` 외 **모든 endpoint는 세션 없이 그대로 열려 있다**. 비-목표는 두 겹으로 잠겨 있다 — `SliceBoundaryTest`(표본 3건 + **전 operation에 `security`·401·403 선언 부재 전수 단언**)와 `ProjectOwnershipRecordingTest`(익명 생성이 **401이 아니라 200**임을 단언). **배포 스택은 여전히 실질 무인증이므로 외부 노출 금지.**
 - **첫 계정 만드는 법**(관리자 API는 D8-5라 아직 없다): `docker exec -e PYTHONPATH=/app -e AUTH_BOOTSTRAP_PASSWORD='…' ai_writte_system-application-1 python scripts/create_user.py <username> --admin`. **`PYTHONPATH=/app`이 필수다** — 이미지에 PYTHONPATH가 없고 `python scripts/x.py`는 CWD를 sys.path에 넣지 않는다.
 - LLM 파이프라인 관측(KPI) 페이즈는 **계측·집계 API·대시보드까지 닫혔다**(2026-07-26). 그 결과물 위에서 다음 작업이 돈다.
@@ -47,10 +50,10 @@
 - **집계 API를 읽을 때의 함정 3가지**(v1.7.48, 전부 응답이 분모를 함께 실어 방어한다): ① `total_tokens`는 `success`+`parse_error` 행만 — 분모는 `tokens_counted_from`. ② **표본이 0이면 비율은 `null`이지 `0.0`이 아니다**(`gate.avg_quality_score`·`loop.non_convergence_rate`) — loop 감사는 opt-in(기본 off)이라 기본 배포에서 `loop.runs_considered`=0이 정상이다. ③ **`multi_call_correlations`는 repair 수가 아니다** — site 고정 후 레코드 2건 이상인 correlation 수이며, repair 구조 site(extractor·compare·planner)에서만 repair를 뜻하고 writing loop에서는 **설계된 라운드**다(gate 최대 3회).
 - **loop 내부 gate 레코드에는 `decision`·`gate_quality_score`가 없다**(v1.7.47 알려진 공백): 파생점수는 endpoint가 `annotate_last`로 얹는데 revise loop이 round별 판정을 결과에 노출하지 않는다(`WritingLoopStage`는 stage/ordinal/status만). 그 필드는 **독립 `POST …/writing/gate` 호출에만** 채워지므로 집계가 전수 커버리지를 가정하면 안 된다.
 - 공개 API 계약(H3)은 닫혀 있다: **`/health`를 제외한 64개 operation 전부**(전체 65 — 인증 3종 추가)가 realistic 에러 상태를 OpenAPI에 선언하고 **미매핑 500 부채는 0건**이다. 새 endpoint를 추가하면 **`responses=`도 함께** 붙여야 하며, 트랙별 전수 선언 가드 테스트가 빠뜨림을 잡는다. 저장소 장애 503 face는 이제 **예외 없이 전 endpoint 균일**하다 — v1.7.40이 마지막 두 잔여(광의 catch가 pymongo를 삼켜 502로 내던 곳)를 닫았다: `POST …/analysis/jobs/{id}/run`과 `POST …/context-search`의 `persist_rejection`. 둘 다 광의 catch 앞에 `except _STORAGE_ERRORS`를 두어 저장소 예외를 503으로 보낸다. **주의**: 앞으로 endpoint body를 광의 `except Exception`으로 감싸면 그 순간 저장소 예외가 다시 502/도메인 에러로 새므로, 그런 catch를 둘 때는 반드시 그 앞에 `except _STORAGE_ERRORS`를 둔다.
-- 회귀 기준선: backend **1627 passed / 623 subtests**(test-mongo 기동, 인증 슬라이스 1~2b 포함), frontend **207 passed / 14 files**, build JS **진입 401.19 kB + 관측 화면 청크 385.67 kB**(차트는 `React.lazy`로 분리 — 관측 화면을 열 때만 내려간다). **skip 수는 머신마다 다르다** — live Chroma 1건은 항상 skip이고, `elasticsearch` 파이썬 패키지가 없는 머신에서는 lexical retrieval 3건이 추가로 skip된다(베타 머신 2026-07-27 = **1 skipped**, 이 패키지가 있다). 숫자가 안 맞으면 회귀를 의심하기 전에 skip 사유부터 `-rs`로 확인할 것. **프론트는 `npm install`이 선행**돼야 한다(미설치 머신에서 recharts 부재로 tsc가 깨지는데 코드 문제가 아니다).
+- 회귀 기준선: backend **1627 passed / 623 subtests**(D8-4는 백엔드 무변), frontend **217 passed / 14 files**(독립 검증 B1~B3 closure 포함). build JS는 **진입 404.87 kB + 관측 화면 청크 385.71 kB**(차트는 `React.lazy`로 분리). **skip 수는 머신마다 다르다** — live Chroma 1건은 항상 skip이고, `elasticsearch` 파이썬 패키지가 없는 머신에서는 lexical retrieval 3건이 추가로 skip된다(베타 머신 2026-07-27 = **1 skipped**). 숫자가 안 맞으면 `-rs`로 skip 사유부터 볼 것. **프론트는 `npm install`이 선행**돼야 한다.
 - **[베타 머신 관측치, 2026-07-27, `docker compose ps` 실측]** 전체 스택이 `--build` 재빌드 후 떠 있다(외부 12B `192.168.1.22:9080` 배선). 정확한 health: **healthy 7**(`application`·`gateway`·`mongo`·`elasticsearch`·`embedding`·`chroma`·`frontend`) + **healthcheck 없는 2**(`worker`·`generation_worker` — async 배경 워커라 by design, "Up"이지 "healthy" 아님). **"전부 healthy"라고 쓰지 않는다** — 워커 2종은 구조적으로 healthcheck가 없다. `/health` 200, 관측 route(`/projects/{id}/observability/kpi`) 등록 확인. (frontend는 원래 unhealthy였다 — nginx `listen 80`이 IPv4 전용인데 healthcheck가 `localhost`→`::1`로 풀려 refused. 이번에 healthcheck를 `127.0.0.1`로 고쳐 healthy 전환 — `docker-compose.yml`에 반영, 46f6009 이후의 사전 존재 결함이었다.) **DB는 fresh다** — 기동 시 dev `mongo_data`의 구 `analysis_extract_v3` 본문(sha `fb4e272…`, 볼륨 소거로 재확인 불가)이 현재 canonical v3(sha `4376310…`)와 달라 `PromptTemplateConflict`로 app이 죽었고(코드 회귀 아님, 코드↔테스트 핀 일치), **오너 판단으로 데이터 볼륨(mongo·es·chroma)을 비우고**(embedding 모델 캐시는 보존) 재기동해 해소했다. 즉 관측 화면·모든 데이터는 **빈 상태부터** 시작한다.
 - **관측 화면 육안 확인이 남은 미검증 항목**이다(로직은 회귀로 잠겨 있고 렌더만 미검증). URL `http://localhost:5520/projects/:id/observability`. **DB가 비어 있어 지금 열면 빈 상태**만 보이므로, 차트 배치·라벨 충돌을 보려면 먼저 파이프라인을 한 번 관통시켜(프로젝트 생성→분석/집필) `llm_call_audits`를 쌓아야 한다.
-- **인증 코드가 들어간 뒤 배포하려면 application 이미지 rebuild가 필요하다**(`argon2-cffi` 신규 의존성). `docker compose up -d --build application`.
+- 인증 백엔드 변경은 application, 로그인 UI 변경은 frontend 이미지 rebuild가 필요하다. 현재 베타 머신은 2026-07-27 D8-4 이미지까지 재빌드됐다.
 
 ## 기동 · 실행법
 
@@ -96,7 +99,7 @@ docker compose run --rm --no-deps -v "$PWD/tests:/app/tests" \
 - **개발 단계(2026-07-20 오너)**: "Gate 우선" 단계는 끝났다. 지금은 **Gate ↔ UI/UX 왕복**이 주축이다.
 - 아이디에이션·계획이 충돌하면 임의 구현 없이 오너 결정을 받는다. 나중 요청이 기록된 결정과 충돌하면 어느 쪽이 canonical인지 먼저 묻는다.
 - monorepo + 독립 LLM Gateway/Worker, Application = FastAPI. 경계는 `project_id`이며 **모든 저장·검색·Gate·tool handler가 강제한다**.
-- **개발 단계(2026-07-26 오너)**: MVP 단일 사용자 유예가 만료됐다 — 제품은 **다중 사용자로 확장한다**(정본 v1.7.49). **단, 코드는 아직 없다**: 배포 스택은 여전히 무인증이므로 이 조항을 근거로 외부에 노출하면 안 된다. 소유권은 `project_id` 강제를 **대체하지 않고 그 위에 얹힌다**. 설계 결정 D1~D8은 아래 오너 결정 대기.
+- **개발 단계(2026-07-26 오너)**: MVP 단일 사용자 유예가 만료돼 **다중 사용자로 확장 중**이다(정본 v1.7.51). 사용자·세션·소유자 기록·프론트 로그인은 서 있으나 **백엔드 인가는 아직 없으므로 외부 노출 금지**. 소유권은 `project_id` 강제를 대체하지 않고 그 위에 얹힌다.
 - frontend = React + TS + Vite, 서빙은 별도 compose 서비스(nginx). OpenAPI→TS 타입 생성 + 얇은 `fetch` 래퍼.
 - **Core SOT**: offset = raw Unicode code point, `content_hash` = raw UTF-8 SHA-256. `source_ref` span은 단일 `source_block` 안에 든다. persistence는 Mongo transaction 기본이고 non-transaction fallback은 **single-writer local/test 전용**. project/draft는 archive(soft delete)하고 snapshot/version/source_ref는 보존한다(archive = 읽기 허용, 본문 쓰기·rename 409).
 - **memory는 append-only**. AI가 직접 덮어쓰지 않고 검색·대조·Gate·검토·versioned upsert를 거친다. canonical만 `memory_vectors`에 색인하며 트리거는 async outbox→worker다. semantic 매칭은 **off 기본**.
@@ -114,12 +117,11 @@ docker compose run --rm --no-deps -v "$PWD/tests:/app/tests" \
 
 ## Owner Decisions Needed
 
-- **★★ D8-3 인가 시행 E1~E4** — **다음 작업을 막고 있는 것.** `plans/auth-d8-3-enforcement-decisions.md`. **E1** `owner_id=None` 처리(폐기 후 clean slate / 전부 허용 / 전부 거부 / 관리자 귀속) · **E2** 인증만 vs 소유권까지(+`GET /projects` 본인 것만) · **E3** D8-3 분할 방식 · **E4** 로그인 화면(D8-4)을 **먼저** 할지. 추천은 각각 A이며, **E1은 어느 쪽을 골라도 코드가 `None`을 deny로 다루는 것이 필수**(폐기는 "지금 없다"만 보장하지 "안 생긴다"를 보장하지 않는다).
 - **★ dogfood 착수(GATE-1)** — 실 12B 풀스택 관통은 끝났고 기술적 선행 조건은 없다. 착수하면 `OPS-1` Ready 승격. 지금은 **인증(D8)이 진행 중**이라 그 뒤로 밀려 있다 — 인증 도중에 끼울지, 끝내고 할지는 오너 판단.
 
 **결정 완료 — 오너 결정 대기 아님, 구현만 남음:**
 
-- **다중 사용자 인증 D0~D8 = 전부 결정됨**(D0 2026-07-26, D1~D8 2026-07-27). `plans/multi-user-auth-cms-decisions.md` §결정 요약: D1=A(내부 모듈)·D2=A(세션+HttpOnly 쿠키, 보안 하드닝·Argon2id)·D3=A(`owner_id`, 공유는 미래)·D4=마이그레이션 불요(개발 데이터 폐기 허용)·D5=A(2단계 삭제, 파기=all delete 전체 그래프)·D6=A(최소 관리자)·D7=A(dependency+전수 가드, 보안 근거)·D8=브리프 7단계. 착수 시 각 슬라이스 계약을 정본에 함께 적는다. **슬라이스 1은 완료**(위 "지금 상태"); D8-3에서 **64 operation**(`/health` 제외)에 인가·401/403이 붙고 Mongo·ES 무인증도 함께 닫힌다.
+- **다중 사용자 인증 D0~D8 + E1~E4 = 전부 결정됨**. D8-4는 독립 검증 B1~B3까지 폐쇄해 합격했고, 다음은 D8-3a다. D8-3이 `/health` 제외 **64 operation**에 HTTP 인증·인가를 붙인다. Mongo·ES 인증은 별도 **D8-7**이며 HTTP 인가와 섞지 않는다.
 - **외부 API 확장 D1~D6 = 전부 결정됨**(2026-07-27). `plans/external-api-expansion-decisions.md` §2: 세 축 전부 확장하되 **슬라이스 분리**(LLM → 임베딩 → 리랭커)·D2=A(generic OpenAI 호환)·D3=A(env 키, 인증 시크릿 재사용)·D4=A(전역 기본)·D5=리랭커 포함(self-host `bge-reranker-v2-m3-ko` + 외부 seam). 코드 실측 공백 = 인증 헤더 주입 지점·provider 선택 config. **착수는 인증 다음**.
 - **`analysis_extractor`를 D4로 정렬할지**(v1.7.47): 지금 이 site만 최종 도메인 거부를 `parse_error`로 재분류하지 않아 같은 repair 구조인 `compare_judge`와 정책이 갈린다. 정렬하면 두 site가 같은 규칙을 따르고, 두면 v1.7.46 결정이 유지된다. 어느 쪽이든 이행 무손실 증명이 필요한 별도 증분.
 - **loop의 round별 gate decision 노출 여부**(v1.7.47 공백): 노출하면 loop 내부 gate 레코드에도 파생점수를 얹을 수 있다. 도메인 계약(`WritingLoopStage`) 변경이라 D2-B(파생점수 정교화)와 함께 볼 사안.
@@ -128,7 +130,7 @@ docker compose run --rm --no-deps -v "$PWD/tests:/app/tests" \
 
 **1번이 현재 진행 중인 트랙이다.** 나머지는 그와 무관하게 남아 있는 것들.
 
-1. **인증 D8-2 — `Project.owner_id` 필드 도입**(D4에 따라 마이그레이션 스크립트 없음; 기존 개발 데이터는 폐기 허용). 그다음이 **D8-3 인가 시행 + 전수 가드**로 64 operation에 401/403이 붙는 가장 큰 단계다. 착수 전 `plans/multi-user-auth-cms-decisions.md` §결정 요약을 읽을 것.
+1. **인증 D8-3a — 인증 dependency + 단계 전수 가드.** `/health` 무인증 유지, `/auth/login`·`/auth/logout`·`/auth/me`의 각 정책을 명시하고 나머지 보호 대상에 401 선언을 붙인다. `test_no_non_auth_operation_is_protected_yet`은 삭제하지 말고 역명제로 바꾼다. 다음은 3-b 소유권+목록 필터(`None` deny) → 3-c 최종 전수 가드.
 2. **스택을 올리면 바로 할 것 — 화면 육안 확인 2건**(둘 다 로직은 회귀로 잠겨 있고 **렌더만** 미검증):
    (a) 관측 화면 `/projects/:id/observability` — 차트 라벨 충돌·막대 배치·좁은 화면 표 넘침.
    (b) 비동기 패드 — 렌더 · 이어쓰기 탭 완료 배지 · 5초 폴링 · "다시 시도" 버튼 · 탭 전환 후 폴링 생존.
@@ -166,6 +168,7 @@ services/
 ├── llm_gateway/              # LLM 경계(ProviderError taxonomy)
 └── embedding/                # 임베딩 서비스(BGE-m3-ko, 1024-dim)
 frontend/                     # React+TS+Vite SPA (recharts는 관측 화면 전용·lazy 로드)
+├── src/auth/                 # 로그인·세션 확인/만료·route guard·서버 로그아웃
 ├── src/observability/        # KPI 대시보드(계약이 정한 오독 방어 3종을 화면이 물려받는다)
 ├── nginx.conf                # /api 리버스 프록시(변수 upstream + resolver)
 └── src/api/schema.d.ts       # gen:api 생성물 — 손으로 고치지 않는다

@@ -1,16 +1,24 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { acceptWriting, reviseAndGateWriting } from "./api/client";
+import { AuthGate } from "./auth/AuthGate";
 
-function ok(body: unknown) {
-  return { ok: true, status: 200, statusText: "", json: async () => body };
+function response(body: unknown, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: "",
+    json: async () => body,
+  };
 }
 
-function mockFetch(...bodies: unknown[]) {
+function mockFetch(...responses: Array<{ body: unknown; status?: number }>) {
   const fetchMock = vi.fn();
-  for (const body of bodies) {
-    fetchMock.mockResolvedValueOnce(ok(body));
+  for (const next of responses) {
+    fetchMock.mockResolvedValueOnce(response(next.body, next.status));
   }
   // The draft editor's unaccepted-candidate recovery banner (ScratchRecovery)
   // fetches its own list on mount. That call is orthogonal to the routing these
@@ -18,7 +26,9 @@ function mockFetch(...bodies: unknown[]) {
   // otherwise the expected request sequences below would gain a stray entry.
   vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
     if (typeof url === "string" && url.includes("/writing/scratch")) {
-      return Promise.resolve(ok({ project_id: "p1", draft_id: "d1", items: [] }));
+      return Promise.resolve(
+        response({ project_id: "p1", draft_id: "d1", items: [] }),
+      );
     }
     return fetchMock(url, init);
   });
@@ -32,7 +42,10 @@ afterEach(() => {
 
 describe("App routes", () => {
   it("renders the project index at the root route", async () => {
-    mockFetch({ projects: [] });
+    const fetchMock = mockFetch(
+      { body: { id: "u1", username: "alice", is_admin: false } },
+      { body: { projects: [] } },
+    );
 
     render(
       <MemoryRouter initialEntries={["/"]}>
@@ -41,12 +54,17 @@ describe("App routes", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "프로젝트" })).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock.mock.calls).toHaveLength(2));
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(init.credentials).toBe("same-origin");
+    }
   });
 
   it("renders a directly addressed project workspace", async () => {
     const fetchMock = mockFetch(
-      { id: "p1", name: "겨울 이야기", archived: false },
-      { drafts: [] },
+      { body: { id: "u1", username: "alice", is_admin: false } },
+      { body: { id: "p1", name: "겨울 이야기", archived: false } },
+      { body: { drafts: [] } },
     );
 
     render(
@@ -59,6 +77,7 @@ describe("App routes", () => {
       await screen.findByRole("heading", { name: "겨울 이야기" }),
     ).toBeInTheDocument();
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/auth/me",
       "/api/projects/p1",
       "/api/projects/p1/drafts",
     ]);
@@ -66,9 +85,17 @@ describe("App routes", () => {
 
   it("renders a directly addressed draft editor", async () => {
     const fetchMock = mockFetch(
-      { id: "p1", name: "겨울 이야기", archived: false },
-      { id: "d1", project_id: "p1", title: "첫 장면", archived: false },
-      { versions: [] },
+      { body: { id: "u1", username: "alice", is_admin: false } },
+      { body: { id: "p1", name: "겨울 이야기", archived: false } },
+      {
+        body: {
+          id: "d1",
+          project_id: "p1",
+          title: "첫 장면",
+          archived: false,
+        },
+      },
+      { body: { versions: [] } },
     );
 
     render(
@@ -79,6 +106,7 @@ describe("App routes", () => {
 
     expect(await screen.findByRole("heading", { name: "첫 장면" })).toBeInTheDocument();
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/auth/me",
       "/api/projects/p1",
       "/api/projects/p1/drafts/d1",
       "/api/projects/p1/drafts/d1/versions",
@@ -86,16 +114,289 @@ describe("App routes", () => {
   });
 
   it("keeps an unknown route inside the product shell", async () => {
+    mockFetch({ body: { id: "u1", username: "alice", is_admin: false } });
+
     render(
       <MemoryRouter initialEntries={["/missing"]}>
         <App />
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole("heading", { name: "이 작업 공간은 없습니다." })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "이 작업 공간은 없습니다." }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "프로젝트로 돌아가기" })).toHaveAttribute(
       "href",
       "/",
     );
+  });
+
+  it("renders no protected route before the session check completes", () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => undefined)));
+
+    render(
+      <MemoryRouter initialEntries={["/projects/p1"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("세션을 확인하는 중…")).toBeInTheDocument();
+    expect(screen.queryByText("로그인")).not.toBeInTheDocument();
+    expect(screen.queryByText("불러오는 중…")).not.toBeInTheDocument();
+  });
+
+  it("keeps the addressed route while logging in and returns there after success", async () => {
+    const fetchMock = mockFetch(
+      { status: 401, body: { detail: "not authenticated" } },
+      {
+        body: {
+          user: { id: "u1", username: "alice", is_admin: false },
+        },
+      },
+      { body: { id: "p1", name: "겨울 이야기", archived: false } },
+      { body: { drafts: [] } },
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/projects/p1"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    await screen.findByLabelText("아이디");
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(["/api/auth/me"]);
+
+    await userEvent.type(screen.getByLabelText("아이디"), "alice");
+    await userEvent.type(screen.getByLabelText("비밀번호"), "pw123");
+    await userEvent.click(screen.getByRole("button", { name: "작업실 입장" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "겨울 이야기" }),
+    ).toBeInTheDocument();
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/auth/me",
+      "/api/auth/login",
+      "/api/projects/p1",
+      "/api/projects/p1/drafts",
+    ]);
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({
+      method: "POST",
+      credentials: "same-origin",
+    });
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+      username: "alice",
+      password: "pw123",
+    });
+  });
+
+  it("uses one generic message for every rejected login", async () => {
+    mockFetch(
+      { status: 401, body: { detail: "not authenticated" } },
+      { status: 401, body: { detail: "invalid credentials" } },
+    );
+
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>,
+    );
+
+    await userEvent.type(await screen.findByLabelText("아이디"), "ghost");
+    await userEvent.type(screen.getByLabelText("비밀번호"), "wrong");
+    await userEvent.click(screen.getByRole("button", { name: "작업실 입장" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "아이디 또는 비밀번호를 확인해 주세요.",
+    );
+    expect(screen.queryByText("invalid credentials")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("비밀번호")).toHaveValue("");
+  });
+
+  it("returns to login when a protected request reports an expired session", async () => {
+    mockFetch(
+      { body: { id: "u1", username: "alice", is_admin: false } },
+      { status: 401, body: { detail: "not authenticated" } },
+    );
+
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("세션이 만료되었습니다.")).toBeInTheDocument();
+    expect(screen.getByLabelText("아이디")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "프로젝트" })).not.toBeInTheDocument();
+  });
+
+  it("also expires the session for partial-envelope requests that bypass JSON request()", async () => {
+    mockFetch(
+      { body: { id: "u1", username: "alice", is_admin: false } },
+      { status: 401, body: { detail: "not authenticated" } },
+    );
+
+    function PartialEnvelopeCaller() {
+      return (
+        <button
+          type="button"
+          onClick={() => {
+            void acceptWriting("p1", {} as Parameters<typeof acceptWriting>[1]).catch(
+              () => undefined,
+            );
+          }}
+        >
+          채택
+        </button>
+      );
+    }
+
+    render(
+      <MemoryRouter>
+        <AuthGate>
+          <PartialEnvelopeCaller />
+        </AuthGate>
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "채택" }));
+
+    expect(await screen.findByText("세션이 만료되었습니다.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "채택" })).not.toBeInTheDocument();
+  });
+
+  it("also expires the session for revise-and-gate partial-envelope requests", async () => {
+    mockFetch(
+      { body: { id: "u1", username: "alice", is_admin: false } },
+      { status: 401, body: { detail: "not authenticated" } },
+    );
+
+    function ReviseAndGateCaller() {
+      return (
+        <button
+          type="button"
+          onClick={() => {
+            void reviseAndGateWriting(
+              "p1",
+              {} as Parameters<typeof reviseAndGateWriting>[1],
+            ).catch(() => undefined);
+          }}
+        >
+          부분 수정
+        </button>
+      );
+    }
+
+    render(
+      <MemoryRouter>
+        <AuthGate>
+          <ReviseAndGateCaller />
+        </AuthGate>
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "부분 수정" }));
+
+    expect(await screen.findByText("세션이 만료되었습니다.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "부분 수정" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the protected UI mounted until server logout succeeds", async () => {
+    let resolveLogout!: (response: unknown) => void;
+    const pendingLogout = new Promise((resolve) => {
+      resolveLogout = resolve;
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        response({ id: "u1", username: "alice", is_admin: false }),
+      )
+      .mockResolvedValueOnce(response({ projects: [] }))
+      .mockReturnValueOnce(pendingLogout);
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "로그아웃" }));
+
+    expect(screen.getByRole("button", { name: "나가는 중…" })).toBeDisabled();
+    expect(screen.getByRole("heading", { name: "프로젝트" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("아이디")).not.toBeInTheDocument();
+
+    resolveLogout(response({ ok: true }));
+
+    expect(await screen.findByLabelText("아이디")).toBeInTheDocument();
+  });
+
+  it("keeps the authenticated workspace and shows an error when server logout fails", async () => {
+    mockFetch(
+      { body: { id: "u1", username: "alice", is_admin: false } },
+      { body: { projects: [] } },
+      { status: 503, body: { detail: "storage unavailable" } },
+    );
+
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "로그아웃" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "로그아웃하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    );
+    expect(screen.getByRole("heading", { name: "프로젝트" })).toBeInTheDocument();
+    expect(screen.getByText("alice")).toBeInTheDocument();
+    expect(screen.queryByLabelText("아이디")).not.toBeInTheDocument();
+  });
+
+  it("revokes the server session before returning to the login surface", async () => {
+    const fetchMock = mockFetch(
+      { body: { id: "u1", username: "alice", is_admin: false } },
+      { body: { projects: [] } },
+      { body: { ok: true } },
+    );
+
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "로그아웃" }));
+
+    expect(await screen.findByLabelText("아이디")).toBeInTheDocument();
+    expect(fetchMock.mock.calls[2][0]).toBe("/api/auth/logout");
+    expect(fetchMock.mock.calls[2][1]).toMatchObject({
+      method: "POST",
+      credentials: "same-origin",
+    });
+  });
+
+  it("offers a retry instead of misreporting a session-check outage as logout", async () => {
+    const fetchMock = mockFetch(
+      { status: 503, body: { detail: "storage unavailable" } },
+      { body: { id: "u1", username: "alice", is_admin: false } },
+      { body: { projects: [] } },
+    );
+
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "세션을 확인하지 못했습니다.",
+    );
+    expect(screen.queryByLabelText("비밀번호")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+
+    expect(await screen.findByRole("heading", { name: "프로젝트" })).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
   });
 });

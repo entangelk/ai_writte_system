@@ -356,3 +356,135 @@ Mongo 라이브·mutation 삼중)·Argon2id·토큰 엔트로피·쿠키 정책�
 추천 각각 A. **E1은 어느 선택지든 코드가 `None`을 deny로 다루는 것이 필수**임을 명시했다 — 폐기는
 "지금 그런 행이 없다"만 보장하고 "앞으로 안 생긴다"는 보장하지 않기 때문이다(2b가 익명 생성을
 여전히 허용한다).
+
+---
+
+## Task — 인증 E1~E4 오너 결정 반영 + D8-4 프론트 로그인 선행
+
+### Goals
+
+- 오너 결정 **E1=A · E2=A · E3=A · E4=A**를 정본 계약에 고정한다.
+- E4의 취지대로 번호에 얽매이지 않고 로그인/세션 만료/라우트 가드를 먼저 세워, 후속 D8-3이
+  백엔드를 잠그는 순간에도 제품을 계속 사용할 수 있게 한다.
+
+### User Decisions and Rationale
+
+- **E1=A**: 개발 데이터는 clean slate로 시작할 수 있지만 코드는 `owner_id=None`을 항상 deny한다.
+  탈퇴한 ID의 기록이나 전체 삭제 누락 버그처럼 무소유 데이터가 미래에 다시 생길 수 있으므로,
+  `None`을 호환 분기로 열어 두면 보안 우회가 된다.
+- **E2=A**: project 경로는 소유권, 비-project 경로는 인증을 요구하고 `GET /projects`는 본인 것만
+  반환한다. 오너가 필터링과 보안 주의를 특별히 강조했으므로 목록 필터는 응답 후 가공이 아니라
+  저장소 조회 경계에서 시행하고 무소유·타 사용자 메타데이터가 노출되지 않게 한다.
+- **E3=A**: D8-3은 인증 dependency → 소유권+목록 필터 → 전수 가드로 작게 나눈다.
+- **E4=A**: 브리프 번호보다 제품의 자연스러운 동작을 우선해 **D8-4를 D8-3보다 먼저** 한다.
+  인가를 임시로 끄는 env 플래그는 두지 않는다.
+
+### Decisions
+
+- 프론트 선행 계약은 `/auth/me` 확인 전 보호 화면 미렌더, 미인증·만료 시 로그인 표면,
+  현재 경로 보존, 성공 후 원래 작업 복귀, 단일 로그인 실패 메시지, 비밀번호 비저장,
+  서버 로그아웃 후 로그인 표면 복귀로 잠갔다(SoT v1.7.51).
+
+### Completed work
+
+- [`frontend/src/auth/AuthGate.tsx`](../../../frontend/src/auth/AuthGate.tsx): 앱 전체를 감싸는 세션
+  경계를 추가했다. `/auth/me`가 끝나기 전에는 하위 route를 mount하지 않고, 401이면 로그인,
+  비-401 장애면 로그아웃으로 오인하지 않고 재시도 화면을 보인다. 로그인 성공은 브라우저 경로를
+  바꾸지 않아 직접 주소로 들어온 작업으로 복귀한다. 로그아웃은 서버 revoke 성공 뒤에만 로컬
+  로그인 상태를 버린다.
+- [`frontend/src/api/client.ts`](../../../frontend/src/api/client.ts): 생성 OpenAPI 타입으로
+  login/logout/me 클라이언트를 추가하고 모든 API 요청에 `credentials: "same-origin"`을 명시했다.
+  보호 API의 401은 전역 세션 만료 신호로 전달한다. 패턴 sweep에서 공통 `request()`를 우회하던
+  partial-envelope 경로 2곳(`revise-and-gate`, `writing/accept`)을 찾아 같은 `fetchApi` 경계로
+  수렴했다 — 둘만 세션 만료를 놓치는 보안 드리프트를 막았다.
+- [`frontend/src/App.tsx`](../../../frontend/src/App.tsx)·
+  [`styles.css`](../../../frontend/src/styles.css): 기존 제품 셸을 인증된 사용자 이름+로그아웃으로
+  연결하고, 기존 종이 질감·세리프 계층을 유지한 집중형 로그인 화면을 추가했다.
+- 공개 백엔드 계약은 무변이다. `npm run gen:api` 재생성 후 `openapi.json`·`schema.d.ts` diff 0.
+
+### Issues found
+
+- **문제**: 생산 코드의 직접 `fetch` 2곳이 공통 인증 응답 경계를 우회했다.
+  **원인**: 두 endpoint가 502 partial envelope를 보존하려고 일반 `request()`와 별도 응답 처리를
+  갖고 있었다. **해결**: JSON 해석/partial 처리는 그대로 두고 전송·401 통지만 `fetchApi`로
+  공통화했다. `git blame`상 두 경로는 partial 계약 도입 때 의도적으로 분리된 것이므로 그 의미를
+  훼손하지 않았다. **결과**: 일반 요청과 partial 요청 모두 쿠키·세션 만료 정책이 같다.
+- **검증 환경**: sandbox 내부 localhost `curl`은 네트워크 격리로 실패했지만 `docker compose ps`는
+  실제 스택이 실행 중임을 확인했다. 새 frontend 이미지를 빌드·재기동하고 host Chromium으로
+  배포 URL을 확인했다.
+
+### Verification
+
+- 집중 회귀: `App.test.tsx` + `WritingPanel.test.tsx` **58 passed**. 신규 인증 가드는
+  세션 확인 전 보호 route 미mount(under-strict)와 유효 세션의 직접 route 유지(over-strict),
+  단일 로그인 실패 메시지, 비밀번호 필드 초기화, 만료 전환, partial-envelope 401, 서버 로그아웃,
+  세션 저장소 장애 재시도를 잠근다.
+- 프론트 전체: 1차 **213 passed / 14 files**, partial-envelope 401 회귀를 더한 최종
+  **214 passed / 14 files**. 이후 독립 검증 B1~B3 closure 회귀 3건을 더해
+  **217 passed / 14 files**로 확정됐다.
+- build: `tsc --noEmit` + Vite 성공. 최종 컨테이너 build는 진입 **404.87 kB**,
+  관측 lazy chunk **385.71 kB**.
+- 실 렌더: 배포 `http://localhost:5520/`의 미인증 로그인 화면을 Chromium
+  **1440×1000 / 390×844**에서 확인. 잘림·가로 넘침 없음, 모바일 첫 화면에 입력과 CTA가 들어온다.
+- `git diff --check` 통과.
+
+### Next steps
+
+- **D8-3a**: `/health`와 `/auth/*` 정책을 명시적으로 제외/분류한 인증 dependency를
+  보호 대상 전체에 붙이고 401 선언·전수 누락 가드를 같은 슬라이스에 추가한다.
+- 이어서 **D8-3b** 소유권+저장소 목록 필터(`owner_id=None` 항상 deny), **3c** 최종 전수 가드로
+  진행한다.
+
+---
+
+## Task — D8-4 프론트 로그인 독립 검증
+
+### Goals
+
+- 작업 AI가 남긴 미커밋 D8-4 변경을 SoT v1.7.51과 E1~E4 결정에 대해 독립·적대적으로 검증한다.
+- 구현, 회귀의 양방향 경계, 생성 계약, 빌드, 배포 상태와 실제 viewport를 서로 대조한다.
+
+### Completed work
+
+- 독립 검증 기록
+  [`docs/verifications/2026-07-27/auth_d8_4_frontend_login.md`](../../verifications/2026-07-27/auth_d8_4_frontend_login.md)을
+  작성했다. 판정은 **조건부 합격**이며 세부 근거와 재현 명령은 해당 기록에만 둔다.
+- HANDOFF의 D8 진행표와 Next Tasks를 현재 actionable 상태로 다시 썼다. D8-4 검증 조건 폐쇄를
+  D8-3a보다 앞에 두고, 독립 실행에서 재현되지 않은 214/14 수치를 무조건 기준선으로 남기지 않았다.
+
+### Issues found
+
+- 검증 기록의 B1~B3가 현재 차단 조건이다. 구현 결함을 임의로 고치지 않았으며, 다음 작업자는
+  회귀 경계 세 칸을 닫고 전체 프론트 스위트를 다시 실행해야 한다.
+
+### Decisions
+
+- 검증 요청은 수정 권한으로 확대하지 않았다. 계약 구현은 일치하지만 contract-required 회귀에
+  빈 셀이 있으므로 green build와 실렌더만으로 합격 처리하지 않았다.
+
+### Next steps
+
+- 검증 기록 B1~B3를 닫고 frontend 214/14 전체 green을 재현한 뒤 D8-3a로 진행한다.
+
+### Verification closure — B1~B3 폐쇄
+
+- 오너가 독립 검증의 조건부 합격 판정과 B1~B3 보강을 승인했다. 구현은 정본과 일치했으므로
+  production 코드는 바꾸지 않고 [`App.test.tsx`](../../../frontend/src/App.test.tsx)의 계약
+  회귀만 보강했다.
+- **B1**: 프로젝트 heading 뒤 `GET /projects` effect가 기록되기 전에 호출 수를 읽던 flaky
+  단언을 `waitFor(...toHaveLength(2))`로 바꿨다. 화면 출현과 effect 완료를 같은 것으로
+  가정하지 않는다.
+- **B2**: pending logout Promise를 수동 해제하기 전까지 프로젝트 heading·인증 UI가 유지되고
+  버튼이 `나가는 중…` disabled인지 잠갔다(서버 선행 under-strict). 별도 503 테스트는 로그인
+  화면으로 전환하지 않고 사용자명·프로젝트·오류를 유지하는지 잠갔다(over-strict).
+- **B3**: `acceptWriting`과 별개로 `reviseAndGateWriting` 호출부를 직접 통과시켜 401이 전역
+  만료 로그인 표면으로 전환되는지 잠갔다. partial 두 경로 중 하나만 공통 경계를 우회하는
+  mutation도 이제 실패한다.
+- 집중 회귀 **14 passed / 1 file**. 전체 verbose 첫 실행은 테스트 실패 없이 환경 실행 한도에서
+  143 종료돼 판정에 쓰지 않았다. 출력량을 줄이고 worker 4개로 재실행한 전체 결과는
+  **217 passed / 14 files**.
+- `npm run build` 성공: entry **404.87 kB**, 관측 lazy chunk **385.71 kB**.
+  `npm run gen:api` 전후 SHA-256은 `openapi.json=fcb090d…`,
+  `schema.d.ts=c5bf248…`로 동일하고 생성물 diff 0. `git diff --check` 통과.
+- 검증 기록의 boundary matrix 빈 셀은 0개, 최종 판정은 **합격**으로 갱신했다. 다음 작업은
+  D8-3a다.

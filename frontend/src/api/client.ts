@@ -1,8 +1,18 @@
 import type { components } from "./schema";
 
 // Single origin: nginx (deployed) and the Vite dev server (dev) both proxy /api
-// to the Application. The API is unauthenticated, so CORS is never opened.
+// to the Application. Session cookies stay same-origin, so CORS remains closed.
 export const API_BASE = "/api";
+
+type UnauthorizedListener = () => void;
+const unauthorizedListeners = new Set<UnauthorizedListener>();
+
+export function subscribeUnauthorized(listener: UnauthorizedListener): () => void {
+  unauthorizedListeners.add(listener);
+  return () => {
+    unauthorizedListeners.delete(listener);
+  };
+}
 
 /** Raised for any non-2xx response; `detail` carries the FastAPI error text. */
 export class ApiError extends Error {
@@ -16,17 +26,30 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetchApi(path, init);
+  if (!response.ok) {
+    throw new ApiError(response.status, await readDetail(response));
+  }
+  return (await response.json()) as T;
+}
+
+async function fetchApi(path: string, init?: RequestInit): Promise<Response> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
+    credentials: "same-origin",
     headers: {
       "Content-Type": "application/json",
       ...init?.headers,
     },
   });
-  if (!response.ok) {
-    throw new ApiError(response.status, await readDetail(response));
+  // Auth endpoints handle their own expected 401s. Any other 401 means a
+  // previously valid browser session can no longer authorize workspace work.
+  if (response.status === 401 && !path.startsWith("/auth/")) {
+    for (const listener of unauthorizedListeners) {
+      listener();
+    }
   }
-  return (await response.json()) as T;
+  return response;
 }
 
 async function readDetail(response: Response): Promise<string> {
@@ -46,6 +69,10 @@ async function readDetail(response: Response): Promise<string> {
 // schema now carries real response shapes). Nothing here is hand-declared: a
 // backend payload change fails the type check after `npm run gen:api`.
 export type CreateProjectRequest = components["schemas"]["CreateProjectRequest"];
+export type LoginRequest = components["schemas"]["LoginRequest"];
+export type LoginResponse = components["schemas"]["LoginResponse"];
+export type LogoutResponse = components["schemas"]["LogoutResponse"];
+export type User = components["schemas"]["UserPayload"];
 export type Project = components["schemas"]["ProjectPayload"];
 export type ProjectListResponse = components["schemas"]["ProjectListResponse"];
 export type ProjectBrief = components["schemas"]["ProjectBriefVersionPayload"];
@@ -90,6 +117,21 @@ export type WritingAcceptRequest = components["schemas"]["WritingAcceptRequest"]
 export type WritingAcceptResponse = components["schemas"]["WritingAcceptResponse"];
 export type WritingAcceptAnalysisPartial =
   components["schemas"]["WritingAcceptAnalysisPartial"];
+
+export function login(body: LoginRequest): Promise<LoginResponse> {
+  return request("/auth/login", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function logout(): Promise<LogoutResponse> {
+  return request("/auth/logout", { method: "POST" });
+}
+
+export function getCurrentUser(): Promise<User> {
+  return request("/auth/me");
+}
 
 export function listProjects(): Promise<ProjectListResponse> {
   return request("/projects");
@@ -294,8 +336,8 @@ export async function reviseAndGateWriting(
   projectId: string,
   body: WritingReviseRequest,
 ): Promise<WritingReviseGateOutcome> {
-  const response = await fetch(
-    `${API_BASE}/projects/${projectId}/writing/revise-and-gate`,
+  const response = await fetchApi(
+    `/projects/${projectId}/writing/revise-and-gate`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -339,7 +381,7 @@ export async function acceptWriting(
   projectId: string,
   body: WritingAcceptRequest,
 ): Promise<WritingAcceptOutcome> {
-  const response = await fetch(`${API_BASE}/projects/${projectId}/writing/accept`, {
+  const response = await fetchApi(`/projects/${projectId}/writing/accept`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
