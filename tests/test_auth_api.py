@@ -240,21 +240,29 @@ class SliceBoundaryTest(unittest.TestCase):
 
     def test_no_non_auth_operation_is_protected_yet(self) -> None:
         # Exhaustive form of the non-goal: the 3 endpoints sampled above are a
-        # spot check, and this slice's claim is about *all* of them. Two contract
-        # signals must stay absent outside /auth until D8-3:
+        # spot check, and this slice's claim is about *all* of them. Three
+        # contract signals must stay absent outside /auth until D8-3:
         #   - a `security` requirement (declared authentication), and
-        #   - a 401 declaration (H3 forces every realistic status to be declared,
-        #     so authorization cannot land without 401s appearing here).
+        #   - a 401 or 403 declaration. H3 forces every realistic status to be
+        #     declared, so authorization cannot land without one of them showing
+        #     up here. Both are listed so the guard does not depend on which one
+        #     D8-3 picks: keying on 401 alone would stay silent if enforcement
+        #     were built as 403-only (raised in the D8-2 verification).
+        # Neither status is used anywhere today, so this is exact, not a filter.
         # When D8-3 does land, this test is expected to fail — that failure is
         # the marker that the non-goal has ended, and it should be rewritten
         # into its inverse rather than deleted.
         spec = create_app().openapi()
+        protection_signals = {"401", "403"}
         offenders = {
             (path, method)
             for path, operations in spec["paths"].items()
             for method, operation in operations.items()
             if not path.startswith("/auth/")
-            and ("security" in operation or "401" in operation.get("responses", {}))
+            and (
+                "security" in operation
+                or protection_signals & set(operation.get("responses", {}))
+            )
         }
         self.assertEqual(offenders, set())
 

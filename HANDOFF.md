@@ -4,7 +4,7 @@
 > 완료 서술은 여기 쓰지 않는다 — `docs/daily_logs/`(상세) · `docs/system-contract-sot.md` 변경이력 · `CHANGELOG.md`(마일스톤) · `docs/verifications/`(독립 검증)에 이미 있다.
 > 편집 규칙은 `CLAUDE.md`·`AGENTS.md`의 "HANDOFF.md" 절에 있다. **길이 상한은 없다** — 대신 **~200줄을 넘으면 자가 검수**하고(그 뒤로는 ~100줄마다) 결과를 아래 한 줄로 남긴다. 길어야 할 이유가 있으면 길어도 된다. 안 보는 것이 문제다.
 >
-> 마지막 자가 검수: 2026-07-27 · 171줄 (인증 슬라이스 진행표 신설 — 1a~2b 완료·다음 D8-3, 착수자 메모 추가. 다음 검수 트리거는 200줄)
+> 마지막 자가 검수: 2026-07-27 · 173줄 (D8-3을 "브리프 승인 전 착수 금지"로 전환 + E1~E4를 Owner Decisions 최상단에. 다음 검수 트리거는 200줄)
 
 ## 머신 구성 (알파 · 베타 · 감마)
 
@@ -33,10 +33,11 @@
   | **2a** | **완료** | `Project.owner_id: str \| None` 필드 + Mongo 왕복. `create_project(name, owner_id=None)`. **공개 API 무변** |
   | **2b** | **완료** | `POST /projects`가 세션이 있으면 생성자를 owner로 **기록**. 세션 없으면 unowned로 **여전히 200** |
   | 2c(선택) | 미착수 | `owner_id`를 공개 payload에 노출할지 — **프론트가 읽을 이유가 생길 때** 하면 된다(schema.d.ts 변경이므로 공짜 아님) |
-  | **3** | **다음** | **인가 시행 + 전수 가드**(D7=A). 가장 큰 단계 |
+  | **3** | **오너 결정 대기 — 코딩 금지** | **인가 시행**(D7=A). 착수 전 `plans/auth-d8-3-enforcement-decisions.md`의 **E1~E4 승인 필요** |
 
-- **D8-3 착수자를 위한 메모**: (a) 소유자 판정에 쓸 재료는 이미 다 있다 — `_current_user(request)`(main.py auth 절)와 `project.owner_id`. (b) **`owner_id`는 nullable이고 legacy 프로젝트는 `None`이다** — 인가 규칙이 "소유자 불일치면 거부"만 보면 **주인 없는 기존 데이터가 아무에게도 안 열리거나 모두에게 열린다**. 어느 쪽으로 정할지가 D8-3의 첫 결정이다(브리프 D4가 "개발 데이터는 폐기 허용"이라 폐기 후 시작도 선택지). (c) 잠금은 **dependency + 전수 가드**로(D7), 그리고 **`tests/test_auth_api.py`의 `test_no_non_auth_operation_is_protected_yet`이 그때 실패하는 것이 정상**이다 — 그 실패가 비-목표 종료의 표지이므로 삭제하지 말고 **역명제로 다시 쓴다**.
-- **⚠ 인가는 아직 없다 — 이것은 의도된 상태다.** 로그인이 생겼고 소유자가 기록되기 시작했지만 **아무것도 그것을 읽어 접근을 막지 않는다**: `/auth/*` 외 **모든 endpoint는 세션 없이 그대로 열려 있다**. 비-목표는 두 겹으로 잠겨 있다 — `SliceBoundaryTest`(표본 3건 + **전 operation에 `security`·401 선언 부재 전수 단언**)와 `ProjectOwnershipRecordingTest`(익명 생성이 **401이 아니라 200**임을 단언). **배포 스택은 여전히 실질 무인증이므로 외부 노출 금지.**
+- **★ D8-3은 브리프 승인 전까지 착수하지 않는다** — `plans/auth-d8-3-enforcement-decisions.md`(2026-07-27 초안). 64개 operation의 전제를 바꾸고 **틀리면 데이터 유출**이라 추측 구현 금지. 결정 4건: **E1** 주인 없는(`owner_id=None`) 프로젝트를 인가가 어떻게 다룰지(★차단) · **E2** 인증만 요구할 곳 vs 소유권까지 볼 곳(+`GET /projects` 본인 것만 반환) · **E3** D8-3 자체의 분할 방식 · **E4** 로그인 화면(D8-4)을 D8-3보다 **먼저** 할지. 추천은 각각 A.
+- **D8-3 착수자를 위한 사실 4가지**(브리프 §1에 근거와 함께 있다): (a) 재료는 이미 다 있다 — `_current_user(request)`(main.py auth 절) + `project.owner_id`. (b) **워커는 HTTP API를 쓰지 않는다** — Mongo에 직접 붙으므로(`scripts/index_sync_worker.py:85·261`) HTTP 인가가 워커를 깨뜨리지 않는다. "서비스 계정"이 필요한 것은 D8-3이 아니라 **인프라 인증(D8-7)**이다. (c) **프론트는 API를 쓴다** — D8-3이 들어가면 로그인 화면이 없어 전부 401이 된다(그래서 E4가 순서 교환을 묻는다). (d) `tests/test_auth_api.py`의 `test_no_non_auth_operation_is_protected_yet`이 **그때 실패하는 것이 정상**이다 — 삭제하지 말고 **역명제로 다시 쓴다**. 이 가드는 `security`·**401·403 세 신호 전부**를 보므로 어떤 상태코드로 설계하든 발화한다.
+- **⚠ 인가는 아직 없다 — 이것은 의도된 상태다.** 로그인이 생겼고 소유자가 기록되기 시작했지만 **아무것도 그것을 읽어 접근을 막지 않는다**: `/auth/*` 외 **모든 endpoint는 세션 없이 그대로 열려 있다**. 비-목표는 두 겹으로 잠겨 있다 — `SliceBoundaryTest`(표본 3건 + **전 operation에 `security`·401·403 선언 부재 전수 단언**)와 `ProjectOwnershipRecordingTest`(익명 생성이 **401이 아니라 200**임을 단언). **배포 스택은 여전히 실질 무인증이므로 외부 노출 금지.**
 - **첫 계정 만드는 법**(관리자 API는 D8-5라 아직 없다): `docker exec -e PYTHONPATH=/app -e AUTH_BOOTSTRAP_PASSWORD='…' ai_writte_system-application-1 python scripts/create_user.py <username> --admin`. **`PYTHONPATH=/app`이 필수다** — 이미지에 PYTHONPATH가 없고 `python scripts/x.py`는 CWD를 sys.path에 넣지 않는다.
 - LLM 파이프라인 관측(KPI) 페이즈는 **계측·집계 API·대시보드까지 닫혔다**(2026-07-26). 그 결과물 위에서 다음 작업이 돈다.
 - **관측 KPI 페이즈의 결과물**(다음 작업이 이 위에서 돈다): LLM을 부르는 **8개 호출부 전부**가 seam C(provider 데코레이터)로 계측되고 — `analysis_extractor`·`writing_gate`·`compare_judge`·`query_planner`·`writing_retrieval_planner`·`writing_generation`·`writing_revision`·`writing_report` — `GET /projects/{id}/observability/kpi`가 집계를 내고, `/projects/:id/observability` 화면이 그것을 그린다. QUAL-1(제품 품질·수기·dogfood)과 별개 트랙이며 운영기획 포트폴리오는 `docs/observability-kpi-rationale.md`.
@@ -113,6 +114,7 @@ docker compose run --rm --no-deps -v "$PWD/tests:/app/tests" \
 
 ## Owner Decisions Needed
 
+- **★★ D8-3 인가 시행 E1~E4** — **다음 작업을 막고 있는 것.** `plans/auth-d8-3-enforcement-decisions.md`. **E1** `owner_id=None` 처리(폐기 후 clean slate / 전부 허용 / 전부 거부 / 관리자 귀속) · **E2** 인증만 vs 소유권까지(+`GET /projects` 본인 것만) · **E3** D8-3 분할 방식 · **E4** 로그인 화면(D8-4)을 **먼저** 할지. 추천은 각각 A이며, **E1은 어느 쪽을 골라도 코드가 `None`을 deny로 다루는 것이 필수**(폐기는 "지금 없다"만 보장하지 "안 생긴다"를 보장하지 않는다).
 - **★ dogfood 착수(GATE-1)** — 실 12B 풀스택 관통은 끝났고 기술적 선행 조건은 없다. 착수하면 `OPS-1` Ready 승격. 지금은 **인증(D8)이 진행 중**이라 그 뒤로 밀려 있다 — 인증 도중에 끼울지, 끝내고 할지는 오너 판단.
 
 **결정 완료 — 오너 결정 대기 아님, 구현만 남음:**
