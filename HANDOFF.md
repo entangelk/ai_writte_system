@@ -4,7 +4,7 @@
 > 완료 서술은 여기 쓰지 않는다 — `docs/daily_logs/`(상세) · `docs/system-contract-sot.md` 변경이력 · `CHANGELOG.md`(마일스톤) · `docs/verifications/`(독립 검증)에 이미 있다.
 > 편집 규칙은 `CLAUDE.md`·`AGENTS.md`의 "HANDOFF.md" 절에 있다. **길이 상한은 없다** — 대신 **~200줄을 넘으면 자가 검수**하고(그 뒤로는 ~100줄마다) 결과를 아래 한 줄로 남긴다. 길어야 할 이유가 있으면 길어도 된다. 안 보는 것이 문제다.
 >
-> 마지막 자가 검수: 2026-07-27 · 146줄 (3개 머신(알파·베타·감마) 구성 절 신설, 베타 health 관측치 실측 정정)
+> 마지막 자가 검수: 2026-07-27 · 147줄 (3개 머신(알파·베타·감마) 구성 절 신설, 베타 health 관측치 실측 정정, cross-encoder 리랭커 미구현 부채 기록)
 
 ## 머신 구성 (알파 · 베타 · 감마)
 
@@ -90,6 +90,7 @@ docker compose run --rm --no-deps -v "$PWD/tests:/app/tests" \
 
 ## 추적 부채
 
+- **[미구현·유예, 포트폴리오 정확성 주의] cross-encoder(뉴럴) 리랭커는 없다.** 현재 RAG 리랭킹은 **RRF(Reciprocal Rank Fusion) 융합만**이다 — 벡터(Chroma/BGE-m3-ko) + lexical(ES/nori) 두 랭킹을 `1/(k+rank)`(k=60)로 합쳐 재정렬([`context_search/service.py:279`](services/application/app/context_search/service.py#L279)·[`:495`](services/application/app/context_search/service.py#L495), env `vector/lexical/hybrid`). query-document 쌍을 신경망으로 재채점하는 **cross-encoder 리랭커(예: `bge-reranker`, Cohere Rerank)는 2026-07-05에 의도적으로 유예**됐다 — 오너가 처음 `dragonkue/bge-reranker-v2-m3-ko`를 embedding으로 지목했다가 그게 reranker임을 잡아 embedding은 `BGE-m3-ko`로 정정하고 **"reranker는 후속 rerank 단계 후보로 남긴다"**고 명시([`plans/04-real-vector-backend-decisions.md:11`](docs/plans/04-real-vector-backend-decisions.md#L11)); "고급 reranking은 후속 범위"([`plans/04-agentic-search.md:26`](docs/plans/04-agentic-search.md#L26)). **삽입 자리**: RRF 융합 결과 뒤, `retrieve()` seam 다음에 rerank 단계를 새로 넣으면 된다(현재 그 훅은 없다). **포트폴리오/README에 쓸 때 "리랭커 있음"이라고 뭉뚱그리면 부정확** — "RRF 하이브리드 융합 리랭킹 있음, 뉴럴 cross-encoder 리랭커는 후속"이 정확하다. 외부 API로 붙일지(Cohere Rerank 등)는 아래 외부 API 확장 계획과 함께 볼 항목.
 - **[누수 아님, 의존성 주의] `context_search/service.py:199`·`:406`의 `embed()`**: 자체적으로 `EmbeddingProviderError`를 안 잡지만 호출자(step runner `:752`·`:835`)의 광의 `except Exception` → `BACKEND_ERROR` → 502가 이미 보호한다. **그 catch를 좁히면 그 순간 500 누수가 된다.**
 
 ## Owner Decisions Needed
