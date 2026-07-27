@@ -348,8 +348,12 @@ class CoreSotService:
     def __init__(self, repository: CoreSotRepository) -> None:
         self._repo = repository
 
-    def create_project(self, *, name: str) -> Project:
-        project = Project(id=self._repo.next_project_id(), name=name)
+    def create_project(self, *, name: str, owner_id: str | None = None) -> Project:
+        # owner_id is recorded, not enforced (D8-3 owns enforcement). Optional so
+        # every existing caller — workers, scripts, tests — keeps working.
+        project = Project(
+            id=self._repo.next_project_id(), name=name, owner_id=owner_id
+        )
         self._repo.put_project(project)
         return project
 

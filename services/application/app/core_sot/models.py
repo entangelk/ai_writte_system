@@ -28,6 +28,10 @@ class Project:
     id: str
     name: str
     archived: bool = False
+    # Multi-user ownership (D3=A). Nullable on purpose for now: projects created
+    # before authentication existed have no owner, and enforcement is D8-3. A
+    # non-null owner_id does NOT restrict access yet — it is only recorded.
+    owner_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

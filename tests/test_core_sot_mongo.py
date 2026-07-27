@@ -192,6 +192,41 @@ class _MongoContractMixin:
         self.assertEqual(brief.forbidden_patterns, ())
         self.assertEqual(brief.style_examples, ())
 
+    def test_project_owner_id_round_trips_through_mongo(self):
+        # D8-2a: ownership is recorded, not enforced. This locks the storage wire
+        # only — a project created with an owner must read back with it, through
+        # get and list alike (the two paths have separate decoders).
+        owned = self.service.create_project(name="Owned", owner_id="user:1")
+
+        self.assertEqual(self.service.get_project(project_id=owned.id).owner_id,
+                         "user:1")
+        listed = {p.id: p for p in self.service.list_projects()}
+        self.assertEqual(listed[owned.id].owner_id, "user:1")
+
+    def test_project_without_owner_round_trips_as_none(self):
+        # Over-strict guard: the default must stay unowned rather than acquiring
+        # a placeholder owner. D8-3 will treat "no owner" as its own case, and a
+        # sentinel string here would silently become a real user id.
+        unowned = self.service.create_project(name="Unowned")
+
+        self.assertIsNone(unowned.owner_id)
+        self.assertIsNone(self.service.get_project(project_id=unowned.id).owner_id)
+
+    def test_legacy_project_document_without_owner_field_reads_as_unowned(self):
+        # Documents written before ownership existed have no owner_id key at all.
+        # Reading one must yield None, not KeyError — this is the exact shape of
+        # every project currently in a deployed database.
+        self.repo._projects.insert_one({
+            "_id": "legacy-project-1",
+            "name": "Before ownership",
+            "archived": False,
+        })
+
+        project = self.service.get_project(project_id="legacy-project-1")
+
+        self.assertIsNone(project.owner_id)
+        self.assertEqual(project.name, "Before ownership")
+
     def test_concurrent_project_brief_version_collision_has_one_success_one_stale(self):
         """Live Mongo guard for W2 verification H3.
 

@@ -519,11 +519,23 @@ class MongoCoreSotRepository:
 
 
 def _project_doc(project: Project) -> dict:
-    return {"_id": project.id, "name": project.name, "archived": project.archived}
+    return {
+        "_id": project.id,
+        "name": project.name,
+        "archived": project.archived,
+        "owner_id": project.owner_id,
+    }
 
 
 def _to_project(doc: dict) -> Project:
-    return Project(id=doc["_id"], name=doc["name"], archived=doc["archived"])
+    return Project(
+        id=doc["_id"],
+        name=doc["name"],
+        archived=doc["archived"],
+        # .get: documents written before ownership existed have no such key, and
+        # they must read back as unowned rather than raising.
+        owner_id=doc.get("owner_id"),
+    )
 
 
 def _project_brief_doc(brief: ProjectBriefVersion) -> dict:
