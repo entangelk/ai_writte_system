@@ -177,6 +177,26 @@ class SliceBoundaryTest(unittest.TestCase):
         self.assertEqual(created.status_code, 200)
         self.assertEqual(client.get("/projects").status_code, 200)
 
+    def test_no_non_auth_operation_is_protected_yet(self) -> None:
+        # Exhaustive form of the non-goal: the 3 endpoints sampled above are a
+        # spot check, and this slice's claim is about *all* of them. Two contract
+        # signals must stay absent outside /auth until D8-3:
+        #   - a `security` requirement (declared authentication), and
+        #   - a 401 declaration (H3 forces every realistic status to be declared,
+        #     so authorization cannot land without 401s appearing here).
+        # When D8-3 does land, this test is expected to fail — that failure is
+        # the marker that the non-goal has ended, and it should be rewritten
+        # into its inverse rather than deleted.
+        spec = create_app().openapi()
+        offenders = {
+            (path, method)
+            for path, operations in spec["paths"].items()
+            for method, operation in operations.items()
+            if not path.startswith("/auth/")
+            and ("security" in operation or "401" in operation.get("responses", {}))
+        }
+        self.assertEqual(offenders, set())
+
     def test_auth_endpoints_declare_401_and_the_storage_503(self) -> None:
         spec = create_app().openapi()
         for path, method, expects_401 in (

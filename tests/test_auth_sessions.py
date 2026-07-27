@@ -84,5 +84,21 @@ class SessionServiceTest(unittest.TestCase):
         self.assertIsNotNone(service.resolve(raw_c))
 
 
+class DefaultTokenEntropyTest(unittest.TestCase):
+    """The default token factory is the one place session security depends on
+    randomness: D2 keeps only the hash server-side, so an attacker's only route
+    back to a live session is guessing the raw token. Every other test injects a
+    fixed token_factory, which would leave a low-entropy default unnoticed."""
+
+    def test_default_tokens_are_unique_and_full_length(self) -> None:
+        service = SessionService(InMemorySessionRepository())
+        tokens = [service.create_session(user_id="u")[0] for _ in range(50)]
+        self.assertEqual(len(set(tokens)), 50)
+        for token in tokens:
+            # secrets.token_urlsafe(32) = 32 random bytes -> 43 base64url chars.
+            # Shortening the default (or swapping in a counter) fails here.
+            self.assertGreaterEqual(len(token), 43)
+
+
 if __name__ == "__main__":
     unittest.main()
