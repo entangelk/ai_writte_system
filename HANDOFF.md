@@ -4,7 +4,7 @@
 > 완료 서술은 여기 쓰지 않는다 — `docs/daily_logs/`(상세) · `docs/system-contract-sot.md` 변경이력 · `CHANGELOG.md`(마일스톤) · `docs/verifications/`(독립 검증)에 이미 있다.
 > 편집 규칙은 `CLAUDE.md`·`AGENTS.md`의 "HANDOFF.md" 절에 있다. **길이 상한은 없다** — 대신 **~200줄을 넘으면 자가 검수**하고(그 뒤로는 ~100줄마다) 결과를 아래 한 줄로 남긴다. 길어야 할 이유가 있으면 길어도 된다. 안 보는 것이 문제다.
 >
-> 마지막 자가 검수: 2026-07-27 · 148줄 (3개 머신(알파·베타·감마) 구성 절 신설, 베타 health 관측치 실측 정정, cross-encoder 리랭커 미구현 부채 기록, 외부 API 확장 브리프 포인터)
+> 마지막 자가 검수: 2026-07-27 · 154줄 (머신 구성 절·베타 health 정정·리랭커 부채·인증 D1~D8 및 외부 API D1~D6 결정 반영·공유 미래확장 메모)
 
 ## 머신 구성 (알파 · 베타 · 감마)
 
@@ -90,14 +90,20 @@ docker compose run --rm --no-deps -v "$PWD/tests:/app/tests" \
 
 ## 추적 부채
 
-- **[미구현·유예, 포트폴리오 정확성 주의] cross-encoder(뉴럴) 리랭커는 없다.** 현재 RAG 리랭킹은 **RRF(Reciprocal Rank Fusion) 융합만**이다 — 벡터(Chroma/BGE-m3-ko) + lexical(ES/nori) 두 랭킹을 `1/(k+rank)`(k=60)로 합쳐 재정렬([`context_search/service.py:279`](services/application/app/context_search/service.py#L279)·[`:495`](services/application/app/context_search/service.py#L495), env `vector/lexical/hybrid`). query-document 쌍을 신경망으로 재채점하는 **cross-encoder 리랭커(예: `bge-reranker`, Cohere Rerank)는 2026-07-05에 의도적으로 유예**됐다 — 오너가 처음 `dragonkue/bge-reranker-v2-m3-ko`를 embedding으로 지목했다가 그게 reranker임을 잡아 embedding은 `BGE-m3-ko`로 정정하고 **"reranker는 후속 rerank 단계 후보로 남긴다"**고 명시([`plans/04-real-vector-backend-decisions.md:11`](docs/plans/04-real-vector-backend-decisions.md#L11)); "고급 reranking은 후속 범위"([`plans/04-agentic-search.md:26`](docs/plans/04-agentic-search.md#L26)). **삽입 자리**: RRF 융합 결과 뒤, `retrieve()` seam 다음에 rerank 단계를 새로 넣으면 된다(현재 그 훅은 없다). **포트폴리오/README에 쓸 때 "리랭커 있음"이라고 뭉뚱그리면 부정확** — "RRF 하이브리드 융합 리랭킹 있음, 뉴럴 cross-encoder 리랭커는 후속"이 정확하다. 외부 API로 붙일지(Cohere Rerank 등)는 아래 외부 API 확장 계획과 함께 볼 항목.
+- **[미구현이나 구현 결정됨, 포트폴리오 정확성 주의] cross-encoder(뉴럴) 리랭커는 아직 없다.** 현재 RAG 리랭킹은 **RRF(Reciprocal Rank Fusion) 융합만**이다 — 벡터(Chroma/BGE-m3-ko) + lexical(ES/nori) 두 랭킹을 `1/(k+rank)`(k=60)로 합쳐 재정렬([`context_search/service.py:279`](services/application/app/context_search/service.py#L279)·[`:495`](services/application/app/context_search/service.py#L495), env `vector/lexical/hybrid`). query-document 쌍을 신경망으로 재채점하는 cross-encoder 리랭커는 2026-07-05에 유예됐다가([`plans/04-real-vector-backend-decisions.md:11`](docs/plans/04-real-vector-backend-decisions.md#L11)) **2026-07-27 구현하기로 결정**됐다(`plans/external-api-expansion-decisions.md` D5): 로컬은 self-host **`dragonkue/bge-reranker-v2-m3-ko`**(임베딩 서비스와 같은 패턴), 외부 리랭커 API도 붙일 수 있게 `RerankProvider` seam을 함께 뚫는다. **별도 슬라이스**(인증·외부 API LLM/임베딩 슬라이스 뒤). **삽입 자리**: RRF 융합 결과 뒤, `retrieve()` seam 다음. **포트폴리오/README 표기**: 현재 상태는 "RRF 하이브리드 융합 리랭킹 있음, 뉴럴 cross-encoder 리랭커는 미구현(구현 예정)"이 정확 — 코드가 붙기 전까지 "있음"으로 쓰면 거짓이다.
+- **[미래 확장, 지금 범위 아님] 공유·협업 글쓰기.** 오너(2026-07-27)가 "생각 안 해봤다 — 나중에 한 번 생각해보자"며 유예. 다중 사용자 소유권은 **D3=A(`Project.owner_id` 한 필드 = 격리, 1 project 1 owner)**로 가되, 공유/협업(권한 등급·workspace·`members[]`)은 미래 확장이다. D3=A가 그 문을 **닫지 않게** 설계돼 있다(`owner_id`는 나중에 `members[]` 첫 원소나 workspace 소유로 승격 가능 — `plans/multi-user-auth-cms-decisions.md` D3). 착수 시점 아님.
 - **[누수 아님, 의존성 주의] `context_search/service.py:199`·`:406`의 `embed()`**: 자체적으로 `EmbeddingProviderError`를 안 잡지만 호출자(step runner `:752`·`:835`)의 광의 `except Exception` → `BACKEND_ERROR` → 502가 이미 보호한다. **그 catch를 좁히면 그 순간 500 누수가 된다.**
 
 ## Owner Decisions Needed
 
-- **★★ 다중 사용자 확장 D1~D8** — **D0는 결정됐다**(오너 2026-07-26: MVP 단계 제약이 만료됐다 → 정본 **v1.7.49**가 다중 사용자 확장을 방향으로 명시). 남은 것은 설계 결정 8건: `plans/multi-user-auth-cms-decisions.md`(별도 서버 여부·인증 방식·소유권 모델·기존 데이터 귀속·삭제 의미·관리자 범위·인가 시행 지점·슬라이스 순서). **주의 — 정본은 방향을 적었지만 코드는 아직 없다**: 배포 스택은 여전히 무인증이므로 이 조항을 근거로 외부에 노출하면 안 된다. 실측 규모: **61 operation**(`/health` 제외, 전체는 62/52)에 인가와 401/403 선언이 붙고, Mongo·ES 무인증(v1.6.53이 "인증 slice 선행 필요"로 미뤄 둔 것)도 함께 온다. dogfood(아래)와 선후를 정해야 한다.
-- **★ dogfood 착수(GATE-1)** — 가장 큰 갈림길. 실 12B 풀스택 관통은 끝났고 기술적 선행 조건은 없다. 착수하면 `OPS-1` Ready 승격.
-- **외부 API 확장 D1~D6**(초안) — `plans/external-api-expansion-decisions.md`. LLM·임베딩을 외부 상용 API로 붙이는 확장(범위·provider 방식·시크릿·provider 선택 구조·뉴럴 리랭커 포함 여부·인증과의 선후). **착수는 인증 다음**으로 오너가 정함. 코드 실측 공백 2가지 = 인증 헤더 주입 지점 없음·provider 선택 config 없음. 추천안 6건 다 A. 뉴럴 리랭커는 D5=A로 이번 범위 제외(위 추적 부채 참조).
+- **★ dogfood 착수(GATE-1)** — 남은 가장 큰 갈림길. 실 12B 풀스택 관통은 끝났고 기술적 선행 조건은 없다. 착수하면 `OPS-1` Ready 승격. **인증과의 선후만 미결** — 오너는 "인증 먼저"라 했으나 dogfood를 그 앞에 끼울지는 아직.
+- **`analysis_extractor`를 D4로 정렬할지**(v1.7.47): 아래 유지.
+- **loop의 round별 gate decision 노출 여부**(v1.7.47 공백): 아래 유지.
+
+**결정 완료(착수 대기) — 더 이상 오너 결정 대기 아님, 구현만 남음:**
+
+- **다중 사용자 인증 D0~D8 = 전부 결정됨**(D0 2026-07-26, D1~D8 2026-07-27). `plans/multi-user-auth-cms-decisions.md` §결정 요약: D1=A(내부 모듈)·D2=A(세션+HttpOnly 쿠키, 보안 하드닝·Argon2id)·D3=A(`owner_id`, 공유는 미래)·D4=마이그레이션 불요(개발 데이터 폐기 허용)·D5=A(2단계 삭제, 파기=all delete 전체 그래프)·D6=A(최소 관리자)·D7=A(dependency+전수 가드, 보안 근거)·D8=브리프 7단계. **주의 — 코드는 아직 0**: 배포 스택은 여전히 무인증이므로 외부 노출 금지. 착수 시 각 슬라이스 계약을 정본에 함께 적는다. 규모: **61 operation**(`/health` 제외)에 인가·401/403이 붙고 Mongo·ES 무인증도 함께 닫힌다.
+- **외부 API 확장 D1~D6 = 전부 결정됨**(2026-07-27). `plans/external-api-expansion-decisions.md` §2: 세 축 전부 확장하되 **슬라이스 분리**(LLM → 임베딩 → 리랭커)·D2=A(generic OpenAI 호환)·D3=A(env 키, 인증 시크릿 재사용)·D4=A(전역 기본)·D5=리랭커 포함(self-host `bge-reranker-v2-m3-ko` + 외부 seam). 코드 실측 공백 = 인증 헤더 주입 지점·provider 선택 config. **착수는 인증 다음**.
 - **`analysis_extractor`를 D4로 정렬할지**(v1.7.47): 지금 이 site만 최종 도메인 거부를 `parse_error`로 재분류하지 않아 같은 repair 구조인 `compare_judge`와 정책이 갈린다. 정렬하면 두 site가 같은 규칙을 따르고, 두면 v1.7.46 결정이 유지된다. 어느 쪽이든 이행 무손실 증명이 필요한 별도 증분.
 - **loop의 round별 gate decision 노출 여부**(v1.7.47 공백): 노출하면 loop 내부 gate 레코드에도 파생점수를 얹을 수 있다. 도메인 계약(`WritingLoopStage`) 변경이라 D2-B(파생점수 정교화)와 함께 볼 사안.
 

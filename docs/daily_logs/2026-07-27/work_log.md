@@ -90,3 +90,45 @@
 - **A/B 갈림길(오너 대기)**: (A) 실 12B로 파이프라인을 관통시켜 `llm_call_audits`를 적재 → 관측 화면
   육안 검증 가능화 / (B) 빈 상태로 오너가 UI에서 dogfood. 검증자·나 모두 A를 권하되, B-1 정정이 선행.
 - 관측 화면 URL: `http://localhost:5520/projects/:id/observability`. DB가 fresh라 지금은 빈 상태만 보인다.
+
+---
+
+## Task — 외부 API 확장성 확인 + 인증/외부 API 브리프 결정 확정 (문서만)
+
+### Goals
+
+- 오너가 인증 착수 전에 "임베딩·리랭커·LLM을 외부 API로 붙일 수 있는 확장성"을 확인 요청.
+- 확인 결과를 바탕으로 외부 API 확장 계획(결정 브리프)을 세우고, 인증 브리프의 D1~D8까지 함께 확정.
+
+### 확장성 확인 결과 (코드 실측)
+
+- **LLM**: gateway 경계·OpenAI 호환 wire는 있으나 **인증 헤더 주입 지점 없음**([`httpx_transport.py:37`](../../../services/llm_gateway/app/httpx_transport.py#L37))·provider 선택 config 없음(`LlamaCppProvider` 하드코딩) → keyless OpenAI 호환만 지금 됨(베타 12B가 그 경로).
+- **임베딩**: `EmbeddingProvider` Protocol seam 있음, `RemoteEmbeddingProvider`는 인하우스 `/embed` 계약 전용·인증 없음 → 외부는 어댑터 1개 추가 필요.
+- **리랭커**: **뉴럴 cross-encoder 리랭커는 없음.** 현재 리랭킹은 **RRF 융합만**([`context_search/service.py:279`](../../../services/application/app/context_search/service.py#L279)). 내가 처음 "리랭커 개념 자체가 없다"고 답한 것은 **틀렸고**(RRF 융합 리랭킹은 있음), 오너 지적으로 정정 — 정확히는 "뉴럴 cross-encoder 리랭커가 없다".
+- **Elasticsearch/검색엔진**: 있음(lexical + nori). 벡터(Chroma)+lexical(ES)+RRF 융합이 실제 RAG 구성.
+
+### User Decisions and Rationale — 외부 API 확장 브리프 (신규 `plans/external-api-expansion-decisions.md`)
+
+- **D1 = 세 축 전부 확장, 슬라이스 분리**(LLM → 임베딩 → 리랭커 각각 독립). 오너: "모두 확장이 맞는데 LLM과 임베딩 슬라이스는 별도로." wire·실패모드·조달이 축마다 달라 묶으면 성격이 섞인다.
+- **D2=A**(generic OpenAI 호환), **D3=A**(env 키, 인증 시크릿 재사용), **D4=A**(전역 기본 + site별 후속) — 추천안 수용.
+- **D5 = 리랭커 포함(유예 해제)**. 로컬 self-host **`dragonkue/bge-reranker-v2-m3-ko`**(임베딩 서비스 패턴) + 외부 리랭커 API도 붙일 `RerankProvider` seam. 오너: "로컬엔 이거 쓰고, 외부꺼도 쓸 수 있게 뚫어놓기." **이 모델은 2026-07-05에 임베딩으로 잘못 지목됐다 유예됐던 바로 그 cross-encoder**가 제 역할로 복귀한 것. 리랭커 API는 공통 wire 표준이 없어(Cohere·Jina·Voyage 각자) provider별 어댑터로 붙는다.
+
+### User Decisions and Rationale — 인증 브리프 D1~D8 (`plans/multi-user-auth-cms-decisions.md`)
+
+- **D1=A**(Application 내부 모듈), **D2=A**(세션+HttpOnly 쿠키) **+ 보안 하드닝**(오너 "인증은 곧 보안"): Argon2id 해시·HttpOnly/Secure/SameSite=Lax·Mongo 서버측 세션(즉시 무효화)·CORS 계속 닫음.
+- **D3=A**(`Project.owner_id` 격리). **공유·협업 글쓰기는 미래 확장으로 유예**(오너 "생각 안 해봤다, 나중에") — D3=A가 `members[]`/workspace 승격 문을 닫지 않음. HANDOFF에 미래확장 메모 남김.
+- **D4 = 마이그레이션 불요, 개발 데이터 폐기 허용**. 오너: "개발단계라 기존 데이터 싹 날려도 됨, 굳이 하면 A." 정본 보존 정책은 *실 창작물* 보호이지 *개발 테스트 데이터*가 아니며 오늘 볼륨을 이미 초기화해 귀속 대상이 사실상 없다. **실 데이터가 쌓인 뒤면 A(부트스트랩 관리자 귀속)로 되돌린다**는 조건 명시.
+- **D5=A**(2단계 archive→관리자 영구삭제) **+ 파기=all delete(전체 그래프)**. 오너: "영구보존은 *작업* 층위, CMS 삭제는 *관리* 층위(작업 상위)라 진짜 삭제, all delete가 맞다." 부분 삭제(고아 데이터) 금지가 이 결정으로 확정.
+- **D6=A**(최소 관리자, additive).
+- **D7=A**(dependency + 전수 가드) — **오너가 "보안 중점으로 구현자 선택" 위임**. 보안 근거: 실패 모드가 데이터 유출이라, 미들웨어(B)는 소유권(데이터 기반) 검사 불가·신규 경로 조용히 열림, 서비스층(C)은 시그니처 오염. A만이 authn+authz를 경계에서 강제하고 누락을 green으로 통과 못 하게 하는 fail-closed 전수 가드를 얹는다(H3·관측 조립 가드 선례).
+- **D8 = 브리프 7단계 유지**(D4가 마이그레이션 불요라 2단계 축소). 오너 미명시 → 구현자 제안 유지, 이견 시 조정.
+
+### Decisions (구현자 판단)
+
+- **두 브리프 다 "결정됨/착수 대기"로 상태 전환**하되 코드·스키마·정본은 안 건드렸다 — 착수는 인증 슬라이스이고, 각 슬라이스가 자기 계약을 정본에 함께 적는 것이 이 repo 규칙이라 지금 정본을 미리 고치면 "문장뿐인 계약"과 "선 코드"가 섞인다.
+- **D7·D4·Argon2id·D8은 구현자 판단이 들어간 지점**이라 브리프·work_log에 근거를 명시하고 오너가 veto할 수 있게 남겼다.
+
+### Next steps
+
+- 오너 확인 후: 인증 슬라이스 D8-1(사용자·세션 저장 + 로그인 API)부터 착수. 그 뒤 외부 API(LLM→임베딩→리랭커), 시크릿은 인증 산출물 재사용.
+- dogfood(★)와 인증의 선후는 아직 열려 있음(오너 "인증 먼저"지만 dogfood를 앞에 끼울지 미결).
