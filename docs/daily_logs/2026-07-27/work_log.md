@@ -266,3 +266,62 @@ Mongo 라이브·mutation 삼중)·Argon2id·토큰 엔트로피·쿠키 정책�
   적혀 있다**(향후 비교 추가 시 `_entry` 경계에서 재부착).
 - **정리**: 검증자가 라이브 검증용으로 만든 `liveprobe` 사용자를 dev DB에서 삭제했다(`owner`만 남음).
 - **회귀**: **1614 passed / 1 skipped / 623 subtests**. 검증 시점 1609 대비 **+5 = 신규 5건**(열거 방지 3 · 토큰 엔트로피 1 · 비-목표 전수 1)과 정확히 일치. subtests 무변. 설명되지 않는 증감 0.
+
+---
+
+## Task — 인증 D8-2 소유권 기록 (2a 필드 · 2b 배선)
+
+### Goals
+
+- 오너 지시: **"한번에 너무 많은 슬라이스를 하려고 하지 말고 작은 단위로 차례차례."** 그래서 D8-2를
+  다시 둘로 쪼갰다 — **2a(필드·저장)** 와 **2b(세션에서 채우기)** 를 각각 독립적으로 green·커밋.
+- 비-목표(유지): 인가는 여전히 없다. 소유자는 **기록만** 되고 아무도 그것으로 접근을 막지 않는다.
+
+### Completed work — 2a (커밋 `7ffd615`)
+
+- [`core_sot/models.py`](../../../services/application/app/core_sot/models.py) `Project.owner_id:
+  str | None = None`. **nullable이 의도**다 — 인증 이전 프로젝트는 소유자가 없고 시행은 D8-3이다.
+- [`mongo_repository.py`](../../../services/application/app/core_sot/mongo_repository.py)
+  `_project_doc`/`_to_project`. 읽기는 **`.get`** — 배포 DB의 기존 문서에는 키 자체가 없다.
+- [`service.py`](../../../services/application/app/core_sot/service.py)
+  `create_project(name, owner_id=None)`. optional이라 worker·script·기존 테스트가 전부 무변.
+- **회귀 신규 3(실 Mongo)**: 소유자 왕복(**get·list 두 디코더 각각**) · 미지정 시 None 유지
+  (over-strict — 자리표시자를 넣으면 D8-3이 "소유자 없음"을 실제 user id로 오인한다) ·
+  **`owner_id` 키가 아예 없는 legacy 문서가 unowned로 읽힌다**(배포 DB의 현재 모양 그대로).
+- **공개 API 무변** 실측: `gen:api` 후 `schema.d.ts` no diff.
+
+### Completed work — 2b
+
+- [`main.py`](../../../services/application/app/main.py) `POST /projects`가 `_current_user`로 세션을
+  해석해 **있으면 생성자를 owner로 기록, 없으면 unowned**. **401로 만들지 않은 것이 핵심** — 인증은
+  D8-3 전까지 선택이고, 여기서 필수로 만들면 이 슬라이스가 실수로 시행 슬라이스가 된다.
+- **회귀 신규 4**: 로그인 후 생성 → owner 기록 · **익명 생성이 401이 아니라 200 + unowned**
+  (over-strict, 슬라이스 경계) · **owner_id를 공개 payload에 노출하지 않음**(노출은 공개 계약 변경이라
+  프론트가 읽을 이유가 생길 때 = 2c) · **로그아웃 후 생성은 unowned**(소유자는 *살아 있는 세션*에서
+  오지 "한때 로그인했었다"에서 오지 않는다).
+- **mutation**: owner 배선을 `owner_id=None`으로 되돌리면 해당 회귀 1건이 정확히 실패한다.
+- **공개 API 무변** 실측: `gen:api` 후 `schema.d.ts` no diff.
+
+### Decisions (구현자 판단)
+
+- **2c(소유자 공개 노출)를 하지 않았다.** `owner_id`를 payload에 넣으면 `schema.d.ts`가 바뀌는
+  공개 계약 변경인데, 지금 그것을 읽을 소비자가 없다(§2). 프론트가 "내 프로젝트" 같은 화면을 요구할
+  때 그 슬라이스와 함께 넣는 것이 맞다.
+- **`create_project`의 `owner_id`를 optional로 뒀다.** required로 만들면 worker·script·기존 테스트가
+  전부 깨지고, 그건 이 슬라이스가 감당할 범위가 아니다. required 승격은 D8-3의 판단.
+
+### Next steps — D8-3 착수자에게
+
+- 재료는 다 있다: `_current_user(request)` + `project.owner_id`.
+- **첫 결정**: `owner_id=None`인 legacy 프로젝트를 어떻게 다룰지. "소유자 불일치면 거부"만 쓰면
+  주인 없는 데이터가 **아무에게도 안 열리거나 모두에게 열린다**. D4가 "개발 데이터 폐기 허용"이라
+  폐기 후 시작도 선택지다.
+- 잠금은 dependency + **전수 가드**(D7). 그리고 `test_no_non_auth_operation_is_protected_yet`이
+  **그때 실패하는 것이 정상**이다 — 삭제하지 말고 역명제로 다시 쓴다.
+
+### Verification (2a·2b 합산)
+
+- **회귀 전량**: **1627 passed / 1 skipped / 623 subtests**. 직전 1614 대비 **+13**이고 분해가
+  정확히 맞는다 — 2a의 신규 3건이 `_MongoContractMixin`의 **서브클래스 3개**(Fallback·Transaction·
+  WritingIntent)에서 각각 도는 **9** + 2b의 **4**. subtests 무변. 설명되지 않는 증감 0.
+- **공개 계약**: 2a·2b 각각 `gen:api` 후 `schema.d.ts` **no diff**(두 슬라이스 다 API 무변이 성공 기준).

@@ -14,6 +14,9 @@ from services.application.app.auth.sessions import (
     InMemorySessionRepository, SessionService,
 )
 from services.application.app.auth.users import InMemoryUserRepository, UserService
+from services.application.app.core_sot.service import (
+    CoreSotService, InMemoryCoreSotRepository,
+)
 from services.application.app.main import create_app
 
 
@@ -25,11 +28,13 @@ class _FakeHasher:
         return stored_hash == "H:" + password
 
 
-def _client(*, ttl=timedelta(hours=1)):
+def _client(*, ttl=timedelta(hours=1), core_sot=None):
     users = UserService(InMemoryUserRepository(), hasher=_FakeHasher())
     sessions = SessionService(InMemorySessionRepository(), ttl=ttl)
     users.create_user(username="alice", password="pw123")
-    app = create_app(user_service=users, session_service=sessions)
+    app = create_app(
+        service=core_sot, user_service=users, session_service=sessions
+    )
     # https base_url on purpose: the cookie ships Secure by default, so an http
     # client would silently drop it and every session test would pass/fail for
     # the wrong reason. This exercises the deployed configuration.
@@ -164,6 +169,62 @@ class CookiePolicyTest(unittest.TestCase):
             with self.subTest(value=value):
                 with mock.patch.dict(os.environ, {"AUTH_COOKIE_SECURE": value}):
                     self.assertEqual(cookie_secure(), expected)
+
+
+class ProjectOwnershipRecordingTest(unittest.TestCase):
+    """D8-2b: creating a project records the creator when a session exists.
+
+    Recording only — nothing reads owner_id for access decisions yet (D8-3).
+    """
+
+    def setUp(self) -> None:
+        self.core_sot = CoreSotService(InMemoryCoreSotRepository())
+        self.client, self.users, _ = _client(core_sot=self.core_sot)
+
+    def _created_project(self, response):
+        return self.core_sot.get_project(project_id=response.json()["id"])
+
+    def test_logged_in_create_records_the_creator_as_owner(self) -> None:
+        login = self.client.post(
+            "/auth/login", json={"username": "alice", "password": "pw123"}
+        )
+        expected_owner = login.json()["user"]["id"]
+
+        response = self.client.post("/projects", json={"name": "Novel"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self._created_project(response).owner_id, expected_owner)
+
+    def test_anonymous_create_still_succeeds_and_stays_unowned(self) -> None:
+        # Over-strict guard on the slice boundary: this must NOT become 401.
+        # Authentication is still optional until D8-3, and turning it required
+        # here would make this the enforcement slice by accident.
+        response = self.client.post("/projects", json={"name": "Anonymous"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(self._created_project(response).owner_id)
+
+    def test_owner_is_not_exposed_on_the_public_payload_yet(self) -> None:
+        # The field is recorded but not published: adding it to the response is a
+        # public contract change (schema.d.ts) and belongs with the slice that
+        # gives the frontend a reason to read it.
+        self.client.post(
+            "/auth/login", json={"username": "alice", "password": "pw123"}
+        )
+        response = self.client.post("/projects", json={"name": "Novel"})
+        self.assertEqual(set(response.json()), {"id", "name", "archived"})
+
+    def test_session_revoked_after_login_creates_an_unowned_project(self) -> None:
+        # The owner comes from the live session, not from "was ever logged in".
+        self.client.post(
+            "/auth/login", json={"username": "alice", "password": "pw123"}
+        )
+        self.client.post("/auth/logout")
+
+        response = self.client.post("/projects", json={"name": "After logout"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(self._created_project(response).owner_id)
 
 
 class SliceBoundaryTest(unittest.TestCase):

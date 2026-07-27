@@ -4,7 +4,7 @@
 > 완료 서술은 여기 쓰지 않는다 — `docs/daily_logs/`(상세) · `docs/system-contract-sot.md` 변경이력 · `CHANGELOG.md`(마일스톤) · `docs/verifications/`(독립 검증)에 이미 있다.
 > 편집 규칙은 `CLAUDE.md`·`AGENTS.md`의 "HANDOFF.md" 절에 있다. **길이 상한은 없다** — 대신 **~200줄을 넘으면 자가 검수**하고(그 뒤로는 ~100줄마다) 결과를 아래 한 줄로 남긴다. 길어야 할 이유가 있으면 길어도 된다. 안 보는 것이 문제다.
 >
-> 마지막 자가 검수: 2026-07-27 · 163줄 (인증 슬라이스 1 착수 반영, stale 3건 제거 — "진행 중 페이즈 없음"·구 컨테이너 정의·H3 61→64, pymongo naive datetime 함정 추가)
+> 마지막 자가 검수: 2026-07-27 · 171줄 (인증 슬라이스 진행표 신설 — 1a~2b 완료·다음 D8-3, 착수자 메모 추가. 다음 검수 트리거는 200줄)
 
 ## 머신 구성 (알파 · 베타 · 감마)
 
@@ -25,8 +25,18 @@
 ## 지금 상태
 
 - 정본은 `docs/system-contract-sot.md` **v1.7.50**(Approved). 미확정 항목은 추측 구현하지 않는다.
-- **진행 중 페이즈 = 다중 사용자 인증(D8).** **슬라이스 1 완료**(2026-07-27): `app/auth/`에 User 저장(Argon2id) · 서버 세션 · `POST /auth/login`·`POST /auth/logout`·`GET /auth/me`가 있고 실 스택에서 관통 검증됐다(operation 62→**65**). **다음은 D8-2**(`Project.owner_id` 필드; D4에 따라 마이그레이션 없음) → **D8-3 인가 시행 + 전수 가드**(가장 큰 단계).
-- **⚠ 인가는 아직 없다 — 이것은 의도된 상태다.** 로그인이 생겼다고 보호되는 것이 아니다: `/auth/*` 외 **모든 endpoint는 세션 없이 그대로 열려 있다**(회귀 `SliceBoundaryTest`가 이 비-목표를 잠근다). 소유권(D3)·시행(D7)이 오기 전에 잠그면 `owner_id`가 없는 기존 데이터에서 오너가 잠기기 때문이다. **배포 스택은 여전히 실질 무인증이므로 외부 노출 금지.**
+- **진행 중 페이즈 = 다중 사용자 인증(D8).** 오너 지시로 **슬라이스를 잘게 쪼개 진행 중**이다(한 번에 큰 덩어리 금지). 진행표:
+
+  | 슬라이스 | 상태 | 내용 |
+  |---|---|---|
+  | 1a·1b·1c | **완료** | User 저장(Argon2id) · 서버 세션 · `/auth/login`·`/auth/logout`·`/auth/me` (operation 62→**65**), 실 스택 관통 검증 |
+  | **2a** | **완료** | `Project.owner_id: str \| None` 필드 + Mongo 왕복. `create_project(name, owner_id=None)`. **공개 API 무변** |
+  | **2b** | **완료** | `POST /projects`가 세션이 있으면 생성자를 owner로 **기록**. 세션 없으면 unowned로 **여전히 200** |
+  | 2c(선택) | 미착수 | `owner_id`를 공개 payload에 노출할지 — **프론트가 읽을 이유가 생길 때** 하면 된다(schema.d.ts 변경이므로 공짜 아님) |
+  | **3** | **다음** | **인가 시행 + 전수 가드**(D7=A). 가장 큰 단계 |
+
+- **D8-3 착수자를 위한 메모**: (a) 소유자 판정에 쓸 재료는 이미 다 있다 — `_current_user(request)`(main.py auth 절)와 `project.owner_id`. (b) **`owner_id`는 nullable이고 legacy 프로젝트는 `None`이다** — 인가 규칙이 "소유자 불일치면 거부"만 보면 **주인 없는 기존 데이터가 아무에게도 안 열리거나 모두에게 열린다**. 어느 쪽으로 정할지가 D8-3의 첫 결정이다(브리프 D4가 "개발 데이터는 폐기 허용"이라 폐기 후 시작도 선택지). (c) 잠금은 **dependency + 전수 가드**로(D7), 그리고 **`tests/test_auth_api.py`의 `test_no_non_auth_operation_is_protected_yet`이 그때 실패하는 것이 정상**이다 — 그 실패가 비-목표 종료의 표지이므로 삭제하지 말고 **역명제로 다시 쓴다**.
+- **⚠ 인가는 아직 없다 — 이것은 의도된 상태다.** 로그인이 생겼고 소유자가 기록되기 시작했지만 **아무것도 그것을 읽어 접근을 막지 않는다**: `/auth/*` 외 **모든 endpoint는 세션 없이 그대로 열려 있다**. 비-목표는 두 겹으로 잠겨 있다 — `SliceBoundaryTest`(표본 3건 + **전 operation에 `security`·401 선언 부재 전수 단언**)와 `ProjectOwnershipRecordingTest`(익명 생성이 **401이 아니라 200**임을 단언). **배포 스택은 여전히 실질 무인증이므로 외부 노출 금지.**
 - **첫 계정 만드는 법**(관리자 API는 D8-5라 아직 없다): `docker exec -e PYTHONPATH=/app -e AUTH_BOOTSTRAP_PASSWORD='…' ai_writte_system-application-1 python scripts/create_user.py <username> --admin`. **`PYTHONPATH=/app`이 필수다** — 이미지에 PYTHONPATH가 없고 `python scripts/x.py`는 CWD를 sys.path에 넣지 않는다.
 - LLM 파이프라인 관측(KPI) 페이즈는 **계측·집계 API·대시보드까지 닫혔다**(2026-07-26). 그 결과물 위에서 다음 작업이 돈다.
 - **관측 KPI 페이즈의 결과물**(다음 작업이 이 위에서 돈다): LLM을 부르는 **8개 호출부 전부**가 seam C(provider 데코레이터)로 계측되고 — `analysis_extractor`·`writing_gate`·`compare_judge`·`query_planner`·`writing_retrieval_planner`·`writing_generation`·`writing_revision`·`writing_report` — `GET /projects/{id}/observability/kpi`가 집계를 내고, `/projects/:id/observability` 화면이 그것을 그린다. QUAL-1(제품 품질·수기·dogfood)과 별개 트랙이며 운영기획 포트폴리오는 `docs/observability-kpi-rationale.md`.
@@ -36,7 +46,7 @@
 - **집계 API를 읽을 때의 함정 3가지**(v1.7.48, 전부 응답이 분모를 함께 실어 방어한다): ① `total_tokens`는 `success`+`parse_error` 행만 — 분모는 `tokens_counted_from`. ② **표본이 0이면 비율은 `null`이지 `0.0`이 아니다**(`gate.avg_quality_score`·`loop.non_convergence_rate`) — loop 감사는 opt-in(기본 off)이라 기본 배포에서 `loop.runs_considered`=0이 정상이다. ③ **`multi_call_correlations`는 repair 수가 아니다** — site 고정 후 레코드 2건 이상인 correlation 수이며, repair 구조 site(extractor·compare·planner)에서만 repair를 뜻하고 writing loop에서는 **설계된 라운드**다(gate 최대 3회).
 - **loop 내부 gate 레코드에는 `decision`·`gate_quality_score`가 없다**(v1.7.47 알려진 공백): 파생점수는 endpoint가 `annotate_last`로 얹는데 revise loop이 round별 판정을 결과에 노출하지 않는다(`WritingLoopStage`는 stage/ordinal/status만). 그 필드는 **독립 `POST …/writing/gate` 호출에만** 채워지므로 집계가 전수 커버리지를 가정하면 안 된다.
 - 공개 API 계약(H3)은 닫혀 있다: **`/health`를 제외한 64개 operation 전부**(전체 65 — 인증 3종 추가)가 realistic 에러 상태를 OpenAPI에 선언하고 **미매핑 500 부채는 0건**이다. 새 endpoint를 추가하면 **`responses=`도 함께** 붙여야 하며, 트랙별 전수 선언 가드 테스트가 빠뜨림을 잡는다. 저장소 장애 503 face는 이제 **예외 없이 전 endpoint 균일**하다 — v1.7.40이 마지막 두 잔여(광의 catch가 pymongo를 삼켜 502로 내던 곳)를 닫았다: `POST …/analysis/jobs/{id}/run`과 `POST …/context-search`의 `persist_rejection`. 둘 다 광의 catch 앞에 `except _STORAGE_ERRORS`를 두어 저장소 예외를 503으로 보낸다. **주의**: 앞으로 endpoint body를 광의 `except Exception`으로 감싸면 그 순간 저장소 예외가 다시 502/도메인 에러로 새므로, 그런 catch를 둘 때는 반드시 그 앞에 `except _STORAGE_ERRORS`를 둔다.
-- 회귀 기준선: backend **1614 passed / 623 subtests**(test-mongo 기동, 인증 슬라이스 1 + 검증 반영 포함), frontend **207 passed / 14 files**, build JS **진입 401.19 kB + 관측 화면 청크 385.67 kB**(차트는 `React.lazy`로 분리 — 관측 화면을 열 때만 내려간다). **skip 수는 머신마다 다르다** — live Chroma 1건은 항상 skip이고, `elasticsearch` 파이썬 패키지가 없는 머신에서는 lexical retrieval 3건이 추가로 skip된다(베타 머신 2026-07-27 = **1 skipped**, 이 패키지가 있다). 숫자가 안 맞으면 회귀를 의심하기 전에 skip 사유부터 `-rs`로 확인할 것. **프론트는 `npm install`이 선행**돼야 한다(미설치 머신에서 recharts 부재로 tsc가 깨지는데 코드 문제가 아니다).
+- 회귀 기준선: backend **1627 passed / 623 subtests**(test-mongo 기동, 인증 슬라이스 1~2b 포함), frontend **207 passed / 14 files**, build JS **진입 401.19 kB + 관측 화면 청크 385.67 kB**(차트는 `React.lazy`로 분리 — 관측 화면을 열 때만 내려간다). **skip 수는 머신마다 다르다** — live Chroma 1건은 항상 skip이고, `elasticsearch` 파이썬 패키지가 없는 머신에서는 lexical retrieval 3건이 추가로 skip된다(베타 머신 2026-07-27 = **1 skipped**, 이 패키지가 있다). 숫자가 안 맞으면 회귀를 의심하기 전에 skip 사유부터 `-rs`로 확인할 것. **프론트는 `npm install`이 선행**돼야 한다(미설치 머신에서 recharts 부재로 tsc가 깨지는데 코드 문제가 아니다).
 - **[베타 머신 관측치, 2026-07-27, `docker compose ps` 실측]** 전체 스택이 `--build` 재빌드 후 떠 있다(외부 12B `192.168.1.22:9080` 배선). 정확한 health: **healthy 7**(`application`·`gateway`·`mongo`·`elasticsearch`·`embedding`·`chroma`·`frontend`) + **healthcheck 없는 2**(`worker`·`generation_worker` — async 배경 워커라 by design, "Up"이지 "healthy" 아님). **"전부 healthy"라고 쓰지 않는다** — 워커 2종은 구조적으로 healthcheck가 없다. `/health` 200, 관측 route(`/projects/{id}/observability/kpi`) 등록 확인. (frontend는 원래 unhealthy였다 — nginx `listen 80`이 IPv4 전용인데 healthcheck가 `localhost`→`::1`로 풀려 refused. 이번에 healthcheck를 `127.0.0.1`로 고쳐 healthy 전환 — `docker-compose.yml`에 반영, 46f6009 이후의 사전 존재 결함이었다.) **DB는 fresh다** — 기동 시 dev `mongo_data`의 구 `analysis_extract_v3` 본문(sha `fb4e272…`, 볼륨 소거로 재확인 불가)이 현재 canonical v3(sha `4376310…`)와 달라 `PromptTemplateConflict`로 app이 죽었고(코드 회귀 아님, 코드↔테스트 핀 일치), **오너 판단으로 데이터 볼륨(mongo·es·chroma)을 비우고**(embedding 모델 캐시는 보존) 재기동해 해소했다. 즉 관측 화면·모든 데이터는 **빈 상태부터** 시작한다.
 - **관측 화면 육안 확인이 남은 미검증 항목**이다(로직은 회귀로 잠겨 있고 렌더만 미검증). URL `http://localhost:5520/projects/:id/observability`. **DB가 비어 있어 지금 열면 빈 상태**만 보이므로, 차트 배치·라벨 충돌을 보려면 먼저 파이프라인을 한 번 관통시켜(프로젝트 생성→분석/집필) `llm_call_audits`를 쌓아야 한다.
 - **인증 코드가 들어간 뒤 배포하려면 application 이미지 rebuild가 필요하다**(`argon2-cffi` 신규 의존성). `docker compose up -d --build application`.

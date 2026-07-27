@@ -2259,8 +2259,18 @@ def create_app(
 
     @app.post("/projects", response_model=ProjectPayload,
               responses=_ERRORS_STORAGE)
-    async def create_project(request: CreateProjectRequest) -> dict[str, object]:
-        project = core_sot.create_project(name=request.name)
+    async def create_project(
+        request: CreateProjectRequest, http_request: Request
+    ) -> dict[str, object]:
+        # D8-2b: record the creator when there is a session, leave unowned when
+        # there is not. Deliberately NOT a 401 — authentication is still optional
+        # (D8-3 makes it required), so an anonymous create must keep working or
+        # this slice would silently become the enforcement slice.
+        current = _current_user(http_request)
+        project = core_sot.create_project(
+            name=request.name,
+            owner_id=current.id if current is not None else None,
+        )
         return _project_payload(project)
 
     @app.get("/projects", response_model=ProjectListResponse,
