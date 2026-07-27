@@ -16,7 +16,9 @@ as "the loop never diverged" when it means "nobody measured".
 import unittest
 from datetime import UTC, datetime
 
-from fastapi.testclient import TestClient
+# D8-3a: authenticated client — these suites drive domain behaviour, not the
+# session boundary (that is tests/test_auth_api.py, which uses the real one).
+from tests.auth_support import AuthenticatedTestClient as TestClient
 
 from services.application.app.core_sot.service import (
     CoreSotService,
@@ -350,7 +352,7 @@ class KpiErrorContractDeclarationTest(unittest.TestCase):
     """
 
     EXPECTED = {
-        ("/projects/{project_id}/observability/kpi", "get"): {"404", "503"},
+        ("/projects/{project_id}/observability/kpi", "get"): {"401", "404", "503"},
     }
 
     def setUp(self):

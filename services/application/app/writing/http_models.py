@@ -257,8 +257,13 @@ class WritingGenerationJobAcceptedPayload(BaseModel):
 _REVISE_GATE_PARTIAL = {"model": Union[WritingReviseGatePartial, ErrorDetailResponse]}
 _DETAIL_ONLY = {"model": ErrorDetailResponse}
 
+# D8-3a: both endpoints below are protected operations (main._REQUIRE_AUTH), so
+# 401 is realistic for them exactly as it is for the operations declared through
+# main._protected. It is always a plain error — the request never reaches the
+# handler, so no partial work can have been persisted.
 REVISE_AND_GATE_RESPONSES: dict[int | str, dict] = {
     400: _REVISE_GATE_PARTIAL,
+    401: _DETAIL_ONLY,
     404: _DETAIL_ONLY,
     502: _REVISE_GATE_PARTIAL,
     503: _REVISE_GATE_PARTIAL,
@@ -284,6 +289,7 @@ _ACCEPT_503 = {
 
 ACCEPT_RESPONSES: dict[int | str, dict] = {
     400: _DETAIL_ONLY,
+    401: _DETAIL_ONLY,
     404: _DETAIL_ONLY,
     409: _DETAIL_ONLY,
     502: {"model": Union[WritingAcceptAnalysisPartial, ErrorDetailResponse]},

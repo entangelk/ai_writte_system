@@ -26,6 +26,7 @@ from services.application.app.memory.service import (
     MemoryNotFound,
     MemoryService,
 )
+from tests.auth_support import authenticate
 
 try:  # pymongo is optional for the in-memory path (main._resolve_storage_error_types)
     from pymongo.errors import AutoReconnect as _STORAGE_FAILURE
@@ -35,6 +36,10 @@ except ModuleNotFoundError:  # pragma: no cover - the driver is present in CI
 
 class TestClient:
     def __init__(self, app):
+        # D8-3a: this suite is about domain behaviour, not the session
+        # boundary, so the client arrives authenticated. The boundary itself
+        # is driven un-overridden in tests/test_auth_api.py.
+        authenticate(app)
         self._app = app
 
     def get(self, path, **kwargs):

@@ -31,6 +31,7 @@ from services.application.app.indexing.service import (
     SourceBlockIndexingService,
 )
 from services.application.app.main import create_app
+from tests.auth_support import authenticate
 
 
 RAW_TEXT = (
@@ -47,6 +48,10 @@ class TestClient:
     __test__ = False  # httpx driver helper, not a pytest test class
 
     def __init__(self, app):
+        # D8-3a: this suite is about domain behaviour, not the session
+        # boundary, so the client arrives authenticated. The boundary itself
+        # is driven un-overridden in tests/test_auth_api.py.
+        authenticate(app)
         self._app = app
 
     def _send(self, method, path, **kwargs):

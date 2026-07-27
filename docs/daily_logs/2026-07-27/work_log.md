@@ -488,3 +488,130 @@ Mongo 라이브·mutation 삼중)·Argon2id·토큰 엔트로피·쿠키 정책�
   `schema.d.ts=c5bf248…`로 동일하고 생성물 diff 0. `git diff --check` 통과.
 - 검증 기록의 boundary matrix 빈 셀은 0개, 최종 판정은 **합격**으로 갱신했다. 다음 작업은
   D8-3a다.
+
+---
+
+## Task — 인증 D8-3a 시행 (인증 dependency + 401 선언 + 전수 가드)
+
+### Goals
+
+- E3=A의 첫 하위 슬라이스를 세운다: `/health`와 공개 `/auth`를 제외한 모든 operation에
+  인증을 **시행**하고, 401을 OpenAPI에 선언하고, 빠뜨림을 잡는 전수 가드를 같은 슬라이스에 넣는다.
+- 슬라이스 1이 "D8-3에서 실패하는 것이 정상"이라 적어 둔 비-목표 가드를 **삭제하지 않고 역명제로**
+  다시 쓴다.
+- 소유권(403)은 손대지 않는다 — D8-3b.
+
+### Completed work — 시행
+
+- [`main.py`](../../../services/application/app/main.py): 모듈 수준 dependency
+  `require_authenticated_user`(+`current_user_or_none`)를 추가하고 `_REQUIRE_AUTH` 한 개를
+  **61개 operation의 `dependencies=`**에 붙였다. `create_app` 클로저가 아니라 모듈 수준인 이유는
+  두 가지다 — 클로저는 앱마다 다른 함수 객체라 `app.dependency_overrides`가 키로 쓸 수 없고,
+  전수 가드가 "이 route가 보호되는가"를 판정하려면 찾을 identity가 **하나여야** 한다.
+  세션·사용자 서비스는 `app.state`로 넘긴다.
+- **공개 예외 4개는 각각 이유를 코드 주석과 계약에 남겼다**: `/health`(healthcheck는 로그인 못
+  한다) · `POST /auth/login`(세션을 얻는 경로) · `POST /auth/logout`(멱등 — 서버가 이미 잊은
+  쿠키로도 로그아웃 상태에 도달할 수 있어야 한다) · `GET /auth/me`(프론트가 "세션이 있는가"를
+  묻는 endpoint라 공유 가드가 아니라 자기 본문에서 401을 낸다).
+- **401 선언은 `_protected()` 한 곳**에서 `_ERRORS_*` 상수에 얹었다(61곳 반복 대신). logout만
+  `_ERRORS_LOGOUT`으로 분리해 공유 상수에 401이 붙어도 닿지 않게 했다 — 종전에는 logout과
+  `/projects` 두 종류가 같은 `_ERRORS_STORAGE`를 썼다.
+  [`writing/http_models.py`](../../../services/application/app/writing/http_models.py)의
+  `REVISE_AND_GATE_RESPONSES`·`ACCEPT_RESPONSES`에도 401을 더했다(둘 다 plain error —
+  요청이 handler에 닿지 않으므로 partial envelope가 나올 수 없다).
+- `POST /projects`는 `owner_id=None`을 더 이상 만들지 않는다. 생성자는 **가드가 이미 해석한 값**을
+  파라미터로 받는다(쿠키를 다시 읽으면 "이 요청자가 누구인가"에 대한 답이 두 개가 되어 갈라진다).
+
+### Completed work — 전수 가드 (두 겹)
+
+`tests/test_auth_api.py`의 `SliceBoundaryTest` → `AuthenticationBoundaryTest`로 재작성했다.
+비-목표 가드는 지시대로 삭제하지 않고 역명제가 됐다.
+
+- **선언 가드**: 모든 route에 대해 `dependencies`에 `require_authenticated_user`가 있는지와
+  `PUBLIC` 리터럴 소속 여부가 **일치**해야 한다. OpenAPI가 아니라 **route 객체**를 읽는 이유는,
+  `responses=`에 401만 있고 배선이 빠진 drift가 스펙 문서만 봐서는 보이지 않기 때문이다.
+- **런타임 가드**: 보호되는 61개를 **실제로 세션 없이 호출**해 401을 확인한다. 200도 404도 422도
+  아니어야 한다 — 가드가 요청 본문 검증보다 앞선다는 사실까지 함께 잠근다(본문 없이 POST해도 401).
+- **over-strict 3종**: ① 유효 세션이면 같은 요청이 가드를 통과해 handler에 도달한다(없으면
+  "전부 거부"도 통과한다) · ② `/health`·`/auth/logout`은 **낼 수 없는 401을 선언하지 않는다** ·
+  ③ `/health`는 열려 있다(깨지면 요청 실패가 아니라 컨테이너 재시작으로 나타나므로 따로 이름을 뒀다).
+- `ProjectOwnershipRecordingTest`의 무소유 arm 2건은 401 arm이 됐고, **상태코드뿐 아니라 저장소에
+  아무것도 남지 않았음**을 함께 단언한다(handler를 돌린 뒤 응답만 거부하면 익명 호출마다 무소유
+  project가 쌓인다). 만료 세션 arm도 추가했다 — 로그아웃과 원인이 다르고, 오래 열어 둔 탭이
+  실제로 만나는 쪽이다.
+
+### Decisions (구현자 판단) — 도메인 스위트를 인증 상태로 만드는 방법
+
+시행이 들어오면 도메인 스위트 ~130개 클라이언트가 전부 401을 받는다. 세 안을 놓고 골랐다.
+
+- **채택**: [`tests/auth_support.py`](../../../tests/auth_support.py) 한 곳에서
+  `app.dependency_overrides[require_authenticated_user]`를 고정 사용자로 덮는다. 각 스위트는
+  자기 클라이언트 생성 지점에서 `authenticate(app)` 한 줄을 부른다.
+- **근거**: 이 스위트들의 주제는 도메인 동작이지 세션 경계가 아니다. 경계는 `test_auth_api.py`가
+  **override 없는 실제 앱**으로 전수 검사하므로, 도메인 스위트에서 401을 130번 다시 확인하는 것은
+  중복이고 실제로는 fixture 소음만 만든다. override는 **dependency를 제거하지 않는다** — route는
+  여전히 선언을 갖고 있어, 선언을 빠뜨린 endpoint가 여기서 우연히 동작하지는 않는다.
+- **버린 안**: (a) 각 스위트에서 실제 로그인 — 앱마다 in-memory 사용자·세션 서비스를 주입해야 해
+  130곳의 `create_app(...)` 인자를 바꿔야 한다. (b) conftest 자동 fixture로 전역 무력화 —
+  "테스트에서는 인증이 꺼져 있다"는 마법이 되고, 전수 가드가 opt-out을 잊는 순간 조용히 무력화된다.
+- **주의로 남긴 것**: `auth_support.py`의 docstring이 "무엇을 하지 않는지"를 명시한다. 이 파일이
+  경계를 끄는 스위치로 읽히면 다음 작업자가 전수 가드까지 여기로 옮길 수 있다.
+
+### Issues found — 패턴 sweep (§4)
+
+- **`APPLICATION_BASE_URL`을 쓰는 운영 smoke 스크립트 4종은 이제 401을 받는다**:
+  `phase2a_deployed_e2e_smoke.py:33` · `phase3a_deployed_rebuild_smoke.py:36` ·
+  `phase4_context_search_deployed_smoke.py:56` · `phase6_gate_finding_live_smoke.py:71`.
+  워커는 HTTP를 쓰지 않아(Mongo 직결) 무영향이라는 브리프 §1 실측은 그대로 유효하다.
+  **이 슬라이스에서 고치지 않고 추적 부채로 올렸다** — 로그인 옵션·자격증명 전달은 운영 도구의
+  범위이고, 3-a를 도구 작업으로 넓히면 슬라이스를 잘게 쪼개라는 지시와 어긋난다.
+- **정본 문장의 노화 1건**: H3 절의 "선언은 `/health`를 제외한 **61개** operation 전부가 503"이
+  v1.7.51의 `/auth` 3종 추가를 반영하지 못하고 있었다. 재측정으로 **64/64**를 확인해 정정했다
+  (v1.7.50이 60→61로 고쳤던 것과 같은 노화다).
+
+### Verification
+
+- 백엔드 전량: **1631 passed / 4 skipped / 873 subtests**
+  (착수 전 기준선 1624 / 4 / 623 — 이 머신은 `elasticsearch` 미설치로 3건이 추가 skip이라
+  HANDOFF의 1627/1과 정합한다). 전수 가드가 61 operation × 3 검사로 subtests를 늘렸다.
+- 실측 확인(스크립트): 보호 route 61/61이 dependency를 갖고 61/61이 401을 선언하며,
+  `/auth/logout`은 401을 선언하지 않는다. 503 선언은 non-health 64/64.
+- 런타임 스모크: 세션 없는 `GET /projects`·`POST /projects`(본문 있음/없음) 전부 401,
+  `/health` 200, `/auth/logout` 200, `/auth/me` 401.
+- 프론트: `npm run gen:api` 재생성(401 추가로 `openapi.json`·`schema.d.ts` 변경 —
+  `openapi.json` `186e77f…`→`43c8865…`, `schema.d.ts` `c5bf248…`→`826e4b2…`),
+  `tsc --noEmit` 통과, **217 passed / 14 files**, build 무변(진입 **404.87 kB**,
+  관측 lazy **385.71 kB**).
+- 이 머신은 `argon2-cffi`가 없어 auth 관련 26개 모듈이 수집 단계에서 실패하고 있었다.
+  [`services/application/requirements.txt:1`](../../../services/application/requirements.txt#L1)에
+  이미 있는 핀(`argon2-cffi>=23,<24`)으로 설치해 해소했다(23.1.0, 핀 범위 내). **루트
+  `requirements.txt`가 아니다** — 독립 검증이 지적한 정밀도 항목.
+
+### 독립 검증 반영 — 판정 합격(조건 없음), 보강 2건 조치
+
+- 오너 요청 독립 검증
+  [`docs/verifications/2026-07-27/auth_d8_3a_enforcement.md`](../../verifications/2026-07-27/auth_d8_3a_enforcement.md)
+  판정 **합격(조건 없음)**. 검증자가 정량 주장(65/4/61/64 operation, 1629/4/873, 217/14,
+  404.87/385.71 kB, gen:api 해시)을 전부 독립 재도출해 일치를 확인했고, **mutation A**(dependency만
+  제거·401 선언 잔류 → 선언·런타임 두 가드 동시 발화)·**mutation B**(`/health`에 401 선언 추가 →
+  over-strict 발화)로 가드가 실제로 문다는 것까지 입증했다. **차단 0건**이라 구현은 바꾸지 않았다.
+- **Hardening #2 채택** — 검증자가 "필수는 아니나 둘 수 있다"고 명명한 보강을 실제로 넣었다.
+  `tests/test_auth_api.py::TestSeamStaysAnOverrideTest`가 두 성질을 잠근다: ① `authenticate(app)`이
+  route의 `dependencies`를 **건드리지 않고** `dependency_overrides`에만 더한다 ② 이 모듈이 쓰는 앱은
+  `dependency_overrides`가 **비어 있다**(경계가 실제 해석 경로로 검사된다). 뮤테이션으로 발화 확인 —
+  `authenticate`가 route dependency를 비우게 고치면 ①이 실패한다. 이 보강의 값은
+  **19개 도메인 스위트가 전부 green인 채로 경계만 사라지는** 시나리오를 docstring이 아니라 회귀가
+  막게 되는 것이다.
+- **정밀도 1건 반영**: argon2-cffi 핀 위치를 `services/application/requirements.txt:1`로 정정했다
+  (루트 `requirements.txt`가 아니다).
+- **Hardening #1(운영 smoke 스크립트 로그인 지원)은 채택하지 않았다** — 검증자도 슬라이스 범위 밖
+  (운영 도구)으로 동의했고 HANDOFF 추적 부채에 file:line으로 남아 있다. 여기서 손대면 3-a가
+  도구 작업으로 번진다.
+- 보강 후 백엔드 **1631 passed / 4 skipped / 873 subtests**(+2 = 새 보강 2건).
+
+### Next steps
+
+- **D8-3b**: project 소유권(403) + `GET /projects` 저장소 경계 필터. `owner_id=None`은 항상 deny
+  (E1=A). 지금은 로그인만 하면 남의 project도 열리므로 **외부 노출 금지는 그대로**다.
+- 이어서 **3-c** 최종 전수 가드(401·403 양쪽).
+- 운영 smoke 스크립트 4종의 로그인 지원은 별도 증분(추적 부채).

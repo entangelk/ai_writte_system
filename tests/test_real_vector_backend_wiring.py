@@ -27,6 +27,7 @@ from services.application.app.main import (
     _build_embedding_provider,
     create_app,
 )
+from tests.auth_support import authenticate
 from tests.test_chroma_adapter import FakeChromaCollection
 
 
@@ -113,6 +114,7 @@ class WiringBackendTest(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("CHROMA_HOST", None)
             app = create_app(service=core)
+            authenticate(app)
         resp = _post(app, _rebuild_path(project_id, snapshot_id))
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["backend"], "in_memory_fake")
@@ -127,6 +129,7 @@ class WiringBackendTest(unittest.TestCase):
             return_value=fake,
         ):
             app = create_app(service=core)
+            authenticate(app)
             resp = _post(app, _rebuild_path(project_id, snapshot_id))
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
@@ -150,6 +153,7 @@ class WiringBackendTest(unittest.TestCase):
             app = create_app(
                 service=core, vector_index=InMemoryVectorIndexAdapter()
             )
+            authenticate(app)
             resp = _post(app, _rebuild_path(project_id, snapshot_id))
         self.assertEqual(resp.json()["backend"], "in_memory_fake")
         connect.assert_not_called()

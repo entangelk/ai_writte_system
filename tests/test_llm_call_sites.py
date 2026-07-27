@@ -21,7 +21,9 @@ import unittest
 from dataclasses import replace
 from unittest import mock
 
-from fastapi.testclient import TestClient
+# D8-3a: authenticated client — these suites drive domain behaviour, not the
+# session boundary (that is tests/test_auth_api.py, which uses the real one).
+from tests.auth_support import AuthenticatedTestClient as TestClient
 
 from services.application.app.analysis.compare import InvalidJudgeResult
 from services.application.app.analysis.compare_judge import (

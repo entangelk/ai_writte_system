@@ -34,6 +34,7 @@ from services.application.app.observability.llm_call_audit import (
 from services.application.app.observability.llm_call_scope import ObservedProvider
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
 from services.llm_gateway.app.provider import GenerationResult, TokenUsage
+from tests.auth_support import authenticate
 
 try:  # pymongo is optional for the in-memory path
     from pymongo.errors import AutoReconnect as _STORAGE_FAILURE
@@ -401,6 +402,7 @@ class WritingGateApiTest(unittest.TestCase):
                                     if with_context else None),
             writing_gate_service=gate,
             llm_call_audit_service=llm_call_audit_service)
+        authenticate(app)
         async def setup():
             transport = httpx.ASGITransport(app=app)
             client = httpx.AsyncClient(transport=transport, base_url="http://test")

@@ -1,12 +1,19 @@
-"""Login/logout/me endpoints: cookie policy, 401 branches, and the slice's
-explicit non-goal — existing endpoints must stay reachable without a session
-until the authorization slice (D7) lands."""
+"""Login/logout/me endpoints, and the authentication boundary they guard.
+
+D8-3a turned the slice-1 non-goal ("existing endpoints stay open") into its
+inverse: every operation except ``/health`` and the public ``/auth`` pair now
+requires a live session. This module is the one place that drives real,
+non-overridden apps, so it is where the exhaustive guard D7=A calls for lives —
+every other suite runs authenticated through ``tests/auth_support.py``.
+"""
 
 import os
+import re
 import unittest
 from datetime import timedelta
 from unittest import mock
 
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from services.application.app.auth.cookies import cookie_secure
@@ -17,7 +24,8 @@ from services.application.app.auth.users import InMemoryUserRepository, UserServ
 from services.application.app.core_sot.service import (
     CoreSotService, InMemoryCoreSotRepository,
 )
-from services.application.app.main import create_app
+from services.application.app.main import create_app, require_authenticated_user
+from tests.auth_support import authenticate
 
 
 class _FakeHasher:
@@ -172,9 +180,12 @@ class CookiePolicyTest(unittest.TestCase):
 
 
 class ProjectOwnershipRecordingTest(unittest.TestCase):
-    """D8-2b: creating a project records the creator when a session exists.
+    """Creating a project records the creator.
 
-    Recording only — nothing reads owner_id for access decisions yet (D8-3).
+    D8-2b recorded the creator when a session happened to exist. D8-3a made the
+    session mandatory, so ``owner_id=None`` is no longer reachable through this
+    endpoint — the unowned arms below became 401 arms. Nothing *reads* owner_id
+    for access decisions yet; that is D8-3b.
     """
 
     def setUp(self) -> None:
@@ -195,14 +206,16 @@ class ProjectOwnershipRecordingTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self._created_project(response).owner_id, expected_owner)
 
-    def test_anonymous_create_still_succeeds_and_stays_unowned(self) -> None:
-        # Over-strict guard on the slice boundary: this must NOT become 401.
-        # Authentication is still optional until D8-3, and turning it required
-        # here would make this the enforcement slice by accident.
+    def test_anonymous_create_is_401_and_stores_nothing(self) -> None:
+        # The inverse of the D8-2b guard, which asserted this stayed 200. Both
+        # halves matter: the status *and* the absence of a stored row. A guard
+        # that ran the handler and then rejected the response would leave an
+        # unowned project behind on every anonymous call.
         response = self.client.post("/projects", json={"name": "Anonymous"})
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIsNone(self._created_project(response).owner_id)
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json(), {"detail": "not authenticated"})
+        self.assertEqual(list(self.core_sot.list_projects()), [])
 
     def test_owner_is_not_exposed_on_the_public_payload_yet(self) -> None:
         # The field is recorded but not published: adding it to the response is a
@@ -214,8 +227,9 @@ class ProjectOwnershipRecordingTest(unittest.TestCase):
         response = self.client.post("/projects", json={"name": "Novel"})
         self.assertEqual(set(response.json()), {"id", "name", "archived"})
 
-    def test_session_revoked_after_login_creates_an_unowned_project(self) -> None:
-        # The owner comes from the live session, not from "was ever logged in".
+    def test_create_after_logout_is_401(self) -> None:
+        # Authorization comes from the *live* session, not from "was ever logged
+        # in". Under D8-2b this recorded an unowned project; now it is refused.
         self.client.post(
             "/auth/login", json={"username": "alice", "password": "pw123"}
         )
@@ -223,48 +237,129 @@ class ProjectOwnershipRecordingTest(unittest.TestCase):
 
         response = self.client.post("/projects", json={"name": "After logout"})
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIsNone(self._created_project(response).owner_id)
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(list(self.core_sot.list_projects()), [])
+
+    def test_expired_session_cannot_create(self) -> None:
+        # The other way a cookie stops being live. Same boundary, different
+        # cause, and the one a long-lived browser tab actually hits.
+        client, _, _ = _client(ttl=timedelta(seconds=-1), core_sot=self.core_sot)
+        client.post("/auth/login", json={"username": "alice", "password": "pw123"})
+
+        response = client.post("/projects", json={"name": "Stale"})
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(list(self.core_sot.list_projects()), [])
 
 
-class SliceBoundaryTest(unittest.TestCase):
-    def test_existing_endpoints_stay_open_without_a_session(self) -> None:
-        # This slice adds authentication only. Authorization is D7; until then a
-        # sessionless request must still work, or the owner is locked out of
-        # data that has no owner_id yet.
+class AuthenticationBoundaryTest(unittest.TestCase):
+    """D7=A's exhaustive guard: the inverse of slice 1's non-goal.
+
+    Slice 1 asserted that *no* operation outside ``/auth`` was protected, and
+    said in so many words that D8-3 must rewrite it into its inverse rather than
+    delete it. This is that rewrite, and it keeps the shape that made the
+    original worth having: the claim is about **every** operation, so it is
+    derived from the app rather than from a list somebody has to remember to
+    extend.
+
+    ``PUBLIC`` is the whole exemption list, spelled out. A new endpoint is
+    protected by default; opening one is an edit to this literal, which is the
+    point — the observability phase measured that a missing wrapper left 56
+    tests green, and the same silence here is a data leak.
+    """
+
+    # (path, method) -> why it answers without a session.
+    PUBLIC = {
+        ("/health", "get"): "compose healthcheck cannot log in",
+        ("/auth/login", "post"): "this is how a session is obtained",
+        ("/auth/logout", "post"): "idempotent: a client must always reach "
+                                  "logged-out, even with a forgotten cookie",
+        ("/auth/me", "get"): "answers its own 401 — it is how the frontend asks "
+                             "whether it has a session at all",
+    }
+
+    def setUp(self) -> None:
+        self.client, _, _ = _client()
+        self.app = self.client.app
+        self.spec = self.app.openapi()
+
+    def _operations(self):
+        for route in self.app.routes:
+            if not isinstance(route, APIRoute):
+                continue
+            for method in sorted(route.methods):
+                yield route, route.path, method.lower()
+
+    def test_every_operation_is_either_protected_or_a_named_exemption(self) -> None:
+        # The declaration half. `dependencies=` is what actually enforces, so the
+        # guard reads the route object: an operation could declare 401 in its
+        # `responses=` and still be wide open, which is exactly the drift that
+        # would be invisible in the OpenAPI document alone.
+        for route, path, method in self._operations():
+            with self.subTest(path=path, method=method):
+                declared = [d.dependency for d in route.dependencies]
+                guarded = require_authenticated_user in declared
+                self.assertEqual(
+                    guarded, (path, method) not in self.PUBLIC,
+                    f"{method.upper()} {path}: add dependencies=_REQUIRE_AUTH, or "
+                    f"add it to PUBLIC with the reason it is open",
+                )
+
+    def test_every_protected_operation_declares_401(self) -> None:
+        # H3 (D3=A): OpenAPI is the mechanical truth about what a caller can get
+        # back. Enforcement without the declaration would generate frontend types
+        # that cannot see the status the endpoint now returns most often.
+        for _route, path, method in self._operations():
+            if (path, method) in self.PUBLIC:
+                continue
+            with self.subTest(path=path, method=method):
+                self.assertIn("401", self.spec["paths"][path][method]["responses"])
+
+    def test_no_public_operation_declares_401_it_cannot_return(self) -> None:
+        # Over-strict guard. /auth/login and /auth/me *do* answer 401 from their
+        # own bodies; /health and /auth/logout never can, and declaring it there
+        # would lie to the generated types just as loudly as omitting it did.
+        for path, method in (("/health", "get"), ("/auth/logout", "post")):
+            with self.subTest(path=path):
+                declared = self.spec["paths"][path][method]["responses"]
+                self.assertNotIn("401", declared)
+
+    def test_every_protected_operation_refuses_a_sessionless_request(self) -> None:
+        # The runtime half, and the one that cannot be satisfied by paperwork.
+        # Every protected operation is actually driven without a cookie and must
+        # answer 401 — not 200, not 404 from a nonexistent id, not 422 from the
+        # missing body. The guard runs before request validation, so a bare call
+        # with no body is enough to prove the boundary is in front of the handler.
+        for _route, path, method in self._operations():
+            if (path, method) in self.PUBLIC:
+                continue
+            with self.subTest(path=path, method=method):
+                url = re.sub(r"\{[^}]+\}", "does-not-exist", path)
+                response = self.client.request(method.upper(), url)
+                self.assertEqual(
+                    response.status_code, 401,
+                    f"{method.upper()} {path} answered {response.status_code} "
+                    f"without a session",
+                )
+
+    def test_a_logged_in_request_passes_the_guard(self) -> None:
+        # Over-strict guard for the runtime half: a boundary that refuses
+        # everything would satisfy the test above and break the product. With a
+        # live session the same requests get past the guard into the handler,
+        # where a fabricated project id is a normal 404 rather than a 401.
+        self.client.post(
+            "/auth/login", json={"username": "alice", "password": "pw123"}
+        )
+        self.assertEqual(self.client.get("/projects").status_code, 200)
+        self.assertEqual(
+            self.client.get("/projects/does-not-exist").status_code, 404
+        )
+
+    def test_health_stays_open(self) -> None:
+        # Named separately from the matrix because breaking it does not show up
+        # as a failed request — it shows up as containers restarting.
         client, _, _ = _client()
         self.assertEqual(client.get("/health").status_code, 200)
-        created = client.post("/projects", json={"name": "Novel"})
-        self.assertEqual(created.status_code, 200)
-        self.assertEqual(client.get("/projects").status_code, 200)
-
-    def test_no_non_auth_operation_is_protected_yet(self) -> None:
-        # Exhaustive form of the non-goal: the 3 endpoints sampled above are a
-        # spot check, and this slice's claim is about *all* of them. Three
-        # contract signals must stay absent outside /auth until D8-3:
-        #   - a `security` requirement (declared authentication), and
-        #   - a 401 or 403 declaration. H3 forces every realistic status to be
-        #     declared, so authorization cannot land without one of them showing
-        #     up here. Both are listed so the guard does not depend on which one
-        #     D8-3 picks: keying on 401 alone would stay silent if enforcement
-        #     were built as 403-only (raised in the D8-2 verification).
-        # Neither status is used anywhere today, so this is exact, not a filter.
-        # When D8-3 does land, this test is expected to fail — that failure is
-        # the marker that the non-goal has ended, and it should be rewritten
-        # into its inverse rather than deleted.
-        spec = create_app().openapi()
-        protection_signals = {"401", "403"}
-        offenders = {
-            (path, method)
-            for path, operations in spec["paths"].items()
-            for method, operation in operations.items()
-            if not path.startswith("/auth/")
-            and (
-                "security" in operation
-                or protection_signals & set(operation.get("responses", {}))
-            )
-        }
-        self.assertEqual(offenders, set())
 
     def test_auth_endpoints_declare_401_and_the_storage_503(self) -> None:
         spec = create_app().openapi()
@@ -277,6 +372,47 @@ class SliceBoundaryTest(unittest.TestCase):
                 declared = set(spec["paths"][path][method]["responses"])
                 self.assertIn("503", declared)
                 self.assertEqual("401" in declared, expects_401)
+
+
+class TestSeamStaysAnOverrideTest(unittest.TestCase):
+    """``tests/auth_support.py`` must never become a switch that turns the
+    boundary off.
+
+    Nineteen domain suites run authenticated through that seam, so if it ever
+    started *removing* the dependency instead of resolving it, every one of them
+    would keep passing while the guard above lost its subject. Two properties
+    keep that from happening silently, and both are asserted here rather than
+    left to the docstring that currently states them.
+    """
+
+    def test_authenticating_an_app_leaves_route_declarations_untouched(self) -> None:
+        client, _, _ = _client()
+        app = client.app
+
+        def declarations():
+            return {
+                (route.path, tuple(sorted(route.methods))):
+                    [dep.dependency for dep in route.dependencies]
+                for route in app.routes if isinstance(route, APIRoute)
+            }
+
+        before = declarations()
+        authenticate(app)
+
+        # The seam may only add to dependency_overrides. Emptying a route's
+        # `dependencies` would make an unguarded endpoint indistinguishable from
+        # a guarded one for the exhaustive guard.
+        self.assertEqual(declarations(), before)
+        self.assertEqual(
+            list(app.dependency_overrides), [require_authenticated_user]
+        )
+
+    def test_this_module_drives_apps_that_are_not_overridden(self) -> None:
+        # The guard's whole value is that it runs against the deployed
+        # resolution path. A future global/autouse override would neuter it and
+        # nothing else would notice — this is what notices.
+        client, _, _ = _client()
+        self.assertEqual(client.app.dependency_overrides, {})
 
 
 if __name__ == "__main__":

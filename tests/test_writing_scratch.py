@@ -43,6 +43,7 @@ from services.application.app.writing.scratch import (
     InMemoryWritingScratchRepository,
     WritingScratchService,
 )
+from tests.auth_support import authenticate
 
 from tests.test_writing import _FakeContextSearch, _FakeProvider, _package, _service
 from tests.test_writing_accept import _Context, _FailingAnalysis, _Gate
@@ -256,6 +257,7 @@ def _generate_app(scratch, *, content="이어진 장면."):
         context_search_service=_FakeContextSearch(_package()),
         writing_scratch_service=scratch,
     )
+    authenticate(app)
     client = _ScratchClient(app)
     project_id = client.post("/projects", json={"name": "Novel"}).json()["id"]
     return client, project_id
@@ -304,6 +306,7 @@ class ScratchListDiscardHttpTest(unittest.TestCase):
             clock=_clock_seq(), id_factory=_id_seq(),
         )
         app = create_app(service=core, writing_scratch_service=scratch)
+        authenticate(app)
         client = _ScratchClient(app)
         scratch.save(project_id=project.id, draft_id="d1", request_id="wr1",
                      task_type="continue_scene", output_type="draft_patch",
@@ -373,6 +376,7 @@ class ScratchAcceptCleanupHttpTest(unittest.TestCase):
             context_search_service=_Context(),
             writing_gate_service=_Gate(decision),
             writing_scratch_service=scratch)
+        authenticate(app)
         client = _ScratchClient(app)
         return client, project.id, draft.id, base.draft_version.id, scratch
 
@@ -470,6 +474,7 @@ class ScratchBestEffortIsolationTest(unittest.TestCase):
             writing_gate_service=_Gate(WritingGateDecision.PASS),
             writing_scratch_service=_ExplodingScratch(
                 InMemoryWritingScratchRepository()))
+        authenticate(app)
         response = _ScratchClient(app).post(
             f"/projects/{project.id}/writing/accept", json={
                 "request_id": "wr1", "draft_id": draft.id,

@@ -66,6 +66,7 @@ from services.application.app.writing.retrieval import (
 )
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
 from services.llm_gateway.app.provider import GenerationResult, TokenUsage
+from tests.auth_support import authenticate
 
 
 def _package(project_id="p1"):
@@ -371,6 +372,7 @@ def _http(provider=None, *, context_error=None, core_service=None,
         writing_loop_policy=loop_policy,
         writing_loop_audit_service=loop_audit_service,
     )
+    authenticate(app)
     client = _Client(app)
     project = client.post("/projects", {"name": "Novel"}).json()["id"]
     return client, project, context

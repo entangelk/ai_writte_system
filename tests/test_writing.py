@@ -80,6 +80,7 @@ from services.application.app.writing.generation_job import (
 )
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
 from services.llm_gateway.app.provider import GenerationResult, TokenUsage
+from tests.auth_support import authenticate
 
 
 def _pointer(project_id="p1"):
@@ -294,6 +295,10 @@ class _TestClient:
     __test__ = False
 
     def __init__(self, app):
+        # D8-3a: this suite is about domain behaviour, not the session
+        # boundary, so the client arrives authenticated. The boundary itself
+        # is driven un-overridden in tests/test_auth_api.py.
+        authenticate(app)
         self._app = app
 
     def post(self, path, **kwargs):

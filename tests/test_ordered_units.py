@@ -17,6 +17,7 @@ from services.application.app.core_sot.service import (
     InvalidDraftOrder,
 )
 from services.application.app.main import create_app
+from tests.auth_support import authenticate
 
 
 class CountingRepository(InMemoryCoreSotRepository):
@@ -273,6 +274,7 @@ class OrderedUnitApiTest(unittest.TestCase):
         self.repo = CountingRepository()
         self.service = CoreSotService(self.repo)
         self.app = create_app(self.service)
+        authenticate(self.app)
 
     def request(self, method: str, path: str, **kwargs):
         async def send():

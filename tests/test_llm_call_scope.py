@@ -299,7 +299,9 @@ class RunEndpointOpensAScopeTest(unittest.TestCase):
     """
 
     def _client(self, runner, audit):
-        from fastapi.testclient import TestClient  # noqa: PLC0415
+        from tests.auth_support import (  # noqa: PLC0415
+            AuthenticatedTestClient as TestClient,
+        )
 
         from services.application.app.analysis.service import (  # noqa: PLC0415
             AnalysisService, InMemoryAnalysisRepository,

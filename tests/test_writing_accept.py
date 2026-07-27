@@ -31,6 +31,7 @@ from services.application.app.writing.models import (
     WritingOutputType, WritingRequest, WritingTaskType,
 )
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
+from tests.auth_support import authenticate
 
 
 def _package(project="project-1"):
@@ -254,6 +255,7 @@ class WritingAcceptApiTest(unittest.TestCase):
         app = create_app(service=core, analysis_service=analysis,
             context_search_service=_Context(error=context_error),
             writing_gate_service=gate)
+        authenticate(app)
         async def open_client():
             return httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://test")
@@ -379,6 +381,7 @@ class WritingAcceptApiTest(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             app = create_app(service=core,
                 analysis_service=AnalysisService(InMemoryAnalysisRepository()))
+            authenticate(app)
         async def call():
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app),
@@ -756,6 +759,7 @@ class WritingIntentApiTest(unittest.TestCase):
         gate = _Gate(decision)
         app = create_app(service=core, analysis_service=analysis,
             context_search_service=_Context(), writing_gate_service=gate)
+        authenticate(app)
         async def open_client():
             return httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://test")
@@ -903,6 +907,7 @@ class StartNextUnitLegacyDataTest(unittest.TestCase):
             context_search_service=_Context(),
             writing_gate_service=_Gate(WritingGateDecision.PASS),
         )
+        authenticate(app)
         client = asyncio.run(self._open(app))
         return client, project.id, current.id, base.draft_version.id
 

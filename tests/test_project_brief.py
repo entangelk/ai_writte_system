@@ -32,6 +32,7 @@ from services.application.app.indexing.service import (
     SourceBlockIndexingService,
 )
 from services.application.app.writing.prompt import format_context_package
+from tests.auth_support import authenticated
 
 
 class _Client:
@@ -209,7 +210,7 @@ class ProjectBriefContractTest(unittest.TestCase):
 class ProjectBriefApiTest(unittest.TestCase):
     def setUp(self):
         self.service = CoreSotService(InMemoryCoreSotRepository())
-        self.client = _Client(create_app(self.service))
+        self.client = _Client(authenticated(create_app(self.service)))
         self.project = self.client.post("/projects", json={"name": "Novel"}).json()
 
     @property

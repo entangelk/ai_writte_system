@@ -39,6 +39,7 @@ from services.application.app.indexing.service import (
 )
 from services.application.app.main import create_app
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
+from tests.auth_support import authenticate
 
 
 RAW_TEXT = (
@@ -53,6 +54,10 @@ RAW_TEXT = (
 
 class TestClient:
     def __init__(self, app):
+        # D8-3a: this suite is about domain behaviour, not the session
+        # boundary, so the client arrives authenticated. The boundary itself
+        # is driven un-overridden in tests/test_auth_api.py.
+        authenticate(app)
         self._app = app
 
     def post(self, path, **kwargs):

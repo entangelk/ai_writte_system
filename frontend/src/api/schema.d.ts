@@ -2077,6 +2077,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProjectListResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
             503: {
                 headers: {
@@ -2108,6 +2117,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectPayload"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2148,6 +2166,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectPayload"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -2197,6 +2224,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectPayload"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -2250,6 +2286,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectPayload"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -2311,6 +2356,15 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -2387,6 +2441,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -2448,6 +2511,15 @@ export interface operations {
                     };
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -2498,6 +2570,15 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -2560,6 +2641,15 @@ export interface operations {
                     };
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -2610,6 +2700,15 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -2658,6 +2757,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -2717,6 +2825,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -2783,6 +2900,15 @@ export interface operations {
                     };
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -2833,6 +2959,15 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -2900,6 +3035,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -2950,6 +3094,15 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -3004,6 +3157,15 @@ export interface operations {
                     };
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -3054,6 +3216,15 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -3117,6 +3288,15 @@ export interface operations {
                     };
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -3167,6 +3347,15 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -3232,6 +3421,15 @@ export interface operations {
             };
             /** @description Bad Request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3308,6 +3506,15 @@ export interface operations {
                     };
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -3360,6 +3567,15 @@ export interface operations {
                     };
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -3409,6 +3625,15 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -3465,6 +3690,15 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -3525,6 +3759,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProjectBriefGetResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -3576,6 +3819,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectBriefPutResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -3636,6 +3888,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProjectBriefVersionListResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -3684,6 +3945,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectBriefGetResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -3743,6 +4013,15 @@ export interface operations {
             };
             /** @description Bad Request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3821,6 +4100,15 @@ export interface operations {
                     "application/json": components["schemas"]["DraftOrderPutResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -3879,6 +4167,15 @@ export interface operations {
                     "application/json": components["schemas"]["DraftListResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -3930,6 +4227,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DraftPayload"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -3991,6 +4297,15 @@ export interface operations {
                     "application/json": components["schemas"]["DraftPayload"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -4039,6 +4354,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DraftPayload"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -4093,6 +4417,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DraftPayload"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -4154,6 +4487,15 @@ export interface operations {
                     "application/json": components["schemas"]["DraftVersionListResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -4210,6 +4552,15 @@ export interface operations {
             };
             /** @description Bad Request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4277,6 +4628,15 @@ export interface operations {
                     "application/json": components["schemas"]["DraftVersionDetailResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -4332,6 +4692,15 @@ export interface operations {
             };
             /** @description Bad Request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4401,6 +4770,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -4450,6 +4828,15 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -4504,6 +4891,15 @@ export interface operations {
                     };
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -4551,6 +4947,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ObservabilityKpiResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -4603,6 +5008,15 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -4664,6 +5078,15 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -4731,6 +5154,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -4781,6 +5213,15 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -4838,6 +5279,15 @@ export interface operations {
             };
             /** @description Bad Request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4934,6 +5384,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -5023,6 +5482,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -5091,6 +5559,15 @@ export interface operations {
                     "application/json": components["schemas"]["WritingGenerationJobPayload"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -5139,6 +5616,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WritingGenerationJobPayload"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -5201,6 +5687,15 @@ export interface operations {
                     };
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -5251,6 +5746,15 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */
@@ -5310,6 +5814,15 @@ export interface operations {
             };
             /** @description Bad Request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5399,6 +5912,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -5479,6 +6001,15 @@ export interface operations {
                     "application/json": components["schemas"]["WritingReviseGatePartial"] | components["schemas"]["ErrorDetailResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -5550,6 +6081,15 @@ export interface operations {
                     };
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -5601,6 +6141,15 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Not Found */

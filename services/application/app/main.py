@@ -7,7 +7,7 @@ from dataclasses import asdict
 from datetime import timedelta
 from typing import Annotated, Protocol, Union
 
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
@@ -1219,31 +1219,56 @@ def _with_storage_note(declaration: dict) -> dict:
 
 _MIGRATION_503 = _with_storage_note(_MIGRATION_503)
 
-_ERRORS_STORAGE: dict[int | str, dict] = {503: _STORAGE_503}
-# Auth (multi-user D2=A). 401 is the only new status this slice adds: the login
-# endpoint returns it for bad credentials and the session-reading endpoints for a
-# missing/expired/revoked cookie. 403 arrives with authorization enforcement (D7),
-# not here — this slice adds no ownership checks.
+# Auth (multi-user D2=A). 401 first appeared on the login endpoint (bad
+# credentials) and the session-reading endpoint (missing/expired/revoked cookie).
+# 403 arrives with ownership enforcement (D8-3b), not here.
 _ERRORS_401: dict[int | str, dict] = {401: _ERROR, 503: _STORAGE_503}
-_ERRORS_404: dict[int | str, dict] = {404: _ERROR, 503: _STORAGE_503}
-_ERRORS_404_502: dict[int | str, dict] = {404: _ERROR, 502: _ERROR, 503: _STORAGE_503}
-_ERRORS_404_STORAGE: dict[int | str, dict] = {404: _ERROR, 503: _AUTO_PROMOTE_503}
-_ERRORS_400_404: dict[int | str, dict] = {
+# Logout is the one non-/health operation that stays reachable without a session:
+# it is idempotent by design so a client can always reach a known-logged-out
+# state. It therefore keeps a declaration with no 401 — hence its own constant,
+# so that adding 401 to the shared storage declaration cannot reach it.
+_ERRORS_LOGOUT: dict[int | str, dict] = {503: _STORAGE_503}
+
+
+# D8-3a: every protected operation can answer 401, so the declaration is added
+# once here instead of 61 times at the call sites. H3 (D3=A) makes OpenAPI the
+# mechanical truth about what a request can get back, and after this slice a
+# sessionless request to any of them gets 401 before the handler runs.
+#
+# Central, but not a substitute for the guard: the wrapper only makes the
+# *declaration* right. An operation that gets the declaration and forgets
+# ``dependencies=_REQUIRE_AUTH`` would be documented as protected while staying
+# open — which is why the exhaustive guard checks the route, not the spec.
+def _protected(declaration: dict[int | str, dict]) -> dict[int | str, dict]:
+    return {401: _ERROR, **declaration}
+
+
+_ERRORS_STORAGE: dict[int | str, dict] = _protected({503: _STORAGE_503})
+_ERRORS_404: dict[int | str, dict] = _protected({404: _ERROR, 503: _STORAGE_503})
+_ERRORS_404_502: dict[int | str, dict] = _protected(
+    {404: _ERROR, 502: _ERROR, 503: _STORAGE_503}
+)
+_ERRORS_404_STORAGE: dict[int | str, dict] = _protected(
+    {404: _ERROR, 503: _AUTO_PROMOTE_503}
+)
+_ERRORS_400_404: dict[int | str, dict] = _protected({
     400: _ERROR, 404: _ERROR, 503: _STORAGE_503,
-}
-_ERRORS_404_409: dict[int | str, dict] = {
+})
+_ERRORS_404_409: dict[int | str, dict] = _protected({
     404: _ERROR, 409: _ERROR, 503: _STORAGE_503,
-}
-_ERRORS_400_404_409: dict[int | str, dict] = {
+})
+_ERRORS_400_404_409: dict[int | str, dict] = _protected({
     400: _ERROR, 404: _ERROR, 409: _ERROR, 503: _STORAGE_503,
-}
-_ERRORS_404_MIGRATION: dict[int | str, dict] = {404: _ERROR, 503: _MIGRATION_503}
-_ERRORS_400_404_MIGRATION: dict[int | str, dict] = {
+})
+_ERRORS_404_MIGRATION: dict[int | str, dict] = _protected(
+    {404: _ERROR, 503: _MIGRATION_503}
+)
+_ERRORS_400_404_MIGRATION: dict[int | str, dict] = _protected({
     400: _ERROR, 404: _ERROR, 503: _MIGRATION_503,
-}
-_ERRORS_404_409_MIGRATION: dict[int | str, dict] = {
+})
+_ERRORS_404_409_MIGRATION: dict[int | str, dict] = _protected({
     404: _ERROR, 409: _ERROR, 503: _MIGRATION_503,
-}
+})
 
 # The analysis track's 503 is the *other* face: a collaborator the endpoint needs
 # (the extraction runner, the compare judge) is absent from this deployment. The
@@ -1258,17 +1283,55 @@ _CONFIG_503 = _with_storage_note({
                    "retrying the request alone cannot succeed.",
 })
 
-_ERRORS_404_502_CONFIG: dict[int | str, dict] = {
+_ERRORS_404_502_CONFIG: dict[int | str, dict] = _protected({
     404: _ERROR, 502: _ERROR, 503: _CONFIG_503,
-}
-_ERRORS_400_404_409_502_CONFIG: dict[int | str, dict] = {
+})
+_ERRORS_400_404_409_502_CONFIG: dict[int | str, dict] = _protected({
     400: _ERROR, 404: _ERROR, 409: _ERROR, 502: _ERROR, 503: _CONFIG_503,
-}
+})
 # context-search is the only endpoint outside the writing track that can exhaust
 # its own budget, so 504 first appears in the declared surface here.
-_ERRORS_400_404_502_504_CONFIG: dict[int | str, dict] = {
+_ERRORS_400_404_502_504_CONFIG: dict[int | str, dict] = _protected({
     400: _ERROR, 404: _ERROR, 502: _ERROR, 503: _CONFIG_503, 504: _ERROR,
-}
+})
+
+
+# --- Authentication enforcement (D8-3a) --------------------------------------
+# D7=A: enforcement is a FastAPI *dependency* declared per operation, backed by
+# an exhaustive guard — not middleware (path patterns become the policy and new
+# routes open silently) and not the service layer (every signature changes).
+#
+# Module level rather than a create_app closure on purpose. A closure would be a
+# different function object per app, so neither ``app.dependency_overrides`` nor
+# the exhaustive guard could name it; the guard has to look for exactly one
+# identity on every route or it cannot tell a protected route from an open one.
+def current_user_or_none(request: Request):
+    """Resolve the session cookie to a live, still-active user, or None."""
+    raw_token = request.cookies.get(SESSION_COOKIE_NAME)
+    if not raw_token:
+        return None
+    session = request.app.state.sessions.resolve(raw_token)
+    if session is None:
+        return None
+    user = request.app.state.users.get_by_id(session.user_id)
+    # A user disabled or deleted after the session was minted must not keep
+    # working just because the cookie is still within its TTL.
+    if user is None or not user.is_active:
+        return None
+    return user
+
+
+def require_authenticated_user(request: Request):
+    """Fail closed: no live session means the operation does not run at all."""
+    user = current_user_or_none(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="not authenticated")
+    return user
+
+
+# One shared list so every protected operation declares the *same* dependency
+# object. ``dependencies=`` copies it per route, so sharing is safe.
+_REQUIRE_AUTH = [Depends(require_authenticated_user)]
 
 
 class LoginRequest(BaseModel):
@@ -2063,34 +2126,33 @@ def create_app(
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    # --- Auth (multi-user D8 slice 1) -------------------------------------
-    # Login/logout/me only. NO authorization is enforced yet: every other
-    # endpoint stays reachable without a session exactly as before, because
-    # ownership (D3) and enforcement (D7) are later slices. Adding the checks
-    # here without owner_id on projects would lock the owner out of their own
-    # data.
+    # --- Auth (multi-user D8) ---------------------------------------------
+    # D8-3a: authentication is now enforced. Every operation except /health and
+    # the three below declares ``dependencies=_REQUIRE_AUTH``, so a sessionless
+    # request is 401 before the handler runs.
+    #
+    # The three exceptions each have a *stated* policy rather than an accident:
+    #   /auth/login  — public: it is how a session is obtained.
+    #   /auth/logout — public and idempotent: a client must always be able to
+    #                  reach a known-logged-out state, including from a cookie
+    #                  the server has already forgotten.
+    #   /auth/me     — requires a session but answers 401 itself, because it is
+    #                  the endpoint the frontend uses to *ask* whether it has one.
+    #
+    # Ownership (403) is D8-3b: being logged in is currently enough for every
+    # project, because nothing reads owner_id for access decisions yet.
     users = user_service or _default_user_service()
     sessions = session_service or _default_session_service()
+    # The module-level dependency reads them from here: it must be one function
+    # object across all apps so the exhaustive guard has a single identity to
+    # look for (see require_authenticated_user).
+    app.state.users = users
+    app.state.sessions = sessions
 
     def _user_payload(user) -> dict[str, object]:
         return {
             "id": user.id, "username": user.username, "is_admin": user.is_admin
         }
-
-    def _current_user(request: Request):
-        """Resolve the session cookie to a live, still-active user, or None."""
-        raw_token = request.cookies.get(SESSION_COOKIE_NAME)
-        if not raw_token:
-            return None
-        session = sessions.resolve(raw_token)
-        if session is None:
-            return None
-        user = users.get_by_id(session.user_id)
-        # A user disabled or deleted after the session was minted must not keep
-        # working just because the cookie is still within its TTL.
-        if user is None or not user.is_active:
-            return None
-        return user
 
     @app.post("/auth/login", response_model=LoginResponse, responses=_ERRORS_401)
     async def login(request: LoginRequest, response: Response) -> dict[str, object]:
@@ -2108,7 +2170,7 @@ def create_app(
         return {"user": _user_payload(user)}
 
     @app.post("/auth/logout", response_model=LogoutResponse,
-              responses=_ERRORS_STORAGE)
+              responses=_ERRORS_LOGOUT)
     async def logout(request: Request, response: Response) -> dict[str, object]:
         # Idempotent by design: logging out without a session is not an error,
         # so a client can always reach a known-logged-out state.
@@ -2120,7 +2182,10 @@ def create_app(
 
     @app.get("/auth/me", response_model=UserPayload, responses=_ERRORS_401)
     async def read_current_user(request: Request) -> dict[str, object]:
-        user = _current_user(request)
+        # Deliberately not `dependencies=_REQUIRE_AUTH`: this is the endpoint the
+        # frontend calls to find out whether it has a session, so it must be able
+        # to answer "no" as its own 401 rather than through a shared guard.
+        user = current_user_or_none(request)
         if user is None:
             raise HTTPException(status_code=401, detail="not authenticated")
         return _user_payload(user)
@@ -2258,28 +2323,32 @@ def create_app(
         core_sot.get_project(project_id=project_id)
 
     @app.post("/projects", response_model=ProjectPayload,
-              responses=_ERRORS_STORAGE)
+              responses=_ERRORS_STORAGE,
+              dependencies=_REQUIRE_AUTH)
     async def create_project(
-        request: CreateProjectRequest, http_request: Request
+        request: CreateProjectRequest,
+        current=Depends(require_authenticated_user),
     ) -> dict[str, object]:
-        # D8-2b: record the creator when there is a session, leave unowned when
-        # there is not. Deliberately NOT a 401 — authentication is still optional
-        # (D8-3 makes it required), so an anonymous create must keep working or
-        # this slice would silently become the enforcement slice.
-        current = _current_user(http_request)
-        project = core_sot.create_project(
-            name=request.name,
-            owner_id=current.id if current is not None else None,
-        )
+        # D8-3a: the creator is no longer optional. The same dependency the
+        # decorator declares is taken as a parameter here so the owner comes from
+        # the value the guard already resolved — re-reading the cookie would be a
+        # second, driftable answer to "who is this".
+        #
+        # `owner_id=None` therefore stops being reachable through this endpoint.
+        # It stays deny-by-default in D8-3b anyway (E1=A): rows with no owner can
+        # still arrive from a deletion bug or a future migration.
+        project = core_sot.create_project(name=request.name, owner_id=current.id)
         return _project_payload(project)
 
     @app.get("/projects", response_model=ProjectListResponse,
-             responses=_ERRORS_STORAGE)
+             responses=_ERRORS_STORAGE,
+             dependencies=_REQUIRE_AUTH)
     async def list_projects() -> dict[str, object]:
         return {"projects": [_project_payload(p) for p in core_sot.list_projects()]}
 
     @app.get("/projects/{project_id}", response_model=ProjectPayload,
-             responses=_ERRORS_404)
+             responses=_ERRORS_404,
+             dependencies=_REQUIRE_AUTH)
     async def get_project(project_id: str) -> dict[str, object]:
         try:
             project = core_sot.get_project(project_id=project_id)
@@ -2290,6 +2359,7 @@ def create_app(
     @app.get(
         "/projects/{project_id}/brief", response_model=ProjectBriefGetResponse,
         responses=_ERRORS_404,
+        dependencies=_REQUIRE_AUTH,
     )
     async def get_project_brief(project_id: str) -> dict[str, object]:
         try:
@@ -2303,6 +2373,7 @@ def create_app(
     @app.put(
         "/projects/{project_id}/brief", response_model=ProjectBriefPutResponse,
         responses=_ERRORS_404_409,
+        dependencies=_REQUIRE_AUTH,
     )
     async def put_project_brief(
         project_id: str, request: PutProjectBriefRequest
@@ -2335,6 +2406,7 @@ def create_app(
         "/projects/{project_id}/brief/versions",
         response_model=ProjectBriefVersionListResponse,
         responses=_ERRORS_404,
+        dependencies=_REQUIRE_AUTH,
     )
     async def list_project_brief_versions(project_id: str) -> dict[str, object]:
         try:
@@ -2347,6 +2419,7 @@ def create_app(
         "/projects/{project_id}/brief/versions/{version_id}",
         response_model=ProjectBriefGetResponse,
         responses=_ERRORS_404,
+        dependencies=_REQUIRE_AUTH,
     )
     async def get_project_brief_version(
         project_id: str, version_id: str
@@ -2360,7 +2433,8 @@ def create_app(
         return {"brief": _project_brief_payload(brief)}
 
     @app.patch("/projects/{project_id}", response_model=ProjectPayload,
-               responses=_ERRORS_404_409)
+               responses=_ERRORS_404_409,
+               dependencies=_REQUIRE_AUTH)
     async def rename_project(
         project_id: str, request: RenameProjectRequest
     ) -> dict[str, object]:
@@ -2377,6 +2451,7 @@ def create_app(
     @app.patch(
         "/projects/{project_id}/drafts/{draft_id}", response_model=DraftPayload,
         responses=_ERRORS_404_409,
+        dependencies=_REQUIRE_AUTH,
     )
     async def rename_draft(
         project_id: str, draft_id: str, request: RenameDraftRequest
@@ -2392,7 +2467,8 @@ def create_app(
         return _draft_payload(draft)
 
     @app.delete("/projects/{project_id}", response_model=ProjectPayload,
-                responses=_ERRORS_404)
+                responses=_ERRORS_404,
+                dependencies=_REQUIRE_AUTH)
     async def archive_project(project_id: str) -> dict[str, object]:
         # MVP: delete is archive (soft delete); SOT data is preserved (§115).
         # Re-archiving is idempotent.
@@ -2406,6 +2482,7 @@ def create_app(
     @app.delete(
         "/projects/{project_id}/drafts/{draft_id}", response_model=DraftPayload,
         responses=_ERRORS_404,
+        dependencies=_REQUIRE_AUTH,
     )
     async def archive_draft(project_id: str, draft_id: str) -> dict[str, object]:
         try:
@@ -2419,7 +2496,8 @@ def create_app(
         return _draft_payload(draft)
 
     @app.get("/projects/{project_id}/drafts", response_model=DraftListResponse,
-             responses=_ERRORS_404_MIGRATION)
+             responses=_ERRORS_404_MIGRATION,
+             dependencies=_REQUIRE_AUTH)
     async def list_drafts(project_id: str) -> dict[str, object]:
         try:
             drafts = core_sot.list_drafts(project_id=project_id)
@@ -2435,6 +2513,7 @@ def create_app(
     @app.get(
         "/projects/{project_id}/drafts/{draft_id}", response_model=DraftPayload,
         responses=_ERRORS_404,
+        dependencies=_REQUIRE_AUTH,
     )
     async def get_draft(project_id: str, draft_id: str) -> dict[str, object]:
         try:
@@ -2447,6 +2526,7 @@ def create_app(
         "/projects/{project_id}/drafts/{draft_id}/versions",
         response_model=DraftVersionListResponse,
         responses=_ERRORS_404,
+        dependencies=_REQUIRE_AUTH,
     )
     async def list_draft_versions(project_id: str, draft_id: str) -> dict[str, object]:
         try:
@@ -2461,6 +2541,7 @@ def create_app(
         "/projects/{project_id}/drafts/{draft_id}/versions/{version_id}",
         response_model=DraftVersionDetailResponse,
         responses=_ERRORS_404,
+        dependencies=_REQUIRE_AUTH,
     )
     async def get_draft_version(
         project_id: str, draft_id: str, version_id: str
@@ -2500,6 +2581,7 @@ def create_app(
         "/projects/{project_id}/drafts/{draft_id}/versions/{version_id}/export",
         response_model=DraftVersionExportResponse,
         responses=_ERRORS_400_404,
+        dependencies=_REQUIRE_AUTH,
     )
     async def export_draft_version(
         project_id: str,
@@ -2535,6 +2617,7 @@ def create_app(
         "/projects/{project_id}/export",
         response_model=ProjectExportResponse,
         responses=_ERRORS_400_404_MIGRATION,
+        dependencies=_REQUIRE_AUTH,
     )
     async def export_project(
         project_id: str,
@@ -2587,7 +2670,8 @@ def create_app(
         }
 
     @app.post("/projects/{project_id}/drafts", response_model=DraftPayload,
-              responses=_ERRORS_404_409_MIGRATION)
+              responses=_ERRORS_404_409_MIGRATION,
+              dependencies=_REQUIRE_AUTH)
     async def create_draft(
         project_id: str, request: CreateDraftRequest
     ) -> dict[str, object]:
@@ -2611,6 +2695,7 @@ def create_app(
         "/projects/{project_id}/draft-order",
         response_model=DraftOrderPutResponse,
         responses=_ERRORS_404_409,
+        dependencies=_REQUIRE_AUTH,
     )
     async def put_draft_order(
         project_id: str, request: DraftOrderPutRequest
@@ -2630,6 +2715,7 @@ def create_app(
         "/projects/{project_id}/drafts/{draft_id}/versions",
         response_model=SaveDraftResponse,
         responses=_ERRORS_400_404_409,
+        dependencies=_REQUIRE_AUTH,
     )
     async def save_draft(
         project_id: str, draft_id: str, request: SaveDraftRequest
@@ -2670,7 +2756,8 @@ def create_app(
         }
 
     @app.post("/projects/{project_id}/snapshots/{snapshot_id}/source-refs",
-              responses=_ERRORS_400_404)
+              responses=_ERRORS_400_404,
+              dependencies=_REQUIRE_AUTH)
     async def create_source_ref(
         project_id: str,
         snapshot_id: str,
@@ -2690,7 +2777,8 @@ def create_app(
         return _source_ref_payload(source_ref)
 
     @app.get("/projects/{project_id}/snapshots/{snapshot_id}/source-refs",
-             responses=_ERRORS_404)
+             responses=_ERRORS_404,
+             dependencies=_REQUIRE_AUTH)
     async def list_source_refs(
         project_id: str,
         snapshot_id: str,
@@ -2705,7 +2793,8 @@ def create_app(
         return {"source_refs": [_source_ref_payload(ref) for ref in source_refs]}
 
     @app.get("/projects/{project_id}/source-refs/{source_ref_id}",
-             responses=_ERRORS_404)
+             responses=_ERRORS_404,
+             dependencies=_REQUIRE_AUTH)
     async def get_source_ref(
         project_id: str,
         source_ref_id: str,
@@ -2722,6 +2811,7 @@ def create_app(
     @app.post(
         "/projects/{project_id}/snapshots/{snapshot_id}/index/source-blocks/rebuild",
         responses=_ERRORS_404_502,
+        dependencies=_REQUIRE_AUTH,
     )
     async def rebuild_source_block_index(
         project_id: str,
@@ -2744,7 +2834,8 @@ def create_app(
             # (context_search/service.py::_run_vector_step).
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    @app.post("/projects/{project_id}/analysis/jobs", responses=_ERRORS_404)
+    @app.post("/projects/{project_id}/analysis/jobs", responses=_ERRORS_404,
+              dependencies=_REQUIRE_AUTH)
     async def create_analysis_job(
         project_id: str, request: CreateAnalysisJobRequest
     ) -> dict[str, object]:
@@ -2763,7 +2854,8 @@ def create_app(
         }
 
     @app.get("/projects/{project_id}/analysis/jobs/{job_id}",
-             responses=_ERRORS_404)
+             responses=_ERRORS_404,
+             dependencies=_REQUIRE_AUTH)
     async def get_analysis_job(project_id: str, job_id: str) -> dict[str, object]:
         try:
             _require_project_exists(project_id)
@@ -2773,7 +2865,8 @@ def create_app(
         return _analysis_job_payload(job)
 
     @app.get("/projects/{project_id}/analysis/jobs/{job_id}/candidates",
-             responses=_ERRORS_404)
+             responses=_ERRORS_404,
+             dependencies=_REQUIRE_AUTH)
     async def list_analysis_candidates(
         project_id: str, job_id: str
     ) -> dict[str, object]:
@@ -2789,7 +2882,8 @@ def create_app(
         }
 
     @app.post("/projects/{project_id}/analysis/jobs/{job_id}/retry",
-              responses=_ERRORS_404_409)
+              responses=_ERRORS_404_409,
+              dependencies=_REQUIRE_AUTH)
     async def retry_analysis_job(project_id: str, job_id: str) -> dict[str, object]:
         try:
             _require_project_exists(project_id)
@@ -2801,7 +2895,8 @@ def create_app(
         return _analysis_job_payload(job)
 
     @app.post("/projects/{project_id}/analysis/jobs/{job_id}/run",
-              responses=_ERRORS_400_404_409_502_CONFIG)
+              responses=_ERRORS_400_404_409_502_CONFIG,
+              dependencies=_REQUIRE_AUTH)
     async def run_analysis_job(project_id: str, job_id: str) -> dict[str, object]:
         try:
             _require_project_exists(project_id)
@@ -2873,6 +2968,7 @@ def create_app(
     @app.post(
         "/projects/{project_id}/analysis/candidates/{candidate_id}/promote",
         responses=_ERRORS_404,
+        dependencies=_REQUIRE_AUTH,
     )
     async def promote_candidate(
         project_id: str, candidate_id: str
@@ -2914,6 +3010,7 @@ def create_app(
     @app.post(
         "/projects/{project_id}/analysis/candidates/{candidate_id}/confirm",
         responses=_ERRORS_404_409,
+        dependencies=_REQUIRE_AUTH,
     )
     async def confirm_candidate(
         project_id: str, candidate_id: str
@@ -2933,6 +3030,7 @@ def create_app(
     @app.post(
         "/projects/{project_id}/analysis/candidates/{candidate_id}/reject",
         responses=_ERRORS_404_409,
+        dependencies=_REQUIRE_AUTH,
     )
     async def reject_candidate(
         project_id: str, candidate_id: str
@@ -2952,6 +3050,7 @@ def create_app(
     @app.post(
         "/projects/{project_id}/analysis/candidates/{candidate_id}/edit",
         responses=_ERRORS_400_404_409,
+        dependencies=_REQUIRE_AUTH,
     )
     async def edit_candidate(
         project_id: str, candidate_id: str, body: EditCandidateRequest
@@ -2976,7 +3075,8 @@ def create_app(
         return _candidate_edit_payload(result)
 
     @app.post("/projects/{project_id}/analysis/jobs/{job_id}/auto-promote",
-              responses=_ERRORS_404_STORAGE)
+              responses=_ERRORS_404_STORAGE,
+              dependencies=_REQUIRE_AUTH)
     async def auto_promote_job(
         project_id: str, job_id: str
     ) -> dict[str, object]:
@@ -3046,7 +3146,8 @@ def create_app(
             "promoted": promoted,
         }
 
-    @app.get("/projects/{project_id}/memory", responses=_ERRORS_404)
+    @app.get("/projects/{project_id}/memory", responses=_ERRORS_404,
+             dependencies=_REQUIRE_AUTH)
     async def list_memory(project_id: str) -> dict[str, object]:
         try:
             _require_project_exists(project_id)
@@ -3060,7 +3161,8 @@ def create_app(
         }
 
     @app.get("/projects/{project_id}/memory/{memory_id}",
-             responses=_ERRORS_404)
+             responses=_ERRORS_404,
+             dependencies=_REQUIRE_AUTH)
     async def get_memory(project_id: str, memory_id: str) -> dict[str, object]:
         try:
             _require_project_exists(project_id)
@@ -3104,7 +3206,8 @@ def create_app(
         }
 
     @app.post("/projects/{project_id}/analysis/jobs/{job_id}/context",
-              responses=_ERRORS_404)
+              responses=_ERRORS_404,
+              dependencies=_REQUIRE_AUTH)
     async def analysis_context_endpoint(
         project_id: str, job_id: str
     ) -> dict[str, object]:
@@ -3146,7 +3249,8 @@ def create_app(
         }
 
     @app.post("/projects/{project_id}/analysis/jobs/{job_id}/compare",
-              responses=_ERRORS_404_502_CONFIG)
+              responses=_ERRORS_404_502_CONFIG,
+              dependencies=_REQUIRE_AUTH)
     async def analysis_compare_endpoint(
         project_id: str, job_id: str
     ) -> dict[str, object]:
@@ -3219,7 +3323,8 @@ def create_app(
         }
 
     @app.post("/projects/{project_id}/analysis/jobs/{job_id}/apply",
-              responses=_ERRORS_400_404)
+              responses=_ERRORS_400_404,
+              dependencies=_REQUIRE_AUTH)
     async def analysis_apply_endpoint(
         project_id: str, job_id: str, request: ApplyMemoryRequest
     ) -> dict[str, object]:
@@ -3280,7 +3385,8 @@ def create_app(
         }
 
     @app.get("/projects/{project_id}/analysis/review-queue",
-             responses=_ERRORS_404)
+             responses=_ERRORS_404,
+             dependencies=_REQUIRE_AUTH)
     async def analysis_review_queue_endpoint(project_id: str) -> dict[str, object]:
         # 2B.4 follow-up: list the project's open review-only (conflict) entries
         # persisted by apply, so an unresolved conflict is observable/reconcilable
@@ -3298,6 +3404,7 @@ def create_app(
     @app.post(
         "/projects/{project_id}/analysis/review-queue/{entry_id}/reconcile",
         responses=_ERRORS_404_409,
+        dependencies=_REQUIRE_AUTH,
     )
     async def reconcile_character_conflict(
         project_id: str, entry_id: str, request: ReconcileCharacterRequest
@@ -3394,7 +3501,8 @@ def create_app(
         return payload
 
     @app.get("/projects/{project_id}/analysis/review-inbox",
-             responses=_ERRORS_404)
+             responses=_ERRORS_404,
+             dependencies=_REQUIRE_AUTH)
     async def list_review_inbox(project_id: str) -> dict[str, object]:
         try:
             _require_project_exists(project_id)
@@ -3413,7 +3521,8 @@ def create_app(
         }
 
     @app.get("/projects/{project_id}/analysis/review-inbox/{candidate_id}",
-             responses=_ERRORS_404)
+             responses=_ERRORS_404,
+             dependencies=_REQUIRE_AUTH)
     async def get_review_inbox_item(
         project_id: str, candidate_id: str
     ) -> dict[str, object]:
@@ -3449,7 +3558,8 @@ def create_app(
         }
 
     @app.get("/projects/{project_id}/analysis/gate-findings",
-             responses=_ERRORS_404)
+             responses=_ERRORS_404,
+             dependencies=_REQUIRE_AUTH)
     async def list_gate_findings(project_id: str) -> dict[str, object]:
         try:
             _require_project_exists(project_id)
@@ -3461,7 +3571,8 @@ def create_app(
         ]}
 
     @app.get("/projects/{project_id}/analysis/gate-findings/{finding_id}",
-             responses=_ERRORS_404)
+             responses=_ERRORS_404,
+             dependencies=_REQUIRE_AUTH)
     async def get_gate_finding(project_id: str, finding_id: str):
         try:
             _require_project_exists(project_id)
@@ -3488,14 +3599,16 @@ def create_app(
                 "idempotent_replay": replay}
 
     @app.post("/projects/{project_id}/analysis/gate-findings/{finding_id}/resolve",
-              responses=_ERRORS_404_409)
+              responses=_ERRORS_404_409,
+              dependencies=_REQUIRE_AUTH)
     async def resolve_gate_finding(project_id: str, finding_id: str):
         return await _transition_gate_finding(
             project_id, finding_id, GateFindingStatus.RESOLVED
         )
 
     @app.post("/projects/{project_id}/analysis/gate-findings/{finding_id}/dismiss",
-              responses=_ERRORS_404_409)
+              responses=_ERRORS_404_409,
+              dependencies=_REQUIRE_AUTH)
     async def dismiss_gate_finding(project_id: str, finding_id: str):
         return await _transition_gate_finding(
             project_id, finding_id, GateFindingStatus.DISMISSED
@@ -3595,7 +3708,8 @@ def create_app(
         }
 
     @app.post("/projects/{project_id}/context-search",
-              responses=_ERRORS_400_404_502_504_CONFIG)
+              responses=_ERRORS_400_404_502_504_CONFIG,
+              dependencies=_REQUIRE_AUTH)
     async def context_search_endpoint(
         project_id: str, body: ContextSearchHttpRequest
     ) -> dict[str, object]:
@@ -3792,7 +3906,8 @@ def create_app(
     @app.post("/projects/{project_id}/writing/generate",
               response_model=WritingCandidatePayload,
               responses={**GENERATE_ASYNC_RESPONSES,
-                         **_ERRORS_400_404_502_504_CONFIG})
+                         **_ERRORS_400_404_502_504_CONFIG},
+              dependencies=_REQUIRE_AUTH)
     async def writing_generate_endpoint(
         project_id: str, body: WritingGenerateRequest
     ) -> dict[str, object]:
@@ -3936,7 +4051,8 @@ def create_app(
 
     @app.get("/projects/{project_id}/writing/generation-jobs/{job_id}",
              response_model=WritingGenerationJobPayload,
-             responses=_ERRORS_404)
+             responses=_ERRORS_404,
+             dependencies=_REQUIRE_AUTH)
     async def get_writing_generation_job(
         project_id: str, job_id: str,
     ) -> dict[str, object]:
@@ -3957,7 +4073,8 @@ def create_app(
 
     @app.post("/projects/{project_id}/writing/generation-jobs/{job_id}/retry",
               response_model=WritingGenerationJobPayload,
-              responses=_ERRORS_404_409)
+              responses=_ERRORS_404_409,
+              dependencies=_REQUIRE_AUTH)
     async def retry_writing_generation_job(
         project_id: str, job_id: str,
     ) -> dict[str, object]:
@@ -3982,7 +4099,8 @@ def create_app(
 
     @app.post("/projects/{project_id}/writing/gate",
               response_model=WritingGatePayload,
-              responses=_ERRORS_400_404_502_504_CONFIG)
+              responses=_ERRORS_400_404_502_504_CONFIG,
+              dependencies=_REQUIRE_AUTH)
     async def writing_gate_endpoint(
         project_id: str, body: WritingGateRequest
     ) -> dict[str, object]:
@@ -4070,7 +4188,8 @@ def create_app(
         return _writing_gate_payload(result)
 
     @app.post("/projects/{project_id}/writing/report",
-              responses=_ERRORS_400_404_502_504_CONFIG)
+              responses=_ERRORS_400_404_502_504_CONFIG,
+              dependencies=_REQUIRE_AUTH)
     async def writing_report_endpoint(
         project_id: str, body: WritingReportRequest
     ) -> dict[str, object]:
@@ -4145,7 +4264,8 @@ def create_app(
         return _writing_candidate_payload(enriched)
 
     @app.post("/projects/{project_id}/writing/revise",
-              responses=_ERRORS_400_404_502_504_CONFIG)
+              responses=_ERRORS_400_404_502_504_CONFIG,
+              dependencies=_REQUIRE_AUTH)
     async def writing_revise_endpoint(
         project_id: str, body: WritingReviseRequest
     ) -> dict[str, object]:
@@ -4230,7 +4350,8 @@ def create_app(
 
     @app.post("/projects/{project_id}/writing/revise-and-gate",
               response_model=WritingReviseGateResponse,
-              responses=REVISE_AND_GATE_RESPONSES)
+              responses=REVISE_AND_GATE_RESPONSES,
+              dependencies=_REQUIRE_AUTH)
     async def writing_revise_and_gate_endpoint(
         project_id: str, body: WritingReviseRequest
     ) -> object:
@@ -4512,7 +4633,8 @@ def create_app(
         }
 
     @app.get("/projects/{project_id}/writing/loop-audits",
-             responses=_ERRORS_404)
+             responses=_ERRORS_404,
+             dependencies=_REQUIRE_AUTH)
     async def writing_loop_audits_endpoint(project_id: str) -> dict[str, object]:
         # Phase 5.9 L9 B: durable, append-only loop audit summaries, newest
         # first. Project-scoped; retained for later verification reference.
@@ -4527,7 +4649,8 @@ def create_app(
         }
 
     @app.get("/projects/{project_id}/writing/loop-audits/{audit_id}",
-             responses=_ERRORS_404)
+             responses=_ERRORS_404,
+             dependencies=_REQUIRE_AUTH)
     async def writing_loop_audit_detail_endpoint(
         project_id: str, audit_id: str
     ) -> dict[str, object]:
@@ -4542,7 +4665,8 @@ def create_app(
 
     @app.get("/projects/{project_id}/observability/kpi",
              response_model=ObservabilityKpiResponse,
-             responses=_ERRORS_404)
+             responses=_ERRORS_404,
+             dependencies=_REQUIRE_AUTH)
     async def observability_kpi_endpoint(project_id: str) -> dict[str, object]:
         # 증분 5 (brief D4=A): the read-out over the per-call audit trail. Pure
         # aggregation — nothing is measured here that the pipeline did not
@@ -4570,7 +4694,8 @@ def create_app(
 
     @app.post("/projects/{project_id}/writing/accept",
               response_model=WritingAcceptResponse,
-              responses=ACCEPT_RESPONSES)
+              responses=ACCEPT_RESPONSES,
+              dependencies=_REQUIRE_AUTH)
     async def writing_accept_endpoint(
         project_id: str, body: WritingAcceptRequest
     ) -> object:
@@ -4723,7 +4848,8 @@ def create_app(
             "created_at": entry.created_at.isoformat(),
         }
 
-    @app.get("/projects/{project_id}/writing/scratch", responses=_ERRORS_404)
+    @app.get("/projects/{project_id}/writing/scratch", responses=_ERRORS_404,
+             dependencies=_REQUIRE_AUTH)
     async def writing_scratch_list_endpoint(
         project_id: str, draft_id: str
     ) -> dict[str, object]:
@@ -4740,7 +4866,8 @@ def create_app(
             "items": [_writing_scratch_payload(e) for e in entries],
         }
 
-    @app.delete("/projects/{project_id}/writing/scratch", responses=_ERRORS_404)
+    @app.delete("/projects/{project_id}/writing/scratch", responses=_ERRORS_404,
+                dependencies=_REQUIRE_AUTH)
     async def writing_scratch_discard_endpoint(
         project_id: str, draft_id: str
     ) -> dict[str, object]:

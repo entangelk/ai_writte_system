@@ -50,12 +50,17 @@ except ModuleNotFoundError:  # pragma: no cover - the driver is present in CI
     _STORAGE_FAILURE = None
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
 from services.llm_gateway.app.provider import FakeLLMProvider, GenerationResult
+from tests.auth_support import authenticate
 
 
 class TestClient:
     """Small sync wrapper around ASGITransport for this test module."""
 
     def __init__(self, app):
+        # D8-3a: this suite is about domain behaviour, not the session
+        # boundary, so the client arrives authenticated. The boundary itself
+        # is driven un-overridden in tests/test_auth_api.py.
+        authenticate(app)
         self._app = app
 
     def get(self, path: str, **kwargs):
@@ -2104,29 +2109,32 @@ class CrudErrorContractDeclarationTest(unittest.TestCase):
     # 422 is excluded because FastAPI emits it automatically for any endpoint
     # with a validated body/param and its body shape is a different contract.
     EXPECTED = {
-        ("/projects", "post"): {"503"},
-        ("/projects", "get"): {"503"},
-        ("/projects/{project_id}", "get"): {"404", "503"},
-        ("/projects/{project_id}", "patch"): {"404", "409", "503"},
-        ("/projects/{project_id}", "delete"): {"404", "503"},
-        ("/projects/{project_id}/brief", "get"): {"404", "503"},
-        ("/projects/{project_id}/brief", "put"): {"404", "409", "503"},
-        ("/projects/{project_id}/brief/versions", "get"): {"404", "503"},
-        ("/projects/{project_id}/brief/versions/{version_id}", "get"): {"404", "503"},
-        ("/projects/{project_id}/drafts", "get"): {"404", "503"},
-        ("/projects/{project_id}/drafts", "post"): {"404", "409", "503"},
-        ("/projects/{project_id}/drafts/{draft_id}", "get"): {"404", "503"},
-        ("/projects/{project_id}/drafts/{draft_id}", "patch"): {"404", "409", "503"},
-        ("/projects/{project_id}/drafts/{draft_id}", "delete"): {"404", "503"},
-        ("/projects/{project_id}/drafts/{draft_id}/versions", "get"): {"404", "503"},
+        ("/projects", "post"): {"401", "503"},
+        ("/projects", "get"): {"401", "503"},
+        ("/projects/{project_id}", "get"): {"401", "404", "503"},
+        ("/projects/{project_id}", "patch"): {"401", "404", "409", "503"},
+        ("/projects/{project_id}", "delete"): {"401", "404", "503"},
+        ("/projects/{project_id}/brief", "get"): {"401", "404", "503"},
+        ("/projects/{project_id}/brief", "put"): {"401", "404", "409", "503"},
+        ("/projects/{project_id}/brief/versions", "get"): {"401", "404", "503"},
+        ("/projects/{project_id}/brief/versions/{version_id}", "get"):
+            {"401", "404", "503"},
+        ("/projects/{project_id}/drafts", "get"): {"401", "404", "503"},
+        ("/projects/{project_id}/drafts", "post"): {"401", "404", "409", "503"},
+        ("/projects/{project_id}/drafts/{draft_id}", "get"): {"401", "404", "503"},
+        ("/projects/{project_id}/drafts/{draft_id}", "patch"):
+            {"401", "404", "409", "503"},
+        ("/projects/{project_id}/drafts/{draft_id}", "delete"): {"401", "404", "503"},
+        ("/projects/{project_id}/drafts/{draft_id}/versions", "get"):
+            {"401", "404", "503"},
         ("/projects/{project_id}/drafts/{draft_id}/versions", "post"):
-            {"400", "404", "409", "503"},
+            {"401", "400", "404", "409", "503"},
         ("/projects/{project_id}/drafts/{draft_id}/versions/{version_id}", "get"):
-            {"404", "503"},
+            {"401", "404", "503"},
         ("/projects/{project_id}/drafts/{draft_id}/versions/{version_id}/export",
-         "get"): {"400", "404", "503"},
-        ("/projects/{project_id}/export", "get"): {"400", "404", "503"},
-        ("/projects/{project_id}/draft-order", "put"): {"404", "409", "503"},
+         "get"): {"401", "400", "404", "503"},
+        ("/projects/{project_id}/export", "get"): {"401", "400", "404", "503"},
+        ("/projects/{project_id}/draft-order", "put"): {"401", "404", "409", "503"},
     }
 
     def setUp(self):
@@ -2255,43 +2263,43 @@ class AnalysisErrorContractDeclarationTest(unittest.TestCase):
 
     # (path, method) -> exact set of declared statuses besides 200/422.
     EXPECTED = {
-        ("/projects/{project_id}/analysis/jobs", "post"): {"404", "503"},
-        ("/projects/{project_id}/analysis/jobs/{job_id}", "get"): {"404", "503"},
+        ("/projects/{project_id}/analysis/jobs", "post"): {"401", "404", "503"},
+        ("/projects/{project_id}/analysis/jobs/{job_id}", "get"): {"401", "404", "503"},
         ("/projects/{project_id}/analysis/jobs/{job_id}/candidates", "get"):
-            {"404", "503"},
+            {"401", "404", "503"},
         ("/projects/{project_id}/analysis/jobs/{job_id}/retry", "post"):
-            {"404", "409", "503"},
+            {"401", "404", "409", "503"},
         ("/projects/{project_id}/analysis/jobs/{job_id}/run", "post"):
-            {"400", "404", "409", "502", "503"},
+            {"401", "400", "404", "409", "502", "503"},
         ("/projects/{project_id}/analysis/jobs/{job_id}/auto-promote", "post"):
-            {"404", "503"},
+            {"401", "404", "503"},
         ("/projects/{project_id}/analysis/jobs/{job_id}/context", "post"):
-            {"404", "503"},
+            {"401", "404", "503"},
         ("/projects/{project_id}/analysis/jobs/{job_id}/compare", "post"):
-            {"404", "502", "503"},
+            {"401", "404", "502", "503"},
         ("/projects/{project_id}/analysis/jobs/{job_id}/apply", "post"):
-            {"400", "404", "503"},
+            {"401", "400", "404", "503"},
         ("/projects/{project_id}/analysis/candidates/{candidate_id}/promote",
-         "post"): {"404", "503"},
+         "post"): {"401", "404", "503"},
         ("/projects/{project_id}/analysis/candidates/{candidate_id}/confirm",
-         "post"): {"404", "409", "503"},
+         "post"): {"401", "404", "409", "503"},
         ("/projects/{project_id}/analysis/candidates/{candidate_id}/reject",
-         "post"): {"404", "409", "503"},
+         "post"): {"401", "404", "409", "503"},
         ("/projects/{project_id}/analysis/candidates/{candidate_id}/edit",
-         "post"): {"400", "404", "409", "503"},
-        ("/projects/{project_id}/analysis/review-queue", "get"): {"404", "503"},
+         "post"): {"401", "400", "404", "409", "503"},
+        ("/projects/{project_id}/analysis/review-queue", "get"): {"401", "404", "503"},
         ("/projects/{project_id}/analysis/review-queue/{entry_id}/reconcile",
-         "post"): {"404", "409", "503"},
-        ("/projects/{project_id}/analysis/review-inbox", "get"): {"404", "503"},
+         "post"): {"401", "404", "409", "503"},
+        ("/projects/{project_id}/analysis/review-inbox", "get"): {"401", "404", "503"},
         ("/projects/{project_id}/analysis/review-inbox/{candidate_id}", "get"):
-            {"404", "503"},
-        ("/projects/{project_id}/analysis/gate-findings", "get"): {"404", "503"},
+            {"401", "404", "503"},
+        ("/projects/{project_id}/analysis/gate-findings", "get"): {"401", "404", "503"},
         ("/projects/{project_id}/analysis/gate-findings/{finding_id}", "get"):
-            {"404", "503"},
+            {"401", "404", "503"},
         ("/projects/{project_id}/analysis/gate-findings/{finding_id}/resolve",
-         "post"): {"404", "409", "503"},
+         "post"): {"401", "404", "409", "503"},
         ("/projects/{project_id}/analysis/gate-findings/{finding_id}/dismiss",
-         "post"): {"404", "409", "503"},
+         "post"): {"401", "404", "409", "503"},
     }
 
     def setUp(self):
@@ -2478,20 +2486,21 @@ class MemorySourceErrorContractDeclarationTest(unittest.TestCase):
 
     # (path, method) -> exact set of declared statuses besides 200/422.
     EXPECTED = {
-        ("/projects/{project_id}/memory", "get"): {"404", "503"},
-        ("/projects/{project_id}/memory/{memory_id}", "get"): {"404", "503"},
+        ("/projects/{project_id}/memory", "get"): {"401", "404", "503"},
+        ("/projects/{project_id}/memory/{memory_id}", "get"): {"401", "404", "503"},
         ("/projects/{project_id}/snapshots/{snapshot_id}/source-refs", "post"):
-            {"400", "404", "503"},
+            {"401", "400", "404", "503"},
         ("/projects/{project_id}/snapshots/{snapshot_id}/source-refs", "get"):
-            {"404", "503"},
-        ("/projects/{project_id}/source-refs/{source_ref_id}", "get"): {"404", "503"},
+            {"401", "404", "503"},
+        ("/projects/{project_id}/source-refs/{source_ref_id}", "get"):
+            {"401", "404", "503"},
         # 502 added when the embedding-failure 500 leak was closed: the rebuild
         # embeds every source block, so a configured-but-failing embedding
         # service is an upstream failure, not a missing collaborator (503).
         ("/projects/{project_id}/snapshots/{snapshot_id}"
-         "/index/source-blocks/rebuild", "post"): {"404", "502", "503"},
+         "/index/source-blocks/rebuild", "post"): {"401", "404", "502", "503"},
         ("/projects/{project_id}/context-search", "post"):
-            {"400", "404", "502", "503", "504"},
+            {"401", "400", "404", "502", "503", "504"},
     }
 
     def setUp(self):
@@ -2918,25 +2927,26 @@ class WritingErrorContractDeclarationTest(unittest.TestCase):
     # same mechanism so it appears here to keep the set exact.
     EXPECTED = {
         ("/projects/{project_id}/writing/generate", "post"):
-            {"202", "400", "404", "502", "503", "504"},
+            {"401", "202", "400", "404", "502", "503", "504"},
         ("/projects/{project_id}/writing/generation-jobs/{job_id}", "get"):
-            {"404", "503"},
+            {"401", "404", "503"},
         ("/projects/{project_id}/writing/generation-jobs/{job_id}/retry", "post"):
-            {"404", "409", "503"},
+            {"401", "404", "409", "503"},
         ("/projects/{project_id}/writing/gate", "post"):
-            {"400", "404", "502", "503", "504"},
+            {"401", "400", "404", "502", "503", "504"},
         ("/projects/{project_id}/writing/report", "post"):
-            {"400", "404", "502", "503", "504"},
+            {"401", "400", "404", "502", "503", "504"},
         ("/projects/{project_id}/writing/revise", "post"):
-            {"400", "404", "502", "503", "504"},
+            {"401", "400", "404", "502", "503", "504"},
         ("/projects/{project_id}/writing/revise-and-gate", "post"):
-            {"400", "404", "502", "503", "504"},
-        ("/projects/{project_id}/writing/loop-audits", "get"): {"404", "503"},
-        ("/projects/{project_id}/writing/loop-audits/{audit_id}", "get"): {"404", "503"},
+            {"401", "400", "404", "502", "503", "504"},
+        ("/projects/{project_id}/writing/loop-audits", "get"): {"401", "404", "503"},
+        ("/projects/{project_id}/writing/loop-audits/{audit_id}", "get"):
+            {"401", "404", "503"},
         ("/projects/{project_id}/writing/accept", "post"):
-            {"400", "404", "409", "502", "503", "504"},
-        ("/projects/{project_id}/writing/scratch", "get"): {"404", "503"},
-        ("/projects/{project_id}/writing/scratch", "delete"): {"404", "503"},
+            {"401", "400", "404", "409", "502", "503", "504"},
+        ("/projects/{project_id}/writing/scratch", "get"): {"401", "404", "503"},
+        ("/projects/{project_id}/writing/scratch", "delete"): {"401", "404", "503"},
     }
 
     # (path, method, code) where the body is a Union of a partial envelope with

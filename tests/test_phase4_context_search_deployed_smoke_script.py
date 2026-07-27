@@ -38,6 +38,7 @@ from services.application.app.indexing.service import (
     SourceBlockIndexingService,
 )
 from services.application.app.main import create_app
+from tests.auth_support import authenticated
 
 
 class DeployedContextSearchSmokeScriptTest(unittest.IsolatedAsyncioTestCase):
@@ -342,11 +343,11 @@ def _real_app_with_shared_index():
         embeddings=embeddings,
         planner=_StaticVectorPlanner(),
     )
-    return create_app(
+    return authenticated(create_app(
         service=core_sot,
         context_search_service=css,
         vector_index=shared_index,
-    )
+    ))
 
 
 def summary_step_order_rebuild_before_search(calls):
