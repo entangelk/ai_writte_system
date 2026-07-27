@@ -132,3 +132,100 @@
 
 - 오너 확인 후: 인증 슬라이스 D8-1(사용자·세션 저장 + 로그인 API)부터 착수. 그 뒤 외부 API(LLM→임베딩→리랭커), 시크릿은 인증 산출물 재사용.
 - dogfood(★)와 인증의 선후는 아직 열려 있음(오너 "인증 먼저"지만 dogfood를 앞에 끼울지 미결).
+
+---
+
+## Task — 인증 D8 슬라이스 1 구현 (1a 저장 · 1b 세션 · 1c 엔드포인트)
+
+### Goals
+
+- 오너 "준비되었으면 작은거부터 진행하자" → D8 슬라이스 1을 세 증분으로 쪼개 착수.
+- **비-목표(의도적)**: 인가는 넣지 않는다. 소유권(D3)·시행(D7) 전에 잠그면 `owner_id`가 없는
+  기존 데이터에서 오너가 잠긴다. 이 비-목표를 회귀로 못박았다(`SliceBoundaryTest`).
+
+### Completed work
+
+- **1a — User 저장 + Argon2id**(커밋 `bd702c4`): `auth/models.py`(User) ·
+  `auth/password.py`(`PasswordHasher` Protocol + `Argon2PasswordHasher`, `Type.ID` 명시 고정) ·
+  `auth/users.py`(Protocol repo · InMemory fake · `UserService`) · `auth/users_mongo.py`
+  (username unique 색인, `DuplicateKeyError`→`DuplicateUsername`). requirements에 `argon2-cffi`.
+- **1b — 세션 저장**(커밋 `451c8ef`): `Session`은 **raw 토큰이 아니라 `token_hash`(sha256)만** 보관
+  — DB 유출이 live 세션을 넘기지 못한다. `SessionService`(create/resolve/revoke/revoke_all_for_user),
+  Mongo는 `user_id` 색인(force-logout) + `expires_at` TTL 색인.
+- **1c — 엔드포인트**(커밋 `5db69b0`): `POST /auth/login`(HttpOnly 쿠키 발급) ·
+  `POST /auth/logout`(서버측 폐기, 세션 없어도 200 멱등) · `GET /auth/me`.
+  `auth/cookies.py`가 쿠키 정책 단일 지점(HttpOnly·SameSite=Lax·Secure·path).
+  `scripts/create_user.py`(관리자 API 전까지 첫 계정을 만드는 유일한 경로, 비밀번호는 env로).
+  operation 62→65, `schema.d.ts` +194.
+
+### Issues found — 라이브 검증이 유닛 테스트가 못 잡은 배포 파손을 잡았다
+
+**증상**: 실 스택에서 `GET /auth/me`가 유효 쿠키로 **500**. 로그인(쓰기)은 정상이라 겉보기엔 동작.
+
+**원인**: **pymongo는 BSON 날짜를 naive로 돌려준다**(client가 `tz_aware=True`가 아닌 한).
+`SessionService.resolve`가 그 naive `expires_at`을 aware `datetime.now(UTC)`와 비교 →
+`TypeError: can't compare offset-naive and offset-aware datetimes` → 500.
+**즉 실 Mongo에서 세션 인증이 통째로 불능**이었다.
+
+**왜 스위트가 green이었나**: fake collection 테스트가 aware datetime을 넣고 aware로 돌려받았다.
+fake가 드라이버의 실제 동작을 재현하지 않아 **배포만 깨진 채 초록**이었다 — 이 저장소가 반복해서
+배운 "green이 계약을 검증한다는 뜻은 아니다"의 저장소 계층판.
+
+**수정**: BSON→도메인 경계(`_entry`)에서 UTC 재부착. `tz_aware=True` 클라이언트 대신 이 지점을 고른
+이유는 **주입된 client도 커버**하기 때문이다(`from_uri` 설정은 주입 경로를 놓친다). BSON이 UTC를
+저장하므로 이것은 변환이 아니라 **재라벨링**이다.
+
+**회귀**: fake collection이 이제 **드라이버처럼 naive를 돌려주고**, 4건으로 양방향을 잠갔다 —
+① 읽은 값이 aware인가 ② 서비스 `resolve`가 안 터지는가(실패 경로 그대로) ③ **순간이 이동하지
+않는가**(tz *변환*이었다면 만료가 조용히 밀린다) ④ 이미 aware인 값은 안 건드리는가.
+**mutation 실증**: 수정을 되돌리면 3건이 실패하고 `sessions.py:85`에서 라이브와 **동일한
+TypeError**가 재현된다. 복원은 `cp`(백업)로 했다 — `git checkout <path>`는 미커밋 작업을 지운다(07-26 교훈).
+
+### Issues found — 패턴 sweep (§4)
+
+같은 "Mongo 날짜를 파이썬에서 now와 비교" 패턴을 repo 전체에서 훑었다. 후보 3곳
+(`writing/generation_job.py:195`, `indexing/service.py:819`·`:821`)은 **전부 무해**했다 —
+그 비교는 **in-memory repo 구현 안**에 있고, Mongo 경로는 같은 판정을 **쿼리 서버측**
+(`{"$lte": ...}`)에서 한다(`generation_job_mongo.py:85`, `indexing/mongo_repository.py:130-136`).
+즉 Mongo 날짜를 파이썬으로 끌어와 비교하던 곳은 내 세션 코드가 유일했다. 기존 결함 0건.
+`users_mongo.py`의 `created_at`은 비교하는 곳이 없어 버그는 아니나, 같은 슬라이스에서 내가 쓴
+코드라 동일하게 정규화해 두었다(향후 비교가 이 버그를 재도입하지 못하게).
+
+### Verification
+
+- **라이브 관통**(베타 머신, 실 Mongo·실 Argon2id): 이미지 rebuild → `argon2-cffi 23.1.0` 이미지 내
+  확인 → `scripts/create_user.py`로 첫 관리자 생성 → 8단계 전부 통과: 로그인 200(Set-Cookie에
+  `HttpOnly; Max-Age=604800; Path=/; SameSite=lax; Secure` 확인) · 쿠키로 me 200 · 쿠키 없이 401 ·
+  오답 401 · 미존재 사용자 **동일 메시지** 401 · 로그아웃 200 · 로그아웃 후 me 401 ·
+  **세션 없이 `/projects` 200(비-목표 확인)**.
+- **회귀 전량**: backend **1605 passed / 1 skipped / 623 subtests**. 직전 커밋 기준선 1556/612 대비
+  **+49 passed / +11 subtests**. 분해: 신규 auth 46 + **skip 정책 차이 3**(이 베타 머신에는
+  `elasticsearch` 파이썬 패키지가 있어 HANDOFF가 적어 둔 lexical 3건이 skip되지 않는다).
+  `-rs`로 잔여 skip 1건이 상시 skip인 live Chroma임을 확인했다. 설명되지 않는 증감 0.
+- **프론트**: `gen:api` 후 `tsc` 0 · build 성공(**진입 401.19 kB 무변** — 이 슬라이스는 프론트 코드 0,
+  로그인 화면은 D8-4) · `vitest` **207 passed / 14 files**(기준선과 동일).
+  (참고: 이 머신은 `node_modules` 미설치라 `npm install`이 선행 필요했다 — recharts 부재로 tsc가
+  실패했던 것이며 코드 문제가 아니었다.)
+
+### Decisions (구현자 판단)
+
+- **`Secure` 쿠키 기본 on**(fail closed). 브라우저가 `http://localhost`를 신뢰 출처로 취급하므로
+  로컬 http 개발도 그대로 동작한다 — 기본값을 낮추지 않고도 개발이 되는 드문 경우라 그렇게 했다.
+  해제는 `AUTH_COOKIE_SECURE`로만. **테스트는 `https://testserver` base_url을 쓴다** — http였다면
+  httpx가 Secure 쿠키를 조용히 버려 세션 테스트가 엉뚱한 이유로 통과/실패했을 것이다(실제로 처음
+  4건이 그렇게 실패했고, 그래서 배포 구성을 그대로 시험하는 쪽으로 고쳤다).
+- **로그인 실패 메시지를 하나로 통일**하고 `UserService.authenticate`에 **열거 방지 더미 verify**를
+  넣었다. 미존재/비활성이 오답보다 빠르면(Argon2는 의도적으로 느리다) 사용자명 존재가 타이밍으로
+  샌다. 메시지 동일성은 over-strict 회귀로 잠갔다.
+- **`AUTH_SESSION_TTL_HOURS`가 0 이하면 기동 거부**. 조용한 fallback은 무한 세션을 만들 수 있고,
+  그건 보안 결함이라 fail-fast가 맞다.
+- **부트스트랩 스크립트를 이 슬라이스에 포함**했다. 관리자 API(D8-5) 전까지 계정을 만들 방법이
+  없으면 로그인 엔드포인트가 배포에서 검증 불가능한 죽은 코드가 된다. 비밀번호는 argv가 아니라
+  env로 받는다(shell history·`ps` 노출).
+
+### Next steps
+
+- **D8-2**: `Project.owner_id` + (D4에 따라 마이그레이션 없이) 필드 도입. 그다음이 **D8-3 인가 시행 +
+  전수 가드**로 가장 큰 단계.
+- 실행 메모: 컨테이너에서 스크립트를 돌릴 때 **`PYTHONPATH=/app`이 필요하다**(이미지에 PYTHONPATH가
+  없고 `python scripts/x.py`는 CWD를 sys.path에 넣지 않는다).

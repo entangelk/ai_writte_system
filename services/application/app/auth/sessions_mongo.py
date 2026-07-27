@@ -1,9 +1,24 @@
 """Mongo repository for sessions."""
 
+from datetime import UTC, datetime
+
 from pymongo import ASCENDING, MongoClient
 
 from services.application.app.auth.models import Session
 from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+
+
+def _aware(value: datetime) -> datetime:
+    """BSON dates come back without tzinfo (pymongo is not tz_aware by default).
+
+    The session domain compares expires_at against an aware ``datetime.now(UTC)``,
+    and comparing naive to aware raises TypeError — which surfaced as a 500 on
+    every session read against real Mongo while the in-memory fake passed. BSON
+    stores UTC, so re-attaching UTC here is a re-labeling, not a conversion.
+    Normalizing at this boundary (rather than via a tz_aware client) also covers
+    an injected client, which `from_uri` settings would miss.
+    """
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 class MongoSessionRepository:
@@ -50,6 +65,6 @@ def _entry(doc: dict) -> Session:
     return Session(
         token_hash=doc["_id"],
         user_id=doc["user_id"],
-        created_at=doc["created_at"],
-        expires_at=doc["expires_at"],
+        created_at=_aware(doc["created_at"]),
+        expires_at=_aware(doc["expires_at"]),
     )

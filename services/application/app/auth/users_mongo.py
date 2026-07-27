@@ -1,5 +1,7 @@
 """Mongo repository for users."""
 
+from datetime import UTC
+
 from pymongo import ASCENDING, MongoClient
 from pymongo.errors import DuplicateKeyError
 
@@ -54,5 +56,12 @@ def _entry(doc: dict) -> User:
         password_hash=doc["password_hash"],
         is_admin=doc["is_admin"],
         is_active=doc["is_active"],
-        created_at=doc["created_at"],
+        # Same UTC re-labeling as the session repo: pymongo returns BSON dates
+        # naive, and the domain treats timestamps as aware. Nothing compares
+        # created_at today, so this is consistency rather than a fix — it keeps a
+        # future comparison from reintroducing the session bug.
+        created_at=(
+            doc["created_at"] if doc["created_at"].tzinfo is not None
+            else doc["created_at"].replace(tzinfo=UTC)
+        ),
     )
