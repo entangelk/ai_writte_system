@@ -4,12 +4,24 @@ from __future__ import annotations
 
 import os
 from dataclasses import asdict
+from datetime import timedelta
 from typing import Annotated, Protocol, Union
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
+from services.application.app.auth.cookies import SESSION_COOKIE_NAME, cookie_kwargs
+from services.application.app.auth.sessions import (
+    DEFAULT_SESSION_TTL,
+    InMemorySessionRepository,
+    SessionService,
+)
+from services.application.app.auth.users import (
+    InMemoryUserRepository,
+    UserService,
+)
+from services.application.app.auth.password import Argon2PasswordHasher
 from services.application.app.analysis.extractor import (
     AnalysisExtractionError,
     VersionedPromptAnalysisExtractionAdapter,
@@ -419,6 +431,46 @@ def _default_gate_finding_service() -> GateFindingService:
     return GateFindingService(MongoGateFindingRepository.from_uri(
         uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
     ))
+
+
+def _default_user_service() -> UserService:
+    # Multi-user D1=A: auth lives inside the application, so it shares the
+    # canonical store's connection settings rather than inventing its own.
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    hasher = Argon2PasswordHasher()
+    if not uri:
+        return UserService(InMemoryUserRepository(), hasher=hasher)
+    from services.application.app.auth.users_mongo import MongoUserRepository
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+    return UserService(
+        MongoUserRepository.from_uri(
+            uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
+        ),
+        hasher=hasher,
+    )
+
+
+def _default_session_service() -> SessionService:
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    ttl = DEFAULT_SESSION_TTL
+    hours = os.environ.get("AUTH_SESSION_TTL_HOURS")
+    if hours:
+        # Refuse to start on a malformed/negative TTL rather than silently
+        # falling back — a session that never expires is a security defect.
+        parsed = float(hours)
+        if parsed <= 0:
+            raise ValueError("AUTH_SESSION_TTL_HOURS must be > 0")
+        ttl = timedelta(hours=parsed)
+    if not uri:
+        return SessionService(InMemorySessionRepository(), ttl=ttl)
+    from services.application.app.auth.sessions_mongo import MongoSessionRepository
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+    return SessionService(
+        MongoSessionRepository.from_uri(
+            uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
+        ),
+        ttl=ttl,
+    )
 
 
 def _default_writing_loop_audit_service() -> WritingLoopAuditService:
@@ -1168,6 +1220,11 @@ def _with_storage_note(declaration: dict) -> dict:
 _MIGRATION_503 = _with_storage_note(_MIGRATION_503)
 
 _ERRORS_STORAGE: dict[int | str, dict] = {503: _STORAGE_503}
+# Auth (multi-user D2=A). 401 is the only new status this slice adds: the login
+# endpoint returns it for bad credentials and the session-reading endpoints for a
+# missing/expired/revoked cookie. 403 arrives with authorization enforcement (D7),
+# not here — this slice adds no ownership checks.
+_ERRORS_401: dict[int | str, dict] = {401: _ERROR, 503: _STORAGE_503}
 _ERRORS_404: dict[int | str, dict] = {404: _ERROR, 503: _STORAGE_503}
 _ERRORS_404_502: dict[int | str, dict] = {404: _ERROR, 502: _ERROR, 503: _STORAGE_503}
 _ERRORS_404_STORAGE: dict[int | str, dict] = {404: _ERROR, 503: _AUTO_PROMOTE_503}
@@ -1212,6 +1269,27 @@ _ERRORS_400_404_409_502_CONFIG: dict[int | str, dict] = {
 _ERRORS_400_404_502_504_CONFIG: dict[int | str, dict] = {
     400: _ERROR, 404: _ERROR, 502: _ERROR, 503: _CONFIG_503, 504: _ERROR,
 }
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class UserPayload(BaseModel):
+    # Deliberately no password_hash: the wire model is the reason a hash cannot
+    # leak by someone later returning the domain object directly.
+    id: str
+    username: str
+    is_admin: bool
+
+
+class LoginResponse(BaseModel):
+    user: UserPayload
+
+
+class LogoutResponse(BaseModel):
+    ok: bool
 
 
 class ProjectPayload(BaseModel):
@@ -1787,6 +1865,8 @@ def create_app(
     writing_scratch_service: WritingScratchService | None = None,
     writing_generation_job_service: WritingGenerationJobService | None = None,
     vector_index: InMemoryVectorIndexAdapter | None = None,
+    user_service: UserService | None = None,
+    session_service: SessionService | None = None,
 ) -> FastAPI:
     # Fail startup loudly for invalid environment-adjustable public bounds.
     _project_brief_style_example_limits()
@@ -1982,6 +2062,68 @@ def create_app(
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    # --- Auth (multi-user D8 slice 1) -------------------------------------
+    # Login/logout/me only. NO authorization is enforced yet: every other
+    # endpoint stays reachable without a session exactly as before, because
+    # ownership (D3) and enforcement (D7) are later slices. Adding the checks
+    # here without owner_id on projects would lock the owner out of their own
+    # data.
+    users = user_service or _default_user_service()
+    sessions = session_service or _default_session_service()
+
+    def _user_payload(user) -> dict[str, object]:
+        return {
+            "id": user.id, "username": user.username, "is_admin": user.is_admin
+        }
+
+    def _current_user(request: Request):
+        """Resolve the session cookie to a live, still-active user, or None."""
+        raw_token = request.cookies.get(SESSION_COOKIE_NAME)
+        if not raw_token:
+            return None
+        session = sessions.resolve(raw_token)
+        if session is None:
+            return None
+        user = users.get_by_id(session.user_id)
+        # A user disabled or deleted after the session was minted must not keep
+        # working just because the cookie is still within its TTL.
+        if user is None or not user.is_active:
+            return None
+        return user
+
+    @app.post("/auth/login", response_model=LoginResponse, responses=_ERRORS_401)
+    async def login(request: LoginRequest, response: Response) -> dict[str, object]:
+        user = users.authenticate(
+            username=request.username, password=request.password
+        )
+        if user is None:
+            # One message for every failure mode (unknown user, wrong password,
+            # disabled account). Distinguishing them here would undo the timing
+            # hardening in UserService.authenticate.
+            raise HTTPException(status_code=401, detail="invalid credentials")
+        raw_token, session = sessions.create_session(user_id=user.id)
+        max_age = int((session.expires_at - session.created_at).total_seconds())
+        response.set_cookie(value=raw_token, **cookie_kwargs(max_age=max_age))
+        return {"user": _user_payload(user)}
+
+    @app.post("/auth/logout", response_model=LogoutResponse,
+              responses=_ERRORS_STORAGE)
+    async def logout(request: Request, response: Response) -> dict[str, object]:
+        # Idempotent by design: logging out without a session is not an error,
+        # so a client can always reach a known-logged-out state.
+        raw_token = request.cookies.get(SESSION_COOKIE_NAME)
+        if raw_token:
+            sessions.revoke(raw_token)
+        response.delete_cookie(**cookie_kwargs())
+        return {"ok": True}
+
+    @app.get("/auth/me", response_model=UserPayload, responses=_ERRORS_401)
+    async def read_current_user(request: Request) -> dict[str, object]:
+        user = _current_user(request)
+        if user is None:
+            raise HTTPException(status_code=401, detail="not authenticated")
+        return _user_payload(user)
 
     def _project_payload(project) -> dict[str, object]:
         return {"id": project.id, "name": project.name, "archived": project.archived}

@@ -6,6 +6,7 @@ Ownership (``Project.owner_id``) and authorization enforcement are later slices
 
 from __future__ import annotations
 
+import secrets
 import uuid
 from datetime import UTC, datetime
 from typing import Callable, Protocol
@@ -66,6 +67,7 @@ class UserService:
         self._hasher = hasher
         self._clock = clock or (lambda: datetime.now(UTC))
         self._id_factory = id_factory or (lambda: "user:" + uuid.uuid4().hex)
+        self._dummy_hash: str | None = None
 
     def create_user(
         self, *, username: str, password: str, is_admin: bool = False
@@ -86,14 +88,25 @@ class UserService:
         self._repo.insert(user)
         return user
 
+    def get_by_id(self, user_id: str) -> User | None:
+        return self._repo.get_by_id(user_id)
+
     def authenticate(self, *, username: str, password: str) -> User | None:
         user = self._repo.get_by_username(username.strip())
-        if user is None:
-            # Enumeration-hardening (constant-time dummy verify) belongs with the
-            # login endpoint slice (1c); the storage layer just reports no match.
-            return None
-        if not user.is_active:
+        if user is None or not user.is_active:
+            # Username enumeration hardening: returning early here would make a
+            # missing/disabled account measurably faster than a wrong password
+            # (Argon2 is deliberately slow), which leaks which usernames exist.
+            # Burn the same verify cost against a throwaway hash before failing.
+            self._hasher.verify(self._enumeration_guard_hash(), password)
             return None
         if not self._hasher.verify(user.password_hash, password):
             return None
         return user
+
+    def _enumeration_guard_hash(self) -> str:
+        # Built once on first miss (hashing is expensive) over a random secret, so
+        # no real password can ever match it.
+        if self._dummy_hash is None:
+            self._dummy_hash = self._hasher.hash(secrets.token_urlsafe(32))
+        return self._dummy_hash
