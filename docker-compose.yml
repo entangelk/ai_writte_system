@@ -358,10 +358,14 @@ services:
       application:
         condition: service_healthy
     healthcheck:
-      # The alpine nginx image ships wget (busybox), not curl.
+      # The alpine nginx image ships wget (busybox), not curl. Probe 127.0.0.1
+      # (not localhost): /etc/hosts maps `localhost` to `::1` as well, busybox
+      # wget prefers the IPv6 record, and nginx here is `listen 80;` (IPv4 only),
+      # so `http://localhost/` gets "Connection refused" and the container reports
+      # unhealthy while actually serving fine. Forcing IPv4 matches nginx's listen.
       test:
         - "CMD-SHELL"
-        - "wget -q -O /dev/null http://localhost/ || exit 1"
+        - "wget -q -O /dev/null http://127.0.0.1/ || exit 1"
       interval: 10s
       timeout: 5s
       retries: 5
