@@ -7,13 +7,14 @@ logged-in user rather than re-asserting the guard at ~130 call sites.
 
 What this does NOT do, deliberately:
 
-* It does not remove the dependency. ``require_authenticated_user`` is still
-  declared on the route; only its *resolution* is overridden, so a route that
-  forgot to declare it does not accidentally start working here.
-* It does not leave the boundary untested. ``tests/test_auth_api.py`` drives
-  every route of a real, non-overridden app and asserts 401 — the exhaustive
-  guard D7=A calls for. A test that wants the real boundary imports
-  ``fastapi.testclient.TestClient`` directly, as that module does.
+* It does not remove either dependency. Authentication and project ownership
+  stay declared on their routes; only their *resolution* is overridden, so a
+  route that forgot a declaration does not accidentally start working here.
+* It does not leave either boundary untested. ``tests/test_auth_api.py`` drives
+  every route of a real, non-overridden app and asserts both sessionless 401
+  and foreign-project 403 — the exhaustive guard D7=A calls for. A test that
+  wants the real boundary imports ``fastapi.testclient.TestClient`` directly,
+  as that module does.
 
 Overriding is keyed on the module-level dependency function, which is why it is
 module level in ``main`` rather than a ``create_app`` closure.
@@ -26,7 +27,10 @@ from datetime import UTC, datetime
 from fastapi.testclient import TestClient as _RealTestClient
 
 from services.application.app.auth.models import User
-from services.application.app.main import require_authenticated_user
+from services.application.app.main import (
+    require_authenticated_user,
+    require_project_owner,
+)
 
 # A fixed identity, so a test that reads back what was recorded (owner_id) has a
 # stable value to assert against.
@@ -43,6 +47,7 @@ TEST_USER = User(
 def authenticate(app) -> None:
     """Make every protected operation on ``app`` resolve to ``TEST_USER``."""
     app.dependency_overrides[require_authenticated_user] = lambda: TEST_USER
+    app.dependency_overrides[require_project_owner] = lambda: None
 
 
 def authenticated(app):

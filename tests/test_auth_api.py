@@ -16,6 +16,11 @@ from unittest import mock
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
+try:
+    from pymongo.errors import AutoReconnect as _STORAGE_FAILURE
+except ModuleNotFoundError:  # pragma: no cover - the driver is present in CI
+    _STORAGE_FAILURE = None
+
 from services.application.app.auth.cookies import cookie_secure
 from services.application.app.auth.sessions import (
     InMemorySessionRepository, SessionService,
@@ -24,7 +29,11 @@ from services.application.app.auth.users import InMemoryUserRepository, UserServ
 from services.application.app.core_sot.service import (
     CoreSotService, InMemoryCoreSotRepository,
 )
-from services.application.app.main import create_app, require_authenticated_user
+from services.application.app.main import (
+    create_app,
+    require_authenticated_user,
+    require_project_owner,
+)
 from tests.auth_support import authenticate
 
 
@@ -252,6 +261,106 @@ class ProjectOwnershipRecordingTest(unittest.TestCase):
         self.assertEqual(list(self.core_sot.list_projects()), [])
 
 
+class ProjectAuthorizationTest(unittest.TestCase):
+    """D8-3b locks both project detail access and the project list."""
+
+    def setUp(self) -> None:
+        self.core_sot = CoreSotService(InMemoryCoreSotRepository())
+        self.client, self.users, _ = _client(core_sot=self.core_sot)
+        self.bob = self.users.create_user(username="bob", password="pw456")
+        login = self.client.post(
+            "/auth/login", json={"username": "alice", "password": "pw123"}
+        )
+        self.alice_id = login.json()["user"]["id"]
+
+    def test_owner_can_read_own_project_and_missing_project_stays_404(self) -> None:
+        """Over-strict: ownership must not reject a valid owner or erase 404."""
+        owned = self.core_sot.create_project(
+            name="Alice's", owner_id=self.alice_id
+        )
+
+        self.assertEqual(self.client.get(f"/projects/{owned.id}").status_code, 200)
+        self.assertEqual(
+            self.client.get("/projects/does-not-exist").status_code, 404
+        )
+
+    def test_other_owner_and_unowned_project_are_both_403(self) -> None:
+        """Under-strict guards: mismatch and None are separate deny branches."""
+        other = self.core_sot.create_project(name="Bob's", owner_id=self.bob.id)
+        unowned = self.core_sot.create_project(name="Unowned")
+
+        for project in (other, unowned):
+            with self.subTest(owner_id=project.owner_id):
+                response = self.client.get(f"/projects/{project.id}")
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.json(), {"detail": "forbidden"})
+
+    def test_list_returns_only_the_authenticated_users_projects(self) -> None:
+        """Neither another user's metadata nor an unowned row may reach the wire."""
+        mine = self.core_sot.create_project(
+            name="Visible", owner_id=self.alice_id
+        )
+        self.core_sot.create_project(name="Other name", owner_id=self.bob.id)
+        self.core_sot.create_project(name="Unowned name")
+
+        response = self.client.get("/projects")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {
+            "projects": [{"id": mine.id, "name": "Visible", "archived": False}]
+        })
+
+    @unittest.skipIf(_STORAGE_FAILURE is None, "pymongo is not installed")
+    def test_project_owner_dependency_maps_storage_failure_to_503(self) -> None:
+        """Under-strict: a store outage in the dependency must not leak a 500."""
+        class FailingRepository(InMemoryCoreSotRepository):
+            def get_project(self, project_id):
+                raise _STORAGE_FAILURE("canonical store unavailable")
+
+        client, _, _ = _client(
+            core_sot=CoreSotService(FailingRepository())
+        )
+        client.post(
+            "/auth/login", json={"username": "alice", "password": "pw123"}
+        )
+
+        response = client.get("/projects/any-project")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {"detail": "canonical store unavailable"})
+
+    def test_every_project_scoped_operation_refuses_a_foreign_project(self) -> None:
+        """Under-strict: every {project_id} route stops before validation/handler."""
+        foreign = self.core_sot.create_project(
+            name="Foreign", owner_id=self.bob.id
+        )
+        for route in self.client.app.routes:
+            if not isinstance(route, APIRoute) or "{project_id}" not in route.path:
+                continue
+            url = route.path.replace("{project_id}", foreign.id)
+            url = re.sub(r"\{[^}]+\}", "does-not-exist", url)
+            for method in sorted(route.methods):
+                with self.subTest(path=route.path, method=method):
+                    response = self.client.request(method, url)
+                    self.assertEqual(response.status_code, 403)
+
+    def test_ownership_dependency_and_403_declaration_match_project_scope(self) -> None:
+        """Declaration guard in both directions: scoped routes only, no drift."""
+        spec = self.client.app.openapi()
+        for route in self.client.app.routes:
+            if not isinstance(route, APIRoute):
+                continue
+            declared = [d.dependency for d in route.dependencies]
+            ownership_guarded = require_project_owner in declared
+            expected = "{project_id}" in route.path
+            for method in sorted(route.methods):
+                method = method.lower()
+                with self.subTest(path=route.path, method=method):
+                    self.assertEqual(ownership_guarded, expected)
+                    responses = spec["paths"][route.path][method]["responses"]
+                    self.assertEqual("403" in responses, expected)
+
+
 class AuthenticationBoundaryTest(unittest.TestCase):
     """D7=A's exhaustive guard: the inverse of slice 1's non-goal.
 
@@ -404,7 +513,8 @@ class TestSeamStaysAnOverrideTest(unittest.TestCase):
         # a guarded one for the exhaustive guard.
         self.assertEqual(declarations(), before)
         self.assertEqual(
-            list(app.dependency_overrides), [require_authenticated_user]
+            list(app.dependency_overrides),
+            [require_authenticated_user, require_project_owner],
         )
 
     def test_this_module_drives_apps_that_are_not_overridden(self) -> None:

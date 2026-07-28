@@ -162,6 +162,12 @@ class InMemoryCoreSotRepository:
     def list_projects(self) -> tuple[Project, ...]:
         return tuple(self.projects.values())
 
+    def list_projects_for_owner(self, owner_id: str) -> tuple[Project, ...]:
+        return tuple(
+            project for project in self.projects.values()
+            if project.owner_id == owner_id
+        )
+
     def get_current_project_brief(
         self, project_id: str
     ) -> ProjectBriefVersion | None:
@@ -405,6 +411,9 @@ class CoreSotService:
 
     def list_projects(self) -> tuple[Project, ...]:
         return self._repo.list_projects()
+
+    def list_projects_for_owner(self, *, owner_id: str) -> tuple[Project, ...]:
+        return self._repo.list_projects_for_owner(owner_id)
 
     def get_project_brief(self, *, project_id: str) -> ProjectBriefVersion | None:
         self._require_project(project_id)

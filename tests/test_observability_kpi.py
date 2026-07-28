@@ -352,7 +352,7 @@ class KpiErrorContractDeclarationTest(unittest.TestCase):
     """
 
     EXPECTED = {
-        ("/projects/{project_id}/observability/kpi", "get"): {"401", "404", "503"},
+        ("/projects/{project_id}/observability/kpi", "get"): {"401", "403", "404", "503"},
     }
 
     def setUp(self):

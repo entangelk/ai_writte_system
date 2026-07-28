@@ -1,9 +1,9 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`
-계약 버전: `v1.7.52`
+계약 버전: `v1.7.54`
 승인일: `2026-06-26`
-최근 갱신일: `2026-07-27`
+최근 갱신일: `2026-07-28`
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
 적용 범위: 제품 경계, 서비스 책임, 데이터 정본, Gateway, AgentLoopRunner, Gate 합성, 검증 기록.
 
@@ -33,6 +33,8 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.7.54 | 2026-07-28 | **D8-3b 독립 검증 차단 2건 폐쇄 — 동작 무변, 계약 자기일관성과 저장소 경계 잠금을 보강했다.** B-1: §H3 상태코드 의미론에 403을 추가해 "살아 있는 세션은 있으나 project 소유자가 아님(`owner_id=None` 포함), handler·422보다 선행, 복구는 권한 있는 project 선택/소유권 정정"으로 고정했다. 404의 종전 "다른 project 소유"는 **자원 수준 `project_id` 불일치**에만 한정해 사용자 소유권 403과의 문면상 모순을 제거했다. B-2: 실 Mongo 반환값 회귀와 별도로 `MongoOwnerFilterQueryTest`가 `find({"owner_id": owner_id})`에 전달된 filter 문서를 직접 단정한다. 따라서 전체를 읽어 Python에서 후처리하는 E2=A 위반 뮤테이션은 이제 실패한다. 독립 검증의 구현·정량 재도출은 모두 통과했고, 이 두 조건 폐쇄로 D8-3b는 무조건 합격 조건을 충족한다. 비차단 H-2도 소유권 dependency 내부 Mongo 장애가 균일 503으로 매핑되는 회귀를 추가해 함께 닫았다. H-1은 예정된 D8-3c 결합 전수 감사, H-3·H-5는 후속 UX/문서 정밀화로 남긴다. H-4는 HANDOFF에 test-mongo ON 전량 기준선과 무인프라 보조 실행을 함께 기록해 닫았다. | 독립 검증 `verifications/2026-07-28/auth_d8_3b_project_ownership.md`, `daily_logs/2026-07-28/work_log.md` |
+| v1.7.53 | 2026-07-28 | **프로젝트 소유권 시행(D8-3b) — 로그인 사용자 사이의 HTTP 데이터 격리를 세웠다.** `/projects/{project_id}/…` **59개 operation 전부**가 인증 dependency 위에 별도 `require_project_owner` dependency를 선언한다. 존재하지 않는 project는 기존 404, 인증됐지만 다른 사용자 소유이거나 `owner_id=None`이면 **403 `{"detail":"forbidden"}`**이며 handler·요청 검증 전에 멈춘다(E1=A·§3의 403 결정). H3 D3=A에 따라 같은 59개가 OpenAPI에 403을 선언하고, `POST /projects`·`GET /projects`와 공개/auth 경로처럼 특정 project를 지목하지 않는 6개 operation은 낼 수 없는 403을 선언하지 않는다. **`GET /projects`는 응답 후 필터가 아니라 저장소 경계**의 `list_projects_for_owner(owner_id)`를 사용하며 Mongo는 `find({"owner_id": current.id})`로 조회해 다른 사용자·무소유 project의 id·name·archived가 wire에 닿지 않는다. 전수 가드는 ① route dependency와 403 선언이 `{project_id}` 범위와 양방향 일치하는지, ② 타인 project id로 59개를 실제 호출해 전부 403인지 검사한다. over-strict 가드는 소유자 200·없는 project 404·비project 403 미선언을 함께 잠근다. 도메인 스위트의 명시적 override seam은 인증·소유권 두 dependency의 **해석만** 바꾸고 route 선언은 보존하며, 실제 경계 스위트는 override 없는 앱을 쓴다. 공개 계약은 `schema.d.ts`에 59개 403 arm이 additive로 반영됐다. D8-3c 최종 401·403 결합 감사가 남았고 Mongo·ES 인프라 인증은 D8-7이므로 외부 노출 금지는 유지한다. | 오너 결정(E1=A·E2=A·E3=A, 2026-07-27), `plans/auth-d8-3-enforcement-decisions.md` §E1~E3·§3, `daily_logs/2026-07-28/work_log.md` |
 | v1.7.52 | 2026-07-27 | **인증 시행(D8-3a) — 무인증으로 열려 있던 표면이 닫혔다.** E3=A의 첫 하위 슬라이스. `/health`와 공개 `/auth` 두 곳을 제외한 **61개 operation 전부**가 FastAPI dependency `require_authenticated_user`를 선언하고, 세션 없는 요청은 handler에 닿기 전에 **401**을 받는다(D7=A: 미들웨어·서비스층이 아니라 dependency + 전수 가드). **공개 예외는 4개이며 각각 이유가 계약된다**: `/health`(compose healthcheck는 로그인할 수 없다) · `POST /auth/login`(세션을 얻는 경로) · `POST /auth/logout`(멱등 — 서버가 이미 잊은 쿠키로도 로그아웃 상태에 도달할 수 있어야 한다) · `GET /auth/me`(프론트가 "세션이 있는가"를 묻는 endpoint라 공유 가드가 아니라 **자기 본문에서** 401을 낸다). 이 4개는 테스트의 `PUBLIC` 리터럴로 열거되며 **새 endpoint는 기본이 보호**다. **선언(H3 D3=A)**: 보호되는 61개 전부가 `responses=`에 401을 싣고, `/health`·`/auth/logout`은 **낼 수 없는 401을 선언하지 않는다**(over-strict 가드). **전수 가드는 두 겹**이다 — ① route 객체에 dependency가 실제로 선언됐는지(선언만 있고 배선이 빠진 drift는 OpenAPI만 봐서는 안 보인다), ② 61개를 **실제로 세션 없이 호출**해 401을 확인(422·404가 아니라 401 — 가드가 요청 검증보다 앞선다). 정상 세션이 같은 요청을 통과시키는 over-strict 가드도 함께 둔다. **`POST /projects`는 `owner_id=None`을 더 이상 만들지 않는다** — 생성자는 가드가 이미 해석한 값에서 온다. 다만 E1=A대로 `None`은 여전히 **항상 deny** 대상이며 그 시행은 D8-3b다. **인가(403·소유권)는 아직 없다**: 로그인만 하면 모든 project에 접근할 수 있으므로 **외부 노출 금지는 유지**된다. 워커는 HTTP를 쓰지 않아 무영향(Mongo 직결, D8-7 사안)이고, `APPLICATION_BASE_URL`을 쓰는 운영 smoke 스크립트 4종은 이 슬라이스에서 401을 받게 된다(추적 부채). | 오너 결정(E1~E4=A, 2026-07-27), `plans/auth-d8-3-enforcement-decisions.md` §E3·§3, `daily_logs/2026-07-27/work_log.md` |
 | v1.7.51 | 2026-07-27 | **인증 시행 E1~E4 확정 + 프론트 로그인 선행 계약.** 오너가 E1=A(`owner_id=None`은 탈퇴·삭제 누락 등 비정상 잔존을 포함해 항상 deny), E2=A(project 경로는 소유권, 그 외는 인증, `GET /projects`는 저장소 경계에서 본인 소유만 필터), E3=A(인증 dependency → 소유권+목록 필터 → 전수 가드의 작은 슬라이스), E4=A를 확정했다. E4는 번호보다 자연스러운 제품 흐름을 우선한다는 뜻으로 **프론트 로그인/세션 만료/라우트 가드를 인가 시행보다 먼저** 세운다. 프론트는 `/auth/me` 확인 전 보호 화면을 렌더하지 않고, 미인증·만료 시 로그인 표면을 보이며 현재 브라우저 경로를 유지해 로그인 성공 뒤 원래 작업으로 돌아간다. 로그인 실패는 계정 존재 여부를 구분하지 않는 단일 메시지이고 비밀번호를 저장하지 않는다. 로그아웃은 서버 세션 폐기 뒤 로그인 표면으로 돌아간다. 백엔드 인가는 후속 D8-3 하위 슬라이스가 서기 전까지 아직 시행되지 않았으므로 외부 노출 금지는 유지된다. | 오너 결정(E1~E4=A, 2026-07-27), `plans/auth-d8-3-enforcement-decisions.md`, `plans/multi-user-auth-cms-decisions.md` |
 | v1.7.50 | 2026-07-26 | **독립 검증 비차단 2건 반영(문서 전용)**. 검증(`verifications/2026-07-26/multi_user_d0_contract_transition.md`, **합격·조건 없음**)이 짚은 두 정밀도 문제를 닫는다. **H1 — 인가 대상 규모의 숫자와 한정어 불일치**: "62 operation 전부"와 "`/health` 외"를 함께 써 왔는데 62/52는 `/health`를 **포함한** 값이다. 재측정으로 확정: 전체 **62/52**, `/health` 제외 **61/51**. D7 전수 가드가 담아야 할 범위는 제외 쪽이므로 두 값을 모두 적고 인가 대상을 61/51로 명시했다. **H2 — "CSRF 표면" 비유가 느슨함**: 쿠키 인증에서 CORS를 여는 것의 실제 효과는 **다른 origin이 사용자의 인증 상태로 API 응답을 읽게** 되는 것이고, CSRF는 쿠키 `SameSite`가 막는 **다른 축**이다(CORS는 CSRF를 막지 않는다). 브리프 D2=A는 이미 `SameSite=Lax`로 정확히 적고 있었으므로 정본 쪽을 그 정밀도에 맞췄다. **결론은 불변** — 단일 origin 유지·CORS 닫기. **덤으로 잡은 stale 1건**: H3 절의 "503 선언은 `/health` 제외 **60개** 전부"가 v1.7.48의 KPI endpoint 추가를 반영하지 못하고 있었다 — 재측정으로 **61/61**을 확인해 정정했다(수치가 계약 문장에 박혀 있으면 endpoint가 늘 때마다 함께 늙는다). 코드·회귀 무변. | 독립 검증 `verifications/2026-07-26/multi_user_d0_contract_transition.md`, `daily_logs/2026-07-26/work_log.md` |
@@ -251,8 +253,8 @@
 ### 제품과 프로젝트 경계
 
 - **제품은 다중 사용자로 확장한다**(오너 결정 2026-07-26, D0=A). 종전 조항 "MVP는 계정/인증이 없는 단일 사용자 시스템이다"와 "향후 다중 사용자를 위해 `user_id`를 지금 억지로 넣지 않는다"는 **MVP 단계의 제약이었고 그 단계가 끝나 해제됐다** — 위반이 아니라 유예의 만료다(v1.6.93이 "frontend framework 보류"를 해제한 것과 같은 성격).
-  - 사용자·Argon2id·서버 세션과 `/auth/login`·`/auth/logout`·`/auth/me`, `Project.owner_id` 기록, 프론트 로그인/세션 만료/라우트 가드는 구현됐고(v1.7.51), **인증 시행도 섰다**(v1.7.52 D8-3a) — `/health`와 공개 `/auth` 두 곳을 뺀 61개 operation은 세션 없이는 401이다.
-  - **그러나 인가(소유권)는 아직 없다**: 로그인한 사용자는 남의 project도 열 수 있고 `GET /projects`가 전부를 돌려준다. **D8-3b가 끝나기 전까지 배포 스택은 다중 사용자 격리가 없으므로 외부 노출 금지는 유지된다.**
+  - 사용자·Argon2id·서버 세션과 `/auth/login`·`/auth/logout`·`/auth/me`, `Project.owner_id` 기록, 프론트 로그인/세션 만료/라우트 가드는 구현됐고(v1.7.51), 인증 시행(v1.7.52)과 **프로젝트 소유권 시행(v1.7.53)**도 섰다. `/health`와 공개 `/auth` 두 곳을 뺀 61개 operation은 세션 없이는 401이고, project-scoped 59개 operation은 비소유·무소유 project에 403이다.
+  - `GET /projects`는 저장소 조회에서 현재 사용자 소유분만 반환한다. **D8-3c 최종 전수 가드와 D8-7 인프라 인증은 아직 남았으므로 외부 노출 금지는 유지한다.**
   - **`project_id` 강제는 그대로 살아남는다** — 모든 저장·검색·Gate·tool handler가 계속 강제한다. 소유권은 그 **위에 얹히는 두 번째 경계**이지 대체가 아니다.
   - 인프라 무인증(Mongo·Elasticsearch `xpack.security.enabled=false`, v1.6.53 G3=A)은 그 결정이 "인증 slice 선행 필요라 범위 밖"이라고 스스로 적었던 항목이다 — 이 확장이 그 선행이며 함께 닫는다.
 - Product Shell은 프로젝트/원고 작업 표면이며 AI 기억의 정본을 별도로 소유하지 않는다.
@@ -332,7 +334,8 @@ H3 페이즈(브리프 `plans/api-error-response-contract-decisions.md`, D1~D4=A
 |---|---|---|
 | 400 | 요청이 이 자원 상태에서 성립하지 않음(도메인 검증 실패). 클라이언트가 요청을 고치면 성공할 수 있다. | `ValueError`/`CoreSotError`, `UnsupportedExportFormat`, `InvalidContextSearchRequest`, Writing intent/next_unit binding 위반, async 프리셋 + `current_position` 없음 |
 | 401 | **살아 있는 세션이 없다.** 요청은 handler에 닿지 않으므로 **아무 부수효과도 남지 않는다**(422보다도 앞선다 — 본문이 비어 있어도 401이다). 쿠키 없음·위조·만료·폐기·계정 비활성이 전부 같은 401이다. 클라이언트의 복구는 **로그인**이다. | `require_authenticated_user`(v1.7.52, 보호되는 61개 operation) · `POST /auth/login`의 자격증명 실패 · `GET /auth/me`의 세션 부재 |
-| 404 | 대상이 없거나 **다른 project 소유**다. project isolation 위반은 존재를 알리지 않고 404로 수렴한다. | `NotFound`/`AnalysisNotFound`/`MemoryNotFound`/`GateFindingNotFound` 계열 |
+| 403 | **살아 있는 세션은 있으나 이 project의 소유자가 아니다.** 다른 사용자 소유와 `owner_id=None`을 함께 거부하며 handler·422보다 앞선다. 이 경계는 project 존재를 숨기지 않는다. 복구는 재로그인이 아니라 **권한 있는 project 선택 또는 소유권 정정**이다. | `require_project_owner`(v1.7.53, project-scoped 59개 operation) |
+| 404 | 대상이 없거나 **요청한 하위 자원이 path의 `project_id`와 다른 project에 속한다.** 이 자원 수준 격리 위반은 존재를 알리지 않고 404로 수렴한다. 사용자↔project 소유권 불일치는 위 403이다. | `NotFound`/`AnalysisNotFound`/`MemoryNotFound`/`GateFindingNotFound` 계열 |
 | 409 | 대상은 있으나 **현재 상태**가 그 연산을 허용하지 않음. | `Archived`, stale base(`StaleProjectBriefBase`/`StaleWritingBase`), job/candidate/finding 상태 전이 위반, 잘못된 reorder 순열(`InvalidDraftOrder`) |
 | 422 | 요청 스키마 검증 실패(FastAPI 자동, 본문 형태 다름) | Pydantic 제약(`NonBlankName` 등) |
 | 502 | **상류**(LLM provider·gateway·검색·임베딩)가 실패했거나 AI 출력이 계약 schema를 만족하지 않음. **협력자가 없는 것(503)이 아니라 있는데 실패한 것**이 502다. | `ContextSearchFailed`, `InvalidWritingGateResult`/`InvalidWritingRevision`/`InvalidCandidateReport`/`InvalidJudgeResult`, `EmbeddingProviderError` |

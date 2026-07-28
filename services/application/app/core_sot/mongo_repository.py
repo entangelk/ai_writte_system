@@ -171,6 +171,10 @@ class MongoCoreSotRepository:
         cursor = self._projects.find().sort("_id", ASCENDING)
         return tuple(_to_project(doc) for doc in cursor)
 
+    def list_projects_for_owner(self, owner_id: str) -> tuple[Project, ...]:
+        cursor = self._projects.find({"owner_id": owner_id}).sort("_id", ASCENDING)
+        return tuple(_to_project(doc) for doc in cursor)
+
     def get_current_project_brief(
         self, project_id: str
     ) -> ProjectBriefVersion | None:

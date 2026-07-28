@@ -99,6 +99,28 @@ def _probe_mongo() -> tuple[bool, bool]:
 _MONGO_AVAILABLE, _TXN_SUPPORTED = _probe_mongo()
 
 
+@unittest.skipUnless(_PYMONGO_AVAILABLE, "pymongo is not installed")
+class MongoOwnerFilterQueryTest(unittest.TestCase):
+    def test_list_projects_for_owner_filters_at_the_mongo_query_boundary(self):
+        filters = []
+
+        class SpyCursor(list):
+            def sort(self, *args, **kwargs):
+                return self
+
+        class SpyCollection:
+            def find(self, filter=None):
+                filters.append(filter)
+                return SpyCursor()
+
+        repo = MongoCoreSotRepository.__new__(MongoCoreSotRepository)
+        repo._projects = SpyCollection()
+
+        repo.list_projects_for_owner("user:1")
+
+        self.assertEqual(filters, [{"owner_id": "user:1"}])
+
+
 class _MongoContractMixin:
     """Shared Core SOT contract exercised against a real Mongo backend.
 
@@ -202,6 +224,15 @@ class _MongoContractMixin:
                          "user:1")
         listed = {p.id: p for p in self.service.list_projects()}
         self.assertEqual(listed[owned.id].owner_id, "user:1")
+
+    def test_list_projects_for_owner_returns_only_matching_rows(self):
+        mine = self.service.create_project(name="Mine", owner_id="user:1")
+        self.service.create_project(name="Other", owner_id="user:2")
+        self.service.create_project(name="Unowned")
+
+        listed = self.service.list_projects_for_owner(owner_id="user:1")
+
+        self.assertEqual([project.id for project in listed], [mine.id])
 
     def test_project_without_owner_round_trips_as_none(self):
         # Over-strict guard: the default must stay unowned rather than acquiring
