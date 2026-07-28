@@ -18,6 +18,12 @@ class MongoWritingLoopAuditRepository:
             [("project_id", 1), ("created_at", DESCENDING)],
             name="writing_loop_audits_by_project_created",
         )
+        # D8-5c: same reason as the llm-call audit's — the compound index cannot
+        # serve the project-less sort the global KPI reads.
+        self._entries.create_index(
+            [("created_at", DESCENDING)],
+            name="writing_loop_audits_by_created",
+        )
 
     @classmethod
     def from_uri(cls, uri: str, *, db_name: str = DEFAULT_DB_NAME):
@@ -34,9 +40,15 @@ class MongoWritingLoopAuditRepository:
     def list_for_project(
         self, project_id: str
     ) -> tuple[StoredWritingLoopRun, ...]:
-        return tuple(_run(doc) for doc in self._entries.find(
-            {"project_id": project_id},
-        ).sort([("created_at", DESCENDING), ("_id", DESCENDING)]))
+        return self._listed({"project_id": project_id})
+
+    def list_all(self) -> tuple[StoredWritingLoopRun, ...]:
+        return self._listed({})
+
+    def _listed(self, query: dict) -> tuple[StoredWritingLoopRun, ...]:
+        return tuple(_run(doc) for doc in self._entries.find(query).sort(
+            [("created_at", DESCENDING), ("_id", DESCENDING)]
+        ))
 
 
 def _doc(run: StoredWritingLoopRun) -> dict:

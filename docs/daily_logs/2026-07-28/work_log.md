@@ -383,3 +383,153 @@
 
 코드·공개 계약 무변이므로 전량 회귀 재실행은 하지 않았다(검증자가 `fb88754`에서 ON 기준선
 `1681/1/1455`를 이미 독립 재현했고, 이 보강은 문서 전용이다).
+
+---
+
+## Task — 인증 D8-5c 전역 관측 KPI (`GET /admin/observability/kpi`)
+
+### Goals
+
+- 앞 슬라이스가 "F1과 무관해 먼저 진행 가능"으로 남긴 5-c를 착수한다.
+- 감사 저장소에 전역 조회를 더하고, 집계 함수는 **입력만 넓혀 재사용**한다(두 번째 구현 금지).
+- 집계 계약이 방어하는 **오독 3종**(분모 동반 · 표본 0이면 `null` · `multi_call_correlations`≠
+  repair 수)이 전역에서도 성립하는지를 *가정하지 않고* 넓힌 입력으로 직접 구동해 확인한다.
+- 관리자 tier의 네 번째 operation으로서 기존 전수 가드(boundary matrix · H3 lock list)에 편입한다.
+
+### Completed work
+
+- **집계(`services/application/app/observability/kpi.py`)**
+  - `aggregate_kpi`와 새 `aggregate_global_kpi`가 공용 `_fold(calls, loop_runs)`를 쓴다.
+    `totals`·`sites`·`gate`·`loop` 계산이 **한 코드 경로**이므로 오독 방어 3종이 전역에서
+    구성상 성립한다(같은 규칙을 두 번 적어 놓고 동기화하는 구조를 만들지 않았다).
+  - `GlobalObservabilityKpi`는 `project_id` 대신 `projects_considered`를 싣는다 — 레코드를
+    하나라도 남긴 project 수. 레코드가 없는 project는 세지 않는다(그 아래 per-call 수치의
+    출처가 흐려진다).
+  - **`_rows_per_correlation`의 버킷 키를 `(project_id, correlation_id)`로 바꿨다.** 아래
+    "Issues found" 참조 — 전역에서만 드러나는 오집계다. per-project 결과는 불변이다.
+- **저장소 — 전역 조회 추가**
+  - `LlmCallAuditRepository`/`WritingLoopAuditRepository` Protocol + in-memory + Mongo에
+    `list_all()`, 서비스에 `list_all_calls()`/`list_all_runs()`.
+  - **nullable `project_id`가 아니라 별도 메서드**로 했다. `list_for_project(None)`이 전
+    project를 반환하는 형태였다면 None이 실수로 흘러 들어가는 순간 조용히 경계를 넘는다.
+  - Mongo 두 컬렉션에 `created_at` 단독 index를 더했다(`*_by_created`). 기존 복합
+    `(project_id, created_at)` index는 project 없는 정렬을 태우지 못하고, 미색인 정렬은
+    컬렉션이 커지면 32MB sort buffer 초과로 **실패**한다.
+  - loop 감사도 전역 조회를 받는다. 빈 목록을 넘겨 `loop`를 채우면 `runs_considered=0`이
+    되는데, 계약이 그 값을 "잰 적 없음"으로 정의하므로 rollup이 켜진 배포에서 거짓이 된다.
+- **endpoint(`main.py`)**
+  - `GET /admin/observability/kpi`, `responses=_ERRORS_ADMIN`(401·403·503),
+    `dependencies=_REQUIRE_ADMIN`. per-project read-out과 달리 **404를 선언하지 않는다** —
+    해석하는 project가 없으므로 없을 것도 없다.
+  - `AdminObservabilityKpiResponse`는 별도 model이다. 한 model로 합치면 항상 존재하는
+    `project_id`를 nullable로 만들어야 하고, 그 순간 per-project 계약이 느슨해진다.
+    `sites` 행 타입(`ObservabilityKpiSitePayload`)은 두 응답이 **공유**한다.
+- **회귀 신규 19 / subtest +13**
+  - `GlobalAggregationTest` 8: 전 project fold · **같은 `correlation_id`가 두 project에 있으면
+    한 워크플로가 아니다**(under-strict) · **같은 project 안의 2건은 여전히 센다**(over-strict) ·
+    토큰 분모 · 표본 0 → null · 진짜 0.0 도달 · loop-only project도 분모에 포함 · 중복 미가산.
+  - `AdminKpiEndpointTest` 5: payload 전 필드 · **관리자가 소유하지 않은 project의 레코드까지
+    센다**(이 endpoint의 존재 이유) · 빈 배포 · 200 model `$ref` · site 행 타입 공유.
+    이 클래스는 **override 없는 실 앱**을 구동한다 — `tests/auth_support.py`는 dependency 두
+    개만 해석하고 `require_admin_user`는 거기 없으므로, 실 관리자 세션 외에는 들어갈 길이 없다.
+  - 저장소 4건(in-memory·Mongo × 감사 2종): `list_all`이 project 경계를 넘고 정렬을 유지 ·
+    빈 상태 · fake-collection 왕복 · index 2종 이름 고정.
+- **문서**: 정본 `v1.7.57`(변경이력 + 본문 §"LLM 파이프라인 관측(KPI)"에 전역 read-out 조항과
+  버킷 키 조항, §H3 403 행 `/admin/*` 3→4개), `CHANGELOG.md`, `HANDOFF.md`.
+
+### Issues found
+
+- **문제**: 전역 집계에서 `multi_call_correlations`가 일어나지 않은 repair를 셀 수 있었다.
+  **원인**: 버킷 키가 `correlation_id` 단독이었다. 그 값은 호출자가 준 `request_id`·
+  `idempotency_key`이므로 서로 다른 project가 **같은 문자열을 쓸 수 있다** — per-project
+  집계에서는 모든 행이 이미 같은 project라 드러나지 않지만, 전역에서는 두 project의 1회
+  호출이 한 워크플로 2건으로 접힌다. 계약이 방어하는 오독 3종 중 하나가 입력을 넓히는
+  것만으로 스스로 무너지는 자리였다(브리프 §5의 "전역 KPI는 `project_id` 축을 잃지 않아야
+  한다"가 가리키는 지점).
+  **해결**: 키를 `(project_id, correlation_id)`로 바꾸고 양방향으로 잠갔다 — 두 project의
+  같은 id는 별개(under-strict), 한 project 안의 2건은 여전히 1건의 multi-call(over-strict).
+  **결과**: per-project 집계 결과는 비트 단위로 불변이고(모든 행이 같은 project), 전역에서만
+  달라진다. 뮤테이션 2종으로 양방향 확인.
+- **문제**: `/admin/observability/kpi`가 두 개의 exact-set lock list에 동시에 걸린다
+  (`AdminErrorContractDeclarationTest`는 `/admin/` 접두, `KpiErrorContractDeclarationTest`는
+  `/observability/` 포함으로 폐쇄를 주장한다).
+  **원인**: 두 track의 폐쇄 가드가 경로 패턴으로 정의돼 있고 이 경로가 둘 다 만족한다.
+  **해결**: 상태 집합이 관리자 계열(401·403·503)이므로 **관리자 track이 소유**하고, 관측
+  track의 폐쇄 가드는 개별 나열이 아니라 **규칙**으로 `/admin/`을 제외한다. 새 관리자 관측
+  endpoint가 생겨도 유지 대상이 늘지 않는다.
+  **결과**: 한 operation을 두 exact-set이 소유해 서로 어긋나는 구조를 만들지 않았다.
+
+### Decisions
+
+- **per-project 분해는 전역 응답에 넣지 않았다.** 넣으면 관리자에게 project 식별자를 노출하게
+  되는데, 그것은 5-b(전 프로젝트 목록)이고 F1=C의 하위 결정 C-1~C-5 뒤에 오는 슬라이스다.
+  전역 KPI가 그 문을 먼저 열면 아직 정해지지 않은 경계를 구현자가 정하는 일이 된다.
+  대신 `projects_considered`로 **project 축은 분모의 형태로만** 남겼다 — 이 절의 다른 반직관
+  수치가 전부 분모를 동반하는 것과 같은 방식이고, 어떤 project도 이름 짓지 않는다.
+- **전역 조회는 별도 메서드**(위 "Completed work" 참조). nullable 인자보다 한 줄 길지만,
+  경계를 넘는 호출이 호출부에서 눈에 보인다.
+- **오독 방어 3종을 "성립할 것"으로 두지 않고 전역 입력으로 다시 구동했다.** 셋 중 둘은
+  코드 공유만으로 성립했지만 하나(`multi_call_correlations`)는 성립하지 않았고, 구동하지
+  않았다면 green인 채로 틀린 숫자를 냈을 자리였다.
+
+### Verification
+
+- 뮤테이션 5종(전수 기재 — 각 뮤테이션은 해당 셀만 물었다):
+  1. 버킷 키에서 project 제거 → 전역 2셀(`test_the_same_correlation_id_in_two_projects_is_not_one_workflow`
+     + 과분할 셀) + endpoint payload 셀 실패.
+  2. 버킷 키를 `(project, call_id)`로 과분할 → per-project `MultiCallCorrelationTest` 1셀 +
+     per-project endpoint payload + 전역 over-strict 셀 실패.
+  3. `_REQUIRE_ADMIN`을 `_REQUIRE_AUTH`로 교체 → boundary matrix 4셀 실패(tier 분할·결합
+     불변식·비관리자 403 전수·소유권 선언 대조).
+  4. endpoint가 `loop_runs=()` → 전역 payload 셀 실패.
+  5. 관측 track 폐쇄 가드에서 `/admin/` 제외 규칙 제거 →
+     `KpiErrorContractDeclarationTest::test_the_whole_observability_track_is_declared` 실패.
+     이 규칙이 실제로 load-bearing임을 읽기가 아니라 구동으로 확인한 것이다.
+- 프론트: `gen:api` 재생성(`schema.d.ts` +74줄, additive), `tsc --noEmit` 통과, build 성공
+  (진입 404.87 kB · 관측 lazy 385.71 kB로 무변), `217 passed / 14 files`.
+  (첫 vitest 실행에서 1건이 실패했으나 동일 커밋에서 두 번 재실행해 모두 217 통과 — 재현되지
+  않는 flake이며 이 슬라이스의 변경은 `schema.d.ts` additive뿐이다.)
+- 백엔드 전량(test-mongo ON): `1700 passed / 1 skipped / 1468 subtests` (870s).
+  종전 기준선 `1681 / 1 / 1455` 대비 **+19 passed / +13 subtests**이고 설명되지 않는 증감은 0이다.
+  - +19 = 이 슬라이스의 신규 테스트 함수 수와 정확히 일치(전역 집계 8 · 관리자 endpoint 5 ·
+    저장소 6). 영향 모듈만 따로 재보아도 250→231(stash 전후)로 같은 델타다.
+  - +13 = 새 operation 1개가 기존 전수 가드를 지나며 생긴 칸 11 + 신규 subTest 2.
+    (인증 경계 3 · 소유권 선언 대조 1 · 결합 매트릭스 3 · 관리자 H3 lock list 4)
+
+### Next steps
+
+- **5-b·5-d는 여전히 오너 결정 대기**다(브리프 §7 C-1~C-6). 5-c는 그 결정에 의존하지 않으므로
+  여기서 닫힌다.
+- 이후 D8-6 영구 삭제, D8-7 Mongo·ES 인프라 인증.
+- 관리자 화면(5-d)이 생기면 이 endpoint가 첫 소비자가 된다. 지금은 프론트 소비자가 없고
+  `schema.d.ts`에 타입만 additive로 들어가 있다.
+
+### 독립 검증 후속 보강 (D8-5c, 같은 슬라이스)
+
+독립 검증 `docs/verifications/2026-07-28/auth_d8_5c_global_kpi.md`는 **합격(차단 0건)**이었고
+비차단 3건을 남겼다. 검증자는 in-process 뮤테이션 탐침(실소스 무변)으로 버킷 키 양방향을 독립
+재현했고, 전량 회귀 `1700 / 1 / 1468`과 delta 회계(신규 19)를 재도출해 주장과 일치시켰다.
+
+- **H-1(기록 정확성) — 실제로는 내 기록이 틀렸고, 고치는 김에 다섯 번째를 구동했다.** work log에
+  "뮤테이션 5종"이라 적고 4종만 상술했는데, 실제로 돌린 것도 4종이었다(검증자는 관측 track
+  `/admin/` 제외 규칙 뮤테이션을 다섯 번째로 정합 해석해 카운트를 살려 줬지만, 그것은 검증자가
+  **읽기로** 도출한 것이지 누가 구동한 것이 아니었다). 숫자를 4로 낮추는 대신 **그 다섯 번째를
+  실제로 돌렸다** — 제외 규칙을 지우면
+  `KpiErrorContractDeclarationTest::test_the_whole_observability_track_is_declared`가 실패한다.
+  이제 "5종"이 사실이고 다섯 개가 전부 prose에 있으며, 검증자가 "읽기로 입증"이라고 적은 칸이
+  구동으로 잠겼다.
+- **H-2(미래 부채) — 가드를 추가하지 않고 이유를 코드에 적었다.** `projects_considered`가 `None`
+  `project_id`를 한 project로 셀 수 있다는 지적은 맞지만, 그 입력은 **오늘 도달 불가능**하다:
+  `StoredLlmCall.project_id`는 `str`이고 `correlation_id`만 `str | None`이며([`llm_call_audit.py:108`](services/application/app/observability/llm_call_audit.py#L108)·[`:113`](services/application/app/observability/llm_call_audit.py#L113)),
+  Mongo 매퍼도 `doc["project_id"]`(없으면 KeyError)와 `doc.get("correlation_id")`(None 허용)로
+  갈라져 있다([`llm_call_audit_mongo.py:68`](services/application/app/observability/llm_call_audit_mongo.py#L68)·[`:70`](services/application/app/observability/llm_call_audit_mongo.py#L70)).
+  즉 **가드의 비대칭은 레코드 타입의 비대칭을 그대로 반영한 것**이고, 지금 가드를 넣으면 도달
+  불가능한 시나리오의 에러 처리가 된다(작업 규칙 §2). 대신 `_rows_per_correlation` 주석에 그
+  근거와 **"그 필드가 nullable이 되는 순간이 가드를 넣을 시점"**을 적어, 다음 독자가 같은 지적을
+  다시 하거나 반대로 조용히 넘기지 않게 했다. 코드 동작 무변(주석만).
+- **H-3(재현 불가 flake)**: 검증자도 vitest 217 passed로 재현하지 못했다. 기록은 이미 정확하므로
+  조치 없음. 반복될 때만 추적한다.
+
+동작 변경은 없다(주석 1개 + 문서). 영향 모듈 재실행 `tests/test_observability_kpi.py 38 passed /
+15 subtests`로 확인했고, 검증자가 방금 `1700 / 1 / 1468`을 독립 재도출했으므로 전량 재실행은
+하지 않았다.

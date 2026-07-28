@@ -79,11 +79,15 @@ class MongoLlmCallAuditRepositoryTest(unittest.TestCase):
             _Client(self.collection), db_name="test"
         )
 
-    def test_installs_project_created_index_with_stable_name(self):
-        self.assertEqual(self.collection.indexes, [(
-            [("project_id", 1), ("created_at", -1)],
-            {"name": "llm_call_audits_by_project_created"},
-        )])
+    def test_installs_both_read_indexes_with_stable_names(self):
+        # D8-5c added the second one: the compound index cannot serve the
+        # project-less sort ``list_all`` issues, and an unindexed sort is a
+        # blocking in-memory sort that fails once the collection is large.
+        self.assertEqual(self.collection.indexes, [
+            ([("project_id", 1), ("created_at", -1)],
+             {"name": "llm_call_audits_by_project_created"}),
+            ([("created_at", -1)], {"name": "llm_call_audits_by_created"}),
+        ])
 
     def test_add_and_list_round_trip_newest_first(self):
         earlier = _call("llmc:a", minute=1)
@@ -105,6 +109,23 @@ class MongoLlmCallAuditRepositoryTest(unittest.TestCase):
             tuple(c.id for c in self.repo.list_for_project("p")),
             ("llmc:z", "llmc:e", "llmc:a"),
         )
+
+    def test_list_all_spans_projects_and_stays_newest_first(self):
+        # D8-5c. The project-scoped read above is what keeps a caller inside one
+        # project, so the global read is asserted to cross exactly that line —
+        # and to round-trip fields the same way, since it is the admin KPI's
+        # only source.
+        earlier = _call("llmc:a", minute=1)
+        later = _call("llmc:z", minute=5)
+        other = _call("llmc:other", project="other", minute=9)
+        for call in (earlier, later, other):
+            self.repo.add(call)
+
+        listed = self.repo.list_all()
+
+        self.assertEqual(tuple(c.id for c in listed),
+                         ("llmc:other", "llmc:z", "llmc:a"))
+        self.assertEqual(listed[0], other)
 
     def test_add_is_append_only_insert(self):
         self.repo.add(_call("llmc:a"))

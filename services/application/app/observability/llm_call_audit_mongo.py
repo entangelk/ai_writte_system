@@ -15,6 +15,13 @@ class MongoLlmCallAuditRepository:
             [("project_id", 1), ("created_at", DESCENDING)],
             name="llm_call_audits_by_project_created",
         )
+        # D8-5c: the compound index above cannot serve a project-less sort, and
+        # an unindexed one is a blocking in-memory sort that fails outright once
+        # the collection outgrows Mongo's 32MB sort buffer.
+        self._entries.create_index(
+            [("created_at", DESCENDING)],
+            name="llm_call_audits_by_created",
+        )
 
     @classmethod
     def from_uri(cls, uri: str, *, db_name: str = DEFAULT_DB_NAME):
@@ -27,9 +34,15 @@ class MongoLlmCallAuditRepository:
     def list_for_project(
         self, project_id: str
     ) -> tuple[StoredLlmCall, ...]:
-        return tuple(_call(doc) for doc in self._entries.find(
-            {"project_id": project_id},
-        ).sort([("created_at", DESCENDING), ("_id", DESCENDING)]))
+        return self._listed({"project_id": project_id})
+
+    def list_all(self) -> tuple[StoredLlmCall, ...]:
+        return self._listed({})
+
+    def _listed(self, query: dict) -> tuple[StoredLlmCall, ...]:
+        return tuple(_call(doc) for doc in self._entries.find(query).sort(
+            [("created_at", DESCENDING), ("_id", DESCENDING)]
+        ))
 
 
 def _doc(call: StoredLlmCall) -> dict:

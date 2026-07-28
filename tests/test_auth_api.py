@@ -672,6 +672,10 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         ("/admin/users", "get"),
         ("/admin/users", "post"),
         ("/admin/users/{user_id}/deactivate", "post"),
+        # D8-5c. Aggregate counts over every project's LLM-call audit — which is
+        # why it sits in this tier rather than the project one: it names no
+        # project and reads no project's content.
+        ("/admin/observability/kpi", "get"),
     }
 
     def setUp(self) -> None:
@@ -734,7 +738,7 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         self.assertEqual(by_tier["auth"], set(self.AUTH_ONLY))
         self.assertEqual(by_tier["admin"], self.ADMIN)
         self.assertEqual(len(by_tier["project"]), 59)
-        self.assertEqual(len(tiers), 68)
+        self.assertEqual(len(tiers), 69)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:

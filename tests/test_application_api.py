@@ -2249,6 +2249,9 @@ class AdminErrorContractDeclarationTest(unittest.TestCase):
         ("/admin/users", "post"): {"400", "401", "403", "409", "503"},
         ("/admin/users/{user_id}/deactivate", "post"):
             {"401", "403", "404", "409", "503"},
+        # D8-5c. No 404: it looks nothing up, so there is nothing to be missing —
+        # the per-project KPI declares one only because it resolves a project.
+        ("/admin/observability/kpi", "get"): {"401", "403", "503"},
     }
 
     def setUp(self):
@@ -2259,7 +2262,7 @@ class AdminErrorContractDeclarationTest(unittest.TestCase):
         return {code for code in responses if code not in ("200", "422")}
 
     def test_declared_error_statuses_match_the_lock_list(self):
-        self.assertEqual(len(self.EXPECTED), 3)
+        self.assertEqual(len(self.EXPECTED), 4)
         for (path, method), expected in self.EXPECTED.items():
             with self.subTest(path=path, method=method):
                 self.assertEqual(self._declared(path, method), expected)

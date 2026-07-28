@@ -153,7 +153,10 @@ from services.application.app.observability.llm_call_audit import (
     LlmCallSite,
     gate_quality_score,
 )
-from services.application.app.observability.kpi import aggregate_kpi
+from services.application.app.observability.kpi import (
+    aggregate_global_kpi,
+    aggregate_kpi,
+)
 from services.application.app.observability.llm_call_scope import (
     ObservedProvider,
     llm_call_scope,
@@ -1939,6 +1942,22 @@ class ObservabilityKpiResponse(BaseModel):
     loop: ObservabilityKpiLoopPayload
 
 
+class AdminObservabilityKpiResponse(BaseModel):
+    # D8-5c. Same four sections as the per-project read-out, and deliberately a
+    # separate model: the two differ in exactly one field, and merging them would
+    # force ``project_id`` to be nullable on a payload where it is always present.
+    #
+    # ``projects_considered`` replaces it — how many projects contributed a
+    # record. It is the project axis this fold would otherwise lose, reported the
+    # way every other counter-intuitive number here is (with its denominator),
+    # and it names no project: which projects exist is the admin projects slice.
+    projects_considered: int
+    totals: ObservabilityKpiTotalsPayload
+    sites: list[ObservabilityKpiSitePayload]
+    gate: ObservabilityKpiGatePayload
+    loop: ObservabilityKpiLoopPayload
+
+
 class WritingAcceptRequest(BaseModel):
     request_id: str
     draft_id: str
@@ -2324,6 +2343,26 @@ def create_app(
         except LastActiveAdmin as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return _admin_user_payload(user)
+
+    @app.get("/admin/observability/kpi",
+             response_model=AdminObservabilityKpiResponse,
+             responses=_ERRORS_ADMIN, dependencies=_REQUIRE_ADMIN)
+    async def admin_observability_kpi_endpoint() -> dict[str, object]:
+        # D8-5c: the deployment-wide read-out. Pure aggregation, like its
+        # per-project sibling — no provider call, no scope. No 404: unlike the
+        # project route there is nothing to look up, and no 403 for ownership
+        # either, because it reads counts rather than any project's content.
+        kpi = aggregate_global_kpi(
+            calls=llm_call_audit.list_all_calls(),
+            loop_runs=writing_loop_audit.list_all_runs(),
+        )
+        return {
+            "projects_considered": kpi.projects_considered,
+            "totals": asdict(kpi.totals),
+            "sites": [asdict(site) for site in kpi.sites],
+            "gate": asdict(kpi.gate),
+            "loop": asdict(kpi.loop),
+        }
 
     def _project_payload(project) -> dict[str, object]:
         return {"id": project.id, "name": project.name, "archived": project.archived}

@@ -21,6 +21,11 @@ own denominators (owner decision 2026-07-26, brief
 - **The gate quality score does not cover every gate call** (SoT v1.7.47 known
   gap): calls made inside the revise loop carry no decision, so
   ``gate.scored_calls`` is the average's real denominator.
+
+D8-5c adds the deployment-wide fold on top of the same rules. It is the same
+code path, not a parallel one, because all three rules have to survive widening
+the input — and one of them only survives if the aggregation keeps the project
+axis inside the correlation key (see ``_rows_per_correlation``).
 """
 
 from __future__ import annotations
@@ -117,6 +122,26 @@ class ObservabilityKpi:
     loop: LoopKpi
 
 
+@dataclass(frozen=True, slots=True)
+class GlobalObservabilityKpi:
+    """The same fold, over every project's records (D8-5c).
+
+    Deliberately not a per-project breakdown: this is the deployment-wide
+    read-out, and listing which projects exist is the admin *projects* slice
+    (5-b), still behind the owner decisions F1=C opened. ``projects_considered``
+    keeps the project axis present as a denominator — "this number came from N
+    projects" — without naming any of them, which is the same line the admin
+    boundary already draws (an admin sees accounts and aggregates, not project
+    content).
+    """
+
+    projects_considered: int
+    totals: TotalsKpi
+    sites: tuple[SiteKpi, ...]
+    gate: GateKpi
+    loop: LoopKpi
+
+
 def aggregate_kpi(
     *,
     project_id: str,
@@ -124,19 +149,49 @@ def aggregate_kpi(
     loop_runs: Sequence[StoredWritingLoopRun],
 ) -> ObservabilityKpi:
     """Fold the audit trails into the KPI read-model."""
-    return ObservabilityKpi(
-        project_id=project_id,
-        totals=_totals(calls),
-        sites=tuple(
+    return ObservabilityKpi(project_id=project_id, **_fold(calls, loop_runs))
+
+
+def aggregate_global_kpi(
+    *,
+    calls: Sequence[StoredLlmCall],
+    loop_runs: Sequence[StoredWritingLoopRun],
+) -> GlobalObservabilityKpi:
+    """The deployment-wide fold — same rules, wider input (D8-5c).
+
+    Shares ``_fold`` with the per-project aggregation rather than restating it,
+    so the three counter-intuitive rules the contract fixes (denominators
+    alongside every rate, ``None`` over zero samples, ``multi_call_correlations``
+    is not a repair count) hold globally by construction instead of by a second
+    implementation that has to be kept in step.
+    """
+    return GlobalObservabilityKpi(
+        # Records are the only source: a project that never called an LLM is not
+        # part of this measurement, and counting it would dilute every per-call
+        # number with projects that contributed no calls.
+        projects_considered=len(
+            {call.project_id for call in calls}
+            | {run.project_id for run in loop_runs}
+        ),
+        **_fold(calls, loop_runs),
+    )
+
+
+def _fold(
+    calls: Sequence[StoredLlmCall], loop_runs: Sequence[StoredWritingLoopRun]
+) -> dict[str, object]:
+    return {
+        "totals": _totals(calls),
+        "sites": tuple(
             _site_kpi(site, [c for c in calls if c.call_site == site])
             # Sorted by name, and only sites that actually made a call: a
             # dashboard iterating rows should not have to filter out seven rows
             # of zeros, and the order must not depend on insertion.
             for site in sorted({call.call_site for call in calls})
         ),
-        gate=_gate(calls),
-        loop=_loop(loop_runs),
-    )
+        "gate": _gate(calls),
+        "loop": _loop(loop_runs),
+    }
 
 
 def _totals(calls: Sequence[StoredLlmCall]) -> TotalsKpi:
@@ -175,15 +230,33 @@ def _site_kpi(call_site: str, calls: Sequence[StoredLlmCall]) -> SiteKpi:
     )
 
 
-def _rows_per_correlation(calls: Iterable[StoredLlmCall]) -> dict[str, int]:
+def _rows_per_correlation(
+    calls: Iterable[StoredLlmCall],
+) -> dict[tuple[str, str], int]:
     # Rows with no correlation_id are skipped rather than bucketed together:
     # they cannot be attributed to a workflow, and lumping them into one bucket
     # would invent a workflow that made many calls.
-    counts: dict[str, int] = {}
+    #
+    # Keyed by ``project_id`` as well, which is invisible per project (every row
+    # already shares one) and load-bearing globally: correlation ids are the
+    # caller's own ``request_id``/``idempotency_key``, so two projects can and do
+    # use the same string. Without the project in the key, one call in each of
+    # two projects would fold into a single two-row workflow and be reported as a
+    # repair that never happened.
+    #
+    # The asymmetry — ``correlation_id`` is skipped when absent, ``project_id``
+    # is not checked — mirrors the record: ``correlation_id`` is ``str | None``
+    # and ``project_id`` is ``str`` (``llm_call_audit.py``; the Mongo mapper
+    # reads ``doc["project_id"]`` but ``doc.get("correlation_id")``). A guard
+    # here would be unreachable today; the moment that field becomes nullable is
+    # the moment to add one, because a ``None`` bucket would distort the
+    # denominator rather than merely skip a row.
+    counts: dict[tuple[str, str], int] = {}
     for call in calls:
         if call.correlation_id is None:
             continue
-        counts[call.correlation_id] = counts.get(call.correlation_id, 0) + 1
+        key = (call.project_id, call.correlation_id)
+        counts[key] = counts.get(key, 0) + 1
     return counts
 
 

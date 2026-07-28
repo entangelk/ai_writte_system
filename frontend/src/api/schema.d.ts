@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/admin/observability/kpi": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin Observability Kpi Endpoint */
+        get: operations["admin_observability_kpi_endpoint_admin_observability_kpi_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/users": {
         parameters: {
             query?: never;
@@ -1004,6 +1021,16 @@ export interface components {
             /** Version Number */
             version_number: number;
         };
+        /** AdminObservabilityKpiResponse */
+        AdminObservabilityKpiResponse: {
+            gate: components["schemas"]["ObservabilityKpiGatePayload"];
+            loop: components["schemas"]["ObservabilityKpiLoopPayload"];
+            /** Projects Considered */
+            projects_considered: number;
+            /** Sites */
+            sites: components["schemas"]["ObservabilityKpiSitePayload"][];
+            totals: components["schemas"]["ObservabilityKpiTotalsPayload"];
+        };
         /** AdminUserListResponse */
         AdminUserListResponse: {
             /** Users */
@@ -1982,6 +2009,53 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    admin_observability_kpi_endpoint_admin_observability_kpi_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminObservabilityKpiResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
     list_users_admin_users_get: {
         parameters: {
             query?: never;

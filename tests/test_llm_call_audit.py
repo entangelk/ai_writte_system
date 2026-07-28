@@ -164,6 +164,30 @@ class LlmCallAuditServiceTest(unittest.TestCase):
         self.assertEqual([c.correlation_id for c in p1], ["c", "a"])
         self.assertEqual([c.correlation_id for c in service.list_calls("p2")], ["b"])
 
+    def test_list_all_spans_projects_and_stays_newest_first(self):
+        # D8-5c: the admin KPI's source. Both halves matter — it must cross the
+        # project boundary the sibling above enforces, and it must keep the
+        # ordering, because "newest first" is what every other read here means.
+        _repo, service = self._service(times=[
+            datetime(2026, 7, 24, 10, 0, tzinfo=UTC),
+            datetime(2026, 7, 24, 11, 0, tzinfo=UTC),
+            datetime(2026, 7, 24, 12, 0, tzinfo=UTC),
+        ])
+        for project, correlation in (("p1", "a"), ("p2", "b"), ("p1", "c")):
+            service.record(
+                project_id=project, call_site=LlmCallSite.WRITING_GATE,
+                correlation_id=correlation, outcome=LlmCallOutcome.SUCCESS,
+            )
+
+        listed = service.list_all_calls()
+
+        self.assertEqual([c.correlation_id for c in listed], ["c", "b", "a"])
+        self.assertEqual({c.project_id for c in listed}, {"p1", "p2"})
+
+    def test_list_all_is_empty_before_anything_is_recorded(self):
+        _repo, service = self._service()
+        self.assertEqual(service.list_all_calls(), ())
+
 
 if __name__ == "__main__":
     unittest.main()

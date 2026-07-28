@@ -18,8 +18,20 @@ from datetime import UTC, datetime
 
 # D8-3a: authenticated client — these suites drive domain behaviour, not the
 # session boundary (that is tests/test_auth_api.py, which uses the real one).
+# The admin read-out below is the exception: the seam does not resolve
+# ``require_admin_user``, so that one drives a real app with a real session.
+from fastapi.testclient import TestClient as _RealTestClient
+
 from tests.auth_support import AuthenticatedTestClient as TestClient
 
+from services.application.app.auth.sessions import (
+    InMemorySessionRepository,
+    SessionService,
+)
+from services.application.app.auth.users import (
+    InMemoryUserRepository,
+    UserService,
+)
 from services.application.app.core_sot.service import (
     CoreSotService,
     InMemoryCoreSotRepository,
@@ -29,6 +41,7 @@ from services.application.app.observability.kpi import (
     NON_CONVERGED_LOOP_STATUSES,
     NOT_A_LOOP_ATTEMPT,
     TOKEN_COUNTED_OUTCOMES,
+    aggregate_global_kpi,
     aggregate_kpi,
 )
 from services.application.app.observability.llm_call_audit import (
@@ -46,6 +59,16 @@ from services.application.app.writing.loop_audit import (
 from services.application.app.writing.revise_gate import WritingLoopStatus
 
 
+class _FakeHasher:
+    """Argon2id is deliberately slow; these tests are not about hashing."""
+
+    def hash(self, password: str) -> str:
+        return "H:" + password
+
+    def verify(self, stored_hash: str, password: str) -> bool:
+        return stored_hash == "H:" + password
+
+
 def _call(
     call_site=LlmCallSite.WRITING_GATE, *, outcome=LlmCallOutcome.SUCCESS,
     correlation_id="wr-1", tokens=10, latency_ms=100, score=None,
@@ -60,9 +83,9 @@ def _call(
     )
 
 
-def _run(status, *, run_id="run-1"):
+def _run(status, *, run_id="run-1", project_id="p1"):
     return StoredWritingLoopRun(
-        id=run_id, project_id="p1", request_id="wr-1",
+        id=run_id, project_id=project_id, request_id="wr-1",
         loop_status=status.value, revision_rounds=1, retrieval_rounds=0,
         gate_evaluations=1, error_type=None,
         trigger_finding_fingerprint="f", initial_candidate_hash="a",
@@ -74,6 +97,10 @@ def _run(status, *, run_id="run-1"):
 
 def _kpi(calls=(), runs=()):
     return aggregate_kpi(project_id="p1", calls=list(calls), loop_runs=list(runs))
+
+
+def _global_kpi(calls=(), runs=()):
+    return aggregate_global_kpi(calls=list(calls), loop_runs=list(runs))
 
 
 class TokenAggregationTest(unittest.TestCase):
@@ -342,6 +369,225 @@ def _replace_project(record, project_id):
     return replace(record, project_id=project_id)
 
 
+class GlobalAggregationTest(unittest.TestCase):
+    """D8-5c: the same fold, over every project's records.
+
+    The reason the global read-out reuses the aggregation instead of adding a
+    second one is that the three rules above have to survive the wider input —
+    so each is driven here against it rather than assumed from the per-project
+    suite. One of them does not survive by itself: correlation ids are the
+    caller's own request ids, so the bucket has to keep the project axis.
+    """
+
+    def test_every_project_is_folded_into_one_set_of_totals(self):
+        kpi = _global_kpi([
+            _call(project_id="p1", tokens=100, call_id="a"),
+            _call(project_id="p2", tokens=40, call_id="b"),
+        ])
+        self.assertEqual(kpi.totals.calls, 2)
+        self.assertEqual(kpi.totals.total_tokens, 140)
+        self.assertEqual(kpi.projects_considered, 2)
+
+    def test_the_same_correlation_id_in_two_projects_is_not_one_workflow(self):
+        # The cell that only exists once the input widens. ``correlation_id`` is
+        # the caller's own request_id/idempotency_key, so two projects can carry
+        # the same string; bucketing on it alone would report one call in each
+        # as a single two-call workflow — a repair that never happened.
+        kpi = _global_kpi([
+            _call(project_id="p1", correlation_id="wr-1", call_id="a"),
+            _call(project_id="p2", correlation_id="wr-1", call_id="b"),
+        ])
+        [site] = kpi.sites
+        self.assertEqual(site.correlations, 2)
+        self.assertEqual(site.multi_call_correlations, 0)
+
+    def test_a_second_call_within_one_project_is_still_counted(self):
+        # Over-strict half of the cell above: adding the project to the key must
+        # not split a genuine repair. Both directions are pinned because a key
+        # of (project, call_id) would satisfy the previous test and report zero
+        # multi-call workflows forever.
+        kpi = _global_kpi([
+            _call(project_id="p1", correlation_id="wr-1", call_id="a"),
+            _call(project_id="p1", correlation_id="wr-1", call_id="b"),
+            _call(project_id="p2", correlation_id="wr-1", call_id="c"),
+        ])
+        [site] = kpi.sites
+        self.assertEqual(site.correlations, 2)
+        self.assertEqual(site.multi_call_correlations, 1)
+
+    def test_token_totals_still_exclude_provider_errors(self):
+        kpi = _global_kpi([
+            _call(project_id="p1", tokens=100, call_id="a"),
+            _call(project_id="p2", outcome=LlmCallOutcome.PROVIDER_ERROR,
+                  tokens=0, call_id="b"),
+        ])
+        self.assertEqual(kpi.totals.total_tokens, 100)
+        self.assertEqual(kpi.totals.tokens_counted_from, 1)
+
+    def test_zero_samples_report_null_rates_not_zero(self):
+        kpi = _global_kpi()
+        self.assertEqual(kpi.projects_considered, 0)
+        self.assertEqual(kpi.totals.calls, 0)
+        self.assertEqual(kpi.sites, ())
+        self.assertIsNone(kpi.gate.avg_quality_score)
+        self.assertIsNone(kpi.loop.non_convergence_rate)
+
+    def test_real_zeroes_stay_reachable(self):
+        # Under-strict half of the above, for both rates at once: "never
+        # measured" must not swallow a measured zero just because the fold now
+        # spans projects.
+        kpi = _global_kpi(
+            [_call(LlmCallSite.WRITING_GATE, project_id="p1", score=0.0)],
+            [_run(WritingLoopStatus.PASS, project_id="p2")],
+        )
+        self.assertEqual(kpi.gate.avg_quality_score, 0.0)
+        self.assertEqual(kpi.loop.non_convergence_rate, 0.0)
+
+    def test_projects_considered_counts_loop_only_projects_too(self):
+        # The loop rollup is opt-in per deployment, but a project whose only
+        # record is a loop run did contribute to the numbers below it, so it
+        # belongs in the denominator that says where they came from.
+        kpi = _global_kpi(
+            [_call(project_id="p1", call_id="a")],
+            [_run(WritingLoopStatus.PASS, project_id="p2")],
+        )
+        self.assertEqual(kpi.projects_considered, 2)
+
+    def test_projects_considered_does_not_double_count_one_project(self):
+        kpi = _global_kpi(
+            [_call(project_id="p1", call_id="a"),
+             _call(project_id="p1", call_id="b")],
+            [_run(WritingLoopStatus.PASS, project_id="p1")],
+        )
+        self.assertEqual(kpi.projects_considered, 1)
+
+
+class AdminKpiEndpointTest(unittest.TestCase):
+    """``GET /admin/observability/kpi`` — the deployment-wide read-out (D8-5c).
+
+    Driven through a **real, non-overridden app**: the test seam in
+    ``tests/auth_support.py`` resolves exactly two dependencies and
+    ``require_admin_user`` is deliberately not one of them, so the only way in is
+    a real admin session. The boundary itself (non-admin → 403, sessionless →
+    401) is audited in ``CombinedBoundaryMatrixTest``; this class is about what
+    the endpoint answers once an admin is through it.
+    """
+
+    def _client(self, calls=(), runs=()):
+        audit = LlmCallAuditService(InMemoryLlmCallAuditRepository())
+        loop_audit = WritingLoopAuditService(InMemoryWritingLoopAuditRepository())
+        users = UserService(InMemoryUserRepository(), hasher=_FakeHasher())
+        users.create_user(username="root", password="pw", is_admin=True)
+        app = create_app(
+            CoreSotService(InMemoryCoreSotRepository()),
+            user_service=users,
+            session_service=SessionService(InMemorySessionRepository()),
+            llm_call_audit_service=audit,
+            writing_loop_audit_service=loop_audit,
+        )
+        # https base_url: the session cookie is Secure by default and an http
+        # client drops it silently, which would fail this suite as a 401.
+        client = _RealTestClient(app, base_url="https://testserver")
+        client.post("/auth/login", json={"username": "root", "password": "pw"})
+        for call in calls:
+            audit._repo.add(call)  # noqa: SLF001 — seeding the read-model
+        for run in runs:
+            loop_audit._repo.add(run)  # noqa: SLF001
+        return client
+
+    def test_payload_shape_is_the_global_contract(self):
+        client = self._client(
+            calls=[
+                _call(LlmCallSite.WRITING_GATE, project_id="p1", score=1.0,
+                      tokens=100, latency_ms=200, call_id="a"),
+                _call(LlmCallSite.WRITING_GATE, project_id="p2",
+                      outcome=LlmCallOutcome.PROVIDER_ERROR, tokens=0,
+                      latency_ms=400, call_id="b"),
+            ],
+            runs=[_run(WritingLoopStatus.BUDGET_EXHAUSTED, project_id="p1")],
+        )
+
+        response = client.get("/admin/observability/kpi")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        # ``projects_considered`` where the per-project payload carries
+        # ``project_id`` — and no project named anywhere, which is the same line
+        # the admin boundary draws around project content.
+        self.assertEqual(
+            set(body),
+            {"projects_considered", "totals", "sites", "gate", "loop"},
+        )
+        self.assertEqual(body["projects_considered"], 2)
+        self.assertEqual(body["totals"], {
+            "calls": 2, "success": 1, "provider_error": 1, "parse_error": 0,
+            "total_tokens": 100, "tokens_counted_from": 1,
+        })
+        self.assertEqual(body["sites"], [{
+            "call_site": "writing_gate", "calls": 2, "success": 1,
+            "provider_error": 1, "parse_error": 0, "total_tokens": 100,
+            "tokens_counted_from": 1, "avg_latency_ms": 300,
+            "correlations": 2, "multi_call_correlations": 0,
+        }])
+        self.assertEqual(body["gate"], {"scored_calls": 1, "avg_quality_score": 1.0})
+        self.assertEqual(body["loop"],
+                         {"runs_considered": 1, "non_convergence_rate": 1.0})
+
+    def test_it_counts_records_of_projects_the_admin_does_not_own(self):
+        # The load-bearing difference from the per-project read-out, and the
+        # reason this endpoint exists: the admin owns nothing here, and the
+        # ownership boundary that answers 403 on every project route must not
+        # narrow this fold to the admin's own (empty) share.
+        client = self._client(calls=[
+            _call(project_id="p1", tokens=10, call_id="a"),
+            _call(project_id="p2", tokens=30, call_id="b"),
+        ])
+
+        body = client.get("/admin/observability/kpi").json()
+
+        self.assertEqual(body["totals"]["calls"], 2)
+        self.assertEqual(body["totals"]["total_tokens"], 40)
+        self.assertEqual(body["projects_considered"], 2)
+
+    def test_an_empty_deployment_reports_zeros_and_nulls_not_an_error(self):
+        response = self._client().get("/admin/observability/kpi")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["projects_considered"], 0)
+        self.assertEqual(body["totals"]["calls"], 0)
+        self.assertEqual(body["sites"], [])
+        self.assertIsNone(body["gate"]["avg_quality_score"])
+        self.assertIsNone(body["loop"]["non_convergence_rate"])
+
+    def test_the_success_body_is_a_declared_model_not_a_free_dict(self):
+        spec = create_app().openapi()
+        schema = (spec["paths"]["/admin/observability/kpi"]["get"]["responses"]
+                  ["200"]["content"]["application/json"]["schema"])
+        self.assertEqual(
+            schema.get("$ref"),
+            "#/components/schemas/AdminObservabilityKpiResponse",
+        )
+
+    def test_the_site_row_type_is_shared_with_the_per_project_read_out(self):
+        # Two payloads, one row type: a site field added for one and not the
+        # other would let the same number mean different things depending on
+        # which endpoint a reader asked.
+        spec = create_app().openapi()
+        rows = {
+            name: (spec["components"]["schemas"][name]["properties"]["sites"])
+            for name in ("ObservabilityKpiResponse",
+                         "AdminObservabilityKpiResponse")
+        }
+        for name, sites in rows.items():
+            with self.subTest(schema=name):
+                self.assertEqual(sites["type"], "array")
+                self.assertEqual(
+                    sites["items"]["$ref"],
+                    "#/components/schemas/ObservabilityKpiSitePayload",
+                )
+
+
 class KpiErrorContractDeclarationTest(unittest.TestCase):
     """H3 — the observability track's OpenAPI declaration.
 
@@ -366,10 +612,16 @@ class KpiErrorContractDeclarationTest(unittest.TestCase):
                 self.assertEqual(declared, expected)
 
     def test_the_whole_observability_track_is_declared(self):
+        # ``/admin/observability/*`` is excluded by rule, not by listing each
+        # one: those operations belong to the admin track's lock list
+        # (``AdminErrorContractDeclarationTest``), whose status set they share
+        # and whose closure guard already refuses an undeclared ``/admin/``
+        # path. One operation owned by two exact-set lock lists is how the two
+        # start to disagree.
         undeclared = {
             (path, method)
             for path, operations in self.spec["paths"].items()
-            if "/observability/" in path
+            if "/observability/" in path and not path.startswith("/admin/")
             for method in operations
             if (path, method) not in self.EXPECTED
         }

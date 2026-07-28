@@ -93,11 +93,14 @@ class MongoWritingLoopAuditRepositoryTest(unittest.TestCase):
             _Client(self.collection), db_name="test"
         )
 
-    def test_installs_project_created_index_with_stable_name(self):
-        self.assertEqual(self.collection.indexes, [(
-            [("project_id", 1), ("created_at", -1)],
-            {"name": "writing_loop_audits_by_project_created"},
-        )])
+    def test_installs_both_read_indexes_with_stable_names(self):
+        # D8-5c added the second one: the compound index cannot serve the
+        # project-less sort ``list_all`` issues for the global KPI.
+        self.assertEqual(self.collection.indexes, [
+            ([("project_id", 1), ("created_at", -1)],
+             {"name": "writing_loop_audits_by_project_created"}),
+            ([("created_at", -1)], {"name": "writing_loop_audits_by_created"}),
+        ])
 
     def test_add_get_and_list_round_trip_newest_first(self):
         earlier = _run("wla:a", minute=1)
@@ -121,6 +124,21 @@ class MongoWritingLoopAuditRepositoryTest(unittest.TestCase):
             tuple(run.id for run in self.repo.list_for_project("other")),
             ("wla:other",),
         )
+
+    def test_list_all_spans_projects_and_stays_newest_first(self):
+        # D8-5c. Crosses exactly the line the project-scoped read enforces, and
+        # round-trips the same way — it is the global KPI's only source.
+        earlier = _run("wla:a", minute=1)
+        later = _run("wla:z", minute=5)
+        other = _run("wla:other", project="other", minute=9)
+        for run in (earlier, later, other):
+            self.repo.add(run)
+
+        listed = self.repo.list_all()
+
+        self.assertEqual(tuple(run.id for run in listed),
+                         ("wla:other", "wla:z", "wla:a"))
+        self.assertEqual(listed[0], other)
 
     def test_add_is_append_only_insert(self):
         self.repo.add(_run("wla:a"))

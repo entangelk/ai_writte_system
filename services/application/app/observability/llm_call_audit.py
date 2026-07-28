@@ -30,7 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Callable, Protocol
+from typing import Callable, Iterable, Protocol
 from uuid import uuid4
 
 from services.application.app.writing.models import (
@@ -129,6 +129,10 @@ class LlmCallAuditRepository(Protocol):
     def list_for_project(
         self, project_id: str
     ) -> tuple[StoredLlmCall, ...]: ...
+    # D8-5c: the deployment-wide read, for the admin KPI. A separate method
+    # rather than a nullable ``project_id`` on the one above, so a caller cannot
+    # reach every project's records by passing None through by accident.
+    def list_all(self) -> tuple[StoredLlmCall, ...]: ...
 
 
 class InMemoryLlmCallAuditRepository:
@@ -141,12 +145,13 @@ class InMemoryLlmCallAuditRepository:
     def list_for_project(
         self, project_id: str
     ) -> tuple[StoredLlmCall, ...]:
-        return tuple(sorted(
-            (call for call in self.entries.values()
-             if call.project_id == project_id),
-            key=lambda call: (call.created_at, call.id),
-            reverse=True,
-        ))
+        return _newest_first(
+            call for call in self.entries.values()
+            if call.project_id == project_id
+        )
+
+    def list_all(self) -> tuple[StoredLlmCall, ...]:
+        return _newest_first(self.entries.values())
 
 
 class LlmCallAuditService:
@@ -186,3 +191,13 @@ class LlmCallAuditService:
 
     def list_calls(self, project_id: str) -> tuple[StoredLlmCall, ...]:
         return self._repo.list_for_project(project_id)
+
+    def list_all_calls(self) -> tuple[StoredLlmCall, ...]:
+        """Every project's records — the admin KPI's source (D8-5c)."""
+        return self._repo.list_all()
+
+
+def _newest_first(calls: Iterable[StoredLlmCall]) -> tuple[StoredLlmCall, ...]:
+    return tuple(sorted(
+        calls, key=lambda call: (call.created_at, call.id), reverse=True
+    ))

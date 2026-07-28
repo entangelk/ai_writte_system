@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Callable, Protocol
+from typing import Callable, Iterable, Protocol
 from uuid import uuid4
 
 from services.application.app.writing.audit_hash import (
@@ -72,6 +72,11 @@ class WritingLoopAuditRepository(Protocol):
     def list_for_project(
         self, project_id: str
     ) -> tuple[StoredWritingLoopRun, ...]: ...
+    # D8-5c: the deployment-wide read. The global KPI reports non-convergence
+    # over a denominator, so it needs the runs themselves — passing no runs
+    # would report ``runs_considered: 0``, which the contract defines as "never
+    # measured" and would be a lie the moment one project has the rollup on.
+    def list_all(self) -> tuple[StoredWritingLoopRun, ...]: ...
 
 
 class InMemoryWritingLoopAuditRepository:
@@ -87,12 +92,21 @@ class InMemoryWritingLoopAuditRepository:
     def list_for_project(
         self, project_id: str
     ) -> tuple[StoredWritingLoopRun, ...]:
-        return tuple(sorted(
-            (run for run in self.entries.values()
-             if run.project_id == project_id),
-            key=lambda run: (run.created_at, run.id),
-            reverse=True,
-        ))
+        return _newest_first(
+            run for run in self.entries.values()
+            if run.project_id == project_id
+        )
+
+    def list_all(self) -> tuple[StoredWritingLoopRun, ...]:
+        return _newest_first(self.entries.values())
+
+
+def _newest_first(
+    runs: Iterable[StoredWritingLoopRun],
+) -> tuple[StoredWritingLoopRun, ...]:
+    return tuple(sorted(
+        runs, key=lambda run: (run.created_at, run.id), reverse=True
+    ))
 
 
 class WritingLoopAuditError(RuntimeError):
@@ -150,6 +164,10 @@ class WritingLoopAuditService:
 
     def list_runs(self, project_id: str) -> tuple[StoredWritingLoopRun, ...]:
         return self._repo.list_for_project(project_id)
+
+    def list_all_runs(self) -> tuple[StoredWritingLoopRun, ...]:
+        """Every project's runs — the admin KPI's source (D8-5c)."""
+        return self._repo.list_all()
 
     def get(
         self, *, project_id: str, run_id: str

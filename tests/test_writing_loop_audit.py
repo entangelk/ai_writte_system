@@ -178,6 +178,25 @@ class WritingLoopAuditServiceTest(unittest.TestCase):
         self.assertEqual(ids, ["wla:3", "wla:1"])  # desc by created_at
         self.assertEqual([r.id for r in service.list_runs("p2")], ["wla:2"])
 
+    def test_list_all_spans_projects_and_stays_newest_first(self):
+        # D8-5c: the global KPI needs the runs themselves, not a count — the
+        # non-convergence rate is reported over ``runs_considered``, so a fold
+        # that could not see other projects' runs would report "never measured"
+        # for a deployment that measured plenty.
+        service, _ = self._service(ids=["wla:1", "wla:2", "wla:3"])
+        self._record(service, project_id="p1")
+        self._record(service, project_id="p2")
+        self._record(service, project_id="p1")
+
+        listed = service.list_all_runs()
+
+        self.assertEqual([run.id for run in listed], ["wla:3", "wla:2", "wla:1"])
+        self.assertEqual({run.project_id for run in listed}, {"p1", "p2"})
+
+    def test_list_all_is_empty_before_anything_is_recorded(self):
+        service, _ = self._service()
+        self.assertEqual(service.list_all_runs(), ())
+
     def test_get_rejects_cross_project_and_missing(self):
         service, _ = self._service(ids=["wla:1"])
         self._record(service, project_id="p1")
