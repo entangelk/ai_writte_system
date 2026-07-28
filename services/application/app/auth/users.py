@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import secrets
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Callable, Protocol
 
@@ -27,12 +28,29 @@ class InvalidUserInput(AuthError):
     pass
 
 
+class UserNotFound(AuthError):
+    pass
+
+
+class LastActiveAdmin(AuthError):
+    """Refusing to deactivate the only remaining active admin (D8-5 F2=A).
+
+    The recovery path from an admin lockout is a container ``docker exec`` of
+    ``scripts/create_user.py``; one check here is far cheaper than that.
+    """
+
+
 class UserRepository(Protocol):
     def insert(self, user: User) -> None:
         """Persist a new user. Raises DuplicateUsername if the username exists."""
 
     def get_by_id(self, user_id: str) -> User | None: ...
     def get_by_username(self, username: str) -> User | None: ...
+    def list_all(self) -> tuple[User, ...]:
+        """Every user, oldest first. Admin-only surface (D8-5)."""
+
+    def set_active(self, user_id: str, *, is_active: bool) -> User | None:
+        """Flip the active flag and return the stored user, or None if unknown."""
 
 
 class InMemoryUserRepository:
@@ -52,6 +70,19 @@ class InMemoryUserRepository:
     def get_by_username(self, username: str) -> User | None:
         user_id = self._by_username.get(username)
         return self._by_id.get(user_id) if user_id is not None else None
+
+    def list_all(self) -> tuple[User, ...]:
+        return tuple(
+            sorted(self._by_id.values(), key=lambda user: (user.created_at, user.id))
+        )
+
+    def set_active(self, user_id: str, *, is_active: bool) -> User | None:
+        stored = self._by_id.get(user_id)
+        if stored is None:
+            return None
+        updated = replace(stored, is_active=is_active)
+        self._by_id[user_id] = updated
+        return updated
 
 
 class UserService:
@@ -90,6 +121,38 @@ class UserService:
 
     def get_by_id(self, user_id: str) -> User | None:
         return self._repo.get_by_id(user_id)
+
+    def list_users(self) -> tuple[User, ...]:
+        return self._repo.list_all()
+
+    def deactivate_user(self, user_id: str) -> User:
+        """Disable an account. Live sessions die with it.
+
+        No separate revocation step: ``current_user_or_none`` resolves the
+        session and then re-reads the user, so a cookie minted before this call
+        stops working on its next request. That property is why D2 chose server
+        sessions over JWT in the first place.
+        """
+        stored = self._repo.get_by_id(user_id)
+        if stored is None:
+            raise UserNotFound("user does not exist")
+        if stored.is_active and self._is_last_active_admin(stored):
+            # F2=A. Deliberately not "you cannot deactivate yourself": two admins
+            # disabling each other would walk past that check into the same
+            # lockout, so the invariant is about the *population*, not the caller.
+            raise LastActiveAdmin("cannot deactivate the last active admin")
+        updated = self._repo.set_active(user_id, is_active=False)
+        if updated is None:  # pragma: no cover - deleted between read and write
+            raise UserNotFound("user does not exist")
+        return updated
+
+    def _is_last_active_admin(self, candidate: User) -> bool:
+        if not candidate.is_admin:
+            return False
+        return not any(
+            other.id != candidate.id and other.is_admin and other.is_active
+            for other in self._repo.list_all()
+        )
 
     def authenticate(self, *, username: str, password: str) -> User | None:
         user = self._repo.get_by_username(username.strip())

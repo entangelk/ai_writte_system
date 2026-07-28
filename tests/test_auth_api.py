@@ -32,6 +32,7 @@ from services.application.app.core_sot.service import (
 )
 from services.application.app.main import (
     create_app,
+    require_admin_user,
     require_authenticated_user,
     require_project_owner,
 )
@@ -346,20 +347,33 @@ class ProjectAuthorizationTest(unittest.TestCase):
                     self.assertEqual(response.status_code, 403)
 
     def test_ownership_dependency_and_403_declaration_match_project_scope(self) -> None:
-        """Declaration guard in both directions: scoped routes only, no drift."""
+        """Declaration guard in both directions: scoped routes only, no drift.
+
+        D8-5 widened the *declaration* half: 403 now has two producers, the
+        ownership boundary and the admin boundary, so "declares 403" no longer
+        means "is project-scoped". The dependency half stayed exact — the
+        ownership dependency belongs on `{project_id}` routes and nowhere else,
+        which is the property this class exists to protect.
+        """
         spec = self.client.app.openapi()
         for route in self.client.app.routes:
             if not isinstance(route, APIRoute):
                 continue
             declared = [d.dependency for d in route.dependencies]
             ownership_guarded = require_project_owner in declared
+            admin_guarded = require_admin_user in declared
             expected = "{project_id}" in route.path
             for method in sorted(route.methods):
                 method = method.lower()
                 with self.subTest(path=route.path, method=method):
                     self.assertEqual(ownership_guarded, expected)
+                    # An admin route must never be project-scoped: the admin
+                    # surface deliberately does not reach project content.
+                    self.assertFalse(admin_guarded and expected)
                     responses = spec["paths"][route.path][method]["responses"]
-                    self.assertEqual("403" in responses, expected)
+                    self.assertEqual(
+                        "403" in responses, expected or admin_guarded
+                    )
 
 
 class AuthenticationBoundaryTest(unittest.TestCase):
@@ -484,6 +498,135 @@ class AuthenticationBoundaryTest(unittest.TestCase):
                 self.assertEqual("401" in declared, expects_401)
 
 
+class AdminUserApiTest(unittest.TestCase):
+    """D8-5 (D6=A): the minimal admin surface — list, create, deactivate.
+
+    The boundary itself is audited in ``CombinedBoundaryMatrixTest``; this class
+    is about what the endpoints *do* once an admin is through it.
+    """
+
+    def setUp(self) -> None:
+        self.client, self.users, _ = _client()
+        self.root = self.users.create_user(
+            username="root", password="pw789", is_admin=True
+        )
+        self.client.post(
+            "/auth/login", json={"username": "root", "password": "pw789"}
+        )
+
+    def test_list_returns_every_account_and_never_a_password_hash(self) -> None:
+        listed = self.client.get("/admin/users")
+
+        self.assertEqual(listed.status_code, 200)
+        users = listed.json()["users"]
+        self.assertEqual(
+            {u["username"] for u in users}, {"alice", "root"}
+        )
+        self.assertEqual(
+            set(users[0]), {"id", "username", "is_admin", "is_active"}
+        )
+        # Over-strict: the wire model is what keeps a hash from ever riding
+        # along, so assert the absence on the raw body rather than the parsed
+        # keys — a nested or renamed field would still be caught.
+        self.assertNotIn("password_hash", listed.text)
+        self.assertNotIn("H:pw123", listed.text)
+
+    def test_created_user_can_log_in_and_is_active(self) -> None:
+        created = self.client.post(
+            "/admin/users", json={"username": "carol", "password": "pw000"}
+        )
+
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(
+            created.json(),
+            {
+                "id": created.json()["id"], "username": "carol",
+                "is_admin": False, "is_active": True,
+            },
+        )
+        # The account is real, not just a row: it can actually log in.
+        login = self.client.post(
+            "/auth/login", json={"username": "carol", "password": "pw000"}
+        )
+        self.assertEqual(login.status_code, 200)
+
+    def test_duplicate_username_is_409_and_bad_input_is_400(self) -> None:
+        self.assertEqual(
+            self.client.post(
+                "/admin/users", json={"username": "alice", "password": "x"}
+            ).status_code,
+            409,
+        )
+        self.assertEqual(
+            self.client.post(
+                "/admin/users", json={"username": "   ", "password": "x"}
+            ).status_code,
+            400,
+        )
+
+    def test_deactivating_a_user_kills_their_live_session(self) -> None:
+        # The property D2 chose server sessions for. Alice logs in on her own
+        # client, the admin disables her, and her *existing* cookie stops
+        # working on the next request — no logout, no waiting for the TTL.
+        alice = TestClient(self.client.app, base_url="https://testserver")
+        alice.post("/auth/login", json={"username": "alice", "password": "pw123"})
+        self.assertEqual(alice.get("/auth/me").status_code, 200)
+
+        alice_id = alice.get("/auth/me").json()["id"]
+        response = self.client.post(f"/admin/users/{alice_id}/deactivate")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["is_active"])
+        self.assertEqual(alice.get("/auth/me").status_code, 401)
+        # And she cannot get a new one either.
+        self.assertEqual(
+            alice.post(
+                "/auth/login", json={"username": "alice", "password": "pw123"}
+            ).status_code,
+            401,
+        )
+
+    def test_deactivating_an_unknown_user_is_404(self) -> None:
+        self.assertEqual(
+            self.client.post("/admin/users/user:ghost/deactivate").status_code, 404
+        )
+
+    def test_the_last_active_admin_cannot_be_deactivated(self) -> None:
+        # F2=A. root is the only admin, so this would lock the deployment out of
+        # its own admin surface — recoverable only by exec-ing a script in the
+        # container.
+        response = self.client.post(f"/admin/users/{self.root.id}/deactivate")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.client.get("/admin/users").status_code, 200)
+
+    def test_an_admin_can_be_deactivated_once_another_admin_is_active(self) -> None:
+        # Over-strict half: the rule is about the population, not about admins
+        # being undeletable. With a second admin present the first one goes.
+        self.client.post(
+            "/admin/users",
+            json={"username": "root2", "password": "pw111", "is_admin": True},
+        )
+
+        response = self.client.post(f"/admin/users/{self.root.id}/deactivate")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["is_active"])
+
+    def test_an_inactive_admin_does_not_count_as_the_survivor(self) -> None:
+        # The check asks for *active* admins. A disabled admin cannot log in, so
+        # counting it would allow exactly the lockout F2=A forbids.
+        second = self.client.post(
+            "/admin/users",
+            json={"username": "root2", "password": "pw111", "is_admin": True},
+        ).json()
+        self.client.post(f"/admin/users/{second['id']}/deactivate")
+
+        response = self.client.post(f"/admin/users/{self.root.id}/deactivate")
+
+        self.assertEqual(response.status_code, 409)
+
+
 class CombinedBoundaryMatrixTest(unittest.TestCase):
     """D8-3c: the 401 and 403 guards audited as a single matrix.
 
@@ -522,6 +665,15 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
                               "narrowed to the caller, not a 403",
     }
 
+    # D8-5's tier. Admin operations name no project on purpose: the admin
+    # surface manages accounts, and reaching another user's project content is
+    # the audited, expiring grant of F1=C — a different mechanism, not this one.
+    ADMIN = {
+        ("/admin/users", "get"),
+        ("/admin/users", "post"),
+        ("/admin/users/{user_id}/deactivate", "post"),
+    }
+
     def setUp(self) -> None:
         self.core_sot = CoreSotService(InMemoryCoreSotRepository())
         self.client, self.users, self.sessions = _client(core_sot=self.core_sot)
@@ -537,6 +689,8 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
             declared = [d.dependency for d in route.dependencies]
             if require_project_owner in declared:
                 tier = "project"
+            elif require_admin_user in declared:
+                tier = "admin"
             elif require_authenticated_user in declared:
                 tier = "auth"
             else:
@@ -568,7 +722,9 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # dependency shows up as an unexpected public operation instead of
         # quietly inheriting whatever the matrix assumed.
         tiers = {(path, method): tier for _r, path, method, tier in self._tiers()}
-        by_tier: dict[str, set] = {"public": set(), "auth": set(), "project": set()}
+        by_tier: dict[str, set] = {
+            "public": set(), "auth": set(), "admin": set(), "project": set(),
+        }
         for operation, tier in tiers.items():
             by_tier[tier].add(operation)
 
@@ -576,8 +732,9 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # "which operations are open" would eventually disagree.
         self.assertEqual(by_tier["public"], set(AuthenticationBoundaryTest.PUBLIC))
         self.assertEqual(by_tier["auth"], set(self.AUTH_ONLY))
+        self.assertEqual(by_tier["admin"], self.ADMIN)
         self.assertEqual(len(by_tier["project"]), 59)
-        self.assertEqual(len(tiers), 65)
+        self.assertEqual(len(tiers), 68)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:
@@ -585,26 +742,36 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
                 self.assertIn("{project_id}", path)
 
     def test_the_two_guards_are_declared_as_one_consistent_stack(self) -> None:
-        # Joint declaration invariants — the ones neither slice's own guard can
-        # state, because each sees only its half:
+        # Joint declaration invariants — the ones no single slice's own guard can
+        # state, because each sees only its own axis:
         #   * 403 without 401 would advertise "you are logged in but refused" on
         #     an operation that never requires logging in.
-        #   * the ownership dependency without the authentication dependency
+        #   * an authorization dependency without the authentication dependency
         #     would leave the exhaustive 3-a guard blind to a protected route,
         #     even though the sub-dependency would still resolve.
         #   * a repeated identity is the drift a copy-pasted `dependencies=`
         #     list produces, and it makes "is this route guarded" ambiguous.
+        #   * 403 has two producers since D8-5 (ownership, admin) and exactly
+        #     those two: a 403 on any other operation is a false declaration.
         for route, path, method, tier in self._tiers():
             with self.subTest(path=path, method=method):
                 declared = [d.dependency for d in route.dependencies]
                 responses = self.spec["paths"][path][method]["responses"]
                 if "403" in responses:
                     self.assertIn("401", responses)
-                if require_project_owner in declared:
-                    self.assertIn(require_authenticated_user, declared)
+                for authorization in (require_project_owner, require_admin_user):
+                    if authorization in declared:
+                        self.assertIn(require_authenticated_user, declared)
+                    self.assertLessEqual(declared.count(authorization), 1)
                 self.assertLessEqual(declared.count(require_authenticated_user), 1)
-                self.assertLessEqual(declared.count(require_project_owner), 1)
-                self.assertEqual(tier == "project", "403" in responses)
+                self.assertEqual(tier in ("project", "admin"), "403" in responses)
+                # The two authorization boundaries are alternatives, never a
+                # stack: an operation behind both would have two different
+                # meanings for the same status.
+                self.assertFalse(
+                    require_project_owner in declared
+                    and require_admin_user in declared
+                )
 
     def test_authentication_answers_before_ownership_on_every_project_route(self) -> None:
         # The load-bearing joint cell. A sessionless request naming *someone
@@ -729,6 +896,55 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         self.assertEqual(
             self.client.get("/projects").json()["projects"][0]["name"], "Bob's first"
         )
+
+    def test_every_admin_operation_refuses_an_authenticated_non_admin(self) -> None:
+        # D8-5's row, under-strict half. Alice is a perfectly valid user, so the
+        # only thing standing between her and the admin surface is the flag —
+        # and the guard runs before request validation, so a bare call with no
+        # body is enough to prove it is in front of the handler (a 422 here
+        # would mean the body was parsed before anyone checked who she is).
+        self._login_alice()
+        for path, method in sorted(self.ADMIN):
+            with self.subTest(path=path, method=method):
+                url = re.sub(r"\{[^}]+\}", "does-not-exist", path)
+                response = self.client.request(method, url)
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.json(), {"detail": "forbidden"})
+
+    def test_every_admin_operation_admits_an_admin(self) -> None:
+        # Over-strict half: a boundary that refused everyone would satisfy the
+        # cell above and ship an admin surface nobody can use.
+        self.users.create_user(username="root", password="pw789", is_admin=True)
+        self.client.post(
+            "/auth/login", json={"username": "root", "password": "pw789"}
+        )
+        for path, method in sorted(self.ADMIN):
+            with self.subTest(path=path, method=method):
+                url = re.sub(r"\{[^}]+\}", "does-not-exist", path)
+                response = self.client.request(method, url)
+                self.assertNotIn(response.status_code, (401, 403))
+
+    def test_the_admin_dependency_cannot_run_without_authentication(self) -> None:
+        # Same isolation drive as the ownership dependency, for the same reason:
+        # the admin routes declare the authentication dependency *and*
+        # ``require_admin_user`` re-declares it, so dropping either layer alone
+        # changes no observable status. This mounts the inner one alone.
+        probe = FastAPI()
+        probe.state.users = self.users
+        probe.state.sessions = self.sessions
+
+        @probe.get("/probe", dependencies=[Depends(require_admin_user)])
+        async def _probe() -> dict[str, bool]:
+            return {"reached": True}
+
+        client = TestClient(probe, base_url="https://testserver")
+        self.assertEqual(client.get("/probe").status_code, 401)
+
+        # And with a session it still refuses a non-admin — the 401 above is the
+        # authentication layer, not the admin check answering everything.
+        self._login_alice()
+        client.cookies = self.client.cookies
+        self.assertEqual(client.get("/probe").status_code, 403)
 
     def test_the_public_row_is_answered_by_handlers_not_by_a_guard(self) -> None:
         # Completes the matrix's fourth row. The tier partition proves no public

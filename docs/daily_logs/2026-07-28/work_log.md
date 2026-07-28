@@ -254,3 +254,109 @@
 보강 후 재검증: `tests/test_auth_api.py` `42 passed / 686 subtests`, 백엔드 전량
 (test-mongo ON) `1653 passed / 1 skipped / 1418 subtests`. 테스트 수는 그대로다 —
 셀 하나의 **잠금 방식**만 바뀌었고 계약·소스는 무변이다.
+
+---
+
+## Task — 인증 D8-5a 관리자 경계 + 사용자 관리
+
+### Goals
+
+- `HANDOFF.md`의 다음 트랙 D8-5(관리자 API·화면, D6=A)를 착수한다.
+- 착수 차단 결정을 브리프로 올려 오너 판단을 받고, **그 결정에 의존하지 않는 부분만** 먼저 짓는다.
+- 관리자 경계(`require_admin_user`)와 최소 사용자 관리(목록·생성·비활성화)를 세우고
+  기존 boundary matrix에 관리자 tier를 정식으로 편입한다.
+- 새 가드가 실제로 무는지 뮤테이션으로 확인한다.
+
+### Completed work
+
+- **결정 브리프** `docs/plans/auth-d8-5-admin-decisions.md`를 썼다. D6=A로 범위는 이미 결정돼
+  있었지만, **관리자가 타인 소유 project에 접근하는가(F1)**는 D8-3이 방금 전수로 잠근 경계를
+  다시 설계하는 문제라 구현자가 고를 수 없어 오너 결정을 받았다.
+- `services/application/app/auth/users.py`
+  - `UserRepository` Protocol에 `list_all()`·`set_active(user_id, is_active=…)`를 추가하고
+    in-memory 구현을 붙였다. 목록은 `(created_at, id)` 순이다.
+  - `UserService.list_users()`·`deactivate_user(user_id)`를 추가했다. 후자는 미존재
+    `UserNotFound`, 마지막 활성 관리자 `LastActiveAdmin`을 던진다.
+  - `_is_last_active_admin`은 **활성 관리자 population**을 본다 — 자기 자신 제외 후 활성
+    관리자가 0이면 거부다.
+- `services/application/app/auth/users_mongo.py`
+  - `list_all()`은 `find({}).sort("created_at", ASCENDING)`으로 **서버측 정렬**한다.
+  - `set_active()`는 `find_one_and_update(..., return_document=AFTER)`로 갱신 후 문서를 돌려준다.
+- `services/application/app/main.py`
+  - `require_admin_user`(하위 dependency로 인증) + `_REQUIRE_ADMIN` 두 겹 배선. 소유권과 같은 형태다.
+  - `_admin(...)` 선언 헬퍼(403 additive). `_owned`와 상태코드는 같지만 **의미가 달라** 별도
+    헬퍼로 뒀다 — 하나로 합치면 선언 가드가 "어느 경계 뒤인지"를 말할 수 없다.
+  - endpoint 3종: `GET /admin/users` · `POST /admin/users`(409/400) ·
+    `POST /admin/users/{user_id}/deactivate`(404/409).
+  - `AdminUserPayload`는 `id`·`username`·`is_admin`·`is_active`만 싣는다.
+- **전수 가드 편입** — 새 tier가 기존 가드 3개를 정확히 깨뜨렸고(설계대로), 계약을 의도적으로 넓혔다.
+  - `ProjectAuthorizationTest`: "403 선언 ⟺ project-scoped"를 "403 ⟺ project-scoped **또는**
+    관리자"로 넓혔다. dependency 쪽 ⟺ `{project_id}`는 **그대로 정확**하고, "관리자 route는
+    절대 project-scoped가 아니다"를 함께 단정한다.
+  - `CombinedBoundaryMatrixTest`: tier가 넷이 됐다(68 = public 4 + 인증 전용 2 + 관리자 3 +
+    project 59). 결합 불변식에 **403의 생산자는 정확히 둘**과 **두 인가 dependency는 대안이지
+    스택이 아니다**를 추가했다.
+  - 관리자 tier 실동작 3셀: 비관리자 403 전수 · 관리자 통과 전수 · 안쪽 겹 격리 구동.
+- 회귀: `AdminUserApiTest` 8건(목록·해시 부재·생성·중복 409·빈 입력 400·세션 즉시 사망·미존재
+  404·마지막 관리자 409·2인 시 해제·비활성 관리자는 생존자로 세지 않음),
+  `ListAndDeactivateTest` 9건(서비스 계층), Mongo fake-collection 4건.
+- `tests/test_application_api.py`에 `AdminErrorContractDeclarationTest`(H3 여섯 번째 트랙)를 추가했다.
+- `frontend/src/api/schema.d.ts`를 재생성해 3개 operation을 additive 반영했다(화면은 5-d).
+
+### Issues found
+
+#### 뮤테이션 N5 — 핸들러가 해시를 넣어도 통과한다(결함 아님)
+
+- 증상: `_admin_user_payload`에 `password_hash`를 추가하는 뮤테이션이 **통과**했다.
+- 원인: `response_model=AdminUserPayload`가 모델에 없는 필드를 구조적으로 걸러낸다. 즉 해시는
+  애초에 wire에 닿지 않으므로 이 뮤테이션은 결함이 아니다.
+- 확인: 실제로 누출되는 두 구성은 **모두 회귀가 문다** — N5b(response_model 제거 + 핸들러 누출)
+  → `test_list_returns_every_account_and_never_a_password_hash` 실패, N5c(모델 자체에 필드 추가)
+  → 같은 테스트 + 생성 응답 exact 비교 실패.
+- 결과: 보호하는 겹은 **wire model**이고 그것이 양방향으로 잠겨 있음을 실측으로 확인했다.
+  D8-3c의 "두 겹 중 한 겹" 상황과 같은 구조이며, 여기서는 추가 셀이 필요하지 않다.
+
+#### 뮤테이션 루프 타임아웃이 소스를 오염시킬 뻔했다
+
+- 증상: 5종 뮤테이션 루프가 N4 도중 2분 제한에 걸려 종료됐고, **원복 `cp`가 실행되지 않았다.**
+  같은 시각 백그라운드 전량 회귀가 돌고 있어 뮤테이트된 소스를 수집했을 수 있다.
+- 조치: 즉시 원복하고 `git diff --stat`으로 무변을 확인한 뒤, 그 전량 회귀를 **폐기**하고
+  깨끗한 트리에서 다시 돌렸다. 남은 뮤테이션은 `-k`로 좁혀 개별 실행했다.
+- 교훈: 뮤테이션과 전량 회귀를 **동시에 돌리지 않는다** — 수집 시점이 겹치면 결과가 무의미하다.
+
+### Decisions
+
+- **오너 결정 F1=C(감사 남기는 impersonation)** — 추천은 A(예외 없음)였으나 오너가 C를 골랐다.
+  관리자는 기본 상태에서 타인 project에 접근하지 못하고, **감사 기록을 남기고 만료되는 승격**을
+  통해서만 접근한다. "관리자가 조용히 볼 수 있다"는 상태를 만들지 않으면서 지원 시나리오는
+  기록을 대가로 지원하겠다는 판단이다. 이 슬라이스(5-a)는 승격을 구현하지 않으며, 소유권 403은
+  관리자에게도 그대로 적용된다.
+- **오너 결정 F2=A(마지막 활성 관리자 비활성화 금지)** — 락아웃 복구 경로가 컨테이너 exec뿐이라
+  검사 한 줄이 훨씬 싸다는 추천을 그대로 채택했다.
+- F1=C에 **의존하는 5-b·5-d는 착수하지 않았다.** C가 새로 여는 하위 결정(승격 수명·범위, 승격
+  아래 쓰기 허용 여부, 감사 대상이 발급인지 개별 요청인지, 사용자 통지 여부)이 남아 있고,
+  추측 구현은 보안 경계를 임의로 정하는 일이다. 5-a는 그 어느 것에도 의존하지 않는다.
+- 재활성화(reactivate)는 만들지 않았다. D6=A가 "목록·생성·비활성화"만 열거하며, 지금 추가하면
+  트리거 없는 예방 구현이다. **비활성화가 단방향 문이라는 점은 5-d 화면 착수 시 재검토할 항목이다.**
+- 관리자 목록에 `created_at`을 넣지 않았다. 필요해지면 additive이며 지금은 소비자가 없다.
+
+### Verification
+
+- `tests/test_auth_api.py` `53 passed / 707 subtests`.
+- `tests/test_auth_users.py`+`test_auth_users_mongo.py` `33 passed`.
+- 계약·인증 4개 모듈 합산 `209 passed / 1102 subtests`.
+- 뮤테이션: N1(관리자 검사 무력화)·N2(마지막 관리자 가드 제거)·N3(활성 여부 무시)·N4(route가
+  관리자 dependency 상실)이 각각 해당 셀에서 실패. N5/N5b/N5c는 위 "Issues found" 참조.
+- 프론트: `gen:api` 재생성, `tsc --noEmit` 통과, build 성공(진입 404.87 kB · 관측 lazy 385.71 kB로
+  기존과 동일), `217 passed / 14 files`.
+- 백엔드 전량(test-mongo ON): `1681 passed / 1 skipped / 1455 subtests` (664s).
+  종전 기준선 `1653 / 1 / 1418`에서 신규 28 테스트·37 subtest만 늘었고 기존 실패·skip 변동 없음.
+  이 실행은 뮤테이션이 모두 원복된 뒤 시작한 것이며, 겹쳤던 앞선 실행은 폐기했다.
+
+### Next steps
+
+- **F1=C 하위 결정이 5-b·5-d의 착수 차단**이다: 승격의 수명·범위, 승격 아래 쓰기 허용 여부,
+  감사 대상(발급 vs 개별 요청), 사용자 통지 여부. 브리프 §7에 정리해 오너 결정을 받는다.
+- 5-c(전역 관측 KPI)는 F1과 무관하므로 먼저 진행할 수 있다 — 감사 저장소에 전역 조회를 더하고
+  기존 집계 함수를 재사용하되, 오독 방어 3종이 전역에서도 성립해야 한다.
+- 이후 D8-6 영구 삭제, D8-7 Mongo·ES 인프라 인증.

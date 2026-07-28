@@ -2230,6 +2230,63 @@ class CrudErrorBodyExactKeyTest(unittest.TestCase):
         self._assert_detail_only(client.get(f"/projects/{project.id}/drafts"), 503)
 
 
+class AdminErrorContractDeclarationTest(unittest.TestCase):
+    """OpenAPI must declare the realistic error statuses of the admin track.
+
+    The D8-5 sibling of the other track classes, and the first one whose 403
+    means "not an admin" rather than "not your project". Both are the same
+    uniform body; what the lock list pins is which operations can produce it at
+    all, so a future non-admin endpoint cannot quietly inherit the status.
+
+    Exact sets, so the test bites both ways — under-strict (a dropped
+    ``responses=`` re-hides a documented failure) and over-strict (declaring a
+    status the endpoint cannot raise, which lies to the generated frontend
+    types).
+    """
+
+    EXPECTED = {
+        ("/admin/users", "get"): {"401", "403", "503"},
+        ("/admin/users", "post"): {"400", "401", "403", "409", "503"},
+        ("/admin/users/{user_id}/deactivate", "post"):
+            {"401", "403", "404", "409", "503"},
+    }
+
+    def setUp(self):
+        self.spec = create_app().openapi()
+
+    def _declared(self, path: str, method: str) -> set[str]:
+        responses = self.spec["paths"][path][method]["responses"]
+        return {code for code in responses if code not in ("200", "422")}
+
+    def test_declared_error_statuses_match_the_lock_list(self):
+        self.assertEqual(len(self.EXPECTED), 3)
+        for (path, method), expected in self.EXPECTED.items():
+            with self.subTest(path=path, method=method):
+                self.assertEqual(self._declared(path, method), expected)
+
+    def test_the_whole_admin_track_is_declared(self):
+        # Over-strict guard on the lock list itself: a new /admin endpoint that
+        # ships without a declaration must fail here rather than pass silently
+        # because every row above still holds.
+        undeclared = {
+            (path, method)
+            for path, operations in self.spec["paths"].items()
+            if path.startswith("/admin/")
+            for method in operations
+            if (path, method) not in self.EXPECTED
+        }
+        self.assertEqual(undeclared, set())
+
+    def test_every_declared_error_body_is_the_uniform_detail_model(self):
+        detail = "#/components/schemas/ErrorDetailResponse"
+        for (path, method), expected in self.EXPECTED.items():
+            responses = self.spec["paths"][path][method]["responses"]
+            for code in expected:
+                with self.subTest(path=path, method=method, code=code):
+                    schema = responses[code]["content"]["application/json"]["schema"]
+                    self.assertEqual(schema.get("$ref"), detail)
+
+
 class AnalysisErrorContractDeclarationTest(unittest.TestCase):
     """OpenAPI must declare the realistic error statuses of the analysis track.
 

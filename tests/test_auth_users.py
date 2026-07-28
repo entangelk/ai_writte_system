@@ -6,7 +6,8 @@ from datetime import UTC, datetime
 
 from services.application.app.auth.models import User
 from services.application.app.auth.users import (
-    DuplicateUsername, InMemoryUserRepository, InvalidUserInput, UserService,
+    DuplicateUsername, InMemoryUserRepository, InvalidUserInput,
+    LastActiveAdmin, UserNotFound, UserService,
 )
 
 _FIXED_TIME = datetime(2026, 7, 27, 12, 0, tzinfo=UTC)
@@ -199,6 +200,101 @@ class EnumerationHardeningTest(unittest.TestCase):
             _service(repo, hasher).authenticate(username="alice", password="pw123")
         )
         self.assertEqual(hasher.verify_calls, [(created.password_hash, "pw123")])
+
+
+class ListAndDeactivateTest(unittest.TestCase):
+    """D8-5 admin operations at the service layer."""
+
+    def setUp(self) -> None:
+        self.repo = InMemoryUserRepository()
+        self.service = _service(self.repo)
+
+    def test_list_users_is_empty_before_anyone_is_created(self) -> None:
+        self.assertEqual(self.service.list_users(), ())
+
+    def test_list_users_returns_every_account(self) -> None:
+        alice = self.service.create_user(username="alice", password="pw")
+        root = self.service.create_user(
+            username="root", password="pw", is_admin=True
+        )
+        self.assertEqual(self.service.list_users(), (alice, root))
+
+    def test_deactivating_flips_the_flag_in_the_store(self) -> None:
+        alice = self.service.create_user(username="alice", password="pw")
+
+        updated = self.service.deactivate_user(alice.id)
+
+        self.assertFalse(updated.is_active)
+        self.assertFalse(self.repo.get_by_id(alice.id).is_active)
+
+    def test_a_deactivated_user_can_no_longer_authenticate(self) -> None:
+        # The reason the flag exists. `authenticate` already refused inactive
+        # accounts; this pins that deactivation actually reaches that path.
+        alice = self.service.create_user(username="alice", password="pw")
+        self.service.deactivate_user(alice.id)
+
+        self.assertIsNone(
+            self.service.authenticate(username="alice", password="pw")
+        )
+
+    def test_deactivating_an_unknown_user_raises(self) -> None:
+        with self.assertRaises(UserNotFound):
+            self.service.deactivate_user("user:ghost")
+
+    def test_the_last_active_admin_is_refused(self) -> None:
+        # F2=A: the invariant is about the population of active admins, so this
+        # fires even though the request names a perfectly valid user.
+        root = self.service.create_user(
+            username="root", password="pw", is_admin=True
+        )
+        self.service.create_user(username="alice", password="pw")
+
+        with self.assertRaises(LastActiveAdmin):
+            self.service.deactivate_user(root.id)
+
+        self.assertTrue(self.repo.get_by_id(root.id).is_active)
+
+    def test_a_second_active_admin_makes_the_first_removable(self) -> None:
+        # Over-strict: admins are not undeletable, they are merely not
+        # extinguishable. A rule that always refused would pass the test above.
+        root = self.service.create_user(
+            username="root", password="pw", is_admin=True
+        )
+        self.service.create_user(username="root2", password="pw", is_admin=True)
+
+        self.assertFalse(self.service.deactivate_user(root.id).is_active)
+
+    def test_an_inactive_admin_does_not_keep_the_last_one_removable(self) -> None:
+        # Counting admins instead of *active* admins would allow the lockout.
+        root = self.service.create_user(
+            username="root", password="pw", is_admin=True
+        )
+        second = self.service.create_user(
+            username="root2", password="pw", is_admin=True
+        )
+        self.service.deactivate_user(second.id)
+
+        with self.assertRaises(LastActiveAdmin):
+            self.service.deactivate_user(root.id)
+
+    def test_deactivating_an_already_inactive_admin_is_allowed(self) -> None:
+        # Idempotence at the boundary: the guard asks whether *this* account is
+        # currently holding the deployment's last admin seat. An already
+        # disabled one is not, so repeating the call must not start failing.
+        root = self.service.create_user(
+            username="root", password="pw", is_admin=True
+        )
+        self.service.create_user(username="root2", password="pw", is_admin=True)
+        self.service.deactivate_user(root.id)
+
+        self.assertFalse(self.service.deactivate_user(root.id).is_active)
+
+    def test_a_non_admin_is_never_blocked_by_the_admin_rule(self) -> None:
+        # The only user in the deployment, but not an admin: the rule must not
+        # generalize into "the last user cannot be disabled".
+        alice = self.service.create_user(username="alice", password="pw")
+
+        self.assertFalse(self.service.deactivate_user(alice.id).is_active)
 
 
 if __name__ == "__main__":

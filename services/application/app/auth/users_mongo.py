@@ -2,7 +2,7 @@
 
 from datetime import UTC
 
-from pymongo import ASCENDING, MongoClient
+from pymongo import ASCENDING, MongoClient, ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 from services.application.app.auth.models import User
@@ -35,6 +35,21 @@ class MongoUserRepository:
 
     def get_by_username(self, username: str) -> User | None:
         doc = self._users.find_one({"username": username})
+        return _entry(doc) if doc else None
+
+    def list_all(self) -> tuple[User, ...]:
+        # Sorted server-side: the admin list is the one place where "oldest
+        # first" is a contract the caller can see, and ordering in Python would
+        # depend on however the driver happened to return the batch.
+        docs = self._users.find({}).sort("created_at", ASCENDING)
+        return tuple(_entry(doc) for doc in docs)
+
+    def set_active(self, user_id: str, *, is_active: bool) -> User | None:
+        doc = self._users.find_one_and_update(
+            {"_id": user_id},
+            {"$set": {"is_active": is_active}},
+            return_document=ReturnDocument.AFTER,
+        )
         return _entry(doc) if doc else None
 
 

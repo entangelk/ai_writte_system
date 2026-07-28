@@ -18,7 +18,11 @@ from services.application.app.auth.sessions import (
     SessionService,
 )
 from services.application.app.auth.users import (
+    DuplicateUsername,
     InMemoryUserRepository,
+    InvalidUserInput,
+    LastActiveAdmin,
+    UserNotFound,
     UserService,
 )
 from services.application.app.auth.password import Argon2PasswordHasher
@@ -1248,6 +1252,17 @@ def _owned(declaration: dict[int | str, dict]) -> dict[int | str, dict]:
     return {403: _ERROR, **declaration}
 
 
+def _admin(declaration: dict[int | str, dict]) -> dict[int | str, dict]:
+    """Declare the 403 face added by the admin dependency (D8-5).
+
+    Same status as ``_owned`` and deliberately a separate helper: the two 403s
+    answer different questions ("not your project" vs "not an admin"), and a
+    single shared helper would make the declaration guards unable to say which
+    boundary an operation is behind.
+    """
+    return {403: _ERROR, **declaration}
+
+
 _ERRORS_STORAGE: dict[int | str, dict] = _protected({503: _STORAGE_503})
 _ERRORS_404: dict[int | str, dict] = _protected({404: _ERROR, 503: _STORAGE_503})
 _ERRORS_404_502: dict[int | str, dict] = _protected(
@@ -1265,6 +1280,16 @@ _ERRORS_404_409: dict[int | str, dict] = _protected({
 _ERRORS_400_404_409: dict[int | str, dict] = _protected({
     400: _ERROR, 404: _ERROR, 409: _ERROR, 503: _STORAGE_503,
 })
+# D8-5 admin surface. 403 = "not an admin" (see _admin), and it is additive over
+# the same 401/503 every protected operation carries.
+_ERRORS_ADMIN: dict[int | str, dict] = _admin(_protected({503: _STORAGE_503}))
+_ERRORS_ADMIN_400_409: dict[int | str, dict] = _admin(_protected({
+    400: _ERROR, 409: _ERROR, 503: _STORAGE_503,
+}))
+_ERRORS_ADMIN_404_409: dict[int | str, dict] = _admin(_protected({
+    404: _ERROR, 409: _ERROR, 503: _STORAGE_503,
+}))
+
 _ERRORS_404_MIGRATION: dict[int | str, dict] = _protected(
     {404: _ERROR, 503: _MIGRATION_503}
 )
@@ -1349,12 +1374,33 @@ def require_project_owner(
     return project
 
 
+def require_admin_user(current=Depends(require_authenticated_user)):
+    """Allow only administrators (D8-5, D6=A).
+
+    403 rather than 401: the session is live and re-logging in changes nothing,
+    which is the same distinction the ownership boundary draws. It is also *not*
+    404 — hiding the admin surface would mean the frontend could not tell "no
+    such endpoint" from "not for you".
+    """
+    if not current.is_admin:
+        raise HTTPException(status_code=403, detail="forbidden")
+    return current
+
+
 # One shared list so every protected operation declares the *same* dependency
 # object. ``dependencies=`` copies it per route, so sharing is safe.
 _REQUIRE_AUTH = [Depends(require_authenticated_user)]
 _REQUIRE_PROJECT_OWNER = [
     Depends(require_authenticated_user),
     Depends(require_project_owner),
+]
+# D8-5: the admin surface is a third tier, layered the same way — the outer list
+# names the authentication dependency so the exhaustive guard can see it on the
+# route, and the inner dependency re-declares it so the check cannot run against
+# an unauthenticated request even if the outer layer is ever dropped.
+_REQUIRE_ADMIN = [
+    Depends(require_authenticated_user),
+    Depends(require_admin_user),
 ]
 
 
@@ -1377,6 +1423,28 @@ class LoginResponse(BaseModel):
 
 class LogoutResponse(BaseModel):
     ok: bool
+
+
+class AdminUserPayload(BaseModel):
+    # Same no-password_hash reason as UserPayload, and one field more: the admin
+    # list is the only surface where whether an account is disabled is the point.
+    id: str
+    username: str
+    is_admin: bool
+    is_active: bool
+
+
+class AdminUserListResponse(BaseModel):
+    users: list[AdminUserPayload]
+
+
+class CreateUserRequest(BaseModel):
+    # The admin supplies the initial password, exactly as scripts/create_user.py
+    # does. Generating and delivering a temporary one needs a channel this
+    # deployment does not have.
+    username: str
+    password: str
+    is_admin: bool = False
 
 
 class ProjectPayload(BaseModel):
@@ -2213,6 +2281,49 @@ def create_app(
         if user is None:
             raise HTTPException(status_code=401, detail="not authenticated")
         return _user_payload(user)
+
+    # --- Admin (D8-5, D6=A minimal admin) ---------------------------------
+    # Users only: the all-projects list and the global KPI are their own slices,
+    # and project *content* stays behind the ownership boundary — an admin
+    # reaches another user's project only through the audited, expiring grant
+    # the owner chose in F1=C, which is a later slice too.
+    def _admin_user_payload(user) -> dict[str, object]:
+        return {
+            "id": user.id, "username": user.username,
+            "is_admin": user.is_admin, "is_active": user.is_active,
+        }
+
+    @app.get("/admin/users", response_model=AdminUserListResponse,
+             responses=_ERRORS_ADMIN, dependencies=_REQUIRE_ADMIN)
+    async def list_users() -> dict[str, object]:
+        return {"users": [_admin_user_payload(u) for u in users.list_users()]}
+
+    @app.post("/admin/users", response_model=AdminUserPayload,
+              responses=_ERRORS_ADMIN_400_409, dependencies=_REQUIRE_ADMIN)
+    async def create_user(request: CreateUserRequest) -> dict[str, object]:
+        try:
+            user = users.create_user(
+                username=request.username,
+                password=request.password,
+                is_admin=request.is_admin,
+            )
+        except DuplicateUsername as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except InvalidUserInput as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _admin_user_payload(user)
+
+    @app.post("/admin/users/{user_id}/deactivate",
+              response_model=AdminUserPayload,
+              responses=_ERRORS_ADMIN_404_409, dependencies=_REQUIRE_ADMIN)
+    async def deactivate_user(user_id: str) -> dict[str, object]:
+        try:
+            user = users.deactivate_user(user_id)
+        except UserNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except LastActiveAdmin as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _admin_user_payload(user)
 
     def _project_payload(project) -> dict[str, object]:
         return {"id": project.id, "name": project.name, "archived": project.archived}
