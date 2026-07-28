@@ -134,3 +134,123 @@
   사용자용 안내로 바꿀지 별도 결정한다.
 - 별도 추적 부채: `APPLICATION_BASE_URL` 사용 운영 smoke 4종에 로그인 자격증명 지원.
 - 이후 D8-5 관리자 API/화면, D8-6 영구 삭제, D8-7 Mongo·ES 인프라 인증 순서.
+
+---
+
+## Task — 인증 D8-3c 최종 결합 감사(401·403 boundary matrix)
+
+### Goals
+
+- `HANDOFF.md`의 다음 작업 D8-3c를 수행한다.
+- 3-a의 인증 축과 3-b의 소유권 축을 **하나의 매트릭스로 결합 감사**해 빈 칸·중복·거짓 선언을
+  잠근다. 새 정책·endpoint 동작은 추가하지 않는다.
+- 독립 검증 H-1(소유자 통과·`owner_id=None` 403·미존재 404가 1개 route 표본)을 59개 전수
+  subtest로 올려 폐쇄한다.
+- 새 셀이 실제로 무는지 뮤테이션으로 확인한다 — green 여부가 아니라 "무엇을 잠갔는가"를 본다.
+
+### Completed work
+
+- `tests/test_auth_api.py`에 `CombinedBoundaryMatrixTest`를 추가했다(신규 9 테스트).
+  기존 3-a·3-b 가드는 각 슬라이스의 자기 가드이므로 손대지 않았다(결정 브리프 §E3의
+  "각 단계에 자기 단계의 가드"). 소스 코드는 한 줄도 바뀌지 않았다.
+  - **tier 분할** — 65개 operation을 *route의 dependency로부터* public 4 · 인증 전용 2 ·
+    project-scoped 59로 분류하고 각 tier 구성원을 리터럴로 고정했다. public 리터럴은
+    `AuthenticationBoundaryTest.PUBLIC`을 재사용한다(같은 목록을 두 벌 두면 언젠가 갈라진다).
+  - **결합 선언 불변식** — 403 선언은 401 선언 없이 존재할 수 없고, 소유권 dependency는 인증
+    dependency 없이 선언될 수 없으며, 같은 identity가 한 route에 두 번 선언될 수 없다.
+    각 슬라이스의 가드는 자기 축만 보므로 이 세 가지는 어느 쪽도 말할 수 없던 문장이다.
+  - **결합 실동작** — 세션 없는 요청이 **타인 소유** project를 지목해도 403이 아니라 401임을
+    59개 전수로 구동했다. 두 거부 조건을 동시에 만족하는 유일한 입력이며, 여기서 403을 내면
+    익명 호출자에게 project의 존재·소유 사실을 알리게 된다.
+  - **H-1 폐쇄** — 소유자 통과 · 무소유 403 · 미존재 404를 각각 59개 전수 subtest로 올렸다.
+    소유자 셀은 operation마다 새 project를 만든다(archive·변경 부수효과가 순서 의존을 만든다).
+    소유자 셀의 단정은 `status not in (401, 403)`이다 — 이 슬라이스가 감사하는 것은 가드이고,
+    그 뒤 handler가 내는 200/422/404는 각 endpoint 자신의 계약이다.
+  - **public row** — `/health`·`/auth/logout` 200과 `POST /auth/login`의 본문 없는 호출이
+    **422**임을 확인한다. 가드는 요청 검증보다 앞서므로 422는 "가드가 없다"는 양성 증거다.
+- `docs/system-contract-sot.md`를 v1.7.55로 올리고, 제품 경계 절의 "D8-3c 남음"을 실제
+  상태(HTTP 시행 3단계 종료, D8-7만 남음)로 고쳤다. `CHANGELOG.md`·`HANDOFF.md`도 갱신했다.
+
+### Issues found
+
+#### 뮤테이션 M3 — 인증 두 겹 중 한 겹을 빼도 관측 동작이 변하지 않는다
+
+- 증상: `require_project_owner`의 인증 하위 dependency를 제거하고 미인증을 403으로 바꾸는
+  뮤테이션을 넣었는데 **매트릭스 전체가 green**이었다.
+- 원인: 코드 결함이 아니라 두 겹 방어다. project route는 `_REQUIRE_PROJECT_OWNER`에서
+  인증 dependency를 **먼저** 선언하므로 하위 dependency가 사라져도 401이 먼저 나간다.
+  실제로 누출되는 구성은 두 겹이 **모두** 빠진 경우이며(M3c), 그때는 매트릭스가 59개 전수로
+  실패한다.
+- 해결: 요청 구동으로는 원리적으로 한 겹 소실을 볼 수 없으므로, 안쪽 겹을
+  `inspect.signature(require_project_owner)`의 하위 dependency로 직접 단정하는 셀을 추가했다.
+  이제 M3 단독 뮤테이션도 실패한다.
+- 결과: 두 겹이 **독립적으로** 잠긴다. 이 사실 자체가 다음 작업자에게 필요한 정보라
+  테스트 주석과 정본 v1.7.55에 실측으로 남겼다.
+
+#### 뮤테이션 6종 결과
+
+| # | 뮤테이션 | 무는 셀 |
+|---|---|---|
+| M1 | `owner_id=None`을 허용 | 무소유 403 (59 subtest 실패) |
+| M2 | 미존재 project를 403으로 | 미존재 404 (59) |
+| M3 | 소유권 dependency의 인증 하위 dependency 제거 | 시그니처 셀(추가 후) |
+| M3c | 두 겹 모두 제거 + 선언 순서 역전 | 401 우선 셀 (59) |
+| M4 | 한 route만 소유권 dependency 상실 | tier 분할 + 결합 선언 불변식 |
+| M5 | 소유자도 거부 | 소유자 통과 (59, over-strict) |
+
+### Decisions
+
+- 기존 3-a·3-b 가드를 새 매트릭스로 **흡수하지 않고 유지**했다. 각 슬라이스가 자기 단계의
+  가드를 갖는 것은 결정 브리프 E3=A의 명시적 구조이고, 전수 구동이 일부 겹치는 비용보다
+  "한 클래스가 무너지면 축 하나가 통째로 무방비"인 위험이 크다.
+- 매트릭스의 tier를 **path 모양이 아니라 route dependency에서** 도출했다. 경로는 operation이
+  어떻게 생겼는지를, dependency는 무엇이 실제로 시행하는지를 말한다 — 감사는 시행하는 쪽을
+  읽어야 한다. 두 방향의 일치는 3-b의 기존 가드가 이미 잠근다.
+- 새 테스트를 별도 모듈로 빼지 않고 `tests/test_auth_api.py`에 넣었다. 이 모듈의 계약은
+  "override 없는 실제 앱을 구동하는 유일한 곳"이며(`TestSeamStaysAnOverrideTest`가 잠근다),
+  새 모듈을 만들면 그 성질을 복제하거나 잃는다.
+- 오너 결정 fork는 없었다. 이 슬라이스는 E1=A·E2=A·E3=A의 마지막 단계 실행이다.
+
+### Verification
+
+- `tests/test_auth_api.py`: `42 passed / 686 subtests`(신규 9 테스트 · 360 subtest).
+- 뮤테이션 6종: 위 표대로 전부 해당 셀에서 실패, 사후 `git diff` 무변으로 원복 확인.
+- 백엔드 전체(test-mongo ON): `1653 passed / 1 skipped / 1418 subtests` (700s).
+  종전 기준선 `1644 / 1 / 1058`에서 신규 9 테스트·360 subtest만 늘었고 기존 실패·skip 변동 없음.
+- 백엔드 전체(test-mongo OFF 보조): `1565 passed / 89 skipped / 1418 subtests` (188s).
+  두 실행의 passed+skipped가 1654로 일치하므로 89 skip은 Mongo 통합 계약 + live Chroma뿐이다.
+- 소스·공개 계약: `services/` 무변이므로 `schema.d.ts` 재생성·프론트 회귀는 대상 아님.
+
+### Next steps
+
+- D8-3 시행은 닫혔다. 다음은 **D8-5 관리자 API/화면 → D8-6 영구 삭제 → D8-7 Mongo·ES 인프라
+  인증** 순서이며, 외부 노출 금지는 D8-7까지 유지된다.
+- 프론트 hardening(H-3): 403 원문 노출 UX를 사용자용 안내로 바꿀지는 여전히 별도 결정이다.
+- 추적 부채: `APPLICATION_BASE_URL` 사용 운영 smoke 4종의 로그인 지원.
+
+### 독립 검증 후속 보강 (같은 슬라이스)
+
+독립 검증 `docs/verifications/2026-07-28/auth_d8_3c_combined_boundary_matrix.md`는
+**합격(차단 0건)**이었고 비차단 후보 3건을 남겼다. 그중 H-a를 닫았다.
+
+- **H-a 폐쇄 — 시그니처 단정을 격리 구동으로 교체했다.** 종전 셀은
+  `inspect.signature(require_project_owner)`의 매개변수 기본값이 정확히
+  `Depends(require_authenticated_user)`임을 단정해서, 보안을 유지한 채 합성·래퍼
+  dependency로 리팩터링하면 **거짓 경보**로 실패했다. 이제 바깥 겹을 일부러 뺀 일회용
+  앱에 `require_project_owner`만 마운트해 상태코드로 단정한다 — 세션 없음 **401** ·
+  소유자 **200** · 타인 **403**. 소유자/타인 두 줄은 401이 "프로브 앱이 잘못 조립돼서"가
+  아니라 안쪽 겹이 실제로 거부한 것임을 보증하는 over-strict 절반이다.
+  - 양방향 실측: M3(안쪽 겹 제거)는 여전히 **실패**하고, 합성 dependency
+    (`Depends(_auth_chain)`)로 바꾸는 정당한 리팩터링은 **통과**한다. 검증이 지적한
+    거짓 경보 조건이 실제로 사라졌음을 뮤테이션으로 확인했다.
+- **H-c — 귀속 상호참조를 매트릭스 docstring에 명시했다.** "세션 없음 → 401(61개)"은
+  `AuthenticationBoundaryTest`, "인증됐으나 타인 소유 → 403(59개)"은
+  `ProjectAuthorizationTest`가 소유한다. 3c만 읽는 사람이 매트릭스에 빈 칸이 있다고
+  오독하지 않도록, 흡수하지 않은 이유(한 클래스가 무너지면 축 하나가 무방비)를 함께 적었다.
+- **H-b — 조치 없음.** test-mongo OFF 보조 기준선 `1565 / 89`는 검증자가 재실행하지
+  않았을 뿐 본 작업에서 같은 날 실측한 값이고, ON 실행과 passed+skipped=1654로 일치한다.
+  권위 기준선은 ON이다.
+
+보강 후 재검증: `tests/test_auth_api.py` `42 passed / 686 subtests`, 백엔드 전량
+(test-mongo ON) `1653 passed / 1 skipped / 1418 subtests`. 테스트 수는 그대로다 —
+셀 하나의 **잠금 방식**만 바뀌었고 계약·소스는 무변이다.

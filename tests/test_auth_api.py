@@ -13,6 +13,7 @@ import unittest
 from datetime import timedelta
 from unittest import mock
 
+from fastapi import Depends, FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
@@ -481,6 +482,264 @@ class AuthenticationBoundaryTest(unittest.TestCase):
                 declared = set(spec["paths"][path][method]["responses"])
                 self.assertIn("503", declared)
                 self.assertEqual("401" in declared, expects_401)
+
+
+class CombinedBoundaryMatrixTest(unittest.TestCase):
+    """D8-3c: the 401 and 403 guards audited as a single matrix.
+
+    3-a proved "every operation is protected" and 3-b proved "every project
+    operation is owned". Each was exhaustive **in its own dimension**, which
+    leaves the cells that only exist where the two meet unowned: whether a
+    sessionless request to someone else's project answers 401 or 403, and
+    whether the owner the ownership guard is supposed to let through actually
+    gets through on all 59 rather than on the one route a sample checked
+    (verification H-1).
+
+    This slice adds no policy and changes no behaviour — it fills those cells
+    and pins the tier of every operation, so a new endpoint cannot land outside
+    all three tiers without a test naming it.
+
+    Tier membership is derived from the **route's dependencies**, not from the
+    path shape: the path is what the operation looks like, the dependency list
+    is what actually enforces, and the whole point of an audit is to read the
+    enforcing side.
+
+    Two cells of the matrix are deliberately **not** here, because the slice that
+    introduced them already drives them exhaustively and absorbing them would
+    leave an axis undefended if this class ever broke: sessionless → 401 on all
+    61 protected operations lives in ``AuthenticationBoundaryTest``, and
+    authenticated-but-not-the-owner → 403 on all 59 project operations lives in
+    ``ProjectAuthorizationTest``. Read all three as one matrix (verification H-c).
+    """
+
+    # Protected, but naming no project — so there is no owner to check and no
+    # 403 to declare. Spelled out for the same reason ``PUBLIC`` is: a third
+    # entry appearing here is a decision, not an accident.
+    AUTH_ONLY = {
+        ("/projects", "post"): "creates the project, so ownership is an output "
+                               "of this call rather than an input",
+        ("/projects", "get"): "names no project: isolation is the store query "
+                              "narrowed to the caller, not a 403",
+    }
+
+    def setUp(self) -> None:
+        self.core_sot = CoreSotService(InMemoryCoreSotRepository())
+        self.client, self.users, self.sessions = _client(core_sot=self.core_sot)
+        self.app = self.client.app
+        self.spec = self.app.openapi()
+        self.bob = self.users.create_user(username="bob", password="pw456")
+
+    def _tiers(self):
+        """Yield (route, path, method, tier) for every operation."""
+        for route in self.app.routes:
+            if not isinstance(route, APIRoute):
+                continue
+            declared = [d.dependency for d in route.dependencies]
+            if require_project_owner in declared:
+                tier = "project"
+            elif require_authenticated_user in declared:
+                tier = "auth"
+            else:
+                tier = "public"
+            for method in sorted(route.methods):
+                yield route, route.path, method.lower(), tier
+
+    def _project_operations(self):
+        for _route, path, method, tier in self._tiers():
+            if tier == "project":
+                yield path, method
+
+    def _url(self, path: str, project_id: str) -> str:
+        # Sub-resource ids are deliberately fabricated: every cell below is
+        # about the guard, which runs before the handler ever looks them up.
+        return re.sub(
+            r"\{[^}]+\}", "does-not-exist", path.replace("{project_id}", project_id)
+        )
+
+    def _login_alice(self) -> str:
+        response = self.client.post(
+            "/auth/login", json={"username": "alice", "password": "pw123"}
+        )
+        return response.json()["user"]["id"]
+
+    def test_every_operation_lands_in_exactly_one_named_tier(self) -> None:
+        # The no-empty-cell guard. Every operation is classified by what guards
+        # it, and each tier's membership is pinned: an endpoint added without a
+        # dependency shows up as an unexpected public operation instead of
+        # quietly inheriting whatever the matrix assumed.
+        tiers = {(path, method): tier for _r, path, method, tier in self._tiers()}
+        by_tier: dict[str, set] = {"public": set(), "auth": set(), "project": set()}
+        for operation, tier in tiers.items():
+            by_tier[tier].add(operation)
+
+        # Reuses 3-a's exemption literal rather than restating it: two lists of
+        # "which operations are open" would eventually disagree.
+        self.assertEqual(by_tier["public"], set(AuthenticationBoundaryTest.PUBLIC))
+        self.assertEqual(by_tier["auth"], set(self.AUTH_ONLY))
+        self.assertEqual(len(by_tier["project"]), 59)
+        self.assertEqual(len(tiers), 65)
+        # A project tier derived from dependencies must coincide with the path
+        # shape; the reverse direction is locked by ProjectAuthorizationTest.
+        for path, method in by_tier["project"]:
+            with self.subTest(path=path, method=method):
+                self.assertIn("{project_id}", path)
+
+    def test_the_two_guards_are_declared_as_one_consistent_stack(self) -> None:
+        # Joint declaration invariants — the ones neither slice's own guard can
+        # state, because each sees only its half:
+        #   * 403 without 401 would advertise "you are logged in but refused" on
+        #     an operation that never requires logging in.
+        #   * the ownership dependency without the authentication dependency
+        #     would leave the exhaustive 3-a guard blind to a protected route,
+        #     even though the sub-dependency would still resolve.
+        #   * a repeated identity is the drift a copy-pasted `dependencies=`
+        #     list produces, and it makes "is this route guarded" ambiguous.
+        for route, path, method, tier in self._tiers():
+            with self.subTest(path=path, method=method):
+                declared = [d.dependency for d in route.dependencies]
+                responses = self.spec["paths"][path][method]["responses"]
+                if "403" in responses:
+                    self.assertIn("401", responses)
+                if require_project_owner in declared:
+                    self.assertIn(require_authenticated_user, declared)
+                self.assertLessEqual(declared.count(require_authenticated_user), 1)
+                self.assertLessEqual(declared.count(require_project_owner), 1)
+                self.assertEqual(tier == "project", "403" in responses)
+
+    def test_authentication_answers_before_ownership_on_every_project_route(self) -> None:
+        # The load-bearing joint cell. A sessionless request naming *someone
+        # else's* project satisfies both deny conditions, and the two guards
+        # would report it differently: 401 says "log in", 403 says "you are the
+        # wrong user". Answering 403 here would tell an anonymous caller that
+        # the project exists and belongs to somebody — and would mean the
+        # ownership lookup ran for an unauthenticated request.
+        foreign = self.core_sot.create_project(name="Bob's", owner_id=self.bob.id)
+        # This client never logged in; asserted rather than assumed, because the
+        # whole cell is void if the fixture ever starts handing out a session.
+        self.assertEqual(self.client.get("/auth/me").status_code, 401)
+
+        for path, method in self._project_operations():
+            with self.subTest(path=path, method=method):
+                response = self.client.request(method, self._url(path, foreign.id))
+                self.assertEqual(
+                    response.status_code, 401,
+                    f"{method.upper()} {path} answered {response.status_code} to a "
+                    f"sessionless request for another user's project",
+                )
+
+    def test_the_ownership_dependency_cannot_run_without_authentication(self) -> None:
+        # Measured while mutating the cell above: the project routes declare the
+        # authentication dependency *and* the ownership dependency declares it as
+        # a sub-dependency, so deleting either one alone leaves every observable
+        # status unchanged — the surviving layer answers. That redundancy is the
+        # point, and it is also why no cell driven against the real app can see
+        # one layer go missing.
+        #
+        # So the inner layer is driven in isolation instead: a throwaway app that
+        # mounts *only* ``require_project_owner``, with the outer layer removed
+        # on purpose. Asserting a status rather than the parameter default keeps
+        # this refactor-tolerant — swapping the sub-dependency for a composed or
+        # wrapped one keeps this green as long as it still authenticates, which
+        # is the property being locked (verification H-a).
+        probe = FastAPI()
+        probe.state.core_sot = self.core_sot
+        probe.state.users = self.users
+        probe.state.sessions = self.sessions
+
+        @probe.get(
+            "/projects/{project_id}/probe",
+            dependencies=[Depends(require_project_owner)],
+        )
+        async def _probe() -> dict[str, bool]:
+            return {"reached": True}
+
+        alice_id = self._login_alice()
+        owned = self.core_sot.create_project(name="Alice's", owner_id=alice_id)
+        foreign = self.core_sot.create_project(name="Bob's", owner_id=self.bob.id)
+        client = TestClient(probe, base_url="https://testserver")
+
+        self.assertEqual(client.get(f"/projects/{foreign.id}/probe").status_code, 401)
+
+        # Over-strict half, and the reason the 401 above means anything: with a
+        # session the same unguarded-by-the-outer-layer route runs, so the 401 is
+        # the inner layer refusing rather than the probe app being misassembled.
+        client.cookies = self.client.cookies
+        self.assertEqual(client.get(f"/projects/{owned.id}/probe").status_code, 200)
+        self.assertEqual(client.get(f"/projects/{foreign.id}/probe").status_code, 403)
+
+    def test_the_owner_passes_the_guard_on_every_project_operation(self) -> None:
+        # Verification H-1, over-strict half: a boundary that refused everything
+        # would satisfy every deny cell in this matrix and ship a dead product.
+        # Only the guard is asserted — what the handler then answers (200, a 422
+        # for the body this bare call omits, a 404 for the fabricated
+        # sub-resource id) is each endpoint's own contract, locked elsewhere.
+        alice_id = self._login_alice()
+        for path, method in self._project_operations():
+            # A fresh project per operation: some of these archive or mutate,
+            # and a shared one would make the matrix order-dependent.
+            owned = self.core_sot.create_project(name="Alice's", owner_id=alice_id)
+            with self.subTest(path=path, method=method):
+                response = self.client.request(method, self._url(path, owned.id))
+                self.assertNotIn(
+                    response.status_code, (401, 403),
+                    f"{method.upper()} {path} refused the project's own owner",
+                )
+
+    def test_an_unowned_project_is_refused_on_every_project_operation(self) -> None:
+        # Verification H-1 + E1=A. ``owner_id=None`` is the shape a pre-auth
+        # project, a deleted account, or a failed migration leaves behind, and
+        # the owner decision is that it is denied everywhere — not adopted by
+        # the first caller who asks.
+        self._login_alice()
+        unowned = self.core_sot.create_project(name="Unowned")
+        self.assertIsNone(unowned.owner_id)
+
+        for path, method in self._project_operations():
+            with self.subTest(path=path, method=method):
+                response = self.client.request(method, self._url(path, unowned.id))
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.json(), {"detail": "forbidden"})
+
+    def test_a_missing_project_is_404_on_every_project_operation(self) -> None:
+        # Verification H-1, third branch. 403 hides nothing about existence, so
+        # a project that is absent must keep saying so instead of being folded
+        # into the ownership refusal — otherwise the owner of a deleted project
+        # is told they lack permission to their own missing data.
+        self._login_alice()
+        for path, method in self._project_operations():
+            with self.subTest(path=path, method=method):
+                response = self.client.request(
+                    method, self._url(path, "does-not-exist")
+                )
+                self.assertEqual(response.status_code, 404)
+
+    def test_the_non_project_operations_serve_any_authenticated_user(self) -> None:
+        # Over-strict guard for the middle tier: ownership must not creep into
+        # the two operations that name no project. Bob owns nothing, and both
+        # still work for him — the list is empty because the store query is
+        # narrowed, not because a guard refused.
+        self.client.post("/auth/login", json={"username": "bob", "password": "pw456"})
+
+        listed = self.client.get("/projects")
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.json(), {"projects": []})
+
+        created = self.client.post("/projects", json={"name": "Bob's first"})
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(
+            self.client.get("/projects").json()["projects"][0]["name"], "Bob's first"
+        )
+
+    def test_the_public_row_is_answered_by_handlers_not_by_a_guard(self) -> None:
+        # Completes the matrix's fourth row. The tier partition proves no public
+        # operation *declares* a guard; this proves none behaves as if it had
+        # one. ``/auth/login`` is the discriminator: a guarded operation refuses
+        # a bodyless call with 401 before validation runs, so 422 here is
+        # positive evidence that the request reached the handler's own contract.
+        self.assertEqual(self.client.get("/health").status_code, 200)
+        self.assertEqual(self.client.post("/auth/logout").status_code, 200)
+        self.assertEqual(self.client.post("/auth/login").status_code, 422)
+        self.assertEqual(self.client.get("/auth/me").status_code, 401)
 
 
 class TestSeamStaysAnOverrideTest(unittest.TestCase):
