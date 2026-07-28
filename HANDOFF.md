@@ -4,7 +4,7 @@
 > 완료 서술은 여기 쓰지 않는다 — `docs/daily_logs/`(상세) · `docs/system-contract-sot.md` 변경이력 · `CHANGELOG.md`(마일스톤) · `docs/verifications/`(독립 검증)에 이미 있다.
 > 편집 규칙은 `CLAUDE.md`·`AGENTS.md`의 "HANDOFF.md" 절에 있다. **길이 상한은 없다** — 대신 **~200줄을 넘으면 자가 검수**하고(그 뒤로는 ~100줄마다) 결과를 아래 한 줄로 남긴다. 길어야 할 이유가 있으면 길어도 된다. 안 보는 것이 문제다.
 >
-> 마지막 자가 검수: 2026-07-28 · 187줄 (D8-5c 반영 + 컨텍스트 예산 트랙 추가 — 진행표·operation 수(69)·회귀 기준선을 덮어썼고, Next Tasks 1번은 "5-c를 하라"에서 "D8-5는 오너 결정에서 막혔고 그동안 갈 수 있는 곳"으로 다시 썼다. 신규 2건은 **미착수 작업**이라 완료 서술이 아니다. 다음 검수 트리거는 200줄 — **거의 다 왔다**)
+> 마지막 자가 검수: 2026-07-28 · 196줄 (C-1 + 독립 검증 보강 반영. **트리거 200줄에 닿기 전에 미리 봤다** — 추가한 만큼 덜어냈다: 함정 절에 **pymongo naive 날짜·쿠키 `Secure` 두 항목이 통째로 중복**돼 있어 뒤엣것을 지웠고(내용 동일·표현만 달랐다 — 스택 금지 규칙 위반), 2026-07-27 베타 관측치에서 **완료 서술**(nginx healthcheck 수정 — 이미 `docker-compose.yml`과 git에 있다)을 걷어내고 머신 무관한 "healthy 7 + healthcheck 없는 2"만 구조적 사실로 승격했다. Next Tasks 2번은 **덧붙이지 않고 다시 썼다**(C-1 완료 → C-2로). 다음 검수 트리거는 300줄)
 
 ## 머신 구성 (알파 · 베타 · 감마)
 
@@ -12,8 +12,8 @@
 
 | 머신 | 역할 | LLM | 띄울 수 있는 것 |
 |---|---|---|---|
-| **알파(Alpha)** | 서비스 배포용 | **in-stack llama**(GPU 3060 Ti 12GB, `docker-compose.llama.yml`) | 전체 스택 + 자체 GPU LLM |
-| **베타(Beta)** | 테스트·개발용 (**지금 이 머신**) | **외부 LLM**(gemma-4-12B, LAN) — 현행 주소는 `.env`·머신-로컬(2026-07-27 `192.168.1.22:9080`) | 전체 스택. gateway는 `.env`의 `LLAMA_BASE_URL`로 외부 서버를 가리킨다 |
+| **알파(Alpha)** | 서비스 배포용 (**2026-07-28 기준 여기**) | **in-stack llama**(GPU **RTX 3060 12GB** — `nvidia-smi` 실측, `docker-compose.llama.yml`) | 전체 스택 + 자체 GPU LLM |
+| **베타(Beta)** | 테스트·개발용 | **외부 LLM**(gemma-4-12B, LAN) — 현행 주소는 `.env`·머신-로컬(2026-07-27 `192.168.1.22:9080`) | 전체 스택. gateway는 `.env`의 `LLAMA_BASE_URL`로 외부 서버를 가리킨다 |
 | **감마(Gamma)** | 사이드 개발용 (노트북) | **없음** — LLM을 못 띄운다 | CPU 기반 컨테이너·DB 정도(mongo/test-mongo·ES·chroma). LLM 관통 작업은 불가 |
 
 - **어느 머신에서든 `docker compose up`만으로 같은 포트로 뜬다**(포트는 repo에 고정, 아래 "기동·실행법"). 머신별로 달라지는 것은 **LLM을 어디서 얻느냐**뿐이다:
@@ -59,9 +59,11 @@
 - **loop 내부 gate 레코드에는 `decision`·`gate_quality_score`가 없다**(v1.7.47 알려진 공백): 파생점수는 endpoint가 `annotate_last`로 얹는데 revise loop이 round별 판정을 결과에 노출하지 않는다(`WritingLoopStage`는 stage/ordinal/status만). 그 필드는 **독립 `POST …/writing/gate` 호출에만** 채워지므로 집계가 전수 커버리지를 가정하면 안 된다.
 - 공개 API 계약(H3)은 닫혀 있다: **`/health`를 제외한 68개 operation 전부**(전체 69 — D8-5a 관리자 3종 + 5-c 전역 KPI)가 realistic 에러 상태를 OpenAPI에 선언하고 **미매핑 500 부채는 0건**이다. 새 endpoint를 추가하면 **`responses=`와 dependency를 함께** 붙여야 한다. `{project_id}` 경로는 `_REQUIRE_PROJECT_OWNER` + `_owned(...)`, 나머지 보호 경로는 `_REQUIRE_AUTH` + `_protected(...)`를 쓴다. 트랙별 전수 선언 가드가 빠뜨림을 잡는다. 저장소 장애 503 face는 이제 **예외 없이 전 endpoint 균일**하다 — v1.7.40이 마지막 두 잔여(광의 catch가 pymongo를 삼켜 502로 내던 곳)를 닫았다: `POST …/analysis/jobs/{id}/run`과 `POST …/context-search`의 `persist_rejection`. 둘 다 광의 catch 앞에 `except _STORAGE_ERRORS`를 두어 저장소 예외를 503으로 보낸다. **주의**: 앞으로 endpoint body를 광의 `except Exception`으로 감싸면 그 순간 저장소 예외가 다시 502/도메인 에러로 새므로, 그런 catch를 둘 때는 반드시 그 앞에 `except _STORAGE_ERRORS`를 둔다.
 - 회귀 기준선: backend는 **test-mongo ON 전량 실행 1700 passed / 1 skipped / 1468 subtests**가 기준이다(2026-07-28 D8-5c 후 재실행, 약 870s). test-mongo OFF 보조 실행은 **1612 passed / 89 skipped / 1468 subtests**(2026-07-28 D8-5c 후 실측, 182s)이며, 이 **89 skip을 정상 기준선으로 읽으면 안 된다**(Mongo 통합 계약 + live Chroma). 두 실행의 passed+skipped는 1701로 일치한다. frontend는 **217 passed / 14 files**. build JS는 **진입 404.87 kB + 관측 화면 청크 385.71 kB**(차트는 `React.lazy`로 분리). **skip 수는 머신·인프라 기동 여부마다 다르다** — 숫자가 안 맞으면 `-rs`로 skip 사유부터 볼 것. **백엔드는 `argon2-cffi`가 설치돼 있어야 한다** — 없으면 auth 관련 26개 모듈이 수집 단계에서 실패해 회귀처럼 보인다. 핀은 루트가 아니라 [`services/application/requirements.txt:1`](services/application/requirements.txt#L1)에 있다(`argon2-cffi>=23,<24`). **프론트는 `npm install`이 선행**돼야 한다.
-- **[베타 머신 관측치, 2026-07-27, `docker compose ps` 실측]** 전체 스택이 `--build` 재빌드 후 떠 있다(외부 12B `192.168.1.22:9080` 배선). 정확한 health: **healthy 7**(`application`·`gateway`·`mongo`·`elasticsearch`·`embedding`·`chroma`·`frontend`) + **healthcheck 없는 2**(`worker`·`generation_worker` — async 배경 워커라 by design, "Up"이지 "healthy" 아님). **"전부 healthy"라고 쓰지 않는다** — 워커 2종은 구조적으로 healthcheck가 없다. `/health` 200, 관측 route(`/projects/{id}/observability/kpi`) 등록 확인. (frontend는 원래 unhealthy였다 — nginx `listen 80`이 IPv4 전용인데 healthcheck가 `localhost`→`::1`로 풀려 refused. 이번에 healthcheck를 `127.0.0.1`로 고쳐 healthy 전환 — `docker-compose.yml`에 반영, 46f6009 이후의 사전 존재 결함이었다.) **DB는 fresh다** — 기동 시 dev `mongo_data`의 구 `analysis_extract_v3` 본문(sha `fb4e272…`, 볼륨 소거로 재확인 불가)이 현재 canonical v3(sha `4376310…`)와 달라 `PromptTemplateConflict`로 app이 죽었고(코드 회귀 아님, 코드↔테스트 핀 일치), **오너 판단으로 데이터 볼륨(mongo·es·chroma)을 비우고**(embedding 모델 캐시는 보존) 재기동해 해소했다. 즉 관측 화면·모든 데이터는 **빈 상태부터** 시작한다.
-- **관측 화면 육안 확인이 남은 미검증 항목**이다(로직은 회귀로 잠겨 있고 렌더만 미검증). URL `http://localhost:5520/projects/:id/observability`. **DB가 비어 있어 지금 열면 빈 상태**만 보이므로, 차트 배치·라벨 충돌을 보려면 먼저 파이프라인을 한 번 관통시켜(프로젝트 생성→분석/집필) `llm_call_audits`를 쌓아야 한다.
-- 인증 백엔드 변경은 application, 로그인 UI 변경은 frontend 이미지 rebuild가 필요하다. 현재 베타 머신은 2026-07-27 D8-4 이미지까지 재빌드됐다.
+- **스택 health를 읽는 법**(머신 무관, 구조적 사실): 정상 상태는 **healthy 7**(`application`·`gateway`·`mongo`·`elasticsearch`·`embedding`·`chroma`·`frontend`) + **healthcheck 없는 2**(`worker`·`generation_worker` — async 배경 워커라 by design, "Up"이지 "healthy" 아님). **"전부 healthy"라고 쓰지 않는다.**
+- **[알파 머신 관측치, 2026-07-28]** 스택이 내려가 있다. C-1 측정 전 `docker compose down`을 했으므로 **컨테이너는 없고 named 볼륨(mongo·es·chroma·llama_models)은 그대로다**(`-v` 없이 내렸다) — 데이터는 보존돼 있다. 다만 이 머신의 DB·색인 **내용**은 확인하지 않았으니, 관통 작업 전에 `docker compose up -d` 후 실제 상태를 볼 것.
+- **[베타 머신 관측치, 2026-07-27]** 전체 스택 기동 확인(외부 12B `192.168.1.22:9080` 배선), 이미지는 D8-4까지 재빌드됨. **DB는 fresh다** — 구 `analysis_extract_v3` 본문(sha `fb4e272…`)이 현재 canonical(sha `4376310…`)과 달라 `PromptTemplateConflict`로 app이 죽었고, **오너 판단으로 데이터 볼륨(mongo·es·chroma)을 비워**(embedding 모델 캐시는 보존) 해소했다. 코드 회귀가 아니라 **오래된 볼륨과 현행 프롬프트 핀의 충돌**이며, 오래된 볼륨을 가진 다른 머신에서도 같은 일이 난다(위 "출시된 프롬프트 본문은 immutable" 함정과 같은 뿌리).
+- **관측 화면 육안 확인이 남은 미검증 항목**이다(로직은 회귀로 잠겨 있고 렌더만 미검증). URL `http://localhost:5520/projects/:id/observability`. **DB가 비어 있으면 빈 상태만** 보이므로, 차트 배치·라벨 충돌을 보려면 먼저 파이프라인을 한 번 관통시켜(프로젝트 생성→분석/집필) `llm_call_audits`를 쌓아야 한다.
+- 인증 백엔드 변경은 application, 로그인 UI 변경은 frontend 이미지 rebuild가 필요하다.
 
 ## 기동 · 실행법
 
@@ -96,9 +98,8 @@ docker compose run --rm --no-deps -v "$PWD/tests:/app/tests" \
 - **백엔드는 `pytest`가 아니라 `python -m pytest`로 실행한다.**
 - **pymongo는 BSON 날짜를 naive로 돌려준다**(client가 `tz_aware=True`가 아닌 한). 그것을 aware `datetime.now(UTC)`와 비교하면 `TypeError`다. **fake-collection 테스트는 이걸 재현하지 못한다** — aware를 넣으면 aware가 나오므로 **스위트는 green인데 배포만 깨진다**. 실측(2026-07-27): 세션 `expires_at` 비교가 실 Mongo에서 `GET /auth/me`를 전량 500으로 만들었는데 유닛 46건은 전부 통과했다. 규칙: **Mongo 날짜를 파이썬으로 끌어와 비교하면 `_entry` 경계에서 UTC를 재부착**하고(`auth/sessions_mongo.py`의 `_aware`), fake collection이 **드라이버처럼 naive를 돌려주는** 회귀를 함께 넣는다. 기존 코드가 무사한 이유는 같은 판정을 **쿼리 서버측**(`{"$lte": …}`)에서 하기 때문이다(`generation_job_mongo.py:85`·`indexing/mongo_repository.py:130-136`) — 그 방식을 따르면 이 함정 자체가 없다.
 - **쿠키 인증 테스트는 `TestClient(app, base_url="https://testserver")`로 만든다.** 세션 쿠키는 `Secure`가 기본 on이라 http 클라이언트는 쿠키를 **조용히 버린다** — 세션 테스트가 엉뚱한 이유로 실패한다(실제로 처음 4건이 그렇게 실패했다).
-- **pymongo는 BSON 날짜를 naive로 돌려준다**(client가 `tz_aware=True`가 아닌 한). 그것을 aware `datetime.now(UTC)`와 비교하면 `TypeError`다. **fake-collection 테스트는 이걸 재현하지 못한다** — aware를 넣으면 aware가 나오므로 **스위트는 green인데 배포만 깨진다**. 실측(2026-07-27): 세션 `expires_at` 비교가 실 Mongo에서 `GET /auth/me`를 전량 500으로 만들었고 유닛 46건은 전부 통과했다. 규칙: **Mongo 날짜를 파이썬으로 끌어와 비교하면 `_entry` 경계에서 UTC를 재부착**하고(`auth/sessions_mongo.py:_aware`), fake collection이 **드라이버처럼 naive를 돌려주는** 회귀를 함께 넣는다. 참고로 기존 코드가 무사한 이유는 같은 판정을 **쿼리 서버측**(`{"$lte": …}`)에서 하기 때문이다(`generation_job_mongo.py:85`·`indexing/mongo_repository.py:130-136`) — 그 방식을 따르면 이 함정 자체가 없다.
-- **쿠키 인증 테스트는 `TestClient(app, base_url="https://testserver")`로 만든다.** 세션 쿠키는 `Secure` 기본 on이라 http 클라이언트는 쿠키를 **조용히 버린다** — 세션 테스트가 엉뚱한 이유로 실패(또는 통과)한다.
-- live 작업 시 외부 llama(`192.168.1.22:9080`)가 죽어 있으면 in-stack llama로 돌린다. `-hf`는 재다운로드 정체가 잦아 캐시 blob을 `-m`으로 직접 지정해야 뜬 전례가 있다.
+- **in-stack llama(`-hf`)가 캐시가 멀쩡한데도 모델을 다시 받는 이유가 잡혔다**(2026-07-28 알파 실측): `-hf …:Q4_0`은 리비전을 고정하지 않고 `main`을 따라가는데, HF 캐시의 `refs/main`이 `29d0977…`로 이동한 반면 디스크 snapshot은 `f6e7774…`·`2b318d6…`뿐이다. 즉 **"정체"가 아니라 새 리비전을 받는 중**이며, 기다리면 언젠가 뜨지만 6.5 GB를 다시 받는다. 회피는 캐시 snapshot을 `-m`으로 직접 지정하는 것: `-m /models/models--google--gemma-4-12B-it-qat-q4_0-gguf/snapshots/2b318d6ebebf093f50ca4376e858325f10703358/gemma-4-12b-it-qat-q4_0.gguf`. 볼륨에 stale `.downloadInProgress` 약 4.9 GB가 남아 있다(11.8 GB 중). **repo는 아직 안 고쳤다** — 리비전 고정 여부는 추적 부채.
+- live 작업 시 외부 llama(`192.168.1.22:9080`)가 죽어 있으면 in-stack llama로 돌린다.
 
 ## Active Decisions (앞으로의 작업을 구속하는 것)
 
@@ -123,11 +124,14 @@ docker compose run --rm --no-deps -v "$PWD/tests:/app/tests" \
 - **[미래 확장, 지금 범위 아님] 공유·협업 글쓰기.** 오너(2026-07-27)가 "생각 안 해봤다 — 나중에 한 번 생각해보자"며 유예. 다중 사용자 소유권은 **D3=A(`Project.owner_id` 한 필드 = 격리, 1 project 1 owner)**로 가되, 공유/협업(권한 등급·workspace·`members[]`)은 미래 확장이다. D3=A가 그 문을 **닫지 않게** 설계돼 있다(`owner_id`는 나중에 `members[]` 첫 원소나 workspace 소유로 승격 가능 — `plans/multi-user-auth-cms-decisions.md` D3). 착수 시점 아님.
 - **[D8-3a가 깨뜨림, 미수리] `APPLICATION_BASE_URL`로 앱 HTTP API를 치는 운영 smoke 스크립트 4종은 이제 401을 받는다**: [`phase2a_deployed_e2e_smoke.py:33`](scripts/phase2a_deployed_e2e_smoke.py#L33) · [`phase3a_deployed_rebuild_smoke.py:36`](scripts/phase3a_deployed_rebuild_smoke.py#L36) · [`phase4_context_search_deployed_smoke.py:56`](scripts/phase4_context_search_deployed_smoke.py#L56) · [`phase6_gate_finding_live_smoke.py:71`](scripts/phase6_gate_finding_live_smoke.py#L71). 로그인 옵션(계정·비밀번호 전달 + 쿠키 유지)을 붙이는 별도 증분이 필요하다. **워커는 무관하다** — HTTP를 안 쓰고 Mongo에 직접 붙는다(그쪽은 D8-7).
 - **[문서 부채, 오너 지시 2026-07-28] `docs/plans/`가 너무 커져서 정리가 필요하다.** 실측: **88개 문서(1.2MB) 중 72개가 `*-decisions.md` 브리프**이고, 접두 체계가 이미 무너졌다(`00`~`07` 계열 59개 + **접두 없음 29개** — 최근 것은 전부 접두가 없다: `auth-d8-*`·`observability-*`·`external-api-*`). [`plans/README.md`](docs/plans/README.md)는 평평한 번호 목록인데 **88개 중 38개만 링크돼 있고 50개가 미등재**다 — 즉 인덱스가 이미 실질을 못 따라간다. 정리 방향(미결정): 브리프를 `plans/decisions/` 하위로 분리할지 · 페이즈별 디렉터리로 나눌지 · README를 수기 목록에서 생성 인덱스로 바꿀지. **주의: 브리프는 오너 결정의 근거 기록이라 삭제·병합하면 "왜 그렇게 정했는가"가 사라진다** — 이동·인덱싱은 되지만 통폐합은 결정 이력 손실이므로 별도 판단이 필요하고, `HANDOFF`·`SoT`·work_log가 브리프 경로를 다수 인용하므로 **이동 시 링크 갱신이 함께 가야 한다**(정리 자체보다 이 링크 작업이 크다).
+- **[알파 작업을 막는 것, 미결정] `docker-compose.llama.yml`의 `-hf`가 리비전을 고정하지 않는다.** `-hf …:Q4_0`은 `main`을 따라가는데 업스트림 `refs/main`이 `29d0977…`로 이동해, 캐시에 온전한 6.5 GB 모델이 있어도 **새 리비전을 다시 받는다**(위 함정 절에 회피법). 고정하려면 `-hf`에 리비전을 붙이거나 `-m`으로 캐시 경로를 직접 쓰면 되지만, **모델 리비전을 최신으로 올릴지 현행을 고정할지가 먼저 정해져야 한다** — 새 리비전이 프롬프트 sha 핀·gate 동작에 어떤 영향을 주는지 미측정이다. 볼륨의 stale `.downloadInProgress` 약 4.9 GB 정리도 함께 판단할 사안.
 - **[누수 아님, 의존성 주의] `context_search/service.py:199`·`:406`의 `embed()`**: 자체적으로 `EmbeddingProviderError`를 안 잡지만 호출자(step runner `:752`·`:835`)의 광의 `except Exception` → `BACKEND_ERROR` → 502가 이미 보호한다. **그 catch를 좁히면 그 순간 500 누수가 된다.**
 
 ## Owner Decisions Needed
 
 - **★ dogfood 착수(GATE-1)** — 실 12B 풀스택 관통은 끝났고 기술적 선행 조건은 없다. 착수하면 `OPS-1` Ready 승격. **인증 HTTP 시행이 닫히면서 "인가 없이 dogfood하면 데이터가 섞인다"는 종전 걸림돌은 사라졌다** — 이제 남은 것은 D8-5~7 구현과의 순서 판단이며 오너 결정 사항이다.
+
+- **★ K-6 — report 호출이 창을 넘는 것을 어떻게 막을지**(C-1이 새로 연 항목, **C-3의 선행**). 선택지는 브리프 §2-1의 **R-a**(report 전용 컨텍스트 예산 — 구현자 추천) · **R-b**(출력 6144 하향 — 2026-07-22 회귀를 되살릴 위험) · **R-c**(창 32768 — 미측정이고 베타는 외부 서버라 적용 불가) · **R-d**(가드에만 위임 — 근거가 소리 없이 사라진다). 정하지 않고 창만 16384로 올리면 report는 깨진 채 남는다.
 
 **결정 완료 — 오너 결정 대기 아님, 구현만 남음:**
 
@@ -141,7 +145,12 @@ docker compose run --rm --no-deps -v "$PWD/tests:/app/tests" \
 **1번이 현재 진행 중인 트랙이다.** 나머지는 그와 무관하게 남아 있는 것들.
 
 1. **인증 D8-5는 오너 결정에서 막혀 있다.** 결정 없이 진행 가능한 하위 슬라이스(5-a·5-c)는 끝났고, 남은 **5-b(전 프로젝트 목록)·5-d(관리자 화면)는 오너 결정 선행**이다 — `plans/auth-d8-5-admin-decisions.md` §7에 **C-1~C-6**이 구현자 의견과 함께 정리돼 있다. C-1~C-5는 F1=C가 연 승격 메커니즘(수명·쓰기 허용·감사 대상·소유자 통지·사유 필수)이고 얽혀 있어 한 번에 정하는 편이 낫다. **C-6은 D8-5a 독립 검증 H-c에서 온 별개 항목** — `POST /admin/users`가 관리자에게 초기 비밀번호를 평문으로 지정하게 하므로 관리자가 사용자 비밀번호를 아는 상태가 남는다(비밀번호 정책도 아직 없다). 결정되면 승격 저장소·`require_project_owner`의 승격 인지·감사 기록·전수 가드 확장이 한 슬라이스로 묶인다. **결정을 기다리는 동안 갈 수 있는 곳**: D8-6 영구 삭제(D5=A로 파기 범위가 이미 결정돼 있고 승격이 필요 없다 — 내용을 읽지 않기 때문이며, 이 점만 착수 시 확인받으면 된다) 또는 D8-7 인프라 인증.
-2. **★ 컨텍스트 예산 — 한글 토큰 보정 · 창 가드 · 입력 상한 8192**(오너 방향 확정 2026-07-28, 브리프 `plans/context-budget-korean-tokens-decisions.md`). **오늘 조사만 했고 코드는 한 줄도 안 바뀌었다.** 요지: 토큰 추정식이 `len/4`(영어용)인데 **한글 실측은 1.70자/token**이라 2.4배 과소평가하고, 그 결과 `max_tokens=4096` 예산이 실제로는 **16,384자(≈9,100~10,100 토큰)**를 통과시켜 **서버 창 `n_ctx=8192`를 그것만으로 초과**한다. 창을 지키는 코드는 없다(주석 한 줄뿐). 프론트에는 글자수 제한·표시가 **아예 없다**. **방향은 오너가 A로 확정했다**(창 `LLAMA_CTX_SIZE` 8192→**16384** + 입력 예산 4096→**8192**). **착수는 브리프 §4의 C-1 = 알파 머신에서 16384가 실제로 뜨는지 기동 확인부터** — 이건 A/B를 고르는 관문이 아니라 A의 확인 절차이며, 안 뜰 때의 후퇴 순서(KV 양자화 → GPU 레이어 하향 → 최후에 B)도 §2에 적어 뒀다. **가드 식은 `입력 + 출력 ≤ 창`이다** — llama.cpp 실측 결과 프롬프트 단독 초과는 400으로 거부하지만 **`프롬프트+출력` 초과는 200인데 출력만 조용히 잘리므로**(`truncated: true`) `입력 ≤ 창`만으로는 아무도 모른다. **창 크기는 상수로 박지 말고 서버에서 읽을 것** — 알파는 16384, 베타는 외부 서버라 8192이고 repo가 그 설정을 통제하지 못한다.
+2. **★ 컨텍스트 예산 — 한글 토큰 보정 · 창 가드 · 입력 상한 8192**(브리프 `plans/context-budget-korean-tokens-decisions.md`). **아직 코드는 한 줄도 안 바뀌었다** — C-1은 실측 슬라이스였다. 요지: 토큰 추정식이 `len/4`(영어용)인데 **한글 실측은 1.68~1.70자/token**이라 2.4배 과소평가하고, 그 결과 `max_tokens=4096` 예산이 **16,384자 = 실측 10,094 토큰**을 통과시켜 창을 그것만으로 넘긴다. 창을 지키는 코드는 없고 프론트에는 글자수 제한·표시가 아예 없다.
+   - **다음은 C-2**(토큰 계측 보정: 색인 시 토큰수 저장 + 상수 fallback). **알파 머신이 필요 없다.**
+   - **C-3 착수 전 브리프 §2-1 필독.** C-1이 찾은 것: **창을 16384로 올려도 self-report 호출은 컨텍스트가 차면 넘친다.** report는 `system + 후보 산문 + 컨텍스트`를 다 싣기 때문이다. **"항상"은 아니다** — 컨텍스트 0이면 세 프리셋 모두 들어간다(long 최악 10,738). 넘기 시작하는 임계는 **short 8,754 · medium 7,755 · long 5,646 tok**이고, **`long`은 현행 예산 상한(10,094)의 56%만 차도 넘는다.** `long`은 이미 프론트에 노출돼 있어 오늘 도달 가능한 경로다. **다만 운영에서 얼마나 자주 만재가 되는지는 미측정** — "구조적으로 도달 가능"과 "자주 일어난다"를 섞지 말 것. C-2로도 해소되지 않으므로 C-3이 report 컨텍스트 예산을 **명시적으로** 정해야 한다(브리프 §2-1의 **K-6** 선택지 R-a~R-d, 추천은 R-a).
+   - **가드 식은 `입력 + 출력 ≤ 창`이다** — 프롬프트 단독 초과는 400으로 거부되지만 **`프롬프트+출력` 초과는 200인데 출력만 조용히 잘리므로**(`truncated: true`) `입력 ≤ 창`만으로는 아무도 모른다.
+   - **창 크기는 상수로 박지 말고 서버에서 읽을 것** — 알파는 16384로 갈 수 있고 베타는 외부 서버라 8192이며 repo가 그 설정을 통제하지 못한다.
+   - **A안(창 16384)은 알파에서 검증됐다**(2026-07-28): `n_ctx_slot=16384` 기동, 생성 중 VRAM 최대 **9,502 / 12,288 MiB**, 속도는 8192 대비 노이즈 범위. 창 12,971 tok을 실제로 채워도 스파이크 없음. §2의 후퇴선(KV 양자화 → 레이어 하향 → B)은 필요 없었다. **단 기본값은 아직 8192다** — 변경은 가드와 함께 C-3에서.
 3. **스택을 올리면 바로 할 것 — 화면 육안 확인 2건**(둘 다 로직은 회귀로 잠겨 있고 **렌더만** 미검증):
    (a) 관측 화면 `/projects/:id/observability` — 차트 라벨 충돌·막대 배치·좁은 화면 표 넘침.
    (b) 비동기 패드 — 렌더 · 이어쓰기 탭 완료 배지 · 5초 폴링 · "다시 시도" 버튼 · 탭 전환 후 폴링 생존.
