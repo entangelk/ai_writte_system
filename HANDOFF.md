@@ -4,7 +4,7 @@
 > 완료 서술은 여기 쓰지 않는다 — `docs/daily_logs/`(상세) · `docs/system-contract-sot.md` 변경이력 · `CHANGELOG.md`(마일스톤) · `docs/verifications/`(독립 검증)에 이미 있다.
 > 편집 규칙은 `CLAUDE.md`·`AGENTS.md`의 "HANDOFF.md" 절에 있다. **길이 상한은 없다** — 대신 **~200줄을 넘으면 자가 검수**하고(그 뒤로는 ~100줄마다) 결과를 아래 한 줄로 남긴다. 길어야 할 이유가 있으면 길어도 된다. 안 보는 것이 문제다.
 >
-> 마지막 자가 검수: 2026-07-28 · 185줄 (D8-5c 반영 — 진행표·operation 수(69)·회귀 기준선을 덮어썼고, Next Tasks 1번은 "5-c를 하라"에서 "D8-5는 오너 결정에서 막혔고 그동안 갈 수 있는 곳"으로 다시 썼다. 완료 서술은 여기 붙이지 않았다. 다음 검수 트리거는 200줄)
+> 마지막 자가 검수: 2026-07-28 · 187줄 (D8-5c 반영 + 컨텍스트 예산 트랙 추가 — 진행표·operation 수(69)·회귀 기준선을 덮어썼고, Next Tasks 1번은 "5-c를 하라"에서 "D8-5는 오너 결정에서 막혔고 그동안 갈 수 있는 곳"으로 다시 썼다. 신규 2건은 **미착수 작업**이라 완료 서술이 아니다. 다음 검수 트리거는 200줄 — **거의 다 왔다**)
 
 ## 머신 구성 (알파 · 베타 · 감마)
 
@@ -122,6 +122,7 @@ docker compose run --rm --no-deps -v "$PWD/tests:/app/tests" \
 - **[미구현이나 구현 결정됨, 포트폴리오 정확성 주의] cross-encoder(뉴럴) 리랭커는 아직 없다.** 현재 RAG 리랭킹은 **RRF(Reciprocal Rank Fusion) 융합만**이다 — 벡터(Chroma/BGE-m3-ko) + lexical(ES/nori) 두 랭킹을 `1/(k+rank)`(k=60)로 합쳐 재정렬([`context_search/service.py:279`](services/application/app/context_search/service.py#L279)·[`:495`](services/application/app/context_search/service.py#L495), env `vector/lexical/hybrid`). query-document 쌍을 신경망으로 재채점하는 cross-encoder 리랭커는 2026-07-05에 유예됐다가([`plans/04-real-vector-backend-decisions.md:11`](docs/plans/04-real-vector-backend-decisions.md#L11)) **2026-07-27 구현하기로 결정**됐다(`plans/external-api-expansion-decisions.md` D5): 로컬은 self-host **`dragonkue/bge-reranker-v2-m3-ko`**(임베딩 서비스와 같은 패턴), 외부 리랭커 API도 붙일 수 있게 `RerankProvider` seam을 함께 뚫는다. **별도 슬라이스**(인증·외부 API LLM/임베딩 슬라이스 뒤). **삽입 자리**: RRF 융합 결과 뒤, `retrieve()` seam 다음. **포트폴리오/README 표기**: 현재 상태는 "RRF 하이브리드 융합 리랭킹 있음, 뉴럴 cross-encoder 리랭커는 미구현(구현 예정)"이 정확 — 코드가 붙기 전까지 "있음"으로 쓰면 거짓이다.
 - **[미래 확장, 지금 범위 아님] 공유·협업 글쓰기.** 오너(2026-07-27)가 "생각 안 해봤다 — 나중에 한 번 생각해보자"며 유예. 다중 사용자 소유권은 **D3=A(`Project.owner_id` 한 필드 = 격리, 1 project 1 owner)**로 가되, 공유/협업(권한 등급·workspace·`members[]`)은 미래 확장이다. D3=A가 그 문을 **닫지 않게** 설계돼 있다(`owner_id`는 나중에 `members[]` 첫 원소나 workspace 소유로 승격 가능 — `plans/multi-user-auth-cms-decisions.md` D3). 착수 시점 아님.
 - **[D8-3a가 깨뜨림, 미수리] `APPLICATION_BASE_URL`로 앱 HTTP API를 치는 운영 smoke 스크립트 4종은 이제 401을 받는다**: [`phase2a_deployed_e2e_smoke.py:33`](scripts/phase2a_deployed_e2e_smoke.py#L33) · [`phase3a_deployed_rebuild_smoke.py:36`](scripts/phase3a_deployed_rebuild_smoke.py#L36) · [`phase4_context_search_deployed_smoke.py:56`](scripts/phase4_context_search_deployed_smoke.py#L56) · [`phase6_gate_finding_live_smoke.py:71`](scripts/phase6_gate_finding_live_smoke.py#L71). 로그인 옵션(계정·비밀번호 전달 + 쿠키 유지)을 붙이는 별도 증분이 필요하다. **워커는 무관하다** — HTTP를 안 쓰고 Mongo에 직접 붙는다(그쪽은 D8-7).
+- **[문서 부채, 오너 지시 2026-07-28] `docs/plans/`가 너무 커져서 정리가 필요하다.** 실측: **88개 문서(1.2MB) 중 72개가 `*-decisions.md` 브리프**이고, 접두 체계가 이미 무너졌다(`00`~`07` 계열 59개 + **접두 없음 29개** — 최근 것은 전부 접두가 없다: `auth-d8-*`·`observability-*`·`external-api-*`). [`plans/README.md`](docs/plans/README.md)는 평평한 번호 목록인데 **88개 중 38개만 링크돼 있고 50개가 미등재**다 — 즉 인덱스가 이미 실질을 못 따라간다. 정리 방향(미결정): 브리프를 `plans/decisions/` 하위로 분리할지 · 페이즈별 디렉터리로 나눌지 · README를 수기 목록에서 생성 인덱스로 바꿀지. **주의: 브리프는 오너 결정의 근거 기록이라 삭제·병합하면 "왜 그렇게 정했는가"가 사라진다** — 이동·인덱싱은 되지만 통폐합은 결정 이력 손실이므로 별도 판단이 필요하고, `HANDOFF`·`SoT`·work_log가 브리프 경로를 다수 인용하므로 **이동 시 링크 갱신이 함께 가야 한다**(정리 자체보다 이 링크 작업이 크다).
 - **[누수 아님, 의존성 주의] `context_search/service.py:199`·`:406`의 `embed()`**: 자체적으로 `EmbeddingProviderError`를 안 잡지만 호출자(step runner `:752`·`:835`)의 광의 `except Exception` → `BACKEND_ERROR` → 502가 이미 보호한다. **그 catch를 좁히면 그 순간 500 누수가 된다.**
 
 ## Owner Decisions Needed
@@ -140,12 +141,13 @@ docker compose run --rm --no-deps -v "$PWD/tests:/app/tests" \
 **1번이 현재 진행 중인 트랙이다.** 나머지는 그와 무관하게 남아 있는 것들.
 
 1. **인증 D8-5는 오너 결정에서 막혀 있다.** 결정 없이 진행 가능한 하위 슬라이스(5-a·5-c)는 끝났고, 남은 **5-b(전 프로젝트 목록)·5-d(관리자 화면)는 오너 결정 선행**이다 — `plans/auth-d8-5-admin-decisions.md` §7에 **C-1~C-6**이 구현자 의견과 함께 정리돼 있다. C-1~C-5는 F1=C가 연 승격 메커니즘(수명·쓰기 허용·감사 대상·소유자 통지·사유 필수)이고 얽혀 있어 한 번에 정하는 편이 낫다. **C-6은 D8-5a 독립 검증 H-c에서 온 별개 항목** — `POST /admin/users`가 관리자에게 초기 비밀번호를 평문으로 지정하게 하므로 관리자가 사용자 비밀번호를 아는 상태가 남는다(비밀번호 정책도 아직 없다). 결정되면 승격 저장소·`require_project_owner`의 승격 인지·감사 기록·전수 가드 확장이 한 슬라이스로 묶인다. **결정을 기다리는 동안 갈 수 있는 곳**: D8-6 영구 삭제(D5=A로 파기 범위가 이미 결정돼 있고 승격이 필요 없다 — 내용을 읽지 않기 때문이며, 이 점만 착수 시 확인받으면 된다) 또는 D8-7 인프라 인증.
-2. **스택을 올리면 바로 할 것 — 화면 육안 확인 2건**(둘 다 로직은 회귀로 잠겨 있고 **렌더만** 미검증):
+2. **★ 컨텍스트 예산 — 한글 토큰 보정 · 창 가드 · 입력 상한 8192**(오너 방향 확정 2026-07-28, 브리프 `plans/context-budget-korean-tokens-decisions.md`). **오늘 조사만 했고 코드는 한 줄도 안 바뀌었다.** 요지: 토큰 추정식이 `len/4`(영어용)인데 **한글 실측은 1.70자/token**이라 2.4배 과소평가하고, 그 결과 `max_tokens=4096` 예산이 실제로는 **16,384자(≈9,100~10,100 토큰)**를 통과시켜 **서버 창 `n_ctx=8192`를 그것만으로 초과**한다. 창을 지키는 코드는 없다(주석 한 줄뿐). 프론트에는 글자수 제한·표시가 **아예 없다**. **방향은 오너가 A로 확정했다**(창 `LLAMA_CTX_SIZE` 8192→**16384** + 입력 예산 4096→**8192**). **착수는 브리프 §4의 C-1 = 알파 머신에서 16384가 실제로 뜨는지 기동 확인부터** — 이건 A/B를 고르는 관문이 아니라 A의 확인 절차이며, 안 뜰 때의 후퇴 순서(KV 양자화 → GPU 레이어 하향 → 최후에 B)도 §2에 적어 뒀다. **가드 식은 `입력 + 출력 ≤ 창`이다** — llama.cpp 실측 결과 프롬프트 단독 초과는 400으로 거부하지만 **`프롬프트+출력` 초과는 200인데 출력만 조용히 잘리므로**(`truncated: true`) `입력 ≤ 창`만으로는 아무도 모른다. **창 크기는 상수로 박지 말고 서버에서 읽을 것** — 알파는 16384, 베타는 외부 서버라 8192이고 repo가 그 설정을 통제하지 못한다.
+3. **스택을 올리면 바로 할 것 — 화면 육안 확인 2건**(둘 다 로직은 회귀로 잠겨 있고 **렌더만** 미검증):
    (a) 관측 화면 `/projects/:id/observability` — 차트 라벨 충돌·막대 배치·좁은 화면 표 넘침.
    (b) 비동기 패드 — 렌더 · 이어쓰기 탭 완료 배지 · 5초 폴링 · "다시 시도" 버튼 · 탭 전환 후 폴링 생존.
-3. **관측 화면을 더 키우는 것은 API에 시간 창(`?since=`)이 생긴 뒤**가 옳다 — 지금 차트가 그리는 것은 누적 스냅샷이라 추세가 없고 막대는 표와 같은 정보를 말한다. 무엇을 더하든 **`React.lazy` 경계 안**에 둘 것(밖으로 나가면 진입 번들이 다시 두 배가 된다).
-4. **dogfood 관찰 항목**: `report field must be an array` 실패율(12B 간헐 비-배열, repair가 흡수 — 잦으면 repair 횟수/프롬프트 축 판단) · `analysis_extract_v4`의 `aspect` 오분류 빈도 · scratch per-draft 상한(기본 20) 밀어냄.
-5. **Deferred(오너 결정 선행)**: 중첩 chapter→scene tree · ProjectBrief→Draft provenance · 관계 graph/완전 timeline · saved publication manifest · Phase 7 대화형 수정(`plans/07-conversational-authoring.md`).
+4. **관측 화면을 더 키우는 것은 API에 시간 창(`?since=`)이 생긴 뒤**가 옳다 — 지금 차트가 그리는 것은 누적 스냅샷이라 추세가 없고 막대는 표와 같은 정보를 말한다. 무엇을 더하든 **`React.lazy` 경계 안**에 둘 것(밖으로 나가면 진입 번들이 다시 두 배가 된다).
+5. **dogfood 관찰 항목**: `report field must be an array` 실패율(12B 간헐 비-배열, repair가 흡수 — 잦으면 repair 횟수/프롬프트 축 판단) · `analysis_extract_v4`의 `aspect` 오분류 빈도 · scratch per-draft 상한(기본 20) 밀어냄.
+6. **Deferred(오너 결정 선행)**: 중첩 chapter→scene tree · ProjectBrief→Draft provenance · 관계 graph/완전 timeline · saved publication manifest · Phase 7 대화형 수정(`plans/07-conversational-authoring.md`).
 
 ## Project Structure
 
