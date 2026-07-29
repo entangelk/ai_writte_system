@@ -126,6 +126,13 @@ def _generation_result(body: Any) -> GenerationResult:
                 prompt_tokens=_token_count(usage["prompt_tokens"]),
                 completion_tokens=_token_count(usage["completion_tokens"]),
             ),
+            # 관측 1b. **없거나 null이면 "모른다"이고 그 경우에도 응답은 유효하다** —
+            # 게이트웨이가 창을 못 읽었다고 생성이 실패하면 관측이 기능을 깨뜨리는 것이
+            # 되고, 아직 이 필드를 안 싣는 게이트웨이와도 섞여 돌아야 한다.
+            context_window=(
+                None if body.get("context_window") is None
+                else _token_count(body["context_window"])
+            ),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise ProviderError(

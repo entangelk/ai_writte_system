@@ -60,6 +60,9 @@ class LlmGatewayAppTests(unittest.IsolatedAsyncioTestCase):
                     "completion_tokens": 1,
                     "total_tokens": 3,
                 },
+                # 관측 1b: 이 호출이 쓴 서버 창. 이 fake provider는 창을 신고하지
+                # 않으므로 **"모른다" = None**이다 — 기본값을 채우지 않는다.
+                "context_window": None,
             },
         )
         self.assertEqual(len(provider.requests), 1)

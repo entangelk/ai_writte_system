@@ -33,6 +33,11 @@ class JsonTransport(Protocol):
 
         ...
 
+    async def get_json(self, path: str) -> JsonResponse:
+        """GET a decoded JSON response (llama.cpp ``/props`` 등 읽기 전용 조회)."""
+
+        ...
+
 
 class TransportFailure(RuntimeError):
     def __init__(self, kind: TransportFailureKind) -> None:
@@ -50,9 +55,18 @@ TransportOutcome = JsonResponse | TransportFailure
 class FakeJsonTransport:
     """Return queued JSON responses or transport failures in FIFO order."""
 
-    def __init__(self, outcomes: Iterable[TransportOutcome]) -> None:
+    def __init__(
+        self,
+        outcomes: Iterable[TransportOutcome],
+        *,
+        get_outcomes: Iterable[TransportOutcome] | None = None,
+    ) -> None:
         self._outcomes = deque(outcomes)
+        # GET은 큐를 따로 쓴다. 같은 큐를 공유하면 창 조회 한 번이 생성 응답을 먹어
+        # 테스트가 엉뚱한 곳에서 깨진다.
+        self._get_outcomes = deque(get_outcomes or ())
         self.requests: list[tuple[str, dict[str, Any]]] = []
+        self.get_requests: list[str] = []
 
     async def post_json(
         self,
@@ -64,6 +78,16 @@ class FakeJsonTransport:
             raise FakeTransportExhausted("fake transport has no queued outcome")
 
         outcome = self._outcomes.popleft()
+        if isinstance(outcome, TransportFailure):
+            raise outcome
+        return outcome
+
+    async def get_json(self, path: str) -> JsonResponse:
+        self.get_requests.append(path)
+        if not self._get_outcomes:
+            raise FakeTransportExhausted("fake transport has no queued GET outcome")
+
+        outcome = self._get_outcomes.popleft()
         if isinstance(outcome, TransportFailure):
             raise outcome
         return outcome

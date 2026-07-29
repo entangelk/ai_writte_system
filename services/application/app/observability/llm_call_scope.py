@@ -59,6 +59,10 @@ class PendingLlmCall:
     # None = "모른다"(provider가 답하지 않은 호출). 0이 아니다 — StoredLlmCall 주석 참조.
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    # 자원 배분 지표의 분모. 헤드룸(`창 − 입력 − 출력상한`)은 이 원천값들에서 **파생**
+    # 시키고 저장하지 않는다 — 파생값을 저장하면 원천과 조용히 갈라진다.
+    context_window: int | None = None
+    max_output_tokens: int | None = None
     latency_ms: int = 0
     error_type: str | None = None
     # Domain verdicts the provider cannot see; filled in by ``annotate_last``.
@@ -186,6 +190,8 @@ def _flush(audit: LlmCallAuditService | None, scope: LlmCallScope) -> None:
                 total_tokens=call.total_tokens,
                 prompt_tokens=call.prompt_tokens,
                 completion_tokens=call.completion_tokens,
+                context_window=call.context_window,
+                max_output_tokens=call.max_output_tokens,
                 latency_ms=call.latency_ms,
                 error_type=call.error_type,
             )
@@ -215,6 +221,9 @@ class ObservedProvider:
                 call_site=self._call_site,
                 outcome=LlmCallOutcome.PROVIDER_ERROR,
                 error_type=exc.code.value,
+                # 응답이 없으므로 창은 모르지만, 출력 상한은 **요청에서** 오므로 안다 —
+                # 실패한 호출이 얼마를 요구했는지는 자원 분석에 유효한 정보다.
+                max_output_tokens=getattr(request, "max_tokens", None),
                 latency_ms=_elapsed_ms(started),
             ))
             raise
@@ -225,6 +234,8 @@ class ObservedProvider:
             total_tokens=result.usage.total_tokens,
             prompt_tokens=result.usage.prompt_tokens,
             completion_tokens=result.usage.completion_tokens,
+            context_window=getattr(result, "context_window", None),
+            max_output_tokens=getattr(request, "max_tokens", None),
             latency_ms=_elapsed_ms(started),
         ))
         return result

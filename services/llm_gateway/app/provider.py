@@ -25,6 +25,11 @@ class GenerationResult:
     content: str
     finish_reason: str
     usage: TokenUsage = field(default_factory=TokenUsage)
+    # 이 호출이 실제로 쓴 서버의 컨텍스트 창(llama.cpp `n_ctx`). **`None`은 "모른다"**
+    # 이며 어떤 기본값도 아니다 — 창을 못 읽었는데 8192 같은 값을 채우면 헤드룸이
+    # 지어낸 숫자 위에서 계산되어 "여유가 있다/없다"를 거짓으로 말한다.
+    # repo가 이 값을 통제하지 못하는 배포가 있으므로(베타는 외부 서버) 상수로 박지 않는다.
+    context_window: int | None = None
 
 
 @runtime_checkable

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 
 from .payload import ChatCompletionRequest, build_llama_payload
@@ -30,6 +31,30 @@ class LlamaCppProvider:
         self._default_model = default_model
         self._default_thinking = default_thinking
         self._provider_name = provider_name
+        # 창(`n_ctx`)은 서버 기동 설정이라 호출마다 바뀌지 않는다 → 한 번만 조회해 캐시한다.
+        # `_UNPROBED` 센티널을 쓰는 이유: 조회에 실패해 `None`을 얻은 것과 아직 조회하지
+        # 않은 것을 구분해야 **실패를 매 호출 재시도하지 않는다**.
+        self._context_window: int | None = None
+        self._window_probed = False
+
+    async def _probe_context_window(self) -> int | None:
+        """llama.cpp `/props`에서 per-slot `n_ctx`를 한 번 읽어 캐시한다.
+
+        **이 조회는 생성을 깨뜨릴 수 없다.** 창은 관측용 부가 정보이고, 그것을 못 읽었다고
+        멀쩡한 생성 요청을 실패시키면 관측이 기능을 망가뜨리는 것이 된다(감사 격리와 같은
+        원칙). 실패하면 `None`("모른다")으로 남기고 다시 시도하지 않는다.
+        """
+        if self._window_probed:
+            return self._context_window
+        self._window_probed = True
+        try:
+            response = await self._transport.get_json("/props")
+            if 200 <= response.status_code < 300:
+                settings = _mapping(_mapping(response.body)["default_generation_settings"])
+                self._context_window = _token_count(settings["n_ctx"])
+        except Exception:  # noqa: BLE001 — 관측이 기능을 깨뜨리지 않는 경계
+            self._context_window = None
+        return self._context_window
 
     async def generate(
         self,
@@ -63,7 +88,10 @@ class LlamaCppProvider:
                 provider=self._provider_name,
             )
 
-        return self._parse_response(response)
+        return replace(
+            self._parse_response(response),
+            context_window=await self._probe_context_window(),
+        )
 
     def _parse_response(self, response: JsonResponse) -> GenerationResult:
         try:

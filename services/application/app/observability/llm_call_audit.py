@@ -130,6 +130,12 @@ class StoredLlmCall:
     # 낙관 쪽으로 오염시킨다. 후행 선택 필드인 이유도 그것이다 — 모르는 것이 기본값이다.
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    # 이 호출이 쓴 서버 컨텍스트 창과 요청한 출력 상한. 셋(입력·출력상한·창)이 모이면
+    # `입력 + 출력 ≤ 창`을 **사후에 판정**할 수 있다. 헤드룸은 파생값이라 저장하지 않는다.
+    # `None`은 여기서도 "모른다"다 — 창을 못 읽은 경우이며, 기본값을 채우면 헤드룸이
+    # 지어낸 숫자 위에서 계산된다.
+    context_window: int | None = None
+    max_output_tokens: int | None = None
 
 
 class LlmCallAuditRepository(Protocol):
@@ -180,6 +186,8 @@ class LlmCallAuditService:
         total_tokens: int = 0,
         prompt_tokens: int | None = None,
         completion_tokens: int | None = None,
+        context_window: int | None = None,
+        max_output_tokens: int | None = None,
         latency_ms: int = 0,
         error_type: str | None = None,
     ) -> StoredLlmCall:
@@ -195,6 +203,8 @@ class LlmCallAuditService:
             total_tokens=total_tokens,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
+            context_window=context_window,
+            max_output_tokens=max_output_tokens,
             latency_ms=latency_ms,
             error_type=error_type,
             created_at=self._clock(),

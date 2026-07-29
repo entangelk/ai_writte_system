@@ -8,6 +8,7 @@ against the real extractor rather than a stand-in.
 """
 
 import asyncio
+from dataclasses import replace
 import json
 import unittest
 
@@ -46,6 +47,25 @@ class _Provider:
         return GenerationResult(model=f"fake-{self.calls}", content=content,
                                 finish_reason="stop",
                                 usage=TokenUsage(self.calls, self.calls))
+
+
+class _Request:
+    """`ObservedProvider`가 요청에서 읽는 것은 출력 상한뿐이다."""
+
+    def __init__(self, *, max_tokens: int | None = None):
+        self.max_tokens = max_tokens
+
+
+class _WindowAwareProvider(_Provider):
+    """창을 신고하는 provider(게이트웨이 경유 실 provider와 같은 모양)."""
+
+    def __init__(self, *contents, context_window: int | None = None):
+        super().__init__(*(contents or ("a",)))
+        self._context_window = context_window
+
+    async def generate(self, request):
+        result = await super().generate(request)
+        return replace(result, context_window=self._context_window)
 
 
 def _audit():
@@ -110,6 +130,53 @@ class ScopeCaptureTest(unittest.TestCase):
             call.total_tokens,
             "분해와 합이 어긋난다 — 둘 중 하나가 다른 호출의 값이거나 누락됐다",
         )
+
+    def test_window_and_output_cap_are_recorded_so_headroom_is_derivable(self):
+        """자원 배분 지표의 **분모**. 1a가 분자(입력 토큰)를 채웠고 이것이 분모다.
+
+        `입력 + 출력 상한 ≤ 창`을 사후에 판정하려면 세 값이 필요하다 — 입력(1a), 출력 상한,
+        그리고 창. 앞의 둘만으로는 "입력 1,851"이 많은지 적은지 말할 수 없다.
+
+        **헤드룸 자체는 저장하지 않는다.** `창 − 입력 − 출력상한`은 파생값이고, 파생값을
+        저장하면 세 원천값과 조용히 갈라진다. 저장하는 것은 원천값뿐이다.
+
+        관측만이다 — 초과해도 요청은 그대로 통과한다(오너 결정 2026-07-29).
+        """
+        audit = _audit()
+        provider = _observed(_WindowAwareProvider(context_window=16384))
+
+        async def run():
+            with llm_call_scope(audit, project_id="p1", correlation_id="job-1"):
+                await provider.generate(_Request(max_tokens=6144))
+
+        asyncio.run(run())
+        call = audit.list_calls("p1")[0]
+        self.assertEqual(call.context_window, 16384)
+        self.assertEqual(call.max_output_tokens, 6144)
+        # 세 원천값으로 헤드룸이 완전히 판정된다.
+        headroom = call.context_window - call.prompt_tokens - call.max_output_tokens
+        self.assertEqual(headroom, 16384 - 1 - 6144)
+
+    def test_unknown_window_is_none_so_headroom_is_not_faked(self):
+        """창을 모르면 `None`이다 — 0도, 어떤 기본값도 아니다.
+
+        게이트웨이가 `/props`를 못 읽었거나(외부 서버 장애) provider가 창을 신고하지 않는
+        구성이면 창을 **모른다**. 여기서 임의의 기본값(8192 등)을 넣으면 **헤드룸이 지어낸
+        숫자 위에서 계산**되고, 그 값이 지표에 섞여 "여유가 있다/없다"를 거짓으로 말한다.
+        분해 토큰의 `None`과 같은 규칙이다(SoT v1.7.58).
+        """
+        audit = _audit()
+        provider = _observed(_Provider("a"))  # 창을 신고하지 않는 provider
+
+        async def run():
+            with llm_call_scope(audit, project_id="p1", correlation_id="job-1"):
+                await provider.generate(_Request(max_tokens=1024))
+
+        asyncio.run(run())
+        call = audit.list_calls("p1")[0]
+        self.assertIsNone(call.context_window)
+        # 출력 상한은 요청에서 오므로 창을 몰라도 알 수 있다.
+        self.assertEqual(call.max_output_tokens, 1024)
 
     def test_provider_error_leaves_the_split_unknown_not_zero(self):
         """실패한 호출의 분해는 **0이 아니라 '모른다'**여야 한다.

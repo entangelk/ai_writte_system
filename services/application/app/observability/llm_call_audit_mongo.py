@@ -58,6 +58,8 @@ def _doc(call: StoredLlmCall) -> dict:
         "total_tokens": call.total_tokens,
         "prompt_tokens": call.prompt_tokens,
         "completion_tokens": call.completion_tokens,
+        "context_window": call.context_window,
+        "max_output_tokens": call.max_output_tokens,
         "latency_ms": call.latency_ms,
         "error_type": call.error_type,
         "created_at": call.created_at,
@@ -79,6 +81,8 @@ def _call(doc: dict) -> StoredLlmCall:
         # "입력 0 토큰"으로 집계에 섞인다.
         prompt_tokens=doc.get("prompt_tokens"),
         completion_tokens=doc.get("completion_tokens"),
+        context_window=doc.get("context_window"),
+        max_output_tokens=doc.get("max_output_tokens"),
         latency_ms=doc.get("latency_ms", 0),
         error_type=doc.get("error_type"),
         created_at=doc["created_at"],

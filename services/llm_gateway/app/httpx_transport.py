@@ -34,13 +34,19 @@ class HttpxJsonTransport:
     async def aclose(self) -> None:
         await self._client.aclose()
 
+    async def get_json(self, path: str) -> JsonResponse:
+        return await self._send(lambda: self._client.get(path))
+
     async def post_json(
         self,
         path: str,
         payload: Mapping[str, Any],
     ) -> JsonResponse:
+        return await self._send(lambda: self._client.post(path, json=dict(payload)))
+
+    async def _send(self, send) -> JsonResponse:
         try:
-            response = await self._client.post(path, json=dict(payload))
+            response = await send()
         except httpx.TimeoutException as exc:
             raise TransportFailure(TransportFailureKind.TIMEOUT) from exc
         except httpx.RequestError as exc:

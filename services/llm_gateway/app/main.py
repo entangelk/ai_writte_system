@@ -166,6 +166,9 @@ def create_app(
                 "completion_tokens": result.usage.completion_tokens,
                 "total_tokens": result.usage.total_tokens,
             },
+            # 이 호출이 실제로 쓴 서버 창. `None`은 "모른다"이며 호출자는 그때 헤드룸을
+            # 계산하지 않는다(지어낸 분모 위에서 계산하지 않기 위해서다).
+            "context_window": result.context_window,
         }
 
     return app
