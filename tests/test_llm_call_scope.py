@@ -200,6 +200,29 @@ class ScopeCaptureTest(unittest.TestCase):
         self.assertIsNone(call.prompt_tokens)
         self.assertIsNone(call.completion_tokens)
 
+    def test_a_failed_call_still_records_what_it_asked_for(self):
+        """관측 1b — 실패한 호출도 **요청한 출력 상한**은 남긴다(독립 검증 B5).
+
+        응답이 없으므로 창과 토큰은 모르지만, 출력 상한은 **요청에서** 온다. 실패한 호출이
+        얼마를 요구했는지는 자원 분석에 유효한 정보다 — 큰 상한을 요구한 호출이 자주
+        실패한다면 그 자체가 신호다. SoT §관측 KPI가 명시한 분기이며, 지우면 그 신호가
+        조용히 사라진다.
+        """
+        audit = _audit()
+        provider = _observed(_Provider(error=ProviderError(
+            code=ProviderErrorCode.TIMEOUT, message="down", retryable=True)))
+
+        async def run():
+            with llm_call_scope(audit, project_id="p1", correlation_id="job-1"):
+                with self.assertRaises(ProviderError):
+                    await provider.generate(_Request(max_tokens=6144))
+
+        asyncio.run(run())
+        call = audit.list_calls("p1")[0]
+        self.assertEqual(call.max_output_tokens, 6144)
+        # 응답이 없으므로 창은 모른다 — 여기서 값을 지어내지 않는다.
+        self.assertIsNone(call.context_window)
+
     def test_provider_failure_is_recorded_and_still_raises(self):
         audit = _audit()
         provider = _observed(_Provider(error=ProviderError(

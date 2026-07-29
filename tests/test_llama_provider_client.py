@@ -294,7 +294,7 @@ def _props(n_ctx):
 
 
 class ContextWindowProbeTest(unittest.TestCase):
-    """관측 1b — 창(`n_ctx`)을 `/props`에서 한 번 읽어 결과에 싣는다.
+    """관측 1b — 창(`n_ctx`)을 `/props`에서 읽어 결과에 싣되, **생성을 붙잡지 않는다.**
 
     창은 자원 배분 지표의 **분모**다(입력 토큰이 분자). 그런데 창은 서버 기동 설정이라
     repo가 통제하지 못하는 배포가 있으므로(베타는 외부 서버) **상수로 박지 않고 읽는다.**
@@ -309,14 +309,61 @@ class ContextWindowProbeTest(unittest.TestCase):
             provider_name="gemma_local",
         ), transport
 
-    def test_window_is_read_from_props_and_attached_to_the_result(self):
+    async def _generate_then_settle(self, provider):
+        """생성한 뒤 이벤트 루프를 한 번 돌려 probe가 끝날 틈을 준다."""
+        result = await provider.generate(_request())
+        await asyncio.sleep(0)
+        return result
+
+    def test_window_is_attached_once_the_probe_completes(self):
         provider, transport = self._provider(
-            [_valid_response()], [_props(16384)]
+            [_valid_response(), _valid_response()], [_props(16384)]
         )
 
-        result = asyncio.run(provider.generate(_request()))
+        async def run():
+            await self._generate_then_settle(provider)
+            return await provider.generate(_request())
+
+        result = asyncio.run(run())
 
         self.assertEqual(result.context_window, 16384)
+        self.assertEqual(transport.get_requests, ["/props"])
+
+    def test_a_slow_probe_does_not_delay_or_fail_the_generate(self):
+        """★ B1(독립 검증 2026-07-29) — **관측이 기능을 깨뜨리지 않는다.**
+
+        종전 구현은 생성이 **이미 성공한 뒤** 반환 경로에서 `await probe`를 했다. `/props`가
+        느리면 게이트웨이 응답이 그만큼 늦어지고, 게이트웨이 transport와 앱 상위 deadline이
+        **둘 다 120s**라 **성공한 생성이 timeout 실패로 뒤집힌다.** 관측용 부가 정보가 기능을
+        깨뜨리는 것이며 SoT §관측 KPI 격리 조항 위반이다.
+
+        여기서는 **끝나지 않는** probe를 준다. 생성은 그대로 성공해야 하고 창만 `None`이어야
+        한다. probe를 다시 기다리는 구현으로 되돌리면 이 테스트는 **영원히 끝나지 않는다**.
+        """
+        never = asyncio.Event()
+
+        class _HangingGet(FakeJsonTransport):
+            async def get_json(self, path):
+                self.get_requests.append(path)
+                await never.wait()          # 절대 풀리지 않는다
+                raise AssertionError("unreachable")
+
+        transport = _HangingGet([_valid_response()], get_outcomes=[])
+        provider = LlamaCppProvider(
+            transport=transport, default_model="gemma-default",
+            default_thinking=True, provider_name="gemma_local",
+        )
+
+        async def run():
+            result = await asyncio.wait_for(provider.generate(_request()), timeout=5)
+            never.set()                     # 매달린 probe를 정리한다
+            await asyncio.sleep(0)
+            return result
+
+        result = asyncio.run(run())
+
+        self.assertEqual(result.content, "반가워요")   # 생성은 성공했다
+        self.assertIsNone(result.context_window)       # 창만 "모른다"
         self.assertEqual(transport.get_requests, ["/props"])
 
     def test_window_is_probed_once_not_per_call(self):
@@ -325,26 +372,23 @@ class ContextWindowProbeTest(unittest.TestCase):
         매 호출 조회하면 생성 1회에 왕복이 2회가 되고, 그 비용이 **관측 때문에** 생긴다.
         """
         provider, transport = self._provider(
-            [_valid_response(), _valid_response()], [_props(8192)]
+            [_valid_response(), _valid_response(), _valid_response()], [_props(8192)]
         )
 
         async def run():
-            first = await provider.generate(_request())
-            second = await provider.generate(_request())
-            return first, second
+            await self._generate_then_settle(provider)
+            return (await provider.generate(_request()),
+                    await provider.generate(_request()))
 
-        first, second = asyncio.run(run())
+        second, third = asyncio.run(run())
 
-        self.assertEqual((first.context_window, second.context_window), (8192, 8192))
+        self.assertEqual((second.context_window, third.context_window), (8192, 8192))
         # GET은 정확히 한 번. 큐에 하나만 넣었으므로 두 번 물었다면 소진 예외가 났다.
         self.assertEqual(transport.get_requests, ["/props"])
 
-    def test_a_failed_probe_leaves_the_window_unknown_and_does_not_fail_generate(self):
-        """**관측이 기능을 깨뜨리지 않는다.**
+    def test_a_failed_probe_leaves_the_window_unknown_and_is_not_retried(self):
+        """실패해도 생성은 성공하고, **재시도하지 않는다**.
 
-        `/props`를 못 읽는 것은 창을 모른다는 뜻이지 생성을 못 한다는 뜻이 아니다.
-        여기서 예외를 올리면 관측 부가 정보 하나 때문에 멀쩡한 생성이 죽는다 —
-        감사 flush 격리(SoT §관측 KPI)와 같은 원칙이다. 그리고 **재시도하지 않는다**:
         실패를 매 호출 다시 물으면 죽은 서버에 왕복을 계속 쌓는다.
         """
         provider, transport = self._provider(
@@ -353,8 +397,8 @@ class ContextWindowProbeTest(unittest.TestCase):
         )
 
         async def run():
-            return (await provider.generate(_request()),
-                    await provider.generate(_request()))
+            first = await self._generate_then_settle(provider)
+            return first, await provider.generate(_request())
 
         first, second = asyncio.run(run())
 
@@ -365,10 +409,12 @@ class ContextWindowProbeTest(unittest.TestCase):
     def test_a_malformed_props_body_is_unknown_not_a_guess(self):
         """모양이 다른 `/props`는 "모른다"이지 추측이 아니다."""
         provider, _ = self._provider(
-            [_valid_response()],
+            [_valid_response(), _valid_response()],
             [JsonResponse(status_code=200, body={"unexpected": True})],
         )
 
-        result = asyncio.run(provider.generate(_request()))
+        async def run():
+            await self._generate_then_settle(provider)
+            return await provider.generate(_request())
 
-        self.assertIsNone(result.context_window)
+        self.assertIsNone(asyncio.run(run()).context_window)

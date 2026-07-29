@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
@@ -32,21 +33,33 @@ class LlamaCppProvider:
         self._default_thinking = default_thinking
         self._provider_name = provider_name
         # 창(`n_ctx`)은 서버 기동 설정이라 호출마다 바뀌지 않는다 → 한 번만 조회해 캐시한다.
-        # `_UNPROBED` 센티널을 쓰는 이유: 조회에 실패해 `None`을 얻은 것과 아직 조회하지
-        # 않은 것을 구분해야 **실패를 매 호출 재시도하지 않는다**.
+        # `_window_probed`는 "조회에 실패해 None을 얻음"과 "아직 조회 안 함"을 구분한다 —
+        # 그래야 **실패를 매 호출 재시도하지 않는다**(죽은 서버에 왕복을 쌓지 않는다).
         self._context_window: int | None = None
         self._window_probed = False
+        self._probe_task: asyncio.Task[None] | None = None
 
-    async def _probe_context_window(self) -> int | None:
-        """llama.cpp `/props`에서 per-slot `n_ctx`를 한 번 읽어 캐시한다.
+    def _start_context_window_probe(self) -> None:
+        """창 조회를 **생성과 동시에** 띄우고 기다리지 않는다.
 
-        **이 조회는 생성을 깨뜨릴 수 없다.** 창은 관측용 부가 정보이고, 그것을 못 읽었다고
-        멀쩡한 생성 요청을 실패시키면 관측이 기능을 망가뜨리는 것이 된다(감사 격리와 같은
-        원칙). 실패하면 `None`("모른다")으로 남기고 다시 시도하지 않는다.
+        ★ 이 비동기성이 계약이다(독립 검증 B1, 2026-07-29). 종전 구현은 생성이 **이미
+        성공한 뒤** 반환 경로에서 `await probe`를 했는데, `/props`가 느리면 게이트웨이의
+        응답이 그만큼 늦어지고 **앱의 상위 deadline(둘 다 120s)을 넘겨 성공한 생성이
+        timeout 실패로 뒤집힌다.** 관측용 부가 정보가 기능을 깨뜨리는 것이며 SoT
+        §관측 KPI의 격리 조항 위반이다.
+
+        지금은 생성 요청 직전에 조회를 띄우고 **결과를 기다리지 않는다**. 생성은 보통
+        초 단위, `/props`는 밀리초 단위이므로 실제로는 첫 호출부터 값이 준비된다. 준비되지
+        않았으면 그 호출의 창은 `None`("모른다")이고 **그것이 정직한 답**이다 — 창 하나
+        때문에 생성을 붙잡아 두지 않는다.
         """
         if self._window_probed:
-            return self._context_window
+            return
         self._window_probed = True
+        self._probe_task = asyncio.ensure_future(self._probe_context_window())
+
+    async def _probe_context_window(self) -> None:
+        """llama.cpp `/props`에서 per-slot `n_ctx`를 읽어 캐시한다(실패는 삼킨다)."""
         try:
             response = await self._transport.get_json("/props")
             if 200 <= response.status_code < 300:
@@ -54,12 +67,13 @@ class LlamaCppProvider:
                 self._context_window = _token_count(settings["n_ctx"])
         except Exception:  # noqa: BLE001 — 관측이 기능을 깨뜨리지 않는 경계
             self._context_window = None
-        return self._context_window
 
     async def generate(
         self,
         request: ChatCompletionRequest,
     ) -> GenerationResult:
+        # 생성과 **동시에** 창을 조회한다(기다리지 않는다 — `_start_context_window_probe`).
+        self._start_context_window_probe()
         payload = build_llama_payload(
             request,
             default_model=self._default_model,
@@ -88,9 +102,10 @@ class LlamaCppProvider:
                 provider=self._provider_name,
             )
 
+        # 기다리지 않는다 — 준비됐으면 값, 아니면 `None`("모른다").
         return replace(
             self._parse_response(response),
-            context_window=await self._probe_context_window(),
+            context_window=self._context_window,
         )
 
     def _parse_response(self, response: JsonResponse) -> GenerationResult:

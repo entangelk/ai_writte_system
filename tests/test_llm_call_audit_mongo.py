@@ -63,7 +63,8 @@ class _Client:
 
 def _call(call_id, *, project="p", minute=0, call_site="writing_gate",
           decision="pass", score=1.0, outcome="success", error_type=None,
-          prompt_tokens=200, completion_tokens=22):
+          prompt_tokens=200, completion_tokens=22,
+          context_window=16384, max_output_tokens=6144):
     # 분해를 **비어 있지 않게** 싣는 것이 중요하다. 둘 다 None이면 매퍼가 필드를
     # 통째로 빠뜨려도 None == None으로 왕복 비교를 통과한다(실측: 저장에서 두 필드를
     # 지워도 5건 전부 green이었다).
@@ -74,6 +75,7 @@ def _call(call_id, *, project="p", minute=0, call_site="writing_gate",
         total_tokens=222, latency_ms=900, error_type=error_type,
         created_at=datetime(2026, 7, 24, 0, minute, tzinfo=UTC),
         prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+        context_window=context_window, max_output_tokens=max_output_tokens,
     )
 
 
@@ -150,6 +152,22 @@ class MongoLlmCallAuditRepositoryTest(unittest.TestCase):
 
         self.assertEqual(restored.total_tokens, 0)
         self.assertEqual(restored.latency_ms, 0)
+
+    def test_legacy_doc_without_window_fields_reads_unknown(self):
+        """관측 1b — 창·출력 상한이 없는 옛 문서도 **`None`("모른다")**이다.
+
+        분해 토큰과 같은 규칙이다. 창에 기본값을 채우면 헤드룸이 **지어낸 분모 위에서**
+        계산되어 "여유가 있다/없다"를 거짓으로 말한다.
+        """
+        self.repo.add(_call("llmc:old2"))
+        old = self.collection.docs["llmc:old2"]
+        old.pop("context_window")
+        old.pop("max_output_tokens")
+
+        [restored] = self.repo.list_for_project("p")
+
+        self.assertIsNone(restored.context_window)
+        self.assertIsNone(restored.max_output_tokens)
 
     def test_legacy_doc_without_the_split_reads_unknown_not_zero(self):
         """분해가 없는 옛 레코드는 **None("모른다")**이지 0이 아니다.

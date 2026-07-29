@@ -50,6 +50,31 @@ class HttpxJsonTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.body, {"ok": True})
 
+    async def test_get_json_issues_a_real_http_get(self):
+        """관측 1b — `/props` 조회는 **GET**이어야 한다(독립 검증 B2).
+
+        POST로 퇴행해도 fake transport를 쓰는 상위 테스트는 전부 green이다. 실 HTTP
+        메서드를 단정하는 곳은 여기뿐이며, llama.cpp `/props`는 GET만 받는다.
+        """
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.method, "GET")
+            self.assertEqual(request.url.path, "/props")
+            self.assertEqual(request.content, b"")   # GET은 본문을 싣지 않는다
+            return httpx.Response(
+                200, json={"default_generation_settings": {"n_ctx": 16384}}
+            )
+
+        async with HttpxJsonTransport(
+            base_url="http://llama.test:9080",
+            transport=httpx.MockTransport(handler),
+        ) as transport:
+            response = await transport.get_json("/props")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.body, {"default_generation_settings": {"n_ctx": 16384}}
+        )
+
     async def test_timeout_and_connection_errors_are_classified(self):
         cases = (
             (
