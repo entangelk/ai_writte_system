@@ -291,3 +291,44 @@ curl -s -X POST http://192.168.1.22:9080/v1/chat/completions \
 잘림과 `parse_error`를 본 것은 아니다**(이 머신은 외부 서버라 창을 못 바꾼다). 표에 **근거 열**을
 추가해 행마다 실측/추론을 구분하고, 무엇이 확인되면 그 칸이 닫히는지를 적었다. HANDOFF의 같은
 문장도 함께 고쳤다.
+
+---
+
+## 오너 결정 (2026-07-29, §2-3 실측을 보고)
+
+- **베타 외부 LLM 서버의 창을 16384로 올릴 수 있다** — 오너가 관리하는 서버다. 이로써 K-2=A의
+  남은 반대 근거("베타는 외부 서버라 적용 불가 → 같은 코드가 머신마다 다르게 깨진다")가
+  사라졌다. **다만 창을 상수로 박는 근거가 되지는 않는다** — repo가 그 서버 설정을 통제하지
+  못한다는 사실은 그대로이므로 가드는 여전히 `/props`에서 읽는다.
+- **K-6 = R-e 확정**(포인터 렌더링 비용 제거). **결정이 뒤집힌 이유가 중요하다**: 브리프의
+  구현자 추천은 R-a였고 그 근거는 "R-e는 계약 변경 비용이 크다"였는데, **그 전제가 사실이
+  아니었다.** report 템플릿은 Mongo 영속이 아니라(조립 때마다 in-memory seed) 새 버전이 필요
+  없고, sha256 불변 핀은 `analysis_extract`에만 걸려 있다. 거기에 오너가 **"지금은 MVP 테스트
+  단계(dogfood 검증 전)라 프롬프트는 얼마든지 바꿀 수 있다"**고 확인했다. 비용이 무너지자
+  R-e가 가장 싼 안이면서 **유일하게 근거를 늘리는 안**으로 남았다(R-a는 report가 보는 근거를
+  줄인다).
+- **착수 순서 = 회계 → R-e → 가드(K-3) → 밀도(K-1).** 오너가 추천 순서를 그대로 채택했다.
+  회계를 먼저 두는 이유는 **지금 예산이 12.7배 틀려서 어떤 수리가 통했는지 잴 자가 없기
+  때문**이다. R-a는 폐기가 아니라 **보류** — 앞 둘이 들어간 뒤 수치를 보고 정한다.
+- 이 결정들로 트랙의 성격이 "정확도 개선"에서 **"오늘 깨진 것 수리"**로 확정됐다.
+
+### 착수 전 패턴 sweep — 같은 회계 버그가 두 곳에 있다
+
+CLAUDE.md §4의 sweep을 돌려 `token_estimate` 사용처를 전수 확인했다. **예산을 집행하는
+루프가 두 개**다:
+
+- [`context_search/service.py:1103`](../../../services/application/app/context_search/service.py#L1103)
+  `_apply_budget` — `total + item.token_estimate <= budget.max_tokens`
+- [`writing/retrieval.py:280`](../../../services/application/app/writing/retrieval.py#L280)
+  — **같은 형태의 별도 구현**. 같은 `token_estimate`를 쓰므로 같은 12.7배 오차를 갖는다.
+
+그리고 [`context_search/prior_memory.py:117`](../../../services/application/app/context_search/prior_memory.py#L117)은
+`_value_tokens`라는 **세 번째 계산**으로 `token_estimate_total`을 만든다.
+
+**한 곳만 고치면 나머지가 조용히 옛 회계로 남는다.** 슬라이스 1은 세 곳을 함께 본다.
+
+`token_estimate`/`token_estimate_total`은 HTTP 응답에 실려 나가지만
+([`main.py:3370`](../../../services/application/app/main.py#L3370)·[`:3808`](../../../services/application/app/main.py#L3808)·[`:3862`](../../../services/application/app/main.py#L3862))
+**정본(SoT)·`schema.d.ts`·프론트 어디에도 등장하지 않는다**(전수 grep 0건). 즉 값이 바뀌어도
+생성 타입이나 화면이 깨지지 않는다 — 다만 **관측 가능한 출력이 바뀌는 것은 맞으므로** 회귀에서
+의도된 변화로 잠근다.
