@@ -454,6 +454,84 @@ class ContextSearchPackageTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(excluded.reason, BUDGET_EXCLUDED_REASON)
         self.assertLessEqual(tight.token_estimate_total, first_estimate)
 
+    async def test_budget_counts_what_the_model_actually_receives_bidirectional(self):
+        """예산은 항목 `text`가 아니라 **렌더링된 프롬프트**를 세야 한다.
+
+        2026-07-29 베타 실측: 시드 3,586자 project에서 `token_estimate_total`이 887인데
+        report가 실제로 싣는 렌더링은 11,304 tok이었다(12.7배). 항목마다 붙는 포인터 JSON
+        (64자 `content_hash` 포함)을 회계가 한 토큰도 세지 않았기 때문이며, 그래서 예산 4096이
+        창 8192를 넘기는 프롬프트를 통과시켜 `writing_report`가 400으로 죽었다.
+
+        under-strict(버그 재발): 회계가 다시 `text`만 세면 추정이 렌더링보다 크게 작아져 실패.
+        over-strict(과잉 교정): 회계가 렌더링보다 크게 부풀면 멀쩡한 항목이 예산에서 잘려 실패.
+
+        **기준은 "전체 패키지 렌더링"이 아니라 "항목별 렌더링 라인의 합"이다.** 예산 제외
+        루프(`_apply_budget`)는 조립 *전에* 항목마다 비용을 알아야 하므로 회계는 항목별일
+        수밖에 없고, 전체 렌더링에는 어떤 항목에도 귀속되지 않는 구조적 래퍼
+        (`<context_package>`·섹션 태그·`project_id`)가 더 붙는다. 그 래퍼를 항목별 회계에
+        요구하면 올바른 수정으로도 이 테스트가 초록불이 되지 않는다.
+
+        **자명하지 않은 이유**: 좌변은 `context_search`가 자체 계산한 추정의 합이고 우변은
+        `writing/prompt`의 실제 렌더러가 만든 문자열이다. 서로 다른 코드 경로이므로, 생성
+        사이트가 포인터를 빠뜨리거나 렌더러가 형식을 바꾸면 두 값이 갈라져 실패한다.
+        (양변을 같은 렌더러로 재계산하면 항상 참이 되어 아무것도 잡지 못한다 — 그렇게 하지 않았다.)
+        """
+        from services.application.app.writing.prompt import (
+            _format_item,
+            format_context_package,
+        )
+
+        core_sot, vector_index, indexing, saved = _fixture()
+        plan = _plan(
+            saved,
+            steps=(
+                _mongo_step(step_id="s1", need=ContextNeed.CURRENT_SCENE),
+                _vector_step(step_id="s2"),
+            ),
+        )
+        service = _service(core_sot, vector_index, indexing, _StaticPlanner(plan))
+        package = await service.build_context_package(
+            _request(
+                saved,
+                needs=(ContextNeed.CURRENT_SCENE, ContextNeed.SOURCE_QUOTE),
+                max_tokens=10_000,
+            )
+        )
+        items = package.macro_items + package.micro_evidence
+        self.assertTrue(items)
+
+        # report 경로가 실제로 보내는 형태(포인터 포함)가 회계의 기준이다 — 두 소비자 중
+        # 큰 쪽이며, 창을 넘기는 것도 이쪽이다.
+        per_item_rendered = sum(
+            estimate_tokens(_format_item(item, package, True)) for item in items
+        )
+
+        self.assertGreaterEqual(
+            package.token_estimate_total,
+            per_item_rendered,
+            "회계가 렌더링보다 작다 — 예산이 창을 넘기는 프롬프트를 통과시킨다",
+        )
+        self.assertLessEqual(
+            package.token_estimate_total,
+            per_item_rendered * 2,
+            "회계가 렌더링의 2배를 넘는다 — 멀쩡한 항목이 예산에서 잘린다",
+        )
+
+        # 항목별 회계가 구조적으로 담을 수 없는 몫이 남는다. 숨기지 않고 크기와 성질을
+        # 여기서 못박는다 — 창 가드(K-3)는 이 몫을 system 프롬프트·후보 산문과 함께
+        # **고정 오버헤드**로 따로 더해야 하며, 예산이 그것까지 세리라 기대하면 안 된다.
+        wrapper_only = estimate_tokens(
+            format_context_package(package, include_pointers=True)
+        ) - per_item_rendered
+        self.assertGreater(
+            wrapper_only, 0, "래퍼가 0이면 이 테스트의 전제(항목별 ≠ 전체)가 사라진 것이다"
+        )
+        self.assertLess(
+            wrapper_only,
+            per_item_rendered,
+            "래퍼가 항목 몫을 넘어섰다 — 더는 고정 오버헤드로 다룰 수 없다",
+        )
+
     async def test_need_priority_order_drives_ranking_bidirectional(self):
         core_sot, vector_index, indexing, saved = _fixture()
         plan = _plan(

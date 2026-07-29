@@ -332,3 +332,54 @@ CLAUDE.md §4의 sweep을 돌려 `token_estimate` 사용처를 전수 확인했�
 **정본(SoT)·`schema.d.ts`·프론트 어디에도 등장하지 않는다**(전수 grep 0건). 즉 값이 바뀌어도
 생성 타입이나 화면이 깨지지 않는다 — 다만 **관측 가능한 출력이 바뀌는 것은 맞으므로** 회귀에서
 의도된 변화로 잠근다.
+
+---
+
+## Task — 슬라이스 1 착수: 예산 회계 (진행 중)
+
+### 오너 조치
+
+- **베타 외부 LLM 서버의 창을 16384로 올렸다**(오너, 2026-07-29). `/props` 실측 확인:
+  `n_ctx=16384 · total_slots=1`. **머신-로컬 관측치**이며 repo가 통제하는 값이 아니므로
+  가드는 여전히 서버에서 읽는다.
+
+### 착수분 — 깨지는 회귀 먼저
+
+`tests/test_context_search.py::test_budget_counts_what_the_model_actually_receives_bidirectional`.
+렌더러(`writing/prompt`)를 직접 호출해 회계와 대조한다. 양방향이며(회계<렌더링 = 버그 재발,
+회계>2×렌더링 = 과잉 교정으로 멀쩡한 항목이 잘림), 렌더링 형식이 바뀌면(R-e) 테스트가 따라간다.
+
+### Issues found — 독립 검증이 잡은 테스트 보정 오류 (수정 작성 전에 해결)
+
+- **문제**: 첫 판의 under-strict 기준이 **전체 패키지 렌더링**(463)이었다. 그런데 예정한 수정은
+  **항목별**이다 — `_apply_budget`이 조립 *전에* 항목마다 비용을 알아야 하므로 회계는 항목별일
+  수밖에 없다. 항목별 렌더링 라인의 합은 **431**이고, 차이 **32 tok**은 어떤 항목에도 귀속되지
+  않는 구조적 래퍼(`<context_package>`·섹션 태그·`project_id`)다.
+- **결과**: 올바른 수정을 넣어도 `431 >= 463`이 거짓이라 **여전히 빨간불**이었을 것이고, 다음
+  작업자가 "수정이 덜 됐나"로 엇나갔을 자리다.
+- **직접 재계산으로 확인**: 같은 픽스처에서 항목 8개, 현재 회계 31 · 항목별 렌더링 합 **431** ·
+  전체 렌더링 **463** · 래퍼 **32**. 검증자 수치와 일치한다.
+- **해결**: 기준을 **항목별 렌더링 라인의 합**으로 바꿨다. 이제 빨간불이 `31 vs 431`이고 수정으로
+  도달 가능하다.
+- **자명화 함정을 피했다**: "그럼 `token_estimate_total`을 렌더러로 재계산하면 되지 않나"는
+  양변이 같은 함수가 되어 **아무것도 잡지 못하는** 테스트가 된다. 좌변은 `context_search`의 자체
+  계산, 우변은 `writing/prompt`의 실제 렌더러로 **서로 다른 코드 경로**를 유지했다.
+- **래퍼를 숨기지 않았다**: 항목별 회계가 담을 수 없는 몫이라는 사실과 그 크기 성질을 별도
+  단정으로 못박았다(0보다 크고 항목 몫보다 작다). **창 가드(K-3)는 이 래퍼를 system 프롬프트·
+  후보 산문과 함께 고정 오버헤드로 따로 더해야 한다** — 예산이 그것까지 세리라 기대하면 안 된다.
+  숨은 매직 상수 대신 계약을 테스트에 적어 둔 것이다.
+
+### Issues found — 내 sweep 분류가 과잉이었다 (커밋 c9e16b3 정정)
+
+커밋 `c9e16b3`은 회계 버그 자리를 다섯으로 적고 "세 곳을 함께 본다"고 했는데, 성격이 셋으로
+갈린다:
+
+- **생산자 3곳** — [`service.py:812`](../../../services/application/app/context_search/service.py#L812)·[`:919`](../../../services/application/app/context_search/service.py#L919)·[`:1089`](../../../services/application/app/context_search/service.py#L1089).
+  `token_estimate=estimate_tokens(text)`. **수정 대상은 여기뿐이다.**
+- **소비자 2곳** — [`_apply_budget`](../../../services/application/app/context_search/service.py#L1103)·[`retrieval.py:280`](../../../services/application/app/writing/retrieval.py#L280).
+  `item.token_estimate`를 소비할 뿐이므로 **생산자를 고치면 자동으로 따라온다.** 손대지 않고
+  회귀 커버리지만 확인한다.
+- **같은 버그가 아님** — [`prior_memory.py:117`](../../../services/application/app/context_search/prior_memory.py#L117)·[`:149`](../../../services/application/app/context_search/prior_memory.py#L149).
+  `PriorMemoryItem`은 **`format_context_package`가 렌더링하지 않는다**(섹션은 do_not_use·
+  constraints·project_brief·macro_items·micro_evidence뿐). 포인터가 붙지 않으므로 포인터
+  누락 버그가 성립하지 않는다. **범위에서 뺀다.**
