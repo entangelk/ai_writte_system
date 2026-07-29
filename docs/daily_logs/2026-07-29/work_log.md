@@ -600,3 +600,78 @@ CLAUDE.md §4의 sweep을 돌려 `token_estimate` 사용처를 전수 확인했�
 
 **참고**: 베타의 LLM 호스트 GPU·VRAM은 내가 모른다. 알파는 32768 기동이 실측돼 있으나
 (VRAM 9,774 / 12,288) 그 수치를 다른 호스트에 옮겨 적용할 수 없다.
+
+---
+
+## Task — K-3 관측 슬라이스 1a: 입력/출력 토큰 분해를 감사에 남긴다
+
+### Goals
+
+- 오너 확정: 가드는 **관측만**(거부 없음). 목적은 정합성 검사가 아니라 **"효과적인 자원 배분"과
+  컨텍스트 양 효율성 분석**이며, 외부 API를 쓰더라도 같은 분석이 필요하다.
+- 오너 질문 "이건 KPI에 포함돼 있겠지?"를 **확인**하고, 없으면 채운다.
+
+### Completed work — 전제가 절반만 맞았다
+
+**토큰 총량은 있지만 입력/출력이 분리돼 있지 않았다.** 그래서 **"창의 얼마를 입력에 쓰는가"를
+지금 KPI로는 답할 수 없었다** — `total_tokens` 하나로는 입력 8,000/출력 500과 그 반대가 같은
+값으로 접힌다.
+
+**그리고 데이터가 없던 것이 아니다.** 게이트웨이는 `prompt_tokens`·`completion_tokens`를 이미
+돌려주고([`llm_gateway/app/main.py:164-168`](../../../services/llm_gateway/app/main.py#L164-L168))
+앱 provider도 파싱하는데([`analysis/gateway_provider.py:126-127`](../../../services/application/app/analysis/gateway_provider.py#L126-L127)),
+[`llm_call_scope.py`](../../../services/application/app/observability/llm_call_scope.py)의
+`ObservedProvider`가 **`total_tokens`만 취해 분해를 버리고** 있었다. 한 줄에서 버려지던 값을 살렸다.
+
+- `PendingLlmCall`·`StoredLlmCall`에 `prompt_tokens`·`completion_tokens`를 더하고, scope의
+  기록·`_flush`·서비스 `record()`·Mongo 매퍼가 함께 나른다.
+- **`None`은 "모른다"이지 0이 아니다.** provider가 답하지 않은 호출(`provider_error`), 이 필드가
+  생기기 전의 옛 레코드, 분해를 신경 쓰지 않는 픽스처가 그렇다. **0으로 적으면 집계가 "입력을
+  0 토큰 썼다"로 읽어 효율 지표를 낙관 쪽으로 오염**시킨다 — 계약이 `total_tokens`의 0을
+  "모른다"로 정의한 것과 같은 이유이며, 분해는 `None`으로 그 사실을 **명시**할 수 있다.
+- **후행 선택 필드로 두었다.** 처음에 필수 필드로 넣었더니 레코드를 직접 만드는 기존 테스트
+  27건이 깨졌는데, 그 픽스처들은 분해를 신경 쓰지 않는 것이 **의미상 옳다**(= 모른다). 기본값이
+  "모른다"인 편이 계약과 맞는다.
+
+### Issues found — Mongo 왕복이 잠겨 있지 않았다 (뮤테이션으로 발견)
+
+- **문제**: 구현 직후 `test_llm_call_audit_mongo.py`가 전부 green이었는데, **저장(`_doc`)에서 두
+  필드를 통째로 지워도 5건 전부 통과**했다.
+- **원인**: 그 모듈의 레코드 헬퍼가 분해를 싣지 않아 양쪽이 `None`이었고, "field-for-field 왕복"
+  비교가 `None == None`으로 지나갔다. **비어 있는 값으로는 왕복을 검증할 수 없다.**
+- **해결**: 헬퍼가 분해를 **비어 있지 않게**(200/22) 싣게 하고, 옛 문서 경로를 위한 셀을
+  추가했다(분해 없는 문서는 `None`으로 읽히고 `total_tokens`는 계속 읽힌다).
+- **양방향 실측**:
+
+  | 뮤테이션 | 보강 전 | 보강 후 |
+  |---|---|---|
+  | 저장에서 분해 누락 | **5건 전부 통과** | **3건 실패** |
+  | 옛 문서를 0으로 채움 | (셀 없음) | **1건 실패** |
+
+### Issues found — 내 절차 실수로 회귀 한 번을 버렸다
+
+- **증상**: 첫 전량 회귀가 `1698 passed / **9 skipped**`(정상은 `/ 1`). passed+skipped는 신규 3건과
+  맞았지만 skip이 8건 늘었다.
+- **원인**: 코드가 아니라 절차다 — `docker compose -f docker-compose.test.yml up -d` 후 **고정
+  `sleep 8`**로 시작했는데, healthcheck는 `rs.initiate` 후 **writable PRIMARY**가 될 때까지
+  healthy를 보고하지 않는다. 그래서 **초반 모듈만 skip되고 나머지는 붙어** 전량 실패가 아니라
+  **부분적으로 잘못된 기준선**이 나왔다.
+- **위험한 이유**: 조용하다. "내 변경이 8건을 깨뜨렸나"로 오독하기 쉽다.
+- **해결**: healthy를 기다린 뒤 재실행 → `1706 passed / 1 skipped / 1468 subtests`. Mongo 통합만
+  따로 돌려도 78 passed로 정상임을 먼저 확인했다. **HANDOFF "기동·실행법"에 함정으로 적었고
+  고정 `sleep` 대신 healthy를 기다리는 한 줄을 넣었다.**
+
+### Verification
+
+- 전량 회귀(test-mongo **healthy 확인 후**): **`1706 passed / 1 skipped / 1468 subtests`**(651s).
+  기준선 `1703 / 1 / 1468` 대비 **+3 = 신규 테스트 3개와 정확히 일치**. `-rs`로 확인한 유일한
+  skip은 알려진 live Chroma 1건이다.
+- 집중: 관측 5개 모듈 `100 passed / 28 subtests`.
+- 뮤테이션 2종: 위 표대로 각각 해당 셀에서 실패, 원복 후 `git diff`로 무변 확인.
+- Mongo 통합 별도 확인: `test_core_sot_mongo.py`+`test_analysis_mongo.py` **78 passed**.
+
+### Next steps
+
+- **1b: 창 크기를 코드가 읽게 하고 헤드룸을 함께 기록**(관측만, 거부 없음). 이것이 "자원 배분"
+  지표의 **분모**를 채우는 자리다.
+- 1c: KPI 집계에 컨텍스트 효율 노출.

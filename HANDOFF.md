@@ -79,6 +79,8 @@
 
 **백엔드 테스트** — `docker compose -f docker-compose.test.yml up -d` 후 `python3 -m pytest -q`. env 불필요(기본 URI가 27020 replica set `rs-test`). 미기동이면 Mongo 테스트가 **skip**(실패 아님). 끝나면 `... down`.
 
+> **함정 — `up -d` 직후 곧바로 돌리지 말 것(2026-07-29 실측).** healthcheck는 `rs.initiate` 후 **writable PRIMARY**가 될 때까지 healthy를 보고하지 않으므로 기동에 수십 초가 걸린다. 고정 `sleep`을 주고 시작하면 **초반 모듈만 skip되고 나머지는 붙어**, 전량 실패가 아니라 **부분적으로 잘못된 기준선**이 나온다(실측: `1698 passed / 9 skipped` — 정상은 `/ 1`). 증상이 조용해서 "내 변경이 8건을 깨뜨렸나"로 오독하기 쉽다. **healthy를 기다린 뒤 시작한다**: `until [ "$(docker inspect -f '{{.State.Health.Status}}' ai_writte_system-test-mongo-1)" = healthy ]; do sleep 2; done`. 숫자가 안 맞으면 `-rs`로 skip 사유부터 본다.
+
 **live Chroma 테스트**(호스트 `pytest`에서는 항상 skip되는 1건) — 호스트를 오염시키지 않고 이미 `chromadb`가 있는 application 이미지에서 돌린다:
 
 ```bash

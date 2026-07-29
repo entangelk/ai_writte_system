@@ -122,6 +122,14 @@ class StoredLlmCall:
     latency_ms: int
     error_type: str | None
     created_at: datetime
+    # 입력/출력 분해. 컨텍스트 효율 분석("창의 얼마를 입력에 쓰는가")은 이것 없이는
+    # 불가능하다 — `total_tokens`만으로는 입력 8,000/출력 500과 그 반대가 같은 값으로
+    # 접힌다. **`None`은 "모른다"이지 0이 아니다**: provider가 답하지 않은 호출
+    # (`provider_error`), 이 필드가 생기기 전의 옛 레코드, 그리고 분해를 신경 쓰지 않는
+    # 픽스처가 그렇다. 0으로 적으면 집계가 "입력을 0 토큰 썼다"로 읽어 효율 지표를
+    # 낙관 쪽으로 오염시킨다. 후행 선택 필드인 이유도 그것이다 — 모르는 것이 기본값이다.
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
 
 
 class LlmCallAuditRepository(Protocol):
@@ -169,7 +177,10 @@ class LlmCallAuditService:
         correlation_id: str | None, outcome: LlmCallOutcome,
         model: str | None = None, decision: str | None = None,
         gate_quality_score: float | None = None,
-        total_tokens: int = 0, latency_ms: int = 0,
+        total_tokens: int = 0,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+        latency_ms: int = 0,
         error_type: str | None = None,
     ) -> StoredLlmCall:
         call = StoredLlmCall(
@@ -182,6 +193,8 @@ class LlmCallAuditService:
             decision=decision,
             gate_quality_score=gate_quality_score,
             total_tokens=total_tokens,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
             latency_ms=latency_ms,
             error_type=error_type,
             created_at=self._clock(),

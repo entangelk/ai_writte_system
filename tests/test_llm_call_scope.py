@@ -79,6 +79,60 @@ class ScopeCaptureTest(unittest.TestCase):
         self.assertEqual(sorted(c.model for c in calls),
                          ["fake-1", "fake-2", "fake-3"])
 
+    def test_input_and_output_tokens_are_recorded_separately(self):
+        """컨텍스트 효율 분석의 전제 — 입력과 출력이 분리돼 있어야 한다.
+
+        오너 목적(2026-07-29)은 "효과적인 자원 배분"과 "컨텍스트 양 효율성 분석"이다.
+        그러려면 **창의 얼마를 입력에 쓰는가**를 물을 수 있어야 하는데, `total_tokens`
+        하나로는 답할 수 없다 — 입력 8,000/출력 500과 입력 500/출력 8,000이 같은 값으로
+        접힌다. 게이트웨이는 `prompt_tokens`·`completion_tokens`를 이미 돌려주고
+        (`llm_gateway/app/main.py`) 앱 provider도 파싱하는데, 종전에는
+        `ObservedProvider`가 **`total_tokens`만 취해 분해를 버렸다.**
+
+        under-strict: 다시 분해를 버리면 두 필드가 None이 되어 실패.
+        over-strict: 합이 분해와 어긋나면(어느 한쪽만 기록하는 등) 실패.
+        """
+        audit = _audit()
+        provider = _observed(_Provider("a"))
+
+        async def run():
+            with llm_call_scope(audit, project_id="p1", correlation_id="job-1"):
+                await provider.generate(object())
+
+        asyncio.run(run())
+        call = audit.list_calls("p1")[0]
+        # _Provider는 n번째 호출에서 TokenUsage(n, n)을 낸다 → 첫 호출은 입력 1·출력 1.
+        self.assertEqual(call.prompt_tokens, 1)
+        self.assertEqual(call.completion_tokens, 1)
+        self.assertEqual(call.total_tokens, 2)
+        self.assertEqual(
+            call.prompt_tokens + call.completion_tokens,
+            call.total_tokens,
+            "분해와 합이 어긋난다 — 둘 중 하나가 다른 호출의 값이거나 누락됐다",
+        )
+
+    def test_provider_error_leaves_the_split_unknown_not_zero(self):
+        """실패한 호출의 분해는 **0이 아니라 '모른다'**여야 한다.
+
+        provider가 답하지 않았으므로 입력 토큰도 알 수 없다. 0으로 적으면 집계가
+        "입력을 0 토큰 썼다"로 읽어 **효율 지표를 낙관 쪽으로 오염**시킨다. 계약이
+        `total_tokens`의 0을 "모른다"로 정의한 것과 같은 이유이며(SoT §관측 KPI),
+        분해는 `None`으로 그 사실을 **명시**할 수 있다.
+        """
+        audit = _audit()
+        provider = _observed(_Provider(error=ProviderError(
+            code=ProviderErrorCode.TIMEOUT, message="down", retryable=True)))
+
+        async def run():
+            with llm_call_scope(audit, project_id="p1", correlation_id="job-1"):
+                with self.assertRaises(ProviderError):
+                    await provider.generate(object())
+
+        asyncio.run(run())
+        call = audit.list_calls("p1")[0]
+        self.assertIsNone(call.prompt_tokens)
+        self.assertIsNone(call.completion_tokens)
+
     def test_provider_failure_is_recorded_and_still_raises(self):
         audit = _audit()
         provider = _observed(_Provider(error=ProviderError(

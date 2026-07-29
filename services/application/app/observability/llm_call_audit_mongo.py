@@ -56,6 +56,8 @@ def _doc(call: StoredLlmCall) -> dict:
         "decision": call.decision,
         "gate_quality_score": call.gate_quality_score,
         "total_tokens": call.total_tokens,
+        "prompt_tokens": call.prompt_tokens,
+        "completion_tokens": call.completion_tokens,
         "latency_ms": call.latency_ms,
         "error_type": call.error_type,
         "created_at": call.created_at,
@@ -73,6 +75,10 @@ def _call(doc: dict) -> StoredLlmCall:
         decision=doc.get("decision"),
         gate_quality_score=doc.get("gate_quality_score"),
         total_tokens=doc.get("total_tokens", 0),
+        # 필드가 생기기 전 레코드에는 없다 → None("모른다"). 0으로 채우면 옛 레코드가
+        # "입력 0 토큰"으로 집계에 섞인다.
+        prompt_tokens=doc.get("prompt_tokens"),
+        completion_tokens=doc.get("completion_tokens"),
         latency_ms=doc.get("latency_ms", 0),
         error_type=doc.get("error_type"),
         created_at=doc["created_at"],

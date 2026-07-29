@@ -56,6 +56,9 @@ class PendingLlmCall:
     outcome: LlmCallOutcome
     model: str | None = None
     total_tokens: int = 0
+    # None = "모른다"(provider가 답하지 않은 호출). 0이 아니다 — StoredLlmCall 주석 참조.
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
     latency_ms: int = 0
     error_type: str | None = None
     # Domain verdicts the provider cannot see; filled in by ``annotate_last``.
@@ -181,6 +184,8 @@ def _flush(audit: LlmCallAuditService | None, scope: LlmCallScope) -> None:
                 decision=call.decision,
                 gate_quality_score=call.gate_quality_score,
                 total_tokens=call.total_tokens,
+                prompt_tokens=call.prompt_tokens,
+                completion_tokens=call.completion_tokens,
                 latency_ms=call.latency_ms,
                 error_type=call.error_type,
             )
@@ -218,6 +223,8 @@ class ObservedProvider:
             outcome=LlmCallOutcome.SUCCESS,
             model=result.model,
             total_tokens=result.usage.total_tokens,
+            prompt_tokens=result.usage.prompt_tokens,
+            completion_tokens=result.usage.completion_tokens,
             latency_ms=_elapsed_ms(started),
         ))
         return result

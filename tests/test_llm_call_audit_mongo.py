@@ -62,13 +62,18 @@ class _Client:
 
 
 def _call(call_id, *, project="p", minute=0, call_site="writing_gate",
-          decision="pass", score=1.0, outcome="success", error_type=None):
+          decision="pass", score=1.0, outcome="success", error_type=None,
+          prompt_tokens=200, completion_tokens=22):
+    # 분해를 **비어 있지 않게** 싣는 것이 중요하다. 둘 다 None이면 매퍼가 필드를
+    # 통째로 빠뜨려도 None == None으로 왕복 비교를 통과한다(실측: 저장에서 두 필드를
+    # 지워도 5건 전부 green이었다).
     return StoredLlmCall(
         id=call_id, project_id=project, call_site=call_site,
         correlation_id="req-1", model="claude-fake", outcome=outcome,
         decision=decision, gate_quality_score=score,
         total_tokens=222, latency_ms=900, error_type=error_type,
         created_at=datetime(2026, 7, 24, 0, minute, tzinfo=UTC),
+        prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
     )
 
 
@@ -145,6 +150,26 @@ class MongoLlmCallAuditRepositoryTest(unittest.TestCase):
 
         self.assertEqual(restored.total_tokens, 0)
         self.assertEqual(restored.latency_ms, 0)
+
+    def test_legacy_doc_without_the_split_reads_unknown_not_zero(self):
+        """분해가 없는 옛 레코드는 **None("모른다")**이지 0이 아니다.
+
+        `total_tokens`·`latency_ms`가 0으로 떨어지는 것과 **의도적으로 다르다**:
+        0 토큰은 "입력을 하나도 안 썼다"는 뜻이 되어 컨텍스트 효율 지표를 낙관
+        쪽으로 오염시킨다. 분해가 생기기 전 레코드는 배포 DB에 실제로 있으므로
+        이 경로는 가상이 아니다.
+        """
+        self.repo.add(_call("llmc:old"))
+        old = self.collection.docs["llmc:old"]
+        old.pop("prompt_tokens")
+        old.pop("completion_tokens")
+
+        [restored] = self.repo.list_for_project("p")
+
+        self.assertIsNone(restored.prompt_tokens)
+        self.assertIsNone(restored.completion_tokens)
+        # 합은 여전히 읽힌다 — 옛 레코드도 총량 집계에는 계속 기여한다.
+        self.assertEqual(restored.total_tokens, 222)
 
 
 if __name__ == "__main__":
