@@ -10,6 +10,7 @@ SOT before it can become a ContextItem.
 from __future__ import annotations
 
 import inspect
+import json
 import time
 from typing import Awaitable, Callable, Protocol
 
@@ -541,6 +542,65 @@ def estimate_tokens(text: str) -> int:
     return max(1, (len(text) + 3) // 4)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ★ 렌더링 형식의 두 번째 정의 (의도된 중복 — 없애려면 아래를 읽고 판단할 것)
+#
+# 예산은 항목이 **모델에게 렌더링되는 형태**를 세야 한다. 2026-07-29 베타 실측:
+# 항목 `text`만 세는 바람에 회계가 실제 렌더링의 1/12.7이었고, 예산 4096이 창 8192를
+# 넘기는 프롬프트를 통과시켜 `writing_report`가 400으로 죽었다(포인터가 report
+# 컨텍스트의 79%였다).
+#
+# 정본 렌더러는 `writing/prompt.py::_format_item` + `writing/context_pointer.py::
+# pointer_json`이다. 그런데 `writing/context_pointer.py`가 이 모듈을 import하므로
+# 되돌려 import하면 **순환**이다. 그래서 형식을 여기 한 벌 더 두고, **두 정의의 일치는
+# `tests/test_context_search.py::test_budget_counts_what_the_model_actually_receives_
+# bidirectional`이 잠근다**(좌변=이 함수, 우변=실제 렌더러 — 서로 다른 코드 경로라
+# 자명해지지 않는다).
+#
+# **이 중복은 한시적이다.** K-6=R-e(오너 2026-07-29)가 포인터 JSON을 프롬프트에서
+# 제거하면 아래 `_pointer_wire_json`이 통째로 필요 없어지고 남는 것은 짧은 스캐폴드뿐이다.
+# R-e 뒤에도 중복이 남으면 그때 정본 렌더링을 양쪽이 import하는 하위 모듈로 옮기는 것이
+# 옳다(HANDOFF 추적 부채에 근거와 함께 있다).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# writing/context_pointer.py::POINTER_KEYS 와 같아야 한다.
+_RENDERED_POINTER_KEYS = ("collection", "document_id", "version_id", "content_hash")
+
+
+def _pointer_wire_json(pointer: IndexPointer) -> str:
+    # writing/context_pointer.py::pointer_json 과 같은 형식(정렬 키·공백 없는 구분자).
+    # `context_pointer_of`는 검증만 하고 네 필드를 그대로 통과시키므로 여기서 IndexPointer를
+    # 직접 읽어도 결과 문자열이 같다.
+    return json.dumps(
+        {key: getattr(pointer, key) for key in _RENDERED_POINTER_KEYS},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def estimate_rendered_item_tokens(
+    *, text: str, pointer: IndexPointer, status: ContextItemStatus
+) -> int:
+    """항목 하나가 프롬프트에 실릴 때의 토큰 추정.
+
+    포인터를 **포함한** 형태를 센다 — 두 소비자(생성=포인터 없음, report=포인터 포함)
+    중 큰 쪽이고, 창을 넘기는 것도 그쪽이기 때문이다. 생성 경로는 그만큼 보수적으로
+    잡히는데, 예산이 과소평가해 요청이 죽는 것보다 과대평가해 항목이 덜 들어가는 편이
+    낫다(과소평가가 버그 방향이다).
+
+    조립 후에야 생기는 구조적 래퍼(`<context_package>`·섹션 태그)는 **여기 담기지 않는다.**
+    어떤 항목에도 귀속되지 않기 때문이며, 창 가드(K-3)가 system 프롬프트·후보 산문과 함께
+    고정 오버헤드로 더해야 하는 몫이다. 그 경계는 위 회귀가 단정으로 잠근다.
+    """
+    label = (
+        "candidate (uncertain)"
+        if status is ContextItemStatus.CANDIDATE
+        else "canonical"
+    )
+    return estimate_tokens(f"- [{label}] {_pointer_wire_json(pointer)} {text}")
+
+
 class ContextSearchService:
     def __init__(
         self,
@@ -796,20 +856,23 @@ class ContextSearchService:
         # (pointer.collection == MEMORIES_COLLECTION) bypasses the source-block
         # _gate_stale_findings that would otherwise read them.
         text = derive_memory_index_text(entry.memory_type, entry.payload)
+        pointer = IndexPointer(
+            project_id=entry.project_id,
+            collection=MEMORIES_COLLECTION,
+            document_id=entry.id,
+            version_id=str(entry.version),
+            content_hash="",
+        )
         return ContextItem(
             need=need,
             status=ContextItemStatus.CANONICAL,
             text=text,
-            pointer=IndexPointer(
-                project_id=entry.project_id,
-                collection=MEMORIES_COLLECTION,
-                document_id=entry.id,
-                version_id=str(entry.version),
-                content_hash="",
-            ),
+            pointer=pointer,
             snapshot_id="",
             sot_reloaded=True,
-            token_estimate=estimate_tokens(text),
+            token_estimate=estimate_rendered_item_tokens(
+                text=text, pointer=pointer, status=ContextItemStatus.CANONICAL
+            ),
             source_ref_ids=entry.source_ref_ids,
         )
 
@@ -903,20 +966,23 @@ class ContextSearchService:
         # same projection as memory), so it never leaks the vector index text.
         # snapshot_id/content_hash/sot_reloaded are inert here (same as memory).
         text = derive_memory_index_text(candidate.candidate_type, candidate.payload)
+        pointer = IndexPointer(
+            project_id=candidate.project_id,
+            collection=CANDIDATES_COLLECTION,
+            document_id=candidate.id,
+            version_id="",
+            content_hash="",
+        )
         return ContextItem(
             need=need,
             status=ContextItemStatus.CANDIDATE,
             text=text,
-            pointer=IndexPointer(
-                project_id=candidate.project_id,
-                collection=CANDIDATES_COLLECTION,
-                document_id=candidate.id,
-                version_id="",
-                content_hash="",
-            ),
+            pointer=pointer,
             snapshot_id="",
             sot_reloaded=True,
-            token_estimate=estimate_tokens(text),
+            token_estimate=estimate_rendered_item_tokens(
+                text=text, pointer=pointer, status=ContextItemStatus.CANDIDATE
+            ),
             source_ref_ids=candidate.source_ref_ids,
             review_status=str(candidate.status),
         )
@@ -1073,20 +1139,23 @@ class ContextSearchService:
         version_id: str,
         content_hash: str,
     ) -> ContextItem:
+        pointer = IndexPointer(
+            project_id=block.project_id,
+            collection=SOURCE_BLOCK_COLLECTION,
+            document_id=block.id,
+            version_id=version_id,
+            content_hash=content_hash,
+        )
         return ContextItem(
             need=need,
             status=ContextItemStatus.CANONICAL,
             text=block.text,
-            pointer=IndexPointer(
-                project_id=block.project_id,
-                collection=SOURCE_BLOCK_COLLECTION,
-                document_id=block.id,
-                version_id=version_id,
-                content_hash=content_hash,
-            ),
+            pointer=pointer,
             snapshot_id=block.snapshot_id,
             sot_reloaded=True,
-            token_estimate=estimate_tokens(block.text),
+            token_estimate=estimate_rendered_item_tokens(
+                text=block.text, pointer=pointer, status=ContextItemStatus.CANONICAL
+            ),
         )
 
     def _rank(

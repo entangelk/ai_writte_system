@@ -188,6 +188,30 @@ class CanonicalMemoryStepTest(unittest.TestCase):
         self.assertEqual(item.pointer.version_id, "1")
         self.assertTrue(item.text)
 
+    def test_canonical_memory_budget_counts_the_rendered_item_bidirectional(self):
+        """정본 메모리 생산자도 렌더링 기준으로 회계한다.
+
+        `tests/test_context_search.py`의 같은 이름 회귀는 **source-block 항목만** 구동하는
+        픽스처라 이 생산자를 잠그지 못한다(실측: 그 픽스처의 8개 항목이 전부
+        `source_blocks`). 생산자마다 포인터 모양이 달라(메모리는 `content_hash`가 비어 있고 `version_id`가 찬다) 렌더링 비용도 다르므로,
+        칸을 비워 두면 이 사이트만 조용히 `text`만 세는 상태로 돌아갈 수 있다.
+
+        under-strict: 회계가 렌더링보다 작으면 예산이 창을 넘기는 프롬프트를 통과시킨다.
+        over-strict: 회계가 2배를 넘으면 멀쩡한 항목이 예산에서 잘린다.
+        """
+        from services.application.app.context_search.service import estimate_tokens
+        from services.application.app.writing.prompt import _format_item
+
+        memory = self._seed()
+        package = asyncio.run(_service(memory).build_context_package(_request()))
+        items = package.macro_items + package.micro_evidence
+        self.assertTrue(items)
+        rendered = sum(
+            estimate_tokens(_format_item(item, package, True)) for item in items
+        )
+        self.assertGreaterEqual(package.token_estimate_total, rendered)
+        self.assertLessEqual(package.token_estimate_total, rendered * 2)
+
     def test_unwired_retriever_yields_empty_without_failure(self):
         memory = self._seed()
         package = asyncio.run(

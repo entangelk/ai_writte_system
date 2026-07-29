@@ -543,11 +543,24 @@ class ContextSearchPackageTest(unittest.IsolatedAsyncioTestCase):
         )
         service = _service(core_sot, vector_index, indexing, _StaticPlanner(plan))
 
+        # "딱 한 항목만 들어가는 예산"을 **실제 항목 비용에서** 끌어온다. 예전에는 2·4라는
+        # 리터럴이었는데 그것은 회계가 `text`만 세던 시절의 값이라, 회계가 렌더링 기준으로
+        # 정직해지자 아무 항목도 못 들어가 테스트가 의도와 무관한 이유로 깨졌다. 이 테스트가
+        # 잠그는 것은 예산의 크기가 아니라 **need 우선순위**이므로 예산은 파생시킨다.
+        async def _tightest_budget_for_top_need(needs):
+            generous = await service.build_context_package(
+                _request(saved, needs=needs, max_tokens=100_000)
+            )
+            ranked = generous.macro_items + generous.micro_evidence
+            self.assertTrue(ranked)
+            return ranked[0].token_estimate
+
+        quote_needs = (ContextNeed.SOURCE_QUOTE, ContextNeed.CURRENT_SCENE)
         quote_first = await service.build_context_package(
             _request(
                 saved,
-                needs=(ContextNeed.SOURCE_QUOTE, ContextNeed.CURRENT_SCENE),
-                max_tokens=2,
+                needs=quote_needs,
+                max_tokens=await _tightest_budget_for_top_need(quote_needs),
             )
         )
         included = quote_first.macro_items + quote_first.micro_evidence
@@ -555,11 +568,12 @@ class ContextSearchPackageTest(unittest.IsolatedAsyncioTestCase):
         for item in included:
             self.assertIs(item.need, ContextNeed.SOURCE_QUOTE)
 
+        scene_needs = (ContextNeed.CURRENT_SCENE, ContextNeed.SOURCE_QUOTE)
         scene_first = await service.build_context_package(
             _request(
                 saved,
-                needs=(ContextNeed.CURRENT_SCENE, ContextNeed.SOURCE_QUOTE),
-                max_tokens=4,
+                needs=scene_needs,
+                max_tokens=await _tightest_budget_for_top_need(scene_needs),
             )
         )
         included = scene_first.macro_items + scene_first.micro_evidence
