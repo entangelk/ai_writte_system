@@ -21,6 +21,7 @@
   - 베타: `.env`에 `LLAMA_BASE_URL=http://192.168.1.22:9080`(커밋 금지 — gateway 기본값 `host.docker.internal:9080`을 외부 서버로 덮는다).
   - 감마: LLM 관통이 필요 없는 작업(회귀·저장소·색인)만. 필요하면 알파/베타로 옮긴다.
 - **함정**: HANDOFF가 "스택이 내려가 있다/떠 있다"고 적었으면 그건 **그 시점 그 머신의 관측치**다. 다른 머신에서 그대로 믿지 말고 `docker compose ps`로 직접 확인한다(memory 규칙 "verify-machine-state-before-claiming-blocked").
+- **★ 알파로 옮길 때 반드시 먼저 할 것 — `LLAMA_CTX_SIZE=16384`(2026-07-29).** 알파의 in-stack llama는 [`docker-compose.llama.yml:29`](docker-compose.llama.yml#L29)에서 **기본 8192**이고 `.env.example`에 항목이 없다. 그런데 **2026-07-29 회계 수정 후에도 report 프롬프트는 약 11,000~11,900 tok**이라, 창 8192에서는 **프롬프트만으로 창을 넘어 HTTP 400(`exceed_context_size_error`) → `provider_error` → generation job 실패**가 된다 — **오늘 아침 베타에서 4/4 실패했던 그 증상 그대로**다. 베타는 오너가 외부 서버를 16384로 올려 뒀지만 **그것은 그 서버의 설정이고 repo가 옮겨 주지 않는다.** 그러므로 알파에서 `long`을 돌리기 전 `.env`에 `LLAMA_CTX_SIZE=16384`를 넣는다(C-1 실측: 기동 성공, VRAM 9,481/12,288, 속도 무변). **안 넣고 실패를 보면 "오늘 수정이 안 먹었나"로 오독하기 쉽다 — 수정은 먹었고 창이 작은 것이다.** 근본 해결은 R-e(포인터 제거)이며 그 뒤에는 8192에서도 여유가 생긴다.
 
 ## 지금 상태
 
