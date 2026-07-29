@@ -506,15 +506,18 @@ class ContextSearchPackageTest(unittest.IsolatedAsyncioTestCase):
             estimate_tokens(_format_item(item, package, True)) for item in items
         )
 
-        self.assertGreaterEqual(
+        # **동등**을 요구한다(밴드가 아니라). 두 계산은 같은 문자열을 만들도록 되어 있으므로
+        # (`_pointer_wire_json` ≡ `pointer_json`, `context_pointer_of`는 값을 바꾸지 않는다)
+        # 항목 단위로 정확히 같아야 하고, 실제로 그렇다. 느슨한 상한(예: ×2)을 두면 **포인터를
+        # 두 번 세는 가장 자연스러운 과잉 교정이 그대로 통과**한다(독립 검증 실측).
+        #
+        # 회계에 의도적 여유(safety margin)를 두기로 결정한다면 이 단정을 **그 여유만큼 명시적으로**
+        # 고쳐야 한다 — 밴드 뒤에 숨겨 들여보내지 않는다.
+        self.assertEqual(
             package.token_estimate_total,
             per_item_rendered,
-            "회계가 렌더링보다 작다 — 예산이 창을 넘기는 프롬프트를 통과시킨다",
-        )
-        self.assertLessEqual(
-            package.token_estimate_total,
-            per_item_rendered * 2,
-            "회계가 렌더링의 2배를 넘는다 — 멀쩡한 항목이 예산에서 잘린다",
+            "회계와 렌더링이 갈라졌다 — 작으면 예산이 창을 넘기는 프롬프트를 통과시키고, "
+            "크면 멀쩡한 항목이 예산에서 잘린다",
         )
 
         # 항목별 회계가 구조적으로 담을 수 없는 몫이 남는다. 숨기지 않고 크기와 성질을

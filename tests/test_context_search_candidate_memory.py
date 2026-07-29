@@ -246,8 +246,13 @@ class CandidateMemoryStepTest(unittest.TestCase):
         rendered = sum(
             estimate_tokens(_format_item(item, package, True)) for item in items
         )
-        self.assertGreaterEqual(package.token_estimate_total, rendered)
-        self.assertLessEqual(package.token_estimate_total, rendered * 2)
+        # 동등을 요구한다 — 느슨한 상한은 포인터 중복 집계 같은 과잉 교정을 통과시킨다
+        # (근거는 `tests/test_context_search.py`의 같은 이름 회귀 주석).
+        self.assertEqual(
+            package.token_estimate_total,
+            rendered,
+            "회계와 렌더링이 갈라졌다 — 작으면 창을 넘기고, 크면 항목이 잘린다",
+        )
 
     def test_unwired_retriever_yields_empty_without_failure(self):
         analysis = self._seed()
