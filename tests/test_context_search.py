@@ -514,8 +514,9 @@ class ContextSearchPackageTest(unittest.IsolatedAsyncioTestCase):
 
         # **의도적 여유가 딱 하나 있고 그 크기를 여기서 못박는다**(§2-4: 여유를 두면 회귀에
         # 명시한다). 회계는 항목을 만드는 시점에 그 항목이 몇 번이 될지 모르므로 세 자리
-        # 상한(`_BUDGET_CITATION_NUMBER`=999)으로 센다. 즉 항목당 최대 2자 = **1토큰**만
-        # 과대평가한다. 그보다 큰 차이는 여유가 아니라 결함이다.
+        # 상한(`_BUDGET_CITATION_NUMBER`=999)으로 센다. 즉 항목당 최대 **2자**만 과대평가하며,
+        # 환산이 `len/1.7`이므로 그 2자는 최대 **2토큰**이다(K-1(a) 전에는 1토큰이었다 —
+        # 여유의 크기가 환산에 딸려 움직이므로 상수를 바꿀 때 이 상한도 함께 본다).
         slack = package.token_estimate_total - per_item_rendered
         self.assertGreaterEqual(
             slack,
@@ -524,9 +525,9 @@ class ContextSearchPackageTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertLessEqual(
             slack,
-            len(items),
-            "여유가 번호 자리수(항목당 1토큰)를 넘었다 — 항목을 두 번 세는 류의 과잉 교정이며 "
-            "멀쩡한 항목이 예산에서 잘린다",
+            2 * len(items),
+            "여유가 번호 자리수(항목당 최대 2토큰)를 넘었다 — 항목을 두 번 세는 류의 과잉 "
+            "교정이며 멀쩡한 항목이 예산에서 잘린다",
         )
 
         # 항목별 회계가 구조적으로 담을 수 없는 몫이 남는다. 숨기지 않고 크기와 성질을
@@ -903,10 +904,34 @@ class ContextGateTest(unittest.IsolatedAsyncioTestCase):
 
 class TokenEstimateTest(unittest.TestCase):
     def test_estimate_is_deterministic_char_based_and_positive(self):
-        self.assertEqual(estimate_tokens(""), 1)
-        self.assertEqual(estimate_tokens("abcd"), 1)
-        self.assertEqual(estimate_tokens("abcde"), 2)
-        self.assertEqual(estimate_tokens("가" * 8), 2)
+        # K-1(a) 2026-07-30: 환산이 `len/4`(영어 어림값)에서 **`len/1.7`**(한글 실측)로
+        # 바뀌었다. 배포 원고 429블록·21,774자 실측에서 `len/4`는 실제 12,747 tok을 5,590으로
+        # 봤다(−56%). 여기 숫자들이 그 환산을 리터럴로 고정한다 — 되돌리면 전부 깨진다.
+        self.assertEqual(estimate_tokens(""), 1)          # 빈 문자열도 최소 1
+        self.assertEqual(estimate_tokens("가"), 1)
+        self.assertEqual(estimate_tokens("가" * 17), 10)  # 17/1.7 = 10 정확히
+        self.assertEqual(estimate_tokens("가" * 18), 11)  # 올림
+        self.assertEqual(estimate_tokens("가" * 100), 59)
+
+    def test_the_estimate_never_undercounts_the_real_corpus_density(self):
+        """★ 과소평가가 버그 방향이다 — 실측 밀도보다 낮게 세면 안 된다.
+
+        under-strict(회귀 재발): `len/4`로 되돌리면 21,774자 코퍼스가 5,590으로 세어져
+        실측 12,747의 절반이 된다. 아래 하한이 그것을 잡는다.
+        over-strict(과잉 교정): 상수를 1.4~1.5로 더 보수적으로 잡으면 코퍼스가 +20~24%
+        과대평가돼 멀쩡한 항목이 예산에서 잘린다. 아래 상한이 그것을 잡는다.
+
+        실 코퍼스의 밀도(1.708 자/tok)를 대표하는 길이로 검사한다 — 실제 원고 총량과 같은
+        21,774자에서 실측은 **12,747 tok**이었다.
+        """
+        corpus_chars, measured_tokens = 21_774, 12_747
+        estimated = estimate_tokens("가" * corpus_chars)
+        self.assertGreaterEqual(
+            estimated, measured_tokens,
+            "추정이 실측을 밑돈다 — 예산이 의도보다 큰 프롬프트를 통과시킨다")
+        self.assertLessEqual(
+            estimated, round(measured_tokens * 1.1),
+            "추정이 실측을 10% 넘게 웃돈다 — 멀쩡한 항목이 예산에서 잘린다")
 
 
 class VectorQuerySimilarTest(unittest.TestCase):

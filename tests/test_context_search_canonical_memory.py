@@ -214,11 +214,11 @@ class CanonicalMemoryStepTest(unittest.TestCase):
             )
             for number, item in enumerate(items, start=1)
         )
-        # 허용되는 여유는 인용 번호의 자리수뿐(항목당 최대 1토큰) — 근거와 실측은
-        # `tests/test_context_search.py`의 같은 이름 회귀 주석에 있다.
+        # 허용되는 여유는 인용 번호의 자리수뿐(2자 = `len/1.7`에서 항목당 최대 2토큰) —
+        # 근거와 실측은 `tests/test_context_search.py`의 같은 이름 회귀 주석에 있다.
         slack = package.token_estimate_total - rendered
         self.assertGreaterEqual(slack, 0, "회계가 렌더링을 밑돈다 — 창을 넘기는 프롬프트가 통과한다")
-        self.assertLessEqual(slack, len(items), "여유가 번호 자리수를 넘었다 — 항목이 예산에서 잘린다")
+        self.assertLessEqual(slack, 2 * len(items), "여유가 번호 자리수를 넘었다 — 항목이 예산에서 잘린다")
 
     def test_unwired_retriever_yields_empty_without_failure(self):
         memory = self._seed()
