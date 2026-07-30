@@ -274,7 +274,8 @@
 - **앱의 매핑을 한 곳으로 모았다**: `504 if TIMEOUT else 502`가 **9개 호출부에 복제**돼
   있었고 세 번째 분기를 더하면 복제본 하나만 놓쳐도 같은 사건이 endpoint마다 다른 상태코드로
   나간다. `_provider_error_status` 하나로 합치고 **헬퍼 3분기 + endpoint 배선**을 두 겹으로
-  잠갔다.
+  잠갔다. **`/writing/generate`만 예외로 자기 분기를 유지한다**(아래 "기존 불일치" 항목) — 창 초과→400은 그 endpoint에도 있으므로 **K-3 계약은 전 endpoint 일관**이고, 남은 손필 분기는
+  TIMEOUT 축의 옛 불일치다.
 
 ### Issues found — 내 첫 설계가 v1.7.60 계약을 어겼다 (되돌림)
 
@@ -332,6 +333,44 @@
 - **내 첫 검증 시나리오가 틀렸던 것도 기록해 둔다**: `max_tokens=16300`으로 "초과"를
   기대했는데 `45 + 16,300 = 16,345 ≤ 16,384`라 통과가 정답이었다. 가드가 아니라 내 산수가
   틀렸고, 실패 판정을 그대로 믿지 않고 수치를 다시 본 덕에 잡았다.
+
+### 독립 검증 후속 보강 (K-3, 같은 슬라이스)
+
+독립 검증 [`verifications/2026-07-30/k3_context_window_guard_audit.md`](../../verifications/2026-07-30/k3_context_window_guard_audit.md)
+판정은 **합격(차단 0)**이고 비차단 4건(H1~H4)이 남았다. 처리 결과:
+
+- **먼저 트리 무결성을 직접 대조했다**(R-e 때 `git checkout --` 사고가 있었으므로).
+  `git status`는 검증 기록만 untracked이고 `git diff HEAD`가 **빈 출력** — 제품 코드가 HEAD와
+  동일하다. 이번 검증자는 역방향 Edit으로만 원복해 사고가 재발하지 않았다.
+- **H3 종결 — 라이브 주장을 repo 명령 하나로 재현되게 만들었다.** 검증자가 외부 12B가 없어
+  재실측하지 못한 부분이다. 새 스크립트를 만들지 않고 기존
+  [`scripts/gateway_generate_live_smoke.py`](../../../scripts/gateway_generate_live_smoke.py)를
+  확장했다(그쪽이 이미 **배포된 게이트웨이 컨테이너**를 HTTP로 치므로 in-process ASGI보다 강한
+  경로다). **경계를 하드코딩하지 않고 자기 교정한다**: 창과 프롬프트 크기를 warm-up 응답에서
+  읽어 `창 − 입력 ± 1`을 계산하므로, 배포 창이 8192든 16384든 같은 스모크가 그 배포의 경계를
+  본다(하드코딩하면 창이 바뀌는 순간 경계 검증이 조용히 죽는다).
+
+  ```bash
+  docker compose build gateway && docker compose up -d --no-deps gateway
+  docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/app \
+    application python scripts/gateway_generate_live_smoke.py --gateway-base-url http://gateway:8001
+  ```
+
+  **배포 컨테이너 실측(2026-07-30, 게이트웨이 이미지를 HEAD로 재빌드 후)**: 창 **16,384** ·
+  프롬프트 **29** → `max_tokens=16,356`(합 16,385 = 창+1) **400 · 17ms** ·
+  `max_tokens=16,355`(합 16,384 = 창) **200 · 132ms**. ±1 경계가 실 인프라에서 갈린다.
+  `exercised: false`(창 미지)는 실패가 아니라 설계상 판정 대상 아님으로 보고한다.
+- **H2 종결 — SoT 문장을 정확하게 고쳤다.** v1.7.62가 "한 곳으로 모았다"고만 적어 `/writing/generate`의
+  손필 분기를 숨겼다. **창 초과→400은 그 endpoint까지 전 endpoint 일관**이고 남은 손필 분기는
+  TIMEOUT 축의 기존 불일치임을 본문에 명시했다. 정본이 실제보다 깔끔하게 적히면 다음 사람이
+  "이미 정리됐다"고 믿는다.
+- **H1 — 결함이 아니라 트레이드오프이므로 K-1 설계 입력으로 넘겼다**(브리프 §2-1 갱신 블록 ·
+  HANDOFF Next Tasks 2). 가드는 창 캐시가 찬 뒤 **매 생성마다** 2왕복을 기다린다. K-1(c)가
+  색인 시점 토큰수를 저장하면 앱이 **안전한 상한**을 미리 알아 "확실히 안전한 요청"을 왕복 없이
+  통과시킬 수 있다. **지금 임시 상한(바이트 수 등)을 만들지 않았다** — K-1이 더 좋은 상한을 곧
+  주므로 한 슬라이스 뒤에 버릴 코드가 된다.
+- **H4(전체 green bar 미종단)는 환경 한계로 남긴다.** 내 실행 기준 1736/1 skipped이며 검증자는
+  K-3 표면 310 + 수집 1737로 교차 확인했다. 두 수가 정합한다.
 
 ### Verification
 

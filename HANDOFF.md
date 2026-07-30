@@ -61,7 +61,7 @@
 - 회귀 기준선: backend는 **test-mongo ON 전량 실행 1736 passed / 1 skipped / 1492 subtests**가 기준이다(2026-07-30 K-3 가드 후 실측, 642s — 같은 날 다른 부하에서 904s도 나왔으니 시간은 기준이 아니다). test-mongo OFF 보조 실행은 **1612 passed / 89 skipped / 1468 subtests**(2026-07-28 D8-5c 후 실측, 182s)이며, 이 **89 skip을 정상 기준선으로 읽으면 안 된다**(Mongo 통합 계약 + live Chroma). 두 실행의 passed+skipped는 1701로 일치한다. frontend는 **219 passed / 14 files**. build JS는 **진입 404.87 kB + 관측 화면 청크 385.71 kB**(차트는 `React.lazy`로 분리). **skip 수는 머신·인프라 기동 여부마다 다르다** — 숫자가 안 맞으면 `-rs`로 skip 사유부터 볼 것. **백엔드는 `argon2-cffi`가 설치돼 있어야 한다** — 없으면 auth 관련 26개 모듈이 수집 단계에서 실패해 회귀처럼 보인다. 핀은 루트가 아니라 [`services/application/requirements.txt:1`](services/application/requirements.txt#L1)에 있다(`argon2-cffi>=23,<24`). **프론트는 `npm install`이 선행**돼야 한다.
 - **스택 health를 읽는 법**(머신 무관, 구조적 사실): 정상 상태는 **healthy 7**(`application`·`gateway`·`mongo`·`elasticsearch`·`embedding`·`chroma`·`frontend`) + **healthcheck 없는 2**(`worker`·`generation_worker` — async 배경 워커라 by design, "Up"이지 "healthy" 아님). **"전부 healthy"라고 쓰지 않는다.**
 - **[알파 머신 관측치, 2026-07-28]** 스택이 내려가 있다. C-1 측정 전 `docker compose down`을 했으므로 **컨테이너는 없고 named 볼륨(mongo·es·chroma·llama_models)은 그대로다**(`-v` 없이 내렸다) — 데이터는 보존돼 있다. 다만 이 머신의 DB·색인 **내용**은 확인하지 않았으니, 관통 작업 전에 `docker compose up -d` 후 실제 상태를 볼 것.
-- **[베타 머신 관측치, 2026-07-30]** 전체 스택이 **떠 있다**(healthy 7 + 워커 2). 아침에는 `application`·`mongo`·`elasticsearch`·`embedding`·`chroma`가 **Exited(255)** 상태였고(머신 이벤트로 보인다 — `worker`·`generation_worker`는 mongo가 없어 재시작 루프였다) `docker compose up -d`로 되살렸다. **이미지는 2026-07-29 HEAD 빌드 그대로**이므로 **작업 트리의 미커밋 변경으로 실 관통을 하려면 재빌드 대신 마운트**한다: `docker compose run --rm --no-deps -v "$PWD/services:/app/services" -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/app application python …`. 외부 12B(`.env`의 `192.168.1.22:9080`)는 `/props` 실측 **`n_ctx=16384` · `total_slots=1`**(오너가 어제 8192→16384로 올린 뒤 그대로다). GPU는 **GTX 1060 3GB**(머신 표대로 12B 불가). DB에는 어제·오늘 프로브가 만든 **project 9개**와 `llm_call_audits`가 있다 — **일부러 남겼다**(Next Tasks 3 육안 확인이 데이터를 필요로 한다). 계정 `probe`(admin)가 있다. Mongo `prompt_templates`에는 **`analysis_extract` v1~v4 4행뿐**이다(report·gate·생성 템플릿은 영속이 아니라 in-memory seed — 위 immutable 함정의 적용 범위가 이것이다).
+- **[베타 머신 관측치, 2026-07-30]** 전체 스택이 **떠 있다**(healthy 7 + 워커 2). 아침에는 `application`·`mongo`·`elasticsearch`·`embedding`·`chroma`가 **Exited(255)** 상태였고(머신 이벤트로 보인다 — `worker`·`generation_worker`는 mongo가 없어 재시작 루프였다) `docker compose up -d`로 되살렸다. **게이트웨이 이미지만 2026-07-30 HEAD로 재빌드**했고(K-3 가드 라이브 확인용) application·frontend는 여전히 2026-07-29 빌드다. 그러므로 **작업 트리의 미커밋 변경으로 실 관통을 하려면 재빌드 대신 마운트**한다: `docker compose run --rm --no-deps -v "$PWD/services:/app/services" -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/app application python …`. 외부 12B(`.env`의 `192.168.1.22:9080`)는 `/props` 실측 **`n_ctx=16384` · `total_slots=1`**(오너가 어제 8192→16384로 올린 뒤 그대로다). GPU는 **GTX 1060 3GB**(머신 표대로 12B 불가). DB에는 어제·오늘 프로브가 만든 **project 9개**와 `llm_call_audits`가 있다 — **일부러 남겼다**(Next Tasks 3 육안 확인이 데이터를 필요로 한다). 계정 `probe`(admin)가 있다. Mongo `prompt_templates`에는 **`analysis_extract` v1~v4 4행뿐**이다(report·gate·생성 템플릿은 영속이 아니라 in-memory seed — 위 immutable 함정의 적용 범위가 이것이다).
 - **[베타, 2026-07-27 — 여전히 유효한 함정]** 이 머신 DB는 그때 비웠다. 구 `analysis_extract_v3` 본문(sha `fb4e272…`)이 현재 canonical(sha `4376310…`)과 달라 `PromptTemplateConflict`로 app이 죽었고, **오너 판단으로 데이터 볼륨(mongo·es·chroma)을 비워**(embedding 모델 캐시는 보존) 해소했다. 코드 회귀가 아니라 **오래된 볼륨과 현행 프롬프트 핀의 충돌**이며, 오래된 볼륨을 가진 다른 머신에서도 같은 일이 난다(위 "출시된 프롬프트 본문은 immutable" 함정과 같은 뿌리).
 - 인증 백엔드 변경은 application, 로그인 UI 변경은 frontend 이미지 rebuild가 필요하다.
 
@@ -90,6 +90,15 @@ docker compose run --rm --no-deps -v "$PWD/tests:/app/tests" \
   -e CHROMA_TEST_URL=chroma:8000 \
   application python -m unittest tests.test_chroma_adapter.ChromaAdapterLiveTest -v
 ```
+
+**창 가드 라이브 확인**(K-3) — 배포된 게이트웨이 컨테이너에 붙어 `창 ± 1` 경계를 **자기 교정**으로 본다(창을 응답에서 읽으므로 배포 창이 8192든 16384든 그 배포의 경계를 본다):
+
+```bash
+docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/app \
+  application python scripts/gateway_generate_live_smoke.py --gateway-base-url http://gateway:8001
+```
+
+`context_window_guard.exercised: false`는 실패가 아니라 **창을 아직 몰라 판정 대상이 아니었다**는 뜻이다(프로세스 첫 호출·`/props` 실패). 게이트웨이 코드를 고친 뒤라면 `docker compose build gateway && docker compose up -d --no-deps gateway`가 선행돼야 한다.
 
 **프론트** — `cd frontend && npm run gen:api && npx tsc --noEmit && npm run build && npx vitest run`.
 
@@ -159,6 +168,7 @@ docker compose run --rm --no-deps -v "$PWD/tests:/app/tests" \
 
 1. **인증 D8-5는 오너 결정에서 막혀 있다.** 결정 없이 진행 가능한 하위 슬라이스(5-a·5-c)는 끝났고, 남은 **5-b(전 프로젝트 목록)·5-d(관리자 화면)는 오너 결정 선행**이다 — `plans/auth-d8-5-admin-decisions.md` §7에 **C-1~C-6**이 구현자 의견과 함께 정리돼 있다. C-1~C-5는 F1=C가 연 승격 메커니즘(수명·쓰기 허용·감사 대상·소유자 통지·사유 필수)이고 얽혀 있어 한 번에 정하는 편이 낫다. **C-6은 D8-5a 독립 검증 H-c에서 온 별개 항목** — `POST /admin/users`가 관리자에게 초기 비밀번호를 평문으로 지정하게 하므로 관리자가 사용자 비밀번호를 아는 상태가 남는다(비밀번호 정책도 아직 없다). 결정되면 승격 저장소·`require_project_owner`의 승격 인지·감사 기록·전수 가드 확장이 한 슬라이스로 묶인다. **결정을 기다리는 동안 갈 수 있는 곳**: D8-6 영구 삭제(D5=A로 파기 범위가 이미 결정돼 있고 승격이 필요 없다 — 내용을 읽지 않기 때문이며, 이 점만 착수 시 확인받으면 된다) 또는 D8-7 인프라 인증.
 2. **★ 컨텍스트 예산 트랙 — 다음은 밀도(K-1)다.** 오너가 정한 순서(회계 → R-e → 가드 → 밀도)에서 **가드까지 들어갔다**(SoT v1.7.62). 남은 것은 K-1이고, R-a(report 전용 예산)는 R-e·가드로 필요가 사라진 쪽이라 폐기 판단만 남았다.
+   - **★ K-1 설계와 엮이는 것(독립 검증 H1)**: 가드는 창 캐시가 찬 뒤 **매 생성마다** `/apply-template`+`/tokenize` **2왕복**을 기다린다(6~67ms, 5s 예산 fail-open). K-1(c)가 색인 시점 토큰수를 저장하면 앱이 호출 전에 **안전한 상한**을 알게 되므로 가드가 "확실히 안전한 요청"을 **왕복 없이** 통과시킬 수 있고, 왕복은 경계 근처에만 남는다. **지금 임시 상한(바이트 수 등)을 만들지 않은 이유**는 K-1이 더 좋은 상한을 곧 주기 때문이다 — 만들면 한 슬라이스 뒤에 버린다.
    - **왜 가드가 들어갔는데도 K-1이 남나**: 가드는 `/apply-template`+`/tokenize`로 **서버가 센 값**을 쓰므로 정확하지만, **예산 회계는 여전히 `len/4`**라 항목을 실제보다 **2.17배 적게** 잡는다(2026-07-30 실측: 회계 1,232 vs 실제 2,678). 즉 지금은 "예산은 틀리고 가드가 막아 준다" 상태다 — 예산이 맞으면 애초에 가드까지 가지 않는다. 추천은 여전히 **(c)+(a)**(색인 시 토큰수 저장 + 상수 fallback). 감마·유닛 테스트에는 LLM이 없으므로 상수 fallback은 어느 안을 골라도 필수다.
    - **가드를 건드릴 사람이 알아야 하는 것**: 판정은 게이트웨이 seam(`client.py::_reject_if_window_exceeded`) 한 곳이고 **걸리면 모델 왕복 0회**다. 입력 수는 추정이 아니라 서버가 센 값이며 **세 조건(같은 `chat_template_kwargs` · `add_special` · 템플릿 적용 후 세기)을 하나라도 어기면 과소평가**된다 — 과소평가는 **가드가 늦게 걸리는 방향**이다. 세 조건 모두 회귀로 잠겨 있다. **판정할 수 없으면 통과**시킨다(창 미지·계수 실패·예산 5s·`max_tokens` 없음).
    - **★ 가드의 공백 2개는 의도된 것이고, 닫으려면 오너 결정이 필요하다**: ① 게이트웨이 프로세스의 **첫 생성 1회**는 창 캐시가 비어 가드 밖이다 ② **`/props` 조회가 실패한 프로세스에서는 가드가 계속 꺼져 있다**(1b가 "실패를 재시도하지 않는다"로 정했으므로). 가드가 창을 짧은 예산 안에서 기다리면 닫히지만 **v1.7.60의 "기다리지 않는다"를 어기고 B1 회귀 셀이 그 예산만큼 매달린다**(실측). 즉 이것은 성능 문제가 아니라 계약 개정 문제다.
