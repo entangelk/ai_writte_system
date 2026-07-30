@@ -25,6 +25,7 @@ from services.application.app.writing.models import (
     WritingRequest, WritingTaskType,
 )
 from services.application.app.writing.metering import MeteredCallError
+from services.application.app.writing.report import VERSION as REPORT_VERSION
 from services.application.app.writing.report import (
     TEMPLATE as REPORT_TEMPLATE, InvalidCandidateReport,
     WritingCandidateReportService, seed_report_template,
@@ -265,6 +266,11 @@ class FormatReportDiagnosisTest(unittest.TestCase):
         self.assertIn("repair attempt", text)
         self.assertIn("must be an array", text)
         self.assertIn("report thinking: false", text)
+        # The header must report the prompt version the service actually sends.
+        # It used to be a literal copy, so bumping the report template left the
+        # operator reading "…_v1" while v2 was live (measured 2026-07-30).
+        self.assertIn(f"report prompt_version: {REPORT_VERSION}", text)
+        self.assertIn("_v2", text)
 
     def test_upstream_output_states_not_reached(self):
         class _FailReviser:

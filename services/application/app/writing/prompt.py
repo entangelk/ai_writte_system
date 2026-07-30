@@ -9,14 +9,10 @@ is plain prose (owner Q2 — no JSON in slice 1).
 
 from __future__ import annotations
 
+from services.application.app.context_search.item_render import render_context_item
 from services.application.app.context_search.models import (
     ContextItem,
-    ContextItemStatus,
     ContextPackage,
-)
-from services.application.app.writing.context_pointer import (
-    context_pointer_of,
-    pointer_json,
 )
 from services.application.app.writing.models import WritingRequest
 from services.llm_gateway.app.payload import ChatCompletionRequest, ChatMessage
@@ -46,15 +42,16 @@ Output the continuation prose only. No JSON, no headings, no meta commentary, no
 
 
 def format_context_package(
-    package: ContextPackage, *, include_pointers: bool = False
+    package: ContextPackage, *, include_citation_numbers: bool = False
 ) -> str:
     """Compact context format (writing_agent_prompt.md §8.1). do_not_use and
     constraints come first (§8.2 hierarchy).
 
-    ``include_pointers`` prefixes each item with its stable ContextPointer so the
-    report extractor can cite the item it used (stable-pointer brief D2=A). Only
-    that one turn opts in: the generation and revise prompts produce prose, not
-    pointers, so their format stays unchanged (contract 3).
+    ``include_citation_numbers`` numbers each item so the report extractor can
+    cite the item it used by number (stable-pointer brief D2=A, rendered as a
+    number since K-6=R-e). Only that one turn opts in: the generation and revise
+    prompts produce prose, not citations, so their format stays unchanged
+    (contract 3).
     """
     sections: list[str] = []
     if package.do_not_use:
@@ -88,21 +85,22 @@ def format_context_package(
             + ("\n".join(populated) if populated else "(empty)")
             + "\n</project_brief>"
         )
+    # 인용 번호는 **macro → micro 순서로 1부터** 센다. `context_pointer.package_pointers`가
+    # 같은 순서로 allowlist를 만들고 `report.parse_report`가 번호를 그 순서로 되돌리므로,
+    # 두 순서가 갈라지면 claim의 근거가 조용히 다른 항목에 붙는다(실패가 아니라 오귀속).
     if package.macro_items:
         sections.append(
             "<macro_context>\n"
-            + "\n".join(
-                _format_item(item, package, include_pointers)
-                for item in package.macro_items
-            )
+            + _format_items(package.macro_items, 1, include_citation_numbers)
             + "\n</macro_context>"
         )
     if package.micro_evidence:
         sections.append(
             "<micro_evidence>\n"
-            + "\n".join(
-                _format_item(item, package, include_pointers)
-                for item in package.micro_evidence
+            + _format_items(
+                package.micro_evidence,
+                1 + len(package.macro_items),
+                include_citation_numbers,
             )
             + "\n</micro_evidence>"
         )
@@ -110,20 +108,17 @@ def format_context_package(
     return f"<context_package project=\"{package.project_id}\">\n{body}\n</context_package>"
 
 
-def _format_item(
-    item: ContextItem, package: ContextPackage, include_pointers: bool
+def _format_items(
+    items: tuple[ContextItem, ...], first_number: int, include_citation_numbers: bool
 ) -> str:
-    # Candidate-origin items are labeled so the model never treats them as
-    # approved knowledge (writing_agent_prompt.md §2.2).
-    label = (
-        "candidate (uncertain)"
-        if item.status is ContextItemStatus.CANDIDATE
-        else "canonical"
+    return "\n".join(
+        render_context_item(
+            text=item.text,
+            status=item.status,
+            number=number if include_citation_numbers else None,
+        )
+        for number, item in enumerate(items, start=first_number)
     )
-    if not include_pointers:
-        return f"- [{label}] {item.text}"
-    pointer = context_pointer_of(item.pointer, project_id=package.project_id)
-    return f"- [{label}] {pointer_json(pointer)} {item.text}"
 
 
 def build_writing_request(

@@ -2,6 +2,15 @@
 
 상태: `Resolved — D1=A · D2=A · D3=A · P-i (owner confirmed 2026-07-15) — 구현 완료 SoT v1.6.92`
 
+> **★ 2026-07-30 갱신 — 이 브리프의 "모델이 포인터를 그대로 베낀다"는 더 이상 현행이 아니다.**
+> K-6=R-e(오너 2026-07-29, 구현 SoT **v1.7.61**)로 프롬프트는 항목마다 **번호**만 보여주고
+> (`- [N] [label] text`) 모델은 `related_context_pointers`에 **번호**를 쓰며 **번호→포인터
+> 매핑은 서버(`report.parse_report`)가** 한다. 이유는 포인터 JSON이 report 컨텍스트의 79%를
+> 차지해 창을 넘겼기 때문이다(`plans/context-budget-korean-tokens-decisions.md` §2-1).
+> **아래 결정 D1·D3·P-i와 allowlist의 취지(모델은 identity를 만들지 못한다)는 그대로 유효하고,
+> 바뀐 것은 모델이 쓰는 wire 한 겹뿐이다** — 도메인 `ContextPointer`·HTTP 응답·Gate 프롬프트·
+> accept advisory는 무변이다. 아래 본문은 **그때의 결정 기록으로** 보존한다.
+
 관련 정본: `docs/system-contract-sot.md` v1.6.91, `05-writing-self-report-decisions.md` D2=A first→B·D5=B·D6=A first→C, `05-writing-report-api-decisions.md`, `context_search/models.py::ContextItem`, `indexing/models.py::IndexPointer`, `writing/prompt.py::format_context_package`
 
 ## Decision needed

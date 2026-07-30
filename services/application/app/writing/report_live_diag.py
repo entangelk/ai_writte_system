@@ -38,6 +38,7 @@ from services.application.app.writing.models import (
 from services.application.app.writing.report import (
     InvalidCandidateReport,
     TEMPLATE as REPORT_TEMPLATE,
+    VERSION as REPORT_VERSION,
     parse_report,
 )
 from services.llm_gateway.app.provider import TokenUsage
@@ -230,7 +231,9 @@ def format_report_diagnosis(
     diagnosis: ReportDiagnosis, *,
     request_id: str, project_id: str,
     model: str | None, max_tokens: int | None,
-    prompt_version: str = "writing_candidate_report_v1",
+    # 리터럴 사본을 두면 버전을 올릴 때 진단이 조용히 옛 버전을 보고한다
+    # (실측 2026-07-30: v2로 올린 뒤에도 "…_v1"을 출력했다).
+    prompt_version: str = REPORT_VERSION,
 ) -> str:
     """Render a report diagnosis as operator-terminal text (stdout only)."""
     lines: list[str] = [

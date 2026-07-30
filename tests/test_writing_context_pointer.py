@@ -1,14 +1,22 @@
 """Stable context pointer contract for Writing candidate claims.
 
 Brief: docs/plans/05-writing-stable-context-pointer-decisions.md —
-D1=A (projection of the existing IndexPointer), D2=A (pointers shown to the
-report extractor only, validated as exact membership of the current package),
+D1=A (projection of the existing IndexPointer), D2=A (the report extractor is the
+only turn that can cite package items, validated against the current package),
 D3=A (required claim array, empty allowed), sub-decision P-i (per-origin field
 invariant: a store fills only the fields it has).
+
+**K-6=R-e (2026-07-30)**: the extractor no longer copies pointer JSON. Items are
+numbered in the prompt, a claim cites the number, and the number→pointer mapping
+happens on the server. The pointer *domain* contract above is unchanged — what
+changed is the wire the model writes, so the membership check became "is this
+number one of the items this request showed" and the ordering
+(``package_pointers`` == prompt numbering, macro then micro) became load-bearing.
 """
 
 import asyncio
 import json
+import re
 import unittest
 
 from services.application.app.analysis.prompt_templates import (
@@ -77,9 +85,10 @@ def _candidate(project_id="p1"):
                             WritingOutputType.DRAFT_PATCH, "아린은 문을 열었다.")
 
 
-def _claim_json(pointers, *, text="문이 열렸다"):
+def _claim_json(cited, *, text="문이 열렸다"):
+    # ``cited`` = the item numbers the model wrote (K-6=R-e wire).
     return {"text": text, "type": "narrative_event", "requires_gate_check": True,
-            "related_context_pointers": list(pointers)}
+            "related_context_pointers": list(cited)}
 
 
 def _report_json(claims):
@@ -176,28 +185,61 @@ class ContextPointerProjectionTest(unittest.TestCase):
 
 
 class ReportPointerParseTest(unittest.TestCase):
-    """D2=A membership + D3=A required array."""
+    """D2=A membership (now by item number, K-6=R-e) + D3=A required array."""
 
     def setUp(self):
         self.allowed = package_pointers(_package(_BLOCK, _MEMORY, _CANDIDATE))
 
-    def test_each_origin_pointer_round_trips(self):
-        # under-strict: a claim citing a real package item keeps the exact
-        # object. Dropping the allowlist check would not fail here — the
-        # rejection tests below carry that direction.
-        for pointer in self.allowed:
-            with self.subTest(collection=pointer.collection):
+    def test_each_number_maps_to_its_own_package_item(self):
+        # under-strict: the number the prompt showed comes back as *that* item's
+        # pointer. This is the whole of R-e — a mapping off by one, reversed, or
+        # keyed to the wrong list would still produce a valid-looking report, so
+        # the position of every origin is pinned, not just one sample.
+        for number, pointer in enumerate(self.allowed, start=1):
+            with self.subTest(number=number, collection=pointer.collection):
                 report = parse_report(
-                    _report_json([_claim_json([pointer_wire(pointer)])]),
+                    _report_json([_claim_json([number])]),
                     allowed_pointers=self.allowed)
                 self.assertEqual(
                     report["candidate_claims"][0].related_context_pointers,
                     (pointer,))
 
+    def test_rendered_number_resolves_to_the_item_it_labels(self):
+        # H1 (독립 검증 2026-07-30): 위 셀은 allowlist만 보므로 **프롬프트의 번호 부여**가
+        # 갈라지는 것을 혼자서는 보지 못한다(그 방향은 service 경유 e2e 셀이 잡는다).
+        # 여기서는 provider 없이 **렌더링된 프롬프트에서 번호를 읽어** 그 번호가 그 줄의
+        # 항목으로 되돌아오는지 본다 — render↔parse 왕복만으로 macro/micro 순서 발산을
+        # 자급자족으로 잡는 셀이다. 세 origin의 본문을 서로 다르게 두는 것이 요점이다
+        # (같은 본문이면 어느 줄이 어느 항목인지 구분할 수 없다).
+        expected = {
+            "등대의 문이 열렸다": ContextPointer("source_blocks", "b1", "ver1", "hash1"),
+            "민아는 편지를 받았다": ContextPointer("memory_entries", "m1", "3", ""),
+            "비가 그쳤다": ContextPointer("analysis_candidates", "c1", "", ""),
+        }
+        package = ContextPackage(
+            project_id="p1", purpose=ContextSearchPurpose.WRITING_CONTEXT,
+            macro_items=(_item(_BLOCK, text="등대의 문이 열렸다"),),
+            micro_evidence=(_item(_MEMORY, text="민아는 편지를 받았다"),
+                            _item(_CANDIDATE, text="비가 그쳤다")),
+            constraints=(), do_not_use=(), token_estimate_total=0, degraded=False)
+        allowed = package_pointers(package)
+        rendered = format_context_package(package, include_citation_numbers=True)
+        labelled = re.findall(r"^- \[(\d+)\] \[[^\]]+\] (.+)$", rendered, re.MULTILINE)
+        self.assertEqual(len(labelled), len(expected))
+        for number, text in labelled:
+            with self.subTest(number=number, text=text):
+                report = parse_report(_report_json([_claim_json([int(number)])]),
+                                      allowed_pointers=allowed)
+                self.assertEqual(
+                    report["candidate_claims"][0].related_context_pointers,
+                    (expected[text],),
+                    "프롬프트가 이 번호로 보여준 항목과 파서가 되돌린 항목이 다르다 — "
+                    "요청은 성공하고 근거만 조용히 다른 항목에 붙는다",
+                )
+
     def test_claim_may_cite_several_items(self):
         report = parse_report(
-            _report_json([_claim_json(
-                [pointer_wire(p) for p in self.allowed])]),
+            _report_json([_claim_json(range(1, len(self.allowed) + 1))]),
             allowed_pointers=self.allowed)
         self.assertEqual(
             report["candidate_claims"][0].related_context_pointers, self.allowed)
@@ -216,43 +258,62 @@ class ReportPointerParseTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "item fields do not match schema"):
             parse_report(_report_json([claim]), allowed_pointers=self.allowed)
 
-    def test_hallucinated_pointer_is_rejected(self):
-        real = pointer_wire(self.allowed[0])
-        for field in ("collection", "document_id", "version_id", "content_hash"):
-            with self.subTest(field=field), self.assertRaisesRegex(
+    def test_number_past_the_end_is_rejected(self):
+        # A hallucinated citation is now an out-of-range number: the model can
+        # only invent numbers, and one the request never showed fails closed.
+        for number in (len(self.allowed) + 1, 99):
+            with self.subTest(number=number), self.assertRaisesRegex(
                     ValueError, "not an item of this context package"):
-                parse_report(
-                    _report_json([_claim_json([{**real, field: "invented"}])]),
-                    allowed_pointers=self.allowed)
+                parse_report(_report_json([_claim_json([number])]),
+                             allowed_pointers=self.allowed)
 
-    def test_valid_looking_pointer_of_another_package_is_rejected(self):
-        other = package_pointers(_package(
+    def test_zero_and_negative_numbers_are_rejected(self):
+        # Numbering is 1-based on purpose. `0` is the number a model reaches for
+        # to mean "none", and a 0-based mapping would silently credit the FIRST
+        # item to a claim that has no evidence. Negative indices would wrap to
+        # the end of the tuple, which is the same defect from the other side.
+        for number in (0, -1, -len(self.allowed)):
+            with self.subTest(number=number), self.assertRaisesRegex(
+                    ValueError, "not an item of this context package"):
+                parse_report(_report_json([_claim_json([number])]),
+                             allowed_pointers=self.allowed)
+
+    def test_number_only_another_package_would_have_is_rejected(self):
+        # Same shape as the old "valid-looking pointer of another package": a
+        # number that is legitimate somewhere else must not be honoured here.
+        bigger = package_pointers(_package(
+            _BLOCK, _MEMORY, _CANDIDATE,
             IndexPointer("p1", "source_blocks", "other-block", "ver9", "hash9")))
+        self.assertEqual(len(bigger), len(self.allowed) + 1)
         with self.assertRaisesRegex(ValueError, "not an item of this context package"):
-            parse_report(_report_json([_claim_json([pointer_wire(other[0])])]),
+            parse_report(_report_json([_claim_json([len(bigger)])]),
                          allowed_pointers=self.allowed)
 
-    def test_rogue_or_missing_pointer_key_is_rejected(self):
+    def test_pointer_object_of_the_old_wire_is_rejected(self):
+        # over-strict for the R-e migration: a model (or a half-reverted prompt)
+        # that still emits the v1 pointer object must fail, not be silently
+        # tolerated — accepting both wires would hide which contract is live.
         real = pointer_wire(self.allowed[0])
-        for name, value in (
-            ("rogue", {**real, "project_id": "p1"}),
-            ("missing", {k: v for k, v in real.items() if k != "content_hash"}),
-        ):
+        for name, value in (("pointer", real), ("rogue", {**real, "project_id": "p1"})):
             with self.subTest(name=name), self.assertRaisesRegex(
-                    ValueError, "item fields do not match schema"):
+                    ValueError, "must be an item number"):
                 parse_report(_report_json([_claim_json([value])]),
                              allowed_pointers=self.allowed)
 
-    def test_non_string_pointer_field_is_rejected(self):
-        real = pointer_wire(self.allowed[0])
-        with self.assertRaisesRegex(ValueError, "must be strings"):
-            parse_report(_report_json([_claim_json([{**real, "version_id": 1}])]),
-                         allowed_pointers=self.allowed)
+    def test_non_integer_citation_is_rejected(self):
+        # `"1"` and `1.0` are what a JSON-sloppy model produces, and `true` is
+        # the one that matters most: bool is a subclass of int in Python, so
+        # without the explicit guard `true` would resolve to item 1.
+        for value in ("1", 1.0, True, None, [1]):
+            with self.subTest(value=repr(value)), self.assertRaisesRegex(
+                    ValueError, "must be an item number"):
+                parse_report(_report_json([_claim_json([value])]),
+                             allowed_pointers=self.allowed)
 
     def test_non_array_pointer_field_is_rejected(self):
-        # H1 (verification 2026-07-15): the field is an ARRAY of pointers. A bare
+        # H1 (verification 2026-07-15): the field is an ARRAY. A bare number,
         # object or string is rejected by the shared _list helper; pinned here so
-        # the pointer contract is self-contained in its own class.
+        # the citation contract is self-contained in its own class.
         for value in ("x", pointer_wire(self.allowed[0]), 3):
             claim = {"text": "x", "type": "narrative_event",
                      "requires_gate_check": True,
@@ -261,67 +322,83 @@ class ReportPointerParseTest(unittest.TestCase):
                     ValueError, "must be an array"):
                 parse_report(_report_json([claim]), allowed_pointers=self.allowed)
 
-    def test_duplicate_pointer_in_one_claim_is_rejected(self):
-        wire = pointer_wire(self.allowed[0])
+    def test_duplicate_number_in_one_claim_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "must not repeat"):
-            parse_report(_report_json([_claim_json([wire, dict(wire)])]),
+            parse_report(_report_json([_claim_json([1, 1])]),
                          allowed_pointers=self.allowed)
 
     def test_two_claims_may_cite_the_same_item(self):
         # over-strict: dedup is per claim; two claims grounded in one item is
         # normal and must not be rejected.
-        wire = pointer_wire(self.allowed[0])
         report = parse_report(
-            _report_json([_claim_json([wire], text="a"),
-                          _claim_json([dict(wire)], text="b")]),
+            _report_json([_claim_json([1], text="a"), _claim_json([1], text="b")]),
             allowed_pointers=self.allowed)
         self.assertEqual(len(report["candidate_claims"]), 2)
 
     def test_default_allowlist_admits_empty_claims_only(self):
         # fails-closed: a caller that passes no allowlist can only get []
-        # claims through — a pointer the model did not see never validates.
+        # claims through — every number is out of range for an empty package.
         self.assertEqual(parse_report(_report_json([_claim_json([])]))
                          ["candidate_claims"][0].related_context_pointers, ())
         with self.assertRaisesRegex(ValueError, "not an item of this context package"):
-            parse_report(_report_json([_claim_json([pointer_wire(self.allowed[0])])]))
+            parse_report(_report_json([_claim_json([1])]))
 
     def test_fence_extraction_does_not_weaken_the_allowlist(self):
-        # The v1.6.85 fence strip applies to pointer-carrying JSON too, but it
-        # normalizes format only: a fenced valid pointer parses, a fenced
-        # unknown pointer is still rejected.
-        wire = pointer_wire(self.allowed[0])
-        fenced = f"```json\n{_report_json([_claim_json([wire])])}\n```"
+        # The v1.6.85 fence strip applies to citation-carrying JSON too, but it
+        # normalizes format only: a fenced valid number parses, a fenced
+        # out-of-range number is still rejected.
+        fenced = f"```json\n{_report_json([_claim_json([1])])}\n```"
         self.assertEqual(
             parse_report(fenced, allowed_pointers=self.allowed)
             ["candidate_claims"][0].related_context_pointers, (self.allowed[0],))
-        bad = f"```json\n{_report_json([_claim_json([{**wire, 'document_id': 'x'}])])}\n```"
+        bad = f"```json\n{_report_json([_claim_json([len(self.allowed) + 1])])}\n```"
         with self.assertRaisesRegex(ValueError, "not an item of this context package"):
             parse_report(bad, allowed_pointers=self.allowed)
 
 
 class ReportServicePointerTest(unittest.TestCase):
-    def test_extractor_sees_pointers_and_claim_keeps_them(self):
-        # Service-level under-strict: the prompt carries each item's pointer and
-        # a claim citing one survives into the enriched candidate.
-        wire = pointer_wire(ContextPointer("memory_entries", "m1", "3", ""))
-        provider = _Provider([_report_json([_claim_json([wire])])])
+    def test_extractor_cites_a_number_and_the_service_maps_it_back(self):
+        # Service-level under-strict, end to end: the prompt numbers the items in
+        # allowlist order (macro item = 1, micro item = 2) and the number the
+        # model wrote comes back as that item's pointer on the enriched
+        # candidate. The prompt and the parser derive the order from two
+        # different places (`format_context_package` sections vs
+        # `package_pointers`), so this cell is what fails if they diverge —
+        # swapping either order makes claim 2 resolve to the source block.
+        provider = _Provider([_report_json([_claim_json([2])])])
         package = _package(_MEMORY, macro=(_BLOCK,))
         enriched = asyncio.run(_service(provider).enrich(_candidate(), package))
         sent = json.loads(provider.requests[0].messages[1].content)["context_package"]
-        self.assertIn('{"collection":"memory_entries","content_hash":"",'
-                      '"document_id":"m1","version_id":"3"}', sent)
-        self.assertIn('"collection":"source_blocks"', sent)
+        self.assertIn("- [1] [canonical] 문이 열렸다", sent)
+        self.assertIn("- [2] [canonical] 문이 열렸다", sent)
         self.assertEqual(enriched.candidate_claims[0].related_context_pointers,
                          (ContextPointer("memory_entries", "m1", "3", ""),))
+        # over-strict (R-e): the 64-char hash and the pointer keys are exactly
+        # what R-e removed — 79% of the report context. If any of them come back
+        # the saving is gone even though every other assertion still passes.
+        for removed in ('"collection"', "source_blocks", "memory_entries", "hash1"):
+            self.assertNotIn(removed, sent)
 
-    def test_template_requires_pointers_and_forbids_invention(self):
+    def test_template_requires_numbers_and_forbids_invention(self):
         provider = _Provider([_report_json([_claim_json([])])])
         asyncio.run(_service(provider).enrich(_candidate(), _package(_BLOCK)))
         template = provider.requests[0].messages[0].content
         self.assertIn('"related_context_pointers"', template)
-        self.assertIn("copy that item's pointer object exactly", template)
+        self.assertIn("`- [N] [label] text`", template)
+        self.assertIn("as a plain integer", template)
+        self.assertIn("never use a number that is not shown in this request", template)
+        # The old instruction told the model to copy the pointer object. Leaving
+        # it in a prompt that no longer shows pointers is how a template ends up
+        # asking for a field the request cannot supply.
+        self.assertNotIn("pointer object", template)
 
     def test_cross_project_item_is_rejected_before_the_provider(self):
+        # This cell now carries the whole "identity is validated before the
+        # model is called" contract (2, P-i): before R-e the prompt formatter
+        # projected every pointer too, so there were two independent rejection
+        # points. The prompt no longer touches identity, and the only remaining
+        # one is `package_pointers` in `enrich_metered` — which runs before the
+        # request is built. `provider.calls == 0` is the assertion that says so.
         provider = _Provider([_report_json([_claim_json([])])])
         package = _package(IndexPointer("other", "source_blocks", "b1", "ver1", "hash1"))
         with self.assertRaisesRegex(InvalidCandidateReport, "belongs to project"):
@@ -337,35 +414,54 @@ class ReportServicePointerTest(unittest.TestCase):
 
 
 class PointerExposureBoundaryTest(unittest.TestCase):
-    """D2=A: only the report extractor sees pointers (contract 3)."""
+    """D2=A: only the report extractor can cite package items (contract 3)."""
 
-    def test_default_formatter_shows_no_pointer(self):
+    def test_default_formatter_shows_no_pointer_and_no_number(self):
         # over-strict: generation and revise send prose prompts; leaking DB
-        # identity into them is the D2=B option the owner rejected.
+        # identity into them is the D2=B option the owner rejected, and a
+        # citation number there would be an instruction the prompt never
+        # explains.
         text = format_context_package(_package(_BLOCK, _MEMORY, _CANDIDATE))
         self.assertNotIn("collection", text)
         self.assertNotIn("source_blocks", text)
+        self.assertNotIn("- [1]", text)
         self.assertIn("- [canonical] 문이 열렸다", text)
         self.assertIn("- [candidate (uncertain)] 문이 열렸다", text)
 
-    def test_report_formatter_prefixes_the_pointer(self):
-        text = format_context_package(_package(_BLOCK), include_pointers=True)
-        self.assertIn(
-            '- [canonical] {"collection":"source_blocks","content_hash":"hash1",'
-            '"document_id":"b1","version_id":"ver1"} 문이 열렸다', text)
+    def test_report_formatter_numbers_items_instead_of_showing_pointers(self):
+        # under-strict + the R-e over-strict guard in one place: the number is
+        # there and the pointer JSON is not.
+        text = format_context_package(_package(_BLOCK), include_citation_numbers=True)
+        self.assertIn("- [1] [canonical] 문이 열렸다", text)
+        for removed in ('"collection"', "source_blocks", "b1", "ver1", "hash1"):
+            self.assertNotIn(removed, text)
 
-    def test_labels_and_sections_are_unchanged_by_pointers(self):
-        # The pointer is additive: the candidate label a consumer relies on
+    def test_citation_numbers_run_continuously_across_sections(self):
+        # `package_pointers` concatenates macro then micro, so the numbering must
+        # too: the micro section starts where macro left off. If the sections were
+        # numbered independently, every micro item would resolve to a macro one.
+        package = _package(_MEMORY, _CANDIDATE, macro=(_BLOCK,))
+        text = format_context_package(package, include_citation_numbers=True)
+        macro, micro = text.split("<micro_evidence>")
+        self.assertIn("- [1] [canonical]", macro)
+        self.assertIn("- [2] [canonical]", micro)
+        self.assertIn("- [3] [candidate (uncertain)]", micro)
+        self.assertEqual(len(package_pointers(package)), 3)
+
+    def test_labels_and_sections_are_unchanged_by_numbering(self):
+        # The number is additive: the candidate label a consumer relies on
         # (§2.2) still precedes the text.
-        text = format_context_package(_package(_CANDIDATE), include_pointers=True)
+        text = format_context_package(_package(_CANDIDATE), include_citation_numbers=True)
         self.assertIn("<micro_evidence>", text)
-        self.assertIn("- [candidate (uncertain)] {", text)
+        self.assertIn("- [1] [candidate (uncertain)] 문이 열렸다", text)
 
     def test_generation_service_sends_no_pointer(self):
         # H2 (verification 2026-07-15) service-seam tripwire: the formatter test
-        # above locks the default, but only this one bites if a call site starts
-        # passing include_pointers=True. Generation emits prose, so DB identity
-        # must never reach its prompt (D2=B, the rejected axis).
+        # above locks the default, but only this one bites if the generation call
+        # site starts sending DB identity. Generation emits prose, so identity
+        # must never reach its prompt (D2=B, the rejected axis). Since R-e no
+        # formatter path renders identity at all, this is now a guard against
+        # re-opening that door rather than against a flag typo.
         provider = _Provider(["이어진 장면."])
         templates = PromptTemplateService(InMemoryPromptTemplateRepository())
         seed_writing_template(templates)

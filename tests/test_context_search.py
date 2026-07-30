@@ -471,15 +471,16 @@ class ContextSearchPackageTest(unittest.IsolatedAsyncioTestCase):
         (`<context_package>`·섹션 태그·`project_id`)가 더 붙는다. 그 래퍼를 항목별 회계에
         요구하면 올바른 수정으로도 이 테스트가 초록불이 되지 않는다.
 
-        **자명하지 않은 이유**: 좌변은 `context_search`가 자체 계산한 추정의 합이고 우변은
-        `writing/prompt`의 실제 렌더러가 만든 문자열이다. 서로 다른 코드 경로이므로, 생성
-        사이트가 포인터를 빠뜨리거나 렌더러가 형식을 바꾸면 두 값이 갈라져 실패한다.
-        (양변을 같은 렌더러로 재계산하면 항상 참이 되어 아무것도 잡지 못한다 — 그렇게 하지 않았다.)
+        **무엇이 남았나(K-6=R-e, 2026-07-30)**: 포인터 렌더링이 없어져 회계와 프롬프트가
+        `item_render.render_context_item` **한 정의**를 공유하게 됐다. 그래서 "두 사본의 형식이
+        갈라지는" 축은 구조적으로 사라졌고, 이 셀이 잠그는 것은 남은 두 가지다 — ① 회계가
+        항목의 `text`만이 아니라 **렌더링되는 라인 전체**를 센다, ② 회계가 렌더링을 **밑돌지
+        않는다**(밑돌면 예산이 창을 넘기는 프롬프트를 통과시킨다).
         """
-        from services.application.app.writing.prompt import (
-            _format_item,
-            format_context_package,
+        from services.application.app.context_search.item_render import (
+            render_context_item,
         )
+        from services.application.app.writing.prompt import format_context_package
 
         core_sot, vector_index, indexing, saved = _fixture()
         plan = _plan(
@@ -500,31 +501,39 @@ class ContextSearchPackageTest(unittest.IsolatedAsyncioTestCase):
         items = package.macro_items + package.micro_evidence
         self.assertTrue(items)
 
-        # report 경로가 실제로 보내는 형태(포인터 포함)가 회계의 기준이다 — 두 소비자 중
-        # 큰 쪽이며, 창을 넘기는 것도 이쪽이다.
+        # report 경로가 실제로 보내는 형태(인용 번호 포함)가 회계의 기준이다 — 두 소비자 중
+        # 큰 쪽이며, 창을 넘기는 것도 이쪽이다. 번호는 macro→micro 순서로 1부터다.
         per_item_rendered = sum(
-            estimate_tokens(_format_item(item, package, True)) for item in items
+            estimate_tokens(
+                render_context_item(
+                    text=item.text, status=item.status, number=number
+                )
+            )
+            for number, item in enumerate(items, start=1)
         )
 
-        # **동등**을 요구한다(밴드가 아니라). 두 계산은 같은 문자열을 만들도록 되어 있으므로
-        # (`_pointer_wire_json` ≡ `pointer_json`, `context_pointer_of`는 값을 바꾸지 않는다)
-        # 항목 단위로 정확히 같아야 하고, 실제로 그렇다. 느슨한 상한(예: ×2)을 두면 **포인터를
-        # 두 번 세는 가장 자연스러운 과잉 교정이 그대로 통과**한다(독립 검증 실측).
-        #
-        # 회계에 의도적 여유(safety margin)를 두기로 결정한다면 이 단정을 **그 여유만큼 명시적으로**
-        # 고쳐야 한다 — 밴드 뒤에 숨겨 들여보내지 않는다.
-        self.assertEqual(
-            package.token_estimate_total,
-            per_item_rendered,
-            "회계와 렌더링이 갈라졌다 — 작으면 예산이 창을 넘기는 프롬프트를 통과시키고, "
-            "크면 멀쩡한 항목이 예산에서 잘린다",
+        # **의도적 여유가 딱 하나 있고 그 크기를 여기서 못박는다**(§2-4: 여유를 두면 회귀에
+        # 명시한다). 회계는 항목을 만드는 시점에 그 항목이 몇 번이 될지 모르므로 세 자리
+        # 상한(`_BUDGET_CITATION_NUMBER`=999)으로 센다. 즉 항목당 최대 2자 = **1토큰**만
+        # 과대평가한다. 그보다 큰 차이는 여유가 아니라 결함이다.
+        slack = package.token_estimate_total - per_item_rendered
+        self.assertGreaterEqual(
+            slack,
+            0,
+            "회계가 렌더링을 밑돈다 — 예산이 창을 넘기는 프롬프트를 통과시킨다(2026-07-29 장애)",
+        )
+        self.assertLessEqual(
+            slack,
+            len(items),
+            "여유가 번호 자리수(항목당 1토큰)를 넘었다 — 항목을 두 번 세는 류의 과잉 교정이며 "
+            "멀쩡한 항목이 예산에서 잘린다",
         )
 
         # 항목별 회계가 구조적으로 담을 수 없는 몫이 남는다. 숨기지 않고 크기와 성질을
         # 여기서 못박는다 — 창 가드(K-3)는 이 몫을 system 프롬프트·후보 산문과 함께
         # **고정 오버헤드**로 따로 더해야 하며, 예산이 그것까지 세리라 기대하면 안 된다.
         wrapper_only = estimate_tokens(
-            format_context_package(package, include_pointers=True)
+            format_context_package(package, include_citation_numbers=True)
         ) - per_item_rendered
         self.assertGreater(
             wrapper_only, 0, "래퍼가 0이면 이 테스트의 전제(항목별 ≠ 전체)가 사라진 것이다"

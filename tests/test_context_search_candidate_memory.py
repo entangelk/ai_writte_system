@@ -230,29 +230,32 @@ class CandidateMemoryStepTest(unittest.TestCase):
 
         `tests/test_context_search.py`의 같은 이름 회귀는 **source-block 항목만** 구동하는
         픽스처라 이 생산자를 잠그지 못한다(실측: 그 픽스처의 8개 항목이 전부
-        `source_blocks`). 생산자마다 포인터 모양이 달라(후보는 `version_id`·`content_hash`가 둘 다 비고 라벨이 `candidate (uncertain)`이다) 렌더링 비용도 다르므로,
-        칸을 비워 두면 이 사이트만 조용히 `text`만 세는 상태로 돌아갈 수 있다.
+        `source_blocks`). 이 사이트는 `token_estimate`를 자기 손으로 채우고 라벨도 다르므로
+        (`candidate (uncertain)`), 칸을 비워 두면 여기만 조용히 `text`만 세는 상태로 돌아갈 수 있다.
 
         under-strict: 회계가 렌더링보다 작으면 예산이 창을 넘기는 프롬프트를 통과시킨다.
-        over-strict: 회계가 2배를 넘으면 멀쩡한 항목이 예산에서 잘린다.
+        over-strict: 회계가 부풀면 멀쩡한 항목이 예산에서 잘린다.
         """
+        from services.application.app.context_search.item_render import (
+            render_context_item,
+        )
         from services.application.app.context_search.service import estimate_tokens
-        from services.application.app.writing.prompt import _format_item
 
         analysis = self._seed()
         package = asyncio.run(_service(analysis).build_context_package(_request()))
         items = package.macro_items + package.micro_evidence
         self.assertTrue(items)
         rendered = sum(
-            estimate_tokens(_format_item(item, package, True)) for item in items
+            estimate_tokens(
+                render_context_item(text=item.text, status=item.status, number=number)
+            )
+            for number, item in enumerate(items, start=1)
         )
-        # 동등을 요구한다 — 느슨한 상한은 포인터 중복 집계 같은 과잉 교정을 통과시킨다
-        # (근거는 `tests/test_context_search.py`의 같은 이름 회귀 주석).
-        self.assertEqual(
-            package.token_estimate_total,
-            rendered,
-            "회계와 렌더링이 갈라졌다 — 작으면 창을 넘기고, 크면 항목이 잘린다",
-        )
+        # 허용되는 여유는 인용 번호의 자리수뿐(항목당 최대 1토큰) — 근거와 실측은
+        # `tests/test_context_search.py`의 같은 이름 회귀 주석에 있다.
+        slack = package.token_estimate_total - rendered
+        self.assertGreaterEqual(slack, 0, "회계가 렌더링을 밑돈다 — 창을 넘기는 프롬프트가 통과한다")
+        self.assertLessEqual(slack, len(items), "여유가 번호 자리수를 넘었다 — 항목이 예산에서 잘린다")
 
     def test_unwired_retriever_yields_empty_without_failure(self):
         analysis = self._seed()

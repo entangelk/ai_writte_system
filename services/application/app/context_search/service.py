@@ -10,7 +10,6 @@ SOT before it can become a ContextItem.
 from __future__ import annotations
 
 import inspect
-import json
 import time
 from typing import Awaitable, Callable, Protocol
 
@@ -19,6 +18,7 @@ from services.application.app.core_sot.service import (
     NotFound,
 )
 from services.application.app.core_sot.models import BlockKind, SourceBlock
+from services.application.app.context_search.item_render import render_context_item
 from services.application.app.context_search.models import (
     BUDGET_EXCLUDED_REASON,
     ContextBudget,
@@ -542,63 +542,33 @@ def estimate_tokens(text: str) -> int:
     return max(1, (len(text) + 3) // 4)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ★ 렌더링 형식의 두 번째 정의 (의도된 중복 — 없애려면 아래를 읽고 판단할 것)
-#
-# 예산은 항목이 **모델에게 렌더링되는 형태**를 세야 한다. 2026-07-29 베타 실측:
-# 항목 `text`만 세는 바람에 회계가 실제 렌더링의 1/12.7이었고, 예산 4096이 창 8192를
-# 넘기는 프롬프트를 통과시켜 `writing_report`가 400으로 죽었다(포인터가 report
-# 컨텍스트의 79%였다).
-#
-# 정본 렌더러는 `writing/prompt.py::_format_item` + `writing/context_pointer.py::
-# pointer_json`이다. 그런데 `writing/context_pointer.py`가 이 모듈을 import하므로
-# 되돌려 import하면 **순환**이다. 그래서 형식을 여기 한 벌 더 두고, **두 정의의 일치는
-# `tests/test_context_search.py::test_budget_counts_what_the_model_actually_receives_
-# bidirectional`이 잠근다**(좌변=이 함수, 우변=실제 렌더러 — 서로 다른 코드 경로라
-# 자명해지지 않는다).
-#
-# **이 중복은 한시적이다.** K-6=R-e(오너 2026-07-29)가 포인터 JSON을 프롬프트에서
-# 제거하면 아래 `_pointer_wire_json`이 통째로 필요 없어지고 남는 것은 짧은 스캐폴드뿐이다.
-# R-e 뒤에도 중복이 남으면 그때 정본 렌더링을 양쪽이 import하는 하위 모듈로 옮기는 것이
-# 옳다(HANDOFF 추적 부채에 근거와 함께 있다).
-# ─────────────────────────────────────────────────────────────────────────────
-
-# writing/context_pointer.py::POINTER_KEYS 와 같아야 한다.
-_RENDERED_POINTER_KEYS = ("collection", "document_id", "version_id", "content_hash")
-
-
-def _pointer_wire_json(pointer: IndexPointer) -> str:
-    # writing/context_pointer.py::pointer_json 과 같은 형식(정렬 키·공백 없는 구분자).
-    # `context_pointer_of`는 검증만 하고 네 필드를 그대로 통과시키므로 여기서 IndexPointer를
-    # 직접 읽어도 결과 문자열이 같다.
-    return json.dumps(
-        {key: getattr(pointer, key) for key in _RENDERED_POINTER_KEYS},
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
+# 회계가 세는 인용 번호의 자리수. 정본 렌더러는 항목의 **실제** 번호를 싣지만(1, 2, … N)
+# 회계는 항목을 만드는 시점에 그 번호를 모른다(번호는 조립 순서에서 나온다). 그래서 세 자리
+# 상한을 쓴다 — 999까지는 회계 ≥ 렌더링이 보장되고(과대평가가 안전한 방향), 남는 여유는
+# 항목당 최대 2자 = 1토큰이다. 이 여유는 §2-4의 "의도적 여유는 회귀에 명시한다"에 따라
+# `tests/test_context_search.py`의 회계 셀이 크기까지 단정한다.
+_BUDGET_CITATION_NUMBER = 999
 
 
 def estimate_rendered_item_tokens(
-    *, text: str, pointer: IndexPointer, status: ContextItemStatus
+    *, text: str, status: ContextItemStatus
 ) -> int:
     """항목 하나가 프롬프트에 실릴 때의 토큰 추정.
 
-    포인터를 **포함한** 형태를 센다 — 두 소비자(생성=포인터 없음, report=포인터 포함)
-    중 큰 쪽이고, 창을 넘기는 것도 그쪽이기 때문이다. 생성 경로는 그만큼 보수적으로
-    잡히는데, 예산이 과소평가해 요청이 죽는 것보다 과대평가해 항목이 덜 들어가는 편이
-    낫다(과소평가가 버그 방향이다).
+    **정본 렌더러(`item_render.render_context_item`)를 그대로 호출한다** — 형식을 사본으로
+    갖던 시절(K-6=R-e 이전)에는 회계가 렌더링의 1/12.7이었고 그 과소평가가 `writing_report`를
+    400으로 죽였다. 인용 번호를 **포함한**(=report 경로) 형태를 세며, 번호가 없는 생성 경로는
+    그만큼 보수적으로 잡힌다 — 과소평가가 버그 방향이기 때문이다.
 
     조립 후에야 생기는 구조적 래퍼(`<context_package>`·섹션 태그)는 **여기 담기지 않는다.**
     어떤 항목에도 귀속되지 않기 때문이며, 창 가드(K-3)가 system 프롬프트·후보 산문과 함께
     고정 오버헤드로 더해야 하는 몫이다. 그 경계는 위 회귀가 단정으로 잠근다.
     """
-    label = (
-        "candidate (uncertain)"
-        if status is ContextItemStatus.CANDIDATE
-        else "canonical"
+    return estimate_tokens(
+        render_context_item(
+            text=text, status=status, number=_BUDGET_CITATION_NUMBER
+        )
     )
-    return estimate_tokens(f"- [{label}] {_pointer_wire_json(pointer)} {text}")
 
 
 class ContextSearchService:
@@ -871,7 +841,7 @@ class ContextSearchService:
             snapshot_id="",
             sot_reloaded=True,
             token_estimate=estimate_rendered_item_tokens(
-                text=text, pointer=pointer, status=ContextItemStatus.CANONICAL
+                text=text, status=ContextItemStatus.CANONICAL
             ),
             source_ref_ids=entry.source_ref_ids,
         )
@@ -981,7 +951,7 @@ class ContextSearchService:
             snapshot_id="",
             sot_reloaded=True,
             token_estimate=estimate_rendered_item_tokens(
-                text=text, pointer=pointer, status=ContextItemStatus.CANDIDATE
+                text=text, status=ContextItemStatus.CANDIDATE
             ),
             source_ref_ids=candidate.source_ref_ids,
             review_status=str(candidate.status),
@@ -1154,7 +1124,7 @@ class ContextSearchService:
             snapshot_id=block.snapshot_id,
             sot_reloaded=True,
             token_estimate=estimate_rendered_item_tokens(
-                text=block.text, pointer=pointer, status=ContextItemStatus.CANONICAL
+                text=block.text, status=ContextItemStatus.CANONICAL
             ),
         )
 

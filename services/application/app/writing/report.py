@@ -10,7 +10,7 @@ from dataclasses import replace
 from services.application.app.analysis.prompt_templates import PromptTemplateService
 from services.application.app.context_search.models import ContextPackage
 from services.application.app.writing.context_pointer import (
-    InvalidContextPointer, POINTER_KEYS, package_pointers,
+    InvalidContextPointer, package_pointers,
 )
 from services.application.app.writing.json_extract import strip_code_fence
 from services.application.app.writing.models import (
@@ -24,7 +24,11 @@ from services.llm_gateway.app.provider import TokenUsage
 from services.llm_gateway.app.provider import LLMProvider
 
 TASK = "writing_candidate_report"
-VERSION = "writing_candidate_report_v1"
+# v2 (K-6=R-e, 2026-07-30): 항목을 포인터 JSON이 아니라 **번호**로 인용한다. 본문이 요구하는
+# 출력 형식이 바뀌었으므로 버전을 올린다 — v1이 두 형식을 뜻하면 진단·감사가 거짓말을 한다.
+# 이 템플릿은 Mongo 영속이 아니라 조립 때마다 in-memory seed이므로(sha256 불변 핀은
+# `analysis_extract` 전용) 기존 배포와 충돌하지 않는다.
+VERSION = "writing_candidate_report_v2"
 TEMPLATE = """Analyze candidate prose and return one JSON object only. Do not use Markdown or explanatory text, and do not wrap the JSON in a ``` code fence.
 
 The object must have exactly these four fields:
@@ -35,9 +39,7 @@ The object must have exactly these four fields:
       "text": "non-empty string",
       "type": "narrative_event|character_state|location_state|relation_change|timeline_fact|foreshadowing_use|factual_claim|interpretation",
       "requires_gate_check": true,
-      "related_context_pointers": [
-        {"collection": "string", "document_id": "string", "version_id": "string", "content_hash": "string"}
-      ]
+      "related_context_pointers": [1]
     }
   ],
   "new_memory_hints": [
@@ -59,7 +61,7 @@ The object must have exactly these four fields:
 
 Each `type` and `severity` must be one literal from its pipe-separated list, not the whole list. Confidence must be a finite number from 0 through 1. Empty arrays are valid and preferred over invented facts.
 
-`related_context_pointers` is required on every claim. Each context_package item is shown as `- [label] {pointer JSON} text`. When a claim uses an item, copy that item's pointer object exactly — every field verbatim, including empty strings. Never invent, edit, merge, or repeat a pointer, and never use a pointer that is not shown in this request. When a claim has no supporting item, return `[]`."""
+`related_context_pointers` is required on every claim. Each context_package item is shown as `- [N] [label] text`, where N is that item's number. When a claim uses an item, put that item's number in `related_context_pointers` as a plain integer — the number only, not the item text and not a quoted string. Never invent a number, never use a number that is not shown in this request, and never repeat a number within one claim. When a claim has no supporting item, return `[]`."""
 
 
 class InvalidCandidateReport(RuntimeError): pass
@@ -138,7 +140,7 @@ class WritingCandidateReportService:
     def _request(self, candidate, package, template):
         payload = {"candidate_text": candidate.text,
                    "context_package": format_context_package(
-                       package, include_pointers=True)}
+                       package, include_citation_numbers=True)}
         return ChatCompletionRequest(messages=(ChatMessage(role="system", content=template),
             ChatMessage(role="user", content=json.dumps(payload, ensure_ascii=False))),
             model=self.model, max_tokens=self.max_tokens, thinking=False)
@@ -146,11 +148,14 @@ class WritingCandidateReportService:
 
 def parse_report(content: str, *,
                  allowed_pointers: tuple[ContextPointer, ...] = ()) -> dict[str, object]:
-    """Strict parse. ``allowed_pointers`` is the current package's exact pointer
-    set (D2=A): a claim may only cite a member of it, so a pointer the model did
-    not see fails closed — the default empty allowlist admits ``[]`` claims only.
+    """Strict parse. ``allowed_pointers`` is the current package's pointer set
+    (D2=A) **in the order the prompt numbered the items** (macro then micro): a
+    claim cites an item by its 1-based number and the number→pointer mapping
+    happens here, on the server (K-6=R-e). A number the request did not show fails
+    closed — the default empty allowlist admits ``[]`` claims only.
     """
-    allowed = frozenset(allowed_pointers)
+    # 순서가 의미다 — 번호가 곧 이 tuple의 위치이므로 set으로 바꾸면 매핑이 사라진다.
+    allowed = tuple(allowed_pointers)
     root = json.loads(strip_code_fence(content))
     if not isinstance(root, Mapping) or set(root) != {"self_reported_constraints",
             "candidate_claims", "new_memory_hints", "risk_notes"}:
@@ -173,18 +178,19 @@ def _exact(v, keys):
 def _claim(v, allowed):
     _exact(v, ("text", "type", "requires_gate_check", "related_context_pointers"))
     if not isinstance(v["requires_gate_check"], bool): raise ValueError("requires_gate_check must be boolean")
-    pointers = tuple(_pointer(x, allowed) for x in _list(v["related_context_pointers"]))
+    pointers = tuple(_cited_pointer(x, allowed) for x in _list(v["related_context_pointers"]))
     if len(set(pointers)) != len(pointers): raise ValueError("claim pointers must not repeat")
     return CandidateClaim(_string(v["text"]), CandidateClaimType(v["type"]),
                           v["requires_gate_check"], pointers)
-def _pointer(v, allowed):
-    _exact(v, POINTER_KEYS)
-    if any(not isinstance(v[key], str) for key in POINTER_KEYS):
-        raise ValueError("pointer fields must be strings")
-    pointer = ContextPointer(**{key: v[key] for key in POINTER_KEYS})
-    if pointer not in allowed:
+def _cited_pointer(v, allowed):
+    # 번호는 **1-based**다(프롬프트가 `- [1] …`로 보여준다). 그래서 `0`은 어떤 항목도 가리키지
+    # 않는다 — "없음"을 0으로 쓰는 모델은 거부되고, 0-based였다면 첫 항목이 조용히 근거로
+    # 붙었을 것이다. `bool`은 `int`의 하위형이라 명시적으로 먼저 막는다(`True`는 1이다).
+    if isinstance(v, bool) or not isinstance(v, int):
+        raise ValueError("claim pointer must be an item number")
+    if not 1 <= v <= len(allowed):
         raise ValueError("claim pointer is not an item of this context package")
-    return pointer
+    return allowed[v - 1]
 def _hint(v):
     _exact(v, ("type", "text", "confidence", "should_analyze_after_save"))
     c=v["confidence"]
