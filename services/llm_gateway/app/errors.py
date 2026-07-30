@@ -13,6 +13,10 @@ class ProviderErrorCode(StrEnum):
     OVERLOADED = "provider_overloaded"
     INVALID_RESPONSE = "provider_invalid_response"
     REQUEST_REJECTED = "provider_request_rejected"
+    # K-3 창 가드(오너 2026-07-30). **우리가** 모델을 부르기 전에 거부한 경우로,
+    # `REQUEST_REJECTED`(모델 서버가 거부 — 왕복 1회를 이미 쓴 상태)와 **구분해야 한다**:
+    # 비용이 이 가드의 이유이므로 "누가 거부했는가"가 곧 그 가드가 일했는지의 신호다.
+    CONTEXT_WINDOW_EXCEEDED = "provider_context_window_exceeded"
 
 
 @dataclass(frozen=True, slots=True)

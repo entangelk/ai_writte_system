@@ -293,6 +293,21 @@ def _props(n_ctx):
     )
 
 
+def _applied(prompt="<start>안녕<end>"):
+    """`/apply-template` 응답 — 채팅 템플릿이 적용된 프롬프트."""
+    return JsonResponse(status_code=200, body={"prompt": prompt})
+
+
+def _tokenized(count):
+    """`/tokenize` 응답 — 토큰 배열(가드는 길이만 쓴다)."""
+    return JsonResponse(status_code=200, body={"tokens": list(range(count))})
+
+
+def _guard_probes(input_tokens):
+    """가드가 판정에 쓰는 두 왕복. 생성 응답 **앞에** 놓인다."""
+    return [_applied(), _tokenized(input_tokens)]
+
+
 class ContextWindowProbeTest(unittest.TestCase):
     """관측 1b — 창(`n_ctx`)을 `/props`에서 읽어 결과에 싣되, **생성을 붙잡지 않는다.**
 
@@ -317,7 +332,9 @@ class ContextWindowProbeTest(unittest.TestCase):
 
     def test_window_is_attached_once_the_probe_completes(self):
         provider, transport = self._provider(
-            [_valid_response(), _valid_response()], [_props(16384)]
+            # 두 번째 생성은 창을 알므로 **가드가 돈다** → 판정 왕복 2회가 앞에 붙는다.
+            [_valid_response(), *_guard_probes(10), _valid_response()],
+            [_props(16384)],
         )
 
         async def run():
@@ -372,7 +389,10 @@ class ContextWindowProbeTest(unittest.TestCase):
         매 호출 조회하면 생성 1회에 왕복이 2회가 되고, 그 비용이 **관측 때문에** 생긴다.
         """
         provider, transport = self._provider(
-            [_valid_response(), _valid_response(), _valid_response()], [_props(8192)]
+            [_valid_response(),
+             *_guard_probes(10), _valid_response(),
+             *_guard_probes(10), _valid_response()],
+            [_props(8192)],
         )
 
         async def run():
@@ -418,3 +438,147 @@ class ContextWindowProbeTest(unittest.TestCase):
             return await provider.generate(_request())
 
         self.assertIsNone(asyncio.run(run()).context_window)
+
+
+class ContextWindowGuardTest(unittest.TestCase):
+    """K-3 창 가드(오너 2026-07-30) — `입력 + 출력상한 ≤ 창`을 **모델 호출 전에** 판정한다.
+
+    왜 `입력 ≤ 창`으로는 부족한가(§1 실측): 프롬프트 단독 초과는 서버가 400으로 거부하지만
+    (왕복 1회를 이미 쓴 뒤다) **`프롬프트 + 출력`이 넘으면 서버는 200을 주고 출력만 조용히
+    자른다.** 후자는 에러가 아니라 망가진 결과로 돌아오므로 가드가 없으면 아무도 모른다.
+
+    가드의 입력 수는 **추정이 아니라 서버가 셀 값**이다(`/apply-template` → `/tokenize`).
+    그래서 이 가드는 밀도 보정(K-1)과 독립이며, `len/4` 추정 위에 세우면 −55% 과소평가로
+    **걸려야 할 때 걸리지 않는다**.
+    """
+
+    def _guarded_provider(self, outcomes, *, n_ctx=1000):
+        """창이 이미 캐시된 provider(첫 호출로 캐시를 채운 뒤 돌려준다)."""
+        transport = FakeJsonTransport(
+            [_valid_response(), *outcomes], get_outcomes=[_props(n_ctx)]
+        )
+        provider = LlamaCppProvider(
+            transport=transport, default_model="gemma-default",
+            default_thinking=False, provider_name="gemma_local",
+        )
+
+        async def warm():
+            await provider.generate(_request())
+            await asyncio.sleep(0)          # probe가 캐시를 채우도록 한 틱 양보
+        asyncio.run(warm())
+        return provider, transport
+
+    def test_over_the_window_is_rejected_without_calling_the_model(self):
+        # under-strict + 비용: 입력 900 + 출력 상한 64 = 964 > 창 900 → 거부.
+        # **생성 응답을 큐에 넣지 않았다** — 모델을 부르면 소진 예외로 터진다.
+        provider, transport = self._guarded_provider(_guard_probes(900), n_ctx=900)
+
+        with self.assertRaises(ProviderError) as raised:
+            asyncio.run(provider.generate(_request()))
+
+        error = raised.exception
+        self.assertIs(error.code, ProviderErrorCode.CONTEXT_WINDOW_EXCEEDED)
+        self.assertFalse(error.retryable)   # 같은 요청은 반드시 같은 실패로 끝난다
+        # 400 detail이 곧 "경고"다(오너 2026-07-30) — 수치가 본문에 있어야 원인을 안다.
+        for number in ("900", "64", "964"):
+            self.assertIn(number, str(error))
+        # 첫 항목은 캐시를 채운 warm-up 생성이다. 그 뒤로는 판정 왕복 2회뿐이어야 한다.
+        self.assertEqual(
+            [path for path, _ in transport.requests][1:],
+            ["/apply-template", "/tokenize"],
+            "가드가 걸렸는데 모델을 불렀다 — 비용을 아끼려고 만든 가드다",
+        )
+
+    def test_exactly_at_the_window_is_allowed(self):
+        # over-strict 경계: 입력 936 + 출력 64 = 1000 == 창 1000 → 통과해야 한다.
+        # `<=`를 `<`로 좁히면 정상 요청이 거부된다.
+        provider, _ = self._guarded_provider(
+            [*_guard_probes(936), _valid_response()], n_ctx=1000
+        )
+        self.assertEqual(asyncio.run(provider.generate(_request())).content, "반가워요")
+
+    def test_one_token_over_the_window_is_rejected(self):
+        # 같은 경계의 반대편: 937 + 64 = 1001 > 1000 → 거부. 두 셀이 함께 `<=`를 고정한다.
+        provider, _ = self._guarded_provider(_guard_probes(937), n_ctx=1000)
+        with self.assertRaises(ProviderError):
+            asyncio.run(provider.generate(_request()))
+
+    def test_the_guard_counts_the_templated_prompt_not_the_message_text(self):
+        """가드는 `/apply-template`의 렌더링 결과를 세고, 같은 `chat_template_kwargs`를 보낸다.
+
+        실측(2026-07-30): `enable_thinking`이 렌더링을 바꿔 같은 messages가 51 vs 49가 된다.
+        kwargs를 안 보내면 **다른 프롬프트를 세게 되고**, 메시지 본문만 세면 템플릿 몫이 빠져
+        과소평가된다(−16 ~ −80). 과소평가는 가드가 늦게 걸리는 방향이라 특히 나쁘다.
+        """
+        provider, transport = self._guarded_provider(
+            [*_guard_probes(10), _valid_response()], n_ctx=1000
+        )
+        asyncio.run(provider.generate(_request()))
+
+        paths = [path for path, _ in transport.requests]
+        self.assertEqual(paths[1:], ["/apply-template", "/tokenize",
+                                     "/v1/chat/completions"])
+        applied_payload = transport.requests[1][1]
+        completion_payload = transport.requests[3][1]
+        self.assertEqual(applied_payload["messages"], completion_payload["messages"])
+        self.assertEqual(applied_payload["chat_template_kwargs"],
+                         completion_payload["chat_template_kwargs"])
+        # BOS를 포함해야 실제 usage.prompt_tokens와 일치한다(빼면 정확히 −1).
+        self.assertIs(transport.requests[2][1]["add_special"], True)
+
+    def test_an_unknown_window_passes_through(self):
+        """창을 모르면 판정하지 않는다 — 가드가 자기 무지로 생성을 막지 않는다.
+
+        `/props` 실패는 1b 계약대로 재시도하지 않으므로, 그 프로세스에서 가드는 계속 꺼진
+        상태로 남는다. **의도된 결과이며 추적 부채로 적혀 있다**(닫으려면 v1.7.60의
+        "기다리지 않는다"를 가드 경로에 한해 개정하는 오너 결정이 필요하다).
+        """
+        transport = FakeJsonTransport(
+            [_valid_response(), _valid_response()],
+            get_outcomes=[TransportFailure(TransportFailureKind.CONNECTION)],
+        )
+        provider = LlamaCppProvider(
+            transport=transport, default_model="gemma-default",
+            default_thinking=False, provider_name="gemma_local",
+        )
+
+        async def run():
+            await provider.generate(_request())
+            await asyncio.sleep(0)
+            return await provider.generate(_request())
+
+        # 가드 왕복이 큐를 먹지 않는다 — 판정 자체를 시작하지 않기 때문이다.
+        self.assertEqual(asyncio.run(run()).content, "반가워요")
+        self.assertEqual([path for path, _ in transport.requests],
+                         ["/v1/chat/completions", "/v1/chat/completions"])
+
+    def test_a_guard_probe_failure_passes_through(self):
+        """토큰을 셀 수 없으면 통과시킨다(방어가 기능을 깨뜨리지 않는다)."""
+        for name, outcomes in (
+            ("apply-template 실패", [TransportFailure(TransportFailureKind.CONNECTION),
+                                     _valid_response()]),
+            ("apply-template 4xx", [JsonResponse(status_code=404, body={}),
+                                    _valid_response()]),
+            ("tokenize 실패", [_applied(), TransportFailure(TransportFailureKind.TIMEOUT),
+                               _valid_response()]),
+            ("모양이 다른 응답", [_applied(), JsonResponse(status_code=200, body={"x": 1}),
+                                 _valid_response()]),
+        ):
+            with self.subTest(name=name):
+                provider, _ = self._guarded_provider(outcomes, n_ctx=10)
+                self.assertEqual(
+                    asyncio.run(provider.generate(_request())).content, "반가워요")
+
+    def test_a_request_without_an_output_cap_is_not_judged(self):
+        """`max_tokens`가 없으면 `입력+출력` 식을 세울 수 없다 → 판정하지 않는다.
+
+        앱의 모든 호출부는 상한을 명시하므로 이 경로는 게이트웨이를 직접 치는 호출자용이다.
+        판정하지 않으므로 가드 왕복도 쓰지 않는다.
+        """
+        provider, transport = self._guarded_provider([_valid_response()], n_ctx=10)
+        request = ChatCompletionRequest(
+            messages=(ChatMessage(role="user", content="안녕"),), thinking=False)
+
+        self.assertEqual(asyncio.run(provider.generate(request)).content, "반가워요")
+        self.assertEqual([path for path, _ in transport.requests],
+                         ["/v1/chat/completions", "/v1/chat/completions"])

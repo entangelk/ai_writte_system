@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
+from .errors import ProviderError, ProviderErrorCode
 from .payload import ChatCompletionRequest, build_llama_payload
 from .provider import GenerationResult, TokenUsage
 from .transport import (
@@ -17,6 +18,12 @@ from .transport import (
     error_from_http_status,
     error_from_transport_failure,
 )
+
+
+# 창 가드가 판정에 쓸 수 있는 시간(K-3). 판정에는 왕복이 필요하고(실측 6~67ms), 그 왕복이
+# 느려질 때 **생성을 붙잡아 두는 것이 더 나쁘다** — 1b(B1)에서 이미 한 번 그렇게 깨졌다.
+# 예산을 넘기면 가드는 판정을 포기하고 요청을 통과시킨다.
+_GUARD_BUDGET_SECONDS = 5.0
 
 
 class LlamaCppProvider:
@@ -79,6 +86,8 @@ class LlamaCppProvider:
             default_model=self._default_model,
             default_thinking=self._default_thinking,
         )
+        # 넘는 요청은 **모델을 부르지 않고** 여기서 거부한다(K-3). 비용이 이유다.
+        await self._reject_if_window_exceeded(payload)
         try:
             response = await self._transport.post_json(
                 "/v1/chat/completions",
@@ -107,6 +116,113 @@ class LlamaCppProvider:
             self._parse_response(response),
             context_window=self._context_window,
         )
+
+    async def _reject_if_window_exceeded(self, payload: Mapping[str, Any]) -> None:
+        """`입력 + 출력상한 ≤ 창`을 **모델을 부르기 전에** 판정한다(K-3, 오너 2026-07-30).
+
+        왜 `입력 ≤ 창`으로는 부족한가(§1 실측): llama.cpp는 **프롬프트 단독 초과는 400으로
+        거부**하지만(왕복 1회를 이미 쓴 뒤다) **`프롬프트 + 출력`이 창을 넘으면 200을 주고
+        출력만 조용히 자른다**(`truncated: true`). 후자는 에러가 아니라 **망가진 결과**로
+        돌아오므로 가드가 없으면 아무도 모른다.
+
+        **판정할 수 없으면 통과시킨다** — 창을 모르거나(`/props` 실패), 토큰을 못 세거나,
+        예산 안에 못 끝나면 가드는 아무 말도 하지 않는다. 방어가 자기 실패로 기능을 깨뜨리면
+        안 되며, 그것이 1b(B1)에서 실제로 깨졌던 계약이다. 출력 상한이 없는 요청도
+        (`max_tokens` 미지정) `입력+출력` 식을 세울 수 없어 판정 대상이 아니다 — 앱의 모든
+        호출부는 상한을 명시한다.
+        """
+        max_output = payload.get("max_tokens")
+        if max_output is None:
+            return
+        try:
+            decision = await asyncio.wait_for(
+                self._window_decision(payload, max_output),
+                timeout=_GUARD_BUDGET_SECONDS,
+            )
+        except Exception:  # noqa: BLE001 — 가드의 실패가 생성을 막지 않는 경계
+            return
+        # 판정은 `_window_decision` 안에서 raise하지 않고 **돌려받아 여기서** 던진다.
+        # 위 `except`가 자기 판정까지 삼켜 버리면 가드가 조용히 사라진다.
+        if decision is not None:
+            raise decision
+
+    async def _window_decision(
+        self, payload: Mapping[str, Any], max_output: int
+    ) -> ProviderError | None:
+        window = self._guard_window()
+        if window is None:
+            return None
+        input_tokens = await self._count_prompt_tokens(payload)
+        if input_tokens is None:
+            return None
+        if input_tokens + max_output <= window:
+            return None
+        return ProviderError(
+            code=ProviderErrorCode.CONTEXT_WINDOW_EXCEEDED,
+            message=(
+                f"context window exceeded before the call: input {input_tokens} + "
+                f"output cap {max_output} = {input_tokens + max_output} > "
+                f"window {window}"
+            ),
+            retryable=False,
+            provider=self._provider_name,
+        )
+
+    def _guard_window(self) -> int | None:
+        """가드가 쓸 창. **기다리지 않는다.**
+
+        기다리고 싶은 유혹이 있다 — 창을 모르면 가드가 판정을 못 하기 때문이다. 그러나 1b
+        계약(SoT v1.7.60)이 `/props` 조회를 **"생성과 동시에 시작하고 결과를 기다리지
+        않는다"**로 못박았고, 가드를 위해 그것을 기다리면 느린 `/props`가 **다시 생성을
+        붙잡는다** — B1이 고친 바로 그 증상이다(실측: 짧은 예산으로 묶어도
+        `test_a_slow_probe_does_not_delay_or_fail_the_generate`가 그 예산만큼 매달린다).
+
+        **그래서 창을 아직/끝내 모르는 호출은 가드 밖에 있다.** 두 경우가 있고 둘 다 의도된
+        결과다: ① 게이트웨이 프로세스의 **첫 생성 1회**(그 뒤로는 캐시가 찬다), ② `/props`
+        조회가 **실패한 프로세스**에서는 계속(1b가 "실패를 재시도하지 않는다"로 정했으므로).
+        ②를 닫으려면 가드가 창을 짧은 예산 안에서 기다려야 하고 그것은 v1.7.60의 "기다리지
+        않는다"를 **가드 경로에 한해 개정하는 오너 결정**이다 — 임의로 뒤집지 않고 추적
+        부채로 남긴다.
+        """
+        return self._context_window
+
+    async def _count_prompt_tokens(self, payload: Mapping[str, Any]) -> int | None:
+        """서버가 실제로 셀 프롬프트 토큰 수. **추정이 아니다.**
+
+        `/apply-template`으로 채팅 템플릿이 적용된 프롬프트를 받아 `/tokenize`로 센다.
+        세 가지를 맞춰야 실제 `usage.prompt_tokens`와 일치한다(2026-07-30 실측 delta **0**:
+        51/51 · 49/49 · 6,143/6,143):
+
+        ① **같은 `chat_template_kwargs`를 함께 보낸다** — `enable_thinking`이 렌더링을 바꾼다
+           (실측: 같은 messages가 51 vs 49). 안 보내면 다른 프롬프트를 센다.
+        ② **`add_special`로 BOS를 포함**시킨다(빼면 정확히 −1).
+        ③ 메시지 내용만 세면 템플릿 몫이 빠져 **과소평가**된다(실측 −16 ~ −80). 과소평가는
+           가드가 늦게 걸리는 방향이라 특히 나쁘다 — 이것이 `len/4` 추정을 쓰지 않는 이유이며,
+           그래서 이 가드는 밀도 보정(K-1) 트랙과 **독립**이다.
+        """
+        try:
+            applied = await self._transport.post_json(
+                "/apply-template",
+                {
+                    "messages": payload["messages"],
+                    "chat_template_kwargs": payload["chat_template_kwargs"],
+                },
+            )
+            if not 200 <= applied.status_code < 300:
+                return None
+            prompt = _string(_mapping(applied.body)["prompt"])
+            counted = await self._transport.post_json(
+                "/tokenize",
+                {"content": prompt, "add_special": True},
+            )
+            if not 200 <= counted.status_code < 300:
+                return None
+            tokens = _mapping(counted.body)["tokens"]
+            if not isinstance(tokens, list):
+                return None
+            return len(tokens)
+        except Exception:  # noqa: BLE001 — 셀 수 없으면 판정하지 않는다(통과)
+            return None
 
     def _parse_response(self, response: JsonResponse) -> GenerationResult:
         try:

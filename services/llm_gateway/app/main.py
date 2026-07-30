@@ -75,6 +75,10 @@ def _status_for_error(error: ProviderError) -> int:
         return 503
     if error.code is ProviderErrorCode.REQUEST_REJECTED:
         return 400
+    # 창 가드가 거부한 요청은 **요청 자체가 못 쓰는 요청**이므로 4xx다(K-3, 오너 2026-07-30).
+    # 재시도가 같은 실패로 끝나는 점도 `REQUEST_REJECTED`와 같다 — 다른 것은 거부한 주체다.
+    if error.code is ProviderErrorCode.CONTEXT_WINDOW_EXCEEDED:
+        return 400
     return 502
 
 

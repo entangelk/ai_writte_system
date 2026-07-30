@@ -85,6 +85,10 @@ class LlmGatewayAppTests(unittest.IsolatedAsyncioTestCase):
             (ProviderErrorCode.OVERLOADED, 429),
             (ProviderErrorCode.UNAVAILABLE, 503),
             (ProviderErrorCode.REQUEST_REJECTED, 400),
+            # K-3 창 가드: 우리가 부르기 전에 거부한 요청도 4xx다. 502로 새면 앱이
+            # "상류 장애"로 오해해 재시도 가능한 실패처럼 다루고, 오너가 정한 400 거부가
+            # 클라이언트에 도달하지 않는다.
+            (ProviderErrorCode.CONTEXT_WINDOW_EXCEEDED, 400),
             (ProviderErrorCode.INVALID_RESPONSE, 502),
         )
 
