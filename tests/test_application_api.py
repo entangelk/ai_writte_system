@@ -2335,8 +2335,10 @@ class AnalysisErrorContractDeclarationTest(unittest.TestCase):
             {"401", "403", "404", "503"},
         ("/projects/{project_id}/analysis/jobs/{job_id}/context", "post"):
             {"401", "403", "404", "503"},
+        # 400은 K-3 창 가드(오너 2026-07-30) — compare 판정 프롬프트가 창을 넘으면 모델을
+        # 부르기 전에 거부되고, 그 얼굴은 상류 장애(502)가 아니라 4xx다.
         ("/projects/{project_id}/analysis/jobs/{job_id}/compare", "post"):
-            {"401", "403", "404", "502", "503"},
+            {"401", "403", "400", "404", "502", "503"},
         ("/projects/{project_id}/analysis/jobs/{job_id}/apply", "post"):
             {"401", "403", "400", "404", "503"},
         ("/projects/{project_id}/analysis/candidates/{candidate_id}/promote",

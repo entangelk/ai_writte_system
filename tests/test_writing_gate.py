@@ -434,8 +434,12 @@ class WritingGateApiTest(unittest.TestCase):
         asyncio.run(client.aclose())
 
     def test_provider_timeout_is_504_and_other_fault_is_502(self):
+        # K-3(오너 2026-07-30): 창 가드 거부는 **400**이다 — 상류 장애가 아니라 요청이 창을
+        # 넘은 것이므로. 이 셀은 `_provider_error_status` 헬퍼가 이 endpoint에 **실제로
+        # 배선돼 있는지**까지 본다(헬퍼 유닛 셀만 있으면 배선이 빠져도 green이다).
         for code, expected in ((ProviderErrorCode.TIMEOUT, 504),
-                               (ProviderErrorCode.UNAVAILABLE, 502)):
+                               (ProviderErrorCode.UNAVAILABLE, 502),
+                               (ProviderErrorCode.CONTEXT_WINDOW_EXCEEDED, 400)):
             provider = _Provider(error=ProviderError(
                 code=code, message="down", retryable=True, provider="gateway"))
             client, project = self._client(provider)

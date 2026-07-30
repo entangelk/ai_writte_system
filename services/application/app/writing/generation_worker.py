@@ -140,9 +140,14 @@ async def execute_generation_job(
             return fail(job, reason=reasons.CONTEXT_SEARCH_FAILED,
                         detail=f"{exc.error_type.value}: {exc.detail}")
         except ProviderError as exc:
-            reason = (reasons.PROVIDER_TIMEOUT
-                      if exc.code is ProviderErrorCode.TIMEOUT
-                      else reasons.PROVIDER_ERROR)
+            # 창 가드 거부는 별도 사유다(K-3, 오너 2026-07-30) — job은 실패하지만 원인은
+            # 상류 장애가 아니라 "요청이 창을 넘었다"이고, 재시도는 같은 실패로 끝난다.
+            if exc.code is ProviderErrorCode.CONTEXT_WINDOW_EXCEEDED:
+                reason = reasons.CONTEXT_WINDOW_EXCEEDED
+            elif exc.code is ProviderErrorCode.TIMEOUT:
+                reason = reasons.PROVIDER_TIMEOUT
+            else:
+                reason = reasons.PROVIDER_ERROR
             return fail(job, reason=reason, detail=str(exc))
         except Exception as exc:  # noqa: BLE001 — H-2 catch-all (now covers persist too): never livelock
             return fail(job, reason=reasons.INTERNAL, detail=repr(exc))

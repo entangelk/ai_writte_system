@@ -60,6 +60,7 @@ class WritingGenerationJobFailureReason(StrEnum):
     - ``INVALID_REQUEST``      ← WritingError / InvalidContextSearchRequest
     - ``INVALID_REPORT``       ← InvalidCandidateReport
     - ``CONTEXT_BUDGET_EXCEEDED`` ← ContextSearchBudgetExceeded
+    - ``CONTEXT_WINDOW_EXCEEDED`` ← ProviderError(CONTEXT_WINDOW_EXCEEDED)
     - ``CONTEXT_SEARCH_FAILED`` ← ContextSearchFailed
     - ``PROVIDER_ERROR``       ← ProviderError (non-timeout)
     - ``PROVIDER_TIMEOUT``     ← ProviderError with code ProviderErrorCode.TIMEOUT
@@ -79,6 +80,10 @@ class WritingGenerationJobFailureReason(StrEnum):
     INVALID_REQUEST = "invalid_request"
     INVALID_REPORT = "invalid_report"
     CONTEXT_BUDGET_EXCEEDED = "context_budget_exceeded"
+    # K-3 창 가드(오너 2026-07-30). `PROVIDER_ERROR`와 **구분해야 한다**: 모델을 부르기
+    # 전에 우리가 거부한 것이라 재시도는 반드시 같은 실패로 끝나고(입력을 줄여야 한다),
+    # 비용도 0이다. 같은 사유로 접으면 "재시도하면 될 실패"와 섞여 보인다.
+    CONTEXT_WINDOW_EXCEEDED = "context_window_exceeded"
     CONTEXT_SEARCH_FAILED = "context_search_failed"
     PROVIDER_ERROR = "provider_error"
     PROVIDER_TIMEOUT = "provider_timeout"

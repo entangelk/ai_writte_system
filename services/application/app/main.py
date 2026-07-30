@@ -1316,8 +1316,31 @@ _CONFIG_503 = _with_storage_note({
                    "retrying the request alone cannot succeed.",
 })
 
+def _provider_error_status(error: ProviderError) -> int:
+    """ProviderError → 이 API의 상태코드. **한 곳에만 둔다.**
+
+    종전에는 이 매핑이 `504 if TIMEOUT else 502` 형태로 **9개 호출부에 복제**돼 있었다.
+    K-3 창 가드가 세 번째 분기를 더하면서 복제본 하나만 놓쳐도 같은 사건이 endpoint마다
+    다른 상태코드로 나가게 되므로 한 함수로 모았다.
+
+    - `TIMEOUT` → **504**: 상류가 제때 답하지 않았다(v1.6.34 taxonomy).
+    - `CONTEXT_WINDOW_EXCEEDED` → **400**: 창 가드가 **모델을 부르기 전에** 거부했다
+      (K-3, 오너 2026-07-30). 상류 장애가 아니라 **요청이 너무 큰 것**이므로 4xx이며,
+      같은 요청의 재시도는 반드시 같은 실패로 끝난다. `detail`이 입력·출력상한·창 수치를
+      실어 나르므로 그 자체가 오너가 말한 "경고"다.
+    - 그 밖의 provider 실패 → **502**: 상류는 있는데 실패했다.
+    """
+    if error.code is ProviderErrorCode.TIMEOUT:
+        return 504
+    if error.code is ProviderErrorCode.CONTEXT_WINDOW_EXCEEDED:
+        return 400
+    return 502
+
+
+# 400은 K-3 창 가드가 이 endpoint에도 닿기 때문에 있다(오너 2026-07-30) — 요청이 창을
+# 넘으면 모델을 부르기 전에 거부되고, 그 얼굴은 상류 장애(502)가 아니라 4xx다.
 _ERRORS_404_502_CONFIG: dict[int | str, dict] = _protected({
-    404: _ERROR, 502: _ERROR, 503: _CONFIG_503,
+    400: _ERROR, 404: _ERROR, 502: _ERROR, 503: _CONFIG_503,
 })
 _ERRORS_400_404_409_502_CONFIG: dict[int | str, dict] = _protected({
     400: _ERROR, 404: _ERROR, 409: _ERROR, 502: _ERROR, 503: _CONFIG_503,
@@ -3469,8 +3492,9 @@ def create_app(
                 # v1.6.34 error taxonomy to this endpoint. Without this the
                 # ProviderError raised by GatewayGenerateProvider propagates as an
                 # unhandled 500. Already recorded by the decorator with its
-                # taxonomy intact.
-                raise HTTPException(status_code=502, detail=str(exc)) from exc
+                # taxonomy intact. 창 가드 거부만 4xx로 갈라진다(K-3).
+                raise HTTPException(status_code=_provider_error_status(exc),
+                                    detail=str(exc)) from exc
         return {
             "job_id": job.id,
             "proposals": [_action_proposal_payload(p) for p in proposals],
@@ -4205,6 +4229,13 @@ def create_app(
                     detail=f"{exc.error_type.value}: {exc.detail}",
                 ) from exc
             except ProviderError as exc:
+                # 창 가드 거부만 4xx로 갈라진다(K-3, 오너 2026-07-30) — 상류 장애가 아니라
+                # 요청이 창을 넘은 것이고, 같은 요청의 재시도는 반드시 같은 실패다.
+                # **주의(기존 불일치, 이 슬라이스가 만든 것 아님)**: 이 endpoint는 TIMEOUT도
+                # 502로 내는데 gate/revise/report는 504로 낸다. 그 정렬은 별도 판단이라
+                # 여기서 바꾸지 않았다(추적 부채).
+                if exc.code is ProviderErrorCode.CONTEXT_WINDOW_EXCEEDED:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
                 raise HTTPException(status_code=502, detail=str(exc)) from exc
         # Safety net (brief D0=B): persist the just-generated candidate to the
         # recovery store so a refresh/navigation before accept doesn't lose it.
@@ -4358,7 +4389,7 @@ def create_app(
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             except ProviderError as exc:
                 # Already recorded by the decorator, with its taxonomy intact.
-                status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
+                status = _provider_error_status(exc)
                 raise HTTPException(status_code=status, detail=str(exc)) from exc
             scope.annotate_last(decision=result.decision.value,
                                 gate_quality_score=gate_quality_score(result))
@@ -4436,7 +4467,7 @@ def create_app(
                     detail=f"{exc.error_type.value}: {exc.detail}",
                 ) from exc
             except ProviderError as exc:
-                status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
+                status = _provider_error_status(exc)
                 raise HTTPException(status_code=status, detail=str(exc)) from exc
         return _writing_candidate_payload(enriched)
 
@@ -4521,7 +4552,7 @@ def create_app(
                     detail=f"{exc.error_type.value}: {exc.detail}",
                 ) from exc
             except ProviderError as exc:
-                status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
+                status = _provider_error_status(exc)
                 raise HTTPException(status_code=status, detail=str(exc)) from exc
         return _writing_candidate_payload(revised)
 
@@ -4646,12 +4677,12 @@ def create_app(
                     detail=f"{exc.error_type.value}: {exc.detail}",
                 ) from exc
             except ProviderError as exc:
-                status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
+                status = _provider_error_status(exc)
                 raise HTTPException(status_code=status, detail=str(exc)) from exc
             except WritingReviseReportFailure as exc:
                 cause = exc.cause
                 if isinstance(cause, ProviderError):
-                    status = 504 if cause.code is ProviderErrorCode.TIMEOUT else 502
+                    status = _provider_error_status(cause)
                     error_type = cause.code.value
                 elif isinstance(cause, InvalidCandidateReport):
                     status, error_type = 502, "invalid_candidate_report"
@@ -4684,7 +4715,7 @@ def create_app(
             except WritingLoopRevisionFailure as exc:
                 cause = exc.cause
                 if isinstance(cause, ProviderError):
-                    status = 504 if cause.code is ProviderErrorCode.TIMEOUT else 502
+                    status = _provider_error_status(cause)
                     error_type = cause.code.value
                 elif isinstance(cause, WritingRevisionError):
                     status, error_type = 400, "writing_revision_error"
@@ -4719,7 +4750,7 @@ def create_app(
             except WritingRetrievalFailure as exc:
                 cause = exc.cause
                 if isinstance(cause, ProviderError):
-                    status = 504 if cause.code is ProviderErrorCode.TIMEOUT else 502
+                    status = _provider_error_status(cause)
                     error_type = cause.code.value
                 elif isinstance(cause, InvalidWritingRetrievalPlan):
                     status, error_type = 502, "invalid_retrieval_plan"
@@ -4760,7 +4791,7 @@ def create_app(
             except WritingReviseGateFailure as exc:
                 cause = exc.cause
                 if isinstance(cause, ProviderError):
-                    status = 504 if cause.code is ProviderErrorCode.TIMEOUT else 502
+                    status = _provider_error_status(cause)
                     error_type = cause.code.value
                 elif isinstance(cause, InvalidWritingGateResult):
                     status, error_type = 502, "invalid_gate_result"
@@ -4995,7 +5026,7 @@ def create_app(
                 reclassify_planner_parse_error(scope, exc)
                 raise HTTPException(status_code=502, detail=str(exc)) from exc
             except ProviderError as exc:
-                status = 504 if exc.code is ProviderErrorCode.TIMEOUT else 502
+                status = _provider_error_status(exc)
                 raise HTTPException(status_code=status, detail=str(exc)) from exc
         if result.accepted:
             _clear_scratch_for_saved_accept()

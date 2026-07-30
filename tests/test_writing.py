@@ -473,6 +473,30 @@ class WritingGenerateApiTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 502)
 
+    def test_context_window_guard_rejection_returns_400_not_502(self):
+        """K-3 창 가드 거부는 **4xx**다(오너 2026-07-30).
+
+        under-strict: 502로 새면 클라이언트에게 "상류 장애 → 재시도해 보라"로 보이는데
+        이 실패는 결정적이다(입력을 줄여야 한다). over-strict: 위 셀이 다른 provider
+        실패가 400으로 새지 않는 것을 함께 잠근다.
+
+        detail이 수치를 실어 나르는 것이 오너 결정의 "경고" 절반이다 — 상태코드는 기계용,
+        detail은 사람용이라는 H3 계약대로 문자열 분기는 하지 않는다.
+        """
+        client, project_id, _ = _http(_FakeProvider(error=ProviderError(
+            code=ProviderErrorCode.CONTEXT_WINDOW_EXCEEDED,
+            message="context window exceeded before the call: input 11905 + "
+                    "output cap 6144 = 18049 > window 16384",
+            retryable=False, provider="llm_gateway",
+        )))
+        response = client.post(
+            f"/projects/{project_id}/writing/generate",
+            json={"request_id": "wr1", "instruction": "이어서 써줘."},
+        )
+        self.assertEqual(response.status_code, 400)
+        for number in ("11905", "6144", "16384"):
+            self.assertIn(number, response.json()["detail"])
+
     def test_context_search_budget_exceeded_returns_504(self):
         # the context-search leg of the orchestration: budget exhaustion → 504.
         client, project_id, _ = _http(

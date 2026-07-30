@@ -141,6 +141,24 @@ class ExecuteFailureMappingTest(unittest.TestCase):
             self._fail_with(writing=_RaisingWriting(exc)),
             WritingGenerationJobFailureReason.PROVIDER_ERROR)
 
+    def test_context_window_exceeded_is_its_own_reason(self):
+        """K-3 창 가드 거부는 `provider_error`로 접히지 않는다(오너 2026-07-30).
+
+        under-strict: 같은 사유로 접으면 화면에서 **"재시도하면 될 실패"와 섞인다** — 이
+        실패는 모델을 부르기 전에 우리가 거부한 것이라 같은 요청의 재시도는 반드시 같은
+        결과이고, 사용자가 할 일은 재시도가 아니라 입력을 줄이는 것이다.
+        over-strict: 다른 provider 실패(위 두 셀)가 이 사유로 새면 안 된다.
+        """
+        exc = ProviderError(code=ProviderErrorCode.CONTEXT_WINDOW_EXCEEDED,
+                            message="context window exceeded before the call: "
+                                    "input 11905 + output cap 6144 = 18049 > window 16384",
+                            retryable=False)
+        reason = self._fail_with(writing=_RaisingWriting(exc))
+        self.assertEqual(
+            reason, WritingGenerationJobFailureReason.CONTEXT_WINDOW_EXCEEDED)
+        self.assertNotEqual(
+            reason, WritingGenerationJobFailureReason.PROVIDER_ERROR)
+
     def test_writing_error_maps_to_invalid_request(self):
         self.assertEqual(
             self._fail_with(writing=_RaisingWriting(WritingError("bad"))),

@@ -20,6 +20,10 @@ class ProviderErrorContractTests(unittest.TestCase):
                 "provider_overloaded",
                 "provider_invalid_response",
                 "provider_request_rejected",
+                # K-3 창 가드(오너 2026-07-30). `provider_request_rejected`와 별개 literal인
+                # 이유는 거부 주체가 다르기 때문이다 — 우리가 부르기 전에 막았으므로 왕복
+                # 비용이 0이고, 그 구분이 곧 가드가 일했는지의 신호다.
+                "provider_context_window_exceeded",
             },
         )
 
@@ -103,3 +107,33 @@ class ProviderErrorFakeTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProviderErrorStatusMappingTests(unittest.TestCase):
+    """앱이 ProviderError를 어느 상태코드로 내는가 — 세 분기 전부.
+
+    이 매핑은 종전에 `504 if TIMEOUT else 502` 형태로 **9개 endpoint에 복제**돼 있었고,
+    K-3 창 가드가 세 번째 분기를 더하면서 한 함수(`_provider_error_status`)로 모았다.
+    여기서 분기를 전수로 잠그고, endpoint 배선은 각 endpoint의 상태코드 셀이 본다
+    (헬퍼만 잠그면 배선이 빠져도 green이다 — 그래서 두 겹이다).
+    """
+
+    def _status(self, code):
+        from services.application.app.main import _provider_error_status
+        return _provider_error_status(ProviderError(
+            code=code, message=code.value, retryable=False, provider="llm_gateway"))
+
+    def test_every_code_maps_to_its_documented_status(self):
+        cases = {
+            ProviderErrorCode.TIMEOUT: 504,               # 상류가 제때 답하지 않았다
+            ProviderErrorCode.CONTEXT_WINDOW_EXCEEDED: 400,  # 요청이 너무 크다(K-3)
+            ProviderErrorCode.UNAVAILABLE: 502,
+            ProviderErrorCode.OVERLOADED: 502,
+            ProviderErrorCode.INVALID_RESPONSE: 502,
+            ProviderErrorCode.REQUEST_REJECTED: 502,
+        }
+        # 새 code를 더하고 이 표를 안 고치면 여기서 걸린다 — 기본값 502로 조용히 묻히지 않는다.
+        self.assertEqual(set(cases), set(ProviderErrorCode))
+        for code, expected in cases.items():
+            with self.subTest(code=code):
+                self.assertEqual(self._status(code), expected)

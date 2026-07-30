@@ -17,6 +17,10 @@ const FAILURE_COPY: Record<string, string> = {
   invalid_report: "생성 결과의 근거 보고서를 해석하지 못했습니다.",
   context_budget_exceeded: "근거 예산을 초과해 생성이 중단됐습니다.",
   context_search_failed: "근거 검색에 실패했습니다.",
+  // K-3 창 가드: 모델을 부르기 전에 거부된 실패라 같은 요청을 다시 보내면 반드시 같은
+  // 결과다. 그래서 문구가 "무엇을 해야 하는지"까지 말한다.
+  context_window_exceeded:
+    "요청이 모델의 컨텍스트 창을 넘어 생성하지 못했습니다. 지시문이나 근거 분량을 줄여야 합니다.",
   provider_error: "생성 모델 호출에 실패했습니다.",
   provider_timeout: "생성 모델 응답이 시간 내에 오지 않았습니다.",
   internal: "내부 오류로 생성에 실패했습니다.",
