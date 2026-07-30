@@ -22,7 +22,12 @@ import {
 // are fixed for the C1 slice; a later slice may expose other task/output types.
 const TASK_TYPE = "continue_scene";
 const OUTPUT_TYPE = "draft_patch";
-const MAX_TOKENS = 4096;
+// 입력 ContextPackage 예산. **서버 기본값(8192)과 같은 값을 명시적으로 보낸다** — 화면이
+// 이 값을 실어 보내므로 서버 기본값만 올리면 제품에는 아무 효과가 없다(K-1(a) 착수 시 실측으로
+// 확인했다). 근거는 `main.py::DEFAULT_CONTEXT_BUDGET_TOKENS` 주석에 있다: 4096은 동기 생성
+// 시절의 값이고, 회계가 한글 실측(`len/1.7`)으로 정직해지면서 같은 숫자의 실제 분량이 절반이
+// 됐기 때문에 8192가 종전 실효 분량을 유지하는 짝이다.
+const MAX_TOKENS = 8192;
 // 400/404/422 are definitive rejections: the candidate can never be accepted
 // with the same body, so the bound idempotency key is discarded. 409 (stale
 // base) is handled separately, and transport/5xx preserve the key for retry.

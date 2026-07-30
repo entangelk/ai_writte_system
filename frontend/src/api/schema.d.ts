@@ -1132,7 +1132,7 @@ export interface components {
             idempotency_key: string;
             /**
              * Max Tokens
-             * @default 4096
+             * @default 8192
              */
             max_tokens: number;
             /** Needs */
@@ -1679,7 +1679,7 @@ export interface components {
             intent: string;
             /**
              * Max Tokens
-             * @default 4096
+             * @default 8192
              */
             max_tokens: number;
             next_unit?: components["schemas"]["NextUnitBody"] | null;
@@ -1782,7 +1782,7 @@ export interface components {
             instruction: string;
             /**
              * Max Tokens
-             * @default 4096
+             * @default 8192
              */
             max_tokens: number;
             /** Query */
@@ -1812,7 +1812,7 @@ export interface components {
             instruction: string;
             /**
              * Max Tokens
-             * @default 4096
+             * @default 8192
              */
             max_tokens: number;
             /**
@@ -1912,7 +1912,7 @@ export interface components {
             instruction: string;
             /**
              * Max Tokens
-             * @default 4096
+             * @default 8192
              */
             max_tokens: number;
             /** Query */
@@ -1974,7 +1974,7 @@ export interface components {
             instruction: string;
             /**
              * Max Tokens
-             * @default 4096
+             * @default 8192
              */
             max_tokens: number;
             /** Persist Audit */

@@ -2089,6 +2089,46 @@ class LegacyOrderedDraftMigration503Test(unittest.TestCase):
         self.assertEqual(resp.status_code, 422)
 
 
+class ContextBudgetDefaultTest(unittest.TestCase):
+    """입력 예산 기본값은 **공개 계약 리터럴**이다(오너 지시 ④, 2026-07-28).
+
+    생략한 클라이언트가 받는 값이므로 OpenAPI에 선언된 default가 곧 계약이다. 여섯 개 요청
+    본문이 같은 값을 쓰는데 종전에는 리터럴이 복제돼 있어 하나만 놓쳐도 endpoint마다 다른
+    예산이 됐다 — 이 셀은 **여섯 곳 전부**를 본다.
+
+    8192인 이유는 두 겹이다: ① 4096은 동기 생성 시절 응답 속도 때문에 고른 값이고 생성이
+    백그라운드 job이 되며 그 제약이 사라졌다(오너 근거) ② K-1(a)로 회계가 `len/4`→`len/1.7`로
+    정직해지면서 같은 숫자의 실제 분량이 절반이 됐으므로, 8192가 종전 실효 분량을 유지하는
+    짝이다. 4096으로 되돌리면 컨텍스트가 조용히 반토막 난다.
+    """
+
+    def setUp(self):
+        self.spec = create_app().openapi()
+
+    def _default_max_tokens(self, schema_name: str):
+        schema = self.spec["components"]["schemas"][schema_name]
+        return schema["properties"]["max_tokens"].get("default")
+
+    def test_every_request_body_declares_the_same_budget_default(self):
+        from services.application.app.main import DEFAULT_CONTEXT_BUDGET_TOKENS
+
+        self.assertEqual(DEFAULT_CONTEXT_BUDGET_TOKENS, 8192)
+        bodies = [
+            name for name, schema in self.spec["components"]["schemas"].items()
+            if isinstance(schema, dict)
+            and "max_tokens" in (schema.get("properties") or {})
+        ]
+        # 여섯 개보다 적으면 어떤 본문이 이 축에서 빠진 것이고, 많아지면 새 endpoint가
+        # 생긴 것이다 — 어느 쪽이든 이 목록을 보고 결정해야 한다.
+        self.assertEqual(len(bodies), 6, f"max_tokens를 받는 본문 목록이 바뀌었다: {bodies}")
+        for name in bodies:
+            with self.subTest(schema=name):
+                self.assertEqual(
+                    self._default_max_tokens(name), DEFAULT_CONTEXT_BUDGET_TOKENS,
+                    "이 본문만 다른 예산을 선언한다 — 생략한 클라이언트가 endpoint마다 "
+                    "다른 크기의 컨텍스트를 받는다")
+
+
 class CrudErrorContractDeclarationTest(unittest.TestCase):
     """OpenAPI must declare the realistic error statuses of the CRUD family.
 

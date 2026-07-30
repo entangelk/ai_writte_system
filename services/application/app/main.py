@@ -1835,13 +1835,31 @@ class EditCandidateRequest(BaseModel):
     payload: dict[str, object]
 
 
+# 입력 ContextPackage 예산의 기본값(오너 지시 ④, 2026-07-28). 4096은 **동기 생성 시절 응답
+# 속도** 때문에 고른 값이었고, 생성이 백그라운드 job + 푸시로 바뀌면서(v1.7.27) 그 제약이
+# 사라졌다는 것이 오너의 근거다.
+#
+# **K-1(a)와 같이 올려야 하는 이유**: 회계가 `len/4`에서 `len/1.7`로 정직해지면서 같은 숫자가
+# 뜻하는 실제 분량이 **절반**이 됐다(4096 회계 ≈ 실제 8,900 tok → ≈ 3,830 tok). 8192로 올리면
+# 실효 분량이 종전과 비슷해지고(≈ 7,660 tok) 숫자는 정직해진다 — 즉 이 값은 확장이라기보다
+# **회계 수정의 짝**이다.
+#
+# **창 여유 실측(2026-07-30 베타, 창 16384)**: 예산 8192를 꽉 채운 report 입력은
+# 약 8,100 tok이고 출력 상한 6,144를 더해도 14,300 < 16,384다. **창 8192 배포에서는 넘는다** —
+# 그래서 알파는 `LLAMA_CTX_SIZE=16384`가 전제다(HANDOFF 함정). 넘으면 조용히 잘리지 않고
+# K-3 가드가 400으로 거부한다.
+#
+# 여섯 개 요청 모델이 같은 기본값을 쓴다. 리터럴을 복제하면 하나만 놓쳐도 endpoint마다 다른
+# 예산이 되므로 상수로 둔다.
+DEFAULT_CONTEXT_BUDGET_TOKENS = 8192
+
 class ContextSearchHttpRequest(BaseModel):
     idempotency_key: str
     query: str
     needs: list[str]
     purpose: str = ContextSearchPurpose.WRITING_CONTEXT.value
     current_position: ContextPositionBody | None = None
-    max_tokens: int = 4096
+    max_tokens: int = DEFAULT_CONTEXT_BUDGET_TOKENS
 
 
 class WritingGenerateRequest(BaseModel):
@@ -1852,7 +1870,7 @@ class WritingGenerateRequest(BaseModel):
     # Retrieval query for the internal context search; defaults to the instruction.
     query: str | None = None
     current_position: ContextPositionBody | None = None
-    max_tokens: int = 4096
+    max_tokens: int = DEFAULT_CONTEXT_BUDGET_TOKENS
     # 증분 2 (D3=A): output-length preset (short|medium|long). The server maps it
     # to output tokens (1024/2048/4096 by default). Distinct from ``max_tokens``,
     # which is the input ContextPackage budget. Legacy clients omit it → short.
@@ -1868,7 +1886,7 @@ class WritingGateRequest(BaseModel):
     draft_excerpt: str = ""
     query: str | None = None
     current_position: ContextPositionBody | None = None
-    max_tokens: int = 4096
+    max_tokens: int = DEFAULT_CONTEXT_BUDGET_TOKENS
 
 
 class WritingReportRequest(BaseModel):
@@ -1879,7 +1897,7 @@ class WritingReportRequest(BaseModel):
     draft_excerpt: str = ""
     query: str | None = None
     current_position: ContextPositionBody | None = None
-    max_tokens: int = 4096
+    max_tokens: int = DEFAULT_CONTEXT_BUDGET_TOKENS
 
 
 class WritingReviseFindingRequest(BaseModel):
@@ -1898,7 +1916,7 @@ class WritingReviseRequest(BaseModel):
     task_type: str = WritingTaskType.CONTINUE_SCENE.value
     query: str | None = None
     current_position: ContextPositionBody | None = None
-    max_tokens: int = 4096
+    max_tokens: int = DEFAULT_CONTEXT_BUDGET_TOKENS
     # Phase 5.9 L9 B (P2=B opt-in, 2026-07-13): persist this loop's audit only
     # when requested. None → env default (WRITING_LOOP_AUDIT_DEFAULT, off).
     persist_audit: bool | None = None
@@ -2001,7 +2019,7 @@ class WritingAcceptRequest(BaseModel):
     draft_excerpt: str = ""
     query: str | None = None
     current_position: ContextPositionBody | None = None
-    max_tokens: int = 4096
+    max_tokens: int = DEFAULT_CONTEXT_BUDGET_TOKENS
     # W3 Writing intent (§3.1). Legacy clients omit both → append_current/null.
     intent: str = WritingIntent.APPEND_CURRENT.value
     next_unit: NextUnitBody | None = None
