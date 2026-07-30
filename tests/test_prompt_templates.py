@@ -36,6 +36,13 @@ _IMMUTABLE_TEMPLATE_DIGESTS = {
     ANALYSIS_EXTRACT_PROMPT_VERSION_V3: (
         "4376310080b4a3420be77cab53e27cc4cb3d89a9e93f136c2e908fcae27eb52a"
     ),
+    # v4는 **현행 버전**이라 더더욱 핀이 필요하다(2026-07-30에 빠져 있는 것을 발견).
+    # 옛 버전은 이제 아무도 고칠 이유가 없지만 현행 본문은 고칠 이유가 늘 있고, 고치는
+    # 순간 **기존 Mongo를 가진 배포가 전부 부팅에 실패**한다 — 핀이 없으면 그 사실을
+    # 배포에서야 알게 된다(2026-07-22·07-27에 실제로 그렇게 잃었다).
+    ANALYSIS_EXTRACT_PROMPT_VERSION: (
+        "b946a70514de99c2fbe84fbef1f1e41cd6086e496fb0a2642cffa6045e3fd6bd"
+    ),
 }
 
 
@@ -93,7 +100,11 @@ class PromptTemplateServiceTest(unittest.TestCase):
             ANALYSIS_EXTRACT_PROMPT_VERSION_V1: ANALYSIS_EXTRACT_TEMPLATE_V1,
             ANALYSIS_EXTRACT_PROMPT_VERSION_V2: ANALYSIS_EXTRACT_TEMPLATE_V2,
             ANALYSIS_EXTRACT_PROMPT_VERSION_V3: ANALYSIS_EXTRACT_TEMPLATE_V3,
+            ANALYSIS_EXTRACT_PROMPT_VERSION: ANALYSIS_EXTRACT_TEMPLATE,
         }
+        # 핀 목록이 **출시된 버전 전부**를 덮는지 함께 본다. v4가 빠져 있던 것을
+        # 2026-07-30에 발견했는데, 빠진 줄을 알아채는 유일한 방법이 이 단정이다.
+        self.assertEqual(set(_IMMUTABLE_TEMPLATE_DIGESTS), set(bodies))
         for version, expected_digest in _IMMUTABLE_TEMPLATE_DIGESTS.items():
             with self.subTest(version=version):
                 digest = hashlib.sha256(bodies[version].encode()).hexdigest()
