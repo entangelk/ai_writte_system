@@ -1351,6 +1351,8 @@ export interface components {
             calls: number;
             /** Correlations */
             correlations: number;
+            /** Headroom Considered */
+            headroom_considered: number;
             /** Multi Call Correlations */
             multi_call_correlations: number;
             /** Parse Error */
@@ -1359,6 +1361,8 @@ export interface components {
             provider_error: number;
             /** Success */
             success: number;
+            /** Thin Headroom Calls */
+            thin_headroom_calls: number;
             /** Tokens Counted From */
             tokens_counted_from: number;
             /** Total Tokens */
@@ -1368,12 +1372,16 @@ export interface components {
         ObservabilityKpiTotalsPayload: {
             /** Calls */
             calls: number;
+            /** Headroom Considered */
+            headroom_considered: number;
             /** Parse Error */
             parse_error: number;
             /** Provider Error */
             provider_error: number;
             /** Success */
             success: number;
+            /** Thin Headroom Calls */
+            thin_headroom_calls: number;
             /** Tokens Counted From */
             tokens_counted_from: number;
             /** Total Tokens */

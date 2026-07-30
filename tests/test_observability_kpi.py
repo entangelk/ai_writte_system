@@ -73,13 +73,18 @@ def _call(
     call_site=LlmCallSite.WRITING_GATE, *, outcome=LlmCallOutcome.SUCCESS,
     correlation_id="wr-1", tokens=10, latency_ms=100, score=None,
     call_id="llmc:1", project_id="p1",
+    prompt_tokens=None, max_output_tokens=None, context_window=None,
 ):
+    # 세 창 관련 값은 **기본이 None("모른다")**이다 — 1a/1b 계약대로이며, 헤드룸 파생이
+    # 그 경우를 판정 대상에서 빼는지(분모)까지 이 기본값으로 잠근다.
     return StoredLlmCall(
         id=call_id, project_id=project_id, call_site=call_site.value,
         correlation_id=correlation_id, model="fake", outcome=outcome.value,
         decision=None, gate_quality_score=score, total_tokens=tokens,
         latency_ms=latency_ms, error_type=None,
         created_at=datetime(2026, 7, 26, tzinfo=UTC),
+        prompt_tokens=prompt_tokens, max_output_tokens=max_output_tokens,
+        context_window=context_window,
     )
 
 
@@ -248,6 +253,85 @@ class LoopConvergenceTest(unittest.TestCase):
         self.assertEqual(kpi.loop.non_convergence_rate, 0.0)
 
 
+class ThinHeadroomWarningTest(unittest.TestCase):
+    """K-3 창 헤드룸 경고(오너 2026-07-30) — "400 거부 **및 경고**"의 경고 절반.
+
+    거부는 게이트웨이 가드가 하고, 여기서는 **넘지는 않지만 빠듯한** 호출을 센다. 저장된
+    플래그가 아니라 원천 세 값(`prompt_tokens`·`max_output_tokens`·`context_window`)에서
+    **읽기 시점에 파생**한다 — v1.7.59가 "헤드룸은 파생값이라 저장하지 않는다"로 정했고,
+    플래그를 저장하면 임계값을 바꾸는 순간 과거 레코드가 거짓말을 한다.
+    """
+
+    def _kpi_for(self, *, prompt, cap, window, site=LlmCallSite.WRITING_REPORT):
+        return _kpi([_call(site, prompt_tokens=prompt, max_output_tokens=cap,
+                           context_window=window, call_id="a")])
+
+    def test_a_roomy_call_is_not_a_warning(self):
+        # over-strict: R-e 뒤 실측 자리(입력 3,216 + 상한 6,144, 창 16384 → 헤드룸 43%).
+        # 여기서 경고가 뜨면 정상 운영이 온통 경고로 덮인다.
+        kpi = self._kpi_for(prompt=3216, cap=6144, window=16384)
+        self.assertEqual(kpi.totals.thin_headroom_calls, 0)
+        self.assertEqual(kpi.totals.headroom_considered, 1)
+
+    def test_a_thin_but_passing_call_is_a_warning(self):
+        # under-strict: 이것이 경고의 존재 이유다 — 지금은 통과하지만 입력이 조금만 커지면
+        # 거부로 바뀐다. 헤드룸 800 = 창의 4.8% < 10%.
+        kpi = self._kpi_for(prompt=9440, cap=6144, window=16384)
+        self.assertEqual(kpi.totals.thin_headroom_calls, 1)
+        self.assertEqual(kpi.totals.headroom_considered, 1)
+
+    def test_an_over_the_window_call_is_also_a_warning(self):
+        # 2026-07-29 실배포 레코드 그대로(헤드룸 −1,665). 음수를 빼면 **가드가 없던 시절의
+        # 레코드가 경고에서 사라진다** — 경고가 가장 필요한 행이 그것이다.
+        kpi = self._kpi_for(prompt=11905, cap=6144, window=16384)
+        self.assertEqual(kpi.totals.thin_headroom_calls, 1)
+
+    def test_the_ten_percent_line_is_exact_in_both_directions(self):
+        # 창 10000 · 상한 1000 → 헤드룸 정확히 1000(=10%)이면 경고 아님, 999면 경고.
+        # `<`를 `<=`로 넓히면 첫 칸이, 좁히면 둘째 칸이 깨진다.
+        self.assertEqual(
+            self._kpi_for(prompt=8000, cap=1000, window=10000)
+            .totals.thin_headroom_calls, 0)
+        self.assertEqual(
+            self._kpi_for(prompt=8001, cap=1000, window=10000)
+            .totals.thin_headroom_calls, 1)
+
+    def test_unknown_values_are_not_judged_and_the_denominator_says_so(self):
+        """`None`은 "모른다"이지 0이 아니다 — 판정 대상에서 빠지고 분모가 그것을 말한다.
+
+        0으로 취급하면 헤드룸이 창 전체로 계산돼 **경고가 절대 뜨지 않는다**(조용한 실패).
+        분모가 없으면 경고 0건이 "빠듯한 호출이 없었다"인지 "창을 아는 호출이 없었다"인지
+        구분할 수 없다(v1.7.48이 세운 방어 패턴).
+        """
+        for name, kwargs in (
+            ("창 모름", dict(prompt=9440, cap=6144, window=None)),
+            ("상한 모름", dict(prompt=9440, cap=None, window=16384)),
+            ("입력 모름", dict(prompt=None, cap=6144, window=16384)),
+        ):
+            with self.subTest(name=name):
+                kpi = self._kpi_for(**kwargs)
+                self.assertEqual(kpi.totals.thin_headroom_calls, 0)
+                self.assertEqual(kpi.totals.headroom_considered, 0)
+
+    def test_the_warning_is_attributed_to_the_site_that_ran_thin(self):
+        # site별로 내는 이유 — 다음 거부가 **어디서** 날지가 그 신호다(실측: report였다).
+        kpi = _kpi([
+            _call(LlmCallSite.WRITING_REPORT, prompt_tokens=9440,
+                  max_output_tokens=6144, context_window=16384, call_id="a"),
+            _call(LlmCallSite.WRITING_GENERATION, prompt_tokens=2484,
+                  max_output_tokens=4096, context_window=16384, call_id="b"),
+        ])
+        by_site = {s.call_site: s for s in kpi.sites}
+        self.assertEqual(by_site["writing_report"].thin_headroom_calls, 1)
+        self.assertEqual(by_site["writing_generation"].thin_headroom_calls, 0)
+        # 두 행 모두 판정은 됐다 — 분모는 site마다 1이다.
+        self.assertEqual(
+            {s: by_site[s].headroom_considered for s in by_site},
+            {"writing_report": 1, "writing_generation": 1})
+        self.assertEqual(kpi.totals.thin_headroom_calls, 1)
+        self.assertEqual(kpi.totals.headroom_considered, 2)
+
+
 class SiteRowsTest(unittest.TestCase):
     def test_rows_are_sorted_by_site_and_only_for_sites_that_called(self):
         kpi = _kpi([
@@ -319,12 +403,16 @@ class KpiEndpointTest(unittest.TestCase):
         self.assertEqual(body["totals"], {
             "calls": 2, "success": 1, "provider_error": 1, "parse_error": 0,
             "total_tokens": 100, "tokens_counted_from": 1,
+            # 이 픽스처는 창을 모르므로 **판정 대상이 0건**이다 — 경고 0이 "빠듯한 호출이
+            # 없었다"가 아니라 "판정할 수 없었다"임을 분모가 말한다(K-3).
+            "thin_headroom_calls": 0, "headroom_considered": 0,
         })
         self.assertEqual(body["sites"], [{
             "call_site": "writing_gate", "calls": 2, "success": 1,
             "provider_error": 1, "parse_error": 0, "total_tokens": 100,
             "tokens_counted_from": 1, "avg_latency_ms": 300,
             "correlations": 1, "multi_call_correlations": 1,
+            "thin_headroom_calls": 0, "headroom_considered": 0,
         }])
         self.assertEqual(body["gate"], {"scored_calls": 1, "avg_quality_score": 1.0})
         self.assertEqual(body["loop"],
@@ -522,12 +610,14 @@ class AdminKpiEndpointTest(unittest.TestCase):
         self.assertEqual(body["totals"], {
             "calls": 2, "success": 1, "provider_error": 1, "parse_error": 0,
             "total_tokens": 100, "tokens_counted_from": 1,
+            "thin_headroom_calls": 0, "headroom_considered": 0,
         })
         self.assertEqual(body["sites"], [{
             "call_site": "writing_gate", "calls": 2, "success": 1,
             "provider_error": 1, "parse_error": 0, "total_tokens": 100,
             "tokens_counted_from": 1, "avg_latency_ms": 300,
             "correlations": 2, "multi_call_correlations": 0,
+            "thin_headroom_calls": 0, "headroom_considered": 0,
         }])
         self.assertEqual(body["gate"], {"scored_calls": 1, "avg_quality_score": 1.0})
         self.assertEqual(body["loop"],

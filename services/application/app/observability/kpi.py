@@ -47,6 +47,21 @@ TOKEN_COUNTED_OUTCOMES: frozenset[str] = frozenset({
     LlmCallOutcome.PARSE_ERROR.value,
 })
 
+# ── 창 헤드룸 경고(K-3, 오너 2026-07-30) ────────────────────────────────────────
+# 오너 결정은 "400 거부 **및 경고**"였다. 거부는 게이트웨이 가드가 하고, 경고는 **넘지는
+# 않지만 빠듯한** 호출을 보이게 하는 몫이다 — 그것이 다음 번 입력이 조금만 커져도 거부로
+# 바뀔 호출이기 때문이다.
+#
+# **저장하지 않고 여기서 파생한다.** v1.7.59가 "헤드룸은 파생값이라 저장하지 않는다(저장하면
+# 원천값과 갈라진다)"로 정했고, 감사 레코드는 이미 세 원천값(`prompt_tokens` ·
+# `max_output_tokens` · `context_window`)을 갖고 있다. 플래그를 따로 저장하면 같은 사실이
+# 두 곳에 있게 되고 임계값을 바꾸는 순간 과거 레코드가 거짓말을 한다.
+#
+# 임계값은 **창의 10%**다. 실측 근거(2026-07-30): R-e 뒤 report는 창 16384에서 헤드룸
+# +7,024(43%)로 넉넉하지만 창 8192에서는 −1,168로 **음수**다. 그 사이를 가르는 선이 필요하고,
+# 10%는 "출력 상한을 다 써도 한 자리 수 % 만 남는다"는 뜻이라 경고로 충분히 좁다.
+THIN_HEADROOM_FRACTION = 0.1
+
 # A loop run that stopped without resolving the finding it was started for.
 # ``budget_exhausted`` ran out of rounds, ``no_change`` could not improve the
 # candidate, ``failed`` broke — none of them reached an answer.
@@ -87,6 +102,10 @@ class SiteKpi:
     # site's shape.
     correlations: int
     multi_call_correlations: int
+    # 창 헤드룸이 빠듯한 호출 수와 분모. site별로 내는 이유는 **어느 호출부가 창에
+    # 붙어 있는지**가 곧 다음 거부가 어디서 날지이기 때문이다(실측: report가 그 자리였다).
+    thin_headroom_calls: int
+    headroom_considered: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +116,9 @@ class TotalsKpi:
     parse_error: int
     total_tokens: int
     tokens_counted_from: int
+    # 창 헤드룸이 빠듯한 호출 수와 **그 판정이 가능했던 행 수**(분모).
+    thin_headroom_calls: int
+    headroom_considered: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +216,31 @@ def _fold(
     }
 
 
+def _headroom_rows(calls: Sequence[StoredLlmCall]) -> list[StoredLlmCall]:
+    """헤드룸을 **판정할 수 있는** 행만. 셋 중 하나라도 모르면 판정 대상이 아니다.
+
+    `None`은 "모른다"이고 0이 아니다(v1.7.58·v1.7.59) — 모르는 것을 0으로 두면 헤드룸이
+    창 전체로 계산돼 **경고가 절대 안 뜬다**. 그래서 분모(`headroom_considered`)를 응답에
+    함께 싣는다: 경고 0건이 "빠듯한 호출이 없었다"인지 "창을 아는 호출이 없었다"인지
+    분모 없이는 구분할 수 없다(v1.7.48이 세운 방어 패턴).
+    """
+    return [
+        call for call in calls
+        if call.context_window is not None
+        and call.max_output_tokens is not None
+        and call.prompt_tokens is not None
+    ]
+
+
+def _thin_headroom(calls: Sequence[StoredLlmCall]) -> int:
+    """`창 − 입력 − 출력상한`이 창의 10% 미만인 호출 수(초과=음수도 포함)."""
+    return sum(
+        1 for call in _headroom_rows(calls)
+        if (call.context_window - call.prompt_tokens - call.max_output_tokens)
+        < call.context_window * THIN_HEADROOM_FRACTION
+    )
+
+
 def _totals(calls: Sequence[StoredLlmCall]) -> TotalsKpi:
     counted = [c for c in calls if c.outcome in TOKEN_COUNTED_OUTCOMES]
     return TotalsKpi(
@@ -203,6 +250,8 @@ def _totals(calls: Sequence[StoredLlmCall]) -> TotalsKpi:
         parse_error=_count(calls, LlmCallOutcome.PARSE_ERROR),
         total_tokens=sum(c.total_tokens for c in counted),
         tokens_counted_from=len(counted),
+        thin_headroom_calls=_thin_headroom(calls),
+        headroom_considered=len(_headroom_rows(calls)),
     )
 
 
@@ -227,6 +276,8 @@ def _site_kpi(call_site: str, calls: Sequence[StoredLlmCall]) -> SiteKpi:
         multi_call_correlations=sum(
             1 for rows in per_correlation.values() if rows > 1
         ),
+        thin_headroom_calls=_thin_headroom(calls),
+        headroom_considered=len(_headroom_rows(calls)),
     )
 
 

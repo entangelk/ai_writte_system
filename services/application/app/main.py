@@ -1931,6 +1931,12 @@ class ObservabilityKpiSitePayload(BaseModel):
     # designed extra round inside the writing loop.
     correlations: int
     multi_call_correlations: int
+    # K-3 창 헤드룸 경고(오너 2026-07-30): `창 − 입력 − 출력상한`이 창의 10% 미만인 호출 수와
+    # **그 판정이 가능했던 행 수**(분모). 저장된 플래그가 아니라 원천 세 값에서 읽기 시점에
+    # 파생한다(v1.7.59: 헤드룸은 저장하지 않는다). 분모가 함께 있어야 "빠듯한 호출이 없었다"와
+    # "창을 아는 호출이 없었다"를 구분할 수 있다.
+    thin_headroom_calls: int
+    headroom_considered: int
 
 
 class ObservabilityKpiTotalsPayload(BaseModel):
@@ -1940,6 +1946,8 @@ class ObservabilityKpiTotalsPayload(BaseModel):
     parse_error: int
     total_tokens: int
     tokens_counted_from: int
+    thin_headroom_calls: int
+    headroom_considered: int
 
 
 class ObservabilityKpiGatePayload(BaseModel):

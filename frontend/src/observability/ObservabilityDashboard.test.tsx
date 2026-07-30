@@ -35,6 +35,8 @@ function site(overrides: Record<string, unknown> = {}) {
     avg_latency_ms: 820,
     correlations: 3,
     multi_call_correlations: 1,
+    thin_headroom_calls: 1,
+    headroom_considered: 3,
     ...overrides,
   };
 }
@@ -49,6 +51,8 @@ function kpiBody(overrides: Record<string, unknown> = {}) {
       parse_error: 0,
       total_tokens: 900,
       tokens_counted_from: 3,
+      thin_headroom_calls: 1,
+      headroom_considered: 3,
     },
     sites: [site()],
     gate: { scored_calls: 3, avg_quality_score: 0.8 },
@@ -269,6 +273,42 @@ describe("ObservabilityDashboard", () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
+  it("shows the context-headroom warning with its denominator", async () => {
+    // K-3(오너 2026-07-30): 거부는 서버 가드가 하고 화면은 "아직 통과하지만 다음이 위험한"
+    // 호출을 보여준다. 분모가 함께 있어야 0건이 "빠듯한 호출 없음"인지 "창을 모름"인지
+    // 구분된다 — 그래서 숫자와 분모를 함께 단정한다.
+    mockFetch({ status: 200, body: kpiBody() });
+    renderDashboard();
+
+    const summary = await screen.findByLabelText("전체 요약");
+    expect(summary).toHaveTextContent("컨텍스트 여유 경고");
+    expect(summary).toHaveTextContent("3건 기준 (여유가 창의 10% 미만)");
+    // 호출부 표는 "경고 / 판정된 건수"로 어느 호출부가 창에 붙었는지 가리킨다.
+    expect(await screen.findByRole("table")).toHaveTextContent("1 / 3");
+  });
+
+  it("says the headroom is unmeasured instead of showing a bare zero", async () => {
+    // 창을 아는 호출이 0건이면 "경고 0"은 거짓 안심이다. v1.7.58/59의 "None은 모른다"가
+    // 화면까지 살아 있어야 한다.
+    mockFetch({
+      status: 200,
+      body: kpiBody({
+        totals: {
+          calls: 4, success: 4, provider_error: 0, parse_error: 0,
+          total_tokens: 900, tokens_counted_from: 4,
+          thin_headroom_calls: 0, headroom_considered: 0,
+        },
+        sites: [site({ thin_headroom_calls: 0, headroom_considered: 0 })],
+      }),
+    });
+    renderDashboard();
+
+    expect(await screen.findByLabelText("전체 요약")).toHaveTextContent(
+      "창 크기를 아는 호출이 없어 측정되지 않음",
+    );
+    expect(await screen.findByRole("table")).toHaveTextContent("—");
   });
 
   it("surfaces an API failure instead of rendering an empty dashboard", async () => {

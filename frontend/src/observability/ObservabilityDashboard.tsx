@@ -175,6 +175,19 @@ export function ObservabilityDashboard() {
                 {kpi.totals.tokens_counted_from}건 기준 (응답 없는 호출 제외)
               </p>
             </div>
+            {/* K-3 창 헤드룸 경고(오너 2026-07-30). 거부는 서버 가드가 하고 화면은
+                **넘지는 않지만 빠듯한** 호출을 보여준다 — 다음 번 입력이 조금만 커지면
+                거부로 바뀔 호출이 그것이다. 분모를 함께 쓰는 이유는 0건이 "빠듯한 호출이
+                없었다"인지 "창을 아는 호출이 없었다"인지 다르기 때문이다. */}
+            <div>
+              <dt>컨텍스트 여유 경고</dt>
+              <dd>{kpi.totals.thin_headroom_calls}</dd>
+              <p className="kpi-note">
+                {kpi.totals.headroom_considered === 0
+                  ? "창 크기를 아는 호출이 없어 측정되지 않음"
+                  : `${kpi.totals.headroom_considered}건 기준 (여유가 창의 10% 미만)`}
+              </p>
+            </div>
             <div>
               <dt>게이트 판정 점수</dt>
               <dd>{score(kpi.gate.avg_quality_score)}</dd>
@@ -272,6 +285,7 @@ export function ObservabilityDashboard() {
                     <th scope="col">평균 지연(ms)</th>
                     <th scope="col">워크플로</th>
                     <th scope="col">여러 번 호출된 워크플로</th>
+                    <th scope="col">여유 경고</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -287,10 +301,21 @@ export function ObservabilityDashboard() {
                       <td>{site.avg_latency_ms}</td>
                       <td>{site.correlations}</td>
                       <td>{site.multi_call_correlations}</td>
+                      <td>
+                        {site.headroom_considered === 0
+                          ? "—"
+                          : `${site.thin_headroom_calls} / ${site.headroom_considered}`}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <p className="kpi-note">
+                “여유 경고”는 <strong>입력 + 출력 상한</strong>이 컨텍스트 창의 90%를 넘은
+                호출 수 / 창 크기를 알 수 있었던 호출 수입니다. 창을 넘긴 요청은 서버가
+                모델을 부르기 전에 거부하므로, 이 숫자는 <strong>아직 통과하지만 다음이
+                위험한</strong> 호출부를 가리킵니다. “—”는 창 크기를 모르는 상태입니다.
+              </p>
               <p className="kpi-note">
                 “여러 번 호출된 워크플로”는 재시도 횟수가 아닙니다. 분석 추출·비교
                 판정·검색 계획에서는 응답이 거부돼 다시 부른 것이지만, 작성 루프는
