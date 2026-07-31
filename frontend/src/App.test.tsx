@@ -30,6 +30,16 @@ function mockFetch(...responses: Array<{ body: unknown; status?: number }>) {
         response({ project_id: "p1", draft_id: "d1", items: [] }),
       );
     }
+    // K-4: WritingPanel 마운트 시 /writing/budget GET 이 발생 — 기록된 시퀀스를 건드리지
+    // 않게 자동 응답한다(scratch 가로채기와 같은 패턴).
+    if (typeof url === "string" && url.includes("/writing/budget")) {
+      return Promise.resolve(
+        response({
+          project_id: "p1",
+          context_budget_tokens: { short: 8192, medium: 8192, long: 8192 },
+        }),
+      );
+    }
     return fetchMock(url, init);
   });
   return fetchMock;

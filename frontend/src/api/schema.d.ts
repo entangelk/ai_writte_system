@@ -830,6 +830,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{project_id}/writing/budget": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Writing Context Budget */
+        get: operations["get_writing_context_budget_projects__project_id__writing_budget_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{project_id}/writing/gate": {
         parameters: {
             query?: never;
@@ -1637,6 +1654,10 @@ export interface components {
         };
         /** ValidationError */
         ValidationError: {
+            /** Context */
+            ctx?: Record<string, never>;
+            /** Input */
+            input?: unknown;
             /** Location */
             loc: (string | number)[];
             /** Message */
@@ -1679,6 +1700,7 @@ export interface components {
             intent: string;
             /**
              * Max Tokens
+             * @description Ceiling on the context-package (input) budget in tokens. The server may reduce it to fit the model's context window alongside the candidate prose and report output (R-a); never increased.
              * @default 8192
              */
             max_tokens: number;
@@ -1733,6 +1755,21 @@ export interface components {
             task_type: components["schemas"]["WritingTaskType"];
             /** Text */
             text: string;
+        };
+        /** WritingContextBudgetPayload */
+        WritingContextBudgetPayload: {
+            context_budget_tokens: components["schemas"]["WritingContextBudgetPresetPayload"];
+            /** Project Id */
+            project_id: string;
+        };
+        /** WritingContextBudgetPresetPayload */
+        WritingContextBudgetPresetPayload: {
+            /** Long */
+            long: number;
+            /** Medium */
+            medium: number;
+            /** Short */
+            short: number;
         };
         /**
          * WritingGateDecision
@@ -1812,6 +1849,7 @@ export interface components {
             instruction: string;
             /**
              * Max Tokens
+             * @description Ceiling on the context-package (input) budget in tokens. The server may reduce it to fit the model's context window (R-a); never increased. Distinct from output_length (output tokens).
              * @default 8192
              */
             max_tokens: number;
@@ -1912,6 +1950,7 @@ export interface components {
             instruction: string;
             /**
              * Max Tokens
+             * @description Ceiling on the context-package (input) budget in tokens. The server may reduce it to fit the model's context window alongside the candidate prose and report output (R-a); never increased.
              * @default 8192
              */
             max_tokens: number;
@@ -1974,6 +2013,7 @@ export interface components {
             instruction: string;
             /**
              * Max Tokens
+             * @description Ceiling on the context-package (input) budget in tokens. The server may reduce it once at loop entry to fit the model's context window alongside the candidate prose and report output (R-a); never increased. The derived value also bounds package growth from retrieve_more merges.
              * @default 8192
              */
             max_tokens: number;
@@ -6129,6 +6169,73 @@ export interface operations {
             };
             /** @description Gateway Timeout */
             504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    get_writing_context_budget_projects__project_id__writing_budget_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WritingContextBudgetPayload"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

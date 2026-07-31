@@ -17,6 +17,8 @@ import {
   type WritingReviseGatePartial,
   type WritingReviseRequest,
 } from "../api/client";
+import { useWritingBudget } from "./useWritingBudget";
+import { estimateTokens, formatInstructionCount } from "./tokenEstimate";
 
 // continue_scene emits a draft_patch (writing-workspace brief §확인된 계약). These
 // are fixed for the C1 slice; a later slice may expose other task/output types.
@@ -203,6 +205,10 @@ export function WritingPanel(props: WritingPanelProps) {
     onAsyncJobStarted,
   } = props;
   const [instruction, setInstruction] = useState("");
+  // K-4: R-a 유도 예산(per-preset 토큰)을 서버에서 받아 카운터의 경고 기준으로 쓴다 —
+  // 프론트 고정 상수(8192)가 아니다. 예산을 모르면(게이트웨이 없음·조회 실패) null 이고
+  // 경고를 띄우지 않는다(거짓 경고 방지).
+  const { budgetByPreset } = useWritingBudget(projectId);
   // W3 Writing intent (§3.1): append to the current unit, or open the next
   // ordered unit. The next-unit fields are only used for start_next_unit.
   const [writingIntent, setWritingIntent] =
@@ -532,6 +538,23 @@ export function WritingPanel(props: WritingPanelProps) {
           rows={3}
           placeholder="예: 아린이 성문을 지나 도시로 들어가는 장면을 이어써줘."
         />
+        {(() => {
+          // K-4: 현재 출력 프리셋의 R-a 유도 예산 대비 90% 를 넘으면 소프트 경고(색 변화).
+          const activeBudget = budgetByPreset?.[outputLength] ?? null;
+          const overBudget =
+            activeBudget !== null &&
+            estimateTokens(instruction) >= Math.round(activeBudget * 0.9);
+          return (
+            <p
+              className={`writing-counter${
+                overBudget ? " writing-counter-warn" : ""
+              }`}
+              aria-live="polite"
+            >
+              {formatInstructionCount(instruction)}
+            </p>
+          );
+        })()}
 
         <label htmlFor="writing-output-length">생성 분량</label>
         <select

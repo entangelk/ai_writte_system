@@ -782,6 +782,23 @@ main {
   font-size: 0.78rem;
 }
 
+/* K-4: 원고 본문 글자수 가이드(창과 무관, hard 제한 없음). flex 에서 오른쪽으로. */
+.editor-char-count {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+/* K-4: 지시문 토큰 카운터 + 소프트 경고(해당 preset 예산의 90% 초과 시 색 변화). */
+.writing-counter {
+  margin: 0.3rem 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.writing-counter-warn {
+  color: var(--danger);
+  font-weight: 600;
+}
+
 .editor-meta label {
   color: var(--ink);
   font-weight: 700;

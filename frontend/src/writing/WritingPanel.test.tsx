@@ -3,6 +3,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WritingPanel } from "./WritingPanel";
+import {
+  resetWritingBudgetCache,
+  seedWritingBudgetCache,
+} from "./useWritingBudget";
 
 type PanelProps = ComponentProps<typeof WritingPanel>;
 
@@ -190,6 +194,10 @@ async function generateAndGate(fetchMock: ReturnType<typeof mockFetch>) {
 
 beforeEach(() => {
   stubIncrementingUuid();
+  // K-4: WritingPanel mount 시 /writing/budget GET 이 발생 — 캐시 시드로 fetch 를 스킵해
+  // 기존 mockResolvedValueOnce(generate→gate) 시퀀스를 건드리지 않는다.
+  resetWritingBudgetCache();
+  seedWritingBudgetCache("p1", { short: 8192, medium: 8192, long: 8192 });
 });
 
 afterEach(() => {
@@ -1018,5 +1026,51 @@ describe("WritingPanel — accept dirty guard (미저장 편집 덮어쓰기 결
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     expect(confirmSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("WritingPanel — K-4 instruction budget counter", () => {
+  it("지시문 아래에 글자수·토큰 카운터를 표시하고 예산 여유면 경고를 띄우지 않는다(under-strict)", async () => {
+    // beforeEach 가 시드한 기본 예산(8192) — 작은 지시문은 여유.
+    mockFetch();
+    renderPanel();
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    const counter = screen.getByText(/자 \(≈\d+ 토큰\)/);
+    expect(counter.className).toContain("writing-counter");
+    expect(counter.className).not.toContain("writing-counter-warn");
+  });
+
+  it("해당 출력 preset 예산의 90% 를 넘으면 소프트 경고 색으로 바뀐다(하중받침)", async () => {
+    // outputLength 기본 "short" → short 예산 100. 90 토큰(≈153자) 넘으면 경고.
+    seedWritingBudgetCache("p1", { short: 100, medium: 8192, long: 8192 });
+    mockFetch();
+    renderPanel();
+    // 160자 → 95 토큰 추정 → round(100 * 0.9)=90 초과 → warn.
+    await userEvent.type(
+      screen.getByLabelText("이어쓰기 지시"),
+      "가".repeat(160),
+    );
+    const counter = screen.getByText(/160자/);
+    expect(counter.className).toContain("writing-counter-warn");
+  });
+
+  it("preset 이 바뀌면 같은 지시문 길이에서도 경고 기준이 달라진다(over-strict)", async () => {
+    // short 예산은 작게, long 예산은 크게 → 같은 160자가 short 에선 경고, long 에선 안전.
+    seedWritingBudgetCache("p1", { short: 100, medium: 8192, long: 8192 });
+    mockFetch();
+    renderPanel();
+    await userEvent.type(
+      screen.getByLabelText("이어쓰기 지시"),
+      "가".repeat(160),
+    );
+    // short(기본 preset): 경고
+    expect(screen.getByText(/160자/).className).toContain(
+      "writing-counter-warn",
+    );
+    // long preset 으로 변경 → 예산 8192 → 경고 해제
+    await userEvent.selectOptions(screen.getByLabelText("생성 분량"), "long");
+    expect(screen.getByText(/160자/).className).not.toContain(
+      "writing-counter-warn",
+    );
   });
 });

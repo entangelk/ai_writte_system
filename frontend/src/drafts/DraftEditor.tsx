@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+import { formatCharCount } from "../writing/tokenEstimate";
 import {
   ApiError,
   describeApiError,
@@ -527,6 +528,7 @@ export function DraftEditor() {
               <span>
                 {versionNumber === null ? "아직 저장된 version 없음" : `현재 version ${versionNumber}`}
               </span>
+              <span className="editor-char-count">{formatCharCount(rawText)}</span>
             </div>
             <textarea
               ref={editorRef}

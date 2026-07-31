@@ -95,6 +95,8 @@ export type SaveDraftRequest = components["schemas"]["SaveDraftRequest"];
 export type SaveDraftResponse = components["schemas"]["SaveDraftResponse"];
 export type WritingGenerateRequest = components["schemas"]["WritingGenerateRequest"];
 export type WritingCandidate = components["schemas"]["WritingCandidatePayload"];
+export type WritingContextBudget =
+  components["schemas"]["WritingContextBudgetPayload"];
 // 증분 2c (D5=A): medium/long presets return a 202 job reference instead of a
 // candidate. generateWriting therefore returns the union; callers narrow with
 // `"job" in produced`. The worker appends the result to scratch (increment 3's
@@ -455,6 +457,14 @@ export function listWritingScratch(
   return request(
     `/projects/${projectId}/writing/scratch?draft_id=${encodeURIComponent(draftId)}`,
   );
+}
+
+// K-4 (프론트 글자수 표시·경고): R-a 유도 예산을 per-preset(short/medium/long) 토큰으로
+// 받아 카운터의 경고 기준으로 쓴다 — 고정 상수(8192)가 아니라 배포·출력 프리셋을 따라간다.
+export function getWritingContextBudget(
+  projectId: string,
+): Promise<WritingContextBudget> {
+  return request(`/projects/${projectId}/writing/budget`);
 }
 
 export function discardWritingScratch(
