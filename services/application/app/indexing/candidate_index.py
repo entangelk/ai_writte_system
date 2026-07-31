@@ -65,6 +65,10 @@ class CandidateVectorIndexAdapter(Protocol):
         limit: int,
     ) -> tuple[CandidateIndexRecord, ...]: ...
 
+    # D8-6c: hard, whole-project delete of the candidate_vectors collection. Purge
+    # is irreversible+idempotent, so an already-empty result is NOT an error.
+    def purge_project(self, *, project_id: str) -> None: ...
+
 
 class InMemoryCandidateVectorIndexAdapter:
     """No-infra vector backend for unit tests and the deterministic fallback."""
@@ -124,6 +128,15 @@ class InMemoryCandidateVectorIndexAdapter:
                 key=lambda record: record.id,
             )
         )
+
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6c: drop every record of one project. Idempotent — a project that was
+        # never indexed (or already purged) simply leaves nothing to remove.
+        self.records = {
+            record_id: record
+            for record_id, record in self.records.items()
+            if record.project_id != project_id
+        }
 
 
 def candidate_index_text(candidate: AnalysisCandidate) -> str:
@@ -190,6 +203,12 @@ class CandidateIndexSyncAdapter:
         record = build_candidate_index_record(candidate, text=text, vector=vector)
         self._vector_index.upsert_candidate_records((record,))
 
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6c: whole-project purge of the vector leg. Unlike index_candidate,
+        # purge is idempotent (an already-empty backend is success, not a
+        # not-found), so there is no load/status branching here.
+        self._vector_index.purge_project(project_id=project_id)
+
 
 class CompositeCandidateIndexSyncAdapter:
     """Fan a CANDIDATE_UPSERTED drain out to every configured candidate sink
@@ -229,3 +248,12 @@ class CompositeCandidateIndexSyncAdapter:
                     SinkOutcome(target=target, backend=backend, ok=True, error=None)
                 )
         return tuple(outcomes)
+
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6c: fan a whole-project purge out to every configured candidate sink
+        # (vector + lexical). Unlike ``drain`` this does NOT isolate per sink — a
+        # failure propagates so the worker retries the whole PROJECT_PURGED entry
+        # (mirrors CompositeMemoryIndexSyncAdapter.purge_project). Each sink
+        # adapter owns its own idempotent ``purge_project``.
+        for _target, _backend, adapter in self._sinks:
+            adapter.purge_project(project_id=project_id)

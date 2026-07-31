@@ -329,6 +329,38 @@ class InMemoryVectorAdapterTest(unittest.TestCase):
         ids = [h.candidate_id for h in hits]
         self.assertEqual(ids, ["a", "b"])  # project + type scoped, a ranks first
 
+    def test_purge_drops_only_target_project_and_is_idempotent(self):
+        # D8-6c-1b: whole-project delete. Two-directional: target emptied
+        # (under-strict) and an adjacent project survives (over-strict), plus
+        # idempotent on an already-empty backend.
+        index = InMemoryCandidateVectorIndexAdapter()
+        index.upsert_candidate_records(
+            (
+                CandidateIndexRecord(
+                    id="a", kind=IndexRecordKind.CANDIDATE, project_id="project-1",
+                    candidate_id="a", candidate_type=CHARACTER.value,
+                    status="needs_review", text="x", vector=(0.1, 0.2),
+                ),
+                CandidateIndexRecord(
+                    id="b", kind=IndexRecordKind.CANDIDATE, project_id="project-2",
+                    candidate_id="b", candidate_type=CHARACTER.value,
+                    status="needs_review", text="y", vector=(0.1, 0.2),
+                ),
+            )
+        )
+        index.purge_project(project_id="project-1")
+        self.assertEqual(index.list_candidate_records(project_id="project-1"), ())
+        self.assertEqual(
+            [r.candidate_id for r in index.list_candidate_records(project_id="project-2")],
+            ["b"],
+        )
+        # idempotent on empty — must not raise, project-2 still intact.
+        index.purge_project(project_id="ghost")
+        self.assertEqual(
+            [r.candidate_id for r in index.list_candidate_records(project_id="project-2")],
+            ["b"],
+        )
+
 
 # --------------------------------------------------------------------------- #
 # Chroma vector adapter round-trip
@@ -364,11 +396,14 @@ class _FakeChromaCollection:
         return {"ids": [ids], "embeddings": [embs], "metadatas": [metas]}
 
     def delete(self, *, where):
-        clauses = where["$and"]
-        pid = clauses[0]["project_id"]
-        cid = clauses[1]["candidate_id"]
+        # Support both $and (project_id+candidate_id, delete_candidate_record)
+        # and a single-key project_id filter (purge_project) — matches real
+        # ChromaCollection.delete, which accepts any where-clause shape.
+        clauses = where["$and"] if "$and" in where else [where]
         for i, (_e, m) in list(self.docs.items()):
-            if m["project_id"] == pid and m["candidate_id"] == cid:
+            if all(
+                m.get(k) == v for clause in clauses for k, v in clause.items()
+            ):
                 del self.docs[i]
 
 
@@ -400,6 +435,32 @@ class ChromaCandidateAdapterTest(unittest.TestCase):
         self.assertEqual([h.candidate_id for h in hits], ["c1"])
         adapter.delete_candidate_record(project_id="project-1", candidate_id="c1")
         self.assertEqual(adapter.list_candidate_records(project_id="project-1"), ())
+
+    def test_purge_drops_only_target_project(self):
+        # D8-6c-1b: whole-project delete via a single project_id where clause
+        # (the fake accepts both $and and single-key shapes, like real Chroma).
+        collection = _FakeChromaCollection()
+        adapter = ChromaCandidateVectorIndexAdapter(collection)
+        adapter.upsert_candidate_records(
+            (
+                CandidateIndexRecord(
+                    id="c1", kind=IndexRecordKind.CANDIDATE, project_id="project-1",
+                    candidate_id="c1", candidate_type=CHARACTER.value,
+                    status="needs_review", text="a", vector=(1.0, 0.0),
+                ),
+                CandidateIndexRecord(
+                    id="p2", kind=IndexRecordKind.CANDIDATE, project_id="project-2",
+                    candidate_id="p2", candidate_type=CHARACTER.value,
+                    status="needs_review", text="b", vector=(1.0, 0.0),
+                ),
+            )
+        )
+        adapter.purge_project(project_id="project-1")
+        self.assertEqual(adapter.list_candidate_records(project_id="project-1"), ())
+        self.assertEqual(
+            [r.candidate_id for r in adapter.list_candidate_records(project_id="project-2")],
+            ["p2"],
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -480,6 +541,33 @@ class InMemoryLexicalAdapterTest(unittest.TestCase):
         self.assertEqual(ids, ["a", "b"])  # project scoped, a scores higher
         self.assertGreater(hits[0].score, hits[1].score)
 
+    def test_purge_drops_only_target_project(self):
+        # D8-6c-1b: whole-project delete of the candidate lexical leg.
+        index = InMemoryCandidateLexicalIndexAdapter()
+        index.index_candidate_records(
+            (
+                build_candidate_lexical_record(
+                    _candidate(
+                        candidate_id="a", payload={"event": "storm"}, candidate_type=EVENT
+                    ),
+                    text="storm",
+                ),
+                build_candidate_lexical_record(
+                    _candidate(
+                        candidate_id="b", project_id="project-2",
+                        payload={"event": "storm"}, candidate_type=EVENT,
+                    ),
+                    text="storm",
+                ),
+            )
+        )
+        index.purge_project(project_id="project-1")
+        self.assertEqual(index.search(project_id="project-1", query="storm", limit=10), ())
+        self.assertEqual(
+            [h.candidate_id for h in index.search(project_id="project-2", query="storm", limit=10)],
+            ["b"],
+        )
+
 
 class ElasticsearchCandidateAdapterTest(unittest.TestCase):
     class _FakeES:
@@ -502,6 +590,18 @@ class ElasticsearchCandidateAdapterTest(unittest.TestCase):
         def search(self, *, index, query, size):
             self.last_query = query
             return {"hits": {"hits": self._hits}}
+
+        def delete_by_query(self, *, index, query):
+            # D8-6c: ES 8.x signature — a term filter on project_id.
+            term = query.get("term", {})
+            to_delete = [
+                doc_id
+                for doc_id, doc in self.docs.items()
+                if all(doc.get(k) == v for k, v in term.items())
+            ]
+            for doc_id in to_delete:
+                del self.docs[doc_id]
+            return {"deleted": len(to_delete)}
 
     def test_index_builds_candidate_pointer_document(self):
         client = self._FakeES()
@@ -543,6 +643,44 @@ class ElasticsearchCandidateAdapterTest(unittest.TestCase):
         client = self._FakeES()
         adapter = ElasticsearchCandidateIndexAdapter(client, index_name="cand")
         adapter.delete_candidate_record(project_id="project-1", candidate_id="ghost")
+
+    def test_purge_deletes_only_target_project(self):
+        # D8-6c-1b: delete_by_query with a project_id term filter drops the
+        # project's documents and leaves an adjacent project intact.
+        client = self._FakeES()
+        adapter = ElasticsearchCandidateIndexAdapter(client, index_name="cand")
+        adapter.index_candidate_records(
+            (
+                build_candidate_lexical_record(
+                    _candidate(
+                        candidate_id="c1", payload={"event": "a"}, candidate_type=EVENT
+                    ),
+                    text="a",
+                ),
+                build_candidate_lexical_record(
+                    _candidate(
+                        candidate_id="c2", payload={"event": "b"}, candidate_type=EVENT
+                    ),
+                    text="b",
+                ),
+                build_candidate_lexical_record(
+                    _candidate(
+                        candidate_id="p2", project_id="project-2",
+                        payload={"event": "c"}, candidate_type=EVENT,
+                    ),
+                    text="c",
+                ),
+            )
+        )
+        adapter.purge_project(project_id="project-1")
+        self.assertEqual(set(client.docs), {"p2"})
+
+    def test_purge_is_idempotent_on_empty(self):
+        client = self._FakeES()
+        adapter = ElasticsearchCandidateIndexAdapter(client, index_name="cand")
+        # never indexed → delete_by_query matches 0 docs; must not raise.
+        adapter.purge_project(project_id="ghost")
+        self.assertEqual(client.docs, {})
 
 
 # --------------------------------------------------------------------------- #
@@ -777,6 +915,57 @@ class PerSinkBookkeepingTest(unittest.TestCase):
         self.assertEqual(vector.calls, 1)  # still not re-indexed
         self.assertEqual(lexical.calls, 2)
         self.assertEqual(repo.outbox_entries, {})
+
+
+class CompositeCandidatePurgeTest(unittest.TestCase):
+    """D8-6c-1b: composite candidate purge fans out to each sink adapter and
+    propagates a failure (mirror of the memory leg's whole-event all-or-retry)."""
+
+    def _composite_over(self, vector_index):
+        return _composite(
+            (
+                VECTOR_TARGET,
+                CHROMA_VECTOR_BACKEND,
+                CandidateIndexSyncAdapter(
+                    analysis_service=_StubAnalysis(),
+                    embeddings=DeterministicFakeEmbeddingProvider(),
+                    vector_index=vector_index,
+                ),
+            )
+        )
+
+    def test_purge_fans_out_to_vector_sink(self):
+        index = InMemoryCandidateVectorIndexAdapter()
+        index.upsert_candidate_records(
+            (
+                CandidateIndexRecord(
+                    id="a", kind=IndexRecordKind.CANDIDATE, project_id="project-1",
+                    candidate_id="a", candidate_type=CHARACTER.value,
+                    status="needs_review", text="x", vector=(0.1, 0.2),
+                ),
+                CandidateIndexRecord(
+                    id="b", kind=IndexRecordKind.CANDIDATE, project_id="project-2",
+                    candidate_id="b", candidate_type=CHARACTER.value,
+                    status="needs_review", text="y", vector=(0.1, 0.2),
+                ),
+            )
+        )
+        self._composite_over(index).purge_project(project_id="project-1")
+        self.assertEqual(index.list_candidate_records(project_id="project-1"), ())
+        self.assertEqual(
+            [r.candidate_id for r in index.list_candidate_records(project_id="project-2")],
+            ["b"],
+        )
+
+    def test_purge_propagates_sink_failure(self):
+        # whole-event all-or-retry: a failing sink must raise so the worker
+        # retries the whole PROJECT_PURGED entry (6c-2), not swallow per-sink.
+        class _BoomVector(InMemoryCandidateVectorIndexAdapter):
+            def purge_project(self, *, project_id: str) -> None:
+                raise RuntimeError("backend down")
+
+        with self.assertRaises(RuntimeError):
+            self._composite_over(_BoomVector()).purge_project(project_id="project-1")
 
 
 if __name__ == "__main__":

@@ -82,6 +82,10 @@ class CandidateLexicalIndexAdapter(Protocol):
         self, *, project_id: str, query: str, limit: int
     ) -> tuple[CandidateLexicalRecord, ...]: ...
 
+    # D8-6c: hard, whole-project delete of the candidate lexical leg. Idempotent —
+    # an already-empty index is success, not a not-found (purge is irreversible).
+    def purge_project(self, *, project_id: str) -> None: ...
+
 
 class InMemoryCandidateLexicalIndexAdapter:
     """No-infra lexical backend for unit tests and the deterministic fallback.
@@ -133,6 +137,15 @@ class InMemoryCandidateLexicalIndexAdapter:
         ranked = sorted(scored, key=lambda r: (-r.score, r.candidate_id))
         return tuple(ranked[:limit])
 
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6c: drop every document of one project. Idempotent — a project with
+        # no documents leaves nothing to remove.
+        self.records = {
+            candidate_id: record
+            for candidate_id, record in self.records.items()
+            if record.project_id != project_id
+        }
+
 
 class ElasticsearchCandidateIndexAdapter:
     """Real lexical backend over an Elasticsearch index (nori-analyzed text).
@@ -171,6 +184,17 @@ class ElasticsearchCandidateIndexAdapter:
             self._client.delete(index=self._index, id=candidate_id)
         except Exception:
             pass
+
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6c: delete every document of one project via a term filter on
+        # project_id. ES delete_by_query returns 0 deleted for a project with no
+        # documents — that is idempotent success, not an error (purge is
+        # irreversible). The ElasticsearchClient Protocol (shared with the memory
+        # leg) gained delete_by_query in 6c-1.
+        self._client.delete_by_query(
+            index=self._index,
+            query={"term": {"project_id": project_id}},
+        )
 
     def search(
         self, *, project_id: str, query: str, limit: int
@@ -242,6 +266,13 @@ class CandidateLexicalIndexSyncAdapter:
             candidate, text=candidate_index_text(candidate)
         )
         self._lexical.index_candidate_records((record,))
+
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6c: whole-project purge of the lexical leg. Idempotent — the lexical
+        # adapter drops every document of the project and an empty result is
+        # success, not a not-found (mirrors the memory leg's
+        # MemoryLexicalIndexSyncAdapter.purge_project).
+        self._lexical.purge_project(project_id=project_id)
 
 
 def connect_elasticsearch_candidate_index(

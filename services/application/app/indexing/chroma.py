@@ -513,6 +513,12 @@ class ChromaCandidateVectorIndexAdapter:
         )
         return _candidate_records_from_query(result)
 
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6c: drop every candidate vector of one project. ChromaCollection.delete
+        # is idempotent — an empty match deletes nothing and raises nothing (mirror
+        # of ChromaMemoryVectorIndexAdapter.purge_project).
+        self._collection.delete(where={"project_id": project_id})
+
 
 def _candidate_records_from_get(result: dict[str, Any]) -> list[CandidateIndexRecord]:
     ids = result.get("ids")
