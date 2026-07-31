@@ -87,6 +87,43 @@ class _MongoAnalysisContractMixin:
         self._client.drop_database(self._db_name)
         self._client.close()
 
+    def test_purge_removes_entire_project_analysis_graph(self):
+        # D8-6b: project 의 analysis 그래프(jobs·tasks·candidates) 전부 파기. 인접 project 유지.
+        job1 = self.service.create_job(
+            project_id="project-1",
+            snapshot_id="snapshot-1",
+            idempotency_key="run-1",
+        ).job
+        task1 = self.service.create_task(
+            project_id="project-1",
+            job_id=job1.id,
+            candidate_type=AnalysisCandidateType.CHARACTER_OBSERVATION,
+        )
+        self.service.record_candidate(
+            project_id="project-1",
+            task_id=task1.id,
+            logical_key="character:a",
+            candidate_type=AnalysisCandidateType.CHARACTER_OBSERVATION,
+            action=AnalysisCandidateAction.CREATE,
+            provenance=AnalysisProvenance.SOURCE_OBSERVED,
+            confidence=0.8,
+            source_ref_ids=("source-ref-1",),
+            payload={"name": "x", "observation": "y"},
+        )
+        job2 = self.service.create_job(
+            project_id="project-2",
+            snapshot_id="snapshot-2",
+            idempotency_key="run-2",
+        ).job
+
+        self.service.purge_project(project_id="project-1")
+
+        # project-1 그래프 전부 제거(under-strict).
+        self.assertIsNone(self.repo.get_job(job1.id))
+        self.assertEqual(self.repo.list_needs_review_candidates("project-1"), ())
+        # project-2 유지(over-strict).
+        self.assertIsNotNone(self.repo.get_job(job2.id))
+
     def test_analysis_state_round_trips_through_fresh_service(self):
         job = self.service.create_job(
             project_id="project-1",

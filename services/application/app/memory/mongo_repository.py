@@ -104,6 +104,10 @@ class MongoMemoryRepository:
         )
         return tuple(_to_memory(doc) for doc in cursor)
 
+    def purge_project(self, project_id: str) -> None:
+        # D8-6b: project 의 memory 전부 파기(직접 project_id 스코프).
+        self._memories.delete_many({"project_id": project_id})
+
 
 def _memory_doc(entry: MemoryEntry) -> dict[str, Any]:
     return {

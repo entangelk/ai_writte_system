@@ -129,6 +129,18 @@ class InMemoryMemoryRepository:
             if entry.project_id == project_id
         )
 
+    def purge_project(self, project_id: str) -> None:
+        # D8-6b: project 의 memory 전부 파기(직접 project_id 스코프). MemoryEntry 도
+        # project_id 를 보관하므로 경유 없이 지운다.
+        ids = [mid for mid, m in self.memories.items() if m.project_id == project_id]
+        for mid in ids:
+            del self.memories[mid]
+        self._candidate_index = {
+            key: mid
+            for key, mid in self._candidate_index.items()
+            if key[0] != project_id
+        }
+
 
 class MemoryService:
     def __init__(
@@ -145,6 +157,11 @@ class MemoryService:
         # via apply) enqueues here, so no write path can forget to index. Owner
         # decision 2026-07-07: promote paths reindex too, not backfill-only.
         self._reindex_outbox = reindex_outbox
+
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6b: project 전체 파기의 memory 다리. endpoint(D8-6d)가 core_sot 파기와 함께
+        # 호출한다. memory 는 project 존재를 모르므로 NotFound 매핑은 없다(core_sot 가 잡는다).
+        self._repo.purge_project(project_id)
 
     @property
     def auto_promotion_threshold(self) -> float | None:

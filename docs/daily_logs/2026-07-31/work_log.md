@@ -724,3 +724,39 @@
   직접/경유가 같은 결과라 통과.
 - **enqueue_project_purged 미사용(6a)**: 의도적 — endpoint(D8-6d)가 유일한 production 호출자. 메서드
   코멘트에 "drain은 D8-6c, 호출은 D8-6d" 명시돼 있다. 6c/6d에서 실제 연결되는지가 후속 검증 포인트.
+
+---
+
+## Task — 인증 D8-6b-1: derived 파기 memory + analysis (SoT v1.7.70)
+
+### Goals
+
+- D8-6b(derived 10컬렉션 파기)의 **첫 반**. 전체 6b는 b-1(memory + analysis 4) / b-2(writing 3·
+  observability·context_search·review 6)로 분할(잘게 쪼개). endpoint 없음(D8-6d).
+
+### Completed work — 구현 (코드 변경)
+
+- `MemoryRepository.purge_project`(Protocol·in-memory·mongo) + `MemoryService.purge_project` thin.
+- `AnalysisRepository.purge_project`(Protocol·in-memory·mongo — jobs·tasks·candidates 3컬렉션 **직접
+  `project_id` 스코프**) + `AnalysisService.purge_project` thin.
+- **10 derived 컬렉션 모두 `project_id` 보관** 확인(탐색 에이전트) → 6a의 in-memory/mongo 비대칭 교훈을
+  적용해 **전부 직접 `project_id` 스코프**(경유 없음).
+
+### Verification
+
+- 핵심 회귀: `test_memory_mongo.py` + `test_analysis_mongo.py` = **15 passed**(양쪽 transaction 경로 자동 커버).
+  memory purge(memory 2 project → 대상 비움 + 인접 유지) + analysis purge(jobs·tasks·candidates 그래프 +
+  인접 유지). payload 검증(character_observation 필수 필드)·import 누락 수정 과정 포함.
+- endpoint 미추가 → operation 카운트 단정 무변.
+- 전량 suite 백그라운드 실행 중(결과는 후속 반영).
+
+### Decisions
+
+- b-1/b-2 분할(잘게 쪼개). "18컬렉션 모두 purge 경로" 전수 가드는 **b-2 끝에서**(b-1 단독으론 12컬렉션).
+- 10 derived 컬렉션 전부 직접 `project_id` 스코프(project_id 보관 확인).
+
+### Next steps
+
+- **D8-6b-2**: writing 3(generation_jobs·scratch·loop_audits) + observability(llm_call_audits) +
+  context_search(gate_findings) + review(review_queue) = 6컬렉션 + **전수 가드(18컬렉션)**.
+- **D8-6c**: vector/index 4백엔드 + worker drain. **D8-6d**: endpoint + 권한 + boundary matrix.

@@ -229,6 +229,15 @@ class InMemoryAnalysisRepository:
             and candidate.status is AnalysisCandidateStatus.NEEDS_REVIEW
         )
 
+    def purge_project(self, project_id: str) -> None:
+        # D8-6b: project 의 analysis 그래프(jobs·tasks·candidates) 전부 파기(직접 project_id 스코프).
+        self.jobs = {jid: j for jid, j in self.jobs.items() if j.project_id != project_id}
+        self.tasks = {tid: t for tid, t in self.tasks.items() if t.project_id != project_id}
+        self.candidates = {cid: c for cid, c in self.candidates.items() if c.project_id != project_id}
+        self._job_request_index = {k: v for k, v in self._job_request_index.items() if k[0] != project_id}
+        self._task_request_index = {k: v for k, v in self._task_request_index.items() if k[0] != project_id}
+        self._candidate_request_index = {k: v for k, v in self._candidate_request_index.items() if k[0] != project_id}
+
 
 class AnalysisService:
     def __init__(
@@ -244,6 +253,10 @@ class AnalysisService:
         # index sync here, so no extraction path can forget to index. Absent
         # (unwired) leaves the deterministic Mongo-direct retrieval intact.
         self._reindex_outbox = reindex_outbox
+
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6b: project 전체 파기의 analysis 다리. endpoint(D8-6d)가 core_sot 파기와 함께 호출한다.
+        self._repo.purge_project(project_id)
 
     @property
     def source_validation_enabled(self) -> bool:

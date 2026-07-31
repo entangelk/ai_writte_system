@@ -187,6 +187,43 @@ class MongoMemoryRepositoryTest(unittest.TestCase):
         with self.assertRaises(DuplicatePromotionRequest):
             self.repo.put_memory(replace(base, id="memory-b"))
 
+    def test_purge_removes_all_project_memory_leaving_others(self):
+        # D8-6b: project 의 memory 전부 파기(직접 project_id 스코프). 인접 project 유지.
+        from services.application.app.memory.models import (
+            MemoryEntry,
+            MemoryStatus,
+            PromotionMode,
+        )
+        from services.application.app.analysis.models import (
+            AnalysisCandidateType,
+            AnalysisProvenance,
+        )
+
+        def _entry(memory_id, project_id, candidate_id):
+            return MemoryEntry(
+                id=memory_id,
+                project_id=project_id,
+                memory_type=AnalysisCandidateType.CHARACTER_OBSERVATION,
+                status=MemoryStatus.CANONICAL,
+                provenance=AnalysisProvenance.SOURCE_OBSERVED,
+                confidence=0.8,
+                source_ref_ids=("source-ref-1",),
+                payload={"name": "x", "observation": "y"},
+                version=1,
+                analysis_job_id="analysis-job-1",
+                source_candidate_id=candidate_id,
+                promotion_mode=PromotionMode.MANUAL,
+                applied_threshold=None,
+            )
+
+        self.repo.put_memory(_entry("memory-1", "project-1", "candidate-1"))
+        self.repo.put_memory(_entry("memory-2", "project-2", "candidate-2"))
+
+        self.repo.purge_project("project-1")
+
+        self.assertEqual(self.repo.list_memories_for_project("project-1"), ())
+        self.assertEqual(len(self.repo.list_memories_for_project("project-2")), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

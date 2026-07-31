@@ -234,6 +234,12 @@ class MongoAnalysisRepository:
         ).sort("_id", ASCENDING)
         return tuple(_to_candidate(doc) for doc in cursor)
 
+    def purge_project(self, project_id: str) -> None:
+        # D8-6b: project 의 analysis 그래프(jobs·tasks·candidates) 전부 파기(직접 project_id 스코프).
+        self._jobs.delete_many({"project_id": project_id})
+        self._tasks.delete_many({"project_id": project_id})
+        self._candidates.delete_many({"project_id": project_id})
+
     def _put_candidates_transactional(
         self, candidates: Sequence[tuple[AnalysisCandidate, str]]
     ) -> None:
