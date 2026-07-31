@@ -135,11 +135,25 @@ class BudgetRow:
 
 @dataclass(frozen=True, slots=True)
 class Overheads:
-    """예산과 무관하게 report 입력에 늘 실리는 몫. R-a 산식의 고정항이다."""
+    """예산과 무관하게 report 입력에 늘 실리는 몫. R-a 산식의 고정항이다.
+
+    `wrapper_tokens`는 **예산별로 따로 재서** 담는다. 하나만 재서 "고정"이라고 적으면 그것은
+    출력이 증명하지 않는 단언이고, 프롬프트 포장이 항목 수에 따라 달라지는 변경이 들어와도
+    아무도 모른다(독립 검증 하드닝 #3).
+    """
 
     system_tokens: int
     candidate_tokens: int
-    wrapper_tokens: int
+    wrapper_tokens_by_budget: Mapping[int, int]
+
+    @property
+    def wrapper_tokens(self) -> int:
+        """산식에 쓰는 래퍼 몫 = 관측된 최대치(보수적인 쪽)."""
+        return max(self.wrapper_tokens_by_budget.values())
+
+    @property
+    def wrapper_is_constant(self) -> bool:
+        return len(set(self.wrapper_tokens_by_budget.values())) == 1
 
     @property
     def total(self) -> int:
@@ -283,7 +297,7 @@ async def measure(args: argparse.Namespace, *, out: TextIO) -> int:
     corpus_chars = len(candidate_text)
 
     rows: list[BudgetRow] = []
-    overheads: Overheads | None = None
+    wrapper_by_budget: dict[int, int] = {}
     for budget in args.budgets:
         package = await services.context_search.build_context_package(
             build_search_request(
@@ -322,13 +336,15 @@ async def measure(args: argparse.Namespace, *, out: TextIO) -> int:
             output_cap=output_cap,
             window=window,
         ))
-        overheads = Overheads(
-            system_tokens=system_tokens,
-            candidate_tokens=candidate_tokens,
-            wrapper_tokens=input_tokens - package_tokens - system_tokens - candidate_tokens,
+        wrapper_by_budget[budget] = (
+            input_tokens - package_tokens - system_tokens - candidate_tokens
         )
 
-    assert overheads is not None  # budgets 는 비어 있을 수 없다(파서가 막는다)
+    overheads = Overheads(
+        system_tokens=system_tokens,
+        candidate_tokens=candidate_tokens,
+        wrapper_tokens_by_budget=wrapper_by_budget,
+    )
     print(format_measurement(
         rows, overheads=overheads, window=window, output_cap=output_cap,
         project_id=project_id, llama_base_url=base_url,
@@ -353,7 +369,14 @@ def format_measurement(rows: list[BudgetRow], *, overheads: Overheads, window: i
         f"  후보 산문: {overheads.candidate_tokens} tok "
         f"({candidate_chars}자, 밀도 {candidate_chars / max(overheads.candidate_tokens, 1):.2f} 자/tok "
         f"— 시드 원고와 같은 생성기이므로 항목 밀도이기도 하다. 실제 원고 실측은 1.71)",
-        f"  래퍼(채팅 템플릿 + JSON 포장): {overheads.wrapper_tokens} tok",
+        f"  래퍼(채팅 템플릿 + JSON 포장): {overheads.wrapper_tokens} tok "
+        + ("— 예산 전 구간에서 동일(실측)"
+           if overheads.wrapper_is_constant
+           else "— ⚠ 예산마다 다르다: "
+                + ", ".join(f"{budget}:{value}"
+                            for budget, value in sorted(
+                                overheads.wrapper_tokens_by_budget.items()))
+                + " (고정항이 아니므로 산식은 최대치를 쓴다)"),
         f"  합계: {overheads.total} tok",
         "",
         "예산별",
@@ -379,10 +402,20 @@ def format_measurement(rows: list[BudgetRow], *, overheads: Overheads, window: i
     )
     saturated = [row for row in rows if row.budget_excluded > 0]
     if saturated:
-        row = saturated[0]
+        # **가장 큰 포화 예산에서 비율을 뽑는다.** 비율은 예산이 커질수록 오른다(패키지의
+        # 구조적 래퍼 — `<context_package>`·섹션 태그 — 가 상각되기 때문이며 실측
+        # 0.965@2048 → 0.979@8192). 권장치가 겨냥하는 것은 **만재 패키지**이므로 그쪽
+        # 비율이 맞다. 목록의 첫 행을 쓰면 **같은 배포인데 `--budgets`를 어떻게 주느냐로
+        # 권장치가 흔들린다**(실측: 5,330 vs 5,381 — 독립 검증이 이 불일치를 잡았다).
+        row = max(saturated, key=lambda candidate: candidate.budget)
         ratio = row.accounting_tokens / max(row.package_tokens, 1)
+        spread = [
+            candidate.accounting_tokens / max(candidate.package_tokens, 1)
+            for candidate in saturated
+        ]
         lines.append(
-            f"  회계/실측 비율 {ratio:.2f} (예산 {row.budget}에서 실측) → "
+            f"  회계/실측 비율 {ratio:.3f} (만재에 가장 가까운 예산 {row.budget}에서 실측 · "
+            f"포화 구간 전체는 {min(spread):.3f}~{max(spread):.3f}) → "
             f"회계 단위 권장 예산 약 {int(allowance * ratio)}"
         )
     else:
