@@ -1972,7 +1972,18 @@ class WritingReviseRequest(BaseModel):
     task_type: str = WritingTaskType.CONTINUE_SCENE.value
     query: str | None = None
     current_position: ContextPositionBody | None = None
-    max_tokens: int = DEFAULT_CONTEXT_BUDGET_TOKENS
+    # R-a(오너 2026-07-31, v1.7.66): 루프의 report 다리(출력 상한 6144 + 후보 산문)가 창을
+    # 구속하므로 이 값은 **상한**이다 — 서버가 창에 맞춰 줄일 수 있으나 늘리지는 않는다.
+    # 진입 시 1회 유도하며 그 값이 패키지 예산과 merge 상한을 함께 묶는다.
+    max_tokens: int = Field(
+        default=DEFAULT_CONTEXT_BUDGET_TOKENS,
+        description=(
+            "Ceiling on the context-package (input) budget in tokens. The server "
+            "may reduce it once at loop entry to fit the model's context window "
+            "alongside the candidate prose and report output (R-a); never increased. "
+            "The derived value also bounds package growth from retrieve_more merges."
+        ),
+    )
     # Phase 5.9 L9 B (P2=B opt-in, 2026-07-13): persist this loop's audit only
     # when requested. None → env default (WRITING_LOOP_AUDIT_DEFAULT, off).
     persist_audit: bool | None = None
@@ -2075,7 +2086,16 @@ class WritingAcceptRequest(BaseModel):
     draft_excerpt: str = ""
     query: str | None = None
     current_position: ContextPositionBody | None = None
-    max_tokens: int = DEFAULT_CONTEXT_BUDGET_TOKENS
+    # R-a(오너 2026-07-31, v1.7.66): accept도 report 다리(reporter.enrich)를 지나므로 이 값은
+    # **상한**이다 — 서버가 창에 맞춰 줄일 수 있으나 늘리지는 않는다(후보 산문 추정 기반).
+    max_tokens: int = Field(
+        default=DEFAULT_CONTEXT_BUDGET_TOKENS,
+        description=(
+            "Ceiling on the context-package (input) budget in tokens. The server "
+            "may reduce it to fit the model's context window alongside the candidate "
+            "prose and report output (R-a); never increased."
+        ),
+    )
     # W3 Writing intent (§3.1). Legacy clients omit both → append_current/null.
     intent: str = WritingIntent.APPEND_CURRENT.value
     next_unit: NextUnitBody | None = None
@@ -4709,7 +4729,20 @@ def create_app(
             needs=_WRITING_CONTINUE_SCENE_NEEDS,
             query=body.query or body.instruction,
             current_position=position,
-            context_budget=ContextBudget(max_tokens=body.max_tokens),
+            # R-a(오너 2026-07-31, v1.7.66): 후보가 이미 있고 루프의 report 다리(출력 상한
+            # 6144 + 후보 산문)가 창을 구속하므로 report 엔드포인트와 같이 창에서 유도한다.
+            # **진입 시 1회**만 유도한다 — 루프는 이 값을 (a) 패키지 예산과 (b) merge 상한의
+            # 양쪽에 그대로 쓰므로, merge_context_packages가 패키지를 이 값으로 묶어
+            # retrieve_more가 유도값 너머로 패키지를 키우지 못하게 한다. 후보는 revise로
+            # partial patch될 뿐 유의하게 자라지 않고, 남는 초과는 K-3 가드가 받는다.
+            context_budget=ContextBudget(max_tokens=await derive_context_budget(
+                requested_tokens=body.max_tokens,
+                capabilities=model_capabilities,
+                report_output_cap=report_output_cap,
+                report_system_template=REPORT_SYSTEM_TEMPLATE,
+                candidate_tokens_upper_bound=candidate_tokens_from_text(
+                    body.candidate_text),
+            )),
         )
         request = WritingRequest(
             request_id=body.request_id,
@@ -5047,7 +5080,18 @@ def create_app(
             needs=_WRITING_CONTINUE_SCENE_NEEDS,
             query=body.query or body.instruction,
             current_position=position,
-            context_budget=ContextBudget(max_tokens=body.max_tokens),
+            # R-a(오너 2026-07-31, v1.7.66): accept도 report 다리를 지난다
+            # (`WritingAcceptService.run` → `reporter.enrich`), 그래서 report 엔드포인트와
+            # 같이 창에서 유도한다(후보 산문 추정을 후보 상한으로). 패턴 스윕으로 발견해
+            # revise-and-gate 확장과 한 슬라이스로 담았다.
+            context_budget=ContextBudget(max_tokens=await derive_context_budget(
+                requested_tokens=body.max_tokens,
+                capabilities=model_capabilities,
+                report_output_cap=report_output_cap,
+                report_system_template=REPORT_SYSTEM_TEMPLATE,
+                candidate_tokens_upper_bound=candidate_tokens_from_text(
+                    body.candidate_text),
+            )),
         )
         request = WritingRequest(body.request_id, project_id, task_type,
                                  body.instruction, body.draft_excerpt,

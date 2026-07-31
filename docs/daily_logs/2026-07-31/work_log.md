@@ -337,3 +337,100 @@
 
 - revise-and-gate 루프 유도(02feebb이 남긴 다음 슬라이스).
 - 알파 R-c 관측(LLAMA_CTX_SIZE=32768 → 유도 자동 확대).
+
+---
+
+## Task — R-a 유도를 revise-and-gate 루프 + /writing/accept로 확장 (SoT v1.7.66)
+
+### Goals
+
+- v1.7.65 ⑤가 **"revise-and-gate 루프는 이 버전 범위 밖 — 패키지 병합·`retrieve_more`와의
+  상호작용은 별도 판단이 필요"**로 남겨둔 것을 닫는다. HANDOFF Next Tasks #2·위 "Next steps"가
+  모두 이것을 다음 슬라이스로 지목했다.
+- **갭**: `/writing/revise-and-gate` 엔드포인트만 `body.max_tokens`를 가공 없이 context budget에
+  넣고 있었다([`main.py:4712`](../../../services/application/app/main.py#L4712)). 다른 3개 writing 호출부
+  (generate · report · 생성 워커)는 `derive_context_budget`로 창에 맞춰 줄인다. 루프의 report 다리
+  (같은 report 서비스, 출력 상한 6144 + 후보 산문)가 창을 넘으면 K-3 가드가 400으로 거부해 루프가 죽는다
+  — 생성 경로에서 이미 본 증상과 같다.
+- **패턴 스윕이 두 번째 사이트를 잡았다**: 루프를 고친 뒤 같은 결함(raw 예산 + report 다리)을
+  repo 전수로 훑어 `/writing/accept`를 찾았다(`WritingAcceptService.run` → `reporter.enrich`).
+  오너 승인으로 같은 슬라이스에 함께 담았다.
+- 성공 기준: ① 루프 진입 시 예산이 창에서 유도된다 ② 유도값이 루프의 패키지 예산·merge 상한 양쪽에
+  흐른다(retrieve_more로 자란 패키지도 묶인다) ③ accept에도 같은 유도가 들어간다 ④ 창을 모르면 종전
+  동작(요청값 그대로) ⑤ 회귀 0건.
+
+### 설계 판단 — SoT가 요구한 "별도 판단" (진입 시 1회 유도)
+
+루프는 패키지를 merge로 키우고 `retrieve_more`로 추가 검색까지 하므로 "무엇을 기준으로 언제 줄일지"가
+결정 사항이었다. 분석 결론:
+
+- **진입 시 1회 유도(엔드포인트)가 정답**이다. 후보가 이미 있으므로 report 엔드포인트와 같이
+  `candidate_tokens_from_text(candidate_text)`를 후보 상한으로 쓴다(출력 프리셋이 아니다 —
+  `output_length`는 generate-only라 revise-and-gate 요청에 없다).
+- **루프 본체는 무변경**이다. 루프는 `context_budget.max_tokens`를 (a) `build_context_package`의
+  예산과 (b) `merge_context_packages(max_tokens=…)`의 merge 상한 **양쪽에** 그대로 쓴다
+  ([`revise_gate.py:490,501`](../../../services/application/app/writing/revise_gate.py#L490)). 엔드포인트에서
+  유도값을 한 번 넣으면 두 곳 모두 자동으로 따른다.
+- **merge 상한이 패키지 성장을 묶는다** — `merge_context_packages`는 합계가 상한을 넘으면 초과 항목을
+  `excluded`로 보낸다([`retrieval.py:280`](../../../services/application/app/writing/retrieval.py#L280)).
+  그러므로 retrieve_more가 패키지를 유도값 너머로 키우지 못한다.
+- **per-round 재유도는 기각** — 이미 만들어진 패키지는 merge 없이는 줄어들지 않으므로, 라운드마다 예산
+  숫자만 다시 유도해 봤자 "후보가 revise로 커진" 문제를 풀지 못한다. 후보는 partial patch
+  (revise 출력 상한 512)라 유의하게 자라지 않고, 구속하는 다리는 여전히 report이며, 남는 초과는
+  **K-3 가드가 백스톱**한다.
+
+### Completed work
+
+- **① 엔드포인트에 유도 적용**([`main.py`](../../../services/application/app/main.py) `writing_revise_and_gate_endpoint`):
+  `ContextBudget(max_tokens=body.max_tokens)` → `await derive_context_budget(...)` (report 엔드포인트와
+  동일 형태). `body.candidate_text`는 이미 그 시점에 available해 재배치 불필요.
+- **② `WritingReviseRequest.max_tokens` description 정렬**: 독립 검증 hardening #2가 generate·report에만
+  붙인 "창에 맞춰 줄일 수 있는 상한(늘리지 않음)" description을 이제 유도가 적용되는 이 필드에도 붙였다.
+  **구조·기본값 무변 — description만.** gate는 report 다리가 없어 구속하지 않으므로 **그대로** 둔다(이
+  차이가 정확한 계약 — hardening #2 Decisions의 연장).
+- **③ SoT v1.7.66**: 변경이력에 v1.7.66 행 추가(루프로 확장 · 1회 유도 · merge 상한이 성장을 묶음 ·
+  per-round 기각 · K-3 백스톱). v1.7.65 ⑤의 "범위 밖"은 변경이력 행이라 그대로 두고 v1.7.66이 대체.
+- **④ wiring 테스트**([`tests/test_writing.py::WritingReviseGateBudgetDerivationTest`](../../../tests/test_writing.py)):
+  엔드포인트→루프 배선을 양방향으로 잠갔다. 관측점은 `_FakeContextSearch.last_request.context_budget.max_tokens`.
+  collaborator stub(revise→report→gate PASS)으로 루프를 첫 판에 끝내고, `_default_model_capabilities`를
+  patch해 창 값을 제어한다.
+- **⑤ 패턴 스윕 — `/writing/accept`에 동일 적용**: ④를 붙인 뒤 같은 raw 예산 패턴을 repo 전수로 훑었더니
+  accept가 걸렸다 — `WritingAcceptService.run`이 `reporter.enrich(candidate, package)`를 부른다
+  ([`accept.py:96`](../../../services/application/app/writing/accept.py#L96)), 즉 report 다리가 있고 원래
+  구현(2026-07-12)부터 raw 예산이었다(git blame `27164ae9`). v1.7.65(02feebb)가 generate·worker·report에만
+  유도를 넣고 accept는 놓친 것. **같은 수정**(엔드포인트에서 `derive_context_budget`, `WritingAcceptRequest`
+  description 정렬)으로 닫고, 양방향 wiring 테스트(`WritingAcceptBudgetDerivationTest`)를 추가했다.
+  accept는 injection params에 writing_accept_service가 없어 게이트를 주입해 `writing_accept`를 build하게
+  했고, accept.run은 base version 미시드로 실패하지만 `build_context_package`가 그 **이전**이라
+  last_request는 잡힌다(accept.run 이후 동작은 `test_writing_accept.py` 범위).
+- **⑥ 패턴 스윕 결산(조용히 넘기지 않음)**: raw 예산 사이트 4곳을 전수 조사했다 — `/writing/gate`
+  · `/writing/revise`(둘 다 report 다리 없음, **올바르게 raw**) · `/context-search`의
+  `_build_context_search_request` 헬퍼(report 다리 없음, 올바르게 raw). accept만이 결함 사이트였다.
+
+### Verification
+
+- **wiring 양방향(revise-gate + accept)**: 창 8000을 알면 요청 8192가 유도값(≈1182)으로 내려가고, 그
+  값은 report 엔드포인트와 **같은 입력**(후보 산문 추정)으로 계산한 `derive_context_budget` 결과와 정확히
+  일치한다(→ (iii) 후보 길이에서 유도함을 함께 건다). 게이트웨이를 모르면 요청값 8192 그대로(종전 동작).
+- **뮤테션(under-strict)**: 두 엔드포인트를 각각 raw `body.max_tokens`로 되돌리면 `8192 != 1182`로
+  재실패함을 직접 확인했다(역방향 Edit으로 원복 — `git checkout --`는 미커밋 작업 트리라 쓰지 않았다).
+- **포커스 회귀**: `test_writing.py`·`test_writing_accept.py`·`test_report_budget_derivation.py` 등 +
+  OpenAPI 핀 `test_application_api.py`(**124 passed**) — description 변경 영향 0.
+- **전량 backend**: **1777 passed / 1 skipped / 1502 subtests**(704s, test-mongo ON). 기준선 1773 대비
+  **+4 = 신규 wiring 4건**(revise-gate 2 + accept 2), subtest·skip 무변 → **회귀 0건**.
+
+### Decisions
+
+- **1회 유도 vs per-round**: 1회 유도. 근거는 위 설계 판단(이미 만들어진 패키지는 merge 없이 못 줄임).
+- **후보 상한 = 후보 산문 추정**(출력 프리셋 아님): report 엔드포인트와 같고, 후보가 이미 존재하므로.
+- **gate 엔드포인트는 손대지 않음**: gate는 report 다리가 없어 창을 구속하지 않는다.
+- **accept를 같은 슬라이스에 담은 것**: 패턴 스윕으로 잡은 동일 결함이라 오너에게 묻고 같이 고치기로(별도
+  슬라이스가 아니라). 수정은 accept에도 동일하게 적용(report 다리가 같으므로).
+- 루프 본체(`revise_gate.py`)는 **무변경** — 유도는 엔드포인트 한 곳에서만.
+
+### Next steps
+
+- **알파 R-c 관측 1회**: 이제 루프·accept도 유도를 쓰므로 창을 32768로 올리면 그 예산도 자동으로 넓어진다.
+  `.env`에 `LLAMA_CTX_SIZE=32768` 후 같은 리그/엔드포인트로 관측.
+- R-a 트랙은 이것으로 적용 지점이 전부 채워졌다(generate · worker · report · **revise-and-gate 루프** ·
+  **accept**). 남은 것은 알파 관측뿐이다.

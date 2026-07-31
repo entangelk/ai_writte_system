@@ -57,6 +57,8 @@ from services.application.app.writing.models import (
     RiskNoteType,
     RiskSeverity,
     WritingCandidate,
+    WritingGateDecision,
+    WritingGateResult,
     WritingOutputType,
     WritingRequest,
     WritingTaskType,
@@ -71,6 +73,12 @@ from services.application.app.writing.service import (
     seed_writing_template,
 )
 from services.application.app.writing.report import InvalidCandidateReport
+from services.application.app import main as main_module
+from services.application.app.writing.report import TEMPLATE as REPORT_SYSTEM_TEMPLATE
+from services.application.app.writing.report_budget import (
+    candidate_tokens_from_text,
+    derive_context_budget,
+)
 from services.application.app.writing.generation_job import (
     InMemoryWritingGenerationJobRepository,
     WritingGenerationJob,
@@ -714,6 +722,210 @@ class WritingReportBudgetTest(unittest.TestCase):
         with patch.dict(os.environ, {"WRITING_REPORT_MAX_TOKENS": "2048"}):
             service = _build_report_service(_FakeProvider())
         self.assertEqual(service.max_tokens, 2048)
+
+
+class _WindowCapabilities:
+    """창·system 토큰 계수를 아는 가짜 게이트웨이 capabilities (R-a 유도용)."""
+
+    def __init__(self, *, window, system_tokens=465):
+        self._window = window
+        self._system = system_tokens
+
+    async def context_window(self):
+        return self._window
+
+    async def count_tokens(self, text):
+        return self._system
+
+
+# revise-and-gate 루프 collaborator stub. 유도 wiring만 잠그므로 루프는 첫 판에 PASS로
+# 끝난다(revise → report → gate PASS). 루프 본체의 행동은 test_writing_revise/
+# retrieval/loop_budget가 잠근다.
+class _StubReviser:
+    def validate_inputs(self, candidate, finding, instruction):
+        pass
+
+    async def revise(self, *, candidate, finding, instruction, package):
+        return replace(candidate, text="수정된 문장")
+
+
+class _StubReporter:
+    async def enrich(self, candidate, package):
+        return candidate
+
+
+class _PassGate:
+    async def evaluate(self, *, request, candidate, package):
+        return WritingGateResult(
+            request.request_id, request.project_id, WritingGateDecision.PASS,
+            (), (), "stub-pass",
+        )
+
+
+class WritingReviseGateBudgetDerivationTest(unittest.TestCase):
+    """R-a (v1.7.66): revise-and-gate 루프도 진입 시점에 예산을 **창에서 유도**한다.
+
+    여기가 wiring 잠금이다 — 유도 **산식**은 `test_report_budget_derivation.py`가,
+    루프 본체는 `test_writing_revise/retrieval/loop_budget`가 잠근다. 본 슬라이스가
+    새로 잠그는 것은 **엔드포인트가 요청 예산을 `derive_context_budget`로 거쳐
+    context_search(→ 루프의 패키지 예산·merge 상한)에 전달한다**는 한 가지다.
+
+    양방향:
+      - 창을 알면 **줄인다**(요청 8192가 유도값으로 내려간다). 엔드포인트를 raw
+        `body.max_tokens`로 되돌리면 context_search가 8192를 보게 돼 재실패한다.
+      - 창을 모르면 **건드리지 않는다**(게이트웨이 없으면 model_capabilities=None →
+        유도 no-op → 요청값 그대로). over-strict: 유도가 정상 요청을 깎지 않는다.
+    """
+
+    _CANDIDATE_TEXT = "아린은 성문 앞에서 멈췄다."
+
+    def _post_revise_and_gate(self, app, project_id, *, max_tokens):
+        client = _TestClient(app)
+        return client.post(
+            f"/projects/{project_id}/writing/revise-and-gate",
+            json={
+                "request_id": "rg1",
+                "instruction": "이어서 수정해줘.",
+                "candidate_text": self._CANDIDATE_TEXT,
+                "max_tokens": max_tokens,
+                "finding": {
+                    "type": "continuity",
+                    "severity": "warning",
+                    "message": "시점이 틀렸다.",
+                    "evidence": "단락 1",
+                    "recommended_decision": "revise",
+                },
+            },
+        )
+
+    def test_window_known_reduces_the_loop_budget(self):
+        # under-strict: 작은 창(8000)을 아는 capabilities에서 엔드포인트가 내린 예산은
+        # 요청 8192보다 작고, **report 엔드포인트와 같은 입력**(후보 산문 추정)으로 계산한
+        # 유도값과 정확히 일치한다 — (iii) 후보 길이에서 유도함을 함께 건다.
+        caps = _WindowCapabilities(window=8000)
+        context = _FakeContextSearch(_package())
+        with patch.object(main_module, "_default_model_capabilities",
+                          return_value=caps):
+            app = create_app(
+                writing_revision_service=_StubReviser(),
+                writing_report_service=_StubReporter(),
+                writing_gate_service=_PassGate(),
+                context_search_service=context,
+            )
+        project_id = _TestClient(app).post(
+            "/projects", json={"name": "Novel"}).json()["id"]
+        response = self._post_revise_and_gate(app, project_id, max_tokens=8192)
+
+        self.assertEqual(response.status_code, 200)
+        expected = asyncio.run(derive_context_budget(
+            requested_tokens=8192,
+            capabilities=caps,
+            report_output_cap=WRITING_REPORT_DEFAULT_MAX_TOKENS,
+            report_system_template=REPORT_SYSTEM_TEMPLATE,
+            candidate_tokens_upper_bound=candidate_tokens_from_text(
+                self._CANDIDATE_TEXT),
+        ))
+        self.assertEqual(context.last_request.context_budget.max_tokens, expected)
+        self.assertLess(context.last_request.context_budget.max_tokens, 8192)
+
+    def test_window_unknown_leaves_the_loop_budget_unchanged(self):
+        # over-strict: 게이트웨이를 모르면(기본 — env 없음) model_capabilities=None이고
+        # 유도는 no-op다. context_search는 요청 예산을 그대로 받는다(종전 동작).
+        context = _FakeContextSearch(_package())
+        app = create_app(
+            writing_revision_service=_StubReviser(),
+            writing_report_service=_StubReporter(),
+            writing_gate_service=_PassGate(),
+            context_search_service=context,
+        )
+        project_id = _TestClient(app).post(
+            "/projects", json={"name": "Novel"}).json()["id"]
+        response = self._post_revise_and_gate(app, project_id, max_tokens=8192)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(context.last_request.context_budget.max_tokens, 8192)
+
+
+class WritingAcceptBudgetDerivationTest(unittest.TestCase):
+    """R-a (v1.7.66): `/writing/accept`도 report 다리(`WritingAcceptService.run`
+    → `reporter.enrich`)를 지나므로 진입 시 창에서 예산을 유도한다.
+
+    패턴 스윕으로 잡은 사이트다 — v1.7.65가 generate·worker·report에만 유도를 넣고
+    accept는 원래 구현(2026-07-12) 그대로 raw로 남겨뒀었다. revise-and-gate와 같은
+    결함·같은 수정(report 엔드포인트처럼 후보 산문 추정을 후보 상한으로). 여기서도
+    엔드포인트→context_search 배선만 잠그고, accept.run의 이후 동작(승격 저장 등)은
+    `test_writing_accept.py`가 담당한다.
+    """
+
+    _CANDIDATE_TEXT = "아린은 성문 앞에서 멈췄다."
+
+    def _post_accept(self, app, project_id, *, max_tokens):
+        client = _TestClient(app)
+        return client.post(
+            f"/projects/{project_id}/writing/accept",
+            json={
+                "request_id": "ac1",
+                "draft_id": "d1",
+                "base_version_id": "v1",
+                "idempotency_key": "k1",
+                "instruction": "이 장면을 받아들여라.",
+                "candidate_text": self._CANDIDATE_TEXT,
+                "max_tokens": max_tokens,
+            },
+        )
+
+    def test_window_known_reduces_the_accept_budget(self):
+        # under-strict: 작은 창을 알면 accept가 context_search에 내린 예산은 요청
+        # 8192보다 작고, report 엔드포인트와 같은 입력(후보 산문 추정)으로 계산한
+        # 유도값과 일치한다. 엔드포인트를 raw로 되돌리면 8192가 와 재실패한다.
+        caps = _WindowCapabilities(window=8000)
+        context = _FakeContextSearch(_package())
+        with patch.object(main_module, "_default_model_capabilities",
+                          return_value=caps):
+            app = create_app(
+                # writing_accept is built when writing_gate is non-None; the
+                # reporter is None here (no gateway) — fine, we only need the
+                # endpoint to reach build_context_package.
+                writing_gate_service=_PassGate(),
+                context_search_service=context,
+            )
+        project_id = _TestClient(app).post(
+            "/projects", json={"name": "Novel"}).json()["id"]
+        # Order-dependent by design: this locks the BUDGET derivation wiring
+        # (observed at context_search.last_request), not accept semantics, so
+        # base_version "v1" is deliberately unseeded — accept.run fails AFTER
+        # build_context_package. If the endpoint ever validates base_version
+        # BEFORE context search, last_request stays None and the
+        # assertIsNotNone below fails — that failure is correct: it means the
+        # derivation no longer reaches context search for this path.
+        self._post_accept(app, project_id, max_tokens=8192)
+
+        self.assertIsNotNone(context.last_request)
+        expected = asyncio.run(derive_context_budget(
+            requested_tokens=8192,
+            capabilities=caps,
+            report_output_cap=WRITING_REPORT_DEFAULT_MAX_TOKENS,
+            report_system_template=REPORT_SYSTEM_TEMPLATE,
+            candidate_tokens_upper_bound=candidate_tokens_from_text(
+                self._CANDIDATE_TEXT),
+        ))
+        self.assertEqual(context.last_request.context_budget.max_tokens, expected)
+        self.assertLess(context.last_request.context_budget.max_tokens, 8192)
+
+    def test_window_unknown_leaves_the_accept_budget_unchanged(self):
+        # over-strict: 게이트웨이를 모르면 model_capabilities=None → 유도 no-op →
+        # 요청 예산 그대로(종전 동작).
+        context = _FakeContextSearch(_package())
+        app = create_app(
+            writing_gate_service=_PassGate(),
+            context_search_service=context,
+        )
+        project_id = _TestClient(app).post(
+            "/projects", json={"name": "Novel"}).json()["id"]
+        self._post_accept(app, project_id, max_tokens=8192)
+
+        self.assertIsNotNone(context.last_request)
+        self.assertEqual(context.last_request.context_budget.max_tokens, 8192)
 
 
 class WritingGenerateEnvelopeKeyTest(unittest.TestCase):
