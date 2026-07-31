@@ -691,6 +691,11 @@
   이것이 a에서 endpoint를 빼는 부수 이유다.
 - test-mongo 기동 시 **stale 네트워크 참조** 오류(`network ... not found`) → `docker rm -f` 후 재기동으로
   해소(옛 컨테이너가 사라진 네트워크를 잡고 있었다).
+- **전량(test-mongo ON, host argon2 OK, 120s)**: **1786 passed / 4 skipped / 1519 subtests** — 직전
+  1779/1/1519 대비 **+7 = D8-6a 신규 회귀**(in-memory 3·indexing 1·mongo 2×3클래스), **회귀 0건**.
+  **양방향 뮤테이션 검증**(in-memory `purge`에서 snapshot 체인을 건너뛰면 `test_purge_removes_entire…`
+  가 `assertNotIn(snapshot, repo.snapshots)`에서 실패 → 역방향 Edit 원복 → 41 passed). skip +3은 알파
+  호스트 환경(live 등), D8-6a와 무관.
 
 ### Decisions
 
