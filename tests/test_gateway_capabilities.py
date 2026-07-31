@@ -4,6 +4,7 @@
 것은 "값이 오간다"만이 아니라 **모를 때 조용히 지어내지 않는다**는 쪽이다.
 """
 
+import asyncio
 import unittest
 
 import httpx
@@ -109,6 +110,30 @@ class ModelCapabilitiesClientTest(unittest.IsolatedAsyncioTestCase):
         capabilities = self._client(
             lambda request: httpx.Response(200, json={"tokens": None}))
         self.assertIsNone(await capabilities.count_tokens("x"))
+
+    async def test_concurrent_first_calls_share_one_probe_and_both_get_the_window(self):
+        """동시 첫 호출이 probe 도중 None을 받지 않고 **같은 창**을 받는다.
+
+        양방향 가드: 캐시가 비었을 때 두 요청이 동시에 오면 한쪽이 probe하는 동안 다른 쪽은
+        lock을 기다렸다가 **같은 값**을 받아야 한다. probe 전에 `_window_probed`를 True로 두면
+        두 번째 호출이 fast-path에서 `_window`(아직 None)을 돌려받아 derivation이 건너뛰고,
+        cold-boot 동시 첫 요청이 가드에 400으로 거부되는 회귀로 나타난다. probe는 정확히 한 번.
+        """
+        calls = []
+
+        async def handler(request):
+            calls.append(request.url.path)
+            await asyncio.sleep(0)  # probe 도중 다른 태스크가 돌게 한다
+            return httpx.Response(200, json={"context_window": 16384})
+
+        capabilities = self._client(handler)
+        first, second = await asyncio.gather(
+            capabilities.context_window(),
+            capabilities.context_window(),
+        )
+        self.assertEqual(first, 16384)
+        self.assertEqual(second, 16384)
+        self.assertEqual(calls, ["/v1/capabilities"])
 
 
 if __name__ == "__main__":

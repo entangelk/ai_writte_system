@@ -1908,7 +1908,16 @@ class WritingGenerateRequest(BaseModel):
     # Retrieval query for the internal context search; defaults to the instruction.
     query: str | None = None
     current_position: ContextPositionBody | None = None
-    max_tokens: int = DEFAULT_CONTEXT_BUDGET_TOKENS
+    # R-a(오너 2026-07-31): 생성이 끝나면 같은 패키지로 self-report가 돌고 그쪽이 창을
+    # 구속하므로, 이 값은 **상한**이다 — 서버가 창에 맞춰 줄일 수 있으나 늘리지는 않는다.
+    max_tokens: int = Field(
+        default=DEFAULT_CONTEXT_BUDGET_TOKENS,
+        description=(
+            "Ceiling on the context-package (input) budget in tokens. The server "
+            "may reduce it to fit the model's context window (R-a); never increased. "
+            "Distinct from output_length (output tokens)."
+        ),
+    )
     # 증분 2 (D3=A): output-length preset (short|medium|long). The server maps it
     # to output tokens (1024/2048/4096 by default). Distinct from ``max_tokens``,
     # which is the input ContextPackage budget. Legacy clients omit it → short.
@@ -1935,7 +1944,16 @@ class WritingReportRequest(BaseModel):
     draft_excerpt: str = ""
     query: str | None = None
     current_position: ContextPositionBody | None = None
-    max_tokens: int = DEFAULT_CONTEXT_BUDGET_TOKENS
+    # R-a(오너 2026-07-31): 후보 산문을 곧바로 싣는 report 다리가 창을 구속하므로 이 값은
+    # **상한**이다 — 서버가 창에 맞춰 줄일 수 있으나 늘리지는 않는다.
+    max_tokens: int = Field(
+        default=DEFAULT_CONTEXT_BUDGET_TOKENS,
+        description=(
+            "Ceiling on the context-package (input) budget in tokens. The server "
+            "may reduce it to fit the model's context window alongside the candidate "
+            "prose and report output (R-a); never increased."
+        ),
+    )
 
 
 class WritingReviseFindingRequest(BaseModel):

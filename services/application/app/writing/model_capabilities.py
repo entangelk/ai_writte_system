@@ -47,13 +47,22 @@ class ModelCapabilities:
             return self._window
         async with self._lock:
             if self._window_probed:
+                # 다른 태스크가 lock을 기다리는 사이에 probe를 끝냈다 — 같은 값을 돌려준다.
                 return self._window
-            self._window_probed = True
-            body = await self._get("/v1/capabilities")
-            if body is not None:
-                window = body.get("context_window")
-                if isinstance(window, int) and not isinstance(window, bool) and window > 0:
-                    self._window = window
+            try:
+                body = await self._get("/v1/capabilities")
+                if body is not None:
+                    window = body.get("context_window")
+                    if isinstance(window, int) and not isinstance(window, bool) and window > 0:
+                        self._window = window
+            finally:
+                # probe가 **끝난 뒤에** 표시한다. probe 전에 True로 두면, probe 도중 들어온 동시
+                # 호출이 lock 밖 fast-path에서 `_window`(아직 None)를 그대로 받아 간다 — 그러면
+                # derivation이 건너뛰고 요청 예산이 그대로 쓰여 가드에 400으로 거부된다(cold-boot
+                # 동시 첫 요청에서 실제로 일어난다). 마침표 뒤에 표시하면 동시 호출은 lock을
+                # 기다렸다가 같은 값을 받는다. 실패도 캐시한다(요청마다 재시도하지 않는다 — K-3
+                # 가드와 같은 계약).
+                self._window_probed = True
         return self._window
 
     async def count_tokens(self, text: str) -> int | None:

@@ -287,3 +287,53 @@
 - **알파에서 R-c 1회**: 창을 32768로 올리면 이제 **유도가 자동으로 넓어진다** — R-c는 별도
   구현이 아니라 이 유도의 관측이 됐다(오너 결정 (ii)가 흡수한 부분).
 - 프론트 `MAX_TOKENS=8192`는 그대로 둔다(상한으로서 유효하며 서버가 창에 맞춰 줄인다).
+
+---
+
+## Task — R-a(02feebb) 독립 검증 비차단 보강 3건 (검증자 실시)
+
+### Goals
+
+독립 검증(`verifications/2026-07-31/r_a_implementation.md`)이 02feebb을 **합격**으로 하되
+비차단 보강 3건을 꼬집었다. 작업 AI를 대신해 검증자가 이 보강을 구현한다.
+
+### Completed work
+
+- **#1 동시성 경쟁 실결함 수정**(`model_capabilities.py`):
+  `context_window()`가 `_window_probed=True`를 probe **전**에 세팅하고 있어, cold-boot에서
+  두 요청이 동시에 첫 조회를 하면 한쪽이 lock 밖 fast-path에서 `_window`(아직 None)를 받아
+  갔다. 그러면 derivation이 건너뛰고 요청 예산(8192)이 그대로 쓰여 **가드에 400으로 거부**된다.
+  `finally`로 probe **뒤**에 표시하게 고쳐 동시 첫 호출이 lock을 기다렸다가 **같은 값**을
+  받게 했다(실패도 캐시 — K-3 fail-open 계약 유지).
+- **#1 회귀(양방향)**: `test_concurrent_first_calls_share_one_probe_and_both_get_the_window`
+  추가 — 두 동시 호출이 같은 창을 받고 probe는 1회. **결함 코드에서 `None != 16384`로 실패**하는
+  것을 되돌려 넣어 직접 확인했다(under-strict). +1 테스트.
+- **#2 `max_tokens` 의미 변경을 OpenAPI description에 반영**(`main.py`):
+  `WritingGenerateRequest`·`WritingReportRequest`(derivation이 실제 적용되는 둘)의
+  `max_tokens`에 "창에 맞춰 줄일 수 있는 상한(늘리지 않음)" description 추가. 게이트·revise는
+  derivation 미적용이라 건드리지 않아 의미가 정확히 갈린다. **구조·기본값(8192) 무변** —
+  description만. OpenAPI 핀 테스트(H3 응답코드 계약)는 영향 0(`test_application_api.py` 145 passed).
+- **#3 SoT v1.7.65 ⑥ 명확화**(`system-contract-sot.md`): 프리셋별 유도 실측값(long 5,307 ·
+  medium 7,273 · short 8,192 캡)을 적고, medium이 §2-5-1 리그 권고 7,417보다 작은 이유(후보 상한을
+  실측 2,139가 아니라 프리셋 2,048 + 보수 상수 150·0.96 — 안전 방향)를 한 줄로. #2로 인해
+  "스키마는 무변"을 "구조는 무변, description만 의미 반영"으로 정정.
+
+### Verification
+
+- 포커스: `test_gateway_capabilities.py`(11)·`test_report_budget_derivation.py`(10)·
+  `test_application_api.py`(124) = **145 passed**. #2 Field 변경이 OpenAPI 계약 테스트를
+  깨뜨리지 않음.
+- 전량: backend **1773 passed / 1 skipped / 1502 subtasks**(02feebb의 1772 + 본 보강 +1).
+  회귀 0건.
+
+### Decisions
+
+- **#2를 전체(max_tokens 5곳)가 아니라 generate·report 2곳에만**: derivation이 적용된 곳만
+  "상한" 의미가 참이고, gate/revise는 그대로 쓴다. 일괄 적용하면 거짓 계약이 된다.
+- #1은 "1회 왕복" 단언의 엣지가 아니라 **실제로 cold-boot 동시 요청이 400으로 죽는 결함**이라
+  보강(테스트만)이 아니라 코드 수정으로 닫았다.
+
+### Next steps
+
+- revise-and-gate 루프 유도(02feebb이 남긴 다음 슬라이스).
+- 알파 R-c 관측(LLAMA_CTX_SIZE=32768 → 유도 자동 확대).
