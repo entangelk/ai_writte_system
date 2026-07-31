@@ -493,37 +493,6 @@ class IndexSyncWorkerTest(unittest.TestCase):
         )
         self.assertEqual(never_stop.entries_claimed, 3)
 
-
-def _fixture(*, project_name="Novel"):
-    core_sot = CoreSotService(InMemoryCoreSotRepository())
-    project = core_sot.create_project(name=project_name)
-    draft = core_sot.create_draft(project_id=project.id, title="Episode 1")
-    saved = core_sot.save_draft(
-        project_id=project.id,
-        draft_id=draft.id,
-        raw_text="첫 문장입니다.\n\n두번째 문장입니다.",
-        idempotency_key=f"save-{project_name}",
-    )
-    index = InMemoryVectorIndexAdapter()
-    service = SourceBlockIndexingService(
-        core_sot=core_sot,
-        embeddings=DeterministicFakeEmbeddingProvider(),
-        vector_index=index,
-    )
-    return (
-        core_sot,
-        index,
-        service,
-        {
-            "project_id": project.id,
-            "draft_id": draft.id,
-            "version_id": saved.draft_version.id,
-            "snapshot_id": saved.snapshot.id,
-            "content_hash": saved.snapshot.content_hash,
-            "blocks": saved.blocks,
-        },
-    )
-
     def test_purge_drain_calls_archive_memory_and_candidate(self):
         # D8-6c-2: a PROJECT_PURGED entry fans the hard-delete out to the archive
         # (source_block) + memory + candidate composites, whole-event, then succeeds.
@@ -578,6 +547,37 @@ def _fixture(*, project_name="Novel"):
         summary = worker.run_once(limit=1, now=_utc(2026, 7, 3, 12, 0, 0))
         self.assertEqual(summary.entries_succeeded, 1)
         self.assertEqual(archive.purged_projects, ["project-1"])
+
+
+def _fixture(*, project_name="Novel"):
+    core_sot = CoreSotService(InMemoryCoreSotRepository())
+    project = core_sot.create_project(name=project_name)
+    draft = core_sot.create_draft(project_id=project.id, title="Episode 1")
+    saved = core_sot.save_draft(
+        project_id=project.id,
+        draft_id=draft.id,
+        raw_text="첫 문장입니다.\n\n두번째 문장입니다.",
+        idempotency_key=f"save-{project_name}",
+    )
+    index = InMemoryVectorIndexAdapter()
+    service = SourceBlockIndexingService(
+        core_sot=core_sot,
+        embeddings=DeterministicFakeEmbeddingProvider(),
+        vector_index=index,
+    )
+    return (
+        core_sot,
+        index,
+        service,
+        {
+            "project_id": project.id,
+            "draft_id": draft.id,
+            "version_id": saved.draft_version.id,
+            "snapshot_id": saved.snapshot.id,
+            "content_hash": saved.snapshot.content_hash,
+            "blocks": saved.blocks,
+        },
+    )
 
 
 class _FailingVectorIndexAdapter:
