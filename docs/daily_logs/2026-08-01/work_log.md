@@ -155,4 +155,6 @@ hardening #1·#2를 보강. #3(SoT)은 오너 결정 대기, #4(composite 관측
 ### Decisions
 - #1 가드는 memory(6c-1)+candidate(6c-1b) 백엔드가 모두 준비됐으므로 6c-2 전에 추가(검증자는 6c-2 종료 권장이었으나
   두 반 끝에 추가해도 정합). source_block archive 누락은 6c-2 합류로 닫힘(주석으로 인수인계).
-- #3 SoT 버전 갱신 여부는 오너 결정(아래 브리프 대기). operation 카운트 무변은 무관 타당.
+- #3 SoT 버전 갱신 — **오너 결정 (b)**: SoT 변경이력에 **v1.7.72 entry** 추가(6c-1·6c-1b indexing 백엔드
+  purge_project + 검증 hardening). 본문 규칙 확장 없이 변경이력 entry만(6a/6b 코드만 슬라이스도 변경이력 entry
+  선례와 일관). HANDOFF 정본 버전 v1.7.71 → v1.7.72. operation 카운트 무변은 무관 타당.

@@ -4,7 +4,7 @@
 > 완료 서술은 여기 쓰지 않는다 — `docs/daily_logs/`(상세) · `docs/system-contract-sot.md` 변경이력 · `CHANGELOG.md`(마일스톤) · `docs/verifications/`(독립 검증)에 이미 있다.
 > 편집 규칙은 `CLAUDE.md`·`AGENTS.md`의 "HANDOFF.md" 절에 있다. **길이 상한은 없다** — 대신 **~200줄을 넘으면 자가 검수**하고(그 뒤로는 ~100줄마다) 결과를 아래 한 줄로 남긴다. 길어야 할 이유가 있으면 길어도 된다. 안 보는 것이 문제다.
 >
-> 마지막 자가 검수: 2026-08-01 · 224줄 (**D8-6c-1·6c-1b memory+candidate vector/lexical 파기 purge_project 완료 + 검증 hardening #1·#2 보강** — indexing 백엔드 purge 전수 가드 + candidate idempotent 대칭, 1814 passed/회귀 0. #3 SoT 갱신은 오너 결정 대기, #4는 설계적. 완료 서술은 `daily_logs/2026-08-01/`·검증 기록에 있다. 남은 6c = 6c-2(worker drain 연결). 다음 검수 트리거는 300줄)
+> 마지막 자가 검수: 2026-08-01 · 224줄 (**D8-6c-1·6c-1b memory+candidate vector/lexical 파기 purge_project 완료 + 검증 hardening #1·#2 보강 + SoT v1.7.72 반영(#3, 오너 결정 b)** — indexing 백엔드 purge 전수 가드 + candidate idempotent 대칭, 1814 passed/회귀 0. #4는 설계적. 완료 서술은 `daily_logs/2026-08-01/`·검증 기록에 있다. 남은 6c = 6c-2(worker drain 연결). 다음 검수 트리거는 300줄)
 
 ## 머신 구성 (알파 · 베타 · 감마)
 
@@ -25,7 +25,7 @@
 
 ## 지금 상태
 
-- 정본은 `docs/system-contract-sot.md` **v1.7.71**(Approved). 미확정 항목은 추측 구현하지 않는다.
+- 정본은 `docs/system-contract-sot.md` **v1.7.72**(Approved). 미확정 항목은 추측 구현하지 않는다.
 - **진행 중 페이즈 = 다중 사용자 인증(D8).** 오너 지시로 **슬라이스를 잘게 쪼개 진행 중**이다(한 번에 큰 덩어리 금지). 진행표:
 
   | 슬라이스 | 상태 | 내용 |
