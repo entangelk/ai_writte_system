@@ -176,9 +176,9 @@ class MongoCoreSotRepository:
         return tuple(_to_project(doc) for doc in cursor)
 
     def purge_project(self, project_id: str) -> None:
-        # D8-6a: project 전체 그래프 영구 파기. 직접 project_id 스코프 6컬렉션 + snapshot
-        # 체인(snapshots·blocks)을 한몸처럼 지운다. 인접 project 레코드는 project_id 스코프가
-        # 다르므로 영향이 없다.
+        # D8-6a: project 전체 그래프 영구 파기. snapshots·blocks 도 project_id 필드를 보관하므로
+        # (_snapshot_doc·_block_doc) 8컬렉션 전부 직접 project_id 스코프로 지운다. 인접 project
+        # 레코드는 project_id 스코프가 다르므로 영향이 없다.
         if self._use_transactions:
             with self._client.start_session() as session:
                 with session.start_transaction():
@@ -187,19 +187,11 @@ class MongoCoreSotRepository:
         self._purge_project(project_id, session=None)
 
     def _purge_project(self, project_id: str, *, session) -> None:
-        # snapshot 체인: 이 project의 version 들이 가리키는 snapshot_id 집합을 모아
-        # snapshots·blocks 를 지운다(snapshots 는 _id=snapshot_id, blocks 는 snapshot_id 필드).
-        snapshot_ids = [
-            doc["snapshot_id"]
-            for doc in self._versions.find(
-                {"project_id": project_id}, {"snapshot_id": 1}, session=session
-            )
-        ]
-        if snapshot_ids:
-            self._snapshots.delete_many({"_id": {"$in": snapshot_ids}}, session=session)
-            self._blocks.delete_many(
-                {"snapshot_id": {"$in": snapshot_ids}}, session=session
-            )
+        # version→snapshot_id 경유가 아니라 직접 project_id 스코프로 지운다 — in-memory 와 대칭이며
+        # (비정상) 고아 snapshot 이 생겨도 잔류하지 않는다(purge 는 비가역이라 안전 방향은 더 넓게).
+        # 독립 검증(2026-07-31)이 지적한 in-memory/mongo snapshot 파기 비대칭의 보강.
+        self._snapshots.delete_many({"project_id": project_id}, session=session)
+        self._blocks.delete_many({"project_id": project_id}, session=session)
         self._versions.delete_many({"project_id": project_id}, session=session)
         self._drafts.delete_many({"project_id": project_id}, session=session)
         self._source_refs.delete_many({"project_id": project_id}, session=session)

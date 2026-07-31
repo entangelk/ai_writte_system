@@ -709,3 +709,18 @@
 - **D8-6b**: derived mongo 10컬렉션(memory·analysis 3·writing 3·observability·context_search·review) 파기.
 - **D8-6c**: vector/index 4백엔드 project-scoped delete + worker `PROJECT_PURGED` drain handler.
 - **D8-6d**: `POST /admin/projects/{id}/purge` endpoint + `_REQUIRE_ADMIN` + boundary matrix(ADMIN tier +1·총 +1).
+
+### 독립 검증 후속 보강 (같은 슬라이스, 검증자 실시)
+
+독립 검증(`docs/verifications/2026-07-31/d8_6a_purge_core_sot.md`, 커밋 a7b9b08) 판정은 **합격(차단 0)**이다.
+비차단 발견 1건을 보강했다.
+
+- **★ in-memory/mongo snapshot 파기 비대칭 → mongo 를 직접 project_id 스코프로 정정(반영)**: 검증자가
+  in-memory 는 `snapshot.project_id` 직접 스코프(더 넓음), mongo 는 `version→snapshot_id` 경유(더 좁음)라는
+  비대칭을 잡았다. purge 는 비가역이라 안전 방향은 더 넓게(in-memory 쪽). 확인하니 **mongo snapshot
+  doc(`_snapshot_doc`)·block doc(`_block_doc`) 모두 `project_id`를 보관**한다 → version 경유가 아니라
+  **직접 `{"project_id": project_id}` 스코프**로 정정(8컬렉션 전부). in-memory 와 대칭 + (비정상) 고아
+  snapshot 잔류 방지. 회귀 재실행: **140 passed**(in-memory 41 + mongo 76 + indexing 23) — 정상 데이터에선
+  직접/경유가 같은 결과라 통과.
+- **enqueue_project_purged 미사용(6a)**: 의도적 — endpoint(D8-6d)가 유일한 production 호출자. 메서드
+  코멘트에 "drain은 D8-6c, 호출은 D8-6d" 명시돼 있다. 6c/6d에서 실제 연결되는지가 후속 검증 포인트.
