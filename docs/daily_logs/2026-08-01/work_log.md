@@ -125,3 +125,34 @@
   + 회귀(worker drain, 어제 깨진 guard `_archive_where` PURGED `ValueError` 교체). 이 슬라이스가 끝나면
   6c의 5 백엔드(source_block + memory vec/lex + candidate vec/lex) drain 이 consistent 하게 연결됨.
 - **6d**: `POST /admin/projects/{id}/purge` endpoint + `_REQUIRE_ADMIN` + boundary matrix(ADMIN +1·총 +1).
+
+---
+
+## Hardening 보강 — 검증(2026-08-01) non-blocking #1·#2 반영
+
+검증자 독립 검증(`docs/verifications/2026-08-01/d8_6c_purge_vector_lexical.md`, 합격)의 non-blocking
+hardening #1·#2를 보강. #3(SoT)은 오너 결정 대기, #4(composite 관측성)는 설계적(6c-2 선택)이라 보강 아님.
+
+### #1 indexing 백엔드 purge 전수 가드
+- `test_purge_project_coverage.py`에 `IndexingBackendPurgeCoverageTest` 추가: memory/candidate
+  vector·lexical Protocol 4종(`MemoryVectorIndexAdapter`·`CandidateVectorIndexAdapter`·
+  `MemoryLexicalIndexAdapter`·`CandidateLexicalIndexAdapter`) + worker 가 drain 에서 부르는 composite 2종
+  (`CompositeMemoryIndexSyncAdapter`·`CompositeCandidateIndexSyncAdapter`)이 `purge_project` 노출을 `dir()`
+  단정. **D5 부분 삭제 금지의 indexing 층** — 고아 보증을 repository(18컬렉션)에서 indexing 백엔드로 확장.
+- over-strict 가드: 6 백엔드 수 고정. **source_block archive(`ArchiveIndexMutationAdapter`)는 6c-2 에서
+  purge_project 추가 시 합류**(카운트 6→7, 주석 명시).
+
+### #2 candidate 멱등 테스트 대칭
+- candidate Chroma(`ChromaCandidateAdapterTest`)·in-memory-lexical(`InMemoryLexicalAdapterTest`)에
+  `test_purge_is_idempotent_on_empty` 추가. memory(4 백엔드 모두 idempotent 단언)와 대칭 — 빈 결과 no-raise.
+
+### Verification
+- `test_purge_project_coverage.py`: **4 passed**(`PurgeProjectCoverageTest` 2 + `IndexingBackendPurgeCoverageTest` 2).
+- candidate purge: **9 passed**(+2 idempotent).
+- **전량(test-mongo ON, 98s)**: **1814 passed / 4 skipped / 1519 subtests** — 1810 대비 **+4 = #1 2·#2 2,
+  회귀 0건**. subtests·skip 동일.
+
+### Decisions
+- #1 가드는 memory(6c-1)+candidate(6c-1b) 백엔드가 모두 준비됐으므로 6c-2 전에 추가(검증자는 6c-2 종료 권장이었으나
+  두 반 끝에 추가해도 정합). source_block archive 누락은 6c-2 합류로 닫힘(주석으로 인수인계).
+- #3 SoT 버전 갱신 여부는 오너 결정(아래 브리프 대기). operation 카운트 무변은 무관 타당.

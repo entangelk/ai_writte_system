@@ -462,6 +462,14 @@ class ChromaCandidateAdapterTest(unittest.TestCase):
             ["p2"],
         )
 
+    def test_purge_is_idempotent_on_empty(self):
+        # D8-6c-1b hardening: never indexed → purge must not raise; the where
+        # still issues a delete but matches zero records (memory-leg symmetry).
+        collection = _FakeChromaCollection()
+        adapter = ChromaCandidateVectorIndexAdapter(collection)
+        adapter.purge_project(project_id="ghost")
+        self.assertEqual(collection.docs, {})
+
 
 # --------------------------------------------------------------------------- #
 # Lexical drain + adapters
@@ -567,6 +575,13 @@ class InMemoryLexicalAdapterTest(unittest.TestCase):
             [h.candidate_id for h in index.search(project_id="project-2", query="storm", limit=10)],
             ["b"],
         )
+
+    def test_purge_is_idempotent_on_empty(self):
+        # D8-6c-1b hardening: never indexed → purge must not raise (memory-leg
+        # symmetry).
+        index = InMemoryCandidateLexicalIndexAdapter()
+        index.purge_project(project_id="ghost")
+        self.assertEqual(index.search(project_id="ghost", query="storm", limit=10), ())
 
 
 class ElasticsearchCandidateAdapterTest(unittest.TestCase):
