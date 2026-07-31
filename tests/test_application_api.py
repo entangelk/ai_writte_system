@@ -3049,6 +3049,7 @@ class WritingErrorContractDeclarationTest(unittest.TestCase):
             {"401", "403", "400", "404", "409", "502", "503", "504"},
         ("/projects/{project_id}/writing/scratch", "get"): {"401", "403", "404", "503"},
         ("/projects/{project_id}/writing/scratch", "delete"): {"401", "403", "404", "503"},
+        ("/projects/{project_id}/writing/budget", "get"): {"401", "403", "404", "503"},
     }
 
     # (path, method, code) where the body is a Union of a partial envelope with
@@ -3070,7 +3071,7 @@ class WritingErrorContractDeclarationTest(unittest.TestCase):
                 ["content"]["application/json"]["schema"])
 
     def test_declared_error_statuses_match_the_lock_list(self):
-        self.assertEqual(len(self.EXPECTED), 12)
+        self.assertEqual(len(self.EXPECTED), 13)
         for (path, method), expected in self.EXPECTED.items():
             with self.subTest(path=path, method=method):
                 self.assertEqual(self._declared(path, method), expected)

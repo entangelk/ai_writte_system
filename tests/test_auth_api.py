@@ -737,8 +737,8 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         self.assertEqual(by_tier["public"], set(AuthenticationBoundaryTest.PUBLIC))
         self.assertEqual(by_tier["auth"], set(self.AUTH_ONLY))
         self.assertEqual(by_tier["admin"], self.ADMIN)
-        self.assertEqual(len(by_tier["project"]), 59)
-        self.assertEqual(len(tiers), 69)
+        self.assertEqual(len(by_tier["project"]), 60)
+        self.assertEqual(len(tiers), 70)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:

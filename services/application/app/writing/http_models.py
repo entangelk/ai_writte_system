@@ -112,6 +112,20 @@ class WritingGatePayload(BaseModel):
     evaluated_by_model: str
 
 
+class WritingContextBudgetPresetPayload(BaseModel):
+    # K-4 (프론트 글자수 표시·경고): 각 출력 프리셋별로 R-a 유도된 입력 컨텍스트 예산
+    # (토큰, 회계 단위). 프론트 카운터의 경고 기준이 된다 — 고정 상수가 아니라 창에서
+    # 유도되므로 배포(알파/베타)와 출력 프리셋을 따라간다. derive_context_budget 참조.
+    short: int
+    medium: int
+    long: int
+
+
+class WritingContextBudgetPayload(BaseModel):
+    project_id: str
+    context_budget_tokens: WritingContextBudgetPresetPayload
+
+
 class WritingLoopPayload(BaseModel):
     status: WritingLoopStatus
     revision_rounds: int

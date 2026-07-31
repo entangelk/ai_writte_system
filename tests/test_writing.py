@@ -35,6 +35,7 @@ from services.application.app.core_sot.service import (
 )
 from services.application.app.indexing.models import IndexPointer
 from services.application.app.main import (
+    DEFAULT_CONTEXT_BUDGET_TOKENS,
     WRITING_REPORT_DEFAULT_MAX_TOKENS,
     WritingGenerateRequest,
     WritingReviseRequest,
@@ -844,6 +845,77 @@ class WritingReviseGateBudgetDerivationTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(context.last_request.context_budget.max_tokens, 8192)
+
+
+class WritingContextBudgetApiTest(unittest.TestCase):
+    """K-4 (프론트 글자수 표시·경고): GET /writing/budget이 R-a 유도 예산을 per-preset으로
+    프론트에 노출한다. wiring 잠금 — 유도 **산식**은 test_report_budget_derivation.py가
+    잠그고, 여기는 **엔드포인트가 출력 프리셋마다 derive_context_budget을 거쳐 노출한다**는
+    한 가지를 건다.
+
+    양방향:
+      - 창을 알면 preset마다 줄어든다(후보 상한 1024<2048<4096). 엔드포인트가 세 preset에
+        같은 upper bound를 건네면(변이) 셋이 같아져 expected 불일치로 이 셀이 문다.
+      - 창을 모르면(model_capabilities=None) 요청값 그대로 — 유도가 정상 요청을 깎지 않는다.
+    """
+
+    def _budget(self, app, project_id):
+        return _TestClient(app).get(f"/projects/{project_id}/writing/budget")
+
+    def test_known_window_derives_each_preset(self):
+        # under-strict: 창을 아는 capabilities에서 세 preset 값이 derive 산식과 정확히
+        # 일치한다(베타 실측 창 16384 — short=8192 clamp · medium≈7273 · long≈5307).
+        caps = _WindowCapabilities(window=16384)
+        with patch.object(main_module, "_default_model_capabilities",
+                          return_value=caps):
+            app = create_app()
+        project_id = _TestClient(app).post(
+            "/projects", json={"name": "Novel"}).json()["id"]
+        response = self._budget(app, project_id)
+
+        self.assertEqual(response.status_code, 200)
+        tokens = response.json()["context_budget_tokens"]
+        self.assertEqual(set(tokens), {"short", "medium", "long"})
+
+        presets = _writing_output_length_tokens()
+
+        async def expected(upper_bound: int) -> int:
+            return await derive_context_budget(
+                requested_tokens=DEFAULT_CONTEXT_BUDGET_TOKENS,
+                capabilities=caps,
+                report_output_cap=WRITING_REPORT_DEFAULT_MAX_TOKENS,
+                report_system_template=REPORT_SYSTEM_TEMPLATE,
+                candidate_tokens_upper_bound=upper_bound,
+            )
+
+        self.assertEqual(
+            tokens["short"],
+            asyncio.run(expected(presets[OutputLength.SHORT])))
+        self.assertEqual(
+            tokens["medium"],
+            asyncio.run(expected(presets[OutputLength.MEDIUM])))
+        self.assertEqual(
+            tokens["long"],
+            asyncio.run(expected(presets[OutputLength.LONG])))
+        # 후보 상한이 클수록 예산이 줄어든다(long 출력 상한이 가장 크므로 long이 가장 작다).
+        self.assertGreaterEqual(tokens["short"], tokens["long"])
+        self.assertLess(tokens["long"], DEFAULT_CONTEXT_BUDGET_TOKENS)
+
+    def test_unknown_window_leaves_the_requested_budget(self):
+        # over-strict: 게이트웨이가 없으면(model_capabilities=None) 유도 no-op → 세 preset
+        # 모두 요청값(DEFAULT_CONTEXT_BUDGET_TOKENS) 그대로. 유도가 정상 요청을 깎지 않는다.
+        with patch.object(main_module, "_default_model_capabilities",
+                          return_value=None):
+            app = create_app()
+        project_id = _TestClient(app).post(
+            "/projects", json={"name": "Novel"}).json()["id"]
+        response = self._budget(app, project_id)
+
+        self.assertEqual(response.status_code, 200)
+        tokens = response.json()["context_budget_tokens"]
+        self.assertEqual(tokens["short"], DEFAULT_CONTEXT_BUDGET_TOKENS)
+        self.assertEqual(tokens["medium"], DEFAULT_CONTEXT_BUDGET_TOKENS)
+        self.assertEqual(tokens["long"], DEFAULT_CONTEXT_BUDGET_TOKENS)
 
 
 class WritingAcceptBudgetDerivationTest(unittest.TestCase):

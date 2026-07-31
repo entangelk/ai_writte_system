@@ -193,6 +193,7 @@ from services.application.app.writing.http_models import (
     REVISE_AND_GATE_RESPONSES,
     WritingAcceptResponse,
     WritingCandidatePayload,
+    WritingContextBudgetPayload,
     WritingGenerationJobPayload,
     WritingGatePayload,
     WritingReviseGateResponse,
@@ -4397,6 +4398,38 @@ def create_app(
                 status_code=404, detail="generation job not found"
             )
         return _writing_generation_job_payload(job)
+
+    @app.get("/projects/{project_id}/writing/budget",
+             response_model=WritingContextBudgetPayload,
+             responses=_owned(_ERRORS_404),
+             dependencies=_REQUIRE_PROJECT_OWNER)
+    async def get_writing_context_budget(project_id: str) -> dict[str, object]:
+        # K-4 (프론트 글자수 표시·경고): R-a 유도 예산을 프론트에 노출해 카운터의 경고 기준을
+        # 정확히 맞춘다 — 고정 상수(8192)는 R-a 이후 실제 예산(베타 ≈5407)과 어긋나 경고를
+        # 거짓으로 만든다. 출력 프리셋마다 derive(후보 상한 = 해당 프리셋 출력 상한).
+        try:
+            _require_project_exists(project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        presets = _writing_output_length_tokens()
+
+        async def _derive(upper_bound: int) -> int:
+            return await derive_context_budget(
+                requested_tokens=DEFAULT_CONTEXT_BUDGET_TOKENS,
+                capabilities=model_capabilities,
+                report_output_cap=report_output_cap,
+                report_system_template=REPORT_SYSTEM_TEMPLATE,
+                candidate_tokens_upper_bound=upper_bound,
+            )
+
+        return {
+            "project_id": project_id,
+            "context_budget_tokens": {
+                "short": await _derive(presets[OutputLength.SHORT]),
+                "medium": await _derive(presets[OutputLength.MEDIUM]),
+                "long": await _derive(presets[OutputLength.LONG]),
+            },
+        }
 
     @app.post("/projects/{project_id}/writing/generation-jobs/{job_id}/retry",
               response_model=WritingGenerationJobPayload,
