@@ -786,7 +786,8 @@
   = **34 passed**. 전수 가드 통과(9 repository purge_project 노출), 기존 도메인 테스트 안 깨짐.
 - 6b-2 purge 동작은 6b-1(memory·analysis)에서 검증한 **직접 `delete_many({"project_id": ...})`** 패턴과
   동일(모든 컬렉션이 project_id 보관 확인). 전수 가드가 메서드 누락을 잡고, 동작 패턴은 6b-1에서 검증.
-- 전량 suite 백그라운드 실행 중(결과는 후속 반영).
+- **전량(test-mongo ON, 119s)**: **1791 passed / 4 skipped / 1519 subtests** — 6b-1 후 1789 대비
+  **+2 = 전수 가드**(test_purge_project_coverage), **회귀 0건**.
 
 ### Decisions
 
