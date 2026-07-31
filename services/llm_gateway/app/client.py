@@ -186,6 +186,44 @@ class LlamaCppProvider:
         """
         return self._context_window
 
+    async def context_window(self) -> int | None:
+        """이 서버의 창(`n_ctx`). **여기서는 조회를 기다린다.**
+
+        생성 경로가 기다리지 않는 것(v1.7.60의 1b 계약)과 모순이 아니다 — 그 계약은
+        **생성을 창 조회 때문에 지연시키지 않는다**는 것이고, 이 호출은 창 자체를 묻는
+        호출이라 기다리지 않으면 답이 없다. 캐시가 이미 차 있으면 왕복도 없다.
+        """
+        if not self._window_probed:
+            self._window_probed = True
+            await self._probe_context_window()
+        elif self._probe_task is not None and not self._probe_task.done():
+            # 생성이 띄워 둔 조회가 아직 돌고 있으면 그것을 기다린다(중복 조회 금지).
+            try:
+                await self._probe_task
+            except Exception:  # noqa: BLE001 — 실패는 "모른다"로 떨어진다
+                return None
+        return self._context_window
+
+    async def count_tokens(self, text: str) -> int | None:
+        """이 서버의 토크나이저가 `text`를 몇 토큰으로 세는가. **추정이 아니다.**
+
+        채팅 템플릿을 적용하지 않는 raw 계수다 — 호출자가 재는 것은 프롬프트 전체가 아니라
+        **그 안에 들어갈 조각**(예: 고정 system 템플릿)이기 때문이다. 못 세면 `None`이며
+        호출자는 그때 자기 추정으로 떨어진다(계수 실패가 기능을 막지 않는다).
+        """
+        try:
+            counted = await self._transport.post_json(
+                "/tokenize", {"content": text, "add_special": False}
+            )
+            if not 200 <= counted.status_code < 300:
+                return None
+            tokens = _mapping(counted.body)["tokens"]
+            if not isinstance(tokens, list):
+                return None
+            return len(tokens)
+        except Exception:  # noqa: BLE001 — 셀 수 없으면 "모른다"
+            return None
+
     async def _count_prompt_tokens(self, payload: Mapping[str, Any]) -> int | None:
         """서버가 실제로 셀 프롬프트 토큰 수. **추정이 아니다.**
 

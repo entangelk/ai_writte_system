@@ -134,8 +134,13 @@ from services.application.app.writing.accept import (
     WritingAcceptService,
 )
 from services.application.app.writing.context_pointer import pointer_wire
+from services.application.app.writing.model_capabilities import ModelCapabilities
 from services.application.app.writing.report import (
     InvalidCandidateReport, WritingCandidateReportService, seed_report_template,
+)
+from services.application.app.writing.report import TEMPLATE as REPORT_SYSTEM_TEMPLATE
+from services.application.app.writing.report_budget import (
+    candidate_tokens_from_text, derive_context_budget,
 )
 from services.application.app.writing.service import (
     WritingError,
@@ -752,6 +757,27 @@ def _default_writing_service() -> WritingService | None:
         max_tokens=int(os.environ.get("WRITING_GENERATE_MAX_TOKENS", "1024")),
         reporter=reporter,
     )
+
+
+def _default_model_capabilities() -> ModelCapabilities | None:
+    """게이트웨이가 아는 모델 사실(창·토큰 계수)의 앱쪽 창구. 게이트웨이가 없으면 None.
+
+    **report 서비스와 같은 env(`LLM_GATEWAY_BASE_URL`)에 걸려 있는 것이 의도다** — 게이트웨이가
+    없으면 report 호출 자체가 없으므로 예산을 줄일 이유도 없다(R-a).
+    """
+    base_url = os.environ.get("LLM_GATEWAY_BASE_URL")
+    if not base_url:
+        return None
+    return ModelCapabilities(
+        base_url=base_url,
+        timeout_seconds=_env_float("LLM_GATEWAY_CAPABILITIES_TIMEOUT_SECONDS", 10.0),
+        trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False),
+    )
+
+
+def _report_output_cap() -> int:
+    """report 호출의 출력 상한. `_build_report_service`와 **같은 env를 같은 기본값으로** 읽는다."""
+    return _env_int("WRITING_REPORT_MAX_TOKENS", WRITING_REPORT_DEFAULT_MAX_TOKENS)
 
 
 def _build_report_service(provider) -> WritingCandidateReportService:
@@ -2076,6 +2102,10 @@ def build_async_generation_collaborators() -> GenerationCollaborators | None:
         # Same factory create_app uses, so the worker's records land in the same
         # store the KPI aggregation reads (증분 C, D3).
         llm_call_audit=_default_llm_call_audit_service(),
+        # R-a: 워커도 같은 유도를 쓴다. 워커에서 빠뜨리면 **제품의 주 경로만** 종전 예산으로
+        # 남는다(생성은 HTTP가 아니라 이 워커가 돌린다).
+        capabilities=_default_model_capabilities(),
+        report_output_cap=_report_output_cap(),
     )
 
 
@@ -2208,6 +2238,10 @@ def create_app(
     )
     writing = writing_service or _default_writing_service()
     writing_gate = writing_gate_service or _default_writing_gate_service()
+    # R-a (오너 2026-07-31): 창·토큰 계수는 **앱 수명 동안 한 번씩만** 묻는다. 여기서 만들어야
+    # 캐시가 요청 간에 살아남는다 — 요청마다 만들면 매 요청에 왕복이 두 번 붙는다.
+    model_capabilities = _default_model_capabilities()
+    report_output_cap = _report_output_cap()
     writing_report = writing_report_service
     if writing_report is None and os.environ.get("LLM_GATEWAY_BASE_URL"):
         writing_report = _build_report_service(GatewayGenerateProvider(
@@ -4229,7 +4263,16 @@ def create_app(
             needs=_WRITING_CONTINUE_SCENE_NEEDS,
             query=body.query or body.instruction,
             current_position=position,
-            context_budget=ContextBudget(max_tokens=body.max_tokens),
+            # R-a: 생성은 이 패키지로 끝나지 않는다 — 같은 패키지가 곧바로 self-report에
+            # 실리고 그쪽이 더 무겁다(출력 상한 6144 + 후보 산문). 후보는 아직 없지만
+            # **상한은 출력 프리셋**이므로 그 값으로 창에 맞춰 줄인다.
+            context_budget=ContextBudget(max_tokens=await derive_context_budget(
+                requested_tokens=body.max_tokens,
+                capabilities=model_capabilities,
+                report_output_cap=report_output_cap,
+                report_system_template=REPORT_SYSTEM_TEMPLATE,
+                candidate_tokens_upper_bound=output_tokens,
+            )),
         )
         # Observability seam C (증분 C): this one request makes up to three
         # provider calls under three different sites — the query planner, the
@@ -4476,7 +4519,15 @@ def create_app(
             needs=_WRITING_CONTINUE_SCENE_NEEDS,
             query=body.query or body.instruction,
             current_position=position,
-            context_budget=ContextBudget(max_tokens=body.max_tokens),
+            # R-a: 여기서는 후보가 **이미 있으므로** 상한이 아니라 그 산문을 직접 센다.
+            context_budget=ContextBudget(max_tokens=await derive_context_budget(
+                requested_tokens=body.max_tokens,
+                capabilities=model_capabilities,
+                report_output_cap=report_output_cap,
+                report_system_template=REPORT_SYSTEM_TEMPLATE,
+                candidate_tokens_upper_bound=candidate_tokens_from_text(
+                    body.candidate_text),
+            )),
         )
         candidate = WritingCandidate(
             request_id=body.request_id,

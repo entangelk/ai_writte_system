@@ -36,6 +36,10 @@ class GenerateRequest(BaseModel):
     chat_template_kwargs: dict[str, Any] | None = None
 
 
+class TokenizeRequest(BaseModel):
+    text: str
+
+
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.environ.get(name)
     if raw is None:
@@ -148,6 +152,25 @@ def create_app(
                 detail="llama upstream is not ready",
             )
         return {"status": "ready"}
+
+    # R-a (오너 2026-07-31): 앱이 **창을 몰라서** report 예산을 상수로 박을 수밖에 없던 것을
+    # 없앤다. 창과 토크나이저는 provider만 아는 사실이므로 게이트웨이가 답한다 — 앱이
+    # `LLAMA_CTX_SIZE`를 자기 env로 복제하면 머신마다 두 값이 갈린다(이 프로젝트가 반복해
+    # 데인 실패 방식). **모르면 `null`이고 앱은 그때 자기 추정으로 떨어진다.**
+    @app.get("/v1/capabilities")
+    async def capabilities() -> dict[str, object]:
+        window = None
+        probe = getattr(provider, "context_window", None)
+        if callable(probe):
+            window = await probe()
+        return {"context_window": window}
+
+    @app.post("/v1/tokenize")
+    async def tokenize(payload: TokenizeRequest) -> dict[str, object]:
+        counter = getattr(provider, "count_tokens", None)
+        if not callable(counter):
+            return {"tokens": None}
+        return {"tokens": await counter(payload.text)}
 
     @app.post("/v1/generate")
     async def generate(payload: GenerateRequest) -> dict[str, object]:

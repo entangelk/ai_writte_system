@@ -50,6 +50,10 @@ from services.application.app.observability.llm_call_scope import (
 )
 from services.application.app.writing.models import WritingRequest, WritingTaskType
 from services.application.app.writing.report import InvalidCandidateReport
+from services.application.app.writing.report import (
+    TEMPLATE as REPORT_SYSTEM_TEMPLATE,
+)
+from services.application.app.writing.report_budget import derive_context_budget
 from services.application.app.writing.scratch import WritingScratchService
 from services.application.app.writing.service import WritingError, WritingService
 
@@ -73,6 +77,14 @@ class GenerationCollaborators:
     # Optional so hand-assembled test collaborators stay valid; None simply
     # records nothing.
     llm_call_audit: LlmCallAuditService | None = None
+    # R-a (오너 2026-07-31). 워커의 생성은 곧바로 self-report로 이어지고 그쪽이 창을
+    # 구속하므로, 패키지 예산을 창에서 유도한다. **Optional인 이유는 llm_call_audit과 같다** —
+    # 손으로 조립한 테스트 collaborators가 그대로 유효해야 하고, None이면 유도 없이 요청값을
+    # 쓴다(종전 동작).
+    # 둘 중 하나라도 없으면 유도하지 않는다. 상한 기본값을 여기에 복제하지 않는 것이
+    # 의도다 — 리터럴 사본은 main과 워커가 서로 다른 상한을 믿게 만드는 가장 흔한 길이다.
+    capabilities: object | None = None
+    report_output_cap: int | None = None
 
 
 async def execute_generation_job(
@@ -92,7 +104,16 @@ async def execute_generation_job(
                 query=job.query or job.instruction,
                 current_position=CurrentPosition(
                     draft_id=job.draft_id, version_id=job.version_id),
-                context_budget=ContextBudget(max_tokens=job.max_tokens),
+                context_budget=ContextBudget(max_tokens=await derive_context_budget(
+                    requested_tokens=job.max_tokens,
+                    capabilities=(
+                        c.capabilities if c.report_output_cap is not None else None
+                    ),
+                    report_output_cap=c.report_output_cap or 0,
+                    report_system_template=REPORT_SYSTEM_TEMPLATE,
+                    # 후보는 아직 없다 — 상한은 이 job이 요청한 출력 프리셋이다.
+                    candidate_tokens_upper_bound=job.max_output_tokens,
+                )),
             )
             package = await c.context_search.build_context_package(search_request)
             candidate = await c.writing.generate(
