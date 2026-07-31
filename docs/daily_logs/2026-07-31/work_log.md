@@ -434,3 +434,77 @@
   `.env`에 `LLAMA_CTX_SIZE=32768` 후 같은 리그/엔드포인트로 관측.
 - R-a 트랙은 이것으로 적용 지점이 전부 채워졌다(generate · worker · report · **revise-and-gate 루프** ·
   **accept**). 남은 것은 알파 관측뿐이다.
+
+---
+
+## Task — 컨텍스트 예산 트랙: K-4 프론트 글자수 카운터 + 소프트 경고 (오너 결정 2026-07-31 "서버 예산 노출까지")
+
+### Goals
+
+- K-4(브리프 `plans/context-budget-korean-tokens-decisions.md:655`): 글쓰기 입력에 **글자수 카운터 + 소프트
+  경고**. 브리프 결정은 "카운터 + 소프트 경고, 원고 본문 hard maxLength 금지(정본 손상), 지시문은 hard 가능".
+  선행 C-2(환산 1.7 확정)는 끝났다.
+- **오너 결정(이 대화)**: R-a(v1.7.66)가 예산을 "창에서 유도"로 바꾼 지금 카운터 기준을 **프론트 고정 8192**로
+  할지 **서버에서 유도 예산 노출**로 할지가 포크. 오너는 **"서버 예산 노출까지"** 를 택했다 — 프론트 고정값은
+  R-a 유도값(베타 ≈5407)과 어긋나 경고를 거짓으로 만든다.
+- **범위 정렬(브리프 §6 + 코드)**: 원고 본문은 `/writing/generate` 에 **안 실린다**(서버가 `draft_id` 로 잘라
+  읽음) — §6 가 "창과 무관, 범위 밖"으로 뺐다. 그러므로 경고 대상은 **지시문**, 원고 본문은 hard 제한 없이
+  글자수 가이드만.
+
+### Completed work — ① K-4(a) 백엔드: `GET /projects/{id}/writing/budget` 노출
+
+- **새 endpoint**([`main.py`](services/application/app/main.py) `get_writing_context_budget`): R-a 유도 예산을
+  **per-preset**(short/medium/long 토큰)으로 노출. 각 preset마다 `derive_context_budget` 을 그 preset의 출력
+  상한(1024/2048/4096)을 후보 상한으로 돌린다(project-scoped 인증 `_REQUIRE_PROJECT_OWNER` +
+  `_owned(_ERRORS_404)` = {401,403,404,503}, sibling `get_writing_generation_job` 와 동형).
+- **payload 모델**([`http_models.py`](services/application/app/writing/http_models.py)): `WritingContextBudgetPresetPayload`·
+  `WritingContextBudgetPayload`.
+- **seam 은 넣었다가 뺐다**: `create_app` 에 `model_capabilities` 주입 seam 을 넣었다가, 기존 R-a 회귀
+  (`WritingReviseGateBudgetDerivationTest`)가 `patch.object(main_module, "_default_model_capabilities")` 방식을
+  이미 쓰는 걸 보고 **제거**(Simplicity + 기존 스타일 일관). endpoint 는 클로저의 `_default_model_capabilities()`
+  값을 그대로 쓴다.
+- 회귀: 선언 가드(`EXPECTED` 12→13, auth matrix project tier 59→60·전체 69→70) + endpoint 동작
+  (`WritingContextBudgetApiTest` 양방향 — 창을 알면 per-preset derive 산식과 정확히 일치, 모르면 요청값 그대로).
+
+### Completed work — ② K-4(b) 프론트: 카운터 + 소프트 경고
+
+- **`tokenEstimate.ts`**(신규): `estimateTokens(text)=ceil([...text].length/1.7)`(spread=Python `len` code point),
+  `formatInstructionCount`·`formatCharCount`. **1.7 은 서버 `context_search/service.py:558` `KOREAN_CHARS_PER_TOKEN`
+  의 미러** — 주석으로 cross-ref, drift 는 표시 경고에만 영향(K-3 가드는 real tokenization).
+- **`useWritingBudget.ts`**(신규): mount 1회 `getWritingContextBudget` + 모듈 캐시(탭 전환 재패치 방지).
+  **실패(transport/5xx/403)하면 null** — 예산을 모르면 경고 안 한다(거짓 경고 방지).
+- **`WritingPanel.tsx`**: 지시문 아래 카운터(`{X}자 (≈{Y} 토큰)`), 해당 preset 예산 대비 **90%** 소프트 경고
+  (`writing-counter-warn`). `maxLength` 없음.
+- **`DraftEditor.tsx`**: `.editor-meta` 에 원고 글자수 가이드만(`editor-char-count`). 토큰 추정·경고·budget fetch 없음(§6).
+- 회귀 7: `tokenEstimate.test.ts`(4) + `WritingPanel` 카운터(렌더 under-strict · 90% 경고 전환 하중받침 · preset over-strict, 3).
+
+### Issues found — 기존 fetch 시퀀스 테스트가 budget GET 에 밀렸다 (해결)
+
+- `useWritingBudget` 이 mount 시 budget GET 을 보내, 기존 `mockResolvedValueOnce` 시퀀스(WritingPanel)와
+  `mockFetch`/`stubFetch`(App·DraftEditor — **DraftEditor 가 WritingPanel 을 렌더**)의 첫 응답을 소비해 9 테스트가
+  깨졌다. **해결은 파일마다 기존 패턴에 맞춰**: WritingPanel.test.tsx 는 `seedWritingBudgetCache`(fetch 스킵),
+  App/DraftEditor.test.tsx 는 기존 `/writing/scratch` URL 가로채기와 같은 패턴으로 `/writing/budget` 자동 응답.
+
+### Decisions
+
+- **per-preset 맵**(단일 보수값 아님): preset마다 derive, 비용 미미(window probe 캐시로 1왕복). 단일값보다 정확하고
+  short/medium 의 거짓 양성을 없앤다.
+- **90% 단일 임계**(two-tier 아님): "잘게 쪼개기" 원칙.
+- **1.7 하드코드 + cross-ref 주석**(`chars_per_token` 노출 아님): drift 는 표시 경고의 미세 오차뿐.
+- **지시문 hard maxLength 이 슬라이스 제외**: 소프트 경고가 K-4 기본값.
+- **원고 본문은 §6 정신으로 글자수 가이드만**.
+
+### Verification
+
+- 백엔드: endpoint 동작 양방향(창 알면 per-preset derive 일치 · 모르면 요청값) + **뮤테이션 under-strict**
+  (세 preset에 같은 upper bound → expected 불일치로 셀이 물음, 역방향 Edit 원복). **전량 1779 passed /
+  1 skipped / 1519 subtests**(713s, test-mongo ON) — 회귀 0.
+- 프론트: **227 passed / 15 files**(tokenEstimate 4 + WritingPanel 카운터 3 신규). build 진입 청크
+  405.89 kB(+1 kB, lazy 경계 유지).
+
+### Next steps
+
+- **DraftEditor maxlength 없음 assert**(follow-up 부채): K-4 의 정본 손상 방지 핵심(원고 본문 hard maxLength 금지)이
+  코드상 확보돼 있으나(textarea 에 `maxLength` 없음) **전용 회귀 assert 는 이 슬라이스에서 생략** — tokenEstimate
+  단위 + 기존 DraftEditor 렌더 통과로 간접 커버. 미래 회귀(누가 maxLength 추가)를 잡으려면 별도 assert 권장.
+- 컨텍스트 예산 트랙: 이제 K-4(프론트 표시)까지 닫혔다. 남은 것은 **알파 R-c 관측 1회**(창 32768).
