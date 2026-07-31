@@ -208,6 +208,9 @@ hardening #1·#2를 보강. #3(SoT)은 오너 결정 대기, #4(composite 관측
 - 깨진 guard `_archive_where` 는 run_once 분기로 PROJECT_PURGED 를 차단해 발화 안 함(`_archive_where`
   자체는 PROJECT/DRAFT_ARCHIVED 만 처리, 변경 없음).
 - endpoint 없음 → operation 카운트 무변(6d 에서 ADMIN tier +1·총 +1).
+- **terminal partial-purge(all-or-retry 내재, 검증 non-blocking #2)**: 한 sink 영구 장애로 FAILED
+  terminal 시 그 전 파기 sink는 파기된 채 잔류 — 잔류 vector 는 core_sot 파기 후 query 가 도달 못 하는
+  ghost(무해) + FAILED 가시. local 안정 환경에서 가능성 낮음(멱등 재파기로 eventual consistency).
 
 ### Next steps
 
