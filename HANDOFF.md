@@ -4,7 +4,7 @@
 > 완료 서술은 여기 쓰지 않는다 — `docs/daily_logs/`(상세) · `docs/system-contract-sot.md` 변경이력 · `CHANGELOG.md`(마일스톤) · `docs/verifications/`(독립 검증)에 이미 있다.
 > 편집 규칙은 `CLAUDE.md`·`AGENTS.md`의 "HANDOFF.md" 절에 있다. **길이 상한은 없다** — 대신 **~200줄을 넘으면 자가 검수**하고(그 뒤로는 ~100줄마다) 결과를 아래 한 줄로 남긴다. 길어야 할 이유가 있으면 길어도 된다. 안 보는 것이 문제다.
 >
-> 마지막 자가 검수: 2026-07-31 · 216줄 (같은 날 **K-4(프론트 글자수 카운터+소프트 경고, v1.7.67, 오너 결정 "서버 예산 노출까지")** 추가 — 백엔드 `GET /writing/budget` per-preset 노출 + 프론트 카운터. 하루에 네 슬라이스가 들어와 **매번 교체로** 처리했다: 측정 리그 → 독립 검증 보강 → **R-a 구현** → **R-a 루프+accept 확장(v1.7.66)**. Next Tasks 2번과 Owner Decisions의 R-a 항목은 그때마다 통째로 다시 썼고(측정 대기 → 결정 대기 → 구현+남은 것 → **적용 지점 5곳 전부 완료, 남은 건 알파 R-c 관측 1회**). 결정 이력은 `daily_logs/2026-07-31/`와 SoT v1.7.66에 있다. 베타 관측치·회귀 기준선도 오늘 값이다. 완료 서술은 여기 쌓지 않았다. 다음 검수 트리거는 300줄)
+> 마지막 자가 검수: 2026-07-31 · 222줄 (같은 날 **K-4(프론트 글자수 카운터+소프트 경고, v1.7.67, 오너 결정 "서버 예산 노출까지")** 추가 — 백엔드 `GET /writing/budget` per-preset 노출 + 프론트 카운터. 하루에 네 슬라이스가 들어와 **매번 교체로** 처리했다: 측정 리그 → 독립 검증 보강 → **R-a 구현** → **R-a 루프+accept 확장(v1.7.66)**. Next Tasks 2번과 Owner Decisions의 R-a 항목은 그때마다 통째로 다시 썼고(측정 대기 → 결정 대기 → 구현+남은 것 → **적용 지점 5곳 전부 완료, 남은 건 알파 R-c 관측 1회**). 결정 이력은 `daily_logs/2026-07-31/`와 SoT v1.7.66에 있다. 베타 관측치·회귀 기준선도 오늘 값이다. 완료 서술은 여기 쌓지 않았다. 다음 검수 트리거는 300줄)
 
 ## 머신 구성 (알파 · 베타 · 감마)
 
@@ -112,6 +112,12 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 - **쿠키 인증 테스트는 `TestClient(app, base_url="https://testserver")`로 만든다.** 세션 쿠키는 `Secure`가 기본 on이라 http 클라이언트는 쿠키를 **조용히 버린다** — 세션 테스트가 엉뚱한 이유로 실패한다(실제로 처음 4건이 그렇게 실패했다).
 - **in-stack llama(`-hf`)가 캐시가 멀쩡한데도 모델을 다시 받는 이유가 잡혔다**(2026-07-28 알파 실측): `-hf …:Q4_0`은 리비전을 고정하지 않고 `main`을 따라가는데, HF 캐시의 `refs/main`이 `29d0977…`로 이동한 반면 디스크 snapshot은 `f6e7774…`·`2b318d6…`뿐이다. 즉 **"정체"가 아니라 새 리비전을 받는 중**이며, 기다리면 언젠가 뜨지만 6.5 GB를 다시 받는다. 회피는 캐시 snapshot을 `-m`으로 직접 지정하는 것: `-m /models/models--google--gemma-4-12B-it-qat-q4_0-gguf/snapshots/2b318d6ebebf093f50ca4376e858325f10703358/gemma-4-12b-it-qat-q4_0.gguf`. 볼륨에 stale `.downloadInProgress` 약 4.9 GB가 남아 있다(11.8 GB 중). **repo는 아직 안 고쳤다** — 리비전 고정 여부는 추적 부채.
 - live 작업 시 외부 llama(`192.168.1.22:9080`)가 죽어 있으면 in-stack llama로 돌린다.
+- **[프론트 회귀 플레이크, 2026-07-31 관측]** `DraftEditor.test.tsx` 전체 스위트가 희귀하게(~9회 중 1회)
+  "1 failed | 40 passed"로 떨어진다 — 독립 검증 중 관측, 희귀해 테스트명 못 잡았다. 유력 원인 (a) 기존 타이밍
+  의존 테스트의 사전 플레이크, 차선 (b) K-4(b) `useWritingBudget` mount-fetch가 DraftEditor 렌더 경로에 새로
+  들어간 비동기-온-마운트와의 레이스. **핵심은 프론트 변경 후 이 플레이크가 떨어지면 내 변경 탓이 아닐 수 있다는
+  것** — 재현 시 특성화하고 (b)가 의심되면 `useWritingBudget` mount-fetch부터 본다. 상세는
+  `docs/verifications/2026-07-31/k4_front_counter_budget.md`.
 
 ## Active Decisions (앞으로의 작업을 구속하는 것)
 

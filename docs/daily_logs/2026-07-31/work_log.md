@@ -446,7 +446,7 @@
   선행 C-2(환산 1.7 확정)는 끝났다.
 - **오너 결정(이 대화)**: R-a(v1.7.66)가 예산을 "창에서 유도"로 바꾼 지금 카운터 기준을 **프론트 고정 8192**로
   할지 **서버에서 유도 예산 노출**로 할지가 포크. 오너는 **"서버 예산 노출까지"** 를 택했다 — 프론트 고정값은
-  R-a 유도값(베타 ≈5407)과 어긋나 경고를 거짓으로 만든다.
+  R-a 유도값(베타, long preset ≈5,307 토큰)과 어긋나 경고를 거짓으로 만든다.
 - **범위 정렬(브리프 §6 + 코드)**: 원고 본문은 `/writing/generate` 에 **안 실린다**(서버가 `draft_id` 로 잘라
   읽음) — §6 가 "창과 무관, 범위 밖"으로 뺐다. 그러므로 경고 대상은 **지시문**, 원고 본문은 hard 제한 없이
   글자수 가이드만.
@@ -476,7 +476,7 @@
 - **`WritingPanel.tsx`**: 지시문 아래 카운터(`{X}자 (≈{Y} 토큰)`), 해당 preset 예산 대비 **90%** 소프트 경고
   (`writing-counter-warn`). `maxLength` 없음.
 - **`DraftEditor.tsx`**: `.editor-meta` 에 원고 글자수 가이드만(`editor-char-count`). 토큰 추정·경고·budget fetch 없음(§6).
-- 회귀 7: `tokenEstimate.test.ts`(4) + `WritingPanel` 카운터(렌더 under-strict · 90% 경고 전환 하중받침 · preset over-strict, 3).
+- 회귀 8: `tokenEstimate.test.ts`(5) + `WritingPanel` 카운터(렌더 under-strict · 90% 경고 전환 하중받침 · preset over-strict, 3).
 
 ### Issues found — 기존 fetch 시퀀스 테스트가 budget GET 에 밀렸다 (해결)
 
@@ -499,12 +499,17 @@
 - 백엔드: endpoint 동작 양방향(창 알면 per-preset derive 일치 · 모르면 요청값) + **뮤테이션 under-strict**
   (세 preset에 같은 upper bound → expected 불일치로 셀이 물음, 역방향 Edit 원복). **전량 1779 passed /
   1 skipped / 1519 subtests**(713s, test-mongo ON) — 회귀 0.
-- 프론트: **227 passed / 15 files**(tokenEstimate 4 + WritingPanel 카운터 3 신규). build 진입 청크
+- 프론트: **227 passed / 15 files**(tokenEstimate 5 + WritingPanel 카운터 3 신규). build 진입 청크
   405.89 kB(+1 kB, lazy 경계 유지).
+- **독립 검증 합격**(`docs/verifications/2026-07-31/k4_front_counter_budget.md`, 커밋 22736b9): 변이 5건이
+  전부 가드 재실패(계약을 진짜로 잠금). B1(원고 본문 `maxLength` 금지 빈 셀)을 assert 1줄로 폐쇄. H1(정상
+  스케일에서 경고 사실상 발화 안 함)은 오너 확인 "안전망 의도, 현행 유지"로 종결.
 
 ### Next steps
 
-- **DraftEditor maxlength 없음 assert**(follow-up 부채): K-4 의 정본 손상 방지 핵심(원고 본문 hard maxLength 금지)이
-  코드상 확보돼 있으나(textarea 에 `maxLength` 없음) **전용 회귀 assert 는 이 슬라이스에서 생략** — tokenEstimate
-  단위 + 기존 DraftEditor 렌더 통과로 간접 커버. 미래 회귀(누가 maxLength 추가)를 잡으려면 별도 assert 권장.
+- **DraftEditor maxLength 없음 assert — 폐쇄**(독립 검증 22736b9): 원고 본문 `maxLength` 금지(정본 손상 방지)
+  의 빈 셀을 `DraftEditor.test.tsx` assert 1줄 + 변이(`maxLength` 넣으면 재실패)로 채웠다.
+- **DraftEditor 스위트 희귀 플레이크**(정직 보고, 재현 필요): 독립 검증 중 ~9회 중 1회 "1 failed | 40 passed"
+  관측. 희귀해 테스트명 못 잡음. 유력 원인 (a) 기존 타이밍 의존 테스트의 사전 플레이크, 차선 (b) K-4(b)
+  `useWritingBudget` mount-fetch 레이스. **재현 시 특성화 권장** — (b)면 mount-fetch 타이밍 조사.
 - 컨텍스트 예산 트랙: 이제 K-4(프론트 표시)까지 닫혔다. 남은 것은 **알파 R-c 관측 1회**(창 32768).
