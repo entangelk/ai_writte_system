@@ -252,6 +252,13 @@ class ChromaArchiveIndexMutationAdapter:
             )
         self._collection.delete(where=where)
 
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6c: hard delete every source_block record of one project. Unlike
+        # mark_archived (which raises DerivedIndexRecordNotFound on an empty match
+        # for the soft single-sink archive path), purge is idempotent — an empty
+        # match deletes nothing and raises nothing (irreversible purge).
+        self._collection.delete(where={"project_id": project_id})
+
 
 def memory_record_to_chroma(
     record: MemoryIndexRecord,

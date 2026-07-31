@@ -41,6 +41,9 @@ from services.application.app.indexing.memory_index import (
 from services.application.app.indexing.memory_lexical_index import (
     MemoryLexicalIndexAdapter,
 )
+# D8-6c-2: source_block archive adapter joined the purge roster (6c-2 added
+# purge_project to ArchiveIndexMutationAdapter).
+from services.application.app.indexing.service import ArchiveIndexMutationAdapter
 
 # (repository 이름, 계약 클래스). Mongo 단일 구현체도 같은 이름의 컬렉션을 쓰지만,
 # 파기 계약은 Protocol 에서 선언되므로 계약 클래스로 단정한다.
@@ -84,13 +87,14 @@ class IndexingBackendPurgeCoverageTest(unittest.TestCase):
     정본은 지워졌는데 derived 인덱스가 남는 **vector/index 잔류 고아**가 생긴다.
     6c-1(memory)·6c-1b(candidate) 가 이 백엔드들에 purge_project 를 추가했다.
 
-    범위: memory/candidate vector·lexical Protocol 4종 + worker 가 drain 에서 부르는
-    composite 2종. **source_block archive(`ArchiveIndexMutationAdapter`)는 6c-2 에서
-    purge_project 를 추가하면 이 목록에 합류**(현재는 mark_archived soft 경로만) —
-    합류 시 `_INDEXING_PURGE_CONTRACTS` 와 아래 카운트(6→7)를 함께 올린다.
+    범위: source_block archive 1종(6c-2 합류) + memory/candidate vector·lexical Protocol
+    4종 + worker 가 drain 에서 부르는 composite 2종 = 7. 새 indexing 백엔드가 project-scoped
+    파기를 추가하면 이 목록과 아래 카운트를 함께 올린다(빠지면 _drain_purge 가 고아를 남긴다).
     """
 
     _INDEXING_PURGE_CONTRACTS = [
+        # D8-6c-2: source_block archive adapter joined once it gained purge_project.
+        ("ArchiveIndexMutationAdapter", ArchiveIndexMutationAdapter),
         ("MemoryVectorIndexAdapter", MemoryVectorIndexAdapter),
         ("CandidateVectorIndexAdapter", CandidateVectorIndexAdapter),
         ("MemoryLexicalIndexAdapter", MemoryLexicalIndexAdapter),
@@ -113,10 +117,10 @@ class IndexingBackendPurgeCoverageTest(unittest.TestCase):
         )
 
     def test_indexing_purge_roster_is_complete(self):
-        # over-strict: 6(4 Protocol + 2 composite) 라는 수 자체를 고정. source_block
-        # archive 가 6c-2 에서 purge_project 를 추가하면 이 수를 7 로 올린다(미추가면
-        # _drain_purge 가 source_block 백엔드를 못 지운다).
-        self.assertEqual(len(self._INDEXING_PURGE_CONTRACTS), 6)
+        # over-strict: 7(archive 1 + vector/lexical Protocol 4 + composite 2) 이라는
+        # 수 자체를 고정. 새 indexing 백엔드가 project-scoped 파기를 추가하면 이 목록과
+        # 함께 올린다(빠지면 _drain_purge 가 그 백엔드를 못 지운다).
+        self.assertEqual(len(self._INDEXING_PURGE_CONTRACTS), 7)
 
 
 if __name__ == "__main__":

@@ -71,6 +71,11 @@ class VectorIndexAdapter(Protocol):
 class ArchiveIndexMutationAdapter(Protocol):
     def mark_archived(self, entry: IndexSyncOutboxEntry) -> None: ...
 
+    # D8-6c: whole-project hard delete of the source_block derived index. Purge is
+    # irreversible+idempotent, so an empty match is success, not a not-found
+    # (contrast mark_archived's soft DerivedIndexRecordNotFound).
+    def purge_project(self, *, project_id: str) -> None: ...
+
 
 class MemoryIndexMutationAdapter(Protocol):
     # b-6 증분2: the composite drains every configured sink and reports a
@@ -80,11 +85,18 @@ class MemoryIndexMutationAdapter(Protocol):
         self, entry: IndexSyncOutboxEntry, *, skip: frozenset[str]
     ) -> tuple[SinkOutcome, ...]: ...
 
+    # D8-6c: whole-project purge (worker PROJECT_PURGED drain). The composite
+    # fans out to every configured sink (vector + lexical); idempotent.
+    def purge_project(self, *, project_id: str) -> None: ...
+
 
 class CandidateIndexMutationAdapter(Protocol):
     def drain(
         self, entry: IndexSyncOutboxEntry, *, skip: frozenset[str]
     ) -> tuple[SinkOutcome, ...]: ...
+
+    # D8-6c: whole-project purge (worker PROJECT_PURGED drain). Mirror of memory.
+    def purge_project(self, *, project_id: str) -> None: ...
 
 
 class IndexSyncRepository(Protocol):
@@ -449,9 +461,14 @@ class DerivedIndexRecordNotFound(Exception):
 class RecordingArchiveIndexMutationAdapter:
     def __init__(self) -> None:
         self.marked_archived: list[IndexSyncOutboxEntry] = []
+        # D8-6c: purge drain recording (worker PROJECT_PURGED path).
+        self.purged_projects: list[str] = []
 
     def mark_archived(self, entry: IndexSyncOutboxEntry) -> None:
         self.marked_archived.append(entry)
+
+    def purge_project(self, *, project_id: str) -> None:
+        self.purged_projects.append(project_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -504,6 +521,12 @@ class IndexSyncWorker:
             claimed += 1
             if entry.event in _PER_SINK_EVENTS:
                 disposition = self._drain_sinks(entry, clock)
+            elif entry.event is IndexSyncEvent.PROJECT_PURGED:
+                # D8-6c: route the purge entry to the whole-event hard-delete path
+                # so it never reaches _drain_archive → _archive_where, which rejects
+                # PROJECT_PURGED with ValueError (only PROJECT/DRAFT_ARCHIVED map to
+                # a where clause).
+                disposition = self._drain_purge(entry, clock)
             else:
                 disposition = self._drain_archive(entry, clock)
             if disposition is _Disposition.SUCCEEDED:
@@ -532,6 +555,36 @@ class IndexSyncWorker:
                 entry, started_at=clock, finished_at=clock
             )
             return _Disposition.SUCCEEDED
+        except Exception as exc:
+            will_requeue = entry.attempt_count + 1 < entry.max_attempts
+            self._repo.record_outbox_failure(
+                entry,
+                error=_backend_error(exc),
+                started_at=clock,
+                finished_at=clock,
+            )
+            return _Disposition.REQUEUED if will_requeue else _Disposition.FAILED
+        self._repo.record_outbox_success(entry, started_at=clock, finished_at=clock)
+        return _Disposition.SUCCEEDED
+
+    def _drain_purge(
+        self, entry: IndexSyncOutboxEntry, clock: datetime
+    ) -> "_Disposition":
+        # D8-6c: PROJECT_PURGED whole-event all-or-retry. One purge entry fans out
+        # to every derived index — source_block archive + memory composite (vector
+        # + lexical) + candidate composite (vector + lexical). Unlike the per-sink
+        # drain (SinkOutcome isolation), purge is all-or-retry: a failing sink
+        # requeues the whole entry, because the per-sink target keys ("vector"/
+        # "lexical") collide across the memory/candidate composites under one entry
+        # and purge is idempotent (re-purge is harmless). Each sink owns its own
+        # idempotent purge_project, so an empty match is success, not a not-found.
+        project_id = entry.project_id
+        try:
+            self._archive_adapter.purge_project(project_id=project_id)
+            if self._memory_adapter is not None:
+                self._memory_adapter.purge_project(project_id=project_id)
+            if self._candidate_adapter is not None:
+                self._candidate_adapter.purge_project(project_id=project_id)
         except Exception as exc:
             will_requeue = entry.attempt_count + 1 < entry.max_attempts
             self._repo.record_outbox_failure(

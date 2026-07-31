@@ -524,6 +524,61 @@ def _fixture(*, project_name="Novel"):
         },
     )
 
+    def test_purge_drain_calls_archive_memory_and_candidate(self):
+        # D8-6c-2: a PROJECT_PURGED entry fans the hard-delete out to the archive
+        # (source_block) + memory + candidate composites, whole-event, then succeeds.
+        repo = InMemoryIndexSyncRepository()
+        outbox = IndexSyncOutboxService(repo)
+        outbox.enqueue_project_purged(project_id="project-1")
+        archive = RecordingArchiveIndexMutationAdapter()
+        memory = _PurgeRecordingSink()
+        candidate = _PurgeRecordingSink()
+        worker = IndexSyncWorker(
+            repository=repo,
+            archive_adapter=archive,
+            memory_adapter=memory,
+            candidate_adapter=candidate,
+        )
+        summary = worker.run_once(limit=1, now=_utc(2026, 7, 3, 12, 0, 0))
+        self.assertEqual(summary.entries_succeeded, 1)
+        self.assertEqual(archive.purged_projects, ["project-1"])
+        self.assertEqual(memory.purged, ["project-1"])
+        self.assertEqual(candidate.purged, ["project-1"])
+        # terminal SUCCESS removes the outbox entry; a clean log records it.
+        self.assertEqual(repo.outbox_entries, {})
+        self.assertEqual(repo.logs[0].status, IndexSyncStatus.SUCCESS)
+
+    def test_purge_drain_requeues_on_any_backend_failure(self):
+        # D8-6c-2: whole-event all-or-retry — one failing sink requeues the whole
+        # entry. Per-sink SinkOutcome isolation is for the MEMORY/CANDIDATE_UPSERTED
+        # drain, not the irreversible purge (re-purge is harmless/idempotent).
+        repo = InMemoryIndexSyncRepository()
+        outbox = IndexSyncOutboxService(repo)
+        outbox.enqueue_project_purged(project_id="project-1")
+        worker = IndexSyncWorker(
+            repository=repo,
+            archive_adapter=RecordingArchiveIndexMutationAdapter(),
+            memory_adapter=_PurgeRecordingSink(),
+            candidate_adapter=_PurgeRecordingSink(fail=True),  # candidate down
+        )
+        summary = worker.run_once(limit=1, now=_utc(2026, 7, 3, 12, 0, 0))
+        self.assertEqual(summary.entries_succeeded, 0)
+        self.assertEqual(summary.entries_requeued, 1)
+        entry = next(iter(repo.outbox_entries.values()))
+        self.assertEqual(entry.last_error.error_type, IndexSyncErrorType.BACKEND_ERROR)
+
+    def test_purge_drain_runs_without_memory_or_candidate_adapter(self):
+        # D8-6c-2: archive-only purge when memory/candidate adapters are not
+        # configured (mirrors the no-Chroma/no-ES worker bootstrap).
+        repo = InMemoryIndexSyncRepository()
+        outbox = IndexSyncOutboxService(repo)
+        outbox.enqueue_project_purged(project_id="project-1")
+        archive = RecordingArchiveIndexMutationAdapter()
+        worker = IndexSyncWorker(repository=repo, archive_adapter=archive)
+        summary = worker.run_once(limit=1, now=_utc(2026, 7, 3, 12, 0, 0))
+        self.assertEqual(summary.entries_succeeded, 1)
+        self.assertEqual(archive.purged_projects, ["project-1"])
+
 
 class _FailingVectorIndexAdapter:
     def upsert_records(self, records):
@@ -542,6 +597,21 @@ class _NotFoundArchiveAdapter:
 
 def _utc(year, month, day, hour, minute, second):
     return datetime(year, month, day, hour, minute, second, tzinfo=timezone.utc)
+
+
+class _PurgeRecordingSink:
+    """D8-6c-2: records purge_project calls; satisfies the worker's memory/candidate
+    adapter seam for the PROJECT_PURGED drain (``_drain_purge`` only calls
+    ``purge_project``, never ``drain``)."""
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.purged: list[str] = []
+        self.fail = fail
+
+    def purge_project(self, *, project_id: str) -> None:
+        if self.fail:
+            raise RuntimeError("purge backend down")
+        self.purged.append(project_id)
 
 
 if __name__ == "__main__":
