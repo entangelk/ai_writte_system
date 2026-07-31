@@ -79,6 +79,11 @@ class MemoryVectorIndexAdapter(Protocol):
         limit: int,
     ) -> tuple[MemoryIndexRecord, ...]: ...
 
+    # D8-6c: hard, whole-project delete of the memory_vectors collection. Purge is
+    # irreversible+idempotent, so an already-empty result is NOT an error (unlike
+    # mark_archived's soft DerivedIndexRecordNotFound — the intent differs).
+    def purge_project(self, *, project_id: str) -> None: ...
+
 
 class InMemoryMemoryVectorIndexAdapter:
     """No-infra vector backend for unit tests and the deterministic fallback."""
@@ -136,6 +141,15 @@ class InMemoryMemoryVectorIndexAdapter:
                 key=lambda record: record.id,
             )
         )
+
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6c: drop every record of one project. Idempotent — a project that was
+        # never indexed (or already purged) simply leaves nothing to remove.
+        self.records = {
+            record_id: record
+            for record_id, record in self.records.items()
+            if record.project_id != project_id
+        }
 
 
 def build_memory_index_record(
@@ -200,6 +214,13 @@ class MemoryIndexSyncAdapter:
                 project_id=project_id, memory_id=memory.supersedes
             )
 
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6c: whole-project purge of the vector leg. Unlike index_memory, purge
+        # is idempotent (an already-empty backend is success, not a not-found), so
+        # there is no load/supersede branching here — the backend drops everything
+        # for the project unconditionally.
+        self._vector_index.purge_project(project_id=project_id)
+
 
 class CompositeMemoryIndexSyncAdapter:
     """Fan a MEMORY_UPSERTED drain out to every configured memory sink (vector +
@@ -241,3 +262,14 @@ class CompositeMemoryIndexSyncAdapter:
                     SinkOutcome(target=target, backend=backend, ok=True, error=None)
                 )
         return tuple(outcomes)
+
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6c: fan a whole-project purge out to every configured memory sink
+        # (vector + lexical). Unlike ``drain`` this does NOT isolate per sink — a
+        # failure propagates so the worker retries the whole PROJECT_PURGED entry
+        # (purge is all-or-retry: per-sink target keys would collide across the
+        # memory/candidate composites under one entry, so there is no per-sink
+        # bookkeeping to keep here). Each sink adapter owns its own idempotent
+        # ``purge_project``.
+        for _target, _backend, adapter in self._sinks:
+            adapter.purge_project(project_id=project_id)

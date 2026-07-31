@@ -361,6 +361,13 @@ class ChromaMemoryVectorIndexAdapter:
         )
         return _memory_records_from_query(result)
 
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6c: drop every memory vector of one project. ChromaCollection.delete
+        # is idempotent — an empty match deletes nothing and raises nothing, so no
+        # not-found handling is needed (contrast mark_archived's soft raise, which
+        # serves the single-sink archive path, not the irreversible purge).
+        self._collection.delete(where={"project_id": project_id})
+
 
 def _memory_records_from_get(result: dict[str, Any]) -> list[MemoryIndexRecord]:
     ids = result.get("ids")

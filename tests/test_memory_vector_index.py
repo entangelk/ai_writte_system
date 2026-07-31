@@ -30,6 +30,7 @@ from services.application.app.indexing.models import (
     IndexRecordKind,
     IndexSyncErrorType,
     IndexSyncEvent,
+    MemoryIndexRecord,
 )
 from services.application.app.indexing.service import (
     DeterministicFakeEmbeddingProvider,
@@ -461,6 +462,104 @@ class WorkerIndexTest(unittest.TestCase):
         self.assertEqual(
             {r.text for r in records}, {"storm", "calm"}
         )
+
+
+class MemoryVectorPurgeTest(unittest.TestCase):
+    """D8-6c-1: whole-project purge of the memory vector leg.
+
+    Two-directional: purge must drop ONLY the target project (over-strict: an
+    adjacent project survives) and be idempotent on an already-empty backend
+    (under-strict: an empty result is NOT an error — purge is irreversible,
+    unlike mark_archived's soft DerivedIndexRecordNotFound). The composite sink
+    propagates a failure so the worker retries the whole entry (6c-2)."""
+
+    def _record(self, memory_id, *, project_id="project-1"):
+        return MemoryIndexRecord(
+            id=memory_id,
+            kind=IndexRecordKind.MEMORY,
+            project_id=project_id,
+            memory_id=memory_id,
+            memory_type="character_observation",
+            version=1,
+            status="canonical",
+            text="x",
+            vector=(0.1, 0.2),
+        )
+
+    def test_inmemory_purge_drops_only_target_project(self):
+        index = InMemoryMemoryVectorIndexAdapter()
+        index.upsert_memory_records(
+            (
+                self._record("m1"),
+                self._record("m2"),
+                self._record("p2", project_id="project-2"),
+            )
+        )
+        index.purge_project(project_id="project-1")
+        self.assertEqual(index.list_memory_records(project_id="project-1"), ())
+        self.assertEqual(
+            [r.memory_id for r in index.list_memory_records(project_id="project-2")],
+            ["p2"],
+        )
+
+    def test_inmemory_purge_is_idempotent_on_empty(self):
+        index = InMemoryMemoryVectorIndexAdapter()
+        # never indexed → purge must not raise (empty result is success).
+        index.purge_project(project_id="ghost")
+        self.assertEqual(index.list_memory_records(project_id="ghost"), ())
+
+    def test_sync_adapter_purge_delegates_to_vector_backend(self):
+        index = InMemoryMemoryVectorIndexAdapter()
+        index.upsert_memory_records(
+            (self._record("m1"), self._record("p2", project_id="project-2"))
+        )
+        adapter = MemoryIndexSyncAdapter(
+            memory_service=MemoryService(InMemoryMemoryRepository()),
+            embeddings=DeterministicFakeEmbeddingProvider(),
+            vector_index=index,
+        )
+        adapter.purge_project(project_id="project-1")
+        self.assertEqual(index.list_memory_records(project_id="project-1"), ())
+        self.assertEqual(
+            [r.memory_id for r in index.list_memory_records(project_id="project-2")],
+            ["p2"],
+        )
+
+    def test_composite_purge_fans_out_to_vector_sink(self):
+        index = InMemoryMemoryVectorIndexAdapter()
+        index.upsert_memory_records(
+            (self._record("m1"), self._record("p2", project_id="project-2"))
+        )
+        composite = _memory_composite(
+            MemoryIndexSyncAdapter(
+                memory_service=MemoryService(InMemoryMemoryRepository()),
+                embeddings=DeterministicFakeEmbeddingProvider(),
+                vector_index=index,
+            )
+        )
+        composite.purge_project(project_id="project-1")
+        self.assertEqual(index.list_memory_records(project_id="project-1"), ())
+        self.assertEqual(
+            [r.memory_id for r in index.list_memory_records(project_id="project-2")],
+            ["p2"],
+        )
+
+    def test_composite_purge_propagates_sink_failure(self):
+        # whole-event all-or-retry: a failing sink must raise so the worker
+        # retries the whole PROJECT_PURGED entry (6c-2), not swallow it per-sink.
+        class _BoomVector(InMemoryMemoryVectorIndexAdapter):
+            def purge_project(self, *, project_id: str) -> None:
+                raise RuntimeError("backend down")
+
+        composite = _memory_composite(
+            MemoryIndexSyncAdapter(
+                memory_service=MemoryService(InMemoryMemoryRepository()),
+                embeddings=DeterministicFakeEmbeddingProvider(),
+                vector_index=_BoomVector(),
+            )
+        )
+        with self.assertRaises(RuntimeError):
+            composite.purge_project(project_id="project-1")
 
 
 if __name__ == "__main__":

@@ -111,6 +111,30 @@ class InMemoryLexicalAdapterTest(unittest.TestCase):
         self.assertEqual(ids, ["both", "one"])
         self.assertGreater(hits[0].score, hits[1].score)
 
+    def test_purge_drops_only_target_project(self):
+        # D8-6c-1: whole-project delete of the memory lexical leg. Two-directional:
+        # the target project is emptied and an adjacent project survives.
+        index = _lexical_index(
+            _memory("a", text="storm"),
+            _memory("b", text="calm"),
+            _memory("other", text="storm", project_id="project-2"),
+        )
+        index.purge_project(project_id="project-1")
+        self.assertEqual(index.search(project_id="project-1", query="storm", limit=10), ())
+        self.assertEqual(
+            [h.memory_id for h in index.search(project_id="project-2", query="storm", limit=10)],
+            ["other"],
+        )
+
+    def test_purge_is_idempotent_on_empty(self):
+        index = _lexical_index(_memory("a", text="storm"))
+        # never indexed → purge must not raise and leave project-1 intact.
+        index.purge_project(project_id="ghost")
+        self.assertEqual(
+            [h.memory_id for h in index.search(project_id="project-1", query="storm", limit=10)],
+            ["a"],
+        )
+
 
 class ElasticsearchAdapterTest(unittest.TestCase):
     class _FakeES:
@@ -135,6 +159,19 @@ class ElasticsearchAdapterTest(unittest.TestCase):
             self.last_query = query
             self.last_size = size
             return {"hits": {"hits": self._hits}}
+
+        def delete_by_query(self, *, index, query):
+            # D8-6c: ES 8.x signature — a term filter on project_id deletes every
+            # matching doc and returns a count (0 for a project with none).
+            term = query.get("term", {})
+            to_delete = [
+                doc_id
+                for doc_id, doc in self.docs.items()
+                if all(doc.get(k) == v for k, v in term.items())
+            ]
+            for doc_id in to_delete:
+                del self.docs[doc_id]
+            return {"deleted": len(to_delete)}
 
     def test_index_builds_pointer_document(self):
         client = self._FakeES()
@@ -182,6 +219,62 @@ class ElasticsearchAdapterTest(unittest.TestCase):
         adapter = ElasticsearchMemoryIndexAdapter(client, index_name="mem")
         # absent doc: must not raise (idempotent drain).
         adapter.delete_memory_record(project_id="project-1", memory_id="ghost")
+
+    def test_purge_deletes_only_target_project(self):
+        # D8-6c-1: delete_by_query with a project_id term filter drops the
+        # project's documents and leaves an adjacent project intact.
+        client = self._FakeES()
+        adapter = ElasticsearchMemoryIndexAdapter(client, index_name="mem")
+        adapter.index_memory_records(
+            (
+                MemoryLexicalRecord(
+                    memory_id="m1", project_id="project-1",
+                    memory_type="event_observation", version=1,
+                    status="canonical", text="a",
+                ),
+                MemoryLexicalRecord(
+                    memory_id="m2", project_id="project-1",
+                    memory_type="event_observation", version=1,
+                    status="canonical", text="b",
+                ),
+                MemoryLexicalRecord(
+                    memory_id="p2", project_id="project-2",
+                    memory_type="event_observation", version=1,
+                    status="canonical", text="c",
+                ),
+            )
+        )
+        adapter.purge_project(project_id="project-1")
+        self.assertEqual(set(client.docs), {"p2"})
+
+    def test_purge_is_idempotent_on_empty(self):
+        client = self._FakeES()
+        adapter = ElasticsearchMemoryIndexAdapter(client, index_name="mem")
+        # never indexed → delete_by_query matches 0 docs; must not raise.
+        adapter.purge_project(project_id="ghost")
+        self.assertEqual(client.docs, {})
+
+
+class MemoryLexicalSyncAdapterPurgeTest(unittest.TestCase):
+    def test_purge_delegates_to_lexical_backend(self):
+        # D8-6c-1: the lexical drain adapter's purge delegates to the lexical leg
+        # (mirrors the vector leg's MemoryIndexSyncAdapter.purge_project).
+        index = _lexical_index(
+            _memory("a", text="storm"),
+            _memory("other", text="storm", project_id="project-2"),
+        )
+        adapter = MemoryLexicalIndexSyncAdapter(
+            memory_service=_store(
+                _memory("a"), _memory("other", project_id="project-2")
+            ),
+            lexical_index=index,
+        )
+        adapter.purge_project(project_id="project-1")
+        self.assertEqual(index.search(project_id="project-1", query="storm", limit=10), ())
+        self.assertEqual(
+            [h.memory_id for h in index.search(project_id="project-2", query="storm", limit=10)],
+            ["other"],
+        )
 
 
 @unittest.skipUnless(

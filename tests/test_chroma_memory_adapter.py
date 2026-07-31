@@ -196,6 +196,30 @@ class ChromaMemoryAdapterTest(unittest.TestCase):
         self.assertNotIn("m1", self.collection.stored_ids())
         self.assertIn("p2-dup", self.collection.stored_ids())
 
+    def test_purge_drops_only_target_project(self):
+        # D8-6c-1: whole-project delete of the memory_vectors collection.
+        # Two-directional: target project emptied (under-strict) and an adjacent
+        # project survives (over-strict).
+        self.adapter.upsert_memory_records(
+            (
+                _record("m1"),
+                _record("m2"),
+                _record("p2", project_id="project-2"),
+            )
+        )
+        self.adapter.purge_project(project_id="project-1")
+        self.assertEqual(self.collection.stored_ids(), {"p2"})
+        # exactly one project_id-scoped delete was issued.
+        self.assertEqual(self.collection.delete_calls, 1)
+
+    def test_purge_is_idempotent_on_empty(self):
+        # never indexed → purge must not raise; the where still issues a delete
+        # call but it matches zero records (empty result is success, not a
+        # not-found — purge is irreversible).
+        self.adapter.purge_project(project_id="ghost")
+        self.assertEqual(self.collection.stored_ids(), set())
+        self.assertEqual(self.collection.delete_calls, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -73,6 +73,10 @@ class MemoryLexicalIndexAdapter(Protocol):
         self, *, project_id: str, query: str, limit: int
     ) -> tuple[MemoryLexicalRecord, ...]: ...
 
+    # D8-6c: hard, whole-project delete of the lexical leg. Idempotent — an
+    # already-empty index is success, not a not-found (purge is irreversible).
+    def purge_project(self, *, project_id: str) -> None: ...
+
 
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 
@@ -130,6 +134,15 @@ class InMemoryMemoryLexicalIndexAdapter:
         ranked = sorted(scored, key=lambda r: (-r.score, r.memory_id))
         return tuple(ranked[:limit])
 
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6c: drop every document of one project. Idempotent — a project with
+        # no documents leaves nothing to remove.
+        self.records = {
+            memory_id: record
+            for memory_id, record in self.records.items()
+            if record.project_id != project_id
+        }
+
 
 class ElasticsearchClient(Protocol):
     """The narrow slice of the real Elasticsearch (8.x) client the adapter uses,
@@ -144,6 +157,12 @@ class ElasticsearchClient(Protocol):
     def search(
         self, *, index: str, query: dict[str, Any], size: int
     ) -> dict[str, Any]: ...
+
+    # D8-6c: project-scoped bulk delete (ES 8.x signature — ``body=`` is gone in
+    # 8.x, matching the ``index``/``delete``/``search`` shape above).
+    def delete_by_query(
+        self, *, index: str, query: dict[str, Any]
+    ) -> Any: ...
 
 
 class ElasticsearchMemoryIndexAdapter:
@@ -186,6 +205,17 @@ class ElasticsearchMemoryIndexAdapter:
             # elasticsearch raises NotFoundError for an absent doc; the delete is
             # idempotent (the vector leg's delete is likewise order-independent).
             pass
+
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6c: delete every document of one project via a term filter on
+        # project_id. ES delete_by_query returns 0 deleted for a project with no
+        # documents — that is idempotent success, not an error (purge is
+        # irreversible; contrast delete-by-id's NotFound swallow above, which
+        # serves the single-version drain path).
+        self._client.delete_by_query(
+            index=self._index,
+            query={"term": {"project_id": project_id}},
+        )
 
     def search(
         self, *, project_id: str, query: str, limit: int
@@ -286,6 +316,13 @@ class MemoryLexicalIndexSyncAdapter:
             self._lexical.delete_memory_record(
                 project_id=project_id, memory_id=memory.supersedes
             )
+
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6c: whole-project purge of the lexical leg. Idempotent — the lexical
+        # adapter drops every document of the project and an empty result is
+        # success, not a not-found (no load/supersede branching here, unlike
+        # index_memory's per-version drain path).
+        self._lexical.purge_project(project_id=project_id)
 
 
 def connect_elasticsearch_memory_index(
