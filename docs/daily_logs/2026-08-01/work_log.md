@@ -158,3 +158,59 @@ hardening #1·#2를 보강. #3(SoT)은 오너 결정 대기, #4(composite 관측
 - #3 SoT 버전 갱신 — **오너 결정 (b)**: SoT 변경이력에 **v1.7.72 entry** 추가(6c-1·6c-1b indexing 백엔드
   purge_project + 검증 hardening). 본문 규칙 확장 없이 변경이력 entry만(6a/6b 코드만 슬라이스도 변경이력 entry
   선례와 일관). HANDOFF 정본 버전 v1.7.71 → v1.7.72. operation 카운트 무변은 무관 타당.
+
+---
+
+## Task — 인증 D8-6c-2: worker PROJECT_PURGED drain 연결 (SoT v1.7.73)
+
+### Goals
+
+- 6c 마지막 코드 슬라이스. 6c-1·6c-1b 가 추가한 memory/candidate 백엔드 `purge_project`(12 커밋)를
+  worker 가 PROJECT_PURGED entry 에서 실제로 부르도록 연결. 인수인계 설계(`_drain_purge` whole-event
+  all-or-retry + `run_once` 분기 + source_block archive purge + 깨진 guard `_archive_where` 교체).
+  endpoint(6d)만 남음.
+
+### Completed work — 구현 (코드 변경)
+
+- **`service.py`**: `IndexSyncWorker._drain_purge` 추가 — archive(source_block) + memory composite +
+  candidate composite purge 순차 호출. **whole-event all-or-retry**(하나라도 실패 시 BACKEND_ERROR + requeue;
+  per-sink SinkOutcome 격리는 MEMORY/CANDIDATE_UPSERTED drain 전용 — PROJECT_PURGED 한 entry 가
+  memory/candidate 두 composite 로 흘러 per-sink target 키 충돌). memory/candidate adapter 가 None 이면
+  archive-only(no-Chroma/no-ES bootstrap).
+- **`service.py`**: `run_once` 분기 `elif entry.event is PROJECT_PURGED → _drain_purge` — PROJECT_PURGED 가
+  깨진 guard `_archive_where` ValueError 경로(else→`_drain_archive`→`mark_archived`)로 가는 것 차단.
+- **`service.py` Protocol**: `ArchiveIndexMutationAdapter`·`MemoryIndexMutationAdapter`·
+  `CandidateIndexMutationAdapter` 에 `purge_project` 선언; `RecordingArchiveIndexMutationAdapter` 에
+  recording purge(`purged_projects`) 추가.
+- **`chroma.py`**: `ChromaArchiveIndexMutationAdapter.purge_project` (source_block collection.delete where project_id).
+- **전수 가드**: `test_purge_project_coverage.py::IndexingBackendPurgeCoverageTest` 에 source_block archive
+  합류(카운트 6→7) — D5 고아 보증 indexing 층이 5 백엔드 전부(source_block + memory vec/lex + candidate vec/lex) 커버.
+
+### Verification
+
+- 회귀: `test_indexing_phase3a.py::IndexSyncWorkerTest` 에 PROJECT_PURGED drain 3 케이스(전 백엔드 호출·
+  whole-event requeue·archive-only).
+- **★ 회귀 위치 버그 + 수정(정직 기록)**: `f81d145` 에서 회귀 3을 IndexSyncWorkerTest 끝이라 착각하고
+  top-level `_fixture` 헬퍼(497-) **뒤에** 삽입 → `_fixture` 의 nested def 가 되어 **pytest 수집에서 제외**.
+  결과 전체 suite 1814(회귀 3 미포함) + 뮤테이션(_drain_purge purge 무력화)에도 re-fail 안 하는 **무효 가드**였음.
+  `python -c` 로 `archive.purged_projects==[]` 임에도 passed 인 것으로 발견(AST 로 IndexSyncWorkerTest 가
+  331-494 종료 확인). `f8a6ad3` 에서 IndexSyncWorkerTest 본문(`test_run_once_stop_check` 직후, `_fixture` 전)으로
+  이동 → 수집/실행. **교훈: 회귀 추가 후 단독 -q뿐 아니라 전체 suite 카운트 +1 과 뮤테이션 re-fail을 함께 본다.**
+- 양방향 뮤테이션(checkpoint 안전망): `_drain_purge` purge 무력화(`try: pass`) → 회귀 3 re-fail
+  (archive.purged_projects·memory·candidate 단언, **3 failed**). 복구 후 green(26 passed).
+- **전량(test-mongo ON, 111s)**: **1817 passed / 4 skipped / 1519 subtests** — 1814(6c-1·6c-1b+hardening) 대비
+  **+3 = 6c-2 회귀 3, 회귀 0건**. subtests·skip 동일.
+
+### Decisions
+
+- whole-event all-or-retry: PROJECT_PURGED 한 entry 가 memory/candidate 두 composite 로 흘러 per-sink
+  target 키("vector"/"lexical") 충돌 → all-or-retry 가 유일 일관 선택. purge 멱등(재파기 무해).
+- 깨진 guard `_archive_where` 는 run_once 분기로 PROJECT_PURGED 를 차단해 발화 안 함(`_archive_where`
+  자체는 PROJECT/DRAFT_ARCHIVED 만 처리, 변경 없음).
+- endpoint 없음 → operation 카운트 무변(6d 에서 ADMIN tier +1·총 +1).
+
+### Next steps
+
+- **6d**: `POST /admin/projects/{id}/purge` endpoint + `_REQUIRE_ADMIN` + boundary matrix(ADMIN +1·총 +1).
+  이것으로 D8-6 영구 삭제 트랙 종료(core_sot·derived·vector/drain·endpoint 전부).
+- **독립 검증**: 6c-2 worker drain 연결 + 깨진 guard 교체 + 회귀 위치 버그/수정에 대한 검증 권장.
