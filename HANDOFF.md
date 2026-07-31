@@ -41,7 +41,7 @@
   | **5-a** | **완료** | `require_admin_user` + 관리자 tier 전수 가드 + `/admin/users` 목록·생성·비활성화 |
   | **5-c** | **완료** | 전역 관측 KPI `GET /admin/observability/kpi` — 감사 저장소 전역 조회 + 집계 재사용 |
   | **5-b·5-d** | **차단** | 전 프로젝트 목록 · 관리자 화면 — **오너 결정 C-1~C-6 선행**(브리프 §7) |
-  | **6 (D8-6a)** | **D8-6a 완료** | 영구 삭제 — **D8-6a 완료**(core_sot 8컬렉션 파기 인터페이스 + `PROJECT_PURGED` 이벤트, **endpoint 없음**). b(derived 10)·c(vector/drain)·d(endpoint) 후속. 부분 삭제 고아 위험(D5) → endpoint는 d에서만 |
+  | **6 (D8-6a·6b)** | **6a·6b 완료, 6c 대기** | 영구 삭제 — **6a**(core_sot 8) + **6b**(derived 10) 파기 인터페이스 + 전수 가드(`test_purge_project_coverage.py`) 완료. **6c**(vector/index + worker drain)는 시도 후 consistent 분할(6c-1 memory / 6c-1b candidate / 6c-2 drain)로 미룸 — **재진입은 `daily_logs/2026-07-31/` 말미 "D8-6c 시도 + 인수인계" 섹션**(탐색 결과 4 + 분할 + 깨진 guard `_archive_where` PURGED `ValueError`). **6d**(endpoint) 후속. endpoint 는 d 에서만(부분 삭제 고아 위험 D5) |
   | **7** | 미착수 | **D8-7 Mongo·ES 인프라 인증**(외부 노출 금지 해제 조건) |
 
 - **D8-3 E1~E4 = 전부 A로 확정** — `plans/auth-d8-3-enforcement-decisions.md`(Resolved). `owner_id=None`은 탈퇴·삭제 누락 같은 미래 비정상 잔존도 **항상 deny**. project 경로는 소유권, 그 외는 인증이며 `GET /projects`는 저장소 조회에서 본인 소유만 반환한다.

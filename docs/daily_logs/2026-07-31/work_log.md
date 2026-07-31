@@ -799,3 +799,50 @@
 
 - **D8-6c**: vector/index 4백엔드(Chroma 2·ES 2) project-scoped delete + worker `PROJECT_PURGED` drain handler.
 - **D8-6d**: `POST /admin/projects/{id}/purge` endpoint + `_REQUIRE_ADMIN` + boundary matrix(ADMIN +1·총 +1).
+
+---
+
+## Task — D8-6c 시도 + 인수인계 (코드 없음, 설계/탐색 결과만 — SoT 무변)
+
+> **다음 세션은 새 컨텍스트라 이 대화를 못 본다.** 6c 분할·탐색 결과를 여기에 둬 다음 작업자가
+> repo만 보고 6c를 재진입할 수 있게 한다(세션 종료 검증 H1 폐쇄).
+
+### 무엇을 했나 (그리고 왜 버렸나)
+- 6c(vector/index 파기 + worker `PROJECT_PURGED` drain)를 시도했다. worker(`indexing/service.py`)
+  `_drain_purge` + `run_once` 3-way 분기 + Protocol 3개 `purge_project`, source_block(chroma Archive)
+  purge, memory vec(`memory_index.py` Protocol·InMemory·Sync·Composite) purge까지 구현.
+- 그러나 **6c는 drain 연결과 5백엔드(source_block + memory vec/lex + candidate vec/lex) purge가 한 덩어리여야
+  consistent**한데, 시간 내 전체 마무리가 어려워 **부분을 버리고 직전 consistent 커밋(337807b)로 되돌렸다**.
+  working tree clean. 6c 코드는 한 줄도 남지 않음(세션 종료 검증이 reflog/코드 전수로 확인).
+
+### 6c 재진입 — 권장 분할 (consistent한 작은 슬라이스)
+- **6c-1**: memory 도메인 파기 — memory vector(Protocol `MemoryVectorIndexAdapter`·InMemory·Chroma) +
+  memory lexical(ES) `purge_project` + `MemoryIndexSyncAdapter`·`CompositeMemoryIndexSyncAdapter` purge.
+  **drain 연결 없음**(6a `enqueue_project_purged` 패턴 — 메서드만, 미사용).
+- **6c-1b**: candidate 도메인 파기 — 같은 패턴(`candidate_index.py`·`candidate_lexical_index.py`).
+- **6c-2**: worker `_drain_purge` + `run_once` 분기(`elif entry.event is PROJECT_PURGED`) 연결 + 회귀(worker drain).
+
+### 6c 탐색 결과 (재진입 출발점 — 이 대화의 Plan/Explore 에이전트가 확보, repo엔 없었음)
+1. **worker drain 분기**(`indexing/service.py`): `run_once`(:505-508)이
+   `if entry.event in _PER_SINK_EVENTS: _drain_sinks` else `_drain_archive`. `_PER_SINK_EVENTS`(52-60) =
+   {MEMORY_UPSERTED, CANDIDATE_UPSERTED, CANDIDATE_REMOVED}. `_drain_archive`(523-545)는
+   `archive_adapter.mark_archived`(soft). PROJECT_PURGED는 현재 else→`_drain_archive`→`mark_archived`라
+   hard delete 가 안 된다.
+2. **★ `_archive_where`(`indexing/chroma.py:210-223`)가 PROJECT_PURGED를 `ValueError`로 거부** → 현재
+   PURGED entry는 else→`_drain_archive`→`mark_archived`→`_archive_where`→ValueError→BACKEND_ERROR→
+   재시도 후 DLQ. 즉 **깨진 guard**이며 6c-2 가 진짜 경로로 교체해야. (단, 6c 시점엔 production PURGED
+   entry 가 0이라 발화 안 함 — 6d 가 유일 호출자.)
+3. **ES `ElasticsearchClient` Protocol(`memory_lexical_index.py`)에 `delete_by_query` 없음** → 6c-1에서
+   추가 필요(ES 8.x 시그니처 `delete_by_query(index=, query=)`). memory/candidate lexical purge 가 이를 씀.
+4. **Chroma `ChromaCollection` Protocol은 이미 `delete(where=)` 보유** → 변경 불필요. memory/candidate
+   vector purge 는 `collection.delete(where={"project_id": project_id})`.
+- **멱등 계약**: `purge_project`는 빈 결과(이미 파기)여도 `DerivedIndexRecordNotFound`를 raise **안 함**
+  (`mark_archived`의 soft NotFound 와 의도적 차이 — 불가역+멱등). `_drain_purge` 는 whole-event 재시도.
+- **회귀 패턴**: `tests/test_indexing_phase3a.py` `IndexSyncWorkerTest`(Recording/_NotFound 어댑터),
+  백엔드 단위는 `FakeChromaCollection`/`_FakeES`(`_FakeES`에 `delete_by_query` 추가 필요).
+- **drain 방식 추천**: 전용 `_drain_purge` + whole-event all-or-retry(`_drain_archive`는 single-sink
+  source_block 공식 계약이라 5-sink fan-out 을 끼우면 위반; per-sink 격리는 target 키 충돌).
+
+### 부가 — 6b-2 동작 테스트 부재 (세션 종료 검증 부가 메모, 6c/6d 보충 후보)
+6b-2(writing 3·observability·context_search·review)는 개별 purge 동작 테스트가 없고 전수 가드(메서드 존재)
++ 6b-1 패턴 동일성에 의존. 6b 검증 합격이나 end-to-end 동작 검증이 미진 — 6c/6d에서 보충 후보.
