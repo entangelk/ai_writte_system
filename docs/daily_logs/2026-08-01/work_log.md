@@ -74,3 +74,54 @@
   source_block archive(`ChromaArchiveIndexMutationAdapter`) purge + 회귀(worker drain, 어제 깨진
   guard `_archive_where` PURGED `ValueError` 교체).
 - **6d**: `POST /admin/projects/{id}/purge` endpoint + `_REQUIRE_ADMIN` + boundary matrix(ADMIN +1·총 +1).
+
+---
+
+## Task — 인증 D8-6c-1b: candidate vector/lexical 파기 purge_project (drain 연결 없음, SoT 무변)
+
+### Goals
+
+- 6c 분할의 둘째 반. **6c-1(memory)의 정확한 미러**를 candidate 도메인에 적용. candidate
+  vector(Chroma/in-memory)·lexical(ES/in-memory) 백엔드에 project 단위 hard delete 추가.
+  drain handler 연결은 6c-2. 어제 인수인계의 "6c-1b: candidate, 같은 패턴" 슬라이스.
+
+### Completed work — 구현 (코드 변경)
+
+- **`candidate_index.py`**: `CandidateVectorIndexAdapter` Protocol + `InMemoryCandidateVectorIndexAdapter` +
+  `CandidateIndexSyncAdapter` + `CompositeCandidateIndexSyncAdapter` 에 `purge_project(*, project_id)` 추가.
+- **`candidate_lexical_index.py`**: `CandidateLexicalIndexAdapter` Protocol + `InMemoryCandidateLexicalIndexAdapter`
+  + `ElasticsearchCandidateIndexAdapter` + `CandidateLexicalIndexSyncAdapter` 에 `purge_project` 추가.
+  **★ ES `ElasticsearchClient` Protocol의 `delete_by_query`는 6c-1에서 memory_lexical_index 에 추가했고
+  candidate_lexical_index 가 그것을 import 재사용**하므로, candidate ES adapter가 추가 Protocol 변경 없이
+  바로 delete_by_query 를 씀(탐색 결과의 수월함 실측).
+- **`chroma.py`**: `ChromaCandidateVectorIndexAdapter.purge_project` — `collection.delete(where={"project_id": ...})`.
+
+### Verification
+
+- **핵심 회귀 7 케이스**(test_candidate_index.py): InMemory vector·chroma·in-memory lexical·ES purge
+  (스코프 + 인접 project 유지 + 멱등) + composite 위임·예외 전파. **★ `_FakeChromaCollection.delete`를
+  `$and`와 단일키 project_id(purge) 모두 지원하게 확장** — 종전엔 `$and` 하드코딩이라 purge 의
+  `where={"project_id":...}` 가 KeyError 였다(실제 ChromaCollection.delete 는 두 형태 모두 허용). 기존
+  `$and` 케이스(delete_candidate_record) 무변. test_candidate_index.py 단독 **33 passed**.
+- **전량(test-mongo ON, 94s)**: **1810 passed / 4 skipped / 1519 subtests** — 6c-1 후 1803 대비
+  **+7 = 6c-1b 회귀 7, 회귀 0건**. subtests·skip 동일.
+- **양방향 가드 뮤테이션**(checkpoint `5b73a86` 안전망): candidate InMemory purge 방향 반전(`!=`→`==`) →
+  `test_purge_drops_only_target_project_and_is_idempotent` re-fail(over-strict 가드). composite 예외 전파
+  가드는 6c-1 memory 의 것과 동일 코드(`CompositeXxxIndexSyncAdapter.purge_project`)라 candidate 에서
+  별도 뮤테이션은 생략(memory 6c-1 B 검증으로 충분). 복구 후 green, working tree clean.
+
+### Decisions
+
+- candidate = memory 의 정확한 미러(동일 멱등 계약·composite 예외 전파·drain 연결 없음).
+- `_FakeChromaCollection.delete` 확장은 내 purge 회귀가 필요로 하는 테스트 인프라 보강(실제 Chroma
+  동작에 맞춤). 기존 테스트 무변 — `$and` 형태가 단일키 형태로 바뀌어도 여전히 매칭.
+- 18컬렉션 전수 가드는 여전히 mongo repository 만 검사 — indexing 백엔드(Protocol 기반) purge 전수
+  가드는 6c-2 끝에서 추가 후보(memory 6c-1 + candidate 6c-1b 백엔드 purge 가 이제 둘 다 있음).
+
+### Next steps
+
+- **6c-2**: worker `_drain_purge` + `run_once` 분기(`elif entry.event is PROJECT_PURGED`) 연결 +
+  source_block archive(`ChromaArchiveIndexMutationAdapter`) purge + memory/candidate composite purge 호출
+  + 회귀(worker drain, 어제 깨진 guard `_archive_where` PURGED `ValueError` 교체). 이 슬라이스가 끝나면
+  6c의 5 백엔드(source_block + memory vec/lex + candidate vec/lex) drain 이 consistent 하게 연결됨.
+- **6d**: `POST /admin/projects/{id}/purge` endpoint + `_REQUIRE_ADMIN` + boundary matrix(ADMIN +1·총 +1).
