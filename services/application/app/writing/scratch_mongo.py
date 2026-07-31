@@ -58,6 +58,10 @@ class MongoWritingScratchRepository:
             return
         self._entries.delete_many({"_id": {"$in": list(ids)}})
 
+    def purge_project(self, project_id: str) -> None:
+        # D8-6b-2: project 의 scratch 전부 파기(직접 project_id 스코프).
+        self._entries.delete_many({"project_id": project_id})
+
 
 def _doc(entry: ScratchCandidate) -> dict:
     return {

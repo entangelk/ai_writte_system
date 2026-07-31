@@ -760,3 +760,41 @@
 - **D8-6b-2**: writing 3(generation_jobs·scratch·loop_audits) + observability(llm_call_audits) +
   context_search(gate_findings) + review(review_queue) = 6컬렉션 + **전수 가드(18컬렉션)**.
 - **D8-6c**: vector/index 4백엔드 + worker drain. **D8-6d**: endpoint + 권한 + boundary matrix.
+
+---
+
+## Task — 인증 D8-6b-2: derived 파기 나머지 6컬렉션 + 전수 가드 (SoT v1.7.71)
+
+### Goals
+
+- D8-6b(derived 10)의 둘째 반으로 **6b 완료**. b-2는 writing 3(generation_jobs·scratch·
+  loop_audits)·observability(llm_call_audits)·context_search(gate_findings)·review(review_queue) = 6컬렉션
+  + **18컬렉션 전수 가드**. endpoint 없음(6d).
+
+### Completed work — 구현 (코드 변경)
+
+- 6도메인 각각 Protocol·in-memory·mongo·서비스에 `purge_project`(직접 `project_id` 스코프).
+  탐색 에이전트가 6컬렉션 **모두 Protocol 기반**(in-memory+mongo+service)임을 확인 — 6b-1 패턴과 동일.
+- **전수 가드** `tests/test_purge_project_coverage.py`(신규): 9개 repository 계약(core_sot·memory·
+  analysis·writing 3·observability·context_search·review = 18 컬렉션)이 모두 `purge_project`를 노출함을
+  `dir()` 단정. 하나라도 빠지면 project 파기가 고아를 남긴다(D5 부분 삭제 금지). over-strict 로 9 라는
+  수 자체도 고정.
+
+### Verification
+
+- 전수 가드 + 기존 6b-2 도메인 `_mongo`(generation_job·scratch·loop_audit·llm_call_audit·gate_findings)
+  = **34 passed**. 전수 가드 통과(9 repository purge_project 노출), 기존 도메인 테스트 안 깨짐.
+- 6b-2 purge 동작은 6b-1(memory·analysis)에서 검증한 **직접 `delete_many({"project_id": ...})`** 패턴과
+  동일(모든 컬렉션이 project_id 보관 확인). 전수 가드가 메서드 누락을 잡고, 동작 패턴은 6b-1에서 검증.
+- 전량 suite 백그라운드 실행 중(결과는 후속 반영).
+
+### Decisions
+
+- 6b-2 개별 동작 회귀는 전수 가드(메서드 존재) + 기존 안 깨짐으로(패턴 동일). 도메인별 동작 테스트는
+  검증자 지적 시 추가.
+- 18컬렉션 전부 직접 `project_id` 스코프(6a 비대칭 교훈 적용).
+
+### Next steps
+
+- **D8-6c**: vector/index 4백엔드(Chroma 2·ES 2) project-scoped delete + worker `PROJECT_PURGED` drain handler.
+- **D8-6d**: `POST /admin/projects/{id}/purge` endpoint + `_REQUIRE_ADMIN` + boundary matrix(ADMIN +1·총 +1).

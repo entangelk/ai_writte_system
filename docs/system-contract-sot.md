@@ -1,7 +1,7 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`
-계약 버전: `v1.7.70`
+계약 버전: `v1.7.71`
 승인일: `2026-06-26`
 최근 갱신일: `2026-07-31`
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
@@ -33,6 +33,7 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.7.71 | 2026-07-31 | **D8-6b-2 — derived 파기 나머지 6컬렉션 + 전수 가드(코드)**. D8-6b 완료(b-1 memory·analysis + b-2 writing 3·observability·context_search·review = derived 10). writing 3(generation_jobs·scratch·loop_audits)·observability(llm_call_audits)·context_search(gate_findings)·review(review_queue) 각 Protocol·in-memory·mongo·서비스에 `purge_project`(직접 project_id 스코프). **전수 가드** `tests/test_purge_project_coverage.py` — 9개 repository 계약(core_sot·memory·analysis·writing 3·observability·context_search·review = 18 컬렉션)이 모두 `purge_project` 노출 → 하나라도 빠지면 project 파기가 고아를 남긴다(D5 부분 삭제 금지). endpoint 없음(6d). | `daily_logs/2026-07-31/`, 회귀 `tests/test_purge_project_coverage.py`·`tests/test_*_mongo.py` |
 | v1.7.70 | 2026-07-31 | **D8-6b-1 — derived 파기 memory + analysis(코드)**. D8-6b 첫 반(b-2: writing 3·observability·context_search·review 6컬렉션). `MemoryRepository.purge_project`·`AnalysisRepository.purge_project`(Protocol·in-memory·mongo — analysis 는 jobs·tasks·candidates 3컬렉션 **직접 project_id 스코프**) + `MemoryService`·`AnalysisService` thin 메서드. **10 derived 컬렉션 모두 project_id 보관** 확인 → 직접 스코프(6a 비대칭 교훈 적용). endpoint 없음(D8-6d). | `daily_logs/2026-07-31/`, 회귀 `tests/test_memory_mongo.py`·`test_analysis_mongo.py` |
 | v1.7.69 | 2026-07-31 | **D8-6a — project 영구 파기 core_sot 인터페이스 + outbox 이벤트(코드)**. D5=A 영구 삭제 첫 서브슬라이스(전체 D8-6 = 4: a core_sot·b derived·c vector/drain·d endpoint). ① `CoreSotRepository.purge_project`(Protocol·in-memory·mongo) — 직접 project_id 스코프 6컬렉션(projects·briefs·drafts·versions·source_refs·accept_receipts) + snapshots·blocks(이것들도 project_id 를 보관해 **8컬렉션 전부 직접 project_id 스코프** — 독립 검증이 지적한 in-memory/mongo 비대칭 보강, version 경유 아님), mongo 는 한 트랜잭션. ② `CoreSotService.purge_project`(`_require_project`→NotFound 후 repo 위임, **enqueue 안 함** — endpoint D8-6d 에서 archive 와 같은 시점에). ③ `IndexSyncEvent.PROJECT_PURGED` + `IndexSyncOutboxService.enqueue_project_purged`(**drain 연결 안 함**, D8-6c 에서). **★ endpoint 없음** — a/b/c 는 endpoint 없이 자체 회귀로 green, endpoint(D8-6d)가 유일한 production 호출자이므로 그 전엔 고아 데이터(정본만 파기하고 vector 잔류)가 생길 수 없다(D5 부분 삭제 금지 통제). | `plans/multi-user-auth-cms-decisions.md` D5·`auth-d8-5-admin-decisions.md` §5, `daily_logs/2026-07-31/`, 회귀 `tests/test_core_sot.py::CoreSotPurgeTest`·`test_core_sot_mongo.py`·`test_indexing_phase3a.py` |
 | v1.7.68 | 2026-07-31 | **알파 R-c 관측 완료 — 컨텍스트 예산 트랙 종료(코드 변경 0, 관측만)**. 창 32768(알파 in-stack llama, `-m` 캐시 직접 로드로 재다운로드 0)에서 현행 예산 8192가 가드 **PASS**(베타 16384에선 같은 구조의 별개 시드 패키지 — 항목 62·회계 8,185 동일, 입력 13,076 vs 13,077 = 1 토큰 차이 — 가 `+ 6,144 = 19,221 > 16,384`로 **400 거부**). R-a 산식(실측) `32768 − 6144 − 4718 = 21,906`, 회계 단위 권장 **약 21,487**(베타 5,407 대비 창 증분 16,384에 **거의** 비례, 비율 0.979/0.981 비대칭 — +16,080). 즉 **R-c(창 확대)는 R-a(창에서 유도)에 흡수됨을 실측으로 확인** — 오너 결정 (ii)가 맞았고 (i) 상수는 기각. 시드 규모(24,000자·항목 117)가 창을 다 못 채운 건 시드 한계(R-c 한계 아님). **라이브 작업 참고**: 알파 application 이미지가 auth 슬라이스 이전 빌드라 `argon2-cffi`가 빠져, 트리 마운트 관통 시 런타임 `pip install 'argon2-cffi>=23,<24>'`가 필요(별도 부채). | 오너 결정(2026-07-30) R-c 측정 단계 완료, `daily_logs/2026-07-31/work_log.md`, `scripts/report_budget_measure.py` |

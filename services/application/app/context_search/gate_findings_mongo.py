@@ -32,6 +32,10 @@ class MongoGateFindingRepository:
             "project_id": project_id, "status": GateFindingStatus.OPEN.value,
         }).sort("_id", ASCENDING))
 
+    def purge_project(self, project_id: str) -> None:
+        # D8-6b-2: project 의 gate finding 전부 파기(직접 project_id 스코프).
+        self._entries.delete_many({"project_id": project_id})
+
 
 def _doc(value: StoredGateFinding) -> dict:
     return {

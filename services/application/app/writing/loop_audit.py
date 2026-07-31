@@ -78,6 +78,8 @@ class WritingLoopAuditRepository(Protocol):
     # measured" and would be a lie the moment one project has the rollup on.
     def list_all(self) -> tuple[StoredWritingLoopRun, ...]: ...
 
+    def purge_project(self, project_id: str) -> None: ...
+
 
 class InMemoryWritingLoopAuditRepository:
     def __init__(self) -> None:
@@ -99,6 +101,12 @@ class InMemoryWritingLoopAuditRepository:
 
     def list_all(self) -> tuple[StoredWritingLoopRun, ...]:
         return _newest_first(self.entries.values())
+
+    def purge_project(self, project_id: str) -> None:
+        # D8-6b-2: project 의 loop audit 전부 파기(직접 project_id 스코프).
+        victims = [rid for rid, r in self.entries.items() if r.project_id == project_id]
+        for rid in victims:
+            del self.entries[rid]
 
 
 def _newest_first(
@@ -126,6 +134,10 @@ class WritingLoopAuditService:
         self._repo = repository
         self._clock = clock or (lambda: datetime.now(UTC))
         self._id_factory = id_factory or (lambda: "wla:" + uuid4().hex)
+
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6b-2: project 전체 파기의 loop-audit 다리. endpoint(D8-6d)가 호출한다.
+        self._repo.purge_project(project_id)
 
     def record(
         self, *, project_id: str, request_id: str,

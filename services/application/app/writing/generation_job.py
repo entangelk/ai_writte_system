@@ -165,6 +165,8 @@ class WritingGenerationJobRepository(Protocol):
         self, project_id: str, draft_id: str
     ) -> tuple[WritingGenerationJob, ...]: ...
 
+    def purge_project(self, project_id: str) -> None: ...
+
 
 class InMemoryWritingGenerationJobRepository:
     def __init__(self) -> None:
@@ -224,6 +226,15 @@ class InMemoryWritingGenerationJobRepository:
             reverse=True,
         ))
 
+    def purge_project(self, project_id: str) -> None:
+        # D8-6b-2: project 의 generation job 전부 파기(직접 project_id 스코프).
+        ids = [jid for jid, j in self.jobs.items() if j.project_id == project_id]
+        for jid in ids:
+            del self.jobs[jid]
+        self._request_index = {
+            k: v for k, v in self._request_index.items() if k[0] != project_id
+        }
+
 
 class WritingGenerationJobService:
     def __init__(
@@ -236,6 +247,10 @@ class WritingGenerationJobService:
         self._clock = clock or (lambda: datetime.now(UTC))
         self._id_factory = id_factory or (lambda: "wgj:" + uuid4().hex)
         self._claim_timeout_seconds = claim_timeout_seconds
+
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6b-2: project 전체 파기의 generation-job 다리. endpoint(D8-6d)가 호출한다.
+        self._repo.purge_project(project_id)
 
     def enqueue(
         self, *, project_id: str, draft_id: str, request_id: str,

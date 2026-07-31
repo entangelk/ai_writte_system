@@ -44,6 +44,8 @@ class GateFindingRepository(Protocol):
     def get(self, finding_id: str) -> StoredGateFinding | None: ...
     def list_open(self, project_id: str) -> tuple[StoredGateFinding, ...]: ...
 
+    def purge_project(self, project_id: str) -> None: ...
+
 
 class InMemoryGateFindingRepository:
     def __init__(self) -> None:
@@ -63,6 +65,12 @@ class InMemoryGateFindingRepository:
             key=lambda entry: entry.id,
         ))
 
+    def purge_project(self, project_id: str) -> None:
+        # D8-6b-2: project 의 gate finding 전부 파기(직접 project_id 스코프).
+        victims = [fid for fid, f in self.entries.items() if f.project_id == project_id]
+        for fid in victims:
+            del self.entries[fid]
+
 
 class GateFindingError(RuntimeError):
     pass
@@ -81,6 +89,10 @@ class GateFindingService:
                  clock: Callable[[], datetime] | None = None) -> None:
         self._repo = repository
         self._clock = clock or (lambda: datetime.now(UTC))
+
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6b-2: project 전체 파기의 gate-finding 다리. endpoint(D8-6d)가 호출한다.
+        self._repo.purge_project(project_id)
 
     def persist_rejection(self, *, request: ContextSearchRequest,
                           idempotency_key: str, package: ContextPackage,

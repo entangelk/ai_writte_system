@@ -39,6 +39,10 @@ class MongoLlmCallAuditRepository:
     def list_all(self) -> tuple[StoredLlmCall, ...]:
         return self._listed({})
 
+    def purge_project(self, project_id: str) -> None:
+        # D8-6b-2: project 의 llm call audit 전부 파기(직접 project_id 스코프).
+        self._entries.delete_many({"project_id": project_id})
+
     def _listed(self, query: dict) -> tuple[StoredLlmCall, ...]:
         return tuple(_call(doc) for doc in self._entries.find(query).sort(
             [("created_at", DESCENDING), ("_id", DESCENDING)]

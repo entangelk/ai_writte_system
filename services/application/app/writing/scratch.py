@@ -62,6 +62,8 @@ class WritingScratchRepository(Protocol):
     ) -> int: ...
     def delete_ids(self, ids: tuple[str, ...]) -> None: ...
 
+    def purge_project(self, project_id: str) -> None: ...
+
 
 class InMemoryWritingScratchRepository:
     def __init__(self) -> None:
@@ -105,6 +107,12 @@ class InMemoryWritingScratchRepository:
         for entry_id in ids:
             self.entries.pop(entry_id, None)
 
+    def purge_project(self, project_id: str) -> None:
+        # D8-6b-2: project 의 scratch 전부 파기(직접 project_id 스코프).
+        victims = [eid for eid, e in self.entries.items() if e.project_id == project_id]
+        for eid in victims:
+            del self.entries[eid]
+
 
 class WritingScratchService:
     def __init__(
@@ -126,6 +134,10 @@ class WritingScratchService:
         self._clock = clock or (lambda: datetime.now(UTC))
         self._id_factory = id_factory or (lambda: "wds:" + uuid4().hex)
         self._max_per_draft = max_per_draft
+
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6b-2: project 전체 파기의 scratch 다리. endpoint(D8-6d)가 호출한다.
+        self._repo.purge_project(project_id)
 
     def save(
         self, *, project_id: str, draft_id: str, request_id: str,

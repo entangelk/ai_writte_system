@@ -86,6 +86,8 @@ class ReviewQueueRepository(Protocol):
 
     def get_entry(self, entry_id: str) -> ReviewQueueEntry | None: ...
 
+    def purge_project(self, project_id: str) -> None: ...
+
 
 class InMemoryReviewQueueRepository:
     """Non-durable ``ReviewQueueRepository`` for tests / the no-Mongo path."""
@@ -120,10 +122,20 @@ class InMemoryReviewQueueRepository:
     def get_entry(self, entry_id: str) -> ReviewQueueEntry | None:
         return self._entries.get(entry_id)
 
+    def purge_project(self, project_id: str) -> None:
+        # D8-6b-2: project 의 review queue 전부 파기(직접 project_id 스코프).
+        victims = [eid for eid, e in self._entries.items() if e.project_id == project_id]
+        for eid in victims:
+            del self._entries[eid]
+
 
 class ReviewQueueService:
     def __init__(self, repository: ReviewQueueRepository) -> None:
         self._repository = repository
+
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6b-2: project 전체 파기의 review-queue 다리. endpoint(D8-6d)가 호출한다.
+        self._repository.purge_project(project_id)
 
     def enqueue(
         self,

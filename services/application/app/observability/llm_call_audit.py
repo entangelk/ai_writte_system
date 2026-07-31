@@ -148,6 +148,8 @@ class LlmCallAuditRepository(Protocol):
     # reach every project's records by passing None through by accident.
     def list_all(self) -> tuple[StoredLlmCall, ...]: ...
 
+    def purge_project(self, project_id: str) -> None: ...
+
 
 class InMemoryLlmCallAuditRepository:
     def __init__(self) -> None:
@@ -167,6 +169,12 @@ class InMemoryLlmCallAuditRepository:
     def list_all(self) -> tuple[StoredLlmCall, ...]:
         return _newest_first(self.entries.values())
 
+    def purge_project(self, project_id: str) -> None:
+        # D8-6b-2: project 의 llm call audit 전부 파기(직접 project_id 스코프).
+        victims = [cid for cid, c in self.entries.items() if c.project_id == project_id]
+        for cid in victims:
+            del self.entries[cid]
+
 
 class LlmCallAuditService:
     def __init__(
@@ -177,6 +185,10 @@ class LlmCallAuditService:
         self._repo = repository
         self._clock = clock or (lambda: datetime.now(UTC))
         self._id_factory = id_factory or (lambda: "llmc:" + uuid4().hex)
+
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6b-2: project 전체 파기의 llm-call-audit 다리. endpoint(D8-6d)가 호출한다.
+        self._repo.purge_project(project_id)
 
     def record(
         self, *, project_id: str, call_site: LlmCallSite,

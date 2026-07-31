@@ -104,6 +104,10 @@ class MongoWritingGenerationJobRepository:
             {"project_id": project_id, "draft_id": draft_id},
         ).sort([("created_at", DESCENDING), ("_id", DESCENDING)]))
 
+    def purge_project(self, project_id: str) -> None:
+        # D8-6b-2: project 의 generation job 전부 파기(직접 project_id 스코프).
+        self._jobs.delete_many({"project_id": project_id})
+
 
 def _doc(job: WritingGenerationJob) -> dict:
     return {
