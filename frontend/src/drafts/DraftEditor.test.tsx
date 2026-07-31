@@ -141,6 +141,10 @@ describe("DraftEditor", () => {
 
     expect(await screen.findByRole("heading", { name: "첫 장면" })).toBeInTheDocument();
     expect(screen.getByLabelText("원고 본문")).toHaveValue("");
+    // K-4 (plans/context-budget-korean-tokens-decisions.md:655): 원고 본문에 hard maxLength 가
+    // 없어야 한다 — 붙여넣기가 잘려 정본이 소리 없이 손상되는 일을 막는다(정본 보존 정책).
+    // under-strict: 누가 textarea 에 maxLength 를 추가하면 이 줄이 문다.
+    expect(screen.getByLabelText("원고 본문")).not.toHaveAttribute("maxlength");
     expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       "/api/projects/p1",
