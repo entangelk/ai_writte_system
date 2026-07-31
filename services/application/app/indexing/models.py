@@ -26,6 +26,9 @@ class IndexSyncBackend(StrEnum):
 
 class IndexSyncEvent(StrEnum):
     PROJECT_ARCHIVED = "project_archived"
+    # D8-6a: project 전체 그래프 파기. drain은 D8-6c에서 연결한다 — a 단계엔 production
+    # 호출자가 없어 worker가 이 entry를 만나지 않는다("정의됐으나 drain 대기" 상태).
+    PROJECT_PURGED = "project_purged"
     DRAFT_ARCHIVED = "draft_archived"
     # Phase 2B.5: apply minted/versioned a canonical memory; reindex it.
     MEMORY_UPSERTED = "memory_upserted"

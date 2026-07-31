@@ -25,7 +25,7 @@
 
 ## 지금 상태
 
-- 정본은 `docs/system-contract-sot.md` **v1.7.68**(Approved). 미확정 항목은 추측 구현하지 않는다.
+- 정본은 `docs/system-contract-sot.md` **v1.7.69**(Approved). 미확정 항목은 추측 구현하지 않는다.
 - **진행 중 페이즈 = 다중 사용자 인증(D8).** 오너 지시로 **슬라이스를 잘게 쪼개 진행 중**이다(한 번에 큰 덩어리 금지). 진행표:
 
   | 슬라이스 | 상태 | 내용 |
@@ -41,7 +41,8 @@
   | **5-a** | **완료** | `require_admin_user` + 관리자 tier 전수 가드 + `/admin/users` 목록·생성·비활성화 |
   | **5-c** | **완료** | 전역 관측 KPI `GET /admin/observability/kpi` — 감사 저장소 전역 조회 + 집계 재사용 |
   | **5-b·5-d** | **차단** | 전 프로젝트 목록 · 관리자 화면 — **오너 결정 C-1~C-6 선행**(브리프 §7) |
-  | **6·7** | 미착수 | 영구 삭제 → **D8-7 Mongo·ES 인프라 인증**(외부 노출 금지 해제 조건) |
+  | **6 (D8-6a)** | **D8-6a 완료** | 영구 삭제 — **D8-6a 완료**(core_sot 8컬렉션 파기 인터페이스 + `PROJECT_PURGED` 이벤트, **endpoint 없음**). b(derived 10)·c(vector/drain)·d(endpoint) 후속. 부분 삭제 고아 위험(D5) → endpoint는 d에서만 |
+  | **7** | 미착수 | **D8-7 Mongo·ES 인프라 인증**(외부 노출 금지 해제 조건) |
 
 - **D8-3 E1~E4 = 전부 A로 확정** — `plans/auth-d8-3-enforcement-decisions.md`(Resolved). `owner_id=None`은 탈퇴·삭제 누락 같은 미래 비정상 잔존도 **항상 deny**. project 경로는 소유권, 그 외는 인증이며 `GET /projects`는 저장소 조회에서 본인 소유만 반환한다.
 - **HTTP 인증·프로젝트 인가는 섰고 결합 감사까지 닫혔다.** 세션 없는 요청은 `/health`와 공개 `/auth` 두 곳을 빼고 401, project-scoped **59 operation**은 타인 소유·`owner_id=None`에 403이다. `GET /projects`는 Mongo `owner_id` 쿼리 경계에서 본인 소유만 반환한다. **D8-7 Mongo·ES 인프라 인증 전까지 외부 노출 금지는 유지** — 남은 위험은 HTTP가 아니라 인프라 무인증이다.

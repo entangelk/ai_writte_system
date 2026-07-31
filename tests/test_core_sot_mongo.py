@@ -592,6 +592,48 @@ class _MongoContractMixin:
         # SoT §113: source_refs are preserved after archive.
         self.assertEqual(self.repo.get_source_ref(source_ref.id), source_ref)
 
+    def test_purge_removes_entire_project_graph(self):
+        # D8-6a: project 전체 그래프 영구 파기(mongo, transaction/fallback 양쪽).
+        project, draft = self._project_and_draft()
+        saved = self.service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text="# Chapter 1\n\nOpening.\n\n---\n\nNext scene.",
+            idempotency_key="save-1",
+        )
+        source_ref = self.service.create_source_ref(
+            project_id=project.id,
+            snapshot_id=saved.snapshot.id,
+            start_offset=0,
+            end_offset=len("Chapter"),
+        )
+        # 인접 project(과삭제 감지).
+        other, other_draft = self._project_and_draft()
+        other_saved = self.service.save_draft(
+            project_id=other.id,
+            draft_id=other_draft.id,
+            raw_text="# Other\n\nText.",
+            idempotency_key="save-1",
+        )
+
+        self.service.purge_project(project_id=project.id)
+
+        # 대상 그래프 전부 제거(under-strict: 한 컬렉션이라도 남기면 실패).
+        self.assertIsNone(self.repo.get_project(project.id))
+        self.assertEqual(self.repo.list_drafts(project_id=project.id), ())
+        self.assertIsNone(self.repo.get_version(saved.draft_version.id))
+        self.assertIsNone(self.repo.get_snapshot(saved.snapshot.id))
+        self.assertEqual(self.repo.get_blocks(saved.snapshot.id), ())
+        self.assertIsNone(self.repo.get_source_ref(source_ref.id))
+        # 인접 project 그래프는 그대로(over-strict: 인접까지 지우면 실패).
+        self.assertIsNotNone(self.repo.get_project(other.id))
+        self.assertEqual(len(self.repo.list_drafts(project_id=other.id)), 1)
+        self.assertIsNotNone(self.repo.get_version(other_saved.draft_version.id))
+
+    def test_purge_unknown_project_raises_not_found(self):
+        with self.assertRaises(NotFound):
+            self.service.purge_project(project_id="does-not-exist")
+
     def test_source_ref_get_enforces_project_isolation(self):
         project_a = self.service.create_project(name="A")
         project_b = self.service.create_project(name="B")

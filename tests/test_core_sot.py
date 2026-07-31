@@ -522,6 +522,70 @@ class CoreSotIsolationAndArchiveTest(unittest.TestCase):
         )
 
 
+class CoreSotPurgeTest(unittest.TestCase):
+    """D8-6a: project 전체 그래프 영구 파기(in-memory). 부분 삭제 고아/과삭제 양쪽을 잠근다."""
+
+    def test_purge_removes_entire_project_graph_and_leaves_others_intact(self):
+        service, repo = _service()
+        project = service.create_project(name="To Purge")
+        draft = service.create_draft(project_id=project.id, title="Episode 1")
+        saved = service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text="# Chapter 1\n\nOpening.\n\n---\n\nNext scene.",
+            idempotency_key="save-1",
+        )
+        # 인접 project: 같은 구조(과삭제 감지용).
+        other = service.create_project(name="Keep")
+        other_draft = service.create_draft(project_id=other.id, title="Episode 1")
+        other_saved = service.save_draft(
+            project_id=other.id,
+            draft_id=other_draft.id,
+            raw_text="# Other\n\nText.",
+            idempotency_key="save-1",
+        )
+
+        service.purge_project(project_id=project.id)
+
+        # 대상 그래프 전부 제거(under-strict: 한 컬렉션이라도 남기면 실패).
+        self.assertNotIn(project.id, repo.projects)
+        self.assertNotIn(draft.id, repo.drafts)
+        self.assertNotIn(saved.draft_version.id, repo.versions)
+        self.assertNotIn(saved.snapshot.id, repo.snapshots)
+        self.assertNotIn(saved.snapshot.id, repo.blocks_by_snapshot)
+        self.assertEqual(repo.list_drafts(project_id=project.id), ())
+        # 인접 project 그래프는 그대로(over-strict: 인접까지 지우면 실패).
+        self.assertIn(other.id, repo.projects)
+        self.assertIn(other_draft.id, repo.drafts)
+        self.assertIn(other_saved.draft_version.id, repo.versions)
+        self.assertIn(other_saved.snapshot.id, repo.snapshots)
+        self.assertIn(other_saved.snapshot.id, repo.blocks_by_snapshot)
+
+    def test_purge_unknown_project_raises_not_found(self):
+        service, _repo = _service()
+        with self.assertRaises(NotFound):
+            service.purge_project(project_id="does-not-exist")
+
+    def test_purge_leaves_no_residue_repurge_raises_not_found(self):
+        # 뮤테이션: 파기가 숨은 잔류를 남기면 재파기나 재접근이 꼬인다. 파기 직후 대상
+        # project는 get_project 도 None 이고 재파기는 NotFound 다(부분 잔류 금지).
+        service, repo = _service()
+        project = service.create_project(name="To Purge")
+        draft = service.create_draft(project_id=project.id, title="Episode 1")
+        service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text="text",
+            idempotency_key="save-1",
+        )
+
+        service.purge_project(project_id=project.id)
+
+        self.assertNotIn(project.id, repo.projects)
+        with self.assertRaises(NotFound):
+            service.purge_project(project_id=project.id)
+
+
 class CoreSotExportTest(unittest.TestCase):
     def test_export_body_matches_selected_version_verbatim(self):
         # Acceptance: exported body equals the selected version's snapshot, with

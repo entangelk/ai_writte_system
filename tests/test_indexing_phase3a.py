@@ -277,6 +277,21 @@ class IndexSyncOutboxServiceTest(unittest.TestCase):
         # targets on claim, so the entry starts with no targets.
         self.assertEqual(entry.targets, {})
 
+    def test_project_purge_creates_pending_outbox_entry(self):
+        # D8-6a: entry만 생산한다. drain(handler)은 D8-6c에서 붙인다 — endpoint(D8-6d)가
+        # 유일한 production 호출자이므로 그 전엔 worker가 이 entry를 만날 일이 없다.
+        # (PROJECT_ARCHIVED 와 같은 sink-agnostic PENDING entry 구조를 따른다.)
+        repo = InMemoryIndexSyncRepository()
+        service = IndexSyncOutboxService(repo)
+
+        entry = service.enqueue_project_purged(project_id="project-1")
+
+        self.assertEqual(entry.project_id, "project-1")
+        self.assertEqual(entry.event, IndexSyncEvent.PROJECT_PURGED)
+        self.assertEqual(entry.source.mongo_collection, PROJECTS_COLLECTION)
+        self.assertEqual(entry.source.mongo_id, "project-1")
+        self.assertEqual(entry.status, IndexSyncStatus.PENDING)
+
     def test_draft_archive_creates_distinct_dedup_source(self):
         service = IndexSyncOutboxService(InMemoryIndexSyncRepository())
 

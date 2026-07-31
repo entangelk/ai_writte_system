@@ -655,3 +655,52 @@
 - **머신 상태 재확인(검증자 outstanding 폐쇄)**: 검증자는 다른 머신이라 `docker compose ps` 재확인을
   못 했다. **알파에서 직접 재확인**: healthy 9 + 워커 2, `/props` **n_ctx=32768** — "스택이 창 32768로
   떠 있다" 작업자 주장이 확인됐다.
+
+---
+
+## Task — 인증 D8-6a: project 영구 파기 core_sot 인터페이스 + outbox 이벤트 (SoT v1.7.69)
+
+### Goals
+
+- D8-6(영구 삭제, D5=A)의 **첫 서브슬라이스**. 전체 D8-6은 "잘게 쪼갠다"(D8) + "부분 삭제 고아
+  금지"(D5) 긴장을 풀기 위해 4개로 분할(a core_sot · b derived · c vector/drain · d endpoint)하고,
+  **endpoint는 d에서만** 추가한다 — endpoint가 유일한 production 호출자이므로 그 전엔 고아 데이터
+  (정본만 파기하고 vector 잔류 → 타 project 검색에 뜸)가 생길 수 없다.
+- 이 슬라이스(a): core_sot 8컬렉션 파기 인터페이스 + outbox `PROJECT_PURGED` 이벤트 정의. **endpoint 없음**.
+
+### Completed work — 구현 (코드 변경)
+
+- `IndexSyncEvent.PROJECT_PURGED`(indexing/models.py) + `enqueue_project_purged`(indexing/service.py,
+  `enqueue_project_archived`의 복사; **drain은 연결하지 않는다** — a 단계엔 production 호출자가 없어
+  worker가 이 entry를 만날 일이 없다).
+- `CoreSotRepository.purge_project`(Protocol) + in-memory 구현(직접 project_id 스코프 6 + snapshot 체인
+  2) + mongo 구현(`_use_transactions` 분기 재사용, 한 트랜잭션에서 직접 6 `delete_many` + version→
+  snapshot_id 집합 수집 후 snapshots·blocks `$in` 삭제; 기존 orphan-prune 순회와 동일 패턴).
+- `CoreSotService.purge_project`(`archive_project` 구조 재사용 — `_require_project`→NotFound 후 repo 위임,
+  **enqueue하지 않는다**: enqueue는 endpoint D8-6d에서 archive와 같은 시점에).
+
+### Verification — 핵심 회귀 (host, argon2-cffi OK)
+
+- in-memory + indexing: `test_core_sot.py`·`test_indexing_phase3a.py` **64 passed**(1.2s). `CoreSotPurgeTest`
+  3건(전체 그래프 제거 + 인접 유지 · 부재 NotFound · 잔류 없음 재파기) + `enqueue_project_purged` entry
+  shape contract.
+- mongo(양쪽 transaction 경로 자동 커버): `test_core_sot_mongo.py` **76 passed**(22s). `_MongoContractMixin`의
+  파기 테스트 2건이 `FallbackMongoTest`(use_transactions=False)·`TransactionMongoTest`(True)·
+  `WritingIntentMongoTest`(True) 모두 통과.
+- **endpoint 미추가** → operation 카운트 단정(`CombinedBoundaryMatrixTest`의 `len(tiers)` 등)은 **무변** —
+  이것이 a에서 endpoint를 빼는 부수 이유다.
+- test-mongo 기동 시 **stale 네트워크 참조** 오류(`network ... not found`) → `docker rm -f` 후 재기동으로
+  해소(옛 컨테이너가 사라진 네트워크를 잡고 있었다).
+
+### Decisions
+
+- **endpoint는 D8-6d에서만**(고아 데이터 위험 회피의 핵심 통제).
+- **감사(`AdminActionAuditRepository`)는 별도 슬라이스 추천** — 브리프 D5는 "감사 로그 UI"만 후속 명시하고
+  저장은 미명시, 기존 admin 작업(사용자 생성·비활성화)도 감사를 남기지 않는다.
+- **파기 권한 = 관리자, 승격(F1) 불필요**(내용을 읽지 않음) — ExitPlanMode 승인으로 착수 전 확인 완료.
+
+### Next steps
+
+- **D8-6b**: derived mongo 10컬렉션(memory·analysis 3·writing 3·observability·context_search·review) 파기.
+- **D8-6c**: vector/index 4백엔드 project-scoped delete + worker `PROJECT_PURGED` drain handler.
+- **D8-6d**: `POST /admin/projects/{id}/purge` endpoint + `_REQUIRE_ADMIN` + boundary matrix(ADMIN tier +1·총 +1).

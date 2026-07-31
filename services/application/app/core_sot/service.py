@@ -168,6 +168,66 @@ class InMemoryCoreSotRepository:
             if project.owner_id == owner_id
         )
 
+    def purge_project(self, project_id: str) -> None:
+        # D8-6a: project 전체 그래프 영구 파기(in-memory). 직접 project_id 스코프 6곳 +
+        # snapshot 체인(snapshots·blocks_by_snapshot). 인접 project 레코드는 건드리지 않는다.
+        snapshot_ids = [
+            sid
+            for sid, snapshot in self.snapshots.items()
+            if snapshot.project_id == project_id
+        ]
+        for sid in snapshot_ids:
+            self.snapshots.pop(sid, None)
+            self.blocks_by_snapshot.pop(sid, None)
+
+        version_ids = [
+            vid
+            for vid, version in self.versions.items()
+            if version.project_id == project_id
+        ]
+        for vid in version_ids:
+            del self.versions[vid]
+        self._save_request_index = {
+            key: vid
+            for key, vid in self._save_request_index.items()
+            if key[0] != project_id
+        }
+
+        draft_ids = [
+            draft.id
+            for draft in self.drafts.values()
+            if draft.project_id == project_id
+        ]
+        for draft_id in draft_ids:
+            self.drafts.pop(draft_id, None)
+            self._version_ids_by_draft.pop(draft_id, None)
+
+        ref_ids = [
+            rid
+            for rid, ref in self.source_refs.items()
+            if ref.project_id == project_id
+        ]
+        for rid in ref_ids:
+            del self.source_refs[rid]
+
+        # key = (project_id, idempotency_key)
+        self._writing_accept_receipts = {
+            key: receipt
+            for key, receipt in self._writing_accept_receipts.items()
+            if key[0] != project_id
+        }
+
+        brief_ids = list(self._project_brief_ids_by_project.pop(project_id, ()))
+        for brief_id in brief_ids:
+            self.project_brief_versions.pop(brief_id, None)
+        self._project_brief_request_index = {
+            key: bid
+            for key, bid in self._project_brief_request_index.items()
+            if key[0] != project_id
+        }
+
+        self.projects.pop(project_id, None)
+
     def get_current_project_brief(
         self, project_id: str
     ) -> ProjectBriefVersion | None:
@@ -869,6 +929,13 @@ class CoreSotService:
         archived = replace(draft, archived=True)
         self._repo.put_draft(archived)
         return archived
+
+    def purge_project(self, *, project_id: str) -> None:
+        # D8-6a: project 전체 그래프 영구 파기(관리자 전용 operation, D5=A). archive와 달리
+        # enqueue하지 않는다 — enqueue는 endpoint(D8-6d)에서 archive와 같은 시점에 한다.
+        # NotFound 끌어올림은 _require_project에서(엔드포인트가 404로 매핑).
+        self._require_project(project_id)
+        self._repo.purge_project(project_id)
 
     def _save_result(self, version_id: str, *, idempotent_replay: bool) -> SaveDraftResult:
         version = self._repo.get_version(version_id)

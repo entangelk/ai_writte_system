@@ -334,6 +334,20 @@ class IndexSyncOutboxService:
             ),
         )
 
+    def enqueue_project_purged(
+        self, *, project_id: str
+    ) -> IndexSyncOutboxEntry:
+        # D8-6a: entry만 생산. drain(handler)은 D8-6c에서 붙인다 — endpoint(D8-6d)가 유일한
+        # production 호출자이므로, 그 전엔 worker가 이 entry를 만날 일이 없다.
+        return self._enqueue_event(
+            project_id=project_id,
+            event=IndexSyncEvent.PROJECT_PURGED,
+            source=IndexSyncSource(
+                mongo_collection=PROJECTS_COLLECTION,
+                mongo_id=project_id,
+            ),
+        )
+
     def enqueue_draft_archived(
         self, *, project_id: str, draft_id: str
     ) -> IndexSyncOutboxEntry:

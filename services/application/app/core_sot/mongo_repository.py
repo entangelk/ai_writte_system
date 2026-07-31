@@ -175,6 +175,40 @@ class MongoCoreSotRepository:
         cursor = self._projects.find({"owner_id": owner_id}).sort("_id", ASCENDING)
         return tuple(_to_project(doc) for doc in cursor)
 
+    def purge_project(self, project_id: str) -> None:
+        # D8-6a: project 전체 그래프 영구 파기. 직접 project_id 스코프 6컬렉션 + snapshot
+        # 체인(snapshots·blocks)을 한몸처럼 지운다. 인접 project 레코드는 project_id 스코프가
+        # 다르므로 영향이 없다.
+        if self._use_transactions:
+            with self._client.start_session() as session:
+                with session.start_transaction():
+                    self._purge_project(project_id, session=session)
+            return
+        self._purge_project(project_id, session=None)
+
+    def _purge_project(self, project_id: str, *, session) -> None:
+        # snapshot 체인: 이 project의 version 들이 가리키는 snapshot_id 집합을 모아
+        # snapshots·blocks 를 지운다(snapshots 는 _id=snapshot_id, blocks 는 snapshot_id 필드).
+        snapshot_ids = [
+            doc["snapshot_id"]
+            for doc in self._versions.find(
+                {"project_id": project_id}, {"snapshot_id": 1}, session=session
+            )
+        ]
+        if snapshot_ids:
+            self._snapshots.delete_many({"_id": {"$in": snapshot_ids}}, session=session)
+            self._blocks.delete_many(
+                {"snapshot_id": {"$in": snapshot_ids}}, session=session
+            )
+        self._versions.delete_many({"project_id": project_id}, session=session)
+        self._drafts.delete_many({"project_id": project_id}, session=session)
+        self._source_refs.delete_many({"project_id": project_id}, session=session)
+        self._writing_accept_receipts.delete_many(
+            {"project_id": project_id}, session=session
+        )
+        self._project_briefs.delete_many({"project_id": project_id}, session=session)
+        self._projects.delete_one({"_id": project_id}, session=session)
+
     def get_current_project_brief(
         self, project_id: str
     ) -> ProjectBriefVersion | None:
