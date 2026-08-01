@@ -260,3 +260,37 @@ hardening #1·#2를 보강. #3(SoT)은 오너 결정 대기, #4(composite 관측
 - **6a(core_sot 8)·6b(derived 10)·6c(vector/index 백엔드 + worker drain)·6d(endpoint) 전부 완료**. 회귀 1820 passed.
 - **남은**: 프론트 purge UI(D8-5 admin 화면 오너 결정 C-1~C-6 선행), 감사 로그(별도 슬라이스 추천),
   완전 멱등 재시구(부분 실패 edge case). frontend `schema.d.ts` 재생성(gen:api)은 백엔드 확정 후.
+
+---
+
+## D8-6d 검증 후속 — blocking #1 해소 + schema.d.ts 재생성 (기록 보강)
+
+독립 검증(`docs/verifications/2026-08-01/d8_6d_purge_endpoint.md`, **조건부 합격**)의 조건 해소와
+프론트 스키마 재생성을 커밋(`3e04884`·`527551e`)했으나 work_log 기록이 빠져 있어 여기 남긴다.
+
+### blocking #1 — endpoint→derived purge wiring 회귀 부재 (`3e04884`)
+
+- **검증자가 뮤테이션 A로 입증한 빈 칸**: endpoint 의 derived 8 service purge 호출(10컬렉션)을 **전부
+  제거해도 1820 passed / 0 failed**. core_sot(정본)+enqueue(vector/index)는 잠겨 있었으나 중간
+  derived 층만 어떤 회귀에도 안 잡혀, 리팩터링 누락 시 **조용한 고아**(D5 부분 삭제 금지 위반).
+- **보강**: `_PurgeSpy`(purge_project 호출 기록, 그 외 `__getattr__` 로 inner 위임) + `_client` 에
+  `memory_service`·`analysis_service` 주입 인자 추가. `AdminProjectPurgeTest` 가 두 spy 를 주입하고
+  `test_admin_purge_fans_out_to_derived_services` 로 fan-out 을 단언.
+- **양방향 뮤테이션**: endpoint 에서 memory·analysis purge 누락 → 해당 셀 re-fail(`spy.purged == []`).
+  복구 후 green(4 passed).
+- **대표 2개로 한정한 이유**: 8 derived 중 memory·analysis 가 실 데이터를 가장 많이 만드는 축이고,
+  나머지 6(review·gate·writing 3·llm)은 endpoint 본문 + 6b 회귀가 각 service purge 자체를 덮는다.
+  빈 칸이었던 것은 **endpoint 가 부르는지 여부**이며 대표 2 spy 가 그 칸을 닫는다.
+
+### schema.d.ts 재생성 (`527551e`)
+
+- `npm run gen:api`(dump_openapi.py → openapi-typescript). 6d 의 `POST /admin/projects/{project_id}/purge`
+  (204)가 schema 에 추가(operations 3곳). `tsc --noEmit` green. **프론트 purge UI 자체는 D8-5 admin
+  화면 오너 결정 C-1~C-6 선행**이라 이번 범위 아님.
+
+### Verification (본 세션 재실측)
+
+- **전량(test-mongo ON, 97.5s)**: **1821 passed / 4 skipped / 1532 subtests** — 6d 직후 1820 대비
+  **+1 = `test_admin_purge_fans_out_to_derived_services`, 회귀 0건**. skip·subtests 동일.
+- 검증 문서의 남은 non-blocking: #2 완전 멱등 재시구(별도 슬라이스) · #3 SoT "완성" 표현(이제
+  wiring lock 이 붙어 근거 성립) · #4 `ProjectAuthorizationTest` 예외 `pass` 의 외과성(사소).
