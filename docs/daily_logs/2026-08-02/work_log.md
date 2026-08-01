@@ -149,6 +149,60 @@ Blocking 0건. 검증자가 뮤테이션 3종·회귀 1836/103.30s·compose 리�
 - **전량 회귀(hardening 후 최종)**: **1837 passed / 4 skipped / 1556 subtests / 103.02s**, exit 0.
   직전 1836 대비 **+1 = `ComposeParserTest`**, 회귀 0건. 08-01 기준선 1831 대비 +6/+7.
 
+---
+
+## 런타임 반영 — 스택 재생성 (오너 결정: "down 후 즉시 up -d까지")
+
+검증 Outstanding §1(옛 컨테이너가 옛 매핑 보유)을 오너가 **재생성**으로 닫기로 했다.
+
+### 절차와 실측
+
+- `docker compose -f docker-compose.yml -f docker-compose.llama.yml down` — llama override를 함께 준
+  이유는 `llama-1`을 **정의된 서비스로** 처리하기 위함이다(base만 주면 orphan이 된다).
+  named 볼륨 **5개 전부 보존** 확인(`mongo_data`·`es_data`·`chroma_data`·`embedding_cache`·`llama_models`).
+- `docker compose up -d` — **base만**. llama override를 뺀 것은 판단이다: `-hf`가 리비전을 고정하지
+  않아 **6.5 GB 재다운로드 위험**이 있고(추적 부채), 창 기본값이 8192라 report 경로가 K-3 가드에
+  400으로 막힌다(★ 함정). 이 머신에 `.env`는 **없다**.
+- **런타임 포트 매핑(`docker port` 실측)** — G1=C가 런타임에서 닫힌 것의 직접 증거:
+
+  | 서비스 | 매핑 | |
+  |---|---|---|
+  | mongo · chroma · elasticsearch · gateway · embedding | `127.0.0.1:27520/8523/9520/8521/8522` | loopback ✓ |
+  | application · frontend | `0.0.0.0:8520` · `0.0.0.0:5520` (+ `[::]`) | 의도된 공개 ✓ |
+
+- **★ LAN 도달성 직접 측정**(호스트 LAN IP `172.30.135.149`로 TCP 연결 시도) — 파일도 `docker port`도
+  아닌 **네트워크 수준의 최종 증거**:
+  - 저장소·내부 5종: **loopback OPEN / LAN closed** (5/5)
+  - `application`·`frontend`: **LAN OPEN** (의도)
+- health: **healthy 7 + 워커 2**(healthcheck 없는 by design) = 문서화된 정상 상태.
+
+### ★★ 재생성이 드러낸 것 — 실행 중이던 이미지가 *인증 없는 제품*이었다
+
+- `application` 이미지가 **2026-07-22 빌드**로 **auth 슬라이스(D8-1~6) 전체보다 앞선다**. 실측:
+  **`POST /auth/login` → 404**, **`GET /projects` → 세션 없이 200**. 즉 HTTP 인증 시행이 통째로 없다.
+- **이것이 왜 이 슬라이스의 문제인가**: G1=C가 `application`·`frontend`의 LAN 공개를 유지한 근거가
+  **"이 둘은 세션 뒤에 있다"**였다. 오래된 이미지에서는 **그 근거가 성립하지 않는다.** 재생성으로
+  스택을 올리는 순간 나는 LAN에 **무인증 API를 게시**한 것이고, 발견 즉시 `docker compose stop
+  application frontend`로 닫은 뒤(LAN 8520·5520 closed 확인) 두 이미지를 재빌드했다.
+- **HANDOFF 부채 서술을 정정했다.** 종전 항목은 "임포트 체인이 `ModuleNotFoundError`로 **죽는다**"고
+  적었는데 **실측은 반대**다 — 그 시점 코드에는 `argon2` import 자체가 없어 **앱이 정상 기동해
+  healthy를 보고한다**. `import argon2`가 실패한다는 관측은 맞았고 **거기서 추론한 증상이 틀렸다**.
+  죽으면 즉시 알지만 healthy는 안 보이므로 **종전 서술이 위험을 과소평가**하고 있었다.
+- **규칙으로 남겼다**: 스택을 올린 뒤 **`curl :8520/projects`가 401인지 확인**한다. 200이면 이미지가
+  낡은 것이다. 이것은 파일→`docker port`→**앱 행동**으로 이어지는 세 번째 확인 층이며, 검증자가
+  잡은 "파일 수준에서만 참" 함정의 같은 계보다.
+
+### 재빌드 후 최종 실측 (런타임 확인 3층 전부)
+
+- 이미지: `application`·`frontend` 둘 다 **2026-08-02 빌드**, 새 이미지에 **`argon2 23.1.0`** 포함.
+- **앱 행동**: `GET /projects` **401**(종전 200) · `POST /auth/login` **존재**(종전 404) · `/health` 200.
+  = D8-3 인증 시행이 런타임에 실제로 섰다.
+- **포트 매핑**: 저장소·내부 5종 `127.0.0.1` / `application`·`frontend` `0.0.0.0` (재확인).
+- **LAN 도달성**: 저장소 5종 closed / 제품 표면 2종 OPEN (재확인).
+- **health**: healthy 7 + 워커 2. 볼륨 5개 보존.
+- **정리**: 이제 `application`·`frontend`의 LAN 공개가 **세션 뒤에 있다**는 G1=C의 전제가 런타임에서도
+  참이다. 재빌드 전에는 그 전제가 거짓이었고, 그 간극이 이 세션에서 가장 위험한 발견이었다.
+
 ### Next steps
 
 - **D8-7의 남은 반(G2~G6 = 자격증명)은 원격/다중 호스트 배포 시점**이다. 브리프에 실행 계획으로 남았다.
