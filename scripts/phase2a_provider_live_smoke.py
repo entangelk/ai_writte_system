@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import os
+import secrets
 import sys
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,12 @@ from services.application.app.analysis.service import (
     InMemoryAnalysisRepository,
 )
 from services.application.app.analysis.source import CoreSotSourceAdapter
+from services.application.app.auth.password import Argon2PasswordHasher
+from services.application.app.auth.sessions import (
+    InMemorySessionRepository,
+    SessionService,
+)
+from services.application.app.auth.users import InMemoryUserRepository, UserService
 from services.application.app.core_sot.service import (
     CoreSotService,
     InMemoryCoreSotRepository,
@@ -40,9 +47,16 @@ from services.llm_gateway.app.httpx_transport import HttpxJsonTransport
 from services.llm_gateway.app.main import create_app as create_gateway_app
 from services.llm_gateway.app.payload import ChatCompletionRequest
 from services.llm_gateway.app.provider import GenerationResult, LLMProvider
+from scripts.script_auth import authenticate_client
 
 
 DEFAULT_LLAMA_BASE_URL = "http://192.168.1.29:9080"
+
+# D8-3a put every application route behind a session, and this smoke drives the
+# app in-process (ASGITransport) with in-memory stores — so unlike the deployed
+# scripts it has no operator account to borrow and nothing that outlives the
+# run. It mints a throwaway one instead of asking for credentials.
+_SMOKE_USERNAME = "phase2a-live-smoke"
 DEFAULT_MODEL = "google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0"
 
 
@@ -119,10 +133,18 @@ async def main() -> int:
                 max_tokens=args.max_tokens,
             ),
         )
-        app = create_application_app(core_sot, analysis, runner)
+        users = UserService(InMemoryUserRepository(), hasher=Argon2PasswordHasher())
+        smoke_password = secrets.token_urlsafe(24)
+        users.create_user(username=_SMOKE_USERNAME, password=smoke_password)
+        app = create_application_app(
+            core_sot, analysis, runner,
+            user_service=users,
+            session_service=SessionService(InMemorySessionRepository()),
+        )
         summary = await _run_smoke(
             app=app,
             args=args,
+            password=smoke_password,
             provider=gateway_provider,
         )
     finally:
@@ -140,6 +162,7 @@ async def _run_smoke(
     app,
     args: argparse.Namespace,
     provider: "_RecordingProvider",
+    password: str,
 ) -> dict[str, Any]:
     raw_text = (
         "민아는 파란 편지를 발견했다.\n\n"
@@ -150,6 +173,9 @@ async def _run_smoke(
         base_url="http://application-smoke",
         timeout=httpx.Timeout(args.timeout_seconds + 10),
     ) as client:
+        await authenticate_client(
+            client, username=_SMOKE_USERNAME, password=password
+        )
         project = (
             await client.post("/projects", json={"name": "Phase 2A Live Smoke"})
         ).json()

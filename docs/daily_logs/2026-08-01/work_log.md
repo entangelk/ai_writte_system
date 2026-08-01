@@ -364,3 +364,60 @@ hardening #1·#2를 보강. #3(SoT)은 오너 결정 대기, #4(composite 관측
   썩는다. 배선 전수 가드가 새 스크립트의 누락을 잡는다.
 - **워커는 범위 밖** — HTTP 를 안 쓰고 Mongo 에 직접 붙는다(D8-7 사안).
 - SoT 무변: 공개 API·계약 변화 없음(스크립트는 계약 소비자다).
+
+---
+
+## Hardening — 검증(2026-08-01) 스크립트 로그인 슬라이스 지적 3건 반영
+
+독립 검증이 **"8종 전부 배선했다"는 주장이 거짓**임을 잡았다(실제 9종). 지적 3건 전부 반영.
+
+### #1 [중간, 실 결함] 배선 누락 — `phase2a_provider_live_smoke.py`
+
+- **재현(독립)**: `create_application_app(core_sot, analysis, runner)` 로 앱을 in-process 로 띄우고
+  `ASGITransport` + `http://application-smoke` 로 `/projects` 등 8개 route 를 친다. session_service 를
+  안 넘겨 `_default_session_service()` 가 서고 → **`POST /projects` → 401 `not authenticated`**
+  (스크래치 재현 실측). 배선 전 실제 증상은 401 본문에서 `KeyError: 'id'`.
+- **왜 놓쳤나**: 내 스윕 기준이 `application_base_url`·`application:8000` 문자열이었는데 이 스크립트는
+  ASGI 가상 호스트(`application-smoke`)를 쓴다. **"스크립트는 전부 application:8000" 전제가 틀렸다.**
+- **수정**: 이 스크립트는 **자기 스택 전체를 소유**하고 저장소가 전부 in-memory 라, 운영자 계정을 빌릴
+  곳도 실행 뒤 남는 것도 없다 → **일회용 계정을 직접 발급**한다(`secrets.token_urlsafe(24)` +
+  `InMemoryUserRepository`/`InMemorySessionRepository` 를 `create_app` 에 주입) 후
+  `authenticate_client(client, username=…, password=…)`. 이를 위해 `authenticate_client` 에
+  **`password` 인자 추가**(기본은 종전대로 env) — 로그인 경로는 여전히 한 곳이다.
+- **라이브 확인**: 죽은 llama(`127.0.0.1:9`)를 가리켜 실행 → project 생성·source_ref 3건·job 실행까지
+  **인증 통과**, `final_job.status=failed`(llama 부재 — 인증 아님).
+
+### #2 [낮음, 문서 정확성] "Secure 함정 때문에 헤더가 필수" 는 과장
+
+- **직접 재현**: 헤더 부착을 `client.cookies.set(...)` 으로 바꿔도 **테스트 통과**. 손으로 넣은 쿠키는
+  Secure 플래그가 없어 plain http 로도 나간다. 검증자 지적이 맞다.
+- **판단: 가드를 조이지 않는다.** 회귀는 *행동*(다음 요청에 세션이 실린다)을 잠그는 것이고 `cookies.set`
+  은 실제로 동작하는 구현이므로, 헤더 전용 단정으로 바꾸면 **정상 구현을 깨는 과잉 교정**이 된다.
+  대신 **주장 쪽을 고쳤다** — `script_auth` docstring·테스트 docstring·HANDOFF 를 "명시 헤더가 필수"에서
+  **"로그인 응답 쿠키를 jar 자동 왕복에 맡기면 안 된다(헤더든 명시 set 이든 jar 밖으로 꺼내라)"** 로.
+  테스트 docstring 에 "이 셀을 헤더 전용으로 조이지 말 것"을 근거와 함께 남겼다.
+
+### #3 [낮음] 배선 가드가 목록 밖 스크립트를 못 본다 → 디스커버리 가드 추가
+
+- 종전 `ScriptLoginWiringCoverageTest` 는 하드코딩된 목록만 검사해 **결함 #1 같은 미등록 스크립트를
+  구조적으로 못 잡았다**. HANDOFF 의 "새 스크립트는 목록에 넣는다"는 강제가 아니었다.
+- **추가**: `test_no_script_reaches_an_application_route_off_the_register` — `scripts/*.py` 를 읽어
+  앱 route 마커(`"/projects`, `\bseed_context\b`)가 있는데 레지스터에 없으면 실패. **디렉터리를 읽지
+  기억을 읽지 않는다.**
+- **이 가드가 즉시 10번째 후보를 잡았고, 그것은 오탐이었다**: `phase4_context_search_planner_live_smoke`
+  는 `seed_context_search_plan_template`(게이트웨이 전용) 때문에 걸렸다 → 마커를 **단어 경계 정규식**으로
+  좁혀 해소. 우는 늑대가 되는 가드는 곧 삭제되므로 오탐 제거가 가드의 일부다.
+- 레지스터를 **모드 dict** 로 바꿨다: `operator`(운영자 계정 — `--username` + env 필수) ·
+  `self_hosted`(자기 스택 소유 — 자체 credential). 9종 = operator 8 + self_hosted 1.
+
+### Verification
+
+- **양방향 뮤테이션 3종**(전부 역방향 Edit 원복):
+  - **C — provider_live 에서 `authenticate_client` 호출 삭제**: 레지스터 가드 subtest re-fail +
+    스크립트 실행이 `KeyError: 'id'`(401 본문)로 재현.
+  - **D — provider_live 를 레지스터에서 제거**: 디스커버리 가드 subtest re-fail
+    ("calls application routes but is not registered"). **#3 가드가 실제로 문다는 증거.**
+  - **A′ — 헤더를 `cookies.set` 으로 교체**: 통과(위 #2 판단의 근거 실측).
+- `tests/test_script_login.py` **10 passed / 17 subtests**(9 레지스터 + 8 디스커버리).
+- **전량(test-mongo ON)**: **1831 passed / 4 skipped / 1549 subtests** — 1830 대비 **+1 = 디스커버리
+  가드, subtests +9**. 회귀 0건.

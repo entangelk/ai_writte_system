@@ -72,19 +72,26 @@ async def login(
 
 
 async def authenticate_client(
-    client: httpx.AsyncClient, *, username: str | None
+    client: httpx.AsyncClient, *, username: str | None, password: str | None = None
 ) -> bool:
     """Log in and pin the session on ``client`` as an explicit Cookie header.
+
+    ``password`` defaults to the environment. Callers that own the whole app
+    (the in-process smoke) pass their own throwaway credential instead.
 
     Returns False when no credentials were supplied, so the caller stays
     anonymous exactly as before.
 
-    The header is deliberate: the session cookie ships ``Secure``, so httpx's
-    cookie jar silently refuses to send it back over plain http — which is what
-    every one of these scripts uses (``http://application:8000``). Relying on
-    the jar would look like it worked and still 401.
+    The header carries the token deliberately: the session cookie ships
+    ``Secure``, so **letting httpx's jar keep the login response's cookie** and
+    replay it silently sends nothing over plain http — which is what these
+    scripts use (``http://application:8000``, ``http://application-smoke``).
+    Putting the token somewhere the jar cannot veto is the requirement; an
+    explicit ``client.cookies.set`` would satisfy it too (the stored cookie
+    carries no Secure flag). What must not happen is relying on the automatic
+    jar round-trip: it looks like it worked and still 401s.
     """
-    password = password_from_env()
+    password = password or password_from_env()
     if not username or not password:
         return False
     token = await login(client, username=username, password=password)
