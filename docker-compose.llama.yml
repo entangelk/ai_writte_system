@@ -33,6 +33,12 @@ services:
     volumes:
       - llama_models:/models
     ports:
+      # Published to all interfaces on purpose (D8-7 G1=C). This is the one
+      # cross-machine dependency in the stack: the machine with the GPU serves
+      # the model to the machines that cannot host it (a beta pointing its
+      # LLAMA_BASE_URL at the alpha over the LAN is the normal setup). Binding
+      # it to loopback would cut that. It holds no project data — it is a model
+      # server — so the exposure is compute, not content.
       - "${LLAMA_PORT:-9080}:9080"
     deploy:
       resources:

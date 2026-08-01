@@ -5,8 +5,15 @@ services:
   mongo:
     image: mongo:7
     command: ["--replSet", "rs0", "--bind_ip_all"]
+    # Loopback-only publish (D8-7 G1=C). This store holds the canonical data and
+    # runs unauthenticated, so publishing it on 0.0.0.0 put it on the LAN for
+    # anyone to read. Binding the host side to 127.0.0.1 removes that exposure
+    # without any credential/keyfile setup. Containers are unaffected — they
+    # reach it as mongo:27017 over the compose network, not through this mapping.
+    # Host-side tooling (mongosh, scripts/migrate_ordered_units.py) still works
+    # because it connects over localhost.
     ports:
-      - "${MONGO_PORT:-27520}:27017"
+      - "127.0.0.1:${MONGO_PORT:-27520}:27017"
     volumes:
       - mongo_data:/data/db
     # Docker's default soft nofile here is 1024, and mongod warns at startup that
@@ -89,6 +96,10 @@ services:
       # RRF). Without it the app falls back to vector-only / Mongo-direct.
       ELASTICSEARCH_URL: "http://elasticsearch:9200"
     ports:
+      # Published to all interfaces on purpose (D8-7 G1=C). This is the only
+      # surface that is meant to be reached from another device, and it is the
+      # one surface that authenticates: every operation but /health and the
+      # public /auth pair is behind a session (v1.7.52/53/55).
       - "${APPLICATION_PORT:-8520}:8000"
     depends_on:
       mongo:
@@ -126,7 +137,11 @@ services:
       LLAMA_TIMEOUT_SECONDS: "${LLAMA_TIMEOUT_SECONDS:-120}"
       LLAMA_TRUST_ENV: "${LLAMA_TRUST_ENV:-false}"
     ports:
-      - "${GATEWAY_PORT:-8521}:8001"
+      # Loopback-only (D8-7 G1=C). The gateway is an internal boundary: the app
+      # calls it as gateway:8001 over the compose network. It holds no data, but
+      # it is an unauthenticated way to spend the LLM, so the LAN has no reason
+      # to reach it. Host-side checks (runbook curl, budget league) use localhost.
+      - "127.0.0.1:${GATEWAY_PORT:-8521}:8001"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -155,7 +170,9 @@ services:
       # Let the model download reach HuggingFace at first startup.
       HF_HOME: "/root/.cache/huggingface"
     ports:
-      - "${EMBEDDING_PORT:-8522}:8002"
+      # Loopback-only (D8-7 G1=C) — internal model server, reached as
+      # embedding:8002 by the app.
+      - "127.0.0.1:${EMBEDDING_PORT:-8522}:8002"
     volumes:
       # Cache the model across restarts so it is downloaded only once.
       - embedding_cache:/root/.cache/huggingface
@@ -182,7 +199,9 @@ services:
       IS_PERSISTENT: "TRUE"
       ANONYMIZED_TELEMETRY: "FALSE"
     ports:
-      - "${CHROMA_PORT:-8523}:8000"
+      # Loopback-only (D8-7 G1=C). Derived index, but it stores content
+      # fragments and project_id, so reading it is reading the content.
+      - "127.0.0.1:${CHROMA_PORT:-8523}:8000"
     volumes:
       # chromadb/chroma:0.5.23 stores persistent data under /chroma/chroma when
       # IS_PERSISTENT=TRUE. Mount that path so container recreation does not
@@ -215,7 +234,10 @@ services:
       xpack.security.enabled: "false"
       ES_JAVA_OPTS: "${ELASTICSEARCH_JAVA_OPTS:--Xms512m -Xmx512m}"
     ports:
-      - "${ELASTICSEARCH_PORT:-9520}:9200"
+      # Loopback-only (D8-7 G1=C). Runs with xpack.security.enabled=false
+      # (v1.6.53 G3=A), so the published port was an unauthenticated read of the
+      # lexical index. Not published to the LAN is the replacement for that.
+      - "127.0.0.1:${ELASTICSEARCH_PORT:-9520}:9200"
     volumes:
       # Persist the lexical index across container recreation. Like Chroma it is a
       # derived index rebuildable from Mongo, but keeping it avoids a reindex on
@@ -353,6 +375,9 @@ services:
       context: .
       dockerfile: services/frontend/Dockerfile
     ports:
+      # Published to all interfaces on purpose (D8-7 G1=C) — this is the product
+      # UI. It serves the SPA and reverse-proxies /api to application, so it
+      # inherits the same session boundary.
       - "${FRONTEND_PORT:-5520}:80"
     depends_on:
       application:

@@ -34,8 +34,11 @@ services:
       - "--bind_ip_all"
       - "--port"
       - "${TEST_MONGO_PORT:-27020}"
+    # Loopback-only (D8-7 G1=C). This one has to stay published because pytest
+    # runs on the host, but only the host needs it — the data is throwaway and
+    # there is no volume.
     ports:
-      - "${TEST_MONGO_PORT:-27020}:${TEST_MONGO_PORT:-27020}"
+      - "127.0.0.1:${TEST_MONGO_PORT:-27020}:${TEST_MONGO_PORT:-27020}"
     # Required, not tuning. The suite creates and drops a throwaway database per
     # test, so WiredTiger churns through far more file handles than a normal
     # deployment. Docker's default soft limit here is 1024 — mongod itself warns
