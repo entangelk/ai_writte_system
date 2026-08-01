@@ -31,7 +31,9 @@ _PLANS = _ROOT / "docs" / "plans"
 _VERIFICATIONS = _ROOT / "docs" / "verifications"
 
 # 마크다운 링크의 `.md` 대상만 뽑는다. 외부 URL·디렉터리·LICENSE 는 대상이 아니다.
-_LINK_RE = re.compile(r"\]\(([^)#]+\.md)\)")
+# `#절-제목` 앵커는 떼고 **파일 경로만** 본다 — 앵커가 붙었다는 이유로 검사에서 빠지면
+# 파일이 사라진 링크가 조용히 통과한다.
+_LINK_RE = re.compile(r"\]\(([^)#]+\.md)(?:#[^)]*)?\)")
 
 
 def _links_in(index: Path) -> list[str]:

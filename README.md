@@ -8,15 +8,65 @@
 모든 AI 출력(생성·분석)은 곧바로 정본이 되지 않고 **candidate**로 남아, Gate와 검토·결정적 승격을
 거쳐 기억으로 반영된다.
 
-## 문서
+## 이 저장소를 읽는 세 축
 
-- **정본 계약(먼저 읽기)**: [`docs/system-contract-sot.md`](docs/system-contract-sot.md)
-- **개발 계획 · 결정 브리프 인덱스**: [`docs/plans/README.md`](docs/plans/README.md)
-- **독립 검증 기록**: [`docs/verifications/README.md`](docs/verifications/README.md)
-- **현재 상태 스냅샷**: [`HANDOFF.md`](HANDOFF.md) · **마일스톤 이력**: [`CHANGELOG.md`](CHANGELOG.md)
-- **문서 안내**: [`docs/README.md`](docs/README.md) · **아이디에이션 원본**: [`docs/abstract.md`](docs/abstract.md)
+같은 시스템을 **기획 · 개발 · 서비스** 세 관점에서 문서로 남겼다. 어느 쪽이 궁금한지에 따라
+들어가는 문이 다르다.
 
-## 어떻게 만들어졌는가 (설계 결정과 검증)
+| 축 | 답하는 질문 | 시작점 |
+|---|---|---|
+| **[기획](#기획--무엇을-왜-만드는가)** | 무엇을 왜 만드는가. 어디까지가 MVP인가 | [`docs/abstract.md`](docs/abstract.md) · [`docs/observability-kpi-rationale.md`](docs/observability-kpi-rationale.md) |
+| **[개발](#개발--어떻게-만들어졌는가-설계-결정과-검증)** | 결정을 어떻게 내리고 어떻게 검증하는가 | [`docs/system-contract-sot.md`](docs/system-contract-sot.md) · [`docs/plans/README.md`](docs/plans/README.md) |
+| **[서비스](#서비스--어떻게-돌리고-지켜보는가)** | 어떻게 띄우고, 무엇을 보고, 어떻게 고치는가 | [`HANDOFF.md`](HANDOFF.md) · [`docs/runbooks/local-llama-server.md`](docs/runbooks/local-llama-server.md) |
+
+---
+
+## 기획 — 무엇을, 왜 만드는가
+
+### 풀려는 문제
+
+장편 창작에서 무너지는 것은 문장력이 아니라 **일관성**이다. 인물의 말투가 3장과 17장에서 다르고,
+20장 전에 죽은 인물이 되살아나고, 작가 자신도 "그때 그 설정이 뭐였더라"를 못 찾는다. 범용 챗봇은
+대화창을 벗어나면 아무것도 기억하지 못하므로 이 문제를 구조적으로 풀 수 없다.
+
+그래서 이 시스템의 중심은 생성 모델이 아니라 **기억**이다. 원고·설정·세계관·문체를 장기 기억으로
+축적하고, 글을 쓰는 시점마다 **필요한 조각만 검색해** 모델에 준다.
+
+### 제품 원칙 (기획 단계에서 못박은 것)
+
+- **AI 출력은 정본이 아니다.** 생성·분석 결과는 전부 **candidate**로 남고, Gate 판정과 사람의
+  검토를 거쳐야 기억이 된다. "AI가 쓴 것이 곧 사실"이 되는 순간 기억이 오염되기 때문이다.
+- **기억은 append-only.** 덮어쓰지 않고 버전을 쌓는다. 잘못된 갱신이 과거를 지우지 못한다.
+- **모든 주장에는 근거 포인터가 붙는다**(`source_ref`). "어디서 나온 설정인가"를 원문 위치까지
+  되짚을 수 있어야 작가가 AI의 판단을 검증할 수 있다.
+
+전체 구상과 대안 검토는 [`docs/abstract.md`](docs/abstract.md)에 있다 —
+**§1 핵심 제품 컨셉** · **§2 핵심 설계 원칙** · **§15 MVP 범위 제안** · **§16 핵심 위험과 대응**.
+확정된 제품 경계·불변 원칙은 [`docs/plans/00-foundations.md`](docs/plans/00-foundations.md)로 내려왔다.
+
+### 무엇을 먼저 만드는가 (Phase ↔ MVP)
+
+기술 의존성 순서(Phase)와 사용자에게 전달되는 가치 묶음(MVP)은 **1:1이 아니다.** 그 매핑을
+[`docs/plans/README.md`](docs/plans/README.md#phase와-mvp의-관계)에 표로 유지한다. 제품화에 필요하지만
+당장 급하지 않은 것들은 **트리거가 왔을 때 하나씩 여는 백로그**로 분리했다 —
+[`docs/plans/product-readiness-backlog.md`](docs/plans/product-readiness-backlog.md).
+
+### 운영 KPI 기획
+
+> **"지금 이 AI가 제대로 일하고 있는가?"** — LLM 파이프라인은 블랙박스라, 계측이 없으면 운영자는
+> **감으로** 프롬프트를 바꾸고 모델을 교체한다.
+
+[`docs/observability-kpi-rationale.md`](docs/observability-kpi-rationale.md)는 **어떤 운영 질문에
+답하기 위해 이 지표를 잡았고, 이 숫자로 어떤 의사결정을 내리는가**를 정리한 문서다. 코드 구조가
+아니라 기획 관점이며, 이 저장소에서 **제품/운영 기획 사고를 가장 직접적으로 보여주는 문서**다.
+
+- 지표를 새로 만들지 않고 **이미 있는 판단 AI(Gate)의 결정을 정량 점수로 재활용**했다.
+- 그 점수의 **한계를 함께 적었다** — Gate는 가장 심각한 지적 하나로 결정하므로 지적의 개수·조합은
+  버려진다. 의도된 단순화임을 명시하고 정밀화 경로를 로드맵으로 남겼다.
+
+---
+
+## 개발 — 어떻게 만들어졌는가 (설계 결정과 검증)
 
 이 저장소에서 **문서는 코드의 부산물이 아니라 선행 조건**이다. 아키텍처·계약 리터럴·정책처럼
 "조용히 고르면 나중에 되돌릴 수 없는" 선택은 코드를 쓰기 전에 **결정 브리프**로 올리고,
@@ -51,17 +101,76 @@
    `pymongo`가 naive datetime을 돌려줘 **유닛 46건이 전부 통과하는데 배포만 깨진** 사례처럼,
    테스트로는 안 보이는 것들이 재발 방지 형태로 적혀 있다.
 
-## 구성 (요약)
+---
 
-- **LLM Gateway** — llama.cpp 호환 provider 앞단(외부 Gemma Q4 endpoint 호출)
-- **Core SOT** — MongoDB 정본: project/draft/version/snapshot/source reference
-- **Analysis / Memory** — 구조화 기억 후보 추출 → 대조 → append-only canonical memory
-- **Indexing** — ChromaDB(vector) · Elasticsearch(nori lexical) 파생 인덱스
-- **Context Search** — 검증된 ContextPackage(정본 재조회 기반)
-- **Agent loop / Gate** — bounded flat loop, 출력 품질 통제
+## 서비스 — 어떻게 돌리고, 지켜보는가
 
-외부 의존(MongoDB · Chroma · Elasticsearch · 임베딩 서비스 · 외부 llama.cpp[Gemma Q4])은
-`docker-compose.yml`로 기동한다. 자세한 경계는 정본 계약 문서를 참고.
+**현재 단계는 로컬 1인 운영(dogfood 직전)이다.** 아래는 그 단계에서 실제로 하고 있는 것이며,
+"나중에 하겠다"는 계획이 아니라 돌아가는 절차다.
+
+### 구성
+
+| 서비스 | 역할 |
+|---|---|
+| **LLM Gateway** | llama.cpp 호환 provider 앞단. 실패 taxonomy·창 가드를 여기서 통제 |
+| **Core SOT** | MongoDB 정본 — project/draft/version/snapshot/source reference |
+| **Analysis / Memory** | 구조화 기억 후보 추출 → 대조 → append-only canonical memory |
+| **Indexing** | ChromaDB(vector) · Elasticsearch(nori lexical) 파생 인덱스 + async outbox 워커 |
+| **Context Search** | 정본 재조회 기반의 검증된 ContextPackage |
+| **Agent loop / Gate** | bounded flat loop, 출력 품질 통제 |
+| **Frontend** | React + TS SPA(nginx). 원고 작업공간 · Review Inbox · 관측 대시보드 |
+
+전 구성요소가 `docker compose up` 하나로 뜬다. **포트는 전용 대역으로 repo에 고정**돼 있어
+어느 머신에서든 같은 번호로 뜬다([`.env.example`](.env.example)에 값과 근거).
+
+### 어디까지 노출하는가
+
+저장소(MongoDB · Elasticsearch · Chroma)와 내부 서비스는 **`127.0.0.1`에만 바인드**한다.
+LAN에 열리는 것은 **인증 뒤에 있는 제품 표면 둘**(application · frontend)과, GPU 없는 머신에
+모델을 주는 llama 서버뿐이다. 이것은 취향이 아니라 **오너 결정으로 정본에 박힌 계약**이며
+(`SoT v1.7.75`), compose 파일을 읽어 강제하는 회귀가 있다(`tests/test_compose_exposure.py`).
+
+### 무엇을 보고 있는가
+
+LLM을 부르는 **8개 호출부 전부**가 표준 감사 레코드를 남기고, 그것을 집계한 KPI를 화면으로 본다
+(프로젝트별 + 전역 관리자). 지표 선정 이유는 위 [운영 KPI 기획](#운영-kpi-기획),
+계약 정의는 정본의 "LLM 파이프라인 관측(KPI)" 절에 있다. **실패한 호출도 센다** — 성공만 세면
+성공률이 영구히 100%가 되기 때문이다.
+
+### 실사용에서 나온 것을 어떻게 되먹이는가
+
+- **실검수 브리프** [`docs/live_review_briefs/`](docs/live_review_briefs/2026-07-18/writing_workspace_ux_restructure.md) —
+  브라우저로 직접 써 보다 발견한 결함이 **기존 승인 계약과 충돌할 때** 재현 증거·충돌 지점·오너
+  결정·재검수 기준을 남긴다. 코드 이슈가 아니라 **계약 재협상 기록**이다.
+- **성능 실측** [`docs/benchmarks/`](docs/benchmarks/2026-07-15/writing_loop_per_stage_ceiling_q4.md) —
+  실 12B 모델로 단계별 비용을 재서 loop 예산 기본값을 정했다. 기본값은 추정이 아니라 측정에서 왔다.
+- **운영 절차** [`docs/runbooks/local-llama-server.md`](docs/runbooks/local-llama-server.md) —
+  로컬 GPU 모델 서버 기동 절차.
+- **함정 축적** [`HANDOFF.md`](HANDOFF.md) — 세 대의 머신(배포용·개발용·노트북)을 옮겨 다니며
+  겪은 것들이 재발 방지 형태로 쌓여 있다. *"테스트는 전부 통과하는데 배포만 깨지는"* 종류가
+  여기 모인다.
+
+### 작업 절차 문서
+
+[`docs/guides/records-and-handoff.md`](docs/guides/records-and-handoff.md) — 작업 로그·인수인계·
+CHANGELOG 작성 규칙 · [`docs/guides/verification.md`](docs/guides/verification.md) — 남의 슬라이스를
+독립 검증하는 절차. 규칙을 사람 기억이 아니라 문서로 둔다.
+
+---
+
+## 문서 지도
+
+| | 어디 |
+|---|---|
+| 정본 계약(먼저 읽기) | [`docs/system-contract-sot.md`](docs/system-contract-sot.md) |
+| 계획 · 결정 브리프 인덱스 (89개) | [`docs/plans/README.md`](docs/plans/README.md) |
+| 독립 검증 기록 (202건) | [`docs/verifications/README.md`](docs/verifications/README.md) |
+| 현재 상태 스냅샷 | [`HANDOFF.md`](HANDOFF.md) |
+| 마일스톤 이력 | [`CHANGELOG.md`](CHANGELOG.md) |
+| 일자별 작업 이력 | [`docs/daily_logs/`](docs/daily_logs/) |
+| 문서 안내 (전체 지도) | [`docs/README.md`](docs/README.md) |
+| 아이디에이션 원본 | [`docs/abstract.md`](docs/abstract.md) |
+| 작업 규칙 | [`CLAUDE.md`](CLAUDE.md) |
 
 ## License
 
