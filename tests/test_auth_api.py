@@ -34,6 +34,12 @@ from services.application.app.indexing.models import IndexSyncEvent
 from services.application.app.indexing.service import (
     InMemoryIndexSyncRepository, IndexSyncOutboxService,
 )
+from services.application.app.analysis.service import (
+    AnalysisService, InMemoryAnalysisRepository,
+)
+from services.application.app.memory.service import (
+    InMemoryMemoryRepository, MemoryService,
+)
 from services.application.app.main import (
     create_app,
     require_admin_user,
@@ -51,13 +57,15 @@ class _FakeHasher:
         return stored_hash == "H:" + password
 
 
-def _client(*, ttl=timedelta(hours=1), core_sot=None, index_sync_outbox=None):
+def _client(*, ttl=timedelta(hours=1), core_sot=None, index_sync_outbox=None,
+            memory_service=None, analysis_service=None):
     users = UserService(InMemoryUserRepository(), hasher=_FakeHasher())
     sessions = SessionService(InMemorySessionRepository(), ttl=ttl)
     users.create_user(username="alice", password="pw123")
     app = create_app(
         service=core_sot, user_service=users, session_service=sessions,
-        index_sync_outbox=index_sync_outbox,
+        index_sync_outbox=index_sync_outbox, memory_service=memory_service,
+        analysis_service=analysis_service,
     )
     # https base_url on purpose: the cookie ships Secure by default, so an http
     # client would silently drop it and every session test would pass/fail for
@@ -639,19 +647,44 @@ class AdminUserApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
 
 
+class _PurgeSpy:
+    """Records purge_project calls; delegates everything else to the inner service.
+
+    D8-6d regression: prove the endpoint actually fans the purge out to the derived
+    services, not just core_sot + enqueue (otherwise derived 10컬렉션 become silent
+    orphans — D5 부분 삭제)."""
+
+    def __init__(self, inner) -> None:
+        self.inner = inner
+        self.purged: list[str] = []
+
+    def purge_project(self, *, project_id: str) -> None:
+        self.purged.append(project_id)
+        return self.inner.purge_project(project_id=project_id)
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+
 class AdminProjectPurgeTest(unittest.TestCase):
-    """D8-6d: POST /admin/projects/{id}/purge — 204 + core_sot 파기(정본).
+    """D8-6d: POST /admin/projects/{id}/purge — 204 + core_sot/derived 파기 + enqueue.
 
     비관리자 403·미인증 401 은 CombinedBoundaryMatrixTest 가 ADMIN tier 전수로 잠근다
-    (purge 포함). 여기는 성공 동작(204 + project 소멸)과 NotFound 404.
+    (purge 포함). 여기는 성공 동작을 세 축으로 검증한다 — 정본(core_sot) 소멸 ·
+    vector/index 용 enqueue · **derived 서비스 파기 호출(D5 전수, memory·analysis 대표)**.
     """
 
     def setUp(self) -> None:
         self.core_sot = CoreSotService(InMemoryCoreSotRepository())
         self.outbox_repo = InMemoryIndexSyncRepository()
         self.sync_outbox = IndexSyncOutboxService(self.outbox_repo)
+        # memory·analysis spy — 8 derived service 중 대표 2개. endpoint 가 이들의
+        # purge_project 를 빼먹으면 조용한 고아(부분 삭제, D5 위반)가 된다.
+        self.memory_spy = _PurgeSpy(MemoryService(InMemoryMemoryRepository()))
+        self.analysis_spy = _PurgeSpy(AnalysisService(InMemoryAnalysisRepository()))
         self.client, self.users, _ = _client(
-            core_sot=self.core_sot, index_sync_outbox=self.sync_outbox
+            core_sot=self.core_sot, index_sync_outbox=self.sync_outbox,
+            memory_service=self.memory_spy, analysis_service=self.analysis_spy,
         )
         self.users.create_user(username="root", password="pw789", is_admin=True)
         self.client.post(
@@ -675,6 +708,14 @@ class AdminProjectPurgeTest(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0].event, IndexSyncEvent.PROJECT_PURGED)
         self.assertEqual(entries[0].project_id, project.id)
+
+    def test_admin_purge_fans_out_to_derived_services(self) -> None:
+        # D5 전수: endpoint 가 8 derived service purge 를 부른다. memory·analysis spy
+        # (대표 2개)로 호출을 잠근다 — 이것이 빠지면 derived 10컬렉션이 조용한 고아.
+        project = self.core_sot.create_project(name="Novel")
+        self.client.post(f"/admin/projects/{project.id}/purge")
+        self.assertEqual(self.memory_spy.purged, [project.id])
+        self.assertEqual(self.analysis_spy.purged, [project.id])
 
     def test_admin_purge_missing_project_is_404(self) -> None:
         response = self.client.post("/admin/projects/does-not-exist/purge")
