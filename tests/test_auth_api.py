@@ -384,7 +384,21 @@ class ProjectAuthorizationTest(unittest.TestCase):
                         # "{project_id} path ⇒ ownership" — the admin deletes the
                         # project by id (D5) without reading its content. Any other
                         # admin + project_id route still fails this guard.
-                        pass
+                        #
+                        # The exception has a shape, so assert the shape instead of
+                        # skipping: a bare `pass` here would also accept a purge
+                        # route with *no* authorization at all, which is the one
+                        # way this exception could turn into a hole.
+                        self.assertFalse(
+                            ownership_guarded,
+                            "purge is admin-authorized by design; adding ownership "
+                            "would deny the admin the very thing D5 grants",
+                        )
+                        self.assertTrue(
+                            admin_guarded,
+                            "purge dropped its admin guard — a {project_id} route "
+                            "with neither ownership nor admin is unauthorized",
+                        )
                     else:
                         self.assertEqual(ownership_guarded, expected)
                         # An admin route must never be project-scoped: the admin
