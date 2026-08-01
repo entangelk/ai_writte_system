@@ -2182,7 +2182,7 @@ class CrudErrorContractDeclarationTest(unittest.TestCase):
 
     def _declared(self, path: str, method: str) -> set[str]:
         responses = self.spec["paths"][path][method]["responses"]
-        return {code for code in responses if code not in ("200", "422")}
+        return {code for code in responses if code not in ("200", "204", "422")}
 
     def test_declared_error_statuses_match_the_lock_list(self):
         self.assertEqual(len(self.EXPECTED), 20)
@@ -2292,6 +2292,9 @@ class AdminErrorContractDeclarationTest(unittest.TestCase):
         # D8-5c. No 404: it looks nothing up, so there is nothing to be missing —
         # the per-project KPI declares one only because it resolves a project.
         ("/admin/observability/kpi", "get"): {"401", "403", "503"},
+        # D8-6d: 204 success(본문 없음) + 404(project 미존재). 409 없음(멱등 — 재파기=404).
+        # _declared 가 2xx(success)를 제외하므로 204 는 여기에 나타나지 않는다.
+        ("/admin/projects/{project_id}/purge", "post"): {"401", "403", "404", "503"},
     }
 
     def setUp(self):
@@ -2299,10 +2302,10 @@ class AdminErrorContractDeclarationTest(unittest.TestCase):
 
     def _declared(self, path: str, method: str) -> set[str]:
         responses = self.spec["paths"][path][method]["responses"]
-        return {code for code in responses if code not in ("200", "422")}
+        return {code for code in responses if code not in ("200", "204", "422")}
 
     def test_declared_error_statuses_match_the_lock_list(self):
-        self.assertEqual(len(self.EXPECTED), 4)
+        self.assertEqual(len(self.EXPECTED), 5)
         for (path, method), expected in self.EXPECTED.items():
             with self.subTest(path=path, method=method):
                 self.assertEqual(self._declared(path, method), expected)
@@ -2409,7 +2412,7 @@ class AnalysisErrorContractDeclarationTest(unittest.TestCase):
 
     def _declared(self, path: str, method: str) -> set[str]:
         responses = self.spec["paths"][path][method]["responses"]
-        return {code for code in responses if code not in ("200", "422")}
+        return {code for code in responses if code not in ("200", "204", "422")}
 
     def test_declared_error_statuses_match_the_lock_list(self):
         self.assertEqual(len(self.EXPECTED), 21)
@@ -2610,7 +2613,7 @@ class MemorySourceErrorContractDeclarationTest(unittest.TestCase):
 
     def _declared(self, path: str, method: str) -> set[str]:
         responses = self.spec["paths"][path][method]["responses"]
-        return {code for code in responses if code not in ("200", "422")}
+        return {code for code in responses if code not in ("200", "204", "422")}
 
     def test_declared_error_statuses_match_the_lock_list(self):
         self.assertEqual(len(self.EXPECTED), 7)
@@ -3064,7 +3067,7 @@ class WritingErrorContractDeclarationTest(unittest.TestCase):
 
     def _declared(self, path: str, method: str) -> set[str]:
         responses = self.spec["paths"][path][method]["responses"]
-        return {code for code in responses if code not in ("200", "422")}
+        return {code for code in responses if code not in ("200", "204", "422")}
 
     def _schema(self, path: str, method: str, code: str) -> dict:
         return (self.spec["paths"][path][method]["responses"][code]

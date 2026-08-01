@@ -1319,6 +1319,11 @@ _ERRORS_ADMIN_400_409: dict[int | str, dict] = _admin(_protected({
 _ERRORS_ADMIN_404_409: dict[int | str, dict] = _admin(_protected({
     404: _ERROR, 409: _ERROR, 503: _STORAGE_503,
 }))
+# D8-6d: project purge. Idempotent — re-purging an already-purged project hits
+# core_sot._require_project NotFound → 404 (not 409; there is no conflict).
+_ERRORS_ADMIN_404: dict[int | str, dict] = _admin(_protected({
+    404: _ERROR, 503: _STORAGE_503,
+}))
 
 _ERRORS_404_MIGRATION: dict[int | str, dict] = _protected(
     {404: _ERROR, 503: _MIGRATION_503}
@@ -2789,6 +2794,30 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         sync_outbox.enqueue_project_archived(project_id=project_id)
         return _project_payload(project)
+
+    @app.post("/admin/projects/{project_id}/purge", status_code=204,
+              response_model=None, responses=_ERRORS_ADMIN_404,
+              dependencies=_REQUIRE_ADMIN)
+    async def purge_project(project_id: str) -> None:
+        # D8-6d: 영구 파기(불가역). archive(soft)와 달리 18컬렉션을 hard delete 하고
+        # indexing outbox 로 worker 가 vector/index 5백엔드를 파기(6c _drain_purge).
+        # D5 전체 그래프 파기. 응답은 204(리소스 소멸). core_sot 파기(8컬렉션, mongo
+        # 트랜잭션)가 NotFound 면 404; derived 파기(10컬렉션, 각 delete_many 멱등) 중
+        # mongo 장애 시 전역 503 handler → 클라이언트 재시도(멱등).
+        try:
+            core_sot.purge_project(project_id=project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        memory.purge_project(project_id=project_id)
+        analysis.purge_project(project_id=project_id)
+        review_queue.purge_project(project_id=project_id)
+        gate_findings.purge_project(project_id=project_id)
+        writing_generation_jobs.purge_project(project_id=project_id)
+        writing_scratch.purge_project(project_id=project_id)
+        writing_loop_audit.purge_project(project_id=project_id)
+        llm_call_audit.purge_project(project_id=project_id)
+        sync_outbox.enqueue_project_purged(project_id=project_id)
+        return None
 
     @app.delete(
         "/projects/{project_id}/drafts/{draft_id}", response_model=DraftPayload,

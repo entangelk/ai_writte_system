@@ -627,6 +627,35 @@ class AdminUserApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
 
 
+class AdminProjectPurgeTest(unittest.TestCase):
+    """D8-6d: POST /admin/projects/{id}/purge — 204 + core_sot 파기(정본).
+
+    비관리자 403·미인증 401 은 CombinedBoundaryMatrixTest 가 ADMIN tier 전수로 잠근다
+    (purge 포함). 여기는 성공 동작(204 + project 소멸)과 NotFound 404.
+    """
+
+    def setUp(self) -> None:
+        self.core_sot = CoreSotService(InMemoryCoreSotRepository())
+        self.client, self.users, _ = _client(core_sot=self.core_sot)
+        self.users.create_user(username="root", password="pw789", is_admin=True)
+        self.client.post(
+            "/auth/login", json={"username": "root", "password": "pw789"}
+        )
+
+    def test_admin_purge_returns_204_and_removes_project(self) -> None:
+        project = self.core_sot.create_project(name="Novel")
+        response = self.client.post(f"/admin/projects/{project.id}/purge")
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.content, b"")  # 204 carries no body
+        # 정본(core_sot)에서 project 소멸 — purge_project 가 실제로 돌았다.
+        self.assertEqual([p.id for p in self.core_sot.list_projects()], [])
+
+    def test_admin_purge_missing_project_is_404(self) -> None:
+        response = self.client.post("/admin/projects/does-not-exist/purge")
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("detail", response.json())
+
+
 class CombinedBoundaryMatrixTest(unittest.TestCase):
     """D8-3c: the 401 and 403 guards audited as a single matrix.
 
@@ -676,6 +705,9 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # why it sits in this tier rather than the project one: it names no
         # project and reads no project's content.
         ("/admin/observability/kpi", "get"),
+        # D8-6d: admin project 영구 파기(204, ADMIN tier). project_id 경로지만 소유권이
+        # 아니라 관리자 검사를 쓰므로 project tier 가 아닌 admin tier.
+        ("/admin/projects/{project_id}/purge", "post"),
     }
 
     def setUp(self) -> None:
@@ -738,7 +770,7 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         self.assertEqual(by_tier["auth"], set(self.AUTH_ONLY))
         self.assertEqual(by_tier["admin"], self.ADMIN)
         self.assertEqual(len(by_tier["project"]), 60)
-        self.assertEqual(len(tiers), 70)
+        self.assertEqual(len(tiers), 71)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:
