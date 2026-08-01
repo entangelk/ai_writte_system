@@ -179,6 +179,13 @@ class PurgeReconcilerCommandTest(unittest.TestCase):
         self.db["llm_call_audits"].insert_many(
             [{"project_id": "live"}, {"project_id": "dead"}]
         )
+        # ★ 죽은 project 를 향한 **기존** outbox 작업. 이것이 있어야 `index_sync_outbox` 가
+        # "project_id 를 쓰는 컬렉션"으로 발견되고, 따라서 삭제 대상이 된다 — 아래 순서 셀이
+        # 무는 조건이 바로 이것이다. 비어 있으면 발견되지 않아 순서가 무의미해지고, 셀은
+        # 통과하되 아무것도 잠그지 않는다(2026-08-02 뮤테이션에서 실제로 그랬다).
+        self.db["index_sync_outbox"].insert_one(
+            {"project_id": "dead", "event": "memory_upserted", "status": "pending"}
+        )
 
     def tearDown(self) -> None:
         self._client.drop_database(self._db_name)
@@ -204,18 +211,25 @@ class PurgeReconcilerCommandTest(unittest.TestCase):
 
         entries = list(self.db["index_sync_outbox"].find({"project_id": "dead"}))
         self.assertEqual(
-            len(entries),
-            1,
-            "PROJECT_PURGED entry 가 사라졌다 — enqueue 를 삭제보다 먼저 했는가?",
+            [entry["event"] for entry in entries],
+            ["project_purged"],
+            "삭제 후 enqueue 여야 한다 — 순서를 뒤집으면 방금 넣은 PROJECT_PURGED 가 "
+            "자기 스윕에 지워지고, 기존 stale entry 도 남는다",
         )
-        self.assertEqual(entries[0]["event"], "project_purged")
         self.assertEqual(self.db["llm_call_audits"].count_documents({}), 1)
 
     def test_without_apply_nothing_is_written(self) -> None:
         self._run()
 
         self.assertEqual(self.db["llm_call_audits"].count_documents({}), 2)
-        self.assertEqual(self.db["index_sync_outbox"].count_documents({}), 0)
+        # 기존 entry 는 그대로 있고 PROJECT_PURGED 는 생기지 않았다.
+        self.assertEqual(
+            [
+                entry["event"]
+                for entry in self.db["index_sync_outbox"].find({"project_id": "dead"})
+            ],
+            ["memory_upserted"],
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover
