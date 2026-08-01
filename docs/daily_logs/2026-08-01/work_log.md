@@ -217,3 +217,46 @@ hardening #1·#2를 보강. #3(SoT)은 오너 결정 대기, #4(composite 관측
 - **6d**: `POST /admin/projects/{id}/purge` endpoint + `_REQUIRE_ADMIN` + boundary matrix(ADMIN +1·총 +1).
   이것으로 D8-6 영구 삭제 트랙 종료(core_sot·derived·vector/drain·endpoint 전부).
 - **독립 검증**: 6c-2 worker drain 연결 + 깨진 guard 교체 + 회귀 위치 버그/수정에 대한 검증 권장.
+
+---
+
+## Task — 인증 D8-6d: admin project purge endpoint (SoT v1.7.74, D8-6 종료)
+
+### Goals
+
+- D8-6 마지막 슬라이스이자 **operation 카운트/공개 API 변화를 주는 유일 슬라이스**. 6a/6b/6c 파기
+  메서드를 endpoint 하나에서 조율해 D5(전체 그래프 파기) 완성. 오너 결정: 응답 204(파기=소멸),
+  부분 실패 503+재시도(전역 handler, 멱등).
+
+### Completed work — 구현 (코드 변경)
+
+- **main.py**: `_ERRORS_ADMIN_404`({401,403,404,503} — 409 불필요, purge 멱등) + `POST /admin/projects/{id}/purge`
+  (204, `response_model=None`, `_REQUIRE_ADMIN`). core_sot.purge(NotFound→404, 8컬렉션 트랜잭션) → derived 8 service
+  purge(10컬렉션) → enqueue_project_purged(6c worker). archive_project 패턴 미러.
+- **boundary matrix**: CombinedBoundaryMatrixTest ADMIN 4→5(`len(tiers)` 70→71). AdminErrorContractDeclarationTest
+  EXPECTED 4→5 + `_declared` 200/204 제외(purge 204 success 가 error lock list 에 섞이지 않게; writing/generate 202 등은 종전 동작 유지).
+- **ProjectAuthorizationTest**: purge(admin + {project_id})가 "{project_id} path ⇒ ownership" 가정의 의도적
+  예외(관리자가 id 로 파기, 내용 안 읽음 — D5). purge path 로 한정(다른 admin+project_id route 는 가드 잡음).
+- **회귀**: AdminProjectPurgeTest(204+소멸·enqueue entry·404). `_client` index_sync_outbox 주입 확장.
+
+### Verification
+
+- 양방향 뮤테이션: endpoint 에서 core_sot.purge + enqueue_project_purged 동시 누락 → AdminProjectPurgeTest
+  **3 re-fail**(204·사라짐·404·entry). 복구 후 green.
+- **전량(test-mongo ON, 116s)**: **1820 passed / 4 skipped / 1532 subtests** — 1817 대비 **+3 =
+  AdminProjectPurgeTest, 회귀 0건**. subtests 1519→1532(+13).
+
+### Decisions
+
+- 오너 결정(본 세션): 응답 **204**(파기=소멸, archive payload 와 구분); 부분 실패 **503+재시도**(전역 handler, 멱등).
+- admin+project_id 예외: D8-6d purge 가 경계 가정의 의도적 예외. purge path 로 한정.
+- `_declared` 200/204 제외: 204(success)가 error lock list 에 섞이지 않게.
+- enqueue 회귀 보강: endpoint 가 enqueue 를 빼먹으면 vector/index 고아(D5) — `_client` 확장으로 entry 단언.
+- **부분 실패 재시도 edge case(명시)**: core_sot 파기 후 derived mongo 장애 → 503 → 재시도 시 core_sot 404(이미
+  파기). 매우 드물고 잔류 derived 는 ghost(무해). 완전 멱등 재시구(core_sot purge 멱등화/reconciler)는 별도 슬라이스.
+
+### D8-6 종료
+
+- **6a(core_sot 8)·6b(derived 10)·6c(vector/index 백엔드 + worker drain)·6d(endpoint) 전부 완료**. 회귀 1820 passed.
+- **남은**: 프론트 purge UI(D8-5 admin 화면 오너 결정 C-1~C-6 선행), 감사 로그(별도 슬라이스 추천),
+  완전 멱등 재시구(부분 실패 edge case). frontend `schema.d.ts` 재생성(gen:api)은 백엔드 확정 후.
