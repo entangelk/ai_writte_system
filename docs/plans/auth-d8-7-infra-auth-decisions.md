@@ -28,10 +28,10 @@ SoT v1.6.53 G3=A(ES 보안 off의 근거가 "인증 슬라이스 선행 필요"�
 | 표면 | 실측 | 인증 도입 시 생기는 일 |
 |---|---|---|
 | **호스트에 게시된 포트** | **7개 전부**: mongo 27520 · application 8520 · gateway 8521 · embedding 8522 · chroma 8523 · elasticsearch 9520 · frontend 5520 (`docker-compose.yml`, 바인드 주소 지정 없음 = 0.0.0.0) | **지금 LAN의 누구나 mongo·ES·chroma에 무인증으로 붙는다.** 이것이 "외부 노출 금지"의 실체다 |
-| **Mongo 자격증명 배선 지점** | `MongoClient(...)` **13곳** — 그런데 **13곳 전부가 `from_uri()` 안**이고(AST로 전수 확인) uri는 한 곳(`CORE_SOT_MONGO_URI`)에서 온다 | **코드 변경 0줄.** 자격증명은 URI에 실린다. 바뀌는 것은 compose/`.env`뿐 |
+| **Mongo 자격증명 배선 지점** | 앱 코드(`services/`) **13곳** — **13곳 전부가 `from_uri()` 안**이고(AST로 전수 확인) uri는 한 곳(`CORE_SOT_MONGO_URI`)에서 온다. **`scripts/`에 4곳이 더 있다**(`migrate_ordered_units.py` · `phase2b5_memory_reindex_live_smoke.py` · `phase2b_candidate_index_live_smoke.py` · `phase2b7_character_alias_live_smoke.py`) — 전부 `MongoClient(<env에서 온 uri>)` | **코드 변경 0줄**(앱·스크립트 공통 — 자격증명은 URI에 실린다). 바뀌는 것은 compose/`.env`뿐 |
 | **Mongo URI 소비자** | compose 3곳(application·worker·generation_worker) + 스크립트 **12개 파일**(env를 읽으므로 수정 불필요) | 스크립트도 env만 맞으면 그대로 돈다 |
-| **ES 클라이언트 생성 지점** | **3곳** — `memory_lexical_index.py:342` · `candidate_lexical_index.py:287` · `scripts/phase4_lexical_memory_live_smoke.py:95`. 전부 `Elasticsearch(url, request_timeout=…)` | `basic_auth=`(또는 URL 인라인 자격증명) 주입 **3곳** + env |
-| **Chroma 클라이언트 생성 지점** | **1곳** — `chroma.py:577` `chromadb.HttpClient(host=host, port=port)` | 헤더/설정 주입 1곳 |
+| **ES 클라이언트 생성 지점** | **3곳** — `services/application/app/indexing/memory_lexical_index.py:342` · `services/application/app/indexing/candidate_lexical_index.py:287` · `scripts/phase4_lexical_memory_live_smoke.py:95`. 전부 `Elasticsearch(url, request_timeout=…)` | `basic_auth=`(또는 URL 인라인 자격증명) 주입 **3곳** + env |
+| **Chroma 클라이언트 생성 지점** | **1곳** — `services/application/app/indexing/chroma.py:577` `chromadb.HttpClient(host=host, port=port)` | 헤더/설정 주입 1곳 |
 | **★ Mongo 복제셋 제약** | `mongod --auth --replSet rs0` → **`BadValue: security.keyFile is required when authorization is enabled with replica sets`**(`docker run mongo:7`로 직접 확인) | **keyfile이 필수다.** 즉 "비밀번호 하나 추가"가 아니라 **커밋할 수 없는 시크릿 파일 + 퍼미션(400) + 소유자**가 머신마다 필요하다 |
 | **기존 데이터 볼륨** | 알파 mongo 볼륨은 2026-07-04, 베타는 2026-07-27 재생성. 둘 다 **인증 없이 만들어졌다** | 인증을 켜는 순간 **부트스트랩(관리 사용자 생성) 절차**가 필요하고, 그 절차는 머신마다 1회 수동이다 |
 | **머신 이동성** | repo의 정의적 성질 = **"어느 머신에서든 `docker compose up`만으로 같은 포트로 뜬다"**(`.env.example` 상단) | 자격증명·keyfile은 **커밋 금지**라 이 성질이 깨진다. 머신마다 셋업 단계가 생긴다 |

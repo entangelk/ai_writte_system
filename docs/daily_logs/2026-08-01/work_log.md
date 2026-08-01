@@ -491,3 +491,39 @@ hardening #1·#2를 보강. #3(SoT)은 오너 결정 대기, #4(composite 관측
   브리프에 명시했고 HANDOFF Owner Decisions 에도 올렸다.
 - **미검증을 사실로 쓰지 않았다**: ES 8.x 가 **이미 만들어진 볼륨**에 보안을 켤 때 `ELASTIC_PASSWORD`
   가 먹는지는 실측 안 했고, 브리프에 "착수 시 실측 선행"으로 명시했다.
+
+---
+
+## 2026-08-01 마감 — 검증 통과 + 정밀도 보탬 + 다음 작업자 메모
+
+### 독립 검증 (결함 0건)
+
+- 두 작업(purge 가드 `pass` 제거 `7bf80ca` · D8-7 브리프 `f823046`) 모두 **검증자가 독립 재현**했고
+  결함이 없었다. 검증자 권고를 실측으로 뒤집은 것(#4 의 `ownership_guarded==expected`)도
+  **반박이 옳다**고 확인됐다(purge dependencies = auth + admin, ownership 없음).
+- 브리프 §1 실측 표는 한 줄씩 독립 검증됐다 — 포트 7개 0.0.0.0 게시 · ES `xpack.security.enabled: false` ·
+  MongoClient 13곳 전부 `from_uri` · ES 3곳 · Chroma `chroma.py:577` · keyfile 강제(공식 문서 교차).
+
+### 정밀도 보탬 2건 반영 (결함 아님)
+
+- **MongoClient "13곳" 은 `services/` 한정**이었다 — `scripts/` 에 **4곳 더** 있다
+  (`migrate_ordered_units` · `phase2b5_memory_reindex_live_smoke` · `phase2b_candidate_index_live_smoke` ·
+  `phase2b7_character_alias_live_smoke`, 전부 env 에서 온 uri 를 그대로 넘긴다). 직접 세어 확인 후
+  브리프 표와 HANDOFF 문구를 정정했다. **"자격증명 코드 0줄" 결론은 그대로**(스크립트도 URI 만 바뀐다).
+- **Chroma 경로 단축 표기**(`chroma.py:577`)를 ES 처럼 **풀 경로**로 맞췄다.
+
+### 오늘 남긴 것 (다음 작업자용)
+
+- **회귀 기준선 = 1831 passed / 4 skipped / 1549 subtests**(test-mongo ON). 이 숫자로 시작하라.
+- **막고 있는 것은 오너 결정 둘뿐**이다: **D8-7 G1**(브리프 `plans/auth-d8-7-infra-auth-decisions.md`,
+  나머지 G2~G6은 G1=B 일 때만 필요) · **D8-5 C-1~C-6**(관리자 화면). 그 밖의 페이즈 트랙은 없다.
+- **결정 없이 지금 열 수 있는 것**: purge 감사 로그 · 완전 멱등 재시구(reconciler). 둘 다 D8-6 잔여이고
+  작다. 다만 **감사 로그는 저장 위치·필드·조회 표면이 사실상 결정 사항**이라 작은 브리프가 먼저 붙는
+  편이 낫다(감사 저장소 `llm_call_audits` 와 같은 축에 둘지가 첫 질문).
+- **이번 슬라이스에서 배운 것(다음 스윕에 그대로 적용할 것)**: 문자열 하나로 스윕하면 **같은 일을 다른
+  철자로 하는 호출부를 놓친다**(`application:8000` vs ASGI `application-smoke`). 부채 목록의 개수를
+  그대로 믿지 말고 **디렉터리를 읽는 가드**로 바꿔라 — 이번에 그렇게 바꾸자마자 오탐 1건까지 같이
+  드러났다(단어 경계로 좁혀 해소).
+- **CHANGELOG 갱신됨**: D8-6 종료(마일스톤) + 스크립트 로그인 2행. 오늘 이전 마지막 항목은 07-31 이었다.
+- **test-mongo 는 내려 두었다**(`docker-compose.test.yml down`). 회귀를 돌리려면 다시 올리고
+  **healthy 를 기다린 뒤** 시작한다(HANDOFF 함정 — 곧바로 돌리면 초반 모듈만 skip 되어 잘못된 기준선이 난다).
