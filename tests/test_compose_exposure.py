@@ -26,10 +26,17 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# compose 파일의 서비스 키(2칸 들여쓰기)와 ports 리스트 항목만 읽는다.
+# compose 파일의 서비스 키(2칸 들여쓰기)와 ports 항목만 읽는다.
+#
+# ★ YAML 표기 전부를 받아야 한다(2026-08-02 독립 검증이 실증한 blind spot). 첫 판은
+# `^    ports:\s*$`라 **한 줄 표기**(`ports: ["8599:8000"]`)를 아예 못 읽었고, 그러면 그
+# 서비스가 게시 집합에서 조용히 빠져 아래 분류 강제를 우회할 수 있었다. 항목 따옴표도
+# 마찬가지다 — compose는 큰따옴표·작은따옴표·무따옴표를 다 받는다. **파서가 못 읽는 표기가
+# 곧 가드의 구멍**이므로 여기서 넓히는 것은 편의가 아니라 가드의 일부다.
 _SERVICE_RE = re.compile(r"^  ([A-Za-z0-9_.-]+):\s*$")
-_PORTS_RE = re.compile(r"^    ports:\s*$")
-_PORT_ITEM_RE = re.compile(r'^      - "([^"]+)"\s*$')
+_PORTS_RE = re.compile(r"^    ports:(?P<inline>.*)$")
+_PORT_ITEM_RE = re.compile(r"""^      - ['"]?([^'"\s]+)['"]?\s*$""")
+_INLINE_ITEM_RE = re.compile(r"""[^\s,\[\]'"]+""")
 
 # 데이터를 가졌거나(mongo·chroma·elasticsearch) 내부 경계일 뿐인(gateway·embedding)
 # 서비스 — 컨테이너끼리는 compose 네트워크 이름으로 붙으므로 호스트 게시는 사람용이다.
@@ -43,14 +50,14 @@ _PUBLIC_ON_PURPOSE = frozenset({"application", "frontend"})
 _LOOPBACK_PREFIX = "127.0.0.1:"
 
 
-def _published_ports(relative_path: str) -> dict[str, list[str]]:
-    """compose 파일에서 **포트를 게시하는 서비스**만 뽑는다 (서비스명 → 매핑 문자열)."""
+def _published_ports_in(text: str) -> dict[str, list[str]]:
+    """compose 본문에서 **포트를 게시하는 서비스**만 뽑는다 (서비스명 → 매핑 문자열)."""
 
     service: str | None = None
     in_ports = False
     published: dict[str, list[str]] = {}
 
-    for line in (_REPO_ROOT / relative_path).read_text(encoding="utf-8").splitlines():
+    for line in text.splitlines():
         matched_service = _SERVICE_RE.match(line)
         if matched_service:
             service = matched_service.group(1)
@@ -58,9 +65,16 @@ def _published_ports(relative_path: str) -> dict[str, list[str]]:
             continue
         if service is None:
             continue
-        if _PORTS_RE.match(line):
-            in_ports = True
+        matched_ports = _PORTS_RE.match(line)
+        if matched_ports:
+            # ports 섹션이 있다는 것만으로 서비스를 집합에 넣는다 — 항목을 하나도
+            # 못 읽어도 분류는 강제된다.
             published.setdefault(service, [])
+            inline = matched_ports.group("inline").strip()
+            if inline:
+                published[service].extend(_INLINE_ITEM_RE.findall(inline))
+            else:
+                in_ports = True
             continue
         if not in_ports:
             continue
@@ -71,6 +85,55 @@ def _published_ports(relative_path: str) -> dict[str, list[str]]:
             in_ports = False
 
     return published
+
+
+def _published_ports(relative_path: str) -> dict[str, list[str]]:
+    return _published_ports_in((_REPO_ROOT / relative_path).read_text(encoding="utf-8"))
+
+
+class ComposeParserTest(unittest.TestCase):
+    """파서가 못 읽는 표기는 곧 가드의 구멍이다 (2026-08-02 독립 검증 hardening #1).
+
+    검증자가 `ports: ["8599:8000"]` **한 줄 표기**로 분류 강제를 실제로 우회했다 — docker는
+    받아들이는데 파서는 그 서비스를 아예 못 봐서 조용히 통과했다. compose 3파일이 지금 전부
+    멀티라인이라 결함은 아니었지만, "분류가 규칙이 아니라 강제"라는 성질이 **표기 하나에만**
+    성립하고 있었다. 아래는 docker가 받는 표기 전부를 파서도 받는다는 것을 잠근다.
+
+    - under-strict: 어느 표기든 못 읽게 되면 그 서비스가 집합에서 빠져 이 셀이 실패한다.
+    - over-strict: `ports`가 **없는** 서비스는 집합에 들어오면 안 된다(넓히다가 아무 리스트나
+      삼키면 분류 리터럴이 무의미해진다). 마지막 단정이 그 방향이다.
+    """
+
+    _FIXTURE = """services:
+  multiline_double:
+    ports:
+      - "127.0.0.1:1111:1111"
+  multiline_single:
+    ports:
+      - '2222:2222'
+  multiline_bare:
+    ports:
+      - 3333:3333
+  inline_list:
+    ports: ["127.0.0.1:4444:4444", '5555:5555']
+  no_ports:
+    image: busybox
+"""
+
+    def test_every_yaml_style_of_publishing_is_seen(self) -> None:
+        published = _published_ports_in(self._FIXTURE)
+
+        self.assertEqual(
+            published,
+            {
+                "multiline_double": ["127.0.0.1:1111:1111"],
+                "multiline_single": ["2222:2222"],
+                "multiline_bare": ["3333:3333"],
+                "inline_list": ["127.0.0.1:4444:4444", "5555:5555"],
+            },
+            "docker가 받는 게시 표기를 파서도 전부 봐야 한다 — 못 보는 표기가 "
+            "분류 강제의 우회로가 된다. `no_ports`는 들어오면 안 된다",
+        )
 
 
 class ComposeExposureTest(unittest.TestCase):
