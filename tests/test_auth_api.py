@@ -30,6 +30,10 @@ from services.application.app.auth.users import InMemoryUserRepository, UserServ
 from services.application.app.core_sot.service import (
     CoreSotService, InMemoryCoreSotRepository,
 )
+from services.application.app.indexing.models import IndexSyncEvent
+from services.application.app.indexing.service import (
+    InMemoryIndexSyncRepository, IndexSyncOutboxService,
+)
 from services.application.app.main import (
     create_app,
     require_admin_user,
@@ -47,12 +51,13 @@ class _FakeHasher:
         return stored_hash == "H:" + password
 
 
-def _client(*, ttl=timedelta(hours=1), core_sot=None):
+def _client(*, ttl=timedelta(hours=1), core_sot=None, index_sync_outbox=None):
     users = UserService(InMemoryUserRepository(), hasher=_FakeHasher())
     sessions = SessionService(InMemorySessionRepository(), ttl=ttl)
     users.create_user(username="alice", password="pw123")
     app = create_app(
-        service=core_sot, user_service=users, session_service=sessions
+        service=core_sot, user_service=users, session_service=sessions,
+        index_sync_outbox=index_sync_outbox,
     )
     # https base_url on purpose: the cookie ships Secure by default, so an http
     # client would silently drop it and every session test would pass/fail for
@@ -366,10 +371,17 @@ class ProjectAuthorizationTest(unittest.TestCase):
             for method in sorted(route.methods):
                 method = method.lower()
                 with self.subTest(path=route.path, method=method):
-                    self.assertEqual(ownership_guarded, expected)
-                    # An admin route must never be project-scoped: the admin
-                    # surface deliberately does not reach project content.
-                    self.assertFalse(admin_guarded and expected)
+                    if route.path == "/admin/projects/{project_id}/purge":
+                        # D8-6d: admin purge is the intentional exception to
+                        # "{project_id} path ⇒ ownership" — the admin deletes the
+                        # project by id (D5) without reading its content. Any other
+                        # admin + project_id route still fails this guard.
+                        pass
+                    else:
+                        self.assertEqual(ownership_guarded, expected)
+                        # An admin route must never be project-scoped: the admin
+                        # surface deliberately does not reach project content.
+                        self.assertFalse(admin_guarded and expected)
                     responses = spec["paths"][route.path][method]["responses"]
                     self.assertEqual(
                         "403" in responses, expected or admin_guarded
@@ -636,7 +648,11 @@ class AdminProjectPurgeTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.core_sot = CoreSotService(InMemoryCoreSotRepository())
-        self.client, self.users, _ = _client(core_sot=self.core_sot)
+        self.outbox_repo = InMemoryIndexSyncRepository()
+        self.sync_outbox = IndexSyncOutboxService(self.outbox_repo)
+        self.client, self.users, _ = _client(
+            core_sot=self.core_sot, index_sync_outbox=self.sync_outbox
+        )
         self.users.create_user(username="root", password="pw789", is_admin=True)
         self.client.post(
             "/auth/login", json={"username": "root", "password": "pw789"}
@@ -649,6 +665,16 @@ class AdminProjectPurgeTest(unittest.TestCase):
         self.assertEqual(response.content, b"")  # 204 carries no body
         # 정본(core_sot)에서 project 소멸 — purge_project 가 실제로 돌았다.
         self.assertEqual([p.id for p in self.core_sot.list_projects()], [])
+
+    def test_admin_purge_enqueues_project_purged(self) -> None:
+        # endpoint 가 worker drain(6c _drain_purge) 용 PROJECT_PURGED entry 를 생산한다 —
+        # 이것이 빠지면 vector/index 5백엔드가 고아로 잔류한다(D5).
+        project = self.core_sot.create_project(name="Novel")
+        self.client.post(f"/admin/projects/{project.id}/purge")
+        entries = list(self.outbox_repo.outbox_entries.values())
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].event, IndexSyncEvent.PROJECT_PURGED)
+        self.assertEqual(entries[0].project_id, project.id)
 
     def test_admin_purge_missing_project_is_404(self) -> None:
         response = self.client.post("/admin/projects/does-not-exist/purge")
