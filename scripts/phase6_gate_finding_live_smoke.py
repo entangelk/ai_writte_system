@@ -48,6 +48,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.script_auth import add_login_arguments, authenticate_client
+
 
 DEFAULT_APPLICATION_BASE_URL = "http://127.0.0.1:8000"
 
@@ -83,6 +85,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=int(os.environ.get("PHASE6_GATE_FINDING_SMOKE_ATTEMPTS", "5")),
         help="Max /context-search attempts per idempotency key (planner variance).",
     )
+    add_login_arguments(parser)
     return parser.parse_args(argv)
 
 
@@ -301,6 +304,7 @@ async def run_live(args: argparse.Namespace) -> dict[str, Any]:
         timeout=httpx.Timeout(args.timeout_seconds),
         trust_env=False,
     ) as client:
+        await authenticate_client(client, username=args.username)
         return await run_gate_finding_smoke(
             client,
             application_base_url=base_url,

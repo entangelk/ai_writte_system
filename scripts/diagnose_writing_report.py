@@ -51,6 +51,7 @@ from scripts.diagnose_writing_gate import (  # shared with the gate diagnostic
     _PositionAction, _env_bool, _env_float, _finding_from_dict,
     build_search_request, seed_context,
 )
+from scripts.script_auth import add_login_arguments, authenticate_client
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +142,7 @@ async def _run(args: argparse.Namespace) -> str:
         async with httpx.AsyncClient(
             base_url=args.application_base_url, timeout=args.timeout,
         ) as client:
+            await authenticate_client(client, username=args.username)
             seeded = await seed_context(
                 client, base_url=args.application_base_url, project_id=args.project_id,
             )
@@ -194,6 +196,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--application-base-url", default="http://application:8000")
     parser.add_argument("--max-tokens", type=int, default=4096)
     parser.add_argument("--timeout", type=float, default=600.0)
+    add_login_arguments(parser)
     return parser
 
 

@@ -49,6 +49,7 @@ from services.application.app.writing.per_stage_measure import (
 )
 from services.application.app.writing.revise_gate import WritingLoopPolicy
 from scripts.benchmark_writing_loop import compose_worst_case_ceiling
+from scripts.script_auth import add_login_arguments, authenticate_client
 from scripts.diagnose_writing_gate import (  # shared with the gate diagnostic
     _DEFAULT_CANDIDATE_TEXT, _DEFAULT_FINDING, _DEFAULT_INSTRUCTION,
     _PositionAction, _env_bool, _env_float, _finding_from_dict,
@@ -159,6 +160,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         async with httpx.AsyncClient(
             base_url=args.application_base_url, timeout=args.timeout,
         ) as client:
+            await authenticate_client(client, username=args.username)
             seeded = await seed_context(
                 client, base_url=args.application_base_url,
                 project_id=args.project_id,
@@ -250,6 +252,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="measurement passes per stage; the conservative MAX per stage is used",
     )
     parser.add_argument("--timeout", type=float, default=600.0)
+    add_login_arguments(parser)
     return parser
 
 

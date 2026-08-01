@@ -60,6 +60,7 @@ from services.application.app.writing.models import (
     WritingTaskType,
 )
 from services.llm_gateway.app.provider import LLMProvider
+from scripts.script_auth import add_login_arguments, authenticate_client
 
 
 # Defaults mirror the benchmark_writing_loop.py `terminal_pass` case so an
@@ -271,6 +272,7 @@ async def _run(args: argparse.Namespace) -> str:
         async with httpx.AsyncClient(
             base_url=args.application_base_url, timeout=args.timeout,
         ) as client:
+            await authenticate_client(client, username=args.username)
             seeded = await seed_context(
                 client, base_url=args.application_base_url, project_id=args.project_id,
             )
@@ -346,6 +348,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-tokens", type=int, default=4096,
                         help="context budget max_tokens (mirrors the loop request body)")
     parser.add_argument("--timeout", type=float, default=600.0)
+    add_login_arguments(parser)
     return parser
 
 

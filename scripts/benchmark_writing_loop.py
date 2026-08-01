@@ -26,6 +26,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from services.application.app.writing.revise_gate import WritingLoopPolicy
+from scripts.script_auth import add_login_arguments, authenticate_client
 
 
 class AsyncHttpClient(Protocol):
@@ -478,6 +479,7 @@ def _percentile(values: list[float | int], percentile: int) -> float | int | Non
 async def _run_live(args: argparse.Namespace) -> dict[str, Any]:
     async with httpx.AsyncClient(base_url=args.application_base_url,
                                  timeout=args.timeout) as client:
+        await authenticate_client(client, username=args.username)
         current_position = await seed_benchmark_context(
             client, base_url=args.application_base_url, project_id=args.project_id
         )
@@ -506,6 +508,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=600.0)
+    add_login_arguments(parser)
     return parser
 
 
