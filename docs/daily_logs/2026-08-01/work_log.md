@@ -421,3 +421,73 @@ hardening #1·#2를 보강. #3(SoT)은 오너 결정 대기, #4(composite 관측
 - `tests/test_script_login.py` **10 passed / 17 subtests**(9 레지스터 + 8 디스커버리).
 - **전량(test-mongo ON)**: **1831 passed / 4 skipped / 1549 subtests** — 1830 대비 **+1 = 디스커버리
   가드, subtests +9**. 회귀 0건.
+
+---
+
+## Task — 6d 검증 #4: purge 경계 예외의 blanket `pass` 제거 (코드 무변)
+
+### Goals
+
+- 6d 독립 검증의 non-blocking #4. `ProjectAuthorizationTest` 의 purge 예외가 `pass` 라 **아무것도
+  단정하지 않는다** — 오너 지시("구멍내지 말라")에 정확히 걸리는 자리.
+
+### Completed work
+
+- **검증자 권고는 실측상 틀렸다**(그대로 따르지 않았다): 권고는 "`ownership_guarded == expected` 는
+  자명 통과라 유지 가능"이었는데, purge 는 `_REQUIRE_ADMIN`(auth + admin)뿐이라
+  `ownership_guarded=False`·`expected=True` → **그 단정은 통과가 아니라 실패**한다.
+- 대신 **예외의 형태를 단정**한다: `assertFalse(ownership_guarded)`(D5 상 의도적 부재 — ownership 을
+  붙이면 관리자가 파기하지 못한다) + `assertTrue(admin_guarded)`. 종전 `pass` 는 **인가가 아예 없는
+  purge 도 통과**시켰다(그 뒤의 403 선언 단정은 `expected or admin_guarded` 라 여전히 참).
+- **패턴 스윕**: `tests/test_auth_api.py`·`test_application_api.py` 의 `pass`/`continue` 전수 확인 —
+  나머지는 전부 정당한 필터(APIRoute 아님·PUBLIC 목록·202 success arm). blanket skip 은 이 한 곳뿐이었다.
+
+### Verification
+
+- **양방향 뮤테이션(인메모리)**: 프로덕션 인증 코드를 약화시키는 디스크 뮤테이션은 **분류기가 차단**했고
+  타당한 차단이라 우회하지 않았다. 대신 스크래치에서 앱을 만들고 **route 객체의 dependencies 를
+  런타임에 변형**해 같은 셀을 돌렸다 — **E**(admin dep 제거) → `assertTrue` re-fail ·
+  **F**(ownership dep 추가) → `assertFalse` re-fail · **control**(무변형) pass.
+- `ProjectAuthorizationTest` 6 passed / 134 subtests. **전량 1831 passed / 4 skipped / 1549 subtests**
+  (셀 내부 강화라 카운트 무변), 회귀 0건. `git diff` 로 main.py 무변 확인.
+
+---
+
+## Task — D8-7 인프라 인증 착수 결정 브리프 (코드 없음)
+
+### Goals
+
+- D8-6 종료·스크립트 부채 해소 후 남은 유일한 페이즈 트랙. **오너 결정 없이는 코드를 쓸 수 없다**
+  (CLAUDE.md "Owner decision brief" — 아키텍처·정책·의존성 선택). 산출물 =
+  [`plans/auth-d8-7-infra-auth-decisions.md`](../../plans/auth-d8-7-infra-auth-decisions.md).
+
+### 착수 전 실측 (브리프의 근거 — 전부 이번 세션에 직접 잼)
+
+- **노출면**: compose 가 **7개 서비스 전부를 호스트에 게시**하고 바인드 주소 지정이 없다(0.0.0.0).
+  즉 mongo(27520)·ES(9520)·chroma(8523)가 **지금 LAN에서 무인증으로 열려 있다** — 이것이
+  "외부 노출 금지"의 실체다.
+- **Mongo 배선 비용 = 코드 0줄**: `MongoClient(...)` 13곳이 **AST 전수 확인 결과 전부 `from_uri()` 안**
+  이고 URI 는 `CORE_SOT_MONGO_URI` 한 곳에서 온다. 자격증명은 URI 에 실린다.
+- **★ 그러나 keyfile 이 강제된다**: `docker run mongo:7 mongod --auth --replSet rs0` →
+  `BadValue: security.keyFile is required when authorization is enabled with replica sets`.
+  **커밋 불가 시크릿 파일 + 퍼미션이 머신마다** 필요해지고, repo 의 정의적 성질("어느 머신에서든
+  compose up 만으로 뜬다")이 깨진다.
+- **ES 배선 3곳**(`memory_lexical_index.py:342`·`candidate_lexical_index.py:287`·
+  `phase4_lexical_memory_live_smoke.py:95`) · **Chroma 1곳**(`chroma.py:577`).
+
+### 브리프의 결정 항목
+
+- **G1(선행)** 위험을 자격증명으로 막을지(B) **노출면 축소로 없앨지**(A) — 추천 **C**(A를 지금,
+  B는 원격 배포 시점). G1=A/C면 G3~G6은 불필요해진다.
+- **G2** 대상 범위(Chroma 포함 여부 — D8-6이 이미 파기 대상으로 셌으므로 포함 추천) ·
+  **G3** 기존 볼륨 마이그레이션 · **G4** 3대 머신 시크릿 배포(진짜 난점) · **G5** test compose 확장 여부 ·
+  **G6** ES TLS.
+
+### Decisions (구현자 판단, 오너 확정 대기)
+
+- 추천 C 의 근거는 **위험의 형태**(LAN 노출은 노출면 축소로 완전히 사라진다)·**단계**(로컬 1인,
+  머신 3대)·**되돌릴 수 있음**(A는 B를 막지 않는다).
+- **G1=C를 고르면 SoT 문구 개정이 따라온다** — 지금 정본은 해제 조건을 *인증*으로 적고 있다.
+  브리프에 명시했고 HANDOFF Owner Decisions 에도 올렸다.
+- **미검증을 사실로 쓰지 않았다**: ES 8.x 가 **이미 만들어진 볼륨**에 보안을 켤 때 `ELASTIC_PASSWORD`
+  가 먹는지는 실측 안 했고, 브리프에 "착수 시 실측 선행"으로 명시했다.

@@ -42,7 +42,7 @@
   | **5-c** | **완료** | 전역 관측 KPI `GET /admin/observability/kpi` — 감사 저장소 전역 조회 + 집계 재사용 |
   | **5-b·5-d** | **차단** | 전 프로젝트 목록 · 관리자 화면 — **오너 결정 C-1~C-6 선행**(브리프 §7) |
   | **6 (D8-6)** | **완료·검증 합격(D8-6 종료)** | 영구 삭제 — **6a**(core_sot 8) + **6b**(derived 10) + **6c**(vector/index 백엔드 + worker drain) + **6d**(`POST /admin/projects/{id}/purge`, 204, `_REQUIRE_ADMIN`) 전부 완료. D5 전체 그래프 파기(18컬렉션 + vector/index 5백엔드) 완성. endpoint = core_sot.purge → derived 8 service purge → enqueue_project_purged(worker). operation 카운트 71(ADMIN tier 5번째). 6d 독립 검증은 **조건부 합격**이었고 조건(endpoint→derived fan-out 회귀 부재)은 `_PurgeSpy` 회귀로 해소됐다. `schema.d.ts`도 재생성됨. **남은**: 프론트 purge UI(D8-5 C-1~C-6 후)·감사 로그(별도)·완전 멱등 재시구. 상세 = `daily_logs/2026-08-01/` 6d + 검증 후속 섹션 |
-  | **7** | 미착수 | **D8-7 Mongo·ES 인프라 인증**(외부 노출 금지 해제 조건) |
+  | **7** | **오너 결정 대기** | **D8-7 인프라 인증**(외부 노출 금지 해제 조건). 착수 브리프 = [`plans/auth-d8-7-infra-auth-decisions.md`](docs/plans/auth-d8-7-infra-auth-decisions.md) — **G1~G6 결정 전까지 코드 없음**. G1이 이 트랙의 성격을 정한다: **자격증명 도입(B)** 대신 **노출면 축소(A)**로 같은 위험을 없앨 수 있고, 구현자 추천은 **C(A를 지금 · B는 원격 배포 시점)** 다 |
 
 - **D8-3 E1~E4 = 전부 A로 확정** — `plans/auth-d8-3-enforcement-decisions.md`(Resolved). `owner_id=None`은 탈퇴·삭제 누락 같은 미래 비정상 잔존도 **항상 deny**. project 경로는 소유권, 그 외는 인증이며 `GET /projects`는 저장소 조회에서 본인 소유만 반환한다.
 - **HTTP 인증·프로젝트 인가는 섰고 결합 감사까지 닫혔다.** 세션 없는 요청은 `/health`와 공개 `/auth` 두 곳을 빼고 401, project-scoped **59 operation**은 타인 소유·`owner_id=None`에 403이다. `GET /projects`는 Mongo `owner_id` 쿼리 경계에서 본인 소유만 반환한다. **D8-7 Mongo·ES 인프라 인증 전까지 외부 노출 금지는 유지** — 남은 위험은 HTTP가 아니라 인프라 무인증이다.
@@ -162,6 +162,7 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 
 ## Owner Decisions Needed
 
+- **★ D8-7 인프라 인증 G1~G6** — 브리프 [`plans/auth-d8-7-infra-auth-decisions.md`](docs/plans/auth-d8-7-infra-auth-decisions.md)(2026-08-01). **G1이 선행**이고 나머지는 G1=B(자격증명)일 때만 필요하다. 실측 근거 셋: ① 저장소 3종이 **0.0.0.0으로 호스트에 게시**돼 LAN 무인증 접근이 지금 열려 있다 ② Mongo 자격증명은 **코드 0줄**(13곳 전부 `from_uri`) ③ 그러나 **`--auth --replSet`은 keyfile을 강제**한다(`mongod` 직접 실행으로 확인) — 즉 커밋 불가 시크릿이 머신마다 필요해 "compose up만으로 뜬다"가 깨진다. 그래서 추천은 **C**(노출면 축소를 지금, 자격증명은 원격 배포 시점). **C를 고르면 "외부 노출 금지" 해제 조건 문구를 SoT에서 개정해야 한다**(인증 → 노출 없음).
 - **★ dogfood 착수(GATE-1)** — 실 12B 풀스택 관통은 끝났고 기술적 선행 조건은 없다. 착수하면 `OPS-1` Ready 승격. **인증 HTTP 시행이 닫히면서 "인가 없이 dogfood하면 데이터가 섞인다"는 종전 걸림돌은 사라졌다** — 이제 남은 것은 D8-5~7 구현과의 순서 판단이며 오너 결정 사항이다.
 
 **결정 완료 — 오너 결정 대기 아님, 구현만 남음:**
