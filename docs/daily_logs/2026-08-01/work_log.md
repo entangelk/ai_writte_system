@@ -294,3 +294,73 @@ hardening #1·#2를 보강. #3(SoT)은 오너 결정 대기, #4(composite 관측
   **+1 = `test_admin_purge_fans_out_to_derived_services`, 회귀 0건**. skip·subtests 동일.
 - 검증 문서의 남은 non-blocking: #2 완전 멱등 재시구(별도 슬라이스) · #3 SoT "완성" 표현(이제
   wiring lock 이 붙어 근거 성립) · #4 `ProjectAuthorizationTest` 예외 `pass` 의 외과성(사소).
+
+---
+
+## Task — 스크립트 세션 로그인: D8-3a 401 부채 해소 (앱 HTTP 8종, SoT 무변)
+
+### Goals
+
+- D8-6 종료 후 다음 슬라이스. **오너 선택**: D8-5는 오너 결정 C-1~C-6에 막혀 있고 D8-7은 결정 브리프가
+  선행이라, 결정 없이 갈 수 있고 **우선순위가 올라가 있던** 추적 부채(HANDOFF)를 연다.
+- D8-3a 이후 앱의 모든 route 가 세션을 요구해 운영 smoke·진단 스크립트가 401 을 받는다. 특히
+  `diagnose_writing_report`·`diagnose_writing_gate` 는 report·gate 실패 원인을 보는 **유일한 진단
+  도구**인데 막혀 있어 2026-07-29 장애 조사에서 쓰지 못했다(앱 코드로 우회했고 그 리그는 repo 에 없다).
+- 성공 기준: ① 자격증명을 주면 로그인해 세션을 유지하고 ② 안 주면 종전대로 익명 진행하며 ③ **plain
+  http 에서 Secure 쿠키가 버려지는 함정**을 회귀가 양방향으로 잠근다.
+
+### Completed work — 구현 (코드 변경)
+
+- **`scripts/script_auth.py`(신규)**: `add_login_arguments(parser)`(`--username`, env `APPLICATION_USERNAME`)
+  · `password_from_env()` · `login(client, …)` · `authenticate_client(client, username=…)`.
+  - **비밀번호는 env 전용**(`APPLICATION_PASSWORD`) — `create_user.py` 선례 그대로다(argv 는 shell
+    history·`ps` 에 남는다). `--password` 옵션은 **의도적으로 없고** 회귀가 그 부재를 단정한다.
+  - **토큰은 명시 `Cookie` 헤더로 싣는다**. 세션 쿠키는 `Secure` 라 httpx 쿠키 저장소가 plain http
+    대상에서 조용히 버리는데(HANDOFF 함정) 스크립트는 전부 `http://application:8000` 이다.
+  - 로그인 실패는 `ScriptLoginError`(401 = 계정/비밀번호/비활성 구분 없음 — 앱의 단일 메시지 정책과
+    동형) · **200 인데 Set-Cookie 가 없으면도 에러**(조용히 익명으로 남는 것을 막는다).
+- **배선 8종**: `phase2a_deployed_e2e_smoke` · `phase3a_deployed_rebuild_smoke` ·
+  `phase4_context_search_deployed_smoke` · `phase6_gate_finding_live_smoke` · `diagnose_writing_gate` ·
+  `diagnose_writing_report` · **`measure_writing_stages`** · **`benchmark_writing_loop`**.
+  각 스크립트는 parser 에 `add_login_arguments`, client 생성 직후 `await authenticate_client(...)`.
+- **★ 패턴 스윕이 2종을 더 찾았다**(CLAUDE.md §4): HANDOFF 는 6종을 지목했지만 `scripts/` 를
+  `application_base_url`·`application:8000` 로 훑으니 `benchmark_writing_loop`·`measure_writing_stages`
+  도 `/projects` 를 친다. 부채 목록이 실측보다 작았던 것이며 8종 전부 배선했다.
+- 진단 2종 docstring 에 로그인 사용법 추가(`-e APPLICATION_PASSWORD` + `--username`), **`--current-position`
+  을 주면 시드를 건너뛰므로 로그인도 불필요**함을 명시.
+
+### Verification
+
+- **회귀 신규 `tests/test_script_login.py` 9 케이스 + 배선 전수 가드**(subtests 8 = 스크립트 8종):
+  헤더 부착·로그인 body·자격증명 없음(익명)·username 만 있고 env 없음·401 에러·Set-Cookie 없음 에러 ·
+  `--password` argv 부재 · env 읽기 · `ScriptLoginWiringCoverageTest`(8종이 flag + 로그인 호출을 모두 가짐).
+- **양방향 뮤테이션**:
+  - **A — Cookie 헤더 부착 제거(쿠키 저장소에 위임)**: `test_login_attaches_the_session_to_later_requests_over_http`
+    re-fail(`cookie: None != 'session=tok-1'`). **Secure 함정이 실제로 잠겨 있음을 실측** — 저장소에
+    맡기는 "그럴듯한" 구현이 여기서만 걸린다.
+  - **B — 한 스크립트에서 `authenticate_client` 호출 삭제**(`diagnose_writing_report`): 배선 가드
+    subtest re-fail. flag 만 남기고 로그인을 잃는 리팩터링을 잡는다(관측 슬라이스의 "조립 가드" 교훈).
+  - 둘 다 **역방향 Edit 으로 원복**(HANDOFF 함정: `git checkout --` 은 미커밋 슬라이스를 날린다).
+- **★ 라이브 관통(실 앱 in-process, 알파)**: 배포 스택은 내려가 있고 알파 `application` 이미지는 auth
+  이전 빌드라, 실 `create_app` 을 in-memory user/session 으로 127.0.0.1:8531 에 띄워 스크립트를 그대로
+  돌렸다(`AUTH_COOKIE_SECURE=true`, plain http — 함정 조건 그대로).
+  - 자격증명 없음 → `POST /projects` **401**(종전 동작 그대로).
+  - `--username probe` + `APPLICATION_PASSWORD` → `phase3a_deployed_rebuild_smoke` **exit 0**
+    (project/draft/version/rebuild 전부 200), `phase2a_deployed_e2e_smoke` 인증 write 6건 200
+    (project·draft·version·source_ref 3) 후 analysis run 만 **503**(LLM 게이트웨이 미구성 face —
+    인증이 아니라 협력자 부재).
+- **전량(test-mongo ON, 100s)**: **1830 passed / 4 skipped / 1540 subtests** — 1821 대비
+  **+9 = 신규 회귀 9, 회귀 0건**. subtests 1532→1540(+8 = 배선 가드가 도는 스크립트 8종). skip 동일.
+- 기존 스크립트 회귀 무변(`test_phase2a/3a/4_*_script.py` + gate·report live diag **43 passed**),
+  8종 전부 `--help` 에 `--username` 노출.
+
+### Decisions
+
+- **자격증명은 선택**(안 주면 익명). 종전 동작 보존이고, 로그인이 필요 없는 호출(`/health`)이나
+  `--current-position` 으로 시드를 건너뛰는 진단 실행에서 계정을 강요하지 않는다.
+- **비밀번호 argv 금지** — `create_user.py` 선례. 회귀가 `--password` 부재를 단정하므로 나중에
+  "편의상" 추가하려면 그 셀을 먼저 봐야 한다.
+- **공용 모듈 1개**(`script_auth.py`) — 8곳에 같은 로그인 코드를 복제하면 Secure 함정 회피가 한 곳에서만
+  썩는다. 배선 전수 가드가 새 스크립트의 누락을 잡는다.
+- **워커는 범위 밖** — HTTP 를 안 쓰고 Mongo 에 직접 붙는다(D8-7 사안).
+- SoT 무변: 공개 API·계약 변화 없음(스크립트는 계약 소비자다).

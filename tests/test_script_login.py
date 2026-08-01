@@ -205,5 +205,13 @@ class ScriptLoginWiringCoverageTest(unittest.TestCase):
             with self.subTest(module=module_name):
                 module = importlib.import_module(module_name)
                 source = inspect.getsource(module)
-                self.assertIn("add_login_arguments(parser)", source)
-                self.assertIn("await authenticate_client(client", source)
+                # assertTrue, not assertIn: a failing assertIn would dump the
+                # whole script source into the report.
+                self.assertTrue(
+                    "add_login_arguments(parser)" in source,
+                    f"{module_name} does not offer --username",
+                )
+                self.assertTrue(
+                    "await authenticate_client(client" in source,
+                    f"{module_name} has the flag but never logs in",
+                )

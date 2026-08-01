@@ -11,8 +11,13 @@ Run inside the application container, which carries the full env contract
 (CORE_SOT_MONGO_URI, LLM_GATEWAY_*, CHROMA_*, EMBEDDING_*, ELASTICSEARCH_URL)
 plus ``scripts/`` and the application code::
 
-    docker compose run --rm --no-deps application \\
-        python scripts/diagnose_writing_gate.py --project-id <benchmark-project>
+    docker compose run --rm --no-deps -e APPLICATION_PASSWORD='...' application \\
+        python scripts/diagnose_writing_gate.py --project-id <benchmark-project> \\
+        --username <account>
+
+``--username`` is needed whenever the idempotent seed runs: D8-3a put the seed's
+project/draft/version writes behind a session (without it they 401). Skip it
+together with the seed by passing ``--current-position``.
 
 By default this seeds the benchmark context idempotently (the same
 ``b2b-writing-loop-context-v1`` draft/version ``benchmark_writing_loop.py``

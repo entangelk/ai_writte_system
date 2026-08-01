@@ -11,8 +11,12 @@ first and repair raw responses plus the exact strict-parse error to stdout.
 
 Writes nothing to Mongo/audit/file. Run inside the application container::
 
-    docker compose run --rm --no-deps application \\
-        python scripts/diagnose_writing_report.py --project-id <benchmark-project>
+    docker compose run --rm --no-deps -e APPLICATION_PASSWORD='...' application \\
+        python scripts/diagnose_writing_report.py --project-id <benchmark-project> \\
+        --username <account>
+
+``--username`` is needed whenever the idempotent seed runs (D8-3a: the seed's
+writes need a session); ``--current-position`` skips both.
 
 Reuses the shared seed/search-request/finding helpers from
 ``diagnose_writing_gate.py`` (same benchmark context, same ContextSearchRequest
