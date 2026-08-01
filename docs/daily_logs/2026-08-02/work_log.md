@@ -388,7 +388,86 @@ Blocking 0건. 검증자가 뮤테이션 3종·회귀 1836/103.30s·compose 리�
 - **전량 회귀**: **1842 passed / 4 skipped / 1556 subtests / 105.70s**, exit 0. 문서 변경이라
   셀 수는 그대로이고 **회귀 0건**이다.
 
+---
+
+## Task — purge reconciler: 파기된 project 의 잔류 데이터 정리 (D8-6 잔여, SoT 무변)
+
+### Goals
+
+- D8-6 잔여 둘(감사 로그 · 완전 멱등 재시구) 중 **결정이 필요 없는 쪽**을 골랐다. 감사 로그는
+  저장 위치·필드·조회 표면이 사실상 결정이라 브리프가 선행돼야 한다.
+- 성공 기준: ① 고아를 찾는다 ② **살아 있는 project 를 안 건드린다**(삭제 도구라 이 방향이 더 위험)
+  ③ 기본이 안전하다(dry-run) ④ 컬렉션 로스터가 낡아도 동작한다.
+
+### 결함의 정확한 형태 (착수 전 코드 실측)
+
+`POST /admin/projects/{id}/purge`([`main.py:2801`](../../../services/application/app/main.py))의 순서는
+**core_sot(8컬렉션) → derived 8종 → enqueue** 다. core_sot 이 성공하고 derived 에서 mongo 장애가
+나면 전역 handler 가 503 을 내는데 — **재시도가 불가능하다.** 두 번째 호출에서
+`core_sot.purge_project` 가 `NotFound` 를 던져 **404** 로 끝나고, derived 는 영원히 남는다.
+
+- endpoint docstring 과 SoT 는 "부분 실패 시 재시도(멱등)"라고 적었다. **그 주장은 derived 단계
+  실패에는 성립하지 않는다** — 재시도할 방법 자체가 없다.
+- 08-01 기록은 잔류물을 **"ghost(무해)"**로 판단했다. **동의하지 않는다**: `llm_call_audits` 에는
+  그 project 의 **프롬프트 본문**이, `writing_drafts_scratch` 에는 **원고 후보**가 남는다.
+  파기를 요청받은 데이터가 남는 것이므로 D5 "부분 삭제는 조용한 고아" 금지 위반이다.
+  다만 **매우 드물다**는 판단에는 동의하므로, endpoint 를 고치는 대신 **정리 도구**를 만들었다.
+
+### Decisions (구현자 판단)
+
+- **endpoint 순서를 바꾸지 않았다.** derived 를 먼저 지우도록 뒤집으면 재시도는 되지만, 실패를
+  방치했을 때 **"살아 있는데 기억만 지워진 project"**가 남는다 — 지금의 "사라졌고 잔류물이 있다"
+  보다 나쁘다. 순서 변경·`core_sot.purge` 멱등화는 **404 계약의 의미를 바꾸는 오너 결정**이라
+  아래 Next steps 로 올렸다. reconciler 는 그 결정과 무관하게 유효하다(어느 쪽을 고르든 필요).
+- **컬렉션 목록을 코드에 적지 않았다.** `project_id` 를 쓰는 컬렉션을 **DB 에서 발견**한다. 새
+  derived 컬렉션이 생겨도 자동으로 덮이므로 이 스크립트가 로스터와 함께 낡지 않는다
+  (2026-08-01 교훈: 목록을 믿지 말고 디렉터리/DB 를 읽어라).
+- **기본은 dry-run.** 파기는 비가역이라 안전한 쪽이 기본이어야 한다. `--apply` 명시 필요.
+- **앱 route 를 안 친다** → 세션 로그인 불필요(워커와 같은 Mongo 직접 접근). 스크립트 로그인
+  디스커버리 가드에도 걸리지 않음을 확인했다.
+
+### Completed work
+
+- **[`scripts/purge_reconciler.py`](../../../scripts/purge_reconciler.py)** — 발견 → 대조 → (선택)
+  파기 → enqueue. `projects` 에 행이 없는 `project_id` 가 고아다. 삭제 후 **마지막에**
+  `PROJECT_PURGED` 를 enqueue 해 worker 가 vector/lexical 5백엔드를 지우게 한다(6c drain).
+- **회귀 6셀**(`tests/test_purge_reconciler.py`, 실 Mongo) — 고아 발견 · **살아 있는 project 보존** ·
+  모르는 새 컬렉션도 스윕 · dry-run 무해 · CLI 배선 · enqueue 순서.
+
+### Verification
+
+- **CLI 관통**(test-mongo, 시드 후 실행): dry-run 은 데이터를 그대로 두고 조사만 출력, `--apply` 는
+  고아 2건 삭제 + `live` 보존 + outbox 에 `project_purged` PENDING 1건 생성. 요약 JSON 확인.
+- **양방향 뮤테이션 3종**(전부 커밋 위에서 돌리고 원복):
+
+  | 뮤테이션 | 실측 |
+  |---|---|
+  | enqueue 를 삭제보다 먼저 | 순서 셀만 실패 |
+  | 살아 있는 판정 제거(`project_id in live` 삭제) | 고아 판정 셀 + 순서 셀 실패 = **살아 있는 원고를 지우는 방향이 잡힌다** |
+  | 컬렉션 발견을 하드코딩 목록으로 | "모르는 컬렉션" 셀만 실패 |
+
+- **전량 회귀**: **1848 passed / 4 skipped / 1559 subtests / 104.20s**, exit 0.
+  1842 대비 **+6 = reconciler 6셀**, subtests +3, 회귀 0건.
+
+### ★ 첫 판 가드가 거짓이었다 (뮤테이션이 잡은 것)
+
+- 순서 셀을 처음 썼을 때 **뮤테이션이 통과했다**. 원인: `_collections_scoped_by_project` 는 apply
+  루프 **전에** 스캔하는데, 그 시점 `index_sync_outbox` 가 비어 있으면 "project_id 를 쓰는
+  컬렉션"으로 **발견되지 않아** 삭제 대상이 아니고, 따라서 순서가 무의미해진다.
+- 즉 내가 스크립트 주석에 적은 함정은 **outbox 에 기존 항목이 있을 때만** 성립한다(실 배포에서는
+  흔한 조건이지만 빈 DB 에서는 아니다). 셀은 통과하되 **아무것도 잠그지 않고 있었다.**
+- setUp 에 **죽은 project 를 향한 기존 sync 작업**을 넣어 실제 조건을 복원했고, 그 뒤 뮤테이션이
+  정확히 그 셀만 물었다. **"테스트가 통과한다"로는 그 테스트가 무엇을 잡는지 알 수 없다**의 실례다.
+
 ### Next steps
+
+- **[오너 결정 후보] endpoint 자체의 재시도 가능성.** 선택지는 ⓐ 현행 유지 + reconciler 로 수습
+  (지금) ⓑ derived 를 먼저 지워 재시도 가능하게(대신 실패 방치 시 "살아 있는데 기억만 없는
+  project") ⓒ `core_sot.purge` 를 멱등화(대신 없는 project 도 204 — **404 계약 변경**).
+  ⓑ·ⓒ 는 계약·데이터 안전성 트레이드오프라 브리프감이다.
+- **purge 감사 로그**는 여전히 미착수이며 작은 브리프 선행을 권한다.
+
+### Next steps (앞 슬라이스들)
 
 - **D8-7의 남은 반(G2~G6 = 자격증명)은 원격/다중 호스트 배포 시점**이다. 브리프에 실행 계획으로 남았다.
 - 지금 결정 없이 열 수 있는 잔여는 어제와 같다 — **purge 감사 로그**(작은 브리프 선행 권장:
