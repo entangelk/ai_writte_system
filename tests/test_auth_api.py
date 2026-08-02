@@ -1302,6 +1302,25 @@ class AdminAccessGrantTest(unittest.TestCase):
             self.client.get(f"/projects/{self.project}/drafts").status_code, 403
         )
 
+    def test_a_grant_does_not_adopt_an_unowned_project(self) -> None:
+        # E1=A: `owner_id=None` 은 **항상** deny 다. 승격도 예외가 아니다 — 승격은
+        # 소유권을 지나는 통로이지 주인 없는 project 를 입양하는 수단이 아니다.
+        #
+        # 2026-08-02 독립 검증 Blocking. 첫 판은 두 번째 분기(승격)에 owner_id 검사가
+        # 없어 **무소유 project + 승격 → 200** 이었다. SoT 세 곳과 docstring 이 반대를
+        # 단언하고 있었는데도 AdminAccessGrantTest 11셀이 전부 alice 소유 project 만
+        # 써서 **이 조합이 0건**이었다(빈 셀).
+        #
+        # 도달 가능성: create_project 는 owner 를 강제하지만, 무소유 행은 삭제 버그나
+        # 미래 migration 으로 남을 수 있다 — 그것이 E1=A 가 존재하는 이유다.
+        orphan = self.core_sot.create_project(name="Orphan").id
+        self.client.post(
+            f"/admin/projects/{orphan}/access-grants", json={"reason": "조사"}
+        )
+        self.assertEqual(
+            self.client.get(f"/projects/{orphan}/drafts").status_code, 403
+        )
+
     def test_purging_a_project_takes_its_grants_with_it(self) -> None:
         # D5: 새 project-scoped 컬렉션이 파기에 안 물리면 조용한 고아가 된다.
         self._issue()

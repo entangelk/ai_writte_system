@@ -1477,7 +1477,12 @@ def require_project_owner(
     if project.owner_id is not None and project.owner_id == current.id:
         return project
     if (
-        current.is_admin
+        # E1=A first, on this branch too. Omitting it here (while the owner
+        # branch had it) was the 2026-08-02 verification Blocking: an unowned
+        # project opened to any admin holding a grant, contradicting the three
+        # places the SoT says otherwise — including the docstring above.
+        project.owner_id is not None
+        and current.is_admin
         and request.method in _GRANTED_METHODS
         and request.app.state.access_grants.active(
             admin_user_id=current.id, project_id=project_id
