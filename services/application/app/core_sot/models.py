@@ -28,9 +28,14 @@ class Project:
     id: str
     name: str
     archived: bool = False
-    # Multi-user ownership (D3=A). Nullable on purpose for now: projects created
-    # before authentication existed have no owner, and enforcement is D8-3. A
-    # non-null owner_id does NOT restrict access yet — it is only recorded.
+    # Multi-user ownership (D3=A). **Enforced since D8-3b (v1.7.53)** — every
+    # project-scoped operation checks it, and an administrator gets past it only
+    # through an expiring, audited grant (D8-5e). The earlier note here said
+    # ownership was "only recorded"; that stopped being true and is corrected.
+    #
+    # Still nullable: projects created before authentication existed have no
+    # owner, and such rows can also arrive from a deletion bug or a migration.
+    # `owner_id=None` is therefore **always denied** (E1=A), never adopted.
     owner_id: str | None = None
 
 

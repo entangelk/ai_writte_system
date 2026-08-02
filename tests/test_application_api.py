@@ -2285,6 +2285,8 @@ class AdminErrorContractDeclarationTest(unittest.TestCase):
     """
 
     EXPECTED = {
+        # D8-5b. No 404: it looks nothing up. Metadata for every project.
+        ("/admin/projects", "get"): {"401", "403", "503"},
         ("/admin/users", "get"): {"401", "403", "503"},
         ("/admin/users", "post"): {"400", "401", "403", "409", "503"},
         ("/admin/users/{user_id}/deactivate", "post"):
@@ -2316,7 +2318,7 @@ class AdminErrorContractDeclarationTest(unittest.TestCase):
         }
 
     def test_declared_error_statuses_match_the_lock_list(self):
-        self.assertEqual(len(self.EXPECTED), 6)
+        self.assertEqual(len(self.EXPECTED), 7)
         for (path, method), expected in self.EXPECTED.items():
             with self.subTest(path=path, method=method):
                 self.assertEqual(self._declared(path, method), expected)

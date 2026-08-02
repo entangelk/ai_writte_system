@@ -826,6 +826,10 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
     # surface manages accounts, and reaching another user's project content is
     # the audited, expiring grant of F1=C — a different mechanism, not this one.
     ADMIN = {
+        # D8-5b: 전 프로젝트 **메타데이터** 목록. project 를 지목하지 않으므로
+        # `_ADMIN_PROJECT_ROUTES` 예외가 아니라 평범한 admin tier 다. 내용은 주지
+        # 않는다 — 그것은 여전히 D8-5e 승격을 거친다.
+        ("/admin/projects", "get"),
         ("/admin/users", "get"),
         ("/admin/users", "post"),
         ("/admin/users/{user_id}/deactivate", "post"),
@@ -902,7 +906,7 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         self.assertEqual(by_tier["auth"], set(self.AUTH_ONLY))
         self.assertEqual(by_tier["admin"], self.ADMIN)
         self.assertEqual(len(by_tier["project"]), 61)
-        self.assertEqual(len(tiers), 73)
+        self.assertEqual(len(tiers), 74)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:
@@ -1177,6 +1181,72 @@ class TestSeamStaysAnOverrideTest(unittest.TestCase):
         # nothing else would notice — this is what notices.
         client, _, _ = _client()
         self.assertEqual(client.app.dependency_overrides, {})
+
+
+class AdminProjectListTest(unittest.TestCase):
+    """D8-5b: 전 프로젝트 **메타데이터** 목록.
+
+    미인증 401·비관리자 403 은 CombinedBoundaryMatrixTest 가 ADMIN tier 전수로 잠근다.
+    여기는 이 endpoint 의 **경계**를 잠근다 — 소유자를 가리지 않고 전부 보이되,
+    **내용은 주지 않는다**(그것은 여전히 D8-5e 승격을 거친다).
+    """
+
+    def setUp(self) -> None:
+        self.core_sot = CoreSotService(InMemoryCoreSotRepository())
+        self.client, self.users, _ = _client(core_sot=self.core_sot)
+        self.root = self.users.create_user(
+            username="root", password="pw789", is_admin=True
+        )
+        self.alice = self.users._repo.get_by_username("alice")
+        self.client.post("/auth/login",
+                         json={"username": "root", "password": "pw789"})
+
+    def test_it_lists_projects_of_every_owner_including_unowned(self) -> None:
+        # 관리자 목록의 존재 이유. 소유자별 필터(GET /projects)와 정반대 방향이라,
+        # 여기가 소유자로 좁혀지면 endpoint 가 무의미해진다.
+        self.core_sot.create_project(name="Alice's", owner_id=self.alice.id)
+        self.core_sot.create_project(name="Root's", owner_id=self.root.id)
+        self.core_sot.create_project(name="Orphan")
+
+        projects = self.client.get("/admin/projects").json()["projects"]
+        self.assertEqual(
+            {p["name"] for p in projects}, {"Alice's", "Root's", "Orphan"}
+        )
+        by_name = {p["name"]: p for p in projects}
+        self.assertEqual(by_name["Alice's"]["owner_id"], self.alice.id)
+        self.assertIsNone(by_name["Orphan"]["owner_id"])
+
+    def test_archived_projects_are_included_and_flagged(self) -> None:
+        # archive 는 soft delete 라 "무엇이 존재하나"에 답할 때 빠지면 안 된다.
+        project = self.core_sot.create_project(
+            name="Shelved", owner_id=self.alice.id
+        )
+        self.core_sot.archive_project(project_id=project.id)
+        [row] = self.client.get("/admin/projects").json()["projects"]
+        self.assertTrue(row["archived"])
+
+    def test_the_listing_carries_no_project_contents(self) -> None:
+        # ★ over-strict 경계. 이 endpoint 가 내용을 흘리기 시작하면 D8-5e 승격
+        # (사유·만료·감사)을 우회하는 뒷문이 된다. 필드 집합을 정확히 단정한다 —
+        # 필드가 늘면 그것은 결정이지 사고여서는 안 된다.
+        self.core_sot.create_project(name="Novel", owner_id=self.alice.id)
+        [row] = self.client.get("/admin/projects").json()["projects"]
+        self.assertEqual(set(row), {"id", "name", "archived", "owner_id"})
+
+    def test_listing_a_project_is_not_recorded_as_an_access(self) -> None:
+        # 목록은 접근이 아니다 — 승격 감사(C-3)는 project **내용**에 닿은 요청만
+        # 센다. 여기가 기록되면 접근 이력이 관리자의 목록 조회로 오염된다.
+        project = self.core_sot.create_project(
+            name="Novel", owner_id=self.alice.id
+        )
+        self.client.get("/admin/projects")
+        self.client.post("/auth/logout")
+        self.client.post("/auth/login",
+                         json={"username": "alice", "password": "pw123"})
+        entries = self.client.get(
+            f"/projects/{project.id}/access-log"
+        ).json()["entries"]
+        self.assertEqual(entries, [])
 
 
 class AdminAccessGrantTest(unittest.TestCase):

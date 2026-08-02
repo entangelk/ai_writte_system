@@ -1626,6 +1626,21 @@ class AccessLogEntryPayload(BaseModel):
 class AccessLogResponse(BaseModel):
     entries: list[AccessLogEntryPayload]
 
+
+class AdminProjectPayload(BaseModel):
+    # D8-5b. One field more than the public payload: `owner_id`, which is the
+    # whole point of an administrator's list (whose project is this). The public
+    # `_project_payload` deliberately still omits it — exposing ownership on the
+    # product surface is a separate, deferred decision (D8-2c).
+    id: str
+    name: str
+    archived: bool
+    owner_id: str | None
+
+
+class AdminProjectListResponse(BaseModel):
+    projects: list[AdminProjectPayload]
+
 PROJECT_BRIEF_STYLE_EXAMPLES_MAX_ITEMS = 3
 PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS = 1000
 
@@ -2931,6 +2946,30 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         sync_outbox.enqueue_project_archived(project_id=project_id)
         return _project_payload(project)
+
+    @app.get("/admin/projects", response_model=AdminProjectListResponse,
+             responses=_ERRORS_ADMIN, dependencies=_REQUIRE_ADMIN)
+    async def list_all_projects() -> dict[str, object]:
+        # D8-5b (F1=C): every project, whoever owns it — id·name·archived·owner.
+        # **Metadata only.** This is the one admin surface that names projects it
+        # does not own, so the boundary matters: it lists *that* they exist and
+        # who owns them, and nothing from inside them. Reading a project's
+        # contents still requires the audited, expiring grant of D8-5e.
+        #
+        # `owner_id` is returned raw rather than resolved to a username: the
+        # admin console already lists users (`GET /admin/users`), so joining here
+        # would add an N+1 to serve a name the caller can already map.
+        #
+        # Archived projects are included — an administrator asking "what exists"
+        # wants the archived ones too (they are soft-deleted, not gone), and the
+        # flag lets the caller decide.
+        return {"projects": [
+            {
+                "id": p.id, "name": p.name, "archived": p.archived,
+                "owner_id": p.owner_id,
+            }
+            for p in core_sot.list_projects()
+        ]}
 
     @app.post("/admin/projects/{project_id}/access-grants",
               response_model=AccessGrantCreateResponse, status_code=201,
