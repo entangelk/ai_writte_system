@@ -99,6 +99,10 @@ def main() -> int:
 
         summary: dict = {
             "mode": "apply" if args.apply else "dry-run",
+            # 운영자가 "이만큼은 안 건드린다"를 요약만 보고 확인할 수 있어야 한다 —
+            # 삭제 도구라 살아 있는 쪽의 규모가 보이지 않으면 실행하기 무섭다
+            # (2026-08-02 독립 검증 hardening #3).
+            "live_project_count": db[_PROJECTS_COLLECTION].count_documents({}),
             "scanned_collections": collections,
             "orphan_project_ids": sorted(orphans),
             "orphans": {

@@ -18,6 +18,9 @@ outbox enqueue 를 뒤이어 한다. derived 단계에서 mongo 장애가 나면
 
 from __future__ import annotations
 
+import contextlib
+import io
+import json
 import os
 import sys
 import time
@@ -191,12 +194,24 @@ class PurgeReconcilerCommandTest(unittest.TestCase):
         self._client.drop_database(self._db_name)
         self._client.close()
 
-    def _run(self, *argv: str) -> None:
+    def _run(self, *argv: str) -> dict:
+        stdout = io.StringIO()
         with mock.patch.dict(
             os.environ,
             {"CORE_SOT_MONGO_URI": _MONGO_URI, "CORE_SOT_MONGO_DB": self._db_name},
-        ), mock.patch.object(sys, "argv", ["purge_reconciler.py", *argv]):
+        ), mock.patch.object(
+            sys, "argv", ["purge_reconciler.py", *argv]
+        ), contextlib.redirect_stdout(stdout):
             self.assertEqual(purge_reconciler.main(), 0)
+        return json.loads(stdout.getvalue())
+
+    def test_the_summary_reports_how_much_is_left_alone(self) -> None:
+        """삭제 도구라 **살아 있는 쪽의 규모**가 요약에 보여야 실행할 수 있다."""
+
+        summary = self._run()
+
+        self.assertEqual(summary["live_project_count"], 1)
+        self.assertEqual(summary["orphan_project_ids"], ["dead"])
 
     def test_the_enqueued_purge_event_survives_the_sweep(self) -> None:
         """★ 순서 함정: `index_sync_outbox` 도 `project_id` 를 가진 컬렉션이라 삭제 대상이다.

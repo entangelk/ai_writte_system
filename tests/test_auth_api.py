@@ -736,6 +736,39 @@ class AdminProjectPurgeTest(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertIn("detail", response.json())
 
+    def test_a_second_purge_is_404_and_never_reaches_the_derived_services(self) -> None:
+        """★ 알려진 한계를 **실행 가능한 사실로** 못박는다 — 재시도는 멱등이 아니다.
+
+        endpoint 는 `core_sot.purge_project` 를 **먼저** 부르고 derived 8종을 뒤이어
+        부른다. 그래서 derived 단계에서 mongo 장애(503)가 나면 **수습할 방법이 없다**:
+        두 번째 호출은 core_sot 이 이미 비어 `NotFound` → 404 로 끝나고 **derived 에
+        도달하지 못한다.** 아래 spy 가 그 도달 실패를 직접 단정한다.
+
+        v1.7.74 changelog 와 endpoint docstring 은 이것을 "멱등 재시도"라고 적었는데
+        거짓이었다(2026-08-02 독립 검증 Blocking #1). 잔류물 수습은 별도 도구가 한다
+        (`scripts/purge_reconciler.py`).
+
+        **이 셀은 오너 결정 ⓑ(순서 변경)·ⓒ(`core_sot.purge` 멱등화)를 막지 않는다 —
+        오히려 그 결정을 구현하면 여기서 실패하므로, 문서 정정을 함께 하도록 강제한다.**
+        """
+
+        project = self.core_sot.create_project(name="Novel")
+        self.assertEqual(
+            self.client.post(f"/admin/projects/{project.id}/purge").status_code, 204
+        )
+        self.memory_spy.purged.clear()
+        self.analysis_spy.purged.clear()
+
+        retry = self.client.post(f"/admin/projects/{project.id}/purge")
+
+        self.assertEqual(retry.status_code, 404)
+        self.assertEqual(
+            (self.memory_spy.purged, self.analysis_spy.purged),
+            ([], []),
+            "재시도가 derived 에 도달했다면 부분 실패를 수습할 수 있다는 뜻이다 — "
+            "그렇다면 docstring·SoT 의 '재시도 불가' 서술을 함께 고쳐야 한다",
+        )
+
 
 class CombinedBoundaryMatrixTest(unittest.TestCase):
     """D8-3c: the 401 and 403 guards audited as a single matrix.

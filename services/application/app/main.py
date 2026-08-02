@@ -2802,8 +2802,18 @@ def create_app(
         # D8-6d: 영구 파기(불가역). archive(soft)와 달리 18컬렉션을 hard delete 하고
         # indexing outbox 로 worker 가 vector/index 5백엔드를 파기(6c _drain_purge).
         # D5 전체 그래프 파기. 응답은 204(리소스 소멸). core_sot 파기(8컬렉션, mongo
-        # 트랜잭션)가 NotFound 면 404; derived 파기(10컬렉션, 각 delete_many 멱등) 중
-        # mongo 장애 시 전역 503 handler → 클라이언트 재시도(멱등).
+        # 트랜잭션)가 NotFound 면 404.
+        #
+        # ★ 알려진 한계 — **재시도는 멱등이 아니다**(2026-08-02 정정. v1.7.74 는 이 자리에
+        # "클라이언트 재시도(멱등)"라고 적었으나 거짓이었다). core_sot 이 **먼저** 지워지므로,
+        # 아래 derived 단계에서 mongo 장애가 나 전역 handler 가 503 을 내면 **수습할 방법이
+        # 없다**: 재시도는 core_sot 이 비어 404 로 끝나고 derived 에 도달하지 못한다. 남는
+        # derived 는 무해하지 않다 — llm_call_audits 에 프롬프트 본문이, scratch 에 원고
+        # 후보가 남는다(D5 부분 삭제 금지 위반). **수습은 `scripts/purge_reconciler.py`**
+        # 가 한다(projects 에 없는 project_id 의 잔류를 찾아 파기 + PROJECT_PURGED enqueue).
+        # 이 순서를 바꿀지(재시도 가능하게) 는 오너 결정 사안이다 — HANDOFF "Owner Decisions".
+        # 한계 자체는 AdminProjectPurgeTest 의
+        # test_a_second_purge_is_404_and_never_reaches_the_derived_services 가 잠근다.
         try:
             core_sot.purge_project(project_id=project_id)
         except NotFound as exc:
