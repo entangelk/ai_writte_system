@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import asdict
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Annotated, Protocol, Union
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
@@ -12,6 +12,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from services.application.app.auth.cookies import SESSION_COOKIE_NAME, cookie_kwargs
+from services.application.app.auth.access_grants import (
+    AccessGrantService,
+    InMemoryAccessGrantRepository,
+)
 from services.application.app.auth.sessions import (
     DEFAULT_SESSION_TTL,
     InMemorySessionRepository,
@@ -483,6 +487,25 @@ def _default_session_service() -> SessionService:
             uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
         ),
         ttl=ttl,
+    )
+
+
+def _default_access_grant_service() -> AccessGrantService:
+    # The TTL is a contract literal (C-1 = 1 hour), not an env knob: a grant that
+    # outlives the support task is exactly the risk F1=C was chosen to bound, and
+    # a per-deployment override would make the audit trail mean different things
+    # on different machines.
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if not uri:
+        return AccessGrantService(InMemoryAccessGrantRepository())
+    from services.application.app.auth.access_grants_mongo import (
+        MongoAccessGrantRepository,
+    )
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+    return AccessGrantService(
+        MongoAccessGrantRepository.from_uri(
+            uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
+        )
     )
 
 
@@ -1417,19 +1440,52 @@ def require_authenticated_user(request: Request):
     return user
 
 
+# C-2 read-only. HEAD rides along with GET because Starlette answers it from the
+# same route; both are side-effect free by HTTP contract.
+_GRANTED_METHODS = frozenset({"GET", "HEAD"})
+
+
 def require_project_owner(
     request: Request,
     project_id: str,
     current=Depends(require_authenticated_user),
 ):
-    """Allow only the owning user; missing projects retain their 404 face."""
+    """Allow the owning user, or an administrator holding a live access grant.
+
+    Missing projects retain their 404 face.
+
+    D8-5e (F1=C, owner 2026-08-02): the grant is the *only* way past ownership,
+    and it is narrower than ownership in two ways that are both enforced here:
+
+    * **read-only (C-2)** — a grant admits GET/HEAD and nothing else. Anything
+      that could write is refused even while the grant is live, so an
+      administrator can never edit someone else's manuscript. The test is the
+      HTTP method rather than a hand-kept list of "read operations": a list
+      would silently misclassify the next endpoint someone adds, and failing
+      closed on an unlisted method is the safe direction.
+    * **still an administrator** — the grant is checked *together with*
+      ``is_admin``, not instead of it. A grant issued to someone who has since
+      lost the role stops working immediately rather than outliving it.
+
+    ``owner_id is None`` keeps denying everyone (E1=A) — a grant does not adopt
+    an unowned project.
+    """
     try:
         project = request.app.state.core_sot.get_project(project_id=project_id)
     except NotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if project.owner_id is None or project.owner_id != current.id:
-        raise HTTPException(status_code=403, detail="forbidden")
-    return project
+    if project.owner_id is not None and project.owner_id == current.id:
+        return project
+    if (
+        current.is_admin
+        and request.method in _GRANTED_METHODS
+        and request.app.state.access_grants.active(
+            admin_user_id=current.id, project_id=project_id
+        )
+        is not None
+    ):
+        return project
+    raise HTTPException(status_code=403, detail="forbidden")
 
 
 def require_admin_user(current=Depends(require_authenticated_user)):
@@ -1518,6 +1574,28 @@ class ProjectListResponse(BaseModel):
 NonBlankBriefString = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, pattern=r"\S")
 ]
+
+
+class AccessGrantCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # C-5: required, and non-blank. "왜 봤는가" is the whole value of the audit
+    # record, and a blank string would satisfy a plain `str` while recording
+    # nothing. The service re-checks so non-HTTP callers cannot skip it.
+    reason: NonBlankBriefString
+
+
+class AccessGrantPayload(BaseModel):
+    id: str
+    project_id: str
+    admin_user_id: str
+    reason: str
+    created_at: datetime
+    expires_at: datetime
+
+
+class AccessGrantCreateResponse(BaseModel):
+    grant: AccessGrantPayload
 
 PROJECT_BRIEF_STYLE_EXAMPLES_MAX_ITEMS = 3
 PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS = 1000
@@ -2176,6 +2254,7 @@ def create_app(
     vector_index: InMemoryVectorIndexAdapter | None = None,
     user_service: UserService | None = None,
     session_service: SessionService | None = None,
+    access_grant_service: AccessGrantService | None = None,
 ) -> FastAPI:
     # Fail startup loudly for invalid environment-adjustable public bounds.
     _project_brief_style_example_limits()
@@ -2392,12 +2471,15 @@ def create_app(
     # Ownership (403) is enforced separately on every project-scoped route.
     users = user_service or _default_user_service()
     sessions = session_service or _default_session_service()
+    access_grants = access_grant_service or _default_access_grant_service()
     # The module-level dependency reads them from here: it must be one function
     # object across all apps so the exhaustive guard has a single identity to
     # look for (see require_authenticated_user).
     app.state.users = users
     app.state.sessions = sessions
     app.state.core_sot = core_sot
+    # require_project_owner reads this to honour a live grant (D8-5e, F1=C).
+    app.state.access_grants = access_grants
 
     def _user_payload(user) -> dict[str, object]:
         return {
@@ -2795,6 +2877,39 @@ def create_app(
         sync_outbox.enqueue_project_archived(project_id=project_id)
         return _project_payload(project)
 
+    @app.post("/admin/projects/{project_id}/access-grants",
+              response_model=AccessGrantCreateResponse, status_code=201,
+              responses=_ERRORS_ADMIN_404, dependencies=_REQUIRE_ADMIN)
+    async def issue_access_grant(
+        project_id: str, request: AccessGrantCreateRequest,
+        current=Depends(require_admin_user),
+    ) -> dict[str, object]:
+        # D8-5e (F1=C, owner 2026-08-02). Ownership refuses administrators too;
+        # this is the audited, expiring way past it. It sits in the ADMIN tier
+        # for the same reason purge does — the path names a project but the
+        # check is "are you an administrator", not "do you own this".
+        #
+        # 404 before issuing: a grant to a project that does not exist would be
+        # an audit record about nothing, and it would let an administrator probe
+        # for project ids through a 201.
+        try:
+            core_sot.get_project(project_id=project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        grant = access_grants.issue(
+            admin_user_id=current.id,
+            project_id=project_id,
+            reason=request.reason,
+        )
+        return {"grant": {
+            "id": grant.id,
+            "project_id": grant.project_id,
+            "admin_user_id": grant.admin_user_id,
+            "reason": grant.reason,
+            "created_at": grant.created_at,
+            "expires_at": grant.expires_at,
+        }}
+
     @app.post("/admin/projects/{project_id}/purge", status_code=204,
               response_model=None, responses=_ERRORS_ADMIN_404,
               dependencies=_REQUIRE_ADMIN)
@@ -2826,6 +2941,11 @@ def create_app(
         writing_scratch.purge_project(project_id=project_id)
         writing_loop_audit.purge_project(project_id=project_id)
         llm_call_audit.purge_project(project_id=project_id)
+        # D8-5e: access grants are project-scoped too (they carry the project id
+        # and the reason an admin looked at it). Leaving them behind would be the
+        # silent orphan D5 forbids — append-only is a rule about *expiry*, not
+        # about surviving the project's destruction.
+        access_grants.purge_project(project_id=project_id)
         sync_outbox.enqueue_project_purged(project_id=project_id)
         return None
 

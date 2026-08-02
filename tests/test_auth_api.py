@@ -10,7 +10,7 @@ every other suite runs authenticated through ``tests/auth_support.py``.
 import os
 import re
 import unittest
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from unittest import mock
 
 from fastapi import Depends, FastAPI
@@ -22,6 +22,9 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - the driver is present in CI
     _STORAGE_FAILURE = None
 
+from services.application.app.auth.access_grants import (
+    AccessGrantService, InMemoryAccessGrantRepository,
+)
 from services.application.app.auth.cookies import cookie_secure
 from services.application.app.auth.sessions import (
     InMemorySessionRepository, SessionService,
@@ -48,6 +51,14 @@ from services.application.app.main import (
 )
 from tests.auth_support import authenticate
 
+# The only `{project_id}` routes that are admin-authorized instead of
+# ownership-authorized. Spelled out once so a third entry is a decision someone
+# had to type, not something a new route inherits by being under /admin.
+_ADMIN_PROJECT_ROUTES = frozenset({
+    "/admin/projects/{project_id}/purge",
+    "/admin/projects/{project_id}/access-grants",
+})
+
 
 class _FakeHasher:
     def hash(self, password: str) -> str:
@@ -58,14 +69,14 @@ class _FakeHasher:
 
 
 def _client(*, ttl=timedelta(hours=1), core_sot=None, index_sync_outbox=None,
-            memory_service=None, analysis_service=None):
+            memory_service=None, analysis_service=None, access_grants=None):
     users = UserService(InMemoryUserRepository(), hasher=_FakeHasher())
     sessions = SessionService(InMemorySessionRepository(), ttl=ttl)
     users.create_user(username="alice", password="pw123")
     app = create_app(
         service=core_sot, user_service=users, session_service=sessions,
         index_sync_outbox=index_sync_outbox, memory_service=memory_service,
-        analysis_service=analysis_service,
+        analysis_service=analysis_service, access_grant_service=access_grants,
     )
     # https base_url on purpose: the cookie ships Secure by default, so an http
     # client would silently drop it and every session test would pass/fail for
@@ -379,25 +390,28 @@ class ProjectAuthorizationTest(unittest.TestCase):
             for method in sorted(route.methods):
                 method = method.lower()
                 with self.subTest(path=route.path, method=method):
-                    if route.path == "/admin/projects/{project_id}/purge":
-                        # D8-6d: admin purge is the intentional exception to
-                        # "{project_id} path ⇒ ownership" — the admin deletes the
-                        # project by id (D5) without reading its content. Any other
-                        # admin + project_id route still fails this guard.
+                    if route.path in _ADMIN_PROJECT_ROUTES:
+                        # The intentional exceptions to "{project_id} path ⇒
+                        # ownership". Both name a project by id without reading
+                        # its content: D8-6d purge destroys it (D5), and D8-5e
+                        # issues the grant that *later* opens read access —
+                        # issuing is not itself access. Any other admin +
+                        # project_id route still fails this guard.
                         #
                         # The exception has a shape, so assert the shape instead of
-                        # skipping: a bare `pass` here would also accept a purge
+                        # skipping: a bare `pass` here would also accept such a
                         # route with *no* authorization at all, which is the one
                         # way this exception could turn into a hole.
                         self.assertFalse(
                             ownership_guarded,
-                            "purge is admin-authorized by design; adding ownership "
-                            "would deny the admin the very thing D5 grants",
+                            f"{route.path} is admin-authorized by design; adding "
+                            "ownership would deny the admin the very thing it grants",
                         )
                         self.assertTrue(
                             admin_guarded,
-                            "purge dropped its admin guard — a {project_id} route "
-                            "with neither ownership nor admin is unauthorized",
+                            f"{route.path} dropped its admin guard — a "
+                            "{project_id} route with neither ownership nor admin "
+                            "is unauthorized",
                         )
                     else:
                         self.assertEqual(ownership_guarded, expected)
@@ -822,6 +836,10 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # D8-6d: admin project 영구 파기(204, ADMIN tier). project_id 경로지만 소유권이
         # 아니라 관리자 검사를 쓰므로 project tier 가 아닌 admin tier.
         ("/admin/projects/{project_id}/purge", "post"),
+        # D8-5e: 승격 발급(201). 같은 이유로 admin tier — 경로가 project 를 지목하지만
+        # 검사는 "관리자인가"이지 "소유자인가"가 아니다. 이 operation 이 여는 것은
+        # **읽기 전용·만료되는** 접근이며, 그 시행은 require_project_owner 안에 있다.
+        ("/admin/projects/{project_id}/access-grants", "post"),
     }
 
     def setUp(self) -> None:
@@ -884,7 +902,7 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         self.assertEqual(by_tier["auth"], set(self.AUTH_ONLY))
         self.assertEqual(by_tier["admin"], self.ADMIN)
         self.assertEqual(len(by_tier["project"]), 60)
-        self.assertEqual(len(tiers), 71)
+        self.assertEqual(len(tiers), 72)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:
@@ -1148,6 +1166,151 @@ class TestSeamStaysAnOverrideTest(unittest.TestCase):
         # nothing else would notice — this is what notices.
         client, _, _ = _client()
         self.assertEqual(client.app.dependency_overrides, {})
+
+
+class AdminAccessGrantTest(unittest.TestCase):
+    """D8-5e (F1=C): 관리자의 만료되는 **읽기 전용** project 접근.
+
+    미인증 401·비관리자 403(발급 endpoint)은 CombinedBoundaryMatrixTest 가 ADMIN tier
+    전수로 잠근다. 여기는 **승격이 실제로 무엇을 열고 무엇을 열지 않는가**를 양방향으로
+    잠근다 — 열려야 할 읽기가 열리고(under-strict), 열리면 안 되는 쓰기·만료·타 project
+    가 닫혀 있다(over-strict).
+    """
+
+    def setUp(self) -> None:
+        self.now = datetime(2026, 8, 2, 12, 0, tzinfo=UTC)
+        self.core_sot = CoreSotService(InMemoryCoreSotRepository())
+        self.grants = AccessGrantService(
+            InMemoryAccessGrantRepository(), clock=lambda: self.now
+        )
+        self.client, self.users, _ = _client(
+            core_sot=self.core_sot, access_grants=self.grants
+        )
+        self.root = self.users.create_user(
+            username="root", password="pw789", is_admin=True
+        )
+        # alice 소유 project — 관리자(root)의 것이 아니다. 저장소에 직접 만든다:
+        # 이 클래스가 보는 것은 소유권 경계이지 생성 경로가 아니다.
+        alice = self.users._repo.get_by_username("alice")
+        self.project = self.core_sot.create_project(
+            name="Novel", owner_id=alice.id
+        ).id
+        self.client.post("/auth/login",
+                         json={"username": "root", "password": "pw789"})
+
+    def _issue(self, reason: str = "지원 요청 #12 확인"):
+        return self.client.post(
+            f"/admin/projects/{self.project}/access-grants",
+            json={"reason": reason},
+        )
+
+    def test_issuing_records_the_reason_and_a_one_hour_expiry(self) -> None:
+        # C-1(1시간)·C-5(사유)는 계약 리터럴이다. 발급 응답이 그것을 그대로 싣는다.
+        response = self._issue()
+        self.assertEqual(response.status_code, 201)
+        grant = response.json()["grant"]
+        self.assertEqual(grant["project_id"], self.project)
+        self.assertEqual(grant["reason"], "지원 요청 #12 확인")
+        self.assertEqual(
+            datetime.fromisoformat(grant["expires_at"])
+            - datetime.fromisoformat(grant["created_at"]),
+            timedelta(hours=1),
+        )
+
+    def test_a_blank_reason_is_refused(self) -> None:
+        # C-5. 공백만 있는 사유는 `str` 로는 통과하지만 아무것도 기록하지 않는다.
+        self.assertEqual(self._issue("   ").status_code, 422)
+
+    def test_a_grant_for_a_missing_project_is_404_not_201(self) -> None:
+        # 없는 project 에 대한 승격은 아무것도 아닌 것에 대한 감사 기록이고,
+        # 201 이 project id 존재 여부를 알려 주는 probe 가 된다.
+        response = self.client.post(
+            "/admin/projects/does-not-exist/access-grants",
+            json={"reason": "probe"},
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_without_a_grant_an_admin_is_still_refused(self) -> None:
+        # 관리자라는 것만으로는 남의 project 를 못 읽는다 — 승격이 유일한 통로다.
+        self.assertEqual(
+            self.client.get(f"/projects/{self.project}/drafts").status_code, 403
+        )
+
+    def test_a_live_grant_opens_reads_on_that_project(self) -> None:
+        self._issue()
+        self.assertEqual(
+            self.client.get(f"/projects/{self.project}/drafts").status_code, 200
+        )
+
+    def test_a_live_grant_never_opens_writes(self) -> None:
+        # C-2 읽기 전용. 승격이 살아 있어도 쓰기는 403이다 — 관리자가 남의 원고를
+        # 고칠 수 있으면 정본 보존 정책과 충돌한다. 방법 판정이라 새 endpoint 도 자동으로
+        # 닫힌 쪽에서 시작한다(fail-closed).
+        self._issue()
+        for method, path in [
+            ("post", f"/projects/{self.project}/drafts"),
+            ("patch", f"/projects/{self.project}"),
+            ("delete", f"/projects/{self.project}"),
+        ]:
+            with self.subTest(method=method, path=path):
+                response = self.client.request(
+                    method.upper(), path, json={"name": "X"}
+                )
+                self.assertEqual(response.status_code, 403)
+
+    def test_the_grant_stops_working_when_it_expires(self) -> None:
+        # C-1. 만료는 판정이지 삭제가 아니다 — 아래 append-only 셀이 짝이다.
+        self._issue()
+        self.now += timedelta(hours=1, seconds=1)
+        self.assertEqual(
+            self.client.get(f"/projects/{self.project}/drafts").status_code, 403
+        )
+
+    def test_an_expired_grant_row_survives_as_the_audit_record(self) -> None:
+        # C-3. 발급 기록은 만료 뒤에도 남아야 "무엇을 왜 봤는가"가 답해진다.
+        # 이 셀이 없으면 누군가 만료 승격을 지우는 "정리"를 넣어도 아무도 모른다.
+        self._issue("감사 대상")
+        self.now += timedelta(days=365)
+        row = self.grants._repo.latest_for(
+            admin_user_id=self.root.id, project_id=self.project
+        )
+        self.assertIsNotNone(row)
+        self.assertEqual(row.reason, "감사 대상")
+
+    def test_a_grant_does_not_reach_a_different_project(self) -> None:
+        # 승격은 한 project 를 지목한다. 여기가 새면 "전 project 열람"이 된다.
+        alice = self.users._repo.get_by_username("alice")
+        other = self.core_sot.create_project(name="Other", owner_id=alice.id).id
+        self._issue()
+        self.assertEqual(
+            self.client.get(f"/projects/{other}/drafts").status_code, 403
+        )
+
+    def test_a_grant_held_by_a_non_admin_does_not_work(self) -> None:
+        # 승격은 관리자 자격과 **함께** 검사된다(is_admin AND live grant). 강등된
+        # 관리자의 살아 있는 승격이 그 역할보다 오래 사는 것을 막는다 — 승격만 보면
+        # 강등이 무의미해진다.
+        bob = self.users.create_user(username="bob", password="pw000")
+        self.assertFalse(bob.is_admin)
+        self.grants.issue(
+            admin_user_id=bob.id, project_id=self.project, reason="비관리자 승격"
+        )
+        self.client.post("/auth/logout")
+        self.client.post("/auth/login",
+                         json={"username": "bob", "password": "pw000"})
+        self.assertEqual(
+            self.client.get(f"/projects/{self.project}/drafts").status_code, 403
+        )
+
+    def test_purging_a_project_takes_its_grants_with_it(self) -> None:
+        # D5: 새 project-scoped 컬렉션이 파기에 안 물리면 조용한 고아가 된다.
+        self._issue()
+        self.client.post(f"/admin/projects/{self.project}/purge")
+        self.assertIsNone(
+            self.grants._repo.latest_for(
+                admin_user_id=self.root.id, project_id=self.project
+            )
+        )
 
 
 if __name__ == "__main__":
