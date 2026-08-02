@@ -69,9 +69,16 @@
    결정되며 — 이 단순화의 한계는 [`observability-kpi-rationale.md`](observability-kpi-rationale.md) §3에
    명시돼 있다.
 4. **문체는 학습이 아니라 선언.** 위 MVP 3 참조.
-5. **관측이 제품 기능으로 들어왔다.** 초안에 없던 축이다. LLM을 부르는 **8개 호출부 전부**가 표준
-   감사 레코드를 남기고, 그것을 집계한 KPI 화면이 프로젝트별·전역으로 있다. 근거는
-   [`observability-kpi-rationale.md`](observability-kpi-rationale.md).
+5. **관측이 제품 기능으로 들어왔다.** 초안에 없던 축이다. **호출부 8곳**이 표준 감사 레코드를
+   남기고, 그것을 집계한 KPI 화면이 프로젝트별·전역으로 있다.
+   - **"8"의 기준**은 `LlmCallSite` enum 리터럴 수 = LLM 어댑터 수다(`observability/llm_call_audit.py`).
+     `query_planner` · `writing_gate` · `compare_judge` · `analysis_extractor` ·
+     `writing_generation` · `writing_retrieval_planner` · `writing_revision` · `writing_report`.
+   - **"전부"는 호출부 단위이지 "모든 LLM 호출"이 아니다.** 요청 경로와 **생성 워커**는 기록하지만,
+     **script·diagnostic 등 감사 scope 밖 경로는 계약상 기록하지 않는다** — 추측한 `project_id`는
+     오염이기 때문이다. 계약 정의는 정본의 "LLM 파이프라인 관측(KPI)" 절에 있다.
+   - 지표를 **왜** 그렇게 잡았는지는 [`observability-kpi-rationale.md`](observability-kpi-rationale.md)
+     (기획 근거이며, 계측 범위의 근거는 아니다 — 그 문서 §6 로드맵은 계측 확대가 완료되기 전에 쓰였다).
 
 ## 6. 지금 일부러 **안 하는** 것
 
