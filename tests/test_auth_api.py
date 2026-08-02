@@ -7,6 +7,7 @@ non-overridden apps, so it is where the exhaustive guard D7=A calls for lives �
 every other suite runs authenticated through ``tests/auth_support.py``.
 """
 
+import ast
 import os
 import pathlib
 import re
@@ -54,6 +55,8 @@ from services.application.app.main import (
 )
 from tests.auth_support import authenticate
 
+_ROOT = pathlib.Path(__file__).resolve().parents[1]
+
 # The only `{project_id}` routes that are admin-authorized instead of
 # ownership-authorized. Spelled out once so a third entry is a decision someone
 # had to type, not something a new route inherits by being under /admin.
@@ -61,6 +64,30 @@ _ADMIN_PROJECT_ROUTES = frozenset({
     "/admin/projects/{project_id}/purge",
     "/admin/projects/{project_id}/access-grants",
 })
+
+
+def _create_user_flags(relative: str) -> list[bool]:
+    """소스에서 `create_user(...)` 호출을 찾아 `must_change_password` 값을 뽑는다.
+
+    주석·문자열이 아니라 **실제 호출의 키워드 인자**를 본다(부분문자열 그렙은
+    주석만 남겨도 통과한다 — 독립 검증이 실증). 인자가 없으면 도메인 기본값 False.
+    """
+
+    tree = ast.parse((_ROOT / relative).read_text(encoding="utf-8"))
+    flags: list[bool] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        if name != "create_user":
+            continue
+        value = False
+        for keyword in node.keywords:
+            if keyword.arg == "must_change_password":
+                value = bool(getattr(keyword.value, "value", False))
+        flags.append(value)
+    return flags
 
 
 class _FakeHasher:
@@ -1303,23 +1330,28 @@ class ForcedPasswordChangeTest(unittest.TestCase):
         # 디스커버리 가드. `create_user` 의 기본값은 False 이고(도메인은 누가 정한
         # 비밀번호인지 모른다), **남의 비밀번호를 정하는 두 표면**이 True 를 준다.
         # 여기가 없으면 새 표면이 조용히 기본값을 물려받는다.
-        admin_api = pathlib.Path(
-            "services/application/app/main.py"
-        ).read_text(encoding="utf-8")
-        bootstrap = pathlib.Path(
-            "scripts/create_user.py"
-        ).read_text(encoding="utf-8")
-        for label, source in [("POST /admin/users", admin_api),
-                              ("scripts/create_user.py", bootstrap)]:
+        #
+        # ★ **호출부를 AST 로 읽는다.** 첫 판은 `assertIn("must_change_password=True")`
+        # 부분문자열 그렙이었는데, 2026-08-02 독립 검증이 반증했다 — 실제 인자를
+        # 지우고 **주석에 그 문자열만 남겨도 통과**했다(false negative). 즉 그 셀은
+        # "호출부가 플래그를 준다"가 아니라 "파일 어딘가에 그 글자가 있다"를 잠그고
+        # 있었다. 소스를 파싱해 `create_user(...)` 호출의 키워드를 직접 본다.
+        for label, relative in [
+            ("POST /admin/users", "services/application/app/main.py"),
+            ("scripts/create_user.py", "scripts/create_user.py"),
+        ]:
             with self.subTest(surface=label):
-                self.assertIn("must_change_password=True", source)
+                self.assertEqual(
+                    _create_user_flags(relative), [True],
+                    f"{label}: create_user 호출이 정확히 하나이고 "
+                    "must_change_password=True 를 줘야 한다",
+                )
 
         # 반대 방향: 자기 계정을 스스로 발급하는 smoke 스크립트는 주면 안 된다
         # (아무도 그 비밀번호를 모르고, 강제하면 스크립트가 못 돈다).
-        smoke = pathlib.Path(
-            "scripts/phase2a_provider_live_smoke.py"
-        ).read_text(encoding="utf-8")
-        self.assertNotIn("must_change_password=True", smoke)
+        self.assertEqual(
+            _create_user_flags("scripts/phase2a_provider_live_smoke.py"), [False]
+        )
 
 
 class AdminProjectListTest(unittest.TestCase):

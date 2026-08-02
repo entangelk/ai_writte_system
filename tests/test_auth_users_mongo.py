@@ -87,10 +87,11 @@ class _Client:
         return self.database
 
 
-def _user(uid="user:1", username="alice"):
+def _user(uid="user:1", username="alice", must_change_password=False):
     return User(
         id=uid, username=username, password_hash="$argon2id$fake",
         is_admin=False, is_active=True, created_at=_FIXED_TIME,
+        must_change_password=must_change_password,
     )
 
 
@@ -158,6 +159,39 @@ class MongoUserRepositoryTest(unittest.TestCase):
 
     def test_set_active_on_an_unknown_user_returns_none(self) -> None:
         self.assertIsNone(self.repo.set_active("user:ghost", is_active=False))
+
+    def test_a_row_written_before_c6_reads_back_without_a_forced_change(self) -> None:
+        """C-6 이전 행에는 `must_change_password` 필드 자체가 없다.
+
+        정본 v1.7.80 이 "기존 계정은 잠기지 않는다"고 단언하는 방어인데, 2026-08-02
+        독립 검증이 **그 방어가 빈 셀**임을 잡았다 — `_entry` 의 `.get(..., False)` 를
+        하드 서브스크립트로 바꿔도 **1898 테스트가 전부 통과**했다. 필드 없는 문서를
+        `_entry` 에 먹이는 셀이 하나도 없었기 때문이다.
+
+        하드 서브스크립트였다면 배포에서 **C-6 이전 계정 전부가 로그인 시 KeyError**
+        (500)로 죽는다 — fake collection 이 늘 새 필드를 갖고 있어 스위트는 green 인
+        채로. `sessions` 의 naive-datetime 함정과 같은 형태다.
+        """
+        # 드라이버가 돌려주는 그대로: C-6 이전에 쓰인 문서에는 그 키가 없다.
+        self.collection.docs["user:legacy"] = {
+            "_id": "user:legacy",
+            "username": "legacy",
+            "password_hash": "H:old",
+            "is_admin": False,
+            "is_active": True,
+            "created_at": _FIXED_TIME,
+        }
+
+        stored = self.repo.get_by_id("user:legacy")
+        self.assertIsNotNone(stored)
+        # 잠기지 않는다 = 교체를 요구받지 않는다.
+        self.assertFalse(stored.must_change_password)
+
+    def test_a_row_written_after_c6_keeps_its_pending_change(self) -> None:
+        # over-strict 짝: 위 셀을 "항상 False" 로 만족시키는 과잉 교정(필드를 아예
+        # 안 읽는 것)을 막는다. 저장된 True 는 True 로 돌아와야 한다.
+        self.repo.insert(_user(must_change_password=True))
+        self.assertTrue(self.repo.get_by_id("user:1").must_change_password)
 
 
 if __name__ == "__main__":
