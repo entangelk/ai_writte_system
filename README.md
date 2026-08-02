@@ -15,7 +15,7 @@
 
 | 축 | 답하는 질문 | 시작점 |
 |---|---|---|
-| **[기획](#기획--무엇을-왜-만드는가)** | 무엇을 왜 만드는가. 어디까지가 MVP인가 | [`docs/abstract.md`](docs/abstract.md) · [`docs/observability-kpi-rationale.md`](docs/observability-kpi-rationale.md) |
+| **[기획](#기획--무엇을-왜-만드는가)** | 무엇을 왜 만드는가. 어디까지가 MVP인가 | [`docs/product-overview.md`](docs/product-overview.md) · [`docs/observability-kpi-rationale.md`](docs/observability-kpi-rationale.md) |
 | **[개발](#개발--어떻게-만들어졌는가-설계-결정과-검증)** | 결정을 어떻게 내리고 어떻게 검증하는가 | [`docs/system-contract-sot.md`](docs/system-contract-sot.md) · [`docs/plans/README.md`](docs/plans/README.md) |
 | **[서비스](#서비스--어떻게-돌리고-지켜보는가)** | 어떻게 띄우고, 무엇을 보고, 어떻게 고치는가 | [`HANDOFF.md`](HANDOFF.md) · [`docs/runbooks/local-llama-server.md`](docs/runbooks/local-llama-server.md) |
 
@@ -40,8 +40,14 @@
 - **모든 주장에는 근거 포인터가 붙는다**(`source_ref`). "어디서 나온 설정인가"를 원문 위치까지
   되짚을 수 있어야 작가가 AI의 판단을 검증할 수 있다.
 
+**제품 컨셉·MVP 범위·핵심 위험을 한 자리에서 보려면
+[`docs/product-overview.md`](docs/product-overview.md)** — *무엇을, 누구를 위해, 어디까지*를
+**현재 상태 기준**으로 정리한 한 장 요약이다. 원안에서 달라진 지점(단일 사용자 → 다중 사용자,
+추출 5종 → 3종 등)을 따로 모아 뒀다.
+
 전체 구상과 대안 검토는 [`docs/abstract.md`](docs/abstract.md)에 있다 —
 **§1 핵심 제품 컨셉** · **§2 핵심 설계 원칙** · **§15 MVP 범위 제안** · **§16 핵심 위험과 대응**.
+다만 이것은 **2026-06 초안**이라 현재 상태와 다른 곳이 있다(위 한 장 요약 §5).
 확정된 제품 경계·불변 원칙은 [`docs/plans/00-foundations.md`](docs/plans/00-foundations.md)로 내려왔다.
 
 ### 무엇을 먼저 만드는가 (Phase ↔ MVP)
@@ -81,7 +87,7 @@
 | **① 결정 브리프** — 선택지 표(`선택지·설명·장점·단점`) + 구현자 추천 + 유예 항목을 적고 **멈춘다**. 추측 구현 금지 | [`docs/plans/`](docs/plans/README.md) | **73개** |
 | **② 구현 + 회귀 가드** — 가드는 **양방향**이어야 한다: 원래 결함을 재현하면 실패(under-strict), 과잉 교정으로 정상 경로를 깨도 실패(over-strict) | `tests/` | **1,850 passed / 1,559 subtests** |
 | **③ 독립 검증** — 구현자가 아닌 세션이 **뮤테이션**(고친 것을 되돌려 회귀가 다시 실패하는지)으로 반증을 시도한다 | [`docs/verifications/`](docs/verifications/README.md) | **203건 / 39일치** |
-| **④ 정본 개정** — 계약이 바뀌면 SoT 버전을 올리고 **변경 이유와 근거 링크**를 남긴다 | [`docs/system-contract-sot.md`](docs/system-contract-sot.md) | **v1.7.75**, 변경이력 전량 보존 |
+| **④ 정본 개정** — 계약이 바뀌면 SoT 버전을 올리고 **변경 이유와 근거 링크**를 남긴다 | [`docs/system-contract-sot.md`](docs/system-contract-sot.md) | **v1.7.76**, 변경이력 전량 보존 |
 | **⑤ 인수인계** — 다음 작업자가 시간을 잃지 않도록 **함정**을 기록한다 | [`HANDOFF.md`](HANDOFF.md) · [`docs/daily_logs/`](docs/daily_logs/) | 일자별 |
 
 **검증 판정 분포는 합격 134 · 조건부 합격 55 · 서술형 14**다. **조건부 합격이 27%**라는 것이
@@ -162,6 +168,7 @@ CHANGELOG 작성 규칙 · [`docs/guides/verification.md`](docs/guides/verificat
 
 | | 어디 |
 |---|---|
+| 제품 한 장 요약 (기획 진입점) | [`docs/product-overview.md`](docs/product-overview.md) |
 | 정본 계약(먼저 읽기) | [`docs/system-contract-sot.md`](docs/system-contract-sot.md) |
 | 계획 · 결정 브리프 인덱스 (89개) | [`docs/plans/README.md`](docs/plans/README.md) |
 | 독립 검증 기록 (203건) | [`docs/verifications/README.md`](docs/verifications/README.md) |

@@ -5,10 +5,10 @@
 
 | 성격 | 어디 | 무엇이 쌓이나 |
 |---|---|---|
-| **기획** | [`abstract.md`](abstract.md) · [`observability-kpi-rationale.md`](observability-kpi-rationale.md) · [`plans/00-foundations.md`](plans/00-foundations.md) · [`plans/product-readiness-backlog.md`](plans/product-readiness-backlog.md) | 제품 컨셉·MVP 범위·설계 원칙·운영 KPI의 근거 |
+| **기획** | [`product-overview.md`](product-overview.md) · [`observability-kpi-rationale.md`](observability-kpi-rationale.md) · [`plans/00-foundations.md`](plans/00-foundations.md) · [`plans/product-readiness-backlog.md`](plans/product-readiness-backlog.md) · (원본) [`abstract.md`](abstract.md) | 제품 컨셉·MVP 범위·설계 원칙·운영 KPI의 근거 |
 | **계약** | [`system-contract-sot.md`](system-contract-sot.md) | 확정된 계약의 **현재 정본**과 버전별 변경 이유 |
 | **결정** | [`plans/README.md`](plans/README.md) | Phase 계획 + 착수 결정 브리프 89개 |
-| **검증** | [`verifications/README.md`](verifications/README.md) | 독립 검증 기록 202건(반증 시도·뮤테이션·판정) |
+| **검증** | [`verifications/README.md`](verifications/README.md) | 독립 검증 기록 203건(반증 시도·뮤테이션·판정) |
 | **실행 이력** | [`daily_logs/`](daily_logs/) | 일자별 작업 로그·오너 결정·실측값 |
 | **서비스/운영** | [`runbooks/`](runbooks/local-llama-server.md) · [`benchmarks/`](benchmarks/2026-07-15/writing_loop_per_stage_ceiling_q4.md) · [`live_review_briefs/`](live_review_briefs/2026-07-18/writing_workspace_ux_restructure.md) | 기동 절차·성능 실측·실사용 검수에서 온 계약 재협상 |
 | **작업 절차** | [`guides/`](guides/records-and-handoff.md) | 기록·인수인계 규칙, 독립 검증 절차 |
@@ -32,6 +32,7 @@
 ## 아이디에이션 문서
 
 아래 문서는 초기 아이디어와 상세 설계 후보를 보존한 참고 자료다. 길고 풍부하지만 그 자체로 확정된 구현 명세는 아니다.
+**전부 2026-06 초안이며 그 뒤 제품 범위가 바뀐 곳이 있다** — 현재 상태 기준의 제품 그림은 [`product-overview.md`](product-overview.md)를 먼저 본다.
 
 - [`abstract.md`](abstract.md): 전체 시스템 초안
 - [`mongo_collections.md`](mongo_collections.md): MongoDB 컬렉션 설계 후보

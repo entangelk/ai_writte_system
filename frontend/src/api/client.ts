@@ -524,7 +524,9 @@ export interface ReviewFieldDiff {
   after: unknown;
 }
 
-/** A conflict attached to a candidate — shown read-only in this slice (no merge/split yet). */
+/** A conflict attached to a candidate. `actions` carries the merge/split affordances the
+ * detail view submits via `reconcileConflict` — the "read-only, no merge/split yet" state
+ * this comment used to describe ended when those actions landed. */
 export interface ReviewConflict {
   entry_id: string;
   action: string;

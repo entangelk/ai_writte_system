@@ -530,3 +530,84 @@ Blocking 0건. 검증자가 뮤테이션 3종·회귀 1836/103.30s·compose 리�
 - 지금 결정 없이 열 수 있는 잔여는 어제와 같다 — **purge 감사 로그**(작은 브리프 선행 권장:
   저장 위치·필드·조회 표면이 사실상 결정 사항) · **완전 멱등 재시구/reconciler**.
 - **D8-5 C-1~C-6은 여전히 오너 결정 대기**(5-b·5-d 차단).
+
+---
+
+## Task — 기획 축 "제품 한 장 요약" (문서 부채, 오너 지시 2026-08-02 · SoT 무변)
+
+### Goals
+
+- README를 3축으로 재구성하면서 드러난 공백을 닫는다 — **제품 컨셉·MVP 범위·핵심 위험이 전부
+  `abstract.md`(48KB) 안에** 있어서 평가자든 새 작업자든 §1·§2·§15·§16을 직접 뽑아 읽어야 했다.
+- 성공 기준: ① 한 자리에서 "무엇을·누구를 위해·어디까지"가 답해진다 ② **원본 요약이 아니라
+  현재 상태 기준**이다 ③ 원안과 달라진 지점이 명시된다 ④ 링크·수치가 실측과 일치한다.
+
+### 착수 전 판단 — 왜 "요약"이 아니라 "다시 쓰기"인가
+
+HANDOFF가 경고한 그대로다. `abstract.md`는 **2026-06 초안**이고 그 뒤 D0(다중 사용자 전환)·MVP
+범위 조정이 있었다. 초안을 압축하면 **낡은 그림이 정문에 걸린다.** 그래서 초안을 뼈대로만 쓰고
+**코드를 실측해** 현재 상태로 다시 썼다. 실측에서 드러난 원안 대비 차이 5건이 문서의 §5가 됐다.
+
+| 축 | 원안(2026-06) | 실측된 현재 | 근거 |
+|---|---|---|---|
+| 사용자 | 단일 사용자, 계정·로그인 없음 | 다중 사용자 — 계정·세션·소유권 403·관리자 tier·파기 | `auth/`, `plans/multi-user-auth-cms-decisions.md` |
+| 추출 | 5종(Character·Event·Location·Foreshadowing·Relation) | **관찰 3종** — 장소·관계 미착수, 떡밥은 `open_question_observation` | [`analysis/models.py:12`](../../../services/application/app/analysis/models.py) |
+| Gate | Continuity·POV·떡밥 Gate 각각 | **Writing Gate 하나** — 지적 유형 4종·판정 5종. `style` 지적은 판정을 안 바꾼다 | [`writing/gate_prompt.py:26`](../../../services/application/app/writing/gate_prompt.py) · `:30` |
+| 문체 | 과거 글에서 **학습**(voice_samples·style_profiles) | 사용자가 **선언** — 프로젝트 브리프의 `style_rules`·`preferred_patterns`·`forbidden_patterns`·`style_examples` | [`main.py:1575-1590`](../../../services/application/app/main.py) |
+| 관측 | 초안에 없음 | 8개 호출부 전량 계측 + KPI 화면(프로젝트별·전역) | `observability/` |
+
+MVP 4(Memory Console)도 실측했다 — **승인 UI만 섰다**(Review Inbox: 승인·거절·수정·병합·분할이
+`reconcileConflict`까지 배선됨). 인물 카드·타임라인·관계 그래프 화면은 **0건**(`frontend/src/`에
+`timeline|character card|relation` 매칭 파일 없음).
+
+### Completed work
+
+- **[`docs/product-overview.md`](../../product-overview.md)** 신설 — 9절: 한 문장 · 풀려는 문제 ·
+  제품 원칙 4 · **MVP 범위(원안 ↔ 현재 도달점)** · **원안에서 달라진 것 5** · 일부러 안 하는 것 ·
+  **위험과 현재 대응**(초안 §16의 5종 + 실사용에서 나온 2종, 각각 "남은 공백"까지) ·
+  **정직한 공백**(로그인 표면 없음·dogfood 미착수·로컬 1인) · 더 읽을 곳.
+- **진입 경로 배선** — 최상위 README 기획 축의 시작점을 `abstract.md` → `product-overview.md`로
+  바꾸고(초안은 "원본"으로 유지), 문서 지도·`docs/README.md` 기획 행에 등재.
+
+### 함께 정정 — 패턴 스윕에서 나온 낡은 단언 5건
+
+작성하려면 권위 소스를 전부 읽어야 했고, 그 과정에서 **현재와 어긋난 단언**이 나왔다. 어제
+Blocking #1의 교훈(*결정을 기다리는 동안 독자는 거짓을 읽는다*)을 그대로 적용해 **사실 확정이
+가능한 것은 즉시** 고쳤다.
+
+| # | 자리 | 무엇이 거짓이었나 | 조치 |
+|---|---|---|---|
+| 1 | [`plans/00-foundations.md`](../../plans/00-foundations.md) 불변 원칙 | **"MVP는 단일 사용자 제품이다 · 계정·로그인·권한은 구현하지 않는다"** — 인증 전체가 서 있는데 **불변 원칙**으로 단언. README가 "확정된 제품 경계"라며 여기를 가리킨다 | 취소선 + 정정 블록. **원문은 지우지 않았다**(왜 그렇게 계획했는지가 사라진다 — SoT v1.7.74 행 처리와 같은 방식). `project_id` 경계는 **유효**임을 함께 못박음 |
+| 2 | [`plans/README.md:14`](../../plans/README.md) | 가드 이름 `tests/test_plans_index.py` — 같은 날 뒤 슬라이스에서 `test_docs_indexes.py`로 일반화돼 **존재하지 않는 파일** | 이름 정정 |
+| 3 | 최상위 `README.md` | SoT **v1.7.75**(현재 v1.7.76) | 정정 |
+| 4 | `docs/README.md` | 검증 기록 **202건**(현재 203건) | 정정 |
+| 5 | [`frontend/src/api/client.ts:527`](../../../frontend/src/api/client.ts) | `ReviewConflict` 주석 **"shown read-only in this slice (no merge/split yet)"** — 그 인터페이스가 `actions`를 들고 있고 UI가 `reconcileConflict`로 제출한다 | 주석 정정(코드 무변) |
+
+### Verification
+
+- **링크 전수 해석**: 손댄 5개 문서의 `.md` 링크(앵커 제외 경로) **깨진 것 0건**.
+- **문서 인덱스 가드**: `tests/test_docs_indexes.py` **5 passed**.
+- **주장 대조**: 새 문서가 단언한 것을 전부 원본/코드에서 확인했다 — 추출 3종 리터럴 · Gate 지적
+  4종과 "style은 판정을 안 바꾼다" · 브리프 문체 필드 4종 · Review Inbox 병합/분할 배선 ·
+  타임라인/인물카드 화면 부재 · plans 89 + 브리프 73 + 검증 203 · SoT v1.7.76.
+- **전량 회귀**: **1850 passed / 4 skipped / 1559 subtests / 106.34s**, exit 0. 문서 + 주석
+  변경이라 **셀 수 무변**, 회귀 0건.
+- **프론트**: `npx tsc --noEmit` exit 0(주석만 바뀌었으므로 타입 영향 없음을 확인).
+
+### Next steps — 고치지 **않은** 낡은 단언 3건 (권한 밖이거나 결정 사안)
+
+즉시 정정한 5건과 달리 아래는 **내 판단으로 고치면 안 되는** 것들이다. 전부 file:line까지 실측했다.
+
+- **★ 정본 `system-contract-sot.md` §"현재 구현 상태"(L698~710)가 낡았다.** `Product Shell UI` 행이
+  *"다음은 B Review Inbox"*라고 적었지만 Review Inbox는 이미 있고, 바로 아래 행은
+  **`Phase 2~6 UI | 미구현`**이라고 단언한다 — Review Inbox·관측 대시보드·Writing 작업공간이
+  전부 서 있으므로 **거짓**이다. 정본 본문 정정은 **버전 개정(v1.7.77) 사안**이라 손대지 않았다.
+  이 표는 v1.6.x 이후 갱신이 끊긴 것으로 보이며, 실제 현재 상태의 권위 소스는 **변경이력과 코드**다.
+  선택지: ⓐ 표를 현재로 갱신 ⓑ **"이 표는 이력이며 현재 상태는 변경이력을 본다"**로 성격을 명시
+  ⓒ 표 자체를 걷어낸다. **ⓑ 추천** — 갱신하면 같은 부채가 다시 쌓인다(이미 두 번 그랬다).
+- **[`observability-kpi-rationale.md`](../../observability-kpi-rationale.md) §6 "로드맵(지금 범위 밖)"의
+  4항목 중 2항목이 이미 완료됐다** — "호출부 계측 확대"(8개 전량 완료)·"집계·대시보드"(API+화면 완료).
+  기획 톤 문서라 표현 손질이 곧 논조 변경이고, 포트폴리오 정문 문서이므로 오너 취향 사안이다.
+- **[`plans/00-foundations.md`](../../plans/00-foundations.md) "전역 착수 전 결정사항" 체크박스**가
+  대부분 미체크인데 실제로는 확정된 것이 있다(에러 envelope=H3 · 삭제/보존 정책=D5=A ·
+  monorepo 경계). 위 #1과 달리 **거짓 단언이 아니라 미갱신 체크리스트**라 급하지 않다.
