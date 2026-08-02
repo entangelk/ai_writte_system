@@ -1394,6 +1394,35 @@ class AdminAccessGrantTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.client.get(f"/projects/{self.project}/drafts")
 
+    def test_a_storage_failure_while_recording_is_the_503_face(self) -> None:
+        # 독립 검증 hardening #1: fail-closed 셀은 RuntimeError 로 "통과하지 않는다"만
+        # 보였고, **배포에서 실제로 나는 얼굴**(저장소 장애 → 503)은 전역 handler 에만
+        # 기대고 있었다. 여기가 그 얼굴을 이 경로에 대해 직접 핀한다 — 500 으로 새거나
+        # 200 으로 통과하면 실패한다.
+        self._issue()
+
+        def _down(*_args, **_kwargs):
+            raise _STORAGE_FAILURE("audit store down")
+
+        self.grants.record_use = _down
+        response = self.client.get(f"/projects/{self.project}/drafts")
+        self.assertEqual(response.status_code, 503)
+
+    def test_reading_the_access_log_under_a_grant_records_that_read_too(self) -> None:
+        # 독립 검증 hardening #2. 승격을 든 관리자는 access-log 도 읽을 수 있고(GET),
+        # **그 읽기 자체가 기록된다** — 감사에 사각지대를 두지 않는다는 뜻이다.
+        #
+        # 기록은 dependency 에서 일어나므로(handler 이전) **응답이 자기 자신의 조회를
+        # 포함한다.** 놀랍게 보이지만 옳은 쪽이다: 로그를 연 사실이 로그에 남는다.
+        self._issue("이력 확인")
+        response = self.client.get(f"/projects/{self.project}/access-log")
+        self.assertEqual(response.status_code, 200)
+
+        entries = response.json()["entries"]
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["path"], f"/projects/{self.project}/access-log")
+        self.assertEqual(entries[0]["admin_user_id"], self.root.id)
+
     def test_purging_a_project_takes_its_access_log_with_it(self) -> None:
         self._issue()
         self.client.get(f"/projects/{self.project}/drafts")

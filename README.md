@@ -85,12 +85,12 @@
 | 단계 | 산출물 | 규모 |
 |---|---|---|
 | **① 결정 브리프** — 선택지 표(`선택지·설명·장점·단점`) + 구현자 추천 + 유예 항목을 적고 **멈춘다**. 추측 구현 금지 | [`docs/plans/`](docs/plans/README.md) | **73개** |
-| **② 구현 + 회귀 가드** — 가드는 **양방향**이어야 한다: 원래 결함을 재현하면 실패(under-strict), 과잉 교정으로 정상 경로를 깨도 실패(over-strict) | `tests/` | **1,881 passed / 1,591 subtests** |
-| **③ 독립 검증** — 구현자가 아닌 세션이 **뮤테이션**(고친 것을 되돌려 회귀가 다시 실패하는지)으로 반증을 시도한다 | [`docs/verifications/`](docs/verifications/README.md) | **205건 / 39일치** |
+| **② 구현 + 회귀 가드** — 가드는 **양방향**이어야 한다: 원래 결함을 재현하면 실패(under-strict), 과잉 교정으로 정상 경로를 깨도 실패(over-strict) | `tests/` | **1,883 passed / 1,591 subtests** |
+| **③ 독립 검증** — 구현자가 아닌 세션이 **뮤테이션**(고친 것을 되돌려 회귀가 다시 실패하는지)으로 반증을 시도한다 | [`docs/verifications/`](docs/verifications/README.md) | **206건 / 39일치** |
 | **④ 정본 개정** — 계약이 바뀌면 SoT 버전을 올리고 **변경 이유와 근거 링크**를 남긴다 | [`docs/system-contract-sot.md`](docs/system-contract-sot.md) | **v1.7.78**, 변경이력 전량 보존 |
 | **⑤ 인수인계** — 다음 작업자가 시간을 잃지 않도록 **함정**을 기록한다 | [`HANDOFF.md`](HANDOFF.md) · [`docs/daily_logs/`](docs/daily_logs/) | 일자별 |
 
-**검증 판정 분포는 합격 134 · 조건부 합격 57 · 서술형 14**다. **조건부 합격이 27%**라는 것이
+**검증 판정 분포는 합격 135 · 조건부 합격 57 · 서술형 14**다. **조건부 합격이 27%**라는 것이
 이 절차가 형식적 통과가 아니라는 증거이며, 각 지적은 후속 커밋에서 닫힌다.
 
 ### 평가자를 위한 짧은 경로
@@ -174,7 +174,7 @@ CHANGELOG 작성 규칙 · [`docs/guides/verification.md`](docs/guides/verificat
 | 제품 한 장 요약 (기획 진입점) | [`docs/product-overview.md`](docs/product-overview.md) |
 | 정본 계약(먼저 읽기) | [`docs/system-contract-sot.md`](docs/system-contract-sot.md) |
 | 계획 · 결정 브리프 인덱스 (89개) | [`docs/plans/README.md`](docs/plans/README.md) |
-| 독립 검증 기록 (205건) | [`docs/verifications/README.md`](docs/verifications/README.md) |
+| 독립 검증 기록 (206건) | [`docs/verifications/README.md`](docs/verifications/README.md) |
 | 현재 상태 스냅샷 | [`HANDOFF.md`](HANDOFF.md) |
 | 마일스톤 이력 | [`CHANGELOG.md`](CHANGELOG.md) |
 | 일자별 작업 이력 | [`docs/daily_logs/`](docs/daily_logs/) |
