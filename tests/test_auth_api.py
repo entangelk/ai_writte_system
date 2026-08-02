@@ -901,8 +901,8 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         self.assertEqual(by_tier["public"], set(AuthenticationBoundaryTest.PUBLIC))
         self.assertEqual(by_tier["auth"], set(self.AUTH_ONLY))
         self.assertEqual(by_tier["admin"], self.ADMIN)
-        self.assertEqual(len(by_tier["project"]), 60)
-        self.assertEqual(len(tiers), 72)
+        self.assertEqual(len(by_tier["project"]), 61)
+        self.assertEqual(len(tiers), 73)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:
@@ -1330,6 +1330,76 @@ class AdminAccessGrantTest(unittest.TestCase):
         )
         self.assertEqual(
             self.client.get(f"/projects/{orphan}/drafts").status_code, 403
+        )
+
+    def test_reads_under_a_grant_are_recorded_with_the_reason(self) -> None:
+        # C-3의 나머지: 발급만으로는 "무엇을 봤는가"가 안 남는다. 승격 아래 요청마다
+        # 한 행이 남고, **사유가 그 행에 함께** 있어 join 없이 읽힌다.
+        self._issue("지원 요청 #12 확인")
+        self.client.get(f"/projects/{self.project}/drafts")
+        uses = self.grants.uses_for_project(project_id=self.project)
+        self.assertEqual(len(uses), 1)
+        self.assertEqual(uses[0].method, "GET")
+        self.assertEqual(uses[0].path, f"/projects/{self.project}/drafts")
+        self.assertEqual(uses[0].admin_user_id, self.root.id)
+        self.assertEqual(uses[0].reason, "지원 요청 #12 확인")
+
+    def test_the_owner_reads_the_access_log(self) -> None:
+        # C-4: 통지 채널이 없으므로 "소유자가 알게 된다"의 현실적 형태는 조회다.
+        self._issue("지원")
+        self.client.get(f"/projects/{self.project}/drafts")
+        self.client.post("/auth/logout")
+        self.client.post("/auth/login",
+                         json={"username": "alice", "password": "pw123"})
+
+        response = self.client.get(f"/projects/{self.project}/access-log")
+        self.assertEqual(response.status_code, 200)
+        entries = response.json()["entries"]
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["reason"], "지원")
+        self.assertEqual(entries[0]["path"], f"/projects/{self.project}/drafts")
+
+    def test_the_owners_own_reads_are_not_recorded(self) -> None:
+        # over-strict: 감사 대상은 **승격 아래 접근**이지 소유자의 정상 사용이 아니다.
+        # 여기가 새면 접근 이력이 소유자 자신의 활동 로그로 오염돼 쓸모를 잃는다.
+        self.client.post("/auth/logout")
+        self.client.post("/auth/login",
+                         json={"username": "alice", "password": "pw123"})
+        self.client.get(f"/projects/{self.project}/drafts")
+        self.assertEqual(
+            self.grants.uses_for_project(project_id=self.project), ()
+        )
+
+    def test_a_refused_request_is_not_recorded(self) -> None:
+        # 승격이 없거나 만료면 접근 자체가 없었으므로 기록도 없다.
+        self.client.get(f"/projects/{self.project}/drafts")  # 승격 없음 → 403
+        self._issue()
+        self.now += timedelta(hours=2)
+        self.client.get(f"/projects/{self.project}/drafts")  # 만료 → 403
+        self.assertEqual(
+            self.grants.uses_for_project(project_id=self.project), ()
+        )
+
+    def test_a_read_is_refused_when_it_cannot_be_recorded(self) -> None:
+        # ★ fail-closed. 감사 기록이 실패하면 **읽기도 실패한다** — 아무도 설명할 수
+        # 없는 접근은 F1=C 가 막으려던 바로 그것이라, 기록 없이 통과시키면 C 를 고른
+        # 이유가 사라진다. (LLM 호출 감사가 격리된 것과 반대다: 그쪽은 보안 경계의
+        # 하중을 받지 않는다.)
+        self._issue()
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("audit store down")
+
+        self.grants.record_use = _boom
+        with self.assertRaises(RuntimeError):
+            self.client.get(f"/projects/{self.project}/drafts")
+
+    def test_purging_a_project_takes_its_access_log_with_it(self) -> None:
+        self._issue()
+        self.client.get(f"/projects/{self.project}/drafts")
+        self.client.post(f"/admin/projects/{self.project}/purge")
+        self.assertEqual(
+            self.grants.uses_for_project(project_id=self.project), ()
         )
 
     def test_purging_a_project_takes_its_grants_with_it(self) -> None:

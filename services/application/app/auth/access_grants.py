@@ -25,7 +25,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Callable, Protocol
 
-from services.application.app.auth.models import AccessGrant
+from services.application.app.auth.models import AccessGrant, AccessGrantUse
 
 # C-1 (owner, 2026-08-02). A contract literal: the SoT and the regression pin it,
 # so changing the number is a contract change rather than a tuning knob.
@@ -37,6 +37,8 @@ class AccessGrantRepository(Protocol):
     def latest_for(
         self, *, admin_user_id: str, project_id: str
     ) -> AccessGrant | None: ...
+    def insert_use(self, use: AccessGrantUse) -> None: ...
+    def uses_for_project(self, *, project_id: str) -> tuple[AccessGrantUse, ...]: ...
     def purge_project(self, *, project_id: str) -> None: ...
 
 
@@ -45,6 +47,7 @@ class InMemoryAccessGrantRepository:
         # Append-only, in issue order — the same property the Mongo repository
         # has, so a test that passes here means something for the deployment.
         self._grants: list[AccessGrant] = []
+        self._uses: list[AccessGrantUse] = []
 
     def insert(self, grant: AccessGrant) -> None:
         self._grants.append(grant)
@@ -60,8 +63,22 @@ class InMemoryAccessGrantRepository:
                 return grant
         return None
 
+    def insert_use(self, use: AccessGrantUse) -> None:
+        self._uses.append(use)
+
+    def uses_for_project(self, *, project_id: str) -> tuple[AccessGrantUse, ...]:
+        # Newest first: the owner reading this wants "what happened recently".
+        return tuple(
+            sorted(
+                (u for u in self._uses if u.project_id == project_id),
+                key=lambda u: u.at,
+                reverse=True,
+            )
+        )
+
     def purge_project(self, *, project_id: str) -> None:
         self._grants = [g for g in self._grants if g.project_id != project_id]
+        self._uses = [u for u in self._uses if u.project_id != project_id]
 
 
 class AccessGrantService:
@@ -111,8 +128,38 @@ class AccessGrantService:
             return None
         return grant
 
+    def record_use(
+        self, grant: AccessGrant, *, method: str, path: str
+    ) -> AccessGrantUse:
+        """Record one request made under ``grant`` (C-3).
+
+        ★ The caller does **not** swallow failures. If this write fails the
+        request fails too (the storage 503 face), because an access nobody can
+        account for is exactly what F1=C was chosen to prevent — letting the read
+        through unrecorded would quietly restore the "admin reads anything,
+        invisibly" state that C was picked over. This is the opposite of the
+        LLM-call audit, which is isolated precisely because *it* is not
+        load-bearing for a security boundary.
+        """
+        use = AccessGrantUse(
+            id=self._id_factory(),
+            grant_id=grant.id,
+            admin_user_id=grant.admin_user_id,
+            project_id=grant.project_id,
+            method=method,
+            path=path,
+            at=self._clock(),
+            reason=grant.reason,
+        )
+        self._repo.insert_use(use)
+        return use
+
+    def uses_for_project(self, *, project_id: str) -> tuple[AccessGrantUse, ...]:
+        """C-4: the after-the-fact view the project's owner reads."""
+        return self._repo.uses_for_project(project_id=project_id)
+
     def purge_project(self, *, project_id: str) -> None:
-        """D5/D8-6: a purged project takes its grants with it.
+        """D5/D8-6: a purged project takes its grants and their uses with it.
 
         Append-only is a rule about *expiry*, not about project destruction —
         leaving grant rows behind would be exactly the silent orphan D5 forbids

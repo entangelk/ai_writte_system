@@ -150,17 +150,23 @@ class _Collection:
 
 
 class _Database:
-    def __init__(self, collection):
-        self.collection = collection
+    """Serves the two collections the repository opens, and nothing else.
+
+    The assert is the point: a repository that starts touching a third
+    collection has to say so here rather than silently getting a fake.
+    """
+
+    def __init__(self, grants, uses):
+        self._by_name = {"access_grants": grants, "access_grant_uses": uses}
 
     def __getitem__(self, name):
-        assert name == "access_grants"
-        return self.collection
+        assert name in self._by_name, name
+        return self._by_name[name]
 
 
 class _Client:
-    def __init__(self, collection):
-        self.database = _Database(collection)
+    def __init__(self, grants, uses):
+        self.database = _Database(grants, uses)
 
     def __getitem__(self, _name):
         return self.database
@@ -183,7 +189,10 @@ class MongoAccessGrantRepositoryTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.collection = _Collection()
-        self.repo = MongoAccessGrantRepository(_Client(self.collection))
+        self.uses = _Collection()
+        self.repo = MongoAccessGrantRepository(
+            _Client(self.collection, self.uses)
+        )
         self.repo.insert(_grant())
 
     def test_read_back_timestamps_are_utc_aware(self) -> None:
@@ -206,14 +215,18 @@ class MongoAccessGrantRepositoryTest(unittest.TestCase):
             service.active(admin_user_id="admin:1", project_id="p1")
         )
 
-    def test_there_is_no_ttl_index(self) -> None:
+    def test_there_is_no_ttl_index_on_either_collection(self) -> None:
         # ★ The deliberate difference from `sessions`. A TTL index would let
-        # Mongo reap expired grants, deleting the evidence that an access
-        # happened (C-3). Sessions have one; this must not.
-        self.assertTrue(self.collection.indexes, "an index is expected to exist")
-        for _keys, name, kwargs in self.collection.indexes:
-            with self.subTest(index=name):
-                self.assertNotIn("expireAfterSeconds", kwargs)
+        # Mongo reap expired grants (or the record of what was read under them),
+        # deleting the evidence that an access happened (C-3). Sessions have
+        # one; neither of these may.
+        for label, collection in [
+            ("access_grants", self.collection), ("access_grant_uses", self.uses),
+        ]:
+            self.assertTrue(collection.indexes, f"{label}: an index is expected")
+            for _keys, name, kwargs in collection.indexes:
+                with self.subTest(collection=label, index=name):
+                    self.assertNotIn("expireAfterSeconds", kwargs)
 
     def test_latest_for_returns_the_newest_row(self) -> None:
         self.repo.insert(_grant(grant_id="g2", created_at=_T0 + timedelta(minutes=30)))

@@ -1484,11 +1484,22 @@ def require_project_owner(
         project.owner_id is not None
         and current.is_admin
         and request.method in _GRANTED_METHODS
-        and request.app.state.access_grants.active(
+        and (grant := request.app.state.access_grants.active(
             admin_user_id=current.id, project_id=project_id
-        )
+        ))
         is not None
     ):
+        # C-3: record what the grant was actually used for. This dependency is
+        # the single choke point — the grant is honoured nowhere else — so the
+        # record cannot be bypassed by adding an endpoint.
+        #
+        # Deliberately **not** isolated: a failure here propagates and the
+        # request fails (storage 503 face). An access nobody can account for is
+        # what F1=C exists to prevent, so letting the read through unrecorded
+        # would quietly restore the state C was chosen over.
+        request.app.state.access_grants.record_use(
+            grant, method=request.method, path=request.url.path
+        )
         return project
     raise HTTPException(status_code=403, detail="forbidden")
 
@@ -1601,6 +1612,19 @@ class AccessGrantPayload(BaseModel):
 
 class AccessGrantCreateResponse(BaseModel):
     grant: AccessGrantPayload
+
+
+class AccessLogEntryPayload(BaseModel):
+    grant_id: str
+    admin_user_id: str
+    method: str
+    path: str
+    at: datetime
+    reason: str
+
+
+class AccessLogResponse(BaseModel):
+    entries: list[AccessLogEntryPayload]
 
 PROJECT_BRIEF_STYLE_EXAMPLES_MAX_ITEMS = 3
 PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS = 1000
@@ -2748,6 +2772,32 @@ def create_app(
     ) -> dict[str, object]:
         projects = core_sot.list_projects_for_owner(owner_id=current.id)
         return {"projects": [_project_payload(p) for p in projects]}
+
+    @app.get("/projects/{project_id}/access-log",
+             response_model=AccessLogResponse,
+             responses=_owned(_ERRORS_404),
+             dependencies=_REQUIRE_PROJECT_OWNER)
+    async def get_access_log(project_id: str) -> dict[str, object]:
+        # C-4 (owner 2026-08-02): there is no notification channel, so the
+        # realistic form of "the owner finds out" is that they can look. This is
+        # the after-the-fact view of every request an administrator made into
+        # this project under a grant — newest first, each carrying the reason
+        # the grant was issued for.
+        #
+        # project-scoped, so the owner reads their own. An administrator holding
+        # a live grant can read it too (it is a GET), which is consistent: they
+        # can already read the project, and that read is itself recorded here.
+        return {"entries": [
+            {
+                "grant_id": use.grant_id,
+                "admin_user_id": use.admin_user_id,
+                "method": use.method,
+                "path": use.path,
+                "at": use.at,
+                "reason": use.reason,
+            }
+            for use in access_grants.uses_for_project(project_id=project_id)
+        ]}
 
     @app.get("/projects/{project_id}", response_model=ProjectPayload,
              responses=_owned(_ERRORS_404),

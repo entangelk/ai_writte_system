@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from pymongo import ASCENDING, DESCENDING, MongoClient
 
-from services.application.app.auth.models import AccessGrant
+from services.application.app.auth.models import AccessGrant, AccessGrantUse
 from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
 
 
@@ -23,6 +23,16 @@ def _aware(value: datetime) -> datetime:
 class MongoAccessGrantRepository:
     def __init__(self, client: MongoClient, *, db_name: str = DEFAULT_DB_NAME) -> None:
         self._grants = client[db_name]["access_grants"]
+        # C-3: one row per request made under a live grant. Separate collection
+        # so the grant row stays a single "who/why" record and the uses grow
+        # independently of it.
+        self._uses = client[db_name]["access_grant_uses"]
+        self._uses.create_index(
+            [("project_id", ASCENDING), ("at", DESCENDING)],
+            name="access_grant_uses_by_project",
+        )
+        # No TTL index here either, for the same reason as the grants: this is
+        # the record of what an administrator looked at.
         # Backs ``latest_for``: newest first within one (admin, project) pair.
         self._grants.create_index(
             [
@@ -53,8 +63,20 @@ class MongoAccessGrantRepository:
         )
         return _entry(doc) if doc else None
 
+    def insert_use(self, use: AccessGrantUse) -> None:
+        self._uses.insert_one(_use_doc(use))
+
+    def uses_for_project(self, *, project_id: str) -> tuple[AccessGrantUse, ...]:
+        return tuple(
+            _use_entry(doc)
+            for doc in self._uses.find(
+                {"project_id": project_id}, sort=[("at", DESCENDING)]
+            )
+        )
+
     def purge_project(self, *, project_id: str) -> None:
         self._grants.delete_many({"project_id": project_id})
+        self._uses.delete_many({"project_id": project_id})
 
 
 def _doc(value: AccessGrant) -> dict:
@@ -76,4 +98,30 @@ def _entry(doc: dict) -> AccessGrant:
         reason=doc["reason"],
         created_at=_aware(doc["created_at"]),
         expires_at=_aware(doc["expires_at"]),
+    )
+
+
+def _use_doc(value: AccessGrantUse) -> dict:
+    return {
+        "_id": value.id,
+        "grant_id": value.grant_id,
+        "admin_user_id": value.admin_user_id,
+        "project_id": value.project_id,
+        "method": value.method,
+        "path": value.path,
+        "at": value.at,
+        "reason": value.reason,
+    }
+
+
+def _use_entry(doc: dict) -> AccessGrantUse:
+    return AccessGrantUse(
+        id=doc["_id"],
+        grant_id=doc["grant_id"],
+        admin_user_id=doc["admin_user_id"],
+        project_id=doc["project_id"],
+        method=doc["method"],
+        path=doc["path"],
+        at=_aware(doc["at"]),
+        reason=doc["reason"],
     )
