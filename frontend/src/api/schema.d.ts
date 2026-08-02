@@ -195,6 +195,23 @@ export interface paths {
         patch: operations["rename_project_projects__project_id__patch"];
         trace?: never;
     };
+    "/projects/{project_id}/access-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Access Log */
+        get: operations["get_access_log_projects__project_id__access_log_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{project_id}/analysis/candidates/{candidate_id}/confirm": {
         parameters: {
             query?: never;
@@ -1101,6 +1118,29 @@ export interface components {
             project_id: string;
             /** Reason */
             reason: string;
+        };
+        /** AccessLogEntryPayload */
+        AccessLogEntryPayload: {
+            /** Admin User Id */
+            admin_user_id: string;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Grant Id */
+            grant_id: string;
+            /** Method */
+            method: string;
+            /** Path */
+            path: string;
+            /** Reason */
+            reason: string;
+        };
+        /** AccessLogResponse */
+        AccessLogResponse: {
+            /** Entries */
+            entries: components["schemas"]["AccessLogEntryPayload"][];
         };
         /** AdminObservabilityKpiResponse */
         AdminObservabilityKpiResponse: {
@@ -2917,6 +2957,73 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    get_access_log_projects__project_id__access_log_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessLogResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
