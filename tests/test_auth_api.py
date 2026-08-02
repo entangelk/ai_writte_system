@@ -980,6 +980,17 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         probe.state.core_sot = self.core_sot
         probe.state.users = self.users
         probe.state.sessions = self.sessions
+        # D8-5e: the dependency also reads ``access_grants``. Today the grant
+        # branch short-circuits on ``is_admin`` before touching it, so leaving
+        # this out happened to work — but then this cell fails with
+        # ``AttributeError: 'State' object has no attribute 'access_grants'``
+        # instead of asserting its property, which is what a 2026-08-02
+        # mutation actually produced (and what made a crash look like the
+        # isolation property being detected). Wiring it keeps the failure
+        # meaningful if the branch order ever changes.
+        probe.state.access_grants = AccessGrantService(
+            InMemoryAccessGrantRepository()
+        )
 
         @probe.get(
             "/projects/{project_id}/probe",
