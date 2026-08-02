@@ -1217,3 +1217,33 @@ D8-5e의 `owner_id=None`(Blocking)과 여기의 pre-C-6 행이 **같은 형태**
 - D8-5d 독립 검증(별도 작업자)을 받으면 발견 사항을 hardening한다.
 - 별도 잔여: D8-6 영구 삭제 UI는 확인 UX 계약을 먼저 정해야 한다. purge 감사 로그도 저장 필드/위치
   브리프가 먼저다. D8-5 자체는 종료됐다.
+
+---
+
+## Hardening — D8-5d 독립 검증(`06dbd16`) 반영
+
+**합격 + 비차단 1건 폐쇄.** 검증자는 frontend 234/17·build·backend 1900과 관리자 guard,
+C-6 409 흐름, 12자 양방향, 무소유 승격, lazy chunk를 독립 재현했다. 유일한 권고는
+`AdminConsole.test.tsx`의 무소유 버튼 `disabled` 단정이 **vacuous**하다는 것이었다: 사유가 빈 값이라
+`owner_id` 조건을 지워도 다른 조건이 이미 버튼을 잠근다.
+
+### 보강
+
+- 무소유 project에는 승격 발급과 접근 이력 버튼을 **렌더하지 않는다**. 실제로 열 수 없는 동작을
+  disabled 버튼으로 보여 줄 이유가 없고, 기존 "승격으로 열 수 없음" 힌트만 남기는 편이 명확하다.
+- 테스트도 두 버튼 부재를 직접 단정한다. 테스트용 initial-state prop이나 pure helper seam은 만들지 않았다.
+- **under-strict mutation**: `owner_id === null` → `false`이면 무소유 project에 버튼이 나타나 해당 셀 실패.
+- **over-strict mutation**: 조건 → `true`이면 정상 소유 project도 컨트롤을 잃어 기존 승격 흐름 셀 실패.
+  즉 무소유만 닫고 정상 소유자는 여는 양방향 경계다.
+
+### Verification
+
+- 집중 `AdminConsole.test.tsx`: **3 passed**.
+- frontend 전체: **234 passed / 17 files**, exit 0.
+- build: **698 modules**, admin lazy chunk 5.51 kB, exit 0.
+- 구현·테스트 체크포인트 `01e97d2`; 뮤테이션 뒤 역방향 patch로 원복, working tree 청결 확인.
+
+### Next steps
+
+- D8-5 독립 검증과 hardening까지 종료. 다음 제품 잔여는 D8-6 영구 삭제 UI이며, 불가역 확인 UX
+  계약이 먼저 필요하다.

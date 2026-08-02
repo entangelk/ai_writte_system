@@ -79,9 +79,19 @@ owner_id disabled-prop을 reason이 채워진 상태에서 직접 단정하는 �
 
 ## Outstanding items
 
-- Hardening(무소유 disabled 직접 단정) — 작업 AI 판단에 맡김.
+- ~~Hardening(무소유 disabled 직접 단정)~~ — **폐쇄 `01e97d2`**. 무소유 project에는 승격·접근 이력
+  버튼을 아예 렌더하지 않고 힌트만 남겼다. 회귀도 빈 사유에서 `disabled`를 보는 vacuous 단정 대신
+  두 버튼의 **부재**를 단정한다. under-strict(`owner_id === null` → `false`)는 무소유 셀 1건,
+  over-strict(`→ true`)는 정상 소유 project의 승격 흐름 셀 1건을 각각 실패시켜 양방향 확인했다.
 - D8-5 종료. 남은 잔여: 영구 삭제 UI(작업 AI가 별도 잔여로 남김).
 - 본 검증은 기록만 작성 후 커밋.
+
+## Hardening closure (2026-08-02)
+
+검증의 유일한 비차단 권고를 `01e97d2`로 닫았다. 테스트 전용 marker나 내부 state 주입 seam을 만들지
+않고 제품 UI를 단순화했다: 열 수 없는 무소유 project에는 실행 불가능한 컨트롤 자체가 없다.
+집중 **3 passed**, 전체 frontend **234 passed / 17 files**, build **698 modules / exit 0**.
+원 검증 판정은 합격 그대로이며 outstanding hardening은 0건이다.
 
 ## Reproduction
 
