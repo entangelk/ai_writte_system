@@ -27,6 +27,9 @@ except ModuleNotFoundError:  # pragma: no cover - the driver is present in CI
 from services.application.app.auth.access_grants import (
     AccessGrantService, InMemoryAccessGrantRepository,
 )
+from services.application.app.auth.admin_audit import (
+    AdminAuditService, InMemoryAdminAuditRepository,
+)
 from services.application.app.auth.cookies import cookie_secure
 from services.application.app.auth.sessions import (
     InMemorySessionRepository, SessionService,
@@ -99,7 +102,8 @@ class _FakeHasher:
 
 
 def _client(*, ttl=timedelta(hours=1), core_sot=None, index_sync_outbox=None,
-            memory_service=None, analysis_service=None, access_grants=None):
+            memory_service=None, analysis_service=None, access_grants=None,
+            admin_audit=None):
     users = UserService(InMemoryUserRepository(), hasher=_FakeHasher())
     sessions = SessionService(InMemorySessionRepository(), ttl=ttl)
     users.create_user(username="alice", password="pw123")
@@ -107,6 +111,7 @@ def _client(*, ttl=timedelta(hours=1), core_sot=None, index_sync_outbox=None,
         service=core_sot, user_service=users, session_service=sessions,
         index_sync_outbox=index_sync_outbox, memory_service=memory_service,
         analysis_service=analysis_service, access_grant_service=access_grants,
+        admin_audit_service=admin_audit,
     )
     # https base_url on purpose: the cookie ships Secure by default, so an http
     # client would silently drop it and every session test would pass/fail for
@@ -754,9 +759,12 @@ class AdminProjectPurgeTest(unittest.TestCase):
         # purge_project 를 빼먹으면 조용한 고아(부분 삭제, D5 위반)가 된다.
         self.memory_spy = _PurgeSpy(MemoryService(InMemoryMemoryRepository()))
         self.analysis_spy = _PurgeSpy(AnalysisService(InMemoryAnalysisRepository()))
+        self.audit_repo = InMemoryAdminAuditRepository()
+        self.admin_audit = AdminAuditService(self.audit_repo)
         self.client, self.users, _ = _client(
             core_sot=self.core_sot, index_sync_outbox=self.sync_outbox,
             memory_service=self.memory_spy, analysis_service=self.analysis_spy,
+            admin_audit=self.admin_audit,
         )
         self.users.create_user(username="root", password="pw789", is_admin=True)
         self.client.post(
@@ -765,7 +773,10 @@ class AdminProjectPurgeTest(unittest.TestCase):
 
     def test_admin_purge_returns_204_and_removes_project(self) -> None:
         project = self.core_sot.create_project(name="Novel")
-        response = self.client.post(f"/admin/projects/{project.id}/purge")
+        self.core_sot.archive_project(project_id=project.id)
+        response = self.client.post(
+            f"/admin/projects/{project.id}/purge", json={"reason": "정리 요청"}
+        )
         self.assertEqual(response.status_code, 204)
         self.assertEqual(response.content, b"")  # 204 carries no body
         # 정본(core_sot)에서 project 소멸 — purge_project 가 실제로 돌았다.
@@ -775,7 +786,10 @@ class AdminProjectPurgeTest(unittest.TestCase):
         # endpoint 가 worker drain(6c _drain_purge) 용 PROJECT_PURGED entry 를 생산한다 —
         # 이것이 빠지면 vector/index 5백엔드가 고아로 잔류한다(D5).
         project = self.core_sot.create_project(name="Novel")
-        self.client.post(f"/admin/projects/{project.id}/purge")
+        self.core_sot.archive_project(project_id=project.id)
+        self.client.post(
+            f"/admin/projects/{project.id}/purge", json={"reason": "정리 요청"}
+        )
         entries = list(self.outbox_repo.outbox_entries.values())
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0].event, IndexSyncEvent.PROJECT_PURGED)
@@ -785,14 +799,117 @@ class AdminProjectPurgeTest(unittest.TestCase):
         # D5 전수: endpoint 가 8 derived service purge 를 부른다. memory·analysis spy
         # (대표 2개)로 호출을 잠근다 — 이것이 빠지면 derived 10컬렉션이 조용한 고아.
         project = self.core_sot.create_project(name="Novel")
-        self.client.post(f"/admin/projects/{project.id}/purge")
+        self.core_sot.archive_project(project_id=project.id)
+        self.client.post(
+            f"/admin/projects/{project.id}/purge", json={"reason": "정리 요청"}
+        )
         self.assertEqual(self.memory_spy.purged, [project.id])
         self.assertEqual(self.analysis_spy.purged, [project.id])
 
     def test_admin_purge_missing_project_is_404(self) -> None:
-        response = self.client.post("/admin/projects/does-not-exist/purge")
+        response = self.client.post(
+            "/admin/projects/does-not-exist/purge", json={"reason": "정리 요청"}
+        )
         self.assertEqual(response.status_code, 404)
         self.assertIn("detail", response.json())
+
+    def test_active_project_is_409_before_audit_or_purge(self) -> None:
+        """Under-strict: D5의 archive→purge 2단계를 backend가 직접 강제한다."""
+        project = self.core_sot.create_project(name="Novel")
+
+        response = self.client.post(
+            f"/admin/projects/{project.id}/purge", json={"reason": "정리 요청"}
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual([p.id for p in self.core_sot.list_projects()], [project.id])
+        self.assertEqual(self.admin_audit.list_project_purge_events(), ())
+
+    def test_archived_project_is_the_over_strict_normal_case(self) -> None:
+        """Over-strict: 2단계 확인은 archive된 정상 purge까지 막지 않는다."""
+        project = self.core_sot.create_project(name="Novel")
+        self.core_sot.archive_project(project_id=project.id)
+
+        response = self.client.post(
+            f"/admin/projects/{project.id}/purge", json={"reason": "정리 요청"}
+        )
+
+        self.assertEqual(response.status_code, 204)
+
+    def test_reason_is_required_and_non_blank(self) -> None:
+        project = self.core_sot.create_project(name="Novel")
+        self.core_sot.archive_project(project_id=project.id)
+
+        for body in ({}, {"reason": "   "}):
+            with self.subTest(body=body):
+                response = self.client.post(
+                    f"/admin/projects/{project.id}/purge", json=body
+                )
+                self.assertEqual(response.status_code, 422)
+        self.assertEqual([p.id for p in self.core_sot.list_projects()], [project.id])
+
+    def test_success_records_requested_and_succeeded_tombstones(self) -> None:
+        project = self.core_sot.create_project(name="Novel")
+        self.core_sot.archive_project(project_id=project.id)
+
+        response = self.client.post(
+            f"/admin/projects/{project.id}/purge", json={"reason": "고객 삭제 요청"}
+        )
+        audit = self.client.get("/admin/audit-events?action=project_purge")
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(audit.status_code, 200)
+        events = audit.json()["events"]
+        self.assertEqual([event["outcome"] for event in events], ["succeeded", "requested"])
+        self.assertEqual({event["target_project_id"] for event in events}, {project.id})
+        self.assertEqual({event["reason"] for event in events}, {"고객 삭제 요청"})
+        self.assertEqual(len({event["operation_id"] for event in events}), 1)
+        self.assertTrue(all("project_id" not in event for event in events))
+
+    def test_requested_audit_failure_prevents_the_purge(self) -> None:
+        if _STORAGE_FAILURE is None:
+            self.skipTest("pymongo is not installed")
+
+        class FailingRepository(InMemoryAdminAuditRepository):
+            def insert(self, event):
+                raise _STORAGE_FAILURE("audit unavailable")
+
+        core_sot = CoreSotService(InMemoryCoreSotRepository())
+        audit = AdminAuditService(FailingRepository())
+        client, users, _ = _client(core_sot=core_sot, admin_audit=audit)
+        users.create_user(username="root", password="pw789", is_admin=True)
+        client.post("/auth/login", json={"username": "root", "password": "pw789"})
+        project = core_sot.create_project(name="Novel")
+        core_sot.archive_project(project_id=project.id)
+
+        response = client.post(
+            f"/admin/projects/{project.id}/purge", json={"reason": "정리 요청"}
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual([p.id for p in core_sot.list_projects()], [project.id])
+
+    def test_outcome_audit_failure_does_not_turn_a_completed_purge_into_503(self) -> None:
+        class OutcomeFailingRepository(InMemoryAdminAuditRepository):
+            def insert(self, event):
+                if event.outcome != "requested":
+                    raise RuntimeError("outcome audit unavailable")
+                super().insert(event)
+
+        core_sot = CoreSotService(InMemoryCoreSotRepository())
+        audit = AdminAuditService(OutcomeFailingRepository())
+        client, users, _ = _client(core_sot=core_sot, admin_audit=audit)
+        users.create_user(username="root", password="pw789", is_admin=True)
+        client.post("/auth/login", json={"username": "root", "password": "pw789"})
+        project = core_sot.create_project(name="Novel")
+        core_sot.archive_project(project_id=project.id)
+
+        response = client.post(
+            f"/admin/projects/{project.id}/purge", json={"reason": "정리 요청"}
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(list(core_sot.list_projects()), [])
 
     def test_a_second_purge_is_404_and_never_reaches_the_derived_services(self) -> None:
         """★ 알려진 한계를 **실행 가능한 사실로** 못박는다 — 재시도는 멱등이 아니다.
@@ -811,13 +928,18 @@ class AdminProjectPurgeTest(unittest.TestCase):
         """
 
         project = self.core_sot.create_project(name="Novel")
+        self.core_sot.archive_project(project_id=project.id)
         self.assertEqual(
-            self.client.post(f"/admin/projects/{project.id}/purge").status_code, 204
+            self.client.post(
+                f"/admin/projects/{project.id}/purge", json={"reason": "정리 요청"}
+            ).status_code, 204
         )
         self.memory_spy.purged.clear()
         self.analysis_spy.purged.clear()
 
-        retry = self.client.post(f"/admin/projects/{project.id}/purge")
+        retry = self.client.post(
+            f"/admin/projects/{project.id}/purge", json={"reason": "재시도"}
+        )
 
         self.assertEqual(retry.status_code, 404)
         self.assertEqual(
@@ -881,6 +1003,7 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # why it sits in this tier rather than the project one: it names no
         # project and reads no project's content.
         ("/admin/observability/kpi", "get"),
+        ("/admin/audit-events", "get"),
         # D8-6d: admin project 영구 파기(204, ADMIN tier). project_id 경로지만 소유권이
         # 아니라 관리자 검사를 쓰므로 project tier 가 아닌 admin tier.
         ("/admin/projects/{project_id}/purge", "post"),
@@ -950,7 +1073,7 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         self.assertEqual(by_tier["auth"], set(self.AUTH_ONLY))
         self.assertEqual(by_tier["admin"], self.ADMIN)
         self.assertEqual(len(by_tier["project"]), 61)
-        self.assertEqual(len(tiers), 74)
+        self.assertEqual(len(tiers), 75)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:

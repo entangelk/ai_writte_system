@@ -1,6 +1,6 @@
 # D8-6 영구 삭제 UI·감사 — 착수 결정 브리프
 
-상태: `Owner decision required`  
+상태: `Approved — D1~D5=A (2026-08-02)`
 작성일: 2026-08-02  
 부모 결정: [`multi-user-auth-cms-decisions.md`](multi-user-auth-cms-decisions.md) D5=A  
 구현 기준: [`system-contract-sot.md`](../system-contract-sot.md) v1.7.69~v1.7.76, v1.7.81
@@ -131,6 +131,10 @@ D3=A일 때 Mongo 장애가 감사와 purge 사이에 발생하면 어떤 결과
 성공 조건으로 삼지 않는 대신 관리자 감사 화면에서 pending을 눈에 띄게 해야 한다.
 
 ## Recommendation summary
+
+> **오너 확정(2026-08-02): D1~D5 전부 A.** D4-D operation journal/saga는
+> 방향도 승인하되 이번 슬라이스에는 넣지 않고, 원격 저장소·다중 worker에서 수동 reconciler가
+> 실제 운영 부담이 되는 시점의 후속 확장으로 추적한다.
 
 | 결정 | 추천 |
 |---|---|

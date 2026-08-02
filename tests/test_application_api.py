@@ -2294,9 +2294,12 @@ class AdminErrorContractDeclarationTest(unittest.TestCase):
         # D8-5c. No 404: it looks nothing up, so there is nothing to be missing —
         # the per-project KPI declares one only because it resolves a project.
         ("/admin/observability/kpi", "get"): {"401", "403", "503"},
-        # D8-6d: 204 success(본문 없음) + 404(project 미존재). 409 없음(멱등 — 재파기=404).
+        # D8-6 UI: recent project-purge tombstone audit, project lookup 없음.
+        ("/admin/audit-events", "get"): {"401", "403", "503"},
+        # D8-6d: 204 success(본문 없음) + 404(project 미존재) + 409(active project).
         # _declared 가 2xx(success)를 제외하므로 204 는 여기에 나타나지 않는다.
-        ("/admin/projects/{project_id}/purge", "post"): {"401", "403", "404", "503"},
+        ("/admin/projects/{project_id}/purge", "post"):
+            {"401", "403", "404", "409", "503"},
         # D8-5e: 승격 발급(201). 404 = project 미존재(발급 전에 확인한다 — 없는 것에
         # 대한 감사 기록을 남기지 않고, 201 이 project id probe 가 되지 않게 한다).
         # 409 없음: 재발급은 충돌이 아니라 append-only 새 행이다(만료 연장의 정상 경로).
@@ -2318,7 +2321,7 @@ class AdminErrorContractDeclarationTest(unittest.TestCase):
         }
 
     def test_declared_error_statuses_match_the_lock_list(self):
-        self.assertEqual(len(self.EXPECTED), 7)
+        self.assertEqual(len(self.EXPECTED), 8)
         for (path, method), expected in self.EXPECTED.items():
             with self.subTest(path=path, method=method):
                 self.assertEqual(self._declared(path, method), expected)

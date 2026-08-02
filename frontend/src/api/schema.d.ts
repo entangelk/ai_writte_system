@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/admin/audit-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Admin Audit Events */
+        get: operations["list_admin_audit_events_admin_audit_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/observability/kpi": {
         parameters: {
             query?: never;
@@ -1159,6 +1176,37 @@ export interface components {
             /** Entries */
             entries: components["schemas"]["AccessLogEntryPayload"][];
         };
+        /** AdminAuditEventListResponse */
+        AdminAuditEventListResponse: {
+            /** Events */
+            events: components["schemas"]["AdminAuditEventPayload"][];
+        };
+        /** AdminAuditEventPayload */
+        AdminAuditEventPayload: {
+            /** Action */
+            action: string;
+            /** Admin User Id */
+            admin_user_id: string;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Error Kind */
+            error_kind: string | null;
+            /** Id */
+            id: string;
+            /** Operation Id */
+            operation_id: string;
+            /** Outcome */
+            outcome: string;
+            /** Reason */
+            reason: string;
+            /** Target Project Id */
+            target_project_id: string;
+            /** Target Type */
+            target_type: string;
+        };
         /** AdminObservabilityKpiResponse */
         AdminObservabilityKpiResponse: {
             gate: components["schemas"]["ObservabilityKpiGatePayload"];
@@ -1644,6 +1692,11 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+        };
+        /** PurgeProjectRequest */
+        PurgeProjectRequest: {
+            /** Reason */
+            reason: string;
         };
         /** PutProjectBriefRequest */
         PutProjectBriefRequest: {
@@ -2192,6 +2245,53 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_admin_audit_events_admin_audit_events_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAuditEventListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
     admin_observability_kpi_endpoint_admin_observability_kpi_get: {
         parameters: {
             query?: never;
@@ -2366,7 +2466,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PurgeProjectRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             204: {
@@ -2395,6 +2499,15 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

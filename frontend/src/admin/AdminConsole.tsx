@@ -1,17 +1,21 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import {
+  ApiError,
   createAdminUser,
   deactivateAdminUser,
   describeApiError,
   getAdminObservabilityKpi,
   issueProjectAccessGrant,
+  listAdminAuditEvents,
   listAdminProjects,
   listAdminUsers,
   listProjectAccessLog,
+  purgeAdminProject,
   type AccessGrant,
   type AccessLogEntry,
   type AdminObservabilityKpi,
+  type AdminAuditEvent,
   type AdminProject,
   type AdminUser,
 } from "../api/client";
@@ -24,10 +28,20 @@ type ProjectAccessState = {
   error?: string;
 };
 
+type ProjectPurgeState = {
+  open?: boolean;
+  reason: string;
+  confirmation: string;
+  busy?: boolean;
+  uncertain?: boolean;
+  error?: string;
+};
+
 export function AdminConsole() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [projects, setProjects] = useState<AdminProject[]>([]);
   const [kpi, setKpi] = useState<AdminObservabilityKpi | null>(null);
+  const [auditEvents, setAuditEvents] = useState<AdminAuditEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [username, setUsername] = useState("");
@@ -35,15 +49,21 @@ export function AdminConsole() {
   const [makeAdmin, setMakeAdmin] = useState(false);
   const [savingUser, setSavingUser] = useState(false);
   const [access, setAccess] = useState<Record<string, ProjectAccessState>>({});
+  const [purges, setPurges] = useState<Record<string, ProjectPurgeState>>({});
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([listAdminUsers(), listAdminProjects(), getAdminObservabilityKpi()])
-      .then(([userResult, projectResult, kpiResult]) => {
+    Promise.all([
+      listAdminUsers(), listAdminProjects(), getAdminObservabilityKpi(),
+      listAdminAuditEvents(),
+    ])
+      .then(([userResult, projectResult, kpiResult, auditResult]) => {
         if (cancelled) return;
         setUsers(userResult.users);
         setProjects(projectResult.projects);
         setKpi(kpiResult);
+        setAuditEvents(auditResult.events);
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(describeApiError(cause));
@@ -115,6 +135,55 @@ export function AdminConsole() {
     }
   }
 
+  function updatePurge(projectId: string, patch: Partial<ProjectPurgeState>) {
+    setPurges((current) => ({
+      ...current,
+      [projectId]: {
+        ...(current[projectId] ?? { reason: "", confirmation: "" }),
+        ...patch,
+      },
+    }));
+  }
+
+  async function purge(project: AdminProject) {
+    const state = purges[project.id] ?? { reason: "", confirmation: "" };
+    if (
+      !project.archived || state.busy || state.uncertain
+      || state.reason.trim() === "" || state.confirmation !== project.name
+    ) return;
+    updatePurge(project.id, { busy: true, error: undefined });
+    setNotice(null);
+    try {
+      await purgeAdminProject(project.id, state.reason.trim());
+      setProjects((current) => current.filter((item) => item.id !== project.id));
+      setPurges((current) => {
+        const next = { ...current };
+        delete next[project.id];
+        return next;
+      });
+      setNotice(`“${project.name}” 프로젝트를 영구 삭제했습니다.`);
+      try {
+        setAuditEvents((await listAdminAuditEvents()).events);
+      } catch {
+        // The purge already succeeded. A read-out failure must not turn it into
+        // a deletion failure or offer a retry for an irreversible operation.
+      }
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 503) {
+        updatePurge(project.id, {
+          busy: false,
+          uncertain: true,
+          error: "삭제 상태를 확정할 수 없습니다. 다시 시도하지 말고 purge reconciler로 잔류 데이터를 확인하세요.",
+        });
+      } else if (cause instanceof ApiError && cause.status === 404) {
+        setProjects((current) => current.filter((item) => item.id !== project.id));
+        setNotice(`“${project.name}” 프로젝트가 이미 존재하지 않습니다.`);
+      } else {
+        updatePurge(project.id, { busy: false, error: describeApiError(cause) });
+      }
+    }
+  }
+
   return (
     <section className="admin-page page-enter">
       <header className="page-heading">
@@ -124,6 +193,7 @@ export function AdminConsole() {
       </header>
 
       {error !== null && <p className="alert" role="alert">{error}</p>}
+      {notice !== null && <p className="status-copy" role="status">{notice}</p>}
       {loading && <p className="status-copy">관리 정보를 불러오는 중…</p>}
 
       {!loading && (
@@ -164,6 +234,7 @@ export function AdminConsole() {
             <div className="admin-projects">
               {projects.map((project) => {
                 const state = access[project.id] ?? { reason: "" };
+                const purgeState = purges[project.id] ?? { reason: "", confirmation: "" };
                 const owner = project.owner_id === null
                   ? "소유자 없음"
                   : ownerNames.get(project.owner_id) ?? project.owner_id;
@@ -191,10 +262,60 @@ export function AdminConsole() {
                         )}
                       </>
                     )}
+                    {project.archived ? (
+                      <section className="admin-danger-zone" aria-label={`${project.name} 영구 삭제`}>
+                        {!purgeState.open ? (
+                          <button
+                            type="button"
+                            className="danger-button"
+                            onClick={() => updatePurge(project.id, { open: true })}
+                          >영구 삭제 준비</button>
+                        ) : (
+                          <>
+                            <h4>영구 삭제</h4>
+                            <p>원고·기억·감사·색인 전체가 삭제되며 복구할 수 없습니다.</p>
+                            <label>삭제 사유<input disabled={purgeState.busy || purgeState.uncertain} value={purgeState.reason} onChange={(e) => updatePurge(project.id, { reason: e.target.value })} /></label>
+                            <label>확인을 위해 <strong>{project.name}</strong> 입력<input disabled={purgeState.busy || purgeState.uncertain} value={purgeState.confirmation} onChange={(e) => updatePurge(project.id, { confirmation: e.target.value })} /></label>
+                            {!purgeState.uncertain && (
+                              <button
+                                type="button"
+                                className="danger-button"
+                                disabled={purgeState.busy || purgeState.reason.trim() === "" || purgeState.confirmation !== project.name}
+                                onClick={() => void purge(project)}
+                              >영구 삭제</button>
+                            )}
+                            {purgeState.error && <p className="alert" role="alert">{purgeState.error}</p>}
+                          </>
+                        )}
+                      </section>
+                    ) : (
+                      <p className="form-hint">영구 삭제하려면 사용자가 먼저 프로젝트를 보관해야 합니다.</p>
+                    )}
                   </article>
                 );
               })}
             </div>
+          </section>
+
+          <section className="admin-section" aria-labelledby="admin-audit-heading">
+            <h2 id="admin-audit-heading">최근 영구 삭제 기록</h2>
+            <ul className="admin-list admin-audit-list">
+              {auditEvents.length === 0
+                ? <li>기록된 영구 삭제가 없습니다.</li>
+                : auditEvents.map((event) => (
+                  <li key={event.id}>
+                    <div>
+                      <strong>{event.target_project_id}</strong>
+                      <span>
+                        {ownerNames.get(event.admin_user_id) ?? event.admin_user_id}
+                        {" · "}{event.outcome === "requested" ? "요청" : event.outcome === "succeeded" ? "완료" : "실패"}
+                        {" · "}{new Date(event.at).toLocaleString("ko-KR")}
+                      </span>
+                      <span>{event.reason}</span>
+                    </div>
+                  </li>
+                ))}
+            </ul>
           </section>
         </>
       )}

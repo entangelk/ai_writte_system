@@ -407,6 +407,35 @@ main {
   font-weight: 700;
 }
 
+.admin-danger-zone {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(157, 47, 47, 0.35);
+}
+
+.admin-danger-zone h4,
+.admin-danger-zone p {
+  margin: 0;
+}
+
+.admin-danger-zone p {
+  color: var(--danger);
+  font-size: 0.82rem;
+}
+
+.admin-project-card .danger-button {
+  justify-self: start;
+  color: var(--danger);
+  border-color: rgba(157, 47, 47, 0.45);
+}
+
+.admin-audit-list li > div {
+  display: grid;
+  gap: 0.25rem;
+}
+
 .grant-status {
   margin-top: 0.7rem;
 }

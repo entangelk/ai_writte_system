@@ -130,6 +130,12 @@ Almost every collection must include:
 
 `project_id` is required for all project data.
 
+Account/session data and administrator audit tombstones are explicit exceptions:
+they describe a user or an administrative action rather than living inside a
+project graph. In particular, `admin_audit_events.target_project_id` identifies
+the graph that was purged but is deliberately **not** named `project_id`; D8-6
+keeps that minimal tombstone after the graph no longer exists.
+
 `user_id` is required where authorization or ownership checks are needed.
 
 No search, write, analysis, or gate operation may cross project boundaries unless explicitly configured.
@@ -2461,6 +2467,55 @@ General event log for debugging and audit.
 db.system_events.createIndex({ project_id: 1, created_at: -1 })
 db.system_events.createIndex({ event_type: 1, created_at: -1 })
 db.system_events.createIndex({ user_id: 1, created_at: -1 })
+```
+
+---
+
+## 43B. admin_audit_events
+
+### 43B.1 Purpose
+
+Minimal administrator-action tombstones that survive project purge. D8-6 stores
+one `requested` event before destructive work and a best-effort `succeeded` or
+`failed` outcome event with the same `operation_id`.
+
+This is the explicit exception to project-wide deletion. It stores no project
+name, owner, manuscript, memory, prompt, or index content. `target_project_id`
+is an audit target, not project ownership; using `project_id` here would cause
+the purge reconciler to treat the audit as an orphaned project child and delete it.
+
+### 43B.2 Document Example
+
+```json
+{
+  "_id": "audit_event_001",
+  "operation_id": "purge_operation_001",
+  "admin_user_id": "user_admin_001",
+  "action": "project_purge",
+  "target_type": "project",
+  "target_project_id": "project_001",
+  "reason": "고객 삭제 요청",
+  "outcome": "requested",
+  "at": "2026-08-02T12:00:00Z",
+  "error_kind": null
+}
+```
+
+`outcome` is one of `requested`, `succeeded`, or `failed`. Failure rows expose a
+stable `error_kind`, not an internal exception body. The collection has no TTL;
+a future legal/operational retention policy is a separate decision.
+
+### 43B.3 Indexes
+
+```javascript
+db.admin_audit_events.createIndex(
+  { action: 1, at: -1 },
+  { name: "admin_audit_events_by_action_at" }
+)
+db.admin_audit_events.createIndex(
+  { operation_id: 1, at: 1 },
+  { name: "admin_audit_events_by_operation_at" }
+)
 ```
 
 ---

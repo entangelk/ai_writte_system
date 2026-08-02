@@ -30,6 +30,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     throw new ApiError(response.status, await readDetail(response));
   }
+  if (response.status === 204) {
+    return undefined as T;
+  }
   return (await response.json()) as T;
 }
 
@@ -79,6 +82,7 @@ export type AdminObservabilityKpi =
   components["schemas"]["AdminObservabilityKpiResponse"];
 export type AccessGrant = components["schemas"]["AccessGrantPayload"];
 export type AccessLogEntry = components["schemas"]["AccessLogEntryPayload"];
+export type AdminAuditEvent = components["schemas"]["AdminAuditEventPayload"];
 export type Project = components["schemas"]["ProjectPayload"];
 export type ProjectListResponse = components["schemas"]["ProjectListResponse"];
 export type ProjectBrief = components["schemas"]["ProjectBriefVersionPayload"];
@@ -159,6 +163,19 @@ export function deactivateAdminUser(userId: string): Promise<AdminUser> {
 
 export function listAdminProjects(): Promise<components["schemas"]["AdminProjectListResponse"]> {
   return request("/admin/projects");
+}
+
+export function listAdminAuditEvents(): Promise<
+  components["schemas"]["AdminAuditEventListResponse"]
+> {
+  return request("/admin/audit-events");
+}
+
+export function purgeAdminProject(projectId: string, reason: string): Promise<void> {
+  return request(`/admin/projects/${encodeURIComponent(projectId)}/purge`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
 }
 
 export function getAdminObservabilityKpi(): Promise<AdminObservabilityKpi> {

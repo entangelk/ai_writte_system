@@ -16,6 +16,11 @@ from services.application.app.auth.access_grants import (
     AccessGrantService,
     InMemoryAccessGrantRepository,
 )
+from services.application.app.auth.admin_audit import (
+    AdminAuditEvent,
+    AdminAuditService,
+    InMemoryAdminAuditRepository,
+)
 from services.application.app.auth.sessions import (
     DEFAULT_SESSION_TTL,
     InMemorySessionRepository,
@@ -504,6 +509,21 @@ def _default_access_grant_service() -> AccessGrantService:
     from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
     return AccessGrantService(
         MongoAccessGrantRepository.from_uri(
+            uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
+        )
+    )
+
+
+def _default_admin_audit_service() -> AdminAuditService:
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if not uri:
+        return AdminAuditService(InMemoryAdminAuditRepository())
+    from services.application.app.auth.admin_audit_mongo import (
+        MongoAdminAuditRepository,
+    )
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+    return AdminAuditService(
+        MongoAdminAuditRepository.from_uri(
             uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
         )
     )
@@ -1652,6 +1672,31 @@ class AdminProjectPayload(BaseModel):
 class AdminProjectListResponse(BaseModel):
     projects: list[AdminProjectPayload]
 
+
+class PurgeProjectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: NonBlankBriefString
+
+
+class AdminAuditEventPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    operation_id: str
+    admin_user_id: str
+    action: str
+    target_type: str
+    target_project_id: str
+    reason: str
+    outcome: str
+    at: datetime
+    error_kind: str | None
+
+
+class AdminAuditEventListResponse(BaseModel):
+    events: list[AdminAuditEventPayload]
+
 PROJECT_BRIEF_STYLE_EXAMPLES_MAX_ITEMS = 3
 PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS = 1000
 
@@ -2310,6 +2355,7 @@ def create_app(
     user_service: UserService | None = None,
     session_service: SessionService | None = None,
     access_grant_service: AccessGrantService | None = None,
+    admin_audit_service: AdminAuditService | None = None,
 ) -> FastAPI:
     # Fail startup loudly for invalid environment-adjustable public bounds.
     _project_brief_style_example_limits()
@@ -2527,6 +2573,7 @@ def create_app(
     users = user_service or _default_user_service()
     sessions = session_service or _default_session_service()
     access_grants = access_grant_service or _default_access_grant_service()
+    admin_audit = admin_audit_service or _default_admin_audit_service()
     # The module-level dependency reads them from here: it must be one function
     # object across all apps so the exhaustive guard has a single identity to
     # look for (see require_authenticated_user).
@@ -2535,6 +2582,7 @@ def create_app(
     app.state.core_sot = core_sot
     # require_project_owner reads this to honour a live grant (D8-5e, F1=C).
     app.state.access_grants = access_grants
+    app.state.admin_audit = admin_audit
 
     def _user_payload(user) -> dict[str, object]:
         return {
@@ -2670,6 +2718,28 @@ def create_app(
             "gate": asdict(kpi.gate),
             "loop": asdict(kpi.loop),
         }
+
+    def _admin_audit_payload(event: AdminAuditEvent) -> dict[str, object]:
+        return {
+            "id": event.id,
+            "operation_id": event.operation_id,
+            "admin_user_id": event.admin_user_id,
+            "action": event.action,
+            "target_type": event.target_type,
+            "target_project_id": event.target_project_id,
+            "reason": event.reason,
+            "outcome": event.outcome,
+            "at": event.at,
+            "error_kind": event.error_kind,
+        }
+
+    @app.get("/admin/audit-events", response_model=AdminAuditEventListResponse,
+             responses=_ERRORS_ADMIN, dependencies=_REQUIRE_ADMIN)
+    async def list_admin_audit_events() -> dict[str, object]:
+        return {"events": [
+            _admin_audit_payload(event)
+            for event in admin_audit.list_project_purge_events()
+        ]}
 
     def _project_payload(project) -> dict[str, object]:
         return {"id": project.id, "name": project.name, "archived": project.archived}
@@ -3047,13 +3117,16 @@ def create_app(
         }}
 
     @app.post("/admin/projects/{project_id}/purge", status_code=204,
-              response_model=None, responses=_ERRORS_ADMIN_404,
+              response_model=None, responses=_ERRORS_ADMIN_404_409,
               dependencies=_REQUIRE_ADMIN)
-    async def purge_project(project_id: str) -> None:
+    async def purge_project(
+        project_id: str, request: PurgeProjectRequest,
+        current=Depends(require_admin_user),
+    ) -> None:
         # D8-6d: 영구 파기(불가역). archive(soft)와 달리 18컬렉션을 hard delete 하고
         # indexing outbox 로 worker 가 vector/index 5백엔드를 파기(6c _drain_purge).
-        # D5 전체 그래프 파기. 응답은 204(리소스 소멸). core_sot 파기(8컬렉션, mongo
-        # 트랜잭션)가 NotFound 면 404.
+        # D5 전체 그래프 파기. 응답은 204(리소스 소멸). 2단계 삭제는 UI 관례가
+        # 아니라 여기서 강제한다: active project 는 먼저 archive해야 하며 아니면 409.
         #
         # ★ 알려진 한계 — **재시도는 멱등이 아니다**(2026-08-02 정정. v1.7.74 는 이 자리에
         # "클라이언트 재시도(멱등)"라고 적었으나 거짓이었다). core_sot 이 **먼저** 지워지므로,
@@ -3062,27 +3135,66 @@ def create_app(
         # derived 는 무해하지 않다 — llm_call_audits 에 프롬프트 본문이, scratch 에 원고
         # 후보가 남는다(D5 부분 삭제 금지 위반). **수습은 `scripts/purge_reconciler.py`**
         # 가 한다(projects 에 없는 project_id 의 잔류를 찾아 파기 + PROJECT_PURGED enqueue).
-        # 이 순서를 바꿀지(재시도 가능하게) 는 오너 결정 사안이다 — HANDOFF "Owner Decisions".
+        # D4=A(오너 2026-08-02)로 현행 순서+reconciler를 유지한다. 장래 D4-D
+        # operation journal/saga는 원격 저장소·다중 worker에서 수동 수습이 실제
+        # 부담이 될 때 연다.
         # 한계 자체는 AdminProjectPurgeTest 의
         # test_a_second_purge_is_404_and_never_reaches_the_derived_services 가 잠근다.
         try:
-            core_sot.purge_project(project_id=project_id)
+            project = core_sot.get_project(project_id=project_id)
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        memory.purge_project(project_id=project_id)
-        analysis.purge_project(project_id=project_id)
-        review_queue.purge_project(project_id=project_id)
-        gate_findings.purge_project(project_id=project_id)
-        writing_generation_jobs.purge_project(project_id=project_id)
-        writing_scratch.purge_project(project_id=project_id)
-        writing_loop_audit.purge_project(project_id=project_id)
-        llm_call_audit.purge_project(project_id=project_id)
-        # D8-5e: access grants are project-scoped too (they carry the project id
-        # and the reason an admin looked at it). Leaving them behind would be the
-        # silent orphan D5 forbids — append-only is a rule about *expiry*, not
-        # about surviving the project's destruction.
-        access_grants.purge_project(project_id=project_id)
-        sync_outbox.enqueue_project_purged(project_id=project_id)
+        if not project.archived:
+            raise HTTPException(
+                status_code=409, detail="project must be archived before purge"
+            )
+
+        # D3/D5=A. This first write is fail-closed: without it the destructive
+        # action does not begin. It intentionally survives the project graph.
+        requested = admin_audit.record_purge_requested(
+            admin_user_id=current.id,
+            target_project_id=project_id,
+            reason=request.reason,
+        )
+        try:
+            core_sot.purge_project(project_id=project_id)
+            memory.purge_project(project_id=project_id)
+            analysis.purge_project(project_id=project_id)
+            review_queue.purge_project(project_id=project_id)
+            gate_findings.purge_project(project_id=project_id)
+            writing_generation_jobs.purge_project(project_id=project_id)
+            writing_scratch.purge_project(project_id=project_id)
+            writing_loop_audit.purge_project(project_id=project_id)
+            llm_call_audit.purge_project(project_id=project_id)
+            # D8-5e grants are project children and disappear. The separate
+            # admin tombstone above is the explicit minimal D5 exception.
+            access_grants.purge_project(project_id=project_id)
+            sync_outbox.enqueue_project_purged(project_id=project_id)
+        except Exception as exc:
+            try:
+                admin_audit.record_purge_outcome(
+                    requested,
+                    outcome="failed",
+                    error_kind=(
+                        "storage_error"
+                        if isinstance(exc, _STORAGE_ERRORS)
+                        else "not_found" if isinstance(exc, NotFound)
+                        else "internal_error"
+                    ),
+                )
+            except Exception:
+                # D5=A: outcome is best-effort after the fail-closed requested
+                # row. Never replace the actual purge failure with audit noise.
+                pass
+            if isinstance(exc, NotFound):
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise
+        try:
+            admin_audit.record_purge_outcome(requested, outcome="succeeded")
+        except Exception:
+            # The irreversible work already completed. Returning 503 here would
+            # falsely tell the client to retry an endpoint that cannot retry.
+            pass
         return None
 
     @app.delete(
