@@ -1,7 +1,7 @@
 # 독립 검증 기록
 
 이 디렉터리는 **구현자가 아닌 검증자가** 각 슬라이스를 다시 뜯어본 기록이다. 2026-06-24부터
-**39일치 · 205건**이 쌓여 있다.
+**39일치 · 206건**이 쌓여 있다.
 
 ## 이 저장소의 검증이 무엇인가
 
@@ -28,7 +28,7 @@
 
 | 판정 | 건수 | 뜻 |
 |---|---|---|
-| 합격 | 134 | blocking 결함 없음 |
+| 합격 | 135 | blocking 결함 없음 |
 | **조건부 합격** | **57** | 합격이되 닫아야 할 조건이 있었다 |
 | 서술형 | 14 | 초기 기록(판정 문구가 정형화되기 전) |
 
@@ -60,10 +60,11 @@
 
 | 기록 | 대상 | 판정 |
 |---|---|---|
+| [`d8_5f_access_grant_audit.md`](2026-08-02/d8_5f_access_grant_audit.md) | D8-5f 승격 아래 요청 감사(access_grant_uses) + C-4 소유자 사후 조회 | 합격 |
+| [`d8_5e_access_grants.md`](2026-08-02/d8_5e_access_grants.md) | D8-5e 관리자 승격(access grant) | 조건부 합격 |
 | [`d8_7_g1c_loopback_exposure.md`](2026-08-02/d8_7_g1c_loopback_exposure.md) | D8-7 G1=C 저장소 노출면 축소(loopback 바인드) | 합격 |
 | [`purge_reconciler.md`](2026-08-02/purge_reconciler.md) | D8-6 잔여 purge reconciler | 조건부 합격 |
 | [`product_overview.md`](2026-08-02/product_overview.md) | 기획 축 제품 한 장 요약 + 낡은 단언 5건 정정 | 조건부 합격 |
-| [`d8_5e_access_grants.md`](2026-08-02/d8_5e_access_grants.md) | D8-5e 관리자 승격(access grant) | 조건부 합격 |
 
 ### 2026-08-01
 
