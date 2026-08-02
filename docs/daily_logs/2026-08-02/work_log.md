@@ -1298,3 +1298,32 @@ C-6 409 흐름, 12자 양방향, 무소유 승격, lazy chunk를 독립 재현�
 
 - 현 우선 작업인 D8-6 영구 삭제 UI 결정 브리프를 먼저 진행한다.
 - 이후 Phase 8 Slice 8.0 착수 브리프에서 billable request의 정확한 경계를 결정한다.
+
+---
+
+## Task — D8-6 영구 삭제 UI·감사 착수 브리프
+
+### Goals
+
+- 오늘 마지막 구현 트랙으로 D8-6 프론트 잔여와 삭제 감사를 닫을 수 있게 실제 계약 공백을 실측한다.
+- 불가역 동작을 오너 결정 없이 구현하지 않고, 선택지·장단점·추천을 별도 브리프로 제시한다.
+
+### Issues found
+
+- D5=A 정책은 archive→purge 2단계지만 현재 backend endpoint는 `archived`를 검사하지 않아 활성
+  project도 직접 영구 삭제할 수 있다. UI만 숨기면 API 직접 호출이 우회한다.
+- endpoint body가 없어 삭제 사유를 받을 수 없고 삭제 행위 감사 저장소도 없다. 기존 access grant
+  감사는 project graph의 일부라 purge 때 함께 삭제된다.
+- reconciler는 `project_id`가 있는 컬렉션을 자동 발견해 고아 행을 지운다. 삭제 감사를 보존하려면
+  project 자식이 아닌 tombstone 의미와 필드명을 명시적으로 분리해야 한다.
+- core SOT 선삭제 뒤 derived 실패 503은 재호출 404라 UI가 일반적인 재시도 버튼을 제공할 수 없다.
+
+### Completed work
+
+- [`plans/auth-d8-6-purge-ui-decisions.md`](../../plans/auth-d8-6-purge-ui-decisions.md)를 작성하고
+  계획 인덱스에 등재했다.
+- D1 2단계 시행, D2 확인 UX, D3 사유·감사, D4 재시도 의미, D5 감사 원자성의 옵션과 추천을 제시했다.
+
+### Next steps
+
+- 오너가 D1~D5를 확정하면 계약 회귀부터 작성하고 backend→frontend 순서로 구현한다.
