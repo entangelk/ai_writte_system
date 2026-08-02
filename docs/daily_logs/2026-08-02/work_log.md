@@ -1247,3 +1247,54 @@ C-6 409 흐름, 12자 양방향, 무소유 승격, lazy chunk를 독립 재현�
 
 - D8-5 독립 검증과 hardening까지 종료. 다음 제품 잔여는 D8-6 영구 삭제 UI이며, 불가역 확인 UX
   계약이 먼저 필요하다.
+
+---
+
+## Task — Phase 8 회원별 요청 횟수 제한·Billing Readiness 계획
+
+### Goals
+
+- 서비스화와 향후 BM 연결을 위해 회원별 사용량 제한을 독립 Phase로 계획한다.
+- 구현을 앞질러 세부 정책을 고르지 않고, 각 슬라이스 착수 시 별도 owner decision brief를 거치는
+  현재 작업 방식을 계획 자체에 고정한다.
+- 계획 인덱스와 HANDOFF가 다음 작업 순서를 바로 가리키게 한다.
+
+### User Decisions and Rationale
+
+- **회원 한도 기준은 토큰량이 아니라 요청 횟수다**(오너, 2026-08-02). 요청마다 보낼 토큰 상한은
+  생성 계약에서 통제할 수 있으므로, 회원에게 설명하고 BM으로 연결할 quota는 요청 횟수로 단순화한다.
+- **세부 정책은 지금 한꺼번에 결정하지 않는다.** 사용 동작 정의, 기간, 차감 시점, 실패 처리,
+  관리자 조정, 결제 연결 같은 결정은 그 정책을 처음 소비하는 슬라이스마다 별도 브리프를 만들고,
+  선택지·장단점·추천을 검토한 뒤 구현한다. 현재 인증/CMS 작업 방식과 같은 진행 규칙이다.
+
+### Completed work
+
+- [`plans/08-member-request-quota.md`](../../plans/08-member-request-quota.md)를 추가했다.
+  - Phase 목표와 포함/제외 범위
+  - 8.0 사용 동작 인벤토리 → 8.1 정책 → 8.2 원장 → 8.3 quota 시행 → 8.4 제품 경로 배선 →
+    8.5 관리자 CMS 백엔드 → 8.6 결제 entitlement seam → 8.7 독립 검증 순서
+  - 각 슬라이스에서 만들 별도 decision brief와 결정 항목
+  - 회원 격리, idempotency, 신규 AI 경로 전수 분류, 관측 KPI와 과금 원장 분리 등의 공통 불변식
+  - 실제 결제/환불/정산, 토큰 quota, CMS 프론트는 범위 밖으로 명시
+- [`plans/README.md`](../../plans/README.md)에 Phase 8 인덱스와 MVP/BM 기여 행을 추가했다.
+- `HANDOFF.md`의 결정 완료 상태와 Next Tasks에 Phase 8을 반영했다. 권장 순서는
+  D8-6 → Phase 8의 8.0~8.3 → 제품 경로 배선이며, 외부 API 확장은 이 quota seam을 소비한다.
+
+### Decisions
+
+- 정식 Phase 번호는 **Phase 8**로 했다. 인증 부모 브리프 안의 결정 항목 `D8`과 혼동될 수 있어
+  계획서 첫머리에 서로 다른 번호 체계임을 명시했다.
+- Phase 8 완료 범위는 **CMS 백엔드와 결제 연결 seam**까지다. 결제 provider와 UI를 지금 넣으면
+  아직 결정되지 않은 상품 정책을 코드로 선결하므로 제외했다.
+- `llm_call_audits`를 사용량 정본으로 재사용하지 않는다. 내부 LLM 호출 횟수와 회원에게 보이는
+  서비스 요청 횟수는 동일하지 않으며, 관측과 BM의 보존·정합성 요구도 다르다.
+
+### Verification
+
+- `python3 -m pytest -q tests/test_docs_indexes.py`: **7 passed / 4 subtests**.
+- `git diff --check`: clean.
+
+### Next steps
+
+- 현 우선 작업인 D8-6 영구 삭제 UI 결정 브리프를 먼저 진행한다.
+- 이후 Phase 8 Slice 8.0 착수 브리프에서 billable request의 정확한 경계를 결정한다.

@@ -137,6 +137,12 @@
 |---|---|---|
 | [`07-conversational-authoring.md`](07-conversational-authoring.md) | 대화형 수정·아이디에이션·저작 감독. 원본 [`../chat-revision-ideation.md`](../chat-revision-ideation.md) | Draft |
 
+### Phase 8 — 회원별 요청 제한 · Billing Readiness (계획됨)
+
+| 문서 | 무엇 | 상태 |
+|---|---|---|
+| [`08-member-request-quota.md`](08-member-request-quota.md) | 회원별 **요청 횟수** quota·사용량 원장·관리자 CMS 백엔드·향후 결제 연결 seam | 상위 방향 승인 · 슬라이스별 브리프 대기 |
+
 ### 프론트엔드
 
 | 문서 | 무엇 | 상태 |
@@ -220,6 +226,7 @@
 | Phase 5 | 이어쓰기와 생성 검증 | MVP 1 완성, MVP 2·3 확장점 |
 | Phase 6 | 후보 검토/승인 UI | MVP 4 기반, MVP 2 운영 화면 |
 | Phase 7 | 대화형 수정·아이디에이션·저작 감독(directive) | 반복 편집 루프, 저자 정보관리(맥거핀 등) |
+| Phase 8 | 회원별 요청 횟수 제한·사용량 운영·결제 연결 seam | 서비스 BM/구독 전환 기반 |
 
 MVP 2의 Continuity/POV, MVP 3의 Voice RAG는 초기 6개 Phase 이후 별도 증분 계획으로 구체화해야 한다. Phase 6에서 모든 고급 기능을 한꺼번에 구현한다는 뜻은 아니다.
 
