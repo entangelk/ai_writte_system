@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List All Projects */
+        get: operations["list_all_projects_admin_projects_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/projects/{project_id}/access-grants": {
         parameters: {
             query?: never;
@@ -1152,6 +1169,22 @@ export interface components {
             sites: components["schemas"]["ObservabilityKpiSitePayload"][];
             totals: components["schemas"]["ObservabilityKpiTotalsPayload"];
         };
+        /** AdminProjectListResponse */
+        AdminProjectListResponse: {
+            /** Projects */
+            projects: components["schemas"]["AdminProjectPayload"][];
+        };
+        /** AdminProjectPayload */
+        AdminProjectPayload: {
+            /** Archived */
+            archived: boolean;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Owner Id */
+            owner_id: string | null;
+        };
         /** AdminUserListResponse */
         AdminUserListResponse: {
             /** Users */
@@ -2173,6 +2206,53 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminObservabilityKpiResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    list_all_projects_admin_projects_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminProjectListResponse"];
                 };
             };
             /** @description Unauthorized */

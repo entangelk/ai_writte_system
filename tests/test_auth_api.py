@@ -1229,6 +1229,11 @@ class AdminProjectListTest(unittest.TestCase):
         # ★ over-strict 경계. 이 endpoint 가 내용을 흘리기 시작하면 D8-5e 승격
         # (사유·만료·감사)을 우회하는 뒷문이 된다. 필드 집합을 정확히 단정한다 —
         # 필드가 늘면 그것은 결정이지 사고여서는 안 된다.
+        #
+        # **이 셀이 잠그는 것은 `AdminProjectPayload` 모델이다.** 핸들러 dict 에
+        # 필드를 더하는 것만으로는 응답이 안 바뀐다 — `response_model` 이 여분을
+        # 걸러 내기 때문이다(뮤테이션으로 실측). 필드가 클라이언트에 실제로 닿는
+        # 유일한 경로가 모델이므로, 겨눌 곳도 거기다.
         self.core_sot.create_project(name="Novel", owner_id=self.alice.id)
         [row] = self.client.get("/admin/projects").json()["projects"]
         self.assertEqual(set(row), {"id", "name", "archived", "owner_id"})
