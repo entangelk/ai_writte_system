@@ -106,5 +106,56 @@ class RepositoryReadmeTest(unittest.TestCase):
         _assert_links_resolve(self, _ROOT / "README.md")
 
 
+# "검증 기록 N건"을 세 문서가 각자 적는다. 세는 사람이 셋이면 반드시 갈라진다 —
+# 실제로 2026-08-02 하루에 세 번 갈라졌고, 매번 최상위 README 하나만 뒤처졌다
+# (검증자는 자기 인덱스를, 구현자는 자기 것을 고치기 때문이다).
+# 링크는 가드가 보고 있었는데 **숫자는 아무도 안 보고 있었다.**
+_COUNT_CLAIMS = (
+    ("docs/verifications/README.md", r"39일치 · (\d+)건"),
+    ("docs/README.md", r"독립 검증 기록 (\d+)건"),
+    ("README.md", r"\*\*(\d+)건 / 39일치\*\*"),
+    ("README.md", r"독립 검증 기록 \((\d+)건\)"),
+)
+
+
+class VerificationCountClaimsTest(unittest.TestCase):
+    """문서가 적은 검증 기록 수가 디스크의 실제 파일 수와 같다.
+
+    under-strict: 기록을 추가하고 어느 한 인덱스만 고치면 실패한다.
+    over-strict: 파일을 지우고 숫자를 안 내려도 실패한다(양쪽 다 거짓말이다).
+    """
+
+    def setUp(self) -> None:
+        self.actual = len(list(_VERIFICATIONS.glob("*/*.md")))
+
+    def test_every_stated_count_matches_the_files_on_disk(self) -> None:
+        for relative, pattern in _COUNT_CLAIMS:
+            with self.subTest(document=relative, pattern=pattern):
+                text = (_ROOT / relative).read_text(encoding="utf-8")
+                found = re.findall(pattern, text)
+                self.assertEqual(
+                    len(found), 1,
+                    f"{relative}: 이 주장을 정확히 한 번 찾지 못했다 — 문구가 "
+                    "바뀌었으면 위 _COUNT_CLAIMS 도 함께 고친다",
+                )
+                self.assertEqual(
+                    int(found[0]), self.actual,
+                    f"{relative}가 {found[0]}건이라 적었지만 실제는 {self.actual}건",
+                )
+
+    def test_the_verdict_distribution_adds_up_to_the_total(self) -> None:
+        # 판정 분포(합격·조건부·서술형)는 전체와 맞아야 한다. 한 건을 등재하면서
+        # 총계만 올리고 분포를 안 고치면 여기서 잡힌다 — 그리고 그 분포는 최상위
+        # README 가 "조건부 합격이 27%"라는 주장의 분모/분자이기도 하다.
+        index = (_VERIFICATIONS / "README.md").read_text(encoding="utf-8")
+        counts = [
+            int(value)
+            for value in re.findall(r"^\| \*{0,2}[^|]+\*{0,2} \| \*{0,2}(\d+)\*{0,2} \|",
+                                    index, re.MULTILINE)
+        ]
+        self.assertEqual(len(counts), 3, f"판정 3종을 못 읽었다: {counts}")
+        self.assertEqual(sum(counts), self.actual)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
