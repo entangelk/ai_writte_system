@@ -4,7 +4,7 @@
 > 완료 서술은 여기 쓰지 않는다 — `docs/daily_logs/`(상세) · `docs/system-contract-sot.md` 변경이력 · `CHANGELOG.md`(마일스톤) · `docs/verifications/`(독립 검증)에 이미 있다.
 > 편집 규칙은 `CLAUDE.md`·`AGENTS.md`의 "HANDOFF.md" 절에 있다. **길이 상한은 없다** — 대신 **~200줄을 넘으면 자가 검수**하고(그 뒤로는 ~100줄마다) 결과를 아래 한 줄로 남긴다. 길어야 할 이유가 있으면 길어도 된다. 안 보는 것이 문제다.
 >
-> 마지막 자가 검수: 2026-08-02 · 236줄 (D8-6 완료 서술을 걷어내고 독립 검증 인계·D4-D 후속 조건·Phase 8 순서만 남겼다. 다음 검수 트리거는 300줄)
+> 마지막 자가 검수: 2026-08-02 · 236줄 (D8-6 검증 대기와 낡은 알파 상태를 제거하고 합격 상태·알파 종료 관측·베타 첫 체크·Phase 8 착수만 남겼다. 다음 검수 트리거는 300줄)
 
 ## 머신 구성 (알파 · 베타 · 감마)
 
@@ -13,13 +13,14 @@
 | 머신 | 역할 | LLM | 띄울 수 있는 것 |
 |---|---|---|---|
 | **알파(Alpha)** | 서비스 배포용 | **in-stack llama**(GPU **RTX 3060 12GB** — `nvidia-smi` 실측, `docker-compose.llama.yml`) | 전체 스택 + 자체 GPU LLM |
-| **베타(Beta)** | 테스트·개발용 (**2026-07-29 기준 여기**) | **외부 LLM**(gemma-4-12B, LAN) — 현행 주소는 `.env`·머신-로컬(2026-07-29 `192.168.1.22:9080`, `n_ctx=8192`). 이 머신 GPU는 **GTX 1060 3GB**라 12B를 못 올린다 | 전체 스택. gateway는 `.env`의 `LLAMA_BASE_URL`로 외부 서버를 가리킨다 |
+| **베타(Beta)** | 테스트·개발용 (**다음 작업 예정 — 상태 재확인 필수**) | **외부 LLM**(gemma-4-12B, LAN) — 주소·context는 `.env`와 `/props`로 다시 잰다. 이 머신 GPU는 **GTX 1060 3GB**라 12B를 못 올린다 | 전체 스택. gateway는 `.env`의 `LLAMA_BASE_URL`로 외부 서버를 가리킨다 |
 | **감마(Gamma)** | 사이드 개발용 (노트북) | **없음** — LLM을 못 띄운다 | CPU 기반 컨테이너·DB 정도(mongo/test-mongo·ES·chroma). LLM 관통 작업은 불가 |
 
 - **어느 머신에서든 `docker compose up`만으로 같은 포트로 뜬다**(포트는 repo에 고정, 아래 "기동·실행법"). 머신별로 달라지는 것은 **LLM을 어디서 얻느냐**뿐이다:
   - 알파: `docker compose -f docker-compose.yml -f docker-compose.llama.yml up`(in-stack llama 9080).
   - 베타: `.env`에 `LLAMA_BASE_URL=http://192.168.1.22:9080`(커밋 금지 — gateway 기본값 `host.docker.internal:9080`을 외부 서버로 덮는다).
   - 감마: LLM 관통이 필요 없는 작업(회귀·저장소·색인)만. 필요하면 알파/베타로 옮긴다.
+- **★ 2026-08-02 작업 전환: 오늘 D8-6까지는 알파에서 수행했고, 다음 Phase 8 Slice 8.0은 베타에서 시작할 예정이다.** 베타에 도착하면 과거 상태를 믿지 말고 `git status --short`·`git log -1 --oneline`·`docker compose ps`·`docker compose -f docker-compose.test.yml ps`부터 다시 잰다. 이미지 날짜가 코드보다 오래됐으면 `application frontend`를 재빌드한다. 커밋은 push하지 않았으므로 머신 간 repo 동기화는 오너의 기존 방식으로 한 뒤 **검증 커밋 `c2ca946`과 그 뒤 마감 커밋이 보이는지** 확인한다.
 - **함정**: HANDOFF가 "스택이 내려가 있다/떠 있다"고 적었으면 그건 **그 시점 그 머신의 관측치**다. 다른 머신에서 그대로 믿지 말고 `docker compose ps`로 직접 확인한다(memory 규칙 "verify-machine-state-before-claiming-blocked").
 - **★ 알파로 옮길 때 반드시 먼저 할 것 — `LLAMA_CTX_SIZE=16384`(2026-07-29).** 알파의 in-stack llama는 [`docker-compose.llama.yml:29`](docker-compose.llama.yml#L29)에서 **기본 8192**이고 `.env.example`에 항목이 없다. 그런데 **2026-07-29 회계 수정 후에도 report 프롬프트는 약 11,000~11,900 tok**이라, 창 8192에서는 **프롬프트만으로 창을 넘어 HTTP 400(`exceed_context_size_error`) → `provider_error` → generation job 실패**가 된다 — **오늘 아침 베타에서 4/4 실패했던 그 증상 그대로**다. 베타는 오너가 외부 서버를 16384로 올려 뒀지만 **그것은 그 서버의 설정이고 repo가 옮겨 주지 않는다.** 그러므로 알파에서 `long`을 돌리기 전 `.env`에 `LLAMA_CTX_SIZE=16384`를 넣는다(C-1 실측: 기동 성공, VRAM 9,481/12,288, 속도 무변). **안 넣고 실패를 보면 "오늘 수정이 안 먹었나"로 오독하기 쉽다 — 수정은 먹었고 창이 작은 것이다.** 근본 해결은 R-e(포인터 제거)이며 그 뒤에는 8192에서도 여유가 생긴다.
 
@@ -45,7 +46,7 @@
   | **5-b** | **완료** | `GET /admin/projects` — 전 프로젝트 **메타데이터**(id·name·archived·owner_id, operation **74**). **내용은 안 준다**(승격 우회 방지) · 목록 조회는 감사 미기록 |
   | **C-6** | **완료** | 관리자가 정한 비밀번호는 **1회용** — 첫 로그인에 교체(409 → `new_password`). 정책 **최소 12자** |
   | **5-d** | **완료·검증 합격·hardening 폐쇄** | `/admin` guard/lazy 화면 · 강제 교체 UI · 전 프로젝트 목록 · 사용자 관리 · 전역 KPI · 승격 발급 · 소유자/관리자 접근 이력 |
-  | **6 (D8-6)** | **구현 완료·독립 검증 대기** | 영구 삭제 backend+UI+감사. archive된 project만 purge(활성 409), 사유 필수, 정확한 이름 확인, 전체 graph 파기·복구 불가 경고. `admin_audit_events`는 graph 밖 최소 tombstone(`target_project_id`, TTL 없음)이며 requested fail-closed·결과 best-effort다. `GET /admin/audit-events`는 ADMIN tier 최근 50건. 503은 상태 불확정이라 UI 재시도를 금지하고 [`purge_reconciler.py`](scripts/purge_reconciler.py) 수습을 안내한다. **D4=A는 현행 core-first+reconciler**, **D4-D operation journal/saga는 원격 저장소·다중 worker 또는 수동 reconciler 부담이 생길 때 확장**한다. operation 75(ADMIN 8). 기준선 backend 1911/4/1625, frontend 236/17, build 698 modules. 정본 v1.7.82 · 결정 `plans/auth-d8-6-purge-ui-decisions.md`. |
+  | **6 (D8-6)** | **완료·독립 검증 합격(`c2ca946`)** | archive-only purge UI+감사. Blocking/Hardening 0, 7축 mutation 전부 작동, 실제 Mongo에서 reconciler가 `target_project_id` tombstone을 보존함을 실증했다. **D4=A는 현행 core-first+reconciler**, **D4-D operation journal/saga는 원격 저장소·다중 worker 또는 수동 reconciler 부담이 생길 때 확장**한다. operation 75(ADMIN 8). 기준선 backend 1911/4/1625, frontend 236/17, build 698 modules. 검증 `docs/verifications/2026-08-02/d8_6_purge_ui.md`. |
   | **7 (D8-7)** | **절반 완료 — G1=C 시행(A), 나머지는 배포 시점** | **인프라 노출면.** 오너가 **G1=C**를 확정했다(2026-08-02) — 위험을 자격증명이 아니라 **노출면 축소로 없앤다**. 저장소·내부 5종(`mongo`·`chroma`·`elasticsearch`·`gateway`·`embedding`)과 `test-mongo`가 **`127.0.0.1:` 바인드**다. **코드 0줄**(compose 3파일뿐). **"외부 노출 금지"의 해제 조건이 *인증*에서 *노출 없음*으로 개정됐다**(SoT v1.7.75). **G2~G6(자격증명 SCRAM·keyfile·basic auth)은 각하가 아니라 유예** — 원격/다중 호스트 배포가 계기이며 브리프가 그대로 실행 계획이다 |
 
 - **D8-3 E1~E4 = 전부 A로 확정** — `plans/auth-d8-3-enforcement-decisions.md`(Resolved). `owner_id=None`은 탈퇴·삭제 누락 같은 미래 비정상 잔존도 **항상 deny**. project 경로는 소유권, 그 외는 인증이며 `GET /projects`는 저장소 조회에서 본인 소유만 반환한다.
@@ -66,9 +67,9 @@
 - 공개 API 계약(H3)은 닫혀 있다: **전체 75개 operation**이 realistic 에러 상태를 OpenAPI에 선언하고 미매핑 500 부채는 0건이다. 새 endpoint는 `responses=`와 dependency를 함께 붙이고, `tests/test_auth_api.py`의 tier 전수 가드에 등재한다. 저장소 예외를 광의 `except Exception`보다 먼저 503으로 보존한다.
 - 회귀 기준선: backend **test-mongo ON 1911 passed / 4 skipped / 1625 subtests**, frontend **236 passed / 17 files**, build **698 modules · 진입 410.29 kB · AdminConsole lazy 8.39 kB · 관측 lazy 386.70 kB**. skip 수는 머신·인프라 기동 여부마다 달라 같은 환경에서 비교한다. backend는 `argon2-cffi`, frontend는 `npm install`이 선행돼야 한다.
 - **스택 health를 읽는 법**(머신 무관, 구조적 사실): 정상 상태는 **healthy 7**(`application`·`gateway`·`mongo`·`elasticsearch`·`embedding`·`chroma`·`frontend`) + **healthcheck 없는 2**(`worker`·`generation_worker` — async 배경 워커라 by design, "Up"이지 "healthy" 아님). **"전부 healthy"라고 쓰지 않는다.**
-- **[알파 머신 관측치, 2026-08-02 스택 재생성 후 — 이 항목이 최신이다]** 스택을 **`down` 후 `up -d`로 통째로 재생성**했다(D8-7 G1=C를 런타임에 반영하기 위함 — 옛 컨테이너는 옛 포트 매핑을 들고 있었다). 지금 **healthy 7 + 워커 2**이고 **named 볼륨 5개 전부 보존**했다(`mongo_data`·`es_data`·`chroma_data`·`embedding_cache`·`llama_models`). **`application`·`frontend` 이미지를 재빌드했다**(둘 다 2026-08-02) — 종전 `application`은 **2026-07-22 빌드라 인증이 아예 없는 제품**이었다(위 부채 항목 참조). 재빌드 후 실측: `GET /projects` **401** · `POST /auth/login` 존재 · `/health` 200 · `argon2 23.1.0` 포함. **`.env`는 이 머신에 없다.** **in-stack llama는 올리지 않았다** — base compose만 띄웠으므로 `llama` 컨테이너가 없다. 필요하면 `-f docker-compose.llama.yml`을 함께 주되 **★ `LLAMA_CTX_SIZE`와 `-hf` 리비전 재다운로드 함정을 먼저 볼 것**(위 ★ 항목·아래 부채). **application이 PromptTemplateConflict 없이 뜬다** — 알파 mongo 볼륨(2026-07-04)이 현행 프롬프트 sha 핀과 호환됨(2026-07-27 베타 사고와 다르게 안전). R-c 시드 project `6a6c7f914d586daaeef1cf22` / draft `…cf23` / version `…cf24`가 DB에 남아 있다(재측정용 보존). GPU RTX 3060 12GB(이것이 알파 확인).
 - **[베타 머신 관측치, 2026-07-31 작업 종료 시점]** 스택은 아침에 **15시간 전 `Exited(255)`**로 내려가 있었고(머신 재부팅 추정) `docker compose up -d`로 복구했다 — 지금 **healthy 7 + 워커 2**다. **첫 `docker` 명령이 30초 넘게 응답하지 않을 수 있다**(데몬 워밍업 — 죽은 것으로 오독하지 말 것). **★ 이미지가 코드보다 뒤처져 있다 — 화면으로 확인하기 전에 반드시 본다**: `gateway`는 07-30 14:52 빌드로 **K-3 가드까지 들어 있고**, `application`은 **07-29 15:48 빌드**라 **K-3 앱 절반(400 매핑·job 사유)·KPI 경고·K-1(환산·예산 8192)이 이미지에 없다**, `frontend`는 **07-27 빌드**라 **KPI 경고 타일과 `MAX_TOKENS=8192`가 없다**. 즉 브라우저로 보는 것은 **그 시점의 제품**이다. 확인하려면 `docker compose build application frontend && docker compose up -d --no-deps application frontend`. 라이브 검증은 전부 **작업 트리를 마운트**해 돌린다(`docker compose run --rm --no-deps -v "$PWD/services:/app/services" …`) — 재빌드 없이 실 파이프라인을 관통하는 그 방법이 표준이다. 외부 12B(`.env`의 `192.168.1.22:9080`)는 `/props` 실측 **`n_ctx=16384` · `total_slots=1`**. GPU는 **GTX 1060 3GB**. DB에는 프로브가 만든 project와 `llm_call_audits`가 있다(일부러 남겼다 — 육안 확인용). 계정 `probe`(admin). Mongo `prompt_templates`는 **`analysis_extract` v1~v4 4행뿐**이다(report·gate·생성 템플릿은 in-memory seed). **예산 포화 프로젝트(2026-07-31 시드, 재측정용)**: `6a6be9c0dbb39de0a51ed8ba` / draft `6a6be9c0dbb39de0a51ed8bb` / version `6a6be9c0dbb39de0a51ed8bc` — 밀도 1.63으로 만든 쪽이며 **이것을 쓴다**. `6a6be92bda7b035f309a8005`는 1차 시드(밀도 1.54, 대표성 낮음).
 - **[베타, 2026-07-27 — 여전히 유효한 함정]** 이 머신 DB는 그때 비웠다. 구 `analysis_extract_v3` 본문(sha `fb4e272…`)이 현재 canonical(sha `4376310…`)과 달라 `PromptTemplateConflict`로 app이 죽었고, **오너 판단으로 데이터 볼륨(mongo·es·chroma)을 비워**(embedding 모델 캐시는 보존) 해소했다. 코드 회귀가 아니라 **오래된 볼륨과 현행 프롬프트 핀의 충돌**이며, 오래된 볼륨을 가진 다른 머신에서도 같은 일이 난다(위 "출시된 프롬프트 본문은 immutable" 함정과 같은 뿌리).
+- **[★ 최신 알파 종료 관측, 2026-08-02]** `nvidia-smi`는 **RTX 3060 12GB**로 알파임을 재확인했다. `docker compose ps`에는 frontend(healthy)·worker·generation_worker와 **test-mongo(healthy, `127.0.0.1:27020`)만** 보였고 application/mongo/gateway/embedding/chroma/elasticsearch는 떠 있지 않았다. test-mongo는 D8-6 실제 Mongo 검증 뒤 **의도적으로 그대로 두었다**; 필요 없으면 알파에서 `docker compose -f docker-compose.test.yml down`으로 내린다. 베타 2026-07-31 관측은 과거 참고이고 이 줄이 알파의 최신 관측이다.
 - 인증 백엔드 변경은 application, 로그인 UI 변경은 frontend 이미지 rebuild가 필요하다.
 
 ## 기동 · 실행법
@@ -180,7 +181,7 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 
 - **Phase 8 회원별 요청 제한 = 상위 방향 확정, 슬라이스별 결정·구현 대기**(오너 2026-08-02). 회원 quota/BM 기준은 **토큰량이 아니라 서비스 요청 횟수**다. 토큰은 각 요청의 생성 상한에서 통제하며 회원 quota로 누적하지 않는다. 부모 계획은 [`plans/08-member-request-quota.md`](docs/plans/08-member-request-quota.md). **세부 정책을 지금 일괄 결정하지 않는다** — 8.0 사용 동작 인벤토리부터 8.6 결제 entitlement seam까지 각 슬라이스 착수 시 별도 owner decision brief를 만들고 승인 뒤 구현한다. 실제 결제·환불·정산과 CMS 프론트는 범위 밖. **D8-6 독립 검증 종료 뒤 8.0**이 다음 구현이며, 외부 API 확장은 새 quota seam을 소비하게 한다.
 
-- **다중 사용자 인증 D0~D8 + E1~E4 = 결정·제품 시행 완료, D8-6 최종 독립 검증만 대기**. HTTP 인증·소유권·관리자 API/화면·archive-only 영구 삭제 UI·최소 삭제 감사·인프라 노출면 축소가 섰다. D8-7의 저장소 자격증명(G2~G6)은 원격 배포 시점으로 유예됐다.
+- **다중 사용자 인증 D0~D8 + E1~E4 = 결정·제품 시행·독립 검증 완료**. HTTP 인증·소유권·관리자 API/화면·archive-only 영구 삭제 UI·최소 삭제 감사·인프라 노출면 축소가 섰다. D8-6 최종 검증은 `c2ca946` PASS이고, D8-7 저장소 자격증명(G2~G6)은 원격 배포 시점으로 유예됐다.
 - **외부 API 확장 D1~D6 = 전부 결정됨**(2026-07-27). `plans/external-api-expansion-decisions.md` §2: 세 축 전부 확장하되 **슬라이스 분리**(LLM → 임베딩 → 리랭커)·D2=A(generic OpenAI 호환)·D3=A(env 키, 인증 시크릿 재사용)·D4=A(전역 기본)·D5=리랭커 포함(self-host `bge-reranker-v2-m3-ko` + 외부 seam). 코드 실측 공백 = 인증 헤더 주입 지점·provider 선택 config. **착수는 인증 다음**.
 - **`analysis_extractor`를 D4로 정렬할지**(v1.7.47): 지금 이 site만 최종 도메인 거부를 `parse_error`로 재분류하지 않아 같은 repair 구조인 `compare_judge`와 정책이 갈린다. 정렬하면 두 site가 같은 규칙을 따르고, 두면 v1.7.46 결정이 유지된다. 어느 쪽이든 이행 무손실 증명이 필요한 별도 증분.
 - **loop의 round별 gate decision 노출 여부**(v1.7.47 공백): 노출하면 loop 내부 gate 레코드에도 파생점수를 얹을 수 있다. 도메인 계약(`WritingLoopStage`) 변경이라 D2-B(파생점수 정교화)와 함께 볼 사안.
@@ -189,14 +190,13 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 
 **1번이 현재 진행 중인 트랙이다.** 나머지는 그와 무관하게 남아 있는 것들.
 
-1. **D8-6 독립 검증** — 구현 커밋과 정본 v1.7.82를 별도 검증자가 적대적으로 감사한다. 필수 matrix: archive 409/archived 204, reason 공백, requested fail-closed/결과 best-effort, tombstone의 `target_project_id`·TTL 없음·reconciler 보존, 신규 ADMIN operation, 정확한 이름 under/over-strict, 503 재시도 부재, 성공 뒤 카드 제거·감사 refresh. 검증자가 결함을 찾으면 직접 고치지 않고 기록·판정으로 인계한다.
-2. **Phase 8 Slice 8.0 사용 동작 인벤토리 브리프** — [`plans/08-member-request-quota.md`](docs/plans/08-member-request-quota.md)를 부모 계획으로 삼아, 어떤 사용자 동작을 1회로 셀지와 내부 retry/repair·복합 writing 동작의 취급을 별도 선택지로 제시한다. 오너 결정 전에는 카운터나 저장 모델을 임의 구현하지 않는다. 8.0~8.3을 외부 API 확장보다 먼저 세우는 것이 권장 순서다.
-3. **지금 바로 할 수 있다 — 화면 육안 확인 2건**(둘 다 로직은 회귀로 잠겨 있고 **렌더만** 미검증). **2026-07-30 기준 베타 스택이 떠 있고 감사 데이터도 있다** — 브라우저와 사람 눈만 있으면 된다. 계정 `probe`:
+1. **베타에서 Phase 8 Slice 8.0 사용 동작 인벤토리 브리프 착수** — 먼저 위 머신 전환 체크(`git`·compose·이미지·외부 LLM `/props`)를 한다. 그 뒤 [`plans/08-member-request-quota.md`](docs/plans/08-member-request-quota.md)를 부모로, 어떤 사용자 동작을 1회로 셀지와 내부 retry/repair·복합 writing 동작의 취급을 선택지로 제시한다. 오너 결정 전에는 카운터나 저장 모델을 구현하지 않는다.
+2. **베타 상태 확인 뒤 화면 육안 확인 2건**(둘 다 로직은 회귀로 잠겨 있고 렌더만 미검증). 2026-07-31에는 계정 `probe`와 감사 데이터가 있었지만 현재 존재를 다시 확인한다:
    (a) 관측 화면 `/projects/:id/observability` — 차트 라벨 충돌·막대 배치·좁은 화면 표 넘침. **`heavy long report probe` project를 보면 `provider_error`가 섞인 분포**를, `long report probe`를 보면 성공 분포를 볼 수 있다.
    (b) 비동기 패드 — 렌더 · 이어쓰기 탭 완료 배지 · 5초 폴링 · "다시 시도" 버튼 · 탭 전환 후 폴링 생존. **failed job이 4개 남아 있어 실패 UX를 바로 볼 수 있다** — 위 추적 부채대로 "다시 시도"가 결정적으로 재실패하는 것도 여기서 확인된다.
-4. **관측 화면을 더 키우는 것은 API에 시간 창(`?since=`)이 생긴 뒤**가 옳다 — 지금 차트가 그리는 것은 누적 스냅샷이라 추세가 없고 막대는 표와 같은 정보를 말한다. 무엇을 더하든 **`React.lazy` 경계 안**에 둘 것(밖으로 나가면 진입 번들이 다시 두 배가 된다).
-5. **dogfood 관찰 항목**: `report field must be an array` 실패율(12B 간헐 비-배열, repair가 흡수 — 잦으면 repair 횟수/프롬프트 축 판단) · `analysis_extract_v4`의 `aspect` 오분류 빈도 · scratch per-draft 상한(기본 20) 밀어냄.
-6. **Deferred(오너 결정 선행)**: 중첩 chapter→scene tree · ProjectBrief→Draft provenance · 관계 graph/완전 timeline · saved publication manifest · Phase 7 대화형 수정(`plans/07-conversational-authoring.md`).
+3. **관측 화면을 더 키우는 것은 API에 시간 창(`?since=`)이 생긴 뒤**가 옳다 — 지금 차트가 그리는 것은 누적 스냅샷이라 추세가 없고 막대는 표와 같은 정보를 말한다. 무엇을 더하든 **`React.lazy` 경계 안**에 둘 것(밖으로 나가면 진입 번들이 다시 두 배가 된다).
+4. **dogfood 관찰 항목**: `report field must be an array` 실패율(12B 간헐 비-배열, repair가 흡수 — 잦으면 repair 횟수/프롬프트 축 판단) · `analysis_extract_v4`의 `aspect` 오분류 빈도 · scratch per-draft 상한(기본 20) 밀어냄.
+5. **Deferred(오너 결정 선행)**: 중첩 chapter→scene tree · ProjectBrief→Draft provenance · 관계 graph/완전 timeline · saved publication manifest · Phase 7 대화형 수정(`plans/07-conversational-authoring.md`).
 
 ## Project Structure
 

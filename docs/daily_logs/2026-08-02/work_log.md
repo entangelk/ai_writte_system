@@ -1413,3 +1413,53 @@ C-6 409 흐름, 12자 양방향, 무소유 승격, lazy chunk를 독립 재현�
 - 별도 검증자가 정본 v1.7.82와 구현 커밋을 적대적으로 검증한다. 필수 matrix는 HANDOFF Next Tasks 1번에
   적었다. 구현자는 자기 작업을 독립 검증 기록으로 판정하지 않는다.
 - 독립 검증 및 발견 hardening이 닫히면 D8-6을 종료하고 Phase 8 Slice 8.0 브리프로 이동한다.
+
+---
+
+## Closeout — D8-6 독립 검증 합격·알파→베타 인계
+
+### Goals
+
+- 독립 검증 `c2ca946`의 판정과 근거를 확인하고 Blocking/Hardening이 있으면 보강한다.
+- D8-6 상태를 종료로 바꾸고, 다음 작업자가 베타에서 Phase 8 Slice 8.0을 바로 시작할 수 있게 한다.
+
+### Verification review
+
+- 검증 기록 [`verifications/2026-08-02/d8_6_purge_ui.md`](../../verifications/2026-08-02/d8_6_purge_ui.md)을
+  원문으로 확인했다. 판정은 **합격**, Blocking 0, Hardening 0이므로 제품 코드 보강은 없다.
+- 검증자가 backend 1911/4/1625, frontend 236/17, build exit 0을 독립 재현했다.
+- 구현 로그의 “5축”은 요약 누락이었다. 실제 검증된 축은 **7개**다: archive 409, requested
+  fail-closed, outcome best-effort, 사유 공백, 정확한 이름, 503 no-retry, `target_project_id` 분리.
+  특히 D5의 outcome best-effort와 D3의 wire literal은 별도 mutation 셀이 있었다.
+- 실제 test-mongo에 tombstone과 `project_id` 고아를 함께 넣은 검증에서 reconciler discovery가
+  `llm_call_audits`만 찾고 `admin_audit_events`를 건너뛰었으며 감사 2건이 보존됐다. 따라서
+  `target_project_id` 분리는 fake 저장소 자기검증이 아니라 실제 Mongo 구조에서도 성립한다.
+- 검증 인덱스는 210건, 판정 분포 139+57+14=210으로 갱신됐고 `find` 실측과 3곳이 일치한다.
+
+### Record hardening
+
+- SoT v1.7.82의 mutation 요약을 5축에서 검증된 7축으로 정정하고 검증 기록 `c2ca946`을 근거로 연결했다.
+- 결정 브리프와 plans index를 `Verified PASS`로, HANDOFF D8-6을 완료로 바꿨다.
+- README의 현재 backend 기준선(1911/1625)과 SoT 버전(v1.7.82) 드리프트를 함께 바로잡았다.
+- CHANGELOG에 독립 검증 합격과 실제 Mongo 실증을 기록했다.
+
+### Machine handoff
+
+- 오늘 D8-6 작업은 **알파**에서 수행했다. 종료 시 `nvidia-smi`는 RTX 3060 12GB로 재확인했다.
+- 2026-08-02 종료 시 `docker compose ps`에는 frontend(healthy), worker, generation_worker,
+  test-mongo(healthy, `127.0.0.1:27020`)가 보였고 application/mongo/gateway/embedding/chroma/ES는 없었다.
+  test-mongo는 검증 후 그대로 두었다. 종료 명령은 `docker compose -f docker-compose.test.yml down`이다.
+- 다음 작업은 **베타에서 Phase 8 Slice 8.0 브리프**다. 베타의 HANDOFF 관측은 2026-07-31 자료라,
+  `git status`/HEAD, compose 상태, 이미지 날짜, `.env` 외부 LLM 주소와 `/props`를 먼저 재측정한다.
+  이 저장소 정책상 push하지 않았으므로 머신 간 동기화 뒤 `c2ca946`과 마감 커밋 존재를 확인한다.
+
+### Verification
+
+- `python3 -m pytest -q tests/test_docs_indexes.py`: **7 passed / 4 subtests**.
+- `git diff --check`: clean.
+- `wc -l HANDOFF.md`: **236줄**, 자가검수 문구와 일치.
+
+### Next steps
+
+- 베타에서 `docs/plans/08-member-request-quota.md`를 읽고 Slice 8.0의 billable request 경계 결정
+  브리프를 작성한다. 오너 결정 전 카운터·원장 구현은 시작하지 않는다.

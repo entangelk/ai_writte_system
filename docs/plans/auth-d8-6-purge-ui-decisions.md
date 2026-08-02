@@ -1,6 +1,6 @@
 # D8-6 영구 삭제 UI·감사 — 착수 결정 브리프
 
-상태: `Implemented — D1~D5=A (v1.7.82, 2026-08-02) · 독립 검증 대기`
+상태: `Verified PASS — D1~D5=A (v1.7.82, c2ca946, 2026-08-02)`
 작성일: 2026-08-02  
 부모 결정: [`multi-user-auth-cms-decisions.md`](multi-user-auth-cms-decisions.md) D5=A  
 구현 기준: [`system-contract-sot.md`](../system-contract-sot.md) v1.7.69~v1.7.76, v1.7.81~v1.7.82
