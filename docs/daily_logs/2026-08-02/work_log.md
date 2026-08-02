@@ -661,3 +661,87 @@ Blocking #1의 교훈(*결정을 기다리는 동안 독자는 거짓을 읽는�
   다른 축임을 확인) · SoT 변경이력에서 v1.7.49 = D0=A 단계 전환 확인.
 - **전량 회귀**: **1850 passed / 4 skipped / 1559 subtests / 121.34s**, exit 0. 문서 전용이라
   셀 수 무변, 회귀 0건.
+
+---
+
+## Task — D8-5e 관리자 승격(access grant): 소유권을 지나는 유일한 통로 (SoT v1.7.77)
+
+### User Decisions and Rationale
+
+오너가 **C-1~C-6을 한 번에 결정**했다(브리프 `plans/auth-d8-5-admin-decisions.md` §7).
+"이 여섯은 서로 얽혀 있어 한 번에 정하는 편이 낫다"는 브리프 권고대로다.
+
+| # | 결정 | 근거 |
+|---|---|---|
+| C-1 | **고정 TTL, 1시간** | 구현자 추천은 30분이었고 **오너가 1시간을 골랐다**. 재발급 번거로움을 줄이는 쪽. "해제까지"·1회용은 각각 영구 권한화·재발급 폭증이라 기각 |
+| C-2 | **읽기 전용** | 지원 시나리오는 "보고 확인"이 대부분이고, 관리자가 남의 원고를 고칠 수 있으면 정본 보존 정책과 충돌 |
+| C-3 | **발급 + 그 아래 요청의 operation 단위 감사** | 발급만 남기면 "무엇을 봤는가"가 안 남아 C를 고른 이유가 반감 |
+| C-4 | **사후 조회 가능** | 통지 채널이 없으므로 소유자가 자기 project 접근 이력을 볼 수 있는 데까지가 현실적 |
+| C-5 | **사유 필수** | 감사 기록의 가치는 "왜"에 있고 한 필드로 얻는다 |
+| C-6 | **최초 로그인 시 변경 강제** | 채널 없이 얻는 가장 큰 개선. 초대 토큰은 전달 채널이 없으면 같은 문제의 이름만 바꾼 것. **별개 축이라 이 슬라이스 범위 밖** |
+
+**슬라이스를 쪼갰다**(오너 지시 "한 번에 큰 덩어리 금지"). 이번은 **승격 저장소 + 발급 endpoint
++ 인가 인지(읽기 전용)** 까지. C-3의 operation 단위 감사 · C-4 사후 조회 · 5-b · 5-d · C-6은 후속.
+
+### Decisions (구현자 판단)
+
+- **읽기 전용의 판정을 HTTP method 로 했다**(`GET`/`HEAD`). 대안은 "읽기 operation 목록"인데,
+  목록은 **다음에 추가되는 endpoint 를 조용히 오분류**하고 그 방향이 열리는 쪽이다. method 판정은
+  모르는 것에 대해 **닫히는 쪽으로 실패**한다(fail-closed).
+- **`is_admin` AND 승격**으로 검사한다. 승격만 보면 강등이 무의미해진다.
+- **append-only + TTL 인덱스 없음.** `sessions`는 TTL 인덱스로 Mongo 가 reap 하지만, 승격 행은
+  **C-3 의 발급 감사 기록 자체**라 reap 하면 접근이 있었다는 증거가 사라진다. 만료는 **판정**이다.
+  이 의도적 차이를 회귀가 단정한다(`test_there_is_no_ttl_index`) — 안 그러면 누군가 "일관성"을
+  이유로 TTL 을 붙인다.
+- **D8-6 파기에 배선했다.** 새 project-scoped 컬렉션을 파기에 안 물리면 **어제 닫은 "조용한 고아"
+  금지(D5)를 내가 다시 여는 것**이다.
+- **404 를 발급 전에 낸다** — 없는 project 에 대한 승격은 아무것도 아닌 것에 대한 감사 기록이고,
+  201 이 project id 존재를 알려 주는 probe 가 된다.
+
+### Completed work
+
+- [`auth/access_grants.py`](../../../services/application/app/auth/access_grants.py) — 모델·저장소·서비스
+- [`auth/access_grants_mongo.py`](../../../services/application/app/auth/access_grants_mongo.py) — naive BSON 재부착(sessions 선례), TTL 인덱스 **없음**
+- `POST /admin/projects/{project_id}/access-grants`(201, ADMIN tier) — **operation 71→72**
+- `require_project_owner` = 소유자 **OR** (관리자 AND `GET`/`HEAD` AND 살아 있는 승격)
+- 회귀 **24셀**: `tests/test_auth_access_grants.py` 13 · `AdminAccessGrantTest` 11
+- 계약 가드 갱신: tier 리터럴(ADMIN +1, 72) · `{project_id}` 예외 집합(`_ADMIN_PROJECT_ROUTES`) ·
+  admin 에러 선언 lock list(+1) · `_declared` 의 성공 코드에 **201 추가**
+
+### Verification
+
+- **뮤테이션 6종 — 전부 정확히 물었다**:
+
+  | 뮤테이션 | 실측 |
+  |---|---|
+  | 읽기 전용 해제(method 조건 제거) | 쓰기 3종 subtest 실패 |
+  | `is_admin` 검사 제거 | 비관리자 승격 셀 + 인증 격리 셀 2건 |
+  | 승격 검사 무력화(F1=C 미시행) | 읽기 개방 셀 1건 |
+  | 만료 판정 제거(영구 권한화) | 3건(HTTP·서비스·append-only) |
+  | TTL 1시간 → 24시간 | 리터럴 셀 포함 4건 |
+  | **over-strict**: 소유자 경로에도 GET 제한 | **소유자 전수 셀 33건** — 정상 경로가 깨지는 방향도 잡힌다 |
+
+- **전량 회귀**: **1874 passed / 4 skipped / 1579 subtests / 125.56s**, exit 0.
+  1850 대비 **+24 = 신규 24셀**, subtests +20, **회귀 0건**.
+- **프론트**: `npm run gen:api` 재생성(schema.d.ts +118줄) · `tsc --noEmit` exit 0 ·
+  `vitest` **227 passed / 15 files**.
+
+### ★ 사고 — `git checkout --` 로 미커밋 슬라이스를 날렸다 (HANDOFF 함정 그대로 밟음)
+
+첫 뮤테이션 원복에 `git checkout -- services/application/app/main.py` 를 썼다. 그 시점
+**슬라이스가 미커밋**이라 main.py 의 변경(임포트·팩토리·dependency·모델·endpoint·purge 배선)이
+**통째로 HEAD 로 되돌아갔다**. 다른 파일은 무사했다(그 파일만 checkout 했으므로).
+
+- **HANDOFF 함정 절에 이미 적혀 있는 사고다** — "뮤테이션 테스트 원복에 `git checkout -- <file>`
+  을 쓰면 미커밋 작업이 사라진다. 이 프로젝트는 슬라이스가 아직 커밋되지 않은 상태가 흔하다."
+  2026-07-30 독립 검증에서 한 번 났고, 문서에 남겼는데도 **같은 손이 다시 밟았다**.
+- **복구**: 대화 이력에서 10개 편집을 재작성해 복원, 82 passed 로 동일성 확인.
+- **교훈은 "조심하자"가 아니다** — CLAUDE.md §6 이 규정한 대로 **뮤테이션 전에 체크포인트 커밋**을
+  했어야 한다. 커밋 후에는 `git checkout --` 가 **정확히 옳은 도구**가 된다(실제로 그 뒤 헬퍼가
+  깨져 파일이 두 번 오염됐을 때 체크포인트로 1초 만에 복구했다). 순서를 지키면 이 함정은 존재하지 않는다.
+
+### Next steps
+
+- **C-3 나머지**(승격 아래 개별 요청의 operation 단위 감사) · **C-4**(소유자 사후 조회) — 다음 슬라이스.
+- **5-b**(전 프로젝트 목록) · **5-d**(관리자 화면) — 승격이 섰으므로 이제 차단 해제됐다.
+- **C-6**(최초 로그인 비밀번호 변경 강제 + 비밀번호 정책) — 오너 확정, 별개 축, 미착수.

@@ -2295,17 +2295,28 @@ class AdminErrorContractDeclarationTest(unittest.TestCase):
         # D8-6d: 204 success(본문 없음) + 404(project 미존재). 409 없음(멱등 — 재파기=404).
         # _declared 가 2xx(success)를 제외하므로 204 는 여기에 나타나지 않는다.
         ("/admin/projects/{project_id}/purge", "post"): {"401", "403", "404", "503"},
+        # D8-5e: 승격 발급(201). 404 = project 미존재(발급 전에 확인한다 — 없는 것에
+        # 대한 감사 기록을 남기지 않고, 201 이 project id probe 가 되지 않게 한다).
+        # 409 없음: 재발급은 충돌이 아니라 append-only 새 행이다(만료 연장의 정상 경로).
+        ("/admin/projects/{project_id}/access-grants", "post"):
+            {"401", "403", "404", "503"},
     }
 
     def setUp(self):
         self.spec = create_app().openapi()
 
     def _declared(self, path: str, method: str) -> set[str]:
+        # Success codes are excluded so the rows above stay a list of *error*
+        # declarations. 201 joined 200/204 with D8-5e (issuing a grant creates a
+        # resource); 422 is FastAPI's automatic validation response.
         responses = self.spec["paths"][path][method]["responses"]
-        return {code for code in responses if code not in ("200", "204", "422")}
+        return {
+            code for code in responses
+            if code not in ("200", "201", "204", "422")
+        }
 
     def test_declared_error_statuses_match_the_lock_list(self):
-        self.assertEqual(len(self.EXPECTED), 5)
+        self.assertEqual(len(self.EXPECTED), 6)
         for (path, method), expected in self.EXPECTED.items():
             with self.subTest(path=path, method=method):
                 self.assertEqual(self._declared(path, method), expected)

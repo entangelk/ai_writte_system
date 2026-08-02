@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/projects/{project_id}/access-grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Issue Access Grant */
+        post: operations["issue_access_grant_admin_projects__project_id__access_grants_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/projects/{project_id}/purge": {
         parameters: {
             query?: never;
@@ -1054,6 +1071,36 @@ export interface components {
             unit_kind: components["schemas"]["UnitKind"];
             /** Version Number */
             version_number: number;
+        };
+        /** AccessGrantCreateRequest */
+        AccessGrantCreateRequest: {
+            /** Reason */
+            reason: string;
+        };
+        /** AccessGrantCreateResponse */
+        AccessGrantCreateResponse: {
+            grant: components["schemas"]["AccessGrantPayload"];
+        };
+        /** AccessGrantPayload */
+        AccessGrantPayload: {
+            /** Admin User Id */
+            admin_user_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Id */
+            id: string;
+            /** Project Id */
+            project_id: string;
+            /** Reason */
+            reason: string;
         };
         /** AdminObservabilityKpiResponse */
         AdminObservabilityKpiResponse: {
@@ -2104,6 +2151,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    issue_access_grant_admin_projects__project_id__access_grants_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccessGrantCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessGrantCreateResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
