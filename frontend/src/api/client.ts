@@ -73,6 +73,12 @@ export type LoginRequest = components["schemas"]["LoginRequest"];
 export type LoginResponse = components["schemas"]["LoginResponse"];
 export type LogoutResponse = components["schemas"]["LogoutResponse"];
 export type User = components["schemas"]["UserPayload"];
+export type AdminUser = components["schemas"]["AdminUserPayload"];
+export type AdminProject = components["schemas"]["AdminProjectPayload"];
+export type AdminObservabilityKpi =
+  components["schemas"]["AdminObservabilityKpiResponse"];
+export type AccessGrant = components["schemas"]["AccessGrantPayload"];
+export type AccessLogEntry = components["schemas"]["AccessLogEntryPayload"];
 export type Project = components["schemas"]["ProjectPayload"];
 export type ProjectListResponse = components["schemas"]["ProjectListResponse"];
 export type ProjectBrief = components["schemas"]["ProjectBriefVersionPayload"];
@@ -133,6 +139,48 @@ export function logout(): Promise<LogoutResponse> {
 
 export function getCurrentUser(): Promise<User> {
   return request("/auth/me");
+}
+
+export function listAdminUsers(): Promise<components["schemas"]["AdminUserListResponse"]> {
+  return request("/admin/users");
+}
+
+export function createAdminUser(
+  body: components["schemas"]["CreateUserRequest"],
+): Promise<AdminUser> {
+  return request("/admin/users", { method: "POST", body: JSON.stringify(body) });
+}
+
+export function deactivateAdminUser(userId: string): Promise<AdminUser> {
+  return request(`/admin/users/${encodeURIComponent(userId)}/deactivate`, {
+    method: "POST",
+  });
+}
+
+export function listAdminProjects(): Promise<components["schemas"]["AdminProjectListResponse"]> {
+  return request("/admin/projects");
+}
+
+export function getAdminObservabilityKpi(): Promise<AdminObservabilityKpi> {
+  return request("/admin/observability/kpi");
+}
+
+export async function issueProjectAccessGrant(
+  projectId: string,
+  reason: string,
+): Promise<AccessGrant> {
+  const response = await request<components["schemas"]["AccessGrantCreateResponse"]>(
+    `/admin/projects/${encodeURIComponent(projectId)}/access-grants`,
+    { method: "POST", body: JSON.stringify({ reason }) },
+  );
+  return response.grant;
+}
+
+export async function listProjectAccessLog(projectId: string): Promise<AccessLogEntry[]> {
+  const response = await request<components["schemas"]["AccessLogResponse"]>(
+    `/projects/${encodeURIComponent(projectId)}/access-log`,
+  );
+  return response.entries;
 }
 
 export function listProjects(): Promise<ProjectListResponse> {

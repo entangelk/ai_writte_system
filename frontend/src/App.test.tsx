@@ -222,6 +222,104 @@ describe("App routes", () => {
     expect(screen.getByLabelText("비밀번호")).toHaveValue("");
   });
 
+  it("replaces an administrator-set password before creating a session", async () => {
+    const fetchMock = mockFetch(
+      { status: 401, body: { detail: "not authenticated" } },
+      { status: 409, body: { detail: "password replacement required" } },
+      {
+        body: {
+          user: { id: "u1", username: "alice", is_admin: false },
+        },
+      },
+      { body: { projects: [] } },
+    );
+
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>,
+    );
+
+    await userEvent.type(await screen.findByLabelText("아이디"), "alice");
+    await userEvent.type(screen.getByLabelText("비밀번호"), "temporary-password");
+    await userEvent.click(screen.getByRole("button", { name: "작업실 입장" }));
+
+    expect(await screen.findByRole("heading", { name: "새 비밀번호 설정" })).toBeInTheDocument();
+    expect(screen.getByLabelText("새 비밀번호")).toBeInTheDocument();
+    expect(screen.getByLabelText("새 비밀번호 확인")).toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText("새 비밀번호"), "short-pass1");
+    await userEvent.type(screen.getByLabelText("새 비밀번호 확인"), "short-pass1");
+    expect(screen.getByRole("button", { name: "비밀번호 바꾸고 입장" })).toBeDisabled();
+    await userEvent.clear(screen.getByLabelText("새 비밀번호"));
+    await userEvent.clear(screen.getByLabelText("새 비밀번호 확인"));
+
+    await userEvent.type(screen.getByLabelText("새 비밀번호"), "new-password");
+    await userEvent.type(screen.getByLabelText("새 비밀번호 확인"), "different-one");
+    expect(screen.getByRole("button", { name: "비밀번호 바꾸고 입장" })).toBeDisabled();
+
+    await userEvent.clear(screen.getByLabelText("새 비밀번호 확인"));
+    await userEvent.type(screen.getByLabelText("새 비밀번호 확인"), "new-password");
+    await userEvent.click(screen.getByRole("button", { name: "비밀번호 바꾸고 입장" }));
+
+    expect(await screen.findByRole("heading", { name: "프로젝트" })).toBeInTheDocument();
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({
+      username: "alice",
+      password: "temporary-password",
+      new_password: "new-password",
+    });
+  });
+
+  it("does not expose the admin route or call admin APIs for a non-admin", async () => {
+    const fetchMock = mockFetch(
+      { body: { id: "u1", username: "alice", is_admin: false } },
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/admin"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "관리자 권한이 필요합니다." }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "관리" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(["/api/auth/me"]);
+  });
+
+  it("exposes the guarded admin route to an administrator", async () => {
+    const fetchMock = mockFetch(
+      { body: { id: "u1", username: "root", is_admin: true } },
+      { body: { users: [] } },
+      { body: { projects: [] } },
+      { body: {
+        projects_considered: 0,
+        totals: {
+          calls: 0, success: 0, provider_error: 0, parse_error: 0,
+          total_tokens: 0, tokens_counted_from: 0,
+          thin_headroom_calls: 0, headroom_considered: 0,
+        },
+        sites: [], gate: {}, loop: {},
+      } },
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/admin"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "관리" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "관리" })).toHaveAttribute("href", "/admin");
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/auth/me",
+      "/api/admin/users",
+      "/api/admin/projects",
+      "/api/admin/observability/kpi",
+    ]);
+  });
+
   it("returns to login when a protected request reports an expired session", async () => {
     mockFetch(
       { body: { id: "u1", username: "alice", is_admin: false } },

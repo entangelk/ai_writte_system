@@ -238,6 +238,9 @@ export function DraftList() {
             >
               파이프라인 관측 →
             </Link>
+            <Link className="section-link" to={`/projects/${projectId}/access-log`}>
+              관리자 접근 이력 →
+            </Link>
           </div>
         )}
       </header>

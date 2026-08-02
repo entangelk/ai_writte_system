@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { Link } from "react-router";
 import {
   ApiError,
@@ -10,6 +10,15 @@ import {
 } from "../api/client";
 
 type AuthState = "checking" | "authenticated" | "anonymous" | "error";
+const AuthUserContext = createContext<User | null>(null);
+
+export function useAuthenticatedUser(): User {
+  const user = useContext(AuthUserContext);
+  if (user === null) {
+    throw new Error("useAuthenticatedUser must be used inside AuthGate");
+  }
+  return user;
+}
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AuthState>("checking");
@@ -104,10 +113,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   return (
+    <AuthUserContext.Provider value={user}>
     <div className="app-shell">
       <header className="app-header">
         <Link className="brand" to="/">AI Writing System</Link>
         <div className="session-menu">
+          {user.is_admin && <Link to="/admin">관리</Link>}
           <span>{user.username}</span>
           <button
             type="button"
@@ -125,6 +136,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       )}
       <main>{children}</main>
     </div>
+    </AuthUserContext.Provider>
   );
 }
 
@@ -150,6 +162,9 @@ function LoginScreen({
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mustReplacePassword, setMustReplacePassword] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [newPasswordConfirmation, setNewPasswordConfirmation] = useState("");
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -163,16 +178,28 @@ function LoginScreen({
       const result = await login({
         username: normalizedUsername,
         password,
+        ...(mustReplacePassword ? { new_password: newPassword } : {}),
       });
       setPassword("");
+      setNewPassword("");
+      setNewPasswordConfirmation("");
       onAuthenticated(result.user);
     } catch (err) {
-      setPassword("");
-      setError(
-        err instanceof ApiError && err.status === 401
-          ? "아이디 또는 비밀번호를 확인해 주세요."
-          : "로그인하지 못했습니다. 잠시 후 다시 시도해 주세요.",
-      );
+      if (err instanceof ApiError && err.status === 409 && !mustReplacePassword) {
+        setMustReplacePassword(true);
+        setError(null);
+      } else {
+        if (err instanceof ApiError && err.status === 401) {
+          setPassword("");
+        }
+        setError(
+          err instanceof ApiError && err.status === 401
+            ? "아이디 또는 비밀번호를 확인해 주세요."
+            : err instanceof ApiError && err.status === 409
+              ? "새 비밀번호를 설정하지 못했습니다. 입력을 확인해 주세요."
+              : "로그인하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+        );
+      }
     } finally {
       setSubmitting(false);
     }
@@ -183,8 +210,12 @@ function LoginScreen({
       <section className="login-page page-enter">
         <header className="login-heading">
           <p className="eyebrow">AI Writing System</p>
-          <h1>작업실 입장</h1>
-          <p>계정으로 로그인해 내 프로젝트와 원고를 이어서 작업하세요.</p>
+          <h1>{mustReplacePassword ? "새 비밀번호 설정" : "작업실 입장"}</h1>
+          <p>
+            {mustReplacePassword
+              ? "관리자가 만든 초기 비밀번호를 본인만 아는 비밀번호로 바꿔 주세요."
+              : "계정으로 로그인해 내 프로젝트와 원고를 이어서 작업하세요."}
+          </p>
         </header>
 
         {sessionExpired && (
@@ -202,6 +233,7 @@ function LoginScreen({
               value={username}
               autoComplete="username"
               autoFocus
+              disabled={mustReplacePassword}
               onChange={(event) => setUsername(event.target.value)}
             />
           </label>
@@ -212,19 +244,54 @@ function LoginScreen({
               name="password"
               type="password"
               value={password}
+              disabled={mustReplacePassword}
               autoComplete="current-password"
               onChange={(event) => setPassword(event.target.value)}
             />
           </label>
+          {mustReplacePassword && (
+            <>
+              <label htmlFor="login-new-password">
+                <span>새 비밀번호</span>
+                <input
+                  id="login-new-password"
+                  type="password"
+                  value={newPassword}
+                  minLength={12}
+                  autoComplete="new-password"
+                  autoFocus
+                  onChange={(event) => setNewPassword(event.target.value)}
+                />
+              </label>
+              <label htmlFor="login-new-password-confirmation">
+                <span>새 비밀번호 확인</span>
+                <input
+                  id="login-new-password-confirmation"
+                  type="password"
+                  value={newPasswordConfirmation}
+                  minLength={12}
+                  autoComplete="new-password"
+                  onChange={(event) => setNewPasswordConfirmation(event.target.value)}
+                />
+              </label>
+              <p className="form-hint">12자 이상, 두 입력이 같아야 합니다.</p>
+            </>
+          )}
           {error !== null && (
             <p className="login-error" role="alert">{error}</p>
           )}
           <button
             className="auth-submit"
             type="submit"
-            disabled={username.trim() === "" || password === "" || submitting}
+            disabled={
+              username.trim() === "" || password === "" || submitting ||
+              (mustReplacePassword &&
+                (newPassword.length < 12 || newPassword !== newPasswordConfirmation))
+            }
           >
-            {submitting ? "확인하는 중…" : "작업실 입장"}
+            {submitting
+              ? "확인하는 중…"
+              : mustReplacePassword ? "비밀번호 바꾸고 입장" : "작업실 입장"}
           </button>
         </form>
       </section>

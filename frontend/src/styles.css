@@ -72,6 +72,13 @@ a {
   gap: 0.85rem;
 }
 
+.session-menu a {
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
 .session-menu button {
   padding: 0;
   color: var(--accent);
@@ -171,6 +178,18 @@ main {
   border-bottom-color: var(--accent);
 }
 
+.login-form input:disabled {
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+.form-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
 .auth-submit {
   justify-self: start;
   margin-top: 0.45rem;
@@ -220,6 +239,190 @@ main {
 .workspace-page {
   width: min(100%, 52rem);
   padding-top: clamp(3.5rem, 8vw, 7rem);
+}
+
+.admin-page {
+  width: min(100%, 62rem);
+  padding-top: clamp(3.5rem, 8vw, 7rem);
+}
+
+.admin-section {
+  margin-top: 2.5rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--ink);
+}
+
+.admin-section > h2 {
+  margin: 0 0 1rem;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.8rem;
+  font-weight: 500;
+}
+
+.admin-kpi {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: 0.8rem;
+  margin: 0;
+}
+
+.admin-kpi > div,
+.admin-project-card {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  background: rgba(251, 248, 241, 0.76);
+}
+
+.admin-kpi dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.admin-kpi dd {
+  margin: 0.25rem 0 0;
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-create-form {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) minmax(10rem, 1fr) auto auto;
+  align-items: end;
+  gap: 0.8rem;
+}
+
+.admin-create-form label,
+.admin-project-card > label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.admin-create-form input:not([type="checkbox"]),
+.admin-project-card input {
+  min-width: 0;
+  padding: 0.55rem 0.65rem;
+  color: var(--ink);
+  background: #fffdf8;
+  border: 1px solid var(--line);
+}
+
+.admin-create-form .admin-checkbox {
+  display: flex;
+  align-items: center;
+  padding-bottom: 0.6rem;
+  white-space: nowrap;
+}
+
+.admin-create-form button,
+.admin-list button,
+.admin-project-card button {
+  padding: 0.55rem 0.8rem;
+  color: var(--accent-dark);
+  background: transparent;
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.admin-create-form button:disabled,
+.admin-project-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.admin-list,
+.access-log {
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-list li,
+.access-log li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.admin-list li div,
+.access-log li {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.admin-list span,
+.access-log span,
+.admin-project-card header p,
+.grant-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.access-log-page li {
+  align-items: start;
+  justify-content: start;
+  padding: 1rem 0;
+}
+
+.admin-projects {
+  display: grid;
+  gap: 1rem;
+}
+
+.admin-project-card header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.admin-project-card h3 {
+  margin: 0 0 0.25rem;
+}
+
+.admin-project-card code {
+  color: var(--muted);
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+}
+
+.admin-project-card .row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 0.75rem;
+}
+
+.admin-project-card .row-actions a {
+  color: var(--accent);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.grant-status {
+  margin-top: 0.7rem;
+}
+
+@media (max-width: 48rem) {
+  .admin-create-form {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-create-form .admin-checkbox {
+    padding-bottom: 0;
+  }
+
+  .admin-project-card header {
+    display: grid;
+  }
 }
 
 .page-heading {
