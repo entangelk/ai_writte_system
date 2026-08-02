@@ -181,7 +181,7 @@
 |---|---|---|
 | [`multi-user-auth-cms-decisions.md`](multi-user-auth-cms-decisions.md) | **부모 브리프** — 인증·소유권·CMS/관리자 D0~D8 | D0~D8 결정됨 |
 | [`auth-d8-3-enforcement-decisions.md`](auth-d8-3-enforcement-decisions.md) | D8-3 인가 시행(E1~E4) | Resolved |
-| [`auth-d8-5-admin-decisions.md`](auth-d8-5-admin-decisions.md) | D8-5 관리자 API·화면. **§7 C-1~C-6이 5-b·5-d를 막고 있다** | Resolved(F1·F2) / **C군 Open** |
+| [`auth-d8-5-admin-decisions.md`](auth-d8-5-admin-decisions.md) | D8-5 관리자 API·화면·승격·최초 비밀번호 교체 | Implemented(v1.7.56~v1.7.81) |
 | [`auth-d8-7-infra-auth-decisions.md`](auth-d8-7-infra-auth-decisions.md) | D8-7 인프라 노출면·자격증명 | **G1=C 확정** / G2~G6 유예 |
 
 ### 외부 확장 (미착수)

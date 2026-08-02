@@ -1147,3 +1147,73 @@ D8-5e의 `owner_id=None`(Blocking)과 여기의 pre-C-6 행이 **같은 형태**
 
 **규칙으로 적어 둔다: 계약 문장에 "…해도 안 깨진다 / …는 잠기지 않는다" 같은 방어적 단언을 쓰면,
 그 단언을 지나는 셀이 있는지 그 자리에서 확인한다.** 없으면 단언을 쓰지 말거나 셀을 함께 만든다.
+
+---
+
+## Task — D8-5d: 관리자 화면 + 최초 비밀번호 교체 UI (SoT v1.7.81)
+
+### Goals
+
+- HANDOFF의 남은 유일한 D8-5 항목을 닫는다.
+- 필수 네 축: ① C-6 강제 교체 UI ② 전 프로젝트 목록 ③ 사용자 관리
+  ④ 승격 발급·접근 이력. D6=A 범위의 전역 KPI도 같은 화면에서 소비한다.
+- 영구 삭제 UI는 D8-6의 별도 잔여이며 확인 UX 계약이 없어 이번 5-d에 섞지 않는다.
+
+### Decisions
+
+- `/admin`은 `AuthGate`가 보관하는 인증 사용자를 context로 내리고 route가 `is_admin`을 **렌더 전**
+  검사한다. 비관리자 직접 진입에서는 관리자 API를 0회 호출한다. 서버 dependency가 최종 권위이고,
+  프론트 guard는 데이터가 잠깐 보였다 사라지는 것과 불필요한 403 호출을 막는다.
+- 관리자 화면은 드물게 쓰므로 `React.lazy`로 별도 chunk다. 전역 KPI는 새 차트를 만들지 않고
+  calls/success/error/project 수만 보여 준다.
+- project 목록의 `owner_id`는 `/admin/users` 결과를 클라이언트에서 매핑한다. API가 raw id를 주기로
+  한 v1.7.79 계약을 유지하며 N+1 join을 새로 만들지 않는다.
+- 승격은 사유가 있어야 발급 버튼이 켜지고, 발급된 현재 화면 세션에서만 project 열기·관리자 자신의
+  access-log 조회를 연다. **`owner_id=None`은 입력 자체와 발급 버튼을 닫는다** — backend가 발급 행을
+  만들 수 있어도 실제 열람은 E1=A로 403이므로, 성공처럼 보이는 거짓 UI를 만들지 않는다.
+- 소유자의 C-4 사후 조회를 실제 제품 표면으로 만들기 위해 `/projects/:id/access-log` route와 작업공간
+  링크를 추가했다. method/path/사유/admin id/시각을 최신순 API 그대로 그린다.
+- 로그인 409일 때만 새 비밀번호 단계로 전환한다. 이때 기존 username/password를 유지하고
+  `new_password`를 함께 보낸다. 12자 이상 + 확인 일치를 먼저 검사하며, 일반 로그인은 새 필드를
+  보내지 않고 401 메시지도 종전과 같다.
+
+### Completed work
+
+- `frontend/src/admin/AdminConsole.tsx` + 3개 회귀: 사용자·프로젝트·KPI 초기 조회,
+  사용자 생성/비활성화, 사유 필수 승격→project 진입→접근 이력.
+- `AuthGate.tsx`: 인증 user context·관리자 헤더 링크·409 교체 단계.
+- `App.tsx`: `/admin` guard/lazy route와 `/projects/:id/access-log`.
+- `AccessLogPage.tsx`: 소유자 사후 조회 화면.
+- OpenAPI 생성 타입만 소비하며 backend/schema/operation은 무변이다.
+
+### Regression guards and mutations
+
+- **under-strict 관리자 guard 제거** → 비관리자 direct-route 셀 실패. 짝인 관리자 정상 진입 셀도 있어
+  `admin`을 모두 막는 over-strict 교정을 방지한다.
+- **무소유 UI 방어 두 겹(입력 숨김 + 발급 disabled) 제거** → 무소유 셀 실패. 버튼 조건 하나만
+  제거했을 때는 입력이 없어 계속 닫혔다 — 실제 방어가 두 겹임을 확인하고 전체 우회를 겨눴다.
+- **비밀번호 최소 길이 12→1 완화** → 11자 경계 셀 실패. 정확히 12자인 정상값은 로그인 성공.
+- 패턴 스윕: 프론트의 다른 409 분기는 writing/draft 도메인 상태 처리이며 로그인 교체와 다른 얼굴이다.
+
+### Verification
+
+- `npm run gen:api`: 성공, 생성 schema 변경 없음.
+- 집중: **21 passed / 3 files**.
+- 전체: **234 passed / 17 files**, exit 0.
+- `npm run build`: tsc clean, **698 modules**, admin lazy chunk 포함, exit 0.
+- `git diff --check`: clean.
+- 체크포인트 커밋 `6f0d521` 후 뮤테이션을 수행해 원복 사고 없이 기준선으로 복귀했다.
+
+### Issues found
+
+- 첫 무소유 버튼 뮤테이션은 테스트를 깨지 못했다. 셀이 약한 것이 아니라 입력을 숨기는 첫 방어가
+  남아 사유를 채울 수 없었기 때문이다. 두 방어를 함께 제거하자 셀이 실패했다. 단일 방어 제거에도
+  안전한 것은 의도된 defense-in-depth다.
+- 장시간 프론트 명령은 10초 초기 yield에서 session id를 반환한다. session을 끝까지 poll하지 않으면
+  빌드/테스트 완료를 오독할 수 있어 최종 검증은 exit code까지 확인했다.
+
+### Next steps
+
+- D8-5d 독립 검증(별도 작업자)을 받으면 발견 사항을 hardening한다.
+- 별도 잔여: D8-6 영구 삭제 UI는 확인 UX 계약을 먼저 정해야 한다. purge 감사 로그도 저장 필드/위치
+  브리프가 먼저다. D8-5 자체는 종료됐다.
