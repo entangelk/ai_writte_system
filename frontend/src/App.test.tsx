@@ -302,6 +302,7 @@ describe("App routes", () => {
         },
         sites: [], gate: {}, loop: {},
       } },
+      { body: { events: [] } },
     );
 
     render(
@@ -317,6 +318,7 @@ describe("App routes", () => {
       "/api/admin/users",
       "/api/admin/projects",
       "/api/admin/observability/kpi",
+      "/api/admin/audit-events",
     ]);
   });
 

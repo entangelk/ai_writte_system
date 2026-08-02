@@ -1368,8 +1368,8 @@ _ERRORS_ADMIN_400_409: dict[int | str, dict] = _admin(_protected({
 _ERRORS_ADMIN_404_409: dict[int | str, dict] = _admin(_protected({
     404: _ERROR, 409: _ERROR, 503: _STORAGE_503,
 }))
-# D8-6d: project purge. Idempotent — re-purging an already-purged project hits
-# core_sot._require_project NotFound → 404 (not 409; there is no conflict).
+# Access-grant issuance: the target project must exist, but there is no project
+# lifecycle conflict on this surface. Purge has its own 404/409 declaration.
 _ERRORS_ADMIN_404: dict[int | str, dict] = _admin(_protected({
     404: _ERROR, 503: _STORAGE_503,
 }))

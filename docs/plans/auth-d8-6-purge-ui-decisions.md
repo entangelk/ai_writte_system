@@ -1,9 +1,9 @@
 # D8-6 영구 삭제 UI·감사 — 착수 결정 브리프
 
-상태: `Approved — D1~D5=A (2026-08-02)`
+상태: `Implemented — D1~D5=A (v1.7.82, 2026-08-02) · 독립 검증 대기`
 작성일: 2026-08-02  
 부모 결정: [`multi-user-auth-cms-decisions.md`](multi-user-auth-cms-decisions.md) D5=A  
-구현 기준: [`system-contract-sot.md`](../system-contract-sot.md) v1.7.69~v1.7.76, v1.7.81
+구현 기준: [`system-contract-sot.md`](../system-contract-sot.md) v1.7.69~v1.7.76, v1.7.81~v1.7.82
 
 ## Decision needed
 
@@ -12,7 +12,7 @@
 정책은 archive→purge를 말하지만 endpoint는 활성 project도 지우며, 현재 endpoint는 사유/감사를
 받지 않고, core SOT 선삭제 뒤 derived 실패 시 재시도도 불가능하다.
 
-## 1. 실측 기준선
+## 1. 실측 기준선 (착수 당시)
 
 | 표면 | 현재 사실 | 이 슬라이스에 미치는 영향 |
 |---|---|---|
@@ -174,3 +174,15 @@ D3=A일 때 Mongo 장애가 감사와 purge 사이에 발생하면 어떤 결과
 4. **검증** — backend/frontend 집중→전체→build, archive/active·이름 under/over-strict·감사 fail-closed·
    신규 ADMIN operation 전수 가드 mutation.
 5. **기록·독립 검증** — SoT/CHANGELOG/work log/HANDOFF 정리, 커밋 뒤 별도 검증자에게 인계.
+
+## 구현 결과
+
+- backend는 archive되지 않은 project의 purge를 409로 거부하고, 비어 있지 않은 `reason`을 받는다.
+- `admin_audit_events`는 project graph 밖의 최소 tombstone이다. `target_project_id`를 쓰고 TTL을 두지
+  않으며, requested 기록은 fail-closed, succeeded/failed 결과 기록은 best-effort다.
+- `GET /admin/audit-events?action=project_purge`는 ADMIN tier의 최근 50건 조회다.
+- 관리자 화면은 archive된 카드에만 danger 영역을 열고, 정확한 project 이름과 사유가 모두 맞아야
+  요청한다. 503은 상태 불확정·운영 수습 필요를 알리며 같은 화면에서 재시도 버튼을 제공하지 않는다.
+- **D4-D 추적 약속**: 이번에는 A를 유지한다. 원격 저장소·다중 worker가 도입되거나 수동 reconciler가
+  실제 운영 부담이 되는 시점에는 durable operation journal/saga로 확장한다. 단순 재시도 버튼이나
+  404 의미 변경으로 대체하지 않는다.

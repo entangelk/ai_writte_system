@@ -1795,7 +1795,10 @@ class AdminAccessGrantTest(unittest.TestCase):
     def test_purging_a_project_takes_its_access_log_with_it(self) -> None:
         self._issue()
         self.client.get(f"/projects/{self.project}/drafts")
-        self.client.post(f"/admin/projects/{self.project}/purge")
+        self.core_sot.archive_project(project_id=self.project)
+        self.client.post(
+            f"/admin/projects/{self.project}/purge", json={"reason": "정리 요청"}
+        )
         self.assertEqual(
             self.grants.uses_for_project(project_id=self.project), ()
         )
@@ -1803,7 +1806,10 @@ class AdminAccessGrantTest(unittest.TestCase):
     def test_purging_a_project_takes_its_grants_with_it(self) -> None:
         # D5: 새 project-scoped 컬렉션이 파기에 안 물리면 조용한 고아가 된다.
         self._issue()
-        self.client.post(f"/admin/projects/{self.project}/purge")
+        self.core_sot.archive_project(project_id=self.project)
+        self.client.post(
+            f"/admin/projects/{self.project}/purge", json={"reason": "정리 요청"}
+        )
         self.assertIsNone(
             self.grants._repo.latest_for(
                 admin_user_id=self.root.id, project_id=self.project

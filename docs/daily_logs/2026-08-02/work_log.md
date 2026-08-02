@@ -1327,3 +1327,89 @@ C-6 409 흐름, 12자 양방향, 무소유 승격, lazy chunk를 독립 재현�
 ### Next steps
 
 - 오너가 D1~D5를 확정하면 계약 회귀부터 작성하고 backend→frontend 순서로 구현한다.
+
+---
+
+## Task — D8-6 영구 삭제 UI·최소 감사 구현
+
+### Goals
+
+- 승인된 D1~D5=A를 backend 보안 경계, 최소 감사 tombstone, 관리자 화면에 끝까지 배선한다.
+- 불가역 삭제의 archive 선행·사유·정확한 대상 확인과, 503 뒤 거짓 재시도 금지를 양방향 회귀로 잠근다.
+- 향후 D4-D operation journal/saga 확장 조건을 정본과 HANDOFF에 남기고 독립 검증에 인계한다.
+
+### User Decisions and Rationale
+
+- 오너는 **D1~D5 전부 A**로 확정했다(2026-08-02). 즉 backend와 UI 모두 archive 선행,
+  project 이름 정확 입력+경고, 사유 필수+project graph 밖 최소 감사, 현행 core-first+reconciler,
+  requested fail-closed+결과 best-effort다.
+- **D4는 지금 A로 닫되 나중에는 D(operation journal/saga)로 확장**한다. 원격 저장소·다중 worker가
+  들어오거나 수동 reconciler가 실제 운영 부담이 되는 시점이 착수 조건이다. 지금 saga를 넣으면 이
+  UI slice를 넘어선 상태 machine·복구 worker를 선결하고, derived 선삭제/404 완화는 다른 안전성
+  계약을 희생하므로 채택하지 않았다.
+
+### Completed work
+
+- `PurgeProjectRequest(reason)`과 archive 검사(활성 409)를 purge endpoint에 추가했다. 삭제 전 project를
+  조회하므로 직접 API 호출도 2단계를 우회하지 못한다.
+- `auth/admin_audit.py`·`admin_audit_mongo.py`를 추가했다. 이벤트는
+  `project_purge_requested|succeeded|failed`, 공통 operation id와 관리자·target·사유·시각을 담는다.
+  `target_project_id`를 써 project graph 및 reconciler의 `project_id` 탐색과 분리했고 TTL을 두지 않았다.
+- requested insert 실패는 purge를 시작하지 않는다. 시작 뒤 succeeded/failed insert는 best-effort라
+  이미 일어난 삭제 결과나 원래 실패를 감사 장애가 뒤집지 않는다.
+- `GET /admin/audit-events?action=project_purge`를 ADMIN tier에 추가해 최근 50건을 최신순으로 제공한다.
+  전체 operation은 74→75, ADMIN은 7→8이다.
+- 관리자 화면에 archived-only danger 영역, 전체 graph 파기/복구 불가 경고, 사유와 정확한 project
+  이름 확인을 추가했다. 성공 시 project 카드를 제거하고 감사 목록을 refresh한다. 503은 상태 불확정과
+  reconciler 수습을 안내하며 재시도 버튼을 렌더하지 않는다.
+- OpenAPI TS schema를 재생성하고 204 body 없는 응답을 client가 처리하도록 했다.
+- `docs/mongo_collections.md`, 결정 브리프, SoT v1.7.82, CHANGELOG, HANDOFF를 현재 계약으로 갱신했다.
+
+### Issues found
+
+- 기존 D5 문서는 archive→purge를 말했지만 endpoint가 활성 project도 삭제했다. UI 숨김만으로는
+  우회되므로 backend 409를 함께 시행했다.
+- purge 이후에도 남아야 할 감사에 `project_id`를 쓰면 discovery 기반 reconciler가 고아 자식으로
+  판단해 삭제한다. 필드 이름만 바꾼 우회가 아니라 graph 밖 관리자 행위 tombstone으로 계약을 분리했다.
+- `AdminAccessGrantTest`의 purge 회귀 2개가 옛 무본문·활성 삭제 호출을 계속 사용했다. archive+reason으로
+  고쳐 새 공개 계약을 실제로 통과하게 했다.
+- `/admin` route smoke가 초기 fetch 4건만 가정해 신규 감사 조회를 놓쳤다. 감사 mock과 URL 단정을
+  추가했다.
+- `_ERRORS_ADMIN_404` 위에 purge를 멱등이라고 부르는 낡은 주석이 있었지만 실제 사용처는 access grant
+  발급이었다. 동작 무변으로 주석의 소유 표면을 바로잡았다.
+
+### Regression guards and adversarial mutations
+
+- archive guard를 제거하면 active 409 셀이 실패하고 archived 정상 204 셀은 통과했다.
+- requested audit insert를 제거하면 fail-closed API 셀과 도메인 이벤트 셀이 실패했다.
+- 정확한 이름 비교를 항상 허용하면 wrong-name disabled 셀이, 항상 거부하면 correct-name enabled 셀이
+  실패해 under/over-strict 양방향이 모두 작동했다.
+- 503에서 버튼을 항상 렌더하면 no-retry 셀이 실패했다.
+- 신규 audit endpoint를 auth-only로 낮추면 combined ADMIN boundary matrix가 실패했다.
+- 모든 mutation은 체크포인트 뒤 working tree에서만 수행하고 역방향 patch로 원복했다.
+
+### Pattern sweep
+
+- hard delete/purge 호출을 repo-wide로 찾고 인접 호출의 `git blame`을 확인했다. 제품 purge endpoint는
+  하나뿐이며 smoke script의 `delete_many`는 fixture 정리다. 실제 동일 계약 드리프트는 위 access-grant
+  회귀 2곳뿐이어서 함께 수정했다.
+
+### Verification
+
+- backend 집중: **31 passed / 440 subtests**.
+- audit domain: **5 passed / 3 subtests**.
+- backend 전체(test-mongo ON): **1911 passed / 4 skipped / 1625 subtests**.
+- frontend 전체: **236 passed / 17 files**.
+- production build: **698 modules**, exit 0(진입 410.29 kB, AdminConsole 8.39 kB, 관측 386.70 kB).
+- docs index: 마감 기록 뒤 재실행. `git diff --check`도 최종 커밋 전에 재실행한다.
+
+### Commits
+
+- `6c9b796` — backend audit/orchestration, 관리자 UI, 회귀, schema의 구현 체크포인트.
+- 최종 기록·패턴 스윕 보강 커밋은 아래 검증 후 생성한다.
+
+### Next steps
+
+- 별도 검증자가 정본 v1.7.82와 구현 커밋을 적대적으로 검증한다. 필수 matrix는 HANDOFF Next Tasks 1번에
+  적었다. 구현자는 자기 작업을 독립 검증 기록으로 판정하지 않는다.
+- 독립 검증 및 발견 hardening이 닫히면 D8-6을 종료하고 Phase 8 Slice 8.0 브리프로 이동한다.
