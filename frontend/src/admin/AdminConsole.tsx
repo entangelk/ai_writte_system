@@ -173,21 +173,23 @@ export function AdminConsole() {
                     {project.owner_id === null ? (
                       <p className="form-hint">소유자 없는 프로젝트는 승격으로 열 수 없습니다.</p>
                     ) : (
-                      <label>접근 사유<input value={state.reason} onChange={(e) => updateAccess(project.id, { reason: e.target.value })} /></label>
-                    )}
-                    <div className="row-actions">
-                      <button type="button" disabled={project.owner_id === null || state.busy || state.reason.trim() === ""} onClick={() => void issueGrant(project.id)}>1시간 읽기 권한 발급</button>
-                      {state.grant && <Link to={`/projects/${project.id}`}>프로젝트 열기</Link>}
-                      <button type="button" disabled={state.busy || !state.grant} onClick={() => void loadAccessLog(project.id)}>접근 이력 보기</button>
-                    </div>
-                    {state.grant && <p className="grant-status">권한 만료: {new Date(state.grant.expires_at).toLocaleString("ko-KR")}</p>}
-                    {state.error && <p className="alert" role="alert">{state.error}</p>}
-                    {state.entries && (
-                      <ul className="access-log">
-                        {state.entries.length === 0
-                          ? <li>기록된 접근이 없습니다.</li>
-                          : state.entries.map((entry, index) => <li key={`${entry.grant_id}-${entry.at}-${index}`}><strong>{entry.method} {entry.path}</strong><span>{entry.reason} · {new Date(entry.at).toLocaleString("ko-KR")}</span></li>)}
-                      </ul>
+                      <>
+                        <label>접근 사유<input value={state.reason} onChange={(e) => updateAccess(project.id, { reason: e.target.value })} /></label>
+                        <div className="row-actions">
+                          <button type="button" disabled={state.busy || state.reason.trim() === ""} onClick={() => void issueGrant(project.id)}>1시간 읽기 권한 발급</button>
+                          {state.grant && <Link to={`/projects/${project.id}`}>프로젝트 열기</Link>}
+                          <button type="button" disabled={state.busy || !state.grant} onClick={() => void loadAccessLog(project.id)}>접근 이력 보기</button>
+                        </div>
+                        {state.grant && <p className="grant-status">권한 만료: {new Date(state.grant.expires_at).toLocaleString("ko-KR")}</p>}
+                        {state.error && <p className="alert" role="alert">{state.error}</p>}
+                        {state.entries && (
+                          <ul className="access-log">
+                            {state.entries.length === 0
+                              ? <li>기록된 접근이 없습니다.</li>
+                              : state.entries.map((entry, index) => <li key={`${entry.grant_id}-${entry.at}-${index}`}><strong>{entry.method} {entry.path}</strong><span>{entry.reason} · {new Date(entry.at).toLocaleString("ko-KR")}</span></li>)}
+                          </ul>
+                        )}
+                      </>
                     )}
                   </article>
                 );

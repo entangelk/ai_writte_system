@@ -54,8 +54,11 @@ describe("AdminConsole", () => {
     const orphanProject = screen.getByText("보관 원고").closest("article");
     expect(orphanProject).not.toBeNull();
     expect(
-      within(orphanProject!).getByRole("button", { name: "1시간 읽기 권한 발급" }),
-    ).toBeDisabled();
+      within(orphanProject!).queryByRole("button", { name: "1시간 읽기 권한 발급" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(orphanProject!).queryByRole("button", { name: "접근 이력 보기" }),
+    ).not.toBeInTheDocument();
     expect(within(orphanProject!).getByText(/승격으로 열 수 없습니다/)).toBeInTheDocument();
     expect(screen.getByText("12")).toBeInTheDocument();
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
