@@ -1280,6 +1280,12 @@ _MIGRATION_503 = _with_storage_note(_MIGRATION_503)
 # credentials) and the session-reading endpoint (missing/expired/revoked cookie).
 # Project-scoped declarations gain 403 through ``_owned`` below.
 _ERRORS_401: dict[int | str, dict] = {401: _ERROR, 503: _STORAGE_503}
+# C-6: login additionally answers 409 when the account still carries a password
+# somebody else chose. Only /auth/login declares it — no other operation gains a
+# status, because the enforcement point is *obtaining a session*, not using one.
+_ERRORS_LOGIN_409: dict[int | str, dict] = {
+    400: _ERROR, 401: _ERROR, 409: _ERROR, 503: _STORAGE_503,
+}
 # Logout is the one non-/health operation that stays reachable without a session:
 # it is idempotent by design so a client can always reach a known-logged-out
 # state. It therefore keeps a declaration with no 401 — hence its own constant,
@@ -1537,6 +1543,11 @@ _REQUIRE_ADMIN = [
 class LoginRequest(BaseModel):
     username: str
     password: str
+    # C-6. Present only when the account must replace an administrator-set
+    # password. Optional so the ordinary login body is unchanged; supplying it
+    # when no change is required is refused rather than silently ignored (see
+    # the handler), because "my password changed" must never be a no-op.
+    new_password: str | None = None
 
 
 class UserPayload(BaseModel):
@@ -2530,7 +2541,8 @@ def create_app(
             "id": user.id, "username": user.username, "is_admin": user.is_admin
         }
 
-    @app.post("/auth/login", response_model=LoginResponse, responses=_ERRORS_401)
+    @app.post("/auth/login", response_model=LoginResponse,
+              responses=_ERRORS_LOGIN_409)
     async def login(request: LoginRequest, response: Response) -> dict[str, object]:
         user = users.authenticate(
             username=request.username, password=request.password
@@ -2540,6 +2552,33 @@ def create_app(
             # disabled account). Distinguishing them here would undo the timing
             # hardening in UserService.authenticate.
             raise HTTPException(status_code=401, detail="invalid credentials")
+        # C-6 (owner 2026-08-02): an administrator-set password is single-use and
+        # can only be spent on replacing itself. **Enforced here rather than on
+        # every operation**: no session is issued at all, so the other 73
+        # operations gain neither a check nor a new declared status — and the
+        # "403 has exactly two producers" invariant stays intact.
+        #
+        # The credentials were already verified above, so this branch cannot be
+        # used to probe: a wrong password is 401 whether or not a change is due.
+        if user.must_change_password:
+            if request.new_password is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="password set by an administrator must be replaced "
+                           "before signing in",
+                )
+            try:
+                user = users.change_password(
+                    user_id=user.id, new_password=request.new_password
+                )
+            except InvalidUserInput as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        elif request.new_password is not None:
+            # Refused rather than ignored: a client that believes it changed the
+            # password must not be told "ok" while nothing happened.
+            raise HTTPException(
+                status_code=409, detail="this account has no pending password change"
+            )
         raw_token, session = sessions.create_session(user_id=user.id)
         max_age = int((session.expires_at - session.created_at).total_seconds())
         response.set_cookie(value=raw_token, **cookie_kwargs(max_age=max_age))
@@ -2587,6 +2626,9 @@ def create_app(
     async def create_user(request: CreateUserRequest) -> dict[str, object]:
         try:
             user = users.create_user(
+                # C-6: an administrator is choosing a password for someone else,
+                # so it is single-use — the account replaces it at first sign-in.
+                must_change_password=True,
                 username=request.username,
                 password=request.password,
                 is_admin=request.is_admin,

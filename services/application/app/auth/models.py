@@ -14,6 +14,12 @@ class User:
     is_admin: bool
     is_active: bool
     created_at: datetime
+    # C-6 (owner 2026-08-02): True while the account still carries a password
+    # somebody *else* chose. Set by the two surfaces where an administrator sets
+    # a password for another human (`POST /admin/users`, `scripts/create_user.py`)
+    # and cleared the moment that human sets their own. While it is True the
+    # account cannot obtain a session at all — see `/auth/login`.
+    must_change_password: bool = False
 
 
 @dataclass(frozen=True, slots=True)

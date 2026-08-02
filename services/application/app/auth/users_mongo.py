@@ -44,6 +44,16 @@ class MongoUserRepository:
         docs = self._users.find({}).sort("created_at", ASCENDING)
         return tuple(_entry(doc) for doc in docs)
 
+    def set_password(self, user_id: str, *, password_hash: str) -> User | None:
+        doc = self._users.find_one_and_update(
+            {"_id": user_id},
+            {"$set": {
+                "password_hash": password_hash, "must_change_password": False,
+            }},
+            return_document=ReturnDocument.AFTER,
+        )
+        return _entry(doc) if doc else None
+
     def set_active(self, user_id: str, *, is_active: bool) -> User | None:
         doc = self._users.find_one_and_update(
             {"_id": user_id},
@@ -59,6 +69,7 @@ def _doc(value: User) -> dict:
         "username": value.username,
         "password_hash": value.password_hash,
         "is_admin": value.is_admin,
+        "must_change_password": value.must_change_password,
         "is_active": value.is_active,
         "created_at": value.created_at,
     }
@@ -70,6 +81,9 @@ def _entry(doc: dict) -> User:
         username=doc["username"],
         password_hash=doc["password_hash"],
         is_admin=doc["is_admin"],
+        # `.get` on purpose: rows written before C-6 have no such field, and a
+        # KeyError here would lock every pre-existing account out of login.
+        must_change_password=doc.get("must_change_password", False),
         is_active=doc["is_active"],
         # Same UTC re-labeling as the session repo: pymongo returns BSON dates
         # naive, and the domain treats timestamps as aware. Nothing compares

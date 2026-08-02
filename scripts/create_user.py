@@ -48,12 +48,18 @@ def main(argv: list[str]) -> int:
     )
     try:
         user = service.create_user(
-            username=username, password=password, is_admin=is_admin
+            username=username, password=password, is_admin=is_admin,
+            # C-6: this password is chosen by whoever runs the script, not by the
+            # account's owner, so it is single-use — the account replaces it at
+            # first sign-in and cannot obtain a session until then.
+            must_change_password=True,
         )
     except DuplicateUsername:
         print(f"user already exists: {username}", file=sys.stderr)
         return 1
     print(f"created {user.id} username={user.username} is_admin={user.is_admin}")
+    print("이 비밀번호는 1회용이다 — 첫 로그인 때 새 비밀번호를 함께 보내야 세션이 발급된다"
+          " (POST /auth/login 의 new_password).")
     return 0
 
 

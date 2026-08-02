@@ -8,6 +8,7 @@ every other suite runs authenticated through ``tests/auth_support.py``.
 """
 
 import os
+import pathlib
 import re
 import unittest
 from datetime import UTC, datetime, timedelta
@@ -29,7 +30,9 @@ from services.application.app.auth.cookies import cookie_secure
 from services.application.app.auth.sessions import (
     InMemorySessionRepository, SessionService,
 )
-from services.application.app.auth.users import InMemoryUserRepository, UserService
+from services.application.app.auth.users import (
+    MIN_PASSWORD_LENGTH, InMemoryUserRepository, UserService,
+)
 from services.application.app.core_sot.service import (
     CoreSotService, InMemoryCoreSotRepository,
 )
@@ -592,11 +595,25 @@ class AdminUserApiTest(unittest.TestCase):
                 "is_admin": False, "is_active": True,
             },
         )
-        # The account is real, not just a row: it can actually log in.
-        login = self.client.post(
+        # C-6: the account is real, but the administrator-set password is
+        # **single-use**. Signing in with it alone is refused (409) — that is the
+        # whole point: an admin must not be left knowing a working password.
+        refused = self.client.post(
             "/auth/login", json={"username": "carol", "password": "pw000"}
         )
+        self.assertEqual(refused.status_code, 409)
+        self.assertNotIn("set-cookie", refused.headers)
+
+        # Spending it on a replacement works, and *is* the sign-in.
+        login = self.client.post(
+            "/auth/login",
+            json={
+                "username": "carol", "password": "pw000",
+                "new_password": "carol-chosen-passphrase",
+            },
+        )
         self.assertEqual(login.status_code, 200)
+        self.assertIn("session", login.cookies)
 
     def test_duplicate_username_is_409_and_bad_input_is_400(self) -> None:
         self.assertEqual(
@@ -1181,6 +1198,128 @@ class TestSeamStaysAnOverrideTest(unittest.TestCase):
         # nothing else would notice — this is what notices.
         client, _, _ = _client()
         self.assertEqual(client.app.dependency_overrides, {})
+
+
+class ForcedPasswordChangeTest(unittest.TestCase):
+    """C-6 (오너 2026-08-02): 관리자가 정한 비밀번호는 **1회용**이다.
+
+    D8-5a 독립 검증 H-c 가 남긴 위험 — *관리자가 사용자의 비밀번호를 아는 상태* — 를
+    없앤다. 강제 지점은 **세션 발급**이지 개별 operation 이 아니다: 그래서 나머지 73개
+    operation 은 검사도, 새 상태코드도 얻지 않고 "403 생산자는 정확히 둘"이라는 불변식이
+    그대로 유지된다.
+    """
+
+    def setUp(self) -> None:
+        self.client, self.users, _ = _client()
+        self.users.create_user(
+            username="carol", password="admin-set", must_change_password=True
+        )
+
+    def _login(self, **extra):
+        return self.client.post(
+            "/auth/login",
+            json={"username": "carol", "password": "admin-set", **extra},
+        )
+
+    def test_the_admin_set_password_alone_never_yields_a_session(self) -> None:
+        # 이 셀이 C-6 의 전부다. 여기가 200 이면 관리자가 아는 비밀번호로 계정을
+        # 그대로 쓸 수 있다는 뜻이고, 슬라이스가 아무것도 안 한 것이 된다.
+        response = self._login()
+        self.assertEqual(response.status_code, 409)
+        self.assertNotIn("set-cookie", response.headers)
+
+    def test_spending_it_on_a_replacement_signs_in(self) -> None:
+        response = self._login(new_password="carol-chosen-passphrase")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("session", response.cookies)
+        self.assertEqual(self.client.get("/auth/me").status_code, 200)
+
+    def test_the_old_password_stops_working_afterwards(self) -> None:
+        # under-strict: 교체가 실제로 저장되지 않으면 옛 비밀번호가 계속 통한다.
+        self._login(new_password="carol-chosen-passphrase")
+        self.client.post("/auth/logout")
+        self.assertEqual(self._login().status_code, 401)
+        self.assertEqual(
+            self.client.post(
+                "/auth/login",
+                json={"username": "carol", "password": "carol-chosen-passphrase"},
+            ).status_code, 200,
+        )
+
+    def test_the_change_is_required_only_once(self) -> None:
+        # over-strict: 플래그가 안 지워지면 사용자가 로그인할 때마다 비밀번호를
+        # 바꿔야 한다 — 계정을 못 쓰게 만드는 과잉 교정 방향이다.
+        self._login(new_password="carol-chosen-passphrase")
+        self.client.post("/auth/logout")
+        again = self.client.post(
+            "/auth/login",
+            json={"username": "carol", "password": "carol-chosen-passphrase"},
+        )
+        self.assertEqual(again.status_code, 200)
+
+    def test_a_wrong_password_is_401_whether_or_not_a_change_is_due(self) -> None:
+        # 409 가 열거 신호가 되면 안 된다 — 자격증명 검증이 **먼저**이므로, 틀린
+        # 비밀번호는 교체 대기 여부와 무관하게 401 이다.
+        wrong_pending = self.client.post(
+            "/auth/login", json={"username": "carol", "password": "nope"}
+        )
+        wrong_normal = self.client.post(
+            "/auth/login", json={"username": "alice", "password": "nope"}
+        )
+        self.assertEqual(wrong_pending.status_code, 401)
+        self.assertEqual(wrong_normal.status_code, 401)
+        self.assertEqual(wrong_pending.json(), wrong_normal.json())
+
+    def test_a_new_password_below_the_policy_is_400_and_changes_nothing(self) -> None:
+        response = self._login(new_password="short")
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn("set-cookie", response.headers)
+        # 거부가 상태를 남기지 않는다: 옛 비밀번호로 여전히 교체를 요구받는다.
+        self.assertEqual(self._login().status_code, 409)
+
+    def test_the_minimum_length_is_the_pinned_literal(self) -> None:
+        # 계약 리터럴. 정확히 경계 위/아래를 친다 — 밴드로 두면 정책을 1자로
+        # 낮추는 변경도 통과한다.
+        self.assertEqual(MIN_PASSWORD_LENGTH, 12)
+        self.assertEqual(
+            self._login(new_password="a" * (MIN_PASSWORD_LENGTH - 1)).status_code, 400
+        )
+        self.assertEqual(
+            self._login(new_password="a" * MIN_PASSWORD_LENGTH).status_code, 200
+        )
+
+    def test_offering_a_new_password_when_none_is_due_is_refused(self) -> None:
+        # 조용히 무시하면 "비밀번호를 바꿨다"고 믿는 클라이언트에게 거짓말이 된다.
+        response = self.client.post(
+            "/auth/login",
+            json={
+                "username": "alice", "password": "pw123",
+                "new_password": "irrelevant-but-long-enough",
+            },
+        )
+        self.assertEqual(response.status_code, 409)
+
+    def test_the_two_admin_surfaces_mark_the_password_single_use(self) -> None:
+        # 디스커버리 가드. `create_user` 의 기본값은 False 이고(도메인은 누가 정한
+        # 비밀번호인지 모른다), **남의 비밀번호를 정하는 두 표면**이 True 를 준다.
+        # 여기가 없으면 새 표면이 조용히 기본값을 물려받는다.
+        admin_api = pathlib.Path(
+            "services/application/app/main.py"
+        ).read_text(encoding="utf-8")
+        bootstrap = pathlib.Path(
+            "scripts/create_user.py"
+        ).read_text(encoding="utf-8")
+        for label, source in [("POST /admin/users", admin_api),
+                              ("scripts/create_user.py", bootstrap)]:
+            with self.subTest(surface=label):
+                self.assertIn("must_change_password=True", source)
+
+        # 반대 방향: 자기 계정을 스스로 발급하는 smoke 스크립트는 주면 안 된다
+        # (아무도 그 비밀번호를 모르고, 강제하면 스크립트가 못 돈다).
+        smoke = pathlib.Path(
+            "scripts/phase2a_provider_live_smoke.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("must_change_password=True", smoke)
 
 
 class AdminProjectListTest(unittest.TestCase):

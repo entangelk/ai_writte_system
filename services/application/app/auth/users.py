@@ -40,6 +40,13 @@ class LastActiveAdmin(AuthError):
     """
 
 
+# C-6. Length over composition (no forced symbol/digit classes): composition
+# rules push people toward predictable substitutions while shortening what they
+# choose. A contract literal — changing it is a deliberate edit, and the
+# regression pins it.
+MIN_PASSWORD_LENGTH = 12
+
+
 class UserRepository(Protocol):
     def insert(self, user: User) -> None:
         """Persist a new user. Raises DuplicateUsername if the username exists."""
@@ -51,6 +58,9 @@ class UserRepository(Protocol):
 
     def set_active(self, user_id: str, *, is_active: bool) -> User | None:
         """Flip the active flag and return the stored user, or None if unknown."""
+
+    def set_password(self, user_id: str, *, password_hash: str) -> User | None:
+        """Store a new hash and clear ``must_change_password``. C-6."""
 
 
 class InMemoryUserRepository:
@@ -84,6 +94,18 @@ class InMemoryUserRepository:
         self._by_id[user_id] = updated
         return updated
 
+    def set_password(self, user_id: str, *, password_hash: str) -> User | None:
+        stored = self._by_id.get(user_id)
+        if stored is None:
+            return None
+        # The two always move together: a stored hash the account owner chose is
+        # exactly what stops it from being someone else's password.
+        updated = replace(
+            stored, password_hash=password_hash, must_change_password=False
+        )
+        self._by_id[user_id] = updated
+        return updated
+
 
 class UserService:
     def __init__(
@@ -101,8 +123,17 @@ class UserService:
         self._dummy_hash: str | None = None
 
     def create_user(
-        self, *, username: str, password: str, is_admin: bool = False
+        self, *, username: str, password: str, is_admin: bool = False,
+        must_change_password: bool = False,
     ) -> User:
+        """Create an account.
+
+        ``must_change_password`` is the caller's statement that *somebody else*
+        chose this password (C-6). It defaults to False because the domain
+        cannot know: `POST /admin/users` and the bootstrap script set it, while
+        the live-smoke script — which issues a throwaway account for its own use
+        and is the only other caller — must not. A guard pins those call sites.
+        """
         username = username.strip()
         if not username:
             raise InvalidUserInput("username is required")
@@ -115,6 +146,7 @@ class UserService:
             is_admin=is_admin,
             is_active=True,
             created_at=self._clock(),
+            must_change_password=must_change_password,
         )
         self._repo.insert(user)
         return user
@@ -166,6 +198,22 @@ class UserService:
         if not self._hasher.verify(user.password_hash, password):
             return None
         return user
+
+    def change_password(self, *, user_id: str, new_password: str) -> User | None:
+        """Set the account's own password and clear the forced-change flag (C-6).
+
+        The policy is applied **here**, not in ``create_user``: an administrator's
+        initial password is single-use (the account cannot get a session until it
+        is replaced), so the credential whose strength actually matters is this
+        one — the durable one the account owner chooses.
+        """
+        if len(new_password) < MIN_PASSWORD_LENGTH:
+            raise InvalidUserInput(
+                f"password must be at least {MIN_PASSWORD_LENGTH} characters"
+            )
+        return self._repo.set_password(
+            user_id, password_hash=self._hasher.hash(new_password)
+        )
 
     def _enumeration_guard_hash(self) -> str:
         # Built once on first miss (hashing is expensive) over a random secret, so
