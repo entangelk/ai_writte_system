@@ -1,9 +1,17 @@
 """`request_locks` Mongo 어댑터 (Phase 8 Slice 8.2b).
 
 **차지는 연산 하나다**(G3=A). ``find_one_and_update`` 의 필터가 "없거나 만료됐다"를
-표현하고, 살아 있는 잠금이 있으면 upsert 가 ``_id`` 중복으로 튕긴다 — 그 예외가 곧
-"잠겨 있음"이다. 이 저장소의 생성 job·색인 outbox 차지와 같은 모양이며, 읽고 판단하고
-쓰는 형태는 **동시 두 요청이 둘 다 "없음"을 읽으므로** 쓰지 않는다.
+표현하고, 살아 있는 잠금이 있으면 upsert 가 ``_id`` 중복으로 튕긴다. 이 저장소의 생성
+job·색인 outbox 차지와 같은 모양이며, 읽고 판단하고 쓰는 형태는 **동시 두 요청이 둘 다
+"없음"을 읽으므로** 쓰지 않는다.
+
+**★ 다만 그 충돌은 "잠겨 있음"의 증거가 아니라 신호다**(2026-08-03 독립 검증 B1이 잡은
+결함). 충돌과 그 뒤의 확인 읽기 사이에 원래 요청이 **해제**하거나 TTL 이 문서를 **치울**
+수 있다 — 그 상태를 그대로 믿으면 ① 이미 만료된 잠금으로 남을 막거나(거짓 차단) ②
+**저장되지 않은 성공**을 돌려주어 다음 요청까지 통과시킨다(= 중복 실행, 이 슬라이스가
+막으려던 바로 그것). 그래서 충돌 뒤에는 **살아 있음을 다시 확인**하고, 아니면 원자적
+차지를 다시 한다. 재시도는 ``CLAIM_ATTEMPTS`` 번으로 유한하며, 소진되면 예외를 올려
+**fail-closed** 한다(중복을 허용하느니 요청을 실패시킨다).
 
 **★ TTL 인덱스는 청소용이고 판정에 쓰지 않는다.** Mongo 의 TTL 삭제는 백그라운드
 모니터가 **약 60초 주기**로 돌기 때문에, 문서 존재 여부로 판정하면 최소 창 5초가
@@ -30,6 +38,10 @@ from services.application.app.quota.lock import RequestLock, cooldown_until
 
 COLLECTION = "request_locks"
 
+#: 충돌 뒤 상태가 바뀐 것을 확인하면 다시 차지한다. **유한**해야 한다 — 무한 재시도는
+#: 잠금 하나 때문에 요청 스레드를 붙잡는다.
+CLAIM_ATTEMPTS = 3
+
 
 def _aware(value: datetime | None) -> datetime | None:
     """BSON 날짜는 naive 로 돌아온다 — 원장·세션 저장소와 같은 재부착."""
@@ -55,19 +67,31 @@ class MongoRequestLockRepository:
         return cls(MongoClient(uri), db_name=db_name)
 
     def claim(self, lock: RequestLock, *, now: datetime) -> RequestLock:
-        try:
-            doc = self._locks.find_one_and_update(
-                {"_id": lock.key, "expires_at": {"$lte": now}},
-                {"$set": _claim_fields(lock)},
-                upsert=True,
-                return_document=ReturnDocument.AFTER,
-            )
-            return lock_entry(doc)
-        except DuplicateKeyError:
-            existing = self._locks.find_one({"_id": lock.key})
-        # 막은 잠금이 곧바로 사라지는 경우는 TTL 이 **만료된** 문서만 지우므로 사실상
-        # 없다. 그래도 도달하면 "잠금이 없다"가 사실이므로 차지한 것으로 본다.
-        return lock_entry(existing) if existing is not None else lock
+        conflict: DuplicateKeyError | None = None
+        for _attempt in range(CLAIM_ATTEMPTS):
+            try:
+                doc = self._locks.find_one_and_update(
+                    {"_id": lock.key, "expires_at": {"$lte": now}},
+                    {"$set": _claim_fields(lock)},
+                    upsert=True,
+                    return_document=ReturnDocument.AFTER,
+                )
+                return lock_entry(doc)
+            except DuplicateKeyError as exc:
+                conflict = exc
+            # ★ 충돌은 "잠겨 있음"의 **증거가 아니라 신호**다(2026-08-03 독립 검증 B1).
+            # 충돌과 이 읽기 사이에 원래 요청이 해제하거나(냉각까지 지난 경우) TTL 이
+            # 문서를 치울 수 있다. 그 상태를 그대로 돌려주면 **만료된 잠금으로 남을
+            # 막고**, 없는 문서를 성공으로 날조하면 **저장되지 않은 잠금**이 되어 다음
+            # 요청도 통과한다(= 중복 실행). 그래서 살아 있음을 다시 확인하고, 아니면
+            # 원자적 차지를 **다시** 한다.
+            blocking = self._locks.find_one({"_id": lock.key})
+            if blocking is not None and _aware(blocking["expires_at"]) > now:
+                return lock_entry(blocking)
+        # 유한 번만 돈다. 여기까지 오면 매 시도가 충돌했는데 매 읽기가 "없거나 만료"를
+        # 본 것이라 상태를 신뢰할 수 없다 — **fail-closed**: 실수 중복을 허용하느니
+        # 요청을 실패시킨다(8.3 이 상태코드를 정한다).
+        raise conflict
 
     def force_claim(self, lock: RequestLock) -> None:
         self._locks.replace_one({"_id": lock.key}, _doc(lock), upsert=True)

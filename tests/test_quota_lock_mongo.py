@@ -27,6 +27,7 @@ from services.application.app.quota.lock import (
     RequestLockService,
 )
 from services.application.app.quota.lock_mongo import (
+    CLAIM_ATTEMPTS,
     COLLECTION,
     MongoRequestLockRepository,
     lock_entry,
@@ -43,6 +44,12 @@ def _lock(holder="h1", *, key=KEY, claimed_at=AT):
         key=key, holder=holder, claimed_at=claimed_at,
         expires_at=claimed_at + LEASE, released_at=None,
     )
+
+
+def _naive(value: datetime) -> datetime:
+    """드라이버가 돌려주는 모양 — fake 문서에 직접 써 넣을 때 쓴다."""
+
+    return value.astimezone(UTC).replace(tzinfo=None)
 
 
 def _strip_tzinfo(value):
@@ -79,6 +86,13 @@ class _Collection:
         self.docs: dict[str, dict] = {}
         self.indexes: list[tuple] = []
         self.calls: list[str] = []
+        self.on_conflict = None
+        """`_id` 충돌 직후 실 서버에서 일어날 수 있는 일을 끼워 넣는 seam.
+
+        충돌과 그 뒤의 확인 읽기 **사이**가 이 슬라이스에서 가장 위험한 구간이다
+        (2026-08-03 독립 검증 B1) — 그 사이에 원래 요청이 해제하거나 TTL 이 문서를
+        치울 수 있고, 그것을 안 보는 구현은 거짓 차단이나 **저장 없는 성공**을 낸다.
+        """
 
     def create_index(self, keys, **kwargs):
         self.indexes.append((keys, kwargs))
@@ -102,6 +116,8 @@ class _Collection:
             return None
         if query["_id"] in self.docs:
             # 살아 있는 잠금이 있어 필터는 안 맞는데 `_id` 는 이미 있다.
+            if self.on_conflict is not None:
+                self.on_conflict()
             raise DuplicateKeyError(query["_id"])
         self.docs[query["_id"]] = {"_id": query["_id"], **changes}
         return dict(self.docs[query["_id"]])
@@ -196,13 +212,65 @@ class MongoRequestLockRepositoryTest(unittest.TestCase):
         self.repo.claim(_lock("h1"), now=AT)
         self.assertIn(KEY, self.collection.docs)
 
-    def test_a_lock_that_vanishes_between_the_conflict_and_the_read_is_granted(self):
-        # 사실상 닫힌 경로(TTL 은 만료된 문서만 지운다)지만 도달하면 "잠금이 없다"가
-        # 사실이다. 여기서 터지면 8.3 이 이유 없이 요청을 막는다.
+    # ------------------------------------ 충돌 뒤 경쟁 (독립 검증 B1·B2 폐쇄)
+
+    def test_a_lock_released_between_the_conflict_and_the_read_is_not_a_false_block(
+        self,
+    ):
+        # ★ B1의 한쪽: 충돌 직후 원래 요청이 해제하고 냉각까지 지나면 그 잠금은
+        # **만료된 것**이다. 충돌을 곧 "잠겨 있음"으로 읽는 구현은 여기서 남을
+        # 1초짜리 거짓 차단으로 막는다 — "`expires_at > now` 가 판정의 유일한 축"과
+        # 정면으로 어긋난다.
         self.repo.claim(_lock("h1"), now=AT)
-        self.collection.find_one = lambda *_args, **_kwargs: None
+
+        def release_and_cool_down():
+            self.collection.docs[KEY].update({
+                "released_at": _naive(AT), "expires_at": _naive(AT),
+            })
+
+        self.collection.on_conflict = release_and_cool_down
         current = self.repo.claim(_lock("h2"), now=AT)
         self.assertEqual(current.holder, "h2")
+        self.assertEqual(self.collection.docs[KEY]["holder"], "h2")
+
+    def test_a_lock_removed_between_the_conflict_and_the_read_is_actually_stored(self):
+        # ★ B1의 더 위험한 쪽: 문서가 사라졌다고 **저장 없는 성공**을 돌려주면 잠금이
+        # DB 에 없으므로 **다음 요청도 통과한다** — 서로 다른 두 요청이 동시에 돌고,
+        # 이 슬라이스가 막으려던 중복 과금이 그대로 열린다.
+        self.repo.claim(_lock("h1"), now=AT)
+        self.collection.on_conflict = lambda: self.collection.docs.pop(KEY, None)
+        current = self.repo.claim(_lock("h2"), now=AT)
+        self.assertEqual(current.holder, "h2")
+        self.assertEqual(self.collection.docs[KEY]["holder"], "h2")
+
+        # 그리고 그 뒤에 온 요청은 막힌다(= 저장이 실제로 됐다).
+        self.collection.on_conflict = None
+        self.assertEqual(self.repo.claim(_lock("h3"), now=AT).holder, "h2")
+
+    def test_every_granted_claim_is_persisted(self):
+        # B2 — `LockGranted(holder=X)` 뒤에는 언제나 저장소가 X 를 들고 있어야 한다.
+        # 차지가 성립하는 세 경로(빈 키 · 만료 회수 · 강제 재차지)를 모두 지난다.
+        first = self.repo.claim(_lock("h1"), now=AT)
+        self.assertEqual(self.collection.docs[KEY]["holder"], first.holder)
+
+        later = AT + LEASE + timedelta(seconds=1)
+        second = self.repo.claim(_lock("h2", claimed_at=later), now=later)
+        self.assertEqual(self.collection.docs[KEY]["holder"], second.holder)
+
+        self.repo.force_claim(_lock("h3", claimed_at=later))
+        self.assertEqual(self.collection.docs[KEY]["holder"], "h3")
+
+    def test_a_conflict_that_never_resolves_fails_closed(self):
+        # 종료 정책(검증 지적 4): 재시도는 **유한**해야 하고, 소진되면 성공을 날조하는
+        # 대신 실패해야 한다. 실수 중복을 허용하느니 요청을 실패시킨다.
+        self.repo.claim(_lock("h1"), now=AT)
+        self.collection.find_one = lambda *_args, **_kwargs: None  # 늘 "없다"고 본다
+        self.collection.calls.clear()
+        with self.assertRaises(DuplicateKeyError):
+            self.repo.claim(_lock("h2"), now=AT)
+        self.assertEqual(
+            self.collection.calls.count("find_one_and_update"), CLAIM_ATTEMPTS)
+        self.assertEqual(self.collection.docs[KEY]["holder"], "h1")  # 남의 잠금 무손상
 
     # --------------------------------------------------------------- 해제
 

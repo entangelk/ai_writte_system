@@ -344,6 +344,43 @@ class ConstantsTest(unittest.TestCase):
             LockGranted,
         )
 
+    def test_an_env_lease_shorter_than_the_gateway_timeout_is_refused(self) -> None:
+        # H2 보강(독립 검증 2026-08-03): 생성자 인자는 자유롭지만 **배포 구성**은
+        # 계약을 어기면 거부한다. lease 가 동기 상한(gateway timeout 120초)보다 짧으면
+        # 아직 실행 중인 요청의 잠금이 풀려 보호가 상시로 새는데, 아무것도 실패하지
+        # 않아 조용하다.
+        import os
+
+        from services.application.app.quota import lock
+
+        os.environ["QUOTA_LOCK_LEASE_SECONDS"] = "60"
+        try:
+            with self.assertRaises(ValueError):
+                lock.configured_lease_seconds()
+        finally:
+            del os.environ["QUOTA_LOCK_LEASE_SECONDS"]
+
+    def test_a_zero_or_negative_env_window_is_refused(self) -> None:
+        import os
+
+        from services.application.app.quota import lock
+
+        for value in ("0", "-5"):
+            os.environ["QUOTA_LOCK_MINIMUM_WINDOW_SECONDS"] = value
+            try:
+                with self.subTest(value=value), self.assertRaises(ValueError):
+                    lock.configured_minimum_window_seconds()
+            finally:
+                del os.environ["QUOTA_LOCK_MINIMUM_WINDOW_SECONDS"]
+
+    def test_the_shipped_defaults_pass_their_own_validation(self) -> None:
+        # over-strict 방지 — 위 두 셀의 검사가 기본 배포를 막으면 안 된다.
+        from services.application.app.quota import lock
+
+        self.assertEqual(lock.configured_lease_seconds(), DEFAULT_LEASE_SECONDS)
+        self.assertEqual(lock.configured_minimum_window_seconds(),
+                         DEFAULT_MINIMUM_WINDOW_SECONDS)
+
     def test_the_environment_can_override_both(self) -> None:
         import os
 
@@ -359,6 +396,54 @@ class ConstantsTest(unittest.TestCase):
             del os.environ["QUOTA_LOCK_LEASE_SECONDS"]
         self.assertEqual(
             lock.configured_minimum_window_seconds(), DEFAULT_MINIMUM_WINDOW_SECONDS)
+
+
+class HolderTokenTest(unittest.TestCase):
+    """H1 보강(독립 검증 2026-08-03) — 토큰의 **신선함**은 fencing의 전제다.
+
+    §0.4의 소유권 검사는 "차지마다 새 토큰"을 전제로 서 있다. 같은 토큰을 돌려주는
+    factory 를 넘기면 옛 요청이 새 주인의 잠금을 정상적으로 해제해 **보호가 통째로
+    사라진다** — 그래서 기본 생산을 이 모듈이 소유하고, 그 사실을 셀로 잠근다.
+    """
+
+    def _service_with_default_tokens(self):
+        return RequestLockService(
+            InMemoryRequestLockRepository(),
+            clock=lambda: NOW,
+            minimum_window_seconds=WINDOW,
+            lease_seconds=LEASE,
+        )
+
+    def test_the_default_factory_is_owned_by_the_module(self) -> None:
+        service = self._service_with_default_tokens()
+        granted = service.claim(
+            user_id=USER, action=ACTION, target_project_id=PROJECT)
+        self.assertTrue(granted.holder)
+
+    def test_the_default_factory_never_repeats_a_token(self) -> None:
+        service = self._service_with_default_tokens()
+        tokens = {
+            service.force_claim(
+                user_id=USER, action=ACTION, target_project_id=PROJECT).holder
+            for _ in range(50)
+        }
+        self.assertEqual(len(tokens), 50)
+
+    def test_a_repeating_factory_is_what_the_default_protects_against(self) -> None:
+        # 가드의 가드: 왜 기본을 소유해야 하는지를 실제로 보여 준다. 토큰이 고정이면
+        # 옛 요청의 해제가 **새 주인의 잠금을 푼다**.
+        repo = InMemoryRequestLockRepository()
+        service = RequestLockService(
+            repo, holder_factory=lambda: "same-token", clock=lambda: NOW,
+            minimum_window_seconds=WINDOW, lease_seconds=LEASE,
+        )
+        first = service.claim(
+            user_id=USER, action=ACTION, target_project_id=PROJECT)
+        service.force_claim(
+            user_id=USER, action=ACTION, target_project_id=PROJECT)
+        self.assertTrue(service.release(
+            user_id=USER, action=ACTION, target_project_id=PROJECT,
+            holder=first.holder))
 
 
 class StoredShapeTest(_LockTestCase):

@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import math
 import os
+import uuid
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Callable, Protocol
@@ -56,6 +57,10 @@ DEFAULT_MINIMUM_WINDOW_SECONDS = 5
 #: 크래시한 요청의 잠금을 회수하는 안전 만료(§0.2). **최소 창과 다른 축이다** —
 #: 가장 긴 동기 요청(long 91초)과 gateway timeout(120초)보다 길어야 한다.
 DEFAULT_LEASE_SECONDS = 180
+
+#: 동기 경로가 넘을 수 없는 시간 = ``LLM_GATEWAY_TIMEOUT_SECONDS`` 의 기본값(`main.py`).
+#: lease 가 이보다 짧으면 **아직 살아 있는 요청의 잠금이 풀려** 보호가 상시로 샌다.
+LONGEST_SYNCHRONOUS_SECONDS = 120
 
 
 def lock_key(user_id: str, action: str, target_project_id: str) -> str:
@@ -116,12 +121,32 @@ def _env_seconds(name: str, fallback: int) -> int:
 
 
 def configured_minimum_window_seconds() -> int:
-    return _env_seconds(
+    window = _env_seconds(
         "QUOTA_LOCK_MINIMUM_WINDOW_SECONDS", DEFAULT_MINIMUM_WINDOW_SECONDS)
+    if window < 1:
+        raise ValueError(
+            "QUOTA_LOCK_MINIMUM_WINDOW_SECONDS must be at least 1 second — "
+            "a zero or negative window turns the guard off silently"
+        )
+    return window
 
 
 def configured_lease_seconds() -> int:
-    return _env_seconds("QUOTA_LOCK_LEASE_SECONDS", DEFAULT_LEASE_SECONDS)
+    """배포 구성은 계약을 어기면 **거부한다**(2026-08-03 독립 검증 H2).
+
+    생성자 인자는 자유롭게 둔다 — 테스트가 초 단위로 짧게 돌리는 자리이고, 거기서는
+    값이 눈앞에 보인다. 반면 env 오설정은 **아무도 안 보는 사이에 핵심 보호를 끈다**:
+    lease 가 gateway timeout 보다 짧으면 아직 실행 중인 요청의 잠금이 풀린다.
+    """
+
+    lease = _env_seconds("QUOTA_LOCK_LEASE_SECONDS", DEFAULT_LEASE_SECONDS)
+    if lease <= LONGEST_SYNCHRONOUS_SECONDS:
+        raise ValueError(
+            f"QUOTA_LOCK_LEASE_SECONDS must outlive the longest synchronous "
+            f"request ({LONGEST_SYNCHRONOUS_SECONDS}s, the gateway timeout) — "
+            "a shorter lease frees the lock while the request is still running"
+        )
+    return lease
 
 
 class RequestLockRepository(Protocol):
@@ -181,11 +206,19 @@ class RequestLockService:
         self,
         repository: RequestLockRepository,
         *,
-        holder_factory: Callable[[], str],
+        holder_factory: Callable[[], str] | None = None,
         clock: Callable[[], datetime] | None = None,
         minimum_window_seconds: int | None = None,
         lease_seconds: int | None = None,
     ) -> None:
+        """``holder_factory`` 는 **부를 때마다 새 토큰**을 줘야 한다.
+
+        같은 토큰을 돌려주는 factory 를 넘기면 옛 요청이 새 주인의 잠금을 해제할 수
+        있어 fencing 이 통째로 무너진다(§0.4). 그래서 기본값을 이 모듈이 소유한다 —
+        인자는 테스트가 토큰을 읽을 수 있게 하려고 남긴 자리다
+        (2026-08-03 독립 검증 H1).
+        """
+
         window = (
             minimum_window_seconds if minimum_window_seconds is not None
             else configured_minimum_window_seconds()
@@ -194,6 +227,8 @@ class RequestLockService:
             lease_seconds if lease_seconds is not None
             else configured_lease_seconds()
         )
+        if window < 1:
+            raise ValueError("the minimum window must be at least 1 second")
         if lease <= window:
             raise ValueError(
                 "lease must outlive the minimum window — they are different axes: "
@@ -201,7 +236,7 @@ class RequestLockService:
                 "synchronous request"
             )
         self._repo = repository
-        self._holder_factory = holder_factory
+        self._holder_factory = holder_factory or (lambda: uuid.uuid4().hex)
         self._clock = clock or (lambda: datetime.now(UTC))
         self._minimum_window = timedelta(seconds=window)
         self._lease = timedelta(seconds=lease)
