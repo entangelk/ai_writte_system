@@ -99,7 +99,113 @@
 
 ### Next steps
 
-- **오너 결정 대기: B1~B6.** 결정 뒤 순서는 브리프 "결정 뒤 구현 슬라이스"대로 ① 분류 확정 →
-  ② 전수 가드 테스트 먼저 → ③ 기록 → ④ 8.1 정책 브리프로 인계다.
+- 오너 결정(B1~B6)을 받는 즉시 분류 확정 → 전수 가드 → 기록 → 8.1 인계.
 - 화면 육안 확인 2건(HANDOFF Next Tasks 2번)은 이미지 재빌드가 선행돼야 한다. 이번 작업은 스택을
   올리지 않았으므로 손대지 않았다.
+
+---
+
+## Task — Slice 8.0 결정 반영·분류표·전수 가드 (SoT v1.7.83)
+
+### Goals
+
+- 같은 날 받은 오너 결정 **B1~B6 = 전부 A**를 코드 정본과 계약에 반영한다.
+- 성공 기준: ① 분류표가 코드에 있고 ② 전수 가드가 **양방향**으로 물며 ③ 카운터·원장·차감 코드는
+  여전히 0줄 ④ 기존 회귀 기준선 무변.
+
+### User Decisions and Rationale
+
+- **B1 = A (요청 1건 = 1회).** 오너 근거는 원가 정확성이 아니라 **제품 성격**이다 — "우리는
+  사용자에게 쉬운 서비스를 제공해야 한다". 그리고 **동작별 원가 차이는 요금 단위로 옮기지 않고
+  내부 BM(요금제 설계·원가 관리)에서 흡수한다**고 명시 지시했다. 따라서 가중치안(C)은 "나중에
+  얹을 수 있는 것"이 아니라 **회원에게 보이는 단위로는 채택하지 않기로 한 것**이다. 회원이 보는
+  숫자는 끝까지 "요청 몇 회"다. 이 문장을 브리프 §0·모듈 docstring·SoT에 그대로 남겼다.
+- **B2 = A, 단서 있음.** 내부 repair·재시도는 "우리가 서비스로서 처리하는 기술 문제"라 청구하지
+  않는다(B1과 같은 사고). **다만 repair를 포함한 내부 호출은 전부 우리 관측 안에 있어야 한다.**
+  → 과금과 관측을 분리한 요구다. 새 계측을 만들지 않고 기존 구조로 충족됨을 확인해 근거를
+  브리프 §3.1에 적고 가드로 잠갔다(아래 "관측 요구 충족 근거").
+- **B3·B4·B5 = A.** "B1·B2와 동일한 사고이기 때문"이라는 오너 설명 그대로, 같은 방향으로 확정.
+- **B6 = A.** 분류표를 코드 정본으로 두고 미분류를 테스트가 실패시킨다.
+
+### Completed work
+
+- **[`quota/billable_actions.py`](../../../services/application/app/quota/billable_actions.py) 신규** —
+  유료 동작 **9개**의 정본 표(`BillableAction` 리터럴·method·path·`fan_out`)와 `BILLABLE_OPERATIONS`
+  조회 집합. docstring이 B1~B6 결정과 **표에 일부러 없는 것 둘**(generation worker 실행 · job retry,
+  둘 다 같은 논리 요청)의 이유를 담는다. **카운터·차감·저장 코드 없음.**
+- **[`tests/test_billable_actions.py`](../../../tests/test_billable_actions.py) 신규** — 8 cells.
+  핵심은 `opens_scope == BILLABLE_OPERATIONS` 집합 동치라 **한 셀이 양방향을 동시에 문다**.
+  파싱이 라우트를 놓치면 다른 셀이 조용히 약해지므로 **파싱 결과를 실제 `app.routes`와 대조하는
+  셀을 먼저** 뒀다(가드의 가드).
+- **문서** — 브리프에 §0 오너 결정·§3 확정 표·§3.1 관측 근거·§4 뮤테이션 기록을 더하고 상태를
+  `Resolved`로, plans index도 갱신. SoT **v1.7.83** 변경이력 + 헤더 버전/갱신일. CHANGELOG 1행.
+
+### 관측 요구(B2 단서) 충족 근거 — 새 계측 없이 성립한다
+
+1. **유료 경로 9개가 전부 `llm_call_scope`를 연다.** 실제로는 그 역이 분류 기준(B4)이라 구조적으로
+   참이며, 새 가드의 집합 동치 셀이 이것을 잠근다.
+2. **repair 호출은 자기 레코드로 남는다.** seam C가 provider를 감싸므로 구조적이고, 이미
+   `test_llm_call_scope.py::test_a_repaired_extraction_leaves_two_records_not_one`과
+   `test_llm_call_sites.py::test_a_repaired_verdict_leaves_two_records_both_successful`이 잠그고 있다.
+   **중복 셀을 만들지 않고 참조**했다.
+3. **비동기 실행도 관측된다.** `generation_worker`가 job의 `project_id`/`request_id`로 scope를 연다 →
+   새 셀 `test_the_generation_worker_is_observed_but_not_billed`가 "관측은 되고 과금은 안 된다"를
+   한 자리에서 단정한다.
+- 같은 `correlation_id` 아래 레코드가 모이므로 "요청 1회에 내부 호출이 몇 번이었는가"를 사후에
+  셀 수 있다(KPI `multi_call_correlations`가 이미 그 축).
+- **공백 1건을 정직하게 남긴다**: 루프 내부 gate 레코드에는 `decision`·`gate_quality_score`가 없다
+  (v1.7.47 기존 공백). **호출 수 차원의 관측 요구는 충족**되고 이것은 파생 필드 공백이라 별건이다.
+
+### Regression guards and adversarial mutations
+
+가드가 실제로 무는지 **뮤테이션 7종**으로 확인했다. 전부 넣고 원복했으며, 원복은 백업 파일과
+`diff`로 동일함을 확인했다(`git checkout --` 금지 — 미커밋 슬라이스를 날린다, HANDOFF 함정).
+
+| # | 뮤테이션 | 방향 | 결과 |
+|---|---|---|---|
+| M1 | `context_search` 분류 삭제 | under-strict | 3 failed |
+| M2 | 무료 `GET …/writing/budget`를 유료로 오분류 | over-strict(B4) | 2 failed |
+| M3 | 분류 경로 오타(`writing/gate`→`gates`) | over-strict | 3 failed |
+| M4 | action 리터럴 개명(`writing_accept`→`accept_v2`) | over-strict | 1 failed |
+| M5 | 재시도 endpoint를 유료로 추가 | B5 위반 | 3 failed |
+| M6 | **분류 없이 새 LLM endpoint 추가**(다중행 데코레이터) | under-strict | 2 failed |
+| M7 | 파서 약화(다중행 데코레이터 미인식) | 가드의 가드 | 1 failed |
+
+M6이 이 가드의 존재 이유다 — 부모 계획 §5의 "새 AI 경로가 분류 없이 조용히 열리면 실패해야 한다"가
+실제로 성립함을 보인다. M7은 나머지 셀이 전부 소스 파싱에 기대므로 **파서가 약해지면 가드가
+조용히 약해진다**는 것을 잡는다.
+
+### Pattern sweep
+
+- `llm_call_scope(` 개방 지점을 repo 전체로 다시 스윕했다: `main.py` 9곳 + `generation_worker.py` 1곳
+  **뿐**이다(scripts·diagnostic 포함 그 외 0건). 분류표가 덮는 범위와 정확히 일치한다.
+- 임베딩 호출부(`.embed(`) 9곳도 확인했다 — 전부 B4=A의 무료 쪽(색인·검색·semantic matcher)이며
+  유료 경로와 겹치지 않는다.
+
+### Issues found
+
+- 없음. 기존 코드는 한 줄도 고치지 않았다(분류는 추가만).
+- 부수 관측: `docker compose -f docker-compose.test.yml up -d`가 test-mongo를 **Recreated**해
+  `docker port`가 `127.0.0.1:27020`을 보였다 — D8-7 G1=C의 loopback 바인드가 이 컨테이너에서는
+  **런타임으로도** 적용됐다(HANDOFF의 "파일 수준 시행" 함정이 재생성으로 닫히는 실례).
+
+### Verification
+
+- `python3 -m pytest -q tests/test_billable_actions.py`: **8 passed / 75 subtests**.
+- 전체 backend(test-mongo ON, 베타): **1922 passed / 1 skipped / 1700 subtests** (776s).
+  - **직전 기준선은 알파의 1911/4/1625다.** 차이는 전부 설명된다: **+8 passed·+75 subtests = 이번 신규
+    파일**, **+3 passed·−3 skipped = 알파에서 skip되던 3건이 베타에서는 실행됐다**(머신·인프라 차이).
+    남은 skip 1건은 호스트 pytest에서 구조적으로 항상 skip되는 live Chroma 셀
+    (`test_chroma_adapter.py:490`, `-rs`로 사유 확인). **회귀는 0건이다.**
+  - HANDOFF의 "skip 수는 머신마다 다르니 같은 환경에서 비교한다"가 그대로 관측된 사례다.
+- `python3 -m pytest -q tests/test_docs_indexes.py`: **7 passed / 4 subtests**.
+- `git diff --check`: clean. 뮤테이션 원복은 `diff`로 바이트 동일 확인.
+
+### Next steps
+
+- **8.1 정책 모델 브리프**가 다음 작업이다. 입력은 브리프 §3의 확정 표이고, 결정할 것은 기간·기본
+  한도·개별 override·무제한/정지 표현·정책 변경 효력 시점이다.
+- 8.2 원장 설계 시 **행에 `action` 리터럴을 남긴다** — 회원 단위에는 가중치를 안 쓰기로 했으므로,
+  원가를 사업 쪽에서 계산하려면 그 리터럴이 유일한 축이다.
+- 별도 증분 후보: `/writing/accept`의 자기보고서 호출을 멱등 replay 조회 뒤로 옮기면 "멱등 =
+  무과금"이 전 경로에서 성립한다.

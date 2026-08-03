@@ -1,7 +1,7 @@
 # Phase 8 Slice 8.0 — billable request 경계 착수 결정 브리프
 
-상태: `Decision needed — 오너 결정 대기`
-작성일: 2026-08-03
+상태: `Resolved — B1~B6 = A (오너, 2026-08-03)`
+작성일: 2026-08-03 · 결정일: 2026-08-03
 부모 계획: [`08-member-request-quota.md`](08-member-request-quota.md) §4 슬라이스 8.0
 측정 기준: 베타 머신, HEAD `05286a6`, 정본 [`system-contract-sot.md`](../system-contract-sot.md) v1.7.82
 
@@ -14,6 +14,23 @@
 
 이 슬라이스는 **무엇을 세는가**만 정한다. 언제 차감하는지(선차감/예약-확정/성공차감), 기간, 한도 값,
 초과 시 HTTP 계약은 8.1~8.3의 결정이다.
+
+## 0. 오너 결정 (2026-08-03) — **B1~B6 전부 A**
+
+추천과 같은 선택이며, 두 가지 단서가 붙었다. **단서가 선택지 A의 의미를 좁히므로 함께 읽는다.**
+
+- **B1 = A.** 근거는 원가 정확성이 아니라 **제품 성격**이다 — "우리는 사용자에게 쉬운 서비스를
+  제공해야 한다". 그리고 **동작별 원가 차이는 요금 단위로 옮기지 않고 내부 BM(요금제 설계·원가
+  관리)에서 흡수한다.** 즉 가중치안(C)은 "나중에 할 일"로 유예된 것이 아니라 **회원에게 보이는
+  단위로는 채택하지 않기로 한 것**이고, 원가 대응은 사업 쪽 문제로 갈음한다. 회원이 보는 숫자는
+  끝까지 "요청 몇 회"다.
+- **B2 = A, 단 관측은 예외 없이 전부.** 내부 repair·재시도는 "우리가 서비스로서 처리하는 기술
+  문제"라 청구하지 않는다(B1과 같은 사고). **그러나 과금하지 않는 것과 안 보이는 것은 다르다 —
+  repair를 포함한 내부 호출은 전부 관측 안에 있어야 한다.** 이 요구는 새 계측을 만들지 않고
+  기존 구조로 충족된다(§3.1에 근거와 가드).
+- **B3 · B4 · B5 = A.** B1·B2와 같은 사고("내부 기술 사정은 서비스가 흡수하고 회원에게는 단순한
+  단위를 준다")의 연장이므로 같은 방향으로 확정.
+- **B6 = A.** 분류표를 코드 정본으로 두고 미분류를 테스트가 실패시킨다.
 
 ## 1. 실측 인벤토리 (2026-08-03, HEAD `05286a6`)
 
@@ -187,8 +204,10 @@ retrieve ≤1)를 회원에게 청구할지.
 
 ## 후속 고려 (이 결정이 열어 두어야 하는 문)
 
-- **A → 가중치(C)로의 승격**: B1=A로 정해도 원장 행에 `action` 리터럴이 남으므로, dogfood 데이터가
-  쌓인 뒤 요금 배수만 8.1 정책에 얹을 수 있다. 원장 스키마를 action 리터럴 없이 만들면 이 문이 닫힌다.
+- **원가 차이는 내부 BM에서 흡수한다(오너 확정)** — 회원에게 보이는 단위에 가중치를 얹지 않는다.
+  다만 **원가를 볼 수는 있어야** 하므로 8.2 원장 행에 `action` 리터럴을 남긴다: 그래야 "이
+  요금제에서 어떤 동작이 얼마나 쓰였는가"를 사업 쪽에서 계산할 수 있다. 원장을 action 리터럴 없이
+  만들면 그 문이 닫힌다.
 - **`/writing/accept`의 보고서 호출 위치**(§1.4): replay 조회 뒤로 옮기면 "멱등 = 무과금"이 전 경로에서
   성립한다. 별도 증분이며, 이 브리프는 그 수정을 전제하지 않는다.
 - **외부 API 확장**: 외부 LLM provider가 붙어도 분류 기준이 `llm_call_scope` 개방이면 새 provider가
@@ -207,12 +226,71 @@ retrieve ≤1)를 회원에게 청구할지.
 - 한도 초과 HTTP status와 `detail` 리터럴 — **8.3**
 - 결제·플랜·가격 — Phase 8 범위 밖
 
+## 3. 확정된 billable action 표 (구현 결과)
+
+정본은 [`services/application/app/quota/billable_actions.py`](../../services/application/app/quota/billable_actions.py)이고
+이 표는 그 사본이다. 갈라지면 코드가 옳다 — 가드가 코드를 앱과 대조한다.
+
+| action 리터럴 | operation | fan-out | 1회에 포함되는 내부 호출 |
+|---|---|---|---|
+| `writing_generate` | `POST …/writing/generate` | | 플래너 · 생성 · 자기보고서. **medium/long의 워커 실행도 이 1회 안**(B5) |
+| `writing_gate` | `POST …/writing/gate` | | 플래너 · gate |
+| `writing_revise` | `POST …/writing/revise` | | 플래너 · revise |
+| `writing_revise_and_gate` | `POST …/writing/revise-and-gate` | | 플래너 · revise ≤2 · 보고서 ≤2 · gate ≤3 · 재검색 2 |
+| `writing_report` | `POST …/writing/report` | | 플래너 · 보고서 |
+| `writing_accept` | `POST …/writing/accept` | | 플래너 · 보고서 · gate |
+| `analysis_extract` | `POST …/analysis/jobs/{job_id}/run` | | 추출(+repair). replay는 provider 0회 |
+| `analysis_compare` | `POST …/analysis/jobs/{job_id}/compare` | **O** | 매칭 후보 1건마다 판정(+repair) |
+| `context_search` | `POST …/context-search` | | 질의 플래너(+repair) |
+
+**표에 일부러 없는 것**(B5=A): `generation_worker`의 배경 실행과
+`POST …/writing/generation-jobs/{job_id}/retry`. 둘 다 provider를 쓰지만 이미 센
+`writing_generate`와 **같은 논리 요청**이다. 나머지 66 operation은 무료다(B4).
+
+### 3.1 B2 관측 요구가 충족되는 근거
+
+"repair를 포함한 내부 호출 전부가 관측 안에 있다"는 **새 계측 없이** 다음 셋의 결합으로 성립한다.
+
+1. **유료 경로 9개가 전부 `llm_call_scope`를 연다** — 실제로는 그 역이 분류 기준이다(B4).
+   → `tests/test_billable_actions.py::test_every_provider_calling_operation_is_classified`
+2. **repair 호출은 자기 레코드로 남는다** — seam C가 provider를 감싸므로 구조적으로 참이고,
+   이미 잠겨 있다(`test_llm_call_scope.py::test_a_repaired_extraction_leaves_two_records_not_one`,
+   `test_llm_call_sites.py::test_a_repaired_verdict_leaves_two_records_both_successful`).
+3. **비동기 실행도 관측된다** — `generation_worker`가 job의 `project_id`/`request_id`로 scope를 연다.
+   → `tests/test_billable_actions.py::test_the_generation_worker_is_observed_but_not_billed`
+
+같은 `correlation_id`(요청의 `request_id`·`idempotency_key`) 아래 레코드가 모이므로 **"요청 1회에
+내부 호출이 몇 번이었는가"를 사후에 셀 수 있다** — KPI의 `multi_call_correlations`가 이미 그 축이다.
+
+**알려진 공백 1건**(호출 수가 아니라 파생 필드): 루프 내부 gate 레코드에는 `decision`·
+`gate_quality_score`가 없다(v1.7.47). **호출 자체는 전부 기록되므로 B2의 관측 요구는 충족**되고,
+이 공백은 별개 항목이다.
+
 ## 결정 뒤 구현 슬라이스
 
-1. **분류 확정** — B1~B4의 결과를 billable-action 표로 확정하고 이 문서와 SoT에 반영한다.
-2. **전수 가드**(B6=A일 때) — 라우트 전수 대비 분류 누락을 실패시키는 테스트를 **먼저** 쓴다.
-   양방향으로 잠근다: 분류를 빠뜨리면 실패하고, 무료 경로를 유료로 잘못 넣어도 실패한다.
-3. **문서** — `docs/mongo_collections.md`는 아직 손대지 않는다(원장은 8.2). work_log·HANDOFF 갱신.
-4. **8.1로 인계** — 정책 모델 브리프가 이 표를 입력으로 받는다.
+1. ~~분류 확정~~ — **완료**: §3 표, [`quota/billable_actions.py`](../../services/application/app/quota/billable_actions.py), SoT v1.7.83.
+2. ~~전수 가드~~ — **완료**: [`tests/test_billable_actions.py`](../../tests/test_billable_actions.py) 8 cells.
+   뮤테이션 7종으로 양방향 확인(§4).
+3. ~~문서~~ — **완료**: SoT·CHANGELOG·plans index·work log·HANDOFF. `docs/mongo_collections.md`는
+   손대지 않았다(원장은 8.2).
+4. **8.1로 인계** — 정책 모델 브리프가 §3 표를 입력으로 받는다. **다음 작업이 여기서 시작한다.**
 
-카운터·원장·차감 코드는 이 슬라이스에서 만들지 않는다.
+카운터·원장·차감 코드는 이 슬라이스에서 만들지 않았다.
+
+## 4. 가드가 실제로 무는지 — 뮤테이션 7종 (2026-08-03 실측)
+
+전부 **넣은 뒤 원복**했고 원복은 백업 파일과 `diff`로 동일함을 확인했다(`git checkout --` 금지 —
+미커밋 슬라이스를 날린다).
+
+| # | 뮤테이션 | 결과 |
+|---|---|---|
+| M1 | `context_search` 분류를 삭제(under-strict) | 3 failed |
+| M2 | 무료 경로 `GET …/writing/budget`를 유료로 오분류(over-strict, B4 위반) | 2 failed |
+| M3 | 분류표의 경로에 오타(`writing/gate` → `writing/gates`) | 3 failed |
+| M4 | action 리터럴 조용한 개명(`writing_accept` → `accept_v2`) | 1 failed |
+| M5 | 재시도 endpoint를 새 유료 요청으로 추가(B5 위반) | 3 failed |
+| M6 | **분류 없이 새 LLM endpoint 추가**(다중행 데코레이터) — 이 가드의 존재 이유 | 2 failed |
+| M7 | 파서를 약화해 다중행 데코레이터를 못 보게 | 1 failed (가드의 가드) |
+
+M7이 중요한 이유: 나머지 셀이 전부 소스 파싱에 기대므로, 파서가 라우트를 놓치면 가드가 **조용히**
+약해진다. 그래서 첫 셀이 파싱 결과를 실제 `app.routes`와 대조한다.
