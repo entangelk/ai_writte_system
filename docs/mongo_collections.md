@@ -2583,6 +2583,105 @@ A second axis (for example "list every suspended member") would add one then.
 
 ---
 
+## 43D. request_usage_ledger
+
+### 43D.1 Purpose
+
+Member request usage (Phase 8 Slice 8.2). One row per billable action, plus
+administrator adjustment rows in the same collection under a different `kind`.
+This is the billing source of record; the observability collection
+`llm_call_audits` is deliberately not reused for it.
+
+Two row kinds share the collection but **do not share their field sets**:
+
+- `kind: "usage"` — carries `action` and `dedupe_key`, never `delta`/`reason`.
+- `kind: "adjustment"` — carries `delta` (signed), `reason` and `admin_user_id`,
+  never `action`/`dedupe_key`. `delta` is added to usage: refunding twenty
+  requests is `-20`.
+
+Usage for a window is `count(usage rows) + sum(adjustment deltas)`. It may go
+below zero when an administrator refunds more than was used; that is a real
+state (a bonus beyond the limit), not an error to clamp away.
+
+The project axis is `target_project_id`, **never `project_id`**. The purge
+reconciler discovers collections carrying a `project_id` field and deletes rows
+whose project no longer exists — under that name, permanently deleting a project
+would erase its billing history, which the owner decision explicitly rejects
+("usage records survive project deletion"). The same reasoning as
+`admin_audit_events` in §43B.
+
+Window keys are computed by `quota/policy.py` (daily = KST calendar date, weekly
+= the start date of the member's 7-day cycle anchored to their signup date) and
+stored on the row. The ledger never recomputes them.
+
+There is no TTL. A retention policy is a later, separate decision.
+
+### 43D.2 Document Example
+
+```json
+{
+  "_id": "usage_entry_001",
+  "kind": "usage",
+  "user_id": "user_001",
+  "target_project_id": "project_001",
+  "action": "writing_generate",
+  "dedupe_key": "b4f1c6e2-0a7d-4f52-9a1e-6b2c8d3e5f70",
+  "daily_key": "2026-08-03",
+  "weekly_key": "2026-07-06",
+  "at": "2026-08-03T05:00:00Z"
+}
+```
+
+```json
+{
+  "_id": "adjustment_entry_001",
+  "kind": "adjustment",
+  "user_id": "user_001",
+  "target_project_id": "project_001",
+  "delta": -20,
+  "reason": "생성 실패 보상",
+  "admin_user_id": "user_admin_001",
+  "daily_key": "2026-08-03",
+  "weekly_key": "2026-07-06",
+  "at": "2026-08-03T06:10:00Z"
+}
+```
+
+Dates are stored as UTC BSON dates and readers re-attach UTC on the way out
+(pymongo returns naive datetimes).
+
+### 43D.3 Indexes
+
+```javascript
+db.request_usage_ledger.createIndex(
+  { user_id: 1, action: 1, dedupe_key: 1 },
+  {
+    name: "request_usage_ledger_dedupe_unique",
+    unique: true,
+    partialFilterExpression: { kind: "usage" }
+  }
+)
+db.request_usage_ledger.createIndex(
+  { user_id: 1, daily_key: 1 },
+  { name: "request_usage_ledger_by_user_day" }
+)
+db.request_usage_ledger.createIndex(
+  { user_id: 1, weekly_key: 1 },
+  { name: "request_usage_ledger_by_user_week" }
+)
+```
+
+`action` belongs in the unique key: the web client mints one request id per
+"continue writing" flow and sends it with `writing_generate`, `writing_gate`,
+`writing_revise_and_gate` and `writing_accept`. Without `action`, those four
+billable actions would collapse into one row.
+
+The unique index **must be partial**. Adjustment rows have no `action` or
+`dedupe_key`, Mongo indexes missing fields as `null`, and a non-partial unique
+index would therefore reject the second adjustment row.
+
+---
+
 ## 44. job_queue
 
 ### 44.1 Purpose

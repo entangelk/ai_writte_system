@@ -144,7 +144,7 @@
 | [`08-member-request-quota.md`](08-member-request-quota.md) | 회원별 **요청 횟수** quota·사용량 원장·관리자 CMS 백엔드·향후 결제 연결 seam | 상위 방향 승인 · 슬라이스별 브리프 대기 |
 | [`08-0-billable-request-boundary-decisions.md`](08-0-billable-request-boundary-decisions.md) | 8.0 — "서비스 요청 1회"의 코드 대응(차감 단위·내부 repair/라운드·fan-out·조회성 경로·논리 요청 동일성·전수 가드) | **Resolved** — B1~B6=A |
 | [`08-1-request-quota-policy-decisions.md`](08-1-request-quota-policy-decisions.md) | 8.1 — 한도 저장 계약(저장 위치·**일/주 이중 사용량 창**·창 파생/저장·기본과 override·무제한/정지 표현·변경 효력·기본값·구독 축 분리) | **Resolved** — P1~P8=확정, 구현 완료 |
-| [`08-2-usage-ledger-decisions.md`](08-2-usage-ledger-decisions.md) | 8.2 — 사용량 원장(행 필드와 삭제 내성·중복 방지 키·집계 정본·보존 기간·관리자 조정 표현). L6(이름 이력)·L7(5초 DB 잠금)은 **8.2c·8.2b로 분리** | L1~L5 확정 · 범위=나 · 구현 대기 |
+| [`08-2-usage-ledger-decisions.md`](08-2-usage-ledger-decisions.md) | 8.2 — 사용량 원장(행 필드와 삭제 내성·중복 방지 키·집계 정본·보존 기간·관리자 조정 표현). L6(이름 이력)·L7(5초 DB 잠금)은 **8.2c·8.2b로 분리** | **Resolved** — L1=B·L2~L5=A, 구현 완료(v1.7.85) |
 
 ### 프론트엔드
 

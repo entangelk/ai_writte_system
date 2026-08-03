@@ -663,3 +663,68 @@ M6·M7이 특히 중요하다 — 가짜 collection이 **드라이버처럼 naiv
 ### Next steps
 
 - **오너 결정 대기: L6 · L7 · 범위(가/나/다).** 셋이 닫히면 계약·양방향 회귀부터 구현한다.
+
+---
+
+## Task — Slice 8.2 사용량 원장 구현 (L1=B·L2~L5=A, SoT v1.7.85)
+
+### User Decisions and Rationale
+
+- **범위 = 나(분리)**(오너). 중간 독립 검증 단위를 작게 유지하고, 개발 중이라 중간 상태를
+  감수한다. → **8.2**(원장) → **8.2b**(L7 잠금) → **8.2c**(L6 이름 이력 + 계약 개정 + UI).
+- 구현자의 반대 논거("거짓 UI 문구 구간")는 **나에서 성립하지 않아 정정**했다 — L6을 통째로
+  미루므로 이름 이력·계약 개정·UI 문구가 8.2c 안에서 함께 들어간다.
+
+### Completed work
+
+- **[`quota/ledger.py`](../../../services/application/app/quota/ledger.py)** — `UsageEntry`·
+  `AdjustmentEntry`(필드 구성이 겹치지 않는다) · 저장소 seam · fake · 서비스. 창 키는 **8.1의
+  `daily_key`/`weekly_key`를 부른다**(재계산 금지).
+- **[`quota/ledger_mongo.py`](../../../services/application/app/quota/ledger_mongo.py)** —
+  `request_usage_ledger`, 인덱스 3종(부분 유니크 1 + 집계 2), `_aware` 재부착.
+- **[`docs/mongo_collections.md`](../../mongo_collections.md) §43D** 등재. SoT **v1.7.85**,
+  CHANGELOG, README SoT 표기, 브리프 구현 결과, plans index.
+- **배선하지 않았다** — 소비자는 8.3이다(8.1과 같은 규칙).
+
+### Issues found — 구현이 드러낸 것
+
+- **★ 유니크 인덱스는 부분(partial) 인덱스여야 한다.** 조정 행에는 `action`·`dedupe_key`가 없고
+  **Mongo는 없는 필드를 `null`로 색인**하므로, 전체 유니크 인덱스로 걸면 **두 번째 조정 행이
+  중복 키로 거부된다.** L5("두 종류가 한 컬렉션에 산다")가 만든 함정이며 브리프 단계에서는 안
+  보였다. fake collection이 부분 인덱스 규칙을 흉내 내게 만들어 회귀로 잡았다(M3이 실증).
+- 사용량이 **음수가 될 수 있다**(환급 > 사용). 깎지 않기로 했다 — "한도를 넘는 보너스"는 관리자가
+  만든 정당한 상태이고, 0으로 clamp하면 그 의도가 사라진다. 잔여 해석은 8.3의 몫이며 M5가
+  과잉 교정을 잡는다.
+
+### Regression guards and adversarial mutations
+
+회귀 **29 cells**. 가장 중요한 셀 둘: **같은 `request_id`라도 `action`이 다르면 각각 센다**(8.0
+계약을 지키는 자리) · **프로젝트 축이 `project_id`로 불리지 않는다**(purge가 과금 기록을 지우는
+것을 막는 자리).
+
+| # | 뮤테이션 | 결과 |
+|---|---|---|
+| M1 | dedupe 키에서 `action` 제거 | 3 failed |
+| M2 | 필드명을 `project_id`로 개명 | **26 failed** |
+| M3 | 부분 인덱스 제거(조정 행이 막힌다) | 2 failed |
+| M4 | 조정 합을 사용 카운트에 안 더함 | 2 failed |
+| M5 | 사용량을 0으로 clamp(과잉 교정) | 1 failed |
+| M6 | 창 키를 원장이 직접 계산(8.1 위임 파기) | 1 failed |
+| M7 | `_aware` 제거 | 2 failed |
+
+원복은 백업 파일과 `diff`로 바이트 동일 확인.
+
+### Verification
+
+- `python3 -m pytest -q tests/test_quota_ledger.py tests/test_quota_ledger_mongo.py`:
+  **29 passed / 2 subtests**.
+- 전체 backend(test-mongo ON, 베타): **1984 passed / 1 skipped / 1717 subtests**(900s).
+  직전 1955/1/1715 대비 **+29 passed·+2 subtests = 이번 신규 셀 그대로**. **회귀 0건.**
+- `python3 -m pytest -q tests/test_docs_indexes.py`: **9 passed / 10 subtests**. `git diff --check`: clean.
+
+### Next steps
+
+- **8.2b(L7 — 5초 중복 가드의 DB 잠금)** 이 다음이다. 착수 시 결정할 것은 잠금 컬렉션의 형태와
+  차지 연산이며, 추천은 만료를 가진 잠금 문서 + 원자적 차지(**TTL은 판정이 아니라 청소에만** —
+  Mongo TTL은 약 60초 주기라 판정을 맡기면 5초가 아니라 최대 1분 잠긴다). 8.3 시행이 곧바로 소비한다.
+- 그 뒤 **8.2c(L6 — 프로젝트 이름 이력 + D8-6 계약 개정 + purge UI 문구 수정)**.

@@ -1,6 +1,6 @@
 # Phase 8 Slice 8.2 — 사용량 원장 착수 결정 브리프
 
-상태: `L1~L5 확정 · 범위=나(분리) 확정 / L6·L7은 후속 슬라이스에서 결정 — 아래 §0.6`
+상태: `Resolved — L1=B·L2~L5=A 확정·구현 완료(SoT v1.7.85) / L6·L7은 8.2c·8.2b`
 작성일: 2026-08-03 · 결정일: 2026-08-03
 부모 계획: [`08-member-request-quota.md`](08-member-request-quota.md) §4 슬라이스 8.2
 선행: [`08-0-…`](08-0-billable-request-boundary-decisions.md)(유료 동작 9개·`action` 리터럴) ·
@@ -305,6 +305,26 @@ Mongo의 TTL 삭제는 약 60초 주기라 그것에 판정을 맡기면 **5초�
 HTTP 계약**(상태코드·`detail`·재확인 필드)은 8.3이 정한다. "이미 생성된 것의 재생성 확인"(오너 요구
 ①의 첫 항목)은 시간이 아니라 **상태** 기반이라 별개다 — scratch에 이미 후보가 있는지를 보는 것이며
 8.3/8.4의 몫이다.
+
+## 구현 결과 (2026-08-03, SoT v1.7.85)
+
+- [`quota/ledger.py`](../../services/application/app/quota/ledger.py) — 두 종류의 행(`UsageEntry`·
+  `AdjustmentEntry`, **필드 구성이 겹치지 않는다**) · 저장소 seam · in-memory fake · 서비스
+  (`record_usage`·`record_adjustment`·`used`). 창 키는 **8.1의 함수를 부른다**.
+- [`quota/ledger_mongo.py`](../../services/application/app/quota/ledger_mongo.py) —
+  `request_usage_ledger`. 인덱스 **셋**: 부분 유니크 `(user_id, action, dedupe_key)` +
+  집계 2종. `_aware` 재부착.
+- 회귀 **29 cells**([`test_quota_ledger.py`](../../tests/test_quota_ledger.py) 18 ·
+  [`test_quota_ledger_mongo.py`](../../tests/test_quota_ledger_mongo.py) 11), 뮤테이션 **7종** 전부 재실패:
+  dedupe에서 `action` 제거(3 fail) · `project_id`로 개명(**26 fail**) · 부분 인덱스 제거(2) ·
+  조정 합 누락(2) · 0 clamp 과잉교정(1) · 창 키 자체 계산(1) · `_aware` 제거(2).
+- [`docs/mongo_collections.md`](../mongo_collections.md) §43D 등재.
+- **아직 아무도 조립하지 않는다**(`create_app` 배선 없음) — 소비자는 8.3이다.
+
+**구현 중 드러난 것 하나**: 유니크 인덱스를 **부분 인덱스로 만들어야 한다**. 조정 행에는
+`action`·`dedupe_key`가 없고 Mongo는 없는 필드를 `null`로 색인하므로, 전체 인덱스로 걸면
+**두 번째 조정 행이 중복 키로 거부된다.** L5(두 종류가 한 컬렉션에 산다)가 만든 함정이며 fake
+collection이 부분 인덱스 규칙을 흉내 내어 회귀로 잡는다.
 
 ## 후속 고려 (이 결정이 열어 두어야 하는 문)
 
