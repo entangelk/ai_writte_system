@@ -404,3 +404,79 @@ M6이 이 가드의 존재 이유다 — 부모 계획 §5의 "새 AI 경로가 
 
 - **오너 결정 대기: P2-a(시간대) · P2-b(주 기준) · P8(구독 축 범위)**, 그리고 P6의 `status` 즉시 예외와
   P7 잠정값(`일 20 / 주 100` 제안) 확인. 이 다섯이 닫히면 곧바로 계약·양방향 회귀부터 구현한다.
+
+---
+
+## Task — Slice 8.1 2차 결정 반영 + 정책 저장 계약 구현 (SoT v1.7.84)
+
+### User Decisions and Rationale
+
+- **P2-a = KST** ("당연히"). 매일 리셋이라 UTC 자정(한국 오전 9시)은 매일 어긋난다.
+- **P2-b = 가입일로부터 7일** — 구현자 추천(달력 주·월요일)을 **기각**했다. 회원마다 온전한 7일을
+  주는 쪽을 택한 것이며, 대가("이번 주"가 전역 개념이 아니다)는 브리프에 명시했다.
+- **P6의 `status` 즉시 예외 = 기각.** "최대 1주 늦어지는 거 상관없음. 고객 입장에서 사용감 편의가
+  먼저." → 정지도 다른 필드와 같은 규칙(불리 = 유예)을 따른다. 해제는 유리하므로 즉시다.
+- **P7 잠정값** 이의 없음 → `일 20 / 주 100`. 요지는 값이 아니라 **자리**다.
+- **P8은 구현자 판단에 위임**("페이즈 단위까지 커지면 페이즈 계획서 작업해서 하고") → **A(8.6으로
+  미룸)** 를 택했고 **새 Phase 계획서는 만들지 않았다** — 구독/결제는 이미 부모 계획의 8.6으로 잡혀
+  있어 Phase 단위로 커지는 작업이 아니다.
+
+### Issues found
+
+- **정지 유예를 받기 전에 안전망을 실측했다**: 계정 비활성화는 세션 해석이 매 요청 `is_active`를
+  보므로([`main.py:1456`](../../../services/application/app/main.py#L1456)) **이미 발급된 세션까지 즉시**
+  끊는다. 즉 "즉시 차단 수단이 없다"가 아니라 **quota 정지(요금 정책)와 계정 차단(출입)이 다른
+  도구**인 것이다. 이 사실이 오너 결정을 안전하게 만든다 — 브리프·SoT에 근거로 남겼다.
+- **가입 "일" vs 가입 "시각"이 미결이었다.** 오너 문언이 "가입일"이므로 기준점을 가입일의 **KST
+  자정**으로 잡았다. 시각 기준이면 주 경계가 오후에 걸려 **두 창이 다른 순간에 넘어간다**("오늘
+  리셋됐는데 왜 또 바뀌나"). 회귀가 이 선택을 직접 단정한다.
+
+### Completed work
+
+- **[`quota/policy.py`](../../../services/application/app/quota/policy.py)** — 창 파생(일 KST 자정 ·
+  주 가입일 기준 7일) · 한도 표현(`int | None` + `status`) · 기본값 해석(env override) · 유·불리
+  **필드별** 분리 · 저장소 seam · in-memory fake · 서비스. **이 저장소의 유일한 지역 시간대 지점**이다.
+- **[`quota/policy_mongo.py`](../../../services/application/app/quota/policy_mongo.py)** —
+  `request_quota_policies`, `_id`=`users._id`(회원당 한 행을 DB가 강제). 조회 축이 그것뿐이라
+  **추가 인덱스 없음**이며 그 이유를 모듈과 컬렉션 문서에 적었다.
+- **[`docs/mongo_collections.md`](../../mongo_collections.md) §43C** 등재. SoT **v1.7.84**, CHANGELOG,
+  브리프 상태·구현 결과, plans index, README SoT 표기.
+- **배선하지 않았다** — `create_app`에서 아무도 이 저장소를 만들지 않는다. 소비자가 8.3에서 생기며,
+  소비자 없이 배선만 넣는 것은 이 저장소의 관례가 아니다.
+
+### Regression guards and adversarial mutations
+
+회귀 **26 cells**. 경계는 **직전·직후를 함께** 단정한다(한쪽만 보면 `<`↔`<=` 실수가 통과한다).
+
+| # | 뮤테이션 | 방향 | 결과 |
+|---|---|---|---|
+| M1 | 경계 시간대를 UTC로 되돌림 | P2-a under-strict | 4 failed |
+| M2 | 주 기준을 가입 **시각**으로(자정 정렬 제거) | P2-b | 2 failed |
+| M3 | 하향도 즉시 적용(유예 제거) | P6 under-strict | 7 failed |
+| M4 | 유·불리를 덩어리로 판정 | P6 필드별 | 1 failed |
+| M5 | 무제한 rank를 0으로 뒤집음 | P5 | 1 failed |
+| M6 | `_aware` 제거(naive 재부착 무력화) | Mongo 함정 | 2 failed |
+| M7 | 무제한을 0으로 직렬화 | over-strict | 1 failed |
+| M8 | env 미설정 시 무제한 반환 | 오배포 시뮬 | 6 failed |
+
+M6·M7이 특히 중요하다 — 가짜 collection이 **드라이버처럼 naive를 돌려주게** 만들었기 때문에 잡힌다.
+그 하네스가 aware를 돌려주도록 바뀌면 함정이 되살아나므로, **하네스 자체를 단정하는 셀**을 함께 뒀다
+(`test_the_fake_really_returns_naive_dates`).
+
+원복은 전부 백업 파일과 `diff`로 바이트 동일 확인(`git checkout --` 금지 — 미커밋 슬라이스를 날린다).
+
+### Verification
+
+- `python3 -m pytest -q tests/test_quota_policy.py tests/test_quota_policy_mongo.py`: **26 passed**.
+- 전체 backend(test-mongo ON, 베타): **1952 passed / 1 skipped / 1715 subtests**(843s).
+  직전 1926/1/1715 대비 **+26 passed = 이번 신규 셀 그대로**(subtests 는 subTest 를 안 써서 무변).
+  **회귀 0건.**
+- `python3 -m pytest -q tests/test_docs_indexes.py`: **9 passed / 10 subtests**. `git diff --check`: clean.
+
+### Next steps
+
+- **8.2 사용량 원장 브리프**가 다음이다. 입력은 이 슬라이스의 **창 키 정의**(`daily_key`·`weekly_key`)와
+  8.0의 `action` 리터럴이며, 결정할 것은 append-only 범위·idempotency key 출처와 수명·보존 기간·
+  집계 정본이다.
+- 8.3 착수 시 **P6=C의 부작용**을 다뤄야 한다: "이미 쓴 양 > 새 한도"는 정상 상태로 인정됐고, 그때
+  무엇을 하는지(거부만·회수 없음)는 아직 미정이다.

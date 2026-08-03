@@ -2520,6 +2520,69 @@ db.admin_audit_events.createIndex(
 
 ---
 
+## 43C. request_quota_policies
+
+### 43C.1 Purpose
+
+Per-member request quota policy (Phase 8 Slice 8.1). Stores **only** the limits and
+the applied state — never usage counts. Usage is a separate ledger (Slice 8.2) and
+the observability collection `llm_call_audits` is not a billing source.
+
+A member without a document uses the code default, so this collection holds only
+deliberate exceptions. That is what keeps a default change from leaving stale
+copies behind on every member row.
+
+The two usage windows are **derived, never stored**: the daily window turns over at
+KST midnight and the weekly window runs in 7-day cycles anchored to the member's
+signup date (also at KST midnight). There is no reset job — a reset is a key
+changing, not a task running.
+
+`pending` carries a policy change that is not in force yet. A change that favours
+the member (raising a limit, lifting a suspension) is applied immediately; an
+unfavourable one waits until the member's current 7-day cycle ends. Readers resolve
+this with a pure function, so nothing needs to run at the boundary.
+
+### 43C.2 Document Example
+
+```json
+{
+  "_id": "user_001",
+  "limits": {
+    "daily_limit": 20,
+    "weekly_limit": 100,
+    "status": "active"
+  },
+  "pending": {
+    "limits": {
+      "daily_limit": 5,
+      "weekly_limit": 30,
+      "status": "active"
+    },
+    "effective_at": "2026-08-10T15:00:00Z"
+  },
+  "updated_at": "2026-08-03T05:00:00Z"
+}
+```
+
+`_id` is the `users._id` of the member, so the one-row-per-member rule is enforced
+by the database itself. `daily_limit`/`weekly_limit` are `null` for "no ceiling on
+that window"; `0` means "zero requests allowed" and is a different state from
+`status: "suspended"`. `status` is one of `active` or `suspended`. `pending` is
+`null` when no deferred change is outstanding, and a new change replaces any
+outstanding one rather than queueing behind it.
+
+Dates are stored as UTC BSON dates. Readers must re-attach UTC on the way out
+(pymongo returns naive datetimes), otherwise the `effective_at` comparison raises
+`TypeError` against an aware `datetime.now(UTC)` — a failure the in-memory fake
+cannot reproduce.
+
+### 43C.3 Indexes
+
+None. The only query axis is the member, and `_id` already is the member id.
+A second axis (for example "list every suspended member") would add one then.
+
+---
+
 ## 44. job_queue
 
 ### 44.1 Purpose
