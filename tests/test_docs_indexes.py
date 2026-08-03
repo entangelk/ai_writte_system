@@ -226,7 +226,7 @@ class VerificationCountClaimsTest(unittest.TestCase):
             for value in re.findall(r"^\| \*{0,2}[^|]+\*{0,2} \| \*{0,2}(\d+)\*{0,2} \|",
                                     index, re.MULTILINE)
         ]
-        self.assertEqual(len(counts), 3, f"판정 3종을 못 읽었다: {counts}")
+        self.assertEqual(len(counts), 4, f"판정 4종을 못 읽었다: {counts}")
         self.assertEqual(sum(counts), self.actual)
 
 

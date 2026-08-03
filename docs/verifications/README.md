@@ -1,7 +1,7 @@
 # 독립 검증 기록
 
 이 디렉터리는 **구현자가 아닌 검증자가** 각 슬라이스를 다시 뜯어본 기록이다. 2026-06-24부터
-**40일치 · 213건**이 쌓여 있다.
+**40일치 · 214건**이 쌓여 있다.
 
 ## 이 저장소의 검증이 무엇인가
 
@@ -30,6 +30,7 @@
 |---|---|---|
 | 합격 | 142 | blocking 결함 없음 |
 | **조건부 합격** | **57** | 합격이되 닫아야 할 조건이 있었다 |
+| **불합격** | **1** | 핵심 계약 위반으로 다음 슬라이스 진행이 차단됐다 |
 | 서술형 | 14 | 초기 기록(판정 문구가 정형화되기 전) |
 
 **조건부 합격이 27%**라는 것이 이 절차가 형식이 아니라는 증거다. 검증이 실제로 지적을 냈고,
@@ -60,6 +61,7 @@
 
 | 기록 | 대상 | 판정 |
 |---|---|---|
+| [`slice_8_2b_duplicate_request_lock.md`](2026-08-03/slice_8_2b_duplicate_request_lock.md) | Phase 8 Slice 8.2b 실수 중복 요청 DB 잠금(G1=C·G2~G6=A, 충돌 후 release/TTL race) | **불합격** |
 | [`slice_8_2_usage_ledger.md`](2026-08-03/slice_8_2_usage_ledger.md) | Phase 8 Slice 8.2 사용량 원장(L1=B·L2~L5=A, target_project_id·부분 인덱스·시행 없음) | 합격 |
 | [`slice_8_1_quota_policy.md`](2026-08-03/slice_8_1_quota_policy.md) | Phase 8 Slice 8.1 요청 한도 정책 저장 계약(P1~P8, 이중 창·KST·파생·시행 없음) | 합격 |
 | [`slice_8_0_billable_boundary.md`](2026-08-03/slice_8_0_billable_boundary.md) | Phase 8 Slice 8.0 billable request 경계(B1~B6=A, 분류만·시행 없음) | 합격 |
