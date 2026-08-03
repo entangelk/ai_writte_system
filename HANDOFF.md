@@ -177,6 +177,7 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 
 ## Owner Decisions Needed
 
+- **★ Phase 8 Slice 8.1 — quota 정책 저장 계약 P1~P7**(브리프 [`plans/08-1-request-quota-policy-decisions.md`](docs/plans/08-1-request-quota-policy-decisions.md), 2026-08-03). P1 저장 위치 · **P2 기간 종류와 경계 시각** · **P3 기간을 파생할지 저장할지** · P4 기본과 개인 override · P5 무제한/정지 표현 · P6 변경 효력 시점 · P7 기본 한도 값. **추천은 전부 A**. 실측이 바꾼 두 가지를 먼저 본다: ① **백엔드에 지역 시간대 개념이 0곳**이라 "매월 1일"의 1일이 어느 시간대인지가 새 결정이다(P2) ② **스택에 스케줄러가 없다**(워커 2종은 폴링, cron 0건) — 그래서 기간을 저장하면 리셋이 새 인프라가 되고, 파생하면 리셋이라는 사건 자체가 없다(P3). **결정 전에는 저장 모델·시행 코드를 만들지 않는다.**
 - **★ dogfood 착수(GATE-1)** — 실 12B 풀스택 관통은 끝났고 기술적 선행 조건은 없다. 착수하면 `OPS-1` Ready 승격. **인증 HTTP 시행이 닫히면서 "인가 없이 dogfood하면 데이터가 섞인다"는 종전 걸림돌은 사라졌다** — 이제 남은 것은 D8-5~7 구현과의 순서 판단이며 오너 결정 사항이다.
 
 **결정 완료 — 오너 결정 대기 아님, 구현만 남음:**
@@ -193,7 +194,7 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 
 **1번이 현재 진행 중인 트랙이다.** 나머지는 그와 무관하게 남아 있는 것들.
 
-1. **Phase 8 Slice 8.1 정책 모델 브리프** — 8.0은 닫혔다(위 결정 완료 항목). 입력은 브리프 §3의 확정 billable-action 표이고, 결정할 것은 **기간(월/일/rolling)·신규 회원 기본 한도·개별 override·무제한/정지 표현·정책 변경 효력 시점**이다. 부모 계획 [`plans/08-member-request-quota.md`](docs/plans/08-member-request-quota.md) §4의 8.1 행이 그대로 착수 조건이며, 브리프 승인 전에는 저장 모델을 만들지 않는다. **8.2 원장을 설계할 때 행에 `action` 리터럴을 남긴다** — 회원 단위에 가중치를 안 쓰기로 했으므로 원가를 사업 쪽에서 계산할 축이 그것뿐이다.
+1. **Phase 8 Slice 8.1 — 오너 결정 대기 중이다**(브리프 제출 완료, 2026-08-03). 실측·브리프는 끝났다. 오너가 P1~P7을 확정하면: ① 저장 계약을 **양방향 회귀로 먼저** 잠근다(기간 경계의 마지막 순간과 다음 기간 첫 순간 · 무제한/정지/`limit=0`의 구분 · 행 없음 → 기본값 · **naive/aware 왕복** — fake collection 이 드라이버처럼 naive 를 돌려주는 셀을 반드시 함께 넣는다, 아래 함정) ② `quota/` 도메인 + Mongo 어댑터(신규 `*_mongo.py`는 fake-collection 왕복 테스트가 표준 요구) ③ [`docs/mongo_collections.md`](docs/mongo_collections.md) §43B 형식으로 컬렉션 등재 ④ 8.2 원장 브리프로 인계. **한도를 시행하는 코드(차단·차감)는 8.3이다** — 8.1에서 만들지 않는다.
 2. **베타 상태 확인 뒤 화면 육안 확인 2건**(둘 다 로직은 회귀로 잠겨 있고 렌더만 미검증). 2026-07-31에는 계정 `probe`와 감사 데이터가 있었지만 현재 존재를 다시 확인한다:
    (a) 관측 화면 `/projects/:id/observability` — 차트 라벨 충돌·막대 배치·좁은 화면 표 넘침. **`heavy long report probe` project를 보면 `provider_error`가 섞인 분포**를, `long report probe`를 보면 성공 분포를 볼 수 있다.
    (b) 비동기 패드 — 렌더 · 이어쓰기 탭 완료 배지 · 5초 폴링 · "다시 시도" 버튼 · 탭 전환 후 폴링 생존. **failed job이 4개 남아 있어 실패 UX를 바로 볼 수 있다** — 위 추적 부채대로 "다시 시도"가 결정적으로 재실패하는 것도 여기서 확인된다.
