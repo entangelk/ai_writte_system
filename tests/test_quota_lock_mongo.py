@@ -1,0 +1,356 @@
+"""`request_locks` 어댑터 (Slice 8.2b).
+
+세 가지가 이 파일의 존재 이유다.
+
+1. **차지가 연산 하나여야 한다**(G3=A). 읽고 판단하고 쓰면 동시 두 요청이 둘 다
+   "없음"을 읽는다 — 그것이 이 슬라이스가 존재하는 이유 자체를 무효로 만든다.
+   ``test_claiming_a_free_key_takes_exactly_one_operation`` 이 호출 기록으로 단정한다.
+2. **판정이 문서 존재가 아니라 ``expires_at`` 비교여야 한다.** fake 는 **TTL 을
+   흉내 내지 않으므로** 만료된 잠금의 문서가 그대로 남아 있고, 그래도 차지에 성공해야
+   한다. 존재로 판정하는 구현은 여기서 막히며, 그 결함은 운영에서만 보인다(TTL 주기
+   ~60초 → 5초가 최대 1분).
+3. **fencing**(§0.4). 갱신 필터가 ``holder`` 를 들지 않으면 먼저 시작한 요청이 남의
+   잠금을 푼다.
+"""
+
+from __future__ import annotations
+
+import unittest
+from datetime import UTC, datetime, timedelta
+
+from pymongo.errors import DuplicateKeyError
+
+from services.application.app.quota.lock import (
+    LockBlocked,
+    LockGranted,
+    RequestLock,
+    RequestLockService,
+)
+from services.application.app.quota.lock_mongo import (
+    COLLECTION,
+    MongoRequestLockRepository,
+    lock_entry,
+)
+
+AT = datetime(2026, 8, 3, 5, 0, tzinfo=UTC)
+KEY = "user-1:writing_generate:proj-1"
+WINDOW = timedelta(seconds=5)
+LEASE = timedelta(seconds=180)
+
+
+def _lock(holder="h1", *, key=KEY, claimed_at=AT):
+    return RequestLock(
+        key=key, holder=holder, claimed_at=claimed_at,
+        expires_at=claimed_at + LEASE, released_at=None,
+    )
+
+
+def _strip_tzinfo(value):
+    if isinstance(value, datetime):
+        return value.astimezone(UTC).replace(tzinfo=None)
+    if isinstance(value, dict):
+        return {key: _strip_tzinfo(item) for key, item in value.items()}
+    return value
+
+
+def _matches(doc, query):
+    for field, condition in query.items():
+        value = doc.get(field)
+        condition = _strip_tzinfo(condition)
+        if isinstance(condition, dict):
+            if "$lte" in condition and not (
+                value is not None and value <= condition["$lte"]
+            ):
+                return False
+        elif value != condition:
+            return False
+    return True
+
+
+class _UpdateResult:
+    def __init__(self, matched):
+        self.matched_count = matched
+
+
+class _Collection:
+    """드라이버 흉내 — `_id` 유일성과 naive 날짜를 재현하고, **TTL 은 흉내 내지 않는다**."""
+
+    def __init__(self):
+        self.docs: dict[str, dict] = {}
+        self.indexes: list[tuple] = []
+        self.calls: list[str] = []
+
+    def create_index(self, keys, **kwargs):
+        self.indexes.append((keys, kwargs))
+
+    def find_one(self, query, projection=None):
+        self.calls.append("find_one")
+        for doc in self.docs.values():
+            if _matches(doc, query):
+                return dict(doc)
+        return None
+
+    def find_one_and_update(self, query, update, *, upsert=False,
+                            return_document=None):
+        self.calls.append("find_one_and_update")
+        changes = _strip_tzinfo(update["$set"])
+        for doc in self.docs.values():
+            if _matches(doc, query):
+                doc.update(changes)
+                return dict(doc)
+        if not upsert:
+            return None
+        if query["_id"] in self.docs:
+            # 살아 있는 잠금이 있어 필터는 안 맞는데 `_id` 는 이미 있다.
+            raise DuplicateKeyError(query["_id"])
+        self.docs[query["_id"]] = {"_id": query["_id"], **changes}
+        return dict(self.docs[query["_id"]])
+
+    def update_one(self, query, update, upsert=False):
+        self.calls.append("update_one")
+        changes = _strip_tzinfo(update["$set"])
+        for doc in self.docs.values():
+            if _matches(doc, query):
+                doc.update(changes)
+                return _UpdateResult(1)
+        return _UpdateResult(0)
+
+    def replace_one(self, query, document, upsert=False):
+        self.calls.append("replace_one")
+        stored = _strip_tzinfo(document)
+        self.docs[stored["_id"]] = stored
+        return _UpdateResult(1)
+
+
+class _Database:
+    def __init__(self, collection):
+        self.collection = collection
+
+    def __getitem__(self, name):
+        assert name == COLLECTION
+        return self.collection
+
+
+class _Client:
+    def __init__(self, collection):
+        self.database = _Database(collection)
+
+    def __getitem__(self, _name):
+        return self.database
+
+
+class MongoRequestLockRepositoryTest(unittest.TestCase):
+    def setUp(self):
+        self.collection = _Collection()
+        self.repo = MongoRequestLockRepository(_Client(self.collection))
+        self.collection.calls.clear()
+
+    # ------------------------------------------------------------- 인덱스
+
+    def test_the_only_index_is_the_cleanup_ttl(self):
+        # 키가 곧 `_id` 라 조회 인덱스가 필요 없다(§0.1). 인덱스가 늘면 그 주장이
+        # 조용히 낡는다.
+        self.assertEqual(len(self.collection.indexes), 1)
+        keys, options = self.collection.indexes[0]
+        self.assertEqual(options["name"], "request_locks_ttl")
+        self.assertEqual([name for name, _direction in keys], ["expires_at"])
+        self.assertEqual(options["expireAfterSeconds"], 0)
+
+    # --------------------------------------------------------------- 차지
+
+    def test_claiming_a_free_key_takes_exactly_one_operation(self):
+        # ★ G3=A — 읽고 판단하고 쓰는 형태로 바뀌면 여기서 막힌다.
+        self.repo.claim(_lock("h1"), now=AT)
+        self.assertEqual(self.collection.calls, ["find_one_and_update"])
+
+    def test_the_claim_filter_compares_the_expiry_and_not_the_existence(self):
+        # 같은 규칙의 다른 각도: 필터에서 만료 비교가 빠지면 살아 있는 잠금을 덮어쓴다.
+        captured = {}
+        original = self.collection.find_one_and_update
+
+        def spy(query, update, **kwargs):
+            captured.update(query=query, kwargs=kwargs)
+            return original(query, update, **kwargs)
+
+        self.collection.find_one_and_update = spy
+        self.repo.claim(_lock("h1"), now=AT)
+        self.assertEqual(captured["query"], {"_id": KEY, "expires_at": {"$lte": AT}})
+        self.assertTrue(captured["kwargs"]["upsert"])
+
+    def test_a_live_lock_blocks_and_the_blocking_lock_comes_back(self):
+        self.repo.claim(_lock("h1"), now=AT)
+        current = self.repo.claim(_lock("h2"), now=AT + timedelta(seconds=1))
+        self.assertEqual(current.holder, "h1")
+
+    def test_an_expired_lock_is_reclaimed_although_the_document_is_still_there(self):
+        # ★ fake 에는 TTL 이 없다 — 문서는 그대로인데 차지에 성공해야 한다.
+        self.repo.claim(_lock("h1"), now=AT)
+        later = AT + LEASE + timedelta(seconds=1)
+        self.assertIn(KEY, self.collection.docs)
+        current = self.repo.claim(_lock("h2", claimed_at=later), now=later)
+        self.assertEqual(current.holder, "h2")
+
+    def test_the_fake_never_removes_documents_on_its_own(self):
+        # 위 셀의 가드의 가드. fake 가 TTL 을 흉내 내기 시작하면 위 셀은 아무것도
+        # 증명하지 못한다(문서가 사라져서 통과하기 때문이다).
+        self.repo.claim(_lock("h1"), now=AT)
+        self.assertIn(KEY, self.collection.docs)
+
+    def test_a_lock_that_vanishes_between_the_conflict_and_the_read_is_granted(self):
+        # 사실상 닫힌 경로(TTL 은 만료된 문서만 지운다)지만 도달하면 "잠금이 없다"가
+        # 사실이다. 여기서 터지면 8.3 이 이유 없이 요청을 막는다.
+        self.repo.claim(_lock("h1"), now=AT)
+        self.collection.find_one = lambda *_args, **_kwargs: None
+        current = self.repo.claim(_lock("h2"), now=AT)
+        self.assertEqual(current.holder, "h2")
+
+    # --------------------------------------------------------------- 해제
+
+    def test_releasing_as_the_owner_moves_the_lock_into_its_cooldown(self):
+        self.repo.claim(_lock("h1"), now=AT)
+        released_at = AT + timedelta(seconds=1)
+        self.assertTrue(self.repo.release(
+            KEY, holder="h1", now=released_at, minimum_window=WINDOW))
+        stored = lock_entry(self.collection.docs[KEY])
+        self.assertEqual(stored.released_at, released_at)
+        self.assertEqual(stored.expires_at, AT + WINDOW)  # 차지 시각 기준이다
+
+    def test_a_release_by_the_previous_holder_changes_nothing(self):
+        # ★ fencing — 강제 재차지 뒤 옛 요청이 완료되며 해제를 부르는 그 자리.
+        self.repo.claim(_lock("h1"), now=AT)
+        self.repo.force_claim(_lock("h2", claimed_at=AT + timedelta(seconds=5)))
+        before = dict(self.collection.docs[KEY])
+        self.assertFalse(self.repo.release(
+            KEY, holder="h1", now=AT + timedelta(seconds=23),
+            minimum_window=WINDOW))
+        self.assertEqual(self.collection.docs[KEY], before)
+
+    def test_releasing_a_key_that_does_not_exist_is_a_no_op(self):
+        self.assertFalse(self.repo.release(
+            "nobody", holder="h1", now=AT, minimum_window=WINDOW))
+
+    def test_the_release_update_filters_on_the_holder(self):
+        # 읽기에서만 소유권을 보고 쓰기 필터에서 빠뜨리면, 읽기와 쓰기 사이의 강제
+        # 재차지를 덮어쓴다. 필터 자체를 못박는다.
+        self.repo.claim(_lock("h1"), now=AT)
+        captured = {}
+        original = self.collection.update_one
+
+        def spy(query, update, **kwargs):
+            captured.update(query=query)
+            return original(query, update, **kwargs)
+
+        self.collection.update_one = spy
+        self.repo.release(KEY, holder="h1", now=AT, minimum_window=WINDOW)
+        self.assertEqual(captured["query"], {"_id": KEY, "holder": "h1"})
+
+    # --------------------------------------------------- 강제 재차지·왕복
+
+    def test_a_forced_claim_overwrites_a_live_lock(self):
+        self.repo.claim(_lock("h1"), now=AT)
+        self.repo.force_claim(_lock("h2", claimed_at=AT + timedelta(seconds=5)))
+        self.assertEqual(lock_entry(self.collection.docs[KEY]).holder, "h2")
+
+    def test_a_forced_claim_clears_a_previous_release(self):
+        self.repo.claim(_lock("h1"), now=AT)
+        self.repo.release(KEY, holder="h1", now=AT + timedelta(seconds=1),
+                          minimum_window=WINDOW)
+        self.repo.force_claim(_lock("h2", claimed_at=AT + timedelta(seconds=2)))
+        self.assertIsNone(lock_entry(self.collection.docs[KEY]).released_at)
+
+    def test_the_stored_key_set_is_pinned_and_carries_no_project_id(self):
+        # 프로젝트 축은 `_id` 안에만 있다. `project_id` 필드가 생기면 purge
+        # reconciler 의 컬렉션 발견에 걸린다(§43D 와 같은 함정).
+        self.repo.claim(_lock("h1"), now=AT)
+        self.assertEqual(set(self.collection.docs[KEY]), {
+            "_id", "holder", "claimed_at", "expires_at", "released_at",
+        })
+
+    def test_dates_come_back_aware(self):
+        self.repo.claim(_lock("h1"), now=AT)
+        self.repo.release(KEY, holder="h1", now=AT + timedelta(seconds=1),
+                          minimum_window=WINDOW)
+        stored = lock_entry(self.collection.docs[KEY])
+        self.assertIsNotNone(stored.claimed_at.tzinfo)
+        self.assertIsNotNone(stored.expires_at.tzinfo)
+        self.assertIsNotNone(stored.released_at.tzinfo)
+
+    def test_the_fake_really_returns_naive_dates(self):
+        # 위 셀이 무엇을 지키는지 못박는다(8.1·8.2와 같은 가드의 가드).
+        self.repo.claim(_lock("h1"), now=AT)
+        self.assertIsNone(self.collection.docs[KEY]["claimed_at"].tzinfo)
+
+    def test_round_trip_preserves_the_lock(self):
+        self.repo.claim(_lock("h1"), now=AT)
+        self.assertEqual(lock_entry(self.collection.docs[KEY]), _lock("h1"))
+
+
+class ServiceOverMongoTest(unittest.TestCase):
+    """도메인 계약이 **이 어댑터 위에서도** 성립하는가.
+
+    `test_quota_lock.py` 는 in-memory 저장소로 계약을 잠근다. 두 저장소가 갈라지면
+    유닛은 전부 green 인데 배포만 다르게 동작하므로, 계약의 뼈대 넷을 여기서 다시
+    구동한다(구간 둘 · 강제 재차지 · fencing).
+    """
+
+    def setUp(self):
+        self.collection = _Collection()
+        self.clock = {"now": AT}
+        holders = iter(f"h{n}" for n in range(1, 100))
+        self.service = RequestLockService(
+            MongoRequestLockRepository(_Client(self.collection)),
+            holder_factory=lambda: next(holders),
+            clock=lambda: self.clock["now"],
+            minimum_window_seconds=5,
+            lease_seconds=180,
+        )
+
+    def claim(self):
+        return self.service.claim(
+            user_id="user-1", action="writing_generate", target_project_id="proj-1")
+
+    def force_claim(self):
+        return self.service.force_claim(
+            user_id="user-1", action="writing_generate", target_project_id="proj-1")
+
+    def release(self, holder):
+        return self.service.release(
+            user_id="user-1", action="writing_generate", target_project_id="proj-1",
+            holder=holder)
+
+    def advance(self, seconds):
+        self.clock["now"] = self.clock["now"] + timedelta(seconds=seconds)
+
+    def test_a_request_in_flight_blocks_and_says_so(self):
+        self.claim()
+        self.advance(10)
+        blocked = self.claim()
+        self.assertIsInstance(blocked, LockBlocked)
+        self.assertTrue(blocked.in_flight)
+
+    def test_the_cooldown_blocks_and_then_lets_go(self):
+        granted = self.claim()
+        self.advance(1)
+        self.release(granted.holder)
+        blocked = self.claim()
+        self.assertIsInstance(blocked, LockBlocked)
+        self.assertFalse(blocked.in_flight)
+        self.advance(4)
+        self.assertIsInstance(self.claim(), LockGranted)
+
+    def test_a_forced_claim_moves_the_lock_instead_of_clearing_it(self):
+        self.claim()
+        self.force_claim()
+        self.assertIsInstance(self.claim(), LockBlocked)
+
+    def test_the_earlier_request_cannot_release_the_new_owners_lock(self):
+        first = self.claim()
+        self.advance(5)
+        self.force_claim()
+        self.advance(18)
+        self.assertFalse(self.release(first.holder))
+        self.assertIsInstance(self.claim(), LockBlocked)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    unittest.main()
