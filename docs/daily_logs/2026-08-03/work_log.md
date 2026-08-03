@@ -209,3 +209,84 @@ M6이 이 가드의 존재 이유다 — 부모 계획 §5의 "새 AI 경로가 
   원가를 사업 쪽에서 계산하려면 그 리터럴이 유일한 축이다.
 - 별도 증분 후보: `/writing/accept`의 자기보고서 호출을 멱등 replay 조회 뒤로 옮기면 "멱등 =
   무과금"이 전 경로에서 성립한다.
+
+---
+
+## Hardening — Slice 8.0 독립 검증(`3b7afc8`) 반영
+
+### Goals
+
+- 검증 판정은 **합격(Blocking 0)**이므로 계약을 바꾸지 않는다. 비차단 지적 H1~H4만 닫는다.
+- 원칙: **표현이 과했으면 표현을 고치고, 관습이던 것은 가드로 바꾼다.**
+
+### Verification review
+
+- [`verifications/2026-08-03/slice_8_0_billable_boundary.md`](../../verifications/2026-08-03/slice_8_0_billable_boundary.md)
+  원문 확인. 검증자가 scope 스윕·정규식 재파싱·전체 suite(778s)·뮤테이션 2종을 **독립 재도출**했고
+  구현자 주장(9=9 동치, 1922/1/1700, M1=3·M2=2 failed)과 전부 일치했다.
+- 검증자가 B2 의존처(`test_llm_call_scope.py`·`test_llm_call_sites.py`의 repair 셀)를 **본문 직독**해
+  `len(calls)==2` + over-strict 짝까지 있는 진짜 양방향 가드임을 확인했다 — 브리프 §3.1의 위임이
+  빈 칸이 아니다.
+
+### 보강 — H1 (표현이 과했다)
+
+지적: 브리프·모듈이 B4 기준을 "기계적으로 확인된다"·"강제"라고 적었으나, 강제되는 것은 **scope를
+여는 route까지**다. `ObservedProvider.generate`가 scope 없는 호출을 미기록 통과시키므로(worker·script를
+위한 기존 계약) provider를 부르되 scope를 안 여는 미래 route는 관측도 분류도 비껴간다.
+
+- **표현 정정 3곳** — 모듈 docstring B4 항·브리프 B4 추천·테스트 모듈 docstring에 **사정거리**를
+  명시했다. SoT v1.7.83 항목에도 같은 문장을 넣었다(계약 문서가 과장을 들고 있으면 안 된다).
+- **관습을 가드로** — 검증자가 "완화층은 있다(per-endpoint 셀)"고 했는데, **그 대응이 관습**이라
+  새 유료 동작이 관측 셀 없이 추가돼도 아무것도 실패하지 않았다. `BillableActionObservabilityCoverageTest`를
+  더해 ① 대응표의 키가 유료 동작 전수와 같은지 ② 지목한 셀이 실제로 **실존**하는지를 단정한다.
+  대응 실측: 7개는 `EndpointOpensAScopeTest`, `analysis_extract`는 `RunEndpointOpensAScopeTest`,
+  `writing_gate`는 `WritingGateObservabilityTest`(다른 파일이라 처음엔 공백을 의심했으나 직독해 보니
+  endpoint를 구동해 레코드를 단정하는 진짜 셀이었다 — **주장 전에 확인했다**).
+- **잔존 한계는 닫지 않고 표면화** — 정적 탐지나 scope-None 진단 메트릭은 별도 판단이라 하지 않고
+  HANDOFF 추적 부채에 "새 호출부는 감싸기·scope·분류 셋이 함께 간다"로 남겼다.
+
+### 보강 — H2 (셀이 문자열만 봤다)
+
+`test_the_generation_worker_is_observed_but_not_billed`가 worker 소스에 `llm_call_scope(`가 있는지만
+보고 **어떤 상관키로 여는지**는 안 봤다. 상관키가 B5의 실체(같은 논리 요청 귀속)이므로
+`project_id=job.project_id`·`correlation_id=job.request_id`를 셀에 못박았다.
+
+### 보강 — H3 (가드 밖의 숫자가 얼어 있었다)
+
+- 지적: `docs/verifications/README.md`·`README.md`가 **39일치**라 적는데 실제는 **40일치**. 원인은
+  `VerificationCountClaimsTest`의 패턴이 `39일치`를 **리터럴로 고정**해 일수가 가드 대상이 아니었다는
+  것 — 게다가 40으로 고치면 패턴이 매칭에 실패해 **고치는 쪽이 깨지는** 상태였다.
+- 패턴을 `(\d+)일치`로 바꾸고 `_DAY_COUNT_CLAIMS` + 전용 셀을 더해 **일수도 디스크에서 유도**하게
+  했다. 두 문서를 40으로 바로잡았다.
+- **패턴 스윕에서 같은 병 4곳을 더 찾았다**(같은 가드 밖의 숫자 주장): `README.md`가 브리프 **73개**·
+  인덱스 **89개**, `docs/plans/README.md`가 **89개 중 73개**라 적는데 실제는 **92개 중 75개**였다.
+  세는 규칙(전체 = `docs/plans/*.md` − 인덱스 자신, 브리프 = `*-decisions.md`)을 가드에 고정하고
+  네 주장을 전부 실측값으로 고쳤다.
+
+### 보강 — H4 (내가 만든 드리프트)
+
+최상위 `README.md`의 회귀 기준선 **1,911 / 1,625 subtests** → **1,922 / 1,700**, SoT **v1.7.82** →
+**v1.7.83**. 슬라이스 8.0에서 HANDOFF·CHANGELOG·SoT는 고치고 README만 놓친 자리다.
+
+### Regression guards and adversarial mutations
+
+새로 만든 가드가 무는지 **4종**으로 확인(전부 백업 원복, `git status`로 원복 확인):
+
+| # | 뮤테이션 | 결과 |
+|---|---|---|
+| H1b-M1 | 새 유료 동작을 **관측 셀 없이** 분류표에 추가 | 3 failed(대응표 셀 포함) |
+| H1b-M2 | 대응표가 지목한 관측 셀을 개명(삭제 시뮬) | 1 failed |
+| H2-M | 워커 상관키를 `job.request_id` → `job.id`로 | 1 failed |
+| H3-M | 일수를 39로 되돌림 | 1 failed |
+
+### Verification
+
+- `python3 -m pytest -q tests/test_billable_actions.py`: **10 passed / 84 subtests**(종전 8/75).
+- `python3 -m pytest -q tests/test_docs_indexes.py`: **9 passed / 10 subtests**(종전 7/4).
+- 전체 backend(test-mongo ON, 베타): **1926 passed / 1 skipped / 1715 subtests**(920s).
+  보강 전 1922/1/1700 대비 **+4 passed·+15 subtests = 이번에 더한 셀 그대로**(관측 대응표 2 · 일수 1 · plans 수 1, subtests 9+2+4). **회귀 0건.**
+- `git diff --check`: clean. 뮤테이션 4종 원복은 `git status`로 확인.
+
+### Next steps
+
+- 변함없이 **8.1 정책 모델 브리프**. 이번 보강은 계약을 바꾸지 않았다(표현 정정 + 가드 추가).

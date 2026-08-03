@@ -160,7 +160,11 @@ retrieve ≤1)를 회원에게 청구할지.
 
 **Recommendation + reason: A.** 유료/무료의 경계가 **코드에서 기계적으로 판정되는** 유일한 안이고
 (`llm_call_scope`를 여는가), 그래서 B6의 전수 가드가 "새 AI 경로가 분류 없이 열리면 실패"를 실제로
-강제할 수 있다. C는 직관적이지만 무료 경로 하나가 외부 LLM 비용을 그대로 태우는 구멍을 남긴다.
+강제할 수 있다. **사정거리는 정확히 말해 둔다**(2026-08-03 독립 검증 H1): 강제되는 것은 *scope를 여는*
+route이지 *provider를 부르는* route 전부가 아니다 — `ObservedProvider.generate`는 scope가 없으면 호출을
+미기록 통과시키므로(worker·script를 위한 기존 관측 계약), scope를 안 여는 route는 관측도 분류도
+비껴간다. 현재 9경로는 §3.1의 per-endpoint 관측 셀이 덮고 그 대응 자체가 가드에 묶여 있으며, 남은 것은
+관습 위반 미래 route에 대한 잔존 한계로 HANDOFF 추적 부채에 있다. C는 직관적이지만 무료 경로 하나가 외부 LLM 비용을 그대로 태우는 구멍을 남긴다.
 임베딩은 self-host라 지금 단계에서 회원 요금으로 옮길 이유가 약하고, 외부 임베딩 API를 도입하는
 슬라이스에서 다시 열면 된다.
 
@@ -253,6 +257,9 @@ retrieve ≤1)를 회원에게 청구할지.
 
 1. **유료 경로 9개가 전부 `llm_call_scope`를 연다** — 실제로는 그 역이 분류 기준이다(B4).
    → `tests/test_billable_actions.py::test_every_provider_calling_operation_is_classified`
+   그리고 **동작별로 "레코드가 실제로 남는다"를 단정하는 기존 셀에 묶여 있다**
+   (`BillableActionObservabilityCoverageTest` — 대응표의 키가 유료 동작 전수와 같아야 하고
+   지목한 셀이 실존해야 한다. 2026-08-03 독립 검증 H1 보강 전까지 이 대응은 관습이었다).
 2. **repair 호출은 자기 레코드로 남는다** — seam C가 provider를 감싸므로 구조적으로 참이고,
    이미 잠겨 있다(`test_llm_call_scope.py::test_a_repaired_extraction_leaves_two_records_not_one`,
    `test_llm_call_sites.py::test_a_repaired_verdict_leaves_two_records_both_successful`).
@@ -291,6 +298,15 @@ retrieve ≤1)를 회원에게 청구할지.
 | M5 | 재시도 endpoint를 새 유료 요청으로 추가(B5 위반) | 3 failed |
 | M6 | **분류 없이 새 LLM endpoint 추가**(다중행 데코레이터) — 이 가드의 존재 이유 | 2 failed |
 | M7 | 파서를 약화해 다중행 데코레이터를 못 보게 | 1 failed (가드의 가드) |
+
+**독립 검증 뒤 보강분 4종**(2026-08-03, 같은 방식으로 원복 확인):
+
+| # | 뮤테이션 | 결과 |
+|---|---|---|
+| H1b-M1 | 새 유료 동작을 **관측 셀 없이** 분류표에 추가 | 3 failed |
+| H1b-M2 | 대응표가 지목한 관측 셀을 개명(삭제 시뮬) | 1 failed |
+| H2-M | 워커 상관키를 `job.request_id` → `job.id`로(귀속 분열) | 1 failed |
+| H3-M | 검증 기록 "일치" 수를 39로 되돌림 | 1 failed |
 
 M7이 중요한 이유: 나머지 셀이 전부 소스 파싱에 기대므로, 파서가 라우트를 놓치면 가드가 **조용히**
 약해진다. 그래서 첫 셀이 파싱 결과를 실제 `app.routes`와 대조한다.

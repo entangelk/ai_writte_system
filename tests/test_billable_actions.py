@@ -2,7 +2,9 @@
 
 브리프 ``08-0-billable-request-boundary-decisions.md`` **B6=A**(오너 2026-08-03).
 부모 계획 §5의 불변식 "새 AI 경로가 quota 적용 여부를 분류하지 않은 채 조용히 열리면
-테스트가 실패해야 한다"를 규칙이 아니라 **강제**로 만든다. 선례는 새 포트에 분류를
+테스트가 실패해야 한다"를 규칙이 아니라 **강제**로 만든다 — 단 그 강제의 사정거리는
+**scope를 여는 route까지**다(맨 아래 Coverage 클래스의 "여전히 못 잡는 것" 참조).
+선례는 새 포트에 분류를
 강요하는 ``test_compose_exposure.py``와 tier 전수 가드
 ``test_auth_api.py::CombinedBoundaryMatrixTest``다.
 
@@ -20,6 +22,7 @@
 
 from __future__ import annotations
 
+import importlib
 import re
 import unittest
 from pathlib import Path
@@ -141,6 +144,12 @@ class SameLogicalRequestTest(unittest.TestCase):
             ("/projects/{project_id}/writing/generation-jobs", "post"),
             BILLABLE_OPERATIONS,
         )
+        # 2026-08-03 독립 검증 H2: 종전에는 "scope 를 연다"만 봤다. **어떤 상관키로**
+        # 여는지가 B5 의 실체다 — job 의 project/request 로 열어야 enqueue 한 그
+        # writing_generate 와 같은 논리 요청으로 묶인다. 새 상관키를 지어내면(예:
+        # job.id) 관측은 되지만 귀속이 갈라져 "같은 한 번"이 깨진다.
+        self.assertIn("project_id=job.project_id", source)
+        self.assertIn("correlation_id=job.request_id", source)
 
     def test_retrying_a_failed_generation_is_not_a_new_billable_request(self) -> None:
         # 실패한 job 재시도는 회원이 결과를 아직 못 받은 같은 요청의 재실행이다.
@@ -150,6 +159,79 @@ class SameLogicalRequestTest(unittest.TestCase):
         self.assertIn(retry, self.bodies)
         self.assertNotIn(retry, BILLABLE_OPERATIONS)
         self.assertNotIn("llm_call_scope(", self.bodies[retry])
+
+
+class BillableActionObservabilityCoverageTest(unittest.TestCase):
+    """B2 관측 요구를 **동작별로** 기존 셀에 묶는다 (2026-08-03 독립 검증 H1 대응).
+
+    이 파일의 다른 셀은 route 본문에 ``llm_call_scope(`` **문자열**이 있는지만 본다.
+    문자열이 있는데 실제로는 레코드가 안 남는 경우까지 보려면 요청을 구동해 감사
+    저장소를 읽는 셀이 필요한데, 그 셀들은 이미 세 파일에 흩어져 존재한다. 문제는
+    **그 대응이 관습이었다는 것**이다 — 새 유료 동작이 관측 셀 없이 추가돼도 아무것도
+    실패하지 않았다.
+
+    그래서 대응을 표로 못박고 ① 표의 키가 유료 동작 전수와 같은지 ② 지목한 셀이
+    실제로 존재하는지를 단정한다. 새 유료 동작을 추가하면 여기 한 줄을 더해야 하고,
+    그 줄은 실존하는 셀을 가리켜야 한다.
+
+    **여전히 못 잡는 것**(정직하게): provider 를 부르되 scope 를 아예 안 여는 미래
+    route. `ObservedProvider.generate` 는 scope 가 없으면 호출을 미기록 통과시키므로
+    (worker 진입점·script 를 위해 계약이 그렇게 정했다) 그런 route 는 관측도 분류도
+    비껴간다. 그것은 이 슬라이스가 만든 구멍이 아니라 관측 계약의 잔존 한계이며
+    HANDOFF 추적 부채에 있다.
+    """
+
+    #: 유료 동작 → 그 동작에서 **레코드가 실제로 남는 것**을 단정하는 기존 셀.
+    COVERAGE: dict[str, tuple[str, str, str]] = {
+        "writing_generate": (
+            "tests.test_llm_call_sites", "EndpointOpensAScopeTest",
+            "test_generate_endpoint_scopes_planner_and_generation"),
+        "writing_gate": (
+            "tests.test_writing_gate", "WritingGateObservabilityTest",
+            "test_successful_gate_call_is_recorded_with_its_derived_quality_score"),
+        "writing_revise": (
+            "tests.test_llm_call_sites", "EndpointOpensAScopeTest",
+            "test_revise_endpoint_scopes_the_revision_call"),
+        "writing_revise_and_gate": (
+            "tests.test_llm_call_sites", "EndpointOpensAScopeTest",
+            "test_revise_and_gate_endpoint_scopes_every_site_in_the_loop"),
+        "writing_report": (
+            "tests.test_llm_call_sites", "EndpointOpensAScopeTest",
+            "test_report_endpoint_scopes_the_report_call"),
+        "writing_accept": (
+            "tests.test_llm_call_sites", "EndpointOpensAScopeTest",
+            "test_accept_endpoint_scopes_its_gate_call"),
+        "analysis_extract": (
+            "tests.test_llm_call_scope", "RunEndpointOpensAScopeTest",
+            "test_run_endpoint_records_the_calls_its_runner_makes"),
+        "analysis_compare": (
+            "tests.test_llm_call_sites", "EndpointOpensAScopeTest",
+            "test_compare_endpoint_scopes_the_whole_job"),
+        "context_search": (
+            "tests.test_llm_call_sites", "EndpointOpensAScopeTest",
+            "test_context_search_endpoint_scopes_the_planner"),
+    }
+
+    def test_every_billable_action_has_an_observability_cell(self) -> None:
+        self.assertEqual(
+            set(self.COVERAGE), {a.action for a in BILLABLE_ACTIONS},
+            "유료 동작과 관측 셀 대응표가 갈라졌다 — 새 동작을 추가했으면 그 동작의 "
+            "레코드가 남는 것을 단정하는 셀도 함께 지목한다",
+        )
+
+    def test_every_named_observability_cell_exists(self) -> None:
+        # 셀 이름을 문자열로 들고 있으므로, 그 셀이 개명·삭제되면 표가 조용히
+        # 거짓이 된다. 여기서 해석해 실존을 확인한다.
+        for action, (module_name, class_name, method) in self.COVERAGE.items():
+            with self.subTest(action=action):
+                module = importlib.import_module(module_name)
+                suite = getattr(module, class_name, None)
+                self.assertIsNotNone(
+                    suite, f"{module_name}.{class_name} 가 없다")
+                self.assertTrue(
+                    callable(getattr(suite, method, None)),
+                    f"{module_name}.{class_name}.{method} 가 없다",
+                )
 
 
 if __name__ == "__main__":  # pragma: no cover

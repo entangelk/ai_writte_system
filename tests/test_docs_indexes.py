@@ -111,10 +111,33 @@ class RepositoryReadmeTest(unittest.TestCase):
 # (검증자는 자기 인덱스를, 구현자는 자기 것을 고치기 때문이다).
 # 링크는 가드가 보고 있었는데 **숫자는 아무도 안 보고 있었다.**
 _COUNT_CLAIMS = (
-    ("docs/verifications/README.md", r"39일치 · (\d+)건"),
+    ("docs/verifications/README.md", r"\d+일치 · (\d+)건"),
     ("docs/README.md", r"독립 검증 기록 (\d+)건"),
-    ("README.md", r"\*\*(\d+)건 / 39일치\*\*"),
+    ("README.md", r"\*\*(\d+)건 / \d+일치\*\*"),
     ("README.md", r"독립 검증 기록 \((\d+)건\)"),
+)
+
+# 같은 문장의 **일수**. 종전에는 이 자리가 `39일치` 리터럴이라 가드 밖이었고, 그래서
+# 디스크가 40일이 된 뒤에도 두 문서가 39에 얼어 있었다(2026-08-03 독립 검증 H3).
+# 리터럴로 고정하면 "숫자를 못 잡는" 것에 그치지 않고 **고치는 쪽이 깨진다** —
+# 40으로 바로잡는 순간 패턴이 매칭에 실패했다. 건수와 같은 규칙으로 디스크에서 센다.
+_DAY_COUNT_CLAIMS = (
+    ("docs/verifications/README.md", r"(\d+)일치 · \d+건"),
+    ("README.md", r"\*\*\d+건 / (\d+)일치\*\*"),
+)
+
+# 같은 병(가드 밖의 숫자 주장)이 `docs/plans/` 쪽에도 있었다 — 2026-08-03에 H3를
+# 고치다 발견했다. 두 문서가 브리프 수를 각자 적는데 둘 다 뒤처져 있었다(73개라
+# 적힌 동안 디스크는 75개). 세는 규칙을 여기 한 곳에 고정한다:
+#   전체 = docs/plans/*.md 에서 인덱스 자신(README.md)을 뺀 수
+#   브리프 = 그중 *-decisions.md
+_PLANS_TOTAL_CLAIMS = (
+    ("README.md", r"계획 · 결정 브리프 인덱스 \((\d+)개\)"),
+    ("docs/plans/README.md", r"\((\d+)개 중 \d+개\)"),
+)
+_PLANS_BRIEF_CLAIMS = (
+    ("README.md", r"추측 구현 금지 \|[^|]*\| \*\*(\d+)개\*\*"),
+    ("docs/plans/README.md", r"\(\d+개 중 (\d+)개\)"),
 )
 
 
@@ -126,7 +149,11 @@ class VerificationCountClaimsTest(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.actual = len(list(_VERIFICATIONS.glob("*/*.md")))
+        records = list(_VERIFICATIONS.glob("*/*.md"))
+        self.actual = len(records)
+        # 일수 = 기록을 가진 날짜 디렉터리 수. 빈 디렉터리는 "N일치"가 세는 대상이
+        # 아니므로 파일에서 유도한다(디렉터리를 직접 세면 빈 날이 끼어든다).
+        self.actual_days = len({record.parent.name for record in records})
 
     def test_every_stated_count_matches_the_files_on_disk(self) -> None:
         for relative, pattern in _COUNT_CLAIMS:
@@ -142,6 +169,52 @@ class VerificationCountClaimsTest(unittest.TestCase):
                     int(found[0]), self.actual,
                     f"{relative}가 {found[0]}건이라 적었지만 실제는 {self.actual}건",
                 )
+
+    def test_every_stated_day_count_matches_the_directories_on_disk(self) -> None:
+        # 건수와 같은 규칙. under-strict: 새 날짜에 기록을 넣고 일수를 안 올리면
+        # 실패한다. over-strict: 실제보다 큰 일수를 적어도 실패한다.
+        for relative, pattern in _DAY_COUNT_CLAIMS:
+            with self.subTest(document=relative, pattern=pattern):
+                text = (_ROOT / relative).read_text(encoding="utf-8")
+                found = re.findall(pattern, text)
+                self.assertEqual(
+                    len(found), 1,
+                    f"{relative}: 이 주장을 정확히 한 번 찾지 못했다 — 문구가 "
+                    "바뀌었으면 위 _DAY_COUNT_CLAIMS 도 함께 고친다",
+                )
+                self.assertEqual(
+                    int(found[0]), self.actual_days,
+                    f"{relative}가 {found[0]}일치라 적었지만 실제는 "
+                    f"{self.actual_days}일치",
+                )
+
+    def test_every_stated_plans_count_matches_the_files_on_disk(self) -> None:
+        # 검증 기록과 같은 병, 같은 처방. 브리프를 추가하고 두 문서 중 하나만
+        # 고치면 실패한다(under-strict). 실제보다 크게 적어도 실패한다(over-strict).
+        plans = _ROOT / "docs" / "plans"
+        documents = [p for p in plans.glob("*.md") if p.name != "README.md"]
+        expected = {
+            "전체": (len(documents), _PLANS_TOTAL_CLAIMS),
+            "브리프": (
+                len([p for p in documents if p.name.endswith("-decisions.md")]),
+                _PLANS_BRIEF_CLAIMS,
+            ),
+        }
+        for label, (actual, claims) in expected.items():
+            for relative, pattern in claims:
+                with self.subTest(kind=label, document=relative):
+                    text = (_ROOT / relative).read_text(encoding="utf-8")
+                    found = re.findall(pattern, text)
+                    self.assertEqual(
+                        len(found), 1,
+                        f"{relative}: 이 주장을 정확히 한 번 찾지 못했다 — 문구가 "
+                        "바뀌었으면 위 _PLANS_* 도 함께 고친다",
+                    )
+                    self.assertEqual(
+                        int(found[0]), actual,
+                        f"{relative}가 {label} {found[0]}개라 적었지만 실제는 "
+                        f"{actual}개",
+                    )
 
     def test_the_verdict_distribution_adds_up_to_the_total(self) -> None:
         # 판정 분포(합격·조건부·서술형)는 전체와 맞아야 한다. 한 건을 등재하면서
