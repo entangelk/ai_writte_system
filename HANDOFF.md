@@ -177,7 +177,7 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 
 ## Owner Decisions Needed
 
-- **★ Phase 8 Slice 8.1 — quota 정책 저장 계약 P1~P7**(브리프 [`plans/08-1-request-quota-policy-decisions.md`](docs/plans/08-1-request-quota-policy-decisions.md), 2026-08-03). P1 저장 위치 · **P2 기간 종류와 경계 시각** · **P3 기간을 파생할지 저장할지** · P4 기본과 개인 override · P5 무제한/정지 표현 · P6 변경 효력 시점 · P7 기본 한도 값. **추천은 전부 A**. 실측이 바꾼 두 가지를 먼저 본다: ① **백엔드에 지역 시간대 개념이 0곳**이라 "매월 1일"의 1일이 어느 시간대인지가 새 결정이다(P2) ② **스택에 스케줄러가 없다**(워커 2종은 폴링, cron 0건) — 그래서 기간을 저장하면 리셋이 새 인프라가 되고, 파생하면 리셋이라는 사건 자체가 없다(P3). **결정 전에는 저장 모델·시행 코드를 만들지 않는다.**
+- **★ Phase 8 Slice 8.1 — 남은 결정 P2-a·P2-b·P8 + 확인 2건**(브리프 [`plans/08-1-request-quota-policy-decisions.md`](docs/plans/08-1-request-quota-policy-decisions.md), 오너 1차 결정 2026-08-03). **확정된 것**: 사용량 창은 **매일 자정 리셋 + 주간 상한**(이중 창)이고 **구독 개월은 별도 축**이다(오너 지적 — 초판이 둘을 하나로 묶어 물었다). 한도는 창별 `daily_limit`·`weekly_limit`(`int|None`, None=무제한) + `status` enum. 정책 변경은 **상향 즉시·하향은 현재 주 끝에 발효**. 기본값은 숫자를 하드코딩하지 않고 해석 함수 한 곳을 지나게 한다. **남은 결정**: ① **P2-a 자정·주 경계의 시간대**(추천 KST — UTC면 한국에서 **매일 오전 9시**에 리셋된다) ② **P2-b "주"의 기준**(추천 달력 주·월요일) ③ **P8 구독 축을 이번에 저장할지**(추천 8.6으로 미룸). **확인 2건**: `status`(정지·해제)는 하향 유예 규칙 **밖**에 두고 즉시 적용 · P7 잠정값 `일 20 / 주 100`. **결정 전에는 저장 모델·시행 코드를 만들지 않는다.**
 - **★ dogfood 착수(GATE-1)** — 실 12B 풀스택 관통은 끝났고 기술적 선행 조건은 없다. 착수하면 `OPS-1` Ready 승격. **인증 HTTP 시행이 닫히면서 "인가 없이 dogfood하면 데이터가 섞인다"는 종전 걸림돌은 사라졌다** — 이제 남은 것은 D8-5~7 구현과의 순서 판단이며 오너 결정 사항이다.
 
 **결정 완료 — 오너 결정 대기 아님, 구현만 남음:**
@@ -194,7 +194,7 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 
 **1번이 현재 진행 중인 트랙이다.** 나머지는 그와 무관하게 남아 있는 것들.
 
-1. **Phase 8 Slice 8.1 — 오너 결정 대기 중이다**(브리프 제출 완료, 2026-08-03). 실측·브리프는 끝났다. 오너가 P1~P7을 확정하면: ① 저장 계약을 **양방향 회귀로 먼저** 잠근다(기간 경계의 마지막 순간과 다음 기간 첫 순간 · 무제한/정지/`limit=0`의 구분 · 행 없음 → 기본값 · **naive/aware 왕복** — fake collection 이 드라이버처럼 naive 를 돌려주는 셀을 반드시 함께 넣는다, 아래 함정) ② `quota/` 도메인 + Mongo 어댑터(신규 `*_mongo.py`는 fake-collection 왕복 테스트가 표준 요구) ③ [`docs/mongo_collections.md`](docs/mongo_collections.md) §43B 형식으로 컬렉션 등재 ④ 8.2 원장 브리프로 인계. **한도를 시행하는 코드(차단·차감)는 8.3이다** — 8.1에서 만들지 않는다.
+1. **Phase 8 Slice 8.1 — 오너 1차 결정은 받았고 잔여 3건 대기 중이다**(위 Owner Decisions Needed 참조). P2-a·P2-b·P8과 확인 2건이 닫히면: ① 저장 계약을 **양방향 회귀로 먼저** 잠근다 — **일 창·주 창 경계 각각**(KST면 경계가 UTC 15:00 근처라는 것을 셀이 직접 단정) · 두 창을 **모두** 통과해야 함 · 무제한/정지/`limit=0` 구분 · 행 없음 → 기본값 · **상향 즉시·하향 주 경계 발효(필드별)** 와 `status` 즉시 예외 · **naive/aware 왕복**(fake collection 이 드라이버처럼 naive 를 돌려주는 셀 필수, 아래 함정) ② `quota/` 도메인 + Mongo 어댑터(fake-collection 왕복은 표준 요구) ③ [`docs/mongo_collections.md`](docs/mongo_collections.md) §43B 형식으로 등재 ④ 8.2 원장 브리프. **창 키 계산과 시간대 변환은 한 곳에만 둔다** — KST가 채택되면 이 저장소의 유일한 지역 시간대 지점이 된다. **차단·차감 코드는 8.3이다.**
 2. **베타 상태 확인 뒤 화면 육안 확인 2건**(둘 다 로직은 회귀로 잠겨 있고 렌더만 미검증). 2026-07-31에는 계정 `probe`와 감사 데이터가 있었지만 현재 존재를 다시 확인한다:
    (a) 관측 화면 `/projects/:id/observability` — 차트 라벨 충돌·막대 배치·좁은 화면 표 넘침. **`heavy long report probe` project를 보면 `provider_error`가 섞인 분포**를, `long report probe`를 보면 성공 분포를 볼 수 있다.
    (b) 비동기 패드 — 렌더 · 이어쓰기 탭 완료 배지 · 5초 폴링 · "다시 시도" 버튼 · 탭 전환 후 폴링 생존. **failed job이 4개 남아 있어 실패 UX를 바로 볼 수 있다** — 위 추적 부채대로 "다시 시도"가 결정적으로 재실패하는 것도 여기서 확인된다.
