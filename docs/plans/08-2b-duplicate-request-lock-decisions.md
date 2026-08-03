@@ -1,6 +1,6 @@
 # Phase 8 Slice 8.2b — 실수 중복 요청의 DB 잠금 (L7) 착수 결정 브리프
 
-상태: `Resolved — G1=C · G2~G6=A (오너 2026-08-03) · 구현 완료 (SoT v1.7.86)`
+상태: `Resolved — G1=C · G2~G6=A (오너 2026-08-03) · 구현 완료 (SoT v1.7.87, 독립 검증 B1·B2 폐쇄 후 재검증 대기)`
 작성일: 2026-08-03
 부모 계획: [`08-member-request-quota.md`](08-member-request-quota.md) §4 · 분리 근거는
 [`08-2-usage-ledger-decisions.md`](08-2-usage-ledger-decisions.md) §0.6(범위=나)

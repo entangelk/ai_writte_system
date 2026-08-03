@@ -2777,9 +2777,17 @@ db.request_locks.findOneAndUpdate(
 )
 ```
 
-— and a live lock makes the upsert collide on `_id`, which is how "already
-locked" is detected. Read-then-write is not an option: two simultaneous requests
-would both read "absent".
+— and a live lock makes the upsert collide on `_id`. Read-then-write is not an
+option: two simultaneous requests would both read "absent".
+
+**The collision is a signal, not a verdict.** Between the collision and the
+follow-up read, the original request may release (moving `expires_at` into the
+past) or the TTL monitor may remove the document. Trusting that state as-is
+produces either a false block on an already-expired lock, or — worse — a
+"success" that was never stored, which lets the next request through as well.
+The adapter therefore re-checks that the blocking lock is live and otherwise
+claims again, a bounded number of times; exhausting them fails closed. A granted
+claim always means the collection holds that holder.
 
 ---
 

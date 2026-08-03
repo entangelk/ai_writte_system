@@ -1087,3 +1087,75 @@ M6·M7이 특히 중요하다 — 가짜 collection이 **드라이버처럼 naiv
   **워커가 아니라 요청 경로가** 차지·해제의 주인이다 — 워커까지 잠금을 끌고 가면 lease와 job 수명이
   서로 다른 두 시계가 된다.
 - **8.2c**(L6 이름 이력 + D8-6 삭제 계약 개정 + purge UI 문구)는 여전히 미착수.
+
+---
+
+## Hardening — Slice 8.2b 독립 검증(`c0e9ba9`) 반영: **불합격(FAIL) → B1·B2 폐쇄 + H1~H3** (SoT v1.7.87)
+
+### Verification review
+
+검증자가 **가장 의심한 축(G3 원자성)**에서 실제 결함을 찾았다. **판정은 정당하다** — 반박할 지점이
+없고, 내 61-cell green이 계약 충족과 동치가 아니라는 지적이 정확하다.
+
+| 지적 | 내 판단 | 조치 |
+|---|---|---|
+| **B1** — `DuplicateKeyError` 뒤 확인 읽기 경쟁에서 ① 만료된 잠금으로 거짓 차단 ② 문서 소실 시 **저장 없는 성공** | **타당(Blocking)**. 특히 ②는 서로 다른 두 holder를 동시에 통과시켜 **이 슬라이스의 존재 이유 자체를 무효화**한다 | 구현 수정 + 회귀 3종 |
+| **B2** — 경계 매트릭스 빈 셀, 그리고 기존 vanish 셀이 **결함을 정상으로 고정** | **타당(Blocking)**. 내가 쓴 그 셀이 가장 나쁘다 — 가드가 결함을 **승인**하고 있었다 | 셀 교체 + "grant ⇒ DB 보유" 단정 |
+| H1 — holder factory의 fresh-token 전제가 API에 없다 | 타당 | 기본 생산을 모듈이 소유(uuid4) + 고정 토큰이 왜 위험한지 셀로 |
+| H2 — env 유효 범위 미검증 | 타당 | env는 거부, 생성자 인자는 자유(이유 명시) |
+| H3 — 실 Mongo 회귀 부재 | 타당 | `test_quota_lock_live_mongo.py` 신설 |
+
+### ★ 뿌리는 한 문장이었다 — "충돌 = 잠겨 있음"
+
+`_id` 충돌은 **그 순간 문서가 있었다**는 뜻일 뿐이고, 내가 그것을 **"잠겨 있다"로 읽었다**. 두 사실
+사이에 시간이 있고 그 사이에 해제·TTL이 낀다. 더 나쁜 것은 내가 그 틈을 **알고도 잘못 처리했다는
+점**이다 — 원래 코드의 주석은 "사실상 닫힌 경로"라고 적고 `return lock`(저장 없는 성공)을 골랐다.
+**"사실상 일어나지 않는다"는 판단이 맞더라도, 일어났을 때의 처리로 *중복 실행을 허용하는 쪽*을 고른
+것은 틀렸다.** 드물다는 것은 안전하다는 뜻이 아니다 — 잠금에서는 **fail-closed**가 기본이어야 한다.
+
+### Completed work
+
+- [`lock_mongo.py`](../../../services/application/app/quota/lock_mongo.py) — 충돌 뒤 **살아 있음을 다시
+  확인**하고, 없거나 만료면 **원자적 차지를 다시** 한다. 재시도는 `CLAIM_ATTEMPTS`(3)로 유한하고
+  소진되면 **예외를 올려 fail-closed** 한다.
+- [`lock.py`](../../../services/application/app/quota/lock.py) — 기본 holder factory(uuid4) 소유,
+  `configured_*` env 검증(lease > 120초 · window ≥ 1), 생성자 window 하한.
+- 회귀 **+13 cells**: 해제 교차 · TTL 삭제 교차 · 종료 정책(fail-closed·유한) · **grant ⇒ DB 보유**
+  (세 경로) · H1 3종 · H2 3종 · 실 Mongo 4종. 기존 vanish 셀은 **삭제**했다(결함 승인 셀).
+- 문서: SoT **v1.7.87**, §43E "collision is a signal, not a verdict", HANDOFF, README 숫자.
+
+### Regression guards and adversarial mutations
+
+| # | 변형 | 재실패 |
+|---|---|---|
+| M-B1 | **검증자가 지적한 원래 코드로 되돌린다**(충돌 → 그대로 반환 / 소실 → `return lock`) | 3 cells(해제 교차·TTL 교차·fail-closed) |
+| M13 | 충돌 뒤 만료 여부를 다시 안 본다 | 1 cell |
+| M14 | 재시도 상한을 1로(종료 정책) | 2 cells |
+| M15 | 기본 holder factory를 고정 토큰으로 | 4 cells(실 Mongo 3 포함 — fencing이 실제로 무너진다) |
+| M16 | env 검증 제거 | 3 cells |
+| M17 | 충돌 재확인 뒤 저장 없이 성공 | 3 cells |
+
+### ★ 사고 1건 — HANDOFF의 함정을 그대로 밟았다 (손실 없음, 기록으로 남긴다)
+
+뮤테이션 원복에 `git checkout -- services/application/app/quota/`를 썼는데 **그 시점 수정이 미커밋이라
+B1 수정이 통째로 날아갔다.** HANDOFF "함정" 절에 **이미 적혀 있는 항목**이고(2026-07-30 독립 검증
+사고), 그럼에도 재발했다. 복구는 `cp` 백업(lock_mongo)과 재작성(lock)으로 끝났고 최종 상태는 회귀로
+확인했다. **교훈은 규칙을 아는 것으로 부족하다는 것** — 그래서 이번에는 **수정을 먼저 커밋하고**
+뮤테이션을 돌렸다(CLAUDE.md §6이 정확히 그 이유로 checkpoint 커밋을 요구한다). 다음 작업자도 같은
+순서를 쓰기 바란다: **수정 커밋 → 뮤테이션 → `git checkout`으로 원복.**
+
+### Verification
+
+- 집중: `python3 -m pytest -q tests/test_quota_lock.py tests/test_quota_lock_mongo.py
+  tests/test_quota_lock_live_mongo.py` → **74 passed / 6 subtests**(종전 61/4).
+- 전체 backend(test-mongo ON, 베타): **2059 passed / 4 skipped / 1725 subtests**(123s).
+  직전 2046/4/1723 대비 **+13 passed·+2 subtests = 이번 신규 셀 그대로**. **회귀 0건.**
+- 실 Mongo 20-way 동시 차지: 1 granted / 19 blocked이며 **DB가 승자 holder를 보유**(검증자 실측을
+  회귀로 상시화했다).
+- `git diff --check`: clean.
+
+### Next steps
+
+- **8.2b 독립 재검증**이 다음이다(검증자 Outstanding items 그대로). 재검증 통과 전에는 **8.3 조립 금지**.
+- 재검증자가 볼 자리: ① 충돌 뒤 경쟁 3종이 원래 결함 코드에서 재실패하는지 ② `LockGranted` ⇒ 저장
+  단정이 세 경로를 다 지나는지 ③ 실 Mongo 셀이 test-mongo 없이는 skip되는지(실패가 아니라).
