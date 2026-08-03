@@ -2682,6 +2682,107 @@ index would therefore reject the second adjustment row.
 
 ---
 
+## 43E. request_locks
+
+### 43E.1 Purpose
+
+Server-side lock against accidentally duplicated requests (Phase 8 Slice 8.2b).
+The ledger's dedupe index in §43D only bites when the client key repeats, and
+the web client mints a fresh uuid per click — a second click therefore passes it.
+This collection is what actually stops it.
+
+The lock is a **control, not a fact**. Losing a document costs nothing (billing
+history lives in §43D), which is why TTL cleanup is safe here and a retention
+policy is not a discussion.
+
+One document per `(user_id, action, target_project_id)`; that triple **is** the
+`_id`, so no additional index exists. The axis keeps the product's normal chain
+(`writing_generate` → `writing_gate` → `writing_revise_and_gate` →
+`writing_accept`) unblocked, and keeps work in two projects independent.
+
+The lock covers **two segments**, split by one field:
+
+- `released_at: null` — the request is still running. Synchronous generation
+  takes about 23 seconds (91 for `long`), so this is where accidental
+  double-clicks actually happen; a fixed five-second window would miss them.
+- `released_at` set — the request finished, and the lock stays until
+  `claimed_at` + the minimum window (5 s, product policy). A request that took
+  longer than that window is unlocked as soon as it finishes.
+
+`expires_at` is the **only axis of judgment**: a lock is held while
+`expires_at > now`. The TTL index is **cleanup only**. Mongo's TTL monitor runs
+roughly every 60 seconds, so judging by document existence would turn the
+five-second window into a minute-long one — and no test would show it, because
+fakes have no TTL cycle.
+
+`holder` is a fencing token. A confirmed ("yes, give me a second draft") request
+force-claims the lock and becomes its new owner; the earlier request then
+finishes and calls release. Without the ownership check, that release would free
+the **new** owner's lock and leave the second generation unprotected. Release
+therefore only acts when `holder` matches.
+
+There is **no `project_id` field** — the project axis lives inside `_id`. The
+purge reconciler discovers collections carrying a `project_id` field, and there
+is no reason to put locks in its path (§43D has the same reasoning, for a
+weightier cause).
+
+Known limit: if the lease expires while the original request is still running,
+a duplicate can slip through. The lease is set well above the longest
+synchronous path (gateway timeout 120 s) as the defence. This is a best-effort
+control, not a guarantee.
+
+### 43E.2 Document Example
+
+```json
+{
+  "_id": "user_001:writing_generate:project_001",
+  "holder": "0f6a1c4e8b2d4f7a9c3e5d1b7f0a2c48",
+  "claimed_at": "2026-08-03T05:00:00Z",
+  "expires_at": "2026-08-03T05:03:00Z",
+  "released_at": null
+}
+```
+
+After the request completes at 05:00:01 the same document reads:
+
+```json
+{
+  "_id": "user_001:writing_generate:project_001",
+  "holder": "0f6a1c4e8b2d4f7a9c3e5d1b7f0a2c48",
+  "claimed_at": "2026-08-03T05:00:00Z",
+  "expires_at": "2026-08-03T05:00:05Z",
+  "released_at": "2026-08-03T05:00:01Z"
+}
+```
+
+Dates are stored as UTC BSON dates and readers re-attach UTC on the way out
+(pymongo returns naive datetimes).
+
+### 43E.3 Indexes
+
+```javascript
+db.request_locks.createIndex(
+  { expires_at: 1 },
+  { name: "request_locks_ttl", expireAfterSeconds: 0 }
+)
+```
+
+That is the only index. The claim is one operation —
+
+```javascript
+db.request_locks.findOneAndUpdate(
+  { _id: key, expires_at: { $lte: now } },
+  { $set: { holder, claimed_at: now, expires_at: now + lease, released_at: null } },
+  { upsert: true, returnDocument: "after" }
+)
+```
+
+— and a live lock makes the upsert collide on `_id`, which is how "already
+locked" is detected. Read-then-write is not an option: two simultaneous requests
+would both read "absent".
+
+---
+
 ## 44. job_queue
 
 ### 44.1 Purpose

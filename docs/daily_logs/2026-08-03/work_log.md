@@ -989,3 +989,101 @@ M6·M7이 특히 중요하다 — 가짜 collection이 **드라이버처럼 naiv
 - 이미지는 여전히 코드보다 뒤처져 있다(application 07-29 등) — **화면 확인이 필요한 작업(8.2c·8.4)에
   들어가기 전 재빌드**가 선행돼야 한다.
 - 작업 트리 clean, push 안 함.
+
+---
+
+## Task — Slice 8.2b 중복 요청 DB 잠금 구현 (G1=C·G2~G6=A, SoT v1.7.86)
+
+브리프 [`plans/08-2b-duplicate-request-lock-decisions.md`](../../plans/08-2b-duplicate-request-lock-decisions.md)가
+결정을 전부 닫아 둔 상태에서 이어받았다. 새 오너 결정 없음 — **결정 반영 구현**이다.
+
+### Goals
+
+1. 계약을 **양방향 회귀로 먼저** 잠근다(브리프 §"결정 뒤 구현 슬라이스" 1의 셀 목록) → verify: 새 회귀가
+   구현 전에 실패하고 구현 뒤 통과한다.
+2. 도메인 + Mongo 어댑터 → verify: 뮤테이션으로 각 셀이 무는지 실측한다.
+3. `mongo_collections.md` §43E · 정본 v1.7.86 → verify: 문서 인덱스 가드 통과.
+4. 전체 회귀 무회귀 → verify: 기준선 대비 증가분이 전부 신규 셀로 설명된다.
+
+### Completed work
+
+| 산출물 | 내용 |
+|---|---|
+| [`quota/lock.py`](../../../services/application/app/quota/lock.py) | 잠금 도메인 — 세 연산(차지·해제·강제 재차지), 두 구간(진행 중·냉각), 두 상수(최소 창·lease), in-memory 저장소 |
+| [`quota/lock_mongo.py`](../../../services/application/app/quota/lock_mongo.py) | `request_locks` 어댑터 — `find_one_and_update` 한 번으로 차지, 청소용 TTL 인덱스 하나 |
+| [`tests/test_quota_lock.py`](../../../tests/test_quota_lock.py) | 도메인 회귀 **40 cells**(+4 subtests) |
+| [`tests/test_quota_lock_mongo.py`](../../../tests/test_quota_lock_mongo.py) | 어댑터 회귀 **21 cells** — 그중 4는 **어댑터 위에서 서비스를 구동**해 두 저장소가 갈라지는 것을 막는다 |
+| `docs/mongo_collections.md` §43E · SoT v1.7.86 · `plans/README.md` · README 숫자 | 문서 |
+
+**8.3이 소비할 표면**: `RequestLockService.claim(...) -> LockGranted | LockBlocked` ·
+`force_claim(...) -> LockGranted` · `release(..., holder=...) -> bool`. 실패는
+`retry_after_seconds`(올림, 최소 1)와 `in_flight`를 들고 온다. **`create_app` 배선은 하지 않았다** —
+소비자가 8.3이라 지금 조립하면 쓰지 않는 배선이 생긴다(8.1·8.2와 같은 판단).
+
+### Issues found — 구현이 드러낸 것
+
+- **★ `holder`가 없으면 fencing 회귀를 쓸 수조차 없다.** 브리프 §0.4가 이미 잡아 둔 자리지만, 구현
+  순서상 **차지가 토큰을 돌려주지 않으면 "먼저 시작한 요청"을 테스트가 지목할 방법이 없다**. 토큰은
+  fencing의 수단이자 **회귀의 언어**다.
+- **`released_at`은 재차지에서 반드시 지워져야 한다.** 만료된 잠금을 다시 차지할 때 옛 `released_at`이
+  남으면, 지금 **생성 중인** 요청이 8.3에게 "방금 요청함(냉각 중)"으로 보고된다 — 화면이 "N초 뒤 다시
+  시도하세요"라고 말하는데 실제로는 23초짜리 생성이 돌고 있는 상태다. 브리프에 없던 항목이라
+  `StoredShapeTest`에 셀로 세웠다.
+- **남은 시간은 올림해야 한다.** 0.5초 남은 상태에서 내림하면 "0초 뒤 다시"가 되고, 그 재시도는 다시
+  막힌다. 하한 1초를 둔다.
+- **해제의 읽기-쓰기 사이는 안전하다** — `claimed_at`은 그 holder에게 불변이고 소유권은 **갱신 필터가
+  다시 확인**하므로, 그 사이 강제 재차지가 일어나면 아무 문서도 안 맞는다. 파이프라인 갱신($max)으로
+  한 연산으로 줄일 수 있지만 fake가 파이프라인을 해석해야 해 **회귀의 값이 떨어진다** — 안 했다.
+- **차지의 "막은 문서가 곧바로 사라지는 경우"는 사실상 닫힌 경로다**(TTL은 **만료된** 문서만 지우는데,
+  `DuplicateKeyError`가 났다는 것은 그 순간 잠금이 살아 있었다는 뜻이다). 그래도 도달하면 "잠금이 없다"가
+  사실이므로 **차지한 것으로 본다** — 여기서 터지면 8.3이 이유 없이 요청을 막는다. 셀로 고정했다.
+
+### Regression guards and adversarial mutations
+
+**뮤테이션 12종 전부 재실패**(원복은 `git checkout -- services/application/app/quota/`, 슬라이스는
+그 전에 커밋해 두었다 — 미커밋 상태에서 그 명령을 쓰면 슬라이스가 통째로 날아간다).
+
+| # | 변형 | 재실패 |
+|---|---|---|
+| M1 | 판정을 **존재 여부**로(`expires_at` 비교 제거) — TTL 함정 그 자체 | 7 cells |
+| M2 | 해제에서 **소유권 검사 제거**(도메인+어댑터 둘 다) | 5 cells |
+| M3 | Mongo 차지를 **read-then-write**로 | 2 cells |
+| M4 | 냉각 기준을 **해제 시각**으로(차지 시각이 아니라) | 9 cells |
+| M5 | 해제가 **냉각을 안 남긴다**(G1=B로 후퇴) | 7 cells |
+| M6 | 확인이 잠금을 **옮기지 않고 지운다**(G4=C) | 4 cells |
+| M7 | 키 축에서 **`action` 제거** | 2 cells |
+| M8 | **두 상수를 하나로** 합친다(+ 생성자 검사 무력화) | 4 cells |
+| M9 | `in_flight`를 늘 `True`로(이유 파생 손실) | 2 cells |
+| M10 | 재차지가 **`released_at`을 잔류**시킨다 | 1 cell |
+| M11 | 남은 시간에서 **올림·하한 제거** | 1 cell |
+| M12 | TTL 인덱스에서 `expireAfterSeconds` 제거 | 1 cell |
+
+**over-strict 짝을 함께 둔 자리 셋**: 경계 직후 통과(`..._right_after_the_minimum_window_ends`) ·
+자기 토큰이면 정상 해제(`test_the_owner_releases_normally`) · 오래 걸린 요청은 냉각 없이 곧바로 풀림
+(`..._unlocks_immediately`). M5·M2의 과잉 교정이 이 셋에 걸린다.
+
+**어댑터 위 서비스 구동 4 cells**를 따로 둔 이유: 계약은 in-memory로 잠기는데 두 저장소가 갈라지면
+**유닛은 전부 green인데 배포만 다르게 동작한다**. 구간 둘·강제 재차지·fencing을 어댑터 위에서 다시 돌린다.
+
+### Verification
+
+- `python3 -m pytest -q tests/test_quota_lock.py tests/test_quota_lock_mongo.py`:
+  **61 passed / 4 subtests**.
+- 전체 backend(test-mongo ON, 베타): **2046 passed / 4 skipped / 1723 subtests**(116s).
+  직전 기준선 **1988/1/1719** 대비 **+58 passed · +3 skipped · +4 subtests**이며 **합계 +61 = 이번 신규
+  셀 그대로**다. **회귀 0건.** skip 3건 증가는 내 변경과 무관하다 — `elasticsearch` 파이썬 패키지가
+  이 셸의 인터프리터에 없어 `test_context_search_memory_lexical_retrieval.py`의 3 cells가 **자기
+  skip 가드**로 빠진 것이다(`-rs`로 사유 확인). 남은 1건은 늘 skip되는 live Chroma 셀.
+- `python3 -m pytest -q tests/test_docs_indexes.py`: 9 passed / 10 subtests(문서 인덱스·링크·숫자 주장).
+- `git diff --check`: clean.
+
+### Next steps
+
+- **8.3(시행)**이 다음이다. 이 슬라이스가 넘기는 것: 차지 실패의 두 이유를 **`429` 하나 + `detail`
+  문구**로 옮기고(브리프 G6, H3 개정 없음), 유료 9경로의 `responses=`에 429를 선언하며 **tier 전수
+  가드에 등재**한다. 확인 통로는 `force_claim`이고, **문구는 8.4**이되 방향은 브리프 §0.4에 못박혀 있다
+  (정당한 사용자를 꾸짖지 않는다).
+- 조립 시 주의: 잠금은 **차지 → 요청 처리 → 해제**가 한 요청 안에서 닫혀야 한다. 비동기 생성(202)은
+  **워커가 아니라 요청 경로가** 차지·해제의 주인이다 — 워커까지 잠금을 끌고 가면 lease와 job 수명이
+  서로 다른 두 시계가 된다.
+- **8.2c**(L6 이름 이력 + D8-6 삭제 계약 개정 + purge UI 문구)는 여전히 미착수.
