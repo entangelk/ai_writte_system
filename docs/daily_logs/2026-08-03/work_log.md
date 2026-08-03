@@ -728,3 +728,56 @@ M6·M7이 특히 중요하다 — 가짜 collection이 **드라이버처럼 naiv
   차지 연산이며, 추천은 만료를 가진 잠금 문서 + 원자적 차지(**TTL은 판정이 아니라 청소에만** —
   Mongo TTL은 약 60초 주기라 판정을 맡기면 5초가 아니라 최대 1분 잠긴다). 8.3 시행이 곧바로 소비한다.
 - 그 뒤 **8.2c(L6 — 프로젝트 이름 이력 + D8-6 계약 개정 + purge UI 문구 수정)**.
+
+---
+
+## Hardening — Slice 8.2 독립 검증(`afc9df0`) 반영
+
+### Verification review
+
+- [`verifications/2026-08-03/slice_8_2_usage_ledger.md`](../../verifications/2026-08-03/slice_8_2_usage_ledger.md)
+  원문 확인. 판정 **합격 · Blocking 0**. 검증자가 두 핵심 주장을 **코드 밖까지 가서** 입증했다:
+  `purge_reconciler.py`가 `project_id` 필드로 컬렉션을 **발견**한다는 것(하드코딩 목록이 아님)과,
+  프론트 `DraftEditor.tsx:226`이 intent마다 uuid 하나를 만들어 **한 흐름의 여러 동작이 공유**한다는
+  것(`DraftEditor.test.tsx:348-349`가 `calls[3]`·`calls[4]`의 동일 `intent-1`을 단정).
+- 뮤테이션 7종 카운트가 **한 건도 어긋나지 않았다**(8.1 검증의 H3 같은 모양 의존성이 이번엔 없었다).
+
+### 보강 — H1 (전이적 보호를 경계에서 잠갔다)
+
+`member_created_at`·clock의 naive 거부는 8.1의 `_require_aware`에서 **전이적으로** 온다(원장이 창
+키를 직접 계산하지 않기 때문). 검증자 판단대로 지금 안전하지만 **잠겨 있지는 않았다** — 8.1의
+단정이 사라지면 원장 스위트의 어떤 셀도 실패하지 않는다. `AwarenessInheritanceTest` 3 cells를
+더해 경계에서 다시 단정했다(over-strict 방향도 포함: 정상 aware 경로가 막히면 실패).
+
+### 보강 — H2 (표본 한 건이면 컬렉션 전체가 sweep 대상이 된다)
+
+- 지적: 파기 reconciler의 발견은 `find_one({project_id: {$exists: true}})`라 **표본**이다. 원장 문서
+  **단 하나**에라도 `project_id`가 섞이면 그 컬렉션이 발견돼 과금 기록이 지워진다.
+- 종전 셀은 **사용 행의 이름 부재만** 봤다. 두 가지를 고쳤다: ① 사용·조정 **두 종류를 모두** 보게
+  하고 ② **저장 문서의 키 집합 전체를 고정**했다 — 이름 부재만으로는 "다른 새 필드"를 못 잡지만,
+  키 집합을 못박으면 필드를 더하려면 이 셀을 함께 고쳐야 한다.
+- 뮤테이션 2종: 사용 행에 `project_id` 추가 → **2 failed** · **조정 행에만** 추가 → **2 failed**
+  (표본 한 건이면 충분하다는 지적을 그대로 재현한 변형이다).
+
+### Regression guards and adversarial mutations
+
+| # | 뮤테이션 | 결과 |
+|---|---|---|
+| H2-M1 | 사용 행 문서에 `project_id` 추가 | 2 failed |
+| H2-M2 | **조정 행에만** `project_id` 추가 | 2 failed |
+| H1-M | 8.1의 awareness 단정 제거(원장 경계가 잡는가) | 2 failed |
+
+원복은 백업과 `diff`로 바이트 동일 확인.
+
+### Verification
+
+- `python3 -m pytest -q tests/test_quota_ledger.py tests/test_quota_ledger_mongo.py`:
+  **33 passed / 4 subtests**(종전 29/2).
+- 전체 backend(test-mongo ON, 베타): **1988 passed / 1 skipped / 1719 subtests**(882s).
+  직전 1984/1/1717 대비 **+4 passed·+2 subtests = 이번 보강 셀 그대로**. **회귀 0건.**
+- `git diff --check`: clean.
+
+### Next steps
+
+- 변함없이 **8.2b(L7 — 5초 중복 가드의 DB 잠금)**. 브리프부터 쓰고, 핵심 함정(TTL≠판정)과 필수 셀
+  둘은 HANDOFF에 이미 있다.

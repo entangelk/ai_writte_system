@@ -169,10 +169,32 @@ class MongoUsageLedgerRepositoryTest(unittest.TestCase):
 
     def test_the_project_axis_is_stored_as_target_project_id(self):
         # ★ 이름이 계약이다 — `project_id` 면 purge reconciler 가 지운다.
+        # **두 종류를 모두 본다**: 조정 행 하나만 `project_id` 를 들어도 컬렉션 전체가
+        # sweep 대상이 된다(아래 셀 참조).
         self.repo.add_usage(_usage("e1"))
-        doc = self.collection.docs["e1"]
-        self.assertIn("target_project_id", doc)
-        self.assertNotIn("project_id", doc)
+        self.repo.add_adjustment(_adjustment("a1"))
+        for doc_id in ("e1", "a1"):
+            with self.subTest(doc=doc_id):
+                doc = self.collection.docs[doc_id]
+                self.assertIn("target_project_id", doc)
+                self.assertNotIn("project_id", doc)
+
+    def test_the_stored_key_sets_are_pinned_so_no_field_creeps_in(self):
+        # H2 보강(독립 검증 2026-08-03): 파기 reconciler 의 컬렉션 발견은
+        # `find_one({project_id: {$exists: true}})` 라 **표본 한 건**이다. 원장 문서
+        # **단 하나**에라도 `project_id` 가 섞이면 컬렉션 전체가 sweep 대상이 되어
+        # 과금 기록이 지워진다. 이름 부재만 보는 것으로는 "다른 새 필드"를 못 잡으므로
+        # **키 집합 자체를 못박는다** — 필드를 더하려면 이 셀을 함께 고쳐야 한다.
+        self.repo.add_usage(_usage("e1"))
+        self.repo.add_adjustment(_adjustment("a1"))
+        self.assertEqual(set(self.collection.docs["e1"]), {
+            "_id", "kind", "user_id", "target_project_id", "action",
+            "dedupe_key", "daily_key", "weekly_key", "at",
+        })
+        self.assertEqual(set(self.collection.docs["a1"]), {
+            "_id", "kind", "user_id", "target_project_id", "delta", "reason",
+            "admin_user_id", "daily_key", "weekly_key", "at",
+        })
 
     def test_dates_come_back_aware(self):
         self.repo.add_usage(_usage("e1"))

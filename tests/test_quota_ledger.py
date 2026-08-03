@@ -232,6 +232,36 @@ class ProjectAxisNameTest(unittest.TestCase):
         self.assertIs(entry.kind, LedgerEntryKind.USAGE)
 
 
+class AwarenessInheritanceTest(unittest.TestCase):
+    """H1 보강(독립 검증 2026-08-03) — naive 입력 거부를 **원장 경계에서도** 잠근다.
+
+    이 보호는 8.1의 `_require_aware` 에서 **전이적으로** 온다(원장이 창 키를 직접
+    계산하지 않고 8.1 함수를 부르기 때문). 검증자 판단대로 지금 안전하지만 **잠겨
+    있지는 않았다** — 원장 쪽에서 그 위임이 끊기거나 8.1의 단정이 사라지면 이 파일의
+    어떤 셀도 실패하지 않는다. 그래서 경계에서 다시 단정한다.
+    """
+
+    def test_a_naive_signup_time_is_refused(self) -> None:
+        service, _repo, _clock = _service()
+        with self.assertRaises(ValueError):
+            service.record_usage(
+                user_id="u1", member_created_at=datetime(2026, 7, 6, 5, 37),
+                target_project_id="p1", action="writing_gate", dedupe_key="k")
+
+    def test_a_naive_clock_is_refused(self) -> None:
+        service, _repo, clock = _service()
+        clock["now"] = datetime(2026, 7, 8, 5, 0)
+        with self.assertRaises(ValueError):
+            service.used(user_id="u1", member_created_at=CREATED_AT)
+
+    def test_aware_input_still_works(self) -> None:
+        # over-strict 방지 — 정상 aware 경로가 막히면 안 된다.
+        service, _repo, _clock = _service()
+        self.assertIsNotNone(service.record_usage(
+            user_id="u1", member_created_at=CREATED_AT, target_project_id="p1",
+            action="writing_gate", dedupe_key="k"))
+
+
 class NoEnforcementHereTest(unittest.TestCase):
     """8.2는 기록·집계까지다 — 한도를 보지 않는다."""
 
