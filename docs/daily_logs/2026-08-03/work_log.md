@@ -480,3 +480,76 @@ M6·M7이 특히 중요하다 — 가짜 collection이 **드라이버처럼 naiv
   집계 정본이다.
 - 8.3 착수 시 **P6=C의 부작용**을 다뤄야 한다: "이미 쓴 양 > 새 한도"는 정상 상태로 인정됐고, 그때
   무엇을 하는지(거부만·회수 없음)는 아직 미정이다.
+
+---
+
+## Hardening — Slice 8.1 독립 검증(`756bf2e`) 반영 + 8.2 착수 브리프
+
+### Verification review
+
+- [`verifications/2026-08-03/slice_8_1_quota_policy.md`](../../verifications/2026-08-03/slice_8_1_quota_policy.md)
+  원문 확인. 판정 **합격 · Blocking 0**. 검증자가 뮤테이션 8종을 독립 재실행하고 전체 회귀
+  1952/1/1715를 재현했다. 정지 유예의 안전망 근거(`main.py:1456`)도 직접 실측해 참임을 확인했다.
+- 비차단 3건(H1 창 함수의 awareness 가정 · H2 `clear_pending` 미자동 · H3 뮤테이션 카운트의 모양
+  의존성)만 남아 그것들을 닫았다.
+
+### 보강 — H1 (관습을 계약으로)
+
+- 지적: `_local`이 `astimezone`을 쓰는데 **naive가 오면 시스템 로컬로 해석**해 비-UTC 호스트에서
+  경계가 조용히 어긋난다. 현재 입력 경로는 전부 aware라 live 결함은 아니지만 **그것은 관습이지
+  계약이 아니었다.**
+- `_require_aware`를 `daily_key`·`weekly_cycle_bounds`·`effective_limits` 입구에 넣어 naive를 거부한다.
+  **저장소 경계의 `_aware`와 방향이 반대인 것은 의도적**이며 그 이유를 docstring에 적었다 — BSON은
+  UTC임이 알려져 있어 재부착이 재명명이지만, **도메인 입력의 naive는 무엇인지 알 수 없다.**
+- 회귀 3 cells 추가(`AwarenessContractTest`). 뮤테이션 2종 양방향 확인: 단정 제거 → 1 failed,
+  "UTC만 허용"으로 과잉 교정 → 1 failed(정상 KST 입력을 깨뜨린다).
+
+### 보강 — H2 (읽는 쪽이 지나야 하는 문)
+
+`QuotaPolicy` docstring에 **`limits`는 유효 한도가 아니다**를 못박았다 — 발효한 예약이 문서에 남아
+있을 수 있고(`clear_pending`은 선택적 정리) 원본을 직접 읽으면 **만료된 예약이 "대기 중"으로 보인다**.
+읽기는 항상 `effective_limits`/`limits_for`를 지나야 한다. 8.5 관리자 조회에 대한 권고는 브리프
+"후속 고려"에 넣었다.
+
+### 보강 — H3 (기록 해석 주의)
+
+검증자의 변형이 구현자 변형과 달라 같은 가드가 다른 카운트를 냈다(덩어리 판정 1↔7, `None`→0 1↔2).
+**카운트는 가드의 세기가 아니다** — 확증되는 것은 *물었는가*이지 *몇 개가 물었는가*가 아니라는 점을
+브리프에 명시했다.
+
+### Completed work — Slice 8.2 착수 브리프
+
+- [`plans/08-2-usage-ledger-decisions.md`](../../plans/08-2-usage-ledger-decisions.md). 결정 5개
+  (L1 행 필드·L2 중복 방지 키·L3 집계 정본·L4 보존 기간·L5 관리자 조정 표현), 각각 선택지 표 + 추천.
+
+### Issues found — 실측이 뒤집은 가정 2건 (브리프 §1의 뼈대)
+
+- **★ 클라이언트 `request_id`는 멱등키가 아니다.** 프론트가 "이어쓰기" 클릭마다 새 uuid를 만들고
+  ([`WritingPanel.tsx:284`](../../../frontend/src/writing/WritingPanel.tsx#L284)) **그 하나를
+  generate·gate·revise-and-gate·accept가 함께 쓴다**(`:289`·`:316`·`:328`·`:423`). 따라서
+  `(user, request_id)`로 중복을 지우면 **한 흐름의 유료 동작 4개가 1개로 접혀 8.0의 "요청 1건 = 1회"가
+  조용히 깨진다.** 반대로 사용자가 다시 클릭한 재시도는 새 uuid라 잡히지도 않는다. → L2의 추천이
+  **키에 `action`을 포함**하는 형태인 이유다. 8.0 B5=A의 "(user, project, 멱등키)" 문언은 키가 있고
+  안정적인 경로에서만 성립한다는 점을 브리프에 명시했다.
+- **★ 원장이 `project_id`를 들면 project 영구 삭제가 과금 기록을 지운다.** purge reconciler는 컬렉션을
+  하드코딩하지 않고 **DB에서 `project_id` 필드를 가진 컬렉션을 발견**해 고아를 지운다
+  ([`purge_reconciler.py:50`](../../../scripts/purge_reconciler.py#L50)). D8-6이 삭제 감사에
+  `target_project_id`를 쓴 이유가 정확히 이것이며, 원장도 같은 함정 위에 있다 → L1 추천은 **project
+  축을 아예 안 남기는** 쪽이다(필요해지면 `target_project_id`로 넓히는 문은 열려 있다).
+- 규모 실측이 L3 추천의 근거다: 외부 12B `total_slots=1`이라 창당 행이 수십 건이고, 그 위에서 count는
+  인덱스 스캔 몇 문서다 — 카운터 캐시는 근거 없는 복잡도다.
+
+### Verification
+
+- `python3 -m pytest -q tests/test_quota_policy.py tests/test_quota_policy_mongo.py`: **29 passed**(종전 26).
+- 전체 backend(test-mongo ON, 베타): **1955 passed / 1 skipped / 1715 subtests**(964s).
+  직전 1952/1/1715 대비 **+3 = `AwarenessContractTest` 셀 그대로**. **회귀 0건.**
+- `python3 -m pytest -q tests/test_docs_indexes.py`: **9 passed / 10 subtests** — 브리프 추가로 plans
+  문서 수 가드가 또 물어 94/77로 정정했다(H3 보강 가드의 두 번째 실사례).
+- 브리프 상대 링크 4건 전부 해석. `git diff --check`: clean.
+
+### Next steps
+
+- **오너 결정 대기: L1~L5.** 결정 뒤 계약·양방향 회귀(같은 dedupe 키 재삽입 · **다른 action은 같은
+  request_id라도 각각 센다** · 회원/창 격리 · 조정 행의 부호 · 창 키를 8.1에서 가져오기) → 도메인 +
+  Mongo 어댑터(유니크 + 집계 인덱스) → `mongo_collections.md` §43D → 8.3 인계.

@@ -81,6 +81,15 @@ class PendingLimits:
 
 @dataclass(frozen=True, slots=True)
 class QuotaPolicy:
+    """저장된 정책 문서. **`limits` 는 유효 한도가 아니다.**
+
+    발효한 `pending` 이 문서에 남아 있을 수 있기 때문이다(`clear_pending` 은 선택적
+    정리이고 자동으로 도는 것이 없다 — 그것이 P3/P6의 요지다). 읽는 쪽은 항상
+    `effective_limits(policy, now)` 나 `QuotaPolicyService.limits_for` 를 지나야 하며,
+    `policy.limits` 를 직접 읽으면 **만료된 예약이 "아직 대기 중"으로 보인다**
+    (2026-08-03 독립 검증 H2 — 8.5 관리자 조회에서 특히 주의).
+    """
+
     user_id: str
     limits: QuotaLimits
     pending: PendingLimits | None
@@ -90,6 +99,27 @@ class QuotaPolicy:
 # ---------------------------------------------------------------- 창 (P2·P3)
 
 
+def _require_aware(name: str, moment: datetime) -> datetime:
+    """naive 를 조용히 받지 않는다 (2026-08-03 독립 검증 H1).
+
+    `astimezone` 은 naive 를 **시스템 로컬**로 해석하므로, 비-UTC 호스트에서 naive 가
+    들어오면 창 경계가 조용히 어긋난다 — 이 저장소가 가장 크게 데인 함정의 형태
+    그대로다(값이 틀리는데 아무것도 실패하지 않는다). 지금 입력 경로는 전부 aware
+    이지만(기본 clock 은 `datetime.now(UTC)`, `created_at` 은 `users_mongo` 가 UTC 를
+    재부착한다) 그것은 **관습이지 계약이 아니었다.** 여기서 계약으로 만든다.
+
+    저장소 경계의 `_aware` 와 방향이 다른 것은 의도적이다: BSON 은 UTC 임이 알려져
+    있어 재부착이 재명명이지만, 도메인 입력의 naive 는 **무엇인지 알 수 없다**.
+    """
+
+    if moment.tzinfo is None:
+        raise ValueError(
+            f"{name} must be timezone-aware — a naive datetime would be read as "
+            "system local time and silently shift the window boundary"
+        )
+    return moment
+
+
 def _local(moment: datetime) -> datetime:
     return moment.astimezone(BOUNDARY_TIMEZONE)
 
@@ -97,7 +127,7 @@ def _local(moment: datetime) -> datetime:
 def daily_key(now: datetime) -> str:
     """일 창의 키 = KST 날짜. 자정에 바뀐다."""
 
-    return _local(now).date().isoformat()
+    return _local(_require_aware("now", now)).date().isoformat()
 
 
 def weekly_cycle_bounds(created_at: datetime, now: datetime) -> tuple[datetime, datetime]:
@@ -108,7 +138,8 @@ def weekly_cycle_bounds(created_at: datetime, now: datetime) -> tuple[datetime, 
     왜 또 바뀌었나"가 된다.
     """
 
-    anchor_date = _local(created_at).date()
+    _require_aware("now", now)
+    anchor_date = _local(_require_aware("created_at", created_at)).date()
     anchor = datetime.combine(
         anchor_date, datetime.min.time(), tzinfo=BOUNDARY_TIMEZONE
     ).astimezone(UTC)
@@ -171,6 +202,7 @@ def effective_limits(policy: QuotaPolicy | None, now: datetime) -> QuotaLimits:
     곁들여도 되고 안 해도 된다.
     """
 
+    _require_aware("now", now)
     if policy is None:
         return default_limits()
     if policy.pending is not None and now >= policy.pending.effective_at:

@@ -208,6 +208,40 @@ class PolicyChangeEffectTest(unittest.TestCase):
         self.assertEqual(kept.limits.daily_limit, DEFAULT_DAILY_LIMIT)
 
 
+class AwarenessContractTest(unittest.TestCase):
+    """H1 보강 — 창 함수는 naive 를 조용히 받지 않는다 (독립 검증 2026-08-03).
+
+    `astimezone` 은 naive 를 시스템 로컬로 해석하므로, 비-UTC 호스트에서는 경계가
+    **틀리는데 아무것도 실패하지 않는다**. 관습이던 것(모든 호출부가 aware 를 넘긴다)을
+    계약으로 바꿨다.
+    """
+
+    def test_naive_input_is_refused_by_every_window_function(self) -> None:
+        naive = datetime(2026, 8, 3, 5, 0)
+        with self.assertRaises(ValueError):
+            daily_key(naive)
+        with self.assertRaises(ValueError):
+            weekly_cycle_bounds(CREATED_AT, naive)
+        with self.assertRaises(ValueError):
+            weekly_cycle_bounds(naive, datetime.now(UTC))
+        with self.assertRaises(ValueError):
+            effective_limits(None, naive)
+
+    def test_aware_input_in_any_timezone_still_works(self) -> None:
+        # over-strict 방지: "UTC 만 받는다"로 좁히면 정상 호출부를 깬다. 요구는
+        # tzinfo 가 있다는 것이지 그것이 UTC 라는 것이 아니다.
+        from zoneinfo import ZoneInfo
+
+        kst_noon = datetime(2026, 8, 3, 12, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+        self.assertEqual(daily_key(kst_noon), "2026-08-03")
+        self.assertEqual(daily_key(kst_noon.astimezone(UTC)), "2026-08-03")
+
+    def test_the_service_reading_path_stays_usable(self) -> None:
+        # 시행 경로(8.3)가 지날 자리 — 기본 clock 이 aware 이므로 그대로 동작한다.
+        service = QuotaPolicyService(InMemoryQuotaPolicyRepository())
+        self.assertEqual(service.limits_for("nobody"), default_limits())
+
+
 class NoEnforcementHereTest(unittest.TestCase):
     """8.1은 저장 계약까지다 — 차감·차단은 8.3."""
 
