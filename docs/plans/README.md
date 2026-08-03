@@ -142,6 +142,7 @@
 | 문서 | 무엇 | 상태 |
 |---|---|---|
 | [`08-member-request-quota.md`](08-member-request-quota.md) | 회원별 **요청 횟수** quota·사용량 원장·관리자 CMS 백엔드·향후 결제 연결 seam | 상위 방향 승인 · 슬라이스별 브리프 대기 |
+| [`08-0-billable-request-boundary-decisions.md`](08-0-billable-request-boundary-decisions.md) | 8.0 — "서비스 요청 1회"의 코드 대응(차감 단위·내부 repair/라운드·fan-out·조회성 경로·논리 요청 동일성·전수 가드) | Decision needed |
 
 ### 프론트엔드
 
