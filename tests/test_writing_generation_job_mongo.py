@@ -42,6 +42,9 @@ def _matches(doc, query):
             dv = doc.get(key)
             if dv is None or dv > value["$lte"]:
                 return False
+        elif isinstance(value, dict) and "$in" in value:
+            if doc.get(key) not in value["$in"]:
+                return False
         elif doc.get(key) != value:
             return False
     return True
@@ -84,6 +87,9 @@ class _Collection:
     def find(self, query):
         return _Cursor(dict(d) for d in self.docs.values() if _matches(d, query))
 
+    def count_documents(self, query):
+        return sum(1 for d in self.docs.values() if _matches(d, query))
+
     def find_one_and_update(self, query, update, *, sort, return_document):
         matches = [d for d in self.docs.values() if _matches(d, query)]
         for key, direction in reversed(sort):
@@ -114,13 +120,15 @@ class _Client:
 
 def _job(job_id, *, project="p", draft="d", request="wr1", minute=0,
          status=WritingGenerationJobStatus.PENDING, claimed_at=None,
-         failure_reason=None, failure_detail=None, result_scratch_id=None):
+         failure_reason=None, failure_detail=None, result_scratch_id=None,
+         user_id=None):
     return WritingGenerationJob(
         id=job_id, project_id=project, draft_id=draft, request_id=request,
         task_type="continue_scene", instruction="이어서", draft_excerpt="앞",
         query=None, output_length="medium", max_output_tokens=2048,
         max_tokens=4096, version_id="v1",
         created_at=_NOW + timedelta(minutes=minute),
+        user_id=user_id,
         status=status, claimed_at=claimed_at, failure_reason=failure_reason,
         failure_detail=failure_detail, result_scratch_id=result_scratch_id,
     )
@@ -236,6 +244,50 @@ class MongoWritingGenerationJobRepositoryTest(unittest.TestCase):
         self.assertEqual(
             [j.id for j in self.repo.list_for_draft("p", "d2")],
             ["wgj:3"])
+
+
+class QuotaSubjectAdapterTest(unittest.TestCase):
+    """Slice 8.3 Q1-b=A — 주체 필드와 진행 중 계수가 어댑터를 왕복한다."""
+
+    def setUp(self):
+        self.collection = _Collection()
+        self.repo = MongoWritingGenerationJobRepository(
+            _Client(self.collection), db_name="test")
+
+    def test_the_member_survives_the_round_trip(self):
+        # 이 필드가 저장되지 않으면 워커가 **아무도 과금하지 못한다** — 그리고
+        # 스위트는 조용하다(도메인 fake 는 필드를 늘 들고 있다).
+        self.repo.add(_job("wgj:1", user_id="u-1"))
+        self.assertEqual(self.repo.get("wgj:1").user_id, "u-1")
+
+    def test_pre_8_3_documents_read_back_without_a_member(self):
+        # 8.3 이전 행에는 이 필드가 없다. 하드 서브스크립트로 읽으면 **옛 job 이
+        # 있는 배포에서 워커가 통째로 죽는다**(이 저장소가 두 번 데인 형태).
+        self.collection.docs["wgj:old"] = {
+            key: value for key, value in _doc_of(_job("wgj:old")).items()
+            if key != "user_id"
+        }
+        self.assertIsNone(self.repo.get("wgj:old").user_id)
+
+    def test_only_pending_and_running_jobs_of_that_member_are_counted(self):
+        self.repo.add(_job("wgj:1", request="a", user_id="u-1"))
+        self.repo.add(_job("wgj:2", request="b", user_id="u-1",
+                           status=WritingGenerationJobStatus.RUNNING))
+        self.repo.add(_job("wgj:3", request="c", user_id="u-1",
+                           status=WritingGenerationJobStatus.SUCCEEDED))
+        self.repo.add(_job("wgj:4", request="d", user_id="u-1",
+                           status=WritingGenerationJobStatus.FAILED))
+        self.repo.add(_job("wgj:5", request="e", user_id="other"))
+        self.assertEqual(self.repo.count_active_for_user("u-1"), 2)
+        self.assertEqual(self.repo.count_active_for_user("other"), 1)
+
+
+def _doc_of(job):
+    from services.application.app.writing.generation_job_mongo import (  # noqa: PLC0415, E501
+        _doc,
+    )
+
+    return _doc(job)
 
 
 if __name__ == "__main__":

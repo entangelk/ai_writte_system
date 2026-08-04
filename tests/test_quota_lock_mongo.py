@@ -69,6 +69,15 @@ def _matches(doc, query):
                 value is not None and value <= condition["$lte"]
             ):
                 return False
+            if "$gt" in condition and not (
+                value is not None and value > condition["$gt"]
+            ):
+                return False
+            if "$regex" in condition:
+                import re as _re  # noqa: PLC0415
+
+                if value is None or _re.search(condition["$regex"], value) is None:
+                    return False
         elif value != condition:
             return False
     return True
@@ -121,6 +130,10 @@ class _Collection:
             raise DuplicateKeyError(query["_id"])
         self.docs[query["_id"]] = {"_id": query["_id"], **changes}
         return dict(self.docs[query["_id"]])
+
+    def count_documents(self, query):
+        self.calls.append("count_documents")
+        return sum(1 for doc in self.docs.values() if _matches(doc, query))
 
     def update_one(self, query, update, upsert=False):
         self.calls.append("update_one")
@@ -351,6 +364,45 @@ class MongoRequestLockRepositoryTest(unittest.TestCase):
     def test_round_trip_preserves_the_lock(self):
         self.repo.claim(_lock("h1"), now=AT)
         self.assertEqual(lock_entry(self.collection.docs[KEY]), _lock("h1"))
+
+
+class InFlightCountAdapterTest(unittest.TestCase):
+    """8.3 Q3=E — 접두 조회가 회원 경계와 판정 축을 둘 다 지키는가."""
+
+    def setUp(self):
+        self.collection = _Collection()
+        self.repo = MongoRequestLockRepository(
+            _Client(self.collection), db_name="test")
+
+    def _store(self, key, *, released=False, expires_at=AT + LEASE):
+        self.collection.docs[key] = {
+            "_id": key, "holder": "h", "claimed_at": _naive(AT),
+            "expires_at": _naive(expires_at),
+            "released_at": _naive(AT) if released else None,
+        }
+
+    def test_it_counts_only_that_members_live_unreleased_locks(self):
+        self._store("user-1:writing_generate:proj-1")
+        self._store("user-1:writing_gate:proj-2")
+        self._store("user-1:writing_report:proj-1", released=True)
+        self._store("user-1:context_search:proj-1", expires_at=AT)  # 만료
+        self._store("user-2:writing_generate:proj-1")
+        self.assertEqual(self.repo.count_in_flight("user-1", now=AT), 2)
+
+    def test_a_member_id_is_not_read_as_a_pattern(self):
+        # 정규식 메타문자를 escape 하지 않으면 앵커가 남의 잠금을 세거나 아무것도
+        # 못 센다. 회원 id 는 지금 ObjectId hex 이지만 그것은 **관습이지 계약이
+        # 아니다** — 그리고 여기서 틀리면 사용량이 조용히 어긋난다.
+        self._store("a.c:writing_generate:proj-1")
+        self._store("abc:writing_generate:proj-1")
+        # escape 를 빼면 `^a.c:` 가 "abc:" 까지 물어 2가 된다.
+        self.assertEqual(self.repo.count_in_flight("a.c", now=AT), 1)
+        self.assertEqual(self.repo.count_in_flight("abc", now=AT), 1)
+
+    def test_the_admission_mutex_key_is_not_counted(self):
+        # §Q3-a 계약 1: 키 공간이 둘이다.
+        self._store("admission:user-1")
+        self.assertEqual(self.repo.count_in_flight("user-1", now=AT), 0)
 
 
 class ServiceOverMongoTest(unittest.TestCase):

@@ -473,6 +473,36 @@ class StoredShapeTest(_LockTestCase):
         self.assertTrue(self.claim().in_flight)
 
 
+class InFlightCountTest(_LockTestCase):
+    """8.3 Q3=E 가 소비하는 계수 — "지금 처리 중인 유료 요청 수"."""
+
+    def test_a_live_lock_counts_and_a_released_one_does_not(self):
+        self.service.claim(
+            user_id="user-1", action="writing_generate", target_project_id="proj-1")
+        self.assertEqual(self.service.count_in_flight(user_id="user-1"), 1)
+        granted = self.service.claim(
+            user_id="user-1", action="writing_gate", target_project_id="proj-1")
+        self.assertEqual(self.service.count_in_flight(user_id="user-1"), 2)
+        self.service.release(
+            user_id="user-1", action="writing_gate", target_project_id="proj-1",
+            holder=granted.holder)
+        # 냉각 중(문서는 살아 있고 released_at 이 있다)은 **진행 중이 아니다** —
+        # 세면 회원이 쓰지도 않은 칸을 최소 창(5초)마다 잃는다.
+        self.assertEqual(self.service.count_in_flight(user_id="user-1"), 1)
+
+    def test_an_expired_lock_does_not_count(self):
+        self.service.claim(
+            user_id="user-1", action="writing_generate", target_project_id="proj-1")
+        self.advance(181)   # lease 를 넘긴다
+        self.assertEqual(self.service.count_in_flight(user_id="user-1"), 0)
+
+    def test_another_members_locks_are_not_counted(self):
+        # over-strict 짝: 접두 조회가 회원 경계를 잃으면 남의 요청이 내 한도를 먹는다.
+        self.service.claim(
+            user_id="user-2", action="writing_generate", target_project_id="proj-1")
+        self.assertEqual(self.service.count_in_flight(user_id="user-1"), 0)
+
+
 class NoEnforcementHereTest(unittest.TestCase):
     """이 슬라이스는 저장 의미론까지다 — HTTP·차감은 8.3이다."""
 

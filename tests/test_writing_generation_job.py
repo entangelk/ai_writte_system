@@ -60,12 +60,13 @@ def _service(*, clock=None, claim_timeout_seconds=DEFAULT_CLAIM_TIMEOUT_SECONDS)
 
 
 def _enqueue(svc, *, project="p1", draft="d1", request="wr1", length="medium",
-             tokens=2048):
+             tokens=2048, user=None):
     return svc.enqueue(
         project_id=project, draft_id=draft, request_id=request,
         task_type="continue_scene", instruction="이어서 써줘",
         draft_excerpt="앞 문단", query=None, output_length=length,
         max_output_tokens=tokens, max_tokens=4096, version_id="v1",
+        user_id=user,
     )
 
 
@@ -278,6 +279,68 @@ class ListForDraftTest(unittest.TestCase):
         self.assertEqual([j.request_id for j in d1], ["wr2", "wr1"])
         d2 = svc.list_for_draft("p1", "d2")
         self.assertEqual([j.request_id for j in d2], ["wr3"])
+
+
+class QuotaSubjectTest(unittest.TestCase):
+    """Slice 8.3 Q1-b=A — job 이 주체를 들고 간다."""
+
+    def test_the_enqueued_job_carries_its_member(self):
+        svc = _service()
+        _enqueue(svc, user="u-1")
+        self.assertEqual(svc.get(svc.claim_next().id).user_id, "u-1")
+
+    def test_only_pending_and_running_jobs_count_toward_the_limit(self):
+        # 완료·실패한 job 은 세지 않는다 — 성공은 원장 행이 대신 세고(이중 계수가
+        # 된다), 실패는 애초에 과금하지 않는다(Q1=C).
+        clock = _Clock()
+        svc = _service(clock=clock)
+        _enqueue(svc, draft="d1", request="wr1", user="u-1")
+        clock.advance(1)
+        _enqueue(svc, draft="d2", request="wr2", user="u-1")
+        self.assertEqual(svc.count_active_for_user(user_id="u-1"), 2)
+        svc.mark_succeeded(svc.claim_next(), result_scratch_id="wds:1")
+        self.assertEqual(svc.count_active_for_user(user_id="u-1"), 1)
+        svc.mark_failed(
+            svc.claim_next(),
+            reason=WritingGenerationJobFailureReason.PROVIDER_ERROR)
+        self.assertEqual(svc.count_active_for_user(user_id="u-1"), 0)
+
+    def test_another_members_jobs_are_not_counted(self):
+        # over-strict 짝: 회원 경계를 잃으면 남의 생성이 내 한도를 먹는다.
+        svc = _service()
+        _enqueue(svc, user="someone-else")
+        self.assertEqual(svc.count_active_for_user(user_id="u-1"), 0)
+
+
+class InFlightDraftGuardTest(unittest.TestCase):
+    """Slice 8.3 Q8=C — 같은 draft 의 **다른** 요청만 막는다."""
+
+    def test_a_pending_job_from_another_request_blocks(self):
+        svc = _service()
+        _enqueue(svc, draft="d1", request="wr1")
+        self.assertTrue(svc.has_other_active_for_draft(
+            project_id="p1", draft_id="d1", request_id="wr2"))
+
+    def test_the_same_request_is_never_blocked_by_its_own_job(self):
+        # over-strict 짝: 멱등 replay 까지 막으면 폴링·재전송하는 클라이언트가
+        # 자기 job 을 못 받는다(그 replay 는 새 job 도 새 과금도 만들지 않는다).
+        svc = _service()
+        _enqueue(svc, draft="d1", request="wr1")
+        self.assertFalse(svc.has_other_active_for_draft(
+            project_id="p1", draft_id="d1", request_id="wr1"))
+
+    def test_a_finished_job_stops_blocking(self):
+        svc = _service()
+        _enqueue(svc, draft="d1", request="wr1")
+        svc.mark_succeeded(svc.claim_next(), result_scratch_id="wds:1")
+        self.assertFalse(svc.has_other_active_for_draft(
+            project_id="p1", draft_id="d1", request_id="wr2"))
+
+    def test_another_draft_is_unaffected(self):
+        svc = _service()
+        _enqueue(svc, draft="d1", request="wr1")
+        self.assertFalse(svc.has_other_active_for_draft(
+            project_id="p1", draft_id="d2", request_id="wr2"))
 
 
 if __name__ == "__main__":

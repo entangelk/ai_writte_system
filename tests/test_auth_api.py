@@ -52,6 +52,7 @@ from services.application.app.memory.service import (
 )
 from services.application.app.main import (
     create_app,
+    enforce_quota,
     require_admin_user,
     require_authenticated_user,
     require_project_owner,
@@ -1337,9 +1338,16 @@ class TestSeamStaysAnOverrideTest(unittest.TestCase):
         # `dependencies` would make an unguarded endpoint indistinguishable from
         # a guarded one for the exhaustive guard.
         self.assertEqual(declarations(), before)
+        # The list is pinned, not just length-checked: adding a third override
+        # must be a deliberate edit here. Slice 8.3 added ``enforce_quota`` —
+        # the duplicate-request lock it turns on has a 5-second minimum window,
+        # so a domain suite POSTing the same billable action twice would 429 for
+        # reasons unrelated to its subject. Its own boundary is driven
+        # un-overridden in ``tests/test_quota_enforcement_api.py``, the same way
+        # this module drives the two above.
         self.assertEqual(
             list(app.dependency_overrides),
-            [require_authenticated_user, require_project_owner],
+            [require_authenticated_user, require_project_owner, enforce_quota],
         )
 
     def test_this_module_drives_apps_that_are_not_overridden(self) -> None:

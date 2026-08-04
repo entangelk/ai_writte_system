@@ -78,7 +78,8 @@ class _RaisingScratch:
         return ()
 
 
-def _collaborators(*, context=None, writing=None, scratch=None, jobs=None):
+def _collaborators(*, context=None, writing=None, scratch=None, jobs=None,
+                   quota=None):
     return GenerationCollaborators(
         context_search=context or _OkContext(),
         writing=writing or _service(_FakeProvider(content="생성된 장면.")),
@@ -87,7 +88,18 @@ def _collaborators(*, context=None, writing=None, scratch=None, jobs=None):
         jobs=jobs or WritingGenerationJobService(
             InMemoryWritingGenerationJobRepository()),
         needs=(ContextNeed.CURRENT_SCENE,),
+        quota=quota,
     )
+
+
+class _RecordingCharger:
+    """Slice 8.3 Q1-b=A 의 차감 주체 자리. 무엇이 언제 불렸는지만 기록한다."""
+
+    def __init__(self):
+        self.charged = []
+
+    def charge(self, job):
+        self.charged.append(job.id)
 
 
 def _claimed(jobs, *, request="wr1", draft="d1", version="v1"):
@@ -115,6 +127,47 @@ class ExecuteSuccessTest(unittest.TestCase):
         self.assertEqual(done.result_scratch_id, entries[0].id)
         self.assertEqual(c.jobs.get(job.id).status,
                          WritingGenerationJobStatus.SUCCEEDED)
+
+
+class ExecuteChargesOnSuccessTest(unittest.TestCase):
+    """Slice 8.3 Q1-b=A — **성공한 생성만** 원장에 남는다."""
+
+    def test_a_successful_job_is_charged(self):
+        charger = _RecordingCharger()
+        c = _collaborators(quota=charger)
+        job = _claimed(c.jobs)
+        _run(execute_generation_job(job, c))
+        self.assertEqual(charger.charged, [job.id])
+
+    def test_a_failed_job_is_not_charged(self):
+        # 오너 정책("실패에는 과금하지 않는다")이 **가장 비싼 경로**에서도 지켜지는
+        # 자리다. 차감을 try 블록 앞이나 mark_failed 경로로 옮기는 변경이 문다.
+        charger = _RecordingCharger()
+        c = _collaborators(
+            quota=charger,
+            writing=_RaisingWriting(ProviderError(
+                code=ProviderErrorCode.TIMEOUT, message="timeout",
+                retryable=True, provider="llm_gateway")),
+        )
+        done = _run(execute_generation_job(_claimed(c.jobs), c))
+        self.assertEqual(done.status, WritingGenerationJobStatus.FAILED)
+        self.assertEqual(charger.charged, [])
+
+    def test_a_persist_failure_after_generation_is_not_charged(self):
+        # 결과가 pad 에 안 남았으면 회원이 받은 것이 없다 — INTERNAL 로 끝나는
+        # 이 경로도 무과금이어야 한다.
+        charger = _RecordingCharger()
+        c = _collaborators(quota=charger, scratch=_RaisingScratch())
+        done = _run(execute_generation_job(_claimed(c.jobs), c))
+        self.assertEqual(done.status, WritingGenerationJobStatus.FAILED)
+        self.assertEqual(charger.charged, [])
+
+    def test_a_worker_without_a_charger_still_runs(self):
+        # 손으로 조립한 collaborators(테스트·스크립트)가 그대로 유효해야 한다 —
+        # llm_call_audit·capabilities 와 같은 이유의 Optional 이다.
+        c = _collaborators(quota=None)
+        done = _run(execute_generation_job(_claimed(c.jobs), c))
+        self.assertEqual(done.status, WritingGenerationJobStatus.SUCCEEDED)
 
 
 class ExecuteFailureMappingTest(unittest.TestCase):
