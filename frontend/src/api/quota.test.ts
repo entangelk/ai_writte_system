@@ -195,10 +195,17 @@ describe("describeQuotaError 는 status 로만 가른다 (W2=A · H3)", () => {
   it("detail 문자열을 바꿔도 분류가 그대로다", () => {
     // H3 계약: 상태코드=기계용, detail=사람용. 서버가 문구를 다듬는 것만으로
     // 화면 동작이 달라지면 그것이 계약 위반이다.
-    const a = describeQuotaError(new ApiError(429, "the same request…"));
-    const b = describeQuotaError(new ApiError(429, "전혀 다른 문장"));
-    expect(a?.kind).toBe(b?.kind);
-    expect(a?.confirmable).toBe(b?.confirmable);
+    //
+    // ★ **동등성만 단정하면 안 된다**(첫 판의 결함, 뮤테이션이 드러냈다): detail 로
+    // 분기하는 구현에서 두 문자열이 **둘 다** 안 걸리면 결과가 나란히 `null` 이라
+    // "같다"가 성립해 버린다. 그래서 값 자체를 단정한다.
+    for (const detail of [
+      "the same request is already in progress",
+      "전혀 다른 문장",
+      "",
+    ]) {
+      expect(describeQuotaError(new ApiError(429, detail))?.kind).toBe("locked");
+    }
   });
 
   it("정지(403)는 quota 스냅샷이 정지라고 말할 때만 정지다", () => {
