@@ -282,3 +282,37 @@ Q3-a를 설계하려면 "진행 중 요청"을 정확히 세야 하는데, **비
 1. **오너가 Q3-a·Q1-b 확인** → 확정되면 8.3 구현 착수(다른 게이트 없음).
 2. Q1-b=A를 고르면 **8.4 범위 일부(워커 주체 전달)가 8.3으로 당겨진다** — 부모 계획 표에 그 이동을
    기록해야 한다.
+
+---
+
+## Closeout — Slice 8.3 브리프 확정 (Q1~Q9 + Q1-a·Q1-b·Q3-a)
+
+### User Decisions and Rationale
+
+- **Q3-a=A(입장 뮤텍스) · Q1-b=A(워커 성공 시 차감) 확정** — 오너: *"DB 고질 문제라면 어쩔 수 없지.
+  서버 성능에 따라 완전히 해결되는 건 아니지만 보완은 가능하겠네."*
+- **덧붙은 판단**: 저장소 교체는 **지금 하지 않는다**. 오너가 분석 의견만 요청했고, 그 분석은 아래
+  "Next steps"의 트리거 조건으로 남긴다(브리프 §후속 고려에도 한 항목으로 들어갔다).
+
+### Completed work
+
+- [`plans/08-3-…decisions.md`](../../plans/08-3-quota-enforcement-decisions.md) → **상태 `Resolved`**.
+  §0 표에 확정 12건, 오너 총평, §후속 고려에 "저장소 교체는 이 설계의 전제가 아니다" 항목 추가.
+- [`HANDOFF.md`](../../../HANDOFF.md) — 8.3을 **Owner Decisions Needed에서 결정 완료 절로 이동**하고
+  확정 내용을 구현자가 바로 쓸 수 있는 형태로 압축(성공의 정의·두 겹 초과 방지·상태코드 셋·헤더 통로·
+  워커 차감과 그것이 8.4에서 당겨 오는 것). Next Tasks 1을 **구현 착수**로 교체.
+- [`plans/README.md`](../../plans/README.md) — 8.3 행을 Resolved로 갱신.
+
+### Verification
+
+- `python3 -m pytest -q tests/test_docs_indexes.py` → **9 passed / 10 subtests**.
+- Mongo 결합 표면 실측(저장소 교체 분석의 근거): `*_mongo.py` **12개**, pymongo를 직접 쓰는 파일
+  **50개**, `mongo_collections.md` **65개 절**, 트랜잭션 사용처 **2곳**(core_sot·analysis).
+
+### Next steps
+
+1. **8.3 구현 착수** — 게이트 없음. 회귀 먼저 → `quota/enforcement.py` → dependency 배선 →
+   `responses=`·전수 가드 → 워커 차감 배선(job `user_id`) → 프론트 `gen:api`.
+2. **저장소 교체는 트리거가 오면 다시 본다**(지금 아님): ① 다중 worker·원격 배포로 잠금 경합이
+   실제 부하가 될 때 ② 8.6 결제에서 원장·entitlement·결제를 한 트랜잭션으로 묶어야 할 때
+   ③ 8.5 관리자 집계가 SQL 없이 버거워질 때. D4-D(operation journal)를 유예한 트리거와 같은 구조다.

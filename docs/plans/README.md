@@ -146,7 +146,7 @@
 | [`08-1-request-quota-policy-decisions.md`](08-1-request-quota-policy-decisions.md) | 8.1 — 한도 저장 계약(저장 위치·**일/주 이중 사용량 창**·창 파생/저장·기본과 override·무제한/정지 표현·변경 효력·기본값·구독 축 분리) | **Resolved** — P1~P8=확정, 구현 완료 |
 | [`08-2-usage-ledger-decisions.md`](08-2-usage-ledger-decisions.md) | 8.2 — 사용량 원장(행 필드와 삭제 내성·중복 방지 키·집계 정본·보존 기간·관리자 조정 표현). L6(이름 이력)·L7(5초 DB 잠금)은 **8.2c·8.2b로 분리** | **Resolved** — L1=B·L2~L5=A, 구현 완료(v1.7.85) |
 | [`08-2b-duplicate-request-lock-decisions.md`](08-2b-duplicate-request-lock-decisions.md) | 8.2b — 실수 중복 요청의 **DB 잠금**(L7: 잠금 수명·키 축·원자적 차지·확인 통과·실패 반환·에러 통로/상태코드) | **Resolved** — G1=C·G2~G6=A, 구현 완료(v1.7.87) · 검증 B1·B2 폐쇄 후 재검증 대기 |
-| [`08-3-quota-enforcement-decisions.md`](08-3-quota-enforcement-decisions.md) | 8.3 — quota **시행**(차감 시점·실패 환원·동시성 초과·저장소 장애 방향·초과/정지 상태코드·확인 통로·시행 seam·비동기 202 잠금·`dedupe_key` 매핑) | **Open** — Q1~Q9 오너 결정 대기 |
+| [`08-3-quota-enforcement-decisions.md`](08-3-quota-enforcement-decisions.md) | 8.3 — quota **시행**(차감 시점·"성공"의 정의·비동기 차감·동시성 초과와 **입장 뮤텍스**·저장소 장애 방향·초과/정지 상태코드·확인 통로·시행 seam·`dedupe_key` 매핑) | **Resolved** — Q1~Q9 + Q1-a·Q1-b·Q3-a 확정, 구현 대기 |
 
 ### 프론트엔드
 
