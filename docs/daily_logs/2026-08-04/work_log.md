@@ -683,3 +683,52 @@ hardening 세 건을 **커밋하기 전에** 뮤테이션 검증을 돌렸고, �
 2. **화면 육안 확인** — 확인 대화·잔여 타일은 렌더가 미검증이다(로직은 회귀로 잠겨 있다).
    application/frontend 이미지가 코드보다 뒤처져 있으므로 rebuild가 선행된다.
 3. **8.2c**(이름 이력 + D8-6 계약 개정 + purge UI 문구)가 다음이고, 그 뒤가 `main.py` 라우터 정리다.
+
+---
+
+## Hardening — Slice 8.4 독립 검증 반영 (합격 · 비차단 3건)
+
+검증 기록: [`verifications/2026-08-04/slice_8_4_product_wiring.md`](../../verifications/2026-08-04/slice_8_4_product_wiring.md)
+— **합격, 차단 결함 0**. 수치(2170/4/1931 · 262/18 · 699 modules·414.13 kB)와 뮤테이션 5종이
+검증자 실측으로 재현됐고, 핵심 주장인 **detail 가드의 "결함→수정" 서사가 `d3194e5` diff로 입증**됐다.
+
+### Completed work — 비차단 3건 처리
+
+| 지적 | 처리 | 근거 |
+|---|---|---|
+| **H-1** `describeQuotaError`의 403 정지가 **quota 미로드 시 소유권으로 위장** | **수리** — 403에서만 `/me/quota`를 한 번 다시 읽어 확정한다(WritingPanel·AnalysisTrigger 양쪽) | 정지 계정의 **첫** 유료 요청이 잔여 조회보다 먼저 도착하는 경합 창은 실재한다. 403은 드물고 통로가 둘(소유권·정지)뿐이라 재조회 한 번의 값이 비용보다 크다. **402·429는 재조회하지 않는다** — 그 자체로 이미 quota 사건이고, 아무 실패에나 조회를 붙이면 실패 경로가 두 배로 시끄러워진다 |
+| **H-2** 뮤테이션-셀 매핑 미기록 | **기록 + 규칙화** — 아래 표에 5종의 **정확한 변이 형태와 실패 셀 이름**을 남겼고, [`records-and-handoff.md`](../../guides/records-and-handoff.md) Work Log 절에 "뮤테이션은 tally가 아니라 표로 적는다"를 명시했다 | `verification.md` §Mutation testing이 이미 요구하던 것을 내 로그가 안 지켰다. 검증자가 ②④⑤에서 다른 cell 수를 얻은 **직접 원인**이며, 그 격차가 가드 결함인지 변이 범위 차이인지 판정할 근거가 로그에 없었다 |
+| **H-3** 최상위 README **서술형 분포 문장**이 가드 밖 | **가드 확장** — 분포 4수·조건부 비율·SoT 버전을 정본(검증 인덱스 표·SoT 헤더)에 묶었다 | 건수 주장은 가드 안이었는데 서술형 문장은 밖이라 `합격 142`가 조용히 얼어 있었다. **새 가드가 넣자마자 살아 있는 거짓 2건을 잡았다**(조건부 27%→**26%**, SoT v1.7.87→**v1.7.89**). 같은 표의 회귀 수치도 정정(2,059/1,725 → 2,170/1,931 — 이 값은 런타임 실측이라 가드로는 못 묶는다) |
+
+### Verification — 뮤테이션-셀 매핑 (H-2가 요구한 형태)
+
+**전부 커밋 뒤에 돌렸고, 매 회 `git checkout --` 원복 후 `git status --short` 공백을 확인했다.**
+
+| # | 변이(정확한 형태) | 위치 | 재실패한 셀 |
+|---|---|---|---|
+| **M1** | `QuotaSnapshot.remaining` 본문을 `return self.daily_remaining` 으로(= `min` 제거) | `quota/enforcement.py:168-172` | `RemainingSnapshotTest.test_remaining_is_the_smaller_of_the_two_windows` · `…test_an_unlimited_window_does_not_constrain_the_combined_value` · `MyQuotaEndpointTest.test_the_combined_remaining_is_the_smaller_window` (**3**) |
+| **M2** | `enforce_quota` 의 `body = await _request_body_mapping(...)` **앞**에 `if current.is_admin: return None`(= admit **과 영수증까지** 우회) | `main.py:1750` | `AdminIsNotExemptTest.test_an_admin_without_a_policy_row_is_bound_by_the_default_limits` · `…test_the_enforcement_dependency_never_looks_at_the_admin_flag` (**2**) |
+| **M3** | `billableHeaders` 를 `return {"X-Confirm-Duplicate":"1"}` 로(= 상시 부착) | `api/client.ts:384-387` | 유료 5함수 × `확인이 없으면 헤더를 싣지 않는다`(**5**) + `WritingPanel … asks before spending a second unit`(**1**) = **6** |
+| **M4** | `request()` 에 `status === 429` 자동 재전송 추가(= 래퍼 전역) | `api/client.ts:47-55` | `429 를 받아도 클라이언트가 스스로 다시 보내지 않는다` · `WritingPanel … asks before spending a second unit` · `… sends nothing when the duplicate prompt is cancelled` · `AnalysisTrigger … asks before re-spending a unit`(**4**) |
+| **M5** | `describeQuotaError` 의 `err.status === 429` 를 `detail.includes("already in progress") \|\| detail.includes("was just made")` 로 | `api/client.ts:809` | `429 는 확인 가능한 중복이다` · `detail 문자열을 바꿔도 분류가 그대로다` · `WritingPanel … sends nothing when the duplicate prompt is cancelled`(**3**) |
+| **M6**(H-1 신규) | 403 재조회 분기를 `if (false && …)` 로(= 수리 되돌리기) | `WritingPanel.tsx:314` | `confirms a suspension by re-reading the quota when the tile has not loaded yet`(**1**) |
+| **M7**(H-1 과잉 교정) | 403이면 **재조회 결과와 무관하게** 정지로 단정 | `WritingPanel.tsx:318` | `leaves an ownership 403 alone when the re-read says the account is active`(**1**) |
+
+**★ 검증자와의 cell 수 격차가 여기서 설명된다**: ②(M2)는 검증자가 `confirmed` **뒤**에 early-return을
+넣어 admit만 우회했고(1 cell), 나는 **영수증까지** 우회해 정산 경로도 함께 끊었다(2 cells). ④(M4)는
+검증자가 나보다 넓은 스위트를 돌려 AnalysisTrigger 셀까지 잡았다(내 최초 기록 3은 **패널 2종만 돌린
+값**이었고, 이번에 세 파일을 함께 돌리니 4다). ⑤(M5)는 검증자가 `detail` 키워드 집합을 다르게 잡았다.
+**세 격차 모두 변이 범위 차이이지 가드 결함이 아니며**, 위 표가 있으면 다음 검증자는 같은 자리에 닿는다.
+
+### Verification — 회귀
+
+- 백엔드 전체(test-mongo ON): **2173 passed / 4 skipped / 1931 subtests**(직전 2170 대비 **+3 = 문서
+  숫자 가드 3 cells**). skip 4의 사유는 그대로(3 = `elasticsearch` 부재, 1 = live Chroma).
+- 프론트: `tsc --noEmit` 통과 · build **699 modules · 진입 414.36 kB**(+0.23 kB = 403 재조회 분기,
+  lazy 청크 무변) · `vitest run` **265 passed / 18 files**(+3 = H-1 셀 3).
+- 문서 가드: `tests/test_docs_indexes.py` **12 passed / 10 subtests**(+3).
+
+### Next steps
+
+1. **8.2c**(이름 이력 + D8-6 계약 개정 + purge UI 문구) → 그 뒤 `main.py` 라우터 정리.
+2. **렌더 육안 확인**은 여전히 미검증이다(검증자도 같은 자리에서 멈췄다) — 이미지 재빌드 선행.

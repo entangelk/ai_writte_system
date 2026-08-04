@@ -18,6 +18,14 @@
 - Include reasoning: why this approach was chosen
 - State the outcome: what effect the change had
 - Write immediately after completing work, while details are fresh
+- **Mutations go in as a table, not a tally.** `verification.md` §"Mutation
+  testing" requires recording *which mutation hit which cell*; the work log is
+  where that pairing lands. "5종 전부 재실패" is not reproducible — an
+  independent verifier re-deriving the mutations will pick slightly different
+  forms and get different cell counts, and then cannot tell whether the gap is
+  the mutation's scope or a weak guard (measured: Slice 8.4, 2026-08-04, three
+  of five counts diverged for exactly this reason). One row per mutation:
+  **the diff applied · the file:line · the cells that failed, by name**.
 
 ## User Decisions and Rationale
 - When a user's preference, decision, constraint, or rationale affects requirements, scope, architecture, design, behavior, or implementation direction, summarize that decision in `docs/daily_logs/YYYY-MM-DD/work_log.md`.
