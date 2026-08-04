@@ -34,6 +34,41 @@
 - Schema / contract self-discovery: when the project exposes a `schema` / introspection command, verify the new literal appears there, not only in the code that emits it.
 - Smoke run vs. envelope claim: when the work log or HANDOFF reports envelope counts (e.g. `high=N, medium=M`), re-run the smoke and compare numbers directly. Reported numbers that nobody recomputed are unverified.
 
+## Mutation testing (proving a guard actually bites)
+
+A green suite proves nothing about whether a test *would have caught* the bug. The proof is to put the defect back — mutate the source, run the focused cells, confirm they re-fail, then restore. Everything below is about doing that without destroying work, because **restoring is where this repo keeps losing code**.
+
+### The restore rule — read this before the first mutation
+
+`git checkout -- <path>` does not "undo the mutation". It **resets the file to HEAD**, which on a dirty tree deletes every uncommitted change in that file — the mutation *and* whatever you were working on. Nine recorded incidents (2026-07-26 → 2026-08-04) follow that exact shape; **eight were implementers restoring their own just-written code**, and three of those were the same worker repeating it within one day. Knowing the rule has demonstrably not been enough, so it is written here as a gate to execute, not a caution to remember.
+
+**Pre-flight, every time — before the first mutation:**
+
+```bash
+git status --short     # must print nothing
+```
+
+Then pick the branch that matches your situation:
+
+| Situation | Restore with | Why |
+|---|---|---|
+| **Tree is clean** (implementer, after a checkpoint commit) | `git checkout -- <path>` | The tool is exactly right here: HEAD *is* the correct pre-mutation state. |
+| **Tree is dirty and you may commit** (implementer mid-slice) | Commit first, then as above | `CLAUDE.md` §6 requires checkpoint commits for this reason. Do not "just be careful" instead. |
+| **Tree is dirty and you must not commit** — a verifier auditing someone else's uncommitted work | `cp` backup + **reverse edit**, then `diff` the file against the backup | A verifier must not alter the subject's git state, and committing someone else's half-finished slice is worse than the mutation. This is the 2026-07-30 case. |
+
+**After every restore**, confirm the tree is back where it started — `git status --short` empty (clean-tree branch) or `diff` byte-identical against the backup (dirty-tree branch). `git diff --stat` matching is *not* sufficient evidence that the content matches; compare the content.
+
+### What to mutate
+
+- **Under-strict direction**: reintroduce the original defect. The regression must re-fail. A mutation that changes nothing observable means the cell is not locking what its name claims.
+- **Over-strict direction**: apply a plausible *over-correction* (an off-by-one added where the original cancellation was deliberate, a guard widened to reject a legitimate case). Some cell must fail here too.
+- **Defensive assertions need the opposite move.** A contract clause of the form "X is never allowed / Y cannot happen" is often protected by **no cell at all**, and inserting a defect proves nothing — a test that does not exist cannot fail. Instead **remove the defence** (or pre-apply the fix you are about to make) and see whether anything notices. Two Blocking findings in this repo were found only this way (2026-08-02).
+- **Record which mutation hit which cell.** "All mutations re-failed" without the pairing does not tell a later reader whether each cell locks its own clause or one broad cell absorbed them all.
+
+### When a mutation does *not* bite
+
+Do not treat it as a pass and move on, and do not assume the guard is missing either — first find out **which layer absorbed it**. Real example (2026-08-04, Slice 8.3): removing the "provider was actually called" condition left the integration cell green, because a second, independent defence (the dedupe key rejecting the row at the database) caught it. That is a designed two-layer defence working — but it also means the integration cell alone cannot lock either layer. The resolution is a unit cell that pins the rule directly, not a shrug.
+
 ## Writing principles
 
 - Independent: do not copy the verified worker's claims unchecked. Re-derive each claim from primary sources (plan, code, tests, smoke output).

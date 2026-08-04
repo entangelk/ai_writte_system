@@ -476,3 +476,33 @@ hardening 세 건을 **커밋하기 전에** 뮤테이션 검증을 돌렸고, �
 - **되돌리기 뮤테이션 3종 전부 재실패**: 해제 감싸기 제거 → H-1 셀 2건 · 빈 헤더 허용 →
   H-5 셀 · `UnclassifiedBillableAction` 포획 제거 → H-3 셀. **이번에는 커밋 뒤에 돌렸다.**
 - 전체(test-mongo ON): **2150 passed / 1 skipped / 1923 subtests**.
+
+---
+
+## Task — `git checkout --` 사고를 규칙으로 닫았다 (오너 지시)
+
+### User Decisions and Rationale
+
+- 오너: *"이 사고나는 게 참 많이 나네? … 핸드오프가 아니라 verification.md에 추가되어야 할 것 같은데?
+  체크아웃 하기 전 커밋이 되어있는지 아닌지 확인 절차가 필요하다 같은?"* → 이어서 **"6장을 고쳐버리고
+  가이드에도 서술해두자. 그럼 더 확실하지?"** 로 확정.
+- **근거가 된 실측**: 오너는 "최근 5일 내 4~5건"으로 기억했으나 로그 전수 조사 결과 **9건**이었고,
+  **8건이 구현자**(검증자는 2026-07-30 한 건)였다. 2026-08-02에는 **같은 사람이 하루에 세 번** 밟았다.
+  → verification.md에만 적으면 사고의 8/9에 안 닿는다는 것이 §6도 함께 고친 이유다.
+
+### Completed work
+
+| 문서 | 역할 |
+|---|---|
+| [`docs/guides/verification.md`](../../guides/verification.md) | **절차 정본** — §"Mutation testing" 신설. 사전 게이트(`git status --short` 공백), **상황별 원복 분기 3종**(clean → `checkout` / dirty이고 커밋 가능 → 먼저 커밋 / **dirty이고 커밋하면 안 되는 검증자** → `cp` 백업 + 역방향 Edit + 바이트 대조), 원복 후 확인, 무엇을 변형할지(방어적 단언은 **defence를 제거**해야 보인다), 그리고 **뮤테이션이 안 물릴 때의 처리**(오늘 Q1-a 두 겹 사례) |
+| `CLAUDE.md`·`AGENTS.md` §6 | **전제조건 + 포인터**. 종전 문장("mutation을 미커밋으로 두고 `git checkout`으로 원복")이 **`checkout`을 시키면서 전제조건을 안 적어** 사고의 기여 원인이었다. 이제 순서를 못박고(커밋 → 뮤테이션 → 원복 → 트리 확인) 게이트 명령과 실측 9건을 적은 뒤 가이드로 링크한다. 두 파일은 여전히 바이트 동일 |
+| `HANDOFF.md` 함정 절 | 사고 서술을 규칙 중복이 아니라 **정본 위치를 가리키는 포인터**로 교체 + 전수 조사 결과 |
+
+**왜 §5 패턴을 따랐나**: verification.md 첫 줄이 이미 *"This doc is the canonical home for that policy;
+`CLAUDE.md` §5 and `AGENTS.md` §5 link here instead of inlining"* 이다. 절차는 한 곳(가이드),
+규칙 파일은 전제조건 한 줄 + 링크 — 같은 규칙이 두 곳에서 갈라질 여지를 만들지 않는다.
+
+### Verification
+
+- `python3 -m pytest -q tests/test_docs_indexes.py` → **9 passed / 10 subtests**(링크·인덱스 가드).
+- `diff` 로 `CLAUDE.md` §6 == `AGENTS.md` §6 **바이트 동일** 확인.
