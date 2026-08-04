@@ -1890,6 +1890,34 @@ class LogoutResponse(BaseModel):
     ok: bool
 
 
+class QuotaWindowPayload(BaseModel):
+    """한 창(일 또는 주)의 상태. ``limit=None`` 은 그 창이 무제한이라는 뜻이다."""
+
+    limit: int | None
+    used: int
+    remaining: int | None
+    resets_at: datetime
+
+
+class MyQuotaResponse(BaseModel):
+    """회원이 보는 자기 사용량 (Slice 8.4 W5=B, operation 76).
+
+    ``remaining`` 이 **표시 단위**다(8.2 §0.2 — 두 창을 모두 통과해야 하므로 작은
+    쪽이 실제 잔여다). 창별 값을 함께 주는 것은 "왜 20회가 아니라 3회인가"의 답이
+    거기 있기 때문이고, 그 답이 없으면 지원 대화가 성립하지 않는다.
+
+    ``status`` 는 한도와 **다른 축**이다(8.1 P5): ``suspended`` 는 잔여가 남아
+    있어도 막히며 푸는 사람이 다르다(관리자). 화면이 그 둘을 같은 말로 그리면
+    "관리자에게 문의"가 사라진다.
+    """
+
+    remaining: int | None
+    unlimited: bool
+    status: str
+    daily: QuotaWindowPayload
+    weekly: QuotaWindowPayload
+
+
 class AdminUserPayload(BaseModel):
     # Same no-password_hash reason as UserPayload, and one field more: the admin
     # list is the only surface where whether an account is disabled is the point.
@@ -2982,6 +3010,49 @@ def create_app(
         if user is None:
             raise HTTPException(status_code=401, detail="not authenticated")
         return _user_payload(user)
+
+    # --- Member self-service quota (Slice 8.4 W5=B) -----------------------
+    # 시행은 8.3에서 켜졌고 화면은 그것을 볼 수 없었다 — 한도가 걸린 채 잔여를
+    # 알 통로가 0개였다. 이 endpoint 가 그 구멍을 닫는다.
+    #
+    # ★ 집계를 여기서 새로 하지 않는다. 분자는 시행이 쓰는 ``effective_usage``,
+    # 분모는 P6 예약을 해석하는 ``limits_for`` 이며 둘 다 ``snapshot()`` 한 곳을
+    # 지난다 — 화면이 자기 나름대로 세면 "3회 남음"을 보여 준 직후 402 를 낸다.
+    @app.get("/me/quota", response_model=MyQuotaResponse,
+             responses=_ERRORS_401, dependencies=_REQUIRE_AUTH)
+    async def read_my_quota(
+        request: Request,
+        current=Depends(require_authenticated_user),
+    ) -> dict[str, object]:
+        # `create_project` 과 같은 이유로 주체를 **dependency 가 이미 해석한 값**
+        # 에서 받는다 — 쿠키를 다시 읽는 것은 "누구인가"에 대한 두 번째 답이다.
+        enforcement: QuotaEnforcementService | None = getattr(
+            request.app.state, "quota", None)
+        if enforcement is None:
+            # 시행이 조립되지 않은 배포에서 "무제한"이라 답하면 거짓말이 된다
+            # (Q4=A 와 같은 방향: 계량 불능은 무료가 아니다).
+            raise HTTPException(
+                status_code=503, detail="request quota enforcement is not configured"
+            )
+        snapshot = enforcement.snapshot(
+            user_id=current.id, member_created_at=current.created_at)
+        return {
+            "remaining": snapshot.remaining,
+            "unlimited": snapshot.unlimited,
+            "status": snapshot.status.value,
+            "daily": {
+                "limit": snapshot.daily_limit,
+                "used": snapshot.daily_used,
+                "remaining": snapshot.daily_remaining,
+                "resets_at": snapshot.daily_resets_at,
+            },
+            "weekly": {
+                "limit": snapshot.weekly_limit,
+                "used": snapshot.weekly_used,
+                "remaining": snapshot.weekly_remaining,
+                "resets_at": snapshot.weekly_resets_at,
+            },
+        }
 
     # --- Admin (D8-5, D6=A minimal admin) ---------------------------------
     # Users only: the all-projects list and the global KPI are their own slices,

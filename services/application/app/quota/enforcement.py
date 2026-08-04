@@ -56,6 +56,8 @@ from services.application.app.quota.policy import (
     QuotaLimits,
     QuotaPolicyService,
     QuotaStatus,
+    next_daily_boundary,
+    next_week_boundary,
 )
 
 logger = logging.getLogger(__name__)
@@ -123,6 +125,59 @@ class QuotaCharge:
     target_project_id: str
     dedupe_key: str
     holder: str
+
+
+@dataclass(frozen=True, slots=True)
+class QuotaSnapshot:
+    """회원이 지금 볼 수 있는 자기 사용량 (8.4 W5=B).
+
+    **표시 단위는 통합값 하나**(8.2 §0.2) — 두 창을 모두 통과해야 하므로 작은 쪽이
+    실제로 남은 횟수다. 그렇다고 창별 값을 감추지는 않는다: "왜 20회가 아니라
+    3회인가"의 답이 거기 있고, 그 답이 없으면 지원 대화가 성립하지 않는다.
+    """
+
+    status: QuotaStatus
+    daily_limit: int | None
+    weekly_limit: int | None
+    daily_used: int
+    weekly_used: int
+    daily_resets_at: datetime
+    weekly_resets_at: datetime
+
+    @property
+    def daily_remaining(self) -> int | None:
+        return _remaining(self.daily_limit, self.daily_used)
+
+    @property
+    def weekly_remaining(self) -> int | None:
+        return _remaining(self.weekly_limit, self.weekly_used)
+
+    @property
+    def unlimited(self) -> bool:
+        return self.daily_limit is None and self.weekly_limit is None
+
+    @property
+    def remaining(self) -> int | None:
+        """통합 잔여. 두 창이 모두 무제한일 때만 ``None`` 이다.
+
+        한쪽만 무제한이면 **다른 쪽이 곧 실질 잔여**다 — 여기서 `None` 을 0 으로
+        접으면 무제한 회원의 잔여가 0 이 되고, 반대로 `None` 을 이겨 버리면
+        한도가 있는 창이 무시된다.
+        """
+
+        candidates = [
+            value for value in (self.daily_remaining, self.weekly_remaining)
+            if value is not None
+        ]
+        return min(candidates) if candidates else None
+
+
+def _remaining(limit: int | None, used: int) -> int | None:
+    if limit is None:
+        return None
+    # 음수는 표시하지 않는다 — 조정이나 한도 하향으로 사용량이 한도를 넘을 수
+    # 있는데(8.2 는 그것을 허용한다), 화면의 "-2회 남음"은 잔여가 아니다.
+    return max(limit - used, 0)
 
 
 class ActiveJobCounter(Protocol):
@@ -300,6 +355,37 @@ class QuotaEnforcementService:
                     QuotaRefusalReason.EXCEEDED,
                     f"{window} request quota exhausted ({used}/{limit})",
                 )
+
+    # ------------------------------------------------------------ 조회 (8.4 W5)
+
+    def snapshot(
+        self, *, user_id: str, member_created_at: datetime
+    ) -> QuotaSnapshot:
+        """회원이 자기 잔여를 보는 값. **읽기만 한다** (8.4 W5=B).
+
+        ★ 이 함수의 존재 이유는 "잔여를 계산하는 두 번째 자리를 만들지 않는 것"이다.
+        분자는 ``effective_usage``(= 입장 판정이 쓰는 그 값), 분모는
+        ``limits_for``(= P6 예약을 해석하는 그 함수)다. 화면이 자기 나름대로 세면
+        "3회 남음"을 보여 준 직후 402 를 내는데, 그것은 버그가 아니라 **불신**으로
+        보인다.
+
+        잠금도 뮤텍스도 잡지 않는다 — 조회가 한 칸을 차지하면 화면을 여는 것만으로
+        한도가 줄고, 뮤텍스를 잡으면 조회 하나가 그 회원의 유료 요청을 직렬화한다.
+        """
+
+        limits = self._policy.limits_for(user_id)
+        daily_used, weekly_used = self.effective_usage(
+            user_id=user_id, member_created_at=member_created_at)
+        now = self._policy.now()
+        return QuotaSnapshot(
+            status=limits.status,
+            daily_limit=limits.daily_limit,
+            weekly_limit=limits.weekly_limit,
+            daily_used=daily_used,
+            weekly_used=weekly_used,
+            daily_resets_at=next_daily_boundary(now),
+            weekly_resets_at=next_week_boundary(member_created_at, now),
+        )
 
     def _claim(
         self, *, user_id: str, action: str, target_project_id: str,

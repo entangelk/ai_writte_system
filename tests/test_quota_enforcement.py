@@ -28,6 +28,7 @@ from services.application.app.quota.enforcement import (
     admission_key,
 )
 from services.application.app.quota.ledger import (
+    AdjustmentEntry,
     InMemoryUsageLedgerRepository,
     UsageLedgerService,
 )
@@ -42,6 +43,10 @@ from services.application.app.quota.policy import (
     QuotaPolicy,
     QuotaPolicyService,
     QuotaStatus,
+    daily_key,
+    next_daily_boundary,
+    next_week_boundary,
+    weekly_key,
 )
 
 _NOW = datetime(2026, 8, 4, 3, 0, tzinfo=UTC)
@@ -433,6 +438,105 @@ class InFlightCountsTowardTheLimitTest(unittest.TestCase):
             user_id=_USER, member_created_at=_JOINED)
         # 잠금 1 + job 3, 원장 0.
         self.assertEqual((daily, weekly), (4, 4))
+
+
+class RemainingSnapshotTest(unittest.TestCase):
+    """8.4 W5=B — 화면이 읽는 잔여는 **시행이 보는 것과 같은 수**여야 한다.
+
+    이 클래스가 잠그는 것은 숫자 하나가 아니라 **두 계산이 갈라지지 않는다**는
+    성질이다. 잔여를 따로 세는 구현은 "3회 남음"을 보여 준 직후 402 를 내는데,
+    그것은 버그로 보이지 않고 **불신으로 보인다**.
+    """
+
+    def test_the_snapshot_reports_the_same_usage_enforcement_would_see(self):
+        # 원장 1 + 진행 중 잠금 1 + async job 2 = 4. 이 합이 곧 입장 판정의 분자다
+        # (Q3=E) — 어느 한 축을 빼는 뮤테이션이 여기서 물린다.
+        jobs = _Jobs(active=2)
+        service, _ledger, _locks, _clock = _build(
+            limits=QuotaLimits(daily_limit=20, weekly_limit=100), jobs=jobs)
+        settled = _admit(service, action="writing_gate", dedupe_key="a")
+        service.settle(settled, charged=True)
+        _admit(service, action="writing_report", dedupe_key="b")  # 진행 중
+        snapshot = service.snapshot(user_id=_USER, member_created_at=_JOINED)
+        self.assertEqual(snapshot.daily_used, 4)
+        self.assertEqual(
+            (snapshot.daily_used, snapshot.weekly_used),
+            service.effective_usage(user_id=_USER, member_created_at=_JOINED),
+        )
+
+    def test_remaining_is_the_smaller_of_the_two_windows(self):
+        # 8.2 §0.2 가 표시 단위를 통합값 하나로 못박았다. 일만 보는 구현은 주가
+        # 소진된 회원에게 "17회 남음"을 보여 주고 다음 클릭에서 402 를 낸다.
+        service, _ledger, _locks, _clock = _build(
+            limits=QuotaLimits(daily_limit=20, weekly_limit=3))
+        # 서로 다른 action 이다 — 같은 action 을 연달아 하면 잠금(5초)에 막힌다.
+        for action in ("writing_gate", "writing_report"):
+            charge = _admit(service, action=action, dedupe_key=f"k-{action}")
+            service.settle(charge, charged=True)
+        snapshot = service.snapshot(user_id=_USER, member_created_at=_JOINED)
+        self.assertEqual(snapshot.daily_remaining, 18)
+        self.assertEqual(snapshot.weekly_remaining, 1)
+        self.assertEqual(snapshot.remaining, 1)
+
+    def test_an_unlimited_window_does_not_constrain_the_combined_value(self):
+        # over-strict 짝: `None` 을 0 으로 접으면 무제한 회원의 잔여가 0이 된다.
+        service, _ledger, _locks, _clock = _build(
+            limits=QuotaLimits(daily_limit=None, weekly_limit=5))
+        snapshot = service.snapshot(user_id=_USER, member_created_at=_JOINED)
+        self.assertIsNone(snapshot.daily_remaining)
+        self.assertEqual(snapshot.weekly_remaining, 5)
+        self.assertEqual(snapshot.remaining, 5)
+
+    def test_fully_unlimited_reports_no_number_at_all(self):
+        # W1 오너 결정의 표현: 부트스트랩 관리자는 `limit=None` 정책 행을 갖는다.
+        # 무제한을 숫자로 말하지 않는다(화면이 그 자리에 아무것도 그리지 않는다).
+        service, _ledger, _locks, _clock = _build(
+            limits=QuotaLimits(daily_limit=None, weekly_limit=None))
+        snapshot = service.snapshot(user_id=_USER, member_created_at=_JOINED)
+        self.assertIsNone(snapshot.remaining)
+        self.assertTrue(snapshot.unlimited)
+
+    def test_remaining_never_goes_below_zero(self):
+        # 한도를 넘긴 상태는 관리자 조정(양수 delta)이나 한도 하향으로 실제로
+        # 생긴다. 그때 잔여가 음수로 새면 화면에 "-2회 남음"이 뜬다.
+        service, ledger_repo, _locks, clock = _build(
+            limits=QuotaLimits(daily_limit=1, weekly_limit=100))
+        ledger_repo.add_adjustment(AdjustmentEntry(
+            id="adj-1", user_id=_USER, target_project_id=_PROJECT, delta=3,
+            reason="운영 보정", admin_user_id="admin-1",
+            daily_key=daily_key(clock()),
+            weekly_key=weekly_key(_JOINED, clock()), at=clock(),
+        ))
+        snapshot = service.snapshot(user_id=_USER, member_created_at=_JOINED)
+        self.assertEqual(snapshot.daily_used, 3)
+        self.assertEqual(snapshot.daily_remaining, 0)
+        self.assertEqual(snapshot.remaining, 0)
+
+    def test_a_suspended_account_is_reported_as_suspended_not_as_zero(self):
+        # P5: 정지와 `limit=0` 은 다른 사건이고 상태코드도 다르다(Q5=B).
+        # 화면이 그 둘을 같은 말로 그리면 "관리자에게 문의"가 사라진다.
+        service, _ledger, _locks, _clock = _build(
+            limits=QuotaLimits(
+                daily_limit=20, weekly_limit=100, status=QuotaStatus.SUSPENDED))
+        snapshot = service.snapshot(user_id=_USER, member_created_at=_JOINED)
+        self.assertIs(snapshot.status, QuotaStatus.SUSPENDED)
+        self.assertEqual(snapshot.remaining, 20)
+
+    def test_the_snapshot_reports_both_window_boundaries(self):
+        service, _ledger, _locks, clock = _build()
+        snapshot = service.snapshot(user_id=_USER, member_created_at=_JOINED)
+        # 일 창은 다음 KST 자정, 주 창은 가입일 기준 주기의 끝(P2-b).
+        self.assertEqual(
+            snapshot.daily_resets_at, next_daily_boundary(clock()))
+        self.assertEqual(
+            snapshot.weekly_resets_at, next_week_boundary(_JOINED, clock()))
+
+    def test_the_snapshot_reads_nothing_and_writes_nothing(self):
+        # 조회가 잠금을 차지하면 화면을 여는 것만으로 한도가 줄어든다. 그리고
+        # 입장 뮤텍스를 잡으면 조회 하나가 그 회원의 유료 요청을 직렬화한다.
+        service, _ledger, lock_repo, _clock = _build()
+        service.snapshot(user_id=_USER, member_created_at=_JOINED)
+        self.assertEqual(list(lock_repo._locks), [])  # noqa: SLF001
 
 
 class AdmissionMutexTest(unittest.TestCase):

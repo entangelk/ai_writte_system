@@ -130,6 +130,22 @@ def daily_key(now: datetime) -> str:
     return _local(_require_aware("now", now)).date().isoformat()
 
 
+def next_daily_boundary(now: datetime) -> datetime:
+    """현재 일 창이 끝나는 순간 = 다음 KST 자정. UTC 로 돌려준다 (8.4 W5=B).
+
+    회원 화면이 "언제 초기화되나"를 말하려면 창의 **끝**이 필요한데, 그 계산이
+    화면으로 새면 이 모듈이 유일한 지역 시간대 지점이라는 성질이 깨진다 —
+    시행과 표시가 다른 "오늘"을 말하게 된다.
+    """
+
+    local = _local(_require_aware("now", now))
+    tomorrow = local.date() + timedelta(days=1)
+    return datetime(
+        tomorrow.year, tomorrow.month, tomorrow.day,
+        tzinfo=BOUNDARY_TIMEZONE,
+    ).astimezone(UTC)
+
+
 def weekly_cycle_bounds(created_at: datetime, now: datetime) -> tuple[datetime, datetime]:
     """가입일 기준 7일 주기의 [시작, 끝). 둘 다 UTC 로 돌려준다.
 
@@ -291,6 +307,15 @@ class QuotaPolicyService:
 
     def limits_for(self, user_id: str) -> QuotaLimits:
         return effective_limits(self._repo.get(user_id), self._clock())
+
+    def now(self) -> datetime:
+        """이 서비스가 보는 현재 시각. 창 경계를 묻는 호출부(8.4 W5)가 쓴다.
+
+        시행과 표시가 **같은 시계**를 봐야 "오늘"이 갈라지지 않는다 — 호출부가
+        `datetime.now(UTC)` 를 따로 부르면 테스트의 고정 시계도 새어 나간다.
+        """
+
+        return self._clock()
 
     def set_limits(
         self, *, user_id: str, created_at: datetime, target: QuotaLimits

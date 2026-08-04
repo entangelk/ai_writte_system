@@ -987,6 +987,9 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
                                "of this call rather than an input",
         ("/projects", "get"): "names no project: isolation is the store query "
                               "narrowed to the caller, not a 403",
+        ("/me/quota", "get"): "8.4 W5=B — 자기 사용량은 회원 단위 사실이라 "
+                              "project 를 지목하지 않는다. 남의 quota 는 경로가 "
+                              "없어서 못 읽는다(관리자 조회는 8.5의 별도 tier)",
     }
 
     # D8-5's tier. Admin operations name no project on purpose: the admin
@@ -1074,7 +1077,7 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         self.assertEqual(by_tier["auth"], set(self.AUTH_ONLY))
         self.assertEqual(by_tier["admin"], self.ADMIN)
         self.assertEqual(len(by_tier["project"]), 61)
-        self.assertEqual(len(tiers), 75)
+        self.assertEqual(len(tiers), 76)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:

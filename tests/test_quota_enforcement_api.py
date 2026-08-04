@@ -111,12 +111,18 @@ class _Client:
         self._app = app
 
     def post(self, path, **kwargs):
+        return self._send("post", path, **kwargs)
+
+    def get(self, path, **kwargs):
+        return self._send("get", path, **kwargs)
+
+    def _send(self, method, path, **kwargs):
         async def send():
             transport = httpx.ASGITransport(app=self._app)
             async with httpx.AsyncClient(
                 transport=transport, base_url="http://test"
             ) as client:
-                return await client.post(path, **kwargs)
+                return await getattr(client, method)(path, **kwargs)
 
         return asyncio.run(send())
 
@@ -605,6 +611,126 @@ class BillableRouteWiringTest(unittest.TestCase):
         for route in self.routes:
             with self.subTest(path=route.path):
                 self.assertIsInstance(route, QuotaSettledRoute)
+
+
+class MyQuotaEndpointTest(unittest.TestCase):
+    """8.4 W5=B — 회원이 자기 잔여를 보는 유일한 통로 (operation 76).
+
+    시행은 8.3에서 켜져 있었고 화면은 그것을 볼 수 없었다. 이 endpoint 가 그 구멍을
+    닫으며, **여기서 재는 것은 숫자가 아니라 "시행과 같은 수를 말하는가"** 다.
+    """
+
+    def _quota(self, client):
+        response = client.get("/me/quota")
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def test_it_reports_the_default_limits_when_the_member_has_no_policy_row(self):
+        client, _project_id, _ledger, _clock, _jobs = _app(
+            provider=_FakeProvider(content="x"))
+        body = self._quota(client)
+        # P4=A: 행이 없으면 코드 기본값(일 20 / 주 100).
+        self.assertEqual(body["daily"]["limit"], 20)
+        self.assertEqual(body["weekly"]["limit"], 100)
+        self.assertEqual(body["remaining"], 20)
+        self.assertEqual(body["status"], "active")
+        self.assertFalse(body["unlimited"])
+
+    def test_a_charged_request_moves_the_number_the_member_sees(self):
+        # 이 셀이 8.4의 요지다 — 화면의 숫자가 **시행이 센 것과 같은 사실**을
+        # 말한다. 두 계산이 갈라지면 "3회 남음" 직후 402 가 난다.
+        client, project_id, _ledger, _clock, _jobs = _app(
+            provider=_FakeProvider(content="이어진 장면."))
+        before = self._quota(client)["remaining"]
+        self.assertEqual(_generate(client, project_id).status_code, 200)
+        self.assertEqual(self._quota(client)["remaining"], before - 1)
+
+    def test_the_combined_remaining_is_the_smaller_window(self):
+        client, _project_id, _ledger, _clock, _jobs = _app(
+            provider=_FakeProvider(content="x"),
+            limits=QuotaLimits(daily_limit=20, weekly_limit=2))
+        body = self._quota(client)
+        self.assertEqual(body["daily"]["remaining"], 20)
+        self.assertEqual(body["weekly"]["remaining"], 2)
+        self.assertEqual(body["remaining"], 2)
+
+    def test_an_unlimited_member_gets_no_number(self):
+        # W1 오너 결정: 부트스트랩 관리자는 `limit=None` 정책 행을 갖는다. 화면은
+        # 그 자리에 아무것도 그리지 않는다 — 무제한을 숫자로 말하지 않는다.
+        client, _project_id, _ledger, _clock, _jobs = _app(
+            provider=_FakeProvider(content="x"),
+            limits=QuotaLimits(daily_limit=None, weekly_limit=None))
+        body = self._quota(client)
+        self.assertTrue(body["unlimited"])
+        self.assertIsNone(body["remaining"])
+
+    def test_it_reports_both_reset_moments(self):
+        client, _project_id, _ledger, _clock, _jobs = _app(
+            provider=_FakeProvider(content="x"))
+        body = self._quota(client)
+        # 고정 시계는 2026-08-04 03:00 UTC(= KST 정오)이므로 일 창은 그 날
+        # UTC 15:00 에 끝난다. 주 창은 가입일(2026-07-01) 기준 7일 주기다.
+        self.assertTrue(body["daily"]["resets_at"].startswith("2026-08-04T15:00"))
+        self.assertIn("resets_at", body["weekly"])
+
+    def test_reading_it_costs_nothing_and_blocks_nothing(self):
+        # over-strict: 조회에 시행이 붙으면 화면을 여는 것만으로 한도가 줄고,
+        # 잠금까지 잡으면 그 뒤 유료 요청이 429 가 된다.
+        client, project_id, ledger, _clock, _jobs = _app(
+            provider=_FakeProvider(content="x"))
+        for _ in range(3):
+            self._quota(client)
+        self.assertEqual(_rows(ledger), [])
+        self.assertEqual(_generate(client, project_id).status_code, 200)
+
+    def test_it_is_not_a_billable_operation(self):
+        # 분류표에 들어가면 조회가 유료가 된다. 8.0 B4(=provider 를 부르는 경로만
+        # 유료)의 직접적 귀결이다.
+        self.assertNotIn(("/me/quota", "get"), BILLABLE_OPERATIONS)
+
+
+class AdminIsNotExemptTest(unittest.TestCase):
+    """8.4 W1 — 면제는 **신분이 아니라 정책 행**이다 (오너 결정 2026-08-04).
+
+    오너는 "면제 없음이되 첫 부트스트랩 관리자만 `limit=None`"으로 정했다. 그 결정의
+    핵심은 `enforce_quota` 에 tier 분기가 **0줄**이라는 것이다 — 관리자가 안 막히는
+    이유는 신분이 아니라 자기 정책 행이고, 그 행이 없으면 관리자도 똑같이 막힌다.
+    이 클래스는 훗날 누군가 `is_admin` 예외를 넣으면 실패한다.
+    """
+
+    def test_an_admin_without_a_policy_row_is_bound_by_the_default_limits(self):
+        admin = User(
+            id="admin-1", username="root", password_hash="unused",
+            is_admin=True, is_active=True,
+            created_at=datetime(2026, 7, 1, tzinfo=UTC),
+        )
+        client, project_id, _ledger, _clock, _jobs = _app(
+            provider=_FakeProvider(content="x"),
+            limits=QuotaLimits(daily_limit=0, weekly_limit=100))
+        client._app.dependency_overrides[  # noqa: SLF001
+            require_authenticated_user] = lambda: admin
+        # 한도 0 행은 `_USER` 것이므로 관리자에게는 **기본값**이 적용된다 —
+        # 그래서 이 요청은 통과한다(over-strict 짝: 관리자만 유독 막히지 않는다).
+        self.assertEqual(_generate(client, project_id).status_code, 200)
+        # 그리고 그 사용은 **원장에 남는다** — 면제였다면 행이 없다.
+        quota = client.get("/me/quota").json()
+        self.assertEqual(quota["daily"]["used"], 1)
+
+    def test_the_enforcement_dependency_never_looks_at_the_admin_flag(self):
+        # 소스 수준의 단정이 아니라 **행동**으로 잡는다: 정책 행이 관리자에게도
+        # 그대로 적용되면 tier 분기는 존재할 수 없다.
+        admin = User(
+            id="quota-user", username="root", password_hash="unused",
+            is_admin=True, is_active=True,
+            created_at=datetime(2026, 7, 1, tzinfo=UTC),
+        )
+        client, project_id, _ledger, _clock, _jobs = _app(
+            provider=_FakeProvider(content="x"),
+            limits=QuotaLimits(daily_limit=0, weekly_limit=100))
+        client._app.dependency_overrides[  # noqa: SLF001
+            require_authenticated_user] = lambda: admin
+        # 같은 id 라 위의 한도 0 행이 이 관리자에게 적용된다 → 402.
+        self.assertEqual(_generate(client, project_id).status_code, 402)
 
 
 class DedupeMappingTest(unittest.TestCase):

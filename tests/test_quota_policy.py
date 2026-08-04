@@ -22,6 +22,7 @@ from services.application.app.quota.policy import (
     daily_key,
     default_limits,
     effective_limits,
+    next_daily_boundary,
     next_week_boundary,
     split_change,
     weekly_cycle_bounds,
@@ -50,6 +51,50 @@ class DailyWindowTest(unittest.TestCase):
         after_utc_midnight = datetime(2026, 8, 4, 0, 1, tzinfo=UTC)
         self.assertEqual(daily_key(before_utc_midnight), "2026-08-04")
         self.assertEqual(daily_key(after_utc_midnight), "2026-08-04")
+
+
+class DailyResetMomentTest(unittest.TestCase):
+    """8.4 W5=B — 회원 화면이 "언제 초기화되나"를 말하려면 창의 **끝**이 필요하다.
+
+    `daily_key` 는 지금 어느 창인지만 답하고 그 창이 언제 끝나는지는 답하지 않았다.
+    이 함수가 그 자리이며 **여기(정책 모듈)에 두는 것이 계약**이다 — 이 저장소의
+    유일한 지역 시간대 지점이라, 화면이 자기 나름대로 "다음 자정"을 계산하면
+    시행과 표시가 다른 "오늘"을 말하게 된다.
+    """
+
+    def test_the_next_reset_is_the_coming_kst_midnight(self) -> None:
+        # KST 자정 = UTC 15:00. 한국 시간 오후(= UTC 오전)에서 본 다음 리셋은
+        # 그 날의 UTC 15:00 이다.
+        korean_afternoon = datetime(2026, 8, 4, 5, 0, tzinfo=UTC)  # KST 14:00
+        self.assertEqual(
+            next_daily_boundary(korean_afternoon),
+            datetime(2026, 8, 4, 15, 0, tzinfo=UTC),
+        )
+
+    def test_utc_midnight_is_not_a_reset(self) -> None:
+        # over-strict 방향: 경계를 UTC 자정으로 되돌린 구현은 여기서 갈라진다.
+        # UTC 로 날짜가 바뀌는 순간 한국은 아직 같은 날(오전 9시)이라, 다음 리셋은
+        # **그 날 저녁**(UTC 15:00)이지 방금 지난 UTC 자정이 아니다.
+        just_after_utc_midnight = datetime(2026, 8, 4, 0, 1, tzinfo=UTC)
+        self.assertEqual(
+            next_daily_boundary(just_after_utc_midnight),
+            datetime(2026, 8, 4, 15, 0, tzinfo=UTC),
+        )
+
+    def test_the_boundary_moment_itself_belongs_to_the_new_window(self) -> None:
+        # 경계 정각에 선 요청은 **새 창**에 있다(`daily_key` 가 그렇게 답한다).
+        # 그러므로 다음 리셋은 24시간 뒤여야 한다 — 여기서 0을 돌려주면 화면이
+        # "지금 초기화"를 무한히 반복한다.
+        boundary = datetime(2026, 8, 4, 15, 0, tzinfo=UTC)
+        self.assertEqual(daily_key(boundary), "2026-08-05")
+        self.assertEqual(
+            next_daily_boundary(boundary),
+            datetime(2026, 8, 5, 15, 0, tzinfo=UTC),
+        )
+
+    def test_it_refuses_naive_input_like_every_other_window_function(self) -> None:
+        with self.assertRaises(ValueError):
+            next_daily_boundary(datetime(2026, 8, 4, 5, 0))
 
 
 class WeeklyWindowTest(unittest.TestCase):
