@@ -1172,4 +1172,59 @@ describe("WritingPanel — 요청 quota (Slice 8.4 W3=A · W5=B)", () => {
     await waitFor(() =>
       expect(screen.getByText("남은 사용 10회")).toBeInTheDocument());
   });
+
+  it("confirms a suspension by re-reading the quota when the tile has not loaded yet", async () => {
+    // 독립 검증 2026-08-04 H-1이 지적한 경합 창: 정지 계정의 **첫** 유료 요청이
+    // 잔여 조회보다 먼저 도착하면 `quota` 가 아직 `null` 이라 403이 소유권 거절로
+    // 위장된다. 403을 받은 그 자리에서 한 번 다시 읽어 확정한다.
+    resetMemberQuota();
+    const fetchMock = mockFetch(
+      { status: 503, body: { detail: "quota unavailable" } },   // mount 조회 실패
+      { status: 403, body: { detail: "forbidden" } },           // 유료 요청
+      { body: { ...quotaBody, status: "suspended" } },          // 403 뒤 재조회
+    );
+    renderPanel();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    await userEvent.click(generateButton());
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "계정이 정지되어 있습니다",
+    );
+  });
+
+  it("leaves an ownership 403 alone when the re-read says the account is active", async () => {
+    // over-strict 짝이자 이 수정에서 가장 위험한 방향: 모든 403을 정지로 말하면
+    // 남의 프로젝트를 열었을 때 "계정이 정지됐다"는 **거짓 안내**가 뜬다.
+    resetMemberQuota();
+    const fetchMock = mockFetch(
+      { status: 503, body: { detail: "quota unavailable" } },
+      { status: 403, body: { detail: "project is owned by another user" } },
+      { body: quotaBody },                                       // status: active
+    );
+    renderPanel();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    await userEvent.click(generateButton());
+    const alert = await screen.findByRole("alert");
+    expect(alert).not.toHaveTextContent("정지");
+    expect(alert).toHaveTextContent("403");
+  });
+
+  it("does not re-read the quota for refusals that are not 403", async () => {
+    // 402·429는 그 자체로 quota 사건이라 재조회할 이유가 없다. 아무 실패에나
+    // 조회를 한 번 더 붙이면 실패 경로가 두 배로 시끄러워진다.
+    resetMemberQuota();
+    const fetchMock = mockFetch(
+      { body: quotaBody },                                       // mount
+      { status: 402, body: { detail: "daily request quota exhausted (20/20)" } },
+      { body: quotaBody },                                       // 거절 뒤 갱신 1회
+    );
+    renderPanel();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    await userEvent.click(generateButton());
+    await screen.findByRole("alert");
+    // mount 1 + 유료 1 + 거절 뒤 갱신 1 = 3. 재확정 조회가 붙으면 4가 된다.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
 });

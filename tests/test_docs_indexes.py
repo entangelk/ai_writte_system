@@ -216,10 +216,7 @@ class VerificationCountClaimsTest(unittest.TestCase):
                         f"{actual}개",
                     )
 
-    def test_the_verdict_distribution_adds_up_to_the_total(self) -> None:
-        # 판정 분포(합격·조건부·서술형)는 전체와 맞아야 한다. 한 건을 등재하면서
-        # 총계만 올리고 분포를 안 고치면 여기서 잡힌다 — 그리고 그 분포는 최상위
-        # README 가 "조건부 합격이 27%"라는 주장의 분모/분자이기도 하다.
+    def _distribution(self) -> list[int]:
         index = (_VERIFICATIONS / "README.md").read_text(encoding="utf-8")
         counts = [
             int(value)
@@ -227,7 +224,59 @@ class VerificationCountClaimsTest(unittest.TestCase):
                                     index, re.MULTILINE)
         ]
         self.assertEqual(len(counts), 4, f"판정 4종을 못 읽었다: {counts}")
-        self.assertEqual(sum(counts), self.actual)
+        return counts
+
+    def test_the_verdict_distribution_adds_up_to_the_total(self) -> None:
+        # 판정 분포(합격·조건부·서술형)는 전체와 맞아야 한다. 한 건을 등재하면서
+        # 총계만 올리고 분포를 안 고치면 여기서 잡힌다 — 그리고 그 분포는 최상위
+        # README 가 "조건부 합격이 N%"라는 주장의 분모/분자이기도 하다.
+        self.assertEqual(sum(self._distribution()), self.actual)
+
+    def test_the_readme_prose_repeats_the_distribution_verbatim(self) -> None:
+        # 독립 검증 2026-08-04 H-3이 손으로 잡은 자리. **건수 주장은 가드 안에
+        # 있었는데 서술형 분포 문장은 밖이었다** — 그래서 8.3·8.2b 합격 +2가
+        # 검증 인덱스 표에는 올랐는데 최상위 README 문장만 `합격 142`에 얼어
+        # 있었고, 아무 테스트도 실패하지 않았다. 같은 병("세는 사람이 둘")이고
+        # 처방도 같다: 분포의 정본은 검증 인덱스 표 하나이며 README 는 그것을
+        # 그대로 되뇐다.
+        readme = (_ROOT / "README.md").read_text(encoding="utf-8")
+        found = re.search(
+            r"합격 (\d+) · 조건부 합격 (\d+) · 불합격 (\d+) · 서술형 (\d+)", readme
+        )
+        self.assertIsNotNone(
+            found, "README 의 판정 분포 문장을 못 찾았다 — 문구가 바뀌었으면 "
+                   "이 패턴도 함께 고친다",
+        )
+        self.assertEqual(
+            [int(value) for value in found.groups()], self._distribution(),
+            "README 분포 문장이 docs/verifications/README.md 표와 다르다",
+        )
+
+    def test_the_conditional_pass_percentage_follows_the_distribution(self) -> None:
+        # 같은 문장의 파생값. 분포를 고치면서 이 백분율만 두면 "조건부 27%"가
+        # 조용히 낡는다 — 이 주장은 포트폴리오 정문에서 **절차가 형식적이지
+        # 않다는 근거**로 쓰이므로 낡은 채 두면 근거가 아니라 흠이 된다.
+        readme = (_ROOT / "README.md").read_text(encoding="utf-8")
+        stated = re.search(r"조건부 합격이 (\d+)%", readme)
+        self.assertIsNotNone(stated, "README 의 조건부 합격 비율 문장을 못 찾았다")
+        conditional = self._distribution()[1]
+        self.assertEqual(
+            int(stated.group(1)), round(conditional / self.actual * 100),
+            f"조건부 {conditional}/{self.actual} = "
+            f"{conditional / self.actual * 100:.1f}%",
+        )
+
+    def test_the_readme_names_the_current_contract_version(self) -> None:
+        # 같은 형태의 세 번째 자리. README 절차 표의 ④ 칸이 SoT 버전을 적는데,
+        # 그 버전은 슬라이스마다 오르고 README 는 아무도 안 고친다(실측: SoT 가
+        # v1.7.89 인 동안 README 는 v1.7.87 이었다). 정본은 SoT 헤더 한 곳이다.
+        sot = (_ROOT / "docs" / "system-contract-sot.md").read_text(encoding="utf-8")
+        current = re.search(r"계약 버전: `(v[\d.]+)`", sot)
+        self.assertIsNotNone(current, "SoT 헤더의 계약 버전을 못 읽었다")
+        readme = (_ROOT / "README.md").read_text(encoding="utf-8")
+        stated = re.search(r"\*\*(v[\d.]+)\*\*, 변경이력 전량 보존", readme)
+        self.assertIsNotNone(stated, "README 절차 표의 SoT 버전 칸을 못 찾았다")
+        self.assertEqual(stated.group(1), current.group(1))
 
 
 if __name__ == "__main__":  # pragma: no cover

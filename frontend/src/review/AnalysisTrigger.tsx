@@ -1,6 +1,7 @@
 import { useRef, useState, type MouseEvent } from "react";
 import { Link } from "react-router";
 import {
+  ApiError,
   analyzeVersion,
   describeApiError,
   describeQuotaError,
@@ -87,15 +88,23 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
         latestSnapshotId,
         options,
       );
-      refreshQuota();
+      void refreshQuota();
       setResult({ candidateCount: outcome.candidateCount });
       onStatusChange?.("complete");
     } catch (err) {
-      const refusal = describeQuotaError(err, quota);
+      let refusal = describeQuotaError(err, quota);
+      if (refusal === null && err instanceof ApiError && err.status === 403) {
+        // 독립 검증 2026-08-04 H-1 — WritingPanel 과 같은 경합 창, 같은 처방.
+        // 정지 계정의 첫 유료 요청이 잔여 조회보다 먼저 오면 정지가 소유권
+        // 거절로 위장된다. 403 에서만 한 번 다시 읽어 확정한다.
+        refusal = describeQuotaError(err, await refreshQuota());
+      }
       if (refusal === null) {
         setError(describeApiError(err));
       } else {
-        refreshQuota();
+        if (refusal.kind !== "suspended") {
+          void refreshQuota();
+        }
         if (refusal.confirmable) {
           // 확인은 사용자 클릭에서만 나온다(W4=A) — 여기서 바로 다시 보내면
           // 확인이 무력화된다.

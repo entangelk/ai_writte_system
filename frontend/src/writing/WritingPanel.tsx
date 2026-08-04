@@ -304,14 +304,27 @@ export function WritingPanel(props: WritingPanelProps) {
    * `retry` 는 사용자가 "하나 더 만들기"를 누를 때만 실행된다 — 여기서 자동으로
    * 부르면 확인이 무력화되고 사용자가 모르는 사이 사용량이 늘어난다(W4=A).
    */
-  function handleQuotaRefusal(err: unknown, retry: () => void): boolean {
-    const refusal = describeQuotaError(err, quota);
+  async function handleQuotaRefusal(
+    err: unknown,
+    retry: () => void,
+  ): Promise<boolean> {
+    let refusal = describeQuotaError(err, quota);
+    if (refusal === null && err instanceof ApiError && err.status === 403) {
+      // 독립 검증 2026-08-04 H-1 — 경합 창을 닫는다. 정지 계정의 **첫** 유료
+      // 요청이 잔여 조회보다 먼저 도착하면 `quota` 가 아직 `null` 이라 정지가
+      // 소유권 거절로 위장된다. 403 은 드물고 통로가 둘뿐이라(소유권·정지),
+      // 그 자리에서 한 번 다시 읽어 확정하는 값이 재조회 한 번보다 크다.
+      // **403 에서만** 한다 — 402·429 는 그 자체로 이미 quota 사건이다.
+      refusal = describeQuotaError(err, await refreshQuota());
+    }
     if (refusal === null) {
       return false;
     }
     // 거절은 요청이 **일어나지 않은** 것이므로 잔여를 다시 읽어 화면을 맞춘다
     // (진행 중 요청이 한 칸을 차지하고 있을 수 있다 — Q3=E).
-    refreshQuota();
+    if (refusal.kind !== "suspended") {
+      void refreshQuota();
+    }
     if (refusal.confirmable) {
       setError(null);
       setRetryable(false);
@@ -364,7 +377,7 @@ export function WritingPanel(props: WritingPanelProps) {
         task_type: TASK_TYPE,
         current_position: position,
       }, options);
-      refreshQuota();
+      void refreshQuota();
       // 증분 2c (D5=A): medium/long presets are async — the server enqueues a
       // background job and returns 202 with a job reference instead of a
       // candidate. The worker appends the result to scratch; the pad (increment 3)
@@ -384,7 +397,7 @@ export function WritingPanel(props: WritingPanelProps) {
       contextRef.current = { baseVersionId, requestId };
       await runGate(produced, { requestId, trimmed, position });
     } catch (err) {
-      if (handleQuotaRefusal(err, () =>
+      if (await handleQuotaRefusal(err, () =>
         void runGenerate({ confirmDuplicate: true }))) {
         return;
       }
@@ -428,7 +441,7 @@ export function WritingPanel(props: WritingPanelProps) {
         task_type: TASK_TYPE,
         current_position: position,
       }, options);
-      refreshQuota();
+      void refreshQuota();
       setGate(evaluated);
       const finding = eligibleRevisionFinding(produced, evaluated);
       if (finding !== null) {
@@ -450,7 +463,7 @@ export function WritingPanel(props: WritingPanelProps) {
         });
       }
     } catch (err) {
-      if (handleQuotaRefusal(err, () =>
+      if (await handleQuotaRefusal(err, () =>
         void runGate(produced, context, { confirmDuplicate: true }))) {
         return;
       }
@@ -478,7 +491,7 @@ export function WritingPanel(props: WritingPanelProps) {
     loopIntentRef.current = body;
     try {
       const outcome = await reviseAndGateWriting(projectId, body, options);
-      refreshQuota();
+      void refreshQuota();
       const stageError = partialStageError(outcome.data);
       setCandidate(outcome.data.candidate);
       setGate(outcome.data.gate);
@@ -497,7 +510,7 @@ export function WritingPanel(props: WritingPanelProps) {
         loopIntentRef.current = null;
       }
     } catch (err) {
-      if (handleQuotaRefusal(err, () =>
+      if (await handleQuotaRefusal(err, () =>
         void executeLoop(body, { confirmDuplicate: true }))) {
         return;
       }
@@ -574,7 +587,7 @@ export function WritingPanel(props: WritingPanelProps) {
         ...fields,
         idempotency_key: intent.key,
       }, options);
-      refreshQuota();
+      void refreshQuota();
       if (outcome.accepted) {
         // A version was saved (200 accepted=true or 502 partial). Consume the
         // candidate and let the editor reload the new latest from the server.
@@ -605,7 +618,7 @@ export function WritingPanel(props: WritingPanelProps) {
         setNotice("채택되지 않았습니다. 아래 Gate 결과를 확인하세요.");
       }
     } catch (err) {
-      if (handleQuotaRefusal(err, () =>
+      if (await handleQuotaRefusal(err, () =>
         void accept({ confirmDuplicate: true }))) {
         // 확인 대화가 뜬 상태다 — intent 는 그대로 두어야 확인 뒤 **같은 키**로
         // 재전송된다(다른 키면 accept 의 멱등 계약이 깨진다).

@@ -34,24 +34,30 @@ export function resetMemberQuota(): void {
 
 export function useMemberQuota(): {
   quota: MyQuota | null;
-  refresh: () => void;
+  refresh: () => Promise<MyQuota | null>;
 } {
   const [quota, setQuota] = useState<MyQuota | null>(seeded);
 
-  const refresh = useCallback(() => {
+  // **읽은 값을 돌려준다.** 대개는 상태만 갱신하면 되지만 한 자리에서 값이 곧바로
+  // 필요하다: 403 을 받은 순간 정지 여부를 확정할 때(독립 검증 2026-08-04 H-1).
+  // 그때 상태 갱신을 기다리면 이미 지난 렌더의 `quota` 를 보게 된다.
+  const refresh = useCallback(async (): Promise<MyQuota | null> => {
     if (seeded !== null) {
       setQuota(seeded);
-      return;
+      return seeded;
     }
-    getMyQuota()
-      .then(setQuota)
-      .catch(() => {
-        /* 보조 정보다 — 위 주석 참조 */
-      });
+    try {
+      const value = await getMyQuota();
+      setQuota(value);
+      return value;
+    } catch {
+      // 보조 정보다 — 위 주석 참조.
+      return null;
+    }
   }, []);
 
   useEffect(() => {
-    refresh();
+    void refresh();
   }, [refresh]);
 
   return { quota, refresh };
