@@ -321,6 +321,35 @@ class _ProviderRequest:
     max_tokens = 16
 
 
+class ChargeRuleTest(unittest.TestCase):
+    """Q1-a=A 의 규칙 자체 — ``2xx`` **그리고** provider 호출.
+
+    **왜 별도 단위 셀인가**(뮤테이션이 드러낸 것, 2026-08-04): 위 replay 셀에서
+    provider 조건을 지워도 통과한다 — 같은 ``job_id`` 를 dedupe 키로 쓰므로
+    (Q9=A) 원장이 두 번째 행을 **DB 수준에서** 거부하기 때문이다. 그것은 결함이
+    아니라 오너가 요구한 **두 겹**이 실제로 겹쳐 있다는 증거다. 다만 그 때문에
+    통합 경로만으로는 한 겹을 지우는 변경이 안 보이므로, 규칙 자체를 여기서
+    직접 잠근다.
+    """
+
+    def test_the_matrix(self):
+        from services.application.app.main import _is_charged  # noqa: PLC0415
+
+        cases = {
+            (200, 1): True,     # 정상 — 일했고 성공했다
+            (200, 0): False,    # ★ replay: 아무 일도 안 하고 200
+            (202, 1): False,    # 접수는 성공이 아니다(Q1-b: 워커가 센다)
+            (202, 0): False,
+            (400, 1): False,    # 창 가드 — provider 왕복은 있었지만 실패다
+            (502, 1): False,    # 실제로 GPU 를 썼지만 무과금(오너 정책)
+            (503, 0): False,
+            (None, 1): False,   # 예외로 끝났다
+        }
+        for (status, calls), expected in cases.items():
+            with self.subTest(status=status, provider_calls=calls):
+                self.assertIs(_is_charged(status, calls), expected)
+
+
 class RefusalStatusTest(unittest.TestCase):
     """Q5=B — 세 사건에 세 코드."""
 
