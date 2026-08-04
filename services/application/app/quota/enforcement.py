@@ -330,6 +330,12 @@ class QuotaEnforcementService:
 
         순서가 뒤집히면 그 사이에 **행도 없고 잠금도 없는 한 칸**이 생겨 초과가
         정확히 그 틈으로 샌다. 그래서 해제는 ``finally`` 이고 차감은 그 앞이다.
+
+        **정산은 요청의 결과를 바꾸지 않는다**(독립 검증 2026-08-04 H-1). 이 함수는
+        응답이 이미 만들어진 뒤에 불리므로, 여기서 예외가 새어 나가면 **성공한
+        2xx 가 5xx 로 뒤집힌다** — 사용자는 결과를 받았는데 실패로 통보받는 셈이다.
+        원장 삽입은 처음부터 그렇게 다뤘고(Q2 잔여), 해제도 같은 규칙을 따른다:
+        잠금은 lease 가 회수하므로 놓쳐도 정합성이 깨지지 않는다.
         """
 
         try:
@@ -342,12 +348,19 @@ class QuotaEnforcementService:
                     dedupe_key=charge.dedupe_key,
                 )
         finally:
-            self._locks.release(
-                user_id=charge.user_id,
-                action=charge.action,
-                target_project_id=charge.target_project_id,
-                holder=charge.holder,
-            )
+            try:
+                self._locks.release(
+                    user_id=charge.user_id,
+                    action=charge.action,
+                    target_project_id=charge.target_project_id,
+                    holder=charge.holder,
+                )
+            except Exception:  # noqa: BLE001 — 응답을 뒤집지 않는다(위 docstring)
+                logger.exception(
+                    "releasing the request lock failed after a settled request "
+                    "(user=%s action=%s) — the lease will reclaim it",
+                    charge.user_id, charge.action,
+                )
 
     def charge_completed_generation(
         self, *, user_id: str, member_created_at: datetime,

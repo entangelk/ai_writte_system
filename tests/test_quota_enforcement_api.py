@@ -430,6 +430,56 @@ class RefusalStatusTest(unittest.TestCase):
         self.assertEqual(_rows(ledger), [])
 
 
+class ConfirmHeaderContentTest(unittest.TestCase):
+    """Q6=C — 확인은 헤더의 **존재**가 아니라 **내용**이다.
+
+    독립 검증 2026-08-04 H-5. 확인 한 번은 사용량 1회를 더 쓰므로(8.0 B1=A),
+    프록시나 클라이언트가 실수로 붙인 빈 값이 확인으로 읽히면 회원이 누르지도
+    않은 두 번째 생성을 사게 된다.
+    """
+
+    def _second(self, headers):
+        client, project_id, ledger, _clock, _jobs = _app(
+            provider=_FakeProvider(content="x"))
+        _generate(client, project_id)
+        return _generate(
+            client, project_id, json={"request_id": "wr-2"}, headers=headers)
+
+    def test_a_blank_header_is_not_a_confirmation(self):
+        for value in ("", "   "):
+            with self.subTest(value=repr(value)):
+                self.assertEqual(
+                    self._second({CONFIRM_DUPLICATE_HEADER: value}).status_code,
+                    429,
+                )
+
+    def test_a_non_blank_header_still_confirms(self):
+        # over-strict 짝: 빈 값을 거르는 변경이 정상 확인까지 막으면 안 된다.
+        self.assertEqual(
+            self._second({CONFIRM_DUPLICATE_HEADER: "1"}).status_code, 200)
+
+
+class UnclassifiedActionFailsClosedTest(unittest.TestCase):
+    """H-3 — 두 표가 갈라지면 조용히 통과하지 않고 503 이다.
+
+    분류표(8.0)와 dedupe 매핑표의 1:1 을 가드가 단정하므로 **도달할 수 없어야
+    하는 자리**다. 그래도 재는 이유는 도달했을 때의 값이 갈리기 때문이다:
+    통과시키면 **중복 방지 없이 도는 유료 요청**이고, `KeyError` 로 두면 공개
+    계약에 미매핑 500 이 샌다(H3의 "미매핑 500 부채 0건"과 충돌).
+    """
+
+    def test_a_missing_dedupe_mapping_answers_503_without_charging(self):
+        client, project_id, ledger, _clock, _jobs = _app(
+            provider=_FakeProvider(content="x"))
+        removed = DEDUPE_SOURCES.pop("writing_generate")
+        try:
+            response = _generate(client, project_id)
+        finally:
+            DEDUPE_SOURCES["writing_generate"] = removed
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(_rows(ledger), [])
+
+
 class AsyncInFlightGuardTest(unittest.TestCase):
     """Q8=C — 202 뒤의 재클릭은 상태 축이 막는다."""
 

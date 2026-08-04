@@ -183,7 +183,10 @@ from services.application.app.observability.llm_call_scope import (
 from services.application.app.quota.billable_actions import (
     BILLABLE_ACTION_BY_OPERATION,
 )
-from services.application.app.quota.dedupe import resolve_dedupe_key
+from services.application.app.quota.dedupe import (
+    UnclassifiedBillableAction,
+    resolve_dedupe_key,
+)
 from services.application.app.quota.enforcement import (
     AdmissionMutex,
     AdmissionUnavailable,
@@ -1665,10 +1668,20 @@ _QUOTA_REFUSAL_STATUS: dict[QuotaRefusalReason, int] = {
 
 
 def _billable_action(request: Request) -> str:
-    """이 요청이 소비하는 유료 동작. 분류표(8.0 B6)가 정본이다."""
+    """이 요청이 소비하는 유료 동작. 분류표(8.0 B6)가 정본이다.
+
+    시행 dependency 가 분류되지 않은 route 에 붙는 것은 배선 결함이며, 그때
+    ``dedupe.py`` 와 **같은 예외**를 올린다 — 두 표(분류·매핑) 중 어느 쪽이
+    비어 있든 호출자가 같은 얼굴(503)로 닫을 수 있게(독립 검증 2026-08-04 H-3).
+    """
     route = request.scope.get("route")
     path = getattr(route, "path", request.url.path)
-    return BILLABLE_ACTION_BY_OPERATION[(path, request.method.lower())]
+    try:
+        return BILLABLE_ACTION_BY_OPERATION[(path, request.method.lower())]
+    except KeyError as exc:
+        raise UnclassifiedBillableAction(
+            f"{request.method} {path} is not in the billable action table"
+        ) from exc
 
 
 async def _request_body_mapping(request: Request) -> dict:
@@ -1709,21 +1722,35 @@ async def enforce_quota(
         raise HTTPException(
             status_code=503, detail="request quota enforcement is not configured"
         )
-    action = _billable_action(request)
     body = await _request_body_mapping(request)
+    # 분류·매핑 조회를 admit 밖에 둔다: 여기서 나는 실패는 저장소 장애가 아니라
+    # **배선 결함**이고(유료 route 인데 표에 없다), 그 얼굴을 아래에서 따로 정한다.
+    try:
+        action = _billable_action(request)
+        dedupe_key = resolve_dedupe_key(
+            action,
+            body=body,
+            path_params=request.path_params,
+            server_key=uuid.uuid4().hex,
+        )
+    except UnclassifiedBillableAction as exc:
+        # 독립 검증 2026-08-04 H-3. 가드가 분류표와 매핑표의 1:1 을 단정하므로
+        # **도달할 수 없어야 하는 자리**지만, 도달한다면 그 요청은 중복 방지 없이
+        # 도는 유료 요청이다 — 통과시키지 않고 Q4=A 와 같은 503 으로 닫는다
+        # (미매핑 500 을 공개 계약에 흘리지 않는다).
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    # Q6=C: 값의 존재가 아니라 **내용**이 확인이다. 빈 헤더를 확인으로 읽으면
+    # 프록시나 클라이언트가 실수로 붙인 빈 값이 사용량 1회를 더 쓰게 된다
+    # (독립 검증 2026-08-04 H-5).
+    confirmed = bool(x_confirm_duplicate and x_confirm_duplicate.strip())
     try:
         charge = enforcement.admit(
             user_id=current.id,
             member_created_at=current.created_at,
             action=action,
             target_project_id=request.path_params["project_id"],
-            dedupe_key=resolve_dedupe_key(
-                action,
-                body=body,
-                path_params=request.path_params,
-                server_key=uuid.uuid4().hex,
-            ),
-            confirmed=x_confirm_duplicate is not None,
+            dedupe_key=dedupe_key,
+            confirmed=confirmed,
         )
     except QuotaRefused as exc:
         headers = (
@@ -1741,7 +1768,7 @@ async def enforce_quota(
     setattr(request.state, _QUOTA_STATE, charge)
     # Q6=C: 확인은 잠금만 뚫는 것이 아니라 Q8=C 의 상태 가드도 함께 통과시킨다 —
     # 사용자에게는 통로가 하나여야 한다. endpoint 가 이 값을 읽는다.
-    request.state.quota_confirmed = x_confirm_duplicate is not None
+    request.state.quota_confirmed = confirmed
     return charge
 
 

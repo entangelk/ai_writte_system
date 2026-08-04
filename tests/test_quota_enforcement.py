@@ -224,6 +224,63 @@ class SuccessfulChargeTest(unittest.TestCase):
         )
 
 
+class SettlementNeverFlipsTheResponseTest(unittest.TestCase):
+    """독립 검증 2026-08-04 H-1 — 정산은 이미 만들어진 응답을 뒤집지 않는다.
+
+    ``settle`` 은 응답이 만들어진 **뒤에** 불린다. 여기서 예외가 새면 성공한 2xx 가
+    5xx 로 바뀐다 — 사용자는 결과를 받았는데 실패로 통보받는다. 원장 삽입은 처음부터
+    그렇게 다뤘고(Q2 잔여), 해제도 같은 규칙을 따라야 한다: 잠금은 lease 가 회수하므로
+    놓쳐도 정합성이 깨지지 않지만, 응답을 뒤집는 것은 되돌릴 수 없다.
+    """
+
+    def _service_with(self, lock_repo):
+        clock = _Clock()
+        return QuotaEnforcementService(
+            policy=QuotaPolicyService(InMemoryQuotaPolicyRepository(), clock=clock),
+            ledger=UsageLedgerService(
+                InMemoryUsageLedgerRepository(), id_factory=_Ids("rul"),
+                clock=clock),
+            locks=RequestLockService(
+                lock_repo, clock=clock, holder_factory=_Ids("holder"),
+                minimum_window_seconds=5, lease_seconds=180),
+            mutex=AdmissionMutex(
+                lock_repo, clock=clock, holder_factory=_Ids("mutex"),
+                sleep=lambda _s: None),
+        )
+
+    def test_a_release_failure_does_not_escape(self):
+        class _BreaksOnRelease(InMemoryRequestLockRepository):
+            def release(self, key, **kwargs):
+                if key.startswith(ADMISSION_KEY_PREFIX):
+                    return super().release(key, **kwargs)
+                raise RuntimeError("lock store died mid-release")
+
+        service = self._service_with(_BreaksOnRelease())
+        charge = _admit(service)
+        with self.assertLogs(
+            "services.application.app.quota.enforcement", level="ERROR"
+        ):
+            service.settle(charge, charged=False)   # 예외가 새면 여기서 실패한다
+
+    def test_the_usage_row_still_lands_when_the_release_fails(self):
+        # over-strict 짝: 해제를 감싸는 것이 **차감을 건너뛰는** 형태가 되면 안 된다.
+        # 순서(원장 → 해제)는 그대로이고 감싸는 것은 해제뿐이다.
+        class _BreaksOnRelease(InMemoryRequestLockRepository):
+            def release(self, key, **kwargs):
+                if key.startswith(ADMISSION_KEY_PREFIX):
+                    return super().release(key, **kwargs)
+                raise RuntimeError("lock store died mid-release")
+
+        service = self._service_with(_BreaksOnRelease())
+        charge = _admit(service)
+        with self.assertLogs(
+            "services.application.app.quota.enforcement", level="ERROR"
+        ):
+            service.settle(charge, charged=True)
+        self.assertEqual(
+            len(service._ledger._repo._usage), 1)  # noqa: SLF001
+
+
 class LimitBoundaryTest(unittest.TestCase):
     """한도 경계 — 직전·정각·직후."""
 

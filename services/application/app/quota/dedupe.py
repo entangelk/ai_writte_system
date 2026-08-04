@@ -30,6 +30,18 @@ from __future__ import annotations
 from enum import StrEnum
 
 
+class UnclassifiedBillableAction(RuntimeError):
+    """유료 동작인데 이 표에 없다 (독립 검증 2026-08-04 H-3).
+
+    **일어날 수 없어야 하는 상태**다 — 분류표(8.0)와 이 표의 1:1 을 가드가 단정
+    하므로 둘 중 하나만 고치면 스위트가 먼저 실패한다. 그럼에도 이름 있는 예외인
+    이유는 **도달했을 때의 얼굴** 때문이다: 시행 dependency 가 이것을 Q4=A 와 같은
+    503(fail-closed)으로 옮기므로, 미매핑 500 이 공개 계약에 새지 않는다(H3 의
+    "미매핑 500 부채 0건"). ``KeyError`` 였다면 그 자리가 500 이었고, 경로
+    파라미터 조회 같은 무관한 ``KeyError`` 와도 구분되지 않았다.
+    """
+
+
 class DedupeSource(StrEnum):
     """키를 어디서 얻는가. 값은 ``BODY``/``PATH`` 의 필드 이름과 함께 쓴다."""
 
@@ -62,7 +74,9 @@ def resolve_dedupe_key(
     """
 
     if action not in DEDUPE_SOURCES:
-        raise KeyError(f"no dedupe key mapping for billable action {action!r}")
+        raise UnclassifiedBillableAction(
+            f"no dedupe key mapping for billable action {action!r}"
+        )
     source, field = DEDUPE_SOURCES[action]
     if source is DedupeSource.SERVER:
         return server_key
