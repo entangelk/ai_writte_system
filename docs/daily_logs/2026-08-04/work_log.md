@@ -612,3 +612,74 @@ hardening 세 건을 **커밋하기 전에** 뮤테이션 검증을 돌렸고, �
 2. 결정 뒤 구현: 회귀 먼저 → 백엔드 operation 76 → 프론트 3층(`ApiError`·서술 함수·확인 패널·잔여 타일)
    → 전체 회귀 → 뮤테이션 5종 → 독립 검증.
 3. **8.2c**(이름 이력 + D8-6 계약 개정 + purge UI 문구)는 그대로 남아 있다. 8.4 뒤가 자연스럽다.
+
+---
+
+## Task — Slice 8.4 구현 (W1~W7 확정 뒤: 잔여 조회·확인 대화·면제 정책 행)
+
+### User Decisions and Rationale
+
+| 항목 | 오너 결정 | 근거·비고 |
+|---|---|---|
+| **W1** 면제 | **A의 변형** — *"면제 없음이되, 첫 시작 어드민 계정 만들 때부터 리미트 없이 none으로 바로 갈 수 있도록."* | **A의 취지가 그대로 유지된다**: 예외가 코드의 tier 분기가 아니라 **정책 행 하나**이고, 그 행은 조회·조정·감사가 되는 보통의 데이터다. 닫히는 것은 A의 유일한 단점(8.5 API 전까지 DB를 손으로 고쳐야 한다)이다 |
+| **W3** 확인 UX | **A. 블로킹 확인 + 헤더 달아 재전송** | 2026-08-03의 "성향"이 결정으로 확정됐다 |
+| **W5** 잔여 표시 | **B. `GET /me/quota` 신설** | 추천대로 |
+| W2·W4·W6·W7 | 추천대로 | 공용 서술 함수 · 명시 인자 · 안정 키 미도입 · 행동 가드 |
+
+**구현자 해석(오너 확인 대상은 아니나 기록)**: "첫 시작 어드민"을 **부트스트랩 스크립트**로 한정했다.
+`POST /admin/users`로 나중에 만드는 관리자는 기본 한도를 받는다 — 거기에 무제한을 심으면
+**"관리자 = 무제한"이 다시 코드의 규칙**이 되어 W1=A가 거부한 자리로 돌아간다.
+
+### Completed work
+
+| 층 | 내용 |
+|---|---|
+| 정책 | [`quota/policy.py`](../../../services/application/app/quota/policy.py) — `next_daily_boundary()`(다음 KST 자정) + `QuotaPolicyService.now()`. **창의 끝 계산을 화면에 두지 않는 것이 계약**이다: 이 모듈이 이 저장소의 유일한 지역 시간대 지점이라, 화면이 자기 나름대로 세면 시행과 표시가 다른 "오늘"을 말한다 |
+| 시행 | [`quota/enforcement.py`](../../../services/application/app/quota/enforcement.py) — `QuotaSnapshot` + `snapshot()`. **분자는 `effective_usage`(시행이 쓰는 그 값), 분모는 `limits_for`(P6 예약을 해석하는 그 함수)**. 통합 잔여는 `min`이고 두 창이 **모두** 무제한일 때만 `None`, 음수는 0으로 바닥을 친다. **잠금도 뮤텍스도 잡지 않는다** |
+| HTTP | `GET /me/quota` — **operation 76**, auth tier, `responses=_ERRORS_401`. 시행 미조립이면 503(무제한이라 답하면 거짓말이 된다) |
+| 부트스트랩 | [`scripts/create_user.py`](../../../scripts/create_user.py) — `--admin`이면 `limit=None` 정책 행을 함께 쓴다. **`set_limits`를 쓰지 않는 것도 계약**이다: P6은 불리한 변경을 주 경계로 유예하는데 여기는 신규 계정의 최초 상태라 유예할 이전 상태가 없다(타면 부트스트랩 관리자가 첫 주 동안 기본 한도로 막힌다) |
+| 프론트 client | `ApiError.retryAfterSeconds`(없으면 **추측하지 않고 `null`**) · `describeQuotaError`(status로만 분기) · `BillableRequestOptions`를 유료 5함수에 · `getMyQuota` |
+| 프론트 화면 | `useMemberQuota` 훅 · 잔여 타일 · **확인 패널**(WritingPanel·AnalysisTrigger) · 생성 연쇄에서 **Gate 단계를 분리**해 중간 429가 그 단계만 되묻게 했다 |
+| 가드 | `quota.test.ts`(유료 5함수 전수 행동 가드 · Retry-After · status 분기 · `/me/quota`) · 패널/트리거 확인 셀 · 백엔드 over-strict "정책 행 없는 관리자에게도 한도가 적용된다" |
+
+### Issues found — 구현이 결정을 정밀화한 지점 넷
+
+1. **★ `403`(정지)을 프론트에서 quota로 단정할 수 없다.** Q5=B가 "정지 403은 소유권 403과 겹치고
+   프론트가 **문구로** 가른다"고 적었는데, H3는 `detail` 문자열 분기를 금지한다 — 즉 브리프 문장을
+   그대로 구현하면 계약 위반이다. **해결: 정지 판정의 정본을 상태코드가 아니라 `GET /me/quota`의
+   `status`로 옮겼다.** 스냅샷이 정지라고 말할 때만 정지로 표시하고, 아니면 소유권 거절로 남긴다.
+   W5=B가 없었으면 이 자리는 못 닫혔다.
+2. **생성 연쇄를 그대로 두면 중간 429가 앞 단계를 재과금한다.** 한 클릭이 generate → gate →
+   revise-and-gate를 부르므로, gate에서 429가 났을 때 "다시 시도"가 연쇄 전체를 재전송하면
+   **이미 성공한 생성이 한 번 더 과금**된다. Gate 단계를 자기 try/catch를 가진 함수로 분리해
+   되묻는 대상이 **그 단계**가 되게 했다.
+3. **잔여 조회가 화면 테스트의 응답 시퀀스를 깨뜨렸다.** mount fetch 하나가 `mockResolvedValueOnce`
+   대기열의 첫 응답을 가져가 **103개 셀이 무너졌다**. `seedWritingBudgetCache` 선례대로
+   `seedMemberQuota`/`resetMemberQuota`를 두고 `vitest.setup.ts`에서 전역 시드했다 —
+   **갱신 동작 자체는 시드하지 않는 별도 셀**이 잠근다(그 셀이 없으면 시드가 가드를 삼킨다).
+4. **`Retry-After`를 하드로 읽으면 기존 테스트 20여 파일이 죽는다.** 이 저장소의 컴포넌트 테스트는
+   `fetch`를 `{ ok, status, json }` 손수 객체로 stub하므로 `response.headers`가 없다. 옵셔널 체이닝으로
+   읽는다 — 실제 `Response`에는 항상 있으니 계약이 약해지지 않고, 하드 읽기는 **다른 것을 재던
+   셀들의 에러 경로를 TypeError로 바꿨을** 뿐이다.
+
+### Verification
+
+- 백엔드 전체(test-mongo ON): **2170 passed / 4 skipped / 1931 subtests**. skip 4 중 **3은 코드가 아니라
+  `elasticsearch` 패키지 부재**(`-rs`로 사유 확인) — 보정하면 직전 2150 대비 **+23이 전부 8.4 신규 셀**이다.
+- 프론트: `gen:api` → `tsc --noEmit` 통과 → `build` **699 modules · 진입 414.13 kB**(+3.84 kB, lazy 청크 무변)
+  → `vitest run` **262 passed / 18 files**(+26).
+- **뮤테이션 5종 전부 재실패**(전부 커밋 뒤에 돌렸고 매번 `git status --short` 공백을 확인했다):
+  ① 잔여를 일 창만 → 3 cells ② `enforce_quota`에 `is_admin` 예외 → 2 cells ③ 확인 헤더 상시 부착 →
+  5 cells ④ 429 자동 재전송 → 3 cells ⑤ `detail` 문자열 분기 → 1 cell.
+- **★ 뮤테이션 ⑤가 내 가드의 결함을 드러냈다**: H3 셀이 두 결과의 **동등성만** 단정해서, `detail`로
+  분기하는 구현에서 두 입력이 **둘 다** 안 걸리면 나란히 `null`이라 통과했다. 값 자체를 단정하도록
+  고친 뒤 같은 뮤테이션이 **2 cells**를 물었다.
+
+### Next steps
+
+1. **독립 검증**(다른 작업자). 특히 볼 자리: 확인 헤더가 사용자 클릭 없이 붙는 경로가 있는가 ·
+   연쇄 중간 429가 앞 단계를 재과금하지 않는가 · 잔여 계산이 시행과 같은 함수를 지나는가 ·
+   `vitest.setup.ts` 전역 시드가 다른 셀의 사정거리를 줄이지 않았는가.
+2. **화면 육안 확인** — 확인 대화·잔여 타일은 렌더가 미검증이다(로직은 회귀로 잠겨 있다).
+   application/frontend 이미지가 코드보다 뒤처져 있으므로 rebuild가 선행된다.
+3. **8.2c**(이름 이력 + D8-6 계약 개정 + purge UI 문구)가 다음이고, 그 뒤가 `main.py` 라우터 정리다.
