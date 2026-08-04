@@ -413,8 +413,8 @@ Q3-a를 설계하려면 "진행 중 요청"을 정확히 세야 하는데, **비
 ### Verification
 
 - 집중 회귀: quota 5파일 + 생성 job·워커·billable 4파일 → **203 passed / 268 subtests**.
-- 전체(test-mongo ON): **2144 passed / 1 skipped / 1913 subtests**
-  (직전 2062/1/1725 → **+82 passed·+188 subtests**, 전부 이번 슬라이스 신규 셀).
+- 전체(test-mongo ON): **2145 passed / 1 skipped / 1921 subtests**
+  (직전 2062/1/1725 → **+83 passed·+196 subtests**, 전부 이번 슬라이스 신규 셀).
 - 실 Mongo 동시성: 한도 1칸에 **동시 20건 → 정확히 1건 입장**(각자 다른 `action`이라
   8.2b 잠금은 아무도 막지 않는다 = 뮤텍스만 재는 셀).
 - **뮤테이션 10종 전부 재실패**. 그중 **뮤텍스 제거는 실 Mongo에서 3건 통과**를 만들었다 —
