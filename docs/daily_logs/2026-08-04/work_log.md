@@ -786,3 +786,41 @@ hardening 세 건을 **커밋하기 전에** 뮤테이션 검증을 돌렸고, �
 1. **오너 결정 N1~N6.** 특히 **N2**(제목의 범위 — draft 제목까지인가)와 **N5**(문구)는 제품 정책이다.
 2. 결정 뒤 구현: 회귀 먼저 → 저장소 + purge 쓰기 한 줄 → UI 문구 → 정본 3곳(§43B·새 절·SoT v1.7.90)
    → 뮤테이션 5종 → 독립 검증. **새 operation은 없다**(76 유지).
+
+---
+
+## Closeout — 2026-08-04 작업 종료
+
+### 오늘 한 것 (커밋 11건, `3f0f166` → HEAD)
+
+| 커밋 | 내용 |
+|---|---|
+| `3f0f166`·`3d5c889` | **Slice 8.4 착수 브리프**(W1~W7) + 오너 결정 기록(W1은 A의 변형 — 부트스트랩 관리자만 무제한) |
+| `4cfd950`·`21de2b0`·`8d59236`·`d3194e5` | **8.4 구현** — `GET /me/quota`(operation 76) · 부트스트랩 무제한 정책 행 · 프론트 배선(확인 대화·잔여 타일·402/429 서술) · H3 가드 강화 |
+| `3663148` | **정본화 SoT v1.7.89** + 기록·인계 |
+| `c03c714`·`9911b3d` | **독립 검증 합격 반영** — 403 정지 경합 창 폐쇄(H-1) · 뮤테이션-셀 매핑 규칙화(H-2) · README 서술형 분포·비율·SoT 버전을 가드에(H-3, 넣자마자 살아 있던 거짓 2건을 잡았다) |
+| `89c9bac` | **Slice 8.2c 착수 브리프**(N1~N6) — 실측 넷이 선택지를 바꿨다 |
+| (이 커밋) | 인계 정리 — 다음 작업을 **브리프 확정**으로 못박았다 |
+
+### 다음 작업자가 바로 이어갈 것
+
+**다음은 구현이 아니라 브리프 확정이다.** [`plans/08-2c-project-name-history-decisions.md`](../../plans/08-2c-project-name-history-decisions.md)의
+**N1~N6 오너 결정**을 받는 것이 첫 단계이며, HANDOFF "Owner Decisions Needed" 첫 항목에 실측·추천이
+요약돼 있다. **결정 전에는 아무것도 구현하지 않는다**(CLAUDE.md §1 — 추측 구현 금지).
+
+**오너 확인이 특히 필요한 자리 = N2**: 문언의 "이름·**제목**"이 `Project.name`인지 **draft 제목까지**인지
+코드로 두 갈래다. 원장 축이 `target_project_id` 하나뿐이라 draft 제목은 조인할 상대가 없고, 장·절 제목은
+줄거리를 드러내 D8-6이 지우려는 것에 더 가깝다 — 그래서 프로젝트 이름만(N2=A)을 추천했다.
+
+### 기준선 (오늘 마감 시점)
+
+- backend **test-mongo ON 2173 passed / 4 skipped / 1931 subtests**(skip 4 = elasticsearch 3 + live Chroma 1)
+- frontend **265 passed / 18 files** · build **699 modules · 진입 414.36 kB**(lazy 무변)
+- 정본 **SoT v1.7.89** · operation **76** · 검증 기록 **217건 / 41일치**
+
+### 머신 상태 (그대로 두고 종료)
+
+베타. `docker compose ps`에 **`frontend`(healthy)·`worker`·`generation_worker`만** 있고 test-mongo는
+내렸다(회귀 때만 올렸다가 내리는 표준 절차 그대로). **이미지는 여전히 코드보다 뒤처져 있다** —
+화면 육안 확인을 하려면 `docker compose build application frontend`가 선행되고, 스택을 올린 뒤
+`curl :8520/projects`가 401인지 먼저 본다(낡은 application은 죽지 않고 인증 없는 제품으로 뜬다).

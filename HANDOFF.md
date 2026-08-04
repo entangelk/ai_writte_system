@@ -188,6 +188,7 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 
 ## Owner Decisions Needed
 
+- **★ Phase 8 Slice 8.2c = 브리프 작성 완료, N1~N6 결정 대기**([`plans/08-2c-project-name-history-decisions.md`](docs/plans/08-2c-project-name-history-decisions.md), 2026-08-04). **다음 작업이 이것이다** — 구현이 아니라 **브리프 확정**이 먼저다. 오너가 2026-08-03에 "삭제된 프로젝트는 id로만 답해진다"를 뒤집었고(이름·제목을 히스토리로 남긴다), 그 결과 **D8-6이 확정한 "purge는 이름을 남기지 않는다"가 개정 대상**이 됐다. 구현자 추천: **N1 전용 컬렉션 `project_name_history`**(보존 정책이 붙을 자기 수명이 필요 — 감사·원장에 얹으면 그 문이 닫힌다) · **N2 프로젝트 이름 최신 한 값**(개명 이력은 나중에 넓힐 수 있지만 **draft 제목은 되돌릴 수 없다**) · **N3 파기 시점에만 스냅샷**(파괴 전 fail-closed — 살아 있는 이름의 정본은 `projects`라 복제하면 두 정본 문제가 생긴다) · **N4 저장 + 계약만**(조회는 8.5) · **N5 UI 문구에 남는 것을 명시** · **N6 §43B 예외 포인터 + 새 절 + SoT**. **★ 오너 확인이 특히 필요한 것 = N2**: 문언의 "이름·**제목**"이 `Project.name`인지 **draft 제목까지**인지 코드로 두 갈래인데, 원장 축이 `target_project_id` 하나뿐이라 draft 제목은 **조인할 상대가 없고** 장·절 제목은 줄거리를 드러내 D8-6이 지우려는 것에 더 가깝다. **결정 전에는 아무것도 구현하지 않는다.**
 - **★ dogfood 착수(GATE-1)** — 실 12B 풀스택 관통은 끝났고 기술적 선행 조건은 없다. 착수하면 `OPS-1` Ready 승격. **인증 HTTP 시행이 닫히면서 "인가 없이 dogfood하면 데이터가 섞인다"는 종전 걸림돌은 사라졌다** — 이제 남은 것은 D8-5~7 구현과의 순서 판단이며 오너 결정 사항이다.
 
 **결정 완료 — 오너 결정 대기 아님, 구현만 남음:**
@@ -209,16 +210,15 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 
 **1번이 현재 진행 중인 트랙이다.** 나머지는 그와 무관하게 남아 있는 것들.
 
-1. **Phase 8 Slice 8.4 = W1~W7 확정·구현·독립 검증 합격(SoT v1.7.89, Blocking 0, 비차단 3건 폐쇄).** 검증 기록 [`verifications/2026-08-04/slice_8_4_product_wiring.md`](docs/verifications/2026-08-04/slice_8_4_product_wiring.md). 브리프 [`plans/08-4-product-wiring-decisions.md`](docs/plans/08-4-product-wiring-decisions.md). **시행이 켜진 채 화면이 그것을 못 보던 상태를 닫았다.** 새 것 셋: **`GET /me/quota`(operation 76)** · **429 블로킹 확인 대화**(확인은 유료 호출 함수의 명시 인자뿐 — 자동 재전송·세션 플래그 금지) · **잔여 타일**(통합값 `min(일,주)`, 무제한이면 미표시). **★ 이 슬라이스에서 앞으로도 유효한 사실 넷**: ① **한 번의 "생성" 클릭이 유료 요청 2~3건**이다(generate → gate → 지적 있으면 revise-and-gate, accept까지 4회) — 화면 문구·잔여 해석·P7 숫자 재평가가 전부 이 사실 위에 선다 ② **프론트가 부르는 유료 경로는 9개가 아니라 5개**다(`writing_revise`·`writing_report`·`analysis_compare`·`context_search`는 호출부 0건) ③ **면제는 신분이 아니라 정책 행**이라 `enforce_quota`에 tier 분기가 0줄이다 ④ **정지(403)는 소유권 403과 코드가 겹치므로** 프론트의 정지 판정 정본은 상태코드가 아니라 `GET /me/quota`의 `status`다. **검증 뒤 굳힌 것 하나 더**: **정지(403) 판정은 스냅샷을 확정한 뒤에 한다** — `quota`가 로드되기 전이면 403이 소유권 거절로 위장되므로 **403에서만** `/me/quota`를 한 번 다시 읽는다(402·429는 재조회하지 않는다). **남은 것은 렌더 육안 확인뿐이다**(검증자도 같은 자리에서 멈췄다).
-2. **Phase 8 Slice 8.3 = 구현·독립 검증 완료(SoT v1.7.88, 검증 PASS·Blocking 0, `98fee5c`).** 비차단 5건 중 **셋을 수리해 닫았다**(H-1 정산이 성공 응답을 뒤집지 않는다 · H-3 미분류 유료 동작이 500이 아니라 503 · H-5 확인은 헤더의 **내용**이다), H-2는 문서 표현 정정, **H-4는 수리하지 않고 기록**했다(아래 추적 부채). 검증 기록 [`verifications/2026-08-04/slice_8_3_quota_enforcement.md`](docs/verifications/2026-08-04/slice_8_3_quota_enforcement.md). 8.4는 위 1번으로 닫혔고 **남은 것은 8.2c**다.
-   - **남은 것은 8.2c**(이름 이력 + D8-6 계약 개정 + purge UI 문구)다. 8.4를 먼저 잡은 근거는 8.2c가 L6을 통째로 미룬 덕에 **지금 거짓 서술을 만들고 있지 않은** 반면(purge UI 문구는 이름 이력이 생겨야 거짓이 된다) 8.4가 닫는 구멍은 **이미 새고 있었다**는 것이다.
-3. **`main.py` 라우터 정리 + 관리자 표면 주소 분리**(오너 2026-08-04 후속 확정, 착수 시점만 미정). 위 추적 부채에 실측·선택지·함께 고칠 가드 2개가 있다. **8.2c까지 닫은 뒤**가 순서다.
-4. **베타 상태 확인 뒤 화면 육안 확인 3건**(전부 로직은 회귀로 잠겨 있고 렌더만 미검증이다 — 8.4의 확인 대화·잔여 타일이 셋째다). 2026-07-31에는 계정 `probe`와 감사 데이터가 있었지만 현재 존재를 다시 확인한다:
+1. **★ 다음 작업 = Slice 8.2c 브리프 확정**(오너 결정 N1~N6). 브리프는 [`plans/08-2c-project-name-history-decisions.md`](docs/plans/08-2c-project-name-history-decisions.md)에 있고 실측·추천 요약은 위 "Owner Decisions Needed" 첫 항목에 있다. **결정 뒤 구현 순서**는 브리프 §"결정 뒤 구현 순서"가 그대로 실행 계획이다 — 회귀 먼저 → 저장소 + purge 쓰기 한 줄 → UI 문구 → 정본 3곳(§43B·새 절·SoT v1.7.90) → 뮤테이션 5종 → 독립 검증. **새 operation은 없다**(76 유지).
+   - **8.4는 닫혔다**(W1~W7 확정·구현·독립 검증 합격, SoT v1.7.89, Blocking 0 + 비차단 3건 폐쇄. 검증 기록 [`verifications/2026-08-04/slice_8_4_product_wiring.md`](docs/verifications/2026-08-04/slice_8_4_product_wiring.md)). **앞으로도 유효한 사실 넷**: ① **한 번의 "생성" 클릭이 유료 요청 2~3건**이다(generate → gate → 지적 있으면 revise-and-gate, accept까지 4회) — 화면 문구·잔여 해석·P7 숫자 재평가가 전부 이 사실 위에 선다 ② **프론트가 부르는 유료 경로는 9개가 아니라 5개**다 ③ **면제는 신분이 아니라 정책 행**이라 `enforce_quota`에 tier 분기가 0줄이다 ④ **정지(403)는 소유권 403과 코드가 겹치므로** 정지 판정의 정본은 상태코드가 아니라 `GET /me/quota`의 `status`이며, `quota`가 로드되기 전이면 **403에서만** 한 번 다시 읽어 확정한다(402·429는 재조회하지 않는다). **남은 것은 렌더 육안 확인뿐이다**(아래 3번).
+2. **`main.py` 라우터 정리 + 관리자 표면 주소 분리**(오너 2026-08-04 후속 확정, 착수 시점만 미정). 위 추적 부채에 실측·선택지·함께 고칠 가드 2개가 있다. **8.2c까지 닫은 뒤**가 순서다.
+3. **베타 상태 확인 뒤 화면 육안 확인 3건**(전부 로직은 회귀로 잠겨 있고 렌더만 미검증이다 — 8.4의 확인 대화·잔여 타일이 셋째다). 2026-07-31에는 계정 `probe`와 감사 데이터가 있었지만 현재 존재를 다시 확인한다:
    (a) 관측 화면 `/projects/:id/observability` — 차트 라벨 충돌·막대 배치·좁은 화면 표 넘침. **`heavy long report probe` project를 보면 `provider_error`가 섞인 분포**를, `long report probe`를 보면 성공 분포를 볼 수 있다.
    (b) 비동기 패드 — 렌더 · 이어쓰기 탭 완료 배지 · 5초 폴링 · "다시 시도" 버튼 · 탭 전환 후 폴링 생존. **failed job이 4개 남아 있어 실패 UX를 바로 볼 수 있다** — 위 추적 부채대로 "다시 시도"가 결정적으로 재실패하는 것도 여기서 확인된다.
-5. **관측 화면을 더 키우는 것은 API에 시간 창(`?since=`)이 생긴 뒤**가 옳다 — 지금 차트가 그리는 것은 누적 스냅샷이라 추세가 없고 막대는 표와 같은 정보를 말한다. 무엇을 더하든 **`React.lazy` 경계 안**에 둘 것(밖으로 나가면 진입 번들이 다시 두 배가 된다).
-6. **dogfood 관찰 항목**: `report field must be an array` 실패율(12B 간헐 비-배열, repair가 흡수 — 잦으면 repair 횟수/프롬프트 축 판단) · `analysis_extract_v4`의 `aspect` 오분류 빈도 · scratch per-draft 상한(기본 20) 밀어냄.
-7. **Deferred(오너 결정 선행)**: 중첩 chapter→scene tree · ProjectBrief→Draft provenance · 관계 graph/완전 timeline · saved publication manifest · Phase 7 대화형 수정(`plans/07-conversational-authoring.md`).
+4. **관측 화면을 더 키우는 것은 API에 시간 창(`?since=`)이 생긴 뒤**가 옳다 — 지금 차트가 그리는 것은 누적 스냅샷이라 추세가 없고 막대는 표와 같은 정보를 말한다. 무엇을 더하든 **`React.lazy` 경계 안**에 둘 것(밖으로 나가면 진입 번들이 다시 두 배가 된다).
+5. **dogfood 관찰 항목**: `report field must be an array` 실패율(12B 간헐 비-배열, repair가 흡수 — 잦으면 repair 횟수/프롬프트 축 판단) · `analysis_extract_v4`의 `aspect` 오분류 빈도 · scratch per-draft 상한(기본 20) 밀어냄.
+6. **Deferred(오너 결정 선행)**: 중첩 chapter→scene tree · ProjectBrief→Draft provenance · 관계 graph/완전 timeline · saved publication manifest · Phase 7 대화형 수정(`plans/07-conversational-authoring.md`).
 
 ## Project Structure
 
