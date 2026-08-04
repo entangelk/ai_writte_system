@@ -2731,6 +2731,25 @@ a duplicate can slip through. The lease is set well above the longest
 synchronous path (gateway timeout 120 s) as the defence. This is a best-effort
 control, not a guarantee.
 
+**Two key spaces live here (Phase 8 Slice 8.3, Q3-a=A).** Besides the request
+locks above, the collection also holds the **member admission mutex** under
+`admission:{user_id}`. Enforcement counts a member's in-flight requests and
+claims their lock inside that mutex, which is what makes going over the limit
+structurally impossible rather than merely unlikely (Mongo transactions cannot
+do this: snapshot isolation does not serialise a `count` predicate).
+
+The two spaces are deliberately disjoint, and both directions matter:
+
+- The prefix scan that counts in-flight requests anchors on `^{user_id}:`, so a
+  mutex document — which starts with `admission:` — is never counted. Sharing a
+  prefix would cost the member a slot for as long as they held the mutex.
+- The mutex's lease is **~5 seconds**, not the 180 above. Its critical section is
+  two Mongo round-trips, so 5 s is ample for crash recovery, and a longer lease
+  would block that member for that long after a crash. It is released
+  immediately (no cooldown) — it is a critical section, not a duplicate guard.
+- **A provider call must never happen inside it.** The whole point is that the
+  serialised segment is milliseconds while the model call is 23–91 seconds.
+
 ### 43E.2 Document Example
 
 ```json

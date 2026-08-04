@@ -357,3 +357,75 @@ Q3-a를 설계하려면 "진행 중 요청"을 정확히 세야 하는데, **비
 - 이미지는 여전히 코드보다 뒤처져 있다(application 07-29 등) — 화면 확인이 필요한 작업(8.2c·8.4)
   전에는 재빌드가 선행돼야 하고, 스택을 올렸으면 `curl :8520/projects`가 401인지 먼저 본다.
 - 작업 트리 clean, push 안 함. **오늘 코드 변경 0줄**이라 회귀 기준선은 그대로다.
+
+---
+
+## Task — Slice 8.3 구현 (quota 시행 조립: 입장·성공차감·정산)
+
+### Goals
+
+브리프 [`plans/08-3-…decisions.md`](../../plans/08-3-quota-enforcement-decisions.md)
+§"결정 뒤 구현 슬라이스" 그대로. 회귀 먼저 → `quota/enforcement.py` → dependency 배선
+→ `responses=`·전수 가드 → 워커 차감 → 프론트 `gen:api`. 오너 결정 12건은 확정 상태라
+새 결정은 없다.
+
+### Completed work
+
+| 산출물 | 내용 |
+|---|---|
+| [`quota/enforcement.py`](../../../services/application/app/quota/enforcement.py) | 신설. `admit`(정책 → 뮤텍스 → 유효 사용량 → 한도 → 잠금)·`settle`(원장 → 해제)·`charge_completed_generation`(워커)·`AdmissionMutex`·`GenerationJobCharger` |
+| [`quota/dedupe.py`](../../../services/application/app/quota/dedupe.py) | 신설. Q9=A 매핑표 + 해석 함수. 미분류 동작은 fail-closed |
+| [`quota/lock.py`](../../../services/application/app/quota/lock.py)·`lock_mongo.py` | `count_in_flight` 추가(`^{user}:` 앵커, escape). 8.2b "추가 인덱스 없음" 유지 |
+| [`main.py`](../../../services/application/app/main.py) | `enforce_quota` dependency · `_REQUIRE_PROJECT_OWNER_BILLABLE` · `_billable()` 선언 · `QuotaSettledRoute` 정산 wrapper · `_default_quota_enforcement_service` · `app.state.quota` |
+| [`llm_call_scope.py`](../../../services/application/app/observability/llm_call_scope.py) | `ProviderCallTally` + `provider_call_tally` — Q1-a 판정 재료 |
+| `writing/generation_job*.py` | `user_id` 비정규화 · `(user_id, status)` 인덱스 · `count_active_for_user` · `has_other_active_for_draft` |
+| `writing/generation_worker.py` | 성공 시 차감(`quota` collaborator, Optional) |
+| 회귀 3파일 + 기존 5파일 보강 | 아래 Verification |
+| 문서 | SoT **v1.7.88** · `mongo_collections.md` §43E(키 공간 둘) · 이 로그 · HANDOFF · CHANGELOG |
+
+### Issues found — 구현이 결정을 정밀화한 지점 넷
+
+1. **★ `yield` dependency는 응답 상태코드를 볼 수 없다.** Q7=A의 문언은 "차감은 `yield`
+   뒤"였는데, 이 앱의 **partial envelope 6곳과 async 202는 예외가 아니라
+   `JSONResponse`를 *반환*한다**. dependency의 exit에는 아무 신호도 오지 않으므로 그
+   자리에서 정산하면 **일하고도 실패한 응답과 접수만 한 202가 과금된다**(= Q1-a·Q1-b를
+   동시에 어긴다). 그래서 **입장은 dependency(선언·전수 가드 가능), 정산은 실제 응답을
+   보는 route wrapper**로 갈랐다. **결정 변경이 아니라 결정을 지키기 위한 배치**이며,
+   wrapper는 정책을 정하지 않는다(dependency가 남긴 영수증이 있을 때만 동작).
+2. **Q8=C의 상태 가드가 멱등 replay까지 막았다.** 브리프 문언("그 draft에 실행 중 job이
+   있으면")을 그대로 구현하면 **같은 `request_id`의 재전송**도 429가 된다 — 그 replay는
+   `enqueue`가 기존 job을 돌려주므로 새 job도 새 과금도 만들지 않는데, 폴링·재전송하는
+   클라이언트가 자기 job을 못 받게 된다. 막아야 하는 것은 **새 job이 생기는 경우**뿐이라
+   `has_other_active_for_draft(request_id=…)`로 좁혔다(over-strict 셀로 잠갔다).
+3. **★ Q1-a의 두 겹이 실제로 겹쳐 있다 — 그래서 한 겹을 지워도 통합 셀이 안 물렸다.**
+   뮤테이션 M4(provider 호출 조건 제거)가 replay 셀을 통과했다: 같은 `job_id`를 dedupe
+   키로 쓰므로(Q9=A) **원장이 두 번째 행을 DB 수준에서 거부**하기 때문이다. 결함이 아니라
+   오너가 요구한 "한 겹으로는 부족하다"가 성립한다는 증거지만, 그 탓에 통합 경로만으로는
+   한 겹을 지우는 변경이 **안 보인다**. `_is_charged`의 (상태코드 × provider 호출 수)
+   행렬을 단위 셀로 직접 잠갔다.
+4. **8.2b 잠금이 켜지면서 도메인 스위트 30여 셀이 429로 떨어졌다.** 같은 유료 동작을
+   연달아 두 번 POST하는 셀(멱등 replay 단정·잘못된 본문 표)이 최소 창 5초에 걸린 것이며
+   **제품 동작으로는 정상**이다. `tests/auth_support.authenticate`가 인증·소유권의
+   *해석*만 우회하던 선례를 따라 **입장만** 우회하게 확장했다 — 정산은 그대로 돌고,
+   확인 헤더도 endpoint까지 살아 간다. `test_auth_api`의 override 목록 핀이 이 추가를
+   **강제로 명시하게 만들었다**(그 가드가 의도대로 물었다).
+
+### Verification
+
+- 집중 회귀: quota 5파일 + 생성 job·워커·billable 4파일 → **203 passed / 268 subtests**.
+- 전체(test-mongo ON): **2144 passed / 1 skipped / 1913 subtests**
+  (직전 2062/1/1725 → **+82 passed·+188 subtests**, 전부 이번 슬라이스 신규 셀).
+- 실 Mongo 동시성: 한도 1칸에 **동시 20건 → 정확히 1건 입장**(각자 다른 `action`이라
+  8.2b 잠금은 아무도 막지 않는다 = 뮤텍스만 재는 셀).
+- **뮤테이션 10종 전부 재실패**. 그중 **뮤텍스 제거는 실 Mongo에서 3건 통과**를 만들었다 —
+  "초과가 실제로 새는 것"의 실측이다.
+- 프론트: `gen:api`(+189줄) · `tsc --noEmit` 통과 · build **동일 번들 크기**(진입 410.29 kB·
+  AdminConsole 8.39 kB·관측 386.70 kB) · `vitest run` **236 passed / 17 files**.
+
+### Next steps
+
+1. **독립 검증**(다른 작업자) — `docs/guides/verification.md`. 특히 볼 자리: 정산 wrapper가
+   모든 종료 경로에서 잠금을 푸는가 · 뮤텍스 임계 구역에 provider 호출이 없는가 ·
+   `auth_support` 우회가 전수 가드의 사정거리를 줄이지 않았는가.
+2. **8.4**(프론트 배선·확인 대화 UX·면제·잔여 표시)와 **8.2c**(이름 이력)는 그대로 남는다.
+3. 선택: 8.2b 재검증 PASS의 검증 기록이 `docs/verifications/`에 아직 없다(2026-08-04 인계 항목).

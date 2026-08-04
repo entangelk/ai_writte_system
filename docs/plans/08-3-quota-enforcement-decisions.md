@@ -1,6 +1,14 @@
 # Phase 8 Slice 8.3 — quota 시행 착수 결정 브리프
 
-상태: `Resolved — Q1~Q9 + Q1-a·Q1-b·Q3-a 전부 확정(오너 2026-08-04). 구현 대기`
+상태: `Resolved — Q1~Q9 + Q1-a·Q1-b·Q3-a 전부 확정(오너 2026-08-04). **구현 완료**(SoT v1.7.88, 독립 검증 대기)`
+
+> **구현이 정밀화한 것 둘**(결정 변경 아님, 2026-08-04 — 상세는 그날 work_log):
+> ① **정산은 `yield` dependency가 아니라 route wrapper에 있다.** Q1-a=A가 요구하는
+> "2xx 그리고 provider 호출"에서 앞 조건을 dependency가 **볼 수 없다** — 이 앱의
+> partial envelope 6곳과 async 202는 예외가 아니라 `JSONResponse`를 *반환*하기
+> 때문이다. 입장(선언·전수 가드 가능)은 dependency에 그대로 두고 정산만 옮겼다.
+> ② **Q8=C의 상태 가드는 같은 `request_id`의 멱등 replay를 막지 않는다.** 그 replay는
+> 새 job도 새 과금도 만들지 않으므로, 막으면 폴링하는 클라이언트가 자기 job을 못 받는다.
 작성일: 2026-08-04
 부모 계획: [`08-member-request-quota.md`](08-member-request-quota.md) §4 슬라이스 8.3
 선행: [`08-0-…`](08-0-billable-request-boundary-decisions.md)(유료 9경로·`action` 리터럴) ·
