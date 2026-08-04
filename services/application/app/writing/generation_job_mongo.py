@@ -45,6 +45,14 @@ class MongoWritingGenerationJobRepository:
              ("created_at", DESCENDING)],
             name="writing_generation_jobs_by_draft_created",
         )
+        # Phase 8 Slice 8.3 (Q1-b=A): 입장 판정이 매 유료 요청마다 이 회원의 대기·
+        # 실행 중 job 을 센다. 입장은 뮤텍스 임계 구역 안이라 **빨라야 한다** —
+        # 인덱스 없이 컬렉션을 훑으면 그 구간이 길어지고, 길어진 임계 구역이 곧
+        # 같은 회원의 다음 요청 지연이다.
+        self._jobs.create_index(
+            [("user_id", ASCENDING), ("status", ASCENDING)],
+            name="writing_generation_jobs_by_user_status",
+        )
 
     @classmethod
     def from_uri(cls, uri: str, *, db_name: str = DEFAULT_DB_NAME):
@@ -104,6 +112,15 @@ class MongoWritingGenerationJobRepository:
             {"project_id": project_id, "draft_id": draft_id},
         ).sort([("created_at", DESCENDING), ("_id", DESCENDING)]))
 
+    def count_active_for_user(self, user_id: str) -> int:
+        return self._jobs.count_documents({
+            "user_id": user_id,
+            "status": {"$in": [
+                WritingGenerationJobStatus.PENDING.value,
+                WritingGenerationJobStatus.RUNNING.value,
+            ]},
+        })
+
     def purge_project(self, project_id: str) -> None:
         # D8-6b-2: project 의 generation job 전부 파기(직접 project_id 스코프).
         self._jobs.delete_many({"project_id": project_id})
@@ -124,6 +141,8 @@ def _doc(job: WritingGenerationJob) -> dict:
         "max_tokens": job.max_tokens,
         "version_id": job.version_id,
         "created_at": job.created_at,
+        # 8.3 Q1-b=A: 워커가 성공 시 원장에 쓰려면 주체를 알아야 한다.
+        "user_id": job.user_id,
         "status": job.status.value,
         "claimed_at": job.claimed_at,
         "failure_reason": (
@@ -150,6 +169,8 @@ def _entry(doc: dict) -> WritingGenerationJob:
         max_tokens=doc["max_tokens"],
         version_id=doc["version_id"],
         created_at=doc["created_at"],
+        # 8.3 이전에 만들어진 행에는 이 필드가 없다 — 그런 job 은 과금되지 않는다.
+        user_id=doc.get("user_id"),
         status=WritingGenerationJobStatus(doc["status"]),
         claimed_at=doc.get("claimed_at"),
         failure_reason=(

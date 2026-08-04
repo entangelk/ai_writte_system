@@ -151,6 +151,49 @@ def current_scope() -> LlmCallScope | None:
     return _SCOPE.get()
 
 
+class ProviderCallTally:
+    """이 요청이 provider 를 실제로 몇 번 불렀는가 (Phase 8 Slice 8.3, Q1-a=A).
+
+    성공차감(Q1=C)의 "성공"은 ``2xx`` **그리고** provider 호출이다 — 상태코드만
+    보면 ``analysis_extract`` replay 처럼 **아무 일도 안 하고 200 인 요청**이 과금
+    된다(오너가 "절대 안 된다"고 못박은 사건). 시행 seam 이 읽는 것은 감사
+    저장소가 아니라 **이 요청이 들고 있는 카운트**이므로 새 의존이 아니라 이미
+    있는 사실을 읽는 것이다.
+
+    ``llm_call_scope`` 가 닫힐 때 그 scope 의 호출 수를 더한다 — 실패한 호출도
+    센다(그런 요청은 2xx 가 아니라 어차피 과금되지 않지만, "불렀다"는 사실 자체는
+    참이다).
+    """
+
+    __slots__ = ("provider_calls",)
+
+    def __init__(self) -> None:
+        self.provider_calls = 0
+
+    def add(self, count: int) -> None:
+        self.provider_calls += count
+
+
+_TALLY: contextvars.ContextVar[ProviderCallTally | None] = contextvars.ContextVar(
+    "llm_provider_call_tally", default=None
+)
+
+
+@contextmanager
+def provider_call_tally(tally: ProviderCallTally) -> Iterator[ProviderCallTally]:
+    """이 블록 안에서 닫히는 scope 들의 호출 수를 ``tally`` 에 모은다.
+
+    ``llm_call_scope`` 와 같은 contextvar 방식이고 같은 성질을 갖는다: 밖에서 난
+    호출(워커·스크립트)은 tally 가 없으므로 아무 데도 안 쌓인다.
+    """
+
+    token = _TALLY.set(tally)
+    try:
+        yield tally
+    finally:
+        _TALLY.reset(token)
+
+
 @contextmanager
 def llm_call_scope(
     audit: LlmCallAuditService | None, *, project_id: str,
@@ -167,6 +210,12 @@ def llm_call_scope(
         yield scope
     finally:
         _SCOPE.reset(token)
+        # 8.3 Q1-a=A. 격리된 ``_flush`` **앞**이다 — 감사 기록이 실패해도 "일을
+        # 했는가"는 참이고, 그 사실로 과금이 갈리기 때문이다(관측 실패가 조용히
+        # 무과금을 만들면 안 된다).
+        tally = _TALLY.get()
+        if tally is not None:
+            tally.add(len(scope.calls))
         _flush(audit, scope)
 
 

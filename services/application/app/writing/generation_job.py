@@ -115,6 +115,15 @@ class WritingGenerationJob:
     # worker stamps it onto the scratch result (D7) and the pad shows it.
     version_id: str
     created_at: datetime
+    # Phase 8 Slice 8.3 (Q1-b=A, 오너 2026-08-04). 202 는 "접수 성공"이지 "생성
+    # 성공"이 아니므로 **워커가 성공 시 원장에 쓴다** — 그러려면 이 job 이 누구
+    # 것인지 워커가 알아야 하고, 그 한 필드가 이것이다. 부모 계획이 8.4 에 배정한
+    # "워커의 주체 전달"을 Q1=C(성공차감)가 여기로 당겼다.
+    #
+    # ``None`` 인 job 은 **과금되지 않는다**: 세션 없이 만들어질 수 있는 경로가
+    # 없으므로 실제로는 8.3 이전에 만들어진 옛 행뿐이고, 주체를 추측해 남의
+    # 사용량에 얹느니 안 세는 편이 옳다(오너 정책: 무노동 무과금과 같은 방향).
+    user_id: str | None = None
     status: WritingGenerationJobStatus = WritingGenerationJobStatus.PENDING
     claimed_at: datetime | None = None
     failure_reason: WritingGenerationJobFailureReason | None = None
@@ -149,6 +158,14 @@ _ALLOWED_TRANSITIONS: frozenset[
 )
 
 
+#: 8.3 Q1-b=A 의 "진행 중 job" = 아직 결과가 나오지 않은 상태 둘. 완료·실패한 job 은
+#: 세지 않는다 — 성공은 원장 행이 대신 세고, 실패는 애초에 과금하지 않는다(Q1=C).
+_ACTIVE_STATUSES: frozenset[WritingGenerationJobStatus] = frozenset({
+    WritingGenerationJobStatus.PENDING,
+    WritingGenerationJobStatus.RUNNING,
+})
+
+
 class InvalidJobStateTransition(RuntimeError):
     """A mark_* was asked for a transition the state machine forbids."""
 
@@ -164,6 +181,14 @@ class WritingGenerationJobRepository(Protocol):
     def list_for_draft(
         self, project_id: str, draft_id: str
     ) -> tuple[WritingGenerationJob, ...]: ...
+
+    def count_active_for_user(self, user_id: str) -> int:
+        """그 회원의 **대기·실행 중** job 수 (8.3 Q1-b=A).
+
+        비동기 생성은 202 에서 잠금이 풀리므로(Q8=C) 워커가 도는 91초 동안 그
+        요청은 진행 중 계수에서 빠진다 — 그 자리를 이 계수가 덮는다. 없으면 회원이
+        async job 을 쌓아 한도를 우회한다.
+        """
 
     def purge_project(self, project_id: str) -> None: ...
 
@@ -226,6 +251,12 @@ class InMemoryWritingGenerationJobRepository:
             reverse=True,
         ))
 
+    def count_active_for_user(self, user_id: str) -> int:
+        return sum(
+            1 for job in self.jobs.values()
+            if job.user_id == user_id and job.status in _ACTIVE_STATUSES
+        )
+
     def purge_project(self, project_id: str) -> None:
         # D8-6b-2: project 의 generation job 전부 파기(직접 project_id 스코프).
         ids = [jid for jid, j in self.jobs.items() if j.project_id == project_id]
@@ -256,7 +287,7 @@ class WritingGenerationJobService:
         self, *, project_id: str, draft_id: str, request_id: str,
         task_type: str, instruction: str, draft_excerpt: str,
         query: str | None, output_length: str, max_output_tokens: int,
-        max_tokens: int, version_id: str,
+        max_tokens: int, version_id: str, user_id: str | None = None,
     ) -> CreateWritingGenerationJobResult:
         # Idempotent on (project_id, request_id): re-submitting the same logical
         # generate (a retried POST) returns the existing job instead of running a
@@ -281,6 +312,7 @@ class WritingGenerationJobService:
             max_tokens=max_tokens,
             version_id=version_id,
             created_at=self._clock(),
+            user_id=user_id,
         )
         self._repo.add(job)
         return CreateWritingGenerationJobResult(job=job, idempotent_replay=False)
@@ -292,6 +324,29 @@ class WritingGenerationJobService:
         self, project_id: str, draft_id: str
     ) -> tuple[WritingGenerationJob, ...]:
         return self._repo.list_for_draft(project_id, draft_id)
+
+    def count_active_for_user(self, *, user_id: str) -> int:
+        return self._repo.count_active_for_user(user_id)
+
+    def has_other_active_for_draft(
+        self, *, project_id: str, draft_id: str, request_id: str
+    ) -> bool:
+        """이 draft 에 **다른 요청의** 결과 대기 중 job 이 있는가 (8.3 Q8=C).
+
+        202 로 잠금이 풀린 뒤의 재클릭이 **새 uuid 로 새 job 을 만들어 2회 과금**
+        되는 것이 가장 비싼 실수 중복이라, 상태 축으로 한 번 더 막는다. 새 저장소도
+        새 수명도 만들지 않는다 — 이미 있는 조회 하나다.
+
+        **``request_id`` 를 빼는 것이 핵심이다.** 같은 ``request_id`` 의 재전송은
+        ``enqueue`` 가 기존 job 을 그대로 돌려주는 **멱등 replay** 라 새 job 도 새
+        과금도 만들지 않는다 — 그것까지 막으면 폴링·재전송하는 클라이언트가 자기
+        job 을 조회하지 못한다. 막아야 하는 것은 **새 job 이 생기는 경우**뿐이다.
+        """
+
+        return any(
+            job.status in _ACTIVE_STATUSES and job.request_id != request_id
+            for job in self._repo.list_for_draft(project_id, draft_id)
+        )
 
     def claim_next(self) -> WritingGenerationJob | None:
         return self._repo.claim_next(

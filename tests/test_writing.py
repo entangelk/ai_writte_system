@@ -1181,6 +1181,12 @@ class WritingGenerateAsyncBranchTest(unittest.TestCase):
         second = client.post(
             f"/projects/{project_id}/writing/generate",
             json=self._async_body(request_id="wr-b"),
+            # Slice 8.3 Q8=C: a *different* request_id while the first job is
+            # still pending is exactly the mistaken duplicate the in-flight
+            # guard refuses (429). Confirming is the product's stated way to
+            # start a second one deliberately, so this test — which is about
+            # key granularity, not about that guard — takes it.
+            headers={"X-Confirm-Duplicate": "1"},
         ).json()
         self.assertFalse(first["idempotent_replay"])
         self.assertFalse(second["idempotent_replay"])

@@ -28,13 +28,18 @@ DB 에서 발견해 고아 행을 지우므로(§43D 와 같은 이유), 잠금�
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
 
 from pymongo import ASCENDING, MongoClient, ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
-from services.application.app.quota.lock import RequestLock, cooldown_until
+from services.application.app.quota.lock import (
+    RequestLock,
+    cooldown_until,
+    in_flight_prefix,
+)
 
 COLLECTION = "request_locks"
 
@@ -114,6 +119,18 @@ class MongoRequestLockRepository:
             }},
         )
         return result.matched_count == 1
+
+    def count_in_flight(self, user_id: str, *, now: datetime) -> int:
+        # 8.3 Q3=E. 앵커 정규식이라 ``_id`` 인덱스를 탄다 — 8.2b 의 "추가 인덱스
+        # 없음" 계약을 지키는 자리다. **escape 가 필수다**: 회원 id 에 정규식
+        # 메타문자가 들어가면 앵커가 다른 회원의 잠금까지 세거나 아무것도 못 센다.
+        # 판정은 여기서도 ``expires_at`` 비교다(G3=A) — TTL 은 청소용이라 문서
+        # 존재로 세면 최대 1분간 남의 창을 먹는다.
+        return self._locks.count_documents({
+            "_id": {"$regex": f"^{re.escape(in_flight_prefix(user_id))}"},
+            "released_at": None,
+            "expires_at": {"$gt": now},
+        })
 
 
 def _claim_fields(lock: RequestLock) -> dict:

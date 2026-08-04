@@ -69,6 +69,17 @@ def lock_key(user_id: str, action: str, target_project_id: str) -> str:
     return f"{user_id}:{action}:{target_project_id}"
 
 
+def in_flight_prefix(user_id: str) -> str:
+    """그 회원의 잠금 키가 공유하는 접두 (8.3 Q3=E).
+
+    진행 중 계수는 이 접두로 ``_id`` 를 훑는다 — 세 축이 이미 ``_id`` 라
+    **8.2b 의 "추가 인덱스 없음" 계약을 건드리지 않는다.** 8.3 의 입장 뮤텍스는
+    ``admission:`` 접두라 여기에 걸리지 않는다(키 공간이 둘이다).
+    """
+
+    return f"{user_id}:"
+
+
 def cooldown_until(
     claimed_at: datetime, now: datetime, minimum_window: timedelta
 ) -> datetime:
@@ -165,6 +176,14 @@ class RequestLockRepository(Protocol):
     ) -> bool:
         """자기 토큰일 때만 냉각으로 넘긴다. 남의 잠금은 **건드리지 않는다**(§0.4)."""
 
+    def count_in_flight(self, user_id: str, *, now: datetime) -> int:
+        """그 회원의 **진행 중** 잠금 수 (8.3 Q3=E).
+
+        "진행 중"은 ``released_at is None`` **그리고** ``expires_at > now`` 다 —
+        해제된(냉각 중) 잠금은 이미 일이 끝난 것이라 사용량에 넣으면 회원이 쓰지도
+        않은 한 칸을 5초간 잃는다.
+        """
+
 
 class InMemoryRequestLockRepository:
     def __init__(self) -> None:
@@ -197,6 +216,15 @@ class InMemoryRequestLockRepository:
             expires_at=cooldown_until(current.claimed_at, now, minimum_window),
         )
         return True
+
+    def count_in_flight(self, user_id: str, *, now: datetime) -> int:
+        prefix = in_flight_prefix(user_id)
+        return sum(
+            1 for key, lock in self._locks.items()
+            if key.startswith(prefix)
+            and lock.released_at is None
+            and lock.expires_at > now
+        )
 
 
 class RequestLockService:
@@ -276,6 +304,16 @@ class RequestLockService:
             now=self._clock(),
             minimum_window=self._minimum_window,
         )
+
+    def count_in_flight(self, *, user_id: str) -> int:
+        """지금 이 회원이 **처리 중인** 유료 요청 수 (8.3 Q3=E).
+
+        8.3 이 이것을 사용량에 더해 "진행 중 요청도 한도를 차지한다"를 만든다 —
+        성공차감(Q1=C)이라 원장 행은 응답 직전에야 생기고, 그 사이가 최대 91초다.
+        잠금이 곧 그 구간의 예약 장부라 **새 저장소도 새 수명도 만들지 않는다**.
+        """
+
+        return self._repo.count_in_flight(user_id, now=self._clock())
 
     def _new_lock(
         self, user_id: str, action: str, target_project_id: str, now: datetime

@@ -85,6 +85,12 @@ class GenerationCollaborators:
     # 의도다 — 리터럴 사본은 main과 워커가 서로 다른 상한을 믿게 만드는 가장 흔한 길이다.
     capabilities: object | None = None
     report_output_cap: int | None = None
+    # Phase 8 Slice 8.3 (Q1-b=A, 오너 2026-08-04). **202 는 접수 성공이지 생성
+    # 성공이 아니다** — 요청 경로가 202 에서 차감하면 "실패에는 과금하지 않는다"는
+    # 오너 정책이 가장 비싼 경로(long 91초)에서만 안 지켜진다. 그래서 원장 행의
+    # 주체가 여기다. Optional 인 이유는 위 둘과 같다(손으로 조립한 테스트
+    # collaborators 가 그대로 유효해야 한다); None 이면 아무것도 차감하지 않는다.
+    quota: object | None = None
 
 
 async def execute_generation_job(
@@ -172,4 +178,14 @@ async def execute_generation_job(
             return fail(job, reason=reason, detail=str(exc))
         except Exception as exc:  # noqa: BLE001 — H-2 catch-all (now covers persist too): never livelock
             return fail(job, reason=reasons.INTERNAL, detail=repr(exc))
+        # 8.3 Q1-b=A: **성공한 생성만** 원장에 남는다. 위 모든 실패 경로는 여기에
+        # 닿지 않으므로 "실패 무과금"이 구조적으로 성립한다. ``dedupe_key`` 는
+        # 요청 경로와 같은 ``request_id`` 라 재전송·retry 가 몇 번을 돌아도 한 행이다.
+        #
+        # 차감을 mark_succeeded **앞**에 두는 이유: 원장이 실패해도 job 은 성공으로
+        # 끝나야 하고(사용자는 결과를 이미 받는다), 그 손실은 charger 안에서 로그로
+        # 남는다. 순서를 뒤집으면 그 사이에 크래시한 워커가 재차지 → 재실행으로
+        # **같은 생성을 다시 돌린다**.
+        if c.quota is not None:
+            c.quota.charge(job)
         return c.jobs.mark_succeeded(job, result_scratch_id=entry.id)

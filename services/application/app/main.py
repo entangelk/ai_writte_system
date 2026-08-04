@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+import uuid
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from typing import Annotated, Protocol, Union
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from services.application.app.auth.cookies import SESSION_COOKIE_NAME, cookie_kwargs
@@ -173,8 +175,35 @@ from services.application.app.observability.kpi import (
 )
 from services.application.app.observability.llm_call_scope import (
     ObservedProvider,
+    ProviderCallTally,
     llm_call_scope,
+    provider_call_tally,
     reclassify_planner_parse_error,
+)
+from services.application.app.quota.billable_actions import (
+    BILLABLE_ACTION_BY_OPERATION,
+)
+from services.application.app.quota.dedupe import resolve_dedupe_key
+from services.application.app.quota.enforcement import (
+    AdmissionMutex,
+    AdmissionUnavailable,
+    GenerationJobCharger,
+    QuotaCharge,
+    QuotaEnforcementService,
+    QuotaRefusalReason,
+    QuotaRefused,
+)
+from services.application.app.quota.ledger import (
+    InMemoryUsageLedgerRepository,
+    UsageLedgerService,
+)
+from services.application.app.quota.lock import (
+    InMemoryRequestLockRepository,
+    RequestLockService,
+)
+from services.application.app.quota.policy import (
+    InMemoryQuotaPolicyRepository,
+    QuotaPolicyService,
 )
 from services.application.app.writing.scratch import (
     MAX_SCRATCH_PER_DRAFT,
@@ -608,6 +637,49 @@ def _default_writing_generation_job_service() -> WritingGenerationJobService:
             uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
         ),
         claim_timeout_seconds=claim_timeout,
+    )
+
+
+def _default_quota_enforcement_service(
+    jobs: WritingGenerationJobService | None = None,
+) -> QuotaEnforcementService:
+    """정책·원장·잠금을 한 저장소 위에서 조립한다 (Slice 8.3).
+
+    셋 다 in-memory 기본이 있어 인프라 없이도 시행이 **켜진 채로** 돈다 — 무제한이
+    되는 기본값은 두지 않는다(그 상태가 곧 무료 제공이다). Mongo URI 가 있으면 세
+    어댑터가 함께 올라간다: 셋 중 하나만 durable 하면 재기동마다 사용량이 반쯤
+    사라지므로 갈라 놓지 않는다.
+
+    입장 뮤텍스는 잠금과 **같은 컬렉션**을 쓴다(§Q3-a 계약 1) — 키 공간만 다르다.
+    """
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if not uri:
+        policy_repo = InMemoryQuotaPolicyRepository()
+        ledger_repo = InMemoryUsageLedgerRepository()
+        lock_repo = InMemoryRequestLockRepository()
+    else:
+        from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+        from services.application.app.quota.ledger_mongo import (
+            MongoUsageLedgerRepository,
+        )
+        from services.application.app.quota.lock_mongo import (
+            MongoRequestLockRepository,
+        )
+        from services.application.app.quota.policy_mongo import (
+            MongoQuotaPolicyRepository,
+        )
+        db_name = os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
+        policy_repo = MongoQuotaPolicyRepository.from_uri(uri, db_name=db_name)
+        ledger_repo = MongoUsageLedgerRepository.from_uri(uri, db_name=db_name)
+        lock_repo = MongoRequestLockRepository.from_uri(uri, db_name=db_name)
+    return QuotaEnforcementService(
+        policy=QuotaPolicyService(policy_repo),
+        ledger=UsageLedgerService(
+            ledger_repo, id_factory=lambda: "rul:" + uuid.uuid4().hex
+        ),
+        locks=RequestLockService(lock_repo),
+        mutex=AdmissionMutex(lock_repo),
+        jobs=jobs,
     )
 
 
@@ -1331,6 +1403,27 @@ def _owned(declaration: dict[int | str, dict]) -> dict[int | str, dict]:
     return {403: _ERROR, **declaration}
 
 
+def _billable(declaration: dict[int | str, dict]) -> dict[int | str, dict]:
+    """Declare the faces request-quota enforcement adds (Phase 8 Slice 8.3, Q5=B).
+
+    Three statuses because the frontend has to *do* three different things:
+
+    * ``402`` — the window's quota is spent. Nothing the caller can do until it
+      resets (or an administrator raises the limit / a plan is bought, which is
+      the 8.6 axis this code deliberately points at).
+    * ``429`` — the same request is already in progress, or was just made. This
+      one is retryable *right now* by re-sending with ``X-Confirm-Duplicate``.
+    * ``503`` — the quota stores could not answer (Q4=A, fail-closed). It rides
+      the storage face every protected operation already declares.
+
+    ``403`` is deliberately **not** added here: project-scoped operations already
+    declare it through ``_owned``, and a suspended account reuses that status
+    (Q5=B) rather than inventing a fourth. The two are told apart by ``detail``
+    for display only — H3 still forbids branching on that string.
+    """
+    return {402: _ERROR, 429: _ERROR, **declaration}
+
+
 def _admin(declaration: dict[int | str, dict]) -> dict[int | str, dict]:
     """Declare the 403 face added by the admin dependency (D8-5).
 
@@ -1432,6 +1525,17 @@ _ERRORS_400_404_502_504_CONFIG: dict[int | str, dict] = _protected({
     400: _ERROR, 404: _ERROR, 502: _ERROR, 503: _CONFIG_503, 504: _ERROR,
 })
 
+# Slice 8.3: the same three declarations, plus the quota faces, for the nine
+# billable operations. Separate constants rather than widening the ones above,
+# because those are shared with free operations — adding 402/429 there would
+# document a quota on endpoints that have none.
+_BILLABLE_404_502_CONFIG: dict[int | str, dict] = _billable(
+    _ERRORS_404_502_CONFIG)
+_BILLABLE_400_404_409_502_CONFIG: dict[int | str, dict] = _billable(
+    _ERRORS_400_404_409_502_CONFIG)
+_BILLABLE_400_404_502_504_CONFIG: dict[int | str, dict] = _billable(
+    _ERRORS_400_404_502_504_CONFIG)
+
 
 # --- Authentication enforcement (D8-3a) --------------------------------------
 # D7=A: enforcement is a FastAPI *dependency* declared per operation, backed by
@@ -1530,6 +1634,171 @@ def require_project_owner(
     raise HTTPException(status_code=403, detail="forbidden")
 
 
+# --- Request quota enforcement (Phase 8 Slice 8.3) ---------------------------
+# 오너 결정 2026-08-04, 브리프 ``08-3-quota-enforcement-decisions.md``.
+# Q7=A: 시행은 **operation 마다 선언하는 dependency** 다 — 인증(D7=A)이 미들웨어를
+# 기각한 이유가 그대로 적용된다(경로 패턴이 정책이 되고 새 route 가 조용히 열린다).
+# ``_REQUIRE_PROJECT_OWNER`` **뒤에** 선언하므로 404·403 은 차감 앞에서 끝난다.
+#
+# ★ 정산(원장 → 잠금 해제)이 dependency 의 ``yield`` 뒤가 아니라 **route wrapper**
+# 에 있는 이유(구현이 드러낸 제약, 결정 변경 아님): Q1-a=A 는 "2xx 그리고 provider
+# 호출"을 요구하는데 **yield dependency 는 응답 상태코드를 볼 수 없다.** 이 앱의
+# partial envelope 6곳과 async 202 는 예외가 아니라 ``JSONResponse`` 를 *반환*하므로
+# dependency 의 exit 에는 아무 신호도 오지 않는다 — 그 자리에서 정산하면 **일하고도
+# 실패한 응답(partial envelope)과 접수만 한 202 가 과금된다.** 그래서 입장은
+# dependency(선언·전수 가드 가능)가, 정산은 실제 응답을 보는 wrapper 가 맡는다.
+# wrapper 는 정책을 **정하지 않는다**: dependency 가 ``request.state`` 에 남긴
+# 영수증이 있을 때만 동작하므로 무료 경로는 그대로 지나간다.
+_QUOTA_STATE = "quota_charge"
+_QUOTA_TALLY_STATE = "quota_tally"
+#: Q6=C. 확인은 헤더로 받는다 — 이 저장소의 쿼리 파라미터 선례가 전부 GET/DELETE 라
+#: POST 의 상태 변경 의도를 URL 에 싣지 않는다. 값의 존재만 본다(비밀이 아니다).
+CONFIRM_DUPLICATE_HEADER = "X-Confirm-Duplicate"
+
+#: Q5=B — 프론트가 **다르게 행동해야 하는 사건이 셋**이라 코드가 셋이다.
+#: 429 "확인하면 지금 통과" / 402 "이번 창에는 방법이 없다" / 403 "관리자만 푼다".
+_QUOTA_REFUSAL_STATUS: dict[QuotaRefusalReason, int] = {
+    QuotaRefusalReason.LOCKED: 429,
+    QuotaRefusalReason.EXCEEDED: 402,
+    QuotaRefusalReason.SUSPENDED: 403,
+}
+
+
+def _billable_action(request: Request) -> str:
+    """이 요청이 소비하는 유료 동작. 분류표(8.0 B6)가 정본이다."""
+    route = request.scope.get("route")
+    path = getattr(route, "path", request.url.path)
+    return BILLABLE_ACTION_BY_OPERATION[(path, request.method.lower())]
+
+
+async def _request_body_mapping(request: Request) -> dict:
+    """이미 읽힌 본문을 dict 로. 본문 없는 두 경로(analysis_*)는 ``{}`` 다.
+
+    FastAPI 는 dependency 를 풀기 **전에** 본문을 읽고 Starlette 이 그것을 캐시하므로
+    여기서 다시 읽어도 endpoint 의 파싱을 굶기지 않는다(Q7=A 의 구현 확인 항목).
+    """
+    raw = await request.body()
+    if not raw:
+        return {}
+    try:
+        parsed = await request.json()
+    except Exception:  # noqa: BLE001 — 본문이 JSON 이 아니면 키가 없는 것과 같다
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+async def enforce_quota(
+    request: Request,
+    x_confirm_duplicate: Annotated[
+        str | None, Header(alias=CONFIRM_DUPLICATE_HEADER)
+    ] = None,
+    current=Depends(require_authenticated_user),
+):
+    """유료 요청 1건의 입장 (Q1=C·Q3=E·Q3-a=A·Q4=A·Q5=B·Q6=C·Q9=A).
+
+    통과하면 영수증을 ``request.state`` 에 남기고, 그 요청이 실제로 성공했을 때만
+    wrapper 가 원장에 한 행을 쓴다. 저장소가 실패하면 예외가 그대로 올라가
+    전역 handler 의 503 이 된다(Q4=A — 계량 불능은 무료 제공이 아니다).
+    """
+    enforcement: QuotaEnforcementService | None = getattr(
+        request.app.state, "quota", None
+    )
+    if enforcement is None:
+        # 조립되지 않은 배포는 유료 경로를 열지 않는다(fail-closed). 인증·소유권과
+        # 달리 여기는 "없으면 통과"가 곧 무료 제공이라 503 이 옳은 얼굴이다.
+        raise HTTPException(
+            status_code=503, detail="request quota enforcement is not configured"
+        )
+    action = _billable_action(request)
+    body = await _request_body_mapping(request)
+    try:
+        charge = enforcement.admit(
+            user_id=current.id,
+            member_created_at=current.created_at,
+            action=action,
+            target_project_id=request.path_params["project_id"],
+            dedupe_key=resolve_dedupe_key(
+                action,
+                body=body,
+                path_params=request.path_params,
+                server_key=uuid.uuid4().hex,
+            ),
+            confirmed=x_confirm_duplicate is not None,
+        )
+    except QuotaRefused as exc:
+        headers = (
+            {"Retry-After": str(exc.retry_after_seconds)}
+            if exc.retry_after_seconds is not None else None
+        )
+        raise HTTPException(
+            status_code=_QUOTA_REFUSAL_STATUS[exc.reason],
+            detail=exc.detail,
+            headers=headers,
+        ) from exc
+    except AdmissionUnavailable as exc:
+        # §Q3-a 계약 3: 초과를 허용하느니 요청을 실패시킨다.
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    setattr(request.state, _QUOTA_STATE, charge)
+    # Q6=C: 확인은 잠금만 뚫는 것이 아니라 Q8=C 의 상태 가드도 함께 통과시킨다 —
+    # 사용자에게는 통로가 하나여야 한다. endpoint 가 이 값을 읽는다.
+    request.state.quota_confirmed = x_confirm_duplicate is not None
+    return charge
+
+
+def quota_confirmed(request: Request) -> bool:
+    """이 요청이 확인 헤더를 달고 왔는가(무료 경로에서는 항상 ``False``)."""
+    return bool(getattr(request.state, "quota_confirmed", False))
+
+
+def quota_charge(request: Request) -> QuotaCharge:
+    """이 요청의 입장 영수증. 유료 경로에서만 존재한다(없으면 배선 결함이다)."""
+    return getattr(request.state, _QUOTA_STATE)
+
+
+class QuotaSettledRoute(APIRoute):
+    """응답을 실제로 보고 정산하는 seam. **정책은 여기 없다**(위 주석 참조).
+
+    - 차감 조건은 Q1-a=A 하나다: ``2xx`` **그리고** provider 를 불렀다.
+    - ``202`` 는 뺀다(Q1-b=A) — 접수는 성공이 아니고 그 차감은 **워커**가 한다.
+      202 는 provider 를 부르지도 않으므로 조건이 두 겹으로 막지만, 규칙 자체를
+      적어 두는 편이 나중에 202 를 내는 다른 경로가 생겨도 안전하다.
+    - 예외로 끝난 요청은 차감 없이 잠금만 푼다. 해제는 ``finally`` 라 어떤 경로로
+      끝나도 잠금이 남지 않는다.
+    """
+
+    def get_route_handler(self):
+        original = super().get_route_handler()
+
+        async def settled(request: Request) -> Response:
+            tally = ProviderCallTally()
+            setattr(request.state, _QUOTA_TALLY_STATE, tally)
+            status_code: int | None = None
+            with provider_call_tally(tally):
+                try:
+                    response = await original(request)
+                    status_code = response.status_code
+                    return response
+                finally:
+                    charge: QuotaCharge | None = getattr(
+                        request.state, _QUOTA_STATE, None
+                    )
+                    if charge is not None:
+                        request.app.state.quota.settle(
+                            charge,
+                            charged=_is_charged(status_code, tally.provider_calls),
+                        )
+
+        return settled
+
+
+def _is_charged(status_code: int | None, provider_calls: int) -> bool:
+    if status_code is None or not 200 <= status_code < 300:
+        return False
+    if status_code == 202:
+        return False
+    return provider_calls > 0
+
+
 def require_admin_user(current=Depends(require_authenticated_user)):
     """Allow only administrators (D8-5, D6=A).
 
@@ -1557,6 +1826,14 @@ _REQUIRE_PROJECT_OWNER = [
 _REQUIRE_ADMIN = [
     Depends(require_authenticated_user),
     Depends(require_admin_user),
+]
+# Slice 8.3 (Q7=A): the nine billable operations. Enforcement is declared **after**
+# ownership so 404 (no such project) and 403 (not yours) are answered before any
+# quota is touched — that ordering is the whole reason those two statuses are
+# structurally free, and reversing it is what the over-strict guard watches for.
+_REQUIRE_PROJECT_OWNER_BILLABLE = [
+    *_REQUIRE_PROJECT_OWNER,
+    Depends(enforce_quota),
 ]
 
 
@@ -2315,11 +2592,12 @@ def build_async_generation_collaborators() -> GenerationCollaborators | None:
     )
     if context_search is None:
         return None
+    jobs = _default_writing_generation_job_service()
     return GenerationCollaborators(
         context_search=context_search,
         writing=writing,
         scratch=_default_writing_scratch_service(),
-        jobs=_default_writing_generation_job_service(),
+        jobs=jobs,
         needs=_WRITING_CONTINUE_SCENE_NEEDS,
         # Same factory create_app uses, so the worker's records land in the same
         # store the KPI aggregation reads (증분 C, D3).
@@ -2328,6 +2606,13 @@ def build_async_generation_collaborators() -> GenerationCollaborators | None:
         # 남는다(생성은 HTTP가 아니라 이 워커가 돌린다).
         capabilities=_default_model_capabilities(),
         report_output_cap=_report_output_cap(),
+        # 8.3 Q1-b=A: 비동기 생성의 차감 주체는 워커다. 같은 factory 를 쓰므로 요청
+        # 경로와 **같은 원장**에 쓰고, 회원 조회는 주 창 키(가입일 기준)를 계산하기
+        # 위한 것이다. 여기서 빠뜨리면 medium/long 이 통째로 무료가 된다.
+        quota=GenerationJobCharger(
+            enforcement=_default_quota_enforcement_service(jobs),
+            users=_default_user_service(),
+        ),
     )
 
 
@@ -2356,11 +2641,20 @@ def create_app(
     session_service: SessionService | None = None,
     access_grant_service: AccessGrantService | None = None,
     admin_audit_service: AdminAuditService | None = None,
+    quota_enforcement_service: QuotaEnforcementService | None = None,
 ) -> FastAPI:
     # Fail startup loudly for invalid environment-adjustable public bounds.
     _project_brief_style_example_limits()
     _writing_output_length_tokens()
     app = FastAPI(title="AI Writing System Application")
+    # Slice 8.3: every route is built by the settling wrapper. It is a no-op for
+    # the 66 free operations (no receipt on ``request.state`` → nothing to do);
+    # applying it globally rather than per-route is deliberate, because "which
+    # routes settle" must not become a second, hand-kept list beside the
+    # enforcement dependency — the dependency stays the single classification.
+    # Must be set before the first decorator runs: FastAPI freezes the class per
+    # route at registration time.
+    app.router.route_class = QuotaSettledRoute
 
     # SoT v1.7.38 (owner decision 2026-07-24): the storage face of 503 is closed
     # app-wide here rather than endpoint by endpoint. Every endpoint but /health
@@ -2583,6 +2877,15 @@ def create_app(
     # require_project_owner reads this to honour a live grant (D8-5e, F1=C).
     app.state.access_grants = access_grants
     app.state.admin_audit = admin_audit
+    # Slice 8.3 (Q7=A): ``enforce_quota`` and the settling route read enforcement
+    # from here for the same reason the auth dependency does — one module-level
+    # function object across all apps, so the exhaustive guard has one identity
+    # to look for. The generation job store is handed over so admission counts a
+    # member's pending/running async jobs (Q1-b=A).
+    app.state.quota = (
+        quota_enforcement_service
+        or _default_quota_enforcement_service(writing_generation_jobs)
+    )
 
     def _user_payload(user) -> dict[str, object]:
         return {
@@ -3613,8 +3916,8 @@ def create_app(
         return _analysis_job_payload(job)
 
     @app.post("/projects/{project_id}/analysis/jobs/{job_id}/run",
-              responses=_owned(_ERRORS_400_404_409_502_CONFIG),
-              dependencies=_REQUIRE_PROJECT_OWNER)
+              responses=_owned(_BILLABLE_400_404_409_502_CONFIG),
+              dependencies=_REQUIRE_PROJECT_OWNER_BILLABLE)
     async def run_analysis_job(project_id: str, job_id: str) -> dict[str, object]:
         try:
             _require_project_exists(project_id)
@@ -3967,8 +4270,8 @@ def create_app(
         }
 
     @app.post("/projects/{project_id}/analysis/jobs/{job_id}/compare",
-              responses=_owned(_ERRORS_404_502_CONFIG),
-              dependencies=_REQUIRE_PROJECT_OWNER)
+              responses=_owned(_BILLABLE_404_502_CONFIG),
+              dependencies=_REQUIRE_PROJECT_OWNER_BILLABLE)
     async def analysis_compare_endpoint(
         project_id: str, job_id: str
     ) -> dict[str, object]:
@@ -4427,8 +4730,8 @@ def create_app(
         }
 
     @app.post("/projects/{project_id}/context-search",
-              responses=_owned(_ERRORS_400_404_502_504_CONFIG),
-              dependencies=_REQUIRE_PROJECT_OWNER)
+              responses=_owned(_BILLABLE_400_404_502_504_CONFIG),
+              dependencies=_REQUIRE_PROJECT_OWNER_BILLABLE)
     async def context_search_endpoint(
         project_id: str, body: ContextSearchHttpRequest
     ) -> dict[str, object]:
@@ -4625,10 +4928,10 @@ def create_app(
     @app.post("/projects/{project_id}/writing/generate",
               response_model=WritingCandidatePayload,
               responses=_owned({**GENERATE_ASYNC_RESPONSES,
-                                **_ERRORS_400_404_502_504_CONFIG}),
-              dependencies=_REQUIRE_PROJECT_OWNER)
+                                **_BILLABLE_400_404_502_504_CONFIG}),
+              dependencies=_REQUIRE_PROJECT_OWNER_BILLABLE)
     async def writing_generate_endpoint(
-        project_id: str, body: WritingGenerateRequest
+        project_id: str, body: WritingGenerateRequest, request: Request
     ) -> dict[str, object]:
         # Phase 5.1: continue_scene generation. The intended flow is
         # context request → ContextPackage → Writing AI (핵심 흐름), so the
@@ -4667,10 +4970,29 @@ def create_app(
                     detail="current_position is required for async presets "
                            "(output_length medium/long)",
                 )
+            # Slice 8.3 Q8=C (오너 2026-08-04): 202 로 잠금이 냉각으로 넘어간 뒤의
+            # 재클릭은 **새 uuid → 새 job → 2회 과금**이 되는 가장 비싼 실수 중복이다.
+            # 잠금과 같은 통로(429 + 확인 헤더)로 상태 축을 한 번 더 막는다 —
+            # 새 저장소도 새 수명도 만들지 않고 이미 있는 조회 하나를 쓴다.
+            if not quota_confirmed(request) and (
+                writing_generation_jobs.has_other_active_for_draft(
+                    project_id=project_id,
+                    draft_id=body.current_position.draft_id,
+                    request_id=body.request_id,
+                )
+            ):
+                raise HTTPException(
+                    status_code=429,
+                    detail="a generation for this draft is still in progress; "
+                           "confirm to start another",
+                )
             result = writing_generation_jobs.enqueue(
                 project_id=project_id,
                 draft_id=body.current_position.draft_id,
                 request_id=body.request_id,
+                # Q1-b=A: 워커가 성공 시 원장에 쓰려면 이 job 이 누구 것인지 알아야
+                # 한다. 요청 경로는 202 를 과금하지 않는다.
+                user_id=quota_charge(request).user_id,
                 task_type=task_type.value,
                 instruction=body.instruction,
                 draft_excerpt=body.draft_excerpt,
@@ -4866,8 +5188,8 @@ def create_app(
 
     @app.post("/projects/{project_id}/writing/gate",
               response_model=WritingGatePayload,
-              responses=_owned(_ERRORS_400_404_502_504_CONFIG),
-              dependencies=_REQUIRE_PROJECT_OWNER)
+              responses=_owned(_BILLABLE_400_404_502_504_CONFIG),
+              dependencies=_REQUIRE_PROJECT_OWNER_BILLABLE)
     async def writing_gate_endpoint(
         project_id: str, body: WritingGateRequest
     ) -> dict[str, object]:
@@ -4955,8 +5277,8 @@ def create_app(
         return _writing_gate_payload(result)
 
     @app.post("/projects/{project_id}/writing/report",
-              responses=_owned(_ERRORS_400_404_502_504_CONFIG),
-              dependencies=_REQUIRE_PROJECT_OWNER)
+              responses=_owned(_BILLABLE_400_404_502_504_CONFIG),
+              dependencies=_REQUIRE_PROJECT_OWNER_BILLABLE)
     async def writing_report_endpoint(
         project_id: str, body: WritingReportRequest
     ) -> dict[str, object]:
@@ -5039,8 +5361,8 @@ def create_app(
         return _writing_candidate_payload(enriched)
 
     @app.post("/projects/{project_id}/writing/revise",
-              responses=_owned(_ERRORS_400_404_502_504_CONFIG),
-              dependencies=_REQUIRE_PROJECT_OWNER)
+              responses=_owned(_BILLABLE_400_404_502_504_CONFIG),
+              dependencies=_REQUIRE_PROJECT_OWNER_BILLABLE)
     async def writing_revise_endpoint(
         project_id: str, body: WritingReviseRequest
     ) -> dict[str, object]:
@@ -5125,8 +5447,8 @@ def create_app(
 
     @app.post("/projects/{project_id}/writing/revise-and-gate",
               response_model=WritingReviseGateResponse,
-              responses=_owned(REVISE_AND_GATE_RESPONSES),
-              dependencies=_REQUIRE_PROJECT_OWNER)
+              responses=_owned(_billable(REVISE_AND_GATE_RESPONSES)),
+              dependencies=_REQUIRE_PROJECT_OWNER_BILLABLE)
     async def writing_revise_and_gate_endpoint(
         project_id: str, body: WritingReviseRequest
     ) -> object:
@@ -5482,8 +5804,8 @@ def create_app(
 
     @app.post("/projects/{project_id}/writing/accept",
               response_model=WritingAcceptResponse,
-              responses=_owned(ACCEPT_RESPONSES),
-              dependencies=_REQUIRE_PROJECT_OWNER)
+              responses=_owned(_billable(ACCEPT_RESPONSES)),
+              dependencies=_REQUIRE_PROJECT_OWNER_BILLABLE)
     async def writing_accept_endpoint(
         project_id: str, body: WritingAcceptRequest
     ) -> object:

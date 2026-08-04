@@ -91,7 +91,15 @@ BILLABLE_ACTIONS: tuple[BillableAction, ...] = (
                    "/projects/{project_id}/context-search"),
 )
 
+#: ``(path, method)`` → ``action`` 리터럴. 8.3 시행이 route 에서 동작 이름을 얻는
+#: 자리이며, 가드와 **같은 정본**을 본다(분류되지 않은 경로는 여기 없으므로
+#: 시행 dependency 가 그 경로에 붙으면 조회에서 즉시 드러난다).
+BILLABLE_ACTION_BY_OPERATION: dict[tuple[str, str], str] = {
+    (action.path, action.method.lower()): action.action
+    for action in BILLABLE_ACTIONS
+}
+
 #: ``(path, method)`` 조회용 — 가드와 8.3 시행이 같은 정본을 본다.
 BILLABLE_OPERATIONS: frozenset[tuple[str, str]] = frozenset(
-    (action.path, action.method.lower()) for action in BILLABLE_ACTIONS
+    BILLABLE_ACTION_BY_OPERATION
 )
