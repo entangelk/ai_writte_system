@@ -1,6 +1,12 @@
 import { useRef, useState, type MouseEvent } from "react";
 import { Link } from "react-router";
-import { analyzeVersion, describeApiError } from "../api/client";
+import {
+  analyzeVersion,
+  describeApiError,
+  describeQuotaError,
+  type BillableRequestOptions,
+} from "../api/client";
+import { useMemberQuota } from "../quota/useMemberQuota";
 
 type AnalysisTriggerProps = {
   projectId: string;
@@ -39,6 +45,11 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
   // pass the state check and launch two jobs (WritingPanel uses the same busyRef
   // pattern). The ref flips immediately.
   const busyRef = useRef(false);
+  // 8.4 W3=A: 분석도 유료 요청이라 같은 확인 통로를 쓴다. 여기서 되묻지 않으면
+  // 이 화면만 raw `"429: …"` 를 뿌리게 된다.
+  const [pendingConfirm, setPendingConfirm] =
+    useState<{ message: string; run: () => void } | null>(null);
+  const { quota, refresh: refreshQuota } = useMemberQuota();
 
   function guardNavigation(event: MouseEvent<HTMLAnchorElement>): void {
     if (onBeforeNavigateAway?.() === false) event.preventDefault();
@@ -54,7 +65,7 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
           : "저장된 version이 없습니다. 본문을 먼저 저장하세요."
       : null;
 
-  async function run() {
+  async function run(options: BillableRequestOptions = {}) {
     if (
       busyRef.current ||
       blocked !== null ||
@@ -67,17 +78,36 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
     onStatusChange?.("running");
     setError(null);
     setResult(null);
+    setPendingConfirm(null);
     try {
       const outcome = await analyzeVersion(
         projectId,
         draftId,
         latestVersionId,
         latestSnapshotId,
+        options,
       );
+      refreshQuota();
       setResult({ candidateCount: outcome.candidateCount });
       onStatusChange?.("complete");
     } catch (err) {
-      setError(describeApiError(err));
+      const refusal = describeQuotaError(err, quota);
+      if (refusal === null) {
+        setError(describeApiError(err));
+      } else {
+        refreshQuota();
+        if (refusal.confirmable) {
+          // 확인은 사용자 클릭에서만 나온다(W4=A) — 여기서 바로 다시 보내면
+          // 확인이 무력화된다.
+          setPendingConfirm({
+            message:
+              "방금 같은 분석을 요청했습니다. 다시 분석할까요? 사용량이 1회 더 듭니다.",
+            run: () => void run({ confirmDuplicate: true }),
+          });
+        } else {
+          setError(refusal.message);
+        }
+      }
       onStatusChange?.("failed");
     } finally {
       busyRef.current = false;
@@ -123,6 +153,26 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
           <span className="spinner" aria-hidden="true" />
           원고에서 검토 후보를 추출하는 중…
         </p>
+      )}
+      {pendingConfirm !== null && (
+        <div className="writing-confirm" role="alertdialog" aria-label="중복 요청 확인">
+          <p>{pendingConfirm.message}</p>
+          <div className="writing-confirm-actions">
+            <button
+              type="button"
+              onClick={() => {
+                const rerun = pendingConfirm.run;
+                setPendingConfirm(null);
+                rerun();
+              }}
+            >
+              다시 분석
+            </button>
+            <button type="button" onClick={() => setPendingConfirm(null)}>
+              취소
+            </button>
+          </div>
+        </div>
       )}
       {error !== null && (
         <div className="writing-error" role="alert">

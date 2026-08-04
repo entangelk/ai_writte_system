@@ -287,4 +287,42 @@ describe("AnalysisTrigger", () => {
       "failed",
     ]);
   });
+
+  it("asks before re-spending a unit when the run is locked as a duplicate (429)", async () => {
+    // 8.4 W3=A. 분석도 유료 요청이라 같은 확인 통로를 쓴다 — 여기서 되묻지 않으면
+    // 이 화면만 raw `"429: …"` 를 뿌린다.
+    const fetchMock = mockFetch(
+      CATALOG_FULL, VERSION_DETAIL, JOB_CREATED,
+      { status: 429, body: { detail: "the same request was just made" } },
+      CATALOG_FULL, VERSION_DETAIL, JOB_CREATED, runResult(1),
+    );
+    renderTrigger();
+    await userEvent.click(runButton());
+    const prompt = await screen.findByRole("alertdialog", {
+      name: "중복 요청 확인",
+    });
+    expect(prompt).toHaveTextContent("사용량이 1회 더 듭니다");
+    // 확인 전에는 아무것도 다시 나가지 않는다(W4=A).
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+
+    await userEvent.click(screen.getByRole("button", { name: "다시 분석" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(8));
+    const runCall = fetchMock.mock.calls[7];
+    expect(runCall[0]).toBe("/api/projects/p1/analysis/jobs/j1/run");
+    expect(
+      new Headers(runCall[1].headers as HeadersInit).get("X-Confirm-Duplicate"),
+    ).toBe("1");
+  });
+
+  it("explains an exhausted quota without offering a retry (402)", async () => {
+    mockFetch(
+      CATALOG_FULL, VERSION_DETAIL, JOB_CREATED,
+      { status: 402, body: { detail: "weekly request quota exhausted (100/100)" } },
+    );
+    renderTrigger();
+    await userEvent.click(runButton());
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("이번 사용 한도를 모두 썼습니다");
+    expect(alert).not.toHaveTextContent("402:");
+  });
 });

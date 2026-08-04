@@ -192,6 +192,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me/quota": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read My Quota */
+        get: operations["read_my_quota_me_quota_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects": {
         parameters: {
             query?: never;
@@ -1512,6 +1529,28 @@ export interface components {
          * @enum {string}
          */
         MemoryHintType: "event" | "character_fact" | "location_fact" | "relation" | "foreshadowing" | "timeline_fact" | "style_signal";
+        /**
+         * MyQuotaResponse
+         * @description 회원이 보는 자기 사용량 (Slice 8.4 W5=B, operation 76).
+         *
+         *     ``remaining`` 이 **표시 단위**다(8.2 §0.2 — 두 창을 모두 통과해야 하므로 작은
+         *     쪽이 실제 잔여다). 창별 값을 함께 주는 것은 "왜 20회가 아니라 3회인가"의 답이
+         *     거기 있기 때문이고, 그 답이 없으면 지원 대화가 성립하지 않는다.
+         *
+         *     ``status`` 는 한도와 **다른 축**이다(8.1 P5): ``suspended`` 는 잔여가 남아
+         *     있어도 막히며 푸는 사람이 다르다(관리자). 화면이 그 둘을 같은 말로 그리면
+         *     "관리자에게 문의"가 사라진다.
+         */
+        MyQuotaResponse: {
+            daily: components["schemas"]["QuotaWindowPayload"];
+            /** Remaining */
+            remaining: number | null;
+            /** Status */
+            status: string;
+            /** Unlimited */
+            unlimited: boolean;
+            weekly: components["schemas"]["QuotaWindowPayload"];
+        };
         /** NextUnitBody */
         NextUnitBody: {
             /** Goal */
@@ -1722,6 +1761,23 @@ export interface components {
             style_rules: string[];
             /** Tone */
             tone: string | null;
+        };
+        /**
+         * QuotaWindowPayload
+         * @description 한 창(일 또는 주)의 상태. ``limit=None`` 은 그 창이 무제한이라는 뜻이다.
+         */
+        QuotaWindowPayload: {
+            /** Limit */
+            limit: number | null;
+            /** Remaining */
+            remaining: number | null;
+            /**
+             * Resets At
+             * Format: date-time
+             */
+            resets_at: string;
+            /** Used */
+            used: number;
         };
         /** ReconcileCharacterRequest */
         ReconcileCharacterRequest: {
@@ -2890,6 +2946,44 @@ export interface operations {
                     "application/json": {
                         [key: string]: string;
                     };
+                };
+            };
+        };
+    };
+    read_my_quota_me_quota_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyQuotaResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };

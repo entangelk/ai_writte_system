@@ -1830,6 +1830,39 @@ main {
   font-size: 0.82rem;
 }
 
+/* Slice 8.4 — 잔여 표시와 중복 확인. 둘 다 패널 머리에 붙는 보조 정보라
+   경고색을 쓰지 않는다: 한도는 장애가 아니라 정상 상태다. */
+.writing-quota {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.writing-confirm {
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted, transparent);
+}
+
+.writing-confirm p {
+  margin: 0 0 0.6rem;
+  font-size: 0.9rem;
+}
+
+.writing-confirm-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.writing-confirm-actions button {
+  padding: 0.35rem 0.9rem;
+  font-size: 0.82rem;
+}
+
 .candidate-summary {
   margin: 0.4rem 0 0;
   font-size: 0.82rem;

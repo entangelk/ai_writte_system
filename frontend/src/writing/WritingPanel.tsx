@@ -3,10 +3,12 @@ import {
   ApiError,
   acceptWriting,
   describeApiError,
+  describeQuotaError,
   describeWritingError,
   gateWriting,
   generateWriting,
   reviseAndGateWriting,
+  type BillableRequestOptions,
   type WritingAcceptRequest,
   type WritingCandidate,
   type WritingGate,
@@ -15,8 +17,10 @@ import {
   type WritingLoopStage,
   type WritingGenerationJob,
   type WritingReviseGatePartial,
+  type MyQuota,
   type WritingReviseRequest,
 } from "../api/client";
+import { describeRemaining, useMemberQuota } from "../quota/useMemberQuota";
 import { useWritingBudget } from "./useWritingBudget";
 import { estimateTokens, formatInstructionCount } from "./tokenEstimate";
 
@@ -158,6 +162,35 @@ const STAGE_STATUS_LABEL: Record<WritingLoopStage["status"], string> = {
   no_change: "변화 없음",
 };
 
+/**
+ * 중복 확인 문구 (8.4 W3=A · 8.2b §0.4).
+ *
+ * 성격이 계약이다 — **꾸짖지 않고, 의도를 묻고, 대가를 알린다.** "중복 요청입니다"는
+ * 정당한 사용자를 실수한 사람으로 단정한다. 이 제품에서 같은 지시로 다른 안을
+ * 받는 것은 정상 사용이고, 서버는 그 통로를 확인 하나로 열어 둔다(G4=A).
+ */
+function confirmPrompt(quota: MyQuota | null): string {
+  const remaining =
+    quota !== null && !quota.unlimited && quota.remaining !== null
+      ? ` (이번 창 잔여 ${quota.remaining}회)`
+      : "";
+  return `방금 같은 요청을 보냈습니다. 하나 더 만들까요? 새로 만들면 사용량이 1회 더 듭니다.${remaining}`;
+}
+
+/** 402 안내에 붙일 초기화 시각. 두 창 중 **먼저 오는 쪽**이 실제 회복 시점이다. */
+function formatResetMoment(quota: MyQuota): string {
+  const moments = [quota.daily.resets_at, quota.weekly.resets_at]
+    .map((value) => new Date(value))
+    .filter((value) => !Number.isNaN(value.getTime()));
+  if (moments.length === 0) {
+    return "초기화 시각 미상";
+  }
+  const soonest = new Date(Math.min(...moments.map((m) => m.getTime())));
+  return soonest.toLocaleString("ko-KR", {
+    month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit",
+  });
+}
+
 function occurrences(text: string, evidence: string): number {
   return evidence === "" ? 0 : text.split(evidence).length - 1;
 }
@@ -232,6 +265,11 @@ export function WritingPanel(props: WritingPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [retryable, setRetryable] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // 8.4 W3=A: 중복 잠금(429)은 되묻는 자리다. `run` 은 **그 단계만** 다시 보내는
+  // 클로저이며(연쇄 전체가 아니다), 사용자가 누르기 전에는 아무 요청도 안 나간다.
+  const [pendingConfirm, setPendingConfirm] =
+    useState<{ message: string; run: () => void } | null>(null);
+  const { quota, refresh: refreshQuota } = useMemberQuota();
   // Coarse phase label so the server-side pipeline (근거 검색 → 초안 생성 → 보고서
   // → Gate) is not a black box while the two calls run.
   const [progress, setProgress] = useState<string | null>(null);
@@ -259,7 +297,38 @@ export function WritingPanel(props: WritingPanelProps) {
     void runGenerate();
   }
 
-  async function runGenerate() {
+  /**
+   * quota 거절이면 화면 언어로 처리하고 `true`, 아니면 `false` (8.4 W2=A).
+   *
+   * 확인 가능한 사건(429)은 **되묻고**, 그 밖(402·정지)은 평범한 에러로 보여 준다.
+   * `retry` 는 사용자가 "하나 더 만들기"를 누를 때만 실행된다 — 여기서 자동으로
+   * 부르면 확인이 무력화되고 사용자가 모르는 사이 사용량이 늘어난다(W4=A).
+   */
+  function handleQuotaRefusal(err: unknown, retry: () => void): boolean {
+    const refusal = describeQuotaError(err, quota);
+    if (refusal === null) {
+      return false;
+    }
+    // 거절은 요청이 **일어나지 않은** 것이므로 잔여를 다시 읽어 화면을 맞춘다
+    // (진행 중 요청이 한 칸을 차지하고 있을 수 있다 — Q3=E).
+    refreshQuota();
+    if (refusal.confirmable) {
+      setError(null);
+      setRetryable(false);
+      setPendingConfirm({ message: confirmPrompt(quota), run: retry });
+      return true;
+    }
+    setPendingConfirm(null);
+    setError(
+      refusal.kind === "exhausted" && quota?.daily.resets_at
+        ? `${refusal.message} (${formatResetMoment(quota)} 초기화)`
+        : refusal.message,
+    );
+    setRetryable(false);
+    return true;
+  }
+
+  async function runGenerate(options: BillableRequestOptions = {}) {
     const trimmed = instruction.trim();
     if (
       trimmed === "" ||
@@ -274,6 +343,7 @@ export function WritingPanel(props: WritingPanelProps) {
     setError(null);
     setRetryable(false);
     setNotice(null);
+    setPendingConfirm(null);
     setCandidate(null);
     setGate(null);
     setLoopResult(null);
@@ -293,7 +363,8 @@ export function WritingPanel(props: WritingPanelProps) {
         output_length: outputLength,
         task_type: TASK_TYPE,
         current_position: position,
-      });
+      }, options);
+      refreshQuota();
       // 증분 2c (D5=A): medium/long presets are async — the server enqueues a
       // background job and returns 202 with a job reference instead of a
       // candidate. The worker appends the result to scratch; the pad (increment 3)
@@ -311,7 +382,43 @@ export function WritingPanel(props: WritingPanelProps) {
       // (transport/5xx preserves the candidate); accept stays disabled until pass.
       setCandidate(produced);
       contextRef.current = { baseVersionId, requestId };
-      setProgress("Gate로 근거를 평가하는 중…");
+      await runGate(produced, { requestId, trimmed, position });
+    } catch (err) {
+      if (handleQuotaRefusal(err, () =>
+        void runGenerate({ confirmDuplicate: true }))) {
+        return;
+      }
+      const described = describeWritingError(err);
+      setError(described.message);
+      setRetryable(described.retryable);
+    } finally {
+      setProgress(null);
+      busyRef.current = false;
+      setBusy(null);
+    }
+  }
+
+  /**
+   * 생성 뒤 이어지는 Gate 단계. **자기 try/catch 를 갖는다**(8.4 W3=A).
+   *
+   * 한 번의 클릭이 유료 요청 2~3건을 연쇄로 부르므로(generate → gate →
+   * revise-and-gate), 중간에서 429 가 나면 되물어야 하는 것은 **그 단계**다.
+   * 연쇄 전체를 다시 보내면 이미 성공한 생성까지 한 번 더 과금된다.
+   */
+  async function runGate(
+    produced: WritingCandidate,
+    context: {
+      requestId: string;
+      trimmed: string;
+      position: { draft_id: string; version_id: string };
+    },
+    options: BillableRequestOptions = {},
+  ) {
+    const { requestId, trimmed, position } = context;
+    busyRef.current = true;
+    setBusy("generating");
+    setProgress("Gate로 근거를 평가하는 중…");
+    try {
       const evaluated = await gateWriting(projectId, {
         request_id: requestId,
         instruction: trimmed,
@@ -320,7 +427,8 @@ export function WritingPanel(props: WritingPanelProps) {
         max_tokens: MAX_TOKENS,
         task_type: TASK_TYPE,
         current_position: position,
-      });
+      }, options);
+      refreshQuota();
       setGate(evaluated);
       const finding = eligibleRevisionFinding(produced, evaluated);
       if (finding !== null) {
@@ -342,6 +450,10 @@ export function WritingPanel(props: WritingPanelProps) {
         });
       }
     } catch (err) {
+      if (handleQuotaRefusal(err, () =>
+        void runGate(produced, context, { confirmDuplicate: true }))) {
+        return;
+      }
       const described = describeWritingError(err);
       setError(described.message);
       setRetryable(described.retryable);
@@ -352,7 +464,10 @@ export function WritingPanel(props: WritingPanelProps) {
     }
   }
 
-  async function executeLoop(body: WritingReviseRequest) {
+  async function executeLoop(
+    body: WritingReviseRequest,
+    options: BillableRequestOptions = {},
+  ) {
     busyRef.current = true;
     setBusy("improving");
     setError(null);
@@ -362,7 +477,8 @@ export function WritingPanel(props: WritingPanelProps) {
     setProgress("후보를 자동으로 개선하는 중…");
     loopIntentRef.current = body;
     try {
-      const outcome = await reviseAndGateWriting(projectId, body);
+      const outcome = await reviseAndGateWriting(projectId, body, options);
+      refreshQuota();
       const stageError = partialStageError(outcome.data);
       setCandidate(outcome.data.candidate);
       setGate(outcome.data.gate);
@@ -381,6 +497,10 @@ export function WritingPanel(props: WritingPanelProps) {
         loopIntentRef.current = null;
       }
     } catch (err) {
+      if (handleQuotaRefusal(err, () =>
+        void executeLoop(body, { confirmDuplicate: true }))) {
+        return;
+      }
       const described = describeWritingError(err);
       setError(described.message);
       setRetryable(described.retryable);
@@ -391,7 +511,7 @@ export function WritingPanel(props: WritingPanelProps) {
     }
   }
 
-  async function accept() {
+  async function accept(options: BillableRequestOptions = {}) {
     if (
       candidate === null ||
       gate?.decision !== "pass" ||
@@ -418,6 +538,7 @@ export function WritingPanel(props: WritingPanelProps) {
     setBusy("accepting");
     setError(null);
     setNotice(null);
+    setPendingConfirm(null);
     const { baseVersionId, requestId } = contextRef.current;
     const fields: Omit<WritingAcceptRequest, "idempotency_key"> = {
       request_id: requestId,
@@ -452,7 +573,8 @@ export function WritingPanel(props: WritingPanelProps) {
       const outcome = await acceptWriting(projectId, {
         ...fields,
         idempotency_key: intent.key,
-      });
+      }, options);
+      refreshQuota();
       if (outcome.accepted) {
         // A version was saved (200 accepted=true or 502 partial). Consume the
         // candidate and let the editor reload the new latest from the server.
@@ -483,7 +605,11 @@ export function WritingPanel(props: WritingPanelProps) {
         setNotice("채택되지 않았습니다. 아래 Gate 결과를 확인하세요.");
       }
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
+      if (handleQuotaRefusal(err, () =>
+        void accept({ confirmDuplicate: true }))) {
+        // 확인 대화가 뜬 상태다 — intent 는 그대로 두어야 확인 뒤 **같은 키**로
+        // 재전송된다(다른 키면 accept 의 멱등 계약이 깨진다).
+      } else if (err instanceof ApiError && err.status === 409) {
         // A newer version appeared: the frozen base is stale. Preserve the
         // candidate and steer the user to reload the latest and regenerate.
         intentRef.current = null;
@@ -514,7 +640,42 @@ export function WritingPanel(props: WritingPanelProps) {
           <p className="eyebrow">AI 이어쓰기</p>
           <h2 id="writing-title">이어쓰기 생성</h2>
         </div>
+        {/*
+          8.4 W5=B — 잔여는 통합값 하나다(8.2 §0.2: 두 창을 모두 통과해야 하므로
+          작은 쪽이 실제 잔여다). **"N회 = 클릭 N번"이 아니다** — 한 번의 생성이
+          생성·검사·(개선)로 2~3회를 쓰므로 그 사실을 title 로 함께 말한다.
+          무제한이면 아무것도 그리지 않는다.
+        */}
+        {describeRemaining(quota) !== null && (
+          <p
+            className="writing-quota"
+            title="생성·Gate 검사·자동 개선·채택이 각각 1회입니다."
+          >
+            {describeRemaining(quota)}
+          </p>
+        )}
       </div>
+
+      {pendingConfirm !== null && (
+        <div className="writing-confirm" role="alertdialog" aria-label="중복 요청 확인">
+          <p>{pendingConfirm.message}</p>
+          <div className="writing-confirm-actions">
+            <button
+              type="button"
+              onClick={() => {
+                const run = pendingConfirm.run;
+                setPendingConfirm(null);
+                run();
+              }}
+            >
+              하나 더 만들기
+            </button>
+            <button type="button" onClick={() => setPendingConfirm(null)}>
+              취소
+            </button>
+          </div>
+        </div>
+      )}
 
       {availability.blocked ? (
         <p className="writing-block" role="note">

@@ -19,16 +19,44 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly detail: string,
+    /**
+     * Slice 8.4 (W2): seconds from `Retry-After`, `null` when the response had
+     * no such header. The quota lock (429) is the only producer today, and the
+     * server already sends it — until now the wrapper dropped it, so the panel
+     * could not say *how long*. It stays `null` rather than a guessed default:
+     * inventing a duration would show a countdown the server never promised.
+     */
+    readonly retryAfterSeconds: number | null = null,
   ) {
     super(detail);
     this.name = "ApiError";
   }
 }
 
+function readRetryAfter(response: Response): number | null {
+  // `headers` is optional-chained on purpose: this repo's component tests stub
+  // `fetch` with hand-rolled `{ ok, status, json }` objects (they predate this
+  // slice and none of them care about headers). A hard read would turn every
+  // one of those into a TypeError inside the error path — i.e. this wrapper
+  // would break error handling in tests that are about something else entirely.
+  const raw = response.headers?.get("Retry-After") ?? null;
+  if (raw === null) {
+    return null;
+  }
+  const seconds = Number(raw);
+  // The HTTP-date form is legal but this server never sends it; a non-numeric
+  // value means "unknown", not 0 (0 would render as "retry now").
+  return Number.isFinite(seconds) ? seconds : null;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetchApi(path, init);
   if (!response.ok) {
-    throw new ApiError(response.status, await readDetail(response));
+    throw new ApiError(
+      response.status,
+      await readDetail(response),
+      readRetryAfter(response),
+    );
   }
   if (response.status === 204) {
     return undefined as T;
@@ -340,12 +368,32 @@ export function exportProject(
   return request(`/projects/${projectId}/export?${query.toString()}`);
 }
 
+// --- 유료 요청 (Phase 8) ------------------------------------------------------
+// 8.0이 분류한 유료 동작 9개 중 화면에서 부르는 것은 5개다(generate·gate·
+// revise-and-gate·accept·analysis extract). 그 다섯만 아래 옵션을 받는다.
+//
+// ★ 확인은 **사용자 응답에서만** 나온다(8.4 W4=A). 래퍼가 429를 보고 알아서 다시
+// 보내거나 세션 플래그로 "이 사람은 확인했음"을 기억하면, 8.2b가 만든 중복 방어가
+// 장식이 된다 — 사용자가 모르는 사이 사용량이 늘기 때문이다. 그래서 통로는 호출부가
+// 명시적으로 넘기는 이 인자 하나뿐이고, 회귀가 자동 재전송이 없음을 잠근다.
+export interface BillableRequestOptions {
+  /** 사용자가 중복 확인 대화에서 "하나 더 만들기"를 누른 요청인가. */
+  confirmDuplicate?: boolean;
+}
+
+function billableHeaders(options?: BillableRequestOptions): HeadersInit {
+  // Q6=C: 값의 **내용**이 확인이다(서버가 빈 값을 확인으로 읽지 않는다).
+  return options?.confirmDuplicate ? { "X-Confirm-Duplicate": "1" } : {};
+}
+
 export function generateWriting(
   projectId: string,
   body: WritingGenerateRequest,
+  options?: BillableRequestOptions,
 ): Promise<WritingCandidate | WritingGenerationJobAccepted> {
   return request(`/projects/${projectId}/writing/generate`, {
     method: "POST",
+    headers: billableHeaders(options),
     body: JSON.stringify(body),
   });
 }
@@ -378,9 +426,11 @@ export function retryGenerationJob(
 export function gateWriting(
   projectId: string,
   body: WritingGateRequest,
+  options?: BillableRequestOptions,
 ): Promise<WritingGate> {
   return request(`/projects/${projectId}/writing/gate`, {
     method: "POST",
+    headers: billableHeaders(options),
     body: JSON.stringify(body),
   });
 }
@@ -402,12 +452,13 @@ export type WritingReviseGateOutcome =
 export async function reviseAndGateWriting(
   projectId: string,
   body: WritingReviseRequest,
+  options?: BillableRequestOptions,
 ): Promise<WritingReviseGateOutcome> {
   const response = await fetchApi(
     `/projects/${projectId}/writing/revise-and-gate`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...billableHeaders(options) },
       body: JSON.stringify(body),
     },
   );
@@ -431,7 +482,7 @@ export async function reviseAndGateWriting(
       retryable: response.status >= 500,
     };
   }
-  throw new ApiError(response.status, data.detail);
+  throw new ApiError(response.status, data.detail, readRetryAfter(response));
 }
 
 // A normalized accept outcome. The endpoint's load-bearing behaviour is that a
@@ -447,10 +498,11 @@ export type WritingAcceptOutcome =
 export async function acceptWriting(
   projectId: string,
   body: WritingAcceptRequest,
+  options?: BillableRequestOptions,
 ): Promise<WritingAcceptOutcome> {
   const response = await fetchApi(`/projects/${projectId}/writing/accept`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...billableHeaders(options) },
     body: JSON.stringify(body),
   });
   if (response.ok) {
@@ -482,7 +534,11 @@ export async function acceptWriting(
         : JSON.stringify(partial.detail ?? partial),
     );
   }
-  throw new ApiError(response.status, await readDetail(response));
+  throw new ApiError(
+    response.status,
+    await readDetail(response),
+    readRetryAfter(response),
+  );
 }
 
 // --- Unaccepted candidate recovery (brief D0=B/D1=B/D2=A) ------------------
@@ -711,6 +767,76 @@ export function dismissGateFinding(
   );
 }
 
+// --- 요청 quota (Phase 8 Slice 8.4) ------------------------------------------
+
+export type MyQuota = components["schemas"]["MyQuotaResponse"];
+
+/**
+ * 회원 자기 사용량. 서버가 통합 잔여 `min(일, 주)`를 이미 계산해 준다 —
+ * 화면이 다시 세면 "3회 남음" 직후 402가 나는, 버그가 아니라 불신으로 보이는
+ * 상태가 된다(8.4 W5=B).
+ */
+export function getMyQuota(): Promise<MyQuota> {
+  return request("/me/quota");
+}
+
+export type QuotaRefusalKind = "locked" | "exhausted" | "suspended";
+
+export interface QuotaRefusal {
+  kind: QuotaRefusalKind;
+  message: string;
+  /** 확인 대화를 띄울 수 있는 사건인가(= 429 하나뿐). */
+  confirmable: boolean;
+  retryAfterSeconds: number | null;
+}
+
+/**
+ * quota 거절 셋을 화면 언어로 옮긴다 (8.4 W2=A).
+ *
+ * **`status`로만 가른다.** H3 계약이 `detail`을 사람용으로 규정하므로 문자열 분기는
+ * 계약 위반이고, 서버가 문구를 다듬는 순간 조용히 오작동한다. Q5=B가 코드를 셋으로
+ * 나눈 이유가 정확히 여기다 — 화면이 해야 하는 **행동이 셋**이다.
+ *
+ * quota 사건이 아니면 `null`을 돌려준다. 호출부는 그때 기존 서술로 넘어간다.
+ */
+export function describeQuotaError(
+  err: unknown,
+  quota?: MyQuota | null,
+): QuotaRefusal | null {
+  if (!(err instanceof ApiError)) {
+    return null;
+  }
+  if (err.status === 403 && quota?.status === "suspended") {
+    // 403은 소유권 거절과 코드가 겹친다(Q5=B가 알고 받은 대가이며, 겹침을 푸는
+    // 유일한 정직한 재료는 `detail` 문자열인데 H3가 그것을 금지한다). 그래서
+    // 정지 판정의 정본은 상태코드가 아니라 **`GET /me/quota`의 `status`** 다 —
+    // 그 값을 들고 있을 때만 정지로 말하고, 아니면 소유권 거절로 남겨 둔다.
+    return {
+      kind: "suspended",
+      message: "계정이 정지되어 있습니다. 관리자에게 문의하세요.",
+      confirmable: false,
+      retryAfterSeconds: null,
+    };
+  }
+  if (err.status === 429) {
+    return {
+      kind: "locked",
+      message: "방금 같은 요청을 보냈습니다.",
+      confirmable: true,
+      retryAfterSeconds: err.retryAfterSeconds,
+    };
+  }
+  if (err.status === 402) {
+    return {
+      kind: "exhausted",
+      message: "이번 사용 한도를 모두 썼습니다. 창이 초기화되면 다시 쓸 수 있습니다.",
+      confirmable: false,
+      retryAfterSeconds: err.retryAfterSeconds,
+    };
+  }
+  return null;
+}
+
 export function describeApiError(err: unknown): string {
   if (err instanceof ApiError) {
     return `${err.status}: ${err.detail}`;
@@ -838,6 +964,7 @@ export async function analyzeVersion(
   draftId: string,
   versionId: string,
   snapshotId: string,
+  options?: BillableRequestOptions,
 ): Promise<{ jobId: string; candidateCount: number; sourceRefsCreated: number }> {
   const sourceRefsCreated = await ensureSourceRefCatalog(
     projectId,
@@ -869,9 +996,11 @@ export async function analyzeVersion(
       throw new ApiError(409, `분석 재시도 준비에 실패했습니다 (상태: ${job.status}).`);
     }
   }
+  // 유료 동작은 이 `/run` 하나다 — job 생성과 재시도 준비는 provider 를 부르지
+  // 않으므로 무료다(8.0 B4).
   const run = await request<{ job: AnalysisJobRef; candidates: unknown[] }>(
     `/projects/${projectId}/analysis/jobs/${created.job.id}/run`,
-    { method: "POST" },
+    { method: "POST", headers: billableHeaders(options) },
   );
   if (run.job.status !== "succeeded") {
     throw new ApiError(

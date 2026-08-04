@@ -7,6 +7,7 @@ import {
   resetWritingBudgetCache,
   seedWritingBudgetCache,
 } from "./useWritingBudget";
+import { resetMemberQuota } from "../quota/useMemberQuota";
 
 type PanelProps = ComponentProps<typeof WritingPanel>;
 
@@ -1072,5 +1073,103 @@ describe("WritingPanel — K-4 instruction budget counter", () => {
     expect(screen.getByText(/160자/).className).not.toContain(
       "writing-counter-warn",
     );
+  });
+});
+
+describe("WritingPanel — 요청 quota (Slice 8.4 W3=A · W5=B)", () => {
+  const quotaBody = {
+    remaining: 12,
+    unlimited: false,
+    status: "active",
+    daily: { limit: 20, used: 8, remaining: 12, resets_at: "2026-08-04T15:00:00Z" },
+    weekly: { limit: 100, used: 30, remaining: 70, resets_at: "2026-08-08T15:00:00Z" },
+  };
+
+  function headersOf(fetchMock: ReturnType<typeof mockFetch>, index: number) {
+    return new Headers(
+      (fetchMock.mock.calls[index][1] as RequestInit).headers as HeadersInit,
+    );
+  }
+
+  it("shows the remaining count and says one click is not one unit", () => {
+    // 전역 시드(vitest.setup.ts)가 잔여 12를 준다. 숫자보다 중요한 것은 title —
+    // 한 번의 생성이 유료 요청 2~3건이라 "12회 = 12번 클릭"이 아니다.
+    renderPanel();
+    const tile = screen.getByText("남은 사용 12회");
+    expect(tile).toHaveAttribute(
+      "title",
+      "생성·Gate 검사·자동 개선·채택이 각각 1회입니다.",
+    );
+  });
+
+  it("asks before spending a second unit when the server locks a duplicate (429)", async () => {
+    const fetchMock = mockFetch(
+      { status: 429, body: { detail: "the same request is already in progress" } },
+      { body: candidate },
+      { body: gatePass },
+    );
+    renderPanel();
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    await userEvent.click(generateButton());
+
+    // 되묻는다 — 그리고 **아직 아무것도 다시 보내지 않았다**(W4=A).
+    const prompt = await screen.findByRole("alertdialog", { name: "중복 요청 확인" });
+    expect(prompt).toHaveTextContent("하나 더 만들까요?");
+    expect(prompt).toHaveTextContent("사용량이 1회 더 듭니다");
+    expect(prompt).toHaveTextContent("이번 창 잔여 12회");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await userEvent.click(screen.getByRole("button", { name: "하나 더 만들기" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    // 확인은 두 번째 요청에만 실린다(첫 요청은 확인 없이 나갔다).
+    expect(headersOf(fetchMock, 0).has("X-Confirm-Duplicate")).toBe(false);
+    expect(headersOf(fetchMock, 1).get("X-Confirm-Duplicate")).toBe("1");
+  });
+
+  it("sends nothing when the duplicate prompt is cancelled", async () => {
+    // over-strict 짝: 취소가 조용히 통과시키면 확인이 있으나 마나다.
+    const fetchMock = mockFetch(
+      { status: 429, body: { detail: "duplicate" } },
+    );
+    renderPanel();
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    await userEvent.click(generateButton());
+    await screen.findByRole("alertdialog", { name: "중복 요청 확인" });
+    await userEvent.click(screen.getByRole("button", { name: "취소" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("explains an exhausted window instead of offering a retry (402)", async () => {
+    // 402는 확인으로 뚫리지 않는다 — 확인 버튼을 주면 눌러도 또 402다.
+    mockFetch({ status: 402, body: { detail: "daily request quota exhausted (20/20)" } });
+    renderPanel();
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    await userEvent.click(generateButton());
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("이번 사용 한도를 모두 썼습니다");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.queryByRole("button", { name: "하나 더 만들기" })).toBeNull();
+    // raw 상태코드 덤프가 아니다(8.4 이전에는 "402: …" 가 그대로 떴다).
+    expect(alert).not.toHaveTextContent("402:");
+  });
+
+  it("re-reads the remaining count after a billable request", async () => {
+    // 시드를 끄고 실제 조회를 켠다 — 갱신하지 않으면 화면의 숫자가 방금 쓴 1회를
+    // 반영하지 않아, 사용자가 잔여를 믿을 수 없게 된다.
+    resetMemberQuota();
+    const fetchMock = mockFetch(
+      { body: quotaBody },                                   // mount
+      { body: candidate },                                   // generate
+      { body: { ...quotaBody, remaining: 11 } },             // generate 뒤 갱신
+      { body: gatePass },                                    // gate
+      { body: { ...quotaBody, remaining: 10 } },             // gate 뒤 갱신
+    );
+    renderPanel();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    await userEvent.click(generateButton());
+    await waitFor(() =>
+      expect(screen.getByText("남은 사용 10회")).toBeInTheDocument());
   });
 });
