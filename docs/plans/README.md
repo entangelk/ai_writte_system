@@ -6,7 +6,7 @@
 
 서비스 경계와 확정된 계약을 먼저 볼 때는 [`../system-contract-sot.md`](../system-contract-sot.md)를 정본 SoT로 사용한다. 이 인덱스는 Phase별 세부 계획과 **모든 착수 결정 브리프**를 찾는 자리다.
 
-> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(98개 중 81개)는
+> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(99개 중 81개)는
 > `*-decisions.md` 착수 결정 브리프이며, **오너 결정의 근거 기록**이다. 파일명 접두 체계는 이미 무너져
 > 있고(`00`~`07` 계열 + 접두 없는 최근 것들) 파일명만으로는 트랙을 알 수 없다 — 그래서 아래는 **접두가
 > 아니라 트랙으로** 묶었다. 디렉터리 재편은 아직 결정되지 않은 별개 사안이다(HANDOFF 추적 부채).
@@ -146,9 +146,15 @@
 | [`08-1-request-quota-policy-decisions.md`](08-1-request-quota-policy-decisions.md) | 8.1 — 한도 저장 계약(저장 위치·**일/주 이중 사용량 창**·창 파생/저장·기본과 override·무제한/정지 표현·변경 효력·기본값·구독 축 분리) | **Resolved** — P1~P8=확정, 구현 완료 |
 | [`08-2-usage-ledger-decisions.md`](08-2-usage-ledger-decisions.md) | 8.2 — 사용량 원장(행 필드와 삭제 내성·중복 방지 키·집계 정본·보존 기간·관리자 조정 표현). L6(이름 이력)·L7(5초 DB 잠금)은 **8.2c·8.2b로 분리** | **Resolved** — L1=B·L2~L5=A, 구현 완료(v1.7.85) |
 | [`08-2b-duplicate-request-lock-decisions.md`](08-2b-duplicate-request-lock-decisions.md) | 8.2b — 실수 중복 요청의 **DB 잠금**(L7: 잠금 수명·키 축·원자적 차지·확인 통과·실패 반환·에러 통로/상태코드) | **Resolved** — G1=C·G2~G6=A, 구현 완료(v1.7.87) · 재검증 **PASS**(2026-08-04) |
-| [`08-2c-project-name-history-decisions.md`](08-2c-project-name-history-decisions.md) | 8.2c — 프로젝트 **이름 이력**(L6: 저장 위치·범위·쓰기 시점·조회 통로) + **D8-6 삭제 계약 개정** + **purge UI 문구** | **Awaiting owner decision** — N1~N6 |
+| [`08-2c-project-name-history-decisions.md`](08-2c-project-name-history-decisions.md) | 8.2c — 프로젝트 **이름 이력**(L6: 저장 위치·범위·쓰기 시점·조회 통로) + **D8-6 삭제 계약 개정** + **purge UI 문구** | **Resolved** — N1~N6=A(오너 2026-08-05) · 구현 대기 |
 | [`08-3-quota-enforcement-decisions.md`](08-3-quota-enforcement-decisions.md) | 8.3 — quota **시행**(차감 시점·"성공"의 정의·비동기 차감·동시성 초과와 **입장 뮤텍스**·저장소 장애 방향·초과/정지 상태코드·확인 통로·시행 seam·`dedupe_key` 매핑) | **Resolved** — Q1~Q9 + Q1-a·Q1-b·Q3-a 확정, **구현 완료**(SoT v1.7.88) · 독립 검증 **PASS**(비차단 5건 처리) |
 | [`08-4-product-wiring-decisions.md`](08-4-product-wiring-decisions.md) | 8.4 — 제품 경로 배선(관리자·내부 **면제** 여부·402/429/403 프론트 계약·**확인 대화 UX**·확인 헤더 층·**잔여 표시 API**·프론트 안정 키·유료 화면 전수 가드) | **Resolved** — W1(A+부트스트랩 무제한)·W2~W7 확정 |
+
+### Phase 9 — 서비스 활동 로그 (계획됨)
+
+| 문서 | 무엇 | 상태 |
+|---|---|---|
+| [`09-service-activity-log.md`](09-service-activity-log.md) | 사용자 행위 기록(누가·언제·무엇을 바꿨는가). **`system_events`는 문서에만 있고 코드 0줄**이라는 실측 공백에서 출발한다. 8.2c §N2-a가 발원 | 페이즈 신설 확정(오너 2026-08-05) · 착수 결정 브리프 대기 |
 
 ### 프론트엔드
 
@@ -235,6 +241,7 @@
 | Phase 6 | 후보 검토/승인 UI | MVP 4 기반, MVP 2 운영 화면 |
 | Phase 7 | 대화형 수정·아이디에이션·저작 감독(directive) | 반복 편집 루프, 저자 정보관리(맥거핀 등) |
 | Phase 8 | 회원별 요청 횟수 제한·사용량 운영·결제 연결 seam | 서비스 BM/구독 전환 기반 |
+| Phase 9 | 사용자 행위 기록(생성·개명·저장·archive)과 그 조회 | 다중 사용자 운영·문의 대응 |
 
 MVP 2의 Continuity/POV, MVP 3의 Voice RAG는 초기 6개 Phase 이후 별도 증분 계획으로 구체화해야 한다. Phase 6에서 모든 고급 기능을 한꺼번에 구현한다는 뜻은 아니다.
 
