@@ -188,6 +188,7 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 
 ## Owner Decisions Needed
 
+- **★ Phase 8 Slice 8.4 = 브리프 작성 완료, W1~W7 오너 결정 대기**([`plans/08-4-product-wiring-decisions.md`](docs/plans/08-4-product-wiring-decisions.md), 2026-08-04). **지금 제품은 한도가 켜진 채 사용자가 그것을 볼 수 없는 상태다** — 프론트에 quota 인지가 **0건**이라 한도에 걸리면 `"402: daily quota exhausted…"` 원문이 뜨고, 서버가 싣는 `Retry-After`는 `ApiError`가 `status`·`detail`만 들어 프론트에 도달하지 못한다. **★ 브리프를 쓰며 나온 실측 하나가 제품 판단을 바꾼다: 한 번의 "생성" 클릭이 유료 요청 2~3건을 연쇄로 부른다**(`generate` → `gate` → 지적이 있으면 `revise-and-gate`, `accept`까지 하면 흐름당 최대 4회). **8.0 B1=A는 지켜지고 있다**(요청 1건=1회) — 어긴 것이 없고, 다만 **회원이 체감하는 단위(클릭)와 과금 단위(요청)가 1:1이 아니라는 사실이 화면에 처음 드러나는 자리가 8.4**이며 기본 한도 일 20이면 **전체 흐름 기준 하루 5~6회**다. 배선 대상은 **유료 9경로가 아니라 5경로**다(`writing_revise`·`writing_report`·`analysis_compare`·`context_search`는 프론트 호출부가 0건 — "9경로 전수 배선"이라 쓰면 거짓이다). 구현자 추천: **W1 면제 없음**(예외를 코드가 아니라 정책 행 `limit=None`으로) · **W2 공용 `describeQuotaError()`**(기존 `describeWritingError`에 넣지 않는다 — 그 함수가 H3 위반 지점이다) · **W3 블로킹 확인 + 헤더 재전송** · **W4 명시 인자**(자동 재시도·세션 플래그는 G4=A 방어를 지운다) · **W5 `GET /me/quota` 신설**(operation 76) · **W6 안정 키 도입 안 함**(도입하면 확인해도 dedupe에 막혀 의도적 2안 받기가 불가능해진다) · **W7 행동 가드**(소스 파싱 가드는 `main.py` 분리를 비싸게 만든 그 형태라 복제하지 않는다).
 - **★ dogfood 착수(GATE-1)** — 실 12B 풀스택 관통은 끝났고 기술적 선행 조건은 없다. 착수하면 `OPS-1` Ready 승격. **인증 HTTP 시행이 닫히면서 "인가 없이 dogfood하면 데이터가 섞인다"는 종전 걸림돌은 사라졌다** — 이제 남은 것은 D8-5~7 구현과의 순서 판단이며 오너 결정 사항이다.
 
 **결정 완료 — 오너 결정 대기 아님, 구현만 남음:**
@@ -210,6 +211,7 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 **1번이 현재 진행 중인 트랙이다.** 나머지는 그와 무관하게 남아 있는 것들.
 
 1. **Phase 8 Slice 8.3 = 구현·독립 검증 완료(SoT v1.7.88, 검증 PASS·Blocking 0, `98fee5c`).** 비차단 5건 중 **셋을 수리해 닫았다**(H-1 정산이 성공 응답을 뒤집지 않는다 · H-3 미분류 유료 동작이 500이 아니라 503 · H-5 확인은 헤더의 **내용**이다), H-2는 문서 표현 정정, **H-4는 수리하지 않고 기록**했다(아래 추적 부채). 검증 기록 [`verifications/2026-08-04/slice_8_3_quota_enforcement.md`](docs/verifications/2026-08-04/slice_8_3_quota_enforcement.md). **다음은 8.4**(프론트 배선·확인 대화 UX·관리자 면제·잔여 표시)**와 8.2c**(이름 이력 + D8-6 계약 개정 + purge UI 문구)다.
+   - **★ 8.4 브리프는 이미 있다 — 남은 것은 오너 결정 W1~W7뿐이다**([`plans/08-4-product-wiring-decisions.md`](docs/plans/08-4-product-wiring-decisions.md), 위 "Owner Decisions Needed" 첫 항목에 실측·추천 요약). **8.4를 8.2c보다 먼저 잡은 근거**: 8.2c는 L6을 통째로 미룬 덕에 **지금 거짓 서술을 만들고 있지 않은** 반면(purge UI 문구는 이름 이력이 생겨야 거짓이 된다), 8.4가 닫는 구멍은 **이미 새고 있다**(한도가 켜져 있는데 화면이 그것을 모른다). 오너가 순서를 뒤집으면 그대로 따른다.
 2. **`main.py` 라우터 정리 + 관리자 표면 주소 분리**(오너 2026-08-04 후속 확정, 착수 시점만 미정). 위 추적 부채에 실측·선택지·함께 고칠 가드 2개가 있다. **1번을 닫은 뒤**가 순서다.
 3. **베타 상태 확인 뒤 화면 육안 확인 2건**(둘 다 로직은 회귀로 잠겨 있고 렌더만 미검증). 2026-07-31에는 계정 `probe`와 감사 데이터가 있었지만 현재 존재를 다시 확인한다:
    (a) 관측 화면 `/projects/:id/observability` — 차트 라벨 충돌·막대 배치·좁은 화면 표 넘침. **`heavy long report probe` project를 보면 `provider_error`가 섞인 분포**를, `long report probe`를 보면 성공 분포를 볼 수 있다.
