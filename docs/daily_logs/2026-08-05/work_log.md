@@ -176,3 +176,75 @@ boundary" — A4가 인용한 대비가 한 글자 일치).
   링크·계획 문서 수 100/82 실측 일치).
 - 브리프의 코드 인용 5건은 작성 후 직접 재확인했고 두 건(`main.py` 미들웨어 기각 주석·purge 배선)은
   실측값으로 정정했다 — **어제 라벨 사고의 재발 방지 절차를 그대로 적용**했다.
+
+---
+
+## Task 3 — Slice 8.2c 구현 (N1~N6=A, SoT v1.7.90)
+
+### Goals
+
+브리프 §"결정 뒤 구현 순서" 그대로: 회귀 먼저 → 저장소 → HTTP 한 줄 → UI 문구 → 정본 3곳 →
+뮤테이션 5종. **새 operation 없음(76 유지)**.
+
+### Completed work
+
+| 단계 | 산출물 |
+|---|---|
+| 회귀(먼저) | [`tests/test_project_name_history.py`](../../../tests/test_project_name_history.py) 신설 8 cells · [`test_auth_api.py`](../../../tests/test_auth_api.py) `AdminProjectPurgeTest` +4 · [`test_purge_reconciler.py`](../../../tests/test_purge_reconciler.py) 실 Mongo +1 · 프론트는 기존 purge 셀에 문구 단정 2줄 |
+| 저장소 | [`app/deletion/`](../../../services/application/app/deletion/) 신설 — `project_name_history.py`(dataclass·Protocol·in-memory·service) + `_mongo.py`. **`_id`=project id, 키 셋뿐** |
+| HTTP | purge endpoint에 `record_purged` **한 줄**(파괴 앞·fail-closed) + `create_app` 인자·`_default_*` 배선 |
+| 프론트 | [`AdminConsole.tsx`](../../../frontend/src/admin/AdminConsole.tsx) 경고 문구 한 줄(N5=A) |
+| 정본 | `mongo_collections.md` §43B 예외 포인터 + **새 §43F** · SoT **v1.7.90** · `08-2` L6 Resolved · README SoT 버전 · CHANGELOG |
+
+**설계에서 실제로 판단이 필요했던 자리 — 쓰기를 어디에 넣는가.** 감사 `requested` 행 **뒤**,
+파괴 `try` 블록의 **첫 줄**에 뒀다. 세 후보 중 이것만 세 성질을 동시에 만족한다: ① 파괴 전이라
+이름을 잃지 않는다 ② 실패 시 기존 handler가 `failed` 감사 outcome을 남기고 503을 낸다
+③ 감사 행보다 뒤라 "이름은 남았는데 감사 행이 없는" 상태가 안 생긴다.
+
+### 회귀 기준선
+
+- backend **2189 passed / 1 skipped / 1931 subtests**(직전 2173/4/1931). **skip 4→1은 코드가
+  아니다** — 이 셸에 `elasticsearch`가 있어 lexical 3 cells가 이번엔 돌았다(HANDOFF가 겪던
+  드리프트의 반대 방향). 보정하면 **+13이 전부 8.2c 신규 셀**이다.
+- **subtests 1931 무변 = operation 76 유지의 실측.**
+- frontend **265 passed / 18 files**(셀 수 무변), `tsc --noEmit`·`build` 통과
+  (AdminConsole lazy 8.39 → **8.50 kB**, 진입 414.36 kB 무변).
+
+### 뮤테이션 (5종 + 재실행 1)
+
+**★ 뮤테이션 전 `git status --short` 공백을 실제로 확인했다**(`507be95` 커밋 뒤). 원복은 전부
+`git checkout -- <path>`이며 매번 tree clean을 재확인했다.
+
+| # | 넣은 변형 | file | 문 셀 |
+|---|---|---|---|
+| 1 | `record_purged`를 `core_sot.purge_project` **뒤로** 이동 | `main.py:3561` | `test_a_failed_name_snapshot_stops_the_purge_before_it_destroys_anything` |
+| 2 | 그 호출을 `try/except Exception: pass`로 감싸기(“안정화”) | `main.py:3561` | 같은 셀 |
+| 3 | `_doc()`에 `"project_id": snapshot.project_id` 추가 | `project_name_history_mongo.py:48` | `test_the_document_key_set_is_fixed_and_has_no_project_id_field` **+ 실 Mongo `test_the_project_name_history_is_not_swept`** |
+| 4 | `rename_project` endpoint에 이력 쓰기 추가(over-strict) | `main.py:3419` | `test_a_live_project_has_no_history_row` — **첫 판에서는 통과했다**(아래) |
+| 5 | purge 경고 문구를 “전체가 삭제되며”로 되돌리기 | `AdminConsole.tsx:276` | `AdminConsole > requires archive, reason, and the exact project name before purging` |
+
+### Issues found — 뮤테이션이 내 가드의 구멍을 둘 드러냈다 (둘 다 닫음)
+
+1. **뮤테이션 4가 첫 판에서 통과했다.** over-strict 셀이 `core_sot.rename_project(...)`를
+   **서비스로 직접** 부르고 있어서, **endpoint에 쓰기를 더하는 과잉 구현을 원리적으로 볼 수
+   없었다**. HTTP(`POST /projects` → `PATCH` → `DELETE`)로 돌게 고친 뒤 재실행하니 물었다.
+   → 이것이 "회귀가 통과한다"와 "회귀가 무언가를 잠근다"가 다르다는 그 자리다.
+2. **reconciler 셀이 손으로 넣은 문서를 재고 있었다.** `insert_one`으로 직접 넣으면 그 셀은
+   *내가 방금 만든 모양*만 재는 셈이라 **어댑터가 `project_id`를 더하는 변경을 못 잡는다**.
+   어댑터(`MongoProjectNameHistoryRepository.put`)로 쓰게 고쳤고, 그 덕에 뮤테이션 3이 fake
+   셀과 실 Mongo 셀 **양쪽**에서 물렸다.
+
+### Decisions (구현자 판단)
+
+- **저장소 위치 = 새 `app/deletion/` 패키지.** 브리프가 "`quota/`가 아니라 삭제 도메인"이라고만
+  적어 자리가 비어 있었다. `core_sot/`에 두면 **파기되는 그래프와 섞여 보이고**, `auth/`는
+  이름이 내용과 어긋난다. 패키지 docstring이 이 패키지의 불변식을 적는다 — *"여기 행은 삭제된
+  프로젝트의 자식이 아니다. `project_id`를 쓰지 않는다."* D4-D purge journal이 열리면 같은 자리다.
+- **`get()`을 서비스·저장소에 남겼다.** N4=A가 막는 것은 **HTTP 조회 통로**이고, 왕복 검증에는
+  읽기가 필요하다. 8.5가 그대로 소비한다.
+
+### Next steps
+
+1. **독립 검증**(다른 작업자) — 대상 커밋과 뮤테이션 표는 위에 있다.
+2. 그 뒤 `main.py` 라우터 정리 + 관리자 주소 분리.
+3. Phase 9는 A1~A8 오너 결정 뒤.
