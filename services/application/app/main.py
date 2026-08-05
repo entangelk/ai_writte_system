@@ -2690,8 +2690,16 @@ def build_async_generation_collaborators() -> GenerationCollaborators | None:
 # ``def create_app`` 바로 앞인 것은 의도다 — router 모듈이 ``from ..main import`` 로
 # 가져오는 공유 심볼(모델·``_REQUIRE_*``·에러 dict·인가 dep)이 전부 이 위에 정의돼
 # 있어야 순환 import 없이 해석된다.
-from services.application.app.routers.admin import register_admin
-from services.application.app.routers.auth import register_auth
+#
+# ★ **상대 import 여야 한다**(H-3, 2026-08-05 독립 검증). router 쪽이 ``from ..main``
+# 이므로 여기가 절대 경로면 두 모듈이 **로드 이름에 따라 다른 객체**가 된다 — 짧은
+# 이름(``PYTHONPATH=services/application`` + ``import app.main``)으로 들어오면
+# ``app.main`` 과 ``services.application.app.main`` 이 따로 생기고, 두 번째 로드가
+# 반쯤 초기화된 ``routers.admin`` 을 만나 ImportError 로 죽는다(분해 전에는 살아 있던
+# 경로다). 상대 경로면 어느 이름으로 들어와도 같은 패키지 안에서 해석된다.
+# 회귀: ``tests/test_app_import_paths.py``.
+from .routers.admin import register_admin
+from .routers.auth import register_auth
 
 
 def create_app(
