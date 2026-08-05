@@ -130,6 +130,37 @@ class PurgeReconcilerTest(unittest.TestCase):
 
         self.assertIn("some_future_derived_collection", self._run()[self.PURGED])
 
+    def test_the_project_name_history_is_not_swept(self) -> None:
+        """★ Slice 8.2c: 이 컬렉션만은 고아로 **발견되면 안 된다**.
+
+        `project_name_history`는 파기된 프로젝트의 이름을 일부러 남기는 자리다(N1~N3=A).
+        그런데 reconciler의 판정 기준은 **`project_id` 필드의 존재**이므로, 그 필드를 쓰는
+        순간 이 컬렉션은 "고아 데이터"로 분류돼 **지워진다** — 이 슬라이스의 목적을 정확히
+        반대로 실행한다. `_id`를 project id로 쓰는 설계가 그것을 구조적으로 막는다.
+
+        누군가 문서에 `project_id`를 더하면(어댑터든 마이그레이션이든) 이 셀이 실패한다.
+        fake collection으로는 못 잡는다 — `list_collection_names`·`find_one` 조합이 판정의
+        전부라 실 Mongo에서만 재현된다.
+        """
+        self.db["project_name_history"].insert_one(
+            {"_id": self.PURGED, "name": "파기된 장편", "purged_at": "2026-08-05T00:00:00Z"}
+        )
+
+        collections = _collections_scoped_by_project(self.db)
+        orphans = _orphan_project_ids(self.db, collections)
+
+        self.assertNotIn(
+            "project_name_history", collections,
+            "이름 이력이 sweep 대상으로 발견됐다 — `project_id` 필드가 섞였다는 뜻이고, "
+            "reconciler가 8.2c가 남기려던 이름을 지운다",
+        )
+        self.assertNotIn("project_name_history", orphans.get(self.PURGED, []))
+        _purge(self.db, self.PURGED, collections)
+        self.assertEqual(
+            self.db["project_name_history"].count_documents({"_id": self.PURGED}), 1,
+            "reconciler 실행이 이름 이력을 지웠다",
+        )
+
     def test_purging_removes_the_orphan_and_leaves_the_live_project_intact(self) -> None:
         collections = _collections_scoped_by_project(self.db)
 

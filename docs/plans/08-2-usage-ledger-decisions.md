@@ -1,6 +1,6 @@
 # Phase 8 Slice 8.2 — 사용량 원장 착수 결정 브리프
 
-상태: `Resolved — L1=B·L2~L5=A 확정·구현 완료(SoT v1.7.85) / L6·L7은 8.2c·8.2b`
+상태: `Resolved — L1=B·L2~L5=A 확정·구현 완료(SoT v1.7.85) / L6은 8.2c에서 Resolved(N1~N6=A, SoT v1.7.90) · L7은 8.2b에서 Resolved`
 작성일: 2026-08-03 · 결정일: 2026-08-03
 부모 계획: [`08-member-request-quota.md`](08-member-request-quota.md) §4 슬라이스 8.2
 선행: [`08-0-…`](08-0-billable-request-boundary-decisions.md)(유료 동작 9개·`action` 리터럴) ·
@@ -248,7 +248,12 @@ DB에서 그 필드를 발견해 **과금 기록을 고아로 지운다** — �
 했나", 이쪽은 "그래서 숫자가 얼마인가"다. 둘 다 필요하고 서로를 대체하지 않는다(조정 행에 사유를
 들되, 관리자 행위 감사는 8.5가 별도로 남긴다).
 
-## L6 — 프로젝트 이름 히스토리를 어디에 두는가 (신설, 결정 대기)
+## L6 — 프로젝트 이름 히스토리를 어디에 두는가 *(8.2c에서 **Resolved** — A 계열, 2026-08-05)*
+
+> **결정은 [`08-2c-project-name-history-decisions.md`](08-2c-project-name-history-decisions.md)에서 났다**(N1~N6 전부 A, SoT v1.7.90).
+> 아래 선택지 표는 그때의 재료이며 **한 곳이 정밀화됐다**: A안 설명은 "생성·개명 시 갱신"을
+> 전제했으나 8.2c N3=A는 **파기 시점에만** 쓴다 — 살아 있는 이름의 정본은 `projects`이고
+> 복제하면 두 정본 문제가 생기기 때문이다. "따라오는 것" 넷은 전부 8.2c에서 이행됐다.
 
 ### Decision needed
 

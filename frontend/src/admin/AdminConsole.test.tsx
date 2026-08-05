@@ -200,6 +200,10 @@ describe("AdminConsole", () => {
     expect(within(active!).getByText(/먼저 프로젝트를 보관/)).toBeInTheDocument();
 
     await userEvent.click(within(archived!).getByRole("button", { name: "영구 삭제 준비" }));
+    // 8.2c N5=A: 경고가 **남는 것**을 말한다. 종전 문구("전체가 삭제")로 되돌리면 여기서
+    // 실패한다 — 무엇이 예외인지 안 말하는 경고는 관리자가 확인할 수 없다.
+    expect(within(archived!).getByText(/프로젝트 이름은 보관됩니다/)).toBeInTheDocument();
+    expect(within(archived!).queryByText(/전체가 삭제되며/)).not.toBeInTheDocument();
     const purgeButton = within(archived!).getByRole("button", { name: "영구 삭제" });
     expect(purgeButton).toBeDisabled();
     await userEvent.type(within(archived!).getByLabelText("삭제 사유"), "고객 삭제 요청");

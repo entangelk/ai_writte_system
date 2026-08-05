@@ -40,6 +40,9 @@ from services.application.app.auth.users import (
 from services.application.app.core_sot.service import (
     CoreSotService, InMemoryCoreSotRepository,
 )
+from services.application.app.deletion.project_name_history import (
+    InMemoryProjectNameHistoryRepository, ProjectNameHistoryService,
+)
 from services.application.app.indexing.models import IndexSyncEvent
 from services.application.app.indexing.service import (
     InMemoryIndexSyncRepository, IndexSyncOutboxService,
@@ -104,7 +107,7 @@ class _FakeHasher:
 
 def _client(*, ttl=timedelta(hours=1), core_sot=None, index_sync_outbox=None,
             memory_service=None, analysis_service=None, access_grants=None,
-            admin_audit=None):
+            admin_audit=None, project_name_history=None):
     users = UserService(InMemoryUserRepository(), hasher=_FakeHasher())
     sessions = SessionService(InMemorySessionRepository(), ttl=ttl)
     users.create_user(username="alice", password="pw123")
@@ -113,6 +116,7 @@ def _client(*, ttl=timedelta(hours=1), core_sot=None, index_sync_outbox=None,
         index_sync_outbox=index_sync_outbox, memory_service=memory_service,
         analysis_service=analysis_service, access_grant_service=access_grants,
         admin_audit_service=admin_audit,
+        project_name_history_service=project_name_history,
     )
     # https base_url on purpose: the cookie ships Secure by default, so an http
     # client would silently drop it and every session test would pass/fail for
@@ -762,10 +766,12 @@ class AdminProjectPurgeTest(unittest.TestCase):
         self.analysis_spy = _PurgeSpy(AnalysisService(InMemoryAnalysisRepository()))
         self.audit_repo = InMemoryAdminAuditRepository()
         self.admin_audit = AdminAuditService(self.audit_repo)
+        self.name_history_repo = InMemoryProjectNameHistoryRepository()
+        self.name_history = ProjectNameHistoryService(self.name_history_repo)
         self.client, self.users, _ = _client(
             core_sot=self.core_sot, index_sync_outbox=self.sync_outbox,
             memory_service=self.memory_spy, analysis_service=self.analysis_spy,
-            admin_audit=self.admin_audit,
+            admin_audit=self.admin_audit, project_name_history=self.name_history,
         )
         self.users.create_user(username="root", password="pw789", is_admin=True)
         self.client.post(
@@ -806,6 +812,98 @@ class AdminProjectPurgeTest(unittest.TestCase):
         )
         self.assertEqual(self.memory_spy.purged, [project.id])
         self.assertEqual(self.analysis_spy.purged, [project.id])
+
+    def test_the_project_name_survives_the_purge_that_destroys_everything_else(
+        self,
+    ) -> None:
+        """Slice 8.2c N3=A: 파기가 이름 한 값을 남긴다 — 사용 기록을 사람이 읽기 위해서다.
+
+        under-strict: 쓰기를 지우면 실패한다. 정본(`projects`)은 소멸했는데 이름 행은
+        살아 있다는 것이 D8-6 계약 개정의 실체다.
+        """
+        project = self.core_sot.create_project(name="첫 장편")
+        self.core_sot.archive_project(project_id=project.id)
+
+        response = self.client.post(
+            f"/admin/projects/{project.id}/purge", json={"reason": "고객 삭제 요청"}
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual([p.id for p in self.core_sot.list_projects()], [])
+        stored = self.name_history.get(project_id=project.id)
+        self.assertIsNotNone(stored, "파기가 이름을 안 남겼다 — 8.2c N3=A 위반")
+        self.assertEqual(stored.name, "첫 장편")
+
+    def test_a_failed_name_snapshot_stops_the_purge_before_it_destroys_anything(
+        self,
+    ) -> None:
+        """★ 이 셀이 **쓰기 순서와 fail-closed를 동시에** 잠근다.
+
+        이름 행 쓰기가 실패했는데 파기가 이미 시작됐다면, 그 프로젝트는 **이름 없이**
+        사라진다(원장이 id로만 답하게 되어 개정 전으로 되돌아간다). 그래서 쓰기는 파괴
+        **앞**이고 실패는 요청 실패다.
+
+        - under-strict: `try/except`로 감싸 "안정화"하면 실패한다(파기가 진행된다).
+        - 순서: 쓰기를 `core_sot.purge_project` 뒤로 옮기면 실패한다 — 그때는 파기가
+          이미 돌았으므로 아래 `list_projects()` 단정이 무너진다.
+        """
+        if _STORAGE_FAILURE is None:
+            self.skipTest("pymongo is not installed")
+
+        class FailingRepository(InMemoryProjectNameHistoryRepository):
+            def put(self, snapshot):
+                raise _STORAGE_FAILURE("name history unavailable")
+
+        core_sot = CoreSotService(InMemoryCoreSotRepository())
+        memory_spy = _PurgeSpy(MemoryService(InMemoryMemoryRepository()))
+        client, users, _ = _client(
+            core_sot=core_sot, memory_service=memory_spy,
+            project_name_history=ProjectNameHistoryService(FailingRepository()),
+        )
+        users.create_user(username="root", password="pw789", is_admin=True)
+        client.post("/auth/login", json={"username": "root", "password": "pw789"})
+        project = core_sot.create_project(name="첫 장편")
+        core_sot.archive_project(project_id=project.id)
+
+        response = client.post(
+            f"/admin/projects/{project.id}/purge", json={"reason": "정리 요청"}
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            [p.id for p in core_sot.list_projects()], [project.id],
+            "이름을 못 남겼는데 정본을 지웠다 — 그 프로젝트는 영영 id로만 답해진다",
+        )
+        self.assertEqual(memory_spy.purged, [], "derived 파기까지 진행됐다")
+
+    def test_a_live_project_has_no_history_row(self) -> None:
+        """Over-strict: N3=A는 **파기 시점에만** 쓴다.
+
+        생성·개명이 이 컬렉션을 건드리면 살아 있는 이름이 두 곳에 복제되고(두 정본),
+        보존 정책의 대상("사라진 프로젝트의 이름")도 흐려진다. 그 과잉 구현이 들어오면
+        이 셀이 실패한다.
+        """
+        project = self.core_sot.create_project(name="첫 장편")
+        self.core_sot.rename_project(project_id=project.id, name="바뀐 이름")
+        self.core_sot.archive_project(project_id=project.id)
+
+        self.assertIsNone(self.name_history.get(project_id=project.id))
+        self.assertEqual(self.name_history_repo.count(), 0)
+
+    def test_a_second_purge_is_404_and_leaves_the_recorded_name_untouched(self) -> None:
+        project = self.core_sot.create_project(name="첫 장편")
+        self.core_sot.archive_project(project_id=project.id)
+        self.client.post(
+            f"/admin/projects/{project.id}/purge", json={"reason": "정리 요청"}
+        )
+
+        second = self.client.post(
+            f"/admin/projects/{project.id}/purge", json={"reason": "다시 정리"}
+        )
+
+        self.assertEqual(second.status_code, 404)
+        self.assertEqual(self.name_history.get(project_id=project.id).name, "첫 장편")
+        self.assertEqual(self.name_history_repo.count(), 1)
 
     def test_admin_purge_missing_project_is_404(self) -> None:
         response = self.client.post(

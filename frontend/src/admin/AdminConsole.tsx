@@ -273,7 +273,10 @@ export function AdminConsole() {
                         ) : (
                           <>
                             <h4>영구 삭제</h4>
-                            <p>원고·기억·감사·색인 전체가 삭제되며 복구할 수 없습니다.</p>
+                            {/* 8.2c N5=A: 종전 문구("전체가 삭제")는 이름 이력이 생긴
+                                뒤로 부분적으로 거짓이다. 무엇이 남는지 말하지 않는 경고는
+                                관리자가 확인할 수 없으므로, 예외를 문장에 드러낸다. */}
+                            <p>원고·기억·감사·색인이 삭제됩니다. 복구할 수 없습니다. 다만 <strong>사용 기록 조회를 위해 프로젝트 이름은 보관됩니다.</strong></p>
                             <label>삭제 사유<input disabled={purgeState.busy || purgeState.uncertain} value={purgeState.reason} onChange={(e) => updatePurge(project.id, { reason: e.target.value })} /></label>
                             <label>확인을 위해 <strong>{project.name}</strong> 입력<input disabled={purgeState.busy || purgeState.uncertain} value={purgeState.confirmation} onChange={(e) => updatePurge(project.id, { confirmation: e.target.value })} /></label>
                             {!purgeState.uncertain && (

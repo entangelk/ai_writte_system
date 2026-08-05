@@ -2484,6 +2484,17 @@ name, owner, manuscript, memory, prompt, or index content. `target_project_id`
 is an audit target, not project ownership; using `project_id` here would cause
 the purge reconciler to treat the audit as an orphaned project child and delete it.
 
+> **Exception pointer (Slice 8.2c, owner 2026-08-05).** "Stores no project name"
+> is still true *of this collection*, but it is no longer true of the purge as a
+> whole: a purge now snapshots the project **name** into
+> [§43F `project_name_history`](#43f-project_name_history) before it destroys
+> anything, so that a usage-ledger row can be read by a human instead of
+> answering with a bare id. The name deliberately lives in its own collection —
+> putting it here would mix product data into an administrator-action audit and
+> tie its retention to this collection's lifetime.
+
+
+
 ### 43B.2 Document Example
 
 ```json
@@ -2807,6 +2818,56 @@ produces either a false block on an already-expired lock, or — worse — a
 The adapter therefore re-checks that the blocking lock is live and otherwise
 claims again, a bounded number of times; exhausting them fails closed. A granted
 claim always means the collection holds that holder.
+
+---
+
+## 43F. project_name_history
+
+### 43F.1 Purpose
+
+The one piece of product data a purge deliberately leaves behind: the **name** a
+project was last known by. Slice 8.2c (owner 2026-08-05) added it because
+`request_usage_ledger` rows key on `target_project_id` alone, so a purged
+project could otherwise only be answered as an id.
+
+This revises the D8-6 expectation recorded in §43B — deletion is still total for
+manuscript, memory, prompts and index content; the name is the single named
+exception, and the purge UI says so.
+
+**`_id` is the project id and there is no `project_id` field.** That is not a
+style choice: `scripts/purge_reconciler.py` discovers sweep targets by looking
+for documents carrying `project_id`, so a document with that field would make
+this collection an orphan-sweep target and the reconciler would delete exactly
+what the slice exists to keep. Same root cause as §43B's `target_project_id`.
+
+Scope is one row per project — the **latest** name, not a rename history, and
+not draft titles (N2=A). The write happens **only at purge time** (N3=A): while a
+project is alive, `projects` is the single source of truth for its name.
+
+### 43F.2 Document Example
+
+```json
+{
+  "_id": "project_001",
+  "name": "첫 장편",
+  "purged_at": "2026-08-05T12:00:00Z"
+}
+```
+
+Exactly three keys. The write is fail-closed and ordered **before** destruction:
+if it fails, the purge does not begin and the request answers 503.
+
+### 43F.3 Indexes
+
+None beyond the primary key; lookups are by `_id`. **No TTL** — the retention
+policy for these names is a separate owner decision, and giving the names their
+own collection is what keeps that door open.
+
+### 43F.4 Reading it
+
+No query API yet (N4=A). The consumer is the usage-ledger read path in Slice 8.5,
+which joins `target_project_id` to this `_id`; when the join finds nothing, the
+contract is to display **"삭제된 프로젝트"**.
 
 ---
 

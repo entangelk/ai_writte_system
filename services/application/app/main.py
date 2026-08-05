@@ -23,6 +23,10 @@ from services.application.app.auth.admin_audit import (
     AdminAuditService,
     InMemoryAdminAuditRepository,
 )
+from services.application.app.deletion.project_name_history import (
+    InMemoryProjectNameHistoryRepository,
+    ProjectNameHistoryService,
+)
 from services.application.app.auth.sessions import (
     DEFAULT_SESSION_TTL,
     InMemorySessionRepository,
@@ -556,6 +560,21 @@ def _default_admin_audit_service() -> AdminAuditService:
     from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
     return AdminAuditService(
         MongoAdminAuditRepository.from_uri(
+            uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
+        )
+    )
+
+
+def _default_project_name_history_service() -> ProjectNameHistoryService:
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if not uri:
+        return ProjectNameHistoryService(InMemoryProjectNameHistoryRepository())
+    from services.application.app.deletion.project_name_history_mongo import (
+        MongoProjectNameHistoryRepository,
+    )
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+    return ProjectNameHistoryService(
+        MongoProjectNameHistoryRepository.from_uri(
             uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
         )
     )
@@ -2696,6 +2715,7 @@ def create_app(
     session_service: SessionService | None = None,
     access_grant_service: AccessGrantService | None = None,
     admin_audit_service: AdminAuditService | None = None,
+    project_name_history_service: ProjectNameHistoryService | None = None,
     quota_enforcement_service: QuotaEnforcementService | None = None,
 ) -> FastAPI:
     # Fail startup loudly for invalid environment-adjustable public bounds.
@@ -2923,6 +2943,10 @@ def create_app(
     sessions = session_service or _default_session_service()
     access_grants = access_grant_service or _default_access_grant_service()
     admin_audit = admin_audit_service or _default_admin_audit_service()
+    # Slice 8.2c: written only by purge, and it outlives the project graph.
+    project_name_history = (
+        project_name_history_service or _default_project_name_history_service()
+    )
     # The module-level dependency reads them from here: it must be one function
     # object across all apps so the exhaustive guard has a single identity to
     # look for (see require_authenticated_user).
@@ -3558,6 +3582,20 @@ def create_app(
             reason=request.reason,
         )
         try:
+            # Slice 8.2c (N3=A, owner 2026-08-05): snapshot the name **before**
+            # anything is destroyed. This is the one product value that outlives
+            # the purge, so that a usage-ledger row can be read by a human
+            # instead of answering with a bare id.
+            #
+            # Order and failure direction are both load-bearing. Moving this
+            # below ``core_sot.purge_project`` would destroy the project first
+            # and then, on a storage failure, lose the name forever — the exact
+            # state the owner decision reverses. Wrapping it in ``try/except``
+            # would do the same silently. It sits inside this block so a failure
+            # still records the ``failed`` audit outcome and answers 503.
+            project_name_history.record_purged(
+                project_id=project_id, name=project.name
+            )
             core_sot.purge_project(project_id=project_id)
             memory.purge_project(project_id=project_id)
             analysis.purge_project(project_id=project_id)
