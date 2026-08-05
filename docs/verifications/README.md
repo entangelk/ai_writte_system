@@ -1,7 +1,7 @@
 # 독립 검증 기록
 
 이 디렉터리는 **구현자가 아닌 검증자가** 각 슬라이스를 다시 뜯어본 기록이다. 2026-06-24부터
-**42일치 · 219건**이 쌓여 있다.
+**42일치 · 220건**이 쌓여 있다.
 
 ## 이 저장소의 검증이 무엇인가
 
@@ -28,7 +28,7 @@
 
 | 판정 | 건수 | 뜻 |
 |---|---|---|
-| 합격 | 147 | blocking 결함 없음 |
+| 합격 | 148 | blocking 결함 없음 |
 | **조건부 합격** | **57** | 합격이되 닫아야 할 조건이 있었다 |
 | **불합격** | **1** | 핵심 계약 위반으로 다음 슬라이스 진행이 차단됐다 |
 | 서술형 | 14 | 초기 기록(판정 문구가 정형화되기 전) |
@@ -61,6 +61,7 @@
 
 | 기록 | 대상 | 판정 |
 |---|---|---|
+| [`router_split_slice1_auth_admin.md`](2026-08-05/router_split_slice1_auth_admin.md) | 라우터 분해 Slice 1(auth·admin, `539171f`~`e8b9908`) — `main.py`의 route를 `register_auth`/`register_admin` 모듈로 이동. 행위 무변을 **독립 4경로 교차 확인**(route 집합 IDENTICAL 76=64+12 · 데코레이터 배선 IDENTICAL 12/12 보안 배선 포함 · handler 본문 byte-동일 · billable 표 무변). modernization 가드를 뮤테이션으로 증명 — **이동한 파일**(`routers/auth.py` /me/quota)에 `llm_call_scope(` 삽입 시 B6 양방향 셀+free-route 셀이 재실패. 전수 suite `2191/1/1931` 기준선 무변. 결정 전제 D8-7 G1=C(loopback 바인딩·코드 0줄) 1차 소스 FAITHFUL. **보강 패스**: OpenAPI 스키마 바이트 동일(sha `1e275ab8…`, 프런트 TS 코드젠 파급 0)·해석된 dependant 트리 76/76 동일·등록 순서민감 쌍 0·재현 스크립트를 [`repro_router_split.py`](2026-08-05/repro_router_split.py)로 커밋. 비차단: 작업자 "전수 suite 못 돌림"은 낡은 test-mongo 가정(실제는 기동 중), **H-3 분해가 `app.main` 짧은 import 경로를 하드 ImportError로 바꿈**(전 진입점 FQ라 미발현, 1줄×2로 닫힘) | **합격** |
 | [`slice_8_2c_project_name_history.md`](2026-08-05/slice_8_2c_project_name_history.md) | Slice 8.2c 구현(`507be95`~`d1f736c`) — 파기가 프로젝트 이름 한 값을 남긴다. 뮤테이션 #3(`_doc()`에 `project_id` 주입)이 **fake key-set 셀과 실 Mongo reconciler 셀 양쪽**을 깨뜨려 2중 방어를 실증했고, #4(rename 핸들러에 이력 쓰기)가 보강 뒤 물리는 것까지 재확인 | **합격** |
 | [`slice_8_2c_brief_and_phase9.md`](2026-08-05/slice_8_2c_brief_and_phase9.md) | Slice 8.2c 브리프 N1~N6=A 확정 + Phase 9(서비스 활동 로그) 신설(문서 전용, 코드 0줄) — §N2-a 실측(system_events=0·draft_versions 필드 부재·purge 생존자 2건)·A4 정반대 선례(llm_call_audits 격리/access_grant_uses fail-closed)·"I2 뒤집으면 D8-6 붕괴" 논리·N1=A 피회 설계(`_PROJECT_ID_FIELD`)를 코드·독스트링에서 재도출 | **합격** |
 
