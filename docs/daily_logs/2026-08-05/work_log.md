@@ -454,3 +454,53 @@ worktree에서 실증했다 — `main.py`의 두 import를 상대 경로로 바�
    `{draft_id}`를 쓰는 도메인이 이동하면 order-sensitive pairs가 0을 유지하는지 그 실행에서 본다.
 3. **Slice 2 착수 전 H-2** — `create_app()` 테스트 호환 shim이 진짜 배포 앱과 갈라지는 것을 막는
    가드가 선행 조건이다(`ObservedProvider` 계측 누락과 동형 — fake green이 배포에서만 드러난다).
+
+---
+
+## Task 6 — H-3 폐쇄: routers import 를 상대 경로로 (`59fe1a1`)
+
+### User Decisions and Rationale
+
+- **오너 지시로 H-3을 Slice 2 착수 전에 수정한다**(2026-08-05). 검증 기록은 이것을 권고로만
+  올렸고(검증자는 코드를 고치지 않는다) 오너 판단 사안으로 남겼는데, 오너가 **먼저 닫자**고
+  결정했다. 근거는 Task 5에 기록한 대로 — **A1=ⓑ가 새 진입점을 만드는 선택**이라 그 전이 적기다.
+
+### Completed work
+
+| 파일 | 변경 |
+|---|---|
+| [`app/main.py`](../../../services/application/app/main.py) | routers import 2줄을 **절대 → 상대**(`from .routers.admin import register_admin`). 왜 상대여야 하는지를 주석으로 남겼다(다음 사람이 "일관성" 명목으로 절대로 되돌리는 것을 막는다). |
+| [`tests/test_app_import_paths.py`](../../../tests/test_app_import_paths.py) | 신규 2 cells — FQ 이름과 짧은 이름 양쪽으로 앱을 **서브프로세스에서** 로드한다. |
+
+**서브프로세스인 이유**: 한 프로세스에서 두 이름을 import 하면 `app.main` 과
+`services.application.app.main` **모듈 사본이 둘** 생기고, 다른 테스트의
+`patch("services.application.app.main.…")` 가 엉뚱한 사본을 건드린다. 잠그려는 성질이
+**프로세스 시작 시점**의 것이므로 격리가 맞다.
+
+### 뮤테이션 (1종)
+
+**커밋 → 뮤테이션 → 원복 순서를 지켰다**(`git status --short` 공백 확인 후 착수).
+
+| 뮤테이션 | 위치 | 재실패한 셀 |
+|---|---|---|
+| 상대 → 절대 import 복귀(H-3 이전 상태) | `main.py:2701-2`(뮤테이션 시점 줄번호) | `test_the_short_package_name_also_loads` **1 failed** / `test_the_fully_qualified_name_loads` **passed** |
+
+**FQ 셀이 통과한 것이 핵심**이다 — 가드가 "앱이 뜨는가"라는 뭉뚱그린 성질이 아니라 **정확히
+H-3만** 겨냥함을 보여준다. 원복 후 `git status --short` 공백 + 2 passed 재확인.
+
+### Verification
+
+- 신규 가드 **2 passed**(원복 후 재실행 포함).
+- **행위 무변 재확인**: [`repro_router_split.py`](../../verifications/2026-08-05/repro_router_split.py)
+  지문이 분해 **전** 트리(`e8b9908~5`)와 여전히 **IDENTICAL**(routes 76 · order-sensitive 0 ·
+  openapi sha 동일). 즉 H-3 수정은 import 이름 해석만 바꾸고 공개 표면을 안 건드렸다.
+- 전수 회귀: 아래 "회귀 기준선".
+
+### 회귀 기준선
+
+_(전수 suite 결과 기재 — 아래 참조)_
+
+### Next steps
+
+1. **Slice 2(ⓑ)** — 선행 2건 중 H-3은 닫혔고 **H-2(shim drift 가드)가 남았다**.
+2. **Slice 1 나머지 7 도메인** — Slice 2와 직교.
