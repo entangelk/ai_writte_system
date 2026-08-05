@@ -23,7 +23,7 @@
 from __future__ import annotations
 
 import importlib
-import re
+import inspect
 import unittest
 from pathlib import Path
 
@@ -36,22 +36,29 @@ from services.application.app.quota.billable_actions import (
 )
 
 _APP_ROOT = Path(__file__).resolve().parents[1] / "services" / "application" / "app"
-_MAIN = _APP_ROOT / "main.py"
 _GENERATION_WORKER = _APP_ROOT / "writing" / "generation_worker.py"
 
-# 다중행 데코레이터도 잡는다(`@app.post(\n    "/path"`). 이 정규식이 라우트를 놓치면
-# 가드가 조용히 약해지므로, 아래 첫 셀이 파싱 결과를 실제 app.routes 와 대조한다.
-_ROUTE = re.compile(r'@app\.(get|post|put|patch|delete)\(\s*\n?\s*"([^"]+)"')
 
+def _route_bodies(app) -> dict[tuple[str, str], str]:
+    """``(path, method)`` → 그 endpoint 함수의 소스 본문.
 
-def _route_bodies() -> dict[tuple[str, str], str]:
-    """``(path, method)`` → 그 endpoint 의 소스 본문(다음 라우트 직전까지)."""
-    source = _MAIN.read_text(encoding="utf-8")
-    matches = list(_ROUTE.finditer(source))
+    route-driven: ``app.routes`` 를 순회해 각 ``APIRoute.endpoint`` 의 소스를
+    ``inspect.getsource`` 로 읽는다. **파일 배치와 무관**하게 동작한다 — 라우터가
+    ``main.py`` 한 파일이든 ``register_xxx(app, …)`` 모듈로 쪼개졌든, endpoint 가
+    정의된 파일에서 본문을 가져온다(라우터 분해, 2026-08-05). ``main.py`` 를 정적
+    정규식으로만 읽던 종전과 달리 ``include_router``·``prefix``·별도 모듈에 숨은
+    route 도 빠짐없이 본다.
+    """
     bodies: dict[tuple[str, str], str] = {}
-    for index, match in enumerate(matches):
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(source)
-        bodies[(match.group(2), match.group(1).lower())] = source[match.start():end]
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        try:
+            source = inspect.getsource(route.endpoint)
+        except (OSError, TypeError):
+            source = ""  # 아래 canary 셀이 빈 본문을 물어 fails 로 가리킨다
+        for method in route.methods:
+            bodies[(route.path, method.lower())] = source
     return bodies
 
 
@@ -71,12 +78,19 @@ class BillableActionInventoryTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.app = create_app()
         cls.operations = _operations(cls.app)
-        cls.bodies = _route_bodies()
+        cls.bodies = _route_bodies(cls.app)
 
-    def test_the_static_parse_sees_exactly_the_registered_operations(self) -> None:
-        # 이 파일의 다른 셀은 전부 소스 파싱에 기대므로, 파싱이 라우트를 놓치거나
-        # 지어내면 그 셀들이 조용히 약해진다. 먼저 파싱 자체를 앱과 대조해 못박는다.
-        self.assertEqual(set(self.bodies), self.operations)
+    def test_every_registered_operation_has_readable_endpoint_source(self) -> None:
+        # 이 파일의 다른 셀은 전부 ``inspect.getsource`` 결과에 기대므로, 어떤
+        # endpoint 의 소스를 못 읽으면(빈 본문) 그 셀들이 조용히 약해진다. route-driven
+        # 파싱의 전제 자체를 여기서 못박는다 — 종전 "정적 정규식 == app.routes" 카나리를
+        # 대체한다(라우터가 main.py 밖으로 나가도 route 는 app.routes 에 그대로 있다).
+        unreadable = sorted(op for op, body in self.bodies.items() if not body)
+        self.assertEqual(
+            unreadable, [],
+            f"endpoint 소스를 읽지 못한 operation: {unreadable} — 분류 셀이 조용히 "
+            "빈 본문을 보게 된다",
+        )
 
     def test_every_provider_calling_operation_is_classified(self) -> None:
         """B6 양방향 핵심 셀.
@@ -132,7 +146,7 @@ class SameLogicalRequestTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.bodies = _route_bodies()
+        cls.bodies = _route_bodies(create_app())
 
     def test_the_generation_worker_is_observed_but_not_billed(self) -> None:
         # 워커는 route 가 아니라 위 전수 가드의 사각지대다. 두 가지를 함께 단정한다:
