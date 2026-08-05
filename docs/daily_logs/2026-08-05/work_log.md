@@ -203,9 +203,9 @@ boundary" — A4가 인용한 대비가 한 글자 일치).
 
 ### 회귀 기준선
 
-- backend **2189 passed / 1 skipped / 1931 subtests**(직전 2173/4/1931). **skip 4→1은 코드가
+- backend **2191 passed / 1 skipped / 1931 subtests**(hardening 2건 포함 최종. 검증 시점 값은 2189였다). **skip 4→1은 코드가
   아니다** — 이 셸에 `elasticsearch`가 있어 lexical 3 cells가 이번엔 돌았다(HANDOFF가 겪던
-  드리프트의 반대 방향). 보정하면 **+13이 전부 8.2c 신규 셀**이다.
+  드리프트의 반대 방향). 보정하면 **+15가 전부 8.2c 신규 셀**이다(구현 13 + 검증 hardening 2).
 - **subtests 1931 무변 = operation 76 유지의 실측.**
 - frontend **265 passed / 18 files**(셀 수 무변), `tsc --noEmit`·`build` 통과
   (AdminConsole lazy 8.39 → **8.50 kB**, 진입 414.36 kB 무변).
@@ -243,8 +243,66 @@ boundary" — A4가 인용한 대비가 한 글자 일치).
 - **`get()`을 서비스·저장소에 남겼다.** N4=A가 막는 것은 **HTTP 조회 통로**이고, 왕복 검증에는
   읽기가 필요하다. 8.5가 그대로 소비한다.
 
+### 독립 검증 반영 (`507be95`~`d1f736c` 대상)
+
+판정 **합격(PASS) · Blocking 0**. 기록은
+[`verifications/2026-08-05/slice_8_2c_project_name_history.md`](../../verifications/2026-08-05/slice_8_2c_project_name_history.md).
+검증자가 **뮤테이션을 직접 재현**했다 — #3(`_doc()`에 `project_id` 주입)이 fake key-set 셀과
+실 Mongo reconciler 셀 **양쪽**을 깨뜨려 2중 방어가 실재함을 확인했고, #4(rename 핸들러에
+이력 쓰기)가 보강 뒤 물리는 것까지 재확인했다. 전체 suite 숫자도 4커밋 전부를 포함한 그쪽
+실행에서 **2189/1/1931로 동일** — 두 보강 커밋이 기존 셀 제자리 수정임이 확인됐다.
+
+**비차단 3건 중 2건을 회귀로 닫았고 1건은 문서 수정이다.**
+
+| # | 지적 | 조치 |
+|---|---|---|
+| NIT-1 | 브리프 상태 헤더가 아직 "구현 대기" | "구현 완료(SoT v1.7.90, `d1f736c`) · 독립 검증 합격"으로 |
+| HARDEN-1 | 생산 Mongo 배선을 종단 관통하는 셀 없음 | **실 Mongo 조립 가드 신설** — `_default_project_name_history_service()`를 env와 함께 부르고 실제 문서·키 셋·**aware 재부착**까지 단정 |
+| HARDEN-2 | "중간 실패에도 이름 생존"이 순서로만 보장 | **결과로 단정하는 셀 신설** — derived가 죽는 503 경로에서 이름 행 생존 |
+
+**HARDEN-1을 그냥 넘기지 않은 이유**: 이 저장소는 같은 형태로 이미 데였다 — 하네스가
+`ObservedProvider`를 직접 만들어서 `_default_*`가 감싸기를 빠뜨려도 56 passed였고 **배포에서만**
+계측이 사라졌다. 여기서도 fake 셀(어댑터)과 HTTP 셀(endpoint)이 둘 다 green인 채로 조립만
+in-memory로 떨어질 수 있었다. 덤으로 **naive datetime 재부착**은 실 드라이버에서만 확인된다.
+
+**추가 뮤테이션 2종 — 새 셀이 실제로 무는지 확인**(뮤테이션 전 `git status --short` 공백 확인,
+원복 후 `git diff` 공백 + 마커 grep 재확인):
+
+| # | 넣은 변형 | file | 문 셀 |
+|---|---|---|---|
+| 6 | 이름 쓰기를 **derived 파기 뒤로** 이동 | `main.py` purge 블록 | `test_the_name_survives_a_purge_that_dies_halfway_through` **+** `test_a_failed_name_snapshot_stops_the_purge_before_it_destroys_anything` |
+| 7 | `_default_project_name_history_service()`가 항상 in-memory | `main.py` | `DefaultAssemblyLiveMongoTest::test_the_default_factory_persists_to_mongo_and_reads_back_aware` |
+
+**남은 비차단 없음.** 검증자가 프론트(`tsc`·`build`·`vitest`)를 직접 돌리지 않았다고 밝혔는데,
+그 셋은 구현 시점에 내가 돌렸고 결과는 위 "회귀 기준선"에 있다(265/18 · build 통과).
+
+### Issues found — 8.3 동시성 셀이 부하에서 흔들린다 (8.2c와 무관, 제품 결함 아님)
+
+hardening 보강 뒤 전체 suite에서 **`AdmissionSerialisationLiveMongoTest::test_only_one_of_many_concurrent_requests_takes_the_last_slot` 1건이 실패**했다(2190 passed / 1 failed). 8.2c 코드는 quota를
+건드리지 않으므로 원인을 끝까지 팠다.
+
+**단독 재실행 3/3 통과 → CPU 부하(busy loop 24개) 아래서 재현.** 실패 단정은 셋 중 **세 번째**다:
+
+```
+AssertionError: 거절 사유가 한도가 아니다: ['QuotaRefused', …×17, 'AdmissionUnavailable', 'AdmissionUnavailable']
+```
+
+- **`admitted == 1`은 지켜졌다.** 즉 **초과 입장은 일어나지 않았고**, 이 셀이 지키려는 핵심 성질
+  (뮤텍스가 있다)은 부하에서도 성립했다.
+- 흔들린 것은 **거절 *사유*** 다. `AdmissionMutex._acquire`는 **5회 시도 × 20 ms**
+  ([`enforcement.py:74`](../../../services/application/app/quota/enforcement.py#L74))가 예산이고,
+  20 스레드가 한 뮤텍스에 몰리면 굶는 스레드가 나올 수 있다. 그때 나오는 `AdmissionUnavailable`은
+  **SoT v1.7.88이 명시한 정상 동작**이다 — *"Q4=A 전면 fail-closed(계량 불능 = 무료 제공 금지,
+  **뮤텍스 획득 실패 포함**)"*.
+- 그러므로 **셀이 계약보다 엄격하다**(over-strict). 계약은 "모든 거절이 한도 거절"을 요구한 적이
+  없고, 오히려 굶주림의 정답을 fail-closed로 정해 뒀다.
+
+**고치지 않고 부채로 등재했다.** 8.3의 검증된 회귀 표면이라 단정을 완화하는 것은 남의 슬라이스
+계약 판단이고, 이 슬라이스 범위 밖이다. 권고안은 셋째 단정을 **`QuotaRefused` 또는
+`AdmissionUnavailable` 허용**으로 바꾸는 것이며, 그래도 이 셀이 잠그는 것은 그대로다 —
+뮤텍스를 지우면 `admitted > 1`로 첫째 단정이 문다. HANDOFF 추적 부채에 실측과 함께 적었다.
+
 ### Next steps
 
-1. **독립 검증**(다른 작업자) — 대상 커밋과 뮤테이션 표는 위에 있다.
-2. 그 뒤 `main.py` 라우터 정리 + 관리자 주소 분리.
-3. Phase 9는 A1~A8 오너 결정 뒤.
+1. `main.py` 라우터 정리 + 관리자 주소 분리(오너 2026-08-04 후속 확정).
+2. Phase 9는 A1~A8 오너 결정 뒤.
