@@ -1607,7 +1607,7 @@ class ForcedPasswordChangeTest(unittest.TestCase):
         # "호출부가 플래그를 준다"가 아니라 "파일 어딘가에 그 글자가 있다"를 잠그고
         # 있었다. 소스를 파싱해 `create_user(...)` 호출의 키워드를 직접 본다.
         for label, relative in [
-            ("POST /admin/users", "services/application/app/main.py"),
+            ("POST /admin/users", "services/application/app/routers/admin.py"),
             ("scripts/create_user.py", "scripts/create_user.py"),
         ]:
             with self.subTest(surface=label):
