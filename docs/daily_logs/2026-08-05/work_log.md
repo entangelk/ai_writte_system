@@ -498,7 +498,26 @@ H-3만** 겨냥함을 보여준다. 원복 후 `git status --short` 공백 + 2 p
 
 ### 회귀 기준선
 
-_(전수 suite 결과 기재 — 아래 참조)_
+**backend test-mongo ON: `2193 passed / 1 skipped / 1931 subtests / 0 failed`**(919.24s, 실측).
+
+- 종전 `2191 / 1 / 1931`(Task 3, 8.2c hardening)에서 **+2 = 신규 `test_app_import_paths.py` 2 cells**가
+  전부다. **subtests 1931 무변**이 operation 76 유지의 실측이며, H-3 수정이 route 표면을 안
+  건드렸음을 여기서도 확인한다.
+- **첫 실행은 `4 failed`였고 전부 문서 건수 가드였다**(코드 무관, 아래 Issues).
+
+### Issues found — 검증 기록을 추가하며 README 3곳이 뒤처졌다 (전수 suite 가 잡음)
+
+`VerificationCountClaimsTest`가 물었다: 라우터 분해 검증 기록을 추가하면서
+`docs/verifications/README.md`(219→220·합격 147→148)**만** 갱신되고 최상위 `README.md` **3곳**과
+`docs/README.md` **1곳**이 219에 얼어 있었다. **HANDOFF가 이미 기록해 둔 드리프트의 재발**이다
+— *"세는 사람이 둘이라 하루 세 번 갈라졌고 매번 최상위 README만 뒤처졌다"*.
+
+- **원인은 세션 크래시**다. 기록을 만든 세션이 인덱스 갱신 도중 머신 다운으로 끊겼고, 이어받은
+  세션이 `docs/verifications/README.md`가 이미 갱신된 것을 보고 **"README 작업은 끝났다"고
+  판단**했다 — 갱신돼야 하는 문서가 셋이라는 것을 그 시점에 확인하지 않았다.
+- **가드가 설계대로 잡았다**는 것이 요점이다. 이 저장소가 2026-08-02에 숫자 주장을 디스크
+  실측에 묶어 둔 이유가 정확히 이 사고 형태이며, 사람이 아니라 전수 suite가 잡았다.
+- 수정 `e55aa24`(4곳 정렬) → `test_docs_indexes.py` **12 passed / 10 subtests**.
 
 ### Next steps
 
