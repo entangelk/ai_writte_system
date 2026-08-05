@@ -26,6 +26,7 @@ import sys
 import time
 import unittest
 import uuid
+from datetime import UTC, datetime
 from unittest import mock
 
 try:
@@ -38,6 +39,12 @@ except ImportError:  # pragma: no cover - 환경에 pymongo 가 없을 때
     ConnectionFailure = PyMongoError = Exception
     _PYMONGO_AVAILABLE = False
 
+from services.application.app.deletion.project_name_history import (
+    ProjectNameSnapshot,
+)
+from services.application.app.deletion.project_name_history_mongo import (
+    MongoProjectNameHistoryRepository,
+)
 from scripts import purge_reconciler
 from scripts.purge_reconciler import (
     _collections_scoped_by_project,
@@ -142,8 +149,13 @@ class PurgeReconcilerTest(unittest.TestCase):
         fake collection으로는 못 잡는다 — `list_collection_names`·`find_one` 조합이 판정의
         전부라 실 Mongo에서만 재현된다.
         """
-        self.db["project_name_history"].insert_one(
-            {"_id": self.PURGED, "name": "파기된 장편", "purged_at": "2026-08-05T00:00:00Z"}
+        # ★ 손으로 문서를 넣지 않고 **어댑터로 쓴다**. 손으로 넣으면 이 셀은 "내가 방금
+        # 만든 모양"만 재는 셈이라, 어댑터가 `project_id`를 더하는 변경을 못 잡는다.
+        MongoProjectNameHistoryRepository(self._client, db_name=self._db_name).put(
+            ProjectNameSnapshot(
+                project_id=self.PURGED, name="파기된 장편",
+                purged_at=datetime(2026, 8, 5, tzinfo=UTC),
+            )
         )
 
         collections = _collections_scoped_by_project(self.db)
