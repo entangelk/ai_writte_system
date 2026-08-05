@@ -120,3 +120,59 @@ boundary" — A4가 인용한 대비가 한 글자 일치).
 2. 그 뒤 `main.py` 라우터 정리 + 관리자 주소 분리(오너 2026-08-04 후속 확정).
 3. Phase 9는 8.2c 구현이 닫힌 뒤 착수 결정 브리프부터. 라우터 정리 뒤가 유리하다(쓰기 지점이
    mutating endpoint 전체에 퍼진다).
+
+---
+
+## Task 2 — 검증 기록 커밋 + Phase 9 착수 결정 브리프 작성 (A1~A8)
+
+### User Decisions and Rationale
+
+- **검증 기록을 남기라는 것이 오너 요청이었다**(내가 "검증자가 쓰는 기록"이라 판단해 보류한 것을
+  정정). 검증자가 [`verifications/2026-08-05/slice_8_2c_brief_and_phase9.md`](../../verifications/2026-08-05/slice_8_2c_brief_and_phase9.md)와
+  숫자 주장 4곳을 **작업 트리에 남기고 커밋하지 않아** 내가 커밋했다(`bc0d42a`).
+  **기록 본문은 손대지 않았다** — hardening 2건의 폐쇄와 정정은 이 로그와 `cced53f`에 있고,
+  검증 기록에 구현자가 끼어드는 절이 이 저장소에 없다(전례 0건, 확인함).
+- **Phase 9 문서를 "결정할 수 있는 브리프"로 만들라**는 요청. 종전 `09-service-activity-log.md`는
+  질문만 나열한 계획이라 오너가 고를 수 없었다 → **선택지 표 + 장단점 + 구현자 추천** 형식의
+  착수 브리프를 별도 문서로 분리했다(이 저장소의 계획/브리프 분리 관례 그대로 —
+  Phase 8도 `08-member-request-quota.md` + `08-0-…-decisions.md`였다).
+
+### Completed work
+
+- **`bc0d42a`** — 검증 기록 + `verifications/README.md`(42일치·218건, 판정 분포 08-05 기준)·
+  최상위 `README.md`·`docs/README.md` 숫자 갱신. 실측 재확인: 파일 218개·날짜 42개.
+- **[`plans/09-0-service-activity-log-decisions.md`](../../plans/09-0-service-activity-log-decisions.md) 신설**
+  — A1~A8 각각이 `선택지 | 설명 | 장점 | 단점` 표 + 추천 + 근거를 갖는다. **§0 실측이 브리프의
+  하중을 받는다**:
+
+  | 실측 | 값 | 어느 결정을 움직이는가 |
+  |---|---|---|
+  | mutating operation 성격별 분포 | 정본 10 · 검토 결정 9 · AI 요청 14 · 색인 1 · 인증 2 · 관리자 4 = **40** | A2(범위)가 이 표의 어디에 선을 긋는지가 곧 페이즈 크기 |
+  | 쓰기 지점 후보 | endpoint(결과·의미 다 안다) · dependency(결과 모름) · 서비스 계층(주체 모름) · 미들웨어(**D7=A가 이미 기각**, `main.py:1544`) | A7 |
+  | `current=Depends(...)`로 user를 받는 endpoint | **9곳뿐** — A7=A면 project 경로 34곳에 인자 추가 | A7의 실제 비용 |
+  | 실패 방향 선례 | `llm_call_scope.py:247` 격리 / `access_grants.py:136` fail-closed(*"not load-bearing for a security boundary"*) | A4 |
+  | 배선 템플릿 | `auth/admin_audit.py` 한 쌍 · purge 도메인 호출 **10줄**(`main.py:3561-3573`) | 구현 순서 |
+
+- [`plans/09-service-activity-log.md`](../../plans/09-service-activity-log.md) §5를 질문 나열에서
+  **브리프 포인터 + 추천 요약표**로 교체(계획은 범위·불변식, 브리프는 선택지 — 역할 분리).
+- 인덱스: `plans/README.md` Phase 9 행 추가 + 100개/82개, 최상위 `README.md` 같은 두 숫자.
+- HANDOFF: "Owner Decisions Needed"에 **Phase 9 A1~A8** 항목 신설(추천 8건 요약 + "되돌리기 비싼
+  것은 A2·A4·A7") · Phase 9 결정완료 항목과 Next Tasks 3번을 브리프 작성 완료 상태로 고쳐 씀.
+
+### Decisions (구현자 판단, 오너 확정 전)
+
+- **A2를 B(19개)로 추천한 기준은 "사용자가 무엇을 *바꿨는가*"다.** 승격·거절은 원고가 아니라
+  **기억을 바꾸고**, memory가 append-only라 되돌리기가 가장 어렵다. 반대로 AI 요청은 바꾼 것이
+  아니라 요청한 것이며 이미 `llm_call_audits`·`request_usage_ledger` 둘이 담는다.
+- **A4를 격리로 추천한 근거는 코드가 이미 문장으로 갖고 있다** — `access_grant_uses`가
+  fail-closed인 이유가 *"보안 경계에 하중을 받기 때문"*이고, 활동 로그가 없다고 잘못 열리는 문은
+  없다. 대신 "구멍을 어떻게 아는가"를 후속 고려로 남겼다.
+- **A7=A(endpoint)를 추천하면서 그 대가를 숨기지 않았다** — 34곳 인자 추가. B(dependency)가 한
+  줄로 끝나지만 **route 실행 전에 돌아 결과를 모른다**(404·409로 끝난 요청이 "저장함"으로 남는다).
+
+### Verification
+
+- `python3 -m pytest tests/test_docs_indexes.py -q` → **12 passed / 10 subtests**(신규 브리프 등재·
+  링크·계획 문서 수 100/82 실측 일치).
+- 브리프의 코드 인용 5건은 작성 후 직접 재확인했고 두 건(`main.py` 미들웨어 기각 주석·purge 배선)은
+  실측값으로 정정했다 — **어제 라벨 사고의 재발 방지 절차를 그대로 적용**했다.
