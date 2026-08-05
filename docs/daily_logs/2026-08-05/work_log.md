@@ -376,3 +376,81 @@ Slice 2를 설계하며 **테스트 호환성** 분기를 발견했다. product 
 2. **Slice 1 나머지 7 도메인**(health·projects·drafts·analysis·memory·context_search·writing·
    observability) — 동일 패턴의 기계적 정리. Slice 2와 직교(순서 무관).
 3. Phase 9는 A1~A8 오너 결정 뒤.
+
+---
+
+## Task 5 — 라우터 분해 Slice 1 독립 검증 + 보강 패스 (`38b6e3a`)
+
+### User Decisions and Rationale
+
+- **새 진입점은 별도 compose로 간다 — A1=ⓑ 재확인**(오너, 2026-08-05). Task 4에서 확정한
+  선택을 검증 뒤 다시 확인했다. 이 재확인이 **H-3의 우선순위를 올린다**(아래) — ⓑ는 정의상
+  **새 진입점을 하나 더 만드는** 선택이고, H-3이 문제가 되는 자리가 정확히 거기다.
+- 검증 의뢰 문언: *"작업 AI가 작업한 거 검증하고 의심하고 또 의심해줄래? 라우터 분리 작업이라
+  매우 신중하게 봐줘야 하고, 아직 작업 중이야."*
+
+### Completed work — 검증 기록 + 재현 경로 복구 (코드 0줄)
+
+검증자는 구현에 관여하지 않았다. 판정 **합격 · Blocking 0**, 기록
+[`verifications/2026-08-05/router_split_slice1_auth_admin.md`](../../verifications/2026-08-05/router_split_slice1_auth_admin.md).
+
+**작업 도중 머신이 두 번 다운됐고 그 사이 `/tmp`가 날아갔다.** 1차 패스가 §Reproduction에서
+가리키던 애드혹 스크립트 3종(`cmp_routes.py`·`decorcmp.py`·`bodycmp.py`)이 소실돼 **기록이
+재현 불가 상태**가 됐다 — 판정만 남고 근거를 다시 돌릴 수 없는 형태다. 그래서 보강 패스는
+재현 경로 복구부터 했다.
+
+| 산출물 | 내용 |
+|---|---|
+| [`repro_router_split.py`](../../verifications/2026-08-05/repro_router_split.py) | 앱 공개 표면을 **정규 JSON 지문**으로 찍는다(route 76 · 해석된 dep 트리 · status/response_model/responses · openapi sha · 순서민감 쌍). 분해 전/후 트리에서 돌려 `diff` 하면 무변이 한 줄로 증명된다. `docs/verifications/2026-07-24/repro_*.py` 선례를 따라 **저장소에 커밋**했다. |
+| 기록 §9·§10·§11 + H-3 | 1차 패스가 안 본 3개 표면. 1차 findings §1~8은 그대로 두고 §2·§8에 보강 주석만 덧붙였다. |
+| README 검증 인덱스 | 220건 / 합격 148 갱신(1차 패스에서 이미 반영돼 있던 것을 보강 내용으로 확장). |
+
+### Verification — 보강 패스가 실제로 잰 것
+
+분해 전 트리는 `git worktree`로 따로 깔아 **원본 트리를 건드리지 않았다**. 비교는 소스 텍스트가
+아니라 조립된 `create_app()` 실측이다.
+
+| 표면 | 방법 | 결과 |
+|---|---|---|
+| OpenAPI 계약 | 저장소 제공 `scripts/dump_openapi.py`를 pre/post worktree에서 각각 덤프 | **바이트 동일** 293,924 B · sha256 `1e275ab8…` |
+| 인가 배선 | 76 route의 **해석된 dependant 트리**(중첩 dep 평탄화) + status/response_model/responses | **76/76 동일**, `__module__`만 의도대로 다름 |
+| 등록 순서 | 동일-method·동일-세그먼트수 쌍 전수, literal↔`{param}` 충돌 후보 카운트 | **0쌍** → 순서 변화가 매칭에 영향 불가 |
+| 가드 + tier | `test_billable_actions.py` + `test_auth_api.py` | **112 passed / 863 subtests**(1차 수치와 정확히 일치) |
+| import 경로 | 폐기용 worktree에서 두 이름으로 로드 | §11 — 아래 |
+
+**재실행하지 않은 것**: modernization 뮤테이션과 전수 suite(`2191/1/1931`)는 1차 패스 결과를
+인용한다. 재부팅으로 test-mongo가 내려가 있고 그 사이 HEAD·트리가 안 바뀌었다(가드 수치가
+1차와 일치하는 것이 그 방증). 기록에도 어느 항목이 재도출이고 어느 항목이 인용인지 명시했다.
+
+### Issues found — H-3: 분해가 import 경로 하나를 죽였다 (비차단, 미발현)
+
+`main.py:2693`은 **절대** 경로로, `routers/admin.py:24`는 **상대** 경로(`from ..main import`)로
+서로를 부른다. 이 혼합 때문에 순환이 **import 이름에 따라 다르게 풀린다**:
+
+| 로드 방식 | 분해 전(`e8b9908~5`) | 분해 후(`e8b9908`) |
+|---|---|---|
+| `services.application.app.main`(FQ) | LOAD OK | LOAD OK |
+| `app.main`(`PYTHONPATH=services/application`) | **LOAD OK** | **ImportError(partially initialized module)** |
+
+**지금은 사고가 아니다** — 저장소 전 진입점이 FQ다(Dockerfile `CMD uvicorn
+services.application.app.main:app` · tests 전부 · `scripts/*`). 다만 실패 메시지가 원인과
+동떨어진 "순환 import"라 처음 밟는 사람이 시간을 태운다. **해법이 1줄×2**임을 폐기용
+worktree에서 실증했다 — `main.py`의 두 import를 상대 경로로 바꾸면 **양쪽 이름 다 LOAD OK**다.
+검증자는 코드를 고치지 않았다(권한 밖 + 오너 판단 사안).
+
+### Decisions (검증자 판단)
+
+- **재현 스크립트는 애드혹이 아니라 저장소에 커밋한다.** `/tmp` 소실로 기록이 죽는 것을 이번에
+  실제로 겪었다. 세 개의 애드혹 스크립트를 합쳐 **하나의 지문 스크립트**로 만든 것은, 남은 7
+  도메인 재검증이 "같은 스크립트를 새 기준 커밋으로 다시 돌리기"로 끝나게 하려는 것이다.
+- **`endpoint.__module__`은 일부러 지문에서 뺐다** — 파일 이동이 이 리팩터의 목적이므로 그것만은
+  달라야 정상이다(대신 stderr에 이동 현황으로 찍는다).
+
+### Next steps
+
+1. **H-3 처리 여부 = 오너 결정.** Slice 2(ⓑ)가 새 진입점을 만들기 **전**이 적기다.
+2. **Slice 1 나머지 7 도메인** — 재검증은 `repro_router_split.py`를 새 기준 커밋으로 다시 돌려
+   지문 diff가 비면 끝이다. 단 **§10 순서 성질은 자동 보존이 아니다** — `{project_id}`·
+   `{draft_id}`를 쓰는 도메인이 이동하면 order-sensitive pairs가 0을 유지하는지 그 실행에서 본다.
+3. **Slice 2 착수 전 H-2** — `create_app()` 테스트 호환 shim이 진짜 배포 앱과 갈라지는 것을 막는
+   가드가 선행 조건이다(`ObservedProvider` 계측 누락과 동형 — fake green이 배포에서만 드러난다).
