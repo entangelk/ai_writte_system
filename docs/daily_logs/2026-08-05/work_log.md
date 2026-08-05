@@ -306,3 +306,73 @@ AssertionError: 거절 사유가 한도가 아니다: ['QuotaRefused', …×17, 
 
 1. `main.py` 라우터 정리 + 관리자 주소 분리(오너 2026-08-04 후속 확정).
 2. Phase 9는 A1~A8 오너 결정 뒤.
+
+---
+
+## Task 4 — 라우터 분해 Slice 1 착수 + 관리자 주소 분리 결정 브리프
+
+### User Decisions and Rationale
+
+오너가 두 fork를 닫았다(AskUserQuestion, 2026-08-05). 둘 다 구현자 추천과 같다.
+
+- **R1 = register 함수 패턴.** 라우터 모듈마다 `def register_xxx(app, *, core_sot, writing, …)`
+  형태로 협력자를 **명시 인자**로 받고 `@app.X(...)` 데코레이터는 그대로 둔다. handler 본문은
+  byte-동일로 옮긴다. **APIRouter+include_router(B)** 는 관용적이나 데코레이터 76개 전부 수정 +
+  repo 0건 도입(문화 전환)이라 되돌리기 비싸다고 판단했다.
+- **A1 = ⓑ 별도 compose 서비스.** `application` 이미지를 재사용해 `command:`만 바꾼 네 번째
+  서비스로 관리자 표면을 담고, **호스트 포트는 게시하지 않는다**(nginx `/api/admin/` 경유).
+  product 앱에 `/admin` 라우트가 남지 않아 LAN에서 `application:8520` 직접 hit = 404다.
+
+**★ 핵심 정정 — D8-7 G1=C는 2차 ASGI 앱이 아니다.** 서브에이전트 3개(병렬) 실측이 밝힌
+것: G1=C는 compose `127.0.0.1:` 호스트 바인딩 접두어(코드 **0줄**)였다. HANDOFF가 ⓐ를
+"재료 그대로·코드 변경 최소"라고 한 건 **루프백 바인딩 트릭만 공짜**라는 뜻 — 2차 앱·uvicorn
+기동·프론트 재라우팅은 전부 신규다. 이 정정이 ⓐ(같은 컨테이너 2차 ASGI, supervisord 신규
+도입) vs ⓑ(기존 worker/generation_worker 이미지-공유 패턴)의 비용 평가를 뒤집어 ⓑ로 갔다.
+세션은 **Mongo**에 있어(프로세스 시크릿 아님) 주소가 달라도 세션 공유가 공짜다.
+
+산출: [`plans/router-split-and-admin-separation-decisions.md`](../../plans/router-split-and-admin-separation-decisions.md)
+(Resolved). `docs/plans/README.md` + 최상위 `README.md` 카운트 갱신(101 전체/83 브리프),
+`docs_indexes` 12/10.
+
+### Completed work — Slice 1 일부 (auth·admin 도메인 분해)
+
+| 단계 | 산출물 |
+|---|---|
+| 가드 modernization | [`test_billable_actions.py`](../../../tests/test_billable_actions.py) `_route_bodies()` 를 **정규식 단일 파일 → route-driven**(`app.routes` 순회하며 `inspect.getsource(route.endpoint)`)으로 전환. 파일 배치·prefix·include_router 무관. 카나리를 "정적 파싱==app.routes" → "모든 route endpoint 소스 가독"으로. 분류 9건 무변. |
+| auth 분해 | [`app/routers/auth.py`](../../../services/application/app/routers/auth.py) — `register_auth(app, *, users, sessions)`. login·logout·/auth/me·/me/quota. `_user_payload` 라우터 안으로. `c816f26`→`2914a3f`. |
+| admin 분해 | [`app/routers/admin.py`](../../../services/application/app/routers/admin.py) — `register_admin(app, *, <14 서비스>)`. admin 8 op(purge 핸들러 14 서비스). `_admin_user_payload`·`_admin_audit_payload` 라우터 안으로. `5b56a8a`. |
+
+**패턴(R1)이 종단으로 증명됐다**: 서비스는 명시 인자, 공유 심볼(모델·`_REQUIRE_*`·에러 dict·인가 dep)은
+`from ..main import`(create_app 직전 import라 순환 회피 — 공유 심볼이 전부 그 위에 정의돼 있다),
+인가 가드는 `app.state`를 읽는 모듈 함수라 파일이 쪼개져도 그대로 동작. handler 본문 byte-동일.
+
+### Verification
+
+- `test_billable_actions.py` + `test_auth_api.py` = **112 passed / 863 subtests**(admin 이동 후).
+  `AdminProjectPurgeTest`·`ForcedPasswordChangeTest`(경로 `main.py`→`routers/admin.py` 갱신)·
+  `CombinedBoundaryMatrixTest`(tier 카운트 76/61 + admin 8 op) 전부 보존.
+- app 로드 OK(순환 import 0) · **76 operation 무변** · admin 8 op 보존 · 2192 test collect(import 파손 0).
+- 기능: /health·/auth/login·/auth/me·/me/quota·/auth/logout 동작 확인.
+- 백엔드 전수 suite는 이 머신에서 test-mongo 미기동 시 live 테스트가 멈춰 끝까지 못 돌림 — 단
+  비-auth 코드는 무접촉이고 test_auth_api(863 subtests)가 app 객체를 종단 검증하므로 회귀 위험은 낮다.
+
+### Issues found — Slice 2(관리자 주소 분리)의 설계 분기
+
+Slice 2를 설계하며 **테스트 호환성** 분기를 발견했다. product `create_app()`에서 `/admin`을
+빼면 `CombinedBoundaryMatrixTest`(create_app의 app.routes에서 admin 8 op·총 76을 기대)가
+깨지고, /admin을 치는 테스트 전체가 create_app 기반이라 widespread 영향이다.
+
+**권고 설계(비용 최소)**: `create_app()`(전체, product+admin)은 **테스트·스크립트용으로 그대로**
+두고, 배포용으로 `create_product_app()`(admin 없음)·`create_admin_app()`(admin만)을 **같은
+`_assemble_services()`에서** 만든다. 그러면 2192 테스트는 무변 green이고, **새 가드**가
+`create_product_app`에 /admin 0건·`create_admin_app`에 8건을 단정한다. 선행 작업은
+`_assemble_services()` 추출(create_app 본문 2758-2967의 서비스 조립을 공유 함수로).
+
+### Next steps
+
+1. **Slice 2(관리자 주소 분리, ⓑ)** — `_assemble_services()` 추출 → `create_product_app`·
+   `create_admin_app` → compose `admin` 서비스(포트 미게시) → nginx `location /api/admin/` →
+   노출 가드·새 분리 가드. 오너에게 설계 분기(테스트 호환 방식) 확인 후 착수.
+2. **Slice 1 나머지 7 도메인**(health·projects·drafts·analysis·memory·context_search·writing·
+   observability) — 동일 패턴의 기계적 정리. Slice 2와 직교(순서 무관).
+3. Phase 9는 A1~A8 오너 결정 뒤.
