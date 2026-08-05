@@ -883,11 +883,18 @@ class AdminProjectPurgeTest(unittest.TestCase):
         보존 정책의 대상("사라진 프로젝트의 이름")도 흐려진다. 그 과잉 구현이 들어오면
         이 셀이 실패한다.
         """
-        project = self.core_sot.create_project(name="첫 장편")
-        self.core_sot.rename_project(project_id=project.id, name="바뀐 이름")
-        self.core_sot.archive_project(project_id=project.id)
+        # ★ 서비스가 아니라 **HTTP로** 돈다. 서비스만 부르면 endpoint에 쓰기를 더하는
+        # 과잉 구현을 못 잡는다 — 실제로 뮤테이션에서 그 구멍이 드러나 이 셀을 고쳤다
+        # (2026-08-05, 뮤테이션 4가 첫 판에서는 통과했다).
+        created = self.client.post("/projects", json={"name": "첫 장편"})
+        self.assertEqual(created.status_code, 200)
+        project_id = created.json()["id"]
 
-        self.assertIsNone(self.name_history.get(project_id=project.id))
+        renamed = self.client.patch(f"/projects/{project_id}", json={"name": "바뀐 이름"})
+        archived = self.client.delete(f"/projects/{project_id}")
+
+        self.assertEqual((renamed.status_code, archived.status_code), (200, 200))
+        self.assertIsNone(self.name_history.get(project_id=project_id))
         self.assertEqual(self.name_history_repo.count(), 0)
 
     def test_a_second_purge_is_404_and_leaves_the_recorded_name_untouched(self) -> None:
