@@ -14,9 +14,23 @@
 
 from __future__ import annotations
 
+import os
 import unittest
+import uuid
 from datetime import UTC, datetime
+from unittest import mock
 
+try:
+    from pymongo import MongoClient
+    from pymongo.errors import ConnectionFailure, PyMongoError
+
+    _PYMONGO_AVAILABLE = True
+except ImportError:  # pragma: no cover - 환경에 pymongo 가 없을 때
+    MongoClient = None
+    ConnectionFailure = PyMongoError = Exception
+    _PYMONGO_AVAILABLE = False
+
+from services.application.app.main import _default_project_name_history_service
 from services.application.app.deletion.project_name_history import (
     InMemoryProjectNameHistoryRepository,
     ProjectNameHistoryService,
@@ -25,6 +39,35 @@ from services.application.app.deletion.project_name_history import (
 from services.application.app.deletion.project_name_history_mongo import (
     MongoProjectNameHistoryRepository,
 )
+
+
+_MONGO_URI = os.environ.get(
+    "CORE_SOT_TEST_MONGO_URI", "mongodb://localhost:27020/?replicaSet=rs-test"
+)
+
+
+def _probe_mongo() -> bool:
+    if not _PYMONGO_AVAILABLE:
+        return False
+    client = None
+    probe_db = f"project_name_history_probe_{uuid.uuid4().hex}"
+    try:
+        client = MongoClient(_MONGO_URI, serverSelectionTimeoutMS=300)
+        client.admin.command("ping")
+        client[probe_db]["probe"].insert_one({"probe": True})
+        return True
+    except (ConnectionFailure, PyMongoError):
+        return False
+    finally:
+        if client is not None:
+            try:
+                client.drop_database(probe_db)
+            except PyMongoError:
+                pass
+            client.close()
+
+
+_MONGO_AVAILABLE = _probe_mongo()
 
 
 class ProjectNameHistoryServiceTest(unittest.TestCase):
@@ -114,6 +157,47 @@ class MongoProjectNameHistoryRepositoryTest(unittest.TestCase):
 
     def test_an_unknown_project_reads_as_none(self) -> None:
         self.assertIsNone(self.repo.get("never-purged"))
+
+
+@unittest.skipUnless(_MONGO_AVAILABLE, "no MongoDB reachable for integration tests")
+class DefaultAssemblyLiveMongoTest(unittest.TestCase):
+    """★ 조립 가드 — 배포가 실제로 Mongo에 쓰는가 (독립 검증 2026-08-05 HARDEN-1).
+
+    fake collection 셀은 **어댑터**를, HTTP 셀은 **endpoint**를 잰다. 둘 다 green인데
+    `_default_project_name_history_service()`가 in-memory를 돌려주면 **배포에서만** 이름이
+    사라진다 — 이 저장소가 관측 seam에서 이미 겪은 형태다(하네스가 `ObservedProvider`를
+    직접 만들어, `_default_*`가 감싸기를 빠뜨려도 56 passed였다).
+
+    그리고 실 드라이버여야만 보이는 것이 하나 더 있다: **pymongo는 BSON 날짜를 naive로
+    돌려준다.** fake는 넣은 것을 그대로 주므로 `_aware` 재부착이 빠져도 green이다.
+    """
+
+    def setUp(self) -> None:
+        self._client = MongoClient(_MONGO_URI, serverSelectionTimeoutMS=800)
+        self._db_name = f"project_name_history_test_{uuid.uuid4().hex}"
+
+    def tearDown(self) -> None:
+        self._client.drop_database(self._db_name)
+        self._client.close()
+
+    def test_the_default_factory_persists_to_mongo_and_reads_back_aware(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {"CORE_SOT_MONGO_URI": _MONGO_URI, "CORE_SOT_MONGO_DB": self._db_name},
+        ):
+            service = _default_project_name_history_service()
+
+        service.record_purged(project_id="p1", name="첫 장편")
+
+        doc = self._client[self._db_name]["project_name_history"].find_one({"_id": "p1"})
+        self.assertIsNotNone(doc, "배포 기본 조립이 Mongo에 쓰지 않았다")
+        self.assertEqual(set(doc), {"_id", "name", "purged_at"})
+        stored = service.get(project_id="p1")
+        self.assertEqual(stored.name, "첫 장편")
+        self.assertIsNotNone(
+            stored.purged_at.tzinfo,
+            "드라이버가 돌려준 naive 날짜에 UTC를 재부착하지 않았다",
+        )
 
 
 class _Collection:

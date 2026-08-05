@@ -876,6 +876,37 @@ class AdminProjectPurgeTest(unittest.TestCase):
         )
         self.assertEqual(memory_spy.purged, [], "derived 파기까지 진행됐다")
 
+    def test_the_name_survives_a_purge_that_dies_halfway_through(self) -> None:
+        """★ 8.2c의 진짜 값이 나오는 자리 (독립 검증 2026-08-05 HARDEN-2).
+
+        purge는 **중간에 죽을 수 있다** — core_sot을 지운 뒤 derived 단계에서 저장소가
+        나가면 503이고, 그 프로젝트는 `scripts/purge_reconciler.py`가 수습한다. 이름 행이
+        그 잔해에서 살아남지 못하면 **가장 수습이 어려운 경로에서만** 이름이 사라진다.
+
+        지금은 쓰기 순서가 그것을 보장한다(이름 → core_sot → derived). 이 셀은 그 보장을
+        **순서가 아니라 결과로** 단정한다 — 순서를 바꾸는 어떤 리팩터링도 여기서 걸린다.
+        """
+        if _STORAGE_FAILURE is None:
+            self.skipTest("pymongo is not installed")
+        project = self.core_sot.create_project(name="첫 장편")
+        self.core_sot.archive_project(project_id=project.id)
+
+        def _die(**_kwargs):
+            raise _STORAGE_FAILURE("derived storage unavailable")
+
+        self.memory_spy.purge_project = _die
+
+        response = self.client.post(
+            f"/admin/projects/{project.id}/purge", json={"reason": "정리 요청"}
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual([p.id for p in self.core_sot.list_projects()], [])
+        self.assertEqual(
+            self.name_history.get(project_id=project.id).name, "첫 장편",
+            "파기가 중간에 죽자 이름이 사라졌다 — reconciler가 수습할 잔해에 이름이 없다",
+        )
+
     def test_a_live_project_has_no_history_row(self) -> None:
         """Over-strict: N3=A는 **파기 시점에만** 쓴다.
 
