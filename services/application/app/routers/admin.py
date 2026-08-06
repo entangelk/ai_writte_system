@@ -21,27 +21,31 @@ from services.application.app.auth.users import (
     UserNotFound,
 )
 
-from ..main import (
+from ..api.models import (
     AccessGrantCreateRequest,
     AccessGrantCreateResponse,
-    AdminAuditEvent,
     AdminAuditEventListResponse,
     AdminObservabilityKpiResponse,
     AdminProjectListResponse,
     AdminUserListResponse,
     AdminUserPayload,
     CreateUserRequest,
-    NotFound,
     PurgeProjectRequest,
+)
+from ..api.errors import (
     _ERRORS_ADMIN,
     _ERRORS_ADMIN_400_409,
     _ERRORS_ADMIN_404,
     _ERRORS_ADMIN_404_409,
-    _REQUIRE_ADMIN,
     _STORAGE_ERRORS,
-    aggregate_global_kpi,
+)
+from ..api.dependencies import (
+    _REQUIRE_ADMIN,
     require_admin_user,
 )
+from services.application.app.auth.admin_audit import AdminAuditEvent
+from services.application.app.core_sot.service import NotFound
+from services.application.app.observability.kpi import aggregate_global_kpi
 
 
 def register_admin(

@@ -12,20 +12,24 @@ from fastapi import Depends, HTTPException, Request, Response
 from services.application.app.auth.cookies import SESSION_COOKIE_NAME, cookie_kwargs
 from services.application.app.auth.users import InvalidUserInput
 
-from ..main import (
+from ..api.models import (
     LoginRequest,
     LoginResponse,
     LogoutResponse,
     MyQuotaResponse,
-    QuotaEnforcementService,
     UserPayload,
+)
+from ..api.errors import (
     _ERRORS_401,
     _ERRORS_LOGIN_409,
     _ERRORS_LOGOUT,
+)
+from ..api.dependencies import (
     _REQUIRE_AUTH,
     current_user_or_none,
     require_authenticated_user,
 )
+from services.application.app.quota.enforcement import QuotaEnforcementService
 
 
 def register_auth(app, *, users, sessions) -> None:

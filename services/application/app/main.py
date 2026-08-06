@@ -752,11 +752,6 @@ def _env_float(name: str, default: float) -> float:
     return float(raw)
 
 
-def _env_int(name: str, default: int) -> int:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return int(raw)
 
 
 # The self-report's OUTPUT budget. It must exceed the longest prose preset
@@ -781,11 +776,6 @@ def _env_opt_int(name: str) -> int | None:
     return int(raw)
 
 
-def _env_bool(name: str, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.lower() not in {"0", "false", "no"}
 
 
 def _default_analysis_runner(
@@ -854,14 +844,6 @@ def _default_compare_service(memory: MemoryService) -> AnalysisCompareService:
     )
 
 
-# Fixed retrieval needs for a continue_scene generation (Phase 5.1). Mongo-served
-# needs (current/recent scene) require a current_position; when absent they yield
-# empty sections and generation proceeds with whatever context was retrieved.
-_WRITING_CONTINUE_SCENE_NEEDS = (
-    ContextNeed.CURRENT_SCENE,
-    ContextNeed.RECENT_SCENES,
-    ContextNeed.CANONICAL_MEMORY,
-)
 
 
 def _default_writing_service() -> WritingService | None:
@@ -1278,523 +1260,59 @@ def _build_chroma_vector_index():
 # key set of every envelope below and bites if a model narrows one.
 
 
-# HTTP error contract declarations (SoT v1.7.29 "HTTP 에러 응답 계약", H3 S2).
-#
-# Every error body in this app is the uniform ``{"detail": <string>}``
-# (``ErrorDetailResponse``), so declaring a status documents *which* failures an
-# endpoint can return — it never changes runtime behaviour. The status codes
-# below are the realistic set each endpoint actually raises, not the full app
-# vocabulary.
-#
-# 422 is deliberately absent everywhere: FastAPI documents request-schema
-# validation automatically and its body shape (``{"detail": [ ... ]}``) differs.
-_ERROR = {"model": ErrorDetailResponse}
-
-# The only 503 in the CRUD family is the data-integrity face: stored drafts that
-# predate the W3 ordered-unit invariant. The fix is the one-shot migration, not a
-# corrected request, so the description says so rather than leaving the reader to
-# infer it from a log (the exact gap H3 exists to close).
-_MIGRATION_503 = {
-    "model": ErrorDetailResponse,
-    "description": "Stored draft metadata predates the ordered-unit invariant "
-                   "(or is corrupt). Run scripts/migrate_ordered_units.py; "
-                   "retrying the request alone cannot succeed.",
-}
-
-# SoT v1.7.35 D2=A: the third face of 503 — the canonical store is configured
-# but *failing*. Unlike the other two faces the remedy is not a one-shot human
-# action but storage recovery, after which retrying the same request is the
-# correct recovery (promotion is idempotent, so a retry promotes only what is
-# left).
-#
-# Resolved lazily and exactly once, because main.py must import without pymongo:
-# the in-memory path needs no driver install (see _default_core_sot_service). A
-# missing driver yields an empty tuple, and `except ()` matches nothing — which
-# is the correct behaviour, since a deployment with no Mongo has no Mongo failure
-# to classify.
-#
-# Deliberately ONE named seam rather than a clause per call site: it covers both
-# the memory repository and the reindex outbox (each writes Mongo directly), and
-# the deferred repository-level exception taxonomy replaces this single point
-# instead of every endpoint (brief "Follow-up considerations").
-def _resolve_storage_error_types() -> tuple[type[BaseException], ...]:
-    try:
-        from pymongo.errors import PyMongoError
-    except ModuleNotFoundError:
-        return ()
-    return (PyMongoError,)
 
 
-_STORAGE_ERRORS = _resolve_storage_error_types()
 
 
-class AutoPromotePartialResponse(BaseModel):
-    # SoT v1.7.35 D1=B: 503 raised *after* some candidates were already promoted.
-    # Canonical mints are append-only and are not rolled back, so hiding them
-    # behind a bare error body would make the response disagree with the stored
-    # state. Same shape as the success envelope plus the failure reason; the
-    # partial-envelope precedent is WritingAcceptAnalysisPartial (accept 502).
-    #
-    # Returned via JSONResponse, so this model is responses={} documentation only
-    # and the exact-key regression is its runtime lock (same pattern as the
-    # writing partials). ``promoted`` stays untyped item-wise because the success
-    # arm of this endpoint is an untyped dict today — a narrower model here would
-    # document a wire shape the endpoint does not actually promise.
-    auto_promotion_threshold: float | None
-    promoted: list[dict[str, object]]
-    promotion_error: str
 
 
-_AUTO_PROMOTE_503 = {
-    "model": Union[AutoPromotePartialResponse, ErrorDetailResponse],
-    "description": "The canonical store failed mid-promotion. Every memory this "
-                   "call minted is returned in `promoted` — including one whose "
-                   "mint succeeded but whose reindex enqueue then failed — and "
-                   "none of them are rolled back, so `promoted` always matches "
-                   "what is stored. `promotion_error` names the stage that "
-                   "failed. Recover the store and retry the same request: "
-                   "promotion is idempotent, so the retry promotes only what is "
-                   "left — and a reindex enqueue lost after its mint is repaired "
-                   "by that same retry, because a replayed promotion re-enqueues.",
-}
-
-# SoT v1.7.38: the storage face of 503 is reachable from *every* endpoint that
-# touches Mongo — which is every endpoint except /health — because a global
-# handler (see create_app) maps a driver failure to 503 instead of letting it
-# leak as an opaque 500. Declaring it everywhere is what keeps OpenAPI the
-# mechanical truth (D3=A): a status the runtime can return must appear here.
-#
-# Endpoints whose 503 already carried another face keep that wording and gain
-# this sentence, because one status code gets one declaration and the reader
-# needs to know both remedies apply.
-_STORAGE_503_NOTE = (
-    " The canonical store may also be unreachable or failing; in that case "
-    "recover it and retry the same request unchanged."
-)
-
-_STORAGE_503 = {
-    "model": ErrorDetailResponse,
-    "description": "The canonical store is unreachable or failing. Recover it "
-                   "and retry the same request; the request itself needs no "
-                   "change.",
-}
 
 
-def _with_storage_note(declaration: dict) -> dict:
-    return {**declaration, "description": declaration["description"] + _STORAGE_503_NOTE}
 
 
-_MIGRATION_503 = _with_storage_note(_MIGRATION_503)
-
-# Auth (multi-user D2=A). 401 first appeared on the login endpoint (bad
-# credentials) and the session-reading endpoint (missing/expired/revoked cookie).
-# Project-scoped declarations gain 403 through ``_owned`` below.
-_ERRORS_401: dict[int | str, dict] = {401: _ERROR, 503: _STORAGE_503}
-# C-6: login additionally answers 409 when the account still carries a password
-# somebody else chose. Only /auth/login declares it — no other operation gains a
-# status, because the enforcement point is *obtaining a session*, not using one.
-_ERRORS_LOGIN_409: dict[int | str, dict] = {
-    400: _ERROR, 401: _ERROR, 409: _ERROR, 503: _STORAGE_503,
-}
-# Logout is the one non-/health operation that stays reachable without a session:
-# it is idempotent by design so a client can always reach a known-logged-out
-# state. It therefore keeps a declaration with no 401 — hence its own constant,
-# so that adding 401 to the shared storage declaration cannot reach it.
-_ERRORS_LOGOUT: dict[int | str, dict] = {503: _STORAGE_503}
 
 
-# D8-3a: every protected operation can answer 401, so the declaration is added
-# once here instead of 61 times at the call sites. H3 (D3=A) makes OpenAPI the
-# mechanical truth about what a request can get back, and after this slice a
-# sessionless request to any of them gets 401 before the handler runs.
-#
-# Central, but not a substitute for the guard: the wrapper only makes the
-# *declaration* right. An operation that gets the declaration and forgets
-# ``dependencies=_REQUIRE_AUTH`` would be documented as protected while staying
-# open — which is why the exhaustive guard checks the route, not the spec.
-def _protected(declaration: dict[int | str, dict]) -> dict[int | str, dict]:
-    return {401: _ERROR, **declaration}
 
 
-def _owned(declaration: dict[int | str, dict]) -> dict[int | str, dict]:
-    """Declare the 403 face added by the project ownership dependency."""
-    return {403: _ERROR, **declaration}
 
 
-def _billable(declaration: dict[int | str, dict]) -> dict[int | str, dict]:
-    """Declare the faces request-quota enforcement adds (Phase 8 Slice 8.3, Q5=B).
-
-    Three statuses because the frontend has to *do* three different things:
-
-    * ``402`` — the window's quota is spent. Nothing the caller can do until it
-      resets (or an administrator raises the limit / a plan is bought, which is
-      the 8.6 axis this code deliberately points at).
-    * ``429`` — the same request is already in progress, or was just made. This
-      one is retryable *right now* by re-sending with ``X-Confirm-Duplicate``.
-    * ``503`` — the quota stores could not answer (Q4=A, fail-closed). It rides
-      the storage face every protected operation already declares.
-
-    ``403`` is deliberately **not** added here: project-scoped operations already
-    declare it through ``_owned``, and a suspended account reuses that status
-    (Q5=B) rather than inventing a fourth. The two are told apart by ``detail``
-    for display only — H3 still forbids branching on that string.
-    """
-    return {402: _ERROR, 429: _ERROR, **declaration}
 
 
-def _admin(declaration: dict[int | str, dict]) -> dict[int | str, dict]:
-    """Declare the 403 face added by the admin dependency (D8-5).
-
-    Same status as ``_owned`` and deliberately a separate helper: the two 403s
-    answer different questions ("not your project" vs "not an admin"), and a
-    single shared helper would make the declaration guards unable to say which
-    boundary an operation is behind.
-    """
-    return {403: _ERROR, **declaration}
 
 
-_ERRORS_STORAGE: dict[int | str, dict] = _protected({503: _STORAGE_503})
-_ERRORS_404: dict[int | str, dict] = _protected({404: _ERROR, 503: _STORAGE_503})
-_ERRORS_404_502: dict[int | str, dict] = _protected(
-    {404: _ERROR, 502: _ERROR, 503: _STORAGE_503}
-)
-_ERRORS_404_STORAGE: dict[int | str, dict] = _protected(
-    {404: _ERROR, 503: _AUTO_PROMOTE_503}
-)
-_ERRORS_400_404: dict[int | str, dict] = _protected({
-    400: _ERROR, 404: _ERROR, 503: _STORAGE_503,
-})
-_ERRORS_404_409: dict[int | str, dict] = _protected({
-    404: _ERROR, 409: _ERROR, 503: _STORAGE_503,
-})
-_ERRORS_400_404_409: dict[int | str, dict] = _protected({
-    400: _ERROR, 404: _ERROR, 409: _ERROR, 503: _STORAGE_503,
-})
-# D8-5 admin surface. 403 = "not an admin" (see _admin), and it is additive over
-# the same 401/503 every protected operation carries.
-_ERRORS_ADMIN: dict[int | str, dict] = _admin(_protected({503: _STORAGE_503}))
-_ERRORS_ADMIN_400_409: dict[int | str, dict] = _admin(_protected({
-    400: _ERROR, 409: _ERROR, 503: _STORAGE_503,
-}))
-_ERRORS_ADMIN_404_409: dict[int | str, dict] = _admin(_protected({
-    404: _ERROR, 409: _ERROR, 503: _STORAGE_503,
-}))
-# Access-grant issuance: the target project must exist, but there is no project
-# lifecycle conflict on this surface. Purge has its own 404/409 declaration.
-_ERRORS_ADMIN_404: dict[int | str, dict] = _admin(_protected({
-    404: _ERROR, 503: _STORAGE_503,
-}))
-
-_ERRORS_404_MIGRATION: dict[int | str, dict] = _protected(
-    {404: _ERROR, 503: _MIGRATION_503}
-)
-_ERRORS_400_404_MIGRATION: dict[int | str, dict] = _protected({
-    400: _ERROR, 404: _ERROR, 503: _MIGRATION_503,
-})
-_ERRORS_404_409_MIGRATION: dict[int | str, dict] = _protected({
-    404: _ERROR, 409: _ERROR, 503: _MIGRATION_503,
-})
-
-# The analysis track's 503 is the *other* face: a collaborator the endpoint needs
-# (the extraction runner, the compare judge) is absent from this deployment. The
-# request is fine, so — like the migration face — retrying alone cannot help; the
-# operator action is a deployment change. One constant covers both endpoints
-# because the runtime ``detail`` already names which collaborator is missing, and
-# the semantics are identical.
-_CONFIG_503 = _with_storage_note({
-    "model": ErrorDetailResponse,
-    "description": "A collaborator this endpoint requires is not configured in "
-                   "this deployment. Configure it in the deployment environment; "
-                   "retrying the request alone cannot succeed.",
-})
-
-def _provider_error_status(error: ProviderError) -> int:
-    """ProviderError → 이 API의 상태코드. **한 곳에만 둔다.**
-
-    종전에는 이 매핑이 `504 if TIMEOUT else 502` 형태로 **9개 호출부에 복제**돼 있었다.
-    K-3 창 가드가 세 번째 분기를 더하면서 복제본 하나만 놓쳐도 같은 사건이 endpoint마다
-    다른 상태코드로 나가게 되므로 한 함수로 모았다.
-
-    - `TIMEOUT` → **504**: 상류가 제때 답하지 않았다(v1.6.34 taxonomy).
-    - `CONTEXT_WINDOW_EXCEEDED` → **400**: 창 가드가 **모델을 부르기 전에** 거부했다
-      (K-3, 오너 2026-07-30). 상류 장애가 아니라 **요청이 너무 큰 것**이므로 4xx이며,
-      같은 요청의 재시도는 반드시 같은 실패로 끝난다. `detail`이 입력·출력상한·창 수치를
-      실어 나르므로 그 자체가 오너가 말한 "경고"다.
-    - 그 밖의 provider 실패 → **502**: 상류는 있는데 실패했다.
-    """
-    if error.code is ProviderErrorCode.TIMEOUT:
-        return 504
-    if error.code is ProviderErrorCode.CONTEXT_WINDOW_EXCEEDED:
-        return 400
-    return 502
 
 
-# 400은 K-3 창 가드가 이 endpoint에도 닿기 때문에 있다(오너 2026-07-30) — 요청이 창을
-# 넘으면 모델을 부르기 전에 거부되고, 그 얼굴은 상류 장애(502)가 아니라 4xx다.
-_ERRORS_404_502_CONFIG: dict[int | str, dict] = _protected({
-    400: _ERROR, 404: _ERROR, 502: _ERROR, 503: _CONFIG_503,
-})
-_ERRORS_400_404_409_502_CONFIG: dict[int | str, dict] = _protected({
-    400: _ERROR, 404: _ERROR, 409: _ERROR, 502: _ERROR, 503: _CONFIG_503,
-})
-# context-search is the only endpoint outside the writing track that can exhaust
-# its own budget, so 504 first appears in the declared surface here.
-_ERRORS_400_404_502_504_CONFIG: dict[int | str, dict] = _protected({
-    400: _ERROR, 404: _ERROR, 502: _ERROR, 503: _CONFIG_503, 504: _ERROR,
-})
-
-# Slice 8.3: the same three declarations, plus the quota faces, for the nine
-# billable operations. Separate constants rather than widening the ones above,
-# because those are shared with free operations — adding 402/429 there would
-# document a quota on endpoints that have none.
-_BILLABLE_404_502_CONFIG: dict[int | str, dict] = _billable(
-    _ERRORS_404_502_CONFIG)
-_BILLABLE_400_404_409_502_CONFIG: dict[int | str, dict] = _billable(
-    _ERRORS_400_404_409_502_CONFIG)
-_BILLABLE_400_404_502_504_CONFIG: dict[int | str, dict] = _billable(
-    _ERRORS_400_404_502_504_CONFIG)
 
 
-# --- Authentication enforcement (D8-3a) --------------------------------------
-# D7=A: enforcement is a FastAPI *dependency* declared per operation, backed by
-# an exhaustive guard — not middleware (path patterns become the policy and new
-# routes open silently) and not the service layer (every signature changes).
-#
-# Module level rather than a create_app closure on purpose. A closure would be a
-# different function object per app, so neither ``app.dependency_overrides`` nor
-# the exhaustive guard could name it; the guard has to look for exactly one
-# identity on every route or it cannot tell a protected route from an open one.
-def current_user_or_none(request: Request):
-    """Resolve the session cookie to a live, still-active user, or None."""
-    raw_token = request.cookies.get(SESSION_COOKIE_NAME)
-    if not raw_token:
-        return None
-    session = request.app.state.sessions.resolve(raw_token)
-    if session is None:
-        return None
-    user = request.app.state.users.get_by_id(session.user_id)
-    # A user disabled or deleted after the session was minted must not keep
-    # working just because the cookie is still within its TTL.
-    if user is None or not user.is_active:
-        return None
-    return user
 
 
-def require_authenticated_user(request: Request):
-    """Fail closed: no live session means the operation does not run at all."""
-    user = current_user_or_none(request)
-    if user is None:
-        raise HTTPException(status_code=401, detail="not authenticated")
-    return user
 
 
-# C-2 read-only. HEAD rides along with GET because Starlette answers it from the
-# same route; both are side-effect free by HTTP contract.
-_GRANTED_METHODS = frozenset({"GET", "HEAD"})
 
 
-def require_project_owner(
-    request: Request,
-    project_id: str,
-    current=Depends(require_authenticated_user),
-):
-    """Allow the owning user, or an administrator holding a live access grant.
-
-    Missing projects retain their 404 face.
-
-    D8-5e (F1=C, owner 2026-08-02): the grant is the *only* way past ownership,
-    and it is narrower than ownership in two ways that are both enforced here:
-
-    * **read-only (C-2)** — a grant admits GET/HEAD and nothing else. Anything
-      that could write is refused even while the grant is live, so an
-      administrator can never edit someone else's manuscript. The test is the
-      HTTP method rather than a hand-kept list of "read operations": a list
-      would silently misclassify the next endpoint someone adds, and failing
-      closed on an unlisted method is the safe direction.
-    * **still an administrator** — the grant is checked *together with*
-      ``is_admin``, not instead of it. A grant issued to someone who has since
-      lost the role stops working immediately rather than outliving it.
-
-    ``owner_id is None`` keeps denying everyone (E1=A) — a grant does not adopt
-    an unowned project.
-    """
-    try:
-        project = request.app.state.core_sot.get_project(project_id=project_id)
-    except NotFound as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if project.owner_id is not None and project.owner_id == current.id:
-        return project
-    if (
-        # E1=A first, on this branch too. Omitting it here (while the owner
-        # branch had it) was the 2026-08-02 verification Blocking: an unowned
-        # project opened to any admin holding a grant, contradicting the three
-        # places the SoT says otherwise — including the docstring above.
-        project.owner_id is not None
-        and current.is_admin
-        and request.method in _GRANTED_METHODS
-        and (grant := request.app.state.access_grants.active(
-            admin_user_id=current.id, project_id=project_id
-        ))
-        is not None
-    ):
-        # C-3: record what the grant was actually used for. This dependency is
-        # the single choke point — the grant is honoured nowhere else — so the
-        # record cannot be bypassed by adding an endpoint.
-        #
-        # Deliberately **not** isolated: a failure here propagates and the
-        # request fails (storage 503 face). An access nobody can account for is
-        # what F1=C exists to prevent, so letting the read through unrecorded
-        # would quietly restore the state C was chosen over.
-        request.app.state.access_grants.record_use(
-            grant, method=request.method, path=request.url.path
-        )
-        return project
-    raise HTTPException(status_code=403, detail="forbidden")
 
 
-# --- Request quota enforcement (Phase 8 Slice 8.3) ---------------------------
-# 오너 결정 2026-08-04, 브리프 ``08-3-quota-enforcement-decisions.md``.
-# Q7=A: 시행은 **operation 마다 선언하는 dependency** 다 — 인증(D7=A)이 미들웨어를
-# 기각한 이유가 그대로 적용된다(경로 패턴이 정책이 되고 새 route 가 조용히 열린다).
-# ``_REQUIRE_PROJECT_OWNER`` **뒤에** 선언하므로 404·403 은 차감 앞에서 끝난다.
-#
-# ★ 정산(원장 → 잠금 해제)이 dependency 의 ``yield`` 뒤가 아니라 **route wrapper**
-# 에 있는 이유(구현이 드러낸 제약, 결정 변경 아님): Q1-a=A 는 "2xx 그리고 provider
-# 호출"을 요구하는데 **yield dependency 는 응답 상태코드를 볼 수 없다.** 이 앱의
-# partial envelope 6곳과 async 202 는 예외가 아니라 ``JSONResponse`` 를 *반환*하므로
-# dependency 의 exit 에는 아무 신호도 오지 않는다 — 그 자리에서 정산하면 **일하고도
-# 실패한 응답(partial envelope)과 접수만 한 202 가 과금된다.** 그래서 입장은
-# dependency(선언·전수 가드 가능)가, 정산은 실제 응답을 보는 wrapper 가 맡는다.
-# wrapper 는 정책을 **정하지 않는다**: dependency 가 ``request.state`` 에 남긴
-# 영수증이 있을 때만 동작하므로 무료 경로는 그대로 지나간다.
-_QUOTA_STATE = "quota_charge"
+
+
+
+
+
+
+
+
+
 _QUOTA_TALLY_STATE = "quota_tally"
-#: Q6=C. 확인은 헤더로 받는다 — 이 저장소의 쿼리 파라미터 선례가 전부 GET/DELETE 라
-#: POST 의 상태 변경 의도를 URL 에 싣지 않는다. 값의 존재만 본다(비밀이 아니다).
-CONFIRM_DUPLICATE_HEADER = "X-Confirm-Duplicate"
-
-#: Q5=B — 프론트가 **다르게 행동해야 하는 사건이 셋**이라 코드가 셋이다.
-#: 429 "확인하면 지금 통과" / 402 "이번 창에는 방법이 없다" / 403 "관리자만 푼다".
-_QUOTA_REFUSAL_STATUS: dict[QuotaRefusalReason, int] = {
-    QuotaRefusalReason.LOCKED: 429,
-    QuotaRefusalReason.EXCEEDED: 402,
-    QuotaRefusalReason.SUSPENDED: 403,
-}
 
 
-def _billable_action(request: Request) -> str:
-    """이 요청이 소비하는 유료 동작. 분류표(8.0 B6)가 정본이다.
-
-    시행 dependency 가 분류되지 않은 route 에 붙는 것은 배선 결함이며, 그때
-    ``dedupe.py`` 와 **같은 예외**를 올린다 — 두 표(분류·매핑) 중 어느 쪽이
-    비어 있든 호출자가 같은 얼굴(503)로 닫을 수 있게(독립 검증 2026-08-04 H-3).
-    """
-    route = request.scope.get("route")
-    path = getattr(route, "path", request.url.path)
-    try:
-        return BILLABLE_ACTION_BY_OPERATION[(path, request.method.lower())]
-    except KeyError as exc:
-        raise UnclassifiedBillableAction(
-            f"{request.method} {path} is not in the billable action table"
-        ) from exc
 
 
-async def _request_body_mapping(request: Request) -> dict:
-    """이미 읽힌 본문을 dict 로. 본문 없는 두 경로(analysis_*)는 ``{}`` 다.
-
-    FastAPI 는 dependency 를 풀기 **전에** 본문을 읽고 Starlette 이 그것을 캐시하므로
-    여기서 다시 읽어도 endpoint 의 파싱을 굶기지 않는다(Q7=A 의 구현 확인 항목).
-    """
-    raw = await request.body()
-    if not raw:
-        return {}
-    try:
-        parsed = await request.json()
-    except Exception:  # noqa: BLE001 — 본문이 JSON 이 아니면 키가 없는 것과 같다
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
 
 
-async def enforce_quota(
-    request: Request,
-    x_confirm_duplicate: Annotated[
-        str | None, Header(alias=CONFIRM_DUPLICATE_HEADER)
-    ] = None,
-    current=Depends(require_authenticated_user),
-):
-    """유료 요청 1건의 입장 (Q1=C·Q3=E·Q3-a=A·Q4=A·Q5=B·Q6=C·Q9=A).
-
-    통과하면 영수증을 ``request.state`` 에 남기고, 그 요청이 실제로 성공했을 때만
-    wrapper 가 원장에 한 행을 쓴다. 저장소가 실패하면 예외가 그대로 올라가
-    전역 handler 의 503 이 된다(Q4=A — 계량 불능은 무료 제공이 아니다).
-    """
-    enforcement: QuotaEnforcementService | None = getattr(
-        request.app.state, "quota", None
-    )
-    if enforcement is None:
-        # 조립되지 않은 배포는 유료 경로를 열지 않는다(fail-closed). 인증·소유권과
-        # 달리 여기는 "없으면 통과"가 곧 무료 제공이라 503 이 옳은 얼굴이다.
-        raise HTTPException(
-            status_code=503, detail="request quota enforcement is not configured"
-        )
-    body = await _request_body_mapping(request)
-    # 분류·매핑 조회를 admit 밖에 둔다: 여기서 나는 실패는 저장소 장애가 아니라
-    # **배선 결함**이고(유료 route 인데 표에 없다), 그 얼굴을 아래에서 따로 정한다.
-    try:
-        action = _billable_action(request)
-        dedupe_key = resolve_dedupe_key(
-            action,
-            body=body,
-            path_params=request.path_params,
-            server_key=uuid.uuid4().hex,
-        )
-    except UnclassifiedBillableAction as exc:
-        # 독립 검증 2026-08-04 H-3. 가드가 분류표와 매핑표의 1:1 을 단정하므로
-        # **도달할 수 없어야 하는 자리**지만, 도달한다면 그 요청은 중복 방지 없이
-        # 도는 유료 요청이다 — 통과시키지 않고 Q4=A 와 같은 503 으로 닫는다
-        # (미매핑 500 을 공개 계약에 흘리지 않는다).
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    # Q6=C: 값의 존재가 아니라 **내용**이 확인이다. 빈 헤더를 확인으로 읽으면
-    # 프록시나 클라이언트가 실수로 붙인 빈 값이 사용량 1회를 더 쓰게 된다
-    # (독립 검증 2026-08-04 H-5).
-    confirmed = bool(x_confirm_duplicate and x_confirm_duplicate.strip())
-    try:
-        charge = enforcement.admit(
-            user_id=current.id,
-            member_created_at=current.created_at,
-            action=action,
-            target_project_id=request.path_params["project_id"],
-            dedupe_key=dedupe_key,
-            confirmed=confirmed,
-        )
-    except QuotaRefused as exc:
-        headers = (
-            {"Retry-After": str(exc.retry_after_seconds)}
-            if exc.retry_after_seconds is not None else None
-        )
-        raise HTTPException(
-            status_code=_QUOTA_REFUSAL_STATUS[exc.reason],
-            detail=exc.detail,
-            headers=headers,
-        ) from exc
-    except AdmissionUnavailable as exc:
-        # §Q3-a 계약 3: 초과를 허용하느니 요청을 실패시킨다.
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    setattr(request.state, _QUOTA_STATE, charge)
-    # Q6=C: 확인은 잠금만 뚫는 것이 아니라 Q8=C 의 상태 가드도 함께 통과시킨다 —
-    # 사용자에게는 통로가 하나여야 한다. endpoint 가 이 값을 읽는다.
-    request.state.quota_confirmed = confirmed
-    return charge
 
 
-def quota_confirmed(request: Request) -> bool:
-    """이 요청이 확인 헤더를 달고 왔는가(무료 경로에서는 항상 ``False``)."""
-    return bool(getattr(request.state, "quota_confirmed", False))
 
 
-def quota_charge(request: Request) -> QuotaCharge:
-    """이 요청의 입장 영수증. 유료 경로에서만 존재한다(없으면 배선 결함이다)."""
-    return getattr(request.state, _QUOTA_STATE)
+
 
 
 class QuotaSettledRoute(APIRoute):
@@ -1841,351 +1359,78 @@ def _is_charged(status_code: int | None, provider_calls: int) -> bool:
     return provider_calls > 0
 
 
-def require_admin_user(current=Depends(require_authenticated_user)):
-    """Allow only administrators (D8-5, D6=A).
-
-    403 rather than 401: the session is live and re-logging in changes nothing,
-    which is the same distinction the ownership boundary draws. It is also *not*
-    404 — hiding the admin surface would mean the frontend could not tell "no
-    such endpoint" from "not for you".
-    """
-    if not current.is_admin:
-        raise HTTPException(status_code=403, detail="forbidden")
-    return current
-
-
-# One shared list so every protected operation declares the *same* dependency
-# object. ``dependencies=`` copies it per route, so sharing is safe.
-_REQUIRE_AUTH = [Depends(require_authenticated_user)]
-_REQUIRE_PROJECT_OWNER = [
-    Depends(require_authenticated_user),
-    Depends(require_project_owner),
-]
-# D8-5: the admin surface is a third tier, layered the same way — the outer list
-# names the authentication dependency so the exhaustive guard can see it on the
-# route, and the inner dependency re-declares it so the check cannot run against
-# an unauthenticated request even if the outer layer is ever dropped.
-_REQUIRE_ADMIN = [
-    Depends(require_authenticated_user),
-    Depends(require_admin_user),
-]
-# Slice 8.3 (Q7=A): the nine billable operations. Enforcement is declared **after**
-# ownership so 404 (no such project) and 403 (not yours) are answered before any
-# quota is touched — that ordering is the whole reason those two statuses are
-# structurally free, and reversing it is what the over-strict guard watches for.
-_REQUIRE_PROJECT_OWNER_BILLABLE = [
-    *_REQUIRE_PROJECT_OWNER,
-    Depends(enforce_quota),
-]
 
 
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-    # C-6. Present only when the account must replace an administrator-set
-    # password. Optional so the ordinary login body is unchanged; supplying it
-    # when no change is required is refused rather than silently ignored (see
-    # the handler), because "my password changed" must never be a no-op.
-    new_password: str | None = None
 
 
-class UserPayload(BaseModel):
-    # Deliberately no password_hash: the wire model is the reason a hash cannot
-    # leak by someone later returning the domain object directly.
-    id: str
-    username: str
-    is_admin: bool
 
 
-class LoginResponse(BaseModel):
-    user: UserPayload
 
 
-class LogoutResponse(BaseModel):
-    ok: bool
 
 
-class QuotaWindowPayload(BaseModel):
-    """한 창(일 또는 주)의 상태. ``limit=None`` 은 그 창이 무제한이라는 뜻이다."""
 
-    limit: int | None
-    used: int
-    remaining: int | None
-    resets_at: datetime
 
 
-class MyQuotaResponse(BaseModel):
-    """회원이 보는 자기 사용량 (Slice 8.4 W5=B, operation 76).
 
-    ``remaining`` 이 **표시 단위**다(8.2 §0.2 — 두 창을 모두 통과해야 하므로 작은
-    쪽이 실제 잔여다). 창별 값을 함께 주는 것은 "왜 20회가 아니라 3회인가"의 답이
-    거기 있기 때문이고, 그 답이 없으면 지원 대화가 성립하지 않는다.
 
-    ``status`` 는 한도와 **다른 축**이다(8.1 P5): ``suspended`` 는 잔여가 남아
-    있어도 막히며 푸는 사람이 다르다(관리자). 화면이 그 둘을 같은 말로 그리면
-    "관리자에게 문의"가 사라진다.
-    """
 
-    remaining: int | None
-    unlimited: bool
-    status: str
-    daily: QuotaWindowPayload
-    weekly: QuotaWindowPayload
 
 
-class AdminUserPayload(BaseModel):
-    # Same no-password_hash reason as UserPayload, and one field more: the admin
-    # list is the only surface where whether an account is disabled is the point.
-    id: str
-    username: str
-    is_admin: bool
-    is_active: bool
 
 
-class AdminUserListResponse(BaseModel):
-    users: list[AdminUserPayload]
 
 
-class CreateUserRequest(BaseModel):
-    # The admin supplies the initial password, exactly as scripts/create_user.py
-    # does. Generating and delivering a temporary one needs a channel this
-    # deployment does not have.
-    username: str
-    password: str
-    is_admin: bool = False
 
 
-class ProjectPayload(BaseModel):
-    id: str
-    name: str
-    archived: bool
 
 
-class ProjectListResponse(BaseModel):
-    projects: list[ProjectPayload]
 
 
-NonBlankBriefString = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=1, pattern=r"\S")
-]
 
 
-class AccessGrantCreateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
-    # C-5: required, and non-blank. "왜 봤는가" is the whole value of the audit
-    # record, and a blank string would satisfy a plain `str` while recording
-    # nothing. The service re-checks so non-HTTP callers cannot skip it.
-    reason: NonBlankBriefString
 
 
-class AccessGrantPayload(BaseModel):
-    id: str
-    project_id: str
-    admin_user_id: str
-    reason: str
-    created_at: datetime
-    expires_at: datetime
 
 
-class AccessGrantCreateResponse(BaseModel):
-    grant: AccessGrantPayload
 
 
-class AccessLogEntryPayload(BaseModel):
-    grant_id: str
-    admin_user_id: str
-    method: str
-    path: str
-    at: datetime
-    reason: str
 
 
-class AccessLogResponse(BaseModel):
-    entries: list[AccessLogEntryPayload]
-
-
-class AdminProjectPayload(BaseModel):
-    # D8-5b. One field more than the public payload: `owner_id`, which is the
-    # whole point of an administrator's list (whose project is this). The public
-    # `_project_payload` deliberately still omits it — exposing ownership on the
-    # product surface is a separate, deferred decision (D8-2c).
-    id: str
-    name: str
-    archived: bool
-    owner_id: str | None
-
-
-class AdminProjectListResponse(BaseModel):
-    projects: list[AdminProjectPayload]
-
-
-class PurgeProjectRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    reason: NonBlankBriefString
-
-
-class AdminAuditEventPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
-    id: str
-    operation_id: str
-    admin_user_id: str
-    action: str
-    target_type: str
-    target_project_id: str
-    reason: str
-    outcome: str
-    at: datetime
-    error_kind: str | None
 
 
-class AdminAuditEventListResponse(BaseModel):
-    events: list[AdminAuditEventPayload]
 
-PROJECT_BRIEF_STYLE_EXAMPLES_MAX_ITEMS = 3
-PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS = 1000
 
 
-def _project_brief_style_example_limits() -> tuple[int, int]:
-    max_items = _env_int(
-        "PROJECT_BRIEF_STYLE_EXAMPLES_MAX_ITEMS",
-        PROJECT_BRIEF_STYLE_EXAMPLES_MAX_ITEMS,
-    )
-    max_chars = _env_int(
-        "PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS",
-        PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS,
-    )
-    for name, value in (
-        ("PROJECT_BRIEF_STYLE_EXAMPLES_MAX_ITEMS", max_items),
-        ("PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS", max_chars),
-    ):
-        if value < 1:
-            raise ValueError(f"{name} must be at least 1")
-    return max_items, max_chars
 
 
-def _writing_output_length_tokens() -> dict[OutputLength, int]:
-    # 문체/분량 슬라이스 증분 2 (D3=A). The SERVER owns the preset→output-token
-    # mapping; the confirmed defaults are 1024/2048/4096 and each is env-adjustable
-    # with fail-loud validation (mirrors `_project_brief_style_example_limits`,
-    # increment 1's sibling precedent). `short` defaults to the existing
-    # WRITING_GENERATE_MAX_TOKENS so operators who already tuned it keep that value.
-    presets = {
-        OutputLength.SHORT: _env_int(
-            "WRITING_OUTPUT_LENGTH_SHORT",
-            _env_int("WRITING_GENERATE_MAX_TOKENS", 1024),
-        ),
-        OutputLength.MEDIUM: _env_int("WRITING_OUTPUT_LENGTH_MEDIUM", 2048),
-        OutputLength.LONG: _env_int("WRITING_OUTPUT_LENGTH_LONG", 4096),
-    }
-    for length, value in presets.items():
-        if value < 1:
-            raise ValueError(
-                f"WRITING_OUTPUT_LENGTH_{length.name} must be at least 1"
-            )
-    return presets
 
 
-class ProjectBriefVersionPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
-    id: NonBlankBriefString
-    project_id: NonBlankBriefString
-    version_number: Annotated[int, Field(ge=1)]
-    premise: NonBlankBriefString | None
-    genre: NonBlankBriefString | None
-    tone: NonBlankBriefString | None
-    pov: NonBlankBriefString | None
-    constraints: list[NonBlankBriefString] = Field(
-        json_schema_extra={"uniqueItems": True}
-    )
-    style_rules: list[NonBlankBriefString] = Field(
-        json_schema_extra={"uniqueItems": True}
-    )
-    preferred_patterns: list[NonBlankBriefString] = Field(
-        json_schema_extra={"uniqueItems": True}
-    )
-    forbidden_patterns: list[NonBlankBriefString] = Field(
-        json_schema_extra={"uniqueItems": True}
-    )
-    style_examples: list[NonBlankBriefString] = Field(
-        json_schema_extra={"uniqueItems": True}
-    )
 
-class ProjectBriefGetResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
-    brief: ProjectBriefVersionPayload | None
 
 
-class ProjectBriefPutResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
-    brief: ProjectBriefVersionPayload
-    idempotent_replay: bool
 
 
-class ProjectBriefVersionListResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
-    versions: list[ProjectBriefVersionPayload]
 
 
-class DraftPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
-    id: str
-    project_id: str
-    title: str
-    archived: bool
-    unit_kind: UnitKind
-    position: int = Field(ge=1)
 
 
-class DraftListResponse(BaseModel):
-    drafts: list[DraftPayload]
 
 
-class DraftVersionMetaPayload(BaseModel):
-    # idempotency_key is intentionally absent: an internal save token, not part
-    # of the public read surface (mirrors _version_meta_payload).
-    id: str
-    project_id: str
-    draft_id: str
-    version_number: int
-    snapshot_id: str
 
 
-class DraftVersionListResponse(BaseModel):
-    versions: list[DraftVersionMetaPayload]
 
 
-class SnapshotDetailPayload(BaseModel):
-    id: str
-    project_id: str
-    draft_id: str
-    version_id: str
-    raw_text: str
-    content_hash: str
 
 
-class SourceBlockDetailPayload(BaseModel):
-    id: str
-    project_id: str
-    snapshot_id: str
-    block_index: int
-    kind: BlockKind
-    start_offset: int
-    end_offset: int
-    text: str
 
-
-class DraftVersionDetailResponse(BaseModel):
-    draft_version: DraftVersionMetaPayload
-    snapshot: SnapshotDetailPayload
-    blocks: list[SourceBlockDetailPayload]
 
 
 # The save surface is deliberately narrower than the read surface above and
@@ -2196,440 +1441,81 @@ class DraftVersionDetailResponse(BaseModel):
 # separate declarations.
 
 
-class SavedDraftVersionPayload(BaseModel):
-    id: str
-    version_number: int
-    snapshot_id: str
-
-
-class SavedSnapshotPayload(BaseModel):
-    id: str
-    content_hash: str
-
-
-class SavedSourceBlockPayload(BaseModel):
-    id: str
-    kind: BlockKind
-    start_offset: int
-    end_offset: int
-
-
-class SaveDraftResponse(BaseModel):
-    draft_version: SavedDraftVersionPayload
-    snapshot: SavedSnapshotPayload
-    blocks: list[SavedSourceBlockPayload]
-    idempotent_replay: bool
-
-
-class DraftVersionExportResponse(BaseModel):
-    format: str
-    filename: str
-    content_type: str
-    body: str
-    project_id: str
-    draft_id: str
-    version_id: str
-    version_number: int
-    snapshot_id: str
-    content_hash: str
-
-
-class ProjectExportUnitModel(BaseModel):
-    draft_id: str
-    title: str
-    unit_kind: str | None
-    position: int | None
-    version_id: str
-    version_number: int
-    snapshot_id: str
-    content_hash: str
-
-
-class ProjectExportManifest(BaseModel):
-    project_id: str
-    format: str
-    include_archived: bool
-    units: list[ProjectExportUnitModel]
-
-
-class ProjectExportResponse(BaseModel):
-    format: str
-    filename: str
-    content_type: str
-    body: str
-    project_id: str
-    include_archived: bool
-    manifest: ProjectExportManifest | None
-
-
-# Project/draft naming constraint (SoT v1.6.95, D3=A). Validation lives at the
-# HTTP boundary: every client reaches Core SOT through it, so rejecting here
-# closes the blank-name hole without changing the Core SOT contract. Whitespace
-# is stripped BEFORE min_length runs, so "  x  " is stored as "x" and a
-# whitespace-only name is a 422 rather than a blank name in the canonical store.
-NonBlankName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
-class CreateProjectRequest(BaseModel):
-    name: NonBlankName
 
 
-class PutProjectBriefRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
-    base_version_id: NonBlankBriefString | None
-    idempotency_key: NonBlankBriefString
-    premise: NonBlankBriefString | None
-    genre: NonBlankBriefString | None
-    tone: NonBlankBriefString | None
-    pov: NonBlankBriefString | None
-    constraints: list[NonBlankBriefString] = Field(
-        json_schema_extra={"uniqueItems": True}
-    )
-    style_rules: list[NonBlankBriefString] = Field(
-        json_schema_extra={"uniqueItems": True}
-    )
-    preferred_patterns: list[NonBlankBriefString] = Field(
-        json_schema_extra={"uniqueItems": True}
-    )
-    forbidden_patterns: list[NonBlankBriefString] = Field(
-        json_schema_extra={"uniqueItems": True}
-    )
-    style_examples: list[NonBlankBriefString] = Field(
-        json_schema_extra={"uniqueItems": True}
-    )
 
-    @field_validator(
-        "constraints", "style_rules", "preferred_patterns",
-        "forbidden_patterns", "style_examples",
-    )
-    @classmethod
-    def reject_normalized_duplicates(cls, value: list[str]) -> list[str]:
-        if len(value) != len(set(value)):
-            raise ValueError("brief arrays must not contain duplicates")
-        return value
 
-    @field_validator("style_examples")
-    @classmethod
-    def enforce_style_example_limits(cls, value: list[str]) -> list[str]:
-        max_items, max_chars = _project_brief_style_example_limits()
-        if len(value) > max_items:
-            raise ValueError(f"style_examples must contain at most {max_items} items")
-        if any(len(example) > max_chars for example in value):
-            raise ValueError(
-                f"style_examples entries must contain at most {max_chars} characters"
-            )
-        return value
 
 
-class CreateAnalysisJobRequest(BaseModel):
-    snapshot_id: str
-    idempotency_key: str
 
 
-class CreateDraftRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
-    title: NonBlankName
-    unit_kind: UnitKind = UnitKind.OTHER
 
 
-class DraftOrderPutRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
-    # Keep the structural constraint discoverable in OpenAPI, but route runtime
-    # duplicate detection through CoreSotService so every incomplete/full-set
-    # permutation violation has the W0 §2.2 exact 409 outcome (not Pydantic 422).
-    ordered_draft_ids: list[NonBlankName] = Field(
-        json_schema_extra={"uniqueItems": True}
-    )
-
-
-class DraftOrderPutResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    drafts: list[DraftPayload]
-
-
-class RenameProjectRequest(BaseModel):
-    name: NonBlankName
-
-
-class RenameDraftRequest(BaseModel):
-    title: NonBlankName
-
-
-class SaveDraftRequest(BaseModel):
-    raw_text: str
-    idempotency_key: str
-
-
-class CreateSourceRefRequest(BaseModel):
-    start_offset: int
-    end_offset: int
-
-
-class ContextPositionBody(BaseModel):
-    draft_id: str
-    version_id: str
-
-
-class ApplyProposalBody(BaseModel):
-    candidate_id: str
-    action: str
-    matched_memory_id: str | None = None
-
-
-class ApplyMemoryRequest(BaseModel):
-    proposals: list[ApplyProposalBody]
-
-
-class ReconcileCharacterRequest(BaseModel):
-    action: str
-
-
-class EditCandidateRequest(BaseModel):
-    payload: dict[str, object]
-
-
-# 입력 ContextPackage 예산의 기본값(오너 지시 ④, 2026-07-28). 4096은 **동기 생성 시절 응답
-# 속도** 때문에 고른 값이었고, 생성이 백그라운드 job + 푸시로 바뀌면서(v1.7.27) 그 제약이
-# 사라졌다는 것이 오너의 근거다.
-#
-# **K-1(a)와 같이 올려야 하는 이유**: 회계가 `len/4`에서 `len/1.7`로 정직해지면서 같은 숫자가
-# 뜻하는 실제 분량이 **절반**이 됐다(4096 회계 ≈ 실제 8,900 tok → ≈ 3,830 tok). 8192로 올리면
-# 실효 분량이 종전과 비슷해지고(≈ 7,660 tok) 숫자는 정직해진다 — 즉 이 값은 확장이라기보다
-# **회계 수정의 짝**이다.
-#
-# **★ 창 여유 — 이 값이 report 경로에 안전하다는 뜻은 아니다**(독립 검증 H1이 잡은 정정,
-# 2026-07-30). 예산을 꽉 채운 프로젝트의 report 호출은 항목만이 아니라 **후보 산문까지** 싣는다.
-# **2026-07-31 실측**(`scripts/report_budget_measure.py`, 베타 창 16384, 후보 = `long` 상한):
-#
-#   컨텍스트 8,358 + system 465 + 후보 산문 4,159 + 래퍼 94 + 출력 상한 6,144 = **19,220 > 16,384**
-#
-# 즉 창 16384에서 **2,836 넘는다**(종전 외삽치 −1,914보다 나쁘다 — 실제 렌더링이 외삽값보다
-# 컸다). 후보 산문을 빼고 보면 "들어간다"로 오독하게 되는데, report는 그 산문을 대상으로 하는
-# 호출이라 항상 함께 실린다. 통과하는 최대 예산은 실측 **5120**(여유 +386)이었다.
-#
-# **그래서 이 초과는 조용히 잘리지 않고 K-3 가드가 400으로 거부한다**(실측 delta 0: 가드가
-# 보고한 input 13,076이 위 계산과 같다). 근본 해결은 **R-a**(report 전용 예산)이고, 형태와
-# 숫자는 오너 결정 대기다(브리프 §2-5 — 상수 · 창에서 유도 · 출력 프리셋별의 세 갈래).
-# 창 8192 배포에서는 더 일찍 걸리므로 알파는 `LLAMA_CTX_SIZE=16384`가 전제다(HANDOFF 함정).
-# **이 경계는 예산을 꽉 채우는 프로젝트에서만 만난다** — 베타 프로브(회계 2,876)로는 닿지
-# 않아 `--seed`가 그 재현 데이터를 만든다.
-#
-# 여섯 개 요청 모델이 같은 기본값을 쓴다. 리터럴을 복제하면 하나만 놓쳐도 endpoint마다 다른
-# 예산이 되므로 상수로 둔다.
-DEFAULT_CONTEXT_BUDGET_TOKENS = 8192
-
-class ContextSearchHttpRequest(BaseModel):
-    idempotency_key: str
-    query: str
-    needs: list[str]
-    purpose: str = ContextSearchPurpose.WRITING_CONTEXT.value
-    current_position: ContextPositionBody | None = None
-    max_tokens: int = DEFAULT_CONTEXT_BUDGET_TOKENS
-
-
-class WritingGenerateRequest(BaseModel):
-    request_id: str
-    instruction: str
-    task_type: str = WritingTaskType.CONTINUE_SCENE.value
-    draft_excerpt: str = ""
-    # Retrieval query for the internal context search; defaults to the instruction.
-    query: str | None = None
-    current_position: ContextPositionBody | None = None
-    # R-a(오너 2026-07-31): 생성이 끝나면 같은 패키지로 self-report가 돌고 그쪽이 창을
-    # 구속하므로, 이 값은 **상한**이다 — 서버가 창에 맞춰 줄일 수 있으나 늘리지는 않는다.
-    max_tokens: int = Field(
-        default=DEFAULT_CONTEXT_BUDGET_TOKENS,
-        description=(
-            "Ceiling on the context-package (input) budget in tokens. The server "
-            "may reduce it to fit the model's context window (R-a); never increased. "
-            "Distinct from output_length (output tokens)."
-        ),
-    )
-    # 증분 2 (D3=A): output-length preset (short|medium|long). The server maps it
-    # to output tokens (1024/2048/4096 by default). Distinct from ``max_tokens``,
-    # which is the input ContextPackage budget. Legacy clients omit it → short.
-    # `long` (4096) is single-generate only; it is not a knob on revise-and-gate.
-    output_length: str = OutputLength.SHORT.value
-
-
-class WritingGateRequest(BaseModel):
-    request_id: str
-    instruction: str
-    candidate_text: str
-    task_type: str = WritingTaskType.CONTINUE_SCENE.value
-    draft_excerpt: str = ""
-    query: str | None = None
-    current_position: ContextPositionBody | None = None
-    max_tokens: int = DEFAULT_CONTEXT_BUDGET_TOKENS
-
-
-class WritingReportRequest(BaseModel):
-    request_id: str
-    instruction: str
-    candidate_text: str
-    task_type: str = WritingTaskType.CONTINUE_SCENE.value
-    draft_excerpt: str = ""
-    query: str | None = None
-    current_position: ContextPositionBody | None = None
-    # R-a(오너 2026-07-31): 후보 산문을 곧바로 싣는 report 다리가 창을 구속하므로 이 값은
-    # **상한**이다 — 서버가 창에 맞춰 줄일 수 있으나 늘리지는 않는다.
-    max_tokens: int = Field(
-        default=DEFAULT_CONTEXT_BUDGET_TOKENS,
-        description=(
-            "Ceiling on the context-package (input) budget in tokens. The server "
-            "may reduce it to fit the model's context window alongside the candidate "
-            "prose and report output (R-a); never increased."
-        ),
-    )
-
-
-class WritingReviseFindingRequest(BaseModel):
-    type: str
-    severity: str
-    message: str
-    evidence: str
-    recommended_decision: str
-
-
-class WritingReviseRequest(BaseModel):
-    request_id: str
-    instruction: str
-    candidate_text: str
-    finding: WritingReviseFindingRequest
-    task_type: str = WritingTaskType.CONTINUE_SCENE.value
-    query: str | None = None
-    current_position: ContextPositionBody | None = None
-    # R-a(오너 2026-07-31, v1.7.66): 루프의 report 다리(출력 상한 6144 + 후보 산문)가 창을
-    # 구속하므로 이 값은 **상한**이다 — 서버가 창에 맞춰 줄일 수 있으나 늘리지는 않는다.
-    # 진입 시 1회 유도하며 그 값이 패키지 예산과 merge 상한을 함께 묶는다.
-    max_tokens: int = Field(
-        default=DEFAULT_CONTEXT_BUDGET_TOKENS,
-        description=(
-            "Ceiling on the context-package (input) budget in tokens. The server "
-            "may reduce it once at loop entry to fit the model's context window "
-            "alongside the candidate prose and report output (R-a); never increased. "
-            "The derived value also bounds package growth from retrieve_more merges."
-        ),
-    )
-    # Phase 5.9 L9 B (P2=B opt-in, 2026-07-13): persist this loop's audit only
-    # when requested. None → env default (WRITING_LOOP_AUDIT_DEFAULT, off).
-    persist_audit: bool | None = None
-
-
-class NextUnitBody(BaseModel):
-    # W3 start_next_unit target (§3.1). unit_kind is validated at the endpoint
-    # by converting to UnitKind. `goal` is a required-but-nullable key (W0 catalog
-    # `nextUnitSpec`): the value is optional (null allowed), the key is not.
-    # extra="forbid" matches the catalog's additionalProperties:false.
-    model_config = ConfigDict(extra="forbid")
-    title: str
-    unit_kind: str
-    goal: str | None
-
-
-class ObservabilityKpiSitePayload(BaseModel):
-    call_site: str
-    calls: int
-    success: int
-    provider_error: int
-    parse_error: int
-    total_tokens: int
-    # The row count the token total was built from — ``provider_error`` rows are
-    # excluded because their 0 means "unknown" (SoT v1.7.42).
-    tokens_counted_from: int
-    avg_latency_ms: int
-    # Workflows this site served, and how many took more than one call. Not
-    # named "repairs": a second row is a retry at a repair-shaped site but a
-    # designed extra round inside the writing loop.
-    correlations: int
-    multi_call_correlations: int
-    # K-3 창 헤드룸 경고(오너 2026-07-30): `창 − 입력 − 출력상한`이 창의 10% 미만인 호출 수와
-    # **그 판정이 가능했던 행 수**(분모). 저장된 플래그가 아니라 원천 세 값에서 읽기 시점에
-    # 파생한다(v1.7.59: 헤드룸은 저장하지 않는다). 분모가 함께 있어야 "빠듯한 호출이 없었다"와
-    # "창을 아는 호출이 없었다"를 구분할 수 있다.
-    thin_headroom_calls: int
-    headroom_considered: int
-
-
-class ObservabilityKpiTotalsPayload(BaseModel):
-    calls: int
-    success: int
-    provider_error: int
-    parse_error: int
-    total_tokens: int
-    tokens_counted_from: int
-    thin_headroom_calls: int
-    headroom_considered: int
-
-
-class ObservabilityKpiGatePayload(BaseModel):
-    scored_calls: int
-    # Null, not 0.0, when nothing carried a score (SoT v1.7.47 known gap: loop
-    # gate calls have none).
-    avg_quality_score: float | None
-
-
-class ObservabilityKpiLoopPayload(BaseModel):
-    runs_considered: int
-    non_convergence_rate: float | None
-
-
-class ObservabilityKpiResponse(BaseModel):
-    project_id: str
-    totals: ObservabilityKpiTotalsPayload
-    # A list, not a map keyed by call_site: the literals grow (5→8 in 증분 C,
-    # more with Phase 7) and keying by them would change the generated frontend
-    # type on every new site (owner decision 2026-07-26, D2=A).
-    sites: list[ObservabilityKpiSitePayload]
-    gate: ObservabilityKpiGatePayload
-    loop: ObservabilityKpiLoopPayload
-
-
-class AdminObservabilityKpiResponse(BaseModel):
-    # D8-5c. Same four sections as the per-project read-out, and deliberately a
-    # separate model: the two differ in exactly one field, and merging them would
-    # force ``project_id`` to be nullable on a payload where it is always present.
-    #
-    # ``projects_considered`` replaces it — how many projects contributed a
-    # record. It is the project axis this fold would otherwise lose, reported the
-    # way every other counter-intuitive number here is (with its denominator),
-    # and it names no project: which projects exist is the admin projects slice.
-    projects_considered: int
-    totals: ObservabilityKpiTotalsPayload
-    sites: list[ObservabilityKpiSitePayload]
-    gate: ObservabilityKpiGatePayload
-    loop: ObservabilityKpiLoopPayload
-
-
-class WritingAcceptRequest(BaseModel):
-    request_id: str
-    draft_id: str
-    base_version_id: str
-    idempotency_key: str
-    instruction: str
-    candidate_text: str
-    task_type: str = WritingTaskType.CONTINUE_SCENE.value
-    output_type: str = WritingOutputType.DRAFT_PATCH.value
-    draft_excerpt: str = ""
-    query: str | None = None
-    current_position: ContextPositionBody | None = None
-    # R-a(오너 2026-07-31, v1.7.66): accept도 report 다리(reporter.enrich)를 지나므로 이 값은
-    # **상한**이다 — 서버가 창에 맞춰 줄일 수 있으나 늘리지는 않는다(후보 산문 추정 기반).
-    max_tokens: int = Field(
-        default=DEFAULT_CONTEXT_BUDGET_TOKENS,
-        description=(
-            "Ceiling on the context-package (input) budget in tokens. The server "
-            "may reduce it to fit the model's context window alongside the candidate "
-            "prose and report output (R-a); never increased."
-        ),
-    )
-    # W3 Writing intent (§3.1). Legacy clients omit both → append_current/null.
-    intent: str = WritingIntent.APPEND_CURRENT.value
-    next_unit: NextUnitBody | None = None
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def build_async_generation_collaborators() -> GenerationCollaborators | None:
@@ -2686,20 +1572,99 @@ def build_async_generation_collaborators() -> GenerationCollaborators | None:
     )
 
 
-# 라우터 분해(R1, 2026-08-05): register 함수를 create_app 이 호출한다. 이 import 가
-# ``def create_app`` 바로 앞인 것은 의도다 — router 모듈이 ``from ..main import`` 로
-# 가져오는 공유 심볼(모델·``_REQUIRE_*``·에러 dict·인가 dep)이 전부 이 위에 정의돼
-# 있어야 순환 import 없이 해석된다.
+# 라우터 분해(R1, 2026-08-05): register 함수를 create_app 이 호출한다.
 #
-# ★ **상대 import 여야 한다**(H-3, 2026-08-05 독립 검증). router 쪽이 ``from ..main``
-# 이므로 여기가 절대 경로면 두 모듈이 **로드 이름에 따라 다른 객체**가 된다 — 짧은
-# 이름(``PYTHONPATH=services/application`` + ``import app.main``)으로 들어오면
-# ``app.main`` 과 ``services.application.app.main`` 이 따로 생기고, 두 번째 로드가
-# 반쯤 초기화된 ``routers.admin`` 을 만나 ImportError 로 죽는다(분해 전에는 살아 있던
-# 경로다). 상대 경로면 어느 이름으로 들어와도 같은 패키지 안에서 해석된다.
-# 회귀: ``tests/test_app_import_paths.py``.
+# **이 import 의 위치는 이제 자유롭다**(2026-08-06 공유 prelude 추출). 종전에는
+# ``def create_app`` 바로 앞이어야 했다 — router 가 ``from ..main import`` 로 공유
+# 심볼을 되가져와서 ``main ↔ routers`` 순환이 있었고, 그 순환은 **필요한 심볼이 전부
+# 이 줄 위에 정의돼 있다**는 순서에만 기대어 풀렸다. 그래서 ``routers`` 를 먼저
+# import 하는 모든 경로가 죽었다(``python -m`` 포함, H-3-A).
+#
+# 지금은 공유 심볼이 ``app/api/`` 와 ``app/env.py`` 에 있고 router 도 거기서 가져오므로
+# **순환 자체가 없다**. 상대 경로를 유지하는 이유는 순환이 아니라 **모듈 동일성**이다 —
+# 절대 경로면 짧은 이름(``PYTHONPATH=services/application`` + ``import app.main``)으로
+# 들어온 로드에서 ``app.main`` 과 ``services.application.app.main`` 이 서로 다른 객체가
+# 되고, 다른 테스트의 ``patch("services.application.app.main....")`` 가 엉뚱한 사본을
+# 건드린다. 회귀: ``tests/test_app_import_paths.py``.
 from .routers.admin import register_admin
 from .routers.auth import register_auth
+
+# ── HTTP 계약 계층(2026-08-06 공유 prelude 추출) ─────────────────────────
+# 요청/응답 모델·에러 선언·dependency 는 여기서 산다. `routers/*` 도 **main 이 아니라**
+# 이 모듈들을 본다 — 그래서 `main ↔ routers` 순환이 없고, 어떤 로드 순서에서도 뜬다.
+# 되돌리면(= 정의를 main.py 로 되가져오면) 순환이 복구된다: tests/test_app_import_paths.py.
+from .env import (
+    _env_bool,
+    _env_int,
+)
+from .api.models import (
+    AccessLogResponse,
+    ApplyMemoryRequest,
+    ContextSearchHttpRequest,
+    CreateAnalysisJobRequest,
+    CreateDraftRequest,
+    CreateProjectRequest,
+    CreateSourceRefRequest,
+    DEFAULT_CONTEXT_BUDGET_TOKENS,
+    DraftListResponse,
+    DraftOrderPutRequest,
+    DraftOrderPutResponse,
+    DraftPayload,
+    DraftVersionDetailResponse,
+    DraftVersionExportResponse,
+    DraftVersionListResponse,
+    EditCandidateRequest,
+    ObservabilityKpiResponse,
+    ProjectBriefGetResponse,
+    ProjectBriefPutResponse,
+    ProjectBriefVersionListResponse,
+    ProjectExportResponse,
+    ProjectListResponse,
+    ProjectPayload,
+    PutProjectBriefRequest,
+    ReconcileCharacterRequest,
+    RenameDraftRequest,
+    RenameProjectRequest,
+    SaveDraftRequest,
+    SaveDraftResponse,
+    WritingAcceptRequest,
+    WritingGateRequest,
+    WritingGenerateRequest,
+    WritingReportRequest,
+    WritingReviseRequest,
+    _WRITING_CONTINUE_SCENE_NEEDS,
+    _project_brief_style_example_limits,
+    _writing_output_length_tokens,
+)
+from .api.errors import (
+    _BILLABLE_400_404_409_502_CONFIG,
+    _BILLABLE_400_404_502_504_CONFIG,
+    _BILLABLE_404_502_CONFIG,
+    _ERRORS_400_404,
+    _ERRORS_400_404_409,
+    _ERRORS_400_404_MIGRATION,
+    _ERRORS_404,
+    _ERRORS_404_409,
+    _ERRORS_404_409_MIGRATION,
+    _ERRORS_404_502,
+    _ERRORS_404_MIGRATION,
+    _ERRORS_404_STORAGE,
+    _ERRORS_STORAGE,
+    _STORAGE_ERRORS,
+    _billable,
+    _owned,
+    _provider_error_status,
+)
+from .api.dependencies import (
+    _QUOTA_STATE,
+    _REQUIRE_AUTH,
+    _REQUIRE_PROJECT_OWNER,
+    _REQUIRE_PROJECT_OWNER_BILLABLE,
+    quota_charge,
+    quota_confirmed,
+    require_authenticated_user,
+)
+
 
 
 def create_app(

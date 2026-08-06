@@ -119,7 +119,7 @@ class ProviderErrorStatusMappingTests(unittest.TestCase):
     """
 
     def _status(self, code):
-        from services.application.app.main import _provider_error_status
+        from services.application.app.api.errors import _provider_error_status
         return _provider_error_status(ProviderError(
             code=code, message=code.value, retryable=False, provider="llm_gateway"))
 

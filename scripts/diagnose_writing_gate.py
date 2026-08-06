@@ -207,7 +207,7 @@ def build_search_request(
     ``main``), purpose is WRITING_CONTEXT, the query falls back to the
     instruction, and the budget mirrors the request body's ``max_tokens``.
     """
-    from services.application.app.main import _WRITING_CONTINUE_SCENE_NEEDS
+    from services.application.app.api.models import _WRITING_CONTINUE_SCENE_NEEDS
 
     return ContextSearchRequest(
         project_id=project_id,

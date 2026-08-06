@@ -2110,7 +2110,7 @@ class ContextBudgetDefaultTest(unittest.TestCase):
         return schema["properties"]["max_tokens"].get("default")
 
     def test_every_request_body_declares_the_same_budget_default(self):
-        from services.application.app.main import DEFAULT_CONTEXT_BUDGET_TOKENS
+        from services.application.app.api.models import DEFAULT_CONTEXT_BUDGET_TOKENS
 
         self.assertEqual(DEFAULT_CONTEXT_BUDGET_TOKENS, 8192)
         bodies = [

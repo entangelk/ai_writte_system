@@ -211,7 +211,7 @@ class GateRequestParityTest(unittest.TestCase):
         # The ContextSearchRequest the diagnostic builds must mirror the
         # revise-and-gate endpoint: production needs, WRITING_CONTEXT, query
         # falls back to instruction, budget mirrors the request body max_tokens.
-        from services.application.app.main import _WRITING_CONTINUE_SCENE_NEEDS
+        from services.application.app.api.models import _WRITING_CONTINUE_SCENE_NEEDS
         from scripts.diagnose_writing_gate import build_search_request
 
         request = build_search_request(

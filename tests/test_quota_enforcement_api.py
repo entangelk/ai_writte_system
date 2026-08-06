@@ -33,9 +33,11 @@ from services.application.app.core_sot.service import (
     InMemoryCoreSotRepository,
 )
 from services.application.app.main import (
-    CONFIRM_DUPLICATE_HEADER,
     QuotaSettledRoute,
     create_app,
+)
+from services.application.app.api.dependencies import (
+    CONFIRM_DUPLICATE_HEADER,
     enforce_quota,
     require_authenticated_user,
     require_project_owner,
@@ -567,9 +569,7 @@ class BillableRouteWiringTest(unittest.TestCase):
         # 순서가 곧 계약이다(§1.1): 소유권 뒤라야 404·403 이 차감 앞에서 끝난다.
         # 앞으로 옮기는 리팩터링은 상태코드를 바꾸지 않으므로 **요청 구동
         # 테스트로는 안 보인다** — route 선언을 직접 읽는 이 셀이 그 자리다.
-        from services.application.app.main import (  # noqa: PLC0415
-            require_project_owner as owner,
-        )
+        from services.application.app.api.dependencies import require_project_owner
 
         for operation, route in self._operations():
             if operation not in BILLABLE_OPERATIONS:

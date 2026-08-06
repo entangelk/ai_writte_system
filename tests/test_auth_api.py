@@ -53,8 +53,8 @@ from services.application.app.analysis.service import (
 from services.application.app.memory.service import (
     InMemoryMemoryRepository, MemoryService,
 )
-from services.application.app.main import (
-    create_app,
+from services.application.app.main import create_app
+from services.application.app.api.dependencies import (
     enforce_quota,
     require_admin_user,
     require_authenticated_user,

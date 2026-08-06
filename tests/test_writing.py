@@ -35,13 +35,15 @@ from services.application.app.core_sot.service import (
 )
 from services.application.app.indexing.models import IndexPointer
 from services.application.app.main import (
-    DEFAULT_CONTEXT_BUDGET_TOKENS,
     WRITING_REPORT_DEFAULT_MAX_TOKENS,
+    _build_report_service,
+    create_app,
+)
+from services.application.app.api.models import (
+    DEFAULT_CONTEXT_BUDGET_TOKENS,
     WritingGenerateRequest,
     WritingReviseRequest,
-    _build_report_service,
     _writing_output_length_tokens,
-    create_app,
 )
 from services.application.app.analysis.prompt_templates import (
     InMemoryPromptTemplateRepository,

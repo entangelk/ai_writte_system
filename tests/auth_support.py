@@ -29,7 +29,7 @@ from fastapi import Header, Request
 from fastapi.testclient import TestClient as _RealTestClient
 
 from services.application.app.auth.models import User
-from services.application.app.main import (
+from services.application.app.api.dependencies import (
     CONFIRM_DUPLICATE_HEADER,
     enforce_quota,
     require_authenticated_user,
