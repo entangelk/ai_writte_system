@@ -3,7 +3,7 @@
 - **작성**: 2026-08-06
 - **상위 계획**: [`router-split-and-admin-separation-decisions.md`](router-split-and-admin-separation-decisions.md) (R1·A1 = Resolved)
 - **발원**: 2026-08-06 독립 검증 비차단 **H-3-A** — [`verifications/2026-08-06/h3_closure_and_record_bundle.md`](../verifications/2026-08-06/h3_closure_and_record_bundle.md) §2
-- **상태**: **오너 결정 완료(방향)** — 아래 §3. **남은 결정 1건 = 대상 모듈 배치(§5)**
+- **상태**: **Resolved · 구현 완료**(2026-08-06). 방향 §3 · 배치 §5 = ⓑ(범주 분할) 확정 후 추출 완료(`2f20fbb`·`2d68630`)
 
 ---
 
@@ -102,7 +102,12 @@ import 해야 하는데 **그것이 지금 죽는 경로다.** 우회하려면 `
 
 **끝나면 `main.py` = 조립 모듈**이 된다(기본 협력자 팩토리 + `create_app` + `register_*` 호출).
 
-### 파급 — 테스트는 0
+### 파급 — 테스트는 0 ~~(★ 이 절은 오측이다 — §9 참조)~~
+
+> **★ 정정(2026-08-06 구현 중 발견).** 아래 "겹침 0" 은 **틀렸다.** 실제로는 **8개 파일**이
+> 이동 심볼을 `main` 에서 가져오고 있었다. 원인 둘: 측정이 ⓐ **여러 줄 괄호 import 를
+> 정규식에서 제외**했고 ⓑ 비교 대상을 이동 134개가 아니라 **라우터가 쓰는 31개**로 잡았다.
+> 상세와 처리는 §9. 아래 표는 **틀린 채로 남겨 둔다** — 무엇을 잘못 쟀는지가 기록이다.
 
 | 항목 | 실측 |
 |---|---|
@@ -131,7 +136,7 @@ order-sensitive pairs 0 · openapi sha)이 **IDENTICAL** 이어야 한다. **정
 | **ⓑ 범주 3분할**(추천) | `app/api/models.py`(70+상수) · `app/api/errors.py`(`_ERRORS_*` 20) · `app/api/dependencies.py`(`_REQUIRE_*` 4 + 인가 dep) | 범주가 곧 파일이라 찾기 쉽다. **에러 선언·의존성은 전수 가드가 이미 범주로 다루는 단위**다 | 파일 3개 + `__init__` 판단 |
 | **ⓒ 도메인별 분할** | `app/api/models/{project,writing,admin,…}.py` | 라우터와 1:1 | 모델이 도메인을 가로지른다(공용 payload) — **순환을 그 안에서 재생산**할 위험 |
 
-**추천 = ⓑ.** 이 저장소의 전수 가드가 이미 "에러 선언"·"의존성 tier"를 **범주**로 다루므로
+**결정 = ⓑ**(오너 2026-08-06: *"b로 가자"*). 이 저장소의 전수 가드가 이미 "에러 선언"·"의존성 tier"를 **범주**로 다루므로
 파일 경계를 같은 축에 맞추면 가드와 배치가 어긋나지 않는다. ⓒ 는 모델 간 참조(전이 폐포 46개가
 바로 그 증거)가 도메인을 가로질러서 같은 순환을 작게 재현할 위험이 있다.
 
@@ -160,3 +165,62 @@ order-sensitive pairs 0 · openapi sha)이 **IDENTICAL** 이어야 한다. **정
 - **잔여 7 도메인의 실제 이동**은 이 브리프 범위가 아니다. 이 추출이 끝난 뒤 기계적으로 진행한다.
 - **`main.py` 잔류 47개(조립 팩토리)의 재배치**는 다루지 않는다. 그것은 DI 컨테이너 논의이며
   이 저장소가 피해 온 것이다.
+
+---
+
+## 9. 구현 결과 (2026-08-06, `2f20fbb`·`2d68630`)
+
+### 배치 — 3분할 + `app/env.py` (§5 ⓑ의 보완)
+
+| 모듈 | 정의 | 내용 |
+|---|---|---|
+| [`app/api/models.py`](../../services/application/app/api/models.py) | 78 | 요청/응답 모델 + 그 제약·상수(`NonBlankName`·`PROJECT_BRIEF_*` …) |
+| [`app/api/errors.py`](../../services/application/app/api/errors.py) | 38 | `_ERRORS_*`·`_BILLABLE_*_CONFIG` + 선언 조립 함수(`_protected`/`_owned`/`_billable`/`_admin`) |
+| [`app/api/dependencies.py`](../../services/application/app/api/dependencies.py) | 17 | 인증·소유권·관리자·quota 시행 dependency + `_REQUIRE_*` |
+| [`app/env.py`](../../services/application/app/env.py) | 2 | `_env_int`·`_env_bool` |
+
+**★ `app/env.py` 는 §5 가 적은 "3분할"의 보완이다.** `_env_int`/`_env_bool` 은 **API 계약이
+아니고**, 이동분(19회)과 `main.py` 잔류 조립부(7회)가 **둘 다** 쓴다 — 어느 한쪽에 넣으면
+다른 쪽이 그것을 import 하며 방향이 뒤집힌다. 그래서 `api/` 밖의 별도 모듈로 뺐다.
+
+**의존 방향은 단방향이다**: `errors → models → env`, `dependencies` 는 독립. AST 로 확인했고
+(양방향 쌍 0), 이 방향이 뒤집히면 추출이 없앤 순환이 형태만 바꿔 돌아온다.
+
+### 결과
+
+- `main.py` **5,843 → 4,806줄**. `routers/*` 의 `from ..main import` **0건**.
+- **행위 무변**: `repro_router_split.py` 지문 **IDENTICAL**(route 76 · order-sensitive 0 ·
+  openapi sha `f8b42ef1…`).
+- **되살아난 로드 경로 4종**: 라우터 먼저 · `python -m` · 짧은 이름 · uvicorn.
+- 재수출 4종(`NotFound`·`AdminAuditEvent`·`QuotaEnforcementService`·`aggregate_global_kpi`)은
+  라우터가 **원래 모듈에서 직접** 가져온다 — main 을 경유할 이유가 없다.
+
+### ★ 예측이 틀린 것 하나 — "테스트 파급 0" 은 오측이었다
+
+§4 는 겹침 0 이라 적었으나 **8개 파일이 이동 심볼을 `main` 에서 가져오고 있었다**
+(`enforce_quota`·`require_project_owner`·`DEFAULT_CONTEXT_BUDGET_TOKENS` 등). 원인은 측정
+스크립트가 ⓐ 여러 줄 괄호 import 를 정규식에서 제외했고 ⓑ 비교 대상을 이동 134개가 아니라
+**라우터가 쓰는 31개**로 잡은 것이다. 전부 새 위치로 정렬했다.
+
+**`main.py` 에 재수출 shim 을 두지 않은 것은 의도다.** 두면 핸들러는 새 모듈을 보는데
+테스트는 `main` 을 patch 해서 **조용히 빗나간다** — 이 저장소가 H-2(shim drift)로 이미
+경계하는 형태다. import 를 옮기면 틀렸을 때 시끄럽게 실패한다.
+
+### 마감 — 테스트 파일 재검수(§6)에서 실제로 드러난 것
+
+§6 은 "독스트링이 거짓이 되는데 셀은 통과한다" 를 예고했다. **그보다 한 겹 더 있었다**:
+추출 뒤 기존 두 셀은 **상대/절대 import 를 더 이상 가르지 못한다**(뮤테이션 실측 — 절대로
+되돌려도 **4 cells 전부 통과**). 순환이 있을 때만 이름 혼용이 치명적이었기 때문이다.
+
+그래서 독스트링을 정정하고 그 자리를 대신할 셀을 새로 넣었다 —
+`test_the_short_name_load_keeps_the_routers_in_one_tree` 는 짧은 이름 로드에서 라우터가
+`app.routers.*` 에 사는지 단정하며, 절대 경로로 되돌리면 **그 셀만** 실패한다(1 failed /
+4 passed, 실측).
+
+### 뮤테이션
+
+| 뮤테이션 | 재실패 | 뜻 |
+|---|---|---|
+| 추출 직전 코드(`10502a6`) + 새 테스트 | **새 셀 3개만**(라우터 먼저 ×2 · `python -m`), 기존 2개 통과 | under-strict — 새 셀이 기존 셀이 못 잡던 것을 정확히 잡는다 |
+| `main.py` routers import → 절대 | **모듈 동일성 셀 1개만** | 정정 후 그 자리가 실제로 잠겼다 |
+| 라우터가 `..main` 을 다시 import | 4 cells 전부 | 물기는 하나 정상 경로까지 죽여 분리가 안 된다 |

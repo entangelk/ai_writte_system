@@ -159,3 +159,96 @@
    **IDENTICAL** 이어야 한다 — 정의만 옮기므로 한 글자라도 달라지면 사고 신호다.
 3. 마감에 [`tests/test_app_import_paths.py`](../../../tests/test_app_import_paths.py) 재검수
    (독스트링이 거짓이 되는데 셀은 통과한다).
+
+---
+
+## Task 4 — 공유 prelude 추출 (ⓑ 구현, `2f20fbb`·`2d68630`)
+
+### User Decisions and Rationale
+
+- **오너가 배치 ⓑ 를 확정했다**(2026-08-06, *"b로 가자"*) — `app/api/{models,errors,dependencies}.py`.
+  근거는 브리프 §5: 이 저장소의 전수 가드가 이미 "에러 선언"·"의존성 tier" 를 **범주**로
+  다루므로 파일 경계를 같은 축에 맞춘다.
+- **`app/env.py` 는 구현자 판단으로 더한 4번째 모듈**이다(§5 "3분할" 의 보완, 브리프 §9 에 기록).
+  `_env_int`·`_env_bool` 은 API 계약이 아니고 **이동분(19회)과 잔류 조립부(7회)가 둘 다** 써서,
+  어느 한쪽에 넣으면 다른 쪽이 import 하며 방향이 뒤집힌다.
+
+### Completed work
+
+| 구분 | 내용 |
+|---|---|
+| 신규 | [`app/api/models.py`](../../../services/application/app/api/models.py)(78) · [`errors.py`](../../../services/application/app/api/errors.py)(38) · [`dependencies.py`](../../../services/application/app/api/dependencies.py)(17) · [`app/env.py`](../../../services/application/app/env.py)(2) — 본문 **byte-동일**, 원본 정의 순서 보존 |
+| `main.py` | 이동분 제거 + 새 모듈 import. **5,843 → 4,806줄** |
+| `routers/{admin,auth}` | `from ..main import` **제거**. 재수출 4종은 원래 모듈에서 직접 |
+| 테스트·스크립트 8파일 | 이동 심볼 import 를 새 위치로 정렬 |
+| [`tests/test_app_import_paths.py`](../../../tests/test_app_import_paths.py) | 재검수 — 독스트링 재작성 + 셀 3개 신설(라우터 먼저 · `python -m` · 모듈 동일성) |
+
+**의존 방향은 단방향이다**: `errors → models → env`, `dependencies` 독립. AST 로 양방향 쌍 0 을
+확인하고 착수했다 — AST 타입(클래스/함수/상수)으로 나누면 `const ↔ deps`·`const ↔ models` 가
+순환이 됐고, **용도**로 나누니 DAG 가 됐다.
+
+### Verification
+
+- **행위 무변**: [`repro_router_split.py`](../../verifications/2026-08-05/repro_router_split.py)
+  지문 **IDENTICAL**(route 76 · order-sensitive pairs 0 · openapi sha `f8b42ef1…`).
+- **되살아난 로드 경로 4종**: 라우터 먼저 import · `python -m` · 짧은 이름 · uvicorn.
+- 전수 회귀: 아래 "회귀 기준선".
+
+### 뮤테이션 (3종)
+
+**커밋 → 뮤테이션 → 원복 순서를 지켰다**(`git status --short` 공백 확인 후 착수, 전수 suite 가
+main 트리에서 돌고 있어 **throwaway worktree** 에서 수행).
+
+| 뮤테이션 | 재실패한 셀 | 뜻 |
+|---|---|---|
+| 추출 직전 코드(`10502a6`) + 새 테스트 | **새 셀 3개만**(라우터 먼저 ×2 · `python -m`), 기존 2개 통과 | under-strict — 새 셀이 기존 셀이 못 잡던 것을 정확히 잡는다 |
+| `main.py` routers import → 절대 경로 | **모듈 동일성 셀 1개만**(1 failed / 4 passed) | 정정 후 그 자리가 실제로 잠겼다 |
+| 라우터가 `..main` 을 다시 import | 4 cells 전부 | 물기는 하나 정상 경로까지 죽여 분리가 안 된다 |
+
+### Issues found — ★ 가드가 잠그는 성질이 바뀌었는데 독스트링만 갱신할 뻔했다
+
+브리프 §6 은 "추출 후 독스트링이 거짓이 되는데 셀은 통과한다" 를 예고했다. **그보다 한 겹 더
+있었다** — 순환이 사라지자 기존 두 셀은 **상대/절대 import 를 더 이상 가르지 못한다**(뮤테이션
+실측: 절대로 되돌려도 **4 cells 전부 통과**). 순환이 있을 때만 이름 혼용이 치명적이었기 때문이다.
+
+내가 재작성한 독스트링은 그 두 셀이 "모듈 동일성" 을 잠근다고 적었는데 **그것이 거짓이었다** —
+피하자고 한 형태를 내가 만들 뻔했고, **뮤테이션이 그것을 드러냈다.** 정정하고, 그 자리를 실제로
+잠그는 셀을 신설했다(짧은 이름 로드에서 라우터가 `app.routers.*` 에 사는지 단정).
+
+### Issues found — import 재작성이 `as` 별칭을 버렸다 (전수 회귀 9 subtest)
+
+1차 전수 회귀가 **9 failed**. 전부 한 셀의 subtest 였고
+(`BillableRouteWiringTest::test_enforcement_is_declared_after_ownership`), 원인은 추출이 아니라
+**내 import 재작성 스크립트가 `require_project_owner as owner` 의 별칭을 버린 것**이다.
+
+- **하필 그 셀인 것이 시사적이다** — HANDOFF 가 *"앞으로 옮기는 리팩터링은 상태코드를 하나도
+  바꾸지 않으므로 요청 구동 테스트로는 안 보인다(route 선언을 읽는 셀이 그 자리다)"* 라고
+  예고해 둔 자리다. 예고대로 그 셀이 유일하게 물었다.
+- 별칭 복원 후 38 passed / 180 subtests.
+
+### Decisions (구현자 판단)
+
+- **`main.py` 에 재수출 shim 을 두지 않았다.** 두면 기존 import 가 그대로 살아 편하지만,
+  **핸들러는 새 모듈을 보는데 테스트는 `main` 을 patch 해서 조용히 빗나간다** — 이 저장소가
+  H-2(shim drift)로 이미 경계하는 형태다. import 를 옮기면 틀렸을 때 시끄럽게 실패한다.
+- **`main.py` 의 routers import 는 상대 경로 유지.** 이제 이유가 순환이 아니라 모듈 동일성이다.
+
+### 아직 안 한 것
+
+- **독립 검증** — 이 슬라이스는 구현자가 자기 코드를 검증한 상태다. 다음 세션이 검증자라면
+  여기부터 본다.
+- **실 컨테이너 관통** — 이미지가 낡아 재빌드가 선행돼야 하고 오너 판단 사안이다.
+- **잔여 7 도메인 이동 · Slice 2** — 이 추출 위에서 기계적으로 진행한다.
+
+### 회귀 기준선
+
+**backend test-mongo ON: `2196 passed / 1 skipped / 1933 subtests / 0 failed`**(990.12s, 실측).
+
+- 종전 `2193 / 1 / 1931`(2026-08-05 H-3)에서 **+3 = 신규 셀 3개가 전부**다
+  (라우터 먼저 로드 · `python -m` · 모듈 동일성). **subtests +2** 는 그중 라우터 먼저 셀의
+  subtest 2개(admin·auth)다.
+- **operation 76 은 유지**된다 — 숫자가 아니라 `repro_router_split.py` 지문 IDENTICAL 이 그
+  실측이다(route 76 · openapi sha 동일).
+- skip 1 = 호스트에서 구조적으로 항상 skip 되는 live Chroma 셀.
+- **1차 실행은 `9 failed`였고 전부 `as` 별칭 소실이었다**(위 Issues). 코드가 아니라 import
+  재작성의 실수이며, 복구 후 이 값이다.
