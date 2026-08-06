@@ -261,25 +261,28 @@ class VerificationCountClaimsTest(unittest.TestCase):
             for value in re.findall(r"^\| \*{0,2}[^|]+\*{0,2} \| \*{0,2}(\d+)\*{0,2} \|",
                                     index, re.MULTILINE)
         ]
-        self.assertEqual(len(counts), 4, f"판정 4종을 못 읽었다: {counts}")
+        # 판정은 셋뿐이다(합격·조건부 합격·불합격). 2026-08-06 에 `서술형` 을 걷어냈다
+        # — 정의는 인덱스 표에만 있고 가이드에 없었으며, 222 전수 확인 결과 해당
+        # 기록이 0건이었다(모든 기록이 판정 절과 판정 문구를 갖는다).
+        self.assertEqual(len(counts), 3, f"판정 3종을 못 읽었다: {counts}")
         return counts
 
     def test_the_verdict_distribution_adds_up_to_the_total(self) -> None:
-        # 판정 분포(합격·조건부·서술형)는 전체와 맞아야 한다. 한 건을 등재하면서
+        # 판정 분포(합격·조건부 합격·불합격)는 전체와 맞아야 한다. 한 건을 등재하면서
         # 총계만 올리고 분포를 안 고치면 여기서 잡힌다 — 그리고 그 분포는 최상위
         # README 가 "조건부 합격이 N%"라는 주장의 분모/분자이기도 하다.
         self.assertEqual(sum(self._distribution()), self.actual)
 
     def test_the_readme_prose_repeats_the_distribution_verbatim(self) -> None:
         # 독립 검증 2026-08-04 H-3이 손으로 잡은 자리. **건수 주장은 가드 안에
-        # 있었는데 서술형 분포 문장은 밖이었다** — 그래서 8.3·8.2b 합격 +2가
+        # 있었는데 분포 서술 문장은 밖이었다** — 그래서 8.3·8.2b 합격 +2가
         # 검증 인덱스 표에는 올랐는데 최상위 README 문장만 `합격 142`에 얼어
         # 있었고, 아무 테스트도 실패하지 않았다. 같은 병("세는 사람이 둘")이고
         # 처방도 같다: 분포의 정본은 검증 인덱스 표 하나이며 README 는 그것을
         # 그대로 되뇐다.
         readme = (_ROOT / "README.md").read_text(encoding="utf-8")
         found = re.search(
-            r"합격 (\d+) · 조건부 합격 (\d+) · 불합격 (\d+) · 서술형 (\d+)", readme
+            r"합격 (\d+) · 조건부 합격 (\d+) · 불합격 (\d+)", readme
         )
         self.assertIsNotNone(
             found, "README 의 판정 분포 문장을 못 찾았다 — 문구가 바뀌었으면 "
