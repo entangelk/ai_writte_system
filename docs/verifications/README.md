@@ -1,7 +1,7 @@
 # 독립 검증 기록
 
 이 디렉터리는 **구현자가 아닌 검증자가** 각 슬라이스를 다시 뜯어본 기록이다. 2026-06-24부터
-**43일치 · 221건**이 쌓여 있다.
+**43일치 · 222건**이 쌓여 있다.
 
 ## 이 저장소의 검증이 무엇인가
 
@@ -28,7 +28,7 @@
 
 | 판정 | 건수 | 뜻 |
 |---|---|---|
-| 합격 | 149 | blocking 결함 없음 |
+| 합격 | 150 | blocking 결함 없음 |
 | **조건부 합격** | **57** | 합격이되 닫아야 할 조건이 있었다 |
 | **불합격** | **1** | 핵심 계약 위반으로 다음 슬라이스 진행이 차단됐다 |
 | 서술형 | 14 | 초기 기록(판정 문구가 정형화되기 전) |
@@ -61,6 +61,7 @@
 
 | 기록 | 대상 | 판정 |
 |---|---|---|
+| [`shared_prelude_extraction.md`](2026-08-06/shared_prelude_extraction.md) | 공유 prelude 추출 3커밋(`2f20fbb`~`635d84b`) — `main.py` prelude 134 이름을 `app/env.py`·`app/api/{models,errors,dependencies}.py` 로 본문 byte-동일 추출해 **`main↔routers` 순환을 폐쇄**(H-3-A). 행위 무변 repro 지문 pre(10502a6) vs post(HEAD) **IDENTICAL**(route 76·order-pairs 0·openapi sha `f8b42ef1…`). 죽던 로드 경로 3종 부활(FQ 80 routes·라우터 먼저·`python -m` exit 0). AST 로 이름 해석 양방향 무결(이동 코드 미해결 전역 0·main 누락 import 0)·본문 byte-동일(샘플 14). 뮤테이션 3종 재실패(순환 재도입 5 cell·상대→절대 1 cell·별칭 제거 9 subtest). 기준선 `2196/1/1933/0` 재현(1131s). 사소 보고 오차 2건(main.py 4806→실측 4808·cell 수 라벨링)은 hardening. **합격** |
 | [`h3_closure_and_record_bundle.md`](2026-08-06/h3_closure_and_record_bundle.md) | 미검증 구간 5커밋(`da35489`~`9caa76c`) — H-3 폐쇄(`59fe1a1`, 유일 코드) + 기록·README 건수·기준선. 신규 가드 [`test_app_import_paths.py`](../../tests/test_app_import_paths.py)를 **양방향** 뮤테이션으로 물림 확정(작업 세션은 under-strict 1종만 쟀다 — over-strict를 본 검증이 채웠다). 행위 무변 repro 지문 IDENTICAL(route 76·order-pairs 0·openapi sha `1e275ab8…`), README 220/합격 148 디스크 정확 일치, 기준선 `2193/1/1931` 재현(974s). **비차단 H-3-A: `python -m services.application.app.main`이 분해로 회귀**(분해 전 exit 0 → circular import) — 배포 uvicorn 무관, H-3의 1줄 처방으로는 안 닫힌다. 집계 재현은 [`tally_verification_ledger.py`](2026-08-06/tally_verification_ledger.py) | **합격** |
 
 ### 2026-08-05
