@@ -7,16 +7,20 @@
 **2026-08-06 공유 prelude 추출로 그 순환 자체가 사라졌다**(`app/api/*`·`app/env.py`).
 그래서 이 파일이 잠그는 성질도 바뀌었다 — 아래 셀들은 이제 **두 가지 다른 것**을 잰다.
 
-1. `test_the_*_name_loads` 2건 — **모듈 동일성**. 순환은 없어졌지만 `main.py` 가 routers 를
-   절대 경로로 부르면 짧은 이름 로드에서 `app.main` 과
-   `services.application.app.main` 이 여전히 **서로 다른 객체**가 되고, 다른 테스트의
-   `patch("services.application.app.main....")` 가 엉뚱한 사본을 건드린다.
+1. `test_the_*_name_loads` 2건 — **뜨는가**. 그 이상은 아니다. **★ 추출 뒤 이 둘은 더 이상
+   상대/절대 import 를 가르지 못한다**(실측 2026-08-06: `main.py` 의 routers import 를
+   절대로 되돌려도 **4 cells 전부 통과**했다). 순환이 있을 때만 이름 혼용이 치명적이었기
+   때문이다. 그 자리를 아래 4번이 대신한다.
 2. `test_a_router_module_loads_before_main` — **순환 부재(H-3-A)**. 추출 전에는 `routers`
    를 먼저 import 하면 죽었다. 이것이 순환을 직접 겨냥하는 셀이며, `routers/*` 에
    `from ..main import` 를 되살리면 여기서 잡힌다.
 3. `test_the_module_runs_as_a_script` — 같은 순환의 다른 얼굴. `python -m` 은 모듈을
    `__main__` 으로 올리므로 `main` 이 **두 번** 로드되고, 순환이 있으면 그 두 번째가 죽는다.
    저장소 진입점이 쓰는 명령은 아니지만(Dockerfile=uvicorn) **순환의 값싼 관측 창**이다.
+4. `test_the_short_name_load_keeps_the_routers_in_one_tree` — **모듈 동일성**. 1번이 놓아 준
+   성질을 여기서 잡는다. 짧은 이름으로 들어오면 라우터는 `app.routers.*` 에 살아야 한다 —
+   `main.py` 가 절대 경로로 부르면 `services.application.app.routers.*` 라는 **다른 트리**에
+   실려, 같은 모듈이 두 사본으로 존재하고 `patch` 가 엉뚱한 쪽을 건드린다.
 
 **서브프로세스로 돈다.** 한 프로세스 안에서 두 이름으로 import 하면 모듈 객체가 둘 생겨
 다른 테스트의 patch 대상이 흔들린다 — 잠그려는 성질이 프로세스 시작 시점의 것이므로
@@ -102,6 +106,34 @@ class ImportOrderIndependenceTest(unittest.TestCase):
                     "라우터를 먼저 import 하면 죽는다 — `routers/*` 가 `..main` 을 다시 "
                     f"보고 있는지 확인한다(공유 심볼은 `..api`):\n{result.stderr[-2000:]}",
                 )
+
+    def test_the_short_name_load_keeps_the_routers_in_one_tree(self):
+        """짧은 이름으로 들어오면 라우터도 그 트리에 있어야 한다(모듈 동일성).
+
+        under-strict: `main.py` 의 routers import 를 절대 경로로 되돌리면 라우터가
+        `services.application.app.routers.*` 로 실려 이 셀이 죽는다(실측). 그때
+        `app.main` 과 라우터가 **다른 트리**에 있어 같은 모듈의 사본이 둘 생기고,
+        `patch("services.application.app....")` 가 엉뚱한 쪽을 건드린다.
+        over-strict: 상대 import 로 정상 로드되면 통과한다 — 위 `AppImportPathTest`
+        가 "뜨는가" 를 따로 잠그므로 순환 제거를 위해 앱을 깨뜨리면 그쪽이 먼저 죽는다.
+        """
+        probe = (
+            "import sys, app.main; "
+            "print('FQ' if any(m.startswith('services.application.app.routers') "
+            "for m in sys.modules) else 'SHORT')"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            cwd=_ROOT,
+            env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(_ROOT / "services" / "application")},
+            capture_output=True, text=True, timeout=300,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        self.assertIn(
+            "SHORT", result.stdout,
+            "짧은 이름 로드인데 라우터가 FQ 트리에 실렸다 — `main.py` 의 routers "
+            "import 가 절대 경로로 돌아갔는지 본다(상대여야 한다).",
+        )
 
     def test_the_module_runs_as_a_script(self):
         """`python -m …app.main` — 모듈이 두 번 로드돼도 순환이 없다."""

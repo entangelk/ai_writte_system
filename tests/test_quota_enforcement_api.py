@@ -569,7 +569,9 @@ class BillableRouteWiringTest(unittest.TestCase):
         # 순서가 곧 계약이다(§1.1): 소유권 뒤라야 404·403 이 차감 앞에서 끝난다.
         # 앞으로 옮기는 리팩터링은 상태코드를 바꾸지 않으므로 **요청 구동
         # 테스트로는 안 보인다** — route 선언을 직접 읽는 이 셀이 그 자리다.
-        from services.application.app.api.dependencies import require_project_owner
+        from services.application.app.api.dependencies import (
+            require_project_owner as owner,
+        )
 
         for operation, route in self._operations():
             if operation not in BILLABLE_OPERATIONS:
