@@ -26,14 +26,19 @@
 
 ## 판정 분포 (2026-08-06 기준)
 
+> **판정 열은 그 기록의 *최종* 판정이다**(오너 2026-08-06: *"테스트의 목적은 조건이 닫히는
+> 거니까"*). 조건부로 나갔다가 조건이 닫혀 승격된 기록은 **그 기록 자신의 최종 문구**를 따른다.
+> 종전에는 발행 시점 판정이 섞여 있었고 판정 절이 있는데도 `—`인 행이 14건 있었다 — 2026-08-06에
+> 17건을 기록 본문과 대조해 정렬했다.
+
 | 판정 | 건수 | 뜻 |
 |---|---|---|
-| 합격 | 150 | blocking 결함 없음 |
-| **조건부 합격** | **57** | 합격이되 닫아야 할 조건이 있었다 |
-| **불합격** | **1** | 핵심 계약 위반으로 다음 슬라이스 진행이 차단됐다 |
-| 서술형 | 14 | 초기 기록(판정 문구가 정형화되기 전) |
+| 합격 | 154 | blocking 결함 없음 |
+| **조건부 합격** | **66** | 합격이되 닫아야 할 조건이 있었다 |
+| **불합격** | **2** | 핵심 계약 위반으로 다음 슬라이스 진행이 차단됐다 |
+| 서술형 | 0 | 판정 문구가 없는 기록(정렬 후 남은 것이 없다) |
 
-**조건부 합격이 26%**라는 것이 이 절차가 형식이 아니라는 증거다. 검증이 실제로 지적을 냈고,
+**조건부 합격이 30%**라는 것이 이 절차가 형식이 아니라는 증거다. 검증이 실제로 지적을 냈고,
 그 지적은 후속 커밋으로 닫혔다(각 기록의 Outstanding items → 이후 work_log의 hardening 절).
 
 ## 읽어 볼 만한 것 (처음 오는 사람)
@@ -137,9 +142,9 @@
 | 기록 | 대상 | 판정 |
 |---|---|---|
 | [`beta_long_report_pointer_root_cause.md`](2026-07-29/beta_long_report_pointer_root_cause.md) | 베타 `long` report 실패 / 포인터 루트원인 실측 (코드 변경 0) | 합격 |
-| [`slice1_context_budget_accounting_fix.md`](2026-07-29/slice1_context_budget_accounting_fix.md) | 슬라이스 1 / 컨텍스트 예산 회계 수정 (포인터 렌더링 회계 반영) | — |
-| [`slice1a_io_token_breakdown_audit.md`](2026-07-29/slice1a_io_token_breakdown_audit.md) | 슬라이스 1a / 감사에 입력·출력 토큰 분해 남기기 (K-3 관측 1a) | — |
-| [`slice1b_context_window_output_cap_reaudit.md`](2026-07-29/slice1b_context_window_output_cap_reaudit.md) | 독립 재검증 — K-3 관측 1b 컨텍스트 창·출력 상한 | — |
+| [`slice1_context_budget_accounting_fix.md`](2026-07-29/slice1_context_budget_accounting_fix.md) | 슬라이스 1 / 컨텍스트 예산 회계 수정 (포인터 렌더링 회계 반영) | 합격 |
+| [`slice1a_io_token_breakdown_audit.md`](2026-07-29/slice1a_io_token_breakdown_audit.md) | 슬라이스 1a / 감사에 입력·출력 토큰 분해 남기기 (K-3 관측 1a) | 합격 |
+| [`slice1b_context_window_output_cap_reaudit.md`](2026-07-29/slice1b_context_window_output_cap_reaudit.md) | 독립 재검증 — K-3 관측 1b 컨텍스트 창·출력 상한 | **불합격** |
 
 ### 2026-07-28
 
@@ -157,9 +162,9 @@
 |---|---|---|
 | [`auth_d8_3a_enforcement.md`](2026-07-27/auth_d8_3a_enforcement.md) | 인증 D8-3a 시행 (SoT v1.7.52) | 합격 |
 | [`auth_d8_4_frontend_login.md`](2026-07-27/auth_d8_4_frontend_login.md) | D8-4 프론트 로그인 선행 독립 검증 | 합격 |
-| [`auth_d8_slice1.md`](2026-07-27/auth_d8_slice1.md) | 인증 D8 슬라이스 1 (User·세션·로그인 API) 2026-07-27 | — |
-| [`auth_d8_slice2_owner_id.md`](2026-07-27/auth_d8_slice2_owner_id.md) | 인증 D8-2 (Project.owner_id) 슬라이스 2a·2b 2026-07-27 | — |
-| [`stack_bringup_handoff_machine_section.md`](2026-07-27/stack_bringup_handoff_machine_section.md) | 스택 기동 + HANDOFF 머신 구분 절 (2026-07-27) | — |
+| [`auth_d8_slice1.md`](2026-07-27/auth_d8_slice1.md) | 인증 D8 슬라이스 1 (User·세션·로그인 API) 2026-07-27 | **조건부 합격** |
+| [`auth_d8_slice2_owner_id.md`](2026-07-27/auth_d8_slice2_owner_id.md) | 인증 D8-2 (Project.owner_id) 슬라이스 2a·2b 2026-07-27 | 합격 |
+| [`stack_bringup_handoff_machine_section.md`](2026-07-27/stack_bringup_handoff_machine_section.md) | 스택 기동 + HANDOFF 머신 구분 절 (2026-07-27) | **조건부 합격** |
 
 ### 2026-07-26
 
@@ -182,9 +187,9 @@
 
 | 기록 | 대상 | 판정 |
 |---|---|---|
-| [`auto-promote-503-partial-envelope.md`](2026-07-24/auto-promote-503-partial-envelope.md) | `auto_promote_job` 503 partial envelope (SoT v1.7.35) | — |
+| [`auto-promote-503-partial-envelope.md`](2026-07-24/auto-promote-503-partial-envelope.md) | `auto_promote_job` 503 partial envelope (SoT v1.7.35) | **조건부 합격** |
 | [`observability-kpi-foundation-increments.md`](2026-07-24/observability-kpi-foundation-increments.md) | 관측 KPI 페이즈 기반 증분 1~3 (per-call 감사 레코드 + 게이트 파생점수) | 합격 |
-| [`run_endpoint_storage_503_narrowing.md`](2026-07-24/run_endpoint_storage_503_narrowing.md) | `POST …/analysis/jobs/{id}/run` 저장소 장애 502→503 좁히기 (SoT v1.7.40, (B)) | — |
+| [`run_endpoint_storage_503_narrowing.md`](2026-07-24/run_endpoint_storage_503_narrowing.md) | `POST …/analysis/jobs/{id}/run` 저장소 장애 502→503 좁히기 (SoT v1.7.40, (B)) | 합격 |
 | [`storage_503_global_handler.md`](2026-07-24/storage_503_global_handler.md) | 저장소 장애 매핑 전역화 (SoT v1.7.38, 전역 503 handler) | 합격 |
 
 ### 2026-07-23
@@ -204,7 +209,7 @@
 | [`accept_dirty_guard_unsaved_edits.md`](2026-07-22/accept_dirty_guard_unsaved_edits.md) | accept 후 미저장 편집 소실 결손 수정 (reloadLatest 덮어쓰기, 프론트 전용) | 합격 |
 | [`h3_error_response_contract_plan.md`](2026-07-22/h3_error_response_contract_plan.md) | H3 에러 응답 계약 착수 결정 브리프 + work_log (오너 결정 D1~D4=A) | 조건부 합격 |
 | [`increment3_d6_generation_pad_polling.md`](2026-07-22/increment3_d6_generation_pad_polling.md) | 비동기 생성 + 결과 패드 증분 3: 읽기 전용 패드 + 완료 배지 + 5초 폴링 (D6=A) | 합격 |
-| [`legacy_drafts_500_503_integrity_mapping.md`](2026-07-22/legacy_drafts_500_503_integrity_mapping.md) | 레거시-데이터 `/drafts` 500 근본 수정 (DraftOrderIntegrityError 서브클래스 + 503 매핑) | — |
+| [`legacy_drafts_500_503_integrity_mapping.md`](2026-07-22/legacy_drafts_500_503_integrity_mapping.md) | 레거시-데이터 `/drafts` 500 근본 수정 (DraftOrderIntegrityError 서브클래스 + 503 매핑) | 합격 |
 | [`rail-tab-layering.md`](2026-07-22/rail-tab-layering.md) | 우측 레일 탭 레이어화 (dogfood 결손 수정) | 조건부 합격 |
 | [`retry_slice_d4_generation_job.md`](2026-07-22/retry_slice_d4_generation_job.md) | 비동기 생성 job 재시도 endpoint + UI (async-pad D4=A, SoT v1.7.28) | 합격 |
 
@@ -267,7 +272,7 @@
 | [`c0_writing_http_contract.md`](2026-07-16/c0_writing_http_contract.md) | C0 Writing HTTP contract 구현 (SoT v1.7.1, D3=A) | 합격 |
 | [`c1_writing_basic_ui.md`](2026-07-16/c1_writing_basic_ui.md) | C1 기본 Writing 작업공간 UI 구현 (SoT v1.7.2, D1=A·D2=A·D4=A) | 합격 |
 | [`c2_writing_loop_ui.md`](2026-07-16/c2_writing_loop_ui.md) | C2 자동 revise/retrieve loop UI | 합격 |
-| [`frontend_editor_save.md`](2026-07-16/frontend_editor_save.md) | Frontend editor/save A1 슬라이스 (SoT v1.6.98) | 합격 |
+| [`frontend_editor_save.md`](2026-07-16/frontend_editor_save.md) | Frontend editor/save A1 슬라이스 (SoT v1.6.98) | **조건부 합격** |
 | [`frontend_editor_save_a2.md`](2026-07-16/frontend_editor_save_a2.md) | Frontend editor/save A2 슬라이스 (SoT v1.6.99) | 합격 |
 | [`frontend_first_slice.md`](2026-07-16/frontend_first_slice.md) | Frontend 첫 슬라이스 (SoT v1.6.94) | 합격 |
 | [`frontend_project_navigation.md`](2026-07-16/frontend_project_navigation.md) | Frontend 프로젝트 상세 내비게이션 슬라이스 (SoT v1.6.96) | 합격 |
@@ -345,7 +350,7 @@
 | [`compose_elasticsearch_service_b5.md`](2026-07-09/compose_elasticsearch_service_b5.md) | (b-5) compose 전용 ES 서비스 (배포 lexical/hybrid 발화) | 합격 |
 | [`es_lexical_backfill_v1_6_58.md`](2026-07-09/es_lexical_backfill_v1_6_58.md) | ES-lexical backfill 스크립트 (SoT v1.6.58) | 합격 |
 | [`outbox_per_sink_bookkeeping_b6_increment2.md`](2026-07-09/outbox_per_sink_bookkeeping_b6_increment2.md) | (b-6) 증분2: outbox per-sink bookkeeping (SoT v1.6.57) | 합격 |
-| [`worker_compose_increment1_b6.md`](2026-07-09/worker_compose_increment1_b6.md) | (b-6) 증분1 worker compose 서비스 (주장 v1.6.56) | — |
+| [`worker_compose_increment1_b6.md`](2026-07-09/worker_compose_increment1_b6.md) | (b-6) 증분1 worker compose 서비스 (주장 v1.6.56) | **조건부 합격** |
 
 ### 2026-07-08
 
@@ -440,14 +445,14 @@
 
 | 기록 | 대상 | 판정 |
 |---|---|---|
-| [`analysis_job_state_runner_slice2.md`](2026-06-29/analysis_job_state_runner_slice2.md) | Phase 2A job-state runner integration verification | 합격 |
+| [`analysis_job_state_runner_slice2.md`](2026-06-29/analysis_job_state_runner_slice2.md) | Phase 2A job-state runner integration verification | **조건부 합격** |
 | [`analysis_mongo_persistence.md`](2026-06-29/analysis_mongo_persistence.md) | Phase 2A Analysis Mongo persistence 독립 검증 | 조건부 합격 |
 | [`analysis_mongo_persistence_hardening.md`](2026-06-29/analysis_mongo_persistence_hardening.md) | Phase 2A Analysis Mongo persistence 보강 독립 재검증 | 합격 |
-| [`analysis_phase2a_slice1.md`](2026-06-29/analysis_phase2a_slice1.md) | Phase 2A Slice 1 (analysis domain model + in-memory repository) 독립 검증 | — |
-| [`analysis_phase2a_slice2.md`](2026-06-29/analysis_phase2a_slice2.md) | Phase 2A Slice 2 (taxonomy extraction schema + logical_key derivation) 독립 검증 | — |
-| [`analysis_phase2a_slice3.md`](2026-06-29/analysis_phase2a_slice3.md) | Phase 2A Slice 3 (anchor order idempotency gap closure) 독립 검증 | — |
-| [`analysis_phase2a_slice4.md`](2026-06-29/analysis_phase2a_slice4.md) | Phase 2A Slice 4 (extraction runner + anchor-set identity closure) 독립 검증 | — |
-| [`analysis_write_error_and_job_state_commits.md`](2026-06-29/analysis_write_error_and_job_state_commits.md) | Analysis write-error and job-state commits verification | 합격 |
+| [`analysis_phase2a_slice1.md`](2026-06-29/analysis_phase2a_slice1.md) | Phase 2A Slice 1 (analysis domain model + in-memory repository) 독립 검증 | **조건부 합격** |
+| [`analysis_phase2a_slice2.md`](2026-06-29/analysis_phase2a_slice2.md) | Phase 2A Slice 2 (taxonomy extraction schema + logical_key derivation) 독립 검증 | **조건부 합격** |
+| [`analysis_phase2a_slice3.md`](2026-06-29/analysis_phase2a_slice3.md) | Phase 2A Slice 3 (anchor order idempotency gap closure) 독립 검증 | 합격 |
+| [`analysis_phase2a_slice4.md`](2026-06-29/analysis_phase2a_slice4.md) | Phase 2A Slice 4 (extraction runner + anchor-set identity closure) 독립 검증 | 합격 |
+| [`analysis_write_error_and_job_state_commits.md`](2026-06-29/analysis_write_error_and_job_state_commits.md) | Analysis write-error and job-state commits verification | **조건부 합격** |
 
 ### 2026-06-28
 

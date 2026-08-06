@@ -98,6 +98,44 @@ class VerificationsIndexTest(unittest.TestCase):
     def test_every_index_link_resolves(self) -> None:
         _assert_links_resolve(self, self.index)
 
+    def test_every_record_row_states_a_verdict(self) -> None:
+        """모든 기록 행이 **판정 열에 실제 판정을 적는다**(오너 2026-08-06 = 최종 판정).
+
+        왜 필요한가 — 2026-08-06에 두 가지가 한꺼번에 드러났다:
+          · 판정 절이 있는데 인덱스는 `—`(서술형)인 행이 **14건**이었다. 분포의 합만
+            맞으면 되므로 `VerificationCountClaimsTest` 는 통과했다.
+          · 새 행 하나가 **파이프를 빠뜨려 2열**이었고(판정이 설명 칸에 먹힘) 역시 통과했다.
+        둘 다 "합계는 맞는데 내용이 틀린" 형태다. 여기서는 **행 구조와 판정 값 자체**를 본다.
+
+        판정 문구를 파싱하지 않는 것이 의도다 — 기록 본문의 판정 표현이 영·한 혼용에
+        형식도 제각각이라(`PASS`·`Conditional pass`·`조건부 승인`) 정규식으로 분류하면
+        규칙을 바꿀 때마다 다른 숫자가 나온다(2026-08-06 실측: 두 번 시도해 각각 5건·4건
+        오분류). 그래서 **분류는 사람이 하고, 가드는 "비어 있지 않은가"만 잠근다.**
+
+        under-strict: 새 기록을 `—` 로 등재하거나 판정 열을 빠뜨리면 실패한다.
+        over-strict: 세 판정 중 무엇이든 적혀 있으면 통과한다 — 어떤 판정이어야 하는지는
+        가드가 정하지 않는다(그것은 기록 본문과 사람의 몫이다).
+        """
+        allowed = {"합격", "조건부 합격", "불합격"}
+        index = self.index.read_text(encoding="utf-8")
+        rows = [line for line in index.splitlines() if line.startswith("|")]
+        for record in sorted(_VERIFICATIONS.glob("*/*.md")):
+            link = f"({record.parent.name}/{record.name})"
+            with self.subTest(record=f"{record.parent.name}/{record.name}"):
+                row = next((r for r in rows if link in r), None)
+                self.assertIsNotNone(row, "인덱스에 행이 없다")
+                cells = [c.strip() for c in row.strip().strip("|").split("|")]
+                self.assertEqual(
+                    len(cells), 3,
+                    f"행이 3열이 아니다({len(cells)}열) — 판정 열 앞의 `|` 를 빠뜨렸는지 "
+                    f"본다:\n{row[:160]}",
+                )
+                self.assertIn(
+                    cells[-1].strip("*"), allowed,
+                    "판정 열이 비어 있거나 알 수 없는 값이다 — 기록 본문의 **최종** 판정을 "
+                    f"적는다({'·'.join(sorted(allowed))})",
+                )
+
 
 class RepositoryReadmeTest(unittest.TestCase):
     """최상위 `README.md` — 저장소를 처음 보는 사람이 닿는 곳."""
