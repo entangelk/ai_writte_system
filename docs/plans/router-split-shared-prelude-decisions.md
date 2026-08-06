@@ -188,7 +188,7 @@ order-sensitive pairs 0 · openapi sha)이 **IDENTICAL** 이어야 한다. **정
 
 ### 결과
 
-- `main.py` **5,843 → 4,806줄**. `routers/*` 의 `from ..main import` **0건**.
+- `main.py` **5,843 → 4,808줄**(= `5843 - 1163 + 128`). ★ 초판은 **4,806**이라 적었는데 그것은 주석 재작성 전 **생성기 중간 출력**을 최종값으로 인용한 것이다 — 독립 검증이 잡았다. `routers/*` 의 `from ..main import` **0건**.
 - **행위 무변**: `repro_router_split.py` 지문 **IDENTICAL**(route 76 · order-sensitive 0 ·
   openapi sha `f8b42ef1…`).
 - **되살아난 로드 경로 4종**: 라우터 먼저 · `python -m` · 짧은 이름 · uvicorn.
@@ -223,4 +223,4 @@ order-sensitive pairs 0 · openapi sha)이 **IDENTICAL** 이어야 한다. **정
 |---|---|---|
 | 추출 직전 코드(`10502a6`) + 새 테스트 | **새 셀 3개만**(라우터 먼저 ×2 · `python -m`), 기존 2개 통과 | under-strict — 새 셀이 기존 셀이 못 잡던 것을 정확히 잡는다 |
 | `main.py` routers import → 절대 | **모듈 동일성 셀 1개만** | 정정 후 그 자리가 실제로 잠겼다 |
-| 라우터가 `..main` 을 다시 import | 4 cells 전부 | 물기는 하나 정상 경로까지 죽여 분리가 안 된다 |
+| 라우터가 `..main` 을 다시 import | **그 시점 4 cells 전부**(모듈 동일성 셀을 넣기 전이다 — HEAD 기준으로는 **5 method**이며 독립 검증이 그렇게 실측했다) | 물기는 하나 정상 경로까지 죽여 분리가 안 된다 |

@@ -178,7 +178,7 @@
 | 구분 | 내용 |
 |---|---|
 | 신규 | [`app/api/models.py`](../../../services/application/app/api/models.py)(78) · [`errors.py`](../../../services/application/app/api/errors.py)(38) · [`dependencies.py`](../../../services/application/app/api/dependencies.py)(17) · [`app/env.py`](../../../services/application/app/env.py)(2) — 본문 **byte-동일**, 원본 정의 순서 보존 |
-| `main.py` | 이동분 제거 + 새 모듈 import. **5,843 → 4,806줄** |
+| `main.py` | 이동분 제거 + 새 모듈 import. **5,843 → 4,808줄** |
 | `routers/{admin,auth}` | `from ..main import` **제거**. 재수출 4종은 원래 모듈에서 직접 |
 | 테스트·스크립트 8파일 | 이동 심볼 import 를 새 위치로 정렬 |
 | [`tests/test_app_import_paths.py`](../../../tests/test_app_import_paths.py) | 재검수 — 독스트링 재작성 + 셀 3개 신설(라우터 먼저 · `python -m` · 모듈 동일성) |
@@ -203,7 +203,7 @@ main 트리에서 돌고 있어 **throwaway worktree** 에서 수행).
 |---|---|---|
 | 추출 직전 코드(`10502a6`) + 새 테스트 | **새 셀 3개만**(라우터 먼저 ×2 · `python -m`), 기존 2개 통과 | under-strict — 새 셀이 기존 셀이 못 잡던 것을 정확히 잡는다 |
 | `main.py` routers import → 절대 경로 | **모듈 동일성 셀 1개만**(1 failed / 4 passed) | 정정 후 그 자리가 실제로 잠겼다 |
-| 라우터가 `..main` 을 다시 import | 4 cells 전부 | 물기는 하나 정상 경로까지 죽여 분리가 안 된다 |
+| 라우터가 `..main` 을 다시 import | **그 시점 4 cells 전부**(모듈 동일성 셀을 넣기 전이다 — HEAD 기준으로는 **5 method**이며 독립 검증이 그렇게 실측했다) | 물기는 하나 정상 경로까지 죽여 분리가 안 된다 |
 
 ### Issues found — ★ 가드가 잠그는 성질이 바뀌었는데 독스트링만 갱신할 뻔했다
 
@@ -252,3 +252,47 @@ main 트리에서 돌고 있어 **throwaway worktree** 에서 수행).
 - skip 1 = 호스트에서 구조적으로 항상 skip 되는 live Chroma 셀.
 - **1차 실행은 `9 failed`였고 전부 `as` 별칭 소실이었다**(위 Issues). 코드가 아니라 import
   재작성의 실수이며, 복구 후 이 값이다.
+
+---
+
+## Task 5 — 공유 prelude 추출 독립 검증 반영 + 보강 (`9b400d2` 대상)
+
+독립 세션이 **합격 · Blocking 0** 으로 검증했다
+([기록](../../verifications/2026-08-06/shared_prelude_extraction.md)). 7개 표면을 전부
+재실측했고, 특히 **AST 이름 해석 양방향**(이동 코드 미해결 전역 0 · `main.py` 누락 import 0)은
+구현자가 안 쟀던 축이다 — 잠재 호출시점 `NameError` 가능성을 소거했다.
+
+### Completed work — 보강 패스
+
+| 항목 | 처리 |
+|---|---|
+| 지적 ① `main.py` 4,806 → **4,808** | 네 커밋 전부 4,808 확인. **원인은 인용 시점** — 생성기 중간 출력(주석 재작성 전)을 최종값으로 옮겨 적었다. HANDOFF·브리프 §9·work_log 3곳 정정 |
+| 지적 ② M1 "4 cells" vs 5 method | **둘 다 맞다 — 기준 시점이 다르다.** 구현자 M1 은 모듈 동일성 셀을 넣기 전이라 파일에 4 cells 뿐이었다. 표에 시점 명시 |
+| **표본 한계 폐쇄** | 본문 byte-동일이 **14 샘플**이던 것을 **134 전수**로 바꿨다 → **134/134 IDENTICAL**. 계약이 "본문 byte-동일"이므로 표본이 아니라 전수가 맞는 축이다 |
+| **인덱스 행 결함** | 검증 인덱스의 새 행이 **판정 열 구분자를 빠뜨려 2열**이었다(파이프 3, 정상 4). 판정 `합격` 이 설명 칸에 먹혔다. 복구 |
+
+### Issues found — 예고된 가드 간극이 실제로 발현했다
+
+`docs/verifications/README.md` 의 깨진 행을 **`test_docs_indexes.py` 는 잡지 못했다** — 그 가드는
+분포 표의 **합계**와 링크만 보고 **행 구조는 안 본다**. 이것은 같은 날 앞선 기록이 올린
+*"판정 분포 가드의 간극(합계만 맞으면 green)"* 이 **그 형태 그대로 발현한 것**이다.
+
+- 발견은 [`tally_verification_ledger.py`](../../verifications/2026-08-06/tally_verification_ledger.py)
+  가 했다 — 대조 후보가 17 → 18 로 늘었고, 구분자를 복구하니 17 로 복귀했다.
+- **그 스크립트를 커밋해 둔 것이 값을 했다.** `/tmp` 에 뒀으면 이 결함은 안 보였다.
+- 판정 분포 정의(발행 시점 vs 최종)는 **여전히 오너 결정 대기**이며, 그 결정이 나면
+  행별 판정을 디스크에 묶는 셀이 이 형태까지 함께 닫는다.
+
+### Verification
+
+- `test_docs_indexes.py` **12 passed / 10 subtests**.
+- 전수 byte-동일: 이동 이름 **134/134 IDENTICAL**(pre `10502a6` vs 새 4개 모듈, AST 구간 비교).
+- 건수: **222건 / 43일치**, 분포 합 222(합격 150).
+- 메모리 `router-split-python-m-circular` 는 검증자가 이미 폐쇄 상태로 갱신했고 내용이 정확하다
+  (의존 방향 보존 주의 · 모듈 동일성 셀 설명 포함).
+
+### Next steps
+
+1. **라우터 분해 잔여 7 도메인** — 이제 기계적이다. 각 이동 후 `repro_router_split.py` 지문 diff.
+2. **Slice 2(`create_admin_app()`)** — 선행이 닫혔다. `routers.admin` 을 그냥 import 할 수 있다.
+3. 판정 분포 정의는 오너 결정 대기(위 Issues).
