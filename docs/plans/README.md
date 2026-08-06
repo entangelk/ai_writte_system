@@ -6,7 +6,7 @@
 
 서비스 경계와 확정된 계약을 먼저 볼 때는 [`../system-contract-sot.md`](../system-contract-sot.md)를 정본 SoT로 사용한다. 이 인덱스는 Phase별 세부 계획과 **모든 착수 결정 브리프**를 찾는 자리다.
 
-> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(101개 중 83개)는
+> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(102개 중 84개)는
 > `*-decisions.md` 착수 결정 브리프이며, **오너 결정의 근거 기록**이다. 파일명 접두 체계는 이미 무너져
 > 있고(`00`~`07` 계열 + 접두 없는 최근 것들) 파일명만으로는 트랙을 알 수 없다 — 그래서 아래는 **접두가
 > 아니라 트랙으로** 묶었다. 디렉터리 재편은 아직 결정되지 않은 별개 사안이다(HANDOFF 추적 부채).
@@ -39,6 +39,7 @@
 | [`analysis-memory-taxonomy.md`](analysis-memory-taxonomy.md) | 분석 대상과 저장 단위 논의안 | Discussion |
 | [`product-readiness-backlog.md`](product-readiness-backlog.md) | 트리거가 올 때 하나씩 닫는 횡단 개선 백로그(새 Phase 아님) | Active |
 | [`router-split-and-admin-separation-decisions.md`](router-split-and-admin-separation-decisions.md) | `main.py` 라우터 분해(**register 함수**) + 관리자 주소 분리(**ⓑ 별도 compose 서비스**) | **Resolved** — R1·A1(2026-08-05) · 구현 대기 |
+| [`router-split-shared-prelude-decisions.md`](router-split-shared-prelude-decisions.md) | 공유 prelude 추출(라우터가 `..main` 을 안 보게) — H-3-A 순환 폐쇄 · 이동 134 정의/956줄 실측 | **Resolved(방향)** — ⓑ·잔여 도메인보다 선행(2026-08-06) · **모듈 배치 §5 결정 대기** |
 
 ### Phase 1 — Core SOT
 

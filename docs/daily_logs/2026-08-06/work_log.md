@@ -102,3 +102,60 @@
 2. **H-3-A는 Slice 2와 함께 보는 것이 자연스럽다** — 새 진입점을 만드는 작업이라 순환 제거를
    그때 판단하면 중복이 없다.
 3. 판정 분포 정의(발행 시점 vs 최종)를 정하면 인덱스 17건 정리 + 가드 셀 추가가 한 번에 닫힌다.
+
+---
+
+## Task 3 — H-3-A 분석 + 공유 prelude 추출 결정 브리프
+
+### User Decisions and Rationale
+
+- **오너가 `python -m` 중심 프레이밍을 뒤집었다**(2026-08-06). 문언: *"지금 라우터 완전 분리 전
+  테스트를 진행해서 생기는 문제라는거지? 그러면 cli 명령어가 필요 없는 상황을 만들어야 되는거
+  아닌가? … 이 관점이면 b로 했다가 전부 정리되면 테스트 파일 재검수가 맞나?"*
+- **그 관점이 맞고, 내 직전 추천(ⓒ 로드 순서 무해화 3줄)을 폐기했다.** ⓒ 는 *"ⓑ 는 비싸고
+  Slice 1 잔여와 충돌한다"* 는 전제 위에 있었는데, **ⓑ 를 분해의 일부로 보면 충돌이 아니라
+  선행**이다. ⓒ 는 ⓑ 가 오면 되돌릴 비계다.
+- **결정 = ⓑ(공유 prelude 추출)를 잔여 7 도메인보다 먼저.** 마감에 테스트 파일 재검수.
+- **남은 결정 1건**(대상 모듈 배치)은 브리프 §5 로 올리고 멈췄다.
+
+### Completed work
+
+| 파일 | 변경 |
+|---|---|
+| [`plans/router-split-shared-prelude-decisions.md`](../../plans/router-split-shared-prelude-decisions.md) | **신규 브리프** — 문제 규명 · 선택지 4 · 결정과 근거 · 크기 실측 · 모듈 배치 3지선다(§5) · 마감 항목 · 유예 |
+| [`plans/README.md`](../../plans/README.md) · [`README.md`](../../../README.md) | 인덱스 등재 + 건수 101→102 · 브리프 83→84 |
+| [`HANDOFF.md`](../../../HANDOFF.md) | 추적 부채 H-3-A 항목을 **결정 완료 + 실측**으로 교체 · Next Tasks 에 **1번(공유 prelude 추출)** 신설하고 이후 번호 재정렬 |
+
+### 실측 — 세 가지를 새로 쟀다
+
+1. **순환의 진짜 범위**: `python -m` 만의 문제가 아니다. **`routers.admin`·`routers.auth` 를
+   먼저 import 해도 ImportError** 다. 즉 `main` 이 먼저 오는 **단 하나의 순서**에서만 산다.
+   그리고 그 경로가 **Slice 2(`create_admin_app()`)가 하려는 바로 그 일**이다.
+2. **`python -m` 은 곁가지**: `main.py` 에 `__main__` 블록 없음(말단 `app = create_app()`),
+   repo 사용처 **0건**(Dockerfile=uvicorn, 워커=`python scripts/*.py`). 분해 전 `exit 0` 은
+   *"로드되고 아무것도 안 했다"*.
+3. **ⓑ 의 크기**: prelude 181 정의 중 **이동 134 / 956줄**(main.py 의 16%), 잔류 47 / ~896줄.
+   **직접 참조만 세면 88인데 전이 폐포가 134** — 모델이 서로를 필드로 참조한다.
+   테스트 결합과의 **겹침은 0**(테스트가 잡는 13개는 전부 조립 helper 라 남는다).
+
+### Issues found — 분해를 끝내도 순환은 안 없어진다 (프레이밍 정정)
+
+종전 내 서술은 "H-3-A = `python -m` 회귀"였다. 그 프레임이면 **분해를 끝내면 해결될 것처럼
+읽힌다.** 실제는 반대다 — `from ..main` 하는 모듈이 **2개 → 9개**로 늘 뿐이고, 순환은
+**공유 심볼이 `main.py` 를 떠날 때만** 사라진다. **ⓑ 는 수리가 아니라 분해의 종착점**이다.
+
+### Verification
+
+- `python3 -m pytest tests/test_docs_indexes.py -q` → **12 passed / 10 subtests**(브리프 등재·건수 정합).
+- 순환 재현: HEAD 에서 `routers.admin` 먼저 import → ImportError · `main` 먼저 → OK(80 routes).
+- 폐기한 ⓒ 도 throwaway worktree 에서 **동작은 확인**했다(4 경로 + 가드 2 passed) — 버린
+  이유는 안 되기 때문이 아니라 되돌릴 비계이기 때문이다.
+- 크기 측정은 AST 기반(전이 폐포 포함). 코드 변경 0줄이라 전수 회귀는 안 돌렸다.
+
+### Next steps
+
+1. **모듈 배치 결정**(브리프 §5) — 추천 ⓑ `app/api/{models,errors,dependencies}.py`.
+2. 결정되면 **추출 착수**. 지문([`repro_router_split.py`](../../verifications/2026-08-05/repro_router_split.py))이
+   **IDENTICAL** 이어야 한다 — 정의만 옮기므로 한 글자라도 달라지면 사고 신호다.
+3. 마감에 [`tests/test_app_import_paths.py`](../../../tests/test_app_import_paths.py) 재검수
+   (독스트링이 거짓이 되는데 셀은 통과한다).
