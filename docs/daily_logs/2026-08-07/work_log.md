@@ -493,7 +493,10 @@ annotations`)을 쓰므로 *"import 가 된다"* 보다 **정적으로 미정의
   예고한 것은 추측이었고 실측 결과 아니다.
 - **★ `_require_project_exists` 는 main.py 에 남겼다.** analysis 라우터는 자체
   `project_existence_check(core_sot)` 를 만들어 쓰지만, **writing 잔류(13 op)가
-  여전히 main.py 의 같은 클로저를 33곳에서 쓴다**(grep 실측). 이 줄을 analysis
+  여전히 main.py 의 같은 클로저를 14곳에서 쓴다**(이동 후 실측 — 정의 1 + writing
+  호출 13). **[2026-08-07 독립 검증 정정]** 종전 이 줄이 적던 **'33곳'** 은 이동 전
+  전체 grep 이었고(analysis 19 + writing), 보존 근거로는 **writing 잔류 14** 가
+  맞다(4차 writing 정리 출발값 = 14). 이 줄을 analysis
   블록과 함께 지우면 writing 이 깨진다. 4차에서 writing 이 나가면 그때 같이
   정리한다. (analysis 라우터 안의 `_require_project_exists` 정의는 그 도메인
   안에서만 산다.)

@@ -147,12 +147,17 @@ def main():
     print(f"   >> FAIL={rc != 0}")
     restore("services/application/app/main.py")
 
-    # N3: 공유 직렬화기 본문 망가뜨림 → analysis·writing 양쪽 셀이 같이 물리는가
+    # N3: 공유 직렬화기 본문 망가뜨림 → analysis·writing 양쪽 셀이 같이 물리는가.
+    # 양쪽을 다 돌린다 — analysis job payload 셀 + writing accept 의 analysis_job 필드.
+    # (독립 검증 정정 2026-08-07: 종전 analysis 테스트만 돌려 docstring 의 "양쪽이
+    #  물린다" 와 시위가 어긋났다. writing 반쪽을 추가해 일치시켰다.)
     print("###### N3: drop failure_detail from shared _analysis_job_payload ######")
     mutate("services/application/app/api/payloads.py", N3_dropfield)
-    rc = run(["tests/test_application_api.py", "-k", "analysis"],
-             "N3 / analysis job payload cells (expect FAIL)")
-    print(f"   >> FAIL={rc != 0}")
+    rc_a = run(["tests/test_application_api.py", "-k", "analysis"],
+               "N3a / analysis job payload cells (expect FAIL)")
+    rc_w = run(["tests/test_writing_accept.py"],
+               "N3b / writing accept analysis_job 필드 (expect FAIL — 공유 증거)")
+    print(f"   >> FAIL={rc_a != 0 and rc_w != 0}")
     restore("services/application/app/api/payloads.py")
 
     # N4: 유료 의존성 순서 뒤집기 → 시행이 소유권 앞으로(계약 위반)
