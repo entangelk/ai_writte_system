@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import uuid
-from dataclasses import asdict
 from datetime import datetime, timedelta
 from typing import Annotated, Protocol, Union
 
@@ -171,7 +170,6 @@ from services.application.app.observability.llm_call_audit import (
 )
 from services.application.app.observability.kpi import (
     aggregate_global_kpi,
-    aggregate_kpi,
 )
 from services.application.app.observability.llm_call_scope import (
     ObservedProvider,
@@ -260,7 +258,6 @@ from services.application.app.context_search.models import (
     CurrentPosition,
 )
 from services.application.app.context_search.gate_findings import (
-    GateFindingError,
     GateFindingNotFound,
     GateFindingService,
     GateFindingStatus,
@@ -289,7 +286,6 @@ from services.application.app.context_search.service import (
     MongoDirectCandidateMemoryRetriever,
     VectorCanonicalMemoryRetriever,
     VectorCandidateMemoryRetriever,
-    evaluate_context_gate,
 )
 from services.application.app.core_sot.models import BlockKind, UnitKind
 from services.application.app.core_sot.service import (
@@ -1588,6 +1584,10 @@ def build_async_generation_collaborators() -> GenerationCollaborators | None:
 # 건드린다. 회귀: ``tests/test_app_import_paths.py``.
 from .routers.admin import register_admin
 from .routers.auth import register_auth
+from .routers.context_search import register_context_search
+from .routers.health import register_health
+from .routers.memory import register_memory
+from .routers.observability import register_observability
 
 # ── HTTP 계약 계층(2026-08-06 공유 prelude 추출) ─────────────────────────
 # 요청/응답 모델·에러 선언·dependency 는 여기서 산다. `routers/*` 도 **main 이 아니라**
@@ -1600,7 +1600,6 @@ from .env import (
 from .api.models import (
     AccessLogResponse,
     ApplyMemoryRequest,
-    ContextSearchHttpRequest,
     CreateAnalysisJobRequest,
     CreateDraftRequest,
     CreateProjectRequest,
@@ -1614,7 +1613,6 @@ from .api.models import (
     DraftVersionExportResponse,
     DraftVersionListResponse,
     EditCandidateRequest,
-    ObservabilityKpiResponse,
     ProjectBriefGetResponse,
     ProjectBriefPutResponse,
     ProjectBriefVersionListResponse,
@@ -1654,6 +1652,11 @@ from .api.errors import (
     _billable,
     _owned,
     _provider_error_status,
+)
+from .api.payloads import (
+    _memory_payload,
+    _project_brief_payload,
+    _scope_payload,
 )
 from .api.dependencies import (
     _QUOTA_STATE,
@@ -1898,9 +1901,7 @@ def create_app(
             and writing_gate is not None) else None
     )
 
-    @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
+    register_health(app)
 
     # 공통 auth/admin 서비스 — register_auth·register_admin 이 쓴다(라우터 분해).
     users = user_service or _default_user_service()
@@ -1943,24 +1944,23 @@ def create_app(
         project_name_history=project_name_history,
     )
 
+    register_memory(app, core_sot=core_sot, memory=memory)
+
+    register_observability(
+        app,
+        core_sot=core_sot, llm_call_audit=llm_call_audit,
+        writing_loop_audit=writing_loop_audit,
+    )
+
+    register_context_search(
+        app,
+        core_sot=core_sot, memory=memory, analysis=analysis,
+        context_search=context_search, gate_findings=gate_findings,
+        llm_call_audit=llm_call_audit,
+    )
+
     def _project_payload(project) -> dict[str, object]:
         return {"id": project.id, "name": project.name, "archived": project.archived}
-
-    def _project_brief_payload(brief) -> dict[str, object]:
-        return {
-            "id": brief.id,
-            "project_id": brief.project_id,
-            "version_number": brief.version_number,
-            "premise": brief.premise,
-            "genre": brief.genre,
-            "tone": brief.tone,
-            "pov": brief.pov,
-            "constraints": list(brief.constraints),
-            "style_rules": list(brief.style_rules),
-            "preferred_patterns": list(brief.preferred_patterns),
-            "forbidden_patterns": list(brief.forbidden_patterns),
-            "style_examples": list(brief.style_examples),
-        }
 
     def _draft_payload(draft) -> dict[str, object]:
         assert draft.unit_kind is not None
@@ -2011,30 +2011,6 @@ def create_app(
             "source_ref_ids": list(candidate.source_ref_ids),
             "payload": dict(candidate.payload),
         }
-
-    def _memory_payload(entry) -> dict[str, object]:
-        return {
-            "id": entry.id,
-            "project_id": entry.project_id,
-            "memory_type": str(entry.memory_type),
-            "status": str(entry.status),
-            "provenance": str(entry.provenance),
-            "confidence": entry.confidence,
-            "source_ref_ids": list(entry.source_ref_ids),
-            "payload": dict(entry.payload),
-            "version": entry.version,
-            "analysis_job_id": entry.analysis_job_id,
-            "source_candidate_id": entry.source_candidate_id,
-            "promotion_mode": str(entry.promotion_mode),
-            "applied_threshold": entry.applied_threshold,
-            "scope": _scope_payload(entry.scope),
-            "supersedes": entry.supersedes,
-        }
-
-    def _scope_payload(scope) -> dict[str, object] | None:
-        if scope is None:
-            return None
-        return {"scope_type": scope.scope_type, "scope_id": scope.scope_id}
 
     def _source_ref_payload(source_ref) -> dict[str, object]:
         return {
@@ -2928,31 +2904,6 @@ def create_app(
             "promoted": promoted,
         }
 
-    @app.get("/projects/{project_id}/memory", responses=_owned(_ERRORS_404),
-             dependencies=_REQUIRE_PROJECT_OWNER)
-    async def list_memory(project_id: str) -> dict[str, object]:
-        try:
-            _require_project_exists(project_id)
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return {
-            "memory": [
-                _memory_payload(entry)
-                for entry in memory.list_memories(project_id=project_id)
-            ]
-        }
-
-    @app.get("/projects/{project_id}/memory/{memory_id}",
-             responses=_owned(_ERRORS_404),
-             dependencies=_REQUIRE_PROJECT_OWNER)
-    async def get_memory(project_id: str, memory_id: str) -> dict[str, object]:
-        try:
-            _require_project_exists(project_id)
-            entry = memory.get_memory(project_id=project_id, memory_id=memory_id)
-        except (MemoryNotFound, NotFound) as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return _memory_payload(entry)
-
     def _prior_memory_item_payload(item) -> dict[str, object]:
         return {
             "memory_id": item.memory_id,
@@ -3396,165 +3347,6 @@ def create_app(
         return await _transition_gate_finding(
             project_id, finding_id, GateFindingStatus.DISMISSED
         )
-
-    def _context_item_payload(item) -> dict[str, object]:
-        return {
-            "need": item.need.value,
-            "status": item.status.value,
-            "text": item.text,
-            "pointer": {
-                "project_id": item.pointer.project_id,
-                "collection": item.pointer.collection,
-                "document_id": item.pointer.document_id,
-                "version_id": item.pointer.version_id,
-                "content_hash": item.pointer.content_hash,
-            },
-            "snapshot_id": item.snapshot_id,
-            "sot_reloaded": item.sot_reloaded,
-            "token_estimate": item.token_estimate,
-            "source_ref_ids": list(item.source_ref_ids),
-            "review_status": item.review_status,
-        }
-
-    def _context_trace_payload(trace) -> dict[str, object]:
-        return {
-            "plan": {
-                "plan_id": trace.plan.plan_id,
-                "steps": [
-                    {
-                        "step_id": step.step_id,
-                        "need": step.need.value,
-                        "tools": [tool.value for tool in step.tools],
-                        "query": step.query,
-                    }
-                    for step in trace.plan.steps
-                ],
-            },
-            "steps": [
-                {
-                    "step_id": step.step_id,
-                    "need": step.need.value,
-                    "tool": step.tool.value,
-                    "hits_considered": step.hits_considered,
-                    "items_produced": step.items_produced,
-                    "excluded": [
-                        {"record_id": hit.record_id, "reason": hit.reason}
-                        for hit in step.excluded
-                    ],
-                    "failure": (
-                        None
-                        if step.failure is None
-                        else {
-                            "error_type": step.failure.error_type.value,
-                            "detail": step.failure.detail,
-                        }
-                    ),
-                }
-                for step in trace.steps
-            ],
-            "budget_excluded": [
-                {"record_id": hit.record_id, "reason": hit.reason}
-                for hit in trace.budget_excluded
-            ],
-        }
-
-    def _context_package_payload(package, gate) -> dict[str, object]:
-        return {
-            "package": {
-                "project_id": package.project_id,
-                "purpose": package.purpose.value,
-                "status": package.status,
-                "degraded": package.degraded,
-                "token_estimate_total": package.token_estimate_total,
-                "macro_items": [
-                    _context_item_payload(item) for item in package.macro_items
-                ],
-                "micro_evidence": [
-                    _context_item_payload(item) for item in package.micro_evidence
-                ],
-                "constraints": list(package.constraints),
-                "do_not_use": list(package.do_not_use),
-                "project_brief": (
-                    _project_brief_payload(package.project_brief)
-                    if package.project_brief is not None
-                    else None
-                ),
-                "trace": _context_trace_payload(package.trace),
-            },
-            "gate": {
-                "decision": gate.decision,
-                "findings": [
-                    {"check": finding.check, "detail": finding.detail}
-                    for finding in gate.findings
-                ],
-            },
-        }
-
-    @app.post("/projects/{project_id}/context-search",
-              responses=_owned(_BILLABLE_400_404_502_504_CONFIG),
-              dependencies=_REQUIRE_PROJECT_OWNER_BILLABLE)
-    async def context_search_endpoint(
-        project_id: str, body: ContextSearchHttpRequest
-    ) -> dict[str, object]:
-        try:
-            _require_project_exists(project_id)
-            request = _build_context_search_request(project_id, body)
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if context_search is None:
-            raise HTTPException(
-                status_code=503,
-                detail="context search service is not configured",
-            )
-        # Observability seam C (증분 C): the query planner's calls (one, or two
-        # when the first plan is not JSON). ``idempotency_key`` is this
-        # endpoint's workflow tie — it is what the caller retries under.
-        with llm_call_scope(llm_call_audit, project_id=project_id,
-                            correlation_id=body.idempotency_key) as scope:
-            try:
-                package = await context_search.build_context_package(request)
-                gate = evaluate_context_gate(
-                    package=package,
-                    request=request,
-                    core_sot=core_sot,
-                    memory_service=memory,
-                    analysis_service=analysis,
-                )
-                try:
-                    gate_findings.persist_rejection(
-                        request=request, idempotency_key=body.idempotency_key,
-                        package=package, gate=gate,
-                    )
-                except _STORAGE_ERRORS:
-                    # SoT v1.7.40 D2=A (owner decision 2026-07-24): a canonical store
-                    # failure while persisting the gate rejection is the store face of
-                    # 503, not the upstream 502 the ``GateFindingError`` wrap below
-                    # assigns. Re-raise it unwrapped so it escapes both this try and
-                    # the outer one (no outer clause matches a pymongo type) to the
-                    # global handler → 503, matching run and every other storage path.
-                    # Non-pymongo persistence failures still become GateFindingError →
-                    # 502 (over-strict guard: an operational persist bug is not a store
-                    # outage). Empty ``_STORAGE_ERRORS`` (no driver) catches nothing.
-                    raise
-                except Exception as exc:
-                    raise GateFindingError(str(exc)) from exc
-            except InvalidContextSearchRequest as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            except ContextSearchBudgetExceeded as exc:
-                raise HTTPException(status_code=504, detail=str(exc)) from exc
-            except ContextSearchFailed as exc:
-                reclassify_planner_parse_error(scope, exc)
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"{exc.error_type.value}: {exc.detail}",
-                ) from exc
-            except GateFindingError as exc:
-                raise HTTPException(
-                    status_code=502, detail=f"gate finding persistence failed: {exc}"
-                ) from exc
-        return _context_package_payload(package, gate)
 
     def _writing_candidate_payload(candidate) -> dict[str, object]:
         return {
@@ -4534,35 +4326,6 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return _writing_loop_audit_payload(run)
 
-    @app.get("/projects/{project_id}/observability/kpi",
-             response_model=ObservabilityKpiResponse,
-             responses=_owned(_ERRORS_404),
-             dependencies=_REQUIRE_PROJECT_OWNER)
-    async def observability_kpi_endpoint(project_id: str) -> dict[str, object]:
-        # 증분 5 (brief D4=A): the read-out over the per-call audit trail. Pure
-        # aggregation — nothing is measured here that the pipeline did not
-        # already record, so this endpoint calls no provider and opens no scope.
-        try:
-            _require_project_exists(project_id)
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        kpi = aggregate_kpi(
-            project_id=project_id,
-            calls=llm_call_audit.list_calls(project_id),
-            # The loop rollup is opt-in (WRITING_LOOP_AUDIT_DEFAULT, off), so
-            # this is empty on a default deployment. That is why the payload
-            # reports ``runs_considered`` next to the rate: a null rate over
-            # zero runs is "never measured", not "never diverged".
-            loop_runs=writing_loop_audit.list_runs(project_id),
-        )
-        return {
-            "project_id": kpi.project_id,
-            "totals": asdict(kpi.totals),
-            "sites": [asdict(site) for site in kpi.sites],
-            "gate": asdict(kpi.gate),
-            "loop": asdict(kpi.loop),
-        }
-
     @app.post("/projects/{project_id}/writing/accept",
               response_model=WritingAcceptResponse,
               responses=_owned(_billable(ACCEPT_RESPONSES)),
@@ -4766,43 +4529,6 @@ def create_app(
         }
 
     return app
-
-
-def _build_context_search_request(
-    project_id: str, body: ContextSearchHttpRequest
-) -> ContextSearchRequest:
-    if not body.idempotency_key.strip():
-        raise ValueError("idempotency_key is required")
-    try:
-        purpose = ContextSearchPurpose(body.purpose)
-    except ValueError as exc:
-        raise ValueError(f"unsupported purpose: {body.purpose}") from exc
-    # /context-search serves Writing only; analysis_context has its own
-    # job-scoped endpoint. Keep the two purposes on separate surfaces.
-    if purpose is not ContextSearchPurpose.WRITING_CONTEXT:
-        raise ValueError(f"unsupported purpose: {body.purpose}")
-    needs: list[ContextNeed] = []
-    for raw_need in body.needs:
-        try:
-            needs.append(ContextNeed(raw_need))
-        except ValueError as exc:
-            raise ValueError(f"unsupported need: {raw_need}") from exc
-    position = (
-        CurrentPosition(
-            draft_id=body.current_position.draft_id,
-            version_id=body.current_position.version_id,
-        )
-        if body.current_position is not None
-        else None
-    )
-    return ContextSearchRequest(
-        project_id=project_id,
-        purpose=purpose,
-        needs=tuple(needs),
-        query=body.query,
-        current_position=position,
-        context_budget=ContextBudget(max_tokens=body.max_tokens),
-    )
 
 
 app = create_app()

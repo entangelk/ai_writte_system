@@ -244,7 +244,7 @@ class ContextSearchApiTest(unittest.TestCase):
             GateFinding(check="x", detail="y"),
         ))
         with patch(
-            "services.application.app.main.evaluate_context_gate",
+            "services.application.app.routers.context_search.evaluate_context_gate",
             return_value=rejected,
         ):
             response = TestClient(app).post(
@@ -275,7 +275,7 @@ class ContextSearchApiTest(unittest.TestCase):
             GateFinding(check="x", detail="y"),
         ))
         with patch(
-            "services.application.app.main.evaluate_context_gate",
+            "services.application.app.routers.context_search.evaluate_context_gate",
             return_value=rejected,
         ):
             response = TestClient(app).post(
@@ -294,7 +294,7 @@ class ContextSearchApiTest(unittest.TestCase):
             GateFinding(check="test_check", detail="test detail"),
         ))
         with patch(
-            "services.application.app.main.evaluate_context_gate",
+            "services.application.app.routers.context_search.evaluate_context_gate",
             return_value=rejected,
         ):
             first = TestClient(app).post(
