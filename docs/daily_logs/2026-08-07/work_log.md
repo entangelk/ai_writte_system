@@ -1,0 +1,193 @@
+# 2026-08-07 작업 로그
+
+## Goals
+
+- 라우터 분해 **Slice 1 잔여 도메인** 착수 — 2026-08-06 에 선행(H-3-A 공유 prelude
+  추출)이 닫히면서 "기계적"이 된 구간이다.
+- 한 번에 다 옮기지 않는다. **작은 도메인 4종을 먼저 옮겨** 제품 route 의 이동
+  패턴(공유 직렬화기 처리·유료 경로·소유권 tier)을 한 번 확정한다.
+
+---
+
+## Task 1 — health · memory · observability · context-search 이동 (`b6eec79`)
+
+### User Decisions and Rationale
+
+- 오너 지시는 *"핸드오프와 어제자 데일리로그 확인해서 다음작업 진행하자"* 뿐이었고,
+  **다음 작업의 지목은 문서가 이미 하고 있었다** — HANDOFF `Next Tasks` 2번과
+  2026-08-06 work_log Task 5·6·7 의 `Next steps` 가 셋 다 **라우터 분해 잔여 7 도메인**
+  을 첫 항목으로 적는다. 새 결정 브리프가 필요한 fork 가 아니라고 판단해 브리프 없이
+  착수했다(R1·A1 은 2026-08-05 에 이미 확정).
+- **슬라이스 크기는 구현자 판단으로 작게 잡았다.** 잔여 64 operation 을 한 번에
+  옮기는 것이 기술적으로 불가능하지는 않지만, 이 저장소의 관례가 "중간 독립 검증
+  단위를 작게"이고(8.2 범위 결정과 같은 근거) 제품 route 는 auth·admin 과 달리
+  **공유 직렬화기**를 끌고 있어 첫 이동에서 그 처리 방식이 정해진다.
+
+### Completed work
+
+**5 operation · 4 도메인**을 `main.py` 밖으로 옮겼다. in-routers **12 → 17**.
+
+| 새 파일 | operation | 협력자 |
+|---|---|---|
+| [`routers/health.py`](../../../services/application/app/routers/health.py) | `GET /health` (1) | 없음 |
+| [`routers/memory.py`](../../../services/application/app/routers/memory.py) | `GET …/memory` · `GET …/memory/{id}` (2) | `core_sot`·`memory` |
+| [`routers/observability.py`](../../../services/application/app/routers/observability.py) | `GET …/observability/kpi` (1) | `core_sot`·`llm_call_audit`·`writing_loop_audit` |
+| [`routers/context_search.py`](../../../services/application/app/routers/context_search.py) | `POST …/context-search` (1) | `core_sot`·`memory`·`analysis`·`context_search`·`gate_findings`·`llm_call_audit` |
+
+그리고 **공유 직렬화기 3종**을 신설
+[`api/payloads.py`](../../../services/application/app/api/payloads.py) 로 추출했다 —
+`_project_brief_payload` · `_memory_payload` · `_scope_payload`.
+
+- `main.py` **4,808 → 4,534줄**(−274).
+- `evaluate_context_gate` patch 대상 **3곳**을 새 모듈 경로로 갱신
+  ([`test_context_search_api.py:247·278·297`](../../../tests/test_context_search_api.py#L247)).
+- 이동으로 미사용이 된 `main.py` import **6개** 제거(`asdict`·`aggregate_kpi`·
+  `GateFindingError`·`evaluate_context_gate`·`ContextSearchHttpRequest`·
+  `ObservabilityKpiResponse`). **기존 미사용분 21개는 손대지 않았다**(아래 Issues).
+
+### Decisions (구현자 판단)
+
+- **★ 공유 직렬화기를 `api/payloads.py` 로 내리는 것은 취향이 아니라 강제다.**
+  `routers/*` 는 `from ..main import` 를 되살릴 수 없고(2026-08-06 순환 폐쇄),
+  이동한 handler 가 쓰는 이름은 전부 `main` 밖에 있어야 한다. 그런데
+  `_memory_payload`·`_scope_payload`·`_project_brief_payload` 는 **이동분과 잔류분이
+  둘 다** 쓴다(analysis apply · project brief 4곳). 어느 한쪽에 두면 방향이 뒤집힌다 —
+  `env.py` 를 `api/` 밖에 둔 것과 **같은 형태의 문제, 같은 처방**이다.
+- **반대로 한 도메인만 쓰는 것은 내리지 않았다.** `_context_item_payload` ·
+  `_context_trace_payload` · `_context_package_payload` · `_build_context_search_request`
+  는 context-search 만 쓰므로 그 라우터 모듈 안에 뒀다. 전부 `api/` 로 모으면
+  **`payloads.py` 가 두 번째 `main.py`** 가 된다 — 이 슬라이스가 없애려는 것이 그것이다.
+- **직렬화기 이름의 밑줄을 유지했다**(`_memory_payload`). 모듈 공개 심볼로 승격하면서
+  이름을 다듬으면 handler 본문이 byte-동일이 아니게 되고, R1 이 지문 diff 로 무변을
+  증명하는 근거가 약해진다. 선례(`_ERRORS_401`·`_REQUIRE_AUTH`)와도 일치한다.
+- **`CHANGELOG.md` 는 갱신하지 않았다.** 가이드가 *"major design or feature changes
+  (not every small edit)"* 로 한정하고, **직전 두 리팩터(2026-08-05 라우터 분해
+  `e8b9908` · 2026-08-06 공유 prelude 추출 `2f20fbb`)도 항목이 없다**. 계약·제품
+  표면이 한 자리도 안 바뀐 내부 이동이라 선례를 따랐다 — 검증자가 "기록 누락"으로
+  읽지 않도록 여기 남긴다.
+- **`main.py` 의 기존 미사용 import 21개는 손대지 않았다**(`datetime`·`Header`·
+  `BaseModel`·`AdminAuditEvent` 등, 어제 prelude 추출의 잔재로 보인다). CLAUDE.md §3
+  대로 **내 변경이 만든 6개만** 지웠다. 정리는 별도 슬라이스 사안이다.
+
+### Verification
+
+- **행위 무변** — [`repro_router_split.py`](../../verifications/2026-08-05/repro_router_split.py)
+  지문 pre/post **diff 없음**. route **76** · order-sensitive pairs **0** ·
+  `app.openapi()` sha256 무변 · 해석된 dependency 트리 무변.
+  - **order-sensitive pairs 가 0 인 것이 이번엔 실제 검사였다.** HANDOFF 가
+    *"`{project_id}` 를 쓰는 도메인이 옮겨가면 그 실행에서 다시 본다"* 고 예고한
+    자리이며, `{project_id}` 를 쓰는 route 가 register 로 나간 것은 이번이 처음이다.
+- **본문 byte-동일 전수** — 이동한 정의 **12/12**. 그중 모듈 수준으로 내려간 3종은
+  **들여쓰기 한 단계를 제외하고** 동일하다(중첩→모듈 이동에서 불가피한 유일한 차이).
+- 집중 스위트: `test_context_search_api` · `test_memory_api` · `test_app_import_paths`
+  · `test_billable_actions` · `test_auth_api` · `test_docs_indexes` →
+  **170 passed / 1,097 subtests**.
+
+### 뮤테이션
+
+**커밋 → 뮤테이션 → 원복 순서 준수** — `b6eec79` 커밋 후 `git status --short` 빈 것을
+확인하고 시작했다(CLAUDE.md §6 게이트).
+
+| # | 뮤테이션 (적용한 diff) | 위치 | 재실패한 셀 |
+|---|---|---|---|
+| M1 | `from ..api.payloads import _memory_payload` → `from ..main import _memory_payload` (순환 복귀) | [`routers/memory.py:21`](../../../services/application/app/routers/memory.py#L21) | `test_app_import_paths.py` **5 cells 전부** — `test_the_fully_qualified_name_loads` · `test_the_short_package_name_also_loads` · `test_the_module_runs_as_a_script` · `test_the_short_name_load_keeps_the_routers_in_one_tree` · `test_a_router_module_loads_before_main`(subtest `module=…routers.memory`) |
+| M2 | `register_memory(app, …)` 호출 삭제 (operation 76 → 74) | [`main.py`](../../../services/application/app/main.py) `create_app` | `test_auth_api.py::CombinedBoundaryMatrixTest::test_every_operation_lands_in_exactly_one_named_tier` + `test_memory_api.py` **11 cells**(promotion·review·auto-promote 계열) |
+| M3 | `dependencies` 를 `[enforce_quota, *소유권]` 순서로 뒤집기 | [`routers/context_search.py:156`](../../../services/application/app/routers/context_search.py#L156) | `test_quota_enforcement_api.py::BillableRouteWiringTest::test_enforcement_is_declared_after_ownership` **subtest 1개만**(`operation=('/projects/{project_id}/context-search','post')`) |
+| M4 | `except _STORAGE_ERRORS: raise` 절 제거 (방어 제거 방향) | [`routers/context_search.py:191`](../../../services/application/app/routers/context_search.py#L191) | `test_context_search_api.py::ContextSearchApiTest::test_gate_finding_storage_failure_is_503` **1개만** |
+| M5 | 공유 `_scope_payload` 에서 `scope_id` 키 누락 | [`api/payloads.py:61`](../../../services/application/app/api/payloads.py#L61) | `test_analysis_compare_api.py::AnalysisCompareApiTest::test_promoted_character_memory_serializes_scope` **1개만** |
+
+- **M3·M4 는 "1개만"이 좋은 결과다** — 이동한 route 하나의 성질을 그 route 의 셀
+  하나가 정확히 잠근다는 뜻이고, 넓은 셀이 여러 개를 흡수하고 있지 않다는 뜻이다.
+- **M2 의 tier 전수 가드가 문 것이 register 누락의 방어선이다.** 잔여 4 도메인을
+  옮길 때 register 호출을 빠뜨리면 도메인 셀보다 **이 셀이 먼저** 이유를 말해 준다
+  (`76 operation` 이 안 맞는다고).
+- **over-strict 방향**: M3 의 정상 순서(소유권 → 시행)는 통과하고, M1 의 정상
+  상대 import(`..api.payloads`)도 통과한다. `payloads.py` 를 쓰지 않고 각 라우터가
+  사본을 갖는 형태도 **테스트는 통과한다** — 그래서 공유는 테스트가 아니라
+  M5 가 증거다(아래).
+
+### 회귀 기준선
+
+**backend test-mongo ON `2197 passed / 1 skipped / 2159 subtests`.**
+
+- **★ HANDOFF 에 적혀 있던 기준선 `2196/1/1933` 은 이미 낡은 값이었다.** 어제
+  `abcface` 가 `test_docs_indexes.py` 에 셀 1개 + subtest 222개를 더했는데
+  (어제 work_log Task 6 이 `12 passed / 10 subtests` → `13 / 232` 로 기록한다)
+  **기준선 줄이 갱신되지 않았다**. 2196+1 / 1933+222 = **2197 / 2155** 이며,
+  이 슬라이스 착수 직후 실측이 정확히 그 값이었다(1015.72s).
+- 거기서 **subtests +4 는 전부 M1 이 드러낸 가드 보강**이다 —
+  `test_a_router_module_loads_before_main` 이 이제 라우터 모듈 **6개 전부**를
+  도므로 subtest 2 → 6. **셀 수(2197)와 operation 수(76)는 한 자리도 안 변했다.**
+- 종전 값 이력: 2197/1/2155(착수 직전 · `abcface` 반영) ·
+  2196/1/1933(공유 prelude 추출 시점 실측 · 이후 `abcface` 미반영) ·
+  2193/1/1931(H-3) · 2191/1/1931(8.2c hardening).
+- **최종 실측 888.60s**(착수 직후 1015.72s — 같은 셸·같은 test-mongo, 부하 차이).
+- **★ 숫자 주장 세 곳을 함께 고쳤다**: 이 로그 · [`HANDOFF.md`](../../../HANDOFF.md)
+  회귀 기준선 줄 · 최상위 [`README.md:88`](../../../README.md#L88) 절차 표 ②.
+  README 의 그 칸은 **어떤 가드도 안 덮는 유일한 숫자 주장**이며(2026-08-06 이
+  추적 부채로 올린 항목), 실제로 `2,196/1,933` 에 얼어 있었다.
+
+### Issues found — ★ 라우터 로드 가드가 `admin`·`auth` 두 개만 보고 있었다
+
+M1 을 처음 돌렸을 때 **5 cells 중 4개만 재실패**했다. 통과한 하나가
+`test_a_router_module_loads_before_main` — 이 셀의 **자기 주장이 바로 그것**
+(*"라우터 모듈을 먼저 import 해도 뜬다"*)인데, 목록이
+`("…routers.admin", "…routers.auth")` **하드코딩**이라 오늘 늘어난 4개 모듈은
+검사 대상이 아니었다.
+
+- **다른 4 셀이 물었으므로 이 뮤테이션이 샌 것은 아니다**(그 넷은 `main` 을 로드하고
+  `main` 이 새 라우터를 import 하므로 순환이 그대로 드러난다). 문제는 **셀이 잠근다고
+  적힌 성질과 실제로 잠그는 범위가 어긋났다는 것**이고, 이것은 2026-08-06 이
+  *"가드는 통과하는데 이유가 낡은"* 형태로 기록한 것과 같은 병이다.
+- 처방: 목록을 `routers/*.py` 글롭으로 바꿨다. **사람이 갱신해야 하는 가드는
+  갱신을 잊는 쪽으로만 조용히 약해진다** — 잔여 4 도메인이 들어올 때 자동으로
+  범위에 든다.
+- 보강 후 M1 재실행: **5 cells 전부 재실패**, 그중 이 셀은
+  `SUBFAILED(module='…routers.memory')` 로 **어느 모듈이 범인인지까지** 말한다.
+
+### Issues found — `_require_project_exists` 사본이 4벌 생겼다
+
+이동한 도메인마다 `core_sot.get_project(project_id=project_id)` 한 줄짜리 클로저가
+필요하다. 그대로 두면 잔여 4 도메인까지 **8벌**이 되고, *"없는 project 는 404"* 라는
+한 줄 계약이 갈라질 자리가 8개 생긴다.
+
+- `api/dependencies.py::project_existence_check(core_sot)` **factory 하나**로 합쳤다.
+  FastAPI dependency 가 아니라 handler 가 직접 부르는 평범한 클로저라 factory 형태다.
+- **이 슬라이스에서 처리한 이유**: 다음 도메인 이동이 이 패턴을 4번 더 복제한다.
+  한 번 복제되고 나면 되돌리는 비용이 8배가 된다.
+- 지문은 그대로 **IDENTICAL** — 해석되는 dependency 트리도 응답도 안 바뀐다.
+
+### Issues found — 공유가 진짜 공유인지는 M5 가 증명했고, 겸사겸사 공백도 드러났다
+
+`api/payloads.py::_scope_payload` 에서 `scope_id` 를 빼자 재실패한 셀은
+**`test_analysis_compare_api.py` 한 개**다. 두 가지를 동시에 말한다.
+
+- **좋은 쪽**: 뮤테이션은 `api/payloads.py` 에 넣었는데 문 것은 **아직 `main.py` 에
+  남아 있는 analysis 도메인의 셀**이다. 즉 이동분과 잔류분이 **같은 정의 하나**를
+  본다는 것이 실측됐다 — 사본 두 벌이었다면 이 셀은 통과했을 것이다.
+- **드러난 공백**: `test_memory_api.py` 는 M5 아래서 **전부 통과했다**(23 passed).
+  즉 내가 옮긴 `GET …/memory`·`GET …/memory/{id}` 의 응답에 `scope.scope_id` 가
+  실린다는 것을 단정하는 셀이 **없다** — 그 성질은 analysis 쪽 셀에 **전이적으로만**
+  걸려 있다. **이 슬라이스가 만든 결함은 아니다**(이동 전에도 없었다). 다만 분해
+  때문에 *"memory 응답을 위해 `payloads.py` 를 고쳤는데 analysis 셀이 깨진다"* 는
+  형태로 **드러나게 됐다**. 추적 부채로 옮긴다.
+
+### 아직 안 한 것 (의도)
+
+- **잔여 3~4 도메인**(projects·drafts·analysis·writing) 은 안 옮겼다. 남은 것이
+  **59 operation** 이고 `main.py` 의 부피 대부분이 그쪽이다.
+- **Slice 2(`create_admin_app()`)** 도 안 건드렸다. 이 슬라이스와 직교다.
+
+### Next steps
+
+1. **잔여 도메인 이동** — `projects`·`drafts`·`analysis`·`writing` (**59 operation**).
+   이제 패턴이 셋 다 정해졌다: ① 공유 직렬화기는 `api/payloads.py`, 도메인 전용은
+   그 라우터 ② `_require_project_exists` 는 `project_existence_check(core_sot)`
+   ③ 각 이동 후 `repro_router_split.py` 지문 diff. **`writing` 이 가장 크고**
+   (`_writing_*_payload` 9종·유료 5경로) 거기서 `_draft_payload`·
+   `_analysis_job_payload` 가 다시 공유 대상으로 올라온다.
+2. **Slice 2(`create_admin_app()`)** — 이 슬라이스와 직교이며 선행은 H-2(shim
+   drift 가드) 하나다.
+3. **이 슬라이스는 독립 검증 대기** 상태다. 다음 세션이 검증자라면 여기부터 본다 —
+   대상 커밋 2개(`b6eec79`·`925a321`), 재현은 `repro_router_split.py` 지문 diff 와
+   위 뮤테이션 표 5종.
