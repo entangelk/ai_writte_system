@@ -389,3 +389,76 @@ M1 을 처음 돌렸을 때 **5 cells 중 4개만 재실패**했다. 통과한 �
    **직렬화기가 아닌 헬퍼**도 끌고 있어 1·2차보다 손이 더 간다.
 2. **그 다음 = `main.py` 미사용 import 정리**(오너 판단으로 이 순서다).
 3. **Slice 2(`create_admin_app()`)** — 여전히 직교.
+
+---
+
+## Task 4 — 2차 독립 검증 반영 (`d9ecdd1` 대상) · 비차단 3건 폐쇄
+
+독립 세션이 **합격 · Blocking 0** 으로 검증했다
+([기록](../../verifications/2026-08-07/router_split_slice1_remainder_2nd.md)).
+부하 주장을 전부 반증 시도로 재실측했고, 특히 **orphan 안전을 `pyflakes` F821 로**
+확인한 것은 구현자가 안 쟀던 축이다 — `main.py` 가 PEP 563(`from __future__ import
+annotations`)을 쓰므로 *"import 가 된다"* 보다 **정적으로 미정의 이름이 0건**임을
+보는 쪽이 강하다.
+
+### User Decisions and Rationale
+
+- 오너 지시: *"검증기록 확인해서 보강할 부분 보강해줘."* 이것이 검증자가 오너에게
+  물은 *"repro 를 내가 올릴까, 다음 작업자가 올릴까"* 에 대한 답이기도 하다 —
+  **내가 지금 올린다.**
+
+### Completed work
+
+| 지적 | 처리 |
+|---|---|
+| ① 2차의 byte-동일·뮤테이션 repro 가 커밋되지 않았다 | [`repro_byte_identical_2nd.py`](../../verifications/2026-08-07/repro_byte_identical_2nd.py)(30 def) · [`repro_mutations_2nd.py`](../../verifications/2026-08-07/repro_mutations_2nd.py)(N1~N5) 신설·커밋 |
+| ② 미사용 import 카운트 22 vs 실측 21 | **21 이 맞다** — Task 3 본문 정정 |
+| ③ (관찰) `docker inspect` 가 `no such object` 를 뱉었다 | **더 단순한 설명을 찾았다** — 아래 |
+
+### Decisions (구현자 판단) — 왜 1차 스크립트를 확장하지 않고 파일을 나눴나
+
+검증자 제안은 *"`repro_byte_identical.py` 의 TARGETS 를 30개로 확장"* 이었다.
+나눠 쓰기로 했다. **두 슬라이스는 베이스 커밋이 다르다**(1차 `9bc06e3` ·
+2차 `46ae980`). 한 파일에 합치면 어느 쪽 기대값인지가 인자로 갈리고, 각 검증
+기록의 §Reproduction 이 *"이 명령 하나"* 를 가리키지 못한다. 슬라이스당 한
+파일이면 **기대 출력이 고정된다** — 1차 `12/12`, 2차 `30/30`. 잔여 도메인
+이동도 같은 형태로 하나씩 더 붙이면 된다.
+
+### ★ 검증자 관찰 ③ 의 원인은 데몬 경합이 아니라 오타로 보인다
+
+검증자는 `docker inspect … test-mongo-1` 이 *"찰나에"* `no such object` 를 뱉은 것을
+**데몬 찰나 지연이 낸 허위 에코**로 해석했다. 그런데 같은 기록 §Reproduction (5) 의
+컨테이너 이름이 **`ai_witte_system-…`**(`r` 누락)이다. 그 이름은 전이적이 아니라
+**항상** `no such object` 다(실측). 그리고 그대로 두면 그 줄의 `until` 루프가
+**영원히 돈다** — 재현 절차가 멈추지 않는다.
+
+- 오타를 고쳤고, **남의 기록이라 흔적 없이 고치지 않고** 그 자리에 근거 두 줄을 남겼다.
+- 내 회귀 명령의 에코는 출력 파일에 `healthy` 로 남아 있다 — 내 쪽에서 허위 에코는
+  관측되지 않았다.
+- **그래도 검증자의 결론(진짜 신호는 최종 skip 수)은 맞다.** 이번 슬라이스에서 내가
+  기준선을 한 번 버린 것도 최종 skip 수로 드러났다(Task 3 Issues).
+
+### Verification
+
+- 커밋한 repro 를 **실제로 끝까지 돌렸다**(커밋만 하고 안 돌리면 같은 부채가 된다):
+  - `repro_byte_identical_2nd.py` → **30/30 byte-동일**, exit 0.
+  - `repro_mutations_2nd.py` → **N1~N5 전부 FAIL=True**, N1 은
+    `SUBFAILED(module='…routers.projects')`, N5 는 `SUBFAILED(path='/projects')`.
+    마지막 preflight 재확인까지 clean.
+  - 1차 `repro_byte_identical.py` 도 여전히 **12/12**(2차 이동이 1차 산출물을 안 건드림).
+- `pyflakes` F401 실측 **21**(정리 슬라이스 출발값) · F821 **0**.
+- `test_docs_indexes.py` **13 passed / 234 subtests**(검증자 기록 등재로 233 → 234).
+
+### 아직 안 한 것 (의도)
+
+- **전수 회귀를 다시 돌리지 않았다.** 이 Task 는 `docs/` 와 repro 스크립트만
+  건드렸고, 늘어난 subtest 1개는 **발원 셀에서 직접 확인**했다
+  (`test_docs_indexes.py` 233 → 234). HANDOFF 기준선에는 **마지막으로 전수를 실측한
+  값(2163)** 을 두고 *"지금 돌리면 2164"* 를 근거와 함께 적었다 — 추론한 수를
+  실측처럼 적지 않는다.
+
+### Next steps
+
+1. **잔여 2 도메인** — `analysis`(21) · `writing`(13). 결합도 실측은 HANDOFF 에 있다.
+2. 그 다음 **`main.py` 미사용 import 정리** — 출발값은 **21**(pyflakes F401).
+3. **Slice 2(`create_admin_app()`)** — 직교.
