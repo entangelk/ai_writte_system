@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Annotated, Protocol, Union
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
@@ -290,14 +290,10 @@ from services.application.app.context_search.service import (
 from services.application.app.core_sot.models import BlockKind, UnitKind
 from services.application.app.core_sot.service import (
     Archived,
-    CoreSotError,
     CoreSotService,
     DraftOrderIntegrityError,
     InMemoryCoreSotRepository,
-    InvalidDraftOrder,
     NotFound,
-    StaleProjectBriefBase,
-    UnsupportedExportFormat,
 )
 from services.application.app.indexing.service import (
     CHROMA_VECTOR_BACKEND,
@@ -308,7 +304,6 @@ from services.application.app.indexing.service import (
     InMemoryIndexSyncRepository,
     InMemoryVectorIndexAdapter,
     SourceBlockIndexingService,
-    rebuild_source_block_index_summary,
 )
 from services.application.app.indexing.chroma import (
     DEFAULT_COLLECTION_NAME,
@@ -318,7 +313,7 @@ from services.application.app.indexing.chroma import (
     connect_chroma_collection,
 )
 from services.application.app.indexing.embedding import (
-    EmbeddingProviderError, RemoteEmbeddingProvider,
+    RemoteEmbeddingProvider,
 )
 from services.application.app.indexing.memory_index import MEMORY_VECTOR_COLLECTION
 from services.application.app.indexing.memory_lexical_index import (
@@ -1585,9 +1580,12 @@ def build_async_generation_collaborators() -> GenerationCollaborators | None:
 from .routers.admin import register_admin
 from .routers.auth import register_auth
 from .routers.context_search import register_context_search
+from .routers.drafts import register_drafts
 from .routers.health import register_health
 from .routers.memory import register_memory
 from .routers.observability import register_observability
+from .routers.projects import register_projects
+from .routers.source_refs import register_source_refs
 
 # ── HTTP 계약 계층(2026-08-06 공유 prelude 추출) ─────────────────────────
 # 요청/응답 모델·에러 선언·dependency 는 여기서 산다. `routers/*` 도 **main 이 아니라**
@@ -1598,33 +1596,11 @@ from .env import (
     _env_int,
 )
 from .api.models import (
-    AccessLogResponse,
     ApplyMemoryRequest,
     CreateAnalysisJobRequest,
-    CreateDraftRequest,
-    CreateProjectRequest,
-    CreateSourceRefRequest,
     DEFAULT_CONTEXT_BUDGET_TOKENS,
-    DraftListResponse,
-    DraftOrderPutRequest,
-    DraftOrderPutResponse,
-    DraftPayload,
-    DraftVersionDetailResponse,
-    DraftVersionExportResponse,
-    DraftVersionListResponse,
     EditCandidateRequest,
-    ProjectBriefGetResponse,
-    ProjectBriefPutResponse,
-    ProjectBriefVersionListResponse,
-    ProjectExportResponse,
-    ProjectListResponse,
-    ProjectPayload,
-    PutProjectBriefRequest,
     ReconcileCharacterRequest,
-    RenameDraftRequest,
-    RenameProjectRequest,
-    SaveDraftRequest,
-    SaveDraftResponse,
     WritingAcceptRequest,
     WritingGateRequest,
     WritingGenerateRequest,
@@ -1640,14 +1616,9 @@ from .api.errors import (
     _BILLABLE_404_502_CONFIG,
     _ERRORS_400_404,
     _ERRORS_400_404_409,
-    _ERRORS_400_404_MIGRATION,
     _ERRORS_404,
     _ERRORS_404_409,
-    _ERRORS_404_409_MIGRATION,
-    _ERRORS_404_502,
-    _ERRORS_404_MIGRATION,
     _ERRORS_404_STORAGE,
-    _ERRORS_STORAGE,
     _STORAGE_ERRORS,
     _billable,
     _owned,
@@ -1655,18 +1626,15 @@ from .api.errors import (
 )
 from .api.payloads import (
     _memory_payload,
-    _project_brief_payload,
     _scope_payload,
 )
 from .api.dependencies import (
     _QUOTA_STATE,
-    _REQUIRE_AUTH,
     _REQUIRE_PROJECT_OWNER,
     _REQUIRE_PROJECT_OWNER_BILLABLE,
     project_existence_check,
     quota_charge,
     quota_confirmed,
-    require_authenticated_user,
 )
 
 
@@ -1960,31 +1928,18 @@ def create_app(
         llm_call_audit=llm_call_audit,
     )
 
-    def _project_payload(project) -> dict[str, object]:
-        return {"id": project.id, "name": project.name, "archived": project.archived}
+    register_projects(
+        app,
+        core_sot=core_sot, access_grants=access_grants, sync_outbox=sync_outbox,
+    )
 
-    def _draft_payload(draft) -> dict[str, object]:
-        assert draft.unit_kind is not None
-        assert draft.position is not None
-        return {
-            "id": draft.id,
-            "project_id": draft.project_id,
-            "title": draft.title,
-            "archived": draft.archived,
-            "unit_kind": draft.unit_kind,
-            "position": draft.position,
-        }
+    register_drafts(app, core_sot=core_sot, sync_outbox=sync_outbox)
 
-    def _version_meta_payload(version) -> dict[str, object]:
-        # idempotency_key is intentionally omitted: it is an internal save token,
-        # not part of the public read surface.
-        return {
-            "id": version.id,
-            "project_id": version.project_id,
-            "draft_id": version.draft_id,
-            "version_number": version.version_number,
-            "snapshot_id": version.snapshot_id,
-        }
+    register_source_refs(
+        app,
+        core_sot=core_sot, shared_vector_index=shared_vector_index,
+        shared_embeddings=shared_embeddings, shared_backend=shared_backend,
+    )
 
     def _analysis_job_payload(job) -> dict[str, object]:
         return {
@@ -2013,18 +1968,6 @@ def create_app(
             "payload": dict(candidate.payload),
         }
 
-    def _source_ref_payload(source_ref) -> dict[str, object]:
-        return {
-            "id": source_ref.id,
-            "project_id": source_ref.project_id,
-            "snapshot_id": source_ref.snapshot_id,
-            "block_id": source_ref.block_id,
-            "start_offset": source_ref.start_offset,
-            "end_offset": source_ref.end_offset,
-            "quote": source_ref.quote,
-            "content_hash": source_ref.content_hash,
-        }
-
     def _analysis_run_payload(
         result: AnalysisExtractionRunResult,
     ) -> dict[str, object]:
@@ -2037,560 +1980,7 @@ def create_app(
             "idempotent_replay": result.job_idempotent_replay,
         }
 
-    def _rebuild_source_block_index_payload(
-        *, project_id: str, snapshot_id: str
-    ) -> dict[str, object]:
-        summary = rebuild_source_block_index_summary(
-            core_sot=core_sot,
-            project_id=project_id,
-            snapshot_id=snapshot_id,
-            vector_index=shared_vector_index,
-            embeddings=shared_embeddings,
-        )
-        return summary.to_dict(backend=shared_backend)
-
     _require_project_exists = project_existence_check(core_sot)
-
-    @app.post("/projects", response_model=ProjectPayload,
-              responses=_ERRORS_STORAGE,
-              dependencies=_REQUIRE_AUTH)
-    async def create_project(
-        request: CreateProjectRequest,
-        current=Depends(require_authenticated_user),
-    ) -> dict[str, object]:
-        # D8-3a: the creator is no longer optional. The same dependency the
-        # decorator declares is taken as a parameter here so the owner comes from
-        # the value the guard already resolved — re-reading the cookie would be a
-        # second, driftable answer to "who is this".
-        #
-        # `owner_id=None` therefore stops being reachable through this endpoint.
-        # It stays deny-by-default in D8-3b anyway (E1=A): rows with no owner can
-        # still arrive from a deletion bug or a future migration.
-        project = core_sot.create_project(name=request.name, owner_id=current.id)
-        return _project_payload(project)
-
-    @app.get("/projects", response_model=ProjectListResponse,
-             responses=_ERRORS_STORAGE,
-             dependencies=_REQUIRE_AUTH)
-    async def list_projects(
-        current=Depends(require_authenticated_user),
-    ) -> dict[str, object]:
-        projects = core_sot.list_projects_for_owner(owner_id=current.id)
-        return {"projects": [_project_payload(p) for p in projects]}
-
-    @app.get("/projects/{project_id}/access-log",
-             response_model=AccessLogResponse,
-             responses=_owned(_ERRORS_404),
-             dependencies=_REQUIRE_PROJECT_OWNER)
-    async def get_access_log(project_id: str) -> dict[str, object]:
-        # C-4 (owner 2026-08-02): there is no notification channel, so the
-        # realistic form of "the owner finds out" is that they can look. This is
-        # the after-the-fact view of every request an administrator made into
-        # this project under a grant — newest first, each carrying the reason
-        # the grant was issued for.
-        #
-        # project-scoped, so the owner reads their own. An administrator holding
-        # a live grant can read it too (it is a GET), which is consistent: they
-        # can already read the project, and that read is itself recorded here.
-        return {"entries": [
-            {
-                "grant_id": use.grant_id,
-                "admin_user_id": use.admin_user_id,
-                "method": use.method,
-                "path": use.path,
-                "at": use.at,
-                "reason": use.reason,
-            }
-            for use in access_grants.uses_for_project(project_id=project_id)
-        ]}
-
-    @app.get("/projects/{project_id}", response_model=ProjectPayload,
-             responses=_owned(_ERRORS_404),
-             dependencies=_REQUIRE_PROJECT_OWNER)
-    async def get_project(project_id: str) -> dict[str, object]:
-        try:
-            project = core_sot.get_project(project_id=project_id)
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return _project_payload(project)
-
-    @app.get(
-        "/projects/{project_id}/brief", response_model=ProjectBriefGetResponse,
-        responses=_owned(_ERRORS_404),
-        dependencies=_REQUIRE_PROJECT_OWNER,
-    )
-    async def get_project_brief(project_id: str) -> dict[str, object]:
-        try:
-            brief = core_sot.get_project_brief(project_id=project_id)
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return {
-            "brief": _project_brief_payload(brief) if brief is not None else None
-        }
-
-    @app.put(
-        "/projects/{project_id}/brief", response_model=ProjectBriefPutResponse,
-        responses=_owned(_ERRORS_404_409),
-        dependencies=_REQUIRE_PROJECT_OWNER,
-    )
-    async def put_project_brief(
-        project_id: str, request: PutProjectBriefRequest
-    ) -> dict[str, object]:
-        try:
-            result = core_sot.put_project_brief(
-                project_id=project_id,
-                base_version_id=request.base_version_id,
-                idempotency_key=request.idempotency_key,
-                premise=request.premise,
-                genre=request.genre,
-                tone=request.tone,
-                pov=request.pov,
-                constraints=tuple(request.constraints),
-                style_rules=tuple(request.style_rules),
-                preferred_patterns=tuple(request.preferred_patterns),
-                forbidden_patterns=tuple(request.forbidden_patterns),
-                style_examples=tuple(request.style_examples),
-            )
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except (Archived, StaleProjectBriefBase) as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return {
-            "brief": _project_brief_payload(result.brief),
-            "idempotent_replay": result.idempotent_replay,
-        }
-
-    @app.get(
-        "/projects/{project_id}/brief/versions",
-        response_model=ProjectBriefVersionListResponse,
-        responses=_owned(_ERRORS_404),
-        dependencies=_REQUIRE_PROJECT_OWNER,
-    )
-    async def list_project_brief_versions(project_id: str) -> dict[str, object]:
-        try:
-            versions = core_sot.list_project_brief_versions(project_id=project_id)
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return {"versions": [_project_brief_payload(brief) for brief in versions]}
-
-    @app.get(
-        "/projects/{project_id}/brief/versions/{version_id}",
-        response_model=ProjectBriefGetResponse,
-        responses=_owned(_ERRORS_404),
-        dependencies=_REQUIRE_PROJECT_OWNER,
-    )
-    async def get_project_brief_version(
-        project_id: str, version_id: str
-    ) -> dict[str, object]:
-        try:
-            brief = core_sot.get_project_brief_version(
-                project_id=project_id, version_id=version_id
-            )
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return {"brief": _project_brief_payload(brief)}
-
-    @app.patch("/projects/{project_id}", response_model=ProjectPayload,
-               responses=_owned(_ERRORS_404_409),
-               dependencies=_REQUIRE_PROJECT_OWNER)
-    async def rename_project(
-        project_id: str, request: RenameProjectRequest
-    ) -> dict[str, object]:
-        try:
-            project = core_sot.rename_project(
-                project_id=project_id, name=request.name
-            )
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except Archived as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return _project_payload(project)
-
-    @app.patch(
-        "/projects/{project_id}/drafts/{draft_id}", response_model=DraftPayload,
-        responses=_owned(_ERRORS_404_409),
-        dependencies=_REQUIRE_PROJECT_OWNER,
-    )
-    async def rename_draft(
-        project_id: str, draft_id: str, request: RenameDraftRequest
-    ) -> dict[str, object]:
-        try:
-            draft = core_sot.rename_draft(
-                project_id=project_id, draft_id=draft_id, title=request.title
-            )
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except Archived as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return _draft_payload(draft)
-
-    @app.delete("/projects/{project_id}", response_model=ProjectPayload,
-                responses=_owned(_ERRORS_404),
-                dependencies=_REQUIRE_PROJECT_OWNER)
-    async def archive_project(project_id: str) -> dict[str, object]:
-        # MVP: delete is archive (soft delete); SOT data is preserved (§115).
-        # Re-archiving is idempotent.
-        try:
-            project = core_sot.archive_project(project_id=project_id)
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        sync_outbox.enqueue_project_archived(project_id=project_id)
-        return _project_payload(project)
-
-    @app.delete(
-        "/projects/{project_id}/drafts/{draft_id}", response_model=DraftPayload,
-        responses=_owned(_ERRORS_404),
-        dependencies=_REQUIRE_PROJECT_OWNER,
-    )
-    async def archive_draft(project_id: str, draft_id: str) -> dict[str, object]:
-        try:
-            draft = core_sot.archive_draft(project_id=project_id, draft_id=draft_id)
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        sync_outbox.enqueue_draft_archived(
-            project_id=project_id,
-            draft_id=draft_id,
-        )
-        return _draft_payload(draft)
-
-    @app.get("/projects/{project_id}/drafts", response_model=DraftListResponse,
-             responses=_owned(_ERRORS_404_MIGRATION),
-             dependencies=_REQUIRE_PROJECT_OWNER)
-    async def list_drafts(project_id: str) -> dict[str, object]:
-        try:
-            drafts = core_sot.list_drafts(project_id=project_id)
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except DraftOrderIntegrityError as exc:
-            # Stored drafts predate the W3 ordered-unit invariant (or are corrupt).
-            # The fix is the one-shot scripts/migrate_ordered_units.py, not a
-            # corrected request, so surface a 503 instead of leaking an opaque 500.
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        return {"drafts": [_draft_payload(d) for d in drafts]}
-
-    @app.get(
-        "/projects/{project_id}/drafts/{draft_id}", response_model=DraftPayload,
-        responses=_owned(_ERRORS_404),
-        dependencies=_REQUIRE_PROJECT_OWNER,
-    )
-    async def get_draft(project_id: str, draft_id: str) -> dict[str, object]:
-        try:
-            draft = core_sot.get_draft(project_id=project_id, draft_id=draft_id)
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return _draft_payload(draft)
-
-    @app.get(
-        "/projects/{project_id}/drafts/{draft_id}/versions",
-        response_model=DraftVersionListResponse,
-        responses=_owned(_ERRORS_404),
-        dependencies=_REQUIRE_PROJECT_OWNER,
-    )
-    async def list_draft_versions(project_id: str, draft_id: str) -> dict[str, object]:
-        try:
-            versions = core_sot.list_draft_versions(
-                project_id=project_id, draft_id=draft_id
-            )
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return {"versions": [_version_meta_payload(v) for v in versions]}
-
-    @app.get(
-        "/projects/{project_id}/drafts/{draft_id}/versions/{version_id}",
-        response_model=DraftVersionDetailResponse,
-        responses=_owned(_ERRORS_404),
-        dependencies=_REQUIRE_PROJECT_OWNER,
-    )
-    async def get_draft_version(
-        project_id: str, draft_id: str, version_id: str
-    ) -> dict[str, object]:
-        try:
-            detail = core_sot.get_draft_version(
-                project_id=project_id, draft_id=draft_id, version_id=version_id
-            )
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return {
-            "draft_version": _version_meta_payload(detail.draft_version),
-            "snapshot": {
-                "id": detail.snapshot.id,
-                "project_id": detail.snapshot.project_id,
-                "draft_id": detail.snapshot.draft_id,
-                "version_id": detail.snapshot.version_id,
-                "raw_text": detail.snapshot.raw_text,
-                "content_hash": detail.snapshot.content_hash,
-            },
-            "blocks": [
-                {
-                    "id": block.id,
-                    "project_id": block.project_id,
-                    "snapshot_id": block.snapshot_id,
-                    "block_index": block.block_index,
-                    "kind": block.kind,
-                    "start_offset": block.start_offset,
-                    "end_offset": block.end_offset,
-                    "text": block.text,
-                }
-                for block in detail.blocks
-            ],
-        }
-
-    @app.get(
-        "/projects/{project_id}/drafts/{draft_id}/versions/{version_id}/export",
-        response_model=DraftVersionExportResponse,
-        responses=_owned(_ERRORS_400_404),
-        dependencies=_REQUIRE_PROJECT_OWNER,
-    )
-    async def export_draft_version(
-        project_id: str,
-        draft_id: str,
-        version_id: str,
-        format: str = Query("txt"),
-    ) -> dict[str, object]:
-        try:
-            export = core_sot.export_draft_version(
-                project_id=project_id,
-                draft_id=draft_id,
-                version_id=version_id,
-                fmt=format,
-            )
-        except UnsupportedExportFormat as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return {
-            "format": export.format,
-            "filename": export.filename,
-            "content_type": export.content_type,
-            "body": export.body,
-            "project_id": export.project_id,
-            "draft_id": export.draft_id,
-            "version_id": export.version_id,
-            "version_number": export.version_number,
-            "snapshot_id": export.snapshot_id,
-            "content_hash": export.content_hash,
-        }
-
-    @app.get(
-        "/projects/{project_id}/export",
-        response_model=ProjectExportResponse,
-        responses=_owned(_ERRORS_400_404_MIGRATION),
-        dependencies=_REQUIRE_PROJECT_OWNER,
-    )
-    async def export_project(
-        project_id: str,
-        format: str = Query("txt"),
-        manifest: bool = Query(False),
-        include_archived: bool = Query(False),
-    ) -> dict[str, object]:
-        try:
-            export = core_sot.export_project(
-                project_id=project_id,
-                fmt=format,
-                include_archived=include_archived,
-            )
-        except UnsupportedExportFormat as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except DraftOrderIntegrityError as exc:
-            # Whole-project export reads the ordered unit set; unmigrated legacy
-            # data blocks it. Same migration-required 503 as list/create.
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        manifest_payload: dict[str, object] | None = None
-        if manifest:
-            manifest_payload = {
-                "project_id": export.project_id,
-                "format": export.format,
-                "include_archived": export.include_archived,
-                "units": [
-                    {
-                        "draft_id": unit.draft_id,
-                        "title": unit.title,
-                        "unit_kind": unit.unit_kind,
-                        "position": unit.position,
-                        "version_id": unit.version_id,
-                        "version_number": unit.version_number,
-                        "snapshot_id": unit.snapshot_id,
-                        "content_hash": unit.content_hash,
-                    }
-                    for unit in export.units
-                ],
-            }
-        return {
-            "format": export.format,
-            "filename": export.filename,
-            "content_type": export.content_type,
-            "body": export.body,
-            "project_id": export.project_id,
-            "include_archived": export.include_archived,
-            "manifest": manifest_payload,
-        }
-
-    @app.post("/projects/{project_id}/drafts", response_model=DraftPayload,
-              responses=_owned(_ERRORS_404_409_MIGRATION),
-              dependencies=_REQUIRE_PROJECT_OWNER)
-    async def create_draft(
-        project_id: str, request: CreateDraftRequest
-    ) -> dict[str, object]:
-        try:
-            draft = core_sot.create_draft(
-                project_id=project_id,
-                title=request.title,
-                unit_kind=request.unit_kind,
-            )
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except DraftOrderIntegrityError as exc:
-            # Appending a unit reads the existing ordered set; unmigrated legacy
-            # data blocks it. Same migration-required 503 as list/export.
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        except Archived as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return _draft_payload(draft)
-
-    @app.put(
-        "/projects/{project_id}/draft-order",
-        response_model=DraftOrderPutResponse,
-        responses=_owned(_ERRORS_404_409),
-        dependencies=_REQUIRE_PROJECT_OWNER,
-    )
-    async def put_draft_order(
-        project_id: str, request: DraftOrderPutRequest
-    ) -> dict[str, object]:
-        try:
-            drafts = core_sot.reorder_drafts(
-                project_id=project_id,
-                ordered_draft_ids=tuple(request.ordered_draft_ids),
-            )
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except (Archived, InvalidDraftOrder) as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return {"drafts": [_draft_payload(draft) for draft in drafts]}
-
-    @app.post(
-        "/projects/{project_id}/drafts/{draft_id}/versions",
-        response_model=SaveDraftResponse,
-        responses=_owned(_ERRORS_400_404_409),
-        dependencies=_REQUIRE_PROJECT_OWNER,
-    )
-    async def save_draft(
-        project_id: str, draft_id: str, request: SaveDraftRequest
-    ) -> dict[str, object]:
-        try:
-            result = core_sot.save_draft(
-                project_id=project_id,
-                draft_id=draft_id,
-                raw_text=request.raw_text,
-                idempotency_key=request.idempotency_key,
-            )
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except Archived as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except CoreSotError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {
-            "draft_version": {
-                "id": result.draft_version.id,
-                "version_number": result.draft_version.version_number,
-                "snapshot_id": result.draft_version.snapshot_id,
-            },
-            "snapshot": {
-                "id": result.snapshot.id,
-                "content_hash": result.snapshot.content_hash,
-            },
-            "blocks": [
-                {
-                    "id": block.id,
-                    "kind": block.kind,
-                    "start_offset": block.start_offset,
-                    "end_offset": block.end_offset,
-                }
-                for block in result.blocks
-            ],
-            "idempotent_replay": result.idempotent_replay,
-        }
-
-    @app.post("/projects/{project_id}/snapshots/{snapshot_id}/source-refs",
-              responses=_owned(_ERRORS_400_404),
-              dependencies=_REQUIRE_PROJECT_OWNER)
-    async def create_source_ref(
-        project_id: str,
-        snapshot_id: str,
-        request: CreateSourceRefRequest,
-    ) -> dict[str, object]:
-        try:
-            source_ref = core_sot.create_source_ref(
-                project_id=project_id,
-                snapshot_id=snapshot_id,
-                start_offset=request.start_offset,
-                end_offset=request.end_offset,
-            )
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except CoreSotError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _source_ref_payload(source_ref)
-
-    @app.get("/projects/{project_id}/snapshots/{snapshot_id}/source-refs",
-             responses=_owned(_ERRORS_404),
-             dependencies=_REQUIRE_PROJECT_OWNER)
-    async def list_source_refs(
-        project_id: str,
-        snapshot_id: str,
-    ) -> dict[str, object]:
-        try:
-            source_refs = core_sot.list_source_refs(
-                project_id=project_id,
-                snapshot_id=snapshot_id,
-            )
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return {"source_refs": [_source_ref_payload(ref) for ref in source_refs]}
-
-    @app.get("/projects/{project_id}/source-refs/{source_ref_id}",
-             responses=_owned(_ERRORS_404),
-             dependencies=_REQUIRE_PROJECT_OWNER)
-    async def get_source_ref(
-        project_id: str,
-        source_ref_id: str,
-    ) -> dict[str, object]:
-        try:
-            source_ref = core_sot.get_source_ref(
-                project_id=project_id,
-                source_ref_id=source_ref_id,
-            )
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return _source_ref_payload(source_ref)
-
-    @app.post(
-        "/projects/{project_id}/snapshots/{snapshot_id}/index/source-blocks/rebuild",
-        responses=_owned(_ERRORS_404_502),
-        dependencies=_REQUIRE_PROJECT_OWNER,
-    )
-    async def rebuild_source_block_index(
-        project_id: str,
-        snapshot_id: str,
-    ) -> dict[str, object]:
-        try:
-            return _rebuild_source_block_index_payload(
-                project_id=project_id,
-                snapshot_id=snapshot_id,
-            )
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except EmbeddingProviderError as exc:
-            # The rebuild embeds every source block, so a configured-but-failing
-            # embedding service (timeout / unreachable / malformed response) used
-            # to escape as an opaque 500. It is an upstream collaborator failure,
-            # not a missing one, so it is 502 rather than 503 — the same call this
-            # endpoint's sibling already makes: context search's vector step maps
-            # an embedding failure to BACKEND_ERROR, which surfaces as 502
-            # (context_search/service.py::_run_vector_step).
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @app.post("/projects/{project_id}/analysis/jobs", responses=_owned(_ERRORS_404),
               dependencies=_REQUIRE_PROJECT_OWNER)
