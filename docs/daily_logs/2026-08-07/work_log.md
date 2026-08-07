@@ -99,8 +99,13 @@
 - **M3·M4 는 "1개만"이 좋은 결과다** — 이동한 route 하나의 성질을 그 route 의 셀
   하나가 정확히 잠근다는 뜻이고, 넓은 셀이 여러 개를 흡수하고 있지 않다는 뜻이다.
 - **M2 의 tier 전수 가드가 문 것이 register 누락의 방어선이다.** 잔여 4 도메인을
-  옮길 때 register 호출을 빠뜨리면 도메인 셀보다 **이 셀이 먼저** 이유를 말해 준다
-  (`76 operation` 이 안 맞는다고).
+  옮길 때 register 호출을 빠뜨리면 도메인 셀보다 **이 셀이 먼저** 이유를 말해 준다.
+  **[2026-08-07 독립 검증 정정]** 종전 이 줄은 *"`76 operation` 이 안 맞는다고"* 라
+  적었으나, 실측으로 먼저 물리는 것은 **project-tier 카운트**
+  ([`test_auth_api.py:1215`](../../../tests/test_auth_api.py#L1215)의
+  `len(by_tier["project"]) == 61` → `59 != 61`)이고 `len(tiers) == 76` 은 그 다음
+  줄이다. 셀이 문다는 사실은 같지만 **실패 메시지가 말해 주는 숫자가 다르다** —
+  register 를 빠뜨린 사람이 실제로 보게 될 것은 61 쪽이다.
 - **over-strict 방향**: M3 의 정상 순서(소유권 → 시행)는 통과하고, M1 의 정상
   상대 import(`..api.payloads`)도 통과한다. `payloads.py` 를 쓰지 않고 각 라우터가
   사본을 갖는 형태도 **테스트는 통과한다** — 그래서 공유는 테스트가 아니라
@@ -190,4 +195,85 @@ M1 을 처음 돌렸을 때 **5 cells 중 4개만 재실패**했다. 통과한 �
    drift 가드) 하나다.
 3. **이 슬라이스는 독립 검증 대기** 상태다. 다음 세션이 검증자라면 여기부터 본다 —
    대상 커밋 2개(`b6eec79`·`925a321`), 재현은 `repro_router_split.py` 지문 diff 와
-   위 뮤테이션 표 5종.
+   위 뮤테이션 표 5종. **→ Task 3 에서 닫혔다(합격 `06e7440`).**
+
+---
+
+## Task 2 — 독립 검증 반영 (`06e7440` 대상) · 비차단 2건 폐쇄
+
+독립 세션이 **합격 · Blocking 0** 으로 검증했다
+([기록](../../verifications/2026-08-07/router_split_slice1_remainder_1st.md)).
+6개 축을 전부 재실측했고, **repro 지문이 못 보는 빈칸을 AST 비교로 닫은 것**과
+**패치 타깃 스윕**(이동 심볼을 `app.main.<…>` 로 patch 하는 테스트 0건 확인)은
+구현자가 안 쟀던 축이다. 재현 스크립트 2종(`repro_byte_identical.py` ·
+`repro_mutations.py`)을 커밋해 뒀다 — 메모리 규칙
+`verification-repro-scripts-must-be-committed` 를 지킨 형태다.
+
+### User Decisions and Rationale
+
+- 오너 지시: *"검증기록 확인해서 보강할 부분 보강해줘."* 판정이 **합격**이므로
+  슬라이스를 되돌리는 일은 없고, **비차단 지적 2건을 닫는 것**이 작업 범위다.
+
+### Completed work
+
+| 지적 | 처리 |
+|---|---|
+| ① `GET …/memory` 응답의 `scope` 를 단정하는 셀이 없다 | [`test_memory_api.py`](../../../tests/test_memory_api.py) 에 `MemoryReadScopeSerializationTest` **3 cells** 신설 |
+| ② (화술적) M2 서술이 "76 operation 이 안 맞는다"고 적었는데 실제로는 project-tier 카운트가 먼저 물린다 | Task 1 뮤테이션 절을 정정 — 실패 메시지가 말하는 숫자는 **61** 이다 |
+
+### ★ 검증자가 "별도 계약 확인 필요"로 남긴 것 — 확인했고, 계약이 있다
+
+검증 기록은 *"현재 spec 이 이 필드를 강제하는지는 별도 계약 확인 필요"* 라며
+셀 추가를 조건부로 권했다. **정본에 있다** —
+`system-contract-sot.md` **v1.6.42**(Phase 2B.3 D2=A/D5=A)가 결정적 scope key 를
+도입하며 *"`MemoryEntry` 에 `scope` 필드 추가, 2B.1 승격이 candidate→memory 시
+산출(D5=A, Mongo round-trip · **`_memory_payload` 포함**)"* 이라고 **직렬화기를
+이름으로 지목**한다. 따라서 이 셀은 없던 계약을 새로 만드는 것이 아니라
+**이미 있는 계약을 잠그는 것**이다.
+
+### 신설 셀이 잠그는 것 (두 방향)
+
+- **under-strict** — `scope_type`/`scope_id` 중 하나라도 빠지면 앞의 두 셀이 재실패.
+  `scope_id` 는 정규화된 identity key 이므로(`"  Ariel   Song "` → `"ariel song"`)
+  표시용 이름으로 바뀌는 회귀도 여기서 잡힌다.
+- **over-strict** — `event_observation`·`open_question_observation` 은
+  `derive_scope` 가 **의도적으로 `None`** 을 준다(엔티티 id 가 없다). "scope 가
+  비었으니 채우자" 는 과잉 교정을 세 번째 셀이 문다. 키가 **사라지는 것**과 값이
+  **null 인 것**도 구분해 단정한다 — 프런트에게 전자는 "아직 안 왔다", 후자는
+  "없다"이기 때문이다.
+
+### 뮤테이션 (2종 · 신설 셀 검증)
+
+**커밋 → 뮤테이션 → 원복 순서 준수.** 원복 후 `payloads.py` 가 HEAD 와 byte-동일함을
+`diff` 로 확인했다(`git diff --stat` 일치는 증거가 아니다 — 가이드 §Mutation testing).
+
+| # | 뮤테이션 | 위치 | 재실패한 셀 |
+|---|---|---|---|
+| H1 | `_scope_payload` 에서 `scope_id` 키 제거 (검증자 M5 재현) | [`api/payloads.py:61`](../../../services/application/app/api/payloads.py#L61) | `test_reading_one_memory_carries_the_deterministic_scope` · `test_listing_memory_carries_the_deterministic_scope` **2개** |
+| H2 | `scope is None` 일 때 `{"scope_type":"unknown","scope_id":""}` 를 채우는 과잉 교정 | 같은 함수 | `test_a_taxonomy_without_identity_serializes_scope_as_null` **1개만** |
+
+**H1 은 검증자가 M5 로 돌렸을 때 이 파일이 23 cells 전부 통과했던 바로 그
+뮤테이션이다** — 이제 2 cells 가 문다. 그것이 이 hardening 의 전부다.
+
+### Verification
+
+- `tests/test_memory_api.py` **23 → 26 passed**(+3 cells).
+- **전수 회귀 `2200 passed / 1 skipped / 2160 subtests`**(831초, test-mongo ON).
+  Task 1 의 `2197/1/2159` 에서 **셀 +3 은 전부 신설 `MemoryReadScopeSerializationTest`**
+  이고, **subtest +1 은 코드와 무관하다** — 검증자가 자기 기록을 등재하면서
+  검증 기록이 **222 → 223건**이 됐고 `test_docs_indexes.py` 의 판정 열 전수 셀이
+  한 행 더 돈 것이다(그 파일 단독 `13 passed / 233 subtests`, 종전 232).
+  **이 subtest 수는 검증 기록을 쓸 때마다 1씩 오른다** — 회귀로 오독하지 않도록
+  HANDOFF 기준선 줄에도 적었다.
+- 숫자 주장 세 곳(이 로그 · HANDOFF 기준선 줄 · `README.md:88`)을 다시 정렬했다.
+
+### 아직 안 한 것 (의도)
+
+- **검증 기록 본문은 고치지 않았다.** 남의 세션 산출물이고, 판정·근거가 정확하다.
+  ②의 정정은 **내 work_log 쪽**에 적었다(틀린 서술의 출처가 거기다).
+- `main.py` 기존 미사용 import 21개 정리는 여전히 별도 슬라이스다(검증자도
+  "기존 부채"로 확인했다).
+
+### Next steps
+
+- 잔여 4 도메인 이동(59 operation) — Task 1 의 Next steps 그대로.
