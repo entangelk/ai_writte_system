@@ -647,4 +647,105 @@ annotations`)을 쓰므로 *"import 가 된다"* 보다 **정적으로 미정의
 
 - 잔여 **1 도메인** — `writing`(13 op). 4차. `_analysis_job_payload` 는 이미 공유로
   내려갔으므로 import 만. partial envelope 5곳·유료 6경로로 **검증 시 그 둘을 추가
-  의심축**으로 본다(검증자가 3차 보고에서 미리 적은 것).
+  의심축**으로 본다(검증자가 3차 보고에서 미리 적은 것). **→ Task 7 에서 옮김.**
+
+---
+
+## Task 7 — writing 도메인 이동 (`c289bce`, Slice 1 잔여 4차 · **완료**)
+
+라우터 분해의 **마지막 도메인** 이다. in-routers 63 → **76**, 잔여 **0** —
+**Slice 1(제품 라우터 정리) 완료**.
+
+### User Decisions and Rationale
+
+- 오너 지시: *"오케이 다음작업 진행해줘."* 3차(analysis) 검증 합격 직후이고, 다음은
+  HANDOFF·work_log 가 모두 가리키는 writing(13 op) 한 도메인뿐이다.
+
+### Decisions (구현자 판단)
+
+- **★ import 문을 AST 로 자동 생성했다.** writing handler 13개가 참조하는 심볼이
+  80+개라 heredoc 으로 직접 치면 오타 위험이 크다. `ast.walk` 로 handler 본문의
+  `Name` 중 main.py import 에 있는 것을 모아 모듈별로 import 문을 기계 생성.
+  - **asname 함정 2종**을 이 과정에서 놓쳤다가 `pyflakes` F821 로 잡아 보완 —
+    `InvalidJobStateTransition as InvalidGenerationJobStateTransition`(generation_job
+    모델, analysis 의 그것과 구별되는 별개 클래스) 와 `TEMPLATE as REPORT_SYSTEM_TEMPLATE`.
+    AST 매핑이 asname 을 원본 이름으로 못 돌리는 한계를 **실행 시점 검증**이 잡은 사례.
+  - **직렬화기 본문이 참조하는 심볼**도 handler 만 순회해서 놓쳤다(`pointer_wire`,
+    `_writing_candidate_payload` 가 부름). 역시 F821 로 보완.
+- **partial envelope 5곳·유료 6경로는 byte-동일로 옮겼다.** handler 본문을 통째로
+  추출하면 `JSONResponse(status_code=…, content={…})` 5곳과
+  `_REQUIRE_PROJECT_OWNER_BILLABLE` 선언이 그대로 따라간다. 검증(N3·N4)이 그 둘을
+  추가 의심축으로 잡는다(검증자가 3차 보고에서 미리 지목).
+- **`_require_project_exists` 정의(main.py)를 삭제했다.** 3차에선 writing 잔류가
+  쓴다며 남겼는데, writing 이 마지막 사용자라 이제 main.py 에서 더 쓰는 도메인이
+  없다. 각 라우터는 자체 `project_existence_check(core_sot)`.
+- **미사용 import 77개 제거 — 내 변경이 만든 것만.** writing 이동으로 main.py 잔류가
+  조립 코드만 남아 import 가 대폭 줄었다. pyflakes 전/후 diff 로 3차 후 기준(21)에
+  없는 것만 걸러 제거. **기존 부채 21개는 손대지 않았다**(별도 슬라이스 — 이제
+  도메인이 전부 나갔으니 시점이 됐다).
+  - 보강 스크립트 1판이 실패했다 — `as …` 심볼 줄을 지우고 **같은 블록의 주석만
+    남겨 빈 괄호** `from X import (\n  # comment\n)` 가 돼 SyntaxError. 백업 복구 후
+    다심볼 한 줄 + 주석 + 빈 블록까지 처리하는 판으로 재실행해 합격.
+
+### Completed work
+
+| 새 파일 | operation | 협력자 |
+|---|---|---|
+| [`routers/writing.py`](../../../services/application/app/routers/writing.py) | 13 | core_sot·writing·writing_gate·writing_report·writing_revision·writing_revise_gate·writing_accept·writing_generation_jobs·writing_scratch·writing_loop_audit·context_search·llm_call_audit·model_capabilities·report_output_cap |
+
+- `main.py` **3,106 → 1,860줄**(−1,246). 이제 조립 코드 + create_app 골격만.
+
+### Verification
+
+- **행위 무변** — `repro_router_split.py` 지문 pre(`2a5a52c` worktree)/post **diff
+  없음**. route **76** · order-sensitive pairs **0** · openapi sha256 무변 · dependency
+  트리 무변.
+- **본문 byte-동일 전수** — [`repro_byte_identical_4th.py`](../../verifications/2026-08-07/repro_byte_identical_4th.py)
+  **24/24**(직렬화기 9 + 헬퍼 2 + handler 13). partial envelope 5곳 포함.
+- 집중 스위트 **447 passed / 1,485 subtests**(writing 도메인 + auth tier + quota +
+  application 통합).
+- **전수 회귀 `2200 passed / 1 skipped / 2167 subtests`**(843초, test-mongo ON).
+  3차+검증기록 기준 `2166` 에서 **셀 증감 0**(operation 76 유지). **subtest +1** 은
+  글롭 가드(routers 10→11, `test_app_import_paths` 의 라우터 먼저-로드 셀).
+
+### 뮤테이션 (5종)
+
+**커밋 → 뮤테이션 → 원복 순서 준수.** 원복 후 트리 clean.
+
+| # | 뮤테이션 | 위치 | 재실패한 셀 |
+|---|---|---|---|
+| N1 | `from ..api.payloads` → `from ..main` (순환 복귀) | [`routers/writing.py`](../../../services/application/app/routers/writing.py) | `test_app_import_paths` 5 cells, 글롭 셀이 `SUBFAILED(module='…routers.writing')` |
+| N2 | `register_writing(...)` 호출 삭제 (13 op 통째) | [`main.py`](../../../services/application/app/main.py) | `test_auth_api::CombinedBoundaryMatrixTest::test_every_operation_lands_in_exactly_one_named_tier` |
+| N3 | accept partial envelope 상태코드 502 → 500 (H3 분류 오염) | `routers/writing.py` | `test_writing_accept.py -k partial` (partial envelope 계약 셀) |
+| N4 | `_REQUIRE_PROJECT_OWNER_BILLABLE` 순서 뒤집기(시행→소유권) | [`api/dependencies.py`](../../../services/application/app/api/dependencies.py) | `test_quota_enforcement_api::test_enforcement_is_declared_after_ownership` **BILLABLE 9개 전수 SUBFAILED**(writing 6 포함) |
+| N5 | `GET /writing/budget` 의 `_REQUIRE_PROJECT_OWNER` 제거 | `routers/writing.py` | `test_auth_api::AuthenticationBoundaryTest` `SUBFAILED(path='/projects/{project_id}/writing/budget', method='get')` |
+
+- **N3·N4 가 검증자의 추가 의심축이다.** 3차 독립 검증이 *"partial envelope·유료 6을
+  4차에서 추가 의심축으로 보겠다"* 고 적었는데, N3(partial envelope 분류 오염)·
+  N4(유료 순서) 가 정확히 그 둘을 잡는다. N4 는 BILLABLE 9개 전수라 writing 6경로가
+  이동해도 순서 가드를 잃지 않는다.
+
+### 회귀 기준선
+
+**backend test-mongo ON `2200 passed / 1 skipped / 2167 subtests`**(`c289bce`,
+843초).
+
+- 종전 `2165`(3차 `70584c2`) / `2166`(3차+검증기록 `4ebde99`)에서 **셀 무변**,
+  **subtest +1**(글롭 routers 10→11). 직전 값 이력: 2166(3차+검증) · 2165(3차) ·
+  2163(2차).
+- **★ 숫자 주장 갱신** — [`README.md`](../../../README.md):88 의 `2,165` → `2,167`.
+
+### Slice 1 완료 · 다음
+
+- **라우터 분해 Slice 1(제품 라우터 정리)이 끝났다.** 76 operation 전부가 `routers/`
+  11개 모듈로 나갔고, `main.py` 는 조립 코드(`create_app` 골격 + 서비스 조립 +
+  register 호출)만 남았다(1,860줄).
+- **★ 다음은 `main.py` 미사용 import 정리** — 출발값 **21**(pyflakes F401). 도메인이
+  전부 나갔으므로 오너가 정한 *"도메인 전부 옮긴 뒤 한 번에"* 순서의 시점이다.
+  더불어 `_default_model_capabilities`·`_report_output_cap`·`WritingError`·`seed_*`
+  같은 조립 전용 심볼도 잔류분이라 이때 함께 본다.
+- **Slice 2(`create_admin_app()`)** — 이제 `routers.admin` 을 그냥 import 할 수 있어
+  열려 있다. 선행은 H-2(shim drift 가드) 하나.
+- **이 슬라이스는 독립 검증 대기** — 대상 커밋 `c289bce`, 재현은
+  `repro_byte_identical_4th.py`(24/24) · `repro_mutations_4th.py`(N1~N5) ·
+  `repro_router_split.py` 지문 diff.
