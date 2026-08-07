@@ -1,7 +1,7 @@
 # 독립 검증 기록
 
 이 디렉터리는 **구현자가 아닌 검증자가** 각 슬라이스를 다시 뜯어본 기록이다. 2026-06-24부터
-**44일치 · 224건**이 쌓여 있다.
+**44일치 · 225건**이 쌓여 있다.
 
 ## 이 저장소의 검증이 무엇인가
 
@@ -35,7 +35,7 @@
 
 | 판정 | 건수 | 뜻 |
 |---|---|---|
-| 합격 | 156 | blocking 결함 없음 |
+| 합격 | 157 | blocking 결함 없음 |
 | **조건부 합격** | **66** | 합격이되 닫아야 할 조건이 있었다 |
 | **불합격** | **2** | 핵심 계약 위반으로 다음 슬라이스 진행이 차단됐다 |
 
@@ -69,6 +69,7 @@
 |---|---|---|
 | [`router_split_slice1_remainder_1st.md`](2026-08-07/router_split_slice1_remainder_1st.md) | 라우터 분해 Slice 1 잔여 1차(`b6eec79`·`925a321`) — health·memory·observability·context-search(5 operation)를 `main.py` 밖으로 + 공유 직렬화기 3종 `api/payloads.py` + `_require_project_exists` factory 통합 + 라우터 로드 가드 글롭 전수화(2→6). 행위 무변 repro 지문 pre(`9bc06e3`) vs post(HEAD) **IDENTICAL**(route 76·order-pairs 0·openapi sha·dependency 트리). **이동 정의 12/12 AST-동일**(repro 가 못 보는 `dict` 응답 직렬화기 본문을 이게 닫음)·패치 타깃 3곳 갱신 누락 0. 뮤테이션 5종 전부 주장 셀에 물림(순환 복귀 `SUBFAILED(module=routers.memory)` 로 가드 보강이 범인 지목·register 누락 tier 가드·scope_id 제거→analysis 셀로 공유 증명·storage 503·billable 순서 1개만). 기준선 `2197/1/2159` 재현(1010s). **비차단: `GET …/memory` 응답 `scope.scope_id` 단정 셀 부재**(이동 전부터, hardening). 재현은 [`repro_byte_identical.py`](2026-08-07/repro_byte_identical.py)·[`repro_mutations.py`](2026-08-07/repro_mutations.py) | **합격** |
 | [`router_split_slice1_remainder_2nd.md`](2026-08-07/router_split_slice1_remainder_2nd.md) | 라우터 분해 Slice 1 잔여 2차(`131bc2a`) — projects·drafts·source-refs(25 operation·정의 30)를 `main.py` 밖으로(in-routers 17→42, 잔여 34). 행위 무변 repro 지문 pre(`9bc06e3`=세션 착수 전) vs post(HEAD) **IDENTICAL**(route 76·order-pairs 0·openapi sha `f8b42ef1…`·dependency 트리) — 하루치(1차+hardening+2차)가 한 diff 로 증명. **이동 정의 30/30 AST-동일**(검증자 직접 재현 — 1차 repro 가 안 덮는 축). orphan 제거 **F821 undefined name 0건**(PEP 563 포함). 회귀 `2200/1/2163` 재현(test-mongo 사용, skip=1). 뮤테이션 N1(순환 복귀)이 글롭 가드로 `SUBFAILED(module=routers.projects)` — 1차 글롭 처방이 신규 모듈 3종을 자동 범위화한 것을 재확인. **비차단: 2차 byte-동일·뮤테이션 N1-N5 의 커밋된 repro 스크립트 부재**(부하 증명은 커밋된 지문 repro 로 덮임)·미사용 import 22(작업자) vs 21(실측). | **합격** |
+| [`router_split_slice1_remainder_3rd.md`](2026-08-07/router_split_slice1_remainder_3rd.md) | 라우터 분해 Slice 1 잔여 3차(`70584c2`) — analysis 도메인(21 operation·정의 36)을 `main.py` 밖으로(in-routers 42→63, 잔여 13=writing). 공유 직렬화기 `_analysis_job_payload` 1종만 `api/payloads.py` 로 내림(writing 잔류가 import). 행위 무변 repro 지문 **두 기준** pre(`5aaf202`=3차 직전)·pre(`9bc06e3`=분해 이전) vs HEAD **모두 IDENTICAL**(route 76·order-pairs 0·openapi sha `f8b42ef1…`·dependency 트리) — **1·2·3차 전체가 한 diff 로 증명**. **이동 정의 36/36 AST-동일**(작업자 repro + 검증자 전수 추출). **결합도 독립 입증**: main.py(writing)가 이동 직렬화기 중 오직 `_analysis_job_payload`만 참조 → "유일 공유" 확인. orphan **F821 0건**(PEP 563). 회귀 `2200/1/2165` 재현(test-mongo 사용). 뮤테이션 N1-N5 전부 가드 작동(N1 `SUBFAILED(module=routers.analysis)` 글롭 자동 범위화·N3 analysis·writing 양쪽 시위·N4 BILLABLE 9개 전수). **★ 2차 hardening 2건(repro 미커밋·카운트 22→21)이 `13b673e`로 폐쇄**, 3차는 repro 처음부터 커밋. 재현은 [`repro_byte_identical_3rd.py`](2026-08-07/repro_byte_identical_3rd.py)·[`repro_mutations_3rd.py`](2026-08-07/repro_mutations_3rd.py). | **합격** |
 
 ### 2026-08-06
 
