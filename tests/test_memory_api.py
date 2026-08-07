@@ -247,6 +247,85 @@ class AutoPromotionApiTest(unittest.TestCase):
         )
 
 
+class MemoryReadScopeSerializationTest(unittest.TestCase):
+    """`GET …/memory*` 응답이 `scope` 를 싣는다 — 두 방향 다.
+
+    SoT v1.6.42 (D2=A/D5=A) 가 결정적 scope key 를 도입하며 **`_memory_payload`
+    포함**을 이름으로 못박았다. 그런데 그 성질을 memory 읽기 경로에서 단정하는
+    셀이 없었다 — 2026-08-07 독립 검증이 뮤테이션으로 실증했다(공유
+    `_scope_payload` 에서 `scope_id` 를 빼도 이 파일은 23 cells 전부 통과했고,
+    `test_analysis_compare_api.py` 한 셀만 물었다). 즉 memory 읽기 응답의 형태가
+    **analysis 도메인 셀에 전이적으로만** 걸려 있었다.
+
+    라우터 분해로 `_scope_payload` 가 `api/payloads.py` 로 나가면서 이 빈칸이
+    더 아프다 — memory 응답 때문에 그 파일을 고치면 깨지는 것은 analysis 셀이고,
+    고친 사람은 자기가 무엇을 건드렸는지 응답 쪽에서 볼 수 없다.
+
+    under-strict: `scope_type`/`scope_id` 중 하나라도 빠지면 첫 두 셀이 재실패한다.
+    over-strict: scope 가 없는 taxonomy(event/open_question)에 억지로 값을 채우는
+    과잉 교정은 세 번째 셀이 문다 — `None` 은 결측이 아니라 **"결정적 identity 가
+    도출되지 않는다"는 계약된 값**이다(`derive_scope` 독스트링).
+    """
+
+    def _promote(self, client, analysis, project_id, **kwargs):
+        candidate = _seed_candidate(analysis, project_id=project_id, **kwargs)
+        response = client.post(
+            f"/projects/{project_id}/analysis/candidates/{candidate.id}/promote"
+        )
+        self.assertEqual(response.status_code, 200)
+        return response.json()["memory"]
+
+    def test_reading_one_memory_carries_the_deterministic_scope(self):
+        client, analysis, project_id = _build()
+        # 이름 정규화(공백 collapse + casefold)까지 응답에 실려야 한다 —
+        # scope_id 는 표시용 이름이 아니라 identity key 다.
+        promoted = self._promote(
+            client, analysis, project_id,
+            payload={"name": "  Ariel   Song ", "observation": "brave"},
+        )
+
+        fetched = client.get(
+            f"/projects/{project_id}/memory/{promoted['id']}"
+        )
+
+        self.assertEqual(fetched.status_code, 200)
+        self.assertEqual(
+            fetched.json()["scope"],
+            {"scope_type": "character", "scope_id": "ariel song"},
+        )
+
+    def test_listing_memory_carries_the_deterministic_scope(self):
+        client, analysis, project_id = _build()
+        self._promote(
+            client, analysis, project_id,
+            payload={"name": "Ariel Song", "observation": "brave"},
+        )
+
+        listed = client.get(f"/projects/{project_id}/memory").json()["memory"]
+
+        self.assertEqual(
+            [entry["scope"] for entry in listed],
+            [{"scope_type": "character", "scope_id": "ariel song"}],
+        )
+
+    def test_a_taxonomy_without_identity_serializes_scope_as_null(self):
+        client, analysis, project_id = _build()
+        promoted = self._promote(
+            client, analysis, project_id,
+            candidate_type=AnalysisCandidateType.EVENT_OBSERVATION,
+            payload={"event": "the bridge falls"},
+        )
+
+        fetched = client.get(f"/projects/{project_id}/memory/{promoted['id']}")
+
+        self.assertEqual(fetched.status_code, 200)
+        body = fetched.json()
+        # 키가 사라지는 것과 값이 null 인 것은 다르다 — 전자는 프런트가
+        # "아직 안 왔다" 로, 후자는 "없다" 로 읽는다.
+        self.assertIn("scope", body)
+        self.assertIsNone(body["scope"])
+
+
 class AutoPromoteStorageFailureTest(unittest.TestCase):
     """A failing canonical store makes auto-promote a 503 partial, not a 500.
 
