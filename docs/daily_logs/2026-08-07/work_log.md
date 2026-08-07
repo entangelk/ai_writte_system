@@ -748,4 +748,62 @@ annotations`)을 쓰므로 *"import 가 된다"* 보다 **정적으로 미정의
   열려 있다. 선행은 H-2(shim drift 가드) 하나.
 - **이 슬라이스는 독립 검증 대기** — 대상 커밋 `c289bce`, 재현은
   `repro_byte_identical_4th.py`(24/24) · `repro_mutations_4th.py`(N1~N5) ·
-  `repro_router_split.py` 지문 diff.
+  `repro_router_split.py` 지문 diff. **→ Task 8 에서 합격(`5e19867`)·24/24 는
+  25/25 로 정정.**
+
+---
+
+## Task 8 — 4차 독립 검증 반영 (`5e19867` 대상) · 비차단 2건 폐쇄 · **Slice 1 종료**
+
+독립 세션이 **합격 · Blocking 0** 으로 검증했다
+([기록](../../verifications/2026-08-07/router_split_slice1_remainder_4th.md)).
+**★ 모자 증명** — HEAD ≡ `9bc06e3`(Slice 1 착수 전) IDENTICAL 로, 모놀리스
+main.py(76 op 인라인) → 11 라우터 모듈(76 op 전부) 의 4-슬라이스 리팩터 전체가
+원래 공개 표면과 같음이 한 diff 로 증명됐다. **Slice 1 종료.**
+
+### User Decisions and Rationale
+
+- 오너 지시: *"검증기록 확인해서 보강할 부분 보강해줘."* 판정 **합격**이므로 되돌림은
+  없고 **비차단 hardening 2건을 닫는 것**이 작업 범위다.
+
+### Completed work
+
+| 지적 | 처리 |
+|---|---|
+| ① byte-identical repro TARGETS=24 가 writing 헬퍼 **`_derive`**(`get_writing_context_budget` 안 중첩) 1개 누락 — 작업자가 "헬퍼 2종"으로 세어 빠뜨림 | [`repro_byte_identical_4th.py`](../../verifications/2026-08-07/repro_byte_identical_4th.py) TARGETS 24→25(헬퍼 3종). 실행 **25/25** 확인(이동은 원래 완전했고, 독립 전수 추출이 잡은 과소집계) |
+| ② "원래 6,145/70%" 수사 — 실측 최대 출발점은 prelude 추출 전 5,843, 감소율 약 68% | **기록엔 없다** — 그 수사는 작업자 채팅 요약이지 work_log/HANDOFF 가 아님. work_log Task 7 은 "3,106 → 1,860"(정확)만 적음. 정정 불필요(검증자도 "수사적, 정확성엔 무영향") |
+
+### ★ _derive 정정의 실측
+
+강화한 repro 를 돌려 **25/25 byte-동일**. `_derive` 가 old main.py(`2a5a52c`:2270)·
+new `routers/writing.py`(511) 모두 `async def _derive(upper_bound: int) -> int:` 로
+존재 → handler 내부 중첩이 handler 와 함께 옮겨간 것. 이것이 2차·3차에서도 반복된
+패턴이다 — **손 관리 TARGETS 가 가끔 과소집계되고, 독립 전수 추출이 잡는다**.
+재발 방지로 다음 슬라이스(미사용 정리·Slice 2)에선 byte repro 의 TARGETS 를
+**AST 로 자동 추출**(이 슬라이스의 import 자동 생성과 같은 기법)하는 쪽이 견고하다.
+
+### 검증 행위의 부작용 (검증자 보고 반영)
+
+- **다음 회귀는 2167 → 2168 subtests** — 4차 검증 기록(`5e19867`)이 `test_docs_indexes`
+  판정 열 전수 셀을 1 subtest 늘린다(코드 무관). **README:88 의 2167 은 그대로 둔다**.
+- **카운트 갱신**(검증자 README 반영): 검증 225 → **226** · 합격 157 → **158** ·
+  조건부 비율 **29%** 유지.
+- **환경(WSL2)**: 이 셉에 `docker inspect <name>` 이 찰나 *no such object* 를 뱉는
+  데몬 불량이 있었다(`docker ps` 는 정상 healthy). until 루프(inspect 기반)가 한 번
+  타임아웃됐으나 컨테이너 자체는 healthy 였고 회귀 skip=1 로 정상 동작 확인. 검증
+  기록 Methodology/Reproduction 에 **inspect 대신 `docker ps` 를 쓰도록** 적었다
+  (memory 규칙 "verify-machine-state-before-claiming-blocked" 의 역 — inspect 가
+  거짓 부정을 낸 사례).
+
+### 아직 안 한 것 (의도)
+
+- **검증 기록 본문은 고치지 않았다.** 남의 산출물, 판정·근거 정확. 정정 ①는
+  **내 repro 쪽**(TARGETS)에 적었다.
+
+### Slice 1 종료 · 다음 (오너가 잡는 두 갈래)
+
+1. **`main.py` 미사용 import 정리** — 출발 **21**(pyflakes F401). 도메인이 전부
+   나갔으니 오너 순서 *"도메인 전부 옮긴 뒤 한 번에"* 의 시점. `_default_model_capabilities`
+   ·`_report_output_cap`·`seed_*` 같은 조립 전용 잔류 심볼도 함께 본다.
+2. **Slice 2(`create_admin_app()`)** — `routers.admin` 을 그냥 import 할 수 있어 열림.
+   선행은 H-2(shim drift 가드) 하나.

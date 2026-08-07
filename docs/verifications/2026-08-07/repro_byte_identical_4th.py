@@ -2,15 +2,18 @@
 
 기록: docs/daily_logs/2026-08-07/work_log.md Task 7.
 
-1~3차용과 같은 방법을 4차가 옮긴 **24 정의**(handler 13 + 직렬화기 9 + 헬퍼 2)에
+1~3차용과 같은 방법을 4차가 옮긴 **25 정의**(handler 13 + 직렬화기 9 + 헬퍼 3)에
 적용한다. 이동 직전 커밋(`2a5a52c`)의 main.py 와 HEAD 의 신규 `routers/writing.py`
-에서 이름별로 추출해 `ast.unparse` 로 비교한다. 헬퍼 2종(`_record_loop_audit`·
-`_clear_scratch_for_saved_accept`)은 handler 내부 중첩이라 handler 와 함께 옮겨갔고,
-`ast.walk` 가 중첩을 잡으므로 같이 비교한다.
+에서 이름별로 추출해 `ast.unparse` 로 비교한다. 헬퍼 3종(`_derive`·
+`_record_loop_audit`·`_clear_scratch_for_saved_accept`)은 handler 내부 중첩이라
+handler 와 함께 옮겨갔고, `ast.walk` 가 중첩을 잡으므로 같이 비교한다.
+**★ [2026-08-07 독립 검증 정정]** 종전 이 스크립트는 헬퍼를 2종으로 세어
+`_derive`(`get_writing_context_budget` 안 중첩)를 TARGETS 에 빠뜨렸다(24). 독립
+검증의 전수 추출(25/25)이 잡아 3종으로 정정했다.
 
 실행:
     python3 docs/verifications/2026-08-07/repro_byte_identical_4th.py
-기대: "24/24 byte-동일(AST 정규화)", exit 0
+기대: "25/25 byte-동일(AST 정규화)", exit 0
 """
 import ast
 import subprocess
@@ -57,7 +60,8 @@ TARGETS = [
     ("_writing_loop_audit_payload", 0),
     ("_accepted_save_payload", 0),
     ("_writing_scratch_payload", 0),
-    # --- 헬퍼 2종 (handler 내부 중첩) ---
+    # --- 헬퍼 3종 (handler 내부 중첩) ---
+    ("_derive", 0),
     ("_record_loop_audit", 0),
     ("_clear_scratch_for_saved_accept", 0),
     # --- handler 13 ---
