@@ -277,3 +277,111 @@ M1 을 처음 돌렸을 때 **5 cells 중 4개만 재실패**했다. 통과한 �
 ### Next steps
 
 - 잔여 4 도메인 이동(59 operation) — Task 1 의 Next steps 그대로.
+
+---
+
+## Task 3 — projects · drafts · source-refs 이동 (`131bc2a`, Slice 1 잔여 2차)
+
+### User Decisions and Rationale
+
+- **오너 질문: *"도메인 전부 이동한 다음에 미사용 정리하는 게 깔끔하지 않을까?"*
+  → 그 판단이 맞고, 그대로 간다.** 근거 셋을 답으로 드렸다: ① 이동마다 새 orphan
+  이 생긴다(1차 6개, **이번 2차 38개**) — 먼저 치워도 곧바로 다시 쌓인다
+  ② import 블록은 이동이 매번 만지는 자리라 섞으면 *"이동 때문에 지운 것"* 과
+  *"부채라 지운 것"* 이 한 diff 에 엉킨다(지금 이동 커밋이 지문 IDENTICAL 로
+  깔끔히 증명되는 이유가 그 분리다) ③ 이동이 끝나면 `main.py` 는 조립 코드만
+  남아 import 블록이 훨씬 작아진다 — 그때 한 번의 작은 diff 로 끝난다.
+- 이어서 *"알아서 다음 작업 진행해줘"* 라 슬라이스 범위는 구현자 판단이다.
+
+### Decisions (구현자 판단) — 왜 세 도메인을 한 슬라이스로 묶었나
+
+1차(5 op)보다 큰 25 op 를 한 번에 옮겼다. 근거는 크기가 아니라 **결합도 실측**이다.
+
+- **AST 로 잰 결과 잔여 59 route 중 도메인을 넘나드는 직렬화기는
+  `_analysis_job_payload`(analysis↔writing) 하나뿐**이었다. projects·drafts·
+  source_refs 는 서로 완전히 독립이고 각자 자기 직렬화기만 쓴다 — 즉 이 셋을
+  나눠 옮겨도 얻는 것이 없다.
+  - *주의*: 처음에 route 줄 범위로 헬퍼 사용을 셌더니 `_writing_*_payload` 가
+    analysis 와 "공유"로 나왔다. **route 사이에 헬퍼 정의가 끼어 있어서 생긴
+    허위**다(마지막 analysis route ~ 첫 writing route 구간에 writing 직렬화기
+    정의가 산다). AST 로 handler 본문만 보면 공유는 위의 하나뿐이다.
+    **줄 범위로 소속을 세면 안 된다** — 다음 도메인에서도 같은 함정이 있다.
+- **projects 와 drafts 는 route 선언이 서로 끼워져 있다**(PATCH project → PATCH
+  draft → DELETE project → DELETE draft → …). 도메인별로 나눠 옮기면 같은 구간을
+  두 번 헤집게 되고, 그 사이 상태는 지문으로 검증하기 애매해진다. 셋을 합치면
+  `main.py` 의 **연속 구간 하나**(1963~2593)를 통째로 들어내는 일이 된다.
+- **모듈은 그래도 셋으로 나눴다** — 브리프가 `projects`·`drafts` 를 별도 모듈로
+  적었고, 한 파일에 25 op 를 담으면 이 슬라이스가 없애려는 것을 다시 만든다.
+
+### Completed work
+
+| 새 파일 | operation | 협력자 |
+|---|---|---|
+| [`routers/projects.py`](../../../services/application/app/routers/projects.py) | 11 | `core_sot`·`access_grants`·`sync_outbox` |
+| [`routers/drafts.py`](../../../services/application/app/routers/drafts.py) | 10 | `core_sot`·`sync_outbox` |
+| [`routers/source_refs.py`](../../../services/application/app/routers/source_refs.py) | 4 | `core_sot`·`shared_vector_index`·`shared_embeddings`·`shared_backend` |
+
+- in-routers **17 → 42**, 잔여 **34**(analysis 21 · writing 13).
+- `main.py` **4,534 → 3,924줄**.
+- 직렬화기 5종은 **전부 도메인 전용이라 `api/payloads.py` 로 내리지 않았다**.
+  1차에서 정한 규칙("공유만 내린다")의 반대쪽 사례다.
+- 이동으로 미사용이 된 import **38개** 제거. **기존 부채 22개는 손대지 않았다**(위 오너 판단).
+- **패치 타깃 갱신 0건** — 이동한 심볼을 `app.main.<…>` 로 patch 하는 테스트가
+  없다(스윕 결과 남은 3종 `connect_chroma_collection`·`_build_embedding_provider`·
+  `GatewayGenerateProvider` 는 전부 `main.py` 잔류 조립부다).
+
+### Verification
+
+- **행위 무변** — 지문 diff 없음. **이번 비교 기준은 오늘 세션 착수 시점(`9bc06e3`
+  상태)의 지문**이라 하루치(1차 + hardening + 2차) 전체가 한 번에 증명된다.
+  route **76** · order-sensitive pairs **0** · openapi sha256 무변 · dependency 트리 무변.
+- **이동 정의 30/30 byte-동일**(들여쓰기 정규화).
+- 집중 스위트 **279 passed / 1,501 subtests**.
+- **전수 회귀 `2200 passed / 1 skipped / 2163 subtests`**(829초, test-mongo ON).
+  Task 2 의 `2200/1/2160` 에서 **셀 증감 0** — **25 operation 이동이 셀을 한 개도
+  더하거나 빼지 않았다**(operation 76 유지의 실측은 숫자가 아니라 지문 IDENTICAL
+  이지만, 셀 무변은 "테스트를 고쳐서 통과시킨 것이 아니다"의 실측이다).
+  **subtest +3 은 전부 N1 이 확인한 그 글롭**이다 — `routers/*.py` 가 6 → 9개가
+  되며 `test_a_router_module_loads_before_main` 이 3 subtest 더 돈다.
+
+### 뮤테이션 (5종)
+
+**커밋 → 뮤테이션 → 원복 순서 준수.** 원복 후 4개 파일 전부 HEAD 와 byte-동일함을
+`diff` 로 확인했다.
+
+| # | 뮤테이션 | 위치 | 재실패한 셀 |
+|---|---|---|---|
+| N1 | `from ..api.payloads import` → `from ..main import` (순환 복귀) | `routers/projects.py` | `test_app_import_paths.py` **5 cells**, 그중 `test_a_router_module_loads_before_main` 이 `SUBFAILED(module='…routers.projects')` |
+| N2 | `register_projects(...)` 호출 삭제 | `main.py` `create_app` | `test_auth_api.py` **19 cells**(tier 전수 2 + 소유권/인증 경계 다수) |
+| N3 | `list_drafts` 의 `except DraftOrderIntegrityError → 503` 절 제거 (방어 제거) | `routers/drafts.py` | `LegacyOrderedDraftMigration503Test::test_list_drafts_on_legacy_data_returns_503` · `CrudErrorBodyExactKeyTest::test_503_body` **2개** |
+| N4 | rebuild 의 `EmbeddingProviderError` 매핑 502 → 500 (분류 오염) | `routers/source_refs.py` | `SourceBlockRebuildEmbeddingFailureTest::test_embedding_failure_is_502_with_the_uniform_body` **1개만** |
+| N5 | `POST /projects` 의 `dependencies=_REQUIRE_AUTH` 제거 | `routers/projects.py` | `AuthenticationBoundaryTest::test_every_operation_is_either_protected_or_a_named_exemption` `SUBFAILED(path='/projects')` · `CombinedBoundaryMatrixTest::test_every_operation_lands_in_exactly_one_named_tier` |
+
+- **★ N1 이 이 슬라이스에서 가장 값진 결과다.** 1차에서 하드코딩을 글롭으로 바꾼
+  가드가 **신규 모듈 3종을 자동으로 범위에 넣었다**(모듈 6 → 9, subtest 도 6 → 9).
+  *"사람이 갱신해야 하는 가드는 갱신을 잊는 쪽으로 약해진다"* 는 1차의 처방이
+  다음 슬라이스에서 실제로 값을 한 것이다 — 그때 안 고쳤다면 지금 projects 에
+  순환을 되살려도 그 셀은 조용히 통과했다.
+- N4 가 **1개만** 문 것은 좋은 결과다(넓은 셀이 흡수하지 않는다). 반대로 N2 가
+  19개를 문 것은 register 누락이 **도메인 전체를 지우는** 변경이기 때문이다.
+
+### Issues found — 전수 회귀를 test-mongo 없이 돌려 기준선을 한 번 버렸다
+
+첫 실행이 **`2087 passed / 114 skipped`** 로 나왔다. hardening 뒤 test-mongo 를
+내려 둔 채 돌린 것이다. **합계는 2201 로 직전과 같아 셀 증감이 0 임은 읽을 수
+있었지만**, 기준선으로 인용할 수 있는 값은 아니다.
+
+- HANDOFF 가 *"skip 수는 머신·인프라 기동 여부마다 달라 같은 환경에서 비교한다"*
+  고 적어 둔 그 함정이며, 이번엔 **내가 직접 내려 놓고 잊은** 경우다.
+- 재발 방지로 이 로그에 적어 둔다: **전수 회귀 직전에
+  `docker inspect -f '{{.State.Health.Status}}' ai_writte_system-test-mongo-1`
+  를 같은 명령줄에 붙인다**(이번 재실행이 그 형태다).
+
+### Next steps
+
+1. **잔여 2 도메인** — `analysis`(21) · `writing`(13). **`_analysis_job_payload`
+   가 둘의 유일한 공유 직렬화기**이므로 그 하나만 `api/payloads.py` 로 내린다.
+   `analysis` 는 `_transition_gate_finding`·`_review_source_pointer` 같은
+   **직렬화기가 아닌 헬퍼**도 끌고 있어 1·2차보다 손이 더 간다.
+2. **그 다음 = `main.py` 미사용 import 정리**(오너 판단으로 이 순서다).
+3. **Slice 2(`create_admin_app()`)** — 여전히 직교.
