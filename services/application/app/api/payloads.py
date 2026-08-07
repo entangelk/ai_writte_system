@@ -1,13 +1,15 @@
 """도메인 객체 → 응답 dict 직렬화기 중 **여러 도메인이 공유하는 것**.
 
-`main.py` 의 `create_app()` 안에 있던 중첩 함수를 옮겨왔다(라우터 분해 2차,
+`main.py` 의 `create_app()` 안에 있던 중첩 함수를 옮겨왔다(라우터 분해 2·3차,
 2026-08-07). 본문 byte-동일이며, 여기 있는 것은 전부 **순수 함수**다 —
 협력자(`core_sot`·`memory` …)를 클로저로 잡지 않으므로 파일이 어디에 있든
 같은 값을 낸다.
 
 **여기에 오는 기준은 "공유"다.** 한 도메인만 쓰는 직렬화기는 그 라우터 모듈에
 둔다(예: `_context_*_payload` 는 `routers/context_search.py`). 전부 여기로
-모으면 이 파일이 두 번째 `main.py` 가 된다.
+모으면 이 파일이 두 번째 `main.py` 가 된다. 공유 멤버 현황 —
+`_project_brief_payload`(projects·context_search) · `_memory_payload`+`_scope_payload`
+(memory·analysis) · **`_analysis_job_payload`(analysis·writing, 3차 신설)**.
 
 의존 방향은 `api/` 의 나머지와 같다 — 이 모듈은 아무것도 import 하지 않으므로
 `errors → models → env` 사슬 어디에도 얹히지 않는다. **`main` 이나 `routers` 를
@@ -52,6 +54,19 @@ def _memory_payload(entry) -> dict[str, object]:
         "applied_threshold": entry.applied_threshold,
         "scope": _scope_payload(entry.scope),
         "supersedes": entry.supersedes,
+    }
+
+
+def _analysis_job_payload(job) -> dict[str, object]:
+    return {
+        "id": job.id,
+        "project_id": job.project_id,
+        "snapshot_id": job.snapshot_id,
+        "status": str(job.status),
+        "failure_reason": (
+            str(job.failure_reason) if job.failure_reason is not None else None
+        ),
+        "failure_detail": job.failure_detail,
     }
 
 
