@@ -321,3 +321,19 @@ _REQUIRE_PROJECT_OWNER_BILLABLE = [
     *_REQUIRE_PROJECT_OWNER,
     Depends(enforce_quota),
 ]
+
+
+# --- 존재 확인 (라우터 분해 2차, 2026-08-07) ---------------------------------
+# ``_require_project_exists`` 는 FastAPI dependency 가 **아니다** — handler 본문이
+# 직접 부르는 평범한 클로저이고, 그래서 ``core_sot`` 를 인자로 받는 factory 로
+# 둔다. 여기 있는 이유는 하나다: 라우터 도메인마다 사본을 두면 정의가 8벌이 되고,
+# "없는 project 는 404" 라는 한 줄짜리 계약이 조용히 갈라질 자리가 8개 생긴다.
+#
+# 이것이 소유권 dependency 를 대체하지 않는다는 점에 주의한다 — 소유권은 route
+# 선언(``_REQUIRE_PROJECT_OWNER``)에서 이미 걸러졌고, 이 함수는 그 뒤에서
+# **존재하지 않는 project 를 404 로** 바꾸는 것뿐이다.
+def project_existence_check(core_sot):
+    def _require_project_exists(project_id: str) -> None:
+        core_sot.get_project(project_id=project_id)
+
+    return _require_project_exists

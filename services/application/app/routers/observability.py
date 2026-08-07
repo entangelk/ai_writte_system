@@ -19,14 +19,13 @@ from services.application.app.observability.kpi import aggregate_kpi
 
 from ..api.models import ObservabilityKpiResponse
 from ..api.errors import _ERRORS_404, _owned
-from ..api.dependencies import _REQUIRE_PROJECT_OWNER
+from ..api.dependencies import _REQUIRE_PROJECT_OWNER, project_existence_check
 
 
 def register_observability(
     app, *, core_sot, llm_call_audit, writing_loop_audit
 ) -> None:
-    def _require_project_exists(project_id: str) -> None:
-        core_sot.get_project(project_id=project_id)
+    _require_project_exists = project_existence_check(core_sot)
 
     @app.get("/projects/{project_id}/observability/kpi",
              response_model=ObservabilityKpiResponse,

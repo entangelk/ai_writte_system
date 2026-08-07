@@ -92,9 +92,22 @@ class ImportOrderIndependenceTest(unittest.TestCase):
 
         Slice 2(관리자 표면 별도 진입점)가 하려는 일이 정확히 이것이다 —
         `create_admin_app()` 은 `register_admin` 만 필요하고 제품 앱을 짓지 않는다.
+
+        **목록은 하드코딩하지 않고 패키지에서 읽는다.** 종전에는 `admin`·`auth`
+        두 개를 적어 뒀는데, 2026-08-07 에 라우터 4종이 늘자 그 넷은 이 셀의
+        검사 대상이 아니게 됐다(뮤테이션으로 실측 — `routers/memory.py` 에
+        `from ..main import` 를 되살려도 이 셀만 통과했다). 새 라우터가 생길
+        때마다 사람이 목록을 갱신해야 하는 가드는 갱신을 잊는 쪽으로 조용히
+        약해진다.
         """
-        for module in ("services.application.app.routers.admin",
-                       "services.application.app.routers.auth"):
+        modules = sorted(
+            f"services.application.app.routers.{path.stem}"
+            for path in (_ROOT / "services" / "application" / "app" / "routers")
+            .glob("*.py")
+            if path.stem != "__init__"
+        )
+        self.assertTrue(modules, "routers 패키지에서 모듈을 하나도 못 찾았다")
+        for module in modules:
             with self.subTest(module=module):
                 result = subprocess.run(
                     [sys.executable, "-c", f"import {module}; print('LOAD OK')"],

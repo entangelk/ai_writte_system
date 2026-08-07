@@ -1663,6 +1663,7 @@ from .api.dependencies import (
     _REQUIRE_AUTH,
     _REQUIRE_PROJECT_OWNER,
     _REQUIRE_PROJECT_OWNER_BILLABLE,
+    project_existence_check,
     quota_charge,
     quota_confirmed,
     require_authenticated_user,
@@ -2048,8 +2049,7 @@ def create_app(
         )
         return summary.to_dict(backend=shared_backend)
 
-    def _require_project_exists(project_id: str) -> None:
-        core_sot.get_project(project_id=project_id)
+    _require_project_exists = project_existence_check(core_sot)
 
     @app.post("/projects", response_model=ProjectPayload,
               responses=_ERRORS_STORAGE,

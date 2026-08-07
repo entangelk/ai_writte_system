@@ -39,7 +39,10 @@ from services.application.app.observability.llm_call_scope import (
 
 from ..api.models import ContextSearchHttpRequest
 from ..api.errors import _BILLABLE_400_404_502_504_CONFIG, _STORAGE_ERRORS, _owned
-from ..api.dependencies import _REQUIRE_PROJECT_OWNER_BILLABLE
+from ..api.dependencies import (
+    _REQUIRE_PROJECT_OWNER_BILLABLE,
+    project_existence_check,
+)
 from ..api.payloads import _project_brief_payload
 
 
@@ -53,8 +56,7 @@ def register_context_search(
     gate_findings,
     llm_call_audit,
 ) -> None:
-    def _require_project_exists(project_id: str) -> None:
-        core_sot.get_project(project_id=project_id)
+    _require_project_exists = project_existence_check(core_sot)
 
     def _context_item_payload(item) -> dict[str, object]:
         return {

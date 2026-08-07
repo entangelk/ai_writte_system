@@ -17,13 +17,12 @@ from services.application.app.core_sot.service import NotFound
 from services.application.app.memory.service import MemoryNotFound
 
 from ..api.errors import _ERRORS_404, _owned
-from ..api.dependencies import _REQUIRE_PROJECT_OWNER
+from ..api.dependencies import _REQUIRE_PROJECT_OWNER, project_existence_check
 from ..api.payloads import _memory_payload
 
 
 def register_memory(app, *, core_sot, memory) -> None:
-    def _require_project_exists(project_id: str) -> None:
-        core_sot.get_project(project_id=project_id)
+    _require_project_exists = project_existence_check(core_sot)
 
     @app.get("/projects/{project_id}/memory", responses=_owned(_ERRORS_404),
              dependencies=_REQUIRE_PROJECT_OWNER)
