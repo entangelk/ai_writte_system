@@ -582,4 +582,69 @@ annotations`)을 쓰므로 *"import 가 된다"* 보다 **정적으로 미정의
 3. **Slice 2(`create_admin_app()`)** — 직교.
 4. **이 슬라이스는 독립 검증 대기** — 대상 커밋 `70584c2`, 재현은
    `repro_byte_identical_3rd.py`(36/36) · `repro_mutations_3rd.py`(N1~N5) ·
-   `repro_router_split.py` 지문 diff.
+   `repro_router_split.py` 지문 diff. **→ Task 6 에서 합격(`4ebde99`).**
+
+---
+
+## Task 6 — 3차 독립 검증 반영 (`4ebde99` 대상) · 비차단 2건 폐쇄
+
+독립 세션이 **합격 · Blocking 0** 으로 검증했다
+([기록](../../verifications/2026-08-07/router_split_slice1_remainder_3rd.md)).
+부하 주장을 전부 반증 시도로 재실측했고, 특히 **N3 의 writing 반쪽을 직접
+시위**하고 **`_require_project_exists` 사용처를 독립 입증**한 것은 구현자가 안
+쟀던 축이다.
+
+### User Decisions and Rationale
+
+- 오너 지시: *"검증기록 확인해서 보강할 부분 보강해줘."* 판정이 **합격**이므로
+  슬라이스를 되돌리는 일은 없고, **비차단 hardening 2건을 닫는 것**이 작업 범위다.
+
+### Completed work
+
+| 지적 | 처리 |
+|---|---|
+| ① N3 repro 가 docstring("analysis·writing 양쪽이 물린다")과 달리 analysis 테스트만 돌리던 것 | [`repro_mutations_3rd.py`](../../verifications/2026-08-07/repro_mutations_3rd.py) 의 N3 에 `test_writing_accept.py` 를 추가(N3a analysis + N3b writing). 서술-시위 일치 |
+| ② `_require_project_exists` 보존 근거 "33곳" vs 실측 14 | Task 5 본문 · [`HANDOFF.md`](../../../HANDOFF.md) 정정 — **14**(이동 후 writing 잔류만; 종전 33 은 이동 전 전체 grep). 결론(4차까지 보존)은 그대로 |
+
+### ★ N3 강화의 실측 (repro 재실행)
+
+강화한 repro 를 **끝까지 돌렸다**(메모리 규칙 — 커밋만 하고 안 돌리면 부채). N1~N5
+전부 FAIL=True, restore clean. **N3b writing 반쪽이 8 cells 를 재실패**한다 —
+검증자 실측과 한 자리 일치:
+
+- `WritingAcceptApiTest` 4(`test_pass_returns_saved_version_and_pending_job` ·
+  `test_replay_returns_same_version_without_second_gate` ·
+  `test_stale_is_409_before_gate` · `test_partial_failure_is_502_and_retry_converges`)
+- `WritingAcceptEnvelopeKeyTest` 1(`test_success_envelope_keys_are_complete`)
+- `WritingIntentApiTest` 1(`test_accept_response_exact_keys_for_both_intents`)
+- `StartNextUnitLegacyDataTest` 2
+
+즉 `_analysis_job_payload` 의 한 정의를 망가뜨리면 **analysis run/get/retry
+응답과 writing accept 의 `analysis_job` 필드가 같이 깨진다** — 공유 직렬화기를
+`api/payloads.py` 에 둔 것이 구조 강제임이 양쪽 테스트로 입증됐다(1차 M5 와 같은
+처방, analysis↔writing 버전).
+
+### 검증 행위의 부작용 (검증자 보고 반영)
+
+- **다음 회귀는 2165 → 2166 subtests** — 3차 검증 기록(`4ebde99`)이
+  `test_docs_indexes.py` 판정 열 전수 셀을 1 subtest 늘린다(코드 무관, HANDOFF
+  경고 자리). **README:88 의 2165 는 그대로 둔다**(검증자 판단 존중 — 그 칸은
+  가드가 못 덮는 규모의 대랃값이라 매 검증마다 올리는 건 의미보다 노이즈다).
+- **카운트 갱신**(검증자가 README 에 반영): 검증 224 → **225** · 합격 156 → **157**
+  · 조건부 비율 **29%** 유지(`round(66/225)`).
+- **★ 색인 등록 사고(검증자 투명성 보고)**: 3차 행을 등재하다 2차 행의 판정 자리에
+  덮어써 두 행이 한 줄로 합쳐졌는데, [`test_docs_indexes.py`](../../../tests/test_docs_indexes.py)
+  의 **3열 구조 가드**(`len(cells)==3`)가 즉시 잡았다(pipe 수로 진단·복구). "가드는
+  통과하는데 이유가 낡은" 형태가 아니라 **구조 가드가 사고를 잡은** 사례다.
+
+### 아직 안 한 것 (의도)
+
+- **검증 기록 본문은 고치지 않았다.** 남의 세션 산출물이고 판정·근거가 정확하다.
+  정정 ②(33→14)는 **내 기록 쪽**(work_log·HANDOFF)에 적었다 — 틀린 서술의 출처가
+  거기다(2차 선례와 같다).
+
+### Next steps
+
+- 잔여 **1 도메인** — `writing`(13 op). 4차. `_analysis_job_payload` 는 이미 공유로
+  내려갔으므로 import 만. partial envelope 5곳·유료 6경로로 **검증 시 그 둘을 추가
+  의심축**으로 본다(검증자가 3차 보고에서 미리 적은 것).
