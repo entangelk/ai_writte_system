@@ -462,3 +462,121 @@ annotations`)을 쓰므로 *"import 가 된다"* 보다 **정적으로 미정의
 1. **잔여 2 도메인** — `analysis`(21) · `writing`(13). 결합도 실측은 HANDOFF 에 있다.
 2. 그 다음 **`main.py` 미사용 import 정리** — 출발값은 **21**(pyflakes F401).
 3. **Slice 2(`create_admin_app()`)** — 직교.
+
+---
+
+## Task 5 — analysis 도메인 이동 (`70584c2`, Slice 1 잔여 3차)
+
+### User Decisions and Rationale
+
+- 오너 지시: *"핸드오프와 오늘자 데일리로그 확인해서 다음작업 진행해줘. 잔여 2
+  도메인 분리일꺼야."* 잔여 2도메인(analysis·writing) 중 **analysis 먼저**를
+  오너가 선택했다(슬라이스 범위 질문에 대한 답). 근거: analysis 는 직렬화기
+  중심이라 1·2차 패턴 그대로 깔끔하고, writing 은 partial envelope 5곳·유료
+  6경로로 별도 집중이 검증에 유리.
+- 슬라이스 크기는 구현자 판단(2차 오너 합의 그대로).
+
+### Decisions (구현자 판단) — 결합도 실측
+
+- AST+grep 으로 잰 결과 **둘의 유일한 공유 직렬화기는 `_analysis_job_payload`
+  하나**(analysis run/get/retry/list + writing accept 3867 의 `"analysis_job"`
+  필드). 그래서 **그 하나만 `api/payloads.py` 로 내렸다**(1차 `_memory_payload`
+  선례). 나머지 analysis 직렬화기 13종·헬퍼 1종(`_transition_gate_finding`)은
+  analysis 전용이라 `routers/analysis.py` 안.
+- **★ 함정 회피**: 1차가 경고한 *"route 줄 범위로 헬퍼 소속을 세면 안 된다"* 를
+  실측으로 확인 — `_record_loop_audit`·`_clear_scratch_for_saved_accept` 가 줄
+  범위상 analysis~writing 사이에 있어 writing 것처럼 보일 수 있으나, 실제는
+  **writing handler 내부 중첩 함수**(들여쓰기 8칸)다. handler 를 통째로 옮기면
+  자동 동반이라 별도 결정이 불필요하다.
+- `_draft_payload` 는 이미 [`routers/drafts.py`](../../../services/application/app/routers/drafts.py)
+  에 있어 손 댈 곳이 없다(2차에서 이동). HANDOFF 가 *"공유 후보로 올라온다"* 고
+  예고한 것은 추측이었고 실측 결과 아니다.
+- **★ `_require_project_exists` 는 main.py 에 남겼다.** analysis 라우터는 자체
+  `project_existence_check(core_sot)` 를 만들어 쓰지만, **writing 잔류(13 op)가
+  여전히 main.py 의 같은 클로저를 33곳에서 쓴다**(grep 실측). 이 줄을 analysis
+  블록과 함께 지우면 writing 이 깨진다. 4차에서 writing 이 나가면 그때 같이
+  정리한다. (analysis 라우터 안의 `_require_project_exists` 정의는 그 도메인
+  안에서만 산다.)
+
+### Completed work
+
+| 새 파일 | operation | 협력자 |
+|---|---|---|
+| [`routers/analysis.py`](../../../services/application/app/routers/analysis.py) | 21 | analysis·core_sot·memory·runner·analysis_context·compare·apply_service·review_queue·character_reconciliation·review_inbox·gate_findings·llm_call_audit·candidate_review |
+
+- in-routers **42 → 63**, 잔여 **13**(writing 만).
+- `main.py` **3,924 → 3,106줄**(−818).
+- `_analysis_job_payload` 1종을 [`api/payloads.py`](../../../services/application/app/api/payloads.py)
+  로 내림(analysis↔writing 공유). docstring 의 공유 멤버 현황을 갱신했다.
+- 이동으로 미사용이 된 main.py import **40개** 제거. pyflakes F401 전/후 diff
+  로 **내 변경이 만든 것만** 걸러냈다. **기존 부채 21개는 손대지 않았다**(오너가
+  정한 "도메인 전부 옮긴 뒤 한 번에" 순서).
+
+### Verification
+
+- **행위 무변** — [`repro_router_split.py`](../../verifications/2026-08-05/repro_router_split.py)
+  지문 pre(`5aaf202` worktree)/post **diff 없음**. route **76** · order-sensitive
+  pairs **0** · openapi sha256 무변 · 해석된 dependency 트리 무변.
+- **본문 byte-동일 전수** — [`repro_byte_identical_3rd.py`](../../verifications/2026-08-07/repro_byte_identical_3rd.py)
+  **36/36**(직렬화기 13 + 헬퍼 1 + handler 21 + 공유 `_analysis_job_payload` 1).
+- 집중 스위트 **266 passed / 960 subtests**(analysis 도메인 + auth tier + quota).
+- **전수 회귀 `2200 passed / 1 skipped / 2165 subtests`**(937초, test-mongo ON).
+  2차 기준선 `2163` 에서 **셀 증감 0**(operation 76 유지). **subtest +2** 는
+  둘로 갈라진다 — **+1 은 글롭 가드**(routers 9→10, `test_app_import_paths`
+  의 라우터 먼저-로드 셀), **+1 은 2차 후 검증 기록 `d9ecdd1`** 이
+  `test_docs_indexes` 판정 열 전수 셀을 1 subtest 늘린 것(HANDOFF 가 *"지금
+  돌리면 2164"* 로 예고한 자리). 즉 **3차 이동 자체가 만든 subtest 증가는 +1**.
+
+### 뮤테이션 (5종)
+
+**커밋 → 뮤테이션 → 원복 순서 준수.** 원복 후 트리 clean.
+
+| # | 뮤테이션 | 위치 | 재실패한 셀 |
+|---|---|---|---|
+| N1 | `from ..api.payloads` → `from ..main` (순환 복귀) | [`routers/analysis.py`](../../../services/application/app/routers/analysis.py) | `test_app_import_paths` **5 cells**, 그중 글롭 셀이 `SUBFAILED(module='…routers.analysis')` |
+| N2 | `register_analysis(...)` 호출 삭제 (21 op 통째) | [`main.py`](../../../services/application/app/main.py) | `test_auth_api::CombinedBoundaryMatrixTest::test_every_operation_lands_in_exactly_one_named_tier` |
+| N3 | 공유 `_analysis_job_payload` 에서 `failure_detail` 키 제거 | [`api/payloads.py`](../../../services/application/app/api/payloads.py) | `test_application_api -k analysis` (analysis job payload 셀) |
+| N4 | `_REQUIRE_PROJECT_OWNER_BILLABLE` 순서 뒤집기(시행→소유권) | [`api/dependencies.py`](../../../services/application/app/api/dependencies.py) | `test_quota_enforcement_api::test_enforcement_is_declared_after_ownership` **BILLABLE 9개 전부 SUBFAILED**(analysis run/compare 포함) |
+| N5 | `POST /analysis/jobs` 의 `_REQUIRE_PROJECT_OWNER` 제거 | `routers/analysis.py` | `test_auth_api::AuthenticationBoundaryTest` `SUBFAILED(path='/projects/{project_id}/analysis/jobs')` |
+
+- **N1 이 핵심이다** — 1차가 하드코딩을 `routers/*.py` 글롭으로 바꾼 가드가
+  **3차 신규 모듈 analysis 를 자동으로 범위에 넣었다**(모듈 이름까지 지목).
+  *"사람이 갱신해야 하는 가드는 갱신을 잊는 쪽으로 약해진다"* 는 처방이 세
+  번째 슬라이스에서도 값을 한 것이다.
+- **N4 가 가장 넓게 문다** — 의존성 순서 가드가 BILLABLE 9개를 전수로 검사하므로
+  analysis run/compare 가 이동해도 그 자리를 잃지 않는다(순서 = 계약).
+- **N3 가 공유를 증명한다** — `api/payloads.py` 의 한 정의를 망가뜨렸을 때
+  analysis job payload 셀이 물린다. 이 정의를 analysis 라우터 안 사본으로
+  두었다면 이 셀은 통과했을 것이다(사본이므로). 공유 직렬화기를 `api/payloads`
+  에 둔 것이 테스트가 아니라 구조가 강제한 것임은 1차와 같다.
+
+### 회귀 기준선
+
+**backend test-mongo ON `2200 passed / 1 skipped / 2165 subtests`**(`70584c2`,
+937초).
+
+- 종전 `2200/1/2163`(2차 `c721aa4`)에서 **셀 무변**, **subtest +2**(위 검증
+  절의 설명). 직전 값 이력: 2200/1/2163(2차) · 2200/1/2160(2차 검증 hardening) ·
+  2197/1/2159(1차).
+- **★ 숫자 주장 갱신** — [`README.md`](../../../README.md) 절차 표 ② 의
+  `2,200 passed / 2,163 subtests` → `2,165`. 그 칸은 가드가 원리적으로 못 덮는
+  유일한 숫자 주장(전수를 돌려야 안다)이라 갱신 슬라이스가 직접 고친다.
+
+### 아직 안 한 것 (의도)
+
+- **writing(13 op)** 은 안 옮겼다. 다음 세션(4차). `_analysis_job_payload` 는
+  이미 `api/payloads.py` 에 있으므로 writing 라우터는 import 만 하면 된다.
+- **`main.py` 미사용 import 정리** — 출발값 여전히 **21**(pyflakes F401). 3차가
+  만든 신규 미사용 40개는 이미 제거했고, 기존 21개는 writing 이동 뒤 정리.
+- **Slice 2(`create_admin_app()`)** — 직교.
+
+### Next steps
+
+1. **잔여 1 도메인** — `writing`(13 op). `_analysis_job_payload` 는 이미 공유로
+   내려갔으므로 writing 라우터는 import 만 하면 된다. partial envelope 5곳·유료
+   6경로·헬퍼/상수 다수로 analysis 보다 손이 더 간다.
+2. 그 다음 **`main.py` 미사용 import 정리**(기존 부채 21).
+3. **Slice 2(`create_admin_app()`)** — 직교.
+4. **이 슬라이스는 독립 검증 대기** — 대상 커밋 `70584c2`, 재현은
+   `repro_byte_identical_3rd.py`(36/36) · `repro_mutations_3rd.py`(N1~N5) ·
+   `repro_router_split.py` 지문 diff.
