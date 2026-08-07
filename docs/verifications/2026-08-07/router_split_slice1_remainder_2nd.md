@@ -179,8 +179,10 @@ python3 -m pyflakes services/application/app/main.py \
 
 # (5) 전수 회귀 (skip=1 이 test-mongo 사용의 증거)
 docker compose -f docker-compose.test.yml up -d
-until [ "$(docker inspect -f '{{.State.Health.Status}}' ai_witte_system-test-mongo-1)" = healthy ]; do sleep 2; done
+until [ "$(docker inspect -f '{{.State.Health.Status}}' ai_writte_system-test-mongo-1)" = healthy ]; do sleep 2; done
 python3 -m pytest -q --no-header    # 기대: 2200 passed, 1 skipped, 2163 subtests
+# ^ 컨테이너 이름 오타(ai_witte_…) 를 2026-08-07 보강 패스가 고쳤다 — 오타면 위 until 이
+#   'no such object' 로 영원히 돈다. 아래 Hardening ③ 의 '찰나의 허위 에코' 도 같은 뿌리로 보인다.
 docker compose -f docker-compose.test.yml down
 
 # (6) 뮤테이션 N1 — clean 게이트 → mutate → focused → git checkout 원복 → byte-동일 확인
