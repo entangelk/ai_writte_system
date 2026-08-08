@@ -4,21 +4,18 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timedelta
-from typing import Annotated, Protocol, Union
+from datetime import timedelta
+from typing import Protocol
 
-from fastapi import FastAPI, Header, Request, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
-from services.application.app.auth.cookies import SESSION_COOKIE_NAME, cookie_kwargs
 from services.application.app.auth.access_grants import (
     AccessGrantService,
     InMemoryAccessGrantRepository,
 )
 from services.application.app.auth.admin_audit import (
-    AdminAuditEvent,
     AdminAuditService,
     InMemoryAdminAuditRepository,
 )
@@ -112,29 +109,16 @@ from services.application.app.observability.llm_call_audit import (
     LlmCallAuditService,
     LlmCallSite,
 )
-from services.application.app.observability.kpi import (
-    aggregate_global_kpi,
-)
 from services.application.app.observability.llm_call_scope import (
     ObservedProvider,
     ProviderCallTally,
     provider_call_tally,
 )
-from services.application.app.quota.billable_actions import (
-    BILLABLE_ACTION_BY_OPERATION,
-)
-from services.application.app.quota.dedupe import (
-    UnclassifiedBillableAction,
-    resolve_dedupe_key,
-)
 from services.application.app.quota.enforcement import (
     AdmissionMutex,
-    AdmissionUnavailable,
     GenerationJobCharger,
     QuotaCharge,
     QuotaEnforcementService,
-    QuotaRefusalReason,
-    QuotaRefused,
 )
 from services.application.app.quota.ledger import (
     InMemoryUsageLedgerRepository,
@@ -160,9 +144,6 @@ from services.application.app.writing.generation_job import (
 )
 from services.application.app.writing.generation_worker import (
     GenerationCollaborators,
-)
-from services.application.app.writing.http_models import (
-    ErrorDetailResponse,
 )
 from services.application.app.analysis.source import CoreSotSourceAdapter
 from services.llm_gateway.app.provider import LLMProvider
@@ -195,7 +176,6 @@ from services.application.app.context_search.service import (
     VectorCanonicalMemoryRetriever,
     VectorCandidateMemoryRetriever,
 )
-from services.application.app.core_sot.models import BlockKind
 from services.application.app.core_sot.service import (
     CoreSotService,
     InMemoryCoreSotRepository,
