@@ -76,6 +76,14 @@ Then pick the branch that matches your situation:
 - **Defensive assertions need the opposite move.** A contract clause of the form "X is never allowed / Y cannot happen" is often protected by **no cell at all**, and inserting a defect proves nothing — a test that does not exist cannot fail. Instead **remove the defence** (or pre-apply the fix you are about to make) and see whether anything notices. Two Blocking findings in this repo were found only this way (2026-08-02).
 - **Record which mutation hit which cell.** "All mutations re-failed" without the pairing does not tell a later reader whether each cell locks its own clause or one broad cell absorbed them all.
 
+### ★ Reading the result — `grep FAILED` misses subtest failures
+
+`pytest-subtests` prints a failing subtest as **`SUBFAILED(...)`**, not `FAILED`. A results filter of the shape `grep -E "^FAILED"` therefore prints **nothing** for a mutation that a `subTest`-driven cell caught, and the natural reading of "no FAILED lines" is *"the guard did not bite"* — which is the opposite of what happened. Measured 2026-08-09 (Slice 2 verification): the M8 mutation produced **9 SUBFAILED lines and `9 failed` in the summary**, and the verifier's extraction tool first reported it as no re-failure; a plain rerun corrected it.
+
+This matters because the cells most worth mutating are often exactly the exhaustive ones (`for x in …: with self.subTest(...)`), so the blind spot is aimed at the strongest guards.
+
+**Rule: read the summary count line, not only the `FAILED` lines** — and when pairing a mutation to cells, match `FAILED|SUBFAILED` (or drop the filter and read the tail). A mutation recorded as "did not bite" on a filtered read is worse than not running it: it invites someone to delete a working guard.
+
 ### When a mutation does *not* bite
 
 Do not treat it as a pass and move on, and do not assume the guard is missing either — first find out **which layer absorbed it**. Real example (2026-08-04, Slice 8.3): removing the "provider was actually called" condition left the integration cell green, because a second, independent defence (the dedupe key rejecting the row at the database) caught it. That is a designed two-layer defence working — but it also means the integration cell alone cannot lock either layer. The resolution is a unit cell that pins the rule directly, not a shrug.

@@ -154,3 +154,72 @@ work_log 가 예고한 그대로), 남는 1건은 호스트에서 구조적으�
 2. **Phase 9 A1~A8 오너 결정** — 라우터 정리(Slice 1·2)가 끝나 A7 가드가 `main.py` 를 파일로
    읽을 이유가 완전히 없어졌다.
 3. 추적 부채 2건은 그대로다(`AUTH_SESSION_TTL_HOURS` 계약 회귀 · 미사용 import 가드 ⓐ 유지).
+
+---
+
+## Task 2 — 독립 검증 반영 (`9ddff6e` 대상) · 비차단 3건 처리
+
+독립 세션이 **합격 · Blocking 0** 으로 검증했다
+([기록](../../verifications/2026-08-09/admin_surface_separation.md)). 판정이 합격이므로
+되돌림은 없고 **비차단 지적을 닫는 것**이 범위다.
+
+### User Decisions and Rationale
+
+- 오너 지시: *"검증기록 확인해서 보강할 부분 보강해."* Task 1 의 2026-08-08 선례와 같은 형태다.
+
+### 처리
+
+| 지적 | 처리 |
+|---|---|
+| ① **뮤테이션 매트릭스에 A6(route_class) 축이 빠졌다** — 검증자가 M8 로 그 셀의 생존을 입증했다 | **재현해 매트릭스에 편입**(아래 M8 행). 내 7종은 `test_every_operation_keeps_its_guards_on_the_split_apps` 를 무는 변이를 하나도 갖고 있지 않았다 — **가드 하나가 뮤테이션으로 뒷받침되지 않은 채 있었다**는 뜻이고, 그 상태에서는 "혹시 dead cell 아닌가"를 반박할 근거가 없다 |
+| ② **M1 재측정 때 §6 게이트 위반**(미커밋 문서 3건) | 사실 기록 유지. **이번 Task 는 검증 산물을 먼저 커밋(`9ddff6e`)하고 뮤테이션에 들어갔다** — 게이트를 지킨 상태로 M8 을 돌렸다 |
+| ③ **nginx → admin 한 홉 미실측** | 오너 판단 사안으로 유지. 다만 **미실측의 범위가 줄었다** — 검증자가 실 application 이미지에 트리를 마운트해 `admin_asgi:app` 기동을 입증했으므로(`/admin/users` 401), 남은 것은 **nginx 홉 하나**다. HANDOFF·SoT 문구를 그 실측에 맞게 좁혔다 |
+
+### ★ M8 재현 — 검증자 주장대로 A6 셀은 살아 있다
+
+**순서 준수**: 검증 산물 커밋(`9ddff6e`) → `git status --short` empty 확인 → 뮤테이션 → 원복.
+
+| # | 방향 | 적용한 diff | file | 실패한 셀 |
+|---|---|---|---|---|
+| M8 | under | `app.router.route_class = QuotaSettledRoute` 를 `if include_product:` 로 감싼다(관리자 앱의 route 클래스가 `APIRoute` 로 갈라진다) | `main.py` | `SurfaceMembershipTest::test_every_operation_keeps_its_guards_on_the_split_apps` — **9 SUBFAILED**(admin 8 + `/health`, 전부 관리자 앱이 서빙하는 operation) |
+
+**이 변이가 현실적인 이유**: 관리자 표면은 유료가 아니므로 "정산 wrapper 를 제품에만 주자"는
+최적화가 자연스러워 보인다. 그런데 `QuotaSettledRoute` 는 receipt 가 없으면 no-op 이라
+**얻는 것이 없고**, route 클래스가 표면마다 달라지는 순간 합집합 계약과 배포 앱이 갈라진다
+(브리프 §3 이 "기본: 준다"로 열어 둔 자리이며, 이제 그 선택이 가드로 잠겼다).
+
+### ★ 방법론 부채 하나를 함께 닫았다 — `grep FAILED` 는 subtest 실패를 놓친다
+
+검증자가 자기 추출 도구의 버그를 정직하게 적었다: `pytest-subtests` 는 실패한 subtest 를
+**`SUBFAILED(...)`** 로 찍으므로 `^FAILED` 필터에 **한 줄도 안 걸린다**. 그래서 M8 을 처음에
+*"재실패 없음"* 으로 읽었다.
+
+- **내 Task 1 의 뮤테이션 7종도 같은 필터로 읽었다.** 이번에 M8 을 돌려 실측한 결과 그
+  필터는 `SUBFAILED` 9줄을 전부 버리고 요약줄 `9 failed` 만 남긴다 — 즉 **요약줄을 안 봤으면
+  나도 똑같이 오독했다**. 7종은 전부 cell 단위 실패라 결과는 무사했지만 **방법이 무사했던
+  것은 아니다**.
+- **가장 강한 가드가 정확히 이 사각에 든다** — 전수 대조 셀은 대개 `subTest` 로 돈다.
+- **처리**: 절차 정본 [`docs/guides/verification.md`](../../guides/verification.md)
+  §"Mutation testing" 에 절을 신설했다(요약 count 줄을 읽을 것 · 필터는 `FAILED|SUBFAILED`).
+  *"물지 않았다"를 필터로 읽고 기록하면 다음 사람이 멀쩡한 가드를 지우러 온다.*
+
+### 함께 정정 — 알파 application 이미지는 2026-07-22 가 아니라 2026-08-02 빌드다
+
+검증자가 짚었고 직접 재확인했다(`docker images` = `2026-08-02 07:57:51`, 이미지 안에
+`admin_asgi.py` **없음**). HANDOFF ★★ 항목이 "2026-07-22 빌드"라 적고 있었다 — 그 항목의
+**결론(낡은 이미지는 인증 없는 제품으로 뜬다·재빌드 필요)은 그대로 유효**하지만 날짜가
+틀렸으므로 고쳤다. 2026-08-02 는 D8-5~7 이후라 인증은 들어 있고, **Slice 2(08-09)보다
+앞서므로 admin 진입점이 없다**는 것이 지금 관통을 막는 사유다.
+
+### Verification (이번 Task)
+
+| 검사 | 결과 |
+|---|---|
+| M8 재현 | 9 SUBFAILED · 요약 `9 failed` · 원복 후 `git status --short` empty |
+| 검증자 건수 갱신 확인 | `test_docs_indexes.py` **13 passed / 238 subtests**(기록 1건 = subtest +1) |
+| 이미지 사실 확인 | `ai_writte_system-application:latest` created **2026-08-02 07:57:51** · `admin_asgi.py` 부재 |
+
+### 아직 안 한 것 (의도)
+
+- **검증 기록 본문은 고치지 않았다.** 남의 산출물이고 판정·근거가 정확하다.
+- **nginx 홉** — 오너 판단(재빌드) 사안 그대로.
