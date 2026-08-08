@@ -63,6 +63,12 @@
 
 최신순. 같은 날 여러 건이면 슬라이스별로 나뉜 것이다.
 
+### 2026-08-08
+
+| 기록 | 대상 | 판정 |
+|---|---|---|
+| [`main_unused_import_cleanup.md`](2026-08-08/main_unused_import_cleanup.md) | 라우터 분해 Slice 1 뒷정리(`3ff4274`·`7d4bc8d`) — `main.py` 미사용 import **21개 제거**(1,860→1,840줄, 변경 파일 1). 정적 축을 **1차 소스에서 재현**(OLD `d65a1c9` pyflakes 정확히 21 · NEW 0, 21 심볼이 작업자 표와 한 치 없이 일치) + pyflakes 와 무관한 **독립 잔류 grep**(20/21 잔류 0, 유일 히트는 모듈명 `datetime`). 구조적 축 `main` 경유 참조 **0건**(다중줄 import 오탐 1회를 파일 읽어 해소). 행위 무변 repro 지문 pre(`d65a1c9`) vs post **바이트 동일**(route 76·order-pairs 0·openapi sha `f8b42ef1…`). 뮤테이션 M4(`LlmCallSite` 제거) **8 failed 셀 이름까지 일치**·M1(`timedelta`) 안 뭄 재현. **★ `AUTH_SESSION_TTL_HOURS` 계약을 라이브로 적극 증명** — `-1`/`0`/`abc` 전부 `ValueError`(계약 살아 있음)인데 `grep tests/` **0건**(커버리지 없음). 회귀 `2197/4/2168` 0실패 재현(172s), ES 보정 `2200/1` = 셀 증감 0. **비차단: 작업자가 인용한 지문 해시 `47d78b68…` 재현 불가**(8종 시도) — 원인은 repro 가 JSON 을 stdout·요약표를 stderr 로 내는데 작업자가 `2>&1` 로 합쳐 받은 것(`b9a34fe`로 폐쇄). | **합격** |
+
 ### 2026-08-07
 
 | 기록 | 대상 | 판정 |
