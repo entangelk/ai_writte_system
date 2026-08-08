@@ -1,0 +1,156 @@
+# 2026-08-09 작업 로그
+
+## Goals
+
+- 라우터 정리 **Slice 2 — 관리자 표면 주소 분리**(A1=ⓑ, 오너 2026-08-05). Slice 1 이
+  76 operation 을 `routers/` 11 모듈로 옮겨 놓았으므로, 남은 것은 **파일 배치가 아니라
+  네트워크 토폴로지**다: `/admin` 8 operation 을 제품 앱에서 들어내
+  **같은 이미지·다른 command 의 네 번째 compose 서비스**로 옮기고 nginx 경유로만 닿게 한다.
+- 선행 조건 **H-2(shim drift 가드)** 를 함께 닫는다. 2026-08-05 독립 검증이
+  *"Slice 2 착수 전 오너 확인 사안"* 으로 올린 항목이며, 요구는 **"테스트가 보는 앱"과
+  "배포되는 앱"이 갈라지는 것을 막는 가드** 다.
+- 성공 기준: ① 제품 앱에 `/admin` 0건 ② 관리자 앱에 정확히 admin 8 + `/health`
+  ③ **합집합(`create_app()`) 공개 표면 무변** — 지문 IDENTICAL ④ 토폴로지가 배선 파일에
+  잠긴다 ⑤ 양방향 뮤테이션.
+
+---
+
+## Task 1 — 관리자 표면 주소 분리 (Slice 2, A1=ⓑ)
+
+### User Decisions and Rationale
+
+- **오너 지시**: HANDOFF·데일리로그를 읽고 다음 작업을 진행할 것. Next Tasks 2번이
+  *"★ 그래서 다음은 2번의 Slice 2(`create_admin_app()`) — 선행은 H-2 하나다"* 로 지목한다.
+- **새 결정 브리프는 만들지 않았다.** R1(register 함수)·A1(ⓑ 별도 compose 서비스)이
+  2026-08-05 에 이미 확정돼 있고, 이 슬라이스는 그 결정의 **실행**이다.
+  `CLAUDE.md` §1 의 "genuine fork" 에 해당하는 미결 선택지가 없다.
+- 다만 브리프가 열어 둔 자리 셋은 구현 중 판단이었고, 근거를 아래 "판단한 것"에 적었다.
+
+### 판단한 것 (브리프가 구현자에게 남긴 자리)
+
+| 자리 | 판단 | 근거 |
+|---|---|---|
+| `create_app()` 의 운명 | **합집합으로 남긴다**(제품 68 + 관리자 8 + health) | 브라우저는 nginx 뒤에서 **한 origin** 만 본다. `scripts/dump_openapi.py` → `frontend/src/api/schema.d.ts` 가 그 origin 의 계약이라 **76 전부를 아는 앱이 계속 필요하다.** 제품 전용으로 바꾸면 스키마를 두 앱에서 뽑아 병합해야 하고, 경계 행렬 가드 세 겹도 쪼개진다 |
+| shim drift 방지(H-2) | **세 factory 를 한 함수 본문으로** 두고(`include_product`·`include_admin`), 그 위에 성질 가드를 얹는다 | 검증자가 요구한 것은 "감시"였지만 **구조적으로 못 갈라지게** 하는 편이 강하다. 갈라질 수 있는 코드에 가드를 붙이는 것과, 갈라질 코드가 없는 것은 다르다 |
+| 서비스 조립을 표면별로 잘라낼까 | **자르지 않는다** — 조립은 무조건 전부 돌고 `register_*` 호출만 갈린다 | 관리자 전용 조립 경로는 **아무도 구동하지 않는 두 번째 배선**이 된다(= `ObservedProvider` 계측 누락과 같은 형태). 대가는 관리자 컨테이너가 안 쓰는 객체를 몇 개 더 만드는 것뿐이고, env 를 안 주면 그 객체들은 in-memory fake 다 |
+| `/health` 를 어느 표면에 | **둘 다** | 제품이 아니라 인프라다. 관리자 컨테이너가 healthcheck 를 가지려면 이것뿐이고, 빼면 `worker` 처럼 "Up 이지만 healthy 아님" 상태가 하나 더 는다 |
+| admin 서비스 env | **Mongo 셋뿐** | 관리자 operation 전부가 Mongo 다. purge 도 벡터·lexical 파기를 **outbox 로 넘기고**(worker 가 드레인) 직접 부르지 않는다 — 코드로 확인했다. gateway·chroma·embedding 을 물리면 이 저장소에서 가장 좁은 표면에 기동 의존만 늘어난다 |
+| 관리자 앱의 `/auth` | **두지 않는다** | 세션이 Mongo 라 쿠키가 공짜로 공유되고, nginx 는 `/api/admin/` 만 이 서비스로 보낸다 — 있어도 도달 불가다 |
+
+### Completed work
+
+| 파일 | 변경 |
+|---|---|
+| [`services/application/app/main.py`](../../../services/application/app/main.py) | `create_app(…, include_product=True, include_admin=True)` + **`create_product_app()`·`create_admin_app()`**. 모듈 수준 `app = create_product_app()` |
+| [`services/application/app/admin_asgi.py`](../../../services/application/app/admin_asgi.py) | **신규** — compose `admin` 서비스의 ASGI 진입점 |
+| [`docker-compose.yml`](../../../docker-compose.yml) | **`admin` 서비스 신설**(application 이미지 재사용 · command 만 변경 · **포트 미게시** · Mongo 셋 · healthcheck · `restart: unless-stopped`). `frontend` 의 `depends_on` 에 admin 추가 |
+| [`frontend/nginx.conf`](../../../frontend/nginx.conf) | `location /api/admin/` → `admin:8000`(변수 upstream + 런타임 resolver, 제품 location 과 같은 형태) |
+| [`tests/test_admin_surface_separation.py`](../../../tests/test_admin_surface_separation.py) | **신규 10 cells** — 표면 소속 · **H-2 합집합 성질** · 진입점 · compose/nginx 토폴로지 |
+| [`tests/test_app_import_paths.py`](../../../tests/test_app_import_paths.py) | 새 배포 진입점 로드 셀 1 |
+| [`docs/system-contract-sot.md`](../../system-contract-sot.md) | **v1.7.91** — 변경이력 + §"제품과 프로젝트 경계"에 표면 분리 계약 4항 |
+| [`README.md`](../../../README.md) | 절차 표 ② 기준선 · ④ SoT 버전(가드가 잡는 두 자리) |
+
+**등록 순서는 건드리지 않았다.** `if include_*:` 를 **제자리에** 두고 호출 목록을
+재배열하지 않은 것이 계약이다 — 합집합 앱의 route 등록 순서가 곧 OpenAPI 문서의 순서이고,
+그것이 프론트 TS 생성물의 입력이다. (초판에서 admin 을 auth 앞으로 옮겼다가 되돌렸다.)
+
+### 왜 이 분리가 방어인가
+
+제품 포트는 **일부러 LAN 에 게시**된다(D8-7 G1=C). 그 근거가 *"세션 뒤에 있다"* 이므로,
+`/admin` 이 같은 포트에 있는 한 관리자 표면의 방어는 `require_admin_user` **한 겹**이었다.
+분리 후 LAN 에서 그 경로를 치면 **가드가 아니라 라우터가 404** 로 답한다 — 가드는 없어지지
+않고 두 번째 겹으로 남는다.
+
+### 검증
+
+| 검사 | 결과 |
+|---|---|
+| **공개 표면 무변** — `repro_router_split.py`(HEAD worktree vs 작업 트리) | **`diff` 출력 없음(pre ≡ post)** · route **76** · order-sensitive pairs **0** · openapi sha `f8b42ef1…` · stdout-only 지문 sha `c3dfb391…` |
+| 표면 분할 실측 | 합집합 **76** = 제품 **68** ∪ 관리자 **9**, 교집합 = `{("/health","get")}` |
+| `docker compose config` | 10 서비스 파싱 성공, `admin` 이 의도한 command·env·healthcheck 로 해석됨 |
+| `nginx -t`(nginx:1.27-alpine 에 실 conf 마운트) | `syntax is ok` / `test is successful` |
+| **소켓 라이브**(호스트 uvicorn 2개, in-memory 조립) | 관리자 8531: `/health` **200** · `/admin/users` **401** · `/projects` **404** · `/auth/login` **404** / 제품 8532: `/health` **200** · `/admin/users` **404** · `/projects` **401** · `/auth/login` **405** |
+| 뮤테이션 | 7종(under 6 · over 1) 전부 재실패 — 아래 표 |
+| 전수 회귀(test-mongo ON) | 아래 |
+
+### 뮤테이션 (7종)
+
+**순서 준수**: 구현을 먼저 커밋(`5bdaf15`·`878f24d`) → 뮤테이션 → `git checkout --` 원복 →
+매 회 `git status --short` 로 clean 확인(§6 게이트). 초점 스위트는
+`test_admin_surface_separation.py` + `test_compose_exposure.py`.
+
+| # | 방향 | 적용한 diff | file | 실패한 셀 |
+|---|---|---|---|---|
+| M1 | under | `if include_admin:` → `if True:`(제품 앱이 `/admin` 을 다시 든다) | `main.py` | `SurfaceMembershipTest::test_the_product_surface_serves_no_admin_operation` · `::test_the_two_surfaces_partition_the_union_app` · `EntryPointTest::test_the_image_default_command_serves_the_product_app` (3) |
+| M2 | under | `create_admin_app` 이 `include_product=False` 를 잊는다 | `main.py` | `::test_the_admin_surface_serves_exactly_the_admin_tier_and_health` · `::test_the_two_surfaces_partition_the_union_app` · `EntryPointTest::test_the_admin_container_entrypoint_serves_the_admin_app` (3) |
+| M3 | under | 모듈 수준 `app = create_product_app()` → `create_app()`(이미지 기본 CMD 가 합집합) | `main.py` | `EntryPointTest::test_the_image_default_command_serves_the_product_app` (1) |
+| M4 | under | admin 서비스에 `ports: ["8524:8000"]` 추가 | `docker-compose.yml` | `ComposeAndProxyTopologyTest::test_the_admin_service_publishes_no_host_port` · **`test_compose_exposure.py::ComposeExposureTest::test_every_publishing_service_is_classified`** (2) |
+| M5 | under | admin location 의 rewrite 를 `^/api/admin/(.*)$` 로(= `/admin` 세그먼트 소실 → 업스트림 404) | `frontend/nginx.conf` | `ComposeAndProxyTopologyTest::test_nginx_sends_the_admin_prefix_to_the_admin_service` (1) |
+| M6 | under(**drift**) | **배포 관리자 앱에만** `register_observability(...)` 추가 — 합집합이 모르는 표면이 배포에 생긴다 | `main.py` | `::test_the_admin_surface_serves_exactly_the_admin_tier_and_health` · `::test_the_two_surfaces_partition_the_union_app` · `EntryPointTest::test_the_admin_container_entrypoint_serves_the_admin_app` (3) |
+| M7 | **over** | `register_health(app)` → `if include_product:`(관리자 컨테이너 healthcheck 가 조용히 죽는다) | `main.py` | 위 M6 과 같은 3 셀 |
+
+**★ M1 은 한 번 다시 쟀다.** 첫 실행에서 출력을 `tail -3 | head -2` 로 잘라 받아 실패 셀
+목록이 잘렸고, 그 상태로 표에 4 셀이라 적을 뻔했다. **실측은 3 셀**이며
+`test_every_operation_keeps_its_guards_on_the_split_apps` 는 이 뮤테이션에 물지 않는다 —
+관리자 route 가 양쪽에 다 실리면 `{**product, **admin}` 이 여전히 합집합의 계약을 덮기
+때문이다(그 셀이 겨냥하는 것은 *가드가 다른* 경우이지 *어느 앱에 실렸는가* 가 아니다).
+**재측정 때 작업 트리에 문서 3건이 미커밋 상태였다** — 뮤테이션·원복이 `main.py` 하나만
+path 지정으로 건드렸으므로 손실은 없었지만, §6 게이트("첫 뮤테이션 전 `git status --short`
+가 비어 있어야 한다")를 그대로 지킨 것은 아니다. 사실대로 적는다.
+
+**M6 이 H-2 를 직접 겨냥한 축이다.** "배포 앱에만 있는 표면"은 합집합 앱을 쓰는 기존 가드
+전체가 원리적으로 못 보는 자리이며, 그것을 보는 셀이 이 슬라이스의 존재 이유다.
+
+**M4 는 두 파일의 가드가 함께 무는 것을 확인했다** — 기존 노출 가드는 *"분류해라"* 로 실패하고
+새 셀은 *"게시하면 안 된다"* 로 실패한다. 둘은 다른 말을 한다.
+
+### 회귀 기준선
+
+**실측(알파, test-mongo ON, `878f24d` + 문서)**:
+
+```
+2208 passed, 4 skipped, 2247 subtests passed in 170.94s
+```
+
+**환경 보정하면 `2211 / 1 / 2247`.** skip 4 중 3건은 이 셸에 `elasticsearch` 패키지가 없어
+`test_context_search_memory_lexical_retrieval.py` 가 건너뛴 것이고(알파의 정상값 — 2026-08-08
+work_log 가 예고한 그대로), 남는 1건은 호스트에서 구조적으로 항상 skip 되는 live Chroma 다.
+
+- **직전 기준선 `2200/1/2169`**(2026-08-08 검증 기록 반영 예고값) 대비 **셀 +11 · subtest +78**.
+- **+11 = 신규 파일 10 + 진입점 로드 1.** operation 은 76 무변이고 셀 증감은 전부 신규 가드다.
+- **+78 = 신규 파일의 subtest**(operation 76 전수 계약 대조 + `app.state`/handler 2).
+- **★ 처음에 이 파일을 22 cells / 475 subtests 로 쟀다** — `from tests.test_auth_api import
+  CombinedBoundaryMatrixTest` 로 **클래스를 이름공간에 끌어와** pytest 가 그 클래스를 여기서
+  한 번 더 수집·실행하고 있었다. 모듈만 import 하도록 고쳤다(`878f24d`). 다음에 남의 테스트
+  리터럴을 재사용할 사람은 **클래스가 아니라 모듈을 import 한다**.
+
+프론트는 손대지 않았다 — `nginx.conf` 만 바뀌었고 `src/` 는 0줄이라 `265/18` 기준선과
+`schema.d.ts` 가 그대로다(openapi sha 동일이 그 실측이다).
+
+### Issues found — 등록 순서를 바꿀 뻔했다
+
+- **문제**: 초판이 `if not include_product: return app` 을 auth 앞에 두어 **admin 이 auth 보다
+  먼저 등록**됐다. 표면 집합은 같지만 route **순서**가 바뀐다.
+- **왜 중요한가**: 합집합 앱의 route 순서가 `app.openapi()` 의 `paths` 순서이고, 그것이 프론트
+  TS 생성물의 입력이다. 지문의 order-sensitive pairs 가 0 이라 동작은 안 바뀌지만 **계약 문서의
+  바이트가 바뀐다** — Slice 1 이 4차에 걸쳐 지킨 `f8b42ef1…` 이 깨졌을 자리다.
+- **처리**: `if` 를 제자리에 두는 형태로 고치고 주석으로 이유를 못박았다. 지문 IDENTICAL 로 확인.
+
+### 아직 안 한 것 (의도)
+
+- **컨테이너·nginx 관통 라이브 확인.** 알파 이미지가 2026-07-22 빌드라 재빌드가 선행되고,
+  HANDOFF 가 그것을 **오너 판단 사안**으로 남겨 두었다. 대신 ① 호스트 소켓으로 두 앱을 실제로
+  띄워 상태코드를 재고 ② `docker compose config` 로 서비스 해석을 확인하고 ③ 실 conf 를 nginx
+  컨테이너에 마운트해 `nginx -t` 를 통과시켰다. **남은 미실측은 "nginx → admin 컨테이너" 한
+  홉뿐**이며, 스택을 세울 때 `curl :5520/api/admin/users` 가 **401**(404 가 아니라)인지로 닫힌다.
+- **프론트 admin 호출부 변경 0건** — URL 이 그대로 `/api/admin/...` 이라 바꿀 것이 없다.
+  그것이 ⓑ 를 고른 이유 중 하나였다.
+- **디버그용 `127.0.0.1:${ADMIN_PORT}` 게시**(브리프 §3 의 선택지) — 필요해진 적이 없고,
+  열면 새 셀과 기존 분류 가드를 함께 고쳐야 한다.
+
+### Next steps
+
+1. **스택을 세우는 첫 사람이 관통 확인 1건**(위). 재빌드 대상은 `application`·`admin`·`frontend`.
+2. **Phase 9 A1~A8 오너 결정** — 라우터 정리(Slice 1·2)가 끝나 A7 가드가 `main.py` 를 파일로
+   읽을 이유가 완전히 없어졌다.
+3. 추적 부채 2건은 그대로다(`AUTH_SESSION_TTL_HOURS` 계약 회귀 · 미사용 import 가드 ⓐ 유지).
