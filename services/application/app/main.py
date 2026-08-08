@@ -1523,7 +1523,32 @@ def create_app(
     admin_audit_service: AdminAuditService | None = None,
     project_name_history_service: ProjectNameHistoryService | None = None,
     quota_enforcement_service: QuotaEnforcementService | None = None,
+    include_product: bool = True,
+    include_admin: bool = True,
 ) -> FastAPI:
+    """Assemble the application. ``include_*`` pick which **surface** is served.
+
+    Slice 2 (A1=ⓑ, 2026-08-09): the admin surface moved to its own address —
+    a fourth compose service running the same image with a different command,
+    reachable only through nginx ``/api/admin/``. That means two deployed apps
+    (`create_product_app` / `create_admin_app`), while tests, `scripts/
+    dump_openapi.py` (= the frontend's generated TS contract) and the
+    boundary-matrix guards keep needing the **union** — the browser sees one
+    origin, so one schema has to describe all 76 operations.
+
+    The three factories are one function on purpose. H-2 (verification
+    2026-08-05) asked for a guard against "the app tests exercise drifts from
+    the app that ships"; a shared body makes the drift **structurally**
+    impossible rather than merely watched — the only difference between the
+    three is which ``register_*`` calls run. Service assembly above is
+    unconditional for the same reason: an admin-only assembly path would be a
+    second wiring nobody exercises (the shape this repo was already burned by
+    with ``ObservedProvider`` — fake green, missing only in deployment).
+    ``tests/test_admin_surface_separation.py`` states the union property.
+
+    ``/health`` is registered on **both** surfaces: it is infrastructure, not
+    product, and the admin container needs a compose healthcheck of its own.
+    """
     # Fail startup loudly for invalid environment-adjustable public bounds.
     _project_brief_style_example_limits()
     _writing_output_length_tokens()
@@ -1757,18 +1782,33 @@ def create_app(
         or _default_quota_enforcement_service(writing_generation_jobs)
     )
 
-    register_auth(app, users=users, sessions=sessions)
+    # ``/auth`` is product-side: the browser logs in through the product origin
+    # (nginx sends only ``/api/admin/`` to the admin service), and the session
+    # it mints lives in Mongo, which both apps read. That is why the admin
+    # service needs no auth route of its own and no shared secret.
+    #
+    # ★ The registration **order** below is the union app's route order, which
+    # the OpenAPI document (and therefore the frontend's generated types) is
+    # built from. Skipping a surface must not reorder the others — that is why
+    # these are ``if`` guards in place rather than a reshuffled call list.
+    if include_product:
+        register_auth(app, users=users, sessions=sessions)
 
-    register_admin(
-        app,
-        users=users, core_sot=core_sot, access_grants=access_grants,
-        admin_audit=admin_audit, llm_call_audit=llm_call_audit,
-        writing_loop_audit=writing_loop_audit, memory=memory, analysis=analysis,
-        review_queue=review_queue, gate_findings=gate_findings,
-        writing_generation_jobs=writing_generation_jobs,
-        writing_scratch=writing_scratch, sync_outbox=sync_outbox,
-        project_name_history=project_name_history,
-    )
+    if include_admin:
+        register_admin(
+            app,
+            users=users, core_sot=core_sot, access_grants=access_grants,
+            admin_audit=admin_audit, llm_call_audit=llm_call_audit,
+            writing_loop_audit=writing_loop_audit, memory=memory,
+            analysis=analysis, review_queue=review_queue,
+            gate_findings=gate_findings,
+            writing_generation_jobs=writing_generation_jobs,
+            writing_scratch=writing_scratch, sync_outbox=sync_outbox,
+            project_name_history=project_name_history,
+        )
+
+    if not include_product:
+        return app
 
     register_memory(app, core_sot=core_sot, memory=memory)
 
@@ -1837,4 +1877,32 @@ def create_app(
     return app
 
 
-app = create_app()
+def create_product_app(**kwargs) -> FastAPI:
+    """The product surface — every operation but ``/admin/*`` (A1=ⓑ).
+
+    This is what the ``application`` container serves, and the reason the split
+    exists: the product port is published to the LAN on purpose (D8-7 G1=C), so
+    the admin operations must not be *on* it. A LAN client hitting
+    ``application:8520/admin/users`` now gets 404 from the router, before any
+    guard runs — ``require_admin_user`` stays as the second layer, not the only
+    one.
+    """
+    return create_app(include_admin=False, **kwargs)
+
+
+def create_admin_app(**kwargs) -> FastAPI:
+    """The admin surface — ``/admin/*`` plus the health probe (A1=ⓑ).
+
+    Served by the ``admin`` compose service, which publishes no host port and is
+    reachable only through nginx ``location /api/admin/``. Sessions are shared
+    for free because they live in Mongo (no process secret to carry over), so
+    the browser keeps using the cookie it got from the product origin.
+    """
+    return create_app(include_product=False, **kwargs)
+
+
+# ``uvicorn services.application.app.main:app`` — the image's default CMD, i.e.
+# the ``application`` service. It is the **product** app: the deployment default
+# has to be the surface that is safe to publish, or a container started without
+# a command override would put /admin back on the LAN port.
+app = create_product_app()

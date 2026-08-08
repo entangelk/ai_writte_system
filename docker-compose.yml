@@ -124,6 +124,52 @@ services:
       retries: 5
       start_period: 10s
 
+  admin:
+    # Slice 2 (A1=ⓑ, 2026-08-09): the administrator surface on its own address.
+    # Shares the application image and changes only the command — the same
+    # pattern `worker` and `generation_worker` already use — and **publishes no
+    # host port**, so it is reachable only from inside the compose network,
+    # through nginx `location /api/admin/`. The product app no longer serves
+    # /admin at all, so hitting the LAN-published application port for an admin
+    # operation is a 404 from the router rather than a 403 from a guard.
+    build:
+      context: .
+      dockerfile: services/application/Dockerfile
+    command:
+      - "uvicorn"
+      - "services.application.app.admin_asgi:app"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8000"
+    environment:
+      # Mongo only, on purpose. Every admin operation is Mongo-backed: the user
+      # store, the audit trails, the KPI aggregation, and purge — which destroys
+      # the Mongo graph and *enqueues* the vector/lexical destruction to the
+      # index-sync outbox for `worker` to drain. Nothing on this surface calls
+      # the gateway, embedding or Chroma, so wiring them here would only add
+      # startup dependencies to the narrowest surface in the stack.
+      CORE_SOT_MONGO_URI: "mongodb://mongo:27017/?replicaSet=rs0"
+      CORE_SOT_MONGO_DB: "ai_writing_system"
+      CORE_SOT_MONGO_TRANSACTIONS: "true"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      # /health is registered on both surfaces (it is infrastructure, not
+      # product), which is what lets this container report health like the
+      # application does. Same stdlib probe — the slim image has no curl.
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=2).status == 200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
   gateway:
     build:
       context: .
@@ -381,6 +427,11 @@ services:
       - "${FRONTEND_PORT:-5520}:80"
     depends_on:
       application:
+        condition: service_healthy
+      # Slice 2 (A1=ⓑ): the admin surface is a second upstream of this nginx.
+      # It is not needed for nginx to *boot* (the upstream is resolved per
+      # request, see nginx.conf), but /api/admin/ 502s until it is up.
+      admin:
         condition: service_healthy
     healthcheck:
       # The alpine nginx image ships wget (busybox), not curl. Probe 127.0.0.1

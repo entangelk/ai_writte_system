@@ -78,6 +78,31 @@ class AppImportPathTest(unittest.TestCase):
         self.assertIn("LOAD OK", result.stdout)
 
 
+    def test_the_admin_entrypoint_loads(self):
+        """두 번째 배포 진입점(Slice 2, A1=ⓑ).
+
+        compose `admin` 서비스가 `uvicorn …app.admin_asgi:app` 으로 띄우는 이름이며,
+        이 모듈은 `main` 을 **거꾸로** 끌어온다(`from .main import create_admin_app`).
+        위 셀들이 잠그는 것과 같은 이유로 여기도 실제 로드를 잰다 — 진입점이 하나
+        더 생겼고, 죽으면 컨테이너가 부팅에서 죽는다.
+        """
+        result = subprocess.run(
+            [
+                sys.executable, "-c",
+                "from services.application.app.admin_asgi import app; "
+                "print('LOAD OK')",
+            ],
+            cwd=_ROOT, env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(_ROOT)},
+            capture_output=True, text=True, timeout=300,
+        )
+        self.assertEqual(
+            result.returncode, 0,
+            f"관리자 진입점이 안 뜬다 — compose `admin` 서비스가 죽는다:\n"
+            f"{result.stderr[-2000:]}",
+        )
+        self.assertIn("LOAD OK", result.stdout)
+
+
 class ImportOrderIndependenceTest(unittest.TestCase):
     """순환이 없다 = **main 보다 먼저 로드돼도 된다**(H-3-A, 2026-08-06 추출로 폐쇄).
 
