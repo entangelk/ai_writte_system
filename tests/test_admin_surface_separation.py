@@ -46,13 +46,17 @@ from services.application.app.main import (
 # (`CombinedBoundaryMatrixTest` 가 `AuthenticationBoundaryTest.PUBLIC` 을 재사용하는
 # 것과 같은 이유). 그쪽이 tier 를 **dependency 로부터** 유도해 잠그고, 여기는 그 집합이
 # **어느 앱에 실리는가**를 잠근다 — 두 축이 다르다.
-from tests.test_auth_api import CombinedBoundaryMatrixTest
+#
+# ★ 클래스를 이 모듈 이름공간으로 끌어오면 **pytest 가 그 클래스를 여기서 한 번 더
+# 수집해 실행한다**(실측: 이 파일이 10 cells 인데 22 로 세어졌다). 모듈만 import 하고
+# 속성으로 읽는다.
+from tests import test_auth_api
 from tests.test_compose_exposure import _published_ports
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 _HEALTH = ("/health", "get")
-_ADMIN_OPERATIONS = frozenset(CombinedBoundaryMatrixTest.ADMIN)
+_ADMIN_OPERATIONS = frozenset(test_auth_api.CombinedBoundaryMatrixTest.ADMIN)
 
 
 def _operations(app) -> set[tuple[str, str]]:
