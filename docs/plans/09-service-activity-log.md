@@ -1,6 +1,6 @@
 # Phase 9 — 서비스 활동 로그 (사용자 행위 기록)
 
-상태: `Planned — 페이즈 신설만 확정(오너 2026-08-05). 착수 결정 브리프 대기`
+상태: `Ready — A1~A8 확정(오너 2026-08-09, [9.0 브리프](09-0-service-activity-log-decisions.md)). 구현 대기`
 발원: [`08-2c-project-name-history-decisions.md`](08-2c-project-name-history-decisions.md) §N2-a
 (오너 문언: *"일반 서비스 로그에는 당연히 수정, 저장 뭐 이런 항목들이 저장되어야 할 테니까."*)
 목적: **누가 · 언제 · 무엇을 바꿨는가**에 제품이 답할 수 있게 한다. 지금은 답할 수 없다.
