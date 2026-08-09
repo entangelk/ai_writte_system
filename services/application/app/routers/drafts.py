@@ -15,7 +15,7 @@ byte-동일이다.
 
 from __future__ import annotations
 
-from fastapi import HTTPException, Query
+from fastapi import Depends, HTTPException, Query
 
 from services.application.app.core_sot.service import (
     Archived,
@@ -48,10 +48,13 @@ from ..api.errors import (
     _ERRORS_404_MIGRATION,
     _owned,
 )
-from ..api.dependencies import _REQUIRE_PROJECT_OWNER
+from ..api.dependencies import (
+    _REQUIRE_PROJECT_OWNER,
+    require_authenticated_user,
+)
 
 
-def register_drafts(app, *, core_sot, sync_outbox) -> None:
+def register_drafts(app, *, core_sot, sync_outbox, activity) -> None:
     def _draft_payload(draft) -> dict[str, object]:
         assert draft.unit_kind is not None
         assert draft.position is not None
@@ -81,8 +84,16 @@ def register_drafts(app, *, core_sot, sync_outbox) -> None:
         dependencies=_REQUIRE_PROJECT_OWNER,
     )
     async def rename_draft(
-        project_id: str, draft_id: str, request: RenameDraftRequest
+        project_id: str, draft_id: str, request: RenameDraftRequest,
+        current=Depends(require_authenticated_user),
     ) -> dict[str, object]:
+        # 옛 제목은 바꾸기 전에 읽는다(A3=B).
+        try:
+            previous = core_sot.get_draft(
+                project_id=project_id, draft_id=draft_id
+            ).title
+        except NotFound:
+            previous = None
         try:
             draft = core_sot.rename_draft(
                 project_id=project_id, draft_id=draft_id, title=request.title
@@ -91,6 +102,11 @@ def register_drafts(app, *, core_sot, sync_outbox) -> None:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Archived as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        activity.record(
+            project_id=project_id, actor_user_id=current.id,
+            action="draft_renamed", target_type="draft", target_id=draft.id,
+            before=previous, after=draft.title,
+        )
         return _draft_payload(draft)
 
     @app.delete(
@@ -98,7 +114,10 @@ def register_drafts(app, *, core_sot, sync_outbox) -> None:
         responses=_owned(_ERRORS_404),
         dependencies=_REQUIRE_PROJECT_OWNER,
     )
-    async def archive_draft(project_id: str, draft_id: str) -> dict[str, object]:
+    async def archive_draft(
+        project_id: str, draft_id: str,
+        current=Depends(require_authenticated_user),
+    ) -> dict[str, object]:
         try:
             draft = core_sot.archive_draft(project_id=project_id, draft_id=draft_id)
         except NotFound as exc:
@@ -106,6 +125,11 @@ def register_drafts(app, *, core_sot, sync_outbox) -> None:
         sync_outbox.enqueue_draft_archived(
             project_id=project_id,
             draft_id=draft_id,
+        )
+        activity.record(
+            project_id=project_id, actor_user_id=current.id,
+            action="draft_archived", target_type="draft", target_id=draft.id,
+            before="active", after="archived",
         )
         return _draft_payload(draft)
 
@@ -231,7 +255,8 @@ def register_drafts(app, *, core_sot, sync_outbox) -> None:
               responses=_owned(_ERRORS_404_409_MIGRATION),
               dependencies=_REQUIRE_PROJECT_OWNER)
     async def create_draft(
-        project_id: str, request: CreateDraftRequest
+        project_id: str, request: CreateDraftRequest,
+        current=Depends(require_authenticated_user),
     ) -> dict[str, object]:
         try:
             draft = core_sot.create_draft(
@@ -247,6 +272,11 @@ def register_drafts(app, *, core_sot, sync_outbox) -> None:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except Archived as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        activity.record(
+            project_id=project_id, actor_user_id=current.id,
+            action="draft_created", target_type="draft", target_id=draft.id,
+            after=draft.title,
+        )
         return _draft_payload(draft)
 
     @app.put(
@@ -256,7 +286,8 @@ def register_drafts(app, *, core_sot, sync_outbox) -> None:
         dependencies=_REQUIRE_PROJECT_OWNER,
     )
     async def put_draft_order(
-        project_id: str, request: DraftOrderPutRequest
+        project_id: str, request: DraftOrderPutRequest,
+        current=Depends(require_authenticated_user),
     ) -> dict[str, object]:
         try:
             drafts = core_sot.reorder_drafts(
@@ -267,6 +298,11 @@ def register_drafts(app, *, core_sot, sync_outbox) -> None:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (Archived, InvalidDraftOrder) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        activity.record(
+            project_id=project_id, actor_user_id=current.id,
+            action="draft_order_changed", target_type="project",
+            target_id=project_id,
+        )
         return {"drafts": [_draft_payload(draft) for draft in drafts]}
 
     @app.post(
@@ -276,7 +312,8 @@ def register_drafts(app, *, core_sot, sync_outbox) -> None:
         dependencies=_REQUIRE_PROJECT_OWNER,
     )
     async def save_draft(
-        project_id: str, draft_id: str, request: SaveDraftRequest
+        project_id: str, draft_id: str, request: SaveDraftRequest,
+        current=Depends(require_authenticated_user),
     ) -> dict[str, object]:
         try:
             result = core_sot.save_draft(
@@ -291,6 +328,14 @@ def register_drafts(app, *, core_sot, sync_outbox) -> None:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except CoreSotError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # 이 행이 부모 계획 §1 의 공백을 닫는다 — `draft_versions` 에는
+        # `created_at` 도 `user_id` 도 없어서 "누가 언제 저장했나"에 답할 수 없었다.
+        activity.record(
+            project_id=project_id, actor_user_id=current.id,
+            action="draft_version_saved", target_type="draft_version",
+            target_id=result.draft_version.id,
+            after=str(result.draft_version.version_number),
+        )
         return {
             "draft_version": {
                 "id": result.draft_version.id,

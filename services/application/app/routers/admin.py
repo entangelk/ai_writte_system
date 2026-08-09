@@ -5,7 +5,7 @@ byte-동일이다. 이 모듈은 **Slice 2(관리자 주소 분리)** 의 재료
 ``create_admin_app()`` 가 이 ``register_admin`` 만 호출하는 별도 앱을 올리면
 product 앱에는 ``/admin`` 라우트가 남지 않는다(A1=ⓑ).
 
-14개 서비스를 명시 인자로 받는다(purge 핸들러가 파괴 그래프 전체를 쓴다).
+15개 서비스를 명시 인자로 받는다(purge 핸들러가 파괴 그래프 전체를 쓴다).
 """
 
 from __future__ import annotations
@@ -65,6 +65,7 @@ def register_admin(
     writing_scratch,
     sync_outbox,
     project_name_history,
+    activity,
 ) -> None:
     # --- Admin (D8-5, D6=A minimal admin) ---------------------------------
     # Users only: the all-projects list and the global KPI are their own slices,
@@ -279,6 +280,11 @@ def register_admin(
             # D8-5e grants are project children and disappear. The separate
             # admin tombstone above is the explicit minimal D5 exception.
             access_grants.purge_project(project_id=project_id)
+            # Phase 9 (I1·I2): 활동 로그는 **프로젝트 자식**이라 여기서 함께 사라진다.
+            # 살려 두면 개명 이력·제목·저장 이벤트가 통째로 삭제 예외로 승격돼
+            # D8-6 이 무너진다. 빠뜨려도 reconciler 가 `project_id` 로 수습하지만
+            # 그것은 안전망이지 계약이 아니다.
+            activity.purge_project(project_id=project_id)
             sync_outbox.enqueue_project_purged(project_id=project_id)
         except Exception as exc:
             try:

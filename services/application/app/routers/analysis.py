@@ -16,7 +16,7 @@ byte-동일이다.
 
 from __future__ import annotations
 
-from fastapi import HTTPException
+from fastapi import Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from services.application.app.analysis.apply import MemoryApplyError, MissingMatchedMemory
@@ -68,6 +68,7 @@ from ..api.dependencies import (
     _REQUIRE_PROJECT_OWNER,
     _REQUIRE_PROJECT_OWNER_BILLABLE,
     project_existence_check,
+    require_authenticated_user,
 )
 from ..api.errors import (
     _BILLABLE_400_404_409_502_CONFIG,
@@ -106,6 +107,7 @@ def register_analysis(
     gate_findings,
     llm_call_audit,
     candidate_review,
+    activity,
 ) -> None:
     def _analysis_candidate_payload(candidate) -> dict[str, object]:
         return {
@@ -273,7 +275,8 @@ def register_analysis(
         dependencies=_REQUIRE_PROJECT_OWNER,
     )
     async def promote_candidate(
-        project_id: str, candidate_id: str
+        project_id: str, candidate_id: str,
+        current=Depends(require_authenticated_user),
     ) -> dict[str, object]:
         try:
             _require_project_exists(project_id)
@@ -287,6 +290,13 @@ def register_analysis(
             )
         except (AnalysisNotFound, MemoryNotFound, NotFound) as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # A2=B: 원고가 아니라 **기억**을 바꾼 사용자 판단. memory 는 append-only 라
+        # 잘못 승격해도 과거가 남으므로, 되돌리기 가장 어려운 종류다.
+        activity.record(
+            project_id=project_id, actor_user_id=current.id,
+            action="candidate_promoted", target_type="candidate",
+            target_id=candidate_id,
+        )
         return {
             "memory": _memory_payload(result.memory),
             "idempotent_replay": result.idempotent_replay,
@@ -315,7 +325,8 @@ def register_analysis(
         dependencies=_REQUIRE_PROJECT_OWNER,
     )
     async def confirm_candidate(
-        project_id: str, candidate_id: str
+        project_id: str, candidate_id: str,
+        current=Depends(require_authenticated_user),
     ) -> dict[str, object]:
         # Phase 6 (v1.6.61): approve → confirmed + promotion + de-index + resolve.
         try:
@@ -327,6 +338,11 @@ def register_analysis(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except InvalidCandidateStateTransition as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        activity.record(
+            project_id=project_id, actor_user_id=current.id,
+            action="candidate_confirmed", target_type="candidate",
+            target_id=candidate_id, after=str(result.status),
+        )
         return _candidate_review_payload(result)
 
     @app.post(
@@ -335,7 +351,8 @@ def register_analysis(
         dependencies=_REQUIRE_PROJECT_OWNER,
     )
     async def reject_candidate(
-        project_id: str, candidate_id: str
+        project_id: str, candidate_id: str,
+        current=Depends(require_authenticated_user),
     ) -> dict[str, object]:
         # Phase 6 (v1.6.61): reject → rejected (no promotion) + de-index + dismiss.
         try:
@@ -347,6 +364,11 @@ def register_analysis(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except InvalidCandidateStateTransition as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        activity.record(
+            project_id=project_id, actor_user_id=current.id,
+            action="candidate_rejected", target_type="candidate",
+            target_id=candidate_id, after=str(result.status),
+        )
         return _candidate_review_payload(result)
 
     @app.post(
@@ -355,7 +377,8 @@ def register_analysis(
         dependencies=_REQUIRE_PROJECT_OWNER,
     )
     async def edit_candidate(
-        project_id: str, candidate_id: str, body: EditCandidateRequest
+        project_id: str, candidate_id: str, body: EditCandidateRequest,
+        current=Depends(require_authenticated_user),
     ) -> dict[str, object]:
         # Phase 6 (v1.6.66): edit → new confirmed candidate version + promotion +
         # de-index of the superseded original + resolve. The edited payload is
@@ -374,13 +397,19 @@ def register_analysis(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except InvalidAnalysisCandidate as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        activity.record(
+            project_id=project_id, actor_user_id=current.id,
+            action="candidate_edited", target_type="candidate",
+            target_id=candidate_id,
+        )
         return _candidate_edit_payload(result)
 
     @app.post("/projects/{project_id}/analysis/jobs/{job_id}/auto-promote",
               responses=_owned(_ERRORS_404_STORAGE),
               dependencies=_REQUIRE_PROJECT_OWNER)
     async def auto_promote_job(
-        project_id: str, job_id: str
+        project_id: str, job_id: str,
+        current=Depends(require_authenticated_user),
     ) -> dict[str, object]:
         try:
             _require_project_exists(project_id)
@@ -443,6 +472,19 @@ def register_analysis(
                 })
             if result is not None and not result.idempotent_replay:
                 promoted.append(_memory_payload(result.memory))
+        # 새로 승격된 것이 없으면(전부 replay) 바뀐 것이 없으므로 기록하지 않는다 —
+        # A7=A 의 "결과를 안 뒤에 쓴다"를 이 경로에서 구체화한 것이다.
+        #
+        # ★ 알려진 공백: 위 두 503 partial envelope 경로는 mint 가 durable 한데도
+        # 기록하지 않는다. 그 자리에 record 를 넣으면 부분 실패의 응답 계약(무엇이
+        # 저장됐는지 envelope 이 말한다)과 로그가 두 정본이 되므로, 소비 시점에
+        # 조인하는 A8=A 와 같은 이유로 미룬다.
+        if promoted:
+            activity.record(
+                project_id=project_id, actor_user_id=current.id,
+                action="candidates_auto_promoted", target_type="analysis_job",
+                target_id=job_id, after=str(len(promoted)),
+            )
         return {
             "auto_promotion_threshold": memory.auto_promotion_threshold,
             "promoted": promoted,
@@ -604,7 +646,8 @@ def register_analysis(
               responses=_owned(_ERRORS_400_404),
               dependencies=_REQUIRE_PROJECT_OWNER)
     async def analysis_apply_endpoint(
-        project_id: str, job_id: str, request: ApplyMemoryRequest
+        project_id: str, job_id: str, request: ApplyMemoryRequest,
+        current=Depends(require_authenticated_user),
     ) -> dict[str, object]:
         # Phase 2B.4 (D1=A/D6=A): apply reviewed compare proposals to the
         # canonical memory store. Deterministic writes only — the proposals
@@ -657,6 +700,11 @@ def register_analysis(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except MemoryApplyError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        activity.record(
+            project_id=project_id, actor_user_id=current.id,
+            action="compare_actions_applied", target_type="analysis_job",
+            target_id=job.id, after=str(len(applied)),
+        )
         return {
             "job_id": job.id,
             "applied": [_applied_proposal_payload(a) for a in applied],
@@ -685,7 +733,8 @@ def register_analysis(
         dependencies=_REQUIRE_PROJECT_OWNER,
     )
     async def reconcile_character_conflict(
-        project_id: str, entry_id: str, request: ReconcileCharacterRequest
+        project_id: str, entry_id: str, request: ReconcileCharacterRequest,
+        current=Depends(require_authenticated_user),
     ) -> dict[str, object]:
         try:
             _require_project_exists(project_id)
@@ -699,6 +748,11 @@ def register_analysis(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        activity.record(
+            project_id=project_id, actor_user_id=current.id,
+            action="review_queue_reconciled", target_type="review_queue_entry",
+            target_id=result.entry_id, after=result.action.value,
+        )
         return {
             "entry_id": result.entry_id,
             "action": result.action.value,
@@ -879,16 +933,34 @@ def register_analysis(
     @app.post("/projects/{project_id}/analysis/gate-findings/{finding_id}/resolve",
               responses=_owned(_ERRORS_404_409),
               dependencies=_REQUIRE_PROJECT_OWNER)
-    async def resolve_gate_finding(project_id: str, finding_id: str):
-        return await _transition_gate_finding(
+    async def resolve_gate_finding(
+        project_id: str, finding_id: str,
+        current=Depends(require_authenticated_user),
+    ):
+        payload = await _transition_gate_finding(
             project_id, finding_id, GateFindingStatus.RESOLVED
         )
+        activity.record(
+            project_id=project_id, actor_user_id=current.id,
+            action="gate_finding_resolved", target_type="gate_finding",
+            target_id=finding_id, after=str(GateFindingStatus.RESOLVED),
+        )
+        return payload
 
     @app.post("/projects/{project_id}/analysis/gate-findings/{finding_id}/dismiss",
               responses=_owned(_ERRORS_404_409),
               dependencies=_REQUIRE_PROJECT_OWNER)
-    async def dismiss_gate_finding(project_id: str, finding_id: str):
-        return await _transition_gate_finding(
+    async def dismiss_gate_finding(
+        project_id: str, finding_id: str,
+        current=Depends(require_authenticated_user),
+    ):
+        payload = await _transition_gate_finding(
             project_id, finding_id, GateFindingStatus.DISMISSED
         )
+        activity.record(
+            project_id=project_id, actor_user_id=current.id,
+            action="gate_finding_dismissed", target_type="gate_finding",
+            target_id=finding_id, after=str(GateFindingStatus.DISMISSED),
+        )
+        return payload
 

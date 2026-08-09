@@ -26,6 +26,7 @@ from services.application.app.core_sot.service import (
 )
 
 from ..api.models import (
+    ActivityLogResponse,
     AccessLogResponse,
     CreateProjectRequest,
     ProjectBriefGetResponse,
@@ -52,7 +53,9 @@ from ..api.dependencies import (
 from ..api.payloads import _project_brief_payload
 
 
-def register_projects(app, *, core_sot, access_grants, sync_outbox) -> None:
+def register_projects(
+    app, *, core_sot, access_grants, sync_outbox, activity
+) -> None:
     def _project_payload(project) -> dict[str, object]:
         return {"id": project.id, "name": project.name, "archived": project.archived}
 
@@ -72,6 +75,13 @@ def register_projects(app, *, core_sot, access_grants, sync_outbox) -> None:
         # It stays deny-by-default in D8-3b anyway (E1=A): rows with no owner can
         # still arrive from a deletion bug or a future migration.
         project = core_sot.create_project(name=request.name, owner_id=current.id)
+        # Phase 9 (A7=A): 결과를 안 **뒤에** 기록한다 — 위에서 예외가 났으면 여기
+        # 오지 않으므로 실패한 요청이 "했다"로 남지 않는다.
+        activity.record(
+            project_id=project.id, actor_user_id=current.id,
+            action="project_created", target_type="project", target_id=project.id,
+            after=project.name,
+        )
         return _project_payload(project)
 
     @app.get("/projects", response_model=ProjectListResponse,
@@ -82,6 +92,36 @@ def register_projects(app, *, core_sot, access_grants, sync_outbox) -> None:
     ) -> dict[str, object]:
         projects = core_sot.list_projects_for_owner(owner_id=current.id)
         return {"projects": [_project_payload(p) for p in projects]}
+
+    @app.get("/projects/{project_id}/activity",
+             response_model=ActivityLogResponse,
+             responses=_owned(_ERRORS_404),
+             dependencies=_REQUIRE_PROJECT_OWNER)
+    async def get_project_activity(project_id: str) -> dict[str, object]:
+        # A5=B (operation 77): 소유자가 자기 프로젝트에서 무슨 일이 있었는지 본다.
+        # **소비자가 이미 정해져 있어서** 8.1~8.2c 의 "저장만 하고 소비는 다음
+        # 슬라이스" 관례를 따르지 않았다(그 관례의 근거는 응답 형태를 소비자보다
+        # 먼저 못박지 말라는 것이었다).
+        #
+        # 전역(관리자) 조회는 여기 없다 — 그것은 관리자에게 프로젝트 **내용**을
+        # 여는 문이라 승격 계약(D8-5e)과 함께 볼 별도 결정이다(A5=C).
+        try:
+            core_sot.get_project(project_id=project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"events": [
+            {
+                "id": event.id,
+                "actor_user_id": event.actor_user_id,
+                "action": event.action,
+                "target_type": event.target_type,
+                "target_id": event.target_id,
+                "at": event.at,
+                "before": event.before,
+                "after": event.after,
+            }
+            for event in activity.list_for_project(project_id=project_id)
+        ]}
 
     @app.get("/projects/{project_id}/access-log",
              response_model=AccessLogResponse,
@@ -139,7 +179,8 @@ def register_projects(app, *, core_sot, access_grants, sync_outbox) -> None:
         dependencies=_REQUIRE_PROJECT_OWNER,
     )
     async def put_project_brief(
-        project_id: str, request: PutProjectBriefRequest
+        project_id: str, request: PutProjectBriefRequest,
+        current=Depends(require_authenticated_user),
     ) -> dict[str, object]:
         try:
             result = core_sot.put_project_brief(
@@ -160,6 +201,11 @@ def register_projects(app, *, core_sot, access_grants, sync_outbox) -> None:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (Archived, StaleProjectBriefBase) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        activity.record(
+            project_id=project_id, actor_user_id=current.id,
+            action="project_brief_saved", target_type="project_brief",
+            target_id=result.brief.id,
+        )
         return {
             "brief": _project_brief_payload(result.brief),
             "idempotent_replay": result.idempotent_replay,
@@ -199,8 +245,15 @@ def register_projects(app, *, core_sot, access_grants, sync_outbox) -> None:
                responses=_owned(_ERRORS_404_409),
                dependencies=_REQUIRE_PROJECT_OWNER)
     async def rename_project(
-        project_id: str, request: RenameProjectRequest
+        project_id: str, request: RenameProjectRequest,
+        current=Depends(require_authenticated_user),
     ) -> dict[str, object]:
+        # A3=B 의 대표 자리 — 개명은 덮어쓰기라 지금까지 흔적이 **전혀** 없었다.
+        # 옛 이름은 바꾸기 전에 읽어야 한다.
+        try:
+            previous = core_sot.get_project(project_id=project_id).name
+        except NotFound:
+            previous = None
         try:
             project = core_sot.rename_project(
                 project_id=project_id, name=request.name
@@ -209,12 +262,19 @@ def register_projects(app, *, core_sot, access_grants, sync_outbox) -> None:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Archived as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        activity.record(
+            project_id=project.id, actor_user_id=current.id,
+            action="project_renamed", target_type="project", target_id=project.id,
+            before=previous, after=project.name,
+        )
         return _project_payload(project)
 
     @app.delete("/projects/{project_id}", response_model=ProjectPayload,
                 responses=_owned(_ERRORS_404),
                 dependencies=_REQUIRE_PROJECT_OWNER)
-    async def archive_project(project_id: str) -> dict[str, object]:
+    async def archive_project(
+        project_id: str, current=Depends(require_authenticated_user),
+    ) -> dict[str, object]:
         # MVP: delete is archive (soft delete); SOT data is preserved (§115).
         # Re-archiving is idempotent.
         try:
@@ -222,6 +282,11 @@ def register_projects(app, *, core_sot, access_grants, sync_outbox) -> None:
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         sync_outbox.enqueue_project_archived(project_id=project_id)
+        activity.record(
+            project_id=project.id, actor_user_id=current.id,
+            action="project_archived", target_type="project", target_id=project.id,
+            before="active", after="archived",
+        )
         return _project_payload(project)
 
     @app.get(

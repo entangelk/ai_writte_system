@@ -13,7 +13,7 @@ code point, ``content_hash`` 는 raw UTF-8 SHA-256 이다(Core SOT 계약).
 
 from __future__ import annotations
 
-from fastapi import HTTPException
+from fastapi import Depends, HTTPException
 
 from services.application.app.core_sot.service import CoreSotError, NotFound
 from services.application.app.indexing.embedding import EmbeddingProviderError
@@ -28,11 +28,15 @@ from ..api.errors import (
     _ERRORS_404_502,
     _owned,
 )
-from ..api.dependencies import _REQUIRE_PROJECT_OWNER
+from ..api.dependencies import (
+    _REQUIRE_PROJECT_OWNER,
+    require_authenticated_user,
+)
 
 
 def register_source_refs(
-    app, *, core_sot, shared_vector_index, shared_embeddings, shared_backend
+    app, *, core_sot, shared_vector_index, shared_embeddings, shared_backend,
+    activity,
 ) -> None:
     def _source_ref_payload(source_ref) -> dict[str, object]:
         return {
@@ -65,6 +69,7 @@ def register_source_refs(
         project_id: str,
         snapshot_id: str,
         request: CreateSourceRefRequest,
+        current=Depends(require_authenticated_user),
     ) -> dict[str, object]:
         try:
             source_ref = core_sot.create_source_ref(
@@ -77,6 +82,11 @@ def register_source_refs(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except CoreSotError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        activity.record(
+            project_id=project_id, actor_user_id=current.id,
+            action="source_ref_created", target_type="source_ref",
+            target_id=source_ref.id,
+        )
         return _source_ref_payload(source_ref)
 
     @app.get("/projects/{project_id}/snapshots/{snapshot_id}/source-refs",

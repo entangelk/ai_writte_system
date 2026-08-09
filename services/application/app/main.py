@@ -23,6 +23,10 @@ from services.application.app.deletion.project_name_history import (
     InMemoryProjectNameHistoryRepository,
     ProjectNameHistoryService,
 )
+from services.application.app.activity.log import (
+    ActivityLogService,
+    InMemoryActivityLogRepository,
+)
 from services.application.app.auth.sessions import (
     DEFAULT_SESSION_TTL,
     InMemorySessionRepository,
@@ -432,6 +436,27 @@ def _default_admin_audit_service() -> AdminAuditService:
     from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
     return AdminAuditService(
         MongoAdminAuditRepository.from_uri(
+            uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
+        )
+    )
+
+
+def _default_activity_log_service() -> ActivityLogService:
+    """Phase 9 (A1=A·A6=A): `activity_events`. Mongo 가 있으면 durable, 없으면 in-memory.
+
+    ★ A4=A 격리 때문에 이 조립이 in-memory 로 떨어져도 **아무 소리도 안 난다** —
+    요청은 200 이고 로그만 사라진다. 그래서 실 Mongo 조립 가드가 함께 간다
+    (`tests/test_activity_log.py::DefaultAssemblyLiveMongoTest`, 8.2c HARDEN-1 선례).
+    """
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if not uri:
+        return ActivityLogService(InMemoryActivityLogRepository())
+    from services.application.app.activity.log_mongo import (
+        MongoActivityLogRepository,
+    )
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+    return ActivityLogService(
+        MongoActivityLogRepository.from_uri(
             uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
         )
     )
@@ -1523,6 +1548,7 @@ def create_app(
     admin_audit_service: AdminAuditService | None = None,
     project_name_history_service: ProjectNameHistoryService | None = None,
     quota_enforcement_service: QuotaEnforcementService | None = None,
+    activity_log_service: ActivityLogService | None = None,
     include_product: bool = True,
     include_admin: bool = True,
 ) -> FastAPI:
@@ -1763,6 +1789,8 @@ def create_app(
     project_name_history = (
         project_name_history_service or _default_project_name_history_service()
     )
+    # Phase 9 (I1): the opposite direction — a project *child*, purged with it.
+    activity = activity_log_service or _default_activity_log_service()
     # The module-level dependency reads them from here: it must be one function
     # object across all apps so the exhaustive guard has a single identity to
     # look for (see require_authenticated_user).
@@ -1804,7 +1832,7 @@ def create_app(
             gate_findings=gate_findings,
             writing_generation_jobs=writing_generation_jobs,
             writing_scratch=writing_scratch, sync_outbox=sync_outbox,
-            project_name_history=project_name_history,
+            project_name_history=project_name_history, activity=activity,
         )
 
     if not include_product:
@@ -1828,14 +1856,18 @@ def create_app(
     register_projects(
         app,
         core_sot=core_sot, access_grants=access_grants, sync_outbox=sync_outbox,
+        activity=activity,
     )
 
-    register_drafts(app, core_sot=core_sot, sync_outbox=sync_outbox)
+    register_drafts(
+        app, core_sot=core_sot, sync_outbox=sync_outbox, activity=activity
+    )
 
     register_source_refs(
         app,
         core_sot=core_sot, shared_vector_index=shared_vector_index,
         shared_embeddings=shared_embeddings, shared_backend=shared_backend,
+        activity=activity,
     )
 
 
@@ -1854,6 +1886,7 @@ def create_app(
         gate_findings=gate_findings,
         llm_call_audit=llm_call_audit,
         candidate_review=candidate_review,
+        activity=activity,
     )
 
     register_writing(

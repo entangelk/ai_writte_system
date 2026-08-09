@@ -190,6 +190,28 @@ class AccessLogResponse(BaseModel):
     entries: list[AccessLogEntryPayload]
 
 
+class ActivityEventPayload(BaseModel):
+    """Phase 9 (A3=B) — 고정 코어 + 짧은 값 변화.
+
+    ``before``/``after`` 는 **라벨**이다(이름·제목·상태). 본문은 여기 오지 않으며
+    그 이력은 이미 ``draft_versions``+``source_snapshots`` 에 있다 — 두 정본을 만드는
+    것이 A3=D 를 기각한 이유다.
+    """
+
+    id: str
+    actor_user_id: str
+    action: str
+    target_type: str
+    target_id: str
+    at: datetime
+    before: str | None = None
+    after: str | None = None
+
+
+class ActivityLogResponse(BaseModel):
+    events: list[ActivityEventPayload]
+
+
 class AdminProjectPayload(BaseModel):
     # D8-5b. One field more than the public payload: `owner_id`, which is the
     # whole point of an administrator's list (whose project is this). The public

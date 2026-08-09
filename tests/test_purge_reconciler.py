@@ -42,6 +42,8 @@ except ImportError:  # pragma: no cover - 환경에 pymongo 가 없을 때
 from services.application.app.deletion.project_name_history import (
     ProjectNameSnapshot,
 )
+from services.application.app.activity.log import ActivityEvent
+from services.application.app.activity.log_mongo import MongoActivityLogRepository
 from services.application.app.deletion.project_name_history_mongo import (
     MongoProjectNameHistoryRepository,
 )
@@ -171,6 +173,42 @@ class PurgeReconcilerTest(unittest.TestCase):
         self.assertEqual(
             self.db["project_name_history"].count_documents({"_id": self.PURGED}), 1,
             "reconciler 실행이 이름 이력을 지웠다",
+        )
+
+    def test_the_activity_log_is_swept(self) -> None:
+        """★ Phase 9 (I1·I2): 활동 로그는 위 이름 이력과 **정반대**여야 한다.
+
+        `project_name_history` 는 발견되면 안 되고(파기를 살아남는 예외), 활동 로그는
+        **반드시 발견돼야 한다** — 프로젝트 자식이라 파기와 함께 사라진다. 살려 두면
+        개명 이력·제목·저장 이벤트 전체가 삭제 예외로 승격돼 D8-6 이 무너진다.
+
+        두 셀이 나란히 있는 것이 의도다: 다음 사람이 8.2c 의 `_id` 트릭을 여기에
+        복사하면 이 셀이 실패한다.
+
+        어댑터로 쓴다 — 손으로 문서를 넣으면 "내가 방금 만든 모양"만 재게 된다.
+        """
+        MongoActivityLogRepository(self._client, db_name=self._db_name).insert(
+            ActivityEvent(
+                id="e1", project_id=self.PURGED, actor_user_id="u1",
+                action="project_renamed", target_type="project",
+                target_id=self.PURGED, at=datetime(2026, 8, 9, tzinfo=UTC),
+                before="옛", after="새",
+            )
+        )
+
+        collections = _collections_scoped_by_project(self.db)
+        orphans = _orphan_project_ids(self.db, collections)
+
+        self.assertIn(
+            "activity_events", collections,
+            "활동 로그가 sweep 대상으로 발견되지 않았다 — `project_id` 필드가 "
+            "빠졌다는 뜻이고, 그러면 파기가 못 지우는 행이 생긴다(I2 위반)",
+        )
+        self.assertIn("activity_events", orphans.get(self.PURGED, []))
+        _purge(self.db, self.PURGED, collections)
+        self.assertEqual(
+            self.db["activity_events"].count_documents({}), 0,
+            "reconciler 가 파기된 프로젝트의 활동 로그를 남겼다",
         )
 
     def test_purging_removes_the_orphan_and_leaves_the_live_project_intact(self) -> None:
