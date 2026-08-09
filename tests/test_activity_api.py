@@ -6,8 +6,9 @@
 
 **★ 이 파일의 핵심 두 셀**:
 
-- `test_a_failed_request_leaves_no_trace` — A7=A 를 고른 이유 그 자체다. dependency
-  (B안)에서 기록하면 route 실행 *전*에 도므로 404·409 로 끝난 요청도 "했다"로 남는다.
+- `test_a_conflicting_request_leaves_no_trace` — A7=A 를 고른 이유 그 자체다. 기록이
+  결과보다 앞서면(handler 맨 앞이든 dependency 든) 409 로 끝난 요청이 "했다"로 남는다.
+  **404 짝은 순서를 잠그지 않는다**(그쪽은 dependency 가 먼저 낸다 — 각 셀 docstring).
 - `test_a_broken_activity_store_does_not_break_the_request` — A4=A. 로그 저장소가
   죽어도 사용자의 저장은 성공한다. 반대 방향(파기 실패는 삼키지 않는다)은
   `test_activity_log.py` 가 잰다.
@@ -16,7 +17,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 from fastapi.testclient import TestClient
 
@@ -120,10 +121,14 @@ class ActivityRecordingTest(unittest.TestCase):
         self.assertEqual((event.before, event.after), ("active", "archived"))
 
     def test_a_failed_request_leaves_no_trace(self) -> None:
-        """★ A7=A 의 핵심 — 결과를 안 **뒤에** 쓰기 때문에 실패는 안 남는다.
+        """없는 프로젝트를 고치려는 요청은 흔적을 안 남긴다.
 
-        under-strict: 기록을 handler 앞이나 dependency(B안)로 옮기면 이 셀이 문다.
-        그 자리는 route 실행 *전*이라 404·409 로 끝난 요청까지 "했다"로 남는다.
+        ★ **이 셀은 순서를 잠그지 않는다**(뮤테이션 N2 실측). 없는 project 의 404 는
+        `require_project_owner` **dependency** 가 내므로 handler 본문이 아예 안 돈다 —
+        기록을 handler 맨 앞으로 옮겨도 여기는 통과한다. 순서를 실제로 잠그는 것은
+        아래 409 셀이고, 두 셀을 함께 읽어야 A7=A 가 덮인다. 그래도 이 셀을 남기는
+        이유는 반대 방향이다: 기록을 **dependency 로** 옮기면(A7 의 B안) 그때는
+        여기가 문다.
         """
         before = len(self.repo.events)
 

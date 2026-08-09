@@ -263,6 +263,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{project_id}/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Project Activity */
+        get: operations["get_project_activity_projects__project_id__activity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{project_id}/analysis/candidates/{candidate_id}/confirm": {
         parameters: {
             query?: never;
@@ -1192,6 +1209,40 @@ export interface components {
         AccessLogResponse: {
             /** Entries */
             entries: components["schemas"]["AccessLogEntryPayload"][];
+        };
+        /**
+         * ActivityEventPayload
+         * @description Phase 9 (A3=B) — 고정 코어 + 짧은 값 변화.
+         *
+         *     ``before``/``after`` 는 **라벨**이다(이름·제목·상태). 본문은 여기 오지 않으며
+         *     그 이력은 이미 ``draft_versions``+``source_snapshots`` 에 있다 — 두 정본을 만드는
+         *     것이 A3=D 를 기각한 이유다.
+         */
+        ActivityEventPayload: {
+            /** Action */
+            action: string;
+            /** Actor User Id */
+            actor_user_id: string;
+            /** After */
+            after?: string | null;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Before */
+            before?: string | null;
+            /** Id */
+            id: string;
+            /** Target Id */
+            target_id: string;
+            /** Target Type */
+            target_type: string;
+        };
+        /** ActivityLogResponse */
+        ActivityLogResponse: {
+            /** Events */
+            events: components["schemas"]["ActivityEventPayload"][];
         };
         /** AdminAuditEventListResponse */
         AdminAuditEventListResponse: {
@@ -3309,6 +3360,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AccessLogResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    get_project_activity_projects__project_id__activity_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityLogResponse"];
                 };
             };
             /** @description Unauthorized */

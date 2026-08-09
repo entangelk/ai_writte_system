@@ -271,3 +271,117 @@ work_log 가 예고한 그대로), 남는 1건은 호스트에서 구조적으�
    `current` 인자 → 조회 operation 77 → 정본 → 뮤테이션 → 독립 검증.
 2. **A7 의 34곳 `current=Depends(...)` 인자 추가**가 이 슬라이스의 가장 넓은 diff 다(§0.4).
    라우터 정리가 끝나 이제 그 자리는 `routers/*` 안이다.
+
+---
+
+## Task 4 — Phase 9 Slice 9.0 구현 (서비스 활동 로그)
+
+### User Decisions and Rationale
+
+- 오너 지시: *"일단 브리프 결정되었으니까 작업 진행해줘."* Task 3 에서 확정한
+  A1~A8 을 그대로 구현했다. **새로 결정한 것은 없다.**
+- **★ 다만 브리프 안에서 두 기준이 어긋나는 자리를 하나 발견했다 — 오너 확인이 필요하다**
+  (아래 "Issues found").
+
+### Completed work
+
+| 파일 | 변경 |
+|---|---|
+| [`app/activity/actions.py`](../../../services/application/app/activity/actions.py) | **신규** — mutating **40 전수** 분류표(`logged` 19 / `excluded` 21 + 사유) |
+| [`app/activity/log.py`](../../../services/application/app/activity/log.py) | **신규** — `ActivityEvent` · Protocol · in-memory · 서비스(격리 경계·짧은 값 상한) |
+| [`app/activity/log_mongo.py`](../../../services/application/app/activity/log_mongo.py) | **신규** — `activity_events` 어댑터(인덱스 1 · TTL 없음 · naive 날짜 재부착) |
+| `routers/{projects,drafts,source_refs,analysis}.py` | **19 endpoint 배선** + `current=Depends(require_authenticated_user)` |
+| [`routers/admin.py`](../../../services/application/app/routers/admin.py) | purge 에 `activity.purge_project(...)` 한 줄 |
+| [`routers/projects.py`](../../../services/application/app/routers/projects.py) | **`GET /projects/{project_id}/activity`(operation 77, A5=B)** |
+| [`api/models.py`](../../../services/application/app/api/models.py) | `ActivityEventPayload`·`ActivityLogResponse` |
+| [`main.py`](../../../services/application/app/main.py) | `_default_activity_log_service()` + `activity_log_service` 인자 + 조립 |
+| `tests/test_activity_{actions,log,api}.py` · `test_purge_reconciler.py` · `test_auth_api.py` | 회귀 **+36 cells**, tier 리터럴 76→77·61→62 |
+| `docs/mongo_collections.md` | **§43 `system_events` 폐기 포인터** + **§43G `activity_events`** 신설 |
+| `docs/system-contract-sot.md` | **v1.7.92** + tier 분할 숫자 갱신 |
+| `frontend/src/api/schema.d.ts` | `gen:api` 재생성(+118줄, operation 77) — 화면 작업은 없다 |
+
+### 설계에서 실제로 판단한 것
+
+- **`current` 인자는 19곳에만 붙였다.** 브리프 §0.4 는 "project 경로 34곳"을 예상했는데,
+  기록하는 경로만 주체가 필요하므로 **그 절반이면 된다**. 나머지 route 는 종전대로
+  `dependencies=_REQUIRE_PROJECT_OWNER` 선언만 갖는다.
+- **격리 경계를 서비스 안 한 곳에 뒀다**(호출부 19곳이 아니라). 각자 `try/except` 를
+  쓰면 한 곳이 빠지는 순간 그 경로만 fail-closed 가 되고, 그 차이는 **저장소가 죽기
+  전까지 아무 테스트도 못 본다**.
+- **gate-finding 두 handler 는 헬퍼(`_transition_gate_finding`)가 아니라 handler 본문에서
+  기록한다.** 전수 가드가 `inspect.getsource(route.endpoint)` 를 보므로 헬퍼에 넣으면
+  가드가 못 본다 — 가드가 볼 수 있는 자리에 두는 것이 배선 규칙의 일부다.
+- **auto-promote 는 새로 승격된 것이 있을 때만 기록한다**(전부 replay 면 바뀐 게 없다).
+  **알려진 공백**: 그 handler 의 503 partial envelope 두 경로는 mint 가 durable 한데도
+  기록하지 않는다 — envelope 이 이미 "무엇이 저장됐는지"를 말하므로 두 정본을 피했다.
+
+### Issues found — ★ `writing/accept` 에서 브리프의 두 기준이 어긋난다 (오너 확인 필요)
+
+- **사실**: `POST …/writing/accept` 는 **정본 draft version 을 실제로 저장한다**
+  (`WritingAcceptService.accept` → `start_next_unit` → `SaveDraftResult`, 코드로 확인).
+- **어긋남**: 브리프 §0.2 는 이 경로를 성격으로 **"AI·작업 요청 14"** 에 넣었고, 그래서
+  A2=B(정본 10 + 검토 9)에서 빠진다. 그런데 **A2 의 기준은 "사용자가 무엇을 *바꿨는가*"**
+  이고 accept 는 정본을 바꾼다. 부모 계획 §2 의 목표 질문 *"특정 원고가 마지막으로 저장된
+  것은 언제인가"* 에 정면으로 걸리는 자리다 — **accept 는 주 저작 흐름의 저장 경로**이고,
+  지금 로그에 남는 저장은 수동 `POST …/drafts/{id}/versions` 뿐이다.
+- **처리**: **오너가 승인한 것은 "B = 19" 라 그 숫자를 지켰다.** 임의로 20 으로 넓히지
+  않고, 분류표의 그 행에 **어긋남과 근거를 주석으로 달아** `excluded(ai_request)` 로 두고
+  **오너 확인 대기**로 남긴다. 넓히는 것은 A2 확장 조건 그대로 **행 하나를 옮기는 일**이다
+  (그때 action 리터럴은 `draft_version_accepted` 같은 이름이 자연스럽다).
+- **왜 지금 막지 않았나**: 되돌리기가 싸고(행 하나) 잘못돼도 다른 18 행이 무용해지지
+  않는다. 반대로 승인 숫자를 말없이 바꾸는 것은 결정 기록을 훼손한다.
+
+### Issues found — 404 셀은 순서를 잠그지 않는다 (뮤테이션 N2 가 드러냄)
+
+- `test_a_failed_request_leaves_no_trace`(없는 project 에 PATCH → 404)를 "A7=A 의 핵심"
+  이라 적었는데, **N2(기록을 handler 맨 앞으로 이동)에서 이 셀이 통과했다.**
+- **원인**: 없는 project 의 404 는 `require_project_owner` **dependency** 가 낸다 —
+  handler 본문이 아예 안 돈다. 순서를 실제로 잠그는 것은 **409 셀**
+  (`test_a_conflicting_request_leaves_no_trace`, archive 된 프로젝트 개명)이다.
+- **처리**: 셀을 지우지 않고 **문서를 실측에 맞게 고쳤다** — 404 셀은 반대 방향을 잠근다
+  (기록을 dependency 로 옮기면 그때는 여기가 문다). 두 셀을 함께 읽어야 A7=A 가 덮인다.
+
+### 뮤테이션 (8종)
+
+**순서 준수**: 구현을 먼저 커밋(`65507d9`) → `git status --short` empty 확인 → 뮤테이션 →
+`git checkout --` 원복 → 매 회 clean 확인. **결과는 `FAILED|SUBFAILED` 로 읽었다**
+(2026-08-09 검증이 올린 그 함정 — `grep FAILED` 만으로는 subtest 실패를 통째로 놓친다).
+
+| # | 방향 | 적용한 diff | file | 실패한 셀 |
+|---|---|---|---|---|
+| N1 | under | 개명 endpoint 의 `activity.record(...)` 삭제 | `routers/projects.py` | `test_every_logged_route_actually_records`·`test_the_recorded_action_literal_matches_the_table`(각 1 SUBFAIL) · `test_renaming_records_both_the_old_and_the_new_name` · `test_the_owner_reads_…_newest_first` · `test_the_response_carries_the_value_change` (5) |
+| N2 | under | 기록을 handler **맨 앞**으로(= A7 의 B안 형태) | `routers/projects.py` | `test_a_conflicting_request_leaves_no_trace` · `test_the_owner_reads_…_newest_first` (2). **404 셀은 안 물었다 — 위 Issues 참조** |
+| N3 | **over** | A4=A 격리를 걷어내 fail-closed 로 | `activity/log.py` | `test_a_broken_activity_store_does_not_break_the_request` · `test_a_write_failure_does_not_reach_the_caller` (2) |
+| N4 | under | purge 배선 한 줄 삭제 | `routers/admin.py` | `ActivityPurgeTest::test_purging_a_project_removes_its_activity` (1) |
+| N5 | under(**I1**) | 문서 필드를 `project_id` → `target_project_id`(8.2c 흉내) | `activity/log_mongo.py` | 어댑터 5 + 실 Mongo 조립 1 + **`test_the_activity_log_is_swept`**(reconciler 가 못 찾는다) (7) |
+| N6 | **over(A8)** | 기록 안 하기로 한 `writing/accept` 에 `activity.record(` 추가 | `routers/writing.py` | `test_no_excluded_route_records`(1 SUBFAIL) |
+| N7 | under(A3) | 짧은 값 200자 상한 제거 | `activity/log.py` | `test_a_long_value_is_cut_to_the_short_value_cap` (1) |
+| N8 | under(A6) | TTL 인덱스 추가 | `activity/log_mongo.py` | `test_the_collection_has_no_ttl_index` (1) |
+
+**N5 가 이 슬라이스의 핵심 증거다.** 8.2c 와 정반대 방향을 잠근다 — `project_name_history`
+는 reconciler 에 **발견되면 안 되고**, 활동 로그는 **반드시 발견돼야 한다**. 두 셀이 나란히
+있어서, 다음 사람이 `_id` 트릭을 여기 복사하면 즉시 드러난다.
+
+### Verification
+
+| 검사 | 결과 |
+|---|---|
+| 전수 회귀(알파, test-mongo ON) | `2244 passed / 4 skipped / 2322 subtests in 180s` → **보정 `2247 / 1 / 2322`** |
+| 직전 기준선 `2211/1/2247` 대비 | **셀 +36**(가드 7 · 저장 16 · HTTP 12 · reconciler 1) · **subtest +75** |
+| operation | **76 → 77**(A5=B). tier = public 4 · auth 3 · admin 8 · **project 62** |
+| 프론트 | `gen:api` 재생성(+118줄) · `tsc --noEmit` clean · **265 passed / 18 files**(무변) |
+| 뮤테이션 | 8종(under 6 · over 2) 전부 재실패 |
+
+### 아직 안 한 것 (의도)
+
+- **`writing/accept` 분류** — 위 Issues, 오너 확인 대기.
+- **화면 0줄.** A5=B 는 API 까지다(브리프 §범위 밖: "프론트 화면은 다음").
+- **기록 실패 진단 카운터** — A4=A 의 "조용한 구멍"에 대한 후속 고려이며 범위 밖.
+- **503 partial envelope 경로의 기록**(auto-promote) — 위 설계 판단 참조.
+
+### Next steps
+
+1. **독립 검증**(다른 작업자). 볼 만한 축: N5 방향(8.2c 와의 대칭) · 404/409 셀의 역할
+   분담 · 19 배선이 전부 결과 뒤인지 · `writing/accept` 판단.
+2. **`writing/accept` 오너 확인** 뒤 필요하면 행 하나 이동.
+3. 화면(활동 타임라인)은 별도 슬라이스.

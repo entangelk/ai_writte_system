@@ -2438,11 +2438,21 @@ db.review_results.createIndex({ review_request_id: 1 }, { unique: true })
 
 ---
 
-## 43. system_events
+## 43. system_events — **폐기됨 (Phase 9, 2026-08-09). 후속은 §43G `activity_events`.**
+
+> **★ 이 절은 구현되지 않았고 앞으로도 구현되지 않는다.** 2026-08-05 실측에서
+> `services/`·`scripts/`·`tests/` 전수 grep **0건**이었고(문서에만 있던 스펙 유령),
+> Phase 9 오너 결정 **A1=A**(2026-08-09)가 그 자리를 **§43G `activity_events`** 로
+> 대체했다. **이름이 내용과 어긋난 것이 폐기 사유다** — 담기려던 것은 사용자 행위인데
+> "system" 이라, 훗날 진짜 시스템 이벤트(배포·워커 장애)가 생기면 섞인다. 이 저장소는
+> 이름이 뜻과 어긋나 사고가 날 뻔한 적이 있다(8.2 `project_id` vs `target_project_id`).
+>
+> 아래 스펙은 **역사로만 남긴다** — 특히 `payload` 자유형은 A3=B 가 기각했다(문서 키
+> 집합을 고정해야 파기 reconciler 의 표본 한 건 판정이 안전하다).
 
 ### 43.1 Purpose
 
-General event log for debugging and audit.
+General event log for debugging and audit. **(미구현·폐기)**
 
 ### 43.2 Document Example
 
@@ -2468,6 +2478,67 @@ db.system_events.createIndex({ project_id: 1, created_at: -1 })
 db.system_events.createIndex({ event_type: 1, created_at: -1 })
 db.system_events.createIndex({ user_id: 1, created_at: -1 })
 ```
+
+---
+
+## 43G. activity_events
+
+### 43G.1 Purpose
+
+**누가 · 언제 · 무엇을 바꿨는가.** Phase 9 Slice 9.0(오너 결정 A1~A8, 2026-08-09,
+`docs/plans/09-0-service-activity-log-decisions.md`). §43 `system_events` 를 대체한다.
+
+**★ 이 컬렉션은 프로젝트 자식이다** — `project_id` 필드를 쓰고 **파기와 함께 사라진다**.
+§43F `project_name_history` 와 **정반대 방향이고 그것이 의도다**: 그쪽은 `_id` 를 project id
+로 써서 파기 reconciler 의 고아 sweep 을 구조적으로 피하고, 여기는 **반드시 발견되어야**
+한다. 활동 로그를 파기 생존으로 만들면 개명 이력·제목·저장 이벤트 전체가 삭제 예외로
+승격돼 **D8-6 삭제 계약이 무너진다**(부모 계획 §4 I1·I2).
+
+**무엇이 담기는가(A2=B)**: 정본 변경 10 + 검토 결정 9 = **19 경로**. AI 요청은 여기 담기지
+않는다 — `llm_call_audits`(호출 단위)와 `request_usage_ledger`(과금 단위)가 이미 담으며,
+세 번째 사본은 두 정본 문제다(A8=A). 분류 정본은 **코드**
+(`services/application/app/activity/actions.py`)이고 mutating operation **40 전수**가
+`logged`/`excluded(사유)` 로 등재된다 — 미등재는 `tests/test_activity_actions.py` 가
+실패시킨다.
+
+### 43G.2 Document Example
+
+```json
+{
+  "_id": "evt_001",
+  "project_id": "project_001",
+  "actor_user_id": "user_001",
+  "action": "project_renamed",
+  "target_type": "project",
+  "target_id": "project_001",
+  "at": "2026-08-09T00:00:00Z",
+  "before": "옛 이름",
+  "after": "새 이름"
+}
+```
+
+**키 집합이 계약이다.** 새 필드는 계약 변경이며 회귀가 고정한다. `before`/`after` 는
+**짧은 라벨만**(이름·제목·상태, 200자 상한 — A3=B) 담는다: 본문 이력은 이미
+`draft_versions`+`source_snapshots` 에 있고 복제하면 두 정본이 된다. 값 변화가 없는
+행(생성·저장·검토 결정)은 둘 다 `null` 이다.
+
+### 43G.3 Indexes
+
+```javascript
+db.activity_events.createIndex({ project_id: 1, at: -1 })
+```
+
+**TTL 인덱스는 두지 않는다(A6=A)** — 수명은 프로젝트가 정한다(파기가 지운다). 이 저장소의
+모든 감사 컬렉션이 같다. 부피가 실제로 문제가 되면 project 당 최근 N 건 상한(밀어내기)이
+다음 수단이며, 지금 N 일을 고를 근거가 없다.
+
+### 43G.4 실패 방향
+
+**기록 실패는 요청을 실패시키지 않는다(A4=A, 격리)** — `llm_call_audits` 와 같고
+`access_grant_uses` 와 반대다. 판정 기준은 *"보안 경계에 하중을 지는가"* 이고, 활동 로그가
+없다고 잘못 열리는 문은 없다. **대가는 조용한 구멍**이다(로그가 비어도 아무도 모른다).
+**반면 파기 실패는 삼키지 않는다** — 삼키면 지워지지 않은 로그가 남은 채 "파기 성공"이 되고
+그것이 D5 부분 삭제다.
 
 ---
 
