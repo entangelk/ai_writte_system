@@ -4,7 +4,7 @@
 `test_compose_exposure.py`(포트 분류)이고 형태도 같다 — **표가 정본이고 가드가 강제**다.
 
 **왜 40 전수인가**(A2 확정 조건 ①). 오너가 B 를 고른 것은 범위 판단이지 C 의 각하가
-아니다. 기록하지 않는 21 경로까지 **사유와 함께** 등재돼야 "빠진 것"과 "일부러 뺀 것"이
+아니다. 기록하지 않는 20 경로까지 **사유와 함께** 등재돼야 "빠진 것"과 "일부러 뺀 것"이
 구분되고, **C 로 넓히는 일이 `ai_request` 행의 값을 바꾸는 것**으로 끝난다.
 
 **양방향으로 문다**:
@@ -71,16 +71,19 @@ class ActivityActionClassificationTest(unittest.TestCase):
         stale = sorted(CLASSIFIED_OPERATIONS - set(self.routes))
         self.assertEqual(stale, [], "표에만 있고 앱에는 없는 경로")
 
-    def test_the_logged_set_is_the_nineteen_the_owner_approved(self) -> None:
-        """A2=B — 정본 변경 10 + 검토 결정 9.
+    def test_the_logged_set_is_the_twenty_the_owner_approved(self) -> None:
+        """A2=B — 정본 변경 **11** + 검토 결정 9.
+
+        착수 결정은 19 였고, 2026-08-09 에 오너가 `writing/accept`(정본 draft
+        version 저장)를 더해 **20** 이 됐다.
 
         숫자를 셀에 적는 이유는 범위가 **오너 결정**이기 때문이다. 넓히는 것은
         결정이지 리팩터링이 아니므로, 여기서 눈에 띄게 실패해야 한다.
         """
-        self.assertEqual(len(LOGGED_OPERATIONS), 19)
-        self.assertEqual(len(ACTIVITY_ACTIONS), 19)
+        self.assertEqual(len(LOGGED_OPERATIONS), 20)
+        self.assertEqual(len(ACTIVITY_ACTIONS), 20)
         self.assertEqual(
-            len({action.action for action in ACTIVITY_ACTIONS}), 19,
+            len({action.action for action in ACTIVITY_ACTIONS}), 20,
             "action 리터럴이 중복이다 — 조회 화면이 두 사건을 구분 못 한다",
         )
 
@@ -95,7 +98,7 @@ class ActivityActionClassificationTest(unittest.TestCase):
             if excluded.reason == "ai_request"
         }
 
-        self.assertEqual(len(ai_requests), 14)
+        self.assertEqual(len(ai_requests), 13)
         self.assertTrue(all(
             EXCLUDED_BY_OPERATION[operation].note
             for operation in ai_requests

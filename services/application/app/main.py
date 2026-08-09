@@ -1905,6 +1905,7 @@ def create_app(
         llm_call_audit=llm_call_audit,
         model_capabilities=model_capabilities,
         report_output_cap=report_output_cap,
+        activity=activity,
     )
 
     return app

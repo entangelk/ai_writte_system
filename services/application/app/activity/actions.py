@@ -3,16 +3,17 @@
 오너 결정 2026-08-09, 브리프 ``09-0-service-activity-log-decisions.md``.
 이 모듈은 **분류만** 한다 — 문서 형태는 ``log.py``, 쓰기는 각 endpoint 다.
 
-- **A2=B — 기준은 "사용자가 무엇을 *바꿨는가*"다.** 정본 변경 10 + 검토 결정 9 =
-  **19 경로**가 ``logged`` 다. 승격·거절은 원고를 바꾸지 않지만 **기억을 바꾸고**,
+- **A2=B — 기준은 "사용자가 무엇을 *바꿨는가*"다.** 정본 변경 **11**(오너 2026-08-09
+  가 `writing/accept` 를 더했다 — 아래 그 행의 주석) + 검토 결정 9 = **20 경로**가
+  ``logged`` 다. 승격·거절은 원고를 바꾸지 않지만 **기억을 바꾸고**,
   memory 가 append-only 라 이 제품에서 되돌리기가 가장 어려운 종류다.
 - **★ 표는 mutating operation 40 *전수* 다.** 오너가 B 를 고른 것은 범위 판단이지
   C(AI 요청까지)의 각하가 아니므로, **C 로 넓히는 일이 "행 값 하나 바꾸기"여야
-  한다**는 것이 A2 확정 조건이다. 그래서 기록하지 않는 21 경로도 **사유와 함께**
+  한다**는 것이 A2 확정 조건이다. 그래서 기록하지 않는 20 경로도 **사유와 함께**
   여기 등재된다 — 빠진 것과 일부러 뺀 것이 구분돼야 한다.
   ``tests/test_activity_actions.py`` 가 미등재 mutating route 를 실패시킨다.
 - **★ C 를 열 때 A8 을 함께 다시 본다.** A8=A("중복 기록 없음")가 성립하는 근거가
-  *"AI 요청은 활동 로그 밖"* 이라, ``ai_request`` 21 행만 뒤집으면 같은 사건이
+  *"AI 요청은 활동 로그 밖"* 이라, ``ai_request`` 13 행만 뒤집으면 같은 사건이
   ``llm_call_audits``·``request_usage_ledger``·활동 로그 **셋**에 사는 두 정본이 된다.
 - **A8=A — 이미 다른 축이 담는 것은 여기 담지 않는다.** AI 요청은 관측(호출 단위)과
   원장(과금 단위)이, 관리자 행위는 ``admin_audit_events``·``access_grant_uses`` 가
@@ -57,7 +58,7 @@ class ExcludedOperation:
     note: str = ""
 
 
-#: 정본 변경 10. "제품이 답할 수 있어야 하는 것"(부모 계획 §2)의 뼈대다.
+#: 정본 변경 11. "제품이 답할 수 있어야 하는 것"(부모 계획 §2)의 뼈대다.
 _CANONICAL: tuple[ActivityAction, ...] = (
     ActivityAction("project_created", "POST", "/projects", "project"),
     # 개명은 덮어쓰기라 지금까지 **흔적이 전혀 없었다**(부모 계획 §1). before/after 가
@@ -82,6 +83,18 @@ _CANONICAL: tuple[ActivityAction, ...] = (
     ActivityAction("source_ref_created", "POST",
                    "/projects/{project_id}/snapshots/{snapshot_id}/source-refs",
                    "source_ref"),
+    # ★ 오너 결정 2026-08-09(9.0 착수 결정 뒤의 추가 확정): **accept 는 정본 저장이다.**
+    #   브리프 §0.2 는 이 경로를 *성격*으로 "AI·작업 요청 14" 에 넣었는데, A2 의 기준은
+    #   **"사용자가 무엇을 바꿨는가"** 이고 accept 는 `start_next_unit` →
+    #   `SaveDraftResult` 로 draft version 을 실제로 만든다. 그리고 이것이 **주 저작
+    #   흐름의 저장 경로**라, 빼면 부모 계획 §2 의 *"특정 원고가 마지막으로 저장된 것은
+    #   언제인가"* 가 수동 저장에만 답해진다. 그래서 A2 는 19 → **20 경로**다.
+    #
+    #   **A8(중복 없음)은 그대로다** — 여기서 남기는 것은 *AI 요청*이 아니라 *정본 저장*
+    #   이고, `llm_call_audits`(호출)·`request_usage_ledger`(과금)가 담는 것과 **다른
+    #   사실**이다. C 확장(AI 요청 자체를 담는 것)과 혼동하지 말 것.
+    ActivityAction("draft_version_accepted", "POST",
+                   "/projects/{project_id}/writing/accept", "draft_version"),
 )
 
 #: 검토 결정 9 — 원고가 아니라 **기억을 바꾸는 사용자 판단**.
@@ -115,16 +128,17 @@ _REVIEW: tuple[ActivityAction, ...] = (
                    "gate_finding"),
 )
 
-#: 기록하는 19.
+#: 기록하는 20.
 ACTIVITY_ACTIONS: tuple[ActivityAction, ...] = _CANONICAL + _REVIEW
 
-#: 기록하지 않는 21 — **사유와 함께**. 이 목록이 있어야 "빠진 것"과 "일부러 뺀 것"이
+#: 기록하지 않는 20 — **사유와 함께**. 이 목록이 있어야 "빠진 것"과 "일부러 뺀 것"이
 #: 구분되고, C 확장이 값 변경으로 끝난다.
 EXCLUDED_OPERATIONS: tuple[ExcludedOperation, ...] = (
-    # --- AI·작업 요청 14 (A2=C 로 넓힐 때 이 행들이 logged 가 된다) -------------
+    # --- AI·작업 요청 13 (A2=C 로 넓힐 때 이 행들이 logged 가 된다) -------------
     #
-    # ★ 넓힐 때 A8 을 함께 다시 본다: 지금 "중복 없음"이 성립하는 이유가 이 14 개가
-    #   활동 로그 밖이기 때문이다.
+    # ★ 넓힐 때 A8 을 함께 다시 본다: 지금 "중복 없음"이 성립하는 이유가 이 13 개가
+    #   활동 로그 밖이기 때문이다. (`writing/accept` 는 2026-08-09 에 여기서 나갔다 —
+    #   그것은 C 확장이 아니라 "정본 저장"이라는 다른 사실이다.)
     ExcludedOperation("POST", "/projects/{project_id}/writing/generate",
                       "ai_request", "llm_call_audits + 원장"),
     ExcludedOperation("POST", "/projects/{project_id}/writing/gate",
@@ -135,15 +149,6 @@ EXCLUDED_OPERATIONS: tuple[ExcludedOperation, ...] = (
                       "ai_request", "llm_call_audits + 원장"),
     ExcludedOperation("POST", "/projects/{project_id}/writing/report",
                       "ai_request", "llm_call_audits + 원장"),
-    # ★ 이 한 행은 브리프 안에서 두 기준이 어긋나는 자리다 — §0.2 는 성격으로
-    #   "AI·작업 요청"에 넣었는데, accept 는 **정본 draft version 을 실제로 저장한다**
-    #   (`WritingAcceptService` → `start_next_unit` → `SaveDraftResult`). A2 의 기준
-    #   ("무엇을 바꿨는가")으로 보면 정본 변경이다. **오너가 승인한 것은 "B = 19" 라
-    #   그 숫자를 지켰고**, 넓히는 것은 이 행을 옮기는 한 줄이다. 오너 확인 대기.
-    ExcludedOperation("POST", "/projects/{project_id}/writing/accept",
-                      "ai_request",
-                      "정본 저장 부수효과가 있다 — 브리프 §0.2 분류와 A2 기준이 "
-                      "이 한 행에서 어긋난다(오너 확인 대기)"),
     ExcludedOperation("POST",
                       "/projects/{project_id}/writing/generation-jobs/{job_id}/retry",
                       "ai_request", "같은 논리 요청의 재실행(8.0 B5)"),

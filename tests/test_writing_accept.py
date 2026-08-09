@@ -20,6 +20,10 @@ from services.application.app.core_sot.models import UnitKind
 from services.application.app.core_sot.service import (
     Archived, CoreSotService, InMemoryCoreSotRepository,
 )
+from services.application.app.activity.log import (
+    ActivityLogService,
+    InMemoryActivityLogRepository,
+)
 from services.application.app.main import create_app
 from services.application.app.writing.accept import (
     StaleWritingBase, WritingAcceptAnalysisError, WritingAcceptService,
@@ -244,7 +248,7 @@ class WritingAcceptServiceTest(unittest.TestCase):
 
 class WritingAcceptApiTest(unittest.TestCase):
     def _setup(self, *, decision=WritingGateDecision.PASS, analysis=None,
-               gate_error=None, context_error=None):
+               gate_error=None, context_error=None, activity_repo=None):
         core = CoreSotService(InMemoryCoreSotRepository())
         project = core.create_project(name="Novel")
         draft = core.create_draft(project_id=project.id, title="Draft")
@@ -254,7 +258,11 @@ class WritingAcceptApiTest(unittest.TestCase):
         gate = _Gate(decision, error=gate_error)
         app = create_app(service=core, analysis_service=analysis,
             context_search_service=_Context(error=context_error),
-            writing_gate_service=gate)
+            writing_gate_service=gate,
+            activity_log_service=(
+                ActivityLogService(activity_repo)
+                if activity_repo is not None else None
+            ))
         authenticate(app)
         async def open_client():
             return httpx.AsyncClient(
@@ -278,6 +286,47 @@ class WritingAcceptApiTest(unittest.TestCase):
         self.assertEqual(body["analysis_job"]["status"], "pending")
         self.assertEqual(body["analysis_job"]["snapshot_id"],
                          body["saved"]["snapshot_id"])
+        asyncio.run(client.aclose())
+
+    def test_a_saved_accept_is_recorded_in_the_activity_log(self):
+        """Phase 9 (오너 2026-08-09): accept 는 **정본 저장**이라 타임라인에 남는다.
+
+        착수 결정(A2=B, 19)은 브리프 §0.2 의 성격 분류를 따라 이 경로를 뺐는데,
+        A2 의 기준은 "무엇을 바꿨는가"이고 accept 는 draft version 을 만든다 —
+        그리고 이것이 **주 저작 흐름의 저장 경로**다.
+
+        **기록하는 것은 AI 요청이 아니라 정본 저장이므로 A8(중복 없음)은 그대로다.**
+        """
+        repo = InMemoryActivityLogRepository()
+        client, project, draft, base, _ = self._setup(activity_repo=repo)
+
+        response = self._post(client, project, draft, base.draft_version.id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(repo.events), 1)
+        event = repo.events[0]
+        self.assertEqual(event.action, "draft_version_accepted")
+        self.assertEqual(event.project_id, project)
+        self.assertEqual(
+            event.target_id, response.json()["saved"]["draft_version_id"]
+        )
+        asyncio.run(client.aclose())
+
+    def test_a_bounced_accept_is_not_recorded(self):
+        """over-strict — Gate 가 거부하면 저장이 없고, 저장이 없으면 기록도 없다.
+
+        A7=A 의 "결과를 안 뒤에 쓴다"가 이 경로에서 갖는 모양이다. 200 이지만
+        `saved` 가 없다 — 상태코드가 아니라 **정본이 바뀌었는가**가 기준이다.
+        """
+        repo = InMemoryActivityLogRepository()
+        client, project, draft, base, _ = self._setup(
+            decision=WritingGateDecision.REVISE, activity_repo=repo)
+
+        response = self._post(client, project, draft, base.draft_version.id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["saved"])
+        self.assertEqual(repo.events, [])
         asyncio.run(client.aclose())
 
     def test_non_pass_is_200_without_saved_artifacts(self):

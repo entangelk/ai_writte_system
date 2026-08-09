@@ -21,6 +21,7 @@ byte-동일이다.
 from __future__ import annotations
 
 from fastapi import (
+    Depends,
     HTTPException,
     Request,
 )
@@ -119,6 +120,7 @@ from ..api.dependencies import (
     project_existence_check,
     quota_charge,
     quota_confirmed,
+    require_authenticated_user,
 )
 from ..api.errors import (
     _BILLABLE_400_404_502_504_CONFIG,
@@ -159,6 +161,7 @@ def register_writing(
     llm_call_audit,
     model_capabilities,
     report_output_cap,
+    activity,
 ) -> None:
     _require_project_exists = project_existence_check(core_sot)
     def _writing_candidate_payload(candidate) -> dict[str, object]:
@@ -1144,7 +1147,8 @@ def register_writing(
               responses=_owned(_billable(ACCEPT_RESPONSES)),
               dependencies=_REQUIRE_PROJECT_OWNER_BILLABLE)
     async def writing_accept_endpoint(
-        project_id: str, body: WritingAcceptRequest
+        project_id: str, body: WritingAcceptRequest,
+        current=Depends(require_authenticated_user),
     ) -> object:
         try:
             _require_project_exists(project_id)
@@ -1263,6 +1267,15 @@ def register_writing(
                 # canonical draft exists and the scratch history is moot — same
                 # rationale as the clean success path below.
                 _clear_scratch_for_saved_accept()
+                # ★ 상태코드가 아니라 **정본이 바뀌었는가**로 기록한다(A7=A). 이
+                # 경로는 version 이 저장된 뒤 분석 job 만 실패한 자리이므로, 여기서
+                # 안 남기면 타임라인이 실제로 일어난 저장을 빠뜨린다.
+                activity.record(
+                    project_id=project_id, actor_user_id=current.id,
+                    action="draft_version_accepted", target_type="draft_version",
+                    target_id=exc.saved.draft_version.id,
+                    after=str(exc.saved.draft_version.version_number),
+                )
                 return JSONResponse(status_code=502, content={
                     "accepted": True,
                     "intent": exc.intent.value,
@@ -1280,6 +1293,18 @@ def register_writing(
                 raise HTTPException(status_code=status, detail=str(exc)) from exc
         if result.accepted:
             _clear_scratch_for_saved_accept()
+        # A2 확장(오너 2026-08-09): accept 는 **정본 draft version 을 저장한다** —
+        # 브리프 §0.2 가 성격으로 "AI·작업 요청"에 넣었지만 A2 의 기준은 "무엇을
+        # 바꿨는가"이고, 여기가 주 저작 흐름의 저장 경로다. **기록하는 것은 AI 요청이
+        # 아니라 정본 저장**이므로 A8(중복 없음)은 그대로다 — `llm_call_audits`·원장이
+        # 담는 사건과 다른 사실이다. Gate 가 통과하지 않으면 저장이 없고 기록도 없다.
+        if result.saved is not None:
+            activity.record(
+                project_id=project_id, actor_user_id=current.id,
+                action="draft_version_accepted", target_type="draft_version",
+                target_id=result.saved.draft_version.id,
+                after=str(result.saved.draft_version.version_number),
+            )
         return {
             "accepted": result.accepted,
             "intent": result.intent.value,
