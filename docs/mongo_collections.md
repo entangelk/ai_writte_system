@@ -2494,7 +2494,7 @@ db.system_events.createIndex({ user_id: 1, created_at: -1 })
 한다. 활동 로그를 파기 생존으로 만들면 개명 이력·제목·저장 이벤트 전체가 삭제 예외로
 승격돼 **D8-6 삭제 계약이 무너진다**(부모 계획 §4 I1·I2).
 
-**무엇이 담기는가(A2=B)**: 정본 변경 10 + 검토 결정 9 = **19 경로**. AI 요청은 여기 담기지
+**무엇이 담기는가(A2=B)**: 정본 변경 **11** + 검토 결정 9 = **20 경로**(착수 결정은 19 였고 2026-08-09 에 오너가 `writing/accept` 를 더했다 — 그 경로는 정본 draft version 을 저장한다). AI 요청은 여기 담기지
 않는다 — `llm_call_audits`(호출 단위)와 `request_usage_ledger`(과금 단위)가 이미 담으며,
 세 번째 사본은 두 정본 문제다(A8=A). 분류 정본은 **코드**
 (`services/application/app/activity/actions.py`)이고 mutating operation **40 전수**가

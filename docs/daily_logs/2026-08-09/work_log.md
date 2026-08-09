@@ -437,3 +437,81 @@ N2 행을 실제 diff 로 고쳤다.
 
 - **검증 기록 본문은 고치지 않았다** — 남의 산출물이고 판정·근거가 정확하다.
 - **`writing/accept`** — 오너 결정 대기 그대로.
+
+---
+
+## Task 6 — A2 추가 확정: `writing/accept` 를 활동 로그에 포함 (19 → 20) · 하루 마무리
+
+### User Decisions and Rationale
+
+- **오너 결정(2026-08-09)**: *"그래 그러면 넓히는 걸로 하자."* Task 4 가 물어 둔 자리와
+  독립 검증이 같은 판단을 낸 자리를 오너가 확정했다. **A2 = 정본 변경 11 + 검토 결정 9
+  = 20 경로.**
+- **오너 지시**: 재빌드는 다음에. 오늘은 여기까지 하고 다음 작업자를 위한 메모를 남기고 마무리.
+
+### Completed work
+
+| 파일 | 변경 |
+|---|---|
+| [`activity/actions.py`](../../../services/application/app/activity/actions.py) | accept 행을 `EXCLUDED_OPERATIONS` → `_CANONICAL` 로. 리터럴 **`draft_version_accepted`**, `target_type="draft_version"`. 정본 11 / 검토 9 / `ai_request` 14 → **13** |
+| [`routers/writing.py`](../../../services/application/app/routers/writing.py) | `current=Depends(...)` + **두 경로**에 기록 — 성공(`result.saved is not None`)과 **502 partial**(version 은 저장되고 분석 job 만 실패) |
+| [`main.py`](../../../services/application/app/main.py) | `register_writing(..., activity=activity)` |
+| [`tests/test_writing_accept.py`](../../../tests/test_writing_accept.py) | **+2 cells** — 저장되면 남는다 · **Gate 거부(200·`saved=null`)면 안 남는다**(over-strict) |
+| `tests/test_activity_actions.py` | 리터럴 19 → **20**, `ai_request` 14 → **13** |
+| 브리프·부모 계획·plans 인덱스 | "A2 추가 확정" 블록 · 상태 `Done` · 인덱스 두 행 |
+| `docs/system-contract-sot.md` · `mongo_collections.md` §43G · README · CHANGELOG | **v1.7.93** · 20 경로 |
+
+### 왜 이것이 A8 개정이 아닌가 (중요 — 다음 사람이 헷갈릴 자리)
+
+**남기는 것은 *AI 요청* 이 아니라 *정본 저장* 이다.** `llm_call_audits`(호출 단위)·
+`request_usage_ledger`(과금 단위)가 담는 사건과 **다른 사실**이므로 두 정본이 생기지 않는다.
+**A2=C 확장과 축이 다르다** — C 는 "AI 를 불렀다"를 담는 것이고 대상은 `ai_request` **13 행**
+이며, 그때는 확정 조건 ③(**A8 을 함께 다시 본다**)이 그대로 살아 있다.
+
+### 기록 조건은 상태코드가 아니라 "정본이 바뀌었는가"
+
+- Gate 가 거부하면 200 이지만 `saved` 가 없다 → **기록 없음**.
+- **502 partial envelope**(version 은 저장되고 분석 job 만 실패) → **기록한다**. 상태코드로
+  판정했다면 실제로 일어난 저장을 빠뜨렸을 자리다.
+- **auto-promote 의 503 partial 두 경로와는 다르게 처리했다**(그쪽은 여전히 미기록). 판단
+  근거: accept 의 partial 은 **정본 version 하나**라 `exc.saved` 로 대상이 특정되고 한 행이
+  정확하지만, auto-promote 의 partial 은 envelope 이 열거하는 **목록**이라 행 하나가 담을 수
+  있는 것이 개수뿐이고 재시도와 대조되지 않는다. **판단 사안이며 대안(양쪽 다 기록)을 함께
+  적어 둔다.**
+
+### 뮤테이션 (2종 추가 — 누적 10종)
+
+| # | 방향 | 적용한 diff | file | 실패한 셀 |
+|---|---|---|---|---|
+| N9 | under | 성공 경로의 `activity.record(...)` **블록 삭제** | `routers/writing.py` | `WritingAcceptApiTest::test_a_saved_accept_is_recorded_in_the_activity_log` (1) |
+| N10 | **over** | `if result.saved is not None:` → `if True:`(Gate 거부에도 기록) | `routers/writing.py` | `::test_a_bounced_accept_is_not_recorded` · `::test_a_saved_accept_is_recorded_in_the_activity_log` (2) |
+
+**★ N9 가 드러낸 가드의 한계 — 다음 사람이 알아야 한다**: 성공 경로의 record 를 지워도
+**전수 가드(`test_every_logged_route_actually_records`)는 통과한다.** 같은 handler 안 502
+분기에 `activity.record(` 가 남아 **소스 스캔이 만족되기 때문**이다. 즉 그 가드는 배선의
+**존재**를 보지 **분기**를 보지 못한다 — 무는 것은 행위 셀이다. 한 handler 가 기록 분기를
+여럿 가지면 **분기마다 행위 셀이 필요**하다.
+
+### Verification
+
+| 검사 | 결과 |
+|---|---|
+| 전수 회귀(알파, test-mongo ON) | `2246 passed / 4 skipped / 2324 subtests in 187s` → **보정 `2249 / 1 / 2324`** |
+| 직전 `2247/1/2322` 대비 | **셀 +2 · subtest +2**(전수 가드가 logged 20 을 도는 subtest 증가) |
+| operation | **77 무변** |
+| 뮤테이션 | N9·N10 재실패 |
+
+### 아직 안 한 것 (의도)
+
+- **스택 재빌드·nginx 관통 한 홉** — 오너가 다음으로 미뤘다.
+- **화면(활동 타임라인)** — 별도 슬라이스.
+- **auto-promote 503 partial 기록** — 위 판단 사안.
+- **A2=C 확장** — `ai_request` 13 행이 대상이고 A8 재검토가 함께 간다.
+
+### Next steps (다음 작업자에게)
+
+1. **미검증 구간 = 이 두 커밋**(accept 확장 + 문서). 앞의 Phase 9 본체는 검증 합격(`ad195e5`).
+2. **오너 대기 두 건**: 스택 재빌드 후 `curl :5520/api/admin/users` = **401** 확인(Slice 2 관통
+   한 홉) · dogfood 착수(GATE-1).
+3. **자연스러운 다음 슬라이스는 화면**(활동 타임라인) — API 는 `GET /projects/{id}/activity`
+   (operation 77)로 이미 서 있고 `schema.d.ts` 도 재생성돼 있다.
