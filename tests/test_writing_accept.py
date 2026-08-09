@@ -312,6 +312,41 @@ class WritingAcceptApiTest(unittest.TestCase):
         )
         asyncio.run(client.aclose())
 
+    def test_a_partial_accept_still_records_the_saved_version(self):
+        """★ 기록 조건은 상태코드가 아니라 **정본이 바뀌었는가**다 (SoT v1.7.93).
+
+        이 경로는 draft version 이 저장된 뒤 분석 job 만 실패한 자리라 응답이
+        502(partial envelope)인데도 **정본은 바뀌었다**. 상태코드로 판정했다면
+        타임라인이 실제로 일어난 저장을 빠뜨렸을 자리다.
+
+        **이 셀이 왜 따로 필요한가**(2026-08-09 독립 검증이 연 조건): 같은 handler
+        안에 기록 분기가 **둘**인데, 전수 가드
+        ``ActivityActionClassificationTest::test_every_logged_route_actually_records``
+        는 endpoint 소스에 ``activity.record(`` 가 **있는지**만 본다 — 성공 분기가
+        남아 있으면 이 502 분기를 통째로 지워도 소스 스캔이 만족돼 **전수 회귀가
+        전부 green 이었다**(실측). 분기를 보는 것은 행위 셀뿐이므로 **기록 분기마다
+        하나씩** 필요하다.
+
+        over-strict 도 함께 문다 — ``events`` 가 정확히 1건이라 이 분기에서 두 번
+        기록하는 과잉 교정에서도 실패한다.
+        """
+        repo = InMemoryActivityLogRepository()
+        client, project, draft, base, _ = self._setup(
+            analysis=_FailingAnalysis(InMemoryAnalysisRepository()),
+            activity_repo=repo)
+
+        response = self._post(client, project, draft, base.draft_version.id)
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(len(repo.events), 1)
+        event = repo.events[0]
+        self.assertEqual(event.action, "draft_version_accepted")
+        self.assertEqual(event.project_id, project)
+        self.assertEqual(
+            event.target_id, response.json()["saved"]["draft_version_id"]
+        )
+        asyncio.run(client.aclose())
+
     def test_a_bounced_accept_is_not_recorded(self):
         """over-strict — Gate 가 거부하면 저장이 없고, 저장이 없으면 기록도 없다.
 
