@@ -515,3 +515,66 @@ N2 행을 실제 diff 로 고쳤다.
    한 홉) · dogfood 착수(GATE-1).
 3. **자연스러운 다음 슬라이스는 화면**(활동 타임라인) — API 는 `GET /projects/{id}/activity`
    (operation 77)로 이미 서 있고 `schema.d.ts` 도 재생성돼 있다.
+
+---
+
+## Task 7 — accept 확장 두 커밋 독립 검증 (`170ea3a`·`ca97f2b`)
+
+Task 6 이 남긴 "미검증 구간"을 **구현 세션이 아닌 세션**이 감사했다. 검증 서사·재현 명령·
+경계 행렬은 기록에 있다(여기 복사하지 않는다):
+[`verifications/2026-08-09/service_activity_log_accept_extension.md`](../../verifications/2026-08-09/service_activity_log_accept_extension.md).
+
+### User Decisions and Rationale
+
+- **오너 지시(2026-08-09)**: 다음 작업으로 **미검증 구간 독립 검증**을 고름(스택 재빌드 관통 ·
+  화면 슬라이스 · dogfood 착수를 제치고). 근거는 이 저장소의 표준 리듬 — 미검증 구간을
+  남긴 채 다음 슬라이스를 열지 않는다.
+
+### 판정
+
+**조건부 합격** — 조건 1건(Blocking), 비차단 3건.
+
+| 축 | 결과 |
+|---|---|
+| 분류표 20/20/40 · 정본 11 · `ai_request` 13 · 리터럴 2종 | 코드 실측이 정본 3종과 문자 일치 |
+| 성공 · Gate 거부 두 분기 | 양방향으로 잠겨 있음 |
+| **502 partial 분기** | **★ 잠그는 셀 0건 — Blocking** |
+| 뮤테이션 N9 재현 | 일치(1 셀) |
+| 뮤테이션 N10 재현 | **재실패 셀 하나 불일치**(건수 2 는 맞음) |
+| 기준선 | `2246/4/2324`(보정 `2249/1`) skip 사유까지 재현 |
+
+### ★ Blocking — 계약이 열거한 세 분기 중 하나가 빈 칸이다
+
+SoT v1.7.93 은 기록 조건을 세 분기로 **열거**한다(성공 · Gate 거부 · **502 partial**).
+셋째의 `activity.record(...)` 6줄([`routers/writing.py:1273`](../../../services/application/app/routers/writing.py#L1273))을
+지운 채 **전수 회귀 `2246/4/2324` 전부 green** 이었다. 전수 가드는 같은 handler 의 성공
+분기에 남은 `activity.record(` 로 소스 스캔이 만족돼 통과한다.
+
+**Task 6 이 N9 에서 이 한계를 스스로 적고**(*"분기마다 행위 셀이 필요하다"*) **정작 그
+분기의 셀을 안 넣은 것**이 이 결함의 형태다. 규칙을 아는 것과 적용하는 것이 다른 자리이며,
+`git status --short` 게이트와 같은 종류의 실패다.
+
+닫는 법은 한 셀이고 하네스 변경이 없다(`_setup` 이 `analysis` 와 `activity_repo` 를 이미
+함께 받는다) — 구체 코드는 기록 §5.
+
+### 비차단 3건
+
+1. **N10 페어링 정정 필요** — work_log Task 6 표와 SoT v1.7.93 이 재실패 셀을
+   `test_a_saved_accept_is_recorded_in_the_activity_log` 로 적었으나 실제는
+   **`test_non_pass_is_200_without_saved_artifacts`**(기존 셀 — `saved=None` 역참조가 500).
+2. **idempotent replay 가 이벤트를 매번 추가한다** — accept(200·502)와 `save_draft`(9.0 본체)가
+   **똑같으므로 이 슬라이스 편차가 아니다.** 계약이 침묵하는 축이고, **화면 슬라이스가
+   "저장 3번"으로 그릴 때** 결정한다(선택지 셋은 HANDOFF 추적 부채).
+3. `activity/log.py:88` docstring 이 아직 "19 개 호출부".
+
+### 검증자가 고치지 않은 것 (의도)
+
+- **B-1 을 직접 닫지 않았다** — 가이드 §"the verifier does not silently fix the defect".
+  셀 추가는 오너 지시 후 별도 커밋.
+- 비차단 3건도 손대지 않았다(정정 문구는 기록에 있고, 반영 여부는 오너 판단).
+
+### 인덱스·숫자 갱신 (이 기록이 움직인 것)
+
+`docs/verifications/README.md` 229 → **230**건 · 조건부 66 → **67** · 새 행 ·
+`docs/README.md` · `README.md` 두 자리 + 분포 문장. `test_docs_indexes.py` **13 cells /
+240 subtests** 통과. **다음 전수 회귀 예상값 `2249/1/2325`**(subtest +1 = 판정 열 전수 셀).
