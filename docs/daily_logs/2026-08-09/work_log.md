@@ -484,13 +484,23 @@ N2 행을 실제 diff 로 고쳤다.
 | # | 방향 | 적용한 diff | file | 실패한 셀 |
 |---|---|---|---|---|
 | N9 | under | 성공 경로의 `activity.record(...)` **블록 삭제** | `routers/writing.py` | `WritingAcceptApiTest::test_a_saved_accept_is_recorded_in_the_activity_log` (1) |
-| N10 | **over** | `if result.saved is not None:` → `if True:`(Gate 거부에도 기록) | `routers/writing.py` | `::test_a_bounced_accept_is_not_recorded` · `::test_a_saved_accept_is_recorded_in_the_activity_log` (2) |
+| N10 | **over** | `if result.saved is not None:` → `if True:`(Gate 거부에도 기록) | `routers/writing.py` | `::test_a_bounced_accept_is_not_recorded` · **`::test_non_pass_is_200_without_saved_artifacts`** (2) |
+
+> **★ N10 행은 2026-08-09 독립 검증이 정정했다**(Task 7·8). 종전 이 칸은 둘째 셀을
+> `::test_a_saved_accept_is_recorded_in_the_activity_log` 로 적었으나 **그 셀은 통과했다** —
+> 실제로 물린 것은 **기존 셀** `::test_non_pass_is_200_without_saved_artifacts` 이고, 이유는
+> 기록이 아니라 `saved=None` 역참조가 `AttributeError` → 500 을 만들었기 때문이다. **건수 2 는
+> 맞아 결론은 안 바뀐다.** 가이드 §"Record which mutation hit which cell" 이 경고하는 형태다.
 
 **★ N9 가 드러낸 가드의 한계 — 다음 사람이 알아야 한다**: 성공 경로의 record 를 지워도
 **전수 가드(`test_every_logged_route_actually_records`)는 통과한다.** 같은 handler 안 502
 분기에 `activity.record(` 가 남아 **소스 스캔이 만족되기 때문**이다. 즉 그 가드는 배선의
 **존재**를 보지 **분기**를 보지 못한다 — 무는 것은 행위 셀이다. 한 handler 가 기록 분기를
 여럿 가지면 **분기마다 행위 셀이 필요**하다.
+
+> **★ 그런데 이 Task 는 그 문장을 적고도 502 분기의 셀을 넣지 않았다** — 독립 검증(Task 7)이
+> 그 자리를 Blocking 으로 잡았고 Task 8 이 닫았다. **규칙을 아는 것과 적용하는 것은 다르다**
+> (`git status --short` 게이트가 아홉 번 밟힌 것과 같은 종류의 실패다).
 
 ### Verification
 
@@ -578,3 +588,57 @@ SoT v1.7.93 은 기록 조건을 세 분기로 **열거**한다(성공 · Gate �
 `docs/verifications/README.md` 229 → **230**건 · 조건부 66 → **67** · 새 행 ·
 `docs/README.md` · `README.md` 두 자리 + 분포 문장. `test_docs_indexes.py` **13 cells /
 240 subtests** 통과. **다음 전수 회귀 예상값 `2249/1/2325`**(subtest +1 = 판정 열 전수 셀).
+
+---
+
+## Task 8 — 검증 지적 보강 (Blocking 1 + 비차단 2 폐쇄)
+
+### User Decisions and Rationale
+
+- **오너 지시(2026-08-09)**: *"보강할 부분 네가 보강해줘."* Task 7 검증이 낸 조건과 비차단을
+  같은 날 닫으라는 결정. **replay 축(비차단 ②)만 남겨 뒀다** — 계약이 침묵하는 자리고
+  선택지 ⓐⓑⓒ 중 고르는 것은 오너 결정이라 구현자가 정할 수 없다.
+
+### Completed work
+
+| 파일 | 변경 |
+|---|---|
+| [`tests/test_writing_accept.py`](../../../tests/test_writing_accept.py) | **+1 cell** — `test_a_partial_accept_still_records_the_saved_version`(502 · events 1 · action/project_id/target_id). 73 → **74 cells** |
+| [`activity/log.py`](../../../services/application/app/activity/log.py) | docstring "19 개 호출부" → **20 경로**(호출 지점 21 — accept 가 두 분기) |
+| `docs/system-contract-sot.md` v1.7.93 행 | "회귀 +2 → **+3 cells**" · 뮤테이션 2종 → 3종 · N10 페어링 정정 · **버전은 안 올렸다**(계약 무변, 사실 정정) |
+| work_log Task 6 | N10 행 실측대로 정정 + 인용 블록 |
+| 검증 기록 §6-b·Verdict·Outstanding | 조건 폐쇄 표기 |
+| HANDOFF · README | 추적 부채 폐쇄 · 기준선 |
+
+### 뮤테이션 (양방향 — 새 셀 하나가 둘 다 문다)
+
+| # | 방향 | 적용한 diff | 실패한 셀 |
+|---|---|---|---|
+| V1 | under | 502 분기의 `activity.record(...)` **블록 6줄 삭제** | `::test_a_partial_accept_still_records_the_saved_version` (1) — `1 failed, 57 passed` |
+| V2 | **over** | 같은 분기에 `activity.record(...)` **한 번 더**(이중 기록) | 같은 셀 (1) — `events == 1` 단정이 문다 |
+
+**V1 은 보강 전에는 아무것도 물지 않았다**(전수 회귀 `2246/4/2324` 전부 green). 그것이
+Task 7 의 Blocking 이고, 같은 변이가 이제 정확히 한 셀을 문다.
+
+### 판정을 승격하지 않은 이유 (다음 사람이 볼 자리)
+
+오너 결정(2026-08-06)은 *"조건이 닫히면 그 기록의 최종 판정을 따른다"* 지만, **이 폐쇄를
+한 것이 검증을 한 바로 그 세션**이다. 자기가 낸 조건을 자기가 닫고 자기 판정을 올리면
+독립성이 남지 않으므로 **인덱스 판정 열은 `조건부 합격` 그대로 두었다**. 따라서
+**이 Task 의 산출물(셀 1 + 주석 + 문서 정정)이 지금 미검증 구간**이다.
+
+### Verification
+
+| 검사 | 결과 |
+|---|---|
+| 전수 회귀(알파, test-mongo ON) | `2247 passed / 4 skipped / 2325 subtests in 185s` → **보정 `2250 / 1 / 2325`** |
+| 직전 `2249/1/2324` 대비 | **셀 +1**(502 분기 셀) · **subtest +1**(검증 기록 1건 — 코드 무관) — Task 7 예고값과 일치 |
+| operation | **77 무변** |
+| `test_docs_indexes.py` | `13 cells / 240 subtests` |
+| 뮤테이션 | V1·V2 재실패 |
+
+### 아직 안 한 것 (의도)
+
+- **replay 축**(비차단 ②) — 오너 결정 사안. 트리거는 화면 슬라이스.
+- **판정 승격** — 위 사유.
+- 스택 재빌드·nginx 관통 한 홉 · dogfood 착수 — 오너 대기 유지.
