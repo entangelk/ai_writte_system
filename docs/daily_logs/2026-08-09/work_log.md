@@ -350,7 +350,7 @@ work_log 가 예고한 그대로), 남는 1건은 호스트에서 구조적으�
 | # | 방향 | 적용한 diff | file | 실패한 셀 |
 |---|---|---|---|---|
 | N1 | under | 개명 endpoint 의 `activity.record(...)` 삭제 | `routers/projects.py` | `test_every_logged_route_actually_records`·`test_the_recorded_action_literal_matches_the_table`(각 1 SUBFAIL) · `test_renaming_records_both_the_old_and_the_new_name` · `test_the_owner_reads_…_newest_first` · `test_the_response_carries_the_value_change` (5) |
-| N2 | under | 기록을 handler **맨 앞**으로(= A7 의 B안 형태) | `routers/projects.py` | `test_a_conflicting_request_leaves_no_trace` · `test_the_owner_reads_…_newest_first` (2). **404 셀은 안 물었다 — 위 Issues 참조** |
+| N2 | under | `activity.record(...)` 를 `try:` **앞에 삽입**(원래 호출은 그대로 두었으므로 **중복 기록**이 된다) | `routers/projects.py` | `test_a_conflicting_request_leaves_no_trace` · `test_the_owner_reads_…_newest_first` (2). **404 셀은 안 물었다 — 위 Issues 참조.** 아래 Task 5 가 이 행을 정밀화한다 |
 | N3 | **over** | A4=A 격리를 걷어내 fail-closed 로 | `activity/log.py` | `test_a_broken_activity_store_does_not_break_the_request` · `test_a_write_failure_does_not_reach_the_caller` (2) |
 | N4 | under | purge 배선 한 줄 삭제 | `routers/admin.py` | `ActivityPurgeTest::test_purging_a_project_removes_its_activity` (1) |
 | N5 | under(**I1**) | 문서 필드를 `project_id` → `target_project_id`(8.2c 흉내) | `activity/log_mongo.py` | 어댑터 5 + 실 Mongo 조립 1 + **`test_the_activity_log_is_swept`**(reconciler 가 못 찾는다) (7) |
@@ -385,3 +385,55 @@ work_log 가 예고한 그대로), 남는 1건은 호스트에서 구조적으�
    분담 · 19 배선이 전부 결과 뒤인지 · `writing/accept` 판단.
 2. **`writing/accept` 오너 확인** 뒤 필요하면 행 하나 이동.
 3. 화면(활동 타임라인)은 별도 슬라이스.
+
+---
+
+## Task 5 — 독립 검증 반영 (`ff65ff1` 대상) · 비차단 2건 처리
+
+독립 세션이 **합격 · Blocking 0** 으로 검증했다
+([기록](../../verifications/2026-08-09/service_activity_log.md)). 되돌림은 없고
+비차단 지적을 닫는 것이 범위다.
+
+### 처리
+
+| 지적 | 처리 |
+|---|---|
+| ① **N2 뮤테이션의 셀 수가 내 보고(2)와 하나 다르다(1)** — 검증자는 "rename 호출 직전 이동" 으로 시위했고 1 셀(409)이 물었다 | **두 변이를 각각 다시 재서 원인을 특정했다**(아래). 내 표기 *"기록을 handler 맨 앞으로"* 가 부정확했다 — 실제 diff 는 **이동이 아니라 삽입**이었다 |
+| ② **`writing/accept` 분류** | 오너 결정 대기 유지. 검증자도 *"넓히는 것이 자연스럽다"* 로 같은 판단이고, **A8 을 함께 다시 봐야 한다**는 조건까지 일치한다 |
+
+### ★ ① 의 원인 — 삽입과 이동은 **다른 뮤테이션**이다
+
+두 변이를 같은 초점 스위트에서 각각 실측했다:
+
+| 변이 | 적용한 diff | 실패 셀 |
+|---|---|---|
+| **N2a**(내가 돌린 것) | `activity.record(...)` 를 `try:` **앞에 삽입** — 원래 호출을 **지우지 않았다** | `test_a_conflicting_request_leaves_no_trace` · `test_the_owner_reads_…_newest_first` (**2**) |
+| **N2b**(검증자) | record 블록을 **rename 호출 직전으로 이동**(원래 자리에서 제거) | `test_a_conflicting_request_leaves_no_trace` (**1**) |
+
+**둘째 셀이 무는 이유는 순서가 아니라 중복이었다** — N2a 에서는 성공한 개명 하나가
+`project_renamed` **두 행**을 남기므로 최신순 목록 단정이 깨진다. 즉 내 N2a 는
+*"결과 뒤에 쓴다"* 와 *"한 번만 쓴다"* 를 **동시에** 흔든 변이였고, A7 계약을 겨냥한
+쪽은 **409 셀 하나**다(양쪽 변이에서 모두 물린 그 셀).
+
+**계약 검증에는 영향이 없다** — 핵심 셀이 두 변이 모두에서 물었다. 틀린 것은 **표기**이며
+N2 행을 실제 diff 로 고쳤다.
+
+**★ 일반화해서 절차 정본에 올렸다**: 뮤테이션은 **적용한 diff 를 그대로** 적어야 하고
+요약어(*"앞으로 옮겼다"*)로 적으면 안 된다 — **삽입과 이동은 다른 변이**라 재현자가
+다른 셀 수를 얻고, 그러면 매트릭스의 차이가 *가드의 약함* 때문인지 *변이의 범위* 때문인지
+가릴 수 없다(2026-08-04 Slice 8.4 에서 다섯 중 셋이 갈라진 것과 같은 병이다).
+[`docs/guides/verification.md`](../../guides/verification.md) §"Mutation testing" 에 한 줄 추가.
+
+### 검증이 채운 것 (내가 안 잰 축)
+
+- **분류표 40 전수를 `app.routes` 에서 직접 재유도**했다 — 나는 가드가 통과하는 것으로
+  갈음했는데, 검증자는 미등재 0·stale 0 을 손으로 대조했다.
+- **8.2c 와의 대칭을 두 셀 이름으로 확인**했다(`test_the_project_name_history_is_not_swept`
+  ↔ `test_the_activity_log_is_swept`). 내가 "나란히 둔 것이 의도" 라고만 적은 자리를
+  실제로 마주 놓고 읽었다.
+- **openapi·tier 를 별도로 대조**해 operation 77·project 62 를 재확인했다.
+
+### 아직 안 한 것 (의도)
+
+- **검증 기록 본문은 고치지 않았다** — 남의 산출물이고 판정·근거가 정확하다.
+- **`writing/accept`** — 오너 결정 대기 그대로.

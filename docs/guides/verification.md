@@ -75,6 +75,7 @@ Then pick the branch that matches your situation:
 - **Over-strict direction**: apply a plausible *over-correction* (an off-by-one added where the original cancellation was deliberate, a guard widened to reject a legitimate case). Some cell must fail here too.
 - **Defensive assertions need the opposite move.** A contract clause of the form "X is never allowed / Y cannot happen" is often protected by **no cell at all**, and inserting a defect proves nothing — a test that does not exist cannot fail. Instead **remove the defence** (or pre-apply the fix you are about to make) and see whether anything notices. Two Blocking findings in this repo were found only this way (2026-08-02).
 - **Record which mutation hit which cell.** "All mutations re-failed" without the pairing does not tell a later reader whether each cell locks its own clause or one broad cell absorbed them all.
+  - **Write down the diff you applied, not a paraphrase of it.** *"Moved the call to the top"* and *"inserted a second call at the top"* are **different mutations** and they hit different cells — measured 2026-08-09 (Phase 9): the insertion failed 2 cells because it also broke "written exactly once", the true move failed only the 1 cell that locks the ordering contract. A verifier re-deriving from the paraphrase gets a different count, and then nobody can tell whether the gap is a weak guard or a wider mutation.
 
 ### ★ Reading the result — `grep FAILED` misses subtest failures
 
