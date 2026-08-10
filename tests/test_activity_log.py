@@ -314,6 +314,35 @@ class MongoActivityLogRepositoryTest(unittest.TestCase):
         for _keys, kwargs in self.collection.indexes:
             self.assertNotIn("expireAfterSeconds", kwargs)
 
+    def test_the_merged_read_asks_the_store_for_exactly_the_named_projects(self) -> None:
+        """9.2 P1=ⓐ — 어댑터가 `$in` 으로 **호출자가 준 집합만** 묻는다."""
+        for index, project_id in enumerate(["p1", "p9", "p2"]):
+            self.repo.insert(ActivityEvent(
+                id=f"e{index}", project_id=project_id, actor_user_id="u1",
+                action="draft_created", target_type="draft", target_id="d1",
+                at=_AT + timedelta(hours=index),
+            ))
+
+        rows = self.repo.list_for_projects(project_ids=("p1", "p2"), limit=10)
+
+        self.assertEqual({row.project_id for row in rows}, {"p1", "p2"})
+
+    def test_an_empty_project_set_reads_nothing_at_the_store(self) -> None:
+        """★ **"없음"을 "전부"로 뒤집는 변경을 어댑터에서 직접 문다.**
+
+        서비스에도 빈 집합 단락이 있지만 **그것이 이 성질을 잠그지는 못한다** —
+        두 층이 서로를 가려 어느 쪽을 망가뜨려도 상위 셀이 통과한다(2026-08-10
+        뮤테이션 실측: 서비스 단락 제거·어댑터 `$in` → 무필터, 둘 다 안 물었다).
+        그래서 **저장소를 직접 부르는 이 셀이 그 자리**다. 뒤집히면 프로젝트가
+        없는 회원에게 **남의 활동이 전부** 보인다.
+        """
+        self.repo.insert(ActivityEvent(
+            id="e0", project_id="p1", actor_user_id="u1", action="draft_created",
+            target_type="draft", target_id="d1", at=_AT,
+        ))
+
+        self.assertEqual(self.repo.list_for_projects(project_ids=(), limit=10), ())
+
     def test_purge_deletes_by_project(self) -> None:
         self.repo.purge_project(project_id="p1")
 
@@ -406,10 +435,13 @@ class _Collection:
         self.docs.append(dict(doc))
 
     def find(self, query):
-        return _Cursor([
-            doc for doc in self.docs
-            if doc["project_id"] == query["project_id"]
-        ])
+        wanted = query["project_id"]
+        # 9.2 P1=ⓐ 가 `$in` 을 쓴다. fake 가 그것을 모르면 **어댑터 셀이 통째로
+        # 무의미**해지므로(무엇을 물어도 같은 답) 여기서 두 형태를 모두 해석한다.
+        if isinstance(wanted, dict):
+            allowed = set(wanted["$in"])
+            return _Cursor([d for d in self.docs if d["project_id"] in allowed])
+        return _Cursor([d for d in self.docs if d["project_id"] == wanted])
 
     def delete_many(self, query):
         self.deleted.append(dict(query))
