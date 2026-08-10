@@ -1,7 +1,7 @@
 # 독립 검증 기록
 
 이 디렉터리는 **구현자가 아닌 검증자가** 각 슬라이스를 다시 뜯어본 기록이다. 2026-06-24부터
-**46일치 · 230건**이 쌓여 있다.
+**47일치 · 231건**이 쌓여 있다.
 
 ## 이 저장소의 검증이 무엇인가
 
@@ -24,7 +24,7 @@
 원래 결함을 재현하면 실패해야 하고(under-strict), 과잉 교정으로 정상 경로를 깨도 실패해야 한다
 (over-strict).
 
-## 판정 분포 (2026-08-09 기준)
+## 판정 분포 (2026-08-10 기준)
 
 > **판정 열은 그 기록의 *최종* 판정이다**(오너 2026-08-06: *"테스트의 목적은 조건이 닫히는
 > 거니까"*). 조건부로 나갔다가 조건이 닫혀 승격된 기록은 **그 기록 자신의 최종 문구**를 따른다.
@@ -35,8 +35,8 @@
 
 | 판정 | 건수 | 뜻 |
 |---|---|---|
-| 합격 | 161 | blocking 결함 없음 |
-| **조건부 합격** | **67** | 합격이되 닫아야 할 조건이 있었다 |
+| 합격 | 163 | blocking 결함 없음 |
+| **조건부 합격** | **66** | 합격이되 닫아야 할 조건이 있었다 |
 | **불합격** | **2** | 핵심 계약 위반으로 다음 슬라이스 진행이 차단됐다 |
 
 **조건부 합격이 29%**라는 것이 이 절차가 형식이 아니라는 증거다. 검증이 실제로 지적을 냈고,
@@ -63,9 +63,13 @@
 
 최신순. 같은 날 여러 건이면 슬라이스별로 나뉜 것이다.
 
+### 2026-08-10
+
+| [`accept_activity_cell_reinforcement.md`](2026-08-10/accept_activity_cell_reinforcement.md) | accept 활동 로그 **보강분**(`66f2845`·`33fe4b2`) — 어제 조건부 합격의 조건을 검증 세션 자신이 닫아 미검증으로 남았던 구간. 새 셀이 **네 방향**으로 문다(삭제·이중 기록 + **검증자 추가 축** 리터럴 변조·`target_id` 변조 → 공허한 단정 아님)·502 분기를 지워도 전수 가드는 통과하므로 **유일 방어**임을 재현·**계약의 3분기 열거가 완전함을 코드로 확인**(저장 뒤 예외는 `_finalize` 의 `WritingAcceptAnalysisError` 하나뿐, replay 도 그 경로를 지나 기록됨)·**정정된 N10 페어링 재현**(2 cells, 정정 전 표기가 틀렸음까지 확인)·주석 수(20 경로·지점 21) 코드 실측 일치. 기준선 `2250/1/2325` 를 **베타에서 원시값으로** 재현(알파 보정이 옳았다는 독립 증거, 939s). **Blocking 0** → 어제 기록을 **합격으로 승격**. 비차단 1(§6-b·work_log 의 "73 → 74 cells" 는 3-파일 세트 수인데 파일 하나 행에 붙었다 — 그 파일은 50 → 51). | **합격** |
+
 ### 2026-08-09
 
-| [`service_activity_log_accept_extension.md`](2026-08-09/service_activity_log_accept_extension.md) | Phase 9 A2 추가 확정(`170ea3a`·`ca97f2b`) — 활동 로그가 `writing/accept` 를 포함(19 → **20**). 분류표 20/20/40·정본 11·`ai_request` 13·리터럴 `draft_version_accepted` 를 코드에서 재측정해 정본 3종과 문자 일치 확인, 기준선 `2246/4/2324`(보정 `2249/1`) skip 사유까지 재현. 구현자 N9 일치, **N10 은 재실패 셀 하나가 불일치**(신설 saved 셀이 아니라 기존 `test_non_pass_is_200_without_saved_artifacts`). **★ Blocking 1 — SoT v1.7.93 이 "남긴다"고 명시한 502 partial 분기를 잠그는 셀이 0건**: 그 `activity.record(...)` 6줄을 지워도 **전수 회귀 2246/4/2324 전부 green**(전수 가드는 같은 handler 의 성공 분기로 만족된다). 비차단 3건(뮤테이션 페어링 정정 · replay 가 이벤트를 매번 추가 — **9.0 본체 `save_draft` 와 동일 성질이라 이 슬라이스 편차 아님** · 주석 "19 개 호출부"). | **조건부 합격** |
+| [`service_activity_log_accept_extension.md`](2026-08-09/service_activity_log_accept_extension.md) | Phase 9 A2 추가 확정(`170ea3a`·`ca97f2b`) — 활동 로그가 `writing/accept` 를 포함(19 → **20**). 분류표 20/20/40·정본 11·`ai_request` 13·리터럴 `draft_version_accepted` 를 코드에서 재측정해 정본 3종과 문자 일치 확인, 기준선 `2246/4/2324`(보정 `2249/1`) skip 사유까지 재현. 구현자 N9 일치, **N10 은 재실패 셀 하나가 불일치**(신설 saved 셀이 아니라 기존 `test_non_pass_is_200_without_saved_artifacts`). **★ Blocking 1 — SoT v1.7.93 이 "남긴다"고 명시한 502 partial 분기를 잠그는 셀이 0건**: 그 `activity.record(...)` 6줄을 지워도 **전수 회귀 2246/4/2324 전부 green**(전수 가드는 같은 handler 의 성공 분기로 만족된다). 비차단 3건(뮤테이션 페어링 정정 · replay 가 이벤트를 매번 추가 — **9.0 본체 `save_draft` 와 동일 성질이라 이 슬라이스 편차 아님** · 주석 "19 개 호출부"). **조건은 같은 날 닫혔고 2026-08-10 독립 세션이 폐쇄를 재현해 합격으로 승격**([`accept_activity_cell_reinforcement.md`](2026-08-10/accept_activity_cell_reinforcement.md)). | **합격** |
 | [`service_activity_log.md`](2026-08-09/service_activity_log.md) | Phase 9 Slice 9.0(`65507d9`·`c5b5af4`, A1~A8) — 서비스 활동 로그. 정본 10+검토 9=**19 경로** → `activity_events` + `GET …/activity`(op **77**). **★ N5 I1 방향**(`log_mongo` `project_id`→`target_project_id` 7셀, 8.2c `project_name_history` 와 정반대를 나란히 잠금)·**분류표 40 전수**(미등재·stale 0)·19 배선·A4 격리·A7 409 순서·A8 을 검증자가 1차 소스에서 재현. 뮤테이션 8종(7 완전일치, N2 핵심 409 일치). 회귀 `2244/4/2322`(보정 `2247/1`)·op 76→77·`schema.d.ts` +118. **Blocking 0**. `writing/accept` 정본 저장이나 오너 승인 B=19 존중→excluded+주석(오너 결정 대기, 행 하나). | **합격** |
 | [`admin_surface_separation.md`](2026-08-09/admin_surface_separation.md) | 라우터 정리 Slice 2(`5bdaf15`·`878f24d`·`bb26d6e`, A1=ⓑ) — `/admin` 8 operation 을 별도 compose 서비스로 분리 + H-2(shim drift) 폐쇄. **표면 분할(76=68∪9·교집합 `/health`)**·**openapi sha `f8b42ef1…` worktree diff IDENTICAL**·소켓 라이브(LAN 게시 포트에서 `/admin` 은 **라우터 404**)를 검증자가 1차 소스에서 재현. **★ H-2 drift 뮤테이션(M6) 재현 + 추가 M8 로 operation별 route_class 가드(A6) 생존 입증**; 뮤테이션 7종 전부 구현자 보고 셀과 일치. 회귀 `2208/4/2247`(보정 `2211/1`) 재현(172s). 컨테이너 진입점 기동 트리 마운트로 입증. **Blocking 0**. 남은 nginx→admin 컨테이너 한 홉은 재빌드 후 오너 판정. | **합격** |
 
