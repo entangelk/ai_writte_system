@@ -158,7 +158,7 @@
 |---|---|---|
 | [`09-service-activity-log.md`](09-service-activity-log.md) | 사용자 행위 기록(누가·언제·무엇을 바꿨는가). **`system_events`는 문서에만 있고 코드 0줄**이라는 실측 공백에서 출발한다. 8.2c §N2-a가 발원 | 페이즈 신설 확정(오너 2026-08-05) · **9.0 구현·검증 완료(2026-08-09)** · 부모 계획 |
 | [`09-0-service-activity-log-decisions.md`](09-0-service-activity-log-decisions.md) | 9.0 — 착수 결정(저장 위치·**기록 범위**·문서 형태·**실패 방향**·조회 통로·보존·**쓰기 지점과 누락 가드**·원장 중복) | **Resolved(2026-08-09)** — A1~A8 확정 · 구현·검증 완료 · **A2 추가 확정 19→20**(`writing/accept`) |
-| [`09-1-activity-timeline-screen-decisions.md`](09-1-activity-timeline-screen-decisions.md) | 9.1 — 활동 타임라인 **화면** 착수 결정(화면의 자리 · **최신 100건 상한** · 행위자 표시 · 라벨 정본 · **replay 중복** · target 링크) | **Resolved(2026-08-10)** — S1~S6 확정(ⓐⓐⓑⓐⓐⓑ) · **계약 영향 0 · backend 0줄** · ★ §"나중에 여는 문" F1~F6(트리거 포함) |
+| [`09-1-activity-timeline-screen-decisions.md`](09-1-activity-timeline-screen-decisions.md) | 9.1 — 활동 타임라인 **화면** 착수 결정(화면의 자리 · **최신 100건 상한** · 행위자 표시 · 라벨 정본 · **replay 중복** · target 링크) | **Resolved(2026-08-10) · 구현 완료(SoT v1.7.94)** — S1~S6 확정 · **계약 영향 0 · backend 프로덕션 0줄** · 구현이 S6 전제를 반증(→ **F7**) · ★ §"나중에 여는 문" **F1~F7**(트리거 포함, 구현 뒤에도 유지) |
 
 ### 프론트엔드
 

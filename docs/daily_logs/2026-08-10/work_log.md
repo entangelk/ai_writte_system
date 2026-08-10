@@ -312,3 +312,94 @@ S2(페이징)·S4(라벨 정본)·S5(replay)는 **고르는 순간 operation 77 
 
 1. **9.1 구현 착수 가능** — 브리프 §"결정 뒤 구현 순서" 1~7, **1번이 회귀 먼저**(20 리터럴 전수 가드).
 2. 계약 영향이 0이라 **SoT 행은 구현과 함께** 간다(지금 올릴 것이 없다).
+
+---
+
+## Task 5 — Slice 9.1 구현 (활동 타임라인 화면)
+
+### User Decisions and Rationale
+
+- **오너 지시(2026-08-10)**: *"오케이 바로 진행해보자."* 브리프 확정 직후 착수. 확정값
+  S1~S6 을 그대로 구현했고, **계약을 넓히지 않는다**는 제약을 구현 중에도 지켰다(아래 F7).
+
+### Completed work
+
+| 파일 | 변경 |
+|---|---|
+| [`frontend/src/projects/activityActions.ts`](../../../frontend/src/projects/activityActions.ts) | **신규** — UI 문구 정본 20행 + `target_type` 링크/비링크 **전수 분류**(사유 포함) |
+| [`tests/test_activity_ui_labels.py`](../../../tests/test_activity_ui_labels.py) | **신규 4 cells / 28 subtests** — ★ 두 정본을 잇는 **연결선** |
+| [`frontend/src/projects/ActivityTimelinePage.tsx`](../../../frontend/src/projects/ActivityTimelinePage.tsx) | **신규** — 타임라인 · 빈 상태 · 에러 · **상한 문구** |
+| `ActivityTimelinePage.test.tsx` | **신규 7 cells** |
+| `App.tsx` · `DraftList.tsx` | route + 진입 링크(access-log 링크 옆) |
+| `api/client.ts` | `listProjectActivity` + `ActivityEvent` 타입 |
+
+**프로덕션 백엔드 0줄** — 새로 생긴 파이썬 파일은 테스트뿐이다.
+
+### ★ 연결 가드를 프론트가 아니라 pytest 에 둔 이유
+
+S4=ⓐ 의 조건이 *"백엔드가 21번째 action 을 더하면 실패한다"* 인데, **프론트는 백엔드 리터럴
+목록을 알 방법이 없다** — `schema.d.ts` 는 `action` 을 `string` 으로만 준다(enum 이 아니다).
+두 표를 동시에 볼 수 있는 자리가 pytest 뿐이라 거기 뒀다. 파이썬 테스트가 저장소의
+비-파이썬 파일을 읽는 것은 `test_docs_indexes.py`(문서)·`test_compose_exposure.py`(compose)
+선례를 따른다.
+
+`target_type` 도 같은 형태로 **전수 등재**를 강제했다(`billable_actions` 관례) — 새 종류가
+생기면 링크하거나 **사유와 함께** 비링크로 등재해야 한다. 빠진 것과 일부러 뺀 것을 구분한다.
+
+### ★ 구현이 브리프 전제를 반증했다 — S6 이 좁혀졌고 F7 이 생겼다
+
+브리프는 `draft`·`draft_version` 둘을 링크한다고 적었지만, 편집 화면 route 는
+`/projects/:projectId/drafts/:draftId` 이고 **이벤트 payload 에 `draft_id` 가 없다**
+(`target_id` 는 version id). 넣으려면 **operation 77 계약 변경**이라 오너 승인 아래 지키기로 한
+*"계약 영향 0"* 과 어긋난다.
+
+**그래서 `draft` 만 링크하고 `draft_version` 은 사유와 함께 비링크로 등재했다** — 그 자리에서
+계약을 넓히지 않았고 **유예 F7** 로 올렸다(트리거: payload 에 `draft_id` 가 생기면).
+
+**교훈**: 브리프 §0 실측 표가 **응답 필드를 나열했는데도** S6 을 쓸 때 대조하지 않았다.
+화면 결정은 *"필요한 데이터가 응답에 있는가"* 를 **필드 단위**로 봐야 한다 — 종류가 있다고
+route 를 만들 **재료**가 있는 것은 아니다.
+
+### 뮤테이션 (7종 — 양방향)
+
+**전부 커밋(`86ca173`) 뒤에 돌렸고**(§6 순서), 매회 전후로 `git status --short` 가 비어 있음을
+확인했으며 마지막 원복 뒤 `git diff HEAD` 도 비어 있다.
+
+| # | 방향 | 적용한 diff | 재실패 셀 |
+|---|---|---|---|
+| M1 | under | `activityActions.ts` 라벨 1행 삭제(`gate_finding_dismissed`) — 백엔드가 21번째를 더한 것과 같은 집합 차이 | `test_the_ui_table_labels_exactly_the_logged_actions` (1) |
+| M2 | **over** | 백엔드가 모르는 유령 라벨 1행 추가(`memory_manually_edited`) | 같은 셀 (1) |
+| M3 | under | 라벨 칸에 **리터럴을 복사**(`draft_version_saved: "draft_version_saved"`) — 집합은 맞고 화면만 영어가 되는 형태 | `test_every_label_is_korean_prose_not_the_literal` (**SUBFAILED** 1) |
+| M4 | under | `NON_LINKABLE_TARGET_TYPES` 에서 `gate_finding` 삭제(미등재) | `test_every_target_type_is_classified_as_linkable_or_not` (1) |
+| M5 | **over** | 화면이 `actor_user_id` 를 렌더(access-log 선례를 따라가는 회귀) | `does not show an actor column` (1) |
+| M6 | under | "최근 100건까지 보여줍니다" 문구 삭제 | `says the 100-item ceiling out loud` (1) |
+| M7 | **over** | `draft_version` 도 링크(version id 를 draft id 자리에 넣는 깨진 링크) | `links only the target types that have a screen` (1) |
+
+**M3 이 중요한 자리다** — M1·M2 만으로는 "집합이 같으면 통과"라 라벨 칸에 리터럴을 복사해도
+가드가 만족된다. 폴백(`?? action`)이 있어서 **화면은 영어 스네이크가 되는데 테스트는 green**
+이 되는 형태이며, 두 번째 셀이 그것을 막는다.
+
+### Verification
+
+| 검사 | 결과 |
+|---|---|
+| backend 전수(베타, test-mongo ON) | **`2254 passed / 1 skipped / 2354 subtests in 906s`** — 종전 `2250/1/2326` 대비 **셀 +4 · subtest +28**(전부 새 가드) |
+| frontend | **`272 passed / 19 files`** — 종전 `265/18` 대비 **+7 cells · +1 file** |
+| build | **701 modules**(698 → +3) · 진입 **417.19 kB**(414.36 → +2.83) · **lazy 청크 무변** |
+| `tsc --noEmit` | 통과 |
+| operation | **77 무변** · 응답 형태 무변 |
+| 뮤테이션 | 7종 전부 재실패, 원복 후 트리 clean |
+
+### 아직 안 한 것 (의도)
+
+- **육안 확인** — 렌더는 회귀로 잠갔지만 실제 화면을 사람이 본 적은 없다(프론트 이미지
+  재빌드가 선행이고 그것은 오너 판단 사안이다). HANDOFF 의 "화면 육안 확인" 목록과 같은 성격.
+- **F1~F7** — 트리거와 함께 브리프에 산다.
+- **독립 검증** — 이 슬라이스가 지금 미검증 구간이다.
+
+### Next steps
+
+1. **미검증 구간 = Slice 9.1 두 커밋**. 이 저장소의 리듬대로 다음은 독립 검증이다.
+   볼 만한 축: **연결 가드가 진짜 연결인가**(백엔드에 21번째를 실제로 더해 보는 뮤테이션) ·
+   M3 형태(폴백이 만드는 조용한 통과) · **F7 판단이 옳았는가**(계약을 안 넓힌 것).
+2. 육안 확인은 프론트 재빌드 뒤 `/projects/:id/activity`.
