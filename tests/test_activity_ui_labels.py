@@ -32,7 +32,15 @@ from services.application.app.activity.log import ActivityLogService
 
 _ROOT = Path(__file__).resolve().parents[1]
 _UI_TABLE = _ROOT / "frontend" / "src" / "projects" / "activityActions.ts"
-_UI_PAGE = _ROOT / "frontend" / "src" / "projects" / "ActivityTimelinePage.tsx"
+_UI_SRC = _ROOT / "frontend" / "src"
+
+#: 상한을 **화면이 말하고 서비스가 서빙하는** 짝. 화면마다 상수가 따로 있고 서빙
+#: 메서드도 따로라, 등재되지 않은 세 번째 짝이 생기면 아래 전수 셀이 실패한다.
+_CEILINGS = {
+    "projects/ActivityTimelinePage.tsx": "list_for_project",
+    "me/PersonalHubPage.tsx": "list_for_projects",
+}
+_CEILING_DECLARATION = re.compile(r"const ACTIVITY_PAGE_SIZE = (\d+);")
 
 #: ``key: "값",`` 한 줄. 라벨표·비링크표가 같은 모양이라 하나로 읽는다.
 _ENTRY = re.compile(r'^\s{2}(\w+):\s*"(.*?)",\s*$', re.MULTILINE)
@@ -123,33 +131,59 @@ class ActivityUiTargetTypeTest(unittest.TestCase):
 
 
 class ActivityCeilingClaimTest(unittest.TestCase):
-    """화면이 말하는 상한 = 서버가 실제로 주는 상한인가 (S2=ⓐ 보강, 2026-08-10 검증 §Hardening 1).
+    """화면이 말하는 상한 = 서버가 실제로 주는 상한인가 (S2=ⓐ · 9.2 P2).
 
-    S2=ⓐ 가 요구한 것은 *"화면이 상한을 **문장으로** 말한다"* 까지이고 그 문장은 프론트 셀이
-    잠근다. **그러나 두 100 은 서로 모르는 독립 하드코딩이었다** — 프론트 상수
-    ``ACTIVITY_PAGE_SIZE`` 와 백엔드 기본값 ``ActivityLogService.list_for_project(limit=…)``.
-    백엔드 기본이 바뀌면(F1 커서 페이징 작업 등) 화면이 **서빙 상한과 다른 수를 사용자에게
-    말하게 된다** — 문구는 남아 있으므로 프론트 셀도, 백엔드 셀도 아무것도 못 본다.
+    S2=ⓐ 가 요구한 것은 *"화면이 상한을 **문장으로** 말한다"* 까지이고 그 문장은 프론트
+    셀이 잠근다. **그러나 두 수는 서로 모르는 독립 하드코딩이다** — 화면 상수와 서비스
+    기본값. 서비스 기본이 바뀌면 화면이 **서빙 상한과 다른 수를 사용자에게 말하게 되는데**,
+    문구는 남아 있으므로 프론트 셀도 백엔드 셀도 아무것도 못 본다.
 
-    S4 라벨표가 받은 것과 **같은 종류의 연결선**이다: 두 정본을 나누는 것은 옳고(하나는 서빙
-    정책, 하나는 UI 문구), 나누되 **연결**한다.
+    **★ 짝이 둘이다**(2026-08-10 검증 지적으로 넓혔다): 9.1 이 프로젝트별 화면 ↔
+    ``list_for_project`` 를 묶었는데, 9.2 가 **허브라는 두 번째 상한**을 만들면서 그
+    패턴을 따라가지 않았다 — 허브가 *"최근 100건"* 이라 말하며 50건만 주는 상태가 **어느
+    셀도 안 무는 채로** 가능했다(실측). 그래서 **등재된 짝 전수**로 잰다.
+
+    S4 라벨표가 받은 것과 **같은 종류의 연결선**이다: 나누는 것은 옳고(서빙 정책 ≠ UI
+    문구), 나누되 **연결**한다.
     """
 
-    def test_the_screen_promises_exactly_what_the_service_serves(self):
-        """양방향 — 어느 쪽 100 을 바꿔도 실패한다."""
-        served = inspect.signature(
-            ActivityLogService.list_for_project
-        ).parameters["limit"].default
-        found = re.search(
-            r"const ACTIVITY_PAGE_SIZE = (\d+);", _UI_PAGE.read_text(encoding="utf-8")
-        )
+    def _declared(self, relative: str) -> int:
+        found = _CEILING_DECLARATION.search(
+            (_UI_SRC / relative).read_text(encoding="utf-8"))
         self.assertIsNotNone(
-            found, "ACTIVITY_PAGE_SIZE 상수를 못 찾았다 — 이름이 바뀌었으면 이 패턴도 함께 고친다",
-        )
+            found, f"{relative} 의 ACTIVITY_PAGE_SIZE 를 못 찾았다 — 이름이 "
+                   "바뀌었으면 이 패턴도 함께 고친다")
+        return int(found.group(1))
+
+    def test_every_screen_promises_exactly_what_its_service_serves(self):
+        """양방향 — 어느 쪽 수를 바꿔도 그 짝이 실패한다."""
+        for relative, method_name in _CEILINGS.items():
+            with self.subTest(screen=relative):
+                served = inspect.signature(
+                    getattr(ActivityLogService, method_name)
+                ).parameters["limit"].default
+                self.assertEqual(
+                    self._declared(relative), served,
+                    f"{relative} 이 약속하는 건수와 {method_name} 이 주는 건수가 "
+                    "다르다 — 사용자에게 거짓 상한을 말하게 된다",
+                )
+
+    def test_no_screen_declares_a_ceiling_without_registering_it(self):
+        """★ 세 번째 상한이 **조용히** 생기는 것을 막는다.
+
+        9.2 가 정확히 그 형태였다 — 허브가 새 상수를 두고도 가드에 등재되지 않아
+        짝이 풀린 채였다. 등재를 강제하면 다음 화면은 그 자리에서 걸린다.
+        """
+        declaring = {
+            str(path.relative_to(_UI_SRC)).replace("\\", "/")
+            for path in _UI_SRC.rglob("*.tsx")
+            if _CEILING_DECLARATION.search(path.read_text(encoding="utf-8"))
+        }
+
         self.assertEqual(
-            int(found.group(1)), served,
-            "화면이 약속하는 건수와 서비스가 주는 건수가 다르다 — 사용자에게 "
-            "거짓 상한을 말하게 된다(S2=ⓐ 는 그 문장이 참일 것을 전제한다)",
+            declaring, set(_CEILINGS),
+            "상한을 선언한 화면과 등재된 짝이 다르다 — 새 화면이 상한을 두면 "
+            "어떤 서비스가 그것을 서빙하는지 여기 함께 적는다",
         )
 
 
