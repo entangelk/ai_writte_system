@@ -110,6 +110,7 @@ export type AdminObservabilityKpi =
   components["schemas"]["AdminObservabilityKpiResponse"];
 export type AccessGrant = components["schemas"]["AccessGrantPayload"];
 export type AccessLogEntry = components["schemas"]["AccessLogEntryPayload"];
+export type ActivityEvent = components["schemas"]["ActivityEventPayload"];
 export type AdminAuditEvent = components["schemas"]["AdminAuditEventPayload"];
 export type Project = components["schemas"]["ProjectPayload"];
 export type ProjectListResponse = components["schemas"]["ProjectListResponse"];
@@ -226,6 +227,19 @@ export async function listProjectAccessLog(projectId: string): Promise<AccessLog
     `/projects/${encodeURIComponent(projectId)}/access-log`,
   );
   return response.entries;
+}
+
+/**
+ * Phase 9 Slice 9.1 (A5=B, operation 77) — 소유자가 자기 프로젝트의 활동을 본다.
+ *
+ * ★ 응답은 **최신순 100건 고정**이다(서버 기본값, 페이징 파라미터 없음). 화면이 그
+ * 사실을 문장으로 말해야 한다 — 말하지 않으면 사용자는 "전부"로 읽는다(브리프 S2=ⓐ).
+ */
+export async function listProjectActivity(projectId: string): Promise<ActivityEvent[]> {
+  const response = await request<components["schemas"]["ActivityLogResponse"]>(
+    `/projects/${encodeURIComponent(projectId)}/activity`,
+  );
+  return response.events;
 }
 
 export function listProjects(): Promise<ProjectListResponse> {

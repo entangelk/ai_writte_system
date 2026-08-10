@@ -6,6 +6,7 @@ import { DraftEditor } from "./drafts/DraftEditor";
 import { ProjectList } from "./projects/ProjectList";
 import { ProjectOverview } from "./projects/ProjectOverview";
 import { AccessLogPage } from "./projects/AccessLogPage";
+import { ActivityTimelinePage } from "./projects/ActivityTimelinePage";
 import { ReviewInbox } from "./review/ReviewInbox";
 import { ReviewInboxDetail } from "./review/ReviewInboxDetail";
 
@@ -30,6 +31,7 @@ export function App() {
         <Route path="/projects/:projectId" element={<DraftList />} />
         <Route path="/projects/:projectId/overview" element={<ProjectOverview />} />
         <Route path="/projects/:projectId/access-log" element={<AccessLogPage />} />
+        <Route path="/projects/:projectId/activity" element={<ActivityTimelinePage />} />
         <Route
           path="/projects/:projectId/review"
           element={<ReviewInbox />}
