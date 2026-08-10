@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import inspect
 import re
 import unittest
 from pathlib import Path
@@ -27,9 +28,11 @@ from services.application.app.activity.actions import (
     ACTIVITY_ACTIONS,
     LOGGED_OPERATIONS,
 )
+from services.application.app.activity.log import ActivityLogService
 
 _ROOT = Path(__file__).resolve().parents[1]
 _UI_TABLE = _ROOT / "frontend" / "src" / "projects" / "activityActions.ts"
+_UI_PAGE = _ROOT / "frontend" / "src" / "projects" / "ActivityTimelinePage.tsx"
 
 #: ``key: "값",`` 한 줄. 라벨표·비링크표가 같은 모양이라 하나로 읽는다.
 _ENTRY = re.compile(r'^\s{2}(\w+):\s*"(.*?)",\s*$', re.MULTILINE)
@@ -117,6 +120,37 @@ class ActivityUiTargetTypeTest(unittest.TestCase):
         for target_type, reason in _blocks()["NON_LINKABLE_TARGET_TYPES"].items():
             with self.subTest(target_type=target_type):
                 self.assertNotEqual(reason.strip(), "")
+
+
+class ActivityCeilingClaimTest(unittest.TestCase):
+    """화면이 말하는 상한 = 서버가 실제로 주는 상한인가 (S2=ⓐ 보강, 2026-08-10 검증 §Hardening 1).
+
+    S2=ⓐ 가 요구한 것은 *"화면이 상한을 **문장으로** 말한다"* 까지이고 그 문장은 프론트 셀이
+    잠근다. **그러나 두 100 은 서로 모르는 독립 하드코딩이었다** — 프론트 상수
+    ``ACTIVITY_PAGE_SIZE`` 와 백엔드 기본값 ``ActivityLogService.list_for_project(limit=…)``.
+    백엔드 기본이 바뀌면(F1 커서 페이징 작업 등) 화면이 **서빙 상한과 다른 수를 사용자에게
+    말하게 된다** — 문구는 남아 있으므로 프론트 셀도, 백엔드 셀도 아무것도 못 본다.
+
+    S4 라벨표가 받은 것과 **같은 종류의 연결선**이다: 두 정본을 나누는 것은 옳고(하나는 서빙
+    정책, 하나는 UI 문구), 나누되 **연결**한다.
+    """
+
+    def test_the_screen_promises_exactly_what_the_service_serves(self):
+        """양방향 — 어느 쪽 100 을 바꿔도 실패한다."""
+        served = inspect.signature(
+            ActivityLogService.list_for_project
+        ).parameters["limit"].default
+        found = re.search(
+            r"const ACTIVITY_PAGE_SIZE = (\d+);", _UI_PAGE.read_text(encoding="utf-8")
+        )
+        self.assertIsNotNone(
+            found, "ACTIVITY_PAGE_SIZE 상수를 못 찾았다 — 이름이 바뀌었으면 이 패턴도 함께 고친다",
+        )
+        self.assertEqual(
+            int(found.group(1)), served,
+            "화면이 약속하는 건수와 서비스가 주는 건수가 다르다 — 사용자에게 "
+            "거짓 상한을 말하게 된다(S2=ⓐ 는 그 문장이 참일 것을 전제한다)",
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover

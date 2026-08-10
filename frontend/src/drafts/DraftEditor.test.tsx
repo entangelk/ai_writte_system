@@ -1237,8 +1237,16 @@ describe("DraftEditor", () => {
     expect(screen.getByText(/과거 version 1 근거 · 현재 최신 원고가 아님/)).toBeInTheDocument();
     // Server offsets count Unicode code points; textarea selection counts UTF-16
     // code units. The leading emoji therefore moves the browser span by one.
-    expect((editor as HTMLTextAreaElement).selectionStart).toBe(2);
-    expect((editor as HTMLTextAreaElement).selectionEnd).toBe(4);
+    //
+    // ★ waitFor 인 것은 의도다(2026-08-10, 검증 §Hardening 2 의 flake 폐쇄): 선택 영역은
+    // 값과 **다른 effect** 에서 적용된다(DraftEditor.tsx 의 pendingSelection effect →
+    // setSelectionRange). 값이 도착한 직후 동기로 읽으면 그 effect 가 아직 안 돌았을 수
+    // 있고, 과부하 전수 run 에서 실제로 1건 실패했다(단독 실행은 green). **단정은 그대로
+    // 정확히 2·4 다** — 느슨하게 만든 것이 아니라 effect flush 를 기다리는 것뿐이다.
+    await waitFor(() => {
+      expect((editor as HTMLTextAreaElement).selectionStart).toBe(2);
+      expect((editor as HTMLTextAreaElement).selectionEnd).toBe(4);
+    });
     expect(fetchMock.mock.calls[6][0]).toBe(
       "/api/projects/p1/drafts/d1/versions/v1",
     );
@@ -1462,8 +1470,11 @@ describe("DraftEditor", () => {
     await waitFor(() => expect(targetEditor).toHaveValue("둘째 원고"));
     expect(confirm).toHaveBeenCalledTimes(2);
     expect(await screen.findByText(/최신 version 2 근거 · 선택 영역 0–2/)).toBeInTheDocument();
-    expect(targetEditor.selectionStart).toBe(0);
-    expect(targetEditor.selectionEnd).toBe(2);
+    // 같은 effect 경쟁(위 주석) — 패턴 스윕으로 찾은 두 번째 자리다.
+    await waitFor(() => {
+      expect(targetEditor.selectionStart).toBe(0);
+      expect(targetEditor.selectionEnd).toBe(2);
+    });
     expect(fetchMock.mock.calls.map(([url]) => url)).toContain(
       "/api/projects/p1/drafts",
     );
