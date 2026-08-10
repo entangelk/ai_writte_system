@@ -159,7 +159,7 @@
 | [`09-service-activity-log.md`](09-service-activity-log.md) | 사용자 행위 기록(누가·언제·무엇을 바꿨는가). **`system_events`는 문서에만 있고 코드 0줄**이라는 실측 공백에서 출발한다. 8.2c §N2-a가 발원 | 페이즈 신설 확정(오너 2026-08-05) · **9.0 구현·검증 완료(2026-08-09)** · 부모 계획 |
 | [`09-0-service-activity-log-decisions.md`](09-0-service-activity-log-decisions.md) | 9.0 — 착수 결정(저장 위치·**기록 범위**·문서 형태·**실패 방향**·조회 통로·보존·**쓰기 지점과 누락 가드**·원장 중복) | **Resolved(2026-08-09)** — A1~A8 확정 · 구현·검증 완료 · **A2 추가 확정 19→20**(`writing/accept`) |
 | [`09-1-activity-timeline-screen-decisions.md`](09-1-activity-timeline-screen-decisions.md) | 9.1 — 활동 타임라인 **화면** 착수 결정(화면의 자리 · **최신 100건 상한** · 행위자 표시 · 라벨 정본 · **replay 중복** · target 링크) | **Resolved(2026-08-10) · 구현 완료(SoT v1.7.94)** — S1~S6 확정 · **계약 영향 0 · backend 프로덕션 0줄** · 구현이 S6 전제를 반증(→ **F7**) · ★ §"나중에 여는 문" **F1~F7**(트리거 포함, 구현 뒤에도 유지) |
-| [`09-2-personal-hub-and-ia-decisions.md`](09-2-personal-hub-and-ia-decisions.md) | 9.2 — 개인 페이지(**전체 통합 허브**) + 프론트 IA 재배치(**통합 활동 조회** · 상한 · 관측 통합 여부 · 주소 · 관리자 랜딩 · 로그인/랜딩 · 프로젝트 화면 링크 정리) | **Resolved(2026-08-10)** — P1~P8 확정 · **backend 있다**(operation 77 → **78**) · ★ 독립 검증이 P1 논거를 반증(fan-out 은 N≤상한이면 정확) → 근거 재작성·**P8 신설** · P4 보안 3항(S-1 AuthGate 축소 · S-2 open redirect · S-3 IDOR) |
+| [`09-2-personal-hub-and-ia-decisions.md`](09-2-personal-hub-and-ia-decisions.md) | 9.2 — 개인 페이지(**전체 통합 허브**) + 프론트 IA 재배치(**통합 활동 조회** · 상한 · 관측 통합 여부 · 주소 · 관리자 랜딩 · 로그인/랜딩 · 프로젝트 화면 링크 정리) | **Resolved · 구현 완료(2026-08-10, SoT v1.7.96)** — P1~P8 · operation 77 → **78** · ★ 독립 검증이 P1 논거를 반증(fan-out 은 N≤상한이면 정확) → 근거 재작성·**P8 신설** · P4 보안 3항(S-1 AuthGate 축소 · S-2 open redirect · S-3 IDOR) |
 
 ### 프론트엔드
 
