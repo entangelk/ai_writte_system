@@ -76,6 +76,28 @@ describe("DraftList", () => {
     ]);
   });
 
+  it("does not offer the admin access log to the project owner", async () => {
+    // 오너 결정(2026-08-10): **관리자 접근 이력은 관리자가 보는 것**이다 — 문의가 들어오면
+    // 관리자가 그것을 보고 답한다. 소유자 화면에 두는 것은 오너의 의도가 아니었고,
+    // 그 통로는 관리자 콘솔에 이미 있다(AdminConsole "접근 이력 보기").
+    //
+    // ★ 링크만 뗐다 — route 도 API(operation 73)도 그대로다. 계약을 축소하지 않은 것은
+    // 되돌리기를 공짜로 두기 위해서이고, D8-5f C-4 의 "소유자가 본다" 근거를 다시 볼지는
+    // 별도 결정으로 남아 있다. 이 셀은 링크가 **조용히 되살아나는 것**만 막는다.
+    mockFetch(
+      { body: { id: "p1", name: "겨울 이야기", archived: false } },
+      { body: { drafts: [] } },
+    );
+
+    renderDraftList();
+
+    await screen.findByRole("heading", { name: "겨울 이야기" });
+    expect(screen.queryByRole("link", { name: /관리자 접근 이력/ })).toBeNull();
+    // 같은 자리의 다른 두 링크는 남아 있어야 한다 — 뭉뚱그려 지우는 과잉 교정을 막는다.
+    expect(screen.getByRole("link", { name: /활동 타임라인/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /파이프라인 관측/ })).toBeInTheDocument();
+  });
+
   it("supports a direct project URL and shows an empty draft state", async () => {
     mockFetch(
       { body: { id: "deep-link", name: "직접 진입", archived: false } },
