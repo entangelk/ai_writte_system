@@ -207,7 +207,7 @@ SKIPPED  test_context_search_memory_lexical_retrieval.py:324/336/341  (elasticse
 
 | 항목 | 처리 | 실측 |
 |---|---|---|
-| **B-1**(Blocking) | `WritingAcceptApiTest::test_a_partial_accept_still_records_the_saved_version` 추가(73 → **74 cells**) | **양방향으로 문다** — 502 분기 record 삭제(under) · 같은 분기 이중 기록(over) 모두 **그 셀 하나**가 재실패(`1 failed, 57 passed`) |
+| **B-1**(Blocking) | `WritingAcceptApiTest::test_a_partial_accept_still_records_the_saved_version` 추가. **3-파일 세트**(`test_writing_accept.py`+`test_activity_actions.py`+`test_activity_log.py`, §4 가 재는 그 세트) 73 → **74 cells**, **파일 하나로는 50 → 51**(2026-08-10 검증 정정) | **양방향으로 문다** — 502 분기 record 삭제(under) · 같은 분기 이중 기록(over) 모두 **그 셀 하나**가 재실패(`1 failed, 57 passed`) |
 | §6-① 페어링 | work_log Task 6 N10 행 · SoT v1.7.93 행을 실측대로 정정 | — |
 | §6-③ 주석 | `activity/log.py` docstring "19 개 호출부" → 20 경로(호출 지점 21) | — |
 | §6-② replay | **닫지 않았다** — 계약이 침묵하는 축이고 선택지 ⓐⓑⓒ 중 고르는 것은 오너 결정이다. 화면 슬라이스가 트리거 | — |

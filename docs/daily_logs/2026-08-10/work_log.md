@@ -138,3 +138,35 @@ HEAD `33fe4b2` clean · `docker compose ps` 는 `frontend`(healthy)·`worker`·`
    재생성돼 있다. **새 슬라이스이므로 오너 decision brief 가 먼저다**(replay 표시 방식이 그
    브리프 안에서 함께 결정되는 자리다 — 어제 비차단 ②의 트리거가 바로 이것이다).
 3. **오너 대기 두 건 유지**: 재빌드 후 `curl :5520/api/admin/users` = 401 · dogfood 착수(GATE-1).
+
+---
+
+## Task 2 — 비차단 지적 폐쇄 (숫자 귀속 정정)
+
+### User Decisions and Rationale
+
+- **오너 지시(2026-08-10)**: *"보강이 필요한 부분 보강해주고 없다면 화면 브리프 작성해줘."*
+  Task 1 이 낸 비차단 1건을 닫으라는 것. 어제 Task 8 과 같은 형태의 지시이고, 이번에는
+  **판정 승격 문제가 없다** — 이 기록의 판정이 원래 `합격`이라 폐쇄가 판정을 건드리지 않는다.
+
+### Completed work
+
+| 파일 | 변경 |
+|---|---|
+| [`verifications/2026-08-09/service_activity_log_accept_extension.md`](../../verifications/2026-08-09/service_activity_log_accept_extension.md) §6-b | `추가(73 → 74 cells)` → **3-파일 세트 73 → 74 · 파일 하나 50 → 51** 을 함께 적는다 |
+| [2026-08-09 work_log Task 8](../2026-08-09/work_log.md) Completed work | 같은 정정(그 행이 가리키는 것이 파일 하나임을 명시) |
+| [`verifications/2026-08-10/…reinforcement.md`](../../verifications/2026-08-10/accept_activity_cell_reinforcement.md) §5-1 | **발행 뒤 추가** 블록으로 폐쇄 표기 — **지적 원문은 그대로 둔다** |
+| `HANDOFF.md` 추적 부채 | 폐쇄 + 일반 규칙 한 줄로 축약 |
+
+### 남긴 일반 규칙 (부채를 지우는 대신 남기는 것)
+
+**셀 수를 적을 때는 "무엇을 돌린 수인지"를 같은 줄에 적는다.** 이 저장소의 확인법이
+*"그 파일을 열어 세어 보기"* 라, 세트 수를 파일 행에 적으면 **재현할 수 없는 숫자**가 된다.
+이번 건은 23 만큼 어긋나 있었고, 값이 맞았기 때문에 오히려 더 오래 살아남을 수 있었다.
+
+### Verification
+
+| 검사 | 결과 |
+|---|---|
+| `test_docs_indexes.py` | `13 cells / 241 subtests` — 무변(문서 본문 수정이라 건수를 안 건드린다) |
+| 코드 변경 | **0줄** |

@@ -603,7 +603,7 @@ SoT v1.7.93 은 기록 조건을 세 분기로 **열거**한다(성공 · Gate �
 
 | 파일 | 변경 |
 |---|---|
-| [`tests/test_writing_accept.py`](../../../tests/test_writing_accept.py) | **+1 cell** — `test_a_partial_accept_still_records_the_saved_version`(502 · events 1 · action/project_id/target_id). 73 → **74 cells** |
+| [`tests/test_writing_accept.py`](../../../tests/test_writing_accept.py) | **+1 cell** — `test_a_partial_accept_still_records_the_saved_version`(502 · events 1 · action/project_id/target_id). **이 파일은 50 → 51 cells**이고, 검증 기록 §4 의 **3-파일 세트**(+`test_activity_actions.py`+`test_activity_log.py`)가 73 → **74**다 — 종전에 그 세트 수를 이 행에 적었다(2026-08-10 검증 정정) |
 | [`activity/log.py`](../../../services/application/app/activity/log.py) | docstring "19 개 호출부" → **20 경로**(호출 지점 21 — accept 가 두 분기) |
 | `docs/system-contract-sot.md` v1.7.93 행 | "회귀 +2 → **+3 cells**" · 뮤테이션 2종 → 3종 · N10 페어링 정정 · **버전은 안 올렸다**(계약 무변, 사실 정정) |
 | work_log Task 6 | N10 행 실측대로 정정 + 인용 블록 |
