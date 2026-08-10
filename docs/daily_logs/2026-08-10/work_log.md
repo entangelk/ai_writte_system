@@ -403,3 +403,79 @@ route 를 만들 **재료**가 있는 것은 아니다.
    볼 만한 축: **연결 가드가 진짜 연결인가**(백엔드에 21번째를 실제로 더해 보는 뮤테이션) ·
    M3 형태(폴백이 만드는 조용한 통과) · **F7 판단이 옳았는가**(계약을 안 넓힌 것).
 2. 육안 확인은 프론트 재빌드 뒤 `/projects/:id/activity`.
+
+---
+
+## Task 6 — 9.1 독립 검증 반영: 비차단 2건 폐쇄
+
+검증 기록: [`verifications/2026-08-10/slice_9_1_activity_timeline.md`](../../verifications/2026-08-10/slice_9_1_activity_timeline.md)
+(**합격 · Blocking 0**, `b18cb83` — 다른 세션). 폐쇄 표기는 그 기록 **§4-b**(발행 뒤 추가)에 있고
+**원 지적 문언은 그대로 뒀다**.
+
+### User Decisions and Rationale
+
+- **오너 지시(2026-08-10)**: *"검증기록 확인해서 보강할 부분 보강해줘."* 검증이 낸 hardening 2건을
+  닫으라는 것. **판정이 원래 `합격` 이라 승격 문제가 없다** — 어제 accept 확장 때와 다른 점이다.
+- **검증 보고를 그대로 받지 않고 기록 실물과 커밋을 먼저 확인했다**(`b18cb83` 존재 · §4 문언 ·
+  인덱스 232/164). 요약과 기록이 일치했다.
+
+### H1 — 표시 상한 ↔ 서빙 상한을 **나눈 채 연결**했다
+
+**무엇이 구멍이었나**: 프론트 `ACTIVITY_PAGE_SIZE = 100` 과 백엔드
+`ActivityLogService.list_for_project(limit=100)` 이 **서로 모르는 독립 하드코딩**이었다. 백엔드
+기본이 바뀌면(F1 커서 페이징 작업이 정확히 그 자리다) 화면은 여전히 *"최근 100건"* 이라고
+말하는데 서버는 다른 수를 준다 — **문구는 남아 있으므로 프론트 셀도 백엔드 셀도 아무것도 못 본다.**
+
+**어떻게 닫았나**: `ActivityCeilingClaimTest` 한 셀. 백엔드 값은 **`inspect.signature` 로 읽는다** —
+소스 regex 를 쓰면 서명이 바뀔 때 가드가 조용히 못 찾는다(그 자체가 두 번째 구멍이 된다).
+
+**★ 합치지 않고 연결한 것이 요점이다.** 서빙 정책과 UI 문구는 다른 관심사라 한 곳으로 모으면
+오히려 섞인다 — 오너 원칙(2026-08-10) ③이 가드로 실현되는 **세 번째 자리**다(라벨표 ·
+`target_type` 분류 · 상한).
+
+### H2 — flake 는 테스트 설계 결함이었고, 마스킹하지 않고 고쳤다
+
+**원인**: 선택 영역은 값과 **다른 effect** 에서 적용된다
+([`DraftEditor.tsx:190-195`](../../../frontend/src/drafts/DraftEditor.tsx#L190) — `pendingSelection`
+effect → `setSelectionRange`). 값 도착 직후 `selectionStart` 를 **동기로** 읽으면 그 effect 가 아직
+안 돌았을 수 있다. 단독 실행이 green 이고 과부하 전수에서만 깨진 이유가 이것이다.
+
+**처리**: 단정을 `waitFor` 로 감쌌다. **느슨하게 만든 것이 아니다** — 기대값을 `2→3` 으로 바꾼
+뮤테이션에서 여전히 재실패한다(정확히 2·4 를 계속 요구한다). 바뀐 것은 *"언제 읽는가"* 뿐이다.
+
+**패턴 스윕**(CLAUDE.md §4): 같은 형태를 **한 곳 더** 찾아 함께 고쳤다(`:1465`, 선택 0–2). 검증이
+보고한 것은 한 자리였지만 근본 원인이 같으므로 둘 다 닫았다.
+
+### 뮤테이션 (3종 — 커밋 `4097437` 뒤 실행)
+
+| # | 방향 | 적용한 diff | 재실패 셀 |
+|---|---|---|---|
+| H1-M1 | under | `log.py` 기본값 `100 → 50`(서버가 덜 주는데 화면은 100 이라 말한다) | `ActivityCeilingClaimTest::test_the_screen_promises_exactly_what_the_service_serves` (1) |
+| H1-M2 | under | 프론트 상수 `100 → 250`(화면이 더 준다고 말한다) | 같은 셀 (1) |
+| H2-M1 | **검증용** | 기대 offset `2 → 3` — `waitFor` 가 단정을 느슨하게 만들었는지 | `restores a historical source by exact snapshot and code-point offsets` (1) — **여전히 문다** |
+
+매회 전후 `git status --short` 비어 있음, 마지막 원복 뒤 `git diff HEAD` 도 비어 있음.
+
+### Verification
+
+| 검사 | 결과 |
+|---|---|
+| backend 전수(베타, test-mongo ON) | **`2255 passed / 1 skipped / 2355 subtests in 1024s`** — 종전 `2254/1/2354` 대비 **셀 +1**(상한 가드) · **subtest +1**(검증 기록 `b18cb83`, 코드 무관) |
+| frontend 전수 | **`272 passed / 19 files`** — ★ **백엔드 전수와 동시 실행**으로 원 flake 의 과부하 조건을 일부러 재현했고 green |
+| `DraftEditor.test.tsx` 단독 | 41/41 |
+| `tsc --noEmit` | 통과 |
+| `test_docs_indexes.py` | `13 cells / 242 subtests` |
+| 계약 | operation **77** · 응답 형태 무변 · **SoT 버전 유지**(v1.7.94 행에 접어 넣었다 — v1.7.90 선례) |
+
+### 아직 안 한 것 (의도)
+
+- **육안 확인** — 프론트 재빌드 선행이고 오너 판단 사안(검증자도 동의했다).
+- **F1~F7** — 트리거와 함께 브리프에 산다. **H1 가드가 F1 의 트리거 지점을 실제로 지킨다** —
+  커서 페이징 작업이 백엔드 기본값을 건드리면 그 셀이 실패하면서 *"화면 문구도 같이 고쳐라"* 를
+  말해 준다.
+
+### Next steps
+
+1. **미검증 구간이 없다** — 9.1 은 구현·검증·hardening 폐쇄까지 끝났다.
+2. 남은 것은 **육안 확인 하나**(재빌드 후 `/projects/:id/activity`)와 오너 대기 두 건
+   (`curl :5520/api/admin/users` = 401 · dogfood 착수).
