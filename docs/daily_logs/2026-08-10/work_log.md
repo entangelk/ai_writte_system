@@ -170,3 +170,65 @@ HEAD `33fe4b2` clean · `docker compose ps` 는 `frontend`(healthy)·`worker`·`
 |---|---|
 | `test_docs_indexes.py` | `13 cells / 241 subtests` — 무변(문서 본문 수정이라 건수를 안 건드린다) |
 | 코드 변경 | **0줄** |
+
+---
+
+## Task 3 — 화면(활동 타임라인) 착수 결정 브리프 작성
+
+브리프: [`plans/09-1-activity-timeline-screen-decisions.md`](../../plans/09-1-activity-timeline-screen-decisions.md)
+(**Open — S1~S6 오너 결정 대기**). 선택지 표·권고·근거는 브리프에 있다(여기 복사하지 않는다).
+
+### User Decisions and Rationale
+
+- **오너 지시(2026-08-10)**: *"보강이 필요한 부분 보강해주고 **없다면 화면 브리프 작성**해줘."*
+  보강(Task 2)이 문서 두 줄로 끝나는 크기라 같은 세션에서 브리프까지 갔다. **브리프는
+  결정을 묻는 문서이지 구현이 아니므로 착수하지 않았다** — CLAUDE.md §1 "Owner decision
+  brief (kickoff)".
+
+### 브리프를 쓰기 전에 코드에서 확인한 것 (추측으로 쓰지 않았다)
+
+| 사실 | 값 | 왜 브리프에 필요한가 |
+|---|---|---|
+| 응답 상한 | **100건 하드코딩**([`log.py:142`](../../../services/application/app/activity/log.py#L142) 기본값, endpoint 가 `limit` 미전달) | S2 전체가 이 사실 위에 선다 |
+| 페이징 파라미터 | **없음**(쿼리스트링 0개) | "더 보기"는 **계약 변경**이라는 것 |
+| 정렬 | 최신순 `at` DESC([`log_mongo.py:47`](../../../services/application/app/activity/log_mongo.py#L47)) | 화면이 정렬을 안 해도 된다 |
+| action / target_type | **20종 / 9종** | S4 라벨표 크기와 S6 링크 대상 |
+| 선례 화면 | [`AccessLogPage.tsx`](../../../frontend/src/projects/AccessLogPage.tsx) 56줄 · eager · `DraftList:241` 진입 | S1 권고의 근거 |
+
+### ★ 브리프를 쓰다가 발견한 것 — 행위자 열이 필요 없다
+
+**관리자 행위는 이 컬렉션 밖이고**(분류표 `admin_audited` 로 제외 — `admin_audit_events`·
+`access_grant_uses` 가 담는다) **프로젝트는 소유자 1인 소유**다. 그래서 `actor_user_id` 는
+**항상 화면을 보고 있는 그 사람**이다 — 열을 만들어도 정보량이 0이다(S3=ⓑ 권고의 근거).
+
+이것은 A2/A8 결정의 **부수 효과**이지 누군가 설계한 것이 아니라, 브리프에 적어 두지 않으면
+다음 구현자가 `actor_user_id` 를 그대로 렌더하고(access-log 선례를 따라) 화면에 24자 hex 가
+줄마다 뜬다.
+
+### 계약을 움직이는 자리를 분리해 둔 이유
+
+S2(페이징)·S4(라벨 정본)·S5(replay)는 **고르는 순간 operation 77 계약이 바뀌거나 정본이
+둘이 되는** 자리다. 전부 *"먼저 만들고 보고 나서"* 를 권고했다 — **아직 아무도 이 데이터를
+본 적이 없어서** 지금 고르면 사용 근거 없이 형태에 갇힌다. **예외 하나가 S4 의 가드**이며,
+라벨표는 만드는 순간 두 번째 정본이 되므로 그 셀이 같은 커밋에 있어야 한다고 적었다.
+
+### Completed work
+
+| 파일 | 변경 |
+|---|---|
+| [`plans/09-1-activity-timeline-screen-decisions.md`](../../plans/09-1-activity-timeline-screen-decisions.md) | **신규** — S1~S6 선택지 표 + 권고 + follow-up + Deferred + 구현 순서 |
+| [`plans/09-service-activity-log.md`](../../plans/09-service-activity-log.md) | 부모 계획 상태에 9.1 브리프 포인터 |
+| [`plans/README.md`](../../plans/README.md) · `README.md` | 인덱스 행 + 건수 102 → **103** · 브리프 84 → **85** |
+
+### Verification
+
+| 검사 | 결과 |
+|---|---|
+| `test_docs_indexes.py` | `13 cells / 241 subtests` — **가드가 먼저 실패해 건수 주장 3자리를 잡아냈다**(README 2 · plans README 1) |
+| 코드 변경 | **0줄**(브리프는 결정 문서다) |
+
+### Next steps
+
+1. **오너가 S1~S6 을 정하면** 브리프 §"결정 뒤 구현 순서" 1~7 로 착수한다. 1번이 회귀 먼저다.
+2. 정해진 값은 브리프에 `Resolved` 로 적고 SoT 행은 **구현과 함께** 간다(계약이 실제로
+   움직이는 것은 S2-ⓑⓒ·S4-ⓑ·S5-ⓒ 를 고를 때뿐이다).
