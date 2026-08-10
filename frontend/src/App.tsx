@@ -7,6 +7,7 @@ import { ProjectList } from "./projects/ProjectList";
 import { ProjectOverview } from "./projects/ProjectOverview";
 import { AccessLogPage } from "./projects/AccessLogPage";
 import { ActivityTimelinePage } from "./projects/ActivityTimelinePage";
+import { PersonalHubPage } from "./me/PersonalHubPage";
 import { ReviewInbox } from "./review/ReviewInbox";
 import { ReviewInboxDetail } from "./review/ReviewInboxDetail";
 
@@ -28,6 +29,7 @@ export function App() {
       <Routes>
         <Route path="/" element={<ProjectList />} />
         <Route path="/admin" element={<AdminRoute />} />
+        <Route path="/me" element={<PersonalHubPage />} />
         <Route path="/projects/:projectId" element={<DraftList />} />
         <Route path="/projects/:projectId/overview" element={<ProjectOverview />} />
         <Route path="/projects/:projectId/access-log" element={<AccessLogPage />} />

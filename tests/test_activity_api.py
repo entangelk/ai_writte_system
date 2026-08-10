@@ -215,6 +215,87 @@ class ActivityQueryTest(unittest.TestCase):
         self.assertEqual([event["action"] for event in events], ["project_created"])
 
 
+class PersonalActivityQueryTest(unittest.TestCase):
+    """Slice 9.2 P1=ⓐ — `GET /me/activity`(operation 78, 인증 전용 tier).
+
+    **P8=ⓐ 소유 기준이다.** 이 화면이 답하는 질문은 *"내 것들에 무슨 일이 있었나"* 이므로
+    범위는 **내가 소유한 프로젝트**이지 *"내가 행위자인 이벤트"* 가 아니다. **오너 확정
+    (2026-08-10): 다중 사용자가 되어도 이 범위는 유지되고, 그때 바뀌는 것은 범위가 아니라
+    표시다**(F4 = 행위자 열을 켠다). 지금은 관리자=오너(1인)라 두 기준이 같은 결과를 내므로
+    **아래 격리 셀이 그 구분을 지키는 유일한 자리**다.
+
+    **S-3**: 이 endpoint 는 **project id 를 받지 않는다** — 주체는 세션에서만 유도한다.
+    미인증 401 은 `CombinedBoundaryMatrixTest` 가 tier 전수로 잠근다.
+    """
+
+    def setUp(self) -> None:
+        self.client, self.repo, self.core = _client()
+
+    def _second_user_client(self) -> TestClient:
+        """같은 앱에 다른 회원으로 로그인한 클라이언트."""
+        app = self.client.app
+        app.state.users.create_user(username="bob", password="pw456")
+        other = TestClient(app, base_url="https://testserver")
+        other.post("/auth/login", json={"username": "bob", "password": "pw456"})
+        return other
+
+    def test_it_merges_every_owned_project_newest_first(self) -> None:
+        first = self.client.post("/projects", json={"name": "첫 장편"}).json()["id"]
+        second = self.client.post("/projects", json={"name": "둘째 장편"}).json()["id"]
+        self.client.patch(f"/projects/{first}", json={"name": "첫 장편 개정"})
+
+        response = self.client.get("/me/activity")
+
+        self.assertEqual(response.status_code, 200)
+        events = response.json()["events"]
+        # 최신순: first 개명 → second 생성 → first 생성
+        self.assertEqual(
+            [event["action"] for event in events],
+            ["project_renamed", "project_created", "project_created"],
+        )
+        self.assertEqual(
+            {event["project_id"] for event in events}, {first, second}
+        )
+
+    def test_it_never_shows_another_members_project(self) -> None:
+        """★ P8 소유 기준의 경계 — 남의 프로젝트는 한 행도 새지 않는다."""
+        mine = self.client.post("/projects", json={"name": "내 것"}).json()["id"]
+        other_client = self._second_user_client()
+        theirs = other_client.post(
+            "/projects", json={"name": "남의 것"}
+        ).json()["id"]
+
+        mine_events = self.client.get("/me/activity").json()["events"]
+        their_events = other_client.get("/me/activity").json()["events"]
+
+        self.assertEqual({e["project_id"] for e in mine_events}, {mine})
+        self.assertEqual({e["project_id"] for e in their_events}, {theirs})
+
+    def test_a_member_without_projects_gets_an_empty_log(self) -> None:
+        """프로젝트가 없으면 저장소를 묻지 않고 빈 목록이다(빈 `$in` 을 안 만든다)."""
+        response = self.client.get("/me/activity")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["events"], [])
+
+    def test_each_row_names_its_project_so_the_hub_can_group_them(self) -> None:
+        """통합 화면은 행이 **어느 프로젝트의 것인지** 말할 수 있어야 한다.
+
+        project-scoped 응답에는 `project_id` 가 없다(주소가 이미 말한다). 통합에서는
+        그것이 사라지면 행을 해석할 수 없으므로 **이 tier 에서만 필드가 하나 는다**.
+        """
+        project_id = self.client.post("/projects", json={"name": "한 편"}).json()["id"]
+
+        event = self.client.get("/me/activity").json()["events"][0]
+
+        self.assertEqual(event["project_id"], project_id)
+        # project-scoped 쪽은 그대로 — 계약을 넓히지 않았다.
+        scoped = self.client.get(
+            f"/projects/{project_id}/activity"
+        ).json()["events"][0]
+        self.assertNotIn("project_id", scoped)
+
+
 class ActivityPurgeTest(unittest.TestCase):
     """★ I1·I2 — 프로젝트를 파기하면 활동 로그도 사라진다.
 

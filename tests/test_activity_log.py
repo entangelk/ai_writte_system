@@ -183,6 +183,60 @@ class ActivityLogServiceTest(unittest.TestCase):
 
         self.assertEqual([row.id for row in rows], ["e4", "e3"])
 
+    def _seed(self, rows):
+        """(id, project_id, at) 을 그대로 넣는다 — `record()` 는 setUp 의 고정 시계라
+        같은 `at` 이 되어 정렬을 잴 수 없다(기존 정렬 셀과 같은 관용구)."""
+        repo = InMemoryActivityLogRepository()
+        for event_id, project_id, at in rows:
+            repo.insert(ActivityEvent(
+                id=event_id, project_id=project_id, actor_user_id="u1",
+                action="draft_created", target_type="draft", target_id="d1", at=at,
+            ))
+        return ActivityLogService(repo)
+
+    def test_reading_many_projects_merges_them_newest_first(self) -> None:
+        """9.2 P1=ⓐ — 통합 조회는 **여러 project 를 한 줄로** 접는다."""
+        service = self._seed([
+            ("e0", "p1", _AT),
+            ("e1", "p2", _AT + timedelta(hours=2)),
+            ("e2", "p1", _AT + timedelta(hours=1)),
+        ])
+
+        rows = service.list_for_projects(project_ids=("p1", "p2"))
+
+        self.assertEqual([row.id for row in rows], ["e1", "e2", "e0"])
+
+    def test_reading_many_projects_excludes_the_ones_not_named(self) -> None:
+        """★ 소유 기준(P8)의 경계는 **호출자가 준 집합**이다."""
+        service = self._seed([
+            ("mine", "p1", _AT),
+            ("theirs", "p9", _AT + timedelta(hours=1)),
+        ])
+
+        rows = service.list_for_projects(project_ids=("p1",))
+
+        self.assertEqual([row.id for row in rows], ["mine"])
+
+    def test_reading_no_projects_returns_nothing(self) -> None:
+        """프로젝트가 없는 회원 — 빈 집합은 "전부"가 아니라 "없음"이다.
+
+        뒤집히면 **남의 활동이 전부 보이는** 형태가 되므로 저장소에 묻지도 않는다.
+        """
+        service = self._seed([("e0", "p1", _AT)])
+
+        self.assertEqual(service.list_for_projects(project_ids=()), ())
+
+    def test_the_merged_read_honours_the_ceiling(self) -> None:
+        """P2 — 통합 상한 기본값은 per-project 와 **같은 수**다(역전 방지)."""
+        service = self._seed([
+            (f"e{i}", f"p{i}", _AT + timedelta(hours=i)) for i in range(5)
+        ])
+
+        rows = service.list_for_projects(
+            project_ids=tuple(f"p{i}" for i in range(5)), limit=2)
+
+        self.assertEqual([row.id for row in rows], ["e4", "e3"])
+
     def test_purge_removes_only_the_named_project(self) -> None:
         repo = InMemoryActivityLogRepository()
         for project_id in ("p1", "p2"):

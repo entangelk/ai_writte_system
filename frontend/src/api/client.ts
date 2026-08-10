@@ -111,6 +111,8 @@ export type AdminObservabilityKpi =
 export type AccessGrant = components["schemas"]["AccessGrantPayload"];
 export type AccessLogEntry = components["schemas"]["AccessLogEntryPayload"];
 export type ActivityEvent = components["schemas"]["ActivityEventPayload"];
+export type PersonalActivityEvent =
+  components["schemas"]["PersonalActivityEventPayload"];
 export type AdminAuditEvent = components["schemas"]["AdminAuditEventPayload"];
 export type Project = components["schemas"]["ProjectPayload"];
 export type ProjectListResponse = components["schemas"]["ProjectListResponse"];
@@ -239,6 +241,19 @@ export async function listProjectActivity(projectId: string): Promise<ActivityEv
   const response = await request<components["schemas"]["ActivityLogResponse"]>(
     `/projects/${encodeURIComponent(projectId)}/activity`,
   );
+  return response.events;
+}
+
+/**
+ * Slice 9.2 P1=ⓐ (operation 78) — 개인 허브의 통합 활동.
+ *
+ * **project id 를 넘기지 않는다**(S-3): 범위는 서버가 세션 주체에서 유도한 **소유
+ * 프로젝트 집합**이다(P8=ⓐ). 응답은 project-scoped 와 한 필드만 다르다 — `project_id`.
+ */
+export async function listMyActivity(): Promise<PersonalActivityEvent[]> {
+  const response = await request<
+    components["schemas"]["PersonalActivityLogResponse"]
+  >("/me/activity");
   return response.events;
 }
 

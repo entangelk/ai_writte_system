@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -49,6 +51,10 @@ class ActivityLogRepository(Protocol):
         self, *, project_id: str, limit: int
     ) -> tuple[ActivityEvent, ...]: ...
 
+    def list_for_projects(
+        self, *, project_ids: Sequence[str], limit: int
+    ) -> tuple[ActivityEvent, ...]: ...
+
     def purge_project(self, *, project_id: str) -> None: ...
 
 
@@ -63,6 +69,13 @@ class InMemoryActivityLogRepository:
         self, *, project_id: str, limit: int
     ) -> tuple[ActivityEvent, ...]:
         rows = [event for event in self.events if event.project_id == project_id]
+        return tuple(sorted(rows, key=lambda event: event.at, reverse=True)[:limit])
+
+    def list_for_projects(
+        self, *, project_ids: Sequence[str], limit: int
+    ) -> tuple[ActivityEvent, ...]:
+        wanted = set(project_ids)
+        rows = [event for event in self.events if event.project_id in wanted]
         return tuple(sorted(rows, key=lambda event: event.at, reverse=True)[:limit])
 
     def purge_project(self, *, project_id: str) -> None:
@@ -142,6 +155,28 @@ class ActivityLogService:
         self, *, project_id: str, limit: int = 100
     ) -> tuple[ActivityEvent, ...]:
         return self._repo.list_for_project(project_id=project_id, limit=limit)
+
+    def list_for_projects(
+        self, *, project_ids: Sequence[str], limit: int = 100
+    ) -> tuple[ActivityEvent, ...]:
+        """여러 프로젝트의 활동을 **한 줄로 접어** 최신순으로 준다 (9.2 P1=ⓐ).
+
+        **범위는 호출자가 주는 집합이다**(P8=ⓐ 소유 기준) — 이 서비스는 "누가
+        소유자인가"를 모른다. 그 판정은 endpoint 가 세션 주체에서 유도하며,
+        여기서 다시 하면 **주체에 대한 두 번째 답**이 생긴다.
+
+        **상한 기본값이 per-project 와 같은 100 인 것은 의도다**(P2): 통합이
+        프로젝트별보다 **적게** 보이면 "전체"가 "하나"보다 작은 역설이 된다.
+        두 수는 하나의 기본값에서 나온다.
+
+        **빈 집합은 "전부"가 아니라 "없음"이다** — 프로젝트가 없는 회원에게
+        남의 활동이 보이는 것이 이 자리에서 나올 수 있는 최악이므로, 저장소에
+        묻지 않고 바로 비운다.
+        """
+        if not project_ids:
+            return ()
+        return self._repo.list_for_projects(
+            project_ids=tuple(project_ids), limit=limit)
 
     def purge_project(self, *, project_id: str) -> None:
         """D8-6/I1 — 프로젝트 자식이므로 파기와 함께 사라진다.

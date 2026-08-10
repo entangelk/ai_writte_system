@@ -1820,7 +1820,8 @@ def create_app(
     # built from. Skipping a surface must not reorder the others — that is why
     # these are ``if`` guards in place rather than a reshuffled call list.
     if include_product:
-        register_auth(app, users=users, sessions=sessions)
+        register_auth(app, users=users, sessions=sessions,
+                      core_sot=service, activity=activity)
 
     if include_admin:
         register_admin(

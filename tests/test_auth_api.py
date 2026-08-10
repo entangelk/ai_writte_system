@@ -1126,6 +1126,11 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         ("/me/quota", "get"): "8.4 W5=B — 자기 사용량은 회원 단위 사실이라 "
                               "project 를 지목하지 않는다. 남의 quota 는 경로가 "
                               "없어서 못 읽는다(관리자 조회는 8.5의 별도 tier)",
+        ("/me/activity", "get"): "9.2 P1=ⓐ·P8=ⓐ — 통합 활동은 **소유 프로젝트 "
+                                 "집합**을 세션 주체에서 유도하므로 project 를 "
+                                 "지목하지 않는다. **경로가 project id 를 받지 "
+                                 "않는 것이 S-3(IDOR 표면 없음)이다** — 남의 "
+                                 "프로젝트는 요청할 방법 자체가 없다",
     }
 
     # D8-5's tier. Admin operations name no project on purpose: the admin
@@ -1212,9 +1217,11 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         self.assertEqual(by_tier["public"], set(AuthenticationBoundaryTest.PUBLIC))
         self.assertEqual(by_tier["auth"], set(self.AUTH_ONLY))
         self.assertEqual(by_tier["admin"], self.ADMIN)
-        # Phase 9 A5=B 가 `GET /projects/{id}/activity` 를 더해 62/77 이 됐다.
+        # Phase 9 A5=B 가 `GET /projects/{id}/activity` 를 더해 62/77 이 됐고,
+        # Slice 9.2 P1=ⓐ 가 `GET /me/activity` 를 **인증 전용** tier 에 더해 78 이
+        # 됐다(project tier 는 무변 62 — 통합 조회는 project 를 지목하지 않는다).
         self.assertEqual(len(by_tier["project"]), 62)
-        self.assertEqual(len(tiers), 77)
+        self.assertEqual(len(tiers), 78)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:

@@ -1,5 +1,6 @@
 """`activity_events` Mongo 어댑터 (Phase 9 Slice 9.0)."""
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from pymongo import ASCENDING, DESCENDING, MongoClient
@@ -44,6 +45,20 @@ class MongoActivityLogRepository:
         return tuple(
             _entry(doc)
             for doc in self._events.find({"project_id": project_id})
+            .sort("at", DESCENDING)
+            .limit(limit)
+        )
+
+    def list_for_projects(
+        self, *, project_ids: Sequence[str], limit: int
+    ) -> tuple[ActivityEvent, ...]:
+        # 9.2 P1=ⓐ. 정렬·상한을 **서버가** 적용하는 것이 이 선택지의 값이다 —
+        # 클라이언트 병합은 프로젝트별 상한 안에서만 정확하고 그 경계가 조용하다.
+        return tuple(
+            _entry(doc)
+            for doc in self._events.find(
+                {"project_id": {"$in": list(project_ids)}}
+            )
             .sort("at", DESCENDING)
             .limit(limit)
         )

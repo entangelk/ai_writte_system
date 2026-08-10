@@ -212,6 +212,22 @@ class ActivityLogResponse(BaseModel):
     events: list[ActivityEventPayload]
 
 
+class PersonalActivityEventPayload(ActivityEventPayload):
+    """통합 활동 한 행 (Slice 9.2 P1=ⓐ, ``GET /me/activity``).
+
+    project-scoped 응답과 **한 필드만 다르다** — ``project_id``. 그쪽은 주소가 이미
+    프로젝트를 말하므로 넣지 않았고, 통합에서는 그것이 없으면 **행을 해석할 수 없다**
+    (어느 원고의 저장인지 모른다). 상속으로 둔 것은 두 표현이 갈라지지 않게 하려는
+    것이다 — 코어 필드가 늘면 양쪽이 함께 는다.
+    """
+
+    project_id: str
+
+
+class PersonalActivityLogResponse(BaseModel):
+    events: list[PersonalActivityEventPayload]
+
+
 class AdminProjectPayload(BaseModel):
     # D8-5b. One field more than the public payload: `owner_id`, which is the
     # whole point of an administrator's list (whose project is this). The public

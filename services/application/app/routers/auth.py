@@ -1,4 +1,4 @@
-"""Auth + 회원 셀프서비스 route (``/auth/*`` · ``/me/quota``).
+"""Auth + 회원 셀프서비스 route (``/auth/*`` · ``/me/quota`` · ``/me/activity``).
 
 ``main.py`` 의 ``create_app()`` 에서 옮겨온 register 함수(R1). handler 본문은
 byte-동일이다 — 서비스(``users``·``sessions``)만 명시 인자로 받고, 공유 심볼은
@@ -17,6 +17,7 @@ from ..api.models import (
     LoginResponse,
     LogoutResponse,
     MyQuotaResponse,
+    PersonalActivityLogResponse,
     UserPayload,
 )
 from ..api.errors import (
@@ -32,7 +33,7 @@ from ..api.dependencies import (
 from services.application.app.quota.enforcement import QuotaEnforcementService
 
 
-def register_auth(app, *, users, sessions) -> None:
+def register_auth(app, *, users, sessions, core_sot, activity) -> None:
     # --- Auth (multi-user D8) ---------------------------------------------
     # D8-3a: authentication is now enforced. Every operation except /health and
     # the three below declares ``dependencies=_REQUIRE_AUTH``, so a sessionless
@@ -159,3 +160,37 @@ def register_auth(app, *, users, sessions) -> None:
                 "resets_at": snapshot.weekly_resets_at,
             },
         }
+
+    @app.get("/me/activity", response_model=PersonalActivityLogResponse,
+             responses=_ERRORS_401, dependencies=_REQUIRE_AUTH)
+    async def read_my_activity(
+        current=Depends(require_authenticated_user),
+    ) -> dict[str, object]:
+        # Slice 9.2 P1=ⓐ (operation 78). 개인 허브가 "내 것들에 무슨 일이 있었나"에
+        # 한 번의 요청으로 답한다.
+        #
+        # **★ P8=ⓐ 소유 기준이며 그 범위는 여기서만 정해진다.** 경로가 project id 를
+        # 받지 않는 것이 S-3 이다 — 남의 프로젝트를 요청할 문법 자체가 없고, 주체는
+        # 세션이 해석한 값에서만 온다(``create_project``·``/me/quota`` 와 같은 이유:
+        # 쿠키를 다시 읽는 것은 "누구인가"에 대한 두 번째 답이다).
+        #
+        # **오너 확정(2026-08-10): 다중 사용자가 되어도 범위는 소유 기준이다.** 그때
+        # 바뀌는 것은 범위가 아니라 **표시**이며(F4 = 행위자 열), 여기를 actor 기준으로
+        # 뒤집는 것이 아니다.
+        owned = core_sot.list_projects_for_owner(owner_id=current.id)
+        events = activity.list_for_projects(
+            project_ids=tuple(project.id for project in owned))
+        return {"events": [
+            {
+                "id": event.id,
+                "project_id": event.project_id,
+                "actor_user_id": event.actor_user_id,
+                "action": event.action,
+                "target_type": event.target_type,
+                "target_id": event.target_id,
+                "at": event.at,
+                "before": event.before,
+                "after": event.after,
+            }
+            for event in events
+        ]}

@@ -192,6 +192,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read My Activity */
+        get: operations["read_my_activity_me_activity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/me/quota": {
         parameters: {
             query?: never;
@@ -1681,6 +1698,43 @@ export interface components {
             /** Total Tokens */
             total_tokens: number;
         };
+        /**
+         * PersonalActivityEventPayload
+         * @description 통합 활동 한 행 (Slice 9.2 P1=ⓐ, ``GET /me/activity``).
+         *
+         *     project-scoped 응답과 **한 필드만 다르다** — ``project_id``. 그쪽은 주소가 이미
+         *     프로젝트를 말하므로 넣지 않았고, 통합에서는 그것이 없으면 **행을 해석할 수 없다**
+         *     (어느 원고의 저장인지 모른다). 상속으로 둔 것은 두 표현이 갈라지지 않게 하려는
+         *     것이다 — 코어 필드가 늘면 양쪽이 함께 는다.
+         */
+        PersonalActivityEventPayload: {
+            /** Action */
+            action: string;
+            /** Actor User Id */
+            actor_user_id: string;
+            /** After */
+            after?: string | null;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Before */
+            before?: string | null;
+            /** Id */
+            id: string;
+            /** Project Id */
+            project_id: string;
+            /** Target Id */
+            target_id: string;
+            /** Target Type */
+            target_type: string;
+        };
+        /** PersonalActivityLogResponse */
+        PersonalActivityLogResponse: {
+            /** Events */
+            events: components["schemas"]["PersonalActivityEventPayload"][];
+        };
         /** ProjectBriefGetResponse */
         ProjectBriefGetResponse: {
             brief: components["schemas"]["ProjectBriefVersionPayload"] | null;
@@ -2997,6 +3051,44 @@ export interface operations {
                     "application/json": {
                         [key: string]: string;
                     };
+                };
+            };
+        };
+    };
+    read_my_activity_me_activity_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonalActivityLogResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
         };
