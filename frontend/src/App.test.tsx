@@ -199,6 +199,80 @@ describe("App routes", () => {
     });
   });
 
+  it("sends an administrator to the console when they log in at the root", async () => {
+    // 9.2 P5=ⓐ. 관리자에게 첫 화면은 관리 화면이다.
+    mockFetch(
+      { status: 401, body: { detail: "not authenticated" } },
+      { body: { user: { id: "a1", username: "root", is_admin: true } } },
+      { body: { users: [] } },
+      { body: { projects: [] } },
+      { body: { events: [] } },
+      { body: { sites: [], totals: {} } },
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    await screen.findByLabelText("아이디");
+    await userEvent.type(screen.getByLabelText("아이디"), "root");
+    await userEvent.type(screen.getByLabelText("비밀번호"), "pw123");
+    await userEvent.click(screen.getByRole("button", { name: "작업실 입장" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "관리", level: 1 }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not swallow an administrator's deep link", async () => {
+    // ★ P5 의 딥링크 지적. 이 게이트는 URL 을 바꾸지 않고 제자리에서 로그인
+    // 화면을 그리므로, 관리자가 `/projects/p1` 로 들어왔으면 **그 화면을 받아야**
+    // 한다. 무조건 `/admin` 으로 옮기면 의도한 도착지가 사라진다.
+    //
+    // ★ 이 성질 덕분에 `?next=` 가 필요 없고, 그래서 **open redirect 표면(S-2)이
+    // 아예 생기지 않는다** — 없는 것을 검증할 수는 없으므로 이 셀이 그 자리다.
+    mockFetch(
+      { status: 401, body: { detail: "not authenticated" } },
+      { body: { user: { id: "a1", username: "root", is_admin: true } } },
+      { body: { id: "p1", name: "겨울 이야기", archived: false } },
+      { body: { drafts: [] } },
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/projects/p1"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    await screen.findByLabelText("아이디");
+    await userEvent.type(screen.getByLabelText("아이디"), "root");
+    await userEvent.type(screen.getByLabelText("비밀번호"), "pw123");
+    await userEvent.click(screen.getByRole("button", { name: "작업실 입장" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "겨울 이야기" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the personal hub behind the session gate", async () => {
+    // ★ S-1. 지금은 `AuthGate` 가 `<Routes>` 전체를 감싸 이것이 구조적으로 참이지만,
+    // **공개 랜딩(F10)을 열면서 그 보호를 좁히는 순간 `/me` 가 딸려 나갈 수 있다**.
+    // 그 변경이 오기 전에 셀을 놓아 둔다 — 진짜 방어는 백엔드 401 이고(`/me/activity`·
+    // `/me/quota` 는 인증 전용 tier) 이것은 화면이 새지 않는지만 본다.
+    mockFetch({ status: 401, body: { detail: "not authenticated" } });
+
+    render(
+      <MemoryRouter initialEntries={["/me"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByLabelText("아이디")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "내 작업" })).toBeNull();
+  });
+
   it("uses one generic message for every rejected login", async () => {
     mockFetch(
       { status: 401, body: { detail: "not authenticated" } },

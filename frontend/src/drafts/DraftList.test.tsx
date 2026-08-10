@@ -93,9 +93,12 @@ describe("DraftList", () => {
 
     await screen.findByRole("heading", { name: "겨울 이야기" });
     expect(screen.queryByRole("link", { name: /관리자 접근 이력/ })).toBeNull();
-    // 같은 자리의 다른 두 링크는 남아 있어야 한다 — 뭉뚱그려 지우는 과잉 교정을 막는다.
+    // ★ 9.2 P7=ⓑ — 관측도 뗐다(운영 질문이라 `/me` 로 갔다). **활동은 남는다** —
+    // "이 원고에서 무슨 일이 있었나"는 저작 중의 질문이라 여기가 자연스럽다.
+    // 뭉뚱그려 지우는 과잉 교정은 아래 단정이 막는다.
+    expect(screen.queryByRole("link", { name: /파이프라인 관측/ })).toBeNull();
     expect(screen.getByRole("link", { name: /활동 타임라인/ })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /파이프라인 관측/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /작품 정보/ })).toBeInTheDocument();
   });
 
   it("supports a direct project URL and shows an empty draft state", async () => {

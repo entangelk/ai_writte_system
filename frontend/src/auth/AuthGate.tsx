@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router";
 import { Link } from "react-router";
 import {
   ApiError,
@@ -21,6 +22,8 @@ export function useAuthenticatedUser(): User {
 }
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [state, setState] = useState<AuthState>("checking");
   const [user, setUser] = useState<User | null>(null);
   const [sessionExpired, setSessionExpired] = useState(false);
@@ -107,6 +110,19 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           setUser(nextUser);
           setSessionExpired(false);
           setState("authenticated");
+          // P5=ⓐ — 관리자는 로그인 직후 관리자 화면으로 간다.
+          //
+          // ★ **루트에서 로그인했을 때만** 옮긴다. 이 게이트는 URL 을 바꾸지 않고
+          // **제자리에서** 로그인 화면을 그리므로 `/projects/X` 로 들어온 사람은
+          // 로그인만 하면 그 화면을 그대로 받는다 — 무조건 옮기면 **의도한 도착지를
+          // 삼킨다**(브리프 P5 의 딥링크 지적).
+          //
+          // ★ 그래서 `?next=` 를 만들지 않았다: 목적지가 이미 주소에 있는데 그것을
+          // 쿼리로 한 번 더 실어 나르면 **open redirect 표면(S-2)을 없던 데서 만드는
+          // 것**이다. 이 앱에는 `next` 를 만드는 흐름이 하나도 없다.
+          if (nextUser.is_admin && location.pathname === "/") {
+            navigate("/admin", { replace: true });
+          }
         }}
       />
     );
@@ -209,12 +225,12 @@ function LoginScreen({
     <main className="auth-shell">
       <section className="login-page page-enter">
         <header className="login-heading">
-          <p className="eyebrow">AI Writing System</p>
-          <h1>{mustReplacePassword ? "새 비밀번호 설정" : "작업실 입장"}</h1>
+          <p className="eyebrow">에-라잇</p>
+          <h1>{mustReplacePassword ? "새 비밀번호 설정" : "쓴 것을 기억하는 집필 작업실"}</h1>
           <p>
             {mustReplacePassword
               ? "관리자가 만든 초기 비밀번호를 본인만 아는 비밀번호로 바꿔 주세요."
-              : "계정으로 로그인해 내 프로젝트와 원고를 이어서 작업하세요."}
+              : "설정과 인물, 지난 원고를 AI가 기억한 채로 이어서 씁니다."}
           </p>
         </header>
 
