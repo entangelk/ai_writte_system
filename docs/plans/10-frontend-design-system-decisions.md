@@ -201,23 +201,43 @@ OKLCH→sRGB 변환과 WCAG 대비를 계산한다. **숫자를 손으로 적지
 
 #### semantic (2계층)
 
+> **★ 정정(2026-08-11 — 독립 검증 잔여 니트).** 착수 시점 표는 **9행이 빠지고**
+> `--border-hairline` 매핑도 틀렸다(`slate-300` → 실제 `slate-200`). 아래는
+> `:root` 에서 재생성한 것이며, 이제
+> [`tests/test_design_token_provenance.py`](../../tests/test_design_token_provenance.py)
+> 가 이 표와 `:root` 가 갈리지 못하게 잠근다 — **표를 손으로 늘리지 말고 토큰을
+> 먼저 만든 뒤 여기 옮긴다.**
+
 | 토큰 | → primitive | 쓰임 |
 |---|---|---|
 | `--surface-page` | `blue-50` | 페이지 바탕 |
-| `--surface-card` | `slate-0` | 카드·패널 |
-| `--surface-sunken` | `blue-100` | 침강면(코드·인용·비활성) |
+| `--surface-raised` | `slate-50` | **융기면** — 카드·패널(page 보다 밝다) |
+| `--surface-card` | `slate-0` | 카드 안쪽·입력면(가장 밝다) |
+| `--surface-sunken` | `blue-100` | 침강면(page 보다 어둡다 — 카드 안 블록) |
 | `--surface-accent-soft` | `blue-100` | 강조 배경(선택된 행 등) |
 | `--text-body` | `blue-900` | 본문 |
 | `--text-muted` | `slate-600` | 보조 문구 |
+| `--text-placeholder` | `slate-450` | 입력 placeholder |
 | `--text-link` | `blue-700` | 링크 |
 | `--text-on-accent` | `slate-0` | 강조면 위 글자 |
 | `--action-primary` | `blue-600` | 주 버튼 |
 | `--action-primary-hover` | `blue-700` | 주 버튼 hover |
 | `--action-danger` | `danger-600` | 파괴 버튼 |
-| `--border-hairline` | `slate-300` | **장식** 구분선 |
-| `--border-control` | `slate-400` | **기능** 테두리(입력·선택) |
+| `--action-danger-hover` | `danger-700` | 파괴 버튼 hover |
+| `--border-hairline` | `slate-200` | **장식** 구분선(1.4.11 대상 아님) |
+| `--border-control` | `slate-400` | **기능** 테두리(입력·선택) — 3:1 |
+| `--border-danger` | `danger-600` | 파괴 영역 테두리 |
 | `--focus-ring` | `blue-600` | 포커스 |
-| `--state-danger-*` / `-warn-*` / `-ok-*` | 각 100·700 | 상태 배너 |
+| `--state-danger-surface` | `danger-100` | 오류 배너 면 |
+| `--state-danger-text` | `danger-700` | 오류 문구 |
+| `--state-warn-surface` | `warn-100` | 경고 배너 면 |
+| `--state-warn-text` | `warn-700` | 경고 문구 |
+| `--state-ok-surface` | `ok-100` | 성공 배너 면 |
+| `--state-ok-text` | `ok-700` | 성공 문구 |
+
+알파가 필요한 자리는 primitive 를 rgb 로 푼 별도 토큰이다(`--veil-raised` ·
+`--tint-accent-weak|soft|strong` · `--grid-line` · `--shadow-panel`) — 이들은
+`var()` 참조가 아니라 리터럴이라 위 표에 없다.
 
 #### WCAG 2.2 검산 — **30짝** 전수, 실패 0
 

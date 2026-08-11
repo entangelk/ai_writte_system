@@ -76,6 +76,8 @@
 
 - **C1 (문서 충실성) — 닫힘.** 발행 시점(HEAD `4dd2046`)에 브리프 §D2 표가 구현과 갈라져 있었다(`--slate-400 #88929d`·18짝·`--surface-raised`/`--slate-450` 누락). `f717b87` 이 정정: 원시테이블 `--slate-400` 취소선→**#7f8994** · `--slate-450` 신설 · 대비표를 "착수 시점 스냅샷"으로 명시 + 정본을 `10_palette_contrast.py`·`test_design_token_provenance.py` 로 지정(정정 주석이 "독립 검증 C1·H1" 인용). 검증자 실측 — 완전. **잔여 니트(비차단)**: semantic 표(§D2 line 204-220)에 `--surface-raised`·`--text-placeholder` 행이 여전히 빠지나 `:root`·work_log Task 6 에 문서화돼 있고 대비표 주석이 정본을 script 으로 지정하므로 "정본이 거짓 숫자를 말한다"는 정정 목적은 달성.
 
+  **★ 잔여 니트도 폐쇄 2026-08-11 (작업 AI, 검증자 아님).** 표를 `:root` 에서 **재생성**했다 — 검증자가 짚은 둘 외에 **총 9행이 빠져 있었고**(`--action-danger-hover`·`--border-danger`·`--state-*` 6종 포함) `--border-hairline` 매핑도 틀렸다(`slate-300` → 실제 `slate-200`). §4 패턴 스윕으로 전수 대조해 한 번에 닫았다. **그리고 이 드리프트 자체를 가드로 묶었다**(`test_design_token_provenance.py` +1셀) — primitive hex·짝 수 prose 에 이은 **같은 병의 세 번째**라, 부주의가 아니라 *사람이 두 곳을 동시에 기억해야 하는 구조*가 원인이라고 봤다. 뮤테이션 3종 작동: M18 `:root` 에 토큰 추가·표 미갱신 → 1 failed · M19 표 매핑만 변경 → 1 failed · M20 표에서 행 삭제 → 1 failed. provenance 가드 **4 → 5 cells / 65 → 89 subtests**.
+
 ### Hardening / 비차단
 
 - **H1 (문서 정확성) — 닫힘.** 짝 수 prose 3곳(브리프 "18"·styles.css :root 주석 "28"·work_log "18")이 모두 **30**으로 통일됐다(`259c7a4`). **검증자 권고를 받아 prose 를 `len(PAIRS)` 에 묶는 셀을 provenance 가드에 추가**했다(`test_prose_that_states_the_pair_count_matches_the_generator`, M16·M17 로 입증) — 가드 **3→4 cells·62→65 subtests**. "세는 사람 셋" 병의 재발을 구조적으로 막는다.

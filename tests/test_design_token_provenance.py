@@ -141,6 +141,48 @@ class PaletteProvenanceTest(unittest.TestCase):
                     f"{relative} 가 {found[0]}짝이라 적었지만 실제 PAIRS 는 {expected}짝",
                 )
 
+    def test_the_brief_semantic_table_matches_the_stylesheet(self) -> None:
+        """결정 브리프의 semantic 표가 `:root` 와 갈리지 못하게 한다.
+
+        **같은 병의 세 번째다.** ① primitive hex 가 갈림(→ 위 출처 셀) ② 짝 수
+        prose 가 세 곳에서 갈림(→ 위 prose 셀) ③ 그리고 semantic 표가 **9행이
+        빠지고** `--border-hairline` 매핑까지 틀린 채로 남아 있었다(독립 검증
+        잔여 니트). 앞의 둘을 가드로 닫으면서 이 표만 손으로 두면 **다음 슬라이스가
+        토큰을 하나 더할 때 또 갈린다** — 사람이 두 곳을 동시에 기억해야 하는 구조가
+        원인이지 부주의가 원인이 아니다.
+
+        **표는 정본이 아니라 사본이다.** 정본은 `:root` 이고, 토큰을 먼저 만든 뒤
+        표를 맞춘다. 양방향 — 어느 한쪽만 고쳐도 실패한다.
+        """
+        css = _STYLESHEET.read_text(encoding="utf-8")
+        root = css[: css.index("\n}\n")]
+        actual = dict(
+            re.findall(
+                r"^\s*(--[a-z0-9-]+)\s*:\s*var\((--[a-z0-9-]+)\)\s*;", root, re.MULTILINE
+            )
+        )
+
+        brief_path = _ROOT / "docs" / "plans" / "10-frontend-design-system-decisions.md"
+        brief = brief_path.read_text(encoding="utf-8")
+        section = brief[
+            brief.index("#### semantic (2계층)") : brief.index("#### WCAG")
+        ]
+        listed = dict(
+            re.findall(r"^\|\s*`(--[a-z0-9-]+)`\s*\|\s*`([a-z0-9-]+)`\s*\|", section, re.MULTILINE)
+        )
+
+        self.assertEqual(
+            sorted(listed), sorted(actual),
+            "브리프 semantic 표와 :root 의 토큰 목록이 다르다 — 한쪽만 고쳤다",
+        )
+        for token in sorted(actual):
+            with self.subTest(token=token):
+                self.assertEqual(
+                    listed[token], actual[token][2:],
+                    f"{token} 의 primitive 매핑이 갈렸다. "
+                    f"브리프={listed[token]} :root={actual[token][2:]}",
+                )
+
     def test_body_text_clears_the_stricter_AAA_bar_on_every_surface(self) -> None:
         """본문만은 AA 로 만족하지 않기로 한 결정(장시간 읽고 쓰는 도구)을 잠근다.
 
