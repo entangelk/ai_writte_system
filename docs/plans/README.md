@@ -165,7 +165,7 @@
 
 | 문서 | 무엇 | 상태 |
 |---|---|---|
-| [`10-frontend-design-system-decisions.md`](10-frontend-design-system-decisions.md) | Phase 10 — 디자인 시스템 착수 결정(범위 · 토큰 체계 · **활동 100건 표시** · **`/me` 진입점** · 제품명 · 다크 모드) | **Open — D1~D6 오너 대기** · ★ 실측: `toHaveClass` **0**·`ByTestId` **0** 이라 **순수 시각 변경은 회귀 비용 0**, 비싼 것은 문구 311곳·접근성 semantics 478곳 · 육안 확인이 올린 기능 결손 셋을 합류시켰다 |
+| [`10-frontend-design-system-decisions.md`](10-frontend-design-system-decisions.md) | Phase 10 — 디자인 시스템 착수 결정(범위 · 토큰 체계 · **활동 100건 표시** · **`/me` 진입점** · 제품명 · 다크 모드) | **Resolved(2026-08-11) · 구현 대기** — D1~D6 확정 · **계약 영향 0 · backend 0줄** · ★ **D2 는 구현자 권고(현행 유지)를 오너가 기각**했고 그것이 옳았다(현행 크림+테라코타 = AI 디자인 기본값) → **잉크블루 팔레트**를 OKLCH+WCAG 2.2 로 계산해 세움([`10_palette_contrast.py`](10_palette_contrast.py), 18짝 전수 통과) · ★ 실측: `toHaveClass` **0**·`ByTestId` **0** 이라 **순수 시각 변경은 회귀 비용 0**, 비싼 것은 문구 311곳·접근성 semantics 478곳 |
 
 ### 프론트엔드
 
