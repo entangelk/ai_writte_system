@@ -1,0 +1,122 @@
+"""팔레트의 **출처를 잇는 연결선** (Phase 10 Slice 10.1, D2=ⓑ).
+
+두 정본은 중복이 아니다 —
+
+- ``docs/plans/10_palette_contrast.py`` = *"그 값이 왜 그 값인가"*(OKLCH 램프 ·
+  색역 처리 · WCAG 검산). 값을 **만드는** 자리.
+- ``frontend/src/styles.css`` 의 ``:root`` = *"화면이 실제로 쓰는 값"*. 값을
+  **소비하는** 자리.
+
+**이 파일이 그 연결이다.** ``styles.css`` 주석은 *"여기 hex 를 손으로 고치지 말 것 —
+스크립트를 고치고 다시 돌린 뒤 옮긴다"* 라고 적고 있지만, **적어 두는 것만으로는 아무도
+막지 못한다.** 손으로 한 글자 고치면 그 순간 팔레트는 "계산해서 세웠다"가 아니게 되고,
+**대비 검산은 더 이상 화면에 뜨는 색을 말하지 않는다** — 그런데 회귀는 전부 green 이다
+(CSS 값을 재는 것은 프론트 가드 ``designTokens.test.ts`` 이고, 그쪽은 *토큰 체계의
+무결성*을 보지 이 값이 **어디서 왔는지**는 모른다).
+
+**★ 왜 프론트가 아니라 여기(pytest)인가**: 생성기가 파이썬이다. vitest 에서 이 스크립트를
+돌리려면 서브프로세스로 파이썬을 불러야 하고, 그러면 프론트 스위트가 파이썬 런타임에
+의존하게 된다. 두 정본을 **같은 프로세스에서** 볼 수 있는 자리가 여기뿐이다. 파이썬
+테스트가 저장소의 비-파이썬 파일을 읽는 것은 ``test_activity_ui_labels.py``(TS/CSS)·
+``test_docs_indexes.py``(문서)·``test_compose_exposure.py``(compose YAML) 의 선례를 따른다.
+
+**양방향**:
+
+- under-strict — CSS 의 hex 를 손으로 고치면 ``test_every_primitive_matches`` 가 실패한다.
+- over-strict — 스크립트만 고치고 CSS 로 옮기지 않아도 **같은 셀이** 실패한다(값이 갈리는
+  것 자체가 결함이지 방향이 문제가 아니다).
+- 그리고 ``test_the_generator_still_passes_its_own_contrast_check`` 가 **검산 자체**를
+  지킨다 — 램프를 고쳐 CSS 까지 성실히 옮겼는데 그 값이 WCAG 를 깨는 경우가 남기 때문이다.
+"""
+from __future__ import annotations
+
+import importlib.util
+import re
+import sys
+import unittest
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[1]
+_GENERATOR = _ROOT / "docs" / "plans" / "10_palette_contrast.py"
+_STYLESHEET = _ROOT / "frontend" / "src" / "styles.css"
+
+
+def _load_generator():
+    spec = importlib.util.spec_from_file_location("_palette", _GENERATOR)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["_palette"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _primitives_declared_in_css() -> dict[str, str]:
+    """``:root`` 에 적힌 primitive 선언만. semantic 은 ``var(...)`` 참조라 안 잡힌다."""
+    text = _STYLESHEET.read_text(encoding="utf-8")
+    root = text[: text.index("\n}\n")]
+    return {
+        name: value
+        for name, value in re.findall(
+            r"^\s*--((?:blue|slate|danger|warn|ok)-\d+)\s*:\s*(#[0-9a-f]{6})\s*;",
+            root,
+            re.MULTILINE,
+        )
+    }
+
+
+class PaletteProvenanceTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.generator = _load_generator()
+        self.css = _primitives_declared_in_css()
+
+    def test_every_primitive_matches_the_generator_output(self) -> None:
+        """CSS 의 primitive 전부가 스크립트가 지금 내는 값과 같아야 한다."""
+        expected = self.generator.P
+
+        # 이름 집합부터 — CSS 에만 있거나 스크립트에만 있는 토큰은 그 자체로 결함이다.
+        self.assertEqual(
+            sorted(self.css), sorted(expected),
+            "CSS 의 primitive 목록과 생성기의 목록이 다르다 — 한쪽만 고쳤다",
+        )
+
+        for name in sorted(expected):
+            with self.subTest(token=name):
+                self.assertEqual(
+                    self.css[name], expected[name],
+                    f"--{name} 가 갈렸다. CSS={self.css[name]} 생성기={expected[name]} — "
+                    "손으로 고쳤거나 스크립트 수정을 옮기지 않았다. "
+                    "`python3 docs/plans/10_palette_contrast.py` 출력을 옮긴다",
+                )
+
+    def test_the_generator_still_passes_its_own_contrast_check(self) -> None:
+        """램프를 바꾸더라도 **WCAG 2.2 AA 를 깨면서** 바꾸지는 못하게 한다.
+
+        위 셀만 있으면 "둘이 같기만 하면" 통과하므로, 둘을 나란히 나쁘게 바꾸는 변경이
+        빠져나간다. 여기서 검산 자체를 돌린다 — 브리프가 *"통과 여부가 아니라 설계 입력"*
+        이라고 적은 그 기준이다.
+        """
+        failures = []
+        for foreground, background, required, purpose in self.generator.PAIRS:
+            ratio = self.generator.contrast(
+                self.generator.P[foreground], self.generator.P[background]
+            )
+            with self.subTest(pair=f"{foreground} on {background}"):
+                self.assertGreaterEqual(
+                    round(ratio, 2), required,
+                    f"{purpose}: {ratio:.2f}:1 < {required}:1",
+                )
+            if round(ratio, 2) < required:
+                failures.append(purpose)
+        self.assertEqual(failures, [])
+
+    def test_body_text_clears_the_stricter_AAA_bar_on_every_surface(self) -> None:
+        """본문만은 AA 로 만족하지 않기로 한 결정(장시간 읽고 쓰는 도구)을 잠근다.
+
+        이것이 없으면 본문 잉크를 AA 경계(4.5)까지 밝혀도 위 셀이 통과한다.
+        """
+        surfaces = ("blue-50", "slate-50", "slate-0", "blue-100")
+        for surface in surfaces:
+            with self.subTest(surface=surface):
+                ratio = self.generator.contrast(
+                    self.generator.P["blue-900"], self.generator.P[surface]
+                )
+                self.assertGreaterEqual(round(ratio, 2), 7.0)
