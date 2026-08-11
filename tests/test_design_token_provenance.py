@@ -108,6 +108,39 @@ class PaletteProvenanceTest(unittest.TestCase):
                 failures.append(purpose)
         self.assertEqual(failures, [])
 
+    def test_prose_that_states_the_pair_count_matches_the_generator(self) -> None:
+        """검산 짝 수를 **글로 적은 자리**가 실제 `PAIRS` 와 같아야 한다.
+
+        위 셀들은 값(hex·대비)을 묶지만 **서술은 안 묶는다.** 그래서 표면 계층이
+        늘며 짝이 18 → 30 이 됐을 때 **세 곳이 서로 다른 수를 말하는 상태**가
+        됐다(브리프 18 · `styles.css` 주석 28 · work_log 18). 독립 검증 H1 이
+        잡았고, *"세는 사람이 여럿이면 언젠가 갈린다"* 는 이 저장소가
+        `test_docs_indexes.py` 로 이미 한 번 배운 병이다 — 같은 처방을 쓴다.
+
+        **여기서 재는 것은 서술이지 값이 아니다.** 짝을 늘리거나 줄이면 이 셀이
+        실패하고, 그때 **문서를 함께 고치라는 뜻**이다.
+        """
+        expected = len(self.generator.PAIRS)
+        claims = {
+            "frontend/src/styles.css": r"WCAG 2\.2 AA (\d+)짝 전수 검산",
+            "docs/daily_logs/2026-08-11/work_log.md": r"WCAG 2\.2 AA (\d+)짝 전수 검산",
+            "docs/plans/10-frontend-design-system-decisions.md":
+                r"#### WCAG 2\.2 검산 — \*\*(\d+)짝\*\* 전수",
+        }
+        for relative, pattern in claims.items():
+            with self.subTest(document=relative):
+                text = (_ROOT / relative).read_text(encoding="utf-8")
+                found = re.findall(pattern, text)
+                self.assertEqual(
+                    len(found), 1,
+                    f"{relative}: 이 주장을 정확히 한 번 찾지 못했다 — 문구가 "
+                    "바뀌었으면 위 claims 도 함께 고친다",
+                )
+                self.assertEqual(
+                    int(found[0]), expected,
+                    f"{relative} 가 {found[0]}짝이라 적었지만 실제 PAIRS 는 {expected}짝",
+                )
+
     def test_body_text_clears_the_stricter_AAA_bar_on_every_surface(self) -> None:
         """본문만은 AA 로 만족하지 않기로 한 결정(장시간 읽고 쓰는 도구)을 잠근다.
 
