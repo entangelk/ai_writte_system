@@ -84,7 +84,22 @@ work_log Task 5 · HANDOFF 기준선(frontend 289/20 · 진입 420.81 kB 갱신)
 
 ## Outstanding items
 
-- **작업 AI** 가 H1(탭 `<title>` 통일 + `document.title` 가드) 처리. H3(M1 셀 라벨 정정) 도 같이.
+- ~~**작업 AI** 가 H1(탭 `<title>` 통일 + `document.title` 가드) 처리. H3(M1 셀 라벨 정정) 도 같이.~~
+  **★ 폐쇄 2026-08-11 (작업 AI, 검증자 아님).**
+  - **H1 닫힘** — `frontend/index.html:6` 을 `<title>에-라잇</title>` 로. 가드는
+    `document.title` 이 아니라 **파일을 읽는** 쪽으로 만들었다
+    ([`frontend/src/productName.test.ts`](../../../frontend/src/productName.test.ts), 2 cells):
+    vitest 는 `index.html` 을 로드하지 않고 빈 jsdom 문서에 마운트하므로 `document.title`
+    을 읽어도 **런타임 값이지 저장소의 값이 아니다** — 검증자가 지목한 맹점이 그대로 남는다.
+    파일을 읽으면 `<head>` 전체가 사정거리에 들어온다. 두 번째 셀은 **소스 전수 스윕**이라
+    `og:title`·manifest 등 아직 없는 자리도 미리 덮는다(테스트 파일은 제외 — 부재를
+    단정하려면 그 문자열을 적어야 한다). 양방향 실측: **M7** 타이틀 되돌림 → 2 failed ·
+    **M8** 렌더 밖 소스에 옛 이름 부활 → 1 failed.
+  - **H3 닫힘** — work_log Task 5 의 M1 표를 `App.test.tsx:641` Esc 포커스 복귀 셀로 정정.
+    검증자 지적대로 개수는 맞고 라벨만 빗갔다(작업자가 M1 을 재현해 직접 확인).
+  - **기준선 이동**: frontend `289/20` → **`291 passed / 21 files`**(+2 cells · +1 file).
+    build **702 modules · 진입 420.81 kB 무변**(타이틀은 JS 번들 밖이다). `dist/index.html`
+    재빌드에서 `<title>에-라잇</title>` 확인.
 - H2(openapi API title)는 10.0 범위 밖이라 별도 오너 판단.
 - 본 검증은 **검증으로 끝** — 10.1 팔레트 교체 착수·타이틀 수정은 작업 AI 몫(오너 2026-08-11).
 

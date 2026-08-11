@@ -143,7 +143,7 @@ D4 = ⓐ+ⓒ · D5 = ⓐ 구현. [`AuthGate.tsx`](../../../frontend/src/auth/Aut
 
 | # | 적용한 diff | 위치 | 실패한 셀 |
 |---|---|---|---|
-| M1 | `<Link to="/me">` → `<span>` | `AuthGate.tsx` `SessionMenu` | **3 failed** — 진입점 셀 + 비관리자 셀 + 제품명 셀(같은 렌더 경유) |
+| M1 | `<Link to="/me">` → `<span>` | `AuthGate.tsx` `SessionMenu` | **3 failed** — 진입점 셀 + 비관리자 셀 + **Esc 포커스 복귀 셀**([`App.test.tsx:641`](../../../frontend/src/App.test.tsx#L641), 열린 뒤 `tab()` 이 그 링크로 가므로 함께 깨진다) |
 | M2 | `triggerRef.current?.focus()` → `void 0` | 같은 파일 `close()` | **1 failed** — `closes on Escape and gives focus back` |
 | M3 | `{user.is_admin && (` → `{true && (` | 같은 파일 | **1 failed** — 비관리자 over-strict 셀 |
 | M4 | `onClick={onLogout}` → `onClick={() => { setOpen(false); onLogout(); }}` | 같은 파일 | **2 failed** — 진행 신호 셀 + 기존 로그아웃 셀 |
