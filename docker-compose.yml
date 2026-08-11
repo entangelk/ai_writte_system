@@ -44,6 +44,15 @@ services:
       start_period: 10s
 
   application:
+    # ★ 이 Dockerfile 을 쓰는 네 서비스(application·admin·worker·
+    # generation_worker)가 **한 이미지를 공유한다.** `image:` 를 명시하지 않으면
+    # compose 가 서비스마다 별도 태그(`<project>-<service>`)를 만들고, 그러면
+    # `docker compose build application` 이 나머지 셋을 갱신하지 않는다.
+    # 2026-08-11 실측: worker 이미지가 07-27 로 15일 뒤처져 **PROJECT_PURGED
+    # drain 이 없는 채로** 돌고 있었다(D8-6 파기의 워커 절반이 죽어 있었다).
+    # 주석은 처음부터 "Shares the application image" 라고 적었으나 설정이 그것을
+    # 구현하지 않았다 — 태그를 공유해 의도와 설정을 일치시킨다.
+    image: ai_writte_system-app
     build:
       context: .
       dockerfile: services/application/Dockerfile
@@ -132,6 +141,7 @@ services:
     # through nginx `location /api/admin/`. The product app no longer serves
     # /admin at all, so hitting the LAN-published application port for an admin
     # operation is a 404 from the router rather than a 403 from a guard.
+    image: ai_writte_system-app  # application 과 공유(사유는 application 참조)
     build:
       context: .
       dockerfile: services/application/Dockerfile
@@ -320,6 +330,7 @@ services:
     # to run as a single replica (G2=A). G1=A: no health port — restart + the
     # per-pass stdout JSON is the observability channel, and each sink call is
     # bounded by its request_timeout so the loop cannot wedge indefinitely.
+    image: ai_writte_system-app  # application 과 공유(사유는 application 참조)
     build:
       context: .
       dockerfile: services/application/Dockerfile
@@ -362,6 +373,7 @@ services:
     # index worker it calls the LLM gateway, so it needs the same gateway +
     # context env as `application`; the atomic claim (find_one_and_update + lease)
     # makes a single replica safe. Observability = restart + per-pass stdout JSON.
+    image: ai_writte_system-app  # application 과 공유(사유는 application 참조)
     build:
       context: .
       dockerfile: services/application/Dockerfile

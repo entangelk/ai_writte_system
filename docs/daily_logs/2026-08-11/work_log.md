@@ -17,11 +17,16 @@
 **빌드 → `docker compose up -d`** 후 **healthy 8 + healthcheck 없는 2** 회복.
 
 **★ HANDOFF 에 없던 함정 — `admin` 은 따로 빌드해야 한다.** HANDOFF 는 *"application
-이미지 재사용·command 만 다름"* 이라 적고 있으나 [`docker-compose.yml:135`](../../../docker-compose.yml#L135)
+이미지 재사용·command 만 다름"* 이라 적고 있으나 [`docker-compose.yml`](../../../docker-compose.yml)
 에 **자체 `build:` 블록**이 있어 `ai_writte_system-admin` **별도 태그**로 빌드된다.
 `docker compose build application frontend` 로는 갱신되지 않고, 실제로 이 세션이
-그것을 놓쳐 admin 만 옛 이미지로 한 번 떴다. (worker·generation_worker 는 진짜로
-application 이미지를 공유하지만 admin 은 아니다.)
+그것을 놓쳐 admin 만 옛 이미지로 한 번 떴다.
+
+> **★ 정정(같은 날, Task 4).** 이 문단이 처음에 *"worker·generation_worker 는 진짜로
+> application 이미지를 공유하지만 admin 은 아니다"* 라고 적었는데 **거짓이다.** 넷 다
+> 각자 `build:` 를 갖고 각자 태그를 받고 있었고, **가장 뒤처진 것은 admin 이 아니라
+> worker(07-27)였다.** 오너가 *"별도 태그를 한 특별한 이유가 있나? 서로 필요한거잖아"*
+> 라고 물어 다시 봤고 그 지적이 맞았다 — 아래 Task 4 가 근본 수정이다.
 
 **프론트 빌드 출력이 기준선과 일치** — 702 modules · 진입 420.08 kB · AdminConsole
 lazy 8.50 kB · 관측 lazy 386.70 kB. 어제 검증이 정정한 **702** 가 맞음을 재확인.
@@ -67,13 +72,64 @@ AttributeError: 'NoneType' object has no attribute 'list_projects_for_owner'
 HANDOFF 의 *"285셀이 문구·구조를 상당히 잠근다"* 경고를 축별로 갈랐다: **순수 시각
 변경은 회귀 비용 0**, 비싼 것은 **문구 311곳**과 **접근성 semantics 478곳**이다.
 
+### Task 4 — 앱 이미지 하나로 통합 (오너 지적에서 출발)
+
+오너 질문: *"빌드쪽은 계속 놓치게 된다면 컴포즈에서 같이 묶어두는게 맞지 않나? 별도 태그를
+한 특별한 이유가 있나? 서로 필요한거잖아"*
+
+**답: 특별한 이유가 없었다 — 오히려 주석이 이미 공유를 의도한다고 적고 있었다.** `admin`
+주석은 *"Shares the application image and changes only the command"*, `worker` 주석은
+*"Shares the application image (same Python runtime + deps + indexing code)"* 다.
+**의도는 처음부터 공유였고 설정만 그것을 구현하지 않았다** — compose 는 `image:` 가 없으면
+서비스마다 `<project>-<service>` 태그를 만든다.
+
+**실측한 피해**(이 질문이 없었으면 안 봤을 것이다):
+
+| 서비스 | 이미지 날짜 | 뒤처짐 |
+|---|---|---|
+| `application` | 08-11 | — (오늘 재빌드) |
+| `admin` | 08-11 | — (오늘 재빌드, Task 1 에서 놓쳤다가 수습) |
+| `generation_worker` | **07-29** | **13일** |
+| `worker` | **07-27** | **15일** |
+
+**★ 그리고 그것이 기능을 죽이고 있었다.** 실행 중인 `worker` 컨테이너 안을 직접 봤다:
+
+```
+docker compose exec worker grep -c "_drain_purge" .../indexing/service.py  →  0   (현행 코드는 2)
+docker compose exec worker grep -rl "PROJECT_PURGED" .../indexing/          →  (없음)
+```
+
+즉 **D8-6 파기의 워커 절반이 죽어 있었다** — 관리자 purge 가 `PROJECT_PURGED` 를 outbox 로
+넘기는데(`f81d145`, 08-02) 실행 중 워커는 그 이벤트 타입을 **모르는 07-27 코드**였다.
+`generation_worker` 는 8.3 의 **워커 차감**(`9a6a500`)이 빠져 있었다.
+**다만 잠복이었다** — `index_sync_outbox` 실측 **0건**이라 아직 아무 파기도 발생하지 않았다.
+
+**수정**: 네 서비스에 `image: ai_writte_system-app` 을 명시해 태그를 공유시켰다.
+
+**검증**:
+
+- `docker compose config --quiet` 통과 · 네 서비스가 같은 이미지로 해석됨
+- `docker compose build` 에서 **`ai_writte_system-app Building/Built` 가 정확히 1회** —
+  compose 가 빌드를 dedupe 한다(추측이 아니라 출력으로 확인)
+- 재기동 후 **네 컨테이너의 이미지 ID 가 동일**(`sha256:a8a3ed19ec376`)
+- 워커 안 `_drain_purge` **0 → 2**, `PROJECT_PURGED` 존재로 전환
+- 제품 관통 무변: `/health` 200 · `/me/activity` 401 · 제품앱 `/admin/users` **404** ·
+  nginx `/api/admin/users` **401**(Slice 2 토폴로지 유지)
+- compose 를 읽는 테스트 **전수**(`test_compose_exposure` · `test_admin_surface_separation` ·
+  `test_core_sot_mongo`) **92 passed / 87 subtests**
+
+**정리 대상**: 참조를 잃은 옛 이미지 4개(~2.0 GB) — `ai_writte_system-application` ·
+`-admin` · `-worker` · `-generation_worker`. **삭제는 오너 판단**이라 남겨 뒀다
+(`docker image rm` 하면 회수된다).
+
 ## Issues found
 
 | # | 문제 | 원인 | 처리 | 결과 |
 |---|---|---|---|---|
 | 1 | `/me/activity` 배포에서 500 | `register_auth` 만 해석 전 `core_sot`(None) 수령 | 한 줄 수정 + 주입 없는 조립 가드 2셀 | `d26059e` · 라이브 200 확인 |
 | 2 | 전수 회귀 **5 failed** | **작성자 과실** — 새 브리프를 `docs/plans/README.md` 인덱스에 미등재 + 두 README 개수 주장(104/86)이 낡음 | 인덱스에 "프론트 디자인 (Phase 10)" 절 신설 · 105/87 로 갱신 | `505bc03` · 재측정 green |
-| 3 | `admin` 이미지가 재빌드에서 누락 | compose 에 자체 `build:` 가 있어 별도 태그 | `docker compose build admin` 추가 실행 | HANDOFF 에 함정으로 등재 |
+| 3 | `admin` 이미지가 재빌드에서 누락 | compose 에 자체 `build:` 가 있어 별도 태그 | `docker compose build admin` 추가 실행 | 임시 수습 |
+| 4 | **★ `worker` 가 15일 뒤처져 `PROJECT_PURGED` drain 이 없었다** | Issue 3 과 **같은 뿌리** — 네 서비스가 한 Dockerfile 을 쓰면서 `image:` 미명시라 각자 태그 | 네 서비스에 `image: ai_writte_system-app` 공유 (Task 4) | 워커 `_drain_purge` 0 → 2 · 이미지 ID 4개 동일 · 빌드 1회 |
 
 **Issue 2 에 대해**: `docs/plans/README.md` 가 *"새 계획·브리프를 쓰면 아래 표에 한 줄
 추가한다. 빠뜨리면 `tests/test_docs_indexes.py` 가 실패한다 — 규칙이 아니라 강제다"* 라고
