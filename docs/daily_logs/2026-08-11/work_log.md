@@ -122,6 +122,55 @@ docker compose exec worker grep -rl "PROJECT_PURGED" .../indexing/          → 
 `-admin` · `-worker` · `-generation_worker`. **삭제는 오너 판단**이라 남겨 뒀다
 (`docker image rm` 하면 회수된다).
 
+### Task 5 — Phase 10 Slice 10.0: 계정 메뉴 + 제품명 (`387bfe7`·`5965c9b`)
+
+D4 = ⓐ+ⓒ · D5 = ⓐ 구현. [`AuthGate.tsx`](../../../frontend/src/auth/AuthGate.tsx) 의
+새 `SessionMenu` + `styles.css` 배치.
+
+**★ 브리프에서 한 가지 벗어났다 — `role="menu"` 를 안 썼다.** 브리프 §D4 가
+`role="menu"`/`menuitem` 을 적었으나 구현하며 고쳤다. ARIA 의 menu 는 **애플리케이션
+명령 메뉴**용이고 화살표 키 탐색·타입어헤드를 사용자에게 약속하는데, 여기 담긴 것은
+**내비게이션 링크 둘 + 액션 하나**라 그 약속을 지킬 이유가 없다 → 표준 **disclosure**
+(버튼 `aria-expanded`/`aria-controls` + 접히는 영역). **부수 효과로 기존 셀이 살았다**:
+`role="menuitem"` 을 얹으면 `<a>` 의 link 역할이 덮여 `getByRole("link", {name:"관리"})`
+가 무효가 되는데 disclosure 는 보존한다. 브리프에 취소선으로 정정 기록.
+
+**판단 하나** — 로그아웃 클릭에 패널을 닫지 않는다. 닫으면 `"나가는 중…"`·`disabled` 가
+그 즉시 사라져 **진행 중이라는 유일한 신호를 잃는다**. 초판이 그렇게 썼다가 고쳤고,
+그 성질을 M4 가 잠근다.
+
+### 뮤테이션 (6종 전부 작동)
+
+| # | 적용한 diff | 위치 | 실패한 셀 |
+|---|---|---|---|
+| M1 | `<Link to="/me">` → `<span>` | `AuthGate.tsx` `SessionMenu` | **3 failed** — 진입점 셀 + 비관리자 셀 + 제품명 셀(같은 렌더 경유) |
+| M2 | `triggerRef.current?.focus()` → `void 0` | 같은 파일 `close()` | **1 failed** — `closes on Escape and gives focus back` |
+| M3 | `{user.is_admin && (` → `{true && (` | 같은 파일 | **1 failed** — 비관리자 over-strict 셀 |
+| M4 | `onClick={onLogout}` → `onClick={() => { setOpen(false); onLogout(); }}` | 같은 파일 | **2 failed** — 진행 신호 셀 + 기존 로그아웃 셀 |
+| M5 | 헤더 `에-라잇` → `AI Writing System` | 같은 파일 | **1 failed** — 제품명 셀 |
+| M6 | `{open && (` → `{true && (` | 같은 파일 | **2 failed** — 닫힘 상태 셀 + Esc 셀 |
+
+**★ M2 는 처음에 안 물었다(24 passed) — 그것이 신호였다.** 초판 셀이 트리거를 클릭한
+직후 Esc 를 눌렀는데 **그 시점 포커스가 이미 트리거에 있어** 복귀 코드를 통째로 지워도
+통과했다. 포커스를 패널 안으로 옮긴 뒤(`userEvent.tab()`) 눌러야 복귀를 잰다. 강화 후
+같은 뮤테이션이 문다(`5965c9b`). **어제 배운 "뮤테이션이 안 물면 그것이 신호다"가
+오늘 다시 적중했다.**
+
+### 기존 셀 갱신 (6줄)
+
+드롭다운으로 옮겼으므로 `관리`·`로그아웃` 을 집기 전에 메뉴를 연다. 비관리자 셀은
+**닫힌 채로 없음**을 보던 것을 **열어서 없음**으로 강화했다(닫혀 있으면 무엇이든 없다).
+
+### 회귀·부하
+
+frontend **285/20 → 289 passed / 20 files**(**+4 cells**, 파일 무변).
+build **702 modules 무변** · 진입 **420.08 → 420.81 kB**(+0.73) · CSS 26.21 → 26.62 kB ·
+**lazy 청크 무변**(AdminConsole 8.50 · 관측 386.70). backend 무관(프로덕션 0줄) —
+프론트를 읽는 유일한 백엔드 가드 `test_activity_ui_labels.py` **6 passed / 30 subtests**.
+
+**배포 확인**: `docker compose build frontend && up -d` 후 번들에 `에-라잇`·`내 작업`
+포함 확인, frontend healthy.
+
 ## Issues found
 
 | # | 문제 | 원인 | 처리 | 결과 |
