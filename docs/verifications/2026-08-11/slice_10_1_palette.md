@@ -78,13 +78,13 @@
 
 ### Hardening / 비차단
 
-- **H1 (문서 정확성) — 닫힘.** 짝 수 prose 3곳(브리프 "18"·styles.css :root 주석 "28"·work_log "18")이 모두 **30**으로 통일됐다(`f717b87`). 단 prose 짝 수를 `len(PAIRS)` 에 묶는 강제 셀은 아직 없다 — **권고로 남김**(provenance 가드에 추가하면 "세는 사람 셋" 병의 재발을 막는다).
+- **H1 (문서 정확성) — 닫힘.** 짝 수 prose 3곳(브리프 "18"·styles.css :root 주석 "28"·work_log "18")이 모두 **30**으로 통일됐다(`259c7a4`). **검증자 권고를 받아 prose 를 `len(PAIRS)` 에 묶는 셀을 provenance 가드에 추가**했다(`test_prose_that_states_the_pair_count_matches_the_generator`, M16·M17 로 입증) — 가드 **3→4 cells·62→65 subtests**. "세는 사람 셋" 병의 재발을 구조적으로 막는다.
 - **H2 (스코프, 오너 결정 대기): 타이포를 10.3~ 로 유예** — 브리프 10.1 범위("…타이포…")에서 축소. 사유 타당하고 `:root` 에 기록됐으나 **오너가 축소를 bless 했는지** 는 본 검증 시점에 미확정(작업자 보고만). 오너 수용 필요.
 - **H3 (진행 중·작업자 공지): work_log 회귀 기준선·HANDOFF·CHANGELOG 미갱신** — 작업자가 *"회귀 끝나면 기준선 채우고 마무리"* 라 공지(work_log 하단이 10.0 값으로 stale). 백엔드 전수 수치는 작업자 세션 실행 대기라 본 검증도 미실측(새 provenance 가드 3/62 만 단독 확인).
 
 ## Verdict
 
-**합격** — 발행 시점엔 **조건부 합격**(조건 C1·H1 = 브리프 §D2 표·prose 짝 수 정정)이었으나, **그 조건이 발행과 같은 커밋 `f717b87`(작업자)에서 폐쇄**됐다 → 합격 승격. 작업자가 브리프 원시테이블을 정정(`--slate-400` ~~#88929d~~→**#7f8994**·`--slate-450` 신설)하고 대비표를 **착수 시점 스냅샷**으로 명시하며 정본을 [`10_palette_contrast.py`](../../plans/10_palette_contrast.py)·[`test_design_token_provenance.py`](../../tests/test_design_token_provenance.py) 로 지정했다. **정정 주석이 "독립 검증 C1·H1" 을 직접 인용**한다(10.0 `role="menu"` 인라인 정정 패턴). styles.css 주석(28→30)·work_log(18→30) 도 통일. 검증자가 정정 내용을 실측해 완전함을 확인했다.
+**합격** — 발행 시점엔 **조건부 합격**(조건 C1·H1 = 브리프 §D2 표·prose 짝 수 정정)이었으나, **후속 커밋 `259c7a4`(작업자)에서 폐쇄**됐다 → 합격 승격. (참고: `f717b87` 은 슬라이스 표만 고쳤고 D2 본표 정정·prose 통일·prose-가드는 `259c7a4`.) 작업자가 브리프 원시테이블을 정정(`--slate-400` ~~#88929d~~→**#7f8994**·`--slate-450` 신설)하고 대비표를 **착수 시점 스냅샷**으로 명시하며 정본을 [`10_palette_contrast.py`](../../plans/10_palette_contrast.py)·[`test_design_token_provenance.py`](../../tests/test_design_token_provenance.py) 로 지정했다. **정정 주석이 "독립 검증 C1·H1" 을 직접 인용**한다(10.0 `role="menu"` 인라인 정정 패턴). styles.css 주석(28→30)·work_log(18→30) 도 통일. 검증자가 정정 내용을 실측해 완전함을 확인했다.
 
 이유: 팔레트 구현은 WCAG 30짝 독립 재계산으로 전부 통과하고 옛 팔레트는 제거됐으며 새 가드 셋(designTokens·provenance·productName)이 뮤테이션으로 입증됐다. 8.4 숨은 결함·작업자 자결함도 fix. **검증이 잡은 문서 충실성 결함(C1·H1)이 동일 커밋에서 닫혔다** — 검증 절차가 정상 작동한 사례. 잔여 니트(semantic 표에 `--surface-raised`/`--text-placeholder` 행 누락, 비차단)만 남는다.
 
