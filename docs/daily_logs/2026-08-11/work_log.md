@@ -330,7 +330,28 @@ CSS **26.62 → 30.47 kB**(토큰 정의 + 주석). backend 는 아래 기준선
 
 ## 회귀 기준선
 
-**backend test-mongo ON `2268 passed / 1 skipped / 2367 subtests`**(2026-08-11 베타 실측,
+**backend test-mongo ON `2271 passed / 1 skipped / 2430 subtests`**(2026-08-11 베타 실측,
+1093초 — Slice 10.1). **셀 +3 · subtest +63**, 귀속:
+
+- **셀 +3 · subtest +62** = 신규 [`test_design_token_provenance.py`](../../../tests/test_design_token_provenance.py)
+  (primitive 28짝 대조 + 대비 30짝 + 본문 AAA 4면)
+- **subtest +1** = 검증 기록 한 건(`bd2c679`, 오너의 10.0 독립 검증) — `test_docs_indexes.py`
+  의 판정 열 전수 셀이 기록 한 건당 1 오르는 자리이며 **코드와 무관하다**
+
+frontend **294 passed / 22 files** · build **702 modules · 진입 420.81 kB 무변** ·
+CSS 26.62 → 30.47 kB.
+
+### ★ 재현되지 않은 이상 현상 하나 (무시하지 말 것)
+
+전수 회귀 직후 `test_design_token_provenance.py` 단독 실행이 **한 번** `1 failed /
+61 subtests` 를 냈다(정상은 `3 passed / 62 subtests`). 그 뒤 **20회 연속 재실행 전부
+통과**했고, 트리는 clean·같은 커밋이라 두 실행이 **같은 바이트를 읽었다** — 즉 코드가
+아니라 읽기가 흔들린 것으로 보인다. **이 세션에서 같은 마운트가 `HANDOFF.md` 에 허위
+`ENOENT` 를 두 번 냈다**(쓰기는 성공했는데 에러를 반환). WSL/drvfs 의 일시적 읽기 문제로
+추정하되 **단정하지 않는다.** 같은 증상이 다시 보이면 파일시스템으로 넘기기 전에
+`git status` 와 생성기-CSS diff 를 먼저 본다.
+
+**그 아래는 이력이다** — 종전 backend `2268 passed / 1 skipped / 2367 subtests`(2026-08-11 베타 실측,
 986초). 직전 `2266/1/2367` 에서 **셀 +2 · subtest 0** — 신규 `PersonalActivityAssemblyTest`
 2셀이고 subtest 를 만들지 않는다. 문서 3건 추가는 `test_docs_indexes.py` 의 판정 열
 전수 셀을 건드리지 않았다(브리프는 `verifications/` 가 아니라 `plans/` 라서).
