@@ -296,6 +296,63 @@ class PersonalActivityQueryTest(unittest.TestCase):
         self.assertNotIn("project_id", scoped)
 
 
+class PersonalActivityAssemblyTest(unittest.TestCase):
+    """★ `/me/activity` 가 **주입 없이 조립된 앱**에서도 서는지 — 배포 조립 가드.
+
+    이 파일의 다른 모든 셀은 `create_app(service=…)` 로 core_sot 을 **주입**한다.
+    그러면 `create_app` 안의 원시 파라미터 `service` 와 해석된 `core_sot`
+    (`service or _default_core_sot_service()`)이 **같은 객체**라 둘을 혼동해도
+    아무 셀도 물지 않는다. 배포는 아무것도 주입하지 않으므로 원시 파라미터가
+    `None` 이고, **거기서만** 차이가 보인다 — 2026-08-11 실측: 재빌드한 스택에서
+    `GET /me/activity` 가 `AttributeError: 'NoneType' object has no
+    attribute 'list_projects_for_owner'` 로 500 이었다. 회귀 2266셀 전원 green
+    이었고 육안 확인이 잡았다.
+
+    **양방향으로 문다**:
+
+    - under-strict — `register_auth` 에 해석 전 값을 넘기면 (`core_sot=service`)
+      주입 없는 앱에서 500 이 되어 `test_it_serves_without_an_injected_core_sot`
+      가 실패한다.
+    - over-strict — 그것을 "안전하게" 고치겠다고 호출 지점에서
+      `_default_core_sot_service()` 를 **새로** 부르면 개인 허브만 다른 저장소를
+      보게 된다. `test_it_reads_the_same_store_the_rest_of_the_app_writes` 가
+      그 방향을 문다(같은 앱에 만든 프로젝트가 허브에서 안 보인다).
+    """
+
+    def _app_without_injected_core_sot(self):
+        # core_sot 만 빼고 조립한다. 인증 서비스는 로그인할 수 있어야 하므로
+        # 주입하며, 그것이 이 셀이 재는 축도 아니다. env 가 없으면
+        # `_default_core_sot_service()` 는 in-memory 로 떨어지므로 인프라가
+        # 필요 없다.
+        users = UserService(InMemoryUserRepository(), hasher=_FakeHasher())
+        sessions = SessionService(InMemorySessionRepository(), ttl=timedelta(hours=1))
+        users.create_user(username="alice", password="pw123")
+        app = create_app(
+            user_service=users, session_service=sessions,
+            activity_log_service=ActivityLogService(InMemoryActivityLogRepository()),
+        )
+        client = TestClient(app, base_url="https://testserver")
+        client.post("/auth/login", json={"username": "alice", "password": "pw123"})
+        return client
+
+    def test_it_serves_without_an_injected_core_sot(self) -> None:
+        client = self._app_without_injected_core_sot()
+
+        response = client.get("/me/activity")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["events"], [])
+
+    def test_it_reads_the_same_store_the_rest_of_the_app_writes(self) -> None:
+        """허브는 앱이 실제로 쓰는 저장소를 읽어야 한다 — 제 것을 새로 만들면 안 된다."""
+        client = self._app_without_injected_core_sot()
+        project_id = client.post("/projects", json={"name": "첫 장편"}).json()["id"]
+
+        events = client.get("/me/activity").json()["events"]
+
+        self.assertEqual([event["project_id"] for event in events], [project_id])
+
+
 class ActivityPurgeTest(unittest.TestCase):
     """★ I1·I2 — 프로젝트를 파기하면 활동 로그도 사라진다.
 

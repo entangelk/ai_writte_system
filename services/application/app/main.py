@@ -1821,7 +1821,7 @@ def create_app(
     # these are ``if`` guards in place rather than a reshuffled call list.
     if include_product:
         register_auth(app, users=users, sessions=sessions,
-                      core_sot=service, activity=activity)
+                      core_sot=core_sot, activity=activity)
 
     if include_admin:
         register_admin(
