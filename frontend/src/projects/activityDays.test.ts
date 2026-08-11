@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { groupActivityByDay } from "./activityDays";
 
 /** 로컬 시간대로 `Date` 를 만든다 — 문자열 파싱이 UTC 로 새는 것을 피한다. */
@@ -61,18 +61,39 @@ describe("groupActivityByDay (Phase 10 Slice 10.2)", () => {
     expect(groups[1].events.map((e) => e.id)).toEqual(["c"]);
   });
 
-  it("uses the local calendar day, not UTC", () => {
+  describe("로컬 달력 경계 (UTC 로 바꾸면 깨져야 한다)", () => {
     /**
-     * ★ 각 행이 `toLocaleString("ko-KR")` 로 **로컬 시각**을 찍는다. 머리글을
-     * UTC 로 계산하면 *"오늘"* 아래에 어제 시각이 적힌 행이 앉는다 — 머리글은
-     * 옆에 적힌 시각과 **같은 날**을 말해야 한다. 로컬 자정 직후 1분을 준다:
-     * UTC 로 바꾸면(KST 기준) 전날로 넘어가는 시각이다.
+     * ★ 각 행이 로컬 시각을 찍으므로 머리글도 **로컬 날짜**여야 한다 — UTC 로
+     * 계산하면 *"오늘"* 아래에 어제 시각이 적힌 행이 앉는다.
+     *
+     * **★ 이 셀은 시간대를 고정한다. 안 하면 머신에 따라 아무것도 안 잰다.**
+     * 2026-08-11 실측: `getFullYear` → `getUTCFullYear` 뮤테이션이
+     * `TZ=Asia/Seoul` 에서는 3 failed 인데 **`TZ=UTC` 에서는 0 failed** 였다 —
+     * UTC 머신에서는 두 구현이 같은 값을 내므로 잡을 것이 없기 때문이다. 그러면
+     * **UTC 컨테이너/CI 에서 로컬→UTC 리팩터링이 전부 green 으로 통과하고**,
+     * 버그는 시간대가 다른 사용자에게서만 터진다. 이 저장소는 머신 셋을 옮겨
+     * 다니고 컨테이너 기본이 UTC 라 실제 위험이다.
+     *
+     * 양쪽 끝(자정 직후·직전)을 둘 다 본다 — offset 의 **부호에 관계없이** 한쪽은
+     * UTC 경계를 넘는다.
      */
-    const justAfterLocalMidnight = localAt(2026, 8, 11, 0, 1);
+    const originalTz = process.env.TZ;
+    beforeEach(() => { process.env.TZ = "Asia/Seoul"; });
+    afterEach(() => { process.env.TZ = originalTz; });
 
-    const groups = groupActivityByDay([{ at: justAfterLocalMidnight }], NOW);
+    it("keeps a minute past local midnight on today", () => {
+      const groups = groupActivityByDay(
+        [{ at: localAt(2026, 8, 11, 0, 1) }], new Date(2026, 7, 11, 15, 0));
 
-    expect(groups[0].label).toBe("오늘");
+      expect(groups[0].label).toBe("오늘");
+    });
+
+    it("keeps a minute before local midnight on the same day", () => {
+      const groups = groupActivityByDay(
+        [{ at: localAt(2026, 8, 11, 23, 59) }], new Date(2026, 7, 11, 15, 0));
+
+      expect(groups[0].label).toBe("오늘");
+    });
   });
 
   it("keeps rows it cannot date instead of dropping them", () => {

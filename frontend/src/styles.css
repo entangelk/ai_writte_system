@@ -2119,11 +2119,30 @@ main {
   margin-top: var(--space-6);
 }
 
+/* ★ 머리글이 라벨체(작고 흐림)라 그룹 경계가 눈에 안 띄었다 — 오너가 육안 확인에서
+   "머릿글이 안 접히는 것 같다"고 했고 독립 검증이 원인을 *시각 강조 약함*으로 짚었다
+   (접힘 자체는 정상 동작이었다). 색을 본문 잉크로 올리고 아래에 실선을 그어 **경계가
+   보이게** 한다. 크기는 그대로 둔다 — 이 머리글은 날짜일 뿐이라 행보다 커질 이유가 없다. */
 .activity-day > h2,
 .activity-day > h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   margin: 0 0 var(--space-2);
-  color: var(--text-muted);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--border-hairline);
+  color: var(--text-body);
   font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0.08em;
+}
+
+/* 날짜 옆 점 하나 — 목록이 길어졌을 때 스크롤 중에 경계를 찾는 표식이다. */
+.activity-day > h2::before,
+.activity-day > h3::before {
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: var(--radius-pill);
+  background: var(--action-primary);
+  content: "";
 }
