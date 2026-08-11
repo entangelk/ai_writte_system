@@ -72,21 +72,21 @@
 
 - **없음.** 팔레트 구현은 계약(D2)을 충족하고 WCAG 30짝이 독립 재계산으로 전부 통과하며, 가드가 뮤테이션으로 입증됐다.
 
-### ★ 조건 (닫아야 합격으로 승격)
+### ★ 조건 → **폐쇄(같은 커밋 `f717b87`, 작업자; 검증자 실측 확인)**
 
-- **C1 (문서 충실성): 브리프 §D2 표가 구현과 갈렸고 10.1 커밋이 브리프를 고치지 않았다.** [`10-frontend-…-decisions.md`](../../plans/10-frontend-design-system-decisions.md):180 `--slate-400 #88929d`(실제 #7f8994)·:221 "18짝"(실제 30)·`--surface-raised`/`--slate-450` 행 누락. 진실은 work_log Task 6·스크립트·provenance 가드에 있으나 **정본(결정 브리프) 자체 표가 틀리다**. 10.0 이 `role="menu"` 를 취소선으로 인라인 정정한 패턴을 10.1 은 따르지 않았다(`verification.md`: 계약 내부 불일치는 blocking).
+- **C1 (문서 충실성) — 닫힘.** 발행 시점(HEAD `4dd2046`)에 브리프 §D2 표가 구현과 갈라져 있었다(`--slate-400 #88929d`·18짝·`--surface-raised`/`--slate-450` 누락). `f717b87` 이 정정: 원시테이블 `--slate-400` 취소선→**#7f8994** · `--slate-450` 신설 · 대비표를 "착수 시점 스냅샷"으로 명시 + 정본을 `10_palette_contrast.py`·`test_design_token_provenance.py` 로 지정(정정 주석이 "독립 검증 C1·H1" 인용). 검증자 실측 — 완전. **잔여 니트(비차단)**: semantic 표(§D2 line 204-220)에 `--surface-raised`·`--text-placeholder` 행이 여전히 빠지나 `:root`·work_log Task 6 에 문서화돼 있고 대비표 주석이 정본을 script 으로 지정하므로 "정본이 거짓 숫자를 말한다"는 정정 목적은 달성.
 
 ### Hardening / 비차단
 
-- **H1 (문서 정확성): 짝 수 prose 가 3곳에서 갈라진다** — 브리프 "18"·`styles.css` :root 주석(line 15) "28"·work_log "팔레트를 어떻게 세웠는가"(line 315) "18" — 실제 **30**. provenance 가드가 CSS-hex↔script 는 묶지만 **prose 짝 수는 안 묶는다**. C1 정정과 함께 30으로 맞추고, (권고) prose 짝 수를 `len(PAIRS)` 에 묶는 셀을 provenance 가드에 추가하면 이 병의 재발을 막는다(`test_docs_indexes` 의 "세는 사람 셋" 병과 같은 뿌리).
+- **H1 (문서 정확성) — 닫힘.** 짝 수 prose 3곳(브리프 "18"·styles.css :root 주석 "28"·work_log "18")이 모두 **30**으로 통일됐다(`f717b87`). 단 prose 짝 수를 `len(PAIRS)` 에 묶는 강제 셀은 아직 없다 — **권고로 남김**(provenance 가드에 추가하면 "세는 사람 셋" 병의 재발을 막는다).
 - **H2 (스코프, 오너 결정 대기): 타이포를 10.3~ 로 유예** — 브리프 10.1 범위("…타이포…")에서 축소. 사유 타당하고 `:root` 에 기록됐으나 **오너가 축소를 bless 했는지** 는 본 검증 시점에 미확정(작업자 보고만). 오너 수용 필요.
 - **H3 (진행 중·작업자 공지): work_log 회귀 기준선·HANDOFF·CHANGELOG 미갱신** — 작업자가 *"회귀 끝나면 기준선 채우고 마무리"* 라 공지(work_log 하단이 10.0 값으로 stale). 백엔드 전수 수치는 작업자 세션 실행 대기라 본 검증도 미실측(새 provenance 가드 3/62 만 단독 확인).
 
 ## Verdict
 
-**조건부 합격** — 조건: 브리프 §D2 표(`--slate-400` 값·18→30짝·`--surface-raised`/`--slate-450` 누락)와 흩어진 짝 수 prose(styles.css :root 주석 28·work_log 18 → 실제 30)를 실제 팔레트에 맞게 정정할 것(C1·H1). 그 외 blocking 0.
+**합격** — 발행 시점엔 **조건부 합격**(조건 C1·H1 = 브리프 §D2 표·prose 짝 수 정정)이었으나, **그 조건이 발행과 같은 커밋 `f717b87`(작업자)에서 폐쇄**됐다 → 합격 승격. 작업자가 브리프 원시테이블을 정정(`--slate-400` ~~#88929d~~→**#7f8994**·`--slate-450` 신설)하고 대비표를 **착수 시점 스냅샷**으로 명시하며 정본을 [`10_palette_contrast.py`](../../plans/10_palette_contrast.py)·[`test_design_token_provenance.py`](../../tests/test_design_token_provenance.py) 로 지정했다. **정정 주석이 "독립 검증 C1·H1" 을 직접 인용**한다(10.0 `role="menu"` 인라인 정정 패턴). styles.css 주석(28→30)·work_log(18→30) 도 통일. 검증자가 정정 내용을 실측해 완전함을 확인했다.
 
-이유: 팔레트 구현 자체는 WCAG 30짝 독립 재계산으로 전부 통과하고 옛 팔레트는 제거됐으며 새 가드 셋(designTokens·provenance·productName)이 뮤테이션으로 입증됐다. 8.4 숨은 결함과 작업자 자결함도 fix 됐다. 다만 **결정 브리프의 팔레트 표가 구현과 갈라진 채** 인라인 정정(10.0 선례)이 안 돼 정본이 스스로 틀린 숫자를 말하고 있어, 이 정정이 조건이다.
+이유: 팔레트 구현은 WCAG 30짝 독립 재계산으로 전부 통과하고 옛 팔레트는 제거됐으며 새 가드 셋(designTokens·provenance·productName)이 뮤테이션으로 입증됐다. 8.4 숨은 결함·작업자 자결함도 fix. **검증이 잡은 문서 충실성 결함(C1·H1)이 동일 커밋에서 닫혔다** — 검증 절차가 정상 작동한 사례. 잔여 니트(semantic 표에 `--surface-raised`/`--text-placeholder` 행 누락, 비차단)만 남는다.
 
 ## Outstanding items
 

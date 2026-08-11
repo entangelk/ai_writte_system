@@ -1,7 +1,7 @@
 # 독립 검증 기록
 
 이 디렉터리는 **구현자가 아닌 검증자가** 각 슬라이스를 다시 뜯어본 기록이다. 2026-06-24부터
-**48일치 · 234건**이 쌓여 있다.
+**48일치 · 235건**이 쌓여 있다.
 
 ## 이 저장소의 검증이 무엇인가
 
@@ -35,7 +35,7 @@
 
 | 판정 | 건수 | 뜻 |
 |---|---|---|
-| 합격 | 165 | blocking 결함 없음 |
+| 합격 | 166 | blocking 결함 없음 |
 | **조건부 합격** | **67** | 합격이되 닫아야 할 조건이 있었다 |
 | **불합격** | **2** | 핵심 계약 위반으로 다음 슬라이스 진행이 차단됐다 |
 
@@ -65,6 +65,7 @@
 
 ### 2026-08-11
 
+| [`slice_10_1_palette.md`](2026-08-11/slice_10_1_palette.md) | Slice 10.1 잉크블루 토큰 체계(`dcd2ad5`·`3465192`·`4dd2046`, Phase 10 §D2·§D6) — 기준선 재현(frontend **294/22** · build **702/420.81 무변·CSS 30.47** · provenance **3/62**). **★ WCAG 30짝 독립 재계산 전부 통과**(slate-400 #7f8994=3.32·slate-450 #636c77=4.98 위험짝 직접 계산, 스크립트와 소수 3째짜리 일치). 옛 팔레트 토큰·#a4452f 0(#f4f0e7 은 관측 차트만=예상 중간상태). 새 가드 designTokens(3)·provenance(3)·productName(2) 뮤테이션으로 물림 확인(provenance CSS-hex 변형→cell1·designTokens 미정의토큰→cell1). 8.4 `.writing-confirm` 결함 fix·작업자 자결함(body) fix. 타이포 29종 무변·유예사유 :root 기록. **★C1·H1(브리프 §D2 표·prose 짝 수 정정)은 발행과 같은 커밋 `f717b87`에서 작업자 폐쇄** — 브리프 원시테이블 정정(slate-400 취소선→#7f8994·slate-450 신설) + 대비표 "착수 스냅샷" 명시·정본을 script/guard 지정(주석이 "독립 검증 C1·H1" 인용) + styles.css/work_log 짝 수 30 통일. 검증자 실측·완전 → **합격 승격**. | **합격** |
 | [`slice_10_0_account_menu.md`](2026-08-11/slice_10_0_account_menu.md) | Slice 10.0 계정 메뉴 + 제품명 "에-라잇"(`387bfe7`·`5965c9b`·`db223ee`, Phase 10 §D4 ⓐ+ⓒ·§D5) — 기준선 전부 독립 재현(frontend **289/20** · build **702 modules · 420.81 kB** · 백엔드 가드 **6/30** · `tsc` clean). **★ M2 헤드라인 내러티브 양방향 재현** — 강화 전 테스트(387bfe7)+변형 = **24 passed(안 물음)**, 강화 후+변형 = **1 failed(물음)**. M1→3·M4→2 failed 도 일치. 두 일탈 모두 건강 — disclosure vs `role="menu"`(ARIA menu 약속 불필요·`<a>` link 역할 보존) · 로그아웃 패널 유지(진행 신호 보존, M4 2겹). **★발견: 브라우저 탭 `<title>` 이 "AI Writing System" 잔존**(`index.html:6`) — D5 "이름 통일" 의도가 탭에서 미달성, `queryByText` 가 `<head>` 를 안 봐 가드 밖. 오너 결정: 수정은 작업 AI. **Blocking 0**. 비차단 3(★H1 탭 타이틀 통일+`document.title` 가드 · H2 openapi API title=범위 밖 · H3 work_log M1 셀 라벨 정정). | **조건부 합격** |
 
 ### 2026-08-10
