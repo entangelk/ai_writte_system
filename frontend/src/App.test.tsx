@@ -640,6 +640,12 @@ describe("App routes", () => {
       await userEvent.click(trigger);
       expect(screen.getByRole("link", { name: "내 작업" })).toBeInTheDocument();
 
+      // ★ 포커스를 **패널 안으로 옮긴 뒤** 눌러야 이 셀이 무엇인가를 잰다.
+      // 트리거를 클릭한 직후에는 포커스가 이미 트리거에 있어서, 복귀를 지워도
+      // `toHaveFocus()` 가 통과한다(2026-08-11 뮤테이션 실측 — 초판이 그랬다).
+      await userEvent.tab();
+      expect(screen.getByRole("link", { name: "내 작업" })).toHaveFocus();
+
       await userEvent.keyboard("{Escape}");
 
       expect(screen.queryByRole("link", { name: "내 작업" })).not.toBeInTheDocument();
