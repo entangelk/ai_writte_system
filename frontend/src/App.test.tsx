@@ -358,7 +358,10 @@ describe("App routes", () => {
     expect(
       await screen.findByRole("heading", { name: "관리자 권한이 필요합니다." }),
     ).toBeInTheDocument();
+    // 10.0: 닫힌 채로 없는 것은 약하다 — **열어서** 없음을 본다.
+    await userEvent.click(screen.getByRole("button", { name: "alice" }));
     expect(screen.queryByRole("link", { name: "관리" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "내 작업" })).toBeInTheDocument();
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(["/api/auth/me"]);
   });
 
@@ -386,6 +389,8 @@ describe("App routes", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "관리" })).toBeInTheDocument();
+    // 10.0: 관리 링크는 계정 메뉴 안으로 들어갔다(D4 ⓐ+ⓒ).
+    await userEvent.click(screen.getByRole("button", { name: "root" }));
     expect(screen.getByRole("link", { name: "관리" })).toHaveAttribute("href", "/admin");
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       "/api/auth/me",
@@ -503,7 +508,8 @@ describe("App routes", () => {
       </MemoryRouter>,
     );
 
-    await userEvent.click(await screen.findByRole("button", { name: "로그아웃" }));
+    await userEvent.click(await screen.findByRole("button", { name: "alice" }));
+    await userEvent.click(screen.getByRole("button", { name: "로그아웃" }));
 
     expect(screen.getByRole("button", { name: "나가는 중…" })).toBeDisabled();
     expect(screen.getByRole("heading", { name: "프로젝트" })).toBeInTheDocument();
@@ -527,7 +533,8 @@ describe("App routes", () => {
       </MemoryRouter>,
     );
 
-    await userEvent.click(await screen.findByRole("button", { name: "로그아웃" }));
+    await userEvent.click(await screen.findByRole("button", { name: "alice" }));
+    await userEvent.click(screen.getByRole("button", { name: "로그아웃" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "로그아웃하지 못했습니다. 잠시 후 다시 시도해 주세요.",
@@ -550,7 +557,8 @@ describe("App routes", () => {
       </MemoryRouter>,
     );
 
-    await userEvent.click(await screen.findByRole("button", { name: "로그아웃" }));
+    await userEvent.click(await screen.findByRole("button", { name: "alice" }));
+    await userEvent.click(screen.getByRole("button", { name: "로그아웃" }));
 
     expect(await screen.findByLabelText("아이디")).toBeInTheDocument();
     expect(fetchMock.mock.calls[2][0]).toBe("/api/auth/logout");
@@ -582,5 +590,109 @@ describe("App routes", () => {
 
     expect(await screen.findByRole("heading", { name: "프로젝트" })).toBeInTheDocument();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+  });
+  describe("계정 메뉴 (Phase 10 Slice 10.0, D4 = ⓐ+ⓒ)", () => {
+    /**
+     * **`/me` 로 가는 링크가 저장소 전체에 하나도 없었다** — route 는 9.2 에 있었으나
+     * 진입점이 없어 주소를 직접 쳐야 도달했다(2026-08-11 육안 확인). 여기가 그
+     * 진입점을 잠그는 자리다.
+     *
+     * `role="menu"` 가 아니라 **disclosure** 인 이유는 `AuthGate.tsx` 의
+     * `SessionMenu` docstring 에 있다.
+     */
+
+    it("puts the personal hub behind the username, closed until asked", async () => {
+      mockFetch(
+        { body: { id: "u1", username: "alice", is_admin: false } },
+        { body: { projects: [] } },
+      );
+
+      render(
+        <MemoryRouter>
+          <App />
+        </MemoryRouter>,
+      );
+
+      const trigger = await screen.findByRole("button", { name: "alice" });
+      // 닫혀 있을 때는 항목이 DOM 에 없다 — "보이지만 감춰짐" 이 아니다.
+      expect(trigger).toHaveAttribute("aria-expanded", "false");
+      expect(screen.queryByRole("link", { name: "내 작업" })).not.toBeInTheDocument();
+
+      await userEvent.click(trigger);
+
+      expect(trigger).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByRole("link", { name: "내 작업" })).toHaveAttribute("href", "/me");
+    });
+
+    it("closes on Escape and gives focus back to the trigger", async () => {
+      mockFetch(
+        { body: { id: "u1", username: "alice", is_admin: false } },
+        { body: { projects: [] } },
+      );
+
+      render(
+        <MemoryRouter>
+          <App />
+        </MemoryRouter>,
+      );
+
+      const trigger = await screen.findByRole("button", { name: "alice" });
+      await userEvent.click(trigger);
+      expect(screen.getByRole("link", { name: "내 작업" })).toBeInTheDocument();
+
+      await userEvent.keyboard("{Escape}");
+
+      expect(screen.queryByRole("link", { name: "내 작업" })).not.toBeInTheDocument();
+      // 포커스를 안 돌려주면 키보드 사용자가 메뉴를 닫은 자리에서 길을 잃는다.
+      expect(trigger).toHaveFocus();
+    });
+
+    it("keeps the logout progress visible instead of closing the panel", async () => {
+      /**
+       * over-strict 방향: 로그아웃 클릭에 `setOpen(false)` 를 넣으면 "나가는 중…"·
+       * `disabled` 가 그 즉시 사라져 **진행 중이라는 유일한 신호를 잃는다.**
+       * 초판이 실제로 그렇게 썼다가 이 성질 때문에 고쳤다.
+       */
+      let resolveLogout!: (value: unknown) => void;
+      const pending = new Promise((resolve) => { resolveLogout = resolve; });
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(
+          response({ id: "u1", username: "alice", is_admin: false }),
+        )
+        .mockResolvedValueOnce(response({ projects: [] }))
+        .mockReturnValueOnce(pending);
+      vi.stubGlobal("fetch", fetchMock);
+
+      render(
+        <MemoryRouter>
+          <App />
+        </MemoryRouter>,
+      );
+
+      await userEvent.click(await screen.findByRole("button", { name: "alice" }));
+      await userEvent.click(screen.getByRole("button", { name: "로그아웃" }));
+
+      expect(screen.getByRole("button", { name: "나가는 중…" })).toBeDisabled();
+
+      resolveLogout(response({ ok: true }));
+      expect(await screen.findByLabelText("아이디")).toBeInTheDocument();
+    });
+
+    it("names the product 에-라잇 in the header, not the old working title", async () => {
+      // D5. 로그인 화면은 9.2 부터 "에-라잇" 인데 헤더만 옛 이름으로 남아 있었다.
+      mockFetch(
+        { body: { id: "u1", username: "alice", is_admin: false } },
+        { body: { projects: [] } },
+      );
+
+      render(
+        <MemoryRouter>
+          <App />
+        </MemoryRouter>,
+      );
+
+      expect(await screen.findByRole("link", { name: "에-라잇" })).toHaveAttribute("href", "/");
+      expect(screen.queryByText("AI Writing System")).not.toBeInTheDocument();
+    });
   });
 });

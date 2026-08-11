@@ -1,4 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import {
+  createContext, useCallback, useContext, useEffect, useRef, useState,
+} from "react";
 import { useLocation, useNavigate } from "react-router";
 import { Link } from "react-router";
 import {
@@ -132,18 +134,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     <AuthUserContext.Provider value={user}>
     <div className="app-shell">
       <header className="app-header">
-        <Link className="brand" to="/">AI Writing System</Link>
-        <div className="session-menu">
-          {user.is_admin && <Link to="/admin">관리</Link>}
-          <span>{user.username}</span>
-          <button
-            type="button"
-            disabled={loggingOut}
-            onClick={() => void handleLogout()}
-          >
-            {loggingOut ? "나가는 중…" : "로그아웃"}
-          </button>
-        </div>
+        <Link className="brand" to="/">에-라잇</Link>
+        <SessionMenu
+          user={user}
+          loggingOut={loggingOut}
+          onLogout={() => void handleLogout()}
+        />
       </header>
       {logoutError !== null && (
         <p className="header-alert" role="alert">
@@ -160,10 +156,111 @@ function AuthStatus({ children }: { children: React.ReactNode }) {
   return (
     <main className="auth-shell">
       <section className="auth-status page-enter" aria-live="polite">
-        <p className="eyebrow">AI Writing System</p>
+        <p className="eyebrow">에-라잇</p>
         {children}
       </section>
     </main>
+  );
+}
+
+/**
+ * 헤더의 계정 메뉴 (Phase 10 Slice 10.0, D4 = ⓐ+ⓒ).
+ *
+ * **ⓐ 와 ⓒ 를 함께 확정한 결과의 형태다**(오너 2026-08-11): username 이 **누를 수
+ * 있는 자리**이고(ⓐ), 누르면 **내 작업 · 관리 · 로그아웃**이 열린다(ⓒ). 그전까지
+ * username 은 `<span>` 이었고 **`/me` 로 가는 링크가 저장소 전체에 하나도 없어서**
+ * 주소를 직접 쳐야 도달했다 — 9.2 가 만든 화면이 도달 불가였다.
+ *
+ * **★ `role="menu"` 를 쓰지 않는다.** 브리프 §D4 는 `role="menu"`/`menuitem` 을
+ * 적었지만 구현하며 고쳤다. ARIA 의 menu 는 **애플리케이션 명령 메뉴**용이고
+ * 화살표 키 탐색·타입어헤드를 사용자에게 약속한다 — 여기 담긴 것은 **내비게이션
+ * 링크 둘 + 액션 하나**라 그 약속을 지킬 이유도 방법도 없다. 그래서 표준
+ * disclosure(버튼 + 접히는 영역)로 간다. 부수 효과로 `<a>` 의 link 역할이 보존돼
+ * 기존 셀(`getByRole("link", { name: "관리" })`)이 그대로 유효하다 —
+ * `role="menuitem"` 을 얹었으면 그 역할이 덮여 무효가 됐을 것이다.
+ *
+ * 지켜야 하는 것 셋:
+ * 1. **관리 링크는 조건부**다(`is_admin`). 조건을 잃으면 비관리자에게 404 로 가는
+ *    링크가 보인다 — over-strict 셀이 문다.
+ * 2. **로그아웃은 옮긴 것이지 다시 쓴 것이 아니다** — `loggingOut`·`disabled`·
+ *    "나가는 중…" 문구와 `logoutError` 배너는 `AuthGate` 에 그대로 있다.
+ * 3. **Esc 로 닫히고 포커스가 트리거로 돌아온다.** 열어 놓고 키보드로 빠져나갈 수
+ *    없으면 그 자리가 함정이 된다.
+ */
+function SessionMenu({
+  user,
+  loggingOut,
+  onLogout,
+}: {
+  user: User;
+  loggingOut: boolean;
+  onLogout: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  const close = useCallback((returnFocus: boolean) => {
+    setOpen(false);
+    if (returnFocus) {
+      triggerRef.current?.focus();
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    // 바깥을 누르면 닫는다. 트리거 자신은 제 onClick 이 토글하므로 제외하지
+    // 않으면 "닫고 다시 여는" 두 번이 한 클릭에 일어난다.
+    function onPointerDown(event: MouseEvent) {
+      if (!wrapperRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [open]);
+
+  return (
+    <div
+      className="session-menu"
+      ref={wrapperRef}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && open) {
+          event.stopPropagation();
+          close(true);
+        }
+      }}
+    >
+      <button
+        type="button"
+        className="session-trigger"
+        ref={triggerRef}
+        aria-expanded={open}
+        aria-controls="session-menu-panel"
+        onClick={() => setOpen((wasOpen) => !wasOpen)}
+      >
+        {user.username}
+      </button>
+      {open && (
+        <div className="session-panel" id="session-menu-panel">
+          <Link to="/me" onClick={() => close(false)}>내 작업</Link>
+          {user.is_admin && (
+            <Link to="/admin" onClick={() => close(false)}>관리</Link>
+          )}
+          {/*
+            ★ 누를 때 패널을 닫지 않는다. 닫으면 "나가는 중…"·`disabled` 가 그
+            즉시 화면에서 사라져 **진행 중이라는 유일한 신호를 잃는다**. 성공하면
+            셸 전체가 로그인 화면으로 바뀌며 함께 사라지고, 실패하면 열린 채로
+            남아 사용자가 바로 다시 누를 수 있다(오류는 헤더 아래 배너).
+          */}
+          <button type="button" disabled={loggingOut} onClick={onLogout}>
+            {loggingOut ? "나가는 중…" : "로그아웃"}
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

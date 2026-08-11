@@ -67,9 +67,38 @@ a {
 }
 
 .session-menu {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.85rem;
+}
+
+/* 10.0 계정 메뉴(disclosure). 색·간격은 10.1 토큰 교체가 다시 잡는다 — 여기서는
+   기존 헤더 값을 그대로 쓰고 배치만 만든다. */
+.session-trigger {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.session-trigger[aria-expanded="true"] {
+  color: var(--accent-dark);
+}
+
+.session-panel {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  min-width: 9rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.75rem 0.9rem;
+  background: #fffdf8;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  box-shadow: 0 6px 18px rgba(64, 53, 37, 0.12);
 }
 
 .session-menu a {
