@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ActivityTimelinePage } from "./ActivityTimelinePage";
 
 afterEach(() => {
@@ -100,4 +100,66 @@ it("surfaces a failed load instead of an empty page", async () => {
 
   expect(await screen.findByRole("alert")).toBeInTheDocument();
   expect(screen.queryByText("아직 기록된 활동이 없습니다.")).not.toBeInTheDocument();
+});
+
+describe("날짜 그룹 (Phase 10 Slice 10.2, D3=ⓓ)", () => {
+  /**
+   * 그전까지 최대 100건이 **한 덩어리로 주르륵** 쌓였다(오너 육안 확인 지적).
+   * 그룹핑 규칙 자체는 `activityDays.test.ts` 가 잰다 — 여기는 **화면이 그것을
+   * 실제로 쓰는가**를 본다(모듈은 멀쩡한데 화면이 안 부르는 상태가 가능하다).
+   */
+
+  /**
+   * ★ 이 셀들은 **시계에 의존하지 않는다.** 화면은 `groupActivityByDay(events)` 를
+   * 기본 `now`(=실제 지금)로 부르므로 "오늘"·"어제" 를 여기서 재려면 시계를 고정해야
+   * 하는데, `vi.useFakeTimers()` 는 `findBy*` 의 `waitFor` 를 멈춰 세워 전부 타임아웃이
+   * 된다(초판이 그랬다). **연도가 다른 날짜**를 쓰면 라벨이 무슨 날에 돌려도 같다.
+   * "오늘"·"어제" 자체는 `activityDays.test.ts` 가 `now` 를 주입해 결정적으로 잰다 —
+   * 여기가 재는 것은 **화면이 그 모듈을 실제로 쓰는가**다.
+   */
+  const DAY_ONE = {
+    ...SAVED, id: "d1", at: new Date(2024, 2, 5, 9, 0).toISOString(),
+  };
+  const DAY_ONE_LATER = {
+    ...SAVED, id: "d1b", action: "draft_renamed", target_type: "draft",
+    target_id: "dr1", at: new Date(2024, 2, 5, 8, 0).toISOString(),
+  };
+  const DAY_TWO = {
+    ...SAVED, id: "d2", action: "project_renamed", target_type: "project",
+    target_id: "p1", at: new Date(2024, 1, 27, 9, 0).toISOString(),
+  };
+
+  it("puts a dated heading above each day's rows", async () => {
+    stubEvents([DAY_ONE, DAY_ONE_LATER, DAY_TWO]);
+    renderPage();
+
+    // 같은 날 둘은 머리글 하나 아래로 접힌다 — 머리글이 행마다 반복되지 않는다.
+    const headings = await screen.findAllByRole("heading", { level: 2 });
+    expect(headings.map((h) => h.textContent)).toEqual(
+      ["2024년 3월 5일", "2024년 2월 27일"]);
+  });
+
+  it("drops the date from each row now that the heading carries it", async () => {
+    /**
+     * over-strict 방향: 머리글을 얹고도 행이 전체 날짜를 그대로 찍으면 같은 정보가
+     * 두 번 나온다 — 그룹핑을 한 이유가 사라진다. 행에는 **시각만** 남아야 한다.
+     */
+    stubEvents([DAY_ONE]);
+    renderPage();
+
+    await screen.findByRole("heading", { level: 2, name: "2024년 3월 5일" });
+    const row = screen.getByText("원고 저장").closest("li");
+    expect(row?.textContent).not.toContain("2024");
+    expect(row?.textContent).not.toContain("3월 5일");
+    expect(row?.textContent).toMatch(/\d{2}:\d{2}/);
+  });
+
+  it("still says the ceiling — grouping did not raise it", async () => {
+    // D3=ⓓ 는 커서를 **유예**한 것이지 상한을 없앤 것이 아니다. 문구가 사라지면
+    // 화면이 "더 있다"고 암시하게 된다.
+    stubEvents([DAY_ONE]);
+    renderPage();
+
+    expect(await screen.findByText(/최근 100건까지 보여줍니다/)).toBeInTheDocument();
+  });
 });

@@ -2112,3 +2112,18 @@ main {
 .kpi-table tbody th {
   color: var(--text-body);
 }
+
+/* 10.2 활동 날짜 그룹. 머리글은 날짜를 나르고 행은 시각만 찍는다 — 같은 정보를 두
+   번 쓰지 않는 것이 그룹핑을 한 이유다. */
+.activity-day + .activity-day {
+  margin-top: var(--space-6);
+}
+
+.activity-day > h2,
+.activity-day > h3 {
+  margin: 0 0 var(--space-2);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}

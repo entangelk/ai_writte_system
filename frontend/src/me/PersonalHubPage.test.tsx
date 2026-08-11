@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PersonalHubPage } from "./PersonalHubPage";
 import { resetMemberQuota, seedMemberQuota } from "../quota/useMemberQuota";
 
@@ -157,4 +157,27 @@ it("surfaces a failed load instead of an empty page", async () => {
   renderHub();
 
   expect(await screen.findByRole("alert")).toBeInTheDocument();
+});
+
+describe("날짜 그룹 (Phase 10 Slice 10.2, D3=ⓓ)", () => {
+  /**
+   * 규칙은 `activityDays.test.ts`, 여기는 **허브가 그 모듈을 쓰는가**. 연도가 다른
+   * 날짜를 써서 시계에 의존하지 않는다(사유는 `ActivityTimelinePage.test.tsx`).
+   *
+   * ★ 통합 화면이라 행은 날짜가 빠져도 **어느 프로젝트인지**는 계속 말해야 한다 —
+   * 그것이 project-scoped 응답과 이 tier 의 유일한 차이다(9.2 P1).
+   */
+  it("groups by day while each row still names its project", async () => {
+    stub(PROJECTS, [
+      { ...EVENTS[0], id: "g1", at: new Date(2024, 2, 5, 9, 0).toISOString() },
+      { ...EVENTS[1], id: "g2", at: new Date(2024, 1, 27, 9, 0).toISOString() },
+    ]);
+    renderHub();
+
+    const headings = await screen.findAllByRole("heading", { level: 3 });
+    expect(headings.map((h) => h.textContent)).toEqual(
+      ["2024년 3월 5일", "2024년 2월 27일"]);
+    // 프로젝트 이름은 그대로 — 목록 링크와 활동 행 양쪽에 나온다.
+    expect(screen.getAllByText(/여름 습작/).length).toBeGreaterThanOrEqual(2);
+  });
 });

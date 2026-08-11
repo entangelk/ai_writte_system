@@ -9,6 +9,7 @@ import {
 } from "../api/client";
 import { useMemberQuota } from "../quota/useMemberQuota";
 import { activityActionLabel } from "../projects/activityActions";
+import { groupActivityByDay } from "../projects/activityDays";
 
 /** 서버가 통합 조회에서 한 번에 주는 최대 건수 (per-project 와 **같은 수** — P2 역전 방지). */
 const ACTIVITY_PAGE_SIZE = 100;
@@ -119,28 +120,36 @@ export function PersonalHubPage() {
         {events !== null && events.length === 0 && (
           <div className="empty-state"><p>아직 기록된 활동이 없습니다.</p></div>
         )}
-        {events !== null && events.length > 0 && (
-          <ul className="access-log access-log-page">
-            {events.map((event) => (
-              <li key={event.id}>
-                <strong>{activityActionLabel(event.action)}</strong>
-                <span>
-                  {projectName.get(event.project_id) ?? event.project_id}
-                  {" · "}
-                  {new Date(event.at).toLocaleString("ko-KR")}
-                  {(event.before ?? event.after) !== null && (
-                    <>
-                      {" · "}
-                      {event.before !== null && event.before !== undefined
-                        ? `${event.before} → ` : ""}
-                      {event.after ?? ""}
-                    </>
-                  )}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
+        {events !== null && events.length > 0 && groupActivityByDay(events).map((day) => (
+          // 10.2: 날짜가 머리글로 올라갔으므로 행은 **시각만** 찍는다. 통합 화면이라
+          // 행은 여전히 어느 프로젝트인지 말해야 한다(9.2 P1 — 그것이 project-scoped
+          // 응답과 이 tier 의 차이다).
+          <div className="activity-day" key={day.key}>
+            <h3>{day.label}</h3>
+            <ul className="access-log access-log-page">
+              {day.events.map((event) => (
+                <li key={event.id}>
+                  <strong>{activityActionLabel(event.action)}</strong>
+                  <span>
+                    {projectName.get(event.project_id) ?? event.project_id}
+                    {" · "}
+                    {new Date(event.at).toLocaleTimeString("ko-KR", {
+                      hour: "2-digit", minute: "2-digit",
+                    })}
+                    {(event.before ?? event.after) !== null && (
+                      <>
+                        {" · "}
+                        {event.before !== null && event.before !== undefined
+                          ? `${event.before} → ` : ""}
+                        {event.after ?? ""}
+                      </>
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
       </section>
     </section>
   );

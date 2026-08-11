@@ -6,6 +6,7 @@ import {
   type ActivityEvent,
 } from "../api/client";
 import { activityActionLabel, activityTargetHref } from "./activityActions";
+import { groupActivityByDay } from "./activityDays";
 
 /** 서버가 한 번에 주는 최대 건수. 화면이 이 수를 **문장으로** 말한다(브리프 S2=ⓐ). */
 const ACTIVITY_PAGE_SIZE = 100;
@@ -62,34 +63,41 @@ export function ActivityTimelinePage() {
       {events !== null && events.length === 0 && (
         <div className="empty-state"><p>아직 기록된 활동이 없습니다.</p></div>
       )}
-      {events !== null && events.length > 0 && (
-        <ul className="access-log access-log-page">
-          {events.map((event) => {
-            const href = projectId === undefined ? null : activityTargetHref(
-              projectId, event.target_type, event.target_id,
-            );
-            const changed = [event.before, event.after]
-              .some((value) => value !== null && value !== undefined);
-            return (
-              <li key={event.id}>
-                <strong>{activityActionLabel(event.action)}</strong>
-                <span>
-                  {new Date(event.at).toLocaleString("ko-KR")}
-                  {changed && (
-                    <>
-                      {" · "}
-                      {event.before !== null && event.before !== undefined
-                        ? `${event.before} → ` : ""}
-                      {event.after ?? ""}
-                    </>
-                  )}
-                  {href !== null && <>{" · "}<Link to={href}>원고 열기</Link></>}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+      {events !== null && events.length > 0 && groupActivityByDay(events).map((day) => (
+        // 10.2: 날짜 머리글 아래로 그 날의 행만. 100건 상한은 그대로이며(D3=ⓓ 가
+        // 커서를 유예했다) 위 문장이 여전히 그 수를 말한다.
+        <section className="activity-day" key={day.key}>
+          <h2>{day.label}</h2>
+          <ul className="access-log access-log-page">
+            {day.events.map((event) => {
+              const href = projectId === undefined ? null : activityTargetHref(
+                projectId, event.target_type, event.target_id,
+              );
+              const changed = [event.before, event.after]
+                .some((value) => value !== null && value !== undefined);
+              return (
+                <li key={event.id}>
+                  <strong>{activityActionLabel(event.action)}</strong>
+                  <span>
+                    {new Date(event.at).toLocaleTimeString("ko-KR", {
+                      hour: "2-digit", minute: "2-digit",
+                    })}
+                    {changed && (
+                      <>
+                        {" · "}
+                        {event.before !== null && event.before !== undefined
+                          ? `${event.before} → ` : ""}
+                        {event.after ?? ""}
+                      </>
+                    )}
+                    {href !== null && <>{" · "}<Link to={href}>원고 열기</Link></>}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ))}
     </section>
   );
 }
