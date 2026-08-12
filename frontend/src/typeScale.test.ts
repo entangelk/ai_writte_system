@@ -108,8 +108,21 @@ describe("타이포 축 (Phase 10 Slice 10.3)", () => {
       ),
     ];
 
-    // 램프 자체가 사라지거나 주석 형식이 깨지면 위 정규식이 조용히 0건이 된다.
-    expect(steps.length).toBeGreaterThan(0);
+    /**
+     * ★ **정규식이 놓친 토큰은 검사도 안 받는다**(독립 검증 H1, M6 탐침으로 실증
+     * 2026-08-12): 위 패턴은 `1.125^n` 주석이 **붙어 있는 줄만** 잡으므로,
+     * 주석 없이 선언한 `--type-*` 은 램프 검사를 **조용히 통과**한다. 그러면
+     * "값은 계산 결과다" 라는 이 파일의 주장이 새 토큰에는 성립하지 않는데
+     * 아무도 모른다 — M5(가드는 목록이 부른 이름만 본다)와 **같은 계열의 맹점**이다.
+     *
+     * 그래서 **선언된 토큰 전부가 출처를 달고 있는지**를 먼저 잠근다. 이것이
+     * `steps.length > 0` 보다 강하다(0건뿐 아니라 **일부 누락**도 잡는다).
+     */
+    const declared = [...css.matchAll(/^\s*(--type-[a-z]+)\s*:/gm)].map((m) => m[1]);
+    const documented = new Set(steps.map((m) => m[1]));
+
+    expect(declared.filter((token) => !documented.has(token))).toEqual([]);
+    expect(declared.length).toBeGreaterThan(0);
 
     const drifted = steps
       .map(([, token, value, exponent]) => ({
