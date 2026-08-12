@@ -346,38 +346,6 @@ main {
   border-top: 1px solid var(--text-body);
 }
 
-/* ★ 10.4 — 이 규칙이 **없어서** 로그인 버튼만 브라우저 기본값(회색 상자 + 얇은
-   테두리)으로 그려지고 있었다. 제품의 정문이다.
-
-   **가드가 못 잡는 종류의 결함이다** — 색 리터럴도 없고(아예 선언이 없었다) 토큰
-   오타도 아니라서 CSS·TS 가드가 전부 조용했고, 렌더 테스트는 스타일을 안 본다.
-   **스크린샷을 떠서 눈으로 보다 찾았다**(2026-08-12).
-
-   **근본 원인은 기본 동작 버튼 규칙이 네 곳에 흩어져 있다는 것**이다 —
-   `.form-controls` · `.editor-actions` · `.writing-actions`(+candidate·loop) ·
-   `.row-actions`. 같은 선언이 네 벌이라 **새 표면은 어디에도 안 들어가는 것이
-   기본값**이 된다. 지금은 빠진 자리만 채우고(§3 수술적 변경), 넷을 하나로 합치는
-   것은 패딩이 서로 달라 시각이 바뀌므로 별도 판단으로 남긴다. */
-.login-form button {
-  padding: 0.72rem 1.5rem;
-  color: var(--text-on-accent);
-  background: var(--action-primary);
-  border: 0;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-weight: 700;
-  transition: background 160ms ease;
-}
-
-.login-form button:hover:not(:disabled) {
-  background: var(--action-primary-hover);
-}
-
-.login-form button:disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
-}
-
 .login-form label {
   display: grid;
   gap: 0.45rem;
