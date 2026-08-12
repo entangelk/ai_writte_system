@@ -712,10 +712,6 @@ main {
   gap: 0.6rem 1.2rem;
 }
 
-.overview-page {
-  width: min(100%, 62rem);
-}
-
 .overview-section {
   margin: 0 0 2rem;
   padding: var(--space-6);
