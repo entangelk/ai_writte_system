@@ -2,7 +2,7 @@
  * 타이포 축의 무결성 (Phase 10 Slice 10.3).
  *
  * **왜 필요한가 — 스케일은 세우는 것보다 지키는 것이 어렵다.** 10.3 은
- * `DraftEditor` 화면의 font-size **19종을 8종으로** 줄였다. 그런데 CSS 는
+ * `DraftEditor` 화면의 font-size **18종을 8종으로** 줄였다. 그런데 CSS 는
  * `font-size: 0.83rem` 한 줄을 아무 저항 없이 받아 주고, `toHaveClass` 단정이
  * **0개**라 회귀는 전부 green 이다(10.1 이 `designTokens.test.ts` 를 만든 것과
  * 같은 이유이며, 같은 계열의 파일이다). 스케일은 **다음 한 줄부터** 무너진다.
