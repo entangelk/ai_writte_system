@@ -95,7 +95,13 @@ const MIGRATED: Record<string, string> = {
 
   ".rail-section-heading h2": "subhead",
   ".version-panel-heading h2": "panel",
-  ".editor-heading h1": "title",
+
+  // 10.4 — 화면 제목은 전 표면이 한 계단을 쓴다. 종전에는 `.page-heading h1`
+  // clamp(2.8~5.4rem) · `.project-heading h1` clamp(2.5~4.7rem) · `.editor-heading h1`
+  // 셋으로 갈려 있었고, 앞의 둘은 첫 화면의 절반을 먹었다(실측 근거는 styles.css).
+  ".page-heading h1, .workspace-page > h1": "title",
+  // 로그인은 작업 화면이 아니라 정문이라 한 계단 위를 쓴다 — 램프 밖으로 나가지는 않는다.
+  ".login-heading h1": "display",
 };
 
 describe("타이포 축 (Phase 10 Slice 10.3)", () => {

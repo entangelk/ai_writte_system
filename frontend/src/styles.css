@@ -169,6 +169,7 @@
   --type-subhead: 1.266rem; /* 1.125^2  · 레일 소제목 */
   --type-panel: 1.602rem;   /* 1.125^4  · 패널 제목 */
   --type-title: 2.027rem;   /* 1.125^6  · 화면 제목 */
+  --type-display: 2.887rem; /* 1.125^9  · 로그인 화면 제목(정문) */
 
   color: var(--text-body);
   background: var(--surface-page);
@@ -319,13 +320,13 @@ main {
 }
 
 .login-heading {
-  margin-bottom: clamp(2.5rem, 7vw, 4.5rem);
+  margin-bottom: var(--space-8);
 }
 
 .login-heading h1 {
   margin: 0;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(3.2rem, 10vw, 5.6rem);
+  font-size: var(--type-display);
   font-weight: 500;
   letter-spacing: -0.06em;
   line-height: 0.94;
@@ -343,6 +344,38 @@ main {
   gap: 1.2rem;
   padding-top: 1.4rem;
   border-top: 1px solid var(--text-body);
+}
+
+/* ★ 10.4 — 이 규칙이 **없어서** 로그인 버튼만 브라우저 기본값(회색 상자 + 얇은
+   테두리)으로 그려지고 있었다. 제품의 정문이다.
+
+   **가드가 못 잡는 종류의 결함이다** — 색 리터럴도 없고(아예 선언이 없었다) 토큰
+   오타도 아니라서 CSS·TS 가드가 전부 조용했고, 렌더 테스트는 스타일을 안 본다.
+   **스크린샷을 떠서 눈으로 보다 찾았다**(2026-08-12).
+
+   **근본 원인은 기본 동작 버튼 규칙이 네 곳에 흩어져 있다는 것**이다 —
+   `.form-controls` · `.editor-actions` · `.writing-actions`(+candidate·loop) ·
+   `.row-actions`. 같은 선언이 네 벌이라 **새 표면은 어디에도 안 들어가는 것이
+   기본값**이 된다. 지금은 빠진 자리만 채우고(§3 수술적 변경), 넷을 하나로 합치는
+   것은 패딩이 서로 달라 시각이 바뀌므로 별도 판단으로 남긴다. */
+.login-form button {
+  padding: 0.72rem 1.5rem;
+  color: var(--text-on-accent);
+  background: var(--action-primary);
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-weight: 700;
+  transition: background 160ms ease;
+}
+
+.login-form button:hover:not(:disabled) {
+  background: var(--action-primary-hover);
+}
+
+.login-form button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
 .login-form label {
@@ -427,14 +460,26 @@ main {
   font-size: 1.7rem;
 }
 
-.workspace-page {
-  width: min(100%, 52rem);
-  padding-top: clamp(3.5rem, 8vw, 7rem);
-}
+ /* 10.4 — 배치를 편집기 기준으로 통일한다 (오너 2026-08-12).
 
+   **실측이 근거다**(headless chromium 1440×900, `docs/plans/10_layout_probe.html`):
+   종전 `.workspace-page` 는 **첫 화면의 49~56% 를 콘텐츠 전 chrome 으로** 썼다
+   (콘텐츠까지 332px · 설명문단이 있으면 452px). 10.3 에서 고친 편집기는 240px·37%
+   였고 **나머지 12개 표면만 옛 문법에 남아 있었다** — 큰 디스플레이 제목 + 넉넉한
+   여백은 *랜딩 페이지* 문법이지 매일 쓰는 **작업 도구**의 문법이 아니다(10.1 이
+   크림+테라코타에서 배운 것과 같은 계열의 AI 기본값이다).
+
+   그리고 **오른쪽 가장자리가 안 맞았다**: 왼쪽은 전부 208px 로 맞는데 오른쪽이
+   헤더 1232 · 편집기 1232 · 관리자 1200 · 나머지 **1040**(192px 모자람)이었고
+   규칙이 적힌 곳은 없었다. 이제 셋 다 헤더와 같은 **68rem** 이다.
+
+   ★ 좁은 측정폭이 필요한 블록은 **스스로** 제한한다(`.page-heading` 42rem ·
+   그 설명문단 34rem) — 컨테이너를 좁혀서 얻지 않는다. 그래야 정렬과 가독성이
+   서로를 깎지 않는다. */
+.workspace-page,
 .admin-page {
-  width: min(100%, 62rem);
-  padding-top: clamp(3.5rem, 8vw, 7rem);
+  width: min(100%, 68rem);
+  padding-top: clamp(var(--space-8), 4vw, 3rem);
 }
 
 .admin-section {
@@ -647,22 +692,19 @@ main {
 
 .page-heading {
   max-width: 42rem;
-  margin-bottom: 3.25rem;
+  margin-bottom: var(--space-6);
 }
 
 .page-heading h1,
 .workspace-page > h1 {
   margin: 0;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(2.8rem, 7vw, 5.4rem);
+  font-size: var(--type-title);
   font-weight: 500;
-  letter-spacing: -0.055em;
-  line-height: 0.96;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
 }
 
-.project-heading h1 {
-  font-size: clamp(2.5rem, 6vw, 4.7rem);
-}
 
 .section-links {
   display: flex;
@@ -798,18 +840,9 @@ main {
   border: 1px solid var(--border-danger);
 }
 
-/* 10.3 — 편집기의 주인공은 원고다. 종전에는 화면 위쪽 chrome(상단 여백 최대 7rem +
-   제목 최대 4.2rem)이 원고보다 컸다. 제목은 타이포 축의 `--type-title` 로 내려가고
-   (아래 `.editor-heading h1`), 여기서는 그 위 여백을 함께 줄여 **첫 화면에 본문이
-   들어오게** 한다. 다른 workspace 화면은 아직 종전 값이다(화면 슬라이스가 자기 차례에). */
-.editor-heading {
-  margin-bottom: var(--space-6);
-}
-
-.editor-page {
-  width: min(100%, 68rem);
-  padding-top: clamp(var(--space-8), 4vw, 3rem);
-}
+/* 10.3 이 편집기에만 두었던 chrome 축소는 10.4 에서 `.workspace-page` 로 올라갔다 —
+   여기 있던 폭·여백·제목 override 는 전부 중복이 되어 지웠다. `editor-page` 클래스는
+   마크업에 남아 있고(다른 규칙이 쓴다) 이 화면만의 값은 이제 없다. */
 
 .workspace-status {
   display: flex;
@@ -1007,9 +1040,6 @@ main {
   margin-bottom: 1.4rem;
 }
 
-.editor-heading h1 {
-  font-size: var(--type-title);
-}
 
 .page-heading > p:last-child {
   max-width: 34rem;
@@ -1706,8 +1736,9 @@ main {
     padding-left: 1.1rem;
   }
 
-  .workspace-page {
-    padding-top: 3.2rem;
+  .workspace-page,
+  .admin-page {
+    padding-top: var(--space-8);
   }
 
   .creation-form {

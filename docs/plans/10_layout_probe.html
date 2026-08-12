@@ -1,0 +1,56 @@
+<!doctype html>
+<!--
+  Phase 10 배치 실측 하네스 (Slice 10.4, 2026-08-12).
+
+  왜 있는가: 10.4 의 근거 수치("첫 화면의 49% 가 콘텐츠 전 chrome")는 **선언값에서
+  추정한 것이 아니라 렌더해서 잰 것**이다. 그 수치를 기록에 쓰는 이상 재현 경로가
+  저장소 안에 있어야 한다(선례: `repro_outbox_retry.py`).
+
+  돌리는 법: `bash docs/plans/10_layout_probe.sh`
+  (직접 열어도 된다 — 브라우저에서 열면 아래 표가 화면에 찍힌다.)
+-->
+<html lang="ko"><head><meta charset="utf-8"><title>Phase 10 layout probe</title>
+<link rel="stylesheet" href="styles.css"></head>
+<body><div class="app-shell">
+<header class="app-header"><a class="brand" href="#">에-라잇</a><span>OWNER</span></header>
+<main>
+  <section class="workspace-page" id="A">
+    <a class="back-link" href="#">← 뒤로</a>
+    <header class="page-heading"><p class="eyebrow">작품 서재</p><h1>프로젝트</h1>
+      <p>설명 문단이 있는 경우.</p></header>
+    <div class="mark">내용</div>
+  </section>
+  <section class="admin-page" id="C">
+    <header class="page-heading"><p class="eyebrow">관리자</p><h1>관리 콘솔</h1></header>
+    <div class="mark">내용</div>
+  </section>
+  <section class="workspace-page editor-page" id="B">
+    <a class="back-link" href="#">← 뒤로</a>
+    <header class="page-heading editor-heading"><div><p class="eyebrow">원고 편집기</p>
+      <h1>원고 제목</h1><p>프로젝트</p></div></header>
+    <div class="mark">내용</div>
+  </section>
+</main></div>
+<script>
+addEventListener("load", () => {
+  const header = document.querySelector(".app-header").getBoundingClientRect();
+  const rows = ["A", "C", "B"].map((id) => {
+    const section = document.getElementById(id);
+    const box = section.getBoundingClientRect();
+    const mark = section.querySelector(".mark").getBoundingClientRect();
+    const h1 = section.querySelector("h1").getBoundingClientRect();
+    return {
+      screen: { A: "workspace-page", C: "admin-page", B: "editor-page" }[id],
+      // 섹션 시작 → 첫 콘텐츠. 화면마다 앞에 무엇이 있든 "콘텐츠 전 chrome" 이다.
+      chromeToContent: Math.round(mark.top - box.top),
+      h1Height: Math.round(h1.height),
+      // 헤더까지 포함해 첫 화면에서 차지하는 비율.
+      firstScreenPct: Math.round((mark.top - box.top + header.height) / innerHeight * 100),
+      rightEdge: Math.round(box.right),
+    };
+  });
+  const out = { viewport: innerHeight, headerRight: Math.round(header.right), rows };
+  document.body.insertAdjacentHTML("beforeend",
+    "<pre id=probe-result>" + JSON.stringify(out, null, 1) + "</pre>");
+});
+</script></body></html>
