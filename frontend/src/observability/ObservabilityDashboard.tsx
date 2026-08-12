@@ -16,6 +16,7 @@ import {
   type ObservabilityKpi,
   type ObservabilityKpiSite,
 } from "../api/client";
+import { readChartColors } from "./chartColors";
 
 // The KPI payload carries three values that are misread when drawn naively, and
 // the contract (SoT v1.7.48) states each of them. The screen inherits that
@@ -50,23 +51,20 @@ function siteLabel(callSite: string): string {
   return SITE_LABELS[callSite] ?? callSite;
 }
 
-// Validated against this app's paper surface (#f4f0e7) with the dataviz
-// validator: lightness band, chroma floor, all-pairs CVD separation, normal
-// vision floor and 3:1 contrast all pass. Green was the intuitive pick for
-// "success" but green↔amber collapses under protanopia (ΔE 2.4), so success
-// takes the blue slot. Identity is never colour alone — every series is in the
-// legend and repeated in the table below.
+// Colours now come from `:root` (Slice 10.3) — see `chartColors.ts` for why the
+// literals had to go and what the token list means. The palette rationale itself
+// lives beside the values in `styles.css`; the short version:
 //
-// The amber and the failure colour move together (verification 2026-07-26 H-3):
-// darkening amber alone for contrast margin pulled it *into* the brick red
-// (normal-vision ΔE 14.0, below the 15 floor), trading a passing contrast for a
-// failing separation. Re-stepping the failure hue to a crimson keeps every check
-// passing and lifts the weakest contrast from 3.55 to 4.14.
-const OUTCOME_COLORS = {
-  success: "#1a6d99",
-  providerError: "#8c1f4a",
-  parseError: "#9a6a24",
-} as const;
+// Green was the intuitive pick for "success" but green↔amber collapses under
+// protanopia, so success takes the blue slot. The amber and the failure colour
+// move together (verification 2026-07-26 H-3): darkening amber alone for contrast
+// margin pulled it *into* the brick red, trading a passing contrast for a failing
+// separation. Re-validated against the new surface on 2026-08-12 — all six checks
+// still pass, and moving success onto the app's action blue lifted the worst CVD
+// separation from ΔE 12.6 to 15.4.
+//
+// Identity is never colour alone — every series is in the legend and repeated in
+// the table below.
 
 function percent(part: number, whole: number): string {
   if (whole === 0) return "—";
@@ -128,6 +126,9 @@ export function ObservabilityDashboard() {
   }, [projectId]);
 
   const rows = kpi === null ? [] : chartRows(kpi.sites);
+  // 렌더마다 읽는다 — `:root` 를 바꾸면(테마) 다음 렌더에 따라온다. 값 캐시는
+  // 그 연결을 끊으므로 두지 않는다(호출은 한 번, 값만 여섯 번 꺼낸다).
+  const color = readChartColors();
   // Nothing measured at all — neither an LLM call nor a loop run. The summary
   // would be five cards of zeros next to a message that already says it. Loop
   // runs are counted separately on purpose: an older project can hold loop
@@ -219,32 +220,32 @@ export function ObservabilityDashboard() {
               <div className="chart-frame" role="img" aria-label="호출부별 호출 결과 분포">
                 <ResponsiveContainer width="100%" height={260}>
                   <BarChart data={rows}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#d8d0c1" vertical={false} />
-                    <XAxis dataKey="site" stroke="#746f65" tickLine={false} />
-                    <YAxis allowDecimals={false} stroke="#746f65" tickLine={false} axisLine={false} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={color.grid} vertical={false} />
+                    <XAxis dataKey="site" stroke={color.axis} tickLine={false} />
+                    <YAxis allowDecimals={false} stroke={color.axis} tickLine={false} axisLine={false} />
                     <Tooltip />
                     <Legend />
                     <Bar
                       dataKey="성공"
                       stackId="outcome"
-                      fill={OUTCOME_COLORS.success}
-                      stroke="#f4f0e7"
+                      fill={color.success}
+                      stroke={color.markGap}
                       strokeWidth={2}
                     />
                     <Bar
                       dataKey="provider_error"
                       stackId="outcome"
                       name="응답 실패"
-                      fill={OUTCOME_COLORS.providerError}
-                      stroke="#f4f0e7"
+                      fill={color.providerError}
+                      stroke={color.markGap}
                       strokeWidth={2}
                     />
                     <Bar
                       dataKey="parse_error"
                       stackId="outcome"
                       name="응답 거부"
-                      fill={OUTCOME_COLORS.parseError}
-                      stroke="#f4f0e7"
+                      fill={color.parseError}
+                      stroke={color.markGap}
                       strokeWidth={2}
                       radius={[4, 4, 0, 0]}
                     />
@@ -256,15 +257,15 @@ export function ObservabilityDashboard() {
               <div className="chart-frame" role="img" aria-label="호출부별 토큰 사용량">
                 <ResponsiveContainer width="100%" height={220}>
                   <BarChart data={rows}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#d8d0c1" vertical={false} />
-                    <XAxis dataKey="site" stroke="#746f65" tickLine={false} />
-                    <YAxis allowDecimals={false} stroke="#746f65" tickLine={false} axisLine={false} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={color.grid} vertical={false} />
+                    <XAxis dataKey="site" stroke={color.axis} tickLine={false} />
+                    <YAxis allowDecimals={false} stroke={color.axis} tickLine={false} axisLine={false} />
                     <Tooltip />
                     {/* One series: the heading names it, so no legend box. */}
                     <Bar
                       dataKey="tokens"
                       name="토큰"
-                      fill={OUTCOME_COLORS.success}
+                      fill={color.success}
                       radius={[4, 4, 0, 0]}
                     />
                   </BarChart>
