@@ -18,8 +18,8 @@
  *   나중에 `:root` 한 곳만 바꿔 테마를 얻는다. 하나라도 새면 그 자리는 안 따라온다.)
  */
 
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -59,6 +59,49 @@ describe("디자인 토큰 (Phase 10 Slice 10.1)", () => {
     ].map((m) => m[0]);
 
     expect(literals).toEqual([]);
+  });
+
+  it("keeps colour out of the TypeScript sources too", () => {
+    /**
+     * **위 셀의 사각지대**(Slice 10.3 에서 실제로 당했다): 그것은 `styles.css` 만
+     * 읽으므로 **TS 가 들고 있는 색은 안 보인다.** 관측 대시보드가 정확히 그
+     * 자리였다 — recharts 가 색을 SVG **속성**으로 받아 `var(--)` 가 안 닿는다는
+     * 이유로 색을 JS 리터럴로 들고 있었고, 10.1 이 팔레트를 통째로 가는 동안
+     * **혼자 옛 크림/벽돌 값에 남아** 막대마다 크림색 테두리를 그렸다. CSS 가드는
+     * 전부 green 이었다.
+     *
+     * 처방은 `chartColors.ts` 의 `getComputedStyle` 이고, 이 셀은 **그 처방이
+     * 우회되지 않는지**를 잠근다. 색이 다시 TS 로 새면 그 자리는 테마를 안 따라온다.
+     *
+     * 주석은 판정에서 뺀다 — 옛 값을 *설명하는* 문장(`chartColors.ts` 머리말)까지
+     * 결함으로 세면 기록을 못 남긴다. 테스트 파일도 뺀다(단정이 색을 적는 것은 정당).
+     */
+    const root = resolve(dirname(fileURLToPath(import.meta.url)));
+    const sources: string[] = [];
+    const walk = (directory: string) => {
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        const path = join(directory, entry.name);
+        if (entry.isDirectory()) walk(path);
+        else if (/\.tsx?$/.test(entry.name) && !/\.test\./.test(entry.name)) {
+          sources.push(path);
+        }
+      }
+    };
+    walk(root);
+
+    // 목록이 비면 아래 단정이 공허하게 통과한다.
+    expect(sources.length).toBeGreaterThan(0);
+
+    const leaked = sources.flatMap((path) => {
+      const code = readFileSync(path, "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      return [...code.matchAll(/#[0-9a-fA-F]{3,8}\b|\brgba?\([^)]*\)/g)].map(
+        (match) => `${relative(root, path)}: ${match[0]}`,
+      );
+    });
+
+    expect(leaked).toEqual([]);
   });
 
   it("routes screens through semantic tokens, not raw primitives", () => {
