@@ -36,6 +36,24 @@ const declared = new Set(
   [...rootBlock.matchAll(/^\s*(--[a-z0-9-]+)\s*:/gm)].map((match) => match[1]),
 );
 
+/** `:root` 에 적힌 그대로의 선언값(`var(--blue-600)` 이면 그 문자열). */
+function declarationOf(token: string): string | undefined {
+  return new RegExp(`^\\s*${token}\\s*:\\s*([^;]+);`, "m").exec(rootBlock)?.[1].trim();
+}
+
+/** primitive 참조를 한 겹 따라가 최종 hex 를 낸다. */
+function resolveToken(token: string): string | undefined {
+  const value = declarationOf(token);
+  const alias = value === undefined ? null : /^var\((--[a-z0-9-]+)\)$/.exec(value);
+  return alias === null ? value : declarationOf(alias[1]);
+}
+
+const SERIES_TOKENS = [
+  CHART_TOKENS.success,
+  CHART_TOKENS.providerError,
+  CHART_TOKENS.parseError,
+];
+
 describe("차트 색 토큰 (Phase 10 Slice 10.3)", () => {
   it("resolves every token the chart reads at runtime", () => {
     const requested = Object.values(CHART_TOKENS);
@@ -54,25 +72,55 @@ describe("차트 색 토큰 (Phase 10 Slice 10.3)", () => {
 
   it("keeps the series colours distinct from one another", () => {
     /**
-     * 계열색의 유일한 요구는 **서로 구별되는가**다. 값 자체의 검산(색각 이상 ΔE ·
-     * 명도 대역 · 채도 바닥 · 3:1)은 dataviz 검증기가 하고 그 명령과 결과는
-     * `styles.css` 주석에 적혀 있다 — 여기서 그것을 다시 구현하지 않는다
-     * (구현하면 검증기와 갈리는 두 번째 정본이 생긴다).
-     *
-     * 대신 **가장 싸고 가장 잘 깨지는 것**을 잠근다: 셋 중 둘이 같은 값이 되는 것.
-     * 토큰을 복사·붙여넣기로 늘릴 때 실제로 일어나는 사고이며, 그 순간 두 계열은
+     * 가장 싸고 가장 잘 깨지는 것: 셋 중 둘이 같은 값이 되는 것. 토큰을
+     * 복사·붙여넣기로 늘릴 때 실제로 일어나는 사고이며, 그 순간 두 계열은
      * 그래프에서 **한 덩어리로 보인다**.
      */
-    const series = [
-      CHART_TOKENS.success,
-      CHART_TOKENS.providerError,
-      CHART_TOKENS.parseError,
-    ].map((token) => {
-      const found = new RegExp(`^\\s*${token}\\s*:\\s*([^;]+);`, "m").exec(rootBlock);
-      return found?.[1].trim();
-    });
+    const series = SERIES_TOKENS.map((token) => declarationOf(token));
 
     expect(series.every((value) => value !== undefined)).toBe(true);
     expect(new Set(series).size).toBe(series.length);
+  });
+
+  it("still holds the exact palette the recorded validation covered", () => {
+    /**
+     * ★ **독립 검증 H1 (2026-08-12) — 이 셀이 그것을 닫는다.**
+     *
+     * 위 셀은 셋이 *서로 다른지*만 본다. 그래서 **검증기가 FAIL 하는 조합으로
+     * 바꿔도 전부 green 이었다** — 실측: `--chart-parse-error` 를 `#7b5100` 로
+     * 바꾸면 dataviz 검증기는 채도 바닥 미달로 FAIL 인데 가드 7셀이 모두 통과했고
+     * `styles.css` 주석만 조용히 낡았다.
+     *
+     * **그렇다고 ΔE 를 여기서 다시 구현하지는 않는다** — 그러면 검증기와 갈리는
+     * 두 번째 정본이 생긴다(그 판단은 유지한다). 대신 **"지금 값이 그때 검산한
+     * 바로 그 값인가"** 를 잠근다. 10.1 팔레트·10.3 타이포가 쓴 것과 같은
+     * *출처 연결* 처방이다.
+     *
+     * 잠그는 연결 셋 — **어느 하나만 움직여도 실패한다**:
+     *
+     * 1. `:root` 의 계열색 셋 **↔** 주석에 적힌 검산 명령의 팔레트 인자
+     * 2. 검산에 쓴 표면 **↔** `--surface-raised` 의 실제 값
+     * 3. 그 토큰 **↔** `.chart-frame` 이 실제로 그리는 배경
+     *
+     * 3번이 브리프의 *"표면을 바꾸면 검산을 다시 돌린다"* 를 **강제하는 자리**다.
+     * 종전에는 그 문장을 아무도 집행하지 않았다.
+     *
+     * 실패하면 할 일은 하나: **주석의 명령을 그대로 다시 돌리고**, 통과하면 값과
+     * 주석을 함께 옮긴다.
+     */
+    const command = /validate_palette\.js\s+"([^"]+)"[\s\S]{0,120}?--surface\s+"(#[0-9a-f]{6})"/i
+      .exec(css);
+    expect(command, "styles.css 주석의 검산 명령을 못 찾았다").not.toBeNull();
+
+    const [, documentedPalette, documentedSurface] = command!;
+
+    // 1. 계열색 — primitive 참조는 한 겹 따라간다(`--chart-success: var(--blue-600)`).
+    const resolved = SERIES_TOKENS.map((token) => resolveToken(token));
+    expect(resolved).toEqual(documentedPalette.split(",").map((hex) => hex.trim()));
+
+    // 2·3. 검산 표면 = `.chart-frame` 이 실제로 그리는 배경.
+    const frame = /\.chart-frame\s*\{[^}]*background:\s*var\((--[a-z0-9-]+)\)/.exec(css);
+    expect(frame, ".chart-frame 의 배경 선언을 못 찾았다").not.toBeNull();
+    expect(resolveToken(frame![1])).toEqual(documentedSurface);
   });
 });

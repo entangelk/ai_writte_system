@@ -16,7 +16,7 @@ import {
   type ObservabilityKpi,
   type ObservabilityKpiSite,
 } from "../api/client";
-import { readChartColors } from "./chartColors";
+import { readChartColors, tooltipStyle } from "./chartColors";
 
 // The KPI payload carries three values that are misread when drawn naively, and
 // the contract (SoT v1.7.48) states each of them. The screen inherits that
@@ -223,8 +223,8 @@ export function ObservabilityDashboard() {
                     <CartesianGrid strokeDasharray="3 3" stroke={color.grid} vertical={false} />
                     <XAxis dataKey="site" stroke={color.axis} tickLine={false} />
                     <YAxis allowDecimals={false} stroke={color.axis} tickLine={false} axisLine={false} />
-                    <Tooltip />
-                    <Legend />
+                    <Tooltip contentStyle={tooltipStyle(color)} />
+                    <Legend wrapperStyle={{ color: color.overlayText }} />
                     <Bar
                       dataKey="성공"
                       stackId="outcome"
@@ -260,7 +260,7 @@ export function ObservabilityDashboard() {
                     <CartesianGrid strokeDasharray="3 3" stroke={color.grid} vertical={false} />
                     <XAxis dataKey="site" stroke={color.axis} tickLine={false} />
                     <YAxis allowDecimals={false} stroke={color.axis} tickLine={false} axisLine={false} />
-                    <Tooltip />
+                    <Tooltip contentStyle={tooltipStyle(color)} />
                     {/* One series: the heading names it, so no legend box. */}
                     <Bar
                       dataKey="tokens"

@@ -40,6 +40,15 @@ export const CHART_TOKENS = {
    * 이므로 페이지 배경(`--surface-page`)을 쓰면 틈만 파랗게 뜬다.
    */
   markGap: "--surface-raised",
+  /**
+   * 툴팁·범례 (독립 검증 H2, 2026-08-12). recharts 는 이 둘을 **자기 기본
+   * 스타일**로 그린다 — 흰 배경 + `#ccc` 테두리 + 검은 글자. 우리 코드에
+   * 리터럴이 없으니 색 가드는 조용한데 **화면에서는 혼자 다른 계통**이다.
+   * 떠 있는 표면이므로 융기면이 아니라 카드면을 쓴다.
+   */
+  overlaySurface: "--surface-card",
+  overlayBorder: "--border-hairline",
+  overlayText: "--text-body",
 } as const;
 
 export type ChartColors = Record<keyof typeof CHART_TOKENS, string>;
@@ -58,5 +67,21 @@ export function readChartColors(): ChartColors {
     grid: read(CHART_TOKENS.grid),
     axis: read(CHART_TOKENS.axis),
     markGap: read(CHART_TOKENS.markGap),
+    overlaySurface: read(CHART_TOKENS.overlaySurface),
+    overlayBorder: read(CHART_TOKENS.overlayBorder),
+    overlayText: read(CHART_TOKENS.overlayText),
+  };
+}
+
+/**
+ * recharts `<Tooltip>` 에 그대로 넘기는 스타일. 컴포넌트가 같은 객체를 두 차트에
+ * 쓰므로 여기 한 번만 적는다 — 두 차트가 서로 다른 툴팁을 갖는 것이 H2 의 재발이다.
+ */
+export function tooltipStyle(color: ChartColors) {
+  return {
+    background: color.overlaySurface,
+    border: `1px solid ${color.overlayBorder}`,
+    borderRadius: "0.5rem",
+    color: color.overlayText,
   };
 }
