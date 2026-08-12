@@ -123,4 +123,29 @@ describe("차트 색 토큰 (Phase 10 Slice 10.3)", () => {
     expect(frame, ".chart-frame 의 배경 선언을 못 찾았다").not.toBeNull();
     expect(resolveToken(frame![1])).toEqual(documentedSurface);
   });
+
+  it("dresses every recharts overlay instead of leaving library defaults", () => {
+    /**
+     * ★ **독립 검증 H2 (2026-08-12).** `<Tooltip>`·`<Legend>` 는 recharts 가 자기
+     * 기본 스타일로 그린다(흰 배경 · `#ccc` 테두리). **우리 코드에 리터럴이 없으니
+     * 색 가드는 전부 조용한데** 화면에서는 혼자 다른 계통이었다 — *"색을 안 쓴 것"*
+     * 과 *"라이브러리 색을 쓴 것"* 은 다르고, 리터럴을 세는 가드는 그 둘을 구별하지
+     * 못한다.
+     *
+     * 스타일을 입힌 뒤에도 **prop 하나를 지우면 조용히 기본값으로 돌아간다.** 그래서
+     * 여기서 소스를 읽어 **모든** overlay 가 옷을 입었는지 센다(`아무거나 하나`가
+     * 아니라 전수 — 차트가 둘인데 한쪽만 입히는 것이 실제로 일어나는 사고다).
+     */
+    const dashboard = readFileSync(resolve(here, "ObservabilityDashboard.tsx"), "utf8");
+
+    const tooltips = [...dashboard.matchAll(/<Tooltip\b[^/>]*/g)].map((m) => m[0]);
+    const legends = [...dashboard.matchAll(/<Legend\b[^/>]*/g)].map((m) => m[0]);
+
+    // overlay 가 아예 사라지면 아래 filter 가 빈 배열이라 공허하게 통과한다.
+    expect(tooltips.length).toBeGreaterThan(0);
+    expect(legends.length).toBeGreaterThan(0);
+
+    expect(tooltips.filter((tag) => !tag.includes("contentStyle="))).toEqual([]);
+    expect(legends.filter((tag) => !tag.includes("wrapperStyle="))).toEqual([]);
+  });
 });
