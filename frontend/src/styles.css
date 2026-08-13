@@ -304,6 +304,67 @@ main {
   padding: 0 2rem 5rem;
 }
 
+/* ==========================================================================
+   기본 동작 버튼 — 겉모습을 정하는 자리 (Phase 10 Slice 10.5, 2026-08-13)
+   ==========================================================================
+
+   ★ 종전에는 같은 선언이 **다섯 벌** 흩어져 있었다. 사본이 여럿이면 새 표면이
+   어디에도 안 들어가는 것이 조용하고, 실제로 이미 조용히 갈라져 있었다 —
+   `.editor-actions button` 만 transition 이 없어 배경이 툭 바뀌었고, hover 시
+   살짝 뜨는 효과는 다섯 중 **둘**에만 있었다(2026-08-13 실측).
+
+   여기서 정하는 것은 **겉모습**(색·테두리·커서·모션)이고 **패딩은 자리마다
+   남는다** — 0.78/1.35(정문) · 0.72/1.1 · 0.72/1.5 · 0.5/1.1 로 서로 다르며
+   합치면 시각이 바뀐다. **크기는 자리가 정하고 정체성은 여기가 정한다.**
+
+   모션 통일은 오너 결정이다(2026-08-13) — 안 뜨던 3곳이 함께 뜬다. 정적
+   겉모습은 무변이고 hover 할 때만 달라진다.
+
+   ★ **새 기본 버튼을 만들면 선택자를 아래 세 규칙에 함께 더한다**(base·hover·
+   disabled). 셋의 자리 집합이 갈리는 것을 [`buttonAppearance.test.ts`](./buttonAppearance.test.ts)
+   가 문다 — base 에만 넣으면 accent 색은 얻고 hover·disabled 반응은 못 얻는데,
+   그것은 눈으로 화면을 열기 전에는 안 보인다.
+   -------------------------------------------------------------------- */
+.auth-submit,
+.form-controls button,
+.editor-actions button,
+.writing-actions button,
+.candidate-actions button,
+.loop-retry,
+.row-actions button {
+  color: var(--text-on-accent);
+  background: var(--action-primary);
+  border: 0;
+  cursor: pointer;
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+/* `.auth-submit:focus-visible` 만 여기 끼어 있는 것은 의도다 — 정문은 키보드로
+   들어오는 자리라 종전부터 focus 에 같은 반응을 줬다. 나머지는 브라우저 기본
+   focus 링을 그대로 쓴다(아무도 `outline` 을 지우지 않는다). */
+.auth-submit:hover:not(:disabled),
+.auth-submit:focus-visible,
+.form-controls button:hover:not(:disabled),
+.editor-actions button:hover:not(:disabled),
+.writing-actions button:hover:not(:disabled),
+.candidate-actions button:hover:not(:disabled),
+.loop-retry:hover:not(:disabled),
+.row-actions button:hover:not(:disabled) {
+  background: var(--action-primary-hover);
+  transform: translateY(-1px);
+}
+
+.auth-submit:disabled,
+.form-controls button:disabled,
+.editor-actions button:disabled,
+.writing-actions button:disabled,
+.candidate-actions button:disabled,
+.loop-retry:disabled,
+.row-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
 .auth-shell {
   display: grid;
   width: 100%;
@@ -386,22 +447,6 @@ main {
   justify-self: start;
   margin-top: 0.45rem;
   padding: 0.78rem 1.35rem;
-  color: var(--text-on-accent);
-  background: var(--action-primary);
-  border: 0;
-  cursor: pointer;
-  transition: background 160ms ease, transform 160ms ease;
-}
-
-.auth-submit:hover:not(:disabled),
-.auth-submit:focus-visible {
-  background: var(--action-primary-hover);
-  transform: translateY(-1px);
-}
-
-.auth-submit:disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
 }
 
 .login-error,
@@ -1094,21 +1139,6 @@ main {
 
 .form-controls button {
   padding: 0.72rem 1.1rem;
-  color: var(--text-on-accent);
-  background: var(--action-primary);
-  border: 0;
-  cursor: pointer;
-  transition: background 160ms ease, transform 160ms ease;
-}
-
-.form-controls button:hover:not(:disabled) {
-  background: var(--action-primary-hover);
-  transform: translateY(-1px);
-}
-
-.form-controls button:disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
 }
 
 .resource-list {
@@ -1259,19 +1289,6 @@ main {
 
 .editor-actions button {
   padding: 0.72rem 1.5rem;
-  color: var(--text-on-accent);
-  background: var(--action-primary);
-  border: 0;
-  cursor: pointer;
-}
-
-.editor-actions button:hover:not(:disabled) {
-  background: var(--action-primary-hover);
-}
-
-.editor-actions button:disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
 }
 
 .version-panel {
@@ -1497,24 +1514,6 @@ main {
 .candidate-actions button,
 .loop-retry {
   padding: 0.72rem 1.5rem;
-  color: var(--text-on-accent);
-  background: var(--action-primary);
-  border: 0;
-  cursor: pointer;
-  transition: background 160ms ease;
-}
-
-.writing-actions button:hover:not(:disabled),
-.candidate-actions button:hover:not(:disabled),
-.loop-retry:hover:not(:disabled) {
-  background: var(--action-primary-hover);
-}
-
-.writing-actions button:disabled,
-.candidate-actions button:disabled,
-.loop-retry:disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
 }
 
 .writing-notice {
@@ -1810,20 +1809,6 @@ main {
 
 .row-actions button {
   padding: 0.5rem 1.1rem;
-  color: var(--text-on-accent);
-  background: var(--action-primary);
-  border: 0;
-  cursor: pointer;
-  transition: background 160ms ease;
-}
-
-.row-actions button:hover:not(:disabled) {
-  background: var(--action-primary-hover);
-}
-
-.row-actions button:disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
 }
 
 .row-actions button.ghost {
