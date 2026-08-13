@@ -116,7 +116,7 @@ cd .. && cp /tmp/head.css frontend/src/styles.css   # 복원 → md5 a7e28ea… 
 
 ### F6. 패턴 스윕 — 놓친 사본 없다
 
-`background: var(--action-primary)` 선언 3곳 중 2곳(줄 921 배지·2183 점)은 `cursor:pointer` 가 없어 identity 에서 **의도대로** 제외됨. `cursor: not-allowed` 는 줄 364(버튼 disabled 통일) 외 3곳(580·1206·1353)이나 이들은 input/link 계열의 **다른 표면**이라 이 슬라이스 범위 밖. `opacity: 0.42`·`translateY(-1px)` 는 통일 자리에만 존재(흩어짐 0).
+`background: var(--action-primary)` 선언 3곳 중 2곳(줄 921 배지·2183 점)은 `cursor:pointer` 가 없어 identity 에서 **의도대로** 제외됨 — 놓친 버튼 사본 0(이 스윕의 결론). **★ `:disabled` 불투명도가 버튼 계열에서 네 값으로 갈린 것은 별개 문제**(`cursor: not-allowed` 는 네 자리 동일) — 아래 H1 에서 정정.
 
 ### F7. 구현자 오염 보고는 정직하다
 
@@ -128,7 +128,9 @@ cd .. && cp /tmp/head.css frontend/src/styles.css   # 복원 → md5 a7e28ea… 
 - 없음. 계약 위반·추적 안 된 경계·과잉 교정 누락 전부 0건. (이 슬라이스는 frontend CSS·테스트 작업으로 API/schema 계약에 닿지 않는다.)
 
 ### Hardening (비차단)
-- **H1 — `cursor: not-allowed` 가 다른 표면 3곳에 흩어져 있다** (줄 580·1206·1353, 비버튼 disabled). 이 슬라이스가 다룬 "버튼 겉모습 흩어짐" 과 **같은 계열**(disabled 스타일이 조용히 갈라질 수 있음)이나 대상이 input/link 계열로 다르다. 범위 밖이므로 이 슬라이스에서 손대지 않았고, 정당하다. 해당 표면들이 늘어나면 별도 부채 후보.
+- **H1 — `:disabled` 겉모습이 버튼 계열에서 불투명도 네 값으로 갈려 있다** (줄 363 통일=0.42 · 579 `.admin-create-form/.admin-project-card button`=0.45 · 1205 `.order-controls button`=0.35 · 1352 `.version-list/.export-* button`=0.5). `cursor: not-allowed` 는 네 자리 모두 같다.
+  - **★ 정정(2026-08-13, 구현자 `ffa5848`)**: 최초 이 항목(과 위 F6)을 *"`cursor: not-allowed` 흩어짐, input/link 계열 다른 표면"* 이라 적었는데 **둘 다 틀렸다** — `:disabled` 규칙을 전수로 뽑지 않고 `cursor: not-allowed` grep 결과에 "input/link" 를 **확인 없이 덧붙인** 가정이었다. 실제 그 자리들은 전부 `button:disabled`(비버튼은 `.login-form input`=0.7 하나뿐)이고, 갈라진 것은 cursor 가 아니라 **불투명도**다. 구현자가 재측정으로 잡았고 **검증자가 독립 재확인**했다(위 표). "이 슬라이스 범위 밖" 이라는 결론은 옳았으나 성격 규정이 사실과 달랐다 — 검증 기록에서도 원시 확인(`:disabled` 규칙 전수)을 빼면 안 된다는 자체 사례.
+  - 이 표면은 오너 결정 대기 **부채 ④**(HANDOFF 추적 부채)로 등재됐다 — 네 값을 하나로 모으면 비활성 버튼 농도가 실제로 바뀌어(값 하나를 고르는 것은 디자인 판단) 이 슬라이스가 임의로 정할 수 없다.
 
 ## Verdict
 
