@@ -1,7 +1,7 @@
 # 독립 검증 기록
 
 이 디렉터리는 **구현자가 아닌 검증자가** 각 슬라이스를 다시 뜯어본 기록이다. 2026-06-24부터
-**50일치 · 240건**이 쌓여 있다.
+**50일치 · 242건**이 쌓여 있다.
 
 ## 이 저장소의 검증이 무엇인가
 
@@ -35,7 +35,7 @@
 
 | 판정 | 건수 | 뜻 |
 |---|---|---|
-| 합격 | 171 | blocking 결함 없음 |
+| 합격 | 173 | blocking 결함 없음 |
 | **조건부 합격** | **67** | 합격이되 닫아야 할 조건이 있었다 |
 | **불합격** | **2** | 핵심 계약 위반으로 다음 슬라이스 진행이 차단됐다 |
 
@@ -66,6 +66,8 @@
 ### 2026-08-13
 
 | [`debt_buttons_typescale_m5.md`](2026-08-13/debt_buttons_typescale_m5.md) | 부채 ①② 폐쇄(`db9f9c0` 기본 버튼 겉모습 다섯 벌→한 자리 · `f022088` typeScale 넷째 셀 · `08aed1b` 기록, Phase 10) — 기준선 전부 HEAD 에서 재측정(frontend **323/27**(423s) · build **704·진입 421.78·관측 lazy 387.43·AdminConsole 8.50 무변** · **CSS 31.42→30.79(-0.63)** 직접 빌드 · `tsc` OK). **★ 원문 전제 정정이 사실** — `b97307d` HANDOFF 가 *"관측된 피해 0건 · 시각 무변(transition 포함)"* 이라 **스스로 모순** 적었는데, 다섯 블록을 직접 재어 `.editor-actions button` 만 transition 없음·hover lift **2:3** 갈림을 잡아 "피해 0건이 아니라 아무도 안 본 것" 으로 정정(오너 **D-10.5-b** "다섯 곳 전부 뜨게"). **★ 캐스케이드 건전** — 7 선택자를 건드리는 규칙 9자리 전수 추출, 겉모집 속성은 통일 자리(328·345·357)에만, padding 은 자리별(446·1140·1290·1513·1810), `.row-actions button.ghost`(0,2,1)>(0,1,1) 로 정체성 유지 · CSS 파일 1개·`!important` 는 reduced-motion 전역(변경 전부터)만. **★ 뮤테이션 6종 전부 단독 물림**(구현자 N1-N4·M-a/b 와 독립): buttonAppearance M1→cell1·M2→cell2·M3→cell3·M4→cell4(over-strict padding) · typeScale **M5(MIGRATED 행 삭제)→cell4 가 종전 M5 한계를 닫는 핵심 증명**·M6(미등재 규칙)→cell4. **★ CSS-pre 31.42 를 cp-swap 빌드로 디스크에서 직접 측정**(믿지 않고 잼). 패턴 스윕: `background:…primary` 3곳 중 2곳(배지·날짜 점)은 cursor 없어 identity 의도 제외 — 놓친 사본 0. **Blocking 0**. 비차단: H1 `cursor:not-allowed` 흩어짐 3곳(580·1206·1353, 비버튼 표면·범위 밖). | **합격** |
+| [`chart_h1_h2_hardening.md`](2026-08-13/chart_h1_h2_hardening.md) | 차트 검증(`e124879`) 비차단 H1·H2 보강(`444ab1b`·`f724fce`) — H1(셀 "still holds the exact palette")은 ΔE 재구현 대신 **출처 연결**(계열색↔주석 팔레트·검산 표면↔`--surface-raised`·그 토큰↔`.chart-frame` 배경)을 잠그고, H2(`tooltipStyle(color)` 적용 + 셀 "dresses every overlay" 전수)는 recharts 기본 스타일 회귀를 막는다. **★ 뮤테이션 H1-a(계열색 변경)·H1-c(프레임 배경)→H1 셀 단독 FAIL**(연결 ①·③ 양쪽), **H2-a(Tooltip contentStyle 제거)→H2 단독 FAIL**. chartColors 3→5 cells · 회귀 323/27 무변 · 관측 lazy 387.03→387.43(HEAD 빌드 재확인). **Blocking 0**. 비차단: H1 잔여(CVD 통과 자체는 여전히 자동 가드 아님 — palette 변경 시 재실행 리뷰 필수). | **합격** |
+| [`login_button_false_finding_correction.md`](2026-08-13/login_button_false_finding_correction.md) | 10.4 검증(`33e8783`) 뒤 `2c6eb9e` — "정문 버튼이 브라우저 기본값(회색)"이 **하네스(`10_layout_probe.html`) 마크업이 `auth-submit` 클래스를 빠뜨린 가짜 입력**이었음을 정정, 거짓 발견 위에 쓴 `.login-form button` 규칙(base·hover·disabled)을 전부 되돌림. **★ 제거 깨끗함**(잔존·참조 0건) · **정문 버튼은 `AuthGate.tsx` 의 `className="auth-submit"`→`.auth-submit`(항상 `--action-primary`=rgb(0,110,190))로 여전히 스타일** — "회색이었다"는 입력 오류. 특이도 (0,1,1)>(0,1,0) 이 조용한 restyle 피해를 설명. **★ 구멍 구조적 폐쇄**: 거짓 규칙 재도입 시 오늘 `buttonAppearance` 가 cell 1·2 로 잡음(2c6eb9e 가 손으로 닫은 패턴을 가드가 대체). CSS 31.76→31.42(-0.34, f022088 빌드로 post 재확인). **Blocking 0**. | **합격** |
 
 ### 2026-08-12
 
