@@ -59,8 +59,14 @@ services:
   gateway:
     # Point the gateway at the in-stack llama service instead of the external
     # host default, and wait for the model to finish loading before starting.
+    #
+    # ★ An explicit LLAMA_BASE_URL wins over the in-stack model (owner, 2026-08-14:
+    # "모델이 있어도 API 가 있다면 API 로"). This used to be hardcoded, which made the
+    # in-stack llama beat .env unconditionally — the opposite of that rule. The dash
+    # form is deliberate: `${VAR:-default}` would send an empty value back to the
+    # default, so it could not express "external API, none configured".
     environment:
-      LLAMA_BASE_URL: "http://llama:9080"
+      LLAMA_BASE_URL: "${LLAMA_BASE_URL-http://llama:9080}"
       LLAMA_DEFAULT_MODEL: "${LLAMA_DEFAULT_MODEL:-google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0}"
       LLAMA_DEFAULT_THINKING: "${LLAMA_DEFAULT_THINKING:-false}"
       LLAMA_TIMEOUT_SECONDS: "${LLAMA_TIMEOUT_SECONDS:-900}"

@@ -96,14 +96,26 @@ services:
       # Real vector backend (B.4): the embedding service and Chroma. When these
       # are set the shared vector index is the persistent Chroma backend with
       # real 1024-dim embeddings; without them the app falls back to the fake.
-      EMBEDDING_SERVICE_URL: "http://embedding:8002"
+      #
+      # ★ The default is the in-stack service, but .env may point these at an
+      # external API (deployment servers download no models). Note the dash form
+      # `${VAR-default}`: unlike `${VAR:-default}` used elsewhere in this file,
+      # it keeps an *empty* value empty, so `EMBEDDING_SERVICE_URL=` in .env
+      # actually reaches the app's fallback instead of being reset to the
+      # default. The app reads these with `if not ...`, so empty == unset.
+      EMBEDDING_SERVICE_URL: "${EMBEDDING_SERVICE_URL-http://embedding:8002}"
       EMBEDDING_DIMENSIONS: "${EMBEDDING_DIMENSIONS:-1024}"
-      CHROMA_HOST: "chroma"
+      CHROMA_HOST: "${CHROMA_HOST-chroma}"
+      # Not env-driven on purpose: CHROMA_PORT is already taken by the *host*
+      # publish below (127.0.0.1:${CHROMA_PORT:-8523}:8000), and this one is the
+      # in-network port. Sharing the name would make a host-port override
+      # silently redirect the app to a port nothing listens on. An external
+      # Chroma with a different port needs an override file, not this variable.
       CHROMA_PORT: "8000"
       # §8 lexical leg (v1.6.52): with Elasticsearch configured alongside the
       # vector backend, the canonical memory retriever is hybrid (vector+lexical
       # RRF). Without it the app falls back to vector-only / Mongo-direct.
-      ELASTICSEARCH_URL: "http://elasticsearch:9200"
+      ELASTICSEARCH_URL: "${ELASTICSEARCH_URL-http://elasticsearch:9200}"
     ports:
       # Published to all interfaces on purpose (D8-7 G1=C). This is the only
       # surface that is meant to be reached from another device, and it is the
@@ -338,11 +350,13 @@ services:
     environment:
       CORE_SOT_MONGO_URI: "mongodb://mongo:27017/?replicaSet=rs0"
       CORE_SOT_MONGO_DB: "ai_writing_system"
-      EMBEDDING_SERVICE_URL: "http://embedding:8002"
+      # Same env convention as application (dash form keeps an empty value
+      # empty so .env can point these at an external API or switch them off).
+      EMBEDDING_SERVICE_URL: "${EMBEDDING_SERVICE_URL-http://embedding:8002}"
       EMBEDDING_DIMENSIONS: "${EMBEDDING_DIMENSIONS:-1024}"
-      CHROMA_HOST: "chroma"
+      CHROMA_HOST: "${CHROMA_HOST-chroma}"
       CHROMA_PORT: "8000"
-      ELASTICSEARCH_URL: "http://elasticsearch:9200"
+      ELASTICSEARCH_URL: "${ELASTICSEARCH_URL-http://elasticsearch:9200}"
       INDEX_SYNC_INTERVAL: "${INDEX_SYNC_INTERVAL:-30}"
     depends_on:
       mongo:
@@ -398,12 +412,13 @@ services:
       # Must exceed the longest generate (long≈91s bounded by the gateway timeout).
       WRITING_GENERATION_CLAIM_TIMEOUT_SECONDS: "${WRITING_GENERATION_CLAIM_TIMEOUT_SECONDS:-600}"
       GENERATION_WORKER_INTERVAL: "${GENERATION_WORKER_INTERVAL:-5}"
-      # Context search needs the same real backends as application.
-      EMBEDDING_SERVICE_URL: "http://embedding:8002"
+      # Context search needs the same real backends as application, and the same
+      # env convention (dash form — an empty value stays empty).
+      EMBEDDING_SERVICE_URL: "${EMBEDDING_SERVICE_URL-http://embedding:8002}"
       EMBEDDING_DIMENSIONS: "${EMBEDDING_DIMENSIONS:-1024}"
-      CHROMA_HOST: "chroma"
+      CHROMA_HOST: "${CHROMA_HOST-chroma}"
       CHROMA_PORT: "8000"
-      ELASTICSEARCH_URL: "http://elasticsearch:9200"
+      ELASTICSEARCH_URL: "${ELASTICSEARCH_URL-http://elasticsearch:9200}"
     depends_on:
       mongo:
         condition: service_healthy
