@@ -209,5 +209,24 @@ class LlamaComposeExposureTest(unittest.TestCase):
             self.assertFalse(mapping.startswith(_LOOPBACK_PREFIX), mapping)
 
 
+class ExternalComposeExposureTest(unittest.TestCase):
+    """외부 API override(`docker-compose.external.yml`)의 노출면.
+
+    이 파일은 **포트를 하나도 게시하지 않는다** — 주소를 밖으로 돌리고 로컬 백엔드를
+    profile 뒤로 넣을 뿐이라 새 노출면이 없다. 그 성질을 잠그는 이유는, 이 가드가
+    **파일을 이름으로 하나씩** 읽기 때문이다: 목록에 없는 compose 파일은 아무리
+    포트를 열어도 위 분류 강제(`_LOOPBACK_ONLY` / `_PUBLIC_ON_PURPOSE`)를 **통째로
+    우회한다**. 배포 서버가 쓰는 파일이 바로 그 사각지대에 있으면 안 된다.
+    """
+
+    def test_the_external_override_publishes_no_new_ports(self) -> None:
+        self.assertEqual(
+            _published_ports("docker-compose.external.yml"),
+            {},
+            "외부 override 가 포트를 게시하기 시작했다면 그것은 새 노출면이다 — "
+            "위 두 리터럴 중 어디에 속하는지 분류하고 이 셀을 그에 맞게 고친다",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

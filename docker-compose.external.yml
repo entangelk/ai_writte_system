@@ -1,0 +1,106 @@
+# 배포 서버용 override — 모델을 하나도 받지 않고 **외부 API 로만** 돌린다.
+#
+#     docker compose -f docker-compose.yml -f docker-compose.external.yml up -d
+#
+# 오너 결정 D-10.5-d/g(2026-08-13 방향, 2026-08-14 시행): *"실제 서비스 서버는 지금
+# 환경과 다르다. 모델을 다운로드 받지 않고 외부 API 연결로만 빌드하는 것이 필요하다."*
+#
+# ★ `docker-compose.llama.yml` 과 **정반대 짝**이다. 하나는 모델을 스택 안으로 들이고
+# (알파), 이것은 전부 밖으로 낸다(배포 서버). 공통은 `docker-compose.yml` 하나이며
+# **이 파일은 그것을 복제하지 않는다** — 배선을 복제하면 dev 쪽 수정이 배포 쪽에 안
+# 따라가고 그 차이는 배포에서만 드러난다(이 저장소가 H-2 shim drift 와 worker 이미지
+# 태그로 두 번 겪은 형태다. 후자는 worker 이미지가 15일 뒤처진 채 PROJECT_PURGED
+# drain 없이 돌고 있었다).
+#
+# ── 무엇이 꺼지는가 ──────────────────────────────────────────────────────────
+# `embedding`·`chroma`·`elasticsearch` 는 profile 뒤로 들어가 **기동도 빌드도 되지
+# 않는다**. 그 셋이 이 스택에서 모델·플러그인을 들고 오는 자리다:
+#   - embedding    → sentence-transformers/torch 로 `EMBEDDING_MODEL_NAME`
+#                    (기본 dragonkue/BGE-m3-ko)을 받는다
+#   - elasticsearch→ 자체 Dockerfile 로 analysis-nori 를 심는다
+#   - chroma       → 모델은 없지만 외부로 나가면 함께 필요 없다
+# 굳이 로컬로 되살리려면 `--profile local-models` 를 준다.
+#
+# ★ `llama` 는 여기 없다 — 애초에 `docker-compose.llama.yml` 에만 있는 서비스라
+# 이 override 를 쓰면 자동으로 없다. gateway 는 **끄지 않는다**: 모델을 들지 않고
+# 외부 LLM API 앞에 서는 우리 프록시이며, 주소는 base 의 `LLAMA_BASE_URL` 로 정한다.
+#
+# ── 주소는 전부 .env 로 준다 ────────────────────────────────────────────────
+# 값이 없으면 **기동을 거부한다**(`:?`). 조용히 in-stack 기본값으로 떨어지면 뜨지도
+# 않는 서비스를 가리키게 되고, 그것은 에러가 아니라 **연결 실패의 형태로만** 드러나
+# 원인을 찾기 어렵다. 이 저장소의 fail-fast 관례(EMBEDDING_DIMENSIONS 차원 가드,
+# AUTH_SESSION_TTL_HOURS 기동 거부)와 같은 선택이다.
+#
+# **"백엔드를 끄고 싶다"** 면 이 파일이 아니라 base + `.env` 를 쓴다(빈 값 → 앱이
+# fake 임베딩·벡터 없음·Mongo 직조회로 내려간다). 이 파일은 *외부에 있다* 를 뜻한다.
+#
+# ── 아직 안 되는 것 (착수 전 반드시 읽을 것) ────────────────────────────────
+# ★ **임베딩은 아직 진짜 외부 API 에 못 붙는다.** `RemoteEmbeddingProvider`
+# (services/application/app/indexing/embedding.py)가 아는 계약은 **우리 임베딩
+# 서비스의 자체 형식**이다 — `POST /embed {"text": …}` → `{"embedding": [...]}`.
+# OpenAI 형식(`POST /v1/embeddings`, `{"input": …}` → `{"data":[{"embedding":…}]}`)
+# 이 아니다. 따라서 `EMBEDDING_SERVICE_URL` 에 넣을 수 있는 것은 **그 계약을 말하는
+# 엔드포인트**뿐이고, OpenAI 호환 임베딩 API 를 붙이려면 **어댑터가 먼저**다
+# (추적 부채 축 ③). LLM 은 반대다 — gateway 가 OpenAI 호환 `/v1/chat/completions`
+# 를 부르므로 외부 API 가 그대로 붙는다.
+#
+# ★ **리랭커는 코드가 0줄이다.** 2026-07-27 에 구현하기로 결정만 됐고
+# (`plans/external-api-expansion-decisions.md` D5: self-host
+# `dragonkue/bge-reranker-v2-m3-ko` + 외부 `RerankProvider` seam) 아직 없다.
+# 그래서 여기 리랭커 env 를 만들지 않았다 — **아무도 읽지 않는 변수를 미리 두면
+# 그것이 붙어 있다는 착각을 만든다.** 붙는 날 이 파일에 자리가 생긴다.
+#
+# ★ gateway 의 `/health/ready` 는 upstream 의 `GET /health` 를 본다. 외부 API 에
+# 그 경로가 없으면 503 이지만, compose healthcheck 는 `/health/live` 라 **스택 기동은
+# 막지 않는다**. 그리고 `/props`·`/tokenize`·`/apply-template` 는 llama.cpp 전용이라
+# 외부 API 에서는 None 이 되고 **컨텍스트 예산 가드가 실측 대신 추정으로 내려간다**
+# (과소평가 방향 = 가드가 늦게 걸린다). 붙인 뒤 "뜨긴 뜬다" 로 끝내지 말 것.
+
+services:
+  application:
+    environment:
+      EMBEDDING_SERVICE_URL: "${EMBEDDING_SERVICE_URL:?외부 임베딩 주소가 필요하다 (자체 POST /embed 계약)}"
+      CHROMA_HOST: "${CHROMA_HOST:?외부 Chroma 호스트가 필요하다}"
+      # ★ 이름이 `CHROMA_PORT` 가 아닌 이유: 그 이름은 base 에서 **호스트 게시 포트**
+      # (127.0.0.1:${CHROMA_PORT:-8523}:8000)로 이미 쓰이고 있다. 같은 이름을 쓰면
+      # 호스트 포트를 바꾼 사람이 앱을 엉뚱한 포트로 돌리게 된다.
+      CHROMA_PORT: "${EXTERNAL_CHROMA_PORT:-8000}"
+      ELASTICSEARCH_URL: "${ELASTICSEARCH_URL:?외부 Elasticsearch 주소가 필요하다}"
+    # 꺼진 셋을 기다리지 않는다. `!override` 라 base 의 5개를 통째로 대체한다 —
+    # 남기는 둘은 여전히 스택 안에 있고 여전히 필요하다.
+    depends_on: !override
+      mongo:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+
+  worker:
+    environment:
+      EMBEDDING_SERVICE_URL: "${EMBEDDING_SERVICE_URL:?외부 임베딩 주소가 필요하다 (자체 POST /embed 계약)}"
+      CHROMA_HOST: "${CHROMA_HOST:?외부 Chroma 호스트가 필요하다}"
+      CHROMA_PORT: "${EXTERNAL_CHROMA_PORT:-8000}"
+      ELASTICSEARCH_URL: "${ELASTICSEARCH_URL:?외부 Elasticsearch 주소가 필요하다}"
+    depends_on: !override
+      mongo:
+        condition: service_healthy
+
+  generation_worker:
+    environment:
+      EMBEDDING_SERVICE_URL: "${EMBEDDING_SERVICE_URL:?외부 임베딩 주소가 필요하다 (자체 POST /embed 계약)}"
+      CHROMA_HOST: "${CHROMA_HOST:?외부 Chroma 호스트가 필요하다}"
+      CHROMA_PORT: "${EXTERNAL_CHROMA_PORT:-8000}"
+      ELASTICSEARCH_URL: "${ELASTICSEARCH_URL:?외부 Elasticsearch 주소가 필요하다}"
+    depends_on: !override
+      mongo:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+
+  # 모델·플러그인을 들고 오는 셋. profile 뒤에 두면 기본 기동에서도 `build` 에서도
+  # 빠진다(실측). 로컬로 되살리려면 `--profile local-models`.
+  embedding:
+    profiles: ["local-models"]
+  chroma:
+    profiles: ["local-models"]
+  elasticsearch:
+    profiles: ["local-models"]

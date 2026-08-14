@@ -235,5 +235,85 @@ class InStackLlamaOverrideTest(unittest.TestCase):
         )
 
 
+class ExternalOverrideTest(unittest.TestCase):
+    """`docker-compose.external.yml` — 배포 서버는 모델을 하나도 받지 않는다.
+
+    base 를 **복제하지 않고 덮는** override 다(`docker-compose.llama.yml` 과 같은 패턴,
+    방향만 반대). 여기서 잠그는 것은 그 파일이 실제로 *외부 전용* 인가이며, 네 축이다:
+    주소 필수 · 모델 서비스 비기동 · 꺼진 것을 기다리지 않음 · 이름 충돌 회피.
+    """
+
+    PATH = "docker-compose.external.yml"
+    #: 모델·플러그인을 들고 오는 서비스 — 배포 서버에서 기동도 빌드도 되면 안 된다.
+    MODEL_SERVICES = ("embedding", "chroma", "elasticsearch")
+    #: 외부 주소를 반드시 받아야 하는 변수.
+    REQUIRED = ("EMBEDDING_SERVICE_URL", "CHROMA_HOST", "ELASTICSEARCH_URL")
+
+    def setUp(self) -> None:
+        self.text = (_REPO_ROOT / self.PATH).read_text(encoding="utf-8")
+        self.by_service = _env_by_service(self.text)
+
+    def test_external_addresses_are_required_not_defaulted(self) -> None:
+        """`:?` — 값이 없으면 기동을 거부한다.
+
+        default 를 주면 배포 서버가 **뜨지도 않는 in-stack 서비스**를 조용히 가리키고,
+        그것은 기동 실패가 아니라 첫 검색에서야 연결 오류로 드러난다.
+        """
+
+        declaring = {s: e for s, e in self.by_service.items() if set(self.REQUIRED) & e.keys()}
+        self.assertTrue(declaring, "외부 주소를 선언하는 서비스가 없다")
+        for service, env in sorted(declaring.items()):
+            for name in self.REQUIRED:
+                with self.subTest(service=service, variable=name):
+                    self.assertIn(name, env, f"{service} 가 외부 백엔드 일부만 덮는다")
+                    self.assertIn(
+                        f"${{{name}:?",
+                        env[name],
+                        f"{service}.{name} 이 필수가 아니다 — 값이 없을 때 "
+                        "in-stack 기본값으로 조용히 떨어진다",
+                    )
+
+    def test_model_carrying_services_are_behind_a_profile(self) -> None:
+        """profile 뒤에 있어야 기동에서도 `build` 에서도 빠진다(2026-08-14 실측)."""
+
+        for service in self.MODEL_SERVICES:
+            with self.subTest(service=service):
+                block = self.text.split(f"\n  {service}:\n", 1)
+                self.assertEqual(len(block), 2, f"{service} 를 override 가 안 덮는다")
+                self.assertIn(
+                    "profiles:",
+                    block[1].split("\n  ", 1)[0],
+                    f"{service} 가 profile 뒤에 없다 — 배포 서버가 이 이미지를 "
+                    "빌드하고 띄운다(embedding 은 torch 를 끌고 온다)",
+                )
+
+    def test_nothing_waits_on_the_services_that_are_off(self) -> None:
+        """`depends_on` 에 꺼진 셋이 남아 있으면 앱이 영영 안 뜬다."""
+
+        for service in self.MODEL_SERVICES:
+            with self.subTest(service=service):
+                self.assertNotIn(
+                    f"      {service}:\n        condition:",
+                    self.text,
+                    f"꺼져 있는 {service} 를 무언가가 기다린다 — "
+                    "`depends_on: !override` 로 대체하는 것을 빠뜨렸다",
+                )
+
+    def test_the_internal_chroma_port_does_not_reuse_the_host_port_name(self) -> None:
+        """★ `CHROMA_PORT` 는 base 에서 **호스트 게시 포트** 이름으로 이미 쓰인다."""
+
+        for service, env in sorted(self.by_service.items()):
+            value = env.get("CHROMA_PORT")
+            if value is None:
+                continue
+            with self.subTest(service=service):
+                self.assertNotIn(
+                    "${CHROMA_PORT",
+                    value,
+                    "호스트 게시 포트와 이름을 공유하면, 그 포트를 바꾼 사람이 "
+                    "앱을 아무도 안 듣는 포트로 돌린다. 별도 이름을 쓴다",
+                )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
