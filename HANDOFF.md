@@ -4,6 +4,8 @@
 > 완료 서술은 여기 쓰지 않는다 — `docs/daily_logs/`(상세) · `docs/system-contract-sot.md` 변경이력 · `CHANGELOG.md`(마일스톤) · `docs/verifications/`(독립 검증)에 이미 있다.
 > 편집 규칙은 `CLAUDE.md`·`AGENTS.md`의 "HANDOFF.md" 절에 있다. **길이 상한은 없다** — 대신 **~200줄을 넘으면 자가 검수**하고(그 뒤로는 ~100줄마다) 결과를 아래 한 줄로 남긴다. 길어야 할 이유가 있으면 길어도 된다. 안 보는 것이 문제다.
 >
+> **★ 2026-08-14: 400줄 트리거가 실제로 걸렸다(402줄) — 아직 검수하지 않았다.** 직전 검수가 *"다음 작업자가 400줄 트리거에서 본다"* 로 남긴 그 자리이고, **안 본 절은 여전히 `함정` · `Active Decisions` · `추적 부채` 셋**이다. 오늘은 오너 우선순위(배포 외부화 배선)를 먼저 했고 검수는 미뤘다 — **미룬 것이지 통과한 것이 아니다.** 다음 작업자가 그 셋을 본다.
+>
 > 마지막 자가 검수: **2026-08-10 · 310줄 (전체 검수는 아니고 `Owner Decisions Needed` 절을 제대로 봤다 — 직전 검수가 "안 본 절"로 남겨 둔 그 자리다). **그 절이 완료 이력 창고가 돼 있었다** — 12개 항목 중 **진짜 대기는 dogfood 하나**였고 나머지는 끝난 슬라이스 서사였다(Phase 9 Slice 9.0 이 아직 "구현 대기 — 지금 가장 앞선 작업"으로 적혀 있었다). **지우지 않고 압축**했다 — 끝난 것은 새 절 "완료 슬라이스"로 내리되 **다음 사람이 밟을 함정 문장은 그대로** 옮기고, 편집 후 키워드 10종이 저장소에서 사라지지 않았는지 grep 으로 확인했다. **안 본 절: 함정 · Active Decisions · 추적 부채** — 다음 작업자가 400줄 트리거에서 본다)
 
 ## 머신 구성 (알파 · 베타 · 감마)
@@ -160,14 +162,16 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 
 ## 추적 부채
 
-- **★ [유예 · 트리거 = 오너가 외부 API 를 준다](2026-08-13) 배포 서버용 "모델 다운로드 0 · 외부 API 전용" 빌드와 그 관통 검증.** 오너 방향: *"실제 서비스 서버는 지금 환경과 다르다. 모델을 받지 않고 **외부 API 로만** 빌드해야 하고, **모델이 로컬에 있더라도 API 가 있으면 API 로 물려야** 한다."* 착수는 API 를 받은 뒤이지만 **지금 실측해 둔 지형은 아래가 전부다**(2026-08-13, 코드·compose 직접 확인).
-  - **★ 막는 것은 코드가 아니라 compose 하드코딩이다.** 코드의 fallback 은 실재한다 — `EMBEDDING_SERVICE_URL` 없으면 `DeterministicFakeEmbeddingProvider`([main.py:1123](services/application/app/main.py#L1123)) · `CHROMA_HOST` 없으면 벡터 검색기 `None`([:1024](services/application/app/main.py#L1024)) · `ELASTICSEARCH_URL` 없으면 Mongo 직조회([:1047](services/application/app/main.py#L1047)). **그런데 compose 가 셋 다 `${}` 없이 박아 둔다** — [`docker-compose.yml:99·101·106`](docker-compose.yml#L99)(application) · [`:341·343·345`](docker-compose.yml#L341)(worker) · [`:402·404·406`](docker-compose.yml#L402)(generation_worker). 즉 **`.env` 로는 못 돌리고 override 파일이 필요하다.** 유일하게 env 로 갈아끼울 수 있는 것은 [`:190`](docker-compose.yml#L190) `LLAMA_BASE_URL` 하나다.
-  - **★ "모델이 있어도 API 우선" 은 지금 성립하지 않는다** — [`docker-compose.llama.yml:63`](docker-compose.llama.yml#L63) 이 gateway 의 `LLAMA_BASE_URL` 을 **`"http://llama:9080"` 로 하드코딩**해서, 그 override 를 쓰면 `.env` 가 무엇이든 **in-stack llama 가 무조건 이긴다**. 최소 변경은 `${LLAMA_BASE_URL:-http://llama:9080}` 이고, **그 우선순위는 조립 성질이라 회귀로 잠글 수 있다**(선례 = `ObservedProvider` 감싸기 조립 가드 — 하네스가 직접 만들면 green 이고 **배포에서만** 틀어지는 형태를 이 저장소가 이미 겪었다).
-  - **★ 가장 큰 검증 축 = llama.cpp 전용 3종이 조용히 죽는 것.** 생성 경로는 **`POST /v1/chat/completions`(OpenAI 호환) 하나**라([client.py:93](services/llm_gateway/app/client.py#L93)) 외부 API 가 대체로 붙는다. 그러나 `/props`([:71](services/llm_gateway/app/client.py#L71)) · `/tokenize`([:216](services/llm_gateway/app/client.py#L216)·[:253](services/llm_gateway/app/client.py#L253)) · `/apply-template`([:243](services/llm_gateway/app/client.py#L243))는 **llama.cpp 전용이고 셋 다 예외를 삼켜 `None` 을 반환한다**. 그러면 **컨텍스트 예산 가드가 서버 실측 대신 호출자 추정으로 떨어지는데, 코드 주석이 그 추정은 과소평가 방향(= 가드가 늦게 걸린다)이라고 명시한다.** 즉 **에러가 아니라 조용한 품질 저하**다 — 외부 API 로 바꾼 뒤 *"뜨긴 뜬다"* 로 끝내면 안 되고 **토큰 계수가 살아 있는지를 따로 확인**해야 한다.
+- **★ 배포 서버용 "모델 다운로드 0 · 외부 API 전용" — 축이 셋이고 ①은 닫혔다(2026-08-14).** 오너 방향: *"실제 서비스 서버는 지금 환경과 다르다. 모델을 받지 않고 **외부 API 로만** 빌드해야 하고, **모델이 로컬에 있더라도 API 가 있으면 API 로 물려야** 한다."* **★ 어제 이 항목 전체를 *"API 받은 뒤"* 로 유예했는데 그것이 과했다 — API 가 실제로 필요한 것은 ③뿐이다.**
+  - **① [닫힘 2026-08-14 `b6b1269`·`3ff94a3`] env 로 갈아끼우기.** `EMBEDDING_SERVICE_URL`·`CHROMA_HOST`·`ELASTICSEARCH_URL` 이 application·worker·generation_worker 세 자리에서, `LLAMA_BASE_URL` 이 llama override 에서 env 로 정해진다. **프로덕션 코드 0줄** — 코드는 원래 준비돼 있었고(`if not os.environ.get(...)`) 막던 것이 compose 하드코딩이었다. 가드 [`tests/test_compose_backend_env.py`](tests/test_compose_backend_env.py).
+  - **★ ② [유예 · 트리거 = 배포 서버를 실제로 세우는 날] "선택 빌드/기동" 은 아직 안 된다.** env 를 비워도 컨테이너가 안 뜬다 — [`docker-compose.yml:130-135`](docker-compose.yml#L130)(application) 과 워커 둘이 `embedding`·`chroma`·`elasticsearch` 에 **`depends_on: condition: service_healthy`** 를 걸고 있다. 그리고 이 저장소에 **`profiles:` 는 0건**이다. 여는 방법은 profiles 도입 + `depends_on` 조건부화이며, **compose 작업이라 API 없이도 할 수 있다.** 이걸 해야 배포 서버에서 **torch 를 끌고 오는 `embedding` 이미지를 빌드·기동하지 않는다**(`docker compose build` 는 전 서비스를 도니 대상 지정도 함께 본다).
+  - **★ ③ [유예 · 트리거 = 오너가 외부 API 를 준다] 외부 API 로 실제로 물리기.** 여기부터가 API 가 필요한 자리다. 아래 "검증 축" 항목들이 전부 이 축이다.
+  - **★ compose 의 `${}` 표기는 취향이 아니라 코드가 그 변수를 읽는 방식을 따라간다**(2026-08-14 에 이 실수를 한 번 하고 잡았다). `if not os.environ.get(name)` 으로 읽으면 **dash 형태 `${VAR-default}`** — 빈 값이 빈 채로 통과해야 코드의 fallback 에 도달한다(백엔드 3종). `os.environ.get(name, DEFAULT)` 로 읽으면 **콜론 형태 `${VAR:-default}`** — 기본값 *인자*라 빈 값이 미설정으로 취급되지 않아서, dash 로 두면 빈 base URL 이 그대로 전달돼 전 호출이 실패한다(gateway `LLAMA_BASE_URL`, [llm_gateway/main.py:56](services/llm_gateway/app/main.py#L56)). **이 파일의 다른 40여 항목이 전부 콜론이라 "통일" 하고 싶어지는데 그 통일이 곧 회귀다** — 양방향 다 셀이 문다. **두 방향 모두 배포에서만 드러난다.**
+  - **★ `CHROMA_PORT` 를 env 화하지 말 것 — 이름이 이미 쓰이고 있다.** 같은 이름이 host publish(`127.0.0.1:${CHROMA_PORT:-8523}:8000`)에서는 **호스트 포트**를, environment 에서는 **컨테이너 내부 포트**를 뜻한다. 게다가 [`.env.example:35`](.env.example) 가 `CHROMA_PORT=8523` 을 문서화하므로 **문서를 그대로 따른 사람이** 앱을 아무도 안 듣는 포트로 돌리게 된다. 외부 Chroma 는 override 파일로 붙인다.
+  - **★ 가장 큰 검증 축(③) = llama.cpp 전용 3종이 조용히 죽는 것.** 생성 경로는 **`POST /v1/chat/completions`(OpenAI 호환) 하나**라([client.py:93](services/llm_gateway/app/client.py#L93)) 외부 API 가 대체로 붙는다. 그러나 `/props`([:71](services/llm_gateway/app/client.py#L71)) · `/tokenize`([:216](services/llm_gateway/app/client.py#L216)·[:253](services/llm_gateway/app/client.py#L253)) · `/apply-template`([:243](services/llm_gateway/app/client.py#L243))는 **llama.cpp 전용이고 셋 다 예외를 삼켜 `None` 을 반환한다**. 그러면 **컨텍스트 예산 가드가 서버 실측 대신 호출자 추정으로 떨어지는데, 코드 주석이 그 추정은 과소평가 방향(= 가드가 늦게 걸린다)이라고 명시한다.** 즉 **에러가 아니라 조용한 품질 저하**다 — 외부 API 로 바꾼 뒤 *"뜨긴 뜬다"* 로 끝내면 안 되고 **토큰 계수가 살아 있는지를 따로 확인**해야 한다.
   - **`/health/ready` 는 upstream `GET /health` 를 본다**([main.py:143](services/llm_gateway/app/main.py#L143)) — 외부 API 에 그 경로가 없으면 503 이다. 다만 compose gateway healthcheck 는 `/health/live` 라 **스택 기동은 안 막힌다**(이미 알려진 "liveness 전용" 성질).
   - **임베딩 외부화는 어댑터가 필요하다** — 계약이 OpenAI 형식이 아니라 자체 형식이다(`POST /embed {"text": …}` → `{"embedding": […], "dimensions": N}`, [`services/embedding/app/main.py`](services/embedding/app/main.py)). 그리고 `EMBEDDING_DIMENSIONS`(기본 1024) 가드가 차원 불일치를 **fail-fast** 로 막는다 — 기존 `memory_vectors` 컬렉션과 차원이 다른 모델로 갈아타면 그 자리에서 걸린다(의도된 방어).
-  - **이미지도 같이 본다** — 외부 전용이면 `embedding` 서비스를 안 띄우므로 **torch 를 끌고 오는 그 이미지를 빌드할 이유도 없다**. `docker compose build` 는 전 서비스를 도니 **대상 지정**이 필요하다.
-  - **검증 시 볼 것(요약)**: ① 외부 API 만으로 스택이 뜨고 **모델 다운로드가 0** 인가 ② `.env`/override 로 **API 가 in-stack 모델을 이기는가** ③ **토큰 계수가 살아 있는가**(죽었으면 예산 가드가 추정으로 내려간 것) ④ 임베딩 어댑터의 차원이 `memory_vectors` 와 맞는가 ⑤ 검색이 하이브리드인지 Mongo 직조회로 강등됐는지 **의도한 쪽인가**.
+  - **검증 시 볼 것(요약)**: ① 외부 API 만으로 스택이 뜨고 **모델 다운로드가 0** 인가(②가 선행) ② **토큰 계수가 살아 있는가**(죽었으면 예산 가드가 실측→추정으로 내려간 것 — 조용하다) ③ 임베딩 어댑터의 차원이 `memory_vectors` 와 맞는가 ④ 검색이 하이브리드인지 Mongo 직조회로 강등됐는지 **의도한 쪽인가**. **★ *"API 가 in-stack 모델을 이기는가"* 는 이제 셀이 본다**(①에서 닫힘) — 라이브에서 다시 재는 대신 `docker compose -f docker-compose.yml -f docker-compose.llama.yml config | grep LLAMA_BASE_URL` 한 줄로 확인된다.
 
 - **★ [Phase 10 이 연 부채 셋 중 ①② 는 2026-08-13 에 닫혔다(독립 검증 합격 `fd32d1e`). 남은 것은 ③ 하나 + 검증이 연 ④ 하나다.]** 셋 다 **가드가 자기 밖을 못 보는** 같은 계열이었다.
   - **★ ④ [검증이 열었다 2026-08-13 · 판단 사안] `:disabled` 겉모습이 버튼 계열에서 **네 자리·네 값**으로 갈려 있다.** 10.5 가 통일한 것은 **accent 기본 버튼 7 선택자**뿐이고, 그 밖의 버튼은 여전히 자기 값을 쓴다 — [`styles.css`](frontend/src/styles.css) 355(**0.42**, 통일 자리) · 576 `.admin-create-form/.admin-project-card button`(**0.45**) · 1203 `.order-controls button`(**0.35**) · 1348 `.version-list/.export-actions/.export-controls button`(**0.5**). `cursor: not-allowed` 는 네 자리 모두 같다. **★ 이 항목은 성격 규정이 한 번 틀렸다가 정정된 자리다** — 독립 검증(`fd32d1e`)의 비차단 H1 이 *"`cursor: not-allowed` 흩어짐, input/link 계열의 다른 표면"* 이라 적었으나 셋 다 `button:disabled` 이고 갈라진 것은 cursor 가 아니라 불투명도다(구현자 전수 재측정 `ffa5848` → 검증자 독립 재확인 후 기록 정정 `c08b0c2`). **그 서술을 따라갔으면 다음 사람이 input·link 를 뒤지다 못 찾았다.** 남는 일반 규칙: **비차단 지적도 그대로 옮기기 전에 원시 확인을 한 번 한다**(검증자 자신이 *"검증 기록에서 원시 확인을 빼면 안 된다"* 는 자체 사례로 남겼다). 비버튼은 `.login-form input:disabled`(0.7) 하나뿐이고, `.session-menu button:disabled`(0.55·**`cursor: wait`**)는 *진행 중* 을 뜻하는 **의도된 예외**라 대상이 아니다. **★ 닫는 것은 오너 결정을 요구한다** — 네 값을 하나로 모으면 **네 표면의 비활성 버튼 농도가 실제로 바뀐다**(D-10.5-b 와 같은 성격이고, 값 하나를 고르는 것은 디자인 판단이다). **트리거 = Phase 10 끝 육안**(그때 네 농도를 한 화면씩 보고 정하는 것이 가장 싸다) 또는 **새 비활성 버튼 표면이 생기는 날**.
@@ -301,9 +305,15 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 
 ## Next Tasks
 
-> **★ 2026-08-13 마감 메모 — 내일 여기서 시작한다.**
+> **★ 2026-08-14 마감 메모 — 내일 여기서 시작한다.**
 >
-> **오늘 한 것**: 부채 **②**(`typeScale` 이관 목록의 M5 한계, `f022088`) → 부채 **①**(기본 버튼 겉모습 다섯 곳 분산, `db9f9c0`). **③(T1)은 오너 결정으로 육안까지 유예**했다. 상세는 [work_log](docs/daily_logs/2026-08-13/work_log.md).
+> **오늘 한 것**: 오너가 **Phase 10 육안보다 D-10.5-d 배선을 먼저** 하기로 방향을 바꿨다. 배포 서버 외부화 **축 ①(env 로 갈아끼우기)을 닫았다**(`b6b1269` → 정정 `3ff94a3`). **프로덕션 코드 0줄 · compose 두 파일 + 가드 하나.** 상세는 [work_log](docs/daily_logs/2026-08-14/work_log.md).
+>
+> **★ 다음 사람이 가장 먼저 알아야 하는 것 — compose 의 `${}` 표기는 코드가 그 변수를 읽는 방식을 따라간다.** 오늘 이 실수를 **한 번 하고** 기록을 쓰다 잡았다: 백엔드 3종은 `if not os.environ.get(...)` 라 **dash `${VAR-x}`**(빈 값이 빈 채로 통과해야 fallback 에 닿는다), gateway `LLAMA_BASE_URL` 은 `os.environ.get(name, DEFAULT)` 라 **콜론 `${VAR:-x}`**(dash 면 빈 값이 깨진 base URL 로 흘러간다). **이 파일의 다른 40여 항목이 전부 콜론이라 "표기 통일" 이 자연스러워 보이는데 그 통일이 곧 회귀다** — 양방향 다 셀이 문다(M2·M6).
+>
+> **★ 미검증 구간이 다시 생겼다 — 오늘 2커밋(`b6b1269`·`3ff94a3`) + 기록 커밋.** 어제까지 0 이었다. 검증자가 볼 만한 축: ① dash/콜론 판단이 **각 변수의 코드 읽기와 실제로 짝인지**(내가 한 번 틀린 자리다) ② `CHROMA_PORT` 를 남긴 판단 ③ ② 축(profiles)이 정말 별개 슬라이스인지.
+>
+> **★ 트리거 정정 — 어제 이 부채 전체를 "API 받은 뒤" 로 유예한 것은 과했다.** API 가 실제로 필요한 것은 **③(외부 API 로 물리기)뿐**이고, ①은 오늘 API 없이 끝냈으며 **②(profiles 로 선택 기동)도 compose 작업이라 지금 할 수 있다.** 유예를 통째로 걸면 지금 할 수 있는 것까지 잠긴다.
 >
 > **★ 미검증 구간이 0 이다**(2026-08-13 기준). 오늘 2커밋(`f022088`·`db9f9c0`)은 `fd32d1e` 합격, 어제 잔여분은 `661300c` 합격(`444ab1b`·`f724fce` 차트 H1/H2 보강 · **`2c6eb9e` 정문 버튼 정정**). 기록 셋: [`debt_buttons_typescale_m5.md`](docs/verifications/2026-08-13/debt_buttons_typescale_m5.md) · [`chart_h1_h2_hardening.md`](docs/verifications/2026-08-13/chart_h1_h2_hardening.md) · [`login_button_false_finding_correction.md`](docs/verifications/2026-08-13/login_button_false_finding_correction.md). 전부 Blocking 0.
 >
@@ -317,7 +327,7 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 >
 > **★ 오늘 배운 것 — 어제의 규칙이 오늘 실제로 한 번 잡았다.** `cd` 가 실패해 `&&` 체인이 끊겼고, 복원 안 된 뮤테이션 위에 다음 뮤테이션이 얹혔다. **출력은 *"1 failed | 3 passed"* 로 깨끗해 보였다** — 두 뮤테이션이 같은 셀을 물어 단독 측정과 구별되지 않았기 때문이다. **뮤테이션과 뮤테이션 *사이*에도 `git status --short` 를 찍는다**(§6 사전 게이트는 "첫 뮤테이션 전"만 말한다). 그리고 **`cd` 를 복원 명령과 `&&` 로 묶지 않는다.**
 >
-> **오너 결정 대기 잔여**: dogfood 착수(GATE-1) · H2(API 문서 제품명 — **착수 전 오너에게 자세히 설명할 것**).
+> **오너 결정 대기 잔여**: **배포 외부화 축 ②(profiles 로 선택 기동 — API 없이 지금 가능)** · dogfood 착수(GATE-1) · H2(API 문서 제품명 — **착수 전 오너에게 자세히 설명할 것**).
 >
 > **확인용으로 남아 있는 것(정리 대상)**: 계정 `timeline_demo`/`timeline-demo-0810` 와 프로젝트 `6a795ab928e4a53aa000a824`(활동 5건). 파기하면 활동도 함께 사라진다(I1 실증 기회) 또는 계정을 비활성화한다.
 
