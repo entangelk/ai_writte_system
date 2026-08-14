@@ -62,11 +62,18 @@ services:
     #
     # ★ An explicit LLAMA_BASE_URL wins over the in-stack model (owner, 2026-08-14:
     # "모델이 있어도 API 가 있다면 API 로"). This used to be hardcoded, which made the
-    # in-stack llama beat .env unconditionally — the opposite of that rule. The dash
-    # form is deliberate: `${VAR:-default}` would send an empty value back to the
-    # default, so it could not express "external API, none configured".
+    # in-stack llama beat .env unconditionally — the opposite of that rule.
+    #
+    # ★ Colon form here, dash form for the backend trio in docker-compose.yml. The
+    # form must match how the code reads the variable: the gateway reads this with
+    # `os.environ.get("LLAMA_BASE_URL", DEFAULT)` (a default *argument*), so an empty
+    # value is NOT treated as unset — it would be passed through as an empty base URL
+    # and every call would fail. The colon form sends an empty value back to the
+    # in-stack llama, which is the sane reading of "no external API configured".
+    # The backend trio is the opposite case: those are read with `if not ...`, so
+    # empty == unset == documented fallback, and there the dash form is required.
     environment:
-      LLAMA_BASE_URL: "${LLAMA_BASE_URL-http://llama:9080}"
+      LLAMA_BASE_URL: "${LLAMA_BASE_URL:-http://llama:9080}"
       LLAMA_DEFAULT_MODEL: "${LLAMA_DEFAULT_MODEL:-google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0}"
       LLAMA_DEFAULT_THINKING: "${LLAMA_DEFAULT_THINKING:-false}"
       LLAMA_TIMEOUT_SECONDS: "${LLAMA_TIMEOUT_SECONDS:-900}"

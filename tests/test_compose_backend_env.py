@@ -188,7 +188,19 @@ class ExternalBackendEnvTest(unittest.TestCase):
 
 
 class InStackLlamaOverrideTest(unittest.TestCase):
-    """`docker-compose.llama.yml` — 모델이 있어도 API 가 있으면 API 가 이긴다."""
+    """`docker-compose.llama.yml` — 모델이 있어도 API 가 있으면 API 가 이긴다.
+
+    ★ 여기는 **콜론 형태**가 맞고 위 백엔드 3종은 dash 형태가 맞다. 표기는 취향이 아니라
+    **코드가 그 변수를 읽는 방식**을 따라간다:
+
+    - gateway 는 ``os.environ.get("LLAMA_BASE_URL", DEFAULT)`` — 기본값 *인자*라
+      빈 문자열이 미설정으로 취급되지 **않는다**. dash 형태로 두면 빈 값이 그대로
+      base URL 이 되어 모든 호출이 실패한다. 콜론 형태라야 빈 값이 in-stack 으로 돌아간다.
+    - 백엔드 3종은 ``if not os.environ.get(...)`` — 빈 값 == 미설정 == 문서화된 fallback.
+      거기서는 콜론 형태가 '끄기' 를 불가능하게 만든다.
+
+    즉 **같은 실수의 두 방향**이고, 어느 쪽이든 배포에서만 드러난다.
+    """
 
     def setUp(self) -> None:
         self.by_service = _env_by_service(
@@ -201,9 +213,25 @@ class InStackLlamaOverrideTest(unittest.TestCase):
         gateway = self.by_service.get("gateway", {})
         self.assertEqual(
             gateway.get("LLAMA_BASE_URL"),
-            _dash_form("LLAMA_BASE_URL", "http://llama:9080"),
+            "${LLAMA_BASE_URL:-http://llama:9080}",
             "이 override 를 쓰는 순간 in-stack llama 가 무조건 이긴다 — "
             "오너 규칙 '모델이 있어도 API 가 있다면 API 로' 의 반대다",
+        )
+
+    def test_an_empty_value_falls_back_to_the_in_stack_model(self) -> None:
+        """over-strict — dash 형태로 '통일' 하면 빈 값이 깨진 base URL 이 된다.
+
+        gateway 의 읽기가 기본값 *인자* 라서, 빈 값은 fallback 이 아니라 ``""`` 그대로
+        전달된다. 백엔드 3종과 표기를 맞추려는 리팩터링이 정확히 이 방향이다.
+        """
+
+        gateway = self.by_service.get("gateway", {})
+        self.assertNotEqual(
+            gateway.get("LLAMA_BASE_URL"),
+            _dash_form("LLAMA_BASE_URL", "http://llama:9080"),
+            "dash 형태는 `LLAMA_BASE_URL=` 을 빈 base URL 로 흘려보낸다 — "
+            "gateway 는 `os.environ.get(name, DEFAULT)` 로 읽어 빈 값을 "
+            "미설정으로 보지 않는다",
         )
 
 
