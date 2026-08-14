@@ -111,6 +111,39 @@ OpenAI 형식(`POST /v1/embeddings`)에는 못 붙고, **리랭커는 `grep -rl 
 로 analysis-nori) · `llama`(애초에 llama.yml 에만 있어 자동으로 빠진다). `chroma` 는
 모델이 없지만 밖으로 나가면 함께 필요 없다.
 
+### Task 4 — 리랭커 결정 브리프 작성 (`plans/reranker-slice-decisions.md`)
+
+오너: *"리랭커도 모델이니까 이것도 작업해야겠는데? 리랭커쪽 어댑터는 아예 안
+되어있다는거지?"* → **확인: 어댑터가 아니라 기능 자체가 0줄이다.** `services/` ·
+`scripts/` · `tests/` · `frontend/src/` 전수에서 `rerank`·`cross-encoder`·
+`bge-reranker` **0건**. 지금 "리랭킹" 은 RRF 융합뿐이다
+([`service.py:277`](../../../services/application/app/context_search/service.py#L277)).
+
+**성격이 오늘 작업과 다르다는 것을 먼저 말했다** — 오늘은 *있는 것을 밖으로 빼는*
+일이었고 리랭커는 *없는 것을 만드는* 일이다. 그래서 "모델이니까 external 파일에
+넣자" 가 지금은 성립하지 않는다(넣을 대상이 없다).
+
+**브리프가 정하는 것은 D5 가 남긴 넷**이다(D5 자체는 뒤집지 않는다 — B+C 확정):
+① 착수 순서(임베딩 어댑터가 먼저인가) ② 조달 순서(self-host↔외부 seam)
+③ 삽입 모양(데코레이터 / Hybrid 내부 / 호출부) ④ 완료 기준(무엇을 보고 좋아졌다고
+하는가).
+
+**브리프를 쓰며 실측한 것 — 이 슬라이스의 가장 큰 자산**: 융합 자리가 정확히 둘이고
+(`HybridCanonicalMemoryRetriever` [:280](../../../services/application/app/context_search/service.py#L280) ·
+`HybridCandidateMemoryRetriever` [:496](../../../services/application/app/context_search/service.py#L496))
+**둘의 seam 이 동일하다**(`retrieve(*, project_id, query, limit)`). 이미 Protocol 로
+선언돼 있어 **데코레이터 하나가 둘 다 덮는다** — 그것이 브리프의 결정 3 추천 근거다.
+
+**★ 리랭커 env 를 아직 안 만든 이유를 브리프에 명시했다** — 아무도 읽지 않는 변수는
+그것이 붙어 있다는 착각을 만든다. 오너 지시(*"모델 업로드 되는 것들은 다 넣자"*)는
+seam 이 서는 날 `docker-compose.external.yml` 에서 실행된다.
+
+**등재 과정에서 가드가 한 번 잡았다** — 새 브리프를 `plans/README.md` 에 넣자
+`VerificationCountClaimsTest` 가 *"README.md가 전체 105개라 적었지만 실제는 106개"*
+로 실패했다. 최상위 README 2곳 + `plans/README.md` 1곳을 **106/88** 로 정렬했다.
+**그리고 HANDOFF 의 같은 수치(`89개 문서 / 73개 브리프`, 2026-08-02 값)는 가드 밖이라
+아무도 안 잡고 있었다** — 12일 만에 17건 어긋나 있었고 함께 고쳤다.
+
 ## Issues found
 
 **문제**: 같은 슬라이스 안에서 표기를 **통일하려는 충동**이 정확히 결함을 만든다.
@@ -197,8 +230,11 @@ M1·M4 는 **원래 결함의 재현**(어제까지의 상태가 정확히 그�
 
 ## Next steps
 
-- **오너 결정 대기**: ② profiles 로 선택 기동을 이어서 할지. 하면 배포 서버에서
-  torch 를 끌고 오는 embedding 이미지를 빌드·기동하지 않을 수 있다.
+- **★ 오너 결정 대기 — 리랭커 브리프**([`plans/reranker-slice-decisions.md`](../../plans/reranker-slice-decisions.md)).
+  결정 1~4 가 확정되기 전에는 코드를 쓰지 않는다. 특히 **결정 3(삽입 모양)은 잘못
+  고르면 되돌리는 비용이 크다**(Hybrid 내부를 골랐다가 데코레이터로 옮기면 두
+  클래스에서 걷어내야 한다). 구현자 추천은 **1=임베딩 어댑터 먼저 · 2=seam+외부 먼저
+  · 3=데코레이터 · 4=배선만 잠그고 품질은 dogfood 뒤**.
 - **여전히 대기**: Phase 10 끝 육안 확인(부채 ③ T1 · ④ `:disabled` 농도의 판단
   자리) · dogfood 착수(GATE-1) · H2(API 문서 제품명, 착수 전 오너 설명 필수).
 - **전수 회귀는 안 돌렸다** — 프로덕션 코드 0줄이고 compose 를 읽는 가드

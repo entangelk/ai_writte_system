@@ -6,7 +6,7 @@
 
 서비스 경계와 확정된 계약을 먼저 볼 때는 [`../system-contract-sot.md`](../system-contract-sot.md)를 정본 SoT로 사용한다. 이 인덱스는 Phase별 세부 계획과 **모든 착수 결정 브리프**를 찾는 자리다.
 
-> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(105개 중 87개)는
+> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(106개 중 88개)는
 > `*-decisions.md` 착수 결정 브리프이며, **오너 결정의 근거 기록**이다. 파일명 접두 체계는 이미 무너져
 > 있고(`00`~`07` 계열 + 접두 없는 최근 것들) 파일명만으로는 트랙을 알 수 없다 — 그래서 아래는 **접두가
 > 아니라 트랙으로** 묶었다. 디렉터리 재편은 아직 결정되지 않은 별개 사안이다(HANDOFF 추적 부채).
@@ -215,11 +215,12 @@
 | [`auth-d8-6-purge-ui-decisions.md`](auth-d8-6-purge-ui-decisions.md) | D8-6 영구 삭제 UI·2단계 시행·삭제 감사·재시도 의미 | Verified PASS(v1.7.82, c2ca946) |
 | [`auth-d8-7-infra-auth-decisions.md`](auth-d8-7-infra-auth-decisions.md) | D8-7 인프라 노출면·자격증명 | **G1=C 확정** / G2~G6 유예 |
 
-### 외부 확장 (미착수)
+### 외부 확장 (배선 완료 · 어댑터 미착수)
 
 | 문서 | 무엇 | 상태 |
 |---|---|---|
-| [`external-api-expansion-decisions.md`](external-api-expansion-decisions.md) | 외부 LLM·임베딩·뉴럴 리랭커 확장(D1~D6) | 결정됨 · 코드 미착수 |
+| [`external-api-expansion-decisions.md`](external-api-expansion-decisions.md) | **부모 브리프** — 외부 LLM·임베딩·뉴럴 리랭커 확장(D1~D6) | D1~D6 결정됨 · compose 배선 완료(2026-08-14) · 임베딩/리랭커 어댑터 미착수 |
+| [`reranker-slice-decisions.md`](reranker-slice-decisions.md) | D5 가 남긴 넷 — 착수 순서·조달 순서(self-host↔외부)·삽입 모양·완료 기준 | **오너 결정 대기** |
 
 ## 문서 지위와 우선순위
 
