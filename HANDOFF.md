@@ -96,6 +96,14 @@
 
 표준 포트(27017·8000~8003·9200·5173)를 쓰지 않는 이유는 `.env.example` 상단에 있다 — 여러 머신을 옮겨 다니는 프로젝트라 충돌하고, 임시 env 회피는 repo에 안 남아 문서에 머신-로컬 관측치가 사실처럼 적히게 된다.
 
+**★ 기동 방식은 셋이고, 공통 `docker-compose.yml` 하나에 override 를 얹어 고른다**(복제본이 아니다 — 복제하면 dev 수정이 배포에 안 따라간다):
+
+| 방식 | 명령 | 모델을 어디서 |
+|---|---|---|
+| **기본**(베타·감마) | `docker compose up -d` | 외부 LLM(`.env` 의 `LLAMA_BASE_URL`) + in-stack 임베딩·ES·chroma |
+| **in-stack 모델**(알파) | `… -f docker-compose.llama.yml up -d` | 전부 스택 안. **`LLAMA_CTX_SIZE=16384` 확인**(위 ★ 함정) |
+| **외부 API 전용**(배포 서버) | `… -f docker-compose.external.yml up -d` | **전부 밖.** 모델·플러그인을 들고 오는 셋(`embedding`·`chroma`·`elasticsearch`)이 profile 뒤로 가 **기동도 빌드도 안 된다**. 주소는 `.env` 필수 — 없으면 기동 거부 |
+
 **백엔드 테스트** — `docker compose -f docker-compose.test.yml up -d` 후 `python3 -m pytest -q`. env 불필요(기본 URI가 27020 replica set `rs-test`). 미기동이면 Mongo 테스트가 **skip**(실패 아님). 끝나면 `... down`.
 
 > **함정 — `up -d` 직후 곧바로 돌리지 말 것(2026-07-29 실측).** healthcheck는 `rs.initiate` 후 **writable PRIMARY**가 될 때까지 healthy를 보고하지 않으므로 기동에 수십 초가 걸린다. 고정 `sleep`을 주고 시작하면 **초반 모듈만 skip되고 나머지는 붙어**, 전량 실패가 아니라 **부분적으로 잘못된 기준선**이 나온다(실측: `1698 passed / 9 skipped` — 정상은 `/ 1`). 증상이 조용해서 "내 변경이 8건을 깨뜨렸나"로 오독하기 쉽다. **healthy를 기다린 뒤 시작한다**: `until [ "$(docker inspect -f '{{.State.Health.Status}}' ai_writte_system-test-mongo-1)" = healthy ]; do sleep 2; done`. 숫자가 안 맞으면 `-rs`로 skip 사유부터 본다.
@@ -159,8 +167,9 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 
 - **★ 배포 서버용 "모델 다운로드 0 · 외부 API 전용" — 축이 셋이고 ①은 닫혔다(2026-08-14).** 오너 방향: *"실제 서비스 서버는 지금 환경과 다르다. 모델을 받지 않고 **외부 API 로만** 빌드해야 하고, **모델이 로컬에 있더라도 API 가 있으면 API 로 물려야** 한다."* **★ 어제 이 항목 전체를 *"API 받은 뒤"* 로 유예했는데 그것이 과했다 — API 가 실제로 필요한 것은 ③뿐이다.**
   - **① [닫힘 2026-08-14 `b6b1269`·`3ff94a3`] env 로 갈아끼우기.** `EMBEDDING_SERVICE_URL`·`CHROMA_HOST`·`ELASTICSEARCH_URL` 이 application·worker·generation_worker 세 자리에서, `LLAMA_BASE_URL` 이 llama override 에서 env 로 정해진다. **프로덕션 코드 0줄** — 코드는 원래 준비돼 있었고(`if not os.environ.get(...)`) 막던 것이 compose 하드코딩이었다. 가드 [`tests/test_compose_backend_env.py`](tests/test_compose_backend_env.py).
-  - **★ ② [유예 · 트리거 = 배포 서버를 실제로 세우는 날] "선택 빌드/기동" 은 아직 안 된다.** env 를 비워도 컨테이너가 안 뜬다 — [`docker-compose.yml:130-135`](docker-compose.yml#L130)(application) 과 워커 둘이 `embedding`·`chroma`·`elasticsearch` 에 **`depends_on: condition: service_healthy`** 를 걸고 있다. 그리고 이 저장소에 **`profiles:` 는 0건**이다. 여는 방법은 profiles 도입 + `depends_on` 조건부화이며, **compose 작업이라 API 없이도 할 수 있다.** 이걸 해야 배포 서버에서 **torch 를 끌고 오는 `embedding` 이미지를 빌드·기동하지 않는다**(`docker compose build` 는 전 서비스를 도니 대상 지정도 함께 본다).
+  - **② [닫힘 2026-08-14] 모델을 안 받는 기동 = [`docker-compose.external.yml`](docker-compose.external.yml) override.** `docker compose -f docker-compose.yml -f docker-compose.external.yml up -d` 로 `embedding`·`chroma`·`elasticsearch` 가 profile 뒤로 가 **기동도 빌드도 안 된다**(그 셋이 모델·플러그인을 들고 오는 자리다 — torch+BGE-m3-ko · nori Dockerfile). `depends_on` 은 `!override` 로 대체돼 꺼진 것을 안 기다린다. **base 는 한 줄도 안 바뀌었다**(지문 IDENTICAL). **★ "별도 compose" 를 완전한 두 벌로 만들지 말 것** — 430줄 복제는 dev 수정이 배포에 안 따라가고 **배포에서만** 드러난다(H-2 shim drift · worker 이미지 태그 선례). override 가 정답이고 `docker-compose.llama.yml` 과 **방향만 반대인 짝**이다.
   - **★ ③ [유예 · 트리거 = 오너가 외부 API 를 준다] 외부 API 로 실제로 물리기.** 여기부터가 API 가 필요한 자리다. 아래 "검증 축" 항목들이 전부 이 축이다.
+  - **★ 어댑터가 있는 것은 LLM 하나뿐이다 — 나머지 둘을 "있다"고 착각하지 말 것**(2026-08-14 코드 실측). **LLM**: gateway 가 OpenAI 호환 `POST /v1/chat/completions` 를 부르므로 외부 API 가 **그대로 붙는다**. **임베딩**: `RemoteEmbeddingProvider`([`indexing/embedding.py:23`](services/application/app/indexing/embedding.py))가 아는 계약은 **우리 서비스의 자체 형식**(`POST /embed {"text": …}` → `{"embedding": […]}`)이라 **OpenAI 형식 임베딩 API 에는 못 붙는다** — 어댑터가 ③의 실제 내용이다. **리랭커**: `grep -rl rerank services/` = **0건**이고 2026-07-27 D5 로 결정만 됐다. **그래서 external override 에 리랭커 env 를 만들지 않았다** — 아무도 읽지 않는 변수는 그것이 붙어 있다는 착각을 만든다.
   - **★ compose 의 `${}` 표기는 취향이 아니라 코드가 그 변수를 읽는 방식을 따라간다**(2026-08-14 에 이 실수를 한 번 하고 잡았다). `if not os.environ.get(name)` 으로 읽으면 **dash 형태 `${VAR-default}`** — 빈 값이 빈 채로 통과해야 코드의 fallback 에 도달한다(백엔드 3종). `os.environ.get(name, DEFAULT)` 로 읽으면 **콜론 형태 `${VAR:-default}`** — 기본값 *인자*라 빈 값이 미설정으로 취급되지 않아서, dash 로 두면 빈 base URL 이 그대로 전달돼 전 호출이 실패한다(gateway `LLAMA_BASE_URL`, [llm_gateway/main.py:56](services/llm_gateway/app/main.py#L56)). **이 파일의 다른 40여 항목이 전부 콜론이라 "통일" 하고 싶어지는데 그 통일이 곧 회귀다** — 양방향 다 셀이 문다. **두 방향 모두 배포에서만 드러난다.**
   - **★ `CHROMA_PORT` 를 env 화하지 말 것 — 이름이 이미 쓰이고 있다.** 같은 이름이 host publish(`127.0.0.1:${CHROMA_PORT:-8523}:8000`)에서는 **호스트 포트**를, environment 에서는 **컨테이너 내부 포트**를 뜻한다. 게다가 [`.env.example:35`](.env.example) 가 `CHROMA_PORT=8523` 을 문서화하므로 **문서를 그대로 따른 사람이** 앱을 아무도 안 듣는 포트로 돌리게 된다. 외부 Chroma 는 override 파일로 붙인다.
   - **★ 가장 큰 검증 축(③) = llama.cpp 전용 3종이 조용히 죽는 것.** 생성 경로는 **`POST /v1/chat/completions`(OpenAI 호환) 하나**라([client.py:93](services/llm_gateway/app/client.py#L93)) 외부 API 가 대체로 붙는다. 그러나 `/props`([:71](services/llm_gateway/app/client.py#L71)) · `/tokenize`([:216](services/llm_gateway/app/client.py#L216)·[:253](services/llm_gateway/app/client.py#L253)) · `/apply-template`([:243](services/llm_gateway/app/client.py#L243))는 **llama.cpp 전용이고 셋 다 예외를 삼켜 `None` 을 반환한다**. 그러면 **컨텍스트 예산 가드가 서버 실측 대신 호출자 추정으로 떨어지는데, 코드 주석이 그 추정은 과소평가 방향(= 가드가 늦게 걸린다)이라고 명시한다.** 즉 **에러가 아니라 조용한 품질 저하**다 — 외부 API 로 바꾼 뒤 *"뜨긴 뜬다"* 로 끝내면 안 되고 **토큰 계수가 살아 있는지를 따로 확인**해야 한다.
@@ -294,7 +303,7 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 >
 > **★ 오늘 배운 것 — 어제의 규칙이 오늘 실제로 한 번 잡았다.** `cd` 가 실패해 `&&` 체인이 끊겼고, 복원 안 된 뮤테이션 위에 다음 뮤테이션이 얹혔다. **출력은 *"1 failed | 3 passed"* 로 깨끗해 보였다** — 두 뮤테이션이 같은 셀을 물어 단독 측정과 구별되지 않았기 때문이다. **뮤테이션과 뮤테이션 *사이*에도 `git status --short` 를 찍는다**(§6 사전 게이트는 "첫 뮤테이션 전"만 말한다). 그리고 **`cd` 를 복원 명령과 `&&` 로 묶지 않는다.**
 >
-> **오너 결정 대기 잔여**: **배포 외부화 축 ②(profiles 로 선택 기동 — API 없이 지금 가능)** · dogfood 착수(GATE-1) · H2(API 문서 제품명 — **착수 전 오너에게 자세히 설명할 것**).
+> **오너 결정 대기 잔여**: dogfood 착수(GATE-1) · H2(API 문서 제품명 — **착수 전 오너에게 자세히 설명할 것**).
 >
 > **확인용으로 남아 있는 것(정리 대상)**: 계정 `timeline_demo`/`timeline-demo-0810` 와 프로젝트 `6a795ab928e4a53aa000a824`(활동 5건). 파기하면 활동도 함께 사라진다(I1 실증 기회) 또는 계정을 비활성화한다.
 

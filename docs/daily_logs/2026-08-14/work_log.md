@@ -76,6 +76,41 @@ base_url = os.environ.get("LLAMA_BASE_URL", DEFAULT_LLAMA_BASE_URL)
 **실측**: `.env` 의 외부 API 가 여전히 이김(`192.168.1.22:9080`) · `LLAMA_BASE_URL=`
 → in-stack 복귀(`http://llama:9080`).
 
+### Task 3 — 배포 서버용 외부 API 전용 override (`docker-compose.external.yml`)
+
+**오너 제안이 내 제안보다 나았다.** Task 1 마무리에서 나는 축 ②(선택 기동)를
+*"base 에 profiles 도입 + `depends_on` 조건부화가 필요한 별도 슬라이스"* 로 적었다.
+오너가 *"별도 내부용 컴포저와 외부 API 를 사용하는 컴포저로 나누자"* 고 했고,
+**override 로 하면 base 를 한 줄도 안 건드리고 ①②가 한 파일에서 끝난다.**
+
+**"별도" 의 두 가지 뜻 중 하나는 위험하다.** 완전한 두 벌(430줄 복제)은 이 저장소가
+두 번 데인 형태다 — H-2 shim drift(*"배포 앱을 위해 조립 코드를 따로 만들면 그 순간
+아무도 구동하지 않는 두 번째 배선이 생긴다"*)와 worker 이미지 태그(주석은 공유한다고
+적었는데 설정이 아니라서 **worker 가 15일 뒤처진 채 `PROJECT_PURGED` drain 없이**
+돌고 있었다). 그래서 [`docker-compose.llama.yml`](../../../docker-compose.llama.yml)
+과 같은 **override** 로 갔다. 방향만 반대인 짝이다.
+
+| 확인(compose v5.1.2) | 결과 |
+|---|---|
+| 주소 없이 실행 | **rc=1**, 한국어 사유 메시지 |
+| 기동 대상 | `admin application frontend gateway generation_worker mongo worker` — 백엔드 3종 빠짐 |
+| `depends_on` | application→[gateway,mongo] · worker→[mongo] · generation_worker→[gateway,mongo] |
+| 빌드 대상 | `app`·`gateway`·`frontend` — **torch 이미지 빠짐** |
+| base 단독 · llama override | **둘 다 지문 IDENTICAL** — 순수 추가 |
+
+**★ 오너 전제를 하나 정정했다.** *"우리가 외부 API 어댑터 만들었잖아"* 는 **LLM 만
+참**이다. 코드 확인 결과: 임베딩 `RemoteEmbeddingProvider`
+([`indexing/embedding.py:23`](../../../services/application/app/indexing/embedding.py))
+가 아는 계약은 **우리 임베딩 서비스의 자체 형식**(`POST /embed {"text": …}`)이라
+OpenAI 형식(`POST /v1/embeddings`)에는 못 붙고, **리랭커는 `grep -rl rerank services/`
+가 0건**이다(2026-07-27 D5 로 결정만 됐다). 그래서 **리랭커 env 를 만들지 않았다** —
+아무도 읽지 않는 변수를 미리 두면 그것이 붙어 있다는 착각을 만든다.
+
+**모델을 들고 오는 자리는 셋뿐**이라는 것도 확인했다: `embedding`(torch +
+`EMBEDDING_MODEL_NAME`, 기본 `dragonkue/BGE-m3-ko`) · `elasticsearch`(자체 Dockerfile
+로 analysis-nori) · `llama`(애초에 llama.yml 에만 있어 자동으로 빠진다). `chroma` 는
+모델이 없지만 밖으로 나가면 함께 필요 없다.
+
 ## Issues found
 
 **문제**: 같은 슬라이스 안에서 표기를 **통일하려는 충동**이 정확히 결함을 만든다.
@@ -106,6 +141,15 @@ os.environ.get(name)` 이면 dash. 두 방향 다 배포에서만 드러난다.
 | M4 | `${LLAMA_BASE_URL:-…}` → `"http://llama:9080"` (하드코딩 복귀) | `docker-compose.llama.yml:69` | `test_an_explicit_base_url_wins_over_the_in_stack_model` |
 | M5 | `CHROMA_PORT: "8000"` → `${CHROMA_PORT-8000}` (이름 충돌 도입) | `docker-compose.yml:114` | `test_chroma_port_stays_hardcoded_because_the_name_is_taken` |
 | M6 | `${LLAMA_BASE_URL:-…}` → `${LLAMA_BASE_URL-…}` (표기 '통일') | `docker-compose.llama.yml:69` | `test_an_empty_value_falls_back_to_the_in_stack_model` · `test_an_explicit_base_url_wins_over_the_in_stack_model` |
+| M7 | `${EMBEDDING_SERVICE_URL:?…}` → `${…:-http://embedding:8002}` (필수 → 기본값) | `docker-compose.external.yml` 3자리 | `test_external_addresses_are_required_not_defaulted` |
+| M8 | `embedding` 의 `profiles:` 줄 삭제 | `docker-compose.external.yml` | `test_model_carrying_services_are_behind_a_profile` |
+| M9 | `depends_on` 에 `embedding: condition: service_healthy` 재도입 | `docker-compose.external.yml`(application) | `test_nothing_waits_on_the_services_that_are_off` |
+| M10 | `${EXTERNAL_CHROMA_PORT:-8000}` → `${CHROMA_PORT:-8000}` (이름 재사용) | `docker-compose.external.yml` 3자리 | `test_the_internal_chroma_port_does_not_reuse_the_host_port_name` |
+| M11 | override 에 `application.ports: ["9999:8000"]` 추가 | `docker-compose.external.yml` | `test_the_external_override_publishes_no_new_ports` |
+
+M7~M11 은 **각각 정확히 한 셀만** 물었다(M1~M3 이 두 셀씩 문 것과 대비 — 그쪽은 전수
+셀과 성질 셀이 겹치는 자리다). M11 은 *가드가 파일을 이름으로 읽는* 구조 자체의 사각
+지대를 재는 것이라, 새 compose 파일을 더하는 사람이 이 셀을 함께 늘려야 한다.
 
 M1·M4 는 **원래 결함의 재현**(어제까지의 상태가 정확히 그것이다). M2·M6 은 **같은
 실수의 두 방향**이고, M3·M5 는 over-strict 방향이다.
@@ -132,6 +176,24 @@ M1·M4 는 **원래 결함의 재현**(어제까지의 상태가 정확히 그�
   필요한 것은 ③뿐**이다.
 - *근거*: ①은 오늘 실제로 끝냈다(코드 0줄·API 0회 호출). ②도 compose 작업이다.
 - *따라서*: HANDOFF 부채 항목의 트리거를 축별로 쪼개 다시 적었다.
+
+**D-10.5-g. 내부용 / 외부 API용을 나누되, "별도" 는 override 다.**
+
+- *결정*: 오너 *"별도 내부용 컴포저와 외부 API 를 사용하는 컴포저로 나눠서 하는 거는?"*
+  → [`docker-compose.external.yml`](../../../docker-compose.external.yml). 주소는 전부
+  `.env`(오너: *"env 로 채워넣는 걸로 하자"*).
+- *근거*: override 로 하면 **base 무변**이고 ①②가 한 파일에서 끝난다(실측). 그리고
+  `docker-compose.llama.yml` 이라는 **선례가 이미 같은 모양**이라 새 개념이 아니다 —
+  머신별로 override 를 고르는 구조가 된다.
+- *트레이드오프*: **완전한 두 벌은 기각**했다. 430줄 복제는 dev 쪽 수정이 배포 쪽에
+  안 따라가고 **그 차이가 배포에서만 드러난다** — 이 저장소의 H-2·worker 태그 선례가
+  정확히 그 형태다. 대신 override 는 base 를 읽어야 전체를 이해할 수 있다는 비용이
+  있는데, 파일 머리말이 그 지도를 대신한다.
+- *주소를 필수로 한 것*: `:?` 라 값이 없으면 기동을 거부한다. default 를 주면 배포
+  서버가 **뜨지도 않는 in-stack 서비스**를 조용히 가리키고 첫 검색에서야 드러난다.
+  "백엔드를 끄고 싶다" 는 이 파일이 아니라 base + 빈 값(축 ①)으로 표현한다.
+- *열어 둔 문*: 리랭커가 붙는 날 이 파일에 자리가 생긴다. 지금은 **변수도 만들지
+  않았다** — 오너가 *"리랭크…는 있는지 모르겠다"* 고 한 그대로 **아직 없다**.
 
 ## Next steps
 
