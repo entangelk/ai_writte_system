@@ -23,7 +23,14 @@
 #
 # ★ `llama` 는 여기 없다 — 애초에 `docker-compose.llama.yml` 에만 있는 서비스라
 # 이 override 를 쓰면 자동으로 없다. gateway 는 **끄지 않는다**: 모델을 들지 않고
-# 외부 LLM API 앞에 서는 우리 프록시이며, 주소는 base 의 `LLAMA_BASE_URL` 로 정한다.
+# 외부 LLM API 앞에 서는 우리 프록시다. 다만 **주소는 여기서 필수로 잡는다**(아래).
+#
+# ★ 오너 규칙(2026-08-16): *"① env 에 외부 API 가 있으면 그거 사용 ② 없다면 내부
+# LLM 모델 다운로드 시도 ③ 다운로드가 에러나거나 시도되지 못했다면 당연히 실패."*
+# 알파(llama override)에서는 ①②③이 이미 그대로 돈다 — 주소를 주면 외부가 이기고,
+# 안 주면 in-stack llama 가 받고, 못 받으면 healthcheck 실패로 gateway 가 안 뜬다.
+# **이 파일에서는 ②가 구조적으로 불가능하다**(모델을 하나도 받지 않는 것이 목적이다).
+# 그러므로 주소가 없으면 ③으로 간다 — base 의 콜론 폴백을 여기서 `:?` 로 덮는다.
 #
 # ── 주소는 전부 .env 로 준다 ────────────────────────────────────────────────
 # 값이 없으면 **기동을 거부한다**(`:?`). 조용히 in-stack 기본값으로 떨어지면 뜨지도
@@ -95,6 +102,19 @@ services:
         condition: service_healthy
       gateway:
         condition: service_healthy
+
+  gateway:
+    environment:
+      # ★ base 는 `${LLAMA_BASE_URL:-http://host.docker.internal:9080}` 라 미설정이면
+      # **그 서버 자신의 9080** 을 가리킨다. 배포 서버에는 거기 아무것도 없고
+      # (llama 서비스가 이 구성에 없다) 폴백할 in-stack 모델도 없으므로, 조용히
+      # 떨어지면 스택은 healthy 인데 **생성만 전부 실패**한다 — 이 파일이 배격한
+      # 바로 그 실패 형태다. 그래서 여기서만 필수로 덮는다.
+      #
+      # 호스트 llama 를 쓰고 싶으면 선택지가 사라진 것이 아니라 **명시하면 된다**:
+      #   LLAMA_BASE_URL=http://host.docker.internal:9080
+      # (base 의 `extra_hosts` 가 그 이름을 계속 풀어 준다.)
+      LLAMA_BASE_URL: "${LLAMA_BASE_URL:?외부 LLM API 주소가 필요하다 (OpenAI 호환 /v1/chat/completions)}"
 
   # 모델·플러그인을 들고 오는 셋. profile 뒤에 두면 기본 기동에서도 `build` 에서도
   # 빠진다(실측). 로컬로 되살리려면 `--profile local-models`.

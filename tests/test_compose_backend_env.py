@@ -273,6 +273,53 @@ class ExternalOverrideTest(unittest.TestCase):
                         "in-stack 기본값으로 조용히 떨어진다",
                     )
 
+    def test_the_llm_address_is_required_because_nothing_can_fall_back(self) -> None:
+        """★ 배포 서버에는 폴백할 모델이 없다 — 그래서 주소가 없으면 기동을 거부한다.
+
+        오너 규칙(2026-08-16): *"① env 에 외부 API 가 있으면 그거 사용 ② 없다면 내부
+        LLM 모델 다운로드 시도 ③ 다운로드가 에러나거나 시도되지 못했다면 당연히 실패."*
+        `docker-compose.llama.yml` 에서는 ①②③이 이미 그대로 돈다(콜론 폴백 → in-stack
+        llama → healthcheck 실패 시 gateway 가 `depends_on` 에 걸려 안 뜬다). **이
+        override 는 모델을 하나도 받지 않는 것이 목적이라 ②가 구조적으로 불가능**하고,
+        따라서 남는 것은 ③뿐이다.
+
+        안 잠그면: base 의 `${LLAMA_BASE_URL:-http://host.docker.internal:9080}` 이
+        살아 있어 배포 서버가 **자기 자신의 9080**(아무것도 없는 자리)을 조용히 가리킨다.
+        스택은 healthy 로 뜨고 생성만 전부 실패하므로 원인이 주소 누락으로 안 보인다.
+        """
+
+        gateway = self.by_service.get("gateway", {})
+        self.assertIn(
+            "${LLAMA_BASE_URL:?",
+            gateway.get("LLAMA_BASE_URL", ""),
+            "배포 override 가 LLM 주소를 필수로 잡지 않는다 — 빠뜨리면 스택은 뜨는데 "
+            "`host.docker.internal:9080`(그 서버에 없는 자리)을 조용히 가리키고 "
+            "생성만 전부 실패한다. `.env.example` 이 배격한 그 실패 형태다",
+        )
+
+    def test_the_base_file_still_falls_back_so_dev_machines_keep_booting(self) -> None:
+        """over-strict — 이 필수화를 base 에까지 '통일' 하면 개발 머신이 안 뜬다.
+
+        같은 변수가 **파일마다 다른 계약**을 갖는 자리다. 배포(이 override)는 폴백할
+        모델이 없어서 필수이고, base 는 호스트 llama·외부 LAN 서버로 폴백하는 것이
+        옳아서 콜론 형태다(베타·감마가 그 경로로 돈다). 한쪽 규칙을 다른 쪽에 복사하는
+        것이 이 슬라이스에서 가장 자연스러워 보이는 과잉 교정이다.
+
+        ★ 이 단정은 base `docker-compose.yml:202` 의 표기를 잠그는 **첫 셀**이기도 하다
+        (2026-08-15 검증 B1 — 종전에는 그 자리를 dash 로 바꿔도 무는 셀이 0건이었다).
+        다만 잠그는 방식이 '이 두 파일' 이라 세 번째 compose 파일이 생기면 따라가지
+        않는다 — 그 일반화는 여전히 열린 항목이다.
+        """
+
+        base = (_REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            '"${LLAMA_BASE_URL:-http://host.docker.internal:9080}"',
+            base,
+            "base 의 LLAMA_BASE_URL 이 콜론 폴백을 잃었다. `:?` 로 필수화하면 배포 서버 "
+            "규칙을 개발 머신에 강요하는 것이고, dash 로 바꾸면 빈 값이 깨진 base URL 로 "
+            "흘러간다(gateway 는 `os.environ.get(name, DEFAULT)` 로 읽는다)",
+        )
+
     def test_model_carrying_services_are_behind_a_profile(self) -> None:
         """profile 뒤에 있어야 기동에서도 `build` 에서도 빠진다(2026-08-14 실측)."""
 

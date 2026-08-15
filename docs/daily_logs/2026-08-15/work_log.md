@@ -208,6 +208,46 @@ tests 0건) · 어제 예상값 +6셀/+30의 축 ① 귀속(테스트 구조 유
 공백 확인, 복원은 저장소 루트 절대경로(cwd 함정). 이 기록으로 검증 기록은 243 → **244건** —
 README 2곳·인덱스 판정 분포를 함께 갱신했다.
 
+---
+
+## D-2026-08-16-a. B2 는 선택지가 아니라 **일반 규칙**으로 닫혔다 (오너)
+
+- *오너 문언*: *"1. env에 외부 API가 있으면 그거 사용, 2. 그게 없다면 내부 LLM 모델 다운로드
+  시도, 3. 모델 다운로드가 에러나 혹은 시도되지 못했다면 당연히 빌드 실패."*
+- *★ 오너 질문이 짚은 것*: *"LLM 서버가 없다는 건 빌드할 때 선택하지 못했다는 것?"* — **반은
+  맞다.** in-stack LLM 여부는 빌드 옵션이 아니라 **어떤 override 를 얹느냐**로 갈리고,
+  모델은 빌드가 아니라 **첫 기동 때** 받는다(`llama` 는 pull 이미지이며 `-hf` 가 런타임
+  다운로드다). 그래서 3번의 실패 지점은 `build` 가 아니라 **기동**이다.
+- *실측한 것 — 규칙 ①②③은 알파에서 이미 돌고 있었다*: `llama.yml` 이
+  `${LLAMA_BASE_URL:-http://llama:9080}` 라 ① env 우선 · ② 없으면 in-stack llama 가 받고 ·
+  ③ 못 받으면 healthcheck 실패 → gateway 가 `depends_on: service_healthy` 에 걸려 안 뜬다.
+- *결함이 있던 자리는 배포 override 하나*: 그 구성에는 llama 서비스가 **없어서 ②가 구조적으로
+  불가능**한데, base 의 콜론 폴백이 살아 있어 ③ 대신 **자기 서버의 9080**(아무것도 없는 자리)을
+  조용히 가리켰다. 규칙을 그대로 적용하면 **③이 강제**되므로 B2 는 (a)로 결정된다 —
+  선택지를 물을 일이 아니었다.
+- *시행*: [`docker-compose.external.yml`](../../../docker-compose.external.yml) gateway 에
+  `LLAMA_BASE_URL: "${LLAMA_BASE_URL:?외부 LLM API 주소가 필요하다 (OpenAI 호환 /v1/chat/completions)}"`.
+  **base·llama override 는 한 줄도 안 건드렸다.**
+- *실측(전후)*:
+
+  | 확인 | 결과 |
+  |---|---|
+  | 배포 override · 주소 없음 | **rc=1** + 한국어 사유(`required variable LLAMA_BASE_URL is missing a value: 외부 LLM API 주소가 필요하다 …`) |
+  | 배포 override · 넷 다 지정 | **rc=0** |
+  | 배포 override · 호스트 llama 명시 | `LLAMA_BASE_URL: http://host.docker.internal:9080` — **여전히 쓸 수 있다**(감사 F2 가 잡은 "선택지 배제" 서술이 과대였음의 실측) |
+  | base 단독 · llama override | 둘 다 **rc=0**, 알파 주소 `http://llama:9080` 무변 |
+
+- *가드 2셀(양방향)*: `test_the_llm_address_is_required_because_nothing_can_fall_back`(under-strict —
+  필수화를 되돌리면 실패) · `test_the_base_file_still_falls_back_so_dev_machines_keep_booting`
+  (over-strict — 이 필수화를 base 에 '통일' 하면 개발 머신이 안 뜬다).
+- *★ 부수 효과 — B1 이 함께 닫혔다*: over-strict 셀이 base `docker-compose.yml:202` 의 콜론
+  형태를 단정하므로, 검증 B1 이 지적한 *"그 자리를 잠그는 셀 0건"* 이 해소된다. **남는 한계**:
+  잠그는 방식이 "이 두 파일" 이라 **세 번째 compose 파일에는 따라가지 않는다**(원 제안이던
+  `_COLON_REQUIRED` 일반화는 미착수).
+- *F1 관련*: 오너 지시는 *"장부만 고쳐 … 그냥 지나친 거는 나중에 잡던지"* 였으나, 그 시점에
+  **이미 `7326d9e` 가 추기 검증으로 닫아 둔 상태**였다(6352121·3b71eac 둘 다 Blocking 0).
+  장부가 이미 사실과 맞아 **추가 조치 없음.**
+
 ### 감사 반영 — 지적 다섯을 전부 처리했다 (오너: *"검증기록 확인해서 보강할 부분 있으면 보강해줘"*)
 
 **지적을 그대로 옮기지 않고 전부 1차 자료로 재확인한 뒤 반영했다**(다른 세션의 보고도
