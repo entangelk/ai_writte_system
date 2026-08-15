@@ -99,11 +99,15 @@
 
 **★ 기동 방식은 셋이고, 공통 `docker-compose.yml` 하나에 override 를 얹어 고른다**(복제본이 아니다 — 복제하면 dev 수정이 배포에 안 따라간다):
 
-| 방식 | 명령 | 모델을 어디서 |
-|---|---|---|
-| **기본**(베타·감마) | `docker compose up -d` | 외부 LLM(`.env` 의 `LLAMA_BASE_URL`) + in-stack 임베딩·ES·chroma |
-| **in-stack 모델**(알파) | `… -f docker-compose.llama.yml up -d` | 전부 스택 안. **`LLAMA_CTX_SIZE=16384` 확인**(위 ★ 함정) |
-| **외부 API 전용**(배포 서버) | `… -f docker-compose.external.yml up -d` | **전부 밖.** 모델·플러그인을 들고 오는 셋(`embedding`·`chroma`·`elasticsearch`)이 profile 뒤로 가 **기동도 빌드도 안 된다**. 주소는 `.env` 필수 — 없으면 기동 거부 |
+| 방식 | 명령 | 모델을 어디서 | `LLAMA_BASE_URL` 을 안 주면 |
+|---|---|---|---|
+| **기본**(베타·감마) | `docker compose up -d` | 외부 LLM(`.env` 의 `LLAMA_BASE_URL`) + in-stack 임베딩·ES·chroma | `host.docker.internal:9080` — **내 호스트에서 도는 llama** 로 폴백 |
+| **in-stack 모델**(알파) | `… -f docker-compose.llama.yml up -d` | 전부 스택 안. **`LLAMA_CTX_SIZE=16384` 확인**(위 ★ 함정) | `llama:9080` — 스택 안 llama 로 폴백 |
+| **외부 API 전용**(배포 서버) | `… -f docker-compose.external.yml up -d` | **전부 밖.** 모델·플러그인을 들고 오는 셋(`embedding`·`chroma`·`elasticsearch`)이 profile 뒤로 가 **기동도 빌드도 안 된다** | **기동 거부**(`:?`) — 폴백할 모델이 이 구성에 없다. 주소 넷 다 `.env` 필수 |
+
+**★ LLM 을 어디서 얻는지는 빌드 옵션이 아니라 *어느 override 를 얹느냐* 다 — 그리고 모델은 빌드가 아니라 첫 기동에 받는다.**(2026-08-16 오너 질문 *"LLM 서버가 없다는 건 빌드할 때 선택하지 못했다는 것?"* 에 대한 정리. 다시 묻지 않도록 여기 둔다.) `llama` 는 우리가 빌드하는 이미지가 아니라 **받아오는 이미지**(`ghcr.io/ggml-org/llama.cpp:server-cuda`)이고, GGUF 는 `-hf` 인자로 **컨테이너가 뜨면서** 볼륨에 받는다. 그래서 "모델을 못 받아서 실패" 는 `build` 가 아니라 **기동** 에서 난다(llama healthcheck 실패 → gateway 가 `depends_on: service_healthy` 에 걸려 안 뜬다).
+
+**★ 오너 규칙(2026-08-16) — 이 표가 그 규칙의 시행이다**: *"① env 에 외부 API 가 있으면 그거 사용 ② 없다면 내부 LLM 모델 다운로드 시도 ③ 다운로드가 에러나거나 시도되지 못했다면 당연히 실패."* 알파는 ①②③이 그대로 돌고, 기본 방식은 ②의 "내부" 가 **호스트의 llama** 다. **배포 방식은 ②가 구조적으로 불가능하므로**(모델 0이 그 파일의 목적) **③이 강제된다** — 그것이 세 번째 행의 `:?` 다. 종전에는 이 자리만 ③으로 안 가고 base 의 폴백을 물려받아, 배포 서버가 **자기 자신의 9080**(아무것도 없는 자리)을 조용히 가리켰다(2026-08-15 검증 B2 → 2026-08-16 시행 `cd1d82d`).
 
 **백엔드 테스트** — `docker compose -f docker-compose.test.yml up -d` 후 `python3 -m pytest -q`. env 불필요(기본 URI가 27020 replica set `rs-test`). 미기동이면 Mongo 테스트가 **skip**(실패 아님). 끝나면 `... down`.
 
@@ -169,7 +173,7 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 - **★ 배포 서버용 "모델 다운로드 0 · 외부 API 전용" — 축이 셋이고 ①은 닫혔다(2026-08-14).** 오너 방향: *"실제 서비스 서버는 지금 환경과 다르다. 모델을 받지 않고 **외부 API 로만** 빌드해야 하고, **모델이 로컬에 있더라도 API 가 있으면 API 로 물려야** 한다."* **★ 어제 이 항목 전체를 *"API 받은 뒤"* 로 유예했는데 그것이 과했다 — API 가 실제로 필요한 것은 ③뿐이다.**
   - **① [닫힘 2026-08-14 `b6b1269`·`3ff94a3`] env 로 갈아끼우기.** `EMBEDDING_SERVICE_URL`·`CHROMA_HOST`·`ELASTICSEARCH_URL` 이 application·worker·generation_worker 세 자리에서, `LLAMA_BASE_URL` 이 llama override 에서 env 로 정해진다. **프로덕션 코드 0줄** — 코드는 원래 준비돼 있었고(`if not os.environ.get(...)`) 막던 것이 compose 하드코딩이었다. 가드 [`tests/test_compose_backend_env.py`](tests/test_compose_backend_env.py).
   - **② [닫힘 2026-08-14] 모델을 안 받는 기동 = [`docker-compose.external.yml`](docker-compose.external.yml) override.** `docker compose -f docker-compose.yml -f docker-compose.external.yml up -d` 로 `embedding`·`chroma`·`elasticsearch` 가 profile 뒤로 가 **기동도 빌드도 안 된다**(그 셋이 모델·플러그인을 들고 오는 자리다 — torch+BGE-m3-ko · nori Dockerfile). `depends_on` 은 `!override` 로 대체돼 꺼진 것을 안 기다린다. **base 는 한 줄도 안 바뀌었다**(지문 IDENTICAL). **★ "별도 compose" 를 완전한 두 벌로 만들지 말 것** — 430줄 복제는 dev 수정이 배포에 안 따라가고 **배포에서만** 드러난다(H-2 shim drift · worker 이미지 태그 선례). override 가 정답이고 `docker-compose.llama.yml` 과 **방향만 반대인 짝**이다.
-  - **★ [검증이 연 것, 2026-08-15 · 미해소] B1 = base [`docker-compose.yml:202`](docker-compose.yml#L202) 의 `LLAMA_BASE_URL` 표기를 잠그는 셀이 0건이다.** `InStackLlamaOverrideTest` 는 `llama.yml` 만 읽고 `ExternalBackendEnvTest` 는 base 를 읽되 `_EXTERNALIZABLE`(백엔드 3종)만 순회한다 — 이 변수는 어느 목록에도 없다. **실증: 문자 그대로 같은 diff 가 `llama.yml` 에서 2셀, base 에서 0셀**(compose 가드 27 passed 전원 green). **닫는 법**: 반대 방향 목록 `_COLON_REQUIRED = {"LLAMA_BASE_URL": …}` 을 두어 **두 파일에서 함께** 단정한다(세 번째 파일이 생겨도 규칙이 따라간다). **★ 일반 규칙 — 계약이 변수에 걸리면 그 변수를 선언하는 자리 전부를 잠근다.**
+  - **★ [닫힘 2026-08-16 `cd1d82d`] B1·B2 — 같은 변수의 두 결함이 한 슬라이스로 닫혔다.** B2(배포에서 주소 미필수)를 오너 규칙대로 `:?` 로 시행하면서, 그 **over-strict 가드**(이 필수화를 base 에 '통일' 하면 개발 머신이 안 뜬다)가 base [`docker-compose.yml:202`](docker-compose.yml#L202) 의 콜론 형태를 단정하게 되어 **B1(그 자리를 잠그는 셀 0건)도 함께 닫혔다.** 실증: 종전 **0셀**이던 base dash 화 뮤테이션이 이제 **1셀**을 문다. **★ 남는 한계 하나 — 잠그는 방식이 "이 두 파일" 이라 세 번째 compose 파일에는 안 따라간다**(원 제안이던 `_COLON_REQUIRED` 목록 일반화는 미착수). **새 override 를 더하는 사람이 그때 함께 본다.** **★ 일반 규칙 — 계약이 변수에 걸리면 그 변수를 선언하는 자리 전부를 잠근다.**
   - **★ ③ [유예 · 트리거 = 오너가 외부 API 를 준다] 외부 API 로 실제로 물리기.** 여기부터가 API 가 필요한 자리다. 아래 "검증 축" 항목들이 전부 이 축이다.
   - **★ 어댑터가 있는 것은 LLM 하나뿐이다 — 나머지 둘을 "있다"고 착각하지 말 것**(2026-08-14 코드 실측). **LLM**: gateway 가 OpenAI 호환 `POST /v1/chat/completions` 를 부르므로 외부 API 가 **그대로 붙는다**. **임베딩**: `RemoteEmbeddingProvider`([`indexing/embedding.py:23`](services/application/app/indexing/embedding.py))가 아는 계약은 **우리 서비스의 자체 형식**(`POST /embed {"text": …}` → `{"embedding": […]}`)이라 **OpenAI 형식 임베딩 API 에는 못 붙는다** — 어댑터가 ③의 실제 내용이다. **리랭커**: `grep -rl rerank services/` = **0건**이고 2026-07-27 D5 로 결정만 됐다. **그래서 external override 에 리랭커 env 를 만들지 않았다** — 아무도 읽지 않는 변수는 그것이 붙어 있다는 착각을 만든다. **★ 리랭커는 이제 브리프가 있다**([`plans/reranker-slice-decisions.md`](docs/plans/reranker-slice-decisions.md), 2026-08-14) — D5 가 남긴 넷(착수 순서·조달 순서·삽입 모양·완료 기준)을 정하며 **오너 결정 대기**다. 브리프가 실측한 자산 하나: 융합 자리가 둘인데 **둘의 seam 이 동일해**(`retrieve(*, project_id, query, limit)`) 데코레이터 하나가 둘 다 덮는다.
   - **★ compose 의 `${}` 표기는 취향이 아니라 코드가 그 변수를 읽는 방식을 따라간다**(2026-08-14 에 이 실수를 한 번 하고 잡았다). `if not os.environ.get(name)` 으로 읽으면 **dash 형태 `${VAR-default}`** — 빈 값이 빈 채로 통과해야 코드의 fallback 에 도달한다(백엔드 3종). `os.environ.get(name, DEFAULT)` 로 읽으면 **콜론 형태 `${VAR:-default}`** — 기본값 *인자*라 빈 값이 미설정으로 취급되지 않아서, dash 로 두면 빈 base URL 이 그대로 전달돼 전 호출이 실패한다(gateway `LLAMA_BASE_URL`, [llm_gateway/main.py:56](services/llm_gateway/app/main.py#L56)). **이 파일의 다른 40여 항목이 전부 콜론이라 "통일" 하고 싶어지는데 그 통일이 곧 회귀다** — 양방향 다 셀이 문다. **두 방향 모두 배포에서만 드러난다.**
@@ -264,8 +268,7 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
     생길 때). 10.0 이 만든 [`productName.test.ts`](frontend/src/productName.test.ts) 스윕이
     프론트 쪽은 이미 덮고 있으므로, 이 항목은 **백엔드 쪽 짝**이다.
 
-- **★ [해소됨 2026-08-16 — 오너 규칙으로 (a) 확정·시행] 배포 서버에서 `LLAMA_BASE_URL` 을 빠뜨리면 기동을 거부할 것인가.** 오너가 선택지를 고르는 대신 **일반 규칙**을 줬다: *"① env 에 외부 API 가 있으면 그거 사용 ② 없다면 내부 LLM 모델 다운로드 시도 ③ 다운로드가 에러나거나 시도되지 못했다면 당연히 실패."* 알파(llama override)에서는 ①②③이 **이미 그대로 돌고 있었고**(콜론 폴백 → in-stack llama → healthcheck 실패 시 gateway 가 `depends_on` 에 걸려 안 뜬다), **배포 override 에서만 ②가 구조적으로 불가능**한데(모델 0이 그 파일의 목적) ③으로 가지 않고 있던 것이 결함이었다. 그래서 (a) 시행 — [`docker-compose.external.yml`](docker-compose.external.yml) 의 gateway 가 `${LLAMA_BASE_URL:?…}` 로 덮는다. **base 는 안 건드렸다**(개발 머신은 폴백이 옳다). 가드 2셀([`tests/test_compose_backend_env.py`](tests/test_compose_backend_env.py) `ExternalOverrideTest`)이 양방향을 잠근다. 아래는 결정 당시의 선택지 서술이며 이력으로 남긴다. ↓
-- **[이력 · 위에서 (a)로 닫힘] 배포 서버에서 `LLAMA_BASE_URL` 을 빠뜨리면 기동을 거부할 것인가.** [`.env.example:96-109`](.env.example) 가 *"값이 없으면 기동을 거부한다"* 를 적고 주소 다섯을 나열하는데 **이 하나만 거부하지 않는다**(같은 목록의 `EXTERNAL_CHROMA_PORT` 는 *"생략하면 8000"* 이라고 자기 예외를 밝혔다 — 누락이 대비되는 자리다). 빠뜨리면 조용히 `host.docker.internal:9080` 으로 떨어져 **그 파일 자신이 배격한 실패 형태**가 된다. **(a) external override 에서 gateway `LLAMA_BASE_URL` 을 `:?` 로 필수화** — 문서와 맞고 fail-fast 가 넷이 된다. **★ 비용은 `.env` 에 한 줄이다** — `${VAR:?}` 는 **값이 있으면 그 값을 그대로 쓰므로** 필수화 뒤에도 `LLAMA_BASE_URL=http://host.docker.internal:9080` 을 적으면 호스트 llama 를 그대로 쓴다. **사라지는 것은 선택지가 아니라 암묵적 폴백뿐이다**(종전 이 자리가 *"호스트 llama 선택지를 배제한다"* 고 적었던 것은 **과대 서술이고 감사 F2 가 잡았다** — 그 프레이밍으로 보면 (a)의 비용을 과대평가한 채 고르게 된다). **(b) `.env.example` 이 예외를 명시** — 문서가 실제를 반영하되 fail-fast 는 셋에 머문다. **검증자가 고르지 않고 남겼다**(둘 다 타당하다).
+- **[해소됨 2026-08-16 `cd1d82d` — 여기 남기는 것은 규칙 하나뿐]** 배포에서 `LLAMA_BASE_URL` 미설정을 거부할지가 열려 있었고, **오너가 선택지 대신 일반 규칙을 줘서 답이 하나로 나왔다**(위 "기동·실행법" 의 ①②③). 시행·실측·가드는 [2026-08-16 work_log](docs/daily_logs/2026-08-16/work_log.md) D-2026-08-16-a. **★ 남기는 규칙**: **선택지를 묻기 전에 오너가 이미 준 일반 규칙으로 답이 결정되는지 먼저 본다** — 이 건은 규칙을 적용하면 (a)가 유일해서 애초에 결정 사안이 아니었다. 그리고 **비용 서술을 과대하게 적으면 오너가 잘못된 저울로 고른다**(초판의 *"호스트 llama 선택지를 배제한다"* → 실제로는 `.env` 에 한 줄이면 그대로 쓴다. 감사 F2 가 잡았고 **실측으로 확인됐다**).
 - **★ dogfood 착수(GATE-1)** — **기술적 선행 조건이 없다.** 실 12B 풀스택 관통은 끝났고, 인증·소유권·quota·활동 로그가 전부 서 있다. 착수하면 `OPS-1` Ready 승격. 종전 걸림돌이던 *"인가 없이 dogfood 하면 데이터가 섞인다"* 는 D8-3 시행으로 사라졌다. **오늘 기준 진짜로 남은 유일한 오너 결정이다.**
 - **★ Phase 10 = 프론트 디자인 시스템 착수 여부(2026-08-10 방향 확정, 브리프 미작성).** 오너가 *"이제 전체적으로 프론트 쪽 디자인을 진행하면 될 것 같다"* 고 했고 **IA(9.2)가 끝나 순서가 왔다**. 착수하려면 브리프가 먼저이며, **회귀 285셀이 문구·구조를 상당히 잠그고 있어 그 수정 비용을 예산에 넣어야 한다**(예: `"최근 100건"` 문구는 서빙 상한과 짝으로 묶여 있다). 색·타이포·간격·컴포넌트 → 화면별 적용 순서.
 - **외부 API 확장 D1~D6 = 전부 결정됨, 착수 대기**(2026-07-27, `plans/external-api-expansion-decisions.md` §2). 세 축 전부 확장하되 **슬라이스 분리**(LLM → 임베딩 → 리랭커) · D2=A(generic OpenAI 호환) · D3=A(env 키) · D4=A(전역 기본) · D5=리랭커 포함(self-host `bge-reranker-v2-m3-ko` + 외부 seam). **코드 실측 공백 = 인증 헤더 주입 지점·provider 선택 config.** 착수 조건이던 "인증 다음"은 충족됐다.
@@ -285,7 +288,21 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 
 ## Next Tasks
 
-> **★ 2026-08-15 마감 메모 — 여기서 시작한다. 머신이 알파로 바뀌었다.**
+> **★ 2026-08-16 마감 메모 — 여기서 시작한다. 머신은 알파다.**
+>
+> **오늘 한 것**: **B1·B2 를 한 슬라이스로 닫았다**(`cd1d82d`). 배포 override 의 gateway 가 `${LLAMA_BASE_URL:?…}` 로 주소를 필수로 받고, 그 **over-strict 가드가 base:202 의 콜론 형태까지 단정**해 B1(잠그는 셀 0건)이 함께 닫혔다. **base·`llama.yml` 은 한 줄도 안 건드렸다.** 상세는 [work_log](docs/daily_logs/2026-08-16/work_log.md).
+>
+> **★ 미검증 = 1커밋(`cd1d82d`).** 오늘 구현은 자기 검증뿐이다. 볼 만한 축: ① `:?` 가 **배포 방식에만** 걸리고 base·알파로 안 샜는가 ② over-strict 셀이 B1 을 정말 대신하는가(**세 번째 compose 파일에는 안 따라가는 한계**를 어떻게 볼 것인가) ③ 위 기동 표의 ①②③ 서술이 실제 동작과 맞는가.
+>
+> **★ 다음 사람이 가장 먼저 알아야 하는 것 — LLM 을 어디서 얻는지는 "빌드 옵션" 이 아니다.** 어느 override 를 얹느냐로 갈리고, 모델은 빌드가 아니라 **첫 기동**에 받는다. 오너 규칙 ①②③(env 우선 → 없으면 내부 모델 → 못 받으면 실패)과 방식별 폴백은 **위 "기동·실행법" 표에 정리해 뒀다** — 2026-08-16 에 오너가 이 질문을 했고, 다시 묻지 않도록 그 자리에 박았다.
+>
+> **★ 오너에게 결정을 요청할 때 — 라벨로 묻지 말 것.** 오늘 오너 발화: *"f1이고 b2고 그게 뭔데. 그냥 그렇게 써놓으면 내가 어떻게 알아?"* **검증에서 나온 결정 사안은 브리프가 없어서** 라벨만 인계되는 구멍이 있다. **무슨 일이 벌어지는지 → 무엇을 고르는지 → 각 선택의 실제 비용** 순서로 낸다. 그리고 **비용을 과대하게 적으면 오너가 잘못된 저울로 고른다** — B2 초판의 *"호스트 llama 선택지를 배제한다"* 가 그 예이고, 실제로는 `.env` 한 줄이면 그대로 쓴다(실측). **선택지를 묻기 전에, 오너가 이미 준 일반 규칙으로 답이 결정되는지 먼저 본다** — B2 가 그 경우였다.
+>
+> **★ HANDOFF 자가 검수(400줄 트리거) 결과 — 402 → 419 → 402.** B1·B2 서술 세 벌(추적 부채 · Owner Decisions · 이 메모)을 압축했는데 **같은 손으로 이 메모와 기동 표를 더해 순증이 됐고, 줄 수를 세어 보고서야 알았다.** 되돌린 방법은 **이틀 지난 08-14 메모를 25 → 8줄로** 압축한 것이다(13문단 중 상당수가 다른 절에 **더 자세히** 있는 중복이었다 — `${}` 표기는 추적 부채, cwd 함정은 `함정` 절, `2c6eb9e` 는 CSS 절). 지우기 전 **키워드 11종의 저장소 생존을 grep 으로 확인**했다. **★ 남기는 규칙: 검수의 산출은 "무엇을 줄였나" 가 아니라 순 결과다.** **안 본 절: `함정` · `Active Decisions` · `완료 슬라이스`.**
+>
+> **알파 상태**(어제와 동일): **`.env` 가 없다**(`long` 전에 `LLAMA_CTX_SIZE=16384`) · **스택은 안 띄웠다**(이미지만 갱신, `frontend`·`worker`·`generation_worker` 3개가 옛 이미지로 떠 있다) · 이 호스트는 `python3` 다.
+>
+> **★ 2026-08-15 마감 메모(이력).**
 >
 > **오늘 한 것**: **알파 이미지 전량 재빌드**(코드 0줄 — 이 머신 이미지가 **215커밋** 뒤처져 있었다. 이미지 시각 08-02 기준이며, **종전 이 자리의 "260" 은 앵커를 안 밝힌 값이었다**. **`ai_writte_system-app` 태그 통합과 `admin` 이미지가 이 머신에는 오늘 처음 들어왔다**) · **미검증 9커밋 독립 검증**(`33dbdd2` + 추기 — **조건부 합격 · Blocking 2**) · **전수 회귀 새 기준선 `2284/1/2515`**(알파 원시 `2281/4`, 192초 — 예측하고 맞췄다). 상세는 [work_log](docs/daily_logs/2026-08-15/work_log.md).
 >
@@ -297,37 +314,20 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 >
 > **★ 예상값을 물려받을 때는 그 값이 어느 커밋까지를 세었는지 함께 본다.** 어제 예상 *"셀 +6 · subtest +30"* 은 **틀리지 않았다** — 축 ①이 실제로 6셀/30 이었고, 낡은 것은 예측이 아니라 범위였다(`8e57369` 가 뒤에 5셀/18 을 얹었다).
 >
-> **★ 미검증 구간의 시작점은 날짜 디렉터리가 아니라 마지막 검증 기록 *커밋* 이다 — 같은 계열 오류가 이것으로 세 번째다.** 08-13 *"미검증 다섯"* → 셋 · 08-14 *"2커밋"* → 7 · 오늘 *"7커밋"* → **9**. 오늘의 오류는 시작점을 `docs/verifications/2026-08-13/` 디렉터리 존재로 추정한 것이다 — **날짜 디렉터리는 그날 *쓰인 기록*을 뜻하지 그날 커밋 전부가 검증됐다는 뜻이 아니다.** 두 번째 세션 감사(F1)가 잡았고, 사각지대였던 `6352121`·`3b71eac`(08-13 12:09·12:44, docs-only)은 **추기 검증으로 닫았다**(둘 다 Blocking 0 — [기록 §추기 A1](docs/verifications/2026-08-15/deploy_externalization_axes_1_2.md)). **★ 그래서 지금 미검증 구간은 실제로 0 이다**(`c08b0c2` 이후 전 구간이 오늘 두 기록으로 덮인다). 감사 기록 [`alpha_day_slice_audit.md`](docs/verifications/2026-08-15/alpha_day_slice_audit.md).
+> **★ 미검증 구간의 시작점은 날짜 디렉터리가 아니라 마지막 검증 기록 *커밋* 이다 — 같은 계열 오류가 이것으로 세 번째다.** 08-13 *"미검증 다섯"* → 셋 · 08-14 *"2커밋"* → 7 · 오늘 *"7커밋"* → **9**. 오늘의 오류는 시작점을 `docs/verifications/2026-08-13/` 디렉터리 존재로 추정한 것이다 — **날짜 디렉터리는 그날 *쓰인 기록*을 뜻하지 그날 커밋 전부가 검증됐다는 뜻이 아니다.** 두 번째 세션 감사(F1)가 잡았고, 사각지대였던 `6352121`·`3b71eac`(08-13 12:09·12:44, docs-only)은 **추기 검증으로 닫았다**(둘 다 Blocking 0 — [기록 §추기 A1](docs/verifications/2026-08-15/deploy_externalization_axes_1_2.md)). **★ 그 시점(08-15 마감)에 미검증 구간은 0 이 됐다**(`c08b0c2` 이후 전 구간이 그날 두 기록으로 덮였다 — **지금 상태는 위 08-16 메모의 1커밋**이다). 감사 기록 [`alpha_day_slice_audit.md`](docs/verifications/2026-08-15/alpha_day_slice_audit.md).
 >
 > **★ 추기 검증이 건진 것 하나 — 축 ③(외부 API 로 물리기)의 진짜 위험은 "안 뜨는 것"이 아니라 "조용히 통과하는 것"이다.** `3b71eac` 가 등재한 서술을 코드로 확인했다: `/props`·`/tokenize`·`/apply-template` 는 **llama.cpp 전용이고 셋 다 예외를 삼켜 `None` 을 반환**한다([`client.py:75`](services/llm_gateway/app/client.py#L75)·[`:224`](services/llm_gateway/app/client.py#L224)·[`:262`](services/llm_gateway/app/client.py#L262)). **262 줄 주석이 그 자리에서 말한다 — `# 셀 수 없으면 판정하지 않는다(통과)`.** 그리고 대체 경로인 호출자 추정은 [`:237-238`](services/llm_gateway/app/client.py#L237) 이 **과소평가 방향(가드가 늦게 걸린다)** 이라고 명시한다. **외부 API 로 바꾼 뒤 "뜨긴 뜬다" 로 끝내면 안 되고 토큰 계수가 살아 있는지를 따로 확인한다.**
 >
 > **알파 함정 둘**(이 머신에서 바로 걸린다): **`.env` 가 없다** — 빌드·`config` 는 기본값으로 통과하지만 `long` 을 돌리기 전에 `LLAMA_CTX_SIZE=16384` 를 넣는다(`.env.example:68` 에 주석으로 있다. HANDOFF 가 *"항목이 없다"* 고 적던 것은 해소됐다). **스택은 아직 안 띄웠다** — 이미지만 갱신했고 `frontend`·`worker`·`generation_worker` 3개가 **옛 이미지로** 떠 있다.
 >
-> **★ 2026-08-14 마감 메모(이력 — 미검증 구간 서술은 위가 대체한다).**
+> **★ 2026-08-14 마감 메모(이력 — 압축됨 2026-08-16. 서사는 [work_log](docs/daily_logs/2026-08-14/work_log.md) 에 있고, 여기 남기는 것은 *지금도 구속하는 것* 뿐이다).**
 >
-> **오늘 한 것**: 오너가 **Phase 10 육안보다 D-10.5-d 배선을 먼저** 하기로 방향을 바꿨다. 배포 서버 외부화 **축 ①·② 를 닫았다** — ①env 배선(`b6b1269` → 정정 `3ff94a3`) · ②[`docker-compose.external.yml`](docker-compose.external.yml) override(`8e57369`). **프로덕션 코드 0줄.** 그리고 **HANDOFF 400줄 자가 검수**(`6a51bbb`, 404 → 371)와 **리랭커 결정 브리프**를 썼다. 상세는 [work_log](docs/daily_logs/2026-08-14/work_log.md).
+> **★ 함정 — 미검증 목록을 인계 문구에서 베끼지 말고 git 에서 다시 유도할 것.** 이 계열 오류가 08-13 *"다섯"* → 셋 · 08-14 *"2커밋"* → 7 · 08-15 *"7커밋"* → **9** 로 **세 번 났다.** 확인법 둘: 시작점은 **마지막 검증 기록 *커밋*** 이지 날짜 디렉터리가 아니고(디렉터리는 *그날 쓰인 기록*을 뜻한다), 조상 여부는 `git merge-base --is-ancestor` **와** 그 기록의 Subject·본문 대조 **둘 다** 본다.
 >
-> **★ 다음 사람이 가장 먼저 알아야 하는 것 — compose 의 `${}` 표기는 코드가 그 변수를 읽는 방식을 따라간다.** 오늘 이 실수를 **한 번 하고** 기록을 쓰다 잡았다: 백엔드 3종은 `if not os.environ.get(...)` 라 **dash `${VAR-x}`**(빈 값이 빈 채로 통과해야 fallback 에 닿는다), gateway `LLAMA_BASE_URL` 은 `os.environ.get(name, DEFAULT)` 라 **콜론 `${VAR:-x}`**(dash 면 빈 값이 깨진 base URL 로 흘러간다). **이 파일의 다른 40여 항목이 전부 콜론이라 "표기 통일" 이 자연스러워 보이는데 그 통일이 곧 회귀다** — 양방향 다 셀이 문다(M2·M6).
->
-> **★ 미검증 구간이 다시 생겼다 — 오늘 2커밋(`b6b1269`·`3ff94a3`) + 기록 커밋.** 어제까지 0 이었다. 검증자가 볼 만한 축: ① dash/콜론 판단이 **각 변수의 코드 읽기와 실제로 짝인지**(내가 한 번 틀린 자리다) ② `CHROMA_PORT` 를 남긴 판단 ③ ② 축(profiles)이 정말 별개 슬라이스인지.
->
-> **★ 트리거 정정 — 어제 이 부채 전체를 "API 받은 뒤" 로 유예한 것은 과했다.** API 가 실제로 필요한 것은 **③(외부 API 로 물리기)뿐**이고, ①은 오늘 API 없이 끝냈으며 **②(profiles 로 선택 기동)도 compose 작업이라 지금 할 수 있다.** 유예를 통째로 걸면 지금 할 수 있는 것까지 잠긴다.
->
-> **★ 미검증 구간이 0 이다**(2026-08-13 기준). 오늘 2커밋(`f022088`·`db9f9c0`)은 `fd32d1e` 합격, 어제 잔여분은 `661300c` 합격(`444ab1b`·`f724fce` 차트 H1/H2 보강 · **`2c6eb9e` 정문 버튼 정정**). 기록 셋: [`debt_buttons_typescale_m5.md`](docs/verifications/2026-08-13/debt_buttons_typescale_m5.md) · [`chart_h1_h2_hardening.md`](docs/verifications/2026-08-13/chart_h1_h2_hardening.md) · [`login_button_false_finding_correction.md`](docs/verifications/2026-08-13/login_button_false_finding_correction.md). 전부 Blocking 0.
->
-> **★ 함정 — 미검증 목록을 인계 문구에서 베끼지 말고 git 에서 다시 유도할 것.** 어제 마감 메모가 *"미검증 다섯"* 이라 적었고 오늘 아침 이 자리도 그대로 옮겼는데, 검증자가 대조하니 **진짜 미검증은 셋**이었다 — `e5c0fac`·`b7c6453` 은 **`e124879`(차트 검증)의 조상이자 그 기록의 범위 안**이었다(Subject 가 `b7c6453` 을 명시하고 본문이 `e5c0fac` 을 *"M6 재탐침 cell1 FAIL 로 맹점 닫힘"* 으로 다룬다. 2026-08-13 재확인). **조상이라는 것만으로는 검증이 아니지만, 여기서는 범위에도 실제로 들어 있었다** — 확인법은 `git merge-base --is-ancestor` **와** 그 기록의 Subject·본문 대조 **둘 다**다. **★ 어제 마감 메모가 사실을 틀린 것은 이것으로 두 번째다**(첫째는 부채 ① 전제 *"관측된 피해 0건"*). 두 번 다 다음 세션이 그것을 **입력으로 삼아** 옮겨 적었고, 두 번 다 **재측정이 잡았다.**
->
-> **★ 되짚을 것 하나 — `2c6eb9e` 가 손으로 닫은 구멍을 오늘 가드가 구조적으로 이어받았다**(`661300c` F4 실측). 그 거짓 규칙(`.login-form button`)을 **그대로 재도입하면 `buttonAppearance.test.ts` 의 cell 1·2 가 실패한다.** 즉 "하네스 오독 → 흩어진 N번째 사본" 계열은 이제 사람 눈이 아니라 회귀가 잡는다.
->
-> **★ [완료 2026-08-13] backend 전수 회귀 — 오너 D-10.5-a 의 세 단계(부채 → 검증 → 전수)가 다 닫혔다.** 새 기준선 **`2273/1/2466`**(922초). **돌리기 전에 예상값을 세우고 맞췄다** — 기여분은 셋뿐이고 전부 코드와 무관했다(provenance 셀 +2·subtest +28 · 검증 기록 +8). 그 밖에 움직인 자리가 없다는 것이 *"Phase 10 이 backend 프로덕션 코드를 0줄 바꿨다"* 의 이틀치 누적 실증이다. 내역과 다음 사람을 위한 예측법은 위 **회귀 기준선** 항목에 있다.
->
-> **육안 확인은 Phase 10 끝에 한 번에**(오너 결정 D-10.3-b). `docker compose build frontend && docker compose up -d frontend` 선행 — CSS·TS 변경이 이미지에 안 들어가 있다. **볼 것 다섯**: ① 첫 화면에 콘텐츠가 들어오는가 ② 오른쪽 끝이 헤더와 맞는가 ③ **목록 행이 68rem 에서 너무 벌어지지 않는가**(T1 — **이것이 부채 ③의 판단 자리다**) ④ 차트 막대의 크림색 테두리가 사라졌는가 ⑤ **편집기 저장·생성·목록 행 버튼이 hover 에서 뜨는가**(10.5 가 새로 더한 자리).
->
-> **★ 오늘 배운 것 — 어제의 규칙이 오늘 실제로 한 번 잡았다.** `cd` 가 실패해 `&&` 체인이 끊겼고, 복원 안 된 뮤테이션 위에 다음 뮤테이션이 얹혔다. **출력은 *"1 failed | 3 passed"* 로 깨끗해 보였다** — 두 뮤테이션이 같은 셀을 물어 단독 측정과 구별되지 않았기 때문이다. **뮤테이션과 뮤테이션 *사이*에도 `git status --short` 를 찍는다**(§6 사전 게이트는 "첫 뮤테이션 전"만 말한다). 그리고 **`cd` 를 복원 명령과 `&&` 로 묶지 않는다.**
->
-> **오너 결정 대기 잔여**: **리랭커 슬라이스 브리프**([`plans/reranker-slice-decisions.md`](docs/plans/reranker-slice-decisions.md) — 결정 1~4, **승인 전 코드 금지**) · dogfood 착수(GATE-1) · H2(API 문서 제품명 — **착수 전 오너에게 자세히 설명할 것**).
+> **육안 확인은 Phase 10 끝에 한 번에**(오너 결정 D-10.3-b). `docker compose build frontend && docker compose up -d frontend` 선행 — CSS·TS 변경이 이미지에 안 들어가 있다. **볼 것 다섯**: ① 첫 화면에 콘텐츠가 들어오는가 ② 오른쪽 끝이 헤더와 맞는가 ③ **목록 행이 68rem 에서 너무 벌어지지 않는가**(T1 — **부채 ③의 판단 자리**) ④ 차트 막대의 크림색 테두리가 사라졌는가 ⑤ **편집기 저장·생성·목록 행 버튼이 hover 에서 뜨는가**.
 >
 > **확인용으로 남아 있는 것(정리 대상)**: 계정 `timeline_demo`/`timeline-demo-0810` 와 프로젝트 `6a795ab928e4a53aa000a824`(활동 5건). 파기하면 활동도 함께 사라진다(I1 실증 기회) 또는 계정을 비활성화한다.
+>
 
 **★ CSS 를 만질 사람이 알아야 하는 것 일곱** (10.1 · 10.3 · 10.4 · 10.5):
 
