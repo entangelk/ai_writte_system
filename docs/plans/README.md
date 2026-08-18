@@ -220,7 +220,7 @@
 | 문서 | 무엇 | 상태 |
 |---|---|---|
 | [`external-api-expansion-decisions.md`](external-api-expansion-decisions.md) | **부모 브리프** — 외부 LLM·임베딩·뉴럴 리랭커 확장(D1~D6) | D1~D6 결정됨 · compose 배선 완료(2026-08-14) · 임베딩/리랭커 어댑터 미착수 |
-| [`reranker-slice-decisions.md`](reranker-slice-decisions.md) | D5 가 남긴 넷 — 착수 순서·조달 순서(self-host↔외부)·삽입 모양·완료 기준 | **오너 결정 대기** |
+| [`reranker-slice-decisions.md`](reranker-slice-decisions.md) | D5 가 남긴 넷 — 착수 순서·조달 순서(self-host↔외부)·삽입 모양·완료 기준 | **Resolved(2026-08-18)** — 1=A·2=A·3=A·4=A+C(하네스 선작성). 착수는 임베딩 어댑터 뒤 |
 
 ## 문서 지위와 우선순위
 
