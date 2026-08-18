@@ -9,6 +9,8 @@
   **결정 1~4 를 확정**했다. 그것을 브리프에 반영하고, 확정 전에 **이상한 부분이 있으면 먼저
   보고**하는 것이 지시였다: *"확인해보고 이상한 부분 있으면 나한테 말해주고 아니면 브리프
   확정해줘."*
+- 확정 뒤 오너가 범위를 넓혔다: *"어댑터 브리프까지 작성하고 오늘 작업 마무리하자. 핸드오프에
+  다음 작업은 브리프 확정이라구 해주고."* → Task 3 + HANDOFF 갱신.
 
 ## Completed work
 
@@ -35,7 +37,49 @@
 갱신했다. **브리프 수·문서 수는 안 변했으므로** `test_docs_indexes.py` 의 숫자 주장
 (`_PLANS_TOTAL_CLAIMS`·`_PLANS_BRIEF_CLAIMS`)은 건드릴 것이 없다.
 
+### Task 3 — 임베딩 어댑터 브리프 작성 (다음 슬라이스 · 오너 결정 대기)
+
+리랭커 결정 1=A 가 *"임베딩 어댑터 먼저"* 로 정했고, 그 슬라이스는 **자체 브리프가 없었다.**
+[`plans/embedding-adapter-slice-decisions.md`](../../plans/embedding-adapter-slice-decisions.md)
+를 새로 썼다(148줄). CLAUDE.md §1 의 브리프 구조를 따랐다 — 결정 넷 각각에 선택지 표
+(`선택지·설명·장점·단점`) · 추천 + 이유 · 후속 고려 · 유예 · 승인 전 보류.
+
+| 결정 | 무엇 | 권고 |
+|---|---|---|
+| 1 | 어댑터를 어디에 두는가 | **A** — 앱 안 두 번째 Provider(`OpenAIEmbeddingProvider`), env 로 조립에서 고름 |
+| 2 | 배치를 지금 다루는가 | **A** — 단건 유지, seam 무변. `embed_many` 는 additive 라 나중에 열린다 |
+| 3 | 차원 전환 | **A** — 현행 fail-fast 가드 + 수동 재색인(가드도 스크립트도 이미 있다) |
+| 4 | 조립 누락 방지 | **A** — 조립 헬퍼 하나 + 전수 가드 |
+
+**실측한 것**(브리프 §배경):
+
+- **두 형식이 넷 다 다르다** — 경로(`/embed` ↔ `/v1/embeddings`) · 요청 키(`text` ↔ `input`) ·
+  응답(`{"embedding":…}` ↔ `{"data":[{"embedding":…}]}`) · 인증(없음 ↔ `Bearer`).
+- **seam 은 단건·동기다** — `embed(text) -> tuple[float, ...]` 가 **Protocol 세 곳에 같은 모양**
+  으로 선언돼 있다(`analysis/semantic_matcher.py:28` · `indexing/memory_index.py:58` ·
+  `indexing/service.py:63`). 동기인 것은 의도다(모듈 docstring: *"async ripple 회피"*).
+- **★ 조립 지점이 여섯이다** — `main.py:1126` + 스크립트 5개. `EMBEDDING_DIMENSIONS` 기본값
+  `"1024"` 이 **다섯 곳에 각자** 적혀 있다.
+
 ## Issues found
+
+**★ 조립 지점 하나가 한 달 넘게 깨진 채 green 이었다 — 브리프를 쓰다 발견했다.**
+
+- *결함*: [`scripts/calibrate_character_identity_threshold.py:20`](../../../scripts/calibrate_character_identity_threshold.py#L20)
+  이 `RemoteEmbeddingProvider(args.embedding_url)` 로 **위치 인자**를 넘기는데 생성자는
+  **키워드 전용**(`def __init__(self, *, base_url: str, …)`)이다. **호출 즉시 `TypeError`** 다.
+- *실측*: `RemoteEmbeddingProvider.__init__() takes 1 positional argument but 2 were given`
+  (`python3 -c` 로 직접 재현).
+- *언제부터*: `git log` — `a74c4c7`(2026-07-12, *"feat: add character homonym reconciliation"*).
+  **`grep tests/` 0건** — 이 스크립트를 부르는 테스트가 없어 아무도 몰랐다.
+- *조치*: **고치지 않았다**(CLAUDE.md §3 — 내 변경이 만든 결함이 아니다. 그리고 오늘은 코드 0줄
+  슬라이스다). **브리프 §"착수 전 알아야 하는 실측"과 HANDOFF Owner Decisions 에 file:line 으로
+  등재**했다(§4 의 "tracked debt with file:line").
+- *★ 이것이 결정 4 의 근거를 바꿨다*: 조립 가드를 *"`ObservedProvider` 때 그랬으니 이번에도"* 라는
+  **유추**로 권고하려던 참이었는데, **같은 사고가 이 축에서 이미 일어나 있었다.** 추측이 아니라
+  실증으로 권고를 세웠다.
+
+**★ 리랭커 브리프 확정 쪽에서 나온 것 셋.**
 
 **★ 결정 4 의 오너 문언은 브리프의 선택지 B 가 아니다 — 확정 전에 이것을 보고했다.**
 
@@ -102,15 +146,31 @@
 문서 전용 변경이라 [`records-and-handoff.md`](../../guides/records-and-handoff.md) 기준의
 **링크·참조·숫자 주장** 축으로 검증했다.
 
-- `python3 -m pytest tests/test_docs_indexes.py` — **통과**(결과는 아래 실행 기록).
-- 브리프가 인용한 file:line 앵커 전수 재확인 — Task 1 표.
+- `python3 -m pytest tests/test_docs_indexes.py` — **13 passed**(브리프 추가 후 재실행 포함).
+  브리프 파일이 하나 늘어 **가드가 요구하는 숫자 주장 네 자리를 함께 올렸다** —
+  `README.md` 전체 106 → **107** · 브리프 88 → **89**, `docs/plans/README.md` 같은 쌍.
+  **인덱스 행도 등재**했다(가드가 "인덱스에서 닿는가"를 본다).
+- 리랭커 브리프가 인용한 file:line 앵커 전수 재확인 — Task 1 표. 새 브리프의 실측은 Task 3.
+- **결함 재현은 실제로 돌렸다** — `python3 -c` 로 `TypeError` 를 확인했고 `inspect.signature`
+  로 키워드 전용임을 확인했다(추론이 아니다).
 - **코드는 0줄**이라 회귀 스위트 전수는 안 돌렸다. 새 기준선 변동 **없음**(셀 ±0 · subtest ±0).
+- **HANDOFF 401줄** — 08-18 추가분(마감 메모 · Owner Decisions 항목)을 얹고, 오늘 다른 자리로
+  이관된 08-16 문단 둘(자가 검수 결과 → 헤더 · *"LLM 은 빌드 옵션이 아니다"* → 기동 표)을
+  걷어내 **402 → 401** 로 닫았다. **★ 걷어내기 전 확인에서 한 번 오독했다** —
+  `grep -c "A\|B"` 가 두 패턴을 OR 로 세는 것을 잊고 *"기동 표에 살아 있다"* 로 읽었다.
+  다시 보니 **문자열은 사라졌지만 내용은 기동 표에 더 자세히 있었다**(*"빌드 옵션이 아니라
+  어느 override 를 얹느냐"* + 오너 규칙 ①②③). 결론은 같았지만 **확인 방법이 틀렸다** —
+  OR grep 의 카운트를 생존 근거로 쓰지 않는다.
 
 ## Next steps
 
-- **다음 코드 작업은 임베딩 어댑터 슬라이스**(결정 1=A). 착수 전 **자체 브리프**가 필요하다 —
-  배치 크기 · 차원 불일치 시 재색인 · 실패 모드는 이 브리프가 정하지 않았다. **감마에서는
-  임베딩 서비스를 띄울 수 없으므로** 실측이 필요한 부분은 알파/베타에서 한다.
+- **★ 다음 작업 = 브리프 확정(오너).** 구현이 아니다 —
+  [`plans/embedding-adapter-slice-decisions.md`](../../plans/embedding-adapter-slice-decisions.md)
+  의 결정 1~4 가 정해져야 임베딩 어댑터 슬라이스가 열린다(§승인 전 보류). **오너에게 낼 때는
+  라벨로 묻지 말 것** — 08-16 에 배운 규칙대로 **무슨 일이 벌어지는지 → 무엇을 고르는지 →
+  각 선택의 실제 비용** 순서로 낸다.
+- **감마에서 할 수 있는 것은 여기까지다** — 어댑터 구현·재색인 실측은 외부 키 또는 알파/베타가
+  필요하다.
 - **미검증 = 2커밋** — `cd1d82d`(08-16 B2 시행) + 오늘 문서 커밋. 오늘 것은 코드 0줄이다.
 - **여전히 오너 대기**: dogfood 착수(GATE-1) · H2(착수 전 설명 필수) · Phase 10 끝 육안 확인.
 - **착수 가능(오너 결정 불필요)**: `AUTH_SESSION_TTL_HOURS` 회귀 가드 2셀 — 오늘 다시 확인했고
