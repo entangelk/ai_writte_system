@@ -65,6 +65,18 @@
 - *왜 침묵하지 않았나*: 오너 조건이 *"헷갈리지 않게"* 였는데, 절차가 반쪽이라는 사실을 빼면
   README 가 바로 그 헷갈림을 만든다.
 
+### Task 4 — 오너 질문에서 나온 전수 스윕: *"에러인데 어떻게 그린이 떴지? 다른 것도 있나?"*
+
+- **왜 green 이었나 (구조적 원인 셋)**: ① **테스트가 `scripts/` 를 실행하지 않는다** — 스크립트 33개 중 테스트에서 이름조차 참조되지 않는 것이 **10개**, 그중 **9개는 `*_live_smoke.py`(설계상 sandbox-external)** 라 정상이고 **남는 하나가 `calibrate_character_identity_threshold.py`** 다. ② **CI 가 없다**(`.github/` 없음). ③ **타입체커·린터 설정이 없다**(mypy·ruff·pyright·pyproject·setup.cfg 전부 없음). → 시그니처 불일치를 잡을 층이 **하나도 없다.** "green" 은 *"있는 테스트가 전부 통과한다"* 는 뜻이고, 그 테스트 집합에 이 파일이 들어간 적이 없다.
+- **같은 형태가 더 있는가 (AST 전수, 353파일 · 정의 4726종)**:
+  - **위치 인자 arity 불일치 — 진짜 적중 1건**(그 파일 그 줄). 나머지 6건은 이름 충돌 오탐(`re.match` · `list.index` · 테스트 스텁 `send`).
+  - **존재하지 않는 키워드 인자 — 진짜 적중 0건**(17건 전부 테스트 스텁과의 이름 충돌: pymongo `update_one(session=…)` 등).
+  - **`from services…import X` 의 X 가 사라진 경우 — 0건.**
+- **★ 스윕이 새로 찾은 것: 그 파일은 `:20` 이전에 이미 죽는다.** `sys.path` 부트스트랩이 없어 `python3 scripts/calibrate_character_identity_threshold.py --help` 가 **`ModuleNotFoundError: No module named 'services'`** 로 끝난다(실행 확인). 다른 스크립트(`phase2b5_reindex_memory.py`)는 같은 명령으로 `--help` 가 정상 출력된다 — 부트스트랩 유무가 갈랐다. `PYTHONPATH=/app` 을 주면 그때 `:20` 의 `TypeError` 를 만난다.
+- **그래서 결정 4=A 의 이관 범위가 늘었다** — 헬퍼로 옮기는 것만으로는 *"돌아간다"* 가 되지 않는다. **부트스트랩도 함께 넣어야 한다.** 부트스트랩이 없는 스크립트는 6개지만 나머지 5개(`create_user` · `purge_reconciler` · `migrate_ordered_units` · `smoke_llm_provider` · `phase4_lexical_memory_live_smoke`)는 **컨테이너 exec / live smoke 용**이고 `PYTHONPATH=/app` 관례가 이미 문서화돼 있다(2026-07-12 이후 여러 work_log).
+- **기록**: HANDOFF `추적 부채` 최상단에 등재했다. 코드는 안 건드렸다 — CLAUDE.md §3(남의 결함은 알리되 손대지 않는다) + 이 결함의 처방이 이미 결정 4=A 로 잡혀 있다.
+- **미확인으로 남긴 인접 축 하나**: 위 오탐 17건은 **테스트 스텁이 실제 드라이버 API 를 그대로 흉내 내지 않는다**는 것을 보여 준다(예: 스텁 `update_one` 에 `session` 파라미터가 없다). 스텁이 실물과 갈라지면 그것도 조용한 축인데, **지금 사고가 난 적은 없어 판정하지 않았다.**
+
 ## Decisions
 
 **D-2026-08-19-a. 임베딩 어댑터 슬라이스 브리프 결정 1~4 확정.**
