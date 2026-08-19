@@ -77,6 +77,14 @@
 - **기록**: HANDOFF `추적 부채` 최상단에 등재했다. 코드는 안 건드렸다 — CLAUDE.md §3(남의 결함은 알리되 손대지 않는다) + 이 결함의 처방이 이미 결정 4=A 로 잡혀 있다.
 - **미확인으로 남긴 인접 축 하나**: 위 오탐 17건은 **테스트 스텁이 실제 드라이버 API 를 그대로 흉내 내지 않는다**는 것을 보여 준다(예: 스텁 `update_one` 에 `session` 파라미터가 없다). 스텁이 실물과 갈라지면 그것도 조용한 축인데, **지금 사고가 난 적은 없어 판정하지 않았다.**
 
+### Task 5 — 브리프 작성: 실행되지 않는 코드의 부패 (오너 요청)
+
+- 파일: [`docs/plans/script-rot-guard-decisions.md`](../../plans/script-rot-guard-decisions.md) — **결정 둘**. ① 시그니처 부패를 무엇으로 막는가(A. AST 가드 셀 / B. 타입체커 / C. import 스모크 / D. `--help` 스모크 / E. 안 한다) ② **감마의 부분 green** 을 어떻게 말하는가(A. 결손 의존성 설치 / B. 표기 규율 / C. 둘 다 / D. 무시).
+- 추천: **1=A · 2=A+B.**
+- **★ 브리프를 쓰다가 내 직전 발언이 틀렸다는 것이 실측으로 드러났다.** 앞 턴에서 *"`scripts/*.py` 를 전부 import 해 보는 셀(싸고 import-time 결함만 잡음)"* 을 선택지로 제시했는데, **그 셀은 오늘의 그 버그를 통과시킨다** — `TypeError` 가 `main()` 안이라 import 로는 실행되지 않는다. 한 단계 더 간 `--help` 스모크도 마찬가지다: `PYTHONPATH=. python3 scripts/calibrate_character_identity_threshold.py --help` → **exit 0**(결함이 `parse_args()` 다음 줄이라 그 앞에서 빠져나간다). **그래서 브리프는 C·D 를 "싼 선택지" 가 아니라 "이 결함을 못 잡는 선택지" 로 적었다** — 못 잡는 것을 가드라 부르면 다음 사람에게 거짓 안전감이 된다.
+- **감마 실측(머신-로컬)**: `python3 -m pytest tests/ --collect-only` → **1382 collected · 33 errors, 33건 전부 `ModuleNotFoundError: No module named 'argon2'`.** `argon2-cffi` 는 [`services/application/requirements.txt:1`](../../../services/application/requirements.txt) 에 선언된 진짜 의존성인데 **이 머신에 없다.** 같은 결손이 스크립트 import 시도에서도 5건으로 나타난다(33개 중 28개 성공). **회귀 기준선은 알파 2284 passed** 이므로, 감마의 부분 실행을 "green" 이라 부르면 두 문장이 같아 보인다 — 그것이 결정 2 다.
+- **앞 턴의 import 실패 11건은 내 측정 인공물이었다** — `spec_from_file_location` 로 로드하면서 `sys.modules` 에 등록하지 않아 6건이 `AttributeError: 'NoneType' object has no attribute '__dict__'` 로 죽었다. 등록을 넣어 다시 재니 **실패는 `argon2` 5건뿐**이었다. 측정 도구의 결함을 저장소의 결함으로 보고할 뻔했다.
+
 ## Decisions
 
 **D-2026-08-19-a. 임베딩 어댑터 슬라이스 브리프 결정 1~4 확정.**
@@ -124,6 +132,13 @@
 - **코드 0줄** — `git diff --stat` 이 `README.md` · 브리프 · `docs/plans/README.md` · 이 로그뿐임을
   확인했다.
 
+**D-2026-08-19-c. 오늘은 브리프까지만 하고 마감한다 (오너).**
+
+- 오너 문언: *"자꾸 다음작업이 밀리는 경향이 있지만 오늘은 브리프까지만 하고 정리하자."*
+- 즉 **가드 셀 구현도, 임베딩 어댑터 구현도 오늘 열지 않는다.** 이 인식(*"다음 작업이 밀린다"*)은
+  기록해 둘 값이 있다 — 브리프가 늘어나는 것 자체가 착수를 미루는 방식이 될 수 있다. **다음
+  세션은 브리프 확정 둘 중 하나가 아니라 구현으로 여는 것이 기본값이다.**
+
 ## Next steps
 
 - **다음은 구현이다** — 임베딩 어댑터 슬라이스. 순서는 브리프 §착수 조건: ① 조립 헬퍼 + 전수 가드
@@ -131,5 +146,6 @@
   `docker-compose.external.yml` §"아직 안 되는 것" 의 임베딩 문단 수정.
 - **감마에서 할 수 있는 것은 ①②의 코드·단위 테스트까지다.** 외부 키로 실제 호출을 보내는 것과
   **재색인 지연·호출 수 실측(결정 2 의 트리거)** 은 외부 키 또는 알파/베타가 필요하다.
+- **오너 결정 대기 브리프가 둘**: [`script-rot-guard-decisions.md`](../../plans/script-rot-guard-decisions.md)(오늘 작성) · dogfood 착수. **전자는 임베딩 구현을 막지 않는다** — 별개 축이다.
 - 그 뒤가 리랭커 슬라이스([`reranker-slice-decisions.md`](../../plans/reranker-slice-decisions.md)
   Resolved).

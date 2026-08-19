@@ -6,7 +6,7 @@
 
 서비스 경계와 확정된 계약을 먼저 볼 때는 [`../system-contract-sot.md`](../system-contract-sot.md)를 정본 SoT로 사용한다. 이 인덱스는 Phase별 세부 계획과 **모든 착수 결정 브리프**를 찾는 자리다.
 
-> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(107개 중 89개)는
+> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(108개 중 90개)는
 > `*-decisions.md` 착수 결정 브리프이며, **오너 결정의 근거 기록**이다. 파일명 접두 체계는 이미 무너져
 > 있고(`00`~`07` 계열 + 접두 없는 최근 것들) 파일명만으로는 트랙을 알 수 없다 — 그래서 아래는 **접두가
 > 아니라 트랙으로** 묶었다. 디렉터리 재편은 아직 결정되지 않은 별개 사안이다(HANDOFF 추적 부채).
@@ -221,6 +221,7 @@
 |---|---|---|
 | [`external-api-expansion-decisions.md`](external-api-expansion-decisions.md) | **부모 브리프** — 외부 LLM·임베딩·뉴럴 리랭커 확장(D1~D6) | D1~D6 결정됨 · compose 배선 완료(2026-08-14) · 임베딩/리랭커 어댑터 미착수 |
 | [`reranker-slice-decisions.md`](reranker-slice-decisions.md) | D5 가 남긴 넷 — 착수 순서·조달 순서(self-host↔외부)·삽입 모양·완료 기준 | **Resolved(2026-08-18)** — 1=A·2=A·3=A·4=A+C(하네스 선작성). 착수는 임베딩 어댑터 뒤 |
+| [`script-rot-guard-decisions.md`](script-rot-guard-decisions.md) | 실행되지 않는 코드(`scripts/`)의 시그니처 부패를 무엇으로 막는가 · 감마의 부분 green 표기 | **오너 결정 대기**(2026-08-19 작성) |
 | [`embedding-adapter-slice-decisions.md`](embedding-adapter-slice-decisions.md) | **다음 슬라이스** — OpenAI 형식 어댑터 자리·배치·차원 전환·조립 누락 방지 | **Resolved(2026-08-19)** — 넷 다 A. 재색인 설명은 README 절로 함께 나간다(오너 조건) |
 
 ## 문서 지위와 우선순위
