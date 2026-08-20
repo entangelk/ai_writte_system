@@ -98,6 +98,36 @@ Do not treat it as a pass and move on, and do not assume the guard is missing ei
 - State the verdict directly, using the three tokens fixed in "Required sections" (`합격` / `조건부 합격` / `불합격`). `조건부 합격` is allowed but must name the condition **on the verdict line itself** — a condition buried in a later paragraph is what makes a record unclassifiable later.
 - Never conflate "the test suite is green" with "the test suite verifies what the spec demands". Make the distinction visible in the record.
 
+## Recording a measurement — state the environment that made it true
+
+A measured `rc`, count, or "it failed with X" is only reproducible if the record
+says **what the environment was**. This is not a general plea for detail; it is
+about the specific inputs that silently change the answer on someone else's
+machine.
+
+**Measured failure (2026-08-20, `cd1d82d` verification, H1).** The implementer's
+table read *"no address → `rc=1`"*. True — but only with `.env` neutralised. On a
+machine whose `.env` supplies `LLAMA_BASE_URL`, the same command returns `rc=0`,
+or trips on a *different* required variable first. A third party running it "as
+written" sees a different result and cannot tell whether the claim was wrong or
+their setup differs.
+
+- **`docker compose` measurements: record the `.env` state.** Either neutralise it
+  (`--env-file /dev/null`) and say so, or state which keys it supplied. `compose`
+  reads `.env` from the project directory whether or not you meant it to.
+- **Type-checker / linter / dependency-sensitive measurements: record what was
+  installed.** The same `mypy` config produced **88** errors in a virtualenv
+  without runtime dependencies and **111** on a provisioned host — third-party
+  generics only resolve when the package is present (2026-08-20, mypy guard
+  slice). A leaner machine looks *quieter*, and quiet reads as clean.
+- **Anything whose result depends on infrastructure readiness: record that too.**
+  Running the suite immediately after `docker compose -f docker-compose.test.yml
+  up -d` skips 11 Mongo cells while still printing a green summary line.
+
+The shared failure shape: **the number is right, the label is incomplete, and the
+gap is invisible to the next reader.** When a measurement can move with the
+environment, the environment is part of the measurement.
+
 ## Relation to other documents
 
 - Verification records are independent audit artifacts. Do not move their content into `work_log.md`, `HANDOFF.md`, or `CHANGELOG.md`.
