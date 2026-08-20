@@ -283,4 +283,16 @@ scripts/calibrate_character_identity_threshold.py:20: error:
 
 **이 슬라이스는 [임베딩 어댑터 슬라이스](embedding-adapter-slice-decisions.md)와 순서를 다투지 않는다** — 별개 축이다.
 
-**산출물**: [`requirements-dev.txt`](../../requirements-dev.txt) · [`mypy.ini`](../../mypy.ini) · [`tests/test_typecheck.py`](../../tests/test_typecheck.py) · 회귀 셀 3개(accept 2 · lock 1) · 실제 수정 5건. **억제 주석 0건**이며 그것을 잠그는 셀이 따로 있다.
+**산출물**: [`requirements-dev.txt`](../../requirements-dev.txt) · [`mypy.ini`](../../mypy.ini) · [`tests/test_typecheck.py`](../../tests/test_typecheck.py) · 회귀 셀 3개(accept 2 · lock 1) · 실제 수정 5건.
+
+**★ "조용해지는 길" 을 무엇으로 잠갔는가 — 이 문언은 독립 검증에 한 번 반박당하고 다시 쓴 것이다.** 초판은 *"억제 주석 0건이며 그것을 잠그는 셀이 따로 있다"* 였는데, [독립 검증](../verifications/2026-08-20/mypy_guard_slice.md)이 **그 문언보다 실제 잠금이 좁다는 것을 네 벡터로 증명했다**(무공백 `#type:ignore` · `# mypy: ignore-errors` 프라그마 · 퍼모듈 `ignore_errors` · `files` 범위 축소 — 넷 다 요약줄 초록인 채 표적 결함이 살아남았다).
+
+**폐쇄는 문언을 좁히는 대신 검사를 넓혀서 했다** — 문언을 줄이면 **계약이 약해진 채 합의되고**, 그것이 이 브리프가 막으려는 모양이다. 지금 잠긴 것은:
+
+| 축 | 잠금 |
+|---|---|
+| 주석 | 정규식 `#\s*(type:\s*ignore\|mypy:)` — 공백 유무·파일 단위 프라그마 포함 |
+| 설정 | **섹션은 `[mypy]` 하나** · **키는 `mypy_path`·`ignore_missing_imports`·`files`·`disable_error_code` 넷만** · `files` 는 정확히 `{services, scripts}` |
+| disable 목록 | 고정 집합의 **부분집합만** — 더하면(약화) 실패, **빼면(강화) 통과** |
+
+**★ 마지막 줄이 §후속 고려의 확장 트리거와 한 몸이다.** disable 목록을 고정 일치로 잠갔으면 **이 셀이 확장 자체를 막았을 것**이다. 넓히기가 자유롭도록 부분집합으로 단정한다.
