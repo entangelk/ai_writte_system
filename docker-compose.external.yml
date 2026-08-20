@@ -42,14 +42,29 @@
 # fake 임베딩·벡터 없음·Mongo 직조회로 내려간다). 이 파일은 *외부에 있다* 를 뜻한다.
 #
 # ── 아직 안 되는 것 (착수 전 반드시 읽을 것) ────────────────────────────────
-# ★ **임베딩은 아직 진짜 외부 API 에 못 붙는다.** `RemoteEmbeddingProvider`
-# (services/application/app/indexing/embedding.py)가 아는 계약은 **우리 임베딩
-# 서비스의 자체 형식**이다 — `POST /embed {"text": …}` → `{"embedding": [...]}`.
-# OpenAI 형식(`POST /v1/embeddings`, `{"input": …}` → `{"data":[{"embedding":…}]}`)
-# 이 아니다. 따라서 `EMBEDDING_SERVICE_URL` 에 넣을 수 있는 것은 **그 계약을 말하는
-# 엔드포인트**뿐이고, OpenAI 호환 임베딩 API 를 붙이려면 **어댑터가 먼저**다
-# (추적 부채 축 ③). LLM 은 반대다 — gateway 가 OpenAI 호환 `/v1/chat/completions`
-# 를 부르므로 외부 API 가 그대로 붙는다.
+# ★ **[해소됨 2026-08-20] 임베딩도 이제 외부 API 에 붙는다.** 종전에는 이 자리가
+# *"임베딩은 아직 진짜 외부 API 에 못 붙는다"* 였다 — `RemoteEmbeddingProvider` 가
+# 아는 계약이 우리 서비스의 자체 형식(`POST /embed {"text": …}`)뿐이었기 때문이다.
+# 임베딩 어댑터 슬라이스(plans/embedding-adapter-slice-decisions.md 결정 1=A)가
+# `OpenAIEmbeddingProvider` 를 그 옆에 두면서 제약이 사라졌다.
+#
+# **다만 형식은 자동으로 안 바뀐다 — `EMBEDDING_API_FORMAT=openai` 를 명시해야 한다.**
+# 키만 넣는 것으로는 바뀌지 않는다(키 유무로 추론하면 키를 잠깐 지운 순간 형식이
+# 조용히 바뀌고, 그때 보이는 것은 원인에서 먼 404 뿐이다). `openai` 일 때
+# `EMBEDDING_API_MODEL` 은 **필수**다 — 그 형식은 모델을 요청마다 보내므로 기본값이
+# 있을 수 없다.
+#
+# **주소는 호스트 루트**를 넣는다(`/v1/embeddings` 는 코드가 붙인다). 벤더 문서가
+# `…/v1` 까지 인쇄하므로 그대로 붙여 넣어도 되게 접미 `/v1` 하나는 벗겨 낸다.
+# LLM 쪽 `LLAMA_BASE_URL` 과 같은 관례다.
+#
+# ★ **그리고 외부 API 로 바꾸는 것은 "모델이 바뀌는 것" 이다 — 재색인이 따라온다.**
+# 차원이 다르면(1024 → 예: 1536) 첫 임베딩 호출에서 fail-fast 하고, **차원까지 바뀌는
+# 경로는 절차가 아직 없다**(벡터 삭제는 프로젝트 단위 purge 뿐). 규칙과 절차는
+# README §"임베딩 모델을 바꾸면 색인을 다시 만들어야 한다" 에 있다.
+#
+# ★ **비용**: 지금은 텍스트 하나에 요청 하나다(배치 없음 — 결정 2=A). 재색인 한 번이
+# **기억 건수만큼 호출**이고 외부 API 에서는 그것이 곧 요금이다. 배치는 실측 뒤에 연다.
 #
 # ★ **리랭커는 코드가 0줄이다.** 2026-07-27 에 구현하기로 결정만 됐고
 # (`plans/external-api-expansion-decisions.md` D5: self-host
@@ -66,7 +81,13 @@
 services:
   application:
     environment:
-      EMBEDDING_SERVICE_URL: "${EMBEDDING_SERVICE_URL:?외부 임베딩 주소가 필요하다 (자체 POST /embed 계약)}"
+      EMBEDDING_SERVICE_URL: "${EMBEDDING_SERVICE_URL:?외부 임베딩 주소가 필요하다 (openai 형식이면 호스트 루트)}"
+      # `native`(우리 형식) 또는 `openai`. 코드가 get(name, DEFAULT) 로 읽으므로 콜론.
+      EMBEDDING_API_FORMAT: "${EMBEDDING_API_FORMAT:-native}"
+      # 아래 둘은 get(name) + falsy 검사라 **대시** — 빈 값이 빈 채로 넘어가야
+      # 코드의 "없음" 분기(모델 필수 오류 / 키 없이 호출)에 도달한다.
+      EMBEDDING_API_MODEL: "${EMBEDDING_API_MODEL-}"
+      EMBEDDING_API_KEY: "${EMBEDDING_API_KEY-}"
       CHROMA_HOST: "${CHROMA_HOST:?외부 Chroma 호스트가 필요하다}"
       # ★ 이름이 `CHROMA_PORT` 가 아닌 이유: 그 이름은 base 에서 **호스트 게시 포트**
       # (127.0.0.1:${CHROMA_PORT:-8523}:8000)로 이미 쓰이고 있다. 같은 이름을 쓰면
@@ -83,7 +104,13 @@ services:
 
   worker:
     environment:
-      EMBEDDING_SERVICE_URL: "${EMBEDDING_SERVICE_URL:?외부 임베딩 주소가 필요하다 (자체 POST /embed 계약)}"
+      EMBEDDING_SERVICE_URL: "${EMBEDDING_SERVICE_URL:?외부 임베딩 주소가 필요하다 (openai 형식이면 호스트 루트)}"
+      # `native`(우리 형식) 또는 `openai`. 코드가 get(name, DEFAULT) 로 읽으므로 콜론.
+      EMBEDDING_API_FORMAT: "${EMBEDDING_API_FORMAT:-native}"
+      # 아래 둘은 get(name) + falsy 검사라 **대시** — 빈 값이 빈 채로 넘어가야
+      # 코드의 "없음" 분기(모델 필수 오류 / 키 없이 호출)에 도달한다.
+      EMBEDDING_API_MODEL: "${EMBEDDING_API_MODEL-}"
+      EMBEDDING_API_KEY: "${EMBEDDING_API_KEY-}"
       CHROMA_HOST: "${CHROMA_HOST:?외부 Chroma 호스트가 필요하다}"
       CHROMA_PORT: "${EXTERNAL_CHROMA_PORT:-8000}"
       ELASTICSEARCH_URL: "${ELASTICSEARCH_URL:?외부 Elasticsearch 주소가 필요하다}"
@@ -93,7 +120,13 @@ services:
 
   generation_worker:
     environment:
-      EMBEDDING_SERVICE_URL: "${EMBEDDING_SERVICE_URL:?외부 임베딩 주소가 필요하다 (자체 POST /embed 계약)}"
+      EMBEDDING_SERVICE_URL: "${EMBEDDING_SERVICE_URL:?외부 임베딩 주소가 필요하다 (openai 형식이면 호스트 루트)}"
+      # `native`(우리 형식) 또는 `openai`. 코드가 get(name, DEFAULT) 로 읽으므로 콜론.
+      EMBEDDING_API_FORMAT: "${EMBEDDING_API_FORMAT:-native}"
+      # 아래 둘은 get(name) + falsy 검사라 **대시** — 빈 값이 빈 채로 넘어가야
+      # 코드의 "없음" 분기(모델 필수 오류 / 키 없이 호출)에 도달한다.
+      EMBEDDING_API_MODEL: "${EMBEDDING_API_MODEL-}"
+      EMBEDDING_API_KEY: "${EMBEDDING_API_KEY-}"
       CHROMA_HOST: "${CHROMA_HOST:?외부 Chroma 호스트가 필요하다}"
       CHROMA_PORT: "${EXTERNAL_CHROMA_PORT:-8000}"
       ELASTICSEARCH_URL: "${ELASTICSEARCH_URL:?외부 Elasticsearch 주소가 필요하다}"

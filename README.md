@@ -173,6 +173,47 @@ python3 scripts/phase2b5_reindex_candidate.py --project-id <PROJECT_ID> --mongo-
 **lexical(Elasticsearch/nori) 색인은 임베딩 모델과 무관하다** — 원문 텍스트를 색인하므로 모델 교체의
 영향을 받지 않는다. 위 스크립트가 벡터와 함께 다시 써 주는 것뿐이다.
 
+### 외부 임베딩 API에 붙이기 (OpenAI 형식)
+
+기본값은 **스택 안의 임베딩 컨테이너**다. 아무것도 설정하지 않으면 그대로 돌아간다 — 아래는
+그 대신 **외부 임베딩 API**를 쓸 때만 필요한 설정이다.
+
+| 환경변수 | 기본값 | 뜻 |
+|---|---|---|
+| `EMBEDDING_API_FORMAT` | `native` | `native` = 우리 임베딩 서비스 형식 · `openai` = OpenAI 형식 API |
+| `EMBEDDING_SERVICE_URL` | `http://embedding:8002` | 임베딩 주소. `openai`일 때는 **호스트 루트**를 넣는다(아래) |
+| `EMBEDDING_API_MODEL` | 없음 | `openai`일 때 **필수**. 벤더의 모델 이름(예: `text-embedding-3-small`) |
+| `EMBEDDING_API_KEY` | 없음 | `Authorization: Bearer …`로 나간다. 키를 안 받는 서버면 비워 둔다 |
+| `EMBEDDING_DIMENSIONS` | `1024` | 차원 가드. **모델이 바뀌면 이것도 확인한다**(위 절) |
+
+```bash
+EMBEDDING_API_FORMAT=openai
+EMBEDDING_SERVICE_URL=https://api.openai.com
+EMBEDDING_API_MODEL=text-embedding-3-small
+EMBEDDING_API_KEY=sk-...
+EMBEDDING_DIMENSIONS=1536
+```
+
+**주소는 호스트 루트를 넣는다** — 경로(`/v1/embeddings`)는 코드가 붙인다. 벤더 문서는 대개
+`https://api.openai.com/v1`처럼 `/v1`까지 적어 두는데, **그대로 붙여 넣어도 된다**(끝의 `/v1` 하나는
+벗겨 낸다). 이건 LLM 쪽 `LLAMA_BASE_URL`과 같은 관례다.
+
+**형식은 반드시 `EMBEDDING_API_FORMAT`으로 지정한다.** 키만 넣으면 바뀌지 않는다 — 일부러 그렇게
+했다. 키 유무로 형식을 짐작하게 만들면 **키를 잠깐 지운 순간 형식이 조용히 바뀌고**, 그때 보이는
+것은 원인에서 한참 떨어진 `404`뿐이다.
+
+**★ 외부 API로 바꾸는 것도 "모델이 바뀌는 것"이다.** 위 절의 재색인 규칙이 그대로 적용된다 —
+오히려 이 경우가 **모델이 확실히 바뀌는 경우**다. 차원이 다르면(예: 1024 → 1536) 첫 호출에서
+멈추고, **차원까지 바뀌는 경로는 아직 절차가 없다**(위 "아직 검증되지 않은 경로 하나").
+
+> **비용 주의 — 재색인은 건당 1회 호출이다.** 지금은 텍스트 하나에 요청 하나를 보낸다(배치 없음).
+> 프로젝트 하나를 재색인하면 **기억 건수만큼 호출**이 나가고, 외부 API에서는 그것이 곧 요금과
+> 시간이다. 배치는 **실제로 재어 보고** 아프면 여는 것으로 미뤄 뒀다
+> ([브리프](docs/plans/embedding-adapter-slice-decisions.md) 결정 2).
+
+**로컬 임베딩 컨테이너는 그대로 둔다** — 키가 없는 개발 머신에서는 계속 그것을 쓴다. 배포에서만
+[`docker-compose.external.yml`](docker-compose.external.yml)이 profile 뒤로 보낸다.
+
 ### 어디까지 노출하는가
 
 저장소(MongoDB · Elasticsearch · Chroma)와 내부 서비스는 **`127.0.0.1`에만 바인드**한다.
