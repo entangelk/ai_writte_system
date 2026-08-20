@@ -202,7 +202,7 @@ from services.application.app.indexing.chroma import (
     connect_chroma_collection,
 )
 from services.application.app.indexing.embedding import (
-    RemoteEmbeddingProvider,
+    build_embedding_provider_from_env,
 )
 from services.application.app.indexing.memory_index import MEMORY_VECTOR_COLLECTION
 from services.application.app.indexing.memory_lexical_index import (
@@ -1118,17 +1118,9 @@ def _build_lexical_candidate_retriever(analysis: AnalysisService):
 
 def _build_embedding_provider():
     # Real embedding service (B.2) when configured, else the deterministic fake.
-    # expected_dimensions activates the B.1 dimension guard in deployment so a
-    # misconfigured model dimension fails fast (B.2 verification follow-up).
-    base_url = os.environ.get("EMBEDDING_SERVICE_URL")
-    if not base_url:
-        return DeterministicFakeEmbeddingProvider()
-    return RemoteEmbeddingProvider(
-        base_url=base_url,
-        timeout_seconds=_env_float("EMBEDDING_TIMEOUT_SECONDS", 30.0),
-        trust_env=_env_bool("EMBEDDING_TRUST_ENV", False),
-        expected_dimensions=int(os.environ.get("EMBEDDING_DIMENSIONS", "1024")),
-    )
+    # The dimension guard, timeouts and the fake fallback all live in the single
+    # assembly helper now (embedding-adapter slice, decision 4=A).
+    return build_embedding_provider_from_env()
 
 
 def _build_chroma_vector_index():

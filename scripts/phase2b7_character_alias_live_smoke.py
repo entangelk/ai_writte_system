@@ -123,7 +123,9 @@ def run_smoke(args: argparse.Namespace) -> dict:
         ChromaMemoryVectorIndexAdapter,
         connect_chroma_collection,
     )
-    from services.application.app.indexing.embedding import RemoteEmbeddingProvider
+    from services.application.app.indexing.embedding import (
+        build_embedding_provider_from_env,
+    )
     from services.application.app.indexing.mongo_repository import (
         MongoIndexSyncRepository,
     )
@@ -167,12 +169,7 @@ def run_smoke(args: argparse.Namespace) -> dict:
         ),
     )
     adapter = ChromaMemoryVectorIndexAdapter(collection)
-    embeddings = RemoteEmbeddingProvider(
-        base_url=os.environ["EMBEDDING_SERVICE_URL"],
-        timeout_seconds=float(os.environ.get("EMBEDDING_TIMEOUT_SECONDS", "30")),
-        trust_env=False,
-        expected_dimensions=int(os.environ.get("EMBEDDING_DIMENSIONS", "1024")),
-    )
+    embeddings = build_embedding_provider_from_env(required=True)
     alias_matcher = EmbeddingSemanticMatcher(
         embeddings=embeddings,
         vector_search=adapter,

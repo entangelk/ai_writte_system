@@ -3,12 +3,26 @@
 Each line: {"left_text": "...", "right_text": "...", "same_identity": true}
 """
 
+from __future__ import annotations
+
 import argparse
 import json
+import sys
 from pathlib import Path
 
+# Without this the script cannot be run at all from the repo root — it died on
+# `ModuleNotFoundError: No module named 'services'` before ever reaching the
+# call below. The five other bootstrap-less scripts are container-exec / live
+# smoke tools where `PYTHONPATH=/app` is the documented convention; this one is
+# meant to be run directly, so it carries its own (embedding-adapter slice,
+# decision 4=A — the migration includes the bootstrap).
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from services.application.app.analysis.character_threshold import calibrate_threshold
-from services.application.app.indexing.embedding import RemoteEmbeddingProvider
+from services.application.app.indexing.embedding import (
+    build_embedding_provider_from_env,
+)
 from services.application.app.indexing.service import _cosine_similarity
 
 
@@ -17,7 +31,7 @@ def main() -> None:
     parser.add_argument("--input", required=True)
     parser.add_argument("--embedding-url", required=True)
     args = parser.parse_args()
-    embedding = RemoteEmbeddingProvider(base_url=args.embedding_url)
+    embedding = build_embedding_provider_from_env(base_url=args.embedding_url)
     samples = []
     rows = []
     for line_number, line in enumerate(Path(args.input).read_text().splitlines(), 1):

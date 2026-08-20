@@ -16,7 +16,6 @@ if __package__ in {None, ""}:
 
 from services.application.app.indexing.service import (
     CHROMA_VECTOR_BACKEND,
-    DeterministicFakeEmbeddingProvider,
     ELASTICSEARCH_BACKEND,
     FAKE_VECTOR_BACKEND,
     IndexSyncWorker,
@@ -58,16 +57,11 @@ def _build_archive_adapter() -> tuple[object, str]:
 def _build_embedding_provider():
     # Real embedding service when EMBEDDING_SERVICE_URL is set (same convention as
     # create_app), else the deterministic fake.
-    base_url = os.environ.get("EMBEDDING_SERVICE_URL")
-    if not base_url:
-        return DeterministicFakeEmbeddingProvider()
-    from services.application.app.indexing.embedding import RemoteEmbeddingProvider
-
-    return RemoteEmbeddingProvider(
-        base_url=base_url,
-        timeout_seconds=float(os.environ.get("EMBEDDING_TIMEOUT_SECONDS", "30")),
-        expected_dimensions=int(os.environ.get("EMBEDDING_DIMENSIONS", "1024")),
+    from services.application.app.indexing.embedding import (
+        build_embedding_provider_from_env,
     )
+
+    return build_embedding_provider_from_env()
 
 
 def _build_memory_adapter(
