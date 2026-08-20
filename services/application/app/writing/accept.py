@@ -131,8 +131,16 @@ class WritingAcceptService:
                     goal_intent=intent.value, idempotency_key=save_key)
             except DuplicateWritingAcceptReceipt:
                 # Concurrent same-key race: converge on the committed unit.
-                saved, target = self._replay(
+                # The duplicate says another transaction *wrote* the receipt,
+                # not that this one can *read* it yet — before that commit is
+                # visible the replay lookup still comes back empty. Fail closed
+                # on the caller's own error so a retry can converge; unpacking
+                # None here raised TypeError instead.
+                replay = self._replay(
                     request.project_id, draft_id, save_key, intent)
+                if replay is None:
+                    raise
+                saved, target = replay
                 return self._finalize(request.project_id, saved, candidate,
                                       intent, target, gate=None, replay=True)
             saved = SaveDraftResult(result.draft_version, result.snapshot,

@@ -20,6 +20,9 @@ from services.application.app.core_sot.models import UnitKind
 from services.application.app.core_sot.service import (
     Archived, CoreSotService, InMemoryCoreSotRepository,
 )
+from services.application.app.core_sot.repository import (
+    DuplicateWritingAcceptReceipt,
+)
 from services.application.app.activity.log import (
     ActivityLogService,
     InMemoryActivityLogRepository,
@@ -53,6 +56,36 @@ def _request(project="project-1"):
 def _candidate(project="project-1", text="새 문단."):
     return WritingCandidate("wr1", project, WritingTaskType.CONTINUE_SCENE,
         WritingOutputType.DRAFT_PATCH, text)
+
+
+class _ReceiptRaceCore:
+    """`start_next_unit` 이 중복 영수증을 알리는데 그 영수증이 아직 안 읽히는 창.
+
+    Mongo 에서 실제로 열리는 창이다 — 중복 키 오류는 다른 트랜잭션이 **썼다**는
+    신호이고, 그 트랜잭션이 아직 커밋 전이면 뒤따르는 읽기는 **못 본다**.
+
+    `receipt_readable=True` 는 그 반대쪽(이미 보이는 정상 수렴)을 만든다. 두 방향이
+    다 필요하다 — accept.py 의 그 자리는 한쪽만 보고 짜여 있었다.
+    """
+
+    def __init__(self, inner, *, receipt_readable):
+        self._inner = inner
+        self._receipt_readable = receipt_readable
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def start_next_unit(self, **kwargs):
+        if self._receipt_readable:
+            # 다른 트랜잭션이 이미 커밋한 상태를 만든다.
+            self._inner.start_next_unit(**kwargs)
+        raise DuplicateWritingAcceptReceipt(kwargs["idempotency_key"])
+
+    def get_writing_accept_receipt(self, *, project_id, idempotency_key):
+        if not self._receipt_readable:
+            return None
+        return self._inner.get_writing_accept_receipt(
+            project_id=project_id, idempotency_key=idempotency_key)
 
 
 class _Gate:
@@ -723,6 +756,40 @@ class WritingIntentAcceptTest(_IntentBase):
         self.assertEqual(replay.target_draft.id, target_id)
         self.assertEqual(self._draft_count(), count)
         self.assertEqual(len(failing._repo.jobs), 1)
+
+    # --- 중복 영수증 레이스: 두 방향 (2026-08-20, mypy 가드가 찾았다) ---
+    #
+    # accept.py 의 그 except 절은 `_replay()` 를 **None 검사 없이 언팩**했다. 같은
+    # 함수 앞쪽(:106)은 제대로 `is not None` 을 보는데 여기만 안 봤다. 테스트가
+    # 이 분기를 한 번도 안 밟아 한 번도 드러나지 않았다.
+
+    def test_an_unreadable_receipt_fails_closed_instead_of_type_error(self):
+        """under-strict: None 검사를 빼면 이 셀이 다시 실패한다.
+
+        영수증을 아직 못 읽는 창에서 기대하는 것은 **원인을 말하는 실패**다.
+        None 을 언팩하면 `TypeError: cannot unpack non-sequence NoneType` 가
+        나고, 호출자는 무슨 일이 났는지 알 수 없다(재시도해야 하는지도 모른다).
+        """
+        service = self._service()
+        service._core_sot = _ReceiptRaceCore(self.core, receipt_readable=False)
+        with self.assertRaises(DuplicateWritingAcceptReceipt):
+            self._accept_start(key="race-1", service=service)
+        # 유닛을 날조하지 않았다 — fail-closed 의 나머지 절반이다.
+        self.assertEqual(self._draft_count(), 3)
+
+    def test_a_readable_receipt_still_converges_through_the_same_branch(self):
+        """over-strict: 과잉교정(예: 무조건 raise)을 하면 이 셀이 실패한다.
+
+        영수증이 보이는 정상 레이스는 **여전히 조용히 수렴**해야 한다 — 이것이
+        그 except 절이 존재하는 이유 자체다.
+        """
+        service = self._service()
+        service._core_sot = _ReceiptRaceCore(self.core, receipt_readable=True)
+        result = self._accept_start(key="race-2", service=service)
+        self.assertTrue(result.idempotent_replay)
+        self.assertIsNone(result.gate)
+        # 한 번만 만들어졌다(현재·기존 다음·보관됨 + 새 유닛 하나).
+        self.assertEqual(self._draft_count(), 4)
 
     def test_next_unit_goal_is_not_persisted_as_prose(self):  # WI-16
         goal = "주인공을 죽이는 반전"

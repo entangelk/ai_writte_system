@@ -1,0 +1,10 @@
+# 개발 전용 의존성 — 프로덕션 이미지에 들어가지 않는다.
+#
+# services/application/requirements.txt 에 섞지 말 것. 섞으면 타입체커가
+# 프로덕션 이미지에 실려 나간다(docs/plans/script-rot-guard-decisions.md 결정 1-b).
+#
+# 설치: python3 -m pip install -r requirements-dev.txt
+#
+# mypy 는 tests/test_typecheck.py 가 부른다. 설치 안 된 머신에서 그 셀은
+# skip 이 아니라 실패한다 — skip 은 가드를 조용히 없앤다(같은 문서 결정 1-b).
+mypy>=2.3,<3

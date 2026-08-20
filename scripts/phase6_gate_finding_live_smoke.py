@@ -279,9 +279,9 @@ def _finding_checks(search: dict[str, Any]) -> list[str]:
     if not isinstance(body, dict):
         return []
     return [
-        f.get("check")
+        check
         for f in body.get("gate", {}).get("findings", [])
-        if isinstance(f, dict)
+        if isinstance(f, dict) and isinstance(check := f.get("check"), str)
     ]
 
 

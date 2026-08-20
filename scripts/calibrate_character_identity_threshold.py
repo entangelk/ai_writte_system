@@ -17,7 +17,7 @@ def main() -> None:
     parser.add_argument("--input", required=True)
     parser.add_argument("--embedding-url", required=True)
     args = parser.parse_args()
-    embedding = RemoteEmbeddingProvider(args.embedding_url)
+    embedding = RemoteEmbeddingProvider(base_url=args.embedding_url)
     samples = []
     rows = []
     for line_number, line in enumerate(Path(args.input).read_text().splitlines(), 1):

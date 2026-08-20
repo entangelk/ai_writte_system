@@ -96,6 +96,14 @@ class MongoRequestLockRepository:
         # 유한 번만 돈다. 여기까지 오면 매 시도가 충돌했는데 매 읽기가 "없거나 만료"를
         # 본 것이라 상태를 신뢰할 수 없다 — **fail-closed**: 실수 중복을 허용하느니
         # 요청을 실패시킨다(8.3 이 상태코드를 정한다).
+        if conflict is None:
+            # `CLAIM_ATTEMPTS` 가 0 이면 시도를 **한 번도 안 하고** 여기 닿는다. 종전
+            # 코드는 그 자리에서 `raise None` 으로 `TypeError` 를 냈다 — 잠금을 안 걸고
+            # 나가는 것은 같은데 **이유를 말하지 않는** 실패였다. 이 상수는 "유한해야
+            # 한다"는 이유로 존재하므로 0 으로 바뀔 수 있고, 그때도 fail-closed 여야
+            # 한다(2026-08-20 mypy 가드가 찾았다).
+            raise RuntimeError(
+                f"CLAIM_ATTEMPTS={CLAIM_ATTEMPTS} 이라 차지를 시도하지 않았다")
         raise conflict
 
     def force_claim(self, lock: RequestLock) -> None:

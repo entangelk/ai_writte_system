@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 from pymongo.errors import DuplicateKeyError
 
@@ -284,6 +285,26 @@ class MongoRequestLockRepositoryTest(unittest.TestCase):
         self.assertEqual(
             self.collection.calls.count("find_one_and_update"), CLAIM_ATTEMPTS)
         self.assertEqual(self.collection.docs[KEY]["holder"], "h1")  # 남의 잠금 무손상
+
+    def test_zero_attempts_fails_closed_with_a_stated_reason(self):
+        """under-strict: `conflict is None` 가드를 빼면 이 셀이 다시 실패한다.
+
+        종전에는 이 경로가 `raise None` → `TypeError` 였다. 잠금을 안 걸고 나가는
+        것은 같지만 **이유를 말하지 않는** 실패라, 호출자도 로그를 보는 사람도
+        무슨 일이 났는지 알 수 없다. 이 상수는 "유한해야 한다"는 이유로 존재하므로
+        0 으로 바뀔 수 있는 값이다(2026-08-20 mypy 가드가 찾았다).
+
+        over-strict 쪽은 바로 위 `test_a_conflict_that_never_resolves_fails_closed`
+        가 잠근다 — 정상 소진은 여전히 `DuplicateKeyError` 여야지 이 새 오류가
+        아니다. 둘을 함께 봐야 이 가드가 양방향이 된다.
+        """
+        with patch("services.application.app.quota.lock_mongo.CLAIM_ATTEMPTS", 0):
+            with self.assertRaises(RuntimeError) as raised:
+                self.repo.claim(_lock("h1"), now=AT)
+        self.assertNotIsInstance(raised.exception, TypeError)
+        self.assertIn("CLAIM_ATTEMPTS", str(raised.exception))
+        # 시도를 아예 안 했으므로 아무것도 안 남았다.
+        self.assertEqual(self.collection.docs, {})
 
     # --------------------------------------------------------------- 해제
 

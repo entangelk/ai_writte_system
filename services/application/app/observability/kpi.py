@@ -216,16 +216,19 @@ def _fold(
     }
 
 
-def _headroom_rows(calls: Sequence[StoredLlmCall]) -> list[StoredLlmCall]:
-    """헤드룸을 **판정할 수 있는** 행만. 셋 중 하나라도 모르면 판정 대상이 아니다.
+def _headroom_rows(calls: Sequence[StoredLlmCall]) -> list[tuple[int, int, int]]:
+    """헤드룸을 **판정할 수 있는** 행의 `(창, 입력, 출력상한)`만. 셋 중 하나라도 모르면 판정 대상이 아니다.
 
     `None`은 "모른다"이고 0이 아니다(v1.7.58·v1.7.59) — 모르는 것을 0으로 두면 헤드룸이
     창 전체로 계산돼 **경고가 절대 안 뜬다**. 그래서 분모(`headroom_considered`)를 응답에
     함께 싣는다: 경고 0건이 "빠듯한 호출이 없었다"인지 "창을 아는 호출이 없었다"인지
     분모 없이는 구분할 수 없다(v1.7.48이 세운 방어 패턴).
     """
+    # 세 값을 그대로 들고 나온다 — 호출자가 다시 `None` 을 걸러야 한다면 이 함수의
+    # 계약("판정할 수 있는 행")이 타입에 안 적힌 것이다(2026-08-20).
     return [
-        call for call in calls
+        (call.context_window, call.prompt_tokens, call.max_output_tokens)
+        for call in calls
         if call.context_window is not None
         and call.max_output_tokens is not None
         and call.prompt_tokens is not None
@@ -235,9 +238,8 @@ def _headroom_rows(calls: Sequence[StoredLlmCall]) -> list[StoredLlmCall]:
 def _thin_headroom(calls: Sequence[StoredLlmCall]) -> int:
     """`창 − 입력 − 출력상한`이 창의 10% 미만인 호출 수(초과=음수도 포함)."""
     return sum(
-        1 for call in _headroom_rows(calls)
-        if (call.context_window - call.prompt_tokens - call.max_output_tokens)
-        < call.context_window * THIN_HEADROOM_FRACTION
+        1 for window, prompt, cap in _headroom_rows(calls)
+        if (window - prompt - cap) < window * THIN_HEADROOM_FRACTION
     )
 
 
