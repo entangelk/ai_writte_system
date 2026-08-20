@@ -9,17 +9,26 @@
 가 `None` 을 돌려주고 조립이 감싸지 않는다 — **끄기가 조립에서 끝난다**(결정 3=A 를
 고른 이유 중 하나). 그래서 이 파일이 있다는 사실만으로는 검색이 달라지지 않는다.
 
-**★ 실패는 열려 있다(fail-open).** 리랭커가 죽거나 이상한 응답을 주면 **원래 순서를
-그대로 돌려준다.** 재정렬은 품질 향상이지 정확성 요건이 아니므로, 그것 때문에 검색이
-죽으면 손해가 이득보다 크다. 결정 4-① 이 잠그는 세 축 중 하나가 이것이다.
+**★ 실패는 열려 있다(fail-open) — 이 단계 전체가 그렇다.** 리랭커가 죽든, 응답이
+계약을 벗어나든, **텍스트 투영이 던지든** 원래 순서가 그대로 나간다. 재정렬은 품질
+향상이지 정확성 요건이 아니므로, 그것 때문에 검색이 죽으면 손해가 이득보다 크다.
+결정 4-① 이 잠그는 세 축 중 하나가 이것이다.
+
+**범위가 "프로바이더 실패" 가 아니라 "단계 전체" 인 것은 독립 검증이 잡아 준 것이다**
+(2026-08-20 조건 C1). 종전에는 `RerankProviderError` 만 잡아서 **투영이 던지면 검색
+경로가 죽었고**, 그 호출은 이 슬라이스가 새로 넣은 것이었다. **다만 조용히 삼키지는
+않는다** — `logging.WARNING` 으로 남긴다.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, Callable, Protocol, Sequence, TypeVar
 
 import httpx
+
+_log = logging.getLogger(__name__)
 
 #: 재정렬할 것이 없으면 부르지 않는다 — 0·1개는 순서가 하나뿐이다.
 _MINIMUM_TO_REORDER = 2
@@ -78,17 +87,31 @@ class RerankingRetriever:
         if len(items) < _MINIMUM_TO_REORDER:
             return items
         try:
+            # ★ 투영까지 이 안에 있다. 2026-08-20 독립 검증(조건 C1)이 지적한
+            # 자리다 — 종전에는 `RerankProviderError` 만 잡아서 **`text_of` 가 던지면
+            # 검색 경로가 죽었다.** 투영은 이 슬라이스가 검색 경로에 **새로 넣은
+            # 호출**이므로, 그것 때문에 죽는 길도 이 슬라이스가 만든 것이다.
             documents = [self._text_of(item) for item in items]
             order = self._provider.rerank(query=query, documents=documents)
-        except RerankProviderError:
-            # fail-open — 원래 순서가 그대로 나간다(결정 4-①).
+            if not _is_permutation(order, len(items)):
+                # 순열이 아니면 항목이 **빠지거나 겹친다.** 부분 응답(`top_n`)을
+                # 그대로 받으면 검색 결과가 조용히 줄어드는데, 그것은 재정렬이 아니라
+                # 필터링이고 이 seam 이 약속한 일이 아니다.
+                raise RerankProviderError(
+                    f"rerank order is not a permutation of {len(items)} documents"
+                )
+            reordered = tuple(items[index] for index in order)
+        except Exception:  # noqa: BLE001 — 결정 4-① 의 fail-open 경계
+            # 좁히면 이 **선택적 개선 단계**의 예외가 검색을 죽인다. 재정렬은 품질
+            # 향상이지 정확성 요건이 아니므로, 그 때문에 검색이 죽으면 손해가 이득보다
+            # 크다. 같은 형태의 선례: activity/log.py 의 A4=A 격리 경계.
+            #
+            # **조용히 삼키지는 않는다** — 로그가 없으면 리랭킹이 영원히 no-op 인 채로
+            # 아무도 모른다(그것이 이 저장소가 오늘 네 번 만난 실패 모양이다).
+            _log.warning("reranking failed; falling back to fusion order",
+                         exc_info=True)
             return items
-        if not _is_permutation(order, len(items)):
-            # 순열이 아니면 항목이 **빠지거나 겹친다.** 부분 응답(`top_n`)을 그대로
-            # 받으면 검색 결과가 조용히 줄어드는데, 그것은 재정렬이 아니라 필터링이고
-            # 이 seam 이 약속한 일이 아니다. 같은 이유로 fail-open 한다.
-            return items
-        return tuple(items[index] for index in order)
+        return reordered
 
 
 def _is_permutation(order: Sequence[int], size: int) -> bool:
@@ -187,7 +210,11 @@ def _order_from_body(body: Any, size: int) -> tuple[int, ...]:
             raise RerankProviderError("rerank relevance_score must be a number")
         ranked.append((float(score), index))
     # 서버가 이미 정렬해 주는 것이 보통이지만 계약은 그것을 약속하지 않는다.
-    # 점수 동률에서는 **요청 순서**를 유지한다(안정 정렬 + 인덱스 tie-break 없음).
+    #
+    # 동률에서는 **응답에 담긴 순서**를 유지한다(안정 정렬 + 인덱스 tie-break 없음).
+    # 요청 순서가 아니다 — 2026-08-20 검증 H2 의 정정이다. 응답이 요청 순서로 올
+    # 때만 둘이 같고, 계약은 그것도 약속하지 않는다. 중요한 것은 **같은 응답이
+    # 언제나 같은 순서를 낸다**는 것이며, 그것이 여기서 잠그는 성질이다.
     ranked.sort(key=lambda pair: pair[0], reverse=True)
     return tuple(index for _score, index in ranked)
 

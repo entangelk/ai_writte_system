@@ -129,6 +129,69 @@ class FailOpenTest(unittest.TestCase):
                     ("a", "b", "c"))
 
 
+class FailOpenScopeTest(unittest.TestCase):
+    """★ fail-open 은 프로바이더가 아니라 **이 단계 전체**를 덮는다 (검증 조건 C1).
+
+    종전에는 `RerankProviderError` 만 잡아서 **텍스트 투영이 던지면 검색 경로가
+    죽었다.** 투영은 이 슬라이스가 검색 경로에 **새로 넣은 호출**이므로 그 길도 이
+    슬라이스가 만든 것이다 — 독립 검증이 런타임으로 실증했고 그것이 조건이었다.
+
+    셀 문언이 *"모든 실패가 원래 순서로 떨어진다"* 라고 단정했는데 잠금은 프로바이더
+    하나였다 — **계약 문언이 잠금보다 넓은 실수의 네 번째다**(오늘 앞선 셋: 정본
+    산출물 문언 · 셀 실패 메시지 · 조립 가드). 네 번 다 폐쇄는 **검사를 넓히는 쪽**이다.
+    """
+
+    def _raising_text_of(self, exception):
+        def text_of(_item):
+            raise exception
+        return text_of
+
+    def test_a_projection_failure_returns_the_original_order(self):
+        for exception in (ValueError("bad payload"), KeyError("name"),
+                          TypeError("not a memory")):
+            with self.subTest(raised=type(exception).__name__):
+                inner = _Inner(("a", "b", "c"))
+                retriever = RerankingRetriever(
+                    inner=inner, provider=_Provider(order=(2, 1, 0)),
+                    text_of=self._raising_text_of(exception))
+                self.assertEqual(
+                    retriever.retrieve(project_id="p", query="q", limit=8),
+                    ("a", "b", "c"))
+
+    def test_a_provider_raising_something_unexpected_still_fails_open(self):
+        # 어댑터가 RerankProviderError 로 감싸지 못한 예외를 흘릴 수 있다.
+        _, retriever = _wrapped(("a", "b"), _Provider(error=RuntimeError("boom")))
+        self.assertEqual(
+            retriever.retrieve(project_id="p", query="q", limit=8), ("a", "b"))
+
+    def test_the_fallback_is_logged_rather_than_swallowed(self):
+        """★ fail-open 이 조용하면 리랭킹이 영원히 no-op 인 채로 아무도 모른다.
+
+        오늘 이 저장소가 네 번 만난 실패 모양(*"green 이 말하지 않은 것"*)이 정확히
+        그것이다. 그래서 경계는 넓히되 **로그는 남긴다** — `activity/log.py` 의
+        A4=A 격리 경계와 같은 형태다.
+        """
+        _, retriever = _wrapped(("a", "b"), _Provider(error=RuntimeError("boom")))
+        with self.assertLogs(
+                "services.application.app.context_search.rerank", level="WARNING"
+        ) as captured:
+            retriever.retrieve(project_id="p", query="q", limit=8)
+        self.assertIn("reranking failed", captured.output[0])
+        # 원인이 남아야 한다 — 메시지만 있으면 무엇이 터졌는지 모른다.
+        self.assertIn("RuntimeError", captured.output[0])
+
+    def test_a_healthy_reranking_logs_nothing(self):
+        # over-strict: 정상 경로가 경고를 내면 로그가 곧 소음이 되고 아무도 안 본다.
+        import logging as _logging
+
+        _, retriever = _wrapped(("a", "b"), _Provider(order=(1, 0)))
+        with self.assertNoLogs(
+                "services.application.app.context_search.rerank",
+                level=_logging.WARNING):
+            self.assertEqual(
+                retriever.retrieve(project_id="p", query="q", limit=8), ("b", "a"))
+
+
 class SwitchedOffTest(unittest.TestCase):
     """② 끌 수 있는가 — 주소가 없으면 조립이 감싸지 않는다."""
 
@@ -342,16 +405,35 @@ class AssemblyGuardTest(unittest.TestCase):
             "안 씌우는 이유를 여기 적는다")
 
     def test_the_wrapper_is_the_only_place_that_builds_the_decorator(self):
-        """조립이 데코레이터를 직접 만들면 끄기 경로가 둘이 된다."""
+        """조립이 데코레이터를 직접 만들면 끄기 경로가 둘이 된다.
+
+        ★ 별칭(`import … as RR`)과 모듈 속성(`rerank.RerankingRetriever(…)`)까지
+        센다 — 원이름만 보던 초판은 둘 다 침묵했다(2026-08-20 검증 H1). 임베딩
+        조립 가드가 **같은 날** B1 으로 배운 것인데 이 파일에 적용되지 않았다:
+        **한 곳에서 배운 것은 같은 형태의 다른 가드에도 옮겨야 한다.**
+
+        **잔여는 임베딩 가드와 같다** — 할당 별칭(`X = RerankingRetriever; X()`)은
+        안 잡는다. 이름 재결합 추적은 타입체커의 일이다.
+        """
         tree = ast.parse(self.ASSEMBLY.read_text(encoding="utf-8"))
+        names = {"RerankingRetriever"}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if alias.name == "RerankingRetriever" and alias.asname:
+                        names.add(alias.asname)
         builders = [
             node for node in ast.walk(tree)
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-            and node.func.id == "RerankingRetriever"
+            if isinstance(node, ast.Call) and (
+                (isinstance(node.func, ast.Name) and node.func.id in names)
+                or (isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "RerankingRetriever")
+            )
         ]
         self.assertEqual(
             len(builders), 1,
-            "RerankingRetriever 는 _rerank_wrapped 안에서만 만든다")
+            "RerankingRetriever 는 _rerank_wrapped 안에서만 만든다 — "
+            "별칭·모듈 속성 호출도 같은 자리다")
 
 
 if __name__ == "__main__":  # pragma: no cover
