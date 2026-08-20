@@ -2,7 +2,7 @@
 
 > 작성 2026-08-14. **Resolved 2026-08-18 — 결정 1~4 전부 확정(오너).** 부모 결정은 [`external-api-expansion-decisions.md`](external-api-expansion-decisions.md) D1·D5(2026-07-27)이고, 이 문서는 **그 결정을 뒤집지 않는다** — D5 가 정하지 않고 남긴 **순서·삽입 방식·완료 기준**을 정한다.
 >
-> **확정값 요약: 1=A(임베딩 어댑터 먼저) · 2=A(seam+외부 먼저) · 3=A(데코레이터) · 4=A+C, 단 평가 하네스는 이번 슬라이스에서 선작성.** 근거·문언은 각 절의 `★ 확정` 항목과 [2026-08-18 work_log](../daily_logs/2026-08-18/work_log.md) D-2026-08-18-a.
+> **확정값 요약: 1=A(임베딩 어댑터 먼저) · 2=A(seam+외부 먼저) · 3=A(데코레이터) · 4=A+C, 단 평가 하네스는 이번 슬라이스에서 선작성.** **구현 완료 2026-08-20** — [work_log](../daily_logs/2026-08-20/work_log.md) Task 18~21. 근거·문언은 각 절의 `★ 확정` 항목과 [2026-08-18 work_log](../daily_logs/2026-08-18/work_log.md) D-2026-08-18-a.
 >
 > **★ 오너가 함께 준 전제 — 외부 API 를 곧 조달한다.** *"곧바로 리랭커 외부 API를 찾아서 연결할꺼니까 참고로 알고있어. 임베딩도 마찬가지고."* 이 한 줄이 **결정 2 의 조건부 단서를 해소**했고(아래 §결정 2), **결정 1 이 여는 임베딩 슬라이스의 목표도 확정**했다(자체 형식 유지가 아니라 OpenAI 호환 어댑터).
 
@@ -181,3 +181,35 @@ D5 본문이 *"리랭킹이 실제로 Gate 품질을 올리는지"* 오프라인
 **리랭커 슬라이스를 열 때 이 문서가 이미 답해 둔 것**: seam 을 먼저(2=A) · 데코레이터로(3=A) · 조립 가드를 함께(3) · 배선만 잠그고 품질은 미룸(4=A+C) · 하네스는 만들되 정답은 안 채움(4-②).
 
 **여전히 되돌리기 비싼 것은 결정 3 이다** — A 대신 B(Hybrid 클래스 내부)로 쓰면 두 클래스에서 걷어내야 한다. 구현 중 *"데코레이터가 번거로우니 클래스 안에 넣자"* 는 충동이 들면 그것이 이 결정이 미리 막아 둔 자리다.
+
+## 산출물 (2026-08-20)
+
+| # | 확정 | 산출물 |
+|---|---|---|
+| 2=A | seam + 외부 어댑터 먼저 · **로컬 기본 no-op** | [`context_search/rerank.py`](../../services/application/app/context_search/rerank.py) — `RerankProvider` · `HttpRerankProvider` · `build_rerank_provider_from_env`(주소 없으면 **`None`**) |
+| 3=A | retriever 데코레이터 + 조립 가드 | 같은 파일 `RerankingRetriever` · [`main.py`](../../services/application/app/main.py) `_rerank_wrapped` 두 자리 · [`tests/test_rerank.py`](../../tests/test_rerank.py) `AssemblyGuardTest` |
+| 4-① | 배선·안전성 셋 | 순서 변경 · 끌 수 있음 · **fail-open** 각각 셀 |
+| 4-② | 평가 하네스 **선작성** | [`scripts/eval_retrieval_ranking.py`](../../scripts/eval_retrieval_ranking.py) + [최소 셀](../../tests/test_eval_retrieval_ranking.py) |
+| — | external override 자리 | [`docker-compose.external.yml`](../../docker-compose.external.yml) — *"리랭커는 코드가 0줄"* 문단 **[해소됨]** · env 3종 |
+
+**도메인 코드 0줄 · Protocol 무변 · 새 컨테이너 0.**
+
+## 구현에서 정해진 것 (브리프가 위임했거나 안 정한 자리)
+
+- **★ wire 는 "OpenAI 호환" 이 아니라 Cohere 가 낸 generic 이다.** D2=A 의 문언은 *"generic OpenAI-호환"* 인데, **OpenAI 에는 rerank 엔드포인트가 없다.** D2 가 뜻한 것은 *"벤더 전용이 아니라 여럿이 공유하는 형식"* 이고 리랭킹에서 그 자리를 차지한 것은 `POST /v1/rerank`(Cohere · Jina · Voyage · TEI · infinity)다. **문언을 그대로 따랐으면 존재하지 않는 계약을 구현할 뻔했다** — 정본의 글자가 아니라 그것이 겨눈 성질을 따랐고, 그 판단을 여기 적어 둔다.
+- **seam 은 점수가 아니라 순서를 돌려준다.** 점수를 흘리면 **그 점수로 자르는 두 번째 정책**(임계값·top-k)이 곧 붙는데, top-k 는 이 브리프가 **지연 실측 뒤로** 미룬 결정이다. 지금 그 문을 열지 않는다.
+- **부분 응답(`top_n`)도 fail-open 이다.** 순열이 아닌 응답을 그대로 받으면 검색 결과가 **조용히 줄어든다** — 그것은 재정렬이 아니라 필터링이고 이 seam 이 약속한 일이 아니다.
+- **env 표기**: `RERANK_API_URL`·`RERANK_API_MODEL`·`RERANK_API_KEY` 셋 다 `get(name)` + falsy 검사라 **대시**다. external override 에서 **`:?` 를 쓰지 않았다** — 리랭커 없이 뜨는 것이 정상 구성이기 때문이다.
+- **텍스트 투영은 주입한다.** 두 항목 타입이 달라 `derive_memory_index_text` / `candidate_index_text` 를 조립에서 넘긴다 — **색인이 쓴 것과 같은 투영**이라야 리랭커가 색인이 본 것과 같은 글을 읽는다.
+
+## 남은 것 — 전부 트리거와 함께
+
+| 남은 것 | 트리거 |
+|---|---|
+| **품질 판정**(4-③) | **GATE-1(dogfood) 착수** — 실사용 질의에 **오너가** 정답을 붙인 뒤 하네스로 돌린다 |
+| **하네스 첫 실전 실행** | **외부 리랭커 키** — 기본이 꺼짐이라 키 전에는 no-op 대 no-op 비교다 |
+| **self-host**(D5 로컬 기본) | seam 이 섰으므로 **어댑터 하나** · 붙는 날 profile 뒤로 · **모델 크기·CPU 지연 실측이 그 슬라이스의 첫 작업** |
+| **top-k**(융합 결과 전부 vs 상위 N) | **지연 실측** — 지연이 여기 비례한다 |
+| **candidate 쪽 리랭킹을 뺄지** | 지금은 **둘 다 걸었다.** 빼려면 조립에서 한 줄이다 |
+
+**★ 표기 규칙은 그대로 유효하다** — 하네스가 있다는 사실은 *"평가했다"* 가 아니다. 정확한 표기는 **"외부 API 리랭커 붙일 수 있음(기본 꺼짐) · self-host 미구현 · 품질 평가 미실시"** 다.
