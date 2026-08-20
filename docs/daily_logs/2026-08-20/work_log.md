@@ -79,6 +79,66 @@ mypy 2.3.1 을 **scratchpad venv 에 설치**해서 쟀다 — 시스템 파이�
   저장소 관례(지우지 말고 압축)이고, **무엇이 왜 뒤집혔는지가 이 문서의 값이다.**
 - [`docs/plans/README.md:224`](../../plans/README.md) 행을 `오너 결정 대기` → `Resolved(2026-08-20)` 로.
 
+### Task 6 — mypy 가드 슬라이스 구현 (브리프 §착수 조건 1~5)
+
+**오너 지시**: *"오케이 가보자고. 진행해봐."* — 확정 직후 축 ②를 열었다.
+
+| 단계 | 산출물 | 확인 |
+|---|---|---|
+| ① 개발 의존성 | [`requirements-dev.txt`](../../../requirements-dev.txt) — mypy 만 | 프로덕션 `requirements.txt` 셋에 mypy 없음을 셀이 단정 |
+| ② 설정 | [`mypy.ini`](../../../mypy.ini) — `call-arg`+`misc` 만 켬 | `python3 -m mypy` → 5건 |
+| ③ 5건 처리 | 아래 표 | `Success: no issues found in 193 source files` |
+| ④ 가드 셀 | [`tests/test_typecheck.py`](../../../tests/test_typecheck.py) — 미설치 시 **실패**(skip 아님) | 7 passed / 3 subtests |
+| ⑤ 양방향 3종 | 아래 뮤테이션 표 | 7종 전부 물었다 |
+
+**처리한 5건** — 억제 주석은 **0건**이고, 그것을 잠그는 셀(`test_no_suppression_comment_carries_the_guard`)을 따로 뒀다.
+
+| 파일 | 무엇을 고쳤나 |
+|---|---|
+| [`calibrate_character_identity_threshold.py:20`](../../../scripts/calibrate_character_identity_threshold.py#L20) | **표적 결함.** 위치 인자 → `base_url=`. **`sys.path` 부트스트랩 결손은 안 건드렸다** — 임베딩 슬라이스 결정 4=A 범위다 |
+| [`writing/accept.py:134`](../../../services/application/app/writing/accept.py#L134) | `_replay()` None 검사 추가. 못 읽는 영수증 창에서 `TypeError` 대신 **`DuplicateWritingAcceptReceipt` 로 fail-closed**(호출자가 재시도로 수렴할 수 있다) |
+| [`quota/lock_mongo.py:99`](../../../services/application/app/quota/lock_mongo.py#L99) | `CLAIM_ATTEMPTS=0` 이면 `raise None` → `TypeError` 였다. **이유를 말하는 `RuntimeError`** 로 |
+| [`observability/kpi.py:219`](../../../services/application/app/observability/kpi.py#L219) | `_headroom_rows` 가 *"판정할 수 있는 행"* 이라는 계약을 타입에 안 적어 호출자가 `None` 을 다시 만났다. **세 값을 튜플로** 내보낸다 |
+| [`phase6_gate_finding_live_smoke.py:282`](../../../scripts/phase6_gate_finding_live_smoke.py#L282) | `list[str]` 에 `None` 이 섞일 수 있었다. 문자열만 담는다 |
+
+### Task 7 — ★ 확정 때 쓴 숫자가 틀렸다는 것이 구현 중에 드러났다
+
+- **문제**: 설정을 넣고 처음 돌리자 **5건이 아니라 10건**이 나왔다. 새로 나온 5건이 전부
+  `var-annotated`(`client = MongoClient(uri)`).
+- **원인**: **오전 측정을 런타임 의존성이 없는 scratchpad venv 에서 했다.** `pymongo` 가 없으니
+  `MongoClient` 가 `Any` 로 뭉개져 제네릭 지적이 아예 안 났다. 제대로 준비된 호스트에서는
+  **전체가 88 이 아니라 111건/40파일**이다(`arg-type` +15 · `var-annotated` +5 · `return-value` +3).
+- **처리**: 브리프에 §정정 소절을 넣고(88 → 111), `var-annotated` 를 disable 목록에 넣었다.
+- **★ 그런데 좁힌 집합은 두 환경에서 똑같이 5건이었고 `call-arg` 는 양쪽 다 1건이었다.**
+  **`call-arg` 는 우리 코드끼리의 호출이라 서드파티 설치 여부와 무관하게 소스에서 풀리기
+  때문**이다. 그래서 **좁힌 집합은 비용 타협이 아니라 이 가드를 재현 가능하게 만드는 조건**이다 —
+  넓은 설정은 의존성이 덜 깔린 머신에서 더 조용해지고, **그 침묵이 "깨끗하다" 로 읽힌다.**
+  이 브리프가 막으려던 실패 모양 그대로다.
+- **결정 1 은 바뀌지 않는다**: B 를 고른 근거는 88 이라는 값이 아니라 ① 좁히면 억제 없이 시작
+  가능 ② A 가 못 보는 결함 둘 — 둘 다 111 에서도 그대로다.
+
+### Task 8 — 뮤테이션 검사 (7종 · 어느 뮤테이션이 어느 셀을 물었나)
+
+**★ 뮤테이션 전에 커밋했다**(`0b1c6f3`). 그 뒤 트리가 비어 있음을 확인하고 시작했고, 7종을
+끝낸 뒤 `git status --short` 가 다시 비어 있음을 확인했다.
+
+| # | 적용한 변경 | file:line | 재실패한 셀 |
+|---|---|---|---|
+| M1 | `if replay is None: raise` 제거(버그 재도입) | `accept.py:134` | `test_an_unreadable_receipt_fails_closed_instead_of_type_error` |
+| M2 | 같은 자리를 **무조건 `raise`** 로(과잉교정) | `accept.py:134` | `test_a_readable_receipt_still_converges_through_the_same_branch` |
+| M3 | `if conflict is None:` 블록 제거 | `lock_mongo.py:99` | `test_zero_attempts_fails_closed_with_a_stated_reason` |
+| M4 | **원래 결함 복원**(`base_url=` → 위치 인자) | `calibrate_…:20` | `test_the_configured_scope_typechecks_clean` |
+| M5 | `call-arg` 를 disable 목록에 추가 | `mypy.ini` | `test_a_positional_call_to_a_keyword_only_constructor_is_reported` |
+| M6 | `misc` 를 disable 목록에 추가 | `mypy.ini` | 위 셀 + `test_disabling_misc_would_hide_the_target_defect` |
+| M7 | `# type: ignore[call-arg]` 로 우회 | `calibrate_…:20` | `test_no_suppression_comment_carries_the_guard` |
+
+- **M4 가 이 슬라이스의 핵심 증거다** — 한 달 넘게 아무 층도 못 잡던 그 결함을 **이제 저장소가
+  스스로 잡는다.**
+- **M5 가 잡는 구멍이 따로 있다**: `call-arg` 를 끄면 저장소는 **여전히 초록**이고 가드만 조용히
+  사라진다. 저장소 초록 셀 하나로는 그 길이 안 막힌다.
+- **M7 도 같은 종류다**: 억제 주석 한 줄이면 mypy 자체는 통과한다(실제로 통과했다). 잡은 것은
+  억제 금지 셀이다.
+
 ## Issues found
 
 **I-1. 브리프가 자기 유예 근거를 재 보지 않고 "미지수" 로 적었다.**
@@ -107,6 +167,24 @@ mypy 2.3.1 을 **scratchpad venv 에 설치**해서 쟀다 — 시스템 파이�
 - mypy 는 이 저장소에 없는 새 의존성이다. 시스템 파이썬에 넣으면 *"이 머신에서만 참인 상태"* 가
   하나 더 생긴다(HANDOFF §머신-로컬 관측 규율).
 - scratchpad venv 에만 설치했고, **`git status --short` 가 측정 전후 모두 비어 있었다.**
+
+**I-4. ★ 측정 환경이 측정값을 바꾼다 — 그런데 표적 클래스는 안 바뀐다.**
+
+- *문제*: 오전에 잰 88건이 오후 호스트에서 111건이었다(Task 7).
+- *원인*: 서드파티가 설치돼 있어야 그 제네릭이 풀린다. venv 에는 런타임 의존성이 없었다.
+- *처리*: 브리프에 정정 소절 + `var-annotated` disable.
+- *결과*: **이 저장소가 이미 아는 병의 새 얼굴이다** — [`verify-head-before-labeling-measurements`]
+  · [`live-smoke-runs-working-tree-no-rebuild`] 와 같은 축. **실측 라벨에는 "어느 환경에서"
+  가 붙어야 한다.** 그리고 이번엔 **좁힌 집합이 그 변동을 자동으로 흡수**했다는 것이 값이다.
+
+**I-5. 억제 한 줄이면 mypy 는 통과한다 — 그래서 셀을 하나 더 뒀다.**
+
+- *문제*: 뮤테이션 M7 에서 `# type: ignore[call-arg]` 를 넣자 **mypy 자체는 통과**했다.
+- *원인*: 저장소 초록 셀은 "mypy 가 조용하다" 만 단정한다. 조용하게 만드는 방법이 둘이다.
+- *처리*: `test_no_suppression_comment_carries_the_guard` 가 `services/`·`scripts/` 전수에서
+  `type: ignore` 를 0건으로 잠근다. 같은 이유로 `test_a_positional_call_…` 이 **설정 자체**를
+  잠근다(M5 에서 `call-arg` 를 꺼도 저장소는 초록이었다).
+- *결과*: **"초록이다" 를 단정하는 셀과 "무엇을 보고 있다" 를 단정하는 셀은 다른 셀이다.**
 
 ## Decisions
 
@@ -137,6 +215,15 @@ mypy 2.3.1 을 **scratchpad venv 에 설치**해서 쟀다 — 시스템 파이�
 - *왜 지우지 않는가*: 감마로 다시 갈 때 **같은 관측이 또 나온다.** 그때 필요한 것은 문단의 부재가
   아니라 **"이건 선행조건 미이행이다" 라는 판정**이다.
 
+**D-2026-08-20-c. 축 ② 를 먼저 열었다 (오너 승인).**
+
+- 확정 직후 오너 문언: *"오케이 가보자고. 진행해봐."* — 제시한 권장 순서(②→①) 그대로 열었다.
+- *경계를 지킨 곳*: `calibrate_character_identity_threshold.py` 의 **`sys.path` 부트스트랩
+  결손은 손대지 않았다.** 그것은 임베딩 슬라이스 결정 4=A(조립 헬퍼 이관)의 범위이고, 여기서
+  같이 고치면 **①이 그 파일을 다시 만질 때 충돌한다.** 이 슬라이스는 **가드가 무는 것만** 고쳤다.
+- *부수 효과*: ①의 조건(*"닫혔다는 증거는 가드 셀이지 돌려 봤다가 아니다"*)이 **이미 충족된
+  상태**가 됐다 — 뮤테이션 M4 가 그 증거다.
+
 ## Verification
 
 - `python3 -m pytest tests/test_docs_indexes.py -q` → **13 passed** (아래 실행 기록).
@@ -154,19 +241,49 @@ mypy 2.3.1 을 **scratchpad venv 에 설치**해서 쟀다 — 시스템 파이�
 - **코드 0줄** — `git diff --stat` 이 브리프 · `docs/plans/README.md` · `HANDOFF.md` · 이 로그뿐임을
   확인했다.
 
+### 전수 회귀 (베타, 2026-08-20)
+
+**`2296 passed · 1 skipped · 2519 subtests` (1145초).** 남은 skip 1건은 호스트에서 구조적으로
+항상 skip 되는 live Chroma 셀([`test_chroma_adapter.py:490`](../../../tests/test_chroma_adapter.py#L490))이다.
+
+- **셀 증감이 정확히 맞는다**: 오늘 오전 착수 전 이 머신 실측이 **2287 collected** 였고,
+  이 슬라이스가 더한 것이 **10셀**(typecheck 7 · accept 2 · lock 1)이라 **2297**(= 2296+1)이다.
+- **subtest +3** 은 `test_typecheck.py` 의 프로덕션 requirements 3종 전수뿐이다.
+- **HANDOFF 의 종전 기준선 `2284/1/2515` 는 알파·2026-08-15 값**이라 그대로 빼면 안 된다
+  (그 사이 08-18·08-19 문서 작업이 있었고 이 슬라이스가 측정하지 않았다). **비교는 오늘
+  이 머신의 착수 전 값(2287)과 한다.**
+
+**★ 그리고 1회차 실행은 `12 skipped` 였다 — 그것이 이 슬라이스의 주제를 한 번 더 증명했다.**
+
+| 회차 | 명령 | 결과 |
+|---|---|---|
+| 1 | `up -d` **직후** `python3 -m pytest -q` | 2285 passed · **12 skipped** |
+| 2 | 같은 트리, `-rs` | skip **1건**(live Chroma)뿐 |
+| 3 | 같은 트리, mongo 예열 후 | **2296 passed · 1 skipped** |
+
+- *원인*: `docker compose -f docker-compose.test.yml up -d` 직후에는 **복제셋이 아직 준비 전**이라
+  Mongo 셀 11개가 **skip 으로 빠진다**. 저장소 관례상 미기동은 실패가 아니라 skip 이다.
+- *왜 위험한가*: **요약줄이 여전히 초록이다.** *"2285 passed"* 를 그대로 받아 적으면 **Mongo
+  어댑터 11셀을 안 돌린 초록**이 회귀 기준선이 된다. **어제 감마의 `argon2` 33건과 정확히 같은
+  모양**이고, 이 브리프가 막으려던 *"green 이 말하지 않은 것"* 그 자체다.
+- *처리*: HANDOFF 함정으로 등재했다. **판정은 passed 수가 아니라 skip 수를 먼저 본다.**
+
 > **★ 위 mypy 수치는 재현 스크립트가 아니라 명령줄이다.** 저장소 관례(검증 재현 스크립트는 커밋한다)에
 > 비추면 **약한 형태**다. 다만 이 측정은 슬라이스 착수 시 **가드 셀 자체가 그 자리를 대체**하므로
 > 별도 스크립트를 남기지 않았다 — **셀이 생기는 순간 이 명령줄은 셀의 설정으로 굳는다.**
 
 ## Next steps
 
-- **다음은 구현이다.** 두 축이 있고 **서로 순서를 다투지 않는다**:
-  - **축 ① 임베딩 어댑터 슬라이스** — [브리프](../../plans/embedding-adapter-slice-decisions.md)
-    Resolved(08-19). 순서: 조립 헬퍼 + 전수 가드 → `OpenAIEmbeddingProvider` → README env 서술 →
-    `docker-compose.external.yml` 문단 수정.
-  - **축 ② mypy 가드 슬라이스** — 이 브리프 §착수 조건 5단계.
-- **권장 순서는 ② → ①** 이다. ②의 5건 처리에 **①이 닫기로 한 그 스크립트가 포함**되므로, 가드를
-  먼저 세우면 ①의 *"닫혔다는 증거는 가드 셀이지 돌려 봤다가 아니다"* 조건이 **이미 충족된 상태로**
-  시작한다. 반대 순서면 같은 파일을 두 번 만진다.
-- **오너 결정 대기 브리프는 이제 dogfood 착수 하나다.**
+- **다음은 임베딩 어댑터 슬라이스(축 ①) 하나다** — 축 ②는 오늘 닫혔다.
+  [브리프](../../plans/embedding-adapter-slice-decisions.md) 순서: 조립 헬퍼 + 전수 가드 →
+  `OpenAIEmbeddingProvider` → README env 서술 → `docker-compose.external.yml` 문단 수정.
+- **①을 여는 사람이 알아야 할 것 둘**: ① `calibrate_character_identity_threshold.py` 의
+  **시그니처는 이미 고쳐졌고 부트스트랩(`sys.path`)만 남았다** — 그것이 결정 4=A 헬퍼 이관의
+  범위다(일부러 안 건드렸다). ② ①의 조건 *"닫혔다는 증거는 가드 셀"* 은 **이미 충족된 상태로
+  시작한다**(뮤테이션 M4).
+- **오너 결정 대기 브리프는 dogfood 착수 하나뿐이다.**
 - 그 뒤가 리랭커 슬라이스([브리프](../../plans/reranker-slice-decisions.md) Resolved).
+- **미검증 = 2커밋**(`0b1c6f3` 이 슬라이스 · `cd1d82d` 2026-08-16). 이 슬라이스는 자기 검증뿐이다 —
+  볼 만한 축: ① 좁힌 코드 집합이 표적 클래스를 정말 다 덮는가 ② `accept.py` 의 `raise` 재발생이
+  호출자 계약(HTTP 매핑 없음 → 500)에 맞는가 ③ `lock_mongo` 의 `RuntimeError` 가 8.3 상태코드
+  정책과 어긋나지 않는가.
