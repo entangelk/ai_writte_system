@@ -699,6 +699,32 @@ MRR · nDCG@k.
 - **비차단** — H1 external.yml 새 env 3종 표기-셀 부재(FORMAT 콜론은 빈 값 처리가 갈린다) · H2 가드 스캔 범위 `services`+`scripts` 하드코딩("세 번째 파일" 계열). 관측: `if __name__` 블록이 WireFormatSelectionTest 앞에 있어 직접 실행 시 그 클래스 미수집(pytest 무영향).
 - 전수 **`2319 passed · 1 skipped · 2545 subtests`**(1183초, 등재 후 트리 실측) — passed·skip 은 예고(`2319/1`)와 정확히 일치, subtest 2545 = 구현자 실측 2544 + 이 기록 등재분 1. 코드 무변 상태에서 검증 기록이 하나 더 등재되면 subtest +1(조건 B1 폐쇄처럼 셀을 바꾸는 커밋이 오면 그 커밋의 예고값으로 다시 센다).
 
+### 독립 검증 — 리랭커 슬라이스 (7a88ac1·f14917b) + 임베딩 B1 폐쇄 재겁(a9bca6d) — 조건부 합격
+
+(또 다른 세션 — 리랭커 구현자가 아님. 기록 [`verifications/2026-08-20/reranker_slice.md`](../../verifications/2026-08-20/reranker_slice.md) · 재현 [`repro_reranker_slice.sh`](../../verifications/2026-08-20/repro_reranker_slice.sh) 커밋)
+
+- **★ 구현자 자문 축 실증(→조건 C1)** — `text_of`(투영) 가 던지는 예외가 `except RerankProviderError` 밖으로 새어나가 **검색 경로가 죽는다**(런타임 직접 실증: `[ValueError] … 새어나감`). FailOpenTest 문언 *"모든 실패"* · 브리프 4-①③의 값 *"검색이 죽지 않는다"* 와 행동이 어긋난다. 폐쇄: **단계 전체 fail-open 권장** / 문언 스코프(오너 선택).
+- **임베딩 B1 폐쇄 승격 확정** — 폐쇄 세션(`a9bca6d`)의 자체 승격을 검증자가 재현 스크립트 재실행으로 확인(V1 `16 passed`→가드 실패 뒤집힘 · V1b 유지 · V1c 문언 명시 잔여). 폐쇄 세션이 못 고른 인덱스 행(조건부→합격)·Verdict 줄·판정 분포(합격 176→177·조건부 70 유지)를 함께 정리. 폐쇄 세션이 남긴 축 둘에도 답: 남은 `as` 형태 없음 · `docs` 분류 타당.
+- **뮤테이션 페어링**(diff 는 재현 스크립트 그대로):
+
+  | 뮤테이션 | file:line | 무는 셀 | 수 |
+  |---|---|---|---|
+  | **RV-B1** 모듈 속성 `_rr.RerankingRetriever(…)`(main.py 두 번째 생성) | main.py | **없음 — 18 passed** | **0** |
+  | **RV-B2** 별칭 `RR(…)` | main.py | 없음(비차단 H1 — B1 학습 미적용) | 0 |
+  | R1 정본 감싸기 누락 | main.py | both-sites 셀 canonical subtest | 1 |
+  | R2 candidate 감싸기 누락 | main.py | 같은 셀 candidate subtest | 1 |
+  | R3b fail-open→fail-closed | rerank.py | `test_a_provider_error_returns_the_original_order` | 1 |
+  | R4 순열 검사 제거 | rerank.py | non-permutation 셀 | 5 |
+  | R5 0·1개도 호출 | rerank.py | nothing-to-reorder 셀 subtest 2 | 2 |
+  | R6b 동률 인덱스 역순 | rerank.py:191 | `test_ties_keep_the_request_order` | 1 |
+  | R7 bool 인덱스 허용 | rerank.py | malformed 셀 subtest | 1 |
+  | 하네스 경계: `.jsonl` 투입 | docs/… | `test_the_repository_ships_no_evaluation_set` | 1 |
+
+- **산출물 4건 일치** — no-op 기본(`None` 이 정상값) · 데코레이터 도메인 0줄·vector-only 도 감쌈 · 하네스 무정답+경계셀 실증 · D2=A 글자("OpenAI 호환")를 Cohere generic `POST /v1/rerank` 로 바로잡은 계약 수정이 브리프에 기록(OpenAI 에 rerank 엔드포인트 없음은 사실) · env 3종 대시+`:?` 아님 · 표기 3분할.
+- **비차단** — H1 유일-생성자 셀 속성·별칭 우회(R1/R2 본령은 소리 내게 작동) · H2 동률 문언("요청 순서 유지"는 응답이 요청 순서일 때만 참 — 안정 정렬은 응답 순서 보존).
+- **뮤테이션 실수가 양쪽에서 났다** — 구현자 R3·R6 초판(문법 오류·행동 no-op)에 이어 검증자도 R6b 재유도 첫 시도를 들여쓰기 8칸으로 써 `count=0` 단정에 걸렸다. **뮤테이션이 안 물면 가드를 의심하기 전에 뮤테이션부터 본다** — 가이드 규칙이 하루 만에 양쪽을 구했다.
+- 전수 **`2350 passed · 1 skipped · 2583 subtests`**(1171초, 등재 후 트리 실측) — passed·skip 은 예고와 정확히 일치, subtest 2583 = 구현자 실측 2582 + 이 기록 등재분 1.
+
 ## Next steps
 
 - **다음은 dogfood(GATE-1) 착수다.** 오늘로 **외부 API 확장 세 축이 전부 코드로 섰고**,
