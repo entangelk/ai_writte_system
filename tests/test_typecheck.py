@@ -35,8 +35,15 @@ _INSTALL_HINT = (
 #: 독립 검증에 셋으로 뚫렸다(2026-08-20 B1).
 _SUPPRESSION = re.compile(r"#\s*(type:\s*ignore|mypy:)")
 
-#: `[mypy]` 섹션에 허용된 키. 이 밖은 전부 "조용해지는 길" 이다 — `ignore_errors`,
-#: `exclude`, `follow_imports = skip` 이 대표적이다.
+#: `[mypy]` 섹션에 허용된 키. **트립와이어이지 억제 키 목록이 아니다** — 이 밖의 키는
+#: 억제든 무해든 **일단 실패한다.** 조용해지는 키를 하나씩 막는 방식으로는 `ignore_errors`
+#: 다음에 `exclude`, 그 다음에 `follow_imports = skip` 이 계속 나오기 때문이고(독립 검증이
+#: 실제로 네 벡터를 뚫었다), 허용집합만이 그 클래스를 닫는다.
+#:
+#: **정당한 키를 넣는 길은 막혀 있지 않다 — 이 집합에 의식적으로 더하면 된다.** 실제로
+#: `warn_unused_ignores`(가드를 **강화**하는 키) · `python_version` · `plugins` ·
+#: `explicit_package_bases` 는 조용해지는 길이 아니며, 필요해지면 여기 추가하는 것이
+#: 정상 경로다. 이 셀이 요구하는 것은 **그 추가가 의식적일 것** 하나다.
 _ALLOWED_KEYS = frozenset({
     "mypy_path", "ignore_missing_imports", "files", "disable_error_code",
 })
@@ -140,6 +147,13 @@ class RepositoryTypecheckTest(unittest.TestCase):
 
         그래서 벡터를 하나씩 막지 않고 **허용된 것만 남긴다**: 섹션은 `[mypy]` 하나,
         키는 아래 넷, 범위는 두 디렉터리, disable 목록은 고정 집합의 **부분집합**.
+
+        **★ 키 검사는 트립와이어이지 "억제 키 목록" 이 아니다.** 허용 목록 밖이면
+        무해한 키(`warn_unused_ignores` 처럼 오히려 **강화**하는 것)도 실패한다 —
+        요구하는 것은 "조용해지지 말 것" 이 아니라 **"의식적으로 추가할 것"** 이다.
+        (2026-08-20 재검 H4 — 종전 메시지가 *"이 키들 밖은 전부 조용해지는 길"* 이라
+        **원인을 거짓으로** 말했다. 결정 1-b② 가 경계한 것의 더 나쁜 형태다:
+        원인을 안 말하는 실패보다 **틀리게 말하는 실패**가 다음 사람을 더 멀리 보낸다.)
         부분집합인 이유는 **넓히기(코드를 목록에서 빼는 것)는 자유여야** 하기
         때문이다 — 브리프 §후속 고려의 확장 트리거를 이 셀이 막으면 안 된다.
         """
@@ -150,10 +164,16 @@ class RepositoryTypecheckTest(unittest.TestCase):
                          "퍼모듈 섹션은 억제 목록이 되는 길이다")
         self.assertLessEqual(
             set(parser["mypy"]), _ALLOWED_KEYS,
-            "이 키들 밖은 전부 조용해지는 길이다(ignore_errors·exclude·follow_imports 등)")
+            "허용 목록 밖의 키는 억제 키든 무해한 키든 일단 실패한다(트립와이어). "
+            "조용해지는 키(ignore_errors·exclude·follow_imports = skip 등)라면 넣지 "
+            "말고, 정당한 키라면 _ALLOWED_KEYS 에 의식적으로 추가한다")
 
         scope = {part.strip() for part in parser["mypy"]["files"].split(",")}
-        self.assertEqual(scope, {"services", "scripts"}, "범위를 줄이지 않는다")
+        self.assertEqual(
+            scope, {"services", "scripts"},
+            "검사 범위는 등가로 잠근다 — 줄이면 결함이 그대로 살아 있는데 저장소가 "
+            "초록이 되고(그것이 폐쇄한 벡터다), 늘리는 것도 여기서 거부된다. "
+            "늘리는 것이 정당해지는 날(예: tests/ 편입 트리거)에는 이 줄을 함께 고친다")
 
         disabled = {code.strip().rstrip(",")
                     for code in parser["mypy"]["disable_error_code"].split()
