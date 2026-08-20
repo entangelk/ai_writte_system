@@ -251,6 +251,90 @@ clean 트리에서 직접 돌렸다 — **config 10종 + 뮤테이션 6종 전�
 포함) 매 뮤테이션 뒤 트리가 복원됐다. **`/tmp` 가 아니라 기록 옆에 커밋된 것이 이 확인을
 가능하게 했다.**
 
+### Task 12 — 임베딩 어댑터 슬라이스 (축 ①) 착수: 조립 헬퍼 + 전수 가드 (결정 4=A)
+
+**브리프 순서대로 헬퍼가 먼저다** — 새 provider 가 붙을 자리를 하나로 만들지 않으면 조립 6곳에
+"어느 provider 인가" 분기가 여섯 벌 생긴다.
+
+**착수 전 실측이 브리프보다 나빴다.** 브리프는 `EMBEDDING_DIMENSIONS` 기본값이 다섯 벌이라
+적었는데, 실제로는 **네 값이 자리마다 갈려 있었다**:
+
+| 갈린 것 | 실태 |
+|---|---|
+| `EMBEDDING_DIMENSIONS` 기본 `"1024"` | **5벌** |
+| `EMBEDDING_TIMEOUT_SECONDS` 읽는 법 | `main.py` 는 `_env_float`, 워커 셋은 `float(os.environ.get(…, "30"))` |
+| `trust_env` | **`main.py` 만 넘긴다.** 워커 셋은 생성자 기본값에 기대고 있었다 |
+| 주소 없음 처리 | fake 로 내려감(4곳) · `ValueError`(live smoke) · CLI 인자(보정) **셋** |
+
+- **헬퍼 계약**: `build_embedding_provider_from_env(*, base_url=None, required=False)`.
+  `base_url` 은 보정 스크립트가 주소를 CLI 로 받기 때문이고, `required` 는 live smoke 가
+  **fake 로 조용히 내려가면 안 되는 도구**이기 때문이다. **env → provider 만 한다** — 재색인
+  정책·차원 결정·배치를 넣으면 그것이 두 번째 조립 지점이 된다(브리프 경고).
+- **가드는 AST 다.** *"생성자를 직접 부르는 자리가 하나라도 있으면 실패"* — 등재 목록(선택지 B)을
+  기각한 이유가 M5 침묵이라 목록을 만들지 않았다. **문자열이 아니라 AST 인 것은 오늘 mypy
+  가드에서 배운 것**이다(표기 하나만 보면 나머지를 놓친다 — I-6).
+
+**★ 6번 자리는 시그니처만이 아니라 부트스트랩까지 닫았다.** 브리프가 *"그 이관은 '부트스트랩도
+넣는다' 를 포함해야 한다 — 그렇지 않으면 헬퍼만 옮기고 여전히 안 돈다"* 고 명시한 부분이다.
+실측: 이관 전 `python3 scripts/calibrate_character_identity_threshold.py --help` 는
+`ModuleNotFoundError: No module named 'services'`, 이관 후 **rc=0**.
+
+### Task 13 — `OpenAIEmbeddingProvider` (결정 1=A)
+
+경로·요청 키·응답 구조·인증 **넷이 달라서** `wire_format` 분기가 아니라 두 번째 클래스다.
+**Protocol 세 곳 무변 · 새 컨테이너 0 · 배치 없음**(결정 2=A — 형식이 배열을 받으므로
+*"어차피 받으니 지금"* 충동이 드는 자리이고, 브리프가 그것을 미리 막아 뒀다).
+
+**차원 가드는 두 provider 가 같은 함수를 쓴다**(`_vector_from_numbers`). 결정 3=A 의 **전 기제가
+그 가드**라 둘 사이에서 갈리면 그 결정이 반쪽이 된다.
+
+### Task 14 — 브리프가 구현에 위임한 env 결정 (§후속 고려)
+
+브리프는 *"변수를 하나 더 둘지 형식을 별도 env 로 뺄지는 구현에서 정할 문제"* 로 남겼다.
+**정한 값과 근거는 [브리프 §구현에서 정해진 것](../../plans/embedding-adapter-slice-decisions.md)에
+표로 적었다.** 핵심 셋:
+
+- **형식은 `EMBEDDING_API_FORMAT` 로 명시하고 키 유무로 추론하지 않는다.** 추론이 더 짧지만
+  **키를 잠깐 지우면 형식이 조용히 바뀌고**, 그 실패는 `404` 로 **원인에서 가장 먼 자리**에
+  떨어진다. 기본이 `native` 라 기존 배포는 env 를 안 건드려도 그대로 돈다.
+- **`EMBEDDING_MODEL_NAME` 을 재사용하지 않았다.** 그건 우리 컨테이너가 받는 **HF 모델 id** 이고
+  새 변수는 **벤더 모델 이름**이다. 같은 이름을 쓰면 HF id 가 외부 API 로 나간다.
+- **base 는 호스트 루트, 접미 `/v1` 하나는 벗긴다.** 벤더 문서가 `…/v1` 로 인쇄하므로 그대로
+  복사해도 404 가 아니어야 한다. 경로 **안**의 `v1`(`…/v1/proxy`)은 안 건드린다(over-strict 셀).
+
+### Task 15 — README 절(③)과 external override 문단(④)
+
+- **README** — 어제 신설한 재색인 절 **바로 뒤**에 붙였다. 독자는 오너 조건대로 *"내부 구조를
+  모르는 사람"* 이라 env 표 + **붙여넣을 수 있는 예시** + 주소가 호스트 루트라는 것 + 형식을
+  명시해야 하는 이유를 적었다. **★ 외부 API 로 바꾸는 것도 "모델이 바뀌는 것" 이라는 연결이
+  이 절의 값이다** — 오히려 모델이 확실히 바뀌는 경우다. 비용 주의(재색인 = 건당 1회 호출)도
+  결정 2 트리거와 함께 적었다.
+- **external override** — *"임베딩은 아직 진짜 외부 API 에 못 붙는다"* 문단이 이 슬라이스로
+  **거짓이 됐다.** 지우지 않고 **[해소됨]** 로 표시하고 무엇이 바뀌었는지 적었다. 새 env 3종을
+  세 서비스에 배선하고 `:?` 메시지도 갱신했다.
+- **표기 규칙대로 갈랐다** — `EMBEDDING_API_FORMAT` 은 `get(name, DEFAULT)` 라 **콜론**,
+  `API_MODEL`·`API_KEY` 는 `get(name)` + falsy 검사라 **대시**(빈 값이 빈 채로 넘어가야 코드의
+  "없음" 분기에 닿는다).
+- **compose 실측** — `.env` 는 `--env-file /dev/null` 로 중립화했다(**오늘 올린
+  [`guides/verification.md`](../../guides/verification.md) §Recording a measurement 규칙의 첫 적용**):
+  주소 없음 → `rc=1` · openai 4종 지정 → 그대로 렌더.
+
+### Task 16 — 뮤테이션 (임베딩 축 6종)
+
+**커밋 후 clean 트리 분기**, 매 회 `git status --short` 공백 확인.
+
+| # | 뮤테이션 | 재실패한 셀 |
+|---|---|---|
+| E1 | 한 자리가 생성자 직접 호출로 되돌아감(원 결함 형태) | `test_no_site_builds_an_embedding_provider_by_hand` + `test_every_assembly_site_reaches_the_helper` subtest |
+| E2b | 헬퍼 파일이 provider 를 아예 안 만듦(over-strict 축) | `test_the_helper_itself_is_allowed_to_construct` 외 4 |
+| E3 | **형식을 키 유무로 추론**하게 바꿈 | `test_the_key_alone_does_not_switch_the_format` 외 |
+| E4 | openai 인데 모델 없으면 조용히 기본값 | `test_openai_format_without_a_model_fails_fast` |
+| E5 | 접미 `/v1` 벗기기 제거 | `test_a_pasted_vendor_base_url_…` subtest 2(**`/v1/proxy` subtest 는 통과 = over-strict 무영향**) |
+| E6 | 차원 가드를 **openai 쪽만** 빼먹음 | `test_the_dimension_guard_reaches_the_openai_provider_too` |
+
+**E3 가 이 슬라이스에서 가장 값진 뮤테이션이다** — 추론 설계는 **더 짧고 더 편해서** 다음 사람이
+실제로 그렇게 고칠 만한 방향이고, 그때 깨지는 것은 코드가 아니라 **진단 가능성**이다.
+
 ## Issues found
 
 **I-1. 브리프가 자기 유예 근거를 재 보지 않고 "미지수" 로 적었다.**
@@ -401,6 +485,19 @@ clean 트리에서 직접 돌렸다 — **config 10종 + 뮤테이션 6종 전�
   모양**이고, 이 브리프가 막으려던 *"green 이 말하지 않은 것"* 그 자체다.
 - *처리*: HANDOFF 함정으로 등재했다. **판정은 passed 수가 아니라 skip 수를 먼저 본다.**
 
+### 전수 회귀 — 임베딩 슬라이스 뒤 (베타, 2026-08-20)
+
+**`2319 passed · 1 skipped · 2544 subtests` (1068초).** skip 1 = live Chroma(구조적).
+
+- **셀 +22 · subtest +22 가 전부 이 슬라이스의 신규 가드다** — 조립 16셀(신규 파일) ·
+  provider +6셀.
+- **검산**: 착수 전 `2297 / 1 / 2522`. 그 2522 는 재검 실측 2520 에 **검증 기록 둘**(폐쇄 재검 ·
+  `cd1d82d`)이 판정 열 전수 셀을 **subtest +2** 한 값이다. `2297+22 = 2319` · `2522+22 = 2544`
+  로 **양쪽 다 맞는다.**
+- **★ mongo 를 `hello().isWritablePrimary` 로 예열한 뒤 돌렸다** — 오늘 오전 등재한 함정
+  (`up -d` 직후면 Mongo 11셀이 조용히 skip 되고 요약줄은 초록)의 첫 적용이다. **포트가
+  27020 이라 기본 포트로 물으면 `ECONNREFUSED` 다** — 예열 명령에 `--port 27020` 이 필요하다.
+
 > **★ 위 mypy 수치는 재현 스크립트가 아니라 명령줄이다.** 저장소 관례(검증 재현 스크립트는 커밋한다)에
 > 비추면 **약한 형태**다. 다만 이 측정은 슬라이스 착수 시 **가드 셀 자체가 그 자리를 대체**하므로
 > 별도 스크립트를 남기지 않았다 — **셀이 생기는 순간 이 명령줄은 셀의 설정으로 굳는다.**
@@ -430,15 +527,16 @@ clean 트리에서 직접 돌렸다 — **config 10종 + 뮤테이션 6종 전�
 
 ## Next steps
 
-- **다음 전수 기대값 `2297 / 1 / 2521`** — 재검 실측이 `2297/1/2520` 이었고, **재검 기록 등재가 `test_docs_indexes` 판정 열 전수 셀을 subtest +1**(코드 무관 자리).
-- **다음은 임베딩 어댑터 슬라이스(축 ①) 하나다** — 축 ②는 오늘 닫혔다.
-  [브리프](../../plans/embedding-adapter-slice-decisions.md) 순서: 조립 헬퍼 + 전수 가드 →
-  `OpenAIEmbeddingProvider` → README env 서술 → `docker-compose.external.yml` 문단 수정.
-- **①을 여는 사람이 알아야 할 것 둘**: ① `calibrate_character_identity_threshold.py` 의
-  **시그니처는 이미 고쳐졌고 부트스트랩(`sys.path`)만 남았다** — 그것이 결정 4=A 헬퍼 이관의
-  범위다(일부러 안 건드렸다). ② ①의 조건 *"닫혔다는 증거는 가드 셀"* 은 **이미 충족된 상태로
-  시작한다**(뮤테이션 M4).
-- **오너 결정 대기 브리프는 dogfood 착수 하나뿐이다.**
-- 그 뒤가 리랭커 슬라이스([브리프](../../plans/reranker-slice-decisions.md) Resolved).
-- **미검증 = 0커밋.** `cd1d82d` 가 [2026-08-20 검증](../../verifications/2026-08-20/deploy_llama_required_b1_b2.md)으로 닫히며 **저장소에 미검증 구간이 없다.**
-  필요한 키를 나중에 못 넣게 되는 방향의 과잉교정).
+- **다음은 리랭커 슬라이스다.** [브리프](../../plans/reranker-slice-decisions.md) Resolved(08-18)이고
+  **1=A(임베딩 어댑터 먼저)의 선행 조건이 오늘 충족됐다.** 확정값: 2=A(seam+외부 먼저 · 로컬
+  기본 no-op) · 3=A(데코레이터+조립 가드) · 4=A+C **단 평가 하네스 선작성**.
+  **★ 그 하네스의 첫 고객이 임베딩일 수 있다**(임베딩 브리프 §후속 고려).
+- **임베딩 축에서 열린 채 남은 것 둘 — 둘 다 트리거가 붙어 있다.**
+  ① **배치(`embed_many`)** — 트리거는 **재색인 지연·호출 수 실측**이고 그 실측은 **외부 키가
+  있어야** 가능하다. ② **차원까지 바뀔 때의 컬렉션 재생성 절차** — 트리거는 **실제로 차원이
+  다른 모델을 조달할 때**.
+- **오너 결정 대기 브리프는 dogfood 하나뿐이다.**
+- **미검증 = 3커밋**(`0bb73ee`·`c3f75c0`·`e49d458`). 볼 만한 축 넷: ① 조립 가드가 **AST 라서**
+  놓치는 형태(별칭 import 후 호출 등) ② 헬퍼가 **env → provider 만** 하는가 ③
+  `_strip_version_suffix` 가 **경로 안의 `v1`** 을 안 건드리는가 ④ `EMBEDDING_API_FORMAT` 기본이
+  `native` 라 **기존 배포가 정말 무영향**인가. **외부 키가 필요한 것은 실호출과 재색인 실측뿐**이다.
