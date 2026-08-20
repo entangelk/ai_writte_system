@@ -525,6 +525,29 @@ clean 트리에서 직접 돌렸다 — **config 10종 + 뮤테이션 6종 전�
 - **H2(비차단, 기존 열린 항목 유지)** — 네 번째 compose 파일은 가드가 자동 추적하지 않는다(셀이 파일 경로를 하드코딩). 트리거: 새 override 의 `LLAMA_BASE_URL` 선언.
 - **★ 전수 1회차가 내 편집을 잡았다** — 1회차(등재 완료 전 트리) `2294/5failed/1/2520` 의 실패 5건이 전부 docs-index 계열이었다: 카운트(246→247)를 인덱스 행보다 먼저 고치는 동안 **행 없는 기록 파일·분포 불일치**가 그대로 걸린 것. 행+누락 2곳(docs/README.md 카운트·README 분포 문장)을 채우니 `test_docs_indexes` 13 passed/257 subtests. **카운트 가드가 검증자의 등재 절차까지 검사한다.**
 
+### 독립 검증 — 임베딩 어댑터 슬라이스 (0bb73ee·c3f75c0·e49d458) — 조건부 합격
+
+(또 다른 세션 — 임베딩 구현자가 아님. 기록 [`verifications/2026-08-20/embedding_adapter_slice.md`](../../verifications/2026-08-20/embedding_adapter_slice.md) · 재현 [`repro_embedding_assembly.sh`](../../verifications/2026-08-20/repro_embedding_assembly.sh) 커밋)
+
+- **축 넷 판정**: ① 별칭 import 우회 **실존**(→조건 B1) ② 헬퍼 env→provider 만 ✓ ③ 경로 안 `v1` 무영향 ✓(E5 재유도) ④ 기본값 native 무영향 ✓(코드 기본값 동일·셀·compose 렌더 세 층).
+- **뮤테이션 페어링**(적용 diff 는 재현 스크립트 그대로):
+
+  | 뮤테이션 | file:line | 무는 셀 | 수 |
+  |---|---|---|---|
+  | **V1** 별칭 import 후 `REP(…)` | index_sync_worker.py | **없음 — 16 passed** | **0** |
+  | V1c 할당 별칭 `P=Remote…; P(…)` | index_sync_worker.py | 없음(같은 계열) | 0 |
+  | V1b 모듈 속성 `emb.Remote…(…)` | index_sync_worker.py | `test_no_site_builds_an_embedding_provider_by_hand` | 1 |
+  | E1 직접 회귀(import 문 잔류) | index_sync_worker.py | 같은 가드 셀 | 1 |
+  | E2b 결합(두 생성자 제거) | embedding.py | `test_the_helper_itself_is_allowed_to_construct` 포함 13 failed | 13 |
+  | E3 키 유무 추론 | embedding.py | `test_the_key_alone_does_not_switch_the_format` 포함 | 6 |
+  | E5 접미 `/v1` 벗기기 제거 | embedding.py | pasted 셀 **접미 2서브테스트만**(`/v1/proxy` 통과) | 2 |
+  | E6 openai 쪽 차원 가드 탈락 | embedding.py | `test_the_dimension_guard_reaches_the_openai_provider_too` | 1 |
+  | E4 모델 조용히 기본값 | embedding.py | `test_openai_format_without_a_model_fails_fast` | 1 |
+
+- **조건 B1(오너 선택 대기)** — 가드가 `Call` 피호출자를 원이름 집합과만 비교해 `import … as REP` 후 호출을 못 본다. 계약 문언 *"하나라도"* 가 잠금보다 넓다(mypy M8~M11 과 같은 모양). **권장: asname 맵 강화**(약 10줄, 할당 별칭은 셀 문언에 잔여 명시) / 대안: 문언 축소. 폐쇄 확인 = 재현 스크립트 V1 블록이 16 passed → 가드 실패로 뒤집히는 것.
+- **비차단** — H1 external.yml 새 env 3종 표기-셀 부재(FORMAT 콜론은 빈 값 처리가 갈린다) · H2 가드 스캔 범위 `services`+`scripts` 하드코딩("세 번째 파일" 계열). 관측: `if __name__` 블록이 WireFormatSelectionTest 앞에 있어 직접 실행 시 그 클래스 미수집(pytest 무영향).
+- 전수 **`2319 passed · 1 skipped · 2545 subtests`**(1183초, 등재 후 트리 실측) — passed·skip 은 예고(`2319/1`)와 정확히 일치, subtest 2545 = 구현자 실측 2544 + 이 기록 등재분 1. 코드 무변 상태에서 검증 기록이 하나 더 등재되면 subtest +1(조건 B1 폐쇄처럼 셀을 바꾸는 커밋이 오면 그 커밋의 예고값으로 다시 센다).
+
 ## Next steps
 
 - **다음은 리랭커 슬라이스다.** [브리프](../../plans/reranker-slice-decisions.md) Resolved(08-18)이고
