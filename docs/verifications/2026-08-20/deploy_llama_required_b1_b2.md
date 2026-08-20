@@ -67,7 +67,7 @@
 
 ### 4. 실측 표의 재현성 — 절차 미기록(→ H1)
 
-- 구현자 실측 표의 네 결과(주소 없음 rc=1 한국어 사유 · 넷 지정 rc=0 · 호스트 llama 통과 · base/llama rc=0 무변)는 **값·문구까지 전부 재현됐다**. 다만 "주소 없음 → rc=1" 은 **환경 통제 없이는 이 머신에서 재현되지 않는다**: `.env` 가 LLAMA 를 제공하므로 P0(셸 3개 + `.env` 활성)은 rc=0(LLAMA 는 `.env` 가 채움), P0b(아무것도 안 줌)는 **EMBEDDING_SERVICE_URL 부터** rc=1. `--env-file /dev/null` 로 우회해야만 LLAMA 의 `:?` 가 드러난다(A2). 구현자가 어떻게 통제했는지 work_log 에 없다 — 주장은 참이지만 절차가 없어 제3자가 "그대로" 돌리면 다른 결과를 본다. 이 기록의 Methodology 와 repro 스크립트가 그 절차를 채운다.
+- 구현자 실측 표의 네 결과(주소 없음 rc=1 한국어 사유 · 넷 지정 rc=0 · 호스트 llama 통과 · base/llama rc=0 무변)는 **값·문구까지 전부 재현됐다**. 다만 "주소 없음 → rc=1" 은 **환경 통제 없이는 이 머신에서 재현되지 않는다**: `.env` 가 LLAMA 를 제공하므로 P0(셸 3개 + `.env` 활성)은 rc=0(LLAMA 는 `.env` 가 채움), P0b(아무것도 안 줌)도 LLAMA 아닌 다른 필수부터 rc=1 — 어느 서비스가 먼저 걸리는지는 실행마다 달랐다(수동 실측 `application.EMBEDDING_SERVICE_URL` · 스크립트 재실행 `generation_worker.ELASTICSEARCH_URL`, compose 의 보간 순서가 고정이 아니다). `--env-file /dev/null` 로 우회해야만 LLAMA 의 `:?` 가 드러난다(A2). 구현자가 어떻게 통제했는지 work_log 에 없다 — 주장은 참이지만 절차가 없어 제3자가 "그대로" 돌리면 다른 결과를 본다. 이 기록의 Methodology 와 repro 스크립트가 그 절차를 채운다.
 
 ### 5. 문서·링크 정합
 

@@ -39,7 +39,7 @@ echo "═══ Part 1. compose config 실측(환경 통제) ═══"
 unset LLAMA_BASE_URL EMBEDDING_SERVICE_URL CHROMA_HOST ELASTICSEARCH_URL
 echo "── P0 배포, .env 있는 그대로 + 셸 3개 → rc=0(.env 의 LLAMA 가 :? 를 마스킹 — 중립화 필요성의 실증)"
 env $THREE docker compose -f $BASE -f $EXT config >/dev/null 2>/tmp/p0.err; echo "rc=$? : $(head -1 /tmp/p0.err)"
-echo "── P0b 배포, 아무것도 안 줌(.env 활성) → 첫 거부는 EMBEDDING(LLAMA 는 .env 가 채운다)"
+echo "── P0b 배포, 아무것도 안 줌(.env 활성) → LLAMA 아닌 다른 필수부터 rc=1(어떤 서비스가 먼저 걸리는지는 실행마다 다르다; LLAMA 는 .env 가 채운다)"
 docker compose -f $BASE -f $EXT config >/dev/null 2>/tmp/p0b.err; echo "rc=$? : $(head -1 /tmp/p0b.err)"
 echo "── A2 배포, 넷 중 LLAMA 만 빼기(.env 우회) → rc=1 + 한국어 사유"
 env $THREE docker compose --env-file /dev/null -f $BASE -f $EXT config >/dev/null 2>/tmp/a2.err; echo "rc=$? : $(head -1 /tmp/a2.err)"
