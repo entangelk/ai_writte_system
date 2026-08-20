@@ -84,17 +84,56 @@ E5(접미 `/v1` 벗기기 제거) 재유도: `https://api.example.com/v1`·`/v1/
 
 ### Blocking (조건)
 
-- **B1 — AST 가드의 별칭 import 우회**(Findings 1). 계약 문언 *"하나라도"* 가 잠금보다 넓고, 벡터(`import … as …`)는 평범한 관행이다. 폐쇄까지 판정을 **조건부**로 둔다. 권장 처방은 가드 강화(i) — `asname` 맵으로 별칭 호출까지 단정, 할당 별칭(V1c)은 셀 문언에 잔여로 명시. 폐쇄 확인은 [repro 스크립트](repro_embedding_assembly.sh) V1 블록이 **16 passed → 가드 실패로 뒤집히는 것**으로 재현된다.
+- ~~**B1 — AST 가드의 별칭 import 우회**~~ **[닫힘 2026-08-20 `7af3a87`]**(Findings 1). 계약 문언 *"하나라도"* 가 잠금보다 넓고, 벡터(`import … as …`)는 평범한 관행이다. 폐쇄까지 판정을 **조건부**로 둔다. 권장 처방은 가드 강화(i) — `asname` 맵으로 별칭 호출까지 단정, 할당 별칭(V1c)은 셀 문언에 잔여로 명시. 폐쇄 확인은 [repro 스크립트](repro_embedding_assembly.sh) V1 블록이 **16 passed → 가드 실패로 뒤집히는 것**으로 재현된다.
 
 ### Hardening recommendations (비차단)
 
-- **H1 — external.yml 새 env 3종의 표기를 잠그는 셀이 없다.** `EMBEDDING_API_FORMAT` 의 콜론 형태는 빈 값 처리가 갈리는 자리(콜론=빈 값→native, 대시=빈 값→코드 ValueError)라 `llama.yml`·`CHROMA_PORT` 선례와 같은 형태-셀의 value 가 있다. MODEL/KEY 는 빈 기본값이라 대시/콜론이 행동 중립(선택은 표기 규칙 준수).
-- **H2 — 가드 스캔 범위가 경로 하드코딩**(`services`+`scripts`). 새 최상위 코드 디렉터리는 자동으로 안 따라온다 — "세 번째 compose 파일"과 같은 계열. 트리거: 새 디렉터리 추가 시 `_sources()` 함께 고친다.
+- ~~**H1 — external.yml 새 env 3종의 표기를 잠그는 셀이 없다.**~~ **[닫힘]** `EMBEDDING_API_FORMAT` 의 콜론 형태는 빈 값 처리가 갈리는 자리(콜론=빈 값→native, 대시=빈 값→코드 ValueError)라 `llama.yml`·`CHROMA_PORT` 선례와 같은 형태-셀의 value 가 있다. MODEL/KEY 는 빈 기본값이라 대시/콜론이 행동 중립(선택은 표기 규칙 준수).
+- ~~**H2 — 가드 스캔 범위가 경로 하드코딩**~~ **[닫힘 — 분류 강요로]**(`services`+`scripts`). 새 최상위 코드 디렉터리는 자동으로 안 따라온다 — "세 번째 compose 파일"과 같은 계열. 트리거: 새 디렉터리 추가 시 `_sources()` 함께 고친다.
 - (관측) [`tests/test_embedding_assembly.py:162`](../../../tests/test_embedding_assembly.py) 의 `if __name__` 블록이 `WireFormatSelectionTest` **앞에** 있어 직접 실행(`python -m`) 시 그 클래스가 수집되지 않는다 — pytest 로 돌 때는 무영향.
 
 ## Verdict
 
 **조건부 합격** — B1(AST 가드가 별칭 import 후 호출을 못 본다 — "하나라도" 단정과 잠금 사이의 간극 폐쇄)를 닫을 것. 나머지 전 축은 실증적으로 성립했다: 헬퍼는 env→provider 만 하고(축②), `/v1/proxy` 무영향(축③), 기본값 native 의 무영향이 코드·셀·렌더 세 층에서 확인됐으며(축④), E1~E6 전부 같은 diff 로 재현되고 산출물 4건·전수 `2319/1/2544` 예고치까지 일치한다.
+
+## 조건 폐쇄 — **B1 닫힘 · H1·H2·관측도 함께 (2026-08-20, 구현 세션 `7af3a87`)**
+
+> 이 절은 **검증자가 아니라 구현 세션이 나중에 추가한 것**이다. 위 Findings·Verdict 는
+> 검증 시점 그대로 두었다.
+
+**폐쇄안 (i) 가드 강화를 골랐다.** (ii) 문언 축소는 *"하나라도"* 를 *"원이름 직접 호출"* 로
+좁혀 기록을 참으로 만드는 길인데, 그것은 **계약을 약해진 채 합의**시킨다. 오늘 이 저장소가
+같은 실수를 이미 두 번 했다(mypy 슬라이스의 정본 산출물 문언 B1 · 재검의 셀 실패 메시지 H4).
+**세 번째로 같은 선택지가 나왔고 세 번 다 "검사를 넓힌다" 를 골랐다.**
+
+**구현**: 파일마다 `ImportFrom` 의 `asname` 을 모아 원이름 집합에 더한다. **별칭은 파일
+스코프**라 한 파일의 `as REP` 가 다른 파일의 `REP` 를 뜻하지 않으므로 맵을 파일마다 다시 만든다.
+
+**★ 잔여를 문언에 명시했다 — 검증자 권고 그대로.** 할당 별칭(`P = RemoteEmbeddingProvider`
+뒤의 `P(…)`, V1c)은 **안 잡는다.** 이름 재결합 추적은 타입체커의 일이고, **여기서 멈추는 것이
+이 셀의 계약**이다. 셀 docstring 이 *"잡는 형태 셋 + 잔여 하나"* 로 다시 쓰였다 — **"하나라도"
+라는 문언이 사라진 것이 이 폐쇄의 절반**이다.
+
+**재검(구현 세션, 검증자 스크립트 그대로 — `bash docs/verifications/2026-08-20/repro_embedding_assembly.sh`)**
+
+| 블록 | 검증 시점 | 폐쇄 후 |
+|---|---|---|
+| **V1** 별칭 import 후 호출 | 16 passed(침묵) | ✅ **가드 실패** — 예고된 뒤집힘 그대로 |
+| **V1c** 할당 별칭 | 침묵 | 침묵(**문언에 잔여로 명시**) |
+| **V1b** 모듈 속성 | 잡음 | 잡음(경계 보존) |
+
+**비차단도 함께 닫았다**
+
+| | 처방 | 무는 것 확인 |
+|---|---|---|
+| **H1** | external.yml 새 env 3종의 표기 셀([`test_compose_backend_env.py`](../../../tests/test_compose_backend_env.py) `ExternalOverrideTest`) | V4(FORMAT→대시) · V5(MODEL→콜론) 각각 subtest 재실패 |
+| **H2** | 스캔 범위 하드코딩 → **분류 강요**(`_SCANNED` 또는 `_OUT_OF_SCOPE` 에 이유와 함께) | V2(새 최상위 디렉터리) 재실패 |
+| H2 반대쪽 | 목록만 남고 디렉터리가 사라지면 스캔이 0파일이 되어 조용히 통과 — 그것도 잠갔다 | V3(`_SCANNED` 에 없는 이름) subtest 재실패 |
+| 관측 | `if __name__` 블록을 파일 끝으로 | `PYTHONPATH=. python3 tests/test_embedding_assembly.py` → **11 → 18 tests** |
+
+**★ 관측 항목이 가장 조용한 결함이었다.** `if __name__` 블록 뒤에 정의된 `WireFormatSelectionTest`
+**7셀**이 직접 실행에서 아예 수집되지 않았다. pytest 로는 돌기 때문에 **CI 도 전수도 아무 말을
+안 한다** — 이 저장소가 오늘 세 번 만난 *"green 이 말하지 않은 것"* 의 네 번째 얼굴이다.
 
 ## Outstanding items
 
