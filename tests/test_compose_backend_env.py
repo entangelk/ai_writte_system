@@ -320,6 +320,37 @@ class ExternalOverrideTest(unittest.TestCase):
             "흘러간다(gateway 는 `os.environ.get(name, DEFAULT)` 로 읽는다)",
         )
 
+    def test_the_embedding_api_env_uses_the_notation_its_reader_needs(self) -> None:
+        """새 임베딩 API env 3종의 표기 — 콜론/대시가 취향이 아니라 코드를 따라간다.
+
+        `EMBEDDING_API_FORMAT` 은 코드가 `get(name, DEFAULT)` 로 읽으므로 **콜론**이
+        맞다. 대시로 두면 `EMBEDDING_API_FORMAT=` (빈 값)이 그대로 넘어가 코드가
+        `ValueError` 를 던진다 — 끄려던 사람이 기동 실패를 본다.
+
+        `EMBEDDING_API_MODEL`·`EMBEDDING_API_KEY` 는 `get(name)` + falsy 검사라
+        **대시**다. 지금은 기본값이 비어 있어 두 표기의 행동이 같지만, **표기 규칙을
+        지키는 것 자체가 다음 사람이 기본값을 넣을 때의 안전장치**다 — 콜론에
+        기본값이 붙는 순간 "빈 값으로 끄기" 가 조용히 불가능해진다.
+
+        선례: `EMBEDDING_SERVICE_URL` 의 대시(위 `_dash_form`) · `LLAMA_BASE_URL`
+        의 콜론. 이 저장소는 같은 이유로 두 번 다 형태를 셀로 잠갔다.
+        """
+        expected = {
+            "EMBEDDING_API_FORMAT": ("${EMBEDDING_API_FORMAT:-native}", "콜론"),
+            "EMBEDDING_API_MODEL": ("${EMBEDDING_API_MODEL-}", "대시"),
+            "EMBEDDING_API_KEY": ("${EMBEDDING_API_KEY-}", "대시"),
+        }
+        services = [name for name, env in self.by_service.items()
+                    if "EMBEDDING_SERVICE_URL" in env]
+        self.assertEqual(len(services), 3, "임베딩을 받는 서비스가 셋이어야 한다")
+        for service in services:
+            for name, (literal, form) in expected.items():
+                with self.subTest(service=service, variable=name):
+                    self.assertEqual(
+                        self.by_service[service].get(name), literal,
+                        f"{service}.{name} 은 {form} 형태여야 한다 — "
+                        "표기는 코드가 그 변수를 읽는 방식을 따라간다")
+
     def test_model_carrying_services_are_behind_a_profile(self) -> None:
         """profile 뒤에 있어야 기동에서도 `build` 에서도 빠진다(2026-08-14 실측)."""
 

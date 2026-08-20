@@ -40,29 +40,90 @@ _PROVIDER_CONSTRUCTORS = frozenset({
 })
 
 
+#: 최상위 코드 디렉터리 중 **일부러 범위 밖**인 것과 그 이유. 새 디렉터리가 생기면
+#: 아래 `test_the_scan_covers_every_top_level_code_directory` 가 실패하므로, 조용히
+#: 빠지는 대신 여기서 분류를 강요한다("세 번째 compose 파일" 계열의 처방 — 2026-08-20
+#: 검증 H2). 이 저장소의 `test_compose_exposure` 가 새 서비스에 쓰는 방식과 같다.
+_OUT_OF_SCOPE = {
+    "tests": "테스트는 provider 를 직접 만드는 것이 정당하다(단위 테스트가 그 일이다)",
+    "frontend": "TypeScript 표면 — 파이썬 조립 지점이 아니다",
+    "docs": "문서. 재현 스크립트가 뮤테이션으로 생성자를 적는 자리가 있다",
+    "schemas": "계약 파일",
+}
+
+#: 스캔하는 최상위 디렉터리.
+_SCANNED = ("services", "scripts")
+
+
+def _top_level_python_dirs() -> set[str]:
+    found = set()
+    for child in _ROOT.iterdir():
+        if not child.is_dir() or child.name.startswith("."):
+            continue
+        if child.name == "node_modules":
+            continue
+        if next(child.rglob("*.py"), None) is not None:
+            found.add(child.name)
+    return found
+
+
 def _sources() -> list[Path]:
-    paths = [*(_ROOT / "services").rglob("*.py"), *(_ROOT / "scripts").rglob("*.py")]
+    paths = [q for name in _SCANNED for q in (_ROOT / name).rglob("*.py")]
     return sorted(p for p in paths if p != _ASSEMBLY_MODULE)
+
+
+def _constructor_names(tree: ast.AST) -> set[str]:
+    """이 파일 안에서 provider 생성자를 가리키는 **모든 이름**.
+
+    ★ 원이름만 보면 `import … as REP` 뒤의 `REP(…)` 를 놓친다. 2026-08-20 독립
+    검증이 실제로 그것으로 가드를 뚫었고(조건 B1), `import … as …` 는 이 저장소
+    스크립트에서 쓰이는 평범한 관행이라 벡터가 현실적이었다.
+
+    **잔여(의도적으로 안 잡는 것): 할당 별칭** — `P = RemoteEmbeddingProvider`
+    뒤의 `P(…)`. 잡으려면 이름 재결합을 따라가야 하고 그것은 타입체커의 일이다.
+    여기서 멈추는 것이 이 셀의 계약이며, 아래 docstring 이 그렇게 말한다.
+    """
+
+    names = set(_PROVIDER_CONSTRUCTORS)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name in _PROVIDER_CONSTRUCTORS and alias.asname:
+                    names.add(alias.asname)
+    return names
 
 
 class NoDirectProviderConstructionTest(unittest.TestCase):
     def test_no_site_builds_an_embedding_provider_by_hand(self):
-        """under-strict: 어떤 자리든 생성자를 직접 부르면 이 셀이 실패한다.
+        """under-strict: 생성자를 직접 부르는 자리가 있으면 이 셀이 실패한다.
 
         `import` 나 문서에 이름이 나오는 것은 무관하다 — **호출**만 본다. 그래서
         문자열 검색이 아니라 AST 로 `Call` 노드의 피호출자 이름을 본다(2026-08-20
         mypy 가드에서 배운 것: 문자열 매칭은 표기 하나만 보고 나머지를 놓친다).
+
+        **잡는 형태 셋**: 원이름 호출 · 모듈 속성 호출(`emb.RemoteEmbeddingProvider(…)`)
+        · **`import … as REP` 뒤의 `REP(…)`**. 셋째는 2026-08-20 독립 검증이 조건
+        B1 으로 뚫은 자리다 — 원이름 집합과만 비교하던 초판이 침묵했고, `as` 는
+        이 저장소에서 쓰이는 평범한 관행이라 벡터가 현실적이었다.
+
+        **★ 잔여 하나 — 할당 별칭은 안 잡는다.** `P = RemoteEmbeddingProvider` 뒤의
+        `P(…)` 는 통과한다. 이름 재결합을 따라가는 것은 타입체커의 일이고, 여기서
+        멈추는 것이 이 셀의 계약이다. **계약 문언을 잠금보다 넓게 쓰지 않으려고
+        적어 둔다** — 오늘 두 번 그 실수를 했다(정본 산출물 문언 · 셀 실패 메시지).
         """
         offenders = []
         for path in _sources():
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            # 원이름 + 이 파일이 붙인 별칭. 파일마다 다시 만든다 — 별칭은 파일
+            # 스코프이고, 한 파일의 `as REP` 가 다른 파일의 `REP` 를 뜻하지 않는다.
+            local_names = _constructor_names(tree)
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call):
                     continue
                 func = node.func
                 name = (func.id if isinstance(func, ast.Name)
                         else func.attr if isinstance(func, ast.Attribute) else None)
-                if name in _PROVIDER_CONSTRUCTORS:
+                if name in local_names:
                     offenders.append(
                         f"{path.relative_to(_ROOT)}:{node.lineno}: {name}(...)")
         self.assertEqual(
@@ -100,6 +161,31 @@ class NoDirectProviderConstructionTest(unittest.TestCase):
             with self.subTest(site=site):
                 text = (_ROOT / site).read_text(encoding="utf-8")
                 self.assertIn("build_embedding_provider_from_env", text)
+
+
+class ScanScopeTest(unittest.TestCase):
+    def test_the_scan_covers_every_top_level_code_directory(self):
+        """새 최상위 코드 디렉터리가 조용히 범위 밖으로 빠지지 않게 한다.
+
+        경로를 하드코딩한 스캔은 "세 번째 compose 파일" 과 같은 병이다 — 계약이
+        디렉터리에 걸려 있는데 목록이 둘만 알고 있으면, 셋째가 생기는 날 가드가
+        아무 말도 안 한다(2026-08-20 검증 H2). 그래서 **분류를 강요한다**:
+        스캔하거나, 이유와 함께 범위 밖으로 적거나 둘 중 하나다.
+        """
+        classified = set(_SCANNED) | set(_OUT_OF_SCOPE)
+        unclassified = _top_level_python_dirs() - classified
+        self.assertEqual(
+            unclassified, set(),
+            "새 최상위 파이썬 디렉터리다 — _SCANNED 에 넣거나 _OUT_OF_SCOPE 에 "
+            "이유와 함께 적는다")
+
+    def test_the_scanned_directories_still_exist(self):
+        # over-strict 반대쪽: 목록만 남고 디렉터리가 사라지면 스캔이 0파일이 되고
+        # 위 셀은 조용히 통과한다.
+        for name in _SCANNED:
+            with self.subTest(directory=name):
+                self.assertTrue((_ROOT / name).is_dir())
+                self.assertTrue(next((_ROOT / name).rglob("*.py"), None))
 
 
 class HelperBehaviourTest(unittest.TestCase):
@@ -159,8 +245,6 @@ class HelperBehaviourTest(unittest.TestCase):
         self.assertFalse(build_embedding_provider_from_env()._trust_env)
 
 
-if __name__ == "__main__":  # pragma: no cover
-    unittest.main()
 
 
 class WireFormatSelectionTest(unittest.TestCase):
@@ -243,3 +327,7 @@ class WireFormatSelectionTest(unittest.TestCase):
         os.environ["EMBEDDING_DIMENSIONS"] = "1536"
         self.assertEqual(
             build_embedding_provider_from_env()._expected_dimensions, 1536)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    unittest.main()
