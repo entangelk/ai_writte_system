@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+import configparser
+import re
 import subprocess
 import sys
 import tempfile
@@ -27,6 +29,23 @@ _INSTALL_HINT = (
     "`python3 -m pip install -r requirements-dev.txt` 로 설치한다. "
     "(개발 전용 의존성이며 프로덕션 이미지에 들어가지 않는다.)"
 )
+
+#: mypy 가 억제로 받아들이는 주석 표기 전부. 공백은 선택이고(`#type:ignore`),
+#: 파일 단위 프라그마(`# mypy: …`)도 같은 일을 한다 — 초판이 정준형 하나만 봤다가
+#: 독립 검증에 셋으로 뚫렸다(2026-08-20 B1).
+_SUPPRESSION = re.compile(r"#\s*(type:\s*ignore|mypy:)")
+
+#: `[mypy]` 섹션에 허용된 키. 이 밖은 전부 "조용해지는 길" 이다 — `ignore_errors`,
+#: `exclude`, `follow_imports = skip` 이 대표적이다.
+_ALLOWED_KEYS = frozenset({
+    "mypy_path", "ignore_missing_imports", "files", "disable_error_code",
+})
+
+#: 지금 끈 코드. 셀은 **부분집합**만 단정한다 — 넓히기(빼기)는 자유여야 한다.
+_PINNED_DISABLED = frozenset({
+    "arg-type", "operator", "attr-defined", "union-attr", "return-value",
+    "assignment", "type-var", "var-annotated",
+})
 
 #: 표적 결함과 **같은 모양**의 최소 재현. 저장소 파일에 의존하지 않는다 — 그 파일이
 #: 리팩터링되면 함께 죽는 가드는 가드가 아니다.
@@ -85,15 +104,63 @@ class RepositoryTypecheckTest(unittest.TestCase):
                          f"mypy 가 물었다:\n{result.stdout}\n{result.stderr}")
 
     def test_no_suppression_comment_carries_the_guard(self):
-        # 위 셀을 `# type: ignore` 로 초록으로 만드는 우회를 막는다.
+        """위 셀을 **주석으로** 초록으로 만드는 우회를 막는다.
+
+        ★ 초판은 문자열 `"type: ignore"` 를 찾았고, 독립 검증(2026-08-20 B1)이 그
+        검사를 **세 가지로 뚫었다**. mypy 가 억제로 받아들이는 표기가 하나가 아니다:
+
+        - `#type:ignore[call-arg]` — **공백 없음**. 사람 눈에는 같고 문자열 매칭에는
+          안 걸린다.
+        - `# mypy: ignore-errors` — 파일 1행 프라그마. **파일 하나를 통째로** 끈다.
+        - `# mypy: disable-error-code="call-arg"` — 같은 프라그마의 코드 지정형.
+
+        그래서 정규식으로 넓혔다. **"억제 주석 0건" 이라는 계약 문언이 실제 잠금
+        범위보다 넓었던 것이 그 지적의 핵심**이라, 여기서는 문언이 아니라 검사를
+        넓혀 맞췄다.
+        """
         offenders = []
-        for path in [*(_ROOT / "services").rglob("*.py"),
-                     *(_ROOT / "scripts").rglob("*.py")]:
+        for path in sorted([*(_ROOT / "services").rglob("*.py"),
+                            *(_ROOT / "scripts").rglob("*.py")]):
             for number, line in enumerate(
                     path.read_text(encoding="utf-8").splitlines(), 1):
-                if "type: ignore" in line:
-                    offenders.append(f"{path.relative_to(_ROOT)}:{number}")
+                if _SUPPRESSION.search(line):
+                    offenders.append(
+                        f"{path.relative_to(_ROOT)}:{number}: {line.strip()}")
         self.assertEqual(offenders, [], "억제로 초록을 만들지 않는다")
+
+    def test_the_config_cannot_be_quietly_weakened(self):
+        """설정 파일로 조용해지는 길 전부를 잠근다 (2026-08-20 B1·H1 폐쇄).
+
+        주석만 막으면 같은 일을 `mypy.ini` 에서 할 수 있다. 독립 검증이 둘을 뚫었다:
+
+        - 퍼모듈 섹션 `[mypy-scripts.…]` + `ignore_errors = True` — **브리프가 스스로
+          경고한 "억제 목록이 부채가 된다" 의 정확한 형태**다.
+        - `files = services, scripts` → `files = services` — **범위 축소**. 검사 대상에서
+          빼면 결함은 그대로 살아 있는데 저장소는 초록이다.
+
+        그래서 벡터를 하나씩 막지 않고 **허용된 것만 남긴다**: 섹션은 `[mypy]` 하나,
+        키는 아래 넷, 범위는 두 디렉터리, disable 목록은 고정 집합의 **부분집합**.
+        부분집합인 이유는 **넓히기(코드를 목록에서 빼는 것)는 자유여야** 하기
+        때문이다 — 브리프 §후속 고려의 확장 트리거를 이 셀이 막으면 안 된다.
+        """
+        parser = configparser.ConfigParser()
+        parser.read(_CONFIG, encoding="utf-8")
+
+        self.assertEqual(parser.sections(), ["mypy"],
+                         "퍼모듈 섹션은 억제 목록이 되는 길이다")
+        self.assertLessEqual(
+            set(parser["mypy"]), _ALLOWED_KEYS,
+            "이 키들 밖은 전부 조용해지는 길이다(ignore_errors·exclude·follow_imports 등)")
+
+        scope = {part.strip() for part in parser["mypy"]["files"].split(",")}
+        self.assertEqual(scope, {"services", "scripts"}, "범위를 줄이지 않는다")
+
+        disabled = {code.strip().rstrip(",")
+                    for code in parser["mypy"]["disable_error_code"].split()
+                    if code.strip().rstrip(",")}
+        self.assertLessEqual(
+            disabled, _PINNED_DISABLED,
+            "disable 목록에 새 코드를 더하는 것은 억제다 — 빼는 것(넓히기)은 자유다")
 
 
 class GuardDirectionTest(unittest.TestCase):
