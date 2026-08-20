@@ -5,14 +5,21 @@ service): the request shape, a valid vector, optional dimension validation, and
 the error mapping for transport/status/body failures. The provider satisfies the
 sync EmbeddingProvider Protocol used by indexing and context search.
 See docs/plans/04-real-vector-backend-decisions.md (B.1).
+
+`OpenAIEmbeddingProvider` (embedding-adapter slice, decision 1=A) is locked in
+the same file and against the same harness: the two providers speak different
+wires but sit behind one `embed(text) -> vector` seam, and keeping their
+regressions side by side is what makes a divergence visible.
 """
 
+import json
 import unittest
 
 import httpx
 
 from services.application.app.indexing.embedding import (
     EmbeddingProviderError,
+    OpenAIEmbeddingProvider,
     RemoteEmbeddingProvider,
 )
 
@@ -109,3 +116,112 @@ class RemoteEmbeddingProviderTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _openai(handler, **kwargs):
+    kwargs.setdefault("model", "text-embedding-3-small")
+    return OpenAIEmbeddingProvider(
+        base_url="https://api.example.com",
+        transport=httpx.MockTransport(handler),
+        **kwargs,
+    )
+
+
+def _openai_body(vector):
+    return {"data": [{"embedding": list(vector), "index": 0}],
+            "usage": {"prompt_tokens": 4, "total_tokens": 4}}
+
+
+class OpenAIEmbeddingProviderTest(unittest.TestCase):
+    """네 가지가 다르다 — 경로·요청 키·응답 구조·인증. 넷을 각각 잠근다."""
+
+    def test_posts_the_openai_shape_and_returns_a_float_vector(self):
+        seen = {}
+
+        def handler(request):
+            seen["method"] = request.method
+            seen["path"] = request.url.path
+            seen["body"] = json.loads(request.read().decode())
+            seen["auth"] = request.headers.get("Authorization")
+            return httpx.Response(200, json=_openai_body([0.1, 0.2, 0.3, 4]))
+
+        vector = _openai(handler, api_key="sk-test").embed("아린은 항구에 도착했다")
+
+        self.assertEqual(seen["method"], "POST")
+        # 경로는 provider 가 소유한다 — base 는 호스트 루트다(게이트웨이와 같은 관례).
+        self.assertEqual(seen["path"], "/v1/embeddings")
+        # 요청 키는 'text' 가 아니라 'input' 이고, 모델을 요청마다 보낸다.
+        self.assertEqual(seen["body"],
+                         {"input": "아린은 항구에 도착했다",
+                          "model": "text-embedding-3-small"})
+        self.assertEqual(seen["auth"], "Bearer sk-test")
+        # 응답은 data[0].embedding 에 있다.
+        self.assertEqual(vector, (0.1, 0.2, 0.3, 4.0))
+        self.assertTrue(all(isinstance(v, float) for v in vector))
+
+    def test_no_api_key_sends_no_authorization_header(self):
+        # OpenAI 호환 로컬 서버는 키를 안 받는 경우가 있다. 빈 문자열을 Bearer 로
+        # 보내면 그런 서버가 오히려 거부한다.
+        seen = {}
+
+        def handler(request):
+            seen["auth"] = request.headers.get("Authorization")
+            return httpx.Response(200, json=_openai_body([1.0]))
+
+        _openai(handler).embed("x")
+        self.assertIsNone(seen["auth"])
+
+    def test_the_dimension_guard_is_the_same_one(self):
+        """결정 3=A 의 전 기제가 이 가드다 — 두 provider 에서 갈리면 안 된다."""
+
+        def handler(_request):
+            return httpx.Response(200, json=_openai_body([0.0, 1.0, 2.0]))
+
+        self.assertEqual(len(_openai(handler, expected_dimensions=3).embed("x")), 3)
+        with self.assertRaises(EmbeddingProviderError):
+            _openai(handler, expected_dimensions=1024).embed("x")
+
+    def test_transport_and_status_failures_map_to_embedding_error(self):
+        def timeout(_request):
+            raise httpx.ConnectTimeout("slow")
+
+        def refused(_request):
+            raise httpx.ConnectError("refused")
+
+        def unauthorized(_request):
+            return httpx.Response(401, json={"error": {"message": "bad key"}})
+
+        for name, handler in (("timeout", timeout), ("refused", refused),
+                              ("401", unauthorized)):
+            with self.subTest(failure=name):
+                with self.assertRaises(EmbeddingProviderError):
+                    _openai(handler).embed("x")
+
+    def test_the_error_message_carries_the_status_and_not_the_body(self):
+        # 본문에는 벤더 메시지와 함께 우리가 보낸 텍스트가 되돌아올 수 있다.
+        def handler(_request):
+            return httpx.Response(
+                429, json={"error": {"message": "rate limited: 아린은 항구에"}})
+
+        with self.assertRaises(EmbeddingProviderError) as raised:
+            _openai(handler).embed("아린은 항구에")
+        self.assertIn("429", str(raised.exception))
+        self.assertNotIn("아린은 항구에", str(raised.exception))
+
+    def test_malformed_bodies_are_rejected_rather_than_coerced(self):
+        cases = {
+            "not json": httpx.Response(200, content=b"nope"),
+            "not an object": httpx.Response(200, json=[1, 2, 3]),
+            "no data": httpx.Response(200, json={"usage": {}}),
+            "empty data": httpx.Response(200, json={"data": []}),
+            "data holds scalars": httpx.Response(200, json={"data": ["x"]}),
+            "no embedding": httpx.Response(200, json={"data": [{"index": 0}]}),
+            "empty embedding": httpx.Response(200, json=_openai_body([])),
+            "string values": httpx.Response(200, json=_openai_body(["0.1"])),
+            # bool 은 int 의 하위형이라 걸러내지 않으면 0.0/1.0 으로 조용히 들어온다.
+            "bool values": httpx.Response(200, json=_openai_body([True, False])),
+        }
+        for name, response in cases.items():
+            with self.subTest(body=name):
+                with self.assertRaises(EmbeddingProviderError):
+                    _openai(lambda _r, _resp=response: _resp).embed("x")

@@ -20,6 +20,7 @@ import unittest
 from pathlib import Path
 
 from services.application.app.indexing.embedding import (
+    OpenAIEmbeddingProvider,
     RemoteEmbeddingProvider,
     build_embedding_provider_from_env,
 )
@@ -106,7 +107,9 @@ class HelperBehaviourTest(unittest.TestCase):
         self._saved = {
             name: os.environ.pop(name, None)
             for name in ("EMBEDDING_SERVICE_URL", "EMBEDDING_DIMENSIONS",
-                         "EMBEDDING_TIMEOUT_SECONDS", "EMBEDDING_TRUST_ENV")
+                         "EMBEDDING_TIMEOUT_SECONDS", "EMBEDDING_TRUST_ENV",
+                         "EMBEDDING_API_FORMAT", "EMBEDDING_API_MODEL",
+                         "EMBEDDING_API_KEY")
         }
 
     def tearDown(self):
@@ -158,3 +161,85 @@ class HelperBehaviourTest(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+class WireFormatSelectionTest(unittest.TestCase):
+    """어느 형식을 고르는가 — env 하나로 명시하고 추론하지 않는다."""
+
+    def setUp(self):
+        self._saved = {
+            name: os.environ.pop(name, None)
+            for name in ("EMBEDDING_SERVICE_URL", "EMBEDDING_API_FORMAT",
+                         "EMBEDDING_API_MODEL", "EMBEDDING_API_KEY",
+                         "EMBEDDING_DIMENSIONS")
+        }
+        os.environ["EMBEDDING_SERVICE_URL"] = "https://api.example.com"
+
+    def tearDown(self):
+        for name, value in self._saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+    def test_the_default_is_our_own_format(self):
+        """기존 배포가 env 를 하나도 안 건드려도 그대로 돌아야 한다."""
+        self.assertIsInstance(
+            build_embedding_provider_from_env(), RemoteEmbeddingProvider)
+
+    def test_openai_format_is_chosen_explicitly(self):
+        os.environ["EMBEDDING_API_FORMAT"] = "openai"
+        os.environ["EMBEDDING_API_MODEL"] = "text-embedding-3-small"
+        provider = build_embedding_provider_from_env()
+        self.assertIsInstance(provider, OpenAIEmbeddingProvider)
+        self.assertEqual(provider._model, "text-embedding-3-small")
+
+    def test_the_key_alone_does_not_switch_the_format(self):
+        """★ 형식을 키 유무로 추론하지 않는다.
+
+        추론하면 키를 지운 순간 형식이 조용히 바뀌고, 그 실패는 "왜 갑자기 404 인가"
+        로 나타난다 — 원인에서 가장 먼 자리다.
+        """
+        os.environ["EMBEDDING_API_KEY"] = "sk-test"
+        self.assertIsInstance(
+            build_embedding_provider_from_env(), RemoteEmbeddingProvider)
+
+    def test_openai_format_without_a_model_fails_fast(self):
+        # 모델은 요청마다 보내므로 기본값이 있을 수 없다. 여기서 안 멈추면
+        # 벤더 오류를 읽게 되고, 그 메시지는 우리 설정을 말하지 않는다.
+        os.environ["EMBEDDING_API_FORMAT"] = "openai"
+        with self.assertRaises(ValueError) as raised:
+            build_embedding_provider_from_env()
+        self.assertIn("EMBEDDING_API_MODEL", str(raised.exception))
+
+    def test_an_unknown_format_fails_fast_and_names_the_valid_values(self):
+        # 오타(`openAI`, `open-ai`)가 조용히 자체 형식으로 떨어지면
+        # "키를 넣었는데 왜 안 나가나" 가 된다.
+        os.environ["EMBEDDING_API_FORMAT"] = "open-ai"
+        with self.assertRaises(ValueError) as raised:
+            build_embedding_provider_from_env()
+        self.assertIn("native", str(raised.exception))
+        self.assertIn("openai", str(raised.exception))
+
+    def test_a_pasted_vendor_base_url_does_not_double_the_version_prefix(self):
+        """벤더 문서는 base 를 `…/v1` 로 인쇄한다 — 그대로 붙여도 404 가 아니어야."""
+        os.environ["EMBEDDING_API_FORMAT"] = "openai"
+        os.environ["EMBEDDING_API_MODEL"] = "m"
+        for pasted, expected in (
+            ("https://api.example.com/v1", "https://api.example.com"),
+            ("https://api.example.com/v1/", "https://api.example.com"),
+            ("https://api.example.com", "https://api.example.com"),
+            # over-strict: 경로 안의 v1 은 접미가 아니다.
+            ("https://api.example.com/v1/proxy", "https://api.example.com/v1/proxy"),
+        ):
+            with self.subTest(base_url=pasted):
+                os.environ["EMBEDDING_SERVICE_URL"] = pasted
+                self.assertEqual(
+                    build_embedding_provider_from_env()._base_url, expected)
+
+    def test_the_dimension_guard_reaches_the_openai_provider_too(self):
+        os.environ["EMBEDDING_API_FORMAT"] = "openai"
+        os.environ["EMBEDDING_API_MODEL"] = "m"
+        os.environ["EMBEDDING_DIMENSIONS"] = "1536"
+        self.assertEqual(
+            build_embedding_provider_from_env()._expected_dimensions, 1536)
