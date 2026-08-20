@@ -204,13 +204,21 @@ from services.application.app.indexing.chroma import (
 from services.application.app.indexing.embedding import (
     build_embedding_provider_from_env,
 )
-from services.application.app.indexing.memory_index import MEMORY_VECTOR_COLLECTION
+from services.application.app.context_search.rerank import (
+    RerankingRetriever,
+    build_rerank_provider_from_env,
+)
+from services.application.app.indexing.memory_index import (
+    MEMORY_VECTOR_COLLECTION,
+    derive_memory_index_text,
+)
 from services.application.app.indexing.memory_lexical_index import (
     MEMORY_LEXICAL_INDEX,
     connect_elasticsearch_memory_index,
 )
 from services.application.app.indexing.candidate_index import (
     CANDIDATE_VECTOR_COLLECTION,
+    candidate_index_text,
 )
 from services.application.app.indexing.candidate_lexical_index import (
     CANDIDATE_LEXICAL_INDEX,
@@ -997,6 +1005,22 @@ def _default_context_search_service(
     )
 
 
+def _rerank_wrapped(inner, *, text_of):
+    """Wrap a retriever with neural reranking, or return it untouched.
+
+    Both assembly sites go through here so the "did someone forget to wrap it"
+    failure has a single place to be guarded — `ObservedProvider` produced
+    exactly that bug once (green suite, instrumentation silently gone in
+    deployment) and the prescription was an assembly guard. Here the same
+    omission would silently return search to its pre-reranking quality.
+    """
+
+    provider = build_rerank_provider_from_env()
+    if provider is None:
+        return inner
+    return RerankingRetriever(inner=inner, provider=provider, text_of=text_of)
+
+
 def _build_canonical_memory_retriever(memory: MemoryService):
     # ⑤ §5 B canonical retrieval backend, chosen by env (D3/E6): vector over the
     # shared memory_vectors collection, lexical over the Elasticsearch memory
@@ -1006,14 +1030,24 @@ def _build_canonical_memory_retriever(memory: MemoryService):
     vector = _build_vector_canonical_retriever(memory)
     lexical = _build_lexical_canonical_retriever(memory)
     if vector is not None and lexical is not None:
-        return HybridCanonicalMemoryRetriever(
+        inner = HybridCanonicalMemoryRetriever(
             vector_retriever=vector, lexical_retriever=lexical
         )
-    if vector is not None:
-        return vector
-    if lexical is not None:
-        return lexical
-    return MongoDirectCanonicalMemoryRetriever(memory)
+    elif vector is not None:
+        inner = vector
+    elif lexical is not None:
+        inner = lexical
+    else:
+        inner = MongoDirectCanonicalMemoryRetriever(memory)
+    # Neural reranking wraps the chosen backend rather than living inside it, so
+    # vector-only and lexical-only configurations get it too (decision 3=A). No
+    # address configured means no wrapper at all — turning it off ends here.
+    return _rerank_wrapped(
+        inner,
+        text_of=lambda memory_entry: derive_memory_index_text(
+            memory_entry.memory_type, memory_entry.payload
+        ),
+    )
 
 
 def _build_vector_canonical_retriever(memory: MemoryService):
@@ -1066,14 +1100,18 @@ def _build_candidate_memory_retriever(analysis: AnalysisService):
     vector = _build_vector_candidate_retriever(analysis)
     lexical = _build_lexical_candidate_retriever(analysis)
     if vector is not None and lexical is not None:
-        return HybridCandidateMemoryRetriever(
+        inner = HybridCandidateMemoryRetriever(
             vector_retriever=vector, lexical_retriever=lexical
         )
-    if vector is not None:
-        return vector
-    if lexical is not None:
-        return lexical
-    return MongoDirectCandidateMemoryRetriever(analysis)
+    elif vector is not None:
+        inner = vector
+    elif lexical is not None:
+        inner = lexical
+    else:
+        inner = MongoDirectCandidateMemoryRetriever(analysis)
+    # Same wrapper, same seam — the two retrieval families differ only in the
+    # item type, which is why the text projection is the injected part.
+    return _rerank_wrapped(inner, text_of=candidate_index_text)
 
 
 def _build_vector_candidate_retriever(analysis: AnalysisService):
