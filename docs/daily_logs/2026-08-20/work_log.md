@@ -365,6 +365,29 @@ mypy 2.3.1 을 **scratchpad venv 에 설치**해서 쟀다 — 시스템 파이�
 > 비추면 **약한 형태**다. 다만 이 측정은 슬라이스 착수 시 **가드 셀 자체가 그 자리를 대체**하므로
 > 별도 스크립트를 남기지 않았다 — **셀이 생기는 순간 이 명령줄은 셀의 설정으로 굳는다.**
 
+### 독립 검증 — cd1d82d (배포 override LLM 주소 필수화 · B1·B2 폐쇄) — 합격
+
+(다른 세션 — 구현자가 아님. 기록 [`verifications/2026-08-20/deploy_llama_required_b1_b2.md`](../../verifications/2026-08-20/deploy_llama_required_b1_b2.md) · 재현 [`repro_deploy_llama_required.sh`](../../verifications/2026-08-20/repro_deploy_llama_required.sh) 커밋)
+
+- **축① `:?` 국소성** — `LLAMA_BASE_URL` 선언 3곳 전수에서 `:?` 는 `docker-compose.external.yml:117` 뿐(base:202·llama:76 은 콜론 폴백, test.yml 미선언). 병합도 변수 단위로 확인(배포 렌더에 base env 4키·`extra_hosts` 생존). 알파 유출 뮤테이션(M4)은 기존 InStack 셀이 물었다.
+- **축② B1 대체** — 뮤테이션 페어링(적용 diff 그대로):
+
+  | 뮤테이션 | file:line | 무는 셀 | 수 |
+  |---|---|---|---|
+  | M1 `:?외부 LLM API 주소가…` → `:-http://host.docker.internal:9080` | external.yml:117 | `ExternalOverrideTest::test_the_llm_address_is_required_because_nothing_can_fall_back` | 1 |
+  | M2 `:-` → `-`(base 대시화 = B1 시나리오) | docker-compose.yml:202 | `ExternalOverrideTest::test_the_base_file_still_falls_back_so_dev_machines_keep_booting` | 1 |
+  | M3 `:-` → `:?`(배포 규칙 base '통일') | docker-compose.yml:202 | 같은 over-strict 셀 | 1 |
+  | M4 `:-` → `:?`(알파 유출) | docker-compose.llama.yml:76 | `InStackLlamaOverrideTest::test_an_explicit_base_url_wins_over_the_in_stack_model` | 1 |
+  | M4b `:-` → `-`(llama 대시화) | docker-compose.llama.yml:76 | InStack 2셀 모두 | 2 |
+  | **M2′ 구(舊) 테스트 파일(`cd1d82d~1`) × M2** | docker-compose.yml:202 | **없음(10 passed)** | **0** |
+
+  M2(1셀)·M2′(0셀)이 같은 diff 로 **B1 "종전 0셀 → 이제 1셀"** 을 양단 실증했다.
+- **전수(최종 트리)** — `2297 passed · 1 skipped · 2522 subtests`(1173초). passed 는 직전 재검과 동일, subtest +2 는 이 기록의 인덱스 등재분.
+- **축③** — 기동 표 3행·오너 규칙 ①②③ ↔ `docker compose config` 10종 전부 일치(rc=1 한국어 사유 전문 · 호스트 llama 명시 통과 · **빈 값도 거부** · 세 방식 폴백 주소 · `depends_on` 머지).
+- **H1(비차단)** — 구현자 실측 표의 "주소 없음 rc=1" 은 **`.env` 중립화 없이 재현 불가**하다(이 머신 `.env` 가 LLAMA 를 제공 — 무통제면 EMBEDDING 부터 rc=1). 재현 스크립트가 표준 절차(`--env-file /dev/null` + 셸 3개)로 고정했다. **남기는 규칙: compose 실측을 기록할 때 `.env` 상태를 함께 적는다.**
+- **H2(비차단, 기존 열린 항목 유지)** — 네 번째 compose 파일은 가드가 자동 추적하지 않는다(셀이 파일 경로를 하드코딩). 트리거: 새 override 의 `LLAMA_BASE_URL` 선언.
+- **★ 전수 1회차가 내 편집을 잡았다** — 1회차(등재 완료 전 트리) `2294/5failed/1/2520` 의 실패 5건이 전부 docs-index 계열이었다: 카운트(246→247)를 인덱스 행보다 먼저 고치는 동안 **행 없는 기록 파일·분포 불일치**가 그대로 걸린 것. 행+누락 2곳(docs/README.md 카운트·README 분포 문장)을 채우니 `test_docs_indexes` 13 passed/257 subtests. **카운트 가드가 검증자의 등재 절차까지 검사한다.**
+
 ## Next steps
 
 - **다음 전수 기대값 `2297 / 1 / 2521`** — 재검 실측이 `2297/1/2520` 이었고, **재검 기록 등재가 `test_docs_indexes` 판정 열 전수 셀을 subtest +1**(코드 무관 자리).
