@@ -9,6 +9,8 @@
 
 **양방향**:
 - under-strict — 세 title 중 하나라도 옛 이름으로 되돌아가면 첫 셀이 실패한다.
+  구분자만 흔들려도(`Application` → `App`) 마찬가지다 — 첫 셀은 **정확 일치**이고,
+  그 기대값 표가 규칙을 벗어나는 것은 둘째 셀이 잡는다(2026-08-21 검증 M8·H-P2).
 - over-strict — 이름 통일을 **식별자까지** 밀어붙이면 세 번째 셀이 실패한다.
   ``ai_writing_system`` 은 표시명이 아니라 **Mongo DB 이름**이고, 바꾸면 앱은 조용히
   빈 DB 를 가리킨다(이 저장소가 실제로 밟은 함정 — `ai_writing` 이 0건을 냈다).
@@ -21,6 +23,7 @@
 """
 
 import pathlib
+import re
 import unittest
 
 from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
@@ -35,6 +38,27 @@ _ROOT = pathlib.Path(__file__).resolve().parents[1]
 _PRODUCT_NAME = "에-라잇"
 #: 그 전의 작업 제목. 노출되는 자리에 남아 있으면 안 된다.
 _RETIRED_NAME = "AI Writing System"
+
+#: 은퇴명의 **표기 변형**까지 잡는다 — 대소문자와 공백 폭만 다른 것은 같은 이름이다
+#: (2026-08-21 독립 검증 M7 이 `"AI writing System"` 주입으로 종전 침묵을 실증했다.
+#: 그때 잔존은 0건이라 이론적 맹점이었고, 닫는 비용이 한 줄이라 닫는다).
+#:
+#: **★ 밑줄·하이픈 형태는 일부러 안 잡는다** — `ai_writing_system`(Mongo DB 이름) ·
+#: `ai-writing-system-frontend`(npm 패키지명)는 **식별자**이고, 그것을 개명하면 앱이
+#: 조용히 빈 DB 를 가리킨다. 그래서 여기서 금지하는 것은 **띄어 쓴 표시명**뿐이다.
+#: 줄바꿈을 건너뛰지 않는 것(`[ \t]+`)도 같은 이유다 — 우연한 적중을 만들지 않는다.
+_RETIRED_VARIANTS = re.compile(r"ai[ \t]+writing[ \t]+system", re.IGNORECASE)
+
+#: **오너가 D-2026-08-21-a 로 정한 정확한 글자.** `startswith` 만으로는
+#: `"에-라잇 App"` 같은 **서비스 구분자 드리프트**를 아무 셀도 못 본다
+#: (2026-08-21 독립 검증 M8 이 실증했다 — 그때 3셀 전부 침묵했다).
+#: 새 서비스가 생기면 **여기에 글자를 더하는 것이 정상 경로**이며, 그 추가가
+#: 의식적일 것 하나만 요구한다(`_ALLOWED_KEYS` 계열의 트립와이어와 같은 형태).
+_DECIDED_TITLES = {
+    "application": "에-라잇 Application",
+    "embedding": "에-라잇 Embedding Service",
+    "llm_gateway": "에-라잇 LLM Gateway",
+}
 
 _SKIPPED_DIRS = frozenset({
     ".git", "__pycache__", "node_modules", "tests", "docs", "frontend",
@@ -55,35 +79,54 @@ def _source_files() -> list[pathlib.Path]:
 
 
 class ProductNameTest(unittest.TestCase):
-    def test_every_service_titles_its_api_docs_with_the_product_name(self):
-        """`/docs`·`/redoc` 상단에 뜨는 글자. 세 서비스가 각각 들고 있다."""
+    def test_every_service_titles_its_api_docs_with_the_decided_letters(self):
+        """`/docs`·`/redoc` 상단에 뜨는 글자. 세 서비스가 각각 들고 있다.
+
+        **정확 일치로 잠근다.** 종전에는 `startswith(제품명)` + 은퇴명 부재만 봐서
+        `"에-라잇 App"` 으로 바꿔도 세 셀이 전부 침묵했다(2026-08-21 검증 M8).
+        구분자는 취향이 아니라 **오너 결정 D-2026-08-21-a 가 정한 글자**이고,
+        그 결정의 근거는 코드·로그·compose 서비스명과 글자가 이어지는 것이었다 —
+        `Application` 을 `App` 으로 줄이면 그 근거가 조용히 사라진다.
+        """
         apps = {
             "application": create_application_app(),
             "embedding": create_embedding_app(),
             "llm_gateway": create_gateway_app(provider=FakeLLMProvider([])),
         }
+        self.assertEqual(sorted(apps), sorted(_DECIDED_TITLES))
 
         for service, app in apps.items():
             with self.subTest(service=service):
-                self.assertTrue(
-                    app.title.startswith(_PRODUCT_NAME),
-                    f"{service} 의 FastAPI title 이 제품명으로 시작하지 않는다: "
-                    f"{app.title!r} — /docs 상단에 그대로 뜬다.",
+                self.assertEqual(
+                    app.title, _DECIDED_TITLES[service],
+                    f"{service} 의 FastAPI title 이 결정된 글자가 아니다 — "
+                    "/docs 상단에 그대로 뜬다.",
                 )
-                self.assertNotIn(_RETIRED_NAME, app.title)
+
+    def test_the_decided_letters_themselves_follow_the_naming_rule(self):
+        """위 표는 **데이터**다 — 그 데이터가 규칙을 벗어나면 잠금이 무의미하다.
+
+        표를 `"AI Writing App"` 으로 고치면 위 셀은 통과하고 제품명만 사라진다.
+        일반 규칙(*"제품명으로 시작한다"* · §Active Decisions)은 여기서 잠근다.
+        새 서비스를 표에 더할 때 이 셀이 그 규칙을 자동으로 적용한다.
+        """
+        for service, title in _DECIDED_TITLES.items():
+            with self.subTest(service=service):
+                self.assertTrue(title.startswith(_PRODUCT_NAME), title)
+                self.assertIsNone(_RETIRED_VARIANTS.search(title), title)
 
     def test_the_retired_working_title_survives_in_no_backend_source(self):
         """세 자리를 고쳐도 네 번째가 생기면 소용없다 — 완전성 셀."""
         offenders = [
             str(path.relative_to(_ROOT))
             for path in _source_files()
-            if _RETIRED_NAME in path.read_text(encoding="utf-8")
+            if _RETIRED_VARIANTS.search(path.read_text(encoding="utf-8"))
         ]
 
         self.assertEqual(
             offenders, [],
-            f"옛 작업 제목 {_RETIRED_NAME!r} 이 남아 있다. 제품명은 "
-            f"{_PRODUCT_NAME!r} 하나다(Phase 10 D5).",
+            f"옛 작업 제목 {_RETIRED_NAME!r}(대소문자·공백 변형 포함)이 남아 있다. "
+            f"제품명은 {_PRODUCT_NAME!r} 하나다(Phase 10 D5).",
         )
 
     def test_the_rename_does_not_reach_the_database_identifier(self):
