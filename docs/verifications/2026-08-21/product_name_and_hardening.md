@@ -89,9 +89,18 @@
 
 ### Hardening recommendations (비차단)
 
+> **[전부 닫힘 2026-08-21 — H-P1 은 오너 결정(D-2026-08-21-d) `c1fed21` · H-P2·M7 은 `924b0ab`.]** 원문은 발행 시점 그대로 두고 각 항에 폐쇄 결과를 붙인다.
+
 - **★ H-P1 — 오너 결정 요청: README H1·LICENSE 제목줄의 은퇴명 잔존.** 모든 스윕의 사정거리 밖에 있는 살아있는 잔존(Findings 4). 바꾸거나 의도 잔존으로 문언화한다. 결정이 나면 그 자리를 잡는 셀/스윕 확장 여부도 함께 정한다.
+  - **[닫힘 `c1fed21`]** 오너가 **교체**를 택했다(D-2026-08-21-d) — `README.md:1` `# 에-라잇` · `LICENSE:1` `에-라잇 — License`. 저작권자(`entangelk`)는 무변이라 법적 의미는 바뀌지 않는다.
+  - **자리를 고치는 것으로 끝내지 않았다** — 지적의 핵심이 *"이 슬라이스가 치유하려던 병과 같은 모양"* 이었으므로 **스윕을 그 자리까지 넓혔다**(`_FRONT_DOOR = ("README.md", "LICENSE")`). 확장자 규칙으로 열지 않은 이유: `HANDOFF.md`·`CHANGELOG.md` 가 함께 들어오는데 **그 둘은 이력이라 은퇴명이 남아 있는 것이 맞다**(이 기록이 `HANDOFF.md:164` 를 무해로 분류한 것과 같은 판단).
+  - **이름 목록은 자기가 비는 것을 못 본다** → 존재 트립와이어 셀(`test_the_front_door_files_are_actually_there_to_be_swept`)을 함께 뒀다. 뮤테이션 **P7**(`LICENSE` 를 옮김) 실측: 트립와이어 subtest + 스윕 셀 **둘 다** 발화.
+  - 뮤테이션 **P5**(README H1 되돌림) · **P6**(LICENSE 제목줄 되돌림) 각각 스윕 셀 1건 발화 — **종전에는 둘 다 침묵이었다.**
 - **H-P2 — 서비스 구분자 미잠금(M8).** D-2026-08-21-a 의 정확 글자 셋을 equality 로 단정하면 구분자 드리프트(Application→App)까지 잠긴다. 현재 잠긴 것은 "제품명 시작+은퇴명 부재"뿐이다.
+  - **[닫힘 `924b0ab`]** 첫 셀을 **정확 일치**로 바꿨다(`_DECIDED_TITLES` 표). 뮤테이션 **P1**(= M8 재유도, `title="에-라잇 App"`) → `SUBFAILED(service='application')` — **종전 3셀 전부 침묵에서 뒤집힘.**
+  - **표는 데이터라 표 자체가 규칙을 벗어날 수 있다** → 둘째 셀(`test_the_decided_letters_themselves_follow_the_naming_rule`)이 표를 검사한다. 뮤테이션 **P2**(표 항목을 `"AI Writing App"` 으로) → **두 셀 모두** 발화. 새 서비스를 표에 더하면 일반 규칙이 자동 적용된다.
 - (관측·조치 불필요) 변형 표기 맹점(M7) — 잔존 0실측, 의도가 문언화돼 있다.
+  - **[닫힘 `924b0ab` — 조치 불필요 판정을 뒤집은 것이 아니라 비용이 한 줄이었다]** 스윕을 정규식(`ai[ \t]+writing[ \t]+system`, `IGNORECASE`)으로 바꿔 대소문자·공백 폭 변형을 잡는다. 뮤테이션 **P3**(= M7 재유도) 발화. **밑줄·하이픈 형태는 여전히 안 잡는다** — 그쪽은 식별자(`ai_writing_system` DB 이름 · npm 패키지명)이고, over-strict 뮤테이션 **P4**(식별자 두 형태 주입)에서 **침묵을 확인**했다(오탐 0).
 
 ## Verdict
 
@@ -99,8 +108,8 @@
 
 ## Outstanding items
 
-- **H-P1 오너 결정 대기** — README H1·LICENSE 제목줄(제품명 교체 or 의도 잔존 문언화).
-- 미검증: **코드 커밋 0** — 이 기록 계열뿐. 정확한 목록은 `git log <최신 검증기록 커밋>..HEAD` 로 유도(최신 검증 기록 = 이 기록 등재 커밋 — `git log -1 -- docs/verifications/2026-08-21/product_name_and_hardening.md`).
+- ~~**H-P1 오너 결정 대기**~~ **[결정·이행 2026-08-21 `c1fed21`]** 교체 + 스윕 확장. 위 §Hardening 참조.
+- ~~미검증: **코드 커밋 0** — 이 기록 계열뿐.~~ **[낡음 — 같은 날 뒤에]** 폐쇄 커밋 `924b0ab`·`c1fed21` 이 들어왔다. **개수를 베끼지 말 것**: 정확한 목록은 `git log <최신 검증기록 커밋>..HEAD` 로 유도(최신 검증 기록 = 이 기록 등재 커밋 — `git log -1 -- docs/verifications/2026-08-21/product_name_and_hardening.md`).
 - dogfood(GATE-1) 선행 = 외부 키(변함없음).
 
 ## Reproduction
@@ -108,7 +117,7 @@
 ```bash
 bash docs/verifications/2026-08-21/repro_product_name_and_hardening.sh   # M1~M8 + N1~N4·R6b
 python3 scripts/dump_openapi.py | python3 -c "import json,sys; print(json.load(sys.stdin)['info'])"
-grep -rn "AI Writing System" README.md LICENSE                            # H-P1 잔존 확인
-python3 -m pytest -q tests/test_product_name.py tests/test_rerank.py    # 3/3 · 23/26
+grep -rniE "ai[ \t]+writing[ \t]+system" README.md LICENSE                # H-P1 — 폐쇄 후 0건이어야 한다
+python3 -m pytest -q tests/test_product_name.py tests/test_rerank.py    # 폐쇄 후 5/8 · 23/26 (폐쇄 전 3/3 · 23/26)
 python3 -m pytest -q                                                    # 전수(등재 전 기준 2358/1/2592)
 ```
