@@ -357,3 +357,29 @@ Q1 이 **두 셀**을 무는 것은 설계대로다 — 완전성 셀과 예외 
   [`product_name_and_hardening.md`](../../verifications/2026-08-21/product_name_and_hardening.md) Findings 6.
 - **키 없이 열 수 있는 남은 오너 대기 항목**: Phase 10 프론트 디자인 시스템(브리프 미작성) ·
   Phase 8.5 관리자 quota 운영 API · `analysis_extractor` D4 정렬 · 타이포 이관(트리거 미도래).
+
+## [알파 세션 — 같은 날 추가] 시각 검증 환경 조성 (운영 슬라이스, 코드 0줄)
+
+오너가 **D-2026-08-21-e 의 새 축(버튼 카테고리별 색) 트리거 = 육안 확인**을 실행한다고 하여
+알파에서 최신 빌드·기동을 마쳤다. 머신은 **알파(RTX 3060)** — 위 Tasks는 베타 세션이다.
+
+- **재빌드**: `application`(=`app` 이미지 4서비스 공유)·`frontend`·`gateway`·`embedding`.
+  08-15 이미지는 `services/` 6커밋(리랭커·OpenAI 임베딩·제품명 등)과 `frontend` `c37d77b`
+  뒤처져 있었다. 빌드 지표: **704 modules · 진입 421.78 kB · AdminConsole 8.50 kB ·
+  관측 lazy 387.43 kB 전부 무변, CSS 30.79 → 30.90 kB**(토큰 추가분).
+- **빌드 최신성 실측**: served CSS(`index-BavOddu5.css`)에 `--disabled-opacity:.45` +
+  `var()` 소비 4자리 → `c37d77b` 반영. `:8520/openapi.json` `info.title="에-라잇 Application"`
+  → `29299e5` 반영.
+- **★ llama 리비전 함정 재발**(07-28 함정, 부채 미해결): 볼륨 `refs/main`(`29d0977…`)이
+  스냅샷 둘 어느 쪽도 아니어서 `-hf` 기동이 ~6.5GB 재다운로드로 갔다. **다운로드가 끝나면
+  캐시가 자체 치유된다**(스냅샷 완성). 그때까지 LLM 경로(원고 생성 등)는 불가 — 버튼 육안
+  확인과 무관하므로 기다리지 않고 진행했다.
+- **기동**: llama healthy가 `up -d` 전체의 관문이라 **분리 기동**으로 우회했다 —
+  `up -d --no-deps gateway`(헬스가 liveness 전용이라 upstream 없이 healthy) →
+  `--no-deps application generation_worker` → `frontend`. 결과 **healthy 8 + 워커 2**
+  (llama는 다운로드 계속, 완료 후 자동 healthy).
+- **환경**: `.env` 없던 알파에 `LLAMA_CTX_SIZE=16384`만 넣어 생성(커밋 금지 분).
+  mongo 볼륨은 **계정 0명**이어서 확인 전용 계정 생성 — `visual_demo`(admin,
+  quota 무제한 정책 행 동반). 1회용 비밀번호는 이 세션에서 교체까지 마쳤고
+  최종 비밀번호는 오너에게 전달. 프로젝트 1건 시드(**육안 확인용 프로젝트**,
+  `6a8835cdc216173e8e5a906c`) — 비-LLM 경로(생성·로그인)만 사용했다.
