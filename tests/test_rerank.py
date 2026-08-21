@@ -180,6 +180,26 @@ class FailOpenScopeTest(unittest.TestCase):
         # 원인이 남아야 한다 — 메시지만 있으면 무엇이 터졌는지 모른다.
         self.assertIn("RuntimeError", captured.output[0])
 
+    def test_a_response_that_is_not_a_permutation_is_logged_too(self):
+        """순열 검사가 `try` **안**에 있다는 주장의 관측 가능한 차이가 이것이다.
+
+        계약(fail-open)은 검사가 경계 **밖**에 있어도 만족한다 — 두 배치의 반환값이
+        같기 때문이다(둘 다 원래 순서). 갈리는 것은 **로그뿐**이고, 그래서 이 경로가
+        조용하면 *"한 곳에서 떨어진다"* 는 서술을 아무도 확인할 수 없다
+        (2026-08-21 검증이 관측으로 남긴 자리).
+        """
+        _, retriever = _wrapped(("a", "b", "c"), _Provider(order=(1, 0)))
+        with self.assertLogs(
+                "services.application.app.context_search.rerank", level="WARNING"
+        ) as captured:
+            self.assertEqual(
+                retriever.retrieve(project_id="p", query="q", limit=8),
+                ("a", "b", "c"))
+        self.assertIn("reranking failed", captured.output[0])
+        # 원인이 "순열이 아니다" 로 남아야 한다 — 프로바이더 장애와 구별되지 않으면
+        # 운영에서 부분 응답(`top_n`)을 장애로 오진한다.
+        self.assertIn("not a permutation", captured.output[0])
+
     def test_a_healthy_reranking_logs_nothing(self):
         # over-strict: 정상 경로가 경고를 내면 로그가 곧 소음이 되고 아무도 안 본다.
         import logging as _logging
@@ -337,18 +357,35 @@ class HttpRerankProviderTest(unittest.TestCase):
                     _adapter(lambda _r, _resp=response: _resp).rerank(
                         query="q", documents=["가", "나"])
 
-    def test_ties_keep_the_request_order(self):
-        # 동률에서 순서가 흔들리면 같은 입력이 실행마다 다른 결과를 낸다.
-        def handler(_request):
-            return httpx.Response(200, json={"results": [
-                {"index": 0, "relevance_score": 0.5},
-                {"index": 1, "relevance_score": 0.5},
-                {"index": 2, "relevance_score": 0.5},
-            ]})
+    def test_ties_keep_the_response_order(self):
+        """동률에서 잠그는 성질은 **"같은 응답이 언제나 같은 순서를 낸다"** 하나다.
 
-        self.assertEqual(
-            _adapter(handler).rerank(query="q", documents=["가", "나", "다"]),
-            (0, 1, 2))
+        **★ "요청 순서 유지" 가 아니다** — 안정 정렬이 보존하는 것은 **응답에 담긴
+        순서**이고, 요청 순서와 겹치는 것은 정합 서버가 동률을 요청 순서로 보내 줄
+        때뿐이다(계약은 그것을 약속하지 않는다). 2026-08-20 검증 H2 가 주석을 그렇게
+        정정했고, **셀 이름과 입력에는 정정 전 문언이 남아 있었다**(2026-08-21 검증
+        H2-a·H2-b). 그래서 이름을 성질에 맞추고 **두 해석이 갈리는 입력**을 더한다 —
+        종전 입력은 둘이 우연히 겹쳐서 어느 쪽을 잠갔는지 구별하지 못했다.
+        """
+        def _handler(indices):
+            def handler(_request):
+                return httpx.Response(200, json={"results": [
+                    {"index": index, "relevance_score": 0.5} for index in indices
+                ]})
+            return handler
+
+        cases = {
+            # 두 해석이 겹치는 입력(종전 셀). 회귀로 남긴다.
+            "응답이 요청 순서로 왔다": ((0, 1, 2), (0, 1, 2)),
+            # ★ 갈리는 입력. 요청 순서를 잠그고 있었다면 여기서 실패한다.
+            "응답이 다른 순서로 왔다": ((2, 0, 1), (2, 0, 1)),
+        }
+        for name, (response_order, expected) in cases.items():
+            with self.subTest(response=name):
+                self.assertEqual(
+                    _adapter(_handler(response_order)).rerank(
+                        query="q", documents=["가", "나", "다"]),
+                    expected)
 
 
 class AssemblyGuardTest(unittest.TestCase):
