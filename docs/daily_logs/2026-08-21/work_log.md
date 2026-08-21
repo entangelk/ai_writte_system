@@ -141,13 +141,19 @@
 - **frontend 전수**: `npx vitest run` → **27 files · 323 passed**(550초). **백엔드 전수와 동시 실행**했다 — 그것이 §함정 의 프론트 플레이크 항목이 적어 둔 과부하 조건이라 같은 회차로 재관측까지 겸했다(Task 3).
 - **계약 산출물**: `npm run gen:api` 재생성 → `schema.d.ts` **diff 0**.
 - **전수**: `python3 -m pytest tests -q` → **`2357 passed · 1 skipped · 2589 subtests`**(1409초, 프론트 전수와 동시 실행). **skip 을 먼저 봤다** — 1건이며 정상값인 live Chroma 그것이다. 직전 기준선 `2354 / 1 / 2586`(2026-08-20 `90164df`) 대비 **passed +3 · subtest +3** 으로, 오늘 더한 3셀(그중 한 셀이 subtest 3)과 **정확히 일치**한다.
+- **[검증자 세션 — 같은 날 이 뒤에 추가] `92b9b24` 독립 검증 완료 → 합격.**
+  [`verifications/2026-08-21/reranker_c1_h1_h2_closure.md`](../../verifications/2026-08-21/reranker_c1_h1_h2_closure.md)
+  — C1-M1~M3·RV-B1/B2 같은 diff 재유도 전부 일치, 전수 `2357/1/2589` 재현. 인계 볼 축 셋 판정 및
+  **R3b 리터럴 갱신 이행**(`33461cc`). reranker_slice 조건부 합격 **승격 확정**(임베딩 B1 선례와 같은
+  절차 — 인덱스 행·Verdict 줄·분포 정리). 세부는 그 기록으로 — 여기 중복하지 않는다.
 
 ## Next steps
 
 - **다음 작업 = dogfood(GATE-1) 착수** — 인계의 권고는 유지된다. **키 조달(알파)이 선행**이고,
   순서는 `키 조달 → dogfood 질의·정답 축적 → 판정` 이다.
-- **`92b9b24` 독립 검증은 대기 중**(다른 검증자). 인계에 적힌 볼 축 셋 그대로:
-  ① `except Exception` 경계 폭 ② `assertNoLogs` 가 다른 로거까지 막는지
-  ③ **`repro_reranker_slice.sh` 의 R3b 블록 리터럴이 낡았다 — 검증자가 갱신한다.**
+- ~~**`92b9b24` 독립 검증은 대기 중**(다른 검증자)~~ — **완료(같은 날 검증자 세션, 합격·승격)**.
+  볼 축 셋(① 경계 폭 ② `assertNoLogs` 스코프 ③ R3b 리터럴 갱신) 전부 판정·이행 —
+  [`verifications/2026-08-21/reranker_c1_h1_h2_closure.md`](../../verifications/2026-08-21/reranker_c1_h1_h2_closure.md)
+  Findings 5. **미검증 커밋 0.**
 - **키 없이 열 수 있는 남은 오너 대기 항목**: Phase 10 프론트 디자인 시스템(브리프 미작성) ·
   Phase 8.5 관리자 quota 운영 API · `analysis_extractor` D4 정렬 · 타이포 이관(트리거 미도래).
