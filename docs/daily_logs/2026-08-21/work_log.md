@@ -373,7 +373,10 @@ Q1 이 **두 셀**을 무는 것은 설계대로다 — 완전성 셀과 예외 
 - **★ llama 리비전 함정 재발**(07-28 함정, 부채 미해결): 볼륨 `refs/main`(`29d0977…`)이
   스냅샷 둘 어느 쪽도 아니어서 `-hf` 기동이 ~6.5GB 재다운로드로 갔다. **다운로드가 끝나면
   캐시가 자체 치유된다**(스냅샷 완성). 그때까지 LLM 경로(원고 생성 등)는 불가 — 버튼 육안
-  확인과 무관하므로 기다리지 않고 진행했다.
+  확인과 무관하므로 기다리지 않고 진행했다. **[완료 실측, 같은 날]** ~36분 만에 다운로드가
+  끝나 스냅샷 `29d0977…` 가 완성됐고 llama는 자동 healthy — 로그 `n_ctx_slot = 16384`
+  (`.env` 적용 확인), gateway `/health/ready` = `{"status":"ready"}`. 이후 재기동은
+  캐시 히트로 곧장 모델 로드된다.
 - **기동**: llama healthy가 `up -d` 전체의 관문이라 **분리 기동**으로 우회했다 —
   `up -d --no-deps gateway`(헬스가 liveness 전용이라 upstream 없이 healthy) →
   `--no-deps application generation_worker` → `frontend`. 결과 **healthy 8 + 워커 2**
