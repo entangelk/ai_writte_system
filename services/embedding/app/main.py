@@ -73,7 +73,7 @@ def create_app(model: EmbeddingModel | None = None) -> FastAPI:
             app.state.model = _build_model_from_env()
         yield
 
-    app = FastAPI(title="AI Writing System Embedding Service", lifespan=lifespan)
+    app = FastAPI(title="에-라잇 Embedding Service", lifespan=lifespan)
     app.state.model = model
 
     @app.get("/health")

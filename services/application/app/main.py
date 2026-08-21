@@ -1608,7 +1608,7 @@ def create_app(
     # Fail startup loudly for invalid environment-adjustable public bounds.
     _project_brief_style_example_limits()
     _writing_output_length_tokens()
-    app = FastAPI(title="AI Writing System Application")
+    app = FastAPI(title="에-라잇 Application")
     # Slice 8.3: every route is built by the settling wrapper. It is a no-op for
     # the 66 free operations (no receipt on ``request.state`` → nothing to do);
     # applying it globally rather than per-route is deliberate, because "which

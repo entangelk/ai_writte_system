@@ -124,7 +124,7 @@ def create_app(
             if owned_transport is not None:
                 await owned_transport.aclose()
 
-    app = FastAPI(title="AI Writing System LLM Gateway", lifespan=lifespan)
+    app = FastAPI(title="에-라잇 LLM Gateway", lifespan=lifespan)
 
     @app.get("/health")
     @app.get("/health/live")
