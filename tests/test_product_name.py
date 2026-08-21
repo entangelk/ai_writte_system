@@ -15,7 +15,8 @@
   ``ai_writing_system`` 은 표시명이 아니라 **Mongo DB 이름**이고, 바꾸면 앱은 조용히
   빈 DB 를 가리킨다(이 저장소가 실제로 밟은 함정 — `ai_writing` 이 0건을 냈다).
 
-**스캔 범위** — 저장소 전체의 `.py` 와 compose `.yml` 에서 아래를 뺀다.
+**스캔 범위** — 저장소 전체의 `.py` 와 compose `.yml`, 그리고 **저장소 정문 두 파일**
+(`README.md`·`LICENSE`, 2026-08-21 검증 H-P1)에서 아래를 뺀다.
 ``tests`` 는 부재를 단정하려면 그 문자열을 적어야 하므로 제외하고(이 파일 자신이 그
 예다), ``docs`` 는 이력 기록이라 옛 이름이 **남아 있는 것이 맞다.** 범위를
 `services`·`scripts` 로 하드코딩하지 않은 것은 의도다 — 네 번째 최상위 패키지가
@@ -64,6 +65,14 @@ _SKIPPED_DIRS = frozenset({
     ".git", "__pycache__", "node_modules", "tests", "docs", "frontend",
 })
 
+#: **저장소 정문** — 확장자로는 안 걸리지만 사람이 가장 먼저 읽는 두 자리.
+#: 2026-08-21 독립 검증 H-P1 이 여기서 은퇴명을 찾았다: 백엔드 스윕은 `.py`+compose 만,
+#: 프론트 스윕은 `frontend/` 만 봐서 **README H1 은 어느 쪽 사정거리에도 없었다**.
+#: 이 슬라이스가 치유하려던 병과 정확히 같은 모양이라 오너가 교체를 택했다
+#: (D-2026-08-21-d). 확장자 규칙으로 열면 `HANDOFF.md`·`CHANGELOG.md` 가 함께 들어오는데
+#: 그 둘은 **이력이라 은퇴명이 남아 있는 것이 맞다** — 그래서 이름으로 둘만 더한다.
+_FRONT_DOOR = ("README.md", "LICENSE")
+
 
 def _source_files() -> list[pathlib.Path]:
     found = []
@@ -75,7 +84,7 @@ def _source_files() -> list[pathlib.Path]:
                     stack.append(entry)
             elif entry.suffix == ".py" or entry.name.startswith("docker-compose"):
                 found.append(entry)
-    return found
+    return found + [_ROOT / name for name in _FRONT_DOOR]
 
 
 class ProductNameTest(unittest.TestCase):
@@ -128,6 +137,20 @@ class ProductNameTest(unittest.TestCase):
             f"옛 작업 제목 {_RETIRED_NAME!r}(대소문자·공백 변형 포함)이 남아 있다. "
             f"제품명은 {_PRODUCT_NAME!r} 하나다(Phase 10 D5).",
         )
+
+    def test_the_front_door_files_are_actually_there_to_be_swept(self):
+        """이름으로 더한 두 자리는 **파일이 사라지면 조용히 스윕에서 빠진다.**
+
+        확장자 규칙과 달리 이름 목록은 자기가 비는 것을 스스로 못 본다 — 그래서
+        트립와이어를 둔다. `README.md` 를 옮기거나 이름을 바꾸면 여기서 실패하고,
+        그때 `_FRONT_DOOR` 를 고치는 것이 정상 경로다.
+        """
+        for name in _FRONT_DOOR:
+            with self.subTest(file=name):
+                self.assertTrue(
+                    (_ROOT / name).is_file(),
+                    f"{name} 이 없다 — 스윕이 그 자리를 조용히 안 보게 된다.",
+                )
 
     def test_the_rename_does_not_reach_the_database_identifier(self):
         """표시명 통일이 식별자를 건드리면 앱이 조용히 빈 DB 를 본다."""
