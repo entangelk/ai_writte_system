@@ -62,14 +62,14 @@ except Exception as e:
 EOF
 
 echo; echo "═══ Part 2. 조립 가드 우회(H1) — 셋째 셀(유일 생성자)의 맹점 ═══"
-echo "── RV-B1: 모듈 속성 경로 _rr.RerankingRetriever(…) → 현재 침묵(18 passed)"
+echo "── RV-B1: 모듈 속성 경로 _rr.RerankingRetriever(…) → 폐쇄(92b9b24) 후 셋째 셀 실패"
 mutfile "$M" 'def _rerank_wrapped(inner, *, text_of):' 'def _bypass_assembly():
     import services.application.app.context_search.rerank as _rr
     return _rr.RerankingRetriever(inner=None, provider=None, text_of=str)
 
 
 def _rerank_wrapped(inner, *, text_of):'
-echo "── RV-B2: 별칭 import RR(…) — B1 과 같은 형태 → 현재 침묵"
+echo "── RV-B2: 별칭 import RR(…) — B1 과 같은 형태 → 폐쇄(92b9b24) 후 같은 셀 실패"
 mutfile "$M" 'def _rerank_wrapped(inner, *, text_of):' 'def _bypass_assembly():
     from services.application.app.context_search.rerank import RerankingRetriever as RR
     return RR(inner=None, provider=None, text_of=str)
@@ -87,10 +87,8 @@ mutfile "$M" '    return _rerank_wrapped(
     )' '    return inner'
 echo "── R2: candidate 조립 감싸기 누락"
 mutfile "$M" '    return _rerank_wrapped(inner, text_of=candidate_index_text)' '    return inner'
-echo "── R3b: fail-open → fail-closed"
-mutfile "$R" '        except RerankProviderError:
-            # fail-open — 원래 순서가 그대로 나간다(결정 4-①).
-            return items' '        except RerankProviderError:
+echo "── R3b: fail-open → fail-closed (92b9b24 가 경계 줄을 바꿔 새 리터럴로 갱신 — 차기 검증자가 이행)"
+mutfile "$R" '        except Exception:  # noqa: BLE001 — 결정 4-① 의 fail-open 경계' '        except Exception:
             raise'
 echo "── R4: 순열 검사 제거"
 mutfile "$R" '        if not _is_permutation(order, len(items)):' '        if False:'
