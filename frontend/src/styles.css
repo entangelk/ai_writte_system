@@ -77,6 +77,19 @@
   --action-danger: var(--danger-600);
   --action-danger-hover: var(--danger-700);
 
+  /* 비활성 버튼의 농도 — 한 값이다(오너 결정 D-2026-08-21-e, 부채 ④ 폐쇄).
+     종전에는 네 자리가 0.42 · 0.45 · 0.35 · 0.5 로 갈려 있었다.
+
+     ★ 실효 대비는 이 값 하나로 안 같아진다 — `opacity` 는 요소를 배경과
+     합성하는데 네 자리의 **글자색이 서로 다르기 때문**이다(흰색 · blue-700 ·
+     blue-900 · slate-600). 이 값에서 네 자리는 1.99 · 2.21 · 2.75 · 2.02 로
+     흩어지고, 그것을 알고 고른 것이다: 규칙 하나가 읽기 쉽고, **진짜 문제는
+     대비가 아니라 색 선택**이기 때문이다(오너 관측 — "영구 삭제"는 red 계열,
+     버전·순서 컨트롤은 진한 회색이어야 보인다). 그 축은 위험·일반·특수 카테고리를
+     세워 색별로 실측하는 **별도 작업**이며 HANDOFF 추적 부채에 있다.
+     재현: `python3 docs/plans/10_disabled_contrast.py` */
+  --disabled-opacity: 0.45;
+
   /* 선. hairline 은 **장식**이라 WCAG 1.4.11 대상이 아니고(그래서 검산표에
      없다), control 은 **컴포넌트를 식별시키는 선**이라 3:1 이다.
      ★ 구분선이 의미를 나르기 시작하면 hairline 이 아니라 control 을 쓴다. */
@@ -362,7 +375,7 @@ main {
 .loop-retry:disabled,
 .row-actions button:disabled {
   cursor: not-allowed;
-  opacity: 0.42;
+  opacity: var(--disabled-opacity);
 }
 
 .auth-shell {
@@ -578,7 +591,7 @@ main {
 .admin-create-form button:disabled,
 .admin-project-card button:disabled {
   cursor: not-allowed;
-  opacity: 0.45;
+  opacity: var(--disabled-opacity);
 }
 
 .admin-list,
@@ -1204,7 +1217,7 @@ main {
 
 .order-controls button:disabled {
   cursor: not-allowed;
-  opacity: 0.35;
+  opacity: var(--disabled-opacity);
 }
 
 .empty-state,
@@ -1351,7 +1364,7 @@ main {
 .export-actions button:disabled,
 .export-controls button:disabled {
   cursor: not-allowed;
-  opacity: 0.5;
+  opacity: var(--disabled-opacity);
 }
 
 .export-actions {
