@@ -90,6 +90,18 @@ class LoginFailureGuard:
     def register_failure(self, username: str) -> None:
         now = self._clock()
         record = self._stale_reset(username, now)
+        if record is not None and record.locked_until is not None \
+                and record.locked_until > now:
+            # Already locked: touch nothing. Writing a fresh failure-count row
+            # here would *clear* locked_until and unlock the account — the
+            # single-worker deployment cannot reach this (the route checks
+            # is_locked first and the handler is synchronous), but Mongo is the
+            # store precisely because multi-instance is the stated expansion
+            # (P-6), and there two requests race past the early check into this
+            # method. Found by independent verification H-1 (2026-08-22).
+            # Deliberately no extension either: the lock is a speed bump, not
+            # an escalation ladder.
+            return
         failures = (record.failures if record else 0) + 1
         if failures >= self._max_failures:
             # The counter resets *at* lock time, so when the lockout expires

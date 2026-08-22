@@ -95,6 +95,30 @@ class LoginFailureGuardTest(unittest.TestCase):
             guard.register_failure("ghost")
         self.assertTrue(guard.is_locked("ghost"))
 
+    def test_a_failure_during_a_lock_neither_clears_nor_extends_it(self) -> None:
+        # 검증 H-1(2026-08-22)의 재결함 방지. 단일 워커 배포에선 라우트의 조기
+        # is_locked 검사가 이 상태를 만들지 못하지만, P-6 이 Mongo 저장을 택한
+        # 근거가 다중 인스턴스 확장이고 거기서 두 요청이 조기 검사를 통과해
+        # 경쟁한다. 그때 이 메서드가 카운터 행을 새로 쓰면 locked_until 이
+        # 지워져 **잠금이 스스로 해제**된다.
+        #
+        # under-strict: 잠금 중 실패가 잠금을 지우면 첫 단정이 실패한다.
+        # over-strict: 잠금을 연장하면(에스컬레이션) 둘째 단정이 실패한다 —
+        # 잠금은 속도 방지턱이지 사다리가 아니다.
+        guard, clock = _guard()
+        for _ in range(5):
+            guard.register_failure("alice")
+        locked_until_before = guard._repo.get("alice").locked_until
+
+        clock["now"] = _T0 + timedelta(seconds=30)  # well inside the lockout
+        guard.register_failure("alice")
+
+        self.assertTrue(guard.is_locked("alice"))
+        self.assertEqual(
+            guard._repo.get("alice").locked_until, locked_until_before,
+            "잠금 중 실패는 잠금 만료 시각을 바꾸지 않는다(연장도 해제도 아님)",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
