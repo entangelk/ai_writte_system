@@ -84,7 +84,7 @@
 
 | 단계 | 산출물 | 규모 |
 |---|---|---|
-| **① 결정 브리프** — 선택지 표(`선택지·설명·장점·단점`) + 구현자 추천 + 유예 항목을 적고 **멈춘다**. 추측 구현 금지 | [`docs/plans/`](docs/plans/README.md) | **90개** |
+| **① 결정 브리프** — 선택지 표(`선택지·설명·장점·단점`) + 구현자 추천 + 유예 항목을 적고 **멈춘다**. 추측 구현 금지 | [`docs/plans/`](docs/plans/README.md) | **91개** |
 | **② 구현 + 회귀 가드** — 가드는 **양방향**이어야 한다: 원래 결함을 재현하면 실패(under-strict), 과잉 교정으로 정상 경로를 깨도 실패(over-strict) | `tests/` | **2,266 passed / 2,367 subtests** |
 | **③ 독립 검증** — 구현자가 아닌 세션이 **뮤테이션**(고친 것을 되돌려 회귀가 다시 실패하는지)으로 반증을 시도한다 | [`docs/verifications/`](docs/verifications/README.md) | **251건 / 53일치** |
 | **④ 정본 개정** — 계약이 바뀌면 SoT 버전을 올리고 **변경 이유와 근거 링크**를 남긴다 | [`docs/system-contract-sot.md`](docs/system-contract-sot.md) | **v1.7.96**, 변경이력 전량 보존 |
@@ -184,6 +184,8 @@ python3 scripts/phase2b5_reindex_candidate.py --project-id <PROJECT_ID> --mongo-
 | `EMBEDDING_SERVICE_URL` | `http://embedding:8002` | 임베딩 주소. `openai`일 때는 **호스트 루트**를 넣는다(아래) |
 | `EMBEDDING_API_MODEL` | 없음 | `openai`일 때 **필수**. 벤더의 모델 이름(예: `text-embedding-3-small`) |
 | `EMBEDDING_API_KEY` | 없음 | `Authorization: Bearer …`로 나간다. 키를 안 받는 서버면 비워 둔다 |
+| `EMBEDDING_API_KEYS` | `EMBEDDING_API_KEY` 1개 | **키 리스트(쉼표 구분)** — 여러 개를 주면 회전한다(아래 절). `native` 형식과는 같이 쓸 수 없다 |
+| `EMBEDDING_KEY_RPM` | `30` | 키당 분당 요청 상한(슬라이딩 60초 창) |
 | `EMBEDDING_DIMENSIONS` | `1024` | 차원 가드. **모델이 바뀌면 이것도 확인한다**(위 절) |
 
 ```bash
@@ -213,6 +215,31 @@ EMBEDDING_DIMENSIONS=1536
 
 **로컬 임베딩 컨테이너는 그대로 둔다** — 키가 없는 개발 머신에서는 계속 그것을 쓴다. 배포에서만
 [`docker-compose.external.yml`](docker-compose.external.yml)이 profile 뒤로 보낸다.
+
+### 외부 API 키 폴백 — 여러 키·여러 모델 (2026-08-22)
+
+외부 API에 키를 **여러 개** 꼬면 자동으로 회전한다. 키 1개·모델 1개인 오늘의 구성은 아무것도
+바뀌지 않는다(래퍼도 계수기도 붙지 않는다). 정책·근거의 정본은
+[`docs/plans/external-api-fallback-decisions.md`](docs/plans/external-api-fallback-decisions.md).
+
+| 환경변수 | 대상 | 기본값 | 뜻 |
+|---|---|---|---|
+| `LLAMA_API_KEYS` | gateway | 없음 | LLM 키 리스트(쉼표 구분). 없으면 인증 헤더 없음(로컬 llama) |
+| `LLAMA_MODELS` | gateway | `LLAMA_DEFAULT_MODEL` 1개 | 모델 체인. 첫 번째가 기본, 나머지가 폴백 모델 |
+| `LLAMA_KEY_RPM` | gateway | `30` | 키당 분당 요청 상한(슬라이딩 60초 창) |
+| `RERANK_API_KEYS` | application·worker | `RERANK_API_KEY` 1개 | 리랭커 키 리스트 |
+| `RERANK_KEY_RPM` | application·worker | `30` | |
+
+시도 순서(키가 우선, 모델이 그다음): 키 `[a,b,c]` × 모델 `[1,2]`면 **a1 → b1 → c1 → a2 → b2 → c2**.
+시작 키는 요청마다 **라운드로빈**으로 순환한다(한 키로 몰리지 않게 — 배분이 곧 RPM 예산이다).
+429면 그 키를 60초 쉬게 하고 다음 키로, 401/403이면 600초 쉬게 하고 다음 키로, 400류는
+키·모델을 바꿔도 소용없으므로 즉시 실패한다. 전 조합이 소진되면 **기다리지 않고** retryable
+오류로 실패한다(fail-fast) — 임베딩은 인덱스 재시도가, 리랭커는 fail-open이 그 뒤를 받는다.
+
+임베딩은 `EMBEDDING_API_KEYS`로 키만 회전한다 — **모델 폴백은 없다**(모델을 바꾸면 차원이
+변해 재색인이 필요하므로, 위 절의 규칙이 우선한다). 게이트웨이가 요청에 명시한 모델
+(`LLM_GATEWAY_MODEL`)은 env 체인을 덮어쓰지 않고 **체인의 첫 순위가 된다** — env 모델들은
+그 뒤를 따르는 폴백이다.
 
 ### 어디까지 노출하는가
 
@@ -258,7 +285,7 @@ CHANGELOG 작성 규칙 · [`docs/guides/verification.md`](docs/guides/verificat
 |---|---|
 | 제품 한 장 요약 (기획 진입점) | [`docs/product-overview.md`](docs/product-overview.md) |
 | 정본 계약(먼저 읽기) | [`docs/system-contract-sot.md`](docs/system-contract-sot.md) |
-| 계획 · 결정 브리프 인덱스 (108개) | [`docs/plans/README.md`](docs/plans/README.md) |
+| 계획 · 결정 브리프 인덱스 (109개) | [`docs/plans/README.md`](docs/plans/README.md) |
 | 독립 검증 기록 (251건) | [`docs/verifications/README.md`](docs/verifications/README.md) |
 | 현재 상태 스냅샷 | [`HANDOFF.md`](HANDOFF.md) |
 | 마일스톤 이력 | [`CHANGELOG.md`](CHANGELOG.md) |

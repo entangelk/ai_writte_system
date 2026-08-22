@@ -371,7 +371,7 @@ def build_rerank_provider_from_env() -> RerankProvider | None:
     timeout_seconds = _env_float("RERANK_TIMEOUT_SECONDS", 10.0)
     trust_env = _env_bool("RERANK_TRUST_ENV", False)
     # 키 리스트(오너 2026-08-22). 비면 오늘의 단일 키 변수로 내려간다.
-    keys = split_env_list(os.environ.get("RERANK_API_KEYS"))
+    keys: list[str | None] = split_env_list(os.environ.get("RERANK_API_KEYS"))
     if not keys:
         keys = [os.environ.get("RERANK_API_KEY") or None]
 

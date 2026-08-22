@@ -401,7 +401,7 @@ def build_embedding_provider_from_env(
     wire_format = os.environ.get("EMBEDDING_API_FORMAT", NATIVE_FORMAT).strip().lower()
     # 키 리스트(오너 2026-08-22). native 형식은 키를 안 쓰므로 리스트가 명시된 것은
     # 설정 실수다 — 조용히 무시하면 "넣었는데 왜 회전하지 않나"가 된다.
-    keys = split_env_list(os.environ.get("EMBEDDING_API_KEYS"))
+    keys: list[str | None] = split_env_list(os.environ.get("EMBEDDING_API_KEYS"))
     if keys and wire_format == NATIVE_FORMAT:
         raise ValueError(
             "EMBEDDING_API_KEYS requires "
