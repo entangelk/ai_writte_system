@@ -41,7 +41,7 @@ from ..api.dependencies import (
 from services.application.app.quota.enforcement import QuotaEnforcementService
 
 
-def register_auth(app, *, users, sessions, core_sot, activity) -> None:
+def register_auth(app, *, users, sessions, core_sot, activity, login_guard) -> None:
     # --- Auth (multi-user D8) ---------------------------------------------
     # D8-3a: authentication is now enforced. Every operation except /health and
     # the three below declares ``dependencies=_REQUIRE_AUTH``, so a sessionless
@@ -49,6 +49,9 @@ def register_auth(app, *, users, sessions, core_sot, activity) -> None:
     #
     # The three exceptions each have a *stated* policy rather than an accident:
     #   /auth/login  — public: it is how a session is obtained.
+    #   /auth/signup — public (2026-08-22): requesting an account is how an
+    #                  account begins to exist. It grants nothing — the row is
+    #                  pending until an administrator approves it.
     #   /auth/logout — public and idempotent: a client must always be able to
     #                  reach a known-logged-out state, including from a cookie
     #                  the server has already forgotten.
@@ -82,6 +85,12 @@ def register_auth(app, *, users, sessions, core_sot, activity) -> None:
     @app.post("/auth/login", response_model=LoginResponse,
               responses=_ERRORS_LOGIN)
     async def login(request: LoginRequest, response: Response) -> dict[str, object]:
+        username = request.username.strip()
+        # Brute-force bound (P-6, 2026-08-22): checked before Argon2 runs, and
+        # the answer is the unified 401 — whether an account is locked is a
+        # state the attacker's own failures created, so nothing new leaks.
+        if login_guard.is_locked(username):
+            raise HTTPException(status_code=401, detail="invalid credentials")
         user = users.authenticate(
             username=request.username, password=request.password
         )
@@ -89,7 +98,12 @@ def register_auth(app, *, users, sessions, core_sot, activity) -> None:
             # One message for every failure mode (unknown user, wrong password,
             # disabled account). Distinguishing them here would undo the timing
             # hardening in UserService.authenticate.
+            login_guard.register_failure(username)
             raise HTTPException(status_code=401, detail="invalid credentials")
+        # Credentials verified from here on — every path below proves the caller
+        # holds the right password, so the failure counter clears (the guard
+        # slows password *guessing*, not legitimate sign-ins).
+        login_guard.register_success(username)
         # Signup approval gate (P-4): checked only *after* credentials verify,
         # so a wrong password on a pending account is a plain 401 — the status
         # is visible to nobody who does not already hold the right password

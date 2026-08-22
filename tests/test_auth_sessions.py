@@ -1,6 +1,8 @@
 """SessionService with the in-memory repository and injected clock/token."""
 
+import os
 import unittest
+import unittest.mock
 from datetime import UTC, datetime, timedelta
 
 from services.application.app.auth.sessions import (
@@ -98,6 +100,51 @@ class DefaultTokenEntropyTest(unittest.TestCase):
             # secrets.token_urlsafe(32) = 32 random bytes -> 43 base64url chars.
             # Shortening the default (or swapping in a counter) fails here.
             self.assertGreaterEqual(len(token), 43)
+
+
+class SessionTtlEnvGuardTest(unittest.TestCase):
+    """``AUTH_SESSION_TTL_HOURS`` 의 기동 거부를 잠그는 셀 (추적 부채 2026-08-08 폐쇄).
+
+    이 계약에는 2026-08-08 뮤테이션 이후로도 셀이 0개였다 — ``raise ValueError``
+    를 지워도 아무 테스트가 물지 않았고, 그 순간 잘못된 env 가 조용히 기본 TTL
+    로 떨어진다(무한 세션 가능). 승인제 가입 슬라이스가 인증을 만지는 김에
+    같이 닫는다(2026-08-22).
+
+    under-strict: 거부를 지우면 1·2번 셀이 실패한다.
+    over-strict: 정상 값까지 거부하면(형식 검사 과잉) 3·4번 셀이 실패한다.
+    """
+
+    def test_a_negative_ttl_refuses_to_start(self) -> None:
+        from services.application.app.main import _default_session_service
+        with unittest.mock.patch.dict(
+            os.environ, {"AUTH_SESSION_TTL_HOURS": "-24"}
+        ):
+            with self.assertRaises(ValueError):
+                _default_session_service()
+
+    def test_a_zero_ttl_refuses_to_start(self) -> None:
+        from services.application.app.main import _default_session_service
+        with unittest.mock.patch.dict(os.environ, {"AUTH_SESSION_TTL_HOURS": "0"}):
+            with self.assertRaises(ValueError):
+                _default_session_service()
+
+    def test_a_positive_ttl_is_honoured(self) -> None:
+        from services.application.app.main import _default_session_service
+        with unittest.mock.patch.dict(
+            os.environ, {"AUTH_SESSION_TTL_HOURS": "2"}
+        ):
+            service = _default_session_service()
+        self.assertEqual(service._ttl, timedelta(hours=2))
+
+    def test_an_unset_ttl_keeps_the_seven_day_default(self) -> None:
+        from services.application.app.main import _default_session_service
+        env = {
+            k: v for k, v in os.environ.items()
+            if k != "AUTH_SESSION_TTL_HOURS"
+        }
+        with unittest.mock.patch.dict(os.environ, env, clear=True):
+            service = _default_session_service()
+        self.assertEqual(service._ttl, timedelta(days=7))
 
 
 if __name__ == "__main__":

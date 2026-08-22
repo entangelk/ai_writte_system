@@ -265,6 +265,68 @@ class SignupApiTest(unittest.TestCase):
         self.assertEqual(wrong.json()["detail"], "invalid credentials")
 
 
+class LoginLockoutTest(unittest.TestCase):
+    """승인제 가입과 함께 선 브루트포스 방어 (2026-08-22, P-6).
+
+    under-strict: 가드가 없으면 첫 셀이 실패한다(6번째 올바른 로그인이 200).
+    over-strict: 잠금이 다른 username 까지 묻거나(셋째) 다른 실패 모드와 응답이
+    갈라지면(넷째) 실패한다.
+    """
+
+    def test_the_sixth_attempt_with_the_right_password_is_still_401(self) -> None:
+        client, _, _ = _client()
+        for _ in range(5):
+            client.post(
+                "/auth/login", json={"username": "alice", "password": "nope"}
+            )
+        # The lock must hold even against the *correct* password — that is the
+        # entire point of the guard.
+        response = client.post(
+            "/auth/login", json={"username": "alice", "password": "pw123"}
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertNotIn("set-cookie", response.headers)
+
+    def test_lockout_answers_the_unified_401_detail(self) -> None:
+        client, _, _ = _client()
+        for _ in range(5):
+            client.post(
+                "/auth/login", json={"username": "alice", "password": "nope"}
+            )
+        response = client.post(
+            "/auth/login", json={"username": "alice", "password": "nope"}
+        )
+        self.assertEqual(response.status_code, 401)
+        # Whether an account is locked must not be distinguishable from any
+        # other 401 — the lock state was created by the attacker's own failures
+        # and must not become an oracle.
+        self.assertEqual(response.json()["detail"], "invalid credentials")
+
+    def test_a_lock_is_per_username(self) -> None:
+        client, _, _ = _client()
+        for _ in range(5):
+            client.post(
+                "/auth/login", json={"username": "alice", "password": "nope"}
+            )
+        # bob never failed: his sign-in is untouched.
+        response = client.post(
+            "/auth/login", json={"username": "alice", "password": "pw123"}
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_a_locked_out_unknown_username_is_also_401(self) -> None:
+        client, _, _ = _client()
+        for _ in range(5):
+            client.post(
+                "/auth/login", json={"username": "ghost", "password": "nope"}
+            )
+        response = client.post(
+            "/auth/login", json={"username": "ghost", "password": "anything"}
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"], "invalid credentials")
+
+
 class MeTest(unittest.TestCase):
     def test_returns_current_user_after_login(self) -> None:
         client, _, _ = _client()

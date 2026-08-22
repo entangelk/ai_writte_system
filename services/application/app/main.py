@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from services.application.app.auth.login_guard import LoginFailureGuard
+
 import os
 import uuid
 from datetime import timedelta
-from typing import Protocol
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
@@ -412,6 +416,47 @@ def _default_session_service() -> SessionService:
             uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
         ),
         ttl=ttl,
+    )
+
+
+def _default_login_failure_guard() -> "LoginFailureGuard":
+    # Brute-force defense for /auth/login (signup approval slice 1-c, owner
+    # 2026-08-22). Malformed/negative values refuse to start rather than
+    # silently falling back — same posture as AUTH_SESSION_TTL_HOURS above: a
+    # guard that quietly became "no guard" is worse than no guard.
+    from services.application.app.auth.login_guard import (
+        DEFAULT_LOCKOUT_SECONDS, DEFAULT_MAX_FAILURES, InMemoryFailureRecordRepository,
+        LoginFailureGuard,
+    )
+    max_failures = DEFAULT_MAX_FAILURES
+    raw_max = os.environ.get("AUTH_LOGIN_MAX_FAILURES")
+    if raw_max:
+        parsed = int(raw_max)
+        if parsed <= 0:
+            raise ValueError("AUTH_LOGIN_MAX_FAILURES must be > 0")
+        max_failures = parsed
+    lockout_seconds = DEFAULT_LOCKOUT_SECONDS
+    raw_lockout = os.environ.get("AUTH_LOGIN_LOCKOUT_SECONDS")
+    if raw_lockout:
+        parsed = int(raw_lockout)
+        if parsed <= 0:
+            raise ValueError("AUTH_LOGIN_LOCKOUT_SECONDS must be > 0")
+        lockout_seconds = parsed
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if uri:
+        from services.application.app.auth.login_guard_mongo import (
+            MongoFailureRecordRepository,
+        )
+        from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+        repository = MongoFailureRecordRepository.from_uri(
+            uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
+        )
+    else:
+        repository = InMemoryFailureRecordRepository()
+    return LoginFailureGuard(
+        repository,
+        max_failures=max_failures,
+        lockout=timedelta(seconds=lockout_seconds),
     )
 
 
@@ -1574,6 +1619,7 @@ def create_app(
     vector_index: InMemoryVectorIndexAdapter | None = None,
     user_service: UserService | None = None,
     session_service: SessionService | None = None,
+    login_failure_guard: "LoginFailureGuard | None" = None,
     access_grant_service: AccessGrantService | None = None,
     admin_audit_service: AdminAuditService | None = None,
     project_name_history_service: ProjectNameHistoryService | None = None,
@@ -1851,7 +1897,8 @@ def create_app(
     # these are ``if`` guards in place rather than a reshuffled call list.
     if include_product:
         register_auth(app, users=users, sessions=sessions,
-                      core_sot=core_sot, activity=activity)
+                      core_sot=core_sot, activity=activity,
+                      login_guard=login_failure_guard or _default_login_failure_guard())
 
     if include_admin:
         register_admin(
