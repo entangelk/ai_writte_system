@@ -116,7 +116,7 @@ D8-5 이래 *"403 has exactly two producers (ownership, admin)"* 불변식이
 
 | # | 내용 | operation |
 |---|---|---|
-| 1-a | `User.status` 모델 + Mongo 왕복 + `POST /auth/signup` | 77→78 |
+| 1-a | `User.status` 모델 + Mongo 왕복 + `POST /auth/signup` | 78→79 (초판에 77→78로 적었으나 착수 시점이 이미 78이었다 — 독립 검증 정정) |
 | 1-b | 로그인 게이트 분기(403) + 403 생산자 셀 갱신 | 무변 |
 | 1-c | 브루트포스 잠금 + `AUTH_SESSION_TTL_HOURS` 가드 셀 | 무변 |
 | 1-d | 관리자 승인 API 3종 | 78→81 |

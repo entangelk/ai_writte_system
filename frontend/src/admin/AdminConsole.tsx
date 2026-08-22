@@ -137,7 +137,8 @@ export function AdminConsole() {
   }
 
   async function deactivate(userId: string) {
-    setError(null);    try {
+    setError(null);
+    try {
       const updated = await deactivateAdminUser(userId);
       setUsers((current) => current.map((user) => user.id === userId ? updated : user));
     } catch (cause) {

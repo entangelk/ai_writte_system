@@ -241,3 +241,22 @@ docker exec ai_writte_system-mongo-1 mongosh --quiet ai_writing_system \
 curl -s -D - -X POST localhost:5520/api/auth/login -H 'Content-Type: application/json' \
   -d '{"username":"verif2_0822","password":"verify-long-pw-0822!"}' -o /dev/null   # 200 + Secure 쿠키
 ```
+
+---
+
+## 조건 폐쇄 (2026-08-22, 구현 세션 — 검증과 별개 커밋)
+
+- **B1 폐쇄** — SoT 본문 3곳 개정: §상태코드 의미론 403 행(생산자 둘→셋 +
+  "살아 있는 세션" 문장에서 ③ 가입 상태를 갈라 서술), §에러 계약 H3 항에
+  **등재 예외 목록** 신설(② 로그인 화면 승인 안내 — 유일 소비자·두 문구 명시),
+  C-6 절의 "생산자 둘" 재인용 갱신. 셀 수 산수 정정(신규 47→49, 프론트 8→5 —
+  collect 실측), 브리프 operation 77→78 → 78→79 정정.
+- **H-1 폐쇄** — `register_failure`가 잠금 중 레코드를 카운터 행으로 덮어쓰던
+  결함 수리: 잠금 중 실패는 **touch하지 않는다**(연장도 해제도 아님 — 에스컬레이션
+  없음 정책 유지). 양방향 셀 동반(`test_a_failure_during_a_lock_neither_clears_nor_extends_it`),
+  뮤테이션(보존 분기 무효화) 재실패 확인. 본 기록 M9(stale 리셋 제거)가 물지
+  않았던 이유가 이 결함이었음 — 흡수층 제거로 M9 계열이 이제 의미를 갖는다.
+- **H-3 반영** — 오너 결정 대기 항목 ②의 범위를 8520 직접 + **5520 nginx 경유**
+  로 확대 기록(HANDOFF·work_log). 코드 변경 없음(오너 결정 사안).
+- **정리 목록 갱신** — 시드 정리 대기에 본 검증 잔여 계정 추가:
+  `verif_0822`(pending) · `verif2_0822`(active — Mongo flip으로 승격).

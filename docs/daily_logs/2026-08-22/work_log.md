@@ -38,6 +38,21 @@
 > HANDOFF의 2026-08-13 함정이 정확히 재현. 복구 명령은 항상 저장소 루트에서.
 > 루트에서 `npx vitest`를 돌리면 274 failed가 나는데 **결과가 아니라 아티팩트**다.
 >
+> **[세션 6 — 같은 날 추가, 알파] 독립 검증 조건 폐쇄 (B1·H-1·비차단).**
+> 검증 판정 조건부 합격(`verifications/2026-08-22/signup_approval_slice.md`,
+> `531c371`)의 조건을 같은 날 닫았다:
+> - **B1** — SoT 본문 3곳 개정(§상태코드 403 행 생산자 셋 + ③ 가입 상태를
+>   "살아 있는 세션" 문장에서 갈라 서술·§H3 등재 예외 목록 신설(로그인 화면
+>   유일 소비자·두 문구)·C-6 절 재인용 갱신). 셀 수 산수 정정(47→49 — collect
+>   실측, 프론트 8→5), 브리프 operation 78→79 정정.
+> - **H-1** — 잠금 중 `register_failure`가 카운터 행을 새로 써 `locked_until`을
+>   지우던 경쟁 결함 수리(잠금 중 실패는 touch 않음·연장도 안 함). 양방향 셀
+>   `test_a_failure_during_a_lock_neither_clears_nor_extends_it` + 뮤테이션
+>   (보존 분기 무효화 → 재실패) 확인. 검증 M9가 안 물었던 이유가 이 결함이었다.
+> - **H-3** — `/docs` nginx 경유 공개 발견을 결정 대기 ②에 반영(코드 무변).
+> - AdminConsole.tsx 서식(deactivate try 앞 개행)·시드 정리 목록에 검증 잔여
+>   `verif_0822`·`verif2_0822` 추가.
+>
 > **스모크 잔여(정리 대기)**: `smoke_admin`(admin)·`bob`(활성)·`carol`(거절) +
 > 기존 시드 `visual_demo`(admin)·`visual_user` — 오너 계정 생성 후 전부 비활성화.
 
