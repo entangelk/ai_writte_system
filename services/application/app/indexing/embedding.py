@@ -189,6 +189,7 @@ class OpenAIEmbeddingProvider:
         timeout_seconds: float = 30.0,
         trust_env: bool = False,
         expected_dimensions: int | None = None,
+        embeddings_path: str = "/v1/embeddings",
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
@@ -197,12 +198,22 @@ class OpenAIEmbeddingProvider:
         self._timeout_seconds = timeout_seconds
         self._trust_env = trust_env
         self._expected_dimensions = expected_dimensions
+        # `embeddings_path` 는 기본(OpenAI·OpenRouter 의 /v1/embeddings)에서 벗어나는
+        # 벤더를 위한 자리다 — 구글의 OpenAI 호환 루트는 /v1beta/openai 라 /v1 이 없다.
+        # 조립(build_embedding_provider_from_env)이 계산해 넣는다.
+        self._embeddings_path = embeddings_path
         self._transport = transport
 
     def embed(self, text: str) -> tuple[float, ...]:
         headers = {}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
+        body: dict[str, object] = {"input": text, "model": self._model}
+        if self._expected_dimensions is not None:
+            # 안 보내면 벤더 기본값으로 나온다(구글 gemini-embedding-2 는 3072). 기대
+            # 차원을 요청에 실어 고정한다 — 차원 가드와 요청이 같은 값을 말한다.
+            # 이 파라미터가 없는 벤더는 400 으로 크게 실패한다(조용한 불일치보다 낫다).
+            body["dimensions"] = self._expected_dimensions
         try:
             with httpx.Client(
                 base_url=self._base_url,
@@ -212,8 +223,8 @@ class OpenAIEmbeddingProvider:
                 headers=headers,
             ) as client:
                 response = client.post(
-                    "/v1/embeddings",
-                    json={"input": text, "model": self._model},
+                    self._embeddings_path,
+                    json=body,
                 )
         except httpx.TimeoutException as exc:
             raise EmbeddingProviderError(
@@ -334,18 +345,27 @@ class KeyRotatingEmbeddingProvider:
         )
 
 
-def _strip_version_suffix(base_url: str) -> str:
-    """Drop one trailing `/v1` so a pasted vendor base URL does not double it.
+def _embeddings_endpoint(raw: str) -> tuple[str, str]:
+    """`EMBEDDING_SERVICE_URL` → (base_url, embeddings_path). **붙여넣은 벤더 주소가
+    그대로 동작해야 한다** — 게이트웨이의 `_chat_endpoint`(llm_gateway/main.py)와
+    같은 관례다:
 
-    Vendor docs print `https://api.openai.com/v1`, but this repo's convention —
-    set by the LLM gateway — is that the configured address is the host root and
-    the client owns the path. Both spellings therefore have to work; the
-    alternative is a 404 whose cause is invisible in the address someone copied
-    from the docs.
+    - `…/embeddings` 으로 끝나면 → 전체 엔드포인트로 보고 그 결론을 유지한다.
+    - `/v1beta/openai` 로 끝나면(구글 Gemini API 의 OpenAI 호환 루트 — **접미 `/v1`
+      이 없다**) → `/embeddings` 를 붙인다.
+    - 그 외(OpenAI·OpenRouter) → 접미 `/v1` 하나를 벗기고 `/v1/embeddings` 를 붙인다.
+
+    ★ 구글은 **호스트 루트만 붙여넣으면 동작하지 않는다**(`/v1/embeddings 경로가
+    없다) — 문서가 인쇄하는 `…/v1beta/openai` 까지 넣는다(실측 2026-08-22).
     """
-
-    trimmed = base_url.rstrip("/")
-    return trimmed[: -len("/v1")] if trimmed.endswith("/v1") else trimmed
+    trimmed = raw.rstrip("/")
+    if trimmed.endswith("/embeddings"):
+        return trimmed[: -len("/embeddings")], "/embeddings"
+    if trimmed.endswith("/v1beta/openai"):
+        return trimmed, "/embeddings"
+    if trimmed.endswith("/v1"):
+        trimmed = trimmed[: -len("/v1")]
+    return trimmed, "/v1/embeddings"
 
 
 def _env_float(name: str, default: float) -> float:
@@ -434,14 +454,16 @@ def build_embedding_provider_from_env(
         # 리스트가 비면 오늘의 단일 키 변수로 내려간다(기존 배포 무변).
         keys = [os.environ.get("EMBEDDING_API_KEY") or None]
 
+    base_url, embeddings_path = _embeddings_endpoint(resolved)
     providers = [
         OpenAIEmbeddingProvider(
-            base_url=_strip_version_suffix(resolved),
+            base_url=base_url,
             model=model,
             api_key=key,
             timeout_seconds=timeout_seconds,
             trust_env=trust_env,
             expected_dimensions=expected_dimensions,
+            embeddings_path=embeddings_path,
         )
         for key in keys
     ]

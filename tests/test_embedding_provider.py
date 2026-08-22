@@ -120,8 +120,8 @@ if __name__ == "__main__":
 
 def _openai(handler, **kwargs):
     kwargs.setdefault("model", "text-embedding-3-small")
+    kwargs.setdefault("base_url", "https://api.example.com")
     return OpenAIEmbeddingProvider(
-        base_url="https://api.example.com",
         transport=httpx.MockTransport(handler),
         **kwargs,
     )
@@ -158,6 +158,50 @@ class OpenAIEmbeddingProviderTest(unittest.TestCase):
         # 응답은 data[0].embedding 에 있다.
         self.assertEqual(vector, (0.1, 0.2, 0.3, 4.0))
         self.assertTrue(all(isinstance(v, float) for v in vector))
+
+    def test_expected_dimensions_travel_in_the_request_too(self):
+        # 구글 gemini-embedding-2 실측(2026-08-22): dimensions 를 안 보내면 벤더 기본
+        # (3072)로 나온다. 가드가 기대하는 값을 요청에도 실어 고정한다.
+        # under-strict: 전송을 빼면 응답 차원이 벤더 기본값을 따라간다.
+        seen = {}
+
+        def handler(request):
+            seen["body"] = json.loads(request.read().decode())
+            return httpx.Response(200, json=_openai_body([0.0] * 1536))
+
+        _openai(handler, expected_dimensions=1536).embed("x")
+
+        self.assertEqual(seen["body"]["dimensions"], 1536)
+
+    def test_without_expected_dimensions_the_field_stays_absent(self):
+        # over-strict: 기대 차원이 없으면(가드 off) 파라미터를 안 보낸다 — 이 필드가
+        # 없는 벤더가 400 으로 거부하는 일을 만들지 않는다.
+        seen = {}
+
+        def handler(request):
+            seen["body"] = json.loads(request.read().decode())
+            return httpx.Response(200, json=_openai_body([0.0]))
+
+        _openai(handler).embed("x")
+
+        self.assertNotIn("dimensions", seen["body"])
+
+    def test_a_custom_embeddings_path_is_posted_as_given(self):
+        # 구글의 OpenAI 호환 루트에는 접미 /v1 이 없다(/v1beta/openai + /embeddings).
+        # 조립이 계산해 준 경로를 provider 가 그대로 써야 한다(2026-08-22 실측).
+        seen = {}
+
+        def handler(request):
+            seen["path"] = request.url.path
+            return httpx.Response(200, json=_openai_body([0.0]))
+
+        _openai(
+            handler,
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+            embeddings_path="/embeddings",
+        ).embed("x")
+
+        self.assertEqual(seen["path"], "/v1beta/openai/embeddings")
 
     def test_no_api_key_sends_no_authorization_header(self):
         # OpenAI 호환 로컬 서버는 키를 안 받는 경우가 있다. 빈 문자열을 Bearer 로

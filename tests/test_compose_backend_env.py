@@ -370,6 +370,13 @@ class ExternalOverrideTest(unittest.TestCase):
             '"${LLAMA_API_KEYS-}"',
             '"${LLAMA_MODELS-}"',
             '"${LLAMA_KEY_RPM:-30}"',
+            # 임베딩 API 5종(2026-08-22) — external override 와 같은 형태. base 가
+            # 이걸 실어야 in-stack chroma/es 를 유지한 채 외부 임베딩만 쓸 수 있다.
+            '"${EMBEDDING_API_FORMAT:-native}"',
+            '"${EMBEDDING_API_MODEL-}"',
+            '"${EMBEDDING_API_KEY-}"',
+            '"${EMBEDDING_API_KEYS-}"',
+            '"${EMBEDDING_KEY_RPM:-30}"',
         ):
             with self.subTest(literal=literal):
                 self.assertIn(

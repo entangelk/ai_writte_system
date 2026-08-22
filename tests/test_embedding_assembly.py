@@ -23,6 +23,7 @@ from services.application.app.indexing.embedding import (
     KeyRotatingEmbeddingProvider,
     OpenAIEmbeddingProvider,
     RemoteEmbeddingProvider,
+    _embeddings_endpoint,
     build_embedding_provider_from_env,
 )
 from services.application.app.indexing.service import (
@@ -399,6 +400,71 @@ class KeyListAssemblyTest(unittest.TestCase):
         os.environ["EMBEDDING_KEY_RPM"] = "0"
         with self.assertRaisesRegex(ValueError, "EMBEDDING_KEY_RPM"):
             build_embedding_provider_from_env()
+
+    def test_a_google_root_builds_the_google_shaped_endpoint(self):
+        # 구글은 /v1/embeddings 경로가 없다(2026-08-22 실측) — /v1beta/openai 루트를
+        # 넣으면 경로가 /embeddings 로 바뀐다. 호스트 루트만 넣으면 동작하지 않는다.
+        os.environ["EMBEDDING_SERVICE_URL"] = (
+            "https://generativelanguage.googleapis.com/v1beta/openai"
+        )
+
+        provider = build_embedding_provider_from_env()
+
+        self.assertIsInstance(provider, OpenAIEmbeddingProvider)
+        self.assertEqual(
+            provider._base_url,
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+        )
+        self.assertEqual(provider._embeddings_path, "/embeddings")
+
+
+class EmbeddingsEndpointTests(unittest.TestCase):
+    """붙여넣은 벤더 주소가 그대로 동작해야 한다 — 게이트웨이 `_chat_endpoint`와 같은 관례.
+
+    under-strict: 구글 루트에 /v1 을 얹으면 재실패한다(404). over-strict: 경로 안의
+    `v1` 을 접미로 오인해 벗기면 재실패한다.
+    """
+
+    def test_pasted_addresses_reach_the_right_endpoint(self):
+        cases = {
+            # 구글 — 문서가 인쇄하는 OpenAI 호환 루트(접미 /v1 이 없다)
+            "https://generativelanguage.googleapis.com/v1beta/openai": (
+                "https://generativelanguage.googleapis.com/v1beta/openai",
+                "/embeddings",
+            ),
+            "https://generativelanguage.googleapis.com/v1beta/openai/": (
+                "https://generativelanguage.googleapis.com/v1beta/openai",
+                "/embeddings",
+            ),
+            # 전체 엔드포인트를 통째로 붙여넣기
+            "https://generativelanguage.googleapis.com/v1beta/openai/embeddings": (
+                "https://generativelanguage.googleapis.com/v1beta/openai",
+                "/embeddings",
+            ),
+            # OpenAI — 문서가 …/v1 까지 인쇄한다
+            "https://api.openai.com/v1": (
+                "https://api.openai.com",
+                "/v1/embeddings",
+            ),
+            # OpenRouter — …/api/v1 까지 인쇄한다
+            "https://openrouter.ai/api/v1": (
+                "https://openrouter.ai/api",
+                "/v1/embeddings",
+            ),
+            # 호스트 루트(우리 관례의 기본형)
+            "https://api.example.com": (
+                "https://api.example.com",
+                "/v1/embeddings",
+            ),
+            # over-strict: 경로 안의 v1 은 접미가 아니다
+            "https://proxy.example.com/v1/proxy": (
+                "https://proxy.example.com/v1/proxy",
+                "/v1/embeddings",
+            ),
+        }
+        for pasted, (base, path) in cases.items():
+            with self.subTest(pasted=pasted):
+                self.assertEqual(_embeddings_endpoint(pasted), (base, path))
 
 
 if __name__ == "__main__":  # pragma: no cover

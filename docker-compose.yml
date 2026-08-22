@@ -105,6 +105,16 @@ services:
       # default. The app reads these with `if not ...`, so empty == unset.
       EMBEDDING_SERVICE_URL: "${EMBEDDING_SERVICE_URL-http://embedding:8002}"
       EMBEDDING_DIMENSIONS: "${EMBEDDING_DIMENSIONS:-1024}"
+      # External embedding API (openai wire format). base carries these so a machine
+      # can use an external embedder while keeping in-stack chroma/es — the external
+      # override declares the same five and wins on merge. Notation follows the code:
+      # format/rpm are get(name, DEFAULT) reads (colon), model/keys are get()+falsy
+      # (dash — empty means unset, so no key is sent).
+      EMBEDDING_API_FORMAT: "${EMBEDDING_API_FORMAT:-native}"
+      EMBEDDING_API_MODEL: "${EMBEDDING_API_MODEL-}"
+      EMBEDDING_API_KEY: "${EMBEDDING_API_KEY-}"
+      EMBEDDING_API_KEYS: "${EMBEDDING_API_KEYS-}"
+      EMBEDDING_KEY_RPM: "${EMBEDDING_KEY_RPM:-30}"
       CHROMA_HOST: "${CHROMA_HOST-chroma}"
       # Not env-driven on purpose: CHROMA_PORT is already taken by the *host*
       # publish below (127.0.0.1:${CHROMA_PORT:-8523}:8000), and this one is the
@@ -364,6 +374,16 @@ services:
       # empty so .env can point these at an external API or switch them off).
       EMBEDDING_SERVICE_URL: "${EMBEDDING_SERVICE_URL-http://embedding:8002}"
       EMBEDDING_DIMENSIONS: "${EMBEDDING_DIMENSIONS:-1024}"
+      # External embedding API (openai wire format). base carries these so a machine
+      # can use an external embedder while keeping in-stack chroma/es — the external
+      # override declares the same five and wins on merge. Notation follows the code:
+      # format/rpm are get(name, DEFAULT) reads (colon), model/keys are get()+falsy
+      # (dash — empty means unset, so no key is sent).
+      EMBEDDING_API_FORMAT: "${EMBEDDING_API_FORMAT:-native}"
+      EMBEDDING_API_MODEL: "${EMBEDDING_API_MODEL-}"
+      EMBEDDING_API_KEY: "${EMBEDDING_API_KEY-}"
+      EMBEDDING_API_KEYS: "${EMBEDDING_API_KEYS-}"
+      EMBEDDING_KEY_RPM: "${EMBEDDING_KEY_RPM:-30}"
       CHROMA_HOST: "${CHROMA_HOST-chroma}"
       CHROMA_PORT: "8000"
       ELASTICSEARCH_URL: "${ELASTICSEARCH_URL-http://elasticsearch:9200}"
@@ -426,6 +446,16 @@ services:
       # env convention (dash form — an empty value stays empty).
       EMBEDDING_SERVICE_URL: "${EMBEDDING_SERVICE_URL-http://embedding:8002}"
       EMBEDDING_DIMENSIONS: "${EMBEDDING_DIMENSIONS:-1024}"
+      # External embedding API (openai wire format). base carries these so a machine
+      # can use an external embedder while keeping in-stack chroma/es — the external
+      # override declares the same five and wins on merge. Notation follows the code:
+      # format/rpm are get(name, DEFAULT) reads (colon), model/keys are get()+falsy
+      # (dash — empty means unset, so no key is sent).
+      EMBEDDING_API_FORMAT: "${EMBEDDING_API_FORMAT:-native}"
+      EMBEDDING_API_MODEL: "${EMBEDDING_API_MODEL-}"
+      EMBEDDING_API_KEY: "${EMBEDDING_API_KEY-}"
+      EMBEDDING_API_KEYS: "${EMBEDDING_API_KEYS-}"
+      EMBEDDING_KEY_RPM: "${EMBEDDING_KEY_RPM:-30}"
       CHROMA_HOST: "${CHROMA_HOST-chroma}"
       CHROMA_PORT: "8000"
       ELASTICSEARCH_URL: "${ELASTICSEARCH_URL-http://elasticsearch:9200}"
