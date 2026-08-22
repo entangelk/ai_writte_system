@@ -204,6 +204,12 @@ services:
       LLAMA_DEFAULT_THINKING: "${LLAMA_DEFAULT_THINKING:-false}"
       LLAMA_TIMEOUT_SECONDS: "${LLAMA_TIMEOUT_SECONDS:-120}"
       LLAMA_TRUST_ENV: "${LLAMA_TRUST_ENV:-false}"
+      # Key-pool fallback (owner 2026-08-22). Lists are read with get()+falsy
+      # checks (dash — empty means unset, so local llama stays keyless); the RPM
+      # counter parses floats, so an empty value must fall back to 30 (colon).
+      LLAMA_API_KEYS: "${LLAMA_API_KEYS-}"
+      LLAMA_MODELS: "${LLAMA_MODELS-}"
+      LLAMA_KEY_RPM: "${LLAMA_KEY_RPM:-30}"
     ports:
       # Loopback-only (D8-7 G1=C). The gateway is an internal boundary: the app
       # calls it as gateway:8001 over the compose network. It holds no data, but

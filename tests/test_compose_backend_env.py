@@ -339,6 +339,11 @@ class ExternalOverrideTest(unittest.TestCase):
             "EMBEDDING_API_FORMAT": ("${EMBEDDING_API_FORMAT:-native}", "콜론"),
             "EMBEDDING_API_MODEL": ("${EMBEDDING_API_MODEL-}", "대시"),
             "EMBEDDING_API_KEY": ("${EMBEDDING_API_KEY-}", "대시"),
+            # 키 폴백(오너 2026-08-22) — 같은 규칙이 4종에 더 붙는다.
+            "EMBEDDING_API_KEYS": ("${EMBEDDING_API_KEYS-}", "대시"),
+            "EMBEDDING_KEY_RPM": ("${EMBEDDING_KEY_RPM:-30}", "콜론"),
+            "RERANK_API_KEYS": ("${RERANK_API_KEYS-}", "대시"),
+            "RERANK_KEY_RPM": ("${RERANK_KEY_RPM:-30}", "콜론"),
         }
         services = [name for name, env in self.by_service.items()
                     if "EMBEDDING_SERVICE_URL" in env]
@@ -350,6 +355,26 @@ class ExternalOverrideTest(unittest.TestCase):
                         self.by_service[service].get(name), literal,
                         f"{service}.{name} 은 {form} 형태여야 한다 — "
                         "표기는 코드가 그 변수를 읽는 방식을 따라간다")
+
+    def test_the_gateway_fallback_env_uses_the_notation_its_reader_needs(self) -> None:
+        """게이트웨이 키 폴백 env 3종(base) — 역시 코드를 따라간다.
+
+        `LLAMA_API_KEYS`·`LLAMA_MODELS` 는 parse_env_list 가 빈 값을 unset 으로
+        읽으므로 **대시**, `LLAMA_KEY_RPM` 은 `_env_float` 이 빈 값을 `float()` 로
+        바꾸다 크래시하므로 **콜론**(기본 30). override 들(external·llama)은 base
+        와 병합되고 LLAMA_* 를 덮지 않으므로 base 하나가 셋을 다 덮는다.
+        """
+        base = (_REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        for literal in (
+            '"${LLAMA_API_KEYS-}"',
+            '"${LLAMA_MODELS-}"',
+            '"${LLAMA_KEY_RPM:-30}"',
+        ):
+            with self.subTest(literal=literal):
+                self.assertIn(
+                    literal, base,
+                    "표기는 코드가 그 변수를 읽는 방식을 따라간다"
+                    "(대시=빈 값 허용, 콜론=빈 값 방지)")
 
     def test_model_carrying_services_are_behind_a_profile(self) -> None:
         """profile 뒤에 있어야 기동에서도 `build` 에서도 빠진다(2026-08-14 실측)."""
