@@ -1,5 +1,27 @@
 # 2026-08-23 작업 로그 (알파)
 
+> **[세션 2] `/docs`·`/openapi.json` 비공개 이행 — 오너 결정 대기 ② 해소 (SoT v1.7.98).**
+> 오너 결정: *"api 쪽과 docs는 공개되면 안되지."* 실측으로 노출 6곳(8520 직접 3 +
+> nginx 경유 3)을 확인하고 `create_app`의 `FastAPI(docs_url=None, redoc_url=None,
+> openapi_url=None)` 한 곳으로 닫았다 — 세 factory(제품·관리자·합집합)가 한 본문이라
+> 한 번에 폐쇄(v1.7.91 구조가 여기서도 일했다). 관리자 앱은 nginx prefix 구조상
+> 애초에 노출 없음(실측 404). **선행 확인 — HTTP 소비자 0건**: 프론트 TS 계약은
+> `scripts/dump_openapi.py`(import 방식 `create_app().openapi()`), 테스트 5파일도
+> 전부 `.openapi()` 직접 호출. 커밋 `14e9904`.
+>
+> - **가드**: `test_admin_surface_separation.py` 신규 1셀 — 세 앱의 네 docs 경로
+>   (`/docs`·`/docs/oauth2-redirect`·`/redoc`·`/openapi.json`) 부재 +
+>   `/health`·제품 `/auth/login` 생존(양방향). docs 라우트는 `APIRoute`가 아니라
+>   일반 `Route`라 경로 집합으로 직접 잰다.
+> - **뮤테이션**: FastAPI 기본값 복원(세 줄 제거) → 신규 셀 재실패 ✓ → 복구 ✓.
+> - **회귀**: 전수 **2482 passed / 0 failed / skip 4** — 검산: 2480(08-22 세션 5) +
+>   1(H-1 수리 셀, 세션 6) + 1(오늘) = 2482. 일치.
+> - **실관통**(app 이미지 재빌드·4서비스 재생성 후): 6경로 전부 **404**,
+>   `/health` 200 양쪽·프론트 200·`/projects` 401·로그인/가입 라우트 생존.
+> - **함정(밟음)**: `docker compose build app` → 서비스명은 `application`(이미지
+>   태그만 `ai_writte_system-app`). 빌드 없이 `up`하면 옛 이미지로 올라 차단이
+>   안 보인다.
+
 > **[세션 1] 오너 admin 계정 생성 + 시드 정리 — HANDOFF 오너 결정 대기 ① 이행.**
 > 08-22 보안 점검 발견 ②(활성 admin 시드 계정·오너 본인 계정 부재)를 닫았다.
 > 오너가 계정명 `owner-account`를 지정(아래 D-2026-08-23-a). **비밀번호는 이 문서 어디에도
@@ -67,6 +89,13 @@ DB에 없다(검증 문서에는 생성 커맨드가 있으나 그 뒤 정리된
 
 ## Decisions
 
+### D-2026-08-23-c — docs 비공개, env 토글 없음 (오너 + 구현자)
+
+오너: *"api 쪽과 docs는 공개되면 안되지."* — `/docs`·`/redoc`·`/openapi.json` 전부
+비공개. 구현자 판단으로 **env 토글 없이 상시 차단** — 정당한 소비자가 전부 import
+방식(dump 스크립트·테스트)이라 런타임 서빙의 수요가 0이고, 공개가 다시 필요해지면
+그때 명시적 결정으로 연다(조용한 env 폴백이 아니라).
+
 ### D-2026-08-23-a — 오너 계정명 = `owner-account` (오너)
 
 오너 질문 *"admin 계정을 매번 따로 만들어야하는거야? 어드민 계정이니까 그게 안전하겠지?"*에
@@ -84,6 +113,6 @@ env 전달(히스토리·ps 무노출)·Argon2id 해시만 저장·C-6 1회용. 
 
 - **오너**: `http://localhost:5520`에서 `owner-account` + 전달받은 임시 비밀번호로 로그인 →
   409 안내에 따라 새 비밀번호(12자 이상) 설정. 그때 임시값은 무효화된다.
-- **오너 결정 대기 ②③ 잔여**(HANDOFF): `/docs`·`/openapi.json` 공개 차단 여부(8520+5520
-  둘 다) · Secure 쿠키×http 홈서버(HTTPS 또는 `AUTH_COOKIE_SECURE=false`)+nginx 보안 헤더.
+- **오너 결정 대기 ③만 잔여**(HANDOFF): Secure 쿠키×http 홈서버(HTTPS 또는
+  `AUTH_COOKIE_SECURE=false`) + nginx 보안 헤더(X-Frame-Options 등). ①②는 해소(세션 1·2).
 - 폴백 슬라이스(`d8ba6e7…`) 독립 검증은 여전히 대기.
