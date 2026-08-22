@@ -2968,6 +2968,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description Conflict */
             409: {
                 headers: {

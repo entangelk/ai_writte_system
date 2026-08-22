@@ -34,6 +34,7 @@ from services.application.app.auth.cookies import cookie_secure
 from services.application.app.auth.sessions import (
     InMemorySessionRepository, SessionService,
 )
+from services.application.app.auth.models import User
 from services.application.app.auth.users import (
     MIN_PASSWORD_LENGTH, InMemoryUserRepository, UserService,
 )
@@ -213,17 +214,41 @@ class SignupApiTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
-    def test_a_pending_account_cannot_sign_in(self) -> None:
+    def test_a_pending_account_is_403_pending(self) -> None:
         client, _, _ = _client()
         client.post(
             "/auth/signup", json={"username": "bob", "password": "long-enough-pw"}
         )
-        # Right password, still no session: the row is pending. 1-a answers the
-        # unified 401; 1-b (owner 2026-08-22) differentiates into 403+reason.
+        # Right password, no session, told *why* (owner 2026-08-22): the 403 is
+        # effectively addressed to the account owner alone, since reaching it
+        # requires the correct password.
         response = client.post(
             "/auth/login", json={"username": "bob", "password": "long-enough-pw"}
         )
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["detail"], "account approval pending")
+        self.assertNotIn("set-cookie", response.headers)
+
+    def test_a_rejected_account_is_403_rejected(self) -> None:
+        client, users, _ = _client()
+        client.post(
+            "/auth/signup", json={"username": "bob", "password": "long-enough-pw"}
+        )
+        # An admin's rejection (1-d will expose this as an operation; the domain
+        # write itself is exercised in the users tests — here we only need the
+        # row in place, so the repository seam is used directly).
+        pending = users.list_users()[-1]  # alice is created first, bob is last
+        users._repo.replace(User(
+            id=pending.id, username=pending.username,
+            password_hash=pending.password_hash, is_admin=False,
+            is_active=True, created_at=pending.created_at,
+            must_change_password=False, status="rejected",
+        ))
+        response = client.post(
+            "/auth/login", json={"username": "bob", "password": "long-enough-pw"}
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["detail"], "signup request rejected")
         self.assertNotIn("set-cookie", response.headers)
 
     def test_a_pending_status_is_not_revealed_by_a_wrong_password(self) -> None:
@@ -472,11 +497,11 @@ class ProjectAuthorizationTest(unittest.TestCase):
     def test_ownership_dependency_and_403_declaration_match_project_scope(self) -> None:
         """Declaration guard in both directions: scoped routes only, no drift.
 
-        D8-5 widened the *declaration* half: 403 now has two producers, the
-        ownership boundary and the admin boundary, so "declares 403" no longer
-        means "is project-scoped". The dependency half stayed exact — the
-        ownership dependency belongs on `{project_id}` routes and nowhere else,
-        which is the property this class exists to protect.
+        D8-5 widened the *declaration* half: 403 gained its second producer (the
+        admin boundary) and signup approval (owner 2026-08-22) its third — so
+        "declares 403" no longer means "is project-scoped". The dependency half
+        stayed exact — the ownership dependency belongs on `{project_id}` routes
+        and nowhere else, which is the property this class exists to protect.
         """
         spec = self.client.app.openapi()
         for route in self.client.app.routes:
@@ -518,9 +543,29 @@ class ProjectAuthorizationTest(unittest.TestCase):
                         # surface deliberately does not reach project content.
                         self.assertFalse(admin_guarded and expected)
                     responses = spec["paths"][route.path][method]["responses"]
-                    self.assertEqual(
-                        "403" in responses, expected or admin_guarded
-                    )
+                    if route.path == "/auth/login":
+                        # 403's third producer (owner 2026-08-22): signup
+                        # status, raised *in the handler* after credentials
+                        # verify — an account-state answer, not an authorization
+                        # boundary. Shape-asserted like the admin exception
+                        # above rather than skipped: the login route must carry
+                        # neither dependency (a guard here would wall off the
+                        # very handshake the route exists for), must declare
+                        # 403, and must keep 401 alongside (a wrong password is
+                        # still the first gate — the status never leaks to a
+                        # guesser).
+                        self.assertFalse(
+                            ownership_guarded or admin_guarded,
+                            "the login route must stay dependency-free — "
+                            "authorization belongs to the sessions it hands "
+                            "out, not to the handshake itself",
+                        )
+                        self.assertIn("403", responses)
+                        self.assertIn("401", responses)
+                    else:
+                        self.assertEqual(
+                            "403" in responses, expected or admin_guarded
+                        )
 
 
 class AuthenticationBoundaryTest(unittest.TestCase):
@@ -1302,8 +1347,11 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         #     even though the sub-dependency would still resolve.
         #   * a repeated identity is the drift a copy-pasted `dependencies=`
         #     list produces, and it makes "is this route guarded" ambiguous.
-        #   * 403 has two producers since D8-5 (ownership, admin) and exactly
-        #     those two: a 403 on any other operation is a false declaration.
+        #   * 403 has three producers: D8-5's two boundaries (ownership, admin)
+        #     and — since signup approval (owner 2026-08-22) — the login
+        #     handshake itself, which answers 403 to a correct password on a
+        #     pending/rejected account. That third producer lives only on
+        #     /auth/login; a 403 on any other operation is a false declaration.
         for route, path, method, tier in self._tiers():
             with self.subTest(path=path, method=method):
                 declared = [d.dependency for d in route.dependencies]
@@ -1315,7 +1363,15 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
                         self.assertIn(require_authenticated_user, declared)
                     self.assertLessEqual(declared.count(authorization), 1)
                 self.assertLessEqual(declared.count(require_authenticated_user), 1)
-                self.assertEqual(tier in ("project", "admin"), "403" in responses)
+                if path == "/auth/login":
+                    # The third producer, shape-asserted: an authorization-free
+                    # public route whose 403 is an account-state answer.
+                    self.assertEqual(tier, "public")
+                    self.assertIn("403", responses)
+                else:
+                    self.assertEqual(
+                        tier in ("project", "admin"), "403" in responses
+                    )
                 # The two authorization boundaries are alternatives, never a
                 # stack: an operation behind both would have two different
                 # meanings for the same status.

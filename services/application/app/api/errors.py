@@ -124,9 +124,14 @@ _ERRORS_401: dict[int | str, dict] = {401: _ERROR, 503: _STORAGE_503}
 # C-6: login additionally answers 409 when the account still carries a password
 # somebody else chose. Only /auth/login declares it — no other operation gains a
 # status, because the enforcement point is *obtaining a session*, not using one.
-_ERRORS_LOGIN_409: dict[int | str, dict] = {
-    400: _ERROR, 401: _ERROR, 409: _ERROR, 503: _STORAGE_503,
+_ERRORS_LOGIN: dict[int | str, dict] = {
+    400: _ERROR, 401: _ERROR, 403: _ERROR, 409: _ERROR, 503: _STORAGE_503,
 }
+# 403 joined the login contract with signup approval (owner 2026-08-22): a
+# correct-password sign-in against a pending/rejected account is told which it
+# is. This is 403's third producer (ownership · admin · signup status) — the
+# boundary matrix cells were updated in the same slice, and the login screen
+# (1-e) branches on the detail: the one enrolled H3 exception.
 
 
 # Logout is the one non-/health operation that stays reachable without a session:

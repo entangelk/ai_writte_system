@@ -23,14 +23,15 @@ from ..api.models import (
 )
 from ..api.errors import (
     _ERRORS_401,
-    _ERRORS_LOGIN_409,
+    _ERRORS_LOGIN,
     _ERRORS_LOGOUT,
     _ERRORS_SIGNUP,
 )
 from ..auth.users import (
     DuplicateUsername,
     InvalidUserInput,
-    USER_STATUS_ACTIVE,
+    USER_STATUS_PENDING,
+    USER_STATUS_REJECTED,
 )
 from ..api.dependencies import (
     _REQUIRE_AUTH,
@@ -79,7 +80,7 @@ def register_auth(app, *, users, sessions, core_sot, activity) -> None:
         return {"username": user.username, "status": user.status}
 
     @app.post("/auth/login", response_model=LoginResponse,
-              responses=_ERRORS_LOGIN_409)
+              responses=_ERRORS_LOGIN)
     async def login(request: LoginRequest, response: Response) -> dict[str, object]:
         user = users.authenticate(
             username=request.username, password=request.password
@@ -91,16 +92,23 @@ def register_auth(app, *, users, sessions, core_sot, activity) -> None:
             raise HTTPException(status_code=401, detail="invalid credentials")
         # Signup approval gate (P-4): checked only *after* credentials verify,
         # so a wrong password on a pending account is a plain 401 — the status
-        # is visible to nobody who does not already hold the right password.
-        # 1-a keeps the unified 401 here; 1-b differentiates pending/rejected
-        # into 403 + reason (owner 2026-08-22).
-        if user.status != USER_STATUS_ACTIVE:
-            raise HTTPException(status_code=401, detail="invalid credentials")
+        # is visible to nobody who does not already hold the right password
+        # (owner 2026-08-22: the 403 is effectively addressed to the account
+        # owner alone). The two details are consumed by the login screen (1-e);
+        # this is the one enrolled exception to H3's "never branch on detail".
+        if user.status == USER_STATUS_PENDING:
+            raise HTTPException(
+                status_code=403, detail="account approval pending"
+            )
+        if user.status == USER_STATUS_REJECTED:
+            raise HTTPException(
+                status_code=403, detail="signup request rejected"
+            )
         # C-6 (owner 2026-08-02): an administrator-set password is single-use and
         # can only be spent on replacing itself. **Enforced here rather than on
         # every operation**: no session is issued at all, so the other 73
-        # operations gain neither a check nor a new declared status — and the
-        # "403 has exactly two producers" invariant stays intact.
+        # operations gain neither a check nor a new declared status — and 403's
+        # producers stay exactly three (ownership · admin · signup status above).
         #
         # The credentials were already verified above, so this branch cannot be
         # used to probe: a wrong password is 401 whether or not a change is due.
