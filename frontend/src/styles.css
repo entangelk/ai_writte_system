@@ -475,6 +475,24 @@ main {
   margin-bottom: 1.2rem;
 }
 
+/* 승인제 가입(2026-08-22): 로그인 폼과 요청 폼 사이를 오가는 링크형 버튼.
+   accent 면을 쓰지 않는다(buttonAppearance 가드의 대상이 아니다) — 이 자리의
+   역할은 "다른 모드로 전환"이지 주 행동이 아니어서, 면을 주면 제출 버튼과
+   경쟁한다. */
+.auth-switch {
+  justify-self: start;
+  margin-top: 0.1rem;
+  padding: 0.2rem 0;
+  color: var(--action-primary);
+  background: transparent;
+  border: 0;
+  font-size: 0.84rem;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 0.2rem;
+  cursor: pointer;
+}
+
 .auth-status {
   color: var(--text-muted);
 }

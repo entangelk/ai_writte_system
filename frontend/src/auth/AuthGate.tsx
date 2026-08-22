@@ -8,6 +8,7 @@ import {
   getCurrentUser,
   login,
   logout,
+  requestSignup,
   subscribeUnauthorized,
   type User,
 } from "../api/client";
@@ -264,6 +265,20 @@ function SessionMenu({
   );
 }
 
+/** 로그인 화면의 세 얼굴 (승인제 가입, 2026-08-22).
+ *
+ * - "signin": 아이디·비밀번호 (+ 관리자 1회용 비밀번호 교체 분기)
+ * - "signup": 새 계정 요청 — **요청만** 만들고, 계정은 관리자 승인 뒤 생긴다.
+ * - "requested": 요청 접수 안내 — 세션이 없으니 "가입됐다"가 아니라
+ *   "접수됐다"고만 말한다(과잉 안내는 승인 전 로그인 시도로 이어진다).
+ *
+ * 로그인 403 은 detail 두 문구로 대기/거절을 구분해 보여준다 — H3 "detail 로
+ * 분기하지 않는다"의 **등재된 유일 예외**(백엔드 슬라이스 1-b, 오너 2026-08-22).
+ * 그 403 을 받았다는 것 자체가 비밀번호까지 맞았다는 뜻이라, 사실상 본인에게만
+ * 보이는 안내다.
+ */
+type LoginMode = "signin" | "signup" | "requested";
+
 function LoginScreen({
   sessionExpired,
   onAuthenticated,
@@ -271,13 +286,23 @@ function LoginScreen({
   sessionExpired: boolean;
   onAuthenticated: (user: User) => void;
 }) {
+  const [mode, setMode] = useState<LoginMode>("signin");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [signupPasswordConfirmation, setSignupPasswordConfirmation] =
+    useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mustReplacePassword, setMustReplacePassword] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [newPasswordConfirmation, setNewPasswordConfirmation] = useState("");
+
+  function switchMode(next: LoginMode) {
+    setMode(next);
+    setError(null);
+    setPassword("");
+    setSignupPasswordConfirmation("");
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -305,109 +330,258 @@ function LoginScreen({
         if (err instanceof ApiError && err.status === 401) {
           setPassword("");
         }
-        setError(
-          err instanceof ApiError && err.status === 401
-            ? "아이디 또는 비밀번호를 확인해 주세요."
-            : err instanceof ApiError && err.status === 409
-              ? "새 비밀번호를 설정하지 못했습니다. 입력을 확인해 주세요."
-              : "로그인하지 못했습니다. 잠시 후 다시 시도해 주세요.",
-        );
+        setError(signinErrorMessage(err));
       }
     } finally {
       setSubmitting(false);
     }
   }
 
+  async function submitSignup(event: React.FormEvent) {
+    event.preventDefault();
+    const normalizedUsername = username.trim();
+    if (
+      normalizedUsername === "" || password.length < 12 ||
+      password !== signupPasswordConfirmation || submitting
+    ) {
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      await requestSignup({ username: normalizedUsername, password });
+      setPassword("");
+      setSignupPasswordConfirmation("");
+      setMode("requested");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setError("이미 사용 중인 아이디입니다. 다른 아이디를 사용해 주세요.");
+      } else if (err instanceof ApiError && err.status === 400) {
+        setError("요청 내용을 확인해 주세요. 비밀번호는 12자 이상이어야 합니다.");
+      } else {
+        setError("가입 요청을 보내지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (mode === "requested") {
+    return (
+      <main className="auth-shell">
+        <section className="login-page page-enter">
+          <header className="login-heading">
+            <p className="eyebrow">에-라잇</p>
+            <h1>가입 요청이 접수되었습니다</h1>
+            <p>
+              관리자가 승인하면 입력하신 아이디와 비밀번호로 로그인할 수 있습니다.
+              승인까지 시간이 걸릴 수 있으니 조금 뒤에 다시 시도해 주세요.
+            </p>
+          </header>
+          <form className="login-form" onSubmit={(e) => e.preventDefault()}>
+            <button
+              className="auth-submit"
+              type="button"
+              onClick={() => switchMode("signin")}
+            >
+              로그인 화면으로
+            </button>
+          </form>
+        </section>
+      </main>
+    );
+  }
+
+  const signupForm = mode === "signup";
+
   return (
     <main className="auth-shell">
       <section className="login-page page-enter">
         <header className="login-heading">
           <p className="eyebrow">에-라잇</p>
-          <h1>{mustReplacePassword ? "새 비밀번호 설정" : "쓴 것을 기억하는 집필 작업실"}</h1>
+          <h1>
+            {mustReplacePassword
+              ? "새 비밀번호 설정"
+              : signupForm ? "새 계정 요청" : "쓴 것을 기억하는 집필 작업실"}
+          </h1>
           <p>
             {mustReplacePassword
               ? "관리자가 만든 초기 비밀번호를 본인만 아는 비밀번호로 바꿔 주세요."
-              : "설정과 인물, 지난 원고를 AI가 기억한 채로 이어서 씁니다."}
+              : signupForm
+                ? "요청하면 관리자 승인 뒤 계정이 열립니다. 비밀번호는 12자 이상입니다."
+                : "설정과 인물, 지난 원고를 AI가 기억한 채로 이어서 씁니다."}
           </p>
         </header>
 
-        {sessionExpired && (
+        {sessionExpired && !signupForm && (
           <p className="session-expired" role="status">
             세션이 만료되었습니다.
           </p>
         )}
 
-        <form className="login-form" onSubmit={submit}>
-          <label htmlFor="login-username">
-            <span>아이디</span>
-            <input
-              id="login-username"
-              name="username"
-              value={username}
-              autoComplete="username"
-              autoFocus
-              disabled={mustReplacePassword}
-              onChange={(event) => setUsername(event.target.value)}
-            />
-          </label>
-          <label htmlFor="login-password">
-            <span>비밀번호</span>
-            <input
-              id="login-password"
-              name="password"
-              type="password"
-              value={password}
-              disabled={mustReplacePassword}
-              autoComplete="current-password"
-              onChange={(event) => setPassword(event.target.value)}
-            />
-          </label>
-          {mustReplacePassword && (
-            <>
-              <label htmlFor="login-new-password">
-                <span>새 비밀번호</span>
-                <input
-                  id="login-new-password"
-                  type="password"
-                  value={newPassword}
-                  minLength={12}
-                  autoComplete="new-password"
-                  autoFocus
-                  onChange={(event) => setNewPassword(event.target.value)}
-                />
-              </label>
-              <label htmlFor="login-new-password-confirmation">
-                <span>새 비밀번호 확인</span>
-                <input
-                  id="login-new-password-confirmation"
-                  type="password"
-                  value={newPasswordConfirmation}
-                  minLength={12}
-                  autoComplete="new-password"
-                  onChange={(event) => setNewPasswordConfirmation(event.target.value)}
-                />
-              </label>
-              <p className="form-hint">12자 이상, 두 입력이 같아야 합니다.</p>
-            </>
-          )}
-          {error !== null && (
-            <p className="login-error" role="alert">{error}</p>
-          )}
-          <button
-            className="auth-submit"
-            type="submit"
-            disabled={
-              username.trim() === "" || password === "" || submitting ||
-              (mustReplacePassword &&
-                (newPassword.length < 12 || newPassword !== newPasswordConfirmation))
-            }
-          >
-            {submitting
-              ? "확인하는 중…"
-              : mustReplacePassword ? "비밀번호 바꾸고 입장" : "작업실 입장"}
-          </button>
-        </form>
+        {signupForm ? (
+          <form className="login-form" onSubmit={submitSignup}>
+            <label htmlFor="signup-username">
+              <span>아이디</span>
+              <input
+                id="signup-username"
+                name="username"
+                value={username}
+                autoComplete="username"
+                autoFocus
+                onChange={(event) => setUsername(event.target.value)}
+              />
+            </label>
+            <label htmlFor="signup-password">
+              <span>비밀번호</span>
+              <input
+                id="signup-password"
+                name="new-password"
+                type="password"
+                value={password}
+                minLength={12}
+                autoComplete="new-password"
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </label>
+            <label htmlFor="signup-password-confirmation">
+              <span>비밀번호 확인</span>
+              <input
+                id="signup-password-confirmation"
+                type="password"
+                value={signupPasswordConfirmation}
+                minLength={12}
+                autoComplete="new-password"
+                onChange={(event) =>
+                  setSignupPasswordConfirmation(event.target.value)
+                }
+              />
+            </label>
+            <p className="form-hint">12자 이상, 두 입력이 같아야 합니다.</p>
+            {error !== null && (
+              <p className="login-error" role="alert">{error}</p>
+            )}
+            <button
+              className="auth-submit"
+              type="submit"
+              disabled={
+                username.trim() === "" || password.length < 12 ||
+                password !== signupPasswordConfirmation || submitting
+              }
+            >
+              {submitting ? "보내는 중…" : "가입 요청 보내기"}
+            </button>
+            <button
+              className="auth-switch"
+              type="button"
+              onClick={() => switchMode("signin")}
+            >
+              이미 계정이 있나요? 로그인
+            </button>
+          </form>
+        ) : (
+          <form className="login-form" onSubmit={submit}>
+            <label htmlFor="login-username">
+              <span>아이디</span>
+              <input
+                id="login-username"
+                name="username"
+                value={username}
+                autoComplete="username"
+                autoFocus
+                disabled={mustReplacePassword}
+                onChange={(event) => setUsername(event.target.value)}
+              />
+            </label>
+            <label htmlFor="login-password">
+              <span>비밀번호</span>
+              <input
+                id="login-password"
+                name="password"
+                type="password"
+                value={password}
+                disabled={mustReplacePassword}
+                autoComplete="current-password"
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </label>
+            {mustReplacePassword && (
+              <>
+                <label htmlFor="login-new-password">
+                  <span>새 비밀번호</span>
+                  <input
+                    id="login-new-password"
+                    type="password"
+                    value={newPassword}
+                    minLength={12}
+                    autoComplete="new-password"
+                    autoFocus
+                    onChange={(event) => setNewPassword(event.target.value)}
+                  />
+                </label>
+                <label htmlFor="login-new-password-confirmation">
+                  <span>새 비밀번호 확인</span>
+                  <input
+                    id="login-new-password-confirmation"
+                    type="password"
+                    value={newPasswordConfirmation}
+                    minLength={12}
+                    autoComplete="new-password"
+                    onChange={(event) => setNewPasswordConfirmation(event.target.value)}
+                  />
+                </label>
+                <p className="form-hint">12자 이상, 두 입력이 같아야 합니다.</p>
+              </>
+            )}
+            {error !== null && (
+              <p className="login-error" role="alert">{error}</p>
+            )}
+            <button
+              className="auth-submit"
+              type="submit"
+              disabled={
+                username.trim() === "" || password === "" || submitting ||
+                (mustReplacePassword &&
+                  (newPassword.length < 12 || newPassword !== newPasswordConfirmation))
+              }
+            >
+              {submitting
+                ? "확인하는 중…"
+                : mustReplacePassword ? "비밀번호 바꾸고 입장" : "작업실 입장"}
+            </button>
+            {/* 승인제(2026-08-22): 요청은 누구나 — 승인은 관리자. 비밀번호 교체
+                분기에서는 숨긴다(그 흐름의 다음 단계는 교체지 가입이 아니다). */}
+            {!mustReplacePassword && (
+              <button
+                className="auth-switch"
+                type="button"
+                onClick={() => switchMode("signup")}
+              >
+                계정이 없나요? 새 계정 요청
+              </button>
+            )}
+          </form>
+        )}
       </section>
     </main>
   );
+}
+
+/** 로그인 실패 안내문. 403 두 detail 만 구분한다(H3 등재 예외의 유일 소비자). */
+function signinErrorMessage(err: unknown): string {
+  if (err instanceof ApiError && err.status === 403) {
+    if (err.detail === "account approval pending") {
+      return "가입 승인 대기 중입니다. 관리자가 승인하면 로그인할 수 있어요.";
+    }
+    if (err.detail === "signup request rejected") {
+      return "가입 요청이 거절되었습니다. 다른 아이디로 다시 요청할 수 있어요.";
+    }
+  }
+  if (err instanceof ApiError && err.status === 401) {
+    return "아이디 또는 비밀번호를 확인해 주세요.";
+  }
+  if (err instanceof ApiError && err.status === 409) {
+    return "새 비밀번호를 설정하지 못했습니다. 입력을 확인해 주세요.";
+  }
+  return "로그인하지 못했습니다. 잠시 후 다시 시도해 주세요.";
 }

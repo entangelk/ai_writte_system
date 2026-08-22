@@ -700,5 +700,93 @@ describe("App routes", () => {
       expect(await screen.findByRole("link", { name: "에-라잇" })).toHaveAttribute("href", "/");
       expect(screen.queryByText("AI Writing System")).not.toBeInTheDocument();
     });
+
+    it("requests an account without ever implying it exists yet", async () => {
+      // 승인제 가입(2026-08-22): 요청은 누구나 — 계정은 관리자 승인 뒤 생긴다.
+      // under-strict: 접수 화면이 "가입 완료"를 말하면 셋째 단정이 실패한다.
+      const fetchMock = mockFetch(
+        { status: 401, body: { detail: "not authenticated" } },
+        { status: 201, body: { username: "bob", status: "pending" } },
+      );
+
+      render(
+        <MemoryRouter initialEntries={["/"]}>
+          <App />
+        </MemoryRouter>,
+      );
+
+      await screen.findByLabelText("아이디");
+      await userEvent.click(
+        screen.getByRole("button", { name: "계정이 없나요? 새 계정 요청" }),
+      );
+      await userEvent.type(screen.getByLabelText("아이디"), "bob");
+      await userEvent.type(screen.getByLabelText("비밀번호"), "long-enough-pw");
+      await userEvent.type(screen.getByLabelText("비밀번호 확인"), "long-enough-pw");
+      await userEvent.click(
+        screen.getByRole("button", { name: "가입 요청 보내기" }),
+      );
+
+      expect(
+        await screen.findByRole("heading", { name: "가입 요청이 접수되었습니다" }),
+      ).toBeInTheDocument();
+      expect(fetchMock.mock.calls[1][0]).toBe("/api/auth/signup");
+      expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+        username: "bob",
+        password: "long-enough-pw",
+      });
+      // "가입 완료"가 아니다 — 세션이 없으니 승인 전엔 들어갈 수 없다.
+      expect(screen.queryByText(/가입 완료/)).toBeNull();
+    });
+
+    it("tells a pending member their approval is still waiting", async () => {
+      // 로그인 403 + "account approval pending" (H3 등재 예외의 유일 소비자).
+      mockFetch(
+        { status: 401, body: { detail: "not authenticated" } },
+        { status: 403, body: { detail: "account approval pending" } },
+      );
+
+      render(
+        <MemoryRouter initialEntries={["/"]}>
+          <App />
+        </MemoryRouter>,
+      );
+
+      await screen.findByLabelText("아이디");
+      await userEvent.type(screen.getByLabelText("아이디"), "bob");
+      await userEvent.type(screen.getByLabelText("비밀번호"), "long-enough-pw");
+      await userEvent.click(screen.getByRole("button", { name: "작업실 입장" }));
+
+      expect(
+        await screen.findByText("가입 승인 대기 중입니다. 관리자가 승인하면 로그인할 수 있어요."),
+      ).toBeInTheDocument();
+      // 401 통일 문구와 갈라진다 — 이 사람은 비밀번호가 틀린 게 아니다.
+      expect(
+        screen.queryByText("아이디 또는 비밀번호를 확인해 주세요."),
+      ).toBeNull();
+    });
+
+    it("tells a rejected member they can request again", async () => {
+      mockFetch(
+        { status: 401, body: { detail: "not authenticated" } },
+        { status: 403, body: { detail: "signup request rejected" } },
+      );
+
+      render(
+        <MemoryRouter initialEntries={["/"]}>
+          <App />
+        </MemoryRouter>,
+      );
+
+      await screen.findByLabelText("아이디");
+      await userEvent.type(screen.getByLabelText("아이디"), "bob");
+      await userEvent.type(screen.getByLabelText("비밀번호"), "long-enough-pw");
+      await userEvent.click(screen.getByRole("button", { name: "작업실 입장" }));
+
+      expect(
+        await screen.findByText(
+          "가입 요청이 거절되었습니다. 다른 아이디로 다시 요청할 수 있어요.",
+        ),
+      ).toBeInTheDocument();
+    });
   });
 });

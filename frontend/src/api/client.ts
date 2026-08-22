@@ -102,6 +102,8 @@ async function readDetail(response: Response): Promise<string> {
 export type CreateProjectRequest = components["schemas"]["CreateProjectRequest"];
 export type LoginRequest = components["schemas"]["LoginRequest"];
 export type LoginResponse = components["schemas"]["LoginResponse"];
+export type SignupRequest = components["schemas"]["SignupRequest"];
+export type SignupResponse = components["schemas"]["SignupResponse"];
 export type LogoutResponse = components["schemas"]["LogoutResponse"];
 export type User = components["schemas"]["UserPayload"];
 export type AdminUser = components["schemas"]["AdminUserPayload"];
@@ -163,6 +165,17 @@ export type WritingAcceptAnalysisPartial =
 
 export function login(body: LoginRequest): Promise<LoginResponse> {
   return request("/auth/login", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+// 승인제 가입 요청 (2026-08-22): 201이면 요청은 접수된 것 — 계정은 관리자 승인
+// 전까지 아무것도 아니다(로그인 시도는 403 "승인 대기"). username 중복은 409.
+export function requestSignup(
+  body: SignupRequest,
+): Promise<SignupResponse> {
+  return request("/auth/signup", {
     method: "POST",
     body: JSON.stringify(body),
   });
