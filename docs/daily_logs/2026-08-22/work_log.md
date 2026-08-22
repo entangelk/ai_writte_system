@@ -127,6 +127,41 @@ LLM 게이트웨이(키×모델) + 임베딩·리랭커(키만). 임베딩 모�
 - 기존 스위트 무변 통과: `test_llm_gateway_app`·`test_embedding_assembly`(AST 가드 포함)·
   `test_rerank`·`test_compose_backend_env`(표기 잠금)·`test_httpx_transport`.
 
+## [알파 세션 2 — 같은 날 추가] 키 정리·스택 전환·임베딩 검토
+
+오너 지시 셋: *"키는 지우지 뭐. 스택 전환 해주고, 임베딩은 (gemini-embedding-2 표)
+이거 한번 검토해줘. 지금 구조랑 다를 수 있어서 전용 어댑터를 만들어야할 수도 있겠다."*
+
+**① IP 제한 키 제거** — key[0] 삭제, 5키. (오너가 말한 "5개"와 이제 일치.)
+
+**② 스택 전환(외부 LLM)** — 전환 전 상태 실측: 핵심 컨테이너(mongo·application·
+gateway·llama 등 7개)가 2시간 전 코드 255로 전부 죽어 있었고(WSL/도커 사고 추정)
+worker·admin은 mongo 없이 재시작 루프. `docker compose -f docker-compose.yml -f
+docker-compose.llama.yml down` 후 **base 만 재빌드 기동**(llama 서비스 없음 =
+외부 전환, 볼륨 보존). 전 컨테이너 healthy, 실제 게이트웨이 경로 생성 확인:
+`model: gemma-4-31b-it`, `"네, 스택 전환이 완료되었습니다."` — 키 회전·thought
+걷기 모두 스택 안에서 동작.
+
+**③ gemini-embedding-2 검토(실측, 전용 어댑터 필요성 판정):**
+
+| 프로브 | 결과 |
+|---|---|
+| OpenAI 호환 `/v1beta/openai/embeddings` | **200 OK** — wire 계약은 우리와 같음 |
+| 기본 차원 | **3072** (`dimensions` 파라미터로 768 실측 변경 가능 — **전송 안 하면 3072**) |
+| `task_type`(네이티브 확장) | 400 Unknown name — 호환 경로로는 못 씀 |
+| 네이티브 `:embedContent` | 200 OK — `taskType`·`outputDimensionality`(768·1024) 다 됨, 같은 키 |
+| **QUERY vs DOCUMENT 임베딩** | **코사인 1.0000 — 이 모델은 비대칭 없음. taskType 구분이 검색 품질에 실질 영향 없음(전용 어댑터의 근거 소멸)** |
+
+결론: **전용 어댑터 불필요 — 기존 `OpenAIEmbeddingProvider` 확장 2건으로 족하다.**
+① 경로 정규화(LLM `_chat_endpoint`와 같은 관례 — 지금은 `/v1/embeddings`를 무조건
+붙여 구글에선 404), ② `dimensions` 요청 파라미터 전송(안 보내면 3072로 나와
+차원 가드와 불일치). 운영 쟁점: **모델 교체 = 재색인 필수**(차원과 무관 — 임베딩
+공간 자체가 다름. 차원 1024를 골라도 기존 BGE-m3 벡터와 섞으면 무의미), 차원은
+권장값 768/1536/3072 중 선택(1024도 기술적 가능), 입력 상한 8,192 토큰(메모리
+조각은 짧아 무관), **alpha 배선 공백 — 임베딩 API env 통과가 external override 에만
+있고 base compose 에는 없음**(in-stack chroma/es 를 유지한 채 앱만 외부 임베딩을
+쓰려면 base 에도 통과 필요) → 슬라이스에 포함.
+
 ## [알파 세션 — 같은 날 추가] 외부 LLM 실호출 스모크 (구글 Gemini API)
 
 오너: *"넣었어. 5개 키 넣었으니까 테스트 진행해봐."* (실제로는 **6개**가 들어 있었다 —
