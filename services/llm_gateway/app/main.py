@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from .client import LlamaCppProvider
 from .errors import ProviderError, ProviderErrorCode
+from .fallback import FallbackProvider, SlidingWindowRateLimiter, parse_env_list
 from .httpx_transport import HttpxJsonTransport
 from .payload import ChatCompletionRequest, ChatMessage
 from .provider import LLMProvider
@@ -54,20 +55,70 @@ def _env_float(name: str, default: float) -> float:
     return float(raw)
 
 
-def _build_provider() -> tuple[LLMProvider, HttpxJsonTransport, str]:
+def _build_provider() -> tuple[LLMProvider, list[HttpxJsonTransport], str]:
+    """env → provider·transport 들. 키 폴백(오너 2026-08-22)의 조립 지점.
+
+    - `LLAMA_API_KEYS`(쉼표 리스트, 1개여도 된다): 키마다 transport가 하나씩.
+      없으면 인증 헤더 없음 — 로컬 llama.cpp 의 오늘 경로다.
+    - `LLAMA_MODELS`(쉼표 리스트): `models[0]` 기본, 나머지 폴백. 없으면
+      `LLAMA_DEFAULT_MODEL` 하나.
+    - 키 ≤1 且 모델 ≤1이면 **래퍼 없이 오늘과 동일한 단일 provider** — 로컬 구성은
+      창(窓) 계수기도 라운드로빈도 없는 대가 없는 세계에 그대로 둔다.
+    """
     base_url = os.environ.get("LLAMA_BASE_URL", DEFAULT_LLAMA_BASE_URL)
-    transport = HttpxJsonTransport(
-        base_url=base_url,
-        timeout_seconds=_env_float("LLAMA_TIMEOUT_SECONDS", 120.0),
-        trust_env=_env_bool("LLAMA_TRUST_ENV", False),
+    timeout_seconds = _env_float("LLAMA_TIMEOUT_SECONDS", 120.0)
+    trust_env = _env_bool("LLAMA_TRUST_ENV", False)
+    default_model = os.environ.get("LLAMA_DEFAULT_MODEL", "gemma-local")
+    default_thinking = _env_bool("LLAMA_DEFAULT_THINKING", False)
+    provider_name = os.environ.get("LLAMA_PROVIDER_NAME", DEFAULT_PROVIDER_NAME)
+
+    keys: list[str | None] = parse_env_list(os.environ.get("LLAMA_API_KEYS"))
+    if not keys:
+        keys = [None]
+    models = parse_env_list(os.environ.get("LLAMA_MODELS")) or [default_model]
+    rpm = _env_float("LLAMA_KEY_RPM", 30.0)
+    if rpm < 1:
+        # 빈 값은 compose 콜론 표기가 기본 30으로 메우지만, 명시적으로 0을 적은 것은
+        # 설정 실수다 — 조용히 모든 키를 막는 것보다 기동에서 거부하는 것이 낫다.
+        raise ValueError("LLAMA_KEY_RPM must be at least 1")
+
+    def _transport_for(key: str | None) -> HttpxJsonTransport:
+        return HttpxJsonTransport(
+            base_url=base_url,
+            timeout_seconds=timeout_seconds,
+            trust_env=trust_env,
+            headers={"Authorization": f"Bearer {key}"} if key else None,
+        )
+
+    if len(keys) <= 1 and len(models) <= 1:
+        transport = _transport_for(keys[0])
+        provider = LlamaCppProvider(
+            transport=transport,
+            default_model=models[0],
+            default_thinking=default_thinking,
+            provider_name=provider_name,
+        )
+        return provider, [transport], base_url
+
+    transports = [_transport_for(key) for key in keys]
+    provider = FallbackProvider(
+        providers=[
+            LlamaCppProvider(
+                transport=transport,
+                default_model=models[0],
+                default_thinking=default_thinking,
+                provider_name=provider_name,
+            )
+            for transport in transports
+        ],
+        models=models,
+        limiter=SlidingWindowRateLimiter(
+            slots=len(transports), limit=int(rpm)
+        ),
+        # 체인 전체가 시도당 타임아웃과 같은 예산을 공유 — N 조합이 지연을 배가하지 않는다.
+        total_timeout_seconds=timeout_seconds,
     )
-    provider = LlamaCppProvider(
-        transport=transport,
-        default_model=os.environ.get("LLAMA_DEFAULT_MODEL", "gemma-local"),
-        default_thinking=_env_bool("LLAMA_DEFAULT_THINKING", False),
-        provider_name=os.environ.get("LLAMA_PROVIDER_NAME", DEFAULT_PROVIDER_NAME),
-    )
-    return provider, transport, base_url
+    return provider, transports, base_url
 
 
 def _status_for_error(error: ProviderError) -> int:
@@ -111,11 +162,11 @@ def create_app(
     *,
     llama_base_url: str | None = None,
 ) -> FastAPI:
-    owned_transport: HttpxJsonTransport | None = None
+    owned_transports: list[HttpxJsonTransport] = []
     configured_base_url = llama_base_url
 
     if provider is None:
-        provider, owned_transport, configured_base_url = _build_provider()
+        provider, owned_transports, configured_base_url = _build_provider()
     elif configured_base_url is None:
         configured_base_url = os.environ.get(
             "LLAMA_BASE_URL", DEFAULT_LLAMA_BASE_URL
@@ -126,8 +177,8 @@ def create_app(
         try:
             yield
         finally:
-            if owned_transport is not None:
-                await owned_transport.aclose()
+            for transport in owned_transports:
+                await transport.aclose()
 
     app = FastAPI(title="에-라잇 LLM Gateway", lifespan=lifespan)
 
