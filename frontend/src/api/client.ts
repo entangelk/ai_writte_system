@@ -205,6 +205,35 @@ export function deactivateAdminUser(userId: string): Promise<AdminUser> {
   });
 }
 
+// 승인제 가입(2026-08-22): 요청 목록·승인·거절. 승인·거절은 pending 요청에만
+// 성공한다 — 서버가 이미 처리된 요청에 409 로 답하면 화면은 목록을 다시 읽는다.
+export type AdminSignupRequest =
+  components["schemas"]["AdminSignupPayload"];
+
+export function listAdminSignupRequests(): Promise<
+  components["schemas"]["AdminSignupListResponse"]
+> {
+  return request("/admin/signup-requests");
+}
+
+export function approveAdminSignup(
+  userId: string,
+): Promise<AdminSignupRequest> {
+  return request(
+    `/admin/signup-requests/${encodeURIComponent(userId)}/approve`,
+    { method: "POST" },
+  );
+}
+
+export function rejectAdminSignup(
+  userId: string,
+): Promise<AdminSignupRequest> {
+  return request(
+    `/admin/signup-requests/${encodeURIComponent(userId)}/reject`,
+    { method: "POST" },
+  );
+}
+
 export function listAdminProjects(): Promise<components["schemas"]["AdminProjectListResponse"]> {
   return request("/admin/projects");
 }

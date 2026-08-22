@@ -42,7 +42,8 @@ describe("AdminConsole", () => {
         },
         sites: [], gate: {}, loop: {},
       }))
-      .mockResolvedValueOnce(response({ events: [] }));
+      .mockResolvedValueOnce(response({ events: [] }))
+      .mockResolvedValueOnce(response({ requests: [] }));
     vi.stubGlobal("fetch", fetchMock);
 
     render(<MemoryRouter><AdminConsole /></MemoryRouter>);
@@ -67,6 +68,7 @@ describe("AdminConsole", () => {
       "/api/admin/projects",
       "/api/admin/observability/kpi",
       "/api/admin/audit-events",
+      "/api/admin/signup-requests",
     ]);
   });
 
@@ -86,6 +88,7 @@ describe("AdminConsole", () => {
         sites: [], gate: {}, loop: {},
       }))
       .mockResolvedValueOnce(response({ events: [] }))
+      .mockResolvedValueOnce(response({ requests: [] }))
       .mockResolvedValueOnce(response({
         id: "u2", username: "alice", is_admin: false, is_active: true,
       }))
@@ -103,7 +106,7 @@ describe("AdminConsole", () => {
 
     const aliceRow = (await screen.findByText("alice")).closest("li");
     expect(aliceRow).not.toBeNull();
-    expect(JSON.parse(fetchMock.mock.calls[4][1].body)).toEqual({
+    expect(JSON.parse(fetchMock.mock.calls[5][1].body)).toEqual({
       username: "alice", password: "temporary-password", is_admin: false,
     });
     await userEvent.click(within(aliceRow!).getByRole("button", { name: "비활성화" }));
@@ -129,6 +132,7 @@ describe("AdminConsole", () => {
         sites: [], gate: {}, loop: {},
       }))
       .mockResolvedValueOnce(response({ events: [] }))
+      .mockResolvedValueOnce(response({ requests: [] }))
       .mockResolvedValueOnce(response({ grant: {
         id: "g1", project_id: "p1", admin_user_id: "u1", reason: "지원 요청 확인",
         created_at: "2026-08-02T00:00:00Z", expires_at: "2026-08-02T01:00:00Z",
@@ -151,14 +155,14 @@ describe("AdminConsole", () => {
     await userEvent.click(grantButton);
 
     expect(await within(project!).findByText(/권한 만료/)).toBeInTheDocument();
-    expect(JSON.parse(fetchMock.mock.calls[4][1].body)).toEqual({ reason: "지원 요청 확인" });
+    expect(JSON.parse(fetchMock.mock.calls[5][1].body)).toEqual({ reason: "지원 요청 확인" });
     expect(within(project!).getByRole("link", { name: "프로젝트 열기" })).toHaveAttribute(
       "href", "/projects/p1",
     );
 
     await userEvent.click(within(project!).getByRole("button", { name: "접근 이력 보기" }));
     expect(await within(project!).findByText("GET /projects/p1")).toBeInTheDocument();
-    await waitFor(() => expect(fetchMock.mock.calls[5][0]).toBe("/api/projects/p1/access-log"));
+    await waitFor(() => expect(fetchMock.mock.calls[6][0]).toBe("/api/projects/p1/access-log"));
   });
 
   it("requires archive, reason, and the exact project name before purging", async () => {
@@ -180,6 +184,7 @@ describe("AdminConsole", () => {
         sites: [], gate: {}, loop: {},
       }))
       .mockResolvedValueOnce(response({ events: [] }))
+      .mockResolvedValueOnce(response({ requests: [] }))
       .mockResolvedValueOnce(response(undefined, 204))
       .mockResolvedValueOnce(response({ events: [
         {
@@ -216,8 +221,8 @@ describe("AdminConsole", () => {
 
     expect(await screen.findByRole("status")).toHaveTextContent("영구 삭제했습니다");
     expect(screen.queryByText("보관 원고")).not.toBeInTheDocument();
-    expect(JSON.parse(fetchMock.mock.calls[4][1].body)).toEqual({ reason: "고객 삭제 요청" });
-    expect(fetchMock.mock.calls[4][0]).toBe("/api/admin/projects/p2/purge");
+    expect(JSON.parse(fetchMock.mock.calls[5][1].body)).toEqual({ reason: "고객 삭제 요청" });
+    expect(fetchMock.mock.calls[5][0]).toBe("/api/admin/projects/p2/purge");
     expect(await screen.findByText("p2")).toBeInTheDocument();
   });
 
@@ -239,6 +244,7 @@ describe("AdminConsole", () => {
         sites: [], gate: {}, loop: {},
       }))
       .mockResolvedValueOnce(response({ events: [] }))
+      .mockResolvedValueOnce(response({ requests: [] }))
       .mockResolvedValueOnce(response({ detail: "storage unavailable" }, 503));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -252,6 +258,78 @@ describe("AdminConsole", () => {
 
     expect(await within(project!).findByText(/다시 시도하지 말고/)).toBeInTheDocument();
     expect(within(project!).queryByRole("button", { name: "영구 삭제" })).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  it("lists signup requests and approves one", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ users: [
+        { id: "u1", username: "root", is_admin: true, is_active: true },
+      ] }))
+      .mockResolvedValueOnce(response({ projects: [] }))
+      .mockResolvedValueOnce(response({
+        projects_considered: 0,
+        totals: {
+          calls: 0, success: 0, provider_error: 0, parse_error: 0,
+          total_tokens: 0, tokens_counted_from: 0,
+          thin_headroom_calls: 0, headroom_considered: 0,
+        },
+        sites: [], gate: {}, loop: {},
+      }))
+      .mockResolvedValueOnce(response({ events: [] }))
+      .mockResolvedValueOnce(response({ requests: [
+        { id: "s1", username: "bob", requested_at: "2026-08-22T09:00:00Z" },
+      ] }))
+      .mockResolvedValueOnce(response({
+        id: "s1", username: "bob", requested_at: "2026-08-22T09:00:00Z",
+      }))
+      .mockResolvedValueOnce(response({ requests: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MemoryRouter><AdminConsole /></MemoryRouter>);
+
+    expect(await screen.findByText("bob")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "승인" }));
+
+    expect(await screen.findByText("bob 계정을 승인했습니다.")).toBeInTheDocument();
+    // 처리된 요청은 큐에서 사라진다 — 목록을 다시 읽었기 때문이다.
+    expect(screen.queryByRole("button", { name: "승인" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls[5][0]).toBe("/api/admin/signup-requests/s1/approve");
+    expect(fetchMock.mock.calls[5][1]).toMatchObject({ method: "POST" });
+    expect(fetchMock.mock.calls[6][0]).toBe("/api/admin/signup-requests");
+  });
+
+  it("rejects a signup and stays honest when the request was already resolved", async () => {
+    // 409(다른 관리자가 먼저 처리)여도 목록을 다시 읽어 서버 상태를 따른다.
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ users: [
+        { id: "u1", username: "root", is_admin: true, is_active: true },
+      ] }))
+      .mockResolvedValueOnce(response({ projects: [] }))
+      .mockResolvedValueOnce(response({
+        projects_considered: 0,
+        totals: {
+          calls: 0, success: 0, provider_error: 0, parse_error: 0,
+          total_tokens: 0, tokens_counted_from: 0,
+          thin_headroom_calls: 0, headroom_considered: 0,
+        },
+        sites: [], gate: {}, loop: {},
+      }))
+      .mockResolvedValueOnce(response({ events: [] }))
+      .mockResolvedValueOnce(response({ requests: [
+        { id: "s1", username: "bob", requested_at: "2026-08-22T09:00:00Z" },
+      ] }))
+      .mockResolvedValueOnce(response({ detail: "signup request already resolved" }, 409))
+      .mockResolvedValueOnce(response({ requests: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MemoryRouter><AdminConsole /></MemoryRouter>);
+
+    expect(await screen.findByText("bob")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "거절" }));
+
+    // 오류는 보이되, 큐는 서버가 말하는 대로(비었다) 갱신된다.
+    expect(await screen.findByText(/409: signup request already resolved/)).toBeInTheDocument();
+    expect(screen.queryByText("bob")).not.toBeInTheDocument();
   });
 });

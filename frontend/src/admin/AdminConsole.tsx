@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import {
   ApiError,
+  approveAdminSignup,
   createAdminUser,
   deactivateAdminUser,
   describeApiError,
@@ -9,14 +10,17 @@ import {
   issueProjectAccessGrant,
   listAdminAuditEvents,
   listAdminProjects,
+  listAdminSignupRequests,
   listAdminUsers,
   listProjectAccessLog,
   purgeAdminProject,
+  rejectAdminSignup,
   type AccessGrant,
   type AccessLogEntry,
   type AdminObservabilityKpi,
   type AdminAuditEvent,
   type AdminProject,
+  type AdminSignupRequest,
   type AdminUser,
 } from "../api/client";
 
@@ -50,20 +54,23 @@ export function AdminConsole() {
   const [savingUser, setSavingUser] = useState(false);
   const [access, setAccess] = useState<Record<string, ProjectAccessState>>({});
   const [purges, setPurges] = useState<Record<string, ProjectPurgeState>>({});
+  const [signups, setSignups] = useState<AdminSignupRequest[]>([]);
+  const [signupBusy, setSignupBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     Promise.all([
       listAdminUsers(), listAdminProjects(), getAdminObservabilityKpi(),
-      listAdminAuditEvents(),
+      listAdminAuditEvents(), listAdminSignupRequests(),
     ])
-      .then(([userResult, projectResult, kpiResult, auditResult]) => {
+      .then(([userResult, projectResult, kpiResult, auditResult, signupResult]) => {
         if (cancelled) return;
         setUsers(userResult.users);
         setProjects(projectResult.projects);
         setKpi(kpiResult);
         setAuditEvents(auditResult.events);
+        setSignups(signupResult.requests);
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(describeApiError(cause));
@@ -96,9 +103,41 @@ export function AdminConsole() {
     }
   }
 
-  async function deactivate(userId: string) {
+  /** 승인·거절 뒤에는 목록을 다시 읽는다(성공·409 모두) — 다른 관리자가 방금
+   * 처리했을 수 있어 로컬 배열 조작보다 서버 상태가 정직하다. */
+  async function resolveSignup(
+    signup: AdminSignupRequest,
+    action: "approve" | "reject",
+  ) {
+    if (signupBusy !== null) return;
+    setSignupBusy(signup.id);
     setError(null);
+    setNotice(null);
     try {
+      const call = action === "approve"
+        ? approveAdminSignup
+        : rejectAdminSignup;
+      await call(signup.id);
+      setNotice(
+        action === "approve"
+          ? `${signup.username} 계정을 승인했습니다.`
+          : `${signup.username} 요청을 거절했습니다.`,
+      );
+    } catch (cause) {
+      setError(describeApiError(cause));
+    } finally {
+      try {
+        const refreshed = await listAdminSignupRequests();
+        setSignups(refreshed.requests);
+      } catch {
+        // 갱신 실패는 본 오류를 덮지 않는다 — 목록은 다음 방문 때 맞춰진다.
+      }
+      setSignupBusy(null);
+    }
+  }
+
+  async function deactivate(userId: string) {
+    setError(null);    try {
       const updated = await deactivateAdminUser(userId);
       setUsers((current) => current.map((user) => user.id === userId ? updated : user));
     } catch (cause) {
@@ -227,6 +266,40 @@ export function AdminConsole() {
                 </li>
               ))}
             </ul>
+          </section>
+
+          <section className="admin-section" aria-labelledby="admin-signups-heading">
+            <h2 id="admin-signups-heading">가입 요청</h2>
+            {signups.length === 0 ? (
+              <p className="form-hint">기다리는 가입 요청이 없습니다.</p>
+            ) : (
+              <ul className="admin-list">
+                {signups.map((signup) => (
+                  <li key={signup.id}>
+                    <div>
+                      <strong>{signup.username}</strong>
+                      <span>요청 {new Date(signup.requested_at).toLocaleString()}</span>
+                    </div>
+                    <div className="row-actions">
+                      <button
+                        type="button"
+                        disabled={signupBusy !== null}
+                        onClick={() => void resolveSignup(signup, "approve")}
+                      >
+                        승인
+                      </button>
+                      <button
+                        type="button"
+                        disabled={signupBusy !== null}
+                        onClick={() => void resolveSignup(signup, "reject")}
+                      >
+                        거절
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
 
           <section className="admin-section" aria-labelledby="admin-projects-heading">

@@ -398,6 +398,7 @@ describe("App routes", () => {
       "/api/admin/projects",
       "/api/admin/observability/kpi",
       "/api/admin/audit-events",
+      "/api/admin/signup-requests",
     ]);
   });
 
