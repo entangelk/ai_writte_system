@@ -1,7 +1,7 @@
 """Slice 2 (A1=ⓑ): 관리자 표면은 **다른 주소**에 있다.
 
 오너 결정(2026-08-05, `plans/router-split-and-admin-separation-decisions.md`)은
-`/admin` 8 operation 을 제품 앱에서 들어내 **같은 이미지·다른 command 의 네 번째
+`/admin` 11 operation 을 제품 앱에서 들어내 **같은 이미지·다른 command 의 네 번째
 compose 서비스**로 옮기는 것이다. 제품 포트는 D8-7 G1=C 에 의해 **일부러 LAN 에
 게시**돼 있고 그 근거가 "세션 뒤에 있다" 이므로, 관리자 표면이 그 포트에 남아 있는 한
 방어는 `require_admin_user` 한 겹뿐이다. 분리하면 LAN 에서 그 경로는 **가드가 아니라
@@ -124,7 +124,7 @@ class SurfaceMembershipTest(unittest.TestCase):
         self.assertIn(_HEALTH, product)
 
     def test_the_admin_surface_serves_exactly_the_admin_tier_and_health(self) -> None:
-        """관리자 앱 = admin tier 8 + `/health`. 그 이상도 이하도 아니다."""
+        """관리자 앱 = admin tier 11 + `/health`. 그 이상도 이하도 아니다."""
 
         self.assertEqual(
             _operations(self.admin), set(_ADMIN_OPERATIONS) | {_HEALTH},

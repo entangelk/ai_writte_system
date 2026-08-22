@@ -141,6 +141,19 @@ class AdminUserPayload(BaseModel):
     is_active: bool
 
 
+class AdminSignupPayload(BaseModel):
+    # One pending signup request, as the admin approval queue shows it.
+    # ``requested_at`` is the row's created_at — re-request over a rejected row
+    # overwrites it, so it is genuinely "when this request was made".
+    id: str
+    username: str
+    requested_at: datetime
+
+
+class AdminSignupListResponse(BaseModel):
+    requests: list[AdminSignupPayload]
+
+
 class AdminUserListResponse(BaseModel):
     users: list[AdminUserPayload]
 

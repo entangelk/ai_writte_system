@@ -1,4 +1,4 @@
-"""관리자 표면 route (``/admin/*`` 8 operation, D8-5·D8-6).
+"""관리자 표면 route (``/admin/*`` 11 operation, D8-5·D8-6 + 승인제 가입(2026-08-22)).
 
 ``main.py`` 의 ``create_app()`` 에서 옮겨온 register 함수(R1). handler 본문은
 byte-동일이다. 이 모듈은 **Slice 2(관리자 주소 분리)** 의 재료가 된다 —
@@ -18,6 +18,7 @@ from services.application.app.auth.users import (
     DuplicateUsername,
     InvalidUserInput,
     LastActiveAdmin,
+    SignupNotPending,
     UserNotFound,
 )
 
@@ -27,6 +28,8 @@ from ..api.models import (
     AdminAuditEventListResponse,
     AdminObservabilityKpiResponse,
     AdminProjectListResponse,
+    AdminSignupListResponse,
+    AdminSignupPayload,
     AdminUserListResponse,
     AdminUserPayload,
     CreateUserRequest,
@@ -113,6 +116,57 @@ def register_admin(
         except LastActiveAdmin as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return _admin_user_payload(user)
+
+    # --- Signup approval (owner 2026-08-22: requests are public, the check is
+    # admin). Approve/reject operate on *pending* rows only — the service
+    # enforces that, so a resolved account can never change status again (an
+    # active account is deactivated, not rejected; that path kills sessions).
+    # Like the other account operations these are not admin-audited: the audit
+    # collections cover the project-content exceptions (purge, grants), and
+    # widening them is a separate decision, not this slice's default.
+
+    @app.get("/admin/signup-requests",
+             response_model=AdminSignupListResponse,
+             responses=_ERRORS_ADMIN, dependencies=_REQUIRE_ADMIN)
+    async def list_signup_requests() -> dict[str, object]:
+        return {"requests": [
+            {
+                "id": user.id,
+                "username": user.username,
+                "requested_at": user.created_at,
+            }
+            for user in users.list_pending_signups()
+        ]}
+
+    @app.post("/admin/signup-requests/{user_id}/approve",
+              response_model=AdminSignupPayload,
+              responses=_ERRORS_ADMIN_404_409, dependencies=_REQUIRE_ADMIN)
+    async def approve_signup(user_id: str) -> dict[str, object]:
+        try:
+            user = users.approve_signup(user_id)
+        except UserNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except SignupNotPending as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {
+            "id": user.id, "username": user.username,
+            "requested_at": user.created_at,
+        }
+
+    @app.post("/admin/signup-requests/{user_id}/reject",
+              response_model=AdminSignupPayload,
+              responses=_ERRORS_ADMIN_404_409, dependencies=_REQUIRE_ADMIN)
+    async def reject_signup(user_id: str) -> dict[str, object]:
+        try:
+            user = users.reject_signup(user_id)
+        except UserNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except SignupNotPending as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {
+            "id": user.id, "username": user.username,
+            "requested_at": user.created_at,
+        }
 
     @app.get("/admin/observability/kpi",
              response_model=AdminObservabilityKpiResponse,

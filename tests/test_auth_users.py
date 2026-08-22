@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from services.application.app.auth.models import User
 from services.application.app.auth.users import (
     DuplicateUsername, InMemoryUserRepository, InvalidUserInput,
-    LastActiveAdmin, UserNotFound, UserService,
+    LastActiveAdmin, SignupNotPending, UserNotFound, UserService,
     USER_STATUS_ACTIVE, USER_STATUS_PENDING, USER_STATUS_REJECTED,
 )
 
@@ -296,6 +296,83 @@ class ListAndDeactivateTest(unittest.TestCase):
         alice = self.service.create_user(username="alice", password="pw")
 
         self.assertFalse(self.service.deactivate_user(alice.id).is_active)
+
+
+class SignupApprovalTest(unittest.TestCase):
+    """관리자 승인·거절 (슬라이스 1-d, P-7).
+
+    under-strict: 이미 처리된 요청이 다시 승인되면(상태 재변경) 짝 셀이 실패한다.
+    over-strict: pending 아닌 것까지 거부하며 정상 승인을 막으면 첫 셀이 실패한다.
+    """
+
+    def setUp(self) -> None:
+        self.repo = InMemoryUserRepository()
+        self.hasher = _FakeHasher()
+        # One id factory across every service this test builds: two factories
+        # each start at user:1 and later writes silently overwrite earlier rows.
+        self.ids = _seq_ids()
+        self.service = UserService(
+            self.repo, hasher=self.hasher,
+            clock=lambda: _FIXED_TIME, id_factory=self.ids,
+        )
+
+    def _pending(self, username: str):
+        return self.service.request_signup(
+            username=username, password="long-enough-pw"
+        )
+
+    def test_approval_moves_pending_to_active(self) -> None:
+        pending = self._pending("bob")
+        approved = self.service.approve_signup(pending.id)
+        self.assertEqual(approved.status, USER_STATUS_ACTIVE)
+
+    def test_rejection_moves_pending_to_rejected(self) -> None:
+        pending = self._pending("bob")
+        rejected = self.service.reject_signup(pending.id)
+        self.assertEqual(rejected.status, USER_STATUS_REJECTED)
+
+    def test_an_approved_request_cannot_be_approved_twice(self) -> None:
+        pending = self._pending("bob")
+        self.service.approve_signup(pending.id)
+        with self.assertRaises(SignupNotPending):
+            self.service.approve_signup(pending.id)
+
+    def test_an_approved_request_cannot_be_rejected_afterwards(self) -> None:
+        # The invariant that keeps session semantics sane: no resolved account
+        # ever changes status again. Deactivation is the one-way door for
+        # active accounts, not rejection.
+        pending = self._pending("bob")
+        self.service.approve_signup(pending.id)
+        with self.assertRaises(SignupNotPending):
+            self.service.reject_signup(pending.id)
+
+    def test_an_admin_created_account_is_not_approvable(self) -> None:
+        # Administrator-created rows are active from birth (pre-signup rows
+        # read back active); approval only ever targets signup requests.
+        admin_made = self.service.create_user(username="carol", password="pw123")
+        with self.assertRaises(SignupNotPending):
+            self.service.approve_signup(admin_made.id)
+
+    def test_approving_an_unknown_user_raises_not_found(self) -> None:
+        with self.assertRaises(UserNotFound):
+            self.service.approve_signup("user:ghost")
+
+    def test_pending_list_shows_only_pending_oldest_first(self) -> None:
+        later = datetime(2026, 8, 23, 8, 0, tzinfo=UTC)
+        first = self._pending("bob")
+        second = UserService(
+            self.repo, hasher=self.hasher,
+            clock=lambda: later, id_factory=self.ids,
+        ).request_signup(username="dave", password="long-enough-pw")
+        # An active account and a rejected row must not appear in the queue.
+        self.service.create_user(username="admin", password="pw123")
+        rejected = self._pending("erin")
+        self.service.reject_signup(rejected.id)
+
+        queue = self.service.list_pending_signups()
+        self.assertEqual([u.username for u in queue], ["bob", "dave"])
+        self.assertEqual(queue[0].id, first.id)
+        self.assertEqual(queue[1].id, second.id)
 
 
 class SignupRequestTest(unittest.TestCase):

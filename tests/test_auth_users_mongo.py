@@ -248,6 +248,35 @@ class MongoUserRepositoryTest(unittest.TestCase):
         # 덮어쓴 것이지 두 번째 행이 생긴 것이 아니다.
         self.assertEqual(len(self.collection.docs), 1)
 
+    def test_list_pending_returns_only_pending_rows(self) -> None:
+        # Pre-signup rows (no status field) can never be pending — the filter
+        # is on the stored field, and their absence from the queue is what
+        # keeps administrator-created accounts out of the approval queue.
+        self.collection.docs["user:legacy"] = {
+            "_id": "user:legacy", "username": "legacy",
+            "password_hash": "H:old", "is_admin": True, "is_active": True,
+            "created_at": _FIXED_TIME,
+        }
+        self.repo.insert(_user(status=USER_STATUS_PENDING))
+        self.repo.insert(_user(uid="user:2", username="active-user"))
+
+        pending = self.repo.list_pending()
+        self.assertEqual([u.id for u in pending], ["user:1"])
+
+    def test_set_status_persists_and_returns_the_updated_user(self) -> None:
+        self.repo.insert(_user(status=USER_STATUS_PENDING))
+        updated = self.repo.set_status("user:1", status=USER_STATUS_ACTIVE)
+        self.assertIsNotNone(updated)
+        self.assertEqual(updated.status, USER_STATUS_ACTIVE)
+        self.assertEqual(
+            self.repo.get_by_id("user:1").status, USER_STATUS_ACTIVE
+        )
+
+    def test_set_status_on_an_unknown_user_returns_none(self) -> None:
+        self.assertIsNone(
+            self.repo.set_status("user:ghost", status=USER_STATUS_ACTIVE)
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

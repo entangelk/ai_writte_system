@@ -898,6 +898,104 @@ class AdminUserApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
 
 
+class SignupApprovalApiTest(unittest.TestCase):
+    """승인제 가입의 관리자 측 (슬라이스 1-d, 오너 2026-08-22).
+
+    under-strict: 승인이 pending 아닌 행도 바꾸면 409 셀이 실패한다.
+    over-strict: 승인이 세션까지 만들면(로그인 대신) 승인 후 로그인 셀이 실패한다.
+    """
+
+    def setUp(self) -> None:
+        self.client, self.users, _ = _client()
+        self.users.create_user(username="root", password="pw789", is_admin=True)
+        self.client.post(
+            "/auth/login", json={"username": "root", "password": "pw789"}
+        )
+
+    def _request(self, username: str) -> str:
+        response = self.client.post(
+            "/auth/signup", json={"username": username, "password": "long-enough-pw"}
+        )
+        self.assertEqual(response.status_code, 201)
+        # The signup response deliberately carries no id — the requester has no
+        # use for one — so the admin flow discovers it the way the UI does.
+        queue = self.client.get("/admin/signup-requests").json()["requests"]
+        return next(r["id"] for r in queue if r["username"] == username)
+
+    def test_the_queue_lists_pending_requests_only(self) -> None:
+        self._request("bob")
+        # An already-approved request leaves the queue.
+        approved = self._request("carol")
+        self.client.post(f"/admin/signup-requests/{approved}/approve")
+        listed = self.client.get("/admin/signup-requests")
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(
+            [r["username"] for r in listed.json()["requests"]], ["bob"]
+        )
+        self.assertEqual(
+            set(listed.json()["requests"][0]),
+            {"id", "username", "requested_at"},
+        )
+
+    def test_approval_lets_the_member_sign_in(self) -> None:
+        pending = self._request("bob")
+        approved = self.client.post(
+            f"/admin/signup-requests/{pending}/approve"
+        )
+        self.assertEqual(approved.status_code, 200)
+        # Approval mints no session of its own — the member signs in themselves.
+        signin = self.client.post(
+            "/auth/login", json={"username": "bob", "password": "long-enough-pw"}
+        )
+        self.assertEqual(signin.status_code, 200)
+        self.assertIn("session", signin.cookies)
+
+    def test_rejection_keeps_the_account_403(self) -> None:
+        pending = self._request("bob")
+        rejected = self.client.post(
+            f"/admin/signup-requests/{pending}/reject"
+        )
+        self.assertEqual(rejected.status_code, 200)
+        signin = self.client.post(
+            "/auth/login", json={"username": "bob", "password": "long-enough-pw"}
+        )
+        self.assertEqual(signin.status_code, 403)
+        self.assertEqual(signin.json()["detail"], "signup request rejected")
+
+    def test_an_already_resolved_request_is_409(self) -> None:
+        pending = self._request("bob")
+        self.client.post(f"/admin/signup-requests/{pending}/approve")
+        again = self.client.post(
+            f"/admin/signup-requests/{pending}/approve"
+        )
+        self.assertEqual(again.status_code, 409)
+
+    def test_an_unknown_request_is_404(self) -> None:
+        response = self.client.post(
+            "/admin/signup-requests/user:ghost/approve"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_non_admin_gets_403_on_all_three(self) -> None:
+        self.client, self.users, _ = _client()
+        self.client.post(
+            "/auth/login", json={"username": "alice", "password": "pw123"}
+        )
+        self.assertEqual(
+            self.client.get("/admin/signup-requests").status_code, 403
+        )
+        self.assertEqual(
+            self.client.post(
+                "/admin/signup-requests/user:x/approve"
+            ).status_code, 403
+        )
+        self.assertEqual(
+            self.client.post(
+                "/admin/signup-requests/user:x/reject"
+            ).status_code, 403
+        )
+
+
 class _PurgeSpy:
     """Records purge_project calls; delegates everything else to the inner service.
 
@@ -1313,6 +1411,12 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         ("/admin/users", "get"),
         ("/admin/users", "post"),
         ("/admin/users/{user_id}/deactivate", "post"),
+        # Signup approval (owner 2026-08-22): requests are public, the check is
+        # admin. These three are account operations like users above — not
+        # admin-audited, not project-scoped.
+        ("/admin/signup-requests", "get"),
+        ("/admin/signup-requests/{user_id}/approve", "post"),
+        ("/admin/signup-requests/{user_id}/reject", "post"),
         # D8-5c. Aggregate counts over every project's LLM-call audit — which is
         # why it sits in this tier rather than the project one: it names no
         # project and reads no project's content.
@@ -1392,7 +1496,7 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # 가입 승인 슬라이스(2026-08-22)가 `POST /auth/signup` 을 공개 tier 에
         # 더해 79 가 됐다 — 요청은 누구나, 승인은 관리자.
         self.assertEqual(len(by_tier["project"]), 62)
-        self.assertEqual(len(tiers), 79)
+        self.assertEqual(len(tiers), 82)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:

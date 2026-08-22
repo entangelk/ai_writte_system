@@ -28,6 +28,16 @@ class InvalidUserInput(AuthError):
     pass
 
 
+class SignupNotPending(AuthError):
+    """Approve/reject targeted a row that is not awaiting approval.
+
+    An active or rejected row is *resolved*, not missing — the caller (an
+    administrator) is told so with 409 rather than 404, because "the request
+    you are looking at was already handled" is actionable in the admin UI in a
+    way "no such user" is not.
+    """
+
+
 class UserNotFound(AuthError):
     pass
 
@@ -69,6 +79,12 @@ class UserRepository(Protocol):
 
     def replace(self, user: User) -> None:
         """Overwrite the stored row for ``user.id`` wholesale (signup re-request)."""
+
+    def list_pending(self) -> tuple[User, ...]:
+        """Signup requests awaiting approval, oldest request first."""
+
+    def set_status(self, user_id: str, *, status: str) -> User | None:
+        """Flip the signup status and return the stored user, or None."""
 
 
 class InMemoryUserRepository:
@@ -118,6 +134,23 @@ class InMemoryUserRepository:
         # Same username by construction (signup re-request), so the by-username
         # index needs no touch — only the stored row itself changes.
         self._by_id[user.id] = user
+
+    def list_pending(self) -> tuple[User, ...]:
+        return tuple(
+            u for u in sorted(
+                self._by_id.values(),
+                key=lambda user: (user.created_at, user.id),
+            )
+            if u.status == USER_STATUS_PENDING
+        )
+
+    def set_status(self, user_id: str, *, status: str) -> User | None:
+        stored = self._by_id.get(user_id)
+        if stored is None:
+            return None
+        updated = replace(stored, status=status)
+        self._by_id[user_id] = updated
+        return updated
 
 
 class UserService:
@@ -248,6 +281,33 @@ class UserService:
             other.id != candidate.id and other.is_admin and other.is_active
             for other in self._repo.list_all()
         )
+
+    # --- Signup approval (owner 2026-08-22 — requests public, approval admin) --
+
+    def list_pending_signups(self) -> tuple[User, ...]:
+        return self._repo.list_pending()
+
+    def approve_signup(self, user_id: str) -> User:
+        """pending → active. The member signs in on their *next* attempt —
+        approval mints no session, exactly like admin-created accounts."""
+        stored = self._repo.get_by_id(user_id)
+        if stored is None:
+            raise UserNotFound("user does not exist")
+        if stored.status != USER_STATUS_PENDING:
+            raise SignupNotPending("signup request already resolved")
+        return self._repo.set_status(user_id, status=USER_STATUS_ACTIVE)
+
+    def reject_signup(self, user_id: str) -> User:
+        """pending → rejected. **Pending rows only**: rejecting an active
+        account is not this mechanism — deactivation (D6=A) is, and it kills
+        live sessions. Keeping rejection on unresolved rows preserves the
+        invariant that no resolved account ever changes status again."""
+        stored = self._repo.get_by_id(user_id)
+        if stored is None:
+            raise UserNotFound("user does not exist")
+        if stored.status != USER_STATUS_PENDING:
+            raise SignupNotPending("signup request already resolved")
+        return self._repo.set_status(user_id, status=USER_STATUS_REJECTED)
 
     def authenticate(self, *, username: str, password: str) -> User | None:
         user = self._repo.get_by_username(username.strip())

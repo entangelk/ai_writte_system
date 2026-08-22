@@ -68,6 +68,21 @@ class MongoUserRepository:
         # the password hash moving together with the new request.
         self._users.replace_one({"_id": user.id}, _doc(user))
 
+    def list_pending(self) -> tuple[User, ...]:
+        # Server-side filter+sort like list_all: the admin queue is ordered by
+        # request time, and pre-status rows (status field absent) can never be
+        # pending — they are the administrator-created accounts.
+        docs = self._users.find({"status": "pending"}).sort("created_at", ASCENDING)
+        return tuple(_entry(doc) for doc in docs)
+
+    def set_status(self, user_id: str, *, status: str) -> User | None:
+        doc = self._users.find_one_and_update(
+            {"_id": user_id},
+            {"$set": {"status": status}},
+            return_document=ReturnDocument.AFTER,
+        )
+        return _entry(doc) if doc else None
+
 
 def _doc(value: User) -> dict:
     return {
