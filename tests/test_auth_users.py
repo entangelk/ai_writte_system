@@ -8,6 +8,7 @@ from services.application.app.auth.models import User
 from services.application.app.auth.users import (
     DuplicateUsername, InMemoryUserRepository, InvalidUserInput,
     LastActiveAdmin, UserNotFound, UserService,
+    USER_STATUS_ACTIVE, USER_STATUS_PENDING, USER_STATUS_REJECTED,
 )
 
 _FIXED_TIME = datetime(2026, 7, 27, 12, 0, tzinfo=UTC)
@@ -295,6 +296,125 @@ class ListAndDeactivateTest(unittest.TestCase):
         alice = self.service.create_user(username="alice", password="pw")
 
         self.assertFalse(self.service.deactivate_user(alice.id).is_active)
+
+
+class SignupRequestTest(unittest.TestCase):
+    """승인제 가입 요청 (2026-08-22, plans/auth-signup-approval-decisions.md P-2·P-3).
+
+    under-strict 방향: 요청이 active 행을 만들면(승인 우회) 1·7번 셀이 실패한다.
+    over-strict 방향: rejected 재요청을 막거나(5) deactivated 행을 되살리면(6)
+    실패한다 — 거절은 밴이 아니고 비활성화는 단방향이다.
+    """
+
+    def setUp(self) -> None:
+        self.repo = InMemoryUserRepository()
+        self.hasher = _FakeHasher()
+        self.service = UserService(
+            self.repo, hasher=self.hasher,
+            clock=lambda: _FIXED_TIME, id_factory=_seq_ids(),
+        )
+
+    def test_a_signup_request_creates_a_pending_row(self) -> None:
+        user = self.service.request_signup(
+            username="bob", password="long-enough-pw"
+        )
+        self.assertEqual(user.status, USER_STATUS_PENDING)
+        # The request grants nothing: enabled as a row, but not sign-in-able and
+        # carrying no administrator flag and no forced-change flag (the
+        # requester owns the password from the start — no C-6 flow).
+        self.assertTrue(user.is_active)
+        self.assertFalse(user.is_admin)
+        self.assertFalse(user.must_change_password)
+        self.assertEqual(user.password_hash, "H:long-enough-pw")
+
+    def test_a_short_password_is_refused(self) -> None:
+        with self.assertRaises(InvalidUserInput):
+            self.service.request_signup(username="bob", password="short")
+        # Nothing was written — the refusal is not a pending row.
+        self.assertIsNone(self.repo.get_by_username("bob"))
+
+    def test_an_empty_username_is_refused(self) -> None:
+        with self.assertRaises(InvalidUserInput):
+            self.service.request_signup(username="  ", password="long-enough-pw")
+
+    def test_an_active_username_cannot_be_requested(self) -> None:
+        self.service.create_user(username="alice", password="pw123")
+        with self.assertRaises(DuplicateUsername):
+            self.service.request_signup(
+                username="alice", password="long-enough-pw"
+            )
+
+    def test_a_pending_username_cannot_be_requested_twice(self) -> None:
+        self.service.request_signup(username="bob", password="long-enough-pw")
+        with self.assertRaises(DuplicateUsername):
+            self.service.request_signup(
+                username="bob", password="another-long-pw"
+            )
+
+    def test_a_rejected_username_can_be_re_requested(self) -> None:
+        first = self.service.request_signup(
+            username="bob", password="long-enough-pw"
+        )
+        # An admin's rejection (1-d writes this via set_status; simulated here
+        # because this slice's domain only owns the request side).
+        rejected = User(
+            id=first.id, username=first.username,
+            password_hash=first.password_hash, is_admin=False,
+            is_active=True, created_at=first.created_at,
+            must_change_password=False, status=USER_STATUS_REJECTED,
+        )
+        self.repo.replace(rejected)
+
+        later = datetime(2026, 8, 22, 9, 0, tzinfo=UTC)
+        second = UserService(
+            self.repo, hasher=self.hasher,
+            clock=lambda: later, id_factory=_seq_ids(),
+        ).request_signup(username="bob", password="different-long-pw")
+
+        # Same row overwritten (not a second row), fresh request evidence:
+        # new hash, new created_at, back to pending.
+        self.assertEqual(second.id, first.id)
+        self.assertEqual(second.status, USER_STATUS_PENDING)
+        self.assertEqual(second.password_hash, "H:different-long-pw")
+        self.assertEqual(second.created_at, later)
+        self.assertEqual(
+            [u.username for u in self.repo.list_all()], ["bob"]
+        )
+
+    def test_a_deactivated_rejected_row_is_not_resurrected(self) -> None:
+        first = self.service.request_signup(
+            username="bob", password="long-enough-pw"
+        )
+        deactivated_and_rejected = User(
+            id=first.id, username=first.username,
+            password_hash=first.password_hash, is_admin=False,
+            is_active=False, created_at=first.created_at,
+            must_change_password=False, status=USER_STATUS_REJECTED,
+        )
+        self.repo.replace(deactivated_and_rejected)
+        # Deactivation is one-way (D6=A): a re-request must not flip is_active
+        # back — that would make signup an un-deactivation surface.
+        with self.assertRaises(DuplicateUsername):
+            self.service.request_signup(
+                username="bob", password="yet-another-long-pw"
+            )
+        self.assertFalse(self.repo.get_by_username("bob").is_active)
+
+    def test_a_replacement_row_is_never_an_admin(self) -> None:
+        first = self.service.request_signup(
+            username="bob", password="long-enough-pw"
+        )
+        rejected_admin = User(
+            id=first.id, username=first.username,
+            password_hash=first.password_hash, is_admin=True,
+            is_active=True, created_at=first.created_at,
+            must_change_password=False, status=USER_STATUS_REJECTED,
+        )
+        self.repo.replace(rejected_admin)
+        second = self.service.request_signup(
+            username="bob", password="long-enough-pw-2"
+        )
+        self.assertFalse(second.is_admin)
 
 
 if __name__ == "__main__":

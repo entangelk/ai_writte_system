@@ -74,6 +74,20 @@ class LoginRequest(BaseModel):
     new_password: str | None = None
 
 
+class SignupRequest(BaseModel):
+    # Self-service signup request (2026-08-22): creates a *pending* row an
+    # administrator must approve. No password confirmation field — that is a
+    # client-side concern; the server would only re-compare two strings it was
+    # handed by the same untrusted party.
+    username: str
+    password: str
+
+
+class SignupResponse(BaseModel):
+    username: str
+    status: str
+
+
 class UserPayload(BaseModel):
     # Deliberately no password_hash: the wire model is the reason a hash cannot
     # leak by someone later returning the domain object directly.

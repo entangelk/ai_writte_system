@@ -62,6 +62,12 @@ class MongoUserRepository:
         )
         return _entry(doc) if doc else None
 
+    def replace(self, user: User) -> None:
+        # Signup re-request over a rejected row: same _id, same username, so the
+        # unique index is not in play. Wholesale overwrite keeps created_at and
+        # the password hash moving together with the new request.
+        self._users.replace_one({"_id": user.id}, _doc(user))
+
 
 def _doc(value: User) -> dict:
     return {
@@ -72,6 +78,7 @@ def _doc(value: User) -> dict:
         "must_change_password": value.must_change_password,
         "is_active": value.is_active,
         "created_at": value.created_at,
+        "status": value.status,
     }
 
 
@@ -85,6 +92,10 @@ def _entry(doc: dict) -> User:
         # KeyError here would lock every pre-existing account out of login.
         must_change_password=doc.get("must_change_password", False),
         is_active=doc["is_active"],
+        # Rows written before signup approval (2026-08-22) have no field and are
+        # existing, administrator-created accounts — "active" is the only reading
+        # that keeps them signing in. Same posture as must_change_password above.
+        status=doc.get("status", "active"),
         # Same UTC re-labeling as the session repo: pymongo returns BSON dates
         # naive, and the domain treats timestamps as aware. Nothing compares
         # created_at today, so this is consistency rather than a fix — it keeps a

@@ -181,6 +181,65 @@ class LoginTest(unittest.TestCase):
         self.assertEqual(unknown.json()["detail"], wrong.json()["detail"])
 
 
+class SignupApiTest(unittest.TestCase):
+    """승인제 가입 요청 HTTP 계약 (2026-08-22, 슬라이스 1-a).
+
+    under-strict: 가입이 세션을 요구하면(공개가 아니면) 첫 셀이 실패한다.
+    over-strict: 가입이 곧바로 로그인 가능한 계정을 만들면 넷째 셀이 실패한다.
+    다섯째 셀은 1-b(403+사유)에서 갱신된다 — 지금은 임시 401 통일이다.
+    """
+
+    def test_a_signup_request_is_public_and_creates_a_pending_row(self) -> None:
+        client, _, _ = _client()
+        response = client.post(
+            "/auth/signup", json={"username": "bob", "password": "long-enough-pw"}
+        )
+        self.assertEqual(response.status_code, 201)
+        body = response.json()
+        self.assertEqual(body["username"], "bob")
+        self.assertEqual(body["status"], "pending")
+
+    def test_a_taken_active_username_is_409(self) -> None:
+        client, _, _ = _client()  # alice exists
+        response = client.post(
+            "/auth/signup", json={"username": "alice", "password": "long-enough-pw"}
+        )
+        self.assertEqual(response.status_code, 409)
+
+    def test_a_password_under_the_policy_minimum_is_400(self) -> None:
+        client, _, _ = _client()
+        response = client.post(
+            "/auth/signup", json={"username": "bob", "password": "short"}
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_a_pending_account_cannot_sign_in(self) -> None:
+        client, _, _ = _client()
+        client.post(
+            "/auth/signup", json={"username": "bob", "password": "long-enough-pw"}
+        )
+        # Right password, still no session: the row is pending. 1-a answers the
+        # unified 401; 1-b (owner 2026-08-22) differentiates into 403+reason.
+        response = client.post(
+            "/auth/login", json={"username": "bob", "password": "long-enough-pw"}
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertNotIn("set-cookie", response.headers)
+
+    def test_a_pending_status_is_not_revealed_by_a_wrong_password(self) -> None:
+        # Enumeration defense continues to hold: guessing at a pending account
+        # must look identical to guessing at any other account.
+        client, _, _ = _client()
+        client.post(
+            "/auth/signup", json={"username": "bob", "password": "long-enough-pw"}
+        )
+        wrong = client.post(
+            "/auth/login", json={"username": "bob", "password": "not-the-password"}
+        )
+        self.assertEqual(wrong.status_code, 401)
+        self.assertEqual(wrong.json()["detail"], "invalid credentials")
+
+
 class MeTest(unittest.TestCase):
     def test_returns_current_user_after_login(self) -> None:
         client, _, _ = _client()
@@ -484,6 +543,9 @@ class AuthenticationBoundaryTest(unittest.TestCase):
     PUBLIC = {
         ("/health", "get"): "compose healthcheck cannot log in",
         ("/auth/login", "post"): "this is how a session is obtained",
+        ("/auth/signup", "post"): "requesting an account is how an account "
+                                  "begins to exist — the row it creates is "
+                                  "pending and grants nothing (2026-08-22)",
         ("/auth/logout", "post"): "idempotent: a client must always reach "
                                   "logged-out, even with a forgotten cookie",
         ("/auth/me", "get"): "answers its own 401 — it is how the frontend asks "
@@ -1220,8 +1282,10 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # Phase 9 A5=B 가 `GET /projects/{id}/activity` 를 더해 62/77 이 됐고,
         # Slice 9.2 P1=ⓐ 가 `GET /me/activity` 를 **인증 전용** tier 에 더해 78 이
         # 됐다(project tier 는 무변 62 — 통합 조회는 project 를 지목하지 않는다).
+        # 가입 승인 슬라이스(2026-08-22)가 `POST /auth/signup` 을 공개 tier 에
+        # 더해 79 가 됐다 — 요청은 누구나, 승인은 관리자.
         self.assertEqual(len(by_tier["project"]), 62)
-        self.assertEqual(len(tiers), 78)
+        self.assertEqual(len(tiers), 79)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:

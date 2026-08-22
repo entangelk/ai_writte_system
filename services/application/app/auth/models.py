@@ -20,6 +20,16 @@ class User:
     # and cleared the moment that human sets their own. While it is True the
     # account cannot obtain a session at all — see `/auth/login`.
     must_change_password: bool = False
+    # Signup approval (owner 2026-08-22): "pending" = requested, waiting for an
+    # admin; "active" = can sign in; "rejected" = an admin declined (the username
+    # may be re-requested — rejection is not a ban; banning is deactivation).
+    # Defaults to "active" so rows written before this field existed keep
+    # signing in — same migration posture as ``must_change_password``.
+    # A separate axis from ``is_active``: deactivation stays one-way (D6=A) and
+    # keeps its unified 401 (enumeration defense); status is what an *approved
+    # or not* question answers, only visible after correct credentials.
+    status: str = "active"
+
 
 
 @dataclass(frozen=True, slots=True)

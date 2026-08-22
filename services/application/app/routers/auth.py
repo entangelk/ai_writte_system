@@ -10,7 +10,6 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, Request, Response
 
 from services.application.app.auth.cookies import SESSION_COOKIE_NAME, cookie_kwargs
-from services.application.app.auth.users import InvalidUserInput
 
 from ..api.models import (
     LoginRequest,
@@ -18,12 +17,20 @@ from ..api.models import (
     LogoutResponse,
     MyQuotaResponse,
     PersonalActivityLogResponse,
+    SignupRequest,
+    SignupResponse,
     UserPayload,
 )
 from ..api.errors import (
     _ERRORS_401,
     _ERRORS_LOGIN_409,
     _ERRORS_LOGOUT,
+    _ERRORS_SIGNUP,
+)
+from ..auth.users import (
+    DuplicateUsername,
+    InvalidUserInput,
+    USER_STATUS_ACTIVE,
 )
 from ..api.dependencies import (
     _REQUIRE_AUTH,
@@ -54,6 +61,23 @@ def register_auth(app, *, users, sessions, core_sot, activity) -> None:
             "id": user.id, "username": user.username, "is_admin": user.is_admin
         }
 
+    @app.post("/auth/signup", status_code=201, response_model=SignupResponse,
+              responses=_ERRORS_SIGNUP)
+    async def signup(request: SignupRequest) -> dict[str, object]:
+        # Public by design (owner 2026-08-22): requesting an account is how an
+        # account begins to exist. What the request *grants* is nothing — the
+        # row is pending and no session can be issued against it until an
+        # administrator approves (1-d).
+        try:
+            user = users.request_signup(
+                username=request.username, password=request.password
+            )
+        except DuplicateUsername as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except InvalidUserInput as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"username": user.username, "status": user.status}
+
     @app.post("/auth/login", response_model=LoginResponse,
               responses=_ERRORS_LOGIN_409)
     async def login(request: LoginRequest, response: Response) -> dict[str, object]:
@@ -64,6 +88,13 @@ def register_auth(app, *, users, sessions, core_sot, activity) -> None:
             # One message for every failure mode (unknown user, wrong password,
             # disabled account). Distinguishing them here would undo the timing
             # hardening in UserService.authenticate.
+            raise HTTPException(status_code=401, detail="invalid credentials")
+        # Signup approval gate (P-4): checked only *after* credentials verify,
+        # so a wrong password on a pending account is a plain 401 — the status
+        # is visible to nobody who does not already hold the right password.
+        # 1-a keeps the unified 401 here; 1-b differentiates pending/rejected
+        # into 403 + reason (owner 2026-08-22).
+        if user.status != USER_STATUS_ACTIVE:
             raise HTTPException(status_code=401, detail="invalid credentials")
         # C-6 (owner 2026-08-02): an administrator-set password is single-use and
         # can only be spent on replacing itself. **Enforced here rather than on

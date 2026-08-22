@@ -46,6 +46,11 @@ class LastActiveAdmin(AuthError):
 # regression pins it.
 MIN_PASSWORD_LENGTH = 12
 
+# Signup approval statuses (owner 2026-08-22 — plans/auth-signup-approval-decisions.md).
+USER_STATUS_PENDING = "pending"
+USER_STATUS_ACTIVE = "active"
+USER_STATUS_REJECTED = "rejected"
+
 
 class UserRepository(Protocol):
     def insert(self, user: User) -> None:
@@ -61,6 +66,9 @@ class UserRepository(Protocol):
 
     def set_password(self, user_id: str, *, password_hash: str) -> User | None:
         """Store a new hash and clear ``must_change_password``. C-6."""
+
+    def replace(self, user: User) -> None:
+        """Overwrite the stored row for ``user.id`` wholesale (signup re-request)."""
 
 
 class InMemoryUserRepository:
@@ -106,6 +114,11 @@ class InMemoryUserRepository:
         self._by_id[user_id] = updated
         return updated
 
+    def replace(self, user: User) -> None:
+        # Same username by construction (signup re-request), so the by-username
+        # index needs no touch — only the stored row itself changes.
+        self._by_id[user.id] = user
+
 
 class UserService:
     def __init__(
@@ -147,6 +160,56 @@ class UserService:
             is_active=True,
             created_at=self._clock(),
             must_change_password=must_change_password,
+        )
+        self._repo.insert(user)
+        return user
+
+    def request_signup(self, *, username: str, password: str) -> User:
+        """Self-service signup request (owner 2026-08-22 — approval required).
+
+        Creates a ``pending`` row. No session is ever issued against it; an
+        administrator approves it to ``active`` later (1-d). The password is
+        final — unlike C-6 there is nobody else choosing it — so the minimum
+        length policy applies *here*, the moment it is chosen.
+        """
+        username = username.strip()
+        if not username:
+            raise InvalidUserInput("username is required")
+        if len(password) < MIN_PASSWORD_LENGTH:
+            raise InvalidUserInput(
+                f"password must be at least {MIN_PASSWORD_LENGTH} characters"
+            )
+        existing = self._repo.get_by_username(username)
+        if existing is not None:
+            # Re-request is allowed only over a rejected row that is still an
+            # enabled account: rejection must not become a permanent username
+            # ban. A deactivated row wins over re-request — deactivation is
+            # one-way (D6=A) and this path must not resurrect it.
+            if existing.status != USER_STATUS_REJECTED or not existing.is_active:
+                raise DuplicateUsername("username already exists")
+            replacement = User(
+                id=existing.id,
+                username=username,
+                password_hash=self._hasher.hash(password),
+                # A signup request can never mint an administrator, and the
+                # requester owns the password from the start (no C-6 flow).
+                is_admin=False,
+                is_active=True,
+                created_at=self._clock(),
+                must_change_password=False,
+                status=USER_STATUS_PENDING,
+            )
+            self._repo.replace(replacement)
+            return replacement
+        user = User(
+            id=self._id_factory(),
+            username=username,
+            password_hash=self._hasher.hash(password),
+            is_admin=False,
+            is_active=True,
+            created_at=self._clock(),
+            must_change_password=False,
+            status=USER_STATUS_PENDING,
         )
         self._repo.insert(user)
         return user

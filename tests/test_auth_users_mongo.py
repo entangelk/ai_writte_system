@@ -9,7 +9,10 @@ from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 from services.application.app.auth.models import User
-from services.application.app.auth.users import DuplicateUsername
+from services.application.app.auth.users import (
+    DuplicateUsername,
+    USER_STATUS_ACTIVE, USER_STATUS_PENDING, USER_STATUS_REJECTED,
+)
 from services.application.app.auth.users_mongo import MongoUserRepository
 
 _FIXED_TIME = datetime(2026, 7, 27, 12, 0, tzinfo=UTC)
@@ -39,6 +42,13 @@ class _Collection:
             if all(doc.get(key) == value for key, value in query.items()):
                 return doc
         return None
+
+    def replace_one(self, query, replacement):
+        # Driver semantics: matched 0 → nothing written (no upsert).
+        for doc_id, doc in self.docs.items():
+            if all(doc.get(key) == value for key, value in query.items()):
+                self.docs[doc_id] = dict(replacement)
+                return
 
     def find(self, query):
         return _Cursor([
@@ -87,11 +97,12 @@ class _Client:
         return self.database
 
 
-def _user(uid="user:1", username="alice", must_change_password=False):
+def _user(uid="user:1", username="alice", must_change_password=False,
+          status=USER_STATUS_ACTIVE):
     return User(
         id=uid, username=username, password_hash="$argon2id$fake",
         is_admin=False, is_active=True, created_at=_FIXED_TIME,
-        must_change_password=must_change_password,
+        must_change_password=must_change_password, status=status,
     )
 
 
@@ -192,6 +203,50 @@ class MongoUserRepositoryTest(unittest.TestCase):
         # 안 읽는 것)을 막는다. 저장된 True 는 True 로 돌아와야 한다.
         self.repo.insert(_user(must_change_password=True))
         self.assertTrue(self.repo.get_by_id("user:1").must_change_password)
+
+    def test_a_row_written_before_signup_approval_reads_back_active(self) -> None:
+        """가입 승인 필드(status) 이전에 쓰인 행은 "active" 로 읽힌다.
+
+        C-6 의 `.get` 방어와 같은 병을 미리 막는 셀이다 — `_entry` 의
+        `doc.get("status", "active")` 를 하드 서브스크립트로 바꾸면 이 셀이
+        실패해야 한다. 실패하지 않으면(빈 셀이면) 승인 슬라이스 배포 직후
+        **기존 관리자·사용자 전부가 로그인에서 KeyError(500)** 로 죽는다.
+        """
+        self.collection.docs["user:legacy"] = {
+            "_id": "user:legacy",
+            "username": "legacy",
+            "password_hash": "H:old",
+            "is_admin": False,
+            "is_active": True,
+            "created_at": _FIXED_TIME,
+        }
+        stored = self.repo.get_by_id("user:legacy")
+        self.assertIsNotNone(stored)
+        self.assertEqual(stored.status, USER_STATUS_ACTIVE)
+
+    def test_signup_status_round_trips(self) -> None:
+        # over-strict 짝: 위 셀을 상수 반환로 만족시키는 과잉 교정(필드를 안
+        # 읽는 것)을 막는다. pending 으로 쓰면 pending 으로 돌아온다.
+        self.repo.insert(_user(status=USER_STATUS_PENDING))
+        self.assertEqual(
+            self.repo.get_by_id("user:1").status, USER_STATUS_PENDING
+        )
+
+    def test_replace_overwrites_the_row_wholesale(self) -> None:
+        original = _user(status=USER_STATUS_REJECTED)
+        self.repo.insert(original)
+        replacement = User(
+            id=original.id, username=original.username,
+            password_hash="H:new-pw", is_admin=False, is_active=True,
+            created_at=_FIXED_TIME, must_change_password=False,
+            status=USER_STATUS_PENDING,
+        )
+        self.repo.replace(replacement)
+        stored = self.repo.get_by_id(original.id)
+        self.assertEqual(stored.password_hash, "H:new-pw")
+        self.assertEqual(stored.status, USER_STATUS_PENDING)
+        # 덮어쓴 것이지 두 번째 행이 생긴 것이 아니다.
+        self.assertEqual(len(self.collection.docs), 1)
 
 
 if __name__ == "__main__":

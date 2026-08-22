@@ -136,6 +136,16 @@ _ERRORS_LOGIN_409: dict[int | str, dict] = {
 _ERRORS_LOGOUT: dict[int | str, dict] = {503: _STORAGE_503}
 
 
+# Signup request (2026-08-22) is public like /auth/login: it is how an account
+# begins to exist. 400 = policy (empty username, password under 12 chars),
+# 409 = username taken (an intentional disclosure — the requester needs to pick
+# another username), 503 = session store unavailable (the Mongo insert happens
+# under the same envelope as every other auth write).
+_ERRORS_SIGNUP: dict[int | str, dict] = {
+    400: _ERROR, 409: _ERROR, 503: _STORAGE_503,
+}
+
+
 # D8-3a: every protected operation can answer 401, so the declaration is added
 # once here instead of 61 times at the call sites. H3 (D3=A) makes OpenAPI the
 # mechanical truth about what a request can get back, and after this slice a
