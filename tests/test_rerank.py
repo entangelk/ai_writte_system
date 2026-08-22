@@ -21,6 +21,7 @@ import httpx
 
 from services.application.app.context_search.rerank import (
     HttpRerankProvider,
+    KeyRotatingRerankProvider,
     RerankingRetriever,
     RerankProviderError,
     build_rerank_provider_from_env,
@@ -219,7 +220,8 @@ class SwitchedOffTest(unittest.TestCase):
         self._saved = {
             name: os.environ.pop(name, None)
             for name in ("RERANK_API_URL", "RERANK_API_MODEL", "RERANK_API_KEY",
-                         "RERANK_TIMEOUT_SECONDS", "RERANK_TRUST_ENV")
+                         "RERANK_TIMEOUT_SECONDS", "RERANK_TRUST_ENV",
+                         "RERANK_API_KEYS", "RERANK_KEY_RPM")
         }
 
     def tearDown(self):
@@ -261,6 +263,70 @@ class SwitchedOffTest(unittest.TestCase):
         self.assertEqual(
             build_rerank_provider_from_env()._base_url,
             "https://proxy.example.com/v1/rerankers")
+
+
+class RerankKeyListTest(unittest.TestCase):
+    """RERANK_API_KEYS — 키 리스트 조립 (오너 2026-08-22).
+
+    ★ 총괄 over-strict 가드: 리스트 없는 세계는 오늘의 단일 어댑터 그 자체다.
+    """
+
+    def setUp(self):
+        self._saved = {
+            name: os.environ.pop(name, None)
+            for name in ("RERANK_API_URL", "RERANK_API_MODEL", "RERANK_API_KEY",
+                         "RERANK_API_KEYS", "RERANK_KEY_RPM",
+                         "RERANK_TIMEOUT_SECONDS", "RERANK_TRUST_ENV")
+        }
+        os.environ["RERANK_API_URL"] = "https://rerank.example.com"
+        os.environ["RERANK_API_MODEL"] = "rerank-v3"
+
+    def tearDown(self):
+        for name, value in self._saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+    def test_keys_without_an_address_still_mean_no_reranking(self):
+        # 주소 없음 = 정상 구성(결정 2=A)이 우선한다 — 키가 리랭킹을 켜면 안 된다.
+        os.environ.pop("RERANK_API_URL")
+        os.environ["RERANK_API_KEYS"] = "sk-1,sk-2"
+        self.assertIsNone(build_rerank_provider_from_env())
+
+    def test_keys_unset_builds_the_bare_adapter(self):
+        provider = build_rerank_provider_from_env()
+        self.assertIsInstance(provider, HttpRerankProvider)
+        self.assertNotIsInstance(provider, KeyRotatingRerankProvider)
+        self.assertIsNone(provider._api_key)
+
+    def test_a_single_key_builds_the_bare_adapter(self):
+        os.environ["RERANK_API_KEYS"] = "sk-1"
+        provider = build_rerank_provider_from_env()
+        self.assertIsInstance(provider, HttpRerankProvider)
+        self.assertEqual(provider._api_key, "sk-1")
+
+    def test_multiple_keys_build_the_rotating_wrapper(self):
+        # 쉼표 분리·공백·중복 제거가 조립 지점에서 함께 걸린다.
+        os.environ["RERANK_API_KEYS"] = " sk-1 , sk-2 ,,sk-1 "
+        provider = build_rerank_provider_from_env()
+        self.assertIsInstance(provider, KeyRotatingRerankProvider)
+        self.assertEqual(
+            [inner._api_key for inner in provider._providers],
+            ["sk-1", "sk-2"],
+        )
+
+    def test_the_legacy_single_key_variable_is_still_honoured(self):
+        os.environ["RERANK_API_KEY"] = "sk-legacy"
+        provider = build_rerank_provider_from_env()
+        self.assertIsInstance(provider, HttpRerankProvider)
+        self.assertEqual(provider._api_key, "sk-legacy")
+
+    def test_non_positive_rpm_fails_fast(self):
+        os.environ["RERANK_API_KEYS"] = "sk-1,sk-2"
+        os.environ["RERANK_KEY_RPM"] = "0"
+        with self.assertRaisesRegex(ValueError, "RERANK_KEY_RPM"):
+            build_rerank_provider_from_env()
 
 
 def _adapter(handler, **kwargs):

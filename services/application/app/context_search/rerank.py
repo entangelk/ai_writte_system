@@ -24,9 +24,18 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+import time
 from typing import Any, Callable, Protocol, Sequence, TypeVar
 
 import httpx
+
+from services.application.app.key_rotation import (
+    KEY_REJECTED_COOLDOWN_SECONDS,
+    RATE_LIMIT_COOLDOWN_SECONDS,
+    SyncSlidingWindowLimiter,
+    split_env_list,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -35,7 +44,35 @@ _MINIMUM_TO_REORDER = 2
 
 
 class RerankProviderError(RuntimeError):
-    """리랭커가 도달 불가이거나 응답이 계약을 벗어났을 때."""
+    """리랭커가 도달 불가이거나 응답이 계약을 벗어났을 때.
+
+    `status_code`/`network` 는 키 회전 계층이 **이 오류를 키를 바꿔 재시도할 만한가**를
+    판단하는 근거다(오너 2026-08-22). 메시지 문자열은 그대로 — 기존 진단·테스트 호환.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        network: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.network = network
+
+    @property
+    def key_rotatable(self) -> bool:
+        """키를 바꾸면 고쳐질 수 있는 실패인가 — 네트워크·401/403/408/429·5xx.
+
+        본문 계약 위반은 `False`다 — 어느 키로 보내도 같은 결과고, 회전은 진단을
+        늦출 뿐이다.
+        """
+        if self.network:
+            return True
+        if self.status_code in (401, 403, 408, 429):
+            return True
+        return self.status_code is not None and self.status_code >= 500
 
 
 class RerankProvider(Protocol):
@@ -171,20 +208,102 @@ class HttpRerankProvider:
                     },
                 )
         except httpx.TimeoutException as exc:
-            raise RerankProviderError("rerank request timed out") from exc
+            raise RerankProviderError(
+                "rerank request timed out", network=True
+            ) from exc
         except httpx.RequestError as exc:
-            raise RerankProviderError("rerank service is unavailable") from exc
+            raise RerankProviderError(
+                "rerank service is unavailable", network=True
+            ) from exc
 
         if response.status_code >= 400:
             # 본문에는 우리가 보낸 문서가 되돌아올 수 있다 — 상태만 싣는다.
             raise RerankProviderError(
-                f"rerank service returned status {response.status_code}"
+                f"rerank service returned status {response.status_code}",
+                status_code=response.status_code,
             )
         try:
             body = response.json()
         except ValueError as exc:
             raise RerankProviderError("rerank response is not JSON") from exc
         return _order_from_body(body, len(documents))
+
+
+class KeyRotatingRerankProvider:
+    """키 회전(오너 2026-08-22) — `rerank` seam 을 N개 provider 앞에서 라운드로빈으로.
+
+    임베딩 형제(indexing/embedding.py 의 KeyRotatingEmbeddingProvider)와 같은 정책:
+    시작 키 라운드로빈 배분(한 키로 집중되지 않게 — 오너 정정 2026-08-22), 키당 RPM
+    슬라이딩 60초 창, 401/403 장기(600s)·429/5xx/네트워크 단기(60s) 쿨다운, 소진
+    fail-fast. 모델 폴백은 없다.
+
+    소진은 결국 `RerankProviderError` 로 나가고 `RerankingRetriever` 의 fail-open
+    경계(위)가 융합 순서로 내려준다 — 회전은 재정렬이 죽는 빈도를 줄일 뿐, 정확성
+    요건이 되지 않는다는 이 슬라이스의 원래 계약은 그대로다.
+    """
+
+    def __init__(
+        self,
+        *,
+        providers: list[HttpRerankProvider],
+        limiter: SyncSlidingWindowLimiter,
+        budget_seconds: float,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if not providers:
+            raise ValueError("providers must not be empty")
+        self._providers = providers
+        self._limiter = limiter
+        self._budget_seconds = budget_seconds
+        self._clock = clock
+        self._next_start = 0
+        # sync endpoint 는 스레드풀에서 돌아 동시 rerank() 가 실재한다.
+        self._start_lock = threading.Lock()
+
+    def rerank(self, *, query: str, documents: Sequence[str]) -> tuple[int, ...]:
+        with self._start_lock:
+            start = self._next_start
+            self._next_start = (self._next_start + 1) % len(self._providers)
+        count = len(self._providers)
+        deadline = self._clock() + self._budget_seconds
+        last_error: RerankProviderError | None = None
+        attempted = False
+        for offset in range(count):
+            slot = (start + offset) % count
+            if not self._limiter.try_acquire(slot):
+                continue
+            if attempted and self._clock() >= deadline:
+                # 예산 소진 — 시작하지 않는 시도. 첫 시도는 항상 돈다.
+                break
+            attempted = True
+            try:
+                return self._providers[slot].rerank(
+                    query=query, documents=documents
+                )
+            except RerankProviderError as exc:
+                if not exc.key_rotatable:
+                    raise
+                last_error = exc
+                # 키 인덱스만 남긴다 — 키 값은 로그에 오지 않는다.
+                _log.warning(
+                    "rerank key rotation failed: key_index=%d status=%s",
+                    slot,
+                    exc.status_code,
+                )
+                self._limiter.cool(
+                    slot,
+                    (
+                        KEY_REJECTED_COOLDOWN_SECONDS
+                        if exc.status_code in (401, 403)
+                        else RATE_LIMIT_COOLDOWN_SECONDS
+                    ),
+                )
+        if last_error is not None:
+            raise last_error
+        raise RerankProviderError(
+            "all rerank keys are rate-limited or cooling down",
+            status_code=429,
+        )
 
 
 def _order_from_body(body: Any, size: int) -> tuple[int, ...]:
@@ -242,16 +361,42 @@ def build_rerank_provider_from_env() -> RerankProvider | None:
 
     base_url = os.environ.get("RERANK_API_URL")
     if not base_url:
+        # 키만 있고 주소가 없어도 None 이다 — "리랭킹 없음"이 정상 구성이라는
+        # 위의 계약이 우선한다(키가 주소를 강제로 켜면 안 된다).
         return None
     model = os.environ.get("RERANK_API_MODEL")
     if not model:
         raise ValueError("RERANK_API_MODEL is required when RERANK_API_URL is set")
-    return HttpRerankProvider(
-        base_url=_strip_version_suffix(base_url),
-        model=model,
-        api_key=os.environ.get("RERANK_API_KEY") or None,
-        timeout_seconds=_env_float("RERANK_TIMEOUT_SECONDS", 10.0),
-        trust_env=_env_bool("RERANK_TRUST_ENV", False),
+
+    timeout_seconds = _env_float("RERANK_TIMEOUT_SECONDS", 10.0)
+    trust_env = _env_bool("RERANK_TRUST_ENV", False)
+    # 키 리스트(오너 2026-08-22). 비면 오늘의 단일 키 변수로 내려간다.
+    keys = split_env_list(os.environ.get("RERANK_API_KEYS"))
+    if not keys:
+        keys = [os.environ.get("RERANK_API_KEY") or None]
+
+    providers = [
+        HttpRerankProvider(
+            base_url=_strip_version_suffix(base_url),
+            model=model,
+            api_key=key,
+            timeout_seconds=timeout_seconds,
+            trust_env=trust_env,
+        )
+        for key in keys
+    ]
+    if len(providers) <= 1:
+        return providers[0]
+
+    rpm = _env_float("RERANK_KEY_RPM", 30.0)
+    if rpm < 1:
+        raise ValueError("RERANK_KEY_RPM must be at least 1")
+    return KeyRotatingRerankProvider(
+        providers=providers,
+        limiter=SyncSlidingWindowLimiter(slots=len(providers), limit=int(rpm)),
+        # 첫 시도는 항상 돌고 그 뒤의 시도는 이 예산 안에서만 — 리랭커 타임아웃(10s)
+        # 이 검색 지연에 그대로 더해지는 축이라 누적 방지가 특히 중요하다.
+        budget_seconds=timeout_seconds,
     )
 
 

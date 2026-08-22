@@ -12,6 +12,11 @@ from services.application.app.indexing.embedding import (
     EmbeddingProviderError,
     KeyRotatingEmbeddingProvider,
 )
+from services.application.app.context_search.rerank import (
+    KeyRotatingRerankProvider,
+    RerankProviderError,
+    RerankingRetriever,
+)
 from services.application.app.key_rotation import (
     KEY_REJECTED_COOLDOWN_SECONDS,
     RATE_LIMIT_COOLDOWN_SECONDS,
@@ -276,6 +281,127 @@ class SyncSlidingWindowLimiterTests(unittest.TestCase):
             SyncSlidingWindowLimiter(slots=1, limit=0)
         with self.assertRaises(ValueError):
             SyncSlidingWindowLimiter(slots=0, limit=1)
+
+
+class FakeRerankProvider:
+    """결과/오류를 FIFO 로 내는 rerank fake — httpx 없이 회전 계약만 본다."""
+
+    def __init__(self, outcomes) -> None:
+        self._outcomes = list(outcomes)
+        self.calls = 0
+
+    def rerank(self, *, query: str, documents) -> tuple[int, ...]:
+        self.calls += 1
+        outcome = self._outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+def _rerank_status_error(status_code: int) -> RerankProviderError:
+    return RerankProviderError(
+        f"rerank service returned status {status_code}",
+        status_code=status_code,
+    )
+
+
+class _StaticInner:
+    def __init__(self, items) -> None:
+        self._items = items
+
+    def retrieve(self, *, project_id, query, limit):
+        return self._items
+
+
+class KeyRotatingRerankProviderTests(unittest.TestCase):
+    def _rotating(self, providers, *, limit=30, clock=None, budget=10.0):
+        clock = clock if clock is not None else FakeClock()
+        return KeyRotatingRerankProvider(
+            providers=providers,
+            limiter=SyncSlidingWindowLimiter(
+                slots=len(providers), limit=limit, clock=clock
+            ),
+            budget_seconds=budget,
+            clock=clock,
+        )
+
+    def test_rotates_on_a_5xx_error_then_succeeds(self):
+        providers = [
+            FakeRerankProvider([_rerank_status_error(503)]),
+            FakeRerankProvider([(1, 0)]),
+        ]
+        rotating = self._rotating(providers)
+
+        self.assertEqual(
+            rotating.rerank(query="q", documents=("d0", "d1")), (1, 0)
+        )
+        self.assertEqual([p.calls for p in providers], [1, 1])
+
+    def test_a_4xx_error_does_not_rotate(self):
+        # over-strict: 요청 버그(400)를 회전으로 삼키면 진단이 늦어진다.
+        rejected = _rerank_status_error(400)
+        providers = [
+            FakeRerankProvider([rejected]),
+            FakeRerankProvider([(1, 0)]),
+        ]
+        rotating = self._rotating(providers)
+
+        with self.assertRaises(RerankProviderError) as raised:
+            rotating.rerank(query="q", documents=("d0", "d1"))
+
+        self.assertIs(raised.exception, rejected)
+        self.assertEqual(providers[1].calls, 0)
+
+    def test_all_keys_limited_fails_fast_with_a_retryable_status(self):
+        clock = FakeClock()
+        limiter = SyncSlidingWindowLimiter(slots=2, limit=30, clock=clock)
+        limiter.cool(0, 60.0)
+        limiter.cool(1, 60.0)
+        providers = [FakeRerankProvider([]), FakeRerankProvider([])]
+        rotating = KeyRotatingRerankProvider(
+            providers=providers, limiter=limiter,
+            budget_seconds=10.0, clock=clock,
+        )
+
+        with self.assertRaises(RerankProviderError) as raised:
+            rotating.rerank(query="q", documents=("d0", "d1"))
+
+        self.assertEqual(raised.exception.status_code, 429)
+        self.assertEqual([p.calls for p in providers], [0, 0])
+
+    def test_exhaustion_reraises_the_last_error(self):
+        last = _rerank_status_error(429)
+        providers = [
+            FakeRerankProvider([_rerank_status_error(500)]),
+            FakeRerankProvider([last]),
+        ]
+        rotating = self._rotating(providers)
+
+        with self.assertRaises(RerankProviderError) as raised:
+            rotating.rerank(query="q", documents=("d0", "d1"))
+
+        self.assertIs(raised.exception, last)
+
+    def test_exhaustion_is_still_fail_open_at_the_retriever(self):
+        # 이 슬라이스의 원래 계약(결정 4-①)은 회전이 늘어나도 그대로다 — 키 전부가
+        # 소진되면 융합 순서로 내려가고, WARNING 으로 남는다.
+        providers = [
+            FakeRerankProvider([_rerank_status_error(503)]),
+            FakeRerankProvider([_rerank_status_error(429)]),
+        ]
+        retriever = RerankingRetriever(
+            inner=_StaticInner(("a", "b")),
+            provider=self._rotating(providers),
+            text_of=str,
+        )
+
+        with self.assertLogs(
+            "services.application.app.context_search.rerank", level="WARNING"
+        ):
+            self.assertEqual(
+                retriever.retrieve(project_id="p", query="q", limit=5),
+                ("a", "b"),
+            )
 
 
 class SplitEnvListTests(unittest.TestCase):
