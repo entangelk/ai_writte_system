@@ -20,10 +20,24 @@ docs/plans/embedding-adapter-slice-decisions.md (decisions 1=A, 4=A).
 
 from __future__ import annotations
 
+import logging
 import os
+import threading
+import time
+from collections.abc import Callable
 from typing import Any
 
 import httpx
+
+from services.application.app.key_rotation import (
+    KEY_REJECTED_COOLDOWN_SECONDS,
+    RATE_LIMIT_COOLDOWN_SECONDS,
+    SyncSlidingWindowLimiter,
+    split_env_list,
+)
+
+
+_log = logging.getLogger(__name__)
 
 
 #: `EMBEDDING_API_FORMAT` 의 값. 기본은 자체 형식이라 기존 배포가 env 를 안 건드려도
@@ -34,7 +48,35 @@ OPENAI_FORMAT = "openai"
 
 
 class EmbeddingProviderError(RuntimeError):
-    """Raised when the embedding service is unreachable or returns a bad body."""
+    """Raised when the embedding service is unreachable or returns a bad body.
+
+    `status_code`/`network` 는 키 회전 계층이 **이 오류를 키를 바꿔 재시도할 만한가**를
+    판단하는 근거다(오너 2026-08-22). 메시지 문자열은 그대로 — 기존 진단·테스트 호환.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        network: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.network = network
+
+    @property
+    def key_rotatable(self) -> bool:
+        """키를 바꾸면 고쳐질 수 있는 실패인가 — 네트워크·401/403/408/429·5xx.
+
+        차원 가드·본문 계약 위반은 `False`다 — 어느 키로 보내도 같은 결과고,
+        회전은 진단을 늦출 뿐이다(over-strict 가드가 잠근다).
+        """
+        if self.network:
+            return True
+        if self.status_code in (401, 403, 408, 429):
+            return True
+        return self.status_code is not None and self.status_code >= 500
 
 
 class RemoteEmbeddingProvider:
@@ -63,13 +105,18 @@ class RemoteEmbeddingProvider:
             ) as client:
                 response = client.post("/embed", json={"text": text})
         except httpx.TimeoutException as exc:
-            raise EmbeddingProviderError("embedding request timed out") from exc
+            raise EmbeddingProviderError(
+                "embedding request timed out", network=True
+            ) from exc
         except httpx.RequestError as exc:
-            raise EmbeddingProviderError("embedding service is unavailable") from exc
+            raise EmbeddingProviderError(
+                "embedding service is unavailable", network=True
+            ) from exc
 
         if response.status_code >= 400:
             raise EmbeddingProviderError(
-                f"embedding service returned status {response.status_code}"
+                f"embedding service returned status {response.status_code}",
+                status_code=response.status_code,
             )
         try:
             body = response.json()
@@ -169,16 +216,21 @@ class OpenAIEmbeddingProvider:
                     json={"input": text, "model": self._model},
                 )
         except httpx.TimeoutException as exc:
-            raise EmbeddingProviderError("embedding request timed out") from exc
+            raise EmbeddingProviderError(
+                "embedding request timed out", network=True
+            ) from exc
         except httpx.RequestError as exc:
-            raise EmbeddingProviderError("embedding service is unavailable") from exc
+            raise EmbeddingProviderError(
+                "embedding service is unavailable", network=True
+            ) from exc
 
         if response.status_code >= 400:
             # The body can carry the vendor's reason, but it can also carry the
             # prompt back. Only the status goes into the message — the same rule
             # the rest of this file follows.
             raise EmbeddingProviderError(
-                f"embedding service returned status {response.status_code}"
+                f"embedding service returned status {response.status_code}",
+                status_code=response.status_code,
             )
         try:
             body = response.json()
@@ -203,6 +255,83 @@ class OpenAIEmbeddingProvider:
                 "embedding response must include a non-empty 'embedding' array"
             )
         return _vector_from_numbers(embedding, self._expected_dimensions)
+
+
+class KeyRotatingEmbeddingProvider:
+    """키 회전(오너 2026-08-22) — `embed` seam 을 N개 provider 앞에서 라운드로빈으로.
+
+    게이트웨이 형제(`llm_gateway/app/fallback.py`)와 같은 정책: 시작 키 라운드로빈
+    배분(한 키로 집중되지 않게 — 오너 정정 2026-08-22), 키당 RPM 슬라이딩 60초 창,
+    401/403 장기(600s)·429/5xx/네트워크 단기(60s) 쿨다운, 소진 fail-fast.
+    **모델 폴백은 없다** — 임베딩 모델을 바꾸면 차원이 변하고 그 길은 재색인 절차
+    (plans/embedding-adapter-slice-decisions.md 결정 3=A)의 영역이다.
+
+    `key_rotatable` 이 아닌 오류(차원 가드·400류)는 즉시 재발생한다 — 어느 키로
+    보내도 같은 결과고, 회전은 진단을 늦출 뿐이다.
+    """
+
+    def __init__(
+        self,
+        *,
+        providers: list[Any],
+        limiter: SyncSlidingWindowLimiter,
+        budget_seconds: float,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if not providers:
+            raise ValueError("providers must not be empty")
+        self._providers = providers
+        self._limiter = limiter
+        self._budget_seconds = budget_seconds
+        self._clock = clock
+        self._next_start = 0
+        # sync endpoint 는 스레드풀에서 돌아 동시 embed() 가 실재한다 — 카운터도 잠근다.
+        self._start_lock = threading.Lock()
+
+    def embed(self, text: str) -> tuple[float, ...]:
+        with self._start_lock:
+            start = self._next_start
+            self._next_start = (self._next_start + 1) % len(self._providers)
+        count = len(self._providers)
+        deadline = self._clock() + self._budget_seconds
+        last_error: EmbeddingProviderError | None = None
+        attempted = False
+        for offset in range(count):
+            slot = (start + offset) % count
+            if not self._limiter.try_acquire(slot):
+                continue
+            if attempted and self._clock() >= deadline:
+                # 예산 소진 — 시작하지 않는 시도. 첫 시도는 항상 돈다(예산이 0이어도).
+                break
+            attempted = True
+            try:
+                return self._providers[slot].embed(text)
+            except EmbeddingProviderError as exc:
+                if not exc.key_rotatable:
+                    raise
+                last_error = exc
+                # 키 인덱스만 남긴다 — 키 값은 로그에 오지 않는다(게이트웨이와 같은 규칙).
+                _log.warning(
+                    "embedding key rotation failed: key_index=%d status=%s",
+                    slot,
+                    exc.status_code,
+                )
+                self._limiter.cool(
+                    slot,
+                    (
+                        KEY_REJECTED_COOLDOWN_SECONDS
+                        if exc.status_code in (401, 403)
+                        else RATE_LIMIT_COOLDOWN_SECONDS
+                    ),
+                )
+        if last_error is not None:
+            # 시도는 했으나 전부 실패 — 마지막 오류를 그대로 돌려 보내면 인덱스 재시도
+            # backoff(service.py 의 (60, 300)s)가 원인별로 판단할 수 있다.
+            raise last_error
+        raise EmbeddingProviderError(
+            "all embedding keys are rate-limited or cooling down",
+            status_code=429,
+        )
 
 
 def _strip_version_suffix(base_url: str) -> str:
@@ -270,6 +399,15 @@ def build_embedding_provider_from_env(
     expected_dimensions = int(os.environ.get("EMBEDDING_DIMENSIONS", "1024"))
 
     wire_format = os.environ.get("EMBEDDING_API_FORMAT", NATIVE_FORMAT).strip().lower()
+    # 키 리스트(오너 2026-08-22). native 형식은 키를 안 쓰므로 리스트가 명시된 것은
+    # 설정 실수다 — 조용히 무시하면 "넣었는데 왜 회전하지 않나"가 된다.
+    keys = split_env_list(os.environ.get("EMBEDDING_API_KEYS"))
+    if keys and wire_format == NATIVE_FORMAT:
+        raise ValueError(
+            "EMBEDDING_API_KEYS requires "
+            f"EMBEDDING_API_FORMAT={OPENAI_FORMAT} "
+            "(the native service takes no key)"
+        )
     if wire_format == NATIVE_FORMAT:
         return RemoteEmbeddingProvider(
             base_url=resolved,
@@ -292,11 +430,32 @@ def build_embedding_provider_from_env(
             f"EMBEDDING_API_MODEL is required when "
             f"EMBEDDING_API_FORMAT={OPENAI_FORMAT}"
         )
-    return OpenAIEmbeddingProvider(
-        base_url=_strip_version_suffix(resolved),
-        model=model,
-        api_key=os.environ.get("EMBEDDING_API_KEY") or None,
-        timeout_seconds=timeout_seconds,
-        trust_env=trust_env,
-        expected_dimensions=expected_dimensions,
+    if not keys:
+        # 리스트가 비면 오늘의 단일 키 변수로 내려간다(기존 배포 무변).
+        keys = [os.environ.get("EMBEDDING_API_KEY") or None]
+
+    providers = [
+        OpenAIEmbeddingProvider(
+            base_url=_strip_version_suffix(resolved),
+            model=model,
+            api_key=key,
+            timeout_seconds=timeout_seconds,
+            trust_env=trust_env,
+            expected_dimensions=expected_dimensions,
+        )
+        for key in keys
+    ]
+    if len(providers) <= 1:
+        return providers[0]
+
+    rpm = _env_float("EMBEDDING_KEY_RPM", 30.0)
+    if rpm < 1:
+        # 0을 명시한 것은 설정 실수 — 모든 키를 조용히 막는 대신 기동에서 거부한다.
+        raise ValueError("EMBEDDING_KEY_RPM must be at least 1")
+    return KeyRotatingEmbeddingProvider(
+        providers=providers,
+        limiter=SyncSlidingWindowLimiter(slots=len(providers), limit=int(rpm)),
+        # 첫 시도는 항상 돌고 그 뒤의 시도는 이 예산 안에서만 — N키 × 타임아웃의 지연
+        # 누적을 막는다(재색인처럼 길게 도는 호출에서 특히 문제가 된다).
+        budget_seconds=timeout_seconds,
     )

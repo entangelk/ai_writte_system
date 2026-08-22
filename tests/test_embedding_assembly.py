@@ -20,6 +20,7 @@ import unittest
 from pathlib import Path
 
 from services.application.app.indexing.embedding import (
+    KeyRotatingEmbeddingProvider,
     OpenAIEmbeddingProvider,
     RemoteEmbeddingProvider,
     build_embedding_provider_from_env,
@@ -195,7 +196,8 @@ class HelperBehaviourTest(unittest.TestCase):
             for name in ("EMBEDDING_SERVICE_URL", "EMBEDDING_DIMENSIONS",
                          "EMBEDDING_TIMEOUT_SECONDS", "EMBEDDING_TRUST_ENV",
                          "EMBEDDING_API_FORMAT", "EMBEDDING_API_MODEL",
-                         "EMBEDDING_API_KEY")
+                         "EMBEDDING_API_KEY", "EMBEDDING_API_KEYS",
+                         "EMBEDDING_KEY_RPM")
         }
 
     def tearDown(self):
@@ -255,7 +257,8 @@ class WireFormatSelectionTest(unittest.TestCase):
             name: os.environ.pop(name, None)
             for name in ("EMBEDDING_SERVICE_URL", "EMBEDDING_API_FORMAT",
                          "EMBEDDING_API_MODEL", "EMBEDDING_API_KEY",
-                         "EMBEDDING_DIMENSIONS")
+                         "EMBEDDING_DIMENSIONS", "EMBEDDING_API_KEYS",
+                         "EMBEDDING_KEY_RPM")
         }
         os.environ["EMBEDDING_SERVICE_URL"] = "https://api.example.com"
 
@@ -327,6 +330,75 @@ class WireFormatSelectionTest(unittest.TestCase):
         os.environ["EMBEDDING_DIMENSIONS"] = "1536"
         self.assertEqual(
             build_embedding_provider_from_env()._expected_dimensions, 1536)
+
+
+class KeyListAssemblyTest(unittest.TestCase):
+    """EMBEDDING_API_KEYS — 키 리스트 조립 (오너 2026-08-22).
+
+    ★ 총괄 over-strict 가드: 리스트 없는 세계는 오늘의 단일 provider 그 자체다.
+    1개도 마찬가지 — 폴백 조합이 없을 때 래퍼를 얹는 것은 과설계다.
+    """
+
+    def setUp(self):
+        self._saved = {
+            name: os.environ.pop(name, None)
+            for name in ("EMBEDDING_SERVICE_URL", "EMBEDDING_API_FORMAT",
+                         "EMBEDDING_API_MODEL", "EMBEDDING_API_KEY",
+                         "EMBEDDING_DIMENSIONS", "EMBEDDING_API_KEYS",
+                         "EMBEDDING_KEY_RPM")
+        }
+        os.environ["EMBEDDING_SERVICE_URL"] = "https://api.example.com"
+        os.environ["EMBEDDING_API_FORMAT"] = "openai"
+        os.environ["EMBEDDING_API_MODEL"] = "text-embedding-3-small"
+
+    def tearDown(self):
+        for name, value in self._saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+    def test_keys_unset_still_builds_the_bare_provider(self):
+        provider = build_embedding_provider_from_env()
+        self.assertIsInstance(provider, OpenAIEmbeddingProvider)
+        self.assertNotIsInstance(provider, KeyRotatingEmbeddingProvider)
+
+    def test_a_single_key_in_the_list_builds_the_bare_provider(self):
+        os.environ["EMBEDDING_API_KEYS"] = "sk-1"
+        self.assertIsInstance(
+            build_embedding_provider_from_env(), OpenAIEmbeddingProvider)
+
+    def test_multiple_keys_build_the_rotating_wrapper(self):
+        # 쉼표 분리·공백·중복 제거가 조립 지점에서 함께 걸린다.
+        os.environ["EMBEDDING_API_KEYS"] = " sk-1 , sk-2 ,,sk-1 "
+        provider = build_embedding_provider_from_env()
+        self.assertIsInstance(provider, KeyRotatingEmbeddingProvider)
+        self.assertEqual(
+            [inner._api_key for inner in provider._providers],
+            ["sk-1", "sk-2"],
+        )
+
+    def test_the_legacy_single_key_variable_is_still_honoured(self):
+        os.environ["EMBEDDING_API_KEY"] = "sk-legacy"
+        provider = build_embedding_provider_from_env()
+        self.assertIsInstance(provider, OpenAIEmbeddingProvider)
+        self.assertEqual(provider._api_key, "sk-legacy")
+
+    def test_keys_with_the_native_format_fail_fast(self):
+        # native 서비스는 키를 안 쓴다 — 리스트가 명시됐는데 조용히 무시되면
+        # "넣었는데 왜 회전하지 않나"가 된다.
+        os.environ["EMBEDDING_API_KEYS"] = "sk-1,sk-2"
+        os.environ["EMBEDDING_API_FORMAT"] = "native"
+        with self.assertRaises(ValueError) as raised:
+            build_embedding_provider_from_env()
+        self.assertIn("EMBEDDING_API_KEYS", str(raised.exception))
+        self.assertIn("openai", str(raised.exception))
+
+    def test_non_positive_rpm_fails_fast(self):
+        os.environ["EMBEDDING_API_KEYS"] = "sk-1,sk-2"
+        os.environ["EMBEDDING_KEY_RPM"] = "0"
+        with self.assertRaisesRegex(ValueError, "EMBEDDING_KEY_RPM"):
+            build_embedding_provider_from_env()
 
 
 if __name__ == "__main__":  # pragma: no cover
