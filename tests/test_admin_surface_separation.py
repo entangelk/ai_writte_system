@@ -199,6 +199,29 @@ class SurfaceMembershipTest(unittest.TestCase):
                     ),
                 )
 
+    def test_the_interactive_docs_are_not_served_on_any_surface(self) -> None:
+        """오너 2026-08-23(보안 점검 발견 ③·검증 H-3): docs 는 공개 표면이 아니다.
+
+        FastAPI 기본값으로 두면 `/docs`·`/redoc`·`/openapi.json` 이 8520 직접은
+        물론 nginx 경유(`/api/docs`·…)로도 **무인증 200** — 모든 route·가드·에러
+        형태를 네트워크의 누구에게나 광고한다. 스키마의 정당한 소비자는 전부
+        import 방식이다(`scripts/dump_openapi.py`·테스트의 `.openapi()`).
+
+        docs 라우트는 `APIRoute` 가 아니라 일반 `Route` 라 `_operations()` 에 안
+        잡히므로 경로 집합으로 직접 잰다. **under-strict**: 기본값을 되돌리면
+        네 경로가 다시 살아 이 셀이 문다. **over-strict**: 문을 닫는다고 공개
+        라우트(`/health`·제품의 `/auth/login`)까지 지워지면 안 된다.
+        """
+        docs_paths = {"/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json"}
+        for app in (self.union, self.product, self.admin):
+            served = {getattr(route, "path", None) for route in app.routes}
+            self.assertEqual(
+                served & docs_paths, set(),
+                f"{app.title} must not serve the interactive docs",
+            )
+            self.assertIn(("/health", "get"), _operations(app))
+        self.assertIn(("/auth/login", "post"), _operations(self.product))
+
 
 class EntryPointTest(unittest.TestCase):
     """컨테이너가 실제로 부르는 이름이 맞는 앱을 준다."""

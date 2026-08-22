@@ -1654,7 +1654,21 @@ def create_app(
     # Fail startup loudly for invalid environment-adjustable public bounds.
     _project_brief_style_example_limits()
     _writing_output_length_tokens()
-    app = FastAPI(title="에-라잇 Application")
+    # Owner 2026-08-23 (security audit finding ③ / verification H-3): the
+    # interactive docs are NOT a public surface. With FastAPI defaults they
+    # were reachable unauthenticated both directly (8520 /docs·/redoc·
+    # /openapi.json) and through nginx (/api/docs·…) — which advertises every
+    # route, guard and error shape to anyone on the network. Nothing legit
+    # consumes them over HTTP: the frontend contract comes from
+    # ``scripts/dump_openapi.py`` (an import, ``create_app().openapi()``), and
+    # the test suites call ``.openapi()`` the same way. Disabling here covers
+    # product, admin and union app at once — the three factories are one body.
+    app = FastAPI(
+        title="에-라잇 Application",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
     # Slice 8.3: every route is built by the settling wrapper. It is a no-op for
     # the 66 free operations (no receipt on ``request.state`` → nothing to do);
     # applying it globally rather than per-route is deliberate, because "which
