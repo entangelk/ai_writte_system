@@ -34,11 +34,16 @@ class LlamaCppProvider:
         default_model: str,
         default_thinking: bool,
         provider_name: str,
+        chat_path: str = "/v1/chat/completions",
     ) -> None:
+        # `chat_path` 는 기본(llama.cpp·OpenAI·OpenRouter 의 /v1/chat/completions)에서
+        # 벗어나는 벤더를 위한 자리다 — 구글 Gemini API 의 OpenAI 호환 루트는
+        # /v1beta/openai 라 접미 /v1 이 없다. 조립(main._chat_endpoint)이 계산해 넣는다.
         self._transport = transport
         self._default_model = default_model
         self._default_thinking = default_thinking
         self._provider_name = provider_name
+        self._chat_path = chat_path
         # 창(`n_ctx`)은 서버 기동 설정이라 호출마다 바뀌지 않는다 → 한 번만 조회해 캐시한다.
         # `_window_probed`는 "조회에 실패해 None을 얻음"과 "아직 조회 안 함"을 구분한다 —
         # 그래야 **실패를 매 호출 재시도하지 않는다**(죽은 서버에 왕복을 쌓지 않는다).
@@ -90,7 +95,7 @@ class LlamaCppProvider:
         await self._reject_if_window_exceeded(payload)
         try:
             response = await self._transport.post_json(
-                "/v1/chat/completions",
+                self._chat_path,
                 payload,
             )
         except TransportFailure as exc:

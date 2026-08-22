@@ -59,6 +59,24 @@ class LlamaCppProviderTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(provider, LLMProvider)
 
+    async def test_a_custom_chat_path_is_posted_as_given(self):
+        # 구글 Gemini API 의 OpenAI 호환 루트에는 접미 /v1 이 없다(/v1beta/openai).
+        # 조립이 계산해 준 경로를 provider 가 그대로 써야 한다 — 기본 경로를 하드코딩된
+        # 것으로 되돌리면 이 셀이 재실패한다(붙여넣은 주소 관례, 2026-08-22).
+        transport = FakeJsonTransport([_valid_response()])
+        provider = LlamaCppProvider(
+            transport=transport,
+            default_model="gemma-4-31b-it",
+            default_thinking=False,
+            provider_name="google",
+            chat_path="/chat/completions",
+        )
+
+        await provider.generate(_request())
+
+        path, _payload = transport.requests[0]
+        self.assertEqual(path, "/chat/completions")
+
     async def test_valid_response_is_parsed_and_payload_is_recorded(self):
         provider, transport = self._provider([_valid_response()])
 

@@ -241,6 +241,11 @@ EMBEDDING_DIMENSIONS=1536
 (`LLM_GATEWAY_MODEL`)은 env 체인을 덮어쓰지 않고 **체인의 첫 순위가 된다** — env 모델들은
 그 뒤를 따르는 폴백이다.
 
+**`LLAMA_BASE_URL`은 벤더 문서에서 그대로 붙여넣으면 된다** — 접미 `/v1`이 있는 주소(OpenAI
+`…/v1`·OpenRouter `…/api/v1`)는 그 `/v1`을 알아서 벗기고, 구글 Gemini API의 OpenAI 호환
+루트 `https://generativelanguage.googleapis.com/v1beta/openai`(접미 `/v1`이 **없는** 모양)는
+`/chat/completions`를 알아서 붙인다. 임베딩 어댑터의 `_strip_version_suffix`와 같은 관례다.
+
 ### 어디까지 노출하는가
 
 저장소(MongoDB · Elasticsearch · Chroma)와 내부 서비스는 **`127.0.0.1`에만 바인드**한다.

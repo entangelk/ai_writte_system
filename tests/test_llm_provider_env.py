@@ -11,7 +11,7 @@ from unittest.mock import patch
 from services.llm_gateway.app.client import LlamaCppProvider
 from services.llm_gateway.app.fallback import FallbackProvider
 from services.llm_gateway.app.httpx_transport import HttpxJsonTransport
-from services.llm_gateway.app.main import _build_provider, create_app
+from services.llm_gateway.app.main import _build_provider, _chat_endpoint, create_app
 from services.llm_gateway.app.provider import FakeLLMProvider
 
 
@@ -120,6 +120,23 @@ class BuildProviderEnvTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "LLAMA_KEY_RPM"):
             _build_provider()
 
+    async def test_the_google_root_builds_the_google_shaped_endpoint(self):
+        # 구글 Gemini API 의 OpenAI 호환 루트는 접미 /v1 이 없다 — 정규화가 경로를
+        # 맞춰 주지 않으면 붙여넣은 주소는 404 로만 응답한다(live smoke 선행 조건).
+        os.environ["LLAMA_BASE_URL"] = (
+            "https://generativelanguage.googleapis.com/v1beta/openai"
+        )
+        os.environ["LLAMA_API_KEYS"] = "AIza-test"
+
+        provider, transports, _ = self._build()
+
+        self.assertIsInstance(provider, LlamaCppProvider)
+        self.assertEqual(
+            str(transports[0]._client.base_url).rstrip("/"),
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+        )
+        self.assertEqual(provider._chat_path, "/chat/completions")
+
     async def test_the_lifespan_closes_every_owned_transport(self):
         # under-strict: lifespan 안에서는 열려 있고, over-strict: 나갈 때 전부 닫힌다.
         # 첫 transport만 닫는 종전 형태로 되돌아가면 나머지가 Unclosed client 가 된다.
@@ -143,6 +160,55 @@ class BuildProviderEnvTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertTrue(all(t._client.is_closed for t in transports))
+
+
+class ChatEndpointNormalizationTests(unittest.TestCase):
+    """붙여넣은 벤더 주소가 그대로 동작해야 한다(임베딩 `_strip_version_suffix` 관례).
+
+    under-strict: 구글 루트에 /v1 을 얹으면 재실패한다(404). over-strict: 경로 안의
+    `v1` 을 접미로 오인해 벗기면 재실패한다.
+    """
+
+    def test_pasted_addresses_reach_the_right_endpoint(self):
+        cases = {
+            # 구글 Gemini API — 문서가 인쇄하는 OpenAI 호환 루트(접미 /v1 이 없다)
+            "https://generativelanguage.googleapis.com/v1beta/openai": (
+                "https://generativelanguage.googleapis.com/v1beta/openai",
+                "/chat/completions",
+            ),
+            # 같은 주소의 끝 슬래시·전체 엔드포인트 통째로 붙여넣기
+            "https://generativelanguage.googleapis.com/v1beta/openai/": (
+                "https://generativelanguage.googleapis.com/v1beta/openai",
+                "/chat/completions",
+            ),
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions": (
+                "https://generativelanguage.googleapis.com/v1beta/openai",
+                "/chat/completions",
+            ),
+            # OpenAI — 문서가 …/v1 까지 인쇄한다
+            "https://api.openai.com/v1": (
+                "https://api.openai.com",
+                "/v1/chat/completions",
+            ),
+            # OpenRouter — …/api/v1 까지 인쇄한다
+            "https://openrouter.ai/api/v1": (
+                "https://openrouter.ai/api",
+                "/v1/chat/completions",
+            ),
+            # llama.cpp — 오늘의 기본(호스트 루트)
+            "http://host.docker.internal:9080": (
+                "http://host.docker.internal:9080",
+                "/v1/chat/completions",
+            ),
+            # over-strict: 경로 안의 v1 은 접미가 아니다(임베딩 브리프와 같은 결)
+            "https://proxy.example.com/v1/llm": (
+                "https://proxy.example.com/v1/llm",
+                "/v1/chat/completions",
+            ),
+        }
+        for pasted, (base, path) in cases.items():
+            with self.subTest(pasted=pasted):
+                self.assertEqual(_chat_endpoint(pasted), (base, path))
 
 
 if __name__ == "__main__":

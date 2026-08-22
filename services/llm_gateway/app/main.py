@@ -55,6 +55,28 @@ def _env_float(name: str, default: float) -> float:
     return float(raw)
 
 
+def _chat_endpoint(raw: str) -> tuple[str, str]:
+    """`LLAMA_BASE_URL` → (base_url, chat_path). **붙여넣은 벤더 주소가 그대로 동작해야 한다.**
+
+    임베딩 어댑터의 `_strip_version_suffix` 와 같은 관례다(문서가 인쇄하는 주소를 그대로
+    붙여넣어도 404 가 아니어야 한다 — 안 그러면 실패는 원인에서 먼 자리에서 나온다):
+
+    - `…/chat/completions` 으로 끝나면 → 전체 엔드포인트로 보고 그 결론을 유지한다.
+    - `/v1beta/openai` 로 끝나면(구글 Gemini API 의 OpenAI 호환 루트 — **접미 `/v1` 이
+      없다**) → `/chat/completions` 를 붙인다.
+    - 그 외(llama.cpp·OpenAI·OpenRouter) → 접미 `/v1` 하나를 벗기고 `/v1/chat/completions`
+      를 붙인다 — 벤더 문서가 `…/v1` 까지 인쇄하든 안 하든 같은 자리에 닿는다.
+    """
+    trimmed = raw.rstrip("/")
+    if trimmed.endswith("/chat/completions"):
+        return trimmed[: -len("/chat/completions")], "/chat/completions"
+    if trimmed.endswith("/v1beta/openai"):
+        return trimmed, "/chat/completions"
+    if trimmed.endswith("/v1"):
+        trimmed = trimmed[: -len("/v1")]
+    return trimmed, "/v1/chat/completions"
+
+
 def _build_provider() -> tuple[LLMProvider, list[HttpxJsonTransport], str]:
     """env → provider·transport 들. 키 폴백(오너 2026-08-22)의 조립 지점.
 
@@ -65,7 +87,9 @@ def _build_provider() -> tuple[LLMProvider, list[HttpxJsonTransport], str]:
     - 키 ≤1 且 모델 ≤1이면 **래퍼 없이 오늘과 동일한 단일 provider** — 로컬 구성은
       창(窓) 계수기도 라운드로빈도 없는 대가 없는 세계에 그대로 둔다.
     """
-    base_url = os.environ.get("LLAMA_BASE_URL", DEFAULT_LLAMA_BASE_URL)
+    base_url, chat_path = _chat_endpoint(
+        os.environ.get("LLAMA_BASE_URL", DEFAULT_LLAMA_BASE_URL)
+    )
     timeout_seconds = _env_float("LLAMA_TIMEOUT_SECONDS", 120.0)
     trust_env = _env_bool("LLAMA_TRUST_ENV", False)
     default_model = os.environ.get("LLAMA_DEFAULT_MODEL", "gemma-local")
@@ -97,6 +121,7 @@ def _build_provider() -> tuple[LLMProvider, list[HttpxJsonTransport], str]:
             default_model=models[0],
             default_thinking=default_thinking,
             provider_name=provider_name,
+            chat_path=chat_path,
         )
         return provider, [transport], base_url
 
@@ -108,6 +133,7 @@ def _build_provider() -> tuple[LLMProvider, list[HttpxJsonTransport], str]:
                 default_model=models[0],
                 default_thinking=default_thinking,
                 provider_name=provider_name,
+                chat_path=chat_path,
             )
             for transport in transports
         ],
