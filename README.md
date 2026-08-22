@@ -85,7 +85,7 @@
 | 단계 | 산출물 | 규모 |
 |---|---|---|
 | **① 결정 브리프** — 선택지 표(`선택지·설명·장점·단점`) + 구현자 추천 + 유예 항목을 적고 **멈춘다**. 추측 구현 금지 | [`docs/plans/`](docs/plans/README.md) | **91개** |
-| **② 구현 + 회귀 가드** — 가드는 **양방향**이어야 한다: 원래 결함을 재현하면 실패(under-strict), 과잉 교정으로 정상 경로를 깨도 실패(over-strict) | `tests/` | **2,266 passed / 2,367 subtests** |
+| **② 구현 + 회귀 가드** — 가드는 **양방향**이어야 한다: 원래 결함을 재현하면 실패(under-strict), 과잉 교정으로 정상 경로를 깨도 실패(over-strict) | `tests/` | **2,316 passed / 2,654 subtests** |
 | **③ 독립 검증** — 구현자가 아닌 세션이 **뮤테이션**(고친 것을 되돌려 회귀가 다시 실패하는지)으로 반증을 시도한다 | [`docs/verifications/`](docs/verifications/README.md) | **251건 / 53일치** |
 | **④ 정본 개정** — 계약이 바뀌면 SoT 버전을 올리고 **변경 이유와 근거 링크**를 남긴다 | [`docs/system-contract-sot.md`](docs/system-contract-sot.md) | **v1.7.96**, 변경이력 전량 보존 |
 | **⑤ 인수인계** — 다음 작업자가 시간을 잃지 않도록 **함정**을 기록한다 | [`HANDOFF.md`](HANDOFF.md) · [`docs/daily_logs/`](docs/daily_logs/) | 일자별 |
@@ -118,7 +118,7 @@
 
 | 서비스 | 역할 |
 |---|---|
-| **LLM Gateway** | llama.cpp 호환 provider 앞단. 실패 taxonomy·창 가드를 여기서 통제 |
+| **LLM Gateway** | llama.cpp·OpenAI 호환 provider(llama.cpp 서버·구글 등) 앞단. 실패 taxonomy·창 가드·**키 회전·모델 폴백**을 여기서 통제 |
 | **Core SOT** | MongoDB 정본 — project/draft/version/snapshot/source reference |
 | **Analysis / Memory** | 구조화 기억 후보 추출 → 대조 → append-only canonical memory |
 | **Indexing** | ChromaDB(vector) · Elasticsearch(nori lexical) 파생 인덱스 + async outbox 워커 |
@@ -143,7 +143,7 @@
 
 | 바꾼 것 | 무슨 일이 일어나는가 |
 |---|---|
-| **차원이 다른 모델** (1024 → 다른 값) | **첫 임베딩 호출에서 멈춘다.** 차원 가드가 응답 벡터의 길이를 보고 `EmbeddingProviderError`로 fail-fast 한다([`indexing/embedding.py`](services/application/app/indexing/embedding.py#L78)). 시끄럽게 실패하므로 놓칠 일이 없다 |
+| **차원이 다른 모델** (1024 → 다른 값) | **첫 임베딩 호출에서 멈춘다.** 차원 가드가 응답 벡터의 길이를 보고 `EmbeddingProviderError`로 fail-fast 한다([`indexing/embedding.py`](services/application/app/indexing/embedding.py)). 시끄럽게 실패하므로 놓칠 일이 없다 |
 | **차원이 같은 다른 모델** (1024 → 다른 1024 모델) | **아무 일도 안 일어난다.** 가드가 통과하고, 검색은 계속 결과를 낸다. 옛 벡터와 새 질의가 한 공간인 척 섞이면서 **품질만 조용히 떨어진다** — 에러도 경고도 없다 |
 
 두 번째 칸이 이 절이 존재하는 이유다. 색인 구조를 아는 사람에게는 재색인이 당연한 수순이지만,
@@ -151,9 +151,10 @@
 
 **절차.** 모델을 바꿀 때는 셋을 한 묶음으로 한다.
 
-1. `EMBEDDING_MODEL_NAME`을 바꾼다(기본 `dragonkue/BGE-m3-ko`). 차원이 다르면
-   `EMBEDDING_DIMENSIONS`(기본 `1024`)도 함께 바꾼다 — **하나만 바꾸면 위 표의 첫 칸에서 멈춘다.**
-2. 스택을 다시 띄운다(`docker compose up -d`). 임베딩 서비스가 새 모델을 받는다.
+1. 임베딩 모델을 바꾼다 — 로컬이면 `EMBEDDING_MODEL_NAME`(기본 `dragonkue/BGE-m3-ko`),
+   외부 API면 `EMBEDDING_API_MODEL`(아래 절). 차원이 다르면 `EMBEDDING_DIMENSIONS`(기본
+   `1024`)도 함께 바꾼다 — **하나만 바꾸면 위 표의 첫 칸에서 멈춘다.**
+2. 스택을 다시 띄운다(`docker compose up -d`). 로컬 모델이면 임베딩 서비스가 새 모델을 받는다.
 3. **프로젝트마다** 재색인 스크립트 둘을 돌린다. 정본 기억과 검토 대기 candidate는 색인이 따로다.
 
 ```bash
@@ -165,10 +166,16 @@ python3 scripts/phase2b5_reindex_candidate.py --project-id <PROJECT_ID> --mongo-
 > 실패하지 않고 **요약까지 정상으로 출력한 뒤 종료 시 사라지는 dry run**이다. 실제 색인을 고치려면
 > 그 환경변수가 있는 자리에서 돌려야 한다.
 
-**아직 검증되지 않은 경로 하나** — 위 절차는 **차원이 그대로일 때**의 것이다. 차원까지 바뀌면 기존
-벡터 컬렉션을 비우거나 다시 만들어야 하는데, **그 스크립트는 아직 없다**(벡터 삭제 경로는 프로젝트
-단위 purge 하나뿐이다). 차원이 다른 모델로 갈아탈 일이 생기면 그때 절차를 만들어야 한다 — 이 문서가
-없는 절차를 있는 것처럼 말하지 않으려고 적어 둔다.
+**차원까지 바뀌는 경로(실측 2026-08-22)** — 컬렉션은 **첫 삽입 벡터가 차원을 정하므로**, 차원이
+바뀌면 벡터 저장소를 비우고 다시 쌓는다. 정본은 Mongo에 있으므로 재색인으로 전부 복구된다.
+
+1. 위 절차의 1–2를 마친 뒤(새 모델·새 차원이 스택에 반영된 상태),
+2. Chroma 컨테이너를 내리고 **볼륨을 삭제**한 뒤 다시 띄운다(예: `docker compose stop chroma &&
+   docker compose rm -f chroma && docker volume rm <프로젝트>_chroma_data && docker compose up -d chroma`).
+   ★ 볼륨 이름에서 프로젝트 접두를 확인하고 **다른 프로젝트의 볼륨을 지우지 않는다.**
+3. 프로젝트마다 위 재색인 스크립트 둘을 돌린다 — 첫 삽입이 새 차원의 컬렉션을 만든다.
+
+Elasticsearch(lexical) 색인은 차원과 무관하므로 비울 필요 없다(아래 참조).
 
 **lexical(Elasticsearch/nori) 색인은 임베딩 모델과 무관하다** — 원문 텍스트를 색인하므로 모델 교체의
 영향을 받지 않는다. 위 스크립트가 벡터와 함께 다시 써 주는 것뿐이다.
@@ -212,8 +219,8 @@ EMBEDDING_DIMENSIONS=1536
 것은 원인에서 한참 떨어진 `404`뿐이다.
 
 **★ 외부 API로 바꾸는 것도 "모델이 바뀌는 것"이다.** 위 절의 재색인 규칙이 그대로 적용된다 —
-오히려 이 경우가 **모델이 확실히 바뀌는 경우**다. 차원이 다르면(예: 1024 → 1536) 첫 호출에서
-멈추고, **차원까지 바뀌는 경로는 아직 절차가 없다**(위 "아직 검증되지 않은 경로 하나").
+오히려 이 경우가 **모델이 확실히 바뀌는 경우**다. 차원까지 달라지면(예: 1024 → 1536) 위 절의
+**차원 전환 절차**(볼륨 비우기 → 재색인)를 따른다(2026-08-22 실측).
 
 > **비용 주의 — 재색인은 건당 1회 호출이다.** 지금은 텍스트 하나에 요청 하나를 보낸다(배치 없음).
 > 프로젝트 하나를 재색인하면 **기억 건수만큼 호출**이 나가고, 외부 API에서는 그것이 곧 요금과
@@ -221,7 +228,9 @@ EMBEDDING_DIMENSIONS=1536
 > ([브리프](docs/plans/embedding-adapter-slice-decisions.md) 결정 2).
 
 **로컬 임베딩 컨테이너는 그대로 둔다** — 키가 없는 개발 머신에서는 계속 그것을 쓴다. 배포에서만
-[`docker-compose.external.yml`](docker-compose.external.yml)이 profile 뒤로 보낸다.
+[`docker-compose.external.yml`](docker-compose.external.yml)이 profile 뒤로 보낸다. 외부 임베딩
+env는 base compose도 통과하므로 **저장소(chroma·es)는 스택 안에 둔 채 임베딩만 외부로** 보낼 수도
+있다(임베딩 API env 5종만 `.env`에 넣으면 된다).
 
 ### 외부 API 키 폴백 — 여러 키·여러 모델 (2026-08-22)
 
