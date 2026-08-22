@@ -127,10 +127,44 @@ LLM 게이트웨이(키×모델) + 임베딩·리랭커(키만). 임베딩 모�
 - 기존 스위트 무변 통과: `test_llm_gateway_app`·`test_embedding_assembly`(AST 가드 포함)·
   `test_rerank`·`test_compose_backend_env`(표기 잠금)·`test_httpx_transport`.
 
+## [알파 세션 — 같은 날 추가] 외부 LLM 실호출 스모크 (구글 Gemini API)
+
+오너: *"넣었어. 5개 키 넣었으니까 테스트 진행해봐."* (실제로는 **6개**가 들어 있었다 —
+말씀과 달라 보고했고, 그대로 진행.) 모델: `gemma-4-31b-it`(오너 지정, 공식 id 하이픈
+표기 확인). 스모크는 스택 바깥 스크립트(`/tmp/llm_external_smoke.py`, 일회용)로 실조립
+(`_build_provider`)을 그대로 돌렸다 — **스택은 무변**(in-stack llama 유지).
+
+**실측 다섯 가지(구글 붙이며 발견 → 그 자리에서 수정):**
+
+1. **구글의 OpenAI 호환 루트에는 `/v1`이 없다**(`…/v1beta/openai` + `/chat/completions`) —
+   그대로 두면 404. `_chat_endpoint` 정규화로 해결(커밋 21b1f1c): 접미 `/v1` 벗김
+   (OpenAI·OpenRouter)·구글 루트 인식·전체 엔드포인트 붙여넣기 허용.
+2. **`chat_template_kwargs` → 400 "Unknown name"** — llama.cpp 전용 필드를 OpenAI 호환
+   서버가 거부. `LLAMA_API_FORMAT=llamacpp|openai`(기본 llamacpp, 형식은 주소로 추론
+   안 함 — 임베딩 축과 같은 결)로 해결. openai 는 확장·프로브(/props·/tokenize)도 끔.
+3. **`reasoning_effort` → 400 "Thinking budget is not supported"** — 이 모델의 thinking을
+   끌 방법이 없고 content가 `<thought>…</thought>답변` 모양으로 온다. openai 형식에서
+   thought 블록을 걷어 계약(content=답변) 유지. **닫히지 않은 블록은 빈 문자열** —
+   지어내지 않는다.
+4. **짧은 `max_tokens`(64)로는 사고가 예산을 전부 써 전부 빈 답** — 512에서 정상.
+   짧은 상한의 호출부가 있다면 영향 검토 필요(앱의 호출부는 상한을 크게 잡는다).
+5. **key[0]이 IP 주소 제한**(403 PERMISSION_DENIED, 이 머신 발신 IP 미허용) — 오히려
+   실전 폴백 검증 기회가 됐다: 첫 호출에서 `provider_key_rejected` 로그 1회 → 즉시
+   key[1]로 회전 → 성공. **600s 쿨다운 실전 확인 — 13번 호출 내내 key[0]은 딱 1회만
+   시도됨.**
+
+**최종 결과(13/13 성공)**: 시도 분포 `[1, 5, 2, 2, 2, 2]`(key0=거부 1회, 나머지 5키에
+라운드로빈 균등 분산), 전 호출 한국어 인사 정상 생성, 모델 `gemma-4-31b-it`.
+
+**오너에게 남은 것**: ① key[0]의 IP 제한 — 허용 목록에 이 머신 IP(X.X.X.X)를
+추가하거나 키를 하나 지우거나. ② 이 머신 스택의 LLM 전환 여부 — `.env`가 이미 외부를
+가리키므로 재기동하면 in-stack llama 대신 구글로 돈다(오너 규칙 ①). ③ 임베딩·리랭커
+실측은 키 확보 뒤 후속.
+
 ## Next steps
 
-- 실외부 API로 live smoke(키 2개·모델 2개 구성) — 키 공급이 오늘의 선행 조건이었다
-  (2026-08-21 일지 "Owner Decisions Needed").
+- 임베딩·리랭커 실측(키 필요) — LLM 축은 이제 실측 완료.
 - 관측 연결 확인: 폴백으로 살아난 호출이 `ObservedProvider` 감사 레코드에 어떤 모양으로
   남는지(모델 필드는 실제로 쓰인 폴백 모델명으로 남는다 — 확인 셀은 아직 없음).
 - `Retry-After` 헤더 존중 여부는 실제 429 응답을 보고 나서(유예 목록 참조).
+- key[0] IP 제한 처리(오너) 및 스택 전환 결정(오너).

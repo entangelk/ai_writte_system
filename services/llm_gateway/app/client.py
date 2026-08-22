@@ -35,15 +35,22 @@ class LlamaCppProvider:
         default_thinking: bool,
         provider_name: str,
         chat_path: str = "/v1/chat/completions",
+        llama_extras: bool = True,
     ) -> None:
         # `chat_path` 는 기본(llama.cpp·OpenAI·OpenRouter 의 /v1/chat/completions)에서
         # 벗어나는 벤더를 위한 자리다 — 구글 Gemini API 의 OpenAI 호환 루트는
         # /v1beta/openai 라 접미 /v1 이 없다. 조립(main._chat_endpoint)이 계산해 넣는다.
+        #
+        # `llama_extras=False`(LLAMA_API_FORMAT=openai)면 llama.cpp 전용 확장을 안 보낸다
+        # — `chat_template_kwargs` 를 OpenAI 호환 서버에 보내면 400 "Unknown name" 이다
+        # (구글 실측 2026-08-22). /props·/tokenize 프로브도 마찬가지로 llama.cpp 전용이라
+        # 끄면 창·토큰수는 "모른다"(None)로 내려간다 — 지어내는 것보다 정직하다.
         self._transport = transport
         self._default_model = default_model
         self._default_thinking = default_thinking
         self._provider_name = provider_name
         self._chat_path = chat_path
+        self._llama_extras = llama_extras
         # 창(`n_ctx`)은 서버 기동 설정이라 호출마다 바뀌지 않는다 → 한 번만 조회해 캐시한다.
         # `_window_probed`는 "조회에 실패해 None을 얻음"과 "아직 조회 안 함"을 구분한다 —
         # 그래야 **실패를 매 호출 재시도하지 않는다**(죽은 서버에 왕복을 쌓지 않는다).
@@ -85,12 +92,17 @@ class LlamaCppProvider:
         request: ChatCompletionRequest,
     ) -> GenerationResult:
         # 생성과 **동시에** 창을 조회한다(기다리지 않는다 — `_start_context_window_probe`).
-        self._start_context_window_probe()
+        if self._llama_extras:
+            self._start_context_window_probe()
         payload = build_llama_payload(
             request,
             default_model=self._default_model,
             default_thinking=self._default_thinking,
         )
+        if not self._llama_extras:
+            # OpenAI 호환 서버는 모르는 필드를 400 으로 거부한다(구글 실측). thinking
+            # 토글은 llama.cpp 의 스위치다 — 이 형식에서는 표현 수단이 없다.
+            payload.pop("chat_template_kwargs", None)
         # 넘는 요청은 **모델을 부르지 않고** 여기서 거부한다(K-3). 비용이 이유다.
         await self._reject_if_window_exceeded(payload)
         try:
@@ -216,6 +228,9 @@ class LlamaCppProvider:
         **그 안에 들어갈 조각**(예: 고정 system 템플릿)이기 때문이다. 못 세면 `None`이며
         호출자는 그때 자기 추정으로 떨어진다(계수 실패가 기능을 막지 않는다).
         """
+        if not self._llama_extras:
+            # /tokenize 는 llama.cpp 전용 — OpenAI 호환 서버에는 그 경로가 없다.
+            return None
         try:
             counted = await self._transport.post_json(
                 "/tokenize", {"content": text, "add_special": False}
@@ -278,6 +293,11 @@ class LlamaCppProvider:
             choice = _mapping(choices[0])
             message = _mapping(choice["message"])
             content = _string(message["content"])
+            if not self._llama_extras:
+                # OpenAI 호환 형식에는 thinking 을 끄는 스위치가 없다(구글은 이 모델에
+                # reasoning_effort 도 400 으로 거부한다 — 실측 2026-08-22). llama.cpp 의
+                # enable_thinking=False 와 같은 계약(content = 답변)을 마크업 제거로 지킨다.
+                content = _strip_thought_block(content)
             finish_reason = _string(choice["finish_reason"])
 
             usage = _mapping(body["usage"])
@@ -305,6 +325,23 @@ def _mapping(value: Any) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise TypeError("value must be an object")
     return value
+
+
+def _strip_thought_block(content: str) -> str:
+    """`<thought>…</thought>` 한 덩어리를 걷어낸다(OpenAI 호환 형식 전용).
+
+    구글 gemma-4 는 content 를 `<thought>…사고…</thought>답변` 모양으로 준다(실측
+    2026-08-22). 닫힌 블록이면 앞뒤를 잇고, **닫히지 않았으면 빈 문자열**이다 —
+    창이 사고 도중에 끊겼다는 뜻이고(finish_reason=length), 지어낸 답을 만들지
+    않는다. 태그가 없으면 그대로 돌려준다.
+    """
+    start = content.find("<thought>")
+    if start == -1:
+        return content
+    end = content.find("</thought>", start)
+    if end == -1:
+        return ""
+    return (content[:start] + content[end + len("</thought>") :]).strip()
 
 
 def _string(value: Any) -> str:

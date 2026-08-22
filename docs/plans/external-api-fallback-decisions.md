@@ -31,6 +31,8 @@
 - **compose 표기** — 리스트 변수는 대시(빈 값 = unset), RPM 변수는 콜론 `:-30`(`_env_float`은 빈 값에 `float("")` 크래시). [`tests/test_compose_backend_env.py`](../../tests/test_compose_backend_env.py) 표기 셀이 잠근다.
 - **로그 위생** — 실패 시도는 `key_index` + 모델명 + 오류 코드만 남긴다. 게이트웨이의 `FallbackProvider`는 **키 값을 아예 모른다**(구조적 비유출).
 - **무설정 무변** — 키 ≤1 且 모델 ≤1이면 래퍼·계수기 없이 오늘의 단일 provider. 로컬 llama 배포는 아무 대가도 지불하지 않는다(over-strict 총괄 가드가 잠금).
+- **`LLAMA_API_FORMAT`(llamacpp 기본 · openai) — 구글 실측(2026-08-22)이 낸 것.** OpenAI 호환 서버는 모르는 필드를 400 "Unknown name" 으로 거부한다(`chat_template_kwargs`). `openai` 는 llama.cpp 전용 확장·프로브(/props·/tokenize)를 끈다. **형식은 주소로 추론하지 않는다** — 임베딩 축(`EMBEDDING_API_FORMAT`)과 같은 결. 주소 정규화(`_chat_endpoint`)는 별개: 접미 `/v1` 벗기기·구글 `/v1beta/openai` 루트 인식·전체 엔드포인트 붙여넣기 허용.
+- **openai 형식에서 `<thought>…</thought>` 걷어내기** — 이 형식에는 thinking 을 끄는 스위치가 없다(구글은 이 모델에 `reasoning_effort` 도 400 "Thinking budget is not supported" 로 거부). llama.cpp 의 `enable_thinking=False` 와 같은 계약(**content = 답변**)을 마크업 제거로 지킨다. 닫히지 않은 블록(출력 상한이 사고 도중 끊긴 경우)은 **빈 문자열** — 지어낸 답을 만들지 않는다. 단, 짧은 `max_tokens` 로는 사고가 예산을 전부 쓸 수 있다(실측: 64로는 전부 빈 답, 512로 정상).
 
 ## 2. 유예 / out of scope
 

@@ -90,6 +90,18 @@ def _build_provider() -> tuple[LLMProvider, list[HttpxJsonTransport], str]:
     base_url, chat_path = _chat_endpoint(
         os.environ.get("LLAMA_BASE_URL", DEFAULT_LLAMA_BASE_URL)
     )
+    # `llamacpp`(기본) — llama.cpp 전용 확장(chat_template_kwargs·/props·/tokenize)을
+    # 쓴다. `openai` — OpenAI 호환 서버(구글 Gemini API 등). 모르는 필드를 400 으로
+    # 거부하는 쪽이므로 확장을 뺀다(구글 실측 2026-08-22). **형식은 주소로 추론하지
+    # 않는다** — 임베딩 축(EMBEDDING_API_FORMAT)과 같은 결: 추론하면 주소를 고치는
+    # 순간 조용히 형식이 바뀌고 실패는 원인에서 먼 자리에서 나온다.
+    wire_format = os.environ.get("LLAMA_API_FORMAT", "llamacpp").strip().lower()
+    if wire_format not in ("llamacpp", "openai"):
+        raise ValueError(
+            "LLAMA_API_FORMAT must be 'llamacpp' or 'openai', "
+            f"got {wire_format!r}"
+        )
+    llama_extras = wire_format == "llamacpp"
     timeout_seconds = _env_float("LLAMA_TIMEOUT_SECONDS", 120.0)
     trust_env = _env_bool("LLAMA_TRUST_ENV", False)
     default_model = os.environ.get("LLAMA_DEFAULT_MODEL", "gemma-local")
@@ -122,6 +134,7 @@ def _build_provider() -> tuple[LLMProvider, list[HttpxJsonTransport], str]:
             default_thinking=default_thinking,
             provider_name=provider_name,
             chat_path=chat_path,
+            llama_extras=llama_extras,
         )
         return provider, [transport], base_url
 
@@ -134,6 +147,7 @@ def _build_provider() -> tuple[LLMProvider, list[HttpxJsonTransport], str]:
                 default_thinking=default_thinking,
                 provider_name=provider_name,
                 chat_path=chat_path,
+                llama_extras=llama_extras,
             )
             for transport in transports
         ],

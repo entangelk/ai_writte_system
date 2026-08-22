@@ -227,6 +227,7 @@ EMBEDDING_DIMENSIONS=1536
 | `LLAMA_API_KEYS` | gateway | 없음 | LLM 키 리스트(쉼표 구분). 없으면 인증 헤더 없음(로컬 llama) |
 | `LLAMA_MODELS` | gateway | `LLAMA_DEFAULT_MODEL` 1개 | 모델 체인. 첫 번째가 기본, 나머지가 폴백 모델 |
 | `LLAMA_KEY_RPM` | gateway | `30` | 키당 분당 요청 상한(슬라이딩 60초 창) |
+| `LLAMA_API_FORMAT` | gateway | `llamacpp` | `llamacpp` = llama.cpp 전용 확장 사용 · `openai` = OpenAI 호환 벤더(구글 등 — 모르는 필드를 400으로 거부하므로 확장 제거) |
 | `RERANK_API_KEYS` | application·worker | `RERANK_API_KEY` 1개 | 리랭커 키 리스트 |
 | `RERANK_KEY_RPM` | application·worker | `30` | |
 

@@ -204,6 +204,10 @@ services:
       LLAMA_DEFAULT_THINKING: "${LLAMA_DEFAULT_THINKING:-false}"
       LLAMA_TIMEOUT_SECONDS: "${LLAMA_TIMEOUT_SECONDS:-120}"
       LLAMA_TRUST_ENV: "${LLAMA_TRUST_ENV:-false}"
+      # Wire format of the upstream: llamacpp (default, sends llama.cpp-only
+      # extras) or openai (OpenAI-compatible vendors — Google rejects unknown
+      # fields with 400). Read with get(name, DEFAULT), hence the colon form.
+      LLAMA_API_FORMAT: "${LLAMA_API_FORMAT:-llamacpp}"
       # Key-pool fallback (owner 2026-08-22). Lists are read with get()+falsy
       # checks (dash — empty means unset, so local llama stays keyless); the RPM
       # counter parses floats, so an empty value must fall back to 30 (colon).

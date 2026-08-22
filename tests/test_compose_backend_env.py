@@ -366,6 +366,7 @@ class ExternalOverrideTest(unittest.TestCase):
         """
         base = (_REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
         for literal in (
+            '"${LLAMA_API_FORMAT:-llamacpp}"',  # get(name, DEFAULT) 읽기 — 콜론
             '"${LLAMA_API_KEYS-}"',
             '"${LLAMA_MODELS-}"',
             '"${LLAMA_KEY_RPM:-30}"',

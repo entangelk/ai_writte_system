@@ -17,6 +17,7 @@ from services.llm_gateway.app.provider import FakeLLMProvider
 
 _VARS = (
     "LLAMA_BASE_URL",
+    "LLAMA_API_FORMAT",
     "LLAMA_API_KEYS",
     "LLAMA_MODELS",
     "LLAMA_DEFAULT_MODEL",
@@ -136,6 +137,32 @@ class BuildProviderEnvTests(unittest.IsolatedAsyncioTestCase):
             "https://generativelanguage.googleapis.com/v1beta/openai",
         )
         self.assertEqual(provider._chat_path, "/chat/completions")
+
+    async def test_the_api_format_switches_the_llamacpp_extras(self):
+        # 형식은 주소로 추론하지 않는다(임베딩 축과 같은 결) — 구글 주소를 넣는 것만으로는
+        # llamacpp 확장이 켜져 있다(over-strict 방향), `LLAMA_API_FORMAT=openai` 가 끈다.
+        os.environ["LLAMA_BASE_URL"] = (
+            "https://generativelanguage.googleapis.com/v1beta/openai"
+        )
+        os.environ["LLAMA_API_KEYS"] = "AIza-test"
+
+        provider, _, _ = self._build()
+        self.assertIs(provider._llama_extras, True)  # 추론 없음 — 기본 그대로
+
+        os.environ["LLAMA_API_FORMAT"] = "openai"
+        provider, _, _ = self._build()
+        self.assertIs(provider._llama_extras, False)
+
+        os.environ["LLAMA_API_FORMAT"] = "llamacpp"
+        provider, _, _ = self._build()
+        self.assertIs(provider._llama_extras, True)
+
+    async def test_an_unknown_api_format_fails_fast(self):
+        # 오타(`openAI`·`open-ai`)가 조용히 llamacpp 로 떨어지면 "설정했는데 왜 안
+        # 나가나"가 된다 — 임베딩 축의 같은 결정.
+        os.environ["LLAMA_API_FORMAT"] = "open-ai"
+        with self.assertRaisesRegex(ValueError, "LLAMA_API_FORMAT"):
+            _build_provider()
 
     async def test_the_lifespan_closes_every_owned_transport(self):
         # under-strict: lifespan 안에서는 열려 있고, over-strict: 나갈 때 전부 닫힌다.

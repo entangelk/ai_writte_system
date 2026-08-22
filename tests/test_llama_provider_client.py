@@ -77,6 +77,83 @@ class LlamaCppProviderTests(unittest.IsolatedAsyncioTestCase):
         path, _payload = transport.requests[0]
         self.assertEqual(path, "/chat/completions")
 
+    async def test_openai_format_omits_the_llamacpp_only_field_and_probes(self):
+        # 구글 실측(2026-08-22): OpenAI 호환 서버는 모르는 필드를 400 "Unknown name" 으로
+        # 거부한다. under-strict: chat_template_kwargs 를 그대로 보내면 재실패한다.
+        transport = FakeJsonTransport([_valid_response()])
+        provider = LlamaCppProvider(
+            transport=transport,
+            default_model="gemma-4-31b-it",
+            default_thinking=False,
+            provider_name="google",
+            llama_extras=False,
+        )
+
+        await provider.generate(_request(thinking=True))
+
+        _path, payload = transport.requests[0]
+        self.assertNotIn("chat_template_kwargs", payload)
+        # /props 프로브도 llama.cpp 전용 — 이 형식에서는 왕복 자체를 안 한다.
+        self.assertEqual(transport.get_requests, [])
+
+    async def test_openai_format_has_no_tokenizer_round_trip(self):
+        transport = FakeJsonTransport([])
+        provider = LlamaCppProvider(
+            transport=transport,
+            default_model="gemma-4-31b-it",
+            default_thinking=False,
+            provider_name="google",
+            llama_extras=False,
+        )
+
+        self.assertIsNone(await provider.count_tokens("안녕"))
+        self.assertEqual(transport.requests, [])
+
+    async def test_openai_format_strips_the_thought_block(self):
+        # 구글 실측(2026-08-22): content 가 `<thought>…사고…</thought>답변` 모양으로
+        # 온다. under-strict: 걷어내지 않으면 답변에 사고가 섞여 나간다.
+        transport = FakeJsonTransport(
+            [_valid_response("<thought>숙고 중…</thought>안녕하세요!")]
+        )
+        provider = LlamaCppProvider(
+            transport=transport,
+            default_model="gemma-4-31b-it",
+            default_thinking=False,
+            provider_name="google",
+            llama_extras=False,
+        )
+
+        result = await provider.generate(_request())
+
+        self.assertEqual(result.content, "안녕하세요!")
+
+    async def test_openai_format_an_unclosed_thought_block_yields_empty(self):
+        # 창이 사고 도중에 끊긴 경우(finish_reason=length) — 지어낸 답을 만들지 않는다.
+        transport = FakeJsonTransport(
+            [_valid_response("<thought>계속 생각만 하다가 끊")]
+        )
+        provider = LlamaCppProvider(
+            transport=transport,
+            default_model="gemma-4-31b-it",
+            default_thinking=False,
+            provider_name="google",
+            llama_extras=False,
+        )
+
+        result = await provider.generate(_request())
+
+        self.assertEqual(result.content, "")
+
+    async def test_the_llamacpp_format_does_not_strip_anything(self):
+        # over-strict: 걷어내기는 openai 형식의 몫이다 — llama.cpp 에서 thinking=True 로
+        # 얻은 content 를 게이트웨이가 임의로 고치면 안 된다.
+        raw = "<thought>숙고 중…</thought>안녕하세요!"
+        provider, _ = self._provider([_valid_response(raw)])
+
+        result = await provider.generate(_request())
+
+        self.assertEqual(result.content, raw)
+
     async def test_valid_response_is_parsed_and_payload_is_recorded(self):
         provider, transport = self._provider([_valid_response()])
 
