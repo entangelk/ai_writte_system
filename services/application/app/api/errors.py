@@ -280,7 +280,10 @@ def _provider_error_status(error: ProviderError) -> int:
       (K-3, 오너 2026-07-30). 상류 장애가 아니라 **요청이 너무 큰 것**이므로 4xx이며,
       같은 요청의 재시도는 반드시 같은 실패로 끝난다. `detail`이 입력·출력상한·창 수치를
       실어 나르므로 그 자체가 오너가 말한 "경고"다.
-    - 그 밖의 provider 실패 → **502**: 상류는 있는데 실패했다.
+    - 그 밖의 provider 실패 → **502**: 상류는 있는데 실패했다. 여기에는 `KEY_REJECTED`
+      (401/403 — 상류가 **우리의 API 키**를 거부, 오너 2026-08-22)가 포함된다: 이 API의
+      클라이언트는 게이트웨이에 자격증명이 없으므로 401은 "너의 인증을 고쳐라"라는 거짓
+      메시지가 된다.
     """
     if error.code is ProviderErrorCode.TIMEOUT:
         return 504

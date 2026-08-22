@@ -79,13 +79,25 @@ class HttpStatusMappingTests(unittest.TestCase):
                 self.assertIs(error.retryable, True)
 
     def test_other_client_errors_are_rejected_and_not_retryable(self):
-        for status_code in (400, 401, 403, 404, 422):
+        # 401/403은 여서 빠진다 — 그 둘은 요청이 아니라 **키**가 거부된 것이므로 아래
+        # 별도 셀로 간다(키 폴백 슬라이스, 오너 2026-08-22). 이 셀이 401/403까지 잡고
+        # 있으면 over-strict다: 키 실패를 요청 실패로 뭉개면 폴백이 키를 안 바꾼다.
+        for status_code in (400, 404, 422):
             with self.subTest(status_code=status_code):
                 error = error_from_http_status(status_code)
                 self.assertEqual(
                     error.code,
                     ProviderErrorCode.REQUEST_REJECTED,
                 )
+                self.assertIs(error.retryable, False)
+
+    def test_auth_failures_are_key_rejected(self):
+        # under-strict 방향: 401/403을 REQUEST_REJECTED로 되돌리면 이 셀이 재실패한다 —
+        # 키 폴백 계층은 이 코드를 보고 "키를 바꿔라"를 판단한다.
+        for status_code in (401, 403):
+            with self.subTest(status_code=status_code):
+                error = error_from_http_status(status_code)
+                self.assertEqual(error.code, ProviderErrorCode.KEY_REJECTED)
                 self.assertIs(error.retryable, False)
 
     def test_success_and_redirect_statuses_are_not_misclassified_as_errors(self):

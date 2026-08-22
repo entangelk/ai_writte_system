@@ -143,6 +143,13 @@ def error_from_http_status(
             retryable=True,
             provider=provider,
         )
+    if status_code in (401, 403):
+        return ProviderError(
+            code=ProviderErrorCode.KEY_REJECTED,
+            message="provider rejected the api key",
+            retryable=False,
+            provider=provider,
+        )
     if status_code < 500:
         return ProviderError(
             code=ProviderErrorCode.REQUEST_REJECTED,

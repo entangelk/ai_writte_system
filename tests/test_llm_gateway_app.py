@@ -90,6 +90,9 @@ class LlmGatewayAppTests(unittest.IsolatedAsyncioTestCase):
             # 클라이언트에 도달하지 않는다.
             (ProviderErrorCode.CONTEXT_WINDOW_EXCEEDED, 400),
             (ProviderErrorCode.INVALID_RESPONSE, 502),
+            # 401/403 — 상류가 우리 키를 거부했다(키 폴백 슬라이스). 게이트웨이의 클라이언트
+            # 는 자격증명이 없으므로 401이 아니라 502로 나간다(오너 2026-08-22).
+            (ProviderErrorCode.KEY_REJECTED, 502),
         )
 
         for code, expected_status in cases:

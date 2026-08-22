@@ -83,6 +83,11 @@ def _status_for_error(error: ProviderError) -> int:
     # 재시도가 같은 실패로 끝나는 점도 `REQUEST_REJECTED`와 같다 — 다른 것은 거부한 주체다.
     if error.code is ProviderErrorCode.CONTEXT_WINDOW_EXCEEDED:
         return 400
+    # 키가 거부된 것(401/403)은 **우리 쪽 자격증명 실패**다. 게이트웨이의 클라이언트(앱)는
+    # 게이트웨이에 자격증명이 없으므로 401을 돌려주면 "너의 인증을 고쳐라"라는 거짓 메시지가
+    # 된다 — 실패한 자격증명은 게이트웨이→상류 방향이므로 502가 정직하다(오너 2026-08-22).
+    if error.code is ProviderErrorCode.KEY_REJECTED:
+        return 502
     return 502
 
 

@@ -24,6 +24,10 @@ class ProviderErrorContractTests(unittest.TestCase):
                 # 이유는 거부 주체가 다르기 때문이다 — 우리가 부르기 전에 막았으므로 왕복
                 # 비용이 0이고, 그 구분이 곧 가드가 일했는지의 신호다.
                 "provider_context_window_exceeded",
+                # 외부 API 키 폴백(오너 2026-08-22). 401/403 — 키가 거부된 경우로,
+                # `provider_request_rejected`와 별개 literal인 이유는 **키를 바꾸면
+                # 고쳐지는 실패**이기 때문이다. 폴백 계층이 이 구별로 회전 여부를 정한다.
+                "provider_key_rejected",
             },
         )
 
@@ -131,6 +135,8 @@ class ProviderErrorStatusMappingTests(unittest.TestCase):
             ProviderErrorCode.OVERLOADED: 502,
             ProviderErrorCode.INVALID_RESPONSE: 502,
             ProviderErrorCode.REQUEST_REJECTED: 502,
+            # 401/403 — 상류가 우리 키를 거부했다. 앱 쪽 자격증명 문제가 아니므로 502.
+            ProviderErrorCode.KEY_REJECTED: 502,
         }
         # 새 code를 더하고 이 표를 안 고치면 여기서 걸린다 — 기본값 502로 조용히 묻히지 않는다.
         self.assertEqual(set(cases), set(ProviderErrorCode))

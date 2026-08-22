@@ -17,6 +17,10 @@ class ProviderErrorCode(StrEnum):
     # `REQUEST_REJECTED`(모델 서버가 거부 — 왕복 1회를 이미 쓴 상태)와 **구분해야 한다**:
     # 비용이 이 가드의 이유이므로 "누가 거부했는가"가 곧 그 가드가 일했는지의 신호다.
     CONTEXT_WINDOW_EXCEEDED = "provider_context_window_exceeded"
+    # 외부 API 키 폴백(오너 2026-08-22). 401/403 — **키가 거부된 것**이지 요청이 거부된
+    # 것이 아니다. `REQUEST_REJECTED`(요청 자체가 못 쓰는 경우)와 구분해야 폴백 계층이
+    # "키를 바꾸면 고쳐진다"와 "뭘 바꿔도 소용없다"를 구별할 수 있다.
+    KEY_REJECTED = "provider_key_rejected"
 
 
 @dataclass(frozen=True, slots=True)
