@@ -127,6 +127,31 @@ LLM 게이트웨이(키×모델) + 임베딩·리랭커(키만). 임베딩 모�
 - 기존 스위트 무변 통과: `test_llm_gateway_app`·`test_embedding_assembly`(AST 가드 포함)·
   `test_rerank`·`test_compose_backend_env`(표기 잠금)·`test_httpx_transport`.
 
+## [알파 세션 3 — 같은 날 추가] 임베딩 구글 전환 시행 (gemini-embedding-2 · 1536차원)
+
+오너 결정(AskUserQuestion): **차원 1536, 지금 착수.** 검토 결론("전용 어댑터 불필요 —
+어댑터 확장 2건")을 그날 바로 시행했다.
+
+1. **어댑터 확장**(커밋 e952506): `_embeddings_endpoint` 경로 정규화(구글
+   `/v1beta/openai` 루트 인식 — 호스트 루트만 넣으면 404) + `OpenAIEmbeddingProvider`가
+   `EMBEDDING_DIMENSIONS` 값을 요청의 `dimensions`로 전송(안 보내면 구글 기본 3072).
+   base compose 3서비스에 임베딩 API env 5종 통과 — **in-stack chroma/es 를 유지한 채
+   외부 임베딩만** 쓰는 길(external override 와 병합 시 override 승리).
+2. **.env 전환** → 실조립 실호출 2회: `KeyRotatingEmbeddingProvider`(키 5개), **1536차원**.
+3. **스택 재빌드**(코드+env) → **크로마 볼륨 와이프**(`ai_writte_system_chroma_data` —
+   기존 1024차원 BGE-m3 벡터. 옆 프로젝트 볼륨 `agent-memory-system_chroma_data` 는
+   무손상). 컬렉션은 첫 삽입 벡터가 차원을 정한다.
+4. **재색인**: application 컨테이너 안에서 44개 프로젝트 전부 memory+candidate 스크립트
+   실행(정본 8건·후보 53건 upsert — 멱등).
+5. **검증**: `memory_vectors` count=8 dims=1536 · `candidate_vectors` count=53 dims=1536 ·
+   실쿼리("아린은 항구에 도착했다") → 두 컬렉션 상위 히트 코사인 0.52–0.58. 앱 어댑터의
+   query 경로는 이미 `[list(vector)]` 변환을 한다(임시 질의가 tuple 거부된 것과 무관).
+6. 전체 백엔드 스위트 **2316 passed · 0 failed**.
+
+**알파 스택 최종 상태**: LLM·임베딩 모두 구글(같은 AI Studio 키 5개 라운드로빈),
+mongo/chroma/elasticsearch 는 in-stack, llama·embedding 컨테이너 중 llama 는 제거
+(embedding 컨테이너는 떠 있으나 앱이 부르지 않는다).
+
 ## [알파 세션 2 — 같은 날 추가] 키 정리·스택 전환·임베딩 검토
 
 오너 지시 셋: *"키는 지우지 뭐. 스택 전환 해주고, 임베딩은 (gemini-embedding-2 표)

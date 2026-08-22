@@ -200,6 +200,13 @@ EMBEDDING_DIMENSIONS=1536
 `https://api.openai.com/v1`처럼 `/v1`까지 적어 두는데, **그대로 붙여 넣어도 된다**(끝의 `/v1` 하나는
 벗겨 낸다). 이건 LLM 쪽 `LLAMA_BASE_URL`과 같은 관례다.
 
+**구글 Gemini API 임베딩(`gemini-embedding-2`)은 주소가 다르다** —
+`https://generativelanguage.googleapis.com/v1beta/openai`까지 넣는다(호스트 루트만 넣으면 404,
+실측 2026-08-22). LLM과 같은 AI Studio 키를 쓴다. `EMBEDDING_DIMENSIONS`의 값이 요청의
+`dimensions`로 실려 차원이 고정되며, 안 보내면 벤더 기본(이 모델은 **3072**)으로 나온다 —
+차원 가드와 요청이 같은 값을 말한다. 이 모델은 QUERY/DOCUMENT 임베딩이 동일하므로(코사인
+1.0000 실측) task type 구분이 필요 없다.
+
 **형식은 반드시 `EMBEDDING_API_FORMAT`으로 지정한다.** 키만 넣으면 바뀌지 않는다 — 일부러 그렇게
 했다. 키 유무로 형식을 짐작하게 만들면 **키를 잠깐 지운 순간 형식이 조용히 바뀌고**, 그때 보이는
 것은 원인에서 한참 떨어진 `404`뿐이다.
