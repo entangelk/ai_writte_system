@@ -16,12 +16,14 @@ class HttpxJsonTransport:
         base_url: str,
         timeout_seconds: float = 120.0,
         trust_env: bool = False,
+        headers: Mapping[str, str] | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=httpx.Timeout(timeout_seconds),
             trust_env=trust_env,
+            headers=headers,
             transport=transport,
         )
 

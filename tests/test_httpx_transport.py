@@ -154,6 +154,33 @@ class HttpxJsonTransportTests(unittest.IsolatedAsyncioTestCase):
             str(raised.exception.to_envelope().to_dict()),
         )
 
+    async def test_configured_headers_reach_the_wire_and_default_stays_absent(self):
+        # 키 폴백 슬라이스(오너 2026-08-22) — Authorization 주입 지점. under-strict:
+        # 명시한 헤더가 실제 요청에 실린다. over-strict: 안 줬을 때 몰래 실리면 안 된다
+        # (로컬 llama.cpp 경로가 조용히 변한다 — external-api 문서 §0가 지목한 공백).
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["authorization"] = request.headers.get("Authorization")
+            return httpx.Response(200, json={"ok": True})
+
+        async with HttpxJsonTransport(
+            base_url="http://llama.test:9080",
+            headers={"Authorization": "Bearer test-key"},
+            transport=httpx.MockTransport(handler),
+        ) as transport:
+            await transport.post_json("/v1/chat/completions", {})
+
+        self.assertEqual(seen["authorization"], "Bearer test-key")
+
+        async with HttpxJsonTransport(
+            base_url="http://llama.test:9080",
+            transport=httpx.MockTransport(handler),
+        ) as transport:
+            await transport.post_json("/v1/chat/completions", {})
+
+        self.assertIsNone(seen["authorization"])
+
     async def test_context_manager_closes_the_httpx_client(self):
         # Under-strict guard: the client is open while in use.
         # Over-strict guard: exiting the context must close it.
