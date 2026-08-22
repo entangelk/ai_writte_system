@@ -178,13 +178,21 @@ EXCLUDED_OPERATIONS: tuple[ExcludedOperation, ...] = (
     # 없는 행을 담을 자리가 없고, 담게 만들면 purge 가 못 지우는 행이 생긴다.
     ExcludedOperation("POST", "/auth/login", "not_project_scoped", "세션 축"),
     ExcludedOperation("POST", "/auth/logout", "not_project_scoped", "세션 축"),
-    # --- 관리자 4 -------------------------------------------------------------
+    # 승인제 가입(2026-08-22): 요청은 pending 행 하나뿐 — 정본도 세션도 아니다.
+    ExcludedOperation("POST", "/auth/signup", "not_project_scoped", "가입 요청 축"),
+    # --- 관리자 4 + 승인 2 ----------------------------------------------------
     #
     # I3: 관리자 행위·승격 접근과 소유자 활동을 섞으면 양쪽이 쓸모를 잃는다
     # (SoT v1.7.78). purge 생존 여부도 정반대라 한 컬렉션에 둘 수 없다.
     ExcludedOperation("POST", "/admin/users", "admin_audited", "관리자 축"),
     ExcludedOperation("POST", "/admin/users/{user_id}/deactivate",
                       "admin_audited", "관리자 축"),
+    # 승인·거절은 계정 관리 조작(사용자 만들기·비활성화와 같은 축) — admin_audit
+    # 도 활동 로그도 아니다(계정 관련 관리 조작은 현행대로 미기록, 브리프 P-7).
+    ExcludedOperation("POST", "/admin/signup-requests/{user_id}/approve",
+                      "admin_audited", "관리자 축(계정 관리)"),
+    ExcludedOperation("POST", "/admin/signup-requests/{user_id}/reject",
+                      "admin_audited", "관리자 축(계정 관리)"),
     ExcludedOperation("POST", "/admin/projects/{project_id}/purge",
                       "admin_audited", "admin_audit_events(파기 tombstone)"),
     ExcludedOperation("POST", "/admin/projects/{project_id}/access-grants",
