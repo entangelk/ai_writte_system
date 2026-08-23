@@ -278,6 +278,16 @@ def register_admin(
     ) -> dict[str, object]:
         # 정지는 즉시다(D1ⓒ·D2) — 다음 요청부터 403(Q5=B·P5). 한도·pending 은
         # 그대로: 정지는 한도 축이 아니다.
+        # H1(2026-08-23 검증, 오너 결정 — 자기 정지 금지): 마지막 관리자가 자기
+        # quota 를 정지하는 셀프 잠금은 서비스 운영 불능이다(F2 의 정신 — 관리자
+        # population 이 아니라 운영 연속성의 축). 자기 해제(activate)는 막지
+        # 않는다: 관리자 라우트에 enforce_quota 가 없어 정지된 관리자도 여기는
+        # 도달한다.
+        if user_id == current.id:
+            raise HTTPException(
+                status_code=400,
+                detail="administrators cannot suspend their own quota",
+            )
         return _toggle_status(
             user_id, status=QuotaStatus.SUSPENDED, change="suspend",
             reason=body.reason, current=current)

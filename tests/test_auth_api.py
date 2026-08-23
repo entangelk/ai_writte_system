@@ -1634,6 +1634,44 @@ class AdminQuotaPolicyChangeApiTest(unittest.TestCase):
                 json={"reason": "감사 죽는 경우"},
             )
 
+    def test_non_integer_limit_values_are_rejected_not_coerced(self) -> None:
+        """B1(2026-08-23 검증, 오너 ⓐ) — lax coercion 금지.
+
+        종전 pydantic lax 모드는 ``"77"`` 을 77 로 적용하고 ``true`` 를 **1 로
+        변환해 축소 예약까지 만들었다**(검증 V7 실측). StrictInt 로 전부 422.
+        under-strict: StrictInt 를 int 로 되돌리면 true 케이스가 200 으로
+        되살아 이 셀이 문는다. 음수는 라우터의 400 (타입 오류와 다른 사건).
+        """
+        alice = self._member("alice")
+        base = f"/admin/quota-policies/{alice.id}/limits"
+        for field in ("daily_limit", "weekly_limit"):
+            for bad in ("77", True, 2.5):
+                with self.subTest(field=field, value=bad):
+                    response = self.client.post(base, json={
+                        "reason": "타입 검증", field: bad,
+                    })
+                    self.assertEqual(response.status_code, 422)
+
+    def test_an_admin_cannot_suspend_their_own_quota(self) -> None:
+        """H1(2026-08-23 검증, 오너 결정) — 셀프 잠금 금지.
+
+        under-strict: 이 검사를 없애면 200 으로 되살아난다. over-strict:
+        남의 정지·자기 해제(activate)는 여전히 가능해야 한다.
+        """
+        root = next(u for u in self.users.list_users()
+                    if u.username == "root")
+        self.assertEqual(self.client.post(
+            f"/admin/quota-policies/{root.id}/suspend",
+            json={"reason": "셀프 잠금 시도"}).status_code, 400)
+        # 남의 정지는 200 — 그리고 자기 해제는 막히지 않는다.
+        alice = self._member("alice")
+        self.assertEqual(self.client.post(
+            f"/admin/quota-policies/{alice.id}/suspend",
+            json={"reason": "타인 정지"}).status_code, 200)
+        self.assertEqual(self.client.post(
+            f"/admin/quota-policies/{root.id}/activate",
+            json={"reason": "자기 해제"}).status_code, 200)
+
     def test_validation_and_target_errors(self) -> None:
         alice = self._member("alice")
         base = f"/admin/quota-policies/{alice.id}/limits"

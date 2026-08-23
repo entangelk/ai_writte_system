@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pydantic import (
+    StrictInt,
     BaseModel,
     ConfigDict,
     Field,
@@ -184,11 +185,15 @@ class AdminQuotaPolicyDetailResponse(AdminQuotaPolicyPayload):
 
 class AdminQuotaLimitsChangeRequest(BaseModel):
     """8.5-b — 한도 변경(D2=ⓐ: 발효는 도메인 P6). 둘 중 하나만 바꿀 수 있고
-    ``None`` 은 그 창의 무제한이다. **둘 다 미지정은 400**(브리프 §5)."""
+    ``None`` 은 그 창의 무제한이다. **둘 다 미지정은 400**(브리프 §5).
+
+    ``StrictInt`` — 검증 B1(2026-08-23, 오너 ⓐ): lax coercion 은 ``"77"``을
+    77 로, ``true`` 를 **1 로 변환해 축소 예약까지 만들었다**. 숫자 문자열·
+    불·소수는 전부 422 로 차단한다(음수·미지정은 라우터의 400 과 갈린다)."""
 
     reason: str
-    daily_limit: int | None = None
-    weekly_limit: int | None = None
+    daily_limit: StrictInt | None = None
+    weekly_limit: StrictInt | None = None
 
 
 class AdminQuotaSuspendRequest(BaseModel):
