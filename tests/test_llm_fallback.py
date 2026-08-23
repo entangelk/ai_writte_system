@@ -399,6 +399,19 @@ class FallbackConstructionTests(unittest.TestCase):
             )
 
 
+class CooldownLiteralTests(unittest.TestCase):
+    def test_owner_policy_cooldown_literals_are_pinned(self):
+        """오너 정책 리터럴 600s/60s — 상대 기준 셀(상수±1)은 임의 값에도 참이다.
+
+        2026-08-23 독립 검증 H1(M1): 600을 60으로 바꿔도 전 수트가 green이었다.
+        두 값은 오너 결정(401/403 장기·429 단기)이므로 절대값으로 잠근다.
+        under-strict: 리터럴을 바꾸면 이 셀이 문다. over-strict: 없음 —
+        값 자체가 계약이다(바꾸려면 오너 결정과 함께 이 셀을 고친다).
+        """
+        self.assertEqual(KEY_REJECTED_COOLDOWN_SECONDS, 600.0)
+        self.assertEqual(RATE_LIMIT_COOLDOWN_SECONDS, 60.0)
+
+
 class ParseEnvListTests(unittest.TestCase):
     def test_splits_strips_and_dedups(self):
         # 같은 키를 두 번 적으면 슬롯이 두 개가 돼 RPM 예산이 두 배로 세진다 — 중복 제거는 그 방지.

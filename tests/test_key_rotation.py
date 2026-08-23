@@ -67,6 +67,18 @@ def _status_error(status_code: int) -> EmbeddingProviderError:
     )
 
 
+class CooldownLiteralTests(unittest.TestCase):
+    def test_owner_policy_cooldown_literals_are_pinned(self):
+        """동기 축(임베딩·리랭커)의 오너 정책 리터럴 600s/60s — 게이트웨이 형제와 같은 값.
+
+        2026-08-23 독립 검증 H1: 게이트웨이 축과 달리 이 축의 절대값을 잠그는
+        셀이 없었다(관계 단정 '장>단'뿐). 두 축이 같은 오너 정책을 공유하므로
+        같은 절대값으로 핀한다. under-strict: 리터럴 변경 시 재실패.
+        """
+        self.assertEqual(KEY_REJECTED_COOLDOWN_SECONDS, 600.0)
+        self.assertEqual(RATE_LIMIT_COOLDOWN_SECONDS, 60.0)
+
+
 class KeyRotatableClassificationTests(unittest.TestCase):
     def test_rotation_worthiness_of_each_error_shape(self):
         # 회전 대상: 네트워크·401/403/408/429·5xx. 비회전: 400·404·본문/차원 계약 위반.

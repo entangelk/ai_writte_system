@@ -28,6 +28,7 @@
 - **체인 전체가 하나의 시간 예산을 공유** — 게이트웨이는 `asyncio.timeout(LLAMA_TIMEOUT_SECONDS)`, 임베딩·리랭커는 첫 시도 후 deadline 점검. N 조합이 시도당 타임아웃을 N배로 불리는 것을 막는다(1b(B1)이 이미 겪은 "성공한 생성이 timeout으로 뒤집히는" 실패의 예방).
 - **소진 시 오류** — 시도가 0개(전부 RPM/쿨다운)면 `OVERLOADED` retryable(임베딩은 status 429) → 인덱스 재시도 backoff(60/300s)·리랭커 fail-open과 자연 조합. 시도는 했으나 전부 실패면 **마지막 오류 그대로**(진단 보존).
 - **env 이름** — `LLAMA_API_KEYS`·`LLAMA_MODELS`·`LLAMA_KEY_RPM`(+ `EMBEDDING_`·`RERANK_` 축의 `*_API_KEYS`·`*_KEY_RPM`). 부모 브리프 §3이 스케치한 `LLM_API_KEY`(단수)를 **대체**한다 — 현행 `LLAMA_*` family와의 일관성이 스케치의 우선순위를 이긴다(스케치는 착수 전 추정 표면이었다).
+- **리스트 파싱**(2026-08-23 검증 H2 보강) — 쉼표 구분 값을 **항목별 trim·빈 항목 무시·중복 제거(첫 등장 순서 유지)** 로 읽는다. `test_splits_strips_and_dedups`가 잠근다.
 - **compose 표기** — 리스트 변수는 대시(빈 값 = unset), RPM 변수는 콜론 `:-30`(`_env_float`은 빈 값에 `float("")` 크래시). [`tests/test_compose_backend_env.py`](../../tests/test_compose_backend_env.py) 표기 셀이 잠근다.
 - **로그 위생** — 실패 시도는 `key_index` + 모델명 + 오류 코드만 남긴다. 게이트웨이의 `FallbackProvider`는 **키 값을 아예 모른다**(구조적 비유출).
 - **무설정 무변** — 키 ≤1 且 모델 ≤1이면 래퍼·계수기 없이 오늘의 단일 provider. 로컬 llama 배포는 아무 대가도 지불하지 않는다(over-strict 총괄 가드가 잠금).
