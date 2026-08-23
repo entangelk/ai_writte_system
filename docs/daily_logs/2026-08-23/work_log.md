@@ -6,7 +6,7 @@
 > - **사전 정리(재작성 전 커밋)**: 계정명 표기 4파일 일반화('오너 계정' — 중복 표현 수습 포함).
 > - **백업**: `../ai_writte_system-pre-rewrite-backup.bundle` (--all 8.4MB — 문제 시 복구 원본).
 > - **재작성**: `git filter-repo --replace-text`(blob) 1패스 + `--message-callback`(커밋 메시지)
->   2패스 — `X.X.X.X→X.X.X.X`·계정명→`owner-account`. replace-text가 blob만 커버한다는
+>   2패스 — 공인 IP→`X.X.X.X`·계정명→`owner-account`(실값은 어느 기록에도 남기지 않는다). replace-text가 blob만 커버한다는
 >   것을 1패스 검증(메시지 3건 잔존)으로 발견해 2패스로 닫음.
 > - **검증 전부 통과**: 전 783커밋 blob 0건·커밋 메시지 0건·커밋 수 유지·작성자 이메일
 >   2종 유지(오너 수용)·워킹트리 clean·문서 가드 green.
