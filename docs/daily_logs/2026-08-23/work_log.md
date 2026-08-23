@@ -10,8 +10,11 @@
 >   **filter-repo 3패스**로 재치환. 교훈: **"지웠다"를 기록하는 문서가 재유출의
 >   자리가 된다 — 재작성 기록에는 치환 결과만 적는다.**
 > - **백업 번들 삭제**(오너: 불필요) — repo 밖 경로였고 tracked 아님(확인).
-> - 오너 남은 것: **`git remote add origin <URL>` 후 force push**(원격 private
->   이력 갱신) → public 전환. 내일: 포트폴리오 설명문·dogfood 병행 UI.
+> - **원격 force push 완료(같은 세션, 오너 지시로 대리)**: origin 재등록
+>   (`git@github.com:entangelk/ai_writte_system.git`) → `push -f origin main`
+>   — 원격 main = 재작성본. **원격 PR 3개 ref는 브랜치 삭제로 못 지우는 GitHub
+>   영구 ref라 전부 fetch·검사했고 IP·계정명 0건**(IP 등장 전의 PR이라 안전 —
+>   남겨둠). 원격 브랜치는 main 하나. 이제 GitHub에서 public 전환만 하면 된다.
 
 > **[세션 16] 공개 전 이력 재작성 — 공인 IP·오너 계정명 전 이력 제거 (git filter-repo).**
 > 오너 지시: *"ip 깃 이력 싹다 지워야지"* · *"계정은 있으면 안되지"* · 이메일·HANDOFF·

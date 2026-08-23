@@ -299,9 +299,9 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 >   extractor 안정화(v1.7.99)·docs 비공개(v1.7.98)·**dogfood 착수 선언**·**공개 전 보안
 >   정리 완료**(전 이력 재작성 — IP·계정명 0건·이메일은 오너 수용 유지·백업 번들 삭제).
 >   배포 서버도 재작성 이력로 재동기화 완료(양쪽 785커밋·누출 문자열 0건).
-> - **오너 남은 것 하나**: `git remote add origin <URL>` → **`git push -f origin main`**
->   (private 원격의 옛 이력 갱신) → GitHub에서 public 전환. **push 전엔 원격에 옛
->   이력(IP 포함)이 남아 있다.**
+> - **원격 갱신 완료(세션 17 말미, 오너 지시로 대리 force push)**: 원격 main =
+>   재작성본·원격 브랜치 main 하나·**PR 3개 ref도 fetch·검사해 IP·계정명 0건**
+>   (IP 등장 전 PR이라 안전). **오너 남은 것: GitHub 설정에서 public 전환만.**
 > - **다음 세션 순서**: ① 포트폴리오 설명문(오너: "설명문은 내일") ② dogfood 병행 UI
 >   (관리자 콘솔 quota 화면 — 8.5 백엔드 준비완료) ③ dogfood 관찰은
 >   [`docs/dogfood-checklist.md`](docs/dogfood-checklist.md).
