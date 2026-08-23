@@ -193,6 +193,14 @@ EXCLUDED_OPERATIONS: tuple[ExcludedOperation, ...] = (
                       "admin_audited", "관리자 축(계정 관리)"),
     ExcludedOperation("POST", "/admin/signup-requests/{user_id}/reject",
                       "admin_audited", "관리자 축(계정 관리)"),
+    # 8.5-b(2026-08-23): 회원 quota 정책 조작 — 이제 정말 admin_audit_events 에
+    # 남는다(D3=ⓑ). 활동 로그는 회원의 project 행위(I3)라 여기도 관리자 축.
+    ExcludedOperation("POST", "/admin/quota-policies/{user_id}/limits",
+                      "admin_audited", "관리자 축(회원 정책)"),
+    ExcludedOperation("POST", "/admin/quota-policies/{user_id}/suspend",
+                      "admin_audited", "관리자 축(회원 정책)"),
+    ExcludedOperation("POST", "/admin/quota-policies/{user_id}/activate",
+                      "admin_audited", "관리자 축(회원 정책)"),
     ExcludedOperation("POST", "/admin/projects/{project_id}/purge",
                       "admin_audited", "admin_audit_events(파기 tombstone)"),
     ExcludedOperation("POST", "/admin/projects/{project_id}/access-grants",
