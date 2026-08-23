@@ -132,6 +132,56 @@ class MyQuotaResponse(BaseModel):
     weekly: QuotaWindowPayload
 
 
+class AdminQuotaPendingPayload(BaseModel):
+    """8.5-a — 아직 발효하지 않은 예약 변경만 실은다(P6).
+
+    지나간 예약(``effective_at`` 이 지난 pending)은 어디에도 "대기 중"으로 보이면
+    안 된다 — 검증 H2. 이 모델에 실리기 직전에 발효 여부로 거른다.
+    """
+
+    daily_limit: int | None
+    weekly_limit: int | None
+    status: str
+    effective_at: datetime
+
+
+class AdminQuotaPolicyPayload(BaseModel):
+    """8.5-a — 관리자가 보는 회원 정책·사용량 요약 (operation 80).
+
+    ``remaining``/``daily``/``weekly`` 는 ``/me/quota`` 와 **같은 snapshot 정의**다 —
+    관리자 화면이 회원 화면과 다른 산식을 말하면 지원 대화가 성립하지 않는다.
+    """
+
+    user_id: str
+    username: str
+    is_active: bool
+    status: str
+    unlimited: bool
+    remaining: int | None
+    daily: QuotaWindowPayload
+    weekly: QuotaWindowPayload
+    has_pending: bool
+
+
+class AdminQuotaPolicyListResponse(BaseModel):
+    policies: list[AdminQuotaPolicyPayload]
+
+
+class AdminQuotaPolicyDetailResponse(AdminQuotaPolicyPayload):
+    """8.5-a — 상세 (operation 81).
+
+    ``stored_*`` 는 **진단용 원본 행**이고 유효 한도는 부모의 ``daily``/``weekly``
+    이다 — 둘을 갈라 놓는 것이 이 endpoint 의 존재 이유다(H2: ``policy.limits`` 를
+    그대로 내놓으면 만료된 예약이 "아직 대기 중"으로 보인다). 정책 행이 없는 회원은
+    ``stored_*`` 가 ``None`` 이고 유효 한도는 코드 기본 해석이다.
+    """
+
+    stored_daily_limit: int | None
+    stored_weekly_limit: int | None
+    pending: AdminQuotaPendingPayload | None
+    updated_at: datetime | None
+
+
 class AdminUserPayload(BaseModel):
     # Same no-password_hash reason as UserPayload, and one field more: the admin
     # list is the only surface where whether an account is disabled is the point.

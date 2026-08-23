@@ -308,6 +308,16 @@ class QuotaPolicyService:
     def limits_for(self, user_id: str) -> QuotaLimits:
         return effective_limits(self._repo.get(user_id), self._clock())
 
+    def policy_row(self, user_id: str) -> QuotaPolicy | None:
+        """저장된 정책 행 그대로(8.5-a 관리자 조회용).
+
+        **호출부는 이 값을 "유효 한도"로 쓰면 안 된다** — 해석(``effective_limits``)
+        을 거쳐야 하며, 여기가 진단용 원본(``stored_limits``·``pending``)이 필요한
+        관리자 상세를 위해만 존재한다. 시행은 계속 ``limits_for`` 를 쓴다.
+        """
+
+        return self._repo.get(user_id)
+
     def now(self) -> datetime:
         """이 서비스가 보는 현재 시각. 창 경계를 묻는 호출부(8.4 W5)가 쓴다.
 

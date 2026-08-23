@@ -283,6 +283,14 @@ class QuotaEnforcementService:
         # 스크립트)에서 세울 것이 없기 때문이고, 배포 조립은 항상 넘긴다.
         self._jobs = jobs
 
+    # 8.5-a: the admin read surface needs the stored policy row (stored limits,
+    # pending reservation) next to the effective snapshot. Exposing the service
+    # the enforcement itself uses — rather than assembling a second one — keeps
+    # one interpretation path (same instance, same clock) by construction.
+    @property
+    def policy(self):
+        return self._policy
+
     # ------------------------------------------------------------ 입장 (Q3-a)
 
     def admit(

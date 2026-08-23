@@ -1354,6 +1354,144 @@ class AdminProjectPurgeTest(unittest.TestCase):
         )
 
 
+class AdminQuotaPolicyApiTest(unittest.TestCase):
+    """Phase 8.5-a (owner 2026-08-23): the quota operations read surface.
+
+    경계(401/403/tier)는 ``CombinedBoundaryMatrixTest`` 가 본다 — 이 클래스는
+    통과한 관리자가 **무엇을 보는가**를 잠근다. 특히 H2(2026-08-03 검증): 저장된
+    ``policy.limits`` 를 유효 한도인 양 내놓으면 만료된 예약이 "아직 대기 중"으로
+    보인다 — 상세의 두 값이 갈라져 있는 것이 이 표면의 존재 이유다.
+    """
+
+    def setUp(self) -> None:
+        self.client, self.users, _ = _client()
+        self.root = self.users.create_user(
+            username="root", password="pw789", is_admin=True
+        )
+        self.client.post(
+            "/auth/login", json={"username": "root", "password": "pw789"}
+        )
+        self.quota = self.client.app.state.quota
+
+    def _member(self, username):
+        return next(
+            u for u in self.users.list_users() if u.username == username)
+
+    def test_list_includes_members_without_a_policy_row(self) -> None:
+        # under-strict: 정책 행 없는 회원이 조용히 빠지면 "무제한인 줄 알았는데
+        # 기본 20" 사고가 목록에서 보이지 않는다 — 포함이 이 endpoint 의 요점.
+        listed = self.client.get("/admin/quota-policies")
+
+        self.assertEqual(listed.status_code, 200)
+        entries = {p["username"]: p for p in listed.json()["policies"]}
+        self.assertIn("alice", entries)  # 정책 행 없음 — 기본 해석으로 포함
+        self.assertIn("root", entries)   # 부트스트랩 정책 행 있음
+        self.assertFalse(entries["alice"]["has_pending"])
+        self.assertEqual(
+            set(entries["alice"]),
+            {"user_id", "username", "is_active", "status", "unlimited",
+             "remaining", "daily", "weekly", "has_pending"},
+        )
+        # 비활성 회원은 운영 목록에서 제외 — 로그인할 수 없는 계정의 한도는
+        # 운영 대상이 아니다(상세는 user_id 로 직접 보는 길이 남는다).
+        self.users.create_user(username="ghost", password="pw000")
+        ghost = self._member("ghost")
+        self.users.deactivate_user(ghost.id)
+        listed = self.client.get("/admin/quota-policies")
+        names = {p["username"] for p in listed.json()["policies"]}
+        self.assertNotIn("ghost", names)
+
+    def test_detail_splits_effective_from_stored_and_hides_expired_pending(self) -> None:
+        # ★ H2 — 만료된 예약(effective_at 이 지난 pending)은 어디에도 "대기 중"으로
+        # 나와선 안 된다. 행에 그 잔재를 심어도 상세의 pending 은 None 이고 유효
+        # 한도는 이미 예약을 반영한다.
+        from datetime import UTC, datetime, timedelta
+
+        from services.application.app.quota.policy import (
+            PendingLimits, QuotaLimits, QuotaPolicy, QuotaStatus,
+        )
+        now = datetime.now(UTC)
+        self.quota.policy._repo.upsert(QuotaPolicy(
+            user_id=self._member("alice").id,
+            limits=QuotaLimits(10, 10, QuotaStatus.ACTIVE),
+            pending=PendingLimits(
+                limits=QuotaLimits(3, 3, QuotaStatus.ACTIVE),
+                effective_at=now - timedelta(days=1),
+            ),
+            updated_at=now,
+        ))
+        alice = self._member("alice")
+        detail = self.client.get(f"/admin/quota-policies/{alice.id}")
+
+        self.assertEqual(detail.status_code, 200)
+        body = detail.json()
+        self.assertIsNone(body["pending"])          # 만료 예약은 "대기 중"이 아니다
+        self.assertFalse(body["has_pending"])
+        self.assertEqual(body["stored_daily_limit"], 10)   # 진단용 원본
+        self.assertEqual(body["daily"]["limit"], 3)        # 유효 한도 = 해석값
+        self.assertIsNotNone(body["updated_at"])
+
+    def test_future_reservation_is_pending_and_relief_is_immediate(self) -> None:
+        # P6(D2=ⓐ): 완화는 즉시, 축소는 창 경계 예약 — set_limits 가 그렇게 굽는다.
+        from services.application.app.quota.policy import (
+            QuotaLimits, QuotaStatus,
+        )
+
+        alice = self._member("alice")
+        self.quota.policy.set_limits(
+            user_id=alice.id, created_at=alice.created_at,
+            target=QuotaLimits(50, 200, QuotaStatus.ACTIVE),
+        )
+        detail = self.client.get(f"/admin/quota-policies/{alice.id}")
+        body = detail.json()
+        # 완화(20→50)는 즉시라 예약이 남지 않는다 — P6 의 절반.
+        self.assertFalse(body["has_pending"])
+        self.assertEqual(body["daily"]["limit"], 50)
+
+        # 축소(50→1)는 다음 주 경계 예약 — 목록의 has_pending 으로 보인다.
+        self.quota.policy.set_limits(
+            user_id=alice.id, created_at=alice.created_at,
+            target=QuotaLimits(1, 1, QuotaStatus.ACTIVE),
+        )
+        detail = self.client.get(f"/admin/quota-policies/{alice.id}")
+        body = detail.json()
+        self.assertTrue(body["has_pending"])
+        self.assertIsNotNone(body["pending"])
+        self.assertEqual(body["pending"]["daily_limit"], 1)
+        # 유효 한도는 아직 50 — 예약은 창 경계까지 기다린다.
+        self.assertEqual(body["daily"]["limit"], 50)
+        listed = self.client.get("/admin/quota-policies")
+        entry = next(p for p in listed.json()["policies"]
+                     if p["username"] == "alice")
+        self.assertTrue(entry["has_pending"])
+
+    def test_detail_matches_the_member_s_own_quota_numbers(self) -> None:
+        # 관리자 화면과 회원 화면이 다른 산식을 말하면 지원 대화가 성립하지
+        # 않는다 — 같은 snapshot 정의를 쓰는지를 두 표면에서 직접 비교한다.
+        alice = self._member("alice")
+        self.client.post("/auth/login",
+                         json={"username": "alice", "password": "pw123"})
+        mine = self.client.get("/me/quota").json()
+        self.client.post("/auth/login",
+                         json={"username": "root", "password": "pw789"})
+        detail = self.client.get(f"/admin/quota-policies/{alice.id}").json()
+
+        self.assertEqual(detail["daily"]["used"], mine["daily"]["used"])
+        self.assertEqual(detail["daily"]["limit"], mine["daily"]["limit"])
+        self.assertEqual(detail["status"], mine["status"])
+
+    def test_unknown_user_is_404_and_non_admin_is_403(self) -> None:
+        self.assertEqual(
+            self.client.get("/admin/quota-policies/user:nope").status_code, 404)
+        self.client.post("/auth/login",
+                         json={"username": "alice", "password": "pw123"})
+        self.assertEqual(
+            self.client.get("/admin/quota-policies").status_code, 403)
+        self.assertEqual(
+            self.client.get(
+                f"/admin/quota-policies/{self.root.id}").status_code, 403)
+
+
 class CombinedBoundaryMatrixTest(unittest.TestCase):
     """D8-3c: the 401 and 403 guards audited as a single matrix.
 
@@ -1411,6 +1549,11 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         ("/admin/users", "get"),
         ("/admin/users", "post"),
         ("/admin/users/{user_id}/deactivate", "post"),
+        # Phase 8.5-a (owner 2026-08-23, plans/08-5-usage-admin-cms-decisions.md):
+        # the quota operations read surface. Reads only — changes/suspend and
+        # their audit are 8.5-b. Not project-scoped: the subject is users.id.
+        ("/admin/quota-policies", "get"),
+        ("/admin/quota-policies/{user_id}", "get"),
         # Signup approval (owner 2026-08-22): requests are public, the check is
         # admin. These three are account operations like users above — not
         # admin-audited, not project-scoped.
@@ -1495,8 +1638,10 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # 됐다(project tier 는 무변 62 — 통합 조회는 project 를 지목하지 않는다).
         # 가입 승인 슬라이스(2026-08-22)가 `POST /auth/signup` 을 공개 tier 에
         # 더해 79 가 됐다 — 요청은 누구나, 승인은 관리자.
+        # Phase 8.5-a(2026-08-23)가 quota 운영 조회 2종을 admin tier 에 더해
+        # 84 가 됐다(ADMIN 11→13).
         self.assertEqual(len(by_tier["project"]), 62)
-        self.assertEqual(len(tiers), 82)
+        self.assertEqual(len(tiers), 84)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:

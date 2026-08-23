@@ -28,12 +28,17 @@ from ..api.models import (
     AdminAuditEventListResponse,
     AdminObservabilityKpiResponse,
     AdminProjectListResponse,
+    AdminQuotaPendingPayload,
+    AdminQuotaPolicyDetailResponse,
+    AdminQuotaPolicyListResponse,
+    AdminQuotaPolicyPayload,
     AdminSignupListResponse,
     AdminSignupPayload,
     AdminUserListResponse,
     AdminUserPayload,
     CreateUserRequest,
     PurgeProjectRequest,
+    QuotaWindowPayload,
 )
 from ..api.errors import (
     _ERRORS_ADMIN,
@@ -56,6 +61,7 @@ def register_admin(
     *,
     users,
     core_sot,
+    quota=None,
     access_grants,
     admin_audit,
     llm_call_audit,
@@ -86,6 +92,98 @@ def register_admin(
              responses=_ERRORS_ADMIN, dependencies=_REQUIRE_ADMIN)
     async def list_users() -> dict[str, object]:
         return {"users": [_admin_user_payload(u) for u in users.list_users()]}
+
+    # --- Admin quota operations read surface (Phase 8.5-a, D1~D3 of
+    # plans/08-5-usage-admin-cms-decisions.md; owner 2026-08-23). Reads only —
+    # the change/suspend endpoints and their audit are 8.5-b. Reads are not
+    # admin-audited (D3=ⓑ audits changes only; list polling must not flood the
+    # audit store).
+    def _quota_unavailable() -> HTTPException:
+        # Same face as /me/quota: an unassembled enforcement must not read as
+        # "unlimited" (Q4=A kin — measurement failure is not free service).
+        return HTTPException(
+            status_code=503, detail="request quota enforcement is not configured"
+        )
+
+    def _pending_payload(policy_row) -> AdminQuotaPendingPayload | None:
+        # H2: an expired reservation must never render as "pending" — filter by
+        # effective_at against the policy service's own clock.
+        if policy_row is None or policy_row.pending is None:
+            return None
+        if policy_row.pending.effective_at <= quota.policy.now():
+            return None
+        return AdminQuotaPendingPayload(
+            daily_limit=policy_row.pending.limits.daily_limit,
+            weekly_limit=policy_row.pending.limits.weekly_limit,
+            status=policy_row.pending.limits.status.value,
+            effective_at=policy_row.pending.effective_at,
+        )
+
+    def _quota_policy_payload(user, snapshot) -> AdminQuotaPolicyPayload:
+        policy_row = quota.policy.policy_row(user.id)
+        return AdminQuotaPolicyPayload(
+            user_id=user.id,
+            username=user.username,
+            is_active=user.is_active,
+            status=snapshot.status.value,
+            unlimited=snapshot.daily_limit is None and snapshot.weekly_limit is None,
+            remaining=snapshot.daily_remaining
+            if snapshot.daily_remaining is not None
+            and (snapshot.weekly_remaining is None
+                 or snapshot.daily_remaining <= snapshot.weekly_remaining)
+            else snapshot.weekly_remaining,
+            daily=QuotaWindowPayload(
+                limit=snapshot.daily_limit, used=snapshot.daily_used,
+                remaining=snapshot.daily_remaining,
+                resets_at=snapshot.daily_resets_at),
+            weekly=QuotaWindowPayload(
+                limit=snapshot.weekly_limit, used=snapshot.weekly_used,
+                remaining=snapshot.weekly_remaining,
+                resets_at=snapshot.weekly_resets_at),
+            has_pending=_pending_payload(policy_row) is not None,
+        )
+
+    @app.get("/admin/quota-policies", response_model=AdminQuotaPolicyListResponse,
+             responses=_ERRORS_ADMIN, dependencies=_REQUIRE_ADMIN)
+    async def list_quota_policies() -> dict[str, object]:
+        # 정책 행이 없는 활성 회원도 포함한다(D1 브리프) — 목록에서 조용히 빠지면
+        # "무제한인 줄 알았는데 기본 20" 사고가 보이지 않는다. 비활성 회원은
+        # 로그인할 수 없으므로 운영 목록에서 제외한다(상세는 볼 수 있다).
+        if quota is None:
+            raise _quota_unavailable()
+        return {"policies": [
+            _quota_policy_payload(
+                user,
+                quota.snapshot(user_id=user.id, member_created_at=user.created_at),
+            )
+            for user in users.list_users() if user.is_active
+        ]}
+
+    @app.get("/admin/quota-policies/{user_id}",
+             response_model=AdminQuotaPolicyDetailResponse,
+             responses=_ERRORS_ADMIN_404, dependencies=_REQUIRE_ADMIN)
+    async def read_quota_policy(user_id: str) -> dict[str, object]:
+        # H2 핵심: 이 endpoint 는 stored_limits/pending 을 진단용으로 **갈라**
+        # 보여준다. 유효 한도는 부모 필드(effective snapshot)가 유일하다.
+        if quota is None:
+            raise _quota_unavailable()
+        user = users.get_by_id(user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="no such user")
+        snapshot = quota.snapshot(
+            user_id=user.id, member_created_at=user.created_at)
+        base = _quota_policy_payload(user, snapshot)
+        policy_row = quota.policy.policy_row(user.id)
+        pending = _pending_payload(policy_row)
+        return AdminQuotaPolicyDetailResponse(
+            **base.model_dump(),
+            stored_daily_limit=None if policy_row is None
+            else policy_row.limits.daily_limit,
+            stored_weekly_limit=None if policy_row is None
+            else policy_row.limits.weekly_limit,
+            pending=pending,
+            updated_at=None if policy_row is None else policy_row.updated_at,
+        ).model_dump()
 
     @app.post("/admin/users", response_model=AdminUserPayload,
               responses=_ERRORS_ADMIN_400_409, dependencies=_REQUIRE_ADMIN)

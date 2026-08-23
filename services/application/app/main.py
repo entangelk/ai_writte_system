@@ -1924,7 +1924,8 @@ def create_app(
     if include_admin:
         register_admin(
             app,
-            users=users, core_sot=core_sot, access_grants=access_grants,
+            users=users, core_sot=core_sot,
+            quota=app.state.quota, access_grants=access_grants,
             admin_audit=admin_audit, llm_call_audit=llm_call_audit,
             writing_loop_audit=writing_loop_audit, memory=memory,
             analysis=analysis, review_queue=review_queue,
