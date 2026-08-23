@@ -305,7 +305,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        template = prompt_templates.seed_analysis_extract_v4()
+        template = prompt_templates.seed_analysis_extract_v5()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -371,6 +371,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
         prompt_templates.seed_analysis_extract_v4()
+        prompt_templates.seed_analysis_extract_v5()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -455,6 +456,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
         prompt_templates.seed_analysis_extract_v4()
+        prompt_templates.seed_analysis_extract_v5()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -561,6 +563,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
         prompt_templates.seed_analysis_extract_v4()
+        prompt_templates.seed_analysis_extract_v5()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -614,6 +617,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
         prompt_templates.seed_analysis_extract_v4()
+        prompt_templates.seed_analysis_extract_v5()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -650,6 +654,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
         provider = FakeLLMProvider([])
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
         prompt_templates.seed_analysis_extract_v4()
+        prompt_templates.seed_analysis_extract_v5()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -855,6 +860,25 @@ class _Catalog:
             for source_ref in self._source_refs
             if source_ref.project_id == project_id
             and source_ref.snapshot_id == snapshot_id
+        )
+
+
+class AssemblyDefaultTest(unittest.TestCase):
+    def test_extractor_assembly_default_max_tokens_has_fence_headroom(self):
+        """조립 기본은 8192 — 2048은 펜스째 끊김으로 후보 0을 만들었다(2026-08-23).
+
+        under-strict: 기본을 2048로 되돌리면 이 셀이 문다(세션 5/6 실측 경로).
+        over-strict는 이 셀이 못 본다 — 값을 더 크게 바꾸는 것은 이 슬라이스의
+        취지(끊김 여유)와 충돌하지 않는다. 소스 스캔인 이유는 env 기본값이
+        조립 지점에만 존재해 인스턴스 검사보다 정확해서다(activity 가드 패턴).
+        """
+        import inspect
+
+        from services.application.app import main
+
+        source = inspect.getsource(main)
+        self.assertIn(
+            'os.environ.get("ANALYSIS_EXTRACT_MAX_TOKENS", "8192")', source
         )
 
 

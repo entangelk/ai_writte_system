@@ -8,11 +8,13 @@ from services.application.app.analysis.prompt_templates import (
     ANALYSIS_EXTRACT_PROMPT_VERSION_V1,
     ANALYSIS_EXTRACT_PROMPT_VERSION_V2,
     ANALYSIS_EXTRACT_PROMPT_VERSION_V3,
+    ANALYSIS_EXTRACT_PROMPT_VERSION_V4,
     ANALYSIS_EXTRACT_TASK_TYPE,
     ANALYSIS_EXTRACT_TEMPLATE,
     ANALYSIS_EXTRACT_TEMPLATE_V1,
     ANALYSIS_EXTRACT_TEMPLATE_V2,
     ANALYSIS_EXTRACT_TEMPLATE_V3,
+    ANALYSIS_EXTRACT_TEMPLATE_V4,
     InMemoryPromptTemplateRepository,
     PromptTemplateConflict,
     PromptTemplateError,
@@ -40,8 +42,12 @@ _IMMUTABLE_TEMPLATE_DIGESTS = {
     # 옛 버전은 이제 아무도 고칠 이유가 없지만 현행 본문은 고칠 이유가 늘 있고, 고치는
     # 순간 **기존 Mongo를 가진 배포가 전부 부팅에 실패**한다 — 핀이 없으면 그 사실을
     # 배포에서야 알게 된다(2026-07-22·07-27에 실제로 그렇게 잃었다).
-    ANALYSIS_EXTRACT_PROMPT_VERSION: (
+    ANALYSIS_EXTRACT_PROMPT_VERSION_V4: (
         "b946a70514de99c2fbe84fbef1f1e41cd6086e496fb0a2642cffa6045e3fd6bd"
+    ),
+    # v5 (2026-08-23): 펜스 금지 명시 추가 — 현행 버전이라 더더욱 핀이 필요하다.
+    ANALYSIS_EXTRACT_PROMPT_VERSION: (
+        "bc2a0b126fe3342a31da2fcc566cd29eb5557ea83add13838dbc290400834751"
     ),
 }
 
@@ -59,16 +65,19 @@ class PromptTemplateServiceTest(unittest.TestCase):
         self.assertEqual(fetched, seeded)
         self.assertEqual(fetched.template, ANALYSIS_EXTRACT_TEMPLATE_V1)
 
-    def test_seed_analysis_extract_v4_is_current_and_keeps_v1_v2_v3(self):
+    def test_seed_analysis_extract_v5_is_current_and_keeps_v1_through_v4(self):
         service = PromptTemplateService(InMemoryPromptTemplateRepository())
 
         legacy = service.seed_analysis_extract_v1()
         v2 = service.seed_analysis_extract_v2()
         v3 = service.seed_analysis_extract_v3()
-        current = service.seed_analysis_extract_v4()
+        v4 = service.seed_analysis_extract_v4()
+        current = service.seed_analysis_extract_v5()
 
         self.assertEqual(current.version, ANALYSIS_EXTRACT_PROMPT_VERSION)
         self.assertEqual(current.template, ANALYSIS_EXTRACT_TEMPLATE)
+        self.assertEqual(v4.version, ANALYSIS_EXTRACT_PROMPT_VERSION_V4)
+        self.assertEqual(v4.template, ANALYSIS_EXTRACT_TEMPLATE_V4)
         self.assertEqual(legacy.version, ANALYSIS_EXTRACT_PROMPT_VERSION_V1)
         self.assertEqual(v2.version, ANALYSIS_EXTRACT_PROMPT_VERSION_V2)
         self.assertEqual(v2.template, ANALYSIS_EXTRACT_TEMPLATE_V2)
@@ -100,6 +109,7 @@ class PromptTemplateServiceTest(unittest.TestCase):
             ANALYSIS_EXTRACT_PROMPT_VERSION_V1: ANALYSIS_EXTRACT_TEMPLATE_V1,
             ANALYSIS_EXTRACT_PROMPT_VERSION_V2: ANALYSIS_EXTRACT_TEMPLATE_V2,
             ANALYSIS_EXTRACT_PROMPT_VERSION_V3: ANALYSIS_EXTRACT_TEMPLATE_V3,
+            ANALYSIS_EXTRACT_PROMPT_VERSION_V4: ANALYSIS_EXTRACT_TEMPLATE_V4,
             ANALYSIS_EXTRACT_PROMPT_VERSION: ANALYSIS_EXTRACT_TEMPLATE,
         }
         # 핀 목록이 **출시된 버전 전부**를 덮는지 함께 본다. v4가 빠져 있던 것을
@@ -126,7 +136,7 @@ class PromptTemplateServiceTest(unittest.TestCase):
         restarted.seed_analysis_extract_v1()
         restarted.seed_analysis_extract_v2()
         restarted.seed_analysis_extract_v3()
-        current = restarted.seed_analysis_extract_v4()
+        current = restarted.seed_analysis_extract_v5()
 
         self.assertEqual(current.version, ANALYSIS_EXTRACT_PROMPT_VERSION)
         self.assertEqual(
@@ -152,7 +162,7 @@ class PromptTemplateServiceTest(unittest.TestCase):
         with self.assertRaises(PromptTemplateConflict):
             service.seed_template(
                 task_type=ANALYSIS_EXTRACT_TASK_TYPE,
-                version=ANALYSIS_EXTRACT_PROMPT_VERSION,
+                version=ANALYSIS_EXTRACT_PROMPT_VERSION_V4,
                 template="different template",
             )
 

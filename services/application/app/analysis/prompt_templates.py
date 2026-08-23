@@ -36,10 +36,32 @@ Each source_anchors item must copy source_ref_id, start_offset, end_offset, quot
 payload is {"name":"...","observation":"..."} for character, {"event":"..."} for event, or {"question":"..."} for open question.
 Do not invent facts outside the supplied snapshot text.
 """
-ANALYSIS_EXTRACT_PROMPT_VERSION = "analysis_extract_v4"
-ANALYSIS_EXTRACT_TEMPLATE = """You extract Phase 2A analysis candidates.
+ANALYSIS_EXTRACT_PROMPT_VERSION_V4 = "analysis_extract_v4"
+ANALYSIS_EXTRACT_TEMPLATE_V4 = """You extract Phase 2A analysis candidates.
 
 Return one JSON object with a top-level candidates list.
+Treat writing_candidate_report source_blocks and related pointers as advisory provenance only.
+Never copy document_id, block_id, or any identifier from writing_candidate_report into source_anchors.
+Use source_ref_id values only from the current source_ref_catalog, preserving each catalog anchor exactly.
+Each candidate must contain exactly candidate_type, provenance, confidence, source_anchors, and payload.
+candidate_type is character_observation, event_observation, or open_question_observation.
+provenance is source_observed or ai_inferred. confidence is a number from 0.0 to 1.0.
+Each source_anchors item must copy source_ref_id, start_offset, end_offset, quote, and content_hash exactly from one current catalog item.
+payload is {"name":"...","observation":"..."} for character, {"event":"..."} for event, or {"question":"..."} for open question.
+For character, you MAY add an optional "aspect" classifying the observation (e.g. "voice" for how the character speaks, "trait" for a personality trait); omit it for a plain observation.
+Do not invent facts outside the supplied snapshot text.
+"""
+# v5 (2026-08-23): gemma-4-31b-it wraps its JSON in a ```json fence by habit —
+# v4 asked for "one JSON object" and the model still fenced. When the output is
+# long the closing fence is lost to the token ceiling and parsing fails (see
+# the open-fence guard in writing/json_extract.py and the extractor slice in
+# work_log 2026-08-23 session 6). Naming the fence explicitly is the cheap half
+# of the fix; the parser guard is the reliable half.
+ANALYSIS_EXTRACT_PROMPT_VERSION = "analysis_extract_v5"
+ANALYSIS_EXTRACT_TEMPLATE = """You extract Phase 2A analysis candidates.
+
+Return one JSON object with a top-level candidates list as raw JSON text only.
+Do not wrap the JSON in markdown code fences: no ```json, no ```, no prose before or after.
 Treat writing_candidate_report source_blocks and related pointers as advisory provenance only.
 Never copy document_id, block_id, or any identifier from writing_candidate_report into source_anchors.
 Use source_ref_id values only from the current source_ref_catalog, preserving each catalog anchor exactly.
@@ -158,6 +180,13 @@ class PromptTemplateService:
         )
 
     def seed_analysis_extract_v4(self) -> PromptTemplate:
+        return self.seed_template(
+            task_type=ANALYSIS_EXTRACT_TASK_TYPE,
+            version=ANALYSIS_EXTRACT_PROMPT_VERSION_V4,
+            template=ANALYSIS_EXTRACT_TEMPLATE_V4,
+        )
+
+    def seed_analysis_extract_v5(self) -> PromptTemplate:
         return self.seed_template(
             task_type=ANALYSIS_EXTRACT_TASK_TYPE,
             version=ANALYSIS_EXTRACT_PROMPT_VERSION,

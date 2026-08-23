@@ -9,7 +9,6 @@ from services.application.app.analysis.prompt_builder import (
     build_analysis_extract_request,
 )
 from services.application.app.analysis.prompt_templates import (
-    ANALYSIS_EXTRACT_PROMPT_VERSION,
     ANALYSIS_EXTRACT_TASK_TYPE,
     PromptTemplateService,
     InMemoryPromptTemplateRepository,
@@ -55,7 +54,7 @@ class AnalysisPromptBuilderTest(unittest.TestCase):
         self.assertEqual(request.messages[0].content, template.template)
         payload = json.loads(request.messages[1].content)
         self.assertEqual(payload["task_type"], ANALYSIS_EXTRACT_TASK_TYPE)
-        self.assertEqual(payload["prompt_version"], ANALYSIS_EXTRACT_PROMPT_VERSION)
+        self.assertEqual(payload["prompt_version"], template.version)
         self.assertEqual(payload["snapshot"]["raw_text"], snapshot.raw_text)
         self.assertEqual(
             payload["source_ref_catalog"],

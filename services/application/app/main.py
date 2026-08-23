@@ -663,6 +663,7 @@ def _default_prompt_template_service() -> PromptTemplateService:
         service.seed_analysis_extract_v2()
         service.seed_analysis_extract_v3()
         service.seed_analysis_extract_v4()
+        service.seed_analysis_extract_v5()
         return service
 
     from services.application.app.analysis.prompt_template_mongo_repository import (
@@ -679,6 +680,7 @@ def _default_prompt_template_service() -> PromptTemplateService:
     service.seed_analysis_extract_v2()
     service.seed_analysis_extract_v3()
     service.seed_analysis_extract_v4()
+    service.seed_analysis_extract_v5()
     return service
 
 
@@ -757,7 +759,12 @@ def _default_analysis_runner(
             prompt_templates=prompt_templates,
             source_ref_catalog=core_sot,
             model=os.environ.get("LLM_GATEWAY_MODEL") or None,
-            max_tokens=int(os.environ.get("ANALYSIS_EXTRACT_MAX_TOKENS", "2048")),
+            # Owner 2026-08-23 (extractor slice): 2048 could truncate mid-fence —
+            # gemma-4-31b-it wraps JSON in a ```json fence and a long candidate
+            # list lost the closing fence to the ceiling, which parsing then
+            # rejected (work_log 2026-08-23 session 5/6). Headroom first; the
+            # open-fence guard in writing/json_extract.py is the second half.
+            max_tokens=int(os.environ.get("ANALYSIS_EXTRACT_MAX_TOKENS", "8192")),
         ),
     )
 
