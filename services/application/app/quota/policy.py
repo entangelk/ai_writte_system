@@ -355,6 +355,33 @@ class QuotaPolicyService:
         self._repo.upsert(policy)
         return policy
 
+    def set_status(
+        self, *, user_id: str, status: QuotaStatus
+    ) -> QuotaPolicy:
+        """quota 상태만 **즉시** 바꾼다(8.5-b 정지·해제 — 브리프 D1ⓒ·D2).
+
+        ``set_limits`` 를 쓰면 안 된다: P6 는 상태 전이도 유예해
+        ACTIVE→SUSPENDED 가 다음 주 창 경계까지 걸리는데, 정지의 계약은
+        "긴급 차단은 즉시"다. 한도(``limits``)와 보류 예약(``pending``)은
+        그대로 둔다 — 정지는 한도 축이 아니며, 창 경계의 한도 예약은 정지
+        아래에서도 자기 계약대로 발효한다. 행이 없는 회원은 기본 한도 행을
+        만들어 상태를 심는다(부트스트랩 관례와 같은 구조).
+        """
+        now = self._clock()
+        row = self._repo.get(user_id)
+        if row is None:
+            row = QuotaPolicy(
+                user_id=user_id, limits=default_limits(),
+                pending=None, updated_at=now,
+            )
+        settled = replace(
+            row,
+            limits=replace(row.limits, status=status),
+            updated_at=now,
+        )
+        self._repo.upsert(settled)
+        return settled
+
     def clear_pending(self, user_id: str) -> QuotaPolicy | None:
         """발효한 예약을 문서에 굳힌다(선택적 정리 — 해석은 이미 예약을 반영한다)."""
 

@@ -252,6 +252,10 @@ _ERRORS_ADMIN_404_409: dict[int | str, dict] = _admin(_protected({
 _ERRORS_ADMIN_404: dict[int | str, dict] = _admin(_protected({
     404: _ERROR, 503: _STORAGE_503,
 }))
+# Phase 8.5-b: quota 정책 변경·정지 — 값 검증(음수·둘 다 미지정) 400 + 대상 회원 404.
+_ERRORS_ADMIN_400_404: dict[int | str, dict] = _admin(_protected({
+    400: _ERROR, 404: _ERROR, 503: _STORAGE_503,
+}))
 
 
 _ERRORS_404_MIGRATION: dict[int | str, dict] = _protected(

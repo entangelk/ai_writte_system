@@ -2297,6 +2297,13 @@ class AdminErrorContractDeclarationTest(unittest.TestCase):
         ("/admin/quota-policies", "get"): {"401", "403", "503"},
         ("/admin/quota-policies/{user_id}", "get"):
             {"401", "403", "404", "503"},
+        # 8.5-b: value/reason validation is 400; the member must exist.
+        ("/admin/quota-policies/{user_id}/limits", "post"):
+            {"400", "401", "403", "404", "503"},
+        ("/admin/quota-policies/{user_id}/suspend", "post"):
+            {"400", "401", "403", "404", "503"},
+        ("/admin/quota-policies/{user_id}/activate", "post"):
+            {"400", "401", "403", "404", "503"},
         # 승인제 가입(2026-08-22). 목록은 404 없음(조회 대상이 없다), 승인·거절은
         # 404(요청 없음)·409(이미 처리됨) — pending 행에만 동작한다는 계약.
         ("/admin/signup-requests", "get"): {"401", "403", "503"},
@@ -2334,7 +2341,7 @@ class AdminErrorContractDeclarationTest(unittest.TestCase):
         }
 
     def test_declared_error_statuses_match_the_lock_list(self):
-        self.assertEqual(len(self.EXPECTED), 13)  # 8.5-a: quota 조회 2종
+        self.assertEqual(len(self.EXPECTED), 16)  # 8.5-a/b: quota 운영 5종
         for (path, method), expected in self.EXPECTED.items():
             with self.subTest(path=path, method=method):
                 self.assertEqual(self._declared(path, method), expected)

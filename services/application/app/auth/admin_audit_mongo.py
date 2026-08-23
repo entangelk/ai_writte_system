@@ -41,6 +41,14 @@ class MongoAdminAuditRepository:
             .limit(limit)
         )
 
+    def list_member_quota_events(self, *, limit: int) -> tuple[AdminAuditEvent, ...]:
+        return tuple(
+            _entry(doc)
+            for doc in self._events.find({"action": "member_quota_policy"})
+            .sort("at", DESCENDING)
+            .limit(limit)
+        )
+
 
 def _doc(event: AdminAuditEvent) -> dict:
     return {
@@ -53,6 +61,8 @@ def _doc(event: AdminAuditEvent) -> dict:
         "reason": event.reason,
         "outcome": event.outcome,
         "at": event.at,
+        "target_user_id": event.target_user_id,
+        "detail": event.detail,
         "error_kind": event.error_kind,
     }
 
@@ -68,5 +78,7 @@ def _entry(doc: dict) -> AdminAuditEvent:
         reason=doc["reason"],
         outcome=doc["outcome"],
         at=_aware(doc["at"]),
+        target_user_id=doc.get("target_user_id"),
+        detail=doc.get("detail"),
         error_kind=doc.get("error_kind"),
     )

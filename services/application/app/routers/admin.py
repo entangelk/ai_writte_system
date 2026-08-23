@@ -28,11 +28,13 @@ from ..api.models import (
     AdminAuditEventListResponse,
     AdminObservabilityKpiResponse,
     AdminProjectListResponse,
+    AdminQuotaLimitsChangeRequest,
     AdminQuotaPendingPayload,
     AdminQuotaPolicyDetailResponse,
     AdminQuotaPolicyListResponse,
     AdminQuotaPolicyPayload,
     AdminSignupListResponse,
+    AdminQuotaSuspendRequest,
     AdminSignupPayload,
     AdminUserListResponse,
     AdminUserPayload,
@@ -42,6 +44,7 @@ from ..api.models import (
 )
 from ..api.errors import (
     _ERRORS_ADMIN,
+    _ERRORS_ADMIN_400_404,
     _ERRORS_ADMIN_400_409,
     _ERRORS_ADMIN_404,
     _ERRORS_ADMIN_404_409,
@@ -54,6 +57,7 @@ from ..api.dependencies import (
 from services.application.app.auth.admin_audit import AdminAuditEvent
 from services.application.app.core_sot.service import NotFound
 from services.application.app.observability.kpi import aggregate_global_kpi
+from services.application.app.quota.policy import QuotaLimits, QuotaStatus
 
 
 def register_admin(
@@ -159,6 +163,23 @@ def register_admin(
             for user in users.list_users() if user.is_active
         ]}
 
+    def _quota_detail(user) -> dict[str, object]:
+        """조회 상세·변경·정지 응답이 같은 모양을 쓴다 — 변경 응답이 발효
+        결과(유효 한도·pending)를 즉시 확인시키는 것이 8.5 브리프 §5 다."""
+        snapshot = quota.snapshot(
+            user_id=user.id, member_created_at=user.created_at)
+        base = _quota_policy_payload(user, snapshot)
+        policy_row = quota.policy.policy_row(user.id)
+        return AdminQuotaPolicyDetailResponse(
+            **base.model_dump(),
+            stored_daily_limit=None if policy_row is None
+            else policy_row.limits.daily_limit,
+            stored_weekly_limit=None if policy_row is None
+            else policy_row.limits.weekly_limit,
+            pending=_pending_payload(policy_row),
+            updated_at=None if policy_row is None else policy_row.updated_at,
+        ).model_dump()
+
     @app.get("/admin/quota-policies/{user_id}",
              response_model=AdminQuotaPolicyDetailResponse,
              responses=_ERRORS_ADMIN_404, dependencies=_REQUIRE_ADMIN)
@@ -170,20 +191,109 @@ def register_admin(
         user = users.get_by_id(user_id)
         if user is None:
             raise HTTPException(status_code=404, detail="no such user")
-        snapshot = quota.snapshot(
-            user_id=user.id, member_created_at=user.created_at)
-        base = _quota_policy_payload(user, snapshot)
-        policy_row = quota.policy.policy_row(user.id)
-        pending = _pending_payload(policy_row)
-        return AdminQuotaPolicyDetailResponse(
-            **base.model_dump(),
-            stored_daily_limit=None if policy_row is None
-            else policy_row.limits.daily_limit,
-            stored_weekly_limit=None if policy_row is None
-            else policy_row.limits.weekly_limit,
-            pending=pending,
-            updated_at=None if policy_row is None else policy_row.updated_at,
-        ).model_dump()
+        return _quota_detail(user)
+
+    # --- Phase 8.5-b: 한도 변경·정지/해제 + 감사 (D2=ⓐ·D3=ⓑ, 오너 2026-08-23).
+    # 감사는 변경 뒤에 남고 호출부가 예외를 삼키지 않는다(fail-closed) —
+    # 감사 쓰기 실패가 요청을 죽여야 "기록했지만 사실은 못 했다"가 없다.
+    def _audit_quota_change(
+        current, *, target_user, change: str, reason: str,
+    ) -> None:
+        if admin_audit is not None:
+            admin_audit.record_member_quota_change(
+                admin_user_id=current.id,
+                target_user_id=target_user.id,
+                change=change,
+                reason=reason,
+            )
+
+    @app.post("/admin/quota-policies/{user_id}/limits",
+              response_model=AdminQuotaPolicyDetailResponse,
+              responses=_ERRORS_ADMIN_400_404,
+              dependencies=_REQUIRE_ADMIN)
+    async def change_quota_limits(
+        user_id: str,
+        body: AdminQuotaLimitsChangeRequest,
+        current=Depends(require_admin_user),
+    ) -> dict[str, object]:
+        if quota is None:
+            raise _quota_unavailable()
+        if body.daily_limit is None and body.weekly_limit is None:
+            raise HTTPException(
+                status_code=400,
+                detail="daily_limit or weekly_limit must be specified",
+            )
+        for value, name in ((body.daily_limit, "daily_limit"),
+                            (body.weekly_limit, "weekly_limit")):
+            if value is not None and value < 0:
+                raise HTTPException(
+                    status_code=400, detail=f"{name} must not be negative")
+        if not body.reason.strip():
+            raise HTTPException(status_code=400, detail="reason is required")
+        user = users.get_by_id(user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="no such user")
+        # ★ suspended 회원의 한도 변경이 정지를 몰래 풀지 않는다 — P6 해석의
+        # status 축을 현재값으로 유지해 target 을 만든다(set_limits 는
+        # status 미지정 시 ACTIVE 로 해석하므로 명시가 필수다).
+        effective = quota.policy.limits_for(user.id)
+        before = (effective.daily_limit, effective.weekly_limit)
+        quota.policy.set_limits(
+            user_id=user.id, created_at=user.created_at,
+            target=QuotaLimits(
+                daily_limit=body.daily_limit,
+                weekly_limit=body.weekly_limit,
+                status=effective.status,
+            ),
+        )
+        _audit_quota_change(
+            current, target_user=user,
+            change=(f"daily {before[0]}->{body.daily_limit}, "
+                    f"weekly {before[1]}->{body.weekly_limit}"),
+            reason=body.reason,
+        )
+        return _quota_detail(user)
+
+    def _toggle_status(user_id: str, *, status, change: str, reason: str,
+                       current) -> dict[str, object]:
+        if quota is None:
+            raise _quota_unavailable()
+        if not reason.strip():
+            raise HTTPException(status_code=400, detail="reason is required")
+        user = users.get_by_id(user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="no such user")
+        quota.policy.set_status(user_id=user.id, status=status)
+        _audit_quota_change(current, target_user=user, change=change,
+                            reason=reason)
+        return _quota_detail(user)
+
+    @app.post("/admin/quota-policies/{user_id}/suspend",
+              response_model=AdminQuotaPolicyDetailResponse,
+              responses=_ERRORS_ADMIN_400_404,
+              dependencies=_REQUIRE_ADMIN)
+    async def suspend_quota(
+        user_id: str, body: AdminQuotaSuspendRequest,
+        current=Depends(require_admin_user),
+    ) -> dict[str, object]:
+        # 정지는 즉시다(D1ⓒ·D2) — 다음 요청부터 403(Q5=B·P5). 한도·pending 은
+        # 그대로: 정지는 한도 축이 아니다.
+        return _toggle_status(
+            user_id, status=QuotaStatus.SUSPENDED, change="suspend",
+            reason=body.reason, current=current)
+
+    @app.post("/admin/quota-policies/{user_id}/activate",
+              response_model=AdminQuotaPolicyDetailResponse,
+              responses=_ERRORS_ADMIN_400_404,
+              dependencies=_REQUIRE_ADMIN)
+    async def activate_quota(
+        user_id: str, body: AdminQuotaSuspendRequest,
+        current=Depends(require_admin_user),
+    ) -> dict[str, object]:
+        # 해제는 quota 상태만 되돌린다 — 계정 비활성화(단방향 D6)와 별개 축.
+        return _toggle_status(
+            user_id, status=QuotaStatus.ACTIVE, change="activate",
+            reason=body.reason, current=current)
 
     @app.post("/admin/users", response_model=AdminUserPayload,
               responses=_ERRORS_ADMIN_400_409, dependencies=_REQUIRE_ADMIN)

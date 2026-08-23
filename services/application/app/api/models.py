@@ -182,6 +182,21 @@ class AdminQuotaPolicyDetailResponse(AdminQuotaPolicyPayload):
     updated_at: datetime | None
 
 
+class AdminQuotaLimitsChangeRequest(BaseModel):
+    """8.5-b — 한도 변경(D2=ⓐ: 발효는 도메인 P6). 둘 중 하나만 바꿀 수 있고
+    ``None`` 은 그 창의 무제한이다. **둘 다 미지정은 400**(브리프 §5)."""
+
+    reason: str
+    daily_limit: int | None = None
+    weekly_limit: int | None = None
+
+
+class AdminQuotaSuspendRequest(BaseModel):
+    """8.5-b — 정지·해제(즉시). 사유는 감사 행에 그대로 남는다(D3=ⓑ)."""
+
+    reason: str
+
+
 class AdminUserPayload(BaseModel):
     # Same no-password_hash reason as UserPayload, and one field more: the admin
     # list is the only surface where whether an account is disabled is the point.

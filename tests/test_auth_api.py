@@ -1492,6 +1492,172 @@ class AdminQuotaPolicyApiTest(unittest.TestCase):
                 f"/admin/quota-policies/{self.root.id}").status_code, 403)
 
 
+class AdminQuotaPolicyChangeApiTest(unittest.TestCase):
+    """Phase 8.5-b (owner 2026-08-23): 한도 변경·정지/해제 + 감사.
+
+    발효 규칙(P6) 자체는 도메인 셀이 잠근다 — 이 클래스는 HTTP 표면이 그걸
+    올바르게 타는지(특히 **suspended 회원의 한도 변경이 정지를 몰래 풀지
+    않는다**)와 감사(D3=ⓑ)를 본다.
+    """
+
+    def setUp(self) -> None:
+        self.client, self.users, _ = _client()
+        self.users.create_user(username="root", password="pw789", is_admin=True)
+        self.client.post(
+            "/auth/login", json={"username": "root", "password": "pw789"}
+        )
+        self.quota = self.client.app.state.quota
+
+    def _member(self, username):
+        return next(
+            u for u in self.users.list_users() if u.username == username)
+
+    def test_relief_applies_immediately_and_response_shows_effect(self) -> None:
+        alice = self._member("alice")
+        changed = self.client.post(
+            f"/admin/quota-policies/{alice.id}/limits",
+            json={"reason": "완화 테스트", "daily_limit": 50},
+        )
+        self.assertEqual(changed.status_code, 200)
+        body = changed.json()
+        self.assertEqual(body["daily"]["limit"], 50)   # 완화 = 즉시
+        self.assertEqual(body["stored_daily_limit"], 50)
+        self.assertFalse(body["has_pending"])
+
+    def test_a_limits_change_does_not_lift_a_suspension(self) -> None:
+        # ★ 이 슬라이스가 만든 위험과 그 폐쇄 — set_limits 는 status 미지정을
+        # ACTIVE 로 해석하므로, 라우터가 현재 status 를 유지해 target 을 만드는
+        # 것이 없으면 한도 변경 한 번에 정지가 풀린다.
+        from services.application.app.quota.policy import QuotaStatus
+
+        alice = self._member("alice")
+        self.client.post(
+            f"/admin/quota-policies/{alice.id}/suspend",
+            json={"reason": "긴급 정지"},
+        )
+        changed = self.client.post(
+            f"/admin/quota-policies/{alice.id}/limits",
+            json={"reason": "정지 상태에서 한도 조정", "weekly_limit": 200},
+        )
+        self.assertEqual(changed.status_code, 200)
+        self.assertEqual(changed.json()["status"], "suspended")
+
+    def test_suspend_is_immediate_and_activate_restores(self) -> None:
+        alice = self._member("alice")
+        suspended = self.client.post(
+            f"/admin/quota-policies/{alice.id}/suspend",
+            json={"reason": "긴급 정지"},
+        )
+        self.assertEqual(suspended.status_code, 200)
+        self.assertEqual(suspended.json()["status"], "suspended")
+
+        # 즉시다(D1ⓒ·D2) — 회원의 다음 요청 관점: /me/quota 가 이미 반영.
+        self.client.post("/auth/login",
+                         json={"username": "alice", "password": "pw123"})
+        self.assertEqual(
+            self.client.get("/me/quota").json()["status"], "suspended")
+        self.client.post("/auth/login",
+                         json={"username": "root", "password": "pw789"})
+
+        restored = self.client.post(
+            f"/admin/quota-policies/{alice.id}/activate",
+            json={"reason": "해제"},
+        )
+        self.assertEqual(restored.status_code, 200)
+        self.assertEqual(restored.json()["status"], "active")
+
+    def test_changes_are_audited_with_reason_but_reads_are_not(self) -> None:
+        from services.application.app.auth.admin_audit import (
+            AdminAuditService, InMemoryAdminAuditRepository,
+        )
+
+        repo = InMemoryAdminAuditRepository()
+        audit = AdminAuditService(repo)
+        client, users, _ = _client(admin_audit=audit)
+        users.create_user(username="root", password="pw789", is_admin=True)
+        client.post("/auth/login",
+                    json={"username": "root", "password": "pw789"})
+        alice = next(u for u in users.list_users() if u.username == "alice")
+
+        # 읽기는 감사를 남기지 않는다(D3=ⓑ — 목록 polling 이 감사를 채운다).
+        client.get("/admin/quota-policies")
+        client.get(f"/admin/quota-policies/{alice.id}")
+        self.assertEqual(repo.events, [])
+
+        changed = client.post(
+            f"/admin/quota-policies/{alice.id}/limits",
+            json={"reason": "  사유 있는 변경  ", "daily_limit": 40},
+        )
+        self.assertEqual(changed.status_code, 200)
+        client.post(f"/admin/quota-policies/{alice.id}/suspend",
+                    json={"reason": "정지 사유"})
+        self.assertEqual(len(repo.events), 2)
+        row = repo.events[0]
+        self.assertEqual(row.action, "member_quota_policy")
+        self.assertEqual(row.target_type, "user")
+        self.assertEqual(row.target_user_id, alice.id)
+        self.assertIsNone(row.target_project_id)  # 회원 이벤트에 project 필드 없음
+        self.assertEqual(row.reason, "사유 있는 변경")  # strip 되어 저장
+        self.assertIn("daily", row.detail)
+        self.assertEqual(row.outcome, "succeeded")
+
+    def test_audit_failure_fails_the_request_closed(self) -> None:
+        # fail-closed(D3=ⓑ): 감사 쓰기가 죽으면 요청도 죽는다 — 삼키면
+        # "기록했지만 사실은 못 했다"가 된다.
+        from services.application.app.auth.admin_audit import (
+            AdminAuditService,
+        )
+
+        class _FailingRepo:
+            def insert(self, event):
+                raise RuntimeError("audit store down")
+
+            def list_project_purge_events(self, *, limit):
+                return ()
+
+            def list_member_quota_events(self, *, limit):
+                return ()
+
+        audit = AdminAuditService(_FailingRepo())
+        client, users, _ = _client(admin_audit=audit)
+        users.create_user(username="root", password="pw789", is_admin=True)
+        client.post("/auth/login",
+                    json={"username": "root", "password": "pw789"})
+        alice = next(u for u in users.list_users() if u.username == "alice")
+
+        # fail-closed 의 정의 = 예외가 요청을 죽인다(삼키지 않는다). TestClient
+        # 는 예외를 그대로 전파하므로 전파 자체를 단정한다 — 배포에서는 전역
+        # handler 가 저장소 계열을 503 로, 그 외를 500 으로 바꾼다(v1.7.38).
+        with self.assertRaises(RuntimeError):
+            client.post(
+                f"/admin/quota-policies/{alice.id}/suspend",
+                json={"reason": "감사 죽는 경우"},
+            )
+
+    def test_validation_and_target_errors(self) -> None:
+        alice = self._member("alice")
+        base = f"/admin/quota-policies/{alice.id}/limits"
+        # 둘 다 미지정 · 음수 · 공백 사유 → 400
+        self.assertEqual(self.client.post(
+            base, json={"reason": "r"}).status_code, 400)
+        self.assertEqual(self.client.post(
+            base, json={"reason": "r", "daily_limit": -1}).status_code, 400)
+        self.assertEqual(self.client.post(
+            base, json={"reason": "   ", "daily_limit": 5}).status_code, 400)
+        # 없는 회원 → 404 (변경·정지 공통)
+        self.assertEqual(self.client.post(
+            "/admin/quota-policies/user:nope/limits",
+            json={"reason": "r", "daily_limit": 5}).status_code, 404)
+        self.assertEqual(self.client.post(
+            "/admin/quota-policies/user:nope/suspend",
+            json={"reason": "r"}).status_code, 404)
+        # 비관리자 → 403
+        self.client.post("/auth/login",
+                         json={"username": "alice", "password": "pw123"})
+        self.assertEqual(self.client.post(
+            base, json={"reason": "r", "daily_limit": 5}).status_code, 403)
+
+
 class CombinedBoundaryMatrixTest(unittest.TestCase):
     """D8-3c: the 401 and 403 guards audited as a single matrix.
 
@@ -1554,6 +1720,12 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # their audit are 8.5-b. Not project-scoped: the subject is users.id.
         ("/admin/quota-policies", "get"),
         ("/admin/quota-policies/{user_id}", "get"),
+        # 8.5-b (2026-08-23): changes + suspend/activate. Audited (D3=ⓑ) —
+        # unlike the account operations above, member-policy *writes* leave
+        # an admin_audit_events row with a mandatory reason.
+        ("/admin/quota-policies/{user_id}/limits", "post"),
+        ("/admin/quota-policies/{user_id}/suspend", "post"),
+        ("/admin/quota-policies/{user_id}/activate", "post"),
         # Signup approval (owner 2026-08-22): requests are public, the check is
         # admin. These three are account operations like users above — not
         # admin-audited, not project-scoped.
@@ -1638,10 +1810,10 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # 됐다(project tier 는 무변 62 — 통합 조회는 project 를 지목하지 않는다).
         # 가입 승인 슬라이스(2026-08-22)가 `POST /auth/signup` 을 공개 tier 에
         # 더해 79 가 됐다 — 요청은 누구나, 승인은 관리자.
-        # Phase 8.5-a(2026-08-23)가 quota 운영 조회 2종을 admin tier 에 더해
-        # 84 가 됐다(ADMIN 11→13).
+        # Phase 8.5-a/b(2026-08-23)가 quota 운영 5종을 admin tier 에 더해 87 이
+        # 됐다(ADMIN 11→16).
         self.assertEqual(len(by_tier["project"]), 62)
-        self.assertEqual(len(tiers), 84)
+        self.assertEqual(len(tiers), 87)  # 8.5-b: quota 변경·정지 3종
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:
