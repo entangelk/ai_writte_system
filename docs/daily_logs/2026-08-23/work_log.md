@@ -1,5 +1,28 @@
 # 2026-08-23 작업 로그 (알파)
 
+> **[세션 5] IP 제한 키 양쪽 정리 + 알파 env 수리 + extractor 스키마 불일치 원인 규명.**
+> 오너 지시 셋: ① "IP 문제 키 이번에야말로 확실하게 처리(기록 미기재)" ② 알파 env
+> 적용 ③ extractor 호환 조사. **키 정리**: 배포 서버·알파 양쪽 `.env`에서 각 1개씩
+> 거부 키(HTTP 403)를 헬스체크로 식별해 제거 — **양쪽 모두 4/4 정상**. 08-22에 알파
+> key[0]을 지웠는데도 남아 있었다(IP 제한 키가 그것만이 아니었다). 식별·제거는 전부
+> 인덱스 기반으로 처리했고 **키 값은 이 문서 어디에도 없다**. **알파 env 수리**:
+> `LLAMA_TIMEOUT_SECONDS=300`·`LLAMA_DEFAULT_MODEL=gemma-4-31b-it` 추가·재기동.
+>
+> **extractor 원인 규명 (실측 5종)**: gemma-4-31b-it는 JSON을 **```json 마크다운
+> 펜스로 감싼다**(매번 관측). 완전 펜스는 `strip_code_fence`가 잘 벗기므로 **성공
+> 회차도 있다** — 같은 알파 스택에서 phase2a 관통이 직전 실행은 400·후보 0, 다음
+> 실행은 후보 생성·succeeded (조건부 결함의 연속 실측 증명). 실패 경로: 출력이 길면
+> `max_tokens=2048`(extractor 기본) 상한에서 **닫는 펜스째 끊김** → "provider content
+> must be JSON" → repair 진입 → repair 출력의 필드 어긋 → 최종 "candidate fields do
+> not match schema"(서버 관통에서 관측된 그 오류). 부수: 짧은 max_tokens(실측 200)에서는
+> **사고가 예산을 전부 써 빈 답**(08-22 발견의 제품 경로판). llama 12B는 펜스를 안
+> 써서 미발견이었다. v4 프롬프트에는 **펜스 금지 문구가 없다**(repair에만 있음).
+>
+> **처방 후보(오너 결정 대기)**: **A** extractor max_tokens 상향(2048→4096, 끊김 여유)
+> + **B** 프롬프트 v5("raw JSON only, no fence" 명시 — immutable 절차·sha256 핀·Mongo
+> 이행 동반) 조합 권장. **C**(파서의 열린 펜스 확장)은 끊긴 케이스가 JSON 자체도
+> 무효라 회복 불가 — 효과 제한적으로 각하 권고. 검색·생성 축은 무관(영향 없음).
+
 > **[세션 4] 임베딩만(리랭커 없이) end-to-end 관통 실측 — 오너 과제 수행 (세부 미기재).**
 > 배포 서버에서 관통: 로그인 → 원문 등록(snapshot·source_refs) → **색인(구글
 > 임베딩 1536, chroma 6블록)** → **검색(플래너 LLM + `vector` 도구 6힛트, RRF — 리랭커
@@ -164,9 +187,9 @@ env 전달(히스토리·ps 무노출)·Argon2id 해시만 저장·C-6 1회용. 
 - **★ 알파 `.env`에 `LLAMA_DEFAULT_MODEL=gemma-4-31b-it` 추가 제안** — 세션 4 발견
   함정(미설정 시 compose 기본 `gemma-local`이 앱에 내려가 외부 API에서 400 전멸)을
   알파도 공유 중. 오너 확인 후 한 줄.
-- **후속 과제(세션 4에서 열림)**: 분석 extractor 후보 스키마 불일치 — `gemma-4-31b-it`가
-  내놓은 후보 JSON이 도메인 스키마를 통과 못 함(검색·생성 축은 정상). `.env.example`에
-  `LLAMA_DEFAULT_MODEL`·타임아웃 명시 여부도 함께.
+- **후속 과제(세션 4에서 열림 → 세션 5 원인 규명)**: 분석 extractor 조건부 실패 —
+  펜스 감싸기 + max_tokens=2048 끊김. **처방 A+B 결정 대기**(위 세션 5 요약).
+  `.env.example`에 `LLAMA_DEFAULT_MODEL`·타임아웃 명시 여부도 함께.
 - 오너 결정 대기 셋 전부 해소(세션 1·2·3). 남은 부채: nginx 보안 헤더(권고)·
   SoT 부채(KEY_REJECTED·폴백 정책)·폴백 슬라이스 독립 검증.
 - 폴백 슬라이스(`d8ba6e7…`) 독립 검증은 여전히 대기.
