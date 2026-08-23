@@ -145,7 +145,7 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
   - **★ 그 게이트를 실제로 무력화하는 것은 `cwd` 다 — 2026-08-13 하루에 4번 났다**(구현자 1 · 독립 검증자 3). 셸의 작업 디렉터리는 명령 사이에 **남는다**. `cd frontend && npx vitest …` 를 돌린 뒤 복원 명령을 치면 두 가지로 갈린다: ① `git checkout -- frontend/src/x` → cwd 가 `frontend/` 라 **`pathspec did not match` 로 시끄럽게 실패**한다(검증자가 겪은 쪽. 알아채기 쉽다). ② `cd frontend && git checkout -- src/x` → cwd 가 **이미** `frontend/` 라 `cd` 가 실패하고 **`&&` 뒤 복원이 조용히 안 돈다**(구현자가 겪은 쪽). ②가 위험하다 — 다음 뮤테이션이 **복원 안 된 것 위에 얹히는데** 출력이 `1 failed | 3 passed` 로 **깨끗해 보인다**(두 뮤테이션이 같은 셀을 물면 단독 측정과 구별되지 않는다). **처방 둘**: **복원 명령은 항상 저장소 루트 절대경로에서 시작한다**(`cd <repo-root> && git checkout -- <path>`), 그리고 **뮤테이션과 뮤테이션 *사이*에도 `git status --short` 를 찍는다**(§6 게이트는 "첫 뮤테이션 전" 만 말한다).
 - **★ 뮤테이션 결과를 `grep FAILED` 로 읽으면 subtest 실패를 통째로 놓친다**(2026-08-09 실측). `pytest-subtests` 는 실패한 subtest 를 **`SUBFAILED(...)`** 로 찍으므로 `^FAILED` 필터에는 **한 줄도 안 걸리고**, "물지 않았다"로 읽힌다 — 요약줄에만 `9 failed` 가 남는다. 실제로 Slice 2 독립 검증이 이 필터로 A6 셀을 *"재실패 없음"* 이라 읽었다가 단독 실행으로 정정했다. **하필 전수 대조 셀(가장 강한 가드)이 대부분 `subTest` 로 돈다.** 규칙: **요약 count 줄을 읽고**, 페어링할 때는 `FAILED|SUBFAILED` 를 매칭한다. 절차 정본은 [`docs/guides/verification.md`](docs/guides/verification.md) §"Mutation testing" 에 있다 — **필터 때문에 "안 문다"고 기록하면 다음 사람이 멀쩡한 가드를 지우러 온다.**
 - **★ compose의 포트 매핑 변경은 이미 만들어진 컨테이너에 적용되지 않는다 — `up -d`로도 안 된다**(2026-08-02 독립 검증이 잡았다). 포트 매핑은 **컨테이너 생성 시점에 고정**되므로, D8-7 G1=C의 loopback 바인드는 **파일 수준에서만 참**이고 기존 컨테이너는 `docker ps -a`에 여전히 `0.0.0.0:27520->27017` 같은 **옛 매핑을 들고 있다**. 지금은 그 컨테이너들이 Exited라 실제 노출은 없지만, **옛 컨테이너를 그대로 다시 살리면 LAN 노출이 그대로 복귀한다.** 반영하려면 **재생성**이 필요하다(`docker compose down` 후 `up -d`, 또는 `up -d --force-recreate`). 볼륨은 named라 `down`으로 지워지지 않는다(`down -v`는 지운다 — 쓰지 말 것). **확인법은 파일이 아니라 `docker port <container>`다** — compose 파일을 읽고 "닫혔다"고 결론내면 안 된다. 같은 성질이 env·command 변경 전반에 적용된다.
-- **★ 2026-08-23 이력 재작성(filter-repo) — 커밋 해시가 전부 바뀌었다.** 공개 전 공인 IP·오너 계정명을 전 이력에서 치환했다(`X.X.X.X`·`owner-account`). ① 문서의 옛 해시 인용은 번들 백업(`../ai_writte_system-pre-rewrite-backup.bundle` — **비공개**)이 원본이다. ② **배포 서버 클론은 낡았다** — 다음 동기화는 재클론/hard reset으로(bundle fetch가 ff 안 된다). ③ origin 이 지워졌으니 오너가 재등록 + **force push**한다. 백업 번들에 IP가 있으므로 공개 저장소 금지.
+- **★ 2026-08-23 이력 재작성(filter-repo) — 커밋 해시가 전부 바뀌었다.** 공개 전 공인 IP·오너 계정명을 전 이력에서 치환했다(`X.X.X.X`·`owner-account`). ① 문서의 옛 해시 인용은 무효다(예전 백업 번들은 삭제됨). ② [해소 2026-08-23 세션 17] **배포 서버는 재동기화 완료**(FETCH_HEAD reset + 옛 refs/gc 정리 — 서버 `.env`·override 무사). ③ **origin 이 지워졌으니 오너가 재등록 + force push**한다(아직 대기). **★ 3패스까지 간 경위**: 재작성 기록 문서가 치환 예시로 실값을 재유출한 것을 전수 검증이 잡았다 — **재작성 기록에는 치환 결과만 적는다**(재발 방지).
 - **백엔드는 `pytest`가 아니라 `python -m pytest`로 실행한다.**
 - **★ 계약에 "…는 잠기지 않는다 / …해도 안 깨진다" 류의 *방어적 단언*을 쓰면, 그 단언을 지나는 셀이 있는지 그 자리에서 확인한다.** 2026-08-02 하루에 두 번 걸렸다 — D8-5e의 `owner_id=None`(**Blocking**: 무소유 project가 승격으로 열렸다)과 C-6의 pre-C-6 Mongo 행(`.get(..., False)`를 하드 서브스크립트로 바꿔도 **1898 전부 통과**). **둘 다 결함을 *넣는* 뮤테이션으로는 원리적으로 안 보인다** — 없는 셀은 무엇을 깨뜨려도 실패하지 않기 때문이다. 잡은 것은 **방어를 없애 보거나 고칠 것을 미리 넣어 보는** 뮤테이션이다. 후자는 특히 fake가 늘 새 필드를 갖는 저장소 계층에서 위험하다(아래 naive-datetime 함정과 같은 형태 — 스위트는 green, 배포만 죽는다).
 - **pymongo는 BSON 날짜를 naive로 돌려준다**(client가 `tz_aware=True`가 아닌 한). 그것을 aware `datetime.now(UTC)`와 비교하면 `TypeError`다. **fake-collection 테스트는 이걸 재현하지 못한다** — aware를 넣으면 aware가 나오므로 **스위트는 green인데 배포만 깨진다**. 실측(2026-07-27): 세션 `expires_at` 비교가 실 Mongo에서 `GET /auth/me`를 전량 500으로 만들었는데 유닛 46건은 전부 통과했다. 규칙: **Mongo 날짜를 파이썬으로 끌어와 비교하면 `_entry` 경계에서 UTC를 재부착**하고(`auth/sessions_mongo.py`의 `_aware`), fake collection이 **드라이버처럼 naive를 돌려주는** 회귀를 함께 넣는다. 기존 코드가 무사한 이유는 같은 판정을 **쿼리 서버측**(`{"$lte": …}`)에서 하기 때문이다(`generation_job_mongo.py:85`·`indexing/mongo_repository.py:130-136`) — 그 방식을 따르면 이 함정 자체가 없다.
@@ -292,6 +292,21 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 - **[폐쇄 2026-08-10 · 다시 제기하지 말 것] 관리자가 접근 이력을 보려면 승격이 필요하고, 그 열람 자체도 감사에 남는다.** 구현자가 *"이력만 보고 싶을 때도 grant 를 발급해야 하는 것은 어긋날 수 있다"* 고 관찰했고 **오너가 검토 후 현행 유지로 결정했다**(*"개인 자산을 보는 건데… 이력만 보는 것도 감사대상으로 보자"*). **★ 그리고 그것이 이미 코드의 동작이다** — `GET /projects/{id}/access-log` 는 `_REQUIRE_PROJECT_OWNER` 라 관리자는 살아 있는 grant 없이 403 이고, grant 로 통과한 요청은 [`dependencies.py:128`](services/application/app/api/dependencies.py#L128) 의 `record_use` 가 **단일 choke point** 에서 남긴다. **UI 의 `disabled` 는 백엔드 제약을 비추는 것이지 UI 판단이 아니다.**
 
 ## Next Tasks
+
+> **★★ 2026-08-23 세션 17 마감 메모 — 오늘은 여기까지. 여기서 시작한다.**
+>
+> - **오늘의 종착**: Phase 8.5 완결(검증 폐쇄 포함, SoT v1.8.3)·폴백 SoT 등재(v1.8.0)·
+>   extractor 안정화(v1.7.99)·docs 비공개(v1.7.98)·**dogfood 착수 선언**·**공개 전 보안
+>   정리 완료**(전 이력 재작성 — IP·계정명 0건·이메일은 오너 수용 유지·백업 번들 삭제).
+>   배포 서버도 재작성 이력로 재동기화 완료(양쪽 785커밋·누출 문자열 0건).
+> - **오너 남은 것 하나**: `git remote add origin <URL>` → **`git push -f origin main`**
+>   (private 원격의 옛 이력 갱신) → GitHub에서 public 전환. **push 전엔 원격에 옛
+>   이력(IP 포함)이 남아 있다.**
+> - **다음 세션 순서**: ① 포트폴리오 설명문(오너: "설명문은 내일") ② dogfood 병행 UI
+>   (관리자 콘솔 quota 화면 — 8.5 백엔드 준비완료) ③ dogfood 관찰은
+>   [`docs/dogfood-checklist.md`](docs/dogfood-checklist.md).
+> - **★ 커밋 해시가 오늘 두 번 바뀌었다**(filter-repo 2+3패스) — 옛 해시 인용은 무효,
+>   현재 HEAD 체인만 정본.
 
 > **★★ 2026-08-22 세션 5 (알파) 마감 메모 — 승인제 가입이 섰다(SoT v1.7.97). 여기서 시작한다.**
 >
