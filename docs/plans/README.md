@@ -151,7 +151,7 @@
 | [`08-2c-project-name-history-decisions.md`](08-2c-project-name-history-decisions.md) | 8.2c — 프로젝트 **이름 이력**(L6: 저장 위치·범위·쓰기 시점·조회 통로) + **D8-6 삭제 계약 개정** + **purge UI 문구** | **Resolved** — N1~N6=A(오너 2026-08-05) · 구현 대기 |
 | [`08-3-quota-enforcement-decisions.md`](08-3-quota-enforcement-decisions.md) | 8.3 — quota **시행**(차감 시점·"성공"의 정의·비동기 차감·동시성 초과와 **입장 뮤텍스**·저장소 장애 방향·초과/정지 상태코드·확인 통로·시행 seam·`dedupe_key` 매핑) | **Resolved** — Q1~Q9 + Q1-a·Q1-b·Q3-a 확정, **구현 완료**(SoT v1.7.88) · 독립 검증 **PASS**(비차단 5건 처리) |
 | [`08-4-product-wiring-decisions.md`](08-4-product-wiring-decisions.md) | 8.4 — 제품 경로 배선(관리자·내부 **면제** 여부·402/429/403 프론트 계약·**확인 대화 UX**·확인 헤더 층·**잔여 표시 API**·프론트 안정 키·유료 화면 전수 가드) | **Resolved** — W1(A+부트스트랩 무제한)·W2~W7 확정 |
-| [`08-5-usage-admin-cms-decisions.md`](08-5-usage-admin-cms-decisions.md) | 8.5 — 관리자 quota 운영 API(조회·한도 변경·**정지/해제**·사유·감사 — endpoint 4종, ADMIN 11→15. **8.5-a 조회 → 8.5-b 변경·정지**로 분할 시행) | **Resolved** — D1~D3 확정(2026-08-23) · **구현 대기** |
+| [`08-5-usage-admin-cms-decisions.md`](08-5-usage-admin-cms-decisions.md) | 8.5 — 관리자 quota 운영 API(조회·한도 변경·**정지/해제**·사유·감사 — endpoint 5종, ADMIN 11→16) | **Resolved** — D1~D3 확정(2026-08-23) · **구현 완료**(8.5-a v1.8.1 · 8.5-b v1.8.2, 독립 검증 대기) |
 
 ### Phase 9 — 서비스 활동 로그 (계획됨)
 

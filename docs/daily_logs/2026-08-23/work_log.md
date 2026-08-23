@@ -1,5 +1,21 @@
 # 2026-08-23 작업 로그 (알파)
 
+> **[세션 11] Phase 8.5-b 구현 — 한도 변경·정지/해제 + 감사 (SoT v1.8.2). Phase 8.5 완결.**
+> 커밋 `0a75c5e`·`44ffb47`.
+> - **한도 변경**: P6 재사용·사유 필수·400(음수/미지정/공백). **★ suspended 회원의
+>   한도 변경이 정지를 몰래 풀지 않게** 라우터가 현재 status 를 target 에 유지
+>   (`set_limits` 는 status 미지정을 ACTIVE 로 해석 — 이 슬라이스가 만든 위험과 폐쇄).
+> - **정지/해제**: `QuotaPolicyService.set_status` 신규 — **즉시**. P6(`split_change`)이
+>   상태 전이까지 유예하는 것이 구현 중 발견돼 `set_limits` 와 갈랐다(브리프 '구현이
+>   정밀화한 것' 등재). 한도·pending 무영향.
+> - **감사(D3=ⓑ)**: `AdminAuditEvent` 확장(member_quota_policy·target_user_id·detail)·
+>   `record_member_quota_change` — fail-closed(전파 단정 셀)·읽기 미기록·사유 strip.
+> - **가드**: tier 87·에러선언 16·행위 6셀. **전수 등재 누락 1건** — 활동 분류표
+>   (mutating 전수 가드가 3종 미등재로 실패; `admin_audited`·회원 정책 축으로 등재 —
+>   이 사유 문자열이 이번부터 문자 그대로 사실이 됐다).
+> - **뮤테이션 3종** 재실패: status 유지 제거·감사 호출 무력화·set_status 미적용.
+> - **전수 2504 / 4 / 2805**(검산 2498+6 일치).
+
 > **[세션 10] Phase 8.5-a 구현 — 관리자 quota 운영 조회 2종 (SoT v1.8.1).**
 > 브리프(세션 9)의 첫 슬라이스. 커밋 `d20cb67`·`5d89484`.
 > - **조회 2종**: 목록(활성 전원·정책 행 없는 회원 포함·has_pending)·상세
