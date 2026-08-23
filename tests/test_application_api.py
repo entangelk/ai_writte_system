@@ -2291,6 +2291,12 @@ class AdminErrorContractDeclarationTest(unittest.TestCase):
         ("/admin/users", "post"): {"400", "401", "403", "409", "503"},
         ("/admin/users/{user_id}/deactivate", "post"):
             {"401", "403", "404", "409", "503"},
+        # Phase 8.5-a (2026-08-23): quota operations read surface. List looks
+        # nothing up (no 404); detail resolves a user_id (404). Both can 503 —
+        # unassembled quota enforcement must not read as "unlimited".
+        ("/admin/quota-policies", "get"): {"401", "403", "503"},
+        ("/admin/quota-policies/{user_id}", "get"):
+            {"401", "403", "404", "503"},
         # 승인제 가입(2026-08-22). 목록은 404 없음(조회 대상이 없다), 승인·거절은
         # 404(요청 없음)·409(이미 처리됨) — pending 행에만 동작한다는 계약.
         ("/admin/signup-requests", "get"): {"401", "403", "503"},
@@ -2328,7 +2334,7 @@ class AdminErrorContractDeclarationTest(unittest.TestCase):
         }
 
     def test_declared_error_statuses_match_the_lock_list(self):
-        self.assertEqual(len(self.EXPECTED), 11)
+        self.assertEqual(len(self.EXPECTED), 13)  # 8.5-a: quota 조회 2종
         for (path, method), expected in self.EXPECTED.items():
             with self.subTest(path=path, method=method):
                 self.assertEqual(self._declared(path, method), expected)
