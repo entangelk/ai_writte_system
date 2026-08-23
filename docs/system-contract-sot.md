@@ -33,6 +33,7 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.8.0 | 2026-08-23 | **폴백 taxonomy 등재 — 추적 부채 폐쇄(minor: 신규 public literal `provider_key_rejected`와 폴백 계약이 SoT에 없었다).** 2026-08-22 키 폴백 슬라이스가 구현·독립 검증(합격·승격)까지 마친 뒤 SoT 반영이 빠져 있던 것을 §LLM Gateway에 등재한다: error literal **5종 → 6종**(`provider_key_rejected` — 401/403 유래·앱 면 **502**), **키 회전 1순위·모델 폴백 2순위**(키 내곽·모델 외곽 a1→b1→c1→a2→b2→c2), 시작 키 라운드로빈, 키당 RPM 30, **쿨다운 3분류(401/403=600s·429=60s·그 외 없음 — 축 무관 동일, 2026-08-23 검증 B1 오너 ⓑ 정렬)**, 소진 fail-fast, 명시 모델 우선, env 리스트 파싱(trim·빈 무시·중복 제거), `key_index` 로그 비유출, 3축 범위(게이트웨이 키×모델·임베딩·리랭커 키만). **부채 동반 폐쇄**: `.env.example`·README env 표에 `LLAMA_DEFAULT_MODEL`(미설정 시 compose 기본 `gemma-local`이 앱에 내려가 외부 API에서 400 전멸 — 08-23 실측 함정)·`LLAMA_TIMEOUT_SECONDS`(writing 생성 120s+ 실측) 명시. **코드·가드 무변** — 등재 슬라이스다. | 브리프 [`plans/external-api-fallback-decisions.md`](plans/external-api-fallback-decisions.md), 검증 [`verifications/2026-08-23/llm_key_fallback_slice.md`](verifications/2026-08-23/llm_key_fallback_slice.md)(합격·승격), `daily_logs/2026-08-23/work_log.md` 세션 8 |
 | v1.7.99 | 2026-08-23 | **extractor 안정화 — 모델 교체(로컬 llama → 외부 gemma)가 드러낸 조건부 파싱 결함 폐쇄.** `gemma-4-31b-it`는 JSON을 **```json 펜스로 감싼다**(매번 관측) — 완전 펜스는 `strip_code_fence`가 벗기므로 성공 회차가 있었으나, 출력이 길어 **`max_tokens` 상한(2048)에서 닫는 펜스째 끊기면** 파싱이 실패하고 repair 재시도까지 어긋나 후보 0으로 끝났다(배포 서버·알파 관통 실측, 연속 실행으로 조건부임을 증명). 처방 셋(오너 2026-08-23): **① `ANALYSIS_EXTRACT_MAX_TOKENS` 조립 기본 2048→8192**(끊김 여유, 소스 스캔 가드) **② `analysis_extract` 프롬프트 v5** — "raw JSON only, 펜스 금지" 명시(v4 본문은 보존, sha `b946a7…` 무변 확인; v5 핀 `bc2a0b…` 추가; seed 체인 v1~v5) **③ `strip_code_fence` 열린 펜스 회복** — 선두 펜스 뒤 **나머지 전체가 하나의 온전 JSON 문서일 때만** 벗긴다(미완결 JSON·trailing prose는 여전히 거부 — extraction not relaxation 유지). ③은 gate·report·compare·extractor·planner·retrieval **전 strict JSON 파서가 공유**하므로 한 곳의 확장이 전 호출부에 적용된다. 부수 실측: 짧은 상한(200)에서는 사고가 예산을 전부 소진해 **빈 답**이 된다(08-22 발견의 제품 경로 확증). 회귀 backend **2489 passed / 0 failed / skip 4**(신규 7셀: json_extract 6·조립 스캔 1 · subtest +1), 뮤테이션 3종(열린 펜스 분기 제거·v5 펜스 금지 제거·기본 2048 원복) 전부 재실패. 실관통: 알파 **phase2a 3회 연속 성공**(후보 6·5·6), 배포 서버 1회 성공(후보 4). | 오너 결정(2026-08-23 — *"a는 넉넉하게 8192까지 하고 b는 프롬프트 내 명시 뿐만 아니라 파싱 가드 처리도"*), `daily_logs/2026-08-23/work_log.md` 세션 5·6 |
 | v1.7.98 | 2026-08-23 | **대화형 문서 비공개 — `/docs`·`/redoc`·`/openapi.json`은 공개 표면이 아니다(오너 결정).** FastAPI 기본값은 이 세 경로를 8520 직접은 물론 nginx 경유(`/api/docs`·`/api/openapi.json` 등)에서도 **무인증 200**으로 서빙해 전 route·가드·에러 형태를 네트워크의 누구에게나 광고했다(2026-08-22 보안 점검 발견 ③·독립 검증 H-3). 세 factory 가 한 본문(v1.7.91)이므로 `create_app` 의 `FastAPI(docs_url=None, redoc_url=None, openapi_url=None)` **한 곳**에서 제품·관리자·합집합이 함께 닫힌다 — 관리자 앱은 nginx prefix 구조상 애초에 노출이 없었다. **OpenAPI 스키마의 정당한 소비자는 전부 import 방식**(프론트 TS 계약의 `scripts/dump_openapi.py`·테스트의 `.openapi()` — HTTP 소비자 **0건** 실측)이므로 서빙을 끊어도 잃는 소비자가 없다. 가드는 `tests/test_admin_surface_separation.py` 신규 셀이 세 앱의 네 docs 경로(`/docs`·`/docs/oauth2-redirect`·`/redoc`·`/openapi.json`) 부재와 `/health`·제품 `/auth/login` 생존을 함께 잠근다(양방향 — 문을 닫는다고 공개 라우트가 지워지면 안 된다). 회귀 backend **2482 passed / 0 failed / skip 4**(신규 1셀) · 뮤테이션(FastAPI 기본값 복원) 재실패→복구 확인 · 실관통(이미지 재빌드 후): 6경로 전부 404, `/health`·프론트·인증 라우트 무변. | 오너 결정(2026-08-23 — *"api 쪽과 docs는 공개되면 안되지"*), `daily_logs/2026-08-23/work_log.md` |
 | v1.7.97 | 2026-08-22 | **자기 가입·승인제 + 로그인 브루트포스 방어(오너 3결정, operation 79 → **82**, ADMIN 8 → **11**, 공개 4 → **5**).** v1.7.82의 *"첫 관리자 없이 자기 가입하는 표면은 없다"*를 **승인제로 개정**한다 — 오너 정정: *"요청은 할 수 있지만 그 확인은 관리자가 한다는 소리였어. 나중에 자동 가입처리를 하더라도."* **`POST /auth/signup`(공개)**: username·비밀번호(12자+)만 받아 **pending** 행을 만들고 아무것도 부여하지 않는다. 중복(active·pending)은 409 — 아이디 선택 안내를 위한 **의도된 노출**. **rejected 행은 재요청 허용**(덮어씀 — 거절은 밴이 아니고 밴은 비활성화 D6의 역할), 단 **deactivated+rejected는 재요청 거부**(비활성화 단방향을 가입이 되살리면 안 된다). **상태는 `User.status: pending|active|rejected` 한 필드**(별도 컬렉션이면 자동 승인 전환 시 생성 경로가 둘이 된다) — 기존 행은 코드 기본값 active 로 해석(`.get` 관례, C-6 과 동일. 하드 서브스크립트로 바꾸면 배포 직후 기존 계정 전원 로그인 500). **★ 403의 생산자는 이제 셋**(소유권·관리자·**가입 상태**) — 로그인 게이트 순서는 `자격증명(실패=401 통일, 타이밍 방어 유지) → status(pending/rejected=403+사유 detail) → must_change_password(409) → 세션`이며, 그 403 을 받으려면 비밀번호가 이미 정확해야 하므로 **사실상 본인에게만 보이는 안내다**(오너 결정). 두 detail 문구(`account approval pending`·`signup request rejected`)로 로그인 화면이 대기/거절을 구분하는 것이 **H3 "detail 분기 금지"의 등재된 유일 예외**다(기존 `describeWritingError` 예외와 같은 취급, 소비자는 `AuthGate` 유일). **승인 축(ADMIN 3종)**: `GET /admin/signup-requests` · `approve` · `reject` — **pending 행에만 동작**(도메인 강제, 처리된 계정 상태는 다시 안 바뀌며 이미 처리됨은 409)하고 승인은 세션을 만들지 않는다(다음 로그인부터). 계정 관리 조작 관례(생성·비활성화)대로 **admin_audit 미기록**. 승인된 계정은 기본 quota(일 20/주 100)를 받는다. **★ 브루트포스 방어 동반(오너 결정 — 가입이 공개 표면을 넓히므로 방어가 먼저 선다)**: 로그인 실패 username별 계수, **기본 5회(창 내) → 5분 잠금**(env `AUTH_LOGIN_MAX_FAILURES`·`AUTH_LOGIN_LOCKOUT_SECONDS`, 음수/0 기동 거부 — 조용한 폴백 금지, `AUTH_SESSION_TTL_HOURS` 와 같은 결). 잠금 중 **올바른 비밀번호도 401 통일**(잠금 여부가 오라클이 되지 않게)하고, 자격증명 통과(403·409 포함)에서 카운터 리셋, 잠금 만료·창 경과 시 전체 리셋(에스컬레이션 사다리가 아니다). 저장은 Mongo `login_failures`(TTL 인덱스 없음 — 창이 env 라 서비스가 권위). **축은 username**(nginx 5520·직접 8520 의 X-Forwarded-For 신뢰가 갈려 IP 축은 유예). **부채 폐쇄 동반**: `AUTH_SESSION_TTL_HOURS` 기동 거부를 지키는 셀 4개(2026-08-08 뮤테이션이 빈 셀임을 드러낸 자리). 회귀 backend **2480 passed / 0 failed**(신규 49셀: 도메인 15·Mongo 6·가드 8·TTL 4·HTTP 16 — 독립 검증 정정, 초판 47은 산수 오류) · frontend **331 passed**(신규 5셀 — 가입 폼 1·대기/거절 안내 2·승인 UI 2 — 독립 검증 정정) · build 진입 425.35 kB(+3.57, 가입 폼 분량), 뮤테이션 8종(신규행 active·로그인 게이트 제거·`.get`→하드서브스크립트·pending/rejected 문구 교환·잠금 제거·TTL 폴백·reject 강제 제거·403 detail 분기 제거) 전부 재실패. **실서비스 관통 실측**(nginx 경유): 가입 201 → 대기 403 → 승인 200 → 로그인 200 / 거절 403 / 재승인 409 / 5회 실패 후 정답 401(잠금). | 오너 결정 3건(2026-08-22 — 403+사유·방어 동반·시드 정리), `plans/auth-signup-approval-decisions.md`, `daily_logs/2026-08-22/work_log.md` |
@@ -508,7 +509,7 @@ H3 페이즈(브리프 `plans/api-error-response-contract-decisions.md`, D1~D4=A
 
 ### LLM Gateway
 
-정본 세부 문서: [`plans/llm-gateway.md`](plans/llm-gateway.md)
+정본 세부 문서: [`plans/llm-gateway.md`](plans/llm-gateway.md) · 폴백 정책 정본: [`plans/external-api-fallback-decisions.md`](plans/external-api-fallback-decisions.md)
 
 확정된 구현 계약:
 
@@ -516,7 +517,7 @@ H3 페이즈(브리프 `plans/api-error-response-contract-decisions.md`, D1~D4=A
 - Application은 모델 파일 경로, CUDA 설정, inference engine 세부를 알지 않는다.
 - Gateway는 MongoDB/ChromaDB/Elasticsearch에 접근하지 않는다.
 - Gateway는 domain tool registry나 AgentLoopRunner terminal decision을 소유하지 않는다.
-- 현재 provider error literal은 다음 5종이다.
+- 현재 provider error literal은 다음 6종이다(`provider_key_rejected`는 2026-08-22 폴백 슬라이스가 더했고 v1.8.0에 등재됐다).
 
 ```text
 provider_unavailable
@@ -524,6 +525,7 @@ provider_timeout
 provider_overloaded
 provider_invalid_response
 provider_request_rejected
+provider_key_rejected
 ```
 
 - HTTP/text completion 성공 응답은 `model`, 첫 choice `message.content`, `finish_reason`, `usage.prompt_tokens`, `usage.completion_tokens`를 모두 유효값으로 가져야 한다.
@@ -532,11 +534,22 @@ provider_request_rejected
 - `HttpxJsonTransport`는 `trust_env=false`가 기본이며, proxy는 필요할 때만 opt-in한다.
 - 실제 tool-call parsing은 아직 미구현이다.
 
+**외부 API 키 폴백(오너 정책 2026-08-22 — 구현·검증 뒤 v1.8.0에 등재)**:
+
+- **키 회전이 1순위, 모델 폴백이 2순위다.** 시도 순서는 키가 내곽·모델이 외곽 — 키 `[a,b,c]` × 모델 `[1,2]`면 `a1 → b1 → c1 → a2 → b2 → c2`. 시작 키는 **라운드로빈 배분**(요청마다 순환해 한 키로 집중되지 않게), 키당 RPM은 **30**(슬라이딩 60초 창).
+- **쿨다운은 3분류뿐이며 축 무관 동일하다**(2026-08-23 검증 B1 오너 ⓑ 정렬): **401/403 = `provider_key_rejected` · 600s** · **429 = 60s** · **그 외(네트워크·408·5xx)는 쿨다운 없이 즉시 다음 조합** — timeout/5xx는 키가 아니라 상태의 문제라 키를 벌주지 않는다. 전 조합 소진은 대기 없이 **fail-fast**(마지막 오류 그대로).
+- **`provider_key_rejected`는 `retryable=False`지만 폴백은 회전한다** — "그대로 재시도 가능한가"(앱 계약)와 "조합을 바꾸면 고쳐지는가"(폴백 내부 `key_fatal`)는 두 질문이며, `retryable` 하나가 둘을 겹쳐 입고 있던 것을 폴백 슬라이스가 갈랐다. 앱을 향한 HTTP 면은 **502**다 — 게이트웨이의 클라이언트(앱)는 게이트웨이에 자격증명이 없으므로 401은 "너의 인증을 고쳐라"라는 거짓 메시지가 된다.
+- **요청이 명시한 모델은 체인의 앞장이고 env 모델은 뒤따르는 폴백이다**(덮어쓰지 않는다 — 앱이 `LLM_GATEWAY_MODEL`을 싣는 일이 흔하므로). env 리스트(`LLAMA_API_KEYS`·`LLAMA_MODELS`)는 **trim·빈 항목 무시·중복 제거(첫 등장 순서 유지)**로 파싱한다.
+- **폴백 로그는 `key_index`만 남긴다** — 게이트웨이 `FallbackProvider`는 키 값을 아예 모른다(구조적 비유출).
+- **축은 셋이다**: LLM 게이트웨이(키×모델) · 임베딩·리랭커(**키만** — 모델 폴백은 임베딩 차원 가드(결정 3=A, 모델 교체=재색인)·리랭커 URL 우선 계약과 충돌하므로 없다).
+- **운영 함정(2026-08-23 실측)**: `.env`에 `LLAMA_DEFAULT_MODEL`이 없으면 compose 기본 `gemma-local`이 앱에 내려가 외부 API 배포에서 **400 전멸**(REQUEST_REJECTED는 즉시 중단이라 폴백도 못 함). 외부 배포에서는 명시가 사실상 필수며 `.env.example`에 기재했다.
+
 검증 근거:
 
 - Slice 0.1~0.6 unit/contract 회귀
 - [`verifications/2026-06-24/llm_gateway_f1_f2_closure.md`](verifications/2026-06-24/llm_gateway_f1_f2_closure.md)
 - [`verifications/2026-06-24/llm_gateway_slice_0_6_httpx.md`](verifications/2026-06-24/llm_gateway_slice_0_6_httpx.md)
+- [`verifications/2026-08-23/llm_key_fallback_slice.md`](verifications/2026-08-23/llm_key_fallback_slice.md) — 폴백 슬라이스 독립 검증(합격·승격, B1 폐쇄 재검 포함)
 
 ### AgentLoopRunner
 

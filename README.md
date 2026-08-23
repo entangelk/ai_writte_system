@@ -243,6 +243,8 @@ env는 base compose도 통과하므로 **저장소(chroma·es)는 스택 안에 
 | `LLAMA_API_KEYS` | gateway | 없음 | LLM 키 리스트(쉼표 구분). 없으면 인증 헤더 없음(로컬 llama) |
 | `LLAMA_MODELS` | gateway | `LLAMA_DEFAULT_MODEL` 1개 | 모델 체인. 첫 번째가 기본, 나머지가 폴백 모델 |
 | `LLAMA_KEY_RPM` | gateway | `30` | 키당 분당 요청 상한(슬라이딩 60초 창) |
+| `LLAMA_DEFAULT_MODEL` | gateway·app | `gemma-local` | **외부 API 배포에서는 명시가 사실상 필수** — 미설정 시 compose 기본 `gemma-local`이 앱에 내려가 그 모델이 없는 벤더에서 400 즉시 중단(2026-08-23 실측 함정) |
+| `LLAMA_TIMEOUT_SECONDS` | gateway·app | `120` | 상류·클라이언트 양쪽 타임아웃(하나의 키가 양쪽에 전파). writing 생성은 구글에서 120s+ 걸린다 — 외부 배포 권장 `300` |
 | `LLAMA_API_FORMAT` | gateway | `llamacpp` | `llamacpp` = llama.cpp 전용 확장 사용 · `openai` = OpenAI 호환 벤더(구글 등 — 모르는 필드를 400으로 거부하므로 확장 제거) |
 | `RERANK_API_KEYS` | application·worker | `RERANK_API_KEY` 1개 | 리랭커 키 리스트 |
 | `RERANK_KEY_RPM` | application·worker | `30` | |
