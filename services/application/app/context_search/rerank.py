@@ -234,8 +234,8 @@ class KeyRotatingRerankProvider:
 
     임베딩 형제(indexing/embedding.py 의 KeyRotatingEmbeddingProvider)와 같은 정책:
     시작 키 라운드로빈 배분(한 키로 집중되지 않게 — 오너 정정 2026-08-22), 키당 RPM
-    슬라이딩 60초 창, 401/403 장기(600s)·429/5xx/네트워크 단기(60s) 쿨다운, 소진
-    fail-fast. 모델 폴백은 없다.
+    슬라이딩 60초 창, 401/403 장기(600s)·429 단기(60s) 쿨다운 — 네트워크·408·5xx는
+    쿨다운 없이 다음 조합(2026-08-23 B1 정렬) — 소진 fail-fast. 모델 폴백은 없다.
 
     소진은 결국 `RerankProviderError` 로 나가고 `RerankingRetriever` 의 fail-open
     경계(위)가 융합 순서로 내려준다 — 회전은 재정렬이 죽는 빈도를 줄일 뿐, 정확성
@@ -290,14 +290,12 @@ class KeyRotatingRerankProvider:
                     slot,
                     exc.status_code,
                 )
-                self._limiter.cool(
-                    slot,
-                    (
-                        KEY_REJECTED_COOLDOWN_SECONDS
-                        if exc.status_code in (401, 403)
-                        else RATE_LIMIT_COOLDOWN_SECONDS
-                    ),
-                )
+                # embedding 형제와 같은 3분류(브리프 §1, 2026-08-23 B1 정렬):
+                # 401/403=장기, 429=단기, 네트워크·408·5xx=쿨다운 없이 즉시 다음 조합.
+                if exc.status_code in (401, 403):
+                    self._limiter.cool(slot, KEY_REJECTED_COOLDOWN_SECONDS)
+                elif exc.status_code == 429:
+                    self._limiter.cool(slot, RATE_LIMIT_COOLDOWN_SECONDS)
         if last_error is not None:
             raise last_error
         raise RerankProviderError(

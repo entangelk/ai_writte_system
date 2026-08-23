@@ -120,6 +120,30 @@ class KeyRotatingEmbeddingProviderTests(unittest.TestCase):
             clock=clock,
         )
 
+    def test_a_5xx_failure_does_not_cool_the_slot(self):
+        """5xx는 키가 아니라 상태의 문제 — 쿨다운 없이 다음 조합·같은 슬롯 재시도.
+
+        under-strict(브리프 §1 vs B1 이탈): 5xx에 60s 쿨다운을 거는 원복이면
+        두 번째 embed에서 두 슬롯 전부 쿨다운이라 소진(429)으로 끝난다.
+        over-strict: 429·401/403의 쿨다운은 기존 셀들이 잠근다(이 셀은 5xx 축).
+        2026-08-23 검증 B1 — 오너 ⓑ(코드 정렬) 시행 전까지 이 행동은 무가드였다.
+        """
+        clock = FakeClock()
+        providers = [
+            FakeEmbeddingProvider([_status_error(503), (1.0, 2.0)]),
+            FakeEmbeddingProvider([(3.0, 4.0), _status_error(500)]),
+        ]
+        rotating = self._rotating(providers, clock=clock)
+
+        # 첫 호출: 슬롯0이 503 → 쿨다운 없이 회전해 슬롯1 성공.
+        self.assertEqual(rotating.embed("첫"), (3.0, 4.0))
+
+        # 1초 뒤(60s 쿨다운이 있었다면 두 슬롯 전부 막히는 시간): 시작 슬롯1이
+        # 500 → 슬롯0도 막히지 않아 재시도되어 성공한다.
+        clock.now += 1.0
+        self.assertEqual(rotating.embed("둘"), (1.0, 2.0))
+        self.assertEqual(providers[0].calls, 2)
+
     def test_rotates_on_a_network_error_then_succeeds(self):
         # under-strict: 회전이 없으면(오늘의 단일 provider) 첫 실패가 곧 실패다.
         providers = [
@@ -336,6 +360,30 @@ class KeyRotatingRerankProviderTests(unittest.TestCase):
             budget_seconds=budget,
             clock=clock,
         )
+
+    def test_a_5xx_failure_does_not_cool_the_slot(self):
+        """embedding 형제와 같은 축 — 5xx는 쿨다운 없이 즉시 다음 조합(브리프 §1).
+
+        under-strict: 5xx 60s 쿨다운 원복이면 두 번째 retrieve가 소진 예외로
+        끝난다. 401/403·429 쿨다운은 기존 셀들이 잠근다(2026-08-23 B1 정렬).
+        """
+        clock = FakeClock()
+        providers = [
+            FakeRerankProvider([_rerank_status_error(503), (0, 1)]),
+            FakeRerankProvider([(1, 0), _rerank_status_error(500)]),
+        ]
+        rotating = self._rotating(providers, clock=clock)
+
+        self.assertEqual(
+            rotating.rerank(query="q", documents=["문서"]),
+            (1, 0),
+        )
+        clock.now += 1.0
+        self.assertEqual(
+            rotating.rerank(query="q", documents=["문서"]),
+            (0, 1),
+        )
+        self.assertEqual(providers[0].calls, 2)
 
     def test_rotates_on_a_5xx_error_then_succeeds(self):
         providers = [

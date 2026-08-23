@@ -273,7 +273,8 @@ class KeyRotatingEmbeddingProvider:
 
     게이트웨이 형제(`llm_gateway/app/fallback.py`)와 같은 정책: 시작 키 라운드로빈
     배분(한 키로 집중되지 않게 — 오너 정정 2026-08-22), 키당 RPM 슬라이딩 60초 창,
-    401/403 장기(600s)·429/5xx/네트워크 단기(60s) 쿨다운, 소진 fail-fast.
+    401/403 장기(600s)·429 단기(60s) 쿨다운 — 네트워크·408·5xx는 쿨다운 없이 다음
+    조합(2026-08-23 B1 정렬) — 소진 fail-fast.
     **모델 폴백은 없다** — 임베딩 모델을 바꾸면 차원이 변하고 그 길은 재색인 절차
     (plans/embedding-adapter-slice-decisions.md 결정 3=A)의 영역이다.
 
@@ -327,14 +328,14 @@ class KeyRotatingEmbeddingProvider:
                     slot,
                     exc.status_code,
                 )
-                self._limiter.cool(
-                    slot,
-                    (
-                        KEY_REJECTED_COOLDOWN_SECONDS
-                        if exc.status_code in (401, 403)
-                        else RATE_LIMIT_COOLDOWN_SECONDS
-                    ),
-                )
+                # 쿨다운은 상태 코드가 말하는 "키의 문제"에만 건다(브리프 §1,
+                # 2026-08-23 검증 B1 — 오너 ⓑ 코드 정렬). 401/403=키 치명(장기),
+                # 429=한도(단기), 네트워크·408·5xx는 키가 아니라 상태의 문제라
+                # 쿨다운 없이 다음 조합이 즉시 시도된다(게이트웨이 형제와 같은 정책).
+                if exc.status_code in (401, 403):
+                    self._limiter.cool(slot, KEY_REJECTED_COOLDOWN_SECONDS)
+                elif exc.status_code == 429:
+                    self._limiter.cool(slot, RATE_LIMIT_COOLDOWN_SECONDS)
         if last_error is not None:
             # 시도는 했으나 전부 실패 — 마지막 오류를 그대로 돌려 보내면 인덱스 재시도
             # backoff(service.py 의 (60, 300)s)가 원인별로 판단할 수 있다.
