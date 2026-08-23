@@ -6,7 +6,7 @@
 
 서비스 경계와 확정된 계약을 먼저 볼 때는 [`../system-contract-sot.md`](../system-contract-sot.md)를 정본 SoT로 사용한다. 이 인덱스는 Phase별 세부 계획과 **모든 착수 결정 브리프**를 찾는 자리다.
 
-> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(110개 중 92개)는
+> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(111개 중 93개)는
 > `*-decisions.md` 착수 결정 브리프이며, **오너 결정의 근거 기록**이다. 파일명 접두 체계는 이미 무너져
 > 있고(`00`~`07` 계열 + 접두 없는 최근 것들) 파일명만으로는 트랙을 알 수 없다 — 그래서 아래는 **접두가
 > 아니라 트랙으로** 묶었다. 디렉터리 재편은 아직 결정되지 않은 별개 사안이다(HANDOFF 추적 부채).
@@ -151,6 +151,7 @@
 | [`08-2c-project-name-history-decisions.md`](08-2c-project-name-history-decisions.md) | 8.2c — 프로젝트 **이름 이력**(L6: 저장 위치·범위·쓰기 시점·조회 통로) + **D8-6 삭제 계약 개정** + **purge UI 문구** | **Resolved** — N1~N6=A(오너 2026-08-05) · 구현 대기 |
 | [`08-3-quota-enforcement-decisions.md`](08-3-quota-enforcement-decisions.md) | 8.3 — quota **시행**(차감 시점·"성공"의 정의·비동기 차감·동시성 초과와 **입장 뮤텍스**·저장소 장애 방향·초과/정지 상태코드·확인 통로·시행 seam·`dedupe_key` 매핑) | **Resolved** — Q1~Q9 + Q1-a·Q1-b·Q3-a 확정, **구현 완료**(SoT v1.7.88) · 독립 검증 **PASS**(비차단 5건 처리) |
 | [`08-4-product-wiring-decisions.md`](08-4-product-wiring-decisions.md) | 8.4 — 제품 경로 배선(관리자·내부 **면제** 여부·402/429/403 프론트 계약·**확인 대화 UX**·확인 헤더 층·**잔여 표시 API**·프론트 안정 키·유료 화면 전수 가드) | **Resolved** — W1(A+부트스트랩 무제한)·W2~W7 확정 |
+| [`08-5-usage-admin-cms-decisions.md`](08-5-usage-admin-cms-decisions.md) | 8.5 — 관리자 quota 운영 API(조회·한도 변경·**정지/해제**·사유·감사 — endpoint 4종, ADMIN 11→15. **8.5-a 조회 → 8.5-b 변경·정지**로 분할 시행) | **Resolved** — D1~D3 확정(2026-08-23) · **구현 대기** |
 
 ### Phase 9 — 서비스 활동 로그 (계획됨)
 
