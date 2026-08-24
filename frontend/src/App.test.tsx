@@ -380,6 +380,9 @@ describe("App routes", () => {
         sites: [], gate: {}, loop: {},
       } },
       { body: { events: [] } },
+      // signup-requests 뒤의 6번째 마운트 fetch — 회원 사용량 한도 섹션.
+      { body: { requests: [] } },
+      { body: { policies: [] } },
     );
 
     render(
@@ -399,6 +402,7 @@ describe("App routes", () => {
       "/api/admin/observability/kpi",
       "/api/admin/audit-events",
       "/api/admin/signup-requests",
+      "/api/admin/quota-policies",
     ]);
   });
 
