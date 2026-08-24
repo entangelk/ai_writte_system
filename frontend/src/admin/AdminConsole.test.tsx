@@ -52,8 +52,15 @@ describe("AdminConsole", () => {
 
     expect(await screen.findByRole("heading", { name: "관리" })).toBeInTheDocument();
     // 오너 요청(2026-08-24): 관리 화면에서 서비스로 들어가는 명시적 출구.
-    expect(screen.getByRole("link", { name: "서비스로 이동" }))
-      .toHaveAttribute("href", "/");
+    // H2(2026-08-24 검증 보강): 존재·href만 잠그면 header 안으로 옮겨져도 green이다
+    // (.page-heading > p:last-child 소개 문단 스타일이 깨지는 그 배치) — 머리글의
+    // 바로 다음 형제라는 위치까지 잠근다.
+    const serviceLink = screen.getByRole("link", { name: "서비스로 이동" });
+    expect(serviceLink).toHaveAttribute("href", "/");
+    expect(
+      screen.getByRole("heading", { name: "관리" }).closest("header")!
+        .nextElementSibling,
+    ).toBe(serviceLink);
     expect(await screen.findByRole("heading", { name: "회원 사용량 한도" }))
       .toBeInTheDocument();
     expect(await screen.findByText("활성 회원이 없습니다.")).toBeInTheDocument();

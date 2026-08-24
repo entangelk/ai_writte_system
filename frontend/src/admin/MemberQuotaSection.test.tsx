@@ -123,6 +123,12 @@ describe("MemberQuotaSection", () => {
     expect(fetchMock.mock.calls[1][0]).toBe("/api/admin/quota-policies/u1");
     expect(within(writerRowEl).getByLabelText("일일 한도")).toHaveValue("20");
     expect(within(writerRowEl).getByLabelText("주간 한도")).toHaveValue("100");
+    // H1(2026-08-24 검증 보강): P6 발효 힌트는 SoT v1.8.4 행이 인용하는 문구다.
+    // 조건 힌트(축소 예약·무정책)는 셀이 있었지만 이 무조건 렌더 문구는 지워도
+    // green이었다 — 형평상 여기서 잠근다.
+    expect(within(writerRowEl)
+      .getByText("한도를 늘리면 즉시, 줄이면 다음 창 경계에 반영됩니다."))
+      .toBeInTheDocument();
 
     const starterRowEl = screen.getByText("starter").closest("li")!;
     await userEvent.click(
