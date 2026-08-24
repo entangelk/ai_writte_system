@@ -572,6 +572,7 @@ main {
 }
 
 .admin-create-form label,
+.admin-quota-detail label,
 .admin-project-card > label {
   display: grid;
   gap: 0.35rem;
@@ -581,6 +582,7 @@ main {
 }
 
 .admin-create-form input:not([type="checkbox"]),
+.admin-quota-detail input:not([type="checkbox"]),
 .admin-project-card input {
   min-width: 0;
   padding: 0.55rem 0.65rem;
@@ -589,7 +591,8 @@ main {
   border: 1px solid var(--border-hairline);
 }
 
-.admin-create-form .admin-checkbox {
+.admin-create-form .admin-checkbox,
+.admin-quota-detail .admin-checkbox {
   display: flex;
   align-items: center;
   padding-bottom: 0.6rem;
@@ -718,6 +721,16 @@ main {
 
 .grant-status {
   margin-top: 0.7rem;
+}
+
+/* 회원 사용량 한도(8.5) — 목록 행 안에서 열리는 관리 패널. 버튼은
+   .admin-list button(ghost)을 그대로 쓴다 — 새 버튼 규칙을 만들지 않는다. */
+.admin-quota-detail {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-hairline);
 }
 
 @media (max-width: 48rem) {

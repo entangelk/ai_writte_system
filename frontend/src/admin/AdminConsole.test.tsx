@@ -43,12 +43,20 @@ describe("AdminConsole", () => {
         sites: [], gate: {}, loop: {},
       }))
       .mockResolvedValueOnce(response({ events: [] }))
-      .mockResolvedValueOnce(response({ requests: [] }));
+      .mockResolvedValueOnce(response({ requests: [] }))
+      // 6번째 마운트 fetch — MemberQuotaSection 목록(사용자 섹션 뒤에 렌더).
+      .mockResolvedValueOnce(response({ policies: [] }));
     vi.stubGlobal("fetch", fetchMock);
 
     render(<MemoryRouter><AdminConsole /></MemoryRouter>);
 
     expect(await screen.findByRole("heading", { name: "관리" })).toBeInTheDocument();
+    // 오너 요청(2026-08-24): 관리 화면에서 서비스로 들어가는 명시적 출구.
+    expect(screen.getByRole("link", { name: "서비스로 이동" }))
+      .toHaveAttribute("href", "/");
+    expect(await screen.findByRole("heading", { name: "회원 사용량 한도" }))
+      .toBeInTheDocument();
+    expect(await screen.findByText("활성 회원이 없습니다.")).toBeInTheDocument();
     expect(screen.getByText("root")).toBeInTheDocument();
     expect(screen.getByText("겨울 이야기")).toBeInTheDocument();
     expect(screen.getByText(/보관됨/)).toBeInTheDocument();
@@ -69,6 +77,7 @@ describe("AdminConsole", () => {
       "/api/admin/observability/kpi",
       "/api/admin/audit-events",
       "/api/admin/signup-requests",
+      "/api/admin/quota-policies",
     ]);
   });
 
@@ -89,6 +98,8 @@ describe("AdminConsole", () => {
       }))
       .mockResolvedValueOnce(response({ events: [] }))
       .mockResolvedValueOnce(response({ requests: [] }))
+      // 6번째 마운트 fetch — MemberQuotaSection 목록(사용자 섹션 뒤에 렌더).
+      .mockResolvedValueOnce(response({ policies: [] }))
       .mockResolvedValueOnce(response({
         id: "u2", username: "alice", is_admin: false, is_active: true,
       }))
@@ -106,7 +117,7 @@ describe("AdminConsole", () => {
 
     const aliceRow = (await screen.findByText("alice")).closest("li");
     expect(aliceRow).not.toBeNull();
-    expect(JSON.parse(fetchMock.mock.calls[5][1].body)).toEqual({
+    expect(JSON.parse(fetchMock.mock.calls[6][1].body)).toEqual({
       username: "alice", password: "temporary-password", is_admin: false,
     });
     await userEvent.click(within(aliceRow!).getByRole("button", { name: "비활성화" }));
@@ -133,6 +144,8 @@ describe("AdminConsole", () => {
       }))
       .mockResolvedValueOnce(response({ events: [] }))
       .mockResolvedValueOnce(response({ requests: [] }))
+      // 6번째 마운트 fetch — MemberQuotaSection 목록(사용자 섹션 뒤에 렌더).
+      .mockResolvedValueOnce(response({ policies: [] }))
       .mockResolvedValueOnce(response({ grant: {
         id: "g1", project_id: "p1", admin_user_id: "u1", reason: "지원 요청 확인",
         created_at: "2026-08-02T00:00:00Z", expires_at: "2026-08-02T01:00:00Z",
@@ -155,14 +168,14 @@ describe("AdminConsole", () => {
     await userEvent.click(grantButton);
 
     expect(await within(project!).findByText(/권한 만료/)).toBeInTheDocument();
-    expect(JSON.parse(fetchMock.mock.calls[5][1].body)).toEqual({ reason: "지원 요청 확인" });
+    expect(JSON.parse(fetchMock.mock.calls[6][1].body)).toEqual({ reason: "지원 요청 확인" });
     expect(within(project!).getByRole("link", { name: "프로젝트 열기" })).toHaveAttribute(
       "href", "/projects/p1",
     );
 
     await userEvent.click(within(project!).getByRole("button", { name: "접근 이력 보기" }));
     expect(await within(project!).findByText("GET /projects/p1")).toBeInTheDocument();
-    await waitFor(() => expect(fetchMock.mock.calls[6][0]).toBe("/api/projects/p1/access-log"));
+    await waitFor(() => expect(fetchMock.mock.calls[7][0]).toBe("/api/projects/p1/access-log"));
   });
 
   it("requires archive, reason, and the exact project name before purging", async () => {
@@ -185,6 +198,8 @@ describe("AdminConsole", () => {
       }))
       .mockResolvedValueOnce(response({ events: [] }))
       .mockResolvedValueOnce(response({ requests: [] }))
+      // 6번째 마운트 fetch — MemberQuotaSection 목록(사용자 섹션 뒤에 렌더).
+      .mockResolvedValueOnce(response({ policies: [] }))
       .mockResolvedValueOnce(response(undefined, 204))
       .mockResolvedValueOnce(response({ events: [
         {
@@ -221,8 +236,8 @@ describe("AdminConsole", () => {
 
     expect(await screen.findByRole("status")).toHaveTextContent("영구 삭제했습니다");
     expect(screen.queryByText("보관 원고")).not.toBeInTheDocument();
-    expect(JSON.parse(fetchMock.mock.calls[5][1].body)).toEqual({ reason: "고객 삭제 요청" });
-    expect(fetchMock.mock.calls[5][0]).toBe("/api/admin/projects/p2/purge");
+    expect(JSON.parse(fetchMock.mock.calls[6][1].body)).toEqual({ reason: "고객 삭제 요청" });
+    expect(fetchMock.mock.calls[6][0]).toBe("/api/admin/projects/p2/purge");
     expect(await screen.findByText("p2")).toBeInTheDocument();
   });
 
@@ -245,6 +260,8 @@ describe("AdminConsole", () => {
       }))
       .mockResolvedValueOnce(response({ events: [] }))
       .mockResolvedValueOnce(response({ requests: [] }))
+      // 6번째 마운트 fetch — MemberQuotaSection 목록(사용자 섹션 뒤에 렌더).
+      .mockResolvedValueOnce(response({ policies: [] }))
       .mockResolvedValueOnce(response({ detail: "storage unavailable" }, 503));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -258,7 +275,7 @@ describe("AdminConsole", () => {
 
     expect(await within(project!).findByText(/다시 시도하지 말고/)).toBeInTheDocument();
     expect(within(project!).queryByRole("button", { name: "영구 삭제" })).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(fetchMock).toHaveBeenCalledTimes(7);
   });
 
   it("lists signup requests and approves one", async () => {
@@ -280,10 +297,14 @@ describe("AdminConsole", () => {
       .mockResolvedValueOnce(response({ requests: [
         { id: "s1", username: "bob", requested_at: "2026-08-22T09:00:00Z" },
       ] }))
+      // 6번째 마운트 fetch — MemberQuotaSection 목록.
+      .mockResolvedValueOnce(response({ policies: [] }))
       .mockResolvedValueOnce(response({
         id: "s1", username: "bob", requested_at: "2026-08-22T09:00:00Z",
       }))
-      .mockResolvedValueOnce(response({ requests: [] }));
+      .mockResolvedValueOnce(response({ requests: [] }))
+      // 6번째 마운트 fetch — MemberQuotaSection 목록(사용자 섹션 뒤에 렌더).
+      .mockResolvedValueOnce(response({ policies: [] }));
     vi.stubGlobal("fetch", fetchMock);
 
     render(<MemoryRouter><AdminConsole /></MemoryRouter>);
@@ -294,9 +315,9 @@ describe("AdminConsole", () => {
     expect(await screen.findByText("bob 계정을 승인했습니다.")).toBeInTheDocument();
     // 처리된 요청은 큐에서 사라진다 — 목록을 다시 읽었기 때문이다.
     expect(screen.queryByRole("button", { name: "승인" })).not.toBeInTheDocument();
-    expect(fetchMock.mock.calls[5][0]).toBe("/api/admin/signup-requests/s1/approve");
-    expect(fetchMock.mock.calls[5][1]).toMatchObject({ method: "POST" });
-    expect(fetchMock.mock.calls[6][0]).toBe("/api/admin/signup-requests");
+    expect(fetchMock.mock.calls[6][0]).toBe("/api/admin/signup-requests/s1/approve");
+    expect(fetchMock.mock.calls[6][1]).toMatchObject({ method: "POST" });
+    expect(fetchMock.mock.calls[7][0]).toBe("/api/admin/signup-requests");
   });
 
   it("rejects a signup and stays honest when the request was already resolved", async () => {
@@ -319,8 +340,12 @@ describe("AdminConsole", () => {
       .mockResolvedValueOnce(response({ requests: [
         { id: "s1", username: "bob", requested_at: "2026-08-22T09:00:00Z" },
       ] }))
+      // 6번째 마운트 fetch — MemberQuotaSection 목록.
+      .mockResolvedValueOnce(response({ policies: [] }))
       .mockResolvedValueOnce(response({ detail: "signup request already resolved" }, 409))
-      .mockResolvedValueOnce(response({ requests: [] }));
+      .mockResolvedValueOnce(response({ requests: [] }))
+      // 6번째 마운트 fetch — MemberQuotaSection 목록(사용자 섹션 뒤에 렌더).
+      .mockResolvedValueOnce(response({ policies: [] }));
     vi.stubGlobal("fetch", fetchMock);
 
     render(<MemoryRouter><AdminConsole /></MemoryRouter>);

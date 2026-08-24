@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
+import { MemberQuotaSection } from "./MemberQuotaSection";
 import {
   ApiError,
   approveAdminSignup,
@@ -232,6 +233,10 @@ export function AdminConsole() {
         <p>사용자와 프로젝트 메타데이터를 관리하고, 필요한 경우에만 감사되는 읽기 권한을 발급합니다.</p>
       </header>
 
+      {/* header 안에 넣으면 .page-heading > p:last-child 가 소개 문단에 안
+          걸린다 — 링크는 header 밖이 정위치다. */}
+      <Link className="section-link" to="/">서비스로 이동</Link>
+
       {error !== null && <p className="alert" role="alert">{error}</p>}
       {notice !== null && <p className="status-copy" role="status">{notice}</p>}
       {loading && <p className="status-copy">관리 정보를 불러오는 중…</p>}
@@ -268,6 +273,8 @@ export function AdminConsole() {
               ))}
             </ul>
           </section>
+
+          <MemberQuotaSection />
 
           <section className="admin-section" aria-labelledby="admin-signups-heading">
             <h2 id="admin-signups-heading">가입 요청</h2>

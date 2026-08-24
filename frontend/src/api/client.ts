@@ -234,6 +234,56 @@ export function rejectAdminSignup(
   );
 }
 
+// 회원 quota 운영(Phase 8.5, 2026-08-24): 조회 2종 + 변경 3종. 변경은 전부
+// 감사 사유가 필수다(D3=ⓑ). 한도 변경은 두 창을 **통째로 대체**하므로 호출하는
+// 쪽에서 변경 없는 창도 현재 유효값을 함께 실어야 한다(한 창만 보내면 다른
+// 창이 null=무제한이 된다 — routers/admin.py change_quota_limits).
+export type AdminQuotaPolicy = components["schemas"]["AdminQuotaPolicyPayload"];
+export type AdminQuotaPolicyDetail =
+  components["schemas"]["AdminQuotaPolicyDetailResponse"];
+
+export function listAdminQuotaPolicies(): Promise<
+  components["schemas"]["AdminQuotaPolicyListResponse"]
+> {
+  return request("/admin/quota-policies");
+}
+
+export function getAdminQuotaPolicy(
+  userId: string,
+): Promise<AdminQuotaPolicyDetail> {
+  return request(`/admin/quota-policies/${encodeURIComponent(userId)}`);
+}
+
+export function changeAdminQuotaLimits(
+  userId: string,
+  body: components["schemas"]["AdminQuotaLimitsChangeRequest"],
+): Promise<AdminQuotaPolicyDetail> {
+  return request(`/admin/quota-policies/${encodeURIComponent(userId)}/limits`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function suspendAdminQuota(
+  userId: string,
+  reason: string,
+): Promise<AdminQuotaPolicyDetail> {
+  return request(`/admin/quota-policies/${encodeURIComponent(userId)}/suspend`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export function activateAdminQuota(
+  userId: string,
+  reason: string,
+): Promise<AdminQuotaPolicyDetail> {
+  return request(`/admin/quota-policies/${encodeURIComponent(userId)}/activate`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+}
+
 export function listAdminProjects(): Promise<components["schemas"]["AdminProjectListResponse"]> {
   return request("/admin/projects");
 }
