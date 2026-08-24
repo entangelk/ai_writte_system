@@ -89,6 +89,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/quota-policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Quota Policies */
+        get: operations["list_quota_policies_admin_quota_policies_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/quota-policies/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Quota Policy */
+        get: operations["read_quota_policy_admin_quota_policies__user_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/quota-policies/{user_id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Activate Quota */
+        post: operations["activate_quota_admin_quota_policies__user_id__activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/quota-policies/{user_id}/limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Change Quota Limits */
+        post: operations["change_quota_limits_admin_quota_policies__user_id__limits_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/quota-policies/{user_id}/suspend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Suspend Quota */
+        post: operations["suspend_quota_admin_quota_policies__user_id__suspend_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/signup-requests": {
         parameters: {
             query?: never;
@@ -1385,6 +1470,115 @@ export interface components {
             name: string;
             /** Owner Id */
             owner_id: string | null;
+        };
+        /**
+         * AdminQuotaLimitsChangeRequest
+         * @description 8.5-b — 한도 변경(D2=ⓐ: 발효는 도메인 P6). 둘 중 하나만 바꿀 수 있고
+         *     ``None`` 은 그 창의 무제한이다. **둘 다 미지정은 400**(브리프 §5).
+         *
+         *     ``StrictInt`` — 검증 B1(2026-08-23, 오너 ⓐ): lax coercion 은 ``"77"``을
+         *     77 로, ``true`` 를 **1 로 변환해 축소 예약까지 만들었다**. 숫자 문자열·
+         *     불·소수는 전부 422 로 차단한다(음수·미지정은 라우터의 400 과 갈린다).
+         */
+        AdminQuotaLimitsChangeRequest: {
+            /** Daily Limit */
+            daily_limit?: number | null;
+            /** Reason */
+            reason: string;
+            /** Weekly Limit */
+            weekly_limit?: number | null;
+        };
+        /**
+         * AdminQuotaPendingPayload
+         * @description 8.5-a — 아직 발효하지 않은 예약 변경만 실은다(P6).
+         *
+         *     지나간 예약(``effective_at`` 이 지난 pending)은 어디에도 "대기 중"으로 보이면
+         *     안 된다 — 검증 H2. 이 모델에 실리기 직전에 발효 여부로 거른다.
+         */
+        AdminQuotaPendingPayload: {
+            /** Daily Limit */
+            daily_limit: number | null;
+            /**
+             * Effective At
+             * Format: date-time
+             */
+            effective_at: string;
+            /** Status */
+            status: string;
+            /** Weekly Limit */
+            weekly_limit: number | null;
+        };
+        /**
+         * AdminQuotaPolicyDetailResponse
+         * @description 8.5-a — 상세 (operation 81).
+         *
+         *     ``stored_*`` 는 **진단용 원본 행**이고 유효 한도는 부모의 ``daily``/``weekly``
+         *     이다 — 둘을 갈라 놓는 것이 이 endpoint 의 존재 이유다(H2: ``policy.limits`` 를
+         *     그대로 내놓으면 만료된 예약이 "아직 대기 중"으로 보인다). 정책 행이 없는 회원은
+         *     ``stored_*`` 가 ``None`` 이고 유효 한도는 코드 기본 해석이다.
+         */
+        AdminQuotaPolicyDetailResponse: {
+            daily: components["schemas"]["QuotaWindowPayload"];
+            /** Has Pending */
+            has_pending: boolean;
+            /** Is Active */
+            is_active: boolean;
+            pending: components["schemas"]["AdminQuotaPendingPayload"] | null;
+            /** Remaining */
+            remaining: number | null;
+            /** Status */
+            status: string;
+            /** Stored Daily Limit */
+            stored_daily_limit: number | null;
+            /** Stored Weekly Limit */
+            stored_weekly_limit: number | null;
+            /** Unlimited */
+            unlimited: boolean;
+            /** Updated At */
+            updated_at: string | null;
+            /** User Id */
+            user_id: string;
+            /** Username */
+            username: string;
+            weekly: components["schemas"]["QuotaWindowPayload"];
+        };
+        /** AdminQuotaPolicyListResponse */
+        AdminQuotaPolicyListResponse: {
+            /** Policies */
+            policies: components["schemas"]["AdminQuotaPolicyPayload"][];
+        };
+        /**
+         * AdminQuotaPolicyPayload
+         * @description 8.5-a — 관리자가 보는 회원 정책·사용량 요약 (operation 80).
+         *
+         *     ``remaining``/``daily``/``weekly`` 는 ``/me/quota`` 와 **같은 snapshot 정의**다 —
+         *     관리자 화면이 회원 화면과 다른 산식을 말하면 지원 대화가 성립하지 않는다.
+         */
+        AdminQuotaPolicyPayload: {
+            daily: components["schemas"]["QuotaWindowPayload"];
+            /** Has Pending */
+            has_pending: boolean;
+            /** Is Active */
+            is_active: boolean;
+            /** Remaining */
+            remaining: number | null;
+            /** Status */
+            status: string;
+            /** Unlimited */
+            unlimited: boolean;
+            /** User Id */
+            user_id: string;
+            /** Username */
+            username: string;
+            weekly: components["schemas"]["QuotaWindowPayload"];
+        };
+        /**
+         * AdminQuotaSuspendRequest
+         * @description 8.5-b — 정지·해제(즉시). 사유는 감사 행에 그대로 남는다(D3=ⓑ).
+         */
+        AdminQuotaSuspendRequest: {
+            /** Reason */
+            reason: string;
         };
         /** AdminSignupListResponse */
         AdminSignupListResponse: {
@@ -2768,6 +2962,360 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    list_quota_policies_admin_quota_policies_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminQuotaPolicyListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    read_quota_policy_admin_quota_policies__user_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminQuotaPolicyDetailResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    activate_quota_admin_quota_policies__user_id__activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminQuotaSuspendRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminQuotaPolicyDetailResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    change_quota_limits_admin_quota_policies__user_id__limits_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminQuotaLimitsChangeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminQuotaPolicyDetailResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    suspend_quota_admin_quota_policies__user_id__suspend_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminQuotaSuspendRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminQuotaPolicyDetailResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
