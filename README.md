@@ -86,11 +86,11 @@
 |---|---|---|
 | **① 결정 브리프** — 선택지 표(`선택지·설명·장점·단점`) + 구현자 추천 + 유예 항목을 적고 **멈춘다**. 추측 구현 금지 | [`docs/plans/`](docs/plans/README.md) | **93개** |
 | **② 구현 + 회귀 가드** — 가드는 **양방향**이어야 한다: 원래 결함을 재현하면 실패(under-strict), 과잉 교정으로 정상 경로를 깨도 실패(over-strict) | `tests/` | **2,316 passed / 2,654 subtests** |
-| **③ 독립 검증** — 구현자가 아닌 세션이 **뮤테이션**(고친 것을 되돌려 회귀가 다시 실패하는지)으로 반증을 시도한다 | [`docs/verifications/`](docs/verifications/README.md) | **255건 / 55일치** |
+| **③ 독립 검증** — 구현자가 아닌 세션이 **뮤테이션**(고친 것을 되돌려 회귀가 다시 실패하는지)으로 반증을 시도한다 | [`docs/verifications/`](docs/verifications/README.md) | **256건 / 56일치** |
 | **④ 정본 개정** — 계약이 바뀌면 SoT 버전을 올리고 **변경 이유와 근거 링크**를 남긴다 | [`docs/system-contract-sot.md`](docs/system-contract-sot.md) | **v1.8.4**, 변경이력 전량 보존 |
 | **⑤ 인수인계** — 다음 작업자가 시간을 잃지 않도록 **함정**을 기록한다 | [`HANDOFF.md`](HANDOFF.md) · [`docs/daily_logs/`](docs/daily_logs/) | 일자별 |
 
-**검증 판정 분포는 합격 182 · 조건부 합격 71 · 불합격 2**다. **조건부 합격이 28%**라는 것이
+**검증 판정 분포는 합격 183 · 조건부 합격 71 · 불합격 2**다. **조건부 합격이 28%**라는 것이
 이 절차가 형식적 통과가 아니라는 증거이며, 각 지적은 후속 커밋에서 닫힌다.
 
 ### 평가자를 위한 짧은 경로
@@ -310,7 +310,7 @@ CHANGELOG 작성 규칙 · [`docs/guides/verification.md`](docs/guides/verificat
 | 제품 한 장 요약 (기획 진입점) | [`docs/product-overview.md`](docs/product-overview.md) |
 | 정본 계약(먼저 읽기) | [`docs/system-contract-sot.md`](docs/system-contract-sot.md) |
 | 계획 · 결정 브리프 인덱스 (111개) | [`docs/plans/README.md`](docs/plans/README.md) |
-| 독립 검증 기록 (255건) | [`docs/verifications/README.md`](docs/verifications/README.md) |
+| 독립 검증 기록 (256건) | [`docs/verifications/README.md`](docs/verifications/README.md) |
 | 현재 상태 스냅샷 | [`HANDOFF.md`](HANDOFF.md) |
 | 마일스톤 이력 | [`CHANGELOG.md`](CHANGELOG.md) |
 | 일자별 작업 이력 | [`docs/daily_logs/`](docs/daily_logs/) |
