@@ -180,10 +180,17 @@ SoT v1.8.4 행·CHANGELOG·HANDOFF(5-d 행+마감 메모)·브리프 상태줄 �
   것이 SoT 인용 문구의 수명을 보장한다. (어휘 "남은 사용 N회"는 제품쪽
   `WritingPanel.test.tsx:1098` 선례대로 이번에 관리자쪽도 고정했는데, 정적 힌트를 화면에
   낸 것 자체가 이번이 처음이라 선례가 없던 자리다.)
+  **[→ 폐쇄 2026-08-24 `e32e9b2`]** — 패널 열기 셀("loads the member detail…")에
+  `getByText` 정확 문구 단정 추가. 뮤테이션(힌트 문구 삭제) 재실패 확인 — 정확히 그
+  1셀만 실패. 서사 [`daily_logs/2026-08-24/work_log.md`](../../daily_logs/2026-08-24/work_log.md) 세션 2.
 - **H2 — 링크 위치 미고정**: 링크는 존재+`href="/"`만 단정된다. "머리글 바로 아래"(
   `</header>` 뒤)는 DOM 순서 단정이 없어, header 안으로 옮겨져도(.page-heading 스타일이
   깨지는 그 배치) 테스트는 녹색이다. 작업자가 올린 주석의 이유가 사라지는 변화를 잡으려면
   순서 단정이 필요하다.
+  **[→ 폐쇄 2026-08-24 `e32e9b2`]** — 렌더 셀("loads users, project metadata…")에
+  `heading.closest("header").nextElementSibling === link` 단정 추가(머리글의 바로 다음
+  형제). 뮤테이션(링크를 header 안으로 이동 — 이 항목이 지목한 그 배치) 재실패 확인 —
+  정확히 그 1셀만 실패.
 
 ## Verdict
 
