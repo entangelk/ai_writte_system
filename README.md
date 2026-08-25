@@ -19,6 +19,9 @@
 | **[개발](#개발--어떻게-만들어졌는가-설계-결정과-검증)** | 결정을 어떻게 내리고 어떻게 검증하는가 | [`docs/system-contract-sot.md`](docs/system-contract-sot.md) · [`docs/plans/README.md`](docs/plans/README.md) |
 | **[서비스](#서비스--어떻게-돌리고-지켜보는가)** | 어떻게 띄우고, 무엇을 보고, 어떻게 고치는가 | [`HANDOFF.md`](HANDOFF.md) · [`docs/runbooks/local-llama-server.md`](docs/runbooks/local-llama-server.md) |
 
+> **채용·평가 목적으로 왔다면 [`docs/portfolio.md`](docs/portfolio.md)부터** — 시간 예산별(5분·30분·2시간)
+> 읽기 경로, 대표 사례 해설, 증거 지도가 있다.
+
 ---
 
 ## 기획 — 무엇을, 왜 만드는가

@@ -5,6 +5,7 @@
 
 | 성격 | 어디 | 무엇이 쌓이나 |
 |---|---|---|
+| **포트폴리오** | [`portfolio.md`](portfolio.md) | 평가자용 안내 — 시간 예산별 읽기 경로·하이라이트·증거 지도 |
 | **기획** | [`product-overview.md`](product-overview.md) · [`observability-kpi-rationale.md`](observability-kpi-rationale.md) · [`plans/00-foundations.md`](plans/00-foundations.md) · [`plans/product-readiness-backlog.md`](plans/product-readiness-backlog.md) · (원본) [`abstract.md`](abstract.md) | 제품 컨셉·MVP 범위·설계 원칙·운영 KPI의 근거 |
 | **계약** | [`system-contract-sot.md`](system-contract-sot.md) | 확정된 계약의 **현재 정본**과 버전별 변경 이유 |
 | **결정** | [`plans/README.md`](plans/README.md) | Phase 계획 + 착수 결정 브리프 90개 |
