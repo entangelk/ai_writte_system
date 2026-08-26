@@ -82,6 +82,10 @@ const MIGRATED: Record<string, string> = {
   ".writing-confirm-actions button": "meta",
   ".candidate-summary": "meta",
 
+  // 2026-08-26 — 스크래치 패드(항목별 채택·버리기)와 오버레이 드로어 표면.
+  ".scratch-recovery-note": "meta",
+  ".rail-dock button": "meta",
+
   ".back-link": "small",
   ".version-empty": "small",
   ".empty-state span, .status-copy, .read-only-note": "small",
@@ -97,13 +101,18 @@ const MIGRATED: Record<string, string> = {
   ".generation-pad-failed": "small",
   ".writing-confirm p": "small",
   ".review-link": "small",
+  ".scratch-recovery-lead": "small",
+  ".scratch-recovery-error": "small",
+  ".scratch-recovery-gate": "small",
 
   ".page-heading > p:last-child": "base",
 
   ".editor-form textarea": "reading",
   ".candidate-text": "reading",
+  ".scratch-recovery-text": "reading",
 
   ".rail-section-heading h2": "subhead",
+  ".rail-drawer-title": "subhead",
   ".version-panel-heading h2": "panel",
 
   // 10.4 — 화면 제목은 전 표면이 한 계단을 쓴다. 종전에는 `.page-heading h1`

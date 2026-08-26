@@ -220,7 +220,7 @@ a {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  max-width: 68rem;
+  max-width: 76rem;
   margin: 0 auto;
   padding: 1.6rem 2rem 1.1rem;
   border-bottom: 1px solid var(--border-hairline);
@@ -304,7 +304,7 @@ a {
 }
 
 .header-alert {
-  max-width: 68rem;
+  max-width: 76rem;
   margin: 0 auto;
   padding: 0.75rem 2rem;
   color: var(--state-danger-text);
@@ -312,7 +312,7 @@ a {
 }
 
 main {
-  max-width: 68rem;
+  max-width: 76rem;
   margin: 0 auto;
   padding: 0 2rem 5rem;
 }
@@ -515,14 +515,16 @@ main {
 
    그리고 **오른쪽 가장자리가 안 맞았다**: 왼쪽은 전부 208px 로 맞는데 오른쪽이
    헤더 1232 · 편집기 1232 · 관리자 1200 · 나머지 **1040**(192px 모자람)이었고
-   규칙이 적힌 곳은 없었다. 이제 셋 다 헤더와 같은 **68rem** 이다.
+   규칙이 적힌 곳은 없었다. 이제 셋 다 헤더와 같은 폭을 쓴다 — 10.4 에서 68rem,
+   2026-08-26 오너 결정으로 **76rem** 으로 넓혔다(전체 페이지 적용; pageLayout
+   가드가 네 리터럴의 일치를 핀하므로 변수화하지 않는다).
 
    ★ 좁은 측정폭이 필요한 블록은 **스스로** 제한한다(`.page-heading` 42rem ·
    그 설명문단 34rem) — 컨테이너를 좁혀서 얻지 않는다. 그래야 정렬과 가독성이
    서로를 깎지 않는다. */
 .workspace-page,
 .admin-page {
-  width: min(100%, 68rem);
+  width: min(100%, 76rem);
   padding-top: clamp(var(--space-8), 4vw, 3rem);
 }
 
