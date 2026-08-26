@@ -701,6 +701,25 @@ export function listWritingScratch(
   );
 }
 
+export interface ScratchItemDiscardResponse {
+  project_id: string;
+  scratch_id: string;
+  deleted: boolean;
+}
+
+// Per-item [버리기] (2026-08-26): retire exactly one scratch entry; siblings
+// survive. Unknown id or another project's id → 404 (project-scoped like the
+// job endpoints); the UI treats failure as "restore the optimistic removal".
+export function discardWritingScratchItem(
+  projectId: string,
+  scratchId: string,
+): Promise<ScratchItemDiscardResponse> {
+  return request(
+    `/projects/${projectId}/writing/scratch/${encodeURIComponent(scratchId)}`,
+    { method: "DELETE" },
+  );
+}
+
 // K-4 (프론트 글자수 표시·경고): R-a 유도 예산을 per-preset(short/medium/long) 토큰으로
 // 받아 카운터의 경고 기준으로 쓴다 — 고정 상수(8192)가 아니라 배포·출력 프리셋을 따라간다.
 export function getWritingContextBudget(

@@ -17,12 +17,12 @@ import {
   type WritingLoopStage,
   type WritingGenerationJob,
   type WritingReviseGatePartial,
-  type MyQuota,
   type WritingReviseRequest,
 } from "../api/client";
 import { describeRemaining, useMemberQuota } from "../quota/useMemberQuota";
 import { useWritingBudget } from "./useWritingBudget";
 import { estimateTokens, formatInstructionCount } from "./tokenEstimate";
+import { confirmPrompt, formatResetMoment } from "./quotaConfirm";
 
 // continue_scene emits a draft_patch (writing-workspace brief §확인된 계약). These
 // are fixed for the C1 slice; a later slice may expose other task/output types.
@@ -32,8 +32,9 @@ const OUTPUT_TYPE = "draft_patch";
 // 이 값을 실어 보내므로 서버 기본값만 올리면 제품에는 아무 효과가 없다(K-1(a) 착수 시 실측으로
 // 확인했다). 근거는 `main.py::DEFAULT_CONTEXT_BUDGET_TOKENS` 주석에 있다: 4096은 동기 생성
 // 시절의 값이고, 회계가 한글 실측(`len/1.7`)으로 정직해지면서 같은 숫자의 실제 분량이 절반이
-// 됐기 때문에 8192가 종전 실효 분량을 유지하는 짝이다.
-const MAX_TOKENS = 8192;
+// 됐기 때문에 8192가 종전 실효 분량을 유지하는 짝이다. ScratchRecovery(패드 채택)가 같은
+// 값을 쓴다.
+export const MAX_TOKENS = 8192;
 // 400/404/422 are definitive rejections: the candidate can never be accepted
 // with the same body, so the bound idempotency key is discarded. 409 (stale
 // base) is handled separately, and transport/5xx preserve the key for retry.
@@ -109,7 +110,8 @@ function availabilityOf(
   return { blocked: false };
 }
 
-const DECISION_LABEL: Record<string, string> = {
+// 패드(ScratchRecovery)의 채택 반려 안내가 같은 라벨을 쓴다.
+export const DECISION_LABEL: Record<string, string> = {
   pass: "채택 가능 (pass)",
   revise: "수정 필요 (revise)",
   retrieve_more: "추가 근거 필요 (retrieve_more)",
@@ -161,35 +163,6 @@ const STAGE_STATUS_LABEL: Record<WritingLoopStage["status"], string> = {
   failed: "실패",
   no_change: "변화 없음",
 };
-
-/**
- * 중복 확인 문구 (8.4 W3=A · 8.2b §0.4).
- *
- * 성격이 계약이다 — **꾸짖지 않고, 의도를 묻고, 대가를 알린다.** "중복 요청입니다"는
- * 정당한 사용자를 실수한 사람으로 단정한다. 이 제품에서 같은 지시로 다른 안을
- * 받는 것은 정상 사용이고, 서버는 그 통로를 확인 하나로 열어 둔다(G4=A).
- */
-function confirmPrompt(quota: MyQuota | null): string {
-  const remaining =
-    quota !== null && !quota.unlimited && quota.remaining !== null
-      ? ` (이번 창 잔여 ${quota.remaining}회)`
-      : "";
-  return `방금 같은 요청을 보냈습니다. 하나 더 만들까요? 새로 만들면 사용량이 1회 더 듭니다.${remaining}`;
-}
-
-/** 402 안내에 붙일 초기화 시각. 두 창 중 **먼저 오는 쪽**이 실제 회복 시점이다. */
-function formatResetMoment(quota: MyQuota): string {
-  const moments = [quota.daily.resets_at, quota.weekly.resets_at]
-    .map((value) => new Date(value))
-    .filter((value) => !Number.isNaN(value.getTime()));
-  if (moments.length === 0) {
-    return "초기화 시각 미상";
-  }
-  const soonest = new Date(Math.min(...moments.map((m) => m.getTime())));
-  return soonest.toLocaleString("ko-KR", {
-    month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit",
-  });
-}
 
 function occurrences(text: string, evidence: string): number {
   return evidence === "" ? 0 : text.split(evidence).length - 1;

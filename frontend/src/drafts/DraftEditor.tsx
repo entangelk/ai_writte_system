@@ -650,6 +650,12 @@ export function DraftEditor() {
                       projectId={projectId}
                       draftId={draftId}
                       refreshKey={scratchRefresh}
+                      dirty={dirty}
+                      readOnly={readOnly}
+                      onAccepted={() => {
+                        setScratchRefresh((n) => n + 1);
+                        void reloadLatest();
+                      }}
                     />
                     <WritingPanel
                       projectId={projectId}

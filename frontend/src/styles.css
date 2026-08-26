@@ -2033,6 +2033,94 @@ main {
   }
 }
 
+/* 스크래치 복구 패드 (2026-08-26 항목별 채택·버리기). 핵심은 .scratch-recovery-text:
+   pre의 기본 white-space:pre가 긴 문단을 가로 스크롤로 밀어내 검토를 막았다 —
+   .candidate-text와 같은 pre-wrap으로 세로로 흐르게 한다. */
+.scratch-recovery {
+  margin: 0 0 1.4rem;
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+}
+
+.scratch-recovery-lead {
+  margin: 0;
+  font-size: var(--type-small);
+  color: var(--text-muted);
+}
+
+.scratch-recovery-error {
+  margin: 0;
+  font-size: var(--type-small);
+  color: var(--state-danger-text);
+}
+
+.scratch-recovery-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-4);
+}
+
+.scratch-recovery-item {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--surface-sunken);
+  border-left: 2px solid var(--action-primary);
+  border-radius: var(--radius-sm);
+}
+
+.scratch-recovery-text {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: var(--type-reading);
+  line-height: 1.85;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.scratch-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.scratch-recovery-actions button {
+  padding: 0.45rem 0.9rem;
+}
+
+.scratch-recovery-note {
+  margin: 0;
+  font-size: var(--type-meta);
+  color: var(--text-muted);
+}
+
+.scratch-recovery-gate {
+  display: grid;
+  gap: var(--space-1);
+  font-size: var(--type-small);
+}
+
+.scratch-recovery-gate p {
+  margin: 0;
+}
+
+.scratch-recovery-gate ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--text-muted);
+}
+
+.scratch-recovery-discard {
+  justify-self: start;
+  padding: 0.45rem 0.9rem;
+}
+
 .writing-error {
   display: flex;
   align-items: center;

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DraftEditor } from "./DraftEditor";
+import { resetMemberQuota, seedMemberQuota } from "../quota/useMemberQuota";
 
 type MockResponse = { status?: number; body: unknown };
 
@@ -125,6 +126,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  resetMemberQuota();
   Reflect.deleteProperty(URL, "createObjectURL");
   Reflect.deleteProperty(URL, "revokeObjectURL");
 });
@@ -805,6 +807,91 @@ describe("DraftEditor", () => {
     expect(screen.getByText("현재 version 4")).toBeInTheDocument();
     expect(fetchMock.mock.calls[6][0]).toBe("/api/projects/p1/writing/accept");
     expect(fetchMock.mock.calls[7][0]).toBe("/api/projects/p1/drafts/d1/versions");
+  });
+
+  it("reloads the editor to the new latest after a PAD item is accepted (패드 채택 배선)", async () => {
+    // Same seam as the WritingPanel accept above, driven from the recovery
+    // pad: an async-generated candidate living in scratch is 채택'd there, and
+    // the editor must reload the saved version (scratchRefresh + reloadLatest).
+    seedMemberQuota({
+      remaining: 7, unlimited: false, status: "active",
+      daily: { limit: 20, used: 13, remaining: 7, resets_at: null },
+      weekly: { limit: 100, used: 41, remaining: 59, resets_at: null },
+    } as never);
+    const version4 = { ...version1, id: "v4", version_number: 4, snapshot_id: "s4" };
+    const padItem = {
+      id: "wds:1", draft_id: "d1", request_id: "wr1",
+      task_type: "continue_scene", output_type: "draft_patch",
+      instruction: "이어서", candidate_text: "복구된 문단.",
+      intent: null, version_id: "v1", created_at: "2026-07-20T00:00:00Z",
+    };
+    const acceptBody = {
+      accepted: true,
+      gate: {
+        request_id: "wr1", project_id: "p1", decision: "pass", findings: [],
+        checked_constraints: [], evaluated_by_model: "fake-gate",
+      },
+      saved: {
+        draft_version_id: "v4", version_number: 4, snapshot_id: "s4",
+        content_hash: "h4",
+      },
+      analysis_job: {
+        id: "j1", project_id: "p1", snapshot_id: "s4", status: "pending",
+        failure_reason: null, failure_detail: null,
+      },
+      idempotent_replay: false,
+    };
+    const fetchMock = vi.fn();
+    for (const next of [
+      { body: project },
+      { body: draft },
+      { body: { versions: [version1] } },
+      { body: detail(version1, "기존.") },
+      { body: acceptBody },
+      { body: { versions: [version1, version4] } },
+      { body: detail(version4, "기존.\n\n복구된 문단.") },
+    ]) {
+      fetchMock.mockResolvedValueOnce(response(next));
+    }
+    // Local stub: the scratch LIST (GET) serves the pad item — the file-level
+    // stubFetch always answers empty, which this test must override.
+    vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
+      if (
+        typeof url === "string" && url.includes("/writing/scratch") &&
+        init?.method !== "DELETE"
+      ) {
+        return Promise.resolve(
+          response({ body: { project_id: "p1", draft_id: "d1", items: [padItem] } }),
+        );
+      }
+      if (typeof url === "string" && url.includes("/writing/budget")) {
+        return Promise.resolve(
+          response({
+            body: {
+              project_id: "p1",
+              context_budget_tokens: { short: 8192, medium: 8192, long: 8192 },
+            },
+          }),
+        );
+      }
+      return fetchMock(url, init);
+    });
+
+    renderEditor();
+    await screen.findByText("복구된 문단.");
+    await userEvent.click(screen.getByRole("button", { name: "채택" }));
+
+    // The editor reloaded to the version the pad accept saved.
+    await waitFor(() =>
+      expect(screen.getByLabelText("원고 본문")).toHaveValue(
+        "기존.\n\n복구된 문단.",
+      ),
+    );
+    expect(screen.getByText("현재 version 4")).toBeInTheDocument();
+    const acceptCall = fetchMock.mock.calls.find(
+      ([url]) => String(url).endsWith("/writing/accept"),
+    );
+    expect(acceptCall?.[0]).toBe("/api/projects/p1/writing/accept");
   });
 
   it("confirms before an accept discards unsaved editor edits, and cancel keeps them (미저장 편집 결손 fix)", async () => {
