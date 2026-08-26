@@ -3,8 +3,8 @@
 오너 결정 2026-08-09. 선례는 `test_billable_actions.py`(유료 분류)·
 `test_compose_exposure.py`(포트 분류)이고 형태도 같다 — **표가 정본이고 가드가 강제**다.
 
-**왜 40 전수인가**(A2 확정 조건 ①). 오너가 B 를 고른 것은 범위 판단이지 C 의 각하가
-아니다. 기록하지 않는 20 경로까지 **사유와 함께** 등재돼야 "빠진 것"과 "일부러 뺀 것"이
+**왜 41 전수인가**(A2 확정 조건 ①). 오너가 B 를 고른 것은 범위 판단이지 C 의 각하가
+아니다. 기록하지 않는 21 경로까지 **사유와 함께** 등재돼야 "빠진 것"과 "일부러 뺀 것"이
 구분되고, **C 로 넓히는 일이 `ai_request` 행의 값을 바꾸는 것**으로 끝난다.
 
 **양방향으로 문다**:
@@ -98,7 +98,7 @@ class ActivityActionClassificationTest(unittest.TestCase):
             if excluded.reason == "ai_request"
         }
 
-        self.assertEqual(len(ai_requests), 13)
+        self.assertEqual(len(ai_requests), 14)
         self.assertTrue(all(
             EXCLUDED_BY_OPERATION[operation].note
             for operation in ai_requests

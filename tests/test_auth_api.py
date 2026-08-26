@@ -1850,8 +1850,10 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # 더해 79 가 됐다 — 요청은 누구나, 승인은 관리자.
         # Phase 8.5-a/b(2026-08-23)가 quota 운영 5종을 admin tier 에 더해 87 이
         # 됐다(ADMIN 11→16).
-        self.assertEqual(len(by_tier["project"]), 62)
-        self.assertEqual(len(tiers), 87)  # 8.5-b: quota 변경·정지 3종
+        # 스크래치 항목별 버리기(2026-08-26)가 project tier 에 DELETE 를 더해
+        # 63/88 이 됐다 — 패드의 [버리기] 를 위한 개별 항목 경로.
+        self.assertEqual(len(by_tier["project"]), 63)
+        self.assertEqual(len(tiers), 88)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:

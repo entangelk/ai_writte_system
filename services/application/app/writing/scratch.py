@@ -60,6 +60,7 @@ class WritingScratchRepository(Protocol):
     def delete_for_request(
         self, project_id: str, draft_id: str, request_id: str
     ) -> int: ...
+    def delete_one(self, project_id: str, scratch_id: str) -> bool: ...
     def delete_ids(self, ids: tuple[str, ...]) -> None: ...
 
     def purge_project(self, project_id: str) -> None: ...
@@ -102,6 +103,16 @@ class InMemoryWritingScratchRepository:
         for entry_id in victims:
             del self.entries[entry_id]
         return len(victims)
+
+    def delete_one(self, project_id: str, scratch_id: str) -> bool:
+        # Per-item explicit discard (2026-08-26 dogfood). Scoped by project —
+        # the pad only ever names its own project's ids, and a cross-project id
+        # must read as "not found", same isolation as the job endpoints.
+        entry = self.entries.get(scratch_id)
+        if entry is None or entry.project_id != project_id:
+            return False
+        del self.entries[scratch_id]
+        return True
 
     def delete_ids(self, ids: tuple[str, ...]) -> None:
         for entry_id in ids:
@@ -178,6 +189,12 @@ class WritingScratchService:
         # recoverable (they remain valuable to copy — the pad's reason to exist).
         # No matching entry → no-op (returns 0).
         return self._repo.delete_for_request(project_id, draft_id, request_id)
+
+    def discard_item(self, project_id: str, scratch_id: str) -> bool:
+        # Per-item explicit discard — the pad's [버리기]. Retires exactly one
+        # entry by id; siblings survive (same D2=A spirit as accept-clear).
+        # Unknown id or another project's id → False (caller maps to 404).
+        return self._repo.delete_one(project_id, scratch_id)
 
     def _trim(self, project_id: str, draft_id: str) -> None:
         # Keep only the newest ``max_per_draft`` entries; drop the oldest excess.

@@ -12,6 +12,8 @@ D2=A, 2026-07-20). Locks the pre-dogfood safety net both directions:
   accept leaves it intact (over-strict: the user can still recover the bounced
   draft).
 - list/discard HTTP surfaces + project 404.
+- per-item discard (2026-08-26 dogfood): one named entry retires by id,
+  siblings and cross-project entries survive (under/over both pinned).
 
 Retention values here are the provisional implementer decision pending owner
 SoT ratification (see the brief's "잠정 보존/만료 정책").
@@ -128,6 +130,37 @@ class ScratchServiceTest(unittest.TestCase):
         self._saved(svc, "p1", "d1", "유일본")
         self.assertEqual(svc.clear_accepted_item("p1", "d1", "no-such"), 0)
         self.assertEqual(len(svc.list_for_draft("p1", "d1")), 1)
+
+    def test_discard_item_removes_only_the_named_entry(self):
+        # under-strict: the per-item [버리기] retires exactly the named entry;
+        # siblings stay recoverable (same D2=A spirit as accept-clear).
+        svc = _service_with(InMemoryWritingScratchRepository())
+        svc.save(project_id="p1", draft_id="d1", request_id="wr1",
+                 task_type="continue_scene", output_type="draft_patch",
+                 instruction="이어서", candidate_text="버릴 것")
+        svc.save(project_id="p1", draft_id="d1", request_id="wr2",
+                 task_type="continue_scene", output_type="draft_patch",
+                 instruction="이어서", candidate_text="남을 것")
+        self.assertTrue(svc.discard_item("p1", "wds:1"))
+        self.assertEqual(
+            [e.candidate_text for e in svc.list_for_draft("p1", "d1")],
+            ["남을 것"])
+
+    def test_discard_item_unknown_or_cross_project_returns_false(self):
+        # over-strict: an unknown id — or another project's id — is a no-op that
+        # reports False; the store must be unchanged. Project scoping mirrors
+        # the job endpoints' "belongs to another project" isolation.
+        svc = _service_with(InMemoryWritingScratchRepository())
+        svc.save(project_id="p1", draft_id="d1", request_id="wr1",
+                 task_type="continue_scene", output_type="draft_patch",
+                 instruction="이어서", candidate_text="p1 항목")
+        svc.save(project_id="p2", draft_id="d1", request_id="wr2",
+                 task_type="continue_scene", output_type="draft_patch",
+                 instruction="이어서", candidate_text="p2 항목")
+        self.assertFalse(svc.discard_item("p1", "wds:9"))
+        self.assertFalse(svc.discard_item("p1", "wds:2"))
+        self.assertEqual(len(svc.list_for_draft("p1", "d1")), 1)
+        self.assertEqual(len(svc.list_for_draft("p2", "d1")), 1)
 
     def test_clear_draft_removes_all_and_returns_count(self):
         svc = _service_with(InMemoryWritingScratchRepository())
@@ -349,6 +382,72 @@ class ScratchListDiscardHttpTest(unittest.TestCase):
         discard = client.delete(
             "/projects/nope/writing/scratch", params={"draft_id": "d1"})
         self.assertEqual(discard.status_code, 404)
+
+
+class ScratchItemDiscardHttpTest(unittest.TestCase):
+    def _app_with_seeded(self):
+        # Two projects, each with one scratch entry: p1 owns wds:1, p2 owns
+        # wds:2 (the shared _id_seq hands ids out in save order).
+        core = CoreSotService(InMemoryCoreSotRepository())
+        project = core.create_project(name="Novel")
+        other = core.create_project(name="Other")
+        scratch = WritingScratchService(
+            InMemoryWritingScratchRepository(),
+            clock=_clock_seq(), id_factory=_id_seq(),
+        )
+        app = create_app(service=core, writing_scratch_service=scratch)
+        authenticate(app)
+        client = _ScratchClient(app)
+        scratch.save(project_id=project.id, draft_id="d1", request_id="wr1",
+                     task_type="continue_scene", output_type="draft_patch",
+                     instruction="이어서", candidate_text="오래된")
+        scratch.save(project_id=project.id, draft_id="d1", request_id="wr2",
+                     task_type="continue_scene", output_type="draft_patch",
+                     instruction="이어서", candidate_text="최신")
+        scratch.save(project_id=other.id, draft_id="d1", request_id="wr3",
+                     task_type="continue_scene", output_type="draft_patch",
+                     instruction="이어서", candidate_text="타 프로젝트")
+        return client, project.id, other.id, scratch
+
+    def test_discard_item_removes_only_the_target(self):
+        # under-strict: 200 + deleted:true, and the sibling survives in the
+        # list — the whole-draft discard must not be reachable from this route.
+        client, project_id, _, _ = self._app_with_seeded()
+        response = client.delete(
+            f"/projects/{project_id}/writing/scratch/wds:1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {
+            "project_id": project_id, "scratch_id": "wds:1", "deleted": True})
+        after = client.get(
+            f"/projects/{project_id}/writing/scratch", params={"draft_id": "d1"})
+        self.assertEqual([i["candidate_text"] for i in after.json()["items"]],
+                         ["최신"])
+
+    def test_discard_item_unknown_id_is_404(self):
+        # over-strict: an unknown id changes nothing — the sibling stays.
+        client, project_id, _, _ = self._app_with_seeded()
+        response = client.delete(
+            f"/projects/{project_id}/writing/scratch/wds:99")
+        self.assertEqual(response.status_code, 404)
+        after = client.get(
+            f"/projects/{project_id}/writing/scratch", params={"draft_id": "d1"})
+        self.assertEqual(len(after.json()["items"]), 2)
+
+    def test_discard_item_id_of_another_project_is_404(self):
+        # over-strict (project isolation): p2's entry must not be reachable
+        # through p1's path, and must survive the attempt.
+        client, project_id, other_id, scratch = self._app_with_seeded()
+        response = client.delete(
+            f"/projects/{project_id}/writing/scratch/wds:3")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            [e.candidate_text for e in scratch.list_for_draft(other_id, "d1")],
+            ["타 프로젝트"])
+
+    def test_discard_item_unknown_project_is_404(self):
+        client, _, _, _ = self._app_with_seeded()
+        response = client.delete("/projects/nope/writing/scratch/wds:1")
+        self.assertEqual(response.status_code, 404)
 
 
 class ScratchAcceptCleanupHttpTest(unittest.TestCase):

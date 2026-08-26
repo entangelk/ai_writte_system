@@ -169,6 +169,37 @@ class MongoWritingScratchRepositoryTest(unittest.TestCase):
             ("wds:d2",),
         )
 
+    def test_delete_one_removes_only_the_named_entry(self):
+        # Per-item discard (2026-08-26). The delete_queries pin is over-strict:
+        # the filter must carry BOTH project_id and _id — a bare-{"_id"} delete
+        # would let one project retire another project's entry.
+        self.repo.add(_entry("wds:drop", minute=1))
+        self.repo.add(_entry("wds:keep", minute=2))
+        self.repo.add(_entry("wds:p2", project="p2", minute=3))
+
+        self.assertTrue(self.repo.delete_one("p", "wds:drop"))
+
+        self.assertEqual(self.collection.delete_queries,
+                         [{"project_id": "p", "_id": "wds:drop"}])
+        self.assertEqual(
+            tuple(e.id for e in self.repo.list_for_draft("p", "d")),
+            ("wds:keep",),
+        )
+        self.assertEqual(
+            tuple(e.id for e in self.repo.list_for_draft("p2", "d")),
+            ("wds:p2",),
+        )
+
+    def test_delete_one_unknown_or_cross_project_returns_false(self):
+        # Over-strict: no match (unknown id, or another project's id) → False
+        # and the document survives untouched.
+        self.repo.add(_entry("wds:p2", project="p2"))
+
+        self.assertFalse(self.repo.delete_one("p", "wds:missing"))
+        self.assertFalse(self.repo.delete_one("p", "wds:p2"))
+
+        self.assertEqual(len(self.repo.list_for_draft("p2", "d")), 1)
+
     def test_delete_ids_removes_named_entries_only(self):
         self.repo.add(_entry("wds:drop", minute=1))
         self.repo.add(_entry("wds:keep", minute=2))

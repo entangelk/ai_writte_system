@@ -1365,3 +1365,26 @@ def register_writing(
             "draft_id": draft_id,
             "deleted": deleted,
         }
+
+    @app.delete("/projects/{project_id}/writing/scratch/{scratch_id}",
+                responses=_owned(_ERRORS_404),
+                dependencies=_REQUIRE_PROJECT_OWNER)
+    async def writing_scratch_discard_item_endpoint(
+        project_id: str, scratch_id: str
+    ) -> dict[str, object]:
+        # Per-item "버리기" (2026-08-26 dogfood): retire exactly one entry by id;
+        # siblings survive. Unknown id or another project's id → 404 — same
+        # "exists but belongs to another project" isolation as the job
+        # endpoints. `deleted` is a bool, not a count: 200 already means
+        # exactly-one (clear_draft's 0..N count semantics don't apply).
+        try:
+            _require_project_exists(project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if not writing_scratch.discard_item(project_id, scratch_id):
+            raise HTTPException(status_code=404, detail="scratch entry not found")
+        return {
+            "project_id": project_id,
+            "scratch_id": scratch_id,
+            "deleted": True,
+        }

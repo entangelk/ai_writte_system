@@ -7,13 +7,13 @@
   가 `writing/accept` 를 더했다 — 아래 그 행의 주석) + 검토 결정 9 = **20 경로**가
   ``logged`` 다. 승격·거절은 원고를 바꾸지 않지만 **기억을 바꾸고**,
   memory 가 append-only 라 이 제품에서 되돌리기가 가장 어려운 종류다.
-- **★ 표는 mutating operation 40 *전수* 다.** 오너가 B 를 고른 것은 범위 판단이지
+- **★ 표는 mutating operation 41 *전수* 다.** 오너가 B 를 고른 것은 범위 판단이지
   C(AI 요청까지)의 각하가 아니므로, **C 로 넓히는 일이 "행 값 하나 바꾸기"여야
-  한다**는 것이 A2 확정 조건이다. 그래서 기록하지 않는 20 경로도 **사유와 함께**
+  한다**는 것이 A2 확정 조건이다. 그래서 기록하지 않는 21 경로도 **사유와 함께**
   여기 등재된다 — 빠진 것과 일부러 뺀 것이 구분돼야 한다.
   ``tests/test_activity_actions.py`` 가 미등재 mutating route 를 실패시킨다.
 - **★ C 를 열 때 A8 을 함께 다시 본다.** A8=A("중복 기록 없음")가 성립하는 근거가
-  *"AI 요청은 활동 로그 밖"* 이라, ``ai_request`` 13 행만 뒤집으면 같은 사건이
+  *"AI 요청은 활동 로그 밖"* 이라, ``ai_request`` 14 행만 뒤집으면 같은 사건이
   ``llm_call_audits``·``request_usage_ledger``·활동 로그 **셋**에 사는 두 정본이 된다.
 - **A8=A — 이미 다른 축이 담는 것은 여기 담지 않는다.** AI 요청은 관측(호출 단위)과
   원장(과금 단위)이, 관리자 행위는 ``admin_audit_events``·``access_grant_uses`` 가
@@ -131,10 +131,10 @@ _REVIEW: tuple[ActivityAction, ...] = (
 #: 기록하는 20.
 ACTIVITY_ACTIONS: tuple[ActivityAction, ...] = _CANONICAL + _REVIEW
 
-#: 기록하지 않는 20 — **사유와 함께**. 이 목록이 있어야 "빠진 것"과 "일부러 뺀 것"이
+#: 기록하지 않는 21 — **사유와 함께**. 이 목록이 있어야 "빠진 것"과 "일부러 뺀 것"이
 #: 구분되고, C 확장이 값 변경으로 끝난다.
 EXCLUDED_OPERATIONS: tuple[ExcludedOperation, ...] = (
-    # --- AI·작업 요청 13 (A2=C 로 넓힐 때 이 행들이 logged 가 된다) -------------
+    # --- AI·작업 요청 14 (A2=C 로 넓힐 때 이 행들이 logged 가 된다) -------------
     #
     # ★ 넓힐 때 A8 을 함께 다시 본다: 지금 "중복 없음"이 성립하는 이유가 이 13 개가
     #   활동 로그 밖이기 때문이다. (`writing/accept` 는 2026-08-09 에 여기서 나갔다 —
@@ -154,6 +154,10 @@ EXCLUDED_OPERATIONS: tuple[ExcludedOperation, ...] = (
                       "ai_request", "같은 논리 요청의 재실행(8.0 B5)"),
     ExcludedOperation("DELETE", "/projects/{project_id}/writing/scratch",
                       "ai_request", "미승인 후보 임시 저장소 비우기 — 정본이 아니다"),
+    ExcludedOperation("DELETE",
+                      "/projects/{project_id}/writing/scratch/{scratch_id}",
+                      "ai_request",
+                      "미승인 후보 임시 저장소 항목 버리기 — 정본이 아니다"),
     ExcludedOperation("POST", "/projects/{project_id}/analysis/jobs",
                       "ai_request", "분석 작업 접수"),
     ExcludedOperation("POST", "/projects/{project_id}/analysis/jobs/{job_id}/run",

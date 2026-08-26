@@ -53,6 +53,14 @@ class MongoWritingScratchRepository:
         )
         return result.deleted_count
 
+    def delete_one(self, project_id: str, scratch_id: str) -> bool:
+        # Per-item discard — the project scope in the filter is the isolation:
+        # another project's id matches nothing and reads as not-found.
+        result = self._entries.delete_many(
+            {"project_id": project_id, "_id": scratch_id}
+        )
+        return result.deleted_count == 1
+
     def delete_ids(self, ids: tuple[str, ...]) -> None:
         if not ids:
             return
