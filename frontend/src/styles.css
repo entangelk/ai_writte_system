@@ -909,10 +909,11 @@ main {
   font-size: var(--type-meta);
 }
 
+/* 오버레이 드로어(2026-08-26): 레일은 그리드 컬럼이 아니라 화면 우측의 고정
+   오버레이다. 편집 영역은 전폭을 쓰고, 드로어는 그 위를 덮는다. */
 .split-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(19rem, 22rem);
-  gap: clamp(1.5rem, 4vw, 3.5rem);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
 }
 
@@ -920,36 +921,84 @@ main {
   min-width: 0;
 }
 
+/* 항상 DOM 에 남고 변환으로만 숨는다 — display:none 이면 마운트 유지 인바리언트
+   (탭 전환·드로어 닫힘에도 WritingPanel state·배경 생성 통로가 생존)을 transition
+   과 함께 지킬 수 없다. 불투명 surface-card — veil-raised 는 반투명이라 아래
+   본문이 비친다. */
 .workspace-rail {
-  position: sticky;
-  top: 1rem;
-  min-width: 0;
-  border: 1px solid var(--border-hairline);
-  background: var(--veil-raised);
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  width: min(50vw, 36rem);
+  height: 100dvh;
+  background: var(--surface-card);
+  border-left: 1px solid var(--border-hairline);
+  box-shadow: var(--shadow-panel);
+  transform: translateX(100%);
+  visibility: hidden;
+  transition:
+    transform 260ms ease-out,
+    visibility 0s linear 260ms;
 }
 
-.rail-tabs {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+.workspace-rail[data-open="true"] {
+  transform: translateX(0);
+  visibility: visible;
+  transition:
+    transform 260ms ease-out,
+    visibility 0s;
+}
+
+.rail-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--border-hairline);
 }
 
-.rail-tabs button {
-  padding: 0.75rem 0.35rem;
+.rail-drawer-title {
+  margin: 0;
+  font-size: var(--type-subhead);
+  font-weight: 700;
+}
+
+.rail-drawer-close {
+  padding: 0.35rem 0.6rem;
+}
+
+/* 닫힘 상태 트리거 — 화면 오른쪽 가장자리의 세로 탭 띠. 항상 노출되어 완료 배지가
+   드로어를 열지 않아도 보인다. */
+.rail-dock {
+  position: fixed;
+  top: 50%;
+  right: 0;
+  z-index: 30;
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-1);
+  background: var(--surface-card);
+  border: 1px solid var(--border-hairline);
+  border-right: 0;
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+  transform: translateY(-50%);
+}
+
+.rail-dock button {
+  padding: 0.5rem 0.4rem;
+  font-size: var(--type-meta);
   color: var(--text-muted);
   background: transparent;
   border: 0;
-  border-right: 1px solid var(--border-hairline);
   cursor: pointer;
 }
 
-.rail-tabs button:last-child {
-  border-right: 0;
-}
-
-.rail-tabs button[aria-selected="true"] {
+.rail-dock button[aria-selected="true"] {
   color: var(--text-body);
-  box-shadow: inset 0 -2px var(--action-primary);
   font-weight: 700;
 }
 
@@ -968,7 +1017,7 @@ main {
 }
 
 .rail-panel {
-  max-height: calc(100vh - 7rem);
+  flex: 1;
   overflow-y: auto;
   padding: 1.15rem;
 }
@@ -1780,17 +1829,9 @@ main {
     flex-wrap: wrap;
   }
 
-  .split-workspace {
-    grid-template-columns: 1fr;
-  }
-
+  /* 좁은 화면의 드로어는 화면 전체를 덮는다(절반이 의미 없다). */
   .workspace-rail {
-    position: static;
-    grid-row: 1;
-  }
-
-  .rail-panel {
-    max-height: none;
+    width: 100vw;
   }
 }
 

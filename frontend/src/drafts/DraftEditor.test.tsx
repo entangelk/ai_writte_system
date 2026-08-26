@@ -54,7 +54,9 @@ function mockFetch(...responses: MockResponse[]) {
   return stubFetch(fetchMock);
 }
 
-function renderEditor(path = "/projects/p1/drafts/d1") {
+// 기본 경로는 드로어를 연 채 시작한다(?panel=writing) — 이 파일의 대부분 셀은
+// 이어쓰기 패널의 컨트롤을 조작한다. 드로어가 닫힌 기본 상태는 별도 셀이 잠근다.
+function renderEditor(path = "/projects/p1/drafts/d1?panel=writing") {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
@@ -1199,6 +1201,137 @@ describe("DraftEditor", () => {
     await userEvent.click(screen.getByRole("tab", { name: /이어쓰기/ }));
 
     // The typed instruction survived the round-trip (the layer stayed mounted).
+    expect(screen.getByLabelText("이어쓰기 지시")).toHaveValue("이어서 써줘");
+  });
+
+  // ── 오버레이 드로어(2026-08-26) ─────────────────────────────────────────────
+  // 기본은 닫힘 — panel param 이 있을 때만 열린다. 닫힘 상태의 a11y 트리 가림과
+  // 마운트 유지 인바리언트를 양방향으로 잠근다.
+
+  it("hides the rail drawer from the a11y tree until a tab opens it (드로어 기본 닫힘)", async () => {
+    // under-strict: no panel param → the drawer content (writing controls) is
+    // aria-hidden — the dock tabs are the only reachable surface.
+    // over-strict: a dock tab click must open the drawer and reveal the panel
+    // (a permanently hidden drawer cannot pass).
+    mockFetch(
+      { body: project },
+      { body: draft },
+      { body: { versions: [version1] } },
+      { body: detail(version1, "기존 본문") },
+    );
+    renderEditor("/projects/p1/drafts/d1");
+    await screen.findByLabelText("원고 본문");
+
+    expect(screen.getByRole("tablist", { name: "집필 도구 선택" })).toBeInTheDocument();
+    // Role queries respect aria-hidden (the a11y contract the drawer closes
+    // under); label queries don't, so the hidden state is asserted by role.
+    expect(
+      screen.queryByRole("button", { name: "이어쓰기 생성" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("집필 도구")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+
+    await userEvent.click(screen.getByRole("tab", { name: /이어쓰기/ }));
+    expect(await screen.findByLabelText("이어쓰기 지시")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "이어쓰기 생성" })).toBeInTheDocument();
+  });
+
+  it("closes the drawer (and review params) on ✕ and Esc, leaving the editor usable", async () => {
+    mockFetch(
+      { body: project },
+      { body: draft },
+      { body: { versions: [version1] } },
+      { body: detail(version1, "기존 본문") },
+    );
+    renderEditor("/projects/p1/drafts/d1?panel=review&candidate=c1");
+    await screen.findByLabelText("원고 본문");
+    expect(screen.getByRole("button", { name: "패널 닫기" })).toBeInTheDocument();
+
+    // ✕ closes and drops the review deep-link params with the panel param.
+    await userEvent.click(screen.getByRole("button", { name: "패널 닫기" }));
+    expect(screen.queryByRole("button", { name: "패널 닫기" })).not.toBeInTheDocument();
+    expect(window.location.search).toBe("");
+
+    // Reopen, then Esc closes too — and the editor underneath stays usable.
+    await userEvent.click(screen.getByRole("tab", { name: /이어쓰기/ }));
+    expect(screen.getByRole("button", { name: "이어쓰기 생성" })).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("원고 본문"), "!");
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(
+      screen.queryByRole("button", { name: "이어쓰기 생성" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("원고 본문")).toHaveValue("기존 본문!");
+  });
+
+  it("keeps the completion badge lit while the drawer is closed, clearing it only when the writing tab is open (드로어 배지 회귀 방어)", async () => {
+    // over-strict: pre-drawer code acknowledged on activePanel === "writing"
+    // alone — with the drawer closed that default would clear the badge while
+    // the pad is invisible. The badge must survive a closed drawer and clear
+    // only on an OPEN writing tab.
+    vi.useFakeTimers();
+    vi.stubGlobal("crypto", { randomUUID: () => "req-1" });
+    const state = { jobStatus: "running" };
+    routeAsyncPad(state);
+
+    // Start from the CLOSED drawer (the default path routes writing tab, so
+    // drive it explicitly closed).
+    renderEditor("/projects/p1/drafts/d1");
+    await pump();
+    fireEvent.change(screen.getByLabelText("이어쓰기 지시"), {
+      target: { value: "이어서 써줘" },
+    });
+    // Drawer closed → the generate control is unreachable; open writing first,
+    // generate, then CLOSE the drawer while the job runs.
+    fireEvent.click(screen.getByRole("tab", { name: /이어쓰기/ }));
+    fireEvent.change(screen.getByLabelText("생성 분량"), {
+      target: { value: "medium" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "이어쓰기 생성" }));
+    await pump();
+    expect(screen.getByText(/백그라운드 생성 1건 진행 중/)).toBeInTheDocument();
+
+    // Finish the job with the drawer CLOSED.
+    fireEvent.click(screen.getByRole("button", { name: "패널 닫기" }));
+    state.jobStatus = "succeeded";
+    await pump(5000);
+
+    const writingTab = screen.getByRole("tab", { name: /이어쓰기/ });
+    expect(
+      within(writingTab).getByLabelText("백그라운드 생성 완료 1건"),
+    ).toBeInTheDocument(); // still lit behind the closed drawer
+
+    // Opening the writing tab acknowledges it.
+    fireEvent.click(writingTab);
+    await pump();
+    expect(
+      within(screen.getByRole("tab", { name: /이어쓰기/ })).queryByLabelText(
+        "백그라운드 생성 완료 1건",
+      ),
+    ).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("preserves the Writing panel instruction across drawer close/reopen (드로어 마운트 유지)", async () => {
+    // Same invariant as the tab-switch cell above, driven by the drawer: the
+    // panels stay mounted while the drawer is closed.
+    mockFetch(
+      { body: project },
+      { body: draft },
+      { body: { versions: [version1] } },
+      { body: detail(version1, "기존 본문") },
+    );
+    renderEditor();
+    await screen.findByLabelText("원고 본문");
+
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    await userEvent.click(screen.getByRole("button", { name: "패널 닫기" }));
+    expect(
+      screen.queryByRole("button", { name: "이어쓰기 생성" }),
+    ).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("tab", { name: /이어쓰기/ }));
     expect(screen.getByLabelText("이어쓰기 지시")).toHaveValue("이어서 써줘");
   });
 

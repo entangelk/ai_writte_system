@@ -61,6 +61,10 @@ export function DraftEditor() {
   const activePanel = requestedPanel === "analysis" || requestedPanel === "review"
     ? requestedPanel
     : "writing";
+  // 오버레이 드로어(2026-08-26): `panel` param 이 있으면 그 탭으로 열리고, 없으면
+  // 닫힌다(기본). 닫힘 상태에서도 아래 레이어들은 마운트 유지 — 변환·aria-hidden
+  // 으로만 숨는다(래일 마크업의 주석 참조).
+  const drawerOpen = requestedPanel !== null;
   const [project, setProject] = useState<Project | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [rawText, setRawText] = useState("");
@@ -93,6 +97,8 @@ export function DraftEditor() {
   const exportingRef = useRef(false);
   const intentRef = useRef<SaveIntent | null>(null);
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  const drawerRef = useRef<HTMLElement | null>(null);
+  const dockRef = useRef<HTMLElement | null>(null);
 
   // 증분 3 (D6): track async (medium/long) generations. Polling lives here (not in
   // WritingPanel) so it survives tab switches and drives the tab completion badge.
@@ -170,13 +176,15 @@ export function DraftEditor() {
     setAnalysisStatus("idle");
   }, [latestSnapshotId]);
 
-  // Viewing the writing tab counts as seeing the completed generations, so clear
-  // the tab badge. Completions that land while another tab is open keep it lit.
+  // Opening the writing tab of an OPEN drawer counts as seeing the completed
+  // generations, so clear the tab badge. A closed drawer must not — the pad is
+  // invisible behind it (2026-08-26 drawer regression guard) — and completions
+  // landing on another tab keep it lit.
   useEffect(() => {
-    if (activePanel === "writing" && unseenGenerationJobs > 0) {
+    if (drawerOpen && activePanel === "writing" && unseenGenerationJobs > 0) {
       acknowledgeGenerationJobs();
     }
-  }, [activePanel, unseenGenerationJobs, acknowledgeGenerationJobs]);
+  }, [drawerOpen, activePanel, unseenGenerationJobs, acknowledgeGenerationJobs]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -205,6 +213,35 @@ export function DraftEditor() {
     }
     setSearchParams(next);
   }
+
+  function closeDrawer(): void {
+    // Leaving the drawer drops the review deep-link params too, mirroring
+    // selectPanel's review cleanup. aria-hidden 요소가 포커스를 물고 있으면 안
+    // 된다 — 닫히는 순간 활성 독 탭으로 옮긴다.
+    const drawer = drawerRef.current;
+    if (drawer !== null && drawer.contains(document.activeElement)) {
+      dockRef.current
+        ?.querySelector<HTMLButtonElement>(`[data-panel="${activePanel}"]`)
+        ?.focus();
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete("panel");
+    next.delete("candidate");
+    next.delete("source");
+    setSearchParams(next);
+  }
+
+  // Esc closes the open drawer. Not bound while closed — Esc must keep meaning
+  // "stop editing" (textarea blur etc.) in the editor.
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeDrawer();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawerOpen, searchParams, activePanel]);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -604,36 +641,72 @@ export function DraftEditor() {
             )}
               </section>
             </div>
+          </div>
 
-            {projectId !== undefined && draftId !== undefined && (
-              <aside className="workspace-rail" aria-label="집필 도구">
-                <div className="rail-tabs" role="tablist" aria-label="집필 도구 선택">
-                  {(["writing", "analysis", "review"] as const).map((panel) => (
-                    <button
-                      key={panel}
-                      type="button"
-                      role="tab"
-                      aria-selected={activePanel === panel}
-                      onClick={() => selectPanel(panel)}
-                    >
-                      {panel === "writing" ? "이어쓰기" : panel === "analysis" ? "분석" : "검토"}
-                      {panel === "writing" && unseenGenerationJobs > 0 && (
-                        <span
-                          className="tab-badge"
-                          aria-label={`백그라운드 생성 완료 ${unseenGenerationJobs}건`}
-                        >
-                          {unseenGenerationJobs}
-                        </span>
-                      )}
-                    </button>
-                  ))}
+          {/* 오버레이 드로어(2026-08-26): 레일은 그리드 밖 고정 요소다. 독(세로 탭
+              띠)은 항상 노출되어 닫힘 상태에서도 탭 전환·완료 배지에 닿게 하고,
+              드로어는 `panel` param 으로 열린 탭을 정한다. */}
+          {projectId !== undefined && draftId !== undefined && (
+            <>
+              <nav
+                className="rail-dock"
+                ref={dockRef}
+                role="tablist"
+                aria-label="집필 도구 선택"
+              >
+                {(["writing", "analysis", "review"] as const).map((panel) => (
+                  <button
+                    key={panel}
+                    type="button"
+                    role="tab"
+                    data-panel={panel}
+                    aria-selected={activePanel === panel}
+                    onClick={() => selectPanel(panel)}
+                  >
+                    {panel === "writing" ? "이어쓰기" : panel === "analysis" ? "분석" : "검토"}
+                    {panel === "writing" && unseenGenerationJobs > 0 && (
+                      <span
+                        className="tab-badge"
+                        aria-label={`백그라운드 생성 완료 ${unseenGenerationJobs}건`}
+                      >
+                        {unseenGenerationJobs}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </nav>
+              <aside
+                className="workspace-rail rail-drawer"
+                ref={drawerRef}
+                data-open={drawerOpen}
+                aria-hidden={!drawerOpen}
+                aria-label="집필 도구"
+              >
+                <div className="rail-drawer-header">
+                  <p className="rail-drawer-title">
+                    {activePanel === "writing"
+                      ? "이어쓰기"
+                      : activePanel === "analysis"
+                        ? "분석"
+                        : "검토"}
+                  </p>
+                  <button
+                    type="button"
+                    className="rail-drawer-close"
+                    aria-label="패널 닫기"
+                    onClick={closeDrawer}
+                  >
+                    ✕
+                  </button>
                 </div>
                 <div className="rail-panel" role="tabpanel">
-                  {/* Layer tabs (dogfood 결손 수정): panels stay MOUNTED and only the
-                      inactive ones are hidden, so WritingPanel input state and the
-                      background GenerationPad/ScratchRecovery conduit survive tab
-                      switches. The active panel is selected by the `panel` query
-                      param (selectPanel) — unchanged. */}
+                  {/* Layer tabs (dogfood 결손 수정 → 드로어 개정 2026-08-26): panels
+                      stay MOUNTED and only the inactive ones are hidden — now by the
+                      drawer too, which hides via transform+aria-hidden rather than
+                      unmounting — so WritingPanel input state and the background
+                      GenerationPad/ScratchRecovery conduit survive BOTH tab switches
+                      and drawer open/close. The active panel is selected by the
+                      `panel` query param (selectPanel) — unchanged. */}
                   <div
                     className={
                       activePanel === "writing" ? "rail-layer" : "rail-layer hidden"
@@ -706,8 +779,8 @@ export function DraftEditor() {
                   </div>
                 </div>
               </aside>
-            )}
-          </div>
+            </>
+          )}
         </>
       )}
     </section>
