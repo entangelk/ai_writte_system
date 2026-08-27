@@ -175,3 +175,58 @@
    `DELETE …/writing/scratch/{scratch_id}` 를 등재하고 실제 에러 선언과 대조하면 닫힌다.
 4. **신버전(슬라이드 탭) 대조**: 오너가 구버전 빌드로 본 지적이라, 배포 후 같은 자리를 다시 봐야
    한다. 특히 편집기 드로어와 설정 탭이 좁은 화면에서 겹치지 않는지.
+
+---
+
+## 세션 2 — 부채 처리: D7 폐쇄 + D5 선행 실측 ("일단 테스트")
+
+착수 시 트리 clean(`39f4795`). 마감 커밋은 아래 각 항목에 있다.
+
+### D7 — 기존 실패 셀 폐쇄 · 커밋 `04e0b7b`
+
+- `WritingErrorContractDeclarationTest`의 `EXPECTED`에
+  `("/projects/{project_id}/writing/scratch/{scratch_id}", "delete")` 등재
+  (집합 `{401,403,404,503}` — `_owned(_ERRORS_404)`가 만드는 선언 그대로, 형제 경로와 동일)
+  + 개수 핀 13 → 14.
+- **재현 → 수정 → green**: 착수 전 `1 failed, 5 passed, 110 subtests` 실측 후
+  `test_application_api.py` 전체 **124 passed · 498 subtests**(= 세션 1 기준 123+1failed와 정확히 합침).
+- **뮤테이션(over-strict 방향)**: 새 등재 항목에서 `"503"` 제거 → lock-list 셀이
+  `SUBFAILED(path='/projects/{project_id}/writing/scratch/{scratch_id}', method='delete')` 로 재실패
+  확인 후 `git checkout` 원복, 트리 clean 재확인. under 방향은 착수 전 재현이 그 증거.
+- **백엔드 전수가 이제 빨간 셀 0으로 돈다** — 이후 새 실패는 전부 새 결함이다.
+
+### D5 선행 실측 — 오너 "일단 테스트" (2026-08-27, 알파, 외부 구글 API 배포)
+
+스택 전체 기동(healthy 8 + 워커 2) 후 임시 계정 `budget_probe`(비관리자)로 관통 측정.
+측정 뒤 프로브 정리: 프로젝트 `budget-측정용-프로브`(`6a8fd127048b122e35512a36`) 아카이브 +
+계정 비활성화(mongosh 직접, 둘 다 soft·가역 — 08-23 정리 선례와 같은 형태).
+
+| # | 측정 | 값 |
+|---|---|---|
+| 1 | `GET gateway /v1/capabilities` | `{"context_window":null}` — llama.cpp 전용 `/props`가 외부 API에 없음(문서화된 함정). `/health/ready` 503("llama upstream is not ready")도 같은 원인의 문서화된 동작 |
+| 2 | `GET /projects/{id}/writing/budget` | `{"short":8192,"medium":8192,"long":8192}` — `derive_context_budget`의 `window is None → return requested_tokens`. **현재 배포의 예산 숫자는 서버 실측이 아니라 요청 상한(`DEFAULT_CONTEXT_BUDGET_TOKENS=8192`)** |
+| 3 | 원고 본문(`raw_text`) 등장 지점 전수 | 저장(`api/models.py:679` `SaveDraftRequest`) · 읽기(`:494`·`routers/drafts.py:200`) · export(`core_sot/service.py:696`) · 저장소 해시·블록분해(splitter). **LLM 프롬프트 0곳** |
+| 4 | 생성 프롬프트 구성(`writing/prompt.py::build_writing_request`) | system 템플릿 + instruction + ContextPackage(**검색 조각**) + `draft_excerpt` — 프론트는 `draft_excerpt`를 **항상 `""`**로 보낸다(`WritingPanel.tsx:347,412,535`·`ScratchRecovery.tsx:171`). gate·report·accept가 싣는 `candidate_text`는 AI 산출물이지 본문이 아니다 |
+| 5 | accept 합성 방식 | [`accept.py:150`](../../services/application/app/writing/accept.py#L150) `_append_patch` — **후보를 본문에 append**. 본문은 채택마다 자라며 `long` 프리셋(4096 tok ≈ 최대 ~6,963자) 산출물 채택 가능 |
+
+**오너 질문("4000자가 8000 컨텍스트 안에 들어갈지")에 대한 답**: **들어갈 일이 없다** — 본문은
+어떤 프롬프트에도 통째로 실리지 않는다. 창 예산이 실제로 구속하는 것은 검색 조각(ContextPackage)이고,
+현재 배포에서 그 8192라는 값은 요청 상한일 뿐 서버 실측이 아니다(외부 API에선 창을 못 잰다).
+4000자 ≈ 2,353 tok(1.7자/tok).
+
+**예외 축 하나(본문이 아니라 자료)**: `analysis_extract`는 **source 스냅샷의 `raw_text`를 통째로**
+싣는다([`extractor.py:73`](../../services/application/app/analysis/extractor.py#L73)). 오너가 말한
+"본문"(원고)이 아니라 자료 축이지만, **긴 텍스트가 창에 직접 부딪히는 유일한 LLM 경로**다 —
+길이 제한 논의를 나중에 자료 축으로 확장할 때 이 자리부터 시작한다.
+
+### 세션 2 오너 결정 대기 — 4000자 제한의 적용 범위
+
+실측이 오너 지시의 전제("본문이 창에 실린다")를 부정했고, accept-append 설계와 4000자가 충돌할 수
+있어 **적용 범위는 오너 결정**으로 넘겼다(선택지 ⓐ~ⓓ — HANDOFF "Owner Decisions Needed" ⓪ 갱신분
+참조). 결정 전에 계약을 박지 않는다(D5의 "테스트 선행" 조건이 그 뜻이다).
+
+## 세션 2 다음 단계
+
+1. **D5 범위 오너 결정 수령** → 서버 `max_length` + 422 + 프론트 사전 차단·카운터 경고 +
+   양방향 회귀를 한 슬라이스로 시행.
+2. **D6(`unit_kind`)·신버전 육안 대조** — 세션 1 다음 단계 2·4 그대로(오너 몫).
