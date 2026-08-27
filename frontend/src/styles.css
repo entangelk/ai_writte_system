@@ -2415,3 +2415,119 @@ main {
   color: var(--text-on-accent);
   background: var(--action-primary-hover);
 }
+
+/* ── 내 작업 `/me` (오너 2026-08-27) ────────────────────────────────────
+   이 화면은 만들어진 뒤로 제 스타일이 없었다 — 프로젝트 목록이 맨 하이퍼링크로
+   흘렀고, 활동 100건이 한 번에 펼쳐져 화면을 다 먹었다. 카드 경계는
+   `.overview-section` 과 같은 것을 쓰고(같은 것은 같게 보인다), 접기는
+   `<details>` 그대로 쓴다 — 상태를 들고 있을 이유가 없는 곳에 상태를 만들지
+   않는다. */
+.hub-section {
+  margin: 0 0 var(--space-6);
+  padding: var(--space-6);
+  border: 1px solid var(--border-hairline);
+  background: var(--veil-raised);
+}
+
+.hub-section > h2 {
+  margin: 0 0 1rem;
+}
+
+.hub-fold > summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  cursor: pointer;
+  list-style: none;
+}
+
+.hub-fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* 삼각형은 직접 그린다 — 브라우저 기본 marker 는 baseline 정렬이 제각각이라
+   제목 옆에서 줄이 흔들린다. */
+.hub-fold > summary::before {
+  color: var(--text-muted);
+  content: "▸";
+  transition: transform 160ms ease;
+}
+
+.hub-fold[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.hub-fold > summary h2,
+.hub-fold > summary h3 {
+  display: inline-flex;
+  margin: 0;
+}
+
+.hub-fold > summary > span {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.hub-fold[open] > summary {
+  margin-bottom: 1rem;
+}
+
+/* 날짜 그룹이 접히게 되면서 머리글이 summary 안으로 들어갔다 — 종전 규칙은
+   `.activity-day > h3` 만 잡았으므로 그 자리를 함께 잡아 준다. */
+.activity-day > summary > h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-body);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.activity-day > summary > h3::before {
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: var(--radius-pill);
+  background: var(--action-primary);
+  content: "";
+}
+
+.quota-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4) var(--space-8);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.quota-summary li {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.quota-summary strong {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.quota-summary span {
+  font-size: 1.15rem;
+}
+
+/* 행 안의 보조 진입(활동·관측)은 버튼이 아니라 링크다 — `.row-actions` 의
+   버튼 규칙이 잡지 않는 자리라 여기서 따로 준다. */
+.hub-row-links a {
+  color: var(--text-link);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.hub-row-links a:hover,
+.hub-row-links a:focus-visible {
+  color: var(--action-primary-hover);
+}

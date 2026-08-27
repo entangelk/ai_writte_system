@@ -88,18 +88,31 @@ export function PersonalHubPage() {
         )}
       </section>
 
-      <section className="hub-section">
-        <h2>내 프로젝트</h2>
+      {/* 10.3(오너 2026-08-27): 목록이 맨 링크로 흘러 프로젝트 목록 화면과 다른
+          것처럼 보였다 — `.resource-list` 를 그대로 쓴다(같은 것은 같게 보여야
+          한다). 접히는 것은 아래 활동과 짝을 맞추기 위해서다. */}
+      <details className="hub-section hub-fold" open>
+        <summary>
+          <h2>내 프로젝트</h2>
+          {projects !== null && <span>{projects.length}개</span>}
+        </summary>
         {projects !== null && projects.length === 0 && (
           <div className="empty-state"><p>아직 프로젝트가 없습니다.</p></div>
         )}
         {projects !== null && projects.length > 0 && (
-          <ul className="hub-projects">
+          <ul className="resource-list" aria-label="내 프로젝트 목록">
             {projects.map((project) => (
-              <li key={project.id}>
-                <Link to={`/projects/${project.id}`}>{project.name}</Link>
-                {project.archived && <span className="badge">보관됨</span>}
-                <span className="row-actions">
+              <li className="resource-row" key={project.id}>
+                <Link
+                  aria-label={project.name}
+                  className="resource-link"
+                  to={`/projects/${project.id}`}
+                >
+                  <span>{project.name}</span>
+                  <span className="row-arrow" aria-hidden="true">→</span>
+                </Link>
+                {project.archived && <span className="status-badge">(보관됨)</span>}
+                <span className="row-actions hub-row-links">
                   <Link to={`/projects/${project.id}/activity`}>활동</Link>
                   <Link to={`/projects/${project.id}/observability`}>관측</Link>
                 </span>
@@ -107,12 +120,18 @@ export function PersonalHubPage() {
             ))}
           </ul>
         )}
-      </section>
+      </details>
 
-      <section className="hub-section">
-        <h2>최근 활동</h2>
+      {/* 100건을 다 주는 것은 유지하되 **펼쳐 놓지는 않는다**(오너 2026-08-27):
+          날짜 그룹마다 접히고, 가장 최근 날짜 하나만 열린 채로 시작한다. 목록을
+          자르지 않고 화면만 줄이는 방법이라 P2(상한) 는 그대로다. */}
+      <details className="hub-section hub-fold" open>
+        <summary>
+          <h2>최근 활동</h2>
+          {events !== null && <span>{events.length}건</span>}
+        </summary>
         <p className="form-hint">
-          내 프로젝트 전체에서 최근 {ACTIVITY_PAGE_SIZE}건까지 보여줍니다.
+          내 프로젝트 전체에서 최근 {ACTIVITY_PAGE_SIZE}건까지 보여줍니다. 날짜를 눌러 펼칩니다.
         </p>
         {events === null && error === null && (
           <p className="status-copy">활동 기록을 불러오는 중…</p>
@@ -120,12 +139,15 @@ export function PersonalHubPage() {
         {events !== null && events.length === 0 && (
           <div className="empty-state"><p>아직 기록된 활동이 없습니다.</p></div>
         )}
-        {events !== null && events.length > 0 && groupActivityByDay(events).map((day) => (
+        {events !== null && events.length > 0 && groupActivityByDay(events).map((day, index) => (
           // 10.2: 날짜가 머리글로 올라갔으므로 행은 **시각만** 찍는다. 통합 화면이라
           // 행은 여전히 어느 프로젝트인지 말해야 한다(9.2 P1 — 그것이 project-scoped
           // 응답과 이 tier 의 차이다).
-          <div className="activity-day" key={day.key}>
-            <h3>{day.label}</h3>
+          <details className="activity-day" key={day.key} open={index === 0}>
+            <summary>
+              <h3>{day.label}</h3>
+              <span>{day.events.length}건</span>
+            </summary>
             <ul className="access-log access-log-page">
               {day.events.map((event) => (
                 <li key={event.id}>
@@ -148,9 +170,9 @@ export function PersonalHubPage() {
                 </li>
               ))}
             </ul>
-          </div>
+          </details>
         ))}
-      </section>
+      </details>
     </section>
   );
 }
