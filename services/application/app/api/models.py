@@ -701,6 +701,9 @@ class SaveDraftRequest(BaseModel):
         # D5-2(오너 2026-08-27, "전 경로 4000자"): 유닛 본문 상한. accept 합성 경로는
         # writing/accept.py 가 같은 상수로 provider 호출 앞에 잰다 — 두 축이 같은 env 를
         # 읽는 것이 이 헬퍼가 app/env.py 에 있는 이유다(도메인이 api/ 를 import 못 한다).
+        # ★ strip 전 길이로 잰다 — 이 경로가 저장하는 값이 strip 되지 않은 원문 그대로이기
+        # 때문이다. accept 축은 strip 후 패치/씨앗을 재는데 그쪽도 같은 원리다(그 경로가
+        # 그렇게 저장한다). 각 축은 자기가 저장하는 것을 잰다(2026-08-27 검증 보강 3).
         limit = draft_raw_text_max_chars()
         if len(value) > limit:
             raise ValueError(f"raw_text must contain at most {limit} characters")

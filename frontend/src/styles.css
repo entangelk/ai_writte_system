@@ -819,6 +819,28 @@ main {
   font-size: 0.8rem;
 }
 
+.brief-field-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+/* ProjectBrief 스칼라 1000자 서버 상한의 사전 안내. 입력은 자르지 않고 초과분을
+   그대로 보여 준다 — 사용자가 무엇을 줄일지 직접 판단한 뒤 저장한다. */
+.brief-char-count {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.brief-char-count.limit-near {
+  color: var(--state-warn-text);
+}
+
+.brief-char-count.limit-over {
+  color: var(--state-danger-text);
+  font-weight: 600;
+}
+
 .brief-form label:first-child,
 .brief-form label:last-of-type,
 .brief-actions {

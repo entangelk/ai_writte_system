@@ -232,3 +232,26 @@ class AcceptRawTextLimitTest(unittest.TestCase):
         with self.assertRaises(NotFound):
             self._accept_append(base_version_id="no-such-version",
                                 text="무엇이든")
+
+    def test_a_replay_after_lowering_the_env_limit_hits_the_limit_first(self):
+        """검증 보강 1(2026-08-27) — 상한 검사가 replay 조회보다 앞임을 핀한다.
+
+        정상 재시도(같은 멱등키·같은 상한)는 합성 길이도 같으므로 상한을 통과해 replay 가
+        수렴한다. 갈리는 것은 **env 상한이 원래 채택과 재시도 사이에 내려간 경우**뿐이다 —
+        그때 이 설계는 수렴(200)이 아니라 400 을 내고 provider 호출도 없다. `_validate` 가
+        이미 replay 앞에서 hard-fail 하는 것과 같은 부류의 선택이며, 셀이 의도를 잠가 다음
+        사람이 이 갈림을 "버그인가?"라고 추측하지 않게 한다.
+        """
+        base = self._seed_base("가" * 3000)
+        accepted = self._accept_append(base_version_id=base.draft_version.id,
+                                       text="나" * 400)
+        self.assertTrue(accepted.accepted)
+        self.assertEqual(self.reporter.calls, 1)
+
+        with patch.dict(os.environ, {"DRAFT_RAW_TEXT_MAX_CHARS": "3000"}):
+            with self.assertRaises(WritingAcceptError) as ctx:
+                self._accept_append(base_version_id=base.draft_version.id,
+                                    text="나" * 400)
+        self.assertIn("unit limit", str(ctx.exception))
+        # 상한 검사는 enrich 앞이므로 재시도에서 provider 호출은 추가로 없다.
+        self.assertEqual(self.reporter.calls, 1)

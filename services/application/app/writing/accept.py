@@ -96,7 +96,11 @@ class WritingAcceptService:
         # D5-2(오너 2026-08-27, "전 경로 4000자"): 유닛 본문 상한을 **provider 호출
         # 앞에** 시행한다 — 상한을 넘을 몸은 enrich·gate 어느 쪽에도 돈을 쓸 수 없다.
         # append_current 는 합성 결과(base + "\n\n" + patch)를, start_next_unit 은
-        # 씨앗 본문(candidate)을 잰다.
+        # 씨앗 본문(candidate)을 잰다. ★ 이 검사는 replay 조회보다도 앞이다(2026-08-27
+        # 검증 보강 1 — `_validate` 가 이미 replay 앞에 있는 것과 같은 부류의 설계 선택):
+        # 같은 멱등키의 재시도가 상한 이전에 성공 저장했더라도, env 상한이 그 사이 내려가
+        # 있으면 수렴(200)이 아니라 400을 낸다. 발화 조건이 env 변경뿐이라 셀로 의도를
+        # 핀했다(test_draft_raw_text_limit — replay-after-lowering).
         self._enforce_raw_text_limit(
             request=request, draft_id=draft_id,
             base_version_id=base_version_id, candidate_text=candidate.text)
@@ -170,6 +174,9 @@ class WritingAcceptService:
 
         base 읽기가 실패해도 여기서 죽이지 않는다 — replay/404/409 순서(§3.3)는
         아래 원래 흐름이 소유한다. 이 조회는 산술을 위한 조용한 읽기일 뿐이다.
+        측정은 strip 후다 — 이 경로가 저장하는 패치/씨앗이 strip 된 것이고, 저장 축
+        (SaveDraftRequest)이 strip 전 원문을 재는 것과 대칭이다(각 축은 자기가 저장하는
+        것을 잰다 — 2026-08-27 검증 보강 3).
         """
         limit = draft_raw_text_max_chars()
         text = candidate_text.strip()

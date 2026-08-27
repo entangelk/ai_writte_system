@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -34,6 +34,33 @@ afterEach(() => {
 });
 
 describe("ProjectOverview", () => {
+  it.each(["작품 전제", "장르", "톤", "시점(POV)"])(
+    "%s shows the 1000-character boundary and blocks only an over-limit save",
+    async (fieldLabel) => {
+      mockFetch(
+        { id: "p1", name: "겨울 이야기", archived: false },
+        { brief: null },
+        { memory: [] },
+        { project_id: "p1", items: [], gate_findings: [] },
+      );
+
+      renderOverview();
+      const field = await screen.findByLabelText(fieldLabel);
+      const saveButton = screen.getByRole("button", { name: "저장" });
+
+      // Over-strict guard: the backend accepts exactly 1000 code points.
+      fireEvent.change(field, { target: { value: "가".repeat(1000) } });
+      expect(screen.getByText("1000 / 1000자")).toHaveClass("limit-near");
+      expect(saveButton).toBeEnabled();
+      expect(field).not.toHaveAttribute("maxLength");
+
+      // Under-strict guard: keep the extra input visible, but prevent the 422 round trip.
+      fireEvent.change(field, { target: { value: "가".repeat(1001) } });
+      expect(screen.getByText("1001 / 1000자")).toHaveClass("limit-over");
+      expect(saveButton).toBeDisabled();
+    },
+  );
+
   it("progressively onboards an empty project and saves normalized fields", async () => {
     vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "brief-key-1") });
     const fetchMock = mockFetch(

@@ -36,6 +36,28 @@ const EMPTY_FORM: BriefForm = {
   styleExamples: [""],
 };
 
+const BRIEF_SCALAR_MAX_CHARS = 1000;
+const BRIEF_SCALAR_WARN_CHARS = Math.floor(BRIEF_SCALAR_MAX_CHARS * 0.9);
+
+function codePointLength(value: string): number {
+  return [...value].length;
+}
+
+function BriefScalarCount({ value }: { value: string }) {
+  const count = codePointLength(value);
+  const className = count > BRIEF_SCALAR_MAX_CHARS
+    ? "brief-char-count limit-over"
+    : count >= BRIEF_SCALAR_WARN_CHARS
+      ? "brief-char-count limit-near"
+      : "brief-char-count";
+  return <span className={className} aria-hidden="true">{count} / {BRIEF_SCALAR_MAX_CHARS}자</span>;
+}
+
+function hasOversizedScalar(form: BriefForm): boolean {
+  return [form.premise, form.genre, form.tone, form.pov]
+    .some((value) => codePointLength(value) > BRIEF_SCALAR_MAX_CHARS);
+}
+
 function briefForm(brief: ProjectBrief | null): BriefForm {
   if (brief === null) return EMPTY_FORM;
   return {
@@ -93,6 +115,7 @@ export function ProjectOverview() {
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const scalarOverLimit = hasOversizedScalar(form);
 
   useEffect(() => {
     if (projectId === undefined) {
@@ -192,10 +215,10 @@ export function ProjectOverview() {
 
           {editing && !project.archived ? (
             <div className="brief-form">
-              <label>작품 전제<textarea value={form.premise} onChange={(e) => setForm({ ...form, premise: e.target.value })} /></label>
-              <label>장르<input value={form.genre} onChange={(e) => setForm({ ...form, genre: e.target.value })} /></label>
-              <label>톤<input value={form.tone} onChange={(e) => setForm({ ...form, tone: e.target.value })} /></label>
-              <label>시점(POV)<input value={form.pov} onChange={(e) => setForm({ ...form, pov: e.target.value })} /></label>
+              <label><span className="brief-field-heading"><span>작품 전제</span><BriefScalarCount value={form.premise} /></span><textarea aria-label="작품 전제" aria-invalid={codePointLength(form.premise) > BRIEF_SCALAR_MAX_CHARS} value={form.premise} onChange={(e) => setForm({ ...form, premise: e.target.value })} /></label>
+              <label><span className="brief-field-heading"><span>장르</span><BriefScalarCount value={form.genre} /></span><input aria-label="장르" aria-invalid={codePointLength(form.genre) > BRIEF_SCALAR_MAX_CHARS} value={form.genre} onChange={(e) => setForm({ ...form, genre: e.target.value })} /></label>
+              <label><span className="brief-field-heading"><span>톤</span><BriefScalarCount value={form.tone} /></span><input aria-label="톤" aria-invalid={codePointLength(form.tone) > BRIEF_SCALAR_MAX_CHARS} value={form.tone} onChange={(e) => setForm({ ...form, tone: e.target.value })} /></label>
+              <label><span className="brief-field-heading"><span>시점(POV)</span><BriefScalarCount value={form.pov} /></span><input aria-label="시점(POV)" aria-invalid={codePointLength(form.pov) > BRIEF_SCALAR_MAX_CHARS} value={form.pov} onChange={(e) => setForm({ ...form, pov: e.target.value })} /></label>
               <label>핵심 제약 <span>한 줄에 하나</span><textarea value={form.constraints} onChange={(e) => setForm({ ...form, constraints: e.target.value })} /></label>
               <label>문체 규칙 <span>한 줄에 하나</span><textarea value={form.styleRules} onChange={(e) => setForm({ ...form, styleRules: e.target.value })} /></label>
               <label>선호 표현 <span>한 줄에 하나</span><textarea value={form.preferredPatterns} onChange={(e) => setForm({ ...form, preferredPatterns: e.target.value })} /></label>
@@ -234,7 +257,7 @@ export function ProjectOverview() {
                 >문체 예시 추가</button>
               </fieldset>
               <div className="brief-actions">
-                <button type="button" onClick={() => void save(false)} disabled={saving}>저장</button>
+                <button type="button" onClick={() => void save(false)} disabled={saving || scalarOverLimit}>저장</button>
                 {brief === null ? (
                   <button className="secondary-button" type="button" onClick={() => void save(true)} disabled={saving}>지금은 건너뛰기</button>
                 ) : (
