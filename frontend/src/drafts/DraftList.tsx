@@ -16,7 +16,11 @@ export function DraftList() {
   const [project, setProject] = useState<Project | null>(null);
   const [drafts, setDrafts] = useState<Draft[] | null>(null);
   const [title, setTitle] = useState("");
-  const [unitKind, setUnitKind] = useState<CreateDraftRequest["unit_kind"]>("other");
+  // 기본은 "장"이다(오너 2026-08-27). 종전 기본 "기타"는 서버 기본값(레거시
+  // 마이그레이션이 값 없는 행을 채우는 값)을 화면이 그대로 따른 것이었는데,
+  // 사람이 새 원고를 만들 때 고르는 첫 값으로는 맞지 않았다. 서버 기본값은
+  // 그대로 둔다 — 그쪽은 "값이 오지 않았을 때"의 답이고 여기는 사람의 답이다.
+  const [unitKind, setUnitKind] = useState<CreateDraftRequest["unit_kind"]>("chapter");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -167,6 +171,16 @@ export function DraftList() {
                   원고 만들기
                 </button>
               </div>
+              {/* 오너 2026-08-27: 장·장면을 섞어 쓸 때 무엇이 달라지는지 화면이
+                  말하지 않아 고르기 어려웠다. 실제 동작 그대로 적는다 — 셋은
+                  **이름표**이고 계층이 아니다. */}
+              <p className="form-hint unit-kind-help">
+                <strong>장·장면·기타는 원고를 구분하는 이름표입니다.</strong> 셋 다 한
+                목록에 나란히 놓이고 정본 순서(1, 2, 3…)를 함께 씁니다 — 장 안에 장면을
+                넣는 계층은 없습니다. 한 번에 이어 쓰고 한 덩어리로 내보낼 분량마다 원고를
+                하나씩 만드세요. 이름표는 목록에서 그 원고가 무엇인지 알아보는 데 쓰고,
+                나중에 바꿔도 본문·순서에는 영향이 없습니다.
+              </p>
             </form>
           )}
 

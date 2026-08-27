@@ -1225,10 +1225,33 @@ main {
   border-bottom: 1px solid var(--border-control);
   border-radius: 0;
   outline: none;
+  /* ★ 오너 2026-08-27: 원고 단위 select 가 옆 입력칸과 높이가 안 맞았다.
+     원인은 padding 이 아니라 **글꼴**이다 — 브라우저는 select 에 제 UI 글꼴을
+     주므로 같은 padding 을 줘도 line-box 높이가 달라진다. 둘 다 페이지 글꼴을
+     물려받게 해서 맞춘다(`font: inherit` 은 크기·행간까지 함께 가져온다). */
+  font: inherit;
 }
 
 .form-controls select {
   flex: 0 0 auto;
+  /* UA 화살표를 끄고 caret 을 직접 그린다. 이미지가 아니라 gradient 인 것은
+     `currentColor` 를 쓰기 위해서다 — 라이트/다크 어느 쪽에서도 글자색을 따라간다. */
+  appearance: none;
+  padding-right: 1.5rem;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-repeat: no-repeat, no-repeat;
+  background-size: 0.32rem 0.32rem, 0.32rem 0.32rem;
+  background-position: right 0.62rem center, right 0.35rem center;
+}
+
+/* 설명문은 폼 두 열 전체를 가로지른다 — 오른쪽 컨트롤 열에만 갇히면 좁은
+   기둥에 여섯 줄로 접힌다. */
+.creation-form .unit-kind-help {
+  grid-column: 1 / -1;
+  margin: 0.9rem 0 0;
+  max-width: 46rem;
 }
 
 .form-controls input::placeholder {

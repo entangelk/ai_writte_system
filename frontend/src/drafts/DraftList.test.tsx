@@ -224,9 +224,11 @@ describe("DraftList", () => {
     await userEvent.click(screen.getByRole("button", { name: "원고 만들기" }));
 
     await waitFor(() => expect(field).toHaveValue(""));
+    // 단위를 안 고르면 "장"으로 간다(오너 2026-08-27) — 종전 기본 "기타"는
+    // 서버가 값 없는 요청에 채우는 값이었지 사람이 고르는 첫 값이 아니었다.
     expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({
       title: "첫 장면",
-      unit_kind: "other",
+      unit_kind: "chapter",
     });
   });
 
@@ -360,5 +362,32 @@ describe("DraftList", () => {
     );
 
     expect(await screen.findByText("프로젝트 홈")).toBeInTheDocument();
+  });
+
+  it("defaults the unit to 장 and explains that the three are labels, not a hierarchy", async () => {
+    // 오너 2026-08-27(dogfood): ① 첫 값이 늘 "기타"였다 ② 장·장면을 섞어 쓸 때
+    // 무엇이 달라지는지 화면이 말하지 않았다.
+    //
+    // ★ 설명문은 **실제 동작**을 적는다. `unit_kind` 는 평면 ordered unit 의
+    // 이름표이고(SoT D2=A) 계층이 아니다 — 프롬프트에도, export heading 에도,
+    // 부모-자식 관계에도 쓰이지 않는다. under-strict: 계층이 있는 것처럼 다시
+    // 쓰면 "계층은 없습니다" 단정이 실패한다.
+    mockFetch(
+      { body: { id: "p1", name: "겨울 이야기", archived: false } },
+      { body: { drafts: [] } },
+    );
+
+    renderDraftList();
+    await screen.findByText(/아직 원고가 없습니다/);
+
+    expect(screen.getByLabelText("원고 단위")).toHaveValue("chapter");
+    const help = screen.getByText(/이름표입니다/).closest("p")!;
+    expect(help).toHaveClass("unit-kind-help");
+    expect(help.textContent).toContain("계층은 없습니다");
+    // over-strict 가드: 설명을 넣었다고 선택지를 줄이면 안 된다 — 셋 다 남는다.
+    const options = Array.from(
+      screen.getByLabelText("원고 단위").querySelectorAll("option"),
+    ).map((option) => option.textContent);
+    expect(options).toEqual(["장", "장면", "기타"]);
   });
 });
