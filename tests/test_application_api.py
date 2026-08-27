@@ -3096,6 +3096,10 @@ class WritingErrorContractDeclarationTest(unittest.TestCase):
              "504"},
         ("/projects/{project_id}/writing/scratch", "get"): {"401", "403", "404", "503"},
         ("/projects/{project_id}/writing/scratch", "delete"): {"401", "403", "404", "503"},
+        # Per-item discard (2026-08-26): same owned+404+storage faces as the
+        # whole-draft discard above — registered here 2026-08-27 (D7).
+        ("/projects/{project_id}/writing/scratch/{scratch_id}", "delete"):
+            {"401", "403", "404", "503"},
         ("/projects/{project_id}/writing/budget", "get"): {"401", "403", "404", "503"},
     }
 
@@ -3118,7 +3122,7 @@ class WritingErrorContractDeclarationTest(unittest.TestCase):
                 ["content"]["application/json"]["schema"])
 
     def test_declared_error_statuses_match_the_lock_list(self):
-        self.assertEqual(len(self.EXPECTED), 13)
+        self.assertEqual(len(self.EXPECTED), 14)
         for (path, method), expected in self.EXPECTED.items():
             with self.subTest(path=path, method=method):
                 self.assertEqual(self._declared(path, method), expected)
