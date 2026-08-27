@@ -1776,3 +1776,58 @@ describe("저장 기록 접기 (오너 2026-08-27 dogfood)", () => {
       .toHaveAttribute("aria-current", "true");
   });
 });
+
+describe("본문 4000자 상한 (D5-2, 오너 2026-08-27)", () => {
+  // ★ 시행 방식: **경고 + 저장 차단**이지 잘라내기가 아니다 — textarea maxLength 는
+  // 붙여넣기를 몰래 잘라 정본을 손상시키므로 금지다(위 "opens a zero-version" 셀이
+  // no-maxlength 를 잠근다). 서버가 최후 방어(저장 422·accept 400)다.
+
+  it("warns as the body approaches the limit", async () => {
+    mockFetch(
+      { body: project },
+      { body: draft },
+      { body: { versions: [version1] } },
+      { body: detail(version1, "가".repeat(3_900)) },
+    );
+
+    renderEditor();
+
+    const counter = await screen.findByText(/3,900자/);
+    expect(counter).toHaveClass("limit-near");
+    expect(counter).toHaveTextContent("상한 4,000자 임박");
+  });
+
+  it("keeps save disabled for a body already past the limit", async () => {
+    // 상한 이전에 저장된 긴 본문을 불러온 레거시 케이스. dirty 여부와 무관하게
+    // overLimit 이 저장을 막는다 — 고쳐도 여전히 상한 위면 저장 버튼은 잠긴 채다.
+    mockFetch(
+      { body: project },
+      { body: draft },
+      { body: { versions: [version1] } },
+      { body: detail(version1, "가".repeat(4_100)) },
+    );
+
+    renderEditor();
+    const editor = await screen.findByLabelText("원고 본문");
+    const counter = await screen.findByText(/4,100자/);
+    expect(counter).toHaveClass("limit-over");
+    expect(counter).toHaveTextContent("상한 4,000자 초과 — 저장할 수 없습니다");
+
+    await userEvent.type(editor, "다");
+    expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
+  });
+
+  it("blocks saving a freshly typed body that passes the limit", async () => {
+    // under 방향 앵커: overLimit 차단을 지우면 이 셀이 재실패한다. fireEvent.change 로
+    // 4001자를 한 번에 넣는다(4001키 타이핑은 느리다).
+    mockFetch({ body: project }, { body: draft }, { body: { versions: [] } });
+
+    renderEditor();
+    const editor = await screen.findByLabelText("원고 본문");
+    fireEvent.change(editor, { target: { value: "가".repeat(4_001) } });
+
+    const counter = await screen.findByText(/4,001자/);
+    expect(counter).toHaveClass("limit-over");
+    expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
+  });
+});

@@ -1588,6 +1588,7 @@ from .routers.writing import register_writing
 from .env import (
     _env_bool,
     _env_int,
+    draft_raw_text_max_chars,
 )
 from .api.models import (
     _WRITING_CONTINUE_SCENE_NEEDS,
@@ -1661,6 +1662,7 @@ def create_app(
     # Fail startup loudly for invalid environment-adjustable public bounds.
     _project_brief_style_example_limits()
     _writing_output_length_tokens()
+    draft_raw_text_max_chars()
     # Owner 2026-08-23 (security audit finding ③ / verification H-3): the
     # interactive docs are NOT a public surface. With FastAPI defaults they
     # were reachable unauthenticated both directly (8520 /docs·/redoc·

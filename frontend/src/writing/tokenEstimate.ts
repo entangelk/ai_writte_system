@@ -9,6 +9,23 @@
 export const KOREAN_CHARS_PER_TOKEN = 1.7;
 
 /**
+ * 유닛 본문 글자수 상한 — 오너 결정 D5-2(2026-08-27, "전 경로 4000자"). 서버 기본값
+ * `DRAFT_RAW_TEXT_MAX_CHARS`(app/env.py)의 미러다: 서버는 이 상한을 저장 스키마(422)와
+ * accept 합성(400, provider 호출 앞) 둘 다에 시행하므로, 여기의 경고·저장 차단은 사용자가
+ * 서버 거부를 만나기 *전에* 알게 하는 사전 안내일 뿐 최후 방어가 아니다. ★ 잘라내기로
+ * 시행하지 않는다 — textarea maxLength 는 붙여넣기를 몰래 잘라 정본을 손상시킨다.
+ *
+ * 근거(2026-08-27 실측 정정): 원고는 매 생성마다 검색 조각으로 프롬프트에 실린다 —
+ * 현재 장면 문단 전부(제목 없는 유닛이면 유닛 전체)+직전 문단 5개를 꺼내 예산(요청 상한
+ * 8192)까지 편집해 넣는다. 4000자 ≈ 2,353 tok = 예산의 ~29%라 온전히 들어가고, 유닛이
+ * 길어지면 다른 조각이 밀려 이어쓰기가 직전 흐름·기억을 잃는다(조용한 품질 저하).
+ */
+export const RAW_TEXT_MAX_CHARS = 4000;
+
+/** 상한 임박 안내를 켜는 시점(상한의 90%). */
+export const RAW_TEXT_WARN_CHARS = Math.floor(RAW_TEXT_MAX_CHARS * 0.9);
+
+/**
  * 글자수(Unicode code point)를 1.7 자/tok 로 토큰 추정한다. 서버 estimate_tokens(len/1.7) 과
  * 같은 식이다. `[...text].length` 로 code point 를 세는 것은 Python 의 len(text) 를 미러링하기
  * 때문이다(서로게이트 페어를 한 글자로 센다).
@@ -23,7 +40,11 @@ export function formatInstructionCount(text: string): string {
   return `${chars.toLocaleString("ko-KR")}자 (≈${estimateTokens(text).toLocaleString("ko-KR")} 토큰)`;
 }
 
-/** 원고 본문 표기: "X자". 창과 무관(브리프 §6 — /writing/generate 에 본문이 안 실린다). */
+/**
+ * 원고 본문 표기: "X자". 본문은 생성 프롬프트에 검색 조각(현재 장면+직전 5문단)으로
+ * 실린다(2026-08-27 정정 — 종전 "안 실린다" 주석은 잘못이었다). 카운터의 역할은
+ * RAW_TEXT_MAX_CHARS 상한 안내뿐, 토큰 환산은 하지 않는다.
+ */
 export function formatCharCount(text: string): string {
   return `${[...text].length.toLocaleString("ko-KR")}자`;
 }

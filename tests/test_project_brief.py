@@ -384,6 +384,44 @@ class ProjectBriefApiTest(unittest.TestCase):
         )
 
 
+class BriefTextFieldLimitTest(unittest.TestCase):
+    """D5-2 따라 정리(오너 2026-08-27): 설명창 스칼라 필드의 길이 상한.
+
+    이 필드들은 생성 프롬프트의 <project_brief> 에 매번 렌더되므로 무제한이면 검색
+    조각 예산을 잠식한다. 상한 1000자 = 문체 예시 기본값과 같은 값(BriefTextField).
+    양방향: max_length 를 지우면 over 셀이, 1000→999로 내리면 boundary 셀이 재실패한다.
+    """
+
+    def setUp(self):
+        self.service = CoreSotService(InMemoryCoreSotRepository())
+        self.client = _Client(authenticated(create_app(self.service)))
+        self.project = self.client.post("/projects", json={"name": "Novel"}).json()
+
+    @property
+    def path(self):
+        return f"/projects/{self.project['id']}/brief"
+
+    def test_premise_at_exactly_1000_chars_is_accepted(self):
+        accepted = self.client.put(
+            self.path, json=_brief_body(premise="가" * 1000,
+                                        idempotency_key="brief-limit-1"))
+        self.assertEqual(accepted.status_code, 200)
+
+    def test_premise_past_1000_chars_is_rejected(self):
+        rejected = self.client.put(
+            self.path, json=_brief_body(premise="가" * 1001,
+                                        idempotency_key="brief-limit-2"))
+        self.assertEqual(rejected.status_code, 422)
+
+    def test_every_scalar_description_field_enforces_the_same_ceiling(self):
+        for field in ("premise", "genre", "tone", "pov"):
+            with self.subTest(field=field):
+                body = _brief_body(idempotency_key=f"brief-limit-{field}")
+                body[field] = "가" * 1001
+                self.assertEqual(
+                    self.client.put(self.path, json=body).status_code, 422)
+
+
 class WorkspaceW0SchemaIntegrationTest(unittest.TestCase):
     def setUp(self):
         self.openapi = create_app().openapi()

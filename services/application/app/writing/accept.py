@@ -25,7 +25,8 @@ from services.application.app.core_sot.models import (
 from services.application.app.core_sot.repository import (
     DuplicateWritingAcceptReceipt,
 )
-from services.application.app.core_sot.service import Archived, CoreSotService
+from services.application.app.core_sot.service import Archived, CoreSotService, NotFound
+from services.application.app.env import draft_raw_text_max_chars
 from services.application.app.writing.context_pointer import pointer_wire
 from services.application.app.writing.gate import WritingGateService
 from services.application.app.writing.service import CandidateReporter
@@ -92,6 +93,13 @@ class WritingAcceptService:
                      package: ContextPackage) -> WritingAcceptResult:
         self._validate(draft_id, base_version_id, idempotency_key,
                        request, candidate, package)
+        # D5-2(오너 2026-08-27, "전 경로 4000자"): 유닛 본문 상한을 **provider 호출
+        # 앞에** 시행한다 — 상한을 넘을 몸은 enrich·gate 어느 쪽에도 돈을 쓸 수 없다.
+        # append_current 는 합성 결과(base + "\n\n" + patch)를, start_next_unit 은
+        # 씨앗 본문(candidate)을 잰다.
+        self._enforce_raw_text_limit(
+            request=request, draft_id=draft_id,
+            base_version_id=base_version_id, candidate_text=candidate.text)
         if self._reporter is not None:
             candidate = await self._reporter.enrich(candidate, package)
         save_key = f"writing-accept:{idempotency_key}"
@@ -154,6 +162,31 @@ class WritingAcceptService:
             target = draft
         return self._finalize(request.project_id, saved, candidate, intent,
                               target, gate=gate, replay=saved.idempotent_replay)
+
+    def _enforce_raw_text_limit(self, *, request: WritingRequest,
+                                draft_id: str, base_version_id: str,
+                                candidate_text: str) -> None:
+        """유닛 본문 상한(app/env.py draft_raw_text_max_chars)을 provider 호출 앞에 잰다.
+
+        base 읽기가 실패해도 여기서 죽이지 않는다 — replay/404/409 순서(§3.3)는
+        아래 원래 흐름이 소유한다. 이 조회는 산술을 위한 조용한 읽기일 뿐이다.
+        """
+        limit = draft_raw_text_max_chars()
+        text = candidate_text.strip()
+        if request.intent is WritingIntent.START_NEXT_UNIT:
+            if len(text) > limit:
+                raise WritingAcceptError(
+                    f"candidate text must contain at most {limit} characters")
+            return
+        try:
+            base = self._core_sot.get_draft_version(
+                project_id=request.project_id, draft_id=draft_id,
+                version_id=base_version_id)
+        except NotFound:
+            return
+        if len(_append_patch(base.snapshot.raw_text, text)) > limit:
+            raise WritingAcceptError(
+                f"accepted text would exceed the {limit}-character unit limit")
 
     def _replay(self, project_id: str, draft_id: str, save_key: str,
                 intent: WritingIntent) -> tuple[SaveDraftResult, Draft] | None:

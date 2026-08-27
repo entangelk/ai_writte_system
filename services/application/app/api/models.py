@@ -35,7 +35,7 @@ from services.application.app.writing.models import (
 )
 from typing import Annotated
 
-from ..env import _env_int
+from ..env import _env_int, draft_raw_text_max_chars
 
 
 # Fixed retrieval needs for a continue_scene generation (Phase 5.1). Mongo-served
@@ -254,6 +254,17 @@ class ProjectListResponse(BaseModel):
 
 NonBlankBriefString = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, pattern=r"\S")
+]
+
+# 설명창 스칼라 필드(전제·장르·어조·시점)의 길이 상한 — 오너 지적(2026-08-27, "프로젝트
+# 설명창에는 별도 제한이 없는 걸로 알고 있다")으로 D5-2 슬라이스에서 추가. 이 필드들은
+# 생성 프롬프트의 <project_brief> 에 매번 렌더되므로 무제한이면 검색 조각 예산을 잠식한다.
+# 1000자 = 문체 예시(PROJECT_BRIEF_STYLE_EXAMPLE_MAX_CHARS 기본값)와 같은 값. 배열 항목
+# (constraints·style_rules·선호/금지 패턴)은 이번 범위 밖이다.
+BriefTextField = Annotated[
+    str, StringConstraints(
+        strip_whitespace=True, min_length=1, pattern=r"\S", max_length=1000
+    )
 ]
 
 
@@ -600,10 +611,10 @@ class PutProjectBriefRequest(BaseModel):
 
     base_version_id: NonBlankBriefString | None
     idempotency_key: NonBlankBriefString
-    premise: NonBlankBriefString | None
-    genre: NonBlankBriefString | None
-    tone: NonBlankBriefString | None
-    pov: NonBlankBriefString | None
+    premise: BriefTextField | None
+    genre: BriefTextField | None
+    tone: BriefTextField | None
+    pov: BriefTextField | None
     constraints: list[NonBlankBriefString] = Field(
         json_schema_extra={"uniqueItems": True}
     )
@@ -683,6 +694,17 @@ class RenameDraftRequest(BaseModel):
 class SaveDraftRequest(BaseModel):
     raw_text: str
     idempotency_key: str
+
+    @field_validator("raw_text")
+    @classmethod
+    def enforce_raw_text_limit(cls, value: str) -> str:
+        # D5-2(오너 2026-08-27, "전 경로 4000자"): 유닛 본문 상한. accept 합성 경로는
+        # writing/accept.py 가 같은 상수로 provider 호출 앞에 잰다 — 두 축이 같은 env 를
+        # 읽는 것이 이 헬퍼가 app/env.py 에 있는 이유다(도메인이 api/ 를 import 못 한다).
+        limit = draft_raw_text_max_chars()
+        if len(value) > limit:
+            raise ValueError(f"raw_text must contain at most {limit} characters")
+        return value
 
 
 class CreateSourceRefRequest(BaseModel):

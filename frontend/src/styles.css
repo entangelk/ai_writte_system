@@ -1359,10 +1359,21 @@ main {
   font-size: var(--type-meta);
 }
 
-/* K-4: 원고 본문 글자수 가이드(창과 무관, hard 제한 없음). flex 에서 오른쪽으로. */
+/* K-4: 원고 본문 글자수 가이드. flex 에서 오른쪽으로. D5-2(2026-08-27)부터 상한이
+   있다(서버 4000자, RAW_TEXT_MAX_CHARS 미러) — 임박은 warn, 초과(이미 긴 본문을 불러온
+   레거시 케이스)는 danger 로 알린다. */
 .editor-char-count {
   margin-left: auto;
   color: var(--text-muted);
+}
+
+.editor-char-count.limit-near {
+  color: var(--state-warn-text);
+}
+
+.editor-char-count.limit-over {
+  color: var(--state-danger-text);
+  font-weight: 600;
 }
 
 /* K-4: 지시문 토큰 카운터 + 소프트 경고(해당 preset 예산의 90% 초과 시 색 변화). */

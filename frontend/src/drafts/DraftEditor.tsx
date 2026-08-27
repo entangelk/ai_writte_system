@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
-import { formatCharCount } from "../writing/tokenEstimate";
+import {
+  RAW_TEXT_MAX_CHARS,
+  RAW_TEXT_WARN_CHARS,
+  formatCharCount,
+} from "../writing/tokenEstimate";
 import {
   ApiError,
   describeApiError,
@@ -174,6 +178,13 @@ export function DraftEditor() {
     .some((version) => version.id === selectedVersionId);
 
   const dirty = rawText !== baseline;
+  // D5-2: 본문 상한. 코드포인트 단위([...text].length)로 세는 것은 formatCharCount 와
+  // 서버 Python len 을 미러링하기 때문이다. ★ textarea 에 maxLength 를 붙이지 않는다 —
+  // 붙여넣기가 잘려 정본이 소리 없이 손상된다(정본 보존 정책, DraftEditor.test.tsx 의
+  // no-maxlength 셀이 잠금). 프론트의 시행은 **경고 + 저장 차단**이지 잘라내기가 아니다.
+  const charCount = [...rawText].length;
+  const overLimit = charCount > RAW_TEXT_MAX_CHARS;
+  const nearLimit = !overLimit && charCount >= RAW_TEXT_WARN_CHARS;
   const readOnly = forcedReadOnly || project?.archived === true || draft?.archived === true;
   const latest = latestOf(versions);
   const latestVersionId = latest?.id ?? null;
@@ -262,7 +273,8 @@ export function DraftEditor() {
       draftId === undefined ||
       !dirty ||
       readOnly ||
-      savingRef.current
+      savingRef.current ||
+      overLimit
     ) {
       return;
     }
@@ -577,7 +589,20 @@ export function DraftEditor() {
               <span>
                 {versionNumber === null ? "아직 저장된 version 없음" : `현재 version ${versionNumber}`}
               </span>
-              <span className="editor-char-count">{formatCharCount(rawText)}</span>
+              <span
+                className={
+                  overLimit ? "editor-char-count limit-over"
+                    : nearLimit ? "editor-char-count limit-near"
+                    : "editor-char-count"
+                }
+              >
+                {formatCharCount(rawText)}
+                {overLimit
+                  ? ` / 상한 ${RAW_TEXT_MAX_CHARS.toLocaleString("ko-KR")}자 초과 — 저장할 수 없습니다`
+                  : nearLimit
+                    ? ` / 상한 ${RAW_TEXT_MAX_CHARS.toLocaleString("ko-KR")}자 임박`
+                    : ""}
+              </span>
             </div>
             <textarea
               ref={editorRef}
@@ -598,7 +623,10 @@ export function DraftEditor() {
                 {notice ?? (dirty ? "저장하지 않은 변경 사항" : "모든 변경 사항 저장됨")}
               </span>
               {!readOnly && (
-                <button type="submit" disabled={!dirty || saving || selecting}>
+                <button
+                  type="submit"
+                  disabled={!dirty || saving || selecting || overLimit}
+                >
                   {saving ? "저장 중…" : "저장"}
                 </button>
               )}
