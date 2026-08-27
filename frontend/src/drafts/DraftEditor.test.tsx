@@ -1818,14 +1818,19 @@ describe("본문 4000자 상한 (D5-2, 오너 2026-08-27)", () => {
   });
 
   it("blocks saving a freshly typed body that passes the limit", async () => {
-    // under 방향 앵커: overLimit 차단을 지우면 이 셀이 재실패한다. fireEvent.change 로
-    // 4001자를 한 번에 넣는다(4001키 타이핑은 느리다).
+    // under 방향 앵커: overLimit 차단을 지우면 이 셀이 재실패한다. over 방향도 함께 잠는다 —
+    // 짧은 본문은 경고 없이 저장 가능이어야 한다(과잉 차단 방지). fireEvent.change 로 값을
+    // 넣는다(4001키 타이핑은 느리다).
     mockFetch({ body: project }, { body: draft }, { body: { versions: [] } });
 
     renderEditor();
     const editor = await screen.findByLabelText("원고 본문");
-    fireEvent.change(editor, { target: { value: "가".repeat(4_001) } });
+    fireEvent.change(editor, { target: { value: "짧은 문장." } });
+    expect(screen.getByText("6자")).not.toHaveTextContent("임박");
+    expect(screen.getByText("6자")).not.toHaveClass("limit-near");
+    expect(screen.getByRole("button", { name: "저장" })).toBeEnabled();
 
+    fireEvent.change(editor, { target: { value: "가".repeat(4_001) } });
     const counter = await screen.findByText(/4,001자/);
     expect(counter).toHaveClass("limit-over");
     expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
