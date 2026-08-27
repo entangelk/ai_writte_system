@@ -209,15 +209,21 @@ class AcceptRawTextLimitTest(unittest.TestCase):
                                  WritingTaskType.CONTINUE_SCENE, "이어서 써줘",
                                  intent=WritingIntent.START_NEXT_UNIT,
                                  next_unit=next_unit)
+        # ★ candidate 도 intent·next_unit 을 함께 싣는다 — 안 그러면 _validate 의
+        # next_unit 일치 검사가 먼저 걸려 이 셀이 상한과 무관한 이유로 통과한다
+        # (M3 뮤테이션으로 발견한 무효 통과).
         candidate = WritingCandidate("wr1", self.project,
                                      WritingTaskType.CONTINUE_SCENE,
-                                     WritingOutputType.DRAFT_PATCH, "가" * 4001)
-        with self.assertRaises(WritingAcceptError):
+                                     WritingOutputType.DRAFT_PATCH, "가" * 4001,
+                                     intent=WritingIntent.START_NEXT_UNIT,
+                                     next_unit=next_unit)
+        with self.assertRaises(WritingAcceptError) as ctx:
             asyncio.run(self._service().accept(
                 draft_id=self.draft.id,
                 base_version_id=base.draft_version.id,
                 idempotency_key="accept-start", request=request,
                 candidate=candidate, package=_package(self.project)))
+        self.assertIn("at most 4000 characters", str(ctx.exception))
         self.assertEqual((self.reporter.calls, self.gate.calls), (0, 0))
 
     def test_a_missing_base_still_reports_not_found_not_the_limit(self):
