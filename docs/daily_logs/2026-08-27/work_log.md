@@ -225,6 +225,32 @@
 있어 **적용 범위는 오너 결정**으로 넘겼다(선택지 ⓐ~ⓓ — HANDOFF "Owner Decisions Needed" ⓪ 갱신분
 참조). 결정 전에 계약을 박지 않는다(D5의 "테스트 선행" 조건이 그 뜻이다).
 
+### ★ 세션 2 정정 — 오너 지적 "LLM에 안 실린다고? 이어쓰기가 본문을 참고할 텐데?" (정확)
+
+위 표 ③·④와 "오너 질문에 대한 답"의 **"들어갈 일이 없다"는 틀렸다.** `raw_text` 가 *하나의 덩어리
+필드로* 실리지 않는다는 것만 사실이고, **원고는 매 생성마다 검색 조각으로 프롬프트에 실린다** —
+오너 체감이 정확하다. 정확한 메커니즘(전부 코드 실측):
+
+1. 프론트는 생성마다 `current_position: {draft_id, version_id}` 를 보낸다
+   ([`WritingPanel.tsx:341,351,415,434,539`](../../frontend/src/writing/WritingPanel.tsx#L341)). 빈 값은
+   `draft_excerpt` 쪽이다.
+2. 생성 검색 요청의 need 는 **고정** `_WRITING_CONTINUE_SCENE_NEEDS = (CURRENT_SCENE,
+   RECENT_SCENES, CANONICAL_MEMORY)`([`api/models.py:43-46`](../../services/application/app/api/models.py#L43)).
+3. Mongo 스텝 `_run_mongo_step`([`context_search/service.py:1085-1115`](../../services/application/app/context_search/service.py#L1085))이
+   **그 위치의 원고 버전 블록**을 다시 읽고 `_split_scene_blocks`([`:1189`](../../services/application/app/context_search/service.py#L1189))로
+   자른다: **현재 장면 = 마지막 HEADING/SCENE_MARKER 이후 문단 전부**(제목 없는 유닛이면 유닛 전체) +
+   **직전 문단 5개**(`DEFAULT_RECENT_SCENE_BLOCK_LIMIT=5`).
+4. 이 블록들이 ContextItem이 되고 `_apply_budget`([`:1167`](../../services/application/app/context_search/service.py#L1167))이
+   예산(요청 상한 8192)까지 랭킹순으로 끊어 넣는다 — 초과 조각은 `budget_excluded` 로 잘린다.
+
+**수정된 오너 질문의 답**: 본문(현재 장면)은 매 생성마다 실리므로 **본문 길이와 예산은 직결**이다.
+4000자 ≈ 2,353 tok 는 예산 8192의 약 29% — 현재 장면이 온전히 들어가고 직전 5문단·기억 조각과
+나눌 여유가 있다. 유닛이 그보다 훨씬 길어지면 현재 장면 조각이 예산을 대량 차지해 다른 조각이
+밀리고, 잘린 쪽의 이어쓰기 품질이 **조용히** 저하된다(실패 아님). 그러므로 **4000자 제한의 실질
+근거는 "창 안전"이 아니라 "현재 장면이 예산 안에 온전히 들어가 이어쓰기 품질을 보존"하는 것**이고,
+이 근거는 성립한다. 여전히 유효한 측정: budget 8192는 외부 API 배포에서 요청 상한(창 실측 불가) ·
+accept-append · 프론트 `draft_excerpt` 항상 `""`.
+
 ## 세션 2 다음 단계
 
 1. **D5 범위 오너 결정 수령** → 서버 `max_length` + 422 + 프론트 사전 차단·카운터 경고 +
