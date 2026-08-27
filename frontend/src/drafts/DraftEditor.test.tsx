@@ -1700,3 +1700,79 @@ describe("DraftEditor", () => {
     );
   });
 });
+
+describe("저장 기록 접기 (오너 2026-08-27 dogfood)", () => {
+  /** version N 개를 최신순으로 만든다(자세한 필드는 위 픽스처를 따른다). */
+  function manyVersions(count: number) {
+    return Array.from({ length: count }, (_, index) => ({
+      ...version1,
+      id: `v${index + 1}`,
+      version_number: index + 1,
+      snapshot_id: `s${index + 1}`,
+    }));
+  }
+
+  it("keeps the newest five in hand and folds the rest away", async () => {
+    // under-strict: 다시 전부 펼치면 최신 목록이 8개가 되어 재실패한다 —
+    // 저장할수록 버튼이 끝없이 늘어나던 그 상태다.
+    // over-strict: **목록을 잘라서** 줄이는 과대교정도 실패한다. 접힘 안에
+    // 나머지 셋이 그대로 있어야 하고, 옛 version 은 여전히 고를 수 있어야 한다.
+    const all = manyVersions(8);
+    mockFetch(
+      { body: project }, { body: draft }, { body: { versions: all } },
+      { body: detail(all[7], "여덟째 원고") },
+    );
+
+    renderEditor();
+    await screen.findByLabelText("원고 본문");
+
+    const recent = screen.getByRole("list", { name: "버전 기록" });
+    expect(within(recent).getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "version 8", "version 7", "version 6", "version 5", "version 4",
+    ]);
+
+    const older = screen.getByRole("list", { name: "이전 버전 기록" });
+    expect(within(older).getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "version 3", "version 2", "version 1",
+    ]);
+    expect(screen.getByText("이전 version 3개 더 보기")).toBeInTheDocument();
+    expect(older.closest("details")).not.toHaveAttribute("open");
+  });
+
+  it("does not fold at all when there are five or fewer", async () => {
+    const all = manyVersions(5);
+    mockFetch(
+      { body: project }, { body: draft }, { body: { versions: all } },
+      { body: detail(all[4], "다섯째 원고") },
+    );
+
+    renderEditor();
+    await screen.findByLabelText("원고 본문");
+
+    expect(within(screen.getByRole("list", { name: "버전 기록" }))
+      .getAllByRole("button")).toHaveLength(5);
+    expect(screen.queryByText(/이전 version/)).toBeNull();
+  });
+
+  it("opens the fold when the version being viewed lives inside it", async () => {
+    // 무엇을 보고 있는지가 화면에서 사라지면 안 된다 — 옛 version 을 고르면
+    // 그 자리가 열린 채로 있어야 한다.
+    const all = manyVersions(8);
+    mockFetch(
+      { body: project }, { body: draft }, { body: { versions: all } },
+      { body: detail(all[7], "여덟째 원고") },
+      { body: detail(all[0], "첫 원고") },
+    );
+
+    renderEditor();
+    await screen.findByLabelText("원고 본문");
+    await userEvent.click(screen.getByRole("button", { name: "version 1" }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("원고 본문")).toHaveValue("첫 원고"));
+    const older = screen.getByRole("list", { name: "이전 버전 기록" });
+    expect(older.closest("details")).toHaveAttribute("open");
+    expect(screen.getByRole("button", { name: "version 1" }))
+      .toHaveAttribute("aria-current", "true");
+  });
+});

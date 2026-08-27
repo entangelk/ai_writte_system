@@ -2588,3 +2588,42 @@ main {
   color: var(--text-body);
   border-bottom-color: var(--action-primary);
 }
+
+/* ── 저장 기록 접기 (오너 2026-08-27) ───────────────────────────────────
+   저장할수록 version 버튼이 끝없이 늘어났다. 최신 다섯만 손에 두고 나머지는
+   여기 접힌다 — 목록을 자른 것이 아니라 화면만 줄인 것이다. */
+.version-older {
+  margin-top: 1rem;
+}
+
+.version-older > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.version-older > summary::-webkit-details-marker {
+  display: none;
+}
+
+.version-older > summary::before {
+  content: "▸";
+  transition: transform 160ms ease;
+}
+
+.version-older[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.version-older > summary:hover {
+  color: var(--text-body);
+}
+
+/* 접힘 안의 목록은 머리글 없이 바로 이어지므로 위 여백이 필요 없다. */
+.version-older .version-list {
+  margin-top: 0.7rem;
+}

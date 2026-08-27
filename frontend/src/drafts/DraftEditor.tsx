@@ -30,6 +30,9 @@ type SaveIntent = {
 
 const DEFINITIVE_SAVE_FAILURES = new Set([400, 404, 409, 422]);
 
+/** 저장 기록에서 접지 않고 바로 내놓는 최신 version 수 (오너 2026-08-27). */
+const RECENT_VERSION_COUNT = 5;
+
 function latestOf(versions: DraftVersion[]): DraftVersion | null {
   return versions.reduce<DraftVersion | null>(
     (selected, version) =>
@@ -160,6 +163,15 @@ export function DraftEditor() {
       active = false;
     };
   }, [projectId, draftId]);
+
+  // 저장 기록: 최신 RECENT_VERSION_COUNT 개만 펼쳐 두고 나머지는 접는다
+  // (오너 2026-08-27). 목록 자체는 자르지 않는다 — 접는 것은 화면이다.
+  const orderedVersions = [...versions]
+    .sort((left, right) => right.version_number - left.version_number);
+  const recentVersions = orderedVersions.slice(0, RECENT_VERSION_COUNT);
+  const olderVersions = orderedVersions.slice(RECENT_VERSION_COUNT);
+  const selectedIsOlder = olderVersions
+    .some((version) => version.id === selectedVersionId);
 
   const dirty = rawText !== baseline;
   const readOnly = forcedReadOnly || project?.archived === true || draft?.archived === true;
@@ -622,10 +634,9 @@ export function DraftEditor() {
             {versions.length === 0 ? (
               <p className="version-empty">저장하면 첫 version이 여기에 표시됩니다.</p>
             ) : (
-              <ul className="version-list" aria-label="버전 기록">
-                {[...versions]
-                  .sort((left, right) => right.version_number - left.version_number)
-                  .map((version) => (
+              <>
+                <ul className="version-list" aria-label="버전 기록">
+                  {recentVersions.map((version) => (
                     <li key={version.id}>
                       <button
                         type="button"
@@ -637,7 +648,32 @@ export function DraftEditor() {
                       </button>
                     </li>
                   ))}
-              </ul>
+                </ul>
+                {/* 오너 2026-08-27: 저장할수록 버튼이 끝없이 늘어났다. 자주 쓰는
+                    것은 최신 몇 개뿐이라 그것만 손에 두고 나머지는 접는다 —
+                    **자르지는 않는다**(옛 version 은 여전히 전부 고를 수 있다).
+                    선택 중인 version 이 접힘 안에 있으면 열어 둔다: 무엇을 보고
+                    있는지 화면에서 사라지면 안 된다. */}
+                {olderVersions.length > 0 && (
+                  <details className="version-older" open={selectedIsOlder}>
+                    <summary>이전 version {olderVersions.length}개 더 보기</summary>
+                    <ul className="version-list" aria-label="이전 버전 기록">
+                      {olderVersions.map((version) => (
+                        <li key={version.id}>
+                          <button
+                            type="button"
+                            aria-current={version.id === selectedVersionId ? "true" : undefined}
+                            disabled={saving || selecting}
+                            onClick={() => void selectVersion(version)}
+                          >
+                            version {version.version_number}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </>
             )}
               </section>
             </div>
