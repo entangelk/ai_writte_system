@@ -209,6 +209,11 @@ class AdminUserPayload(BaseModel):
     username: str
     is_admin: bool
     is_active: bool
+    # Signup approval axis, separate from ``is_active`` (see auth.models.User).
+    # A pending row is stored with ``is_active=True``, so without this field the
+    # admin list showed a signup request as "활성" — an account that cannot sign
+    # in at all, labelled the same as one that can (owner 2026-08-27, dogfood).
+    status: str
 
 
 class AdminSignupPayload(BaseModel):

@@ -90,6 +90,7 @@ def register_admin(
         return {
             "id": user.id, "username": user.username,
             "is_admin": user.is_admin, "is_active": user.is_active,
+            "status": user.status,
         }
 
     @app.get("/admin/users", response_model=AdminUserListResponse,

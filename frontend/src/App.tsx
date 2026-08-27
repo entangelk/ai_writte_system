@@ -22,13 +22,20 @@ const ObservabilityDashboard = lazy(async () => ({
 const AdminConsole = lazy(async () => ({
   default: (await import("./admin/AdminConsole")).AdminConsole,
 }));
+const AdminUserDetail = lazy(async () => ({
+  default: (await import("./admin/AdminUserDetail")).AdminUserDetail,
+}));
 
 export function App() {
   return (
     <AuthGate>
       <Routes>
         <Route path="/" element={<ProjectList />} />
-        <Route path="/admin" element={<AdminRoute />} />
+        <Route path="/admin" element={<AdminRoute><AdminConsole /></AdminRoute>} />
+        <Route
+          path="/admin/users/:userId"
+          element={<AdminRoute><AdminUserDetail /></AdminRoute>}
+        />
         <Route path="/me" element={<PersonalHubPage />} />
         <Route path="/projects/:projectId" element={<DraftList />} />
         <Route path="/projects/:projectId/overview" element={<ProjectOverview />} />
@@ -71,7 +78,7 @@ export function App() {
   );
 }
 
-function AdminRoute() {
+function AdminRoute({ children }: { children: React.ReactNode }) {
   const user = useAuthenticatedUser();
   if (!user.is_admin) {
     return (
@@ -84,7 +91,7 @@ function AdminRoute() {
   }
   return (
     <Suspense fallback={<p className="status-copy">관리 화면을 불러오는 중…</p>}>
-      <AdminConsole />
+      {children}
     </Suspense>
   );
 }

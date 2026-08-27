@@ -1627,6 +1627,8 @@ export interface components {
             is_active: boolean;
             /** Is Admin */
             is_admin: boolean;
+            /** Status */
+            status: string;
             /** Username */
             username: string;
         };

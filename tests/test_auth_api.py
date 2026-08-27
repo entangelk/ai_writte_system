@@ -780,7 +780,7 @@ class AdminUserApiTest(unittest.TestCase):
             {u["username"] for u in users}, {"alice", "root"}
         )
         self.assertEqual(
-            set(users[0]), {"id", "username", "is_admin", "is_active"}
+            set(users[0]), {"id", "username", "is_admin", "is_active", "status"}
         )
         # Over-strict: the wire model is what keeps a hash from ever riding
         # along, so assert the absence on the raw body rather than the parsed
@@ -798,7 +798,7 @@ class AdminUserApiTest(unittest.TestCase):
             created.json(),
             {
                 "id": created.json()["id"], "username": "carol",
-                "is_admin": False, "is_active": True,
+                "is_admin": False, "is_active": True, "status": "active",
             },
         )
         # C-6: the account is real, but the administrator-set password is
@@ -921,6 +921,25 @@ class SignupApprovalApiTest(unittest.TestCase):
         # use for one — so the admin flow discovers it the way the UI does.
         queue = self.client.get("/admin/signup-requests").json()["requests"]
         return next(r["id"] for r in queue if r["username"] == username)
+
+    def test_admin_user_list_separates_pending_from_active(self) -> None:
+        """가입 대기 계정은 활성 계정과 구별돼야 한다 (오너 2026-08-27, dogfood).
+
+        under-strict: ``status`` 를 payload 에서 빼면 KeyError 로 재실패한다 —
+        그것이 대기 계정이 관리 목록에서 "활성"으로 보이던 원인이다.
+        over-strict: 대기 행을 ``is_active=False`` 로 "고치는" 과대교정도 여기서
+        실패한다. 비활성화는 단방향(D6)이고 승인 대기와는 다른 축이라,
+        대기 행은 활성 플래그를 그대로 든 채 status 로만 구별돼야 한다.
+        """
+        self._request("bob")
+
+        users = self.client.get("/admin/users").json()["users"]
+        bob = next(u for u in users if u["username"] == "bob")
+        root = next(u for u in users if u["username"] == "root")
+
+        self.assertEqual(bob["status"], "pending")
+        self.assertTrue(bob["is_active"])
+        self.assertEqual(root["status"], "active")
 
     def test_the_queue_lists_pending_requests_only(self) -> None:
         self._request("bob")
