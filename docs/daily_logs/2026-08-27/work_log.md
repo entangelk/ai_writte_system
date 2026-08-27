@@ -256,3 +256,87 @@ accept-append · 프론트 `draft_excerpt` 항상 `""`.
 1. **D5 범위 오너 결정 수령** → 서버 `max_length` + 422 + 프론트 사전 차단·카운터 경고 +
    양방향 회귀를 한 슬라이스로 시행.
 2. **D6(`unit_kind`)·신버전 육안 대조** — 세션 1 다음 단계 2·4 그대로(오너 몫).
+
+---
+
+## 세션 3 — D5-2 시행: 유닛 본문 4000자 상한 전 경로 + 설명창 스칼라 상한 · 커밋 `3a8fa28`·`5085e42`·`7dae1b3`
+
+### 오너 결정 (D5-2, 세션 2 보고에 대한 답)
+
+정정된 실측(원고는 매 생성 검색 조각으로 실림)을 보고한 뒤 오너가 범위를 정했다. 원문:
+*"전경로 4000자인데, 이거랑 동시에 프론트에서 본문에 4000자 제한까지도 같이 하자. 또, 내가 확인하기로
+프로젝트 설명창 들에는 별도 제한이 없는걸로 알고있어. 작업하면서 거기도 한번 봐줘. 또, 메모장 기능을
+하나 넣어두면 좋을꺼같아. 이건 다음 계획에서 하는걸로 써줘."*
+
+| # | 결정 | 시행 |
+|---|---|---|
+| D5-2-① | 전 경로 4000자 | 저장 스키마 422 + accept 합성 400(provider 호출 앞) |
+| D5-2-② | 프론트 사전 제한 | 카운터 경고 + 저장 차단 — **maxLength 금지**(하단) |
+| D5-2-③ | 설명창 필드 조사·보강 | premise·genre·tone·pov 상한 1000자(`BriefTextField`) |
+| D5-2-④ | 메모장 기능 | **다음 계획 항목으로 기록만**(구현 안 함 — 아래 "다음 계획") |
+
+### 구현
+
+- **상수**: [`app/env.py`](../../services/application/app/env.py) `draft_raw_text_max_chars()`
+  — 기본 4000, env `DRAFT_RAW_TEXT_MAX_CHARS` override, `<1` 기동 거부(main.py 조립 검증에
+  추가 — 스타일 예시·출력 프리셋과 같은 관례). 도메인(accept)이 api/를 import 못 하는 방향
+  규칙 때문에 공유 자리인 env.py에 뒀다.
+- **저장 축**: `SaveDraftRequest.raw_text`에 `field_validator` → 422(문체 예시 검증과 동일 관용).
+- **채택 축**: `WritingAcceptService._enforce_raw_text_limit` — append 합성 결과는
+  `_append_patch`를 그대로 불러 정확히 잰다(구분자 포함), start_next_unit 은 씨앗 본문만.
+  **`_validate` 직후·enrich 앞**에 호출 — 유료 호출 뒤에 거부되는 일이 없다. base 읽기가
+  `NotFound`면 조용히 넘어가 replay/404 순서(§3.3)를 원래 흐름에 맡긴다(셀이 잠금).
+- **프론트**: `tokenEstimate.ts`에 `RAW_TEXT_MAX_CHARS`(서버 미러)·`RAW_TEXT_WARN_CHARS`(90%).
+  DraftEditor 카운터가 `limit-near`(warn)/`limit-over`(danger) 상태를 말하고 저장 버튼·submit
+  조건에 `overLimit`. **★ textarea `maxLength`는 안 쓴다** — 기존 셀
+  (*"opens a zero-version draft…"* 의 no-maxlength 단정)이 정본 보존 정책으로 잠그고 있었다:
+  붙여넣기가 잘려 소리 없이 손상된다. 오너의 "프론트 제한"은 **경고+저장 차단**으로 시행하는
+  것이 두 정책을 모두 지키는 길이었다(충돌 발견 → 잘라내기 폐기 방향으로 해소).
+- **설명창**: `BriefTextField`(strip·min1·max1000) — `base_version_id`·`idempotency_key`는
+  그대로 `NonBlankBriefString`(id 축에 설명 상한을 섞지 않는다).
+
+### Mutation (양방향 8종)
+
+절차 준수: 각 mutation 전 `git status --short` 빈 것 확인(커밋 `3a8fa28` 위), mutate → 재실패
+확인 → `git checkout --` 원복(저장소 루트 절대경로) → clean 재확인.
+
+| # | mutation | 방향 | 재실패한 셀 |
+|---|---|---|---|
+| M1 | 저장 validator 무력화 | under | one_over 422 · env-조정성 |
+| M2 | 저장 `>` → `>=` | over | exactly_at_the_limit_saves |
+| M3 | accept 시행 호출 제거 | under | append_past · seed_past (provider 0회 단정 포함) |
+| M4 | accept append `>` → `>=` | over | composed_exactly_at_the_limit_passes |
+| M5 | `BriefTextField` max_length 제거 | under | premise_past · 전 필드 subtest |
+| M6 | brief 1000 → 999 | over | premise_at_exactly_1000 |
+| M7 | 저장 차단 `overLimit` 제거 | under | keeps_save_disabled · blocks_freshly_typed |
+| M8 | `RAW_TEXT_WARN_CHARS` → 0 | over | blocks_freshly_typed(짧은 본문 "임박 없음" 단정) |
+
+- **★ M3 1차 실행에서 seed 셀이 통과했다 — 무효 통과였다**: candidate에 `intent`·`next_unit`을
+  안 실어 `_validate`의 next-unit 일치 검사가 먼저 걸렸던 것(세션 1 M8 교훈의 재현 — *mutation이
+  통과하면 가드가 약한 것일 수도, mutation이 안 먹은 것일 수도 있다*). candidate을 바로잡아
+  `assertRaises` 메시지까지 단정하게 수선(커밋 `7dae1b3`)한 뒤 M3 재실행 — 양쪽 다 물었다.
+- **★ M7 복원에서 cwd 함정이 실제로 터졌다**(HANDOFF §뮤테이션): `cd frontend && vitest` 뒤
+  `git checkout -- frontend/src/...`를 치니 pathspec 불일치로 **원복이 안 됐다**. 저장소 루트
+  절대경로로 재원복·clean 확인으로 회복. 규칙을 알고도 순서를 틀으면 터진다 — 복원 명령은
+  항상 `cd /mnt/f/devel/ai_writte_system && …`.
+
+### 실DB 영향 조사 (알파 mongosh)
+
+- 스냅샷(`source_snapshots`) 중 4000자 초과 **1건 — 24,070자** = **"예산 포화 측정용 장면" 씨드**
+  (예산 측정 슬라이스 아티팩트, 오너 원고 아님). 그 외 최장 762자. **오너 콘텐츠 영향 0건.**
+- 브리프 필드 1000자 초과 **0건**(버전 2건 전수).
+- 그 씨드 장면은 이제 수동 저장이 422로 막힌다(측정용이라 방치 가능 — 정리 원하면 파기).
+
+### 기준선
+
+- 백엔드 전수(test-mongo ON): **2526 passed · 4 skipped · 2841 subtests**(216초). skip 4 =
+  알파 관례(Chroma 1 + ES 3). 신규 11셀(limit 8 + brief 3).
+- 프론트 전수: **373 passed / 34 files**(+3셀). `tsc --noEmit` clean. build 진입 434.87 kB
+  (+1.37). `gen:api` 재생성 — `schema.d.ts` **무변**(maxLength 는 TS 타입에 나오지 않음).
+- SoT **v1.8.7** 승인(상단 변경이력).
+
+### 다음 계획 — 오너 지시 기록 (D5-2-④, 구현 안 함)
+
+**메모장 기능**: 오너 *"메모장 기능을 하나 넣어두면 좋을꺼같아. 이건 다음 계획에서 하는걸로
+써줘."* — 구체 요구사항(위치·단위·공개 범위)은 미정이고 착수 시 오너 브리프가 선행한다.
+HANDOFF "Next Tasks"에 다음 계획 항목으로 등재했다.
