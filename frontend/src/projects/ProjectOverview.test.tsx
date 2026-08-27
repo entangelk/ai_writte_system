@@ -61,7 +61,9 @@ describe("ProjectOverview", () => {
     );
 
     renderOverview();
-    await screen.findByRole("heading", { name: "겨울 이야기" });
+    // 프로젝트 이름 머리글은 설정 셸(ProjectSettingsPage)이 쓴다 — 이 컴포넌트는
+    // 그 탭 하나의 내용이다(오너 2026-08-27).
+    await screen.findByRole("heading", { name: "작품 시작 정보" });
     await userEvent.type(screen.getByLabelText("작품 전제"), "  겨울 항구의 비밀  ");
     await userEvent.type(screen.getByLabelText(/핵심 제약/), " 시간 여행 금지 ");
     await userEvent.type(screen.getByLabelText(/문체 규칙/), " 절제된 감각 묘사 ");

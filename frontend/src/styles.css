@@ -344,6 +344,7 @@ main {
 .writing-actions button,
 .candidate-actions button,
 .loop-retry,
+.section-link.primary-link,
 .row-actions button {
   color: var(--text-on-accent);
   background: var(--action-primary);
@@ -362,6 +363,8 @@ main {
 .writing-actions button:hover:not(:disabled),
 .candidate-actions button:hover:not(:disabled),
 .loop-retry:hover:not(:disabled),
+.section-link.primary-link:hover,
+.section-link.primary-link:focus-visible,
 .row-actions button:hover:not(:disabled) {
   background: var(--action-primary-hover);
   transform: translateY(-1px);
@@ -373,6 +376,10 @@ main {
 .writing-actions button:disabled,
 .candidate-actions button:disabled,
 .loop-retry:disabled,
+/* `<a>` 에는 결코 매치되지 않는다 — 그래도 여기 두는 것은 세 규칙(base·hover·
+   disabled)의 자리 집합이 갈리지 않게 하기 위해서다(buttonAppearance.test.ts).
+   빠뜨리면 "면은 얻고 반응은 못 얻는" 그 결함과 같은 모양이 된다. */
+.section-link.primary-link:disabled,
 .row-actions button:disabled {
   cursor: not-allowed;
   opacity: var(--disabled-opacity);
@@ -2402,18 +2409,12 @@ main {
 }
 
 /* 관리자도 글을 쓴다 — 작업장 출구는 부차 링크가 아니라 첫 번째 행동이다. */
+/* 면(accent 배경·hover)은 위쪽 통합 규칙이 준다 — 여기는 **크기만** 정한다
+   (buttonAppearance.test.ts: 크기는 자리가, 정체성은 한 곳이 정한다). */
 .section-link.primary-link {
   padding: 0.6rem 1.1rem;
-  color: var(--text-on-accent);
-  background: var(--action-primary);
   font-size: 0.9rem;
   font-weight: 700;
-}
-
-.section-link.primary-link:hover,
-.section-link.primary-link:focus-visible {
-  color: var(--text-on-accent);
-  background: var(--action-primary-hover);
 }
 
 /* ── 내 작업 `/me` (오너 2026-08-27) ────────────────────────────────────
@@ -2530,4 +2531,37 @@ main {
 .hub-row-links a:hover,
 .hub-row-links a:focus-visible {
   color: var(--action-primary-hover);
+}
+
+/* ── 프로젝트 설정 탭 (오너 2026-08-27) ─────────────────────────────────
+   작업 공간 첫 화면에서 뺀 것들(작품 정보·개요 · 원고 내보내기 · 활동
+   타임라인)이 사는 자리. 편집기 드로어의 세로 탭과 달리 여기는 페이지 탭이라
+   가로로 눕고, 선택된 탭만 밑줄로 선다. */
+.settings-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.5rem;
+  margin: 0 0 var(--space-6);
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.settings-tabs button {
+  padding: 0.7rem 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: color 160ms ease, border-color 160ms ease;
+}
+
+.settings-tabs button:hover {
+  color: var(--text-body);
+}
+
+.settings-tabs button[aria-selected="true"] {
+  color: var(--text-body);
+  border-bottom-color: var(--action-primary);
 }

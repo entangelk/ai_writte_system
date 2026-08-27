@@ -1,12 +1,11 @@
 import { Suspense, lazy } from "react";
-import { Link, Route, Routes } from "react-router";
+import { Link, Navigate, Route, Routes, useParams } from "react-router";
 import { AuthGate, useAuthenticatedUser } from "./auth/AuthGate";
 import { DraftList } from "./drafts/DraftList";
 import { DraftEditor } from "./drafts/DraftEditor";
 import { ProjectList } from "./projects/ProjectList";
-import { ProjectOverview } from "./projects/ProjectOverview";
+import { ProjectSettingsPage } from "./projects/ProjectSettingsPage";
 import { AccessLogPage } from "./projects/AccessLogPage";
-import { ActivityTimelinePage } from "./projects/ActivityTimelinePage";
 import { PersonalHubPage } from "./me/PersonalHubPage";
 import { ReviewInbox } from "./review/ReviewInbox";
 import { ReviewInboxDetail } from "./review/ReviewInboxDetail";
@@ -38,9 +37,12 @@ export function App() {
         />
         <Route path="/me" element={<PersonalHubPage />} />
         <Route path="/projects/:projectId" element={<DraftList />} />
-        <Route path="/projects/:projectId/overview" element={<ProjectOverview />} />
+        <Route path="/projects/:projectId/settings" element={<ProjectSettingsPage />} />
+        {/* 오너 2026-08-27: 개요·활동은 설정 탭 아래로 모였다. 옛 주소는
+            남겨 둔 링크·북마크가 죽지 않도록 그 탭으로 넘긴다. */}
+        <Route path="/projects/:projectId/overview" element={<SettingsRedirect tab="brief" />} />
+        <Route path="/projects/:projectId/activity" element={<SettingsRedirect tab="activity" />} />
         <Route path="/projects/:projectId/access-log" element={<AccessLogPage />} />
-        <Route path="/projects/:projectId/activity" element={<ActivityTimelinePage />} />
         <Route
           path="/projects/:projectId/review"
           element={<ReviewInbox />}
@@ -76,6 +78,11 @@ export function App() {
       </Routes>
     </AuthGate>
   );
+}
+
+function SettingsRedirect({ tab }: { tab: string }) {
+  const { projectId } = useParams<{ projectId: string }>();
+  return <Navigate replace to={`/projects/${projectId}/settings?tab=${tab}`} />;
 }
 
 function AdminRoute({ children }: { children: React.ReactNode }) {

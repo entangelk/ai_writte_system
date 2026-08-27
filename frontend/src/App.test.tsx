@@ -794,4 +794,29 @@ describe("App routes", () => {
       ).toBeInTheDocument();
     });
   });
+
+  it("keeps old overview/activity links alive by sending them to the settings tab", async () => {
+    // 오너 2026-08-27: 두 화면이 설정 탭 아래로 모였다. 남아 있는 링크·북마크가
+    // 죽지 않아야 하고, 열리는 곳은 **그 탭**이어야 한다(무조건 첫 탭이 아니라).
+    // 셸(getProject)과 탭(listProjectActivity)이 나란히 나가므로 순서 큐가 아니라
+    // 주소로 답한다 — 이 셀이 재는 것은 요청 순서가 아니라 도착지다.
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => response(
+      url.includes("/auth/me")
+        ? { id: "u1", username: "alice", is_admin: false }
+        : url.includes("/activity")
+          ? { events: [] }
+          : { id: "p1", name: "겨울 이야기", archived: false },
+    )));
+
+    render(
+      <MemoryRouter initialEntries={["/projects/p1/activity"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "겨울 이야기" }))
+      .toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "활동 타임라인" }))
+      .toHaveAttribute("aria-selected", "true");
+  });
 });

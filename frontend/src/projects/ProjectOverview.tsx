@@ -164,17 +164,14 @@ export function ProjectOverview() {
   }
 
   if (loading) {
-    return <section className="workspace-page"><p>작품 정보를 불러오는 중…</p></section>;
+    return <p className="status-copy">작품 정보를 불러오는 중…</p>;
   }
 
   return (
-    <section className="workspace-page overview-page page-enter">
-      <Link className="back-link" to={`/projects/${projectId}`}>← 원고 작업 공간</Link>
-      <header className="page-heading project-heading">
-        <p className="eyebrow">작품 정보 · 정본 개요</p>
-        <h1>{project?.name ?? "프로젝트"}</h1>
-        <p>작품 정보와 승인된 기억만 표시합니다. 검토 전 항목은 정본과 분리됩니다.</p>
-      </header>
+    <>
+      <p className="form-hint">
+        작품 정보와 승인된 기억만 표시합니다. 검토 전 항목은 정본과 분리됩니다.
+      </p>
 
       {error !== null && <p className="alert" role="alert">{error}</p>}
       {notice !== null && <p className="source-jump-notice" role="status">{notice}</p>}
@@ -293,6 +290,6 @@ export function ProjectOverview() {
           </ul>
         )}
       </section>
-    </section>
+    </>
   );
 }

@@ -45,16 +45,11 @@ export function ActivityTimelinePage() {
   }, [projectId]);
 
   return (
-    <section className="workspace-page page-enter">
-      <Link className="back-link" to={`/projects/${projectId}`}>← 원고 목록</Link>
-      <header className="page-heading">
-        <p className="eyebrow">기록</p>
-        <h1>활동 타임라인</h1>
-        <p>
-          이 프로젝트에서 무엇이 언제 바뀌었는지 최신순으로 봅니다.
-          {" "}최근 {ACTIVITY_PAGE_SIZE}건까지 보여줍니다.
-        </p>
-      </header>
+    <>
+      <p className="form-hint">
+        이 프로젝트에서 무엇이 언제 바뀌었는지 최신순으로 봅니다.
+        {" "}최근 {ACTIVITY_PAGE_SIZE}건까지 보여줍니다.
+      </p>
 
       {error !== null && <p className="alert" role="alert">{error}</p>}
       {events === null && error === null && (
@@ -98,6 +93,6 @@ export function ActivityTimelinePage() {
           </ul>
         </section>
       ))}
-    </section>
+    </>
   );
 }
