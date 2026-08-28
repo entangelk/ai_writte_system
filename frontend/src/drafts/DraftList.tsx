@@ -149,16 +149,24 @@ export function DraftList() {
     if (projectId === undefined || purgeBusy || chapterConfirmTitle !== chapter.title) return;
     setPurgeBusy(true);
     setPurgeError(null);
+    let purgeRequested = false;
     try {
       if (!chapter.archived) await archiveChapter(projectId, chapter.id);
+      purgeRequested = true;
       await purgeChapter(projectId, chapter.id);
       setChapterPurgeTarget(null);
       setChapterConfirmTitle("");
       await loadChapters();
     } catch (cause: unknown) {
-      setPurgeError(cause instanceof ApiError && cause.status === 503
-        ? "삭제 결과를 확정할 수 없습니다. 목록을 새로 확인한 뒤 다시 시도하세요."
-        : describeApiError(cause));
+      if (purgeRequested && cause instanceof ApiError && cause.status === 404) {
+        setChapterPurgeTarget(null);
+        setChapterConfirmTitle("");
+        await loadChapters();
+      } else {
+        setPurgeError(cause instanceof ApiError && cause.status === 503
+          ? "삭제 결과를 확정할 수 없습니다. 목록을 새로 확인한 뒤 다시 시도하세요."
+          : describeApiError(cause));
+      }
     } finally {
       setPurgeBusy(false);
     }

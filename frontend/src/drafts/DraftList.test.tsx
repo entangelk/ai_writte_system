@@ -162,4 +162,41 @@ describe("DraftList Chapter→Scene hierarchy", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("삭제 결과를 확정할 수 없습니다");
     expect(screen.getByRole("alertdialog", { name: "장 삭제 확인" })).toBeInTheDocument();
   });
+
+  it("treats a repeated chapter purge 404 as an already-completed success", async () => {
+    const c1 = { ...chapter("c1", "1장", 1), archived: true };
+    const fetchMock = mockFetch(
+      { body: { id: "p1", name: "작품", archived: false } },
+      { body: { chapters: [c1] } },
+      { status: 404, body: { detail: "chapter not found" } },
+      { body: { chapters: [] } },
+    );
+    renderDraftList();
+    await screen.findByText("1장");
+    await userEvent.click(screen.getByRole("button", { name: "1장 삭제" }));
+    await userEvent.type(screen.getByLabelText(/장 제목을 정확히/), "1장");
+    await userEvent.click(screen.getByRole("button", { name: "장과 장면 영구 삭제" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(screen.queryByRole("alertdialog", { name: "장 삭제 확인" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("does not mistake an archive-stage 404 for a completed purge", async () => {
+    const c1 = chapter("c1", "1장", 1);
+    const fetchMock = mockFetch(
+      { body: { id: "p1", name: "작품", archived: false } },
+      { body: { chapters: [c1] } },
+      { status: 404, body: { detail: "chapter not found" } },
+    );
+    renderDraftList();
+    await screen.findByText("1장");
+    await userEvent.click(screen.getByRole("button", { name: "1장 삭제" }));
+    await userEvent.type(screen.getByLabelText(/장 제목을 정확히/), "1장");
+    await userEvent.click(screen.getByRole("button", { name: "장과 장면 영구 삭제" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("404: chapter not found");
+    expect(screen.getByRole("alertdialog", { name: "장 삭제 확인" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
 });
