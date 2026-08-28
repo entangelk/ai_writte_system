@@ -6,7 +6,7 @@ import { ProjectSettingsPage } from "./ProjectSettingsPage";
 
 /** 탭이 무엇을 청하든 답한다 — 이 파일이 재는 것은 셸이지 탭 내용이 아니다. */
 function stubFetch() {
-  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+  const fetchMock = vi.fn(async (url: string) => {
     const body = url.endsWith("/p1")
       ? { id: "p1", name: "겨울 이야기", archived: false }
       : url.includes("/brief")
