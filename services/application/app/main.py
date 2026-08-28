@@ -1958,7 +1958,14 @@ def create_app(
     register_projects(
         app,
         core_sot=core_sot, access_grants=access_grants, sync_outbox=sync_outbox,
-        activity=activity,
+        activity=activity, admin_audit=admin_audit,
+        project_name_history=project_name_history, memory=memory,
+        analysis=analysis, review_queue=review_queue,
+        gate_findings=gate_findings,
+        writing_generation_jobs=writing_generation_jobs,
+        writing_scratch=writing_scratch,
+        writing_loop_audit=writing_loop_audit,
+        llm_call_audit=llm_call_audit,
     )
 
     register_drafts(

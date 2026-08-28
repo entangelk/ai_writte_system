@@ -70,6 +70,7 @@ _ROOT = pathlib.Path(__file__).resolve().parents[1]
 # had to type, not something a new route inherits by being under /admin.
 _ADMIN_PROJECT_ROUTES = frozenset({
     "/admin/projects/{project_id}/purge",
+    "/admin/projects/{project_id}/archive",
     "/admin/projects/{project_id}/access-grants",
 })
 
@@ -1800,6 +1801,9 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # D8-6d: admin project 영구 파기(204, ADMIN tier). project_id 경로지만 소유권이
         # 아니라 관리자 검사를 쓰므로 project tier 가 아닌 admin tier.
         ("/admin/projects/{project_id}/purge", "post"),
+        # 관리 콘솔 아카이브(2026-08-28) — purge 의 선행 조건을 여는 진입점.
+        # purge 와 같은 이유로 admin tier(경로가 project 를 지목해도 검사는 관리자).
+        ("/admin/projects/{project_id}/archive", "post"),
         # D8-5e: 승격 발급(201). 같은 이유로 admin tier — 경로가 project 를 지목하지만
         # 검사는 "관리자인가"이지 "소유자인가"가 아니다. 이 operation 이 여는 것은
         # **읽기 전용·만료되는** 접근이며, 그 시행은 require_project_owner 안에 있다.
@@ -1876,8 +1880,10 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # 63/88 이 됐다 — 패드의 [버리기] 를 위한 개별 항목 경로.
         # 원고 하드 삭제(2026-08-28)가 project tier 에 POST purge 를 더해
         # 64/89 가 됐다 — 아카이브(soft)와 구분되는 원고 단위 영구 삭제 경로.
-        self.assertEqual(len(by_tier["project"]), 64)
-        self.assertEqual(len(tiers), 89)
+        # 소유자 프로젝트 purge(같은 날)가 project tier 에 POST purge 를 더해
+        # 65/91 이 됐다(관리자 아카이브는 admin tier).
+        self.assertEqual(len(by_tier["project"]), 65)
+        self.assertEqual(len(tiers), 91)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:

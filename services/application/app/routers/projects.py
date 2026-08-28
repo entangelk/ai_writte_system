@@ -35,6 +35,7 @@ from ..api.models import (
     ProjectExportResponse,
     ProjectListResponse,
     ProjectPayload,
+    PurgeProjectRequest,
     PutProjectBriefRequest,
     RenameProjectRequest,
 )
@@ -51,10 +52,14 @@ from ..api.dependencies import (
     require_authenticated_user,
 )
 from ..api.payloads import _project_brief_payload
+from .admin import execute_project_purge
 
 
 def register_projects(
-    app, *, core_sot, access_grants, sync_outbox, activity
+    app, *, core_sot, access_grants, sync_outbox, activity,
+    admin_audit, project_name_history, memory, analysis, review_queue,
+    gate_findings, writing_generation_jobs, writing_scratch,
+    writing_loop_audit, llm_call_audit,
 ) -> None:
     def _project_payload(project) -> dict[str, object]:
         return {"id": project.id, "name": project.name, "archived": project.archived}
@@ -288,6 +293,31 @@ def register_projects(
             before="active", after="archived",
         )
         return _project_payload(project)
+
+    @app.post("/projects/{project_id}/purge", status_code=204,
+              response_model=None, responses=_owned(_ERRORS_404_409),
+              dependencies=_REQUIRE_PROJECT_OWNER)
+    async def purge_project(
+        project_id: str, request: PurgeProjectRequest,
+        current=Depends(require_authenticated_user),
+    ) -> None:
+        # 소유자 프로젝트 purge(2026-08-28 오너 결정 — 설정탭 삭제 버튼의 본체).
+        # 파괴 그래프는 admin purge 와 **한 벌**이다: ``execute_project_purge``
+        # (routers/admin.py). 권한만 다르다 — 여기는 소유자. 감사·이름 이력·outbox
+        # 도 같이 남으므로 관리자 파기와 구별할 필요 없이 같은 원장에 쌓인다.
+        await execute_project_purge(
+            project_id=project_id, reason=request.reason,
+            acting_user_id=current.id,
+            core_sot=core_sot, admin_audit=admin_audit,
+            project_name_history=project_name_history,
+            memory=memory, analysis=analysis, review_queue=review_queue,
+            gate_findings=gate_findings,
+            writing_generation_jobs=writing_generation_jobs,
+            writing_scratch=writing_scratch,
+            writing_loop_audit=writing_loop_audit,
+            llm_call_audit=llm_call_audit, access_grants=access_grants,
+            activity=activity, sync_outbox=sync_outbox,
+        )
 
     @app.get(
         "/projects/{project_id}/export",

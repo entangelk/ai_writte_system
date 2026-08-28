@@ -33,6 +33,7 @@ from ..api.models import (
     AdminQuotaPolicyDetailResponse,
     AdminQuotaPolicyListResponse,
     AdminQuotaPolicyPayload,
+    AdminProjectPayload,
     AdminSignupListResponse,
     AdminQuotaSuspendRequest,
     AdminSignupPayload,
@@ -58,6 +59,128 @@ from services.application.app.auth.admin_audit import AdminAuditEvent
 from services.application.app.core_sot.service import NotFound
 from services.application.app.observability.kpi import aggregate_global_kpi
 from services.application.app.quota.policy import QuotaLimits, QuotaStatus
+
+
+async def execute_project_purge(
+    *,
+    project_id: str,
+    reason: str,
+    acting_user_id: str,
+    core_sot,
+    admin_audit,
+    project_name_history,
+    memory,
+    analysis,
+    review_queue,
+    gate_findings,
+    writing_generation_jobs,
+    writing_scratch,
+    writing_loop_audit,
+    llm_call_audit,
+    access_grants,
+    activity,
+    sync_outbox,
+) -> None:
+    """프로젝트 영구 파기의 **한 벌뿐인 본체** (D8-6d, 2026-08-28 소유자 경로 공유).
+
+    admin purge(``POST /admin/projects/{id}/purge``)와 소유자 purge
+    (``POST /projects/{id}/purge``, projects 라우터)가 **같은 파괴 그래프**를 쓴다
+    — 두 벌이 되면 어느 한쪽만 새 서비스를 받아 조용한 고아를 만든다(D5 부분
+    삭제). 권한 차이만 라우터가 정한다.
+
+    D8-6d 원 주석: 영구 파기(불가역). archive(soft)와 달리 18컬렉션을 hard delete
+    하고 indexing outbox 로 worker 가 vector/index 5백엔드를 파기(6c _drain_purge).
+    응답은 204(리소스 소멸). 2단계 삭제는 UI 관례가 아니라 여기서 강제한다:
+    active project 는 먼저 archive해야 하며 아니면 409.
+
+    ★ 알려진 한계 — **재시도는 멱등이 아니다**(2026-08-02 정정. v1.7.74 는 이 자리에
+    "클라이언트 재시도(멱등)"라고 적었으나 거짓이었다). core_sot 이 **먼저** 지워지므로,
+    아래 derived 단계에서 mongo 장애가 나 전역 handler 가 503 을 내면 **수습할 방법이
+    없다**: 재시도는 core_sot 이 비어 404 로 끝나고 derived 에 도달하지 못한다. 남는
+    derived 는 무해하지 않다 — llm_call_audits 에 프롬프트 본문이, scratch 에 원고
+    후보가 남는다(D5 부분 삭제 금지 위반). **수습은 `scripts/purge_reconciler.py`**
+    가 한다(projects 에 없는 project_id 의 잔류를 찾아 파기 + PROJECT_PURGED enqueue).
+    D4=A(오너 2026-08-02)로 현행 순서+reconciler를 유지한다.
+    한계 자체는 AdminProjectPurgeTest 의
+    test_a_second_purge_is_404_and_never_reaches_the_derived_services 가 잠근다.
+    """
+    try:
+        project = core_sot.get_project(project_id=project_id)
+    except NotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not project.archived:
+        raise HTTPException(
+            status_code=409, detail="project must be archived before purge"
+        )
+
+    # D3/D5=A. This first write is fail-closed: without it the destructive
+    # action does not begin. It intentionally survives the project graph.
+    # (``admin_user_id`` 필드에 소유자 purge 의 행위자 id 가 들어간다 — 파기 감사
+    # 원장의 행위자 축이지 admin 권한의 증명이 아니다.)
+    requested = admin_audit.record_purge_requested(
+        admin_user_id=acting_user_id,
+        target_project_id=project_id,
+        reason=reason,
+    )
+    try:
+        # Slice 8.2c (N3=A, owner 2026-08-05): snapshot the name **before**
+        # anything is destroyed. This is the one product value that outlives
+        # the purge, so that a usage-ledger row can be read by a human
+        # instead of answering with a bare id.
+        #
+        # Order and failure direction are both load-bearing. Moving this
+        # below ``core_sot.purge_project`` would destroy the project first
+        # and then, on a storage failure, lose the name forever — the exact
+        # state the owner decision reverses. Wrapping it in ``try/except``
+        # would do the same silently. It sits inside this block so a failure
+        # still records the ``failed`` audit outcome and answers 503.
+        project_name_history.record_purged(
+            project_id=project_id, name=project.name
+        )
+        core_sot.purge_project(project_id=project_id)
+        memory.purge_project(project_id=project_id)
+        analysis.purge_project(project_id=project_id)
+        review_queue.purge_project(project_id=project_id)
+        gate_findings.purge_project(project_id=project_id)
+        writing_generation_jobs.purge_project(project_id=project_id)
+        writing_scratch.purge_project(project_id=project_id)
+        writing_loop_audit.purge_project(project_id=project_id)
+        llm_call_audit.purge_project(project_id=project_id)
+        # D8-5e grants are project children and disappear. The separate
+        # admin tombstone above is the explicit minimal D5 exception.
+        access_grants.purge_project(project_id=project_id)
+        # Phase 9 (I1·I2): 활동 로그는 **프로젝트 자식**이라 여기서 함께 사라진다.
+        # 살려 두면 개명 이력·제목·저장 이벤트가 통째로 삭제 예외로 승격돼
+        # D8-6 이 무너진다. 빠뜨려도 reconciler 가 `project_id` 로 수습하지만
+        # 그것은 안전망이지 계약이 아니다.
+        activity.purge_project(project_id=project_id)
+        sync_outbox.enqueue_project_purged(project_id=project_id)
+    except Exception as exc:
+        try:
+            admin_audit.record_purge_outcome(
+                requested,
+                outcome="failed",
+                error_kind=(
+                    "storage_error"
+                    if isinstance(exc, _STORAGE_ERRORS)
+                    else "not_found" if isinstance(exc, NotFound)
+                    else "internal_error"
+                ),
+            )
+        except Exception:
+            # D5=A: outcome is best-effort after the fail-closed requested
+            # row. Never replace the actual purge failure with audit noise.
+            pass
+        if isinstance(exc, NotFound):
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise
+    try:
+        admin_audit.record_purge_outcome(requested, outcome="succeeded")
+    except Exception:
+        # The irreversible work already completed. Returning 503 here would
+        # falsely tell the client to retry an endpoint that cannot retry.
+        pass
+    return None
 
 
 def register_admin(
@@ -493,95 +616,45 @@ def register_admin(
         project_id: str, request: PurgeProjectRequest,
         current=Depends(require_admin_user),
     ) -> None:
-        # D8-6d: 영구 파기(불가역). archive(soft)와 달리 18컬렉션을 hard delete 하고
-        # indexing outbox 로 worker 가 vector/index 5백엔드를 파기(6c _drain_purge).
-        # D5 전체 그래프 파기. 응답은 204(리소스 소멸). 2단계 삭제는 UI 관례가
-        # 아니라 여기서 강제한다: active project 는 먼저 archive해야 하며 아니면 409.
-        #
-        # ★ 알려진 한계 — **재시도는 멱등이 아니다**(2026-08-02 정정. v1.7.74 는 이 자리에
-        # "클라이언트 재시도(멱등)"라고 적었으나 거짓이었다). core_sot 이 **먼저** 지워지므로,
-        # 아래 derived 단계에서 mongo 장애가 나 전역 handler 가 503 을 내면 **수습할 방법이
-        # 없다**: 재시도는 core_sot 이 비어 404 로 끝나고 derived 에 도달하지 못한다. 남는
-        # derived 는 무해하지 않다 — llm_call_audits 에 프롬프트 본문이, scratch 에 원고
-        # 후보가 남는다(D5 부분 삭제 금지 위반). **수습은 `scripts/purge_reconciler.py`**
-        # 가 한다(projects 에 없는 project_id 의 잔류를 찾아 파기 + PROJECT_PURGED enqueue).
-        # D4=A(오너 2026-08-02)로 현행 순서+reconciler를 유지한다. 장래 D4-D
-        # operation journal/saga는 원격 저장소·다중 worker에서 수동 수습이 실제
-        # 부담이 될 때 연다.
-        # 한계 자체는 AdminProjectPurgeTest 의
-        # test_a_second_purge_is_404_and_never_reaches_the_derived_services 가 잠근다.
+        # D8-6d: 영구 파기(불가역). 파괴 그래프 전체는 register_admin 밖의 공유
+        # 함수 ``execute_project_purge`` 다 — 소유자 purge(2026-08-28)가 **같은
+        # 그래프**를 쓴다. 두 벌이 되면 어느 한쪽만 새 서비스를 받아 조용한 고아를
+        # 만든다(D5 부분 삭제).
+        await execute_project_purge(
+            project_id=project_id, reason=request.reason,
+            acting_user_id=current.id,
+            core_sot=core_sot, admin_audit=admin_audit,
+            project_name_history=project_name_history,
+            memory=memory, analysis=analysis, review_queue=review_queue,
+            gate_findings=gate_findings,
+            writing_generation_jobs=writing_generation_jobs,
+            writing_scratch=writing_scratch,
+            writing_loop_audit=writing_loop_audit,
+            llm_call_audit=llm_call_audit, access_grants=access_grants,
+            activity=activity, sync_outbox=sync_outbox,
+        )
+
+    @app.post("/admin/projects/{project_id}/archive",
+              response_model=AdminProjectPayload,
+              responses=_ERRORS_ADMIN_404,
+              dependencies=_REQUIRE_ADMIN)
+    async def admin_archive_project(
+        project_id: str, current=Depends(require_admin_user),
+    ) -> dict[str, object]:
+        # 관리 콘솔의 purge 진입점 보강(2026-08-28 오너 결정) — purge 는 archived
+        # 프로젝트만 받는데 그 상태로 만드는 화면 경로가 없어 도달이 막혀 있었다.
+        # 소유자의 DELETE /projects/{id} 와 같은 시퀀스를 admin 권한으로만.
         try:
-            project = core_sot.get_project(project_id=project_id)
+            project = core_sot.archive_project(project_id=project_id)
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        if not project.archived:
-            raise HTTPException(
-                status_code=409, detail="project must be archived before purge"
-            )
-
-        # D3/D5=A. This first write is fail-closed: without it the destructive
-        # action does not begin. It intentionally survives the project graph.
-        requested = admin_audit.record_purge_requested(
-            admin_user_id=current.id,
-            target_project_id=project_id,
-            reason=request.reason,
+        sync_outbox.enqueue_project_archived(project_id=project_id)
+        activity.record(
+            project_id=project.id, actor_user_id=current.id,
+            action="project_archived", target_type="project", target_id=project.id,
+            before="active", after="archived",
         )
-        try:
-            # Slice 8.2c (N3=A, owner 2026-08-05): snapshot the name **before**
-            # anything is destroyed. This is the one product value that outlives
-            # the purge, so that a usage-ledger row can be read by a human
-            # instead of answering with a bare id.
-            #
-            # Order and failure direction are both load-bearing. Moving this
-            # below ``core_sot.purge_project`` would destroy the project first
-            # and then, on a storage failure, lose the name forever — the exact
-            # state the owner decision reverses. Wrapping it in ``try/except``
-            # would do the same silently. It sits inside this block so a failure
-            # still records the ``failed`` audit outcome and answers 503.
-            project_name_history.record_purged(
-                project_id=project_id, name=project.name
-            )
-            core_sot.purge_project(project_id=project_id)
-            memory.purge_project(project_id=project_id)
-            analysis.purge_project(project_id=project_id)
-            review_queue.purge_project(project_id=project_id)
-            gate_findings.purge_project(project_id=project_id)
-            writing_generation_jobs.purge_project(project_id=project_id)
-            writing_scratch.purge_project(project_id=project_id)
-            writing_loop_audit.purge_project(project_id=project_id)
-            llm_call_audit.purge_project(project_id=project_id)
-            # D8-5e grants are project children and disappear. The separate
-            # admin tombstone above is the explicit minimal D5 exception.
-            access_grants.purge_project(project_id=project_id)
-            # Phase 9 (I1·I2): 활동 로그는 **프로젝트 자식**이라 여기서 함께 사라진다.
-            # 살려 두면 개명 이력·제목·저장 이벤트가 통째로 삭제 예외로 승격돼
-            # D8-6 이 무너진다. 빠뜨려도 reconciler 가 `project_id` 로 수습하지만
-            # 그것은 안전망이지 계약이 아니다.
-            activity.purge_project(project_id=project_id)
-            sync_outbox.enqueue_project_purged(project_id=project_id)
-        except Exception as exc:
-            try:
-                admin_audit.record_purge_outcome(
-                    requested,
-                    outcome="failed",
-                    error_kind=(
-                        "storage_error"
-                        if isinstance(exc, _STORAGE_ERRORS)
-                        else "not_found" if isinstance(exc, NotFound)
-                        else "internal_error"
-                    ),
-                )
-            except Exception:
-                # D5=A: outcome is best-effort after the fail-closed requested
-                # row. Never replace the actual purge failure with audit noise.
-                pass
-            if isinstance(exc, NotFound):
-                raise HTTPException(status_code=404, detail=str(exc)) from exc
-            raise
-        try:
-            admin_audit.record_purge_outcome(requested, outcome="succeeded")
-        except Exception:
-            # The irreversible work already completed. Returning 503 here would
-            # falsely tell the client to retry an endpoint that cannot retry.
-            pass
-        return None
+        return {
+            "id": project.id, "name": project.name,
+            "archived": project.archived, "owner_id": project.owner_id,
+        }
