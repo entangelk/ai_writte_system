@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import re
 import unittest
 from unittest.mock import patch
 
@@ -62,11 +63,33 @@ class TestClient:
         # is driven un-overridden in tests/test_auth_api.py.
         authenticate(app)
         self._app = app
+        self._chapter_ids: dict[str, str] = {}
 
     def get(self, path: str, **kwargs):
         return self._request("GET", path, **kwargs)
 
     def post(self, path: str, **kwargs):
+        match = re.fullmatch(r"/projects/([^/]+)/drafts", path)
+        body = kwargs.get("json")
+        if match is not None and isinstance(body, dict) and "chapter_id" not in body:
+            project_id = match.group(1)
+            chapter_id = self._chapter_ids.get(project_id)
+            if chapter_id is None:
+                created = self._request(
+                    "POST", f"/projects/{project_id}/chapters",
+                    json={"title": "테스트 장"},
+                )
+                if created.status_code < 300:
+                    chapter_id = created.json()["id"]
+                    self._chapter_ids[project_id] = chapter_id
+            if chapter_id is not None:
+                migrated_body = dict(body)
+                if migrated_body.get("unit_kind") in {"chapter", "scene", "other"}:
+                    migrated_body.pop("unit_kind")
+                kwargs = {
+                    **kwargs,
+                    "json": {**migrated_body, "chapter_id": chapter_id},
+                }
         return self._request("POST", path, **kwargs)
 
     def put(self, path: str, **kwargs):
@@ -1517,9 +1540,9 @@ class SpineEnvelopeKeyTest(unittest.TestCase):
         expected = {
             "id",
             "project_id",
+            "chapter_id",
             "title",
             "archived",
-            "unit_kind",
             "position",
         }
 
@@ -1673,7 +1696,10 @@ class ProjectExportApiTest(unittest.TestCase):
 
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
-        self.assertEqual(body["body"], "# 1장\n\nfirst\n\n# 2장\n\nsecond")
+        self.assertEqual(
+            body["body"],
+            "# 테스트 장\n\n## 1장\n\nfirst\n\n## 2장\n\nsecond",
+        )
         manifest = body["manifest"]
         self.assertEqual(manifest["project_id"], self.project["id"])
         self.assertEqual(manifest["format"], "markdown")
@@ -1687,7 +1713,9 @@ class ProjectExportApiTest(unittest.TestCase):
             {
                 "draft_id": self.d1["id"],
                 "title": "1장",
-                "unit_kind": "chapter",
+                "chapter_id": self.d1["chapter_id"],
+                "chapter_title": "테스트 장",
+                "chapter_position": 1,
                 "position": 1,
                 "version_id": self.saved1["draft_version"]["id"],
                 "version_number": 1,
@@ -1717,9 +1745,12 @@ class ProjectExportApiTest(unittest.TestCase):
             f"/projects/{self.project['id']}/export?include_archived=true"
         ).json()
 
-        self.assertEqual(default["body"], "2장\n\nsecond")
+        self.assertEqual(default["body"], "테스트 장\n\n2장\n\nsecond")
         self.assertEqual(default["include_archived"], False)
-        self.assertEqual(opted_in["body"], "1장\n\nfirst\n\n2장\n\nsecond")
+        self.assertEqual(
+            opted_in["body"],
+            "테스트 장\n\n1장\n\nfirst\n\n2장\n\nsecond",
+        )
         self.assertEqual(opted_in["include_archived"], True)
 
     def test_unsupported_format_and_missing_project_rejected(self):
@@ -1741,7 +1772,10 @@ class ProjectExportApiTest(unittest.TestCase):
         resp = self.client.get(f"/projects/{self.project['id']}/export")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()["body"], "1장\n\nfirst\n\n2장\n\nsecond")
+        self.assertEqual(
+            resp.json()["body"],
+            "테스트 장\n\n1장\n\nfirst\n\n2장\n\nsecond",
+        )
 
     def test_export_response_exact_keys(self):
         # EX-12 (fire): lock the exact top-level envelope keys so a future
@@ -1771,7 +1805,9 @@ class ProjectExportApiTest(unittest.TestCase):
             {
                 "draft_id",
                 "title",
-                "unit_kind",
+                "chapter_id",
+                "chapter_title",
+                "chapter_position",
                 "position",
                 "version_id",
                 "version_number",
@@ -2030,11 +2066,11 @@ class LegacyOrderedDraftMigration503Test(unittest.TestCase):
         self.assertEqual(resp.status_code, 503)
         self.assertIn("migration is required", resp.json()["detail"])
 
-    def test_create_draft_on_legacy_data_returns_503(self):
+    def test_create_chapter_on_partial_legacy_data_returns_503(self):
         client, project_id = self._app_with_legacy_draft()
 
         resp = client.post(
-            f"/projects/{project_id}/drafts", json={"title": "New"}
+            f"/projects/{project_id}/chapters", json={"title": "New"}
         )
 
         self.assertEqual(resp.status_code, 503)
@@ -2058,13 +2094,7 @@ class LegacyOrderedDraftMigration503Test(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(len(resp.json()["drafts"]), 1)
 
-    def test_reorder_on_legacy_data_stays_409_not_500(self):
-        # Locks the intentional asymmetry: reorder already caught the integrity
-        # error via its InvalidDraftOrder clause (409), so it never leaked a 500
-        # and was deliberately left unchanged (work_log §3 scope-out). Without
-        # this test the 409 rested only on the subclass-catch mechanism; here it
-        # is pinned. Two directions: not 500 (if reorder's catch is ever split
-        # out) and not 503 (the 503 mapping stays exclusive to list/create/export).
+    def test_legacy_project_wide_reorder_route_is_removed(self):
         client, project_id = self._app_with_legacy_draft()
 
         resp = client.put(
@@ -2072,7 +2102,7 @@ class LegacyOrderedDraftMigration503Test(unittest.TestCase):
             json={"ordered_draft_ids": ["legacy-1"]},
         )
 
-        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(resp.status_code, 404)
 
     def test_create_with_bad_unit_kind_is_client_error_not_503(self):
         # Over-strict: a bad unit_kind is a client input error (422 at the
@@ -2161,6 +2191,18 @@ class CrudErrorContractDeclarationTest(unittest.TestCase):
             {"401", "403", "404", "503"},
         ("/projects/{project_id}/drafts", "get"): {"401", "403", "404", "503"},
         ("/projects/{project_id}/drafts", "post"): {"401", "403", "404", "409", "503"},
+        ("/projects/{project_id}/chapters", "get"):
+            {"401", "403", "404", "503"},
+        ("/projects/{project_id}/chapters", "post"):
+            {"401", "403", "404", "409", "503"},
+        ("/projects/{project_id}/chapters/{chapter_id}/archive", "post"):
+            {"401", "403", "404", "409", "503"},
+        ("/projects/{project_id}/chapters/{chapter_id}/purge", "post"):
+            {"401", "403", "404", "409", "503"},
+        ("/projects/{project_id}/chapter-order", "put"):
+            {"401", "403", "404", "409", "503"},
+        ("/projects/{project_id}/chapters/{chapter_id}/scene-order", "put"):
+            {"401", "403", "404", "409", "503"},
         ("/projects/{project_id}/drafts/{draft_id}", "get"): {"401", "403", "404", "503"},
         ("/projects/{project_id}/drafts/{draft_id}", "patch"):
             {"401", "403", "404", "409", "503"},
@@ -2178,7 +2220,6 @@ class CrudErrorContractDeclarationTest(unittest.TestCase):
         ("/projects/{project_id}/drafts/{draft_id}/versions/{version_id}/export",
          "get"): {"401", "403", "400", "404", "503"},
         ("/projects/{project_id}/export", "get"): {"401", "403", "400", "404", "503"},
-        ("/projects/{project_id}/draft-order", "put"): {"401", "403", "404", "409", "503"},
         ("/projects/{project_id}/purge", "post"): {"401", "403", "404", "409", "503"},
     }
 
@@ -2190,7 +2231,7 @@ class CrudErrorContractDeclarationTest(unittest.TestCase):
         return {code for code in responses if code not in ("200", "204", "422")}
 
     def test_declared_error_statuses_match_the_lock_list(self):
-        self.assertEqual(len(self.EXPECTED), 22)  # 2026-08-28: 제품 purge 2경로 추가
+        self.assertEqual(len(self.EXPECTED), 27)
         for (path, method), expected in self.EXPECTED.items():
             with self.subTest(path=path, method=method):
                 self.assertEqual(self._declared(path, method), expected)

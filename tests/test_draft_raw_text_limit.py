@@ -56,7 +56,6 @@ from services.application.app.writing.models import (
     WritingRequest,
     WritingTaskType,
 )
-from services.application.app.core_sot.models import UnitKind
 
 
 class _FakeHasher:
@@ -119,9 +118,12 @@ class SaveEndpointLimitTest(unittest.TestCase):
                          json={"username": "alice", "password": "pw123"})
         self.project_id = self.client.post(
             "/projects", json={"name": "한 장편"}).json()["id"]
+        chapter_id = self.client.post(
+            f"/projects/{self.project_id}/chapters", json={"title": "1장"}
+        ).json()["id"]
         self.draft_id = self.client.post(
             f"/projects/{self.project_id}/drafts",
-            json={"title": "1장", "unit_kind": "chapter"}).json()["id"]
+            json={"title": "첫 장면", "chapter_id": chapter_id}).json()["id"]
 
     def _save(self, raw_text: str, key: str = "k1"):
         return self.client.post(
@@ -161,7 +163,10 @@ class AcceptRawTextLimitTest(unittest.TestCase):
         self.core = CoreSotService(InMemoryCoreSotRepository())
         project = self.core.create_project(name="Novel")
         self.project = project.id
-        self.draft = self.core.create_draft(project_id=project.id, title="Draft")
+        chapter = self.core.create_chapter(project_id=project.id, title="1장")
+        self.draft = self.core.create_scene(
+            project_id=project.id, chapter_id=chapter.id, title="Draft"
+        )
         self.analysis = AnalysisService(InMemoryAnalysisRepository())
         self.gate = _Gate()
         self.reporter = _Reporter()
@@ -204,7 +209,7 @@ class AcceptRawTextLimitTest(unittest.TestCase):
 
     def test_start_next_unit_seed_past_the_limit_fails_before_any_provider_call(self):
         base = self._seed_base("짧은 본문.")
-        next_unit = NextUnit(title="새 장", unit_kind=UnitKind.CHAPTER)
+        next_unit = NextUnit(title="새 장면")
         request = WritingRequest("wr1", self.project,
                                  WritingTaskType.CONTINUE_SCENE, "이어서 써줘",
                                  intent=WritingIntent.START_NEXT_UNIT,

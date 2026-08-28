@@ -112,7 +112,7 @@ it("does not link a draft row whose draft no longer exists", async () => {
       ? { drafts: [
         {
           id: "d1", project_id: "p1", title: "1장", archived: true,
-          unit_kind: "chapter", position: 1,
+          chapter_id: "c1", position: 1,
         },
       ] }
       : { events: [

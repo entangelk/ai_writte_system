@@ -72,7 +72,7 @@ class WritingAcceptResult:
     analysis_job: AnalysisJob | None
     intent: WritingIntent = WritingIntent.APPEND_CURRENT
     # The Draft the save targeted (append: the current draft; start: the new
-    # unit). Carries unit_kind/position for the response `saved` envelope. None
+    # Scene). Carries chapter_id/position for the response `saved` envelope. None
     # only when nothing was saved (Gate non-pass).
     target_draft: Draft | None = None
     idempotent_replay: bool = False
@@ -139,7 +139,6 @@ class WritingAcceptService:
                 result = self._core_sot.start_next_unit(
                     project_id=request.project_id, current_draft_id=draft_id,
                     raw_text=text, title=request.next_unit.title,
-                    unit_kind=request.next_unit.unit_kind,
                     goal_intent=intent.value, idempotency_key=save_key)
             except DuplicateWritingAcceptReceipt:
                 # Concurrent same-key race: converge on the committed unit.

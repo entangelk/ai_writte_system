@@ -25,7 +25,6 @@ from services.application.app.context_search.models import (
 )
 from services.application.app.core_sot.models import (
     BlockKind,
-    UnitKind,
 )
 from services.application.app.writing.models import (
     OutputLength,
@@ -478,9 +477,9 @@ class DraftPayload(BaseModel):
 
     id: str
     project_id: str
+    chapter_id: str
     title: str
     archived: bool
-    unit_kind: UnitKind
     position: int = Field(ge=1)
 
 
@@ -598,7 +597,6 @@ class ProjectExportUnitModel(BaseModel):
     chapter_id: str | None
     chapter_title: str | None
     chapter_position: int | None
-    unit_kind: str | None
     position: int | None
     version_id: str
     version_number: int
@@ -692,10 +690,7 @@ class CreateDraftRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: NonBlankName
-    unit_kind: UnitKind = UnitKind.OTHER
-    # SoT v1.8.9 hierarchy input. Optional only during the staged migration;
-    # the hierarchy route rejects absence once Chapters exist.
-    chapter_id: NonBlankName | None = None
+    chapter_id: NonBlankName
 
 
 class CreateChapterRequest(BaseModel):
@@ -730,23 +725,6 @@ class SceneOrderPutResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     scenes: list[ScenePayload]
-
-
-class DraftOrderPutRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    # Keep the structural constraint discoverable in OpenAPI, but route runtime
-    # duplicate detection through CoreSotService so every incomplete/full-set
-    # permutation violation has the W0 §2.2 exact 409 outcome (not Pydantic 422).
-    ordered_draft_ids: list[NonBlankName] = Field(
-        json_schema_extra={"uniqueItems": True}
-    )
-
-
-class DraftOrderPutResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    drafts: list[DraftPayload]
 
 
 class RenameProjectRequest(BaseModel):
@@ -934,13 +912,11 @@ class WritingReviseRequest(BaseModel):
 
 
 class NextUnitBody(BaseModel):
-    # W3 start_next_unit target (§3.1). unit_kind is validated at the endpoint
-    # by converting to UnitKind. `goal` is a required-but-nullable key (W0 catalog
-    # `nextUnitSpec`): the value is optional (null allowed), the key is not.
+    # SoT v1.8.9: start_next_unit always creates the next Scene in the current
+    # Chapter. `goal` is a required-but-nullable generation hint.
     # extra="forbid" matches the catalog's additionalProperties:false.
     model_config = ConfigDict(extra="forbid")
     title: str
-    unit_kind: str
     goal: str | None
 
 

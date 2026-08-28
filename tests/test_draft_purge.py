@@ -56,10 +56,16 @@ class DraftPurgeTest(unittest.TestCase):
         # victim(1편·저장 1회·아카이브) + sibling(1편) — 스코프 검증의 최소 대조군.
         project = self.client.post("/projects", json={"name": "Novel"}).json()
         self.project_id = project["id"]
+        chapter = self.client.post(
+            f"/projects/{self.project_id}/chapters", json={"title": "1장"}
+        )
+        self.assertEqual(chapter.status_code, 200, chapter.text)
+        self.chapter_id = chapter.json()["id"]
 
         def _create_draft(title: str) -> str:
             response = self.client.post(
-                f"/projects/{self.project_id}/drafts", json={"title": title}
+                f"/projects/{self.project_id}/drafts",
+                json={"title": title, "chapter_id": self.chapter_id},
             )
             self.assertEqual(response.status_code, 200, response.text)
             return response.json()["id"]
@@ -116,6 +122,10 @@ class DraftPurgeTest(unittest.TestCase):
             f"/projects/{self.project_id}/drafts/{self.victim_id}/purge"
         )
         self.assertEqual(response.status_code, 204)
+        self.assertEqual(
+            self.jobs.list_for_draft(self.project_id, self.victim_id), (),
+            "terminal generation job 이 잔류한다 — 삭제된 draft를 가리키는 고아다",
+        )
         self.assertEqual(response.content, b"")  # 204 carries no body
 
         # victim 소멸 — 정본·버전 모두.

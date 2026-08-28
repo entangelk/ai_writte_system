@@ -1,44 +1,32 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import {
-  archiveDraft,
-  createDraft,
-  describeApiError,
-  getProject,
-  listDrafts,
-  purgeDraft,
-  putDraftOrder,
-  type CreateDraftRequest,
-  type Draft,
-  type Project,
+  ApiError, archiveChapter, archiveDraft, createChapter, createDraft,
+  describeApiError, getProject, listChapters, purgeChapter, purgeDraft,
+  putChapterOrder, putSceneOrder,
+  type Chapter, type Draft, type Project,
 } from "../api/client";
 
 export function DraftList() {
   const { projectId } = useParams<{ projectId: string }>();
   const [project, setProject] = useState<Project | null>(null);
-  const [drafts, setDrafts] = useState<Draft[] | null>(null);
-  const [title, setTitle] = useState("");
-  // 기본은 "장"이다(오너 2026-08-27). 종전 기본 "기타"는 서버 기본값(레거시
-  // 마이그레이션이 값 없는 행을 채우는 값)을 화면이 그대로 따른 것이었는데,
-  // 사람이 새 원고를 만들 때 고르는 첫 값으로는 맞지 않았다. 서버 기본값은
-  // 그대로 둔다 — 그쪽은 "값이 오지 않았을 때"의 답이고 여기는 사람의 답이다.
-  const [unitKind, setUnitKind] = useState<CreateDraftRequest["unit_kind"]>("chapter");
+  const [chapters, setChapters] = useState<Chapter[] | null>(null);
+  const [chapterTitle, setChapterTitle] = useState("");
+  const [sceneTitles, setSceneTitles] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  // 원고 영구 삭제(2026-08-28 오너 결정) — 체크박스 확인 가드. 프로젝트 삭제의
-  // 이름 확인보다 한 단계 가볍다: 원고는 프로젝트 안의 하나고, 피해 반경이 작다.
-  const [purgeTarget, setPurgeTarget] = useState<Draft | null>(null);
-  const [purgeChecked, setPurgeChecked] = useState(false);
+  const [scenePurgeTarget, setScenePurgeTarget] = useState<Draft | null>(null);
+  const [scenePurgeChecked, setScenePurgeChecked] = useState(false);
+  const [chapterPurgeTarget, setChapterPurgeTarget] = useState<Chapter | null>(null);
+  const [chapterConfirmTitle, setChapterConfirmTitle] = useState("");
   const [purgeBusy, setPurgeBusy] = useState(false);
   const [purgeError, setPurgeError] = useState<string | null>(null);
 
-  const loadDrafts = useCallback(async () => {
-    if (projectId === undefined) {
-      return;
+  const loadChapters = useCallback(async () => {
+    if (projectId !== undefined) {
+      setChapters((await listChapters(projectId)).chapters);
     }
-    const response = await listDrafts(projectId);
-    setDrafts(response.drafts);
   }, [projectId]);
 
   useEffect(() => {
@@ -47,93 +35,109 @@ export function DraftList() {
       setLoading(false);
       return;
     }
-
     let active = true;
     setLoading(true);
-    void Promise.all([getProject(projectId), listDrafts(projectId)])
+    void Promise.all([getProject(projectId), listChapters(projectId)])
       .then(([nextProject, response]) => {
-        if (!active) {
-          return;
-        }
+        if (!active) return;
         setProject(nextProject);
-        setDrafts(response.drafts);
+        setChapters(response.chapters);
         setError(null);
       })
-      .catch((err: unknown) => {
-        if (active) {
-          setError(describeApiError(err));
-        }
+      .catch((cause: unknown) => {
+        if (active) setError(describeApiError(cause));
       })
       .finally(() => {
-        if (active) {
-          setLoading(false);
-        }
+        if (active) setLoading(false);
       });
-
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [projectId]);
 
-  async function submit(event: React.FormEvent) {
+  async function addChapter(event: React.FormEvent) {
     event.preventDefault();
-    const trimmed = title.trim();
-    if (projectId === undefined || trimmed === "" || saving || project?.archived) {
-      return;
-    }
+    const title = chapterTitle.trim();
+    if (projectId === undefined || title === "" || saving || project?.archived) return;
     setSaving(true);
     try {
-      await createDraft(projectId, { title: trimmed, unit_kind: unitKind });
-      setTitle("");
+      await createChapter(projectId, { title });
+      setChapterTitle("");
+      await loadChapters();
       setError(null);
-      await loadDrafts();
-    } catch (err) {
-      setError(describeApiError(err));
+    } catch (cause: unknown) {
+      setError(describeApiError(cause));
     } finally {
       setSaving(false);
     }
   }
 
-  async function moveDraft(index: number, offset: -1 | 1) {
-    if (projectId === undefined || drafts === null || saving || project?.archived) {
-      return;
+  async function addScene(chapter: Chapter, event: React.FormEvent) {
+    event.preventDefault();
+    const title = (sceneTitles[chapter.id] ?? "").trim();
+    if (projectId === undefined || title === "" || saving || chapter.archived) return;
+    setSaving(true);
+    try {
+      await createDraft(projectId, { title, chapter_id: chapter.id });
+      setSceneTitles((current) => ({ ...current, [chapter.id]: "" }));
+      await loadChapters();
+      setError(null);
+    } catch (cause: unknown) {
+      setError(describeApiError(cause));
+    } finally {
+      setSaving(false);
     }
+  }
+
+  async function moveChapter(index: number, offset: -1 | 1) {
+    if (projectId === undefined || chapters === null || saving) return;
     const target = index + offset;
-    if (target < 0 || target >= drafts.length) {
-      return;
-    }
-    const reordered = [...drafts];
+    if (target < 0 || target >= chapters.length) return;
+    const reordered = [...chapters];
     [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
     setSaving(true);
     try {
-      const response = await putDraftOrder(projectId, {
-        ordered_draft_ids: reordered.map((draft) => draft.id),
-      });
-      setDrafts(response.drafts);
+      setChapters((await putChapterOrder(projectId, {
+        ordered_chapter_ids: reordered.map((chapter) => chapter.id),
+      })).chapters);
       setError(null);
-    } catch (err) {
-      setError(describeApiError(err));
+    } catch (cause: unknown) {
+      setError(describeApiError(cause));
     } finally {
       setSaving(false);
     }
   }
 
-  // 삭제 2단계(2026-08-28) — 보관이 먼저(색인 제거 outbox 확정), 그다음 purge.
-  // 진행 중인 생성 잡이 있으면 purge 가 409 로 거부된다(문구를 그대로 보여 준다).
-  async function deleteDraft(draft: Draft) {
-    if (projectId === undefined || purgeBusy || !purgeChecked) {
-      return;
+  async function moveScene(chapter: Chapter, index: number, offset: -1 | 1) {
+    if (projectId === undefined || saving) return;
+    const target = index + offset;
+    if (target < 0 || target >= chapter.scenes.length) return;
+    const reordered = [...chapter.scenes];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    setSaving(true);
+    try {
+      const response = await putSceneOrder(projectId, chapter.id, {
+        ordered_draft_ids: reordered.map((scene) => scene.id),
+      });
+      setChapters((current) => current?.map((item) =>
+        item.id === chapter.id ? { ...item, scenes: response.scenes } : item
+      ) ?? null);
+      setError(null);
+    } catch (cause: unknown) {
+      setError(describeApiError(cause));
+    } finally {
+      setSaving(false);
     }
+  }
+
+  async function deleteScene(scene: Draft) {
+    if (projectId === undefined || purgeBusy || !scenePurgeChecked) return;
     setPurgeBusy(true);
     setPurgeError(null);
     try {
-      if (!draft.archived) {
-        await archiveDraft(projectId, draft.id);
-      }
-      await purgeDraft(projectId, draft.id);
-      setPurgeTarget(null);
-      setPurgeChecked(false);
-      await loadDrafts();
+      if (!scene.archived) await archiveDraft(projectId, scene.id);
+      await purgeDraft(projectId, scene.id);
+      setScenePurgeTarget(null);
+      setScenePurgeChecked(false);
+      await loadChapters();
     } catch (cause: unknown) {
       setPurgeError(describeApiError(cause));
     } finally {
@@ -141,185 +145,122 @@ export function DraftList() {
     }
   }
 
-  return (
-    <section className="workspace-page page-enter">
-      <Link className="back-link" to="/">← 프로젝트로 돌아가기</Link>
+  async function deleteChapter(chapter: Chapter) {
+    if (projectId === undefined || purgeBusy || chapterConfirmTitle !== chapter.title) return;
+    setPurgeBusy(true);
+    setPurgeError(null);
+    try {
+      if (!chapter.archived) await archiveChapter(projectId, chapter.id);
+      await purgeChapter(projectId, chapter.id);
+      setChapterPurgeTarget(null);
+      setChapterConfirmTitle("");
+      await loadChapters();
+    } catch (cause: unknown) {
+      setPurgeError(cause instanceof ApiError && cause.status === 503
+        ? "삭제 결과를 확정할 수 없습니다. 목록을 새로 확인한 뒤 다시 시도하세요."
+        : describeApiError(cause));
+    } finally {
+      setPurgeBusy(false);
+    }
+  }
 
-      <header className="page-heading project-heading">
-        <p className="eyebrow">원고 작업 공간</p>
-        <h1>{project?.name ?? "프로젝트"}</h1>
-        <p>장면이나 장을 원고 단위로 나누어 관리합니다.</p>
-        {projectId !== undefined && (
-          // 오너 2026-08-27: 링크 셋이 나란히 있어 어지러웠다. 집필 중 수시로
-          // 드나드는 검토함만 남기고, 나머지(작품 정보·개요 · 활동 타임라인 ·
-          // 원고 내보내기)는 설정 탭 하나 뒤로 모았다.
-          <div className="section-links">
-            <Link className="section-link" to={`/projects/${projectId}/review`}>
-              검토함 →
-            </Link>
-            <Link className="section-link" to={`/projects/${projectId}/settings`}>
-              프로젝트 설정 →
-            </Link>
+  return <section className="workspace-page page-enter">
+    <Link className="back-link" to="/">← 프로젝트로 돌아가기</Link>
+    <header className="page-heading project-heading">
+      <p className="eyebrow">원고 작업 공간</p>
+      <h1>{project?.name ?? "프로젝트"}</h1>
+      <p>장은 장면의 집합입니다. 장과 장면의 순서를 각각 관리합니다.</p>
+      {projectId !== undefined && <div className="section-links">
+        <Link className="section-link" to={`/projects/${projectId}/review`}>검토함 →</Link>
+        <Link className="section-link" to={`/projects/${projectId}/settings`}>프로젝트 설정 →</Link>
+      </div>}
+    </header>
+
+    {error !== null && <p className="alert" role="alert">{error}</p>}
+    {loading ? <p className="status-copy">원고를 불러오는 중…</p>
+      : project === null || chapters === null ? null : <>
+        {!project.archived && <form className="creation-form" onSubmit={addChapter}>
+          <div className="form-copy">
+            <label htmlFor="chapter-title">새 장 제목</label>
+            <span>장을 만든 뒤 그 안에 장면을 추가하세요.</span>
           </div>
-        )}
-      </header>
+          <div className="form-controls">
+            <input id="chapter-title" value={chapterTitle}
+              onChange={(event) => setChapterTitle(event.target.value)}
+              autoComplete="off" placeholder="예: 1장 — 첫눈" />
+            <button type="submit" disabled={saving || chapterTitle.trim() === ""}>장 만들기</button>
+          </div>
+        </form>}
 
-      {error !== null && <p className="alert" role="alert">{error}</p>}
+        {scenePurgeTarget !== null && <div className="confirm-panel" role="alertdialog" aria-label="장면 삭제 확인">
+          <p><strong>{scenePurgeTarget.title}</strong>과 모든 버전·생성 기록이 영구히 사라집니다.</p>
+          {purgeError !== null && <p className="alert" role="alert">{purgeError}</p>}
+          <label className="confirm-check"><input type="checkbox" checked={scenePurgeChecked}
+            disabled={purgeBusy} onChange={(event) => setScenePurgeChecked(event.target.checked)} />삭제하겠습니다</label>
+          <div className="confirm-actions">
+            <button type="button" className="danger-button" disabled={purgeBusy || !scenePurgeChecked}
+              onClick={() => void deleteScene(scenePurgeTarget)}>영구 삭제</button>
+            <button type="button" disabled={purgeBusy} onClick={() => { setScenePurgeTarget(null); setPurgeError(null); }}>취소</button>
+          </div>
+        </div>}
 
-      {loading ? (
-        <p className="status-copy">원고를 불러오는 중…</p>
-      ) : project === null || drafts === null ? null : (
-        <>
-          {project.archived ? (
-            <p className="read-only-note">
-              보관된 프로젝트에서는 새 원고를 만들 수 없습니다. 기존 원고는 계속 읽을 수 있습니다.
-            </p>
-          ) : (
-            <form className="creation-form" onSubmit={submit}>
-              <div className="form-copy">
-                <label htmlFor="draft-title">새 원고 제목</label>
-                <span>본문과 version 저장은 다음 단계에서 연결됩니다.</span>
+        {chapterPurgeTarget !== null && <div className="confirm-panel" role="alertdialog" aria-label="장 삭제 확인">
+          <p><strong>{chapterPurgeTarget.title}</strong>과 그 안의 모든 장면·버전·생성 기록이 영구히 사라집니다.</p>
+          <label htmlFor="chapter-confirm-title">확인을 위해 장 제목을 정확히 입력하세요.</label>
+          <input id="chapter-confirm-title" value={chapterConfirmTitle}
+            onChange={(event) => setChapterConfirmTitle(event.target.value)} />
+          {purgeError !== null && <p className="alert" role="alert">{purgeError}</p>}
+          <div className="confirm-actions">
+            <button type="button" className="danger-button"
+              disabled={purgeBusy || chapterConfirmTitle !== chapterPurgeTarget.title}
+              onClick={() => void deleteChapter(chapterPurgeTarget)}>장과 장면 영구 삭제</button>
+            <button type="button" disabled={purgeBusy} onClick={() => { setChapterPurgeTarget(null); setChapterConfirmTitle(""); setPurgeError(null); }}>취소</button>
+          </div>
+        </div>}
+
+        {chapters.length === 0 ? <div className="empty-state"><p>아직 장이 없습니다.</p><span>첫 장을 만들어 작품을 시작하세요.</span></div>
+          : <ol className="resource-list chapter-list" aria-label="장 목록">
+            {chapters.map((chapter, chapterIndex) => <li className="chapter-group" key={chapter.id}>
+              <div className="resource-row chapter-row">
+                <strong>{chapter.title}</strong>
+                <span className="status-badge">장 순서 {chapter.position}</span>
+                {chapter.archived && <span className="status-badge">보관됨</span>}
+                <span className="order-controls">
+                  {!project.archived && <>
+                    <button type="button" aria-label={`${chapter.title} 위로`} disabled={saving || chapterIndex === 0} onClick={() => void moveChapter(chapterIndex, -1)}>↑</button>
+                    <button type="button" aria-label={`${chapter.title} 아래로`} disabled={saving || chapterIndex === chapters.length - 1} onClick={() => void moveChapter(chapterIndex, 1)}>↓</button>
+                  </>}
+                  <button type="button" className="danger-button" aria-label={`${chapter.title} 삭제`}
+                    disabled={saving || purgeBusy} onClick={() => { setChapterPurgeTarget(chapter); setChapterConfirmTitle(""); setPurgeError(null); }}>장 삭제</button>
+                </span>
               </div>
-              <div className="form-controls">
-                <label className="unit-kind-label" htmlFor="draft-unit-kind">원고 단위</label>
-                <select
-                  id="draft-unit-kind"
-                  value={unitKind}
-                  onChange={(event) => setUnitKind(event.target.value as CreateDraftRequest["unit_kind"])}
-                >
-                  <option value="chapter">장</option>
-                  <option value="scene">장면</option>
-                  <option value="other">기타</option>
-                </select>
-                <input
-                  id="draft-title"
-                  value={title}
-                  onChange={(event) => setTitle(event.target.value)}
-                  autoComplete="off"
-                  placeholder="예: 1장 — 첫눈"
-                />
-                <button type="submit" disabled={title.trim() === "" || saving}>
-                  원고 만들기
-                </button>
-              </div>
-              {/* 오너 2026-08-27: 장·장면을 섞어 쓸 때 무엇이 달라지는지 화면이
-                  말하지 않아 고르기 어려웠다. 실제 동작 그대로 적는다 — 셋은
-                  **이름표**이고 계층이 아니다. */}
-              <p className="form-hint unit-kind-help">
-                <strong>장·장면·기타는 원고를 구분하는 이름표입니다.</strong> 셋 다 한
-                목록에 나란히 놓이고 정본 순서(1, 2, 3…)를 함께 씁니다 — 장 안에 장면을
-                넣는 계층은 없습니다. 한 번에 이어 쓰고 한 덩어리로 내보낼 분량마다 원고를
-                하나씩 만드세요. 이름표는 목록에서 그 원고가 무엇인지 알아보는 데 쓰고,
-                나중에 바꿔도 본문·순서에는 영향이 없습니다.
-              </p>
-            </form>
-          )}
-
-          {drafts.length === 0 ? (
-            <div className="empty-state">
-              <p>아직 원고가 없습니다.</p>
-              <span>첫 장면이나 장을 만들어 작품의 본문을 시작하세요.</span>
-            </div>
-          ) : (
-            <>
-              {purgeTarget !== null && (
-                // 원고 삭제 확인(2026-08-28) — 체크박스 하나로 충분하다. 삭제는
-                // 영구(버전·생성 기록까지)라는 문구가 가드의 실체다.
-                <div className="confirm-panel" role="alertdialog"
-                     aria-label="원고 삭제 확인">
-                  <p className="status-copy">
-                    <strong>{purgeTarget.title}</strong> 와 모든 버전·생성 기록이
-                    영구히 사라집니다. 되돌릴 수 없습니다.
-                  </p>
-                  {purgeError !== null && (
-                    <p className="alert" role="alert">{purgeError}</p>
-                  )}
-                  <label className="confirm-check">
-                    <input
-                      type="checkbox"
-                      checked={purgeChecked}
-                      disabled={purgeBusy}
-                      onChange={(event) => setPurgeChecked(event.target.checked)}
-                    />
-                    삭제하겠습니다
-                  </label>
-                  <div className="confirm-actions">
-                    <button
-                      type="button"
-                      className="danger-button"
-                      disabled={purgeBusy || !purgeChecked}
-                      onClick={() => void deleteDraft(purgeTarget)}
-                    >
-                      {purgeBusy ? "삭제 중…" : "영구 삭제"}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={purgeBusy}
-                      onClick={() => {
-                        setPurgeTarget(null);
-                        setPurgeChecked(false);
-                        setPurgeError(null);
-                      }}
-                    >
-                      취소
-                    </button>
-                  </div>
-                </div>
-              )}
-            <ul className="resource-list" aria-label="원고 목록">
-              {drafts.map((draft, index) => (
-                <li className="resource-row draft-row" key={draft.id}>
-                  <Link
-                    aria-label={draft.title}
-                    className="resource-link"
-                    to={`/projects/${projectId}/drafts/${draft.id}`}
-                  >
-                    <span>{draft.title}</span>
-                    <span className="row-arrow" aria-hidden="true">→</span>
-                  </Link>
-                  <span className="status-badge">
-                    정본 순서 {draft.position} · {draft.unit_kind === "chapter"
-                      ? "장"
-                      : draft.unit_kind === "scene" ? "장면" : "기타"}
-                  </span>
-                  {draft.archived && <span className="status-badge">(보관됨)</span>}
-                  <span className="order-controls">
-                    {!project.archived && (
-                      <>
-                        <button
-                          aria-label={`${draft.title} 위로`}
-                          disabled={saving || index === 0}
-                          onClick={() => void moveDraft(index, -1)}
-                          type="button"
-                        >↑</button>
-                        <button
-                          aria-label={`${draft.title} 아래로`}
-                          disabled={saving || index === drafts.length - 1}
-                          onClick={() => void moveDraft(index, 1)}
-                          type="button"
-                        >↓</button>
-                      </>
-                    )}
-                    <button
-                      aria-label={`${draft.title} 삭제`}
-                      className="danger-button"
-                      disabled={purgeBusy || saving}
-                      onClick={() => {
-                        setPurgeTarget(draft);
-                        setPurgeChecked(false);
-                        setPurgeError(null);
-                      }}
-                      type="button"
-                    >삭제</button>
-                  </span>
-                </li>
-              ))}
-            </ul>
-            </>
-          )}
-
-        </>
-      )}
-    </section>
-  );
+              {!project.archived && !chapter.archived && <form className="scene-creation-form" onSubmit={(event) => void addScene(chapter, event)}>
+                <label htmlFor={`scene-title-${chapter.id}`}>새 장면</label>
+                <input id={`scene-title-${chapter.id}`} value={sceneTitles[chapter.id] ?? ""}
+                  onChange={(event) => setSceneTitles((current) => ({ ...current, [chapter.id]: event.target.value }))}
+                  placeholder="장면 제목" />
+                <button type="submit" disabled={saving || (sceneTitles[chapter.id] ?? "").trim() === ""}>장면 만들기</button>
+              </form>}
+              {chapter.scenes.length === 0 ? <p className="status-copy">아직 장면이 없습니다.</p>
+                : <ol className="resource-list scene-list" aria-label={`${chapter.title} 장면 목록`}>
+                  {chapter.scenes.map((scene, sceneIndex) => <li className="resource-row draft-row" key={scene.id}>
+                    <Link aria-label={scene.title} className="resource-link" to={`/projects/${projectId}/drafts/${scene.id}`}>
+                      <span>{scene.title}</span><span className="row-arrow" aria-hidden="true">→</span>
+                    </Link>
+                    <span className="status-badge">장면 순서 {scene.position}</span>
+                    {scene.archived && <span className="status-badge">보관됨</span>}
+                    <span className="order-controls">
+                      {!project.archived && !chapter.archived && <>
+                        <button type="button" aria-label={`${scene.title} 위로`} disabled={saving || sceneIndex === 0} onClick={() => void moveScene(chapter, sceneIndex, -1)}>↑</button>
+                        <button type="button" aria-label={`${scene.title} 아래로`} disabled={saving || sceneIndex === chapter.scenes.length - 1} onClick={() => void moveScene(chapter, sceneIndex, 1)}>↓</button>
+                      </>}
+                      <button type="button" className="danger-button" aria-label={`${scene.title} 삭제`} disabled={saving || purgeBusy}
+                        onClick={() => { setScenePurgeTarget(scene); setScenePurgeChecked(false); setPurgeError(null); }}>삭제</button>
+                    </span>
+                  </li>)}
+                </ol>}
+            </li>)}
+          </ol>}
+      </>}
+  </section>;
 }

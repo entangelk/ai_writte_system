@@ -220,9 +220,6 @@ export function WritingPanel(props: WritingPanelProps) {
   const [writingIntent, setWritingIntent] =
     useState<"append_current" | "start_next_unit">("append_current");
   const [nextTitle, setNextTitle] = useState("");
-  const [nextKind, setNextKind] = useState<"chapter" | "scene" | "other">(
-    "chapter",
-  );
   const [nextGoal, setNextGoal] = useState("");
   // 증분 2 (D3=A): output-length preset. The server owns the preset→token mapping
   // (short/medium/long → 1024/2048/4096). `long` is single-generate only — it is
@@ -541,7 +538,6 @@ export function WritingPanel(props: WritingPanelProps) {
       next_unit: startingNextUnit
         ? {
             title: nextTitle.trim(),
-            unit_kind: nextKind,
             goal: nextGoal.trim() === "" ? null : nextGoal.trim(),
           }
         : null,
@@ -574,13 +570,12 @@ export function WritingPanel(props: WritingPanelProps) {
         const savedNextUnit = startingNextUnit;
         setWritingIntent("append_current");
         setNextTitle("");
-        setNextKind("chapter");
         setNextGoal("");
         setNotice(
           outcome.analysisFailed
             ? "채택되어 새 version으로 저장됐습니다. 분석 작업은 실패해 재시도가 필요합니다."
             : savedNextUnit
-              ? "새 유닛으로 채택·저장됐습니다."
+              ? "같은 장의 새 장면으로 채택·저장됐습니다."
               : "채택되어 새 version으로 저장됐습니다.",
         );
         onAccepted();
@@ -737,35 +732,22 @@ export function WritingPanel(props: WritingPanelProps) {
               checked={startingNextUnit}
               onChange={() => setWritingIntent("start_next_unit")}
             />
-            다음 유닛 시작
+            같은 장의 다음 장면 시작
           </label>
         </fieldset>
 
         {startingNextUnit && (
           <div className="writing-next-unit">
-            <label htmlFor="next-unit-title">새 유닛 제목</label>
+            <label htmlFor="next-unit-title">새 장면 제목</label>
             <input
               id="next-unit-title"
               type="text"
               value={nextTitle}
               onChange={(event) => setNextTitle(event.target.value)}
               readOnly={readOnly}
-              placeholder="예: 2장 — 성 안에서"
+              placeholder="예: 성 안에서"
             />
-            <label htmlFor="next-unit-kind">유닛 종류</label>
-            <select
-              id="next-unit-kind"
-              value={nextKind}
-              onChange={(event) =>
-                setNextKind(event.target.value as "chapter" | "scene" | "other")
-              }
-              disabled={readOnly}
-            >
-              <option value="chapter">chapter</option>
-              <option value="scene">scene</option>
-              <option value="other">other</option>
-            </select>
-            <label htmlFor="next-unit-goal">유닛 목표(선택)</label>
+            <label htmlFor="next-unit-goal">장면 목표(선택)</label>
             <input
               id="next-unit-goal"
               type="text"
@@ -922,7 +904,7 @@ export function WritingPanel(props: WritingPanelProps) {
             </button>
             {gate?.decision === "pass" && !nextUnitReady && (
               <span className="candidate-accept-note">
-                새 유닛 제목을 입력해야 채택할 수 있습니다.
+                새 장면 제목을 입력해야 채택할 수 있습니다.
               </span>
             )}
             {gate !== null && gate.decision !== "pass" && !canAccept && (

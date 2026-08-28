@@ -1400,6 +1400,36 @@ main {
   opacity: var(--disabled-opacity);
 }
 
+.chapter-group {
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.chapter-row {
+  border-bottom: 0;
+}
+
+.chapter-row > strong {
+  flex: 1;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.35rem;
+}
+
+.scene-creation-form {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0.5rem 0 0 1.5rem;
+}
+
+.scene-creation-form input {
+  flex: 1;
+}
+
+.scene-list {
+  margin: 0.75rem 0 0 1.5rem;
+}
+
 .empty-state,
 .status-copy,
 .read-only-note,

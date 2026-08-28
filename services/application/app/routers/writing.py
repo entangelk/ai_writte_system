@@ -37,7 +37,6 @@ from services.application.app.context_search.service import (
     ContextSearchFailed,
     InvalidContextSearchRequest,
 )
-from services.application.app.core_sot.models import UnitKind
 from services.application.app.core_sot.service import (
     Archived,
     DraftOrderIntegrityError,
@@ -290,7 +289,7 @@ def register_writing(
             "version_number": saved.draft_version.version_number,
             "snapshot_id": saved.snapshot.id,
             "content_hash": saved.snapshot.content_hash,
-            "unit_kind": target_draft.unit_kind.value,
+            "chapter_id": target_draft.chapter_id,
             "position": target_draft.position,
         }
 
@@ -1158,7 +1157,6 @@ def register_writing(
             next_unit = (
                 NextUnit(
                     title=body.next_unit.title,
-                    unit_kind=UnitKind(body.next_unit.unit_kind),
                     goal=body.next_unit.goal,
                 )
                 if body.next_unit is not None else None

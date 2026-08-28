@@ -125,6 +125,9 @@ class MongoWritingGenerationJobRepository:
         # D8-6b-2: project 의 generation job 전부 파기(직접 project_id 스코프).
         self._jobs.delete_many({"project_id": project_id})
 
+    def purge_draft(self, project_id: str, draft_id: str) -> None:
+        self._jobs.delete_many({"project_id": project_id, "draft_id": draft_id})
+
 
 def _doc(job: WritingGenerationJob) -> dict:
     return {

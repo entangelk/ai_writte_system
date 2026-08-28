@@ -10,13 +10,14 @@ from __future__ import annotations
 import asyncio
 import unittest
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from services.application.app.core_sot.chapter_scene_migration import (
     ChapterSceneHierarchyMigration,
 )
 from services.application.app.core_sot.models import Draft, UnitKind
 from services.application.app.core_sot.service import (
+    Archived,
     CoreSotService,
     InMemoryCoreSotRepository,
     InvalidDraftOrder,
@@ -31,6 +32,14 @@ from services.application.app.api.models import (
     SceneOrderPutRequest,
 )
 from services.application.app.routers.drafts import register_drafts
+from services.application.app.writing.generation_job import (
+    InMemoryWritingGenerationJobRepository,
+    WritingGenerationJobService,
+)
+from services.application.app.writing.scratch import (
+    InMemoryWritingScratchRepository,
+    WritingScratchService,
+)
 from tests.auth_support import TEST_USER
 
 
@@ -164,7 +173,6 @@ class ChapterHierarchyContractTest(unittest.TestCase):
             current_draft_id=current.id,
             raw_text="새 장면 본문",
             title="새 장면",
-            unit_kind=UnitKind.CHAPTER,  # ignored after hierarchy migration
             goal_intent="start_next_unit",
             idempotency_key="next-scene",
         )
@@ -221,6 +229,28 @@ class ChapterHierarchyContractTest(unittest.TestCase):
             [(unit.chapter_id, unit.chapter_title) for unit in complete.units],
             [(first.id, "1장"), (second.id, "2장")],
         )
+
+    def test_archived_chapter_blocks_child_writes_without_mutating_child_flag(self):
+        chapter = self.service.create_chapter(
+            project_id=self.project.id, title="보관 장"
+        )
+        scene = self.service.create_scene(
+            project_id=self.project.id, chapter_id=chapter.id, title="장면"
+        )
+        self.service.archive_chapter(
+            project_id=self.project.id, chapter_id=chapter.id
+        )
+
+        with self.assertRaises(Archived):
+            self.service.save_draft(
+                project_id=self.project.id,
+                draft_id=scene.id,
+                raw_text="쓰면 안 됨",
+                idempotency_key="blocked-save",
+            )
+
+        self.assertFalse(self.repo.get_draft(scene.id).archived)
+        self.assertEqual(self.repo.version_count(scene.id), 0)
 
 
 class ChapterHierarchyMigrationTest(unittest.TestCase):
@@ -291,14 +321,18 @@ class ChapterHierarchyApiTest(unittest.TestCase):
             name="API 작품", owner_id=TEST_USER.id
         )
         activity = ActivityLogService(InMemoryActivityLogRepository())
+        self.jobs = WritingGenerationJobService(
+            InMemoryWritingGenerationJobRepository()
+        )
+        self.scratch = WritingScratchService(InMemoryWritingScratchRepository())
         app = FastAPI()
         register_drafts(
             app,
             core_sot=self.service,
             sync_outbox=object(),
             activity=activity,
-            writing_generation_jobs=object(),
-            writing_scratch=object(),
+            writing_generation_jobs=self.jobs,
+            writing_scratch=self.scratch,
         )
         self.app = app
 
@@ -333,6 +367,7 @@ class ChapterHierarchyApiTest(unittest.TestCase):
             TEST_USER,
         ))
         self.assertNotIn("unit_kind", one)
+        self.assertEqual(one["chapter_id"], chapter_id)
 
         reorder = self._endpoint(
             "/projects/{project_id}/chapters/{chapter_id}/scene-order", "PUT"
@@ -356,6 +391,91 @@ class ChapterHierarchyApiTest(unittest.TestCase):
             [scene["title"] for scene in listed["chapters"][0]["scenes"]],
             ["둘째 장면", "첫 장면"],
         )
+
+        list_flat = self._endpoint("/projects/{project_id}/drafts", "GET")
+        flattened = asyncio.run(list_flat(self.project.id))
+        self.assertEqual(
+            [scene["id"] for scene in flattened["drafts"]],
+            [two["id"], one["id"]],
+        )
+        self.assertTrue(all(
+            scene["chapter_id"] == chapter_id
+            and "unit_kind" not in scene
+            for scene in flattened["drafts"]
+        ))
+
+    def test_scene_create_contract_requires_parent_and_rejects_unit_kind(self):
+        with self.assertRaises(ValueError):
+            CreateDraftRequest.model_validate({"title": "고아 장면"})
+        with self.assertRaises(ValueError):
+            CreateDraftRequest.model_validate({
+                "title": "예외축",
+                "chapter_id": "chapter-1",
+                "unit_kind": "other",
+            })
+
+    def test_chapter_purge_active_job_guard_writes_nothing(self):
+        chapter = self.service.create_chapter(
+            project_id=self.project.id, title="안전 장"
+        )
+        scene = self.service.create_scene(
+            project_id=self.project.id, chapter_id=chapter.id, title="작업 중"
+        )
+        self.service.archive_chapter(
+            project_id=self.project.id, chapter_id=chapter.id
+        )
+        self.jobs.enqueue(
+            project_id=self.project.id,
+            draft_id=scene.id,
+            request_id="active-job",
+            task_type="continue",
+            instruction="이어쓰기",
+            draft_excerpt="",
+            query=None,
+            output_length="short",
+            max_output_tokens=512,
+            max_tokens=1024,
+            version_id="version-1",
+        )
+        purge = self._endpoint(
+            "/projects/{project_id}/chapters/{chapter_id}/purge", "POST"
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            asyncio.run(purge(self.project.id, chapter.id, TEST_USER))
+
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertIsNotNone(self.repo.get_chapter(chapter.id))
+        self.assertIsNotNone(self.repo.get_draft(scene.id))
+
+    def test_chapter_purge_removes_terminal_child_jobs(self):
+        chapter = self.service.create_chapter(
+            project_id=self.project.id, title="완료 장"
+        )
+        scene = self.service.create_scene(
+            project_id=self.project.id, chapter_id=chapter.id, title="완료 장면"
+        )
+        self.service.archive_chapter(
+            project_id=self.project.id, chapter_id=chapter.id
+        )
+        self.jobs.enqueue(
+            project_id=self.project.id, draft_id=scene.id,
+            request_id="done-job", task_type="continue", instruction="이어쓰기",
+            draft_excerpt="", query=None, output_length="short",
+            max_output_tokens=512, max_tokens=1024, version_id="version-1",
+        )
+        claimed = self.jobs.claim_next()
+        assert claimed is not None
+        self.jobs.mark_succeeded(claimed, result_scratch_id="scratch-1")
+        purge = self._endpoint(
+            "/projects/{project_id}/chapters/{chapter_id}/purge", "POST"
+        )
+
+        asyncio.run(purge(self.project.id, chapter.id, TEST_USER))
+
+        self.assertIsNone(self.repo.get_chapter(chapter.id))
+        self.assertIsNone(self.repo.get_draft(scene.id))
+        self.assertEqual(self.jobs.list_for_draft(self.project.id, scene.id), ())
 
 
 if __name__ == "__main__":

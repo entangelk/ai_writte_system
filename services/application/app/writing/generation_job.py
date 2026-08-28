@@ -191,6 +191,7 @@ class WritingGenerationJobRepository(Protocol):
         """
 
     def purge_project(self, project_id: str) -> None: ...
+    def purge_draft(self, project_id: str, draft_id: str) -> None: ...
 
 
 class InMemoryWritingGenerationJobRepository:
@@ -266,6 +267,19 @@ class InMemoryWritingGenerationJobRepository:
             k: v for k, v in self._request_index.items() if k[0] != project_id
         }
 
+    def purge_draft(self, project_id: str, draft_id: str) -> None:
+        ids = [
+            job_id for job_id, job in self.jobs.items()
+            if job.project_id == project_id and job.draft_id == draft_id
+        ]
+        for job_id in ids:
+            del self.jobs[job_id]
+        removed = set(ids)
+        self._request_index = {
+            key: job_id for key, job_id in self._request_index.items()
+            if job_id not in removed
+        }
+
 
 class WritingGenerationJobService:
     def __init__(
@@ -282,6 +296,9 @@ class WritingGenerationJobService:
     def purge_project(self, *, project_id: str) -> None:
         # D8-6b-2: project 전체 파기의 generation-job 다리. endpoint(D8-6d)가 호출한다.
         self._repo.purge_project(project_id)
+
+    def purge_draft(self, *, project_id: str, draft_id: str) -> None:
+        self._repo.purge_draft(project_id, draft_id)
 
     def enqueue(
         self, *, project_id: str, draft_id: str, request_id: str,

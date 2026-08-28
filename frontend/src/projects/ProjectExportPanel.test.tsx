@@ -66,27 +66,39 @@ describe("ProjectExportPanel", () => {
   }
 
   const twoDrafts = {
-    drafts: [
+    chapters: [
       {
-        id: "d1", project_id: "p1", title: "1장", archived: false,
-        unit_kind: "chapter", position: 1,
+        id: "c1", project_id: "p1", title: "1장", archived: false, position: 1,
+        scenes: [{
+          id: "d1", project_id: "p1", title: "첫 장면", archived: false,
+          chapter_id: "c1", position: 1,
+        }],
       },
       {
-        id: "d2", project_id: "p1", title: "2장", archived: false,
-        unit_kind: "chapter", position: 2,
+        id: "c2", project_id: "p1", title: "2장", archived: false, position: 2,
+        scenes: [{
+          id: "d2", project_id: "p1", title: "둘째 장면", archived: false,
+          chapter_id: "c2", position: 1,
+        }],
       },
     ],
   };
 
   const mixedDrafts = {
-    drafts: [
+    chapters: [
       {
-        id: "d1", project_id: "p1", title: "1장", archived: false,
-        unit_kind: "chapter", position: 1,
+        id: "c1", project_id: "p1", title: "1장", archived: false, position: 1,
+        scenes: [{
+          id: "d1", project_id: "p1", title: "첫 장면", archived: false,
+          chapter_id: "c1", position: 1,
+        }],
       },
       {
-        id: "d2", project_id: "p1", title: "묵은 장", archived: true,
-        unit_kind: "chapter", position: 2,
+        id: "c2", project_id: "p1", title: "묵은 장", archived: true, position: 2,
+        scenes: [{
+          id: "d2", project_id: "p1", title: "묵은 장면", archived: false,
+          chapter_id: "c2", position: 1,
+        }],
       },
     ],
   };
@@ -144,12 +156,14 @@ describe("ProjectExportPanel", () => {
             include_archived: false,
             units: [
               {
-                draft_id: "d1", title: "1장", unit_kind: "chapter", position: 1,
+                draft_id: "d1", title: "1장", chapter_id: "c1",
+                chapter_title: "1장", chapter_position: 1, position: 1,
                 version_id: "v1", version_number: 1, snapshot_id: "s1",
                 content_hash: "h1",
               },
               {
-                draft_id: "d2", title: "2장", unit_kind: "chapter", position: 2,
+                draft_id: "d2", title: "2장", chapter_id: "c2",
+                chapter_title: "2장", chapter_position: 2, position: 1,
                 version_id: "v2", version_number: 1, snapshot_id: "s2",
                 content_hash: "h2",
               },
@@ -193,8 +207,10 @@ describe("ProjectExportPanel", () => {
     expect(perUnit).toHaveLength(2);
     // Without the manifest option the zip holds only the per-unit files.
     const zip = await JSZip.loadAsync(blobs.at(-1)!);
-    expect(Object.keys(zip.files).sort()).toEqual(["01-1장.md", "02-2장.md"]);
-    expect(await zip.file("01-1장.md")!.async("string")).toBe("first");
+    expect(Object.keys(zip.files).sort()).toEqual([
+      "01-01-1장.md", "02-01-2장.md",
+    ]);
+    expect(await zip.file("01-01-1장.md")!.async("string")).toBe("first");
   });
 
   it("does not start a second export while the first is in flight", async () => {
@@ -237,7 +253,7 @@ describe("ProjectExportPanel", () => {
 
   it("hides export controls when the project has no units", async () => {
     mockFetch(
-      { body: { drafts: [] } },
+      { body: { chapters: [] } },
     );
 
     renderPanel();
@@ -254,10 +270,14 @@ describe("ProjectExportPanel", () => {
     mockFetch(
       {
         body: {
-          drafts: [
+          chapters: [
             {
-              id: "d1", project_id: "p1", title: "묵은 장", archived: true,
-              unit_kind: "chapter", position: 1,
+              id: "c1", project_id: "p1", title: "묵은 장", archived: true,
+              position: 1,
+              scenes: [{
+                id: "d1", project_id: "p1", title: "묵은 장면", archived: false,
+                chapter_id: "c1", position: 1,
+              }],
             },
           ],
         },
@@ -282,16 +302,17 @@ describe("ProjectExportPanel", () => {
 
   it("sanitizes unit titles and falls back to the draft id for zip entry names", async () => {
     const trickyDrafts = {
-      drafts: [
-        {
+      chapters: [{
+        id: "c1", project_id: "p1", title: "장", archived: false, position: 1,
+        scenes: [{
           id: "d1", project_id: "p1", title: 'a/b:c*?"<>|', archived: false,
-          unit_kind: "other", position: 1,
+          chapter_id: "c1", position: 1,
         },
         {
           id: "draft-xyz", project_id: "p1", title: "   ", archived: false,
-          unit_kind: "other", position: 2,
-        },
-      ],
+          chapter_id: "c1", position: 2,
+        }],
+      }],
     };
     mockFetch(
       { body: trickyDrafts },
@@ -304,12 +325,14 @@ describe("ProjectExportPanel", () => {
             project_id: "p1", format: "txt", include_archived: false,
             units: [
               {
-                draft_id: "d1", title: 'a/b:c*?"<>|', unit_kind: "other",
+                draft_id: "d1", title: 'a/b:c*?"<>|', chapter_id: "c1",
+                chapter_title: "장", chapter_position: 1,
                 position: 1, version_id: "v1", version_number: 1,
                 snapshot_id: "s1", content_hash: "h1",
               },
               {
-                draft_id: "draft-xyz", title: "   ", unit_kind: "other",
+                draft_id: "draft-xyz", title: "   ", chapter_id: "c1",
+                chapter_title: "장", chapter_position: 1,
                 position: 2, version_id: "v2", version_number: 1,
                 snapshot_id: "s2", content_hash: "h2",
               },
@@ -346,8 +369,8 @@ describe("ProjectExportPanel", () => {
       // path-unsafe chars (/ : * ? " < > |) each replaced with "_"; a title that
       // sanitizes to empty (whitespace-only) falls back to the draft id; position
       // is zero-padded to two digits.
-      "01-a_b_c______.txt",
-      "02-draft-xyz.txt",
+      "01-01-a_b_c______.txt",
+      "01-02-draft-xyz.txt",
     ]);
   });
 

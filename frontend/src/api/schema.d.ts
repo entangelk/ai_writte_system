@@ -876,6 +876,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{project_id}/chapter-order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put Chapter Order */
+        put: operations["put_chapter_order_projects__project_id__chapter_order_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/chapters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Chapters */
+        get: operations["list_chapters_projects__project_id__chapters_get"];
+        put?: never;
+        /** Create Chapter */
+        post: operations["create_chapter_projects__project_id__chapters_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/chapters/{chapter_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Archive Chapter */
+        post: operations["archive_chapter_projects__project_id__chapters__chapter_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/chapters/{chapter_id}/purge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Purge Chapter */
+        post: operations["purge_chapter_projects__project_id__chapters__chapter_id__purge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/chapters/{chapter_id}/scene-order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put Scene Order */
+        put: operations["put_scene_order_projects__project_id__chapters__chapter_id__scene_order_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{project_id}/context-search": {
         parameters: {
             query?: never;
@@ -887,23 +973,6 @@ export interface paths {
         put?: never;
         /** Context Search Endpoint */
         post: operations["context_search_endpoint_projects__project_id__context_search_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{project_id}/draft-order": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Put Draft Order */
-        put: operations["put_draft_order_projects__project_id__draft_order_put"];
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1381,6 +1450,8 @@ export interface components {
     schemas: {
         /** AcceptedSavePayload */
         AcceptedSavePayload: {
+            /** Chapter Id */
+            chapter_id: string;
             /** Content Hash */
             content_hash: string;
             /** Draft Id */
@@ -1391,7 +1462,6 @@ export interface components {
             position: number;
             /** Snapshot Id */
             snapshot_id: string;
-            unit_kind: components["schemas"]["UnitKind"];
             /** Version Number */
             version_number: number;
         };
@@ -1743,6 +1813,36 @@ export interface components {
          * @enum {string}
          */
         CandidateClaimType: "narrative_event" | "character_state" | "location_state" | "relation_change" | "timeline_fact" | "foreshadowing_use" | "factual_claim" | "interpretation";
+        /** ChapterListResponse */
+        ChapterListResponse: {
+            /** Chapters */
+            chapters: components["schemas"]["ChapterPayload"][];
+        };
+        /** ChapterOrderPutRequest */
+        ChapterOrderPutRequest: {
+            /** Ordered Chapter Ids */
+            ordered_chapter_ids: string[];
+        };
+        /** ChapterOrderPutResponse */
+        ChapterOrderPutResponse: {
+            /** Chapters */
+            chapters: components["schemas"]["ChapterPayload"][];
+        };
+        /** ChapterPayload */
+        ChapterPayload: {
+            /** Archived */
+            archived: boolean;
+            /** Id */
+            id: string;
+            /** Position */
+            position: number;
+            /** Project Id */
+            project_id: string;
+            /** Scenes */
+            scenes: components["schemas"]["ScenePayload"][];
+            /** Title */
+            title: string;
+        };
         /** ContextPointerPayload */
         ContextPointerPayload: {
             /** Collection */
@@ -1788,12 +1888,17 @@ export interface components {
             /** Snapshot Id */
             snapshot_id: string;
         };
-        /** CreateDraftRequest */
-        CreateDraftRequest: {
+        /** CreateChapterRequest */
+        CreateChapterRequest: {
             /** Title */
             title: string;
-            /** @default other */
-            unit_kind: components["schemas"]["UnitKind"];
+        };
+        /** CreateDraftRequest */
+        CreateDraftRequest: {
+            /** Chapter Id */
+            chapter_id: string;
+            /** Title */
+            title: string;
         };
         /** CreateProjectRequest */
         CreateProjectRequest: {
@@ -1824,20 +1929,12 @@ export interface components {
             /** Drafts */
             drafts: components["schemas"]["DraftPayload"][];
         };
-        /** DraftOrderPutRequest */
-        DraftOrderPutRequest: {
-            /** Ordered Draft Ids */
-            ordered_draft_ids: string[];
-        };
-        /** DraftOrderPutResponse */
-        DraftOrderPutResponse: {
-            /** Drafts */
-            drafts: components["schemas"]["DraftPayload"][];
-        };
         /** DraftPayload */
         DraftPayload: {
             /** Archived */
             archived: boolean;
+            /** Chapter Id */
+            chapter_id: string;
             /** Id */
             id: string;
             /** Position */
@@ -1846,7 +1943,6 @@ export interface components {
             project_id: string;
             /** Title */
             title: string;
-            unit_kind: components["schemas"]["UnitKind"];
         };
         /** DraftVersionDetailResponse */
         DraftVersionDetailResponse: {
@@ -1974,8 +2070,6 @@ export interface components {
             goal: string | null;
             /** Title */
             title: string;
-            /** Unit Kind */
-            unit_kind: string;
         };
         /** ObservabilityKpiGatePayload */
         ObservabilityKpiGatePayload: {
@@ -2155,6 +2249,12 @@ export interface components {
         };
         /** ProjectExportUnitModel */
         ProjectExportUnitModel: {
+            /** Chapter Id */
+            chapter_id: string | null;
+            /** Chapter Position */
+            chapter_position: number | null;
+            /** Chapter Title */
+            chapter_title: string | null;
             /** Content Hash */
             content_hash: string;
             /** Draft Id */
@@ -2165,8 +2265,6 @@ export interface components {
             snapshot_id: string;
             /** Title */
             title: string;
-            /** Unit Kind */
-            unit_kind: string | null;
             /** Version Id */
             version_id: string;
             /** Version Number */
@@ -2307,6 +2405,31 @@ export interface components {
             /** Start Offset */
             start_offset: number;
         };
+        /** SceneOrderPutRequest */
+        SceneOrderPutRequest: {
+            /** Ordered Draft Ids */
+            ordered_draft_ids: string[];
+        };
+        /** SceneOrderPutResponse */
+        SceneOrderPutResponse: {
+            /** Scenes */
+            scenes: components["schemas"]["ScenePayload"][];
+        };
+        /** ScenePayload */
+        ScenePayload: {
+            /** Archived */
+            archived: boolean;
+            /** Chapter Id */
+            chapter_id: string;
+            /** Id */
+            id: string;
+            /** Position */
+            position: number;
+            /** Project Id */
+            project_id: string;
+            /** Title */
+            title: string;
+        };
         /** SignupRequest */
         SignupRequest: {
             /** Password */
@@ -2354,11 +2477,6 @@ export interface components {
             /** Text */
             text: string;
         };
-        /**
-         * UnitKind
-         * @enum {string}
-         */
-        UnitKind: "chapter" | "scene" | "other";
         /** UserPayload */
         UserPayload: {
             /** Id */
@@ -6544,6 +6662,466 @@ export interface operations {
             };
         };
     };
+    put_chapter_order_projects__project_id__chapter_order_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChapterOrderPutRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChapterOrderPutResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    list_chapters_projects__project_id__chapters_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChapterListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Stored draft metadata predates the ordered-unit invariant (or is corrupt). Run scripts/migrate_ordered_units.py; retrying the request alone cannot succeed. The canonical store may also be unreachable or failing; in that case recover it and retry the same request unchanged. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    create_chapter_projects__project_id__chapters_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateChapterRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChapterPayload"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Stored draft metadata predates the ordered-unit invariant (or is corrupt). Run scripts/migrate_ordered_units.py; retrying the request alone cannot succeed. The canonical store may also be unreachable or failing; in that case recover it and retry the same request unchanged. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    archive_chapter_projects__project_id__chapters__chapter_id__archive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                chapter_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChapterPayload"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    purge_chapter_projects__project_id__chapters__chapter_id__purge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                chapter_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    put_scene_order_projects__project_id__chapters__chapter_id__scene_order_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                chapter_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SceneOrderPutRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneOrderPutResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
     context_search_endpoint_projects__project_id__context_search_post: {
         parameters: {
             query?: never;
@@ -6655,86 +7233,6 @@ export interface operations {
             };
             /** @description Gateway Timeout */
             504: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorDetailResponse"];
-                };
-            };
-        };
-    };
-    put_draft_order_projects__project_id__draft_order_put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DraftOrderPutRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DraftOrderPutResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorDetailResponse"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorDetailResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorDetailResponse"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorDetailResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
-            503: {
                 headers: {
                     [name: string]: unknown;
                 };

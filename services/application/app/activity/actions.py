@@ -90,8 +90,6 @@ _CANONICAL: tuple[ActivityAction, ...] = (
     # 프로젝트 purge 때만 activity.purge_project 가 행을 지운다.
     ActivityAction("draft_purged", "POST",
                    "/projects/{project_id}/drafts/{draft_id}/purge", "draft"),
-    ActivityAction("draft_order_changed", "PUT",
-                   "/projects/{project_id}/draft-order", "project"),
     # **본문 저장.** `draft_versions` 는 append-only 지만 `created_at` 도 `user_id` 도
     # 없어서(부모 계획 §1) "누가 언제 저장했나"에 답할 수 없었다 — 이 행이 그것을 준다.
     ActivityAction("draft_version_saved", "POST",

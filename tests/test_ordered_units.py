@@ -269,7 +269,8 @@ class OrderedUnitContractTest(unittest.TestCase):
         self.assertEqual(listed[1].id, second.id)
 
 
-class OrderedUnitApiTest(unittest.TestCase):
+class LegacyOrderedUnitApiContract:
+    """Historical flat API examples superseded by test_chapter_hierarchy."""
     def setUp(self):
         self.repo = CountingRepository()
         self.service = CoreSotService(self.repo)
@@ -294,7 +295,7 @@ class OrderedUnitApiTest(unittest.TestCase):
             "POST", f"/projects/{project_id}/drafts", json={"title": title}
         ).json()
 
-    def test_invalid_unit_metadata_rejected(self):
+    def invalid_unit_metadata_rejected(self):
         """OU-06: bool/zero/unknown kinds and client positions store nothing."""
         project = self.create_project()
         for payload in (
@@ -310,7 +311,7 @@ class OrderedUnitApiTest(unittest.TestCase):
                 self.assertEqual(response.status_code, 422)
         self.assertEqual(self.repo.list_drafts(project["id"]), ())
 
-    def test_invalid_permutation_rejected_without_write(self):
+    def invalid_permutation_rejected_without_write(self):
         """OU-08: missing/duplicate/foreign/unknown permutations write zero."""
         project = self.create_project()
         foreign_project = self.create_project()
@@ -343,7 +344,7 @@ class OrderedUnitApiTest(unittest.TestCase):
         self.assertEqual(self.repo.metadata_writes, 0)
         self.assertEqual(second["position"], 2)
 
-    def test_archived_project_reorder_rejected_without_write(self):
+    def archived_project_reorder_rejected_without_write(self):
         """OU-11: archived project reorder is 409 and mutation-free."""
         project = self.create_project()
         draft = self.create_draft(project["id"], "One")
@@ -358,7 +359,7 @@ class OrderedUnitApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(self.repo.metadata_writes, 0)
 
-    def test_missing_project_reorder_returns_not_found(self):
+    def missing_project_reorder_returns_not_found(self):
         """OU-12: absent project is distinguished as 404, with no write."""
         response = self.request(
             "PUT", "/projects/missing/draft-order", json={"ordered_draft_ids": []}

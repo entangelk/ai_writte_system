@@ -532,7 +532,7 @@ class WritingAcceptEnvelopeKeyTest(unittest.TestCase):
         })
         self.assertEqual(set(body["saved"]), {
             "draft_id", "draft_version_id", "version_number", "snapshot_id",
-            "content_hash", "unit_kind", "position",
+            "content_hash", "chapter_id", "position",
         })
         self.assertEqual(set(body["analysis_job"]), {
             "id", "project_id", "snapshot_id", "status", "failure_reason",
@@ -557,7 +557,7 @@ class WritingAcceptEnvelopeKeyTest(unittest.TestCase):
         })
         self.assertEqual(set(body["saved"]), {
             "draft_id", "draft_version_id", "version_number", "snapshot_id",
-            "content_hash", "unit_kind", "position",
+            "content_hash", "chapter_id", "position",
         })
         # Load-bearing values (not just key existence): this partial is
         # `502 + accepted=true + saved present`. It must never be mistaken for a
@@ -572,8 +572,8 @@ class WritingAcceptEnvelopeKeyTest(unittest.TestCase):
 # --- W3 Writing intent (W0 contract §3, WI-01~22) --------------------------
 
 
-def _next_unit(title="새 장", kind=UnitKind.CHAPTER, goal=None):
-    return NextUnit(title=title, unit_kind=kind, goal=goal)
+def _next_unit(title="새 장면", goal=None):
+    return NextUnit(title=title, goal=goal)
 
 
 def _start_request(project, next_unit):
@@ -595,15 +595,17 @@ class _IntentBase(unittest.TestCase):
         self.core = CoreSotService(InMemoryCoreSotRepository())
         project = self.core.create_project(name="Novel")
         self.project = project.id
-        self.current = self.core.create_draft(
-            project_id=self.project, title="현재 장", unit_kind=UnitKind.CHAPTER)
+        self.chapter = self.core.create_chapter(
+            project_id=self.project, title="현재 장")
+        self.current = self.core.create_scene(
+            project_id=self.project, chapter_id=self.chapter.id, title="현재 장면")
         self.base = self.core.save_draft(project_id=self.project,
             draft_id=self.current.id, raw_text="현재 본문.",
             idempotency_key="base")
-        self.following = self.core.create_draft(
-            project_id=self.project, title="기존 다음", unit_kind=UnitKind.SCENE)
-        self.archived_following = self.core.create_draft(
-            project_id=self.project, title="보관됨", unit_kind=UnitKind.OTHER)
+        self.following = self.core.create_scene(
+            project_id=self.project, chapter_id=self.chapter.id, title="기존 다음")
+        self.archived_following = self.core.create_scene(
+            project_id=self.project, chapter_id=self.chapter.id, title="보관됨")
         self.core.archive_draft(project_id=self.project,
             draft_id=self.archived_following.id)
         self.analysis_repo = InMemoryAnalysisRepository()
@@ -644,13 +646,13 @@ class _IntentBase(unittest.TestCase):
 
 class WritingIntentAcceptTest(_IntentBase):
     def test_start_next_unit_creates_atomic_first_version(self):  # WI-03
-        result = self._accept_start(next_unit=_next_unit("2장", UnitKind.CHAPTER))
+        result = self._accept_start(next_unit=_next_unit("새 장면"))
         self.assertTrue(result.accepted)
         self.assertIs(result.intent, WritingIntent.START_NEXT_UNIT)
         self.assertEqual(result.saved.draft_version.version_number, 1)
         self.assertEqual(result.saved.snapshot.raw_text, "새 유닛 본문.")
-        self.assertEqual(result.target_draft.title, "2장")
-        self.assertIs(result.target_draft.unit_kind, UnitKind.CHAPTER)
+        self.assertEqual(result.target_draft.title, "새 장면")
+        self.assertEqual(result.target_draft.chapter_id, self.chapter.id)
         self.assertEqual(result.target_draft.position, 2)  # current + 1
 
     def test_start_next_unit_preserves_current_unit(self):  # WI-04
@@ -672,7 +674,7 @@ class WritingIntentAcceptTest(_IntentBase):
         result = self._accept_start()
         positions = self._positions()
         self.assertEqual(positions, [
-            ("현재 장", 1), (result.target_draft.title, 2),
+            ("현재 장면", 1), (result.target_draft.title, 2),
             ("기존 다음", 3), ("보관됨", 4)])
         archived = self.core.get_draft(project_id=self.project,
             draft_id=self.archived_following.id)
@@ -794,7 +796,7 @@ class WritingIntentAcceptTest(_IntentBase):
     def test_next_unit_goal_is_not_persisted_as_prose(self):  # WI-16
         goal = "주인공을 죽이는 반전"
         result = self._accept_start(
-            next_unit=_next_unit("2장", UnitKind.CHAPTER, goal=goal))
+            next_unit=_next_unit("새 장면", goal=goal))
         self.assertNotIn(goal, result.saved.snapshot.raw_text)
         self.assertNotIn(goal, result.target_draft.title)
         receipt = self.core.get_writing_accept_receipt(
@@ -900,12 +902,13 @@ class WritingIntentApiTest(unittest.TestCase):
     def _setup(self, *, decision=WritingGateDecision.PASS, analysis=None):
         core = CoreSotService(InMemoryCoreSotRepository())
         project = core.create_project(name="Novel")
-        current = core.create_draft(project_id=project.id, title="현재 장",
-            unit_kind=UnitKind.CHAPTER)
+        chapter = core.create_chapter(project_id=project.id, title="현재 장")
+        current = core.create_scene(
+            project_id=project.id, chapter_id=chapter.id, title="현재 장면")
         base = core.save_draft(project_id=project.id, draft_id=current.id,
             raw_text="현재 본문.", idempotency_key="base")
-        following = core.create_draft(project_id=project.id, title="기존 다음",
-            unit_kind=UnitKind.SCENE)
+        core.create_scene(
+            project_id=project.id, chapter_id=chapter.id, title="기존 다음")
         analysis = analysis or AnalysisService(InMemoryAnalysisRepository())
         gate = _Gate(decision)
         app = create_app(service=core, analysis_service=analysis,
@@ -925,7 +928,7 @@ class WritingIntentApiTest(unittest.TestCase):
         body = {"request_id": "wr1", "draft_id": draft, "base_version_id": base,
                 "idempotency_key": "acc1", "instruction": "이어서 써줘",
                 "candidate_text": "새 유닛 본문.", "intent": "start_next_unit",
-                "next_unit": {"title": "2장", "unit_kind": "chapter", "goal": None}}
+                "next_unit": {"title": "새 장면", "goal": None}}
         body.update(overrides)
         return body
 
@@ -936,7 +939,7 @@ class WritingIntentApiTest(unittest.TestCase):
             "request_id": "wr1", "draft_id": draft, "base_version_id": base,
             "idempotency_key": "a", "instruction": "이어서", "candidate_text": "글.",
             "intent": "append_current",
-            "next_unit": {"title": "2장", "unit_kind": "chapter", "goal": None}})
+            "next_unit": {"title": "새 장면", "goal": None}})
         self.assertEqual(bad_append.status_code, 400)
         # start_next_unit missing next_unit → 400, before the Gate.
         bad_start = self._post(client, project, {
@@ -955,8 +958,8 @@ class WritingIntentApiTest(unittest.TestCase):
         self.assertEqual(started_body["intent"], "start_next_unit")
         self.assertEqual(set(started_body["saved"]), {
             "draft_id", "draft_version_id", "version_number", "snapshot_id",
-            "content_hash", "unit_kind", "position"})
-        self.assertEqual(started_body["saved"]["unit_kind"], "chapter")
+            "content_hash", "chapter_id", "position"})
+        self.assertIsInstance(started_body["saved"]["chapter_id"], str)
         self.assertEqual(started_body["saved"]["position"], 2)
         appended = self._post(client, project, {
             "request_id": "wr1", "draft_id": draft,
@@ -965,7 +968,10 @@ class WritingIntentApiTest(unittest.TestCase):
             "intent": "append_current"})
         self.assertEqual(appended.status_code, 200)
         self.assertEqual(appended.json()["intent"], "append_current")
-        self.assertEqual(appended.json()["saved"]["unit_kind"], "chapter")
+        self.assertEqual(
+            appended.json()["saved"]["chapter_id"],
+            started_body["saved"]["chapter_id"],
+        )
         self.assertEqual(appended.json()["saved"]["position"], 1)
         asyncio.run(client.aclose())
 
@@ -978,7 +984,7 @@ class WritingIntentApiTest(unittest.TestCase):
         self.assertTrue(body["accepted"])
         self.assertEqual(body["intent"], "start_next_unit")
         self.assertEqual(body["saved"]["position"], 2)
-        self.assertEqual(body["saved"]["unit_kind"], "chapter")
+        self.assertIsInstance(body["saved"]["chapter_id"], str)
         self.assertIsNone(body["analysis_job"])
         asyncio.run(client.aclose())
 
@@ -1038,8 +1044,9 @@ class StartNextUnitLegacyDataTest(unittest.TestCase):
     def _setup(self, *, legacy: bool):
         core = CoreSotService(InMemoryCoreSotRepository())
         project = core.create_project(name="Novel")
-        current = core.create_draft(
-            project_id=project.id, title="현재 장", unit_kind=UnitKind.CHAPTER
+        chapter = core.create_chapter(project_id=project.id, title="현재 장")
+        current = core.create_scene(
+            project_id=project.id, chapter_id=chapter.id, title="현재 장면"
         )
         base = core.save_draft(
             project_id=project.id, draft_id=current.id,
@@ -1075,7 +1082,7 @@ class StartNextUnitLegacyDataTest(unittest.TestCase):
         body = {"request_id": "wr1", "draft_id": draft, "base_version_id": base,
                 "idempotency_key": "acc1", "instruction": "이어서 써줘",
                 "candidate_text": "새 유닛 본문.", "intent": "start_next_unit",
-                "next_unit": {"title": "2장", "unit_kind": "chapter", "goal": None}}
+                "next_unit": {"title": "새 장면", "goal": None}}
         body.update(overrides)
         return body
 
@@ -1136,12 +1143,13 @@ class WritingIntentInMemoryRollbackTest(_IntentBase):
         repo = _FailingRepo()
         core = CoreSotService(repo)
         project = core.create_project(name="Novel")
-        current = core.create_draft(project_id=project.id, title="현재",
-            unit_kind=UnitKind.CHAPTER)
+        chapter = core.create_chapter(project_id=project.id, title="현재 장")
+        current = core.create_scene(
+            project_id=project.id, chapter_id=chapter.id, title="현재")
         core.save_draft(project_id=project.id, draft_id=current.id,
             raw_text="본문.", idempotency_key="base")
-        following = core.create_draft(project_id=project.id, title="다음",
-            unit_kind=UnitKind.SCENE)
+        core.create_scene(
+            project_id=project.id, chapter_id=chapter.id, title="다음")
         before = [(d.id, d.position) for d in
                   core.list_drafts(project_id=project.id)]
         # Pin every one of the six surfaces explicitly (H1): draft/position,
@@ -1152,7 +1160,7 @@ class WritingIntentInMemoryRollbackTest(_IntentBase):
         with self.assertRaises(RuntimeError):
             core.start_next_unit(project_id=project.id,
                 current_draft_id=current.id, raw_text="새 유닛.",
-                title="2장", unit_kind=UnitKind.CHAPTER,
+                title="새 장면",
                 goal_intent="start_next_unit",
                 idempotency_key="writing-accept:acc1")
         # 1-2. Draft/position surface: positions restored, no new unit.

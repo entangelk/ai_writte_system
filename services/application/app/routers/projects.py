@@ -358,7 +358,6 @@ def register_projects(
                         "chapter_id": unit.chapter_id,
                         "chapter_title": unit.chapter_title,
                         "chapter_position": unit.chapter_position,
-                        "unit_kind": unit.unit_kind,
                         "position": unit.position,
                         "version_id": unit.version_id,
                         "version_number": unit.version_number,

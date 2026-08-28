@@ -165,13 +165,12 @@ class RiskNote:
 class NextUnit:
     """Target for ``start_next_unit`` (W0 contract §3.1).
 
-    ``title`` is nonblank, ``unit_kind`` is chapter|scene|other, and ``goal`` is
-    an optional nonblank generation hint that is NEVER persisted as prose
+    ``title`` is nonblank and ``goal`` is an optional nonblank generation hint
+    that is NEVER persisted as prose
     (WI-16). Validation lives at the accept boundary, not in this container.
     """
 
     title: str
-    unit_kind: UnitKind
     goal: str | None = None
 
 

@@ -551,6 +551,10 @@ class CoreSotService:
         if project.archived:
             raise Archived("project is archived")
         chapters = self._repo.list_chapters(project_id)
+        if not chapters and self._repo.list_drafts(project_id):
+            raise DraftOrderIntegrityError(
+                "scene hierarchy migration is required"
+            )
         self._require_ordered_chapters(chapters)
         chapter = Chapter(
             id=self._repo.next_chapter_id(),
@@ -721,7 +725,28 @@ class CoreSotService:
 
     def list_drafts(self, *, project_id: str) -> tuple[Draft, ...]:
         self._require_project(project_id)
+        chapters = self._repo.list_chapters(project_id)
         drafts = self._repo.list_drafts(project_id)
+        if chapters:
+            self._require_ordered_chapters(chapters)
+            chapter_ids = {chapter.id for chapter in chapters}
+            if any(
+                draft.chapter_id not in chapter_ids or draft.unit_kind is not None
+                for draft in drafts
+            ):
+                raise DraftOrderIntegrityError(
+                    "scene hierarchy migration is required"
+                )
+            flattened: list[Draft] = []
+            for chapter in chapters:
+                scenes = tuple(
+                    draft for draft in drafts if draft.chapter_id == chapter.id
+                )
+                self._require_ordered_scenes(scenes, chapter_id=chapter.id)
+                flattened.extend(sorted(
+                    scenes, key=lambda draft: draft.position
+                ))
+            return tuple(flattened)
         self._require_ordered_drafts(drafts)
         return drafts
 
@@ -1095,7 +1120,6 @@ class CoreSotService:
         current_draft_id: str,
         raw_text: str,
         title: str,
-        unit_kind: UnitKind,
         goal_intent: str,
         idempotency_key: str,
     ) -> StartNextUnitResult:
@@ -1111,20 +1135,11 @@ class CoreSotService:
             raise CoreSotError("idempotency_key is required")
         self._require_active_project_and_draft(project_id, current_draft_id)
         current = self._require_draft(project_id, current_draft_id)
-        if current.chapter_id is not None:
-            drafts = self.list_scenes(
-                project_id=project_id, chapter_id=current.chapter_id
-            )
-            new_chapter_id = current.chapter_id
-            new_unit_kind = None
-        else:
-            # Pre-v1.8.9 compatibility until the explicit migration has run.
-            if not isinstance(unit_kind, UnitKind):
-                raise InvalidDraftOrder("draft unit_kind is invalid")
-            drafts = self._repo.list_drafts(project_id)
-            self._require_ordered_drafts(drafts)
-            new_chapter_id = None
-            new_unit_kind = unit_kind
+        if current.chapter_id is None:
+            raise DraftOrderIntegrityError("scene hierarchy migration is required")
+        drafts = self.list_scenes(
+            project_id=project_id, chapter_id=current.chapter_id
+        )
         current_position = current.position
         shifted = tuple(
             replace(draft, position=draft.position + 1)
@@ -1135,8 +1150,7 @@ class CoreSotService:
             id=self._repo.next_draft_id(),
             project_id=project_id,
             title=title,
-            chapter_id=new_chapter_id,
-            unit_kind=new_unit_kind,
+            chapter_id=current.chapter_id,
             position=current_position + 1,
         )
         version_id = self._repo.next_version_id()
@@ -1316,6 +1330,10 @@ class CoreSotService:
             raise Archived("project is archived")
         if draft.archived:
             raise Archived("draft is archived")
+        if draft.chapter_id is not None:
+            chapter = self._require_chapter(project_id, draft.chapter_id)
+            if chapter.archived:
+                raise Archived("chapter is archived")
 
     @staticmethod
     def _require_ordered_drafts(drafts: tuple[Draft, ...]) -> None:

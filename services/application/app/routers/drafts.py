@@ -37,8 +37,6 @@ from ..api.models import (
     CreateChapterRequest,
     CreateDraftRequest,
     DraftListResponse,
-    DraftOrderPutRequest,
-    DraftOrderPutResponse,
     DraftPayload,
     DraftVersionDetailResponse,
     DraftVersionExportResponse,
@@ -69,14 +67,14 @@ def register_drafts(
     app, *, core_sot, sync_outbox, activity, writing_generation_jobs, writing_scratch,
 ) -> None:
     def _draft_payload(draft) -> dict[str, object]:
-        assert draft.unit_kind is not None
+        assert draft.chapter_id is not None
         assert draft.position is not None
         return {
             "id": draft.id,
             "project_id": draft.project_id,
+            "chapter_id": draft.chapter_id,
             "title": draft.title,
             "archived": draft.archived,
-            "unit_kind": draft.unit_kind,
             "position": draft.position,
         }
 
@@ -134,7 +132,7 @@ def register_drafts(
     @app.post(
         "/projects/{project_id}/chapters",
         response_model=ChapterPayload,
-        responses=_owned(_ERRORS_404_409),
+        responses=_owned(_ERRORS_404_409_MIGRATION),
         dependencies=_REQUIRE_PROJECT_OWNER,
     )
     async def create_chapter(
@@ -148,6 +146,8 @@ def register_drafts(
             )
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except DraftOrderIntegrityError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except Archived as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         activity.record(
@@ -242,6 +242,9 @@ def register_drafts(
             )
         for scene in scenes:
             writing_scratch.clear_draft(project_id, scene.id)
+            writing_generation_jobs.purge_draft(
+                project_id=project_id, draft_id=scene.id
+            )
         core_sot.purge_chapter(project_id=project_id, chapter_id=chapter_id)
         activity.record(
             project_id=project_id,
@@ -408,6 +411,9 @@ def register_drafts(
         # core(비가역)를 먼저 지우고 scratch 삭제가 실패하면 원고 없이 500만 남지만,
         # 이 순서면 scratch 단계 실패 시 원고가 그대로 남아 재시도로 수습된다.
         writing_scratch.clear_draft(project_id, draft_id)
+        writing_generation_jobs.purge_draft(
+            project_id=project_id, draft_id=draft_id
+        )
         core_sot.purge_draft(project_id=project_id, draft_id=draft_id)
         activity.record(
             project_id=project_id, actor_user_id=current.id,
@@ -535,7 +541,7 @@ def register_drafts(
 
     @app.post(
               "/projects/{project_id}/drafts",
-              response_model=DraftPayload | ScenePayload,
+              response_model=DraftPayload,
               responses=_owned(_ERRORS_404_409_MIGRATION),
               dependencies=_REQUIRE_PROJECT_OWNER)
     async def create_draft(
@@ -543,18 +549,11 @@ def register_drafts(
         current=Depends(require_authenticated_user),
     ) -> dict[str, object]:
         try:
-            if request.chapter_id is not None:
-                draft = core_sot.create_scene(
-                    project_id=project_id,
-                    chapter_id=request.chapter_id,
-                    title=request.title,
-                )
-            else:
-                draft = core_sot.create_draft(
-                    project_id=project_id,
-                    title=request.title,
-                    unit_kind=request.unit_kind,
-                )
+            draft = core_sot.create_scene(
+                project_id=project_id,
+                chapter_id=request.chapter_id,
+                title=request.title,
+            )
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except DraftOrderIntegrityError as exc:
@@ -568,37 +567,7 @@ def register_drafts(
             action="draft_created", target_type="draft", target_id=draft.id,
             after=draft.title,
         )
-        return (
-            _scene_payload(draft)
-            if draft.chapter_id is not None
-            else _draft_payload(draft)
-        )
-
-    @app.put(
-        "/projects/{project_id}/draft-order",
-        response_model=DraftOrderPutResponse,
-        responses=_owned(_ERRORS_404_409),
-        dependencies=_REQUIRE_PROJECT_OWNER,
-    )
-    async def put_draft_order(
-        project_id: str, request: DraftOrderPutRequest,
-        current=Depends(require_authenticated_user),
-    ) -> dict[str, object]:
-        try:
-            drafts = core_sot.reorder_drafts(
-                project_id=project_id,
-                ordered_draft_ids=tuple(request.ordered_draft_ids),
-            )
-        except NotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except (Archived, InvalidDraftOrder) as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        activity.record(
-            project_id=project_id, actor_user_id=current.id,
-            action="draft_order_changed", target_type="project",
-            target_id=project_id,
-        )
-        return {"drafts": [_draft_payload(draft) for draft in drafts]}
+        return _draft_payload(draft)
 
     @app.post(
         "/projects/{project_id}/drafts/{draft_id}/versions",

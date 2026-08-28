@@ -127,8 +127,13 @@ export type ProjectBriefVersionListResponse =
 export type CreateDraftRequest = components["schemas"]["CreateDraftRequest"];
 export type Draft = components["schemas"]["DraftPayload"];
 export type DraftListResponse = components["schemas"]["DraftListResponse"];
-export type DraftOrderPutRequest = components["schemas"]["DraftOrderPutRequest"];
-export type DraftOrderPutResponse = components["schemas"]["DraftOrderPutResponse"];
+export type Chapter = components["schemas"]["ChapterPayload"];
+export type ChapterListResponse = components["schemas"]["ChapterListResponse"];
+export type CreateChapterRequest = components["schemas"]["CreateChapterRequest"];
+export type ChapterOrderPutRequest = components["schemas"]["ChapterOrderPutRequest"];
+export type ChapterOrderPutResponse = components["schemas"]["ChapterOrderPutResponse"];
+export type SceneOrderPutRequest = components["schemas"]["SceneOrderPutRequest"];
+export type SceneOrderPutResponse = components["schemas"]["SceneOrderPutResponse"];
 export type DraftVersion = components["schemas"]["DraftVersionMetaPayload"];
 export type DraftVersionListResponse = components["schemas"]["DraftVersionListResponse"];
 export type DraftVersionDetail = components["schemas"]["DraftVersionDetailResponse"];
@@ -420,6 +425,20 @@ export function listDrafts(projectId: string): Promise<DraftListResponse> {
   return request(`/projects/${projectId}/drafts`);
 }
 
+export function listChapters(projectId: string): Promise<ChapterListResponse> {
+  return request(`/projects/${projectId}/chapters`);
+}
+
+export function createChapter(
+  projectId: string,
+  body: CreateChapterRequest,
+): Promise<Chapter> {
+  return request(`/projects/${projectId}/chapters`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 export function createDraft(
   projectId: string,
   body: CreateDraftRequest,
@@ -430,13 +449,36 @@ export function createDraft(
   });
 }
 
-export function putDraftOrder(
+export function putChapterOrder(
   projectId: string,
-  body: DraftOrderPutRequest,
-): Promise<DraftOrderPutResponse> {
-  return request(`/projects/${projectId}/draft-order`, {
+  body: ChapterOrderPutRequest,
+): Promise<ChapterOrderPutResponse> {
+  return request(`/projects/${projectId}/chapter-order`, {
     method: "PUT",
     body: JSON.stringify(body),
+  });
+}
+
+export function putSceneOrder(
+  projectId: string,
+  chapterId: string,
+  body: SceneOrderPutRequest,
+): Promise<SceneOrderPutResponse> {
+  return request(`/projects/${projectId}/chapters/${chapterId}/scene-order`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export function archiveChapter(projectId: string, chapterId: string): Promise<Chapter> {
+  return request(`/projects/${projectId}/chapters/${chapterId}/archive`, {
+    method: "POST",
+  });
+}
+
+export function purgeChapter(projectId: string, chapterId: string): Promise<void> {
+  return request(`/projects/${projectId}/chapters/${chapterId}/purge`, {
+    method: "POST",
   });
 }
 

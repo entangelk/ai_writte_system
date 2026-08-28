@@ -95,9 +95,12 @@ class ActivityRecordingTest(unittest.TestCase):
     def test_saving_a_draft_version_records_who_and_when(self) -> None:
         """`draft_versions` 에는 `created_at` 도 `user_id` 도 없다(부모 계획 §1)."""
         project_id = self._create_project()
+        chapter_id = self.client.post(
+            f"/projects/{project_id}/chapters", json={"title": "1장"}
+        ).json()["id"]
         draft_id = self.client.post(
             f"/projects/{project_id}/drafts",
-            json={"title": "1장", "unit_kind": "chapter"},
+            json={"title": "첫 장면", "chapter_id": chapter_id},
         ).json()["id"]
 
         response = self.client.post(

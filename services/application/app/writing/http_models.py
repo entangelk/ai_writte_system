@@ -26,7 +26,6 @@ from typing import Union
 
 from pydantic import BaseModel
 
-from services.application.app.core_sot.models import UnitKind
 from services.application.app.writing.models import (
     CandidateClaimType,
     MemoryHintType,
@@ -148,15 +147,13 @@ class WritingStageError(BaseModel):
 
 
 class AcceptedSavePayload(BaseModel):
-    # W3 (§3.3): both intents expose the target Draft's kind/position. For
-    # append the target is the current draft; for start_next_unit it is the new
-    # unit created at current position + 1.
+    # SoT v1.8.9: both intents expose the target Scene's Chapter and position.
     draft_id: str
     draft_version_id: str
     version_number: int
     snapshot_id: str
     content_hash: str
-    unit_kind: UnitKind
+    chapter_id: str
     position: int
 
 

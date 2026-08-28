@@ -146,7 +146,7 @@ const saved = {
   version_number: 4,
   snapshot_id: "s4",
   content_hash: "h4",
-  unit_kind: "chapter",
+  chapter_id: "c1",
   position: 1,
 };
 
@@ -811,10 +811,9 @@ describe("WritingPanel — accept (pass only)", () => {
       { body: startAccept },
     );
     renderPanel();
-    await userEvent.click(screen.getByLabelText("다음 유닛 시작"));
-    await userEvent.type(screen.getByLabelText("새 유닛 제목"), "2장 — 성 안");
-    await userEvent.selectOptions(screen.getByLabelText("유닛 종류"), "scene");
-    await userEvent.type(screen.getByLabelText("유닛 목표(선택)"), "반전을 심는다");
+    await userEvent.click(screen.getByLabelText("같은 장의 다음 장면 시작"));
+    await userEvent.type(screen.getByLabelText("새 장면 제목"), "성 안");
+    await userEvent.type(screen.getByLabelText("장면 목표(선택)"), "반전을 심는다");
     await generateAndGate(fetchMock);
     expect(acceptButton()).toBeEnabled();
     await userEvent.click(acceptButton());
@@ -822,24 +821,23 @@ describe("WritingPanel — accept (pass only)", () => {
     const body = JSON.parse(fetchMock.mock.calls[2][1].body);
     expect(body.intent).toBe("start_next_unit");
     expect(body.next_unit).toEqual({
-      title: "2장 — 성 안",
-      unit_kind: "scene",
+      title: "성 안",
       goal: "반전을 심는다",
     });
-    expect(screen.getByRole("status")).toHaveTextContent("새 유닛으로 채택·저장됐습니다.");
+    expect(screen.getByRole("status")).toHaveTextContent("같은 장의 새 장면으로 채택·저장됐습니다.");
   });
 
   it("blocks accept when starting the next unit without a title", async () => {
     const fetchMock = mockFetch({ body: candidate }, { body: gatePass });
     renderPanel();
-    await userEvent.click(screen.getByLabelText("다음 유닛 시작"));
+    await userEvent.click(screen.getByLabelText("같은 장의 다음 장면 시작"));
     await generateAndGate(fetchMock);
     // Gate passed, but a blank next-unit title keeps accept disabled.
     expect(acceptButton()).toBeDisabled();
     expect(
-      screen.getByText("새 유닛 제목을 입력해야 채택할 수 있습니다."),
+      screen.getByText("새 장면 제목을 입력해야 채택할 수 있습니다."),
     ).toBeInTheDocument();
-    await userEvent.type(screen.getByLabelText("새 유닛 제목"), "2장");
+    await userEvent.type(screen.getByLabelText("새 장면 제목"), "장면 2");
     expect(acceptButton()).toBeEnabled();
   });
 

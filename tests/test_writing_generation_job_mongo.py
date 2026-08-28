@@ -90,6 +90,12 @@ class _Collection:
     def count_documents(self, query):
         return sum(1 for d in self.docs.values() if _matches(d, query))
 
+    def delete_many(self, query):
+        for doc_id in [
+            doc["_id"] for doc in self.docs.values() if _matches(doc, query)
+        ]:
+            del self.docs[doc_id]
+
     def find_one_and_update(self, query, update, *, sort, return_document):
         matches = [d for d in self.docs.values() if _matches(d, query)]
         for key, direction in reversed(sort):
@@ -167,6 +173,21 @@ class MongoWritingGenerationJobRepositoryTest(unittest.TestCase):
 
     def test_find_request_returns_none_when_absent(self):
         self.assertIsNone(self.repo.find_request("p", "missing"))
+
+    def test_purge_draft_removes_only_that_drafts_jobs(self):
+        self.repo.add(_job("wgj:victim", draft="victim", request="victim"))
+        sibling = _job("wgj:sibling", draft="sibling", request="sibling")
+        other_project = _job(
+            "wgj:other", project="other", draft="victim", request="other"
+        )
+        self.repo.add(sibling)
+        self.repo.add(other_project)
+
+        self.repo.purge_draft("p", "victim")
+
+        self.assertIsNone(self.repo.get("wgj:victim"))
+        self.assertEqual(self.repo.get("wgj:sibling"), sibling)
+        self.assertEqual(self.repo.get("wgj:other"), other_project)
 
     def test_claim_moves_oldest_pending_to_running(self):
         self.repo.add(_job("wgj:new", minute=5))

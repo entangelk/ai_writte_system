@@ -4,8 +4,8 @@ import {
   describeApiError,
   exportDraftVersion,
   exportProject,
-  listDrafts,
-  type Draft,
+  listChapters,
+  type Chapter,
 } from "../api/client";
 
 type ExportFormat = "txt" | "markdown";
@@ -20,12 +20,15 @@ const EXTENSION: Record<ExportFormat, string> = { txt: "txt", markdown: "md" };
 function bundleEntryName(
   draftId: string,
   title: string,
+  chapterPosition: number | null,
   position: number | null,
   format: ExportFormat,
 ): string {
   const safeTitle = title.replace(/[\\/:*?"<>|]/g, "_").trim();
   const stem = safeTitle === "" ? draftId : safeTitle;
-  const prefix = String(position ?? 0).padStart(2, "0");
+  const prefix = [chapterPosition, position]
+    .map((value) => String(value ?? 0).padStart(2, "0"))
+    .join("-");
   return `${prefix}-${stem}.${EXTENSION[format]}`;
 }
 
@@ -54,7 +57,7 @@ function triggerDownload(blob: Blob, filename: string): void {
  * 담을지 알 수 없게 된다.
  */
 export function ProjectExportPanel({ projectId }: { projectId: string }) {
-  const [drafts, setDrafts] = useState<Draft[] | null>(null);
+  const [chapters, setChapters] = useState<Chapter[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [includeArchived, setIncludeArchived] = useState(false);
   const [exporting, setExporting] = useState<
@@ -64,9 +67,9 @@ export function ProjectExportPanel({ projectId }: { projectId: string }) {
 
   useEffect(() => {
     let active = true;
-    listDrafts(projectId)
+    listChapters(projectId)
       .then((response) => {
-        if (active) setDrafts(response.drafts);
+        if (active) setChapters(response.chapters);
       })
       .catch((cause: unknown) => {
         if (active) setError(describeApiError(cause));
@@ -108,7 +111,13 @@ export function ProjectExportPanel({ projectId }: { projectId: string }) {
             format,
           );
           zip.file(
-            bundleEntryName(unit.draft_id, unit.title, unit.position, format),
+            bundleEntryName(
+              unit.draft_id,
+              unit.title,
+              unit.chapter_position,
+              unit.position,
+              format,
+            ),
             exported.body,
           );
         }
@@ -124,11 +133,14 @@ export function ProjectExportPanel({ projectId }: { projectId: string }) {
     }
   }
 
-  // At least one unit would actually be exported under the current archived
-  // toggle. Archived units are excluded unless the user opts them in, so an
-  // archived-only project can only export once "보관된 원고 포함" is on.
-  const canExport =
-    drafts !== null && drafts.some((draft) => includeArchived || !draft.archived);
+  const canExport = chapters !== null && chapters.some((chapter) =>
+    chapter.scenes.some((scene) =>
+      includeArchived || (!chapter.archived && !scene.archived)
+    )
+  );
+  const hasArchivedContent = chapters !== null && chapters.some((chapter) =>
+    chapter.archived || chapter.scenes.some((scene) => scene.archived)
+  );
 
   return (
     <section className="overview-section" aria-labelledby="export-heading">
@@ -141,13 +153,13 @@ export function ProjectExportPanel({ projectId }: { projectId: string }) {
 
       {error !== null && <p className="alert" role="alert">{error}</p>}
 
-      {drafts === null ? (
+      {chapters === null ? (
         <p className="status-copy">원고를 불러오는 중…</p>
-      ) : drafts.length === 0 ? (
+      ) : chapters.every((chapter) => chapter.scenes.length === 0) ? (
         <div className="empty-state"><p>내보낼 원고가 없습니다.</p></div>
       ) : (
         <section className="export-controls" aria-label="원고 내보내기">
-          {drafts.some((draft) => draft.archived) && (
+          {hasArchivedContent && (
             <div className="export-options">
               <label className="export-option">
                 <input
