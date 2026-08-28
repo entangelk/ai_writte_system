@@ -20,6 +20,7 @@ export function DraftList() {
   const [scenePurgeChecked, setScenePurgeChecked] = useState(false);
   const [chapterPurgeTarget, setChapterPurgeTarget] = useState<Chapter | null>(null);
   const [chapterConfirmTitle, setChapterConfirmTitle] = useState("");
+  const [chapterPurgeUncertain, setChapterPurgeUncertain] = useState(false);
   const [purgeBusy, setPurgeBusy] = useState(false);
   const [purgeError, setPurgeError] = useState<string | null>(null);
 
@@ -146,26 +147,41 @@ export function DraftList() {
   }
 
   async function deleteChapter(chapter: Chapter) {
-    if (projectId === undefined || purgeBusy || chapterConfirmTitle !== chapter.title) return;
+    if (projectId === undefined || purgeBusy || chapterPurgeUncertain
+        || chapterConfirmTitle !== chapter.title) return;
     setPurgeBusy(true);
     setPurgeError(null);
-    let purgeRequested = false;
+    if (!chapter.archived) {
+      try {
+        await archiveChapter(projectId, chapter.id);
+      } catch (cause: unknown) {
+        // 1단계 실패 — 아직 파괴된 것이 없다. 재시도가 안전하므로 되살린다
+        // (오너 ⓐ 2026-08-28, 프로젝트 purge와 같은 단계 구분).
+        setPurgeBusy(false);
+        setPurgeError(describeApiError(cause));
+        return;
+      }
+    }
     try {
-      if (!chapter.archived) await archiveChapter(projectId, chapter.id);
-      purgeRequested = true;
       await purgeChapter(projectId, chapter.id);
       setChapterPurgeTarget(null);
       setChapterConfirmTitle("");
       await loadChapters();
     } catch (cause: unknown) {
-      if (purgeRequested && cause instanceof ApiError && cause.status === 404) {
+      if (cause instanceof ApiError && cause.status === 404) {
+        // 재파기 404 — 이미 완료된 파기와 같다(보관 단계 404는 위 1단계 catch가 처리).
         setChapterPurgeTarget(null);
         setChapterConfirmTitle("");
         await loadChapters();
+      } else if (cause instanceof ApiError && cause.status === 503) {
+        // 파기 단계 503 — uncertain 잠금. 이미 시작된 파기는 재시도로 확정할 수
+        // 없다(오너 ⓐ, 프로젝트 purge 면과 같은 임계·문구 구조).
+        setChapterPurgeUncertain(true);
+        setPurgeError(
+          "삭제 상태를 확정할 수 없습니다. 다시 시도하지 말고 목록을 새로고침해 장이 남았는지 확인하세요.",
+        );
       } else {
-        setPurgeError(cause instanceof ApiError && cause.status === 503
-          ? "삭제 결과를 확정할 수 없습니다. 목록을 새로 확인한 뒤 다시 시도하세요."
-          : describeApiError(cause));
+        setPurgeError(describeApiError(cause));
       }
     } finally {
       setPurgeBusy(false);
@@ -216,13 +232,14 @@ export function DraftList() {
           <p><strong>{chapterPurgeTarget.title}</strong>과 그 안의 모든 장면·버전·생성 기록이 영구히 사라집니다.</p>
           <label htmlFor="chapter-confirm-title">확인을 위해 장 제목을 정확히 입력하세요.</label>
           <input id="chapter-confirm-title" value={chapterConfirmTitle}
+            disabled={purgeBusy || chapterPurgeUncertain}
             onChange={(event) => setChapterConfirmTitle(event.target.value)} />
           {purgeError !== null && <p className="alert" role="alert">{purgeError}</p>}
           <div className="confirm-actions">
-            <button type="button" className="danger-button"
+            {!chapterPurgeUncertain && <button type="button" className="danger-button"
               disabled={purgeBusy || chapterConfirmTitle !== chapterPurgeTarget.title}
-              onClick={() => void deleteChapter(chapterPurgeTarget)}>장과 장면 영구 삭제</button>
-            <button type="button" disabled={purgeBusy} onClick={() => { setChapterPurgeTarget(null); setChapterConfirmTitle(""); setPurgeError(null); }}>취소</button>
+              onClick={() => void deleteChapter(chapterPurgeTarget)}>장과 장면 영구 삭제</button>}
+            <button type="button" disabled={purgeBusy || chapterPurgeUncertain} onClick={() => { setChapterPurgeTarget(null); setChapterConfirmTitle(""); setPurgeError(null); }}>취소</button>
           </div>
         </div>}
 

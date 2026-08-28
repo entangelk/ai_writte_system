@@ -146,7 +146,7 @@ describe("DraftList Chapter→Scene hierarchy", () => {
     expect(fetchMock.mock.calls[3][0]).toBe("/api/projects/p1/chapters/c1/purge");
   });
 
-  it("keeps the confirmation open and marks a 503 purge result uncertain", async () => {
+  it("locks the chapter purge behind uncertain on a 503", async () => {
     const c1 = { ...chapter("c1", "1장", 1), archived: true };
     mockFetch(
       { body: { id: "p1", name: "작품", archived: false } },
@@ -159,8 +159,31 @@ describe("DraftList Chapter→Scene hierarchy", () => {
     await userEvent.type(screen.getByLabelText(/장 제목을 정확히/), "1장");
     await userEvent.click(screen.getByRole("button", { name: "장과 장면 영구 삭제" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("삭제 결과를 확정할 수 없습니다");
+    expect(await screen.findByRole("alert")).toHaveTextContent("삭제 상태를 확정할 수 없습니다");
     expect(screen.getByRole("alertdialog", { name: "장 삭제 확인" })).toBeInTheDocument();
+    // uncertain 잠금(오너 ⓐ 2026-08-28) — 재시도 버튼 제거·제목 입력·취소 잠금.
+    expect(screen.queryByRole("button", { name: "장과 장면 영구 삭제" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/장 제목을 정확히/)).toBeDisabled();
+    expect(screen.getByRole("button", { name: "취소" })).toBeDisabled();
+  });
+
+  it("revives the chapter purge retry when only the archive step failed", async () => {
+    const c1 = chapter("c1", "1장", 1);
+    mockFetch(
+      { body: { id: "p1", name: "작품", archived: false } },
+      { body: { chapters: [c1] } },
+      { status: 503, body: { detail: "storage unavailable" } },
+    );
+    renderDraftList();
+    await screen.findByText("1장");
+    await userEvent.click(screen.getByRole("button", { name: "1장 삭제" }));
+    await userEvent.type(screen.getByLabelText(/장 제목을 정확히/), "1장");
+    await userEvent.click(screen.getByRole("button", { name: "장과 장면 영구 삭제" }));
+
+    // 1단계(보관) 실패는 파괴가 없다 — 잠금하면 안 되고 재시도가 살아 있어야 한다.
+    expect(await screen.findByRole("alert")).toHaveTextContent("503");
+    expect(screen.getByRole("button", { name: "장과 장면 영구 삭제" })).toBeEnabled();
+    expect(screen.getByLabelText(/장 제목을 정확히/)).toBeEnabled();
   });
 
   it("treats a repeated chapter purge 404 as an already-completed success", async () => {
