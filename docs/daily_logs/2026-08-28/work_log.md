@@ -33,3 +33,56 @@
 
 - 오너가 공개 사이트에서 신버전 UI를 육안 대조한다.
 - 편집기 드로어·설정 탭·좁은 화면 배치에서 발견되는 문제를 별도 결함으로 기록한다.
+
+---
+
+## Session 2 — 도그푸드 UI 배치 결함 3건
+
+### Goals
+
+- 관리자에서 사용자별 상세·프로젝트 목록으로 들어가는 경로를 명확히 한다.
+- 원고 단위 설명과 라벨의 폭·상하 정렬을 바로잡는다.
+- 편집기 도구 독·드로어를 편집 영역이 아니라 뷰포트 오른쪽에 고정한다.
+
+### Completed work
+
+- 관리자 사용자 상세 화면은 이미 `/admin/users/:userId`에 존재하고 사용자 소유 프로젝트를 필터링하고 있었다. 새 화면을 중복 생성하지 않고 작은 `상세` 진입 문구를 `사용자 상세 보기 →`로 바꿔 발견성을 높였다.
+- `.unit-kind-help`의 `max-width: 46rem`을 제거해 생성 폼 두 열 전체 폭을 사용하게 했다. `원고 단위` 라벨을 명시적 `.unit-kind-label`로 두고 `.form-controls`의 유일한 `align-items`를 `center`로 고정했다. 좁은 화면의 `stretch` 재정의도 제거했다.
+- 편집기 독·드로어 자체는 이미 `position: fixed; right: 0`이었다. 문제는 조상 `.page-enter`가 애니메이션 종료 뒤 `transform: translateY(0)`을 유지해 fixed containing block을 뷰포트에서 편집기 박스로 바꾼 것이었다. 편집기 뿌리에서 `page-enter`만 제거하고 `workspace-page editor-page` 소속은 보존했다.
+
+### Issues found
+
+- `sr-only` 클래스는 저장소 CSS에 정의가 없어 라벨을 숨기지 못하고 있었다. 오너가 노출 라벨의 중앙정렬을 요구했으므로 새 숨김 유틸리티를 만들지 않고 실제 보이는 라벨로 정리했다.
+- `position: fixed` 값만 읽으면 올바르게 보이지만 조상 transform까지 함께 보지 않으면 실제 containing block을 오판한다. 패턴 스윕 결과 fixed 표면은 편집기 독·드로어 두 곳뿐이어서 동일 결함의 추가 위치는 없었다(`git blame`: 독·드로어는 08-26 도입, page-enter는 07-16 선행).
+
+### Decisions
+
+- 기존 사용자 상세 페이지와 API를 재사용하며 새 operation·route는 만들지 않는다.
+- 전체 페이지 진입 애니메이션을 전역 변경하지 않고 fixed 표면을 가진 편집기에서만 제외한다.
+- 원고 단위 설명은 별도 좁은 읽기 폭을 두지 않고 생성 폼 전폭을 사용한다.
+
+### Mutation verification
+
+모든 mutation은 체크포인트 커밋 `b4e1a0d`와 clean tree 위에서 적용하고 `apply_patch` 역편집으로 복원했다.
+
+| # | 방향 | mutation | 파일 | 재실패한 셀 |
+|---|---|---|---|---|
+| M1 | under | `사용자 상세 보기 →`를 작은 `상세`로 복귀 | `admin/AdminConsole.tsx` | `AdminConsole > loads users, project metadata, and the deployment KPI` |
+| M2 | over | 상세 링크 목적지를 `/admin`으로 축소 | `admin/AdminConsole.tsx` | 위 셀의 href 단정 |
+| M3 | under | 설명 폭 `max-width: 46rem` 복귀 | `styles.css` | `원고 생성 폼 배치 > centers the unit label…` |
+| M4 | over | 설명의 `grid-column: 1 / -1` 제거 | `styles.css` | 위 셀의 전폭 단정 |
+| M5 | over | 보이는 `.unit-kind-label`을 `sr-only`로 복귀 | `drafts/DraftList.tsx` | `DraftList > defaults the unit to 장…` |
+| M6 | under | 편집기 뿌리에 `page-enter` 재부착 | `drafts/DraftEditor.tsx` | `DraftEditor > roots the fixed tool dock at the viewport…` |
+| M7 | over | 애니메이션 제거와 함께 `editor-page`까지 제거 | `drafts/DraftEditor.tsx` | 위 셀의 페이지 소속 단정 |
+
+### Verification
+
+- 수정 전 신규 회귀 4개가 각 원인을 재현해 실패했다.
+- 집중 회귀: 5파일 **82/82**.
+- 프론트 전수: 34파일 **379/379**.
+- `npm run build`: TypeScript clean, Vite **711 modules**, 진입 **435.89 kB**, CSS **37.32 kB**.
+- 패턴 스윕과 7종 mutation 뒤 working tree가 체크포인트와 byte-identical한 clean 상태임을 확인했다.
+
+### Next steps
+
+- 공개 배포를 갱신한 뒤 관리자 상세 진입, 원고 단위 폼, 편집기 우측 독·드로어를 브라우저에서 다시 육안 확인한다.
