@@ -392,3 +392,47 @@ Blocking 6건을 닫는다. B5(소유자 면 503 재시도)는 오너 결정 **�
 
 - 독립 검증 재확인 요청(조건부 합격 조건 폐쇄).
 - 장(유닛) 삭제 브리프 — unit_kind 존치 결정과 함께.
+
+---
+
+## Session 8 — 장→장면 계층화 방향 확정·결정 브리프
+
+### Goals
+
+- `unit_kind` 존치 문제를 오너가 정한 실제 장→장면 계층 방향으로 좁힌다.
+- 기존 평면 원고 계약과 저장 데이터를 손상하지 않고 구현하려면 필요한 세부 결정을 브리프로 올린다.
+
+### Completed work
+
+- 오너가 **“계층화한다. 장은 장면의 집합”**으로 방향을 확정했다.
+- 현재 `Draft`·ordered-unit·reorder·Writing accept·export 계약을 실측했다. 현행은 부모 필드 없이
+  archived 포함 전 Draft가 project 단위 `position=1..N`을 공유하고, W0가 chapter→scene nesting을
+  명시적으로 금지한다.
+- [`chapter-scene-hierarchy-decisions.md`](../../plans/chapter-scene-hierarchy-decisions.md)를 작성했다.
+  저장 모델, 장 본문 소유, 기존 데이터 이관, `other`, 2단계 순서, AI 다음 단위 생성, 장 삭제, export/보관의
+  선택지·권고·후속 문을 분리했다.
+- 계획 인덱스에 새 브리프를 등재했다.
+
+### Issues found
+
+- 기존 `chapter` Draft도 version·snapshot·분석 참조를 가진 실제 본문일 수 있어, 이를 곧바로
+  본문 없는 Chapter로 바꾸면 참조 ID를 대량 재작성해야 한다.
+- 계층화는 SoT v1.7.9 D2=A와 W0의 “nesting 미도입”을 뒤집는 계약 변경이다. 세부 결정을
+  확정하지 않은 채 parent 필드만 추가하면 reorder·export·삭제가 서로 다른 트리를 말한다.
+
+### Decisions
+
+- 오너 결정: `unit_kind`를 제거하거나 이름표로만 두지 않고 실제 계층을 도입한다.
+- 오너 결정: 장은 장면의 집합이다. 장 자체 본문 허용, 저장 엔티티, 기존 데이터 이관 등
+  세부 계약은 브리프 D1~D8 답변 뒤 확정한다.
+
+### Next steps
+
+- 오너가 브리프 D1~D8을 확정한다.
+- 확정값을 SoT와 W0 계약에 반영한 뒤 모델/마이그레이션부터 회귀 우선으로 구현한다.
+
+### Verification
+
+- `tests/test_docs_indexes.py`: **13 passed / 268 subtests**.
+- 계획 문서 **112개**, 결정 브리프 **94개** 카운터와 루트/계획 README 주장이 일치한다.
+- `git diff --check` 통과.
