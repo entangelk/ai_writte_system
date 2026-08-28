@@ -263,7 +263,10 @@ class OrderedUnitContractTest(unittest.TestCase):
 
         self.service.archive_draft(project_id=self.project.id, draft_id=first.id)
 
-        listed = self.service.list_drafts(project_id=self.project.id)
+        # v1.8.9부터 service.list_drafts는 legacy 평면 Draft를 503 축으로 거부하므로
+        # 저장 원문(migration 입력) 축에서 불변식을 읽는다 — archive가 position을
+        # compact하지 않는다는 W3 메타데이터 계약 자체는 유지된다.
+        listed = self.repo.list_drafts(project_id=self.project.id)
         self.assertEqual([draft.position for draft in listed], [1, 2])
         self.assertTrue(listed[0].archived)
         self.assertEqual(listed[1].id, second.id)

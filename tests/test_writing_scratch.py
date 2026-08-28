@@ -454,7 +454,9 @@ class ScratchAcceptCleanupHttpTest(unittest.TestCase):
     def _setup(self, *, decision=WritingGateDecision.PASS, analysis=None):
         core = CoreSotService(InMemoryCoreSotRepository())
         project = core.create_project(name="Novel")
-        draft = core.create_draft(project_id=project.id, title="Draft")
+        chapter = core.create_chapter(project_id=project.id, title="1장")
+        draft = core.create_scene(
+            project_id=project.id, chapter_id=chapter.id, title="Draft")
         base = core.save_draft(project_id=project.id, draft_id=draft.id,
                                raw_text="기존.", idempotency_key="base")
         scratch = WritingScratchService(InMemoryWritingScratchRepository())
@@ -563,7 +565,9 @@ class ScratchBestEffortIsolationTest(unittest.TestCase):
     def test_accept_succeeds_when_scratch_clear_raises(self):
         core = CoreSotService(InMemoryCoreSotRepository())
         project = core.create_project(name="Novel")
-        draft = core.create_draft(project_id=project.id, title="Draft")
+        chapter = core.create_chapter(project_id=project.id, title="1장")
+        draft = core.create_scene(
+            project_id=project.id, chapter_id=chapter.id, title="Draft")
         base = core.save_draft(project_id=project.id, draft_id=draft.id,
                                raw_text="기존.", idempotency_key="base")
         app = create_app(

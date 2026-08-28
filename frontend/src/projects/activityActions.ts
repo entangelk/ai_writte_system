@@ -13,21 +13,25 @@
  *   21번째 action 을 더하면 그 셀이 실패한다. `schema.d.ts` 는 `action` 을 `string` 으로만
  *   주므로 **타입으로는 못 잡는다 — 그 가드가 유일한 연결선이다.**
  *
- * 그래서 이 표는 **20행 전수**여야 하고, 임의로 줄이거나 늘리면 가드가 양방향으로 문다.
+ * 그래서 이 표는 **25행 전수**여야 하고, 임의로 줄이거나 늘리면 가드가 양방향으로 문다.
  */
 
-/** `action` 리터럴 → 타임라인 한 줄에 쓰는 문구. 백엔드 분류표의 logged 21 과 1:1 이다. */
+/** `action` 리터럴 → 타임라인 한 줄에 쓰는 문구. 백엔드 분류표의 logged 25 과 1:1 이다. */
 export const ACTIVITY_ACTION_LABELS: Record<string, string> = {
-  // 정본 변경 11 (+ 원고 하드 삭제 2026-08-28)
+  // 정본 변경 (+ 원고 하드 삭제·장/장면 계층 2026-08-28 — 평면 원고 순서는 폐지)
   project_created: "프로젝트 생성",
   project_renamed: "프로젝트 이름 변경",
   project_archived: "프로젝트 보관",
   project_brief_saved: "기획 브리프 저장",
+  chapter_created: "장 생성",
+  chapter_archived: "장 보관",
+  chapter_purged: "장 삭제",
+  chapter_order_changed: "장 순서 변경",
+  scene_order_changed: "장면 순서 변경",
   draft_created: "원고 생성",
   draft_renamed: "원고 제목 변경",
   draft_archived: "원고 보관",
   draft_purged: "원고 삭제",
-  draft_order_changed: "원고 순서 변경",
   draft_version_saved: "원고 저장",
   source_ref_created: "출처 연결",
   draft_version_accepted: "생성 결과 반영",
@@ -65,6 +69,7 @@ export const LINKABLE_TARGET_TYPES = ["draft"] as const;
 export const NON_LINKABLE_TARGET_TYPES: Record<string, string> = {
   project: "지금 보고 있는 그 프로젝트다",
   project_brief: "전용 route 가 없고 개요 화면 안에 있다",
+  chapter: "장 단위 route 가 없고 원고 목록 안에 중첩돼 있다",
   draft_version: "★ payload 에 draft_id 가 없어 편집 화면 route 를 만들 수 없다 (브리프 F7)",
   source_ref: "전용 화면이 없다",
   candidate: "검토함 목록 안에만 있고 단건 route 가 없다",
