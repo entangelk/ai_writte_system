@@ -217,6 +217,9 @@ class ProjectExportUnit:
 
     draft_id: str
     title: str
+    chapter_id: str | None
+    chapter_title: str | None
+    chapter_position: int | None
     unit_kind: UnitKind | None
     position: int | None
     version_id: str

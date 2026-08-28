@@ -222,6 +222,28 @@ class MongoCoreSotRepository:
             return
         self._purge_draft(project_id, draft_id, session=None)
 
+    def purge_chapter(self, project_id: str, chapter_id: str) -> None:
+        if self._use_transactions:
+            with self._client.start_session() as session:
+                with session.start_transaction():
+                    self._purge_chapter(project_id, chapter_id, session=session)
+            return
+        self._purge_chapter(project_id, chapter_id, session=None)
+
+    def _purge_chapter(self, project_id: str, chapter_id: str, *, session) -> None:
+        child_ids = [
+            doc["_id"] for doc in self._drafts.find(
+                {"project_id": project_id, "chapter_id": chapter_id},
+                {"_id": 1},
+                session=session,
+            )
+        ]
+        for draft_id in child_ids:
+            self._purge_draft(project_id, draft_id, session=session)
+        self._chapters.delete_one(
+            {"_id": chapter_id, "project_id": project_id}, session=session
+        )
+
     def _purge_draft(self, project_id: str, draft_id: str, *, session) -> None:
         # source_refs 는 draft_id 필드가 없다(_source_ref_doc) — snapshot_id 경유로
         # 지운다. snapshot 을 먼저 읽고 같은 스코프로 지우는 순서라 트랜잭션 밖에서도

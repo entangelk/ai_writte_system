@@ -3,11 +3,11 @@
 오너 결정 2026-08-09, 브리프 ``09-0-service-activity-log-decisions.md``.
 이 모듈은 **분류만** 한다 — 문서 형태는 ``log.py``, 쓰기는 각 endpoint 다.
 
-- **A2=B — 기준은 "사용자가 무엇을 *바꿨는가*"다.** 정본 변경 **11**(오너 2026-08-09
+- **A2=B — 기준은 "사용자가 무엇을 *바꿨는가*"다.** Chapter 계층 경로를 포함한 정본 변경
   가 `writing/accept` 를 더했다 — 아래 그 행의 주석) + 검토 결정 9 = **20 경로**가
-  ``logged`` 다. 승격·거절은 원고를 바꾸지 않지만 **기억을 바꾸고**,
+  + 검토 결정 경로가 ``logged`` 다. 승격·거절은 원고를 바꾸지 않지만 **기억을 바꾸고**,
   memory 가 append-only 라 이 제품에서 되돌리기가 가장 어려운 종류다.
-- **★ 표는 mutating operation 41 *전수* 다.** 오너가 B 를 고른 것은 범위 판단이지
+- **★ 표는 mutating operation *전수* 다.** 오너가 B 를 고른 것은 범위 판단이지
   C(AI 요청까지)의 각하가 아니므로, **C 로 넓히는 일이 "행 값 하나 바꾸기"여야
   한다**는 것이 A2 확정 조건이다. 그래서 기록하지 않는 21 경로도 **사유와 함께**
   여기 등재된다 — 빠진 것과 일부러 뺀 것이 구분돼야 한다.
@@ -58,7 +58,7 @@ class ExcludedOperation:
     note: str = ""
 
 
-#: 정본 변경 11. "제품이 답할 수 있어야 하는 것"(부모 계획 §2)의 뼈대다.
+#: 정본 변경. "제품이 답할 수 있어야 하는 것"(부모 계획 §2)의 뼈대다.
 _CANONICAL: tuple[ActivityAction, ...] = (
     ActivityAction("project_created", "POST", "/projects", "project"),
     # 개명은 덮어쓰기라 지금까지 **흔적이 전혀 없었다**(부모 계획 §1). before/after 가
@@ -67,6 +67,19 @@ _CANONICAL: tuple[ActivityAction, ...] = (
     ActivityAction("project_archived", "DELETE", "/projects/{project_id}", "project"),
     ActivityAction("project_brief_saved", "PUT",
                    "/projects/{project_id}/brief", "project_brief"),
+    ActivityAction("chapter_created", "POST",
+                   "/projects/{project_id}/chapters", "chapter"),
+    ActivityAction("chapter_archived", "POST",
+                   "/projects/{project_id}/chapters/{chapter_id}/archive",
+                   "chapter"),
+    ActivityAction("chapter_purged", "POST",
+                   "/projects/{project_id}/chapters/{chapter_id}/purge",
+                   "chapter"),
+    ActivityAction("chapter_order_changed", "PUT",
+                   "/projects/{project_id}/chapter-order", "project"),
+    ActivityAction("scene_order_changed", "PUT",
+                   "/projects/{project_id}/chapters/{chapter_id}/scene-order",
+                   "chapter"),
     ActivityAction("draft_created", "POST",
                    "/projects/{project_id}/drafts", "draft"),
     ActivityAction("draft_renamed", "PATCH",
@@ -132,7 +145,7 @@ _REVIEW: tuple[ActivityAction, ...] = (
                    "gate_finding"),
 )
 
-#: 기록하는 20.
+#: 기록하는 경로 전수.
 ACTIVITY_ACTIONS: tuple[ActivityAction, ...] = _CANONICAL + _REVIEW
 
 #: 기록하지 않는 21 — **사유와 함께**. 이 목록이 있어야 "빠진 것"과 "일부러 뺀 것"이

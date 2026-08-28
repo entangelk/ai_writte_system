@@ -484,6 +484,32 @@ class DraftPayload(BaseModel):
     position: int = Field(ge=1)
 
 
+class ScenePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    project_id: str
+    chapter_id: str
+    title: str
+    archived: bool
+    position: int = Field(ge=1)
+
+
+class ChapterPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    project_id: str
+    title: str
+    archived: bool
+    position: int = Field(ge=1)
+    scenes: list[ScenePayload]
+
+
+class ChapterListResponse(BaseModel):
+    chapters: list[ChapterPayload]
+
+
 class DraftListResponse(BaseModel):
     drafts: list[DraftPayload]
 
@@ -569,6 +595,9 @@ class DraftVersionExportResponse(BaseModel):
 class ProjectExportUnitModel(BaseModel):
     draft_id: str
     title: str
+    chapter_id: str | None
+    chapter_title: str | None
+    chapter_position: int | None
     unit_kind: str | None
     position: int | None
     version_id: str
@@ -664,6 +693,43 @@ class CreateDraftRequest(BaseModel):
 
     title: NonBlankName
     unit_kind: UnitKind = UnitKind.OTHER
+    # SoT v1.8.9 hierarchy input. Optional only during the staged migration;
+    # the hierarchy route rejects absence once Chapters exist.
+    chapter_id: NonBlankName | None = None
+
+
+class CreateChapterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: NonBlankName
+
+
+class ChapterOrderPutRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ordered_chapter_ids: list[NonBlankName] = Field(
+        json_schema_extra={"uniqueItems": True}
+    )
+
+
+class ChapterOrderPutResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    chapters: list[ChapterPayload]
+
+
+class SceneOrderPutRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ordered_draft_ids: list[NonBlankName] = Field(
+        json_schema_extra={"uniqueItems": True}
+    )
+
+
+class SceneOrderPutResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scenes: list[ScenePayload]
 
 
 class DraftOrderPutRequest(BaseModel):

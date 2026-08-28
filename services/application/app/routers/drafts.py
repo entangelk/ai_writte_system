@@ -30,6 +30,11 @@ from services.application.app.writing.generation_job import (
 )
 
 from ..api.models import (
+    ChapterListResponse,
+    ChapterOrderPutRequest,
+    ChapterOrderPutResponse,
+    ChapterPayload,
+    CreateChapterRequest,
     CreateDraftRequest,
     DraftListResponse,
     DraftOrderPutRequest,
@@ -41,6 +46,9 @@ from ..api.models import (
     RenameDraftRequest,
     SaveDraftRequest,
     SaveDraftResponse,
+    SceneOrderPutRequest,
+    SceneOrderPutResponse,
+    ScenePayload,
 )
 from ..api.errors import (
     _ERRORS_400_404,
@@ -82,6 +90,228 @@ def register_drafts(
             "version_number": version.version_number,
             "snapshot_id": version.snapshot_id,
         }
+
+    def _scene_payload(draft) -> dict[str, object]:
+        assert draft.chapter_id is not None
+        assert draft.position is not None
+        return {
+            "id": draft.id,
+            "project_id": draft.project_id,
+            "chapter_id": draft.chapter_id,
+            "title": draft.title,
+            "archived": draft.archived,
+            "position": draft.position,
+        }
+
+    def _chapter_payload(chapter) -> dict[str, object]:
+        scenes = core_sot.list_scenes(
+            project_id=chapter.project_id, chapter_id=chapter.id
+        )
+        return {
+            "id": chapter.id,
+            "project_id": chapter.project_id,
+            "title": chapter.title,
+            "archived": chapter.archived,
+            "position": chapter.position,
+            "scenes": [_scene_payload(scene) for scene in scenes],
+        }
+
+    @app.get(
+        "/projects/{project_id}/chapters",
+        response_model=ChapterListResponse,
+        responses=_owned(_ERRORS_404_MIGRATION),
+        dependencies=_REQUIRE_PROJECT_OWNER,
+    )
+    async def list_chapters(project_id: str) -> dict[str, object]:
+        try:
+            chapters = core_sot.list_chapters(project_id=project_id)
+            return {"chapters": [_chapter_payload(chapter) for chapter in chapters]}
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except DraftOrderIntegrityError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.post(
+        "/projects/{project_id}/chapters",
+        response_model=ChapterPayload,
+        responses=_owned(_ERRORS_404_409),
+        dependencies=_REQUIRE_PROJECT_OWNER,
+    )
+    async def create_chapter(
+        project_id: str,
+        request: CreateChapterRequest,
+        current=Depends(require_authenticated_user),
+    ) -> dict[str, object]:
+        try:
+            chapter = core_sot.create_chapter(
+                project_id=project_id, title=request.title
+            )
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Archived as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        activity.record(
+            project_id=project_id,
+            actor_user_id=current.id,
+            action="chapter_created",
+            target_type="chapter",
+            target_id=chapter.id,
+            after=chapter.title,
+        )
+        return _chapter_payload(chapter)
+
+    @app.post(
+        "/projects/{project_id}/chapters/{chapter_id}/archive",
+        response_model=ChapterPayload,
+        responses=_owned(_ERRORS_404_409),
+        dependencies=_REQUIRE_PROJECT_OWNER,
+    )
+    async def archive_chapter(
+        project_id: str,
+        chapter_id: str,
+        current=Depends(require_authenticated_user),
+    ) -> dict[str, object]:
+        try:
+            scenes = core_sot.list_scenes(
+                project_id=project_id, chapter_id=chapter_id
+            )
+            chapter = core_sot.archive_chapter(
+                project_id=project_id, chapter_id=chapter_id
+            )
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Archived as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        for scene in scenes:
+            sync_outbox.enqueue_draft_archived(
+                project_id=project_id, draft_id=scene.id
+            )
+        activity.record(
+            project_id=project_id,
+            actor_user_id=current.id,
+            action="chapter_archived",
+            target_type="chapter",
+            target_id=chapter.id,
+            before="active",
+            after="archived",
+        )
+        return _chapter_payload(chapter)
+
+    @app.post(
+        "/projects/{project_id}/chapters/{chapter_id}/purge",
+        status_code=204,
+        response_model=None,
+        responses=_owned(_ERRORS_404_409),
+        dependencies=_REQUIRE_PROJECT_OWNER,
+    )
+    async def purge_chapter(
+        project_id: str,
+        chapter_id: str,
+        current=Depends(require_authenticated_user),
+    ) -> None:
+        try:
+            chapters = core_sot.list_chapters(project_id=project_id)
+            chapter = next(
+                item for item in chapters if item.id == chapter_id
+            )
+            scenes = core_sot.list_scenes(
+                project_id=project_id, chapter_id=chapter_id
+            )
+        except StopIteration as exc:
+            raise HTTPException(status_code=404, detail="chapter not found") from exc
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if not chapter.archived:
+            raise HTTPException(
+                status_code=409, detail="chapter must be archived before purge"
+            )
+        if any(
+            job.status in (
+                WritingGenerationJobStatus.PENDING,
+                WritingGenerationJobStatus.RUNNING,
+            )
+            for scene in scenes
+            for job in writing_generation_jobs.list_for_draft(
+                project_id, scene.id
+            )
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="chapter has a scene with an active generation job; "
+                       "wait or discard it",
+            )
+        for scene in scenes:
+            writing_scratch.clear_draft(project_id, scene.id)
+        core_sot.purge_chapter(project_id=project_id, chapter_id=chapter_id)
+        activity.record(
+            project_id=project_id,
+            actor_user_id=current.id,
+            action="chapter_purged",
+            target_type="chapter",
+            target_id=chapter_id,
+            before="archived",
+            after="purged",
+        )
+
+    @app.put(
+        "/projects/{project_id}/chapter-order",
+        response_model=ChapterOrderPutResponse,
+        responses=_owned(_ERRORS_404_409),
+        dependencies=_REQUIRE_PROJECT_OWNER,
+    )
+    async def put_chapter_order(
+        project_id: str,
+        request: ChapterOrderPutRequest,
+        current=Depends(require_authenticated_user),
+    ) -> dict[str, object]:
+        try:
+            chapters = core_sot.reorder_chapters(
+                project_id=project_id,
+                ordered_chapter_ids=tuple(request.ordered_chapter_ids),
+            )
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (Archived, InvalidDraftOrder) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        activity.record(
+            project_id=project_id,
+            actor_user_id=current.id,
+            action="chapter_order_changed",
+            target_type="project",
+            target_id=project_id,
+        )
+        return {"chapters": [_chapter_payload(chapter) for chapter in chapters]}
+
+    @app.put(
+        "/projects/{project_id}/chapters/{chapter_id}/scene-order",
+        response_model=SceneOrderPutResponse,
+        responses=_owned(_ERRORS_404_409),
+        dependencies=_REQUIRE_PROJECT_OWNER,
+    )
+    async def put_scene_order(
+        project_id: str,
+        chapter_id: str,
+        request: SceneOrderPutRequest,
+        current=Depends(require_authenticated_user),
+    ) -> dict[str, object]:
+        try:
+            scenes = core_sot.reorder_scenes(
+                project_id=project_id,
+                chapter_id=chapter_id,
+                ordered_draft_ids=tuple(request.ordered_draft_ids),
+            )
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (Archived, InvalidDraftOrder) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        activity.record(
+            project_id=project_id,
+            actor_user_id=current.id,
+            action="scene_order_changed",
+            target_type="chapter",
+            target_id=chapter_id,
+        )
+        return {"scenes": [_scene_payload(scene) for scene in scenes]}
 
     @app.patch(
         "/projects/{project_id}/drafts/{draft_id}", response_model=DraftPayload,
@@ -303,7 +533,9 @@ def register_drafts(
             "content_hash": export.content_hash,
         }
 
-    @app.post("/projects/{project_id}/drafts", response_model=DraftPayload,
+    @app.post(
+              "/projects/{project_id}/drafts",
+              response_model=DraftPayload | ScenePayload,
               responses=_owned(_ERRORS_404_409_MIGRATION),
               dependencies=_REQUIRE_PROJECT_OWNER)
     async def create_draft(
@@ -311,11 +543,18 @@ def register_drafts(
         current=Depends(require_authenticated_user),
     ) -> dict[str, object]:
         try:
-            draft = core_sot.create_draft(
-                project_id=project_id,
-                title=request.title,
-                unit_kind=request.unit_kind,
-            )
+            if request.chapter_id is not None:
+                draft = core_sot.create_scene(
+                    project_id=project_id,
+                    chapter_id=request.chapter_id,
+                    title=request.title,
+                )
+            else:
+                draft = core_sot.create_draft(
+                    project_id=project_id,
+                    title=request.title,
+                    unit_kind=request.unit_kind,
+                )
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except DraftOrderIntegrityError as exc:
@@ -329,7 +568,11 @@ def register_drafts(
             action="draft_created", target_type="draft", target_id=draft.id,
             after=draft.title,
         )
-        return _draft_payload(draft)
+        return (
+            _scene_payload(draft)
+            if draft.chapter_id is not None
+            else _draft_payload(draft)
+        )
 
     @app.put(
         "/projects/{project_id}/draft-order",

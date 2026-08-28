@@ -285,6 +285,18 @@ class InMemoryCoreSotRepository:
             if receipt.draft_id != draft_id
         }
 
+    def purge_chapter(self, project_id: str, chapter_id: str) -> None:
+        chapter = self.chapters.get(chapter_id)
+        if chapter is None or chapter.project_id != project_id:
+            return
+        child_ids = [
+            draft.id for draft in self.drafts.values()
+            if draft.project_id == project_id and draft.chapter_id == chapter_id
+        ]
+        for draft_id in child_ids:
+            self.purge_draft(project_id, draft_id)
+        self.chapters.pop(chapter_id, None)
+
     def get_current_project_brief(
         self, project_id: str
     ) -> ProjectBriefVersion | None:
@@ -890,12 +902,76 @@ class CoreSotService:
             raise UnsupportedExportFormat(f"unsupported export format: {fmt!r}")
         # Read-only: archived projects still export (SoT archive read-allowed).
         self._require_project(project_id)
+        chapters = self._repo.list_chapters(project_id)
         drafts = self._repo.list_drafts(project_id)
-        self._require_ordered_drafts(drafts)
         content_type, extension = _EXPORT_FORMATS[fmt]
 
         units: list[ProjectExportUnit] = []
         blocks: list[str] = []
+        if chapters:
+            self._require_ordered_chapters(chapters)
+            chapter_ids = {chapter.id for chapter in chapters}
+            if any(
+                draft.chapter_id not in chapter_ids or draft.unit_kind is not None
+                for draft in drafts
+            ):
+                raise DraftOrderIntegrityError(
+                    "scene hierarchy migration is required"
+                )
+            for chapter in chapters:
+                scenes = tuple(
+                    draft for draft in drafts if draft.chapter_id == chapter.id
+                )
+                self._require_ordered_scenes(scenes, chapter_id=chapter.id)
+                if chapter.archived and not include_archived:
+                    continue
+                scene_blocks: list[str] = []
+                for scene in scenes:
+                    if scene.archived and not include_archived:
+                        continue
+                    versions = self._repo.list_versions(scene.id)
+                    if not versions:
+                        continue
+                    latest = max(
+                        versions, key=lambda version: version.version_number
+                    )
+                    snapshot = self._repo.get_snapshot(latest.snapshot_id)
+                    assert snapshot is not None
+                    units.append(ProjectExportUnit(
+                        draft_id=scene.id,
+                        title=scene.title,
+                        chapter_id=chapter.id,
+                        chapter_title=chapter.title,
+                        chapter_position=chapter.position,
+                        unit_kind=None,
+                        position=scene.position,
+                        version_id=latest.id,
+                        version_number=latest.version_number,
+                        snapshot_id=snapshot.id,
+                        content_hash=snapshot.content_hash,
+                    ))
+                    heading = (
+                        f"## {scene.title}" if fmt == "markdown" else scene.title
+                    )
+                    scene_blocks.append(f"{heading}\n\n{snapshot.raw_text}")
+                if scene_blocks:
+                    chapter_heading = (
+                        f"# {chapter.title}" if fmt == "markdown" else chapter.title
+                    )
+                    blocks.append(
+                        f"{chapter_heading}\n\n" + "\n\n".join(scene_blocks)
+                    )
+            return ProjectExport(
+                format=fmt,
+                filename=f"{project_id}.{extension}",
+                content_type=content_type,
+                body="\n\n".join(blocks),
+                project_id=project_id,
+                include_archived=include_archived,
+                units=tuple(units),
+            )
+
+        self._require_ordered_drafts(drafts)
         for draft in drafts:
             if draft.archived and not include_archived:
                 continue
@@ -911,6 +987,9 @@ class CoreSotService:
                 ProjectExportUnit(
                     draft_id=draft.id,
                     title=draft.title,
+                    chapter_id=None,
+                    chapter_title=None,
+                    chapter_position=None,
                     unit_kind=draft.unit_kind,
                     position=draft.position,
                     version_id=latest.id,
@@ -1030,12 +1109,22 @@ class CoreSotService:
         """
         if not idempotency_key:
             raise CoreSotError("idempotency_key is required")
-        if not isinstance(unit_kind, UnitKind):
-            raise InvalidDraftOrder("draft unit_kind is invalid")
         self._require_active_project_and_draft(project_id, current_draft_id)
-        drafts = self._repo.list_drafts(project_id)
-        self._require_ordered_drafts(drafts)
-        current = next(d for d in drafts if d.id == current_draft_id)
+        current = self._require_draft(project_id, current_draft_id)
+        if current.chapter_id is not None:
+            drafts = self.list_scenes(
+                project_id=project_id, chapter_id=current.chapter_id
+            )
+            new_chapter_id = current.chapter_id
+            new_unit_kind = None
+        else:
+            # Pre-v1.8.9 compatibility until the explicit migration has run.
+            if not isinstance(unit_kind, UnitKind):
+                raise InvalidDraftOrder("draft unit_kind is invalid")
+            drafts = self._repo.list_drafts(project_id)
+            self._require_ordered_drafts(drafts)
+            new_chapter_id = None
+            new_unit_kind = unit_kind
         current_position = current.position
         shifted = tuple(
             replace(draft, position=draft.position + 1)
@@ -1046,7 +1135,8 @@ class CoreSotService:
             id=self._repo.next_draft_id(),
             project_id=project_id,
             title=title,
-            unit_kind=unit_kind,
+            chapter_id=new_chapter_id,
+            unit_kind=new_unit_kind,
             position=current_position + 1,
         )
         version_id = self._repo.next_version_id()
@@ -1171,6 +1261,22 @@ class CoreSotService:
         self._require_project(project_id)
         self._require_draft(project_id, draft_id)
         self._repo.purge_draft(project_id, draft_id)
+
+    def archive_chapter(
+        self, *, project_id: str, chapter_id: str
+    ) -> Chapter:
+        project = self._require_project(project_id)
+        if project.archived:
+            raise Archived("project is archived")
+        chapter = self._require_chapter(project_id, chapter_id)
+        archived = replace(chapter, archived=True)
+        self._repo.put_chapter(archived)
+        return archived
+
+    def purge_chapter(self, *, project_id: str, chapter_id: str) -> None:
+        self._require_project(project_id)
+        self._require_chapter(project_id, chapter_id)
+        self._repo.purge_chapter(project_id, chapter_id)
 
     def _save_result(self, version_id: str, *, idempotent_replay: bool) -> SaveDraftResult:
         version = self._repo.get_version(version_id)
