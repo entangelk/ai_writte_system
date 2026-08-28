@@ -634,6 +634,52 @@ class _MongoContractMixin:
         with self.assertRaises(NotFound):
             self.service.purge_project(project_id="does-not-exist")
 
+    def test_purge_draft_removes_only_that_draft_graph(self):
+        # 원고 하드 삭제(2026-08-28) — mongo, transaction/fallback 양쪽. sibling draft
+        # 와 project 를 대조군으로 둔다(under: 잔류 / over: 과삭제, 양방향).
+        project, victim = self._project_and_draft()
+        saved = self.service.save_draft(
+            project_id=project.id,
+            draft_id=victim.id,
+            raw_text="# Chapter 1\n\nOpening.\n\n---\n\nNext scene.",
+            idempotency_key="save-victim",
+        )
+        source_ref = self.service.create_source_ref(
+            project_id=project.id,
+            snapshot_id=saved.snapshot.id,
+            start_offset=0,
+            end_offset=len("Chapter"),
+        )
+        sibling = self.service.create_draft(
+            project_id=project.id, title="남을 원고",
+        )
+        sibling_saved = self.service.save_draft(
+            project_id=project.id,
+            draft_id=sibling.id,
+            raw_text="# Sibling\n\nText.",
+            idempotency_key="save-sibling",
+        )
+
+        self.service.purge_draft(project_id=project.id, draft_id=victim.id)
+
+        # victim 그래프 전부 제거(under-strict).
+        self.assertEqual(
+            self.repo.get_draft(victim.id), None,
+            "victim 원고가 잔류한다",
+        )
+        self.assertIsNone(self.repo.get_version(saved.draft_version.id))
+        self.assertIsNone(self.repo.get_snapshot(saved.snapshot.id))
+        self.assertEqual(self.repo.get_blocks(saved.snapshot.id), ())
+        self.assertIsNone(self.repo.get_source_ref(source_ref.id))
+        # sibling·project 무사(over-strict — 인접까지 지우면 실패).
+        self.assertIsNotNone(self.repo.get_draft(sibling.id))
+        self.assertIsNotNone(self.repo.get_version(sibling_saved.draft_version.id))
+        self.assertEqual(
+            [d.id for d in self.repo.list_drafts(project_id=project.id)],
+            [sibling.id],
+        )
+        self.assertIsNotNone(self.repo.get_project(project.id))
+
     def test_source_ref_get_enforces_project_isolation(self):
         project_a = self.service.create_project(name="A")
         project_b = self.service.create_project(name="B")
