@@ -74,7 +74,7 @@ describe("App routes", () => {
     const fetchMock = mockFetch(
       { body: { id: "u1", username: "alice", is_admin: false } },
       { body: { id: "p1", name: "겨울 이야기", archived: false } },
-      { body: { drafts: [] } },
+      { body: { chapters: [] } },
     );
 
     render(
@@ -89,7 +89,7 @@ describe("App routes", () => {
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       "/api/auth/me",
       "/api/projects/p1",
-      "/api/projects/p1/drafts",
+      "/api/projects/p1/chapters",
     ]);
   });
 
@@ -164,7 +164,7 @@ describe("App routes", () => {
         },
       },
       { body: { id: "p1", name: "겨울 이야기", archived: false } },
-      { body: { drafts: [] } },
+      { body: { chapters: [] } },
     );
 
     render(
@@ -187,7 +187,7 @@ describe("App routes", () => {
       "/api/auth/me",
       "/api/auth/login",
       "/api/projects/p1",
-      "/api/projects/p1/drafts",
+      "/api/projects/p1/chapters",
     ]);
     expect(fetchMock.mock.calls[1][1]).toMatchObject({
       method: "POST",
@@ -237,7 +237,7 @@ describe("App routes", () => {
       { status: 401, body: { detail: "not authenticated" } },
       { body: { user: { id: "a1", username: "root", is_admin: true } } },
       { body: { id: "p1", name: "겨울 이야기", archived: false } },
-      { body: { drafts: [] } },
+      { body: { chapters: [] } },
     );
 
     render(

@@ -46,6 +46,9 @@ from services.application.app.core_sot.models import (
     UnitKind,
     WritingAcceptReceipt,
 )
+from services.application.app.core_sot.chapter_scene_migration import (
+    ChapterSceneHierarchyMigration,
+)
 from services.application.app.core_sot.ordered_unit_migration import (
     OrderedUnitMigrationService,
 )
@@ -148,6 +151,63 @@ class _MongoContractMixin:
         project = self.service.create_project(name="Novel")
         draft = self.service.create_draft(project_id=project.id, title="Episode 1")
         return project, draft
+
+    def test_chapter_scene_migration_preserves_graph_and_is_a_noop_on_rerun(self):
+        project, legacy = self._project_and_draft()
+        raw_text = "Mongo 원문\r\n\r\nbyte 보존.  \n"
+        saved = self.service.save_draft(
+            project_id=project.id, draft_id=legacy.id,
+            raw_text=raw_text, idempotency_key="legacy-save",
+        )
+
+        first = ChapterSceneHierarchyMigration(self.repo).run()
+        second = ChapterSceneHierarchyMigration(self.repo).run()
+
+        self.assertEqual(first.migrated_projects, 1)
+        self.assertEqual(second.unchanged_projects, 1)
+        chapters = self.repo.list_chapters(project.id)
+        self.assertEqual(len(chapters), 1)
+        migrated = self.repo.get_draft(legacy.id)
+        self.assertEqual(migrated.chapter_id, chapters[0].id)
+        self.assertIsNone(migrated.unit_kind)
+        self.assertEqual(
+            self.repo.get_snapshot(saved.snapshot.id).raw_text, raw_text
+        )
+        self.assertEqual(
+            self.repo.list_versions(legacy.id), (saved.draft_version,)
+        )
+        self.assertEqual(
+            self.repo.get_blocks(saved.snapshot.id), saved.blocks
+        )
+
+    def test_chapter_purge_keeps_sibling_chapter_and_scene(self):
+        project = self.service.create_project(name="Hierarchy")
+        victim_chapter = self.service.create_chapter(
+            project_id=project.id, title="지울 장"
+        )
+        sibling_chapter = self.service.create_chapter(
+            project_id=project.id, title="남을 장"
+        )
+        victim = self.service.create_scene(
+            project_id=project.id, chapter_id=victim_chapter.id, title="지울 장면"
+        )
+        sibling = self.service.create_scene(
+            project_id=project.id, chapter_id=sibling_chapter.id, title="남을 장면"
+        )
+        saved = self.service.save_draft(
+            project_id=project.id, draft_id=victim.id,
+            raw_text="지울 본문", idempotency_key="victim-save",
+        )
+
+        self.service.purge_chapter(
+            project_id=project.id, chapter_id=victim_chapter.id
+        )
+
+        self.assertIsNone(self.repo.get_chapter(victim_chapter.id))
+        self.assertIsNone(self.repo.get_draft(victim.id))
+        self.assertIsNone(self.repo.get_snapshot(saved.snapshot.id))
+        self.assertEqual(self.repo.get_chapter(sibling_chapter.id), sibling_chapter)
+        self.assertEqual(self.repo.get_draft(sibling.id), sibling)
 
     def test_project_brief_versions_persist_in_order_and_replay(self):
         project = self.service.create_project(name="Novel")

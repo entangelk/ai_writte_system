@@ -25,7 +25,12 @@ from services.application.app.core_sot.models import (
 from services.application.app.core_sot.repository import (
     DuplicateWritingAcceptReceipt,
 )
-from services.application.app.core_sot.service import Archived, CoreSotService, NotFound
+from services.application.app.core_sot.service import (
+    Archived,
+    CoreSotService,
+    DraftOrderIntegrityError,
+    NotFound,
+)
 from services.application.app.env import draft_raw_text_max_chars
 from services.application.app.writing.context_pointer import pointer_wire
 from services.application.app.writing.gate import WritingGateService
@@ -104,15 +109,27 @@ class WritingAcceptService:
         self._enforce_raw_text_limit(
             request=request, draft_id=draft_id,
             base_version_id=base_version_id, candidate_text=candidate.text)
+        draft = self._core_sot.get_draft(
+            project_id=request.project_id, draft_id=draft_id)
+        chapters = self._core_sot.list_chapters(project_id=request.project_id)
+        chapter = next(
+            (item for item in chapters if item.id == draft.chapter_id), None
+        )
+        if (
+            chapter is None
+            or draft.position is None
+            or draft.unit_kind is not None
+        ):
+            raise DraftOrderIntegrityError(
+                "scene hierarchy migration is required"
+            )
+        project = self._core_sot.get_project(project_id=request.project_id)
+        if project.archived or chapter.archived or draft.archived:
+            raise Archived("project, chapter, or draft is archived")
         if self._reporter is not None:
             candidate = await self._reporter.enrich(candidate, package)
         save_key = f"writing-accept:{idempotency_key}"
         intent = request.intent
-        draft = self._core_sot.get_draft(
-            project_id=request.project_id, draft_id=draft_id)
-        project = self._core_sot.get_project(project_id=request.project_id)
-        if project.archived or draft.archived:
-            raise Archived("project or draft is archived")
 
         # Replay lookup precedes stale-base and Gate (§3.3, WI-19).
         replay = self._replay(request.project_id, draft_id, save_key, intent)

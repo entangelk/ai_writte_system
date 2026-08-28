@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from dataclasses import replace
 
 from fastapi import FastAPI, HTTPException
 
@@ -29,6 +30,7 @@ from services.application.app.activity.log import (
 from services.application.app.api.models import (
     CreateChapterRequest,
     CreateDraftRequest,
+    RenameDraftRequest,
     SceneOrderPutRequest,
 )
 from services.application.app.routers.drafts import register_drafts
@@ -218,11 +220,18 @@ class ChapterHierarchyContractTest(unittest.TestCase):
         complete = self.service.export_project(
             project_id=self.project.id, fmt="markdown", include_archived=True
         )
+        text = self.service.export_project(
+            project_id=self.project.id, fmt="txt", include_archived=True
+        )
 
         self.assertEqual(visible.body, "# 1장\n\n## 첫 장면\n\n첫 본문")
         self.assertEqual(
             complete.body,
             "# 1장\n\n## 첫 장면\n\n첫 본문\n\n# 2장\n\n## 숨은 장면\n\n숨은 본문",
+        )
+        self.assertEqual(
+            text.body,
+            "1장\n\n첫 장면\n\n첫 본문\n\n2장\n\n숨은 장면\n\n숨은 본문",
         )
         self.assertFalse(self.repo.get_draft(hidden.id).archived)
         self.assertEqual(
@@ -260,13 +269,15 @@ class ChapterHierarchyMigrationTest(unittest.TestCase):
         self.project = self.service.create_project(name="legacy")
 
     def _legacy(self, draft_id: str, title: str, kind: UnitKind, position: int):
-        self.repo.put_draft(Draft(
+        draft = Draft(
             id=draft_id,
             project_id=self.project.id,
             title=title,
             unit_kind=kind,
             position=position,
-        ))
+        )
+        self.repo.put_draft(draft)
+        return draft
 
     def test_migration_preserves_draft_ids_and_builds_deterministic_groups(self):
         self._legacy("preface", "서문", UnitKind.OTHER, 1)
@@ -311,6 +322,43 @@ class ChapterHierarchyMigrationTest(unittest.TestCase):
         self.assertEqual(result.unchanged_projects, 1)
         self.assertEqual(self.service.list_scenes(
             project_id=self.project.id, chapter_id=chapter.id), (scene,))
+
+    def test_migration_preserves_versions_snapshots_body_bytes_and_archive(self):
+        legacy = self._legacy("legacy", "1장", UnitKind.CHAPTER, 1)
+        raw_text = "첫 줄\r\n\r\n둘째 줄.  \n"
+        saved = self.service.save_draft(
+            project_id=self.project.id, draft_id=legacy.id,
+            raw_text=raw_text, idempotency_key="legacy-save",
+        )
+        self.repo.put_draft(replace(legacy, archived=True))
+        versions_before = self.repo.list_versions(legacy.id)
+        snapshot_before = self.repo.get_snapshot(saved.snapshot.id)
+        blocks_before = self.repo.get_blocks(saved.snapshot.id)
+
+        ChapterSceneHierarchyMigration(self.repo).run()
+
+        migrated = self.repo.get_draft(legacy.id)
+        self.assertTrue(migrated.archived)
+        self.assertEqual(self.repo.list_versions(legacy.id), versions_before)
+        self.assertEqual(self.repo.get_snapshot(saved.snapshot.id), snapshot_before)
+        self.assertEqual(self.repo.get_snapshot(saved.snapshot.id).raw_text, raw_text)
+        self.assertEqual(self.repo.get_blocks(saved.snapshot.id), blocks_before)
+
+    def test_partial_hierarchy_fails_closed_without_changing_any_row(self):
+        chapter = self.service.create_chapter(
+            project_id=self.project.id, title="이미 생긴 장"
+        )
+        legacy = self._legacy("legacy", "고아 평면 원고", UnitKind.SCENE, 1)
+        before_chapters = self.repo.list_chapters(self.project.id)
+        before_drafts = self.repo.list_drafts(self.project.id)
+
+        with self.assertRaisesRegex(ValueError, "partial or invalid"):
+            ChapterSceneHierarchyMigration(self.repo).run()
+
+        self.assertEqual(self.repo.list_chapters(self.project.id), before_chapters)
+        self.assertEqual(self.repo.list_drafts(self.project.id), before_drafts)
+        self.assertEqual(self.repo.get_chapter(chapter.id), chapter)
+        self.assertEqual(self.repo.get_draft(legacy.id), legacy)
 
 
 class ChapterHierarchyApiTest(unittest.TestCase):
@@ -413,6 +461,33 @@ class ChapterHierarchyApiTest(unittest.TestCase):
                 "chapter_id": "chapter-1",
                 "unit_kind": "other",
             })
+
+    def test_legacy_scene_crud_fails_closed_with_503_before_any_write(self):
+        legacy = Draft(
+            id="legacy-scene", project_id=self.project.id, title="평면 원고",
+            unit_kind=UnitKind.SCENE, position=1,
+        )
+        self.repo.put_draft(legacy)
+
+        calls = (
+            (self._endpoint("/projects/{project_id}/drafts", "GET"),
+             (self.project.id,)),
+            (self._endpoint("/projects/{project_id}/drafts/{draft_id}", "GET"),
+             (self.project.id, legacy.id)),
+            (self._endpoint("/projects/{project_id}/drafts/{draft_id}", "PATCH"),
+             (self.project.id, legacy.id, RenameDraftRequest(title="바뀌면 안 됨"), TEST_USER)),
+            (self._endpoint("/projects/{project_id}/drafts/{draft_id}", "DELETE"),
+             (self.project.id, legacy.id, TEST_USER)),
+        )
+        for endpoint, arguments in calls:
+            with self.subTest(endpoint=endpoint.__name__):
+                with self.assertRaises(HTTPException) as raised:
+                    asyncio.run(endpoint(*arguments))
+                self.assertEqual(raised.exception.status_code, 503)
+
+        unchanged = self.repo.get_draft(legacy.id)
+        self.assertEqual(unchanged.title, "평면 원고")
+        self.assertFalse(unchanged.archived)
 
     def test_chapter_purge_active_job_guard_writes_nothing(self):
         chapter = self.service.create_chapter(

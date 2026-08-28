@@ -220,7 +220,12 @@ def seed_saturating_project(core_sot: Any, *, name: str, target_chars: int
     여기서 필요한 것은 정본 저장뿐이라 인증 경계를 우회하는 것이 아니라 **지나지 않는다**.
     """
     project = core_sot.create_project(name=name)
-    draft = core_sot.create_draft(project_id=project.id, title="예산 포화 측정용 장면")
+    chapter = core_sot.create_chapter(project_id=project.id, title="예산 측정")
+    draft = core_sot.create_scene(
+        project_id=project.id,
+        chapter_id=chapter.id,
+        title="예산 포화 측정용 장면",
+    )
     saved = core_sot.save_draft(
         project_id=project.id,
         draft_id=draft.id,

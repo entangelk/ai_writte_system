@@ -7446,7 +7446,7 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            /** @description Stored draft metadata predates the ordered-unit invariant (or is corrupt). Run scripts/migrate_ordered_units.py; retrying the request alone cannot succeed. The canonical store may also be unreachable or failing; in that case recover it and retry the same request unchanged. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -7514,7 +7514,7 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            /** @description Stored draft metadata predates the ordered-unit invariant (or is corrupt). Run scripts/migrate_ordered_units.py; retrying the request alone cannot succeed. The canonical store may also be unreachable or failing; in that case recover it and retry the same request unchanged. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -7595,7 +7595,7 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            /** @description Stored draft metadata predates the ordered-unit invariant (or is corrupt). Run scripts/migrate_ordered_units.py; retrying the request alone cannot succeed. The canonical store may also be unreachable or failing; in that case recover it and retry the same request unchanged. */
             503: {
                 headers: {
                     [name: string]: unknown;

@@ -747,8 +747,11 @@ class CoreSotService:
                     scenes, key=lambda draft: draft.position
                 ))
             return tuple(flattened)
-        self._require_ordered_drafts(drafts)
-        return drafts
+        if drafts:
+            raise DraftOrderIntegrityError(
+                "scene hierarchy migration is required"
+            )
+        return ()
 
     def list_chapters(self, *, project_id: str) -> tuple[Chapter, ...]:
         self._require_project(project_id)

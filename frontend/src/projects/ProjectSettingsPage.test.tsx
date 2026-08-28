@@ -9,6 +9,8 @@ function stubFetch() {
   const fetchMock = vi.fn(async (url: string) => {
     const body = url.endsWith("/p1")
       ? { id: "p1", name: "겨울 이야기", archived: false }
+      : url.includes("/chapters")
+        ? { chapters: [] }
       : url.includes("/brief")
         ? { brief: null }
         : url.includes("/memory")

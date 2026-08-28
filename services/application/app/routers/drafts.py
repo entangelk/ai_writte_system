@@ -66,9 +66,27 @@ from ..api.dependencies import (
 def register_drafts(
     app, *, core_sot, sync_outbox, activity, writing_generation_jobs, writing_scratch,
 ) -> None:
+    def _require_migrated_scene(draft) -> None:
+        try:
+            chapter_ids = {
+                chapter.id for chapter in core_sot.list_chapters(
+                    project_id=draft.project_id
+                )
+            }
+        except DraftOrderIntegrityError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        if (
+            draft.chapter_id not in chapter_ids
+            or draft.position is None
+            or draft.unit_kind is not None
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail="scene hierarchy migration is required",
+            )
+
     def _draft_payload(draft) -> dict[str, object]:
-        assert draft.chapter_id is not None
-        assert draft.position is not None
+        _require_migrated_scene(draft)
         return {
             "id": draft.id,
             "project_id": draft.project_id,
@@ -318,7 +336,7 @@ def register_drafts(
 
     @app.patch(
         "/projects/{project_id}/drafts/{draft_id}", response_model=DraftPayload,
-        responses=_owned(_ERRORS_404_409),
+        responses=_owned(_ERRORS_404_409_MIGRATION),
         dependencies=_REQUIRE_PROJECT_OWNER,
     )
     async def rename_draft(
@@ -327,9 +345,11 @@ def register_drafts(
     ) -> dict[str, object]:
         # 옛 제목은 바꾸기 전에 읽는다(A3=B).
         try:
-            previous = core_sot.get_draft(
+            previous_draft = core_sot.get_draft(
                 project_id=project_id, draft_id=draft_id
-            ).title
+            )
+            _require_migrated_scene(previous_draft)
+            previous = previous_draft.title
         except NotFound:
             previous = None
         try:
@@ -349,7 +369,7 @@ def register_drafts(
 
     @app.delete(
         "/projects/{project_id}/drafts/{draft_id}", response_model=DraftPayload,
-        responses=_owned(_ERRORS_404),
+        responses=_owned(_ERRORS_404_MIGRATION),
         dependencies=_REQUIRE_PROJECT_OWNER,
     )
     async def archive_draft(
@@ -357,6 +377,9 @@ def register_drafts(
         current=Depends(require_authenticated_user),
     ) -> dict[str, object]:
         try:
+            _require_migrated_scene(core_sot.get_draft(
+                project_id=project_id, draft_id=draft_id
+            ))
             draft = core_sot.archive_draft(project_id=project_id, draft_id=draft_id)
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -438,7 +461,7 @@ def register_drafts(
 
     @app.get(
         "/projects/{project_id}/drafts/{draft_id}", response_model=DraftPayload,
-        responses=_owned(_ERRORS_404),
+        responses=_owned(_ERRORS_404_MIGRATION),
         dependencies=_REQUIRE_PROJECT_OWNER,
     )
     async def get_draft(project_id: str, draft_id: str) -> dict[str, object]:

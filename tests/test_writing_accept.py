@@ -131,7 +131,10 @@ class WritingAcceptServiceTest(unittest.TestCase):
         self.core = CoreSotService(InMemoryCoreSotRepository())
         project = self.core.create_project(name="Novel")
         self.project = project.id
-        self.draft = self.core.create_draft(project_id=project.id, title="Draft")
+        chapter = self.core.create_chapter(project_id=project.id, title="1장")
+        self.draft = self.core.create_scene(
+            project_id=project.id, chapter_id=chapter.id, title="Draft"
+        )
         self.base = self.core.save_draft(project_id=project.id,
             draft_id=self.draft.id, raw_text="기존 문단.", idempotency_key="base")
         self.analysis_repo = InMemoryAnalysisRepository()
@@ -284,7 +287,10 @@ class WritingAcceptApiTest(unittest.TestCase):
                gate_error=None, context_error=None, activity_repo=None):
         core = CoreSotService(InMemoryCoreSotRepository())
         project = core.create_project(name="Novel")
-        draft = core.create_draft(project_id=project.id, title="Draft")
+        chapter = core.create_chapter(project_id=project.id, title="1장")
+        draft = core.create_scene(
+            project_id=project.id, chapter_id=chapter.id, title="Draft"
+        )
         base = core.save_draft(project_id=project.id, draft_id=draft.id,
             raw_text="기존.", idempotency_key="base")
         analysis = analysis or AnalysisService(InMemoryAnalysisRepository())
@@ -1041,7 +1047,7 @@ class StartNextUnitLegacyDataTest(unittest.TestCase):
     becomes observable and must be locked then.
     """
 
-    def _setup(self, *, legacy: bool):
+    def _setup(self, *, legacy: bool, target_legacy: bool = False):
         core = CoreSotService(InMemoryCoreSotRepository())
         project = core.create_project(name="Novel")
         chapter = core.create_chapter(project_id=project.id, title="현재 장")
@@ -1052,6 +1058,10 @@ class StartNextUnitLegacyDataTest(unittest.TestCase):
             project_id=project.id, draft_id=current.id,
             raw_text="현재 본문.", idempotency_key="base",
         )
+        if target_legacy:
+            core._repo.drafts[current.id] = replace(
+                current, chapter_id=None, unit_kind=UnitKind.SCENE,
+            )
         if legacy:
             # A draft stored before the W3 ordered-unit invariant: no unit_kind,
             # no position. Built through the repository because the service
@@ -1116,6 +1126,18 @@ class StartNextUnitLegacyDataTest(unittest.TestCase):
             "candidate_text": "덧붙임.", "intent": "append_current"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["intent"], "append_current")
+        asyncio.run(client.aclose())
+
+    def test_append_current_targeting_legacy_draft_is_503(self):
+        client, project, draft, base = self._setup(
+            legacy=False, target_legacy=True
+        )
+        response = self._accept(client, project, {
+            "request_id": "wr1", "draft_id": draft, "base_version_id": base,
+            "idempotency_key": "acc1", "instruction": "이어서",
+            "candidate_text": "덧붙임.", "intent": "append_current"})
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("migration", response.json()["detail"])
         asyncio.run(client.aclose())
 
     def test_binding_errors_still_map_to_400_not_503(self):
