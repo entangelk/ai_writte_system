@@ -5,8 +5,7 @@
 > 완료 서술은 여기 쓰지 않는다 — `docs/daily_logs/`(상세) · `docs/system-contract-sot.md` 변경이력 · `CHANGELOG.md`(마일스톤) · `docs/verifications/`(독립 검증)에 이미 있다.
 > 편집 규칙은 `CLAUDE.md`·`AGENTS.md`의 "HANDOFF.md" 절에 있다. **길이 상한은 없다** — 대신 **~200줄을 넘으면 자가 검수**하고(그 뒤로는 ~100줄마다) 결과를 아래 한 줄로 남긴다. 길어야 할 이유가 있으면 길어도 된다. 안 보는 것이 문제다.
 >
-> 마지막 분량 기록: **2026-08-28 세션 8 · 722 → 723줄(+1)** — `unit_kind` 미결정 항을 **장→장면 계층 확정·구현 진행**으로 교체하고 다음 순서를 모델/마이그레이션으로 갱신했다. **검수는 하지 않았다** — 723은 마지막 자가 검수 기준선(683)의 다음 트리거 783에 못 미친다.
-> 마지막 분량 기록: **2026-08-28 · 697 → 699줄(+2)** — 다음 순서를 텍스트+화살표 링크 가시성 개선 뒤 메모 기능으로 명시했다. **검수는 하지 않았다** — 699는 마지막 자가 검수 기준선(683)의 다음 트리거 783에 못 미친다.
+> 마지막 분량 기록: **2026-08-28 세션 10 · 723 → 715줄(-8)** — 장→장면 계층의 낡은 “구현 진행/다음은 API” 서술을 실제 완료 상태와 배포 전 검증 항목으로 교체하고, SoT·operation 수·Deferred를 실측값에 맞췄다. 계층 관련 링크와 키워드 재검색에서 좌표 부패 0건. **검수는 하지 않았다** — 715는 마지막 자가 검수 기준선(683)의 다음 트리거 783에 못 미친다.
 > 마지막 분량 기록: **2026-08-27 세션 2 · 648 → 683줄(+35, 순증 35·삭제 2 — 2회 편집: 세션 2 기록 +25, 오너 지적 정정 +10)** — 세션 2 마감 메모 신규(D7 폐쇄·D5 실측·프로브 정리) · "Owner Decisions Needed" ⓪ 실측·범위 갈림으로 재작성 · 세션 1 메모 기존 실패 줄 해소 주석. 2회차는 **오너 지적("이어쓰기가 본문을 참고할 텐데?")으로 "본문 미탑재" 주장을 정정**한 것 — ⓪ 재작성·세션 2 메모 교체·세션 1 메모 정정 주석. **자가 검수 했다(683 > 트리거 675)**: 이 세션의 새 인용 좌표 7곳 전수 실측 대조(`WritingPanel.tsx:341`·`api/models.py:43`·`service.py:1085/1167/1189`·`accept.py:150`·`extractor.py:73`) — **좌표 부패 0건**, 지운 것 없음(이번 증분은 전부 살아 있는 판단·결정 대기 항목이다).
 > 마지막 자가 검수: **2026-08-26 · 547 → 575줄(+28, 순증 28·삭제 1)** — 세션 3 마감 메모 신규(드로어·패드 항목별 채택/버리기·76rem·유예 트리거·오너 확인거리) · 08-26 스타일 부채 항에 핵심 결함 폐쇄 주석(부채 나머지 축은 유지) · 검수줄 교체. 본문 그 외 무변. 다음 검수 기준선은 이 줄의 575. 그 아래는 세션 1·2 검수 기록: **526 → 547줄(+21)** — 세션 1 마감 메모 신규(+17: 애드센스 로더·가드·SRI 사유·유예 트리거)·검수 줄 자체 +1 · 세션 2 분량(+3: ads.txt 반영 완료·유예 ① 해소 교체, 자동/수동은 승인 후로 트리거 이동) · 08-25 메모의 낡은 op 표기 4곳 갱신(줄 수 무변 — 시점 명시·계약 지시자로 교체, 실측 87 대조). 본문 그 외 무변.
 > 마지막 자가 검수: **2026-08-25 · 508 → 526줄(+18)** — 세션 1 마감 메모 신규(+18: public 전환·설명문 신설·낡은 op 수 발견), 본문 무변. 그 아래는 08-24 검수 기록: **493 → 508줄(+15)** — 세션 2 폐쇄 메모 신규(+12: 검증 합격·H1/H2 폐쇄·운영 관찰)·세션 1 메모 미검증 줄에 해소 주석 1행·5-d 행은 무변. 아래는 같은 날 세션 1 검수 기록: **471 → 493줄(+22)** — ① 5-d 행에 "회원 사용량 한도(8.5)" 갱신(줄 수 무변) ② Next Tasks 상단에 08-24 마감 메모 신규(+21 — 완료 서술이 아니라 다음 착수점·미검증 범위·관리자 화면 함정 둘이 중심) ③ 회귀 기준선은 그 메모 안에 실측 반영. **★ 정직 기록: 처음 헤더에 454 → 462로 적었는데 그 기준은 08-23 검수 줄의 자기 보고값을 믿은 것 — 실측은 `git show HEAD:HANDOFF.md | wc -l` = 471이었고 마감 검수에서 바로잡았다. 숫자 주장은 실측 대상이다.** 그 아래는 08-23 검수 기록: **452 → 454줄(+2)** — 세션 7의 B1 항목을 결정 대기 서술(4행)에서 해소 1행으로 압축 교체했는데 기준선 줄의 중첩된 예고 문구(검증자 예고와 세션 7 예고가 같은 줄에 쌓임)를 실측값 하나로 정리하며 순증 +2 — 완료 서술 아님. 세션 6은 기존 문장 교체만. 세션 4가 함정 절에 **`LLAMA_DEFAULT_MODEL` 함정 한 항을 새로 썼다**(+2는 이 이유이며, 다음 사람이 오늘 밟을 실제 함정이라 삭제 대상이 아니다). 세션 2·3 갱신은 기존 문장 교체만. 그 아래는 같은 날 세션 1 검수 기록: **451 → 450줄(순증 없음)** — 갱신 2곳뿐(오너 결정 대기 ① 해소 처리 · 08-21 관측의 시드 문장을 현재 상태로 재작성). 그 아래는 08-21 검수 기록: **466 → 430줄**(H2 폐쇄분 + 오늘 마감 메모를 얹고도 **순증 없음** — 08-20 메모를 압축 교체하고, 이 헤더에 쌓여 있던 검수 서사 두 문단을 이 한 줄로 줄였다). **★ 규칙 셋만 남긴다.** ① **검수의 산출은 "무엇을 줄였나" 가 아니라 순 결과다**(08-16 검수가 세 벌을 압축해 놓고 같은 손으로 더 얹어 순증이 됐고, 줄 수를 세어 보고서야 알았다). ② **검수의 마지막 단계는 이 줄을 고치는 것이다**(08-16 검수는 결과를 work_log 에만 적어 헤더가 이틀 동안 *"마지막 검수 = 08-14"* 라는 거짓을 말했다). ③ **지우기 전 키워드의 저장소 생존을 grep 으로 확인한다.** **오늘 연 것 = 08-14 이후 아무도 안 보던 세 절**(`함정` · `Active Decisions` · `완료 슬라이스`). **인용 좌표·파일 12종을 실측 대조했고 전부 살아 있었다**(`billable_actions.py` · `target_project_id` · `ScratchRecovery.tsx:83` · `describeWritingError` · `sessions_mongo._aware` · `ulimits.nofile` · `item_render.py` · SoT `v1.7.96` 등) — **좌표 부패는 0건**이었다. **지운 것 하나**: 프론트 플레이크 항목(`DraftEditor.test.tsx`)이 자기 트리거(*"다음에 또 재현 안 되면 지운다"*)를 충족했다 — **백엔드 전수와 동시 실행(= 그 항목이 적어 둔 과부하 조건)에서 프론트 전수 27파일·323셀 green**(2026-08-21 실측). 관측 상세는 [`verifications/2026-07-31/k4_front_counter_budget.md`](docs/verifications/2026-07-31/k4_front_counter_budget.md) 에 남아 있다.
@@ -31,8 +30,8 @@
 
 ## 지금 상태
 
-- 정본은 `docs/system-contract-sot.md` **v1.8.7**(Approved). 미확정 항목은 추측 구현하지 않는다.
-- **★ 배포되는 앱이 이제 둘이다(Slice 2, 2026-08-09). 앱을 만지는 사람이 가장 먼저 알아야 한다.** `/admin` 8 operation 은 **`admin` compose 서비스**(application 이미지 재사용·command 만 다름·**포트 미게시**)가 서빙하고, 도달 경로는 nginx `location /api/admin/` 하나다. 제품 앱에는 그 route 가 **없으므로** LAN 에서 치면 가드가 아니라 **라우터가 404** 다(`require_admin_user` 는 두 번째 겹으로 남는다). **알아야 하는 것 다섯**: ① **`create_app()` 은 사라지지 않았고 여전히 91 operation 합집합**이다(2026-08-28 삭제 슬라이스 +3 — 원고 purge·소유자 purge·관리자 아카이브) — 테스트·경계 행렬·`scripts/dump_openapi.py`(= 프론트 `schema.d.ts`)가 전부 그것을 쓴다. 브라우저는 nginx 뒤에서 한 origin 만 보므로 **계약은 하나여야 한다**. ② **세 factory(`create_app`·`create_product_app`·`create_admin_app`)는 한 함수 본문**이고 `include_product`·`include_admin` 으로만 갈린다 — 그것이 H-2(shim drift) 의 처방이다. **배포 앱만 따로 조립하는 코드를 새로 만들면 안 된다**(그 순간 아무도 구동하지 않는 두 번째 배선이 생긴다). 성질은 [`tests/test_admin_surface_separation.py`](tests/test_admin_surface_separation.py)가 잠근다 — 합집합 = 제품 ∪ 관리자 · 교집합 = `/health` · operation 별 가드·상태코드·에러 선언 동일. ③ **`register_*` 호출 순서를 재배열하지 말 것** — 합집합 앱의 route 순서가 OpenAPI `paths` 순서이고 그것이 프론트 생성물의 입력이다. surface 를 건너뛰는 것은 `if` 를 **제자리에** 두는 방식으로만 한다(초판이 admin 을 auth 앞으로 옮겼다가 지문이 깨질 뻔했다). ④ **`main:app` 은 제품 앱**이다(이미지 기본 CMD). 관리자 컨테이너는 [`admin_asgi.py`](services/application/app/admin_asgi.py) 를 띄운다 — 그 모듈을 import 하면 `main` 의 모듈 수준 제품 앱도 함께 만들어져 **관리자 컨테이너는 안 쓰는 앱 하나를 더 든다**(알려진 대가, 서빙되는 것은 관리자 앱뿐). ⑤ **admin 서비스 env 는 Mongo 셋뿐**이다 — 관리자 operation 전부가 Mongo 이고 purge 도 벡터·lexical 파기를 outbox 로 넘긴다. gateway·chroma 를 물리려면 이유를 함께 적을 것.
+- 정본은 `docs/system-contract-sot.md` **v1.8.9**(Approved). 미확정 항목은 추측 구현하지 않는다.
+- **★ 배포되는 앱이 이제 둘이다(Slice 2, 2026-08-09). 앱을 만지는 사람이 가장 먼저 알아야 한다.** `/admin` 8 operation 은 **`admin` compose 서비스**(application 이미지 재사용·command 만 다름·**포트 미게시**)가 서빙하고, 도달 경로는 nginx `location /api/admin/` 하나다. 제품 앱에는 그 route 가 **없으므로** LAN 에서 치면 가드가 아니라 **라우터가 404** 다(`require_admin_user` 는 두 번째 겹으로 남는다). **알아야 하는 것 다섯**: ① **`create_app()` 은 사라지지 않았고 현재 96 operation 합집합**이다(2026-08-28 계층 API 반영 실측) — 테스트·경계 행렬·`scripts/dump_openapi.py`(= 프론트 `schema.d.ts`)가 전부 그것을 쓴다. 브라우저는 nginx 뒤에서 한 origin 만 보므로 **계약은 하나여야 한다**. ② **세 factory(`create_app`·`create_product_app`·`create_admin_app`)는 한 함수 본문**이고 `include_product`·`include_admin` 으로만 갈린다 — 그것이 H-2(shim drift) 의 처방이다. **배포 앱만 따로 조립하는 코드를 새로 만들면 안 된다**(그 순간 아무도 구동하지 않는 두 번째 배선이 생긴다). 성질은 [`tests/test_admin_surface_separation.py`](tests/test_admin_surface_separation.py)가 잠근다 — 합집합 = 제품 ∪ 관리자 · 교집합 = `/health` · operation 별 가드·상태코드·에러 선언 동일. ③ **`register_*` 호출 순서를 재배열하지 말 것** — 합집합 앱의 route 순서가 OpenAPI `paths` 순서이고 그것이 프론트 생성물의 입력이다. surface 를 건너뛰는 것은 `if` 를 **제자리에** 두는 방식으로만 한다(초판이 admin 을 auth 앞으로 옮겼다가 지문이 깨질 뻔했다). ④ **`main:app` 은 제품 앱**이다(이미지 기본 CMD). 관리자 컨테이너는 [`admin_asgi.py`](services/application/app/admin_asgi.py) 를 띄운다 — 그 모듈을 import 하면 `main` 의 모듈 수준 제품 앱도 함께 만들어져 **관리자 컨테이너는 안 쓰는 앱 하나를 더 든다**(알려진 대가, 서빙되는 것은 관리자 앱뿐). ⑤ **admin 서비스 env 는 Mongo 셋뿐**이다 — 관리자 operation 전부가 Mongo 이고 purge 도 벡터·lexical 파기를 outbox 로 넘긴다. gateway·chroma 를 물리려면 이유를 함께 적을 것.
 - **★ 활동 로그가 생겼다(Phase 9 Slice 9.0, 2026-08-09) — 사용자 행위를 남기는 첫 저장소다.** `activity_events` 에 **정본 변경 11 + 검토 결정 9 = 20 경로**가 한 행씩 남기고(A2=B, 2026-08-09 에 오너가 `writing/accept` 를 더해 19 → 20), 소유자는 `GET /projects/{id}/activity`(Phase 9 시점 총 operation **77**)로 읽는다. **알아야 하는 것 여섯**: ① **★ 이 컬렉션은 8.2c `project_name_history` 와 정반대다** — `project_id` 필드를 쓰고 **파기와 함께 사라진다**(I1·I2). 그쪽의 `_id` 트릭(reconciler 회피)을 여기 복사하면 **개명 이력 전체가 삭제 예외로 승격돼 D8-6 이 무너진다**. 실 Mongo 셀 둘이 두 방향을 나란히 잰다. ② **분류표가 mutating 40 전수다**([`activity/actions.py`](services/application/app/activity/actions.py)) — 새 mutating route 는 `logged`/`excluded(사유)` 중 하나로 등재해야 하고 미등재는 가드가 실패시킨다. **A2 를 C(AI 요청까지)로 넓히는 일은 `ai_request` 14 행의 값을 바꾸는 것**이어야 한다(오너 조건) — **그때 A8(중복 없음)을 함께 다시 본다**. ③ **기록은 handler 본문에서, 결과를 안 뒤에**(A7=A). dependency 로 옮기면 404·409 로 끝난 요청이 "했다"로 남는다. **가드가 `inspect.getsource(route.endpoint)` 를 보므로 헬퍼 안에 넣으면 안 잡힌다.** ④ **기록 실패는 요청을 안 죽인다**(A4=A 격리, 경계는 서비스 안 **한 곳**) — 대가는 **조용한 구멍**이고, 그래서 배선 누락도 런타임에 안 보인다(전수 가드가 유일한 신호다). **반면 파기 실패는 삼키지 않는다.** ⑤ **`before`/`after` 는 라벨만**(이름·제목·상태, **200자 상한**). 본문을 넣으면 `draft_versions` 와 두 정본이 된다. ⑥ **`writing/accept` 도 기록한다** — 정본 draft version 저장이기 때문이다(오너 2026-08-09). **A8 개정이 아니다**: 남기는 것은 AI 요청이 아니라 정본 저장이라 관측·원장과 다른 사실이고, **A2=C 확장(AI 요청 자체)과는 축이 다르다**(대상은 `ai_request` **13 행**이며 그때 A8 을 함께 다시 본다). **기록 조건은 상태코드가 아니라 정본이 바뀌었는가** — Gate 거부(200·`saved=null`)는 안 남기고 **502 partial(version 은 저장됨)은 남긴다**. ⑦ **★ 전수 가드는 배선의 *존재*만 본다 — *분기*는 못 본다**(N9 실측): 한 handler 에 기록 분기가 둘이면 하나를 지워도 소스 스캔이 만족돼 통과한다. **분기마다 행위 셀이 필요하다.**
 
 - **진행 중 페이즈 = 다중 사용자 인증(D8).** 오너 지시로 **슬라이스를 잘게 쪼개 진행 중**이다(한 번에 큰 덩어리 금지). 진행표:
@@ -291,19 +290,13 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
   `current_position` 기반 — 종전 "본문 미탑재" 서술은 폐기). ⑤ 설명창 스칼라(premise·genre·tone·pov)
   상한 1000자(`BriefTextField`) — `<project_brief>` 가 매 프롬프트에 렌더되기 때문.
 
-- **⓪-b 장→장면 계층 확정·구현 진행(2026-08-28, SoT v1.8.9).** 별도 metadata-only
+- **⓪-b [구현 완료·배포 전 migration/독립 검증 대기] 장→장면 계층(2026-08-28, SoT v1.8.9).** 별도 metadata-only
   Chapter + Scene(Draft), 기존 Draft ID/본문 무손실 이관, `other` 제거, parent별 연속 순열,
   AI는 같은 장의 다음 Scene만, 계층 export, 안전 가드 포함 Chapter cascade purge다.
-  - **전수 확인 결과(2026-08-27), 이 필드는 어떤 동작도 분기시키지 않는다**: 프롬프트 미사용 ·
-    export heading 매핑 없음(SoT v1.7.17 이 명시) · 부모-자식 관계 없음(`core_sot/models.py` 에
-    parent 없음) · 분석·검색·기억 미사용. **남은 쓰임은 목록 라벨과 export manifest 필드 둘뿐**이고,
-    그 manifest 는 2026-08-27 에 UI 에서 뺐다(계약에는 남아 있다).
-  - **왜 이렇게 됐나**: SoT **v1.7.9 D2=A** 가 계층안을 각하하고 **평면 ordered unit** 을 택하면서
-    종류 표시만 라벨로 남겼다. 결함이 아니라 그때의 결정이며, 다만 **그 결정이 오너에게 전달된 적이
-    없다**(오늘 화면 설명문을 실제 동작대로 쓰다가 드러났다).
   - **확정 브리프**: [`chapter-scene-hierarchy-decisions.md`](docs/plans/chapter-scene-hierarchy-decisions.md).
-    조합은 D1~D6·D8=A, D7=B. 모델/마이그레이션부터 작은 슬라이스로 구현한다. 지금 화면의
-    “이름표” 설명은 새 계층이 배포되기 전 현행 동작을 정직하게 말하므로 UI 슬라이스까지 유지한다.
+    조합은 D1~D6·D8=A, D7=B. 공개 `unit_kind`와 평면 reorder는 제거됐고 Chapter/Scene API·UI,
+    같은 장의 다음 Scene, 계층 export, cascade purge까지 구현됐다. 배포 전에 disposable Mongo에서
+    `scripts/migrate_chapter_scene_hierarchy.py` dry-run→apply→재실행 no-op을 확인한다.
 
 - **① dogfood 착수(GATE-1) — ★ 착수(2026-08-23, 오너 선언 *"도그푸드 착수 할꺼니까"*) + UI 병행.** 오너가 실사용하는 동시에 세션은 화면(UI) 개선을 진행하는 병행 운영. **오너 체크리스트: [`docs/dogfood-checklist.md`](docs/dogfood-checklist.md)** — 시작 절차·매일 보는 것·즉시 보고 사안·품질 기록(D4 정렬·gate 노출 결정의 재료가 여기서 쌓임)·관측 공백 해석·문제 기록 포맷. `OPS-1` Ready 승격(착수 조건 충족). 원래 서술(기술적 선행 전부 완료·D8-3로 인가 걸림돌 해소)은 성립 상태 그대로.
 - **② 프론트 랜딩 기획 + 개인정보처리방침·이용약관 정본 대기 — 공개 직결.** 약관·개인정보 처리방침은 서비스 공개 전 법적 요건이고 **정본은 오너만 쓸 수 있다**(원고가 구글 API로 나가는 고지 포함 여부도 오너 판단). 오너 자료가 오는 순간 시작 — 병목이 이사람이다.
@@ -349,10 +342,9 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 >   **mutation 표는 work_log 세션 6~7 에 있다.**
 > - **hover 토큰 규칙**: `--action-primary-hover` 는 본색과 **램프 두 단계 이상** 차이(현재
 >   blue-600→blue-800). 한 단계는 hover 로 안 보인다 — designTokens 셀이 잠근다.
-> - **다음 순서**: 장→장면 계층 모델/마이그레이션 첫 슬라이스 구현됨 — 다음은 공개 API와
->   프론트 계층 목록·생성·재정렬. 그 뒤 Writing next Scene → export → D7 cascade 삭제.
->   계층화가 끝나면 텍스트+화살표 링크 가시성 →
->   메모 기능(08-27 순서 그대로).
+> - **다음 순서**: Chapter migration을 disposable Mongo에서 dry-run→apply→no-op으로 검증하고,
+>   이 머신에서 시작 단계에 멈추는 ASGI TestClient 전수를 정상 환경에서 재실행한 뒤 독립 검증한다.
+>   그 다음 텍스트+화살표 링크 가시성 → 메모 기능(08-27 순서 그대로).
 
 > **★★ 2026-08-27 세션 4 반영 — D5-2 조건 폐쇄 + 보강 1·3·4 완료. 여기서 시작한다.**
 >
@@ -683,7 +675,7 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
    (b) 비동기 패드 — 렌더 · 이어쓰기 탭 완료 배지 · 5초 폴링 · "다시 시도" 버튼 · 탭 전환 후 폴링 생존. **failed job이 4개 남아 있어 실패 UX를 바로 볼 수 있다** — 위 추적 부채대로 "다시 시도"가 결정적으로 재실패하는 것도 여기서 확인된다.
 5. **관측 화면을 더 키우는 것은 API에 시간 창(`?since=`)이 생긴 뒤**가 옳다 — 지금 차트가 그리는 것은 누적 스냅샷이라 추세가 없고 막대는 표와 같은 정보를 말한다. 무엇을 더하든 **`React.lazy` 경계 안**에 둘 것(밖으로 나가면 진입 번들이 다시 두 배가 된다).
 6. **dogfood 관찰 항목**: `report field must be an array` 실패율(12B 간헐 비-배열, repair가 흡수 — 잦으면 repair 횟수/프롬프트 축 판단) · `analysis_extract_v4`의 `aspect` 오분류 빈도 · scratch per-draft 상한(기본 20) 밀어냄.
-7. **Deferred(오너 결정 선행)**: 중첩 chapter→scene tree · ProjectBrief→Draft provenance · 관계 graph/완전 timeline · saved publication manifest · Phase 7 대화형 수정(`plans/07-conversational-authoring.md`).
+7. **Deferred(오너 결정 선행)**: Chapter 위의 part/volume 계층 · ProjectBrief→Draft provenance · 관계 graph/완전 timeline · saved publication manifest · Phase 7 대화형 수정(`plans/07-conversational-authoring.md`).
 
 ## Project Structure
 

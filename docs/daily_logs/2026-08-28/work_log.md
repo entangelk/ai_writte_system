@@ -494,3 +494,79 @@ Blocking 6건을 닫는다. B5(소유자 면 503 재시도)는 오너 결정 **�
 
 - Chapter/Scene 공개 API와 계층 payload를 추가하고 기존 평면 API를 폐기한다.
 - 프론트 목록·생성·재정렬을 새 계층 payload로 이관한다.
+
+---
+
+## Session 10 — Chapter/Scene 계층 공개 계약·Writing·export·cascade purge·UI 완결
+
+### Goals
+
+- Session 9의 정본 모델과 migration 위에 Chapter→Scene 공개 계약 전체를 연결한다.
+- 오너가 고른 D6=A·D7=B를 Writing과 안전한 cascade purge에 반영하고 양방향 회귀로 잠근다.
+- 계층화 완료 상태를 브리프·SoT 파생 산출물·기록물에 일치시킨다.
+
+### Completed work
+
+- Chapter 목록·생성·보관·파기와 Chapter/Scene 독립 reorder API를 추가했다. Scene 생성은
+  `chapter_id`를 필수로 받고 공개 `unit_kind` 및 project-wide `draft-order`를 제거했다.
+- Writing `start_next_unit`은 현재 Scene과 같은 Chapter 끝에 다음 Scene만 만든다. candidate·accept
+  payload에서 `unit_kind`를 제거하고 저장 결과에 `chapter_id`를 연결했다.
+- Markdown/TXT/ZIP export를 Chapter position→Scene position 순으로 바꾸고, Chapter 보관은 자식
+  `archived`를 덮어쓰지 않는 파생 가시성으로 구현했다. ZIP 파일명은 두 position을 함께 써 장마다
+  Scene position이 다시 1부터 시작해도 충돌하지 않는다.
+- Chapter cascade purge는 보관 선행, 모든 자식 active 생성 잡 사전 검사(write 0/409), scratch와
+  종료 생성 잡 정리, Core SOT 자식 그래프+Chapter 원자 파기를 적용했다. 기존 단일 Scene purge도
+  종료 생성 잡을 남기지 않도록 같은 저장소 경계를 보강했다.
+- 프론트 원고 목록을 Chapter 안에 Scene이 중첩된 구조로 교체하고 장/장면 생성·독립 순서 이동,
+  장면 체크박스 삭제, Chapter 정확 제목 cascade 확인을 연결했다. purge 503은 uncertain으로 확인창을
+  유지하고, purge 요청 이후 재시도 404만 이미 완료된 성공으로 처리한다.
+- OpenAPI 파생 타입 `frontend/src/api/schema.d.ts`를 재생성하고 공개 계약의 `unit_kind` 제거를 확인했다.
+
+### Issues found
+
+- Chapter purge가 Core SOT만 지우면 완료·실패 generation job이 고아로 남았다. draft-scoped
+  `purge_draft`를 generation job repository/service에 추가해 Chapter와 기존 Scene purge 양쪽에서
+  종료 잡을 함께 제거했다.
+- export 화면이 flat Scene 목록만 읽으면 보관된 Chapter의 파생 가시성을 알 수 없었다. Chapter
+  목록을 함께 읽어 기본 export와 ZIP 선택이 같은 가시성 규칙을 쓰게 했다.
+- 이 머신에서 FastAPI TestClient/ASGI 통합 셀은 첫 요청 단계에서 장시간 대기했다. 실패 assertion은
+  관측되지 않았고 중단했으며, direct endpoint 회귀와 OpenAPI introspection으로 공개 계약을 검증했다.
+  정상 TestClient 환경에서 전수 재실행은 배포 전 남은 검증이다.
+- purge 재시도 404 성공 처리가 UI에서 빠진 것을 최종 계약 대조에서 발견했다. purge 요청 시작 여부를
+  경계로 추가해 archive 단계 404까지 성공으로 삼는 과잉 보정을 막았다.
+
+### Decisions
+
+- 오너 결정 D3=A: 테스트 데이터 삭제도 허용됐지만 D3=C는 삭제가 아니라 legacy 이중 계약이므로,
+  기존 Draft ID·version·snapshot·본문을 보존하면서 runtime을 단일 계층으로 수렴시키는 A를 적용했다.
+- 오너 결정 D6=A: 이어쓰기는 같은 Chapter의 다음 Scene만 만들며 새 Chapter는 사용자 명시 동작이다.
+- 오너 결정 D7=B: Chapter 삭제는 자식 Scene을 포함한다. 파괴 범위가 넓으므로 제목 확인과 생성 잡
+  write-0 가드, 503 uncertain, purge-stage 404 멱등 성공을 함께 계약으로 둔다.
+- 나머지는 확정 브리프대로 D1=A·D2=A·D4=A·D5=A·D8=A를 적용했다.
+
+### Verification
+
+- backend 집중 회귀: Chapter/activity/admin/Writing/ordered-unit 묶음 **60 passed**. generation job +
+  Chapter 묶음 **51 passed**(앞 묶음과 일부 중복하므로 합산하지 않음).
+- mypy: application과 선택 테스트 **154 source files, no issues**. 전체 대상의
+  `tests/test_application_api.py:51`에는 기존 `_STORAGE_FAILURE=None` 대입 오류 1건이 있어 해당 파일만
+  제외했다.
+- frontend 집중 회귀: DraftList·WritingPanel·ProjectExportPanel **71/71**, 최종 DraftList **7/7**.
+  production build **711 modules** 통과.
+- OpenAPI introspection: project-wide `/draft-order` 없음, Scene 생성 `title/chapter_id` 필수·extra 금지,
+  Draft/NextUnit/AcceptedSave의 `chapter_id`와 `unit_kind` 제거/추가 방향 확인.
+- `py_compile`, `git diff --check`, 생성 schema 대조 통과. ASGI TestClient 전수는 위 환경 대기로 미완료.
+
+| 방향 | 적용한 diff | 위치 | 재실패한 셀 |
+|---|---|---|---|
+| under-strict | `chapter_id: NonBlankName` → `chapter_id: NonBlankName \| None = None` | `services/application/app/api/models.py:693` | `ChapterHierarchyApiTest.test_scene_create_contract_requires_parent_and_rejects_unit_kind` |
+| over-strict | `if chapter.archived and not include_archived:` → `if chapter.archived:` | `services/application/app/core_sot/service.py:951` | `ChapterHierarchyContractTest.test_export_uses_chapter_then_scene_headings_and_derived_archive` |
+| under-strict | purge 성공 status `404` → `410` | `frontend/src/drafts/DraftList.tsx:161` | `treats a repeated chapter purge 404 as an already-completed success` |
+| over-strict | `purgeRequested &&` 제거로 모든 단계의 404를 성공 처리 | `frontend/src/drafts/DraftList.tsx:161` | `does not mistake an archive-stage 404 for a completed purge` |
+
+### Next steps
+
+- disposable Mongo에서 `scripts/migrate_chapter_scene_hierarchy.py`를 dry-run→apply→재실행 no-op 순으로
+  검증한 뒤 실제 maintenance window에 적용한다.
+- TestClient가 정상 시작되는 환경에서 backend 전수와 Chapter API ASGI 관통을 재실행한다.
+- 구현 커밋 범위를 다른 작업자가 독립 검증한다.

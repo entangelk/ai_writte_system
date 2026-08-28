@@ -126,9 +126,9 @@ reorder는 현재 완전 순열·단일 사용자·원자 교체 선례도 그�
 
 ### Recommendation + reason
 
-**B. target을 두 동작으로 명시하는 것을 추천한다.** W0가 저장 target 의미를 명시적 intent가
-소유하도록 한 이유를 유지하면서, 장 시작도 한 번의 사용자 의도로 원자 처리할 수 있다.
-리터럴 이름과 response shape는 구현 전 SoT에서 확정한다.
+**확정 결과는 A다.** 이어쓰기는 현재 Chapter 안의 다음 Scene 생성으로만 좁히고, 새 Chapter는
+사용자가 명시적으로 만든다. 장의 마지막 Scene에서 이어쓰기를 눌렀다는 사실만으로 다음 장까지
+추론하는 것은 일반적인 저작 흐름과 맞지 않고 원자 write set도 불필요하게 넓힌다.
 
 ## D7. 장 삭제
 
@@ -140,9 +140,9 @@ reorder는 현재 완전 순열·단일 사용자·원자 교체 선례도 그�
 
 ### Recommendation + reason
 
-**A. 빈 장만 삭제를 첫 슬라이스로 추천한다.** 바로 직전 삭제 슬라이스가 503 uncertain과
-파기 그래프를 어렵게 잠갔다. 계층화와 cascade purge를 한 번에 열지 말고, 먼저 안전한
-비파괴 구조 변경과 장면 단위 삭제를 닫은 뒤 실제 사용에서 장 단위 삭제 요구를 확인한다.
+**확정 결과는 B다.** 장 삭제는 사용자가 기대하는 대로 모든 자식 Scene을 포함하되, 장 보관
+선행·정확한 제목 확인·active 생성 잡 write 0/409·503 uncertain·재파기 404 성공 처리로 기존
+draft purge보다 넓어진 파괴 범위를 잠근다.
 
 ## D8. 내보내기와 보관
 
@@ -217,5 +217,4 @@ reorder는 현재 완전 순열·단일 사용자·원자 교체 선례도 그�
 - Scene 아래의 beat/문단 트리
 - 장 공동 편집·부분 순서 CRDT·fractional ordering
 - Chapter synopsis 자동 생성과 canonical memory 승격
-- 비어 있지 않은 장의 cascade hard purge(D7에서 별도 채택 전)
 - 기존 분석 결과를 장 단위로 재집계하는 기능
