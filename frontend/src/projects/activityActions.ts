@@ -16,9 +16,9 @@
  * 그래서 이 표는 **20행 전수**여야 하고, 임의로 줄이거나 늘리면 가드가 양방향으로 문다.
  */
 
-/** `action` 리터럴 → 타임라인 한 줄에 쓰는 문구. 백엔드 분류표의 logged 20 과 1:1 이다. */
+/** `action` 리터럴 → 타임라인 한 줄에 쓰는 문구. 백엔드 분류표의 logged 21 과 1:1 이다. */
 export const ACTIVITY_ACTION_LABELS: Record<string, string> = {
-  // 정본 변경 11
+  // 정본 변경 11 (+ 원고 하드 삭제 2026-08-28)
   project_created: "프로젝트 생성",
   project_renamed: "프로젝트 이름 변경",
   project_archived: "프로젝트 보관",
@@ -26,6 +26,7 @@ export const ACTIVITY_ACTION_LABELS: Record<string, string> = {
   draft_created: "원고 생성",
   draft_renamed: "원고 제목 변경",
   draft_archived: "원고 보관",
+  draft_purged: "원고 삭제",
   draft_order_changed: "원고 순서 변경",
   draft_version_saved: "원고 저장",
   source_ref_created: "출처 연결",

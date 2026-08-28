@@ -75,15 +75,16 @@ class ActivityActionClassificationTest(unittest.TestCase):
         """A2=B — 정본 변경 **11** + 검토 결정 9.
 
         착수 결정은 19 였고, 2026-08-09 에 오너가 `writing/accept`(정본 draft
-        version 저장)를 더해 **20** 이 됐다.
+        version 저장)를 더해 **20** 이 됐다. 원고 하드 삭제 슬라이스(2026-08-28
+        오너 결정)가 `draft_purged` 를 더해 **21** 이 됐다.
 
         숫자를 셀에 적는 이유는 범위가 **오너 결정**이기 때문이다. 넓히는 것은
         결정이지 리팩터링이 아니므로, 여기서 눈에 띄게 실패해야 한다.
         """
-        self.assertEqual(len(LOGGED_OPERATIONS), 20)
-        self.assertEqual(len(ACTIVITY_ACTIONS), 20)
+        self.assertEqual(len(LOGGED_OPERATIONS), 21)
+        self.assertEqual(len(ACTIVITY_ACTIONS), 21)
         self.assertEqual(
-            len({action.action for action in ACTIVITY_ACTIONS}), 20,
+            len({action.action for action in ACTIVITY_ACTIONS}), 21,
             "action 리터럴이 중복이다 — 조회 화면이 두 사건을 구분 못 한다",
         )
 

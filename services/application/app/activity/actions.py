@@ -73,6 +73,10 @@ _CANONICAL: tuple[ActivityAction, ...] = (
                    "/projects/{project_id}/drafts/{draft_id}", "draft"),
     ActivityAction("draft_archived", "DELETE",
                    "/projects/{project_id}/drafts/{draft_id}", "draft"),
+    # 원고 하드 삭제(2026-08-28). append-only 원장이라 **파기 뒤에도 행은 남는다** —
+    # 프로젝트 purge 때만 activity.purge_project 가 행을 지운다.
+    ActivityAction("draft_purged", "POST",
+                   "/projects/{project_id}/drafts/{draft_id}/purge", "draft"),
     ActivityAction("draft_order_changed", "PUT",
                    "/projects/{project_id}/draft-order", "project"),
     # **본문 저장.** `draft_versions` 는 append-only 지만 `created_at` 도 `user_id` 도

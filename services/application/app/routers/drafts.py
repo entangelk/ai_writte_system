@@ -25,6 +25,9 @@ from services.application.app.core_sot.service import (
     NotFound,
     UnsupportedExportFormat,
 )
+from services.application.app.writing.generation_job import (
+    WritingGenerationJobStatus,
+)
 
 from ..api.models import (
     CreateDraftRequest,
@@ -54,7 +57,9 @@ from ..api.dependencies import (
 )
 
 
-def register_drafts(app, *, core_sot, sync_outbox, activity) -> None:
+def register_drafts(
+    app, *, core_sot, sync_outbox, activity, writing_generation_jobs, writing_scratch,
+) -> None:
     def _draft_payload(draft) -> dict[str, object]:
         assert draft.unit_kind is not None
         assert draft.position is not None
@@ -132,6 +137,50 @@ def register_drafts(app, *, core_sot, sync_outbox, activity) -> None:
             before="active", after="archived",
         )
         return _draft_payload(draft)
+
+    @app.post(
+        "/projects/{project_id}/drafts/{draft_id}/purge", status_code=204,
+        response_model=None, responses=_owned(_ERRORS_404_409),
+        dependencies=_REQUIRE_PROJECT_OWNER,
+    )
+    async def purge_draft(
+        project_id: str, draft_id: str,
+        current=Depends(require_authenticated_user),
+    ) -> None:
+        # 원고 하드 삭제(2026-08-28 오너 결정). 아카이브를 선행 요구하는 것은
+        # 프로젝트 purge 와 같은 이유다 — 색인 제거(DRAFT_ARCHIVED outbox → chroma
+        # 파기)가 먼저 확정된 뒤 본체를 지운다. 활동 행은 append-only 원장이라
+        # 남는다(프로젝트 purge 때만 지워진다).
+        try:
+            draft = core_sot.get_draft(project_id=project_id, draft_id=draft_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if not draft.archived:
+            raise HTTPException(
+                status_code=409, detail="draft must be archived before purge",
+            )
+        # active 생성 잡이 붙어 있으면 거부(오너 2026-08-28) — 잡의 결과물은 draft
+        # 에 표시되므로 앵커가 사라진 잡은 완료돼도 갈 곳이 없다.
+        if any(
+            job.status in (
+                WritingGenerationJobStatus.PENDING,
+                WritingGenerationJobStatus.RUNNING,
+            )
+            for job in writing_generation_jobs.list_for_draft(
+                project_id, draft_id,
+            )
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="draft has an active generation job; wait or discard it",
+            )
+        core_sot.purge_draft(project_id=project_id, draft_id=draft_id)
+        writing_scratch.clear_draft(project_id, draft_id)
+        activity.record(
+            project_id=project_id, actor_user_id=current.id,
+            action="draft_purged", target_type="draft", target_id=draft_id,
+            before="archived", after="purged",
+        )
 
     @app.get("/projects/{project_id}/drafts", response_model=DraftListResponse,
              responses=_owned(_ERRORS_404_MIGRATION),

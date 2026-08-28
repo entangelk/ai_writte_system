@@ -1962,7 +1962,9 @@ def create_app(
     )
 
     register_drafts(
-        app, core_sot=core_sot, sync_outbox=sync_outbox, activity=activity
+        app, core_sot=core_sot, sync_outbox=sync_outbox, activity=activity,
+        writing_generation_jobs=writing_generation_jobs,
+        writing_scratch=writing_scratch,
     )
 
     register_source_refs(

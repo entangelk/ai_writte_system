@@ -108,7 +108,8 @@ class _FakeHasher:
 
 def _client(*, ttl=timedelta(hours=1), core_sot=None, index_sync_outbox=None,
             memory_service=None, analysis_service=None, access_grants=None,
-            admin_audit=None, project_name_history=None):
+            admin_audit=None, project_name_history=None,
+            writing_generation_job_service=None, writing_scratch_service=None):
     users = UserService(InMemoryUserRepository(), hasher=_FakeHasher())
     sessions = SessionService(InMemorySessionRepository(), ttl=ttl)
     users.create_user(username="alice", password="pw123")
@@ -118,6 +119,8 @@ def _client(*, ttl=timedelta(hours=1), core_sot=None, index_sync_outbox=None,
         analysis_service=analysis_service, access_grant_service=access_grants,
         admin_audit_service=admin_audit,
         project_name_history_service=project_name_history,
+        writing_generation_job_service=writing_generation_job_service,
+        writing_scratch_service=writing_scratch_service,
     )
     # https base_url on purpose: the cookie ships Secure by default, so an http
     # client would silently drop it and every session test would pass/fail for
@@ -1871,8 +1874,10 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # 됐다(ADMIN 11→16).
         # 스크래치 항목별 버리기(2026-08-26)가 project tier 에 DELETE 를 더해
         # 63/88 이 됐다 — 패드의 [버리기] 를 위한 개별 항목 경로.
-        self.assertEqual(len(by_tier["project"]), 63)
-        self.assertEqual(len(tiers), 88)
+        # 원고 하드 삭제(2026-08-28)가 project tier 에 POST purge 를 더해
+        # 64/89 가 됐다 — 아카이브(soft)와 구분되는 원고 단위 영구 삭제 경로.
+        self.assertEqual(len(by_tier["project"]), 64)
+        self.assertEqual(len(tiers), 89)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:

@@ -201,6 +201,48 @@ class MongoCoreSotRepository:
         self._project_briefs.delete_many({"project_id": project_id}, session=session)
         self._projects.delete_one({"_id": project_id}, session=session)
 
+    def purge_draft(self, project_id: str, draft_id: str) -> None:
+        # 원고 하드 삭제 — purge_project의 draft 스코프 판(2026-08-28 오너 결정).
+        # project 레코드·브리프·인접 draft 는 project_id 스코프가 달라 영향이 없다.
+        if self._use_transactions:
+            with self._client.start_session() as session:
+                with session.start_transaction():
+                    self._purge_draft(project_id, draft_id, session=session)
+            return
+        self._purge_draft(project_id, draft_id, session=None)
+
+    def _purge_draft(self, project_id: str, draft_id: str, *, session) -> None:
+        # source_refs 는 draft_id 필드가 없다(_source_ref_doc) — snapshot_id 경유로
+        # 지운다. snapshot 을 먼저 읽고 같은 스코프로 지우는 순서라 트랜잭션 밖에서도
+        # 잔류 방향으로 안전하다(읽은 뒤 끼어든 snapshot 은 다음 purge 의 몫).
+        snapshot_ids = [
+            doc["_id"]
+            for doc in self._snapshots.find(
+                {"project_id": project_id, "draft_id": draft_id},
+                {"_id": 1},
+                session=session,
+            )
+        ]
+        self._snapshots.delete_many(
+            {"project_id": project_id, "draft_id": draft_id}, session=session
+        )
+        self._blocks.delete_many(
+            {"project_id": project_id, "draft_id": draft_id}, session=session
+        )
+        if snapshot_ids:
+            self._source_refs.delete_many(
+                {"snapshot_id": {"$in": snapshot_ids}}, session=session
+            )
+        self._versions.delete_many(
+            {"project_id": project_id, "draft_id": draft_id}, session=session
+        )
+        self._writing_accept_receipts.delete_many(
+            {"project_id": project_id, "draft_id": draft_id}, session=session
+        )
+        self._drafts.delete_one(
+            {"_id": draft_id, "project_id": project_id}, session=session
+        )
+
     def get_current_project_brief(
         self, project_id: str
     ) -> ProjectBriefVersion | None:

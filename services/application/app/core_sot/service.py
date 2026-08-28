@@ -228,6 +228,50 @@ class InMemoryCoreSotRepository:
 
         self.projects.pop(project_id, None)
 
+    def purge_draft(self, project_id: str, draft_id: str) -> None:
+        # 원고 하드 삭제 — purge_project가 지우는 축의 draft 소속 판(2026-08-28 오너
+        # 결정: 원고 영구 삭제 추가). 프로젝트 레코드·브리프·인접 draft는 건드리지
+        # 않는다. source_refs는 SourceRef가 draft_id를 몰라 snapshot_id 경유로 지운다.
+        snapshot_ids = [
+            sid
+            for sid, snapshot in self.snapshots.items()
+            if snapshot.project_id == project_id and snapshot.draft_id == draft_id
+        ]
+        removed_snapshots = set(snapshot_ids)
+        for sid in snapshot_ids:
+            self.snapshots.pop(sid, None)
+            self.blocks_by_snapshot.pop(sid, None)
+        self.source_refs = {
+            rid: ref
+            for rid, ref in self.source_refs.items()
+            if ref.snapshot_id not in removed_snapshots
+        }
+
+        version_ids = [
+            vid
+            for vid, version in self.versions.items()
+            if version.project_id == project_id and version.draft_id == draft_id
+        ]
+        for vid in version_ids:
+            del self.versions[vid]
+        # key = (project_id, idempotency_key) → version_id. draft_id가 키에 없어
+        # 지워진 version_id를 값으로 갖는 행을 뺀다.
+        removed_versions = set(version_ids)
+        self._save_request_index = {
+            key: vid
+            for key, vid in self._save_request_index.items()
+            if vid not in removed_versions
+        }
+
+        self.drafts.pop(draft_id, None)
+        self._version_ids_by_draft.pop(draft_id, None)
+        # receipt 는 (project_id, idempotency_key) 키지만 값에 draft_id 를 갖는다.
+        self._writing_accept_receipts = {
+            key: receipt
+            for key, receipt in self._writing_accept_receipts.items()
+            if receipt.draft_id != draft_id
+        }
+
     def get_current_project_brief(
         self, project_id: str
     ) -> ProjectBriefVersion | None:
@@ -936,6 +980,14 @@ class CoreSotService:
         # NotFound 끌어올림은 _require_project에서(엔드포인트가 404로 매핑).
         self._require_project(project_id)
         self._repo.purge_project(project_id)
+
+    def purge_draft(self, *, project_id: str, draft_id: str) -> None:
+        # 원고 하드 삭제(2026-08-28 오너 결정) — purge_project의 draft 스코프 판.
+        # archived 선행 검증은 엔드포인트가 한다(프로젝트 purge와 같은 분업).
+        # NotFound 끌어올림은 _require_draft에서(엔드포인트가 404로 매핑).
+        self._require_project(project_id)
+        self._require_draft(project_id, draft_id)
+        self._repo.purge_draft(project_id, draft_id)
 
     def _save_result(self, version_id: str, *, idempotent_replay: bool) -> SaveDraftResult:
         version = self._repo.get_version(version_id)
