@@ -86,3 +86,59 @@
 ### Next steps
 
 - 공개 배포를 갱신한 뒤 관리자 상세 진입, 원고 단위 폼, 편집기 우측 독·드로어를 브라우저에서 다시 육안 확인한다.
+
+---
+
+## Session 3 — 관리자 상세 진입·편집 도구 가시성 보강
+
+### Goals
+
+- 관리자 사용자 목록에서 아이디 자체를 상세 진입점으로 만들고 목적을 함께 표시한다.
+- 사용자 상세의 검색·프로젝트 목록과 계정 비활성화 액션 사이에 구획 간격을 둔다.
+- 편집기 우측의 이어쓰기·분석·검토 탭을 축소 화면에서도 쉽게 찾고 누를 수 있게 한다.
+- 제품 핵심 흐름이 안정되는 시점의 사용자 가이드 작성을 후속 작업으로 남긴다.
+
+### Completed work
+
+- 사용자 아이디와 `상세 보기 →`를 하나의 링크로 묶고 접근성 이름과 사용자별 상세 경로를 명시했다. 종전의 별도 상세 액션은 제거해 진입점 중복을 없앴다.
+- 사용자 상세 화면에 전용 클래스 세 개를 부여하고 계정 액션 및 프로젝트 목록 위에 `--space-4` 간격을 적용했다.
+- 우측 도구 독의 각 탭을 최소 `4.75rem × 3.5rem`, `--type-small`로 키웠다. 선택 탭은 accent 면과 반전 글자색, 비선택 탭은 hover/focus tint, 독은 패널 그림자로 구분한다.
+- 사용자 가이드는 지금 바로 만들지 않고 도그푸드에서 핵심 흐름과 UI가 안정된 뒤 공개 전 작성하도록 `HANDOFF.md`의 다음 작업에 트리거를 명시했다.
+
+### Issues found
+
+- 링크 안의 아이디와 보조 문구는 JSX 노드 경계에서 접근성 이름 공백이 보장되지 않았다. `aria-label`로 `아이디 상세 보기 →`를 명시해 화면과 보조기술 양쪽에서 목적을 고정했다.
+- 기존 `typeScale.test.ts`는 독 탭을 `meta` 크기로 고정하고 있어 이번 가시성 요구와 충돌했다. 새 요구가 의도적인 크기 변경이므로 이관 계약을 `small`로 함께 갱신했다.
+- 패턴 스윕 결과 같은 상세 링크나 별도 우측 독 구현은 추가로 없었다. 기존 독은 2026-08-26에 도입된 단일 구현이었다.
+
+### Decisions
+
+- 오너 결정: 관리자 목록에서는 별도 액션보다 사용자 아이디 자체를 상세 링크로 쓰고, `상세 보기` 라벨로 목적을 드러낸다.
+- 오너 결정: 사용자 상세의 프로젝트 목록과 비활성화 액션은 바로 위 콘텐츠에 붙이지 않고 명시적 간격을 둔다.
+- 오너 결정: 이어쓰기·분석·검토 독은 작은 화면 배율에서도 발견 가능한 충분한 크기와 선택 강조를 가져야 한다.
+- 오너 결정: 제품이 어느 정도 완성되어 핵심 흐름과 UI가 안정되면 사용자 가이드를 작성한다.
+
+### Mutation verification
+
+모든 mutation은 체크포인트 커밋 `f025c8f`와 clean tree 위에서 적용하고 `apply_patch` 역편집으로 복원했다.
+
+| # | 방향 | mutation | 파일 | 재실패한 셀 |
+|---|---|---|---|---|
+| M1 | over | 아이디 링크의 `상세 보기 →` 표시와 접근성 라벨 제거 | `admin/AdminConsole.tsx` | `AdminConsole > loads users, project metadata, and the deployment KPI`의 accessible-name 단정 |
+| M2 | under | 상세 화면 액션·프로젝트 목록 공통 `margin-top` 규칙 제거 | `styles.css` | `관리 상세와 편집기 도구 독 배치 > separates account actions and the project list from the content above them` |
+| M3 | over | 선택된 도구 탭의 accent 배경·반전 글자색 제거 | `styles.css` | `관리 상세와 편집기 도구 독 배치 > gives every fixed tool tab a large target and a visible selected state`의 selected 단정 |
+| M4 | under | 도구 탭을 종전 작은 padding·`--type-meta`로 복귀 | `styles.css` | 위 셀의 최소 폭 단정 + `타이포 축 > keeps the migrated rules on the scale instead of raw literals` |
+| M5 | under | 사용자별 상세 링크를 사용자 목록 경로로 축소 | `admin/AdminConsole.tsx` | `AdminConsole > loads users, project metadata, and the deployment KPI`의 href 단정 |
+
+### Verification
+
+- 수정 전 신규 회귀는 사용자 링크, 상세 전용 클래스, 간격 규칙, 도구 독 크기·선택 강조의 결손을 재현해 실패했다.
+- 집중 회귀: 3파일 **19/19**.
+- 프론트 전수: 34파일 **381/381**.
+- `npm run build`: TypeScript clean, Vite **711 modules**, 진입 **435.89 kB**, CSS **38.01 kB**.
+- 패턴 스윕과 5종 mutation 뒤 working tree가 체크포인트와 byte-identical한 clean 상태임을 확인했다.
+
+### Next steps
+
+- 공개 환경에서 사용자 아이디 링크, 상세 화면 간격, 우측 도구 독의 실제 크기와 열림 동작을 육안 확인한다.
+- 도그푸드 핵심 흐름과 UI가 안정되면 공개 전에 사용자 가이드를 작성한다.
