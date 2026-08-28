@@ -162,6 +162,7 @@
 - URL의 `panel`은 열린 상태를 정하고 별도 `lastPanel` 상태가 마지막 선택을 보존하게 분리했다. 닫을 때 쿼리는 제거하되 활성 탭은 유지해 우측 독 표시가 이어쓰기로 되돌아가지 않는다.
 - 드로어가 열린 동안 뒤에 가려진 우측 독은 `aria-hidden`으로 접근성 트리에서 제외해 같은 이름의 탭 두 벌이 동시에 포커스되지 않게 했다.
 - 우측 독 탭을 최소 `5.5rem × 4.25rem`, `--type-base`로 확대했다. 드로어 상단 탭도 최소 높이 `3.25rem`과 선택 accent·hover/focus 처리를 적용했다.
+- 서버 전용 설정을 보존한 채 공개 환경의 프론트 이미지만 교체하고, 새 JS/CSS 자산이 인터넷 경로까지 전달된 것을 확인했다.
 
 ### Issues found
 
@@ -194,6 +195,7 @@
 - 프론트 전수: 34파일 **382/382**.
 - `npm run build`: TypeScript clean, Vite **711 modules**, 진입 **436.28 kB**, CSS **38.66 kB**.
 - 패턴 스윕과 4종 mutation 뒤 working tree가 체크포인트와 byte-identical한 clean 상태임을 확인했다.
+- 공개 배포: 프론트 healthy, 인터넷 HTML·API health **HTTP 200**, 서빙 자산 해시가 로컬 빌드와 일치했다.
 
 ### Next steps
 
