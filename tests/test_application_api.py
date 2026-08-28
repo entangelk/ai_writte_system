@@ -2119,6 +2119,73 @@ class LegacyOrderedDraftMigration503Test(unittest.TestCase):
         self.assertEqual(resp.status_code, 422)
 
 
+class FlatLegacyEscapePathReadsTest(unittest.TestCase):
+    """평면 legacy의 export·versions 읽기는 migration 전 대피 경로다(오너 N1=ⓐ, 2026-08-29).
+
+    v1.8.9 계층화는 평면 legacy Draft를 만나는 공개 CRUD·Writing accept를 503로
+    fail-closed한다. 다만 **정합적인 평면 ordered unit(챕터 0개)** 프로젝트의 전체
+    export와 개별 draft의 versions 읽기는 200을 유지한다 — 목록이 이미 503인 운영
+    평면 데이터(migration apply 전)의 유일한 대피 창구라는 오너 결정(SoT v1.8.10).
+    versions는 ordered set을 읽지 않으므로 혼합 상태에서도 200이고, 혼합(부분
+    migration) 상태의 **export**만 같은 503 면을 유지한다.
+
+    - under-strict: 평면 분기의 export를 503로 바꾸면 대피 경로 셀들이 재실패한다.
+    - over-strict: 혼합 상태 검사를 없애면 fail-closed 셀이 재실패한다.
+    """
+
+    def _flat_app(self):
+        service = CoreSotService(InMemoryCoreSotRepository())
+        project = service.create_project(name="Legacy")
+        draft = service.create_draft(project_id=project.id, title="평면 원고")
+        service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text="평면 본문.",
+            idempotency_key="k1",
+        )
+        return TestClient(create_app(service=service)), project.id, draft.id
+
+    def test_flat_legacy_project_export_is_the_migration_escape_path(self):
+        client, project_id, _ = self._flat_app()
+
+        resp = client.get(f"/projects/{project_id}/export", params={"format": "txt"})
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("평면 원고", resp.json()["body"])
+        self.assertIn("평면 본문.", resp.json()["body"])
+
+    def test_flat_legacy_draft_version_reads_stay_open(self):
+        client, project_id, draft_id = self._flat_app()
+
+        listed = client.get(f"/projects/{project_id}/drafts/{draft_id}/versions")
+        version_id = listed.json()["versions"][0]["id"]
+        detail = client.get(
+            f"/projects/{project_id}/drafts/{draft_id}/versions/{version_id}"
+        )
+        exported = client.get(
+            f"/projects/{project_id}/drafts/{draft_id}/versions/{version_id}/export"
+        )
+
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(len(listed.json()["versions"]), 1)
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(exported.status_code, 200)
+        self.assertIn("평면 본문.", exported.json()["body"])
+
+    def test_mixed_hierarchy_state_export_still_fails_closed(self):
+        service = CoreSotService(InMemoryCoreSotRepository())
+        project = service.create_project(name="혼합")
+        service.create_chapter(project_id=project.id, title="1장")
+        # 챕터가 이미 있는 프로젝트에 평면 draft가 잔존하는 부분 migration 형상.
+        service.create_draft(project_id=project.id, title="고아 평면")
+        client = TestClient(create_app(service=service))
+
+        resp = client.get(f"/projects/{project.id}/export")
+
+        self.assertEqual(resp.status_code, 503)
+        self.assertIn("migration is required", resp.json()["detail"])
+
+
 class ContextBudgetDefaultTest(unittest.TestCase):
     """입력 예산 기본값은 **공개 계약 리터럴**이다(오너 지시 ④, 2026-07-28).
 

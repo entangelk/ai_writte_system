@@ -342,8 +342,11 @@ def register_projects(
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except DraftOrderIntegrityError as exc:
-            # Whole-project export reads the ordered unit set; unmigrated legacy
-            # data blocks it. Same migration-required 503 as list/create.
+            # Mixed (partially migrated) or malformed legacy data blocks the
+            # export — same migration-required 503 as list/create. A
+            # well-formed flat legacy project (ordered units, no chapters)
+            # still exports: the migration-era escape path (SoT v1.8.10,
+            # owner decision 2026-08-29).
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         manifest_payload: dict[str, object] | None = None
         if manifest:
