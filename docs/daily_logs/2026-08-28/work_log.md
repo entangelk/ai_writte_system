@@ -624,7 +624,8 @@ Blocking 6건을 닫는다. B5(소유자 면 503 재시도)는 오너 결정 **�
 
 ### Verification
 
-- backend 전수(test-mongo ON): 아래 Reproduction 참조 — 최종 수치는 커밋 시점 기록.
+- backend 전수(test-mongo ON): **2567 passed / 4 skipped / 3021 subtests — 0 failed**(3분 51초,
+  ASGI/TestClient 셀 대기 없이 정상 실행). 중간 실패 10건 그룹은 아래 Completed work의 이관으로 폐쇄.
 - mongo 집중: `test_core_sot_mongo` **85/85**(+신규 6), `test_writing_generation_job_mongo` **14/14**.
 - frontend 전수 **383/383**(exit 0) · `npm run build` 통과(진입 442.34 kB) · `schema.d.ts` 재생성 0줄 차.
 - `tests/test_docs_indexes.py` 13 passed. `test_activity_ui_labels` 6 passed(라벨표 25행 전수).
