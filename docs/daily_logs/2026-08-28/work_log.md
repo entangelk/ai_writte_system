@@ -104,6 +104,7 @@
 - 사용자 상세 화면에 전용 클래스 세 개를 부여하고 계정 액션 및 프로젝트 목록 위에 `--space-4` 간격을 적용했다.
 - 우측 도구 독의 각 탭을 최소 `4.75rem × 3.5rem`, `--type-small`로 키웠다. 선택 탭은 accent 면과 반전 글자색, 비선택 탭은 hover/focus tint, 독은 패널 그림자로 구분한다.
 - 사용자 가이드는 지금 바로 만들지 않고 도그푸드에서 핵심 흐름과 UI가 안정된 뒤 공개 전 작성하도록 `HANDOFF.md`의 다음 작업에 트리거를 명시했다.
+- 서버 전용 설정과 비밀값 파일의 체크섬을 보존한 채 공개 배포의 프론트만 새 이미지로 교체했다. 컨테이너 health와 인터넷 경로의 HTML·API health가 모두 HTTP 200이고 새 JS/CSS 자산 해시가 일치함을 확인했다.
 
 ### Issues found
 
@@ -137,6 +138,7 @@
 - 프론트 전수: 34파일 **381/381**.
 - `npm run build`: TypeScript clean, Vite **711 modules**, 진입 **435.89 kB**, CSS **38.01 kB**.
 - 패턴 스윕과 5종 mutation 뒤 working tree가 체크포인트와 byte-identical한 clean 상태임을 확인했다.
+- 공개 배포: 프론트 컨테이너 healthy, 인터넷 HTML·API health **HTTP 200**, 서빙 자산 해시가 로컬 빌드와 일치했다.
 
 ### Next steps
 
