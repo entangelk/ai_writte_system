@@ -392,8 +392,11 @@ class _MongoContractMixin:
     def test_project_and_draft_list_get_round_trip_with_isolation(self):
         project_a = self.service.create_project(name="A")
         project_b = self.service.create_project(name="B")
-        draft_a1 = self.service.create_draft(project_id=project_a.id, title="Episode 1")
-        draft_a2 = self.service.create_draft(project_id=project_a.id, title="Episode 2")
+        chapter_a = self.service.create_chapter(project_id=project_a.id, title="1장")
+        draft_a1 = self.service.create_scene(
+            project_id=project_a.id, chapter_id=chapter_a.id, title="Episode 1")
+        draft_a2 = self.service.create_scene(
+            project_id=project_a.id, chapter_id=chapter_a.id, title="Episode 2")
 
         # Re-read through a fresh service to exercise the persisted read path.
         reread = CoreSotService(self.repo)
@@ -1037,12 +1040,13 @@ class WritingIntentMongoTest(_MongoContractMixin, unittest.TestCase):
         # An injected mid-write failure must leave zero of the six start-next
         # surfaces: position shift, Draft, version, snapshot, block, receipt.
         project = self.service.create_project(name="Ordered")
-        current = self.service.create_draft(
-            project_id=project.id, title="현재", unit_kind=UnitKind.CHAPTER)
+        chapter = self.service.create_chapter(project_id=project.id, title="현재 장")
+        current = self.service.create_scene(
+            project_id=project.id, chapter_id=chapter.id, title="현재")
         self.service.save_draft(project_id=project.id, draft_id=current.id,
             raw_text="현재 본문.", idempotency_key="base")
-        following = self.service.create_draft(
-            project_id=project.id, title="다음", unit_kind=UnitKind.SCENE)
+        following = self.service.create_scene(
+            project_id=project.id, chapter_id=chapter.id, title="다음")
         before = [(d.id, d.position) for d in self.repo.list_drafts(project.id)]
         # Capture the full write-set counts so every one of the six surfaces is
         # pinned explicitly (H1): draft/position, version, snapshot, block,
@@ -1063,7 +1067,7 @@ class WritingIntentMongoTest(_MongoContractMixin, unittest.TestCase):
                 self.service.start_next_unit(
                     project_id=project.id, current_draft_id=current.id,
                     raw_text="새 유닛 본문.", title="2장",
-                    unit_kind=UnitKind.CHAPTER, goal_intent="start_next_unit",
+                    goal_intent="start_next_unit",
                     idempotency_key="writing-accept:acc1")
         finally:
             self.repo._after_start_next_write = original_hook
