@@ -70,7 +70,7 @@ export function AdminUserDetail() {
   }
 
   return (
-    <section className="admin-page page-enter">
+    <section className="admin-page admin-user-detail page-enter">
       <Link className="back-link" to="/admin">← 관리로 돌아가기</Link>
 
       <header className="page-heading">
@@ -98,7 +98,7 @@ export function AdminUserDetail() {
               <div><dt>프로젝트</dt><dd>{projects.length}</dd></div>
             </dl>
             {user.is_active && (
-              <div className="row-actions">
+              <div className="row-actions admin-user-account-actions">
                 <button type="button" onClick={() => void deactivate()}>비활성화</button>
               </div>
             )}
@@ -120,7 +120,7 @@ export function AdminUserDetail() {
             ) : visible.length === 0 ? (
               <p className="form-hint">검색과 일치하는 프로젝트가 없습니다.</p>
             ) : (
-              <div className="admin-projects">
+              <div className="admin-projects admin-user-project-list">
                 {visible.map((project) => (
                   <AdminProjectCard
                     key={project.id}

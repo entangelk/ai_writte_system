@@ -50,10 +50,16 @@ describe("AdminUserDetail", () => {
     renderDetail();
 
     expect(await screen.findByRole("heading", { name: "alice" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "alice" }).closest("section"))
+      .toHaveClass("admin-user-detail");
     expect(screen.getByText("겨울 이야기")).toBeInTheDocument();
     expect(screen.getByText("여름 이야기")).toBeInTheDocument();
     expect(screen.queryByText("남의 원고")).not.toBeInTheDocument();
     expect(screen.queryByText("주인 없는 원고")).not.toBeInTheDocument();
+    expect(screen.getByText("겨울 이야기").closest(".admin-projects"))
+      .toHaveClass("admin-user-project-list");
+    expect(screen.getByRole("button", { name: "비활성화" }).closest(".row-actions"))
+      .toHaveClass("admin-user-account-actions");
 
     await userEvent.type(screen.getByLabelText("프로젝트 검색"), "겨울");
     expect(screen.getByText("겨울 이야기")).toBeInTheDocument();

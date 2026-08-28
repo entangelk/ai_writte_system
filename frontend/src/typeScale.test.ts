@@ -84,9 +84,10 @@ const MIGRATED: Record<string, string> = {
 
   // 2026-08-26 — 스크래치 패드(항목별 채택·버리기)와 오버레이 드로어 표면.
   ".scratch-recovery-note": "meta",
-  ".rail-dock button": "meta",
 
   ".back-link": "small",
+  // 오너 2026-08-28 — 화면 가장자리 도구 탭은 축소 화면에서도 식별되어야 한다.
+  ".rail-dock button": "small",
   ".version-empty": "small",
   ".empty-state span, .status-copy, .read-only-note": "small",
   ".alert": "small",

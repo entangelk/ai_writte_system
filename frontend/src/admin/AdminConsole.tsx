@@ -205,7 +205,14 @@ export function AdminConsole() {
                 {visibleUsers.map((user) => (
                   <li key={user.id}>
                     <div>
-                      <strong>{user.username}</strong>
+                      <Link
+                        className="admin-user-detail-link"
+                        to={`/admin/users/${user.id}`}
+                        aria-label={`${user.username} 상세 보기 →`}
+                      >
+                        <strong>{user.username}</strong>
+                        <span>상세 보기 →</span>
+                      </Link>
                       <span>
                         {user.is_admin ? "관리자" : "사용자"}
                         {" · "}{adminUserStateLabel(user)}
@@ -213,7 +220,6 @@ export function AdminConsole() {
                       </span>
                     </div>
                     <div className="row-actions">
-                      <Link to={`/admin/users/${user.id}`}>사용자 상세 보기 →</Link>
                       {user.is_active && <button type="button" onClick={() => void deactivate(user.id)}>비활성화</button>}
                     </div>
                   </li>

@@ -1016,21 +1016,33 @@ main {
   border: 1px solid var(--border-hairline);
   border-right: 0;
   border-radius: var(--radius-md) 0 0 var(--radius-md);
+  box-shadow: var(--shadow-panel);
   transform: translateY(-50%);
 }
 
 .rail-dock button {
-  padding: 0.5rem 0.4rem;
-  font-size: var(--type-meta);
+  min-width: 4.75rem;
+  min-height: 3.5rem;
+  padding: 0.75rem 0.65rem;
+  font-size: var(--type-small);
   color: var(--text-muted);
   background: transparent;
   border: 0;
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: color 160ms ease, background 160ms ease;
 }
 
 .rail-dock button[aria-selected="true"] {
-  color: var(--text-body);
+  color: var(--text-on-accent);
+  background: var(--action-primary);
   font-weight: 700;
+}
+
+.rail-dock button:hover:not([aria-selected="true"]),
+.rail-dock button:focus-visible:not([aria-selected="true"]) {
+  color: var(--action-primary-hover);
+  background: var(--tint-accent-soft);
 }
 
 .tab-badge {
@@ -2450,6 +2462,25 @@ main {
 
 .admin-search input:focus {
   border-bottom-color: var(--action-primary);
+}
+
+.admin-user-detail-link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  justify-self: start;
+  color: var(--text-link);
+  text-decoration: none;
+}
+
+.admin-user-detail-link:hover,
+.admin-user-detail-link:focus-visible {
+  color: var(--action-primary-hover);
+}
+
+.admin-user-account-actions,
+.admin-user-project-list {
+  margin-top: var(--space-4);
 }
 
 .admin-list .row-actions a {

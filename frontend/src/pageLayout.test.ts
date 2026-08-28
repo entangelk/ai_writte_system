@@ -154,3 +154,30 @@ describe("원고 생성 폼 배치", () => {
     expect(help?.body).not.toMatch(/max-width\s*:/);
   });
 });
+
+describe("관리 상세와 편집기 도구 독 배치", () => {
+  it("separates account actions and the project list from the content above them", () => {
+    const spacing = rules.find(
+      (rule) =>
+        rule.selector.includes(".admin-user-account-actions") &&
+        rule.selector.includes(".admin-user-project-list"),
+    );
+
+    expect(spacing?.body).toMatch(/margin-top:\s*var\(--space-4\)/);
+  });
+
+  it("gives every fixed tool tab a large target and a visible selected state", () => {
+    // under-strict: 종전 0.5rem padding+meta 글꼴로 돌아가면 크기 단정이 실패한다.
+    // over-strict: 크기만 키우고 선택 강조를 없애도 selected 단정이 실패한다.
+    const button = rules.find((rule) => rule.selector === ".rail-dock button");
+    expect(button?.body).toMatch(/min-width:\s*4\.75rem/);
+    expect(button?.body).toMatch(/min-height:\s*3\.5rem/);
+    expect(button?.body).toMatch(/font-size:\s*var\(--type-small\)/);
+
+    const selected = rules.find(
+      (rule) => rule.selector === '.rail-dock button[aria-selected="true"]',
+    );
+    expect(selected?.body).toMatch(/color:\s*var\(--text-on-accent\)/);
+    expect(selected?.body).toMatch(/background:\s*var\(--action-primary\)/);
+  });
+});
