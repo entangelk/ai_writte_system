@@ -1,5 +1,11 @@
 # Writing Workspace V2 W0 계약과 migration
 
+> **2026-08-28 supersession:** §2의 평면 ordered unit, §3의 `next_unit.unit_kind`,
+> §5의 `chapter→scene parent/child tree` 유예, §6의 unit_kind별 heading 미사용은
+> [`chapter-scene-hierarchy-decisions.md`](chapter-scene-hierarchy-decisions.md)의 확정 계약으로
+> 폐기됐다. 새 정본은 별도 Chapter + Scene(Draft), parent별 연속 순열, 같은 장의 다음 Scene,
+> 계층 export다. 아래 기존 절은 v1.7.9~v1.7.17 구현 이력과 이관 전 계약을 설명하기 위해 보존한다.
+
 상태: `Approved — W0~W4 구현 완료 (matrix PB/OU/WI/SC/EX 전부 채움)`
 
 정본 버전: `system-contract-sot.md` v1.7.17

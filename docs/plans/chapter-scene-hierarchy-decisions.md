@@ -1,6 +1,6 @@
 # Decision brief — 장→장면 계층화
 
-상태: `Owner direction fixed; detailed decisions pending`
+상태: `Resolved — D1=A · D2=A · D3=A · D4=A · D5=A · D6=A · D7=B · D8=A (오너 2026-08-28)`
 정본 연결: [`../system-contract-sot.md`](../system-contract-sot.md),
 [`writing-workspace-v2-w0-contract.md`](writing-workspace-v2-w0-contract.md)
 목적: 오너가 확정한 **“장은 장면의 집합”** 방향을 기존 평면 ordered-unit 계약과
@@ -16,8 +16,24 @@
 결정한다.
 
 이 방향은 W0의 `chapter→scene nesting은 열지 않는다`와 SoT v1.7.9 D2=A(평면
-ordered unit)를 폐기하는 계약 변경이다. 아래 세부 결정을 확정해 SoT와 W0 계약을 함께
-개정하기 전에는 구현하지 않는다.
+ordered unit)를 폐기하는 계약 변경이다.
+
+## Owner decisions — 2026-08-28
+
+- **D1=A** — Chapter를 별도 정본 엔티티로 둔다.
+- **D2=A** — Chapter는 metadata-only이고 실제 산문 정본은 Scene(Draft)이 소유한다.
+- **D3=A** — 기존 Draft ID·version·snapshot·본문을 보존하는 결정적 one-shot 이관을 한다.
+  오너는 테스트 단계라 데이터 삭제도 허용했지만, D3=C는 삭제가 아니라 legacy 이중 계약이라
+  더 복잡하다. 오너가 “A가 편하면 A”를 허용했으므로 무손실·단일 계약인 A를 채택한다.
+- **D4=A** — `other` 예외 축을 제거하고 migration에서 Scene으로 통합한다.
+- **D5=A** — Chapter와 Scene이 각 parent 범위의 연속 순열을 소유한다.
+- **D6=A** — Writing AI는 같은 Chapter의 다음 Scene만 만든다. 새 Chapter 생성은 사용자
+  명시 동작이다. 오너 근거는 일반적으로 장 마지막 장면의 이어쓰기가 다음 장을 자동 생성하지
+  않는다는 저작 흐름이다.
+- **D7=B** — Chapter purge는 모든 자식 Scene을 포함한다. 안전 가드는 장 보관 선행·정확한
+  장 제목 확인·자식 중 active 생성 잡 존재 시 409·503 uncertain 잠금·404 재파기 성공 처리다.
+- **D8=A** — export에 Chapter→Scene heading 계층을 반영하고 Chapter 보관은 자식 상태를
+  덮어쓰지 않는 파생 가시성으로 처리한다.
 
 ## Decision needed
 
@@ -154,6 +170,46 @@ reorder는 현재 완전 순열·단일 사용자·원자 교체 선례도 그�
 - 공개 API·OpenAPI·`schema.d.ts`·export manifest·WritingCandidate/receipt가 모두 영향권이다.
 - 계층화 구현은 `모델/마이그레이션 → 읽기/API → UI/reorder → Writing intent → export → 삭제`
   순으로 작게 나누고 각 슬라이스를 독립 검증한다.
+
+## 확정 구현 계약
+
+### 데이터
+
+- `Chapter = {id, project_id, title, archived, position}`.
+- `Draft`는 Scene 정본이며 `{id, project_id, chapter_id, title, archived, position}`을 가진다.
+  신규 runtime shape에서 `unit_kind`는 제거한다.
+- Chapter position은 project 안 archived 포함 `1..C`, Scene position은 chapter 안 archived 포함
+  `1..S`의 연속 순열이다.
+- migration은 기존 `chapter` Draft 앞에 같은 제목의 Chapter를 만들고 그 Draft를 제목 `본문`인
+  첫 Scene으로 바꾼다. 뒤따르는 `scene|other` Draft는 다음 `chapter` Draft 전까지 같은 Chapter에
+  귀속한다. 선행 chapter 없는 묶음은 합성 Chapter `미분류`에 둔다. Draft와 하위 정본 ID·본문은
+  byte-identical하게 보존한다.
+
+### 공개 API
+
+- `GET /projects/{pid}/chapters` → position 순 Chapter와 각 Chapter의 position 순 Scene을 반환한다.
+- `POST /projects/{pid}/chapters` request `{title}` → 빈 Chapter를 마지막 position에 만든다.
+- `PUT /projects/{pid}/chapter-order` request `{ordered_chapter_ids}` → archived 포함 완전 순열.
+- `PUT /projects/{pid}/chapters/{cid}/scene-order` request `{ordered_draft_ids}` → 해당 Chapter의
+  archived 포함 Scene 완전 순열.
+- 기존 `POST /projects/{pid}/drafts`는 `{title, chapter_id}`를 받고 해당 Chapter 끝에 Scene을 만든다.
+- 기존 `GET /projects/{pid}/drafts`는 호환용 flat Scene 목록을 Chapter position→Scene position
+  순으로 반환하되 payload는 `chapter_id`를 싣고 `unit_kind`를 제거한다.
+- 기존 project-wide `PUT /projects/{pid}/draft-order`는 제거한다.
+
+### Writing·export·삭제
+
+- `intent=start_next_unit` 리터럴은 호환을 위해 유지하되 의미는 **같은 Chapter의 다음 Scene**으로
+  좁힌다. `next_unit={title,goal}`이며 `unit_kind`는 제거한다.
+- 빈 Chapter의 첫 Scene은 일반 Scene 생성으로 명시적으로 만든다. AI가 새 Chapter를 추론하거나
+  빈 Chapter를 자동 채우지 않는다.
+- Markdown export는 `# {chapter.title}` 뒤 각 Scene을 `## {scene.title}`로, TXT는 장 제목 뒤
+  장면 제목과 본문을 순서대로 출력한다. 기본 export는 archived Chapter 또는 Scene을 제외한다.
+- `POST /projects/{pid}/chapters/{cid}/archive`가 Chapter만 archived 처리한다. 자식 Scene의
+  `archived` 필드는 바꾸지 않는다.
+- `POST /projects/{pid}/chapters/{cid}/purge`는 Chapter archived 선행을 요구하고 모든 자식 Scene의
+  기존 draft purge graph와 Chapter를 함께 제거한다. 자식 중 active generation job이 있으면
+  write 0·409다. UI는 exact Chapter title 확인 뒤 호출하고 파기 단계 503을 uncertain으로 잠근다.
 
 ## Deferred / out of scope
 
