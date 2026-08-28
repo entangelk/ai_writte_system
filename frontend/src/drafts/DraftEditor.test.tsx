@@ -1208,6 +1208,25 @@ describe("DraftEditor", () => {
   // 기본은 닫힘 — panel param 이 있을 때만 열린다. 닫힘 상태의 a11y 트리 가림과
   // 마운트 유지 인바리언트를 양방향으로 잠근다.
 
+  it("roots the fixed tool dock at the viewport, outside the animated page containing block", async () => {
+    // under-strict: `.page-enter`의 종료 transform도 fixed 자손의 containing block을
+    // 편집기 박스로 바꾼다. over-strict: 애니메이션을 피한다며 페이지 뿌리/편집기
+    // 소속까지 벗기면 뒤 두 class 단정이 실패한다.
+    mockFetch(
+      { body: project },
+      { body: draft },
+      { body: { versions: [version1] } },
+      { body: detail(version1, "기존 본문") },
+    );
+    renderEditor("/projects/p1/drafts/d1");
+    const page = (await screen.findByLabelText("원고 본문")).closest("section");
+
+    expect(page).toHaveClass("workspace-page", "editor-page");
+    expect(page).not.toHaveClass("page-enter");
+    expect(screen.getByRole("tablist", { name: "집필 도구 선택" }))
+      .toHaveClass("rail-dock");
+  });
+
   it("hides the rail drawer from the a11y tree until a tab opens it (드로어 기본 닫힘)", async () => {
     // under-strict: no panel param → the drawer content (writing controls) is
     // aria-hidden — the dock tabs are the only reachable surface.

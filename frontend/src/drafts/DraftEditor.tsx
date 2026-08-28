@@ -543,7 +543,7 @@ export function DraftEditor() {
   }
 
   return (
-    <section className="workspace-page editor-page page-enter">
+    <section className="workspace-page editor-page">
       <Link
         className="back-link"
         to={`/projects/${projectId ?? ""}`}

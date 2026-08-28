@@ -150,7 +150,7 @@ export function DraftList() {
                 <span>본문과 version 저장은 다음 단계에서 연결됩니다.</span>
               </div>
               <div className="form-controls">
-                <label className="sr-only" htmlFor="draft-unit-kind">원고 단위</label>
+                <label className="unit-kind-label" htmlFor="draft-unit-kind">원고 단위</label>
                 <select
                   id="draft-unit-kind"
                   value={unitKind}

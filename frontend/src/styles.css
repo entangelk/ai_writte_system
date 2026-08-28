@@ -1233,7 +1233,14 @@ main {
 
 .form-controls {
   display: flex;
+  align-items: center;
   gap: 0.65rem;
+}
+
+.unit-kind-label {
+  flex: 0 0 auto;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .form-controls input,
@@ -1273,7 +1280,6 @@ main {
 .creation-form .unit-kind-help {
   grid-column: 1 / -1;
   margin: 0.9rem 0 0;
-  max-width: 46rem;
 }
 
 .form-controls input::placeholder {
@@ -1874,10 +1880,6 @@ main {
   .overview-heading {
     align-items: flex-start;
     flex-direction: column;
-  }
-
-  .form-controls {
-    align-items: stretch;
   }
 
   .resource-link {

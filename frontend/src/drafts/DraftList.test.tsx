@@ -384,6 +384,7 @@ describe("DraftList", () => {
     const help = screen.getByText(/이름표입니다/).closest("p")!;
     expect(help).toHaveClass("unit-kind-help");
     expect(help.textContent).toContain("계층은 없습니다");
+    expect(screen.getByText("원고 단위")).toHaveClass("unit-kind-label");
     // over-strict 가드: 설명을 넣었다고 선택지를 줄이면 안 된다 — 셋 다 남는다.
     const options = Array.from(
       screen.getByLabelText("원고 단위").querySelectorAll("option"),

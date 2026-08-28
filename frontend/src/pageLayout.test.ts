@@ -136,3 +136,21 @@ describe("페이지 배치 (Phase 10 Slice 10.4)", () => {
     expect(width![1]).toBe(shellWidth![1]);
   });
 });
+
+describe("원고 생성 폼 배치", () => {
+  it("centers the unit label with its controls and lets the explanation use the full form width", () => {
+    // under-strict: 설명을 다시 46rem로 제한하거나 한 grid 열에 가두면 오른쪽 절반이
+    // 빈다. over-strict: 중앙정렬을 없애면 노출 라벨이 컨트롤 위쪽에 붙는다.
+    const controlAlignments = rules
+      .filter((rule) => rule.selector === ".form-controls")
+      .flatMap((rule) => [...rule.body.matchAll(/align-items:\s*([^;]+);/g)])
+      .map((match) => match[1].trim());
+    expect(controlAlignments).toEqual(["center"]);
+
+    const help = rules.find(
+      (rule) => rule.selector === ".creation-form .unit-kind-help",
+    );
+    expect(help?.body).toMatch(/grid-column:\s*1\s*\/\s*-1/);
+    expect(help?.body).not.toMatch(/max-width\s*:/);
+  });
+});

@@ -69,7 +69,9 @@ describe("AdminConsole", () => {
     // 사용자 상세로 들어간다. 여기 남는 것은 거기로 갈 수 없는 것뿐이다.
     expect(screen.queryByText("겨울 이야기")).not.toBeInTheDocument();
     const aliceRow = screen.getByText("alice").closest("li")!;
-    expect(within(aliceRow).getByRole("link", { name: "상세" }))
+    // under-strict: 작은 "상세" 한 단어는 실제 페이지가 있어도 발견하기 어려웠다.
+    // over-strict: 상세 진입을 없애고 프로젝트 수만 보여 줘도 이 셀이 실패한다.
+    expect(within(aliceRow).getByRole("link", { name: "사용자 상세 보기 →" }))
       .toHaveAttribute("href", "/admin/users/u2");
     expect(within(aliceRow).getByText(/프로젝트 1개/)).toBeInTheDocument();
     expect(screen.getByText(/보관됨/)).toBeInTheDocument();

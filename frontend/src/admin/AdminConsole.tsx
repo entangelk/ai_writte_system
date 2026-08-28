@@ -213,7 +213,7 @@ export function AdminConsole() {
                       </span>
                     </div>
                     <div className="row-actions">
-                      <Link to={`/admin/users/${user.id}`}>상세</Link>
+                      <Link to={`/admin/users/${user.id}`}>사용자 상세 보기 →</Link>
                       {user.is_active && <button type="button" onClick={() => void deactivate(user.id)}>비활성화</button>}
                     </div>
                   </li>
