@@ -40,7 +40,7 @@ def composite(fg, bg, alpha):
 #: styles.css `:root` 에서 그대로 옮긴 값. 팔레트가 바뀌면 여기도 바뀐다.
 TOKENS = {
     "--blue-600": "#006ebe",   # --action-primary
-    "--blue-700": "#005798",   # --action-primary-hover
+    "--blue-800": "#003e70",   # --action-primary-hover (admin ghost 글자가 같은 토큰을 쓴다)
     "--blue-900": "#042847",   # --text-body
     "--slate-0": "#ffffff",    # --surface-card / --text-on-accent
     "--slate-50": "#f6f9fc",   # --surface-raised
@@ -52,7 +52,7 @@ TOKENS = {
 #: 배경은 그 버튼이 실제로 놓이는 표면이다(카드 위 = `--surface-card`).
 SITES = [
     ("auth-submit 외 7선택자", "solid", "--slate-0", "--blue-600", 0.42),
-    ("admin-create-form / admin-project-card", "ghost", "--blue-700", None, 0.45),
+    ("admin-create-form / admin-project-card", "ghost", "--blue-800", None, 0.45),
     ("order-controls", "ghost", "--blue-900", None, 0.35),
     ("version-list / export-actions / export-controls", "ghost", "--slate-600", None, 0.50),
 ]

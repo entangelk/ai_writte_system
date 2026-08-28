@@ -73,7 +73,9 @@
 
   /* 동작 */
   --action-primary: var(--blue-600);
-  --action-primary-hover: var(--blue-700);
+  /* 한 단계 아래(blue-700)는 본색과 실효 대비 ~1.4:1 이라 hover 로 안 보인다(오너
+     2026-08-28). 두 단계(blue-800)로 간다 — 흰 라벨 대비도 4.5 를 훨씬 넘는다. */
+  --action-primary-hover: var(--blue-800);
   --action-danger: var(--danger-600);
   --action-danger-hover: var(--danger-700);
 
