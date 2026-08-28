@@ -2551,6 +2551,28 @@ main {
   margin: 0 0 1rem;
 }
 
+/* 삭제 확인 패널(2026-08-28) — 프로젝트 삭제(이름 확인)와 원고 삭제(체크박스)가
+   같은 모양을 쓴다. 되돌릴 수 없는 일의 확인은 문구·입력·버튼 순서로 정형화한다. */
+.confirm-panel {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-6);
+  padding: var(--space-6);
+  border: 1px solid var(--border-danger);
+  background: var(--veil-raised);
+}
+
+.confirm-panel .confirm-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.confirm-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
 .hub-fold > summary {
   display: flex;
   align-items: baseline;

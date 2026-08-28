@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import {
   describeApiError,
+  listDrafts,
   listProjectActivity,
   type ActivityEvent,
 } from "../api/client";
@@ -27,6 +28,9 @@ export function ActivityTimelinePage() {
   const { projectId } = useParams<{ projectId: string }>();
   const [events, setEvents] = useState<ActivityEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 원고 purge(2026-08-28) 뒤에도 활동 행은 남는다 — 살아 있는 원고 id 집합을
+  // 알아야 죽은 draft 행에 링크를 안 걸 수 있다. 보관분까지 포함해 읽는다.
+  const [draftIds, setDraftIds] = useState<ReadonlySet<string> | null>(null);
 
   useEffect(() => {
     if (projectId === undefined) {
@@ -40,6 +44,16 @@ export function ActivityTimelinePage() {
       })
       .catch((cause: unknown) => {
         if (active) setError(describeApiError(cause));
+      });
+    // GET /drafts 는 보관분을 포함한 전체 목록을 준다 — purge 로 사라진 원고만
+    // 이 집합에 없다.
+    listDrafts(projectId)
+      .then((result) => {
+        if (active) setDraftIds(new Set(result.drafts.map((draft) => draft.id)));
+      })
+      .catch(() => {
+        // 원고 집합을 못 얻으면 행은 종전처럼 링크로 둔다(활동 조회가 주 요청이다).
+        if (active) setDraftIds(null);
       });
     return () => { active = false; };
   }, [projectId]);
@@ -67,6 +81,7 @@ export function ActivityTimelinePage() {
             {day.events.map((event) => {
               const href = projectId === undefined ? null : activityTargetHref(
                 projectId, event.target_type, event.target_id,
+                draftIds ?? undefined,
               );
               const changed = [event.before, event.after]
                 .some((value) => value !== null && value !== undefined);

@@ -391,4 +391,63 @@ describe("DraftList", () => {
     ).map((option) => option.textContent);
     expect(options).toEqual(["장", "장면", "기타"]);
   });
+
+  it("permanently deletes a draft behind a checkbox confirmation", async () => {
+    // 원고 삭제(2026-08-28 오너 결정) — 체크박스 가드 + 2단계(보관 → purge).
+    // 양방향: 체크 전엔(under) 절대 활성화되지 않고, 체크하면(over) 보관 DELETE 가
+    // purge POST 보다 먼저 나가고 목록에서 사라진다.
+    const fetchMock = mockFetch(
+      { body: { id: "p1", name: "겨울 이야기", archived: false } },
+      {
+        body: {
+          drafts: [
+            {
+              id: "d1", project_id: "p1", title: "첫 장면", archived: false,
+              unit_kind: "scene", position: 1,
+            },
+            {
+              id: "d2", project_id: "p1", title: "둘째 장면", archived: false,
+              unit_kind: "scene", position: 2,
+            },
+          ],
+        },
+      },
+      // archiveDraft 응답(soft). purgeDraft 는 204(본체 없음).
+      { body: undefined, status: 204 },
+      { body: undefined, status: 204 },
+      { body: { drafts: [
+        {
+          id: "d2", project_id: "p1", title: "둘째 장면", archived: false,
+          unit_kind: "scene", position: 2,
+        },
+      ] } },
+    );
+
+    renderDraftList();
+    await screen.findByText("첫 장면");
+
+    await userEvent.click(screen.getByRole("button", { name: "첫 장면 삭제" }));
+    const purgeButton = screen.getByRole("button", { name: "영구 삭제" });
+    expect(purgeButton).toBeDisabled();
+
+    await userEvent.click(screen.getByLabelText("삭제하겠습니다"));
+    expect(purgeButton).toBeEnabled();
+    await userEvent.click(purgeButton);
+
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls as unknown as [
+        string, RequestInit | undefined,
+      ][];
+      const archive = calls.find(([url, init]) =>
+        url === "/api/projects/p1/drafts/d1" && init?.method === "DELETE");
+      const purge = calls.find(([url, init]) =>
+        url === "/api/projects/p1/drafts/d1/purge" && init?.method === "POST");
+      expect(archive).toBeDefined();
+      expect(purge).toBeDefined();
+      expect(calls.indexOf(archive!)).toBeLessThan(calls.indexOf(purge!));
+    });
+    await waitFor(() =>
+      expect(screen.queryByText("첫 장면")).not.toBeInTheDocument());
+    expect(screen.getByText("둘째 장면")).toBeInTheDocument();
+  });
 });

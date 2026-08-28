@@ -78,13 +78,23 @@ export function activityActionLabel(action: string): string {
   return ACTIVITY_ACTION_LABELS[action] ?? action;
 }
 
-/** 활동 한 줄에서 갈 곳. 없으면 `null`. */
+/** 활동 한 줄에서 갈 곳. 없으면 `null`.
+ *
+ * 원고 purge(2026-08-28) 뒤에도 활동 행은 남는다(append-only 원장). 원고가 더
+ * 없는 draft 행에 링크를 걸면 404 로 떨어진다 — `draft_version` 행이 무링크인
+ * 것(F7)과 같은 처방으로, 호출자가 아는 원고 id 집합(`knownDraftIds`)에 없으면
+ * 링크를 걸지 않는다. 집합을 안 넘긴 호출자는 종전처럼 항상 링크다.
+ */
 export function activityTargetHref(
   projectId: string,
   targetType: string,
   targetId: string,
+  knownDraftIds?: ReadonlySet<string>,
 ): string | null {
   if (targetType === "draft") {
+    if (knownDraftIds !== undefined && !knownDraftIds.has(targetId)) {
+      return null;
+    }
     return `/projects/${encodeURIComponent(projectId)}/drafts/${encodeURIComponent(targetId)}`;
   }
   return null;

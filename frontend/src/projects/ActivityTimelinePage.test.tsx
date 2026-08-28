@@ -102,6 +102,33 @@ it("surfaces a failed load instead of an empty page", async () => {
   expect(screen.queryByText("아직 기록된 활동이 없습니다.")).not.toBeInTheDocument();
 });
 
+it("does not link a draft row whose draft no longer exists", async () => {
+  // 원고 purge(2026-08-28) 뒤에도 활동 행은 남는다(append-only 원장). 살아 있는
+  // 원고 id 집합에 없는 draft 행에 링크를 걸면 404 로 떨어진다 — draft_version
+  // 행이 무링크인 것(F7)과 같은 처방이다. 양방향: 살아 있는 원고는 여전히 링크.
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({
+    ok: true, status: 200, statusText: "",
+    json: async () => url.endsWith("/drafts")
+      ? { drafts: [
+        {
+          id: "d1", project_id: "p1", title: "1장", archived: true,
+          unit_kind: "chapter", position: 1,
+        },
+      ] }
+      : { events: [
+        { ...SAVED, id: "e3", action: "draft_created",
+          target_type: "draft", target_id: "d1" },
+        { ...SAVED, id: "e4", action: "draft_purged",
+          target_type: "draft", target_id: "d-gone" },
+      ] },
+  })));
+  renderPage();
+
+  const links = await screen.findAllByRole("link", { name: "원고 열기" });
+  expect(links).toHaveLength(1);
+  expect(links[0]).toHaveAttribute("href", "/projects/p1/drafts/d1");
+});
+
 describe("날짜 그룹 (Phase 10 Slice 10.2, D3=ⓓ)", () => {
   /**
    * 그전까지 최대 100건이 **한 덩어리로 주르륵** 쌓였다(오너 육안 확인 지적).

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -6,7 +6,7 @@ import { ProjectSettingsPage } from "./ProjectSettingsPage";
 
 /** 탭이 무엇을 청하든 답한다 — 이 파일이 재는 것은 셸이지 탭 내용이 아니다. */
 function stubFetch() {
-  const fetchMock = vi.fn(async (url: string) => {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const body = url.endsWith("/p1")
       ? { id: "p1", name: "겨울 이야기", archived: false }
       : url.includes("/brief")
@@ -29,6 +29,7 @@ function renderSettings(path = "/projects/p1/settings") {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/projects/:projectId/settings" element={<ProjectSettingsPage />} />
+        <Route path="/" element={<p data-testid="project-list-marker">목록</p>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -92,5 +93,46 @@ describe("ProjectSettingsPage", () => {
 
     expect(await screen.findByRole("heading", { name: "작품 시작 정보" }))
       .toBeInTheDocument();
+  });
+
+  it("keeps the permanent purge behind the exact project name", async () => {
+    // 프로젝트 삭제(2026-08-28 오너 결정) — 관리 콘솔 purge 면과 같은 이름 확인
+    // 가드. 양방향: 이름이 다르면(under) 절대 활성화되지 않고, 일치하면(over)
+    // 2단계(보관 → purge)를 순서대로 부른 뒤 목록으로 나간다.
+    const fetchMock = stubFetch();
+    renderSettings();
+    await screen.findByRole("heading", { name: "겨울 이야기" });
+
+    await userEvent.click(screen.getByRole("button", { name: "프로젝트 삭제…" }));
+    const purgeButton = screen.getByRole("button", { name: "영구 삭제" });
+    expect(purgeButton).toBeDisabled();
+
+    await userEvent.type(
+      screen.getByLabelText(/겨울 이야기.*입력하세요/), "다른 이름",
+    );
+    expect(purgeButton).toBeDisabled();
+
+    const confirmation = screen.getByLabelText(/겨울 이야기.*입력하세요/);
+    await userEvent.clear(confirmation);
+    await userEvent.type(confirmation, "겨울 이야기");
+    expect(purgeButton).toBeEnabled();
+    await userEvent.click(purgeButton);
+
+    // 2단계 순서 — 보관(soft)이 purge 앞에 온다.
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls as unknown as [
+        string, RequestInit | undefined,
+      ][];
+      const archive = calls.find(([url, init]) =>
+        url === "/api/projects/p1" && init?.method === "DELETE");
+      const purge = calls.find(([url]) => url === "/api/projects/p1/purge");
+      expect(archive).toBeDefined();
+      expect(purge).toBeDefined();
+      expect(JSON.parse(String(purge![1]?.body))).toEqual({
+        reason: "설정 탭에서 소유자 삭제",
+      });
+      expect(calls.indexOf(archive!)).toBeLessThan(calls.indexOf(purge!));
+    });
+    expect(await screen.findByTestId("project-list-marker")).toBeInTheDocument();
   });
 });

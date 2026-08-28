@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import {
+  adminArchiveProject,
   ApiError,
   describeApiError,
   issueProjectAccessGrant,
@@ -40,15 +41,33 @@ export function AdminProjectCard({
   project,
   owner,
   onPurged,
+  onArchived,
 }: {
   project: AdminProject;
   owner: string;
   onPurged: (project: AdminProject) => void;
+  /** 관리자 아카이브(2026-08-28) — 카드가 보관 상태로 바뀐 걸 부모 목록에 반영한다. */
+  onArchived: (project: AdminProject) => void;
 }) {
   const [access, setAccess] = useState<AccessState>({ reason: "" });
   const [purgeState, setPurgeState] = useState<PurgeState>({
     reason: "", confirmation: "",
   });
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | undefined>(undefined);
+
+  async function archive() {
+    if (archiveBusy) return;
+    setArchiveBusy(true);
+    setArchiveError(undefined);
+    try {
+      const archived = await adminArchiveProject(project.id);
+      onArchived(archived);
+    } catch (cause) {
+      setArchiveError(describeApiError(cause));
+      setArchiveBusy(false);
+    }
+  }
 
   async function issueGrant() {
     if (access.busy || access.reason.trim() === "") return;
@@ -162,7 +181,20 @@ export function AdminProjectCard({
           )}
         </section>
       ) : (
-        <p className="form-hint">영구 삭제하려면 사용자가 먼저 프로젝트를 보관해야 합니다.</p>
+        // 관리자 아카이브(2026-08-28) — 종전 문구는 "사용자가 먼저 보관해야 한다"였는데
+        // 사용자 화면에도 보관 진입점이 없어 purge 도달이 구조적으로 막혀 있었다.
+        <section className="admin-danger-zone" aria-label={`${project.name} 보관`}>
+          <p>영구 삭제하려면 먼저 보관해야 합니다.</p>
+          <button
+            type="button"
+            className="danger-button"
+            disabled={archiveBusy}
+            onClick={() => void archive()}
+          >
+            {archiveBusy ? "보관 중…" : "보관으로 전환"}
+          </button>
+          {archiveError && <p className="alert" role="alert">{archiveError}</p>}
+        </section>
       )}
     </article>
   );

@@ -1,9 +1,15 @@
 import { useEffect, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { ProjectOverview } from "./ProjectOverview";
 import { ProjectExportPanel } from "./ProjectExportPanel";
 import { ActivityTimelinePage } from "./ActivityTimelinePage";
-import { describeApiError, getProject, type Project } from "../api/client";
+import {
+  archiveProject,
+  describeApiError,
+  getProject,
+  purgeProject,
+  type Project,
+} from "../api/client";
 
 const TABS = [
   { id: "brief", label: "작품 정보·개요" },
@@ -29,9 +35,16 @@ type TabId = (typeof TABS)[number]["id"];
  */
 export function ProjectSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [project, setProject] = useState<Project | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 프로젝트 삭제(2026-08-28 오너 결정) — 이름 확인 가드. 관리 콘솔의 purge 면과
+  // 같은 패턴이다: 이 버튼은 영구 파기(원고·버전·기억·활동 전부)를 부른다.
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const requested = searchParams.get("tab");
   const activeTab: TabId = TABS.some((tab) => tab.id === requested)
@@ -57,6 +70,28 @@ export function ProjectSettingsPage() {
         <p className="alert" role="alert">프로젝트 경로가 올바르지 않습니다.</p>
       </section>
     );
+  }
+
+  async function deleteProject() {
+    if (projectId === undefined || project === null || deleteBusy
+        || confirmation !== project.name) {
+      return;
+    }
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      // 보관(soft)이 먼저다 — purge 는 보관된 프로젝트만 받는다(2단계 강제).
+      // 사유는 파기 감사 원장에 남는다. 이름 확인이 진짜 가드이므로 화면은
+      // 사유를 따로 묻지 않는다(오너 2026-08-28 지시).
+      if (!project.archived) {
+        await archiveProject(projectId);
+      }
+      await purgeProject(projectId, "설정 탭에서 소유자 삭제");
+      navigate("/");
+    } catch (cause: unknown) {
+      setDeleteError(describeApiError(cause));
+      setDeleteBusy(false);
+    }
   }
 
   return (
@@ -87,6 +122,60 @@ export function ProjectSettingsPage() {
       {activeTab === "brief" && <ProjectOverview />}
       {activeTab === "export" && <ProjectExportPanel projectId={projectId} />}
       {activeTab === "activity" && <ActivityTimelinePage />}
+
+      {/* 프로젝트 삭제(2026-08-28) — 설정의 마지막 자리. 되돌릴 수 없는 일은
+          자주 하는 일과 같은 눈높이에 두지 않는다(관리 콘솔 purge 면과 같은
+          이름 확인 가드). */}
+      <section className="hub-section project-delete-section">
+        <h2 className="section-title">프로젝트 삭제</h2>
+        <p className="status-copy">
+          프로젝트와 모든 원고·버전·기억·활동 기록이 영구히 사라집니다. 되돌릴 수
+          없습니다.
+        </p>
+        {deleteError !== null && (
+          <p className="alert" role="alert">{deleteError}</p>
+        )}
+        {!deleteOpen ? (
+          <button type="button" onClick={() => setDeleteOpen(true)}>
+            프로젝트 삭제…
+          </button>
+        ) : (
+          <div className="confirm-panel">
+            <label htmlFor="project-delete-confirmation">
+              삭제를 원하면 프로젝트 이름 <strong>{project?.name ?? ""}</strong> 을(를)
+              입력하세요
+            </label>
+            <input
+              id="project-delete-confirmation"
+              value={confirmation}
+              autoComplete="off"
+              disabled={deleteBusy}
+              onChange={(event) => setConfirmation(event.target.value)}
+            />
+            <div className="confirm-actions">
+              <button
+                type="button"
+                className="danger-button"
+                disabled={deleteBusy || confirmation !== (project?.name ?? "")}
+                onClick={() => void deleteProject()}
+              >
+                {deleteBusy ? "삭제 중…" : "영구 삭제"}
+              </button>
+              <button
+                type="button"
+                disabled={deleteBusy}
+                onClick={() => {
+                  setDeleteOpen(false);
+                  setConfirmation("");
+                  setDeleteError(null);
+                }}
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
     </section>
   );
 }

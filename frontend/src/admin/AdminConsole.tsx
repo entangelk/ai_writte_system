@@ -288,6 +288,12 @@ export function AdminConsole() {
                           // 바꾸거나 되돌릴 수 없는 작업에 재시도를 권하면 안 된다.
                         });
                     }}
+                    onArchived={(archived) => {
+                      setProjects((current) =>
+                        current.map((item) =>
+                          item.id === archived.id ? archived : item));
+                      setNotice(`“${archived.name}” 프로젝트를 보관했습니다.`);
+                    }}
                   />
                 ))}
               </div>

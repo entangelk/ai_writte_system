@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import {
+  archiveDraft,
   createDraft,
   describeApiError,
   getProject,
   listDrafts,
+  purgeDraft,
   putDraftOrder,
   type CreateDraftRequest,
   type Draft,
@@ -24,6 +26,12 @@ export function DraftList() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // 원고 영구 삭제(2026-08-28 오너 결정) — 체크박스 확인 가드. 프로젝트 삭제의
+  // 이름 확인보다 한 단계 가볍다: 원고는 프로젝트 안의 하나고, 피해 반경이 작다.
+  const [purgeTarget, setPurgeTarget] = useState<Draft | null>(null);
+  const [purgeChecked, setPurgeChecked] = useState(false);
+  const [purgeBusy, setPurgeBusy] = useState(false);
+  const [purgeError, setPurgeError] = useState<string | null>(null);
 
   const loadDrafts = useCallback(async () => {
     if (projectId === undefined) {
@@ -110,6 +118,29 @@ export function DraftList() {
     }
   }
 
+  // 삭제 2단계(2026-08-28) — 보관이 먼저(색인 제거 outbox 확정), 그다음 purge.
+  // 진행 중인 생성 잡이 있으면 purge 가 409 로 거부된다(문구를 그대로 보여 준다).
+  async function deleteDraft(draft: Draft) {
+    if (projectId === undefined || purgeBusy || !purgeChecked) {
+      return;
+    }
+    setPurgeBusy(true);
+    setPurgeError(null);
+    try {
+      if (!draft.archived) {
+        await archiveDraft(projectId, draft.id);
+      }
+      await purgeDraft(projectId, draft.id);
+      setPurgeTarget(null);
+      setPurgeChecked(false);
+      await loadDrafts();
+    } catch (cause: unknown) {
+      setPurgeError(describeApiError(cause));
+    } finally {
+      setPurgeBusy(false);
+    }
+  }
+
   return (
     <section className="workspace-page page-enter">
       <Link className="back-link" to="/">← 프로젝트로 돌아가기</Link>
@@ -190,6 +221,51 @@ export function DraftList() {
               <span>첫 장면이나 장을 만들어 작품의 본문을 시작하세요.</span>
             </div>
           ) : (
+            <>
+              {purgeTarget !== null && (
+                // 원고 삭제 확인(2026-08-28) — 체크박스 하나로 충분하다. 삭제는
+                // 영구(버전·생성 기록까지)라는 문구가 가드의 실체다.
+                <div className="confirm-panel" role="alertdialog"
+                     aria-label="원고 삭제 확인">
+                  <p className="status-copy">
+                    <strong>{purgeTarget.title}</strong> 와 모든 버전·생성 기록이
+                    영구히 사라집니다. 되돌릴 수 없습니다.
+                  </p>
+                  {purgeError !== null && (
+                    <p className="alert" role="alert">{purgeError}</p>
+                  )}
+                  <label className="confirm-check">
+                    <input
+                      type="checkbox"
+                      checked={purgeChecked}
+                      disabled={purgeBusy}
+                      onChange={(event) => setPurgeChecked(event.target.checked)}
+                    />
+                    삭제하겠습니다
+                  </label>
+                  <div className="confirm-actions">
+                    <button
+                      type="button"
+                      className="danger-button"
+                      disabled={purgeBusy || !purgeChecked}
+                      onClick={() => void deleteDraft(purgeTarget)}
+                    >
+                      {purgeBusy ? "삭제 중…" : "영구 삭제"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={purgeBusy}
+                      onClick={() => {
+                        setPurgeTarget(null);
+                        setPurgeChecked(false);
+                        setPurgeError(null);
+                      }}
+                    >
+                      취소
+                    </button>
+                  </div>
+                </div>
+              )}
             <ul className="resource-list" aria-label="원고 목록">
               {drafts.map((draft, index) => (
                 <li className="resource-row draft-row" key={draft.id}>
@@ -207,25 +283,39 @@ export function DraftList() {
                       : draft.unit_kind === "scene" ? "장면" : "기타"}
                   </span>
                   {draft.archived && <span className="status-badge">(보관됨)</span>}
-                  {!project.archived && (
-                    <span className="order-controls">
-                      <button
-                        aria-label={`${draft.title} 위로`}
-                        disabled={saving || index === 0}
-                        onClick={() => void moveDraft(index, -1)}
-                        type="button"
-                      >↑</button>
-                      <button
-                        aria-label={`${draft.title} 아래로`}
-                        disabled={saving || index === drafts.length - 1}
-                        onClick={() => void moveDraft(index, 1)}
-                        type="button"
-                      >↓</button>
-                    </span>
-                  )}
+                  <span className="order-controls">
+                    {!project.archived && (
+                      <>
+                        <button
+                          aria-label={`${draft.title} 위로`}
+                          disabled={saving || index === 0}
+                          onClick={() => void moveDraft(index, -1)}
+                          type="button"
+                        >↑</button>
+                        <button
+                          aria-label={`${draft.title} 아래로`}
+                          disabled={saving || index === drafts.length - 1}
+                          onClick={() => void moveDraft(index, 1)}
+                          type="button"
+                        >↓</button>
+                      </>
+                    )}
+                    <button
+                      aria-label={`${draft.title} 삭제`}
+                      className="danger-button"
+                      disabled={purgeBusy || saving}
+                      onClick={() => {
+                        setPurgeTarget(draft);
+                        setPurgeChecked(false);
+                        setPurgeError(null);
+                      }}
+                      type="button"
+                    >삭제</button>
+                  </span>
                 </li>
               ))}
             </ul>
+            </>
           )}
 
         </>

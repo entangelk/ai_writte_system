@@ -116,6 +116,10 @@ describe("AdminUserDetail", () => {
         { id: "p1", name: "사용 중 원고", archived: false, owner_id: "u2" },
         { id: "p2", name: "보관 원고", archived: true, owner_id: "u2" },
       ] }))
+      // 관리자 아카이브(2026-08-28) — 사용 중 카드를 보관으로 바꾸는 호출.
+      .mockResolvedValueOnce(response({
+        id: "p1", name: "사용 중 원고", archived: true, owner_id: "u2",
+      }))
       .mockResolvedValueOnce(response(undefined, 204));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -125,7 +129,14 @@ describe("AdminUserDetail", () => {
     expect(active).not.toBeNull();
     expect(archived).not.toBeNull();
     expect(within(active!).queryByRole("button", { name: "영구 삭제 준비" })).not.toBeInTheDocument();
-    expect(within(active!).getByText(/먼저 프로젝트를 보관/)).toBeInTheDocument();
+    // 보관 진입점이 이 카드에 있다 — 종전엔 안내 문구만 있어 purge 도달이
+    // 구조적으로 막혀 있었다(2026-08-28).
+    const archiveButton = within(active!).getByRole("button", { name: "보관으로 전환" });
+    await userEvent.click(archiveButton);
+    expect(fetchMock.mock.calls[2][0]).toBe("/api/admin/projects/p1/archive");
+    // 보관되면 같은 카드에 purge 면이 열린다.
+    expect(await within(active!).findByRole("button", { name: "영구 삭제 준비" }))
+      .toBeInTheDocument();
 
     await userEvent.click(within(archived!).getByRole("button", { name: "영구 삭제 준비" }));
     // 8.2c N5=A: 경고가 **남는 것**을 말한다. 종전 문구("전체가 삭제")로 되돌리면 여기서
@@ -144,8 +155,8 @@ describe("AdminUserDetail", () => {
 
     expect(await screen.findByRole("status")).toHaveTextContent("영구 삭제했습니다");
     expect(screen.queryByText("보관 원고")).not.toBeInTheDocument();
-    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({ reason: "고객 삭제 요청" });
-    expect(fetchMock.mock.calls[2][0]).toBe("/api/admin/projects/p2/purge");
+    expect(JSON.parse(fetchMock.mock.calls[3][1].body)).toEqual({ reason: "고객 삭제 요청" });
+    expect(fetchMock.mock.calls[3][0]).toBe("/api/admin/projects/p2/purge");
   });
 
   it("does not offer a retry when a purge returns an ambiguous 503", async () => {

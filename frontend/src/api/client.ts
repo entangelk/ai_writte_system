@@ -301,6 +301,15 @@ export function purgeAdminProject(projectId: string, reason: string): Promise<vo
   });
 }
 
+// 관리 콘솔 아카이브(2026-08-28) — purge 는 보관된 프로젝트만 받는데 그 상태로
+// 만드는 진입점이 없어 도달이 막혀 있었다. 소유자의 DELETE /projects/{id} 와
+// 같은 동작을 admin 권한으로만.
+export function adminArchiveProject(projectId: string): Promise<AdminProject> {
+  return request(`/admin/projects/${encodeURIComponent(projectId)}/archive`, {
+    method: "POST",
+  });
+}
+
 export function getAdminObservabilityKpi(): Promise<AdminObservabilityKpi> {
   return request("/admin/observability/kpi");
 }
@@ -433,6 +442,32 @@ export function putDraftOrder(
 
 export function getDraft(projectId: string, draftId: string): Promise<Draft> {
   return request(`/projects/${projectId}/drafts/${draftId}`);
+}
+
+// 원고 삭제 2단계(2026-08-28) — 보관(soft)이 먼저다: 색인 제거(outbox)가
+// 확정된 뒤에야 본체(purge)를 지운다. purge 는 active 생성 잡이 남아 있으면
+// 409 로 거부된다(화면은 그대로 오류 문구로 보여 준다).
+export function archiveDraft(projectId: string, draftId: string): Promise<Draft> {
+  return request(`/projects/${projectId}/drafts/${draftId}`, { method: "DELETE" });
+}
+
+export function purgeDraft(projectId: string, draftId: string): Promise<void> {
+  return request(`/projects/${projectId}/drafts/${draftId}/purge`, {
+    method: "POST",
+  });
+}
+
+// 프로젝트 삭제 2단계(2026-08-28) — 원고와 같은 모양. purge 는 영구 파기라
+// 이름 확인 가드(설정 탭)가 앞선다. reason 은 파기 감사 원장 행에 남는다.
+export function archiveProject(projectId: string): Promise<Project> {
+  return request(`/projects/${projectId}`, { method: "DELETE" });
+}
+
+export function purgeProject(projectId: string, reason: string): Promise<void> {
+  return request(`/projects/${projectId}/purge`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
 }
 
 export function listDraftVersions(

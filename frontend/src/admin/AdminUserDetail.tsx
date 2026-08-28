@@ -131,6 +131,12 @@ export function AdminUserDetail() {
                         current.filter((item) => item.id !== purged.id));
                       setNotice(`“${purged.name}” 프로젝트를 영구 삭제했습니다.`);
                     }}
+                    onArchived={(archived) => {
+                      setProjects((current) =>
+                        current.map((item) =>
+                          item.id === archived.id ? archived : item));
+                      setNotice(`“${archived.name}” 프로젝트를 보관했습니다.`);
+                    }}
                   />
                 ))}
               </div>
