@@ -30,6 +30,7 @@ from pymongo.errors import DuplicateKeyError, OperationFailure
 
 from services.application.app.core_sot.models import (
     BlockKind,
+    Chapter,
     Draft,
     DraftVersion,
     Project,
@@ -69,6 +70,7 @@ class MongoCoreSotRepository:
         self._use_transactions = use_transactions
         self._projects = self._db["projects"]
         self._project_briefs = self._db["project_brief_versions"]
+        self._chapters = self._db["chapters"]
         self._drafts = self._db["drafts"]
         self._versions = self._db["draft_versions"]
         self._snapshots = self._db["source_snapshots"]
@@ -131,6 +133,11 @@ class MongoCoreSotRepository:
                 unique=True,
                 name="uniq_writing_accept_receipt",
             )
+            self._chapters.create_index(
+                [("project_id", ASCENDING), ("position", ASCENDING)],
+                unique=True,
+                name="uniq_chapter_position",
+            )
         except OperationFailure as exc:
             raise MongoRepositorySetupError(
                 "failed to create required Core SOT MongoDB indexes"
@@ -142,6 +149,9 @@ class MongoCoreSotRepository:
         return str(ObjectId())
 
     def next_project_brief_version_id(self) -> str:
+        return str(ObjectId())
+
+    def next_chapter_id(self) -> str:
         return str(ObjectId())
 
     def next_draft_id(self) -> str:
@@ -193,6 +203,7 @@ class MongoCoreSotRepository:
         self._snapshots.delete_many({"project_id": project_id}, session=session)
         self._blocks.delete_many({"project_id": project_id}, session=session)
         self._versions.delete_many({"project_id": project_id}, session=session)
+        self._chapters.delete_many({"project_id": project_id}, session=session)
         self._drafts.delete_many({"project_id": project_id}, session=session)
         self._source_refs.delete_many({"project_id": project_id}, session=session)
         self._writing_accept_receipts.delete_many(
@@ -284,6 +295,107 @@ class MongoCoreSotRepository:
         doc = self._drafts.find_one({"_id": draft_id})
         return _to_draft(doc) if doc else None
 
+    def get_chapter(self, chapter_id: str) -> Chapter | None:
+        doc = self._chapters.find_one({"_id": chapter_id})
+        return _to_chapter(doc) if doc else None
+
+    def put_chapter(self, chapter: Chapter) -> None:
+        self._chapters.replace_one(
+            {"_id": chapter.id}, _chapter_doc(chapter), upsert=True
+        )
+
+    def list_chapters(self, project_id: str) -> tuple[Chapter, ...]:
+        cursor = self._chapters.find({"project_id": project_id}).sort(
+            "position", ASCENDING
+        )
+        return tuple(_to_chapter(doc) for doc in cursor)
+
+    def replace_chapter_metadata(
+        self, project_id: str, chapters: tuple[Chapter, ...]
+    ) -> None:
+        current_ids = {
+            doc["_id"] for doc in self._chapters.find(
+                {"project_id": project_id}, {"_id": 1}
+            )
+        }
+        if current_ids != {chapter.id for chapter in chapters}:
+            raise DraftSetChanged("chapter set changed during write")
+        for index, chapter in enumerate(chapters, start=1):
+            self._chapters.update_one(
+                {"_id": chapter.id, "project_id": project_id},
+                {"$set": {"position": -index}},
+            )
+        for chapter in chapters:
+            self._chapters.update_one(
+                {"_id": chapter.id, "project_id": project_id},
+                {"$set": {
+                    "title": chapter.title,
+                    "archived": chapter.archived,
+                    "position": chapter.position,
+                }},
+            )
+
+    def replace_hierarchy(
+        self,
+        project_id: str,
+        chapters: tuple[Chapter, ...],
+        drafts: tuple[Draft, ...],
+    ) -> None:
+        # The pre-v1.8.9 project-wide position index conflicts with parent-scoped
+        # Scene positions and is obsolete once this maintenance migration starts.
+        try:
+            self._drafts.drop_index("uniq_draft_position")
+        except OperationFailure:
+            pass
+        if self._use_transactions:
+            with self._client.start_session() as session:
+                with session.start_transaction():
+                    self._replace_hierarchy(
+                        project_id, chapters, drafts, session=session
+                    )
+        else:
+            before_chapters = tuple(self._chapters.find({"project_id": project_id}))
+            before_drafts = tuple(self._drafts.find({"project_id": project_id}))
+            try:
+                self._replace_hierarchy(project_id, chapters, drafts, session=None)
+            except Exception:
+                self._chapters.delete_many({"project_id": project_id})
+                self._drafts.delete_many({"project_id": project_id})
+                if before_chapters:
+                    self._chapters.insert_many(before_chapters)
+                if before_drafts:
+                    self._drafts.insert_many(before_drafts)
+                raise
+        self._drafts.create_index(
+            [("chapter_id", ASCENDING), ("position", ASCENDING)],
+            unique=True,
+            name="uniq_scene_position",
+        )
+
+    def _replace_hierarchy(
+        self, project_id, chapters, drafts, *, session
+    ) -> None:
+        current_ids = {
+            doc["_id"] for doc in self._drafts.find(
+                {"project_id": project_id}, {"_id": 1}, session=session
+            )
+        }
+        if current_ids != {draft.id for draft in drafts}:
+            raise DraftSetChanged("draft set changed during hierarchy migration")
+        self._chapters.delete_many({"project_id": project_id}, session=session)
+        if chapters:
+            self._chapters.insert_many(
+                [_chapter_doc(chapter) for chapter in chapters], session=session
+            )
+        for draft in drafts:
+            result = self._drafts.replace_one(
+                {"_id": draft.id, "project_id": project_id},
+                _draft_doc(draft),
+                session=session,
+            )
+            if result.matched_count != 1:
+                raise DraftSetChanged("draft set changed during hierarchy migration")
+
     def put_draft(self, draft: Draft) -> None:
         self._drafts.replace_one({"_id": draft.id}, _draft_doc(draft), upsert=True)
 
@@ -291,7 +403,10 @@ class MongoCoreSotRepository:
         cursor = self._drafts.find({"project_id": project_id}).sort("_id", ASCENDING)
         drafts = tuple(_to_draft(doc) for doc in cursor)
         if drafts and all(draft.position is not None for draft in drafts):
-            return tuple(sorted(drafts, key=lambda draft: draft.position))
+            return tuple(sorted(
+                drafts,
+                key=lambda draft: (draft.chapter_id or "", draft.position),
+            ))
         return drafts
 
     def replace_draft_metadata(
@@ -334,7 +449,12 @@ class MongoCoreSotRepository:
                 {"_id": draft.id, "project_id": project_id},
                 {
                     "$set": {
-                        "unit_kind": str(draft.unit_kind),
+                        "unit_kind": (
+                            str(draft.unit_kind)
+                            if draft.unit_kind is not None
+                            else None
+                        ),
+                        "chapter_id": draft.chapter_id,
                         "position": draft.position,
                     }
                 },
@@ -649,12 +769,33 @@ def _to_project_brief(doc: dict) -> ProjectBriefVersion:
     )
 
 
+def _chapter_doc(chapter: Chapter) -> dict:
+    return {
+        "_id": chapter.id,
+        "project_id": chapter.project_id,
+        "title": chapter.title,
+        "archived": chapter.archived,
+        "position": chapter.position,
+    }
+
+
+def _to_chapter(doc: dict) -> Chapter:
+    return Chapter(
+        id=doc["_id"],
+        project_id=doc["project_id"],
+        title=doc["title"],
+        archived=doc["archived"],
+        position=doc["position"],
+    )
+
+
 def _draft_doc(draft: Draft) -> dict:
     return {
         "_id": draft.id,
         "project_id": draft.project_id,
         "title": draft.title,
         "archived": draft.archived,
+        "chapter_id": draft.chapter_id,
         "unit_kind": str(draft.unit_kind) if draft.unit_kind is not None else None,
         "position": draft.position,
     }
@@ -666,6 +807,7 @@ def _to_draft(doc: dict) -> Draft:
         project_id=doc["project_id"],
         title=doc["title"],
         archived=doc["archived"],
+        chapter_id=doc.get("chapter_id"),
         unit_kind=(
             UnitKind(doc["unit_kind"])
             if doc.get("unit_kind") is not None

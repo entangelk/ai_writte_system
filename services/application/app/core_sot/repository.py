@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from services.application.app.core_sot.models import (
+    Chapter,
     Draft,
     DraftVersion,
     Project,
@@ -55,6 +56,8 @@ class CoreSotRepository(Protocol):
 
     def next_project_brief_version_id(self) -> str: ...
 
+    def next_chapter_id(self) -> str: ...
+
     def next_draft_id(self) -> str: ...
 
     def next_version_id(self) -> str: ...
@@ -74,6 +77,23 @@ class CoreSotRepository(Protocol):
     def purge_project(self, project_id: str) -> None: ...
 
     def purge_draft(self, project_id: str, draft_id: str) -> None: ...
+
+    def get_chapter(self, chapter_id: str) -> Chapter | None: ...
+
+    def put_chapter(self, chapter: Chapter) -> None: ...
+
+    def list_chapters(self, project_id: str) -> tuple[Chapter, ...]: ...
+
+    def replace_chapter_metadata(
+        self, project_id: str, chapters: tuple[Chapter, ...]
+    ) -> None: ...
+
+    def replace_hierarchy(
+        self,
+        project_id: str,
+        chapters: tuple[Chapter, ...],
+        drafts: tuple[Draft, ...],
+    ) -> None: ...
 
     def get_current_project_brief(
         self, project_id: str

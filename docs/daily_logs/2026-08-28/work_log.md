@@ -443,3 +443,54 @@ Blocking 6건을 닫는다. B5(소유자 면 503 재시도)는 오너 결정 **�
 - 계획 문서 **112개**, 결정 브리프 **94개** 카운터와 루트/계획 README 주장이 일치한다.
 - 세부 결정 확정 뒤 SoT **v1.8.9**와 README 버전 주장을 함께 갱신했다.
 - `git diff --check` 통과.
+
+---
+
+## Session 9 — Chapter/Scene 정본 모델·migration 첫 슬라이스
+
+### Goals
+
+- 별도 Chapter와 parent별 Scene 순서 불변식을 Core SOT에 세운다.
+- 기존 평면 Draft의 ID·version·snapshot·본문을 건드리지 않는 one-shot migration을 구현한다.
+
+### Completed work
+
+- metadata-only `Chapter{id,project_id,title,archived,position}`와 legacy-only
+  `Draft.unit_kind`, runtime `Draft.chapter_id` 경계를 추가했다.
+- in-memory/Mongo repository에 Chapter CRUD, Chapter reorder, hierarchy 원자 교체, project purge의
+  Chapter 정리를 추가했다. Mongo migration은 낡은 project-wide position index를 제거하고
+  `(chapter_id,position)` unique index로 교체한다.
+- `ChapterSceneHierarchyMigration`이 기존 chapter Draft를 같은 제목 Chapter 아래 `본문` Scene으로,
+  뒤따르는 scene/other를 같은 Chapter로, 선행 chapter 없는 묶음을 `미분류` Chapter로 결정적으로
+  이관한다. Draft와 하위 정본 ID는 그대로 둔다.
+- 신규 실행 스크립트 `scripts/migrate_chapter_scene_hierarchy.py`를 추가했다.
+- Chapter/Scene 독립 연속 순서, 교차 장 reorder 거부, 독립 reorder 정상 경로, 결정적 migration,
+  정상 계층 no-op의 양방향 회귀 5개를 추가했다.
+
+### Issues found
+
+- 기존 Mongo unique `(project_id,position)`은 장마다 Scene position이 1부터 시작하는 새 계약과
+  공존할 수 없다. migration maintenance window에서 낡은 index를 제거한 뒤 새 parent-scoped
+  index를 설치하도록 했다.
+- D3=C는 데이터 삭제가 아니라 legacy 이중계약이어서 runtime 분기가 계속 남는다. 확정한 D3=A가
+  migration 뒤 단일 계층 계약으로 수렴한다.
+
+### Decisions
+
+- `unit_kind`는 migration 입력을 읽기 위해 내부 모델에만 임시 nullable로 남기고, 신규 Scene은
+  `unit_kind=None`으로 만든다. 공개 payload 제거는 API 슬라이스에서 수행한다.
+- 첫 슬라이스는 정본 불변식과 migration만 잠근다. 공개 API·UI·Writing·export·cascade purge는
+  이 기반 위의 후속 슬라이스로 분리한다.
+
+### Verification
+
+- 신규 집중 회귀: `tests/test_chapter_hierarchy.py` **5/5**.
+- 기존 ordered-unit 순수 도메인 회귀 **11개 연속 통과** 후 이 머신의 TestClient 셀에서 장시간
+  대기해 90초 상한으로 중단했다. 실패 출력은 없었고 API 슬라이스에서 해당 표면을 다시 실행한다.
+- Core SOT + migration script mypy: **9 source files, no issues**.
+- `py_compile` 및 `git diff --check` 통과.
+
+### Next steps
+
+- Chapter/Scene 공개 API와 계층 payload를 추가하고 기존 평면 API를 폐기한다.
+- 프론트 목록·생성·재정렬을 새 계층 payload로 이관한다.

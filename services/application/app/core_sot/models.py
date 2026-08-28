@@ -40,6 +40,17 @@ class Project:
 
 
 @dataclass(frozen=True, slots=True)
+class Chapter:
+    """Metadata-only parent for ordered Scene drafts (SoT v1.8.9)."""
+
+    id: str
+    project_id: str
+    title: str
+    archived: bool = False
+    position: int = 1
+
+
+@dataclass(frozen=True, slots=True)
 class ProjectBriefVersion:
     id: str
     project_id: str
@@ -68,8 +79,12 @@ class Draft:
     project_id: str
     title: str
     archived: bool = False
+    # v1.8.9: every runtime Scene belongs to one Chapter. ``None`` remains only
+    # while the explicit flat-unit migration is inspecting legacy rows.
+    chapter_id: str | None = None
     # ``None`` exists only while the explicit W3 legacy migration is inspecting
-    # pre-v1.7.14 documents. Every runtime-created/migrated Draft has both fields.
+    # pre-v1.8.9 documents. ``unit_kind`` is legacy migration input only after
+    # Chapter→Scene hierarchy; new runtime Scenes leave it unset.
     unit_kind: UnitKind | None = None
     position: int | None = None
 

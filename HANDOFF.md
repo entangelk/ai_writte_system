@@ -349,8 +349,9 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 >   **mutation 표는 work_log 세션 6~7 에 있다.**
 > - **hover 토큰 규칙**: `--action-primary-hover` 는 본색과 **램프 두 단계 이상** 차이(현재
 >   blue-600→blue-800). 한 단계는 hover 로 안 보인다 — designTokens 셀이 잠근다.
-> - **다음 순서**: 장→장면 계층 모델/마이그레이션부터 구현. 장 cascade 삭제는 브리프 D7에
->   포함한다. 그 다음이 텍스트+화살표 링크 가시성 →
+> - **다음 순서**: 장→장면 계층 모델/마이그레이션 첫 슬라이스 구현됨 — 다음은 공개 API와
+>   프론트 계층 목록·생성·재정렬. 그 뒤 Writing next Scene → export → D7 cascade 삭제.
+>   계층화가 끝나면 텍스트+화살표 링크 가시성 →
 >   메모 기능(08-27 순서 그대로).
 
 > **★★ 2026-08-27 세션 4 반영 — D5-2 조건 폐쇄 + 보강 1·3·4 완료. 여기서 시작한다.**

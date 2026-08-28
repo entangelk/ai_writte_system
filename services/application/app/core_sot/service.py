@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from services.application.app.core_sot.models import (
+    Chapter,
     Draft,
     DraftVersion,
     DraftVersionDetail,
@@ -101,11 +102,13 @@ class InMemoryCoreSotRepository:
     def __init__(self) -> None:
         self._project_seq = 0
         self._project_brief_version_seq = 0
+        self._chapter_seq = 0
         self._draft_seq = 0
         self._version_seq = 0
         self._snapshot_seq = 0
         self._source_ref_seq = 0
         self.projects: dict[str, Project] = {}
+        self.chapters: dict[str, Chapter] = {}
         self.project_brief_versions: dict[str, ProjectBriefVersion] = {}
         self._project_brief_ids_by_project: dict[str, list[str]] = {}
         self._project_brief_request_index: dict[tuple[str, str], str] = {}
@@ -127,6 +130,10 @@ class InMemoryCoreSotRepository:
     def next_project_brief_version_id(self) -> str:
         self._project_brief_version_seq += 1
         return f"project-brief-version-{self._project_brief_version_seq}"
+
+    def next_chapter_id(self) -> str:
+        self._chapter_seq += 1
+        return f"chapter-{self._chapter_seq}"
 
     def next_draft_id(self) -> str:
         self._draft_seq += 1
@@ -201,6 +208,12 @@ class InMemoryCoreSotRepository:
         for draft_id in draft_ids:
             self.drafts.pop(draft_id, None)
             self._version_ids_by_draft.pop(draft_id, None)
+
+        self.chapters = {
+            cid: chapter
+            for cid, chapter in self.chapters.items()
+            if chapter.project_id != project_id
+        }
 
         ref_ids = [
             rid
@@ -308,6 +321,57 @@ class InMemoryCoreSotRepository:
     def get_draft(self, draft_id: str) -> Draft | None:
         return self.drafts.get(draft_id)
 
+    def get_chapter(self, chapter_id: str) -> Chapter | None:
+        return self.chapters.get(chapter_id)
+
+    def put_chapter(self, chapter: Chapter) -> None:
+        self.chapters[chapter.id] = chapter
+
+    def list_chapters(self, project_id: str) -> tuple[Chapter, ...]:
+        return tuple(sorted(
+            (chapter for chapter in self.chapters.values()
+             if chapter.project_id == project_id),
+            key=lambda chapter: chapter.position,
+        ))
+
+    def replace_chapter_metadata(
+        self, project_id: str, chapters: tuple[Chapter, ...]
+    ) -> None:
+        current_ids = {
+            chapter.id for chapter in self.chapters.values()
+            if chapter.project_id == project_id
+        }
+        if current_ids != {chapter.id for chapter in chapters}:
+            raise DraftSetChanged("chapter set changed during write")
+        for chapter in chapters:
+            self.chapters[chapter.id] = chapter
+
+    def replace_hierarchy(
+        self,
+        project_id: str,
+        chapters: tuple[Chapter, ...],
+        drafts: tuple[Draft, ...],
+    ) -> None:
+        before_chapters = dict(self.chapters)
+        before_drafts = dict(self.drafts)
+        try:
+            for chapter in chapters:
+                if chapter.project_id != project_id:
+                    raise DraftSetChanged("chapter belongs to another project")
+                self.chapters[chapter.id] = chapter
+            current_draft_ids = {
+                draft.id for draft in self.drafts.values()
+                if draft.project_id == project_id
+            }
+            if current_draft_ids != {draft.id for draft in drafts}:
+                raise DraftSetChanged("draft set changed during hierarchy migration")
+            for draft in drafts:
+                self.drafts[draft.id] = draft
+        except Exception:
+            self.chapters = before_chapters
+            self.drafts = before_drafts
+            raise
+
     def put_draft(self, draft: Draft) -> None:
         self.drafts[draft.id] = draft
 
@@ -316,7 +380,10 @@ class InMemoryCoreSotRepository:
             draft for draft in self.drafts.values() if draft.project_id == project_id
         )
         if drafts and all(draft.position is not None for draft in drafts):
-            return tuple(sorted(drafts, key=lambda draft: draft.position))
+            return tuple(sorted(
+                drafts,
+                key=lambda draft: (draft.chapter_id or "", draft.position),
+            ))
         return drafts
 
     def replace_draft_metadata(
@@ -467,6 +534,41 @@ class CoreSotService:
         self._repo.put_project(project)
         return project
 
+    def create_chapter(self, *, project_id: str, title: str) -> Chapter:
+        project = self._require_project(project_id)
+        if project.archived:
+            raise Archived("project is archived")
+        chapters = self._repo.list_chapters(project_id)
+        self._require_ordered_chapters(chapters)
+        chapter = Chapter(
+            id=self._repo.next_chapter_id(),
+            project_id=project_id,
+            title=title,
+            position=len(chapters) + 1,
+        )
+        self._repo.put_chapter(chapter)
+        return chapter
+
+    def create_scene(
+        self, *, project_id: str, chapter_id: str, title: str
+    ) -> Draft:
+        project = self._require_project(project_id)
+        if project.archived:
+            raise Archived("project is archived")
+        chapter = self._require_chapter(project_id, chapter_id)
+        if chapter.archived:
+            raise Archived("chapter is archived")
+        scenes = self.list_scenes(project_id=project_id, chapter_id=chapter_id)
+        scene = Draft(
+            id=self._repo.next_draft_id(),
+            project_id=project_id,
+            chapter_id=chapter_id,
+            title=title,
+            position=len(scenes) + 1,
+        )
+        self._repo.put_draft(scene)
+        return scene
+
     def create_draft(
         self,
         *,
@@ -610,6 +712,87 @@ class CoreSotService:
         drafts = self._repo.list_drafts(project_id)
         self._require_ordered_drafts(drafts)
         return drafts
+
+    def list_chapters(self, *, project_id: str) -> tuple[Chapter, ...]:
+        self._require_project(project_id)
+        chapters = self._repo.list_chapters(project_id)
+        self._require_ordered_chapters(chapters)
+        return chapters
+
+    def list_scenes(
+        self, *, project_id: str, chapter_id: str
+    ) -> tuple[Draft, ...]:
+        self._require_project(project_id)
+        self._require_chapter(project_id, chapter_id)
+        scenes = tuple(
+            draft for draft in self._repo.list_drafts(project_id)
+            if draft.chapter_id == chapter_id
+        )
+        self._require_ordered_scenes(scenes, chapter_id=chapter_id)
+        return tuple(sorted(scenes, key=lambda draft: draft.position))
+
+    def reorder_chapters(
+        self, *, project_id: str, ordered_chapter_ids: tuple[str, ...]
+    ) -> tuple[Chapter, ...]:
+        project = self._require_project(project_id)
+        if project.archived:
+            raise Archived("project is archived")
+        current = self.list_chapters(project_id=project_id)
+        current_ids = tuple(chapter.id for chapter in current)
+        if (
+            len(ordered_chapter_ids) != len(current_ids)
+            or len(set(ordered_chapter_ids)) != len(ordered_chapter_ids)
+            or set(ordered_chapter_ids) != set(current_ids)
+        ):
+            raise InvalidDraftOrder(
+                "ordered_chapter_ids must be the complete chapter set"
+            )
+        if ordered_chapter_ids == current_ids:
+            return current
+        by_id = {chapter.id: chapter for chapter in current}
+        reordered = tuple(
+            replace(by_id[chapter_id], position=index)
+            for index, chapter_id in enumerate(ordered_chapter_ids, start=1)
+        )
+        self._repo.replace_chapter_metadata(project_id, reordered)
+        return self.list_chapters(project_id=project_id)
+
+    def reorder_scenes(
+        self,
+        *,
+        project_id: str,
+        chapter_id: str,
+        ordered_draft_ids: tuple[str, ...],
+    ) -> tuple[Draft, ...]:
+        project = self._require_project(project_id)
+        if project.archived:
+            raise Archived("project is archived")
+        chapter = self._require_chapter(project_id, chapter_id)
+        if chapter.archived:
+            raise Archived("chapter is archived")
+        current = self.list_scenes(project_id=project_id, chapter_id=chapter_id)
+        current_ids = tuple(draft.id for draft in current)
+        if (
+            len(ordered_draft_ids) != len(current_ids)
+            or len(set(ordered_draft_ids)) != len(ordered_draft_ids)
+            or set(ordered_draft_ids) != set(current_ids)
+        ):
+            raise InvalidDraftOrder(
+                "ordered_draft_ids must be the complete scene set"
+            )
+        if ordered_draft_ids == current_ids:
+            return current
+        by_id = {draft.id: draft for draft in current}
+        reordered_subset = {
+            draft_id: replace(by_id[draft_id], position=index)
+            for index, draft_id in enumerate(ordered_draft_ids, start=1)
+        }
+        all_drafts = tuple(
+            reordered_subset.get(draft.id, draft)
+            for draft in self._repo.list_drafts(project_id)
+        )
+        self._repo.replace_draft_metadata(project_id, all_drafts)
+        return self.list_scenes(project_id=project_id, chapter_id=chapter_id)
 
     def reorder_drafts(
         self, *, project_id: str, ordered_draft_ids: tuple[str, ...]
@@ -1014,6 +1197,12 @@ class CoreSotService:
             raise NotFound("draft not found")
         return draft
 
+    def _require_chapter(self, project_id: str, chapter_id: str) -> Chapter:
+        chapter = self._repo.get_chapter(chapter_id)
+        if chapter is None or chapter.project_id != project_id:
+            raise NotFound("chapter not found")
+        return chapter
+
     def _require_active_project_and_draft(self, project_id: str, draft_id: str) -> None:
         project = self._require_project(project_id)
         draft = self._require_draft(project_id, draft_id)
@@ -1037,4 +1226,35 @@ class CoreSotService:
         if positions != tuple(range(1, len(drafts) + 1)):
             raise DraftOrderIntegrityError(
                 "draft positions must be a contiguous permutation"
+            )
+
+    @staticmethod
+    def _require_ordered_chapters(chapters: tuple[Chapter, ...]) -> None:
+        if any(
+            not _is_int(chapter.position) or chapter.position < 1
+            for chapter in chapters
+        ):
+            raise DraftOrderIntegrityError("chapter positions are invalid")
+        positions = tuple(sorted(chapter.position for chapter in chapters))
+        if positions != tuple(range(1, len(chapters) + 1)):
+            raise DraftOrderIntegrityError(
+                "chapter positions must be a contiguous permutation"
+            )
+
+    @staticmethod
+    def _require_ordered_scenes(
+        scenes: tuple[Draft, ...], *, chapter_id: str
+    ) -> None:
+        if any(
+            draft.chapter_id != chapter_id
+            or draft.position is None
+            or not _is_int(draft.position)
+            or draft.position < 1
+            for draft in scenes
+        ):
+            raise DraftOrderIntegrityError("scene hierarchy migration is required")
+        positions = tuple(sorted(draft.position for draft in scenes))
+        if positions != tuple(range(1, len(scenes) + 1)):
+            raise DraftOrderIntegrityError(
+                "scene positions must be a contiguous permutation within chapter"
             )
