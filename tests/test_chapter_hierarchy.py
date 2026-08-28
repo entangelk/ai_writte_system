@@ -20,6 +20,7 @@ from services.application.app.core_sot.models import Draft, UnitKind
 from services.application.app.core_sot.service import (
     Archived,
     CoreSotService,
+    DraftOrderIntegrityError,
     InMemoryCoreSotRepository,
     InvalidDraftOrder,
 )
@@ -73,6 +74,20 @@ class ChapterHierarchyContractTest(unittest.TestCase):
         self.assertEqual([d.id for d in self.service.list_scenes(
             project_id=self.project.id, chapter_id=first.id)], [one.id, two.id])
         self.assertEqual(other.position, 1)  # over-strict: position is per Chapter.
+
+    def test_legacy_drafts_fail_closed_at_the_service_boundary(self):
+        # 검증 B1(2026-08-28): migration 전 평면 Draft는 서비스 읽기 경계에서
+        # 이미 거부된다(라우터 payload 가드와 2층 방어 — 각 층을 따로 잠근다).
+        # 장면이 하나도 없는 프로젝트는 legacy가 아니라 빈 정상 상태다.
+        empty = self.service.create_project(name="빈 작품")
+        self.assertEqual(self.service.list_drafts(project_id=empty.id), ())
+
+        self.repo.put_draft(Draft(
+            id="legacy-flat", project_id=self.project.id,
+            title="평면 원고", unit_kind=UnitKind.SCENE, position=1,
+        ))
+        with self.assertRaises(DraftOrderIntegrityError):
+            self.service.list_drafts(project_id=self.project.id)
 
     def test_reorder_rejects_a_scene_from_another_chapter_without_write(self):
         first = self.service.create_chapter(
