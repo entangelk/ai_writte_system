@@ -374,6 +374,11 @@ Blocking 6건을 닫는다. B5(소유자 면 503 재시도)는 오너 결정 **�
 
 - 집중: `test_draft_purge` 9셀 · `test_owner_project_purge` 7셀 · `test_core_sot_mongo`
   79/79(receipt 단정 포함) · `test_application_api` 전수 · `ProjectSettingsPage` 7셀.
+- **최종 전수(보강 완료 후)**: backend **2546 passed / 4 skipped / 2907 subtests**
+  (test-mongo ON — 셀 +2: B2 인메모리 receipts·B3 종료 잡) · frontend **388/388**
+  (+2: uncertain·보관 실패) · `tsc --noEmit` clean · build 439.59 kB. docs 인덱스
+  카운터 갱신(258건/58일치·판정 분포 183/73/2·v1.8.8) — 검증 기록 등재로 낡은
+  카운터를 인덱스 가드가 잡았다.
 - 보강 mutation 4종 — 검증이 뚫은 무셀 방향 그대로 되돌려 **전부 물림**을 확인:
 
 | # | 방향 | mutation | 재실패한 셀 |
