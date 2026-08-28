@@ -992,10 +992,36 @@ main {
   border-bottom: 1px solid var(--border-hairline);
 }
 
-.rail-drawer-title {
-  margin: 0;
-  font-size: var(--type-subhead);
+.rail-drawer-tabs {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.rail-drawer-tabs button {
+  min-height: 3.25rem;
+  padding: 0.65rem 0.8rem;
+  font-size: var(--type-small);
   font-weight: 700;
+  color: var(--text-muted);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.rail-drawer-tabs button[aria-selected="true"] {
+  color: var(--text-on-accent);
+  background: var(--action-primary);
+  border-color: var(--action-primary);
+}
+
+.rail-drawer-tabs button:hover:not([aria-selected="true"]),
+.rail-drawer-tabs button:focus-visible:not([aria-selected="true"]) {
+  color: var(--action-primary-hover);
+  background: var(--tint-accent-soft);
+  border-color: var(--border-control);
 }
 
 .rail-drawer-close {
@@ -1021,10 +1047,10 @@ main {
 }
 
 .rail-dock button {
-  min-width: 4.75rem;
-  min-height: 3.5rem;
-  padding: 0.75rem 0.65rem;
-  font-size: var(--type-small);
+  min-width: 5.5rem;
+  min-height: 4.25rem;
+  padding: 1rem 0.8rem;
+  font-size: var(--type-base);
   color: var(--text-muted);
   background: transparent;
   border: 0;

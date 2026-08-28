@@ -1223,7 +1223,7 @@ describe("DraftEditor", () => {
 
     expect(page).toHaveClass("workspace-page", "editor-page");
     expect(page).not.toHaveClass("page-enter");
-    expect(screen.getByRole("tablist", { name: "집필 도구 선택" }))
+    expect(screen.getByLabelText("집필 도구 선택"))
       .toHaveClass("rail-dock");
   });
 
@@ -1282,6 +1282,35 @@ describe("DraftEditor", () => {
       screen.queryByRole("button", { name: "이어쓰기 생성" }),
     ).not.toBeInTheDocument();
     expect(screen.getByLabelText("원고 본문")).toHaveValue("기존 본문!");
+  });
+
+  it("switches panels from the drawer header and keeps the last tab selected after close", async () => {
+    // under-strict: 헤더 탭이 없거나 닫을 때 panel 상태를 writing 기본값으로 버리면 실패한다.
+    // over-strict: 헤더 표시만 만들고 실제 패널·우측 독 선택을 연동하지 않아도 실패한다.
+    mockFetch(
+      { body: project },
+      { body: draft },
+      { body: { versions: [version1] } },
+      { body: detail(version1, "기존 본문") },
+    );
+    renderEditor("/projects/p1/drafts/d1?panel=review");
+    await screen.findByLabelText("원고 본문");
+
+    const drawerTabs = screen.getByRole("tablist", {
+      name: "열린 집필 도구 전환",
+    });
+    expect(within(drawerTabs).getAllByRole("tab")).toHaveLength(3);
+    await userEvent.click(within(drawerTabs).getByRole("tab", { name: "분석" }));
+    expect(screen.getByRole("button", { name: "이 원고 분석" })).toBeInTheDocument();
+    expect(within(drawerTabs).getByRole("tab", { name: "분석" }))
+      .toHaveAttribute("aria-selected", "true");
+
+    await userEvent.click(screen.getByRole("button", { name: "패널 닫기" }));
+    const dock = screen.getByRole("tablist", { name: "집필 도구 선택" });
+    expect(within(dock).getByRole("tab", { name: "분석" }))
+      .toHaveAttribute("aria-selected", "true");
+    expect(within(dock).getByRole("tab", { name: /이어쓰기/ }))
+      .toHaveAttribute("aria-selected", "false");
   });
 
   it("keeps the completion badge lit while the drawer is closed, clearing it only when the writing tab is open (드로어 배지 회귀 방어)", async () => {

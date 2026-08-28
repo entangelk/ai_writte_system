@@ -37,6 +37,14 @@ const DEFINITIVE_SAVE_FAILURES = new Set([400, 404, 409, 422]);
 /** 저장 기록에서 접지 않고 바로 내놓는 최신 version 수 (오너 2026-08-27). */
 const RECENT_VERSION_COUNT = 5;
 
+type ToolPanel = "writing" | "analysis" | "review";
+
+const TOOL_PANELS: ToolPanel[] = ["writing", "analysis", "review"];
+
+function toolPanelLabel(panel: ToolPanel): string {
+  return panel === "writing" ? "이어쓰기" : panel === "analysis" ? "분석" : "검토";
+}
+
 function latestOf(versions: DraftVersion[]): DraftVersion | null {
   return versions.reduce<DraftVersion | null>(
     (selected, version) =>
@@ -65,9 +73,14 @@ export function DraftEditor() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedPanel = searchParams.get("panel");
-  const activePanel = requestedPanel === "analysis" || requestedPanel === "review"
-    ? requestedPanel
-    : "writing";
+  const routedPanel: ToolPanel | null =
+    requestedPanel === "writing" ||
+    requestedPanel === "analysis" ||
+    requestedPanel === "review"
+      ? requestedPanel
+      : null;
+  const [lastPanel, setLastPanel] = useState<ToolPanel>(() => routedPanel ?? "writing");
+  const activePanel = routedPanel ?? lastPanel;
   // 오버레이 드로어(2026-08-26): `panel` param 이 있으면 그 탭으로 열리고, 없으면
   // 닫힌다(기본). 닫힘 상태에서도 아래 레이어들은 마운트 유지 — 변환·aria-hidden
   // 으로만 숨는다(래일 마크업의 주석 참조).
@@ -227,7 +240,12 @@ export function DraftEditor() {
     setPendingSelection(null);
   }, [pendingSelection, rawText]);
 
-  function selectPanel(panel: "writing" | "analysis" | "review"): void {
+  useEffect(() => {
+    if (routedPanel !== null) setLastPanel(routedPanel);
+  }, [routedPanel]);
+
+  function selectPanel(panel: ToolPanel): void {
+    setLastPanel(panel);
     const next = new URLSearchParams(searchParams);
     next.set("panel", panel);
     if (panel !== "review") {
@@ -717,8 +735,9 @@ export function DraftEditor() {
                 ref={dockRef}
                 role="tablist"
                 aria-label="집필 도구 선택"
+                aria-hidden={drawerOpen}
               >
-                {(["writing", "analysis", "review"] as const).map((panel) => (
+                {TOOL_PANELS.map((panel) => (
                   <button
                     key={panel}
                     type="button"
@@ -727,7 +746,7 @@ export function DraftEditor() {
                     aria-selected={activePanel === panel}
                     onClick={() => selectPanel(panel)}
                   >
-                    {panel === "writing" ? "이어쓰기" : panel === "analysis" ? "분석" : "검토"}
+                    {toolPanelLabel(panel)}
                     {panel === "writing" && unseenGenerationJobs > 0 && (
                       <span
                         className="tab-badge"
@@ -747,13 +766,31 @@ export function DraftEditor() {
                 aria-label="집필 도구"
               >
                 <div className="rail-drawer-header">
-                  <p className="rail-drawer-title">
-                    {activePanel === "writing"
-                      ? "이어쓰기"
-                      : activePanel === "analysis"
-                        ? "분석"
-                        : "검토"}
-                  </p>
+                  <nav
+                    className="rail-drawer-tabs"
+                    role="tablist"
+                    aria-label="열린 집필 도구 전환"
+                  >
+                    {TOOL_PANELS.map((panel) => (
+                      <button
+                        key={panel}
+                        type="button"
+                        role="tab"
+                        aria-selected={activePanel === panel}
+                        onClick={() => selectPanel(panel)}
+                      >
+                        {toolPanelLabel(panel)}
+                        {panel === "writing" && unseenGenerationJobs > 0 && (
+                          <span
+                            className="tab-badge"
+                            aria-label={`백그라운드 생성 완료 ${unseenGenerationJobs}건`}
+                          >
+                            {unseenGenerationJobs}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </nav>
                   <button
                     type="button"
                     className="rail-drawer-close"

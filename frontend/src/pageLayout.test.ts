@@ -170,9 +170,9 @@ describe("관리 상세와 편집기 도구 독 배치", () => {
     // under-strict: 종전 0.5rem padding+meta 글꼴로 돌아가면 크기 단정이 실패한다.
     // over-strict: 크기만 키우고 선택 강조를 없애도 selected 단정이 실패한다.
     const button = rules.find((rule) => rule.selector === ".rail-dock button");
-    expect(button?.body).toMatch(/min-width:\s*4\.75rem/);
-    expect(button?.body).toMatch(/min-height:\s*3\.5rem/);
-    expect(button?.body).toMatch(/font-size:\s*var\(--type-small\)/);
+    expect(button?.body).toMatch(/min-width:\s*5\.5rem/);
+    expect(button?.body).toMatch(/min-height:\s*4\.25rem/);
+    expect(button?.body).toMatch(/font-size:\s*var\(--type-base\)/);
 
     const selected = rules.find(
       (rule) => rule.selector === '.rail-dock button[aria-selected="true"]',

@@ -87,7 +87,7 @@ const MIGRATED: Record<string, string> = {
 
   ".back-link": "small",
   // 오너 2026-08-28 — 화면 가장자리 도구 탭은 축소 화면에서도 식별되어야 한다.
-  ".rail-dock button": "small",
+  ".rail-dock button": "base",
   ".version-empty": "small",
   ".empty-state span, .status-copy, .read-only-note": "small",
   ".alert": "small",
@@ -113,7 +113,7 @@ const MIGRATED: Record<string, string> = {
   ".scratch-recovery-text": "reading",
 
   ".rail-section-heading h2": "subhead",
-  ".rail-drawer-title": "subhead",
+  ".rail-drawer-tabs button": "small",
   ".version-panel-heading h2": "panel",
 
   // 10.4 — 화면 제목은 전 표면이 한 계단을 쓴다. 종전에는 `.page-heading h1`
