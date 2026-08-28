@@ -2131,6 +2131,8 @@ class FlatLegacyEscapePathReadsTest(unittest.TestCase):
 
     - under-strict: 평면 분기의 export를 503로 바꾸면 대피 경로 셀들이 재실패한다.
     - over-strict: 혼합 상태 검사를 없애면 fail-closed 셀이 재실패한다.
+    - 혼합 상태에서 versions만 503로 막는 중간 설계(평면은 열되 혼합은 막기)도
+      mixed-versions 셀이 잡는다(2차 재검증 N3 — V6b 무셀로 실증된 유인).
     """
 
     def _flat_app(self):
@@ -2184,6 +2186,37 @@ class FlatLegacyEscapePathReadsTest(unittest.TestCase):
 
         self.assertEqual(resp.status_code, 503)
         self.assertIn("migration is required", resp.json()["detail"])
+
+    def test_mixed_hierarchy_state_version_reads_stay_open(self):
+        # SoT v1.8.10이 "versions는 ordered set을 읽지 않아 혼합 상태에서도 200"이라고
+        # 못박은 분기의 셀(2차 재검증 N3). 생성 순서가 형상을 만든다 — 챕터를 먼저
+        # 두고(이때 drafts가 없어 create_chapter가 막지 않는다) 평면 draft를 얹으면
+        # migration이 챕터를 만들다 만 부분 상태와 같은 혼합이 된다.
+        service = CoreSotService(InMemoryCoreSotRepository())
+        project = service.create_project(name="혼합")
+        service.create_chapter(project_id=project.id, title="1장")
+        draft = service.create_draft(project_id=project.id, title="고아 평면")
+        service.save_draft(
+            project_id=project.id,
+            draft_id=draft.id,
+            raw_text="혼합 본문.",
+            idempotency_key="k1",
+        )
+        client = TestClient(create_app(service=service))
+
+        listed = client.get(f"/projects/{project.id}/drafts/{draft.id}/versions")
+        version_id = listed.json()["versions"][0]["id"]
+        detail = client.get(
+            f"/projects/{project.id}/drafts/{draft.id}/versions/{version_id}"
+        )
+        exported = client.get(
+            f"/projects/{project.id}/drafts/{draft.id}/versions/{version_id}/export"
+        )
+
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(exported.status_code, 200)
+        self.assertIn("혼합 본문.", exported.json()["body"])
 
 
 class ContextBudgetDefaultTest(unittest.TestCase):

@@ -167,8 +167,10 @@ draft purge보다 넓어진 파괴 범위를 잠근다.
 - 장 보관과 장면 보관은 별도 상태다. 유효 가시성은 `chapter.archived OR scene.archived`로
   계산하되 자식 필드를 자동 변경하지 않는다.
 - 장 unarchive 공개 경로는 제공하지 않는다. D8=A의 "장 보관 복구 가능"은 자식 Scene
-  상태를 보존한다는 **저장 성질**이지 공개 경로 약속이 아니며, unarchive는 project
-  unarchive(v1.5 MVP 범위 밖)와 동일하게 미제공이다(오너 결정 2026-08-29, 재검증 H1).
+  상태를 보존한다는 **저장 성질**이지 공개 경로 약속이 아니며, unarchive 상태 전이는
+  SoT v1.5 archive 정책(2026-06-28 확정 — "archived인 동안 차단"으로 한정해 unarchive
+  여지를 보존, 공개 경로를 약속한 적 없음)이 범위 밖으로 둔 축이라 project·장 모두
+  미제공이다(오너 결정 2026-08-29, 재검증 H1).
 - 활동 로그에는 장 생성·개명·재정렬·보관·삭제 action을 분류표에 명시적으로 등재한다.
 - 공개 API·OpenAPI·`schema.d.ts`·export manifest·WritingCandidate/receipt가 모두 영향권이다.
 - 계층화 구현은 `모델/마이그레이션 → 읽기/API → UI/reorder → Writing intent → export → 삭제`
