@@ -78,10 +78,15 @@ async def run_deployed_context_search_smoke(
     project = await _json(
         client.post("/projects", json={"name": "Phase 4 Deployed Smoke"})
     )
+    chapter = await _json(
+        client.post(
+            f"/projects/{project['id']}/chapters", json={"title": "1장"}
+        )
+    )
     draft = await _json(
         client.post(
             f"/projects/{project['id']}/drafts",
-            json={"title": "Smoke draft"},
+            json={"title": "Smoke draft", "chapter_id": chapter["id"]},
         )
     )
     saved = await _json(

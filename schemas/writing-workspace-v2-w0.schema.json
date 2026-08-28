@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://local.ai-writing-system/schemas/writing-workspace-v2-w0.schema.json",
   "title": "Writing Workspace V2 W0 public contract",
-  "description": "Schema catalog. Consumers MUST select an exact operation or entity through a #/$defs/... fragment; the permissive catalog root is never an endpoint schema.",
-  "x-contract-version": "v1.7.21",
+  "description": "Schema catalog. Consumers MUST select an exact operation or entity through a #/$defs/... fragment; the permissive catalog root is never an endpoint schema. v1.8.9 supersedes the flat ordered-unit shapes: the Scene (Draft) carries a required chapter_id, public unit_kind and the project-wide draft-order are removed, and ordering is Chapter/Scene parent-scoped (docs/plans/chapter-scene-hierarchy-decisions.md).",
+  "x-contract-version": "v1.8.9",
   "$defs": {
     "nonBlankString": {
       "type": "string",
@@ -15,9 +15,6 @@
         { "$ref": "#/$defs/nonBlankString" },
         { "type": "null" }
       ]
-    },
-    "unitKind": {
-      "enum": ["chapter", "scene", "other"]
     },
     "writingIntent": {
       "enum": ["append_current", "start_next_unit"]
@@ -136,17 +133,40 @@
     "draftV2": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "project_id", "title", "archived", "unit_kind", "position"],
+      "required": ["id", "project_id", "chapter_id", "title", "archived", "position"],
       "properties": {
         "id": { "$ref": "#/$defs/nonBlankString" },
         "project_id": { "$ref": "#/$defs/nonBlankString" },
+        "chapter_id": { "$ref": "#/$defs/nonBlankString" },
         "title": { "$ref": "#/$defs/nonBlankString" },
         "archived": { "type": "boolean" },
-        "unit_kind": { "$ref": "#/$defs/unitKind" },
         "position": { "type": "integer", "minimum": 1 }
       }
     },
-    "draftOrderPutRequest": {
+    "chapterOrderPutRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ordered_chapter_ids"],
+      "properties": {
+        "ordered_chapter_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonBlankString" }
+        }
+      }
+    },
+    "chapterOrderPutResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["chapters"],
+      "properties": {
+        "chapters": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/chapterV2" }
+        }
+      }
+    },
+    "sceneOrderPutRequest": {
       "type": "object",
       "additionalProperties": false,
       "required": ["ordered_draft_ids"],
@@ -158,12 +178,28 @@
         }
       }
     },
-    "draftOrderPutResponse": {
+    "sceneOrderPutResponse": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["drafts"],
+      "required": ["scenes"],
       "properties": {
-        "drafts": {
+        "scenes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/draftV2" }
+        }
+      }
+    },
+    "chapterV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "project_id", "title", "archived", "position", "scenes"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonBlankString" },
+        "project_id": { "$ref": "#/$defs/nonBlankString" },
+        "title": { "$ref": "#/$defs/nonBlankString" },
+        "archived": { "type": "boolean" },
+        "position": { "type": "integer", "minimum": 1 },
+        "scenes": {
           "type": "array",
           "items": { "$ref": "#/$defs/draftV2" }
         }
@@ -172,10 +208,9 @@
     "nextUnitSpec": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["title", "unit_kind", "goal"],
+      "required": ["title", "goal"],
       "properties": {
         "title": { "$ref": "#/$defs/nonBlankString" },
-        "unit_kind": { "$ref": "#/$defs/unitKind" },
         "goal": { "$ref": "#/$defs/nullableNonBlankString" }
       }
     },
@@ -256,14 +291,14 @@
     "savedWritingTarget": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["draft_id", "draft_version_id", "version_number", "snapshot_id", "content_hash", "unit_kind", "position"],
+      "required": ["draft_id", "draft_version_id", "version_number", "snapshot_id", "content_hash", "chapter_id", "position"],
       "properties": {
         "draft_id": { "$ref": "#/$defs/nonBlankString" },
         "draft_version_id": { "$ref": "#/$defs/nonBlankString" },
         "version_number": { "type": "integer", "minimum": 1 },
         "snapshot_id": { "$ref": "#/$defs/nonBlankString" },
         "content_hash": { "$ref": "#/$defs/nonBlankString" },
-        "unit_kind": { "$ref": "#/$defs/unitKind" },
+        "chapter_id": { "$ref": "#/$defs/nonBlankString" },
         "position": { "type": "integer", "minimum": 1 }
       }
     },

@@ -51,6 +51,11 @@ class DeployedContextSearchSmokeScriptTest(unittest.IsolatedAsyncioTestCase):
                 return _json_response({"id": "project-1", "name": "Smoke"})
             if (
                 request.method == "POST"
+                and request.url.path == "/projects/project-1/chapters"
+            ):
+                return _json_response({"id": "chapter-1"})
+            if (
+                request.method == "POST"
                 and request.url.path == "/projects/project-1/drafts"
             ):
                 return _json_response({"id": "draft-1", "project_id": "project-1"})
@@ -144,6 +149,8 @@ class DeployedContextSearchSmokeScriptTest(unittest.IsolatedAsyncioTestCase):
         async def handler(request):
             if request.method == "POST" and request.url.path == "/projects":
                 return _json_response({"id": "project-1"})
+            if request.url.path == "/projects/project-1/chapters":
+                return _json_response({"id": "chapter-1"})
             if request.url.path == "/projects/project-1/drafts":
                 return _json_response({"id": "draft-1"})
             if request.url.path == "/projects/project-1/drafts/draft-1/versions":
@@ -178,6 +185,8 @@ class DeployedContextSearchSmokeScriptTest(unittest.IsolatedAsyncioTestCase):
         async def handler(request):
             if request.method == "POST" and request.url.path == "/projects":
                 return _json_response({"id": "project-1"})
+            if request.url.path == "/projects/project-1/chapters":
+                return _json_response({"id": "chapter-1"})
             if request.url.path == "/projects/project-1/drafts":
                 return _json_response({"id": "draft-1"})
             if request.url.path == "/projects/project-1/drafts/draft-1/versions":

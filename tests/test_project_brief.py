@@ -477,27 +477,35 @@ class WorkspaceW0SchemaIntegrationTest(unittest.TestCase):
                     "uniqueItems"
                 ]
             )
-        # --- W3 ordered unit + Writing intent fragments (SC-01 final closure) ---
+        # --- W3→v1.8.9 계층 fragment (SC-01 closure, 2026-08-28 갱신) ---
         self.assertEqual(
             set(schemas["DraftPayload"]["required"]),
             set(self.catalog["draftV2"]["required"]),
         )
         self.assertEqual(
-            set(schemas["DraftOrderPutRequest"]["required"]),
-            set(self.catalog["draftOrderPutRequest"]["required"]),
+            set(schemas["ChapterOrderPutRequest"]["required"]),
+            set(self.catalog["chapterOrderPutRequest"]["required"]),
         )
         self.assertTrue(
-            schemas["DraftOrderPutRequest"]["properties"]["ordered_draft_ids"][
+            schemas["ChapterOrderPutRequest"]["properties"]["ordered_chapter_ids"][
                 "uniqueItems"
             ]
         )
         self.assertEqual(
-            set(schemas["DraftOrderPutResponse"]["required"]),
-            set(self.catalog["draftOrderPutResponse"]["required"]),
+            set(schemas["SceneOrderPutRequest"]["required"]),
+            set(self.catalog["sceneOrderPutRequest"]["required"]),
+        )
+        self.assertTrue(
+            schemas["SceneOrderPutRequest"]["properties"]["ordered_draft_ids"][
+                "uniqueItems"
+            ]
         )
         self.assertEqual(
-            schemas["UnitKind"]["enum"], self.catalog["unitKind"]["enum"]
+            set(schemas["ChapterPayload"]["required"]),
+            set(self.catalog["chapterV2"]["required"]),
         )
+        # v1.8.9: 공개 unit_kind 축은 제거됐다 — components 에 돌아오면 잡는다.
+        self.assertNotIn("UnitKind", schemas)
         self.assertEqual(
             schemas["WritingIntent"]["enum"], self.catalog["writingIntent"]["enum"]
         )
@@ -522,7 +530,13 @@ class WorkspaceW0SchemaIntegrationTest(unittest.TestCase):
         paths = self.openapi["paths"]
         self.assertIn("put", paths["/projects/{project_id}/brief"])
         self.assertIn("get", paths["/projects/{project_id}/brief/versions"])
-        self.assertIn("put", paths["/projects/{project_id}/draft-order"])
+        self.assertIn("put", paths["/projects/{project_id}/chapter-order"])
+        self.assertIn(
+            "put",
+            paths["/projects/{project_id}/chapters/{chapter_id}/scene-order"],
+        )
+        # v1.8.9: 평면 draft-order 는 공개 계약에서 제거됐다.
+        self.assertNotIn("/projects/{project_id}/draft-order", paths)
         self.assertIn("post", paths["/projects/{project_id}/writing/accept"])
 
     def test_endpoints_do_not_reference_catalog_root(self):
@@ -533,13 +547,22 @@ class WorkspaceW0SchemaIntegrationTest(unittest.TestCase):
         self.assertIn("PutProjectBriefRequest", encoded)
         self.assertIn("ProjectBriefPutResponse", encoded)
         # W3 endpoints reference their named components, never the catalog root.
-        reorder = json.dumps(
-            self.openapi["paths"]["/projects/{project_id}/draft-order"],
+        chapter_order = json.dumps(
+            self.openapi["paths"]["/projects/{project_id}/chapter-order"],
             sort_keys=True,
         )
-        self.assertNotIn("writing-workspace-v2-w0.schema.json", reorder)
-        self.assertIn("DraftOrderPutRequest", reorder)
-        self.assertIn("DraftOrderPutResponse", reorder)
+        self.assertNotIn("writing-workspace-v2-w0.schema.json", chapter_order)
+        self.assertIn("ChapterOrderPutRequest", chapter_order)
+        self.assertIn("ChapterOrderPutResponse", chapter_order)
+        scene_order = json.dumps(
+            self.openapi["paths"][
+                "/projects/{project_id}/chapters/{chapter_id}/scene-order"
+            ],
+            sort_keys=True,
+        )
+        self.assertNotIn("writing-workspace-v2-w0.schema.json", scene_order)
+        self.assertIn("SceneOrderPutRequest", scene_order)
+        self.assertIn("SceneOrderPutResponse", scene_order)
         accept = json.dumps(
             self.openapi["paths"]["/projects/{project_id}/writing/accept"],
             sort_keys=True,

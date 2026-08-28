@@ -99,7 +99,10 @@ def _shared_app():
     share one vector index (the same instance create_app owns)."""
     core_sot = CoreSotService(InMemoryCoreSotRepository())
     project = core_sot.create_project(name="Novel")
-    draft = core_sot.create_draft(project_id=project.id, title="Episode 1")
+    chapter = core_sot.create_chapter(project_id=project.id, title="1장")
+    draft = core_sot.create_scene(
+        project_id=project.id, chapter_id=chapter.id, title="Episode 1"
+    )
     saved = core_sot.save_draft(
         project_id=project.id,
         draft_id=draft.id,

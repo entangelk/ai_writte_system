@@ -1882,8 +1882,10 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # 64/89 가 됐다 — 아카이브(soft)와 구분되는 원고 단위 영구 삭제 경로.
         # 소유자 프로젝트 purge(같은 날)가 project tier 에 POST purge 를 더해
         # 65/91 이 됐다(관리자 아카이브는 admin tier).
-        self.assertEqual(len(by_tier["project"]), 65)
-        self.assertEqual(len(tiers), 91)
+        # Chapter→Scene 계층(2026-08-28, SoT v1.8.9)이 chapter 6경로를 project tier 에
+        # 더하고 평면 draft-order 를 제거해 70/96 이 됐다.
+        self.assertEqual(len(by_tier["project"]), 70)
+        self.assertEqual(len(tiers), 96)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:

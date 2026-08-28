@@ -597,8 +597,12 @@ class ReviewInboxApiTest(unittest.TestCase):
 
     def test_detail_resolves_source_ref_pointer_from_core_sot(self):
         client, analysis, memory, project_id = _build()
+        chapter = client.post(
+            f"/projects/{project_id}/chapters", json={"title": "1장"}
+        ).json()
         draft = client.post(
-            f"/projects/{project_id}/drafts", json={"title": "Episode 1"}
+            f"/projects/{project_id}/drafts",
+            json={"title": "Episode 1", "chapter_id": chapter["id"]},
         ).json()
         raw_text = "Ariel found the blue letter."
         saved = client.post(

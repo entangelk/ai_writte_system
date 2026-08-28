@@ -570,3 +570,67 @@ Blocking 6건을 닫는다. B5(소유자 면 503 재시도)는 오너 결정 **�
   검증한 뒤 실제 maintenance window에 적용한다.
 - TestClient가 정상 시작되는 환경에서 backend 전수와 Chapter API ASGI 관통을 재실행한다.
 - 구현 커밋 범위를 다른 작업자가 독립 검증한다.
+
+---
+
+## Session 11 — 독립 검증(불합격) Blocking 5건 보강 마감
+
+### Goals
+
+- 독립 검증 [`verifications/2026-08-28/chapter_scene_hierarchy.md`](../../verifications/2026-08-28/chapter_scene_hierarchy.md)
+  (판정 **불합격**)의 Blocking 5건을 폐쇄한다. 작업 AI가 B1~B4와 H2·H3을 구현하다 중단했고,
+  본 세션이 B5·전수 수습·기록물을 마감했다.
+
+### Completed work
+
+- **B1(작업 AI분 + 셀 보강)** — migration 전 평면 legacy Draft를 서비스 `list_drafts` 경계와 라우터
+  `_require_migrated_scene` 양쪽에서 쓰기 전 **503** `scene hierarchy migration is required`로 fail-closed.
+  Writing accept는 대상 draft의 장 귀속·보관 상태를 enrich 앞에 검사한다(보관 장 409 포함).
+  서비스 경계 셀을 신설해 2층 방어의 **각 층을 따로** 잠갔다.
+- **B5(본 세션)** — Chapter purge 503을 오너 ⓐ 패턴으로 전환: 보관 단계 실패(파괴 없음)만 재시도를
+  되살리고, 파기 단계 503은 재시도 버튼 제거·제목 입력·취소 잠금으로 uncertain 처리한다.
+  `purgeRequested` 플래그는 2단계 try 분리로 구조적으로 대체했다.
+- **B2·B3·H2·H3(작업 AI분)** — TXT 계층 export 단정, migration version/snapshot/본문 byte·archived
+  보존·부분 상태 fail-closed 셀, mongo chapter 대칭 셀 2종, App/ProjectSettings mock `/chapters`
+  이관, `report_budget_measure` chapter+scene 씨드.
+- **B4(작업 AI분 + 활동 수 보태기)** — SoT v1.8.9 "(구현 진행)"→완료, Product Shell에서
+  "draft/chapter/scene 계층은 미확정이다" 제거·계층 조항·총 96 operation 등재. 본 세션이 활동
+  분류표 수(canonical **25**·EXCLUDED **29**)를 조항에 보탰다.
+- **전수 재개에서 발견한 잔여 이관(본 세션)** — 전수를 돌리지 않아 숨어 있던 B1 여파 4곳:
+  mongo 셀 4건(round-trip 3클래스·start_next_unit rollback — 죽은 `unit_kind=` 인자 포함),
+  `ordered_units` OU-10(legacy 메타데이터 축은 repo 읽기로), `writing_scratch` accept 셀 4건,
+  프론트 활동 라벨표(장 5종 라벨·`draft_order_changed` 제거·`chapter` 비링크 등재 — 연결 가드가
+  잡았다). 이 머신에서 ASGI/TestClient 셀은 **대기 없이 정상 실행**됐다(세션 10의 "시작 단계
+  대기" 주장은 이 환경에서 재현되지 않았다).
+
+### Decisions
+
+- B5의 uncertain 잠금은 새 결정이 아니라 오너 ⓐ(2026-08-28, 프로젝트 purge D4=A·세션 7 B5의
+  대칭 적용)와 SoT v1.8.9 리터럴 "503 uncertain 잠금"(v1.8.8이 재시도 금지로 정의)을 그대로
+  이어받은 시행이다.
+
+### Mutation verification
+
+모든 mutation은 체크포인트 커밋 위 clean tree에서 적용하고 `git checkout --` 로 복원했다(매번
+`git status --short` 0건 확인).
+
+| # | 방향 | mutation | 재실패한 셀 |
+|---|---|---|---|
+| M-A | under(B5) | 503에서 `setChapterPurgeUncertain(true)` 제거 | `locks the chapter purge behind uncertain on a 503` |
+| M-B | over(B5) | 보관 단계 catch에도 uncertain 설정 | `revives the chapter purge retry when only the archive step failed` |
+| M-C | under(B1) | `list_drafts` legacy 거부를 legacy 반환으로 복귀 | `test_legacy_drafts_fail_closed_at_the_service_boundary` |
+| M-D | under(B1) | `_draft_payload`에서 `_require_migrated_scene` 호출 제거 | `test_legacy_scene_crud_fails_closed_with_503_before_any_write`의 `get_draft` subtest — 목록 subtest는 서비스층이 흡수(2층 방어 확인) |
+| M-E | under(B1) | accept legacy 가드 `or`→`and` 완화 | `test_append_current_targeting_legacy_draft_is_503` |
+
+### Verification
+
+- backend 전수(test-mongo ON): 아래 Reproduction 참조 — 최종 수치는 커밋 시점 기록.
+- mongo 집중: `test_core_sot_mongo` **85/85**(+신규 6), `test_writing_generation_job_mongo` **14/14**.
+- frontend 전수 **383/383**(exit 0) · `npm run build` 통과(진입 442.34 kB) · `schema.d.ts` 재생성 0줄 차.
+- `tests/test_docs_indexes.py` 13 passed. `test_activity_ui_labels` 6 passed(라벨표 25행 전수).
+- OpenAPI 실측 96 operation — SoT v1.8.9 조항·HANDOFF와 일치.
+
+### Next steps
+
+- 독립 재검증 요청(불합격 조건 B1~B5 폐쇄 확인).
+- disposable Mongo migration dry-run→apply→재실행 no-op 검증 후 maintenance window 적용(잔여).

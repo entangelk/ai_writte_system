@@ -468,6 +468,16 @@ class _EndpointHarness:
     def _project(self, client):
         return client.post("/projects", json={"name": "Novel"}).json()["id"]
 
+    def _scene(self, client, project_id):
+        # v1.8.9부터 Scene 생성은 chapter_id 가 필수다(평면 unit_kind 축 폐지).
+        chapter = client.post(
+            f"/projects/{project_id}/chapters", json={"title": "1장"}
+        ).json()
+        return client.post(
+            f"/projects/{project_id}/drafts",
+            json={"title": "장면", "chapter_id": chapter["id"]},
+        ).json()
+
     def _writing_body(self, **over):
         body = {
             "request_id": "wr-1",
@@ -633,8 +643,7 @@ class EndpointOpensAScopeTest(_EndpointHarness, unittest.TestCase):
             audit, context_search_service=_CallingContext(planner),
             writing_gate_service=_CallingGate(gate)))
         project_id = self._project(client)
-        draft = client.post(f"/projects/{project_id}/drafts",
-                            json={"title": "1장"}).json()
+        draft = self._scene(client, project_id)
         version = client.post(
             f"/projects/{project_id}/drafts/{draft['id']}/versions",
             json={"raw_text": "앞 문장.", "idempotency_key": "v1"},
@@ -848,8 +857,7 @@ class EndpointReclassifiesTheFinalRejectionTest(_EndpointHarness, unittest.TestC
             writing_gate_service=_CallingGate(
                 gate, error=InvalidWritingGateResult("decision missing"))))
         project_id = self._project(client)
-        draft = client.post(f"/projects/{project_id}/drafts",
-                            json={"title": "1장"}).json()
+        draft = self._scene(client, project_id)
         version = client.post(
             f"/projects/{project_id}/drafts/{draft['id']}/versions",
             json={"raw_text": "앞 문장.", "idempotency_key": "v1"},

@@ -43,6 +43,7 @@ def _repo_with_indexes(*, fail_on_name: str | None = None):
     repo._source_refs = _FakeCollection(fail_on_name=fail_on_name)
     repo._drafts = _FakeCollection(fail_on_name=fail_on_name)
     repo._writing_accept_receipts = _FakeCollection(fail_on_name=fail_on_name)
+    repo._chapters = _FakeCollection(fail_on_name=fail_on_name)
     return repo
 
 
@@ -130,6 +131,16 @@ class MongoIndexSetupTests(unittest.TestCase):
                 (
                     [("project_id", 1), ("idempotency_key", 1)],
                     {"unique": True, "name": "uniq_writing_accept_receipt"},
+                )
+            ],
+        )
+        # v1.8.9: the Chapter per-project position boundary must be requested.
+        self.assertEqual(
+            repo._chapters.calls,
+            [
+                (
+                    [("project_id", 1), ("position", 1)],
+                    {"unique": True, "name": "uniq_chapter_position"},
                 )
             ],
         )

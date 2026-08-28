@@ -290,13 +290,18 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
   `current_position` 기반 — 종전 "본문 미탑재" 서술은 폐기). ⑤ 설명창 스칼라(premise·genre·tone·pov)
   상한 1000자(`BriefTextField`) — `<project_brief>` 가 매 프롬프트에 렌더되기 때문.
 
-- **⓪-b [구현 완료·배포 전 migration/독립 검증 대기] 장→장면 계층(2026-08-28, SoT v1.8.9).** 별도 metadata-only
+- **⓪-b [검증 Blocking 5건 보강 완료·독립 재검증 대기] 장→장면 계층(2026-08-28, SoT v1.8.9).** 별도 metadata-only
   Chapter + Scene(Draft), 기존 Draft ID/본문 무손실 이관, `other` 제거, parent별 연속 순열,
   AI는 같은 장의 다음 Scene만, 계층 export, 안전 가드 포함 Chapter cascade purge다.
   - **확정 브리프**: [`chapter-scene-hierarchy-decisions.md`](docs/plans/chapter-scene-hierarchy-decisions.md).
     조합은 D1~D6·D8=A, D7=B. 공개 `unit_kind`와 평면 reorder는 제거됐고 Chapter/Scene API·UI,
-    같은 장의 다음 Scene, 계층 export, cascade purge까지 구현됐다. 배포 전에 disposable Mongo에서
-    `scripts/migrate_chapter_scene_hierarchy.py` dry-run→apply→재실행 no-op을 확인한다.
+    같은 장의 다음 Scene, 계층 export, cascade purge까지 구현됐다.
+  - **1차 독립 검증은 불합격**([`chapter_scene_hierarchy.md`](docs/verifications/2026-08-28/chapter_scene_hierarchy.md))이었고
+    세션 11이 Blocking 5건을 폐쇄했다 — legacy 평면 Draft의 CRUD·accept 503 fail-closed(2층),
+    Chapter purge 503 uncertain 잠금(오너 ⓐ 대칭), TXT·migration 무손실 축 셀, SoT 본문 정합
+    (96 op·활동 25/29), 전수 red 셀 이관(mongo 4·ordered_unit 1·writing_scratch 4·활동 라벨표).
+    **재검증을 거친 뒤** disposable Mongo에서 `scripts/migrate_chapter_scene_hierarchy.py`
+    dry-run→apply→재실행 no-op을 확인한다.
 
 - **① dogfood 착수(GATE-1) — ★ 착수(2026-08-23, 오너 선언 *"도그푸드 착수 할꺼니까"*) + UI 병행.** 오너가 실사용하는 동시에 세션은 화면(UI) 개선을 진행하는 병행 운영. **오너 체크리스트: [`docs/dogfood-checklist.md`](docs/dogfood-checklist.md)** — 시작 절차·매일 보는 것·즉시 보고 사안·품질 기록(D4 정렬·gate 노출 결정의 재료가 여기서 쌓임)·관측 공백 해석·문제 기록 포맷. `OPS-1` Ready 승격(착수 조건 충족). 원래 서술(기술적 선행 전부 완료·D8-3로 인가 걸림돌 해소)은 성립 상태 그대로.
 - **② 프론트 랜딩 기획 + 개인정보처리방침·이용약관 정본 대기 — 공개 직결.** 약관·개인정보 처리방침은 서비스 공개 전 법적 요건이고 **정본은 오너만 쓸 수 있다**(원고가 구글 API로 나가는 고지 포함 여부도 오너 판단). 오너 자료가 오는 순간 시작 — 병목이 이사람이다.
@@ -342,8 +347,9 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 >   **mutation 표는 work_log 세션 6~7 에 있다.**
 > - **hover 토큰 규칙**: `--action-primary-hover` 는 본색과 **램프 두 단계 이상** 차이(현재
 >   blue-600→blue-800). 한 단계는 hover 로 안 보인다 — designTokens 셀이 잠근다.
-> - **다음 순서**: Chapter migration을 disposable Mongo에서 dry-run→apply→no-op으로 검증하고,
->   이 머신에서 시작 단계에 멈추는 ASGI TestClient 전수를 정상 환경에서 재실행한 뒤 독립 검증한다.
+> - **다음 순서**: 세션 11 보강(B1~B5)의 독립 재검증 → Chapter migration을 disposable Mongo에서
+>   dry-run→apply→no-op으로 검증하고 maintenance window에 적용한다(TestClient 전수는 이 머신에서
+>   정상 실행됐다 — 세션 10의 "시작 대기"는 이 환경에서 재현되지 않았다).
 >   그 다음 텍스트+화살표 링크 가시성 → 메모 기능(08-27 순서 그대로).
 
 > **★★ 2026-08-27 세션 4 반영 — D5-2 조건 폐쇄 + 보강 1·3·4 완료. 여기서 시작한다.**
