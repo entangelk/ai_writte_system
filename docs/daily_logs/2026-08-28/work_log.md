@@ -202,3 +202,72 @@
 - 텍스트와 화살표만 있는 이동 링크를 전수 확인해, 주요 이동은 버튼형으로 만들고 보조 이동은 일관된 강조를 주는 UI 슬라이스를 진행한다.
 - 링크 가시성 개선 뒤 메모 기능의 위치·저장 단위·공개 범위를 결정하는 오너 브리프를 작성한다.
 - 공개 환경에 이번 프론트 빌드를 반영한 뒤 열린 드로어 탭 전환과 닫힘 후 선택 유지, 확대된 독을 육안 확인한다.
+
+## Session 5 — 주 버튼 hover 가시성 · 삭제 기능 현황 조사
+
+### Goals
+
+- 관리 콘솔 "작업장으로 이동" 버튼이 hover 반응으로 보이지 않는 결함(오너 관측)을 고친다.
+- 프로젝트·원고 삭제 기능의 현황을 정리하고, 원고 삭제 추가 시 분석 축·DB id 참조에
+  문제가 되는 축을 식별해 오너 결정 재료로 올린다(구현은 별도 슬라이스).
+
+### Completed work
+
+- `--action-primary-hover` 를 blue-700 → **blue-800** 으로(램프 두 단계). 한 단계는 본색과
+  실효 대비 ~1.4:1 이라 hover 피드백이 아니었다. admin ghost 버튼 글자색이 같은 토큰을
+  공유하므로 같이 진해진다(대비 개선 방향).
+- 검산 스크립트 2종을 실제 매핑에 맞춰 갱신 후 재실행 — 팔레트 대비 **실패 0건**,
+  disabled 표 참조값 갱신. `designTokens.test.ts` 에 **hover-base 램프 두 단계 가드**
+  신설(under: 한 단계 복귀 시 재실패 확인, mutation 검증 완료).
+
+### Issues found
+
+- **원고 아카이브(`DELETE .../drafts/{draft_id}`)는 이미 있다** — 색인 제거(outbox
+  `DRAFT_ARCHIVED` → chroma `{"draft_id"}` 파기)까지 붙어 있다. 그런데 **프론트에 호출
+  함수 자체가 없다**(`api/client.ts` 에 원고·프로젝트 archive 함수 부재) — "삭제 기능이
+  없다"는 관측의 실체.
+- **프로젝트 아카이브 UI 가 없어 admin purge 도달 경로가 막혀 있다** — 관리 콘솔 purge
+  면(이름 확인+사유)은 `project.archived` 일 때만 노출되는데, 그 상태로 만드는 진입점이
+  화면 어디에도 없다.
+- **원고 영구 삭제(하드 딜리트)는 백엔드에도 없다** — core_sot 에 draft 단위 삭제
+  메서드가 없다(`purge_project` 뿐).
+
+### 삭제 기능 현황·영향 조사 (오너 질의: 분석·DB id 접근)
+
+**이미 안전한 축 — 원고를 직접 참조하지 않는다:**
+
+- **분석(analysis)**: 잡·후보·리뷰 큐의 축이 전부 `project_id + snapshot_id`(자료 스냅샷
+  축)이다. draft 를 키/id 로 쓰는 곳이 없어 원고 삭제로 고아가 생기지 않는다.
+- **memory**: 후보 승격 기반(project 스코프) — draft 참조 없음.
+- **gate_findings**: 저장은 project 단위 열린 finding. 요청 순간 위치로만 `draft_id`를
+  쓰고 남기지 않는다.
+- **ES(lexical) 색인**: 원고는 아예 안 들어간다(자료·후보·기억 축만). 원고 벡터는
+  chroma뿐이고 그 제거 파이프라인이 위의 `DRAFT_ARCHIVED` 다.
+
+**원고 삭제 시 손봐야 할 축:**
+
+1. `drafts`·`draft_versions`·저장요청(멱등)·수령영수증 — 삭제 본체. 메서드 신설 필요.
+2. **chroma 색인** — 아카이브를 선행시키면 제거 파이프라인 재사용(프로젝트 purge 의
+   "archive 선행" 패턴과 같은 모양).
+3. **generation_job** — `draft_id` 를 저장한다. 진행 중 잡이 있으면 거부(409)하는 편이
+   purge 철학과 일치한다. 완료 경로는 scratch 저장뿐이라 깨지진 않는다.
+4. **scratch** — `delete_for_draft` 가 이미 있다. 호출만 하면 된다.
+5. **activity** — append-only 원장이라 draft 행(`target_id`)이 남는다. **죽은 id 문제의
+   실체는 여기뿐**이다. draft 행은 현재 링크형이므로 무링크 처리(draft_version 행의
+   F7 과 같은 방식)가 필요하다. 행 파기는 append-only 위반이라 부적합.
+6. id 재사용 우려는 없다 — `next_draft_id` 시퀀스라 삭제된 id 로 재발급되지 않는다.
+
+**결론**: 오너가 우려한 "분석·DB id 접근" 축에는 구조적 충돌이 없다. 실제 과제는
+activity 무링크 처리와 잡·스크래치 정리다.
+
+### Verification
+
+- 프론트 전수 34파일 **382/382** (hover 변경 후). 검산 스크립트 2종 PASS.
+- Mutation: hover 를 blue-700 로 되돌리면 신규 가드 셀 재실패 → 복원 → tree clean 확인.
+
+### Next steps
+
+- 원고 삭제 슬라이스 착수 시: 아카이브 선행 → 하드 삭제 + scratch `delete_for_draft`
+  → activity 무링크 처리 순서. active 잡 존재 시 409 를 명세에 넣을지 오너 결정.
+- 프로젝트 아카이브 진입점(작업장 설정? 관리 콘솔?)을 정해 UI 를 열어야 purge 도달
+  경로가 산다 — 오너 결정 필요.
