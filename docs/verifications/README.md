@@ -1,7 +1,7 @@
 # 독립 검증 기록
 
 이 디렉터리는 **구현자가 아닌 검증자가** 각 슬라이스를 다시 뜯어본 기록이다. 2026-06-24부터
-**58일치 · 258건**이 쌓여 있다.
+**58일치 · 259건**이 쌓여 있다.
 
 ## 이 저장소의 검증이 무엇인가
 
@@ -24,7 +24,7 @@
 원래 결함을 재현하면 실패해야 하고(under-strict), 과잉 교정으로 정상 경로를 깨도 실패해야 한다
 (over-strict).
 
-## 판정 분포 (2026-08-27 기준)
+## 판정 분포 (2026-08-28 기준)
 
 > **판정 열은 그 기록의 *최종* 판정이다**(오너 2026-08-06: *"테스트의 목적은 조건이 닫히는
 > 거니까"*). 조건부로 나갔다가 조건이 닫혀 승격된 기록은 **그 기록 자신의 최종 문구**를 따른다.
@@ -37,9 +37,9 @@
 |---|---|---|
 | 합격 | 183 | blocking 결함 없음 |
 | **조건부 합격** | **73** | 합격이되 닫아야 할 조건이 있었다 |
-| **불합격** | **2** | 핵심 계약 위반으로 다음 슬라이스 진행이 차단됐다 |
+| **불합격** | **3** | 핵심 계약 위반으로 다음 슬라이스 진행이 차단됐다 |
 
-**조건부 합격이 27%**라는 것이 이 절차가 형식이 아니라는 증거다. 검증이 실제로 지적을 냈고,
+**조건부 합격이 28%**라는 것이 이 절차가 형식이 아니라는 증거다. 검증이 실제로 지적을 냈고,
 그 지적은 후속 커밋으로 닫혔다(각 기록의 Outstanding items → 이후 work_log의 hardening 절).
 
 ## 읽어 볼 만한 것 (처음 오는 사람)
@@ -67,6 +67,7 @@
 
 | 기록 | 무엇을 봤나 | 판정 |
 |---|---|---|
+| [`chapter_scene_hierarchy.md`](2026-08-28/chapter_scene_hierarchy.md) | 장→장면 계층화 슬라이스(`65348ab..258c719` 구현 4커밋, SoT v1.8.9) — 정본 모델·Chapter API·순서 불변식·cascade purge 가드·UI 제목 확인·404 단계 구분·schema 파생물은 계약 대로임을 코드 직독·재실행·V1 mutation(구현자 주장 셀 재물림)으로 확인. **라이브 재현으로 Blocking 5**: ① migration 전 평면 상태(현 운영 데이터 형상)에서 `GET /drafts`·draft payload 경로·writing accept가 **500** — 엔드포인트가 선언한 503 "migration" 얼굴 위반(assert `drafts.py:70`·`AcceptedSavePayload.chapter_id` 필수 str). ② 계약 요구 셀 부재 — TXT 계층 export(V3 무셀 실증)·migration 무손실 축(version/snapshot/본문·archived·partial fail-closed, 브리프가 "양방향 회귀로 잠근다" 명시). ③ **`test_writing_accept.py` 6셀 red**(e735caa 회귀 — 이전 커밋 53 passed 실증)·프론트 전수 4셀 red(mock 미갱신): 수정한 파일을 실행하지 않은 채 "집중 60 passed"(묶음이 writing_accept 제외 선택 조합)로 마감. ④ SoT 본문 자기모순 — "draft/chapter/scene 계층은 미확정이다" 잔존·운용 수 91(실측 96)·"(구현 진행)". ⑤ "503 uncertain 잠금"(v1.8.8 정의=재시도 금지·오너 ⓐ) 대비 장 purge UI "다시 시도하세요"+재시도 버튼 활성 — **오너 판단**. Hardening: 장 unarchive 부재(D8=A 근거 도달 불가)·mongo chapter 경로 무셀·`report_budget_measure` legacy 생성. | **불합격** |
 | [`deletion_slice.md`](2026-08-28/deletion_slice.md) | 삭제 기능 슬라이스(`070f0b9..adf93d0` 8커밋) — 원고 purge·소유자 프로젝트 purge(`execute_project_purge` 공유)·관리자 아카이브·프론트 4표면. 파괴 그래프·권한·409 조건·D3 리터럴·인메모리↔mongo 6축 대칭·운용 스윝(88→91, 활동 20→21) 코드 직독으로 정합 확인. 전수 전부 재현: 백엔드(test-mongo ON) **2544/4/2894**·mongo 단독 **79**·프론트 **386+tsc clean+build OK**. **뮤테이션 9종 — 6종 재실패(구현자 클레임 가드 3종 포함), 3종 무셀 통과가 곧 발견**: B3/B5 receipts 소거 제거(인메모리·mongo 양쪽)에 어떤 셀도 안 물고, B4 잡 가드를 종료 상태까지 확장해도 안 물음 — "6컬렉션"·D1의 should-NOT-fire 면이 잠기지 않았다. **Blocking 6**: SoT 미등재(신규 API 3종·운용 수, v1.8.0 선례)·앞의 무셀 3종·Crud 에러 선언 잠금 미등재(20핀 그대로, 관리자 트랙은 17로 등록한 비대칭)·소유자 purge 면 503 재시도 제공(관리자 면은 uncertain 잠금 — D4=A·HANDOFF:223와 충돌, archive/purge 단계 구분이 필요해 **오너 결정**)·기록 의무(CHANGELOG·HANDOFF 미갱신, mutation 표 미준수). | **조건부 합격** |
 
 ### 2026-08-27
