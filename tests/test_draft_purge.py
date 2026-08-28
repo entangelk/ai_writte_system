@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import unittest
 
+from services.application.app.core_sot.models import WritingAcceptReceipt
 from services.application.app.core_sot.service import (
     CoreSotService,
     InMemoryCoreSotRepository,
@@ -135,6 +136,67 @@ class DraftPurgeTest(unittest.TestCase):
         self.assertEqual(
             [p.id for p in self.core_sot.list_projects()], [self.project_id],
         )
+
+    def test_purge_removes_accept_receipts_and_keeps_siblings(self) -> None:
+        """B2(검증 2026-08-28) — 6컬렉션 중 receipts 축이 무셀이었다.
+
+        receipt 가 잔류하면 accept 멱역 재생이 **죽은 version** 을 가리키는 고아가
+        된다. under: victim 소거를 빼면 첫 단정이, over: sibling 도 지우면 둘째
+        단정이 실패한다. (receipt 쓰기 경로는 accept 트랜잭션 안에만 있어 repo 에
+        직접 주입한다 — 이 셀은 purge 의 소거 축을 재는 자리다.)
+        """
+        victim_receipt = WritingAcceptReceipt(
+            project_id=self.project_id, idempotency_key="writing-accept:victim",
+            intent="start_next_unit", draft_id=self.victim_id,
+            draft_version_id=self.victim_version["id"],
+        )
+        sibling_receipt = WritingAcceptReceipt(
+            project_id=self.project_id, idempotency_key="writing-accept:sib",
+            intent="start_next_unit", draft_id=self.sibling_id,
+            draft_version_id="version-none",
+        )
+        self.repo._writing_accept_receipts[
+            (self.project_id, "writing-accept:victim")
+        ] = victim_receipt
+        self.repo._writing_accept_receipts[
+            (self.project_id, "writing-accept:sib")
+        ] = sibling_receipt
+
+        self._archive_victim()
+        response = self.client.post(
+            f"/projects/{self.project_id}/drafts/{self.victim_id}/purge"
+        )
+        self.assertEqual(response.status_code, 204)
+        self.assertIsNone(self.core_sot.get_writing_accept_receipt(
+            project_id=self.project_id, idempotency_key="writing-accept:victim",
+        ), "victim 의 accept 영수증이 잔류한다 — 죽은 version 을 가리키는 고아다")
+        self.assertIsNotNone(self.core_sot.get_writing_accept_receipt(
+            project_id=self.project_id, idempotency_key="writing-accept:sib",
+        ), "sibling 의 영수증까지 지워졌다 — 과잉 삭제다")
+
+    def test_terminal_generation_job_does_not_block_purge(self) -> None:
+        """B3(검증 2026-08-28) — D1 의 should-NOT-fire 면.
+
+        409 는 **active**(PENDING·RUNNING) 잡에만 낸다. 가드가 종료 상태
+        (SUCCEEDED·FAILED)까지 확장되면 "한 번 생성을 돌린 원고는 영구 삭제
+        불가"가 되는데, 그 회귀가 조용히 통과하는 것이 무셀로 실증됐다.
+        """
+        self._archive_victim()
+        created = self.jobs.enqueue(
+            project_id=self.project_id, draft_id=self.victim_id,
+            request_id="req-done", task_type="continue", instruction="이어써",
+            draft_excerpt="첫 문단.", query=None, output_length="short",
+            max_output_tokens=512, max_tokens=1024,
+            version_id=self.victim_version["id"],
+        )
+        claimed = self.jobs.claim_next()
+        self.assertIsNotNone(claimed)
+        self.jobs.mark_succeeded(claimed, result_scratch_id="scratch-done")
+
+        response = self.client.post(
+            f"/projects/{self.project_id}/drafts/{self.victim_id}/purge"
+        )
+        self.assertEqual(response.status_code, 204)
 
     def test_second_purge_is_404(self) -> None:
         # 프로젝트 purge 의 같은 이름 셀과 대응 — 삭제된 원고의 재삭제는 파기가 아니라

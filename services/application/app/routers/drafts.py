@@ -174,8 +174,11 @@ def register_drafts(
                 status_code=409,
                 detail="draft has an active generation job; wait or discard it",
             )
-        core_sot.purge_draft(project_id=project_id, draft_id=draft_id)
+        # scratch(재생성 무해한 파생물)를 core 파기 **앞에** 둔다(검증 H1, 2026-08-28).
+        # core(비가역)를 먼저 지우고 scratch 삭제가 실패하면 원고 없이 500만 남지만,
+        # 이 순서면 scratch 단계 실패 시 원고가 그대로 남아 재시도로 수습된다.
         writing_scratch.clear_draft(project_id, draft_id)
+        core_sot.purge_draft(project_id=project_id, draft_id=draft_id)
         activity.record(
             project_id=project_id, actor_user_id=current.id,
             action="draft_purged", target_type="draft", target_id=draft_id,

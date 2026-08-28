@@ -4,6 +4,7 @@ import { ProjectOverview } from "./ProjectOverview";
 import { ProjectExportPanel } from "./ProjectExportPanel";
 import { ActivityTimelinePage } from "./ActivityTimelinePage";
 import {
+  ApiError,
   archiveProject,
   describeApiError,
   getProject,
@@ -44,6 +45,10 @@ export function ProjectSettingsPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [confirmation, setConfirmation] = useState("");
   const [deleteBusy, setDeleteBusy] = useState(false);
+  // B5(검증 2026-08-28, 오너 ⓐ) — purge 단계 503 은 uncertain 잠금. 관리자 면과
+  // 같은 임계(D4=A: 503 뒤의 UI 재시도는 거짓 안내다 — 이미 시작된 파기를
+  // 재시도로 되돌릴 수 없다).
+  const [deleteUncertain, setDeleteUncertain] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const requested = searchParams.get("tab");
@@ -74,23 +79,42 @@ export function ProjectSettingsPage() {
 
   async function deleteProject() {
     if (projectId === undefined || project === null || deleteBusy
-        || confirmation !== project.name) {
+        || deleteUncertain || confirmation !== project.name) {
       return;
     }
     setDeleteBusy(true);
     setDeleteError(null);
-    try {
-      // 보관(soft)이 먼저다 — purge 는 보관된 프로젝트만 받는다(2단계 강제).
-      // 사유는 파기 감사 원장에 남는다. 이름 확인이 진짜 가드이므로 화면은
-      // 사유를 따로 묻지 않는다(오너 2026-08-28 지시).
-      if (!project.archived) {
+    // 보관(soft)이 먼저다 — purge 는 보관된 프로젝트만 받는다(2단계 강제).
+    // 사유는 파기 감사 원장에 남는다. 이름 확인이 진짜 가드이므로 화면은
+    // 사유를 따로 묻지 않는다(오너 2026-08-28 지시).
+    if (!project.archived) {
+      try {
         await archiveProject(projectId);
+      } catch (cause: unknown) {
+        // 1단계 실패 — 아직 파괴된 것이 없다. 재시도가 안전하므로 되살린다.
+        setDeleteBusy(false);
+        setDeleteError(describeApiError(cause));
+        return;
       }
+    }
+    try {
       await purgeProject(projectId, "설정 탭에서 소유자 삭제");
       navigate("/");
     } catch (cause: unknown) {
-      setDeleteError(describeApiError(cause));
       setDeleteBusy(false);
+      if (cause instanceof ApiError && cause.status === 503) {
+        // 파기 진행 중 저장 장애 — 이미 시작된 파기는 재시도로 확정할 수 없다.
+        // 관리자 면과 같은 uncertain 잠금(검증 B5, 오너 ⓐ 2026-08-28).
+        setDeleteUncertain(true);
+        setDeleteError(
+          "삭제 상태를 확정할 수 없습니다. 다시 시도하지 말고 purge reconciler로 잔류 데이터를 확인하세요.",
+        );
+      } else if (cause instanceof ApiError && cause.status === 404) {
+        // 이미 지워진 것 — 재파기 404 는 성공과 같다(관리자 면과 같은 처리).
+        navigate("/");
+      } else {
+        setDeleteError(describeApiError(cause));
+      }
     }
   }
 
@@ -149,21 +173,23 @@ export function ProjectSettingsPage() {
               id="project-delete-confirmation"
               value={confirmation}
               autoComplete="off"
-              disabled={deleteBusy}
+              disabled={deleteBusy || deleteUncertain}
               onChange={(event) => setConfirmation(event.target.value)}
             />
             <div className="confirm-actions">
+              {!deleteUncertain && (
+                <button
+                  type="button"
+                  className="danger-button"
+                  disabled={deleteBusy || confirmation !== (project?.name ?? "")}
+                  onClick={() => void deleteProject()}
+                >
+                  {deleteBusy ? "삭제 중…" : "영구 삭제"}
+                </button>
+              )}
               <button
                 type="button"
-                className="danger-button"
-                disabled={deleteBusy || confirmation !== (project?.name ?? "")}
-                onClick={() => void deleteProject()}
-              >
-                {deleteBusy ? "삭제 중…" : "영구 삭제"}
-              </button>
-              <button
-                type="button"
-                disabled={deleteBusy}
+                disabled={deleteBusy || deleteUncertain}
                 onClick={() => {
                   setDeleteOpen(false);
                   setConfirmation("");

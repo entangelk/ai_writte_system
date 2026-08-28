@@ -44,6 +44,7 @@ from services.application.app.core_sot.models import (
     DraftVersion,
     SourceSnapshot,
     UnitKind,
+    WritingAcceptReceipt,
 )
 from services.application.app.core_sot.ordered_unit_migration import (
     OrderedUnitMigrationService,
@@ -659,6 +660,16 @@ class _MongoContractMixin:
             raw_text="# Sibling\n\nText.",
             idempotency_key="save-sibling",
         )
+        # receipts — B2(검증 2026-08-28): 이 축의 소거가 무셀이었다. accept 쓰기
+        # 경로는 트랜잭션 안에만 있어 컬렉션에 직접 넣는다(소거 축을 재는 자리).
+        for draft_id, key in (
+            (victim.id, "accept-victim"), (sibling.id, "accept-sib"),
+        ):
+            self.repo._writing_accept_receipts.insert_one({
+                "project_id": project.id, "idempotency_key": key,
+                "intent": "start_next_unit", "draft_id": draft_id,
+                "draft_version_id": "version-x",
+            })
 
         self.service.purge_draft(project_id=project.id, draft_id=victim.id)
 
@@ -671,6 +682,16 @@ class _MongoContractMixin:
         self.assertIsNone(self.repo.get_snapshot(saved.snapshot.id))
         self.assertEqual(self.repo.get_blocks(saved.snapshot.id), ())
         self.assertIsNone(self.repo.get_source_ref(source_ref.id))
+        # receipts(2026-08-28 검증 B2) — victim 소멸(under)·sibling 생존(over).
+        self.assertIsNone(self.repo.get_writing_accept_receipt(
+            project.id, "accept-victim"),
+            "victim 의 accept 영수증이 잔류한다",
+        )
+        receipt_sib = self.repo.get_writing_accept_receipt(
+            project.id, "accept-sib",
+        )
+        self.assertIsNotNone(receipt_sib)
+        self.assertEqual(receipt_sib.draft_id, sibling.id)
         # sibling·project 무사(over-strict — 인접까지 지우면 실패).
         self.assertIsNotNone(self.repo.get_draft(sibling.id))
         self.assertIsNotNone(self.repo.get_version(sibling_saved.draft_version.id))

@@ -135,4 +135,76 @@ describe("ProjectSettingsPage", () => {
     });
     expect(await screen.findByTestId("project-list-marker")).toBeInTheDocument();
   });
+
+  it("locks the owner purge behind uncertain on a 503 (D4=A)", async () => {
+    // 검증 B5(2026-08-28, 오너 ⓐ) — 파기 단계 503 은 재시도를 제공하지 않는다.
+    // 관리자 면과 같은 임계다: 이미 시작된 파기를 재시도로 확정할 수 없어 거짓
+    // 안내가 된다. under: 버튼을 되살리면 셀이 실패한다.
+    const ok = (body: unknown) => ({
+      ok: true, status: 200, statusText: "", json: async () => body,
+    });
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.includes("/p1/purge")) {
+        return {
+          ok: false, status: 503, statusText: "",
+          json: async () => ({ detail: "storage" }),
+        };
+      }
+      if (url.endsWith("/drafts")) return ok({ drafts: [] });
+      if (url.includes("/brief")) return ok({ brief: null });
+      if (url.includes("/memory")) return ok({ memory: [] });
+      if (url.includes("/review")) return ok({ project_id: "p1", items: [], gate_findings: [] });
+      if (url.includes("/activity")) return ok({ events: [] });
+      return ok({ id: "p1", name: "겨울 이야기", archived: false });
+    }));
+
+    renderSettings();
+    await screen.findByRole("heading", { name: "겨울 이야기" });
+    await userEvent.click(screen.getByRole("button", { name: "프로젝트 삭제…" }));
+    const confirmation = screen.getByLabelText(/겨울 이야기.*입력하세요/);
+    await userEvent.type(confirmation, "겨울 이야기");
+    await userEvent.click(screen.getByRole("button", { name: "영구 삭제" }));
+
+    expect(await screen.findByRole("alert"))
+      .toHaveTextContent("다시 시도하지 말고 purge reconciler로");
+    // uncertain — 재시도 버튼이 아예 사라지고 취소·입력도 잠긴다.
+    expect(screen.queryByRole("button", { name: "영구 삭제" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "취소" })).toBeDisabled();
+    expect(confirmation).toBeDisabled();
+  });
+
+  it("revives the button when only the archive step failed", async () => {
+    // 단계 구분의 반대 방향 — 보관(soft) 실패는 아직 파괴된 것이 없어 재시도가
+    // 안전하다. over: 이 실패까지 잠그면 "파괴 없는 실패"에 갇힌다.
+    const ok = (body: unknown) => ({
+      ok: true, status: 200, statusText: "", json: async () => body,
+    });
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      // 보관(DELETE /p1)만 실패한다 — 조회(GET /p1)는 정상이어야 화면이 뜬다.
+      if (url.endsWith("/p1") && init?.method === "DELETE") {
+        return {
+          ok: false, status: 503, statusText: "",
+          json: async () => ({ detail: "storage" }),
+        };
+      }
+      if (url.endsWith("/drafts")) return ok({ drafts: [] });
+      if (url.includes("/brief")) return ok({ brief: null });
+      if (url.includes("/memory")) return ok({ memory: [] });
+      if (url.includes("/review")) return ok({ project_id: "p1", items: [], gate_findings: [] });
+      if (url.includes("/activity")) return ok({ events: [] });
+      return ok({ id: "p1", name: "겨울 이야기", archived: false });
+    }));
+
+    renderSettings();
+    await screen.findByRole("heading", { name: "겨울 이야기" });
+    await userEvent.click(screen.getByRole("button", { name: "프로젝트 삭제…" }));
+    const confirmation = screen.getByLabelText(/겨울 이야기.*입력하세요/);
+    await userEvent.type(confirmation, "겨울 이야기");
+    await userEvent.click(screen.getByRole("button", { name: "영구 삭제" }));
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    // 1단계 실패 — 버튼이 살아 있다(재시도 안내가 아니라 그냥 오류).
+    expect(screen.getByRole("button", { name: "영구 삭제" })).toBeEnabled();
+    expect(screen.queryByText(/다시 시도하지 말고/)).not.toBeInTheDocument();
+  });
 });

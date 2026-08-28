@@ -2165,6 +2165,10 @@ class CrudErrorContractDeclarationTest(unittest.TestCase):
         ("/projects/{project_id}/drafts/{draft_id}", "patch"):
             {"401", "403", "404", "409", "503"},
         ("/projects/{project_id}/drafts/{draft_id}", "delete"): {"401", "403", "404", "503"},
+        # 삭제 슬라이스(2026-08-28): 원고·프로젝트 하드 purge. 409 = 아카이브 미선행
+        # 또는 active 생성 잡(원고) / active 프로젝트(프로젝트).
+        ("/projects/{project_id}/drafts/{draft_id}/purge", "post"):
+            {"401", "403", "404", "409", "503"},
         ("/projects/{project_id}/drafts/{draft_id}/versions", "get"):
             {"401", "403", "404", "503"},
         ("/projects/{project_id}/drafts/{draft_id}/versions", "post"):
@@ -2175,6 +2179,7 @@ class CrudErrorContractDeclarationTest(unittest.TestCase):
          "get"): {"401", "403", "400", "404", "503"},
         ("/projects/{project_id}/export", "get"): {"401", "403", "400", "404", "503"},
         ("/projects/{project_id}/draft-order", "put"): {"401", "403", "404", "409", "503"},
+        ("/projects/{project_id}/purge", "post"): {"401", "403", "404", "409", "503"},
     }
 
     def setUp(self):
@@ -2185,7 +2190,7 @@ class CrudErrorContractDeclarationTest(unittest.TestCase):
         return {code for code in responses if code not in ("200", "204", "422")}
 
     def test_declared_error_statuses_match_the_lock_list(self):
-        self.assertEqual(len(self.EXPECTED), 20)
+        self.assertEqual(len(self.EXPECTED), 22)  # 2026-08-28: 제품 purge 2경로 추가
         for (path, method), expected in self.EXPECTED.items():
             with self.subTest(path=path, method=method):
                 self.assertEqual(self._declared(path, method), expected)

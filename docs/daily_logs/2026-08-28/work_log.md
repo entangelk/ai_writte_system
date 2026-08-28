@@ -317,10 +317,73 @@ activity 무링크 처리와 잡·스크래치 정리다.
 - 백엔드 전수 **2544 passed, 4 skipped**(mongo 통합 포함 — test-mongo 기동 후
   `test_core_sot_mongo` 79/79).
 - 프론트 전수 **386/386** · `tsc --noEmit` clean · `vite build` OK.
-- Mutation 4종: hover 토큰 blue-701 되돌림(세션 5) · 원고 체크박스 가드 제거 ·
-  타임라인 draftIds 전달 제거 — 전부 재실패 확인 후 복원, tree clean.
+
+### Mutation verification (정정 — 독립 검증 지적)
+
+종전 이 자리에 *"Mutation 4종"* 을 서술로 적었는데 **실제 구현자 mutation은 3종**이고
+나열도 없었다(검증 B6③). 표로 정정한다 — 이름 가드 무력화는 구현자가 돌리지 않았고
+독립 검증(F3)이 물었으므로 이 표에 넣지 않는다.
+
+| # | 방향 | mutation | 파일 | 재실패한 셀 |
+|---|---|---|---|---|
+| M1 | under | hover 토큰을 blue-700(한 단계)로 되돌림 | `frontend/src/styles.css` | `designTokens > keeps the primary hover at least two ramp steps from its base` |
+| M2 | under | 원고 삭제 확인의 `!purgeChecked` 조건 제거 | `frontend/src/drafts/DraftList.tsx` | `DraftList > permanently deletes a draft behind a checkbox confirmation`의 비활성 단정 |
+| M3 | under | 타임라인의 `draftIds ?? undefined` → `undefined` | `frontend/src/projects/ActivityTimelinePage.tsx` | `ActivityTimelinePage > does not link a draft row whose draft no longer exists` |
 
 ### Next steps
 
 - 장(유닛) 삭제 슬라이스 — unit_kind 존치 결정(D6)과 함께 오너 브리프 필요.
 - 배포 환경 반영(기록은 보안 규칙에 따라 생략).
+
+## Session 7 — 독립 검증 조건부 합격 보강 (B1~B6 + H1)
+
+### Goals
+
+검증 기록 [`deletion_slice.md`](../verifications/2026-08-28/deletion_slice.md)(조건부 합격)의
+Blocking 6건을 닫는다. B5(소유자 면 503 재시도)는 오너 결정 **ⓐ 단계 구분+uncertain 잠금**,
+나머지 5건은 셀·문서 등재로 기계적으로 폐쇄.
+
+### Completed work
+
+- **B2** — receipts 축 셀: 인메모리(`test_draft_purge` victim 소거+sibling 생존 양방향)
+  ·mongo(`test_core_sot_mongo` purge_draft 셀에 동일 양방향). receipt 쓰기 경로는 accept
+  트랜잭션 안에만 있어 repo/컬렉션에 직접 주입(소거 축을 재는 자리).
+- **B3** — 종료 잡 should-not-fire 셀: SUCCEEDED 잡이 붙은 archived 원고 purge → 204.
+  가드가 네 상태 전부로 확장되면 이 셀이 물린다.
+- **B4** — Crud 에러 계약 EXPECTED에 제품 purge 2경로 추가(**20→22핀**).
+- **B5(오너 ⓐ)** — 설정탭 삭제 버튼 단계 구분: 보관 단계 실패(파괴 없음)는 버튼 되살림,
+  파기 단계 503은 **uncertain 잠금**(재시도 버튼 제거·취소/입력 잠금·"reconciler 확인"
+  안내 — 관리자 면과 같은 문구), 재파기 404는 성공 처리. 셀 2종(uncertain/보관-실패).
+- **H1** — draft purge에서 scratch 정리를 core 파기 **앞**으로(파생물 우선 — scratch 단계
+  실패 시 원고가 남아 재시도로 수습).
+- **B1** — SoT **v1.8.8** 등재: Product Shell에 삭제 표면 3축 계약 추가(409 조건 2종·
+  6컬렉션·reason 리터럴·I3 무행·503 양면 대칭), 운용 수(총 91·tier 65·활동 21/23·
+  admin 17·Crud 22핀), 변경 이력 행.
+- **B6** — CHANGELOG 2026-08-28 삭제 슬라이스 항목 · HANDOFF(op 수 76→91·회귀 기준선
+  2544·Next Tasks 마감 메모·분량 기록) · work_log 세션 6 mutation 표 교체(4종 주장→
+  실제 3종, 셀 매핑 명기).
+- **보고 정정** — 완료 보고 "커밋 10개"는 실제 슬라이스 8개(검증 메타데이터 지적).
+
+### Decisions
+
+| # | 결정 | 근거 |
+|---|---|---|
+| D5 | B5 = ⓐ 단계 구분 + uncertain 잠금 | 오너 선택(2026-08-28) — D4=A "503 후 UI 재시도 금지"를 소유자 경로까지 대칭 적용. 보관 단계(파괴 없음)만 재시도 허용 |
+
+### Verification
+
+- 집중: `test_draft_purge` 9셀 · `test_owner_project_purge` 7셀 · `test_core_sot_mongo`
+  79/79(receipt 단정 포함) · `test_application_api` 전수 · `ProjectSettingsPage` 7셀.
+- 보강 mutation 4종 — 검증이 뚫은 무셀 방향 그대로 되돌려 **전부 물림**을 확인:
+
+| # | 방향 | mutation | 재실패한 셀 |
+|---|---|---|---|
+| R1 | under(B2) | 인메모리 receipt 재구성 제거 | `test_purge_removes_accept_receipts_and_keeps_siblings` |
+| R2 | under(B2) | mongo receipt delete_many 제거 | mongo `test_purge_draft_removes_only_that_draft_graph` |
+| R3 | over(B3) | 잡 가드에 SUCCEEDED·FAILED 추가 | `test_terminal_generation_job_does_not_block_purge` |
+| R4 | under(B5) | 503을 일반 오류로 되돌림(uncertain 제거) | `locks the owner purge behind uncertain on a 503` |
+
+### Next steps
+
+- 독립 검증 재확인 요청(조건부 합격 조건 폐쇄).
+- 장(유닛) 삭제 브리프 — unit_kind 존치 결정과 함께.
