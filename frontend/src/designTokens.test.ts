@@ -115,4 +115,33 @@ describe("디자인 토큰 (Phase 10 Slice 10.1)", () => {
 
     expect([...new Set(leaked)].sort()).toEqual([]);
   });
+
+  it("keeps the primary hover at least two ramp steps from its base", () => {
+    /**
+     * **hover 가시성의 최소 요건** (2026-08-28, 오너 관측 — 관리 콘솔 작업장 이동
+     * 버튼이 hover 로 전혀 안 보인다). 한 단계 아래(blue-600→blue-700)는 실효 대비
+     * ~1.4:1 로 채움 버튼의 hover 피드백이 아니고, 같은 값을 가리키면 아예 없다.
+     * 램프에서 **두 단계 이상** 떨어뜨린다(blue-800).
+     *
+     * **양방향**:
+     * - under — hover 를 한 단계(blue-700)로 되돌리면 실패한다.
+     * - over — hover 가 base 와 같은 primitive 를 가리키면 실패한다.
+     *
+     * 램프는 `:root` 정의 순서대로 밝→어두(blue-50 → blue-900)다. 흰 라벨을 지키려면
+     * hover 는 **어두운 방향**(램프 뒤쪽, 양의 인덱스 차이)으로 가야 한다 — 밝은 쪽은
+     * `--text-on-accent` 대비가 무너진다.
+     */
+    const ramp = [...rootBlock.matchAll(/^\s*(--blue-\d+)\s*:/gm)].map((m) => m[1]);
+    const reference = (token: string) => {
+      const match = rootBlock.match(
+        new RegExp(`^\\s*${token}\\s*:\\s*var\\((--blue-\\d+)\\)`, "m"),
+      );
+      expect(match, `${token} must reference a blue primitive`).not.toBeNull();
+      return ramp.indexOf(match![1]);
+    };
+
+    const steps = reference("--action-primary-hover") - reference("--action-primary");
+
+    expect(steps).toBeGreaterThanOrEqual(2);
+  });
 });
