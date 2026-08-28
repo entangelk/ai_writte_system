@@ -271,3 +271,56 @@ activity 무링크 처리와 잡·스크래치 정리다.
   → activity 무링크 처리 순서. active 잡 존재 시 409 를 명세에 넣을지 오너 결정.
 - 프로젝트 아카이브 진입점(작업장 설정? 관리 콘솔?)을 정해 UI 를 열어야 purge 도달
   경로가 산다 — 오너 결정 필요.
+
+## Session 6 — 삭제 기능 슬라이스: 원고 하드 삭제·소유자 프로젝트 purge·관리자 아카이브
+
+### Goals
+
+오너 결정(세션 5 보고에 대한 지시): ① active 생성 잡이 붙은 원고의 purge 는 409
+② 삭제 진입점 — 사용자는 설정 탭, 관리자는 관리 콘솔 ③ 프로젝트 삭제는 설정 탭
+버튼 + **이름 입력 가드 팝업** ④ 원고·장 삭제는 **체크박스 가드**. 장(유닛) 삭제는
+장 편집 UI·unit_kind 존치 결정이 먼저라 **별도 슬라이스로 유예**(오너 선택).
+
+### Completed work
+
+- **원고 하드 삭제** `POST /projects/{pid}/drafts/{did}/purge`(소유자): core_sot
+  6컬렉션(drafts·versions·snapshots·blocks·source_refs·receipts)을 draft 스코프로
+  파기(인메모리+몽고, 몽고는 트랜잭션 경로 포함). 아카이브 선행 409 · active 생성
+  잡 409 · scratch `clear_draft` · activity 는 append-only 원장에 `draft_purged` 행.
+- **소유자 프로젝트 purge** `POST /projects/{pid}/purge`: admin purge 의 파괴 그래프를
+  `execute_project_purge`(routers/admin.py)로 **한 벌로 공유** — 두 벌이 되면 어느
+  한쪽만 새 서비스를 받아 조용한 고아가 된다(D5). 감사·이름 이력·outbox 도 같은 원장.
+- **관리자 아카이브** `POST /admin/projects/{pid}/archive`: purge 진입 도달 경로
+  보강(보관으로 만드는 화면 경로가 없어 purge 가 구조적으로 막혀 있었다). I3 에
+  따라 활동 행은 남기지 않는다(관리자 축).
+- **프론트**: 설정 탭 삭제 섹션(이름 확인 → archive→purge 순차 → 목록 복귀) ·
+  원고 목록 행 삭제 버튼 + 체크박스 확인 패널 · 관리 콘솔 카드 "보관으로 전환" ·
+  활동 타임라인의 죽은 draft 행 무링크(F7 과 같은 처방).
+
+### Decisions
+
+| # | 결정 | 근거 |
+|---|---|---|
+| D1 | active 생성 잡 존재 시 원고 purge 409 | 오너 세션 지시 — 잡의 결과물은 draft 에 표시되므로 앵커가 사라진 잡은 완료돼도 갈 곳이 없다 |
+| D2 | 진입점 이원 — 사용자=설정 탭(이름 가드), 관리자=관리 콘솔 | 오너 세션 지시 |
+| D3 | 소유자 purge 의 reason 을 화면에서 묻지 않고 "설정 탭에서 소유자 삭제"로 채운다 | 이름 확인이 진짜 가드(오너 지시). 감사 원장엔 그대로 남는다 |
+| D4 | 장(유닛) 삭제는 별도 슬라이스 유예 | 장을 다루는 UI/API 가 없어 설계부터 필요 + unit_kind 존치(D6 유예)와 얽힘 |
+
+### Issues found
+
+- 소유자 purge/admin 아카이브가 activity 분류표에 등재돼 있지 않으면 전수가 잡는다
+  — 분류표는 배선과 같은 정본이다(수습: EXCLUDED 2건 등재, 관리자 아카이브의
+  activity 행 제거로 I3 정합).
+
+### Verification
+
+- 백엔드 전수 **2544 passed, 4 skipped**(mongo 통합 포함 — test-mongo 기동 후
+  `test_core_sot_mongo` 79/79).
+- 프론트 전수 **386/386** · `tsc --noEmit` clean · `vite build` OK.
+- Mutation 4종: hover 토큰 blue-701 되돌림(세션 5) · 원고 체크박스 가드 제거 ·
+  타임라인 draftIds 전달 제거 — 전부 재실패 확인 후 복원, tree clean.
+
+### Next steps
+
+- 장(유닛) 삭제 슬라이스 — unit_kind 존치 결정(D6)과 함께 오너 브리프 필요.
+- 배포 환경 반영(기록은 보안 규칙에 따라 생략).
