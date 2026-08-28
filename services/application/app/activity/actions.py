@@ -211,6 +211,14 @@ EXCLUDED_OPERATIONS: tuple[ExcludedOperation, ...] = (
                       "admin_audited", "관리자 축(회원 정책)"),
     ExcludedOperation("POST", "/admin/projects/{project_id}/purge",
                       "admin_audited", "admin_audit_events(파기 tombstone)"),
+    # 소유자 purge(2026-08-28): 파기가 activity 를 통째로 지우므로 행을 남길 수
+    # 없다 — 감사는 admin_audit_events 가 담는다(execute_project_purge 공유 본체).
+    ExcludedOperation("POST", "/projects/{project_id}/purge",
+                      "admin_audited", "파기가 activity 자체를 지운다"),
+    # 관리자 아카이브(2026-08-28): purge 진입 조건을 여는 관리자 행위 — I3 의
+    # 관리자 축이라 활동 로그에 남지 않는다(소유자 아카이브만 남긴다).
+    ExcludedOperation("POST", "/admin/projects/{project_id}/archive",
+                      "admin_audited", "관리자 축(I3)"),
     ExcludedOperation("POST", "/admin/projects/{project_id}/access-grants",
                       "admin_audited", "access_grant_uses"),
 )

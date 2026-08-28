@@ -644,16 +644,13 @@ def register_admin(
         # 관리 콘솔의 purge 진입점 보강(2026-08-28 오너 결정) — purge 는 archived
         # 프로젝트만 받는데 그 상태로 만드는 화면 경로가 없어 도달이 막혀 있었다.
         # 소유자의 DELETE /projects/{id} 와 같은 시퀀스를 admin 권한으로만.
+        # 활동 행은 남기지 않는다(I3): 관리자 행위는 활동 로그가 아닌 관리자 축의
+        # 것이다 — 소유자는 상태(보관됨)로 이 변화를 본다.
         try:
             project = core_sot.archive_project(project_id=project_id)
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         sync_outbox.enqueue_project_archived(project_id=project_id)
-        activity.record(
-            project_id=project.id, actor_user_id=current.id,
-            action="project_archived", target_type="project", target_id=project.id,
-            before="active", after="archived",
-        )
         return {
             "id": project.id, "name": project.name,
             "archived": project.archived, "owner_id": project.owner_id,

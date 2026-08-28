@@ -134,7 +134,7 @@ class AdminArchiveProjectTest(unittest.TestCase):
             "/auth/login", json={"username": "root", "password": "pw789"}
         )
 
-    def test_admin_archive_marks_archived_and_leaves_activity(self) -> None:
+    def test_admin_archive_marks_archived_and_leaves_no_activity_row(self) -> None:
         response = self.client.post(
             f"/admin/projects/{self.project_id}/archive"
         )
@@ -143,14 +143,15 @@ class AdminArchiveProjectTest(unittest.TestCase):
         self.assertTrue(
             self.core_sot.get_project(project_id=self.project_id).archived
         )
-        # 활동 행 검증은 소유자 세션에서(활동 읽기는 소유 경로다).
+        # 관리자 행위는 활동 로그가 아닌 관리자 축이다(I3) — 소유자 타임라인에
+        # 행이 남지 않는다. 소유자 아카이브(DELETE /projects/{id})만 행을 남긴다.
         self.client.post(
             "/auth/login", json={"username": "alice", "password": "pw123"}
         )
         events = self.client.get(
             f"/projects/{self.project_id}/activity"
         ).json()["events"]
-        self.assertTrue(
+        self.assertFalse(
             any(e["action"] == "project_archived" for e in events),
         )
 

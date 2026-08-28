@@ -221,7 +221,7 @@ OKLCH→sRGB 변환과 WCAG 대비를 계산한다. **숫자를 손으로 적지
 | `--text-link` | `blue-700` | 링크 |
 | `--text-on-accent` | `slate-0` | 강조면 위 글자 |
 | `--action-primary` | `blue-600` | 주 버튼 |
-| `--action-primary-hover` | `blue-700` | 주 버튼 hover |
+| `--action-primary-hover` | `blue-800` | 주 버튼 hover (한 단계는 ~1.4:1 로 안 보인다 — 2026-08-28) |
 | `--action-danger` | `danger-600` | 파괴 버튼 |
 | `--action-danger-hover` | `danger-700` | 파괴 버튼 hover |
 | `--border-hairline` | `slate-200` | **장식** 구분선(1.4.11 대상 아님) |
