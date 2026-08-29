@@ -1,0 +1,71 @@
+# 임베딩만 외부 API 로 쓰는 배포 구성 — chroma·Elasticsearch 는 스택 안에 둔다.
+#
+#     docker compose -f docker-compose.yml -f docker-compose.external-embedding.yml up -d
+#
+# `docker-compose.external.yml`(전부 외부)과 `docker-compose.llama.yml`(전부 내부) 사이의
+# **하이브리드 조합**이다: LLM·임베딩은 외부 API, 벡터·어휘 백엔드는 in-stack. 이 조합에서
+# 배포가 매번 늦어진 실측 원인(2026-08-29 조사)이 이 파일의 존재 이유다 —
+#
+# base 의 `application.depends_on` 이 `embedding: service_healthy` 를 요구하는데
+# 임베딩을 외부로 쓰는 서버에는 embedding 컨테이너도 이미지도 없다. 그러면
+# `docker compose up -d <svc>`(의존 포함)가 **embedding 이미지를 그 자리에서 빌드**하기
+# 시작하고(torch·sentence-transformers 설치), 끝나도 컨테이너 기동+healthy(start_period
+# 300s — 첫 기동 모델 다운로드 고려)를 기다린다. "빌드는 다 됐는데 확인이 한참 걸리던"
+# 것의 정체였다. `--no-deps` 는 이 대기를 우회할 뿐 조합 자체를 고치지 않는다.
+#
+# ── 이 파일이 하는 일 ────────────────────────────────────────────────────────
+# 1. `embedding` 서비스를 profile 뒤로 보낸다(`local-models` — external.yml 과 같은
+#    이름). 기본 기동·빌드 어디에도 끌려들지 않는다. 되살리려면 `--profile local-models`.
+# 2. embedding 을 기다리던 세 서비스(application·worker·generation_worker)의
+#    `depends_on` 을 `!override` 로 통째로 교체한다 — **mongo·gateway·chroma·
+#    elasticsearch 는 그대로 기다린다**(이 조합에서는 진짜 필요하다).
+# 3. `EMBEDDING_SERVICE_URL` 을 필수로 만든다(`:?`). base 의 폴백은 방금 꺼둔
+#    in-stack 서비스를 가리키므로, 값이 비면 조용한 연결 실패로만 드러난다 —
+#    external.yml 이 배격한 것과 같은 실패 형태다. 나머지 임베딩 env 는 base
+#    폴백(.env)을 그대로 쓴다.
+#
+# ── 전부 외부가 필요해지면 ──────────────────────────────────────────────────
+# chroma·ES 까지 끄는 구성은 이 파일이 아니라 `docker-compose.external.yml` 이다.
+# 둘을 함께 쓰지 않는다(의존 교체가 서로 충돌한다 — 목적에 맞는 하나만).
+services:
+  application:
+    environment:
+      EMBEDDING_SERVICE_URL: "${EMBEDDING_SERVICE_URL:?외부 임베딩 주소가 필요하다}"
+    # 꺼진 embedding 을 기다리지 않는다. `!override` 로 base 의 5개를 통째로 대체 —
+    # 남기는 넷은 이 조합에서도 스택 안에 있고 여전히 필요하다.
+    depends_on: !override
+      mongo:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+      chroma:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+
+  worker:
+    environment:
+      EMBEDDING_SERVICE_URL: "${EMBEDDING_SERVICE_URL:?외부 임베딩 주소가 필요하다}"
+    depends_on: !override
+      mongo:
+        condition: service_healthy
+      chroma:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+
+  generation_worker:
+    environment:
+      EMBEDDING_SERVICE_URL: "${EMBEDDING_SERVICE_URL:?외부 임베딩 주소가 필요하다}"
+    depends_on: !override
+      mongo:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+      chroma:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+
+  embedding:
+    profiles: ["local-models"]
