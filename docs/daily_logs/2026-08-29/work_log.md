@@ -46,3 +46,44 @@
 
 - **migration dry-run→apply→재실행 no-op 검증은 잔여**(배포 전 과제, 세션 10~11 기록 그대로). 적용 완료 후엔 평면 대피 경로 분기가 자연 소멸 — SoT v1.8.10 조항의 폐기 검토가 그 시점 과제.
 - 운영 Mongo는 평면 상태 — 평면 프로젝트의 export·versions 200 동작은 이제 **계약된** 동작이다(재검증 Outstanding 항목 해소).
+
+## Session 2 — 2차 재검증 조건 N3·N4 폐쇄
+
+### Goals
+
+- 2차 독립 재검증 [`flat_legacy_escape_path_closure.md`](../../verifications/2026-08-29/flat_legacy_escape_path_closure.md)(**조건부 합격**, `8f97238`)의 조건 **N3**("versions는 혼합 상태에서도 200" 분기 무셀)·**N4**("v1.5 MVP 범위 밖" 인용 출처 부재)를 닫는다.
+
+### Completed work
+
+- **N3 셀**: `FlatLegacyEscapePathReadsTest::test_mixed_hierarchy_state_version_reads_stay_open` 추가 — 혼합 형상(챕터 먼저 생성 → 평면 draft → save, 재검증 재현 스크립트와 동일 순서)에서 legacy draft의 versions 3경로(목록·상세·버전 export) 200과 본문을 단정. 클래스 docstring에 해당 방향 가드 1줄("혼합 상태에서 versions만 503로 막는 중간 설계도 mixed-versions 셀이 잡는다").
+- **N4 인용 정정**: decisions D8 follow-up와 SoT v1.8.10 변경이력의 "project unarchive(v1.5 MVP 범위 밖)"을 실측 출처로 교체 — SoT v1.5 archive 정책(2026-06-28 확정, `daily_logs/2026-06-28/work_log.md:207` — "unarchive/상태전이는 차단 범위 밖('archived 동안 차단'으로 한정해 향후 unarchive 여지 보존)"). SoT 행에는 인용 출처 정정 마커를 남겼다.
+- **검증**: 집중 23 passed/271 subtests · V6b 재적용 mutation · 전수 아래 Verification.
+
+### Issues found
+
+1. **N3 무셀** — 문제: SoT v1.8.10이 명시한 "versions는 혼합 상태에서도 200"의 반대 방향(혼합만 versions 503화, 검증자 V6b)을 어떤 셀도 잡지 못했다. 원인: 세션 1 셀 3종이 평면 versions·평면 export·혼합 export만 잠그고 혼합 versions 칸을 빠뜨림. 해결: 혼합 versions 200 단정 셀 1개. 결과: V6b 재적용 시 정확히 그 셀만 재실패(1 failed — 평면 versions 셀 green 유지, 중간 설계와 전면 방어가 구분됨).
+2. **N4 출처 없는 인용(세션 1 작성분 결함)** — 문제: "project unarchive(v1.5 MVP 범위 밖)"의 'v1.5 MVP 범위'를 정의하는 문서가 저장소에 없었다(재검증 전체 grep 0건). 원인: 세션 1에서 v1.5 변경이력의 archive 범위 서술과 실제 정책 기록을 짜맞춰 잘못 요약함. 해결: 실제 근거(2026-06-28 archive 정책 확정 — unarchive 상태 전이는 차단 범위 밖·여지 보존, 공개 경로 약속 없음)로 교체. 결과: decisions D8·SoT v1.8.10 행 정정 — **세션 1 로그의 같은 인용(Completed work·Decisions)도 같은 결함이 있으나 로그 무결성을 위해 본문은 그대로 두고 이 세션으로 정정을 기록한다.**
+
+### Decisions
+
+- 별도 오너 결정 없음 — N3·N4는 재검증 조건의 기계적 폐쇄(오너 방향 결정 N1=ⓐ·H1=①는 세션 1 그대로).
+- **SoT 버전 무상승 판단**: N4는 계약 의미가 아니라 서술 근거 인용의 정정이므로(v1.8.10 행 내 정정 마커 + 본 로그 + CHANGELOG로 기록), 새 버전 행을 만들지 않았다. 계약 내용(`:661` 계층 조항)은 무변.
+
+### Mutation verification
+
+| # | 방향 | 적용 diff | 파일:줄 | 물린 셀 |
+|---|---|---|---|---|
+| V6b-r | 중간 설계(혼합만 versions 방어 — 검증자 V6b와 동일 의미) | `list_draft_versions` 라우트 try 첫 줄에 `draft = core_sot.get_draft(project_id=…, draft_id=…)` + `if core_sot.list_chapters(project_id=…): _require_migrated_scene(draft)` 삽입 — 챕터 없는 평면은 통과 | `routers/drafts.py` `list_draft_versions` | **물림** `FlatLegacyEscapePathReadsTest::test_mixed_hierarchy_state_version_reads_stay_open` (1 failed만 — 평면 versions 셀 green, 127 passed) |
+
+절차: 구현 커밋(`717ed5e`) 후 적용 → `pytest tests/test_application_api.py` → `git checkout -- services/application/app/routers/drafts.py` 복원 → `git status --short` 0건 확인.
+
+### Verification
+
+- 집중: `FlatLegacyEscapePathReadsTest`(4셀) + `LegacyOrderedDraftMigration503Test` + `tests/test_docs_indexes.py` — **23 passed / 271 subtests**(+1 passed·+1 subtest는 검증자 커밋 `8f97238`의 기록 파일 등재에 따른 docs 루프).
+- 전수(test-mongo ON, 종료 후 down): **2571 passed / 4 skipped / 3023 subtests — 0 failed**(234.17s). 직전 HEAD 대비 **+1 passed(신규 셀)·+1 subtest(검증자 기록 등재분 — 본 셀은 subTest 0개)**, 변동 전부 귀속 확인.
+- 프론트·`schema.d.ts`·OpenAPI 무변(셀·문서만 변경).
+
+### Next steps
+
+- migration dry-run→apply→재실행 no-op 검증 — 배포 전 잔여(변경 없음).
+- 재검증 비차단 관찰(혼합 상태 생성 경로의 전제 — "챕터만 있고 drafts 0개"에서만 조립 가능 — 을 설명하는 조항): 다음 슬라이스가 혼합 상태를 다룰 때 한 줄 후보.
