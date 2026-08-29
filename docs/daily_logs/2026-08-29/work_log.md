@@ -171,18 +171,30 @@
   메모 기능은 그 뒤에 둔다.
 - 주요 이동은 기존 accent 버튼 선례를 유지하고, 문장·메타 행 안의 이동은 일관된 보조 링크로 둔다.
 
+### Issues found
+
+- 첫 과도 적용 mutation은 `className="inline-navigation-link back-link"`를 넣었는데도 통과했다.
+  가드가 속성 전체가 아니라 첫 클래스만 문자열로 읽은 결함이었다. 정규식으로 모든 클래스 조합을
+  읽도록 보강한 뒤 같은 mutation이 재실패했다.
+
 ### Verification
 
 - 집중 렌더 회귀: `AnalysisTrigger`·`ProjectOverview`·`ActivityTimelinePage`·`PersonalHubPage`
   **47/47**.
 - 스타일 가드: `navigationLinks`·`typeScale` **6/6**.
-- 전수 프론트 회귀와 production build는 이 환경의 30초 명령 수명 제한으로 완료 출력을 받지 못해
-  체크포인트 뒤 재실행·확인한다.
+- 이 환경의 30초 명령 수명 제한 때문에 프론트 전수와 production build는 완료 출력을 받지 못했다.
+
+### Mutation verification
+
+체크포인트 `c6dc865`의 clean tree 위에서 mutation을 적용하고 `apply_patch` 역편집으로 복원했다.
+
+| # | 방향 | mutation | 파일 | 재실패한 셀 |
+|---|---|---|---|---|
+| M1 | under | 작품 기억의 `검토 전 n개 →`에서 공통 클래스 제거 | `projects/ProjectOverview.tsx` | `보조 이동 링크 > gives every plain secondary navigation link the shared treatment` |
+| M2 | over | not-found의 뒤로 가기에 `inline-navigation-link` 추가 | `App.tsx` | 위 셀의 정확 집합 단정 |
 
 ### Next steps
 
-- 회귀 뮤테이션(보조 링크 누락·목록 행으로의 과도한 적용)을 확인하고 전수 프론트 회귀·build를
-  완료한다.
 - 다음 기능 작업인 메모는 구현 전에 위치·저장 단위·공개 범위를 정하는 오너 결정 브리프를 작성한다.
 
 ---
