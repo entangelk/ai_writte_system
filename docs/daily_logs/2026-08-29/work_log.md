@@ -148,6 +148,37 @@
 
 ---
 
+## Session 6 — 장면 메모 기능 결정 브리프
+
+### Goals
+
+- 다음 기능 작업인 메모에 필요한 위치·저장 단위·공개 범위 결정을 구현 전에 명확히 한다.
+
+### Completed work
+
+- [`scene-note-decisions.md`](../../plans/scene-note-decisions.md)를 작성해 D1~D4를 오너 결정으로
+  분리했다: Scene 메모의 화면 위치, 저장 수명, access grant 열람 범위, 저장 경험.
+- 권고 조합은 편집기 드로어의 Scene 메모 탭 + 서버 전용 컬렉션 + 소유자 쓰기/grant 읽기 +
+  명시적 저장/최신 한 값이다. 원고 정본·export·LLM 프롬프트와 분리하는 이유와 Scene/project
+  purge·활동 분류표에 연결해야 하는 후속 계약을 기록했다.
+- 계획 인덱스와 HANDOFF를 `Proposed / 오너 결정 대기` 상태로 연결했다.
+
+### Decisions
+
+- 오너 지시(2026-08-29): 이동 링크 가시성 개선 다음에는 메모 기능을 검토한다. 구현 대신 결정
+  브리프부터 작성해 위치·저장 단위·공개 범위를 선택할 수 있게 한다.
+
+### Verification
+
+- `docs/plans/README.md`의 링크·상태 표기와 HANDOFF의 브리프 링크를 대조했다.
+
+### Next steps
+
+- 오너가 D1~D4를 결정하면, 그 값을 브리프의 확정 표와 정본 계약에 반영한 뒤 최소 구현
+  슬라이스를 시작한다.
+
+---
+
 ## Session 5 — 보조 이동 링크 가시성
 
 ### Goals
