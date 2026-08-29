@@ -87,3 +87,61 @@
 
 - migration dry-run→apply→재실행 no-op 검증 — 배포 전 잔여(변경 없음).
 - 재검증 비차단 관찰(혼합 상태 생성 경로의 전제 — "챕터만 있고 drafts 0개"에서만 조립 가능 — 을 설명하는 조항): 다음 슬라이스가 혼합 상태를 다룰 때 한 줄 후보.
+
+---
+
+## Session 3 — 계층화 배포·운영 migration 적용(migration 인덱스 결함 수습 포함)
+
+### Goals
+
+- 계층화 마감 상태(main `4cf646f`)를 배포 서버에 반영하고 운영 Mongo의 평면 데이터에
+  Chapter→Scene migration을 적용한다(오너 지시: 백업 생략 — 전부 테스트 데이터).
+
+### Completed work
+
+- **배포(1차)**: 오너 push 후 배포 서버에서 소스를 main으로 정렬·application·gateway·frontend
+  이미지 재빌드·앱 계열 교체(영속 저장소·외부 LLM/임베딩 구성 무변). 전 서비스 healthy·
+  내부 health 200·프론트의 /api 프록시 정상 확인.
+- **운영 migration 1차 실행 — 실패**: `DuplicateKeyError (uniq_scene_position: chapter_id=null,
+  position=1)`. `replace_hierarchy`가 프로젝트마다 데이터 커밋 뒤 `(chapter_id, position)`
+  unique 인덱스를 만드는데, 아직 평면인 다른 프로젝트들의 `(null, position)` 중복과 충돌한다.
+  로컬 mongo migration 셀이 단일 프로젝트 형상이라 이 분기를 못 잡은 **멀티 프로젝트 무셀**이었다.
+  실패 시점 상태: 첫 프로젝트 이관 커밋(1/10)·나머지 평면·unique 인덱스 소실(`_id_`만 잔존).
+  앱은 계약대로 평면 프로젝트 목록만 503 fail-closed로 동작(크래시 없음·데이터 무손실).
+- **수습(로컬, `9b2f1e0`)**: 회귀 우선 — 프로젝트 3개 평면 형상 셀을 추가해 수정 전
+  운영과 동일한 DuplicateKeyError로 red 재현(3 서브클래스). 수정 — `uniq_scene_position`을
+  partial unique(`chapter_id`가 문자열인 귀속 Scene에만 유일성)로: 중간 상태 충돌 제거·
+  최종 상태 DB층 방어 유지. mutation(partial에 null 포함 복귀) 재 red 확인.
+- **재배포·migration 2차**: 오너 push → 배포 서버 재정렬·application 이미지 재빌드·앱 4서비스
+  교체 → migration 재실행 **성공**(`migrated=9, unchanged=1` — 1차에 이관된 프로젝트 스킵) →
+  재실행 **no-op**(`migrated=0, unchanged=10`).
+
+### Issues found
+
+1. **멀티 프로젝트 평면 migration 무셀** — 위 Completed work. 교훈: migration 인덱스 설치는
+   "전체가 계층화된 뒤"에만 유일성이 성립하는 전역 조건인데 셀이 단일 프로젝트 형상만
+   검증했다. 수습 셀(`test_multi_project_flat_migration_installs_the_scene_index`)이 잠근다.
+2. **배포 서버에서 `docker compose up -d`(서비스 지정)가 의존성 재검사 단계에서 10분
+   대기 후에도 진행하지 않는 현상** — `--no-deps`로 개별 교체하면 즉시 성공. 원인 미상
+   (dockerd 로그에 containerd session healthcheck 경계 오류 반복 관측). 재현 시 같은
+   우회로 진행하고 원인 규명은 별도 과제로 남긴다.
+
+### Decisions
+
+- 오너 결정(2026-08-29): migration 백업 없이 이번 배포에 함께 적용 — "다 테스트라서".
+- (수칙 확인) migration 스크립트 실행은 컨테이너 내 `PYTHONPATH=/app` 지정이 필요하다 —
+  `python scripts/...` 실행은 스크립트 디렉터리가 `sys.path[0]`이 되어 `services` 임포트가
+  실패한다.
+
+### Verification
+
+- 최종 운영 상태(배포 서버 실측): projects=10·drafts=10(**무손실**)·chapters=10·
+  legacy_flat=0(**전면 계층화**)·인덱스 `_id_`,`uniq_scene_position`(**partial unique 설치**).
+- 서비스 레이어: 전 프로젝트(10/10) `list_chapters`·`list_drafts` 정상 반환, 앱 health 200.
+- 로컬 수습 검증: mongo 전수 **88/88**(+신규 3)·backend 전수 **2574 passed / 4 skipped /
+  3024 subtests — 0 failed**.
+
+### Next steps
+
+- 오너가 공개 사이트에서 계층화 UI(장/장면 목록·생성·순서 이동·삭제 확인창)를 육안 확인한다.
+- compose up 대기 현상의 원인 규명은 별도 과제(재현 시 `--no-deps` 우회 기록은 위 2).
