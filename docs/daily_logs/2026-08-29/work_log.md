@@ -145,3 +145,72 @@
 
 - 오너가 공개 사이트에서 계층화 UI(장/장면 목록·생성·순서 이동·삭제 확인창)를 육안 확인한다.
 - compose up 대기 현상의 원인 규명은 별도 과제(재현 시 `--no-deps` 우회 기록은 위 2).
+
+---
+
+## Session 4 — 배포 "감지 지연" 원인 조사·수습(embedding 의존)
+
+### Goals
+
+- 오너 지시: 저번 배포부터 반복된 "빌드는 다 됐는데 확인에 시간이 많이 걸리던" 현상의
+  원인을 파라라서 수습한다. 이번 배포(세션 3)에서도 `docker compose up -d`(서비스 지정)가
+  10분 넘게 무대기했던 관측이 계기다.
+
+### Completed work
+
+- **원인 규명 — `embedding` 의존 빌드.** base compose의 `application.depends_on`이
+  `embedding: service_healthy`를 포함하는데, 임베딩을 외부 API로 쓰는 배포 서버에는
+  embedding 컨테이너도 **이미지도 없다**. `up <svc>`(의존 포함)는 존재하지 않는 이미지를
+  그 자리에서 **빌드**하기 시작하고(torch·sentence-transformers 설치), 끝나도 컨테이너
+  기동+healthy(`start_period` 300s — 첫 기동 모델 다운로드 고려)를 기다린다. 이 대기가
+  지연의 정체였다. 재현 실험: 변화 없는 `up -d application`조차 "Image
+  ai_writte_system-embedding Building"로 60초 타임아웃(직접 관측).
+- **부수 오류 판명.** dockerd 로그의 `healthcheck failed: only one connection allowed`
+  (containerd grpc 경고 — moby/buildkit#748·moby#52721류)는 빌드 중 발생하는 경고로
+  **컨테이너 헬스에는 영향이 없었다**(전 서비스 healthy 유지·현재도 간헐 발생). 범인이
+  아니라 동행자였다. 디스크 42%·메모리 여유로 자원 고갈도 아님.
+- **기존 external.yml이 왜 안 쓰였나.** `docker-compose.external.yml`이 정확히 이 문제의
+  처방(profile 뒤로 + depends_on 교체)이지만 chroma·ES까지 끈다 — 이 서버는 LLM·임베딩만
+  외부이고 chroma·ES를 in-stack으로 쓰는 **하이브리드**라 그대로는 기동 거부
+  (CHROMA_HOST·ELASTICSEARCH_URL 필수값 없음). 스택 컨테이너 라벨도 base 단독으로
+  만들어져 있었다(override 미적용 확인).
+- **수습 — `docker-compose.external-embedding.yml` 신설(커밋 `f73e820`, 오너 결정).**
+  embedding만 profile(`local-models`) 뒤로, application·worker·generation_worker의
+  depends_on을 `!override`로 교체(embedding 제거·나머지 4/3/4 유지),
+  `EMBEDDING_SERVICE_URL` `:?` 필수화. 배포 절차(사용법)는 파일 헤더 주석에 runbook으로
+  기록했다.
+- **리모트 적용·실증.** 오너 push → 배포 서버 재정렬 → 새 조합
+  (`-f docker-compose.yml -f docker-compose.external-embedding.yml`)으로 스택 라벨 갱신 →
+  **핵심 실증: 의존성 포함 `up -d application`이 0.741초에 완료**(mongo·gateway·chroma·
+  elasticsearch healthy 확인 후 즉시 — embedding은 등장하지도 않음). 이전 10분+ 대기에서
+  0.7초로 수습됐다.
+
+### Issues found
+
+1. **배포 지연의 정체는 docker 감지 결함이 아니라 compose 선언과 실제 구성의 불일치**였다 —
+   base compose는 "embedding이 스택 안에 있다"를 기본으로 선언하고, 이 서버는 임베딩만
+   외부인데 그 차이를 담는 조합 파일이 없었다(전부 외부용만 있었다).
+2. 세션 3의 `--no-deps` 우회는 유효했지만 원인을 고친 게 아니었다 — 의존 확인 자체를
+   건너뛰었을 뿐. 이번 override로 의존 포함 up이 정상 경로로 즉시가 됐다.
+3. containerd grpc 경고("only one connection allowed")는 여전히 간헐 발생한다(idle에서도
+   4건/10분 관측) — 빌드/조회와 겹칠 때의 경합 경고로 판명되어 방치 가능. 재발 시 영향은
+   로그 노이즈 수준(컨테이너 healthy 무관 실측).
+
+### Decisions
+
+- 오너 결정(2026-08-29): 수습은 **override 신설 + runbook 기록** — `--no-deps` 우회
+  고정이 아니라 조합 자체를 고치는 쪽.
+
+### Verification
+
+- 병합 config 검증: 기본 서비스 목록에서 embedding 제외·의존 4/3/4·
+  `--profile local-models`로 복귀·`:?` 필수 동작.
+- `tests/test_compose_backend_env.py` + `tests/test_docs_indexes.py` — 27 passed.
+- 리모트 실증: 의존 포함 `up -d application` **0.741초**(이전 10분+), 전 서비스 healthy·
+  앱 health 200·migration 상태 무변(세션 3 결과 유지).
+
+### Next steps
+
+- 다음 배포부터는 `-f docker-compose.yml -f docker-compose.external-embedding.yml` 조합이
+  이 서버의 표준 절차다(파일 헤더 주석이 runbook). 전부 외부 구성이 필요해지만 않으면
+  `docker-compose.external.yml`과 함께 쓰지 않는다(의존 교체 충돌).
