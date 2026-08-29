@@ -355,7 +355,11 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 >   **메모 기능은 Slice 0부터 진행한다.** 확정값은
 >   [`scene-note-decisions.md`](docs/plans/scene-note-decisions.md), 인계 가능한 순서·각 slice의
 >   완료 기준은 [`scene-note-implementation-phases.md`](docs/plans/scene-note-implementation-phases.md)에
->   있다. 다음 작업자는 Slice 0(저장·파기 수명)만 열고 HTTP/UI를 함께 만들지 않는다.
+>   있다. **오늘 코드는 아직 0줄이다.** 다음 작업자는 Slice 0(저장·파기 수명)만 열고 HTTP/UI를
+>   함께 만들지 않는다. 착수 위치는 `core_sot/models.py`·`service.py`의 in-memory repository와
+>   `core_sot/mongo_repository.py`의 Mongo index/`_purge_{draft,chapter,project}`, 그리고 공유 project
+>   파기 진입점 `routers/admin.py::execute_project_purge`다. Scene/Chapter 파기는 Core SOT 안에서,
+>   project purge는 공유 실행 함수에서 연결한다 — 두 경로를 하나로 뭉치지 않는다.
 
 > **★★ 2026-08-27 세션 4 반영 — D5-2 조건 폐쇄 + 보강 1·3·4 완료. 여기서 시작한다.**
 >

@@ -170,6 +170,14 @@
 
 - **Slice 0**: `SceneNote` 전용 저장소와 Scene/Chapter/project purge 수명을 테스트부터 구현한다.
 
+### Handoff note
+
+- 오늘은 시간 제약으로 Slice 0 구현을 시작하지 않았다. 코드·SoT·OpenAPI 무변이다.
+- 착수 전 확인한 경계: in-memory 수명은 `core_sot/service.py`, Mongo index와 purge는
+  `core_sot/mongo_repository.py`, project purge 공유 그래프는 `routers/admin.py::execute_project_purge`.
+  Scene/Chapter purge는 Core SOT 내부에서, project purge는 공유 실행 함수에서 각각 메모를 지워야
+  한다. Slice 0에 HTTP route·프론트·활동 기록을 섞지 않는다.
+
 ---
 
 ## Session 6 — 장면 메모 기능 결정 브리프
