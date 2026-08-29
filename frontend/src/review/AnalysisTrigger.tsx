@@ -201,7 +201,7 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
           {result.candidateCount > 0 ? (
             <>
               {result.candidateCount}개 검토 후보가 생성됐습니다.{" "}
-              <Link to={`/projects/${projectId}/review`} onClick={guardNavigation}>
+              <Link className="inline-navigation-link" to={`/projects/${projectId}/review`} onClick={guardNavigation}>
                 검토함에서 확인하세요 →
               </Link>
             </>

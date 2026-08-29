@@ -100,7 +100,7 @@ export function ActivityTimelinePage() {
                         {event.after ?? ""}
                       </>
                     )}
-                    {href !== null && <>{" · "}<Link to={href}>원고 열기</Link></>}
+                    {href !== null && <>{" · "}<Link className="inline-navigation-link" to={href}>원고 열기</Link></>}
                   </span>
                 </li>
               );

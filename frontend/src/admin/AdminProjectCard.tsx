@@ -137,7 +137,7 @@ export function AdminProjectCard({
           <label>접근 사유<input value={access.reason} onChange={(e) => setAccess((current) => ({ ...current, reason: e.target.value }))} /></label>
           <div className="row-actions">
             <button type="button" disabled={access.busy || access.reason.trim() === ""} onClick={() => void issueGrant()}>1시간 읽기 권한 발급</button>
-            {access.grant && <Link to={`/projects/${project.id}`}>프로젝트 열기</Link>}
+            {access.grant && <Link className="inline-navigation-link" to={`/projects/${project.id}`}>프로젝트 열기</Link>}
             <button type="button" disabled={access.busy || !access.grant} onClick={() => void loadAccessLog()}>접근 이력 보기</button>
           </div>
           {access.grant && <p className="grant-status">권한 만료: {new Date(access.grant.expires_at).toLocaleString("ko-KR")}</p>}

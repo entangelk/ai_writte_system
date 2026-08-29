@@ -97,6 +97,7 @@ const MIGRATED: Record<string, string> = {
   ".gate-empty": "small",
   ".gate-finding": "small",
   ".section-link": "small",
+  ".inline-navigation-link": "small",
   ".writing-progress": "small",
   ".generation-pad-lead": "small",
   ".generation-pad-failed": "small",

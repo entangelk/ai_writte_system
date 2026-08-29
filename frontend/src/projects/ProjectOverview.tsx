@@ -298,7 +298,7 @@ export function ProjectOverview() {
       <section className="overview-section" aria-labelledby="canon-heading">
         <div className="overview-heading">
           <div><p className="eyebrow">Canonical only</p><h2 id="canon-heading">승인된 작품 기억</h2></div>
-          <Link to={`/projects/${projectId}/review`}>검토 전 {pending}개 →</Link>
+          <Link className="inline-navigation-link" to={`/projects/${projectId}/review`}>검토 전 {pending}개 →</Link>
         </div>
         {memory.length === 0 ? (
           <div className="empty-state"><p>승인된 작품 기억이 없습니다.</p><span>분석 후보는 검토함에서 승인한 뒤 여기에 표시됩니다.</span></div>

@@ -1986,6 +1986,23 @@ main {
   color: var(--action-primary-hover);
 }
 
+/* 문장·보조 동작 안의 이동은 버튼 면을 쓰지 않는다. 대신 밑줄·굵기·focus ring으로
+   단순 본문과 구별한다. 목록 행·뒤로 가기·계정 메뉴는 각각의 문맥 규칙이 있으므로
+   이 공통 규칙에 넣지 않는다. */
+.inline-navigation-link {
+  color: var(--text-link);
+  font-size: var(--type-small);
+  font-weight: 700;
+  text-decoration-line: underline;
+  text-decoration-thickness: 0.12em;
+  text-underline-offset: 0.18em;
+}
+
+.inline-navigation-link:hover,
+.inline-navigation-link:focus-visible {
+  color: var(--action-primary-hover);
+}
+
 .section-title {
   margin: 2.4rem 0 0;
   font-family: Georgia, "Times New Roman", serif;
