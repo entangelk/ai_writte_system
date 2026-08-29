@@ -392,6 +392,11 @@ class MongoCoreSotRepository:
             [("chapter_id", ASCENDING), ("position", ASCENDING)],
             unique=True,
             name="uniq_scene_position",
+            # Migration은 프로젝트별로 replace_hierarchy를 돌리므로 중간 상태에
+            # 평면(아직 chapter_id가 null인) 프로젝트들이 남는다 — (null, position)
+            # 충돌로 인덱스 생성이 죽지 않도록, 귀속된 Scene에만 유일성을 적용한다
+            # (운영 배포 실측 결함 2026-08-29: 멀티 프로젝트 평면에서 DuplicateKeyError).
+            partialFilterExpression={"chapter_id": {"$type": "string"}},
         )
 
     def _replace_hierarchy(

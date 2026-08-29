@@ -180,6 +180,36 @@ class _MongoContractMixin:
             self.repo.get_blocks(saved.snapshot.id), saved.blocks
         )
 
+    def test_multi_project_flat_migration_installs_the_scene_index(self):
+        # 운영 배포 실측 결함(2026-08-29): replace_hierarchy가 프로젝트마다
+        # (chapter_id, position) unique 인덱스를 만드는 동안, 아직 평면인 다른
+        # 프로젝트의 (chapter_id: null, position: 1) 중복과 충돌해
+        # DuplicateKeyError로 migration이 죽었다(단일 프로젝트 셀은 이 형상을
+        # 못 잡는다 — 유일성은 전체가 계층화된 뒤에야 성립한다). 프로젝트 3개가
+        # 평면일 때 전체 이관과 인덱스 설치가 함께 성공해야 한다.
+        flat = []
+        for index in range(3):
+            project = self.service.create_project(name=f"평면 {index}")
+            draft = self.service.create_draft(
+                project_id=project.id, title="장면")  # 프로젝트마다 (null, 1)
+            self.service.save_draft(
+                project_id=project.id, draft_id=draft.id,
+                raw_text="본문.", idempotency_key="k1",
+            )
+            flat.append((project, draft))
+
+        result = ChapterSceneHierarchyMigration(self.repo).run()
+
+        self.assertEqual(result.migrated_projects, 3)
+        for project, draft in flat:
+            migrated = self.repo.get_draft(draft.id)
+            self.assertIsNotNone(migrated.chapter_id)
+            self.assertIsNone(migrated.unit_kind)
+        index_names = [
+            info["name"] for info in self.repo._drafts.list_indexes()
+        ]
+        self.assertIn("uniq_scene_position", index_names)
+
     def test_chapter_purge_keeps_sibling_chapter_and_scene(self):
         project = self.service.create_project(name="Hierarchy")
         victim_chapter = self.service.create_chapter(
