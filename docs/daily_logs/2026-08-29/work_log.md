@@ -148,6 +148,30 @@
 
 ---
 
+## Session 7 — 장면 메모 구현 페이즈
+
+### Goals
+
+- 장면 메모 기능을 다음 작업자가 독립적으로 이어갈 수 있는 작은 구현 Slice로 나눈다.
+
+### Completed work
+
+- [`scene-note-implementation-phases.md`](../../plans/scene-note-implementation-phases.md)에 Slice 0~4를
+  추가했다: 저장·파기 수명 → 읽기/검색 API → 쓰기/활동 기록 → 별도 화면 → 드로어 통합.
+- 각 slice의 범위, 인가, 검증, 인계 조건과 공통 checkpoint/mutation 규칙을 적었다. 특히 Slice 0은
+  HTTP/UI 없이 데이터 수명만 닫고, Slice 3~4는 API 계약을 바꾸지 않는다.
+
+### Decisions
+
+- 오너 지시(2026-08-29): 메모는 한 덩어리로 구현하지 않고 작은 Slice로 순차 진행하며, 다음
+  작업자가 문서만 읽고 그대로 재개할 수 있어야 한다.
+
+### Next steps
+
+- **Slice 0**: `SceneNote` 전용 저장소와 Scene/Chapter/project purge 수명을 테스트부터 구현한다.
+
+---
+
 ## Session 6 — 장면 메모 기능 결정 브리프
 
 ### Goals
