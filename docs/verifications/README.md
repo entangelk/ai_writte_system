@@ -1,7 +1,7 @@
 # 독립 검증 기록
 
 이 디렉터리는 **구현자가 아닌 검증자가** 각 슬라이스를 다시 뜯어본 기록이다. 2026-06-24부터
-**59일치 · 261건**이 쌓여 있다.
+**59일치 · 262건**이 쌓여 있다.
 
 ## 이 저장소의 검증이 무엇인가
 
@@ -35,7 +35,7 @@
 
 | 판정 | 건수 | 뜻 |
 |---|---|---|
-| 합격 | 183 | blocking 결함 없음 |
+| 합격 | 184 | blocking 결함 없음 |
 | **조건부 합격** | **75** | 합격이되 닫아야 할 조건이 있었다 |
 | **불합격** | **3** | 핵심 계약 위반으로 다음 슬라이스 진행이 차단됐다 |
 
@@ -67,6 +67,7 @@
 
 | 기록 | 무엇을 봤나 | 판정 |
 |---|---|---|
+| [`n3_n4_closure.md`](2026-08-29/n3_n4_closure.md) | 2차 재검증 조건 N3·N4의 폐쇄 보강(`717ed5e`+`fe7bc4e`) 독립 재검증. **N3 폐쇄 실증**: 혼합 versions 3경로 200 셀 추가, 검증자가 2차 재검증과 동일한 V6b mutation(혼합일 때만 방어)을 재적용해 **정확히 신규 셀만 물림** 확인(1 failed — 평면 versions 셀 green, 중간 설계와 전면 방어가 셀 단위로 구분). 셀 주석의 조립 전제("drafts가 없어 create_chapter가 막지 않는다")도 `create_chapter` 가드 코드와 정합. **N4 폐쇄 실증**: 교체 인용의 출처가 SoT v1.5 행 원문(2026-06-28 확정 archive 정책·unarchive 범위 밖)과 정합, 정정 마커·버전 무상승 근거(work_log 세션 2 Decisions)·세션 1 로그 무결성 방침 확인, 결함 문구 잔여는 증거 파일뿐. 전수 **2571/4/3023**·집중 23/271·변동 귀속(+1 passed 신규 셀·+1 subtest 검증 기록 등재분)까지 주장과 정확히 일치. | **합격** |
 | [`flat_legacy_escape_path_closure.md`](2026-08-29/flat_legacy_escape_path_closure.md) | 재검증 조건 N1·비차단 H1·N2의 폐쇄 보강(`9dead9e`+`0fb24cd`) 독립 재검증. **N1 폐쇄 실증**: SoT v1.8.10 대피 경로 명시·라우터 주석 정정·셀 3종 계약 고정, mutation M1·M2 재검증 모두 정확히 대상 셀만 물림, 혼합 상태 라이브 재현(versions 200·export 503) 삼자 일치. **subtest 기준선 정밀화 주장 재현**: 기준선(작업 전 `2c77a70`) 전수 2567/4/**3022**·HEAD 2570/4/3022(+3 passed, subtest ±0) — 1차 재검증의 3021은 동일 트리에서 재현 안 되는 측정 변동이었음을 검증자 스스로의 재측으로 확인. **신규 조건 2**: ① SoT가 명시한 "versions는 혼합 상태에서도 200" 분기 무셀(V6b mutation — 혼합만 방어하는 변형이 어떤 셀도 안 물림) ② "project unarchive(v1.5 MVP 범위 밖)" 인용의 출처가 저장소에 0건(실제 근거는 2026-06-28 §115 unarchive 여지 보존). 셀 1개·문구 1줄 수준. | **조건부 합격** |
 | [`chapter_scene_hierarchy_b1_b5_closure.md`](2026-08-29/chapter_scene_hierarchy_b1_b5_closure.md) | 1차 검증(불합격) Blocking 5건의 세션 11 보강(`c911f03..aafd337` 7커밋) 독립 재검증. **B1~B5 전부 폐쇄 실증**: 평면 legacy 4경로 라이브 재현으로 500→**503**(서비스+라우터 2층, mutation으로 각층 분리 잠금 확인 — 목록 subtest는 서비스층이 흡수)·TXT/무손실/partial fail-closed 축 mutation 3종 신규 탐침 전부 물림(1차 무셀 V3 재검증 포함)·B5 uncertain 잠금 셀 양방향+mutation 재검증·SoT v1.8.9 본문·운용 수 실측 일치(96 op·활동 25/29)·전수 수치 주장과 정확히 일치(backend 2567/4/3021 test-mongo ON 직접 기동·mongo 85/85·프론트 383/383·build 442.34 kB·schema 0줄 차). 1차 H5(TestClient 대기 주장)도 본 환경에서 재현 안 됨. **신규 조건(N1)**: 순수 평면 legacy 상태의 `GET /export`·versions가 **200**으로 동작하는 것이 SoT 계층 조항("공개 CRUD·Writing accept… 503")에 정의돼 있지 않고 export 라우터 주석("unmigrated legacy data blocks it")과도 어긋남 — 목록은 503인데 내보내기는 되는 비대칭의 계약 결정이 필요(오너 판단: 대피 경로 명시 or 503 정합). | **조건부 합격** |
 
