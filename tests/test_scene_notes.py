@@ -264,7 +264,7 @@ class SceneNotePurgeTest(unittest.TestCase):
     """파기 수명 — 고아 0(결정 브리프 Follow-up, D5 '부분 삭제는 조용한 고아')."""
 
     def test_scene_purge_removes_its_note_and_keeps_the_sibling_scene_note(self):
-        service, _repo = _service()
+        service, repo = _service()
         project, chapter, victim = _scene(service)
         sibling = service.create_scene(
             project_id=project.id, chapter_id=chapter.id, title="Scene 2"
@@ -278,6 +278,13 @@ class SceneNotePurgeTest(unittest.TestCase):
 
         service.purge_draft(project_id=project.id, draft_id=victim.id)
 
+        # 저장소를 직접 본다 — service 조회는 draft 소멸이 내는 NotFound 에 가려져
+        # **메모 행이 고아로 남아도 통과한다**(변이 M1 이 실증).
+        self.assertNotIn(
+            (project.id, victim.id),
+            repo.scene_notes,
+            "파기된 장면의 메모가 고아로 남았다",
+        )
         with self.assertRaises(NotFound):
             service.get_scene_note(project_id=project.id, draft_id=victim.id)
         self.assertEqual(
@@ -288,7 +295,7 @@ class SceneNotePurgeTest(unittest.TestCase):
         )
 
     def test_chapter_purge_cascades_to_child_scene_notes_only(self):
-        service, _repo = _service()
+        service, repo = _service()
         project, victim_chapter, victim_scene = _scene(service)
         kept_chapter = service.create_chapter(
             project_id=project.id, title="Chapter 2"
@@ -310,6 +317,12 @@ class SceneNotePurgeTest(unittest.TestCase):
             project_id=project.id, chapter_id=victim_chapter.id
         )
 
+        # 같은 이유로 저장소를 직접 본다(위 M1 주석).
+        self.assertNotIn(
+            (project.id, victim_scene.id),
+            repo.scene_notes,
+            "cascade 로 지워진 장면의 메모가 고아로 남았다",
+        )
         with self.assertRaises(NotFound):
             service.get_scene_note(
                 project_id=project.id, draft_id=victim_scene.id
@@ -322,7 +335,7 @@ class SceneNotePurgeTest(unittest.TestCase):
         )
 
     def test_project_purge_removes_notes_and_leaves_another_project_intact(self):
-        service, _repo = _service()
+        service, repo = _service()
         victim, _chapter, victim_scene = _scene(service, project_name="Victim")
         kept, _kept_chapter, kept_scene = _scene(service, project_name="Kept")
         service.put_scene_note(
@@ -334,6 +347,11 @@ class SceneNotePurgeTest(unittest.TestCase):
 
         service.purge_project(project_id=victim.id)
 
+        self.assertNotIn(
+            (victim.id, victim_scene.id),
+            repo.scene_notes,
+            "파기된 프로젝트의 메모가 고아로 남았다",
+        )
         with self.assertRaises(NotFound):
             service.get_scene_note(
                 project_id=victim.id, draft_id=victim_scene.id
