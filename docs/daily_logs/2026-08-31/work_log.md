@@ -253,6 +253,63 @@
   탓의 5초 타임아웃**이었다(단독 재실행 204ms 통과, 부하 없는 전수에서도 385/385).
   교훈: 이 머신에서 두 전수를 겹쳐 돌리지 않는다.
 
+## Session 4 — Slice 1 독립 검증 조건 폐쇄
+
+검증 기록: [`2026-08-31/scene_note_slice_1.md`](../../verifications/2026-08-31/scene_note_slice_1.md)
+(**조건부 합격**, 커밋 `ab76b3e`). 차단 1건 + 보강 1건 + 기록 3건을 닫았다.
+
+### Completed work
+
+- **차단 폐쇄 — 평면 legacy 503 face 행동 셀**: SoT v1.8.12가 "평면 legacy의 503 얼굴도 함께
+  온다"를 명문화했는데 그 분기가 **무셀**이었다(검증자 변이 W5: 라우터의
+  `DraftOrderIntegrityError → 503` 핸들러를 통째로 지워도 60 passed / 0 failed). 그 상태의
+  실제 동작은 **500**이고, 처방이 `migrate_chapter_scene_hierarchy.py`라는 사실이 응답에서
+  사라진다. `SceneNoteLegacyMigrationFaceTest` 3셀 — 정합 평면 503 · 혼합(부분 migration)
+  503 · **정상 계층 200**(과잉 교정 가드).
+- **W2 보강 — strip 대칭**: 서비스 필터(`(query or "").strip()`)와 라우터 스니펫 탐색
+  (`query.strip()`)이 둘 다 strip하는데 **한쪽만 없애는 비대칭을 아무 셀도 못 잡았다**.
+  공백이 붙은 검색어에서 목록에는 뜨는데 미리보기는 머리 200자가 된다 — 검색 연계가 조용히
+  꺼진 상태다. `test_a_padded_query_still_centers_the_snippet` 1셀.
+- **기록 3건**: work_log의 미존재 해시 `6c05e73` → `440c811`(이번엔 `git log --format=%h %s`
+  출력에서 **스크립트로 직접 읽어** 채웠다) · Session 3의 낡은 "Next steps"(완료된 Slice 1을
+  다음 순서로 적고 있었다)를 Slice 2로 교체 · `HANDOFF.md:35`의 "현재 96 operation 합집합"
+  → 98.
+
+### Issues found
+
+1. **같은 날 해시를 두 번 틀렸다.** Session 2에서 "해시는 `git log`에서 복사한다"고 적은
+   직후 Session 3에서 재발했다(`ae2fc9d` → `6c05e73`). 원인은 같다 — 기록 시점에 확인하지
+   않고 추정했다. **다짐으로는 못 고친다**는 것이 이번 재발의 결론이라, 이번 정정은 손으로
+   적지 않고 subject로 커밋을 찾아 해시를 채우는 스크립트로 했다. 다음 세션도 같은 방식을
+   쓴다(work log에 해시를 넣을 때 `git log --format=%h %s`의 출력에서 프로그램으로 뽑는다).
+2. **"선언은 있고 셀은 없는" 분기**가 이번에도 검증자 변이로만 드러났다 — OpenAPI에 503이
+   선언돼 있어 계약 문서만 보면 닫혀 보인다. Slice 0의 M1, Slice 1의 S1과 같은 계열이고,
+   셋 다 **변이 없이는 green으로 보였다**.
+
+### Mutation verification (Session 4)
+
+구현 커밋(`7bd83fc`) 뒤 적용 → 실행 → `git checkout` 복원 → `git status --short` 0건 확인
+(각 1회). 실행 대상은 `test_scene_notes.py` + `test_scene_notes_api.py` +
+`test_chapter_hierarchy.py`.
+
+| # | 방향 | 적용 diff | 파일 | 물린 셀 |
+|---|---|---|---|---|
+| W5 | under(503 face 상실) | `list_scene_notes` route의 `except DraftOrderIntegrityError → 503` 블록 삭제 | `routers/notes.py` | `SceneNoteLegacyMigrationFaceTest::test_flat_legacy_project_note_list_is_503_not_500` · `::test_mixed_hierarchy_state_note_list_is_503_not_500` (2 failed — **검증자가 0셀로 뚫었던 자리**) |
+| W5b | over(정상까지 503) | route가 항상 `DraftOrderIntegrityError` 를 올리게 | `routers/notes.py` | `::test_a_migrated_project_is_not_swept_into_the_503` 포함 8 failed |
+| W2 | under(스니펫 strip 비대칭) | `query.strip().casefold()` → `query.casefold()` | `routers/notes.py` | `NotePreviewTest::test_a_padded_query_still_centers_the_snippet` (1 failed) |
+| W2b | under(필터 strip 제거, 반대쪽) | `(query or "").strip().casefold()` → strip 제거 | `core_sot/service.py` | `SceneNoteListTest::test_blank_query_lists_everything` subtest `query='   '` (1 failed) |
+
+### Verification (Session 4)
+
+- 집중: `test_scene_notes_api.py` **23 passed**(신규 4셀 포함, 총 19→23).
+- broader suite: `test_scene_notes.py` + `test_scene_notes_api.py` +
+  `test_chapter_hierarchy.py` + `test_application_api.py` + `test_auth_api.py` +
+  `test_docs_indexes.py` + `test_activity_actions.py` = **344 passed / 1887 subtests**
+  (2분 35초).
+- 전수는 재실행하지 않았다 — 이번 증분은 **셀 4개 추가와 문서 정정뿐**이고 제품 코드는
+  무변(변이 4종은 적용 후 전부 복원, `git status` 0건)이다. Session 3의 전수
+  (backend 2638/1/3065 · frontend 385)는 검증자가 같은 트리에서 독립 재현했다.
+
 ### Next steps
 
 - **Slice 2(명시적 저장 API와 활동 기록)**: `PUT /projects/{pid}/drafts/{did}/note` 하나.
