@@ -159,6 +159,94 @@
 - Session 1의 전수(2610/1/3024)는 재실행하지 않았다 — 이번 증분은 셀 1개 추가와 문서
   정정뿐이고, 검증자가 같은 트리에서 전수를 독립 재현했다(32:41).
 
+## Session 3 — 장면 메모 Slice 1(읽기 API와 검색)
+
+### Goals
+
+- `GET /projects/{pid}/notes?query=` 와 `GET /projects/{pid}/drafts/{did}/note` 를 연다.
+  쓰기 route·활동 기록은 만들지 않는다(Slice 2).
+- 오너가 제기한 두 축(미리보기·페이지네이션)을 선례와 대조해 결정하고 정본에 남긴다.
+
+### Completed work
+
+- **Core SOT**: `SceneNoteListItem(note, scene, chapter)` 모델 — 필드를 평면화하지 않고 기존
+  모델을 그대로 싣는다(두 번째 필드 목록은 `Draft`/`Chapter` 가 자라는 순간 어긋난다).
+  repository `list_scene_notes(project_id)`(in-memory·Mongo), service
+  `list_scene_notes(project_id, query=None)`.
+- **순서**는 `list_drafts` 에서 가져온다 — 장 position→장면 position 이 이미 거기 있고,
+  평면 legacy 의 `DraftOrderIntegrityError`(503) 얼굴도 함께 온다.
+- **검색**은 서버 적용: 장면 제목 또는 본문 부분 일치, `casefold()` 로 대소문자 무관,
+  **공백뿐인 query 는 필터 없음**.
+- **`routers/notes.py` 신규**(`register_notes(app, *, core_sot)`): 협력자가 `core_sot`
+  하나뿐인 것은 의도다 — 읽기 전용 slice 라 `activity` 를 받지 않는다.
+  `build_note_preview(body, query)` + `SCENE_NOTE_PREVIEW_MAX_CHARS = 200`.
+- **인가는 새 축이 없다**: `_REQUIRE_PROJECT_OWNER` 재사용. grant 읽기와 access-log 기록이
+  기존 choke point(`api/dependencies.py::require_project_owner`) 한 곳에서 그대로 성립한다 —
+  라우터에서 다시 기록하면 두 벌이 된다.
+- **정본**: SoT **v1.8.12**(변경이력 + Phase 1 조항), README ④칸, 결정 브리프 Follow-up,
+  페이즈 문서 Slice 1 완료. operation tier **70/96 → 72/98**(`test_auth_api.py`).
+- **`schema.d.ts` 재생성**(`npm run gen:api`) — `SceneNotePayload`·
+  `SceneNoteListItemPayload`·`SceneNoteListResponse` 및 2 operation 추가(+228줄).
+- **회귀**: `tests/test_scene_notes.py` +8셀(목록·검색, 총 24) ·
+  `tests/test_scene_notes_api.py` **신규 19셀**(응답 모양·미리보기 경계·401/403/404·
+  grant 읽기 + access-log 2행).
+
+### Issues found
+
+1. **순서 가드가 순서를 안 잠갔다 — 변이 S1이 대상 셀을 못 잡았다.** 문제: 순서 계산을
+   `service.list_drafts` → `repo.list_drafts` 로 강등해도 순서 셀이 통과했다. 원인:
+   in-memory repo 도 `(chapter_id or "", position)` 으로 정렬하는데, 픽스처의 chapter id 가
+   `chapter-1`·`chapter-2` 라 **사전순이 position 순과 우연히 일치**했다. 해결: 셀이
+   `reorder_chapters` 로 장을 뒤집어 두 순서가 갈라지게 했다(커밋 `6c05e73`). 결과: 같은
+   변이가 이제 순서 셀을 깨뜨린다. **Slice 0의 M1과 같은 계열** — "가드가 통과하는 이유가
+   내가 생각한 이유인가"를 변이로 물어야 잡힌다. 자체 변이가 없었으면 둘 다 못 잡았다.
+
+### Decisions
+
+- **미리보기 = 검색 연계(오너 2026-08-31)**: query 가 본문에서 잡히면 매치 중심 스니펫,
+  아니면 머리 200자. 길이 200은 활동 로그의 `ACTIVITY_VALUE_MAX_CHARS` 와 같은 값 —
+  같은 성격(목록에 싣는 텍스트 조각)에 두 번째 숫자를 만들지 않는다. tradeoff: 스니펫
+  계산이 라우터에 들어가지만, 절단·창 계산은 표현 계층 관심사라 도메인에 두지 않았다.
+- **페이지네이션 없음(오너 2026-08-31)**: 활동 타임라인의 `limit=100` 선례는 **최신 순
+  타임라인**이라 성립하는 상한이고, **검색 결과에 상한을 걸면 조용한 누락**("분명히 쓴
+  메모가 안 나온다")이 된다. 미리보기 절단으로 크기 문제는 이미 사라진다(장면 200개
+  ≈40KB). 나중에 `limit`/`offset` 추가는 가산적이라 계약을 깨지 않는다.
+- **보관 장면 포함 + 보관 표시(오너 2026-08-31)**: 결정 브리프가 "구현 시 확정"으로 남긴
+  항목. `list_drafts` 가 archived 를 걸러내지 않는 선례와 "archive 는 read 를 막지 않는다"
+  전역 계약을 따른다. `scene_archived`·`chapter_archived` **두 축**을 싣는 이유는 장 보관이
+  자식 Scene 의 `archived` 를 바꾸지 않기 때문이다 — 한 축만 실으면 화면이 읽기 전용을
+  잘못 표시한다.
+- **메모 없음 = `body=null`, 404 아님**: 404 로 답하면 장면 없음(404)과 뒤섞여 드로어가
+  메모 없는 장면을 열 때마다 오류를 받는다. `body=""` 는 빈 메모 저장됨(저장 계약이 그
+  둘을 구분하므로 읽기 표면도 구분한다).
+
+### Mutation verification (Session 3)
+
+구현 커밋(`c861bc0`, 순서 가드 보강 `440c811` 후 S1 재실행) 뒤 적용 → 실행 → `git checkout`
+복원 → `git status --short` 0건 확인(각 1회). 실행 대상은
+`tests/test_scene_notes.py` + `tests/test_scene_notes_api.py`.
+
+| # | 방향 | 적용 diff | 파일 | 물린 셀 |
+|---|---|---|---|---|
+| S1 | under(순서 상실) | `list_scene_notes` 의 `self.list_drafts(...)` → `self._repo.list_drafts(...)` | `core_sot/service.py` | **최초 0셀(가드 결함 — Issues #1)**. 보강 후: `SceneNoteListTest::test_list_is_ordered_by_chapter_then_scene_position` · `::test_unknown_project_is_not_found` (2 failed) |
+| S2 | under(서버측 필터 제거) | query 필터 블록 삭제 | `core_sot/service.py` | service 2셀 + API 2셀 (4 failed) |
+| S3 | under(제목 검색 상실) | 필터에서 `scene.title` 항 삭제 | `core_sot/service.py` | `::test_query_matches_scene_title_and_body_case_insensitively` (1 failed) |
+| S4 | over(공백 query 를 필터로) | `(query or "").strip().casefold()` → `.strip()` 제거 | `core_sot/service.py` | `::test_blank_query_lists_everything` subtest `query='   '` (1 failed) |
+| S5 | over(보관 장면 제외) | 목록 루프에 `or scene.archived` 추가 | `core_sot/service.py` | service 1셀 + API 1셀 (2 failed) |
+| S6 | under(미리보기 절단 제거) | `build_note_preview` 의 길이 분기를 `if True` 로 | `routers/notes.py` | API 1셀 + preview 3셀 (5 failed) |
+| S7 | under(검색 연계 상실) | 매치 중심 분기를 `if False and query` 로 | `routers/notes.py` | `::test_preview_centers_on_the_match_...` · `::test_a_match_near_the_end_...` (2 failed) |
+| S8 | over(메모 없음을 404 로) | 단건 GET 에 `note is None → 404` 추가 | `routers/notes.py` | `::test_a_scene_without_a_note_reads_as_null_body_not_404` (1 failed) |
+| S9 | under(두 archive 축 혼동) | `chapter_archived` 를 `item.scene.archived` 로 | `routers/notes.py` | `::test_archived_scene_and_chapter_stay_listed_with_their_flags` (1 failed) |
+
+### Verification (Session 3)
+
+- 집중: `test_scene_notes.py`(24) + `test_scene_notes_api.py`(19) + `test_core_sot.py` +
+  `test_activity_actions.py` + `test_billable_actions.py` + `test_app_import_paths.py` +
+  `test_docs_indexes.py` + `test_application_api.py` = **248 passed / 1024 subtests**.
+- 전수 route 가드: `test_auth_api.py` **132 passed / 977 subtests**(tier 행렬은 무수정
+  통과했고 **카운트만** 72/98 로 갱신 — 새 경로가 이미 401/403 전수 가드 안에 있다는 뜻).
+- 전수: 아래 절에 실측.
+
 ### Next steps
 
 - **Slice 1(읽기 API·검색)**: `GET /projects/{pid}/notes?query=` + `GET

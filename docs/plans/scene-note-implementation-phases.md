@@ -1,6 +1,6 @@
 # 장면 메모 기능 — 구현 페이즈
 
-상태: `Active — Slice 0 완료(SoT v1.8.11, 2026-08-31) · Slice 1부터 진행`
+상태: `Active — Slice 0·1 완료(SoT v1.8.11·v1.8.12, 2026-08-31) · Slice 2부터 진행`
 작성: 2026-08-29
 결정 정본: [`scene-note-decisions.md`](scene-note-decisions.md) D1=C+A · D2=A · D3=A · D4=A
 
@@ -38,7 +38,10 @@ purge를 양방향으로 검증한다. 파기 그래프에 새 서비스를 넣�
 **완료 후 인계:** 다음 작업자는 repository/service의 public 메서드만 사용하며 Mongo 컬렉션을
 직접 읽지 않는다.
 
-## Slice 1 — 읽기 API와 검색
+## Slice 1 — 읽기 API와 검색 · **완료(2026-08-31, SoT v1.8.12)**
+
+오너 확정(2026-08-31): 미리보기는 **검색과 연계**(매치 중심 스니펫, 200자) ·
+**페이지네이션 없음** · **보관 장면 포함 + 보관 표시**. 메모 없는 장면은 `body=null`.
 
 **범위:** `GET /projects/{pid}/notes?query=`(전체 목록·제목/본문 부분 일치)와
 `GET /projects/{pid}/drafts/{did}/note`를 추가한다. 목록은 Chapter position→Scene position 순이고

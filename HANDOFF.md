@@ -5,6 +5,7 @@
 > 완료 서술은 여기 쓰지 않는다 — `docs/daily_logs/`(상세) · `docs/system-contract-sot.md` 변경이력 · `CHANGELOG.md`(마일스톤) · `docs/verifications/`(독립 검증)에 이미 있다.
 > 편집 규칙은 `CLAUDE.md`·`AGENTS.md`의 "HANDOFF.md" 절에 있다. **길이 상한은 없다** — 대신 **~200줄을 넘으면 자가 검수**하고(그 뒤로는 ~100줄마다) 결과를 아래 한 줄로 남긴다. 길어야 할 이유가 있으면 길어도 된다. 안 보는 것이 문제다.
 >
+> 마지막 분량 기록: **2026-08-31 장면 메모 Slice 0~1 · 730 → 743줄(+13)** — "다음 순서"의 메모 항목을 Slice 0·1 완료 상태로 재작성하고 **Slice 2가 실제로 물릴 가드**(활동 분류표 `scene_note_saved`·`LOGGED_OPERATIONS` 25·operation tier 72/98→73/99)와 남은 확정 항목을 적었다(+12·분량 기록 줄 +1). 용량 산정은 독립 검증 지적대로 바이트 기준으로 정정. **검수는 하지 않았다** — 743은 다음 트리거 783에 못 미친다.
 > 마지막 분량 기록: **2026-08-29 세션 3(배포) · 715 → 723줄(+8)** — ⓪-b를 "재검증 3회·운영 migration 적용까지 마감" 상태로 재작성(+6)·"다음 순서" 압축 교체·정본 버전 표기 v1.8.10(+1)·이 줄(+1). 검증 3건 링크 신규 — 좌표 실측 확인. **검수는 하지 않았다** — 723은 다음 트리거 783에 못 미친다. 그 아래는 08-28 세션 10 기록: **723 → 715줄(-8)** — 장→장면 계층의 낡은 “구현 진행/다음은 API” 서술을 실제 완료 상태와 배포 전 검증 항목으로 교체하고, SoT·operation 수·Deferred를 실측값에 맞췄다. 계층 관련 링크와 키워드 재검색에서 좌표 부패 0건. **검수는 하지 않았다** — 715는 마지막 자가 검수 기준선(683)의 다음 트리거 783에 못 미친다.
 > 마지막 분량 기록: **2026-08-27 세션 2 · 648 → 683줄(+35, 순증 35·삭제 2 — 2회 편집: 세션 2 기록 +25, 오너 지적 정정 +10)** — 세션 2 마감 메모 신규(D7 폐쇄·D5 실측·프로브 정리) · "Owner Decisions Needed" ⓪ 실측·범위 갈림으로 재작성 · 세션 1 메모 기존 실패 줄 해소 주석. 2회차는 **오너 지적("이어쓰기가 본문을 참고할 텐데?")으로 "본문 미탑재" 주장을 정정**한 것 — ⓪ 재작성·세션 2 메모 교체·세션 1 메모 정정 주석. **자가 검수 했다(683 > 트리거 675)**: 이 세션의 새 인용 좌표 7곳 전수 실측 대조(`WritingPanel.tsx:341`·`api/models.py:43`·`service.py:1085/1167/1189`·`accept.py:150`·`extractor.py:73`) — **좌표 부패 0건**, 지운 것 없음(이번 증분은 전부 살아 있는 판단·결정 대기 항목이다).
 > 마지막 자가 검수: **2026-08-26 · 547 → 575줄(+28, 순증 28·삭제 1)** — 세션 3 마감 메모 신규(드로어·패드 항목별 채택/버리기·76rem·유예 트리거·오너 확인거리) · 08-26 스타일 부채 항에 핵심 결함 폐쇄 주석(부채 나머지 축은 유지) · 검수줄 교체. 본문 그 외 무변. 다음 검수 기준선은 이 줄의 575. 그 아래는 세션 1·2 검수 기록: **526 → 547줄(+21)** — 세션 1 마감 메모 신규(+17: 애드센스 로더·가드·SRI 사유·유예 트리거)·검수 줄 자체 +1 · 세션 2 분량(+3: ads.txt 반영 완료·유예 ① 해소 교체, 자동/수동은 승인 후로 트리거 이동) · 08-25 메모의 낡은 op 표기 4곳 갱신(줄 수 무변 — 시점 명시·계약 지시자로 교체, 실측 87 대조). 본문 그 외 무변.
@@ -352,19 +353,26 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 >   blue-600→blue-800). 한 단계는 hover 로 안 보인다 — designTokens 셀이 잠근다.
 > - **다음 순서**: 계층화 재검증 3회(불합격→조건부→조건부→합격)와 운영 migration 적용은
 >   2026-08-29 전부 마감했다(위 ⓪-b). 텍스트+화살표 링크 가시성 개선도 같은 날 마감했다.
->   **메모 기능은 Slice 0(저장·파기 수명)이 끝났고 다음은 Slice 1(읽기 API·검색)이다.**
->   확정값은 [`scene-note-decisions.md`](docs/plans/scene-note-decisions.md), 각 slice의 완료
->   기준은 [`scene-note-implementation-phases.md`](docs/plans/scene-note-implementation-phases.md)에
->   있다. Slice 1이 기댈 계약(SoT v1.8.11): `core_sot` public 메서드
->   `get_scene_note`/`put_scene_note`만 쓰고 `scene_notes` 컬렉션을 직접 읽지 않는다. 본문
->   상한은 `core_sot.service.SCENE_NOTE_MAX_CHARS`(12000자) — API 모델도 이 상수를 쓴다.
->   목록 route는 **미리보기 절단이 필요하다**: 12000자 × 장면 수를 그대로 실으면 응답이
->   커진다 — 장면 200개면 최악 **240만 자**이고, 한국어는 UTF-8 3바이트/자라 **≈7.2MB**
->   (JSON 이스케이프 별도)다. 산정은 문자수가 아니라 **바이트**로 한다. Slice 1은 목록/단건 GET과 서버측 query만 열고 PUT·활동
->   기록은 Slice 2로 미룬다. **Slice 2 선결 1건**(검증 hardening #2): 상한 초과 + 보관된
->   장면이면 `SceneNoteTooLong`이 `Archived`보다 먼저 난다. 이 순서는 원고 상한의 pydantic
->   선례(422가 handler 앞)와 일치하므로 바꾸지 말고, **상태 코드 literal(422 vs 413)만**
->   오너 확인으로 정본에 못박는다 — 근거는 `scene-note-decisions.md` Follow-up.
+>   **메모 기능은 Slice 0(저장·파기 수명)·1(읽기 API·검색)이 끝났고 다음은 Slice 2
+>   (명시적 저장 API와 활동 기록)다.** 확정값은
+>   [`scene-note-decisions.md`](docs/plans/scene-note-decisions.md), 각 slice의 완료 기준은
+>   [`scene-note-implementation-phases.md`](docs/plans/scene-note-implementation-phases.md)에
+>   있다. Slice 2가 기댈 계약(SoT v1.8.11·v1.8.12):
+>   - `PUT /projects/{pid}/drafts/{did}/note` 하나만 추가한다. **소유자만 쓰고 grant는 403**
+>     — 이것은 자동이다(`_REQUIRE_PROJECT_OWNER`가 GET/HEAD만 grant에 열어 준다).
+>   - **새 mutating route라 활동 분류표 전수 가드가 물린다**: `activity/actions.py`의
+>     `ACTIVITY_ACTIONS`에 `scene_note_saved`를 넣고 `LOGGED_OPERATIONS` 카운트(현재 25)를
+>     올린다. 기록은 **handler에서 성공 뒤**에 한다.
+>   - operation tier 카운트는 `tests/test_auth_api.py`의 72/98 → 73/99.
+>   - 요청 모델 상한은 `core_sot.service.SCENE_NOTE_MAX_CHARS`(12000자)를 그대로 쓴다.
+>     **선결 1건**(검증 hardening #2): 상한 초과 + 보관된 장면이면 `SceneNoteTooLong`이
+>     `Archived`보다 먼저 난다. 이 순서는 원고 상한의 pydantic 선례(422가 handler 앞)와
+>     일치하므로 바꾸지 말고, **상태 코드 literal(422 vs 413)만** 오너 확인으로 정본에
+>     못박는다.
+>   - **페이즈 문서가 남긴 확정 항목**: 같은 값을 다시 저장할 때도 활동 행을 남기는가.
+>     D4=A의 "명시적 저장"은 남기는 쪽으로 읽히지만 문언과 셀을 맞춰야 한다.
+>   - 프론트(Slice 3~4)는 API 계약을 바꾸지 않는다. 목록은 이미 미리보기(200자)만 싣고
+>     전문은 단건 GET이 준다 — 화면이 전문을 목록에서 기대하게 만들지 말 것.
 
 > **★★ 2026-08-27 세션 4 반영 — D5-2 조건 폐쇄 + 보강 1·3·4 완료. 여기서 시작한다.**
 >
