@@ -46,6 +46,11 @@
    완전히 가려진다. 해결: Scene/Chapter/project 파기 셀이 `repo.scene_notes`를 직접
    단정하도록 고쳤다(커밋 `ae2fc9d` 계열). 결과: 같은 변이가 이제 2셀을 깨뜨린다(아래 표 M1).
    **교훈**: 부모가 함께 사라지는 자식 데이터의 파기 가드는 서비스 조회로 재면 안 된다.
+   **패턴 sweep(§4)**: 같은 뿌리 — "`draft_id`로 묶인 자식의 부재를 부모를 요구하는 서비스
+   메서드로 단정" — 를 기존 파기 회귀에서 훑었다. `test_draft_purge.py`는 `repo.version_count`
+   와 `(project_id, idempotency_key)` 키인 `get_writing_accept_receipt`로, `test_core_sot.py`·
+   `test_core_sot_mongo.py`의 파기 셀은 전부 `repo.*` 직접 단정으로 재고 있어 **재발 0건**.
+   이 결함은 이번 신규 셀에만 있었다.
 2. **`mongo_collections.md`에 최근 컬렉션이 빠져 있다**(선존 부채, 이번 변경 아님):
    `chapters`(v1.8.9)·`writing_drafts_scratch`도 등재돼 있지 않다. 이 문서는
    `ideation / architecture draft` 상태(문서 우선순위 5)이고 신규 컬렉션의 정본이 아니어서
@@ -101,7 +106,11 @@
 - 문서 가드: `tests/test_docs_indexes.py` **13 passed / 272 subtests**(README ↔ SoT 버전 일치).
 - Mongo 실측: `docker compose -f docker-compose.test.yml up -d`(rs-test, 27020) 기동 후
   `pytest tests/test_core_sot_mongo.py -k note` **15 passed**(신규 6셀 × 실행 경로).
-- 전수: 아래 "전수 회귀" 절.
+- **전수**(test-mongo ON, rs-test 27020): **2610 passed / 1 skipped / 3024 subtests**
+  (32분 55초). 신규 셀은 실측 **33개** — in-memory 15 + Mongo 6셀 × `_MongoContractMixin`
+  3 서브클래스(Fallback·Transaction·WritingIntent) 18(`--collect-only`로 확인).
+  **이 세션에서 변경 전 기준선을 재측하지는 않았다** — 따라서 위 수치는 변경 후 실측값이고
+  "+N" 형태의 증분은 주장하지 않는다(08-29 기록의 2570/4/3022는 다른 세션의 측정치다).
 
 ### Next steps
 
