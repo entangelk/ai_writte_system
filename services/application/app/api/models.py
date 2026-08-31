@@ -23,6 +23,7 @@ from services.application.app.context_search.models import (
     ContextNeed,
     ContextSearchPurpose,
 )
+from services.application.app.core_sot.service import SCENE_NOTE_MAX_CHARS
 from services.application.app.core_sot.models import (
     BlockKind,
 )
@@ -341,6 +342,35 @@ class SceneNoteListItemPayload(BaseModel):
 
 class SceneNoteListResponse(BaseModel):
     notes: list[SceneNoteListItemPayload]
+
+
+class PutSceneNoteRequest(BaseModel):
+    """명시적 저장 한 번(장면 메모 Slice 2, D4=A).
+
+    ``idempotency_key`` 가 없는 것은 의도다 — 이 경로는 값을 통째로 교체하는 upsert 라
+    같은 요청을 두 번 보내도 저장 결과가 같다. 재전송이 만드는 유일한 흔적은 활동 행
+    이고, 그것은 ``routers/notes.py`` 의 연타 창이 접는다.
+    """
+
+    body: str
+
+    @field_validator("body")
+    @classmethod
+    def enforce_body_limit(cls, value: str) -> str:
+        # 상한 초과의 얼굴은 **422** 다(오너 확정 2026-08-31). 위 SaveDraftRequest 와
+        # 같은 관례라 검사가 **handler 진입 전**에 끝나고, 그래서 보관된 장면에 초과
+        # 본문을 보내면 Archived(409) 가 아니라 이 검증이 먼저 난다 — 서비스의
+        # put_scene_note 가 길이를 아카이브보다 먼저 보는 순서와 같은 방향이다
+        # (독립 검증 2026-08-31 hardening #2).
+        #
+        # 상수는 core_sot 것을 그대로 쓴다. 원고 본문 상한과 달리 env override 가 없어
+        # (오너가 준 고정값) 헬퍼를 거칠 이유가 없고, 두 번째 숫자를 만들면 서비스가
+        # 거절하는 값을 API 가 받아들이는 창이 열린다.
+        if len(value) > SCENE_NOTE_MAX_CHARS:
+            raise ValueError(
+                f"body must contain at most {SCENE_NOTE_MAX_CHARS} characters"
+            )
+        return value
 
 
 class ActivityEventPayload(BaseModel):

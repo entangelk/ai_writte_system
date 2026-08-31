@@ -110,6 +110,12 @@ _CANONICAL: tuple[ActivityAction, ...] = (
     #   사실**이다. C 확장(AI 요청 자체를 담는 것)과 혼동하지 말 것.
     ActivityAction("draft_version_accepted", "POST",
                    "/projects/{project_id}/writing/accept", "draft_version"),
+    # 장면 메모 저장(2026-08-31, Slice 2, D4=A). 메모는 원고 정본이 아니지만 **사용자가
+    # 명시적으로 저장한 것**이라 A2=B 의 기준("무엇을 바꿨는가")에 그대로 걸린다 —
+    # AI 요청도 파생 색인도 아니라 excluded 쪽 사유 넷 중 어느 것도 맞지 않는다.
+    # 저장 버튼 연타는 handler 의 연타 창이 접는다(값이 같고 5초 안이면 행을 안 남긴다).
+    ActivityAction("scene_note_saved", "PUT",
+                   "/projects/{project_id}/drafts/{draft_id}/note", "scene_note"),
 )
 
 #: 검토 결정 9 — 원고가 아니라 **기억을 바꾸는 사용자 판단**.

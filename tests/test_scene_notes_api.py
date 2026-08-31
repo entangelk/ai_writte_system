@@ -3,10 +3,10 @@
 `test_scene_notes.py` 가 저장·목록·검색의 **서비스 계약**을 잠근다. 여기는 요청을
 실제로 구동해 **응답 모양·미리보기·인가 경계**가 조립에서 성립하는지 본다.
 
-이 slice 는 읽기 전용이다 — 쓰기 route 도 활동 기록도 없다. 401/403 전수는
-`test_auth_api.py` 의 tier 행렬이 잠그므로 여기서는 이 두 경로가 그 행렬 안에
-있다는 사실(project tier)을 대표 셀로만 확인하고, **grant 읽기와 access-log 한 행**
-처럼 이 표면에서만 물어볼 수 있는 것을 잰다.
+Slice 1 은 읽기 두 경로였고 **Slice 2 가 `PUT …/note` 와 활동 기록을 더했다**.
+401/403 전수는 `test_auth_api.py` 의 tier 행렬이 잠그므로 여기서는 세 경로가 그 행렬
+안에 있다는 사실(project tier)을 대표 셀로만 확인하고, **grant 읽기와 access-log 한
+행**·**활동 행이 남는 조건**처럼 이 표면에서만 물어볼 수 있는 것을 잰다.
 """
 
 from __future__ import annotations
@@ -16,6 +16,10 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
+from services.application.app.activity.log import (
+    ActivityLogService,
+    InMemoryActivityLogRepository,
+)
 from services.application.app.auth.access_grants import (
     AccessGrantService,
     InMemoryAccessGrantRepository,
@@ -31,7 +35,9 @@ from services.application.app.core_sot.service import (
     InMemoryCoreSotRepository,
 )
 from services.application.app.main import create_app
+from services.application.app.core_sot.service import SCENE_NOTE_MAX_CHARS
 from services.application.app.routers.notes import (
+    SCENE_NOTE_DOUBLE_SUBMIT_WINDOW,
     SCENE_NOTE_PREVIEW_MAX_CHARS,
     build_note_preview,
 )
@@ -45,7 +51,7 @@ class _FakeHasher:
         return stored_hash == "H:" + password
 
 
-def _client(*, core_sot=None, access_grants=None):
+def _client(*, core_sot=None, access_grants=None, activity_repo=None):
     users = UserService(InMemoryUserRepository(), hasher=_FakeHasher())
     sessions = SessionService(InMemorySessionRepository(), ttl=timedelta(hours=1))
     users.create_user(username="alice", password="pw123")
@@ -53,6 +59,10 @@ def _client(*, core_sot=None, access_grants=None):
     app = create_app(
         service=core, user_service=users, session_service=sessions,
         access_grant_service=access_grants,
+        activity_log_service=(
+            ActivityLogService(activity_repo)
+            if activity_repo is not None else None
+        ),
     )
     client = TestClient(app, base_url="https://testserver")
     return client, users, core
@@ -402,6 +412,334 @@ class SceneNoteLegacyMigrationFaceTest(unittest.TestCase):
         response = client.get(f"/projects/{project.id}/notes")
 
         self.assertEqual(response.status_code, 200)
+
+
+class _NoteWriteBase(unittest.TestCase):
+    """쓰기 표면의 공통 씨앗. 시계는 주입한다 — 연타 창을 결정적으로 재기 위해서다."""
+
+    def setUp(self) -> None:
+        self.now = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
+        self.core_sot = CoreSotService(
+            InMemoryCoreSotRepository(), clock=lambda: self.now
+        )
+        self.activity = InMemoryActivityLogRepository()
+        self.client, self.users, _ = _client(
+            core_sot=self.core_sot, activity_repo=self.activity
+        )
+        self.client.post(
+            "/auth/login", json={"username": "alice", "password": "pw123"}
+        )
+        self.project = self.client.post(
+            "/projects", json={"name": "Novel"}
+        ).json()["id"]
+        self.chapter = self.client.post(
+            f"/projects/{self.project}/chapters", json={"title": "1장"}
+        ).json()["id"]
+        self.scene = self.client.post(
+            f"/projects/{self.project}/drafts",
+            json={"title": "첫 장면", "chapter_id": self.chapter},
+        ).json()["id"]
+
+    def _put(self, body: str, *, project=None, draft=None):
+        return self.client.put(
+            f"/projects/{project or self.project}/drafts"
+            f"/{draft or self.scene}/note",
+            json={"body": body},
+        )
+
+    def _rows(self):
+        return [
+            event for event in self.activity.events
+            if event.action == "scene_note_saved"
+        ]
+
+
+class SceneNoteWriteApiTest(_NoteWriteBase):
+    """`PUT …/note` 의 저장 계약 (Slice 2, D4=A)."""
+
+    def test_a_saved_note_comes_back_and_reads_back_the_same(self):
+        response = self._put("첫 메모")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["draft_id"], self.scene)
+        self.assertEqual(response.json()["body"], "첫 메모")
+        self.assertIsNotNone(response.json()["updated_at"])
+        read = self.client.get(
+            f"/projects/{self.project}/drafts/{self.scene}/note"
+        ).json()
+        self.assertEqual(read["body"], "첫 메모")
+
+    def test_a_second_save_replaces_the_value_without_leaving_a_version(self):
+        """D4=A: 현재 값 하나뿐이다 — 이전 본문이 어디에도 남지 않는다."""
+
+        self._put("첫 메모")
+        self.now += timedelta(minutes=1)
+
+        self._put("고친 메모")
+
+        read = self.client.get(
+            f"/projects/{self.project}/drafts/{self.scene}/note"
+        ).json()
+        self.assertEqual(read["body"], "고친 메모")
+        self.assertEqual(
+            self.core_sot.get_scene_note(
+                project_id=self.project, draft_id=self.scene
+            ).body,
+            "고친 메모",
+        )
+
+    def test_an_empty_body_saves_an_empty_note_rather_than_deleting_the_row(self):
+        """빈 본문은 행 삭제가 아니다(SoT v1.8.11) — 읽기가 그 둘을 구분한다."""
+
+        self._put("지울 메모")
+        self.now += timedelta(minutes=1)
+
+        response = self._put("")
+
+        self.assertEqual(response.status_code, 200)
+        read = self.client.get(
+            f"/projects/{self.project}/drafts/{self.scene}/note"
+        ).json()
+        self.assertEqual(read["body"], "")
+        self.assertIsNotNone(read["updated_at"])
+
+    def test_a_body_exactly_at_the_limit_is_accepted(self):
+        response = self._put("가" * SCENE_NOTE_MAX_CHARS)
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_a_body_over_the_limit_is_422_and_stores_nothing(self):
+        """오너 확정 2026-08-31: 상한 초과의 얼굴은 **422** 다.
+
+        원고 본문 상한(`SaveDraftRequest.enforce_raw_text_limit`)과 같은 관례 —
+        요청 모델의 `field_validator` 라 handler 진입 **전**에 난다. 그래서
+        아무것도 저장되지 않는다.
+        """
+
+        response = self._put("가" * (SCENE_NOTE_MAX_CHARS + 1))
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIsNone(
+            self.core_sot.get_scene_note(
+                project_id=self.project, draft_id=self.scene
+            )
+        )
+
+    def test_the_length_check_runs_before_the_archive_check(self):
+        """검증 hardening #2 의 순서를 HTTP 에서 고정한다.
+
+        보관된 장면에 상한 초과 본문을 보내면 **409 가 아니라 422** 다 —
+        pydantic 검증이 handler 앞에 있기 때문이며, 서비스의 검사 순서
+        (`put_scene_note` 가 길이를 먼저 본다)와 같은 방향이다.
+        """
+
+        self.core_sot.archive_draft(
+            project_id=self.project, draft_id=self.scene
+        )
+
+        response = self._put("가" * (SCENE_NOTE_MAX_CHARS + 1))
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_writing_to_an_archived_scene_is_409(self):
+        self.core_sot.archive_draft(
+            project_id=self.project, draft_id=self.scene
+        )
+
+        self.assertEqual(self._put("메모").status_code, 409)
+
+    def test_writing_under_an_archived_chapter_is_409(self):
+        """장 보관은 자식 Scene 의 `archived` 를 안 바꾸지만 쓰기는 막는다."""
+
+        self.core_sot.archive_chapter(
+            project_id=self.project, chapter_id=self.chapter
+        )
+
+        self.assertEqual(self._put("메모").status_code, 409)
+
+    def test_writing_to_an_archived_project_is_409(self):
+        self.core_sot.archive_project(project_id=self.project)
+
+        self.assertEqual(self._put("메모").status_code, 409)
+
+    def test_a_scene_from_another_project_is_404(self):
+        other = self.client.post("/projects", json={"name": "Other"}).json()["id"]
+
+        self.assertEqual(self._put("메모", project=other).status_code, 404)
+
+    def test_a_missing_scene_is_404(self):
+        self.assertEqual(self._put("메모", draft="nope").status_code, 404)
+
+    def test_a_missing_project_is_404(self):
+        self.assertEqual(
+            self._put("메모", project="does-not-exist").status_code, 404
+        )
+
+
+class SceneNoteWriteActivityTest(_NoteWriteBase):
+    """`scene_note_saved` 가 남는 조건 (D4=A · 오너 2026-08-31 연타 억제)."""
+
+    def test_a_successful_save_records_exactly_one_row(self):
+        self._put("첫 메모")
+
+        rows = self._rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].project_id, self.project)
+        self.assertEqual(rows[0].target_type, "scene_note")
+        self.assertEqual(rows[0].target_id, self.scene)
+
+    def test_the_row_names_the_actor_not_the_owner_field(self):
+        """행위자는 세션 사용자다 — 소유자와 우연히 같아도 출처가 달라야 한다."""
+
+        self._put("첫 메모")
+
+        alice = self.users._repo.get_by_username("alice")
+        self.assertEqual(self._rows()[0].actor_user_id, alice.id)
+
+    def test_the_note_body_never_rides_into_the_activity_row(self):
+        """A3=B: `before`/`after` 는 **라벨**이다. 12000자 본문이 들어갈 자리가 아니다."""
+
+        self._put("아주 사적인 메모")
+
+        row = self._rows()[0]
+        self.assertIsNone(row.before)
+        self.assertIsNone(row.after)
+
+    def test_a_rejected_save_records_nothing(self):
+        """404·409·422 셋 다 — 실패가 타임라인에 저장으로 보이면 안 된다."""
+
+        self.core_sot.archive_draft(
+            project_id=self.project, draft_id=self.scene
+        )
+        cases = {
+            409: self._put("메모"),
+            404: self._put("메모", draft="nope"),
+            422: self._put("가" * (SCENE_NOTE_MAX_CHARS + 1)),
+        }
+
+        for expected, response in cases.items():
+            with self.subTest(status=expected):
+                self.assertEqual(response.status_code, expected)
+        self.assertEqual(self._rows(), [])
+
+    def test_a_deliberate_re_save_of_the_same_body_records_again(self):
+        """오너 확정 2026-08-31: 같은 값을 **다시** 저장해도 한 행이다.
+
+        D4=A 의 "명시적 저장"은 값 비교가 아니라 사용자의 저장 행위를 센다.
+        연타 창(아래)만 예외이며, 그 창을 지나면 다시 남는다.
+        """
+
+        self._put("같은 메모")
+        self.now += SCENE_NOTE_DOUBLE_SUBMIT_WINDOW
+
+        self._put("같은 메모")
+
+        self.assertEqual(len(self._rows()), 2)
+
+    def test_a_double_submit_of_the_same_body_records_once(self):
+        """저장 버튼 연타(오너 2026-08-31). 창 안의 **같은 값** 재전송은 한 행이다."""
+
+        self._put("같은 메모")
+        self.now += timedelta(milliseconds=200)
+
+        self._put("같은 메모")
+        self._put("같은 메모")
+
+        self.assertEqual(len(self._rows()), 1)
+
+    def test_a_changed_body_inside_the_window_still_records(self):
+        """over-strict 가드 — 억제 조건에서 **값 비교**를 빼면 이 셀이 문다.
+
+        시간만 보는 과잉 교정은 빠르게 고쳐 다시 저장한 진짜 편집을 삼킨다.
+        """
+
+        self._put("첫 메모")
+        self.now += timedelta(milliseconds=200)
+
+        self._put("고친 메모")
+
+        self.assertEqual(len(self._rows()), 2)
+
+    def test_the_window_is_measured_per_scene(self):
+        """다른 장면의 저장은 서로의 창에 걸리지 않는다."""
+
+        second = self.client.post(
+            f"/projects/{self.project}/drafts",
+            json={"title": "둘째 장면", "chapter_id": self.chapter},
+        ).json()["id"]
+
+        self._put("같은 메모")
+        self._put("같은 메모", draft=second)
+
+        self.assertEqual(len(self._rows()), 2)
+
+    def test_the_suppressed_save_still_persists_the_value(self):
+        """억제되는 것은 **활동 행뿐**이다 — 저장 자체는 언제나 일어난다."""
+
+        self._put("같은 메모")
+        self.now += timedelta(milliseconds=200)
+
+        response = self._put("같은 메모")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            self.core_sot.get_scene_note(
+                project_id=self.project, draft_id=self.scene
+            ).updated_at,
+            self.now,
+        )
+
+
+class SceneNoteWriteAuthorizationTest(unittest.TestCase):
+    """D3=A: grant 는 끝까지 읽기 전용이다."""
+
+    def setUp(self) -> None:
+        self.now = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
+        self.core_sot = CoreSotService(InMemoryCoreSotRepository())
+        self.grants = AccessGrantService(
+            InMemoryAccessGrantRepository(), clock=lambda: self.now
+        )
+        self.client, self.users, _ = _client(
+            core_sot=self.core_sot, access_grants=self.grants
+        )
+        self.users.create_user(username="root", password="pw789", is_admin=True)
+        alice = self.users._repo.get_by_username("alice")
+        self.project = self.core_sot.create_project(
+            name="Novel", owner_id=alice.id
+        ).id
+        chapter = self.core_sot.create_chapter(
+            project_id=self.project, title="1장"
+        )
+        self.scene = self.core_sot.create_scene(
+            project_id=self.project, chapter_id=chapter.id, title="첫 장면"
+        ).id
+        self.path = f"/projects/{self.project}/drafts/{self.scene}/note"
+
+    def test_a_sessionless_write_is_401(self):
+        self.assertEqual(
+            self.client.put(self.path, json={"body": "메모"}).status_code, 401
+        )
+
+    def test_a_live_grant_does_not_open_the_write(self):
+        """`_GRANTED_METHODS` 가 GET/HEAD 뿐이라 PUT 은 grant 가 살아 있어도 403 이다."""
+
+        self.client.post(
+            "/auth/login", json={"username": "root", "password": "pw789"}
+        )
+        self.client.post(
+            f"/admin/projects/{self.project}/access-grants",
+            json={"reason": "지원 요청 #12 확인"},
+        )
+
+        self.assertEqual(self.client.get(self.path).status_code, 200)
+        self.assertEqual(
+            self.client.put(self.path, json={"body": "메모"}).status_code, 403
+        )
+        self.assertIsNone(
+            self.core_sot.get_scene_note(
+                project_id=self.project, draft_id=self.scene
+            )
+        )
 
 
 class NotePreviewTest(unittest.TestCase):

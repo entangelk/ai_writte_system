@@ -180,7 +180,7 @@
 | [`writing-workspace-v2-w0-contract.md`](writing-workspace-v2-w0-contract.md) | Workspace V2 W0 exact contract(ProjectBrief·ordered unit·accept 원자성) | W0~W4 완료 |
 | [`chapter-scene-hierarchy-decisions.md`](chapter-scene-hierarchy-decisions.md) | 평면 ordered unit을 **장→장면 실제 계층**으로 전환(저장 모델·본문 소유·무손실 이관·정렬·Writing intent·삭제·export) | **Resolved(2026-08-28)** — D1~D6·D8=A, D7=B · 구현 진행 |
 | [`scene-note-decisions.md`](scene-note-decisions.md) | 장면 메모 기능(화면 위치·저장 단위·공개 범위·저장 경험) | **Resolved** — D1=C+A · D2~D4=A |
-| [`scene-note-implementation-phases.md`](scene-note-implementation-phases.md) | 장면 메모 구현 순서(Slice 0~4: 저장→읽기→쓰기→화면→드로어) | **Active** — Slice 0부터 순차 진행 |
+| [`scene-note-implementation-phases.md`](scene-note-implementation-phases.md) | 장면 메모 구현 순서(Slice 0~4: 저장→읽기→쓰기→화면→드로어) | **Active** — Slice 0·1·2 완료, Slice 3부터 |
 
 ### 공개 API 계약
 

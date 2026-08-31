@@ -1025,7 +1025,8 @@ export interface paths {
         };
         /** Get Scene Note */
         get: operations["get_scene_note_projects__project_id__drafts__draft_id__note_get"];
-        put?: never;
+        /** Put Scene Note */
+        put: operations["put_scene_note_projects__project_id__drafts__draft_id__note_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2347,6 +2348,18 @@ export interface components {
             style_rules: string[];
             /** Tone */
             tone: string | null;
+        };
+        /**
+         * PutSceneNoteRequest
+         * @description 명시적 저장 한 번(장면 메모 Slice 2, D4=A).
+         *
+         *     ``idempotency_key`` 가 없는 것은 의도다 — 이 경로는 값을 통째로 교체하는 upsert 라
+         *     같은 요청을 두 번 보내도 저장 결과가 같다. 재전송이 만드는 유일한 흔적은 활동 행
+         *     이고, 그것은 ``routers/notes.py`` 의 연타 창이 접는다.
+         */
+        PutSceneNoteRequest: {
+            /** Body */
+            body: string;
         };
         /**
          * QuotaWindowPayload
@@ -7738,6 +7751,87 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    put_scene_note_projects__project_id__drafts__draft_id__note_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                draft_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutSceneNoteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneNotePayload"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

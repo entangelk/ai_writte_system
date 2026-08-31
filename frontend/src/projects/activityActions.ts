@@ -13,12 +13,12 @@
  *   21번째 action 을 더하면 그 셀이 실패한다. `schema.d.ts` 는 `action` 을 `string` 으로만
  *   주므로 **타입으로는 못 잡는다 — 그 가드가 유일한 연결선이다.**
  *
- * 그래서 이 표는 **25행 전수**여야 하고, 임의로 줄이거나 늘리면 가드가 양방향으로 문다.
+ * 그래서 이 표는 **26행 전수**여야 하고, 임의로 줄이거나 늘리면 가드가 양방향으로 문다.
  */
 
-/** `action` 리터럴 → 타임라인 한 줄에 쓰는 문구. 백엔드 분류표의 logged 25 과 1:1 이다. */
+/** `action` 리터럴 → 타임라인 한 줄에 쓰는 문구. 백엔드 분류표의 logged 26 과 1:1 이다. */
 export const ACTIVITY_ACTION_LABELS: Record<string, string> = {
-  // 정본 변경 (+ 원고 하드 삭제·장/장면 계층 2026-08-28 — 평면 원고 순서는 폐지)
+  // 정본 변경 (+ 원고 하드 삭제·장/장면 계층 2026-08-28 · 장면 메모 2026-08-31)
   project_created: "프로젝트 생성",
   project_renamed: "프로젝트 이름 변경",
   project_archived: "프로젝트 보관",
@@ -35,6 +35,7 @@ export const ACTIVITY_ACTION_LABELS: Record<string, string> = {
   draft_version_saved: "원고 저장",
   source_ref_created: "출처 연결",
   draft_version_accepted: "생성 결과 반영",
+  scene_note_saved: "장면 메모 저장",
   // 검토 결정 9
   candidate_promoted: "기억 후보 승격",
   candidate_rejected: "기억 후보 거절",
@@ -72,6 +73,7 @@ export const NON_LINKABLE_TARGET_TYPES: Record<string, string> = {
   chapter: "장 단위 route 가 없고 원고 목록 안에 중첩돼 있다",
   draft_version: "★ payload 에 draft_id 가 없어 편집 화면 route 를 만들 수 없다 (브리프 F7)",
   source_ref: "전용 화면이 없다",
+  scene_note: "메모 전용 route 가 아직 없다 — Slice 3 의 /projects/:id/notes 가 생기면 그때 연다",
   candidate: "검토함 목록 안에만 있고 단건 route 가 없다",
   analysis_job: "전용 화면이 없다",
   review_queue_entry: "검토함 목록 안에만 있다",

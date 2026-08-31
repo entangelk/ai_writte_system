@@ -1975,9 +1975,9 @@ def create_app(
         writing_scratch=writing_scratch,
     )
 
-    # 장면 메모 읽기 표면(Slice 1). 협력자가 core_sot 하나뿐인 것은 의도다 —
-    # 쓰기·활동 기록이 없는 slice 라서 activity 를 받지 않는다.
-    register_notes(app, core_sot=core_sot)
+    # 장면 메모 표면(Slice 1 읽기 2 + Slice 2 쓰기 1). activity 는 `scene_note_saved`
+    # 한 행 때문에 든다.
+    register_notes(app, core_sot=core_sot, activity=activity)
 
     register_source_refs(
         app,

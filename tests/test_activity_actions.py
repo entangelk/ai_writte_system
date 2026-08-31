@@ -78,15 +78,17 @@ class ActivityActionClassificationTest(unittest.TestCase):
         version 저장)를 더해 **20** 이 됐다. 원고 하드 삭제 슬라이스(2026-08-28
         오너 결정)가 `draft_purged` 를 더해 **21** 이 됐다. SoT v1.8.9의
         Chapter 계층 정본 변경 셋(생성·보관·파기·장 순서·장면 순서) 5개가 더해지고,
-        평면 `draft-order` 1개가 제거되어 **25**다.
+        평면 `draft-order` 1개가 제거되어 **25**다. 장면 메모 Slice 2(2026-08-31,
+        D4=A)가 `scene_note_saved` 를 더해 **26** 이다 — 메모는 원고 정본이 아니지만
+        사용자가 **명시적으로 저장**한 것이라 A2=B 의 기준에 그대로 걸린다.
 
         숫자를 셀에 적는 이유는 범위가 **오너 결정**이기 때문이다. 넓히는 것은
         결정이지 리팩터링이 아니므로, 여기서 눈에 띄게 실패해야 한다.
         """
-        self.assertEqual(len(LOGGED_OPERATIONS), 25)
-        self.assertEqual(len(ACTIVITY_ACTIONS), 25)
+        self.assertEqual(len(LOGGED_OPERATIONS), 26)
+        self.assertEqual(len(ACTIVITY_ACTIONS), 26)
         self.assertEqual(
-            len({action.action for action in ACTIVITY_ACTIONS}), 25,
+            len({action.action for action in ACTIVITY_ACTIONS}), 26,
             "action 리터럴이 중복이다 — 조회 화면이 두 사건을 구분 못 한다",
         )
 
