@@ -9,6 +9,8 @@ isolation, and archive behavior.
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime
+from typing import Callable
 
 from services.application.app.core_sot.models import (
     Chapter,
@@ -22,6 +24,7 @@ from services.application.app.core_sot.models import (
     ProjectExportUnit,
     PutProjectBriefResult,
     SaveDraftResult,
+    SceneNote,
     SourceBlock,
     SourceRef,
     SourceSnapshot,
@@ -64,6 +67,10 @@ class UnsupportedExportFormat(CoreSotError):
     pass
 
 
+class SceneNoteTooLong(CoreSotError):
+    pass
+
+
 class StaleProjectBriefBase(CoreSotError):
     pass
 
@@ -84,6 +91,14 @@ class DraftOrderIntegrityError(InvalidDraftOrder):
     4xx client error.
     """
 
+
+# 장면 메모 본문 한 글자수 상한 — 오너 결정(2026-08-31). 원고 본문 상한
+# (``env.DRAFT_RAW_TEXT_MAX_CHARS`` = 4000)의 **3배**다. 4000 의 근거인 이어쓰기 예산은
+# 메모에 옮겨오지 않는다 — 메모는 프롬프트·export 에 실리지 않기 때문이다(D2=A). 값을
+# 정하는 것은 쓰임이다: 메모는 나중에 원고로 옮겨 갈 재료를 모아 두는 곳이라 여러 장면
+# 분량(≈3 장면)을 담을 수 있어야 한다. Mongo 16MB 문서 한계와는 두 자릿수 떨어져 있고,
+# 상한의 역할은 창 안전이 아니라 저장 폭주 방지와 UI 가 기댈 명확한 경계다.
+SCENE_NOTE_MAX_CHARS = 12000
 
 _EXPORT_FORMATS: dict[str, tuple[str, str]] = {
     # format -> (content_type, filename extension)
@@ -117,6 +132,8 @@ class InMemoryCoreSotRepository:
         self.snapshots: dict[str, SourceSnapshot] = {}
         self.blocks_by_snapshot: dict[str, tuple[SourceBlock, ...]] = {}
         self.source_refs: dict[str, SourceRef] = {}
+        # key = (project_id, draft_id) — Scene 당 현재 메모 한 건(D2=A).
+        self.scene_notes: dict[tuple[str, str], SceneNote] = {}
         self._version_ids_by_draft: dict[str, list[str]] = {}
         self._save_request_index: dict[tuple[str, str, str], str] = {}
         self._writing_accept_receipts: dict[
@@ -150,6 +167,12 @@ class InMemoryCoreSotRepository:
     def next_source_ref_id(self) -> str:
         self._source_ref_seq += 1
         return f"source-ref-{self._source_ref_seq}"
+
+    def get_scene_note(self, project_id: str, draft_id: str) -> SceneNote | None:
+        return self.scene_notes.get((project_id, draft_id))
+
+    def put_scene_note(self, note: SceneNote) -> None:
+        self.scene_notes[(note.project_id, note.draft_id)] = note
 
     def version_count(self, draft_id: str) -> int:
         return len(self._version_ids_by_draft.get(draft_id, ()))
@@ -223,6 +246,13 @@ class InMemoryCoreSotRepository:
         for rid in ref_ids:
             del self.source_refs[rid]
 
+        # key = (project_id, draft_id)
+        self.scene_notes = {
+            key: note
+            for key, note in self.scene_notes.items()
+            if key[0] != project_id
+        }
+
         # key = (project_id, idempotency_key)
         self._writing_accept_receipts = {
             key: receipt
@@ -275,6 +305,8 @@ class InMemoryCoreSotRepository:
             for key, vid in self._save_request_index.items()
             if vid not in removed_versions
         }
+
+        self.scene_notes.pop((project_id, draft_id), None)
 
         self.drafts.pop(draft_id, None)
         self._version_ids_by_draft.pop(draft_id, None)
@@ -534,8 +566,17 @@ class InMemoryCoreSotRepository:
 
 
 class CoreSotService:
-    def __init__(self, repository: CoreSotRepository) -> None:
+    def __init__(
+        self,
+        repository: CoreSotRepository,
+        *,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
         self._repo = repository
+        # Scene 메모의 ``updated_at`` 만 쓴다 — 다른 정본은 시각을 갖지 않는다.
+        # 주입 가능한 것은 회귀가 갱신 순서를 결정적으로 단정하기 위해서다
+        # (writing/scratch.py 의 clock 관례와 같다).
+        self._clock = clock or (lambda: datetime.now(UTC))
 
     def create_project(self, *, name: str, owner_id: str | None = None) -> Project:
         # owner_id is recorded, not enforced (D8-3 owns enforcement). Optional so
@@ -1294,6 +1335,36 @@ class CoreSotService:
         self._require_project(project_id)
         self._require_chapter(project_id, chapter_id)
         self._repo.purge_chapter(project_id, chapter_id)
+
+    def get_scene_note(
+        self, *, project_id: str, draft_id: str
+    ) -> SceneNote | None:
+        # archive 는 읽기를 막지 않는다(SoT 전역 계약) — 보관된 Scene 의 메모도 읽힌다.
+        # 다른 프로젝트의 draft_id 는 _require_draft 에서 NotFound 다(프로젝트 격리).
+        self._require_project(project_id)
+        self._require_draft(project_id, draft_id)
+        return self._repo.get_scene_note(project_id, draft_id)
+
+    def put_scene_note(
+        self, *, project_id: str, draft_id: str, body: str
+    ) -> SceneNote:
+        # D4=A 명시적 저장: 현재 값을 통째로 교체한다(버전 없음). 빈 본문은 행 삭제가
+        # 아니라 **빈 현재값**이라 "빈 메모"와 "메모 없음"이 구분된다.
+        # 쓰기 경계는 원고 저장과 같은 축이다 — archived project/chapter/scene 은 거절.
+        if len(body) > SCENE_NOTE_MAX_CHARS:
+            raise SceneNoteTooLong(
+                f"scene note body must contain at most {SCENE_NOTE_MAX_CHARS} "
+                "characters"
+            )
+        self._require_active_project_and_draft(project_id, draft_id)
+        note = SceneNote(
+            project_id=project_id,
+            draft_id=draft_id,
+            body=body,
+            updated_at=self._clock(),
+        )
+        self._repo.put_scene_note(note)
+        return note
 
     def _save_result(self, version_id: str, *, idempotent_replay: bool) -> SaveDraftResult:
         version = self._repo.get_version(version_id)

@@ -24,6 +24,8 @@ authoritative idempotency boundary.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from bson import ObjectId
 from pymongo import ASCENDING, MongoClient
 from pymongo.errors import DuplicateKeyError, OperationFailure
@@ -35,6 +37,7 @@ from services.application.app.core_sot.models import (
     DraftVersion,
     Project,
     ProjectBriefVersion,
+    SceneNote,
     SourceBlock,
     SourceRef,
     SourceSnapshot,
@@ -77,6 +80,7 @@ class MongoCoreSotRepository:
         self._blocks = self._db["source_blocks"]
         self._source_refs = self._db["source_refs"]
         self._writing_accept_receipts = self._db["writing_accept_receipts"]
+        self._scene_notes = self._db["scene_notes"]
         self.ensure_indexes()
 
     @classmethod
@@ -137,6 +141,13 @@ class MongoCoreSotRepository:
                 [("project_id", ASCENDING), ("position", ASCENDING)],
                 unique=True,
                 name="uniq_chapter_position",
+            )
+            # 장면 메모: Scene 당 현재 메모 한 건이 계약이므로 unique 가 그 경계다.
+            # ``project_id`` 선두라 프로젝트 단위 목록/파기 질의도 이 인덱스를 쓴다.
+            self._scene_notes.create_index(
+                [("project_id", ASCENDING), ("draft_id", ASCENDING)],
+                unique=True,
+                name="uniq_scene_note",
             )
         except OperationFailure as exc:
             raise MongoRepositorySetupError(
@@ -209,6 +220,7 @@ class MongoCoreSotRepository:
         self._writing_accept_receipts.delete_many(
             {"project_id": project_id}, session=session
         )
+        self._scene_notes.delete_many({"project_id": project_id}, session=session)
         self._project_briefs.delete_many({"project_id": project_id}, session=session)
         self._projects.delete_one({"_id": project_id}, session=session)
 
@@ -270,6 +282,9 @@ class MongoCoreSotRepository:
             {"project_id": project_id, "draft_id": draft_id}, session=session
         )
         self._writing_accept_receipts.delete_many(
+            {"project_id": project_id, "draft_id": draft_id}, session=session
+        )
+        self._scene_notes.delete_many(
             {"project_id": project_id, "draft_id": draft_id}, session=session
         )
         self._drafts.delete_one(
@@ -507,6 +522,20 @@ class MongoCoreSotRepository:
             ) from exc
 
     # -- save / lookups -------------------------------------------------------
+
+    def get_scene_note(self, project_id: str, draft_id: str) -> SceneNote | None:
+        doc = self._scene_notes.find_one(
+            {"project_id": project_id, "draft_id": draft_id}
+        )
+        return None if doc is None else _to_scene_note(doc)
+
+    def put_scene_note(self, note: SceneNote) -> None:
+        # D4=A: 현재 값 교체(버전 없음). upsert 라 첫 저장과 갱신이 한 경로다.
+        self._scene_notes.replace_one(
+            {"project_id": note.project_id, "draft_id": note.draft_id},
+            _scene_note_doc(note),
+            upsert=True,
+        )
 
     def version_count(self, draft_id: str) -> int:
         return self._versions.count_documents({"draft_id": draft_id})
@@ -842,6 +871,36 @@ def _to_draft(doc: dict) -> Draft:
         ),
         position=doc.get("position"),
     )
+
+
+def _scene_note_doc(note: SceneNote) -> dict:
+    # ``_id`` 를 두지 않는다 — 정체성은 uniq_scene_note 인덱스의
+    # (project_id, draft_id) 이고, 메모는 자기 id 로 불리는 일이 없다.
+    return {
+        "project_id": note.project_id,
+        "draft_id": note.draft_id,
+        "body": note.body,
+        "updated_at": note.updated_at,
+    }
+
+
+def _to_scene_note(doc: dict) -> SceneNote:
+    return SceneNote(
+        project_id=doc["project_id"],
+        draft_id=doc["draft_id"],
+        body=doc["body"],
+        updated_at=_aware(doc["updated_at"]),
+    )
+
+
+def _aware(value: datetime) -> datetime:
+    """BSON 날짜를 UTC-aware 로 되돌린다.
+
+    pymongo 는 client 가 ``tz_aware`` 가 아니면 naive 로 돌려주고, naive 와 aware 를
+    비교하면 TypeError 다. 다른 어댑터(auth·activity·quota)와 같은 경계 정규화다.
+    """
+
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 def _version_doc(version: DraftVersion) -> dict:

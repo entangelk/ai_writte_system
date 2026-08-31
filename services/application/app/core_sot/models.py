@@ -8,6 +8,7 @@ without infrastructure.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 
 
@@ -87,6 +88,24 @@ class Draft:
     # Chapter→Scene hierarchy; new runtime Scenes leave it unset.
     unit_kind: UnitKind | None = None
     position: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SceneNote:
+    """One Scene's current working note (장면 메모 D2=A, 2026-08-29).
+
+    Deliberately **not** part of the manuscript: notes never enter
+    ``draft_versions``, exports, or LLM prompts, so the append-only version
+    contract and the export body stay untouched. Identity is
+    ``(project_id, draft_id)`` — one current value per Scene, replaced by an
+    explicit save (D4=A), never versioned. An empty ``body`` is a stored empty
+    note, not a deletion, so "빈 메모" stays distinguishable from "메모 없음".
+    """
+
+    project_id: str
+    draft_id: str
+    body: str
+    updated_at: datetime
 
 
 @dataclass(frozen=True, slots=True)

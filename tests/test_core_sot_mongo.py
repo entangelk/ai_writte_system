@@ -19,6 +19,7 @@ isolated and leave no residue.
 import os
 import unittest
 import uuid
+from datetime import UTC, datetime
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
@@ -238,6 +239,147 @@ class _MongoContractMixin:
         self.assertIsNone(self.repo.get_snapshot(saved.snapshot.id))
         self.assertEqual(self.repo.get_chapter(sibling_chapter.id), sibling_chapter)
         self.assertEqual(self.repo.get_draft(sibling.id), sibling)
+
+    def _scene(self, *, project_name="Notes", title="장면 1"):
+        project = self.service.create_project(name=project_name)
+        chapter = self.service.create_chapter(project_id=project.id, title="장 1")
+        scene = self.service.create_scene(
+            project_id=project.id, chapter_id=chapter.id, title=title
+        )
+        return project, chapter, scene
+
+    def test_scene_note_upsert_round_trips_and_keeps_one_row_per_scene(self):
+        """장면 메모 Slice 0(D2=A·D4=A): 현재 값 한 건이 교체된다."""
+
+        project, _chapter, scene = self._scene()
+
+        first = self.service.put_scene_note(
+            project_id=project.id, draft_id=scene.id, body="첫 메모"
+        )
+        self.assertEqual(
+            self.repo.get_scene_note(project.id, scene.id).body, "첫 메모"
+        )
+        # BSON 날짜는 naive 로 돌아온다 — 어댑터가 UTC 로 되돌리지 않으면 여기서
+        # aware/naive 비교가 TypeError 로 깨진다.
+        self.assertIsNotNone(first.updated_at.tzinfo)
+        self.assertIsNotNone(
+            self.repo.get_scene_note(project.id, scene.id).updated_at.tzinfo
+        )
+
+        self.service.put_scene_note(
+            project_id=project.id, draft_id=scene.id, body="고친 메모"
+        )
+
+        self.assertEqual(
+            self.repo.get_scene_note(project.id, scene.id).body, "고친 메모"
+        )
+        self.assertEqual(
+            self.repo._scene_notes.count_documents(
+                {"project_id": project.id, "draft_id": scene.id}
+            ),
+            1,
+            "장면당 메모가 한 건이라는 계약이 깨졌다(행이 쌓인다)",
+        )
+
+    def test_unique_index_blocks_a_second_note_row_for_one_scene(self):
+        """계약을 지키는 것은 서비스 코드가 아니라 저장소 경계다."""
+
+        project, _chapter, scene = self._scene()
+        self.service.put_scene_note(
+            project_id=project.id, draft_id=scene.id, body="메모"
+        )
+
+        with self.assertRaises(PyMongoError):
+            self.repo._scene_notes.insert_one({
+                "project_id": project.id,
+                "draft_id": scene.id,
+                "body": "두 번째 행",
+                "updated_at": datetime(2026, 8, 31, tzinfo=UTC),
+            })
+
+    def test_scene_note_is_isolated_across_projects(self):
+        project, _chapter, scene = self._scene()
+        other, _other_chapter, _other_scene = self._scene(project_name="Other")
+        self.service.put_scene_note(
+            project_id=project.id, draft_id=scene.id, body="내 메모"
+        )
+
+        with self.assertRaises(NotFound):
+            self.service.get_scene_note(project_id=other.id, draft_id=scene.id)
+        with self.assertRaises(NotFound):
+            self.service.put_scene_note(
+                project_id=other.id, draft_id=scene.id, body="넘겨보기"
+            )
+        self.assertEqual(
+            self.repo.get_scene_note(project.id, scene.id).body, "내 메모"
+        )
+
+    def test_scene_purge_removes_the_note_and_keeps_the_sibling_note(self):
+        project, chapter, victim = self._scene()
+        sibling = self.service.create_scene(
+            project_id=project.id, chapter_id=chapter.id, title="장면 2"
+        )
+        self.service.put_scene_note(
+            project_id=project.id, draft_id=victim.id, body="사라질 메모"
+        )
+        self.service.put_scene_note(
+            project_id=project.id, draft_id=sibling.id, body="남을 메모"
+        )
+
+        self.service.purge_draft(project_id=project.id, draft_id=victim.id)
+
+        self.assertIsNone(
+            self.repo.get_scene_note(project.id, victim.id),
+            "파기된 장면의 메모가 고아로 남았다",
+        )
+        self.assertEqual(
+            self.repo.get_scene_note(project.id, sibling.id).body, "남을 메모"
+        )
+
+    def test_chapter_purge_cascades_to_child_scene_notes_only(self):
+        project, victim_chapter, victim_scene = self._scene()
+        kept_chapter = self.service.create_chapter(
+            project_id=project.id, title="남을 장"
+        )
+        kept_scene = self.service.create_scene(
+            project_id=project.id, chapter_id=kept_chapter.id, title="장면 2-1"
+        )
+        self.service.put_scene_note(
+            project_id=project.id, draft_id=victim_scene.id, body="사라질 메모"
+        )
+        self.service.put_scene_note(
+            project_id=project.id, draft_id=kept_scene.id, body="남을 메모"
+        )
+
+        self.service.purge_chapter(
+            project_id=project.id, chapter_id=victim_chapter.id
+        )
+
+        self.assertIsNone(self.repo.get_scene_note(project.id, victim_scene.id))
+        self.assertEqual(
+            self.repo.get_scene_note(project.id, kept_scene.id).body, "남을 메모"
+        )
+
+    def test_project_purge_removes_scene_notes_and_keeps_other_project(self):
+        victim, _chapter, victim_scene = self._scene(project_name="Victim")
+        kept, _kept_chapter, kept_scene = self._scene(project_name="Kept")
+        self.service.put_scene_note(
+            project_id=victim.id, draft_id=victim_scene.id, body="사라질 메모"
+        )
+        self.service.put_scene_note(
+            project_id=kept.id, draft_id=kept_scene.id, body="남을 메모"
+        )
+
+        self.service.purge_project(project_id=victim.id)
+
+        self.assertEqual(
+            self.repo._scene_notes.count_documents({"project_id": victim.id}),
+            0,
+            "파기된 프로젝트의 메모가 잔류한다",
+        )
+        self.assertEqual(
+            self.repo.get_scene_note(kept.id, kept_scene.id).body, "남을 메모"
+        )
 
     def test_project_brief_versions_persist_in_order_and_replay(self):
         project = self.service.create_project(name="Novel")

@@ -16,6 +16,7 @@ from services.application.app.core_sot.models import (
     DraftVersion,
     Project,
     ProjectBriefVersion,
+    SceneNote,
     SourceBlock,
     SourceRef,
     SourceSnapshot,
@@ -126,6 +127,10 @@ class CoreSotRepository(Protocol):
     ) -> None: ...
 
     def ensure_draft_position_index(self) -> None: ...
+
+    def get_scene_note(self, project_id: str, draft_id: str) -> SceneNote | None: ...
+
+    def put_scene_note(self, note: SceneNote) -> None: ...
 
     def version_count(self, draft_id: str) -> int: ...
 

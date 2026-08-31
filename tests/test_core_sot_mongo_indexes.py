@@ -44,6 +44,7 @@ def _repo_with_indexes(*, fail_on_name: str | None = None):
     repo._drafts = _FakeCollection(fail_on_name=fail_on_name)
     repo._writing_accept_receipts = _FakeCollection(fail_on_name=fail_on_name)
     repo._chapters = _FakeCollection(fail_on_name=fail_on_name)
+    repo._scene_notes = _FakeCollection(fail_on_name=fail_on_name)
     return repo
 
 
@@ -141,6 +142,16 @@ class MongoIndexSetupTests(unittest.TestCase):
                 (
                     [("project_id", 1), ("position", 1)],
                     {"unique": True, "name": "uniq_chapter_position"},
+                )
+            ],
+        )
+        # 장면 메모 Slice 0: Scene 당 현재 메모 한 건이라는 계약의 저장소 경계.
+        self.assertEqual(
+            repo._scene_notes.calls,
+            [
+                (
+                    [("project_id", 1), ("draft_id", 1)],
+                    {"unique": True, "name": "uniq_scene_note"},
                 )
             ],
         )
