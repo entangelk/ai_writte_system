@@ -315,10 +315,22 @@ class SceneNoteListTest(unittest.TestCase):
         return project, (first, second), scenes
 
     def test_list_is_ordered_by_chapter_then_scene_position(self):
+        """순서의 정본은 **position** 이지 저장 순서도 id 순서도 아니다.
+
+        ★ 장을 뒤집는 것이 이 셀의 핵심이다. 뒤집지 않으면 chapter id 의 사전순이
+        position 순과 우연히 같아져, 순서 계산을 저장소 순서로 바꿔도 통과한다
+        (변이 S1 이 실증 — 첫 판 셀은 이 방향을 못 잡았다).
+        """
+
         service, _repo = _service()
-        project, _chapters, scenes = self._project_with_notes(service)
+        project, chapters, scenes = self._project_with_notes(service)
+        first, second = chapters
+        service.reorder_chapters(
+            project_id=project.id,
+            ordered_chapter_ids=(second.id, first.id),
+        )
         # 저장 순서를 목록 순서와 **반대로** 넣는다 — 저장 순서가 새어 나오면 실패한다.
-        for title in ("역 앞", "빗속", "여름 골목"):
+        for title in ("여름 골목", "빗속", "역 앞"):
             service.put_scene_note(
                 project_id=project.id,
                 draft_id=scenes[title].id,
@@ -329,11 +341,11 @@ class SceneNoteListTest(unittest.TestCase):
 
         self.assertEqual(
             [item.scene.title for item in items],
-            ["여름 골목", "빗속", "역 앞"],
+            ["역 앞", "여름 골목", "빗속"],
         )
         self.assertEqual(
             [item.chapter.title for item in items],
-            ["1장 만남", "1장 만남", "2장 이별"],
+            ["2장 이별", "1장 만남", "1장 만남"],
         )
 
     def test_scenes_without_a_note_are_not_rows(self):
