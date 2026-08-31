@@ -352,14 +352,15 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 >   blue-600→blue-800). 한 단계는 hover 로 안 보인다 — designTokens 셀이 잠근다.
 > - **다음 순서**: 계층화 재검증 3회(불합격→조건부→조건부→합격)와 운영 migration 적용은
 >   2026-08-29 전부 마감했다(위 ⓪-b). 텍스트+화살표 링크 가시성 개선도 같은 날 마감했다.
->   **메모 기능은 Slice 0부터 진행한다.** 확정값은
->   [`scene-note-decisions.md`](docs/plans/scene-note-decisions.md), 인계 가능한 순서·각 slice의
->   완료 기준은 [`scene-note-implementation-phases.md`](docs/plans/scene-note-implementation-phases.md)에
->   있다. **오늘 코드는 아직 0줄이다.** 다음 작업자는 Slice 0(저장·파기 수명)만 열고 HTTP/UI를
->   함께 만들지 않는다. 착수 위치는 `core_sot/models.py`·`service.py`의 in-memory repository와
->   `core_sot/mongo_repository.py`의 Mongo index/`_purge_{draft,chapter,project}`, 그리고 공유 project
->   파기 진입점 `routers/admin.py::execute_project_purge`다. Scene/Chapter 파기는 Core SOT 안에서,
->   project purge는 공유 실행 함수에서 연결한다 — 두 경로를 하나로 뭉치지 않는다.
+>   **메모 기능은 Slice 0(저장·파기 수명)이 끝났고 다음은 Slice 1(읽기 API·검색)이다.**
+>   확정값은 [`scene-note-decisions.md`](docs/plans/scene-note-decisions.md), 각 slice의 완료
+>   기준은 [`scene-note-implementation-phases.md`](docs/plans/scene-note-implementation-phases.md)에
+>   있다. Slice 1이 기댈 계약(SoT v1.8.11): `core_sot` public 메서드
+>   `get_scene_note`/`put_scene_note`만 쓰고 `scene_notes` 컬렉션을 직접 읽지 않는다. 본문
+>   상한은 `core_sot.service.SCENE_NOTE_MAX_CHARS`(12000자) — API 모델도 이 상수를 쓴다.
+>   목록 route는 **미리보기 절단이 필요하다**: 12000자 × 장면 수를 그대로 실으면 응답이
+>   커진다(장면 200개 = 최악 2.4MB). Slice 1은 목록/단건 GET과 서버측 query만 열고 PUT·활동
+>   기록은 Slice 2로 미룬다.
 
 > **★★ 2026-08-27 세션 4 반영 — D5-2 조건 폐쇄 + 보강 1·3·4 완료. 여기서 시작한다.**
 >

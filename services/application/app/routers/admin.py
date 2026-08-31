@@ -88,8 +88,9 @@ async def execute_project_purge(
     — 두 벌이 되면 어느 한쪽만 새 서비스를 받아 조용한 고아를 만든다(D5 부분
     삭제). 권한 차이만 라우터가 정한다.
 
-    D8-6d 원 주석: 영구 파기(불가역). archive(soft)와 달리 18컬렉션을 hard delete
-    하고 indexing outbox 로 worker 가 vector/index 5백엔드를 파기(6c _drain_purge).
+    D8-6d 원 주석: 영구 파기(불가역). archive(soft)와 달리 19컬렉션(v1.8.11
+    `scene_notes` 합류)을 hard delete 하고 indexing outbox 로 worker 가 vector/index
+    5백엔드를 파기(6c _drain_purge).
     응답은 204(리소스 소멸). 2단계 삭제는 UI 관례가 아니라 여기서 강제한다:
     active project 는 먼저 archive해야 하며 아니면 409.
 

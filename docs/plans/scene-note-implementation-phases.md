@@ -1,6 +1,6 @@
 # 장면 메모 기능 — 구현 페이즈
 
-상태: `Active — Slice 0부터 순차 진행`
+상태: `Active — Slice 0 완료(SoT v1.8.11, 2026-08-31) · Slice 1부터 진행`
 작성: 2026-08-29
 결정 정본: [`scene-note-decisions.md`](scene-note-decisions.md) D1=C+A · D2=A · D3=A · D4=A
 
@@ -17,7 +17,12 @@
 3. Scene purge·Chapter cascade purge·project purge에 메모 고아가 없다.
 4. `scene_note_saved`는 성공한 명시적 저장에만 활동 로그 한 행을 남긴다.
 
-## Slice 0 — 계약과 저장 수명
+## Slice 0 — 계약과 저장 수명 · **완료(2026-08-31, SoT v1.8.11)**
+
+확정된 값: 본문 상한 **12000자**(`core_sot.service.SCENE_NOTE_MAX_CHARS`, 오너 2026-08-31).
+저장 위치는 Core SOT 내부 `scene_notes`이며, Scene/Chapter 파기는 Core SOT 안에서,
+project 파기는 공유 `execute_project_purge` → `core_sot.purge_project` 한 경로로만 지운다.
+읽기는 archive를 막지 않고 쓰기는 `_require_active_project_and_draft`를 쓴다.
 
 **범위:** `SceneNote` 모델·repository/service·in-memory/Mongo 구현과 `scene_notes` 인덱스,
 Scene/Chapter/project purge 연결만 만든다. HTTP·프론트·활동 기록은 만들지 않는다.
