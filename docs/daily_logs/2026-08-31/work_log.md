@@ -149,12 +149,15 @@
 
 | # | 방향 | 적용 diff | 파일 | 물린 셀 |
 |---|---|---|---|---|
-| V6 | over(읽기 차단) | `get_scene_note`의 `_require_project`+`_require_draft` → `_require_active_project_and_draft` | `core_sot/service.py` | (아래 Verification) |
+| V6 | over(읽기 차단) | `get_scene_note`의 `_require_project`+`_require_draft` → `_require_active_project_and_draft` | `core_sot/service.py:1390` | `SceneNoteArchiveTest::test_archived_project_and_chapter_do_not_block_reads` (**신규 셀 — 이 방향은 지금까지 이 셀만 잡는다**) · `::test_archived_scene_keeps_the_note_readable_but_blocks_writes` (2 failed) |
 
 ### Verification (Session 2)
 
 - `tests/test_scene_notes.py` **16 passed**(신규 1셀 포함).
-- 문서 가드 `tests/test_docs_indexes.py` — 아래 실행 결과.
+- `tests/test_scene_notes.py` + `tests/test_docs_indexes.py` **29 passed / 273 subtests**.
+- 변이 V6 적용 → 2셀 재실패 → `git checkout` 복원 → `git status --short` 0건 확인.
+- Session 1의 전수(2610/1/3024)는 재실행하지 않았다 — 이번 증분은 셀 1개 추가와 문서
+  정정뿐이고, 검증자가 같은 트리에서 전수를 독립 재현했다(32:41).
 
 ### Next steps
 
