@@ -25,6 +25,7 @@ from services.application.app.auth.sessions import (
     SessionService,
 )
 from services.application.app.auth.users import InMemoryUserRepository, UserService
+from services.application.app.core_sot.models import Draft
 from services.application.app.core_sot.service import (
     CoreSotService,
     InMemoryCoreSotRepository,
@@ -314,6 +315,95 @@ class SceneNoteAuthorizationTest(unittest.TestCase):
         self.assertEqual({use.method for use in uses[:2]}, {"GET"})
 
 
+class SceneNoteLegacyMigrationFaceTest(unittest.TestCase):
+    """평면 legacy 데이터의 **503** 얼굴 (독립 검증 2026-08-31 차단 조건 폐쇄).
+
+    SoT v1.8.12 는 목록 순서를 `list_drafts` 에서 가져오므로 "평면 legacy 의 503 얼굴도
+    함께 온다"고 명문화했다. 그런데 그 분기는 **무셀이었다** — 라우터의
+    `DraftOrderIntegrityError → 503` 핸들러를 통째로 지워도 notes 회귀가 전부 통과했다
+    (검증자 변이 W5). 그 상태의 실제 동작은 **500** 이다: 처방이 재시도가 아니라
+    `scripts/migrate_chapter_scene_hierarchy.py` 라는 사실이 응답에서 사라진다.
+
+    두 상태를 모두 잰다 — 정합 평면(챕터 0개)과 혼합(부분 migration). export·versions 의
+    대피 경로(v1.8.10)는 이 표면에 없다: 메모 목록은 `GET /drafts` 와 같은 목록형 읽기라
+    같은 503 을 낸다.
+    """
+
+    def _app_with(self, *, mixed: bool):
+        repo = InMemoryCoreSotRepository()
+        service = CoreSotService(repo)
+        users = UserService(InMemoryUserRepository(), hasher=_FakeHasher())
+        sessions = SessionService(
+            InMemorySessionRepository(), ttl=timedelta(hours=1)
+        )
+        users.create_user(username="alice", password="pw123")
+        alice = users._repo.get_by_username("alice")
+        project = service.create_project(name="Legacy", owner_id=alice.id)
+        if mixed:
+            # 부분 migration: 장은 생겼는데 어느 Draft 는 아직 평면이다.
+            service.create_chapter(project_id=project.id, title="1장")
+            repo.drafts["legacy-1"] = Draft(
+                id="legacy-1", project_id=project.id, title="옛 원고"
+            )
+        else:
+            # 정합 평면: 챕터 0개 + ordered unit Draft.
+            service.create_draft(project_id=project.id, title="평면 원고")
+        app = create_app(
+            service=service, user_service=users, session_service=sessions
+        )
+        client = TestClient(app, base_url="https://testserver")
+        client.post(
+            "/auth/login", json={"username": "alice", "password": "pw123"}
+        )
+        return client, project.id
+
+    def test_flat_legacy_project_note_list_is_503_not_500(self):
+        client, project_id = self._app_with(mixed=False)
+
+        response = client.get(f"/projects/{project_id}/notes")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("migration is required", response.json()["detail"])
+
+    def test_mixed_hierarchy_state_note_list_is_503_not_500(self):
+        client, project_id = self._app_with(mixed=True)
+
+        response = client.get(f"/projects/{project_id}/notes")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("migration is required", response.json()["detail"])
+
+    def test_a_migrated_project_is_not_swept_into_the_503(self):
+        """과잉 교정 가드: 정상 계층 프로젝트까지 503 이 되면 목록이 죽는다."""
+
+        repo = InMemoryCoreSotRepository()
+        service = CoreSotService(repo)
+        users = UserService(InMemoryUserRepository(), hasher=_FakeHasher())
+        sessions = SessionService(
+            InMemorySessionRepository(), ttl=timedelta(hours=1)
+        )
+        users.create_user(username="alice", password="pw123")
+        alice = users._repo.get_by_username("alice")
+        project = service.create_project(name="Novel", owner_id=alice.id)
+        chapter = service.create_chapter(project_id=project.id, title="1장")
+        service.create_scene(
+            project_id=project.id, chapter_id=chapter.id, title="첫 장면"
+        )
+        client = TestClient(
+            create_app(
+                service=service, user_service=users, session_service=sessions
+            ),
+            base_url="https://testserver",
+        )
+        client.post(
+            "/auth/login", json={"username": "alice", "password": "pw123"}
+        )
+
+        response = client.get(f"/projects/{project.id}/notes")
+
+        self.assertEqual(response.status_code, 200)
+
+
 class NotePreviewTest(unittest.TestCase):
     """미리보기 헬퍼의 경계 — 라우터를 거치지 않고 직접 잰다."""
 
@@ -362,6 +452,21 @@ class NotePreviewTest(unittest.TestCase):
         self.assertEqual(
             len(preview), SCENE_NOTE_PREVIEW_MAX_CHARS + len("…")
         )
+
+    def test_a_padded_query_still_centers_the_snippet(self):
+        """검증자 변이 W2: 필터와 스니펫 탐색의 `strip()` 대칭이 무가드였다.
+
+        서비스 필터는 query 를 strip 해서 행을 올리는데 스니펫 탐색이 strip 하지 않으면,
+        공백이 붙은 검색어에서 **목록에는 뜨는데 미리보기는 머리 200자**가 된다 — 검색
+        연계가 조용히 꺼진 상태다.
+        """
+
+        body = "앞" * 500 + "표적" + "뒤" * 500
+
+        preview, _truncated = build_note_preview(body, "  표적  ")
+
+        self.assertIn("표적", preview)
+        self.assertTrue(preview.startswith("…"))
 
     def test_the_window_never_exceeds_the_budget(self):
         body = "앞" * 500 + "표적" + "뒤" * 500

@@ -197,7 +197,7 @@
    `service.list_drafts` → `repo.list_drafts` 로 강등해도 순서 셀이 통과했다. 원인:
    in-memory repo 도 `(chapter_id or "", position)` 으로 정렬하는데, 픽스처의 chapter id 가
    `chapter-1`·`chapter-2` 라 **사전순이 position 순과 우연히 일치**했다. 해결: 셀이
-   `reorder_chapters` 로 장을 뒤집어 두 순서가 갈라지게 했다(커밋 `6c05e73`). 결과: 같은
+   `reorder_chapters` 로 장을 뒤집어 두 순서가 갈라지게 했다(커밋 `440c811`). 결과: 같은
    변이가 이제 순서 셀을 깨뜨린다. **Slice 0의 M1과 같은 계열** — "가드가 통과하는 이유가
    내가 생각한 이유인가"를 변이로 물어야 잡힌다. 자체 변이가 없었으면 둘 다 못 잡았다.
 
@@ -255,8 +255,9 @@
 
 ### Next steps
 
-- **Slice 1(읽기 API·검색)**: `GET /projects/{pid}/notes?query=` + `GET
-  /projects/{pid}/drafts/{did}/note`. Core SOT public 메서드만 쓰고 컬렉션을 직접 읽지 않는다.
-  목록은 Chapter position→Scene position 순, query는 서버 적용, **본문 미리보기 절단** 필요.
-- Slice 2 착수 전에 페이즈 문서의 남은 확정 항목(같은 값 재저장이 활동 행을 남기는가)을 정본
-  문언과 맞춘다.
+- **Slice 2(명시적 저장 API와 활동 기록)**: `PUT /projects/{pid}/drafts/{did}/note` 하나.
+  소유자만 쓰고 grant는 403(dependency가 이미 그렇게 한다). 새 mutating route라 활동 분류표
+  전수 가드가 물린다 — `ACTIVITY_ACTIONS`에 `scene_note_saved` 등재 + `LOGGED_OPERATIONS`
+  25→26, operation tier 72/98→73/99. 상세는 HANDOFF "다음 순서".
+- 착수 전에 페이즈 문서의 남은 확정 항목(같은 값 재저장이 활동 행을 남기는가)을 정본 문언과
+  맞춘다. 상한 초과 vs 아카이브의 상태 코드 literal(422 vs 413)도 같은 자리에서 확정한다.
