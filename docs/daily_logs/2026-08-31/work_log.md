@@ -312,9 +312,115 @@
 
 ### Next steps
 
-- **Slice 2(명시적 저장 API와 활동 기록)**: `PUT /projects/{pid}/drafts/{did}/note` 하나.
-  소유자만 쓰고 grant는 403(dependency가 이미 그렇게 한다). 새 mutating route라 활동 분류표
-  전수 가드가 물린다 — `ACTIVITY_ACTIONS`에 `scene_note_saved` 등재 + `LOGGED_OPERATIONS`
-  25→26, operation tier 72/98→73/99. 상세는 HANDOFF "다음 순서".
-- 착수 전에 페이즈 문서의 남은 확정 항목(같은 값 재저장이 활동 행을 남기는가)을 정본 문언과
-  맞춘다. 상한 초과 vs 아카이브의 상태 코드 literal(422 vs 413)도 같은 자리에서 확정한다.
+- **Slice 2(명시적 저장 API와 활동 기록)** → 세션 5에서 구현 완료. 아래.
+
+## Session 5 — 장면 메모 Slice 2(명시적 저장 API와 활동 기록)
+
+### Goals
+
+- `PUT /projects/{pid}/drafts/{did}/note` 하나를 연다. 소유자만 쓰고 grant는 403.
+- 성공 뒤 `scene_note_saved` 한 행을 남긴다(분류표 전수 가드가 물리는 자리).
+- 착수 전 남아 있던 오너 확인 2건(상한 초과의 상태 코드 · 같은 값 재저장의 활동 의미)을
+  먼저 닫는다 — 페이즈 문서 §"공통 작업 규칙"이 요구하는 자리다.
+
+### Completed work
+
+- **`api/models.py::PutSceneNoteRequest`** — 필드는 `body` 하나. `enforce_body_limit`이
+  `core_sot.service.SCENE_NOTE_MAX_CHARS`(12000)를 재는 pydantic `field_validator`라
+  **검사가 handler 진입 전**이다. `idempotency_key`는 두지 않았다 — 값을 통째로 교체하는
+  upsert라 재전송이 저장 결과를 바꾸지 않는다(바뀌는 것은 활동 행뿐이고 그것은 아래 창이
+  접는다).
+- **`routers/notes.py`** — PUT 하나 추가(`register_notes(app, *, core_sot, activity)`).
+  응답 모델은 단건 GET과 **같은 `SceneNotePayload`**다. route는 두 GET **뒤**에 등재했다 —
+  합집합 앱의 route 순서가 OpenAPI `paths` 순서이고 그것이 `schema.d.ts`의 입력이라, 앞에
+  끼우면 기존 2 operation의 자리가 밀린다.
+- **연타 창** `SCENE_NOTE_DOUBLE_SUBMIT_WINDOW = 5초` + `_is_double_submit(previous, saved)`.
+  handler가 쓰기 전에 직전 값을 한 번 읽어 **본문이 같고 창 안**이면 활동 행만 생략한다.
+  저장과 200 응답은 억제되지 않는다.
+- **`activity/actions.py`** — `scene_note_saved`(PUT `/projects/{project_id}/drafts/
+  {draft_id}/note`, target_type `scene_note`) 등재. logged **25→26**.
+  `before`/`after`는 비운다(A3=B의 짧은 라벨 자리에 12000자 본문이 들어갈 수 없다).
+- **프론트 라벨표** `activityActions.ts` — `scene_note_saved: "장면 메모 저장"` +
+  `NON_LINKABLE_TARGET_TYPES.scene_note`(사유: 메모 전용 route가 Slice 3에서 생긴다).
+  `test_activity_ui_labels.py`가 두 표를 전수 대조하므로 백엔드만 고치면 즉시 물린다.
+- **인가에 새 축이 없다** — `_REQUIRE_PROJECT_OWNER` 그대로. `_GRANTED_METHODS`가
+  GET/HEAD뿐이라 grant는 PUT에서 403이고, D3=A가 코드 없이 성립한다(변이 M8이 실증).
+- **정본**: SoT **v1.8.13**(변경이력 + Phase 1 조항), README ④칸, 결정 브리프 D4·검사 순서
+  항목, 페이즈 문서 Slice 2 완료, `docs/plans/README.md` 상태.
+  operation tier **72/98 → 73/99**, `schema.d.ts` 재생성(+95줄, 순수 가산).
+- **회귀**: `tests/test_scene_notes_api.py` **23 → 46셀**(+23).
+
+### Decisions
+
+- **상한 초과의 얼굴은 422(오너 확정 2026-08-31)**. 요청 모델 `field_validator`라 원고 본문
+  상한(`SaveDraftRequest.enforce_raw_text_limit`)과 **같은 관례**이고, 검사가 handler 앞에
+  서므로 독립 검증 hardening #2가 요구한 순서(보관된 장면 + 초과 본문 → `Archived`가 아니라
+  길이 오류)가 **저절로** 성립한다. 413을 고르면 handler 안에서 잡아야 해 순서를 사람이
+  지켜야 하고, `api/errors.py`가 "422는 모든 곳에서 의도적으로 선언 밖"으로 둔 관례와도
+  갈라진다. tradeoff: 오류 본문 모양이 다른 4xx와 다르다(`{"detail": [...]}`) — 이미 원고
+  저장이 같은 모양이라 프론트가 새로 배울 것은 없다.
+- **같은 값 재저장은 행을 남기고, 연타는 접는다(오너 확정 2026-08-31)**. 오너 문언:
+  *"남기되, 같은 값을 동시에 여러번 저장하는건 막는 로직이 필요하겠어. 저장버튼 여러번
+  누르는거 말야."* 가르는 축이 **값이 아니라 시간**이라는 것이 요점이다 — 나중에 같은 본문을
+  다시 저장하는 것은 두 번째 저장 행위지만, 응답이 오기 전의 재클릭은 한 번의 행위다.
+  구현 자리로 셋(활동 행만 억제 · 429 차단 · 프론트 버튼 잠금)을 제시했고 오너가 **활동 행만
+  억제**를 골랐다: PUT은 항상 200이고 계약이 안 바뀐다. `quota/lock.py`의 429 중복 잠금은
+  과금되는 동기 AI 요청(23~91초)용이라 무료 저장에 걸면 저장마다 Mongo 잠금 쓰기가 붙는다.
+- **연타 창 상수는 따로 둔다.** `quota/lock.py::DEFAULT_MINIMUM_WINDOW_SECONDS`와 값이
+  5로 같지만 다른 상수다 — 그쪽은 과금 요청의 냉각 창(제품 정책)이고 여기는 무료 저장의
+  타임라인 접기다. 합치면 quota 정책을 손볼 때 메모 타임라인이 조용히 따라 바뀐다
+  (그 모듈 docstring이 "두 상수는 서로 다른 것이며 합치면 둘 다 틀린다"고 적은 것과 같은 형태).
+- **`target_type`은 `scene_note`, `target_id`는 `draft_id`**. `draft`를 재사용하면 링크가
+  당장 편집 화면으로 걸리지만, target_type의 의미가 "무엇을 **바꿨는가**의 종류"라 메모
+  저장이 원고 변경으로 보인다. 비링크 등재의 사유에 **트리거를 함께** 적었다 —
+  "Slice 3의 `/projects/:id/notes`가 생기면 그때 연다".
+
+### Mutation verification (Session 5)
+
+구현 커밋(`edec884`) 뒤 적용 → 실행 → **원본 복원 → `git status --short` 0건 확인**(각 1회,
+스크립트가 `finally`에서 원문을 되쓰고 매 회 clean을 출력했다). 실행 대상은
+`test_scene_notes_api.py` + `test_activity_actions.py` + `test_auth_api.py`.
+읽기는 `FAILED|SUBFAILED` + 요약 count 줄로 했다(HANDOFF 함정: `grep FAILED`는 subtest
+실패를 통째로 놓친다).
+
+| # | 방향 | 적용 diff | 파일 | 물린 셀 |
+|---|---|---|---|---|
+| M1 | under(활동 기록 상실) | 기록 블록 전체를 `pass` 로 | `routers/notes.py` | 활동 7셀 + 전수 가드 2 SUBFAILED(`test_every_logged_route_actually_records`·`test_the_recorded_action_literal_matches_the_table`) = **9 failed** |
+| M2 | under(연타 억제 상실) | `if not _is_double_submit(...)` → `if True` | `routers/notes.py` | `::test_a_double_submit_of_the_same_body_records_once` (1) |
+| M3 | over(값 비교 상실 — 시간만 봄) | `_is_double_submit` 에서 `previous.body == saved.body` 항 삭제 | `routers/notes.py` | `::test_a_changed_body_inside_the_window_still_records` (1) |
+| M4 | over(창 상실 — 값만 봄) | 창 비교 항 삭제(같은 값이면 영구 억제) | `routers/notes.py` | `::test_a_deliberate_re_save_of_the_same_body_records_again` (1) |
+| M5 | off-by-one | 창 비교 `<` → `<=`(정확히 5초가 억제됨) | `routers/notes.py` | `::test_a_deliberate_re_save_of_the_same_body_records_again` (1) |
+| M6 | under(상한 검증 무력화) | `enforce_body_limit` 의 `if len(...) >` → `if False` | `api/models.py` | 422 2셀 + `::test_a_rejected_save_records_nothing` = **3 failed** |
+| M7 | under(쓰기 아카이브 경계 상실) | `put_scene_note` 의 `_require_active_project_and_draft` → `_require_draft` | `core_sot/service.py` | 409 3셀 + `::test_a_rejected_save_records_nothing`(SUBFAILED status=409) = **5 failed** |
+| M8 | under(grant 쓰기 개방) | `_GRANTED_METHODS` 에 `"PUT"` 추가 | `api/dependencies.py` | `::test_a_live_grant_does_not_open_the_write` (1) |
+| M9 | over(실패에도 기록) | `activity.record` 를 `try` **앞**으로 이동 | `routers/notes.py` | `::test_a_rejected_save_records_nothing` 포함 **6 failed** |
+
+**M5가 따로 필요한 이유**: M4(창 항 삭제)와 물리는 셀이 같지만 방향이 다르다 — M4는 창을
+없앤 것이고 M5는 경계를 한 칸 옮긴 것이다. 경계 셀이 정확히 5초를 쓰기 때문에 둘 다 문다.
+
+### Verification (Session 5)
+
+- 집중: `test_scene_notes_api.py` **46 passed / 9 subtests**(23 → 46, +23셀).
+- 가드 4파일(`test_activity_actions`·`test_activity_ui_labels`·`test_auth_api`·
+  `test_scene_notes_api`): **191 passed / 1116 subtests**. 착수 직전 같은 4파일을 `HEAD~1`
+  워크트리에서 실측한 값이 **168 / 1098** — **셀 +23(전부 신규) · subtest +18**이고, 그 18은
+  새 operation 하나가 tier·분류·라벨 전수 셀을 도는 **기계적 증가**다(전수 가드가 operation
+  집합을 글롭으로 읽는 그 자리).
+- **전수 backend**(test-mongo ON, rs-test 27020): **2664 passed / 1 failed / 1 skipped /
+  3088 subtests**(29분 35초). 유일한 실패는 `test_docs_indexes.py::VerificationCountClaims
+  Test::test_the_readme_names_the_current_contract_version` — SoT 헤더만 v1.8.13으로 올리고
+  README ④칸을 안 고친 자리이며, **그 셀이 존재하는 이유 그대로 물었다**. 정정(`a0257d9`)
+  뒤 `test_docs_indexes.py` 13 passed / 274 subtests 단독 green.
+  **→ 다음 전수 기대값은 `2665 / 1 / 3088`**(정정은 문서 리터럴 한 줄이라 셀·subtest를 안
+  건드린다). collect-only 실측 **2666**(= 2665 + skip 1)이고 착수 전은 **2643**이다.
+- **전수 frontend는 돌리지 않았다** — 이번 증분에서 프론트 변경은 `activityActions.ts`의
+  라벨 1행·비링크 1행과 생성물 `schema.d.ts`뿐이고, 그 두 표의 정합은
+  `test_activity_ui_labels.py`(pytest)가 전수로 잠근다. **다음 사람이 프론트를 만질 때
+  전수를 함께 잰다.**
+- **주의(전수 실행 규칙)**: 이 머신에서 backend·frontend 전수를 겹쳐 돌리지 않는다
+  (Session 3에서 `productName.test.ts`가 과부하 타임아웃으로 오탐).
+
+### Next steps
+
+- **독립 검증부터 이어간다** — 아래 HANDOFF "다음 순서" 참조. Slice 3(별도 메모 화면)은
+  검증 뒤에 착수한다.

@@ -5,6 +5,7 @@
 > 완료 서술은 여기 쓰지 않는다 — `docs/daily_logs/`(상세) · `docs/system-contract-sot.md` 변경이력 · `CHANGELOG.md`(마일스톤) · `docs/verifications/`(독립 검증)에 이미 있다.
 > 편집 규칙은 `CLAUDE.md`·`AGENTS.md`의 "HANDOFF.md" 절에 있다. **길이 상한은 없다** — 대신 **~200줄을 넘으면 자가 검수**하고(그 뒤로는 ~100줄마다) 결과를 아래 한 줄로 남긴다. 길어야 할 이유가 있으면 길어도 된다. 안 보는 것이 문제다.
 >
+> 마지막 분량 기록: **2026-08-31 장면 메모 Slice 2 · 743 → 754줄(+11)** — "다음 순서"의 메모 항목을 Slice 2 완료 상태로 재작성하고, **다음 작업이 독립 검증**임을 대상 커밋·확정 2건·변이가 연 자리·전수 기대값과 함께 적었다(+10·분량 기록 줄 +1). Slice 2 착수 조건(분류표·tier 카운트 등)은 이제 이력이라 지웠고 SoT 표기를 v1.8.13, 합집합 operation 을 99 로 맞췄다. **검수는 하지 않았다** — 754는 다음 트리거 783에 못 미친다.
 > 마지막 분량 기록: **2026-08-31 장면 메모 Slice 0~1 · 730 → 743줄(+13)** — "다음 순서"의 메모 항목을 Slice 0·1 완료 상태로 재작성하고 **Slice 2가 실제로 물릴 가드**(활동 분류표 `scene_note_saved`·`LOGGED_OPERATIONS` 25·operation tier 72/98→73/99)와 남은 확정 항목을 적었다(+12·분량 기록 줄 +1). 용량 산정은 독립 검증 지적대로 바이트 기준으로 정정. **검수는 하지 않았다** — 743은 다음 트리거 783에 못 미친다.
 > 마지막 분량 기록: **2026-08-29 세션 3(배포) · 715 → 723줄(+8)** — ⓪-b를 "재검증 3회·운영 migration 적용까지 마감" 상태로 재작성(+6)·"다음 순서" 압축 교체·정본 버전 표기 v1.8.10(+1)·이 줄(+1). 검증 3건 링크 신규 — 좌표 실측 확인. **검수는 하지 않았다** — 723은 다음 트리거 783에 못 미친다. 그 아래는 08-28 세션 10 기록: **723 → 715줄(-8)** — 장→장면 계층의 낡은 “구현 진행/다음은 API” 서술을 실제 완료 상태와 배포 전 검증 항목으로 교체하고, SoT·operation 수·Deferred를 실측값에 맞췄다. 계층 관련 링크와 키워드 재검색에서 좌표 부패 0건. **검수는 하지 않았다** — 715는 마지막 자가 검수 기준선(683)의 다음 트리거 783에 못 미친다.
 > 마지막 분량 기록: **2026-08-27 세션 2 · 648 → 683줄(+35, 순증 35·삭제 2 — 2회 편집: 세션 2 기록 +25, 오너 지적 정정 +10)** — 세션 2 마감 메모 신규(D7 폐쇄·D5 실측·프로브 정리) · "Owner Decisions Needed" ⓪ 실측·범위 갈림으로 재작성 · 세션 1 메모 기존 실패 줄 해소 주석. 2회차는 **오너 지적("이어쓰기가 본문을 참고할 텐데?")으로 "본문 미탑재" 주장을 정정**한 것 — ⓪ 재작성·세션 2 메모 교체·세션 1 메모 정정 주석. **자가 검수 했다(683 > 트리거 675)**: 이 세션의 새 인용 좌표 7곳 전수 실측 대조(`WritingPanel.tsx:341`·`api/models.py:43`·`service.py:1085/1167/1189`·`accept.py:150`·`extractor.py:73`) — **좌표 부패 0건**, 지운 것 없음(이번 증분은 전부 살아 있는 판단·결정 대기 항목이다).
@@ -31,8 +32,8 @@
 
 ## 지금 상태
 
-- 정본은 `docs/system-contract-sot.md` **v1.8.10**(Approved). 미확정 항목은 추측 구현하지 않는다.
-- **★ 배포되는 앱이 이제 둘이다(Slice 2, 2026-08-09). 앱을 만지는 사람이 가장 먼저 알아야 한다.** `/admin` 8 operation 은 **`admin` compose 서비스**(application 이미지 재사용·command 만 다름·**포트 미게시**)가 서빙하고, 도달 경로는 nginx `location /api/admin/` 하나다. 제품 앱에는 그 route 가 **없으므로** LAN 에서 치면 가드가 아니라 **라우터가 404** 다(`require_admin_user` 는 두 번째 겹으로 남는다). **알아야 하는 것 다섯**: ① **`create_app()` 은 사라지지 않았고 현재 98 operation 합집합**이다(2026-08-31 장면 메모 읽기 2경로 반영 실측) — 테스트·경계 행렬·`scripts/dump_openapi.py`(= 프론트 `schema.d.ts`)가 전부 그것을 쓴다. 브라우저는 nginx 뒤에서 한 origin 만 보므로 **계약은 하나여야 한다**. ② **세 factory(`create_app`·`create_product_app`·`create_admin_app`)는 한 함수 본문**이고 `include_product`·`include_admin` 으로만 갈린다 — 그것이 H-2(shim drift) 의 처방이다. **배포 앱만 따로 조립하는 코드를 새로 만들면 안 된다**(그 순간 아무도 구동하지 않는 두 번째 배선이 생긴다). 성질은 [`tests/test_admin_surface_separation.py`](tests/test_admin_surface_separation.py)가 잠근다 — 합집합 = 제품 ∪ 관리자 · 교집합 = `/health` · operation 별 가드·상태코드·에러 선언 동일. ③ **`register_*` 호출 순서를 재배열하지 말 것** — 합집합 앱의 route 순서가 OpenAPI `paths` 순서이고 그것이 프론트 생성물의 입력이다. surface 를 건너뛰는 것은 `if` 를 **제자리에** 두는 방식으로만 한다(초판이 admin 을 auth 앞으로 옮겼다가 지문이 깨질 뻔했다). ④ **`main:app` 은 제품 앱**이다(이미지 기본 CMD). 관리자 컨테이너는 [`admin_asgi.py`](services/application/app/admin_asgi.py) 를 띄운다 — 그 모듈을 import 하면 `main` 의 모듈 수준 제품 앱도 함께 만들어져 **관리자 컨테이너는 안 쓰는 앱 하나를 더 든다**(알려진 대가, 서빙되는 것은 관리자 앱뿐). ⑤ **admin 서비스 env 는 Mongo 셋뿐**이다 — 관리자 operation 전부가 Mongo 이고 purge 도 벡터·lexical 파기를 outbox 로 넘긴다. gateway·chroma 를 물리려면 이유를 함께 적을 것.
+- 정본은 `docs/system-contract-sot.md` **v1.8.13**(Approved). 미확정 항목은 추측 구현하지 않는다.
+- **★ 배포되는 앱이 이제 둘이다(Slice 2, 2026-08-09). 앱을 만지는 사람이 가장 먼저 알아야 한다.** `/admin` 8 operation 은 **`admin` compose 서비스**(application 이미지 재사용·command 만 다름·**포트 미게시**)가 서빙하고, 도달 경로는 nginx `location /api/admin/` 하나다. 제품 앱에는 그 route 가 **없으므로** LAN 에서 치면 가드가 아니라 **라우터가 404** 다(`require_admin_user` 는 두 번째 겹으로 남는다). **알아야 하는 것 다섯**: ① **`create_app()` 은 사라지지 않았고 현재 99 operation 합집합**이다(2026-08-31 장면 메모 3경로 반영 실측) — 테스트·경계 행렬·`scripts/dump_openapi.py`(= 프론트 `schema.d.ts`)가 전부 그것을 쓴다. 브라우저는 nginx 뒤에서 한 origin 만 보므로 **계약은 하나여야 한다**. ② **세 factory(`create_app`·`create_product_app`·`create_admin_app`)는 한 함수 본문**이고 `include_product`·`include_admin` 으로만 갈린다 — 그것이 H-2(shim drift) 의 처방이다. **배포 앱만 따로 조립하는 코드를 새로 만들면 안 된다**(그 순간 아무도 구동하지 않는 두 번째 배선이 생긴다). 성질은 [`tests/test_admin_surface_separation.py`](tests/test_admin_surface_separation.py)가 잠근다 — 합집합 = 제품 ∪ 관리자 · 교집합 = `/health` · operation 별 가드·상태코드·에러 선언 동일. ③ **`register_*` 호출 순서를 재배열하지 말 것** — 합집합 앱의 route 순서가 OpenAPI `paths` 순서이고 그것이 프론트 생성물의 입력이다. surface 를 건너뛰는 것은 `if` 를 **제자리에** 두는 방식으로만 한다(초판이 admin 을 auth 앞으로 옮겼다가 지문이 깨질 뻔했다). ④ **`main:app` 은 제품 앱**이다(이미지 기본 CMD). 관리자 컨테이너는 [`admin_asgi.py`](services/application/app/admin_asgi.py) 를 띄운다 — 그 모듈을 import 하면 `main` 의 모듈 수준 제품 앱도 함께 만들어져 **관리자 컨테이너는 안 쓰는 앱 하나를 더 든다**(알려진 대가, 서빙되는 것은 관리자 앱뿐). ⑤ **admin 서비스 env 는 Mongo 셋뿐**이다 — 관리자 operation 전부가 Mongo 이고 purge 도 벡터·lexical 파기를 outbox 로 넘긴다. gateway·chroma 를 물리려면 이유를 함께 적을 것.
 - **★ 활동 로그가 생겼다(Phase 9 Slice 9.0, 2026-08-09) — 사용자 행위를 남기는 첫 저장소다.** `activity_events` 에 **정본 변경 11 + 검토 결정 9 = 20 경로**가 한 행씩 남기고(A2=B, 2026-08-09 에 오너가 `writing/accept` 를 더해 19 → 20), 소유자는 `GET /projects/{id}/activity`(Phase 9 시점 총 operation **77**)로 읽는다. **알아야 하는 것 여섯**: ① **★ 이 컬렉션은 8.2c `project_name_history` 와 정반대다** — `project_id` 필드를 쓰고 **파기와 함께 사라진다**(I1·I2). 그쪽의 `_id` 트릭(reconciler 회피)을 여기 복사하면 **개명 이력 전체가 삭제 예외로 승격돼 D8-6 이 무너진다**. 실 Mongo 셀 둘이 두 방향을 나란히 잰다. ② **분류표가 mutating 40 전수다**([`activity/actions.py`](services/application/app/activity/actions.py)) — 새 mutating route 는 `logged`/`excluded(사유)` 중 하나로 등재해야 하고 미등재는 가드가 실패시킨다. **A2 를 C(AI 요청까지)로 넓히는 일은 `ai_request` 14 행의 값을 바꾸는 것**이어야 한다(오너 조건) — **그때 A8(중복 없음)을 함께 다시 본다**. ③ **기록은 handler 본문에서, 결과를 안 뒤에**(A7=A). dependency 로 옮기면 404·409 로 끝난 요청이 "했다"로 남는다. **가드가 `inspect.getsource(route.endpoint)` 를 보므로 헬퍼 안에 넣으면 안 잡힌다.** ④ **기록 실패는 요청을 안 죽인다**(A4=A 격리, 경계는 서비스 안 **한 곳**) — 대가는 **조용한 구멍**이고, 그래서 배선 누락도 런타임에 안 보인다(전수 가드가 유일한 신호다). **반면 파기 실패는 삼키지 않는다.** ⑤ **`before`/`after` 는 라벨만**(이름·제목·상태, **200자 상한**). 본문을 넣으면 `draft_versions` 와 두 정본이 된다. ⑥ **`writing/accept` 도 기록한다** — 정본 draft version 저장이기 때문이다(오너 2026-08-09). **A8 개정이 아니다**: 남기는 것은 AI 요청이 아니라 정본 저장이라 관측·원장과 다른 사실이고, **A2=C 확장(AI 요청 자체)과는 축이 다르다**(대상은 `ai_request` **13 행**이며 그때 A8 을 함께 다시 본다). **기록 조건은 상태코드가 아니라 정본이 바뀌었는가** — Gate 거부(200·`saved=null`)는 안 남기고 **502 partial(version 은 저장됨)은 남긴다**. ⑦ **★ 전수 가드는 배선의 *존재*만 본다 — *분기*는 못 본다**(N9 실측): 한 handler 에 기록 분기가 둘이면 하나를 지워도 소스 스캔이 만족돼 통과한다. **분기마다 행위 셀이 필요하다.**
 
 - **진행 중 페이즈 = 다중 사용자 인증(D8).** 오너 지시로 **슬라이스를 잘게 쪼개 진행 중**이다(한 번에 큰 덩어리 금지). 진행표:
@@ -353,26 +354,36 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 >   blue-600→blue-800). 한 단계는 hover 로 안 보인다 — designTokens 셀이 잠근다.
 > - **다음 순서**: 계층화 재검증 3회(불합격→조건부→조건부→합격)와 운영 migration 적용은
 >   2026-08-29 전부 마감했다(위 ⓪-b). 텍스트+화살표 링크 가시성 개선도 같은 날 마감했다.
->   **메모 기능은 Slice 0(저장·파기 수명)·1(읽기 API·검색)이 끝났고 다음은 Slice 2
->   (명시적 저장 API와 활동 기록)다.** 확정값은
+>   **메모 기능은 Slice 0(저장·파기 수명)·1(읽기 API·검색)·2(저장 API·활동 기록)가
+>   끝났다. API는 완결됐고 남은 것은 화면 둘(Slice 3~4)이다.** 확정값은
 >   [`scene-note-decisions.md`](docs/plans/scene-note-decisions.md), 각 slice의 완료 기준은
 >   [`scene-note-implementation-phases.md`](docs/plans/scene-note-implementation-phases.md)에
->   있다. Slice 2가 기댈 계약(SoT v1.8.11·v1.8.12):
->   - `PUT /projects/{pid}/drafts/{did}/note` 하나만 추가한다. **소유자만 쓰고 grant는 403**
->     — 이것은 자동이다(`_REQUIRE_PROJECT_OWNER`가 GET/HEAD만 grant에 열어 준다).
->   - **새 mutating route라 활동 분류표 전수 가드가 물린다**: `activity/actions.py`의
->     `ACTIVITY_ACTIONS`에 `scene_note_saved`를 넣고 `LOGGED_OPERATIONS` 카운트(현재 25)를
->     올린다. 기록은 **handler에서 성공 뒤**에 한다.
->   - operation tier 카운트는 `tests/test_auth_api.py`의 72/98 → 73/99.
->   - 요청 모델 상한은 `core_sot.service.SCENE_NOTE_MAX_CHARS`(12000자)를 그대로 쓴다.
->     **선결 1건**(검증 hardening #2): 상한 초과 + 보관된 장면이면 `SceneNoteTooLong`이
->     `Archived`보다 먼저 난다. 이 순서는 원고 상한의 pydantic 선례(422가 handler 앞)와
->     일치하므로 바꾸지 말고, **상태 코드 literal(422 vs 413)만** 오너 확인으로 정본에
->     못박는다.
->   - **페이즈 문서가 남긴 확정 항목**: 같은 값을 다시 저장할 때도 활동 행을 남기는가.
->     D4=A의 "명시적 저장"은 남기는 쪽으로 읽히지만 문언과 셀을 맞춰야 한다.
->   - 프론트(Slice 3~4)는 API 계약을 바꾸지 않는다. 목록은 이미 미리보기(200자)만 싣고
->     전문은 단건 GET이 준다 — 화면이 전문을 목록에서 기대하게 만들지 말 것.
+>   있다.
+>
+>   **★ 다음 작업은 Slice 2 독립 검증이다(2026-08-31 오너 지시). 구현이 아니다.**
+>   대상 커밋은 `edec884`(본체)·`a0257d9`(README 핀)이고 절차는
+>   [`docs/guides/verification.md`](docs/guides/verification.md). 검증자가 알아야 할 것:
+>   - **미검증 구간은 이 슬라이스 하나뿐**이다. 자기 검증 구간은 없다.
+>   - 오너 확정 2건이 이번에 새로 정본이 됐다 — **상한 초과 = 422**(요청 모델
+>     `field_validator`라 handler 앞) · **같은 값 재저장은 행을 남기되 연타(같은 본문 +
+>     5초 안)는 활동 행만 접는다**. 둘 다 SoT v1.8.13 행에 근거와 함께 있다.
+>   - 구현자 변이 **9종 전부 물렸다**(표는 work_log 세션 5). 특히 봐야 할 자리:
+>     ① `_is_double_submit`의 **두 항(값·시간)이 각각 가드되는가**(M3·M4가 그 방향)
+>     ② 실패 경로(404·409·422)에 활동 행이 없는가(M9)
+>     ③ grant PUT 403이 dependency에서 오는가(M8).
+>   - **전수 backend는 `2664 passed / 1 failed / 1 skipped / 3088 subtests`로 실측**했고
+>     그 1 failed가 README 버전 핀이다(`a0257d9`에서 정정). **다음 전수 기대값
+>     `2665 / 1 / 3088`** — 정정이 문서 리터럴 한 줄이라 셀·subtest를 안 건드린다.
+>     collect-only 실측 2666(= 2665 + skip 1), 착수 전 2643.
+>   - **frontend 전수는 안 돌렸다**(프론트 변경이 라벨표 2행 + 생성물뿐이고 그 정합은
+>     pytest `test_activity_ui_labels.py`가 전수로 잠근다). 검증자가 프론트를 만지면
+>     그때 함께 잰다. **이 머신에서 backend·frontend 전수를 겹쳐 돌리지 말 것**(Session 3
+>     에서 `productName.test.ts`가 과부하 타임아웃으로 오탐).
+>
+>   검증이 끝난 뒤 Slice 3(별도 메모 화면)로 간다. 프론트(Slice 3~4)는 API 계약을 바꾸지
+>   않는다. 목록은 이미 미리보기(200자)만 싣고 전문은 단건 GET이 준다 — 화면이 전문을
+>   목록에서 기대하게 만들지 말 것. 저장 화면은 **요청 중 저장 버튼을 비활성화**한다:
+>   연타 창은 활동 로그만 접고 요청 자체는 막지 않는다.
 
 > **★★ 2026-08-27 세션 4 반영 — D5-2 조건 폐쇄 + 보강 1·3·4 완료. 여기서 시작한다.**
 >
