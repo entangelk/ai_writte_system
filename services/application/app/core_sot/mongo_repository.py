@@ -537,6 +537,14 @@ class MongoCoreSotRepository:
             upsert=True,
         )
 
+    def list_scene_notes(self, project_id: str) -> tuple[SceneNote, ...]:
+        # uniq_scene_note 가 project_id 선두라 이 질의가 그 인덱스를 쓴다.
+        # 정렬은 걸지 않는다 — 목록 순서는 service 가 Scene 순서에서 가져온다.
+        return tuple(
+            _to_scene_note(doc)
+            for doc in self._scene_notes.find({"project_id": project_id})
+        )
+
     def version_count(self, draft_id: str) -> int:
         return self._versions.count_documents({"draft_id": draft_id})
 

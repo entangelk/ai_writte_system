@@ -1016,6 +1016,23 @@ export interface paths {
         patch: operations["rename_draft_projects__project_id__drafts__draft_id__patch"];
         trace?: never;
     };
+    "/projects/{project_id}/drafts/{draft_id}/note": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Scene Note */
+        get: operations["get_scene_note_projects__project_id__drafts__draft_id__note_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{project_id}/drafts/{draft_id}/purge": {
         parameters: {
             query?: never;
@@ -1128,6 +1145,23 @@ export interface paths {
         };
         /** Get Memory */
         get: operations["get_memory_projects__project_id__memory__memory_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Scene Notes */
+        get: operations["list_scene_notes_projects__project_id__notes_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2404,6 +2438,63 @@ export interface components {
             kind: components["schemas"]["BlockKind"];
             /** Start Offset */
             start_offset: number;
+        };
+        /**
+         * SceneNoteListItemPayload
+         * @description 메모 목록 한 행. **본문 전문은 싣지 않는다.**
+         *
+         *     상한이 12000자라 전문을 실으면 장면 200개에서 최악 240만 자(한국어 UTF-8 ≈7.2MB)가
+         *     된다. 대신 ``body_preview`` 를 싣고 전문은 단건 GET 이 준다. ``truncated`` 는 화면이
+         *     "더 보기"를 낼지 판단하는 신호다.
+         *
+         *     ``chapter_archived`` 가 함께 있는 이유: 장을 보관해도 자식 Scene 의 ``archived`` 는
+         *     바뀌지 않는데(장면 개별 보관과 구분되는 성질), 쓰기는 두 축 모두에서 막힌다. 한
+         *     축만 실으면 화면이 "읽기 전용"을 잘못 표시한다.
+         */
+        SceneNoteListItemPayload: {
+            /** Body Preview */
+            body_preview: string;
+            /** Chapter Archived */
+            chapter_archived: boolean;
+            /** Chapter Id */
+            chapter_id: string;
+            /** Chapter Title */
+            chapter_title: string;
+            /** Draft Id */
+            draft_id: string;
+            /** Scene Archived */
+            scene_archived: boolean;
+            /** Scene Title */
+            scene_title: string;
+            /** Truncated */
+            truncated: boolean;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** SceneNoteListResponse */
+        SceneNoteListResponse: {
+            /** Notes */
+            notes: components["schemas"]["SceneNoteListItemPayload"][];
+        };
+        /**
+         * SceneNotePayload
+         * @description 한 Scene 의 현재 메모(장면 메모 Slice 1).
+         *
+         *     ``body is None`` 은 **메모 없음**이고 ``body == ""`` 는 **빈 메모 저장됨**이다 —
+         *     저장 계약(SoT v1.8.11)이 그 둘을 구분하므로 읽기 표면도 구분해야 한다. 404 로
+         *     답하지 않는 이유는 장면 없음(404)과 뒤섞이기 때문이다: 드로어가 메모 없는 장면을
+         *     열 때마다 오류를 받게 된다.
+         */
+        SceneNotePayload: {
+            /** Body */
+            body: string | null;
+            /** Draft Id */
+            draft_id: string;
+            /** Updated At */
+            updated_at: string | null;
         };
         /** SceneOrderPutRequest */
         SceneOrderPutRequest: {
@@ -7606,6 +7697,74 @@ export interface operations {
             };
         };
     };
+    get_scene_note_projects__project_id__drafts__draft_id__note_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                draft_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneNotePayload"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
     purge_draft_projects__project_id__drafts__draft_id__purge_post: {
         parameters: {
             query?: never;
@@ -8197,6 +8356,75 @@ export interface operations {
                 };
             };
             /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    list_scene_notes_projects__project_id__notes_get: {
+        parameters: {
+            query?: {
+                query?: string | null;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneNoteListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Stored draft metadata predates the ordered-unit invariant (or is corrupt). Run scripts/migrate_ordered_units.py; retrying the request alone cannot succeed. The canonical store may also be unreachable or failing; in that case recover it and retry the same request unchanged. */
             503: {
                 headers: {
                     [name: string]: unknown;

@@ -296,6 +296,168 @@ class SceneNoteArchiveTest(unittest.TestCase):
             )
 
 
+class SceneNoteListTest(unittest.TestCase):
+    """Slice 1 목록·검색 계약 — 순서·서버측 query·보관 포함."""
+
+    def _project_with_notes(self, service):
+        project = service.create_project(name="Novel")
+        first = service.create_chapter(project_id=project.id, title="1장 만남")
+        second = service.create_chapter(project_id=project.id, title="2장 이별")
+        scenes = {}
+        for chapter, titles in (
+            (first, ("여름 골목", "빗속")),
+            (second, ("역 앞",)),
+        ):
+            for title in titles:
+                scenes[title] = service.create_scene(
+                    project_id=project.id, chapter_id=chapter.id, title=title
+                )
+        return project, (first, second), scenes
+
+    def test_list_is_ordered_by_chapter_then_scene_position(self):
+        service, _repo = _service()
+        project, _chapters, scenes = self._project_with_notes(service)
+        # 저장 순서를 목록 순서와 **반대로** 넣는다 — 저장 순서가 새어 나오면 실패한다.
+        for title in ("역 앞", "빗속", "여름 골목"):
+            service.put_scene_note(
+                project_id=project.id,
+                draft_id=scenes[title].id,
+                body=f"{title} 메모",
+            )
+
+        items = service.list_scene_notes(project_id=project.id)
+
+        self.assertEqual(
+            [item.scene.title for item in items],
+            ["여름 골목", "빗속", "역 앞"],
+        )
+        self.assertEqual(
+            [item.chapter.title for item in items],
+            ["1장 만남", "1장 만남", "2장 이별"],
+        )
+
+    def test_scenes_without_a_note_are_not_rows(self):
+        service, _repo = _service()
+        project, _chapters, scenes = self._project_with_notes(service)
+        service.put_scene_note(
+            project_id=project.id, draft_id=scenes["빗속"].id, body="하나만"
+        )
+
+        items = service.list_scene_notes(project_id=project.id)
+
+        self.assertEqual([item.scene.title for item in items], ["빗속"])
+
+    def test_query_matches_scene_title_and_body_case_insensitively(self):
+        service, _repo = _service()
+        project, _chapters, scenes = self._project_with_notes(service)
+        service.put_scene_note(
+            project_id=project.id, draft_id=scenes["여름 골목"].id,
+            body="여기엔 없는 말",
+        )
+        service.put_scene_note(
+            project_id=project.id, draft_id=scenes["빗속"].id,
+            body="Umbrella 를 놓고 온다",
+        )
+        service.put_scene_note(
+            project_id=project.id, draft_id=scenes["역 앞"].id,
+            body="여기도 없는 말",
+        )
+
+        by_title = service.list_scene_notes(
+            project_id=project.id, query="골목"
+        )
+        by_body = service.list_scene_notes(
+            project_id=project.id, query="UMBRELLA"
+        )
+
+        self.assertEqual([i.scene.title for i in by_title], ["여름 골목"])
+        self.assertEqual([i.scene.title for i in by_body], ["빗속"])
+
+    def test_query_with_no_match_is_an_empty_list_not_an_error(self):
+        service, _repo = _service()
+        project, _chapters, scenes = self._project_with_notes(service)
+        service.put_scene_note(
+            project_id=project.id, draft_id=scenes["빗속"].id, body="본문"
+        )
+
+        self.assertEqual(
+            service.list_scene_notes(project_id=project.id, query="없는말"), ()
+        )
+
+    def test_blank_query_lists_everything(self):
+        """검색창을 지우는 동작이 목록을 비우면 안 된다."""
+
+        service, _repo = _service()
+        project, _chapters, scenes = self._project_with_notes(service)
+        for scene in scenes.values():
+            service.put_scene_note(
+                project_id=project.id, draft_id=scene.id, body="본문"
+            )
+
+        for query in (None, "", "   "):
+            with self.subTest(query=query):
+                self.assertEqual(
+                    len(service.list_scene_notes(
+                        project_id=project.id, query=query
+                    )),
+                    3,
+                )
+
+    def test_archived_scene_notes_stay_in_the_list_and_carry_the_flags(self):
+        """오너 2026-08-31: 보관해도 목록에 남고 화면이 보관 표시를 한다."""
+
+        service, _repo = _service()
+        project, chapters, scenes = self._project_with_notes(service)
+        for scene in scenes.values():
+            service.put_scene_note(
+                project_id=project.id, draft_id=scene.id, body="본문"
+            )
+        service.archive_draft(
+            project_id=project.id, draft_id=scenes["빗속"].id
+        )
+        service.archive_chapter(
+            project_id=project.id, chapter_id=chapters[1].id
+        )
+
+        items = service.list_scene_notes(project_id=project.id)
+
+        self.assertEqual(len(items), 3)
+        flags = {
+            item.scene.title: (item.scene.archived, item.chapter.archived)
+            for item in items
+        }
+        self.assertEqual(flags["여름 골목"], (False, False))
+        self.assertEqual(flags["빗속"], (True, False))
+        # 장 보관은 자식 Scene 의 archived 를 바꾸지 않는다 — 두 축이 따로 실린다.
+        self.assertEqual(flags["역 앞"], (False, True))
+
+    def test_list_is_isolated_to_one_project(self):
+        service, _repo = _service()
+        mine, _chapters, scenes = self._project_with_notes(service)
+        other, _other_chapter, other_scene = _scene(service, project_name="Other")
+        service.put_scene_note(
+            project_id=mine.id, draft_id=scenes["빗속"].id, body="내 메모"
+        )
+        service.put_scene_note(
+            project_id=other.id, draft_id=other_scene.id, body="남의 메모"
+        )
+
+        self.assertEqual(
+            [i.note.body for i in service.list_scene_notes(project_id=mine.id)],
+            ["내 메모"],
+        )
+        self.assertEqual(
+            [i.note.body for i in service.list_scene_notes(project_id=other.id)],
+            ["남의 메모"],
+        )
+
+    def test_unknown_project_is_not_found(self):
+        service, _repo = _service()
+
+        with self.assertRaises(NotFound):
+            service.list_scene_notes(project_id="missing")
+
+
 class SceneNotePurgeTest(unittest.TestCase):
     """파기 수명 — 고아 0(결정 브리프 Follow-up, D5 '부분 삭제는 조용한 고아')."""
 

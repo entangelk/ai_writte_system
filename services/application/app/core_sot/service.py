@@ -25,6 +25,7 @@ from services.application.app.core_sot.models import (
     PutProjectBriefResult,
     SaveDraftResult,
     SceneNote,
+    SceneNoteListItem,
     SourceBlock,
     SourceRef,
     SourceSnapshot,
@@ -173,6 +174,15 @@ class InMemoryCoreSotRepository:
 
     def put_scene_note(self, note: SceneNote) -> None:
         self.scene_notes[(note.project_id, note.draft_id)] = note
+
+    def list_scene_notes(self, project_id: str) -> tuple[SceneNote, ...]:
+        # 순서는 정하지 않는다 — 목록 순서(장 위치→장면 위치)는 service 가 Scene
+        # 순서에서 가져온다. 저장소가 두 번째 순서 정의를 갖게 두지 않는다.
+        return tuple(
+            note
+            for (note_project_id, _draft_id), note in self.scene_notes.items()
+            if note_project_id == project_id
+        )
 
     def version_count(self, draft_id: str) -> int:
         return len(self._version_ids_by_draft.get(draft_id, ()))
@@ -1344,6 +1354,53 @@ class CoreSotService:
         self._require_project(project_id)
         self._require_draft(project_id, draft_id)
         return self._repo.get_scene_note(project_id, draft_id)
+
+    def list_scene_notes(
+        self, *, project_id: str, query: str | None = None
+    ) -> tuple[SceneNoteListItem, ...]:
+        """프로젝트의 모든 Scene 메모를 장 위치→장면 위치 순으로 돌려준다.
+
+        순서와 계층 무결성은 ``list_drafts`` 에서 그대로 가져온다 — 여기서 다시
+        정렬하면 순서 정의가 두 벌이 되고, 평면 legacy 데이터의 503 얼굴도 잃는다.
+
+        ``query`` 는 **서버에서** 적용한다(Slice 1 계약). 장면 제목 또는 메모 본문의
+        부분 일치이며 대소문자를 구분하지 않는다. 공백뿐인 query 는 필터 없음이다 —
+        빈 입력이 결과를 0건으로 만들면 검색창을 지우는 동작이 목록을 비운다.
+
+        보관된 장면의 메모도 **포함한다**(오너 2026-08-31). 형제 선례가 그렇고
+        (``list_drafts`` 는 archived 를 걸러내지 않는다) "archive 는 read 를 막지
+        않는다"가 전역 계약이다. 보관 여부는 행에 실려 화면이 표시한다.
+        """
+        scenes = self.list_drafts(project_id=project_id)
+        chapters = {
+            chapter.id: chapter
+            for chapter in self._repo.list_chapters(project_id)
+        }
+        notes = {
+            note.draft_id: note
+            for note in self._repo.list_scene_notes(project_id)
+        }
+        needle = (query or "").strip().casefold()
+        items: list[SceneNoteListItem] = []
+        for scene in scenes:
+            note = notes.get(scene.id)
+            if note is None:
+                continue
+            chapter = chapters.get(scene.chapter_id)
+            if chapter is None:
+                # 계층 밖 Scene 은 list_drafts 가 이미 503 으로 막는다. 여기 오는
+                # 것은 그 검사를 통과한 것뿐이라 방어적으로 건너뛰기만 한다.
+                continue
+            if (
+                needle
+                and needle not in scene.title.casefold()
+                and needle not in note.body.casefold()
+            ):
+                continue
+            items.append(
+                SceneNoteListItem(note=note, scene=scene, chapter=chapter)
+            )
+        return tuple(items)
 
     def put_scene_note(
         self, *, project_id: str, draft_id: str, body: str

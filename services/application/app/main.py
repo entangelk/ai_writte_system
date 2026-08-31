@@ -1576,6 +1576,7 @@ from .routers.context_search import register_context_search
 from .routers.drafts import register_drafts
 from .routers.health import register_health
 from .routers.memory import register_memory
+from .routers.notes import register_notes
 from .routers.observability import register_observability
 from .routers.projects import register_projects
 from .routers.source_refs import register_source_refs
@@ -1973,6 +1974,10 @@ def create_app(
         writing_generation_jobs=writing_generation_jobs,
         writing_scratch=writing_scratch,
     )
+
+    # 장면 메모 읽기 표면(Slice 1). 협력자가 core_sot 하나뿐인 것은 의도다 —
+    # 쓰기·활동 기록이 없는 slice 라서 activity 를 받지 않는다.
+    register_notes(app, core_sot=core_sot)
 
     register_source_refs(
         app,

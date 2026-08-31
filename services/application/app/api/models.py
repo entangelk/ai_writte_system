@@ -302,6 +302,47 @@ class AccessLogResponse(BaseModel):
     entries: list[AccessLogEntryPayload]
 
 
+class SceneNotePayload(BaseModel):
+    """한 Scene 의 현재 메모(장면 메모 Slice 1).
+
+    ``body is None`` 은 **메모 없음**이고 ``body == ""`` 는 **빈 메모 저장됨**이다 —
+    저장 계약(SoT v1.8.11)이 그 둘을 구분하므로 읽기 표면도 구분해야 한다. 404 로
+    답하지 않는 이유는 장면 없음(404)과 뒤섞이기 때문이다: 드로어가 메모 없는 장면을
+    열 때마다 오류를 받게 된다.
+    """
+
+    draft_id: str
+    body: str | None
+    updated_at: datetime | None
+
+
+class SceneNoteListItemPayload(BaseModel):
+    """메모 목록 한 행. **본문 전문은 싣지 않는다.**
+
+    상한이 12000자라 전문을 실으면 장면 200개에서 최악 240만 자(한국어 UTF-8 ≈7.2MB)가
+    된다. 대신 ``body_preview`` 를 싣고 전문은 단건 GET 이 준다. ``truncated`` 는 화면이
+    "더 보기"를 낼지 판단하는 신호다.
+
+    ``chapter_archived`` 가 함께 있는 이유: 장을 보관해도 자식 Scene 의 ``archived`` 는
+    바뀌지 않는데(장면 개별 보관과 구분되는 성질), 쓰기는 두 축 모두에서 막힌다. 한
+    축만 실으면 화면이 "읽기 전용"을 잘못 표시한다.
+    """
+
+    draft_id: str
+    scene_title: str
+    scene_archived: bool
+    chapter_id: str
+    chapter_title: str
+    chapter_archived: bool
+    body_preview: str
+    truncated: bool
+    updated_at: datetime
+
+
+class SceneNoteListResponse(BaseModel):
+    notes: list[SceneNoteListItemPayload]
+
+
 class ActivityEventPayload(BaseModel):
     """Phase 9 (A3=B) — 고정 코어 + 짧은 값 변화.
 

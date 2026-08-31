@@ -1884,8 +1884,10 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # 65/91 이 됐다(관리자 아카이브는 admin tier).
         # Chapter→Scene 계층(2026-08-28, SoT v1.8.9)이 chapter 6경로를 project tier 에
         # 더하고 평면 draft-order 를 제거해 70/96 이 됐다.
-        self.assertEqual(len(by_tier["project"]), 70)
-        self.assertEqual(len(tiers), 96)
+        # 장면 메모 읽기(2026-08-31, Slice 1)가 목록·단건 GET 2경로를 project tier 에
+        # 더해 72/98 이 됐다 — 읽기 전용이라 grant 도 함께 통과한다(D3=A).
+        self.assertEqual(len(by_tier["project"]), 72)
+        self.assertEqual(len(tiers), 98)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:

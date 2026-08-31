@@ -109,6 +109,21 @@ class SceneNote:
 
 
 @dataclass(frozen=True, slots=True)
+class SceneNoteListItem:
+    """One row of the project-wide note list (장면 메모 Slice 1).
+
+    Carries the existing models rather than a flattened copy of their fields:
+    a second field list would drift from ``Draft``/``Chapter`` the moment either
+    grows one. The list order is the caller's (Chapter position → Scene
+    position), so no position field is repeated here either.
+    """
+
+    note: SceneNote
+    scene: Draft
+    chapter: Chapter
+
+
+@dataclass(frozen=True, slots=True)
 class DraftVersion:
     id: str
     project_id: str
