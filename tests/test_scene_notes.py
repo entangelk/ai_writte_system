@@ -240,6 +240,42 @@ class SceneNoteArchiveTest(unittest.TestCase):
                 project_id=project.id, draft_id=scene.id, body="보관 뒤 메모"
             )
 
+    def test_archived_project_and_chapter_do_not_block_reads(self):
+        """읽기-아카이브 축의 나머지 두 면(독립 검증 hardening #1, 2026-08-31).
+
+        직접 셀로 잠긴 것은 scene 보관뿐이었다. 읽기 경로는 project 보관을 보지 않고
+        chapter 는 아예 참조하지 않는데, 그 성질이 헬퍼 치환 한 번으로 뒤집힌다
+        (읽기를 `_require_active_project_and_draft` 로 바꾸면 여기서 재실패한다).
+        """
+
+        service, _repo = _service()
+        project, chapter, scene = _scene(service)
+        other, _other_chapter, other_scene = _scene(service, project_name="Other")
+        service.put_scene_note(
+            project_id=project.id, draft_id=scene.id, body="장 보관 뒤에도 읽힌다"
+        )
+        service.put_scene_note(
+            project_id=other.id,
+            draft_id=other_scene.id,
+            body="프로젝트 보관 뒤에도 읽힌다",
+        )
+
+        service.archive_chapter(project_id=project.id, chapter_id=chapter.id)
+        service.archive_project(project_id=other.id)
+
+        self.assertEqual(
+            service.get_scene_note(
+                project_id=project.id, draft_id=scene.id
+            ).body,
+            "장 보관 뒤에도 읽힌다",
+        )
+        self.assertEqual(
+            service.get_scene_note(
+                project_id=other.id, draft_id=other_scene.id
+            ).body,
+            "프로젝트 보관 뒤에도 읽힌다",
+        )
+
     def test_archived_chapter_and_project_block_writes(self):
         service, _repo = _service()
         project, chapter, scene = _scene(service)

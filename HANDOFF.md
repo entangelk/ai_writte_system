@@ -359,8 +359,12 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 >   `get_scene_note`/`put_scene_note`만 쓰고 `scene_notes` 컬렉션을 직접 읽지 않는다. 본문
 >   상한은 `core_sot.service.SCENE_NOTE_MAX_CHARS`(12000자) — API 모델도 이 상수를 쓴다.
 >   목록 route는 **미리보기 절단이 필요하다**: 12000자 × 장면 수를 그대로 실으면 응답이
->   커진다(장면 200개 = 최악 2.4MB). Slice 1은 목록/단건 GET과 서버측 query만 열고 PUT·활동
->   기록은 Slice 2로 미룬다.
+>   커진다 — 장면 200개면 최악 **240만 자**이고, 한국어는 UTF-8 3바이트/자라 **≈7.2MB**
+>   (JSON 이스케이프 별도)다. 산정은 문자수가 아니라 **바이트**로 한다. Slice 1은 목록/단건 GET과 서버측 query만 열고 PUT·활동
+>   기록은 Slice 2로 미룬다. **Slice 2 선결 1건**(검증 hardening #2): 상한 초과 + 보관된
+>   장면이면 `SceneNoteTooLong`이 `Archived`보다 먼저 난다. 이 순서는 원고 상한의 pydantic
+>   선례(422가 handler 앞)와 일치하므로 바꾸지 말고, **상태 코드 literal(422 vs 413)만**
+>   오너 확인으로 정본에 못박는다 — 근거는 `scene-note-decisions.md` Follow-up.
 
 > **★★ 2026-08-27 세션 4 반영 — D5-2 조건 폐쇄 + 보강 1·3·4 완료. 여기서 시작한다.**
 >

@@ -44,7 +44,7 @@
    `service.get_scene_note`로 부재를 단정했는데, draft가 사라지면 `_require_draft`가 **메모
    행의 생사와 무관하게** NotFound를 던진다 — D5가 말하는 "조용한 고아"가 서비스 API 뒤에
    완전히 가려진다. 해결: Scene/Chapter/project 파기 셀이 `repo.scene_notes`를 직접
-   단정하도록 고쳤다(커밋 `ae2fc9d` 계열). 결과: 같은 변이가 이제 2셀을 깨뜨린다(아래 표 M1).
+   단정하도록 고쳤다(커밋 `7a63d7a`). 결과: 같은 변이가 이제 2셀을 깨뜨린다(아래 표 M1).
    **교훈**: 부모가 함께 사라지는 자식 데이터의 파기 가드는 서비스 조회로 재면 안 된다.
    **패턴 sweep(§4)**: 같은 뿌리 — "`draft_id`로 묶인 자식의 부재를 부모를 요구하는 서비스
    메서드로 단정" — 를 기존 파기 회귀에서 훑었다. `test_draft_purge.py`는 `repo.version_count`
@@ -111,6 +111,50 @@
   3 서브클래스(Fallback·Transaction·WritingIntent) 18(`--collect-only`로 확인).
   **이 세션에서 변경 전 기준선을 재측하지는 않았다** — 따라서 위 수치는 변경 후 실측값이고
   "+N" 형태의 증분은 주장하지 않는다(08-29 기록의 2570/4/3022는 다른 세션의 측정치다).
+
+## Session 2 — 독립 검증 지적 반영(보강)
+
+검증 기록: [`2026-08-31/scene_note_slice_0.md`](../../verifications/2026-08-31/scene_note_slice_0.md)
+(**합격**, 커밋 `6641462`). 차단 결함 0건, hardening 6건 중 코드/기록에 반영할 5건을 닫았다.
+
+### Completed work
+
+- **hardening #1 — 읽기-아카이브 축 파라미터화**: 직접 셀로 잠긴 것이 scene 보관뿐이었다.
+  `SceneNoteArchiveTest::test_archived_project_and_chapter_do_not_block_reads` 신규(16셀).
+  읽기 헬퍼를 `_require_active_project_and_draft`로 치환하는 회귀에서 재실패한다(변이 V6).
+- **hardening #2 — 검사 순서 선언**: `put_scene_note`가 길이 검사를 아카이브 검사보다 먼저
+  하는 것은 **선례에서 유도된다** — 원고 상한이 `SaveDraftRequest.enforce_raw_text_limit`
+  (pydantic `field_validator`)이라 HTTP에서 422가 handler 진입 **전에** 나고 아카이브 409는
+  그 뒤다. 따라서 Slice 2가 같은 관례를 쓰면 서비스 순서와 HTTP 순서가 일치한다. 결정
+  브리프 Follow-up과 HANDOFF에 "순서는 유지, **상태 코드 literal(422 vs 413)만** 오너 확인"
+  으로 남겼다. 오너 결정이 필요한 것은 순서가 아니라 코드 값이다.
+- **hardening #3 — HANDOFF 용량 산정**: "장면 200개 = 최악 2.4MB"는 1바이트/자 가정이었다.
+  240만 자 · 한국어 UTF-8 3바이트/자 → **≈7.2MB**(JSON 이스케이프 별도)로 정정하고 산정
+  단위를 바이트로 명시. 절단 필요라는 결론은 그대로다.
+- **hardening #4 — work_log 인용 오류**: `ae2fc9d`는 존재하지 않는 해시였다(가드 보강 커밋을
+  기록할 때 확인 없이 적었다). 실제 커밋 `7a63d7a`로 정정.
+- **hardening #5 — SoT 회귀 기술 과소**: v1.8.11 행의 "Mongo 6셀 × transaction/fallback 양
+  경로" → **3 실행 경로**(Fallback·Transaction·WritingIntent = 18셀), in-memory 15→16셀.
+- **hardening #6**(`mongo_collections.md` 미등재): 검증자도 "별도 작업" 판단에 동의 —
+  이번에도 건드리지 않았다. Session 1 Issues #2에 부채로 남아 있다.
+
+### Issues found
+
+1. **존재하지 않는 커밋 해시를 기록에 남겼다**(hardening #4). 원인: 가드 보강 커밋을
+   work_log에 적을 때 `git log`로 확인하지 않고 추정 해시를 썼다. 해결: 정정 + 앞으로 기록에
+   해시를 넣을 때는 `git log --oneline`의 출력에서 복사한다. **이 결함은 검증자가 잡았다** —
+   내 자체 검증에는 해시 실존 확인이 없었다.
+
+### Mutation verification (Session 2)
+
+| # | 방향 | 적용 diff | 파일 | 물린 셀 |
+|---|---|---|---|---|
+| V6 | over(읽기 차단) | `get_scene_note`의 `_require_project`+`_require_draft` → `_require_active_project_and_draft` | `core_sot/service.py` | (아래 Verification) |
+
+### Verification (Session 2)
+
+- `tests/test_scene_notes.py` **16 passed**(신규 1셀 포함).
+- 문서 가드 `tests/test_docs_indexes.py` — 아래 실행 결과.
 
 ### Next steps
 

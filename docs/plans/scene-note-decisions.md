@@ -99,6 +99,14 @@ Chapter/프로젝트 전용 메모는 만들지 않는다.
   3배다 — 4000의 근거인 이어쓰기 예산은 메모에 옮겨오지 않으므로(메모는 프롬프트에 실리지
   않는다) 값을 정하는 것은 쓰임이다: 메모는 원고로 옮겨 갈 재료를 모아 두는 곳이라 여러 장면
   분량(≈3 장면)을 담을 수 있어야 한다. Slice 2의 API 모델과 Slice 3~4의 UI는 이 값을 쓴다.
+- **검사 순서(독립 검증 2026-08-31 hardening #2)**: `put_scene_note`는 길이 검사를
+  아카이브 검사보다 **먼저** 한다 — 보관된 장면에 상한 초과 본문을 보내면 `Archived`가
+  아니라 `SceneNoteTooLong`이 난다. 이 순서는 **선례에서 유도된다**: 원고 본문 상한은
+  `SaveDraftRequest.enforce_raw_text_limit`(pydantic `field_validator`)이라 HTTP에서 422가
+  **handler 진입 전에** 나고, 아카이브 409는 그 뒤에야 판정된다. 즉 Slice 2가 같은 관례로
+  요청 모델에 상한을 두면 서비스 순서와 HTTP 순서가 일치한다. Slice 2는 이 순서를 바꾸지
+  말고, **상태 코드 literal(422 vs 413)만** 오너 확인으로 조항에 못박는다.
+
 - `PUT`이 mutating route인 만큼 활동 분류표·OpenAPI·`schema.d.ts`·401/403 선언·소유자/grant
   경계 테스트를 함께 갱신한다. activity 기록은 handler에서 성공 결과 뒤에 남긴다.
 - 메모는 export와 LLM 프롬프트에 **자동 포함하지 않는다**. 포함하려면 컨텍스트 예산·사용량·
