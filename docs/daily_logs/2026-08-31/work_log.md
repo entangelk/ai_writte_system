@@ -245,7 +245,13 @@
   `test_docs_indexes.py` + `test_application_api.py` = **248 passed / 1024 subtests**.
 - 전수 route 가드: `test_auth_api.py` **132 passed / 977 subtests**(tier 행렬은 무수정
   통과했고 **카운트만** 72/98 로 갱신 — 새 경로가 이미 401/403 전수 가드 안에 있다는 뜻).
-- 전수: 아래 절에 실측.
+- **전수 backend**(test-mongo ON, rs-test 27020): **2638 passed / 1 skipped / 3065 subtests**
+  (34분 29초). Session 1 기준선 2610/1/3024 대비 **+28 passed**(신규 27셀 = service 8 +
+  HTTP 19, 그리고 tier 행렬이 새 경로 2개를 집어 subtests 가 +41).
+- **전수 frontend**: `npx vitest run` **35 files / 385 passed**(10분 3초).
+  ※ 처음 실행에서 `productName.test.ts` 1건이 실패했는데 **backend 전수와 동시에 돌린
+  탓의 5초 타임아웃**이었다(단독 재실행 204ms 통과, 부하 없는 전수에서도 385/385).
+  교훈: 이 머신에서 두 전수를 겹쳐 돌리지 않는다.
 
 ### Next steps
 
