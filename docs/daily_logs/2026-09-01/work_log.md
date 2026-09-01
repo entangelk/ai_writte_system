@@ -101,3 +101,39 @@
 
 - 검증 완료: 새 핀 3개 + `test_docs_indexes.py` = **16 passed / 275 subtests**. Slice 3 화면
   작업에서 frontend 전수를 함께 측정한다.
+
+## Session 3 — 최종 저장·분석 연동 결정 브리프
+
+### Goals
+
+- 도그푸드에서 발견한 “일반 저장 뒤 분석 시점을 놓침”을 확인하고, Slice 3 화면과 함께
+  시행할 수 있는 최종 저장 상태·분석 연동 계약을 구현 전에 정리한다.
+
+### Completed work
+
+- [`final-save-analysis-decisions.md`](../../plans/final-save-analysis-decisions.md)를 작성하고 계획
+  인덱스에 등재했다. 일반 저장은 version만 만들고, 수동 분석과 `채택하고 저장`의 분석 job은
+  snapshot 키를 공유한다는 실제 구현을 대조했다.
+- 오너의 방향을 브리프에 반영했다: final은 Scene당 한 번만 실행하고, 뒤의 편집은 일반 저장과
+  수동 분석으로 처리한다. 추천은 final snapshot을 보존한 채 최신 version과 다르면
+  `최종 저장 후 수정됨`으로 표시하는 B안이다.
+- 장/Scene compacting과 다음 장면 프롬프트 주입은 이번 slice에서 제외했다. 현재 생성 문맥은
+  최신 Scene의 최근 문단과 승인된 canonical memory이며, 분석 후보의 자동 승격은 정본 정책을
+  위반하므로 별도 결정을 필요로 한다.
+
+### Issues found
+
+- 현재 Draft 모델에는 archive 외의 수명 상태가 없어 final을 프론트 상태로만 두면 재접속·다른
+  기기에서 사라진다. 서버 정본 marker와 API 계약이 필요하다.
+
+### Decisions
+
+- **[사용자 방향, 2026-09-01]** Scene의 최종 저장은 한 번만 가능하게 하고, 그 뒤 수정은 일반
+  저장과 수동 분석으로 처리한다. 화면은 final·분석·후속 수정 상태를 구별해 보여야 한다.
+- final 이후 수정 때 final 이력을 지울지 보존할지는 새 공개 상태 계약이라 브리프 D1의 오너
+  확정이 필요하다. 구현은 승인 뒤에만 시작한다.
+
+### Next steps
+
+- 오너가 D1~D3(각 권고 B)을 승인하거나 수정하면 SoT·세부 구현 계획에 반영한 뒤 Slice 3과
+  분리된 final-save slice로 구현한다.
