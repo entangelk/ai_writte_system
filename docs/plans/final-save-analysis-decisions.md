@@ -1,6 +1,6 @@
 # 최종 저장과 분석 연동 — 착수 결정 브리프
 
-상태: `Partially resolved` — 오너 결정 D1=B · D2=B · D3=B · D4=A (2026-09-01); D5 partial HTTP 얼굴 결정 대기
+상태: `Resolved` — 오너 결정 D1=B · D2=B · D3=B · D4=A · D5=A (2026-09-01)
 작성: 2026-09-01
 정본 연결: [`../system-contract-sot.md`](../system-contract-sot.md) v1.8.13, [`frontend-editor-save-decisions.md`](frontend-editor-save-decisions.md), [`05-writing-accept-decisions.md`](05-writing-accept-decisions.md), [`scene-note-implementation-phases.md`](scene-note-implementation-phases.md) Slice 3~4
 
@@ -119,6 +119,14 @@ final marker와 원고 snapshot은 이미 성공적으로 저장됐지만 동기
 되돌리지 않는다고 정했다. 따라서 HTTP 성공은 저장 사실을 나타내고 분석 결과는 명시적
 payload 상태로 분리하는 편이 이 endpoint의 사용자가 다음 행동(수동 분석)을 가장 정확히
 받는다. accept의 502는 그 endpoint가 원래 AI 채택 흐름이라는 별도 성격의 선례다.
+
+### 오너 결정
+
+**D5=A.** 최종 저장이 성공하고 동기 분석만 실패했을 때 finalize는 **HTTP 200**으로 저장 성공을
+알리고, 분석 실패는 payload의 `analysis_job`(실패 상태)·`analysis_error`로 안내한다(2026-09-01
+오너 확정 — 구현 권고와 3차 재검증의 독립 판독이 모두 A였다). 이 결정으로 finalize 스펙의
+**502 선언은 도달 불가능한 얼굴이므로 제거**한다(제거·셀 고정은 재검증 조건 R3·R4와 같은
+폐쇄 슬라이스에서 시행).
 
 ## 확정 계약
 
