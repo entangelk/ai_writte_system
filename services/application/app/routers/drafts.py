@@ -612,7 +612,7 @@ def register_drafts(
     @app.post(
         "/projects/{project_id}/drafts/{draft_id}/versions",
         response_model=SaveDraftResponse,
-        responses=_owned(_BILLABLE_400_404_409_502_CONFIG),
+        responses=_owned(_ERRORS_400_404_409),
         dependencies=_REQUIRE_PROJECT_OWNER,
     )
     async def save_draft(
@@ -665,7 +665,7 @@ def register_drafts(
     @app.post(
         "/projects/{project_id}/drafts/{draft_id}/finalize",
         response_model=FinalizeDraftResponse,
-        responses=_owned(_ERRORS_400_404_409),
+        responses=_owned(_BILLABLE_400_404_409_502_CONFIG),
         dependencies=_REQUIRE_PROJECT_OWNER_BILLABLE,
     )
     async def finalize_draft(

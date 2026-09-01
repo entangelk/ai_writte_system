@@ -1,4 +1,4 @@
-"""Repro for verification 2026-09-01 / final-save-analysis checkpoint (832089b+0922a24).
+"""Regression repro for final-save analysis flow.
 
 D4=A 계약(final-save-analysis-decisions.md 확정 계약)의 실행 경로를 인메모리
 TestClient 로 직접 두드려 본다. 커밋된 회귀 셀이 없는 상태에서 계약 행렬을 임시로
@@ -9,10 +9,6 @@ Run:  python3 docs/verifications/2026-09-01/repro_final_save_flow.py
 출력: 시나리오별 기대/관측 한 줄. 어느 하나라도 기대와 다르면 rc=1.
 
 시나리오:
-  S0  커밋된 소스 그대로: dedupe 표 무매핑 → 503 fail-closed 관측 (결함 B1)
-  S0b dedupe 표에 draft_finalize 행을 *런타임 주입*한 뒤: handler 도달하지만
-      _require_active_project_and_draft 가 None 을 반환해 500 (결함 B2)
-  S0c 서비스 메서드도 런타임 패치(draft 반환)한 뒤 같은 요청이 200 이 되는가
   S1  성공 runner: 저장+marker+job 실행(200, status succeeded, runner 1회)
   S2  같은 키 재전송(confirm 헤더): 동일 version 수렴, runner 재실행 없음
   S3  다른 키 재최종화: 409 AlreadyFinalized
@@ -27,9 +23,8 @@ Run:  python3 docs/verifications/2026-09-01/repro_final_save_flow.py
   S12 S6 실패 job의 수동 재실행 문(retry → pending)
   S13 없는 draft: 404
 
-S0c 이후의 시나리오는 B1·B2 를 런타임 패치로 비활성화한 뒤의 관측이다 — 커밋된
-코드의 동작이 아니라, 두 결함이 고쳐졌을 때 *그 아래에* 또 다른 결함이 있는지를
-가려내는 데 의미가 있다.
+독립 검증에서 B1(dedupe 표)·B2(`None` 반환값 오용)를 찾아낸 뒤, 이 파일을 현재
+커밋을 직접 검증하는 회귀 프로브로 전환했다. 런타임 패치는 사용하지 않는다.
 """
 import os
 import sys
@@ -58,7 +53,6 @@ from services.application.app.api.dependencies import (
     require_project_owner,
 )
 from services.application.app.main import create_app
-from services.application.app.quota.dedupe import DEDUPE_SOURCES, DedupeSource
 from tests.auth_support import TEST_USER
 
 FAILURES = []
@@ -145,67 +139,9 @@ def make_client(runner):
     return client, project["id"], draft["id"]
 
 
-def patch_dedupe():
-    DEDUPE_SOURCES["draft_finalize"] = (DedupeSource.BODY, "idempotency_key")
-
-
-def unpatch_dedupe():
-    DEDUPE_SOURCES.pop("draft_finalize", None)
-
-
-_REQUIRE_ORIG = CoreSotService._require_active_project_and_draft
-
-
-def patch_require_returns_draft():
-    """B2 의 최소 수정폭(draft 반환)을 런타임에 흉내 낸다.
-
-    커밋된 ``_require_active_project_and_draft`` 는 ``-> None`` 검사 메서드인데
-    ``finalize_draft`` 만 반환값을 draft 로 쓴다. 검사는 그대로 두고 draft 만
-    돌려주는 변형으로 클래스를 덮어 S1+ 의 *아래* 계약을 관측한다.
-    """
-
-    def returning(self, project_id, draft_id):
-        _REQUIRE_ORIG(self, project_id, draft_id)
-        draft = self._repo.get_draft(draft_id)
-        assert draft is not None
-        return draft
-
-    CoreSotService._require_active_project_and_draft = returning
-
-
-def restore_require():
-    CoreSotService._require_active_project_and_draft = _REQUIRE_ORIG
-
-
 def main():
     os.environ.pop("LLM_GATEWAY_BASE_URL", None)
     runner = SucceedingRunner()
-
-    # --- S0: committed source as-is → dedupe table has no draft_finalize row.
-    runner = SucceedingRunner()
-    client, pid, did = make_client(runner)
-    response = client.post(
-        f"/projects/{pid}/drafts/{did}/finalize",
-        json={"raw_text": "민아는 밤에 일기를 쓴다.", "idempotency_key": "final-key-1"})
-    check("S0 committed tree finalize status", 503, response.status_code)
-    print(f"      S0 detail: {response.json().get('detail')!r}")
-
-    # --- S0b: dedupe row injected at runtime → handler reached, but the
-    # _require_active_project_and_draft None return breaks it (B2).
-    patch_dedupe()
-    response = client.post(
-        f"/projects/{pid}/drafts/{did}/finalize",
-        json={"raw_text": "민아는 밤에 일기를 쓴다.", "idempotency_key": "final-key-1"},
-        headers={"X-Confirm-Duplicate": "1"})
-    check("S0b dedupe-patched status (500 = B2)", 500, response.status_code)
-
-    # --- S0c: with the service method patched too, the same request succeeds.
-    patch_require_returns_draft()
-    response = client.post(
-        f"/projects/{pid}/drafts/{did}/finalize",
-        json={"raw_text": "민아는 밤에 일기를 쓴다.", "idempotency_key": "final-key-1"},
-        headers={"X-Confirm-Duplicate": "1"})
-    check("S0c fully-patched status", 200, response.status_code)
 
     # --- S1 happy path (fresh app so runner state is clean).
     runner = SucceedingRunner()
@@ -367,8 +303,6 @@ def main():
         headers={"X-Confirm-Duplicate": "1"})
     check("S13 unknown draft status", 404, response.status_code)
 
-    unpatch_dedupe()
-    restore_require()
     print()
     if FAILURES:
         print(f"FAILED ({len(FAILURES)}): {', '.join(FAILURES)}")

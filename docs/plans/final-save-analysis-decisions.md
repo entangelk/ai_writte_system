@@ -1,6 +1,6 @@
 # 최종 저장과 분석 연동 — 착수 결정 브리프
 
-상태: `Resolved` — 오너 결정 D1=B · D2=B · D3=B · D4=A (2026-09-01)
+상태: `Partially resolved` — 오너 결정 D1=B · D2=B · D3=B · D4=A (2026-09-01); D5 partial HTTP 얼굴 결정 대기
 작성: 2026-09-01
 정본 연결: [`../system-contract-sot.md`](../system-contract-sot.md) v1.8.13, [`frontend-editor-save-decisions.md`](frontend-editor-save-decisions.md), [`05-writing-accept-decisions.md`](05-writing-accept-decisions.md), [`scene-note-implementation-phases.md`](scene-note-implementation-phases.md) Slice 3~4
 
@@ -98,6 +98,27 @@ worker는 대량·장시간 분석이 실제 병목으로 측정될 때 열어�
   final marker는 유지하고 최신 snapshot을 `분석 필요`로 보여 준다.
 - final 요청 재전송은 marker·snapshot을 중복 생성하지 않는다. 분석이 실패한 뒤의 재실행은 D1의
   사용자 방향대로 기존 수동 분석 경로가 담당한다.
+
+## D5 — 분석 실패 partial의 HTTP 상태코드
+
+### Decision needed
+
+final marker와 원고 snapshot은 이미 성공적으로 저장됐지만 동기 분석만 실패했을 때, 응답을
+성공(200)으로 둘지 partial failure(502)로 둘지 정해야 한다. 구현은 현재 200과
+`analysis_error`를 반환한다. D2 설명이 `writing/accept`의 502 partial 선례를 인용해 문언
+긴장이 생겼고, status를 바꾸면 프런트의 성공 처리도 함께 달라진다.
+
+| 선택지 | 설명 | 장점 | 단점 |
+|---|---|---|---|
+| **A. 200 + `analysis_error` (권장)** | final 저장의 주 결과가 성공했음을 HTTP 200으로 표현하고 payload의 `analysis_job`/`analysis_error`로 분석 필요를 알린다. | final marker·최신 상태를 즉시 UI에 반영한다 · 일반 API client가 저장 성공을 오류로 오해하지 않는다 | accept의 502 partial 선례와 status가 다르다 |
+| B. 502 partial envelope | accept처럼 502로 응답하되 저장 결과와 분석 오류를 함께 싣는다. | 기존 partial status 관례와 표면적으로 맞춘다 | 프런트가 502에서도 payload를 읽어 final 상태를 반영하는 특수 처리가 필요하다 · HTTP만 보는 client는 저장 실패로 읽는다 |
+
+### Recommendation + reason
+
+**A를 권장한다.** final의 핵심 약속은 one-shot 원고 저장이고, D2=B도 분석 장애가 그 저장을
+되돌리지 않는다고 정했다. 따라서 HTTP 성공은 저장 사실을 나타내고 분석 결과는 명시적
+payload 상태로 분리하는 편이 이 endpoint의 사용자가 다음 행동(수동 분석)을 가장 정확히
+받는다. accept의 502는 그 endpoint가 원래 AI 채택 흐름이라는 별도 성격의 선례다.
 
 ## 확정 계약
 

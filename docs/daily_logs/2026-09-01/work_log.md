@@ -199,3 +199,41 @@
 - **B1~B9 폐쇄 후 재검증**(경계 행렬 14행 + repro S0~S13이 회귀 셀 뼈대). 다음 전수 기대값은
   B 폐쇄·셀 신설 후 다시 잰다. H2 오너 판정 선행 권장(502 채택 시 봉투·프런트 에러 경로 수정).
 
+## Session 5 — final-save 검증 보강
+
+### Goals
+
+- 독립 검증이 확인한 B1~B9와 H1·H6을 실제 실행 경로에서 닫고, H2의 HTTP 계약 충돌은
+  오너가 판단할 수 있는 결정 브리프로 정리한다.
+
+### Completed work
+
+- 커밋 `66ece84`에서 B1(dedupe `draft_finalize`)·B2(활성 project 확인 함수의 `None` 반환값
+  오용)·B4/B6(기존 router 조립 호환)·B5/H6(상태 바 pin·정의된 danger token·초기 장면의
+  `분석 미실행`)·B7(활동 라벨)·B8(payload 키)·B9(tier 행렬)를 보강했다.
+- H1도 runner 예외 뒤 저장소에서 job을 다시 읽도록 해, 응답의 `analysis_job.status`가
+  실제 실패 상태와 어긋나지 않게 했다.
+- B3 응답 선언은 처음 보강에서 save/final에 반대로 배선된 것을 focused wiring guard가
+  찾아냈다. final에만 billable 402/429를 선언하도록 바로잡고 OpenAPI/`schema.d.ts`를
+  재생성했다.
+- 확인: `DedupeMappingTest` + `BillableRouteWiringTest` **8 passed / 220 subtests**,
+  활동 라벨 **6 passed / 39 subtests**, `py_compile`, `git diff --check` 통과.
+
+### Issues found
+
+1. **H2는 여전히 오너 결정이 필요하다.** final marker/snapshot 저장은 성공하고 동기 분석만
+   실패할 때 현재 구현은 `200 + analysis_error`다. D2 설명의 accept 502 partial 선례와
+   문언 충돌하므로 상태코드를 정본으로 못 박아야 한다.
+2. 이 실행 환경은 약 30초 뒤 장기 pytest·Vitest/tsc 프로세스를 강제 종료해 전수 종료값을
+   이 세션에서 얻지 못했다. 종료된 process가 남지 않음을 확인했으며, 다음 재검증은 제한 없는
+   실행 환경에서 S0~S13과 관련 전체 suite로 마무리한다.
+
+### Decisions
+
+- 없음. H2를 D5로 분리해 [`final-save-analysis-decisions.md`](../../plans/final-save-analysis-decisions.md)에
+  A(200 + payload, 권고) / B(502 partial envelope) 선택지를 기록했다.
+
+### Next steps
+
+- 오너가 D5를 선택하면 API 응답 계약·프런트 처리·회귀 셀을 해당 정본으로 고정하고,
+  repro S0~S13 및 백엔드/프런트 관련 전수를 다시 측정해 불합격 판정을 갱신한다.
