@@ -576,6 +576,19 @@ class SceneNoteWriteApiTest(_NoteWriteBase):
         )
 
 
+class SceneNoteLiteralTest(unittest.TestCase):
+    def test_the_owner_approved_double_submit_window_is_five_seconds(self):
+        """SoT v1.8.13·오너 2026-08-31: 연타 창은 5초로 고정한다.
+
+        under-strict: 창 리터럴 드리프트가 이 셀을 문다.
+        over-strict: 정확히 창 경계의 재저장은 아래 셀이 다시 기록함을 잰다.
+        """
+
+        self.assertEqual(
+            SCENE_NOTE_DOUBLE_SUBMIT_WINDOW, timedelta(seconds=5)
+        )
+
+
 class SceneNoteWriteActivityTest(_NoteWriteBase):
     """`scene_note_saved` 가 남는 조건 (D4=A · 오너 2026-08-31 연타 억제)."""
 
@@ -589,7 +602,11 @@ class SceneNoteWriteActivityTest(_NoteWriteBase):
         self.assertEqual(rows[0].target_id, self.scene)
 
     def test_the_row_names_the_actor_not_the_owner_field(self):
-        """행위자는 세션 사용자다 — 소유자와 우연히 같아도 출처가 달라야 한다."""
+        """행위자는 세션 사용자다.
+
+        이 PUT 경로는 소유자만 쓸 수 있어 현재는 두 ID가 구조적으로 같다. 따라서
+        이 셀은 세션 사용자의 ID가 행에 든다는 현재 응답 사실만 잠근다.
+        """
 
         self._put("첫 메모")
 
@@ -744,6 +761,15 @@ class SceneNoteWriteAuthorizationTest(unittest.TestCase):
 
 class NotePreviewTest(unittest.TestCase):
     """미리보기 헬퍼의 경계 — 라우터를 거치지 않고 직접 잰다."""
+
+    def test_the_owner_approved_preview_limit_literal_is_200_characters(self):
+        """SoT v1.8.12·오너 2026-08-31: 미리보기 예산은 200자로 고정한다.
+
+        under-strict: 예산 리터럴 드리프트가 이 셀을 문다.
+        over-strict: 정확히 200자는 아래 경계 셀이 자르지 않음을 잰다.
+        """
+
+        self.assertEqual(SCENE_NOTE_PREVIEW_MAX_CHARS, 200)
 
     def test_a_short_body_is_returned_whole_without_an_ellipsis(self):
         preview, truncated = build_note_preview("짧은 메모", None)

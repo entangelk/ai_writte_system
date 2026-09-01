@@ -149,6 +149,15 @@ class SceneNoteStorageTest(unittest.TestCase):
 
 
 class SceneNoteBoundaryTest(unittest.TestCase):
+    def test_the_owner_approved_body_limit_literal_is_12000_characters(self):
+        """SoT v1.8.11·오너 2026-08-31: 12000은 동작 경계와 별도로 핀한다.
+
+        under-strict: 상한값 자체가 바뀌면 이 셀이 문다.
+        over-strict: 정확히 12000자는 아래 경계 셀이 계속 허용함을 잰다.
+        """
+
+        self.assertEqual(SCENE_NOTE_MAX_CHARS, 12000)
+
     def test_cross_project_draft_id_is_not_found_for_read_and_write(self):
         service, _repo = _service()
         _mine, _chapter, scene = _scene(service, project_name="Mine")

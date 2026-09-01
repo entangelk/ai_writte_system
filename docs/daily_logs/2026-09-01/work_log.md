@@ -60,3 +60,36 @@
 - **B1 폐쇄**: 핀 셀 1개(5초; 권고 — 12000·200 같은 형태 셋으로) + SoT v1.8.13 행 회귀
   문언 정정(H1) + H2 docstring 정정. 폐쇄 후 전수 기대값 2666 / 1 / 3089(collect 2667).
 - 폐쇄 뒤 **Slice 3(별도 메모 화면)** 착수.
+
+## Session 2 — Slice 2 검증 보강 폐쇄
+
+### Goals
+
+- 독립 검증의 차단 B1(연타 창 5초 리터럴 무핀)을 닫고, 동일 원인의 H3(본문 12000자·미리보기
+  200자 무핀) 및 H1·H2 문서 정합 지적을 함께 해소한다.
+
+### Completed work
+
+- 리터럴 핀 셀 3개를 추가했다. `tests/test_scene_notes.py`는
+  `SCENE_NOTE_MAX_CHARS == 12000`, `tests/test_scene_notes_api.py`는
+  `SCENE_NOTE_DOUBLE_SUBMIT_WINDOW == timedelta(seconds=5)`와
+  `SCENE_NOTE_PREVIEW_MAX_CHARS == 200`을 각각 직접 단정한다. 각 docstring은 SoT 버전·오너
+  확정일과 under/over 방향의 짝 가드를 명시한다. 동작 경계 셀은 그대로 남겨 값 고정과 행동
+  검증을 분리했다.
+- SoT v1.8.13 변경 이력의 사실 오기 `27→46`을 실측값 **`23→46(+23)`**으로 in-place 정정했다.
+  과거 커밋 메시지는 불변 기록이므로 수정하지 않았다.
+- 행위자 셀 docstring을 현재 소유자 전용 PUT 구조(소유자 ID와 세션 사용자 ID가 항상 같음)에
+  맞춰 좁혔다. 셀의 실제 단정은 유지했다.
+
+### Issues found
+
+- 없음. B1과 H1~H3은 이 세션의 회귀·문서 보강으로 폐쇄한다.
+
+### Decisions
+
+- 검증 권고대로 세 리터럴을 같은 형식으로 함께 핀했다. 모두 이미 Approved SoT에 명시된
+  오너 확정값이므로 새 제품 결정이나 SoT 버전 상승이 아니다.
+
+### Next steps
+
+- 집중 회귀와 문서 인덱스 가드를 실행해 리터럴 변이 재실패 및 기록 정합성을 확인한다.
