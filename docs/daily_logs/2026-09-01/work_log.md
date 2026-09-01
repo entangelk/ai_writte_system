@@ -153,3 +153,49 @@
 - final-save를 Slice 3 화면 작업과 묶어 구현한다. `finalized_snapshot_id` 저장 위치, final
   route·응답의 analysis 상태, 작업실 조회 payload와 회귀 행렬을 구현하고 SoT·OpenAPI·
   `schema.d.ts`·활동 분류표를 함께 갱신한다.
+
+## Session 4 — final-save D4=A 체크포인트 독립 검증
+
+### Goals
+
+- 오너 요청: "작업 AI가 작업한거 확인해서 검증하고 의심하고 또 의심해줄래" — D4=A 기준
+  구현 체크포인트(커밋 `832089b`·`0922a24`)의 독립 검증. 구현자 보고(컴파일·분류 가드 18/193·
+  tsc 확인 완료, final API 회귀 셀·문서 갱신 잔여)를 사실로 받지 않고 반증.
+
+### Completed work
+
+- 검증 기록: [`verifications/2026-09-01/final_save_analysis_checkpoint.md`](../../verifications/2026-09-01/final_save_analysis_checkpoint.md)
+  — 판정 **불합격**. 인덱스 등재 + 건수 4곳(최상위 README 2·docs/README·검증 인덱스) 265→266·
+  분포 불합격 3→4 갱신, 등재 뒤 `test_docs_indexes` 단독 13 passed / 276 subtests.
+- **경계 행렬**: 확정 계약(final-save-analysis-decisions.md) 문언에서 14행을 먼저 세웠다.
+- **프로브**(`verifications/2026-09-01/repro_final_save_flow.py`, 커밋): 인메모리 TestClient로
+  커밋 상태 그대로의 finalize 첫 요청이 **503**(dedupe 표 무매핑), 표를 런타임 주입하면 **500**
+  (`_require_active_project_and_draft` →None 반환값 오용)임을 관측 — 성공 경로 부재. B1·B2를
+  패치해 우회한 행렬은 13/14 준수(잔여 H1: runner 실패 시 응답 job 상태 낡음).
+- **작업자가 안 돌린 suite**: `test_quota_enforcement_api.py` 2 failed(B1·B3) · 프런트 vitest
+  3 failed(B5 — 상태 바 pin + 디자인 토큰 2, `| tail`이 exit code를 삼켜 green으로 오독되는
+  함정 포착) · 백엔드 전수 **11 failed / 2659 passed / 1 skipped / 3031 subtests**(39:26) —
+  11 failed 전부 이 슬라이스 유래로 귀속 완료(B1·B3·mypy(B2 증거)·B6 5셀·B7·B8·B9).
+- **변이 3종**(유료 행 제거 4failed·활동 행 제거 2failed·경로 리터럴 4failed+wiring) 전부
+  재실패·복원 확인. 주장 수치(18/193·tsc·schema.d.ts byte-identical)는 전부 재현 — 보고 자체는
+  정직했으나 커버리지가 실행 경로 전체를 비껴갔다.
+- HANDOFF ①-a를 검증 결과(차단 9건·재검증 조건)로 재작성.
+
+### Issues found
+
+1. **차단 9건(B1~B9, 상세는 검증 기록)** — 뿌리는 하나: 요청 1건·돌릴 수 있는 가드 suite를
+   실행하지 않은 채 "확인 완료"로 보고. 커밋 시점에 mypy 가드·dedupe 가드가 이미 red였다.
+2. **H2(오너 판단 필요)** — 분석 실패의 HTTP 얼굴: 구현은 200+`analysis_error`, D2=B 권고문은
+   accept의 502 partial 선례를 인용. 확정 계약 본문은 상태코드를 못 박지 않아 계약 내 긴장.
+3. **H6** — 프런트 상태 바 3항 연산에 idle 분기가 없어 저장 이력 없는 새 장면이 "분석 완료"로
+   오표시(구현 전 "미실행"). B5에서 깨진 pin 셀이 바로 이것을 지키던 셀.
+
+### Decisions
+
+- 없음(검증 세션 — 결함 폐쇄 방향과 H2 판정은 오너 결정 사항).
+
+### Next steps
+
+- **B1~B9 폐쇄 후 재검증**(경계 행렬 14행 + repro S0~S13이 회귀 셀 뼈대). 다음 전수 기대값은
+  B 폐쇄·셀 신설 후 다시 잰다. H2 오너 판정 선행 권장(502 채택 시 봉투·프런트 에러 경로 수정).
+
