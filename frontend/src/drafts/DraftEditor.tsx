@@ -598,7 +598,10 @@ export function DraftEditor() {
   async function reloadLatest() {
     if (projectId === undefined || draftId === undefined) return;
     try {
-      const { versions: nextVersions } = await listDraftVersions(projectId, draftId);
+      const [nextDraft, { versions: nextVersions }] = await Promise.all([
+        getDraft(projectId, draftId),
+        listDraftVersions(projectId, draftId),
+      ]);
       const latest = latestOf(nextVersions);
       const detail = latest === null
         ? null
@@ -610,6 +613,7 @@ export function DraftEditor() {
       setSelectedVersionId(detail?.draft_version.id ?? null);
       setSelectedContentHash(detail?.snapshot.content_hash ?? null);
       setVersionNumber(detail?.draft_version.version_number ?? null);
+      setDraft(nextDraft);
       setSourceNotice(null);
       setNotice(null);
       setError(null);
@@ -931,7 +935,10 @@ export function DraftEditor() {
                       latestSnapshotId={latestSnapshotId}
                       readOnly={readOnly}
                       dirty={dirty}
-                      onStatusChange={setAnalysisStatus}
+                      onStatusChange={(status) => {
+                        setAnalysisStatus(status);
+                        if (status === "complete") void reloadLatest();
+                      }}
                       onBeforeNavigateAway={allowNavigationAway}
                     />
                   </div>

@@ -101,6 +101,7 @@
   --focus-ring: var(--blue-600);
 
   /* 상태. 색만으로 상태를 말하지 않는다(WCAG 1.4.1) — 항상 문구가 함께 간다 */
+  --status-danger: var(--danger-600);
   --state-danger-surface: var(--danger-100);
   --state-danger-text: var(--danger-700);
   --state-warn-surface: var(--warn-100);
@@ -943,7 +944,7 @@ main {
 }
 
 .workspace-status .status-attention {
-  color: var(--danger-600);
+  color: var(--status-danger);
   font-weight: 700;
 }
 

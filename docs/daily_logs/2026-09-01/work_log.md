@@ -284,3 +284,32 @@
 - D5 결정 → HTTP 계약 고정·회귀 셀 작성(502 선언 정리 포함).
 - R1·R2 수정 + B4 셀 편입 후 3차 재검증(프로브 + 전수 기대치 재계산).
 - SoT v1.8.13·CHANGELOG 문서 정합성(구현자 잔여 목록)은 R1·R2와 함께 정리.
+
+## Session 7 — final-save 재검증 조건 보강
+
+### Goals
+
+- `final_save_hardening_recheck.md`의 조건 R1·R2·B4를 닫고, D5의 HTTP 얼굴은 오너가
+  선택할 때까지 구현 계약을 바꾸지 않는다.
+
+### Completed work
+
+- R1: primitive `--danger-600`을 화면에서 직접 쓰지 않고 `--status-danger` semantic token으로
+  라우팅했다. 상태 바의 주의 문구라는 화면 의미와 토큰 이름도 일치한다.
+- R2: 수동 분석이 `complete`가 되면 `reloadLatest`가 Draft 정본과 version을 같이 읽어
+  `analysis_snapshot_id`/`analysis_status`를 갱신한다. 따라서 최신 snapshot의 성공 분석은
+  상태 바에 `분석 완료`로 표시되고, 저장 이력이 없는 Scene의 `분석 미실행` 우선순위는 유지한다.
+- B4: S1~S13 41단정 실행 프로브를 `tests/test_final_save_analysis.py`의 pytest 셀로 편입했다.
+  under-strict(저장·marker·동기 분석·재시도 훼손)와 over-strict(final 뒤 일반 저장·수동 분석·
+  보관/없는 draft 경계)를 test docstring에 명시했다.
+- 확인: 새 pytest 셀 collect, Python compile, `git diff --check` 통과. 이 환경은 30초 상한으로
+  실행 중인 프로브/프런트 Vitest의 종료값은 3차 재검증 환경에서 다시 측정한다.
+
+### Decisions
+
+- 없음. D5=A/B는 HTTP 공개 계약이므로 오너 선택 전에는 502 선언을 제거하지 않는다.
+
+### Next steps
+
+- D5를 확정하고 OpenAPI·프런트 처리·pytest 단정을 그 선택으로 고정한다. 이후 S1~S13,
+  새 pytest 셀, 프런트 관련 suite와 전수를 재실행해 조건부 합격을 최종 갱신한다.
