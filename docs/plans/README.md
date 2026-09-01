@@ -181,7 +181,7 @@
 | [`chapter-scene-hierarchy-decisions.md`](chapter-scene-hierarchy-decisions.md) | 평면 ordered unit을 **장→장면 실제 계층**으로 전환(저장 모델·본문 소유·무손실 이관·정렬·Writing intent·삭제·export) | **Resolved(2026-08-28)** — D1~D6·D8=A, D7=B · 구현 진행 |
 | [`scene-note-decisions.md`](scene-note-decisions.md) | 장면 메모 기능(화면 위치·저장 단위·공개 범위·저장 경험) | **Resolved** — D1=C+A · D2~D4=A |
 | [`scene-note-implementation-phases.md`](scene-note-implementation-phases.md) | 장면 메모 구현 순서(Slice 0~4: 저장→읽기→쓰기→화면→드로어) | **Active** — Slice 0·1·2 완료, Slice 3부터 |
-| [`final-save-analysis-decisions.md`](final-save-analysis-decisions.md) | Scene 최종 저장 1회·분석 연동·후속 수정 상태 | **Proposed for owner approval** — D1~D3 권고 B |
+| [`final-save-analysis-decisions.md`](final-save-analysis-decisions.md) | Scene 최종 저장 1회·분석 연동·후속 수정 상태 | **Resolved(2026-09-01)** — D1~D3=B · 최신 snapshot 미분석은 작업실에서도 `분석 필요`로 표시 |
 
 ### 공개 API 계약
 

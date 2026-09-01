@@ -1,12 +1,12 @@
 # 최종 저장과 분석 연동 — 착수 결정 브리프
 
-상태: `Proposed for owner approval`
+상태: `Resolved` — 오너 결정 D1=B · D2=B · D3=B (2026-09-01)
 작성: 2026-09-01
 정본 연결: [`../system-contract-sot.md`](../system-contract-sot.md) v1.8.13, [`frontend-editor-save-decisions.md`](frontend-editor-save-decisions.md), [`05-writing-accept-decisions.md`](05-writing-accept-decisions.md), [`scene-note-implementation-phases.md`](scene-note-implementation-phases.md) Slice 3~4
 
-## Decision needed
+## 결정 완료
 
-직접 편집한 Scene을 한 번만 **최종 저장**해 저장과 분석을 함께 시작하고, 그 뒤의 일반 저장·수동 분석을 최종화 이력과 구별하는 상태 계약을 정해야 한다. 현재 일반 저장은 version만 만들고 분석은 별도 수동 동작이라, 도그푸드에서 분석 시점을 놓치기 쉽다. 이 계약은 `Draft` 수명·분석 job·다음 장면 문맥 표시에 걸리므로 기존 구현만으로 선택할 수 없다.
+직접 편집한 Scene을 한 번만 **최종 저장**해 저장과 분석을 함께 시작하고, 그 뒤의 일반 저장·수동 분석을 최종화 이력과 구별하는 상태 계약을 확정했다. 현재 일반 저장은 version만 만들고 분석은 별도 수동 동작이라, 도그푸드에서 분석 시점을 놓치기 쉽다. 이 계약은 `Draft` 수명·분석 job·다음 장면 문맥 표시에 걸리므로 기존 구현만으로 선택할 수 없었다.
 
 ## Current behavior and constraints
 
@@ -28,6 +28,10 @@
 
 **B를 권장한다.** 도그푸드에서 final 뒤에도 고치고 싶다는 요구를 수용하면서, “최종 저장은 다시 쓰지 않는다”를 불변 이력으로 남긴다. 현재 append-only version 모델과도 맞는다. UI는 최신 version을 보되 `최종 저장됨` 또는 `최종 저장 후 수정됨`을 명확히 보여 사용자가 수동 분석이 필요한 상태를 알 수 있다.
 
+### 오너 결정
+
+**D1=B.** 최초 final snapshot은 보존한다. 이후 일반 저장은 허용하되 final marker를 지우지 않고 `최종 저장 후 수정됨` 상태로 계산한다.
+
 ## D2 — 최종 저장의 분석 실패 의미
 
 | 선택지 | 설명 | 장점 | 단점 |
@@ -39,6 +43,10 @@
 ### Recommendation + reason
 
 **B를 권장한다.** final 저장은 정본 version의 사실이고 분석은 파생 작업이다. 저장 성공·분석 실패를 구분하는 현재 accept의 502 partial 선례를 그대로 사용하면, 실패가 사용자에게 숨지 않으면서 final snapshot도 보존된다.
+
+### 오너 결정
+
+**D2=B.** final marker와 본문 저장을 먼저 확정하고, 같은 snapshot의 분석 job을 후속으로 생성한다. 분석 장애는 final 저장을 되돌리지 않으며 `분석 필요`로 후속 조치한다.
 
 ## D3 — 화면 상태와 재실행 규칙
 
@@ -52,19 +60,25 @@
 
 **B를 권장한다.** finality·analysis·later edit는 서로 다른 사실이다. 색만으로 상태를 전달하지 않고 텍스트 배지와 상태 설명을 함께 두어야 한다. final 이후 본문을 수정하면 일반 `저장`은 계속 가능하고, 저장 직후 상태는 `최종 저장 후 수정됨 · 수동 분석 필요`가 된다.
 
-## Proposed contract if approved
+### 오너 결정
+
+**D3=B.** 작업실과 편집기 모두 상태 배지·비활성 final 버튼·수동 분석 안내를 보인다. 특히 최신 저장본이 분석되지 않았을 때는 작업실에서도 한 번 더 `분석 필요`를 상기시킨다.
+
+## 확정 계약
 
 - Scene별로 `finalized_snapshot_id`, `finalized_at`을 한 번만 기록한다. final marker를 덮거나 삭제하는 public 경로는 제공하지 않는다.
 - `POST /projects/{project_id}/drafts/{draft_id}/finalize`가 최신 본문을 새 version으로 저장하고 final marker 및 `analyze:{snapshot_id}` 분석 job을 만든다. 같은 final 요청의 재시도는 동일 결과로 수렴해야 한다.
 - 일반 저장은 marker가 없으면 `초안`, marker가 최신 snapshot과 같으면 `최종 저장됨`, marker보다 최신 version이 있으면 `최종 저장 후 수정됨`으로 상태를 계산한다.
 - final marker 뒤의 일반 저장은 허용하되 분석을 자동으로 만들지 않는다. 사용자는 기존 수동 분석으로 최신 snapshot을 분석한다.
+- 분석 최신성은 시간 비교가 아니라 **snapshot 동일성**으로 계산한다. 최신 snapshot에 `analyze:{snapshot_id}` job이 `succeeded`이면 `분석 완료`, `pending`/`running`이면 `분석 진행 중`, job이 없거나 `failed`이면 `분석 필요`다. 과거 성공 job의 snapshot이 최신 저장본과 다르면, 성공 기록이 있어도 최신 저장본은 `분석 필요`다.
 - final 저장 요청은 archive·소유권·본문 4000자 상한을 일반 저장과 같은 순서로 적용한다. 저장 성공 뒤에만 활동 행을 남긴다.
-- Scene 목록·편집기·향후 메모 화면은 상태를 보여 줄 수 있도록 final marker와 최신 version 관계를 읽는다. 색은 보조 수단이며 상태 텍스트가 정본이다.
+- Scene 목록·편집기·작업실 화면은 상태를 보여 줄 수 있도록 final marker·최신 version·최신 snapshot analysis job 관계를 읽는다. 색은 보조 수단이며 상태 텍스트가 정본이다.
 
 ## Follow-up considerations
 
-- 분석 job이 완료됐는지와 final marker는 별개다. 화면은 `분석 진행 중`·`분석 완료`·`분석 필요/실패`를 job 상태로 보여야 하며, final marker만으로 완료를 추정하면 안 된다.
+- 분석 job이 완료됐는지와 final marker는 별개다. 현재 `AnalysisJob`에는 완료 시각이 없고 비동기 재시도 순서도 있을 수 있으므로, “마지막 분석 시간”을 비교하지 않는다. 최신 snapshot과 job의 `snapshot_id` 관계가 정본이다.
 - final snapshot의 분석 후보는 현재와 같이 review를 거쳐 canonical memory가 된다. 다음 장면 생성이 이 후보를 자동으로 신뢰하지 않도록 한다.
+- 같은 snapshot의 분석 job은 기존 `(project_id, snapshot_id, analyze:{snapshot_id})` idempotency로 한 건에 수렴한다. 이 보장은 final 저장과 수동 분석이 공유한다.
 - 한 Scene final이 같은 Chapter 전체의 종료를 뜻하지는 않는다. 장 단위 compacting·다음 장면 전용 handoff summary는 별도 계약이 필요하다.
 - 퍼지 시 marker는 Draft의 자식 수명으로 함께 사라져야 한다. archive는 현재 원고 정책처럼 읽기 허용·쓰기 차단을 유지한다.
 - 새 mutating route면 OpenAPI·`schema.d.ts`·activity 분류표·tier 행렬·소유자/grant 경계를 함께 갱신한다.
@@ -76,3 +90,5 @@
 - final marker 해제·재최종화·여러 final milestone
 - 4000자 상한 변경(현재 상한은 이어쓰기 문맥 예산을 위한 별도 Approved 계약)
 - 공동 편집자의 final 권한·승인 흐름, export에 final 표시
+- 서로 다른 snapshot인데 본문과 분석기 버전이 같은 경우의 content-hash 분석 중복 억제
+- 분석기/프롬프트/스키마 버전별 재분석 정책과 분석 결과의 세대(generation) 표시

@@ -117,6 +117,10 @@
 - 오너의 방향을 브리프에 반영했다: final은 Scene당 한 번만 실행하고, 뒤의 편집은 일반 저장과
   수동 분석으로 처리한다. 추천은 final snapshot을 보존한 채 최신 version과 다르면
   `최종 저장 후 수정됨`으로 표시하는 B안이다.
+- 오너가 D1~D3 모두 B로 확정했다. 편집기뿐 아니라 작업실에서도 최신 저장본이 분석되지
+  않았음을 상기시킨다. 이 상태는 `마지막 분석 시간`이 아니라 최신 snapshot과 성공 analysis
+  job의 `snapshot_id`가 같은지로 계산한다. 현재 job에 시각 필드가 없고, snapshot 동일성이
+  비동기 재시도 순서에도 안전하기 때문이다.
 - 장/Scene compacting과 다음 장면 프롬프트 주입은 이번 slice에서 제외했다. 현재 생성 문맥은
   최신 Scene의 최근 문단과 승인된 canonical memory이며, 분석 후보의 자동 승격은 정본 정책을
   위반하므로 별도 결정을 필요로 한다.
@@ -130,10 +134,16 @@
 
 - **[사용자 방향, 2026-09-01]** Scene의 최종 저장은 한 번만 가능하게 하고, 그 뒤 수정은 일반
   저장과 수동 분석으로 처리한다. 화면은 final·분석·후속 수정 상태를 구별해 보여야 한다.
-- final 이후 수정 때 final 이력을 지울지 보존할지는 새 공개 상태 계약이라 브리프 D1의 오너
-  확정이 필요하다. 구현은 승인 뒤에만 시작한다.
+- **[사용자 확정, 2026-09-01]** D1=B(최초 final snapshot 보존·후속 수정됨), D2=B(저장/final
+  확정 뒤 분석 job·장애는 분석 필요), D3=B(텍스트 상태 배지·비활성 final·수동 분석 안내)로
+  확정했다. latest snapshot이 `succeeded` job과 다르면 작업실도 `분석 필요`를 표시한다.
+- 분석 결과는 새 결과가 기존 canonical memory나 사용자의 편집을 자동으로 덮지 않는다. 현재
+  candidate edit은 append-only successor를 만들어 원본을 `superseded`로 보존하고 canonical로
+  승격하며, conflict는 review queue에서 검토한다. 서로 다른 snapshot의 동일 본문을
+  content-hash로 생략할지는 분석기 버전 정책과 함께 별도 결정한다.
 
 ### Next steps
 
-- 오너가 D1~D3(각 권고 B)을 승인하거나 수정하면 SoT·세부 구현 계획에 반영한 뒤 Slice 3과
-  분리된 final-save slice로 구현한다.
+- final-save를 Slice 3 화면 작업과 묶어 구현한다. 구현 전 `finalized_snapshot_id` 저장 위치,
+  final route·응답의 analysis 상태, 작업실 조회 payload와 회귀 행렬을 세부 구현 계획으로
+  내리고, 구현 시 SoT·OpenAPI·`schema.d.ts`·활동 분류표를 함께 갱신한다.
