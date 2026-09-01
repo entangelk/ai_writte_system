@@ -7859,16 +7859,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
-            /** @description Bad Gateway */
-            502: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorDetailResponse"];
-                };
-            };
-            /** @description A collaborator this endpoint requires is not configured in this deployment. Configure it in the deployment environment; retrying the request alone cannot succeed. The canonical store may also be unreachable or failing; in that case recover it and retry the same request unchanged. */
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
             503: {
                 headers: {
                     [name: string]: unknown;

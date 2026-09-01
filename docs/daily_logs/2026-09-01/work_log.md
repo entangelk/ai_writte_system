@@ -361,3 +361,27 @@
 - 폐쇄 슬라이스: R3(채택 3셀 목 갱신 또는 draft 재조회 국한)·R4(브리프 semantic 표에
   `--status-danger` 행 추가)·502 선언 제거·D5=A 회귀 셀 문구 고정 → 4차 재검증으로 조건부
   승격 마무리. SoT v1.8.13·CHANGELOG 문서 정합성 동반.
+
+## Session 9 — final-save D5=A 폐쇄 보강
+
+### Goals
+
+- 오너가 확정한 D5=A를 공개 API·회귀·정본 문서에 고정하고, 3차 재검증의 R3·R4를 닫는다.
+
+### Completed work
+
+- R3: `reloadLatest`를 원래 version/history 재조회로 복원하고, 수동 분석 `complete`에서만
+  `refreshAnalysisStatus`가 Draft를 읽도록 분리했다. 채택 흐름의 기존 fetch 순서를 바꾸지
+  않으면서 수동 분석 성공은 최신 `analysis_snapshot_id`/`analysis_status`를 상태 바에 반영한다.
+- R4: `--status-danger` → `danger-600`을 디자인 브리프의 semantic 표에 등재했다.
+- D5=A: final route는 402·429를 포함한 billable 선언은 유지하고 502를 제외한 새 선언을 쓴다.
+  schema.d.ts를 재생성했고 S6·S7 프로브 단정을 `200 + analysis_error` 문언으로 고정했다.
+  새 pytest 셀은 502 부활(under-strict)과 quota face 제거(over-strict)를 모두 막는다.
+- SoT v1.8.14·README·CHANGELOG에 final marker·동기 분석·D5=A 공개 계약을 반영했다.
+- 확인: D5 OpenAPI 셀 + Palette provenance + quota wiring **11 passed / 311 subtests**,
+  Python compile, `git diff --check` 통과.
+
+### Next steps
+
+- 제한 없는 환경에서 4차 재검증(S1~S13·final pytest·프런트 관련 suite·전수)을 실행해
+  조건부 합격을 최종 판정으로 갱신한다.

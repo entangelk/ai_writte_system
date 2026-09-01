@@ -51,7 +51,7 @@ from ..api.models import (
     ScenePayload,
 )
 from ..api.errors import (
-    _BILLABLE_400_404_409_502_CONFIG,
+    _BILLABLE_400_404_409,
     _ERRORS_400_404,
     _ERRORS_400_404_409,
     _ERRORS_404,
@@ -665,7 +665,7 @@ def register_drafts(
     @app.post(
         "/projects/{project_id}/drafts/{draft_id}/finalize",
         response_model=FinalizeDraftResponse,
-        responses=_owned(_BILLABLE_400_404_409_502_CONFIG),
+        responses=_owned(_BILLABLE_400_404_409),
         dependencies=_REQUIRE_PROJECT_OWNER_BILLABLE,
     )
     async def finalize_draft(

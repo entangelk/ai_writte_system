@@ -598,10 +598,7 @@ export function DraftEditor() {
   async function reloadLatest() {
     if (projectId === undefined || draftId === undefined) return;
     try {
-      const [nextDraft, { versions: nextVersions }] = await Promise.all([
-        getDraft(projectId, draftId),
-        listDraftVersions(projectId, draftId),
-      ]);
+      const { versions: nextVersions } = await listDraftVersions(projectId, draftId);
       const latest = latestOf(nextVersions);
       const detail = latest === null
         ? null
@@ -613,10 +610,22 @@ export function DraftEditor() {
       setSelectedVersionId(detail?.draft_version.id ?? null);
       setSelectedContentHash(detail?.snapshot.content_hash ?? null);
       setVersionNumber(detail?.draft_version.version_number ?? null);
-      setDraft(nextDraft);
       setSourceNotice(null);
       setNotice(null);
       setError(null);
+    } catch (err) {
+      setError(describeApiError(err));
+    }
+  }
+
+  // Manual analysis changes the Draft read-model fields but creates no version.
+  // Keep this refresh separate from reloadLatest: writing acceptors only need the
+  // version/history refresh above, while a global Draft fetch would add an
+  // unrelated request to their established completion path.
+  async function refreshAnalysisStatus() {
+    if (projectId === undefined || draftId === undefined) return;
+    try {
+      setDraft(await getDraft(projectId, draftId));
     } catch (err) {
       setError(describeApiError(err));
     }
@@ -937,7 +946,7 @@ export function DraftEditor() {
                       dirty={dirty}
                       onStatusChange={(status) => {
                         setAnalysisStatus(status);
-                        if (status === "complete") void reloadLatest();
+                        if (status === "complete") void refreshAnalysisStatus();
                       }}
                       onBeforeNavigateAway={allowNavigationAway}
                     />

@@ -338,6 +338,10 @@ _BILLABLE_404_502_CONFIG: dict[int | str, dict] = _billable(
     _ERRORS_404_502_CONFIG)
 
 
+_BILLABLE_400_404_409: dict[int | str, dict] = _billable(
+    _ERRORS_400_404_409)
+
+
 _BILLABLE_400_404_409_502_CONFIG: dict[int | str, dict] = _billable(
     _ERRORS_400_404_409_502_CONFIG)
 

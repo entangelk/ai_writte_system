@@ -42,7 +42,7 @@
 
 ### Recommendation + reason
 
-**B를 권장한다.** final 저장은 정본 version의 사실이고 분석은 파생 작업이다. 저장 성공·분석 실패를 구분하는 현재 accept의 502 partial 선례를 그대로 사용하면, 실패가 사용자에게 숨지 않으면서 final snapshot도 보존된다.
+**B를 권장한다.** final 저장은 정본 version의 사실이고 분석은 파생 작업이다. 저장 성공·분석 실패는 `analysis_error`와 분석 상태로 분리해 사용자에게 숨기지 않으면서 final snapshot을 보존한다. HTTP 상태는 D5=A에서 200으로 확정한다.
 
 ### 오너 결정
 
@@ -74,7 +74,7 @@
 
 | 선택지 | 설명 | 장점 | 단점 |
 |---|---|---|---|
-| **A. final API가 저장 뒤 동기로 분석 실행 (권장)** | final marker·snapshot을 먼저 확정한 뒤 서버가 기존 분석 runner를 호출한다. 분석 실패는 저장을 유지한 partial 응답과 `분석 필요` 상태로 끝난다. | 별도 worker·브라우저 후속 요청 없이 약속을 지킨다 · 현재 수동 분석 runner를 재사용한다 · 1인 로컬 단계의 가장 작은 구현이다 | final 클릭 응답이 분석 시간만큼 길어진다 · 이 endpoint도 분석 1회 사용량을 정산해야 한다 |
+| **A. final API가 저장 뒤 동기로 분석 실행 (권장)** | final marker·snapshot을 먼저 확정한 뒤 서버가 기존 분석 runner를 호출한다. 분석 실패는 저장을 유지한 `analysis_error`와 `분석 필요` 상태로 끝난다. | 별도 worker·브라우저 후속 요청 없이 약속을 지킨다 · 현재 수동 분석 runner를 재사용한다 · 1인 로컬 단계의 가장 작은 구현이다 | final 클릭 응답이 분석 시간만큼 길어진다 · 이 endpoint도 분석 1회 사용량을 정산해야 한다 |
 | B. durable analysis worker를 새로 둔다 | final은 pending job만 만들고 worker가 claim·실행한다. 화면은 polling으로 완료/실패를 받는다. | 응답이 빠르고 재시도·장애 복구가 견고하다 | analysis job lease·worker·배포 command·사용량 선차감/실행 차감 정책이 모두 새로 필요하다 |
 | C. 브라우저가 저장 성공 뒤 기존 분석 버튼 흐름을 자동 호출 | final 응답 뒤 client가 source-ref 준비와 `/run`을 호출한다. | 서버 변경이 가장 작아 보인다 | 브라우저 이탈·네트워크 단절 때 분석이 누락된다. D2=C를 기각한 이유를 되살린다 |
 | D. job만 만들고 수동 분석을 기다린다 | final은 pending analysis job만 기록한다. | 구현은 작다 | 자동 분석이 실행되지 않아 요구를 충족하지 못한다 |

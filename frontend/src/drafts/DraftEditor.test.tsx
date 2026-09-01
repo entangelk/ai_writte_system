@@ -1431,8 +1431,6 @@ describe("DraftEditor", () => {
       { body: { job: { id: "j1", status: "pending" }, idempotent_replay: false } },
       { body: { job: { id: "j1", status: "succeeded" }, candidates: [] } },
       { body: { ...draft, analysis_snapshot_id: "s1", analysis_status: "succeeded" } },
-      { body: { versions: [version1] } },
-      { body: detail(version1, "본문") },
       {
         body: {
           project_id: "p1",

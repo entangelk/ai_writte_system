@@ -228,6 +228,7 @@ OKLCH→sRGB 변환과 WCAG 대비를 계산한다. **숫자를 손으로 적지
 | `--border-control` | `slate-400` | **기능** 테두리(입력·선택) — 3:1 |
 | `--border-danger` | `danger-600` | 파괴 영역 테두리 |
 | `--focus-ring` | `blue-600` | 포커스 |
+| `--status-danger` | `danger-600` | 주의가 필요한 작업 상태 문구 |
 | `--state-danger-surface` | `danger-100` | 오류 배너 면 |
 | `--state-danger-text` | `danger-700` | 오류 문구 |
 | `--state-warn-surface` | `warn-100` | 경고 배너 면 |

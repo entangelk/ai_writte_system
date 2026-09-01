@@ -14,8 +14,8 @@ Run:  python3 docs/verifications/2026-09-01/repro_final_save_flow.py
   S3  다른 키 재최종화: 409 AlreadyFinalized
   S4  final 뒤 일반 저장: 허용, 새 snapshot 에 분석 job 없음(analysis_status null)
   S5  S4 새 snapshot 수동 분석: 상태 succeeded 로 전환
-  S6  runner 예외: 저장·marker 보존, job failed, analysis_error 통지(200)
-  S7  runner 미구성(0922a24): 저장·marker 보존, job pending, analysis_error 통지
+  S6  runner 예외: 저장·marker 보존, **200 + analysis_error**, job failed
+  S7  runner 미구성(0922a24): 저장·marker 보존, **200 + analysis_error**, job pending
   S8  source-ref 서버 준비: final snapshot 의 모든 block span 이 커버되는가
   S9  4001자: 일반 저장과 같은 거부(422)
   S10 보관 프로젝트: 409
@@ -211,14 +211,14 @@ def main():
     check("S5 analysis_snapshot_id is newest",
           new_snapshot, draft["analysis_snapshot_id"])
 
-    # --- S6 runner raises: save/marker preserved, job failed, 200 partial.
+    # --- S6 D5=A: runner failure is analysis state, never a 502 save failure.
     runner6 = ExplodingRunner()
     client6, pid6, did6 = make_client(runner6)
     response = client6.post(
         f"/projects/{pid6}/drafts/{did6}/finalize",
         json={"raw_text": "결말 장면.", "idempotency_key": "final-key-6"})
     body6 = response.json()
-    check("S6 status", 200, response.status_code)
+    check("S6 D5=A status (200 + analysis_error)", 200, response.status_code)
     check("S6 analysis_job failed", "failed", body6["analysis_job"]["status"])
     check("S6 analysis_error set",
           True, isinstance(body6["analysis_error"], str)
@@ -247,7 +247,7 @@ def main():
         f"/projects/{pid7}/drafts/{did7}/finalize",
         json={"raw_text": "또 다른 결말.", "idempotency_key": "final-key-7"})
     body7 = response.json()
-    check("S7 status", 200, response.status_code)
+    check("S7 D5=A status (200 + analysis_error)", 200, response.status_code)
     check("S7 analysis_job pending", "pending", body7["analysis_job"]["status"])
     check("S7 analysis_error names runner",
           True, "runner" in (body7["analysis_error"] or ""))
