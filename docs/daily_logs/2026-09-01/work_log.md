@@ -80,6 +80,13 @@
   과거 커밋 메시지는 불변 기록이므로 수정하지 않았다.
 - 행위자 셀 docstring을 현재 소유자 전용 PUT 구조(소유자 ID와 세션 사용자 ID가 항상 같음)에
   맞춰 좁혔다. 셀의 실제 단정은 유지했다.
+- mutation verification(체크포인트 `836e6cf` 뒤, 각 변이 뒤 `git restore`·clean 확인):
+
+  | 변이 | 파일:줄 | 재실패 셀 |
+  |---|---|---|
+  | `12000 → 12001` | `core_sot/service.py:102` | `SceneNoteBoundaryTest.test_the_owner_approved_body_limit_literal_is_12000_characters` |
+  | `5초 → 6초` | `routers/notes.py:64` | `SceneNoteLiteralTest.test_the_owner_approved_double_submit_window_is_five_seconds` |
+  | `200 → 201` | `routers/notes.py:47` | `NotePreviewTest.test_the_owner_approved_preview_limit_literal_is_200_characters` |
 
 ### Issues found
 
@@ -92,4 +99,5 @@
 
 ### Next steps
 
-- 집중 회귀와 문서 인덱스 가드를 실행해 리터럴 변이 재실패 및 기록 정합성을 확인한다.
+- 검증 완료: 새 핀 3개 + `test_docs_indexes.py` = **16 passed / 275 subtests**. Slice 3 화면
+  작업에서 frontend 전수를 함께 측정한다.
