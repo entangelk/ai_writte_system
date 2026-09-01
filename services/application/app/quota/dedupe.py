@@ -59,6 +59,7 @@ DEDUPE_SOURCES: dict[str, tuple[DedupeSource, str | None]] = {
     "writing_report": (DedupeSource.BODY, "request_id"),
     "writing_accept": (DedupeSource.BODY, "idempotency_key"),
     "analysis_extract": (DedupeSource.PATH, "job_id"),
+    "draft_finalize": (DedupeSource.BODY, "idempotency_key"),
     "analysis_compare": (DedupeSource.SERVER, None),
     "context_search": (DedupeSource.BODY, "idempotency_key"),
 }

@@ -943,7 +943,7 @@ main {
 }
 
 .workspace-status .status-attention {
-  color: var(--status-danger, #a43b2c);
+  color: var(--danger-600);
   font-weight: 700;
 }
 

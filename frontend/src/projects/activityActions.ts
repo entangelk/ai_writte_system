@@ -13,10 +13,10 @@
  *   21번째 action 을 더하면 그 셀이 실패한다. `schema.d.ts` 는 `action` 을 `string` 으로만
  *   주므로 **타입으로는 못 잡는다 — 그 가드가 유일한 연결선이다.**
  *
- * 그래서 이 표는 **26행 전수**여야 하고, 임의로 줄이거나 늘리면 가드가 양방향으로 문다.
+ * 그래서 이 표는 **27행 전수**여야 하고, 임의로 줄이거나 늘리면 가드가 양방향으로 문다.
  */
 
-/** `action` 리터럴 → 타임라인 한 줄에 쓰는 문구. 백엔드 분류표의 logged 26 과 1:1 이다. */
+/** `action` 리터럴 → 타임라인 한 줄에 쓰는 문구. 백엔드 분류표의 logged 27 과 1:1 이다. */
 export const ACTIVITY_ACTION_LABELS: Record<string, string> = {
   // 정본 변경 (+ 원고 하드 삭제·장/장면 계층 2026-08-28 · 장면 메모 2026-08-31)
   project_created: "프로젝트 생성",
@@ -33,6 +33,7 @@ export const ACTIVITY_ACTION_LABELS: Record<string, string> = {
   draft_archived: "원고 보관",
   draft_purged: "원고 삭제",
   draft_version_saved: "원고 저장",
+  draft_finalized: "원고 최종 저장",
   source_ref_created: "출처 연결",
   draft_version_accepted: "생성 결과 반영",
   scene_note_saved: "장면 메모 저장",

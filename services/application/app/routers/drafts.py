@@ -51,6 +51,7 @@ from ..api.models import (
     ScenePayload,
 )
 from ..api.errors import (
+    _BILLABLE_400_404_409_502_CONFIG,
     _ERRORS_400_404,
     _ERRORS_400_404_409,
     _ERRORS_404,
@@ -68,7 +69,7 @@ from ..api.dependencies import (
 
 def register_drafts(
     app, *, core_sot, sync_outbox, activity, writing_generation_jobs, writing_scratch,
-    analysis, runner, llm_call_audit,
+    analysis=None, runner=None, llm_call_audit=None,
 ) -> None:
     def _require_migrated_scene(draft) -> None:
         try:
@@ -95,7 +96,7 @@ def register_drafts(
             project_id=draft.project_id, draft_id=draft.id
         )
         latest = max(versions, key=lambda value: value.version_number, default=None)
-        job = None if latest is None else analysis.get_job_request(
+        job = None if latest is None or analysis is None else analysis.get_job_request(
             project_id=draft.project_id, snapshot_id=latest.snapshot_id,
             idempotency_key=f"analyze:{latest.snapshot_id}",
         )
@@ -611,7 +612,7 @@ def register_drafts(
     @app.post(
         "/projects/{project_id}/drafts/{draft_id}/versions",
         response_model=SaveDraftResponse,
-        responses=_owned(_ERRORS_400_404_409),
+        responses=_owned(_BILLABLE_400_404_409_502_CONFIG),
         dependencies=_REQUIRE_PROJECT_OWNER,
     )
     async def save_draft(
@@ -726,6 +727,8 @@ def register_drafts(
                     job = (await runner.run_job(project_id=project_id, job_id=job.id)).job
         except Exception as exc:
             analysis_error = str(exc)
+            if job is not None:
+                job = analysis.get_job(project_id=project_id, job_id=job.id)
         return {
             "draft_version": {"id": saved.draft_version.id,
                               "version_number": saved.draft_version.version_number,

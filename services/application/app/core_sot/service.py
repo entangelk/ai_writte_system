@@ -1172,7 +1172,8 @@ class CoreSotService:
         idempotency_key: str,
     ) -> FinalizeDraftResult:
         """Save one immutable final snapshot; later edits stay ordinary saves."""
-        draft = self._require_active_project_and_draft(project_id, draft_id)
+        self._require_active_project_and_draft(project_id, draft_id)
+        draft = self._require_draft(project_id, draft_id)
         if draft.finalized_snapshot_id is not None:
             if draft.finalized_idempotency_key != idempotency_key:
                 raise AlreadyFinalized("draft has already been finalized")

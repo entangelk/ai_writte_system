@@ -1450,7 +1450,7 @@ describe("DraftEditor", () => {
 
     const status = await screen.findByLabelText("작업 상태");
     expect(within(status).getByText("저장됨")).toBeInTheDocument();
-    expect(within(status).getByText("분석 미실행")).toBeInTheDocument();
+    expect(within(status).getByText("분석 필요")).toBeInTheDocument();
     expect(within(status).getByText("검토 대기 —")).toBeInTheDocument();
 
     await userEvent.type(screen.getByLabelText("원고 본문"), "!");

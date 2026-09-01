@@ -1544,6 +1544,10 @@ class SpineEnvelopeKeyTest(unittest.TestCase):
             "title",
             "archived",
             "position",
+            "finalized_snapshot_id",
+            "finalized_at",
+            "analysis_status",
+            "analysis_snapshot_id",
         }
 
         self.assertEqual(set(self.draft), expected)

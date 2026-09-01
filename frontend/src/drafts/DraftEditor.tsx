@@ -212,6 +212,13 @@ export function DraftEditor() {
     draft?.analysis_status === null ||
     draft?.analysis_status === "failed"
   );
+  const analysisLabel = latestSnapshotId === null
+    ? "미실행"
+    : analysisNeedsAttention
+      ? "필요"
+      : analysisStatus === "running" || draft?.analysis_status === "pending" || draft?.analysis_status === "running"
+        ? "진행 중"
+        : "완료";
   const onLatest = selectedVersionId !== null && selectedVersionId === latestVersionId;
   const allowNavigationAway = useCallback(
     () => !dirty || window.confirm("저장하지 않은 변경 사항을 버리고 페이지를 이동하시겠습니까?"),
@@ -640,7 +647,7 @@ export function DraftEditor() {
           <div className="workspace-status" aria-label="작업 상태">
             <span>{dirty ? "저장 안 됨" : "저장됨"}</span>
             <span className={analysisNeedsAttention ? "status-attention" : undefined}>
-              분석 {analysisNeedsAttention ? "필요" : analysisStatus === "running" || draft.analysis_status === "pending" || draft.analysis_status === "running" ? "진행 중" : "완료"}
+              분석 {analysisLabel}
             </span>
             <span>{isFinalized ? latestSnapshotId === draft.finalized_snapshot_id ? "최종 저장됨" : "최종 저장 후 수정됨" : "초안"}</span>
             <span>검토 대기 {pendingReviewCount === null ? "—" : `${pendingReviewCount}건`}</span>
