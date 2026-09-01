@@ -237,3 +237,50 @@
 
 - 오너가 D5를 선택하면 API 응답 계약·프런트 처리·회귀 셀을 해당 정본으로 고정하고,
   repro S0~S13 및 백엔드/프런트 관련 전수를 다시 측정해 불합격 판정을 갱신한다.
+
+## Session 6 — final-save 보강 재검증
+
+### Goals
+
+- 오너 요청: "보강한거 재검증해줘" — 불합격 판정 뒤 보강된 커밋 `66ece84`·`30a9194`의
+  폐쇄 주장(B1~B9·H1·H6, 역배선 발견·수정)을 독립 재검증.
+
+### Completed work
+
+- 검증 기록: [`verifications/2026-09-01/final_save_hardening_recheck.md`](../../verifications/2026-09-01/final_save_hardening_recheck.md)
+  — 판정 **조건부 합격**(조건: R1·R2 프런트 red 2셀 + B4 suite 편입 + D5 확정). 인덱스 등재·
+  건수 4곳 266→267·분포 조건부 77→78, 등재 뒤 `test_docs_indexes` 단독 13/277 green.
+- **백엔드 폐쇄 실측**: B1(dedupe 행)·B2(문장형+`_require_draft`)·B3(유료 402/429·무료 복원,
+  생성 스펙 직독)·B6(기본인자)·B7(라벨 27)·B8(키 핀 4)·B9(tier 74/100)·H1(재조회) 전부 확인.
+  변이 M-A(dedupe 행) 1fail·M-B(B2 되돌림) 프로브 rc=1·M-C(H1 제거) S6 기명 1fail·
+  M-D(CSS 되돌림) 토큰 2셀 — 신규 잠금 전부 물림. 구현자 주장 수치(8/220 등)도 정확히 재현.
+- **프로브 전환본**: 패치 없이 현재 코드로 S1~S13 **41단정 전부 통과** — D4=A 실행 경로가
+  끝까지 돈다.
+- **전수(백그라운드, 제한 없는 실행)**: 백엔드 **7 failed / 2667 passed / 3107 subtests** —
+  7 failed 전부 `test_docs_indexes`가 이 기록 미등재를 잡은 것, **제품 셀 0**(선행 11 failed
+  소멸). 프런트 **3 failed / 382 passed** — 슬라이스 귀속 2셀(R1·R2) + App 관리자 라우팅 1건은
+  단독 28/28 green인 부하 플레이크(비귀속).
+
+### Issues found
+
+1. **R1(조건)** — `--danger-600` 프리미티브 직접 사용으로 designTokens semantic 라우팅 셀 red.
+   선행 검증 하드닝 권고가 이 방향을 제시했던 점을 정정 — 폐쇄는 semantic 토큰 정의(예:
+   `:root`에 `--status-danger: var(--danger-600)`)로.
+2. **R2(조건, 실앱 회귀)** — H6 수정이 라벨 우선순위를 `draft.analysis_*`로 옮겼는데 수동 분석
+   경로는 그 필드를 갱신하지 않는다(`AnalysisTrigger`는 `onStatusChange`만). 수동 분석 성공 후에도
+   상태 바가 "분석 필요" 고정 — 확정 계약 "최신 snapshot succeeded = 분석 완료" 위반 표시.
+   pin 셀이 이 회귀를 잡은 채 red.
+3. **B4 잔여(조건)** — finalize 분기의 pytest 셀 부재. 잠금은 커밋된 프로브가 홀로 담당(M-B는
+   크래시 잠금이라 기명 단정화 권고).
+4. **D5 미확정** — A(200, 권장)/B(502 partial) 오너 결정 대기. 결정 전 HTTP 계약·셀·502 선언
+   정리 불가.
+
+### Decisions
+
+- 없음(검증 세션 — D5는 오너 결정 대기).
+
+### Next steps
+
+- D5 결정 → HTTP 계약 고정·회귀 셀 작성(502 선언 정리 포함).
+- R1·R2 수정 + B4 셀 편입 후 3차 재검증(프로브 + 전수 기대치 재계산).
+- SoT v1.8.13·CHANGELOG 문서 정합성(구현자 잔여 목록)은 R1·R2와 함께 정리.

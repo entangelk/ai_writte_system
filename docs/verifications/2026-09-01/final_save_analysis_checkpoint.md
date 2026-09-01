@@ -155,6 +155,11 @@ B1·B2는 이 슬라이스의 결함이지만, 그 아래 계약 이행이 맞�
 
 ## Reproduction
 
+> **고지(2026-09-01 재검증)**: 아래 2) 프로브는 보강 커밋(`66ece84`·`30a9194`)에서
+> 런타임 패치 절차(S0·S0b·S0c)가 제거되고 현재 코드를 직접 검증하는 회귀 프로브로
+> 전환됐다 — S0~S0c 관측은 이 기록 시점(HEAD `0922a24`)의 재현이며, 현재는
+> S1~S13 전부 기대 통과다. 폐쇄 실측은 [`final_save_hardening_recheck.md`](final_save_hardening_recheck.md).
+
 ```bash
 # test-mongo 기동 확인
 docker compose -f docker-compose.test.yml up -d
