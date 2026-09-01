@@ -313,3 +313,44 @@
 
 - D5를 확정하고 OpenAPI·프런트 처리·pytest 단정을 그 선택으로 고정한다. 이후 S1~S13,
   새 pytest 셀, 프런트 관련 suite와 전수를 재실행해 조건부 합격을 최종 갱신한다.
+
+## Session 8 — final-save 조건 폐쇄 3차 재검증
+
+### Goals
+
+- 오너 요청: "다시 한번 검증해줘" — 재검증 조건 R1·R2·B4 보강 커밋 `67e8609`의 폐쇄 확인.
+  D5(A/B)는 오너 결정 대기로 구현을 바꾸지 않았다는 구현자 방침 확인 포함.
+
+### Completed work
+
+- 검증 기록: [`verifications/2026-09-01/final_save_conditions_closure.md`](../../verifications/2026-09-01/final_save_conditions_closure.md)
+  — 판정 **조건부 합격 유지**(조건: R3·R4·D5). 인덱스 등재·건수 4곳 267→268·분포 조건부
+  78→79, 등재 뒤 `test_docs_indexes` 단독 13/278 green.
+- **R1·B4 폐쇄 실측**: semantic 토큰 정의+사용(designTokens 5/5, 변이 재실패) ·
+  `tests/test_final_save_analysis.py` 1 passed(H1 변이 → 셀 FAILED 재실패 — 수집 배선 실증).
+- **R2 계약 시나리오 폐쇄 + 구조 안전 확인**: 수동 분석 complete → `reloadLatest`가 draft까지
+  재조회(변이 잠금). 실패 경로 reload 없음("필요" 유지), 저장 후에는 latestSnapshotId 로컬
+  비교만으로 "필요" 전환 — stale 필드에 구조적으로 안전.
+- **전수(백그라운드)**: 프런트 3 failed / 382 passed(전부 R3 채택 흐름 3셀, 파일 1개).
+  백엔드 9 failed / 2666 passed / 3083 subtests — docs 가드 7(이 기록 미등재) + **R4 1** +
+  live-mongo 부하 플레이크 1(단독 3 passed, 비귀속).
+
+### Issues found
+
+1. **R3(조건)** — `reloadLatest`가 모든 reload에서 `getDraft`를 추가로 불러 채택(Writing·PAD·
+   discard-proceed) 3셀의 fetch 목이 어긋나 red. 폐쇄: 3셀 목 갱신 또는 draft 재조회를 수동
+   분석 완료 경로에 국한.
+2. **R4(조건)** — R1의 `--status-danger`가 디자인 브리프 semantic 표에 미등재(브리프↔:root 1:1
+   가드 `PaletteProvenanceTest` red, 단독 재현). 브리프 표에 행 1개 추가로 폐쇄. 위성 표 누락
+   계열이 30초 상한 환경에서 또 놓친 것 — 백엔드 전수가 잡음.
+3. **D5 미확정** — 502 선언 유지는 구현자의 의도적 보류(기록과 일치). A 확정 시 502 제거·HTTP
+   계약·셀 문구 고정이 D5 폐쇄 슬라이스에 포함되어야 한다.
+
+### Decisions
+
+- 없음(검증 세션 — D5는 오너 결정 대기. 구현자 권고 A + 검증자 독립 판독도 A 동의).
+
+### Next steps
+
+- D5 오너 확정 → R3·R4와 한 슬라이스로 묶어 폐쇄(502 선언 정리 포함) → 4차 재검증으로
+  조건부 승격 마무리. SoT v1.8.13·CHANGELOG 문서 정합성 동반.
