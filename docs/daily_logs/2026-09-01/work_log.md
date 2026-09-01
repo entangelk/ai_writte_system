@@ -452,3 +452,71 @@
   성공 안내)·`미실행`·`진행 중` 기명 셀(under/over-strict 짝). 폐쇄 후 5차 재검증은 집중
   셀+변이로 승격 판정.
 - N2·N3 오너 결정 대기(결정 즉시 셀 1~2줄로 봉인 가능).
+
+## Session 11 — N1 폐쇄(프런트 finality 표시 축 기명 셀)
+
+### Goals
+
+- 4차 재검증([`final_save_d5_closure.md`](../../verifications/2026-09-01/final_save_d5_closure.md))의
+  유일한 조건 N1을 닫는다: 확정 계약 제3조·D3=B가 요구하는 프런트 표시 분기 —
+  배지 3상태·final 버튼(활성/비활성+사유)·finalize 성공/부분 성공 안내·`미실행`/`진행 중`
+  라벨 — 에 기명 셀을 붙이고 양방향 변이로 잠금을 실측한다.
+- 범위 밖: N2·N3은 오너 판정 대기이므로 **손대지 않는다**(4차 재검증 지시와 동일).
+
+### Completed work
+
+- `frontend/src/drafts/DraftEditor.test.tsx`에 `describe("최종 저장 표시 축 …")` 신설 —
+  **12셀**(파일 54 → 66, 프런트 전수 385 → **397**). 구현 코드는 한 줄도 바꾸지 않았다
+  (이 슬라이스는 잠금이지 수정이 아니다 — 4차 재검증이 동작은 계약과 일치한다고 실측했다).
+  - 배지 3상태: marker 없음 → `초안` / marker == 최신 snapshot → `최종 저장됨` /
+    marker보다 최신 version 존재 → `최종 저장 후 수정됨`. 셋 다 `expectOnly` 헬퍼로
+    **기대 문구만 켜져 있고 나머지 두 문구는 꺼져 있음**을 함께 문다(과잉 표시 방지).
+  - final 버튼: marker 없음 → 활성·`title` 부재 / marker 존재 → 비활성 + 사유 문언
+    `"최종 저장은 Scene당 한 번만 할 수 있습니다."` 정확 대조. 추가로 상한 초과 →
+    비활성(상한 아래에서는 활성이어야 함을 같은 셀에서 확인)·보관 원고 → 버튼 부재.
+  - finalize 흐름: 성공 셀은 `/finalize` POST의 `raw_text`·`idempotency_key`까지 대조하고
+    배지 `초안`→`최종 저장됨`·`분석 완료`·성공 안내 문구를 함께 잠근다. 부분 성공은
+    `it.each` 2행 — job `failed` / **job 없음 + `analysis_error`(D5=A의 200 얼굴)** —
+    둘 다 저장은 `최종 저장됨`, 분석은 `필요`, 안내는 부분 성공 문구이며 성공 문구가
+    뜨지 않는 것까지 확인한다.
+  - 분석 라벨 `it.each` 4행: 저장본 없음 → `미실행` / 최신 snapshot job `pending`·`running`
+    → `진행 중` / 성공 job의 snapshot이 최신과 다름(stale) → `필요`. 네 라벨 중 하나만
+    켜져 있음을 매 행에서 확인 — 제3조의 "시간이 아니라 snapshot 동일성" 규칙이 앵커다.
+- 확인: `DraftEditor.test.tsx` **66 passed**, 프런트 전수 **397 passed / 35 files, rc=0**,
+  `npx tsc --noEmit` rc=0. 백엔드는 이 슬라이스가 건드리지 않는다(프런트 테스트 파일 1개 변경).
+- **뮤테이션 11종**(전부 `DraftEditor.tsx`에 적용 → 실행 → 복원, 매회 `git status --porcelain`
+  0줄 확인. 규칙대로 **셀 커밋 `f248d8c` 뒤에** 변이했다):
+
+  | 변이 | diff(file:line) | 재실패 셀 |
+  |---|---|---|
+  | M1 배지 under | `:665` 배지를 `isFinalized ? "최종 저장됨" : "초안"`(snapshot 동일성 무시) | `marker 보다 최신 version 이 있으면 …` |
+  | M2 배지 over | `:665` 배지를 `isFinalized ? "최종 저장 후 수정됨" : "초안"` | `marker 가 최신 snapshot 과 같으면 …` + 성공 셀 + 부분 성공 2셀 (4 failed) |
+  | M3 버튼 잠금 | `:721` `disabled=`에서 `isFinalized` 제거 | mount 2셀 + 성공 셀 (3 failed) |
+  | M4 버튼 사유 | `:722` `title={undefined}` | `marker 가 최신 snapshot 과 같으면 …` + 성공 셀 |
+  | M5 안내 under | `:395` `setNotice(true …` (부분 성공도 성공 문구) | 부분 성공 2셀 |
+  | M6 안내 over | `:395` `setNotice(false …` (성공도 부분 성공 문구) | 성공 셀 |
+  | M7 라벨 미실행 | `:215` `latestSnapshotId === null ? "필요"` | `분석 라벨: 저장본이 없으면 미실행` |
+  | M8 라벨 최신성 | `:210` `draft?.analysis_snapshot_id !== latestSnapshotId ||` → `false ||` | `분석 라벨: 성공 job 의 snapshot 이 최신과 다르면 필요` + `marker 보다 최신 version …` |
+  | M9 라벨 진행 중 | `:219` 에서 `draft?.analysis_status === "pending"/"running"` 제거 | `분석 라벨: … pending 이면 진행 중` · `… running 이면 진행 중` |
+  | M10 상한 | `:721` `disabled=`에서 `overLimit` 제거 | `상한을 넘은 본문은 … 최종 저장 버튼도 잠근다` |
+  | M11 보관 | `:717` final 버튼의 `{!readOnly && (` → `{true && (` | `보관된 원고에는 최종 저장 버튼 자체가 없다` |
+
+### Issues found
+
+1. `it.each` 제목에 `%s`를 2개 쓰는 바람에 두 번째 자리가 배열 인자를 먹어 실패 이름이
+   `… 이면 [object Object]`로 찍혔다. 검증 프로토콜이 **기명 실패 줄을 읽어** 판정하므로
+   이름이 망가지면 가드가 약해진다 — 제목을 `%s` 하나로 줄이고 기대 라벨을 행 이름에
+   포함시켜 재실행(66 passed) 확인했다.
+2. (관찰, 이 슬라이스 밖) 최상위 README ② 카운터가 낡았다는 4차 재검증 지적은 그대로다.
+   프런트 전수가 385 → 397로 다시 움직였으므로 갱신 시 함께 반영해야 한다.
+
+### Decisions
+
+- 없음(오너 결정을 요하는 갈림 없음 — N1은 판정문이 요구 범위를 문언으로 못 박은 잠금 작업).
+  N2·N3은 여전히 오너 대기이며 이 세션에서 건드리지 않았다.
+
+### Next steps
+
+- **5차(승격) 재검증**: 4차 판정문대로 집중 셀 + 변이로 충분하다. 대상은 이 세션 커밋
+  (`f248d8c` 셀 + 제목 정정)·프런트 전수 **397/35** 기대값·위 변이 표 재현.
+- N2·N3 오너 결정 대기(결정 즉시 셀 1~2줄로 봉인 가능).

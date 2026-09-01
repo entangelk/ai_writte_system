@@ -2080,24 +2080,24 @@ describe("최종 저장 표시 축 (확정 계약 제3조·D3=B — 4차 재검�
   );
 
   it.each([
-    ["저장본이 없으면", [] as typeof version1[], null, {}, "분석 미실행"],
+    ["저장본이 없으면 미실행", [] as typeof version1[], null, {}, "분석 미실행"],
     [
-      "최신 snapshot 의 job 이 pending 이면",
+      "최신 snapshot 의 job 이 pending 이면 진행 중",
       [version1], version1, { analysis_snapshot_id: "s1", analysis_status: "pending" },
       "분석 진행 중",
     ],
     [
-      "최신 snapshot 의 job 이 running 이면",
+      "최신 snapshot 의 job 이 running 이면 진행 중",
       [version1], version1, { analysis_snapshot_id: "s1", analysis_status: "running" },
       "분석 진행 중",
     ],
     [
-      "성공 job 의 snapshot 이 최신과 다르면",
+      "성공 job 의 snapshot 이 최신과 다르면 필요",
       [version1, version3], version3, { analysis_snapshot_id: "s1", analysis_status: "succeeded" },
       "분석 필요",
     ],
   ] as Array<[string, typeof version1[], typeof version1 | null, Record<string, unknown>, string]>)(
-    "분석 라벨: %s %s",
+    "분석 라벨: %s",
     async (_name, versions, latestVersion, draftFields, expected) => {
       const responses: MockResponse[] = [
         { body: project },
