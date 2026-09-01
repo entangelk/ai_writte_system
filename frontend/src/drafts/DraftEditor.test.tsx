@@ -1885,3 +1885,263 @@ describe("본문 4000자 상한 (D5-2, 오너 2026-08-27)", () => {
     expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
   });
 });
+
+describe("최종 저장 표시 축 (확정 계약 제3조·D3=B — 4차 재검증 N1 폐쇄)", () => {
+  // 이 블록의 존재 이유: 배지 3상태·final 버튼·finalize 안내·분석 라벨 분기가
+  // 코드로만 존재하고 기명 셀이 하나도 없었다(2026-09-01 4차 재검증 N1 — "코드
+  // 확인은 가드가 아니라 관찰이다"). 각 셀은 양방향으로 문다 — 기대 문구를 잠그는
+  // 동시에 나머지 상태 문구가 같이 뜨지 않는 것까지 확인한다.
+  const version2 = { ...version1, id: "v2", version_number: 2, snapshot_id: "s2" };
+  const FINALITY_LABELS = ["초안", "최종 저장됨", "최종 저장 후 수정됨"];
+  const ANALYSIS_LABELS = ["분석 미실행", "분석 필요", "분석 진행 중", "분석 완료"];
+
+  /** 상태 바에서 기대 문구만 켜져 있는지(나머지는 꺼져 있는지) 본다. */
+  function expectOnly(status: HTMLElement, labels: string[], expected: string) {
+    expect(within(status).getByText(expected)).toBeInTheDocument();
+    for (const other of labels.filter((label) => label !== expected)) {
+      expect(within(status).queryByText(other)).not.toBeInTheDocument();
+    }
+  }
+
+  function finalizeResponse(
+    version: typeof version1,
+    analysisStatus: string | null,
+    analysisError: string | null = null,
+  ): MockResponse {
+    return {
+      body: {
+        draft_version: {
+          id: version.id,
+          version_number: version.version_number,
+          snapshot_id: version.snapshot_id,
+        },
+        // 서버는 새 version 의 snapshot 을 그대로 marker 로 세운다 — 이 동일성이
+        // 곧 "최종 저장됨"(marker == 최신 snapshot) 배지의 근거다.
+        snapshot: { id: version.snapshot_id, content_hash: `hash-${version.version_number}` },
+        analysis_job: analysisStatus === null ? null : {
+          id: "aj1",
+          project_id: "p1",
+          snapshot_id: version.snapshot_id,
+          status: analysisStatus,
+          failure_reason: null,
+          failure_detail: null,
+        },
+        analysis_error: analysisError,
+        idempotent_replay: false,
+      },
+    };
+  }
+
+  it("marker 가 없으면 초안으로 열리고 final 버튼이 사유 없이 활성이다", async () => {
+    mockFetch(
+      { body: project },
+      { body: draft },
+      { body: { versions: [version1] } },
+      { body: detail(version1, "본문") },
+    );
+
+    renderEditor();
+
+    const status = await screen.findByLabelText("작업 상태");
+    expectOnly(status, FINALITY_LABELS, "초안");
+    const finalButton = screen.getByRole("button", { name: "최종 저장·분석" });
+    expect(finalButton).toBeEnabled();
+    // over-strict 방향: marker 가 없는데 비활성 사유를 붙이면 문다.
+    expect(finalButton).not.toHaveAttribute("title");
+  });
+
+  it("marker 가 최신 snapshot 과 같으면 최종 저장됨으로 열리고 final 버튼이 사유와 함께 잠긴다", async () => {
+    mockFetch(
+      { body: project },
+      {
+        body: {
+          ...draft,
+          finalized_snapshot_id: "s1",
+          analysis_snapshot_id: "s1",
+          analysis_status: "succeeded",
+        },
+      },
+      { body: { versions: [version1] } },
+      { body: detail(version1, "본문") },
+    );
+
+    renderEditor();
+
+    const status = await screen.findByLabelText("작업 상태");
+    expectOnly(status, FINALITY_LABELS, "최종 저장됨");
+    const finalButton = screen.getByRole("button", { name: "최종 저장 완료" });
+    expect(finalButton).toBeDisabled();
+    expect(finalButton).toHaveAttribute(
+      "title",
+      "최종 저장은 Scene당 한 번만 할 수 있습니다.",
+    );
+  });
+
+  it("marker 보다 최신 version 이 있으면 최종 저장 후 수정됨이고, 최신 저장본은 분석 필요다", async () => {
+    // 제3조: 상태는 시간이 아니라 snapshot 동일성으로 계산한다. marker(s1)·분석
+    // 성공 기록(s1)이 있어도 최신 저장본(s3)은 미분석이다. final 버튼은 이미
+    // 소진되어 계속 잠긴 채다(Scene당 한 번).
+    mockFetch(
+      { body: project },
+      {
+        body: {
+          ...draft,
+          finalized_snapshot_id: "s1",
+          analysis_snapshot_id: "s1",
+          analysis_status: "succeeded",
+        },
+      },
+      { body: { versions: [version1, version3] } },
+      { body: detail(version3, "본문") },
+    );
+
+    renderEditor();
+
+    const status = await screen.findByLabelText("작업 상태");
+    expectOnly(status, FINALITY_LABELS, "최종 저장 후 수정됨");
+    expectOnly(status, ANALYSIS_LABELS, "분석 필요");
+    expect(screen.getByRole("button", { name: "최종 저장 완료" })).toBeDisabled();
+  });
+
+  it("최종 저장 성공: /finalize 로 최신 본문을 보내고 배지·분석·안내가 함께 넘어간다", async () => {
+    const fetchMock = mockFetch(
+      { body: project },
+      { body: draft },
+      { body: { versions: [version1] } },
+      { body: detail(version1, "본문") },
+      finalizeResponse(version2, "succeeded"),
+    );
+
+    renderEditor();
+
+    const status = await screen.findByLabelText("작업 상태");
+    expectOnly(status, FINALITY_LABELS, "초안");
+
+    await userEvent.click(screen.getByRole("button", { name: "최종 저장·분석" }));
+
+    expect(
+      await screen.findByText("최종 저장과 분석이 완료되었습니다"),
+    ).toBeInTheDocument();
+    expectOnly(status, FINALITY_LABELS, "최종 저장됨");
+    expectOnly(status, ANALYSIS_LABELS, "분석 완료");
+    const finalButton = screen.getByRole("button", { name: "최종 저장 완료" });
+    expect(finalButton).toBeDisabled();
+    expect(finalButton).toHaveAttribute(
+      "title",
+      "최종 저장은 Scene당 한 번만 할 수 있습니다.",
+    );
+
+    const finalizeCall = fetchMock.mock.calls.find(
+      (call) => typeof call[0] === "string" && call[0].includes("/finalize"),
+    );
+    expect(finalizeCall).toBeDefined();
+    const init = finalizeCall?.[1] as RequestInit;
+    expect(init.method).toBe("POST");
+    const sent = JSON.parse(String(init.body)) as {
+      raw_text: string;
+      idempotency_key: string;
+    };
+    expect(sent.raw_text).toBe("본문");
+    expect(sent.idempotency_key.length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    ["분석 job 이 실패로 돌아온 경우", "failed", null],
+    // D5=A: 분석을 만들지 못해도 봉투는 200 + analysis_error 다(502 아님).
+    ["분석 job 을 만들지 못한 경우(200 + analysis_error)", null, "analysis runner unavailable"],
+  ] as Array<[string, string | null, string | null]>)(
+    "최종 저장 부분 성공(%s): 저장은 최종 저장됨이고 분석만 수동으로 미룬다",
+    async (_name, analysisStatus, analysisError) => {
+      mockFetch(
+        { body: project },
+        { body: draft },
+        { body: { versions: [version1] } },
+        { body: detail(version1, "본문") },
+        finalizeResponse(version2, analysisStatus, analysisError),
+      );
+
+      renderEditor();
+
+      const status = await screen.findByLabelText("작업 상태");
+      await userEvent.click(screen.getByRole("button", { name: "최종 저장·분석" }));
+
+      expect(
+        await screen.findByText(
+          "최종 저장은 완료되었습니다. 분석이 완료되지 않아 수동 분석이 필요합니다.",
+        ),
+      ).toBeInTheDocument();
+      // over-strict 방향: 부분 성공을 성공 문구로 뭉개면 문다.
+      expect(
+        screen.queryByText("최종 저장과 분석이 완료되었습니다"),
+      ).not.toBeInTheDocument();
+      expectOnly(status, FINALITY_LABELS, "최종 저장됨");
+      expectOnly(status, ANALYSIS_LABELS, "분석 필요");
+    },
+  );
+
+  it.each([
+    ["저장본이 없으면", [] as typeof version1[], null, {}, "분석 미실행"],
+    [
+      "최신 snapshot 의 job 이 pending 이면",
+      [version1], version1, { analysis_snapshot_id: "s1", analysis_status: "pending" },
+      "분석 진행 중",
+    ],
+    [
+      "최신 snapshot 의 job 이 running 이면",
+      [version1], version1, { analysis_snapshot_id: "s1", analysis_status: "running" },
+      "분석 진행 중",
+    ],
+    [
+      "성공 job 의 snapshot 이 최신과 다르면",
+      [version1, version3], version3, { analysis_snapshot_id: "s1", analysis_status: "succeeded" },
+      "분석 필요",
+    ],
+  ] as Array<[string, typeof version1[], typeof version1 | null, Record<string, unknown>, string]>)(
+    "분석 라벨: %s %s",
+    async (_name, versions, latestVersion, draftFields, expected) => {
+      const responses: MockResponse[] = [
+        { body: project },
+        { body: { ...draft, ...draftFields } },
+        { body: { versions } },
+      ];
+      if (latestVersion !== null) responses.push({ body: detail(latestVersion, "본문") });
+      mockFetch(...responses);
+
+      renderEditor();
+
+      const status = await screen.findByLabelText("작업 상태");
+      expectOnly(status, ANALYSIS_LABELS, expected);
+    },
+  );
+
+  it("상한을 넘은 본문은 저장 버튼과 함께 최종 저장 버튼도 잠근다", async () => {
+    // 제 계약: final 저장도 4000자 상한을 일반 저장과 같은 순서로 적용한다.
+    mockFetch({ body: project }, { body: draft }, { body: { versions: [] } });
+
+    renderEditor();
+    const editor = await screen.findByLabelText("원고 본문");
+
+    // over-strict 방향: 상한 아래에서는 최종 저장이 막히면 안 된다.
+    fireEvent.change(editor, { target: { value: "짧은 문장." } });
+    expect(screen.getByRole("button", { name: "최종 저장·분석" })).toBeEnabled();
+
+    fireEvent.change(editor, { target: { value: "가".repeat(4_001) } });
+    expect(screen.getByRole("button", { name: "최종 저장·분석" })).toBeDisabled();
+  });
+
+  it("보관된 원고에는 최종 저장 버튼 자체가 없다", async () => {
+    mockFetch(
+      { body: project },
+      { body: { ...draft, archived: true } },
+      { body: { versions: [version1] } },
+      { body: detail(version1, "본문") },
+    );
+
+    renderEditor();
+
+    expect(await screen.findByLabelText("원고 본문")).toHaveAttribute("readonly");
+    expect(
+      screen.queryByRole("button", { name: "최종 저장·분석" }),
+    ).not.toBeInTheDocument();
+  });
+});
