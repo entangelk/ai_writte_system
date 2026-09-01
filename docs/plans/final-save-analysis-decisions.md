@@ -1,6 +1,6 @@
 # 최종 저장과 분석 연동 — 착수 결정 브리프
 
-상태: `Partially resolved` — 오너 결정 D1=B · D2=B · D3=B (2026-09-01); D4 실행 경로 결정 대기
+상태: `Resolved` — 오너 결정 D1=B · D2=B · D3=B · D4=A (2026-09-01)
 작성: 2026-09-01
 정본 연결: [`../system-contract-sot.md`](../system-contract-sot.md) v1.8.13, [`frontend-editor-save-decisions.md`](frontend-editor-save-decisions.md), [`05-writing-accept-decisions.md`](05-writing-accept-decisions.md), [`scene-note-implementation-phases.md`](scene-note-implementation-phases.md) Slice 3~4
 
@@ -84,6 +84,11 @@
 **A를 권장한다.** 현재 수동 분석은 이미 동기 runner로 제공되고, final은 Scene당 한 번인 명시적
 사용자 행위다. 저장을 먼저 커밋하면 분석 timeout/provider 장애도 D2=B대로 원고를 잃지 않는다.
 worker는 대량·장시간 분석이 실제 병목으로 측정될 때 열어도 늦지 않다.
+
+### 오너 결정
+
+**D4=A.** final API가 final marker와 snapshot을 먼저 확정한 뒤 서버에서 기존 분석 runner를
+동기로 실행한다. 분석 실패는 저장을 되돌리지 않고 partial 결과와 `분석 필요` 상태로 남긴다.
 
 ### Follow-up considerations
 

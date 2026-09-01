@@ -141,6 +141,8 @@
   실행되고 worker가 없다. final route가 job만 만들면 `pending`에 멈춘다. 따라서 D4(서버 동기
   실행 권장 / durable worker / 브라우저 후속 / job만 생성)를 오너 결정으로 열었다. D4가 없이는
   “최종 저장하면 분석”의 실제 실행·사용량 정산 경로를 임의로 정할 수 없다.
+- **[사용자 확정, 2026-09-01]** D4=A를 선택했다. final API는 marker·snapshot을 먼저 확정한
+  뒤 기존 runner를 동기로 실행하고, 실패하면 저장을 보존한 partial 결과와 `분석 필요`를 남긴다.
 - 분석 결과는 새 결과가 기존 canonical memory나 사용자의 편집을 자동으로 덮지 않는다. 현재
   candidate edit은 append-only successor를 만들어 원본을 `superseded`로 보존하고 canonical로
   승격하며, conflict는 review queue에서 검토한다. 서로 다른 snapshot의 동일 본문을
@@ -148,6 +150,6 @@
 
 ### Next steps
 
-- 오너가 D4를 선택하면 final-save를 Slice 3 화면 작업과 묶어 구현한다. 그때
-  `finalized_snapshot_id` 저장 위치, final route·응답의 analysis 상태, 작업실 조회 payload와
-  회귀 행렬을 세부 구현 계획으로 내리고 SoT·OpenAPI·`schema.d.ts`·활동 분류표를 함께 갱신한다.
+- final-save를 Slice 3 화면 작업과 묶어 구현한다. `finalized_snapshot_id` 저장 위치, final
+  route·응답의 analysis 상태, 작업실 조회 payload와 회귀 행렬을 구현하고 SoT·OpenAPI·
+  `schema.d.ts`·활동 분류표를 함께 갱신한다.
