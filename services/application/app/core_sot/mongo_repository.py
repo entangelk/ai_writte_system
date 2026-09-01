@@ -862,6 +862,9 @@ def _draft_doc(draft: Draft) -> dict:
         "chapter_id": draft.chapter_id,
         "unit_kind": str(draft.unit_kind) if draft.unit_kind is not None else None,
         "position": draft.position,
+        "finalized_snapshot_id": draft.finalized_snapshot_id,
+        "finalized_at": draft.finalized_at,
+        "finalized_idempotency_key": draft.finalized_idempotency_key,
     }
 
 
@@ -878,6 +881,12 @@ def _to_draft(doc: dict) -> Draft:
             else None
         ),
         position=doc.get("position"),
+        finalized_snapshot_id=doc.get("finalized_snapshot_id"),
+        finalized_at=(
+            _aware(doc["finalized_at"])
+            if doc.get("finalized_at") is not None else None
+        ),
+        finalized_idempotency_key=doc.get("finalized_idempotency_key"),
     )
 
 

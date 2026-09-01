@@ -1016,6 +1016,23 @@ export interface paths {
         patch: operations["rename_draft_projects__project_id__drafts__draft_id__patch"];
         trace?: never;
     };
+    "/projects/{project_id}/drafts/{draft_id}/finalize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Finalize Draft */
+        post: operations["finalize_draft_projects__project_id__drafts__draft_id__finalize_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{project_id}/drafts/{draft_id}/note": {
         parameters: {
             query?: never;
@@ -1966,10 +1983,18 @@ export interface components {
         };
         /** DraftPayload */
         DraftPayload: {
+            /** Analysis Snapshot Id */
+            analysis_snapshot_id?: string | null;
+            /** Analysis Status */
+            analysis_status?: string | null;
             /** Archived */
             archived: boolean;
             /** Chapter Id */
             chapter_id: string;
+            /** Finalized At */
+            finalized_at?: string | null;
+            /** Finalized Snapshot Id */
+            finalized_snapshot_id?: string | null;
             /** Id */
             id: string;
             /** Position */
@@ -2038,6 +2063,31 @@ export interface components {
         ErrorDetailResponse: {
             /** Detail */
             detail: string;
+        };
+        /** FinalizeAnalysisJobPayload */
+        FinalizeAnalysisJobPayload: {
+            /** Failure Detail */
+            failure_detail: string | null;
+            /** Failure Reason */
+            failure_reason: string | null;
+            /** Id */
+            id: string;
+            /** Project Id */
+            project_id: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Status */
+            status: string;
+        };
+        /** FinalizeDraftResponse */
+        FinalizeDraftResponse: {
+            /** Analysis Error */
+            analysis_error: string | null;
+            analysis_job: components["schemas"]["FinalizeAnalysisJobPayload"] | null;
+            draft_version: components["schemas"]["SavedDraftVersionPayload"];
+            /** Idempotent Replay */
+            idempotent_replay: boolean;
+            snapshot: components["schemas"]["SavedSnapshotPayload"];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -7700,6 +7750,98 @@ export interface operations {
                 };
             };
             /** @description Stored draft metadata predates the ordered-unit invariant (or is corrupt). Run scripts/migrate_ordered_units.py; retrying the request alone cannot succeed. The canonical store may also be unreachable or failing; in that case recover it and retry the same request unchanged. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    finalize_draft_projects__project_id__drafts__draft_id__finalize_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Confirm-Duplicate"?: string | null;
+            };
+            path: {
+                project_id: string;
+                draft_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FinalizeDraftResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
             503: {
                 headers: {
                     [name: string]: unknown;

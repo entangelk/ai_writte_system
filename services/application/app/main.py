@@ -1973,6 +1973,7 @@ def create_app(
         app, core_sot=core_sot, sync_outbox=sync_outbox, activity=activity,
         writing_generation_jobs=writing_generation_jobs,
         writing_scratch=writing_scratch,
+        analysis=analysis, runner=runner, llm_call_audit=llm_call_audit,
     )
 
     # 장면 메모 표면(Slice 1 읽기 2 + Slice 2 쓰기 1). activity 는 `scene_note_saved`

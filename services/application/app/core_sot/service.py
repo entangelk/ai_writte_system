@@ -15,6 +15,7 @@ from typing import Callable
 from services.application.app.core_sot.models import (
     Chapter,
     Draft,
+    FinalizeDraftResult,
     DraftVersion,
     DraftVersionDetail,
     DraftVersionExport,
@@ -57,6 +58,10 @@ class NotFound(CoreSotError):
 
 
 class Archived(CoreSotError):
+    pass
+
+
+class AlreadyFinalized(CoreSotError):
     pass
 
 
@@ -1160,6 +1165,39 @@ class CoreSotService:
             snapshot=snapshot,
             blocks=blocks,
             idempotent_replay=False,
+        )
+
+    def finalize_draft(
+        self, *, project_id: str, draft_id: str, raw_text: str,
+        idempotency_key: str,
+    ) -> FinalizeDraftResult:
+        """Save one immutable final snapshot; later edits stay ordinary saves."""
+        draft = self._require_active_project_and_draft(project_id, draft_id)
+        if draft.finalized_snapshot_id is not None:
+            if draft.finalized_idempotency_key != idempotency_key:
+                raise AlreadyFinalized("draft has already been finalized")
+            version = next(
+                (item for item in self._repo.list_versions(draft_id)
+                 if item.snapshot_id == draft.finalized_snapshot_id),
+                None,
+            )
+            assert version is not None
+            return FinalizeDraftResult(
+                saved=self._save_result(version.id, idempotent_replay=True),
+                draft=draft,
+                idempotent_replay=True,
+            )
+        saved = self.save_draft(
+            project_id=project_id, draft_id=draft_id, raw_text=raw_text,
+            idempotency_key=f"final:{idempotency_key}",
+        )
+        finalized = replace(
+            draft, finalized_snapshot_id=saved.snapshot.id,
+            finalized_at=datetime.now(UTC), finalized_idempotency_key=idempotency_key,
+        )
+        self._repo.put_draft(finalized)
+        return FinalizeDraftResult(
+            saved=saved, draft=finalized, idempotent_replay=False,
         )
 
     def get_writing_accept_receipt(

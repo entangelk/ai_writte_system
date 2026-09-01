@@ -552,6 +552,10 @@ class DraftPayload(BaseModel):
     title: str
     archived: bool
     position: int = Field(ge=1)
+    finalized_snapshot_id: str | None = None
+    finalized_at: datetime | None = None
+    analysis_status: str | None = None
+    analysis_snapshot_id: str | None = None
 
 
 class ScenePayload(BaseModel):
@@ -646,6 +650,23 @@ class SaveDraftResponse(BaseModel):
     draft_version: SavedDraftVersionPayload
     snapshot: SavedSnapshotPayload
     blocks: list[SavedSourceBlockPayload]
+    idempotent_replay: bool
+
+
+class FinalizeAnalysisJobPayload(BaseModel):
+    id: str
+    project_id: str
+    snapshot_id: str
+    status: str
+    failure_reason: str | None
+    failure_detail: str | None
+
+
+class FinalizeDraftResponse(BaseModel):
+    draft_version: SavedDraftVersionPayload
+    snapshot: SavedSnapshotPayload
+    analysis_job: FinalizeAnalysisJobPayload | None
+    analysis_error: str | None
     idempotent_replay: bool
 
 

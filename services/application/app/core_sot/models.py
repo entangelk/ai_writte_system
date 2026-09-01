@@ -88,6 +88,12 @@ class Draft:
     # Chapter→Scene hierarchy; new runtime Scenes leave it unset.
     unit_kind: UnitKind | None = None
     position: int | None = None
+    # One-shot Scene finalization. The immutable snapshot remains the factual
+    # anchor; later ordinary saves never clear this pointer.
+    finalized_snapshot_id: str | None = None
+    finalized_at: datetime | None = None
+    # Internal replay key, deliberately absent from public payloads.
+    finalized_idempotency_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,6 +207,13 @@ class SaveDraftResult:
     draft_version: DraftVersion
     snapshot: SourceSnapshot
     blocks: tuple[SourceBlock, ...]
+    idempotent_replay: bool
+
+
+@dataclass(frozen=True, slots=True)
+class FinalizeDraftResult:
+    saved: SaveDraftResult
+    draft: Draft
     idempotent_replay: bool
 
 

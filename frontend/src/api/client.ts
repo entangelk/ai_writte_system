@@ -141,6 +141,7 @@ export type DraftVersionExport = components["schemas"]["DraftVersionExportRespon
 export type ProjectExport = components["schemas"]["ProjectExportResponse"];
 export type SaveDraftRequest = components["schemas"]["SaveDraftRequest"];
 export type SaveDraftResponse = components["schemas"]["SaveDraftResponse"];
+export type FinalizeDraftResponse = components["schemas"]["FinalizeDraftResponse"];
 export type WritingGenerateRequest = components["schemas"]["WritingGenerateRequest"];
 export type WritingCandidate = components["schemas"]["WritingCandidatePayload"];
 export type WritingContextBudget =
@@ -535,6 +536,17 @@ export function saveDraft(
   body: SaveDraftRequest,
 ): Promise<SaveDraftResponse> {
   return request(`/projects/${projectId}/drafts/${draftId}/versions`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function finalizeDraft(
+  projectId: string,
+  draftId: string,
+  body: SaveDraftRequest,
+): Promise<FinalizeDraftResponse> {
+  return request(`/projects/${projectId}/drafts/${draftId}/finalize`, {
     method: "POST",
     body: JSON.stringify(body),
   });

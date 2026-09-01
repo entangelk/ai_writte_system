@@ -719,6 +719,12 @@ class AnalysisService:
             raise AnalysisNotFound("analysis job not found")
         return job
 
+    def get_job_request(
+        self, *, project_id: str, snapshot_id: str, idempotency_key: str,
+    ) -> AnalysisJob | None:
+        job_id = self._repo.find_job_request(project_id, snapshot_id, idempotency_key)
+        return self._repo.get_job(job_id) if job_id is not None else None
+
     def _require_task(self, project_id: str, task_id: str) -> AnalysisTask:
         task = self._repo.get_task(task_id)
         if task is None or task.project_id != project_id:

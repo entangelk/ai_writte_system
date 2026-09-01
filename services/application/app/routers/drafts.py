@@ -18,6 +18,7 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, Query
 
 from services.application.app.core_sot.service import (
+    AlreadyFinalized,
     Archived,
     CoreSotError,
     DraftOrderIntegrityError,
@@ -41,6 +42,7 @@ from ..api.models import (
     DraftVersionDetailResponse,
     DraftVersionExportResponse,
     DraftVersionListResponse,
+    FinalizeDraftResponse,
     RenameDraftRequest,
     SaveDraftRequest,
     SaveDraftResponse,
@@ -59,12 +61,14 @@ from ..api.errors import (
 )
 from ..api.dependencies import (
     _REQUIRE_PROJECT_OWNER,
+    _REQUIRE_PROJECT_OWNER_BILLABLE,
     require_authenticated_user,
 )
 
 
 def register_drafts(
     app, *, core_sot, sync_outbox, activity, writing_generation_jobs, writing_scratch,
+    analysis, runner, llm_call_audit,
 ) -> None:
     def _require_migrated_scene(draft) -> None:
         try:
@@ -87,6 +91,14 @@ def register_drafts(
 
     def _draft_payload(draft) -> dict[str, object]:
         _require_migrated_scene(draft)
+        versions = core_sot.list_draft_versions(
+            project_id=draft.project_id, draft_id=draft.id
+        )
+        latest = max(versions, key=lambda value: value.version_number, default=None)
+        job = None if latest is None else analysis.get_job_request(
+            project_id=draft.project_id, snapshot_id=latest.snapshot_id,
+            idempotency_key=f"analyze:{latest.snapshot_id}",
+        )
         return {
             "id": draft.id,
             "project_id": draft.project_id,
@@ -94,6 +106,10 @@ def register_drafts(
             "title": draft.title,
             "archived": draft.archived,
             "position": draft.position,
+            "finalized_snapshot_id": draft.finalized_snapshot_id,
+            "finalized_at": draft.finalized_at,
+            "analysis_status": None if job is None else str(job.status),
+            "analysis_snapshot_id": None if job is None else job.snapshot_id,
         }
 
     def _version_meta_payload(version) -> dict[str, object]:
@@ -643,4 +659,84 @@ def register_drafts(
                 for block in result.blocks
             ],
             "idempotent_replay": result.idempotent_replay,
+        }
+
+    @app.post(
+        "/projects/{project_id}/drafts/{draft_id}/finalize",
+        response_model=FinalizeDraftResponse,
+        responses=_owned(_ERRORS_400_404_409),
+        dependencies=_REQUIRE_PROJECT_OWNER_BILLABLE,
+    )
+    async def finalize_draft(
+        project_id: str, draft_id: str, request: SaveDraftRequest,
+        current=Depends(require_authenticated_user),
+    ) -> dict[str, object]:
+        try:
+            finalized = core_sot.finalize_draft(
+                project_id=project_id, draft_id=draft_id,
+                raw_text=request.raw_text, idempotency_key=request.idempotency_key,
+            )
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (Archived, AlreadyFinalized) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except CoreSotError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        saved = finalized.saved
+        activity.record(
+            project_id=project_id, actor_user_id=current.id,
+            action="draft_finalized", target_type="draft_version",
+            target_id=saved.draft_version.id,
+            after=str(saved.draft_version.version_number),
+        )
+        analysis_error = None
+        job = None
+        try:
+            # Analysis candidates must carry source anchors. The manual trigger
+            # prepares the same full-block catalog in the browser; finalization
+            # owns that preparation server-side so an interrupted browser cannot
+            # strand its promised analysis.
+            covered = {
+                (ref.start_offset, ref.end_offset)
+                for ref in core_sot.list_source_refs(
+                    project_id=project_id, snapshot_id=saved.snapshot.id
+                )
+            }
+            for block in saved.blocks:
+                span = (block.start_offset, block.end_offset)
+                if span[0] < span[1] and span not in covered:
+                    core_sot.create_source_ref(
+                        project_id=project_id, snapshot_id=saved.snapshot.id,
+                        start_offset=span[0], end_offset=span[1],
+                    )
+            existing = analysis.get_job_request(
+                project_id=project_id, snapshot_id=saved.snapshot.id,
+                idempotency_key=f"analyze:{saved.snapshot.id}",
+            )
+            job = existing or analysis.create_job(
+                project_id=project_id, snapshot_id=saved.snapshot.id,
+                idempotency_key=f"analyze:{saved.snapshot.id}",
+            ).job
+            if not finalized.idempotent_replay and runner is not None:
+                from services.application.app.observability.llm_call_scope import llm_call_scope
+                with llm_call_scope(llm_call_audit, project_id=project_id,
+                                    correlation_id=job.id):
+                    job = (await runner.run_job(project_id=project_id, job_id=job.id)).job
+        except Exception as exc:
+            analysis_error = str(exc)
+        return {
+            "draft_version": {"id": saved.draft_version.id,
+                              "version_number": saved.draft_version.version_number,
+                              "snapshot_id": saved.snapshot.id},
+            "snapshot": {"id": saved.snapshot.id,
+                         "content_hash": saved.snapshot.content_hash},
+            "analysis_job": None if job is None else {
+                "id": job.id, "project_id": job.project_id,
+                "snapshot_id": job.snapshot_id, "status": str(job.status),
+                "failure_reason": (str(job.failure_reason)
+                                   if job.failure_reason is not None else None),
+                "failure_detail": job.failure_detail,
+            },
+            "analysis_error": analysis_error,
+            "idempotent_replay": finalized.idempotent_replay,
         }

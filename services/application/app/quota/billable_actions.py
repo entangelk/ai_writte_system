@@ -82,6 +82,8 @@ BILLABLE_ACTIONS: tuple[BillableAction, ...] = (
     # 분류는 경로 단위이고 차감 시점은 8.3 이 정한다.
     BillableAction("analysis_extract", "POST",
                    "/projects/{project_id}/analysis/jobs/{job_id}/run"),
+    BillableAction("draft_finalize", "POST",
+                   "/projects/{project_id}/drafts/{draft_id}/finalize"),
     # 기존 기억과의 대조. 매칭된 후보 1건마다 판정을 부른다 → fan-out(B3).
     BillableAction("analysis_compare", "POST",
                    "/projects/{project_id}/analysis/jobs/{job_id}/compare",

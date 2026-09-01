@@ -130,7 +130,7 @@ class BillableActionInventoryTest(unittest.TestCase):
         self.assertEqual(set(literals), {
             "writing_generate", "writing_gate", "writing_revise",
             "writing_revise_and_gate", "writing_report", "writing_accept",
-            "analysis_extract", "analysis_compare", "context_search",
+            "analysis_extract", "analysis_compare", "draft_finalize", "context_search",
         })
 
     def test_the_fan_out_marking_matches_the_measured_paths(self) -> None:
@@ -221,6 +221,9 @@ class BillableActionObservabilityCoverageTest(unittest.TestCase):
         "analysis_compare": (
             "tests.test_llm_call_sites", "EndpointOpensAScopeTest",
             "test_compare_endpoint_scopes_the_whole_job"),
+        "draft_finalize": (
+            "tests.test_billable_actions", "BillableActionObservabilityCoverageTest",
+            "test_finalize_endpoint_opens_the_analysis_scope"),
         "context_search": (
             "tests.test_llm_call_sites", "EndpointOpensAScopeTest",
             "test_context_search_endpoint_scopes_the_planner"),
@@ -232,6 +235,11 @@ class BillableActionObservabilityCoverageTest(unittest.TestCase):
             "유료 동작과 관측 셀 대응표가 갈라졌다 — 새 동작을 추가했으면 그 동작의 "
             "레코드가 남는 것을 단정하는 셀도 함께 지목한다",
         )
+
+    def test_finalize_endpoint_opens_the_analysis_scope(self) -> None:
+        operation = ("/projects/{project_id}/drafts/{draft_id}/finalize", "post")
+        body = _route_bodies(create_app())[operation]
+        self.assertIn("llm_call_scope(", body)
 
     def test_every_named_observability_cell_exists(self) -> None:
         # 셀 이름을 문자열로 들고 있으므로, 그 셀이 개명·삭제되면 표가 조용히

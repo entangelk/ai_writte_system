@@ -9,6 +9,7 @@ import {
   ApiError,
   describeApiError,
   exportDraftVersion,
+  finalizeDraft,
   getDraft,
   getDraftVersion,
   getProject,
@@ -97,6 +98,7 @@ export function DraftEditor() {
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [exporting, setExporting] = useState<"txt" | "markdown" | null>(null);
   const [forcedReadOnly, setForcedReadOnly] = useState(false);
@@ -113,6 +115,7 @@ export function DraftEditor() {
     end: number;
   } | null>(null);
   const savingRef = useRef(false);
+  const finalizingRef = useRef(false);
   const selectingRef = useRef(false);
   const exportingRef = useRef(false);
   const intentRef = useRef<SaveIntent | null>(null);
@@ -202,6 +205,13 @@ export function DraftEditor() {
   const latest = latestOf(versions);
   const latestVersionId = latest?.id ?? null;
   const latestSnapshotId = latest?.snapshot_id ?? null;
+  const isFinalized = draft?.finalized_snapshot_id !== undefined && draft?.finalized_snapshot_id !== null;
+  const analysisNeedsAttention = latestSnapshotId !== null && (
+    draft?.analysis_snapshot_id !== latestSnapshotId ||
+    draft?.analysis_status === undefined ||
+    draft?.analysis_status === null ||
+    draft?.analysis_status === "failed"
+  );
   const onLatest = selectedVersionId !== null && selectedVersionId === latestVersionId;
   const allowNavigationAway = useCallback(
     () => !dirty || window.confirm("저장하지 않은 변경 사항을 버리고 페이지를 이동하시겠습니까?"),
@@ -342,6 +352,47 @@ export function DraftEditor() {
     } finally {
       savingRef.current = false;
       setSaving(false);
+    }
+  }
+
+  async function finalize(): Promise<void> {
+    if (
+      projectId === undefined || draftId === undefined || readOnly || isFinalized ||
+      finalizingRef.current || savingRef.current || overLimit
+    ) return;
+    finalizingRef.current = true;
+    setFinalizing(true);
+    setError(null);
+    try {
+      const result = await finalizeDraft(projectId, draftId, {
+        raw_text: rawText,
+        idempotency_key: crypto.randomUUID(),
+      });
+      const savedVersion: DraftVersion = {
+        id: result.draft_version.id, project_id: projectId, draft_id: draftId,
+        version_number: result.draft_version.version_number,
+        snapshot_id: result.draft_version.snapshot_id,
+      };
+      setVersions((current) => [savedVersion, ...current.filter((item) => item.id !== savedVersion.id)]);
+      setBaseline(rawText);
+      setSelectedVersionId(savedVersion.id);
+      setSelectedContentHash(result.snapshot.content_hash);
+      setVersionNumber(savedVersion.version_number);
+      setDraft((current) => current === null ? current : {
+        ...current,
+        finalized_snapshot_id: result.snapshot.id,
+        analysis_snapshot_id: result.analysis_job?.snapshot_id ?? null,
+        analysis_status: result.analysis_job?.status ?? "failed",
+      });
+      setAnalysisStatus(result.analysis_job?.status === "succeeded" ? "complete" : "failed");
+      setNotice(result.analysis_job?.status === "succeeded"
+        ? "최종 저장과 분석이 완료되었습니다"
+        : "최종 저장은 완료되었습니다. 분석이 완료되지 않아 수동 분석이 필요합니다.");
+    } catch (err) {
+      setError(describeApiError(err));
+    } finally {
+      finalizingRef.current = false;
+      setFinalizing(false);
     }
   }
 
@@ -588,7 +639,10 @@ export function DraftEditor() {
         <>
           <div className="workspace-status" aria-label="작업 상태">
             <span>{dirty ? "저장 안 됨" : "저장됨"}</span>
-            <span>분석 {analysisStatus === "idle" ? "미실행" : analysisStatus === "running" ? "진행 중" : analysisStatus === "failed" ? "실패" : "완료"}</span>
+            <span className={analysisNeedsAttention ? "status-attention" : undefined}>
+              분석 {analysisNeedsAttention ? "필요" : analysisStatus === "running" || draft.analysis_status === "pending" || draft.analysis_status === "running" ? "진행 중" : "완료"}
+            </span>
+            <span>{isFinalized ? latestSnapshotId === draft.finalized_snapshot_id ? "최종 저장됨" : "최종 저장 후 수정됨" : "초안"}</span>
             <span>검토 대기 {pendingReviewCount === null ? "—" : `${pendingReviewCount}건`}</span>
           </div>
           <div className="split-workspace">
@@ -636,10 +690,21 @@ export function DraftEditor() {
               spellCheck="true"
               placeholder="이곳에서 원고를 시작하세요."
             />
-            <div className="editor-actions">
+              <div className="editor-actions">
               <span aria-live="polite">
                 {notice ?? (dirty ? "저장하지 않은 변경 사항" : "모든 변경 사항 저장됨")}
               </span>
+              {!readOnly && (
+                <button
+                  type="button"
+                  className="final-save-button"
+                  disabled={isFinalized || finalizing || saving || selecting || overLimit}
+                  title={isFinalized ? "최종 저장은 Scene당 한 번만 할 수 있습니다." : undefined}
+                  onClick={() => void finalize()}
+                >
+                  {finalizing ? "최종 저장·분석 중…" : isFinalized ? "최종 저장 완료" : "최종 저장·분석"}
+                </button>
+              )}
               {!readOnly && (
                 <button
                   type="submit"

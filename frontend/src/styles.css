@@ -942,6 +942,15 @@ main {
   font-size: var(--type-meta);
 }
 
+.workspace-status .status-attention {
+  color: var(--status-danger, #a43b2c);
+  font-weight: 700;
+}
+
+.final-save-button {
+  margin-left: auto;
+}
+
 /* 오버레이 드로어(2026-08-26): 레일은 그리드 컬럼이 아니라 화면 우측의 고정
    오버레이다. 편집 영역은 전폭을 쓰고, 드로어는 그 위를 덮는다. */
 .split-workspace {
