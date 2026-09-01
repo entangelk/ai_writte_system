@@ -1,6 +1,6 @@
 # 최종 저장과 분석 연동 — 착수 결정 브리프
 
-상태: `Resolved` — 오너 결정 D1=B · D2=B · D3=B (2026-09-01)
+상태: `Partially resolved` — 오너 결정 D1=B · D2=B · D3=B (2026-09-01); D4 실행 경로 결정 대기
 작성: 2026-09-01
 정본 연결: [`../system-contract-sot.md`](../system-contract-sot.md) v1.8.13, [`frontend-editor-save-decisions.md`](frontend-editor-save-decisions.md), [`05-writing-accept-decisions.md`](05-writing-accept-decisions.md), [`scene-note-implementation-phases.md`](scene-note-implementation-phases.md) Slice 3~4
 
@@ -64,6 +64,36 @@
 
 **D3=B.** 작업실과 편집기 모두 상태 배지·비활성 final 버튼·수동 분석 안내를 보인다. 특히 최신 저장본이 분석되지 않았을 때는 작업실에서도 한 번 더 `분석 필요`를 상기시킨다.
 
+## D4 — final 저장이 분석을 실제로 실행하는 경로
+
+### Decision needed
+
+현재 분석은 job을 만든 뒤 브라우저가 별도 `/run` 요청을 해야만 실행된다. final route가 job만 만들면
+분석은 `pending`에 멈춰 “최종 저장하면 분석”을 충족하지 못한다. source-ref 준비·사용량 정산·장애
+후속도 이 실행 경로와 함께 정해야 한다.
+
+| 선택지 | 설명 | 장점 | 단점 |
+|---|---|---|---|
+| **A. final API가 저장 뒤 동기로 분석 실행 (권장)** | final marker·snapshot을 먼저 확정한 뒤 서버가 기존 분석 runner를 호출한다. 분석 실패는 저장을 유지한 partial 응답과 `분석 필요` 상태로 끝난다. | 별도 worker·브라우저 후속 요청 없이 약속을 지킨다 · 현재 수동 분석 runner를 재사용한다 · 1인 로컬 단계의 가장 작은 구현이다 | final 클릭 응답이 분석 시간만큼 길어진다 · 이 endpoint도 분석 1회 사용량을 정산해야 한다 |
+| B. durable analysis worker를 새로 둔다 | final은 pending job만 만들고 worker가 claim·실행한다. 화면은 polling으로 완료/실패를 받는다. | 응답이 빠르고 재시도·장애 복구가 견고하다 | analysis job lease·worker·배포 command·사용량 선차감/실행 차감 정책이 모두 새로 필요하다 |
+| C. 브라우저가 저장 성공 뒤 기존 분석 버튼 흐름을 자동 호출 | final 응답 뒤 client가 source-ref 준비와 `/run`을 호출한다. | 서버 변경이 가장 작아 보인다 | 브라우저 이탈·네트워크 단절 때 분석이 누락된다. D2=C를 기각한 이유를 되살린다 |
+| D. job만 만들고 수동 분석을 기다린다 | final은 pending analysis job만 기록한다. | 구현은 작다 | 자동 분석이 실행되지 않아 요구를 충족하지 못한다 |
+
+### Recommendation + reason
+
+**A를 권장한다.** 현재 수동 분석은 이미 동기 runner로 제공되고, final은 Scene당 한 번인 명시적
+사용자 행위다. 저장을 먼저 커밋하면 분석 timeout/provider 장애도 D2=B대로 원고를 잃지 않는다.
+worker는 대량·장시간 분석이 실제 병목으로 측정될 때 열어도 늦지 않다.
+
+### Follow-up considerations
+
+- A를 고르면 final route는 분석 provider 호출을 여는 유료 route로 분류하고, 기존 분석과 같은
+  quota·소유권·LLM audit 경계를 적용한다. final의 한 번 실행은 분석 한 번의 정산이다.
+- source-ref catalog은 final snapshot에 대해 서버가 준비해야 한다. 이 준비 또는 runner가 실패하면
+  final marker는 유지하고 최신 snapshot을 `분석 필요`로 보여 준다.
+- final 요청 재전송은 marker·snapshot을 중복 생성하지 않는다. 분석이 실패한 뒤의 재실행은 D1의
+  사용자 방향대로 기존 수동 분석 경로가 담당한다.
+
 ## 확정 계약
 
 - Scene별로 `finalized_snapshot_id`, `finalized_at`을 한 번만 기록한다. final marker를 덮거나 삭제하는 public 경로는 제공하지 않는다.
@@ -92,3 +122,4 @@
 - 공동 편집자의 final 권한·승인 흐름, export에 final 표시
 - 서로 다른 snapshot인데 본문과 분석기 버전이 같은 경우의 content-hash 분석 중복 억제
 - 분석기/프롬프트/스키마 버전별 재분석 정책과 분석 결과의 세대(generation) 표시
+- D4=B를 선택할 때의 analysis worker 모델·lease·재시도·배포 command

@@ -137,6 +137,10 @@
 - **[사용자 확정, 2026-09-01]** D1=B(최초 final snapshot 보존·후속 수정됨), D2=B(저장/final
   확정 뒤 분석 job·장애는 분석 필요), D3=B(텍스트 상태 배지·비활성 final·수동 분석 안내)로
   확정했다. latest snapshot이 `succeeded` job과 다르면 작업실도 `분석 필요`를 표시한다.
+- **[구현 전 발견, 2026-09-01]** 현재 analysis job은 브라우저의 별도 `/run` 요청이 있어야
+  실행되고 worker가 없다. final route가 job만 만들면 `pending`에 멈춘다. 따라서 D4(서버 동기
+  실행 권장 / durable worker / 브라우저 후속 / job만 생성)를 오너 결정으로 열었다. D4가 없이는
+  “최종 저장하면 분석”의 실제 실행·사용량 정산 경로를 임의로 정할 수 없다.
 - 분석 결과는 새 결과가 기존 canonical memory나 사용자의 편집을 자동으로 덮지 않는다. 현재
   candidate edit은 append-only successor를 만들어 원본을 `superseded`로 보존하고 canonical로
   승격하며, conflict는 review queue에서 검토한다. 서로 다른 snapshot의 동일 본문을
@@ -144,6 +148,6 @@
 
 ### Next steps
 
-- final-save를 Slice 3 화면 작업과 묶어 구현한다. 구현 전 `finalized_snapshot_id` 저장 위치,
-  final route·응답의 analysis 상태, 작업실 조회 payload와 회귀 행렬을 세부 구현 계획으로
-  내리고, 구현 시 SoT·OpenAPI·`schema.d.ts`·활동 분류표를 함께 갱신한다.
+- 오너가 D4를 선택하면 final-save를 Slice 3 화면 작업과 묶어 구현한다. 그때
+  `finalized_snapshot_id` 저장 위치, final route·응답의 analysis 상태, 작업실 조회 payload와
+  회귀 행렬을 세부 구현 계획으로 내리고 SoT·OpenAPI·`schema.d.ts`·활동 분류표를 함께 갱신한다.
