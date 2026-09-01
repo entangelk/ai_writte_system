@@ -717,7 +717,9 @@ def register_drafts(
                 project_id=project_id, snapshot_id=saved.snapshot.id,
                 idempotency_key=f"analyze:{saved.snapshot.id}",
             ).job
-            if not finalized.idempotent_replay and runner is not None:
+            if not finalized.idempotent_replay:
+                if runner is None:
+                    raise RuntimeError("analysis runner is not configured")
                 from services.application.app.observability.llm_call_scope import llm_call_scope
                 with llm_call_scope(llm_call_audit, project_id=project_id,
                                     correlation_id=job.id):
