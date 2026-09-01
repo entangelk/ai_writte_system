@@ -1,7 +1,7 @@
 # 독립 검증 기록
 
 이 디렉터리는 **구현자가 아닌 검증자가** 각 슬라이스를 다시 뜯어본 기록이다. 2026-06-24부터
-**61일치 · 268건**이 쌓여 있다.
+**61일치 · 269건**이 쌓여 있다.
 
 ## 이 저장소의 검증이 무엇인가
 
@@ -36,7 +36,7 @@
 | 판정 | 건수 | 뜻 |
 |---|---|---|
 | 합격 | 185 | blocking 결함 없음 |
-| **조건부 합격** | **79** | 합격이되 닫아야 할 조건이 있었다 |
+| **조건부 합격** | **80** | 합격이되 닫아야 할 조건이 있었다 |
 | **불합격** | **4** | 핵심 계약 위반으로 다음 슬라이스 진행이 차단됐다 |
 
 **조건부 합격이 29%**라는 것이 이 절차가 형식이 아니라는 증거다. 검증이 실제로 지적을 냈고,
@@ -67,6 +67,7 @@
 
 | 기록 | 무엇을 봤나 | 판정 |
 |---|---|---|
+| [`final_save_d5_closure.md`](2026-09-01/final_save_d5_closure.md) | final-save D5=A 폐쇄(`0f26f22`·`6a2c32f`·`3b18a1b`) 4차 재검증 — 제한 없는 환경에서 종료값까지. **3차 조건 R3·R4·D5 전부 실측 폐쇄**: D5 선언 집합 {400,401,402,403,404,409,429,503} 직독(502 부재·quota face 유지) + 앱 전체 502 생산지 스캔(drafts 경로 무관·전역 핸들러 503만) + `schema.d.ts` 재생성 byte-identical + SoT v1.8.14·CHANGELOG·README 동기 확인 + **변이 5종 양방향 전부 기명 재실패**(502 부활→D5 셀 · 402/429 제거→D5 셀+wiring SUBFAILED · except 502 raise→프로브 S6 "expected=200 observed=502" · refreshAnalysisStatus 무력화→상태 바 핀 셀 · 브리프 행 삭제→PaletteProvenance). 프로브 41단정 rc=0·새 pytest 셀 2/2·전수 **백엔드 2668/4/3114 rc=0**(기록 작성 전이라 docs 가드 green — 순서 명시)·**프런트 385/35 rc=0**(3차 R3 3셀 회복, 순차 실행으로 플레이크 0). **★신규 조건 N1: 프런트 finality 표시 축 무셀** — 테스트 전 파일에서 `finalize`·`최종 저장` 언급 0건, 배지 3상태·final 버튼·finalize 흐름·미실행/진행 중 라벨이 코드로만 존재(동작은 계약과 일치 — 빠진 것은 잠금). 독자 실측: 같은 키 재전송 활동 행 2건 중복(N3, accept 선례와 긴장·UI 도달 불가)·실패 뒤 재전송 봉투 `analysis_error=None` 비대칭(N4)·DraftList가 finality/분석 필드 미소비(제7조 문언 긴장, N2 오너 판단). | **조건부 합격** |
 | [`scene_note_slice_2.md`](2026-09-01/scene_note_slice_2.md) | 장면 메모 Slice 2(저장 API·활동 기록, `edec884`·`a0257d9`) 독립 검증. v1.8.13 경계 행렬(페이즈 §Slice 2 16항 포함) 전량 ↔ 셀 대응 확인, 구현자 변이 9종 중 7종 재실행 **전부 기록과 동일하게 재실패**(M9는 "삽입" 구성이 6 failed로 재현 — work_log의 "이동" 표기와 달리 두 독법 모두 물림) + **검증자 독자 변이 5종**(읽기 순서 이동 7셀·모델 경계·소유권 deps 제거 2파일 6fail·행위자 출처·**창 리터럴 5초→6초**). **차단 1건: 연타 창 "5초" 리터럴 무핀** — 변이로 6초로 바꿔도 46셀 green(테스트가 상수를 상징적으로 참조). 같은 계열 12000·200 무핀은 하드닝. 하드닝: SoT v1.8.13 행 "27→46" 오기(실측 23→46)·행위자 셀 docstring 과잉 주장(소유자==행위자 구조적 동일, 소유자 조회 변이가 46셀 통과). 집중 4파일 191/1116·collect 2666 재현. 전수 2663/9/1/3082+7 — 9 failed 전부 검증자 미등록 기록을 잡은 `test_docs_indexes`(등재 후 단독 green). | **조건부 합격** |
 | [`final_save_conditions_closure.md`](2026-09-01/final_save_conditions_closure.md) | final-save 재검증 조건 폐쇄(`67e8609`) 3차 재검증. **R1·B4 실측 폐쇄**(semantic 토큰 정의+사용·designTokens 5/5, 변이 재실패 · S1~S13 프로브의 pytest 편입 `tests/test_final_save_analysis.py` 1 passed, H1 변이로 셀 재실패 — 전수 green bar가 이제 finalize 계약을 안다). **R2 계약 시나리오 폐쇄**(변이 잠금, 실패 경로 reload 없음·저장 후 stale 필드로도 "필요" 전환 확인)이지만 **잔여 조건 3**: R3 reloadLatest의 getDraft 추가로 채택 흐름 3셀 red(목 미갱신 — 목 갱신 또는 호출 국한), R4 `--status-danger`가 브리프 semantic 표에 미등재(`PaletteProvenanceTest` red 단독 재현 — 위성 표 계열), D5(200 vs 502) 미확정(502 선언은 의도적 유지 확인). 프런트 전수 3 failed 전부 R3, 백엔드 9 failed = docs 가드 7(미등재) + R4 1 + live-mongo 부하 플레이크 1(단독 green). | **조건부 합격** |
 | [`final_save_hardening_recheck.md`](2026-09-01/final_save_hardening_recheck.md) | final-save 보강(`66ece84`·`30a9194`) 재검증. **백엔드 차단 7건·H1 실측 폐쇄** — dedupe 행·B2 수정·조립 호환·라벨·키 핀·tier 74/100·봉투 재조회 전부 suite+요청 실행으로 확인(변이 M-A~M-D 전부 재실패, 역배선은 wiring 가드가 구현자 스스로 잡은 흐름과 일치). 프로브 전환본(패치 없음) **41단정 전부 통과** — D4=A 실행 경로가 끝까지 돈다. **잔여 조건 4**: R1 `--danger-600` 프리미티브 직접 사용(designTokens semantic 라우팅 red — 선행 하드닝 권고의 방향 정정), R2 수동 분석 성공 후 상태 바 "분석 필요" 고정(**실앱 회귀** — 라벨 우선순위가 갱신되지 않는 draft.* 필드로 이동, AnalysisTrigger는 onStatusChange만 보고), B4 finalize 셀의 suite 부재(잠금은 프로브가 홀로, M-B는 크래시 잠금), D5(200 vs 502) 오너 미확정. 백엔드 전수 7 failed 전부 검증자 미등재 기록(제품 셀 0 — 선행 11 failed 소멸), 프런트 슬라이스 귀속 red 2셀+부하 플레이크 1(단독 green). | **조건부 합격** |

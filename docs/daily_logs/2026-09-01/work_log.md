@@ -392,3 +392,63 @@
 - 오늘 작업은 D5=A 계약 보강 커밋 `0f26f22`에서 종료한다. 이 실행 환경의 약 30초 상한 때문에
   Vitest·장기 pytest 전수 종료값을 신뢰성 있게 얻지 못했다. 다음 담당자는 HANDOFF ①-a와 위
   재검증 순서부터 시작한다.
+
+## Session 10 — final-save D5=A 4차 재검증(최종 판정)
+
+### Goals
+
+- HANDOFF ①-a 지시: 제한 없는 환경에서 4차 재검증 — S1~S13·새 pytest 셀·프런트 관련 suite·
+  양쪽 전수를 종료값까지 측정해 3차 조건부 합격(R3·R4·D5)을 최종 판정한다. 오너 요청 문언:
+  "검증하고 의심하고 또 의심해줘" — 폐쇄 확인에 더해 검증자 독자 스윕으로 새 축을 찌른다.
+
+### Completed work
+
+- 검증 기록: [`verifications/2026-09-01/final_save_d5_closure.md`](../../verifications/2026-09-01/final_save_d5_closure.md)
+  — 판정 **조건부 합격**(조건: N1 프런트 finality 표시 축 무셀). 인덱스 등재 + 건수 4곳
+  (최상위 README 2·docs/README·검증 인덱스) 268→269·분포 조건부 79→80 갱신, 등재 뒤
+  `test_docs_indexes` 단독 **13 passed / 279 subtests**(판정 열 +1 규칙과 일치).
+- **3차 조건 전부 실측 폐쇄**: D5 선언 집합 {400,401,402,403,404,409,429,503} 직독 + 앱 전체
+  502 생산지 스캔(drafts 경로 무관) + `npm run gen:api` 재생성 뒤 `git status` 0줄(schema.d.ts
+  byte-identical) + SoT v1.8.14·CHANGELOG·README 동기·operation 100·tier 74/100 실측 일치.
+  R3(reloadLatest 복원·refreshAnalysisStatus 국한·채택 3셀 mock 복원)·R4(브리프 행·
+  PaletteProvenance green) 확인.
+- **전수(제한 없는 실행, 종료값)**: 백엔드 **2668 / 4 / 3114, rc=0, 289.86초**(알파 —
+  `elasticsearch` 패키지 부재로 skip 4 관례; **기록을 쓰기 전에 돌려** docs 가드 green —
+  선행 3회와 다른 순서, 다음 기대값 2668/4/3115). 프런트 **385 / 35 files, rc=0, 90.43초**
+  (3차 R3 3셀 회복 — 백엔드와 순차 실행으로 부하 플레이크 0). mypy 8/3·집중 suite
+  67/553·tsc rc=0·프로브 41단정 rc=0·새 pytest 셀 2/2.
+- **뮤테이션 5종**(전부 복원·트리 clean 확인):
+
+  | 변이 | diff(file:line) | 재실패 셀 |
+  |---|---|---|
+  | M1 D5 under-strict | `routers/drafts.py` import + :668 `responses=_owned(_BILLABLE_400_404_409_502_CONFIG)`(502 부활) | `test_final_save_analysis.py::test_d5_a_keeps_analysis_failure_inside_a_200_payload` FAILED |
+  | M2 D5 over-strict | `routers/drafts.py:668` `responses=_owned(_ERRORS_400_404_409)`(402/429 제거) | D5 셀 FAILED + `BillableRouteWiringTest::test_every_billable_operation_declares_402_and_429` SUBFAILED(finalize 자리 — 요약 줄 판독) |
+  | M3 D5 행동 | `routers/drafts.py` finalize except 첫 줄에 `raise HTTPException(status_code=502, …)` 삽입 | 프로브 **S6** "expected=200 observed=502" |
+  | M4 R3 | `DraftEditor.tsx:949` `if (status === "complete") void refreshAnalysisStatus();` → `{ void 0; }` | `DraftEditor > renders and updates the save, analysis, and pending-review status bar` FAIL(1/54) |
+  | M5 R4 | `10-frontend-design-system-decisions.md` `--status-danger` 표 행 삭제 | `PaletteProvenanceTest::test_the_brief_semantic_table_matches_the_stylesheet` FAILED |
+
+- **독자 스윕(신규 발견 4)**: ①**N1(조건)** 프런트 테스트 전 파일에서 `finalize`·`최종 저장`
+  언급 0건 — 배지 3상태·final 버튼·finalize 흐름·`미실행`/`진행 중` 라벨 무셀(동작은
+  계약과 일치, 빠진 것은 잠금) ②**N2** DraftList가 finality·분석 필드 미소비(계약 제7조
+  "Scene 목록" 문언 긴장) ③**N3** 같은 키 재전송 활동 행 2건 중복(실측; accept 선례 긴장·
+  UI 도달 불가) ④**N4** 실패 뒤 재전송 봉투 `analysis_error=None` 비대칭(상태 얼굴은 보존).
+
+### Issues found
+
+1. **N1(조건)** — 계약 제3조·D3=B가 요구하는 프런트 표시 분기에 기명 셀이 없다. 가드 규칙상
+   합격으로 못 닫는다 — 셀 묶음 추가가 조건의 전부.
+2. **N2·N3(오너 판단)** — 계약 무침/문언 긴장. 결정 없이 구현하지 않는다.
+3. **우발 — `/mnt/f`에서 perl `-i` 제자리 쓰기가 파일을 손상시켰다**(검증 인덱스 1행에 교체
+   문자열이 앞에 붙음). `git checkout` 복원 뒤 Edit 도구로 재적용, `test_docs_indexes` green으로
+   확인. 이 머신에서는 제자리 편집에 perl/sed `-i`를 쓰지 않는다.
+
+### Decisions
+
+- 없음(검증 세션 — N2·N3 판정은 오너 몫).
+
+### Next steps
+
+- **N1 폐쇄 슬라이스**: DraftEditor finality 배지 3상태·final 버튼·finalize 흐름(성공/부분
+  성공 안내)·`미실행`·`진행 중` 기명 셀(under/over-strict 짝). 폐쇄 후 5차 재검증은 집중
+  셀+변이로 승격 판정.
+- N2·N3 오너 결정 대기(결정 즉시 셀 1~2줄로 봉인 가능).
