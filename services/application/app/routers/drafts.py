@@ -107,7 +107,6 @@ def register_drafts(
             "title": draft.title,
             "archived": draft.archived,
             "position": draft.position,
-            "latest_snapshot_id": None if latest is None else latest.snapshot_id,
             "finalized_snapshot_id": draft.finalized_snapshot_id,
             "finalized_at": draft.finalized_at,
             "analysis_status": None if job is None else str(job.status),

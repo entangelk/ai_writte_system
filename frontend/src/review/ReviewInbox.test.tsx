@@ -93,6 +93,33 @@ describe("ReviewInbox", () => {
     expect(screen.getByRole("button", { name: "해결" })).toBeEnabled();
   });
 
+  it("renders event and open-question summaries inside their list rows", async () => {
+    mockFetch({
+      body: inboxBody({
+        items: [
+          {
+            candidate_id: "event-1", job_id: "j1",
+            candidate_type: "event_observation", status: "needs_review",
+            confidence: 0.7, provenance: "source_observed", conflict_count: 0,
+            payload: { event: "서윤이 비밀 통로를 발견했다" }, actions: CANDIDATE_ACTIONS,
+          },
+          {
+            candidate_id: "question-1", job_id: "j1",
+            candidate_type: "open_question_observation", status: "needs_review",
+            confidence: 0.6, provenance: "ai_inferred", conflict_count: 0,
+            payload: { question: "통로 끝에는 무엇이 있는가?" }, actions: CANDIDATE_ACTIONS,
+          },
+        ],
+      }),
+    });
+    renderInbox();
+
+    expect(await screen.findByText("서윤이 비밀 통로를 발견했다")).toBeInTheDocument();
+    expect(screen.getAllByText("사건")).toHaveLength(2);
+    expect(screen.getByText("미해결 질문")).toBeInTheDocument();
+    expect(screen.getByText("통로 끝에는 무엇이 있는가?")).toBeInTheDocument();
+  });
+
   it("reads the inbox from the single-origin /api path", async () => {
     const fetchMock = mockFetch({ body: inboxBody() });
     renderInbox();

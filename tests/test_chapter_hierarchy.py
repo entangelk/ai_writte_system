@@ -13,6 +13,11 @@ from dataclasses import replace
 
 from fastapi import FastAPI, HTTPException
 
+from services.application.app.analysis.service import (
+    AnalysisService,
+    InMemoryAnalysisRepository,
+)
+
 from services.application.app.core_sot.chapter_scene_migration import (
     ChapterSceneHierarchyMigration,
 )
@@ -31,6 +36,7 @@ from services.application.app.activity.log import (
 from services.application.app.api.models import (
     CreateChapterRequest,
     CreateDraftRequest,
+    DraftPayload,
     RenameDraftRequest,
     SceneOrderPutRequest,
 )
@@ -388,6 +394,7 @@ class ChapterHierarchyApiTest(unittest.TestCase):
             InMemoryWritingGenerationJobRepository()
         )
         self.scratch = WritingScratchService(InMemoryWritingScratchRepository())
+        self.analysis = AnalysisService(InMemoryAnalysisRepository())
         app = FastAPI()
         register_drafts(
             app,
@@ -396,6 +403,7 @@ class ChapterHierarchyApiTest(unittest.TestCase):
             activity=activity,
             writing_generation_jobs=self.jobs,
             writing_scratch=self.scratch,
+            analysis=self.analysis,
         )
         self.app = app
 
@@ -471,6 +479,56 @@ class ChapterHierarchyApiTest(unittest.TestCase):
             and "unit_kind" not in scene
             for scene in flattened["drafts"]
         ))
+
+    def test_flat_contract_and_nested_analysis_values(self):
+        """Under: exact latest job is exposed; over: flat Draft stays closed."""
+        create_chapter = self._endpoint(
+            "/projects/{project_id}/chapters", "POST"
+        )
+        chapter = asyncio.run(create_chapter(
+            self.project.id, CreateChapterRequest(title="상태 장"), TEST_USER
+        ))
+        create_scene = self._endpoint(
+            "/projects/{project_id}/drafts", "POST"
+        )
+        created = asyncio.run(create_scene(
+            self.project.id,
+            CreateDraftRequest(title="상태 장면", chapter_id=chapter["id"]),
+            TEST_USER,
+        ))
+        # Flat endpoints declare DraftPayload(extra="forbid"). A Scene-only
+        # latest_snapshot_id here reproduces the dogfood P0 response 500.
+        DraftPayload.model_validate(created)
+        self.assertNotIn("latest_snapshot_id", created)
+
+        saved = self.service.save_draft(
+            project_id=self.project.id,
+            draft_id=created["id"],
+            raw_text="분석할 본문",
+            idempotency_key="scene-status-save",
+        )
+        snapshot_id = saved.snapshot.id
+        job = self.analysis.create_job(
+            project_id=self.project.id,
+            snapshot_id=snapshot_id,
+            idempotency_key=f"analyze:{snapshot_id}",
+        ).job
+        self.analysis.mark_job_running(project_id=self.project.id, job_id=job.id)
+
+        list_flat = self._endpoint("/projects/{project_id}/drafts", "GET")
+        flat = asyncio.run(list_flat(self.project.id))["drafts"][0]
+        DraftPayload.model_validate(flat)
+        self.assertNotIn("latest_snapshot_id", flat)
+        self.assertEqual(flat["analysis_snapshot_id"], snapshot_id)
+        self.assertEqual(flat["analysis_status"], "running")
+
+        list_chapters = self._endpoint(
+            "/projects/{project_id}/chapters", "GET"
+        )
+        nested = asyncio.run(list_chapters(self.project.id))["chapters"][0]["scenes"][0]
+        self.assertEqual(nested["latest_snapshot_id"], snapshot_id)
+        self.assertEqual(nested["analysis_snapshot_id"], snapshot_id)
+        self.assertEqual(nested["analysis_status"], "running")
 
     def test_scene_create_contract_requires_parent_and_rejects_unit_kind(self):
         with self.assertRaises(ValueError):

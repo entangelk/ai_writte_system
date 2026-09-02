@@ -214,10 +214,10 @@ export function DraftEditor() {
   );
   const analysisRunning = analysisStatus === "running" ||
     draft?.analysis_status === "pending" || draft?.analysis_status === "running";
-  const analysisLabel = latestSnapshotId === null
-    ? "미실행"
-    : analysisRunning
-      ? "진행 중"
+  const analysisLabel = analysisRunning
+    ? "진행 중"
+    : latestSnapshotId === null
+      ? "미실행"
       : analysisNeedsAttention
         ? "필요"
         : "완료";
