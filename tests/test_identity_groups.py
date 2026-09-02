@@ -190,6 +190,21 @@ class CandidateIdentityGroupServiceTest(unittest.TestCase):
         self.assertEqual(len(members), 1)
         self.assertEqual(members[0].added_at, first.added_at)
 
+    def test_add_member_references_candidates_without_ownership(self) -> None:
+        # 계획: "group member는 원 후보를 소유하지 않고 참조만 한다." 존재하지
+        # 않는 candidate id도 추가된다 — over-strict: 존재 검사를 끼워넣으면(원
+        # 후보 소유화) 이 셀이 실패해야 한다(검증 H4의 명시 셀).
+        group = self.service.create_group("p1", _CHARACTER)
+
+        member = self.service.add_member(
+            "p1", group.group_id, "cand:ghost", _CHARACTER
+        )
+
+        self.assertEqual(member.candidate_id, "cand:ghost")
+        self.assertEqual(
+            self.service.list_members("p1", group.group_id), (member,)
+        )
+
     def test_add_member_rejects_missing_group_and_type_mismatch(self) -> None:
         group = self.service.create_group("p1", _CHARACTER)
 

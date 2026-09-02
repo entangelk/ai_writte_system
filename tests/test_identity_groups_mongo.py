@@ -266,8 +266,11 @@ except (ConnectionFailure, PyMongoError):  # pragma: no cover
 
 @unittest.skipUnless(_MONGO_AVAILABLE, "test-mongo (rs-test) not reachable")
 class MongoCandidateIdentityGroupLiveRoundTripTest(unittest.TestCase):
-    """같은 service 계약을 실 Mongo에서 — fake가 흉내 못 내는 unique 인덱스
-    시행(순서 반대 pair의 두 번째 insert가 유일성 위반으로 막히는지)까지 잰다."""
+    """같은 service 계약을 실 Mongo에서 잰다.
+
+    fake 컬렉션이 구조적으로 못 잡는 경계가 둘 — ① 반대 방향 pair가 별도 행으로
+    쌓이는 것(정규화의 실질 효과)과 ② pymongo가 naive datetime을 돌려주는 읽기
+    경계(검증 B1, sessions 사고와 같은 형태). 둘 다 이 셀이 잠근다."""
 
     def setUp(self):
         self._client = MongoClient(_MONGO_URI, serverSelectionTimeoutMS=800)
@@ -275,7 +278,13 @@ class MongoCandidateIdentityGroupLiveRoundTripTest(unittest.TestCase):
         self.repo = MongoCandidateIdentityGroupRepository(
             self._client, db_name=self._db_name
         )
-        self.service = CandidateIdentityGroupService(self.repo)
+        # B1: µs≠0 클록 — BSON 날짼 ms 절단이라 서비스 클록이 같은 해상도로
+        # 절단되지 않으면 실몽고 왕복의 데이터클래스 동등성이 깨진다(프로브 실측
+        # 760724µs→760000µs). 기본 클록은 운에 맡기는 셈이니 주입으로 고정한다.
+        self.clock_value = datetime(2026, 9, 2, 13, 0, 0, 760724, tzinfo=UTC)
+        self.service = CandidateIdentityGroupService(
+            self.repo, clock=lambda: self.clock_value
+        )
 
     def tearDown(self):
         self._client.drop_database(self._db_name)
@@ -283,21 +292,38 @@ class MongoCandidateIdentityGroupLiveRoundTripTest(unittest.TestCase):
 
     def test_round_trip_isolation_and_purge(self):
         group = self.service.create_group("p1", _CHARACTER)
+        member = self.service.add_member("p1", group.group_id, "cand:a", _CHARACTER)
         self.service.add_member("p1", group.group_id, "cand:a", _CHARACTER)
-        self.service.add_member("p1", group.group_id, "cand:a", _CHARACTER)
-        self.service.record_relation(
+        relation = self.service.record_relation(
             "p1", _CHARACTER, "cand:b", "cand:a",
             verdict=IdentityRelationVerdict.SAME,
             rationale="r", source="identity_judge", group_id=group.group_id,
         )
-        # 같은 pair 반대 방향 재기록 — unique 인덱스가 (p,t,left,right) 축이므로
-        # 정규화가 없으면 여기서 유일성 위반이 난다(정규화 실증).
+        # 같은 pair 반대 방향 재기록 — 정규화가 없으면 (b,a)는 (a,b)와 **다른
+        # 인덱스 키**라 유일성 위반이 아니라 별도 행으로 쌓이고, 아래 len 단언이
+        # 그 중복을 잡는다(2026-09-02 검증 H3 정정 — "유일성 위반"이 아니었다).
         self.service.record_relation(
             "p1", _CHARACTER, "cand:a", "cand:b",
             verdict=IdentityRelationVerdict.SAME,
             rationale="r", source="identity_judge", group_id=group.group_id,
         )
         self.service.create_group("p2", _CHARACTER)
+
+        # B1 충실도: 실몽고에서 읽은 값이 기록한 값과 데이터클래스 동등(==)이어야
+        # 한다 — naive 재라벨링 누락이면 tzinfo 불일치로, 클록 ms 절단 누락이면
+        # µs 잘림으로 각각 깨진다. fake 셀은 직렬화가 없어 이 축을 못 잰다.
+        self.assertEqual(self.service.get_group("p1", group.group_id), group)
+        self.assertEqual(
+            self.service.list_members("p1", group.group_id), (member,)
+        )
+        self.assertEqual(
+            self.service.get_relation("p1", _CHARACTER, "cand:a", "cand:b"),
+            relation,
+        )
+        self.assertEqual(
+            self.service.get_relation("p1", _CHARACTER, "cand:b", "cand:a"),
+            relation,
+        )
 
         self.assertEqual(
             len(self.service.list_members("p1", group.group_id)), 1

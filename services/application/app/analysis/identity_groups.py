@@ -107,6 +107,16 @@ def normalize_relation_pair(
     return right_candidate_id, left_candidate_id
 
 
+def _truncate_to_ms(value: datetime) -> datetime:
+    """클록 해상도를 BSON 날짼 ms 로 맞춘다(검증 B1 폐쇄).
+
+    BSON 날짼 ms 까지만 저장하므로 µs 정밀 클록을 그대로 쓰면 실몽고 왕복의
+    데이터클래스 동등성(``==``)이 깨진다(프로브 실측 760724µs→760000µs).
+    쓰기 시점에 잘라 두면 in-memory 와 Mongo 가 같은 값을 말한다.
+    """
+    return value.replace(microsecond=(value.microsecond // 1000) * 1000)
+
+
 class CandidateIdentityGroupRepository(Protocol):
     """세 컬렉션의 저장 계약. relation은 서비스가 정규화한 뒤에만 들어온다."""
 
@@ -300,7 +310,10 @@ class CandidateIdentityGroupService:
         id_factory: Callable[[], str] | None = None,
     ) -> None:
         self._repo = repository
-        self._clock = clock or (lambda: datetime.now(UTC))
+        raw_clock = clock or (lambda: datetime.now(UTC))
+        # B1: 주입 클록이든 기본 클록이든 ms 절단을 통과시킨다 — Mongo 왕복이
+        # 동등성을 유지하는 것은 서비스 계약이지 클록 운이 아니다.
+        self._clock = lambda: _truncate_to_ms(raw_clock())
         self._id_factory = id_factory or (lambda: "cig:" + uuid4().hex)
 
     def purge_project(self, *, project_id: str) -> None:

@@ -9,6 +9,7 @@ unique 축 위의 ``replace_one(..., upsert=True)`` 이고, member/relation 문�
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from pymongo import ASCENDING, MongoClient
@@ -24,6 +25,16 @@ from services.application.app.analysis.identity_groups import (
 )
 from services.application.app.analysis.models import AnalysisCandidateType
 from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+
+
+def _aware(value: datetime) -> datetime:
+    """BSON 날짼 tzinfo 없이 돌아온다 — UTC 로 되돌린다(경계 정규화).
+
+    pymongo 는 client 가 ``tz_aware`` 가 아니면 naive 를 돌려주고, naive 와
+    aware 의 ``==`` 는 조용히 False 다(fake 컬렉션은 직렬화가 없어 이 경계를
+    못 잰다 — 검증 B1). auth·core_sot 등 다른 어댑터와 같은 재라벨링이다.
+    """
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 class MongoCandidateIdentityGroupRepositorySetupError(RuntimeError):
@@ -230,8 +241,8 @@ def _to_group(doc: dict[str, Any]) -> CandidateIdentityGroup:
         candidate_type=AnalysisCandidateType(doc["candidate_type"]),
         status=IdentityGroupStatus(doc["status"]),
         revision=doc["revision"],
-        created_at=doc["created_at"],
-        updated_at=doc["updated_at"],
+        created_at=_aware(doc["created_at"]),
+        updated_at=_aware(doc["updated_at"]),
     )
 
 
@@ -255,7 +266,7 @@ def _to_member(doc: dict[str, Any]) -> CandidateIdentityGroupMember:
         project_id=doc["project_id"],
         candidate_type=AnalysisCandidateType(doc["candidate_type"]),
         member_status=IdentityGroupMemberStatus(doc["member_status"]),
-        added_at=doc["added_at"],
+        added_at=_aware(doc["added_at"]),
     )
 
 
@@ -285,5 +296,5 @@ def _to_relation(doc: dict[str, Any]) -> CandidateIdentityRelation:
         rationale=doc["rationale"],
         source=doc["source"],
         group_id=doc.get("group_id"),
-        created_at=doc["created_at"],
+        created_at=_aware(doc["created_at"]),
     )
