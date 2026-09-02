@@ -64,6 +64,8 @@
   `54192679`이며, 같은 snapshot identity 판정을 nested payload에도 맞췄다.
 - 독립 검증 보강 후 `tests/test_chapter_hierarchy.py` → **18 passed, 4 subtests passed**,
   프론트 관련 3파일 → **88 passed**.
+- 최종 복원 후 Chapter+문서 인덱스 → **31 passed, 284 subtests passed**,
+  `npm run build` → **711 modules**, `git diff --check` 성공.
 - P0 수정 전 신규 셀은 `DraftPayload latest_snapshot_id extra_forbidden`으로 **1 failed**,
   수정 후 **1 passed**로 전환했다.
 - broader TestClient 재실행 명령은
@@ -76,6 +78,18 @@
 - 최초 작업의 **15 passed, 279 subtests** 명령은
   `python3 -m pytest -q tests/test_chapter_hierarchy.py::ChapterHierarchyApiTest::test_create_list_and_parent_scoped_reorder tests/test_docs_indexes.py tests/test_project_brief.py::WorkspaceW0SchemaIntegrationTest::test_openapi_components_match_w0_fragments`였다.
   검증 기록이 지적한 재현 명령 누락을 보완한다.
+
+### Mutation checks after checkpoint `61cd7a1`
+
+| 변이 | 적용 diff | 재실패 셀 | 결과 |
+|---|---|---|---|
+| M8 flat 계약 회귀 | `routers/drafts.py::_draft_payload`에 `"latest_snapshot_id": None if latest is None else latest.snapshot_id` 재삽입 | `ChapterHierarchyApiTest::test_flat_contract_and_nested_analysis_values` | `DraftPayload extra_forbidden`, 1 failed |
+| M9 nested lookup 파손 | `_scene_payload`의 `analyze:`를 `analyze-broken:`로 교체 | 같은 셀 | `analysis_snapshot_id: None != source-snapshot-1`, 1 failed |
+| M10 zero-version 우선순위 회귀 | `analysisLabel`에서 `latestSnapshotId === null`을 `analysisRunning`보다 앞으로 이동 | `저장본이 없는 첫 최종 저장도 요청 중에는 분석 진행으로 표시한다` | `분석 진행 중` 부재·`미실행` 관측, 1 failed |
+| M11 payload 라벨 제거 | `PAYLOAD_FIELD_LABELS`의 `event`·`question` 두 행 삭제 | `renders event and open-question summaries inside their list rows` | 사건 라벨 2개 기대→1개, 1 failed |
+
+각 변이 전 checkpoint+clean gate를 확인했고, 변이마다 `git checkout -- <path>` 복원 후
+`git status --short` 0줄을 확인했다.
 
 ## Next steps
 
