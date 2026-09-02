@@ -21,6 +21,7 @@
 | 미승인 후보 정체성 그룹 C 확정 | `docs/plans/pending-candidate-identity-grouping-decisions.md` · `docs/system-contract-sot.md` | 브리프 상태를 “C 채택”으로 확정하고 SoT v1.8.16에 영속 identity group + 그룹 승인/거절 정책을 등재 | 후보 목록 중복 표시와 승인 후 canonical 중복 방지를 같은 설계로 닫는 방향 확정 |
 | Writing start-next 복구 채택 결함 폐쇄 | `api/models.py` · `routers/writing.py` · `writing/scratch*` · `writing/generation_job*` · `writing/generation_worker.py` · `writing/http_models.py` · `frontend/src/writing/*` · `frontend/src/api/*` · 회귀 | generate 요청에 `intent`/`next_unit` 추가. sync scratch·async job·worker result·scratch API가 둘을 보존. ScratchRecovery accept가 저장된 `next_unit`을 재전송. start-next generate는 provider 호출 전 next_unit binding 검증 | “다음 장면 이어쓰기” 후보가 패드/복구를 거쳐도 새 Scene을 열고, 이전 Scene 본문에 섞이지 않음 |
 | start-next 검증 조건 보강 | `README.md` · `frontend/src/api/schema.d.ts` · `tests/test_writing.py` · `tests/test_writing_generation_job_mongo.py` | 조건부 합격 4건을 닫기 위해 README 정본 표기를 v1.8.16으로 갱신, `gen:api` 재생성, generate 400 경계 4분기 셀, generation_job_mongo `intent`/`next_unit` 실값 round-trip을 추가 | 검증자가 지목한 문서 red·생성물 drift·400 무셀·job Mongo 무잠금 축을 기계적으로 폐쇄 |
+| 미승인 후보 identity group 구현 페이즈 계획 | `docs/plans/pending-candidate-identity-grouping-implementation-phases.md` · `docs/plans/README.md` | C 채택 구현을 저장 모델, shortlist+judge, runner 배선, Review Inbox 읽기면, 그룹 거절, 그룹 승인, grouped UI 7개 Slice로 분할 | 다음 구현을 Slice 0 저장 모델부터 작게 시작할 수 있게 착수 경계를 고정 |
 
 ## Issues found
 
@@ -143,6 +144,6 @@
 ## Next steps
 
 1. start-next 검증 조건 폐쇄 재검증을 받는다.
-2. C 확정 방향으로 identity group/revision 스키마, shortlist+judge, 멱등 group action,
-   grouped Inbox UI를 작은 슬라이스로 나눈다.
-3. 실 dogfood로 상태·목록 가독성을 육안 확인한다.
+2. identity group 구현은 `pending-candidate-identity-grouping-implementation-phases.md`의
+   Slice 0(저장 모델과 수명)부터 진행한다.
+3. 각 Slice가 끝날 때 독립 검증을 받고, grouped Inbox UI 이후 실 dogfood로 상태·목록 가독성을 육안 확인한다.
