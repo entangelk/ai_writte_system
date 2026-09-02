@@ -1,7 +1,7 @@
 # 독립 검증 기록
 
 이 디렉터리는 **구현자가 아닌 검증자가** 각 슬라이스를 다시 뜯어본 기록이다. 2026-06-24부터
-**62일치 · 270건**이 쌓여 있다.
+**62일치 · 271건**이 쌓여 있다.
 
 ## 이 저장소의 검증이 무엇인가
 
@@ -35,7 +35,7 @@
 
 | 판정 | 건수 | 뜻 |
 |---|---|---|
-| 합격 | 185 | blocking 결함 없음 |
+| 합격 | 186 | blocking 결함 없음 |
 | **조건부 합격** | **80** | 합격이되 닫아야 할 조건이 있었다 |
 | **불합격** | **5** | 핵심 계약 위반으로 다음 슬라이스 진행이 차단됐다 |
 
@@ -64,6 +64,8 @@
 최신순. 같은 날 여러 건이면 슬라이스별로 나뉜 것이다.
 
 ### 2026-09-02
+
+| [`dogfood_review_ux_fix.md`](2026-09-02/dogfood_review_ux_fix.md) | dogfood P0·가드 보강 폐쇄(`61cd7a1`·`0174d8d`) 재검증. 1차 불합격 차단 3건 전부 실측 폐쇄 — 500은 커밋 프로브 5경로 200·`DraftPayload.model_validate` 셀, 값 무잠금은 exact `analyze:{snapshot}` 셀, 보고는 작업자 기록 명령 **문자 그대로** 재실행(broader 묶음 106 passed/40s·faulthandler 진단 48 passed/21s — "교착" 2회 불재현). **백엔드 전수 2672/1/3116 실패 0(2113s)** — 이 슬라이스 계열에서 전수 green은 이번이 처음. 프런트 88·build 711 modules·gen:api 무차이. 검증자 독립 변이 M8~M11 전부 기명 셀 재실패(작업자 표와 일치). 유예: `_scene_payload` 장면당 버전 스캔. | **합격** |
 
 | [`dogfood_review_ux.md`](2026-09-02/dogfood_review_ux.md) | dogfood 분석·검토 UX 보강(`d02837a`) 독립 검증. 프런트 집중 86셀·tsc·build·gen:api 무차이 전부 재현, 변이 6종(M1~M6) 기명 재실패. **★차단: flat `_draft_payload`에 계약 밖 `latest_snapshot_id` 추가 → `DraftPayload`(extra=forbid)가 거부해 장면 생성·에디터 로드 등 5경로 미선언 500** — `test_scene_notes_api` 31 failed·`test_final_save_analysis` S1-S13 failed·ReviewInboxApiTest 1 failed, 부모 `5ec69f6`에서 전부 green으로 d02837a 귀속 확정(그 한 줄 삭제 시 67셀 green 실증). "교착으로 못 돌렸다"던 ReviewInboxApiTest는 이 호스트에서 4.2s 통과 — 교착 재현 불가·명령 미기록이 유일한 TestClient suite 스킵을 정당화했고 그 suite가 P0를 잡을 자리였다. scenes[] 분석 상태의 값 파생은 백엔드에 잠금 없음(M7b로 실증). 브리프(2번)는 구조·사실 전제 이상 무. | **불합격** |
 
