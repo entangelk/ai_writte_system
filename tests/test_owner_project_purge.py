@@ -24,6 +24,10 @@ from services.application.app.analysis.service import (
     AnalysisService,
     InMemoryAnalysisRepository,
 )
+from services.application.app.analysis.identity_groups import (
+    CandidateIdentityGroupService,
+    InMemoryCandidateIdentityGroupRepository,
+)
 from services.application.app.auth.admin_audit import (
     AdminAuditService,
     InMemoryAdminAuditRepository,
@@ -55,6 +59,10 @@ class OwnerProjectPurgeTest(unittest.TestCase):
         self.sync_outbox = IndexSyncOutboxService(self.outbox_repo)
         self.memory_spy = _PurgeSpy(MemoryService(InMemoryMemoryRepository()))
         self.analysis_spy = _PurgeSpy(AnalysisService(InMemoryAnalysisRepository()))
+        # 2026-09-02 Slice 0: identity group 3컬렉션도 같은 파괴 그래프를 탄다.
+        self.identity_spy = _PurgeSpy(CandidateIdentityGroupService(
+            InMemoryCandidateIdentityGroupRepository()
+        ))
         self.admin_audit = AdminAuditService(InMemoryAdminAuditRepository())
         self.name_history = ProjectNameHistoryService(
             InMemoryProjectNameHistoryRepository()
@@ -62,6 +70,7 @@ class OwnerProjectPurgeTest(unittest.TestCase):
         self.client, self.users, _ = _client(
             core_sot=self.core_sot, index_sync_outbox=self.sync_outbox,
             memory_service=self.memory_spy, analysis_service=self.analysis_spy,
+            identity_group_service=self.identity_spy,
             admin_audit=self.admin_audit, project_name_history=self.name_history,
         )
         self.users.create_user(username="bob", password="pw456")
@@ -92,6 +101,7 @@ class OwnerProjectPurgeTest(unittest.TestCase):
         # D5 전수 — 소유자 경로라고 derived 파괴를 흘리면 안 된다.
         self.assertEqual(self.memory_spy.purged, [self.project_id])
         self.assertEqual(self.analysis_spy.purged, [self.project_id])
+        self.assertEqual(self.identity_spy.purged, [self.project_id])
         # worker drain(6c) 용 enqueue — 이것이 빠지면 vector/index 가 잔류한다.
         # (아카이브가 남긴 PROJECT_ARCHIVED 행도 같이 있다 — 그것이 선행 단계다.)
         entries = list(self.outbox_repo.outbox_entries.values())

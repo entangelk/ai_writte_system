@@ -1,18 +1,22 @@
 """D8-6 전수 가드: project 파기 경로를 가진 모든 repository가 purge_project 를 노출한다.
 
-D5=A 로 project 파기는 **전체 그래프**(mongo 19 컬렉션)를 지운다. 이 컬렉션들을 관리하는
-repository 계약(9개)이 모두 ``purge_project`` 를 노출하지 않으면 project 파기가 **고아 데이터**를
+D5=A 로 project 파기는 **전체 그래프**(mongo 22 컬렉션)를 지운다. 이 컬렉션들을 관리하는
+repository 계약(10개)이 모두 ``purge_project`` 를 노출하지 않으면 project 파기가 **고아 데이터**를
 남긴다(D5 "부분 삭제는 조용한 고아"). 이 가드는 그 누락을 잡는다 — 새 repository 가 project-scoped
 컬렉션을 추가하면 이 목록에도 넣어야 한다(under-strict: 빠지면 실패).
 
 D8-6a(core_sot 8, v1.8.11 `scene_notes` 합류로 9) + D8-6b-1(memory 1·analysis 3) +
-D8-6b-2(writing 3·observability 1·context_search 1·review 1) = 9 repository 계약 / 19 컬렉션.
+D8-6b-2(writing 3·observability 1·context_search 1·review 1) + identity group 3
+(2026-09-02 Slice 0, 그룹·멤버·관계) = 10 repository 계약 / 22 컬렉션.
 """
 
 from __future__ import annotations
 
 import unittest
 
+from services.application.app.analysis.identity_groups import (
+    CandidateIdentityGroupRepository,
+)
 from services.application.app.analysis.repository import AnalysisRepository
 from services.application.app.analysis.review_queue import ReviewQueueRepository
 from services.application.app.context_search.gate_findings import GateFindingRepository
@@ -57,6 +61,7 @@ _PURGE_REPOSITORIES = [
     ("LlmCallAuditRepository", LlmCallAuditRepository),
     ("GateFindingRepository", GateFindingRepository),
     ("ReviewQueueRepository", ReviewQueueRepository),
+    ("CandidateIdentityGroupRepository", CandidateIdentityGroupRepository),
 ]
 
 
@@ -75,8 +80,8 @@ class PurgeProjectCoverageTest(unittest.TestCase):
 
     def test_purge_repository_roster_is_complete(self):
         # 과잉 교정 가드(over-strict): 실수로 이 목록에 project-scoped 가 아닌 repository
-        # 를 끼워넣거나 빼면, 9 라는 수 자체가 의도임을 고정한다(19 컬렉션 = 9 계약).
-        self.assertEqual(len(_PURGE_REPOSITORIES), 9)
+        # 를 끼워넣거나 빼면, 10 이라는 수 자체가 의도임을 고정한다(22 컬렉션 = 10 계약).
+        self.assertEqual(len(_PURGE_REPOSITORIES), 10)
 
 
 class IndexingBackendPurgeCoverageTest(unittest.TestCase):

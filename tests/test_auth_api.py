@@ -51,6 +51,10 @@ from services.application.app.indexing.service import (
 from services.application.app.analysis.service import (
     AnalysisService, InMemoryAnalysisRepository,
 )
+from services.application.app.analysis.identity_groups import (
+    CandidateIdentityGroupService,
+    InMemoryCandidateIdentityGroupRepository,
+)
 from services.application.app.memory.service import (
     InMemoryMemoryRepository, MemoryService,
 )
@@ -110,7 +114,8 @@ class _FakeHasher:
 def _client(*, ttl=timedelta(hours=1), core_sot=None, index_sync_outbox=None,
             memory_service=None, analysis_service=None, access_grants=None,
             admin_audit=None, project_name_history=None,
-            writing_generation_job_service=None, writing_scratch_service=None):
+            writing_generation_job_service=None, writing_scratch_service=None,
+            identity_group_service=None):
     users = UserService(InMemoryUserRepository(), hasher=_FakeHasher())
     sessions = SessionService(InMemorySessionRepository(), ttl=ttl)
     users.create_user(username="alice", password="pw123")
@@ -122,6 +127,7 @@ def _client(*, ttl=timedelta(hours=1), core_sot=None, index_sync_outbox=None,
         project_name_history_service=project_name_history,
         writing_generation_job_service=writing_generation_job_service,
         writing_scratch_service=writing_scratch_service,
+        identity_group_service=identity_group_service,
     )
     # https base_url on purpose: the cookie ships Secure by default, so an http
     # client would silently drop it and every session test would pass/fail for
@@ -1052,8 +1058,13 @@ class AdminProjectPurgeTest(unittest.TestCase):
         self.sync_outbox = IndexSyncOutboxService(self.outbox_repo)
         # memory·analysis spy — 8 derived service 중 대표 2개. endpoint 가 이들의
         # purge_project 를 빼먹으면 조용한 고아(부분 삭제, D5 위반)가 된다.
+        # identity_groups spy(2026-09-02 Slice 0) — 그룹 3컬렉션이 파기 그래프에
+        # 들어왔다. 빼먹으면 미승인 후보 그룹·판정이 프로젝트보다 오래 산다.
         self.memory_spy = _PurgeSpy(MemoryService(InMemoryMemoryRepository()))
         self.analysis_spy = _PurgeSpy(AnalysisService(InMemoryAnalysisRepository()))
+        self.identity_spy = _PurgeSpy(CandidateIdentityGroupService(
+            InMemoryCandidateIdentityGroupRepository()
+        ))
         self.audit_repo = InMemoryAdminAuditRepository()
         self.admin_audit = AdminAuditService(self.audit_repo)
         self.name_history_repo = InMemoryProjectNameHistoryRepository()
@@ -1061,6 +1072,7 @@ class AdminProjectPurgeTest(unittest.TestCase):
         self.client, self.users, _ = _client(
             core_sot=self.core_sot, index_sync_outbox=self.sync_outbox,
             memory_service=self.memory_spy, analysis_service=self.analysis_spy,
+            identity_group_service=self.identity_spy,
             admin_audit=self.admin_audit, project_name_history=self.name_history,
         )
         self.users.create_user(username="root", password="pw789", is_admin=True)
@@ -1095,6 +1107,7 @@ class AdminProjectPurgeTest(unittest.TestCase):
     def test_admin_purge_fans_out_to_derived_services(self) -> None:
         # D5 전수: endpoint 가 8 derived service purge 를 부른다. memory·analysis spy
         # (대표 2개)로 호출을 잠근다 — 이것이 빠지면 derived 10컬렉션이 조용한 고아.
+        # identity_groups(3컬렉션, 2026-09-02)도 같은 fan-out 대상이다.
         project = self.core_sot.create_project(name="Novel")
         self.core_sot.archive_project(project_id=project.id)
         self.client.post(
@@ -1102,6 +1115,7 @@ class AdminProjectPurgeTest(unittest.TestCase):
         )
         self.assertEqual(self.memory_spy.purged, [project.id])
         self.assertEqual(self.analysis_spy.purged, [project.id])
+        self.assertEqual(self.identity_spy.purged, [project.id])
 
     def test_the_project_name_survives_the_purge_that_destroys_everything_else(
         self,

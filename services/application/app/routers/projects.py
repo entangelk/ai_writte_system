@@ -58,7 +58,7 @@ from .admin import execute_project_purge
 def register_projects(
     app, *, core_sot, access_grants, sync_outbox, activity,
     admin_audit, project_name_history, memory, analysis, review_queue,
-    gate_findings, writing_generation_jobs, writing_scratch,
+    identity_groups, gate_findings, writing_generation_jobs, writing_scratch,
     writing_loop_audit, llm_call_audit,
 ) -> None:
     def _project_payload(project) -> dict[str, object]:
@@ -311,6 +311,7 @@ def register_projects(
             core_sot=core_sot, admin_audit=admin_audit,
             project_name_history=project_name_history,
             memory=memory, analysis=analysis, review_queue=review_queue,
+            identity_groups=identity_groups,
             gate_findings=gate_findings,
             writing_generation_jobs=writing_generation_jobs,
             writing_scratch=writing_scratch,

@@ -74,6 +74,10 @@ from services.application.app.analysis.review_queue import (
     InMemoryReviewQueueRepository,
     ReviewQueueService,
 )
+from services.application.app.analysis.identity_groups import (
+    CandidateIdentityGroupService,
+    InMemoryCandidateIdentityGroupRepository,
+)
 from services.application.app.analysis.reconciliation import (
     CharacterReconciliationService,
 )
@@ -360,6 +364,26 @@ def _default_review_queue_service() -> ReviewQueueService:
 
     return ReviewQueueService(
         MongoReviewQueueRepository.from_uri(
+            uri,
+            db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME),
+        )
+    )
+
+
+def _default_candidate_identity_group_service() -> CandidateIdentityGroupService:
+    # 미승인 후보 정체성 그룹 Slice 0(2026-09-02): 그룹·멤버·판정의 영속 저장.
+    # Mongo-backed when configured, else the non-durable in-memory repo.
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if not uri:
+        return CandidateIdentityGroupService(InMemoryCandidateIdentityGroupRepository())
+
+    from services.application.app.analysis.identity_groups_mongo import (
+        MongoCandidateIdentityGroupRepository,
+    )
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+
+    return CandidateIdentityGroupService(
+        MongoCandidateIdentityGroupRepository.from_uri(
             uri,
             db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME),
         )
@@ -1614,6 +1638,7 @@ def create_app(
     context_search_service: ContextSearchService | None = None,
     compare_service: AnalysisCompareService | None = None,
     review_queue_service: ReviewQueueService | None = None,
+    identity_group_service: CandidateIdentityGroupService | None = None,
     gate_finding_service: GateFindingService | None = None,
     writing_service: WritingService | None = None,
     writing_gate_service: WritingGateService | None = None,
@@ -1741,6 +1766,11 @@ def create_app(
     # 2B.4 follow-up: review-only (conflict) proposals persist to a durable
     # review queue (docs/plans/02b-4-review-queue-persistence-decisions.md).
     review_queue = review_queue_service or _default_review_queue_service()
+    # 미승인 후보 정체성 그룹(Slice 0, 2026-09-02) — 후보↔후보 판정·그룹의 저장.
+    # 아직 HTTP/runner 표면이 없어도 project purge 그래프에는 지금부터 탄다.
+    identity_groups = (
+        identity_group_service or _default_candidate_identity_group_service()
+    )
     apply_service = MemoryApplyService(
         memory_service=memory, review_queue=review_queue
     )
@@ -1932,6 +1962,7 @@ def create_app(
             admin_audit=admin_audit, llm_call_audit=llm_call_audit,
             writing_loop_audit=writing_loop_audit, memory=memory,
             analysis=analysis, review_queue=review_queue,
+            identity_groups=identity_groups,
             gate_findings=gate_findings,
             writing_generation_jobs=writing_generation_jobs,
             writing_scratch=writing_scratch, sync_outbox=sync_outbox,
@@ -1962,6 +1993,7 @@ def create_app(
         activity=activity, admin_audit=admin_audit,
         project_name_history=project_name_history, memory=memory,
         analysis=analysis, review_queue=review_queue,
+        identity_groups=identity_groups,
         gate_findings=gate_findings,
         writing_generation_jobs=writing_generation_jobs,
         writing_scratch=writing_scratch,

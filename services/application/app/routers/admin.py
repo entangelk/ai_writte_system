@@ -72,6 +72,7 @@ async def execute_project_purge(
     memory,
     analysis,
     review_queue,
+    identity_groups,
     gate_findings,
     writing_generation_jobs,
     writing_scratch,
@@ -88,9 +89,9 @@ async def execute_project_purge(
     — 두 벌이 되면 어느 한쪽만 새 서비스를 받아 조용한 고아를 만든다(D5 부분
     삭제). 권한 차이만 라우터가 정한다.
 
-    D8-6d 원 주석: 영구 파기(불가역). archive(soft)와 달리 19컬렉션(v1.8.11
-    `scene_notes` 합류)을 hard delete 하고 indexing outbox 로 worker 가 vector/index
-    5백엔드를 파기(6c _drain_purge).
+    D8-6d 원 주석: 영구 파기(불가역). archive(soft)와 달리 22컬렉션(v1.8.11
+    `scene_notes` 합류 19 + 2026-09-02 identity group 3)을 hard delete 하고
+    indexing outbox 로 worker 가 vector/index 5백엔드를 파기(6c _drain_purge).
     응답은 204(리소스 소멸). 2단계 삭제는 UI 관례가 아니라 여기서 강제한다:
     active project 는 먼저 archive해야 하며 아니면 409.
 
@@ -142,6 +143,9 @@ async def execute_project_purge(
         memory.purge_project(project_id=project_id)
         analysis.purge_project(project_id=project_id)
         review_queue.purge_project(project_id=project_id)
+        # 2026-09-02 Slice 0: identity group 3컬렉션(그룹·멤버·관계)도 project
+        # 자식 — 남으면 미승인 후보 그룹·판정이 프로젝트보다 오래 산다.
+        identity_groups.purge_project(project_id=project_id)
         gate_findings.purge_project(project_id=project_id)
         writing_generation_jobs.purge_project(project_id=project_id)
         writing_scratch.purge_project(project_id=project_id)
@@ -197,6 +201,7 @@ def register_admin(
     memory,
     analysis,
     review_queue,
+    identity_groups,
     gate_findings,
     writing_generation_jobs,
     writing_scratch,
@@ -627,6 +632,7 @@ def register_admin(
             core_sot=core_sot, admin_audit=admin_audit,
             project_name_history=project_name_history,
             memory=memory, analysis=analysis, review_queue=review_queue,
+            identity_groups=identity_groups,
             gate_findings=gate_findings,
             writing_generation_jobs=writing_generation_jobs,
             writing_scratch=writing_scratch,
