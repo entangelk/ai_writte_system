@@ -1,6 +1,6 @@
 # 미승인 후보 정체성 그룹 착수 결정 브리프
 
-**상태**: 오너 결정 대기 (2026-09-02 dogfood)  
+**상태**: 확정 — C 채택 (2026-09-02 dogfood)
 **정본**: `docs/system-contract-sot.md`  
 **선행**: 2A candidate 멱등 저장 · 2B canonical compare · 2B.6/2B.7 의미/별칭 탐지 · Phase 6 Review Inbox
 
@@ -22,7 +22,7 @@
 
 ## Recommendation + reason
 
-**C를 권장한다.** dogfood의 핵심 문제는 목록이 반복되어 보이는 것뿐 아니라, 같은 대상을
+**C를 채택한다.** dogfood의 핵심 문제는 목록이 반복되어 보이는 것뿐 아니라, 같은 대상을
 승인했을 때 canonical memory가 여러 개 되는 것이다. B는 사람이 중복을 인지하게는 하지만
 오류를 막지 못한다. C는 candidate를 물리적으로 합치지 않아 원문 근거를 보존하면서,
 이미 검증된 canonical compare·versioned upsert 경로로 중복 승인을 수렴시킨다. 현재의

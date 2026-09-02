@@ -41,7 +41,13 @@ afterEach(() => {
 });
 
 const listBody = (
-  items: Array<{ id: string; text: string; version_id?: string | null }>,
+  items: Array<{
+    id: string;
+    text: string;
+    version_id?: string | null;
+    intent?: string | null;
+    next_unit?: { title: string; goal: string | null } | null;
+  }>,
 ) => ({
   body: {
     project_id: "p1",
@@ -54,7 +60,8 @@ const listBody = (
       output_type: "draft_patch",
       instruction: "이어서",
       candidate_text: i.text,
-      intent: null,
+      intent: i.intent === undefined ? null : i.intent,
+      next_unit: i.next_unit === undefined ? null : i.next_unit,
       version_id: i.version_id === undefined ? "v1" : i.version_id,
       created_at: "2026-07-20T00:00:00Z",
     })),
@@ -86,6 +93,33 @@ describe("ScratchRecovery", () => {
       <ScratchRecovery projectId="p1" draftId="d1" />,
     );
     await waitFor(() => expect(container).toBeEmptyDOMElement());
+  });
+
+  it("accepts a start-next pad item with its stored next-unit metadata", async () => {
+    const fetchMock = mockFetch(
+      listBody([{
+        id: "wds:1",
+        text: "새 장면 본문",
+        intent: "start_next_unit",
+        next_unit: { title: "다음 장면", goal: "긴장 유지" },
+      }]),
+      { body: { ...acceptSaved, intent: "start_next_unit" } },
+    );
+    const onAccepted = vi.fn();
+    render(
+      <ScratchRecovery projectId="p1" draftId="d1" onAccepted={onAccepted} />,
+    );
+    await screen.findByText(/미채택 초안 1개/);
+
+    await userEvent.click(screen.getByRole("button", { name: "채택" }));
+
+    await waitFor(() => expect(onAccepted).toHaveBeenCalledTimes(1));
+    const acceptCall = fetchMock.mock.calls.find(
+      ([url]) => String(url).endsWith("/writing/accept"),
+    );
+    const body = JSON.parse((acceptCall?.[1] as RequestInit).body as string);
+    expect(body.intent).toBe("start_next_unit");
+    expect(body.next_unit).toEqual({ title: "다음 장면", goal: "긴장 유지" });
   });
 
   it("surfaces recoverable candidates newest-first", async () => {

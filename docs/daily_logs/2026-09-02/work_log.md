@@ -18,6 +18,8 @@
 | 미승인 candidate 중복 기술 검토 | `docs/plans/pending-candidate-identity-grouping-decisions.md` · `docs/plans/README.md` | 현 compare의 canonical-only 공백을 확인. 화면만 그룹/관계 저장/그룹 승인/물리 병합 4안을 비교하고 C(영속 identity group+그룹 승인)를 권장 | 출처 손실·canonical 오염을 막으며 owner-level 전이 계약을 임의로 고르지 않음 |
 | 정본/변경 기록 | `docs/system-contract-sot.md` v1.8.15 · `final-save-analysis-decisions.md` · `frontend-review-inbox-decisions.md` · `CHANGELOG.md` · `HANDOFF.md` | dogfood 요구와 구현 경계, 중복 그룹 결정 대기를 정본에 반영 | 종전 “list에 payload 없음” 결정을 명시적으로 dogfood 개정 |
 | 독립 검증 P0·가드 보강 | `routers/drafts.py` · `test_chapter_hierarchy.py` · `DraftEditor.tsx/test` · `ReviewInbox.test.tsx` | flat payload의 계약 밖 `latest_snapshot_id` 제거. nested exact job의 snapshot/status 값 단정. 첫 저장 전 finalize running 우선순위와 event/question payload 렌더 셀 추가 | 장면 생성·flat 목록·에디터 로드의 response validation 500을 제거하고 검증자가 찾은 무셀/코너 케이스를 잠금 |
+| 미승인 후보 정체성 그룹 C 확정 | `docs/plans/pending-candidate-identity-grouping-decisions.md` · `docs/system-contract-sot.md` | 브리프 상태를 “C 채택”으로 확정하고 SoT v1.8.16에 영속 identity group + 그룹 승인/거절 정책을 등재 | 후보 목록 중복 표시와 승인 후 canonical 중복 방지를 같은 설계로 닫는 방향 확정 |
+| Writing start-next 복구 채택 결함 폐쇄 | `api/models.py` · `routers/writing.py` · `writing/scratch*` · `writing/generation_job*` · `writing/generation_worker.py` · `writing/http_models.py` · `frontend/src/writing/*` · `frontend/src/api/*` · 회귀 | generate 요청에 `intent`/`next_unit` 추가. sync scratch·async job·worker result·scratch API가 둘을 보존. ScratchRecovery accept가 저장된 `next_unit`을 재전송. start-next generate는 provider 호출 전 next_unit binding 검증 | “다음 장면 이어쓰기” 후보가 패드/복구를 거쳐도 새 Scene을 열고, 이전 Scene 본문에 섞이지 않음 |
 
 ## Issues found
 
@@ -30,6 +32,8 @@
 | flat Draft 경로가 `extra_forbidden` 500 | nested Scene 상태 필드를 옮기는 중 `_draft_payload`에도 `latest_snapshot_id` 출력을 추가했으나 `DraftPayload(extra="forbid")`에는 없었음 | flat 한 줄 제거, `DraftPayload.model_validate`와 `latest_snapshot_id` 부재를 기명 셀로 고정 | flat 계약은 무변, nested Scene만 latest snapshot을 수령 |
 | nested scenes 상태 값 파생이 무셀 | 기존 셀은 네 필드 존재만 확인해 `analyze:{snapshot_id}` key가 깨져도 green | 실제 latest snapshot에 exact-key running job을 만들고 snapshot/status 값을 단정 | 잘못된 lookup이면 기명 셀이 실패 |
 | 첫 저장 전 finalize 진행 라벨이 `미실행` | `latestSnapshotId === null` 분기가 local `analysisRunning`보다 먼저였음 | local running을 최우선으로 이동하고 zero-version deferred 셀 추가 | 버튼과 상태 바가 요청 중 동일하게 진행 표시 |
+| 다음 장면 후보가 이전 장면에 섞임 | 생성 요청·scratch·async job이 `intent`/`next_unit`을 보존하지 않아, 패드 채택이 `append_current`/`next_unit=null` accept body로 재구성됨 | generate→candidate/scratch/job→worker→scratch API→ScratchRecovery accept 전 구간에 `intent`/`next_unit`을 보존 | start-next 후보 복구 채택이 `start_next_unit`으로 서버에 도달해 새 Scene을 생성 |
+| 패드의 [채택]이 동작하지 않는 것처럼 보임 | start-next 항목은 서버가 `next_unit` 없는 accept를 400으로 거절하고, UI는 항목 아래 에러만 남김 | 패드가 저장된 next-unit metadata를 전송하고, 생성 단계에서 start-next binding을 사전 검증 | 정상 항목은 저장 성공으로 `onAccepted`가 호출되고, 잘못된 요청은 생성 전에 차단 |
 
 ## Decisions
 
@@ -44,6 +48,11 @@
   C 권장을 제시하고 구현을 멈췄다.
 - 독립 검증 불합격을 확인하고 보강하라는 사용자 지시에 따라, 정본에 없는 flat 계약 확장보다
   최소 복원(출력 한 줄 제거)을 선택했다. `latest_snapshot_id`는 `ScenePayload`에만 유지한다.
+- 사용자가 `pending-candidate-identity-grouping-decisions.md`의 C안을 채택한다고 확정했다.
+  이에 따라 후보↔후보 중복은 영속 identity group과 그룹 승인/거절로 수렴시키며, 단순 UI
+  그룹이나 후보 물리 병합은 정본 방향이 아니다.
+- `start_next_unit`의 next-unit title/goal은 accept 때 갑자기 생기는 값이 아니라 generate 시점의
+  사용자 선택이다. 따라서 sync 후보·async job·scratch 복구 저장소가 이를 보존하는 것이 계약이다.
 
 ## Verification
 
@@ -87,6 +96,21 @@
 | M9 nested lookup 파손 | `_scene_payload`의 `analyze:`를 `analyze-broken:`로 교체 | 같은 셀 | `analysis_snapshot_id: None != source-snapshot-1`, 1 failed |
 | M10 zero-version 우선순위 회귀 | `analysisLabel`에서 `latestSnapshotId === null`을 `analysisRunning`보다 앞으로 이동 | `저장본이 없는 첫 최종 저장도 요청 중에는 분석 진행으로 표시한다` | `분석 진행 중` 부재·`미실행` 관측, 1 failed |
 | M11 payload 라벨 제거 | `PAYLOAD_FIELD_LABELS`의 `event`·`question` 두 행 삭제 | `renders event and open-question summaries inside their list rows` | 사건 라벨 2개 기대→1개, 1 failed |
+
+## Verification — start-next scratch recovery
+
+- Python 컴파일:
+  `python3 -m py_compile services/application/app/api/models.py services/application/app/routers/writing.py services/application/app/writing/scratch.py services/application/app/writing/scratch_mongo.py services/application/app/writing/generation_job.py services/application/app/writing/generation_job_mongo.py services/application/app/writing/generation_worker.py services/application/app/writing/http_models.py` → 통과.
+- Python 집중 회귀:
+  `python3 -m unittest tests.test_writing_scratch tests.test_writing_generation_job tests.test_writing_generation_worker tests.test_writing tests.test_writing_revise` → **191 tests OK**.
+- 프론트 집중 회귀:
+  `npm test -- --run src/writing/WritingPanel.test.tsx src/writing/ScratchRecovery.test.tsx` → **72 tests passed**.
+- 프론트 타입/빌드:
+  `npm run build` → `tsc --noEmit` + Vite build 통과.
+- `git diff --check` → 통과.
+- 패턴 스윕:
+  `rg -n "intent: entry.intent|next_unit: null|intent=job.intent|writing_scratch.save\\(|scratch.save\\(|WritingRequest\\(" services frontend/src tests ...`
+  로 generate/scratch/job/worker 외 유사 누락을 확인. 남은 `WritingRequest(...)` 직접 호출은 테스트·gate/revise의 기본 append 경로라 이번 결함의 start-next 복구 경로와 무관.
 
 각 변이 전 checkpoint+clean gate를 확인했고, 변이마다 `git checkout -- <path>` 복원 후
 `git status --short` 0줄을 확인했다.

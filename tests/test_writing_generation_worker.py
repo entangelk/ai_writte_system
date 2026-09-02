@@ -102,12 +102,16 @@ class _RecordingCharger:
         self.charged.append(job.id)
 
 
-def _claimed(jobs, *, request="wr1", draft="d1", version="v1"):
+def _claimed(
+    jobs, *, request="wr1", draft="d1", version="v1",
+    intent=None, next_unit=None,
+):
     jobs.enqueue(
         project_id="p1", draft_id=draft, request_id=request,
         task_type="continue_scene", instruction="이어서 써줘",
         draft_excerpt="앞 문단", query=None, output_length="medium",
-        max_output_tokens=2048, max_tokens=4096, version_id=version)
+        max_output_tokens=2048, max_tokens=4096, version_id=version,
+        intent=intent, next_unit=next_unit)
     return jobs.claim_next()
 
 
@@ -127,6 +131,20 @@ class ExecuteSuccessTest(unittest.TestCase):
         self.assertEqual(done.result_scratch_id, entries[0].id)
         self.assertEqual(c.jobs.get(job.id).status,
                          WritingGenerationJobStatus.SUCCEEDED)
+
+    def test_success_preserves_start_next_intent_for_pad_accept(self):
+        c = _collaborators()
+        job = _claimed(
+            c.jobs,
+            intent="start_next_unit",
+            next_unit={"title": "다음 장면", "goal": "긴장 유지"},
+        )
+        _run(execute_generation_job(job, c))
+
+        entry = c.scratch.list_for_draft("p1", "d1")[0]
+        self.assertEqual(entry.intent, "start_next_unit")
+        self.assertEqual(entry.next_unit, {
+            "title": "다음 장면", "goal": "긴장 유지"})
 
 
 class ExecuteChargesOnSuccessTest(unittest.TestCase):

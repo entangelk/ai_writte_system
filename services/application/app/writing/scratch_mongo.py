@@ -83,6 +83,7 @@ def _doc(entry: ScratchCandidate) -> dict:
         "candidate_text": entry.candidate_text,
         "created_at": entry.created_at,
         "intent": entry.intent,
+        "next_unit": entry.next_unit,
         "version_id": entry.version_id,
     }
 
@@ -99,5 +100,6 @@ def _entry(doc: dict) -> ScratchCandidate:
         candidate_text=doc["candidate_text"],
         created_at=doc["created_at"],
         intent=doc.get("intent"),
+        next_unit=doc.get("next_unit"),
         version_id=doc.get("version_id"),
     )

@@ -311,11 +311,37 @@ class ScratchGenerateHttpTest(unittest.TestCase):
         items = scratch.list_for_draft(project_id, "d1")
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0].candidate_text, "복구 대상 초안")
-        self.assertIsNone(items[0].intent)
+        self.assertEqual(items[0].intent, "append_current")
+        self.assertIsNone(items[0].next_unit)
         # D7 (async-pad): the generating version is recorded so the pad can show
         # "이 version 기준으로 생성됨". Mutation: dropping the save's version_id
         # arg re-fails this (falls back to None).
         self.assertEqual(items[0].version_id, "v1")
+
+    def test_generate_start_next_persists_intent_and_next_unit(self):
+        # under-strict: a recovered/pad accept must still open the next scene.
+        # If generate drops intent or next_unit, ScratchRecovery reconstructs an
+        # append_current/null accept and the new scene text gets mixed into the
+        # previous scene.
+        scratch = WritingScratchService(InMemoryWritingScratchRepository())
+        client, project_id = _generate_app(scratch, content="새 장면 본문")
+        response = client.post(
+            f"/projects/{project_id}/writing/generate",
+            json={
+                "request_id": "wr-next",
+                "instruction": "다음 장면으로 이어써줘.",
+                "current_position": {"draft_id": "d1", "version_id": "v1"},
+                "intent": "start_next_unit",
+                "next_unit": {"title": "다음 장면", "goal": "긴장 유지"},
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        entry = scratch.list_for_draft(project_id, "d1")[0]
+        self.assertEqual(entry.intent, "start_next_unit")
+        self.assertEqual(entry.next_unit, {"title": "다음 장면", "goal": "긴장 유지"})
+        self.assertEqual(response.json()["intent"], "start_next_unit")
+        self.assertEqual(response.json()["next_unit"], {
+            "title": "다음 장면", "goal": "긴장 유지"})
 
     def test_generate_without_position_does_not_persist(self):
         # over-strict: no draft key → no orphan scratch entry. The recovery net
@@ -361,7 +387,7 @@ class ScratchListDiscardHttpTest(unittest.TestCase):
         first = body["items"][0]
         self.assertEqual(set(first), {
             "id", "draft_id", "request_id", "task_type", "output_type",
-            "instruction", "candidate_text", "intent", "version_id",
+            "instruction", "candidate_text", "intent", "next_unit", "version_id",
             "created_at"})
 
     def test_discard_clears_and_reports_count(self):

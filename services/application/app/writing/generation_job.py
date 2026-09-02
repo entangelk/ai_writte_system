@@ -115,6 +115,10 @@ class WritingGenerationJob:
     # worker stamps it onto the scratch result (D7) and the pad shows it.
     version_id: str
     created_at: datetime
+    # Generate-time W3 intent fields. Async results surface through scratch, so
+    # these must ride the job to keep a later pad accept from defaulting to append.
+    intent: str | None = None
+    next_unit: dict[str, str | None] | None = None
     # Phase 8 Slice 8.3 (Q1-b=A, 오너 2026-08-04). 202 는 "접수 성공"이지 "생성
     # 성공"이 아니므로 **워커가 성공 시 원장에 쓴다** — 그러려면 이 job 이 누구
     # 것인지 워커가 알아야 하고, 그 한 필드가 이것이다. 부모 계획이 8.4 에 배정한
@@ -305,6 +309,8 @@ class WritingGenerationJobService:
         task_type: str, instruction: str, draft_excerpt: str,
         query: str | None, output_length: str, max_output_tokens: int,
         max_tokens: int, version_id: str, user_id: str | None = None,
+        intent: str | None = None,
+        next_unit: dict[str, str | None] | None = None,
     ) -> CreateWritingGenerationJobResult:
         # Idempotent on (project_id, request_id): re-submitting the same logical
         # generate (a retried POST) returns the existing job instead of running a
@@ -328,6 +334,8 @@ class WritingGenerationJobService:
             max_output_tokens=max_output_tokens,
             max_tokens=max_tokens,
             version_id=version_id,
+            intent=intent,
+            next_unit=next_unit,
             created_at=self._clock(),
             user_id=user_id,
         )

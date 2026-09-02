@@ -60,13 +60,13 @@ def _service(*, clock=None, claim_timeout_seconds=DEFAULT_CLAIM_TIMEOUT_SECONDS)
 
 
 def _enqueue(svc, *, project="p1", draft="d1", request="wr1", length="medium",
-             tokens=2048, user=None):
+             tokens=2048, user=None, intent=None, next_unit=None):
     return svc.enqueue(
         project_id=project, draft_id=draft, request_id=request,
         task_type="continue_scene", instruction="이어서 써줘",
         draft_excerpt="앞 문단", query=None, output_length=length,
         max_output_tokens=tokens, max_tokens=4096, version_id="v1",
-        user_id=user,
+        user_id=user, intent=intent, next_unit=next_unit,
     )
 
 
@@ -83,8 +83,22 @@ class EnqueueTest(unittest.TestCase):
         self.assertEqual(job.output_length, "long")
         self.assertEqual(job.max_output_tokens, 4096)
         self.assertEqual(job.max_tokens, 4096)
+        self.assertIsNone(job.intent)
+        self.assertIsNone(job.next_unit)
         self.assertIsNone(job.claimed_at)
         self.assertIsNone(job.result_scratch_id)
+
+    def test_enqueue_carries_start_next_fields(self):
+        svc = _service()
+        result = _enqueue(
+            svc,
+            intent="start_next_unit",
+            next_unit={"title": "다음 장면", "goal": None},
+        )
+
+        self.assertEqual(result.job.intent, "start_next_unit")
+        self.assertEqual(result.job.next_unit, {
+            "title": "다음 장면", "goal": None})
 
     def test_enqueue_is_idempotent_on_project_and_request(self):
         # under-strict: a retried POST of the same request returns the SAME job,

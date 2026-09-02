@@ -44,6 +44,8 @@ const candidate = {
   risk_notes: [],
   candidate_id: null,
   generated_by_model: "fake-writer",
+  intent: "append_current",
+  next_unit: null,
 };
 
 // 증분 2c (D5=A): medium/long presets get a 202 job reference instead of a
@@ -285,6 +287,8 @@ describe("WritingPanel — generate → gate", () => {
       output_length: "short",
       task_type: "continue_scene",
       current_position: { draft_id: "d1", version_id: "v3" },
+      intent: "append_current",
+      next_unit: null,
     });
 
     const [gateUrl, gateInit] = fetchMock.mock.calls[1];
@@ -815,6 +819,12 @@ describe("WritingPanel — accept (pass only)", () => {
     await userEvent.type(screen.getByLabelText("새 장면 제목"), "성 안");
     await userEvent.type(screen.getByLabelText("장면 목표(선택)"), "반전을 심는다");
     await generateAndGate(fetchMock);
+    const generated = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(generated.intent).toBe("start_next_unit");
+    expect(generated.next_unit).toEqual({
+      title: "성 안",
+      goal: "반전을 심는다",
+    });
     expect(acceptButton()).toBeEnabled();
     await userEvent.click(acceptButton());
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
@@ -827,18 +837,15 @@ describe("WritingPanel — accept (pass only)", () => {
     expect(screen.getByRole("status")).toHaveTextContent("같은 장의 새 장면으로 채택·저장됐습니다.");
   });
 
-  it("blocks accept when starting the next unit without a title", async () => {
-    const fetchMock = mockFetch({ body: candidate }, { body: gatePass });
+  it("blocks generation when starting the next unit without a title", async () => {
+    const fetchMock = mockFetch();
     renderPanel();
     await userEvent.click(screen.getByLabelText("같은 장의 다음 장면 시작"));
-    await generateAndGate(fetchMock);
-    // Gate passed, but a blank next-unit title keeps accept disabled.
-    expect(acceptButton()).toBeDisabled();
-    expect(
-      screen.getByText("새 장면 제목을 입력해야 채택할 수 있습니다."),
-    ).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
+    expect(generateButton()).toBeDisabled();
     await userEvent.type(screen.getByLabelText("새 장면 제목"), "장면 2");
-    expect(acceptButton()).toBeEnabled();
+    expect(generateButton()).toBeEnabled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("treats 200 accepted=false as a Gate result, not a failure (candidate kept)", async () => {

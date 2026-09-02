@@ -317,7 +317,8 @@ export function WritingPanel(props: WritingPanelProps) {
       trimmed === "" ||
       busyRef.current ||
       availability.blocked ||
-      latestVersionId === null
+      latestVersionId === null ||
+      !nextUnitReady
     ) {
       return;
     }
@@ -336,6 +337,12 @@ export function WritingPanel(props: WritingPanelProps) {
     const baseVersionId = latestVersionId;
     const requestId = crypto.randomUUID();
     const position = { draft_id: draftId, version_id: baseVersionId };
+    const generateNextUnit = startingNextUnit
+      ? {
+          title: nextTitle.trim(),
+          goal: nextGoal.trim() === "" ? null : nextGoal.trim(),
+        }
+      : null;
     try {
       setProgress("근거를 검색하고 초안을 생성하는 중…");
       const produced = await generateWriting(projectId, {
@@ -346,6 +353,8 @@ export function WritingPanel(props: WritingPanelProps) {
         output_length: outputLength,
         task_type: TASK_TYPE,
         current_position: position,
+        intent: writingIntent,
+        next_unit: generateNextUnit,
       }, options);
       void refreshQuota();
       // 증분 2c (D5=A): medium/long presets are async — the server enqueues a
@@ -765,7 +774,8 @@ export function WritingPanel(props: WritingPanelProps) {
             disabled={
               availability.blocked ||
               busy !== null ||
-              instruction.trim() === ""
+              instruction.trim() === "" ||
+              !nextUnitReady
             }
           >
             {busy === "generating" ? "생성 중…" : "이어쓰기 생성"}
@@ -904,7 +914,7 @@ export function WritingPanel(props: WritingPanelProps) {
             </button>
             {gate?.decision === "pass" && !nextUnitReady && (
               <span className="candidate-accept-note">
-                새 장면 제목을 입력해야 채택할 수 있습니다.
+                새 장면 제목을 입력해야 생성·채택할 수 있습니다.
               </span>
             )}
             {gate !== null && gate.decision !== "pass" && !canAccept && (

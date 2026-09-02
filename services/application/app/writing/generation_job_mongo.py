@@ -143,6 +143,8 @@ def _doc(job: WritingGenerationJob) -> dict:
         "max_output_tokens": job.max_output_tokens,
         "max_tokens": job.max_tokens,
         "version_id": job.version_id,
+        "intent": job.intent,
+        "next_unit": job.next_unit,
         "created_at": job.created_at,
         # 8.3 Q1-b=A: 워커가 성공 시 원장에 쓰려면 주체를 알아야 한다.
         "user_id": job.user_id,
@@ -171,6 +173,8 @@ def _entry(doc: dict) -> WritingGenerationJob:
         max_output_tokens=doc["max_output_tokens"],
         max_tokens=doc["max_tokens"],
         version_id=doc["version_id"],
+        intent=doc.get("intent"),
+        next_unit=doc.get("next_unit"),
         created_at=doc["created_at"],
         # 8.3 이전에 만들어진 행에는 이 필드가 없다 — 그런 job 은 과금되지 않는다.
         user_id=doc.get("user_id"),

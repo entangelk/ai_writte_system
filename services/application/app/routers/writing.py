@@ -188,6 +188,8 @@ def register_writing(
                  "message": x.message} for x in candidate.risk_notes],
             "candidate_id": candidate.candidate_id,
             "generated_by_model": candidate.generated_by_model,
+            "intent": candidate.intent.value,
+            "next_unit": _next_unit_payload(candidate.next_unit),
         }
 
     def _writing_generation_job_payload(job) -> dict[str, object]:
@@ -293,6 +295,11 @@ def register_writing(
             "position": target_draft.position,
         }
 
+    def _next_unit_payload(next_unit: NextUnit | None) -> dict[str, str | None] | None:
+        if next_unit is None:
+            return None
+        return {"title": next_unit.title, "goal": next_unit.goal}
+
     @app.post("/projects/{project_id}/writing/generate",
               response_model=WritingCandidatePayload,
               responses=_owned({**GENERATE_ASYNC_RESPONSES,
@@ -307,12 +314,33 @@ def register_writing(
         try:
             _require_project_exists(project_id)
             task_type = WritingTaskType(body.task_type)
+            intent = WritingIntent(body.intent)
+            next_unit = (
+                NextUnit(title=body.next_unit.title, goal=body.next_unit.goal)
+                if body.next_unit is not None else None
+            )
         except NotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if intent is WritingIntent.APPEND_CURRENT and next_unit is not None:
             raise HTTPException(
-                status_code=400, detail=f"unsupported task_type: {body.task_type}"
-            ) from exc
+                status_code=400, detail="append_current must not carry next_unit"
+            )
+        if intent is WritingIntent.START_NEXT_UNIT:
+            if next_unit is None:
+                raise HTTPException(
+                    status_code=400, detail="start_next_unit requires next_unit"
+                )
+            if not next_unit.title.strip():
+                raise HTTPException(
+                    status_code=400, detail="next_unit.title must not be blank"
+                )
+            if next_unit.goal is not None and not next_unit.goal.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail="next_unit.goal must be a nonblank string or null",
+                )
         # 증분 2 (D3=A): resolve the output-length preset to a token cap. The server
         # owns the mapping; an unknown preset is a 400 (same shape as task_type).
         try:
@@ -369,6 +397,8 @@ def register_writing(
                 max_output_tokens=output_tokens,
                 max_tokens=body.max_tokens,
                 version_id=body.current_position.version_id,
+                intent=intent.value,
+                next_unit=_next_unit_payload(next_unit),
             )
             return JSONResponse(
                 status_code=202,
@@ -424,6 +454,8 @@ def register_writing(
                         task_type=task_type,
                         instruction=body.instruction,
                         draft_excerpt=body.draft_excerpt,
+                        intent=intent,
+                        next_unit=next_unit,
                     ),
                     package=package,
                     max_output_tokens=output_tokens,
@@ -468,6 +500,8 @@ def register_writing(
                     output_type=candidate.output_type.value,
                     instruction=body.instruction,
                     candidate_text=candidate.text,
+                    intent=intent.value,
+                    next_unit=_next_unit_payload(next_unit),
                     version_id=body.current_position.version_id,
                 )
             except Exception:  # noqa: BLE001 — safety net never blocks generate
@@ -1325,6 +1359,7 @@ def register_writing(
             "instruction": entry.instruction,
             "candidate_text": entry.candidate_text,
             "intent": entry.intent,
+            "next_unit": entry.next_unit,
             "version_id": entry.version_id,
             "created_at": entry.created_at.isoformat(),
         }

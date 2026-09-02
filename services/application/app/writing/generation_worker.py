@@ -48,7 +48,12 @@ from services.application.app.observability.llm_call_scope import (
     llm_call_scope,
     reclassify_planner_parse_error,
 )
-from services.application.app.writing.models import WritingRequest, WritingTaskType
+from services.application.app.writing.models import (
+    NextUnit,
+    WritingIntent,
+    WritingRequest,
+    WritingTaskType,
+)
 from services.application.app.writing.report import InvalidCandidateReport
 from services.application.app.writing.report import (
     TEMPLATE as REPORT_SYSTEM_TEMPLATE,
@@ -129,6 +134,13 @@ async def execute_generation_job(
                     task_type=WritingTaskType(job.task_type),
                     instruction=job.instruction,
                     draft_excerpt=job.draft_excerpt,
+                    intent=WritingIntent(
+                        job.intent or WritingIntent.APPEND_CURRENT.value
+                    ),
+                    next_unit=(
+                        NextUnit(**job.next_unit)
+                        if job.next_unit is not None else None
+                    ),
                 ),
                 package=package,
                 max_output_tokens=job.max_output_tokens,
@@ -149,6 +161,8 @@ async def execute_generation_job(
                 output_type=candidate.output_type.value,
                 instruction=job.instruction,
                 candidate_text=candidate.text,
+                intent=job.intent,
+                next_unit=job.next_unit,
                 version_id=job.version_id,
             )
         except (WritingError, InvalidContextSearchRequest) as exc:

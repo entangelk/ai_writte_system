@@ -90,13 +90,13 @@ class _Client:
 
 
 def _entry(entry_id, *, project="p", draft="d", minute=0, text="초안",
-           intent=None, request_id="wr1", version_id=None):
+           intent=None, next_unit=None, request_id="wr1", version_id=None):
     return ScratchCandidate(
         id=entry_id, project_id=project, draft_id=draft, request_id=request_id,
         task_type="continue_scene", output_type="draft_patch",
         instruction="이어서 써줘", candidate_text=text,
         created_at=datetime(2026, 7, 20, 0, minute, tzinfo=UTC),
-        intent=intent, version_id=version_id,
+        intent=intent, next_unit=next_unit, version_id=version_id,
     )
 
 
@@ -116,7 +116,9 @@ class MongoWritingScratchRepositoryTest(unittest.TestCase):
     def test_add_and_list_round_trip_newest_first(self):
         earlier = _entry("wds:a", minute=1, text="오래된")
         later = _entry("wds:z", minute=5, text="최신", version_id="v9")
-        with_intent = _entry("wds:i", minute=3, intent="append_current")
+        with_intent = _entry(
+            "wds:i", minute=3, intent="start_next_unit",
+            next_unit={"title": "다음 장면", "goal": None})
         other_draft = _entry("wds:d2", draft="d2", minute=9)
         other_project = _entry("wds:p2", project="p2", minute=9)
         for entry in (earlier, later, with_intent, other_draft, other_project):

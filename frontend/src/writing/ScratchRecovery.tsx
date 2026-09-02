@@ -177,7 +177,7 @@ export function ScratchRecovery(props: ScratchRecoveryProps) {
         version_id: entry.version_id,
       },
       intent: entry.intent ?? "append_current",
-      next_unit: null,
+      next_unit: entry.next_unit,
     };
     const signature = JSON.stringify(fields);
     const intent = acceptIntentRef.current?.signature === signature

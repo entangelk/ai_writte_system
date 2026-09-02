@@ -77,6 +77,11 @@ class RiskNotePayload(BaseModel):
     message: str
 
 
+class NextUnitPayload(BaseModel):
+    title: str
+    goal: str | None
+
+
 class WritingCandidatePayload(BaseModel):
     request_id: str
     project_id: str
@@ -92,6 +97,8 @@ class WritingCandidatePayload(BaseModel):
     risk_notes: list[RiskNotePayload]
     candidate_id: str | None
     generated_by_model: str
+    intent: WritingIntent
+    next_unit: NextUnitPayload | None
 
 
 class WritingGateFindingPayload(BaseModel):

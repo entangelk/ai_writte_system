@@ -1169,7 +1169,7 @@ class WritingReviseGateEnvelopeKeyTest(unittest.TestCase):
             "request_id", "project_id", "task_type", "output_type", "text",
             "status", "self_reported_constraints", "candidate_claims",
             "new_memory_hints", "risk_notes", "candidate_id",
-            "generated_by_model",
+            "generated_by_model", "intent", "next_unit",
         })
 
     def test_report_error_partial_envelope_keys(self):

@@ -41,10 +41,12 @@ class ScratchCandidate:
     instruction: str
     candidate_text: str
     created_at: datetime
-    # Phase 7 absorption seam: intent is only known at accept, so generate-time
-    # saves leave it None. Kept nullable so a later conversation_turn can carry
-    # it without a schema change (brief Follow-up considerations).
+    # W3 intent is selected at generate time and must survive through the pad;
+    # nullable keeps legacy rows readable.
     intent: str | None = None
+    # Required to accept recovered start_next_unit candidates; nullable keeps
+    # pre-W3/pad rows copy-only or append-only as before.
+    next_unit: dict[str, str | None] | None = None
     # Async pad seam (async-generation-pad D7): the version the candidate was
     # generated against, so the pad can show "이 version 기준으로 생성됨".
     # Additive + nullable like ``intent`` — pre-pad records read as None.
@@ -154,6 +156,7 @@ class WritingScratchService:
         self, *, project_id: str, draft_id: str, request_id: str,
         task_type: str, output_type: str, instruction: str,
         candidate_text: str, intent: str | None = None,
+        next_unit: dict[str, str | None] | None = None,
         version_id: str | None = None,
     ) -> ScratchCandidate:
         entry = ScratchCandidate(
@@ -167,6 +170,7 @@ class WritingScratchService:
             candidate_text=candidate_text,
             created_at=self._clock(),
             intent=intent,
+            next_unit=next_unit,
             version_id=version_id,
         )
         self._repo.add(entry)

@@ -919,6 +919,15 @@ class ContextSearchHttpRequest(BaseModel):
     max_tokens: int = DEFAULT_CONTEXT_BUDGET_TOKENS
 
 
+class NextUnitBody(BaseModel):
+    # SoT v1.8.9: start_next_unit always creates the next Scene in the current
+    # Chapter. `goal` is a required-but-nullable generation hint.
+    # extra="forbid" matches the catalog's additionalProperties:false.
+    model_config = ConfigDict(extra="forbid")
+    title: str
+    goal: str | None
+
+
 class WritingGenerateRequest(BaseModel):
     request_id: str
     instruction: str
@@ -942,6 +951,10 @@ class WritingGenerateRequest(BaseModel):
     # which is the input ContextPackage budget. Legacy clients omit it → short.
     # `long` (4096) is single-generate only; it is not a knob on revise-and-gate.
     output_length: str = OutputLength.SHORT.value
+    # W3 Writing intent (§3.1). Generate must preserve this through sync scratch
+    # and async jobs so a later pad accept does not silently fall back to append.
+    intent: str = WritingIntent.APPEND_CURRENT.value
+    next_unit: NextUnitBody | None = None
 
 
 class WritingGateRequest(BaseModel):
@@ -1006,15 +1019,6 @@ class WritingReviseRequest(BaseModel):
     # Phase 5.9 L9 B (P2=B opt-in, 2026-07-13): persist this loop's audit only
     # when requested. None → env default (WRITING_LOOP_AUDIT_DEFAULT, off).
     persist_audit: bool | None = None
-
-
-class NextUnitBody(BaseModel):
-    # SoT v1.8.9: start_next_unit always creates the next Scene in the current
-    # Chapter. `goal` is a required-but-nullable generation hint.
-    # extra="forbid" matches the catalog's additionalProperties:false.
-    model_config = ConfigDict(extra="forbid")
-    title: str
-    goal: str | None
 
 
 class ObservabilityKpiSitePayload(BaseModel):
