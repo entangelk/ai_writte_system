@@ -22,7 +22,7 @@
 5. 그룹 승인은 단계별 처리 현황을 저장해 재시도 시 이미 승격·적용된 후보를 중복 처리하지 않는다.
 6. grouped Inbox UI에서 같은 그룹 후보를 접고 펼치며, 그룹 승인/거절 실패·부분 실패를 사람이 이해할 수 있다.
 
-## Slice 0 — 저장 모델과 수명
+## Slice 0 — 저장 모델과 수명 · **완료(2026-09-02, SoT v1.8.17)**
 
 **범위:** identity group 저장소만 만든다. HTTP, runner 배선, LLM judge, Review Inbox UI는 만들지 않는다.
 
@@ -44,6 +44,16 @@
 
 **완료 후 인계:** 다음 Slice는 저장소 public service만 사용한다. Mongo collection을 직접 읽어 그룹을
 조립하지 않는다.
+
+**완료 기록(2026-09-02):** `analysis/identity_groups.py`(도메인·서비스·in-memory)·
+`analysis/identity_groups_mongo.py`(3컬렉션 어댑터)로 구현. 아래 계약 리터럴을 이 Slice에서
+확정했다 — ① relation 스키마에 `candidate_type` 포함(위 "모든 unique/index 축" 문장과 필드
+목록의 충돌을 오너 결정으로 상위집합 쪽으로 해소), ② Slice 0 유일 `member_status`=`active`,
+③ 그룹 `revision`은 0에서 시작해 상태 변경마다 +1, ④ relation 재기록은 upsert(마지막 판정
+승리)하되 `created_at`은 첫 판정 유지 — 판정 재사용 정책 자체는 Slice 1. "candidate purge"
+경로는 현재 코드에 없다(후보 문서 hard delete는 project purge뿐)므로 `purge_project` 한 벌로
+고아 없음 계약이 닫힌다. 파기 그래프는 10계약/22컬렉션이 됐고 소유자·admin purge 양 경로
+스파이가 호출을 잠근다.
 
 ## Slice 1 — shortlist와 판정 서비스
 

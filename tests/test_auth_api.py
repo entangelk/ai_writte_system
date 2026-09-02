@@ -1029,8 +1029,8 @@ class _PurgeSpy:
     """Records purge_project calls; delegates everything else to the inner service.
 
     D8-6d regression: prove the endpoint actually fans the purge out to the derived
-    services, not just core_sot + enqueue (otherwise derived 10컬렉션 become silent
-    orphans — D5 부분 삭제)."""
+    services, not just core_sot + enqueue (otherwise the derived collections become
+    silent orphans — D5 부분 삭제)."""
 
     def __init__(self, inner) -> None:
         self.inner = inner

@@ -23,6 +23,7 @@
 | start-next 검증 조건 보강 | `README.md` · `frontend/src/api/schema.d.ts` · `tests/test_writing.py` · `tests/test_writing_generation_job_mongo.py` | 조건부 합격 4건을 닫기 위해 README 정본 표기를 v1.8.16으로 갱신, `gen:api` 재생성, generate 400 경계 4분기 셀, generation_job_mongo `intent`/`next_unit` 실값 round-trip을 추가 | 검증자가 지목한 문서 red·생성물 drift·400 무셀·job Mongo 무잠금 축을 기계적으로 폐쇄 |
 | 미승인 후보 identity group 구현 페이즈 계획 | `docs/plans/pending-candidate-identity-grouping-implementation-phases.md` · `docs/plans/README.md` | C 채택 구현을 저장 모델, shortlist+judge, runner 배선, Review Inbox 읽기면, 그룹 거절, 그룹 승인, grouped UI 7개 Slice로 분할 | 다음 구현을 Slice 0 저장 모델부터 작게 시작할 수 있게 착수 경계를 고정 |
 | identity group 계획 하드닝 반영 | `docs/plans/pending-candidate-identity-grouping-implementation-phases.md` | 합격 검증의 비차단 4건을 계획에 반영: `contradicted` group 상태와 추이성 모순 셀, `uncertain` 표시 및 수동 해소 Deferred 트리거, `/analysis/review-inbox/groups/*` 액션 경로, Slice 4·5 operation 101·102 예상 | 브리프 Follow-up 미배정 두 건과 route/operation 착수 함정을 구현 전 문서 단계에서 폐쇄 |
+| **identity group Slice 0(저장 모델과 수명) 구현** | `analysis/identity_groups.py`(신규) · `analysis/identity_groups_mongo.py`(신규) · `main.py` · `routers/admin.py`·`projects.py` · `tests/test_identity_groups.py`·`test_identity_groups_mongo.py`(신규 20셀) · purge 로스터/스파이 셀 | 세 컬렉션(그룹·멤버·관계)의 도메인·서비스·in-memory·Mongo 어댑터. 모든 unique/index 축에 `project_id`·`candidate_type` 선행. relation pair 좌우 정규화, member 재추가 멱등(`added_at` 불변), group `status open\|contradicted\|closed` 저장, `execute_project_purge` 합류(10계약/22컬렉션) | Slice 1(shortlist·판정 서비스)이 저장소 public service만으로 착수 가능. HTTP/OpenAPI 무변(HEAD 대비 dump 실측 IDENTICAL) |
 
 ## Issues found
 
@@ -56,6 +57,16 @@
   그룹이나 후보 물리 병합은 정본 방향이 아니다.
 - `start_next_unit`의 next-unit title/goal은 accept 때 갑자기 생기는 값이 아니라 generate 시점의
   사용자 선택이다. 따라서 sync 후보·async job·scratch 복구 저장소가 이를 보존하는 것이 계약이다.
+- **(identity group Slice 0) 계획 문서 내부 충돌을 오너 결정으로 확정했다**: relation 필드 목록에는
+  `candidate_type`이 없는데 "모든 unique/index 축에 포함" 문장은 전부 포함을 요구한다. 물어본 결과
+  **relation에 `candidate_type`을 더해 상위집합으로** 가기로 했다(2026-09-02, 대안: 필드 목록
+  그대로 두고 축 문장을 느슨하게 읽기). 구현 중 유도된 나머지 리터럴은 Slice 0 완료 기록에
+  남겼다(`member_status` 초기값 `active`·`revision` 0 시작·relation 재기록 upsert에 `created_at`
+  첫 판정 유지).
+- **(identity group Slice 0) "candidate purge"는 현재 코드에 없는 경로다** — 후보 문서를 hard delete
+  하는 곳은 project purge(`analysis.purge_project`)뿐이므로, 계획의 "candidate purge/project purge
+  고아 없음"은 identity store의 `purge_project` 한 벌로 닫힌다. 후보 단위 파기 경로가 생기면 그때
+  `purge_candidate`를 별도 슬라이스로 연다.
 
 ## Verification
 
@@ -142,10 +153,41 @@
 각 변이 전 checkpoint+clean gate를 확인했고, 변이마다 `git checkout -- <path>` 복원 후
 `git status --short` 0줄을 확인했다.
 
+## Verification — identity group Slice 0
+
+- 테스트 먼저 → 최소 구현 → focused → broader → commit(`183af60`) → 변이 → 복원 순서로 진행했다.
+- Python 컴파일: 신규/수정 모듈 `python3 -m py_compile` 통과.
+- Focused: `PYTHONPATH=. pytest tests/test_identity_groups.py tests/test_identity_groups_mongo.py`
+  → **20 passed**(도메인 14 · Mongo fake 5 · 실몽고 round-trip 1 — test-mongo rs-test 기동 중 실측).
+- Purge 그래프: `test_purge_project_coverage`(로스터 10) · `test_owner_project_purge` ·
+  `test_draft_purge` · `test_purge_reconciler` → **29 passed**. `test_auth_api` 전체 →
+  **132 passed / 999 subtests**(admin purge 스파이 포함).
+- **OpenAPI 무변 실측**: `scripts/dump_openapi.py` 출력을 HEAD(stash) 대비 diff → **IDENTICAL**
+  (`schema.d.ts` 재생성 불요 — 이 Slice는 HTTP 표면이 없다).
+- 전수(베타, test-mongo ON): **2696 passed / 1 skipped / 3124 subtests, exit 0**.
+  검산: HEAD 컬렉션 실측 2677 → working tree 2697 = **순수 +20셀**(신규 두 파일 전부).
+  skip 1은 이 머신 관례(ES 패키지 탑재).
+- 변이 9종(각각 기명 재실패 확인 후 `git checkout --` 복원, 트리 clean 확인):
+
+| 변이 | 내용 | 재실패 셀 | 관측 |
+|---|---|---|---|
+| I1 pair 정규화 제거 | `normalize_relation_pair` 정렬 분기 제거 | `test_relation_pair_is_normalized_across_directions`·`test_relation_round_trip` | 2 failed |
+| I1' 정규화 제거(실몽고) | 같은 변이로 실몽고 셀 | `MongoCandidateIdentityGroupLiveRoundTripTest::test_round_trip_isolation_and_purge` | unique 인덱스 위반, 1 failed |
+| I2 member 멱등 제거 | 기존 행 short-circuit 제거 | `test_add_member_is_idempotent` | 1 failed |
+| I3 created_at 보존 제거 | 재기록마다 clock | `test_relation_pair_is_normalized_across_directions` | 1 failed |
+| I4 project 격리 제거 | `get_group` 프로젝트 비교 제거 | `test_get_group_is_project_scoped`·`test_set_group_status_is_project_scoped` | 2 failed |
+| I5 member type 가드 제거 | 그룹 type 불일치 검사 제거 | `test_add_member_rejects_missing_group_and_type_mismatch` | 1 failed |
+| I6 상태 저장 제거 | `set_group_status`가 save 생략 | `test_group_status_round_trip_including_contradicted` | 1 failed |
+| I7 purge 호출 누락 | `execute_project_purge`에서 identity purge 제거 | 소유자 purge 그래프 셀·`test_admin_purge_fans_out_to_derived_services` | 2 failed |
+| I8 unique 축 type 제거 | member unique 인덱스에서 `candidate_type` 제거 | `test_installs_indexes_with_stable_names_and_scoped_axes` | 1 failed(과잉 방향) |
+
+- 복원 후 focused 재실행 **20 passed**, `git status --short` 코드 0줄(문서만 남음) 확인.
+
 ## Next steps
 
-1. start-next 검증 조건 폐쇄 재검증을 받는다.
-2. identity group 구현은 `pending-candidate-identity-grouping-implementation-phases.md`의
-   Slice 0(저장 모델과 수명)부터 진행한다. Slice 0은 `open|contradicted|closed` group status와
-   `contradicted` round-trip을 포함한다.
+1. start-next 검증 조건 폐쇄 재검증은 완료됐다(합격, `a57b380`).
+2. identity group은 **Slice 0 완료(2026-09-02, SoT v1.8.17)** — 다음은
+   `pending-candidate-identity-grouping-implementation-phases.md`의 **Slice 1(shortlist와 판정
+   서비스)**. 저장소 public service만 사용하고, fake judge로 `same`→member 연결·추이성 모순
+   `contradicted` 전이를 잠근다.
 3. 각 Slice가 끝날 때 독립 검증을 받고, grouped Inbox UI 이후 실 dogfood로 상태·목록 가독성을 육안 확인한다.
