@@ -25,6 +25,7 @@
 | identity group 계획 하드닝 반영 | `docs/plans/pending-candidate-identity-grouping-implementation-phases.md` | 합격 검증의 비차단 4건을 계획에 반영: `contradicted` group 상태와 추이성 모순 셀, `uncertain` 표시 및 수동 해소 Deferred 트리거, `/analysis/review-inbox/groups/*` 액션 경로, Slice 4·5 operation 101·102 예상 | 브리프 Follow-up 미배정 두 건과 route/operation 착수 함정을 구현 전 문서 단계에서 폐쇄 |
 | **identity group Slice 0(저장 모델과 수명) 구현** | `analysis/identity_groups.py`(신규) · `analysis/identity_groups_mongo.py`(신규) · `main.py` · `routers/admin.py`·`projects.py` · `tests/test_identity_groups.py`·`test_identity_groups_mongo.py`(신규 20셀) · purge 로스터/스파이 셀 | 세 컬렉션(그룹·멤버·관계)의 도메인·서비스·in-memory·Mongo 어댑터. 모든 unique/index 축에 `project_id`·`candidate_type` 선행. relation pair 좌우 정규화, member 재추가 멱등(`added_at` 불변), group `status open\|contradicted\|closed` 저장, `execute_project_purge` 합류(10계약/22컬렉션) | Slice 1(shortlist·판정 서비스)이 저장소 public service만으로 착수 가능. HTTP/OpenAPI 무변(HEAD 대비 dump 실측 IDENTICAL) |
 | **identity group Slice 0 검증 B1 폐쇄 + 하드닝(H1~H4)** | `analysis/identity_groups.py`·`identity_groups_mongo.py` · `tests/test_identity_groups.py`·`test_identity_groups_mongo.py` · SoT v1.8.18 | **B1**: Mongo 읽기 naive datetime을 UTC 재라벨링(`_aware`, auth·core_sot와 같은 경계 정규화) + **서비스 클록 BSON ms 절단** → 실몽고 왕복이 데이터클래스 동등성 유지. 실몽고 셀은 µs≠0 클록(760724) 주입으로 `get_group`/`list_members`/`get_relation`(양 방향) 동등성을 결정적으로 단정. **H1** groups `_id`=server 생성 `group_id` 단독을 SoT에 명시 · **H2** self-pair 거절 문구화 · **H4** "member는 참조만" 기명 셀(미존재 candidate 추가 허용 — over-strict: 존재 검사를 끼우면 실패) | 검증 조건부 합격의 유일 차단 조건 폐쇄 — Slice 1 착수 가능. 변이 표 I1' 관측 오기도 정정(H3) |
+| 계약 스키마 중복 전수조사 | `docs/plans/contract-schema-duplication-audit-decisions.md`(신규) · `docs/plans/README.md` · `README.md` · `HANDOFF.md` | 8개 `LlmCallSite` 호출부를 에코 호출·결정적 값 LLM 경유·호출 분산 3축으로 대조. Gate `decision`, analysis `source_anchors`, query planner `plan_id`, report bool 필드, writing 체인 context 반복을 결정 후보로 기명. `llm_call_audits`에는 프롬프트 본문이 없다는 HANDOFF 조사 재료 갭도 분리 | 코드 변경 없이 오너 결정 브리프 산출. 다음 구현은 제거/서버 유도/유지 선택 뒤에 진행 |
 
 ## Issues found
 
@@ -39,6 +40,7 @@
 | 첫 저장 전 finalize 진행 라벨이 `미실행` | `latestSnapshotId === null` 분기가 local `analysisRunning`보다 먼저였음 | local running을 최우선으로 이동하고 zero-version deferred 셀 추가 | 버튼과 상태 바가 요청 중 동일하게 진행 표시 |
 | 다음 장면 후보가 이전 장면에 섞임 | 생성 요청·scratch·async job이 `intent`/`next_unit`을 보존하지 않아, 패드 채택이 `append_current`/`next_unit=null` accept body로 재구성됨 | generate→candidate/scratch/job→worker→scratch API→ScratchRecovery accept 전 구간에 `intent`/`next_unit`을 보존 | start-next 후보 복구 채택이 `start_next_unit`으로 서버에 도달해 새 Scene을 생성 |
 | 패드의 [채택]이 동작하지 않는 것처럼 보임 | start-next 항목은 서버가 `next_unit` 없는 accept를 400으로 거절하고, UI는 항목 아래 에러만 남김 | 패드가 저장된 next-unit metadata를 전송하고, 생성 단계에서 start-next binding을 사전 검증 | 정상 항목은 저장 성공으로 `onAccepted`가 호출되고, 잘못된 요청은 생성 전에 차단 |
+| HANDOFF ⑦의 감사 재료 설명이 실제 schema와 어긋남 | `StoredLlmCall`은 토큰/창/상한/결과만 저장하고 prompt body/output body를 저장하지 않는다 | 브리프에 audit material gap을 별도 결정 항목으로 분리 | 입력↔출력 에코 대조는 기존 `llm_call_audits`만으로는 불가능. 1차는 진단 캡처 표본을 권장 |
 
 ## Decisions
 
@@ -68,6 +70,9 @@
   하는 곳은 project purge(`analysis.purge_project`)뿐이므로, 계획의 "candidate purge/project purge
   고아 없음"은 identity store의 `purge_project` 한 벌로 닫힌다. 후보 단위 파기 경로가 생기면 그때
   `purge_candidate`를 별도 슬라이스로 연다.
+- **(계약 스키마 중복 조사) 코드는 바꾸지 않고 결정 브리프를 먼저 둔다.** Gate `decision` 제거,
+  analysis anchor 축소, prompt body 감사 저장은 모두 계약/관측 정책 변경이라 오너 선택 전 구현하지
+  않는다. 권장은 서버 유도 + mismatch 관측(B)이고, 호출 재배치는 dogfood token 표본 뒤 별도 slice로 연다.
 
 ## Verification
 
@@ -204,6 +209,17 @@
   교체했고, 라이브 셀의 293-294행 주석도 같은 오기라 정정했다.
 - OpenAPI는 이번에도 무변(라우트 무변 — dump 대상 경로 변화 없음).
 
+## Verification — 계약 스키마 중복 전수조사
+
+- HANDOFF ⑦과 SoT v1.8.18의 LLM 관측 계약을 읽고, `LlmCallSite` 8종과 조립 배선을 `rg`/Serena로
+  대조했다.
+- 각 호출부의 prompt builder/parser를 확인했다: `analysis_extractor`, `compare_judge`,
+  `query_planner`, `writing_generation`, `writing_gate`, `writing_retrieval_planner`,
+  `writing_revision`, `writing_report`.
+- 문서 인덱스에 브리프를 등재했다. 첫 `tests.test_docs_indexes` 실행은 계획/브리프 카운트
+  `117/97`이 `118/98`로 늘어난 것을 잡아 실패했고, `README.md`와 `docs/plans/README.md`의
+  카운트를 갱신했다. 코드와 public OpenAPI/`schema.d.ts`는 변경하지 않았다.
+
 ## Next steps
 
 1. start-next 검증 조건 폐쇄 재검증은 완료됐다(합격, `a57b380`).
@@ -212,3 +228,6 @@
    **Slice 1(shortlist와 판정 서비스)**. 저장소 public service만 사용하고, fake judge로
    `same`→member 연결·추이성 모순 `contradicted` 전이를 잠근다.
 3. 각 Slice가 끝날 때 독립 검증을 받고, grouped Inbox UI 이후 실 dogfood로 상태·목록 가독성을 육안 확인한다.
+4. 계약 스키마 중복 브리프는 오너 결정 대기다. 우선 결정할 것: Gate `decision`을 서버 유도로 바꿀지,
+   analysis `source_anchors`를 id/번호 선택 + 서버 재구성으로 줄일지, prompt body 대조를 진단 캡처로
+   할지 별도 감사 collection으로 할지.
