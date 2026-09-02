@@ -1,7 +1,7 @@
 # 독립 검증 기록
 
 이 디렉터리는 **구현자가 아닌 검증자가** 각 슬라이스를 다시 뜯어본 기록이다. 2026-06-24부터
-**62일치 · 272건**이 쌓여 있다.
+**62일치 · 273건**이 쌓여 있다.
 
 ## 이 저장소의 검증이 무엇인가
 
@@ -35,7 +35,7 @@
 
 | 판정 | 건수 | 뜻 |
 |---|---|---|
-| 합격 | 186 | blocking 결함 없음 |
+| 합격 | 187 | blocking 결함 없음 |
 | **조건부 합격** | **81** | 합격이되 닫아야 할 조건이 있었다 |
 | **불합격** | **5** | 핵심 계약 위반으로 다음 슬라이스 진행이 차단됐다 |
 
@@ -64,6 +64,8 @@
 최신순. 같은 날 여러 건이면 슬라이스별로 나뉜 것이다.
 
 ### 2026-09-02
+
+| [`start_next_conditions_closure.md`](2026-09-02/start_next_conditions_closure.md) | start-next 검증 조건 4건 폐쇄(`24cb00a`) 재검증. ①README v1.8.16(docs 13/282 green) ②gen:api 무차이(3곳 불일치 해소) ③400 셀 4 서브테스트(상태+detail 리터럴+provider 미호출 핀) — **FA' 재적용 4 SUBFAILED** ④job몽고 실값 round-trip — **FB' 재적용 1 failed**. 1차 무잠금 입증 변이가 정확히 반대로 물리는 것으로 폐쇄 증명. 상품 코드 0줄(전수 결과 이전)·192/14/72·tsc·711 modules 재현. | **합격** |
 
 | [`start_next_intent_preservation.md`](2026-09-02/start_next_intent_preservation.md) | start-next intent 보존+C 확정 기록(`d4a207a`) 독립 검증. 동작은 전축 정상 — 보존 사슬(generate→sync scratch·async job·worker→scratch API→패드 accept) 실측, 400 검증 4분기 프로브 발화, 191/24/72·build 711 재현, 전수는 95% kill되었으나 진행점 분석+꼬리 220 passed로 "docs 가드 1 실패 외 전부 green" 폐쇄. **조건 4**: ① README 정본 표기 v1.8.15 잔존(docs 가드 red) ② schema.d.ts 손편집 불일치 3곳(NextUnitPayload 미등재·응답 next_unit 선택/컴포넌트 오기·@default 누락) ③ 400 경계 무셀(FA 변이 96 green) ④ job몽고 intent/next_unit 무셀(FB 변이 31 green — scratch몽고와 대조). FC1~FC4 기명 셀 재실패로 도메인 잠금은 작동 확인. | **조건부 합격** |
 
