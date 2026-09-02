@@ -100,7 +100,7 @@ python3 -m pytest tests/test_final_save_analysis.py -q       # 1 failed
 git worktree add /tmp/wt-head1 5ec69f6 && cd /tmp/wt-head1   # 부모에서 동일 3종 → 전부 green
 python3 -m pytest tests/test_analysis_apply_api.py tests/test_scene_notes_api.py tests/test_final_save_analysis.py -q
 cd - && git worktree remove /tmp/wt-head1
-# 500 폭발 반경 프로브: InMemory create_app + TestClient(raise_server_exceptions=False)로
+# 500 폭발 반경 프로브(커밋됨): PYTHONPATH=. python3 docs/verifications/2026-09-02/repro_draft_payload_500.py
 # POST /drafts · GET /drafts · GET /drafts/{id} · PATCH → 500 / GET /chapters → 200
 cd frontend && npx vitest run src/drafts/DraftEditor.test.tsx src/drafts/DraftList.test.tsx src/review/ReviewInbox.test.tsx   # 86 passed
 npx tsc --noEmit && npm run build && npm run gen:api && git status --short   # 무차이
