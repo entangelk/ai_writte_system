@@ -50,10 +50,13 @@
 확정했다 — ① relation 스키마에 `candidate_type` 포함(위 "모든 unique/index 축" 문장과 필드
 목록의 충돌을 오너 결정으로 상위집합 쪽으로 해소), ② Slice 0 유일 `member_status`=`active`,
 ③ 그룹 `revision`은 0에서 시작해 상태 변경마다 +1, ④ relation 재기록은 upsert(마지막 판정
-승리)하되 `created_at`은 첫 판정 유지 — 판정 재사용 정책 자체는 Slice 1. "candidate purge"
+승리)하되 `created_at`은 첫 판정 유지 — 판정 재사용 정책 자체는 Slice 1, ⑤ **클록 해상도는
+BSON ms**(서비스 클록 절단)이고 Mongo 읽기는 naive datetime을 UTC로 재라벨링한다 — 실몽고
+왕복은 데이터클래스 동등성으로 잠근다(검증 B1 폐쇄, SoT v1.8.18). "candidate purge"
 경로는 현재 코드에 없다(후보 문서 hard delete는 project purge뿐)므로 `purge_project` 한 벌로
 고아 없음 계약이 닫힌다. 파기 그래프는 10계약/22컬렉션이 됐고 소유자·admin purge 양 경로
-스파이가 호출을 잠근다.
+스파이가 호출을 잠근다. 독립 검증(`verifications/2026-09-02/identity_group_slice_0.md`)은
+조건부 합격이었고 B1·H1~H4는 같은 날 폐쇄했다.
 
 ## Slice 1 — shortlist와 판정 서비스
 

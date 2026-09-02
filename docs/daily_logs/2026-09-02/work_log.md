@@ -24,6 +24,7 @@
 | 미승인 후보 identity group 구현 페이즈 계획 | `docs/plans/pending-candidate-identity-grouping-implementation-phases.md` · `docs/plans/README.md` | C 채택 구현을 저장 모델, shortlist+judge, runner 배선, Review Inbox 읽기면, 그룹 거절, 그룹 승인, grouped UI 7개 Slice로 분할 | 다음 구현을 Slice 0 저장 모델부터 작게 시작할 수 있게 착수 경계를 고정 |
 | identity group 계획 하드닝 반영 | `docs/plans/pending-candidate-identity-grouping-implementation-phases.md` | 합격 검증의 비차단 4건을 계획에 반영: `contradicted` group 상태와 추이성 모순 셀, `uncertain` 표시 및 수동 해소 Deferred 트리거, `/analysis/review-inbox/groups/*` 액션 경로, Slice 4·5 operation 101·102 예상 | 브리프 Follow-up 미배정 두 건과 route/operation 착수 함정을 구현 전 문서 단계에서 폐쇄 |
 | **identity group Slice 0(저장 모델과 수명) 구현** | `analysis/identity_groups.py`(신규) · `analysis/identity_groups_mongo.py`(신규) · `main.py` · `routers/admin.py`·`projects.py` · `tests/test_identity_groups.py`·`test_identity_groups_mongo.py`(신규 20셀) · purge 로스터/스파이 셀 | 세 컬렉션(그룹·멤버·관계)의 도메인·서비스·in-memory·Mongo 어댑터. 모든 unique/index 축에 `project_id`·`candidate_type` 선행. relation pair 좌우 정규화, member 재추가 멱등(`added_at` 불변), group `status open\|contradicted\|closed` 저장, `execute_project_purge` 합류(10계약/22컬렉션) | Slice 1(shortlist·판정 서비스)이 저장소 public service만으로 착수 가능. HTTP/OpenAPI 무변(HEAD 대비 dump 실측 IDENTICAL) |
+| **identity group Slice 0 검증 B1 폐쇄 + 하드닝(H1~H4)** | `analysis/identity_groups.py`·`identity_groups_mongo.py` · `tests/test_identity_groups.py`·`test_identity_groups_mongo.py` · SoT v1.8.18 | **B1**: Mongo 읽기 naive datetime을 UTC 재라벨링(`_aware`, auth·core_sot와 같은 경계 정규화) + **서비스 클록 BSON ms 절단** → 실몽고 왕복이 데이터클래스 동등성 유지. 실몽고 셀은 µs≠0 클록(760724) 주입으로 `get_group`/`list_members`/`get_relation`(양 방향) 동등성을 결정적으로 단정. **H1** groups `_id`=server 생성 `group_id` 단독을 SoT에 명시 · **H2** self-pair 거절 문구화 · **H4** "member는 참조만" 기명 셀(미존재 candidate 추가 허용 — over-strict: 존재 검사를 끼우면 실패) | 검증 조건부 합격의 유일 차단 조건 폐쇄 — Slice 1 착수 가능. 변이 표 I1' 관측 오기도 정정(H3) |
 
 ## Issues found
 
@@ -172,7 +173,7 @@
 | 변이 | 내용 | 재실패 셀 | 관측 |
 |---|---|---|---|
 | I1 pair 정규화 제거 | `normalize_relation_pair` 정렬 분기 제거 | `test_relation_pair_is_normalized_across_directions`·`test_relation_round_trip` | 2 failed |
-| I1' 정규화 제거(실몽고) | 같은 변이로 실몽고 셀 | `MongoCandidateIdentityGroupLiveRoundTripTest::test_round_trip_isolation_and_purge` | unique 인덱스 위반, 1 failed |
+| I1' 정규화 제거(실몽고) | 같은 변이로 실몽고 셀 | `MongoCandidateIdentityGroupLiveRoundTripTest::test_round_trip_isolation_and_purge` | ~~unique 인덱스 위반~~ → **정정(2026-09-02 검증 H3)**: 실측 재실패 메커니즘은 len 단얫 2 != 1 — (b,a)는 (a,b)와 **다른 인덱스 키**라 유일성 위반이 아니라 별도 행으로 쌓인다. 가드는 유효(관측 서술만 오기). 1 failed |
 | I2 member 멱등 제거 | 기존 행 short-circuit 제거 | `test_add_member_is_idempotent` | 1 failed |
 | I3 created_at 보존 제거 | 재기록마다 clock | `test_relation_pair_is_normalized_across_directions` | 1 failed |
 | I4 project 격리 제거 | `get_group` 프로젝트 비교 제거 | `test_get_group_is_project_scoped`·`test_set_group_status_is_project_scoped` | 2 failed |
@@ -183,11 +184,31 @@
 
 - 복원 후 focused 재실행 **20 passed**, `git status --short` 코드 0줄(문서만 남음) 확인.
 
+## Verification — identity group Slice 0 검증 보강(B1 폐쇄)
+
+- 독립 검증(`verifications/2026-09-02/identity_group_slice_0.md`, 조건부 합격)의 차단 B1과
+  비차단 H1~H4를 오너 지시로 폐쇄했다. 착수 전 red 실측: 보강 단얫을 넣은 라이브 셀이 현재
+  구현에서 실패(315행 `get_group == group` — naive tzinfo·µs 잘림) → 정규화+절단 구현 → green.
+- Focused: `PYTHONPATH=. pytest tests/test_identity_groups.py tests/test_identity_groups_mongo.py`
+  → **21 passed**(신규 H4 셀 +1, 실몽고 충실도는 기존 셀 강화로 셀 수 무변).
+- Purge 그래프 broader: `test_owner_project_purge`·`AdminProjectPurgeTest`·
+  `test_purge_project_coverage` → **27 passed / 2 subtests**.
+- 변이 2종(B1 양방향, 기명 재실패 후 복원·트리 clean 확인):
+
+| 변이 | 내용 | 재실패 셀 | 관측 |
+|---|---|---|---|
+| J1 `_aware` 제거 | naive 통과 | 라이브 `test_round_trip_isolation_and_purge` | tzinfo 불일치로 `==` False, 1 failed |
+| J2 ms 절단 제거 | 서비스 클록 raw 통과 | 같은 셀 | µs 760724↔760000 잘림으로 `==` False, 1 failed |
+
+- H3 정정: 위 변이 표 I1' 행의 관측 문구("unique 인덱스 위반")를 실측(len 단얫 2 != 1)으로
+  교체했고, 라이브 셀의 293-294행 주석도 같은 오기라 정정했다.
+- OpenAPI는 이번에도 무변(라우트 무변 — dump 대상 경로 변화 없음).
+
 ## Next steps
 
 1. start-next 검증 조건 폐쇄 재검증은 완료됐다(합격, `a57b380`).
-2. identity group은 **Slice 0 완료(2026-09-02, SoT v1.8.17)** — 다음은
-   `pending-candidate-identity-grouping-implementation-phases.md`의 **Slice 1(shortlist와 판정
-   서비스)**. 저장소 public service만 사용하고, fake judge로 `same`→member 연결·추이성 모순
-   `contradicted` 전이를 잠근다.
+2. identity group은 **Slice 0 완료 + 검증 B1 폐쇄(2026-09-02, SoT v1.8.18)** — Slice 1 착수
+   보류 사유가 사라졌다. 다음은 `pending-candidate-identity-grouping-implementation-phases.md`의
+   **Slice 1(shortlist와 판정 서비스)**. 저장소 public service만 사용하고, fake judge로
+   `same`→member 연결·추이성 모순 `contradicted` 전이를 잠근다.
 3. 각 Slice가 끝날 때 독립 검증을 받고, grouped Inbox UI 이후 실 dogfood로 상태·목록 가독성을 육안 확인한다.

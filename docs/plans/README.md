@@ -71,7 +71,7 @@
 | [`02b-7-character-alias-homonym-decisions.md`](02b-7-character-alias-homonym-decisions.md) | 2B.7 character 별칭/동명이인 semantic 보강 | 브리프 |
 
 | [`pending-candidate-identity-grouping-decisions.md`](pending-candidate-identity-grouping-decisions.md) | 서로 다른 분석 job의 미승인 후보 정체성 그룹·그룹 승인 | **확정 — C 채택**(2026-09-02 dogfood) |
-| [`pending-candidate-identity-grouping-implementation-phases.md`](pending-candidate-identity-grouping-implementation-phases.md) | C 채택 후 미승인 후보 identity group 구현 슬라이스 분할 | Active — **Slice 0 완료**(2026-09-02, SoT v1.8.17), Slice 1(shortlist·판정 서비스) 다음 |
+| [`pending-candidate-identity-grouping-implementation-phases.md`](pending-candidate-identity-grouping-implementation-phases.md) | C 채택 후 미승인 후보 identity group 구현 슬라이스 분할 | Active — **Slice 0 완료·검증 B1 폐쇄**(2026-09-02, SoT v1.8.18), Slice 1(shortlist·판정 서비스) 다음 |
 
 ### Phase 3 — 파생 색인
 
