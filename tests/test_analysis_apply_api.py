@@ -568,7 +568,7 @@ class ReviewInboxApiTest(unittest.TestCase):
         self.assertEqual(item["candidate_id"], current.id)
         self.assertEqual(item["status"], "needs_review")
         self.assertEqual(item["conflict_count"], 1)
-        self.assertNotIn("payload", item)
+        self.assertEqual(item["payload"], dict(current.payload))
         self.assertTrue(entry["id"])
 
     def test_detail_returns_payload_source_status_memory_and_field_diff(self):

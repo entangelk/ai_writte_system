@@ -126,6 +126,7 @@ export type ProjectBriefVersionListResponse =
   components["schemas"]["ProjectBriefVersionListResponse"];
 export type CreateDraftRequest = components["schemas"]["CreateDraftRequest"];
 export type Draft = components["schemas"]["DraftPayload"];
+export type Scene = components["schemas"]["ScenePayload"];
 export type DraftListResponse = components["schemas"]["DraftListResponse"];
 export type Chapter = components["schemas"]["ChapterPayload"];
 export type ChapterListResponse = components["schemas"]["ChapterListResponse"];
@@ -844,7 +845,7 @@ export interface ReviewAffordance {
   reason: string | null;
 }
 
-/** A review-inbox candidate row (list) — detail adds payload/source_refs/conflicts. */
+/** A review-inbox candidate row (list) — detail adds source_refs/conflicts. */
 export interface ReviewInboxItem {
   candidate_id: string;
   job_id: string;
@@ -853,6 +854,7 @@ export interface ReviewInboxItem {
   confidence: number;
   provenance: string;
   conflict_count: number;
+  payload: Record<string, unknown>;
   actions: ReviewAffordance[];
 }
 
@@ -887,7 +889,6 @@ export interface ReviewConflict {
 }
 
 export interface ReviewInboxDetailItem extends ReviewInboxItem {
-  payload: Record<string, unknown>;
   source_refs: ReviewSourcePointer[];
   conflicts: ReviewConflict[];
 }

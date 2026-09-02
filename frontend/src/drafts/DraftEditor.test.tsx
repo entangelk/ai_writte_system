@@ -2045,6 +2045,32 @@ describe("최종 저장 표시 축 (확정 계약 제3조·D3=B — 4차 재검�
     expect(sent.idempotency_key.length).toBeGreaterThan(0);
   });
 
+  it("최종 저장 요청을 기다리는 동안 상태 바와 버튼에 분석 진행을 표시한다", async () => {
+    let release: ((value: ReturnType<typeof response>) => void) | undefined;
+    const pending = new Promise<ReturnType<typeof response>>((resolve) => {
+      release = resolve;
+    });
+    const fetchMock = mockFetch(
+      { body: project },
+      { body: draft },
+      { body: { versions: [version1] } },
+      { body: detail(version1, "본문") },
+    );
+    fetchMock.mockImplementationOnce(() => pending);
+
+    renderEditor();
+    const status = await screen.findByLabelText("작업 상태");
+    await userEvent.click(screen.getByRole("button", { name: "최종 저장·분석" }));
+
+    expectOnly(status, ANALYSIS_LABELS, "분석 진행 중");
+    expect(screen.getByRole("button", { name: "최종 저장·분석 중…" })).toBeDisabled();
+    expect(screen.queryByText("최종 저장과 분석이 완료되었습니다")).not.toBeInTheDocument();
+
+    release?.(response(finalizeResponse(version2, "succeeded")));
+    expect(await screen.findByText("최종 저장과 분석이 완료되었습니다")).toBeInTheDocument();
+    expectOnly(status, ANALYSIS_LABELS, "분석 완료");
+  });
+
   it.each([
     ["분석 job 이 실패로 돌아온 경우", "failed", null],
     // D5=A: 분석을 만들지 못해도 봉투는 200 + analysis_error 다(502 아님).

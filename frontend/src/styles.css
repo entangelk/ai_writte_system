@@ -1440,6 +1440,19 @@ main {
   margin: 0.75rem 0 0 1.5rem;
 }
 
+.scene-status {
+  display: inline-flex;
+  gap: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--type-micro);
+  white-space: nowrap;
+}
+
+.scene-status.is-running {
+  color: var(--text-link);
+  font-weight: 700;
+}
+
 .empty-state,
 .status-copy,
 .read-only-note,
@@ -1966,6 +1979,32 @@ main {
     font-size: 1.14rem;
   }
 
+  .review-row {
+    grid-template-columns: 1fr;
+  }
+
+  .review-summary-link {
+    padding-right: 0;
+  }
+
+  .review-row > .row-actions {
+    padding-top: 0;
+  }
+
+  .review-preview-fields div {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+
+  .draft-row {
+    flex-wrap: wrap;
+  }
+
+  .scene-status {
+    width: 100%;
+    order: 2;
+  }
+
   .version-panel-heading {
     align-items: stretch;
     flex-direction: column;
@@ -2021,11 +2060,78 @@ main {
 }
 
 .review-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   justify-content: space-between;
+  align-items: start;
 }
 
 .review-row .resource-link {
   flex: 1;
+}
+
+.review-summary-link {
+  align-items: flex-start;
+  padding-right: var(--space-6);
+  font-family: system-ui, sans-serif;
+  font-size: var(--type-body);
+}
+
+.review-summary {
+  display: grid;
+  width: 100%;
+  gap: var(--space-3);
+}
+
+.review-summary-heading {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.review-summary-heading strong {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: var(--type-subhead);
+  font-weight: 500;
+}
+
+.review-summary-heading .row-meta {
+  display: inline;
+  margin: 0;
+}
+
+.review-preview-fields {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.review-preview-fields div {
+  display: grid;
+  grid-template-columns: minmax(5rem, 0.2fr) minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.review-preview-fields dt {
+  color: var(--text-muted);
+  font-size: var(--type-micro);
+  font-weight: 700;
+}
+
+.review-preview-fields dd {
+  margin: 0;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.review-detail-link {
+  color: var(--text-link);
+  font-size: var(--type-micro);
+  font-weight: 700;
+}
+
+.review-row > .row-actions {
+  padding: 1.25rem 0;
 }
 
 .row-meta {

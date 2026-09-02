@@ -29,6 +29,17 @@ const CANDIDATE_TYPE_LABELS: Record<string, string> = {
   open_question_observation: "떡밥",
 };
 
+const PAYLOAD_FIELD_LABELS: Record<string, string> = {
+  name: "이름",
+  observation: "관찰",
+  event: "사건",
+  question: "미해결 질문",
+};
+
+function renderPayloadValue(value: unknown): string {
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
 function findAffordance(
   actions: ReviewAffordance[],
   action: string,
@@ -136,19 +147,31 @@ export function ReviewInbox() {
                 return (
                   <li className="resource-row review-row" key={item.candidate_id}>
                     <Link
-                      className="resource-link"
+                      className="resource-link review-summary-link"
                       to={`/projects/${projectId}/review/${item.candidate_id}`}
                     >
-                      <span>
-                        {CANDIDATE_TYPE_LABELS[item.candidate_type] ??
-                          item.candidate_type}
-                        <span className="row-meta">
-                          신뢰도 {item.confidence.toFixed(2)}
-                          {item.conflict_count > 0 &&
-                            ` · 충돌 ${item.conflict_count}`}
-                        </span>
-                      </span>
-                      <span className="row-arrow" aria-hidden="true">→</span>
+                      <div className="review-summary">
+                        <div className="review-summary-heading">
+                          <strong>
+                            {CANDIDATE_TYPE_LABELS[item.candidate_type] ??
+                              item.candidate_type}
+                          </strong>
+                          <span className="row-meta">
+                            신뢰도 {item.confidence.toFixed(2)}
+                            {item.conflict_count > 0 &&
+                              ` · 충돌 ${item.conflict_count}`}
+                          </span>
+                        </div>
+                        <dl className="review-preview-fields">
+                          {Object.entries(item.payload).map(([key, value]) => (
+                            <div key={key}>
+                              <dt>{PAYLOAD_FIELD_LABELS[key] ?? key}</dt>
+                              <dd>{renderPayloadValue(value)}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                        <span className="review-detail-link">상세 검토 →</span>
+                      </div>
                     </Link>
                     <div className="row-actions">
                       {confirm && (

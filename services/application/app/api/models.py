@@ -567,6 +567,11 @@ class ScenePayload(BaseModel):
     title: str
     archived: bool
     position: int = Field(ge=1)
+    latest_snapshot_id: str | None = None
+    finalized_snapshot_id: str | None = None
+    finalized_at: datetime | None = None
+    analysis_status: str | None = None
+    analysis_snapshot_id: str | None = None
 
 
 class ChapterPayload(BaseModel):

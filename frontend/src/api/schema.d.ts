@@ -2571,12 +2571,22 @@ export interface components {
         };
         /** ScenePayload */
         ScenePayload: {
+            /** Analysis Snapshot Id */
+            analysis_snapshot_id?: string | null;
+            /** Analysis Status */
+            analysis_status?: string | null;
             /** Archived */
             archived: boolean;
             /** Chapter Id */
             chapter_id: string;
+            /** Finalized At */
+            finalized_at?: string | null;
+            /** Finalized Snapshot Id */
+            finalized_snapshot_id?: string | null;
             /** Id */
             id: string;
+            /** Latest Snapshot Id */
+            latest_snapshot_id?: string | null;
             /** Position */
             position: number;
             /** Project Id */

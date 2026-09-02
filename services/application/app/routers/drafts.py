@@ -107,6 +107,7 @@ def register_drafts(
             "title": draft.title,
             "archived": draft.archived,
             "position": draft.position,
+            "latest_snapshot_id": None if latest is None else latest.snapshot_id,
             "finalized_snapshot_id": draft.finalized_snapshot_id,
             "finalized_at": draft.finalized_at,
             "analysis_status": None if job is None else str(job.status),
@@ -127,6 +128,14 @@ def register_drafts(
     def _scene_payload(draft) -> dict[str, object]:
         assert draft.chapter_id is not None
         assert draft.position is not None
+        versions = core_sot.list_draft_versions(
+            project_id=draft.project_id, draft_id=draft.id
+        )
+        latest = max(versions, key=lambda value: value.version_number, default=None)
+        job = None if latest is None or analysis is None else analysis.get_job_request(
+            project_id=draft.project_id, snapshot_id=latest.snapshot_id,
+            idempotency_key=f"analyze:{latest.snapshot_id}",
+        )
         return {
             "id": draft.id,
             "project_id": draft.project_id,
@@ -134,6 +143,11 @@ def register_drafts(
             "title": draft.title,
             "archived": draft.archived,
             "position": draft.position,
+            "latest_snapshot_id": None if latest is None else latest.snapshot_id,
+            "finalized_snapshot_id": draft.finalized_snapshot_id,
+            "finalized_at": draft.finalized_at,
+            "analysis_status": None if job is None else str(job.status),
+            "analysis_snapshot_id": None if job is None else job.snapshot_id,
         }
 
     def _chapter_payload(chapter) -> dict[str, object]:

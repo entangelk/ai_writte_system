@@ -67,6 +67,57 @@ describe("DraftList Chapter→Scene hierarchy", () => {
     ]);
   });
 
+  it("장면별 최종 저장·분석 상태를 목록에서 구분한다", async () => {
+    const draftScene = scene("s1", "c1", "초안 장면", 1);
+    const runningScene = {
+      ...scene("s2", "c1", "분석 장면", 2),
+      latest_snapshot_id: "snap-2",
+      finalized_snapshot_id: "snap-2",
+      analysis_snapshot_id: "snap-2",
+      analysis_status: "running",
+    };
+    const completedScene = {
+      ...scene("s3", "c1", "완료 장면", 3),
+      latest_snapshot_id: "snap-3",
+      finalized_snapshot_id: "snap-3",
+      analysis_snapshot_id: "snap-3",
+      analysis_status: "succeeded",
+    };
+    mockFetch(
+      { body: { id: "p1", name: "작품", archived: false } },
+      { body: { chapters: [chapter("c1", "1장", 1, [draftScene, runningScene, completedScene])] } },
+    );
+
+    renderDraftList();
+
+    expect(await screen.findByLabelText("초안 장면 상태")).toHaveTextContent("초안 · 분석 미실행");
+    expect(screen.getByLabelText("분석 장면 상태")).toHaveTextContent("최종 저장됨 · 분석 진행 중");
+    expect(screen.getByLabelText("완료 장면 상태")).toHaveTextContent("최종 저장됨 · 분석 완료");
+  });
+
+  it("최종 저장 뒤 더 새로운 snapshot이 있으면 완료로 오인하지 않는다", async () => {
+    const modifiedScene = {
+      ...scene("s1", "c1", "수정 장면", 1),
+      latest_snapshot_id: "snap-new",
+      finalized_snapshot_id: "snap-final",
+      analysis_snapshot_id: "snap-final",
+      analysis_status: "succeeded",
+    };
+    mockFetch(
+      { body: { id: "p1", name: "작품", archived: false } },
+      { body: { chapters: [chapter("c1", "1장", 1, [modifiedScene])] } },
+    );
+
+    renderDraftList();
+
+    expect(await screen.findByLabelText("수정 장면 상태")).toHaveTextContent(
+      "최종 저장 후 수정됨 · 분석 필요",
+    );
+    expect(screen.getByLabelText("수정 장면 상태")).not.toHaveTextContent(
+      "최종 저장됨",
+    );
+  });
+
   it("creates a chapter then creates a scene with its required chapter_id", async () => {
     const c1 = chapter("c1", "1장", 1);
     const s1 = scene("s1", "c1", "첫 장면", 1);

@@ -454,6 +454,11 @@ class ChapterHierarchyApiTest(unittest.TestCase):
             [scene["title"] for scene in listed["chapters"][0]["scenes"]],
             ["둘째 장면", "첫 장면"],
         )
+        for scene in listed["chapters"][0]["scenes"]:
+            self.assertIn("latest_snapshot_id", scene)
+            self.assertIn("finalized_snapshot_id", scene)
+            self.assertIn("analysis_status", scene)
+            self.assertIn("analysis_snapshot_id", scene)
 
         list_flat = self._endpoint("/projects/{project_id}/drafts", "GET")
         flattened = asyncio.run(list_flat(self.project.id))

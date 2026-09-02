@@ -157,3 +157,12 @@ payload 상태로 분리하는 편이 이 endpoint의 사용자가 다음 행동
 - 서로 다른 snapshot인데 본문과 분석기 버전이 같은 경우의 content-hash 분석 중복 억제
 - 분석기/프롬프트/스키마 버전별 재분석 정책과 분석 결과의 세대(generation) 표시
 - D4=B를 선택할 때의 analysis worker 모델·lease·재시도·배포 command
+
+## 2026-09-02 dogfood 소비 보강
+
+- finalize 요청을 기다리는 동안 로컬 상태를 `running`으로 올려 상태 바와 버튼이
+  동일하게 `분석 진행 중`을 보인다. 응답을 받으면 전체 페이지를 reload/reset하지 않고
+  finalize payload로 final marker·version·analysis 상태를 수렴시켜 편집 문맥과 스크롤을 보존한다.
+- Chapter의 `scenes[]`는 최신 snapshot·final marker·최신 분석 job 관계를 싣어, 목록에서도
+  편집기와 같은 finality/analysis 판정을 한다. 이로써 4차 재검증 N2(제7조 문언과
+  DraftList 미소비 긴장)를 “배지 구현” 방향으로 닫았다.

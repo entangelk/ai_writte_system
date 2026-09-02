@@ -796,6 +796,10 @@ def register_analysis(
             "confidence": candidate.confidence,
             "provenance": candidate.provenance.value,
             "conflict_count": len(item.conflicts),
+            # Dogfood 2026-09-02: the inbox is an action surface, so the list
+            # carries the candidate summary instead of forcing one detail trip
+            # per approval/rejection decision.
+            "payload": dict(candidate.payload),
             # v1.6.67: available review actions per item (list + detail, D3).
             "actions": [
                 _affordance_payload(a) for a in candidate_affordances()
@@ -803,7 +807,6 @@ def register_analysis(
         }
         if include_detail:
             payload.update({
-                "payload": dict(candidate.payload),
                 "source_refs": [
                     _review_source_pointer(candidate.project_id, source_ref_id)
                     for source_ref_id in candidate.source_ref_ids
@@ -963,4 +966,3 @@ def register_analysis(
             target_id=finding_id, after=str(GateFindingStatus.DISMISSED),
         )
         return payload
-

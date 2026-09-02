@@ -42,6 +42,7 @@ function inboxBody(overrides: Record<string, unknown> = {}) {
         confidence: 0.8,
         provenance: "ai_inferred",
         conflict_count: 0,
+        payload: { name: "서윤", observation: "비밀 통로를 알고 있다" },
         actions: CANDIDATE_ACTIONS,
       },
     ],
@@ -85,6 +86,8 @@ describe("ReviewInbox", () => {
     renderInbox();
 
     expect(await screen.findByText("인물")).toBeInTheDocument();
+    expect(screen.getByText("서윤")).toBeInTheDocument();
+    expect(screen.getByText("비밀 통로를 알고 있다")).toBeInTheDocument();
     expect(screen.getByText("시점 불일치")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "승인" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "해결" })).toBeEnabled();
@@ -173,6 +176,7 @@ describe("ReviewInbox", () => {
           confidence: 0.8,
           provenance: "ai_inferred",
           conflict_count: 0,
+          payload: { event: "거센 비가 내림" },
           actions: [
             { action: "confirm", eligible: false, reason: "차단됨" },
             { action: "reject", eligible: true, reason: null },

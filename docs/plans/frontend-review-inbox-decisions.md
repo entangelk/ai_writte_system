@@ -43,3 +43,12 @@ A는 "일단 어포던스 배선이 도는지"만 보려면 더 작지만, revie
 ## Deferred / out of scope
 
 백엔드/Core SOT 계약 무변(순수 소비). 부분 승인·bulk review·merge/split의 event/open_question 일반화·memory card/foreshadowing view·상태 변경 invalidate 범위는 계속 미확정(Phase 6 열린 항목). 어포던스 `reason`은 display text이므로 pattern-match 금지, `eligible`/`action`으로만 분기.
+
+## 2026-09-02 dogfood 개정 — 목록 안 후보 요약
+
+최초 B 결정은 “detail을 열어 근거를 확인한 뒤 승인”을 전제로 list payload에 candidate
+`payload`를 싣지 않았다. dogfood에서 유형·신뢰도만 보이는 여러 행을 매번 detail로 열어야
+하는 비용이 확인됐고, 오너가 “리스트 칸을 넓혀 대략적인 내용을 보고 바로 승인/거절”을
+요구했다. 따라서 list item에 `payload`를 additive로 싣고, 행은 유형·신뢰도 → payload 필드
+→ 즉시 승인/거절 순으로 펼쳐 보인다. detail은 source quote·conflict diff·edit/merge/split을 위한
+고급 검토 통로로 계속 남는다. 자격은 여전히 서버 `actions` 어포던스만 소비한다.

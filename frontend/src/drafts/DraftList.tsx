@@ -4,8 +4,25 @@ import {
   ApiError, archiveChapter, archiveDraft, createChapter, createDraft,
   describeApiError, getProject, listChapters, purgeChapter, purgeDraft,
   putChapterOrder, putSceneOrder,
-  type Chapter, type Draft, type Project,
+  type Chapter, type Draft, type Project, type Scene,
 } from "../api/client";
+
+function sceneAnalysisLabel(scene: Scene): string {
+  const current = scene.latest_snapshot_id != null &&
+    scene.analysis_snapshot_id === scene.latest_snapshot_id;
+  if (current && (scene.analysis_status === "pending" || scene.analysis_status === "running")) {
+    return "분석 진행 중";
+  }
+  if (current && scene.analysis_status === "succeeded") return "분석 완료";
+  return scene.latest_snapshot_id == null ? "분석 미실행" : "분석 필요";
+}
+
+function sceneFinalityLabel(scene: Scene): string {
+  if (scene.finalized_snapshot_id == null) return "초안";
+  return scene.finalized_snapshot_id === scene.latest_snapshot_id
+    ? "최종 저장됨"
+    : "최종 저장 후 수정됨";
+}
 
 export function DraftList() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -272,6 +289,14 @@ export function DraftList() {
                     <Link aria-label={scene.title} className="resource-link" to={`/projects/${projectId}/drafts/${scene.id}`}>
                       <span>{scene.title}</span><span className="row-arrow" aria-hidden="true">→</span>
                     </Link>
+                    <span
+                      className={`scene-status ${scene.analysis_snapshot_id === scene.latest_snapshot_id && (scene.analysis_status === "pending" || scene.analysis_status === "running") ? "is-running" : ""}`}
+                      aria-label={`${scene.title} 상태`}
+                    >
+                      <span>{sceneFinalityLabel(scene)}</span>
+                      {" · "}
+                      <span>{sceneAnalysisLabel(scene)}</span>
+                    </span>
                     <span className="status-badge">장면 순서 {scene.position}</span>
                     {scene.archived && <span className="status-badge">보관됨</span>}
                     <span className="order-controls">

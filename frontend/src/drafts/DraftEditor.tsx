@@ -212,12 +212,14 @@ export function DraftEditor() {
     draft?.analysis_status === null ||
     draft?.analysis_status === "failed"
   );
+  const analysisRunning = analysisStatus === "running" ||
+    draft?.analysis_status === "pending" || draft?.analysis_status === "running";
   const analysisLabel = latestSnapshotId === null
     ? "미실행"
-    : analysisNeedsAttention
-      ? "필요"
-      : analysisStatus === "running" || draft?.analysis_status === "pending" || draft?.analysis_status === "running"
-        ? "진행 중"
+    : analysisRunning
+      ? "진행 중"
+      : analysisNeedsAttention
+        ? "필요"
         : "완료";
   const onLatest = selectedVersionId !== null && selectedVersionId === latestVersionId;
   const allowNavigationAway = useCallback(
@@ -369,6 +371,7 @@ export function DraftEditor() {
     ) return;
     finalizingRef.current = true;
     setFinalizing(true);
+    setAnalysisStatus("running");
     setError(null);
     try {
       const result = await finalizeDraft(projectId, draftId, {
@@ -396,6 +399,7 @@ export function DraftEditor() {
         ? "최종 저장과 분석이 완료되었습니다"
         : "최종 저장은 완료되었습니다. 분석이 완료되지 않아 수동 분석이 필요합니다.");
     } catch (err) {
+      setAnalysisStatus("failed");
       setError(describeApiError(err));
     } finally {
       finalizingRef.current = false;
@@ -659,7 +663,7 @@ export function DraftEditor() {
         <>
           <div className="workspace-status" aria-label="작업 상태">
             <span>{dirty ? "저장 안 됨" : "저장됨"}</span>
-            <span className={analysisNeedsAttention ? "status-attention" : undefined}>
+            <span className={analysisNeedsAttention && !analysisRunning ? "status-attention" : undefined}>
               분석 {analysisLabel}
             </span>
             <span>{isFinalized ? latestSnapshotId === draft.finalized_snapshot_id ? "최종 저장됨" : "최종 저장 후 수정됨" : "초안"}</span>
