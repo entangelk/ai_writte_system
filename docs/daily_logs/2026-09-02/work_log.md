@@ -22,6 +22,7 @@
 | Writing start-next 복구 채택 결함 폐쇄 | `api/models.py` · `routers/writing.py` · `writing/scratch*` · `writing/generation_job*` · `writing/generation_worker.py` · `writing/http_models.py` · `frontend/src/writing/*` · `frontend/src/api/*` · 회귀 | generate 요청에 `intent`/`next_unit` 추가. sync scratch·async job·worker result·scratch API가 둘을 보존. ScratchRecovery accept가 저장된 `next_unit`을 재전송. start-next generate는 provider 호출 전 next_unit binding 검증 | “다음 장면 이어쓰기” 후보가 패드/복구를 거쳐도 새 Scene을 열고, 이전 Scene 본문에 섞이지 않음 |
 | start-next 검증 조건 보강 | `README.md` · `frontend/src/api/schema.d.ts` · `tests/test_writing.py` · `tests/test_writing_generation_job_mongo.py` | 조건부 합격 4건을 닫기 위해 README 정본 표기를 v1.8.16으로 갱신, `gen:api` 재생성, generate 400 경계 4분기 셀, generation_job_mongo `intent`/`next_unit` 실값 round-trip을 추가 | 검증자가 지목한 문서 red·생성물 drift·400 무셀·job Mongo 무잠금 축을 기계적으로 폐쇄 |
 | 미승인 후보 identity group 구현 페이즈 계획 | `docs/plans/pending-candidate-identity-grouping-implementation-phases.md` · `docs/plans/README.md` | C 채택 구현을 저장 모델, shortlist+judge, runner 배선, Review Inbox 읽기면, 그룹 거절, 그룹 승인, grouped UI 7개 Slice로 분할 | 다음 구현을 Slice 0 저장 모델부터 작게 시작할 수 있게 착수 경계를 고정 |
+| identity group 계획 하드닝 반영 | `docs/plans/pending-candidate-identity-grouping-implementation-phases.md` | 합격 검증의 비차단 4건을 계획에 반영: `contradicted` group 상태와 추이성 모순 셀, `uncertain` 표시 및 수동 해소 Deferred 트리거, `/analysis/review-inbox/groups/*` 액션 경로, Slice 4·5 operation 101·102 예상 | 브리프 Follow-up 미배정 두 건과 route/operation 착수 함정을 구현 전 문서 단계에서 폐쇄 |
 
 ## Issues found
 
@@ -145,5 +146,6 @@
 
 1. start-next 검증 조건 폐쇄 재검증을 받는다.
 2. identity group 구현은 `pending-candidate-identity-grouping-implementation-phases.md`의
-   Slice 0(저장 모델과 수명)부터 진행한다.
+   Slice 0(저장 모델과 수명)부터 진행한다. Slice 0은 `open|contradicted|closed` group status와
+   `contradicted` round-trip을 포함한다.
 3. 각 Slice가 끝날 때 독립 검증을 받고, grouped Inbox UI 이후 실 dogfood로 상태·목록 가독성을 육안 확인한다.
