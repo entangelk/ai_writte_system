@@ -5,7 +5,7 @@
 > 완료 서술은 여기 쓰지 않는다 — `docs/daily_logs/`(상세) · `docs/system-contract-sot.md` 변경이력 · `CHANGELOG.md`(마일스톤) · `docs/verifications/`(독립 검증)에 이미 있다.
 > 편집 규칙은 `CLAUDE.md`·`AGENTS.md`의 "HANDOFF.md" 절에 있다. **길이 상한은 없다** — 대신 **~200줄을 넘으면 자가 검수**하고(그 뒤로는 ~100줄마다) 결과를 아래 한 줄로 남긴다. 길어야 할 이유가 있으면 길어도 된다. 안 보는 것이 문제다.
 >
-> 마지막 분량 기록: **2026-09-02 스키마 중복 전수조사 브리프 · 759줄(줄 수 변동 없음)** — Next Tasks ⑦을 조사 대기에서 브리프 작성·오너 결정 대기로 교체했다(본문 줄 수 무변). `docs/plans/contract-schema-duplication-audit-decisions.md` 신규와 README/계획 인덱스 등재, work_log 기록을 남겼다. **검수는 하지 않았다** — 759는 다음 트리거 783에 못 미친다.
+> 마지막 분량 기록: **2026-09-02 스키마 중복 전수조사 브리프 확정 · 759줄(줄 수 변동 없음)** — Next Tasks ⑦을 오너 결정 반영 상태로 교체했다(본문 줄 수 무변). **검수는 하지 않았다** — 759는 다음 트리거 783에 못 미친다.
 > 마지막 분량 기록: **2026-09-02 identity group 검증 B1 폐쇄 · 755 → 756줄(+1)** — 현재 착수점 문장을 B1 폐쇄·Slice 1 착수 가능 상태로 교체하고(줄 수 무변), 회귀 기준선 줄을 2697/1/3125 실측+검산으로 교체했으며(줄 수 무변), 이 줄을 추가했다(+1). **검수는 하지 않았다** — 756은 다음 트리거 783에 못 미친다.
 > 마지막 분량 기록: **2026-09-02 identity group Slice 0 · 754 → 755줄(+1)** — 현재 착수점 문장을 Slice 0 완료·Slice 1 다음으로 교체하고(본문 줄 수 무변), 회귀 기준선 줄에 2696/1/3124 실측+검산을 실었으며(같은 줄 안 증보), 정본 표기를 v1.8.17로 올렸다(무변), 이 줄을 추가했다(+1). **검수는 하지 않았다** — 755는 다음 트리거 783에 못 미친다.
 > 마지막 분량 기록: **2026-09-02 identity group 계획 하드닝 · 753 → 754줄(+1)** — 검증 합격의 비차단 4건을 구현 페이즈 문서에 반영하고 현재 착수점 문장에 `contradicted` 상태를 추가했다(본문 줄 수 무변), 이 줄을 추가했다(+1). **검수는 하지 않았다** — 754는 다음 트리거 783에 못 미친다.
@@ -335,7 +335,7 @@ docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -e PYTHONPATH=/
 
 - **⑥ Phase 8 잔여 — 8.6 결제 seam 부채화(오너 2026-08-23: *"당장은 결제 붙이는 건 안 할 것 같다"*)·8.7 전체 검증은 8.6 뒤로.** 8.6 브리프는 결제 도입이 계기일 때 작성한다(부모 계획의 결정 축이 그대로 대기). 8.5까지의 구현은 완료·검증됐다.
 
-- **⑦ 계약 스키마 중복 전수조사 브리프 작성됨(오너 결정 대기, 2026-09-02).** 산출은 [`contract-schema-duplication-audit-decisions.md`](docs/plans/contract-schema-duplication-audit-decisions.md). 8개 LLM 호출부 전수 결과, 완전한 "에코 호출"보다는 **결정적/서버 유도 후보**가 핵심이다: Gate `decision`은 findings priority에서 서버가 계산하고, analysis `source_anchors`의 span/quote/hash는 catalog에서 재구성 가능할 수 있으며, query planner `plan_id`는 parser 기본값인데 prompt schema에는 없다. Report는 R-e로 큰 포인터 에코가 이미 제거됐고 남은 bool 둘(`requires_gate_check`·`should_analyze_after_save`)만 정책 판단 후보. 호출 분산은 generation→report→gate→revise가 같은 `ContextPackage`를 반복 싣는 축이나, 부분 실패 envelope이 달라 별도 비용/품질 slice다. **정정해야 할 함정**: `llm_call_audits`에는 프롬프트 본문이 없고 token/window/cap만 있다 — 입력↔출력 본문 대조는 감사 레코드만으로 못 하며, 1차는 진단 캡처 표본을 권장한다. 코드는 건드리지 않았다; 다음 행동은 오너가 "제거·서버 유도+mismatch 관측·현행 유지" 중 선택하는 것이다.
+- **⑦ 계약 스키마 중복 전수조사 브리프 확정됨(구현은 다른 날, 2026-09-02).** 산출은 [`contract-schema-duplication-audit-decisions.md`](docs/plans/contract-schema-duplication-audit-decisions.md). 오너 기준: ① 불필요한 schema는 **삭제 우선** ② 삭제가 안 맞고 서버 유도가 가능하면 **서버 유도 후순위 선** ③ id값도 서버 위에서 통제 가능하면 모델 출력 제외 대상 ④ 모든 변경은 **KPI 의미에 영향 없음**이 gate다. 후보는 Gate `decision`(findings priority에서 서버 유도), analysis `source_anchors` span/quote/hash(catalog 재구성 가능성 확인), query planner `plan_id`(서버 기본 id), report bool 둘(정책값이면 삭제). 호출 분산은 generation→report→gate→revise의 `ContextPackage` 반복 축이며, 확인 뒤 필요하면 장기 유예 없이 곧바로 구현 후보로 올린다. **함정**: `llm_call_audits`에는 프롬프트 본문이 없고 token/window/cap만 있다 — 입력↔출력 본문 대조는 감사 레코드만으로 못 하며, 1차는 진단 캡처 표본으로 한다.
 
 ## 완료 슬라이스 — 계약 요약과 함정만 (이력이 아니라 **지금도 구속하는 것**)
 

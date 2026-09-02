@@ -38,7 +38,7 @@
 | [`flat-loop-gate.md`](flat-loop-gate.md) | flat agent loop 종료 decision·tool registry·budget·completion criteria | Draft(숫자 한도 확정) |
 | [`analysis-memory-taxonomy.md`](analysis-memory-taxonomy.md) | 분석 대상과 저장 단위 논의안 | Discussion |
 | [`product-readiness-backlog.md`](product-readiness-backlog.md) | 트리거가 올 때 하나씩 닫는 횡단 개선 백로그(새 Phase 아님) | Active |
-| [`contract-schema-duplication-audit-decisions.md`](contract-schema-duplication-audit-decisions.md) | 8개 LLM 호출부의 에코/결정적 필드/호출 분산 전수조사 | 브리프 - 오너 결정 대기 |
+| [`contract-schema-duplication-audit-decisions.md`](contract-schema-duplication-audit-decisions.md) | 8개 LLM 호출부의 에코/결정적 필드/호출 분산 전수조사 | 확정 - 구현 대기 |
 | [`router-split-and-admin-separation-decisions.md`](router-split-and-admin-separation-decisions.md) | `main.py` 라우터 분해(**register 함수**) + 관리자 주소 분리(**ⓑ 별도 compose 서비스**) | **Resolved** — R1·A1(2026-08-05) · 구현 대기 |
 | [`router-split-shared-prelude-decisions.md`](router-split-shared-prelude-decisions.md) | 공유 prelude 추출(라우터가 `..main` 을 안 보게) — H-3-A 순환 폐쇄 · 이동 134 정의/956줄 실측 | **Resolved·구현 완료**(2026-08-06, §5=ⓑ 범주 3분할 — `app/api/models.py`·`errors.py`·`dependencies.py`) |
 

@@ -25,7 +25,7 @@
 | identity group 계획 하드닝 반영 | `docs/plans/pending-candidate-identity-grouping-implementation-phases.md` | 합격 검증의 비차단 4건을 계획에 반영: `contradicted` group 상태와 추이성 모순 셀, `uncertain` 표시 및 수동 해소 Deferred 트리거, `/analysis/review-inbox/groups/*` 액션 경로, Slice 4·5 operation 101·102 예상 | 브리프 Follow-up 미배정 두 건과 route/operation 착수 함정을 구현 전 문서 단계에서 폐쇄 |
 | **identity group Slice 0(저장 모델과 수명) 구현** | `analysis/identity_groups.py`(신규) · `analysis/identity_groups_mongo.py`(신규) · `main.py` · `routers/admin.py`·`projects.py` · `tests/test_identity_groups.py`·`test_identity_groups_mongo.py`(신규 20셀) · purge 로스터/스파이 셀 | 세 컬렉션(그룹·멤버·관계)의 도메인·서비스·in-memory·Mongo 어댑터. 모든 unique/index 축에 `project_id`·`candidate_type` 선행. relation pair 좌우 정규화, member 재추가 멱등(`added_at` 불변), group `status open\|contradicted\|closed` 저장, `execute_project_purge` 합류(10계약/22컬렉션) | Slice 1(shortlist·판정 서비스)이 저장소 public service만으로 착수 가능. HTTP/OpenAPI 무변(HEAD 대비 dump 실측 IDENTICAL) |
 | **identity group Slice 0 검증 B1 폐쇄 + 하드닝(H1~H4)** | `analysis/identity_groups.py`·`identity_groups_mongo.py` · `tests/test_identity_groups.py`·`test_identity_groups_mongo.py` · SoT v1.8.18 | **B1**: Mongo 읽기 naive datetime을 UTC 재라벨링(`_aware`, auth·core_sot와 같은 경계 정규화) + **서비스 클록 BSON ms 절단** → 실몽고 왕복이 데이터클래스 동등성 유지. 실몽고 셀은 µs≠0 클록(760724) 주입으로 `get_group`/`list_members`/`get_relation`(양 방향) 동등성을 결정적으로 단정. **H1** groups `_id`=server 생성 `group_id` 단독을 SoT에 명시 · **H2** self-pair 거절 문구화 · **H4** "member는 참조만" 기명 셀(미존재 candidate 추가 허용 — over-strict: 존재 검사를 끼우면 실패) | 검증 조건부 합격의 유일 차단 조건 폐쇄 — Slice 1 착수 가능. 변이 표 I1' 관측 오기도 정정(H3) |
-| 계약 스키마 중복 전수조사 | `docs/plans/contract-schema-duplication-audit-decisions.md`(신규) · `docs/plans/README.md` · `README.md` · `HANDOFF.md` | 8개 `LlmCallSite` 호출부를 에코 호출·결정적 값 LLM 경유·호출 분산 3축으로 대조. Gate `decision`, analysis `source_anchors`, query planner `plan_id`, report bool 필드, writing 체인 context 반복을 결정 후보로 기명. `llm_call_audits`에는 프롬프트 본문이 없다는 HANDOFF 조사 재료 갭도 분리 | 코드 변경 없이 오너 결정 브리프 산출. 다음 구현은 제거/서버 유도/유지 선택 뒤에 진행 |
+| 계약 스키마 중복 전수조사 | `docs/plans/contract-schema-duplication-audit-decisions.md`(신규) · `docs/plans/README.md` · `README.md` · `HANDOFF.md` | 8개 `LlmCallSite` 호출부를 에코 호출·결정적 값 LLM 경유·호출 분산 3축으로 대조. Gate `decision`, analysis `source_anchors`, query planner `plan_id`, report bool 필드, writing 체인 context 반복을 결정 후보로 기명. `llm_call_audits`에는 프롬프트 본문이 없다는 HANDOFF 조사 재료 갭도 분리 | 코드 변경 없이 브리프 확정. 다음 구현 기준은 삭제 우선·서버 유도 후순위·KPI 의미 보존 |
 
 ## Issues found
 
@@ -73,6 +73,10 @@
 - **(계약 스키마 중복 조사) 코드는 바꾸지 않고 결정 브리프를 먼저 둔다.** Gate `decision` 제거,
   analysis anchor 축소, prompt body 감사 저장은 모두 계약/관측 정책 변경이라 오너 선택 전 구현하지
   않는다. 권장은 서버 유도 + mismatch 관측(B)이고, 호출 재배치는 dogfood token 표본 뒤 별도 slice로 연다.
+- **(계약 스키마 중복 조사) 오너가 브리프 기준을 확정했다**: 불필요 schema는 삭제 우선, 삭제가
+  맞지 않고 서버 유도가 가능하면 서버 유도 후순위 선, id값도 서버 통제 가능하면 제외 대상,
+  모든 변경은 KPI 의미에 영향 없음이 gate다. 호출 재배치는 확인 뒤 필요하면 곧바로 구현 후보로
+  올리되, 실제 작업은 다른 날 한다.
 
 ## Verification
 
@@ -219,6 +223,7 @@
 - 문서 인덱스에 브리프를 등재했다. 첫 `tests.test_docs_indexes` 실행은 계획/브리프 카운트
   `117/97`이 `118/98`로 늘어난 것을 잡아 실패했고, `README.md`와 `docs/plans/README.md`의
   카운트를 갱신했다. 코드와 public OpenAPI/`schema.d.ts`는 변경하지 않았다.
+- 오너 확정 기준 반영 뒤 `tests.test_docs_indexes`와 `git diff --check`를 재실행했다.
 
 ## Next steps
 
@@ -228,6 +233,6 @@
    **Slice 1(shortlist와 판정 서비스)**. 저장소 public service만 사용하고, fake judge로
    `same`→member 연결·추이성 모순 `contradicted` 전이를 잠근다.
 3. 각 Slice가 끝날 때 독립 검증을 받고, grouped Inbox UI 이후 실 dogfood로 상태·목록 가독성을 육안 확인한다.
-4. 계약 스키마 중복 브리프는 오너 결정 대기다. 우선 결정할 것: Gate `decision`을 서버 유도로 바꿀지,
-   analysis `source_anchors`를 id/번호 선택 + 서버 재구성으로 줄일지, prompt body 대조를 진단 캡처로
-   할지 별도 감사 collection으로 할지.
+4. 계약 스키마 중복 브리프는 확정됐다. 다음 구현일의 기준은 삭제 우선 → 서버 유도 후순위 →
+   현행 유지 최후순위이며, id류도 서버 통제 가능하면 제외한다. KPI 의미를 바꾸지 않아야 하고,
+   호출 재배치는 확인 뒤 필요하면 곧바로 구현 후보로 올린다.
