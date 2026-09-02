@@ -1,7 +1,7 @@
 # 독립 검증 기록
 
 이 디렉터리는 **구현자가 아닌 검증자가** 각 슬라이스를 다시 뜯어본 기록이다. 2026-06-24부터
-**62일치 · 271건**이 쌓여 있다.
+**62일치 · 272건**이 쌓여 있다.
 
 ## 이 저장소의 검증이 무엇인가
 
@@ -36,7 +36,7 @@
 | 판정 | 건수 | 뜻 |
 |---|---|---|
 | 합격 | 186 | blocking 결함 없음 |
-| **조건부 합격** | **80** | 합격이되 닫아야 할 조건이 있었다 |
+| **조건부 합격** | **81** | 합격이되 닫아야 할 조건이 있었다 |
 | **불합격** | **5** | 핵심 계약 위반으로 다음 슬라이스 진행이 차단됐다 |
 
 **조건부 합격이 29%**라는 것이 이 절차가 형식이 아니라는 증거다. 검증이 실제로 지적을 냈고,
@@ -64,6 +64,8 @@
 최신순. 같은 날 여러 건이면 슬라이스별로 나뉜 것이다.
 
 ### 2026-09-02
+
+| [`start_next_intent_preservation.md`](2026-09-02/start_next_intent_preservation.md) | start-next intent 보존+C 확정 기록(`d4a207a`) 독립 검증. 동작은 전축 정상 — 보존 사슬(generate→sync scratch·async job·worker→scratch API→패드 accept) 실측, 400 검증 4분기 프로브 발화, 191/24/72·build 711 재현, 전수는 95% kill되었으나 진행점 분석+꼬리 220 passed로 "docs 가드 1 실패 외 전부 green" 폐쇄. **조건 4**: ① README 정본 표기 v1.8.15 잔존(docs 가드 red) ② schema.d.ts 손편집 불일치 3곳(NextUnitPayload 미등재·응답 next_unit 선택/컴포넌트 오기·@default 누락) ③ 400 경계 무셀(FA 변이 96 green) ④ job몽고 intent/next_unit 무셀(FB 변이 31 green — scratch몽고와 대조). FC1~FC4 기명 셀 재실패로 도메인 잠금은 작동 확인. | **조건부 합격** |
 
 | [`dogfood_review_ux_fix.md`](2026-09-02/dogfood_review_ux_fix.md) | dogfood P0·가드 보강 폐쇄(`61cd7a1`·`0174d8d`) 재검증. 1차 불합격 차단 3건 전부 실측 폐쇄 — 500은 커밋 프로브 5경로 200·`DraftPayload.model_validate` 셀, 값 무잠금은 exact `analyze:{snapshot}` 셀, 보고는 작업자 기록 명령 **문자 그대로** 재실행(broader 묶음 106 passed/40s·faulthandler 진단 48 passed/21s — "교착" 2회 불재현). **백엔드 전수 2672/1/3116 실패 0(2113s)** — 이 슬라이스 계열에서 전수 green은 이번이 처음. 프런트 88·build 711 modules·gen:api 무차이. 검증자 독립 변이 M8~M11 전부 기명 셀 재실패(작업자 표와 일치). 유예: `_scene_payload` 장면당 버전 스캔. | **합격** |
 
