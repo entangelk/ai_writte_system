@@ -20,6 +20,7 @@
 | 독립 검증 P0·가드 보강 | `routers/drafts.py` · `test_chapter_hierarchy.py` · `DraftEditor.tsx/test` · `ReviewInbox.test.tsx` | flat payload의 계약 밖 `latest_snapshot_id` 제거. nested exact job의 snapshot/status 값 단정. 첫 저장 전 finalize running 우선순위와 event/question payload 렌더 셀 추가 | 장면 생성·flat 목록·에디터 로드의 response validation 500을 제거하고 검증자가 찾은 무셀/코너 케이스를 잠금 |
 | 미승인 후보 정체성 그룹 C 확정 | `docs/plans/pending-candidate-identity-grouping-decisions.md` · `docs/system-contract-sot.md` | 브리프 상태를 “C 채택”으로 확정하고 SoT v1.8.16에 영속 identity group + 그룹 승인/거절 정책을 등재 | 후보 목록 중복 표시와 승인 후 canonical 중복 방지를 같은 설계로 닫는 방향 확정 |
 | Writing start-next 복구 채택 결함 폐쇄 | `api/models.py` · `routers/writing.py` · `writing/scratch*` · `writing/generation_job*` · `writing/generation_worker.py` · `writing/http_models.py` · `frontend/src/writing/*` · `frontend/src/api/*` · 회귀 | generate 요청에 `intent`/`next_unit` 추가. sync scratch·async job·worker result·scratch API가 둘을 보존. ScratchRecovery accept가 저장된 `next_unit`을 재전송. start-next generate는 provider 호출 전 next_unit binding 검증 | “다음 장면 이어쓰기” 후보가 패드/복구를 거쳐도 새 Scene을 열고, 이전 Scene 본문에 섞이지 않음 |
+| start-next 검증 조건 보강 | `README.md` · `frontend/src/api/schema.d.ts` · `tests/test_writing.py` · `tests/test_writing_generation_job_mongo.py` | 조건부 합격 4건을 닫기 위해 README 정본 표기를 v1.8.16으로 갱신, `gen:api` 재생성, generate 400 경계 4분기 셀, generation_job_mongo `intent`/`next_unit` 실값 round-trip을 추가 | 검증자가 지목한 문서 red·생성물 drift·400 무셀·job Mongo 무잠금 축을 기계적으로 폐쇄 |
 
 ## Issues found
 
@@ -88,6 +89,30 @@
   `python3 -m pytest -q tests/test_chapter_hierarchy.py::ChapterHierarchyApiTest::test_create_list_and_parent_scoped_reorder tests/test_docs_indexes.py tests/test_project_brief.py::WorkspaceW0SchemaIntegrationTest::test_openapi_components_match_w0_fragments`였다.
   검증 기록이 지적한 재현 명령 누락을 보완한다.
 
+## Verification — start-next verifier conditions
+
+- 조건 ① README 정본 표기: `docs/system-contract-sot.md` 현재 버전과 맞춰 `README.md`를
+  **v1.8.16**으로 갱신했다.
+- 조건 ② OpenAPI 생성물: `cd frontend && npm run gen:api`로 `schema.d.ts`를 재생성해
+  수동 drift를 제거했다.
+- 조건 ③ 400 경계: `WritingGenerateApiTest::test_start_next_intent_binding_rejects_invalid_pairs_before_provider`
+  에서 append+next_unit, start missing next_unit, blank title, blank goal 네 분기를 모두
+  400/detail/provider 미호출로 잠갔다.
+- 조건 ④ generation_job_mongo 신규 필드: round-trip fixture가 `intent="start_next_unit"`와
+  `next_unit={"title": ..., "goal": ...}` 실값을 넣어 `_doc`/`_entry` 어느 한쪽의 필드 유실도
+  실패하게 했다.
+- 재현:
+  `python3 -m pytest -q tests/test_docs_indexes.py` → **13 passed, 282 subtests**.
+  `python3 -m unittest tests.test_writing.WritingGenerateApiTest tests.test_writing_generation_job_mongo.MongoWritingGenerationJobRepositoryTest`
+  → **22 tests OK**.
+  `python3 -m unittest tests.test_writing_scratch tests.test_writing_generation_job tests.test_writing_generation_worker tests.test_writing tests.test_writing_revise`
+  → **192 tests OK**.
+  `python3 -m unittest tests.test_writing_generation_job_mongo` → **14 tests OK**.
+  `npm test -- --run src/writing/WritingPanel.test.tsx src/writing/ScratchRecovery.test.tsx`
+  → **72 passed**.
+  `npm run build` → **711 modules**, 성공.
+  `git diff --check` → 성공.
+
 ### Mutation checks after checkpoint `61cd7a1`
 
 | 변이 | 적용 diff | 재실패 셀 | 결과 |
@@ -117,7 +142,7 @@
 
 ## Next steps
 
-1. 오너가 미승인 후보 그룹 선택지 A~D 중 하나를 확정한다(권장 C).
-2. C 선택 시 identity group/revision 스키마, shortlist+judge, 멱등 group action, grouped Inbox UI를
-   작은 슬라이스로 나눈다.
-3. 이 슬라이스를 독립 검증하고 실 dogfood로 상태·목록 가독성을 육안 확인한다.
+1. start-next 검증 조건 폐쇄 재검증을 받는다.
+2. C 확정 방향으로 identity group/revision 스키마, shortlist+judge, 멱등 group action,
+   grouped Inbox UI를 작은 슬라이스로 나눈다.
+3. 실 dogfood로 상태·목록 가독성을 육안 확인한다.

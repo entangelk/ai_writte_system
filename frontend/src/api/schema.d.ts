@@ -2156,6 +2156,13 @@ export interface components {
             /** Title */
             title: string;
         };
+        /** NextUnitPayload */
+        NextUnitPayload: {
+            /** Goal */
+            goal: string | null;
+            /** Title */
+            title: string;
+        };
         /** ObservabilityKpiGatePayload */
         ObservabilityKpiGatePayload: {
             /** Avg Quality Score */
@@ -2736,7 +2743,7 @@ export interface components {
             intent: components["schemas"]["WritingIntent"];
             /** New Memory Hints */
             new_memory_hints: components["schemas"]["MemoryHintPayload"][];
-            next_unit?: components["schemas"]["NextUnitBody"] | null;
+            next_unit: components["schemas"]["NextUnitPayload"] | null;
             output_type: components["schemas"]["WritingOutputType"];
             /** Project Id */
             project_id: string;
@@ -2844,16 +2851,16 @@ export interface components {
             /** Instruction */
             instruction: string;
             /**
+             * Intent
+             * @default append_current
+             */
+            intent: string;
+            /**
              * Max Tokens
              * @description Ceiling on the context-package (input) budget in tokens. The server may reduce it to fit the model's context window (R-a); never increased. Distinct from output_length (output tokens).
              * @default 8192
              */
             max_tokens: number;
-            /**
-             * Intent
-             * @default append_current
-             */
-            intent: string;
             next_unit?: components["schemas"]["NextUnitBody"] | null;
             /**
              * Output Length

@@ -127,7 +127,7 @@ class _Client:
 def _job(job_id, *, project="p", draft="d", request="wr1", minute=0,
          status=WritingGenerationJobStatus.PENDING, claimed_at=None,
          failure_reason=None, failure_detail=None, result_scratch_id=None,
-         user_id=None):
+         user_id=None, intent=None, next_unit=None):
     return WritingGenerationJob(
         id=job_id, project_id=project, draft_id=draft, request_id=request,
         task_type="continue_scene", instruction="이어서", draft_excerpt="앞",
@@ -137,6 +137,7 @@ def _job(job_id, *, project="p", draft="d", request="wr1", minute=0,
         user_id=user_id,
         status=status, claimed_at=claimed_at, failure_reason=failure_reason,
         failure_detail=failure_detail, result_scratch_id=result_scratch_id,
+        intent=intent, next_unit=next_unit,
     )
 
 
@@ -153,7 +154,9 @@ class MongoWritingGenerationJobRepositoryTest(unittest.TestCase):
             "wgj:f", status=WritingGenerationJobStatus.FAILED,
             claimed_at=_NOW + timedelta(seconds=5),
             failure_reason=WritingGenerationJobFailureReason.PROVIDER_TIMEOUT,
-            failure_detail="timed out")
+            failure_detail="timed out",
+            intent="start_next_unit",
+            next_unit={"title": "다음 장면", "goal": "긴장 유지"})
         pending = _job("wgj:p", request="wr2", minute=1)
         self.repo.add(failed)
         self.repo.add(pending)

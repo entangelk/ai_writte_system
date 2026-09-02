@@ -457,6 +457,54 @@ class WritingGenerateApiTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 503)
 
+    def test_start_next_intent_binding_rejects_invalid_pairs_before_provider(self):
+        cases = (
+            (
+                "append_with_next_unit",
+                {
+                    "intent": "append_current",
+                    "next_unit": {"title": "다음 장면", "goal": "긴장 유지"},
+                },
+                "append_current must not carry next_unit",
+            ),
+            (
+                "start_without_next_unit",
+                {"intent": "start_next_unit"},
+                "start_next_unit requires next_unit",
+            ),
+            (
+                "start_with_blank_title",
+                {
+                    "intent": "start_next_unit",
+                    "next_unit": {"title": "   ", "goal": "긴장 유지"},
+                },
+                "next_unit.title must not be blank",
+            ),
+            (
+                "start_with_blank_goal",
+                {
+                    "intent": "start_next_unit",
+                    "next_unit": {"title": "다음 장면", "goal": "   "},
+                },
+                "next_unit.goal must be a nonblank string or null",
+            ),
+        )
+        for name, extra, detail in cases:
+            with self.subTest(name=name):
+                provider = _FakeProvider()
+                client, project_id, _ = _http(provider)
+                response = client.post(
+                    f"/projects/{project_id}/writing/generate",
+                    json={"request_id": f"wr-{name}",
+                          "instruction": "다음 장면으로 이어써줘.", **extra},
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json()["detail"], detail)
+                self.assertIsNone(
+                    provider.last_request,
+                    "invalid start-next intent bindings must fail before provider call",
+                )
+
     def test_unsupported_task_type_returns_400(self):
         client, project_id, _ = _http(_FakeProvider())
         response = client.post(
