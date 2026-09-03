@@ -78,6 +78,13 @@ from services.application.app.analysis.identity_groups import (
     CandidateIdentityGroupService,
     InMemoryCandidateIdentityGroupRepository,
 )
+from services.application.app.analysis.identity_judge import (
+    TerminalJsonIdentityJudge,
+    seed_analysis_identity_judge_template,
+)
+from services.application.app.analysis.identity_judging import (
+    CandidateIdentityJudgingService,
+)
 from services.application.app.analysis.reconciliation import (
     CharacterReconciliationService,
 )
@@ -764,6 +771,7 @@ def _default_analysis_runner(
     *,
     core_sot: CoreSotService,
     analysis: AnalysisService,
+    identity_groups: CandidateIdentityGroupService | None = None,
 ) -> AnalysisExtractionRunner | None:
     base_url = os.environ.get("LLM_GATEWAY_BASE_URL")
     if not base_url:
@@ -777,6 +785,38 @@ def _default_analysis_runner(
         ),
         call_site=LlmCallSite.ANALYSIS_EXTRACTOR,
     )
+    # Slice 2 (identity grouping): the runner judges its fresh candidates on
+    # the success path. The judge is its own call site (same reasoning as
+    # compare_judge, owner decision 2026-07-26 D2): one run request spends
+    # extractor and judge turns, and only separate literals keep "is grouping
+    # the expensive half" answerable. Same env gating as the compare judge —
+    # this factory is only reached with a Gateway configured, so the judge is
+    # always wired here; group store absent (explicit None) leaves the phase
+    # unwired, which tests and hand-assembled runners use.
+    identity_judging = None
+    if identity_groups is not None:
+        judge_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
+        seed_analysis_identity_judge_template(judge_templates)
+        identity_judging = CandidateIdentityJudgingService(
+            group_service=identity_groups,
+            candidate_repository=analysis.repository,
+            judge=TerminalJsonIdentityJudge(
+                ObservedProvider(
+                    GatewayGenerateProvider(
+                        base_url=base_url,
+                        timeout_seconds=_env_float(
+                            "LLM_GATEWAY_TIMEOUT_SECONDS", 120.0
+                        ),
+                        trust_env=_env_bool("LLM_GATEWAY_TRUST_ENV", False),
+                    ),
+                    call_site=LlmCallSite.IDENTITY_JUDGE,
+                ),
+                prompt_templates=judge_templates,
+                model=os.environ.get("LLM_GATEWAY_MODEL") or None,
+                max_tokens=int(os.environ.get(
+                    "ANALYSIS_IDENTITY_JUDGE_MAX_TOKENS", "512")),
+            ),
+        )
     return AnalysisExtractionRunner(
         analysis_service=analysis,
         snapshot_loader=CoreSotSourceAdapter(core_sot),
@@ -792,6 +832,7 @@ def _default_analysis_runner(
             # open-fence guard in writing/json_extract.py is the second half.
             max_tokens=int(os.environ.get("ANALYSIS_EXTRACT_MAX_TOKENS", "8192")),
         ),
+        identity_judging=identity_judging,
     )
 
 
@@ -1843,7 +1884,14 @@ def create_app(
     )
     runner = analysis_runner
     if runner is None:
-        runner = _default_analysis_runner(core_sot=core_sot, analysis=analysis)
+        # Slice 2: the default runner also judges fresh candidates into
+        # identity groups (the store assembled above); an injected runner
+        # (tests, smoke scripts) keeps its own wiring.
+        runner = _default_analysis_runner(
+            core_sot=core_sot,
+            analysis=analysis,
+            identity_groups=identity_groups,
+        )
     # A single shared vector index is owned here so the rebuild endpoint writes
     # into the same instance the default context search reads from. It is created
     # regardless of the planner env (rebuild works without LLM_GATEWAY_BASE_URL).

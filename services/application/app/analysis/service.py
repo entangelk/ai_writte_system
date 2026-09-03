@@ -254,6 +254,12 @@ class AnalysisService:
         # (unwired) leaves the deterministic Mongo-direct retrieval intact.
         self._reindex_outbox = reindex_outbox
 
+    @property
+    def repository(self) -> AnalysisRepository:
+        """이 서비스가 쓰는 후보/작업 저장소 — 조립 지점이 같은 인스턴스로
+        후속 서비스(identity judging 등)를 묶을 때 쓰는 읽기 전용 창구."""
+        return self._repo
+
     def purge_project(self, *, project_id: str) -> None:
         # D8-6b: project 전체 파기의 analysis 다리. endpoint(D8-6d)가 core_sot 파기와 함께 호출한다.
         self._repo.purge_project(project_id)

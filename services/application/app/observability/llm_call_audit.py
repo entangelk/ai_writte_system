@@ -62,6 +62,12 @@ class LlmCallSite(StrEnum):
     WRITING_RETRIEVAL_PLANNER = "writing_retrieval_planner"
     WRITING_REVISION = "writing_revision"
     WRITING_REPORT = "writing_report"
+    # 미승인 후보 정체성 그룹 Slice 2 (2026-09-03): 후보↔후보 동일성 판정.
+    # compare_judge를 별도 site로 둔 같은 이유(비가역성) — 한 run 요청이
+    # extractor와 이 판정을 함께 부르므로, 접어 넣으면 한 site의 repair
+    # 빈도를 다른 site의 정상 호출로 오염시킨다(SoT §LLM 파이프라인 관측의
+    # "site를 고정한 뒤 센다" 규칙).
+    IDENTITY_JUDGE = "identity_judge"
 
 
 class LlmCallOutcome(StrEnum):

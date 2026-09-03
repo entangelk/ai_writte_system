@@ -9,6 +9,10 @@ from services.application.app.analysis.extractor import (
     AnalysisCandidateDraft,
     AnalysisExtractionError,
 )
+from services.application.app.analysis.identity_judging import (
+    CandidateIdentityJudgingService,
+    InvalidIdentityJudgement,
+)
 from services.application.app.analysis.models import (
     AnalysisCandidate,
     AnalysisCandidateAction,
@@ -16,6 +20,7 @@ from services.application.app.analysis.models import (
     AnalysisJob,
     AnalysisJobFailureReason,
     AnalysisJobStatus,
+    RecordAnalysisCandidateResult,
     SnapshotText,
 )
 from services.application.app.analysis.repository import (
@@ -28,6 +33,7 @@ from services.application.app.analysis.service import (
 )
 from services.application.app.analysis.source import SnapshotLoader
 from services.application.app.core_sot.service import NotFound
+from services.application.app.observability.llm_call_scope import current_scope
 
 
 class CandidateExtractor(Protocol):
@@ -60,6 +66,7 @@ class AnalysisExtractionRunner:
         analysis_service: AnalysisService,
         snapshot_loader: SnapshotLoader,
         extractor: CandidateExtractor,
+        identity_judging: CandidateIdentityJudgingService | None = None,
     ) -> None:
         if not analysis_service.source_validation_enabled:
             raise AnalysisRunnerConfigurationError(
@@ -68,6 +75,7 @@ class AnalysisExtractionRunner:
         self._analysis_service = analysis_service
         self._snapshot_loader = snapshot_loader
         self._extractor = extractor
+        self._identity_judging = identity_judging
 
     async def run(
         self,
@@ -168,6 +176,9 @@ class AnalysisExtractionRunner:
         succeeded = self._analysis_service.mark_job_succeeded(
             project_id=project_id, job_id=job_id
         )
+        await self._judge_candidate_identities(
+            project_id=project_id, recorded=recorded
+        )
         return AnalysisExtractionRunResult(
             job=succeeded,
             candidates=tuple(result.candidate for result in recorded),
@@ -176,6 +187,42 @@ class AnalysisExtractionRunner:
                 result.idempotent_replay for result in recorded
             ),
         )
+
+    async def _judge_candidate_identities(
+        self, *, project_id: str, recorded: tuple[RecordAnalysisCandidateResult, ...]
+    ) -> None:
+        """Slice 2 (identity grouping): link the job's fresh candidates.
+
+        Runs only on the success path — the failure ``try`` above re-raises
+        before this point, so a save failure or job failure never attempts
+        judging, and the job is already terminal(succeeded) when this runs,
+        which is what makes the isolation structural. Plan Slice 2: a judging
+        failure must not fail the job; candidates stay ``needs_review``.
+        The whole phase is one isolation boundary and the first failure ends
+        it — a down gateway would otherwise burn one timeout per remaining
+        pair for nothing. Partially applied phases self-heal on re-runs
+        (Slice 1: stored relations are reused, group links re-applied —
+        the B3 closure cell is the trust basis).
+        """
+        if self._identity_judging is None:
+            return
+        try:
+            for result in recorded:
+                await self._identity_judging.judge_candidate(
+                    project_id=project_id,
+                    candidate_id=result.candidate.id,
+                )
+        except InvalidIdentityJudgement as exc:
+            # D4 (owner decision 2026-07-26, compare endpoint's branch): the
+            # judge answered and repair still failed to parse — the domain's
+            # final rejection of that last answer. The outcome guard inside
+            # reclassify keeps a provider_error row untouched; with no scope
+            # open (direct service use) there is nothing to annotate.
+            scope = current_scope()
+            if scope is not None:
+                scope.reclassify_last_as_parse_error(type(exc).__name__)
+        except Exception:  # noqa: BLE001 — deliberate isolation boundary
+            pass
 
     @staticmethod
     def _failure_reason(exc: Exception) -> AnalysisJobFailureReason:

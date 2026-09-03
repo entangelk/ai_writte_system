@@ -123,6 +123,34 @@ class SiteAssemblyIsInstrumentedTest(unittest.TestCase):
         self._assert_wrapped(compare._judge._provider,
                              LlmCallSite.COMPARE_JUDGE)
 
+    def test_identity_judge_assembly_is_wrapped(self):
+        # Identity-group Slice 2: the runner's judge must reach the scope as
+        # its own literal, not ride ANALYSIS_EXTRACTOR — a run that extracts
+        # and judges would otherwise blend two subsystems' repair rates.
+        from services.application.app.analysis.identity_groups import (
+            CandidateIdentityGroupService,
+            InMemoryCandidateIdentityGroupRepository,
+        )
+        from services.application.app.analysis.service import (
+            AnalysisService, InMemoryAnalysisRepository,
+        )
+        from services.application.app.analysis.source import CoreSotSourceAdapter
+        from services.application.app.main import _default_analysis_runner
+
+        core_sot = CoreSotService(InMemoryCoreSotRepository())
+        analysis = AnalysisService(
+            InMemoryAnalysisRepository(),
+            source_ref_resolver=CoreSotSourceAdapter(core_sot),
+        )
+        runner = _default_analysis_runner(
+            core_sot=core_sot,
+            analysis=analysis,
+            identity_groups=CandidateIdentityGroupService(
+                InMemoryCandidateIdentityGroupRepository()),
+        )
+        self._assert_wrapped(runner._identity_judging._judge._provider,
+                             LlmCallSite.IDENTITY_JUDGE)
+
     def test_context_search_planner_assembly_is_wrapped(self):
         from services.application.app.analysis.service import (
             AnalysisService, InMemoryAnalysisRepository,
@@ -961,12 +989,14 @@ class GenerationWorkerOpensAScopeTest(unittest.TestCase):
 class CallSiteLiteralsAreDiscoverableTest(unittest.TestCase):
     def test_every_instrumented_site_has_a_literal(self):
         # The literals the aggregation increment will group by. Pinned as a set
-        # so adding a site is a deliberate contract edit, not a silent one.
+        # so adding a site is a deliberate contract edit, not a silent one
+        # (identity_judge joined in the identity-group Slice 2, 2026-09-03).
         self.assertEqual(
             {site.value for site in LlmCallSite},
             {"query_planner", "writing_gate", "compare_judge",
              "analysis_extractor", "writing_generation",
-             "writing_retrieval_planner", "writing_revision", "writing_report"},
+             "writing_retrieval_planner", "writing_revision", "writing_report",
+             "identity_judge"},
         )
 
     def test_literals_are_stable_strings(self):
