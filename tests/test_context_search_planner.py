@@ -23,6 +23,7 @@ from services.application.app.context_search.planner import (
     CONTEXT_SEARCH_PLAN_PROMPT_VERSION,
     CONTEXT_SEARCH_PLAN_TASK_TYPE,
     CONTEXT_SEARCH_PLAN_TEMPLATE,
+    DEFAULT_PLAN_ID,
     SearchPlanParseError,
     TerminalJsonSearchPlanner,
     parse_search_plan,
@@ -79,7 +80,10 @@ def _planner(provider) -> TerminalJsonSearchPlanner:
 class ParseSearchPlanTest(unittest.TestCase):
     def test_valid_plan_parses_literals_and_injects_project_id(self):
         plan = parse_search_plan(_plan_content(), "project-1")
-        self.assertEqual(plan.plan_id, "plan-1")
+        # Under-strict guard: _plan_content() carries a model-emitted
+        # "plan_id": "plan-1", which must NOT be echoed into the plan — the id
+        # is server-controlled (contract schema duplication audit, query_planner).
+        self.assertEqual(plan.plan_id, DEFAULT_PLAN_ID)
         self.assertEqual(plan.project_id, "project-1")
         self.assertEqual(len(plan.steps), 2)
         self.assertEqual(plan.steps[0].need, ContextNeed.CURRENT_SCENE)
@@ -94,7 +98,7 @@ class ParseSearchPlanTest(unittest.TestCase):
             ]}
         )
         plan = parse_search_plan(content, "project-1")
-        self.assertTrue(plan.plan_id)
+        self.assertEqual(plan.plan_id, DEFAULT_PLAN_ID)
 
     def test_unknown_need_literal_is_parse_error(self):
         with self.assertRaises(SearchPlanParseError):
@@ -156,17 +160,26 @@ class ParseSearchPlanTest(unittest.TestCase):
                 "project-1",
             )
 
-    def test_present_empty_plan_id_is_parse_error(self):
-        """B4 should-fire: an explicit empty plan_id is invalid, while an
-        absent plan_id (test_plan_id_defaults_when_absent) is allowed."""
-        content = json.dumps(
-            {"plan_id": "", "steps": [
-                {"step_id": "s1", "need": "current_scene",
-                 "tools": ["mongo"], "query": "x"},
-            ]}
-        )
-        with self.assertRaises(SearchPlanParseError):
-            parse_search_plan(content, "project-1")
+    def test_model_emitted_plan_id_is_ignored(self):
+        """Two-directional guard on the server-controlled plan id.
+
+        Under-strict: restoring the old read of the model's plan_id would
+        echo "plan-1" (or reject the empty string as a parse error) — both
+        fail this cell.
+        Over-strict: rejecting the whole response just because it carries an
+        out-of-contract plan_id key also fails — the key is ignored, not
+        policed.
+        """
+        for emitted in ("plan-1", "", 123):
+            with self.subTest(emitted=emitted):
+                content = json.dumps(
+                    {"plan_id": emitted, "steps": [
+                        {"step_id": "s1", "need": "current_scene",
+                         "tools": ["mongo"], "query": "x"},
+                    ]}
+                )
+                plan = parse_search_plan(content, "project-1")
+                self.assertEqual(plan.plan_id, DEFAULT_PLAN_ID)
 
     def test_non_json_and_bad_shape_are_parse_errors(self):
         for content in ("```json\n{}\n```", "[]", '{"steps":"nope"}',

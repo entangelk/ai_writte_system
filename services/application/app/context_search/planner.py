@@ -58,6 +58,10 @@ allowed_tools. Produce at least one step per requested need. If you cannot
 plan, return {"steps":[]}.
 """
 
+# The plan id is a server-controlled constant. The prompt's output contract
+# has never asked the model for it; a model-emitted "plan_id" is ignored
+# instead of being echoed into the API response (contract schema duplication
+# audit, option A for query_planner).
 DEFAULT_PLAN_ID = "context_search_plan"
 
 
@@ -182,20 +186,13 @@ def build_context_search_plan_request(
 
 def parse_search_plan(content: str, project_id: str) -> SearchPlan:
     root = _json_object(content)
-    plan_id = _plan_id(root.get("plan_id"))
     raw_steps = root.get("steps")
     if not isinstance(raw_steps, list):
         raise SearchPlanParseError("steps must be an array")
     steps = tuple(_plan_step(item) for item in raw_steps)
-    return SearchPlan(plan_id=plan_id, project_id=project_id, steps=steps)
-
-
-def _plan_id(value: object) -> str:
-    if value is None:
-        return DEFAULT_PLAN_ID
-    if not isinstance(value, str) or not value:
-        raise SearchPlanParseError("plan_id must be a non-empty string")
-    return value
+    return SearchPlan(
+        plan_id=DEFAULT_PLAN_ID, project_id=project_id, steps=steps
+    )
 
 
 def _plan_step(item: object) -> SearchPlanStep:
