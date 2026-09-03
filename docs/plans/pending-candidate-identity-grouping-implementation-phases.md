@@ -93,7 +93,7 @@ Slice 2 배선 때 잰다(공통 작업 규칙의 provider 미구성·parse erro
 `IdentityJudgeNotConfigured`·`InvalidIdentityJudgement`·judge 예외 전파로
 서비스 레벨에서 잠갔다).
 
-## Slice 2 — 분석 runner 배선
+## Slice 2 — 분석 runner 배선 · **완료(2026-09-03, SoT v1.8.23)**
 
 **범위:** 분석 candidate가 저장된 뒤 Slice 1 서비스를 호출해 identity relation/group을 생성한다.
 Review Inbox 응답과 액션은 아직 바꾸지 않는다.
@@ -104,6 +104,36 @@ Review Inbox 응답과 액션은 아직 바꾸지 않는다.
 
 **검증:** runner 성공 경로에서 후보 저장 뒤 group 서비스 호출, 후보 0개/no shortlist no-op, group judge
 ProviderError/parse error의 실패 격리, LLM audit row 수를 잠근다.
+
+**완료 기록(2026-09-03):** `analysis/identity_judge.py`(gateway judge adapter)·`analysis/runner.py`
+배선(`identity_judging` 선택 주입)·`LlmCallSite.IDENTITY_JUDGE`(8→9종)·`main.py` 조립
+(`_default_analysis_runner` 확장 + `AnalysisService.repository` 읽기 전용 프로퍼티)로 구현
+(커밋 `488b867`·`e6a4c87`·`fd02e88`, SoT v1.8.23). 이 Slice가 확정한 리터럴 —
+
+- **판정은 성공 경로에서만** — 저장 실패·job 실패에는 시도조차 하지 않는다(셀: 후보 저장 실패 시
+  judge 무호출).
+- **판정은 `mark_job_succeeded` 뒤에 돈다** — job이 이미 종결이므로 판정 경로의 어떤 실패도 job
+  상태를 되돌릴 수 없다(격리의 구조화. 셀 `test_judging_runs_after_the_job_reaches_success` —
+  judge가 불릴 때 job이 SUCCEEDED여야 한다).
+- **판정 실패는 전체 단위 격리 + 첫 실패로 단계 종료** — ProviderError·`InvalidIdentityJudgement`·
+  judge 미구성 어느 것이 와도 job은 succeeded·후보는 `needs_review` 잔류. 세분화(후보별 격리)는
+  죽은 게이트웨이에 남은 pair만큼 timeout을 태우므로 과잉으로 잡았다(뮤테이션 M4′). 부분 적용된
+  단계는 Slice 1의 판정 재사용+자가 치유(B3 셀)로 회복된다.
+- **focal은 이번 job에 기록된 후보만** — pool의 옛 후보는 비교 대상이 될 뿐 스스로 판정을 다니지
+  않는다(셀: 옛 후보 2·신규 1에서 calls는 2쌍, 옛-옛 pair 무판정).
+- **terminal parse 거부의 D4 재분류는 runner 격리 경계에서** — compare endpoint 선례를 이식한
+  것으로, 판정 실패가 HTTP 오류로 올라오지 않아 endpoint가 그 예외를 볼 수 없기 때문이다.
+  `InvalidIdentityJudgement`가 올라온 시점의 마지막 호출이 곧 실패한 repair 호출이다.
+
+judge는 compare judge와 같은 모양이다(프롬프트 `analysis_identity_v1`·task_type `analysis_identity`·
+strict parse·repair 1회·판정 축 세 값 전부 허용), 조립 env 게이팅은 `LLM_GATEWAY_BASE_URL`,
+judge `max_tokens`는 `ANALYSIS_IDENTITY_JUDGE_MAX_TOKENS` 기본 **512**. OpenAPI/`schema.d.ts` 무변
+(덤프 바이트 동일 384,414B, HEAD~1 worktree 대조 실측). 감사 행 수: 판정 pair당 1행(`identity_judge`
+site·`correlation_id`=job_id — run endpoint의 scope를 탄다)·repair는 둘째 행·terminal 거부는 마지막
+행 `parse_error`·provider 실패는 자기 taxonomy 유지 — 전부 실 adapter+seam C 셀로 잠금.
+셀 18종(신규 파일 16 + `test_llm_call_sites.py` 조립 가드·max_tokens 핀 2). 뮤테이션 11회 중 10종
+기명 재실패(가드 제거 1종은 관측 동등 — 격리 경계가 AttributeError를 대신 삼키는 이중 보호).
+전수 **2740/1/3133**(+18셀, 1952.43초).
 
 ## Slice 3 — Review Inbox 읽기면
 

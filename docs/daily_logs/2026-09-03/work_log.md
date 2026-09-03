@@ -252,3 +252,79 @@
 ## Next steps
 
 - **Slice 2(분석 runner 배선) 착수** — B3 셀이 "판정 실패는 job을 실패로 바꾸지 않는다" 신뢰의 기반이 됐다.
+
+---
+
+# Work Log — 2026-09-03 세션 6 (identity group Slice 2 — 분석 runner 배선, 베타)
+
+## Goals
+
+- 오너 지시("Slice 2(분석 runner 배선) 착수 — B3 셀이 격리의 신뢰 기반이 됐다") — 계획 §Slice 2 구현:
+  분석 candidate가 저장된 뒤 Slice 1 서비스를 호출해 identity relation/group을 생성. Review Inbox는 무변.
+
+## Completed work
+
+### 구현(커밋 `488b867`·`e6a4c87`·`fd02e88`, SoT **v1.8.23**)
+
+- **`analysis/identity_judge.py`** — `TerminalJsonIdentityJudge`(compare judge와 같은 모양: versioned
+  prompt `analysis_identity_v1`·task_type `analysis_identity`·strict JSON parse·repair 1회·terminal
+  거부 `InvalidIdentityJudgement`). 판정 축 세 값(`same|different|uncertain`) 전부 judge 출력으로 허용.
+- **`analysis/runner.py`** — `identity_judging` 선택 주입. `_execute_pending_job`이 `mark_job_succeeded`
+  **뒤**에 `_judge_candidate_identities`(이번 job 기록 후보를 focal로 순회)를 부르고, 전체 단위로
+  격리(첫 실패로 단계 종료)하며 `InvalidIdentityJudgement`만 D4 재분류로 연결.
+- **`observability/llm_call_audit.py`** — `LlmCallSite.IDENTITY_JUDGE` 추가(8→9종).
+- **`main.py`** — `_default_analysis_runner`이 judging service를 조립(env `LLM_GATEWAY_BASE_URL`
+  게이팅, `ANALYSIS_IDENTITY_JUDGE_MAX_TOKENS` 기본 512, 자기 `ObservedProvider`로 감싸기).
+  `AnalysisService.repository` 읽기 전용 프로퍼티 신설(같은 저장소 인스턴스로 judging 조립).
+- **이 Slice가 확정한 리터럴**(상세는 계획 문서 §Slice 2 완료 기록): 성공 경로에서만 판정 · 종결 뒤 판정
+  (격리의 구조화) · 전체 단위 격리+첫 실패 종료 · focal=이번 job 기록 후보 · D4 재분류는 runner 격리 경계.
+
+### 검증 셀 18종
+
+- `tests/test_identity_judge_runner_wiring.py` **16셀** — 성공 경로(저장 뒤 호출·relation/group·needs_review
+  잔류) · focal 범위(옛 후보는 pool로만) · no-op 3종(후보 0개·no shortlist: character 이름 불일치+event
+  retriever 미주입·미배선) · 격리 4종(provider error·parse error·저장 실패 미시도·**종결 후 위치 잠금** —
+  judge가 불릴 때 job이 SUCCEEDED여야 한다) · 감사 행 4종(3 pair→3행·repair 2행·terminal 거부
+  [parse_error, success]·provider 실패 taxonomy) · adapter parse 축 3종(verdict 축·정확키·repair 회수).
+- `tests/test_llm_call_sites.py` **2셀** — 조립 감싸기 가드(`_identity_judging._judge._provider`가
+  `IDENTITY_JUDGE` 라벨의 `ObservedProvider`)·max_tokens 리터럴 핀(기본 512·env override). 핀셋 갱신.
+
+### 뮤테이션 11회 — 10종 기명 재실패, 1종 관측 동등
+
+| 변이 | 실측 |
+|---|---|
+| M1 runner 판정 호출 제거 | 9 failed — 성공 경로·focal·위치·감사 4 등 |
+| M2 격리 제거(재발산) | 2 failed — provider 격리 축 |
+| M3 판정을 `mark_job_succeeded` 앞으로 이동 | 1 failed — 위치 잠금 셀 |
+| M4 None-가드 제거 | **무변(16 passed)** — 격리 경계가 AttributeError를 대신 삼키는 이중 보호. 관측 동등하므로 가드는 명료성 용도로 존치 |
+| M4′ 격리를 후보별 세분화(첫 실패 후 계속) | 4 failed — 격리 2·감사 2(호출 수 증가) |
+| M5 리터럴 `"identity_judge"`→`"identity_judging"` | 1 failed — 핀셋 |
+| M6 조립 감싸기 해제 | 1 failed — 조립 가드 |
+| M7 verdict 축 검증 제거 | 1 failed — out-of-set adapter 셀 |
+| M8 repair 제거 | 4 failed — adapter 2·감사 2 |
+| M9 D4 재분류 분기 제거 | 1 failed — terminal 재분류 셀 |
+| M10 정확키 검사 제거 | 1 failed — extra-fields 셀 |
+
+### 회귀
+
+- 전수(test-mongo healthy): **2740 passed / 1 skipped / 3133 subtests, exit 0, 1952.43초**.
+  **검산**: 직전 기준선 2722/1/3133 + 신규 18셀 = 2740, subtest 무변 — 잔차 없음. skip 1 = 이 머신 관례.
+- OpenAPI 덤프 **바이트 동일**(384,414B) — HEAD~1 worktree 대조 실측(첫 시도는 커밋 후 stash가 빈 트리에서
+  무의미한 자기 비교가 됐음을 인지하고 worktree로 재측정).
+- 집중: 신규 파일 16 passed·callsites+runner+judging+scope+audit 50 passed.
+
+## Decisions
+
+- **판정 위치 = 종결 뒤** — 계획은 "저장 뒤"만 못박았으나, `mark_job_succeeded` 앞에 두면 하드 크래시 시
+  job이 running에 갇혀 재실행 불가(retry는 FAILED 전용)한 교착이 생긴다. 종결 뒤면 그 창이 없고, 격리가
+  구조적으로 보장된다. 위치 잠금 셀로 계약화했다.
+- **격리 단위 = 전체(첫 실패 종료)** — 계획이 단위를 정하지 않아 구현 세션에서 확정. 게이트웨이 장애 시
+  남은 pair만큼 120s timeout이 직렬로 쌓이는 것을 막는다. 판정 재사용+자가 치유(B3)가 회복 경로다.
+- **D4 재분류를 runner로** — 판정 실패는 격리돼 HTTP로 올라오지 않으므로 endpoint가 예외를 볼 수 없다.
+  compare endpoint의 branch를 격리 경계로 이식하는 것이 관례의 유일한 성립 위치다.
+- **M4는 실패로 세지 않았다** — 관측 동등한 변이를 억지로 잡으려 셀을 붙이는 것은 잠금이 아니라 장식이다.
+
+## Next steps
+
+- Slice 2 독립 검증(오너 지시 시) — 대상 커밋 `488b867`·`e6a4c87`·`fd02e88`·기록 커밋, 변이가 연 자리,
+  전수 기대값 2740/1/3133. 통과 후 **Slice 3(Review Inbox 읽기면)** 착수.
