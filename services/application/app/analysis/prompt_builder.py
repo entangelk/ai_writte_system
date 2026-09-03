@@ -75,11 +75,12 @@ def build_analysis_extract_request(
 
 
 def _source_ref_payload(source_ref: SourceRef) -> dict[str, object]:
+    # 스키마 중복 전수조사 A(2026-09-03): 카탈로그 렌더는 모델이 근거를 고르는 데
+    # 필요한 필드만 싣는다(id·블록·인용문). start/end offset과 content_hash는 모델에게
+    # 무의미한 에코 원천이었고(v6 이전 출력 계약이 그대로 복사하게 했다) 이제 서버가
+    # id로 조립하므로 렌더에서도 뺀다.
     return {
         "source_ref_id": source_ref.id,
         "block_id": source_ref.block_id,
-        "start_offset": source_ref.start_offset,
-        "end_offset": source_ref.end_offset,
         "quote": source_ref.quote,
-        "content_hash": source_ref.content_hash,
     }

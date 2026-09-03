@@ -25,6 +25,7 @@ from services.application.app.analysis.service import (
     InvalidCandidateSource,
 )
 from services.application.app.analysis.source import CoreSotSourceAdapter
+from services.application.app.core_sot.models import SourceRef
 from services.application.app.core_sot.service import (
     CoreSotService,
     InMemoryCoreSotRepository,
@@ -71,7 +72,7 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
         runner = AnalysisExtractionRunner(
             analysis_service=analysis_service,
             snapshot_loader=source_adapter,
-            extractor=AnalysisExtractionAdapter(provider),
+            extractor=AnalysisExtractionAdapter(provider, source_refs=saved["refs"]),
         )
 
         result = await runner.run(
@@ -113,7 +114,8 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
             analysis_service=analysis_service,
             snapshot_loader=source_adapter,
             extractor=AnalysisExtractionAdapter(
-                FakeLLMProvider(
+                source_refs=saved["refs"],
+                provider=FakeLLMProvider(
                     [
                         GenerationResult(model="fake-gemma", content=payload, finish_reason="stop"),
                         GenerationResult(model="fake-gemma", content=payload, finish_reason="stop"),
@@ -172,15 +174,26 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
         analysis_service, analysis_repo, source_adapter = self._analysis(
             saved["core_sot"]
         )
-        bad_anchor = {
-            **saved["anchors"]["letter"],
-            "quote": "잘못된 인용",
-        }
+        # 스키마 중복 전수조사 A 이후 모델은 quote를 못 틀린다(서버가 카탈로그에서
+        # 조립). 남은 실패 축은 "추출 카탈로그에는 있지만 러너의 정본 카탈로그에는
+        # 없는 id"다 — 조립은 되고 서비스 검증에서 거부된다.
+        ghost_ref = SourceRef(
+            id="ghost-ref",
+            project_id=saved["project_id"],
+            snapshot_id=saved["snapshot_id"],
+            block_id="block-9",
+            start_offset=0,
+            end_offset=2,
+            quote="잘못된 인용",
+            content_hash=saved["anchors"]["letter"]["content_hash"],
+        )
+        bad_anchor = {"source_ref_id": ghost_ref.id}
         runner = AnalysisExtractionRunner(
             analysis_service=analysis_service,
             snapshot_loader=source_adapter,
             extractor=AnalysisExtractionAdapter(
-                FakeLLMProvider(
+                source_refs=(*saved["refs"], ghost_ref),
+                provider=FakeLLMProvider(
                     [
                         self._provider_result(
                             [
@@ -323,7 +336,7 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
     async def test_runner_marks_failed_schema_invalid_on_malformed_provider(self):
         await self._assert_failed_reason(
             extractor=AnalysisExtractionAdapter(
-                FakeLLMProvider(
+                provider=FakeLLMProvider(
                     [
                         GenerationResult(
                             model="fake-gemma",
@@ -692,6 +705,7 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
             "project_id": project.id,
             "snapshot_id": saved.snapshot.id,
             "raw_text": raw_text,
+            "refs": (min_a, letter),
             "anchors": {
                 "min-a": self._anchor(min_a),
                 "letter": self._anchor(letter),
@@ -720,11 +734,15 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
 
     @staticmethod
     def _candidate(candidate_type, payload, source_anchor):
+        # 스키마 중복 전수조사 A: 모델 앵커는 id 하나(source_anchor dict는 서버 조립
+        # 값으로도 쓰이므로 여기서 id만 추출해 싣는다).
         return {
             "candidate_type": candidate_type,
             "provenance": "source_observed",
             "confidence": 0.9,
-            "source_anchors": [source_anchor],
+            "source_anchors": [
+                {"source_ref_id": source_anchor["source_ref_id"]}
+            ],
             "payload": payload,
         }
 

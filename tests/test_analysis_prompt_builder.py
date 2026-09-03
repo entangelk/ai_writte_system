@@ -56,16 +56,15 @@ class AnalysisPromptBuilderTest(unittest.TestCase):
         self.assertEqual(payload["task_type"], ANALYSIS_EXTRACT_TASK_TYPE)
         self.assertEqual(payload["prompt_version"], template.version)
         self.assertEqual(payload["snapshot"]["raw_text"], snapshot.raw_text)
+        # 스키마 중복 전수조사 A: 카탈로그 렌더는 id·블록·인용문만 싣는다.
+        # offset/hash는 모델에게 에코 원천일 뿐이고 서버가 id로 조립한다.
         self.assertEqual(
             payload["source_ref_catalog"],
             [
                 {
                     "source_ref_id": "source-ref-1",
                     "block_id": "block-1",
-                    "start_offset": 0,
-                    "end_offset": 2,
                     "quote": "민아",
-                    "content_hash": "hash-1",
                 }
             ],
         )

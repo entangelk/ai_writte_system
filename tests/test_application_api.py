@@ -1136,13 +1136,9 @@ class ApplicationApiTest(unittest.TestCase):
                                     "provenance": "source_observed",
                                     "confidence": 0.9,
                                     "source_anchors": [
-                                        {
-                                            "source_ref_id": source_ref.id,
-                                            "start_offset": source_ref.start_offset,
-                                            "end_offset": source_ref.end_offset,
-                                            "quote": source_ref.quote,
-                                            "content_hash": source_ref.content_hash,
-                                        }
+                                        # 스키마 중복 전수조사 A: id만 내면
+                                        # 서버가 카탈로그에서 조립한다.
+                                        {"source_ref_id": source_ref.id}
                                     ],
                                     "payload": {
                                         "name": "Mina",

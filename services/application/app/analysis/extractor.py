@@ -52,10 +52,12 @@ class AnalysisExtractionAdapter:
         self,
         provider: LLMProvider,
         *,
+        source_refs: Sequence[SourceRef] = (),
         model: str | None = None,
         max_tokens: int = 2048,
     ) -> None:
         self._provider = provider
+        self._source_refs = tuple(source_refs)
         self._model = model
         self._max_tokens = max_tokens
 
@@ -77,7 +79,9 @@ class AnalysisExtractionAdapter:
                 thinking=False,
             )
         )
-        return parse_analysis_extraction(result.content)
+        return parse_analysis_extraction(
+            result.content, source_refs=self._source_refs
+        )
 
 
 class SourceRefCatalog(Protocol):
@@ -128,25 +132,20 @@ class VersionedPromptAnalysisExtractionAdapter:
 
         result = await self._provider.generate(request)
         try:
-            drafts = parse_analysis_extraction(result.content)
+            # 스키마 중복 전수조사 A: 앵커 조립이 파싱 안에서 일어난다. 모델은
+            # source_ref_id만 내고 span/quote/hash는 카탈로그에서 채운다 — 옛
+            # 사후 대조(_catalog_anchor_error)가 강제하던 전필드 일치가 이제
+            # 구조적으로 보장된다(모델이 복사할 수 없으므로 틀릴 수 없다).
+            return parse_analysis_extraction(
+                result.content, source_refs=source_refs
+            )
         except AnalysisExtractionError as first_error:
             return await self._repair_once(
                 request=request,
                 invalid_content=result.content,
                 error=str(first_error),
+                source_refs=source_refs,
             )
-
-        catalog_error = _catalog_anchor_error(drafts, source_refs)
-        if catalog_error is None:
-            return drafts
-        repaired = await self._repair_once(
-            request=request,
-            invalid_content=result.content,
-            error=catalog_error,
-        )
-        if _catalog_anchor_error(repaired, source_refs) is None:
-            return repaired
-        return repaired
 
     async def _repair_once(
         self,
@@ -154,6 +153,7 @@ class VersionedPromptAnalysisExtractionAdapter:
         request: ChatCompletionRequest,
         invalid_content: str,
         error: str,
+        source_refs: tuple[SourceRef, ...],
     ) -> tuple[AnalysisCandidateDraft, ...]:
         repair = await self._provider.generate(
             _repair_request(
@@ -162,35 +162,20 @@ class VersionedPromptAnalysisExtractionAdapter:
                 parser_error=error,
             )
         )
-        return parse_analysis_extraction(repair.content)
+        return parse_analysis_extraction(repair.content, source_refs=source_refs)
 
 
-def parse_analysis_extraction(content: str) -> tuple[AnalysisCandidateDraft, ...]:
+def parse_analysis_extraction(
+    content: str,
+    *,
+    source_refs: Sequence[SourceRef] = (),
+) -> tuple[AnalysisCandidateDraft, ...]:
+    catalog = {source_ref.id: source_ref for source_ref in source_refs}
     root = _json_object(content)
     raw_candidates = root.get("candidates")
     if not isinstance(raw_candidates, list):
         raise AnalysisExtractionError("candidates must be an array")
-    return tuple(_candidate_draft(item) for item in raw_candidates)
-
-
-def _catalog_anchor_error(
-    drafts: Sequence[AnalysisCandidateDraft],
-    source_refs: Sequence[SourceRef],
-) -> str | None:
-    catalog = {source_ref.id: source_ref for source_ref in source_refs}
-    for draft in drafts:
-        for anchor in draft.source_anchors:
-            source_ref = catalog.get(anchor.source_ref_id)
-            if source_ref is None:
-                return "source_ref_id must exactly match the source_ref catalog"
-            if (
-                source_ref.start_offset != anchor.start_offset
-                or source_ref.end_offset != anchor.end_offset
-                or source_ref.quote != anchor.quote
-                or source_ref.content_hash != anchor.content_hash
-            ):
-                return "source_anchors must preserve catalog span, quote, and content_hash"
-    return None
+    return tuple(_candidate_draft(item, catalog) for item in raw_candidates)
 
 
 _REPAIR_SYSTEM_PROMPT = """Repair Phase 2A analysis extraction output.
@@ -202,7 +187,7 @@ Each candidate must contain exactly these fields:
 - candidate_type: one of character_observation, event_observation, open_question_observation
 - provenance: source_observed or ai_inferred
 - confidence: number from 0.0 to 1.0
-- source_anchors: non-empty array of catalog anchors, preserving source_ref_id, start_offset, end_offset, quote, content_hash
+- source_anchors: non-empty array of {"source_ref_id": "..."} naming current catalog items — span, quote, and content_hash are derived by the server, so emit nothing else
 - payload: character_observation requires {"name": "...", "observation": "..."} and may add an optional "aspect" (e.g. "voice", "trait"); event_observation requires {"event": "..."}; open_question_observation requires {"question": "..."}
 
 Use only source_ref_id values from the original source_ref catalog. If no valid candidate can be produced, return {"candidates":[]}.
@@ -249,7 +234,10 @@ def _repair_request(
     )
 
 
-def _candidate_draft(item: object) -> AnalysisCandidateDraft:
+def _candidate_draft(
+    item: object,
+    catalog: Mapping[str, SourceRef],
+) -> AnalysisCandidateDraft:
     if not isinstance(item, Mapping):
         raise AnalysisExtractionError("candidate must be an object")
     _require_fields(
@@ -265,7 +253,7 @@ def _candidate_draft(item: object) -> AnalysisCandidateDraft:
     candidate_type = _candidate_type(item["candidate_type"])
     provenance = _provenance(item["provenance"])
     confidence = _confidence(item["confidence"])
-    source_anchors = _source_anchors(item["source_anchors"])
+    source_anchors = _source_anchors(item["source_anchors"], catalog)
     try:
         payload = validate_candidate_payload(candidate_type, item["payload"])
     except InvalidAnalysisPayload as exc:
@@ -322,44 +310,45 @@ def _confidence(value: object) -> float:
     return normalized
 
 
-def _source_anchors(value: object) -> tuple[CandidateSourceAnchor, ...]:
+def _source_anchors(
+    value: object,
+    catalog: Mapping[str, SourceRef],
+) -> tuple[CandidateSourceAnchor, ...]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or not value:
         raise AnalysisExtractionError("source_anchors must be a non-empty array")
-    return _dedupe_source_anchors(tuple(_source_anchor(item) for item in value))
+    return _dedupe_source_anchors(
+        tuple(_source_anchor(item, catalog) for item in value)
+    )
 
 
-def _source_anchor(item: object) -> CandidateSourceAnchor:
+def _source_anchor(
+    item: object,
+    catalog: Mapping[str, SourceRef],
+) -> CandidateSourceAnchor:
+    # 스키마 중복 전수조사 A: 모델이 내는 것은 카탈로그 항목의 id 하나다.
+    # span/quote/hash는 서버가 그 id의 카탈로그 행에서 조립한다(옛 전필드 일치
+    # 강제의 구조적 버전). 레거시 5필드 앵커는 정확키 검사에서 거부된다.
     if not isinstance(item, Mapping):
         raise AnalysisExtractionError("source_anchor must be an object")
-    _require_fields(
-        item,
-        {"source_ref_id", "start_offset", "end_offset", "quote", "content_hash"},
-    )
+    _require_fields(item, {"source_ref_id"})
     source_ref_id = _non_empty_string(item["source_ref_id"], "source_ref_id")
-    start_offset = _offset(item["start_offset"], "start_offset")
-    end_offset = _offset(item["end_offset"], "end_offset")
-    if end_offset <= start_offset:
-        raise AnalysisExtractionError("source_anchor offsets are invalid")
-    quote = _non_empty_string(item["quote"], "quote")
-    content_hash = _non_empty_string(item["content_hash"], "content_hash")
+    source_ref = catalog.get(source_ref_id)
+    if source_ref is None:
+        raise AnalysisExtractionError(
+            "source_ref_id must exactly match the source_ref catalog"
+        )
     return CandidateSourceAnchor(
-        source_ref_id=source_ref_id,
-        start_offset=start_offset,
-        end_offset=end_offset,
-        quote=quote,
-        content_hash=content_hash,
+        source_ref_id=source_ref.id,
+        start_offset=source_ref.start_offset,
+        end_offset=source_ref.end_offset,
+        quote=source_ref.quote,
+        content_hash=source_ref.content_hash,
     )
 
 
 def _non_empty_string(value: object, field: str) -> str:
     if not isinstance(value, str) or not value:
         raise AnalysisExtractionError(f"{field} must be a non-empty string")
-    return value
-
-
-def _offset(value: object, field: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise AnalysisExtractionError(f"{field} must be a non-negative integer")
     return value
 
 
