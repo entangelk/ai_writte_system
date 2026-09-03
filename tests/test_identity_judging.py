@@ -492,6 +492,15 @@ class GroupMergeTest(IdentityJudgingTestBase):
         )
 
     def test_same_across_two_groups_merges_into_the_older_group(self) -> None:
+        # 그룹 id를 결정적으로 배정한다 — 첫 그룹(생존)이 ``cig:b``, 둘째(흡수)가
+        # ``cig:a``라 목록 정렬에서 **흡수된 껍데기가 먼저** 온다. 소속 판정이
+        # closed 를 제외하는지를 정렬 운이 아니라 잠그기 위해서다.
+        ids = iter(("cig:b", "cig:a"))
+        self.groups = CandidateIdentityGroupService(
+            InMemoryCandidateIdentityGroupRepository(),
+            clock=self.clock,
+            id_factory=lambda: next(ids),
+        )
         e1 = self._event("cand-e1", "폭풍의 밤")
         e2 = self._event("cand-e2", "폭풍의 밤 지나고")
         e3 = self._event("cand-e3", "새로운 조우")
