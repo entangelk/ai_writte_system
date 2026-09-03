@@ -517,6 +517,7 @@ class GroupMergeTest(IdentityJudgingTestBase):
         )
         service = self._service(judge=judge, retriever=retriever)
         self._judge_candidate(service, candidate_id="cand-e1")
+        self.clock.advance()  # created_at 동률 방지 — 생존 그룹이 확실히 먼저 생긴다
         self._judge_candidate(service, candidate_id="cand-e3")
         group1, group2 = sorted(
             self.groups.list_groups("p1"), key=lambda g: g.created_at
