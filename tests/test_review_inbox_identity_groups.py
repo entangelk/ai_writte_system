@@ -458,6 +458,125 @@ class GroupMetadataTest(unittest.TestCase):
             },
         )
 
+    def test_rationale_ignores_relations_to_members_outside_the_roster(self):
+        # 검증 B1 폐쇄(2026-09-04) — VM1이 13 passed로 입증한 무셀 축. 리터럴 ③의
+        # should-NOT: same relation의 상대가 검토함을 떠났으면 그 pair의 근거는
+        # 싣지 않는다. 그룹은 가시 멤버가 남는 한 살아 있다(여기선 {a, c} ≥ 2).
+        client, analysis, groups, _clock, project_id = _build()
+        a = _seed_candidate(analysis, project_id=project_id,
+                            logical_key="a", payload={"name": "Ariel", "observation": "brave"})
+        b = _seed_candidate(analysis, project_id=project_id,
+                            logical_key="b", payload={"name": "Ariel", "observation": "brave"})
+        c = _seed_candidate(analysis, project_id=project_id,
+                            logical_key="c", payload={"name": "Ariel", "observation": "brave"})
+        _open_group(groups, project_id, a, b, c)
+        _same_relation(groups, project_id, a, b, "judged while b was visible")
+        rejected = client.post(
+            f"/projects/{project_id}/analysis/candidates/{b.id}/reject"
+        )
+        self.assertEqual(rejected.status_code, 200)
+
+        items = _by_id(_items(client, project_id))
+
+        self.assertEqual(items[a.id]["identity_group"]["group_member_ids"],
+                         sorted([a.id, c.id]))
+        self.assertIsNone(
+            items[a.id]["identity_group"]["identity_rationale_summary"]
+        )
+
+    def test_rationale_tie_breaks_by_the_larger_pair_id(self):
+        # 하드닝 H1 — created_at 동률(BSON ms 해상도라 실운영 가능)의 방향 잠금.
+        # 동률이면 큰 pair id가 이긴다(focal 고정 → 더 큰 id의 상대편 relation).
+        client, analysis, groups, _clock, project_id = _build()
+        a = _seed_candidate(analysis, project_id=project_id,
+                            logical_key="a", payload={"name": "Ariel", "observation": "brave"})
+        b = _seed_candidate(analysis, project_id=project_id,
+                            logical_key="b", payload={"name": "Ariel", "observation": "brave"})
+        c = _seed_candidate(analysis, project_id=project_id,
+                            logical_key="c", payload={"name": "Ariel", "observation": "brave"})
+        _open_group(groups, project_id, a, b, c)
+        # 클록을 전진하지 않는다 — 두 relation의 created_at이 정확히 같다.
+        _same_relation(groups, project_id, a, b, f"rationale via {b.id}")
+        _same_relation(groups, project_id, a, c, f"rationale via {c.id}")
+
+        items = _by_id(_items(client, project_id))
+
+        winner = b if b.id > c.id else c
+        self.assertEqual(
+            items[a.id]["identity_group"]["identity_rationale_summary"],
+            f"rationale via {winner.id}",
+        )
+        # focal이 아닌 쪽(b·c)은 각자 a와의 relation 하나뿐 — 동률의 영향이 없다.
+        self.assertEqual(
+            items[b.id]["identity_group"]["identity_rationale_summary"],
+            f"rationale via {b.id}",
+        )
+
+    def test_edited_member_leaves_the_group_roster(self):
+        # 하드닝 H2 — 검토함 이탈의 세 번째 원인 edit(원본 superseded)도
+        # confirm(셀 위)·reject(셀 위)와 같은 분기로 roster에서 사라진다.
+        client, analysis, groups, _clock, project_id = _build()
+        a = _seed_candidate(analysis, project_id=project_id,
+                            logical_key="a", payload={"name": "Ariel", "observation": "brave"})
+        b = _seed_candidate(analysis, project_id=project_id,
+                            logical_key="b", payload={"name": "Ariel", "observation": "brave"})
+        c = _seed_candidate(analysis, project_id=project_id,
+                            logical_key="c", payload={"name": "Ariel", "observation": "brave"})
+        group = _open_group(groups, project_id, a, b, c)
+        _same_relation(groups, project_id, a, b, "judged while b was visible")
+        edited = client.post(
+            f"/projects/{project_id}/analysis/candidates/{b.id}/edit",
+            json={"payload": {"name": "Ariel", "observation": "revised"}},
+        )
+        self.assertEqual(edited.status_code, 200)
+
+        items = _by_id(_items(client, project_id))
+
+        # edit의 승격은 새 후보 id로 나가므로 roster에 끼지 않고, 원본 b는
+        # superseded로 검토함을 떠난다. a-b relation의 상대도 이탈 → 근거 null.
+        self.assertNotIn(b.id, items)
+        self.assertEqual(
+            items[a.id]["identity_group"],
+            {
+                "group_id": group.group_id,
+                "group_size": 2,
+                "group_status": "open",
+                "group_member_ids": sorted([a.id, c.id]),
+                "identity_rationale_summary": None,
+            },
+        )
+
+    def test_rationale_ignores_relations_of_another_candidate_type(self):
+        # 하드닝 H3 — relation의 candidate_type이 그룹의 type과 다르면 근거가
+        # 될 수 없다. 판정 경로는 같은 type pool만 짝짓지만 저장 면은 이 행을
+        # 거부하지 않으므로(서비스 오용으로만 생성 가능), 읽기면의 방어를 잠근다.
+        client, analysis, groups, _clock, project_id = _build()
+        a = _seed_candidate(analysis, project_id=project_id,
+                            logical_key="a", payload={"name": "Ariel", "observation": "brave"})
+        b = _seed_candidate(analysis, project_id=project_id,
+                            logical_key="b", payload={"name": "Ariel", "observation": "brave"})
+        group = _open_group(groups, project_id, a, b)
+        groups.record_relation(
+            project_id, AnalysisCandidateType.EVENT_OBSERVATION, a.id, b.id,
+            verdict=IdentityRelationVerdict.SAME,
+            rationale="cross-type row references character ids",
+            source="identity_judge",
+        )
+
+        items = _by_id(_items(client, project_id))
+
+        # 그룹 자체는 member 행으로 살아 있고 — 근거만 오염되지 않는다.
+        self.assertEqual(
+            items[a.id]["identity_group"],
+            {
+                "group_id": group.group_id,
+                "group_size": 2,
+                "group_status": "open",
+                "group_member_ids": sorted([a.id, b.id]),
+                "identity_rationale_summary": None,
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
