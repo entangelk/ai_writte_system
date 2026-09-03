@@ -36,7 +36,6 @@ def _output(case):
             "recommended_decision": case.expected_decision.value,
         })
     return json.dumps({
-        "decision": case.expected_decision.value,
         "findings": findings,
         "checked_constraints": ["do_not_use", "POV", "continuity"],
     }, ensure_ascii=False)
@@ -83,7 +82,8 @@ class GateQualityFixtureTest(unittest.TestCase):
     def test_wrong_decision_and_invalid_result_are_fail_closed_and_isolated(self):
         cases = GATE_QUALITY_CASES[:2]
         wrong = json.dumps({
-            "decision": "revise",
+            # Schema audit A: no top-level decision — a wrong verdict now comes
+            # from an over-eager finding, which the server derives "revise" from.
             "findings": [{
                 "type": "continuity", "severity": "warning",
                 "message": "과민 판정", "evidence": "민아는 역 안으로 들어섰다",

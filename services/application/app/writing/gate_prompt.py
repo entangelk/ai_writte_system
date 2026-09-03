@@ -15,11 +15,13 @@ from services.llm_gateway.app.payload import ChatCompletionRequest, ChatMessage
 
 
 WRITING_GATE_TASK_TYPE = "writing_gate"
-WRITING_GATE_PROMPT_VERSION = "writing_gate_v1"
+# v2 (contract schema duplication audit, option A): the model no longer emits a
+# top-level decision. The server derives it from findings.recommended_decision,
+# so a model/priority mismatch can no longer reject an otherwise-valid result.
+WRITING_GATE_PROMPT_VERSION = "writing_gate_v2"
 WRITING_GATE_TEMPLATE = """You are the Writing Gate. Evaluate candidate prose against the supplied ContextPackage and original writing request.
 
 Check only: do_not_use, POV, continuity, and style. Return raw JSON only (no markdown code fence, no surrounding prose) with exactly:
-- decision: pass|revise|retrieve_more|needs_user_review|block
 - findings: array of objects with exactly type, severity, message, evidence, recommended_decision
 - checked_constraints: array of strings
 
@@ -27,7 +29,7 @@ Finding type is do_not_use|pov|continuity|style. Severity is warning|error. A fi
 
 A style finding means the candidate prose diverges from the author's project_brief style settings (tone, style_rules, preferred_patterns, forbidden_patterns, style_examples). Style is ADVISORY: judge it only against the author's stated style, its severity must be warning, and its recommendation must be needs_user_review. Never block or auto-revise style — the author may have deviated on purpose and decides for themselves. Do not raise a style finding for a plausible authorial choice; raise it only for a clear divergence from the stated settings.
 
-Decision priority is block > needs_user_review > retrieve_more > revise > pass, computed over the non-style findings only: style findings do NOT change the decision, so a candidate whose only findings are style is pass. Use block for a hard do_not_use or explicit POV violation; needs_user_review for genuine ambiguity or conflicting context; retrieve_more when canonical evidence is insufficient; revise for a repairable continuity problem; pass when there are no non-style findings. Every finding must quote a short exact excerpt from the candidate in evidence, including style and retrieve_more findings; choose the candidate span that diverges or whose claim cannot be verified from the supplied context.
+The server derives the decision from your findings' recommended_decision (block > needs_user_review > retrieve_more > revise > pass), computed over the non-style findings only: style findings do NOT change the decision, so a candidate whose only findings are style passes. Use block for a hard do_not_use or explicit POV violation; needs_user_review for genuine ambiguity or conflicting context; retrieve_more when canonical evidence is insufficient; revise for a repairable continuity problem; report no finding when the candidate is clean. Every finding must quote a short exact excerpt from the candidate in evidence, including style and retrieve_more findings; choose the candidate span that diverges or whose claim cannot be verified from the supplied context.
 
 Do not rewrite prose, search, save, or execute the recommendation."""
 

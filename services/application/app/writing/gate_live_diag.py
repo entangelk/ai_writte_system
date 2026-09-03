@@ -239,7 +239,7 @@ def format_diagnosis(
     diagnosis: GateDiagnosis, *,
     request_id: str, project_id: str,
     model: str | None, max_tokens: int | None,
-    prompt_version: str = "writing_gate_v1",
+    prompt_version: str = "writing_gate_v2",
 ) -> str:
     """Render a diagnosis as operator-terminal text (stdout only).
 

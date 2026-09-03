@@ -75,8 +75,8 @@ def _finding():
     )
 
 
-def _gate_output(decision="pass", findings=None, *, extra_field=False):
-    obj = {"decision": decision, "findings": findings or [],
+def _gate_output(findings=None, *, extra_field=False):
+    obj = {"findings": findings or [],
            "checked_constraints": ["POV 제한 시점"]}
     if extra_field:
         obj["rogue_key"] = "schema violation"
@@ -249,7 +249,7 @@ class RunGateDiagnosisTest(unittest.TestCase):
         self.assertEqual(diag.parse_status, GATE_PARSED_OK)
         self.assertEqual(diag.decision, "pass")
         self.assertEqual(diag.finding_count, 0)
-        self.assertIn("decision", diag.raw_content)
+        self.assertIn("checked_constraints", diag.raw_content)
 
     def test_stage_trace_records_pre_gate_pipeline(self):
         diag = _drive(gate_provider=FakeLLMProvider([GenerationResult(

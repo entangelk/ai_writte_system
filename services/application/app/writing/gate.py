@@ -106,12 +106,8 @@ class WritingGateService:
 
 def parse_writing_gate_result(content: str):
     root = json_object(content)
-    if set(root) != {"decision", "findings", "checked_constraints"}:
+    if set(root) != {"findings", "checked_constraints"}:
         raise ValueError("result fields do not match schema")
-    try:
-        decision = WritingGateDecision(root["decision"])
-    except (ValueError, TypeError) as exc:
-        raise ValueError("unknown decision literal") from exc
     raw_findings = root["findings"]
     raw_checked = root["checked_constraints"]
     if not isinstance(raw_findings, list) or not isinstance(raw_checked, list):
@@ -122,14 +118,15 @@ def parse_writing_gate_result(content: str):
     # 증분 3 (D5=A/D6=A): style findings are advisory — excluded from the decision
     # priority so a candidate whose only findings are style still passes (경고이지
     # 차단 아님, 최종 결정은 사용자). They remain in `findings` so the author sees them.
+    # The decision is server-derived from the findings (contract schema duplication
+    # audit, option A): the model emits no top-level decision, so a model/priority
+    # mismatch can no longer reject an otherwise-valid result.
     decision_driving = tuple(
         item for item in findings
         if item.finding_type is not WritingGateFindingType.STYLE
     )
-    expected = max((item.recommended_decision for item in decision_driving),
+    decision = max((item.recommended_decision for item in decision_driving),
                    key=_PRIORITY.get, default=WritingGateDecision.PASS)
-    if decision is not expected:
-        raise ValueError("decision does not match finding priority")
     return decision, findings, checked
 
 

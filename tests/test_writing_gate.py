@@ -61,8 +61,11 @@ def _candidate(project_id="p1", text="아린은 문을 열었다."):
         output_type=WritingOutputType.DRAFT_PATCH, text=text)
 
 
-def _output(decision="pass", findings=None):
-    return json.dumps({"decision": decision, "findings": findings or [],
+def _output(findings=None):
+    # Schema audit A: the gate output contract has no top-level decision —
+    # the server derives it from the findings. A legacy fixture still carrying
+    # a "decision" key is the rejected-by-schema case (see GateContractTest).
+    return json.dumps({"findings": findings or [],
                        "checked_constraints": ["POV 제한 시점"]},
                       ensure_ascii=False)
 
@@ -106,49 +109,51 @@ class GateContractTest(unittest.TestCase):
     def test_each_non_pass_decision_is_preserved(self):
         for literal in ("revise", "retrieve_more", "needs_user_review", "block"):
             with self.subTest(literal=literal):
-                decision, findings, _ = parse_writing_gate_result(_output(
-                    literal, [_finding(recommendation=literal)]))
+                decision, findings, _ = parse_writing_gate_result(
+                    _output([_finding(recommendation=literal)]))
                 self.assertEqual(decision.value, literal)
                 self.assertEqual(findings[0].recommended_decision.value, literal)
 
-    def test_priority_rejects_weaker_top_level_decision(self):
+    def test_decision_is_derived_from_the_strongest_finding(self):
+        # Schema audit A: the model emits no top-level decision; the server
+        # derives it from findings.recommended_decision. Under-strict guard —
+        # reinstating a weaker default or a model-decision read fails here.
         findings = [_finding(recommendation="revise"),
                     _finding(recommendation="block", finding_type="pov")]
-        with self.assertRaisesRegex(ValueError, "priority"):
-            parse_writing_gate_result(_output("revise", findings))
-        decision, _, _ = parse_writing_gate_result(_output("block", findings))
+        decision, _, _ = parse_writing_gate_result(_output(findings))
         self.assertIs(decision, WritingGateDecision.BLOCK)
 
-    def test_priority_rejects_overstated_top_level_decision(self):
-        # Over-strict guard: lower findings cannot be promoted to a stronger
-        # editor action by the model.
-        for overstated in ("retrieve_more", "needs_user_review", "block"):
-            with self.subTest(overstated=overstated), self.assertRaisesRegex(
-                ValueError, "priority"
+    def test_model_emitted_top_level_decision_is_rejected(self):
+        # Over-strict guard on the narrowed schema, successor of the old
+        # priority-mismatch rejection: a legacy top-level "decision" key is
+        # rejected by the exact-key check — the server, not the model, owns
+        # the decision.
+        for literal in ("pass", "revise", "retrieve_more", "block", "review"):
+            with self.subTest(literal=literal), self.assertRaisesRegex(
+                ValueError, "fields do not match schema"
             ):
-                parse_writing_gate_result(_output(
-                    overstated, [_finding(recommendation="revise")]))
+                parse_writing_gate_result(json.dumps({
+                    "decision": literal, "findings": [],
+                    "checked_constraints": []}))
 
     def test_priority_chain_uses_strongest_finding_at_every_level(self):
         chain = ("revise", "retrieve_more", "needs_user_review", "block")
         for strongest_index, strongest in enumerate(chain):
             findings = [_finding(recommendation=value) for value in
                         chain[:strongest_index + 1]]
-            decision, _, _ = parse_writing_gate_result(
-                _output(strongest, findings))
+            decision, _, _ = parse_writing_gate_result(_output(findings))
             self.assertEqual(decision.value, strongest)
 
     def test_unknown_literal_and_schema_are_rejected(self):
         with self.assertRaises(ValueError):
             parse_writing_gate_result("not json")
         with self.assertRaises(ValueError):
-            parse_writing_gate_result(_output("review"))
-        with self.assertRaises(ValueError):
-            parse_writing_gate_result(json.dumps({"decision": "pass"}))
+            parse_writing_gate_result(json.dumps({"findings": []}))
 
     def test_finding_cannot_recommend_pass(self):
         with self.assertRaises(ValueError):
-            parse_writing_gate_result(_output("pass", [_finding(recommendation="pass")]))
+            parse_writing_gate_result(
+                _output([_finding(recommendation="pass")]))
 
     def test_hard_do_not_use_and_pov_findings_cannot_be_weakened(self):
         invalid_pairs = (
@@ -166,12 +171,12 @@ class GateContractTest(unittest.TestCase):
                                   severity=severity,
                                   recommendation=recommendation), \
                         self.assertRaisesRegex(ValueError, "blocking errors"):
-                    parse_writing_gate_result(_output(recommendation, [_finding(
+                    parse_writing_gate_result(_output([_finding(
                         recommendation=recommendation,
                         finding_type=finding_type, severity=severity)]))
 
     def test_evaluate_is_one_turn_and_returns_structured_result(self):
-        provider = _Provider(_output("block", [_finding(
+        provider = _Provider(_output([_finding(
             recommendation="block", finding_type="do_not_use")]))
         result = asyncio.run(_service(provider).evaluate(
             request=_request(), candidate=_candidate(),
@@ -197,7 +202,7 @@ class GateContractTest(unittest.TestCase):
         self.assertEqual(caught.exception.usage.total_tokens, 2)
 
     def test_evidence_must_be_grounded_in_candidate_text(self):
-        provider = _Provider(_output("revise", [_finding(
+        provider = _Provider(_output([_finding(
             recommendation="revise")]))
         with self.assertRaisesRegex(InvalidWritingGateResult, "evidence"):
             asyncio.run(_service(provider).evaluate(
@@ -240,14 +245,14 @@ class GateStyleFindingTest(unittest.TestCase):
         # priority max, decision would be needs_user_review and pass would reject —
         # this test fails then. The finding stays surfaced for the author to notice.
         decision, findings, _ = parse_writing_gate_result(
-            _output("pass", [self._style()]))
+            _output([self._style()]))
         self.assertIs(decision, WritingGateDecision.PASS)
         self.assertEqual(len(findings), 1)
         self.assertIs(findings[0].finding_type, WritingGateFindingType.STYLE)
 
     def test_style_does_not_lift_a_non_style_decision(self):
         # style alongside a continuity revise: the decision follows continuity only.
-        decision, _, _ = parse_writing_gate_result(_output("revise", [
+        decision, _, _ = parse_writing_gate_result(_output([
             _finding(finding_type="continuity", severity="error",
                      recommendation="revise"),
             self._style(),
@@ -256,7 +261,7 @@ class GateStyleFindingTest(unittest.TestCase):
 
     def test_style_is_carried_but_not_decision_driving_under_block(self):
         # do_not_use(block) drives; style rides along in findings, decision=block.
-        decision, findings, _ = parse_writing_gate_result(_output("block", [
+        decision, findings, _ = parse_writing_gate_result(_output([
             _finding(finding_type="do_not_use", severity="error",
                      recommendation="block"),
             self._style(),
@@ -269,7 +274,7 @@ class GateStyleFindingTest(unittest.TestCase):
         # under-strict: a style finding may not masquerade as a blocking error.
         with self.assertRaises(ValueError):
             parse_writing_gate_result(
-                _output("pass", [self._style(severity="error")]))
+                _output([self._style(severity="error")]))
 
     def test_style_may_only_recommend_needs_user_review(self):
         # over-strict: warning-only·자동 revise 제외·block 없음 locked at parse.
@@ -277,7 +282,7 @@ class GateStyleFindingTest(unittest.TestCase):
             with self.subTest(recommendation=rec):
                 with self.assertRaises(ValueError):
                     parse_writing_gate_result(
-                        _output("pass", [self._style(recommendation=rec)]))
+                        _output([self._style(recommendation=rec)]))
 
     def test_style_does_not_suppress_a_non_style_needs_user_review(self):
         # hardening (D5): style is advisory, but a genuine non-style
@@ -286,7 +291,6 @@ class GateStyleFindingTest(unittest.TestCase):
         # needs_user_review (or the non-style finding were dropped from the
         # priority max), decision would drop to pass and this re-fails.
         decision, findings, _ = parse_writing_gate_result(_output(
-            "needs_user_review",
             [_finding(finding_type="continuity", severity="warning",
                       recommendation="needs_user_review"),
              self._style()],
@@ -339,15 +343,19 @@ class GateFenceStrippingTest(unittest.TestCase):
     def test_fence_does_not_weaken_schema_check(self):
         # over-strict: a rogue key inside a fence is still rejected exactly as
         # an unfenced rogue key would be. The strip normalizes format only.
-        rogue = json.dumps({"decision": "pass", "findings": [],
+        rogue = json.dumps({"findings": [],
                             "checked_constraints": ["POV 제한 시점"],
                             "rogue_key": "schema violation"}, ensure_ascii=False)
         with self.assertRaisesRegex(ValueError, "fields do not match schema"):
             parse_writing_gate_result(self._fence(rogue))
 
-    def test_fence_does_not_weaken_priority_check(self):
-        fenced = self._fence(_output("block", [_finding(recommendation="revise")]))
-        with self.assertRaisesRegex(ValueError, "priority"):
+    def test_fence_does_not_weaken_decision_key_rejection(self):
+        # Successor of the old fenced priority-mismatch cell (schema audit A:
+        # the model emits no top-level decision): a fenced legacy decision key
+        # is still rejected exactly as an unfenced one would be.
+        fenced = self._fence(json.dumps({
+            "decision": "block", "findings": [], "checked_constraints": []}))
+        with self.assertRaisesRegex(ValueError, "fields do not match schema"):
             parse_writing_gate_result(fenced)
 
     def test_fence_around_non_json_still_rejected(self):
@@ -366,7 +374,7 @@ class GateFenceStrippingTest(unittest.TestCase):
     def test_fence_does_not_weaken_evidence_containment(self):
         # over-strict at the service level: a fenced finding whose evidence is
         # absent from the candidate still fails the grounding check post-strip.
-        provider = _Provider(self._fence(_output("revise", [_finding(
+        provider = _Provider(self._fence(_output([_finding(
             recommendation="revise")])))
         with self.assertRaisesRegex(InvalidWritingGateResult, "evidence"):
             asyncio.run(_service(provider).evaluate(
@@ -421,7 +429,7 @@ class WritingGateApiTest(unittest.TestCase):
 
     def test_gate_returns_structured_result(self):
         client, project = self._client(_Provider(_output(
-            "revise", [_finding(recommendation="revise")])))
+            [_finding(recommendation="revise")])))
         response = self._post(client, project)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["decision"], "revise")
@@ -492,7 +500,7 @@ class WritingGateEnvelopeKeyTest(unittest.TestCase):
 
     def test_gate_envelope_keys_are_complete(self):
         client, project = WritingGateApiTest()._client(_Provider(_output(
-            "revise", [_finding(recommendation="revise")])))
+            [_finding(recommendation="revise")])))
         body = WritingGateApiTest()._post(client, project).json()
         self.assertEqual(set(body), {
             "request_id", "project_id", "decision", "findings",
@@ -541,7 +549,7 @@ class WritingGateObservabilityTest(unittest.TestCase):
         # Under-strict guard: drop the success record and this fails. Pins every
         # field the KPI aggregation (증분 5) reads, not just that "a row exists".
         client, project, audit = self._client(_Provider(_output(
-            "revise", [_finding(recommendation="revise")])))
+            [_finding(recommendation="revise")])))
         self.assertEqual(self._post(client, project).status_code, 200)
         calls = audit.list_calls(project)
         self.assertEqual(len(calls), 1)
@@ -552,6 +560,7 @@ class WritingGateObservabilityTest(unittest.TestCase):
         self.assertEqual(call.correlation_id, "wr1")
         self.assertEqual(call.project_id, project)
         self.assertEqual(call.model, "fake-gate")
+        # The decision recorded here is the server-derived one (schema audit A).
         self.assertEqual(call.decision, WritingGateDecision.REVISE.value)
         self.assertEqual(call.gate_quality_score, 0.3)
         # _Provider bills TokenUsage(1, 1); a plain ``evaluate`` call would have
@@ -573,7 +582,7 @@ class WritingGateObservabilityTest(unittest.TestCase):
                 findings = ([] if literal == "pass"
                             else [_finding(recommendation=literal)])
                 client, project, audit = self._client(
-                    _Provider(_output(literal, findings)))
+                    _Provider(_output(findings)))
                 self.assertEqual(self._post(client, project).status_code, 200)
                 call = audit.list_calls(project)[0]
                 self.assertEqual(call.decision, literal)
