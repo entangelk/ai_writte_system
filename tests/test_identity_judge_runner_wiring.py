@@ -40,8 +40,10 @@ from services.application.app.analysis.identity_judge import (
     seed_analysis_identity_judge_template,
 )
 from services.application.app.analysis.identity_judging import (
+    CandidateIdentityJudgingError,
     CandidateIdentityJudgingService,
     IdentityJudgement,
+    IdentityJudgeNotConfigured,
     InvalidIdentityJudgement,
 )
 from services.application.app.analysis.models import (
@@ -373,6 +375,46 @@ class IsolationTest(RunnerWiringTestBase):
 
         self.assertIs(result.job.status, AnalysisJobStatus.SUCCEEDED)
         self.assertIs(holder["status"], AnalysisJobStatus.SUCCEEDED)
+
+    async def test_missing_judge_is_isolated_in_the_runner(self):
+        # B1 폐쇄(독립 검증 2026-09-03, `verifications/2026-09-03/
+        # identity_group_slice_2.md`) — 리터럴 ③의 세 번째 축: 판정 서비스는
+        # 주입됐으나 judge 미구성. 같은 이름 짝이 생기는 순간 서비스가
+        # `IdentityJudgeNotConfigured`를 내고 격리 경계가 삼킨다 — job은
+        # SUCCEEDED·후보는 needs_review·relation 0건. 미배선 셀(서비스 자체
+        # 부재 — 짝이 아예 안 생긴다)과 다른 분기다. spy는 "짝이 있어 오류가
+        # 실제로 났고 삼켜졌다"는 비공허성 증명이다.
+        wiring = self._wiring(None, self._same_name_drafts)
+        entered: list[str] = []
+        raised: list[str] = []
+
+        class _EnteringJudging(CandidateIdentityJudgingService):
+            async def judge_candidate(self, *, project_id, candidate_id):
+                entered.append(candidate_id)
+                try:
+                    return await super().judge_candidate(
+                        project_id=project_id, candidate_id=candidate_id
+                    )
+                except CandidateIdentityJudgingError as exc:
+                    raised.append(type(exc).__name__)
+                    raise
+
+        wiring["runner"]._identity_judging = _EnteringJudging(
+            group_service=wiring["groups"],
+            candidate_repository=wiring["repo"],
+            judge=None,
+        )
+
+        result = await self._run(wiring, key="identity-run-nojudge")
+
+        self.assertIs(result.job.status, AnalysisJobStatus.SUCCEEDED)
+        self.assertEqual(raised, [IdentityJudgeNotConfigured.__name__])
+        self.assertEqual(len(entered), 1)  # 첫 실패로 판정 단계 종료
+        self.assertEqual(
+            wiring["groups"].list_relations(wiring["saved"]["project_id"]), ()
+        )
+        for candidate in result.candidates:
+            self.assertIs(candidate.status, AnalysisCandidateStatus.NEEDS_REVIEW)
 
     async def test_provider_error_does_not_fail_the_job(self):
         judge = _RaisingJudge(ProviderError(
