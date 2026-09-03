@@ -1,9 +1,9 @@
 # 미승인 후보 정체성 그룹 — 구현 페이즈
 
-상태: `Active — Slice 0부터 진행`
+상태: `Active — Slice 0~3 완료, Slice 4(그룹 거절) 다음`
 작성: 2026-09-02
 결정 정본: [`pending-candidate-identity-grouping-decisions.md`](pending-candidate-identity-grouping-decisions.md) — **C 채택**
-계약 정본: [`../system-contract-sot.md`](../system-contract-sot.md) v1.8.16
+계약 정본: [`../system-contract-sot.md`](../system-contract-sot.md) v1.8.25
 
 ## 목적과 완료 기준
 
@@ -148,7 +148,7 @@ site·`correlation_id`=job_id — run endpoint의 scope를 탄다)·repair는 �
 포함). 비차단 H1(재분류 가정 문구)·H3(측정 경계 정정)은 위에 반영했고 H2(HANDOFF 사이트 열거)는
 HANDOFF에 반영했다. 판정 열은 승격하지 않는다(Slice 0·1 선례).
 
-## Slice 3 — Review Inbox 읽기면
+## Slice 3 — Review Inbox 읽기면 · **완료(2026-09-04, SoT v1.8.25)**
 
 **범위:** Review Inbox API payload에 group metadata를 additive로 싣는다. 프론트 UI와 그룹 액션은 아직
 만들지 않는다.
@@ -162,6 +162,29 @@ member 행이다** — relation 행의 `group_id`는 기록 시점 값이라 병
 
 **검증:** grouped 후보와 ungrouped 후보가 같은 목록에 섞여도 기존 후보 액션 affordance가 유지되는지,
 project 격리, stale group member 정리, OpenAPI/`schema.d.ts` 재생성을 확인한다.
+
+**완료 기록(2026-09-04):** `analysis/review_inbox.py`(`IdentityGroupSummary`·`_identity_summaries`·
+서비스에 `CandidateIdentityGroupService` 주입)·`routers/analysis.py`(`_identity_group_payload`)·
+`main.py`(조립)로 구현(커밋 `90cc4dd`, SoT v1.8.25). 새 키는 하나 — `identity_group`(list+detail 공통
+빌더, ungrouped는 `null`)이고 내부 필드명은 위 계약의 열거 그대로다. 이 Slice가 확정한 리터럴 —
+
+- **소속의 정본은 open(non-closed) 그룹과 member 행** — 판정면 `_group_of`와 같은 semantics로
+  `contradicted`도 여전히 묶는다(상태값을 그대로 노출해 UI 경고 라벨의 재료로 쓴다). relation 행의
+  `group_id`는 소속·근거 선택 어디에도 쓰지 않는다 — 셀 `test_rationale_ignores_relation_group_id_pointing_elsewhere`가
+  잠근다.
+- **roster는 멤버십 ∩ 검토함 population** — confirm/reject/edit로 검토함을 떠난 stale member는
+  `group_member_ids`/`group_size`에 싣지 않는다. **가시 멤버 < 2인 그룹은 ungrouped로 읽는다.**
+  저장 멤버십은 이 판단으로 불변(member `member_status` 수명 확정은 Slice 4·5).
+- **`identity_rationale_summary`는 이 후보와 가시 roster를 잇는 `same` relation 중 최신**
+  (`created_at`·동률 pair id 순)의 rationale을 200자 절단 — 상한은 활동 로그 "짧은 값"
+  (`ACTIVITY_VALUE_MAX_CHARS`)·장면 메모 목록 미리보기(`SCENE_NOTE_PREVIEW_MAX_CHARS`)와 같은 값이다.
+  same relation이 없으면 `null`(없는 사실을 지어내지 않는다).
+
+셀 13종(`tests/test_review_inbox_identity_groups.py` — create_app에 identity group 서비스를 주입해
+시드). **OpenAPI/`schema.d.ts` 무변** — review-inbox 응답이 `dict[str, object]`로 선언돼 additive payload가
+선언 schema에 나타나지 않는다(경계 `4ace6c4`↔작업 트리 덤프 바이트 동일, md5 `10978d55…`·384,414B —
+Slice 2 검증이 확정한 지문. 프론트 생성물 재생성 불요). 변이 9종 기명 재실패(표는 work_log 세션 1).
+전수 **2754/1/3134**(+13셀, 1804.50초).
 
 ## Slice 4 — 그룹 거절 액션
 
