@@ -65,6 +65,44 @@
 
 ## Next steps
 
-- **호출 분산(D)축 분석** — `llm_call_audits` 토큰 분해 + 진단 캡처 표본(브리프 Audit material 확정 C)으로 `ContextPackage` 반복 비용을 잰 뒤 필요성 판단(별도 슬라이스).
+- **호출 분산(D)축 분석** — `llm_call_audits` 토큰 분해 + 진단 캡처 표본(브리프 Audit material 확정 C)으로 `ContextPackage` 반복 비용을 잰 뒤 필요성 판단(별도 슬라이스). **D축 재료(검증 지적)**: 게이트 입력 렌더·accept advisory copy의 상수 true bool 둘.
 - identity group Slice 1(shortlist와 판정 서비스)은 그대로 대기(HANDOFF 참조).
 - 배포: 앱 계열 이미지 재빌드 필요(프롬프트 v2/v3/v6·파서 변경). 운영 Mongo의 `prompt_templates`에 v5 행이 있어도 충돌 없음(신규 v6 행 insert — 핀 테스트가 시드 절차를 잠금).
+
+---
+
+# Work Log — 2026-09-03 세션 2 (검증 하드닝, 베타)
+
+## Goals
+
+- 독립 검증(`verifications/2026-09-03/contract_schema_duplication_execution.md`, 판정 **합격**·차단 0·뮤테이션 14/14)의 비차단 하드닝 4건을 반영한다.
+
+## Completed work
+
+검증자가 세션 1의 표 11종을 재실행하고 신설 3종(max→first 유도 약화·유령 SourceRef 합성·legacy decision 키 조용한 pop)까지 전부 물림을 확인했다. 하드닝 4건 반영(커밋 `63669a0`):
+
+| 항목 | 반영 |
+|---|---|
+| ① repair 수용 경계 명문화 | **SoT v1.8.20** — 옛 구현의 repair-후 카탈로그 재검증은 죽은 검사(양 갈래 `return repaired`)였고 v6 파서는 repair 출력도 조립 검증 통과 필수라 수용이 엄격해졌음을 §Phase 2A 조항에 명문화. 브리프 시행 결과의 "모르는 id는 기존대로 repair 1회" 와글도 정정(검증이 발견한 옛 코드 숨은 구멍 — ghost id가 러너 사전검증으로만 잡히던 이중 방어가 파서 단층 방어로 정리) |
+| ② planner KPI 단절 병기 | 같은 v1.8.20 행 — 빈·비문자 `plan_id`가 더 이상 parse error가 아니므로 2026-09-03 시계열 경계는 **gate·extractor·planner 세 site**(planner는 `multi_call_correlations` repair 구조 site) |
+| ③ 입력측 상수 bool 렌더 | 코드 무변(검증 권고대로) — `gate_prompt.py`·`accept.py`의 상수 true bool 둘을 D축 비용 분석 재료로 브리프·HANDOFF에 등재 |
+| ④ 정책 bool 이중 잠금 셀 | `tests/test_writing.py::test_policy_bools_are_server_constants_on_the_public_envelope` 신설 — 실 파서(v3 3키)를 통과한 후보가 generate 응답 wire에 True를 싣는지(파서 기본값 반전 셀의 짝). `_FakeReporter`는 dataclass 직접 생성으로 파서를 우회하므로 진짜 `WritingCandidateReportService`를 reporter로 배선했다 |
+
+**뮤테이션(신규 셀)**: `routers/writing.py` payload 조립 값 `not` 반전 → 신규 셀 1 재실패 → 원복·green(`test_writing.py` 68 passed).
+
+### 회귀(세션 2)
+
+- 전수(test-mongo healthy 후): **2702 passed / 1 skipped / 3132 subtests, exit 0, 2258초(베타)**. **검산**: 직전 2701/1/3131 대비 셀 +1(④ 이중 잠금 셀 — subtest 없음), subtest +1은 **검증 기록(`contract_schema_duplication_execution.md`) 등재분**(판정 열 전수 축 — 문서 가드 단독 실행에서 285→286으로 이미 관측한 값). 예고값(3131)에서 그 +1을 빠뜨린 것은 예측 누락이고 실측 잔차는 없다. **skip 1 = 이 머신 관례**.
+
+## Issues found
+
+- 검증 과정 노트(검증 기록 §Methodology·과정): 검증자가 /tmp 사전 트리 CWD에서 grep을 돌려 사전 트리를 검색한 것을 본 트리로 재실행해 정정했고, docs/README.md 카운트 누락은 문서 가드가 즉시 잡았다 — 가드가 스스로의 몫을 한 반증.
+
+## Decisions
+
+- **v1.8.19 이력 행은 편집하지 않고 v1.8.20 행으로 정정했다** — 이력은 그 시점의 믿음을 보존하고, 부정확했던 와글("기존대로")은 다음 행이 명시적으로 짚는 것이 이 저장소의 변경이력 관례다.
+- **④는 셀을 HTTP generate 경로로 통과시켰다** — accept 페이로드 경로도 가능했지만 generate 응답이 가장 짧은 실 파서→공개 wire 왕복이며, envelope 키 셀과 같은 클래스에 둬 상태를 공유한다.
+
+## Next steps
+
+- (세션 1과 동일 — D축 분석·identity Slice 1·배포 대기)
