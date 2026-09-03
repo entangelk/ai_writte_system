@@ -112,7 +112,10 @@ ProviderError/parse error의 실패 격리, LLM audit row 수를 잠근다.
 
 **계약:** 기존 개별 item 필드는 그대로 유지한다. 새 필드는 예를 들어 `group_id`, `group_size`,
 `group_status`, `group_member_ids`, `identity_rationale_summary`처럼 목록 렌더에 필요한 최소값만 싣는다.
-detail source refs와 conflict/edit 경계는 개별 후보 기준으로 유지한다.
+detail source refs와 conflict/edit 경계는 개별 후보 기준으로 유지한다. **읽기면의 정본은 open 그룹과
+member 행이다** — relation 행의 `group_id`는 기록 시점 값이라 병합으로 흡수된(`closed`) 그룹을 계속
+가리킬 수 있으므로(Slice 1 검증 비차단 #1, 2026-09-03) 표시 전용으로만 쓰고 소속 판단에 쓰지 않는다.
+승격 시 relation.group_id 갱신 정책은 Slice 5에서 정한다.
 
 **검증:** grouped 후보와 ungrouped 후보가 같은 목록에 섞여도 기존 후보 액션 affordance가 유지되는지,
 project 격리, stale group member 정리, OpenAPI/`schema.d.ts` 재생성을 확인한다.
@@ -172,4 +175,7 @@ partial failure 표시, 기존 개별 approve/reject affordance 유지, 모바�
 canonical memory 간 기존 중복 backfill/merge, threshold 운영 캘리브레이션, project 간 identity 공유,
 bulk group 처리, 사람이 확인하지 않는 자동 병합, candidate document 물리 병합은 이 페이즈 밖이다.
 `uncertain` relation의 수동 합치기/분리 확정 액션은 dogfood에서 uncertain 표시가 실제 검토를 막거나,
-`contradicted` group을 사람이 해소해야 하는 첫 사례가 생길 때 별도 Slice로 연다.
+`contradicted` group을 사람이 해소해야 하는 첫 사례가 생길 때 별도 Slice로 연다. **shortlist 상한·페이징**도
+유예다(Slice 1 검증 비차단 #3, 2026-09-03) — 같은 이름 후보가 수백 개면 판정 재사용의 성분 확인(BFS)이
+O(pool×relations)로 커지는데 dogfood 규모에서 문제된 징후가 없으므로, **트리거: Review Inbox의 그룹 수가
+세 자리로 관측될 때** 상한·페이징을 논의한다.
