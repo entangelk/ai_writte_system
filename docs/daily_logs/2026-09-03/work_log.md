@@ -182,3 +182,28 @@
 
 - **Slice 2(분석 runner 배선)** — 후보 저장 뒤 Slice 1 서비스 호출, 후보 0개/no shortlist no-op, group 판정 실패의 job 격리, `correlation_id=analysis_job_id`, **LLM audit 행 수 검증**(실 provider 호출이 생기는 첫 슬라이스).
 - 이 Slice의 독립 검증은 미실시(소유자 배정 대기 — Slice 0 선례: 구현 세션과 검증 세션이 갈렸다).
+
+---
+
+# Work Log — 2026-09-03 세션 5 (identity group Slice 1 독립 검증, 베타)
+
+## Goals
+
+- 오너 요청("다음작업 검증해줘") — 구현 세션 4가 마감한 identity group **Slice 1**(`f5c0ead`·`98c5c13`·`3dfef65`·`6718bc5`)의 독립 검증.
+
+## Completed work
+
+판정 **조건부 합격** — 검증 기록 [`verifications/2026-09-03/identity_group_slice_1.md`](../verifications/2026-09-03/identity_group_slice_1.md)(인덱스·판정 분포 277건/조건부 83 갱신, 문서 가드 green).
+
+- **재현**: 전수 2719/1/3133·exit 0(셀·skip 구현자 주장과 일치 — subtest +1은 본 기록 판정 열 등재분), OpenAPI 사전 트리(`7ab3df6` worktree)와 바이트 동일 독립 재덤프, mypy·문서 가드 green, 구현자 뮤테이션 10종을 diff 재유도해 셀 짝까지 일치 재현.
+- **차단 3건(전부 "행동은 있으나 잠금 없음" — 검증자 신설 변이 3종이 17 passed로 입증)**: B1 retriever 미주입 no-op 무셀 · B2 `source` 리터럴 무셀 · B3 재사용 경로 효과 재적용(자가 치유) 무셀. 병합 셀 보강 두 커밋(결정적 id·클록 전진)의 실효는 M8 재현으로 확인.
+- 코드 무접촉(변이 전부 원복·바이트 대조), test-mongo 원상 복구.
+
+## Decisions
+
+- 판정을 합격이 아니라 조건부로 내렸다 — 가이드 "boundary matrix has no empty cells" 위반이 green bar와 무관하게 차단이기 때문. 셋 다 셀 3개 추가로 폐쇄 가능(기대 전수 2722/1/3133+기록분).
+- 검증자는 결함을 고치지 않는다(가이드) — 조건 폐쇄는 구현 세션 몫으로 남겼다.
+
+## Next steps
+
+- 조건 B1~B3 폐쇄 → Slice 2(분석 runner 배선) 착수. 푸시는 오너 몫.
