@@ -87,7 +87,8 @@ def _candidate(project_id="p1"):
 
 def _claim_json(cited, *, text="문이 열렸다"):
     # ``cited`` = the item numbers the model wrote (K-6=R-e wire).
-    return {"text": text, "type": "narrative_event", "requires_gate_check": True,
+    # requires_gate_check is not a model field (schema audit A, report v3).
+    return {"text": text, "type": "narrative_event",
             "related_context_pointers": list(cited)}
 
 
@@ -254,7 +255,7 @@ class ReportPointerParseTest(unittest.TestCase):
 
     def test_missing_pointer_field_is_rejected(self):
         # D3=A: required, so missing ≠ empty.
-        claim = {"text": "x", "type": "narrative_event", "requires_gate_check": True}
+        claim = {"text": "x", "type": "narrative_event"}
         with self.assertRaisesRegex(ValueError, "item fields do not match schema"):
             parse_report(_report_json([claim]), allowed_pointers=self.allowed)
 
@@ -316,7 +317,6 @@ class ReportPointerParseTest(unittest.TestCase):
         # the citation contract is self-contained in its own class.
         for value in ("x", pointer_wire(self.allowed[0]), 3):
             claim = {"text": "x", "type": "narrative_event",
-                     "requires_gate_check": True,
                      "related_context_pointers": value}
             with self.subTest(value=type(value).__name__), self.assertRaisesRegex(
                     ValueError, "must be an array"):

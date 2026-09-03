@@ -24,11 +24,14 @@ from services.llm_gateway.app.provider import TokenUsage
 from services.llm_gateway.app.provider import LLMProvider
 
 TASK = "writing_candidate_report"
+# v3 (계약 스키마 중복 전수조사 A, 2026-09-03): requires_gate_check / should_analyze_after_save는
+# 서버 정책값이다(accept는 모든 후보를 무조건 게이트하고 저장마다 분석 job을 만든다). 모델 출력
+# 계약에서 빼고 서버 상수로 채운다 — 모델은 예시 리터럴 true를 에코할 뿐이었다.
 # v2 (K-6=R-e, 2026-07-30): 항목을 포인터 JSON이 아니라 **번호**로 인용한다. 본문이 요구하는
 # 출력 형식이 바뀌었으므로 버전을 올린다 — v1이 두 형식을 뜻하면 진단·감사가 거짓말을 한다.
 # 이 템플릿은 Mongo 영속이 아니라 조립 때마다 in-memory seed이므로(sha256 불변 핀은
 # `analysis_extract` 전용) 기존 배포와 충돌하지 않는다.
-VERSION = "writing_candidate_report_v2"
+VERSION = "writing_candidate_report_v3"
 TEMPLATE = """Analyze candidate prose and return one JSON object only. Do not use Markdown or explanatory text, and do not wrap the JSON in a ``` code fence.
 
 The object must have exactly these four fields:
@@ -38,7 +41,6 @@ The object must have exactly these four fields:
     {
       "text": "non-empty string",
       "type": "narrative_event|character_state|location_state|relation_change|timeline_fact|foreshadowing_use|factual_claim|interpretation",
-      "requires_gate_check": true,
       "related_context_pointers": [1]
     }
   ],
@@ -46,8 +48,7 @@ The object must have exactly these four fields:
     {
       "type": "event|character_fact|location_fact|relation|foreshadowing|timeline_fact|style_signal",
       "text": "non-empty string",
-      "confidence": 0.0,
-      "should_analyze_after_save": true
+      "confidence": 0.0
     }
   ],
   "risk_notes": [
@@ -176,12 +177,13 @@ def _string(v):
 def _exact(v, keys):
     if not isinstance(v, Mapping) or set(v) != set(keys): raise ValueError("report item fields do not match schema")
 def _claim(v, allowed):
-    _exact(v, ("text", "type", "requires_gate_check", "related_context_pointers"))
-    if not isinstance(v["requires_gate_check"], bool): raise ValueError("requires_gate_check must be boolean")
+    # requires_gate_check는 모델 출력에 없다(스키마 중복 전수조사 A) — 서버가 모든 accepted
+    # claim을 무조건 게이트하므로 정책 상수 True가 데이터클래스 기본값을 채운다.
+    _exact(v, ("text", "type", "related_context_pointers"))
     pointers = tuple(_cited_pointer(x, allowed) for x in _list(v["related_context_pointers"]))
     if len(set(pointers)) != len(pointers): raise ValueError("claim pointers must not repeat")
     return CandidateClaim(_string(v["text"]), CandidateClaimType(v["type"]),
-                          v["requires_gate_check"], pointers)
+                          related_context_pointers=pointers)
 def _cited_pointer(v, allowed):
     # 번호는 **1-based**다(프롬프트가 `- [1] …`로 보여준다). 그래서 `0`은 어떤 항목도 가리키지
     # 않는다 — "없음"을 0으로 쓰는 모델은 거부되고, 0-based였다면 첫 항목이 조용히 근거로
@@ -192,11 +194,12 @@ def _cited_pointer(v, allowed):
         raise ValueError("claim pointer is not an item of this context package")
     return allowed[v - 1]
 def _hint(v):
-    _exact(v, ("type", "text", "confidence", "should_analyze_after_save"))
+    # should_analyze_after_save도 같은 이유로 모델 출력에 없다 — 저장마다 분석 job이
+    # 무조건 만들어지는 서버 정책이므로 상수 True가 기본값을 채운다.
+    _exact(v, ("type", "text", "confidence"))
     c=v["confidence"]
     if isinstance(c, bool) or not isinstance(c,(int,float)) or not math.isfinite(c) or not 0<=c<=1: raise ValueError("confidence must be finite 0..1")
-    if not isinstance(v["should_analyze_after_save"], bool): raise ValueError("should_analyze_after_save must be boolean")
-    return NewMemoryHint(MemoryHintType(v["type"]), _string(v["text"]), float(c), v["should_analyze_after_save"])
+    return NewMemoryHint(MemoryHintType(v["type"]), _string(v["text"]), float(c))
 def _risk(v):
     _exact(v, ("type", "severity", "message"))
     return RiskNote(RiskNoteType(v["type"]), RiskSeverity(v["severity"]), _string(v["message"]))

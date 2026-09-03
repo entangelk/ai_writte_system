@@ -20,12 +20,13 @@ from services.llm_gateway.app.provider import GenerationResult, TokenUsage
 def _payload():
     # related_context_pointers is required on every claim (stable-pointer brief
     # D3=A); [] is the valid value for a claim with no package evidence.
+    # requires_gate_check / should_analyze_after_save are NOT model fields any
+    # more (schema audit A, report v3): the server fills policy constants.
     return {"self_reported_constraints": ["제한 시점"],
         "candidate_claims": [{"text": "문이 열렸다", "type": "narrative_event",
-                              "requires_gate_check": True,
                               "related_context_pointers": []}],
         "new_memory_hints": [{"type": "event", "text": "문이 열림",
-                              "confidence": 0.8, "should_analyze_after_save": True}],
+                              "confidence": 0.8}],
         "risk_notes": [{"type": "pov", "severity": "high", "message": "시점 확인"}]}
 
 
@@ -42,9 +43,26 @@ class WritingReportTest(unittest.TestCase):
     def test_parse_typed_report_and_empty_arrays(self):
         report = parse_report(json.dumps(_payload(), ensure_ascii=False))
         self.assertEqual(report["candidate_claims"][0].claim_type.value, "narrative_event")
+        # Policy constants (schema audit A): the parsed dataclass carries the
+        # server's unconditional gate/analysis policy, never a model judgment.
+        # Under-strict: flipping either default to False re-fails this.
+        self.assertIs(report["candidate_claims"][0].requires_gate_check, True)
+        self.assertIs(report["new_memory_hints"][0].should_analyze_after_save, True)
         empty = parse_report(json.dumps({"self_reported_constraints": [],
             "candidate_claims": [], "new_memory_hints": [], "risk_notes": []}))
         self.assertEqual(empty["risk_notes"], ())
+
+    def test_legacy_bool_keys_are_rejected(self):
+        # Over-strict direction of the same audit: a legacy claim/hint still
+        # carrying the removed bool key must fail the exact-key item check —
+        # the model output contract stays narrow even if the public payload
+        # keeps the (server-filled) fields.
+        claim = _payload(); claim["candidate_claims"][0]["requires_gate_check"] = True
+        with self.assertRaisesRegex(ValueError, "item fields"):
+            parse_report(json.dumps(claim, ensure_ascii=False))
+        hint = _payload(); hint["new_memory_hints"][0]["should_analyze_after_save"] = True
+        with self.assertRaisesRegex(ValueError, "item fields"):
+            parse_report(json.dumps(hint, ensure_ascii=False))
 
     def test_confidence_rejects_bool_nan_and_range(self):
         for value in (True, float("nan"), -0.1, 1.1):
@@ -70,7 +88,10 @@ class WritingReportTest(unittest.TestCase):
         self.assertEqual(provider.calls,2)
         self.assertEqual(enriched.risk_notes[0].severity.value,"high")
         system_prompt = provider.requests[0].messages[0].content
-        self.assertIn('"requires_gate_check": true', system_prompt)
+        # Schema audit A: the prompt must no longer teach the removed policy
+        # bools (their example literals were pure echo bait).
+        self.assertNotIn("requires_gate_check", system_prompt)
+        self.assertNotIn("should_analyze_after_save", system_prompt)
         self.assertIn("narrative_event|character_state", system_prompt)
         self.assertIn("low|medium|high|critical", system_prompt)
         self.assertEqual(provider.requests[1].messages[0].content, system_prompt)

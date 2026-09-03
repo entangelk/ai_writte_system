@@ -137,7 +137,10 @@ class ContextPointer:
 class CandidateClaim:
     text: str
     claim_type: CandidateClaimType
-    requires_gate_check: bool
+    # 서버 정책 상수(스키마 중복 전수조사 A): accept는 모든 후보를 무조건 게이트하므로
+    # 항상 True. report v3부터 모델 출력에 이 키가 없고, 공개 페이로드는 이 값을 그대로
+    # 실어 보낸다(공개 계약 무변).
+    requires_gate_check: bool = True
     # D3=A: required array in the report wire (empty allowed). A claim with no
     # package evidence carries (); one grounded in the package carries the exact
     # pointers of the items it used. The dataclass default keeps non-report
@@ -151,7 +154,9 @@ class NewMemoryHint:
     hint_type: MemoryHintType
     text: str
     confidence: float
-    should_analyze_after_save: bool
+    # 서버 정책 상수(스키마 중복 전수조사 A): 저장마다 분석 job이 무조건 만들어지므로
+    # 항상 True. report v3부터 모델 출력에 이 키가 없다.
+    should_analyze_after_save: bool = True
 
 
 @dataclass(frozen=True, slots=True)

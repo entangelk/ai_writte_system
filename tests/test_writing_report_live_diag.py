@@ -197,9 +197,9 @@ class RunReportDiagnosisTest(unittest.TestCase):
 
     def test_successful_parse_captures_first_raw_and_counts(self):
         diag, capture = _drive([_gen(_report_json(
-            claims='[{"text":"x","type":"narrative_event","requires_gate_check":true,'
+            claims='[{"text":"x","type":"narrative_event",'
                    '"related_context_pointers":[]}]',
-            hints='[{"type":"event","text":"y","confidence":0.5,"should_analyze_after_save":false}]',
+            hints='[{"type":"event","text":"y","confidence":0.5}]',
             risks='[{"type":"pov","severity":"low","message":"z"}]'))])
         self.assertEqual(diag.parse_status, REPORT_PARSED_OK)
         self.assertEqual(diag.claim_count, 1)
@@ -270,7 +270,6 @@ class FormatReportDiagnosisTest(unittest.TestCase):
         # It used to be a literal copy, so bumping the report template left the
         # operator reading "…_v1" while v2 was live (measured 2026-07-30).
         self.assertIn(f"report prompt_version: {REPORT_VERSION}", text)
-        self.assertIn("_v2", text)
 
     def test_upstream_output_states_not_reached(self):
         class _FailReviser:
