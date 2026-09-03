@@ -100,3 +100,47 @@ stale 멤버 제외 · 가시 <2 ungrouped · project 격리 · detail 동등 ·
   operation 100→101. 착수 시 짧은 결정 브리프 항목: 활동 로그 남길지 여부(계획이 명시적으로 열어둠).
 - 이 슬라이스의 독립 검증은 검증 가이드 절차대로 별도 세션이 한다(구현자 자기 검증 아님).
 - 푸시는 오너 몫.
+
+---
+
+# Work Log — 2026-09-04 세션 2 (identity group Slice 3 독립 검증, 베타)
+
+## Goals
+
+- 오너 요청("작업 ai가 작업한거 확인해서 검증하고 의심하고 또 의심해줄래?") — 구현 세션 1이 마감한
+  identity group **Slice 3(Review Inbox 읽기면)**(`90cc4dd`·`e9680e4`·`2223ba3`, SoT v1.8.25)의 독립 검증.
+
+## Completed work
+
+판정 **조건부 합격** — 검증 기록
+[`verifications/2026-09-04/identity_group_slice_3.md`](../verifications/2026-09-04/identity_group_slice_3.md)
+(인덱스·판정 분포 279건/조건부 85 갱신, 문서 가드 green).
+
+- **재현**: 집중 13셀 green, RED 재현(부모 구현 3파일 복귀 시 **13 failed**·`KeyError: 'identity_group'`
+  실측), OpenAPI **코드 경계(4ace6c4↔HEAD) 바이트 동일** 독립 재덤프(md5 `10978d55…`·384,414B),
+  `schema.d.ts` 무변, 소속 정본이 판정면 `_group_of`와 같은 semantics·public service 전용 사용·
+  검토함 population 정의·edit 이탈 경로(계약의 세 이탈 원인 열거가 사실임) 확인. SoT v1.8.25 행·
+  HANDOFF 착수점·CHANGELOG·README ④ 대조 무불일치.
+- **뮤테이션 6종 실측** — 구현자 표 M1·M2·M5·M7·M8 재유도가 셀 짝까지 일치(1/2/1/4/1 failed).
+  검증자 신설 **VM1**(근거 선택의 관계 양끝 가시 roster 필터 제거)은 **13 passed로 물지 않았다** →
+  차단 B1. 본 트리 변이(RED·VM1·VM2·VM3)는 전수 개시 전에, 잔여 3종은 `/tmp` detached worktree에서
+  실행해 전수 창과 분리.
+- **probe 1종**(기록 옆 커밋): `repro_rationale_out_of_roster.py` — 가시 roster 밖 pair의 same
+  relation이 근거가 되지 않는 행동(rationale `null`) 실측. B1은 잠금 부재뿐(Slice 1·2 B1과 같은 모양).
+- **하드닝 4건(H1~H4)**: created_at 동률 tie-break 무셀·방향 미기재, stale 이탈 세 번째 원인 edit 무셀,
+  relation `candidate_type` 필터 계약 미기재, 이중 non-closed 소속 "오래된 그룹 first" 규칙 계약 미기재.
+
+## 회귀
+
+- 전수(test-mongo healthy 개시, 검증 기록이 인덱스 등재 전 디스크에 있는 채): **2752 passed /
+  9 failed / 1 skipped, 3128+7 subtests, 1858.78초** — 실패 9건은 전부 문서 가드(부모 2+subTest 7)가
+  279번째 기록을 본 것이고 단독 재실행으로 같은 9개 재현·전량 귀속. 코드 축 산술: 2752 = 2754−가드
+  부모 2, 3128+7 = 3134+이 기록 subTest 1 — **회귀 0, 구현자 2754/1/3134 성립**. 인덱스 갱신 뒤
+  `test_docs_indexes.py` green.
+
+## Next steps
+
+- **B1 폐쇄**: probe 본체를 기명 셀로 추가(예: `test_rationale_ignores_relations_to_members_outside_the_roster`)
+  + VM1 재실측으로 물림 확인 — **Slice 4 착수 전에**. H1~H4는 폐쇄 세션에서 함께 볼 것(계획·SoT 한 줄
+  또는 셀).
+- 푸시는 오너 몫. test-mongo는 띄운 채 남김(`docker compose -f docker-compose.test.yml down`으로 정리).
