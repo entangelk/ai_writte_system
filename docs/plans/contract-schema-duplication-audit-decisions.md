@@ -1,6 +1,6 @@
 # 계약 스키마 중복 전수조사 결정 브리프
 
-**상태**: 확정 - 구현은 다른 날 진행 (2026-09-02)
+**상태**: 확정 · **시행 완료(2026-09-03)** — 후보 4종 전부 확인을 거쳐 시행됐다. 아래 "시행 결과" 절 참조.
 
 **정본**: `docs/system-contract-sot.md` v1.8.18
 
@@ -63,7 +63,24 @@ HANDOFF ⑦은 `llm_call_audits`에 "프롬프트 본문·토큰"이 남는다�
 
 ## Deferred / out of scope
 
-- 이 브리프에서는 prompt/parser/schema 코드를 바꾸지 않는다.
+- 이 브리프에서는 prompt/parser/schema 코드를 바꾸지 않는다. **[→ 시행 완료 2026-09-03, 아래 절 참조]**
 - 새 `identity_group_judge` 구현은 Slice 1 착수 범위로 남긴다.
 - 운영 DB의 실제 dogfood 레코드 조회와 민감 본문 저장 정책은 별도 오너 결정이 필요하다.
 - public OpenAPI/`schema.d.ts` 변경은 없다.
+
+## 시행 결과 (2026-09-03, SoT v1.8.19)
+
+확정 기준(A→B→C)을 코드 실측 확인에 통과시킨 뒤 그대로 적용했다. 커밋 `a63b521`(planner) · `226a821`(gate) · `6e9d497`(report) · `159157b`(extractor).
+
+| 후보 | 확인 결과 | 시행 | 근거 |
+|---|---|---|---|
+| query_planner `plan_id` | 프롬프트가 요구한 적 없음. 모델 값이 검증 0회로 API 응답 trace에 그대로 흘러가던 틈 | **A(무시)** — 파서가 모델 값 무시, 서버 상수 `context_search_plan` 통일. 공개 응답 필드는 유지(브리프 "public schema 변경 없음" 울타리 안에서의 완전 삭제 회피) | 완전 삭제는 `SearchPlan.plan_id`·API trace·fixture 7종까지 건드리는 공개 계약 변경이라 범위 밖 |
+| writing_gate `decision` | 서버가 findings priority로 재계산해 불일치 거부 — 모델값은 순수 자기복사. mismatch 관측은 error_type이 단일라 분리 관측된 적 없었음 | **A(즉시 삭제)** — 프롬프트 v2·파서 2키. decision은 서버 유도값(응답 무변). legacy `decision` 키는 정확키 검사 거부 | "transition 서버 유도+mismatch 관측"은 신규 관측 인프라가 필요해 오히려 고비용 — 브리프 대안 B 기각 근거 |
+| report bool 둘 | 서버 제어흐름에서 완전 무시(조건분기 0건) — gate·분석 job 모두 무조건 실행. 모델은 예시 리터럴 `true` 에코(실측 유일 샘플 전부 true) | **A(모델 출력에서 삭제)** — 프롬프트 v3·파서 3키. 공개 페이로드 유지를 위해 데이터클래스 기본값 True(서버 정책 상수)로 채움 | 판단이 아니라 정책값 — D5 선택지 C가 기각하던 "소비자 없는 speculative data"가 실상이었다 |
+| analysis `source_anchors` | 카탈로그 단위 == 모델 선택 단위(4중 확인: 프롬프트 exact-copy 요구·파서 전필드 대조·서비스 재대조·운영 프로듀서 풀블록). 모델의 span/quote/hash 자유도 0 | **A(id 선택+서버 조립)** — 프롬프트 v6(sha 핀·v5 동결)·파서가 카탈로그에서 조립·카탈로그 렌더 슬림(id·block_id·quote). **logical_key 무변**(이행 전 핀값으로 셀 잠금) | 조립이 파싱 안에서 일어나므로 옛 전필드 일치 강제가 구조적으로 보장됨 — drift 클래스 원천 제거 |
+
+**checked_constraints는 유지했다**(gate): 서버 재구성값이 상수(4카테고리 고정)라 모델 자기 보고가 유일한 정보원 — 삭제는 정보 손실이었다. `compare_judge`·`writing_generation`·`writing_retrieval_planner`·`writing_revision`은 브리프 판정 그대로 현행 유지(에코 없음).
+
+**KPI gate 실측**: OpenAPI 덤프가 슬라이스 전 트리(8655653)와 바이트 동일(공개 계약 무변 → `schema.d.ts` 무변). `llm_call_audits` 스키마·outcome 분류 무변. gate·extractor의 parse_error에서 mismatch/drift 원인이 사라져 **빈도 단절**이 있다(의미 불변) — 시계열 비교 시 이 날짜를 경계로 본다.
+
+**남은 축(호출 분산 D·진단 캡처 C)**: 이 날 시행하지 않았다. `llm_call_audits` 토큰 분해 + 진단 캡처 표본(브리프 Audit material 확정 C)으로 중복 비용을 잰 뒤 필요성 판단 — 그때 별도 슬라이스로 연다.
