@@ -9,6 +9,7 @@ docs/plans/05-writing-generation-decisions.md.
 """
 
 import asyncio
+import json
 import os
 import unittest
 from dataclasses import replace
@@ -75,7 +76,11 @@ from services.application.app.writing.service import (
     WritingService,
     seed_writing_template,
 )
-from services.application.app.writing.report import InvalidCandidateReport
+from services.application.app.writing.report import (
+    InvalidCandidateReport,
+    WritingCandidateReportService,
+    seed_report_template,
+)
 from services.application.app import main as main_module
 from services.application.app.writing.report import TEMPLATE as REPORT_SYSTEM_TEMPLATE
 from services.application.app.writing.report_budget import (
@@ -90,7 +95,11 @@ from services.application.app.writing.generation_job import (
     WritingGenerationJobStatus,
 )
 from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
-from services.llm_gateway.app.provider import GenerationResult, TokenUsage
+from services.llm_gateway.app.provider import (
+    FakeLLMProvider,
+    GenerationResult,
+    TokenUsage,
+)
 from tests.auth_support import authenticate
 
 
@@ -1093,6 +1102,48 @@ class WritingGenerateEnvelopeKeyTest(unittest.TestCase):
         self.assertEqual(
             set(body["risk_notes"][0]), {"type", "severity", "message"},
         )
+
+    def test_policy_bools_are_server_constants_on_the_public_envelope(self):
+        """검증 하드닝(2026-09-03 §H4) — 정책 bool의 이중 잠금.
+
+        report v3부터 모델은 requires_gate_check/should_analyze_after_save를
+        내지 않고 서버 정책 상수(True)가 채운다(파서 기본값 반전은
+        test_writing_report가 잡는다). 이 셀은 그 짝으로 **공개 wire**를 잡는다:
+        실 파서(v3 3키 출력)를 통과한 후보가 generate 응답에 True를 실어 나르는지.
+        under-strict: 파서가 모델 출력을 다시 읽거나 payload 조립이 다른 값을
+        읽으면 이 표면 값이 바뀌어 실패한다.
+        over-strict: 값을 뒤집는 과잉 교정(not)도 실패한다.
+        """
+        report = json.dumps({
+            "self_reported_constraints": ["제한 시점"],
+            "candidate_claims": [{"text": "문이 열렸다",
+                                  "type": "narrative_event",
+                                  "related_context_pointers": []}],
+            "new_memory_hints": [{"type": "event", "text": "문이 열림",
+                                  "confidence": 0.8}],
+            "risk_notes": [],
+        }, ensure_ascii=False)
+        provider = FakeLLMProvider([
+            GenerationResult(model="fake-writer", content="이어진 장면.",
+                             finish_reason="stop", usage=TokenUsage(1, 1)),
+            GenerationResult(model="fake-writer", content=report,
+                             finish_reason="stop", usage=TokenUsage(1, 1)),
+        ])
+        templates = PromptTemplateService(InMemoryPromptTemplateRepository())
+        seed_report_template(templates)
+        client, project_id, _ = _http(
+            provider,
+            package=_package(),
+            reporter=WritingCandidateReportService(
+                provider, prompt_templates=templates),
+        )
+        body = client.post(
+            f"/projects/{project_id}/writing/generate",
+            json={"request_id": "wr1", "instruction": "이어서 써줘."},
+        ).json()
+        self.assertIs(body["candidate_claims"][0]["requires_gate_check"], True)
+        self.assertIs(
+            body["new_memory_hints"][0]["should_analyze_after_save"], True)
 
 
 class WritingGenerateAsyncBranchTest(unittest.TestCase):

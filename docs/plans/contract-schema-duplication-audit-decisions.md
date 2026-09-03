@@ -81,6 +81,8 @@ HANDOFF ⑦은 `llm_call_audits`에 "프롬프트 본문·토큰"이 남는다�
 
 **checked_constraints는 유지했다**(gate): 서버 재구성값이 상수(4카테고리 고정)라 모델 자기 보고가 유일한 정보원 — 삭제는 정보 손실이었다. `compare_judge`·`writing_generation`·`writing_retrieval_planner`·`writing_revision`은 브리프 판정 그대로 현행 유지(에코 없음).
 
-**KPI gate 실측**: OpenAPI 덤프가 슬라이스 전 트리(8655653)와 바이트 동일(공개 계약 무변 → `schema.d.ts` 무변). `llm_call_audits` 스키마·outcome 분류 무변. gate·extractor의 parse_error에서 mismatch/drift 원인이 사라져 **빈도 단절**이 있다(의미 불변) — 시계열 비교 시 이 날짜를 경계로 본다.
+**검증 하드닝 반영(2026-09-03, 판정 합격 후 — SoT v1.8.20)**: ① 표의 "모르는 id는 기존대로 repair 1회"는 부정확한 와글이었다 — 옛 구현은 repair-후 카탈로그 재검증이 죽은 검사(양 갈래 `return repaired`)여서 repair 출력이 사실상 무조건 수용됐고, v6 파서는 **repair 출력도 조립 검증 통과 필수**(실패 시 그 호출로 종료)라 **수용 경계가 엄격해졌다**(독립 검증이 발견한 옛 코드의 숨은 구멍이 신규 코드에서 같이 닫힘). ② planner site에도 parse_error 빈도 단절이 있다(빈·비문자 `plan_id`가 더 이상 에러 아님) — KPI 시계열 경계는 **gate·extractor·planner 세 site**. ③ 정책 bool의 공개 표면 이중 잠금 셀 신설(실 파서 통과 후보가 generate 응답에 True를 싣는지).
 
-**남은 축(호출 분산 D·진단 캡처 C)**: 이 날 시행하지 않았다. `llm_call_audits` 토큰 분해 + 진단 캡처 표본(브리프 Audit material 확정 C)으로 중복 비용을 잰 뒤 필요성 판단 — 그때 별도 슬라이스로 연다.
+**KPI gate 실측**: OpenAPI 덤프가 슬라이스 전 트리(8655653)와 바이트 동일(공개 계약 무변 → `schema.d.ts` 무변). `llm_call_audits` 스키마·outcome 분류 무변. gate·extractor·planner의 parse_error에서 mismatch/drift/빈-id 원인이 사라져 **빈도 단절**이 있다(의미 불변) — 시계열 비교 시 이 날짜를 경계로 본다.
+
+**남은 축(호출 분산 D·진단 캡처 C)**: 이 날 시행하지 않았다. `llm_call_audits` 토큰 분해 + 진단 캡처 표본(브리프 Audit material 확정 C)으로 중복 비용을 잰 뒤 필요성 판단 — 그때 별도 슬라이스로 연다. **D축 비용 분석 재료(검증 지적)**: 게이트 입력 렌더(`gate_prompt.py`의 claims/hints 직렬화)와 accept advisory copy(`accept.py`)가 이제 **상수 true만 실어 나르는 bool 둘을 계속 렌더**한다 — 출력 계약 밖이라 무해하나 남은 토큰 노이즈로 함께 볼 것.
