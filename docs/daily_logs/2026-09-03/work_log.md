@@ -106,3 +106,19 @@
 ## Next steps
 
 - (세션 1과 동일 — D축 분석·identity Slice 1·배포 대기)
+
+## 세션 3 — 관측(로그·이력) 분석과 백로그 등재
+
+오너 요청으로 스키마 조사 하드닝(세션 2) 대기 중에 시스템의 로그·이력관리 실태를 읽기 전용으로 분석했다(코드 변경 없음). 결론: "로그"는 목적이 다른 append-only 원장 8종(activity_log·llm_call_audits·writing_loop_audits·gate_findings·Core SOT 버전군·검토/승격 이력·request_usage_ledger·색인 outbox)로 구성되고, 파기 그래프(10 repo/22 collection)와 읽기 표면(/me/activity·admin KPI)까지 계약화돼 있다. 반대로 **의도적으로 비워둔 경계가 4축**이다.
+
+### User Decisions and Rationale
+
+오너가 4축의 처리 레벨을 결정했다(2026-09-03):
+
+- **LLM 본문 미저장** — 새 기록 불요. 스키마 중복 조사 브리프 §Audit material gap이 이미 문서화했고(확정: C 표본·B는 별도 브리프), D축 분석 과업도 이미 대기열에 있다.
+- **운영 stdout 로그 부재·감사 로그 retention 없음** — **백로그 유예**(OBS-1·OBS-2 등재, 트리거 부착). HANDOFF가 아니다 — 착수하지 않기로 한 항목을 HANDOFF에 두면 "지금 착수 지시"가 되므로 이 저장소 관례상 틀린 집이다.
+- **draft_versions 무시간축(activity 단일 의존)** — 독립 항목 미달(설계 의도가 `activity/actions.py:93` 주석에 있고 위험은 프로젝트 전체 파기 시나리오에서만 실질화). OBS-2의 "그때 할 일"에 재검토 한 줄로 딸리게 했다.
+
+### Completed work
+
+- `docs/plans/product-readiness-backlog.md` 활성 표에 OBS-1·OBS-2 두 행 추가(위 결정). 문서 인덱스 가드 green으로 확인.

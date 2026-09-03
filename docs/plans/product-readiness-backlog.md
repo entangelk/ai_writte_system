@@ -41,6 +41,8 @@
 | REPO-1 | Waiting | `ai_writte_system` 이름 정정 | 공개 포트폴리오 URL 확정, 첫 외부 협업자 초대, 또는 외부 배포 설정 추가 중 가장 이른 시점 | 제품명과 저장소 slug를 결정한 뒤 remote·문서 링크·경로 의존 설정을 한 번에 갱신 | 새 이름으로 clone/build/run 가능하고 repo-wide 이전 slug 검색 결과가 의도된 이력 외 0건 | 외부 공개/협업 직전 |
 | LEGAL-1 | Waiting | 코드·문서 라이선스 경계 재결정 | 상업 pilot/유료 제공 검토, 외부 기여 수락, 또는 공개 배포 중 가장 이른 시점 | 현재 CC BY-NC-SA 4.0 단일 적용을 유지할지, 코드용 소프트웨어 라이선스와 문서 라이선스를 분리할지 오너 결정. 필요 시 법률 검토와 제3자 구성요소 조건 확인 | 선택한 코드/문서 경계가 LICENSE·README·기여 정책에 일치하고 제품화 방식과 모순 없음 | 외부 기여/상업 검토 전 |
 | GATE-1 | Waiting | Phase 7 진입 게이트 | UX-1 완료 + QUAL-1 2주 검토 완료 | dogfood에서 반복 재현된 문제와 Phase 7 P1~P5를 대조해 가치가 입증된 첫 slice만 선택 | 오너가 실사용 근거와 함께 Phase 7 첫 slice를 확정하고 그 slice의 착수 브리프가 준비됨 | B 완료 및 dogfood 2주차 |
+| OBS-1 | Waiting | 운영(stdout) 로그 부재 — 도메인 감사 원장(activity·llm_call_audits·writing_loop_audits 등 8종)은 촘촘하나 인프라 사고 이력(부팅 실패·네트워크 오류 원문)은 컨테이너 로그뿐이고 영속 보증이 없다. 앱 전체 `getLogger` 4곳(2026-09-03 관측 분석, work_log 세션 3) | 컨테이너 로그만으로 장애 조사가 안 된 실측 사례 발생, 또는 다중 사용자 전환 | 어디에 무엇을 남길지(레벨·범위·OBS-2 retention 접점) 결정 브리프 먼저(운영 규칙 3) → 구현 | 앱 표준 경로의 장애가 서버 측 기록만으로 재현 가능 | 다중 사용자 전환 검토 시 |
+| OBS-2 | Waiting | 감사 로그 retention/TTL 없음 — 감사 원장 전부에 만료·보존 계약이 없다(세션 TTL뿐, 2026-09-03 실측). 스키마 중복 조사 브리프 §Audit material이 retention 계약을 B(민감 본문 감사)의 필수 전제로 못박았다 | B 브리프를 여는 순간(필수 전제), 또는 다중 사용자 전환 | 보존 기간·민감 데이터 retention 결정 브리프가 먼저. 그때 `activity_log`↔`draft_versions` 시간축 단일 의존(버전 자체에 누가/언제 없음 — `activity/actions.py:93` 근거 주석)도 함께 재검토 | 감사 컬렉션별 보존·만료 계약이 SoT에 등재 | B 브리프 개설 전 |
 
 ## 고정 순서와 체크포인트
 
