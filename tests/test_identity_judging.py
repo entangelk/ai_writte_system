@@ -240,6 +240,29 @@ class ShortlistTest(IdentityJudgingTestBase):
         self.assertEqual(self.groups.list_groups("p1"), ())
         self.assertEqual(self.groups.list_relations("p1"), ())
 
+    def test_event_without_retriever_is_noop_not_fail_closed(self) -> None:
+        # B1 폐쇄(검증 2026-09-03): event/open-question은 adapter(retriever)가
+        # 없으면 빈 shortlist no-op이다 — fail-closed 오류가 아니고, judge가
+        # 없어도 "판정할 pair가 있을 때만" 오류 조건에 걸리지 않는다.
+        focal = _candidate(
+            candidate_id="cand-a",
+            candidate_type=EVENT,
+            payload={"event": "폭풍의 밤"},
+        )
+        other = _candidate(
+            candidate_id="cand-b",
+            candidate_type=EVENT,
+            payload={"event": "폭풍의 밤 지나고"},
+        )
+        self._store(focal, other)
+
+        result = self._judge_candidate(self._service(), candidate_id="cand-a")
+
+        self.assertEqual(result.shortlisted_candidate_ids, ())
+        self.assertIsNone(result.group_id)
+        self.assertEqual(self.groups.list_groups("p1"), ())
+        self.assertEqual(self.groups.list_relations("p1"), ())
+
 
 class JudgementApplicationTest(IdentityJudgingTestBase):
     def test_missing_judge_is_an_explicit_error_only_when_pairs_exist(self) -> None:
@@ -341,6 +364,20 @@ class JudgementApplicationTest(IdentityJudgingTestBase):
         self.assertIsNotNone(result.group_id)
         self.assertEqual(judge.calls, [_pair("cand-a", "cand-b")])
 
+    def test_relation_source_literal_is_identity_judge(self) -> None:
+        # B2 폐쇄(검증 2026-09-03): relation의 source 리터럴은 identity_judge다.
+        focal = _candidate(candidate_id="cand-a")
+        twin = _candidate(candidate_id="cand-b", payload={"name": "ariel", "observation": "다른 관찰"})
+        self._store(focal, twin)
+        judge = _ScriptedJudge(
+            {_pair("cand-a", "cand-b"): IdentityJudgement(IdentityRelationVerdict.UNCERTAIN, "근거 부족")}
+        )
+
+        self._judge_candidate(self._service(judge=judge), candidate_id="cand-a")
+
+        (relation,) = self.groups.list_relations("p1")
+        self.assertEqual(relation.source, "identity_judge")
+
     def test_focal_must_exist_and_be_needs_review(self) -> None:
         with self.assertRaises(CandidateNotFoundForIdentityJudging):
             self._judge_candidate(self._service(), candidate_id="cand-none")
@@ -388,6 +425,49 @@ class IdempotencyTest(IdentityJudgingTestBase):
         self.assertEqual(
             self.groups.list_members("p1", group_after.group_id), members_before
         )  # added_at 불변
+
+    def test_reused_relation_self_heals_group_and_contradiction(self) -> None:
+        # B3 폐쇄(검증 2026-09-03) + 하드닝 #2: relation만 쓰고 죽은 실행 상태에서
+        # 재실행하면 judge 재호출 없이 그룹 연결·모순 표시가 다시 일어난다.
+        a = _candidate(candidate_id="cand-a")
+        b = _candidate(candidate_id="cand-b", payload={"name": "ariel", "observation": "다른 관찰"})
+        c = _candidate(candidate_id="cand-c", payload={"name": "ARIEL", "observation": "셋째"})
+        self._store(a, b, c)
+        # 죽은 실행: 판정 3행은 저장됐지만 그룹·멤버·모순 표시는 못 한 상태.
+        for left, right, verdict, rationale in (
+            ("cand-a", "cand-b", IdentityRelationVerdict.SAME, "A=B"),
+            ("cand-b", "cand-c", IdentityRelationVerdict.SAME, "B=C"),
+            ("cand-a", "cand-c", IdentityRelationVerdict.DIFFERENT, "A≠C"),
+        ):
+            self.groups.record_relation(
+                project_id="p1",
+                candidate_type=CHARACTER,
+                left_candidate_id=left,
+                right_candidate_id=right,
+                verdict=verdict,
+                rationale=rationale,
+                source="identity_judge",
+            )
+        judge = _ScriptedJudge({})  # 재호출되면 KeyError로 즉시 실패한다.
+
+        result = self._judge_candidate(self._service(judge=judge), candidate_id="cand-a")
+
+        # 판정 재사용 — judge는 한 번도 안 불렸고 relation은 3행 무변이다.
+        self.assertEqual(judge.calls, [])
+        self.assertEqual(
+            result.reused_pair_ids,
+            (_pair("cand-a", "cand-b"), _pair("cand-a", "cand-c")),
+        )
+        self.assertEqual(len(self.groups.list_relations("p1")), 3)
+        # 그룹 연결 자가 치유 — same pair만 들어오고 different 쪽은 안 들어온다.
+        (group,) = self.groups.list_groups("p1")
+        self.assertEqual(
+            tuple(m.candidate_id for m in self.groups.list_members("p1", group.group_id)),
+            ("cand-a", "cand-b"),
+        )
+        # 모순 표시 자가 치유 — 정확히 한 번 전환.
+        self.assertEqual(group.status, IdentityGroupStatus.CONTRADICTED)
+        self.assertEqual(group.revision, 1)
 
 
 class TransitivityContradictionTest(IdentityJudgingTestBase):
