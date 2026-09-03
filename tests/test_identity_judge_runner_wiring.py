@@ -345,6 +345,35 @@ class SuccessPathWiringTest(RunnerWiringTestBase):
 
 
 class IsolationTest(RunnerWiringTestBase):
+    async def test_judging_runs_after_the_job_reaches_success(self):
+        # 판정이 mark_job_succeeded **뒤**에 돈다는 잠금 — judge가 불릴 때
+        # job이 이미 종결돼 있어야 판정 경로의 어떤 실패도 job 상태를 되돌릴
+        # 수 없다(격리를 구조로 만드는 위치). 종결 전으로 옮기면 관측 상태가
+        # RUNNING이 돼 실패한다.
+        holder = {}
+
+        class _ObservingJudge:
+            async def judge(self, *, left, right):
+                holder["status"] = wiring["analysis"].get_job(
+                    project_id=saved["project_id"], job_id=job_id
+                ).status
+                return IdentityJudgement(IdentityRelationVerdict.SAME, "같은 인물")
+
+        wiring = self._wiring(_ObservingJudge(), self._same_name_drafts)
+        saved = wiring["saved"]
+        job_id = wiring["analysis"].create_job(
+            project_id=saved["project_id"],
+            snapshot_id=saved["snapshot_id"],
+            idempotency_key="identity-run-after-success",
+        ).job.id
+
+        result = await wiring["runner"].run_job(
+            project_id=saved["project_id"], job_id=job_id
+        )
+
+        self.assertIs(result.job.status, AnalysisJobStatus.SUCCEEDED)
+        self.assertIs(holder["status"], AnalysisJobStatus.SUCCEEDED)
+
     async def test_provider_error_does_not_fail_the_job(self):
         judge = _RaisingJudge(ProviderError(
             code=ProviderErrorCode.UNAVAILABLE,

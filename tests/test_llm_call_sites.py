@@ -151,6 +151,38 @@ class SiteAssemblyIsInstrumentedTest(unittest.TestCase):
         self._assert_wrapped(runner._identity_judging._judge._provider,
                              LlmCallSite.IDENTITY_JUDGE)
 
+    def test_identity_judge_max_tokens_default_and_env_override(self):
+        # 판정은 verdict JSON 하나면 충분해 compare judge와 같은 512 기본.
+        # 리터럴 핀 — env 노브를 소리 없이 못 쓰게 한다.
+        from services.application.app.analysis.identity_groups import (
+            CandidateIdentityGroupService,
+            InMemoryCandidateIdentityGroupRepository,
+        )
+        from services.application.app.analysis.service import (
+            AnalysisService, InMemoryAnalysisRepository,
+        )
+        from services.application.app.analysis.source import CoreSotSourceAdapter
+        from services.application.app.main import _default_analysis_runner
+
+        def _build():
+            core_sot = CoreSotService(InMemoryCoreSotRepository())
+            return _default_analysis_runner(
+                core_sot=core_sot,
+                analysis=AnalysisService(
+                    InMemoryAnalysisRepository(),
+                    source_ref_resolver=CoreSotSourceAdapter(core_sot),
+                ),
+                identity_groups=CandidateIdentityGroupService(
+                    InMemoryCandidateIdentityGroupRepository()),
+            )
+
+        self.assertEqual(_build()._identity_judging._judge._max_tokens, 512)
+        with mock.patch.dict(
+            os.environ, {"ANALYSIS_IDENTITY_JUDGE_MAX_TOKENS": "77"}
+        ):
+            self.assertEqual(
+                _build()._identity_judging._judge._max_tokens, 77)
+
     def test_context_search_planner_assembly_is_wrapped(self):
         from services.application.app.analysis.service import (
             AnalysisService, InMemoryAnalysisRepository,
