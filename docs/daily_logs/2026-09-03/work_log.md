@@ -328,3 +328,44 @@
 
 - Slice 2 독립 검증(오너 지시 시) — 대상 커밋 `488b867`·`e6a4c87`·`fd02e88`·기록 커밋, 변이가 연 자리,
   전수 기대값 2740/1/3133. 통과 후 **Slice 3(Review Inbox 읽기면)** 착수.
+
+---
+
+# Work Log — 2026-09-03 세션 7 (identity group Slice 2 독립 검증, 베타)
+
+## Goals
+
+- 오너 요청("작업 ai가 작업한거 확인해서 검증하고 의심하고 또 의심해줘?") — 구현 세션 6이 마감한
+  identity group **Slice 2(분석 runner 배선)**(`488b867`·`e6a4c87`·`fd02e88`·기록 `3da4112`,
+  SoT v1.8.23)의 독립 검증.
+
+## Completed work
+
+판정 **조건부 합격** — 검증 기록
+[`verifications/2026-09-03/identity_group_slice_2.md`](../verifications/2026-09-03/identity_group_slice_2.md)
+(인덱스·판정 분포 278건/조건부 84 갱신, 문서 가드 green 288 subtests).
+
+- **재현**: 수집 2741=주장 2740+1, 집중 18셀(신규 파일 16+callsites 2) green, 전수 재실측(아래),
+  OpenAPI **코드 경계(2d467b5↔HEAD) 바이트 동일** 독립 재덤프(md5 `10978d55…`·384,414B, 선례 지문 동일),
+  SoT v1.8.23 조항(리터럴 9종·계측 목록·재분류 목록·§Phase 2)·HANDOFF·README/portfolio 갱신 대조 무불일치.
+- **뮤테이션 6종 실측** — 검증자 신설 2종(①focal을 프로젝트 전체 needs_review로 확대하는 과잉 ②max_tokens
+  기본 512→511 변조)이 각자 셀에 물림. 구현자 표 M2(격리 제거→2 failed)·M3(위치 이동→1)·M9(D4 분기
+  제거→1) 재유도가 셀 짝까지 일치, M4(None-가드 제거)는 관측 동등(38 passed) 재확인 — 흡수층=격리 경계.
+- **probe 2종**(기록 옆 커밋): judge 미구성 러너 격리의 행동 확인(job SUCCEEDED)·호출 없는
+  `InvalidIdentityJudgement`의 재분류 오염 실증(extractor success 행이 parse_error로).
+- **차단 1건(B1)**: 러너 레벨 judge 미구성 격리 무셀 — 완료 기록·SoT 리터럴 ③이 삼축(ProviderError·parse·
+  judge 미구성)을 주장하나 셀은 둘뿐. 행동은 계약대로(probe 실측) — Slice 1 B1~B3와 같은 "빈 것은 잠금".
+- **하드닝 3건(H1~H3)**: provider 호출 없는 재분류 오염(기본 조립 불가·compare 동일 모양), HANDOFF KPI
+  사이트 열거 8개 잔류, 구현자 OpenAPI "HEAD~1 대조"가 커밋 시각상 테스트 커밋 전후였을 개연성(무변 결론은
+  검증자가 올바른 경계에서 확정).
+
+## 회귀
+
+- 전수(test-mongo healthy 후, 본 검증 기록이 디스크에 있는 채): **2740 passed / 1 skipped / exit 0,
+  1998.05초**(3134 subtests — subtest +1은 검증 기록 1건의 문서 가드 subTest. 셀 수는 구현자 주장과
+  정확히 일치). green이므로 뮤테이션 동시창 간섭도 사후 배제(변이는 깨뜨리기만 한다).
+
+## Next steps
+
+- B1 폐쇄(셀 1개 — 다음 전수 기대값 2741/1/3133) 후 Slice 3 착수. 검증자는 결함을 고치지 않는다(가이드).
+- 푸시는 오너 몫.
