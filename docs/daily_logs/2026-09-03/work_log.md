@@ -207,3 +207,48 @@
 ## Next steps
 
 - 조건 B1~B3 폐쇄 → Slice 2(분석 runner 배선) 착수. 푸시는 오너 몫.
+
+---
+
+# Work Log — 2026-09-03 세션 5 (identity group Slice 1 검증 조건 폐쇄, 베타)
+
+## Goals
+
+- 독립 검증(`verifications/2026-09-03/identity_group_slice_1.md`, 판정 **조건부 합격**)의 차단 3건(B1~B3 — 전부 "행동은 계약대로, 잠금이 없는" 빈 칸) 폐쇄 + 비차단 하드닝 3건 중 문서화 2건 반영(#2는 B3 셀에 폴드).
+
+## Completed work
+
+### 폐쇄 셀 3개(커밋 `b56674a`)
+
+| 조건 | 신설 셀 | 잠근 것 |
+|---|---|---|
+| B1 | `ShortlistTest::test_event_without_retriever_is_noop_not_fail_closed` | event/open-question retriever 미주입 → 빈 shortlist no-op(fail-closed 오류 아님·judge 없어도 오류 없음 — pool에 pair가 있어도 shortlist가 먼저 비므로) |
+| B2 | `JudgementApplicationTest::test_relation_source_literal_is_identity_judge` | relation `source` 리터럴 `identity_judge` |
+| B3 | `IdempotencyTest::test_reused_relation_self_heals_group_and_contradiction` | 재사용 경로 효과 멱등 재적용(자가 치유) — relation 3행(same 2+different 1)만 남긴 죽은 실행 상태에서 judge 재호출 0회·그룹 {a,b} 생성·모순 `contradicted` 재표시(정확히 한 번, revision 1)까지 **한 셀에 두 효과**(하드닝 #2) |
+
+### 검증자 신설 변이 3종 재실측(전부 새 셀이 잡음 — 매번 원복·트리 clean)
+
+| 변이 | 실측 |
+|---|---|
+| NEW-A `_shortlist`의 retriever None-가드 제거 | 1 failed — B1 셀 |
+| NEW-B `source="identity_judge"` → `"compare_judge"` | 1 failed — B2 셀 |
+| NEW-C 재사용 분기의 `_ensure_same_group` 제거 | 1 failed — B3 셀 |
+
+### 비차단 하드닝 2건(계획 문서, 커밋 `a4388aa`)
+
+- **#1 relation.group_id 낡은 값** — §Slice 3 계약 문단에 명시: relation 행의 `group_id`는 기록 시점 값이라 병합으로 흡수된 `closed` 그룹을 가리킬 수 있다 — **읽기면의 정본은 open 그룹·member 행**, relation.group_id는 표시 전용(갱신 정책은 Slice 5).
+- **#3 shortlist 상한·페이징 트리거 유예** — §Deferred에 부착: **트리거 = Review Inbox 그룹 수 세 자리 관측**(dogfood 규모에서 징후 없음).
+
+### 회귀(세션 5)
+
+- 전수(test-mongo healthy 후): **2722 passed / 1 skipped / 3133 subtests, exit 0, 2300.83초(베타)**. **검산**: 검증자 실측 2719/1/3133 + 폐쇄 셀 3 = 2722, subtest 무변(신규 3셀 subtest 없음 — 3133은 검증 기록 판정 열 등재분 +1 포함) — 검증자 예고와 정확히 일치, 잔차 없음. **skip 1 = 이 머신 관례**.
+- 집중: `test_identity_judging` **20 passed**·문서 가드 13 passed/287 subtests(하드닝 반영 후 재실측).
+
+## Decisions
+
+- **검증 기록의 판정 열은 승격하지 않았다** — Slice 0 B1 선례(폐쇄 사실은 폐쇄 커밋과 이 세션 기록이 담는다).
+- SoT **v1.8.22** — 검증 조건 폐쇄+하드닝 반영을 변경이력에 남기고(§Phase 2A 조항에 잠금 완료 문구 증보) README 핀을 맞췄다.
+
+## Next steps
+
+- **Slice 2(분석 runner 배선) 착수** — B3 셀이 "판정 실패는 job을 실패로 바꾸지 않는다" 신뢰의 기반이 됐다.
