@@ -786,6 +786,19 @@ def register_analysis(
             "reason": affordance.reason,
         }
 
+    def _identity_group_payload(summary) -> dict[str, object] | None:
+        # 정체성 그룹 Slice 3 — additive group metadata. ungrouped는 null.
+        # 기존 개별 item 필드·detail 경계는 개별 후보 기준으로 무변이다.
+        if summary is None:
+            return None
+        return {
+            "group_id": summary.group_id,
+            "group_size": len(summary.member_ids),
+            "group_status": summary.status.value,
+            "group_member_ids": list(summary.member_ids),
+            "identity_rationale_summary": summary.rationale_summary,
+        }
+
     def _review_inbox_payload(item, *, include_detail: bool) -> dict[str, object]:
         candidate = item.candidate
         payload: dict[str, object] = {
@@ -804,6 +817,8 @@ def register_analysis(
             "actions": [
                 _affordance_payload(a) for a in candidate_affordances()
             ],
+            # 정체성 그룹 Slice 3: 목록 렌더에 필요한 group 최소값(ungrouped null).
+            "identity_group": _identity_group_payload(item.identity_group),
         }
         if include_detail:
             payload.update({

@@ -1834,6 +1834,9 @@ def create_app(
     review_inbox = ReviewInboxService(
         analysis_service=analysis, memory_service=memory,
         review_queue=review_queue,
+        # 정체성 그룹 Slice 3: 읽기면이 group metadata를 싣는다(저장소 public
+        # service만 쓴다 — 계획의 Slice 0 인계 조항).
+        identity_groups=identity_groups,
     )
     gate_findings = gate_finding_service or _default_gate_finding_service()
     # Phase 5.9 L9 B: every bounded-loop termination is recorded to a durable,
