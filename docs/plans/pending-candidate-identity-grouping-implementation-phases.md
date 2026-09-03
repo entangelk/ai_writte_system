@@ -58,7 +58,7 @@ BSON ms**(서비스 클록 절단)이고 Mongo 읽기는 naive datetime을 UTC�
 스파이가 호출을 잠근다. 독립 검증(`verifications/2026-09-02/identity_group_slice_0.md`)은
 조건부 합격이었고 B1·H1~H4는 같은 날 폐쇄했다.
 
-## Slice 1 — shortlist와 판정 서비스
+## Slice 1 — shortlist와 판정 서비스 · **완료(2026-09-03, SoT v1.8.21)**
 
 **범위:** 후보 하나를 기준으로 같은 project/type의 `needs_review` 후보를 shortlist하고,
 주입된 identity judge seam으로 `same|different|uncertain` relation을 저장한다. runner나 HTTP에는 아직
@@ -74,6 +74,24 @@ shortlist로 fail-closed가 아니라 no-op 처리한다. `same`만 group member
 candidate id는 제외한다. judge 미구성은 서비스 레벨에서 명시 오류로 드러내되, Slice 2 전까지 runner에는
 배선하지 않는다. fake judge로 `same`→member 연결, `different`/`uncertain`→member 미연결, 같은 pair
 재실행 멱등, A=B·B=C·A≠C 추이성 모순이 group `contradicted`로 남는 것을 잠근다.
+
+**완료 기록(2026-09-03):** `analysis/identity_judging.py`(서비스·seam)·
+`tests/test_identity_judging.py`(17셀)로 구현(커밋 `f5c0ead`·`98c5c13`·`3dfef65`,
+SoT v1.8.21). 이 Slice에서 확정한 리터럴 — ① **판정 재사용은 "저장 판정 승리 +
+효과 멱등 재적용"**(pair에 relation이 있으면 judge 재호출 없이 재사용하되 그룹
+연결·모순 표시는 다시 일어나 죽은 실행의 빈자리를 스스로 메운다), ② **모순 감지는
+도착 순서와 무결** — 새 `different`가 same 성분과 충돌할 때와 `same`이 different
+삼각형을 닫을 때 모두 group을 `contradicted`로 올린다(`open`일 때만 — 정확히 한 번
+전환), ③ **두 그룹을 잇는 same은 병합** — 오래된 그룹이 살아남고 흡수된 그룹은
+`closed` 껍데기(member 행은 남지만 소속 판정에서 제외; Slice 3 읽기면은 open
+그룹만 본다), ④ judge 미구성은 판정할 pair가 있을 때만 명시 오류(빈 shortlist는
+no-op), ⑤ relation `source` 리터럴 `identity_judge`. OpenAPI/`schema.d.ts` 무변
+(덤프 바이트 동일 실측). 뮤테이션 10종 기명 재실패 — 과정에서 병합 셀이 클록
+동률로 **우연히 통과하던 결함**을 발견·보강(결정적 id 순서+클록 전진). 전수
+**2719/1/3132**(+17셀). 실 provider 호출이 없으므로 LLM audit 행 수 검증은
+Slice 2 배선 때 잰다(공통 작업 규칙의 provider 미구성·parse error 축은
+`IdentityJudgeNotConfigured`·`InvalidIdentityJudgement`·judge 예외 전파로
+서비스 레벨에서 잠갔다).
 
 ## Slice 2 — 분석 runner 배선
 

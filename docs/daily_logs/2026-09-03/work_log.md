@@ -122,3 +122,63 @@
 ### Completed work
 
 - `docs/plans/product-readiness-backlog.md` 활성 표에 OBS-1·OBS-2 두 행 추가(위 결정). 문서 인덱스 가드 green으로 확인.
+
+---
+
+# Work Log — 2026-09-03 세션 4 (identity group Slice 1, 베타)
+
+## Goals
+
+- HANDOFF 착수점의 다음 작업 — identity group **Slice 1(shortlist와 판정 서비스)** 구현(계획 `plans/pending-candidate-identity-grouping-implementation-phases.md` Slice 1, 오너 C 채택 2026-09-02).
+
+## Completed work
+
+### 구현(커밋 3개)
+
+- **`analysis/identity_judging.py`(신규)** — `CandidateIdentityJudgingService.judge_candidate(project_id, candidate_id)`: focal(`needs_review` 검증)의 같은 project/type `needs_review` pool에서 shortlist를 만들고 pair마다 ① 저장 relation 있으면 재사용, ② 없으면 주입 judge 호출(확인 후 relation 저장). `same`→그룹 확립, `different`/`uncertain`→relation만. seam: `IdentityJudge`(sync/async 겸용 — `CompareJudge` 선례)·`CandidateShortlistRetriever`(event/open-question 선택). 저장은 Slice 0 public service(`CandidateIdentityGroupService`)만 사용(계획 인계 조항).
+- **`tests/test_identity_judging.py`(신규 17셀)** — 계획 검증 문장 전부 + 병합·검증·전파·비동기 셀. `f5c0ead`(구현) → `98c5c13`(병합 셀 결정적 id 순서) → `3dfef65`(클록 전진 보강).
+- mypy green. **OpenAPI 덤프 바이트 동일 실측**(구현 전후 `scripts/dump_openapi.py` 비교) — 공개 계약·`schema.d.ts` 무변.
+
+### 확정한 계약 리터럴(SoT v1.8.21)
+
+1. **판정 재사용**(Slice 0이 Slice 1로 넘긴 정책) = 저장 판정 승리 + 효과 멱등 재적용(자가 치유).
+2. **모순 감지 도착 순서 무결** — `same` 성분(BFS) 안에서 `different`가 성립하면 `open` 그룹을 `contradicted`로(정확히 한 번 전환). 새 different 도착과 same 삼각형 완성 양쪽 다.
+3. **두 그룹을 잇는 same 병합** — 오래된 그룹 생존, 흡수 그룹 `closed` 껍데기(member 행 잔류하나 소속 판정에서 제외).
+4. judge 미구성 = 판정할 pair가 있을 때만 명시 오류(빈 shortlist는 no-op). verdict 축 밖 거부·judge 예외 전파.
+5. relation `source` = `identity_judge`.
+
+### 뮤테이션(10종 전부 기명 재실패 후 원복·`git status` clean)
+
+| 변이 | 재실패 셀 |
+|---|---|
+| M1 판정 재사용 제거(항상 재판정) | `IdempotencyTest::test_rerun_reuses_stored_relation_without_rejudging` |
+| M2 same→그룹 확립 제거 | 5 failed(same 연결·awaitable·멱등·삼각형 역순·병합) |
+| M3 모순 표시 제거 | 삼각형 셀 2종 |
+| M4 over-strict(성분 확인 없이 different마다 contradicted) | `test_same_closing_a_different_triangle_also_contradicts`(중간 OPEN 단언) |
+| M5 type 격리 제거 | `test_shortlist_is_isolated_by_candidate_type` |
+| M6 over-strict(같은 job 제외 — compare D6 오복사) | same-job 셀 포함 13 failed |
+| M7 병합 제거 | `GroupMergeTest` |
+| M8 closed 껍데기 제외 제거 | `GroupMergeTest`(셀 보강 후 — 아래 Issues) |
+| M9 judge 결과 검증 제거 | `test_invalid_judgement_is_rejected` |
+| M10 over-strict(빈 shortlist에서도 judge 필수) | `test_empty_shortlist_is_noop_without_judge` |
+
+### 회귀
+
+- 전수(test-mongo healthy 후): **2719 passed / 1 skipped / 3132 subtests, exit 0, 1908.70초(베타)**. **검산**: 직전 2702/1/3132 대비 셀 +17 = 신규 파일 17메서드, subtest 무변(신규 파일 subtest 없음), skip 1 = 이 머신 관례(ES 패키지 탑재). 예측과 잔차 없음. 주석 보강(반환형 2곳, 행위 무변) 후 focused 17셀·mypy 재실측 green.
+- 집중: `test_identity_judging`·`test_identity_groups`·`test_identity_groups_mongo`·`test_analysis_compare`·`test_analysis_compare_judge` 50 passed/1 skipped.
+
+## Issues found
+
+- **병합 셀이 우연히 통과하던 결함(M8 과정 발견, `98c5c13`·`3dfef65`로 보강)** — `_FixedClock`은 `advance()` 전까지 같은 시각을 돌려줘 두 그룹의 `created_at`이 동률이 됐고, 병합 tie-break이 group_id로 넘어가 **나중에 만든 그룹이 생존자**가 됐다. 그 결과 M8 변이(closed 껍데기 제외 제거)가 17 passed로 재실패하지 않아 발견했다. 결정적 id 순서(생존 `cig:b`/흡수 `cig:a` — 껍데기가 정렬에서 먼저 옴)와 클록 전진으로 고정. 교훈: **시간 tie-break에 의존하는 셀은 클록이 실제로 흐르는지부터 본다.**
+- **M6 첫 시도는 perl 패턴 불일치로 변이 미적용 green** — grep으로 적용을 확인한 뒤 재실행했다. 변이 "재실패"의 전제는 적용 자체의 확인이다.
+- README Edit이 DrvFs ENOENT 오탐을 냈다(메모리 규칙대로 grep 확인 — 실제로는 적용돼 있었음).
+
+## Decisions
+
+- 위 5개 리터럴은 모두 C 브리프("same을 하나의 review group으로")·계획 문장에서 유도 가능해 오너 브리프 없이 시행했다. 특히 병합은 "같은 job 자기 후보 포함" 계약상 idempotent replay에서 두 그룹이 만나는 경로가 실재하므로 필수였다.
+- **SoT v1.8.21 승격** — 계획 공통 규칙이 SoT 갱신을 명시한 것은 Slice 0·3·4·5뿐이지만, v1.8.17 행이 "판정 재사용 정책은 Slice 1"으로 dangling pointer를 남겼고 이 Slice가 그 정책을 확정했으므로 정본에 회기시켰다(README 핀 가드 동반 갱신).
+
+## Next steps
+
+- **Slice 2(분석 runner 배선)** — 후보 저장 뒤 Slice 1 서비스 호출, 후보 0개/no shortlist no-op, group 판정 실패의 job 격리, `correlation_id=analysis_job_id`, **LLM audit 행 수 검증**(실 provider 호출이 생기는 첫 슬라이스).
+- 이 Slice의 독립 검증은 미실시(소유자 배정 대기 — Slice 0 선례: 구현 세션과 검증 세션이 갈렸다).
