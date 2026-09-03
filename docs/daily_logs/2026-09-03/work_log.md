@@ -369,3 +369,55 @@
 
 - B1 폐쇄(셀 1개 — 다음 전수 기대값 2741/1/3133) 후 Slice 3 착수. 검증자는 결함을 고치지 않는다(가이드).
 - 푸시는 오너 몫.
+
+---
+
+# Work Log — 2026-09-03 세션 7 (identity group Slice 2 검증 조건 B1 폐쇄 + 하드닝, 베타)
+
+## Goals
+
+- 오너 지시("검증기록 확인해서 보강할 부분 보강해줘") — 독립 검증
+  `verifications/2026-09-03/identity_group_slice_2.md`(판정 **조건부 합격**, 커밋 `fcbb9c9`)의
+  차단 B1 폐쇄 + 비차단 하드닝 3건 중 문서 반영(H1·H2·H3).
+
+## Completed work
+
+### B1 폐쇄(커밋 `a305b00`)
+
+- **셀 `test_missing_judge_is_isolated_in_the_runner`** — 리터럴 ③의 세 번째 축(judge 미구성)이
+  러너 레벨에서 무셀이었다(서비스 레벨 셀은 오류 *발생* 축만 잠그고 러너 *격리*는 별개 분기). 서비스
+  주입·judge=None·같은 이름 짝 → spy(`CandidateIdentityJudgingService` 하위클래스)가
+  `IdentityJudgeNotConfigured` 발생·재발산을 기록하고, job SUCCEEDED·`needs_review` 잔류·relation
+  0건·첫 실패로 단계 종료(`entered` 1건)를 단정 — 비공헌성(spy)까지 잰다.
+- **M2(격리 제거) 재실측** — 새 셀 포함 **3 failed**(B1 셀·provider 격리 셀·감사 taxonomy 셀).
+  under-방향 잠금 확인. 복원 후 트리 clean.
+
+### 하드닝 3건 반영(SoT v1.8.24)
+
+- **H1(재분류 가정 정밀화)** — "마지막 호출=실패한 repair"는 **기본 조립에서만 성립하는 가정**임을
+  SoT §관측 재분류 조항·§Phase 2A ⑤·계획 문서에 명문화. 검증자 probe(`repro_reclassify_no_call_mislabel.py`)가
+  시드 안 템플릿의 호출 없는 `InvalidIdentityJudgement`가 같은 scope의 extractor 행을 `parse_error`로
+  오염시키는 것을 실증했다 — compare 선례와 같은 모양이며, 경계 축소(마지막 행 site 확인)는 D4 전체의
+  오너 판단으로 남긴다.
+- **H2(HANDOFF 사이트 열거)** — 관측 문단의 사이트 나열에 `identity_judge` 추가(각주만 9였다).
+- **H3(측정 경계 정정)** — 구현 세션 6의 "HEAD~1 worktree 대조"는 커밋 시각상 테스트 커밋 전후
+  경계였을 개연성이 지배적(양쪽 다 Slice 2 코드 포함) — 그 측정만으로는 무변 주장이 성립하지 않았다.
+  올바른 경계(`2d467b5`↔HEAD·md5 `10978d55…`·384,414B)는 검증자가 확정했다. 계획 문서의 측정 서술을
+  정정하고 이후 기록은 경계 커밋을 명시한다(Slice 1 기록 관례).
+
+### 회귀(세션 7)
+
+- 집중: `test_identity_judge_runner_wiring.py` **17 passed**(16+B1 셀).
+- 전수: **2741 passed / 1 skipped / 3134 subtests, exit 0, 1707.97초**(test-mongo healthy). **검산**: 검증자 실측 2740/1/3134(기록 커밋 상태) + B1 셀 1 = 2741, subtest 무변(신규 셀 subtest 없음) — HANDOFF·SoT v1.8.24 행의 예고와 정확히 일치, 잔차 없음.
+
+## Decisions
+
+- **B1은 셀로 폐쇄했다**(검증이 제시한 대안 "삼축 주장 철회"가 아니라) — 행동이 계약대로였으므로
+  잠금만 빈 것은 Slice 1 B1~B3와 같은 모양이고, 주장 철회는 계약을 좁혀 미래의 회귀를 느슨하게 만든다.
+- **H1은 문구(권고 ①)로 닫고 코드 손대지 않았다** — site 확인 게이트(②)를 identity 판정에만 붙이면
+  compare 선례와 어긋나고, 경계는 D4 관례 전체의 성질이라 슬라이스 단독 결정이 아니다.
+
+## Next steps
+
+- **Slice 3(Review Inbox 읽기면) 착수** — relation.group_id는 표시 전용(읽기면의 정본은 open
+  그룹·member 행) 계약이 이미 서 있다.

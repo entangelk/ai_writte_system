@@ -118,22 +118,35 @@ ProviderError/parse error의 실패 격리, LLM audit row 수를 잠근다.
 - **판정 실패는 전체 단위 격리 + 첫 실패로 단계 종료** — ProviderError·`InvalidIdentityJudgement`·
   judge 미구성 어느 것이 와도 job은 succeeded·후보는 `needs_review` 잔류. 세분화(후보별 격리)는
   죽은 게이트웨이에 남은 pair만큼 timeout을 태우므로 과잉으로 잡았다(뮤테이션 M4′). 부분 적용된
-  단계는 Slice 1의 판정 재사용+자가 치유(B3 셀)로 회복된다.
+  단계는 Slice 1의 판정 재사용+자가 치유(B3 셀)로 회복된다. **세 축 전부 v1.8.24부터 기명 셀로
+  잠긴다** — judge 미구성 축은 독립 검증 B1 폐쇄(2026-09-03, 셀
+  `test_missing_judge_is_isolated_in_the_runner`; M2 격리 제거에 물리는 것 재실측).
 - **focal은 이번 job에 기록된 후보만** — pool의 옛 후보는 비교 대상이 될 뿐 스스로 판정을 다니지
   않는다(셀: 옛 후보 2·신규 1에서 calls는 2쌍, 옛-옛 pair 무판정).
 - **terminal parse 거부의 D4 재분류는 runner 격리 경계에서** — compare endpoint 선례를 이식한
   것으로, 판정 실패가 HTTP 오류로 올라오지 않아 endpoint가 그 예외를 볼 수 없기 때문이다.
-  `InvalidIdentityJudgement`가 올라온 시점의 마지막 호출이 곧 실패한 repair 호출이다.
+  "마지막 호출이 곧 실패한 repair 호출"은 **기본 조립에서만 성립하는 가정이다**(시드를 조립점에서
+  하므로 provider 호출 없이 그 예외가 날 경로가 없다) — 시드 안 템플릿의 손조립·smoke에서는
+  재분류가 같은 scope의 관계 없는 마지막 행을 오염시킬 수 있다(독립 검증 H1 실증, compare 선례와
+  같은 모양).
 
 judge는 compare judge와 같은 모양이다(프롬프트 `analysis_identity_v1`·task_type `analysis_identity`·
 strict parse·repair 1회·판정 축 세 값 전부 허용), 조립 env 게이팅은 `LLM_GATEWAY_BASE_URL`,
 judge `max_tokens`는 `ANALYSIS_IDENTITY_JUDGE_MAX_TOKENS` 기본 **512**. OpenAPI/`schema.d.ts` 무변
-(덤프 바이트 동일 384,414B, HEAD~1 worktree 대조 실측). 감사 행 수: 판정 pair당 1행(`identity_judge`
+(덤프 바이트 동일 384,414B·md5 `10978d55…` — 코드 기준선 `2d467b5`↔HEAD 대조, 독립 검증 §6에서 확정; 구현 세션의 첫 대조는 경계가 테스트 커밋 전후로 무효였다 — 검증 H3 정정). 감사 행 수: 판정 pair당 1행(`identity_judge`
 site·`correlation_id`=job_id — run endpoint의 scope를 탄다)·repair는 둘째 행·terminal 거부는 마지막
 행 `parse_error`·provider 실패는 자기 taxonomy 유지 — 전부 실 adapter+seam C 셀로 잠금.
 셀 18종(신규 파일 16 + `test_llm_call_sites.py` 조립 가드·max_tokens 핀 2). 뮤테이션 11회 중 10종
 기명 재실패(가드 제거 1종은 관측 동등 — 격리 경계가 AttributeError를 대신 삼키는 이중 보호).
 전수 **2740/1/3133**(+18셀, 1952.43초).
+
+**검증 조건 폐쇄(2026-09-03, SoT v1.8.24):** 독립 검증
+[`verifications/2026-09-03/identity_group_slice_2.md`](../verifications/2026-09-03/identity_group_slice_2.md)
+판정 **조건부 합격** — 구현 주장 전부(전수 산술·OpenAPI 경계 대조·셀·뮤테이션 재유도·기록) 재현됐고
+검증자 신설 변이 2종(focal 확대·max_tokens 변조)도 구현 셀이 물렸다. 차단 **B1**(러너 레벨 judge 미구성
+격리 무셀)은 셀 1개로 폐쇄(위 ③) — 전수 **2741/1/3134**(subtest 3134 = 검증 기록의 문서 가드 subTest
+포함). 비차단 H1(재분류 가정 문구)·H3(측정 경계 정정)은 위에 반영했고 H2(HANDOFF 사이트 열거)는
+HANDOFF에 반영했다. 판정 열은 승격하지 않는다(Slice 0·1 선례).
 
 ## Slice 3 — Review Inbox 읽기면
 
