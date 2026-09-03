@@ -430,6 +430,56 @@ def _same_content() -> str:
     )
 
 
+class IdentityJudgeAdapterTest(unittest.IsolatedAsyncioTestCase):
+    """``TerminalJsonIdentityJudge``의 parse 축 — verdict 범위·정확키·repair.
+
+    공통 작업 규칙이 LLM judge Slice의 parse error를 명시 검증으로 요구한다.
+    compare judge fixture(``test_analysis_compare_judge``)와 같은 자리다.
+    """
+
+    async def test_valid_content_parses_verdict_and_rationale(self):
+        judge = _identity_judge(_same_content())
+
+        judgement = await judge.judge(
+            left=_candidate(candidate_id="a"), right=_candidate(candidate_id="b")
+        )
+
+        self.assertIs(judgement.verdict, IdentityRelationVerdict.SAME)
+        self.assertEqual(judgement.rationale, "같은 인물")
+
+    async def test_out_of_set_verdict_repairs_once_then_raises(self):
+        # verdict 축 밖("maybe")은 파싱 거부 → repair 1회 → 그래도 비-JSON이면
+        # InvalidIdentityJudgement. provider 호출은 정확히 2회다.
+        judge = _identity_judge(
+            json.dumps({"verdict": "maybe", "rationale": "x"}, ensure_ascii=False),
+            "still not json",
+        )
+
+        with self.assertRaises(InvalidIdentityJudgement):
+            await judge.judge(
+                left=_candidate(candidate_id="a"),
+                right=_candidate(candidate_id="b"),
+            )
+        self.assertEqual(judge._provider._inner.calls, 2)
+
+    async def test_extra_fields_are_rejected_then_recovered(self):
+        # 정확키 검사 — extra 필드가 있는 첫 응답은 거부되고 repair가 회수한다.
+        judge = _identity_judge(
+            json.dumps(
+                {"verdict": "same", "rationale": "r", "extra": 1},
+                ensure_ascii=False,
+            ),
+            _same_content(),
+        )
+
+        judgement = await judge.judge(
+            left=_candidate(candidate_id="a"), right=_candidate(candidate_id="b")
+        )
+
+        self.assertIs(judgement.verdict, IdentityRelationVerdict.SAME)
+        self.assertEqual(judge._provider._inner.calls, 2)
+
+
 class AuditRowsTest(RunnerWiringTestBase):
     """실 adapter + seam C — 행 수·site·correlation_id·재분류를 잰다.
 
