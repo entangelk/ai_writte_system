@@ -474,30 +474,41 @@ class GroupApproveOrchestrationTest(unittest.TestCase):
         )
 
     def test_members_already_terminal_are_skipped(self):
-        """terminal 멤버는 rejected로 시드한다 — confirm이 남기는 canonical이 채택
-        규칙을 통해 나머지 멤버의 판정 대상을 바꾸는 간섭 없이 skip 축만 잰다."""
+        """terminal 멤버는 rejected·superseded로 시드한다 — confirm이 남기는
+        canonical이 채택 규칙을 통해 나머지 멤버의 판정 대상을 바꾸는 간섭 없이
+        skip 축만 잰다. superseded는 Slice 4 검증 B1의 교훈(무셀 방향)을 승인
+        경로에도 적용한 것 — skip을 두 값 열거로 좁히는 과잉 교정이 이 셀에
+        걸린다(그 좁힘 아래 superseded 멤버의 상태 검사가 전이 예외를 흘린다)."""
         judge = _ScriptedJudge(_no_change())
         w = _build(judge)
         a = _seed_candidate(w["analysis"], project_id=w["project_id"], logical_key="a")
         b = _seed_candidate(w["analysis"], project_id=w["project_id"], logical_key="b")
-        terminal = _seed_candidate(
+        rejected = _seed_candidate(
             w["analysis"], project_id=w["project_id"], logical_key="c")
         self.assertEqual(w["client"].post(
-            f"/projects/{w['project_id']}/analysis/candidates/{terminal.id}/reject"
+            f"/projects/{w['project_id']}/analysis/candidates/{rejected.id}/reject"
         ).status_code, 200)
-        group = _open_group(w["groups"], w["project_id"], a, b, terminal)
+        superseded = _seed_candidate(
+            w["analysis"], project_id=w["project_id"], logical_key="d")
+        self.assertEqual(w["client"].post(
+            f"/projects/{w['project_id']}/analysis/candidates/{superseded.id}/edit",
+            json={"payload": {"name": "Ariel", "observation": "edited"}},
+        ).status_code, 200)
+        group = _open_group(w["groups"], w["project_id"], a, b, rejected, superseded)
 
         response = _approve(w["client"], w["project_id"], group.group_id)
 
         self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()
-        t_step = _step_by(payload, terminal.id)
-        self.assertEqual(t_step["status"], "skipped")
-        self.assertIsNone(t_step["action"])
-        self.assertIsNone(t_step["memory_id"])
+        for terminal in (rejected, superseded):
+            t_step = _step_by(payload, terminal.id)
+            self.assertEqual(t_step["status"], "skipped")
+            self.assertIsNone(t_step["action"])
+            self.assertIsNone(t_step["memory_id"])
         # terminal 멤버는 판정 대상이 아니다.
         judged = {candidate_id for candidate_id, _ in judge.calls}
-        self.assertNotIn(terminal.id, judged)
+        self.assertNotIn(rejected.id, judged)
+        self.assertNotIn(superseded.id, judged)
 
     def test_a_judge_failure_marks_the_step_failed_and_ends_the_pass(self):
         """D4=A — ProviderError는 그 step=failed·패스 종료, 응답은 200(부분 실패 가시)."""
