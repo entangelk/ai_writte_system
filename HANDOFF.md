@@ -60,6 +60,20 @@
 - **검색과 리랭커.** 벡터(Chroma/BGE-m3-ko) + lexical(ES/nori)을 RRF(`1/(k+rank)`, k=60)로 융합하고 리랭커는 **그 뒤에** 걸린다. **★ 리랭커 표기는 세 조각이고 "있음" 한 단어로 쓰면 거짓이다** — *"외부 API 리랭커 붙일 수 있음(**기본 꺼짐**) · self-host 미구현 · **품질 평가 미실시**"*. `RERANK_API_URL` 이 비면 조립이 감싸지 않고 검색은 RRF까지만으로 동작한다. **실패는 열려 있다(fail-open) — 프로바이더가 아니라 *단계 전체*가 그렇다**(순열 아닌 응답·텍스트 투영 예외 포함). 다만 **조용히 삼키지 않는다**(`logging.WARNING` + `exc_info`) — fail-open이 조용하면 리랭킹이 영원히 no-op인 채로 아무도 모른다.
 - **회귀 기준선**: backend **test-mongo ON 2803 passed / 1 skipped / 3189 subtests**(2026-09-04 베타). **skip 1 = live Chroma**이며 **전수 판정은 `passed` 가 아니라 `skip` 수를 먼저 본다.** **★ 최상위 [`README.md`](README.md) 절차 표의 `N passed / N subtests` 는 아무 가드도 안 잡는다** — 기준선을 갱신하는 슬라이스가 그 한 줄도 함께 고친다.
 
+## 표준 제약 (Active Decisions)
+
+완료 이력이 아니라 **앞으로의 작업을 구속하는 것**만. 근거는 각 [`docs/plans/*-decisions.md`](docs/plans/README.md).
+
+- **★ 정본을 나누는 것을 두려워하지 않는다**(2026-08-10 오너): *"서로 다른 섹션의 정본이면 정본은 몇 개가 되든 상관없어. **인덱싱만 제대로 되어 있고 연결만 되어 있으면**."* — 중복이 문제이지 분할이 문제가 아니다.
+- **아이디에이션·계획이 충돌하면 임의 구현 없이 오너 결정을 받는다.** 나중 요청이 기록된 결정과 충돌하면 **어느 쪽이 canonical인지 먼저 묻는다.**
+- **개발 단계**: "Gate 우선"은 끝났고 지금은 **Gate ↔ UI/UX 왕복**이 주축이다(2026-07-20 오너). MVP 단일 사용자 유예는 만료돼 **다중 사용자로 확장 중**이다(2026-07-26 오너, 정본 v1.7.49 = D0=A).
+- **구조**: monorepo + 독립 LLM Gateway/Worker, Application = FastAPI. **경계는 `project_id` 이며 모든 저장·검색·Gate·tool handler 가 강제한다.** frontend = React + TS + Vite, 서빙은 별도 compose 서비스(nginx), OpenAPI→TS 타입 생성 + 얇은 `fetch` 래퍼.
+- **제품명은 "에-라잇" 하나이고 대상은 화면만이 아니다**(D5). 새 서비스의 FastAPI `title=` 도 대상이고 오너가 정한 정확한 글자를 `_DECIDED_TITLES` 표에 더하는 것이 정상 경로다([`test_product_name.py`](tests/test_product_name.py) 가 세 서비스의 `app.title` 정확 일치와 옛 이름 재유입을 함께 단정한다). **★ 식별자는 표시명이 아니라 바꾸지 않는다**(`ai_writing_system` DB 이름 · npm 패키지명 · 이미지 이름). **★ 이력 문서는 대상이 아니다** — `HANDOFF.md`·`CHANGELOG.md`·`docs/` 에 옛 이름이 남는 것은 맞다(그것이 그때의 사실이다).
+- **Core SOT**: offset = **raw Unicode code point**, `content_hash` = **raw UTF-8 SHA-256**. `source_ref` span 은 단일 `source_block` 안에 든다. persistence 는 Mongo transaction 이 기본이고 **non-transaction fallback 은 single-writer local/test 전용**이다.
+- **memory 는 append-only.** AI 가 직접 덮어쓰지 않고 검색·대조·Gate·검토·versioned upsert 를 거친다. **canonical 만 `memory_vectors` 에 색인**하며 트리거는 async outbox→worker 다. **semantic 매칭은 off 가 기본.**
+- **taxonomy 3종**(`character_observation`·`event_observation`·`open_question_observation`), provenance 는 `source_observed`·`ai_inferred`.
+- **★ agent loop 계약층은 더 진행하지 않는다**(tool-call parsing·wire format 미계약). **sub-agent spawn 없이 bounded flat loop 만.**
+
 ## 함정 (모르면 시간을 잃는 것들)
 
 **기동·환경**
