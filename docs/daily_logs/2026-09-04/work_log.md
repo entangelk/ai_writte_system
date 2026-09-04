@@ -144,3 +144,65 @@ stale 멤버 제외 · 가시 <2 ungrouped · project 격리 · detail 동등 ·
   + VM1 재실측으로 물림 확인 — **Slice 4 착수 전에**. H1~H4는 폐쇄 세션에서 함께 볼 것(계획·SoT 한 줄
   또는 셀).
 - 푸시는 오너 몫. test-mongo는 띄운 채 남김(`docker compose -f docker-compose.test.yml down`으로 정리).
+
+---
+
+# Work Log — 2026-09-04 세션 3 (identity group Slice 3 검증 조건 B1 폐쇄 + 하드닝 H1~H4, 베타)
+
+## Goals
+
+- 오너 지시("검증기록 확인해서 보강할 부분 보강해줘") — 독립 검증
+  `verifications/2026-09-04/identity_group_slice_3.md`(판정 **조건부 합격**, 커밋 `73d1b10`)의
+  차단 B1 폐쇄 + 비차단 하드닝 4건(H1~H4) 반영. Slice 2의 세션 7(2026-09-03)과 같은 흐름.
+
+## Completed work
+
+### B1 폐쇄(커밋 `0ff8d13`)
+
+- **셀 `test_rationale_ignores_relations_to_members_outside_the_roster`** — probe
+  `repro_rationale_out_of_roster.py`의 본체를 그대로 셀로 옮겼다(검증 기록이 제안한 폐쇄 방식):
+  trio 그룹 {a,b,c}에서 b reject → 가시 {a,c}로 그룹 생존(≥2)·`group_member_ids` 교차 검증까지
+  단정하고, **a-b same relation의 상대 b가 가시 roster 밖이므로 a의 근거는 `null`**임을 잠근다.
+- **VM1 재실측**(검증 기록의 정확한 diff — relation 양끝 roster_set 필터 제거): **2 failed**
+  (B1 셀 + edit 셀) — 13 passed로 입증됐던 무셀 축이 닫혔다.
+
+### 하드닝 H1~H4
+
+- **H1(동률 tie-break 방향)** — 셀 `test_rationale_tie_breaks_by_the_larger_pair_id`: 클록을
+  전진하지 않고(같은 `created_at`) focal과 두 파트너의 same relation을 기록하면 **큰 id 파트너의
+  relation이 이긴다**(focal 고정 시 pair 튜플의 대소 = 파트너 id 대소라 런타임 산출으로 단정).
+  변이 MH1(비교 반전 `>`→`<`)에 2 failed(동률 셀+최신 선택 셀). 방향을 계획·SoT 리터럴에
+  "동률은 큰 pair id 승리"로 명문화.
+- **H2(edit 이탈 원인)** — 셀 `test_edited_member_leaves_the_group_roster`: edit의 승격은 새
+  후보 id로 나가고 원본은 superseded → roster {a,c}·근거 null. confirm(기존 셀)·reject(기존
+  셀)·edit(신규) 열거의 문서-셀 대응이 완결됐다.
+- **H3(타 type relation 방어)** — 셀 `test_rationale_ignores_relations_of_another_candidate_type`:
+  `candidate_type=EVENT`로 기록된 relation이 character roster 후보 id를 참조해도 근거가 되지
+  않는다(그룹 자체는 member 행으로 생존). 변이 MH3(필터 제거)에 1 failed. 계획·SoT에 근거 한 줄
+  반영 — 판정 경로는 같은 type pool만 짝짓지만 저장 면이 이 행을 거부하지 않으므로 읽기면의 방어.
+- **H4(이중 소속 규칙 명문화)** — 코드만 존재하던 "non-closed 그룹 둘에 동시 소속 시 오래된
+  그룹 first"(병합 생존 규칙과 같은 순서, 결정성 방어)를 계획·SoT에 기재. 셀은 만들지 않았다
+  (세션 1 결정 유지 — 서비스 불변식 밖 상태에 대한 잠금은 over-speculation).
+
+### 회귀(세션 3)
+
+- focused: **17 passed**(13+4). OpenAPI 무변(셀만 추가 — 응답 선언 무변, 재덤프 불요).
+- 전수(test-mongo healthy 확인 후 개시): **2758 passed / 1 skipped / 3135 subtests, exit 0,
+  2256.74초**. **검산**: 2754(세션 1 기준선) + 4셀 = 2758 ✓, subtest 3135 = 3134 + 1(검증
+  기록 279건째의 문서 가드 subTest — 인덱스 등재 후 green) ✓, skip 1 = chroma 관례 ✓.
+- 문서 편집은 전수 완료 **뒤에** 했다 — 검증 기록 §6가 관측한 함정(전수 창 중 문서 가드가
+  디스크를 봄)을 그대로 밟지 않기 위해.
+
+## Decisions
+
+- **B1·H1~H3은 셀로, H4는 문서로 닫았다** — H4의 방어는 서비스 불변식 밖 상태용이므로 셀을
+  만들면 그 상태를 계약으로 승격하는 모양이 된다. 검증 권고("한 줄 추가하거나 방어 제거 결정")에서
+  한 줄 쪽을 택했다.
+- **검증 기록의 "README ② 낡은 수수" Outstanding도 이번 마감에 함께** 갱신했다(2702/3132 →
+  2758/3135) — 검증이 "다음 문서 마감 때 함께 맞추면 된다"고 지정한 시점이 바로 이 세션이다.
+
+## Next steps
+
+- **Slice 4(그룹 거절 액션) 착수** — B1 폐쇄로 길이 열렸다. 착수 시 짧은 결정 브리프: 활동 로그
+  남길지 여부(계획이 명시적으로 열어둠).
+- 푸시는 오너 몫.

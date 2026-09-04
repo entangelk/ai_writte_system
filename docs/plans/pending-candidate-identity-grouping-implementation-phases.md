@@ -176,15 +176,32 @@ project 격리, stale group member 정리, OpenAPI/`schema.d.ts` 재생성을 �
   `group_member_ids`/`group_size`에 싣지 않는다. **가시 멤버 < 2인 그룹은 ungrouped로 읽는다.**
   저장 멤버십은 이 판단으로 불변(member `member_status` 수명 확정은 Slice 4·5).
 - **`identity_rationale_summary`는 이 후보와 가시 roster를 잇는 `same` relation 중 최신**
-  (`created_at`·동률 pair id 순)의 rationale을 200자 절단 — 상한은 활동 로그 "짧은 값"
-  (`ACTIVITY_VALUE_MAX_CHARS`)·장면 메모 목록 미리보기(`SCENE_NOTE_PREVIEW_MAX_CHARS`)와 같은 값이다.
-  same relation이 없으면 `null`(없는 사실을 지어내지 않는다).
+  (`created_at` 순, **동률은 큰 pair id 승리** — 검증 H1 폐쇄로 방향 명문화)의 rationale을 200자 절단 —
+  상한은 활동 로그 "짧은 값"(`ACTIVITY_VALUE_MAX_CHARS`)·장면 메모 목록
+  미리보기(`SCENE_NOTE_PREVIEW_MAX_CHARS`)와 같은 값이다. same relation이 없으면 `null`(없는 사실을
+  지어내지 않는다). **근거 relation의 양끝은 모두 가시 roster 안** — 상대가 이탈한 same relation은
+  근거가 될 수 없다(검증 B1 폐쇄). relation `candidate_type`이 그룹 type과 다른 행도 근거가 될 수
+  없다(검증 H3 — 저장 면이 이 행을 거부하지 않으므로 읽기면의 방어).
 
 셀 13종(`tests/test_review_inbox_identity_groups.py` — create_app에 identity group 서비스를 주입해
 시드). **OpenAPI/`schema.d.ts` 무변** — review-inbox 응답이 `dict[str, object]`로 선언돼 additive payload가
 선언 schema에 나타나지 않는다(경계 `4ace6c4`↔작업 트리 덤프 바이트 동일, md5 `10978d55…`·384,414B —
 Slice 2 검증이 확정한 지문. 프론트 생성물 재생성 불요). 변이 9종 기명 재실패(표는 work_log 세션 1).
 전수 **2754/1/3134**(+13셀, 1804.50초).
+
+**검증 조건 폐쇄(2026-09-04, SoT v1.8.26):** 독립 검증
+[`verifications/2026-09-04/identity_group_slice_3.md`](../verifications/2026-09-04/identity_group_slice_3.md)
+판정 **조건부 합격** — 구현 주장 전부(전수 산술·OpenAPI 경계 대조·셀 13·변이 재유도 5종·RED 선행)가
+재현됐다. 차단 **B1**(가시 roster 밖 pair의 근거 차단 무셀 — 검증자 변이 VM1이 13 passed로 입증)은 셀
+1개로 폐쇄(커밋 `0ff8d13`) — `test_rationale_ignores_relations_to_members_outside_the_roster`(trio에서
+1명 reject 후 가시 2명 유지·근거 `null`). VM1 재실측 **2 failed**(B1 셀+edit 셀). 하드닝 4종도 같이
+반영 — **H1** 동률 tie-break 방향(큰 pair id 승리)을 위 리터럴에 명문화+셀
+`test_rationale_tie_breaks_by_the_larger_pair_id`(변이 MH1 반전에 2 failed) · **H2** stale 이탈 세 번째
+원인 edit(원본 superseded) 셀 `test_edited_member_leaves_the_group_roster`(confirm·reject·edit 열거의
+문서-셀 대응 완결) · **H3** 타 type relation의 근거 배제를 위 리터럴에 기재+셀
+`test_rationale_ignores_relations_of_another_candidate_type`(변이 MH3에 1 failed) · **H4** 이중 non-closed
+소속 시 "오래된 그룹 first"(결정성 방어, 셀 없음)를 명문화. 폐쇄 후 전수 **2758/1/3135**(2256.74초;
+검산 2754+4셀, subtest +1 = 검증 기록의 문서 가드 subTest).
 
 ## Slice 4 — 그룹 거절 액션
 
