@@ -40,6 +40,52 @@ def _links_in(index: Path) -> list[str]:
     return _LINK_RE.findall(index.read_text(encoding="utf-8"))
 
 
+# 계획 문서 머리의 상태 선언. `상태:` 와 `Status:` 를 모두 받고, 굵게·백틱은 껍데기다.
+_STATUS_LINE_RE = re.compile(r"^\**(?:상태|Status)\**\s*[:：]\s*(.{0,90})", re.M | re.I)
+
+# 인덱스 표의 `| [`문서`](링크) | 설명 | 상태 |` 행에서 문서명과 상태 칸을 뽑는다.
+_STATUS_ROW_RE = re.compile(
+    r"^\| \[`([^`]+\.md)`\]\([^)]*\) \| [^|]* \| ([^|]*) \|", re.M
+)
+
+# 이 저장소가 **실제로 쓰고 있는** 어휘다. 통일하지 않은 것은 의도이며(오너 2026-08-06 —
+# 검증 판정 어휘 소급 정리 없음), 새 값을 쓰려면 여기 먼저 더한다. 긴 것이 짧은 것을
+# 가리지 않도록 **긴 순서로** 본다(`구현 완료` 가 `완료` 보다 먼저).
+_STATUS_VOCABULARY: tuple[str, ...] = (
+    "이행됨",
+    "구현 완료",
+    "Partially",
+    "Discussion",
+    "Implemented",
+    "Proposed",
+    "Resolved",
+    "Approved",
+    "Reviewed",
+    "Verified",
+    "Planned",
+    "Active",
+    "Draft",
+    "Done",
+    "확정",
+    "완료",
+)
+
+
+def _token_of(status: str) -> str | None:
+    """상태 문자열의 **선두 토큰**만 돌려준다(꼬리 서술은 자유롭게 둔다)."""
+
+    stripped = status.strip().strip("*`·— ")
+    for word in _STATUS_VOCABULARY:
+        if stripped.lower().startswith(word.lower()):
+            return word
+    return None
+
+
+def _leading_status_token(document: Path) -> str | None:
+    match = _STATUS_LINE_RE.search(document.read_text(encoding="utf-8"))
+    return _token_of(match.group(1)) if match else None
+
+
 def _assert_all_reachable(
     case: unittest.TestCase, index: Path, documents: set[Path], what: str
 ) -> None:
@@ -83,6 +129,68 @@ class PlansIndexTest(unittest.TestCase):
 
     def test_every_index_link_resolves(self) -> None:
         _assert_links_resolve(self, self.index)
+
+    def test_every_plan_document_declares_a_status(self) -> None:
+        """모든 계획 문서가 **머리에 상태를 선언한다**(어휘는 `_STATUS_VOCABULARY`).
+
+        왜 필요한가 — 2026-09-05 전수에서 **13개 문서가 `Draft`·`Proposed`·`Discussion`
+        에 두 달 넘게 멈춰 있었다**. 그중 12개가 기술한 시스템은 구현·독립 검증까지
+        끝난 상태였고, 실제 진행이 `*-decisions.md` 브리프로 옮겨가면서 부모 계획의
+        상태 마커만 안 따라간 것이다. 인덱스 가드는 **도달 가능성**만 봤기 때문에
+        전부 통과했다 — 문서는 찾아지는데 **그 문서가 지금 무엇인지는 아무도 안 봤다**.
+
+        상태 어휘를 새로 통일하지 **않은 것은 의도다**(오너 2026-08-06 선례 — 검증 판정
+        어휘를 소급 정리하지 않기로 했다). 이 셀이 요구하는 것은 통일이 아니라 **선언**
+        이며, 기존 표현(`Resolved`·`확정`·`구현 완료` …)을 그대로 받는다.
+        """
+
+        missing = sorted(
+            path.name
+            for path in _PLANS.glob("*.md")
+            if _leading_status_token(path) is None
+        )
+        self.assertEqual(
+            missing,
+            [],
+            f"상태를 선언하지 않은 계획 문서 {len(missing)}건 — 머리에 "
+            "`상태: <어휘>` 를 적는다. 인식되는 어휘는 tests/test_docs_indexes.py 의 "
+            f"_STATUS_VOCABULARY: {', '.join(_STATUS_VOCABULARY)}",
+        )
+
+    def test_the_index_status_column_matches_the_document(self) -> None:
+        """인덱스 상태 열과 문서 안 상태가 **같은 것을 말한다**.
+
+        이 저장소에는 상태 정본이 둘이다 — 문서 머리의 `상태:` 줄과 이 인덱스의 상태
+        열. 2026-09-05 실측에서 **120행 중 23행이 갈라져 있었다**(예: 스키마 중복
+        전수조사가 인덱스에서는 *"구현 대기"* 인데 문서는 *"시행 완료 2026-09-03"*).
+        둘을 묶지 않으면 한쪽만 고치는 일이 반복된다. 선례는 `_COUNT_CLAIMS`(주장↔디스크)
+        와 `test_design_token_provenance`(스크립트↔CSS)다.
+
+        **양방향**:
+          · under-strict — 문서 상태를 바꾸고 인덱스를 안 고치면 실패한다(이번 병).
+          · over-strict — 그 반대도 실패한다. 그리고 **꼬리는 자유다**: 비교 대상은
+            선두 토큰뿐이라 인덱스가 `Resolved — D1=A(2026-08-05)` 처럼 자세히 적는
+            것은 통과해야 한다. 전체 문자열 일치로 조이면 그 자유가 사라지고, 인덱스가
+            요약을 못 실어 **읽는 자리로서 쓸모가 없어진다.**
+        """
+
+        rows = _STATUS_ROW_RE.findall(self.index.read_text(encoding="utf-8"))
+        self.assertGreater(len(rows), 100, "인덱스 표 파싱이 깨졌다")
+        drifted: list[str] = []
+        for name, cell in rows:
+            document = _PLANS / name
+            if not document.is_file():
+                continue
+            in_file = _leading_status_token(document)
+            in_index = _token_of(cell)
+            if in_file != in_index:
+                drifted.append(f"{name}: 문서={in_file} · 인덱스={in_index}")
+        self.assertEqual(
+            drifted,
+            [],
+            f"상태가 갈라진 행 {len(drifted)}건 — 문서와 인덱스는 같은 상태를 말해야 "
+            "한다(꼬리 서술은 달라도 된다)",
+        )
 
 
 class VerificationsIndexTest(unittest.TestCase):
