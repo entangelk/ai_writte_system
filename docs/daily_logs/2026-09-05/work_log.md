@@ -232,3 +232,118 @@
 
 - HANDOFF Next Tasks 1번 = **정체성 그룹 Slice 5 독립 검증**(독립 개체가 수행).
 - 코드 세션이 열리면 함께 볼 것: `actions.py:173` 주석 수치 정정.
+
+---
+
+# 세션 3 — docs 고아 전수 + 서비스 정책 문서 등재
+
+## Goals
+
+- 오너 지시 둘: ① *"docs 내 md파일들이 많잖아… draft로 남아져 있는 md들도 있는걸로 봐서 지금
+  작업에서 제외된 고아 파일들이 있는거같거든? 그거좀 확인해주고"* ② *"핸드오프에 서비스 정책 계약
+  정리문서 하나 만들어두면 좋을것 같다 (있는지 모르겠지만 찾아보고 만들자)라고 해줘"*.
+- 병행: 다른 AI 에이전트가 읽기 전용 보안 분석 중(오너 고지). 트리 충돌 없음.
+
+## Completed work
+
+커밋 **`a343c12`**. HANDOFF 240 → 244줄. 프로덕션 코드 0줄.
+
+### 방법 — "고아"의 정의를 두 번 고쳤다
+
+1차 정의(*어디서도 참조되지 않은 md*)로는 **502건 중 0건**이 나왔다. daily_logs·verifications 가
+과거에 모든 것을 한 번씩 인용하기 때문에 basename 매칭이 전부 걸린 것이다. 그래서 정의를
+**"살아 있는 문서 그래프에서 끊어진 것"**(날짜 기록을 참조자에서 제외)으로 좁혔고 **1건**이 나왔다.
+그것도 오너가 본 신호(`Draft` 상태)와는 다른 축이라, 세 번째로 **상태 마커 + 커밋 이력**을 함께 봤다.
+**교훈: "고아"는 링크만으로 정의되지 않는다** — 링크는 살아 있는데 *상태가 죽은* 문서가 훨씬 많았다.
+
+### 찾은 것
+
+**① 부모 계획 12건이 `Draft` 에 멈춰 있다** ← 오너가 본 것
+`00-foundations` · `01-core-sot` · `02-analysis-pipeline` · `03-indexing` · `04-agentic-search` ·
+`05-writing-ai` · `06-review-ui` · `07-conversational-authoring` · `08-member-request-quota` ·
+`implementation-plan` · `product-shell` · `flat-loop-gate` · `llm-gateway`(Proposed) ·
+`analysis-memory-taxonomy`(Discussion). 마지막 손댄 날이 **2026-06-24~08-02** 다.
+**이들이 기술한 시스템은 대부분 구현·독립 검증까지 끝났는데** 실제 진행이 `*-decisions.md` 브리프로
+옮겨가면서 부모 계획의 상태 마커만 안 따라갔다. **[`plans/README.md`](../../plans/README.md) 자신도
+`Status: Draft`** 다 — 인덱스가 초안이다.
+
+**② 인덱스 어디에도 없는 디렉터리 1개**
+`docs/verification_briefs/2026-06-24/`(3건). `verifications/` 로 대체된 초기 실험이며, 참조자가
+2026-06-24 daily_log 와 같은 날 검증 기록 셋뿐이다. **살아 있는 문서 그래프에서 완전히 끊긴 유일한
+파일**(`llm_gateway_f1_f2_live_smoke.md`)이 여기 있다.
+
+**③ 한 번 쓰고 멈춘 디렉터리 2개**
+`benchmarks/2026-07-15`(1건) · `live_review_briefs/2026-07-18`(2건). **인덱싱은 돼 있다**
+([`docs/README.md`](../../README.md) "서비스/운영" 행이 가리킨다) — 관행이 `verifications/`·
+`daily_logs/` 로 흡수된 것이지 버려진 것은 아니다. 고아가 아니라 **휴면**으로 분류했다.
+
+**④ 배너 없는 아이디에이션 원본 4건 — 가장 위험한 축**
+`contracts.md` · `analysis_pipeline.md` · `agentic_search_flow.md` · `writing_agent_prompt.md` 는
+2026-06-24 1커밋이고 제목이 옛 제품명(*"Personal Writing AI System"*)이다. **`chat-revision-ideation.md`
+는 *"승격됨(2026-07-09) … 아이디에이션 원본으로 보존"* 배너를 달고 있는데 이 넷은 아무 표시가 없다.**
+특히 **`docs/contracts.md` 는 이름이 `system-contract-sot.md` 와 혼동돼**, 신규 작업자가 6월 계약을
+현재형으로 읽을 수 있다(본문이 `## 1.1 MongoDB Is the Source of Truth` 처럼 단정형이다).
+
+**⑤ 낡은 수치·인덱스 누락**
+- [`docs/README.md:11`](../../README.md) *"브리프 96개"* → 실측 **100**. 최상위 `README.md` 의 같은
+  주장은 `test_docs_indexes.py` 의 `_COUNT_CLAIMS` 가 잡는데 **이 줄은 가드 밖**이다.
+- `chat-revision-ideation.md`·`dogfood-checklist.md` 가 문서 지도 미등재. 후자는 HANDOFF 가 실제로
+  가리키는 살아 있는 문서다.
+- (검증 기록 280건은 가드에 묶여 있고 실측과 일치했다.)
+
+**오탐 정정**: 처음에 `Status:` 줄 grep 으로 *"상태 표기 없음 4건"* 을 집었는데, 확인해 보니
+`embedding-adapter`·`reranker`·`script-rot-guard`·`router-split-shared-prelude` 넷 다 **인용문 형태로
+`Resolved` 를 명시**하고 있었다. 형식이 다를 뿐 결함이 아니라 보고에서 뺐다.
+
+### 서비스 정책 계약 문서 — 찾아봤고 없다
+
+`이용약관|개인정보|요금|가격|정책 계약|terms|privacy` 로 전수 검색했으나 **"이 서비스가 회원에게
+무엇을 약속하는가"를 한 장으로 답하는 문서가 없다.** 정책이 브리프 8~9개와 SoT 절에 흩어져 있다:
+
+| 정책 축 | 지금 어디 |
+|---|---|
+| 요청 한도·정지 | `08-1`·`08-3`·`08-5` 브리프 + SoT |
+| 승인제 가입 | `auth-signup-approval-decisions.md` |
+| 삭제·파기, 이름 보존 | `auth-d8-6-purge-ui-decisions.md` · `08-2c` |
+| 관리자 열람·승격 | `multi-user-auth-cms-decisions.md` |
+| 원고 길이 상한 | D5-2(SoT v1.8.7) |
+| 광고 | AdSense(오너 결정 2026-08-26) |
+| **원고가 외부 LLM API 로 나간다는 고지** | **없음** |
+| **데이터 보존 기간 · 계정 삭제 시 처리** | **없음** |
+
+HANDOFF **Next Tasks 8번**으로 등재하며 세 가지를 함께 적었다: 흩어진 자리 · 아직 아무 데도 없는 것
+둘 · **약관/개인정보처리방침(오너 정본)과의 관계** — 이 문서는 그 법적 문서의 *입력*이지 대체물이
+아니고, **값의 정본은 계속 SoT·브리프**이며 이 문서는 한 장 요약 + 포인터다(값을 복사하면 두 번째
+정본이 된다).
+
+## Issues found
+
+- **문제**: 문서의 **상태 마커에는 아무 가드도 없다.** `test_docs_indexes.py` 는 등재 여부와 링크
+  해석을 강제하지만 *"이 계획이 아직 Draft 인가"* 는 안 본다.
+  **원인**: 인덱스 가드는 도달 가능성을 위해 만들어졌고 신선도는 범위 밖이었다.
+  **처리**: 고치지 않고 HANDOFF "열린 것" 표에 선택지 셋(ⓐ 배너만 ⓑ `archive/` 이동 ⓒ 그대로)과
+  함께 등재했다 — 어느 쪽이든 **오너 판단**이고, 12건을 임의로 `Resolved` 로 바꾸는 것은 결정을
+  대신 쓰는 일이다.
+- **문제**: `docs/README.md:11` 의 브리프 수가 가드 밖이라 낡았다(96 vs 100).
+  **처리**: 미수리 표에 등재. 고치려면 `_COUNT_CLAIMS` 에 그 줄을 더하는 것이 정석이다(값만 고치면
+  같은 병이 재발한다).
+
+## Decisions
+
+- **"고아"를 링크가 아니라 *상태*로 정의했다.** 근거: 링크 기준으로는 502건 중 1건뿐이라 오너가 본
+  현상을 설명하지 못한다. 실제 문제는 **살아 있는 링크 + 죽은 상태**의 조합이었다.
+- **아무것도 지우거나 옮기지 않았다.** 근거: 브리프·계획은 "왜 그렇게 정했는가"의 유일한 출처이고
+  (`test_docs_indexes.py` 머리말이 그 이유를 적고 있다), 이동·통폐합은 별도 오너 판단이다.
+- **서비스 정책 문서를 이번에 쓰지 않고 등재만 했다.** 근거: 내용의 절반(외부 전송 고지·보존 기간·
+  계정 삭제 처리)이 **오너 정책 결정이 없으면 쓸 수 없다.** 지금 쓰면 구현자가 정책을 대신 정하게 된다.
+
+## Verification
+
+- md 502건 전수 참조 그래프(md·py·ts·yml·json 소스에서 `*.md` 인용 수집) + 상태 마커 + `git log`.
+- HANDOFF 깨진 링크 **0건** · `test_docs_indexes.py` **13 passed / 290 subtests**.
+- 프로덕션 코드 0줄, 문서 삭제·이동 0건.
+
+## Next steps
+
+- 오너 판단: 부모 계획 12건 상태 마커 처리(ⓐ/ⓑ/ⓒ) · 서비스 정책 문서의 정책 공백 셋.
+- HANDOFF Next Tasks 1번(정체성 그룹 Slice 5 독립 검증)은 그대로 대기.
