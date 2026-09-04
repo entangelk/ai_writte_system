@@ -227,3 +227,68 @@ stale 멤버 제외 · 가시 <2 ungrouped · project 격리 · detail 동등 ·
 - **멱등은 상태 유도** — 요청 body 없음(개별 reject와 대칭). "같은 key 재전송"="같은 엔드포인트
   재호출", "다른 key"="새 호출"이고 둘 다 changed=0·행위 재발 없음. 명시적 key 필드는 단계별 진행을
   저장하는 Slice 5에서만 필요.
+
+## Completed work
+
+- 착수 결정 브리프 작성·오너 확정(A안 — 그룹 행 1줄):
+  [`pending-candidate-identity-grouping-slice4-activity-log-decisions.md`](../plans/pending-candidate-identity-grouping-slice4-activity-log-decisions.md).
+  브리프의 실측 선례: 일괄 승격(`candidates_auto_promoted`)=배치당 1행·변경 시에만 / 개별
+  거절=후보당 1행·replay에도 무조건(중복 가능 — N3와 같은 결의).
+- 구현(커밋 `4b0d907` + 셀 보강 `1b41177`):
+  `services/application/app/analysis/identity_group_review.py`(신규 서비스 — 저장 멤버십 × 개별
+  reject 경로의 오케스트레이션), `routers/analysis.py` 신규 엔드포인트, `main.py` 조립(신규
+  `create_app` 파라미터 없음), `activity/actions.py` 분류표 등재(검토 결정 9→10), 프론트
+  `activityActions.ts`(라벨 "정체성 그룹 거절"+비링크 사유), `schema.d.ts` 재생성(gen:api —
+  path·operation 각 1), 카운트 가드 3곳 갱신(분류표 28·tier 행렬 75/101·라벨 28행).
+- 리터럴·셀 상세는 구현 페이즈 문서 Slice 4 완료 기록에 있다(중복 기록 아님 — 이곳은 흐름만).
+- 셀 10종(`tests/test_identity_group_reject.py`, RED 선행 — 라우트 부재 상태에서 행동 셀 5개
+  실패 확인 후 구현): 전체 거절(역순 added_at·고정 클록 — 결정성 잠금)·일부 terminal skip·완료
+  재호출 no-op·unknown/cross-project/closed/missing-project 404·contradicted 허용·활동 행
+  모양(그룹 행 1줄·`after`="rejected=2, skipped=1"·멤버별 행 부재)·no-op 무기록.
+
+### 변이 표 (9종 — 8종 기명 재실패, 1종 관측 동등)
+
+| 변이 | 위치(file:line 근사) | 재실패 셀 |
+|---|---|---|
+| M1 상태 필터 반전(`is not`→`is`) | `identity_group_review.py` 멤버 루프 | full·terminal·replay·contradicted·활동행 **5셀** |
+| M2 결과 분류를 무조건 `rejected.append` | `identity_group_review.py` 분기 | **관측 동등(10 passed)** — 상태 필터가 changed를 보장하는 방어선(auto_promote의 같은 지점) |
+| M3 closed 체크 제거 | `identity_group_review.py` | closed 404 **1셀** |
+| M4 closed 체크를 `is not OPEN`으로(contradicted 차단) | `identity_group_review.py` | contradicted **1셀**(과잉 방향) |
+| M5 라우터 `if result.rejected:` 제거(항상 기록) | `routers/analysis.py` | no-op 무기록·replay **2셀** |
+| M6 라우터 action 리터럴 → `candidate_rejected` | `routers/analysis.py` | 활동행 셀 + 분류표 literal subtest **2건** |
+| M7 `idempotent_replay` 항상 False | `identity_group_review.py` | replay **1셀** |
+| M8 `sorted()` 제거 | `identity_group_review.py` | **1차 관측 동등(10 passed)** → 원인: in-memory 아이디가 순차 생성이라 시드 순=아이디 순, 클록 미주입 시 ms 절단 동률이 아이디 tie-break로 붕괴 → 셀 보강(고정 클록·역순 added_at, 커밋 `1b41177`) 후 재실측 **1 failed**(full 셀) |
+| M9 404 매핑에서 `CandidateIdentityGroupNotFoundError` 제거 | `routers/analysis.py` | unknown·cross-project·closed **3셀** |
+
+## Issues found
+
+- **프론트 전수 기존 결함 2건(이 슬라이스 범위 밖)** — `npm test` 401/403에서 `typeScale.test.ts`
+  (마이그레이션 목록 49↔54)·`designTokens.test.ts`(`--type-body` 소비·미정의) 2건 실패. 내 프론트
+  변경(activityActions.ts·schema.d.ts)을 HEAD~1로 되돌려 재실행해도 동일 실패 — **세션 시작
+  시점(6cb6abc)부터 있던 결함**이다. 최근 CSS-건드린 슬라이스가 프론트 전수를 돌리지 않은 채
+  마감했거나(프론트 무변경 슬라이스는 전수를 생략하는 관례), 디자인 시스템 가드가 그 사이 드리프트.
+  문제/원인/조치: 이 슬라이스에서 고치지 않고(범위 밖 — 디자인 시스템 축) 여기에 기록으로 남긴다.
+  다음 프론트를 만지는 슬라이스(Slice 6 grouped UI)가 가장 먼저 볼 후보다.
+- **전수 1차 실측 오염** — 문서 인덱스 미등재(신규 브리프)로 `test_docs_indexes` 5셀 실패 + 요약
+  6 failed. 인덱스 등재(plans README 행 + 루트 README 118→119·98→99) 후 해당 모듈 green 확인,
+  최종 전수로 다시 잰다(아래 회귀). 1차 요약의 outcomes 산술(2766+6+1=2773 > 채택 2769)은
+  tail-4 로그로 원인 기록이 소실돼 재구성 불가 — 최종 실측이 정본이다.
+
+### 회귀(세션 4)
+
+- focused: 10 passed(RED 선행 5 failed → 구현 후 green). 활동 가드 3모듈 31 passed/126 subtests.
+  auth 행렬 132 passed/1010 subtests(75/101 카운트 갱신 반영). broader(identity 4종+candidate_review
+  +활동+admin surface) 149 passed/229 subtests.
+- OpenAPI: operation **101** 실측(신규 path `/projects/{project_id}/analysis/review-inbox/groups/
+  {group_id}/reject`), `schema.d.ts` 재생성 diff는 path+operation 각 1(덤프는 `/tmp/openapi_new.json`).
+- 최종 전수(test-mongo healthy 확인·문서 인덱스 등재 후 개시): **2768 passed / 1 skipped /
+  3159 subtests, exit 0, 1710.99초(28:30)**. 검산: 2758(Slice 3 기준선) + 10셀 = 2768 ✓,
+  skip 1 = chroma 관례 ✓, subtest 3135 + 24 = 신규 operation 1건이 auth 행렬·분류표·라벨·
+  오류 선얩 잠금·문서 인덱스의 라우트/문서 열거 가드에 더한 subtest들이다.
+- 프론트 전수: **401 passed / 2 failed / 403** — 2 실패는 위 Issues의 기존 결함(HEAD~1 재현 확인).
+
+## Next steps
+
+- 이 슬라이스의 독립 검증은 검증 가이드 절차대로 별도 세션이 한다(구현자 자기 검증 아님).
+- Slice 5(그룹 승인 액션) — 활동 로그 모양은 이번 A안 결정에 묶여 있다(그룹 행 1줄·변경 시에만).
+- 푸시는 오너 몫.
