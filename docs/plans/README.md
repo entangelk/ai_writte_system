@@ -6,7 +6,7 @@
 
 서비스 경계와 확정된 계약을 먼저 볼 때는 [`../system-contract-sot.md`](../system-contract-sot.md)를 정본 SoT로 사용한다. 이 인덱스는 Phase별 세부 계획과 **모든 착수 결정 브리프**를 찾는 자리다.
 
-> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(118개 중 98개)는
+> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(119개 중 99개)는
 > `*-decisions.md` 착수 결정 브리프이며, **오너 결정의 근거 기록**이다. 파일명 접두 체계는 이미 무너져
 > 있고(`00`~`07` 계열 + 접두 없는 최근 것들) 파일명만으로는 트랙을 알 수 없다 — 그래서 아래는 **접두가
 > 아니라 트랙으로** 묶었다. 디렉터리 재편은 아직 결정되지 않은 별개 사안이다(HANDOFF 추적 부채).
@@ -72,7 +72,8 @@
 | [`02b-7-character-alias-homonym-decisions.md`](02b-7-character-alias-homonym-decisions.md) | 2B.7 character 별칭/동명이인 semantic 보강 | 브리프 |
 
 | [`pending-candidate-identity-grouping-decisions.md`](pending-candidate-identity-grouping-decisions.md) | 서로 다른 분석 job의 미승인 후보 정체성 그룹·그룹 승인 | **확정 — C 채택**(2026-09-02 dogfood) |
-| [`pending-candidate-identity-grouping-implementation-phases.md`](pending-candidate-identity-grouping-implementation-phases.md) | C 채택 후 미승인 후보 identity group 구현 슬라이스 분할 | Active — **Slice 0 완료·검증 B1 폐쇄**(2026-09-02, SoT v1.8.18), Slice 1(shortlist·판정 서비스) 다음 |
+| [`pending-candidate-identity-grouping-implementation-phases.md`](pending-candidate-identity-grouping-implementation-phases.md) | C 채택 후 미승인 후보 identity group 구현 슬라이스 분할 | Active — **Slice 0~4 완료**(2026-09-04, SoT v1.8.27 — Slice 4 그룹 거절), Slice 5(그룹 승인) 다음 |
+| [`pending-candidate-identity-grouping-slice4-activity-log-decisions.md`](pending-candidate-identity-grouping-slice4-activity-log-decisions.md) | Slice 4 착수 브리프 — 그룹 거절의 활동 로그 모양 | **확정 — A 채택**(2026-09-04, 그룹 행 1줄·변경 시에만) |
 
 ### Phase 3 — 파생 색인
 

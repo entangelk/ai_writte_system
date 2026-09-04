@@ -1,10 +1,10 @@
-"""분석 도메인 route (``/projects/{project_id}/analysis*`` 21 operation).
+"""분석 도메인 route (``/projects/{project_id}/analysis*`` 22 operation).
 
 ``main.py`` 의 ``create_app()`` 에서 옮겨온 register 함수(R1). handler 본문은
 byte-동일이다.
 
 **유료 2경로** 가 섞여 있다 — ``run`` · ``compare`` 가
-``_REQUIRE_PROJECT_OWNER_BILLABLE`` (소유권 → 시행 순서) 이고 나머지 19경로는
+``_REQUIRE_PROJECT_OWNER_BILLABLE`` (소유권 → 시행 순서) 이고 나머지 20경로는
 ``_REQUIRE_PROJECT_OWNER`` 다. 그 순서가 곧 "404·403 은 무과금" 이며
 ``BillableRouteWiringTest`` 가 route 선언에서 직접 잰다(요청 구동 테스트로는
 안 보이는 자리다).

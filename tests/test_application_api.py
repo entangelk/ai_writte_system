@@ -2586,6 +2586,10 @@ class AnalysisErrorContractDeclarationTest(unittest.TestCase):
         ("/projects/{project_id}/analysis/review-inbox", "get"): {"401", "403", "404", "503"},
         ("/projects/{project_id}/analysis/review-inbox/{candidate_id}", "get"):
             {"401", "403", "404", "503"},
+        # 정체성 그룹 Slice 4(2026-09-04): 그룹 거절 배치 판단. member 상태는
+        # 409를 내지 않는다(terminal은 skip) — 얼굴은 소유·존재·저장소뿐이다.
+        ("/projects/{project_id}/analysis/review-inbox/groups/{group_id}/reject",
+         "post"): {"401", "403", "404", "503"},
         ("/projects/{project_id}/analysis/gate-findings", "get"): {"401", "403", "404", "503"},
         ("/projects/{project_id}/analysis/gate-findings/{finding_id}", "get"):
             {"401", "403", "404", "503"},
@@ -2603,7 +2607,7 @@ class AnalysisErrorContractDeclarationTest(unittest.TestCase):
         return {code for code in responses if code not in ("200", "204", "422")}
 
     def test_declared_error_statuses_match_the_lock_list(self):
-        self.assertEqual(len(self.EXPECTED), 21)
+        self.assertEqual(len(self.EXPECTED), 22)
         for (path, method), expected in self.EXPECTED.items():
             with self.subTest(path=path, method=method):
                 self.assertEqual(self._declared(path, method), expected)

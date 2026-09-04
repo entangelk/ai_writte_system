@@ -1,9 +1,9 @@
 # 미승인 후보 정체성 그룹 — 구현 페이즈
 
-상태: `Active — Slice 0~3 완료, Slice 4(그룹 거절) 다음`
+상태: `Active — Slice 0~4 완료, Slice 5(그룹 승인) 다음`
 작성: 2026-09-02
 결정 정본: [`pending-candidate-identity-grouping-decisions.md`](pending-candidate-identity-grouping-decisions.md) — **C 채택**
-계약 정본: [`../system-contract-sot.md`](../system-contract-sot.md) v1.8.25
+계약 정본: [`../system-contract-sot.md`](../system-contract-sot.md) v1.8.27
 
 ## 목적과 완료 기준
 
@@ -203,7 +203,7 @@ Slice 2 검증이 확정한 지문. 프론트 생성물 재생성 불요). 변�
 소속 시 "오래된 그룹 first"(결정성 방어, 셀 없음)를 명문화. 폐쇄 후 전수 **2758/1/3135**(2256.74초;
 검산 2754+4셀, subtest +1 = 검증 기록의 문서 가드 subTest).
 
-## Slice 4 — 그룹 거절 액션
+## Slice 4 — 그룹 거절 액션 · **완료(2026-09-04, SoT v1.8.27)**
 
 **범위:** `POST /projects/{pid}/analysis/review-inbox/groups/{group_id}/reject` 계열의 그룹 거절만 추가한다.
 기존 `/analysis/review-queue|review-inbox` 패밀리에 맞춘다. 그룹 승인은 아직 없다. 예상 operation 수는
@@ -214,6 +214,38 @@ Slice 2 검증이 확정한 지문. 프론트 생성물 재생성 불요). 변�
 
 **검증:** 전체 거절, 일부 terminal skip, 같은 key 재전송, 다른 key로 이미 rejected 재호출, project/group
 404, 401/403, 활동 로그를 남길지 여부는 이 Slice 착수 시 짧은 결정 브리프로 확인한다.
+
+**완료 기록(2026-09-04):** 착수 브리프
+[`pending-candidate-identity-grouping-slice4-activity-log-decisions.md`](pending-candidate-identity-grouping-slice4-activity-log-decisions.md)
+— **A 채택(그룹 행 1줄)**. `analysis/identity_group_review.py`(`CandidateIdentityGroupReviewService`·
+`GroupRejectResult`)·`routers/analysis.py`(엔드포인트)·`main.py`(조립 — 신규 `create_app` 파라미터
+없음, 이미 주입된 서비스들의 순수 조합)로 구현(커밋 `4b0d907`·셀 보강 `1b41177`, SoT v1.8.27).
+operation 100→**101** 실측(tier 행렬 75/101), `schema.d.ts` 재생성(gen:api). 이 Slice가 확정한 리터럴 —
+
+- **멤버 판정은 후보 상태 기계만 본다** — 저장 멤버십에서 `needs_review`만 거절하고 terminal
+  (confirmed·rejected·superseded) 전 종류는 skip한다. 승격 여부(`is_candidate_promoted`)는 보지
+  않는다(개별 reject와 같은 면 — 승격된 needs_review 후보도 거절되며 canonical은 append-only라
+  그대로 남는다). 응답은 `{group_id, rejected[], skipped[], idempotent_replay}`이고 두 목록은 후보
+  id 정렬이다(어댑터와 무관한 결정성 — 변이 M8이 무셀임을 발견해 고정 클록·역순 added_at 셀로 잠금).
+- **멱등은 상태에서 유도한다**(요청 body 없음 — 개별 reject와 대칭) — 완료된 그룹의 재호출은
+  skipped 전체·rejected 공백·`idempotent_replay=true`, 부수효과 재발 없음. "같은 key 재전송"과
+  "다른 key 재호출"이 같은 관측으로 붕괴한다(명시적 key는 단계별 진행을 저장하는 Slice 5).
+- **closed 그룹은 404**, `contradicted`는 거절된다(읽기면 정본과 같은 순서).
+- **그룹·멤버 행은 바꾸지 않는다** — 이것이 이 Slice의 member 수명 결정이다: 멤버십은 append-only
+  참조, 수명은 후보 상태로 표현, 가시성은 roster 교집합(Slice 3)이 정리한다. `member_status` 신규
+  값 없음(Slice 0 "유일 literal `active`" 유지).
+- **부분 실패(스토리지 503)는 전역 handler로 넘긴다**(개별 reject와 같은 모양) — 각 멤버 쓰기가
+  독립적·멱등이라 재호출이 끝난 멤버를 skip하며 이어간다. 단계별 진행 저장은 Slice 5.
+- **활동 로그는 그룹 행 1줄**(브리프 A안) — `identity_group_rejected`·target_type
+  `candidate_identity_group`·`after`="rejected=N, skipped=M", **변경≥1일 때만**(일괄 승격
+  `if promoted:` 선례). 멤버별 `candidate_rejected` 행은 남기지 않는다. 분류표 logged 27→**28**
+  (검토 결정 10), 프론트 라벨 "정체성 그룹 거절"+비링크 사유 등재. 이 결정은 Slice 5 그룹
+  승인의 기록 모양에도 묶는다. 이 슬라이스의 기록 배선은 전수 가드(존재)·활동 행 셀(모양)·변이
+  M5/M6(조건·리터럴)이 잠근다.
+
+셀 10종(`tests/test_identity_group_reject.py`)·뮤테이션 9종 중 8종 기명 재실패(1종 관측 동등 —
+결과 기반 분류의 방어선; M2). 401/403은 기존 전수 행렬이 자동으로 잠근다(project tier 75/101
+카운트만 갱신). 전수·프론트 수치는 work_log 2026-09-04 세션 4에 실측으로 남긴다.
 
 ## Slice 5 — 그룹 승인 액션
 
