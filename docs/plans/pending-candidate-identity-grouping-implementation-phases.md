@@ -1,9 +1,9 @@
 # 미승인 후보 정체성 그룹 — 구현 페이즈
 
-상태: `Active — Slice 0~4 완료, Slice 5(그룹 승인) 다음`
+상태: `Active — Slice 0~4 완료·검증 폐쇄, Slice 5(그룹 승인) 다음`
 작성: 2026-09-02
 결정 정본: [`pending-candidate-identity-grouping-decisions.md`](pending-candidate-identity-grouping-decisions.md) — **C 채택**
-계약 정본: [`../system-contract-sot.md`](../system-contract-sot.md) v1.8.27
+계약 정본: [`../system-contract-sot.md`](../system-contract-sot.md) v1.8.28
 
 ## 목적과 완료 기준
 
@@ -247,6 +247,23 @@ operation 100→**101** 실측(tier 행렬 75/101), `schema.d.ts` 재생성(gen:
 결과 기반 분류의 방어선; M2). 401/403은 기존 전수 행렬이 자동으로 잠근다(project tier 75/101
 카운트만 갱신). 전수·프론트 수치는 work_log 2026-09-04 세션 4에 실측으로 남긴다.
 
+**검증 조건 폐쇄(2026-09-04, SoT v1.8.28):** 독립 검증
+[`verifications/2026-09-04/identity_group_slice_4.md`](../verifications/2026-09-04/identity_group_slice_4.md)
+판정 **조건부 합격** — 구현 주장 전부(전수 산술·OpenAPI·등재 5곳·변이 재유도 8/9종·RED 산술·
+프론트 결함 사전존재)가 재현됐다. 차단 2건은 같은 날 셀로 폐쇄(커밋 `c9b2e36`) —
+**B1** superseded skip 무셀(검증자 변이 VM-A가 skip을 confirmed·rejected 두 값 열거로 좁혀도
+10 passed; 그 좁힘 아래 superseded 멤버 포함 그룹은 `InvalidCandidateStateTransition`이 그룹
+라우터 catch 밖으로 새어 배치 mid-flight로 죽는다 — 검증 실측) → 셀
+`test_superseded_members_are_skipped_like_other_terminal_states`(probe P1 본체; VM-A 재실측
+**1 failed**) · **B2** "승격 여부는 보지 않는다" 무셀(승격+needs_review 멤버의 거절·canonical
+잔존을 잠그는 셀이 전 suite에 없었다 — 방어가 구조적일 뿐) → 셀
+`test_promoted_members_are_still_rejected_and_canonical_survives`(probe P2 본체; 승격 스킵
+드리프트 변이 — 서비스에 memory 주입+승격 멤버 skip — 재실측 **1 failed**). 비차단 하드닝 —
+**H1** mid-loop 스토리지 실패→503·재호출 이어가기 셀(리터럴 ⑤가 skip 셀·개별 멱등 셀에서
+유도적으로만 성립)은 **Slice 5에 이관**한다(단계별 진행 저장 스펙이 근접 — 아래 Slice 5 참조) ·
+**H2** 셀 10의 RED 우연 통과(라우트 부재 시 before==after)를 셀 docstring에 표시. 폐쇄 후
+전수 수치는 work_log 2026-09-04 세션 5에 실측으로 남긴다.
+
 ## Slice 5 — 그룹 승인 액션
 
 **범위:** C 채택의 핵심인 그룹 승인 orchestration을 만든다. UI는 아직 없다.
@@ -260,6 +277,11 @@ step을 재실행하지 않는다.
 **검증:** 첫 후보 승격, 둘째 후보 update/add_evidence/no_change/conflict 4분기, 중간 실패 뒤 재시도,
 같은 key replay, 그룹 revision mismatch 409, canonical 중복 생성 방지를 잠근다. 이 Slice는 가장 위험하므로
 focused 뒤 analysis compare/apply broader suite를 함께 돌린다.
+
+**이관(Slice 4 검증 H1, 2026-09-04):** mid-loop 스토리지 실패→503·재호출 이어가기 셀을 여기서
+함께 만든다 — Slice 4 리터럴 ⑤("재호출이 끝난 멤버를 skip하며 이어간다")가 skip 셀·개별 멱등
+셀에서 유도적으로만 성립해서다(그룹 루프를 관통하는 발화 셀 없음 — 검증 기록 §H1). 단계별 진행
+저장 스펙이 근접하므로 이 슬라이스의 자연스러운 일부다.
 
 ## Slice 6 — grouped Inbox UI
 

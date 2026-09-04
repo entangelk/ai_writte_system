@@ -339,3 +339,78 @@ stale 멤버 제외 · 가시 <2 ungrouped · project 격리 · detail 동등 ·
   착수 — 기록 모양은 A안에 묶임.
 - 프론트 결함 2건은 Slice 6 착수 전 먼저 볼 것.
 - 푸시는 오너 몫. test-mongo는 띄운 채 남김.
+
+---
+
+# Work Log — 2026-09-04 세션 6 (identity group Slice 4 검증 조건 B1·B2 폐쇄 + 하드닝 반영, 베타)
+
+## Goals
+
+- 오너 지시("검증기록 확인해서 보강할 부분 보강해줘") — 독립 검증
+  `verifications/2026-09-04/identity_group_slice_4.md`(판정 **조건부 합격**, 커밋 `a71c942`)의
+  차단 B1·B2 폐쇄 + 비차단 하드닝 2건(H1·H2) 반영. Slice 3의 세션 3과 같은 흐름.
+
+## Completed work
+
+### B1 폐쇄 — superseded skip 셀(커밋 `c9b2e36`)
+
+- **셀 `test_superseded_members_are_skipped_like_other_terminal_states`** — probe P1 본체 이식.
+  그룹 {a, b}에서 b를 edit(원본 superseded — Slice 3 H2 셀이 읽기면에서 이미 시드하는 도달 가능
+  상태) → 거절 → 200, rejected=[a], skipped=[b]. 기존 셀 2가 confirmed·rejected만 시드해서
+  리터럴 ①의 "terminal 전 종류" 세 번째 값이 무셀이었다(검증 변이 VM-A가 10 passed로 입증).
+- **VM-A 재실측 1 failed**(이 셀) — skip을 `in (CONFIRMED, REJECTED)`로 좁히는 과잉 교정이
+  이제 문다. 검증이 실측한 귀결(그 좁힘 아래 superseded 멤버가 `InvalidCandidateStateTransition`을
+  그룹 라우터 catch 밖으로 흘려 배치 mid-flight로 죽임)을 셀 docstring에 기록.
+
+### B2 폐쇄 — 승격 무시 셀(같은 커밋)
+
+- **셀 `test_promoted_members_are_still_rejected_and_canonical_survives`** — probe P2 본체 이식.
+  개별 promote 경로로 a 승격(상태 needs_review 유지 — `memory/service.py`가 도메인 문서로 명시) →
+  그룹 거절 → 200, rejected=[a,b], skipped=[] + **canonical 잔존**(`is_candidate_promoted` True).
+  `_build`가 memory를 돌려주게 수정(unpack 12곳 갱신).
+- **승격 스킵 드리프트 변이 재실측 1 failed**(이 셀) — 서비스에 memory 주입+승격 멤버 skip을
+  더하는 실제 미래 드리프트(검증이 "주입해서 검사 넣는 날 아무 셀도 물지 않는다"고 지적한 형태)
+  를 2파일 변이로 재현해 물림 확인.
+
+### 하드닝 반영
+
+- **H1(mid-loop 503·재호출 이어가기 셀)은 Slice 5에 이관** — 리터럴 ⑤가 skip 셀·개별 멱등 셀에서
+  유도적으로만 성립하는데, 단계별 진행 저장 스펙이 근접한 Slice 5의 자연스러운 일부다. 계획 문서
+  Slice 5 섹션에 이관 줄 추가.
+- **H2(셀 10 RED 우연 통과)** — 셀 docstring에 표시(라우트 부재 시 before==after로 통과 —
+  구현 세션 RED "5 failed" 산술과 정확히 일치하는 사실). 조치 불필요(검증 판정).
+
+### 변이 표 (세션 6 — 재실측 2종, 전부 기명 재실패)
+
+| 변이 | 위치 | 재실패 셀 |
+|---|---|---|
+| VM-A skip을 `in (CONFIRMED, REJECTED)`로(검증자 변이) | `identity_group_review.py` | B1 셀 **1 failed** |
+| MB2 서비스에 memory 주입+승격 멤버 skip(승격 스킵 드리프트 본체) | `identity_group_review.py`·`main.py` 2파일 | B2 셀 **1 failed** |
+
+복원 후 focused **12 passed**·`git status --short` clean 확인. (MB2 복원 시 pathspec 오타로
+1차 checkout이 실패한 것을 재복원으로 닫고 재확인했다.)
+
+### 회귀(세션 6)
+
+- focused: **12 passed**(10+2). OpenAPI·생성물·등재 무변(셀만 추가).
+- 전수(test-mongo healthy 확인·개시): **2770 passed / 1 skipped / 3160 subtests, exit 0,
+  2533.07초**. 검산: 2768(세션 4 기준선) + 2셀 = 2770 ✓, skip 1 = chroma 관례 ✓,
+  subtest 3159 + 1 = 검증 기록(280번째)의 문서 가드 subTest — 검증자가 인덱스 등재를
+  마친 뒤라 세션 4 실측(3159)에 없던 것이다 ✓.
+
+## Decisions
+
+- **B2 변이는 "드리프트 본체"를 재현했다** — 현재 서비스가 memory를 주입받지 않아 승격 스킵을
+  한 줄 변이로 표현할 수 없으므로, 검증이 예측한 미래 변경(memory 주입+skip)을 그대로 적용해
+  셀이 물리는 것을 실측했다. 셀의 dict 동등성 단정이 어떤 구현으로든 a를 rejected에서 빼는
+  방향을 잡는다.
+- **H1을 고치지 않고 Slice 5로 이관** — 검증 권고대로. 지금 셀을 만들면 503 발화를 위한
+  스토리지 fake 주입이 슬라이스 범위를 넘고, 진행 저장 스펙이 같이 설계되는 Slice 5에서 만들면
+  같은 축을 한 벌로 잠긴다(유예 항목엔 트리거를 붙인다 — 계획 문서 참조).
+
+## Next steps
+
+- **Slice 5(그룹 승인 액션) 착수** — B1·B2 폐쇄로 길이 열렸다. 활동 로그 모양은 A안에 묶임.
+  H1 이관 셀(mid-loop 503·재호출 이어가기)도 이 슬라이스에서 함께.
+- 프론트 결함 2건(typeScale·designTokens)은 Slice 6 착수 전 먼저 볼 것(세션 4·검증 모두 확인).
+- 푸시는 오너 몫.
