@@ -1,6 +1,6 @@
 # Phase 3. Indexing
 
-상태: `Draft`  
+상태: **이행됨 — 설계 근거로 보존**. vector/lexical 색인과 재색인 outbox 는 구현·운영 중이다.  
 선행 조건: Phase 1 정본 pointer/version, Phase 2 검색 대상 후보 계약  
 후속 소비자: Agentic Search
 

@@ -1,6 +1,6 @@
 # Product Shell. 프로젝트와 원고 작업 공간
 
-상태: `Draft`  
+상태: **이행됨 — 설계 근거로 보존**. 프로젝트 관리·원고 작업 공간·내보내기는 구현·검증 완료다(그 뒤 Chapter/Scene 계층과 설정 탭 개편이 얹혔다 — 화면 지도는 HANDOFF).  
 적용 범위: Phase 1의 프로젝트/원고 저장 위에 구축하고 Phase 2~6의 상태와 기능을 한 작업 공간으로 연결
 
 구현 진행: SoT v1.6.99에서 Product shell A, v1.7.1~v1.7.5에서 Writing C와 Review Inbox B를 완료했다. 2026-07-18 dogfood 뒤 SoT v1.7.9에서 Writing Workspace V2 방향을 확정하고 v1.7.10 W0 exact contract/migration/schema, v1.7.11~12 W1 editor+docked right rail/source deep-link와 검증 closure, v1.7.13 W2 ProjectBrief onboarding+canonical overview를 완료했다. 다음은 W3 ordered unit/명시 intent다. 전체 Product shell 수용 기준이 남아 본 문서 상태는 `Draft`를 유지한다.

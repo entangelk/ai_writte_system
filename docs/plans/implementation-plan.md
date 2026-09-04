@@ -1,6 +1,6 @@
 # 구현 계획
 
-상태: `Draft`  
+상태: **이행됨 — 설계 근거로 보존**. 여기 적은 배포 경계·구현 순서는 Phase 1~9 로 이행됐다. 현재 상태는 [`../system-contract-sot.md`](../system-contract-sot.md) 변경이력과 [`../../HANDOFF.md`](../../HANDOFF.md) 를 본다.  
 목표: 현재 계획을 실제 개발 가능한 vertical slice와 검증 gate로 변환한다.
 
 ## 승인된 아키텍처 결론

@@ -1,6 +1,6 @@
 # LLM Gateway와 Gemma 12B Q4 계획
 
-상태: `Proposed`  
+상태: **이행됨 — 설계 근거로 보존**. LLM Gateway 는 구현·운영 중이며 키 폴백 taxonomy 까지 SoT v1.8.0 에 등재됐다.  
 참조 구현: `/mnt/d/devel/gemma4_12b` commit `485c4e2fe78323c408fcb64d08c2cdc9ec94f9e3`
 
 참조 구현의 기준 모델은 `google/gemma-4-12B-it-qat-q4_0-gguf`, quant tag `Q4_0`이다. RTX 3050 6GB에서 GPU/CPU 하이브리드 실행을 목표로 `llama.cpp` CUDA server, context 8192, parallel slot 1을 기본 설정으로 둔다. 이 값은 참조 설정이며 현재 프로젝트 환경의 실측 완료값은 아니다.

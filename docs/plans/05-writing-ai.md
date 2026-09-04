@@ -1,6 +1,6 @@
 # Phase 5. Writing AI
 
-상태: `Draft`  
+상태: **이행됨 — 설계 근거로 보존**. 생성·Gate·revise·accept 는 구현·독립 검증 완료다.  
 선행 조건: Phase 4 ContextPackage와 Context Gate  
 후속 소비자: Editor, 저장/분석 재진입, Review UI
 

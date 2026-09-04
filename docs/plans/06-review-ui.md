@@ -1,6 +1,6 @@
 # Phase 6. Review UI
 
-상태: `Draft`  
+상태: **이행됨 — 설계 근거로 보존**. Review Inbox 는 구현·독립 검증 완료다.  
 선행 조건: Phase 2 후보/상태 전이, Phase 5 editor 연동  
 후속 가치: Project Memory Console, Gate review 운영
 

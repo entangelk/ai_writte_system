@@ -2,6 +2,8 @@
 
 # Personal Writing AI System Contracts
 
+> **이 문서는 2026-06 설계 원본이다 — 현재 계약 정본이 아니다.** 확정된 계약은 [`system-contract-sot.md`](system-contract-sot.md) 를 본다. **다만 폐기되지 않았다**: 프로덕션 코드가 이 문서를 **절 번호로 인용**하므로(`context_search/service.py` §1.3 · `indexing/memory_lexical_index.py` §1.3) **절 번호와 절 제목을 바꾸지 말 것.** 여기 적힌 서술은 *그때의 설계 근거*로 읽는다.
+
 Version: `0.1.0-draft`  
 Status: `ideation / architecture draft`  
 Primary SOT: `MongoDB`  

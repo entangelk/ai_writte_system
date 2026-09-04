@@ -1,6 +1,6 @@
 # Phase 2. Analysis Pipeline
 
-상태: `Draft` — Phase 2A kickoff subset approved on `2026-06-29`  
+상태: **이행됨 — 설계 근거로 보존**. Phase 2A 분석 파이프라인은 구현·독립 검증 완료다(그 뒤 정체성 그룹 트랙이 얹혔다).  
 선행 조건: Phase 1 snapshot/block/source_ref 계약. update-aware 분석은 Phase 3~4도 필요  
 후속 소비자: Indexing, Agentic Search, Review UI
 

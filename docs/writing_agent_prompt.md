@@ -2,6 +2,8 @@
 
 # Personal Writing AI System — Writing Agent Prompt Design
 
+> **이 문서는 2026-06 설계 원본이다 — 현재 계약 정본이 아니다.** 확정된 계약은 [`system-contract-sot.md`](system-contract-sot.md) 를 본다. **다만 폐기되지 않았다**: 프로덕션 코드가 이 문서를 **절 번호로 인용**하므로(`writing/prompt.py` §6.1·§8.1·§17.1 · `writing/models.py` §5.2·§9.1 · `context_search/item_render.py` §2.2) **절 번호와 절 제목을 바꾸지 말 것.** 여기 적힌 서술은 *그때의 설계 근거*로 읽는다.
+
 Version: `0.1.0-draft`  
 Status: `architecture draft`  
 Depends on:

@@ -1,6 +1,6 @@
 # 개인 글쓰기 AI 개발 계획
 
-상태: `Draft`  
+상태: **Active — 유지되는 인덱스**  
 기준 원본: [`../abstract.md`](../abstract.md)  
 목적: 2,000여 줄의 전체 초안을 실제 개발 전에 검토하고 확정할 수 있는 Phase 단위 계획으로 재구성한다.
 
@@ -30,15 +30,15 @@
 
 | 문서 | 무엇 | 상태 |
 |---|---|---|
-| [`00-foundations.md`](00-foundations.md) | 제품 경계와 전 Phase 공통 원칙 | Draft |
-| [`implementation-plan.md`](implementation-plan.md) | 배포 경계, 구현 순서, 단계별 검증 | Draft |
-| [`product-shell.md`](product-shell.md) | 프로젝트/원고 작업 공간, 내보내기 | Draft |
+| [`00-foundations.md`](00-foundations.md) | 제품 경계와 전 Phase 공통 원칙 | 이행됨 |
+| [`implementation-plan.md`](implementation-plan.md) | 배포 경계, 구현 순서, 단계별 검증 | 이행됨 |
+| [`product-shell.md`](product-shell.md) | 프로젝트/원고 작업 공간, 내보내기 | 이행됨 |
 | [`gemma4-reuse.md`](gemma4-reuse.md) | 기존 `gemma4_12b`의 재사용 범위와 보강점 | Reviewed |
-| [`llm-gateway.md`](llm-gateway.md) | Gemma Q4 서빙 경계와 실모델 검증 | Proposed |
-| [`flat-loop-gate.md`](flat-loop-gate.md) | flat agent loop 종료 decision·tool registry·budget·completion criteria | Draft(숫자 한도 확정) |
-| [`analysis-memory-taxonomy.md`](analysis-memory-taxonomy.md) | 분석 대상과 저장 단위 논의안 | Discussion |
+| [`llm-gateway.md`](llm-gateway.md) | Gemma Q4 서빙 경계와 실모델 검증 | 이행됨 |
+| [`flat-loop-gate.md`](flat-loop-gate.md) | flat agent loop 종료 decision·tool registry·budget·completion criteria | 이행됨 |
+| [`analysis-memory-taxonomy.md`](analysis-memory-taxonomy.md) | 분석 대상과 저장 단위 논의안 | 이행됨 |
 | [`product-readiness-backlog.md`](product-readiness-backlog.md) | 트리거가 올 때 하나씩 닫는 횡단 개선 백로그(새 Phase 아님) | Active |
-| [`contract-schema-duplication-audit-decisions.md`](contract-schema-duplication-audit-decisions.md) | 8개 LLM 호출부의 에코/결정적 필드/호출 분산 전수조사 | 확정 - 구현 대기 |
+| [`contract-schema-duplication-audit-decisions.md`](contract-schema-duplication-audit-decisions.md) | 8개 LLM 호출부의 에코/결정적 필드/호출 분산 전수조사 | 확정 · **시행 완료(2026-09-03, SoT v1.8.20)** — 남은 축은 호출 분산(D) 분석 |
 | [`router-split-and-admin-separation-decisions.md`](router-split-and-admin-separation-decisions.md) | `main.py` 라우터 분해(**register 함수**) + 관리자 주소 분리(**ⓑ 별도 compose 서비스**) | **Resolved** — R1·A1(2026-08-05) · 구현 대기 |
 | [`router-split-shared-prelude-decisions.md`](router-split-shared-prelude-decisions.md) | 공유 prelude 추출(라우터가 `..main` 을 안 보게) — H-3-A 순환 폐쇄 · 이동 134 정의/956줄 실측 | **Resolved·구현 완료**(2026-08-06, §5=ⓑ 범주 3분할 — `app/api/models.py`·`errors.py`·`dependencies.py`) |
 
@@ -46,13 +46,13 @@
 
 | 문서 | 무엇 | 상태 |
 |---|---|---|
-| [`01-core-sot.md`](01-core-sot.md) | 저장·버전·snapshot·block·source reference | Draft |
+| [`01-core-sot.md`](01-core-sot.md) | 저장·버전·snapshot·block·source reference | 이행됨 |
 
 ### Phase 2A — 최초 분석
 
 | 문서 | 무엇 | 상태 |
 |---|---|---|
-| [`02-analysis-pipeline.md`](02-analysis-pipeline.md) | 최초 추출과 기존 기억 대조·갱신 후보 | Draft(2A subset Approved) |
+| [`02-analysis-pipeline.md`](02-analysis-pipeline.md) | 최초 추출과 기존 기억 대조·갱신 후보 | 이행됨 |
 | [`02-analysis-kickoff-decisions.md`](02-analysis-kickoff-decisions.md) | 2A 착수 결정 | Approved |
 | [`02-analysis-job-state-decisions.md`](02-analysis-job-state-decisions.md) | job/task 상태 전이 | Approved |
 | [`02-analysis-runner-execution-decisions.md`](02-analysis-runner-execution-decisions.md) | runner 실행 경계 | Approved |
@@ -66,10 +66,10 @@
 | [`02b-2-analysis-context-package-decisions.md`](02b-2-analysis-context-package-decisions.md) | 2B.2 prior-memory 검색용 ContextPackage(⑧) | Implemented(v1.6.41) |
 | [`02b-3-analysis-compare-action-decisions.md`](02b-3-analysis-compare-action-decisions.md) | 2B.3 compare→action 판정과 scope key | Resolved |
 | [`02b-4-memory-versioned-upsert-decisions.md`](02b-4-memory-versioned-upsert-decisions.md) | 2B.4 proposal→memory versioned upsert | Resolved |
-| [`02b-4-review-queue-persistence-decisions.md`](02b-4-review-queue-persistence-decisions.md) | 2B.4 후속 — conflict review queue 영속화 | 브리프 |
-| [`02b-5-memory-vector-reindex-decisions.md`](02b-5-memory-vector-reindex-decisions.md) | 2B.5 memory→vector 재색인 | 브리프 |
-| [`02b-6-semantic-identity-resolution-decisions.md`](02b-6-semantic-identity-resolution-decisions.md) | 2B.6 event/open_question 의미적 identity resolution | 브리프 |
-| [`02b-7-character-alias-homonym-decisions.md`](02b-7-character-alias-homonym-decisions.md) | 2B.7 character 별칭/동명이인 semantic 보강 | 브리프 |
+| [`02b-4-review-queue-persistence-decisions.md`](02b-4-review-queue-persistence-decisions.md) | 2B.4 후속 — conflict review queue 영속화 | Resolved |
+| [`02b-5-memory-vector-reindex-decisions.md`](02b-5-memory-vector-reindex-decisions.md) | 2B.5 memory→vector 재색인 | Resolved |
+| [`02b-6-semantic-identity-resolution-decisions.md`](02b-6-semantic-identity-resolution-decisions.md) | 2B.6 event/open_question 의미적 identity resolution | Resolved |
+| [`02b-7-character-alias-homonym-decisions.md`](02b-7-character-alias-homonym-decisions.md) | 2B.7 character 별칭/동명이인 semantic 보강 | Resolved |
 
 | [`pending-candidate-identity-grouping-decisions.md`](pending-candidate-identity-grouping-decisions.md) | 서로 다른 분석 job의 미승인 후보 정체성 그룹·그룹 승인 | **확정 — C 채택**(2026-09-02 dogfood) |
 | [`pending-candidate-identity-grouping-implementation-phases.md`](pending-candidate-identity-grouping-implementation-phases.md) | C 채택 후 미승인 후보 identity group 구현 슬라이스 분할 | Active — **Slice 0~4 완료·검증 폐쇄**(2026-09-04, SoT v1.8.28 — Slice 4 그룹 거절), Slice 5(그룹 승인) 다음 |
@@ -80,7 +80,7 @@
 
 | 문서 | 무엇 | 상태 |
 |---|---|---|
-| [`03-indexing.md`](03-indexing.md) | Chroma/Elasticsearch 파생 인덱스와 동기화 | Draft |
+| [`03-indexing.md`](03-indexing.md) | Chroma/Elasticsearch 파생 인덱스와 동기화 | 이행됨 |
 | [`03-indexing-kickoff-decisions.md`](03-indexing-kickoff-decisions.md) | Phase 3 착수 | Approved |
 | [`03-index-sync-outbox-decisions.md`](03-index-sync-outbox-decisions.md) | 3B automatic sync/outbox | Approved |
 | [`03-index-worker-retry-decisions.md`](03-index-worker-retry-decisions.md) | 3B worker/retry 실행 경계 | Approved |
@@ -89,26 +89,26 @@
 
 | 문서 | 무엇 | 상태 |
 |---|---|---|
-| [`04-agentic-search.md`](04-agentic-search.md) | 검색 계획, 정본 재조회, ContextPackage | Draft |
+| [`04-agentic-search.md`](04-agentic-search.md) | 검색 계획, 정본 재조회, ContextPackage | 이행됨 |
 | [`04-agentic-search-kickoff-decisions.md`](04-agentic-search-kickoff-decisions.md) | Phase 4 착수 | Approved |
 | [`04-context-package-completion-decisions.md`](04-context-package-completion-decisions.md) | ContextPackage 완성(§8 C / §5 B) | Resolved |
 | [`04-shared-vector-index-decisions.md`](04-shared-vector-index-decisions.md) | 공유 in-process vector index | Approved |
 | [`04-real-vector-backend-decisions.md`](04-real-vector-backend-decisions.md) | 영속 vector 백엔드(Chroma). **cross-encoder 리랭커 유예의 출처** | Approved |
-| [`04-compose-elasticsearch-service-decisions.md`](04-compose-elasticsearch-service-decisions.md) | compose 전용 ES 서비스(배포 lexical/hybrid) | 브리프 |
-| [`04-es-lexical-backfill-decisions.md`](04-es-lexical-backfill-decisions.md) | ES-lexical backfill 스크립트 | 브리프 |
-| [`04-worker-compose-outbox-bookkeeping-decisions.md`](04-worker-compose-outbox-bookkeeping-decisions.md) | index-sync worker compose 서비스 + outbox per-target bookkeeping | 브리프 |
+| [`04-compose-elasticsearch-service-decisions.md`](04-compose-elasticsearch-service-decisions.md) | compose 전용 ES 서비스(배포 lexical/hybrid) | Resolved |
+| [`04-es-lexical-backfill-decisions.md`](04-es-lexical-backfill-decisions.md) | ES-lexical backfill 스크립트 | Resolved |
+| [`04-worker-compose-outbox-bookkeeping-decisions.md`](04-worker-compose-outbox-bookkeeping-decisions.md) | index-sync worker compose 서비스 + outbox per-target bookkeeping | Resolved |
 | [`04-canonical-candidate-dedup-decisions.md`](04-canonical-candidate-dedup-decisions.md) | canonical↔candidate 승격 dedup | Resolved |
-| [`04-writing-canonical-context-decisions.md`](04-writing-canonical-context-decisions.md) | Writing ContextPackage에 canonical memory 포함 | 브리프 |
+| [`04-writing-canonical-context-decisions.md`](04-writing-canonical-context-decisions.md) | Writing ContextPackage에 canonical memory 포함 | Resolved |
 | [`04-writing-candidate-context-decisions.md`](04-writing-candidate-context-decisions.md) | `needs_review` candidate의 Writing 포함 | Resolved |
 | [`04-writing-candidate-retrieval-decisions.md`](04-writing-candidate-retrieval-decisions.md) | candidate lexical/vector retrieval | Resolved |
-| [`04-writing-memory-vector-retrieval-decisions.md`](04-writing-memory-vector-retrieval-decisions.md) | memory retrieval의 vector 확장 | 브리프 |
-| [`04-writing-memory-lexical-retrieval-decisions.md`](04-writing-memory-lexical-retrieval-decisions.md) | memory retrieval의 ES lexical 확장 | 브리프 |
+| [`04-writing-memory-vector-retrieval-decisions.md`](04-writing-memory-vector-retrieval-decisions.md) | memory retrieval의 vector 확장 | Resolved |
+| [`04-writing-memory-lexical-retrieval-decisions.md`](04-writing-memory-lexical-retrieval-decisions.md) | memory retrieval의 ES lexical 확장 | Resolved |
 
 ### Phase 5 — Writing AI
 
 | 문서 | 무엇 | 상태 |
 |---|---|---|
-| [`05-writing-ai.md`](05-writing-ai.md) | 컨텍스트 기반 생성과 Writing Gate | Draft |
+| [`05-writing-ai.md`](05-writing-ai.md) | 컨텍스트 기반 생성과 Writing Gate | 이행됨 |
 | [`05-writing-generation-decisions.md`](05-writing-generation-decisions.md) | 5.1 생성 첫 슬라이스 | Resolved |
 | [`05-writing-gate-decisions.md`](05-writing-gate-decisions.md) | 5.2 Writing Gate | Resolved |
 | [`05-writing-accept-decisions.md`](05-writing-accept-decisions.md) | 5.3 accept→save→analysis 재진입 | Resolved |
@@ -132,8 +132,8 @@
 
 | 문서 | 무엇 | 상태 |
 |---|---|---|
-| [`06-review-ui.md`](06-review-ui.md) | 후보 검토와 프로젝트 메모리 관리 UI | Draft |
-| [`06-review-inbox-backend-decisions.md`](06-review-inbox-backend-decisions.md) | Review Inbox 백엔드 착수 | 브리프 |
+| [`06-review-ui.md`](06-review-ui.md) | 후보 검토와 프로젝트 메모리 관리 UI | 이행됨 |
+| [`06-review-inbox-backend-decisions.md`](06-review-inbox-backend-decisions.md) | Review Inbox 백엔드 착수 | Resolved |
 | [`06-review-inbox-affordances-decisions.md`](06-review-inbox-affordances-decisions.md) | Review Inbox 액션 어포던스 | Resolved |
 | [`06-candidate-state-transition-decisions.md`](06-candidate-state-transition-decisions.md) | candidate 상태 전이 | Resolved |
 | [`06-candidate-edit-decisions.md`](06-candidate-edit-decisions.md) | candidate edit 백엔드 계약 | Resolved |
@@ -143,13 +143,13 @@
 
 | 문서 | 무엇 | 상태 |
 |---|---|---|
-| [`07-conversational-authoring.md`](07-conversational-authoring.md) | 대화형 수정·아이디에이션·저작 감독. 원본 [`../chat-revision-ideation.md`](../chat-revision-ideation.md) | Draft |
+| [`07-conversational-authoring.md`](07-conversational-authoring.md) | 대화형 수정·아이디에이션·저작 감독. 원본 [`../chat-revision-ideation.md`](../chat-revision-ideation.md) | Draft — 미착수 |
 
 ### Phase 8 — 회원별 요청 제한 · Billing Readiness (계획됨)
 
 | 문서 | 무엇 | 상태 |
 |---|---|---|
-| [`08-member-request-quota.md`](08-member-request-quota.md) | 회원별 **요청 횟수** quota·사용량 원장·관리자 CMS 백엔드·향후 결제 연결 seam | 상위 방향 승인 · 슬라이스별 브리프 대기 |
+| [`08-member-request-quota.md`](08-member-request-quota.md) | 회원별 **요청 횟수** quota·사용량 원장·관리자 CMS 백엔드·향후 결제 연결 seam | Planned — 상위 방향 승인 · 슬라이스별 브리프 대기 |
 | [`08-0-billable-request-boundary-decisions.md`](08-0-billable-request-boundary-decisions.md) | 8.0 — "서비스 요청 1회"의 코드 대응(차감 단위·내부 repair/라운드·fan-out·조회성 경로·논리 요청 동일성·전수 가드) | **Resolved** — B1~B6=A |
 | [`08-1-request-quota-policy-decisions.md`](08-1-request-quota-policy-decisions.md) | 8.1 — 한도 저장 계약(저장 위치·**일/주 이중 사용량 창**·창 파생/저장·기본과 override·무제한/정지 표현·변경 효력·기본값·구독 축 분리) | **Resolved** — P1~P8=확정, 구현 완료 |
 | [`08-2-usage-ledger-decisions.md`](08-2-usage-ledger-decisions.md) | 8.2 — 사용량 원장(행 필드와 삭제 내성·중복 방지 키·집계 정본·보존 기간·관리자 조정 표현). L6(이름 이력)·L7(5초 DB 잠금)은 **8.2c·8.2b로 분리** | **Resolved** — L1=B·L2~L5=A, 구현 완료(v1.7.85) |
@@ -163,7 +163,7 @@
 
 | 문서 | 무엇 | 상태 |
 |---|---|---|
-| [`09-service-activity-log.md`](09-service-activity-log.md) | 사용자 행위 기록(누가·언제·무엇을 바꿨는가). **`system_events`는 문서에만 있고 코드 0줄**이라는 실측 공백에서 출발한다. 8.2c §N2-a가 발원 | 페이즈 신설 확정(오너 2026-08-05) · **9.0 구현·검증 완료(2026-08-09)** · 부모 계획 |
+| [`09-service-activity-log.md`](09-service-activity-log.md) | 사용자 행위 기록(누가·언제·무엇을 바꿨는가). **`system_events`는 문서에만 있고 코드 0줄**이라는 실측 공백에서 출발한다. 8.2c §N2-a가 발원 | Done — 페이즈 신설 확정(오너 2026-08-05) · **9.0 구현·검증 완료(2026-08-09)** · 부모 계획 |
 | [`09-0-service-activity-log-decisions.md`](09-0-service-activity-log-decisions.md) | 9.0 — 착수 결정(저장 위치·**기록 범위**·문서 형태·**실패 방향**·조회 통로·보존·**쓰기 지점과 누락 가드**·원장 중복) | **Resolved(2026-08-09)** — A1~A8 확정 · 구현·검증 완료 · **A2 추가 확정 19→20**(`writing/accept`) |
 | [`09-1-activity-timeline-screen-decisions.md`](09-1-activity-timeline-screen-decisions.md) | 9.1 — 활동 타임라인 **화면** 착수 결정(화면의 자리 · **최신 100건 상한** · 행위자 표시 · 라벨 정본 · **replay 중복** · target 링크) | **Resolved(2026-08-10) · 구현 완료(SoT v1.7.94)** — S1~S6 확정 · **계약 영향 0 · backend 프로덕션 0줄** · 구현이 S6 전제를 반증(→ **F7**) · ★ §"나중에 여는 문" **F1~F7**(트리거 포함, 구현 뒤에도 유지) |
 | [`09-2-personal-hub-and-ia-decisions.md`](09-2-personal-hub-and-ia-decisions.md) | 9.2 — 개인 페이지(**전체 통합 허브**) + 프론트 IA 재배치(**통합 활동 조회** · 상한 · 관측 통합 여부 · 주소 · 관리자 랜딩 · 로그인/랜딩 · 프로젝트 화면 링크 정리) | **Resolved · 구현 완료(2026-08-10, SoT v1.7.96)** — P1~P8 · operation 77 → **78** · ★ 독립 검증이 P1 논거를 반증(fan-out 은 N≤상한이면 정확) → 근거 재작성·**P8 신설** · P4 보안 3항(S-1 AuthGate 축소 · S-2 open redirect · S-3 IDOR) |
@@ -183,7 +183,7 @@
 | [`frontend-editor-save-decisions.md`](frontend-editor-save-decisions.md) | editor·명시적 save | Resolved |
 | [`frontend-writing-workspace-decisions.md`](frontend-writing-workspace-decisions.md) | Writing 작업공간 | Resolved |
 | [`frontend-review-inbox-decisions.md`](frontend-review-inbox-decisions.md) | Review Inbox 첫 슬라이스 범위 | Resolved |
-| [`writing-workspace-v2-w0-contract.md`](writing-workspace-v2-w0-contract.md) | Workspace V2 W0 exact contract(ProjectBrief·ordered unit·accept 원자성) | W0~W4 완료 |
+| [`writing-workspace-v2-w0-contract.md`](writing-workspace-v2-w0-contract.md) | Workspace V2 W0 exact contract(ProjectBrief·ordered unit·accept 원자성) | Approved — W0~W4 완료 |
 | [`chapter-scene-hierarchy-decisions.md`](chapter-scene-hierarchy-decisions.md) | 평면 ordered unit을 **장→장면 실제 계층**으로 전환(저장 모델·본문 소유·무손실 이관·정렬·Writing intent·삭제·export) | **Resolved(2026-08-28)** — D1~D6·D8=A, D7=B · 구현 진행 |
 | [`scene-note-decisions.md`](scene-note-decisions.md) | 장면 메모 기능(화면 위치·저장 단위·공개 범위·저장 경험) | **Resolved** — D1=C+A · D2~D4=A |
 | [`scene-note-implementation-phases.md`](scene-note-implementation-phases.md) | 장면 메모 구현 순서(Slice 0~4: 저장→읽기→쓰기→화면→드로어) | **Active** — Slice 0·1·2 완료, Slice 3부터 |
@@ -204,7 +204,7 @@
 | [`writing-style-and-length-control-decisions.md`](writing-style-and-length-control-decisions.md) | 문체/어투 3층 계약과 생성 분량 프리셋 | 구현 완료 |
 | [`unaccepted-candidate-persistence-decisions.md`](unaccepted-candidate-persistence-decisions.md) | 미채택 candidate 영속(scratch) | 완료(v1.7.20) |
 | [`async-generation-pad-decisions.md`](async-generation-pad-decisions.md) | 비동기 생성 + 결과 패드 | 구현 완료 |
-| [`context-budget-korean-tokens-decisions.md`](context-budget-korean-tokens-decisions.md) | 한글 토큰 환산·K-3 창 가드·R-e·R-a 유도·K-4 카운터. **트랙 종료** | 완료 |
+| [`context-budget-korean-tokens-decisions.md`](context-budget-korean-tokens-decisions.md) | 한글 토큰 환산·K-3 창 가드·R-e·R-a 유도·K-4 카운터. **트랙 종료** | 확정 |
 
 ### 관측 KPI
 
@@ -220,22 +220,22 @@
 
 | 문서 | 무엇 | 상태 |
 |---|---|---|
-| [`multi-user-auth-cms-decisions.md`](multi-user-auth-cms-decisions.md) | **부모 브리프** — 인증·소유권·CMS/관리자 D0~D8 | D0~D8 결정됨 |
+| [`multi-user-auth-cms-decisions.md`](multi-user-auth-cms-decisions.md) | **부모 브리프** — 인증·소유권·CMS/관리자 D0~D8 | 확정 — D0~D8 결정됨 |
 | [`auth-d8-3-enforcement-decisions.md`](auth-d8-3-enforcement-decisions.md) | D8-3 인가 시행(E1~E4) | Resolved |
 | [`auth-d8-5-admin-decisions.md`](auth-d8-5-admin-decisions.md) | D8-5 관리자 API·화면·승격·최초 비밀번호 교체 | Implemented(v1.7.56~v1.7.81) |
 | [`auth-d8-6-purge-ui-decisions.md`](auth-d8-6-purge-ui-decisions.md) | D8-6 영구 삭제 UI·2단계 시행·삭제 감사·재시도 의미 | Verified PASS(v1.7.82, c2ca946) |
-| [`auth-d8-7-infra-auth-decisions.md`](auth-d8-7-infra-auth-decisions.md) | D8-7 인프라 노출면·자격증명 | **G1=C 확정** / G2~G6 유예 |
+| [`auth-d8-7-infra-auth-decisions.md`](auth-d8-7-infra-auth-decisions.md) | D8-7 인프라 노출면·자격증명 | Partially — **G1=C 확정** / G2~G6 유예 |
 | [`auth-signup-approval-decisions.md`](auth-signup-approval-decisions.md) | 자기 가입(승인제) — v1.7.82 가입 금지 문구 개정·403 생산자 셋·브루트포스 잠금·시드 정리 | **Resolved(2026-08-22)** — 403+사유 / 방어 동봉 / 시드 정리+오너 계정 |
 
 ### 외부 확장 (배선 완료 · 어댑터 미착수)
 
 | 문서 | 무엇 | 상태 |
 |---|---|---|
-| [`external-api-expansion-decisions.md`](external-api-expansion-decisions.md) | **부모 브리프** — 외부 LLM·임베딩·뉴럴 리랭커 확장(D1~D6) | D1~D6 결정됨 · compose 배선 완료(2026-08-14) · 임베딩/리랭커 어댑터 미착수 |
+| [`external-api-expansion-decisions.md`](external-api-expansion-decisions.md) | **부모 브리프** — 외부 LLM·임베딩·뉴럴 리랭커 확장(D1~D6) | 확정 — D1~D6 결정됨 · compose 배선 완료(2026-08-14) · 임베딩/리랭커 어댑터 미착수 |
 | [`reranker-slice-decisions.md`](reranker-slice-decisions.md) | D5 가 남긴 넷 — 착수 순서·조달 순서(self-host↔외부)·삽입 모양·완료 기준 | **Resolved(2026-08-18)** — 1=A·2=A·3=A·4=A+C(하네스 선작성). 착수는 임베딩 어댑터 뒤 |
 | [`script-rot-guard-decisions.md`](script-rot-guard-decisions.md) | 실행되지 않는 코드(`scripts/`)의 시그니처 부패를 무엇으로 막는가 · 감마의 부분 green 표기 | **Resolved(2026-08-20)** — 1=B(mypy 단독) · 1-b=가(`requirements-dev.txt`) · 2=D. **초판 추천 A 가 실측으로 뒤집혔다** |
 | [`embedding-adapter-slice-decisions.md`](embedding-adapter-slice-decisions.md) | **다음 슬라이스** — OpenAI 형식 어댑터 자리·배치·차원 전환·조립 누락 방지 | **Resolved(2026-08-19)** — 넷 다 A. 재색인 설명은 README 절로 함께 나간다(오너 조건) |
-| [`external-api-fallback-decisions.md`](external-api-fallback-decisions.md) | 키 회전(1순위)·모델 폴백(2순위) — 세 축 공통 폴백 정책(a1→b1→c1→a2→b2→c2·RPM 30·fail-fast) | **구현 완료(2026-08-22)** — 부모 브리프 §4의 401/429/5xx 매핑을 `KEY_REJECTED`로 폐쇄 |
+| [`external-api-fallback-decisions.md`](external-api-fallback-decisions.md) | 키 회전(1순위)·모델 폴백(2순위) — 세 축 공통 폴백 정책(a1→b1→c1→a2→b2→c2·RPM 30·fail-fast) | 확정 — 오너 정책 확정(2026-08-22) · **구현 완료**(키 회전·모델 폴백) |
 
 ## 문서 지위와 우선순위
 

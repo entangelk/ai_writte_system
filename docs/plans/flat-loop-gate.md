@@ -1,6 +1,6 @@
 # Flat Loop Gate 계약
 
-상태: `Draft`(decision/tool registry/budget policy/completion criteria slice는 2026-06-24 소유자 확정. 숫자 기본 한도는 2026-06-30 benchmark로 확정)
+상태: **이행됨 — 설계 근거로 보존**. loop 계약은 구현됐다. **★ 프로덕션 코드 11개 파일이 이 문서를 인용하므로 절 번호를 바꾸지 말 것.** 계약층 확장(tool-call parsing·wire format)은 진행하지 않는다(HANDOFF 표준 제약).  
 선행 조건: [`gemma4-reuse.md`](gemma4-reuse.md)의 bounded flat loop 재사용 방침, Slice 0 LLM Gateway provider error 계약
 후속 소비자: Phase 2 Analysis Pipeline(2B 비교 loop), Phase 4 Agentic Search, Writing/Review
 

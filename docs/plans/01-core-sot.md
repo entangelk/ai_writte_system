@@ -1,6 +1,6 @@
 # Phase 1. Core SOT
 
-상태: `Draft`  
+상태: **이행됨 — 설계 근거로 보존**. Core SOT(project·chapter·draft·version·snapshot·source_ref)는 구현·운영 중이다. offset·`content_hash` 규칙은 HANDOFF 표준 제약에 있다.  
 선행 조건: [`00-foundations.md`](00-foundations.md)의 SOT·격리·candidate 원칙 합의  
 후속 소비자: Analysis Pipeline, Indexing, Agentic Search, Writing AI
 

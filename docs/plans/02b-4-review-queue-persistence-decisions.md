@@ -1,5 +1,7 @@
 # 2B.4 후속 — conflict review queue 영속화 착수 결정 브리프
 
+상태: **Resolved**(오너 결정 완료) — 검토 큐 영속화 브리프  
+
 > 상위 계획: `plans/02b-analysis-compare-kickoff-decisions.md`, `plans/02b-3-analysis-compare-action-decisions.md`(D7 review-only), `plans/06-review-ui.md`(Phase 6 소비자).
 > HANDOFF Next Tasks #1 후보 (d). 상태: **Resolved**(오너 결정 2026-07-10).
 

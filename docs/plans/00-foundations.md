@@ -1,6 +1,6 @@
 # 00. 공통 기반
 
-상태: `Draft`  
+상태: **이행됨 — 설계 근거로 보존**. 여기 정한 전 Phase 공통 원칙은 시행 중이고 현재 계약 정본은 [`../system-contract-sot.md`](../system-contract-sot.md) 다. **다만 §"전역 착수 전 결정사항" 체크박스는 미갱신**이다 — 에러 envelope(H3)·삭제 정책·monorepo 경계는 이미 확정됐다(HANDOFF 열린 것).  
 적용 범위: 모든 Phase
 
 ## 제품 목표

@@ -1,6 +1,6 @@
 # 분석 대상과 Narrative Memory 분류 논의안
 
-상태: `Discussion`  
+상태: **이행됨 — 설계 근거로 보존**. 논의안이 taxonomy 3종(`character_observation`·`event_observation`·`open_question_observation`)으로 확정·구현됐다.  
 결정 시점: Phase 2 착수 전  
 목적: “무엇을 분석하고 어떤 단위로 저장할지”를 먼저 합의하기 위한 검토 목록이다. 아래 항목은 구현 확정 schema가 아니다.
 

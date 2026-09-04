@@ -1,5 +1,7 @@
 # Decision brief — 임베딩 어댑터 슬라이스
 
+상태: **Resolved**(2026-08-19, 오너) — 결정 1~4 전부 A. **구현 완료 2026-08-20**  
+
 > 작성 2026-08-18. **Resolved 2026-08-19 — 결정 1~4 전부 확정(오너, 추천안 그대로).** 부모 결정은 [`external-api-expansion-decisions.md`](external-api-expansion-decisions.md) D1~D4(2026-07-27), 직전 결정은 [`reranker-slice-decisions.md`](reranker-slice-decisions.md) 결정 1=A(2026-08-18, *"임베딩 어댑터 먼저"*)다. **이 문서는 그 둘을 뒤집지 않는다** — 그 둘이 정하지 않고 남긴 **어댑터의 모양·배치 전략·차원 전환·조립 누락 방지**를 정한다.
 >
 > **확정값 요약: 1=A(앱 안 두 번째 Provider) · 2=A(단건 유지, seam 무변) · 3=A(fail-fast 가드 + 수동 재색인) · 4=A(조립 헬퍼 + 전수 가드).** **구현 완료 2026-08-20** — [work_log](../daily_logs/2026-08-20/work_log.md) Task 12~15. 오너 문언: *"다 괜찮네. 추천안 대로 브리프 확정해줘."* 근거는 각 절의 `★ 확정` 항목과 [2026-08-19 work_log](../daily_logs/2026-08-19/work_log.md) D-2026-08-19-a.

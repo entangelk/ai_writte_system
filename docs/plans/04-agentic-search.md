@@ -1,6 +1,6 @@
 # Phase 4. Agentic Search
 
-상태: `Draft`  
+상태: **이행됨 — 설계 근거로 보존**. ContextPackage 구성과 하이브리드 검색(RRF 융합)은 구현·운영 중이다. 리랭커 seam 은 그 뒤에 붙었다.  
 선행 조건: Phase 1 pointer/version, Phase 2 기억 상태, Phase 3 검색 adapter  
 후속 소비자: Writing AI, Analysis prior-memory comparison
 

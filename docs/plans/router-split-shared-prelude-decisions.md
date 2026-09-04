@@ -1,5 +1,7 @@
 # 착수 결정 브리프 — 공유 prelude 추출 (라우터 분해 S1, H-3-A 폐쇄)
 
+상태: **Resolved · 구현 완료**(2026-08-06, §5=ⓑ 범주 3분할 — `app/api/models.py`·`errors.py`·`dependencies.py`)  
+
 - **작성**: 2026-08-06
 - **상위 계획**: [`router-split-and-admin-separation-decisions.md`](router-split-and-admin-separation-decisions.md) (R1·A1 = Resolved)
 - **발원**: 2026-08-06 독립 검증 비차단 **H-3-A** — [`verifications/2026-08-06/h3_closure_and_record_bundle.md`](../verifications/2026-08-06/h3_closure_and_record_bundle.md) §2
