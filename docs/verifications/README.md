@@ -1,7 +1,7 @@
 # 독립 검증 기록
 
 이 디렉터리는 **구현자가 아닌 검증자가** 각 슬라이스를 다시 뜯어본 기록이다. 2026-06-24부터
-**64일치 · 279건**이 쌓여 있다.
+**64일치 · 280건**이 쌓여 있다.
 
 ## 이 저장소의 검증이 무엇인가
 
@@ -36,7 +36,7 @@
 | 판정 | 건수 | 뜻 |
 |---|---|---|
 | 합격 | 189 | blocking 결함 없음 |
-| **조건부 합격** | **85** | 합격이되 닫아야 할 조건이 있었다 |
+| **조건부 합격** | **86** | 합격이되 닫아야 할 조건이 있었다 |
 | **불합격** | **5** | 핵심 계약 위반으로 다음 슬라이스 진행이 차단됐다 |
 
 **조건부 합격이 30%**라는 것이 이 절차가 형식이 아니라는 증거다. 검증이 실제로 지적을 냈고,
@@ -66,6 +66,7 @@
 ### 2026-09-04
 
 | [`identity_group_slice_3.md`](2026-09-04/identity_group_slice_3.md) | identity group Slice 3(Review Inbox 읽기면, `90cc4dd`·`e9680e4`·`2223ba3`, SoT v1.8.25) 독립 검증. 주장 재현 — 집중 13셀 green, RED 재현(부모 구현 복귀 시 13 failed·`KeyError: 'identity_group'`), OpenAPI **코드 경계(4ace6c4↔HEAD) 바이트 동일** 재덤프(md5 `10978d55…`·384,414B), `schema.d.ts` 무변, 소속 정본 `_group_of` 일치·public service 전용·population 정의·edit 이탈 경로 확인. 뮤테이션 — 구현자 표 M1·M2·M5·M7·M8 재유도가 셀 짝까지 일치. **★차단 B1: 가시 roster 밖 pair의 근거 차단 무셀** — 리터럴 ③("이 후보와 가시 roster를 잇는 same relation")의 should-NOT 분기에 셀 없음; 검증자 신설 VM1(관계 양끝 roster_set 필터 제거)이 **13 passed**로 입증, 행동은 probe로 계약대로 실측(rationale `null`). 하드닝 4: created_at 동률 tie-break 무셀·방향 미기재(BSON ms라 실운영 가능), stale 이탈 세 번째 원인 edit 무셀, relation `candidate_type` 필터 계약 미기재(서비스 오용 방어), 이중 non-closed 소속 "오래된 그룹 first" 규칙 계약 미기재. | **조건부 합격** |
+| [`identity_group_slice_4.md`](2026-09-04/identity_group_slice_4.md) | identity group Slice 4(그룹 거절 액션, `4b0d907`~`bb68bfa` 5커밋, SoT v1.8.27) 독립 검증. 주장 전부 재현 — 집중 10셀 green, 전수 **2768/1/3159 exit 0** 재실측(2043.15s), OpenAPI **101 operation**·신규 path·오류 선언 {200,401,403,404,422,503}, `schema.d.ts` 재생성물 **바이트 동일**, 등재 5곳(분류표 28·tier 75/101·오류 선언 22·라벨 28행·plans 인덱스 119), RED 5 failed 산술 정확. 뮤테이션 — 구현자 표 9종 중 **8종 재유도가 셀 짝까지 일치**(M2 관측 동등·M6 SUBFAILED 포착 포함; M3만 미실행). **★차단 2건(리터럴 ①의 미잠금 조항)**: **B1** "terminal 전 종류 skip"의 **superseded** 값 무셀 — 검증자 VM-A(skip을 confirmed/rejected 열거로)가 **10 passed**로 입증, 이때 superseded 멤버 그룹은 `InvalidCandidateStateTransition`이 catch 밖으로 새어 배치 중단(개별 라우트는 409로 잡음); **B2** "승격 여부는 보지 않는다" 무셀 — 승격+needs_review 거절 셀이 이 파일·개별 reject 경로 모두 없음(상속 불성립). 행동은 probe 2종(`repro_slice4_member_literals.py`)으로 계약대로 실측. 하드닝 2: mid-loop 503·재호출 이어가기 셀(SoT ⑤ 유도적 성립 — Slice 5 때), 셀 10의 RED 우연 통과 표시. 프론트 기존 결함 2건 **6cb6abc worktree 재현으로 사전존재 확정**. | **조건부 합격** |
 
 ### 2026-09-03
 

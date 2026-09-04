@@ -292,3 +292,50 @@ stale 멤버 제외 · 가시 <2 ungrouped · project 격리 · detail 동등 ·
 - 이 슬라이스의 독립 검증은 검증 가이드 절차대로 별도 세션이 한다(구현자 자기 검증 아님).
 - Slice 5(그룹 승인 액션) — 활동 로그 모양은 이번 A안 결정에 묶여 있다(그룹 행 1줄·변경 시에만).
 - 푸시는 오너 몫.
+
+---
+
+# Work Log — 2026-09-04 세션 5 (identity group Slice 4 독립 검증, 베타)
+
+## Goals
+
+- 오너 요청("작업 AI가 작업한거 확인해서 검증하고 의심하고 또 의심해줘?") — 구현 세션 4가 마감한
+  identity group **Slice 4(그룹 거절 액션)**(`4b0d907`~`bb68bfa` 5커밋, SoT v1.8.27)의 독립 검증.
+
+## Completed work
+
+판정 **조건부 합격** — 검증 기록
+[`verifications/2026-09-04/identity_group_slice_4.md`](../verifications/2026-09-04/identity_group_slice_4.md)
++ probe [`repro_slice4_member_literals.py`](../verifications/2026-09-04/repro_slice4_member_literals.py)
+(인덱스·판정 분포 280건/조건부 86 갱신, 문서 가드 green).
+
+- **재현**: 집중 10셀 green, 전수 **2768/1/3159 exit 0 재실측**(2043.15s — 구현자 수치와 완전 일치),
+  OpenAPI **101 operation**·신규 path·오류 선언 {200,401,403,404,422,503}, `schema.d.ts` gen:api
+  재실행 대조 **바이트 동일**, 등재 5곳(분류표 28·tier 75/101·오류 선언 22·라벨 28행·plans 119),
+  RED 5 failed 산술 정확(404 기대 셀 4종의 우연 통과까지 구현자 기록과 일치).
+- **뮤테이션 8/9종 재유도** — 구현자 표와 셀 짝까지 전부 일치(M1 5셀·M2 관측 동등·M4 1·M5 2·
+  M6 2[SUBFAILED 포함]·M7 1·M8 1[보강 셀]·M9 3; M3만 미실행). 본 트리 6종은 전수 개시 전,
+  M4·M7은 detached worktree에서(변이 창·전수 창 분리).
+- **★차단 2건(SoT v1.8.27 리터럴 ①의 미잠금 조항 — 행동은 전부 계약대로, 빈 것은 잠금)**:
+  **B1** "terminal 전 종류 skip"의 **superseded** 값 — 검증자 신설 VM-A(skip을
+  confirmed/rejected 열거로 바꾸는 과잉 교정)가 **10 passed**로 입증. 이때 superseded 멤버
+  그룹은 `InvalidCandidateStateTransition`이 그룹 라우터 catch 밖으로 새어 배치 중단(개별
+  reject 라우트는 409로 잡는데 그룹은 잡지 않음 — 실측). **B2** "승격 여부는 보지 않는다" —
+  승격+needs_review 멤버 거절(+canonical 잔존) 셀이 그룹·개별 경로 모두 없음(상속 불성립;
+  `memory/service.py:181`이 도달 가능 상태를 도메인 문서로 명시). probe P1·P2가 폐쇄 셀 본체.
+- **프론트 기존 결함 2건 사전존재 확정** — 6cb6abc detached worktree에서 typeScale 49↔54·
+  designTokens `--type-body` 동일 재현. 구현자의 "고치지 않고 기록" 처리 유지.
+- 하드닝 2건 기록: mid-loop 503·재호출 이어가기 셀(Slice 5 때), 셀 10 RED 우연 통과 표시.
+
+## 회귀(세션 5)
+
+- 전수(test-mongo healthy 개시·문서 편집 전 창): **2768 passed / 1 skipped / 3159 subtests,
+  exit 0, 2043.15초** — 검산 2758+10셀 ✓·3135+24 ✓·skip 1 관례 ✓. 1차 측정 오염 없음
+  (개시 전 healthy 확인).
+
+## Next steps
+
+- **B1·B2 폐쇄 세션**(probe 이식 셀 2개 + VM-A 재실측) → 이후 **Slice 5(그룹 승인 액션)**
+  착수 — 기록 모양은 A안에 묶임.
+- 프론트 결함 2건은 Slice 6 착수 전 먼저 볼 것.
+- 푸시는 오너 몫. test-mongo는 띄운 채 남김.
