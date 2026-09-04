@@ -467,3 +467,63 @@ M1·M2 가 under-strict 양방향, M5 가 over-strict 가드다. 전부 복원 �
 - 오너 판단: 휴면 디렉터리 셋(`verification_briefs` 미인덱스 · `benchmarks`·`live_review_briefs` 휴면)
   처리 방향 ⓐ/ⓑ/ⓒ.
 - HANDOFF Next Tasks 1번(정체성 그룹 Slice 5 독립 검증)은 그대로 대기.
+
+---
+
+# 세션 5 — 보안 감사 (이중 다중 에이전트 · 읽기 전용)
+
+## Goals
+
+- 오너 지시: *"보안 분석 작업좀 하자. 현재 레포에서 외부 API 접근 공격이나 문제가 될만한 것들이
+  있는지 확인해줘… 단순 경로 뿐만아니라 할 수 있는 한 모든 보안 체크"* + 추가 지시 *"이 래포는
+  공개 래포이기 때문에, 실제 서비스 페이지에서 이 래포를 참조해서 공격할 수 있는 지점 혹은 보안에
+  문제되는 문서가 남아있는지도 같이 확인"*
+- 다른 AI의 핸드오프 검수 작업과 동시 진행 — 감사 전 과정을 **읽기 전용**으로 강제해 상호 간섭 0.
+
+## Completed work
+
+문서 2건(본 로그 + 상세 리포트). 프로덕션 코드 변경 0줄.
+
+- **감사 A — 코드 보안** (Workflow 41에이전트): 12개 렌즈(외부 LLM API 관문·embedding/인덱싱·
+  인증 코어·접근제어/IDOR·관리자/권한상승·writing LLM 신뢰·analysis 인젝션·Mongo 인젝션·시크릿/설정·
+  프론트 XSS·DoS/quota·전송계층/CORS) 발견 → 발견별 회의적 반증 검증(critical/high 2표) → 완전성 비평.
+  31건 발견 → 26건 고유 → **24확정 / 1기각 / 1불확정**(검증 2건 레이트리밋 사망).
+- **감사 B — 공개 레포 정보노출** (Workflow 23에이전트): 5개 렌즈(배포 서비스 식별자·git 이력
+  시크릿·문서 자격증명·내부 토폴로지·공격 로드맵 문서). 17건 → 16건 → **15확정 / 1기각**.
+- 상세 리포트(전 발견의 설명·공격 시나리오·근거 코드·검증 표 포함):
+  [`verifications/2026-09-05/security_audit_dual_workflow.md`](../../verifications/2026-09-05/security_audit_dual_workflow.md) (940줄)
+
+### 핵심 결과
+
+- **critical 0건.** SSRF·IDOR·접근제어 누락·Mongo 인젝션·XSS·git 이력 시크릿 모두 미발견/소거.
+- **high 1건**: quota 원장 dedupe 키가 클라이언트 제어 `body.request_id`(`quota/dedupe.py:60`) —
+  같은 request_id 반복 전송으로 실제 LLM 파이프라인이 무과금 무한 반복. 잠금은
+  `X-Confirm-Duplicate` 헤더로 즉시 우회.
+- **high→medium 2건**: 실패한 analysis/writing job 무제한 재시도 루프(원장 0~1행으로 접힘,
+  retry 엔드포인트에 과금 의존성·상한 없음).
+- **공개 문서 평문 비밀번호**: `timeline_demo` / `timeline-demo-0810` 3곳(2026-08-10 로그 등) —
+  검증 결과 배포 서버가 아닌 로컬 머신 계정(2026-08-23 배포 DB 실측에 없음)으로 심각도 하향.
+  HANDOFF Next Tasks 7번 정리 대상.
+- **사설 IP 문서 노출**: 192.168.1.22/.29(llama.cpp 무인증)·172.30.135.149(배포 호스트)가
+  docs 47+ 파일에 잔존. HEAD의 HANDOFF.md는 세션 2 정리로 이미 제거. 공개 저장소 보안 규칙
+  위반 사안.
+- 비평 누락 축 2개: Python 의존성 lockfile 부재(npm과 비대칭), 전 페이지 AdSense 서드파티
+  스크립트 + CSP/보안헤더 전무.
+
+## Issues found
+
+- 검증 에이전트 2건이 API 레이트리밋(429)으로 사망 → 발견 26건 중 1건(평문 HTTP 표면)이
+  불확정 처리. **처리**: 해당 발견은 `listen 80`·TLS 종단 부재라 사실 자체는 확인 상태로
+  리포트에 명시.
+
+## Decisions
+
+- 감사 결과를 HANDOFF에 넣지 않고 verifications 리포트로 남겼다. 근거: HANDOFF는 스냅샷
+  원칙 — 조치 가능한 권장 5개 중 오너가 우선순위를 정할 때까지 "다음 작업자가 오늘 할 일"이
+  아니므로. (조치 결정 시 그때 HANDOFF 반영.)
+- 발견 심각도는 검증자 조정값을 최종값으로 채택(발견자의 최초 심각도와 병기).
+
+## Next steps
+
+- 오너 판단 대기: 권장 조치 5개 우선순위(① dedupe 키 서버 검증 ② retry 상한·쿨다운
+  ③ 문서 비밀번호 제거 + 계쇄기 ④ docs 사설 IP 스윕 ⑤ LAN 다중사용자 전환 전제 축들).
