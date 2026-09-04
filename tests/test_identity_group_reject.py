@@ -22,6 +22,7 @@
 
 import asyncio
 import unittest
+from datetime import UTC, datetime
 
 import httpx
 
@@ -61,6 +62,25 @@ from tests.auth_support import authenticate
 CHARACTER = AnalysisCandidateType.CHARACTER_OBSERVATION
 
 
+class _FixedClock:
+    """시각을 한 칸씩 전진 — 멤버 added_at 순서를 잰다.
+
+    서비스 클록은 ms 로 절단되므로 클록 없이는 같은 밀리초 추가가 전부
+    동률이 되고 ``(added_at, candidate_id)`` 정렬이 아이디 정렬로 붕괴한다.
+    멤버 추가 순서 ≠ 아이디 순서를 만들려면 added_at 이 실제로 갈라져야 한다.
+    """
+
+    def __init__(self) -> None:
+        self._ticks = iter(range(0, 300, 10))
+        self.now = datetime(2026, 9, 4, 10, next(self._ticks), tzinfo=UTC)
+
+    def __call__(self) -> datetime:
+        return self.now
+
+    def advance(self) -> None:
+        self.now = datetime(2026, 9, 4, 10, next(self._ticks), tzinfo=UTC)
+
+
 class TestClient:
     __test__ = False
 
@@ -89,8 +109,9 @@ def _build():
     core_sot = CoreSotService(InMemoryCoreSotRepository())
     analysis = AnalysisService(InMemoryAnalysisRepository())
     memory = MemoryService(InMemoryMemoryRepository())
+    clock = _FixedClock()
     groups = CandidateIdentityGroupService(
-        InMemoryCandidateIdentityGroupRepository()
+        InMemoryCandidateIdentityGroupRepository(), clock=clock
     )
     app = create_app(
         service=core_sot, analysis_service=analysis, memory_service=memory,
@@ -100,7 +121,7 @@ def _build():
     )
     client = TestClient(app)
     project_id = client.post("/projects", json={"name": "Novel"}).json()["id"]
-    return client, analysis, groups, project_id
+    return client, analysis, groups, clock, project_id
 
 
 def _seed_candidate(analysis, *, project_id, logical_key):
@@ -151,13 +172,21 @@ def _activity(client, project_id):
 
 class GroupRejectTest(unittest.TestCase):
     def test_rejecting_a_group_rejects_every_needs_review_member(self):
-        client, analysis, groups, project_id = _build()
+        client, analysis, groups, clock, project_id = _build()
         a = _seed_candidate(analysis, project_id=project_id, logical_key="a")
         b = _seed_candidate(analysis, project_id=project_id, logical_key="b")
         c = _seed_candidate(analysis, project_id=project_id, logical_key="c")
-        # 멤버 추가 순서는 아이디 순서와 반대다 — 응답이 멤버십 순회 순서가
-        # 아니라 아이디 정렬을 따르는 것(어댑터와 무관한 결정성)을 잠근다.
-        group = _open_group(groups, project_id, c, b, a)
+        # 멤버 추가 순서는 아이디 순서와 반대고 added_at 은 클록 전진으로 실제로
+        # 갈라진다 — 응답이 멤버십 순회(added_at) 순서가 아니라 아이디 정렬을
+        # 따르는 것(어댑터와 무관한 결정성)을 잠근다. 클록 없이는 같은 밀리초
+        # 동률이 아이디 tie-break 로 붕괴해 sorted() 제거가 관측되지 않는다.
+        group = groups.create_group(project_id, CHARACTER)
+        for candidate in (c, b, a):
+            groups.add_member(
+                project_id=project_id, group_id=group.group_id,
+                candidate_id=candidate.id, candidate_type=CHARACTER,
+            )
+            clock.advance()
 
         response = _reject(client, project_id, group.group_id)
 
@@ -177,7 +206,7 @@ class GroupRejectTest(unittest.TestCase):
         self.assertEqual(_statuses(client, project_id), {})
 
     def test_members_already_terminal_are_skipped_and_the_rest_rejected(self):
-        client, analysis, groups, project_id = _build()
+        client, analysis, groups, _clock, project_id = _build()
         a = _seed_candidate(analysis, project_id=project_id, logical_key="a")
         b = _seed_candidate(analysis, project_id=project_id, logical_key="b")
         confirmed = _seed_candidate(
@@ -215,7 +244,7 @@ class GroupRejectTest(unittest.TestCase):
         구분되지 않는다. 잠그는 것은 과잉 방향이다: 완료된 그룹을 다시 눌러도
         아무 후보를 다시 건드리지 않고 행도 남기지 않는다.
         """
-        client, analysis, groups, project_id = _build()
+        client, analysis, groups, _clock, project_id = _build()
         a = _seed_candidate(analysis, project_id=project_id, logical_key="a")
         b = _seed_candidate(analysis, project_id=project_id, logical_key="b")
         group = _open_group(groups, project_id, a, b)
@@ -234,14 +263,14 @@ class GroupRejectTest(unittest.TestCase):
         self.assertEqual(len(_activity(client, project_id)), 2)
 
     def test_unknown_group_is_404(self):
-        client, _analysis, _groups, project_id = _build()
+        client, _analysis, _groups, _clock, project_id = _build()
 
         response = _reject(client, project_id, "cig:does-not-exist")
 
         self.assertEqual(response.status_code, 404)
 
     def test_another_projects_group_is_404_for_this_project(self):
-        client, analysis, groups, project_id = _build()
+        client, analysis, groups, _clock, project_id = _build()
         other_id = client.post(
             "/projects", json={"name": "Other"}
         ).json()["id"]
@@ -254,7 +283,7 @@ class GroupRejectTest(unittest.TestCase):
 
     def test_closed_group_is_404(self):
         """병합으로 흡수된 closed 껍데기는 검토 대상이 아니다(읽기면과 같은 정본)."""
-        client, analysis, groups, project_id = _build()
+        client, analysis, groups, _clock, project_id = _build()
         a = _seed_candidate(analysis, project_id=project_id, logical_key="a")
         b = _seed_candidate(analysis, project_id=project_id, logical_key="b")
         group = _open_group(groups, project_id, a, b)
@@ -273,7 +302,7 @@ class GroupRejectTest(unittest.TestCase):
         )
 
     def test_missing_project_is_404(self):
-        client, _analysis, _groups, _project_id = _build()
+        client, _analysis, _groups, _clock, _project_id = _build()
 
         response = _reject(client, "does-not-exist", "cig:any")
 
@@ -281,7 +310,7 @@ class GroupRejectTest(unittest.TestCase):
 
     def test_a_contradicted_group_can_still_be_rejected(self):
         """contradicted도 읽기면이 묶는다(Slice 3) — 거절도 그룹 전체에 적용된다."""
-        client, analysis, groups, project_id = _build()
+        client, analysis, groups, _clock, project_id = _build()
         a = _seed_candidate(analysis, project_id=project_id, logical_key="a")
         b = _seed_candidate(analysis, project_id=project_id, logical_key="b")
         group = _open_group(groups, project_id, a, b)
@@ -298,7 +327,7 @@ class GroupRejectTest(unittest.TestCase):
 
     def test_rejection_records_one_group_level_activity_row(self):
         """브리프 A안 — 그룹 행 1줄, after에 두 수를 싣는다(멤버별 행이 아니다)."""
-        client, analysis, groups, project_id = _build()
+        client, analysis, groups, _clock, project_id = _build()
         a = _seed_candidate(analysis, project_id=project_id, logical_key="a")
         b = _seed_candidate(analysis, project_id=project_id, logical_key="b")
         confirmed = _seed_candidate(
@@ -323,7 +352,7 @@ class GroupRejectTest(unittest.TestCase):
 
     def test_a_noop_rejection_records_no_activity_row(self):
         """변경이 없으면 행을 남기지 않는다(일괄 승격의 `if promoted:` 선례)."""
-        client, analysis, groups, project_id = _build()
+        client, analysis, groups, _clock, project_id = _build()
         a = _seed_candidate(analysis, project_id=project_id, logical_key="a")
         b = _seed_candidate(analysis, project_id=project_id, logical_key="b")
         group = _open_group(groups, project_id, a, b)
