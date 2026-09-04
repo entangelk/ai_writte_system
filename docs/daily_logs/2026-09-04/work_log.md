@@ -206,3 +206,24 @@ stale 멤버 제외 · 가시 <2 ungrouped · project 격리 · detail 동등 ·
 - **Slice 4(그룹 거절 액션) 착수** — B1 폐쇄로 길이 열렸다. 착수 시 짧은 결정 브리프: 활동 로그
   남길지 여부(계획이 명시적으로 열어둠).
 - 푸시는 오너 몫.
+
+---
+
+# Work Log — 2026-09-04 세션 4 (identity group Slice 4 — 그룹 거절 액션, 베타)
+
+## Goals
+
+- 페이즈 문서 §Slice 4 시행: `POST /projects/{pid}/analysis/review-inbox/groups/{group_id}/reject`.
+  owner 가드·일부 terminal skip·멱등(재전송·다른 key 재호출)·응답 changed/skipped 수·활동 로그.
+
+## Decisions
+
+- **[오너 결정] 그룹 거절의 활동 로그 = A(그룹 행 1줄, 신규 리터럴 `identity_group_rejected`,
+  target_type `candidate_identity_group`, `after`="rejected=N, skipped=M", 변경≥1일 때만 기록).**
+  브리프 [`pending-candidate-identity-grouping-slice4-activity-log-decisions.md`](../plans/pending-candidate-identity-grouping-slice4-activity-log-decisions.md) —
+  일괄 승격(`candidates_auto_promoted`) 배치 선례와 같은 모양. 반려된 안: 멤버별 행 N줄(프론트
+  무변이지만 타임라인 소음·그룹 맥락 소실)·둘 다(A8 정신에 반함)·미기록(A2=B에 걸려 사유 축이 없음).
+  이 결정은 Slice 5 그룹 승인의 기록 모양에도 묶는다.
+- **멱등은 상태 유도** — 요청 body 없음(개별 reject와 대칭). "같은 key 재전송"="같은 엔드포인트
+  재호출", "다른 key"="새 호출"이고 둘 다 changed=0·행위 재발 없음. 명시적 key 필드는 단계별 진행을
+  저장하는 Slice 5에서만 필요.

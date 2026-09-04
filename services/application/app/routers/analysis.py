@@ -27,6 +27,9 @@ from services.application.app.analysis.compare import (
     InvalidJudgeResult,
 )
 from services.application.app.analysis.extractor import AnalysisExtractionError
+from services.application.app.analysis.identity_groups import (
+    CandidateIdentityGroupNotFoundError,
+)
 from services.application.app.analysis.models import (
     AnalysisCandidateStatus,
     AnalysisJobStatus,
@@ -107,6 +110,7 @@ def register_analysis(
     gate_findings,
     llm_call_audit,
     candidate_review,
+    identity_group_review,
     activity,
 ) -> None:
     def _analysis_candidate_payload(candidate) -> dict[str, object]:
@@ -884,6 +888,44 @@ def register_analysis(
         except (NotFound, ReviewInboxNotFound) as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return _review_inbox_payload(item, include_detail=True)
+
+    @app.post(
+        "/projects/{project_id}/analysis/review-inbox/groups/{group_id}/reject",
+        responses=_owned(_ERRORS_404),
+        dependencies=_REQUIRE_PROJECT_OWNER,
+    )
+    async def reject_review_inbox_group(
+        project_id: str, group_id: str,
+        current=Depends(require_authenticated_user),
+    ) -> dict[str, object]:
+        # 정체성 그룹 Slice 4 — 그룹 거절 배치 판단. terminal 멤버는 skip하고
+        # needs_review만 개별 reject 경로로 거절한다(부수효과·멱등은 그 경로의
+        # 것). closed 그룹은 읽기면 정본과 같은 이유로 404다.
+        try:
+            _require_project_exists(project_id)
+            result = identity_group_review.reject_group(
+                project_id=project_id, group_id=group_id
+            )
+        except (CandidateIdentityGroupNotFoundError, AnalysisNotFound,
+                NotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # 브리프 A안(2026-09-04): 배치 검토 판단은 그룹 행 1줄, 변경≥1일 때만
+        # — 일괄 승격(`if promoted:`)과 같은 모양. 재전송은 행을 남기지 않는다.
+        if result.rejected:
+            activity.record(
+                project_id=project_id, actor_user_id=current.id,
+                action="identity_group_rejected",
+                target_type="candidate_identity_group",
+                target_id=group_id,
+                after=(f"rejected={len(result.rejected)}, "
+                       f"skipped={len(result.skipped)}"),
+            )
+        return {
+            "group_id": group_id,
+            "rejected": list(result.rejected),
+            "skipped": list(result.skipped),
+            "idempotent_replay": result.idempotent_replay,
+        }
 
     def _gate_finding_payload(finding) -> dict[str, object]:
         return {

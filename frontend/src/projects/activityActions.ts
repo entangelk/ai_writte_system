@@ -13,7 +13,7 @@
  *   21번째 action 을 더하면 그 셀이 실패한다. `schema.d.ts` 는 `action` 을 `string` 으로만
  *   주므로 **타입으로는 못 잡는다 — 그 가드가 유일한 연결선이다.**
  *
- * 그래서 이 표는 **27행 전수**여야 하고, 임의로 줄이거나 늘리면 가드가 양방향으로 문다.
+ * 그래서 이 표는 **28행 전수**여야 하고, 임의로 줄이거나 늘리면 가드가 양방향으로 문다.
  */
 
 /** `action` 리터럴 → 타임라인 한 줄에 쓰는 문구. 백엔드 분류표의 logged 27 과 1:1 이다. */
@@ -37,7 +37,7 @@ export const ACTIVITY_ACTION_LABELS: Record<string, string> = {
   source_ref_created: "출처 연결",
   draft_version_accepted: "생성 결과 반영",
   scene_note_saved: "장면 메모 저장",
-  // 검토 결정 9
+  // 검토 결정 10
   candidate_promoted: "기억 후보 승격",
   candidate_rejected: "기억 후보 거절",
   candidate_edited: "기억 후보 수정",
@@ -47,6 +47,8 @@ export const ACTIVITY_ACTION_LABELS: Record<string, string> = {
   review_queue_reconciled: "검토 대기열 정리",
   gate_finding_resolved: "Gate 지적 해결",
   gate_finding_dismissed: "Gate 지적 무시",
+  // 정체성 그룹 거절(2026-09-04, Slice 4) — 배치 판단은 그룹 행 1줄이다.
+  identity_group_rejected: "정체성 그룹 거절",
 };
 
 /**
@@ -76,6 +78,7 @@ export const NON_LINKABLE_TARGET_TYPES: Record<string, string> = {
   source_ref: "전용 화면이 없다",
   scene_note: "메모 전용 route 가 아직 없다 — Slice 3 의 /projects/:id/notes 가 생기면 그때 연다",
   candidate: "검토함 목록 안에만 있고 단건 route 가 없다",
+  candidate_identity_group: "검토함 목록 안에만 있다",
   analysis_job: "전용 화면이 없다",
   review_queue_entry: "검토함 목록 안에만 있다",
   gate_finding: "지적 목록 안에만 있다",

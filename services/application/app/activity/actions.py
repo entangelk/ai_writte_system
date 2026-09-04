@@ -121,7 +121,7 @@ _CANONICAL: tuple[ActivityAction, ...] = (
                    "/projects/{project_id}/drafts/{draft_id}/note", "scene_note"),
 )
 
-#: 검토 결정 9 — 원고가 아니라 **기억을 바꾸는 사용자 판단**.
+#: 검토 결정 10 — 원고가 아니라 **기억을 바꾸는 사용자 판단**.
 _REVIEW: tuple[ActivityAction, ...] = (
     ActivityAction("candidate_promoted", "POST",
                    "/projects/{project_id}/analysis/candidates/{candidate_id}/promote",
@@ -150,6 +150,14 @@ _REVIEW: tuple[ActivityAction, ...] = (
     ActivityAction("gate_finding_dismissed", "POST",
                    "/projects/{project_id}/analysis/gate-findings/{finding_id}/dismiss",
                    "gate_finding"),
+    # 정체성 그룹 거절(2026-09-04, Slice 4, 브리프 A안) — 배치 검토 판단은
+    # 일괄 승격과 같은 모양: **그룹 행 1줄**(`after`="rejected=N, skipped=M"),
+    # 변경≥1일 때만 기록한다. 멤버별 candidate_rejected 행은 남기지 않는다
+    # (같은 사실의 두 번째 정본이 된다).
+    ActivityAction("identity_group_rejected", "POST",
+                   "/projects/{project_id}/analysis/review-inbox/groups/"
+                   "{group_id}/reject",
+                   "candidate_identity_group"),
 )
 
 #: 기록하는 경로 전수.

@@ -78,6 +78,9 @@ from services.application.app.analysis.identity_groups import (
     CandidateIdentityGroupService,
     InMemoryCandidateIdentityGroupRepository,
 )
+from services.application.app.analysis.identity_group_review import (
+    CandidateIdentityGroupReviewService,
+)
 from services.application.app.analysis.identity_judge import (
     TerminalJsonIdentityJudge,
     seed_analysis_identity_judge_template,
@@ -1838,6 +1841,14 @@ def create_app(
         # service만 쓴다 — 계획의 Slice 0 인계 조항).
         identity_groups=identity_groups,
     )
+    # 정체성 그룹 Slice 4: 그룹 단위 검토 액션 — 그룹 서비스(저장 멤버십)와
+    # 개별 후보 거절 경로를 잇는 오케스트레이션. 신규 조립 파라미터는 없다
+    # (이미 주입된 서비스들의 순수 조합이다).
+    identity_group_review = CandidateIdentityGroupReviewService(
+        identity_groups=identity_groups,
+        candidate_review=candidate_review,
+        analysis_service=analysis,
+    )
     gate_findings = gate_finding_service or _default_gate_finding_service()
     # Phase 5.9 L9 B: every bounded-loop termination is recorded to a durable,
     # append-only audit trail. Always available (in-memory default) so no loop
@@ -2088,6 +2099,7 @@ def create_app(
         gate_findings=gate_findings,
         llm_call_audit=llm_call_audit,
         candidate_review=candidate_review,
+        identity_group_review=identity_group_review,
         activity=activity,
     )
 

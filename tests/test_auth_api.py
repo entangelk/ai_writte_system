@@ -1903,8 +1903,10 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # 장면 메모 저장(같은 날, Slice 2)이 `PUT …/drafts/{id}/note` 를 같은 tier 에
         # 더해 73/99 가 됐다 — 같은 dependency 지만 PUT 이라 grant 는 403 이다
         # (`_GRANTED_METHODS` 가 GET/HEAD 뿐이다).
-        self.assertEqual(len(by_tier["project"]), 74)
-        self.assertEqual(len(tiers), 100)
+        # 정체성 그룹 Slice 4(2026-09-04)가 그룹 거절 POST 를 project tier 에
+        # 더해 75/101 이 됐다.
+        self.assertEqual(len(by_tier["project"]), 75)
+        self.assertEqual(len(tiers), 101)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:
