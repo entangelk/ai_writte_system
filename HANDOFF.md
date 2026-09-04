@@ -5,7 +5,7 @@
 > **완료 서술도, 근거·측정치·발견 경위도 여기 쓰지 않는다** — `docs/daily_logs/`(상세) · `docs/system-contract-sot.md` 변경이력 · `CHANGELOG.md`(마일스톤) · `docs/verifications/`(독립 검증) · `docs/plans/*-decisions.md`(왜 그렇게 정했는가)에 있다. **여기 남는 것은 "지키지 않으면 깨지는 것"과 "어디를 보면 되는가"뿐이다.**
 > 편집 규칙은 `CLAUDE.md`·`AGENTS.md`의 "HANDOFF.md" 절에 있다. **~200줄을 넘으면 자가 검수**하고(그 뒤로는 ~100줄마다) 결과를 아래 한 줄로 남긴다.
 >
-> 마지막 자가 검수: **2026-09-05 · 742줄/222KB → 354 → 240줄/44KB**(2차, 오너 지시 *"착수할 수 있는 문서"*) — 1차는 완료 서술 12개 메모(336줄)와 닫힌 부채 12항목을 걷었고, 2차는 **분류를 고쳤다**: ① 부채 절에 있던 11항목이 실은 계약·규칙·주의였다 → 각 절로 이관 ② "지금 상태"의 절차·하우투 5건을 "코드를 만질 때의 규칙"으로 분리 ③ 모든 항목에서 **근거·측정치·발견 경위를 걷어내고** 정본 포인터로 대체 ④ 낡은 사실 정정(`AUTH_SESSION_TTL_HOURS` 부채는 이미 닫혀 있었다 · `docs/plans` 106/88 → **121/100** · 4000 상수는 `DraftEditor` 가 아니라 `tokenEstimate.ts`).
+> 마지막 자가 검수: **2026-09-05 · 742줄/222KB → 354 → 244줄/48KB**(2차, 오너 지시 *"착수할 수 있는 문서"*. +4줄은 같은 날 docs 고아 전수와 서비스 정책 문서 등재) — 1차는 완료 서술 12개 메모(336줄)와 닫힌 부채 12항목을 걷었고, 2차는 **분류를 고쳤다**: ① 부채 절에 있던 11항목이 실은 계약·규칙·주의였다 → 각 절로 이관 ② "지금 상태"의 절차·하우투 5건을 "코드를 만질 때의 규칙"으로 분리 ③ 모든 항목에서 **근거·측정치·발견 경위를 걷어내고** 정본 포인터로 대체 ④ 낡은 사실 정정(`AUTH_SESSION_TTL_HOURS` 부채는 이미 닫혀 있었다 · `docs/plans` 106/88 → **121/100** · 4000 상수는 `DraftEditor` 가 아니라 `tokenEstimate.ts`).
 
 ## 머신 · 기동
 
@@ -145,6 +145,7 @@
 | **auto-promote 503 partial 미기록** | ⓐ 그대로(권장) ⓑ 승격 memory마다 한 행 ⓒ 개수 한 행 | `routers/analysis.py` |
 | **K-3: 창을 모르는 호출은 가드 밖** | ⓐ 그대로 ⓑ 짧은 대기 허용(v1.7.60 개정) ⓒ `/props` 1회 재시도 | v1.7.60 |
 | **`analysis_extractor` D4 정렬 / loop round별 gate decision 노출** | 둘 다 dogfood 데이터가 쌓인 뒤 판단 가치가 올라간다(지금 표본 0) | v1.7.47 |
+| **문서 고아·낡은 상태 마커 처리**(2026-09-05 전수) | ① **부모 계획 12건이 `Draft` 에 멈춰 있다**(`00-foundations`~`08-member-request-quota` · `implementation-plan` · `product-shell` · `flat-loop-gate` · `llm-gateway`) — 기술한 시스템은 대부분 구현·검증 완료인데 마커만 6~7월 그대로다. **[`plans/README.md`](docs/plans/README.md) 자신도 `Draft`** ② **`docs/verification_briefs/2026-06-24`(3건)은 어떤 인덱스에도 없다** — `verifications/` 로 대체된 초기 실험 ③ `benchmarks/2026-07-15`·`live_review_briefs/2026-07-18` 은 인덱싱은 됐지만 **한 번 쓰고 멈췄다** ④ **`docs/contracts.md`** 등 아이디에이션 원본 4건에 `chat-revision-ideation.md` 같은 **"승격됨·보존" 배너가 없다** — 특히 `contracts.md` 는 이름이 `system-contract-sot.md` 와 혼동돼 **신규 작업자가 6월 계약을 현재형으로 읽을 수 있다**. 선택지: ⓐ 배너만 단다 ⓑ `archive/` 로 옮긴다 ⓒ 그대로 둔다 | — |
 | **`docs/plans` 디렉터리 재편** | 브리프 경로 인용 1,083건/253파일 중 183개가 과거 검증 기록 — **"지금 하지 않는다"가 근거 있는 판단**이고 남은 동기는 미학뿐 | — |
 | **llama `-hf` 리비전 고정** | 최신 추종 vs 현행 고정. 새 리비전이 프롬프트 sha 핀·gate 동작에 주는 영향 미측정 | — |
 
@@ -161,6 +162,8 @@
 | 정본 SoT §"현재 구현 상태" 표가 자기모순 | 같은 표가 "구현"과 "미구현"을 함께 말한다. 정정은 버전 개정 사안 | `system-contract-sot.md:821` |
 | `00-foundations.md` 착수 전 체크박스 미갱신 | 실제로는 확정된 항목들이 미체크 — 거짓 단언이 아니라 미갱신 | `docs/plans/00-foundations.md` |
 | `activity/actions.py` 주석의 "기록하지 않는 21" | 실제 29건. 가드는 등재 여부만 보고 개수를 안 본다 | `actions.py:173` |
+| `docs/README.md` 의 "브리프 96개" | 실측 **100**. 최상위 `README.md` 의 같은 주장은 가드가 잡는데 **이 줄은 가드 밖**이다 | `docs/README.md:11` |
+| `chat-revision-ideation.md`·`dogfood-checklist.md` 가 문서 지도에 없다 | 후자는 HANDOFF 가 실제로 가리키는 살아 있는 문서다 | `docs/README.md` |
 | 미사용 import에 회귀 가드 없음 | 유일한 신호가 스위트 밖 linter. **ⓐ(정리 슬라이스마다 수동 측정)가 현 단계에 맞다** | — |
 | 프론트 기존 결함 2건 | `typeScale.test.ts` 이관 목록 49↔54 · `designTokens.test.ts` `--type-body` 미정의. **사전존재 확인됨** | — |
 | `scripts/` 를 pytest가 실행하지 않는다 | CI 없음(`.github` 부재). 부분 방어가 `mypy.ini`(`call-arg`+`misc`) 가드다 — **`misc` 를 disable 목록에 넣으면 표적 결함이 조용해진다** | `tests/test_typecheck.py` |
@@ -194,6 +197,7 @@
 5. **육안 확인(누적)** — 프론트 재빌드 선행. Phase 10 마감 다섯(첫 화면 콘텐츠 · 오른쪽 끝 정렬 · 목록 행 간격 · 차트 막대 테두리 · 버튼 hover) · 비활성 버튼 색 · 편집기 드로어와 설정 탭이 좁은 화면에서 겹치는지 · 관측 화면과 비동기 패드 렌더 · **최종 저장·분석 연동의 첫 실사용**(운영 이력 0건).
 6. **dogfood 관찰**: `report field must be an array` 실패율 · `analysis_extract` 의 `aspect` 오분류 빈도 · scratch per-draft 상한(기본 20) 밀어냄. 체크리스트 [`docs/dogfood-checklist.md`](docs/dogfood-checklist.md).
 7. **정리 대상**: 확인용 계정 `timeline_demo` 와 프로젝트 `6a795ab928e4a53aa000a824`(활동 5건).
+8. **★ 서비스 정책 계약 문서를 만든다(오너 지시 2026-09-05).** **찾아봤고 없다** — 정책이 브리프 8~9개와 SoT 절에 흩어져 있어 *"이 서비스가 회원에게 무엇을 약속하는가"* 를 한 장으로 답할 수 있는 문서가 하나도 없다. **지금 흩어져 있는 자리**: 요청 한도·정지(`08-1`·`08-3`·`08-5` 브리프) · 승인제 가입(`auth-signup-approval-decisions.md`) · 삭제·파기와 이름 보존(`auth-d8-6-purge-ui-decisions.md`·`08-2c`) · 관리자 열람과 승격(`multi-user-auth-cms-decisions.md`) · 원고 길이 상한(D5-2) · 광고(AdSense). **아직 아무 데도 없는 것**: 원고가 외부 LLM API로 나간다는 **고지**, 데이터 보존 기간, 계정 삭제 시 처리. **이 문서는 약관·개인정보처리방침(오너 정본)의 *입력*이지 대체물이 아니다** — 법적 문서는 오너가 쓰고, 이 문서는 **코드가 실제로 시행하는 정책값**을 모아 그 근거를 준다. 값의 정본은 계속 SoT·브리프이고 이 문서는 **한 장 요약 + 포인터**다(값을 여기 복사하면 두 번째 정본이 된다).
 
 **Deferred(오너 결정 선행)**: Chapter 위의 part/volume 계층 · ProjectBrief→Draft provenance · 관계 graph/완전 timeline · saved publication manifest · Phase 7 대화형 수정.
 
