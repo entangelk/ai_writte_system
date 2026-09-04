@@ -121,7 +121,7 @@ def _build():
     )
     client = TestClient(app)
     project_id = client.post("/projects", json={"name": "Novel"}).json()["id"]
-    return client, analysis, groups, clock, project_id
+    return client, analysis, memory, groups, clock, project_id
 
 
 def _seed_candidate(analysis, *, project_id, logical_key):
@@ -172,7 +172,7 @@ def _activity(client, project_id):
 
 class GroupRejectTest(unittest.TestCase):
     def test_rejecting_a_group_rejects_every_needs_review_member(self):
-        client, analysis, groups, clock, project_id = _build()
+        client, analysis, _memory, groups, clock, project_id = _build()
         a = _seed_candidate(analysis, project_id=project_id, logical_key="a")
         b = _seed_candidate(analysis, project_id=project_id, logical_key="b")
         c = _seed_candidate(analysis, project_id=project_id, logical_key="c")
@@ -206,7 +206,7 @@ class GroupRejectTest(unittest.TestCase):
         self.assertEqual(_statuses(client, project_id), {})
 
     def test_members_already_terminal_are_skipped_and_the_rest_rejected(self):
-        client, analysis, groups, _clock, project_id = _build()
+        client, analysis, _memory, groups, _clock, project_id = _build()
         a = _seed_candidate(analysis, project_id=project_id, logical_key="a")
         b = _seed_candidate(analysis, project_id=project_id, logical_key="b")
         confirmed = _seed_candidate(
@@ -237,6 +237,79 @@ class GroupRejectTest(unittest.TestCase):
             ).status.value, "confirmed"
         )
 
+    def test_superseded_members_are_skipped_like_other_terminal_states(self):
+        """검증 B1 폐쇄(2026-09-04) — 리터럴 ① "terminal 전 종류"의 세 번째 값.
+
+        셀 2가 confirmed·rejected만 시드해서 검증자 변이 VM-A(skip을 두 값
+        열거로 좁히는 과잉 교정)가 10 passed로 통과했다. 그 좁힘 아래에서는
+        superseded 멤버가 개별 reject 경로의 `InvalidCandidateStateTransition`
+        을 그룹 라우터 catch 밖으로 흘려 배치를 mid-flight로 죽린다(검증 실측)
+        — 이 셀이 그 방향을 문다. edit가 원본을 superseded로 남기는 상태는
+        Slice 3 H2 셀이 읽기면에서 이미 시드하는 도달 가능 상태다.
+        probe `repro_slice4_member_literals.py` P1의 본체.
+        """
+        client, analysis, _memory, groups, _clock, project_id = _build()
+        a = _seed_candidate(analysis, project_id=project_id, logical_key="a")
+        b = _seed_candidate(analysis, project_id=project_id, logical_key="b")
+        # edit는 원본 b를 superseded로 만든다(승격 후보는 신규 id — 그룹 밖).
+        self.assertEqual(client.post(
+            f"/projects/{project_id}/analysis/candidates/{b.id}/edit",
+            json={"payload": {"name": "Ariel", "observation": "edited"}},
+        ).status_code, 200)
+        self.assertEqual(
+            analysis.get_candidate(
+                project_id=project_id, candidate_id=b.id
+            ).status.value, "superseded"
+        )
+        group = _open_group(groups, project_id, a, b)
+
+        response = _reject(client, project_id, group.group_id)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {
+            "group_id": group.group_id,
+            "rejected": [a.id],
+            "skipped": [b.id],
+            "idempotent_replay": False,
+        })
+
+    def test_promoted_members_are_still_rejected_and_canonical_survives(self):
+        """검증 B2 폐쇄(2026-09-04) — 리터럴 ① "승격 여부는 보지 않는다".
+
+        승격은 상태를 바꾸지 않는다(`memory/service.py` — "a promoted candidate
+        still carries `needs_review` status")— 승격된 needs_review 멤버도
+        그룹 거절의 대상이고, canonical은 append-only라 거절 뒤에 남는다.
+        현재 방어가 구조적일 뿐(서비스가 memory를 주입받지 않는다)이어서
+        memory를 주입해 승격 멤버를 skip하는 날 아무 셀도 물지 않는 상태였다(검증).
+        probe `repro_slice4_member_literals.py` P2의 본체.
+        """
+        client, analysis, memory, groups, _clock, project_id = _build()
+        a = _seed_candidate(analysis, project_id=project_id, logical_key="a")
+        b = _seed_candidate(analysis, project_id=project_id, logical_key="b")
+        # 개별 promote 경로 — 승격 후에도 상태는 needs_review다.
+        self.assertEqual(client.post(
+            f"/projects/{project_id}/analysis/candidates/{a.id}/promote"
+        ).status_code, 200)
+        self.assertTrue(memory.is_candidate_promoted(project_id, a.id))
+        self.assertEqual(
+            analysis.get_candidate(
+                project_id=project_id, candidate_id=a.id
+            ).status.value, "needs_review"
+        )
+        group = _open_group(groups, project_id, a, b)
+
+        response = _reject(client, project_id, group.group_id)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {
+            "group_id": group.group_id,
+            "rejected": sorted([a.id, b.id]),
+            "skipped": [],
+            "idempotent_replay": False,
+        })
+        # canonical은 append-only — 거절이 승격을 되돌리지 않는다.
+        self.assertTrue(memory.is_candidate_promoted(project_id, a.id))
+
     def test_re_invoking_a_completed_reject_is_a_full_noop(self):
         """같은 key 재전송과 "다른 key로 이미 끝난 그룹 재호출"이 같은 관측이다.
 
@@ -244,7 +317,7 @@ class GroupRejectTest(unittest.TestCase):
         구분되지 않는다. 잠그는 것은 과잉 방향이다: 완료된 그룹을 다시 눌러도
         아무 후보를 다시 건드리지 않고 행도 남기지 않는다.
         """
-        client, analysis, groups, _clock, project_id = _build()
+        client, analysis, _memory, groups, _clock, project_id = _build()
         a = _seed_candidate(analysis, project_id=project_id, logical_key="a")
         b = _seed_candidate(analysis, project_id=project_id, logical_key="b")
         group = _open_group(groups, project_id, a, b)
@@ -263,14 +336,14 @@ class GroupRejectTest(unittest.TestCase):
         self.assertEqual(len(_activity(client, project_id)), 2)
 
     def test_unknown_group_is_404(self):
-        client, _analysis, _groups, _clock, project_id = _build()
+        client, _analysis, _memory, _groups, _clock, project_id = _build()
 
         response = _reject(client, project_id, "cig:does-not-exist")
 
         self.assertEqual(response.status_code, 404)
 
     def test_another_projects_group_is_404_for_this_project(self):
-        client, analysis, groups, _clock, project_id = _build()
+        client, analysis, _memory, groups, _clock, project_id = _build()
         other_id = client.post(
             "/projects", json={"name": "Other"}
         ).json()["id"]
@@ -283,7 +356,7 @@ class GroupRejectTest(unittest.TestCase):
 
     def test_closed_group_is_404(self):
         """병합으로 흡수된 closed 껍데기는 검토 대상이 아니다(읽기면과 같은 정본)."""
-        client, analysis, groups, _clock, project_id = _build()
+        client, analysis, _memory, groups, _clock, project_id = _build()
         a = _seed_candidate(analysis, project_id=project_id, logical_key="a")
         b = _seed_candidate(analysis, project_id=project_id, logical_key="b")
         group = _open_group(groups, project_id, a, b)
@@ -302,7 +375,7 @@ class GroupRejectTest(unittest.TestCase):
         )
 
     def test_missing_project_is_404(self):
-        client, _analysis, _groups, _clock, _project_id = _build()
+        client, _analysis, _memory, _groups, _clock, _project_id = _build()
 
         response = _reject(client, "does-not-exist", "cig:any")
 
@@ -310,7 +383,7 @@ class GroupRejectTest(unittest.TestCase):
 
     def test_a_contradicted_group_can_still_be_rejected(self):
         """contradicted도 읽기면이 묶는다(Slice 3) — 거절도 그룹 전체에 적용된다."""
-        client, analysis, groups, _clock, project_id = _build()
+        client, analysis, _memory, groups, _clock, project_id = _build()
         a = _seed_candidate(analysis, project_id=project_id, logical_key="a")
         b = _seed_candidate(analysis, project_id=project_id, logical_key="b")
         group = _open_group(groups, project_id, a, b)
@@ -327,7 +400,7 @@ class GroupRejectTest(unittest.TestCase):
 
     def test_rejection_records_one_group_level_activity_row(self):
         """브리프 A안 — 그룹 행 1줄, after에 두 수를 싣는다(멤버별 행이 아니다)."""
-        client, analysis, groups, _clock, project_id = _build()
+        client, analysis, _memory, groups, _clock, project_id = _build()
         a = _seed_candidate(analysis, project_id=project_id, logical_key="a")
         b = _seed_candidate(analysis, project_id=project_id, logical_key="b")
         confirmed = _seed_candidate(
@@ -351,8 +424,14 @@ class GroupRejectTest(unittest.TestCase):
         )
 
     def test_a_noop_rejection_records_no_activity_row(self):
-        """변경이 없으면 행을 남기지 않는다(일괄 승격의 `if promoted:` 선례)."""
-        client, analysis, groups, _clock, project_id = _build()
+        """변경이 없으면 행을 남기지 않는다(일괄 승격의 `if promoted:` 선례).
+
+        RED 단계에서 이 셀은 우연 통과했다(검증 H2, 2026-09-04) — 라우트가
+        없으면 첫 거절도 404라 before==after가 성립한다. 구현 세션의 RED 기록
+        "5 failed" 산술과 정확히 일치하는 사실이고, 이 셀의 효력은 라우트가
+        있는 지금부터다(셀 3이 먼저 거절을 완료하는 순서 의존은 이미 문서화).
+        """
+        client, analysis, _memory, groups, _clock, project_id = _build()
         a = _seed_candidate(analysis, project_id=project_id, logical_key="a")
         b = _seed_candidate(analysis, project_id=project_id, logical_key="b")
         group = _open_group(groups, project_id, a, b)
