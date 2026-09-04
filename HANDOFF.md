@@ -5,7 +5,7 @@
 > **완료 서술도, 근거·측정치·발견 경위도 여기 쓰지 않는다** — `docs/daily_logs/`(상세) · `docs/system-contract-sot.md` 변경이력 · `CHANGELOG.md`(마일스톤) · `docs/verifications/`(독립 검증) · `docs/plans/*-decisions.md`(왜 그렇게 정했는가)에 있다. **여기 남는 것은 "지키지 않으면 깨지는 것"과 "어디를 보면 되는가"뿐이다.**
 > 편집 규칙은 `CLAUDE.md`·`AGENTS.md`의 "HANDOFF.md" 절에 있다. **~200줄을 넘으면 자가 검수**하고(그 뒤로는 ~100줄마다) 결과를 아래 한 줄로 남긴다.
 >
-> 마지막 자가 검수: **2026-09-05 · 742줄/222KB → 354 → 244줄/48KB**(2차, 오너 지시 *"착수할 수 있는 문서"*. +4줄은 같은 날 docs 고아 전수와 서비스 정책 문서 등재) — 1차는 완료 서술 12개 메모(336줄)와 닫힌 부채 12항목을 걷었고, 2차는 **분류를 고쳤다**: ① 부채 절에 있던 11항목이 실은 계약·규칙·주의였다 → 각 절로 이관 ② "지금 상태"의 절차·하우투 5건을 "코드를 만질 때의 규칙"으로 분리 ③ 모든 항목에서 **근거·측정치·발견 경위를 걷어내고** 정본 포인터로 대체 ④ 낡은 사실 정정(`AUTH_SESSION_TTL_HOURS` 부채는 이미 닫혀 있었다 · `docs/plans` 106/88 → **121/100** · 4000 상수는 `DraftEditor` 가 아니라 `tokenEstimate.ts`).
+> 마지막 자가 검수: **2026-09-05 · 742줄/222KB → 354 → 261줄/52KB**(2차, 오너 지시 *"착수할 수 있는 문서"*. 같은 날 docs 전수·상태 마커 갱신·2차에서 떨어뜨린 표준 제약 복구가 얹혔다) — 1차는 완료 서술 12개 메모(336줄)와 닫힌 부채 12항목을 걷었고, 2차는 **분류를 고쳤다**: ① 부채 절에 있던 11항목이 실은 계약·규칙·주의였다 → 각 절로 이관 ② "지금 상태"의 절차·하우투 5건을 "코드를 만질 때의 규칙"으로 분리 ③ 모든 항목에서 **근거·측정치·발견 경위를 걷어내고** 정본 포인터로 대체 ④ 낡은 사실 정정(`AUTH_SESSION_TTL_HOURS` 부채는 이미 닫혀 있었다 · `docs/plans` 106/88 → **121/100** · 4000 상수는 `DraftEditor` 가 아니라 `tokenEstimate.ts`).
 
 ## 머신 · 기동
 
@@ -123,6 +123,8 @@
 - **새 유료 경로**: 분류표([`quota/billable_actions.py`](services/application/app/quota/billable_actions.py) 가 정본) · 시행 dependency · 402/429 선언 · 확인 헤더가 함께 간다(넷 다 전수 가드). **원장 필드명은 반드시 `target_project_id`** — `project_id` 로 적으면 purge reconciler가 **과금 기록을 지운다**. **입장 뮤텍스 임계 구역에 provider 호출을 넣지 말 것**(한 회원 요청이 91초씩 직렬화된다).
 - **새 endpoint**: `responses=` + dependency + `test_auth_api.py` tier 전수 가드 등재. 저장소 예외는 광의 `except Exception` 보다 먼저 503으로 보존한다.
 - **새 결정 브리프·검증 기록**: [`plans/README.md`](docs/plans/README.md)·검증 인덱스에 등재해야 한다 — [`test_docs_indexes.py`](tests/test_docs_indexes.py) 가 **미등재 문서와 깨진 링크를 양방향으로 막는다**(규칙이 아니라 강제). 같은 가드가 "검증 기록 N건" 류 숫자 주장도 디스크 실측에 묶는다.
+- **★ 계획 문서는 머리에 `상태:` 를 선언하고, 그 값이 [`plans/README.md`](docs/plans/README.md) 상태 열과 같아야 한다**(2026-09-05 가드 신설). **어느 한쪽만 고치면 실패한다** — 상태 정본이 둘이라 갈라지던 것을 묶었다(신설 당시 120행 중 23행이 갈라져 있었고 13건이 두 달째 `Draft` 였다). **어휘는 통일하지 않았다**(오너 2026-08-06 소급 정리 없음 선례) — 요구는 통일이 아니라 **선언**이고, 새 값을 쓰려면 `_STATUS_VOCABULARY` 에 먼저 더한다. **비교는 선두 토큰뿐이라 인덱스 꼬리에 요약을 실을 자유는 남는다.** **★ 문서의 상태를 읽는 자리는 이 열 하나다** — HANDOFF 에 목록을 복사하지 말 것(세 번째 정본이 된다).
+- **★ 설계 원본을 인용할 때는 `§` 번호로 인용하고, 그 문서를 옮기거나 절 번호를 바꾸지 말 것.** [`docs/contracts.md`](docs/contracts.md)·[`writing_agent_prompt.md`](docs/writing_agent_prompt.md)·[`plans/flat-loop-gate.md`](docs/plans/flat-loop-gate.md) 는 **현재 계약 정본이 아니지만 폐기되지도 않았다** — 프로덕션 코드가 절 번호로 인용하는 설계 근거다(각 문서 머리 배너에 인용처가 있다). **주석 인용이라 테스트가 안 잡으므로 이동은 조용히 끊긴다.**
 
 **도메인 계약 — 고치기 전에 알아야 하는 것**
 - **컨텍스트 항목 렌더링은 한 정의다** — [`context_search/item_render.py`](services/application/app/context_search/item_render.py) 를 프롬프트와 예산 회계가 **함께** 쓴다. 항목 렌더링을 바꾸면 예산이 자동으로 따라오지만 **정확히 한 곳에 여유가 있다**: 회계는 인용 번호를 모르므로 `_BUDGET_CITATION_NUMBER=999` 로 센다(항목당 최대 1토큰 과대평가). **여유를 넓히려면 `0 ≤ 여유 ≤ 항목수` 를 단정하는 세 셀을 함께 고친다** — 밴드 뒤에 숨기면 항목을 두 번 세는 과잉 교정이 통과한다.
@@ -159,7 +161,7 @@
 | **auto-promote 503 partial 미기록** | ⓐ 그대로(권장) ⓑ 승격 memory마다 한 행 ⓒ 개수 한 행 | `routers/analysis.py` |
 | **K-3: 창을 모르는 호출은 가드 밖** | ⓐ 그대로 ⓑ 짧은 대기 허용(v1.7.60 개정) ⓒ `/props` 1회 재시도 | v1.7.60 |
 | **`analysis_extractor` D4 정렬 / loop round별 gate decision 노출** | 둘 다 dogfood 데이터가 쌓인 뒤 판단 가치가 올라간다(지금 표본 0) | v1.7.47 |
-| **문서 고아·낡은 상태 마커 처리**(2026-09-05 전수) | ① **부모 계획 12건이 `Draft` 에 멈춰 있다**(`00-foundations`~`08-member-request-quota` · `implementation-plan` · `product-shell` · `flat-loop-gate` · `llm-gateway`) — 기술한 시스템은 대부분 구현·검증 완료인데 마커만 6~7월 그대로다. **[`plans/README.md`](docs/plans/README.md) 자신도 `Draft`** ② **`docs/verification_briefs/2026-06-24`(3건)은 어떤 인덱스에도 없다** — `verifications/` 로 대체된 초기 실험 ③ `benchmarks/2026-07-15`·`live_review_briefs/2026-07-18` 은 인덱싱은 됐지만 **한 번 쓰고 멈췄다** ④ **★ `docs/contracts.md`·`writing_agent_prompt.md` 등은 "죽은 아이디에이션 원본"이 아니다 — 프로덕션 코드가 `§` 번호로 인용하는 살아 있는 설계 근거다**(2026-09-05 실측: `contracts.md §1.3` ← `context_search/service.py`·`indexing/memory_lexical_index.py` · `writing_agent_prompt.md §2.2/§5.2/§6.1/§8.1/§9.1/§17.1` ← `item_render.py`·`writing/models.py`·`writing/prompt.py` · `flat-loop-gate.md` ← **코드 11파일**). **그래서 이 축의 처방은 아카이브 이동이 아니라 "이 문서가 지금 무엇인지" 말하는 배너다** — 지금은 아무 표시가 없어 `contracts.md` 가 이름 때문에 `system-contract-sot.md` 와 혼동되고, 신규 작업자가 6월 계약을 현재형으로 읽을 수 있다(본문이 `MongoDB Is the Source of Truth` 같은 단정형이다). **이동은 그 `§` 인용을 조용히 끊는다**(주석이라 테스트가 안 잡는다) | — |
+| **휴면 문서 디렉터리 처리**(2026-09-05 전수) | **상태 마커 축은 같은 날 닫혔다**(13건 갱신 · 파일↔인덱스 가드 신설 · 설계 원본 4건 배너). **남은 것은 디렉터리 셋뿐**이다: ① **`docs/verification_briefs/2026-06-24`(3건)은 어떤 인덱스에도 없다** — `verifications/` 로 대체된 초기 실험이고, 살아 있는 문서 그래프에서 완전히 끊긴 유일한 파일이 여기 있다 ② `benchmarks/2026-07-15`(1건)·`live_review_briefs/2026-07-18`(2건)은 **인덱싱은 됐지만 한 번 쓰고 멈췄다**(관행이 `verifications/`·`daily_logs/` 로 흡수됐다 — 고아가 아니라 휴면이다). 선택지: ⓐ 인덱스에 "휴면"으로 명시 ⓑ `archive/` 로 옮긴다 ⓒ 그대로 둔다 | — |
 | **`docs/plans` 디렉터리 재편** | 브리프 경로 인용 1,083건/253파일 중 183개가 과거 검증 기록 — **"지금 하지 않는다"가 근거 있는 판단**이고 남은 동기는 미학뿐 | — |
 | **llama `-hf` 리비전 고정** | 최신 추종 vs 현행 고정. 새 리비전이 프롬프트 sha 핀·gate 동작에 주는 영향 미측정 | — |
 
