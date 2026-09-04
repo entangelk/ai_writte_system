@@ -155,7 +155,9 @@ class GroupRejectTest(unittest.TestCase):
         a = _seed_candidate(analysis, project_id=project_id, logical_key="a")
         b = _seed_candidate(analysis, project_id=project_id, logical_key="b")
         c = _seed_candidate(analysis, project_id=project_id, logical_key="c")
-        group = _open_group(groups, project_id, a, b, c)
+        # 멤버 추가 순서는 아이디 순서와 반대다 — 응답이 멤버십 순회 순서가
+        # 아니라 아이디 정렬을 따르는 것(어댑터와 무관한 결정성)을 잠근다.
+        group = _open_group(groups, project_id, c, b, a)
 
         response = _reject(client, project_id, group.group_id)
 
