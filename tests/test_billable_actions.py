@@ -131,6 +131,8 @@ class BillableActionInventoryTest(unittest.TestCase):
             "writing_generate", "writing_gate", "writing_revise",
             "writing_revise_and_gate", "writing_report", "writing_accept",
             "analysis_extract", "analysis_compare", "draft_finalize", "context_search",
+            # 정체성 그룹 승인(2026-09-04, Slice 5) — 판정 fan-out 유료 경로.
+            "identity_group_approve",
         })
 
     def test_the_fan_out_marking_matches_the_measured_paths(self) -> None:
@@ -138,7 +140,9 @@ class BillableActionInventoryTest(unittest.TestCase):
         # 판정을 부르고(analysis/compare.py 의 후보 루프), 나머지는 요청당 호출 수가
         # 정책 상수로 묶여 있다.
         marked = {a.action for a in BILLABLE_ACTIONS if a.fan_out}
-        self.assertEqual(marked, {"analysis_compare"})
+        # compare 는 매칭 후보 1건마다, identity_group_approve 는 남은 멤버마다
+        # 판정을 부른다(Slice 5, 2026-09-04).
+        self.assertEqual(marked, {"analysis_compare", "identity_group_approve"})
 
 
 class SameLogicalRequestTest(unittest.TestCase):
@@ -215,6 +219,9 @@ class BillableActionObservabilityCoverageTest(unittest.TestCase):
         "writing_accept": (
             "tests.test_llm_call_sites", "EndpointOpensAScopeTest",
             "test_accept_endpoint_scopes_its_gate_call"),
+        "identity_group_approve": (
+            "tests.test_identity_group_approve", "GroupApproveAuditRowsTest",
+            "test_each_judged_member_leaves_exactly_one_row_under_the_group"),
         "analysis_extract": (
             "tests.test_llm_call_scope", "RunEndpointOpensAScopeTest",
             "test_run_endpoint_records_the_calls_its_runner_makes"),

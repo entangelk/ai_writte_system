@@ -362,5 +362,11 @@ _BILLABLE_400_404_409_502_CONFIG: dict[int | str, dict] = _billable(
     _ERRORS_400_404_409_502_CONFIG)
 
 
+# 정체성 그룹 승인(Slice 5, 2026-09-04) — 유료(판정 fan-out)에 404/409와
+# judge 얼굴의 503이 얹힌 선언.
+_BILLABLE_404_409_JUDGE: dict[int | str, dict] = _billable(
+    _ERRORS_404_409_JUDGE)
+
+
 _BILLABLE_400_404_502_504_CONFIG: dict[int | str, dict] = _billable(
     _ERRORS_400_404_502_504_CONFIG)

@@ -6382,7 +6382,9 @@ export interface operations {
     approve_review_inbox_group_projects__project_id__analysis_review_inbox_groups__group_id__approve_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Confirm-Duplicate"?: string | null;
+            };
             path: {
                 project_id: string;
                 group_id: string;
@@ -6408,6 +6410,15 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Payment Required */
+            402: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6449,6 +6460,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description The store is unreachable, or no compare judge is configured for a group that needs one. Recover the store / configure the judge and retry the same revision — nothing was started. */

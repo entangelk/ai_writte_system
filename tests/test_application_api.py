@@ -2592,8 +2592,9 @@ class AnalysisErrorContractDeclarationTest(unittest.TestCase):
          "post"): {"401", "403", "404", "503"},
         # 정체성 그룹 Slice 5(2026-09-04): 그룹 승인 오케스트레이션. 409는
         # revision mismatch(D1=A), 503은 스토리지+judge 미구성 fail-fast.
+        # 402/429: 유료(8.0 B4 — 판정 fan-out이 llm_call_scope를 연다).
         ("/projects/{project_id}/analysis/review-inbox/groups/{group_id}/approve",
-         "post"): {"401", "403", "404", "409", "503"},
+         "post"): {"401", "402", "403", "429", "404", "409", "503"},
         ("/projects/{project_id}/analysis/gate-findings", "get"): {"401", "403", "404", "503"},
         ("/projects/{project_id}/analysis/gate-findings/{finding_id}", "get"):
             {"401", "403", "404", "503"},

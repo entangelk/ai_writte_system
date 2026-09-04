@@ -18,6 +18,11 @@
   수 없는 키**라는 점이 이 칸의 핵심이다.
 - ``analysis_compare`` — 서버 생성. 재실행은 매번 provider 를 다시 부르는 **진짜
   재실행**이라 두 번 세는 것이 옳다. 네트워크 재전송은 8.2b 잠금이 덮는다.
+- ``identity_group_approve`` — 서버 생성(2026-09-04, Slice 5). mid-failure 재개
+  재호출은 남은 멤버만큼 provider 를 다시 부르는 진짜 재실행이라 같은 모양이다.
+  ``(group_id, revision)`` 을 키로 접으면 나중의 새 revision 재승인이 무과금으로
+  접히는데, 빈 키·접힌 키로 **다른 요청이 무과금** 되는 것이 이 표가 더 나쁜 쪽으로
+  보는 실패다.
 - ``context_search`` — ``body.idempotency_key``. 호출자가 재시도할 때 드는 키다.
 
 값이 비어 있으면 **서버 생성으로 떨어진다**: 막지 못하는 것은 재전송 중복뿐이고
@@ -61,6 +66,7 @@ DEDUPE_SOURCES: dict[str, tuple[DedupeSource, str | None]] = {
     "analysis_extract": (DedupeSource.PATH, "job_id"),
     "draft_finalize": (DedupeSource.BODY, "idempotency_key"),
     "analysis_compare": (DedupeSource.SERVER, None),
+    "identity_group_approve": (DedupeSource.SERVER, None),
     "context_search": (DedupeSource.BODY, "idempotency_key"),
 }
 

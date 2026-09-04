@@ -3,9 +3,9 @@
 ``main.py`` 의 ``create_app()`` 에서 옮겨온 register 함수(R1). handler 본문은
 byte-동일이다.
 
-**유료 2경로** 가 섞여 있다 — ``run`` · ``compare`` 가
-``_REQUIRE_PROJECT_OWNER_BILLABLE`` (소유권 → 시행 순서) 이고 나머지 21경로는
-``_REQUIRE_PROJECT_OWNER`` 다. 그 순서가 곧 "404·403 은 무과금" 이며
+**유료 3경로** 가 섞여 있다 — ``run`` · ``compare`` · (정체성 그룹 Slice 5)
+``groups/{group_id}/approve`` 가 ``_REQUIRE_PROJECT_OWNER_BILLABLE`` (소유권 →
+시행 순서) 이고 나머지 20경로는 ``_REQUIRE_PROJECT_OWNER`` 다. 그 순서가 곧 "404·403 은 무과금" 이며
 ``BillableRouteWiringTest`` 가 route 선언에서 직접 잰다(요청 구동 테스트로는
 안 보이는 자리다).
 
@@ -76,6 +76,7 @@ from ..api.dependencies import (
 )
 from ..api.errors import (
     _BILLABLE_400_404_409_502_CONFIG,
+    _BILLABLE_404_409_JUDGE,
     _BILLABLE_404_502_CONFIG,
     _ERRORS_400_404,
     _ERRORS_400_404_409,
@@ -932,8 +933,8 @@ def register_analysis(
 
     @app.post(
         "/projects/{project_id}/analysis/review-inbox/groups/{group_id}/approve",
-        responses=_owned(_ERRORS_404_409_JUDGE),
-        dependencies=_REQUIRE_PROJECT_OWNER,
+        responses=_owned(_BILLABLE_404_409_JUDGE),
+        dependencies=_REQUIRE_PROJECT_OWNER_BILLABLE,
     )
     async def approve_review_inbox_group(
         project_id: str, group_id: str, request: ApproveGroupRequest,
@@ -942,6 +943,8 @@ def register_analysis(
         # 정체성 그룹 Slice 5(그룹 승인, D1=A·D2=A·D3=A·D4=A) — 첫 eligible을
         # canonical로 승격하고 나머지를 그 canonical로 수렴시킨다. revision이
         # 멱등 key를 겸한다(불일치 409), 진행 문서가 재시도를 이어간다.
+        # 유료(8.0 B4/B6) — 판정이 남은 멤버만큼 provider를 부르는 fan-out 경로라
+        # compare와 같은 모양으로 시행 dependency를 단다(404·403은 무과금).
         try:
             _require_project_exists(project_id)
         except NotFound as exc:

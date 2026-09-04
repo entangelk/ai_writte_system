@@ -22,7 +22,7 @@
   여는가"이며, 그 기준에 대해서는 가드가 기계적으로 판정한다. **다만 그것이
   "provider를 부르는 route는 반드시 잡힌다"를 뜻하지는 않는다** — scope를 아예 열지
   않는 route는 관측도 분류도 비껴간다(``ObservedProvider.generate``가 scope 없는
-  호출을 미기록 통과시키는 것은 worker·script를 위한 계약이다). 현재 유료 9경로는
+  호출을 미기록 통과시키는 것은 worker·script를 위한 계약이다). 현재 유료 10경로는
   per-endpoint 관측 셀로 덮여 있고(``BillableActionObservabilityCoverageTest``),
   남은 것은 관습 위반 미래 route에 대한 잔존 한계다(2026-08-03 독립 검증 H1,
   HANDOFF 추적 부채). 임베딩·색인(색인 rebuild·재색인 outbox·색인 worker)은 이번
@@ -87,6 +87,13 @@ BILLABLE_ACTIONS: tuple[BillableAction, ...] = (
     # 기존 기억과의 대조. 매칭된 후보 1건마다 판정을 부른다 → fan-out(B3).
     BillableAction("analysis_compare", "POST",
                    "/projects/{project_id}/analysis/jobs/{job_id}/compare",
+                   fan_out=True),
+    # 정체성 그룹 승인(2026-09-04, identity group Slice 5) — 남은 멤버마다 판정을
+    # 부른다 → fan-out(B3). mid-failure 재개 재호출도 provider를 다시 부르는 진짜
+    # 재실행이라 analysis_compare와 같은 서버 생성 키다(dedupe 참조).
+    BillableAction("identity_group_approve", "POST",
+                   "/projects/{project_id}/analysis/review-inbox/groups/"
+                   "{group_id}/approve",
                    fan_out=True),
     # 컨텍스트 검색(질의 플래너가 LLM 이다).
     BillableAction("context_search", "POST",
