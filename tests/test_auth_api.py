@@ -115,7 +115,7 @@ def _client(*, ttl=timedelta(hours=1), core_sot=None, index_sync_outbox=None,
             memory_service=None, analysis_service=None, access_grants=None,
             admin_audit=None, project_name_history=None,
             writing_generation_job_service=None, writing_scratch_service=None,
-            identity_group_service=None):
+            identity_group_service=None, identity_group_approval_service=None):
     users = UserService(InMemoryUserRepository(), hasher=_FakeHasher())
     sessions = SessionService(InMemorySessionRepository(), ttl=ttl)
     users.create_user(username="alice", password="pw123")
@@ -128,6 +128,7 @@ def _client(*, ttl=timedelta(hours=1), core_sot=None, index_sync_outbox=None,
         writing_generation_job_service=writing_generation_job_service,
         writing_scratch_service=writing_scratch_service,
         identity_group_service=identity_group_service,
+        identity_group_approval_service=identity_group_approval_service,
     )
     # https base_url on purpose: the cookie ships Secure by default, so an http
     # client would silently drop it and every session test would pass/fail for
@@ -1904,9 +1905,10 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # 더해 73/99 가 됐다 — 같은 dependency 지만 PUT 이라 grant 는 403 이다
         # (`_GRANTED_METHODS` 가 GET/HEAD 뿐이다).
         # 정체성 그룹 Slice 4(2026-09-04)가 그룹 거절 POST 를 project tier 에
-        # 더해 75/101 이 됐다.
-        self.assertEqual(len(by_tier["project"]), 75)
-        self.assertEqual(len(tiers), 101)
+        # 더해 75/101 이 됐고, Slice 5(같은 날)가 그룹 승인 POST 를 더해
+        # 76/102 이 됐다.
+        self.assertEqual(len(by_tier["project"]), 76)
+        self.assertEqual(len(tiers), 102)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:

@@ -186,6 +186,20 @@ class MemoryService:
             is not None
         )
 
+    def memory_for_candidate(
+        self, *, project_id: str, candidate_id: str
+    ) -> "MemoryEntry | None":
+        """The memory linked to a candidate (promote or versioned apply), if any.
+
+        정체성 그룹 Slice 5(그룹 승인): ``is_candidate_promoted`` 의 판전면 —
+        그룹 승인은 존재만이 아니라 그 memory가 현재 canonical인지 보고, 멤버가
+        이미 가진 canonical을 채택해 두 번째 canonical을 만들지 않는다.
+        """
+        memory_id = self._repo.find_memory_by_candidate(project_id, candidate_id)
+        if memory_id is None:
+            return None
+        return self._require_memory(project_id, memory_id)
+
     def promote_candidate(
         self,
         *,

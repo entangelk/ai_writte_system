@@ -24,6 +24,10 @@ from services.application.app.analysis.service import (
     AnalysisService,
     InMemoryAnalysisRepository,
 )
+from services.application.app.analysis.identity_group_approvals import (
+    CandidateIdentityGroupApprovalService,
+    InMemoryCandidateIdentityGroupApprovalRepository,
+)
 from services.application.app.analysis.identity_groups import (
     CandidateIdentityGroupService,
     InMemoryCandidateIdentityGroupRepository,
@@ -63,6 +67,10 @@ class OwnerProjectPurgeTest(unittest.TestCase):
         self.identity_spy = _PurgeSpy(CandidateIdentityGroupService(
             InMemoryCandidateIdentityGroupRepository()
         ))
+        # 2026-09-04 Slice 5: 승인 진행 문서도 같은 파괴 그래프를 탄다.
+        self.approval_spy = _PurgeSpy(CandidateIdentityGroupApprovalService(
+            InMemoryCandidateIdentityGroupApprovalRepository()
+        ))
         self.admin_audit = AdminAuditService(InMemoryAdminAuditRepository())
         self.name_history = ProjectNameHistoryService(
             InMemoryProjectNameHistoryRepository()
@@ -71,6 +79,7 @@ class OwnerProjectPurgeTest(unittest.TestCase):
             core_sot=self.core_sot, index_sync_outbox=self.sync_outbox,
             memory_service=self.memory_spy, analysis_service=self.analysis_spy,
             identity_group_service=self.identity_spy,
+            identity_group_approval_service=self.approval_spy,
             admin_audit=self.admin_audit, project_name_history=self.name_history,
         )
         self.users.create_user(username="bob", password="pw456")
@@ -102,6 +111,7 @@ class OwnerProjectPurgeTest(unittest.TestCase):
         self.assertEqual(self.memory_spy.purged, [self.project_id])
         self.assertEqual(self.analysis_spy.purged, [self.project_id])
         self.assertEqual(self.identity_spy.purged, [self.project_id])
+        self.assertEqual(self.approval_spy.purged, [self.project_id])
         # worker drain(6c) 용 enqueue — 이것이 빠지면 vector/index 가 잔류한다.
         # (아카이브가 남긴 PROJECT_ARCHIVED 행도 같이 있다 — 그것이 선행 단계다.)
         entries = list(self.outbox_repo.outbox_entries.values())

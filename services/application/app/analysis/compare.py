@@ -150,6 +150,42 @@ class AnalysisCompareService:
             )
         return tuple(proposals)
 
+    @property
+    def has_judge(self) -> bool:
+        """정체성 그룹 Slice 5 — 남은 멤버 판정 전 fail-fast(503) 의사결정용."""
+        return self._judge is not None
+
+    async def judge_against(
+        self, *, candidate: AnalysisCandidate, memory: MemoryEntry
+    ) -> ActionProposal:
+        """정체성 그룹 Slice 5(그룹 승인) — 강제 대상 판정.
+
+        대상 canonical은 그룹이 정한다(첫 eligible 멤버의 승격/채택). 그래서
+        ``_compare_candidate`` 의 결정적 대상 찾기(scope matcher·create
+        폴스루·중복 conflict)를 거치지 않고 judge seam만 재사용한다 — 그룹
+        승인이 두 번째 canonical을 만들지 않는 것(계획 "canonical 중복 생성
+        방지")이 이 분기의 이유다. 검증(판정 축 4값)은 같은 규칙을 쓴다.
+        """
+        if self._judge is None:
+            raise CompareJudgeNotConfigured(
+                "a candidate must be judged but no compare judge is configured"
+            )
+        result = self._judge.judge(candidate=candidate, memory=memory)
+        if inspect.isawaitable(result):
+            result = await result
+        if result.action not in JUDGE_ACTIONS:
+            raise InvalidJudgeResult(
+                f"judge returned {result.action.value}, which is not a valid "
+                "matched-pair action"
+            )
+        return ActionProposal(
+            candidate_id=candidate.id,
+            candidate_type=candidate.candidate_type,
+            action=result.action,
+            matched_memory_id=memory.id,
+            rationale=result.rationale,
+        )
+
     async def _compare_candidate(
         self, project_id: str, job_id: str, candidate: AnalysisCandidate
     ) -> ActionProposal:

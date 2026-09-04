@@ -232,6 +232,22 @@ _ERRORS_400_404_409: dict[int | str, dict] = _protected({
 })
 
 
+# 정체성 그룹 승인(Slice 5, 2026-09-04) — 503의 두 얼굴: 스토리지 장애(전역
+# handler)와 compare judge 미구성 fail-fast(compare endpoint 선례). auto-promote의
+# 부분 봉투와 달리 body는 균일 detail이라 설명만 갈라진다.
+_ERRORS_404_409_JUDGE: dict[int | str, dict] = _protected({
+    404: _ERROR,
+    409: _ERROR,
+    503: {
+        "model": ErrorDetailResponse,
+        "description": "The store is unreachable, or no compare judge is "
+                       "configured for a group that needs one. Recover the "
+                       "store / configure the judge and retry the same "
+                       "revision — nothing was started.",
+    },
+})
+
+
 # D8-5 admin surface. 403 = "not an admin" (see _admin), and it is additive over
 # the same 401/503 every protected operation carries.
 _ERRORS_ADMIN: dict[int | str, dict] = _admin(_protected({503: _STORAGE_503}))

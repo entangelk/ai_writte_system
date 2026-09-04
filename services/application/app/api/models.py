@@ -875,6 +875,12 @@ class ReconcileCharacterRequest(BaseModel):
     action: str
 
 
+class ApproveGroupRequest(BaseModel):
+    """정체성 그룹 승인(Slice 5, D1=A) — revision이 멱등 key를 겸한다."""
+
+    expected_revision: int
+
+
 class EditCandidateRequest(BaseModel):
     payload: dict[str, object]
 

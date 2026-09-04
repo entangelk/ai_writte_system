@@ -1,10 +1,10 @@
-"""분석 도메인 route (``/projects/{project_id}/analysis*`` 22 operation).
+"""분석 도메인 route (``/projects/{project_id}/analysis*`` 23 operation).
 
 ``main.py`` 의 ``create_app()`` 에서 옮겨온 register 함수(R1). handler 본문은
 byte-동일이다.
 
 **유료 2경로** 가 섞여 있다 — ``run`` · ``compare`` 가
-``_REQUIRE_PROJECT_OWNER_BILLABLE`` (소유권 → 시행 순서) 이고 나머지 20경로는
+``_REQUIRE_PROJECT_OWNER_BILLABLE`` (소유권 → 시행 순서) 이고 나머지 21경로는
 ``_REQUIRE_PROJECT_OWNER`` 다. 그 순서가 곧 "404·403 은 무과금" 이며
 ``BillableRouteWiringTest`` 가 route 선언에서 직접 잰다(요청 구동 테스트로는
 안 보이는 자리다).
@@ -29,6 +29,7 @@ from services.application.app.analysis.compare import (
 from services.application.app.analysis.extractor import AnalysisExtractionError
 from services.application.app.analysis.identity_groups import (
     CandidateIdentityGroupNotFoundError,
+    CandidateIdentityGroupRevisionMismatch,
 )
 from services.application.app.analysis.models import (
     AnalysisCandidateStatus,
@@ -80,6 +81,7 @@ from ..api.errors import (
     _ERRORS_400_404_409,
     _ERRORS_404,
     _ERRORS_404_409,
+    _ERRORS_404_409_JUDGE,
     _ERRORS_404_STORAGE,
     _STORAGE_ERRORS,
     _owned,
@@ -87,6 +89,7 @@ from ..api.errors import (
 )
 from ..api.models import (
     ApplyMemoryRequest,
+    ApproveGroupRequest,
     CreateAnalysisJobRequest,
     EditCandidateRequest,
     ReconcileCharacterRequest,
@@ -924,6 +927,72 @@ def register_analysis(
             "group_id": group_id,
             "rejected": list(result.rejected),
             "skipped": list(result.skipped),
+            "idempotent_replay": result.idempotent_replay,
+        }
+
+    @app.post(
+        "/projects/{project_id}/analysis/review-inbox/groups/{group_id}/approve",
+        responses=_owned(_ERRORS_404_409_JUDGE),
+        dependencies=_REQUIRE_PROJECT_OWNER,
+    )
+    async def approve_review_inbox_group(
+        project_id: str, group_id: str, request: ApproveGroupRequest,
+        current=Depends(require_authenticated_user),
+    ) -> dict[str, object]:
+        # 정체성 그룹 Slice 5(그룹 승인, D1=A·D2=A·D3=A·D4=A) — 첫 eligible을
+        # canonical로 승격하고 나머지를 그 canonical로 수렴시킨다. revision이
+        # 멱등 key를 겸한다(불일치 409), 진행 문서가 재시도를 이어간다.
+        try:
+            _require_project_exists(project_id)
+        except NotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # 판정 pair마다 감사 행이 남는다(compare judge 재사용 — 신규 site 아님).
+        # 상관축은 group_id: 이 오케스트레이션에는 잡이 없다.
+        with llm_call_scope(llm_call_audit, project_id=project_id,
+                            correlation_id=group_id) as scope:
+            try:
+                result = await identity_group_review.approve_group(
+                    project_id=project_id, group_id=group_id,
+                    expected_revision=request.expected_revision,
+                )
+            except CandidateIdentityGroupRevisionMismatch as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except CompareJudgeNotConfigured as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+            except (CandidateIdentityGroupNotFoundError, AnalysisNotFound,
+                    NotFound) as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            # 스토리지 실패는 잡지 않는다 — 전역 handler의 503(개별 reject와
+            # 같은 모양). step마다 진행을 저장하므로 재호출이 이어간다.
+            if any(step.error == "InvalidJudgeResult" for step in result.steps):
+                # terminal parse 거부의 재분류(compare endpoint·Slice 2와 같은
+                # 모양) — 마지막 행이 실패한 repair다.
+                scope.reclassify_last_as_parse_error("InvalidJudgeResult")
+        if not result.idempotent_replay:
+            activity.record(
+                project_id=project_id, actor_user_id=current.id,
+                action="identity_group_approved",
+                target_type="candidate_identity_group",
+                target_id=group_id,
+                after=(f"applied={result.applied_count}, "
+                       f"conflict={result.conflict_count}, "
+                       f"skipped={result.skipped_count}"),
+            )
+        return {
+            "group_id": group_id,
+            "expected_revision": result.expected_revision,
+            "canonical_memory_id": result.canonical_memory_id,
+            "steps": [
+                {
+                    "candidate_id": step.candidate_id,
+                    "status": step.status.value,
+                    "action": step.action,
+                    "memory_id": step.memory_id,
+                    "version": step.version,
+                    "error": step.error,
+                }
+                for step in result.steps
+            ],
             "idempotent_replay": result.idempotent_replay,
         }
 

@@ -107,12 +107,15 @@ def normalize_relation_pair(
     return right_candidate_id, left_candidate_id
 
 
-def _truncate_to_ms(value: datetime) -> datetime:
+def truncate_to_ms(value: datetime) -> datetime:
     """클록 해상도를 BSON 날짼 ms 로 맞춘다(검증 B1 폐쇄).
 
     BSON 날짼 ms 까지만 저장하므로 µs 정밀 클록을 그대로 쓰면 실몽고 왕복의
     데이터클래스 동등성(``==``)이 깨진다(프로브 실측 760724µs→760000µs).
     쓰기 시점에 잘라 두면 in-memory 와 Mongo 가 같은 값을 말한다.
+
+    Slice 5 의 승인 진행 저장(``identity_group_approvals``)이 같은 계약을
+    공유해 공개 이름이 됐다.
     """
     return value.replace(microsecond=(value.microsecond // 1000) * 1000)
 
@@ -299,6 +302,22 @@ class CandidateIdentityGroupTypeError(CandidateIdentityGroupError):
     pass
 
 
+class CandidateIdentityGroupRevisionMismatch(CandidateIdentityGroupError):
+    """Slice 5(그룹 승인) — 요청 expected_revision ≠ 그룹 현재 revision(409).
+
+    ``revision`` 은 Slice 0 부터 "승격 액션의 낙관적 동시성 축"으로 지정됐다.
+    착수 브리프 D1=A: revision이 멱등 key를 겸한다 — 같은 revision 재전송은
+    replay/이어가기, 불일치는 클라이언트가 재동기화해야 한다는 신호다.
+    """
+
+    def __init__(self, *, expected: int, current: int) -> None:
+        super().__init__(
+            f"expected revision {expected} but the group is at revision {current}"
+        )
+        self.expected = expected
+        self.current = current
+
+
 class CandidateIdentityGroupService:
     """Slice 0 의 public service — 다음 Slice 는 이 면만 사용한다(계획 인계 조항)."""
 
@@ -313,7 +332,7 @@ class CandidateIdentityGroupService:
         raw_clock = clock or (lambda: datetime.now(UTC))
         # B1: 주입 클록이든 기본 클록이든 ms 절단을 통과시킨다 — Mongo 왕복이
         # 동등성을 유지하는 것은 서비스 계약이지 클록 운이 아니다.
-        self._clock = lambda: _truncate_to_ms(raw_clock())
+        self._clock = lambda: truncate_to_ms(raw_clock())
         self._id_factory = id_factory or (lambda: "cig:" + uuid4().hex)
 
     def purge_project(self, *, project_id: str) -> None:

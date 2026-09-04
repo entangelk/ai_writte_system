@@ -73,6 +73,7 @@ async def execute_project_purge(
     analysis,
     review_queue,
     identity_groups,
+    identity_group_approvals,
     gate_findings,
     writing_generation_jobs,
     writing_scratch,
@@ -146,6 +147,9 @@ async def execute_project_purge(
         # 2026-09-02 Slice 0: identity group 3컬렉션(그룹·멤버·관계)도 project
         # 자식 — 남으면 미승인 후보 그룹·판정이 프로젝트보다 오래 산다.
         identity_groups.purge_project(project_id=project_id)
+        # 정체성 그룹 Slice 5(2026-09-04): 승인 진행 문서도 project 자식 —
+        # 그룹·멤버·관계와 같은 짝으로 지운다.
+        identity_group_approvals.purge_project(project_id=project_id)
         gate_findings.purge_project(project_id=project_id)
         writing_generation_jobs.purge_project(project_id=project_id)
         writing_scratch.purge_project(project_id=project_id)
@@ -202,6 +206,7 @@ def register_admin(
     analysis,
     review_queue,
     identity_groups,
+    identity_group_approvals,
     gate_findings,
     writing_generation_jobs,
     writing_scratch,
@@ -633,6 +638,7 @@ def register_admin(
             project_name_history=project_name_history,
             memory=memory, analysis=analysis, review_queue=review_queue,
             identity_groups=identity_groups,
+            identity_group_approvals=identity_group_approvals,
             gate_findings=gate_findings,
             writing_generation_jobs=writing_generation_jobs,
             writing_scratch=writing_scratch,

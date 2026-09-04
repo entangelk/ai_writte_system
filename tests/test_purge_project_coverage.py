@@ -7,13 +7,17 @@ repository 계약(10개)이 모두 ``purge_project`` 를 노출하지 않으면 
 
 D8-6a(core_sot 8, v1.8.11 `scene_notes` 합류로 9) + D8-6b-1(memory 1·analysis 3) +
 D8-6b-2(writing 3·observability 1·context_search 1·review 1) + identity group 3
-(2026-09-02 Slice 0, 그룹·멤버·관계) = 10 repository 계약 / 22 컬렉션.
+(2026-09-02 Slice 0, 그룹·멤버·관계) + 승인 진행 1(2026-09-04 Slice 5) =
+11 repository 계약 / 23 컬렉션.
 """
 
 from __future__ import annotations
 
 import unittest
 
+from services.application.app.analysis.identity_group_approvals import (
+    CandidateIdentityGroupApprovalRepository,
+)
 from services.application.app.analysis.identity_groups import (
     CandidateIdentityGroupRepository,
 )
@@ -62,6 +66,8 @@ _PURGE_REPOSITORIES = [
     ("GateFindingRepository", GateFindingRepository),
     ("ReviewQueueRepository", ReviewQueueRepository),
     ("CandidateIdentityGroupRepository", CandidateIdentityGroupRepository),
+    ("CandidateIdentityGroupApprovalRepository",
+     CandidateIdentityGroupApprovalRepository),
 ]
 
 
@@ -80,8 +86,8 @@ class PurgeProjectCoverageTest(unittest.TestCase):
 
     def test_purge_repository_roster_is_complete(self):
         # 과잉 교정 가드(over-strict): 실수로 이 목록에 project-scoped 가 아닌 repository
-        # 를 끼워넣거나 빼면, 10 이라는 수 자체가 의도임을 고정한다(22 컬렉션 = 10 계약).
-        self.assertEqual(len(_PURGE_REPOSITORIES), 10)
+        # 를 끼워넣거나 빼면, 11 이라는 수 자체가 의도임을 고정한다(23 컬렉션 = 11 계약).
+        self.assertEqual(len(_PURGE_REPOSITORIES), 11)
 
 
 class IndexingBackendPurgeCoverageTest(unittest.TestCase):

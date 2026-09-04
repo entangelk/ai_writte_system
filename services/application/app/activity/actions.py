@@ -121,7 +121,7 @@ _CANONICAL: tuple[ActivityAction, ...] = (
                    "/projects/{project_id}/drafts/{draft_id}/note", "scene_note"),
 )
 
-#: 검토 결정 10 — 원고가 아니라 **기억을 바꾸는 사용자 판단**.
+#: 검토 결정 11 — 원고가 아니라 **기억을 바꾸는 사용자 판단**.
 _REVIEW: tuple[ActivityAction, ...] = (
     ActivityAction("candidate_promoted", "POST",
                    "/projects/{project_id}/analysis/candidates/{candidate_id}/promote",
@@ -157,6 +157,13 @@ _REVIEW: tuple[ActivityAction, ...] = (
     ActivityAction("identity_group_rejected", "POST",
                    "/projects/{project_id}/analysis/review-inbox/groups/"
                    "{group_id}/reject",
+                   "candidate_identity_group"),
+    # 정체성 그룹 승인(2026-09-04, Slice 5) — Slice 4 A안이 승인의 기록 모양에도
+    # 묶는다: 그룹 행 1줄, `after`="applied=N, conflict=M, skipped=K", 변경≥1일
+    # 때만. applied/conflict 멤버의 candidate_confirmed 행은 남기지 않는다.
+    ActivityAction("identity_group_approved", "POST",
+                   "/projects/{project_id}/analysis/review-inbox/groups/"
+                   "{group_id}/approve",
                    "candidate_identity_group"),
 )
 

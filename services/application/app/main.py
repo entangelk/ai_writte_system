@@ -78,6 +78,10 @@ from services.application.app.analysis.identity_groups import (
     CandidateIdentityGroupService,
     InMemoryCandidateIdentityGroupRepository,
 )
+from services.application.app.analysis.identity_group_approvals import (
+    CandidateIdentityGroupApprovalService,
+    InMemoryCandidateIdentityGroupApprovalRepository,
+)
 from services.application.app.analysis.identity_group_review import (
     CandidateIdentityGroupReviewService,
 )
@@ -394,6 +398,27 @@ def _default_candidate_identity_group_service() -> CandidateIdentityGroupService
 
     return CandidateIdentityGroupService(
         MongoCandidateIdentityGroupRepository.from_uri(
+            uri,
+            db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME),
+        )
+    )
+
+
+def _default_identity_group_approval_service() -> CandidateIdentityGroupApprovalService:
+    # 정체성 그룹 승인 진행 저장(Slice 5, 2026-09-04) — 그룹 승인의 단계별
+    # 상태. 그룹 저장소와 같은 게이팅(Mongo-backed when configured).
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if not uri:
+        return CandidateIdentityGroupApprovalService(
+            InMemoryCandidateIdentityGroupApprovalRepository()
+        )
+    from services.application.app.analysis.identity_group_approvals_mongo import (
+        MongoCandidateIdentityGroupApprovalRepository,
+    )
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+
+    return CandidateIdentityGroupApprovalService(
+        MongoCandidateIdentityGroupApprovalRepository.from_uri(
             uri,
             db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME),
         )
@@ -1685,6 +1710,9 @@ def create_app(
     compare_service: AnalysisCompareService | None = None,
     review_queue_service: ReviewQueueService | None = None,
     identity_group_service: CandidateIdentityGroupService | None = None,
+    identity_group_approval_service: (
+        CandidateIdentityGroupApprovalService | None
+    ) = None,
     gate_finding_service: GateFindingService | None = None,
     writing_service: WritingService | None = None,
     writing_gate_service: WritingGateService | None = None,
@@ -1817,6 +1845,11 @@ def create_app(
     identity_groups = (
         identity_group_service or _default_candidate_identity_group_service()
     )
+    # 정체성 그룹 승인(Slice 5)의 단계별 진행 저장 — 그룹 저장소와 같은 게이팅.
+    identity_group_approvals = (
+        identity_group_approval_service
+        or _default_identity_group_approval_service()
+    )
     apply_service = MemoryApplyService(
         memory_service=memory, review_queue=review_queue
     )
@@ -1842,12 +1875,18 @@ def create_app(
         identity_groups=identity_groups,
     )
     # 정체성 그룹 Slice 4: 그룹 단위 검토 액션 — 그룹 서비스(저장 멤버십)와
-    # 개별 후보 거절 경로를 잇는 오케스트레이션. 신규 조립 파라미터는 없다
-    # (이미 주입된 서비스들의 순수 조합이다).
+    # 개별 후보 거절 경로를 잇는 오케스트레이션. Slice 5(승인)가 같은 서비스에
+    # 진행 저장·판정 seam·버전 upsert·confirm 부수효과를 더했다 — 여전히 이미
+    # 주입된 서비스들의 조합이고 신규 조립 파라미터는 approval 저장소 하나다.
     identity_group_review = CandidateIdentityGroupReviewService(
         identity_groups=identity_groups,
         candidate_review=candidate_review,
         analysis_service=analysis,
+        approvals=identity_group_approvals,
+        compare=compare,
+        memory_service=memory,
+        review_queue=review_queue,
+        removal_outbox=sync_outbox,
     )
     gate_findings = gate_finding_service or _default_gate_finding_service()
     # Phase 5.9 L9 B: every bounded-loop termination is recorded to a durable,
@@ -2027,6 +2066,7 @@ def create_app(
             writing_loop_audit=writing_loop_audit, memory=memory,
             analysis=analysis, review_queue=review_queue,
             identity_groups=identity_groups,
+            identity_group_approvals=identity_group_approvals,
             gate_findings=gate_findings,
             writing_generation_jobs=writing_generation_jobs,
             writing_scratch=writing_scratch, sync_outbox=sync_outbox,
@@ -2058,6 +2098,7 @@ def create_app(
         project_name_history=project_name_history, memory=memory,
         analysis=analysis, review_queue=review_queue,
         identity_groups=identity_groups,
+        identity_group_approvals=identity_group_approvals,
         gate_findings=gate_findings,
         writing_generation_jobs=writing_generation_jobs,
         writing_scratch=writing_scratch,

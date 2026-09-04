@@ -2590,6 +2590,10 @@ class AnalysisErrorContractDeclarationTest(unittest.TestCase):
         # 409를 내지 않는다(terminal은 skip) — 얼굴은 소유·존재·저장소뿐이다.
         ("/projects/{project_id}/analysis/review-inbox/groups/{group_id}/reject",
          "post"): {"401", "403", "404", "503"},
+        # 정체성 그룹 Slice 5(2026-09-04): 그룹 승인 오케스트레이션. 409는
+        # revision mismatch(D1=A), 503은 스토리지+judge 미구성 fail-fast.
+        ("/projects/{project_id}/analysis/review-inbox/groups/{group_id}/approve",
+         "post"): {"401", "403", "404", "409", "503"},
         ("/projects/{project_id}/analysis/gate-findings", "get"): {"401", "403", "404", "503"},
         ("/projects/{project_id}/analysis/gate-findings/{finding_id}", "get"):
             {"401", "403", "404", "503"},
@@ -2607,7 +2611,7 @@ class AnalysisErrorContractDeclarationTest(unittest.TestCase):
         return {code for code in responses if code not in ("200", "204", "422")}
 
     def test_declared_error_statuses_match_the_lock_list(self):
-        self.assertEqual(len(self.EXPECTED), 22)
+        self.assertEqual(len(self.EXPECTED), 23)
         for (path, method), expected in self.EXPECTED.items():
             with self.subTest(path=path, method=method):
                 self.assertEqual(self._declared(path, method), expected)

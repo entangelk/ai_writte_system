@@ -773,6 +773,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{project_id}/analysis/review-inbox/groups/{group_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Review Inbox Group */
+        post: operations["approve_review_inbox_group_projects__project_id__analysis_review_inbox_groups__group_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{project_id}/analysis/review-inbox/groups/{group_id}/reject": {
         parameters: {
             query?: never;
@@ -1850,6 +1867,14 @@ export interface components {
             candidate_id: string;
             /** Matched Memory Id */
             matched_memory_id?: string | null;
+        };
+        /**
+         * ApproveGroupRequest
+         * @description 정체성 그룹 승인(Slice 5, D1=A) — revision이 멱등 key를 겸한다.
+         */
+        ApproveGroupRequest: {
+            /** Expected Revision */
+            expected_revision: number;
         };
         /** AutoPromotePartialResponse */
         AutoPromotePartialResponse: {
@@ -6344,6 +6369,89 @@ export interface operations {
                 };
             };
             /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    approve_review_inbox_group_projects__project_id__analysis_review_inbox_groups__group_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApproveGroupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The store is unreachable, or no compare judge is configured for a group that needs one. Recover the store / configure the judge and retry the same revision — nothing was started. */
             503: {
                 headers: {
                     [name: string]: unknown;
