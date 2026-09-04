@@ -1,9 +1,9 @@
 # 미승인 후보 정체성 그룹 — 구현 페이즈
 
-상태: `Active — Slice 0~4 완료·검증 폐쇄, Slice 5(그룹 승인) 다음`
+상태: `Active — Slice 0~5 완료(Slice 5 검증 대기), Slice 6(grouped UI) 다음`
 작성: 2026-09-02
 결정 정본: [`pending-candidate-identity-grouping-decisions.md`](pending-candidate-identity-grouping-decisions.md) — **C 채택**
-계약 정본: [`../system-contract-sot.md`](../system-contract-sot.md) v1.8.28
+계약 정본: [`../system-contract-sot.md`](../system-contract-sot.md) v1.8.29
 
 ## 목적과 완료 기준
 
@@ -264,7 +264,7 @@ operation 100→**101** 실측(tier 행렬 75/101), `schema.d.ts` 재생성(gen:
 **H2** 셀 10의 RED 우연 통과(라우트 부재 시 before==after)를 셀 docstring에 표시. 폐쇄 후
 전수 수치는 work_log 2026-09-04 세션 5에 실측으로 남긴다.
 
-## Slice 5 — 그룹 승인 액션
+## Slice 5 — 그룹 승인 액션 · **완료(2026-09-04, SoT v1.8.29)**
 
 **범위:** C 채택의 핵심인 그룹 승인 orchestration을 만든다. UI는 아직 없다.
 예상 operation 수는 Slice 4 완료 후 101에서 **102**다.
@@ -282,6 +282,45 @@ focused 뒤 analysis compare/apply broader suite를 함께 돌린다.
 함께 만든다 — Slice 4 리터럴 ⑤("재호출이 끝난 멤버를 skip하며 이어간다")가 skip 셀·개별 멱등
 셀에서 유도적으로만 성립해서다(그룹 루프를 관통하는 발화 셀 없음 — 검증 기록 §H1). 단계별 진행
 저장 스펙이 근접하므로 이 슬라이스의 자연스러운 일부다.
+**완료 기록(2026-09-04):** 착수 브리프
+[`pending-candidate-identity-grouping-slice5-approval-orchestration-decisions.md`](pending-candidate-identity-grouping-slice5-approval-orchestration-decisions.md)
+— 오너가 **D1=A·D2=A·D3=A·D4=A**로 확정. 구현은 `analysis/identity_group_approvals.py`(진행
+저장: 도메인·in-memory·서비스)·`analysis/identity_group_approvals_mongo.py`
+(`candidate_identity_group_approvals`, 그룹당 1문서·steps 내장)·`identity_group_review.py`
+의 `approve_group`·`AnalysisCompareService.judge_against`(강제 대상 판정)+`has_judge`·
+`MemoryService.memory_for_candidate`(채택 규칙)·라우터 엔드포인트·조립(커밋 `ffc9525`·
+셀 보강 `871b634`·유료 등재 `ea55474`). 이 Slice가 확정한 리터럴 —
+
+- **revision이 멱등 key를 겸한다**(D1=A) — body `{"expected_revision": N}`. 불일치 409
+  (detail에 현재 revision), 같은 revision 재전송은 진행 문서와 붕괴해 replay/이어가기.
+- **canonical은 그룹이 정한다** — 나머지 멤버는 scope matcher를 다시 돌리지 않고 그룹
+  canonical을 강제 대상으로 판정한다(create 폴스루 봉쇄). 멤버 중 승격 memory가 있으면
+  (개별 승격·저장 상실 패스 재구성 모두) added_at 최순의 CANONICAL을 **채택**한다 —
+  채택이 없으면 seed가 두 번째 canonical을 mint한다(설계 중 발견, 셀 2종이 잠금).
+- **step마다 진행을 저장한다** — pending|applied|conflict|failed|skipped + memory/version
+  id. 재시도는 applied를 재실행하지 않는다. **Slice 4 검증 H1 이관 셀**(mid-loop
+  스토리지 503 → 재호출이 seed canonical을 채택해 이어간다)을 이 슬라이스에 포함.
+- **applied 멤버는 confirm의 부수효과 세트로 닫는다**(D2=A) — confirmed 전이 + de-index +
+  대기열 resolve. conflict 멤버는 needs_review 잔류 + 대기열 적재. 버전 적용 뒤 canonical
+  포인터는 최신으로 이동한다.
+- **첫 판정 실패에 step=failed·패스 종료**(D4=A) — 응답은 200에 step 상태. terminal parse
+  거부의 감사 재분류는 endpoint 경계(compare·Slice 2 선례).
+- **그룹·멤버·relation 행 불변**(D3=A) — relation.group_id는 영구 표시 전용(Slice 3 유예
+  확정).
+- **judge 미구성은 남은 멤버가 있을 때만 시작 전 503**(eligible==1이면 무판정 통과).
+- **활동 로그는 A안 묶임** — 그룹 행 1줄 `identity_group_approved`·변경≥1(분류표
+  logged 29·검토 결정 11).
+- **유료 10번째 경로**(8.0 B4/B6) — 1차 전수가 미등재를 물어 전환: fan-out 표시·
+  `_REQUIRE_PROJECT_OWNER_BILLABLE`(402/429)·SERVER dedupe 키(재개 재호출은 진짜
+  재실행 — analysis_compare와 같은 모양)·관측 COVERAGE 등재.
+
+셀 33종(승인 28 + Mongo 어댑터 4 fake+1 live — Slice 4 B1 교훈의 superseded 멤버를
+terminal-skip 셀에 선제 포함)·뮤테이션 12종 전부 기명 재실패(표는 work_log 세션 7).
+파기 그래프 11계약/23컬렉션·tier 76/102·오류 선언 23행(+409/+402/429)·`truncate_to_ms`
+공개 승격. OpenAPI/`schema.d.ts` 재생성(+128줄). 전수 **2803/1/3189**(2396.68초; 1차
+3 failed = 유료 등재 2(수리) + quota 타이밍 1(flake — 단독·2차 모두 통과)). RED는 별도
+관측 못 함(구현 뒤 첫 실행) — 뮤테이션이 방향성을 대신 잠금.
+
 
 ## Slice 6 — grouped Inbox UI
 

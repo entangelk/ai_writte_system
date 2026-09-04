@@ -414,3 +414,126 @@ stale 멤버 제외 · 가시 <2 ungrouped · project 격리 · detail 동등 ·
   H1 이관 셀(mid-loop 503·재호출 이어가기)도 이 슬라이스에서 함께.
 - 프론트 결함 2건(typeScale·designTokens)은 Slice 6 착수 전 먼저 볼 것(세션 4·검증 모두 확인).
 - 푸시는 오너 몫.
+
+---
+
+# Work Log — 2026-09-04 세션 7 (identity group Slice 5 — 그룹 승인 오케스트레이션, 구현자=베타)
+
+## Goals
+
+- Slice 5(그룹 승인 액션) 착수 브리프 작성 → 오너 결정 확보.
+- 그룹 승인 오케스트레이션 구현 + **Slice 4 검증 H1 이관 셀**(mid-loop 503·재호출 이어가기).
+- 등재·전수·기록 마감.
+
+## User Decisions and Rationale
+
+- **오너 2026-09-04, 브리프 4축 전부 A 채택**
+  ([`pending-candidate-identity-grouping-slice5-approval-orchestration-decisions.md`](../../plans/pending-candidate-identity-grouping-slice5-approval-orchestration-decisions.md)).
+  - **D1=A — 요청 면**: body `{"expected_revision": N}`. revision이 멱등 key를 겸한다(같은
+    revision 재전송=replay/이어가기, 그룹 현재 revision과 불일치=409·detail에 현재 revision).
+    근거: 필드 1개로 v1.8.27의 "명시적 key는 Slice 5"를 닫는 최소 형태 — 불투명 key+revision
+    분리는 이 프로젝트에 저장층 이득이 없다.
+  - **D2=A — applied 멤버의 후보 상태**: confirmed 전이 + de-index + 대기열 resolve(개별
+    confirm과 같은 부수효과 세트). 근거: 승인하면 검토함에서 사라져야 C안의 목적이 완결된다
+    (job-level apply의 무전이와 갈라짐을 브리프에 명시).
+  - **D3=A — 그룹·relation 행 갱신**: 전부 불변. 거절과 대칭이며 `closed` 의미(병합 흡수)를
+    확장하지 않는다. **relation.group_id는 영구 표시 전용**으로 확정(Slice 3이 Slice 5로
+    이관했던 정책).
+  - **D4=A — 판정 실패 격리**: 첫 실패에 step=failed·패스 종료(나머지 pending). 근거: Slice 2
+    러너 "첫 실패로 단계 종료"와 같은 모양 — 죽은 게이트웨이에서 멤버 수만큼 timeout을
+    태우지 않는다. 응답은 200에 step 상태(부분 실패 가시 — Slice 6 전제).
+
+## Completed work
+
+- **착수 브리프** — Options table 4종 + "계획·선례가 이미 묶은 것"(활동 로그 A안 묶임·closed
+  404·canonical 강제 대상·진행 저장 신규 컬렉션·LLM audit 축·seed 결정성)을 분리해 브리프가
+  진짜 갈림길만 물게 했다. 오너 결정 후 상태 줄 갱신.
+- **진행 저장(신규)** — `analysis/identity_group_approvals.py`(도메인·in-memory·서비스:
+  문서 시각 stamp는 서비스가 정본)·`analysis/identity_group_approvals_mongo.py`
+  (`candidate_identity_group_approvals`, `_id`=group_id·project 인덱스). 파기 그래프
+  **22→23컬렉션(11계약)** — `execute_project_purge` 합류 + 소유자/admin 양 경로 스파이 확장.
+  `truncate_to_ms`를 공개 승격(Slice 0 클록 계약을 두 모듈이 공유).
+- **오케스트레이션** — `identity_group_review.py`의 `approve_group`. seed는 개별 confirm
+  경로, 나머지는 `AnalysisCompareService.judge_against`(신규 — 강제 대상 판정, 검증은
+  기존 JUDGE_ACTIONS 규칙 재사용)+`has_judge`. applied 멤버의 부수효과는
+  `reconciliation.py` 선례의 조립 순서(버전 쓰기→전이→de-index→대기열). conflict는 적용
+  경로와 같은 대기열 적재.
+- **채택 규칙(설계 중 발견)** — 멤버 중 승격 memory가 있으면 added_at 최순의 CANONICAL을
+  그룹 canonical로 채택한다. 없으면 seed가 두 번째 canonical을 mint한다(개별 승격 뒤 그룹
+  승인·mid-failure 재호출의 저장 상실 창). 재구성(reconcile)은 문서가 있던 패스에서만
+  step을 되살린다 — 첫 호출의 채택은 남이 한 개별 승입을 이 호출의 변경으로 세지 않는다.
+- **라우터·조립** — `POST …/groups/{group_id}/approve`·`ApproveGroupRequest`·409/503
+  매핑·활동 행(변경≥1). `create_app`에 `identity_group_approval_service` 파라미터(Mongo
+  게이팅은 그룹 저장소와 같은 축).
+- **유료 전환(1차 전수가 물은 것)** — 승인은 판정이 남은 멤버만큼 provider를 부르는
+  fan-out 경로라 8.0 B4/B6가 유료 분류를 요구한다: `BILLABLE_ACTIONS` 10번째 행
+  (`identity_group_approve`, fan_out)·`_REQUIRE_PROJECT_OWNER_BILLABLE`(402/429·확인 헤더)·
+  `_BILLABLE_404_409_JUDGE` 선언·SERVER dedupe 키·리터럴/fan-out 핀·관측 COVERAGE 행
+  (커밋 `ea55474`). **등재 체크리스트 6곳째** — 메모리 갱신.
+- **등재 5+1곳** — 오류선언 EXPECTED 23행(+409/+402/429)·tier 76/102·분류표 logged 29(검토
+  결정 11)·프론트 라벨 "정체성 그룹 승인"(비링크 사유는 기존 `candidate_identity_group`)·
+  plans 인덱스(120개 중 100개)·유료 분류.
+- **OpenAPI/`schema.d.ts` 재생성** — operation 101→**102** 실측·`ApproveGroupRequest`·유료
+  얼굴(+128줄, dump md5 `8105d2643084`).
+- **커밋 3건** — `ffc9525`(구현)·`871b634`(terminal-skip 셀에 superseded 선제 보강 —
+  Slice 4 B1 교훈)·`ea55474`(유료 등재).
+
+### 변이 표 (12종 — 전부 기명 재실패, `-x` 첫 실패 셀 기록)
+
+| 변이 | 위치 | 재실패 셀 |
+|---|---|---|
+| M1 seed 선택 반전(added_at 역순) | `identity_group_review.py:228` | `test_a_conflict_member_stays_needs_review_and_queues_review` 1 failed |
+| M2 revision 불일치 409 제거 | `:224` | `test_a_revision_mismatch_is_409_with_the_current_revision_in_detail` 1 failed |
+| M3 applied 멤버 전이 제거(D2=A) | `:432` | `test_a_no_change_member_is_confirmed_without_a_new_memory_write` 1 failed |
+| M4 conflict 멤버도 confirmed로(과잉) | `:376` | `test_a_conflict_member_stays_needs_review_and_queues_review` 1 failed |
+| M5 applied step 재실행(진행 무시) | `:272` | `test_a_completed_approval_replay_is_a_full_noop` 1 failed |
+| M6 저장 문서 항상 무시 | `:230` | `test_a_completed_approval_replay_is_a_full_noop` 1 failed |
+| M7 canonical 채택 제거 | `:256` | `test_a_completed_approval_replay_is_a_full_noop` 1 failed(채택 셀 2종도 무는 방향) |
+| M8 judge 미구성 fail-fast 제거 | `:293` | `test_judge_not_configured_fails_fast_503_and_nothing_started` 1 failed |
+| M9 활동 로그 무조건 기록 | `routers/analysis.py:971` | `test_a_completed_approval_replay_is_a_full_noop` 1 failed |
+| M10 감사 상관축 제거(correlation_id=None) | `:952` | `test_each_judged_member_leaves_exactly_one_row_under_the_group` 1 failed |
+| M11 parse 재분류 제거 | `:970` | `test_a_terminal_parse_rejection_is_reclassified_and_fails_the_step` 1 failed |
+| M12 skip을 confirmed/rejected로 좁힘(Slice 4 B1 형태) | `identity_group_review.py:284` | `test_members_already_terminal_are_skipped` 1 failed |
+
+복원 후 `git status --short` clean 확인. 라인 번호는 커밋 `ea55474` 기준.
+
+## Issues found
+
+- **유료 분류 미등재(1차 전수 2 failed)** — 문제: 승인 라우트가 `llm_call_scope`를 여는데
+  `BILLABLE_ACTIONS`에 없었다. 원인: 등재 체크리스트가 5곳이었고 유료 분류를 몰랐다.
+  해결: 8.0 B4/B6 기준으로 유료 전환(fan-out·402/429·SERVER dedupe·COVERAGE). 결과:
+  2차 전수 통과. 메모리 체크리스트 6곳으로 갱신.
+- **quota 라이브몽고 타이밍 1 failed(1차)** — `AdmissionSerialisationLiveMongoTest` 동시
+  경합 셀. 단독 재실행 통과·2차 전수 통과 — flake로 판정(이 슬라이스 변경과 무관 축).
+- **채택 규칙의 필요성(구현 중 발견)** — confirmed 멤버는 confirm이 승격을 동반하므로
+  canonical을 소유한다. "첫 eligible 승격"을 문자 그대로 쓰면 두 번째 canonical이 생긴다.
+  terminal 시드 셀들은 이 간섭을 피해 rejected/superseded로 시드하고, 채택 자체는
+  셀 2종(individually-promoted·H1 재개)이 잠근다.
+- **RED 비고(정직 기록)** — 테스트를 먼저 썼지만 실행은 구현 뒤라 RED 산술을 별도 관측하지
+  못했다. 뮤테이션 12종 기명 재실패가 양방향 방어를 대신한다.
+
+## 회귀(세션 7)
+
+- focused: 승인 28종 + Mongo 어댑터 5종(4 fake + 1 live, test-mongo rs-test) = **33 passed**.
+- 등재·인접: docs 인덱스·activity 3종·application_api·auth_api·billable·quota_enforcement_api·
+  거절·수신함·그룹 저장·퍼지(소유자)·compare/apply 8모듈·llm_call_sites·identity judge
+  wiring — 전부 통과. 프론트 `src/projects` **53 passed**(라벨 변경 포함).
+- 전수(1차): **2801/3/1/3183** — 3 failed(유료 등재 2 + quota 타이밍 1).
+- 전수(2차, 유료 전환 후): **2803 passed / 1 skipped / 3189 subtests, exit 0,
+  2396.68초**(산술: 1차 2801 + 유료 2복구; quota flake는 2차 통과).
+- OpenAPI/`schema.d.ts` 재생성(gen:api) — md5 `8105d2643084`·+128줄.
+
+## Decisions
+
+- 위 오너 결정 4축 외에 구현이 확정한 것: 채택 규칙(문서가 없어도 멤버 memory에서 canonical
+  재구성 — 단, step 되살림은 문서가 있던 패스만), conflict step의 memory_id는 채택/현 시점
+  canonical, no_change step은 write 없이 현재 canonical을 가리킨다, 버전 적용 뒤 canonical
+  포인터는 최신으로 이동(다음 멤버의 판정 대상).
+- **RED를 별도 관측하지 않은 대가를 뮤테이션으로 갚았다** — 12종 전부 기명 재실패.
+
+## Next steps
+
+- **Slice 5 독립 검증**(다른 세션) — 검증 기록·probe·변이 재유도.
+- 이후 **Slice 6(grouped Inbox UI)** — 착수 전 프론트 기존 결함 2건(typeScale·
+  designTokens) 먼저 볼 것.
+- 푸시는 오너 몫. test-mongo는 띄운 채 남김.
