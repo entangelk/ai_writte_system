@@ -901,3 +901,83 @@ Slice 5 검증 축("유료 10번째 경로"). **패턴 스윕 추가 발견 2건
 ## Next steps
 
 - 오너가 D1·D2·D3 을 고르면 슬라이스 1(D1) → 슬라이스 2(D2) 순서로 구현(셀·뮤테이션·SoT 행).
+
+---
+
+# 세션 9 — Phase S-1 구현: quota 우회 체인 폐쇄(감사 유일 HIGH)
+
+## Goals
+
+- 세션 8 브리프의 오너 결정을 구현한다(아래). 성공 기준: 셀+뮤테이션+전수 green,
+  B5 문장 갱신·선언·schema·기록 일습.
+
+## 오너 결정(AskUserQuestion, 2026-09-05)
+
+- **D1 = "A+D + report만 응답 저장"** — 추천(A+D)에 report 국소 C 를 얹음. 유실 회복
+  트레이드오프를 저장 재생으로 닫는 쪽.
+- **D2 = "둘 다"** — 상한+쿨다운+입장.
+- **D3 = "지금 run당 상한+이월"** — 추천(유예)과 달리 즉시 시행.
+
+## 구현(커밋 5개)
+
+`9ce8191`(D1) · `63b6c0d`(D2) · `3a2a3ee`(D3) · `11f90a8`·`82cd7e0`(전수 여파) + 본 기록.
+
+- **D1**: `QuotaRefusalReason.CONSUMED`(409) — 입장에서 정산된 BODY 키를 포인트 리드로
+  찾아 실행 전 거부. `QuotaCharge.confirmed` + `record_usage(force_new)` — 확인 재실행의
+  +1 과금(유니크 충돌 시 접미 키 신규 행). `quota/replay.py` 신규 — report 응답 저장
+  (인메모리+mongo `quota_replay_responses`, TTL 24h)·재생 영수증·wrapper 저장 배선.
+  `dedupe.KEY_REPLAY_ACTIONS` 표(consume/handler/stored/pass). accept 의 replay 조회를
+  enrich 앞으로(순서 교정). 선언 6경로 +409, schema +54줄.
+- **D2**: `retry_policy.py` 신규(상한 2·쿨다운 60s·예외 둘). 양쪽 job 모델·서비스·mongo에
+  `retry_count`/`failed_at`. `require_quota_standing`(정지 403·소진 402 만 — `assert_standing`
+  재사용; 유료 dependency 를 그대로 붙이면 등재 목록 계약과 충돌하는 것은 구현이 밝힌
+  제약으로 브리프에 기록). 가드 진화: `THROTTLED_OPERATIONS` +재시도 2경로(429 셋째
+  생산자), `STANDING_GATED_OPERATIONS` 신설(비-과금 402 의 유일 예외)+배선 1:1 셀. schema +36줄.
+- **D3**: `JudgingBudget` + `DEFAULT_MAX_NEW_RELATIONS_PER_RUN=20` — runner 가 run마다
+  예산 하나를 후보마다 넘김(상한이 run 단위). 재사용은 예산 비과금. 이월: relation 없는
+  쌍은 한쪽이 다시 focal 로 기록될 때 판정(모듈 서술에 정확히 기록 — 과잉 주장 금지).
+
+## Verification
+
+- 포커스: 키 소비·재시도·판정 축 전부 green(도메인 2720 전수 직전 단계별 확인).
+- **전수 `python3 -m pytest tests/ -q` → 2720 passed / 151 skipped / 3206 subtests / 0 failed**
+  (252초, 라이브 Mongo 없음). 산수: 2693+27셀(D1 12·D2 11·D3 4) 정확.
+- 프론트 `tsc --noEmit` 0 · vitest **401/403**(2실패 = 사전존재 typeScale·designTokens,
+  이 슬라이스 무관 확인). `gen:api` 재생성 반영(총 +90줄, 409 얼굴 6경로·재시도 3얼굴).
+- **뮤테이션 11종 전부 기명 재실패**(커밋 위 클린 트리에서 Edit→실행→`git checkout --`→
+  `git status --short` 공백 확인):
+
+| # | 뮤테이션(적용 diff·위치) | 재실패 수(셀) |
+|---|---|---|
+| M-A | `enforcement.admit` 의 소비 검사 `policy in (...) and not confirmed` 앞 `False and` 삽입(검사 무력화) | 4 — 도메인 소비 셀들+HTTP 409 |
+| M-B | `settle` 의 `force_new=charge.confirmed` → `False` | 2 — 확인 +1 셀들(도메인·HTTP) |
+| M-C | `admit` 의 재생 grant 조건 앞 `False and` | 2 — report 재생 셀들 |
+| M-D | 소비 검사에서 `and not confirmed` 제거(과잉 — 확인 재실행까지 409) | 2 — 확인 재실행 셀들 |
+| M-E | accept 의 enrich 를 replay 조회 앞으로 되돌림 | 1 — `..._does_not_re_run_the_reporter` |
+| M-F | analysis `retry_failed_job` 상한 검사 앞 `False and` | 2 — 상한 셀(도메인·HTTP) |
+| M-G | `cooldown_remaining` 이 항상 0 반환 | 3 — 쿨다운 셀들 |
+| M-H | `MAX_JOB_RETRIES = 2` → `1`(과잉) | 3 — 상한 셀들 |
+| M-I | `assert_standing` 본문을 `return`(무력화) | 2 — standing 셀들 |
+| M-J | 판정 예산 검사 앞 `False and` | 3 — 예산·fanout 셀들 |
+| M-K | 재사용(`reused.append`)도 예산 차감(과잉) | 3 — 재사용 비과금 셀 등 |
+
+- **전수 1차(3 실패)의 여파 처리**: writing 라우터에 retry_policy 임포트 누락(mypy 가드
+  포착) · generation retry HTTP 셀·final-save 프로브 S12 를 쿨다운 지난 상태로 갱신
+  (프로브의 make_client 가 analysis 서비스를 돌려주도록 수정 — 쿨다운 안의 429 는
+  test_application_api 셀이 이미 잠금).
+
+## Issues found
+
+- **관찰(등재 부채, S-3 소관)**: `signup_attempts` 컬렉션이 `docs/mongo_collections.md`에
+  등재돼 있지 않다(S-3 슬라이스가 놓친 것). 이번 슬라이스는 `quota_replay_responses`
+  (§43H)만 등재했다 — signup_attempts 는 다음 문서 슬라이스(S-0 또는 별도)에서 채울 것.
+- **구현 제약(브리프 반영)**: D2-b 의 문면("유료 입장 dependency 부착")은 그대로 시행하면
+  등재 목록 계약(유료 11경로·집합↔라우트 등가 가드)과 충돌한다 — 입장 판정만 재사용하는
+  `require_quota_standing` 로 시행하고 그 이유를 브리프·SoT 행에 기록했다.
+
+## Next steps(갱신)
+
+- Phase S 남은 순서: **S-0 문서 스윕 → S-7 토큰 저장 → 트리거 항목**. 낡은 vhost 는
+  타 프로젝트 AI 처리 중(오너 확인).
+- **S-1 은 독립 검증 대기** 상태다(구현 세션이 자기 검증까지 마친 상태 — 검증 기록은
+  별도 세션이 발행한다).

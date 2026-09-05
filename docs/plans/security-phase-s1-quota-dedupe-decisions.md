@@ -1,10 +1,20 @@
 # Decision brief — Phase S-1 quota 우회 체인(dedupe 키 신뢰 · retry 상한 · 판정 팬아웃)
 
-상태: **Proposed(2026-09-05, 오너 결정 대기)**
+상태: **Resolved(2026-09-05) — D1 = A+D+report 국소 C · D2 = 둘 다 · D3 = 지금 시행 · 구현 완료(SoT v1.8.32)**
 정본 연결: 감사 [`../verifications/2026-09-05/security_audit_dual_workflow.md`](../verifications/2026-09-05/security_audit_dual_workflow.md) §A.1~A.4 · [`../system-contract-sot.md`](../system-contract-sot.md) v1.7.88(Q9=A 매핑·B5·Q8)·v1.7.97(accept 멱등)·[`08-2b-duplicate-request-lock-decisions.md`](08-2b-duplicate-request-lock-decisions.md) G4=A
 목적: **가입을 여는 순간 위험해지는** 유일한 HIGH 를 착수 전에 결정 축으로 쪼개 오너에게 올린다. 감사 권고("키 서버 검증 — 신선성 창 또는 서버 발급")는 처방의 뼈대만 줬고, 이 저장소의 등록 계약(B5·G4·Q9)과 충돌하지 않는 닫힘을 고르는 것은 오너 결정이다.
 
 ---
+
+## Owner decisions — 2026-09-05
+
+- **D1 = "A+D + report만 응답 저장"** — 구현자 추천(A+D 결합)에 report 국소 C 를
+  얹었다. 유실된 성공 응답의 회복 문제(브리프가 단점으로 적은 것)를 오너가
+  받아들이지 않고 저장 재생으로 닫는 쪽을 택했다.
+- **D2 = "둘 다"** — 상한(2회)+쿨다운(60s)+입장 게이트. 단 입장은 유료 dependency
+  literal 이 아니라 **입장 판정 재사용**(`require_quota_standing`)으로 시행했다 —
+  그대로 붙이면 등재 목록 계약(유료 11경로)과 충돌한다(구현이 밝힌 제약).
+- **D3 = "지금 run당 상한+이월"** — 추천(유예)과 달리 이번 슬라이스에 바로 시행.
 
 ## Decision needed
 
@@ -72,7 +82,7 @@
 | **(b) shortlist 상한** | 이름 풀 매칭 후보 수 상한 | 구현 작 | 같은 이름 누적 풀에서 다른 이름쌍이 밀려남 |
 | **(c) 유예** | 트리거(가입 개방)까지 놔둠 | 지금 슬라이스 집중 | 열린 채 남음 |
 
-## Recommendation(구현자 추천)
+## Recommendation(구현자 추천 — D1 은 추천에 report 국소 C 를 얹은 변형이, D3 는 추천과 다르게 **지금 시행**이 채택됐다)
 
 - **D1 = A+D 결합 + accept 순서 교정.** A 가 "무료 재실행"을 원천 차단하고(confirm 없는
   느린 루프도 실행 전에 409), D 가 잠금이 이미 약속한 +1 과금을 이행해 동시 경합과

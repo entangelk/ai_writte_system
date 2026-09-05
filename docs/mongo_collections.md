@@ -2942,6 +2942,48 @@ contract is to display **"삭제된 프로젝트"**.
 
 ---
 
+## 43H. quota_replay_responses
+
+### 43H.1 Purpose
+
+정산된 유료 응답의 재생 저장소 — Phase S-1 D1 의 국소 C(오너 2026-09-05).
+대상은 **응답을 지속하지 않는 유일한 유료 경로**(`writing_report`)다: 다른 BODY
+dedupe 키 경로는 결과가 서버에 남아 상태 재조회로 회복되지만, 이 경로는 성공
+응답이 유실되면 결과를 되돌릴 수 없다. 그래서 정산 시점(`QuotaSettledRoute`)에
+직렬화된 응답 본문을 저장해 두고, 같은 `(user_id, action, dedupe_key)` 의 재제출은
+입장(`admit`)이 **재생 영수증**을 내준 뒤 핸들러가 저장 본문을 그대로 돌려준다 —
+provider 도 과금도 다시 일어나지 않는다(이미 세린 요청이다).
+
+One document per replay key; `user_id:action:dedupe_key` is the `_id`, so no
+additional index exists.
+
+### 43H.2 Lifetime
+
+**TTL 24시간**(`stored_at`, `expireAfterSeconds=86400`). 정직한 재시도(네트워크
+유실)는 분 단위이고 원장 행의 창(일·주)보다 짧게 — TTL 이 지난 재제출은 무료
+재실행이 아니라 409 CONSUMED 로 닫힌다. 인덱스는 **청소부**이지 정책이 아니다
+(`signup_attempts` 와 같은 자세: 만료 판정은 입장의 원장 조회가 쥔다).
+
+**컨트롤이지 사실이 아니다** — 문서를 잃어도 청구 이력(§43D)은 무사하다. 회원
+축 데이터지만 `project_id` 필드가 없어 purge reconciler 의 자동 발견 대상 밖이며
+TTL 이 수명을 소유한다(프로젝트 파기와 무관한 회원 축 캐시).
+
+### 43H.3 Indexes
+
+```javascript
+db.quota_replay_responses.createIndex(
+  { stored_at: 1 },
+  { name: "quota_replay_responses_ttl", expireAfterSeconds: 86400 }
+)
+```
+
+### 43H.4 Reading it
+
+조회 API 는 없다. 소비자는 `QuotaEnforcementService.admit`(재생 판정)과
+`writing_report` 핸들러(본문 재생) 뿐이다.
+
+---
+
 ## 44. job_queue
 
 ### 44.1 Purpose
