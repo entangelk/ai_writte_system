@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
@@ -64,6 +65,11 @@ class AnalysisJob:
     failure_reason: AnalysisJobFailureReason | None = None
     failure_detail: str | None = None
     writing_candidate_report: Mapping[str, Any] | None = None
+    # S-1 D2(오너 2026-09-05): 재시도 상한·쿨다운의 재료. ``retry_count`` 는
+    # FAILED→PENDING 되돌림마다 1씩 오르고, ``failed_at`` 은 실패 시각이다(없는
+    # 옛 행은 쿨다운이 없다).
+    retry_count: int = 0
+    failed_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)

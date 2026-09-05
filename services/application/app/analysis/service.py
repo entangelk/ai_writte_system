@@ -32,6 +32,13 @@ from services.application.app.analysis.schema import (
     validate_candidate_payload,
 )
 from services.application.app.analysis.source import SourceRefResolver
+from services.application.app.retry_policy import (
+    MAX_JOB_RETRIES,
+    RetryCooldownActive,
+    RetryLimitReached,
+    cooldown_remaining,
+    now_utc,
+)
 
 
 class CandidateReindexOutbox(Protocol):
@@ -246,6 +253,7 @@ class AnalysisService:
         *,
         source_ref_resolver: SourceRefResolver | None = None,
         reindex_outbox: CandidateReindexOutbox | None = None,
+        clock=None,
     ) -> None:
         self._repo = repository
         self._source_ref_resolver = source_ref_resolver
@@ -253,6 +261,8 @@ class AnalysisService:
         # index sync here, so no extraction path can forget to index. Absent
         # (unwired) leaves the deterministic Mongo-direct retrieval intact.
         self._reindex_outbox = reindex_outbox
+        # S-1 D2: 실패 시각(retry 쿨다운의 재료). 기본은 실시간 — 테스트가 끊어 넣는다.
+        self._clock = clock or now_utc
 
     @property
     def repository(self) -> AnalysisRepository:
@@ -320,21 +330,46 @@ class AnalysisService:
         failure_reason: AnalysisJobFailureReason,
         failure_detail: str | None = None,
     ) -> AnalysisJob:
-        return self._transition_job(
+        job = self._transition_job(
             project_id=project_id,
             job_id=job_id,
             target=AnalysisJobStatus.FAILED,
             failure_reason=failure_reason,
             failure_detail=failure_detail,
         )
+        # S-1 D2: 쿨다운의 기준점 — 실패 직후의 재시도 나열을 막는다.
+        stamped = replace(job, failed_at=self._clock())
+        self._repo.update_job(stamped)
+        return stamped
 
     def retry_failed_job(self, *, project_id: str, job_id: str) -> AnalysisJob:
-        """Explicitly reset one failed job; ordinary replay remains terminal."""
-        return self._transition_job(
+        """Explicitly reset one failed job; ordinary replay remains terminal.
+
+        S-1 D2(오너 2026-09-05 = 상한 2회·쿨다운 60초): 재시도는 회복 수단이지
+        무과금 재실행의 통로가 아니다(감사 §A.2 — B5 의 "재시도는 드문 회복 수단"
+        전제를 지키는 상한). 상한 초과는 ``RetryLimitReached``(409), 마지막 실패
+        직후는 ``RetryCooldownActive``(429+Retry-After).
+        """
+        job = self._require_job(project_id, job_id)
+        if job.retry_count >= MAX_JOB_RETRIES:
+            raise RetryLimitReached(
+                f"this job was already retried {job.retry_count} times "
+                f"(limit {MAX_JOB_RETRIES})"
+            )
+        remaining = cooldown_remaining(job.failed_at, self._clock())
+        if remaining > 0:
+            raise RetryCooldownActive(
+                "this job failed recently; wait before retrying",
+                retry_after_seconds=remaining,
+            )
+        updated = self._transition_job(
             project_id=project_id,
             job_id=job_id,
             target=AnalysisJobStatus.PENDING,
         )
+        counted = replace(updated, retry_count=job.retry_count + 1)
+        self._repo.update_job(counted)
+        return counted
 
     def _transition_job(
         self,

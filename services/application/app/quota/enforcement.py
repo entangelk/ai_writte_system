@@ -381,6 +381,26 @@ class QuotaEnforcementService:
             confirmed=confirmed,
         )
 
+    def assert_standing(
+        self, *, user_id: str, member_created_at: datetime
+    ) -> None:
+        """재시도 등 "같은 논리 요청의 이어가기"가 빌리는 입장 판정 (S-1 D2-b).
+
+        정지(403)·소진(402)만 본다 — 잠금·차감·키 소비는 그 요청의 것이 아니다
+        (B5: 재시도는 같은 논리 요청). 유료 dependency 를 그대로 붙이면 등재
+        목록 계약(유료 11경로·402/429 선언)과 충돌하므로 판정만 재사용한다.
+        """
+
+        limits = self._policy.limits_for(user_id)
+        if limits.status is QuotaStatus.SUSPENDED:
+            raise QuotaRefused(
+                QuotaRefusalReason.SUSPENDED,
+                "this account is suspended; an administrator must lift it",
+            )
+        self._refuse_if_exhausted(
+            user_id=user_id, member_created_at=member_created_at, limits=limits,
+        )
+
     def effective_usage(
         self, *, user_id: str, member_created_at: datetime
     ) -> tuple[int, int]:

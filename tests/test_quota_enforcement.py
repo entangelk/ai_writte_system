@@ -825,6 +825,38 @@ class KeyConsumptionTest(unittest.TestCase):
         self.assertEqual(len(_usage_rows(ledger)), 3)
 
 
+class StandingCheckTest(unittest.TestCase):
+    """S-1 D2-b — 재시도 입장 판정: 정지(403)·소진(402)만 본다(차감·잠금 없음).
+
+    재시도는 같은 논리 요청(B5)이라 원장에 새 행이 없다 — 유료 dependency 를 그대로
+    붙이면 등재 목록 계약과 충돌하므로 입장 판정만 재사용하는 것이 이 메서드다.
+    """
+
+    def test_a_suspended_member_is_refused(self):
+        service, *_ = _build(limits=QuotaLimits(
+            daily_limit=20, weekly_limit=100, status=QuotaStatus.SUSPENDED))
+        with self.assertRaises(QuotaRefused) as refused:
+            service.assert_standing(user_id=_USER, member_created_at=_JOINED)
+        self.assertIs(refused.exception.reason, QuotaRefusalReason.SUSPENDED)
+
+    def test_an_exhausted_member_is_refused(self):
+        service, ledger, _locks, _clock = _build(
+            limits=QuotaLimits(daily_limit=1, weekly_limit=1))
+        service.settle(_admit(service, dedupe_key="spent"), charged=True)
+        with self.assertRaises(QuotaRefused) as refused:
+            service.assert_standing(user_id=_USER, member_created_at=_JOINED)
+        self.assertIs(refused.exception.reason, QuotaRefusalReason.EXCEEDED)
+
+    def test_a_member_with_room_passes_without_claiming_anything(self):
+        """과잉 방어 — 입장 판정은 잠금도 뮤텍스도 잡지 않는다(조회가 요청를
+        직렬화하면 안 된다 — snapshot 과 같은 규칙)."""
+        service, ledger, lock_repo, _clock = _build()
+        service.assert_standing(user_id=_USER, member_created_at=_JOINED)
+        self.assertEqual(len(_usage_rows(ledger)), 0)
+        # 진행 중 잠금이 하나도 없다.
+        self.assertEqual(lock_repo.count_in_flight(_USER, now=_clock()), 0)
+
+
 class StorageFailureTest(unittest.TestCase):
     """Q4=A — 전면 fail-closed. 계량 불능은 무료 제공이 아니다."""
 

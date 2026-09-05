@@ -277,6 +277,34 @@ def quota_confirmed(request: Request) -> bool:
     return bool(getattr(request.state, "quota_confirmed", False))
 
 
+async def require_quota_standing(
+    request: Request,
+    current=Depends(require_authenticated_user),
+):
+    """S-1 D2(b): 실패 job 재시도의 입장 — 정지(403)·소진(402)만 본다.
+
+    차감·잠금·키 소비는 없다: 재시도는 **같은 논리 요청**(B5)이라 원장에 새
+    행이 생기지 않고 차감은 워커의 성공 시점 그대로다. 유료 dependency 를 그대로
+    붙이면 등재 목록 계약(유료 11경로)과 충돌하므로 입장 판정만 재사용한다.
+    """
+    enforcement: QuotaEnforcementService | None = getattr(
+        request.app.state, "quota", None
+    )
+    if enforcement is None:
+        raise HTTPException(
+            status_code=503,
+            detail="request quota enforcement is not configured",
+        )
+    try:
+        enforcement.assert_standing(
+            user_id=current.id, member_created_at=current.created_at)
+    except QuotaRefused as exc:
+        raise HTTPException(
+            status_code=_QUOTA_REFUSAL_STATUS[exc.reason],
+            detail=exc.detail,
+        ) from exc
+
+
 def quota_charge(request: Request) -> QuotaCharge:
     """이 요청의 입장 영수증. 유료 경로에서만 존재한다(없으면 배선 결함이다)."""
     return getattr(request.state, _QUOTA_STATE)

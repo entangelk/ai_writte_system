@@ -121,11 +121,13 @@ from ..api.dependencies import (
     quota_charge,
     quota_confirmed,
     require_authenticated_user,
+    require_quota_standing,
 )
 from ..api.errors import (
     _BILLABLE_400_404_502_504_CONFIG,
     _ERRORS_404,
     _ERRORS_404_409,
+    _ERRORS_JOB_RETRY,
     _billable,
     _owned,
     _provider_error_status,
@@ -565,8 +567,11 @@ def register_writing(
 
     @app.post("/projects/{project_id}/writing/generation-jobs/{job_id}/retry",
               response_model=WritingGenerationJobPayload,
-              responses=_owned(_ERRORS_404_409),
-              dependencies=_REQUIRE_PROJECT_OWNER)
+              responses=_owned(_ERRORS_JOB_RETRY),
+              dependencies=[
+                  *_REQUIRE_PROJECT_OWNER,
+                  Depends(require_quota_standing),
+              ])
     async def retry_writing_generation_job(
         project_id: str, job_id: str,
     ) -> dict[str, object]:
@@ -574,6 +579,8 @@ def register_writing(
         # so the worker re-claims and re-runs it. Mirrors the Analysis retry
         # endpoint (failed→pending, others 409). No separate run call: the
         # generation worker's claim loop picks up any PENDING job on its own.
+        # S-1 D2(오너 2026-09-05): 상한(2회)·쿨다운(60s)·입장 판정이 붙었다 —
+        # 실패 재시도가 무과금 재실행의 통로가 아니게(감사 §A.3).
         try:
             _require_project_exists(project_id)
         except NotFound as exc:
@@ -587,6 +594,13 @@ def register_writing(
             job = writing_generation_jobs.mark_pending_for_retry(job)
         except InvalidGenerationJobStateTransition as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except RetryLimitReached as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except RetryCooldownActive as exc:
+            raise HTTPException(
+                status_code=429, detail=str(exc),
+                headers={"Retry-After": str(exc.retry_after_seconds)},
+            ) from exc
         return _writing_generation_job_payload(job)
 
     @app.post("/projects/{project_id}/writing/gate",

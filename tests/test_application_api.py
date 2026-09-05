@@ -5,6 +5,8 @@ import json
 import os
 import re
 import unittest
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import httpx
@@ -1269,12 +1271,17 @@ class ApplicationApiTest(unittest.TestCase):
             idempotency_key="analyze:snapshot-1",
         ).job
         analysis.mark_job_running(project_id=project["id"], job_id=job.id)
-        analysis.mark_job_failed(
+        failed = analysis.mark_job_failed(
             project_id=project["id"],
             job_id=job.id,
             failure_reason=AnalysisJobFailureReason.SOURCE_INVALID,
             failure_detail="source_ref not found",
         )
+        # S-1 D2: 재시도 쿨다운(60s)을 지난 상태로 만든다 — 서비스 클록이 실시간이므로
+        # 저장된 실패 시각을 되돌려 놓는다.
+        backdated = replace(
+            failed, failed_at=datetime.now(UTC) - timedelta(seconds=61))
+        analysis.repository.update_job(backdated)
 
         response = client.post(
             f"/projects/{project['id']}/analysis/jobs/{job.id}/retry"
@@ -1285,6 +1292,57 @@ class ApplicationApiTest(unittest.TestCase):
         self.assertEqual(response.json()["status"], "pending")
         self.assertIsNone(response.json()["failure_reason"])
         self.assertIsNone(response.json()["failure_detail"])
+
+    def test_analysis_retry_endpoint_enforces_cooldown_then_cap(self):
+        """S-1 D2(오너 2026-09-05): 실패 직후 429(+Retry-After), 상한 초과 409.
+
+        under-strict: 쿨다운이나 상한을 지우면 첫·셋째 단정이 실패한다 — 그
+        상태가 감사 §A.2 의 결함이다(무과금 재실행 루프). over-strict: 정상
+        재시도까지 막으면 둘째 단정이 실패한다.
+        """
+        core_sot = CoreSotService(InMemoryCoreSotRepository())
+        analysis = AnalysisService(InMemoryAnalysisRepository())
+        client = TestClient(create_app(core_sot, analysis_service=analysis))
+        project = client.post("/projects", json={"name": "Novel"}).json()
+        job = analysis.create_job(
+            project_id=project["id"], snapshot_id="snapshot-1",
+            idempotency_key="analyze:snapshot-1",
+        ).job
+
+        def _fail():
+            analysis.mark_job_running(project_id=project["id"], job_id=job.id)
+            failed = analysis.mark_job_failed(
+                project_id=project["id"], job_id=job.id,
+                failure_reason=AnalysisJobFailureReason.PROVIDER_ERROR,
+            )
+            return failed
+
+        def _backdate(failed):
+            analysis.repository.update_job(replace(
+                failed, failed_at=datetime.now(UTC) - timedelta(seconds=61)))
+
+        failed = _fail()
+        cooldown = client.post(
+            f"/projects/{project['id']}/analysis/jobs/{job.id}/retry")
+        self.assertEqual(cooldown.status_code, 429)
+        self.assertEqual(cooldown.headers.get("Retry-After"), "60")
+
+        _backdate(failed)
+        first = client.post(
+            f"/projects/{project['id']}/analysis/jobs/{job.id}/retry")
+        self.assertEqual(first.status_code, 200)
+
+        failed = _fail()
+        _backdate(failed)
+        second = client.post(
+            f"/projects/{project['id']}/analysis/jobs/{job.id}/retry")
+        self.assertEqual(second.status_code, 200)
+
+        failed = _fail()
+        _backdate(failed)
+        capped = client.post(
+            f"/projects/{project['id']}/analysis/jobs/{job.id}/retry")
+        self.assertEqual(capped.status_code, 409)
 
     def test_analysis_retry_endpoint_rejects_non_failed_and_cross_project(self):
         core_sot = CoreSotService(InMemoryCoreSotRepository())
@@ -2557,7 +2615,7 @@ class AnalysisErrorContractDeclarationTest(unittest.TestCase):
         ("/projects/{project_id}/analysis/jobs/{job_id}/candidates", "get"):
             {"401", "403", "404", "503"},
         ("/projects/{project_id}/analysis/jobs/{job_id}/retry", "post"):
-            {"401", "403", "404", "409", "503"},
+            {"401", "402", "403", "404", "409", "429", "503"},
         # 402/429: Slice 8.3 quota enforcement (Q5=B) — billable operation.
         ("/projects/{project_id}/analysis/jobs/{job_id}/run", "post"):
             {"401", "402", "403", "429", "400", "404", "409", "502", "503"},
@@ -3239,7 +3297,7 @@ class WritingErrorContractDeclarationTest(unittest.TestCase):
         ("/projects/{project_id}/writing/generation-jobs/{job_id}", "get"):
             {"401", "403", "404", "503"},
         ("/projects/{project_id}/writing/generation-jobs/{job_id}/retry", "post"):
-            {"401", "403", "404", "409", "503"},
+            {"401", "402", "403", "404", "409", "429", "503"},
         ("/projects/{project_id}/writing/gate", "post"):
             {"401", "402", "403", "429", "400", "404", "409", "502", "503",
              "504"},

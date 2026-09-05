@@ -36,6 +36,13 @@ from enum import StrEnum
 from typing import Callable, Protocol
 from uuid import uuid4
 
+from services.application.app.retry_policy import (
+    MAX_JOB_RETRIES,
+    RetryCooldownActive,
+    RetryLimitReached,
+    cooldown_remaining,
+)
+
 # How long a claimed (RUNNING) job may sit before another worker may reclaim it.
 # Mirrors the index-sync outbox lease: if a worker crashes mid-generation, the
 # job is not stranded. A long generate (``long``≈91s) must fit comfortably under
@@ -135,6 +142,9 @@ class WritingGenerationJob:
     # Set on success: the scratch entry the worker wrote the result into, so the
     # status surface (2c) can point the pad straight at it.
     result_scratch_id: str | None = None
+    # S-1 D2(오너 2026-09-05): 재시도 상한·쿨다운의 재료(AnalysisJob 과 같은 축).
+    retry_count: int = 0
+    failed_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -399,6 +409,7 @@ class WritingGenerationJobService:
             self._transition(job, WritingGenerationJobStatus.FAILED),
             failure_reason=reason,
             failure_detail=detail,
+            failed_at=self._clock(),  # S-1 D2: 재시도 쿨다운의 기준점
         )
         self._repo.update(updated)
         return updated
@@ -414,12 +425,28 @@ class WritingGenerationJobService:
         Non-FAILED jobs raise ``InvalidJobStateTransition`` (the endpoint maps
         that to 409) — succeeded and the in-flight states are never retryable.
         The failure fields and the stale claim lease are cleared on the way back.
+
+        S-1 D2(오너 2026-09-05 = 상한 2회·쿨다운 60초): 재시도는 회복 수단이지
+        무과금 재실행의 통로가 아니다(감사 §A.3). 상한 초과는 ``RetryLimitReached``
+        (409), 마지막 실패 직후는 ``RetryCooldownActive``(429+Retry-After).
         """
+        if job.retry_count >= MAX_JOB_RETRIES:
+            raise RetryLimitReached(
+                f"this job was already retried {job.retry_count} times "
+                f"(limit {MAX_JOB_RETRIES})"
+            )
+        remaining = cooldown_remaining(job.failed_at, self._clock())
+        if remaining > 0:
+            raise RetryCooldownActive(
+                "this job failed recently; wait before retrying",
+                retry_after_seconds=remaining,
+            )
         updated = replace(
             self._transition(job, WritingGenerationJobStatus.PENDING),
             failure_reason=None,
             failure_detail=None,
             claimed_at=None,
+            retry_count=job.retry_count + 1,
         )
         self._repo.update(updated)
         return updated

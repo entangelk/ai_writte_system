@@ -20,6 +20,10 @@ from fastapi import Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from services.application.app.analysis.apply import MemoryApplyError, MissingMatchedMemory
+from services.application.app.retry_policy import (
+    RetryCooldownActive,
+    RetryLimitReached,
+)
 from services.application.app.analysis.compare import (
     ActionProposal,
     CompareAction,
@@ -73,10 +77,12 @@ from ..api.dependencies import (
     _REQUIRE_PROJECT_OWNER_BILLABLE,
     project_existence_check,
     require_authenticated_user,
+    require_quota_standing,
 )
 from ..api.errors import (
     _BILLABLE_400_404_409_502_CONFIG,
     _BILLABLE_404_409_JUDGE,
+    _ERRORS_JOB_RETRY,
     _BILLABLE_404_502_CONFIG,
     _ERRORS_400_404,
     _ERRORS_400_404_409,
@@ -194,8 +200,11 @@ def register_analysis(
         }
 
     @app.post("/projects/{project_id}/analysis/jobs/{job_id}/retry",
-              responses=_owned(_ERRORS_404_409),
-              dependencies=_REQUIRE_PROJECT_OWNER)
+              responses=_owned(_ERRORS_JOB_RETRY),
+              dependencies=[
+                  *_REQUIRE_PROJECT_OWNER,
+                  Depends(require_quota_standing),
+              ])
     async def retry_analysis_job(project_id: str, job_id: str) -> dict[str, object]:
         try:
             _require_project_exists(project_id)
@@ -204,6 +213,13 @@ def register_analysis(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except InvalidJobStateTransition as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except RetryLimitReached as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except RetryCooldownActive as exc:
+            raise HTTPException(
+                status_code=429, detail=str(exc),
+                headers={"Retry-After": str(exc.retry_after_seconds)},
+            ) from exc
         return _analysis_job_payload(job)
 
     @app.post("/projects/{project_id}/analysis/jobs/{job_id}/run",

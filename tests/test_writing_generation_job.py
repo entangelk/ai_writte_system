@@ -15,8 +15,13 @@ consume it. Locks the state machine and the atomic claim both directions:
 """
 
 import unittest
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
+from services.application.app.retry_policy import (
+    RetryCooldownActive,
+    RetryLimitReached,
+)
 from services.application.app.writing.generation_job import (
     DEFAULT_CLAIM_TIMEOUT_SECONDS,
     InMemoryWritingGenerationJobRepository,
@@ -230,8 +235,10 @@ class RetryTest(unittest.TestCase):
         )
 
     def test_retry_resets_failed_job_to_pending_clearing_failure(self):
-        svc = _service()
+        clock = _Clock()
+        svc = _service(clock=clock)
         failed = self._failed(svc)
+        clock.advance(61)  # S-1 D2: 재시도 쿨다운(60s)을 지난 뒤다
         retried = svc.mark_pending_for_retry(failed)
         self.assertEqual(retried.status, WritingGenerationJobStatus.PENDING)
         self.assertIsNone(retried.failure_reason)
@@ -244,14 +251,65 @@ class RetryTest(unittest.TestCase):
     def test_retried_job_is_reclaimable_by_the_worker(self):
         # under-strict — the whole point of the slice: after retry the worker's
         # claim loop must pick the job up again and re-run it.
-        svc = _service()
+        clock = _Clock()
+        svc = _service(clock=clock)
         failed = self._failed(svc)
+        clock.advance(61)  # S-1 D2: 재시도 쿨다운(60s)을 지난 뒤다
         self.assertIsNone(svc.claim_next())  # FAILED is not claimable
         svc.mark_pending_for_retry(failed)
         reclaimed = svc.claim_next()
         self.assertIsNotNone(reclaimed)
         self.assertEqual(reclaimed.id, failed.id)
         self.assertEqual(reclaimed.status, WritingGenerationJobStatus.RUNNING)
+
+    def test_retry_is_capped_at_two_attempts(self):
+        """S-1 D2(오너 2026-09-05): 상한 2회 — B5 의 "재시도는 드문 회복 수단"
+        전제를 지키는 숫자. under-strict: 상한을 지우면 세 번째 재시도가 통과해
+        실패한다. over-strict: 상한을 1 로 당기면 둘째 재시도에서 실패한다.
+        """
+        clock = _Clock()
+        svc = _service(clock=clock)
+        job = self._failed(svc)
+        for _ in range(2):
+            clock.advance(61)
+            job = svc.mark_pending_for_retry(job)
+            claimed = svc.claim_next()
+            job = svc.mark_failed(
+                claimed,
+                reason=WritingGenerationJobFailureReason.PROVIDER_TIMEOUT,
+            )
+        clock.advance(61)
+        with self.assertRaises(RetryLimitReached):
+            svc.mark_pending_for_retry(job)
+
+    def test_retry_within_the_cooldown_is_refused_with_the_remaining_seconds(self):
+        """쿨다운 60s — 실패 직후의 재시도 나열을 막는다(감사 §A.3)."""
+        clock = _Clock()
+        svc = _service(clock=clock)
+        failed = self._failed(svc)
+        with self.assertRaises(RetryCooldownActive) as ctx:
+            svc.mark_pending_for_retry(failed)
+        self.assertEqual(ctx.exception.retry_after_seconds, 60)
+        clock.advance(30)
+        with self.assertRaises(RetryCooldownActive) as ctx:
+            svc.mark_pending_for_retry(failed)
+        self.assertEqual(ctx.exception.retry_after_seconds, 30)
+        clock.advance(31)
+        self.assertEqual(
+            svc.mark_pending_for_retry(failed).status,
+            WritingGenerationJobStatus.PENDING,
+        )
+
+    def test_a_legacy_failed_row_without_failed_at_has_no_cooldown(self):
+        """과잉 방어: S-1 이전 옛 행(``failed_at`` 없음)은 즉시 재시할 수 있다."""
+        svc = _service()
+        failed = self._failed(svc)
+        legacy = replace(failed, failed_at=None)
+        svc._repo.update(legacy)  # noqa: SLF001 — 옛 행 모양을 만드는 입력
+        self.assertEqual(
+            svc.mark_pending_for_retry(legacy).status,
+            WritingGenerationJobStatus.PENDING,
+        )
 
     def test_retry_on_pending_is_rejected(self):
         # over-strict: only a FAILED job is retryable — a queued one is not.

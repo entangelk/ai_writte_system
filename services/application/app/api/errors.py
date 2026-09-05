@@ -232,6 +232,14 @@ _ERRORS_404_409: dict[int | str, dict] = _protected({
     404: _ERROR, 409: _ERROR, 503: _STORAGE_503,
 })
 
+# S-1 D2(오너 2026-09-05): 실패 job 재시도(analysis·generation 양쪽)의 얼굴.
+# 409 는 기존 상태충돌에 재시도 상한 초과가 합류했고, 429 는 마지막 실패 직후의
+# 쿨다운(Retry-After 동반), 402·403 은 재시도 입장 판정(정지·소진 — 차감 없음).
+_ERRORS_JOB_RETRY: dict[int | str, dict] = _protected({
+    402: _ERROR, 403: _ERROR, 404: _ERROR, 409: _ERROR, 429: _ERROR,
+    503: _STORAGE_503,
+})
+
 
 _ERRORS_400_404_409: dict[int | str, dict] = _protected({
     400: _ERROR, 404: _ERROR, 409: _ERROR, 503: _STORAGE_503,

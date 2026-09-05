@@ -43,6 +43,7 @@ from services.application.app.api.dependencies import (
     CONFIRM_DUPLICATE_HEADER,
     enforce_quota,
     require_authenticated_user,
+    require_quota_standing,
     require_project_owner,
 )
 from services.application.app.quota.billable_actions import (
@@ -85,14 +86,30 @@ from tests.test_writing import (
     _service,
 )
 
-# 429 의 **두 번째 생산자**(Phase S-3, 오너 2026-09-05). 이 시스템에서 429 는
-# 8.3 이래로 quota 한 뜻이었고 위 가드 ③이 "유료 11경로에만"을 강제해 왔다.
-# 공개 signup 의 발신 IP 축 레이트리밋은 한도가 아니라 **비용 상한**이라 같은
-# 상태코드를 다른 뜻으로 쓴다 — 403 이 소유권·관리자·가입상태 셋을 갖게 된 것과
-# 같은 취급이라, 조용히 통과시키지 않고 **여기 등재**한다. 목록이 늘어나는 것은
-# 이 줄을 고치는 의도적 편집이어야 한다(아래 두 셀이 양방향으로 잠근다).
+# 429 의 **비-과금 생산자** 목록. 이 시스템에서 429 는 8.3 이래로 quota 한
+# 뜻이었고 가드 ③이 "유료 11경로에만"을 강제해 왔다. 그 뒤 같은 코드를 다른
+# 뜻으로 쓰는 면들이 생겼고, 조용히 통과시키지 않고 **여기 등재**한다 —
+# 목록이 늘어나는 것은 이 줄을 고치는 의도적 편집이어야 한다(아래 셀이
+# 양방향으로 잠근다).
+# - signup 스로틀(Phase S-3, 오너 2026-09-05): 한도가 아니라 발신 IP 축의
+#   **비용 상한**이다.
+# - 실패 job 재시도 쿨다운(S-1 D2, 오너 2026-09-05): 마지막 실패 직후의 재시도
+#   나열을 막는 창이다 — 세 번째 생산자.
 THROTTLED_OPERATIONS: frozenset[tuple[str, str]] = frozenset({
     ("/auth/signup", "post"),
+    ("/projects/{project_id}/analysis/jobs/{job_id}/retry", "post"),
+    ("/projects/{project_id}/writing/generation-jobs/{job_id}/retry", "post"),
+})
+
+# S-1 D2-b(오너 2026-09-05): **유료가 아니면서 402 를 선언하는** 경로 — 실패 job
+# 재시도의 입장 게이트다. Q5=B 의 "402 는 예외가 없다"는 "무료 경로가 한도를
+# 팔지 않는다"는 뜻이었는데, 재시도는 예외다: 자기 한도가 소진된 회원은 재시도로
+# 무과금 재실행을 계속할 수 없어야 한다(감사 §A.2·§A.3). 차금은 여전히 워커의
+# 성공 시점뿐이라 이 경로 자체는 한도를 팔지 않는다. 배선(의존성)은 아래
+# StandingWiringTest 가 양방향으로 잠근다.
+STANDING_GATED_OPERATIONS: frozenset[tuple[str, str]] = frozenset({
+    ("/projects/{project_id}/analysis/jobs/{job_id}/retry", "post"),
+    ("/projects/{project_id}/writing/generation-jobs/{job_id}/retry", "post"),
 })
 
 _USER = User(
@@ -510,6 +527,29 @@ _REPORT_JSON = json.dumps({
 }, ensure_ascii=False)
 
 
+class RetryStandingWiringTest(unittest.TestCase):
+    """S-1 D2-b — 입장 게이트 경로와 ``require_quota_standing`` 배선이 1:1.
+
+    선언(402·403·429)만 갱신하고 dependency 를 빼먹으면 "문서는 지키는 척하는
+    미시행"이 된다 — H3 의 선언≠시행 함정이 그대로 재발하는 자리다. 양방향:
+    왼쪽에 남으면 입장 없는 게이트 선언이고, 오른쪽에 남으면 게이트 아닌 경로가
+    입장 판정을 얻은 것이다.
+    """
+
+    def test_standing_gated_operations_match_the_wiring_exactly(self):
+        app = create_app(service=CoreSotService(InMemoryCoreSotRepository()))
+        wired = {
+            (route.path, method.lower())
+            for route in app.routes if isinstance(route, APIRoute)
+            for method in route.methods
+            if any(
+                d.dependency is require_quota_standing
+                for d in route.dependencies
+            )
+        }
+        self.assertEqual(wired, set(STANDING_GATED_OPERATIONS))
+
+
 class KeyConsumptionHttpTest(unittest.TestCase):
     """S-1(오너 2026-09-05 = A+D+report 국소 C) — BODY dedupe 키는 1회만 소비된다.
 
@@ -712,20 +752,21 @@ class BillableRouteWiringTest(unittest.TestCase):
                 else:
                     # over-strict: 무료 경로에 quota 얼굴이 선언되면 프론트가
                     # 있지도 않은 한도를 다루게 된다.
-                    # 402 에는 예외가 없다 — 등재된 429 생산자도 **한도를 팔지
-                    # 않는다**. 여기서 402 까지 풀면 "무료인데 결제를 요구하는
-                    # 경로"가 조용히 생길 수 있다.
-                    self.assertNotIn("402", declared)
+                    # 402 의 유일한 예외는 S-1 D2-b 의 입장 게이트다(위
+                    # STANDING_GATED_OPERATIONS) — 그마저 **한도를 팔지 않는다**:
+                    # 차금은 워커의 성공 시점뿐이다.
+                    if (path, method) not in STANDING_GATED_OPERATIONS:
+                        self.assertNotIn("402", declared)
                     if (path, method) not in THROTTLED_OPERATIONS:
                         self.assertNotIn("429", declared)
 
-    def test_the_second_429_producer_stays_exactly_one_operation(self):
-        """등재된 429 생산자 목록이 실제 선언과 정확히 일치한다.
+    def test_non_billable_429_producers_stay_enrolled_exactly(self):
+        """등재된 비-과금 429 면 목록이 실제 선언과 정확히 일치한다.
 
-        under-strict: signup 에서 429 선언이 사라지면(= S-3 스로틀이 계약에서
-        빠지면) 실패한다. over-strict: 다른 무료 경로가 429 를 얻으면 위
-        가드가 아니라 **이 셀**이 먼저 실패해서, 예외 목록에 한 줄 더하는 것이
-        의도적 편집이 되게 만든다.
+        under-strict: signup 이나 재시도 경로에서 429 선언이 사라지면(= 스로틀·
+        쿨다운이 계약에서 빠지면) 실패한다. over-strict: 다른 무료 경로가 429 를
+        얻으면 위 가드가 아니라 **이 셀**이 먼저 실패해서, 예외 목록에 한 줄 더하는
+        것이 의도적 편집이 되게 만든다.
         """
         actually_declared = {
             (path, method)

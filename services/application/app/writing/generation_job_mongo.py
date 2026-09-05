@@ -155,6 +155,9 @@ def _doc(job: WritingGenerationJob) -> dict:
         ),
         "failure_detail": job.failure_detail,
         "result_scratch_id": job.result_scratch_id,
+        # S-1 D2: 재시도 상한·쿨다운의 재료(AnalysisJob 과 같은 축).
+        "retry_count": job.retry_count,
+        "failed_at": job.failed_at,
     }
 
 
@@ -186,4 +189,6 @@ def _entry(doc: dict) -> WritingGenerationJob:
         ),
         failure_detail=doc.get("failure_detail"),
         result_scratch_id=doc.get("result_scratch_id"),
+        retry_count=int(doc.get("retry_count") or 0),
+        failed_at=doc.get("failed_at"),
     )
