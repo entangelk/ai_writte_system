@@ -6,7 +6,7 @@
 
 서비스 경계와 확정된 계약을 먼저 볼 때는 [`../system-contract-sot.md`](../system-contract-sot.md)를 정본 SoT로 사용한다. 이 인덱스는 Phase별 세부 계획과 **모든 착수 결정 브리프**를 찾는 자리다.
 
-> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(121개 중 101개)는
+> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(122개 중 102개)는
 > `*-decisions.md` 착수 결정 브리프이며, **오너 결정의 근거 기록**이다. 파일명 접두 체계는 이미 무너져
 > 있고(`00`~`07` 계열 + 접두 없는 최근 것들) 파일명만으로는 트랙을 알 수 없다 — 그래서 아래는 **접두가
 > 아니라 트랙으로** 묶었다. 디렉터리 재편은 아직 결정되지 않은 별개 사안이다(HANDOFF 추적 부채).
@@ -227,6 +227,7 @@
 | [`auth-d8-7-infra-auth-decisions.md`](auth-d8-7-infra-auth-decisions.md) | D8-7 인프라 노출면·자격증명 | Partially — **G1=C 확정** / G2~G6 유예 |
 | [`auth-signup-approval-decisions.md`](auth-signup-approval-decisions.md) | 자기 가입(승인제) — v1.7.82 가입 금지 문구 개정·403 생산자 셋·브루트포스 잠금·시드 정리 | **Resolved(2026-08-22)** — 403+사유 / 방어 동봉 / 시드 정리+오너 계정 |
 | [`security-phase-s3-signup-throttle-decisions.md`](security-phase-s3-signup-throttle-decisions.md) | Phase S-3 — 공개 `/auth/signup` 속박(축: nginx IP / 앱 전역 / IP+XFF 신뢰정책 / 표면 폐쇄). 2026-08-22 이 "공개 배포 전"으로 유예한 `X-Forwarded-For` 신뢰 정책이 이 결정이다 | **Resolved(2026-09-05)** — C 채택(앱 IP축 + XFF 신뢰 정책) · 구현 완료 · 2026-08-22 의 "공개 배포 전 IP 축" 유예가 닫혔다 |
+| [`security-phase-s1-quota-dedupe-decisions.md`](security-phase-s1-quota-dedupe-decisions.md) | Phase S-1 — quota 우회 체인(감사 §A.1~A.4): dedupe 키 신뢰(정산된 키 소비/신선성 창/동기 멱등 replay/확인 재과금/서버 발급) · retry 상한 · 판정 팬아웃. 원장이 잠금 G4=A 의 +1 과금 약속을 배반하는 계약 내부 모순을 함께 올림 | **Proposed(2026-09-05)** — 오너 결정 대기(D1~D3) |
 
 ### 외부 확장 (배선 완료 · 어댑터 미착수)
 

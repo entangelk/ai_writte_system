@@ -860,3 +860,44 @@ Slice 5 검증 축("유료 10번째 경로"). **패턴 스윕 추가 발견 2건
 - 이 슬라이스는 검증 판정 열을 승격하지 않는다(Slice 0~4·v1.8.28 선례) — 조건 소멸 확인은
   검증기록의 Outstanding 정의대로 폐쇄 슬라이스 도달로 성립하고, 재검이 필요하면 다음 독립
   세션이 한다.
+
+---
+
+# 세션 8 — Phase S-1 착수: quota 우회 체인 결정 브리프(오너 결정 대기)
+
+## Goals
+
+- 오너 지시: *"다음 s-1 진행해줘"* + 낡은 vhost 는 타 프로젝트 AI 소관으로 무관하다는 확인.
+- S-3 선례대로, 등록 계약(B5·G4=A·Q9=A)의 경계를 고치는 선택은 브리프로 올리고 멈춘다.
+
+## Completed work
+
+커밋(이번 분): `docs/plans/security-phase-s1-quota-dedupe-decisions.md` 신규 — 감사
+§A.1~A.4 를 결정축 셋으로 쪼갠 브리프.
+
+- **D1 dedupe 키 신뢰(HIGH)**: 선택지 5안(정산된 키 소비 409 / 신선성 창 / 동기 멱등
+  replay / 확인 실행 재과금 / 서버 발급 키). 추천 **A+D 결합 + accept 순서 교정**.
+- **D2 retry 상한(MEDIUM)**: 추천 (c) 상한(2회)+쿨다운(60s)+generation-jobs retry 입장
+  dependency.
+- **D3 판정 팬아웃(MEDIUM)**: 추천 (c) 유예, 단 (a) run당 상한을 가입 개방 슬라이스에 동반.
+
+**브리프 세로 읽기에서 새로 발견한 계약 내부 모순**: 8.2b G4=A 가 *"확인 한 번으로 통과하고
+사용량 1회를 더 쓴다"*고 약속하지만 `QuotaCharge` 에 `confirmed` 필드가 없어 같은 키의
+확인된 재실행은 원장에서 무료로 접힌다 — 잠금의 +1 과금 약속은 한 번도 시행된 적이
+없었다(감사 §A.1 과 같은 뿌리). D안이 이 모순을 닫는다.
+
+**실측으로 보강한 사실관계**: `writing_report` 는 응답을 지속하지 않는다
+(`routers/writing.py:763` 반환 직전 저장 없음) — 409-consumed 안의 유일한 회복 불능
+경로라 오너 트레이드오프로 명시. accept 는 enrich 가 replay 조회보다 앞선다(§A.1).
+
+부수: 계획 인덱스 등재(다중 사용자 인증 트랙, Proposed)·계획 수 주장 갱신
+(README 121→122·101→102, plans README)·HANDOFF 낡은 vhost 줄을 "타 프로젝트 AI 처리 중"
+으로 갱신(오너 확인 이 반영).
+
+## Verification
+
+- `tests/test_docs_indexes.py` **15 passed / 292 subtests**(신규 plan 등재·수 주장 가드 통과).
+
+## Next steps
+
+- 오너가 D1·D2·D3 을 고르면 슬라이스 1(D1) → 슬라이스 2(D2) 순서로 구현(셀·뮤테이션·SoT 행).

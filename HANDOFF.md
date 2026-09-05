@@ -223,7 +223,7 @@
 > **★ 2026-09-05 보안 감사 후속(Phase S)이 진행 중이다.** 감사 판단 **critical 0건** + 오너 확인 둘(확인용 계정은 배포에 없었다 · 승인된 계정이 오너뿐이다). **오늘 도달 가능했던 유일한 항목이던 S-3 signup 축은 닫혔다**(2026-09-05, SoT v1.8.30). 남은 것 중 **S-1(HIGH)은 가입을 여는 순간 위험해지므로 랜딩·약관과 같은 트리거**이고, **S-0 은 침해가 아니라 이 문서 머리의 공개 저장소 보안 규칙 위반**이다. Slice 5 검증은 **이미 병합된 코드를 다시 뜯는 일이라 미뤄도 외부 위험이 늘지 않는다** — 그래서 S-1 을 앞에 뒀다.
 
 0. **★ Phase S — 보안 감사 후속**(기록 [`security_audit_dual_workflow.md`](docs/verifications/2026-09-05/security_audit_dual_workflow.md), 확정 39건 · critical 0 · HIGH 1). 아래 "🛡 보안 — Phase S" 표가 항목별 정본이다. **~~S-3 signup~~(닫힘) → S-1 quota dedupe(가입 열기 전 필수) → S-0 문서 스윕 → S-7 토큰 저장 방식(위생, 설정 한 줄) → 나머지는 트리거.** S-2(nginx 보안 헤더)를 할 때는 **nginx 앞단 레이트리밋·`client_max_body_size` 와 한 슬라이스로 묶는 편이 싸다** — nginx 를 한 번만 연다.
-   - **★ S-3 이 남긴 오너 확인 항목**: 공유 호스트의 공용 리버스 프록시에 이 프로젝트용 **낡은 vhost** 가 남아 있다(지금 죽어 있으나 살아나면 두 번째 진입로). 타 프로젝트 저장소 소관이라 이 저장소에서 못 고친다.
+   - **낡은 vhost(공용 리버스 프록시)**: 오너 확인 완료(2026-09-05) — **타 프로젝트 쪽 작업 AI가 처리 중**이다. 이 저장소 소관 아님(살아나면 두 번째 진입로인 구조는 그대로).
 1. **정체성 그룹 Slice 5 독립 검증** — Slice 0~5 구현 완료, 0~4는 검증 폐쇄, **5만 대기**. 대상은 git에서 유도한다(기준점 = 마지막 검증기록 발행 커밋). 볼 축: revision 멱등 key · step 진행 저장(`candidate_identity_group_approvals`) · 채택 규칙 · **유료 11번째 경로 fan-out** · 그룹 행 한 줄 활동 기록(변경 ≥1일 때만). 브리프 [`pending-candidate-identity-grouping-decisions.md`](docs/plans/pending-candidate-identity-grouping-decisions.md), 페이즈 [`구현 페이즈 문서`](docs/plans/pending-candidate-identity-grouping-implementation-phases.md).
 2. **최종 저장·분석 연동 5차(승격) 재검증** — 4차 조건부 합격의 조건 N1은 닫혔다. **집중 셀 + 변이로 충분**(4차 판정문).
 3. **Slice 6(grouped Inbox UI)** — 1번 통과 후. 착수 전 위 표의 프론트 기존 결함 2건을 먼저 본다.
