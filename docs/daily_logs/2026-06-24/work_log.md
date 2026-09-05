@@ -135,7 +135,7 @@
 
 ### Direct live server smoke
 
-- 대상: `http://192.168.1.29:9080`의 llama.cpp server
+- 대상: `http://<구검증-LLM>:9080`의 llama.cpp server
 - `/health` → `{"status":"ok"}`
 - `/v1/models` → `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`, GGUF, context 8192 확인
 - `/v1/chat/completions`에 `chat_template_kwargs.enable_thinking=false`로 짧은 한국어 요청 전송

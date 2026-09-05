@@ -107,7 +107,7 @@ H-1(2b)은 catch-all 커버리지의 정제(현행 crash-and-reclaim은 작동�
 
 ### Post-verification updates (검증 후 해소)
 
-- **★ 라이브 스모크 — 해소(PASS)**: 작업 AI가 검증 직후(5b6ba87 핸드오프 작성 시점) 외부 12B(192.168.1.22:9080)로 seeded-job 스모크를 돌렸다. gateway-backed `execute_generation_job`이 실 한국어 산문 166자 생성 → job succeeded·scratch 1건·`version_id="v-live"` 보존. worker의 최초 gateway generate 호출 + 결과→scratch 배선 + mark_succeeded가 실 12B에서 관통 확인(context search는 stub — Phase 4에서 이미 라이브 검증). 완전 스택 e2e(실 context search + Mongo + compose 서비스)는 endpoint 배선 2c 후 오너 풀스택.
+- **★ 라이브 스모크 — 해소(PASS)**: 작업 AI가 검증 직후(5b6ba87 핸드오프 작성 시점) 외부 12B(<베타-LLM>:9080)로 seeded-job 스모크를 돌렸다. gateway-backed `execute_generation_job`이 실 한국어 산문 166자 생성 → job succeeded·scratch 1건·`version_id="v-live"` 보존. worker의 최초 gateway generate 호출 + 결과→scratch 배선 + mark_succeeded가 실 12B에서 관통 확인(context search는 stub — Phase 4에서 이미 라이브 검증). 완전 스택 e2e(실 context search + Mongo + compose 서비스)는 endpoint 배선 2c 후 오너 풀스택.
 - **H-1(2b) — 해소(적용)**: 오너 지시로 (a) catch-all 확장을 적용했다. `execute_generation_job`의 result-persist 단계(`clear_accepted_item` + `scratch.save`)를 try 블록 안으로 옮겨 최외곽 `except Exception → INTERNAL`이 저장 단계까지 덮도록 했다. 회귀 `test_persist_failure_terminates_job_not_crash` 추가(under-strict). backend **1296 passed**(1295+1). 상세는 `work_log.md` "증분 2b 독립 검증 후 hardening" 태스크.
 - **2c(D5)**: generate 2048/4096→enqueue·1024 동기·async+no current_position→400·`GET .../generation-jobs/{id}` 상태 read. 이 flip이 async 경로 개통(현재 dormant).
 

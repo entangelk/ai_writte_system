@@ -52,7 +52,7 @@
 
 ## Decisions
 
-- 사용자 결정 반영: gateway compose 편입은 옵션 A로 진행한다. compose는 llama.cpp 서버를 띄우지 않고 gateway 컨테이너만 관리하며, `LLAMA_BASE_URL`이 외부 llama.cpp-compatible server를 가리킨다. 과거 `192.168.1.29:9080`은 다른 머신에서 검증한 live endpoint로 남기고, 현재 repo 기준 기본값은 Docker host의 `http://host.docker.internal:9080`로 둔다. 트레이드오프: 모델 서버 운영은 여전히 별도 책임이라 `/health/live`는 gateway process만 확인하고, upstream 모델 준비 여부는 `/health/ready`에서 별도 확인한다.
+- 사용자 결정 반영: gateway compose 편입은 옵션 A로 진행한다. compose는 llama.cpp 서버를 띄우지 않고 gateway 컨테이너만 관리하며, `LLAMA_BASE_URL`이 외부 llama.cpp-compatible server를 가리킨다. 과거 `<구검증-LLM>:9080`은 다른 머신에서 검증한 live endpoint로 남기고, 현재 repo 기준 기본값은 Docker host의 `http://host.docker.internal:9080`로 둔다. 트레이드오프: 모델 서버 운영은 여전히 별도 책임이라 `/health/live`는 gateway process만 확인하고, upstream 모델 준비 여부는 `/health/ready`에서 별도 확인한다.
 - 사용자 결정: Mongo adapter는 **real pymongo + live Mongo 통합 테스트(미가용 시 skip)** 방식, 드라이버는 **pymongo(sync)**. 이유: transaction을 실제로 검증해야 하고(mongomock은 transaction 미지원), 로컬 단일 사용자 MVP에는 sync가 단순하다. 트레이드오프로 기존 "전부 인프라 없는 단위 테스트" 컨벤션이 통합 테스트 층에서는 깨지지만, skip-aware로 두어 기본 단위 스위트는 인프라 없이 그대로 돌아간다.
 - repository Protocol 추출은 surgical refactor 범위로 판단했다(저장소 교체를 위한 최소 선행조건이며 기존 테스트를 보존).
 
@@ -237,7 +237,7 @@
 
 - 변경 파일: `services/llm_gateway/app/main.py`(신규), `services/llm_gateway/Dockerfile`(신규), `services/llm_gateway/requirements.txt`, `docker-compose.yml`, `tests/test_llm_gateway_app.py`(신규).
 - 배경: HANDOFF Next Task #1은 gateway 서비스를 Dockerfile/compose에 편입하는 것이었지만, 모델 서버는 기존 운영 방식처럼 별도 llama.cpp server로 둬야 했다.
-- 구현: `gateway` 서비스는 `LLAMA_BASE_URL`의 외부 llama.cpp-compatible endpoint를 호출하는 client container다. compose는 llama.cpp server/model weight/GPU lifecycle을 관리하지 않는다. 기본값은 repo-local Docker host 기준 `http://host.docker.internal:9080`이며, 이전 검증 머신의 `192.168.1.29:9080`은 필요 시 env override로만 사용한다.
+- 구현: `gateway` 서비스는 `LLAMA_BASE_URL`의 외부 llama.cpp-compatible endpoint를 호출하는 client container다. compose는 llama.cpp server/model weight/GPU lifecycle을 관리하지 않는다. 기본값은 repo-local Docker host 기준 `http://host.docker.internal:9080`이며, 이전 검증 머신의 `<구검증-LLM>:9080`은 필요 시 env override로만 사용한다.
 - FastAPI shell: `/health/live`와 `/health`는 gateway process liveness만 반환하고, `/health/ready`는 외부 llama.cpp `/health`를 조회한다. `POST /v1/generate`는 기존 `LlamaCppProvider`/`HttpxJsonTransport` 계약을 재사용해 stable generation envelope를 반환하고, `ProviderError`는 public stable error envelope로 노출한다.
 - Dockerfile은 application과 같은 cache-friendly 패턴을 따른다: gateway `requirements.txt`를 먼저 복사·설치하고, 그 뒤 `services/` 소스를 복사한다.
 - compose healthcheck는 외부 모델 상태에 묶이지 않도록 `/health/live`만 probe한다. upstream readiness가 필요한 운영자는 `/health/ready`를 별도 확인한다.

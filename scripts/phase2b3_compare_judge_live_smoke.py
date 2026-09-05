@@ -56,7 +56,6 @@ from services.llm_gateway.app.httpx_transport import HttpxJsonTransport
 from services.llm_gateway.app.main import create_app as create_gateway_app
 
 
-DEFAULT_LLAMA_BASE_URL = "http://192.168.1.29:9080"
 DEFAULT_MODEL = "google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0"
 
 CHARACTER = AnalysisCandidateType.CHARACTER_OBSERVATION
@@ -71,7 +70,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--llama-base-url",
-        default=os.environ.get("LLAMA_BASE_URL", DEFAULT_LLAMA_BASE_URL),
+        # S-0: 실주소를 코드에 두지 않는다. 기본값이 없으므로 환경변수나 인자로
+        # 명시해야 하고, 빠뜨리면 엉뚱한 곳에 조용히 붙는 대신 즉시 멈춘다.
+        default=os.environ.get("LLAMA_BASE_URL"),
+        required=not os.environ.get("LLAMA_BASE_URL"),
     )
     parser.add_argument(
         "--model", default=os.environ.get("LLAMA_DEFAULT_MODEL", DEFAULT_MODEL)

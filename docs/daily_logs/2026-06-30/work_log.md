@@ -60,8 +60,8 @@
 
 - 변경 파일: `scripts/benchmark_llm_provider.py`, `tests/test_llm_benchmark_script.py`, `docs/benchmarks/2026-06-30/gemma_q4_llama_cpp_repeats3_warmup1.json`, `docs/plans/flat-loop-gate.md`, `docs/plans/README.md`, `docs/plans/implementation-plan.md`, `docs/system-contract-sot.md`, `CHANGELOG.md`, `HANDOFF.md`, `docs/daily_logs/2026-06-30/work_log.md`.
 - 검증자 산출물 포함 run endpoint 작업은 먼저 커밋 `4f8182a`로 닫았다.
-- HANDOFF의 다음 막히지 않은 작업인 실제 Gemma/llama.cpp endpoint benchmark를 진행했다. `http://192.168.1.29:9080/health`와 `/v1/models`를 확인했고, model은 `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`, context는 8192로 확인됐다.
-- `python3 -m scripts.benchmark_llm_provider --base-url http://192.168.1.29:9080 --repeats 3 --warmups 1 --timeout 240`를 실행해 raw report를 `docs/benchmarks/2026-06-30/gemma_q4_llama_cpp_repeats3_warmup1.json`에 저장했다.
+- HANDOFF의 다음 막히지 않은 작업인 실제 Gemma/llama.cpp endpoint benchmark를 진행했다. `http://<구검증-LLM>:9080/health`와 `/v1/models`를 확인했고, model은 `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`, context는 8192로 확인됐다.
+- `python3 -m scripts.benchmark_llm_provider --base-url http://<구검증-LLM>:9080 --repeats 3 --warmups 1 --timeout 240`를 실행해 raw report를 `docs/benchmarks/2026-06-30/gemma_q4_llama_cpp_repeats3_warmup1.json`에 저장했다.
 - 측정 결과는 전체 failure 0이었다. p95/max token은 `short_smoke` 1.56s/28 tokens, `json_extraction` 8.70s/125 tokens, `continue_scene` 57.16s/407 tokens다.
 - `flat-loop-gate.md`에 초기 local MVP production 기본값을 확정했다: `analysis_compare` 2 iterations/45s/1024 tokens/5 tool calls/repeat 2/retry 1+1, `context_search` 3/60s/1536/8/repeat 2/retry 1+1, `writing_generate` 1/120s/1024/no tools/provider retry 1.
 - SoT를 v1.6.13으로 올려 benchmark report와 `flat-loop-gate.md`가 production 기본값의 canonical 근거임을 기록하고, 미확정 목록에서 budget/retry production 숫자를 제거했다.
@@ -165,8 +165,8 @@
 - 보강 후 `python3 -m unittest tests.test_application_api tests.test_analysis_runner -v` — 54개 통과.
 - 보강 후 `python3 -m unittest discover tests -v` — 313개 통과(35 skip).
 - 보강 후 잠근 범위: `/run` duplicate conflict 409, provider/기타 exception 502, snapshot_not_found 404, failed job replay, `AnalysisExtractionRunner.run_job()` non-pending replay.
-- benchmark endpoint 확인: `curl -sS --max-time 5 http://192.168.1.29:9080/health` → `{"status":"ok"}`, `/v1/models` → `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`.
-- live benchmark: `python3 -m scripts.benchmark_llm_provider --base-url http://192.168.1.29:9080 --repeats 3 --warmups 1 --timeout 240` — 3 case 모두 failure 0, report 저장 완료.
+- benchmark endpoint 확인: `curl -sS --max-time 5 http://<구검증-LLM>:9080/health` → `{"status":"ok"}`, `/v1/models` → `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`.
+- live benchmark: `python3 -m scripts.benchmark_llm_provider --base-url http://<구검증-LLM>:9080 --repeats 3 --warmups 1 --timeout 240` — 3 case 모두 failure 0, report 저장 완료.
 - `python3 -m py_compile scripts/benchmark_llm_provider.py tests/test_llm_benchmark_script.py`
 - `python3 scripts/benchmark_llm_provider.py --help` — `--base-url` 옵션 표시 확인.
 - `python3 -m unittest tests.test_llm_benchmark_script -v` — 8개 통과.

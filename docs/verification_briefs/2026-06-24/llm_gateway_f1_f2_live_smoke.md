@@ -58,15 +58,15 @@ Expected author-side baseline after Slice 0.6 implementation: 42 tests passing. 
 Temporary local endpoint supplied by the owner:
 
 ```text
-http://192.168.1.29:9080
+http://<구검증-LLM>:9080
 ```
 
 Commands:
 
 ```bash
-curl -sS --max-time 10 http://192.168.1.29:9080/health
-curl -sS --max-time 10 http://192.168.1.29:9080/v1/models
-curl -sS --max-time 120 http://192.168.1.29:9080/v1/chat/completions \
+curl -sS --max-time 10 http://<구검증-LLM>:9080/health
+curl -sS --max-time 10 http://<구검증-LLM>:9080/v1/models
+curl -sS --max-time 120 http://<구검증-LLM>:9080/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model":"google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0","messages":[{"role":"user","content":"다음 문장을 그대로 답하세요: 연결 확인 완료"}],"chat_template_kwargs":{"enable_thinking":false},"temperature":0,"max_tokens":32,"stream":false}'
 ```

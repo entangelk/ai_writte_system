@@ -56,7 +56,7 @@
 
 ### 5. Live LLM smoke — 독립 재현 PASS
 
-`192.168.1.22:9080`(gemma-4-12B)에 `LlamaCppProvider` 직접 연결, continuity 오류 candidate(펜을 상자에 넣고 손에도 쥔 장면)로 `revise` 호출:
+`<베타-LLM>:9080`(gemma-4-12B)에 `LlamaCppProvider` 직접 연결, continuity 오류 candidate(펜을 상자에 넣고 손에도 쥔 장면)로 `revise` 호출:
 - RAW 모델 출력 = `'해리는 빛나는 펜을 상자에 넣고 뚜껑을 닫은 뒤, 다시 그것을 손에 꼭 쥐고 있었다.'` — **bare 평문, markdown·JSON·따옴표·preamble 전무**(`WRAPPING_TRAPS_AT_EDGES=[]`).
 - 서버 splice 후 `PREFIX_PRESERVED=True`·`SUFFIX_PRESERVED=True`. 작업자 "replacement fragment 정상 반환 및 서버 splice 통과" 클레임 재현.
 
@@ -106,6 +106,6 @@ sed -n '143,150p' tests/test_writing_revise.py
 # 이전 B1 폐쇄 확인
 git show 25be309 -- tests/test_writing.py | grep -n "unsupported_task_type\|must not save"
 # live smoke(원격 가동 시)
-curl -s http://192.168.1.22:9080/health
+curl -s http://<베타-LLM>:9080/health
 PYTHONPATH=. python3 /tmp/smoke_revise.py     # bare replacement + PREFIX/SUFFIX_PRESERVED=True
 ```

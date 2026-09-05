@@ -3,7 +3,7 @@
 ## Subject metadata
 
 - **날짜**: 2026-07-14
-- **요청자**: 오너(사용자) — "작업 AI가 작업한 부분 확인해서 검증하고 의심하고 또 의심해줄래? … LLM은 192.168.1.22:9080 외부 포트를 사용하면 되는데 무조건 안된다고 한건 아닌지까지"
+- **요청자**: 오너(사용자) — "작업 AI가 작업한 부분 확인해서 검증하고 의심하고 또 의심해줄래? … LLM은 <베타-LLM>:9080 외부 포트를 사용하면 되는데 무조건 안된다고 한건 아닌지까지"
 - **검증자**: 독립 검증자(Claude, 작업자와 다른 session)
 - **대상 slice/artifact**: Phase 5.10 D1=A operator-only Writing Gate live diagnostics(SoT v1.6.82)
   - `services/application/app/writing/gate_live_diag.py`(신규)
@@ -40,7 +40,7 @@
    - `docker ps`, `docker compose ls`
    - gateway env: `docker exec ai_writte_system-gateway-1 printenv | grep LLAMA`
    - gateway ready: `curl http://localhost:8011/health/ready`
-   - 원격 LLM 도달성: `timeout 5 bash -c 'cat </dev/null >/dev/tcp/192.168.1.22/9080'`
+   - 원격 LLM 도달성: `timeout 5 bash -c 'cat </dev/null >/dev/tcp/<베타-LLM>/9080'`
    - benchmark project 존재: `mongosh ... db.projects.find()`; audit의 `error_type`: `db.writing_loop_audits.findOne(...)`
 3. **정적 검증**: `python3 -m py_compile` (3 파일).
 4. **회귀 테스트**: `python3 -m pytest tests/test_writing_gate_live_diag.py -q`; 추가로 gate 인접 suite `test_writing_gate.py test_writing_loop_audit.py test_writing_loop_budget.py`(main.py seam 회귀 확인).
@@ -75,7 +75,7 @@
 | 주장 | 실제 |
 |---|---|
 | full-stack 없음 | **전 스택 2시간째 실행 중**(healthy): application(:8000)·worker·embedding(:8002)·elasticsearch(:9200)·mongo(:27019)·gateway(:8011)·chroma(:8003) |
-| (원격 LLM 미언급) | gateway env `LLAMA_BASE_URL=http://192.168.1.22:9080`, `/health/ready`=`{"status":"ready"}`, `LLAMA_DEFAULT_MODEL=google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`(브리프의 “Remote Gemma Q4”). `192.168.1.22:9080` 도달 **OPEN**(사용자 지적 포트) |
+| (원격 LLM 미언급) | gateway env `LLAMA_BASE_URL=http://<베타-LLM>:9080`, `/health/ready`=`{"status":"ready"}`, `LLAMA_DEFAULT_MODEL=google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`(브리프의 “Remote Gemma Q4”). `<베타-LLM>:9080` 도달 **OPEN**(사용자 지적 포트) |
 | (benchmark project 미언급) | **“B2b Writing Loop Benchmark 2026-07-14”** project(`6a5591e3…`) 존재 + 동 project audit에 `error_type:"invalid_gate_result"` 반복 기록(revise/report completed, gate failed, total_tokens 실측) |
 
 유일한 실제 장애물: 새 파일(`gate_live_diag.py`/`diagnose_writing_gate.py`)이 image에 bake되고 volume mount가 없어, 실행 중인 image(2026-07-14T01:31:52Z 빌드)에 새 파일이 없음 → **image rebuild 필요**. 그러나 deps layer가 캐시되어 rebuild는 **약 6초**(services/scripts COPY 레이어만 갱신). 이는 “불가능”이 아니라 “명령 1회”이며, 작업 AI가 밝힌 이유(“full-stack 없음”)와도 무관하다. 사용자의 의심(“무조건 안 된다고 한 건 아닌지”)은 적중했다.
@@ -130,7 +130,7 @@ D1=A slice의 should/should-NOT 분기가 모두 회귀에 매핑되고, 양방�
 cd /mnt/d/devel/에베베/ai_writte_system
 # 1. 머신 상태
 docker ps                                    # 전 스택 healthy
-docker exec ai_writte_system-gateway-1 printenv | grep LLAMA   # LLAMA_BASE_URL=http://192.168.1.22:9080
+docker exec ai_writte_system-gateway-1 printenv | grep LLAMA   # LLAMA_BASE_URL=http://<베타-LLM>:9080
 curl -s http://localhost:8011/health/ready   # {"status":"ready"}
 # 2. 정적 + 회귀
 python3 -m py_compile services/application/app/writing/gate_live_diag.py scripts/diagnose_writing_gate.py tests/test_writing_gate_live_diag.py

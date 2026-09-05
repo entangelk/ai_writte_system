@@ -170,7 +170,7 @@ Blocking 0건. 검증자가 뮤테이션 3종·회귀 1836/103.30s·compose 리�
   | mongo · chroma · elasticsearch · gateway · embedding | `127.0.0.1:27520/8523/9520/8521/8522` | loopback ✓ |
   | application · frontend | `0.0.0.0:8520` · `0.0.0.0:5520` (+ `[::]`) | 의도된 공개 ✓ |
 
-- **★ LAN 도달성 직접 측정**(호스트 LAN IP `172.30.135.149`로 TCP 연결 시도) — 파일도 `docker port`도
+- **★ LAN 도달성 직접 측정**(호스트 LAN IP `<알파-호스트-LAN>`로 TCP 연결 시도) — 파일도 `docker port`도
   아닌 **네트워크 수준의 최종 증거**:
   - 저장소·내부 5종: **loopback OPEN / LAN closed** (5/5)
   - `application`·`frontend`: **LAN OPEN** (의도)

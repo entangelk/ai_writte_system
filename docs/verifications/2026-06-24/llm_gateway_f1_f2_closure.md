@@ -23,7 +23,7 @@
 4. contract 자기 모순 — `llm-gateway.md` precondition prose ↔ `errors.py` literal ↔ 테스트 기대값 교차 대조
 5. pattern sweep — gateway app 전체 `raise` 사이트의 spec-silent 거부 잔존 여부
 6. full test suite — `python3 -m unittest discover -s tests`
-7. direct live smoke — `http://192.168.1.29:9080` health/models/completion 재실행
+7. direct live smoke — `http://<구검증-LLM>:9080` health/models/completion 재실행
 
 ## Methodology
 
@@ -188,9 +188,9 @@ cp /tmp/payload_backup.py services/llm_gateway/app/payload.py        # 복원
 git status --porcelain                                     # 빈 출력(복원 확인)
 
 # direct live smoke(작성자 관측 재실행):
-curl -sS --max-time 10 http://192.168.1.29:9080/health      # {"status":"ok"}
-curl -sS --max-time 10 http://192.168.1.29:9080/v1/models   # Q4_0 / gguf / n_ctx 8192
-curl -sS --max-time 120 http://192.168.1.29:9080/v1/chat/completions \
+curl -sS --max-time 10 http://<구검증-LLM>:9080/health      # {"status":"ok"}
+curl -sS --max-time 10 http://<구검증-LLM>:9080/v1/models   # Q4_0 / gguf / n_ctx 8192
+curl -sS --max-time 120 http://<구검증-LLM>:9080/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model":"google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0","messages":[{"role":"user","content":"다음 문장을 그대로 답하세요: 연결 확인 완료"}],"chat_template_kwargs":{"enable_thinking":false},"temperature":0,"max_tokens":32,"stream":false}'
 # content "연결 확인 완료", finish_reason stop, usage prompt 23 / completion 5 / total 28

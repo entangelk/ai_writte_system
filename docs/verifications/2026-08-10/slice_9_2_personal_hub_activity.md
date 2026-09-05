@@ -135,7 +135,7 @@ skip 1 = 호스트에서 구조적으로 항상 skip되는 live Chroma 셀. 수(
 
 - 작업 트리 clean. 뮤테이션 전부 원복 완료(`git status --short` 비어 있음 확인).
 - **test-mongo 가 이 검증을 위해 기동돼 있다**(`docker-compose.test.yml`). 종전 상태(미기동)로 돌리려면 `docker compose -f docker-compose.test.yml down`.
-- 허브 렌더 **육안 확인**은 검증 범위 밖(회귀로 잠갔고 스택은 떠 있다). 오너 재량: `http://localhost:5520/me`(계정 `timeline_demo` / `timeline-demo-0810`).
+- 허브 렌더 **육안 확인**은 검증 범위 밖(회귀로 잠갔고 스택은 떠 있다). 오너 재량: `http://localhost:5520/me`(계정 `timeline_demo`(비밀번호는 저장소 밖)).
 - Hardening 1(허브 상한 연결 셀)을 반영할지는 오너 결정 사안.
 
 ## Reproduction

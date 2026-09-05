@@ -106,6 +106,6 @@ git diff d8231cf -- services/application/app/main.py | grep "^@@"
 # B1 빈 셀 수동 확인: composition test가 validate_inputs→400 / bare revise ProviderError→502/504 를 exercise 안 함
 grep -n "duplicate\|ProviderError\|validate_inputs" tests/test_writing_revise.py   # WritingReviseGateApiTest(326~)에 해당 케이스 부재
 # live partial_ok(원격 가동 시)
-curl -s http://192.168.1.22:9080/health
+curl -s http://<베타-LLM>:9080/health
 PYTHONPATH=. python3 /tmp/smoke_revise_gate.py     # OUTCOME=partial_ok + REVISE_ACTUALLY_APPLIED=True
 ```

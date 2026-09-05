@@ -562,7 +562,7 @@ projects 11 · drafts 11 이고, `activity_events: 0` 은 정상이다(기능이
 ### Next steps
 
 1. **오너: `http://localhost:5520/projects/6a795ab928e4a53aa000a824/activity` 를 눈으로 확인**
-   (`timeline_demo` / `timeline-demo-0810`).
+   (`timeline_demo`(비밀번호는 저장소 밖)).
 2. 그 뒤 남는 오너 대기는 **dogfood 착수(GATE-1)** 하나다.
 
 ---
@@ -966,7 +966,7 @@ F1 을 여는 순간 **조용히** 틀려진다.
 
 1. **미검증 구간 = 9.2 세 커밋**. 볼 만한 축: **빈 집합 이중 방어**(내가 뮤테이션으로 연 자리) ·
    **P8 소유 기준 경계** · **`?next=` 를 안 만든 판단이 옳은가** · 상한 100 의 두 곳 일치.
-2. 육안 확인: 재빌드 후 `/me`(계정 `timeline_demo` / `timeline-demo-0810`).
+2. 육안 확인: 재빌드 후 `/me`(계정 `timeline_demo`(비밀번호는 저장소 밖)).
 
 ---
 

@@ -112,7 +112,7 @@ Catalog anchor repair 분기:
 
 ### I3 — live smoke 독립 재현 불가 (sandbox 제약)
 
-- `scripts/phase2a_provider_live_smoke.py`는 `LLAMA_BASE_URL` 기본값 `http://192.168.1.29:9080`의 실제 llama.cpp endpoint로 외부 TCP를 열어야 한다. 본 검증 환경은 Python/httpx 외부 TCP가 차단되어 live smoke를 독립 재실행할 수 없었다(work log도 sandbox 내부 실행이 `[Errno 1] Operation not permitted`로 막혔음을 기록).
+- `scripts/phase2a_provider_live_smoke.py`는 `LLAMA_BASE_URL` 기본값 `http://<구검증-LLM>:9080`의 실제 llama.cpp endpoint로 외부 TCP를 열어야 한다. 본 검증 환경은 Python/httpx 외부 TCP가 차단되어 live smoke를 독립 재실행할 수 없었다(work log도 sandbox 내부 실행이 `[Errno 1] Operation not permitted`로 막혔음을 기록).
 - 완화: smoke가 사용하는 HTTP source_ref 준비 경로(POST/GET)는 `test_source_ref_create_list_get_round_trip`가 동일 endpoint로 단위 cover한다. smoke의 end-to-end 가치(실제 모델)는 작업자의 documented run(HANDOFF:111/113, `run_http_status=200`, `succeeded`, candidates 3)을 신뢰한다.
 
 ## Verdict

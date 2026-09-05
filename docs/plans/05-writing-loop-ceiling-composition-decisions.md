@@ -4,7 +4,7 @@
 
 ## Resolution (Option A 종결, 2026-07-15)
 
-- **live per-stage 수집 완료**: v1.6.87 M-i 도구를 풀스택(외부 llama `192.168.1.22:9080`)에서 실 12B로 3-pass 실행(`complete=true`). per-stage MAX = revise 323tok/1018ms·report 766/5578·gate 815/3368·retrieve_plan 368/1435·context_search 0tok(제외)/27024ms. 합성 raw = max_total_tokens **4991**·max_wall_clock_ms **51755**. raw 아티팩트 `docs/benchmarks/2026-07-15/writing_loop_per_stage_ceiling_q4.json`(+ 노트).
+- **live per-stage 수집 완료**: v1.6.87 M-i 도구를 풀스택(외부 llama `<베타-LLM>:9080`)에서 실 12B로 3-pass 실행(`complete=true`). per-stage MAX = revise 323tok/1018ms·report 766/5578·gate 815/3368·retrieve_plan 368/1435·context_search 0tok(제외)/27024ms. 합성 raw = max_total_tokens **4991**·max_wall_clock_ms **51755**. raw 아티팩트 `docs/benchmarks/2026-07-15/writing_loop_per_stage_ceiling_q4.json`(+ 노트).
 - **context_search 콜드스타트 caveat**: 27s(pass1)는 측정 하네스 1회성 컨테이너의 Chroma/embedding 콜드스타트. 프로덕션 상시 app에선 warm(pass2/3 ~4s)이라 재현 안 됨 → steady-state wall-clock ≈ **28824ms**. token은 콜드 무관.
 - **오너 B4 결정(~2x 여유율, default-on)**: `WRITING_LOOP_MAX_TOTAL_TOKENS=10000`(raw 4991×2)·`WRITING_LOOP_MAX_WALL_CLOCK_MS=60000`(steady-state 28.8s×2). `docker-compose.yml` 배포 기본을 off→발화로 변경(SoT v1.6.89). code 기본(env 미설정)은 계속 off이라 M6=A 무변.
 - Option A(측정 메커니즘 M-i → live 수집 → 합성 → B4)로 B2b 종결.

@@ -15,7 +15,7 @@
 2. **Implementation code** — endpoint 경로·입력 필드·상태코드 매핑·서버 ContextPackage 재구성·strict extractor 재사용·envelope 재사용·`candidate_id=null` 비영속 표시.
 3. **Prompt schema 보강(핵심)** — report.py TEMPLATE의 enum literal이 Python enum(`CandidateClaimType`/`MemoryHintType`/`RiskNoteType`/`RiskSeverity`)과 **정확히** 일치하는지 셀별 대조. 이것이 구현자의 핵심 클레임이자 fake-provider 회귀가 가리는 결함 클래스.
 4. **Regression tests** — `WritingReportApiTest` 4개 + `test_writing_report.py` prompt assertion이 매트릭스를 채우는지, guard가 양방향으로 bite하는지.
-5. **Live LLM smoke(독립 재현)** — `192.168.1.22:9080` 실 gemma 모델에서 (a) 강화 prompt로 strict parse 통과, (b) 구버전 prompt로 repair 후에도 실패 → 결함/fix의 필연성 증명.
+5. **Live LLM smoke(독립 재현)** — `<베타-LLM>:9080` 실 gemma 모델에서 (a) 강화 prompt로 strict parse 통과, (b) 구버전 prompt로 repair 후에도 실패 → 결함/fix의 필연성 증명.
 6. **Full/focused suite + 컴파일/whitespace** — 880/45/154·68/53·py_compile·diff --check 재도출.
 
 ## Methodology
@@ -71,7 +71,7 @@ item shape(`text`/`type`/`requires_gate_check`, `type`/`text`/`confidence`/`shou
 
 ### 5. Live LLM smoke — 독립 재현 PASS, 결함/fix 필연성 증명
 
-`192.168.1.22:9080`(llama.cpp, `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`)에 `LlamaCppProvider` 직접 연결.
+`<베타-LLM>:9080`(llama.cpp, `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`)에 `LlamaCppProvider` 직접 연결.
 - NEW TEMPLATE, 전체 `enrich`(initial+1회 repair): **`status=ok`**, claims=4/hints=2/risks=0, 모든 enum 유효. (구현자 보고 claims=2/hints=1과 개수 차이 — 입력 prose·비결정성 때문. 핵심 클레임 "strict parse 통과"는 재현.)
 - OLD one-liner TEMPLATE(`report.py` HEAD판)로 module 상수+seed를 monkeypatch해 동일 `enrich`: **repair 후 FAIL → `InvalidCandidateReport`**(json parse error). 구현자 "initial·repair 모두 실패" 클레임 사실 확인.
 - → 결함은 진짜, fix는 필요·효과 있음. fake-provider 회귀는 ready-made JSON을 반환해 이 결함을 가림(구현자 보고와 일치).
@@ -122,7 +122,7 @@ grep -n "task_type" tests/test_writing.py          # 414 라인은 /writing/gene
 # enum 정확성 수동 대조
 grep -n "class CandidateClaimType\|class MemoryHintType\|class RiskNoteType\|class RiskSeverity" services/application/app/writing/models.py
 # live smoke(원격 가동 시)
-curl -s http://192.168.1.22:9080/health                              # {"status":"ok"}
+curl -s http://<베타-LLM>:9080/health                              # {"status":"ok"}
 PYTHONPATH=. python3 /tmp/smoke_report.py                            # NEW: status=ok
 PYTHONPATH=. python3 /tmp/smoke_old_enrich.py                        # OLD: FAIL after repair / NEW: OK
 ```

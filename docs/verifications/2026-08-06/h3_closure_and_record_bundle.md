@@ -110,7 +110,7 @@ under-strict 는 원 기록·work_log Task 6 이 잰 것과 동일(재확인). *
 
 ### 6. 전수 회귀(9caa76c) — 기준선 2193/1/1931 재현 ★
 
-`test-mongo`(`rs-test`, 27020 healthy) 기동 · ES 패키지 존재(8.19.3) · 외부 12B 도달(`192.168.1.22:9080`) 확인 후 `python3 -m pytest tests/ -q`: **`2193 passed / 1 skipped / 1931 subtests / 0 failed`**(974.18s). 9caa76c 이 HANDOFF 에 박은 기준선과 **한 자리 차이 없음**. +2(2191→2193) = 신규 가드 2 cells 전부, subtests 1931 무변(operation 76 유지의 실측). skip 1 = 구조적 live Chroma 셀. 소요 974s vs 기록 919s(≈+6%, 같은 머신·같은 결과, 런 간 분산).
+`test-mongo`(`rs-test`, 27020 healthy) 기동 · ES 패키지 존재(8.19.3) · 외부 12B 도달(`<베타-LLM>:9080`) 확인 후 `python3 -m pytest tests/ -q`: **`2193 passed / 1 skipped / 1931 subtests / 0 failed`**(974.18s). 9caa76c 이 HANDOFF 에 박은 기준선과 **한 자리 차이 없음**. +2(2191→2193) = 신규 가드 2 cells 전부, subtests 1931 무변(operation 76 유지의 실측). skip 1 = 구조적 live Chroma 셀. 소요 974s vs 기록 919s(≈+6%, 같은 머신·같은 결과, 런 간 분산).
 
 ## Issues / Risks
 

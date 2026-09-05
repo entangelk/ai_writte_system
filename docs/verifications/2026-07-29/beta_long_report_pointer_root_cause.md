@@ -34,7 +34,7 @@
 
 모든 측정은 **작업자가 쓴 것을 읽지 않고** 1차 소스에서 재도출했다. 기계 상태(2026-07-29):
 스택은 `docker ps`로 **healthy 7 + healthcheck 없는 2(worker·generation_worker)** 확인(작업 로그
-상태와 일치). 외부 LLM 서버 `192.168.1.22:9080` 도달 확인, `/props` = `n_ctx=8192 · total_slots=1`.
+상태와 일치). 외부 LLM 서버 `<베타-LLM>:9080` 도달 확인, `/props` = `n_ctx=8192 · total_slots=1`.
 
 - **코드 읽기**: 각 인용 위치를 직접 read(`provider.py`·`context_pointer.py`·`prompt.py`·`report.py`·
   `transport.py`·`payload.py`·`llm_call_audit.py`·`GenerationPad.tsx`·`main.py`·`generation_worker.py`·
@@ -46,8 +46,8 @@
 - **독립 재구성**(골드 패스): 작업자가 쓴 문서를 전혀 읽지 않고, **프로덕션** `build_context_package`로
   무거운 시드 프로젝트(`6a694675…0ae`)의 패키지를 빌드 → **프로덕션** `format_context_package`로
   `include_pointers True/False` 렌더 → **프로덕션 모델 토크나이저**(`/tokenize`,
-  `192.168.1.22:9080`)로 토큰화. 스크립트는 stdin으로 pipe(컨테이너 fs에 기록 안 함).
-- **창 프로브**(호스트 `python3` → `192.168.1.22:9080`): (1) prompt 20,000 tok + `max_tokens=64`,
+  `<베타-LLM>:9080`)로 토큰화. 스크립트는 stdin으로 pipe(컨테이너 fs에 기록 안 함).
+- **창 프로브**(호스트 `python3` → `<베타-LLM>:9080`): (1) prompt 20,000 tok + `max_tokens=64`,
   (2) prompt 3,000 tok + `max_tokens=6144`.
 - **문서 diff**: `git diff docs/plans/context-budget-korean-tokens-decisions.md` + `grep HANDOFF.md`.
 
@@ -212,7 +212,7 @@ prompt(12,461)는 400이 아니라 200을 받는다. 단, **"그 뒤 출력이 �
 cd /mnt/d/devel/에베베/ai_writte_system
 # (1) 스택 상태 + 외부 LLM 도달
 docker ps --format '{{.Names}}\t{{.Status}}'
-python3 -c "import httpx;print(httpx.get('http://192.168.1.22:9080/props',timeout=10).json()['default_generation_settings']['n_ctx'])"
+python3 -c "import httpx;print(httpx.get('http://<베타-LLM>:9080/props',timeout=10).json()['default_generation_settings']['n_ctx'])"
 # → healthy 7 + worker 2 (healthcheck 없음) ; n_ctx=8192
 
 # (2) DB 감사 집계 (독립 재현 of F4)
@@ -235,7 +235,7 @@ docker exec -i -e PYTHONPATH=/app ai_writte_system-application-1 python - < /tmp
 
 # (4) 창 프로브 (독립 재현 of F5)
 python3 -c "
-import httpx;b='http://192.168.1.22:9080'
+import httpx;b='http://<베타-LLM>:9080'
 def chat(p,m):return httpx.post(b+'/v1/chat/completions',json={'model':'x','messages':[{'role':'user','content':p}],'max_tokens':m},timeout=120)
 print('probe1', chat('가'*40000,64).status_code)          # 400
 print('probe2', chat('가'*6000,6144).status_code)          # 200

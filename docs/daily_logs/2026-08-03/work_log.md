@@ -20,13 +20,13 @@
 | compose | `frontend`(healthy) · `worker` · `generation_worker`만 Up. application·mongo·gateway·embedding·chroma·ES는 **없음** | 스택 부분 기동. 이 작업(문서/실측)에는 불필요해 올리지 않았다 |
 | test-mongo | 없음 | 베타에는 안 떠 있다(알파에 남겨 둔 것과 다름) |
 | 이미지 | gateway 07-31 · application/generation_worker 07-29 · frontend 07-27 · worker 07-27 | **코드보다 뒤처짐**. 특히 `application`(07-29)은 D8-5~D8-7 인증/관리자 작업 이전이다 |
-| 외부 LLM | `http://192.168.1.22:9080` 응답, `n_ctx=16384`, `total_slots=1` | 살아 있음. HANDOFF 07-31 관측과 동일 |
+| 외부 LLM | `http://<베타-LLM>:9080` 응답, `n_ctx=16384`, `total_slots=1` | 살아 있음. HANDOFF 07-31 관측과 동일 |
 | 모델 스냅샷 | `…/snapshots/29d097773436b69ff9feafd636ab4cf873786537/` | 외부 서버가 **새 리비전 `29d0977…`을 이미 쓰고 있다**(알파 `-hf` 부채가 가리키던 그 리비전) |
 
 - **주의(다음 작업자)**: 화면 육안 확인이나 라이브 관통을 하려면 `application`·`frontend`를 먼저
   재빌드해야 한다. HANDOFF의 ★★ 항목대로 **낡은 `application` 이미지는 죽지 않고 "인증 없는 제품"으로
   뜬다** — 스택을 올렸다면 `curl :8520/projects`가 401인지부터 확인한다.
-- `.env`는 `LLAMA_BASE_URL=http://192.168.1.22:9080` 한 줄만 유효하게 들고 있다(커밋되지 않음).
+- `.env`는 `LLAMA_BASE_URL=http://<베타-LLM>:9080` 한 줄만 유효하게 들고 있다(커밋되지 않음).
 
 ### Completed work — Slice 8.0 실측 인벤토리
 

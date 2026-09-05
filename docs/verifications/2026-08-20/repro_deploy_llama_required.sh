@@ -6,7 +6,7 @@
 # 안전망: 매 뮤테이션 전 status 공백 확인 + cp 백업 + diff -q byte-identical 증명 + trap.
 #
 # ★ 환경 통제가 이 재현의 핵심 축이다: 이 머신 .env(기계 로컬, 커밋 금지)이
-# LLAMA_BASE_URL=http://192.168.1.22:9080 를 제공하므로, compose 가 .env 를 자동
+# LLAMA_BASE_URL=http://<베타-LLM>:9080 를 제공하므로, compose 가 .env 를 자동
 # 로드하면 "주소 없음 → rc=1" 이 재현되지 않는다. 그래서 Part 1은 --env-file /dev/null
 # 로 .env 를 우회하고 셸 env 로만 값을 준다(구현자 work_log 는 이 통제 방법을 적지 않았다).
 #
@@ -59,7 +59,7 @@ echo "── B2 base+llama(알파), env 무변 → llama:9080 폴백 · llama �
 docker compose --env-file /dev/null -f $BASE -f $LLAMA config >/tmp/b2.yml 2>/dev/null; grep -m1 "LLAMA_BASE_URL:" /tmp/b2.yml
 grep -qE "^  llama:" /tmp/b2.yml && echo "  llama 서비스: 있음" ; sed -n '/^  gateway:/,/^  [a-z]/p' /tmp/b2.yml | grep -A2 "depends_on:" | sed 's/^ *//;s/^/  /'
 echo "── B3 base+llama(알파), LLAMA 셸 지정 → env 값이 이긴다(① '모델이 있어도 API 면 API 로')"
-env LLAMA_BASE_URL=http://192.168.1.22:9080 docker compose --env-file /dev/null -f $BASE -f $LLAMA config 2>/dev/null | grep -m1 "LLAMA_BASE_URL:"
+env LLAMA_BASE_URL=http://<베타-LLM>:9080 docker compose --env-file /dev/null -f $BASE -f $LLAMA config 2>/dev/null | grep -m1 "LLAMA_BASE_URL:"
 
 echo; echo "═══ Part 2. 뮤테이션 배터리(가드 셀 페어링) ═══"
 echo "── M1 under-strict: external :? → :- 되돌리기(원 결함 재현) → 신규 under-strict 셀 1"

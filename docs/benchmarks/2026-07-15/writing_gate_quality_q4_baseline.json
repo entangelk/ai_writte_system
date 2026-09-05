@@ -5,7 +5,7 @@
   "complete": true,
   "fixture_version": "writing_gate_quality_v1",
   "gateway_base_url": "http://gateway:8001",
-  "llama_base_url": "http://192.168.1.22:9080",
+  "llama_base_url": "http://<베타-LLM>:9080",
   "matched_count": 21,
   "max_tokens": 1024,
   "model": "google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0",

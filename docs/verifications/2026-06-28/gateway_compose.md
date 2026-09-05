@@ -110,7 +110,7 @@ SoT gateway 계약 위반 없음.
 ### Surface 5 — compose gateway 서비스 구조 (docker-compose.yml:52-79)
 
 - llama.cpp를 compose가 띄우지 않음(작업자 설명 일치). gateway만 서비스로, llama는 외부 endpoint.
-- `LLAMA_BASE_URL: "${LLAMA_BASE_URL:-http://host.docker.internal:9080}"`(:59) — 기본 docker host의 9080, env로 override(192.168.1.29:9080 등) 가능.
+- `LLAMA_BASE_URL: "${LLAMA_BASE_URL:-http://host.docker.internal:9080}"`(:59) — 기본 docker host의 9080, env로 override(<구검증-LLM>:9080 등) 가능.
 - `extra_hosts: host.docker.internal:host-gateway`(:66-67) — Linux에서 host.docker.internal 해석(합리적).
 - port 8001:8001, healthcheck는 `/health/live`(local-only, liveness) → Docker가 upstream 없이도 container healthy 판정(빠른 실패 회피, 합리적 설계).
 - `LLAMA_TRUST_ENV: false` 기본(§165 정합).

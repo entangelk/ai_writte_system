@@ -19,7 +19,7 @@
 
 ## Methodology
 
-- **환경 통제가 이 검증의 전제다**: 이 머신 `.env`(기계 로컬, 커밋 금지, 2026-07-27)이 `LLAMA_BASE_URL=http://192.168.1.22:9080` 를 제공하고 compose 는 프로젝트 디렉터리 `.env` 를 자동 로드한다. 그래서 "주소 없음" 계열 실측은 `--env-file /dev/null` 로 `.env` 를 우회하고 셸 env 로만 값을 줬다(구현자 work_log 는 이 통제를 적지 않았다 — Findings 4).
+- **환경 통제가 이 검증의 전제다**: 이 머신 `.env`(기계 로컬, 커밋 금지, 2026-07-27)이 `LLAMA_BASE_URL=http://<베타-LLM>:9080` 를 제공하고 compose 는 프로젝트 디렉터리 `.env` 를 자동 로드한다. 그래서 "주소 없음" 계열 실측은 `--env-file /dev/null` 로 `.env` 를 우회하고 셸 env 로만 값을 줬다(구현자 work_log 는 이 통제를 적지 않았다 — Findings 4).
 - **config 실측 10종**(P0·P0b·A2~A5·B1a·B1b·B2·B3): `docker compose [-f …] config` 렌더에서 `LLAMA_BASE_URL:` 값·gateway env 병합·`extra_hosts`·`llama` 서비스 존재·`depends_on` 을 직접 읽었다. 전 커맨드는 [repro 스크립트](repro_deploy_llama_required.sh) Part 1.
 - **포커스 회귀**: `python3 -m pytest -q tests/test_compose_backend_env.py` → 기준 **12 passed / 48 subtests**.
 - **뮤테이션 6종**(Part 2): 아래 diff 리터럴 그대로. clean-tree 분기 — 적용 전 `git status --short` 공백 확인, 복원은 `git checkout -- <path>` + 백업과 `diff -q` byte-identical 증명. "종전 0셀" 실증은 `git checkout cd1d82d~1 -- tests/test_compose_backend_env.py` 로 구 테스트 파일(10셀)을 꺼내 같은 base 대시화를 돌렸다(복원 `git checkout HEAD --`, 인덱스까지 되돌림).
@@ -54,7 +54,7 @@
 | 기동 표(HANDOFF) 서술 | 실측 | 일치 |
 |---|---|---|
 | 기본: 안 주면 `host.docker.internal:9080` — 내 호스트 llama 로 폴백 | B1a(`--env-file /dev/null`, env 무변) → rc=0, 렌더 값 그대로 | ✓ |
-| 기본: 모델은 "외부 LLM(`.env` 의 `LLAMA_BASE_URL`)" | B1b(.env 활성) → `http://192.168.1.22:9080` 승리(① env 우선) | ✓ |
+| 기본: 모델은 "외부 LLM(`.env` 의 `LLAMA_BASE_URL`)" | B1b(.env 활성) → `http://<베타-LLM>:9080` 승리(① env 우선) | ✓ |
 | 알파: 안 주면 `llama:9080` — 스택 안 llama 로 폴백 | B2 → rc=0, `http://llama:9080`, `llama` 서비스 존재, gateway `depends_on: llama: service_healthy` 머지 확인 | ✓ |
 | 알파: "모델이 있어도 API 가 있으면 API 로"(①) | B3(LLAMA_BASE_URL 셸 지정) → env 값 승리 | ✓ |
 | 배포: 안 주면 **기동 거부**(`:?`) — 주소 넷 다 `.env` 필수 | A2(넷 중 LLAMA 만 제외) → **rc=1**, 사유 전문 `required variable LLAMA_BASE_URL is missing a value: 외부 LLM API 주소가 필요하다 (OpenAI 호환 /v1/chat/completions)` | ✓ |

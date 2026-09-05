@@ -227,7 +227,7 @@ python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider  # 
 - 보완 후 live `POST /writing/revise-and-gate`가 HTTP 502로 종료(성공 표본 0). 작업자는 p95/ceiling 승격을 보류했고(B4 준수, 숫자 날조 없음 — 올바름).
 - **502 원인은 미검증**. 502는 `InvalidWritingRevision`/`ContextSearchFailed`/`ProviderError(non-timeout)`/report·gate failure 중 하나로 매핑되며(`main.py:2824-2837`), 현재 502 응답 body(error_type/detail)가 기록에 없다.
 - **오너 힌트(권한문제) 검증 권장**: 작업자의 Mongo 추론은 사실에 부합한다 — `core_sot/mongo_repository.py:241-243`·`analysis/mongo_repository.py:241-243`가 `start_session`+`start_transaction`을 쓰고, Mongo transaction은 replica set이 필수이므로 standalone 불가. 단, (a) shared Mongo에서 실제로 관측한 게 topology 오류인지 permission 오류인지, (b) 502 자체가 권한/인증 문제인지는 502 body로 확인해야 한다. 구체적 가설:
-  - remote LLM gateway(192.168.1.22:9080) 인증 — `/health`·`/v1/models`는 통과해도 generation endpoint가 API key/auth를 요구할 수 있음. app provider 설정의 auth 확인.
+  - remote LLM gateway(<베타-LLM>:9080) 인증 — `/health`·`/v1/models`는 통과해도 generation endpoint가 API key/auth를 요구할 수 있음. app provider 설정의 auth 확인.
   - served model id(`google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`)와 app 설정 model명이 정확히 일치하는지(불일치 → provider 404 → 502).
   - 전용 replica set Mongo의 app 사용자 권한 — loop/audit/context 경로가 쓰는 컬렉션 쓰기 권한.
 - 작업자의 다음 계획(502 body·stage 분리 진단)은 올바른 방향이나, 위 권한/인증 가설을 1순위로 확인할 것.

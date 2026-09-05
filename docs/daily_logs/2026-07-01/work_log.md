@@ -50,7 +50,7 @@
 
 - 변경 파일: `scripts/phase2a_provider_live_smoke.py`, `HANDOFF.md`, `docs/daily_logs/2026-07-01/work_log.md`.
 - HANDOFF의 1순위 Next Task였던 실제 Gateway/model 운영 경계 smoke를 실행했다.
-- Public HTTP에는 아직 `source_ref` 생성 endpoint가 없으므로, smoke script가 in-memory Core SOT에 project/draft/version과 `source_ref` catalog(`민아`, `파란 편지`, `준호`)를 준비한다. 그 뒤 Application `/analysis/jobs/{job_id}/run`을 ASGI로 호출하고, Application provider adapter는 Gateway app의 `/v1/generate`를 통과해 실제 llama.cpp-compatible endpoint `http://192.168.1.29:9080`을 호출한다.
+- Public HTTP에는 아직 `source_ref` 생성 endpoint가 없으므로, smoke script가 in-memory Core SOT에 project/draft/version과 `source_ref` catalog(`민아`, `파란 편지`, `준호`)를 준비한다. 그 뒤 Application `/analysis/jobs/{job_id}/run`을 ASGI로 호출하고, Application provider adapter는 Gateway app의 `/v1/generate`를 통과해 실제 llama.cpp-compatible endpoint `http://<구검증-LLM>:9080`을 호출한다.
 - 첫 sandbox 내부 실행은 Python/httpx 외부 TCP가 `[Errno 1] Operation not permitted`로 막혀 `provider_error` 보존 경로로 떨어졌다. 이는 sandbox 제한에 의한 것이므로, 같은 명령을 승인된 외부 네트워크 실행으로 재실행했다.
 - 승인 실행 결과: `run_http_status=400`, final job `status=failed`, `failure_reason=schema_invalid`, `failure_detail="provider content must be JSON"`, candidates 0. 실제 모델 출력은 strict JSON이 아니었지만, run endpoint가 schema failure를 terminal job으로 안정 보존함을 확인했다.
 - 효과: live smoke 수용 기준인 "terminal job을 만들거나 provider/schema failure를 안정적으로 보존"이 충족됐다. 동시에 현 prompt/Gateway text generation 조합은 strict JSON을 보장하지 않는다는 운영 신호가 생겼고, 이는 `/v1/generate-structured` 후속 검토 근거로 남겼다.
@@ -113,7 +113,7 @@
 - Outcome: live Gateway smoke와 별개로, Slice 6의 단위 branch lock이 committed test artifact로 닫혔다.
 
 - 문제: sandbox 내부 Python/httpx는 live llama.cpp endpoint로 TCP 연결을 열 수 없었다.
-- 원인: 현재 실행 환경의 network sandbox가 Python socket 연결을 차단했고, 직접 `httpx.get("http://192.168.1.29:9080/health")`도 `[Errno 1] Operation not permitted`로 실패했다. `curl` health/models 조회는 가능했지만, Application/Gateway provider path는 Python/httpx라 같은 제한을 받는다.
+- 원인: 현재 실행 환경의 network sandbox가 Python socket 연결을 차단했고, 직접 `httpx.get("http://<구검증-LLM>:9080/health")`도 `[Errno 1] Operation not permitted`로 실패했다. `curl` health/models 조회는 가능했지만, Application/Gateway provider path는 Python/httpx라 같은 제한을 받는다.
 - Resolution: live smoke 명령을 승인된 외부 네트워크 실행으로 재실행했다.
 - Outcome: 실제 endpoint까지 도달했고 schema-invalid failure preservation을 확인했다. 앞으로 이 smoke는 sandbox 밖 네트워크 권한이 필요하다.
 
@@ -178,7 +178,7 @@
 - 독립 검증 보강 단일 회귀: `python3 -m unittest tests.test_application_api.ApplicationApiTest.test_analysis_run_endpoint_uses_env_configured_default_runner -v` — 1개 통과.
 - Live smoke script syntax: `python3 -m py_compile scripts/phase2a_provider_live_smoke.py` — 통과.
 - Sandbox 제한 확인: `python3 scripts/phase2a_provider_live_smoke.py` — sandbox 내부에서는 Python/httpx 외부 TCP 차단으로 `run_http_status=502`, final job `failed/provider_error`, `failure_detail="provider is unavailable"` 보존.
-- Live smoke 승인 실행: `python3 scripts/phase2a_provider_live_smoke.py` — 외부 네트워크 권한으로 endpoint `http://192.168.1.29:9080`, model `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0` 호출. 결과 `run_http_status=400`, final job `failed/schema_invalid`, `failure_detail="provider content must be JSON"`, candidates 0.
+- Live smoke 승인 실행: `python3 scripts/phase2a_provider_live_smoke.py` — 외부 네트워크 권한으로 endpoint `http://<구검증-LLM>:9080`, model `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0` 호출. 결과 `run_http_status=400`, final job `failed/schema_invalid`, `failure_detail="provider content must be JSON"`, candidates 0.
 - JSON mode/provenance check: direct curl에서 `chat_template_kwargs.enable_thinking=false` + simple JSON instruction은 `message.content`에 valid JSON을 반환했다. thinking off 없이 같은 요청을 보내면 `message.content`가 비고 `reasoning_content`에 JSON 예시가 들어갔다. `response_format={"type":"json_object"}`는 endpoint에서 거절되지 않았지만, simple case에서는 response_format 없이도 valid JSON이 반환됐다.
 - Repair focused regression: `python3 -m unittest tests.test_analysis_extractor_schema -v` — 12개 통과.
 - Repair compile check: `python3 -m py_compile services/application/app/analysis/extractor.py tests/test_analysis_extractor_schema.py scripts/phase2a_provider_live_smoke.py` — 통과.

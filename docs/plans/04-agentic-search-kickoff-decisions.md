@@ -7,7 +7,7 @@
 ## Owner decisions — 2026-07-03
 
 - §1 purpose/need literal은 **A(최소 집합)**. 후속 slice에서 literal 확장이 가능함을 전제로 승인했다(schema 변경 없이 enum 확장).
-- §2 planner는 **B(LLM planner)를 즉시 채택하되, 범위는 터미널 JSON planner**다. LLM이 한 turn에 SearchPlan JSON을 생성하고 tool-call은 쓰지 않는다(Phase 2A extraction과 같은 패턴). tool-call flat loop planner로의 전환 계획은 이 브리프 §2.1에 잡아 둔다 — "LLM tool-call 미가용 시 터미널 JSON으로 우회"는 반복될 결정 패턴이므로 문서로 남긴다. live Gateway(`192.168.1.29:9080` 경유)는 test/smoke로만 사용하고 구현은 provider 추상화 뒤에 둔다. 진입은 지금 IP지만 compose 내부 DNS(`http://gateway:8001`) + `LLAMA_BASE_URL` env 구조라 내부 통신 전환은 설정 변경이다.
+- §2 planner는 **B(LLM planner)를 즉시 채택하되, 범위는 터미널 JSON planner**다. LLM이 한 turn에 SearchPlan JSON을 생성하고 tool-call은 쓰지 않는다(Phase 2A extraction과 같은 패턴). tool-call flat loop planner로의 전환 계획은 이 브리프 §2.1에 잡아 둔다 — "LLM tool-call 미가용 시 터미널 JSON으로 우회"는 반복될 결정 패턴이므로 문서로 남긴다. live Gateway(`<구검증-LLM>:9080` 경유)는 test/smoke로만 사용하고 구현은 provider 추상화 뒤에 둔다. 진입은 지금 IP지만 compose 내부 DNS(`http://gateway:8001`) + `LLAMA_BASE_URL` env 구조라 내부 통신 전환은 설정 변경이다.
 - §3 retrieval surface는 **A**. 정확도 스코어링 계열은 시스템 전부 구현 후 후속이다.
 - §4 ranking/budget은 **A(최소)**. 최종 튜닝은 후속 작업이다.
 - §5 candidate 기억은 **A 먼저 + B 후속 확장**. status 라벨 필드는 A에서도 처음부터 계약에 열려 있어 확장 비용이 낮다는 확인 하에 승인했다(오너는 B 선호였으나 확장 비용이 낮으므로 A→B 순서 채택).

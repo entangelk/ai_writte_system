@@ -54,7 +54,7 @@ override 파일로 붙인다.
 
 - `docker compose config` **IDENTICAL** — 기본 동작 무변
 - llama override 는 **한 줄만** 변경: `http://llama:9080` → `.env` 의
-  `http://192.168.1.22:9080`. 이 머신에 `.env` 가 있어 **기능이 바로 관측된다**
+  `http://<베타-LLM>:9080`. 이 머신에 `.env` 가 있어 **기능이 바로 관측된다**
 - 끄기: `EMBEDDING_SERVICE_URL= CHROMA_HOST= ELASTICSEARCH_URL=` → 셋 다 `""` 유지
 - 외부: 주소가 세 서비스 전부에 전파(각 3건)
 
@@ -73,7 +73,7 @@ base_url = os.environ.get("LLAMA_BASE_URL", DEFAULT_LLAMA_BASE_URL)
 형태라야 빈 값이 in-stack llama 로 돌아가고, 그것이 *"외부 API 가 설정되지 않음"*
 의 온당한 해석이다.
 
-**실측**: `.env` 의 외부 API 가 여전히 이김(`192.168.1.22:9080`) · `LLAMA_BASE_URL=`
+**실측**: `.env` 의 외부 API 가 여전히 이김(`<베타-LLM>:9080`) · `LLAMA_BASE_URL=`
 → in-stack 복귀(`http://llama:9080`).
 
 ### Task 3 — 배포 서버용 외부 API 전용 override (`docker-compose.external.yml`)

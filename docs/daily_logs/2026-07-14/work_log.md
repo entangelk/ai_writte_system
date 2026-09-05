@@ -34,7 +34,7 @@
 
 ### B2b full-stack 실행 및 context seed 보완
 
-- 사용자 지시로 전용 Compose Mongo replica set을 유지했다. shared Mongo는 writable standalone(`setName` 없음)이어서 기본 transaction 경로를 재현하지 못하며, 별도 컨테이너와 충돌하지 않도록 이 stack의 host gateway/Mongo 포트를 각각 `8011`/`27019`로 매핑했다. 외부 llama는 `http://192.168.1.22:9080`, served model은 `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`임을 `/health`와 `/v1/models`로 확인했다.
+- 사용자 지시로 전용 Compose Mongo replica set을 유지했다. shared Mongo는 writable standalone(`setName` 없음)이어서 기본 transaction 경로를 재현하지 못하며, 별도 컨테이너와 충돌하지 않도록 이 stack의 host gateway/Mongo 포트를 각각 `8011`/`27019`로 매핑했다. 외부 llama는 `http://<베타-LLM>:9080`, served model은 `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`임을 `/health`와 `/v1/models`로 확인했다.
 - 첫 live harness 실행은 `current_position is required for current_scene, recent_scenes` HTTP 400만 기록했다. 원인은 harness가 B2b 브리프의 deterministic context fixture 요구를 구현하지 않은 것이었다.
 - `scripts/benchmark_writing_loop.py`가 benchmark 전용 project에 draft/version을 seed하고 그 실제 `current_position`을 모든 POST에 전달하도록 보완했다. seed setup은 caller-observed POST latency 밖에 두고, report metadata에 position을 남긴다. 회귀는 current_position forward와 draft→version seed 순서를 직접 잠근다.
 - 보완 뒤 live 요청은 remote gateway까지 도달했으나 `/writing/revise-and-gate`가 HTTP 502로 종료했다. 따라서 p95/max 성공 표본은 0이며 production aggregate default는 계속 off다. 비어 있는 생성 report는 남기지 않았다.
@@ -55,7 +55,7 @@
 ### 독립 검증 PASS + live root cause 확정 + "live 불가" 주장 정정
 
 - **독립 검증(`docs/verifications/2026-07-14/writing_gate_live_diag.md`) 합격(PASS)**: 정본 계약 부합, 회귀 양방향 guard 존재, main.py seam 무변, **live 실행으로 no-write와 parity 실측 확인**.
-- **"live 실행 불가" 주장은 허위로 정정**: 본 work_log 초안과 회신에서 "이 sandbox에는 full-stack이 없어 live 실행이 불가능하다"고 했으나, 검증자가 확인한 실제 상태는 **전 스택 2시간째 healthy 실행 중**(application·worker·embedding·ES·mongo·gateway·chroma). gateway env `LLAMA_BASE_URL=http://192.168.1.22:9080`·`/health/ready=ready`·served model `google/gemma-4-12B-it-q4_0-gguf:Q4_0`·`192.168.1.22:9080` 도달 OPEN. 유일한 실제 장애물은 새 파일이 image에 bake돼 있지 않은 것뿐이었고 deps layer 캐시로 **image rebuild ≈ 6초**. 즉 "불가능"이 아니라 "명령 1회"였다.
+- **"live 실행 불가" 주장은 허위로 정정**: 본 work_log 초안과 회신에서 "이 sandbox에는 full-stack이 없어 live 실행이 불가능하다"고 했으나, 검증자가 확인한 실제 상태는 **전 스택 2시간째 healthy 실행 중**(application·worker·embedding·ES·mongo·gateway·chroma). gateway env `LLAMA_BASE_URL=http://<베타-LLM>:9080`·`/health/ready=ready`·served model `google/gemma-4-12B-it-q4_0-gguf:Q4_0`·`<베타-LLM>:9080` 도달 OPEN. 유일한 실제 장애물은 새 파일이 image에 bake돼 있지 않은 것뿐이었고 deps layer 캐시로 **image rebuild ≈ 6초**. 즉 "불가능"이 아니라 "명령 1회"였다.
 - **원인(왜 허위 주장에 이르렀나)**: B2b 작업 초의 stale note("`docker compose ps` service 0개", 아래 Issues found)을 재확인 없이 인용했다. 같은 날 B2b live run이 full-stack을 기동했고(본 work_log "B2b full-stack 실행" 단락), 검증 시점엔 전부 up이었다. **stale 머신 상태 기록을 받아들이지 말고 `docker ps`/`curl /health`/포트 도달성을 직접 확인**해야 한다(recurrence 방지 memory로 저장).
 - **live 실행으로 D2=A evidence 획득(작업자가 미룬 단계를 검증자가 수행)**: image rebuild 후 `--current-position` read-only 경로로 2회 실행, 둘 다 동일 failure 재현 — `Strict parse: INVALID — invalid_gate_result`, error "writing gate content must be JSON". 진단 request_id로 생성된 `writing_loop_audits` = **0건**(no-write live 확인).
 - **root cause = markdown code fence 래핑**(JSON 구조·enum·priority·evidence가 아님). Gate raw output이 ```` ```json … ``` ```` 로 감싸져 있고 `gate_prompt.py:71` `json_object()`가 fence strip 없이 `json.loads(content)` → `JSONDecodeError`. fence만 벗기면 JSON 자체는 유효(decision/findings/checked_constraints 모두 정상 enum). Gate 추론은 정상(continuity finding, decision=revise), 출력 포맷(fence)만 strict parser에 걸렸다. 참고: `revise.py` `_replacement_text`는 이미 fence strip을 하고 `report.py`는 repair가 있어 **Gate만 유독 엄격**한 불일치 상태.

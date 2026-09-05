@@ -119,7 +119,7 @@ adapter의 parse/repair/create-거부/InvalidJudgeResult 계약은 fixture로 �
 
 ### 기타 (정보)
 - **create 2중 방어**: adapter parse(`_action`)와 service `JUDGE_ACTIONS`가 둘 다 create를 거부. docstring이 service guard를 “fake-injection seam 방어”로 명시 — defense-in-depth, 정합.
-- live smoke는 `LLAMA_BASE_URL`(4.2 smoke와 동일 로컬 llama.cpp `192.168.1.29:9080`) 기반, sandbox-external 명시. 본 검증은 sandbox 제약으로 실실행 안 함(작업자도 follow-up으로 명시).
+- live smoke는 `LLAMA_BASE_URL`(4.2 smoke와 동일 로컬 llama.cpp `<구검증-LLM>:9080`) 기반, sandbox-external 명시. 본 검증은 sandbox 제약으로 실실행 안 함(작업자도 follow-up으로 명시).
 
 ## Verdict
 

@@ -39,7 +39,7 @@ Expected author-side baseline: HTTPX tests 5, full suite 42.
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 -m scripts.smoke_llm_provider \
-  --base-url http://192.168.1.29:9080 \
+  --base-url http://<구검증-LLM>:9080 \
   --timeout 30
 ```
 

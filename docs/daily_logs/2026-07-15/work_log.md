@@ -61,7 +61,7 @@
 
 ### Writing Gate 판별 품질 라벨 벤치마크 (SoT v1.6.90)
 
-- **실 12B baseline 완료**: `192.168.1.22:9080` LLM을 보는 healthy Compose Gateway(`http://gateway:8001`)를 통해 application 컨테이너 안에서 7 case×3 repeats 실행. `complete=true`, `succeeded_count=21`, **matched 21/21, accuracy 1.0**, parse/provider fault 0. token 범위 506~613. 아티팩트 `docs/benchmarks/2026-07-15/writing_gate_quality_q4_baseline.json`.
+- **실 12B baseline 완료**: `<베타-LLM>:9080` LLM을 보는 healthy Compose Gateway(`http://gateway:8001`)를 통해 application 컨테이너 안에서 7 case×3 repeats 실행. `complete=true`, `succeeded_count=21`, **matched 21/21, accuracy 1.0**, parse/provider fault 0. token 범위 506~613. 아티팩트 `docs/benchmarks/2026-07-15/writing_gate_quality_q4_baseline.json`.
 - `services/application/app/writing/gate_quality.py` 신규: Gate 5 decision을 7개 라벨 fixture로 고정. 실 B2b 과민 신호의 양방향 guard로 `pass_live_seed_transition`(플랫폼→역내 이동)·`pass_compatible_new_action`(편지 소지 상태와 양립하는 새 행동)을 `pass`로 잠금. 나머지는 repairable continuity contradiction=`revise`, canon 근거 부족=`retrieve_more`, context 상충=`needs_user_review`, do_not_use/POV hard violation=`block`.
 - `run_gate_quality_benchmark`: case×repeat를 독립 실행해 decision + required finding type을 채점. parse/provider fault는 다른 case를 중단하지 않고 `invalid_result|error`로 격리하며 mismatch로 fails-closed. token usage·complete·accuracy를 JSON-safe dict로 반환.
 - `scripts/benchmark_writing_gate.py` 신규: `_default_writing_gate_service` production factory를 재사용해 prompt/model/`thinking=false`/`WRITING_GATE_MAX_TOKENS`와 동형. repeats 기본 3, 정답 전부 match·complete일 때만 exit 0. 쓰기 0, 출력에 raw candidate/context 미포함.
@@ -98,7 +98,7 @@
 
 ### B2b ceiling 라이브 per-stage 수집 + B4 default-on (SoT v1.6.89)
 
-- **풀스택 기동**: 오너가 외부 llama 엔드포인트(`192.168.1.22:9080`) 연결로 풀스택 라이브를 승인. application 이미지 재빌드(신규 `measure_writing_stages.py` bake), env override(`MONGO_PORT=27019`/`GATEWAY_PORT=8011`/`LLAMA_BASE_URL=http://192.168.1.22:9080`/`LLAMA_DEFAULT_MODEL=google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`)로 `docker compose up -d`. gateway `/health/ready=ready`, 전 서비스 healthy. 포트 충돌(shared-mongo 27017·agent-memory-chroma 8001) 회피 확인.
+- **풀스택 기동**: 오너가 외부 llama 엔드포인트(`<베타-LLM>:9080`) 연결로 풀스택 라이브를 승인. application 이미지 재빌드(신규 `measure_writing_stages.py` bake), env override(`MONGO_PORT=27019`/`GATEWAY_PORT=8011`/`LLAMA_BASE_URL=http://<베타-LLM>:9080`/`LLAMA_DEFAULT_MODEL=google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`)로 `docker compose up -d`. gateway `/health/ready=ready`, 전 서비스 healthy. 포트 충돌(shared-mongo 27017·agent-memory-chroma 8001) 회피 확인.
 - **측정 실행**: benchmark 프로젝트(`6a573f8e6d46c52c517d02e7`) 생성 후 `docker compose run --rm --no-deps application python scripts/measure_writing_stages.py --project-id <id> --repeats 3`. 결과 `complete=true`, `incomplete_stages=[]`, 실 12B 관통.
   - per-stage MAX: revise 323tok/1018ms·report 766/5578·gate 815/3368·retrieve_plan 368/1435·context_search 0tok(제외)/27024ms.
   - 합성 raw ceiling(기본 정책 2/1/3): **max_total_tokens 4991·max_wall_clock_ms 51755**.
@@ -155,7 +155,7 @@
   - full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1068 passed / 45 skipped / 240 subtests**(v1.6.88 1062 대비 +6). fail 없음; 기존 `TestClient` collection warning 3건만 유지.
   - `python3 -m py_compile services/application/app/writing/gate_quality.py scripts/benchmark_writing_gate.py tests/test_writing_gate_quality.py`, CLI `--help`, `git diff --check` 통과.
   - pattern sweep: `Gate quality|gate_quality|benchmark_writing_gate`를 repo-wide 탐색해 종전 J1/live smoke가 라벨을 assert하지 않는 관측기임을 재확인. 중복 품질 scorer 없음.
-  - live: application 컨테이너 안 `python scripts/benchmark_writing_gate.py --repeats 3` → **21/21 match, accuracy 1.0, complete=true**, model `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`, llama `192.168.1.22:9080`. Chroma telemetry warning 3건은 비차단이며 Gate 결과와 무관.
+  - live: application 컨테이너 안 `python scripts/benchmark_writing_gate.py --repeats 3` → **21/21 match, accuracy 1.0, complete=true**, model `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`, llama `<베타-LLM>:9080`. Chroma telemetry warning 3건은 비차단이며 Gate 결과와 무관.
 - focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_per_stage_measure.py` → **14 passed**(초기 10 + hardening 4).
 - full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **1055 passed / 45 skipped / 235 subtests**(v1.6.86 1041 대비 +14 신규 테스트). fail 없음.
 - `python3 -m py_compile services/application/app/writing/per_stage_measure.py scripts/measure_writing_stages.py tests/test_writing_per_stage_measure.py`, `docker compose config --quiet`, `git diff --check` 통과.

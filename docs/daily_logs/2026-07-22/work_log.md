@@ -132,7 +132,7 @@
 
 ### Goals
 
-- 오너 요청: async-pad 슬라이스(2b/2c/3/retry)가 실 12B(`192.168.1.22:9080`)로 엔드투엔드 관통하는지 검증. 2b work_log가 "완전 스택 e2e는 오너 풀스택 후속"으로 남겨둔 것을 폐쇄.
+- 오너 요청: async-pad 슬라이스(2b/2c/3/retry)가 실 12B(`<베타-LLM>:9080`)로 엔드투엔드 관통하는지 검증. 2b work_log가 "완전 스택 e2e는 오너 풀스택 후속"으로 남겨둔 것을 폐쇄.
 - GATE-1 정의 명확화(오너 "GATE-1이 정확히 뭔지 모르겠다").
 
 ### User Decisions and Rationale
@@ -142,7 +142,7 @@
 
 ### Completed work — 실 12B 풀스택 e2e (전부 green)
 
-- **host-side 구성**(image rebuild 없이 working-tree, memory `live-smoke-runs-working-tree` 준수): gateway compose(`LLAMA_BASE_URL=http://192.168.1.22:9080 GATEWAY_PORT=8011` → `/health/ready`={"status":"ready"}) + application `uvicorn …:create_app --factory`(127.0.0.1:8010) + `scripts/generation_job_worker.py --loop`, mongo 27018(`agent-memory-mongodb`) 공유(`CORE_SOT_MONGO_TRANSACTIONS=false` non-transaction; job claim은 atomic `find_one_and_update`라 단일 노드에서 안전).
+- **host-side 구성**(image rebuild 없이 working-tree, memory `live-smoke-runs-working-tree` 준수): gateway compose(`LLAMA_BASE_URL=http://<베타-LLM>:9080 GATEWAY_PORT=8011` → `/health/ready`={"status":"ready"}) + application `uvicorn …:create_app --factory`(127.0.0.1:8010) + `scripts/generation_job_worker.py --loop`, mongo 27018(`agent-memory-mongodb`) 공유(`CORE_SOT_MONGO_TRANSACTIONS=false` non-transaction; job claim은 atomic `find_one_and_update`라 단일 노드에서 안전).
 - **관통 결과**:
   1. 시드(project/draft/version POST) → async generate(medium) POST **202** (endpoint 배선 2c 정상, async 분기).
   2. job pending → worker claim → gateway **실 12B 호출** → **succeeded**, `result_scratch_id` 보존, 실 한국어 산문("아린은 거친 질감의 성문을 밀어냈다. 삐걱거리는 소리와 함께 육중한 문이 열렸고…").

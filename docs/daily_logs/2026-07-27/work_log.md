@@ -5,16 +5,16 @@
 ### Goals
 
 - HANDOFF Next Tasks #1(스택을 올리면 바로 할 것 — 관측 화면 육안 확인)의 선행: 이 **베타 테스트
-  머신**(외부 LLM `192.168.1.22`)에서 배포 스택을 실제로 기동한다.
+  머신**(외부 LLM `<베타-LLM>`)에서 배포 스택을 실제로 기동한다.
 - 오너 요청: HANDOFF 상단에 머신 구분(알파·베타·감마) 기록을 남겨 "환경과 안 맞는다"는 오해를 없앤다.
 - 오너의 독립 검증(조건부 합격)이 지적한 차단 1건·보강 3건을 반영하고 커밋한다.
 
 ### Completed work
 
 - **HANDOFF 머신 구분 절 신설** [`HANDOFF.md`](../../../HANDOFF.md): 상단에 알파(배포·in-stack GPU
-  llama)·베타(지금 이 머신·외부 LLM `192.168.1.22:9080`)·감마(노트북·LLM 불가, CPU 컨테이너/DB만) 표와,
+  llama)·베타(지금 이 머신·외부 LLM `<베타-LLM>:9080`)·감마(노트북·LLM 불가, CPU 컨테이너/DB만) 표와,
   "무엇을 띄울 수 있는지(항구적 성질) vs 지금 무엇이 떠 있는지(머신-로컬 관측치)"를 구분하라는 규칙.
-- **베타 머신 `.env` 생성**(커밋 금지 — gitignore 확인): `LLAMA_BASE_URL=http://192.168.1.22:9080`.
+- **베타 머신 `.env` 생성**(커밋 금지 — gitignore 확인): `LLAMA_BASE_URL=http://<베타-LLM>:9080`.
   gateway 기본값 `host.docker.internal:9080`(= 호스트 로컬)을 외부 12B 서버로 덮는다.
 - **전체 스택 기동**: `docker compose up -d --build`(3~4일 전 이미지가 관측 코드 이전이라 재빌드).
   기동 중 발생한 `PromptTemplateConflict`를 해소(아래 Issues) 후 재기동.
@@ -69,7 +69,7 @@
 ### Verification
 
 - **검증자 판정**: 조건부 합격. 진짜로 맞는 것(재확인 완료) — `/health` 200 · operation 62개 ·
-  관측 route 등록 · gateway 컨테이너에서 `192.168.1.22:9080` TCP+/health 200 종단 도달 ·
+  관측 route 등록 · gateway 컨테이너에서 `<베타-LLM>:9080` TCP+/health 200 종단 도달 ·
   PromptTemplateConflict 진단이 코드 메커니즘·테스트 pin·알려진 패턴과 일치. 조건 = B-1 정정.
 - **비검증 한계(검증자 명시)**: 저장돼 있던 구 v3 sha `fb4e272…`는 볼륨 초기화로 증거가 소거되어
   재확인 불가. 진단의 저장 측은 내 진술에 의존(정본 측 재확인 + 알려진 패턴 + 코드 일치로 개연성은 충분).

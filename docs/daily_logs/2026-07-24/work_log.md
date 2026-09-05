@@ -190,7 +190,7 @@
 - **mutation 3종 실증** — 각각 해당 회귀만 물었다. 특히 **`promoted.append(...)` 제거는 v1.7.35가 출하한 결함 그대로를 재현**하고 `test_enqueue_failure_after_the_mint_still_reports_that_mint` 하나만 문다. 서비스가 enqueue 실패를 삼키도록 바꾸면 3건이 동시에 문다.
 - **회귀 전량**: backend **1462 passed / 1 skipped / 526 subtests**. 직전 1459/1/526 대비 **+3 passed**로 신규 회귀 3건과 정확히 일치하며 subtest는 무변이다(신규 테스트가 `subTest`를 쓰지 않음) — 설명되지 않는 증감 0.
 - 프론트: `gen:api` **+20/-0**(v1.7.35와 동일 — description 문구는 타입에 영향 없음), `tsc` clean, build JS **399.03 kB**(무변), vitest **194 passed / 13 files**(무변).
-- **검증자의 "전체 스위트 카운트 미검증"에 대해**: 그 timeout은 **LLM 서버와 무관**하다. 스위트는 `192.168.1.22:9080`에 접속하지 않으며 LLM 관련 테스트는 전부 `llama.test` 가짜 호스트를 쓴다(`tests/test_llm_benchmark_script.py`·`test_httpx_transport.py`). 실측 소요는 이 머신에서 **656초**로, 검증자의 540초 상한을 넘긴 것이 원인이다.
+- **검증자의 "전체 스위트 카운트 미검증"에 대해**: 그 timeout은 **LLM 서버와 무관**하다. 스위트는 `<베타-LLM>:9080`에 접속하지 않으며 LLM 관련 테스트는 전부 `llama.test` 가짜 호스트를 쓴다(`tests/test_llm_benchmark_script.py`·`test_httpx_transport.py`). 실측 소요는 이 머신에서 **656초**로, 검증자의 540초 상한을 넘긴 것이 원인이다.
 
 ### Decisions (구현자 판단)
 

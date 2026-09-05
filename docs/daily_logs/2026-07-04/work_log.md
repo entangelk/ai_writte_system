@@ -50,7 +50,7 @@
 ### 로컬 llama.cpp GPU 서버 opt-in 구성 (환경 정합)
 
 - 변경 파일: `docker-compose.llama.yml`(신규), `docs/runbooks/local-llama-server.md`(신규), `HANDOFF.md`, `docs/daily_logs/2026-07-04/work_log.md`.
-- 새 테스트 머신(RTX 3060 12GB, 16코어/15GB RAM, nvidia runtime + container-toolkit 1.18.2)에는 이전 작업 머신의 외부 llama.cpp endpoint(`192.168.1.29:9080`)가 없다. 사용자 결정으로 실제 llama.cpp GPU 서버를 Docker로 띄워 환경을 맞췄다(모델은 이전 벤치와 동일한 12B QAT 정합).
+- 새 테스트 머신(RTX 3060 12GB, 16코어/15GB RAM, nvidia runtime + container-toolkit 1.18.2)에는 이전 작업 머신의 외부 llama.cpp endpoint(`<구검증-LLM>:9080`)가 없다. 사용자 결정으로 실제 llama.cpp GPU 서버를 Docker로 띄워 환경을 맞췄다(모델은 이전 벤치와 동일한 12B QAT 정합).
 - 기존 `docker-compose.yml`은 의도적으로 llama.cpp 서버를 stack 밖으로 위임(주석 명시)하므로, 그 아키텍처를 훼손하지 않도록 **별도 opt-in override** `docker-compose.llama.yml`을 추가했다. base만 쓰면 종전대로 외부 `LLAMA_BASE_URL`이고, override를 함께 넘길 때만 in-stack `llama` 서비스가 뜬다: `docker compose -f docker-compose.yml -f docker-compose.llama.yml up -d`.
 - `llama` 서비스: image `ghcr.io/ggml-org/llama.cpp:server-cuda`, `-hf ${LLAMA_HF_REPO:-google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0}` + `--jinja`(llama.cpp `chat_template_kwargs.enable_thinking` 지원 필요) + `--n-gpu-layers 99` + `--ctx-size 8192`, host port 9080. GGUF 다운로드는 `LLAMA_CACHE=/models` + `llama_models` 볼륨으로 캐시해 재기동 시 재다운로드하지 않는다. GPU는 `deploy.resources.reservations.devices`(nvidia)로 전달한다.
 - override는 `gateway`의 `LLAMA_BASE_URL`을 `http://llama:9080`으로 덮고 `depends_on: llama: service_healthy`를 걸어, llama가 healthy(모델 로드 완료)된 뒤에만 gateway가 뜨고, 그 뒤 application이 뜨는 순서를 보장한다. `llama` healthcheck는 gateway `/health/ready`가 upstream으로 확인하는 것과 같은 `GET /health`를 curl로 친다(start_period 120s, retries 60 — 12B 로드 여유).

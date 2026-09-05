@@ -4,8 +4,8 @@
 
 ## Provenance
 
-- **모델**: `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0` (외부 llama.cpp `192.168.1.22:9080`, gateway 경유).
-- **스택**: 이 프로젝트 compose 풀스택(application/gateway/mongo[rs0]/embedding[BGE-m3-ko]/chroma/ES[nori]), gateway `LLAMA_BASE_URL=http://192.168.1.22:9080`, host 포트 override `MONGO_PORT=27019`/`GATEWAY_PORT=8011`. gateway `/health/ready=ready`.
+- **모델**: `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0` (외부 llama.cpp `<베타-LLM>:9080`, gateway 경유).
+- **스택**: 이 프로젝트 compose 풀스택(application/gateway/mongo[rs0]/embedding[BGE-m3-ko]/chroma/ES[nori]), gateway `LLAMA_BASE_URL=http://<베타-LLM>:9080`, host 포트 override `MONGO_PORT=27019`/`GATEWAY_PORT=8011`. gateway `/health/ready=ready`.
 - **정책**: 기본 `WritingLoopPolicy(2/1/3)` (revision 2·retrieval 1·gate 3). 최악경로 stage 카운트 = revise 2·report 2·gate 3·retrieve_plan 1·context_search 1.
 - **repeats**: 3 (stage별 보수적 MAX). `complete=true`, `incomplete_stages=[]`.
 - **project**: `6a573f8e6d46c52c517d02e7` (benchmark 전용, idempotent context seed).

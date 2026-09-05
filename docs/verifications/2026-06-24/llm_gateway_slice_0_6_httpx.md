@@ -24,7 +24,7 @@
 5. 계약 wiring — `services/llm_gateway/app/transport.py`, `client.py`, `errors.py` (adapter가 연결되는 안정 계약)
 6. 계약 문서 — implementation-plan.md Slice 0.6, llm-gateway.md response preconditions / adapter 상태
 7. 전체 테스트 스위트 (회색 막대와 계약 위반을 구분)
-8. live adapter smoke — 실제 endpoint `http://192.168.1.29:9080` 경유
+8. live adapter smoke — 실제 endpoint `http://<구검증-LLM>:9080` 경유
 
 ## Methodology
 
@@ -43,10 +43,10 @@
   ```
 - live adapter smoke (brief가 미완료로 남긴 항목을 본 검증자가 이 환경에서 재실행):
   ```bash
-  timeout 8 curl -s --max-time 5 http://192.168.1.29:9080/health
+  timeout 8 curl -s --max-time 5 http://<구검증-LLM>:9080/health
   # httpx 직접 GET /health (trust_env=False, timeout=5)
   PYTHONDONTWRITEBYTECODE=1 timeout 90 python3 -m scripts.smoke_llm_provider \
-    --base-url http://192.168.1.29:9080 --timeout 30
+    --base-url http://<구검증-LLM>:9080 --timeout 30
   ```
 - pattern sweep: `grep -rn "httpx\|HttpxJsonTransport\|trust_env" services tests scripts` 로 adapter 결합이 새 파일 밖으로 누수됐는지 점검.
 
@@ -111,7 +111,7 @@ worker brief(line 48-55)는 “현재 실행 환경에서 Python httpx/urllib so
 - 실제 adapter 경유 smoke:
   ```
   PYTHONDONTWRITEBYTECODE=1 python3 -m scripts.smoke_llm_provider \
-    --base-url http://192.168.1.29:9080 --timeout 30
+    --base-url http://<구검증-LLM>:9080 --timeout 30
   → {"model":"google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0",
      "content":"연결 확인 완료","finish_reason":"stop",
      "usage":{"prompt_tokens":23,"completion_tokens":5,"total_tokens":28}}
@@ -167,8 +167,8 @@ print(issubclass(httpx.ConnectError, httpx.TimeoutException))
 PY
 
 # live adapter smoke (F5) — Python socket이 동작하는 환경에서만
-timeout 8 curl -s --max-time 5 http://192.168.1.29:9080/health
+timeout 8 curl -s --max-time 5 http://<구검증-LLM>:9080/health
 PYTHONDONTWRITEBYTECODE=1 python3 -m scripts.smoke_llm_provider \
-  --base-url http://192.168.1.29:9080 --timeout 30
+  --base-url http://<구검증-LLM>:9080 --timeout 30
 # 기대: content="연결 확인 완료", finish_reason="stop"
 ```

@@ -112,7 +112,7 @@ provider/tool retry cap은 task profile의 필수 policy 값이며 0 이상이�
 
 ### production 기본값
 
-초기 local MVP 기본값은 2026-06-30 live benchmark(`repeats=3`, `warmups=1`, endpoint `http://192.168.1.29:9080`)를 근거로 둔다. 측정 요약: `short_smoke` p95 1.56s / max 28 tokens, `json_extraction` p95 8.70s / max 125 tokens, `continue_scene` p95 57.16s / max 407 tokens, 전체 failure 0. 아래 값은 measured p95와 max token에 여유를 둔 서버 기본 상한이다. 요청자는 더 작은 한도를 요청할 수 있지만 늘릴 수 없다.
+초기 local MVP 기본값은 2026-06-30 live benchmark(`repeats=3`, `warmups=1`, endpoint `http://<구검증-LLM>:9080`)를 근거로 둔다. 측정 요약: `short_smoke` p95 1.56s / max 28 tokens, `json_extraction` p95 8.70s / max 125 tokens, `continue_scene` p95 57.16s / max 407 tokens, 전체 failure 0. 아래 값은 measured p95와 max token에 여유를 둔 서버 기본 상한이다. 요청자는 더 작은 한도를 요청할 수 있지만 늘릴 수 없다.
 
 | task profile | max_iterations | max_wall_clock_ms | max_total_tokens | max_tool_calls | max_repeated_calls | provider_retry_cap | tool_retry_cap | 근거 |
 |---|---:|---:|---:|---:|---:|---:|---:|---|

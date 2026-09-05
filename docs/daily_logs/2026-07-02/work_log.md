@@ -173,8 +173,8 @@
 - Outcome: Application HTTP endpoint까지 연결됐고, 배포형 경로를 실제로 검증했다.
 
 - 문제: 기본 `LLAMA_BASE_URL=http://host.docker.internal:9080`에서는 Gateway upstream 연결이 실패했고, 120초 timeout에서는 실제 모델 호출이 완료되기 전에 `gateway request timed out`으로 실패했다.
-- 원인: 현재 모델 endpoint는 `http://192.168.1.29:9080`이고, 모델 처리 속도가 약 5 t/s라 120초가 부족할 수 있다.
-- Resolution: `LLAMA_BASE_URL=http://192.168.1.29:9080`, `LLAMA_DEFAULT_MODEL=google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`, `LLAMA_TIMEOUT_SECONDS=900`, smoke client `--timeout-seconds 1000`로 재실행했다.
+- 원인: 현재 모델 endpoint는 `http://<구검증-LLM>:9080`이고, 모델 처리 속도가 약 5 t/s라 120초가 부족할 수 있다.
+- Resolution: `LLAMA_BASE_URL=http://<구검증-LLM>:9080`, `LLAMA_DEFAULT_MODEL=google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`, `LLAMA_TIMEOUT_SECONDS=900`, smoke client `--timeout-seconds 1000`로 재실행했다.
 - Outcome: 배포형 E2E가 `run_http_status=200`, final job `succeeded`, candidates 3개로 통과했다.
 
 - 문제: Phase 3A 다음 후보 중 persistent Chroma-like adapter는 실제 backend/dependency 결정 없이 들어가면 추측 구현이 된다.
@@ -267,7 +267,7 @@
 - Diff hygiene: `git diff --check` — 통과.
 - Deployed smoke failure preservation: 기본 `host.docker.internal:9080` compose env에서 `run_http_status=502`, final job `failed/provider_error`, `failure_detail="provider is unavailable"` 확인.
 - Deployed smoke timeout preservation: 실제 model endpoint + 120초 timeout에서 `run_http_status=502`, final job `failed/provider_error`, `failure_detail="gateway request timed out"` 확인.
-- Deployed smoke success: `LLAMA_BASE_URL=http://192.168.1.29:9080 LLAMA_DEFAULT_MODEL=google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0 LLAMA_TIMEOUT_SECONDS=900 APPLICATION_PORT=8010 GATEWAY_PORT=8011 MONGO_PORT=27029 docker compose up -d --build` 후 `python3 scripts/phase2a_deployed_e2e_smoke.py --application-base-url http://127.0.0.1:8010 --timeout-seconds 1000` — `run_http_status=200`, final job `succeeded`, candidates 3개.
+- Deployed smoke success: `LLAMA_BASE_URL=http://<구검증-LLM>:9080 LLAMA_DEFAULT_MODEL=google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0 LLAMA_TIMEOUT_SECONDS=900 APPLICATION_PORT=8010 GATEWAY_PORT=8011 MONGO_PORT=27029 docker compose up -d --build` 후 `python3 scripts/phase2a_deployed_e2e_smoke.py --application-base-url http://127.0.0.1:8010 --timeout-seconds 1000` — `run_http_status=200`, final job `succeeded`, candidates 3개.
 - Phase 3A deployed rebuild smoke compile: `python3 -m py_compile scripts/phase3a_deployed_rebuild_smoke.py tests/test_phase3a_deployed_rebuild_smoke_script.py` — 통과.
 - Phase 3A deployed rebuild smoke focused regression: `python3 -m unittest tests.test_phase3a_deployed_rebuild_smoke_script -v` — 6개 통과.
 - Phase 3A deployed rebuild smoke broader regression: `python3 -m unittest tests.test_phase3a_deployed_rebuild_smoke_script tests.test_phase3a_rebuild_source_block_index_script tests.test_application_api tests.test_indexing_phase3a -v` — 68개 통과.

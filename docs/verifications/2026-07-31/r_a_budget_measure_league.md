@@ -37,7 +37,7 @@
 - 머신 상태 직접 확인: `docker ps` · `curl /props`(host 및 app 컨테이너에서 python socket).
 - **실측 재현**(재현 명령—아래 Reproduction):
   `docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts" -v "$PWD/services:/app/services" \
-   -e LLAMA_BASE_URL=http://192.168.1.22:9080 application python scripts/report_budget_measure.py \
+   -e LLAMA_BASE_URL=http://<베타-LLM>:9080 application python scripts/report_budget_measure.py \
    --project-id 6a6be9c0dbb39de0a51ed8ba \
    --current-position 6a6be9c0dbb39de0a51ed8bb 6a6be9c0dbb39de0a51ed8bc \
    --budgets 4096,5120,6144,8192`
@@ -170,13 +170,13 @@ gateway `/v1/generate` 실관통:
 ```bash
 # 0. 머신 상태 직접 확인 (stale note 신뢰 금지)
 docker ps                                   # ai_writte_system-application-1 healthy?
-curl -s http://192.168.1.22:9080/props | python3 -c "import sys,json;print(json.load(sys.stdin)['default_generation_settings']['n_ctx'])"
+curl -s http://<베타-LLM>:9080/props | python3 -c "import sys,json;print(json.load(sys.stdin)['default_generation_settings']['n_ctx'])"
 #   → 16384 여부
 
 # 1. 측정 표 재현 (시드 재사용, 쓰기 없음)
 docker compose run --rm --no-deps \
     -v "$PWD/scripts:/app/scripts" -v "$PWD/services:/app/services" \
-    -e LLAMA_BASE_URL=http://192.168.1.22:9080 \
+    -e LLAMA_BASE_URL=http://<베타-LLM>:9080 \
     application python scripts/report_budget_measure.py \
     --project-id 6a6be9c0dbb39de0a51ed8ba \
     --current-position 6a6be9c0dbb39de0a51ed8bb 6a6be9c0dbb39de0a51ed8bc \

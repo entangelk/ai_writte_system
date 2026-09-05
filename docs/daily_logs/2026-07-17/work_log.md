@@ -161,7 +161,7 @@
 ### Goals
 
 - 오너 지시("관통 테스트 해보자, 이 머신은 내부 풀스택")대로 Review Inbox B 슬라이스(v1.7.4/v1.7.5)가 소비하는 백엔드 표면을 실 스택·실 12B로 end-to-end 확인한다.
-- 외부 `192.168.1.22`는 이 환경에서 불가라 in-stack llama(`docker-compose.llama.yml`)를 쓴다.
+- 외부 `<베타-LLM>`는 이 환경에서 불가라 in-stack llama(`docker-compose.llama.yml`)를 쓴다.
 
 ### Completed work
 

@@ -123,7 +123,7 @@ planner가 소유하는 분기의 should-fire / should-NOT-fire 매핑:
 ### 7. live smoke 스크립트 정적 검증 — 부합 (미실행은 문서화됨)
 
 - `scripts/phase4_context_search_planner_live_smoke.py`: py_compile 통과. `GatewayGenerateProvider` + in-process gateway app + `httpx.ASGITransport` 배선으로 Phase 2A live smoke와 동일 패턴. `ContextSearchFailed`를 잡아 `status=failed`/`error_type`/`detail`을, 성공 시 `plan_id`/`project_id`/`steps`를 JSON 출력 — 스크립트 자체는 contract 부합.
-- 미실행 사유(sandbox 내부 Python/httpx 외부 TCP 차단 → 실제 Gateway `192.168.1.29:9080` 호출 불가)는 work_log/HANDOFF에 명시적으로 기록되어 있음. 이는 verification 차단 사유가 아니라 owner 결정 대기 outstanding item.
+- 미실행 사유(sandbox 내부 Python/httpx 외부 TCP 차단 → 실제 Gateway `<구검증-LLM>:9080` 호출 불가)는 work_log/HANDOFF에 명시적으로 기록되어 있음. 이는 verification 차단 사유가 아니라 owner 결정 대기 outstanding item.
 
 ## Issues / Risks
 
@@ -187,6 +187,6 @@ git diff --check
 
 # 4. live smoke (sandbox 밖, 승인된 네트워크에서만)
 python3 scripts/phase4_context_search_planner_live_smoke.py \
-  --llama-base-url http://192.168.1.29:9080 \
+  --llama-base-url http://<구검증-LLM>:9080 \
   --model google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0
 ```

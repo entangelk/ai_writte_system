@@ -32,7 +32,7 @@
 6. **계약 자기충돌 sweep**: `grep -rnE 'markdown-fenced|fenced JSON|fence.*repair|fence.*실패|fenced.*valid'` 를 `docs/`·`plans/` 전역에 적용 — 정정 후 잔존 "fenced→repair" 언어의 위치(정본 vs 역사 기록) 분류.
 7. **정적 검증**: `python3 -m py_compile`(5 파일), `git diff --check`, `docker compose config --quiet`, import 실행(`python3 -c`로 4 parser + json_extract 동시 import → 순환 import 부재 확인).
 8. **boundary matrix 구축**: 정정된 clause(`:403`)의 각 분기를 테스트 함수에 매핑, empty cell 검사.
-9. **머신 상태 직접 확인**(`docker ps` + `curl /health`): full-stack이 **실제로 기동 중**(application·mongo·gateway·worker·embedding·ES·chroma 전부 healthy, gateway `/health` ok, llama.cpp `192.168.1.22:9080` 도달 가능). smoke 스크립트의 "external TCP 불가" note는 stale.
+9. **머신 상태 직접 확인**(`docker ps` + `curl /health`): full-stack이 **실제로 기동 중**(application·mongo·gateway·worker·embedding·ES·chroma 전부 healthy, gateway `/health` ok, llama.cpp `<베타-LLM>:9080` 도달 가능). smoke 스크립트의 "external TCP 불가" note는 stale.
 10. **live smoke(working-tree 코드, 실 12B)**: smoke 스크립트는 deployed application(8000)을 치지 않고 working-tree adapter를 PYTHONPATH로 직접 instantiate → in-process gateway → 실 llama.cpp. 따라서 **rebuild 없이 Task 1 신규 코드로 live 관통 가능**. `scripts/phase2b3_compare_judge_live_smoke.py`·`scripts/phase4_context_search_planner_live_smoke.py`를 (a) Task 1 코드 (b) `json_extract.py` no-op mutation 두 상태로 각각 실행.
 
 ## Findings
@@ -210,12 +210,12 @@ grep -rnE 'markdown-fenced|fenced JSON|fence.*repair|fence.*실패' docs/ plans/
 
 # 8. live 관통 (머신 상태 확인 → 실 12B, working-tree 코드, rebuild 불필요)
 docker ps --format '{{.Names}}\t{{.Status}}'   # full-stack 기동 확인
-curl -sS --max-time 4 http://192.168.1.22:9080/health   # llama.cpp 도달 확인
+curl -sS --max-time 4 http://<베타-LLM>:9080/health   # llama.cpp 도달 확인
 # (a) Task 1 코드 — 둘 다 succeeded
-PYTHONPATH=. LLAMA_BASE_URL=http://192.168.1.22:9080 \
+PYTHONPATH=. LLAMA_BASE_URL=http://<베타-LLM>:9080 \
   LLAMA_DEFAULT_MODEL=google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0 \
   python3 scripts/phase2b3_compare_judge_live_smoke.py
-PYTHONPATH=. LLAMA_BASE_URL=http://192.168.1.22:9080 \
+PYTHONPATH=. LLAMA_BASE_URL=http://<베타-LLM>:9080 \
   LLAMA_DEFAULT_MODEL=google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0 \
   python3 scripts/phase4_context_search_planner_live_smoke.py
 # (b) live mutation — json_extract.py:38 을 `return content`로 치환 후 위 두 스크립트 재실행

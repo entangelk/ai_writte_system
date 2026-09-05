@@ -3,7 +3,7 @@
 ## Goals
 
 - `HANDOFF.md`와 2026-07-12 작업 로그를 읽고 다음 순차 작업을 정본에 따라 착수한다.
-- 로컬에서는 LLM 제외 테스트를 사용하고, 필요한 LLM live 검증은 `192.168.1.22:9080`의 응답·생성·Think 범위로 제한한다.
+- 로컬에서는 LLM 제외 테스트를 사용하고, 필요한 LLM live 검증은 `<베타-LLM>:9080`의 응답·생성·Think 범위로 제한한다.
 
 ## Completed work
 
@@ -29,14 +29,14 @@
 - 문제: D3는 별도 `/writing/report` API를 후속 필수로 확정하지만, 같은 브리프의 Follow-up은 candidate persistence/identity 이후로 제한하고 Deferred는 candidate/report persistence를 범위 밖으로 둔다.
 - 원인: v1.6.71 첫 slice에서 generate 합성만 구현하면서 재평가 API의 identity 경계를 후속 문구 두 곳에 서로 다르게 남겼다.
 - 해결/결과: 입력 계약이 inline object인지 persisted candidate id인지 오너 결정 없이는 도출되지 않으므로 구현을 중단하고 결정 브리프로 전환했다.
-- 문제: `192.168.1.22:9080` 실모델은 기존 report prompt의 “supplied enum literals” 지시만으로 typed item schema를 알 수 없어 첫 출력과 repair가 모두 strict parse에 실패했다.
+- 문제: `<베타-LLM>:9080` 실모델은 기존 report prompt의 “supplied enum literals” 지시만으로 typed item schema를 알 수 없어 첫 출력과 repair가 모두 strict parse에 실패했다.
 - 원인: prompt가 top-level field 이름만 나열하고 claim/hint/risk의 exact fields와 enum 값을 실제로 제공하지 않았다. fake provider 회귀는 완성 JSON을 직접 반환해 이 결함을 가렸다.
 - 해결/결과: exact JSON 골격과 모든 enum literal을 initial/repair prompt에 동일하게 제공했다. 재실행은 `status=ok`, claims 2, hints 1, risk 0으로 strict parser를 통과했다.
 - 관찰: 첫 clean-exit 확인용 one-liner는 HTTP client를 다른 event loop에서 닫아 cleanup `RuntimeError`를 냈다. 같은 loop의 `/tmp` smoke로 재실행해 exit 0을 확인했으며 production 결함이 아니다.
 
 ## Decisions
 
-- 사용자 제약: 이 머신에서는 LLM 제외 테스트가 가능하다. LLM live 검증은 `192.168.1.22:9080`을 사용하되, 프로젝트 전용 모델이 아니므로 응답·생성·Think 외 capability나 프로젝트 품질을 전제하지 않는다.
+- 사용자 제약: 이 머신에서는 LLM 제외 테스트가 가능하다. LLM live 검증은 `<베타-LLM>:9080`을 사용하되, 프로젝트 전용 모델이 아니므로 응답·생성·Think 외 capability나 프로젝트 품질을 전제하지 않는다.
 - 작업자 추천: 신규 persistence 없이 기존 extractor를 재사용하는 side-effect-free inline API(A)를 먼저 구현한다. 오너 확정 전에는 채택하지 않는다.
 - 사용자 결정: A를 채택하되 B의 persisted candidate/report 감사 이력과 id 기반 API를 나중에 additive로 구현할 수 있게 둔다. 현재 slice에서는 speculative persistence/revision 모델을 만들지 않는다.
 - 파생 결정: A의 ContextPackage는 client 제출을 신뢰하지 않고 서버가 기존 context-search 입력으로 재구성한다.
@@ -45,8 +45,8 @@
 
 - focused: `python3 -m pytest -q -p no:cacheprovider tests/test_writing_report.py tests/test_writing.py tests/test_writing_gate.py tests/test_writing_accept.py` → **68 passed / 53 subtests**.
 - full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **880 passed / 45 skipped / 154 subtests**. 종전 48 skip 대비 이 머신은 Elasticsearch Python dependency가 있어 3개가 실제 실행됐다.
-- remote health: `curl ... http://192.168.1.22:9080/health` → `{"status":"ok"}`.
-- remote report live: 실제 `LlamaCppProvider`+`WritingCandidateReportService`+strict parser/repair를 `192.168.1.22:9080`에 연결 → `{'status': 'ok', 'constraints': 0, 'claims': 2, 'hints': 1, 'risks': 0, 'claim_types': ['narrative_event', 'narrative_event']}`, exit 0.
+- remote health: `curl ... http://<베타-LLM>:9080/health` → `{"status":"ok"}`.
+- remote report live: 실제 `LlamaCppProvider`+`WritingCandidateReportService`+strict parser/repair를 `<베타-LLM>:9080`에 연결 → `{'status': 'ok', 'constraints': 0, 'claims': 2, 'hints': 1, 'risks': 0, 'claim_types': ['narrative_event', 'narrative_event']}`, exit 0.
 - `git diff --check`, `python3 -m py_compile`은 최종 문서 반영 뒤 재확인한다.
 
 ### 독립 검증 조건부 합격 closure + hardening
@@ -89,7 +89,7 @@
 
 ### Next steps
 
-- 오너가 `05-writing-partial-revise-decisions.md` D1~D8을 확정하면 SoT 반영→boundary tests 우선→최소 revise service/API→비-LLM 전체 회귀→`192.168.1.22:9080` live smoke 순서로 진행한다.
+- 오너가 `05-writing-partial-revise-decisions.md` D1~D8을 확정하면 SoT 반영→boundary tests 우선→최소 revise service/API→비-LLM 전체 회귀→`<베타-LLM>:9080` live smoke 순서로 진행한다.
 
 ## Phase 5.6 finding evidence 기반 부분 revise 구현 (SoT v1.6.73)
 
@@ -114,7 +114,7 @@
 ### Verification
 
 - focused: `tests/test_writing_revise.py` + writing/gate/report/accept → **80 passed / 62 subtests**.
-- remote live: `192.168.1.22:9080`에서 replacement=`그녀는 성문 앞에 서 있었다.`를 반환했고 Application splice 결과가 prefix/suffix를 그대로 보존, `status=ok`.
+- remote live: `<베타-LLM>:9080`에서 replacement=`그녀는 성문 앞에 서 있었다.`를 반환했고 Application splice 결과가 prefix/suffix를 그대로 보존, `status=ok`.
 - full: `python3 -m pytest --ignore=tests/test_memory_mongo.py -q -p no:cacheprovider` → **892 passed / 45 skipped / 163 subtests**.
 - `python3 -m py_compile`(main/revise/test)·`git diff --check` 통과.
 

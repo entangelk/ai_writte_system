@@ -47,4 +47,4 @@
 2. public HTTP 양방향 회귀를 먼저 추가한다: 정상 재평가, project/request/candidate 불일치 pre-provider 거부, malformed→repair, repair 실패, provider 502/timeout 504, side effect 없음.
 3. 기존 `WritingCandidateReportService`와 strict parser를 그대로 재사용해 최소 endpoint만 구현한다.
 4. focused writing/report/gate/accept 회귀 후 LLM 제외 전체 스위트를 실행한다.
-5. `192.168.1.22:9080`에서는 endpoint가 제공하는 응답·생성·Think 범위 안에서 strict JSON/repair wiring smoke만 수행하고, tool calling이나 프로젝트 전용 품질을 주장하지 않는다.
+5. `<베타-LLM>:9080`에서는 endpoint가 제공하는 응답·생성·Think 범위 안에서 strict JSON/repair wiring smoke만 수행하고, tool calling이나 프로젝트 전용 품질을 주장하지 않는다.

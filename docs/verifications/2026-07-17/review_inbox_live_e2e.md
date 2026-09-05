@@ -7,7 +7,7 @@
 - **실행자**: 작업 AI(본 세션)
 - **대상**: Frontend B Review Inbox 첫·둘째 슬라이스가 소비하는 백엔드 표면 전체 — candidate confirm/reject/edit, conflict merge/split, gate finding resolve/dismiss.
 - **소스**: 작업 트리(커밋 `ae2f638` v1.7.4 · `18e0b8b` v1.7.5 · `6cfc09d` 검증 보강). 관통 시점 application/frontend 이미지는 현재 코드로 재빌드.
-- **스택**: 이 머신 내부 풀스택 — `docker-compose.yml` + `docker-compose.llama.yml` + 로컬 override(아래). 실 Mongo(replica set)·Chroma·Elasticsearch(nori)·embedding(BGE-m3-ko)·worker·gateway·**in-stack llama.cpp 12B**(`google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`, RTX 3060). 외부 `192.168.1.22:9080`은 이 환경에서 사용 불가라 in-stack llama 사용.
+- **스택**: 이 머신 내부 풀스택 — `docker-compose.yml` + `docker-compose.llama.yml` + 로컬 override(아래). 실 Mongo(replica set)·Chroma·Elasticsearch(nori)·embedding(BGE-m3-ko)·worker·gateway·**in-stack llama.cpp 12B**(`google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0`, RTX 3060). 외부 `<베타-LLM>:9080`은 이 환경에서 사용 불가라 in-stack llama 사용.
 - **경로**: 브라우저 동등 경로 = 프론트 nginx `/api` 프록시(`http://localhost:5173/api/...`).
 
 ## Scope

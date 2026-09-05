@@ -23,7 +23,7 @@
 - HANDOFF 편집: `git diff HANDOFF.md`(전체), `wc -l HANDOFF.md`
 - live 상태: `docker compose ps --format ...`(health 컬럼), `docker inspect ... --format '{{json .State.Health}}'`, `docker exec ... netstat`/`nginx -T`
 - 엔드포인트: `curl http://localhost:8520/health`, `/openapi.json`(operation 수 및 observability path 추출, python), `curl http://localhost:5520/...`
-- LLM 경로: host `curl 192.168.1.22:9080/health` + gateway 컨테이너 내 `python3 socket.create_connection` / `urllib` (컨테이너에 wget/curl 없음)
+- LLM 경로: host `curl <베타-LLM>:9080/health` + gateway 컨테이너 내 `python3 socket.create_connection` / `urllib` (컨테이너에 wget/curl 없음)
 - 프롬프트 sha: `python3 -c "hashlib.sha256(ANALYSIS_EXTRACT_TEMPLATE_V3...)"`
 - compose/코드: `grep`, `Read` (conflict 메커니즘, nginx listen, healthcheck 정의)
 - 로그 존재: `ls docs/daily_logs/2026-07-27/`, `ls docs/verifications/2026-07-27/`
@@ -37,7 +37,7 @@
   - 실측 합산: **healthy 6 · unhealthy 1(frontend) · healthcheck 없음 2(worker/generation_worker)**.
   - 즉 "전부 healthy"는 **사실이 아니다**. 이는 CLAUDE.md가 금지하는 "machine-local 관측치를 부정확하게 사실로 기록"하는 정확한 실패 양상이다. 작업자 본인이 "머신-로컬 관측치를 믿지 말라"는 절을 같이 써 놓고도, 직접 `docker compose ps`로 확인하지 않은 듯한 상태로 "전부 healthy"를 적었다.
 - **경미**: 자가 검수 줄에서 이전 형식의 "N줄" 카운트가 빠지고 작업 내용 설명으로 대체됨(`> ... · 3개 머신 구성 절 신설, stale 머신 관측치 1건 정정`). CLAUDE.md 예시는 `YYYY-MM-DD · N줄`. 146<200 이라 트리거 미발동이나, 줄을 건드인 이상 줄 수 표기 권장.
-- **경미**: 베타 LLM `192.168.1.22:9080`(LAN IP)을 "항구적 성질" 표에 배치. IP는 머신/네트워크-로컬 성질. 단 `.env` 커밋 금지·머신별 덮쓰기 주의로 마킹해 두어 완화는 됨.
+- **경미**: 베타 LLM `<베타-LLM>:9080`(LAN IP)을 "항구적 성질" 표에 배치. IP는 머신/네트워크-로컬 성질. 단 `.env` 커밋 금지·머신별 덮쓰기 주의로 마킹해 두어 완화는 됨.
 
 ### 2. PromptTemplateConflict 진단 — 코드 메커니즘 일치(정본 측 재확인), 저장 측은 폐기로 비검증
 - 코드(`prompt_templates.py:118-121`): `seed_template`이 저장된 동일 version의 body가 코드 body와 다르면 `PromptTemplateConflict` 발생 → 작업자 진단과 기계적으로 일치.
@@ -50,7 +50,7 @@
 - `/health` 200 — **참** (`curl localhost:8520/health` → `{"status":"ok"}` 200).
 - OpenAPI operation 62개 — **참** (`/openapi.json` 실측 62).
 - 관측 route `/projects/{project_id}/observability/kpi` GET 등록 — **참** (작업자 인용과 정확 일치).
-- 외부 12B gemma-local 응답 — **참**(종단 확인). host `curl 192.168.1.22:9080/health`→200, 그리고 gateway 컨테이너 내 `socket.create_connection(('192.168.1.22',9080))` 성공 + `urllib /health`→200. gateway→LLM 네트워크 경로 실제 도달 확인.
+- 외부 12B gemma-local 응답 — **참**(종단 확인). host `curl <베타-LLM>:9080/health`→200, 그리고 gateway 컨테이너 내 `socket.create_connection(('<베타-LLM>',9080))` 성공 + `urllib /health`→200. gateway→LLM 네트워크 경로 실제 도달 확인.
 - "9개 서비스 전부 healthy" — **거짓**(위 1참조). frontend unhealthy.
 
 ### 4. Frontend unhealthy 근본 원인 — **기존 결함(작업자 유발 아님)**, 그러나 보고 누락
@@ -95,7 +95,7 @@ docker inspect ai_writte_system-frontend-1 --format '{{json .State.Health}}' | p
 curl -s localhost:8520/health
 curl -s localhost:8520/openapi.json | python3 -c "import sys,json;d=json.load(sys.stdin);print(sum(1 for p in d['paths'] for m in p if m in('get','post','put','delete','patch')))" 2>/dev/null
 # (4) gateway→LLM 종단
-docker exec ai_writte_system-gateway-1 python3 -c "import urllib.request;print(urllib.request.urlopen('http://192.168.1.22:9080/health',timeout=8).status)"
+docker exec ai_writte_system-gateway-1 python3 -c "import urllib.request;print(urllib.request.urlopen('http://<베타-LLM>:9080/health',timeout=8).status)"
 # (5) canonical v3 sha 재계산
 cd services/application && python3 -c "import hashlib;from app.analysis.prompt_templates import ANALYSIS_EXTRACT_TEMPLATE_V3 as t;print(hashlib.sha256(t.encode()).hexdigest())"
 # (6) 로그 부재 확인

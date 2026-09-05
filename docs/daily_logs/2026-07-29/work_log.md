@@ -15,7 +15,7 @@
 ### 측정 환경 (머신-로컬 관측치, 2026-07-29)
 
 - **베타 머신**. GPU는 `nvidia-smi` 실측 **GTX 1060 3GB** — 12B를 못 올리므로 LLM은 외부
-  서버(`.env`의 `LLAMA_BASE_URL=http://192.168.1.22:9080`)다.
+  서버(`.env`의 `LLAMA_BASE_URL=http://<베타-LLM>:9080`)다.
 - 외부 LLM은 살아 있고 `/props` 실측 **`n_ctx=8192` · `total_slots=1`**
   (모델 `gemma-4-12b-it-qat-q4_0.gguf`). **즉 이 머신은 브리프 §2-2 세 번째 행("창 8192")의
   조건 그 자체다.**
@@ -235,7 +235,7 @@ docker exec -e PYTHONPATH=/app -e AUTH_BOOTSTRAP_PASSWORD='...' \
   ai_writte_system-application-1 python scripts/create_user.py probe --admin
 
 # 3. 창 초과 → 400 확인
-curl -s -X POST http://192.168.1.22:9080/v1/chat/completions \
+curl -s -X POST http://<베타-LLM>:9080/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model":"x","messages":[{"role":"user","content":"'"$(python3 -c 'print("가"*40000)')"'"}],"max_tokens":64}'
 # → 400 exceed_context_size_error, n_ctx 8192
