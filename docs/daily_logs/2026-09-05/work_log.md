@@ -1032,3 +1032,46 @@ Slice 5 검증 축("유료 10번째 경로"). **패턴 스윕 추가 발견 2건
 - **S-0 문서 스윕** 이 다음(오너 판정 대기 — 검증 기록도 "짧은 폐쇄 슬라이스로
   묶든 S-0 에 끼워 넣든 무방" 이라고 봄). S-0 에는 `signup_attempts` 의
   mongo_collections.md 미등재(S-3 부채)가 이미 기다리고 있다.
+
+---
+
+# 세션 11 — Phase S-3·S-1 배포 (오너 지시)
+
+## Goals
+
+- 오너 지시: *"일단 배포하고 정리하자. 다음 작업자를 위한 메모 남겨주고 … 배포까지 해줘"* —
+  감사 1차 위험 폐쇄(S-3·S-1)를 배포에 반영한다.
+
+## Completed work
+
+배포 서버(오너 제공 키 접속 — 주소·계정은 저장소에 기록하지 않는다, 공개 저장소 보안 규칙).
+오너가 origin push 를 마친 상태에서 진행했다(구현 세션은 푸시하지 않는다 — 규칙).
+
+1. **git pull** `a875fc0` → `d37eb84`(4일치 — identity group Slice 0~6 · Phase S-3 · S-1 ·
+   검증 폐쇄 2건). ff-only, 서버 로컬 미추적 파일 1건(`docker-compose.homeserver.yml`)은
+   미접촉.
+2. **이미지 재빌드**: compose base + external-embedding 오버라이드(운용 조합 그대로) —
+   `ai_writte_system-app`(application·admin·worker·generation_worker 공유 태그)·frontend·
+   gateway 전부 Built.
+3. **컨테이너 재생성**(`up -d`) — 전 스택 healthy/Up.
+
+## Verification (배포 서버에서 실측, 2026-09-05)
+
+- `GET /health` → `{"status":"ok"}` · `GET /projects` → **401**(인증 생존 — 구버전 이미지
+  함정 아님) · frontend → 200.
+- **S-3 실동작**: 과장 username(80자) signup ×6 → **400×5 → 6번째 429 + `Retry-After: 3599`**.
+  스로틀이 400 시도까지 전부 계수하고 있음을 보여준다. 400은 행 생성 앞이라 **pending 행
+  오염 0건**.
+- **신규 컬렉션 부팅 생성**: `quota_replay_responses`(S-1)·`signup_attempts`(S-3)·
+  `request_usage_ledger` — 저장소 생성자의 create_index 가 기동 시 돈 증거.
+- **TTL 인덱스 실측**: `quota_replay_responses.stored_at=86400`(§43H literal)·
+  `signup_attempts.window_started_at=86400`(S-3 공식 max(86400, 3600×24) 와 일치).
+- 앱 컨테이너에 `CORE_SOT_MONGO_URI` 주입 확인 — 쿼터 저장소(원장·잠금·재생)가 Mongo
+  정본으로 돈다(재기동에 사용량·재생 창이 사라지지 않는다).
+
+## Next steps
+
+- **다음 작업자**: 다음 순서는 **S-0 문서 스윕**(mongo_collections 의 `signup_attempts`
+  미등재 부채 포함). 배포는 본 세션 기록의 절차(pull → compose build → up -d → 스모크)를
+  그대로 따르면 된다 — **frontend 재빌드 필수**(schema.d.ts 가 바뀌는 슬라이스마다).
+- S-1·S-3의 독립 검증 재확인(조건 소멸 확인)은 별도 세션 몫.
