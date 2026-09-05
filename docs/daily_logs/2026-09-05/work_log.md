@@ -981,3 +981,54 @@ Slice 5 검증 축("유료 10번째 경로"). **패턴 스윕 추가 발견 2건
   타 프로젝트 AI 처리 중(오너 확인).
 - **S-1 은 독립 검증 대기** 상태다(구현 세션이 자기 검증까지 마친 상태 — 검증 기록은
   별도 세션이 발행한다).
+
+---
+
+# 세션 10 — Phase S-1 검증 조건 폐쇄(B1·B2 + 비차단 3건, SoT v1.8.33)
+
+## Goals
+
+- 오너 지시: *"검증기록 확인해서 보강할 부분 보강해줘"* — 독립 검증
+  [`verifications/2026-09-05/phase_s1_quota_bypass_chain.md`](../../verifications/2026-09-05/phase_s1_quota_bypass_chain.md)
+  (판정 **조건부 합격**)의 B1·B2 를 닫고 비차단 H1~H3 을 반영한다.
+
+## Completed work
+
+커밋 `325ed79`(셀+정정) + v1.8.33 기록.
+
+- **B1 — TTL 하방 셀 2곳.** 검증 변이(86400→3600)가 0실패였던 자리: HTTP 셀
+  `test_the_replay_window_lasts_the_full_24_hours`(literal 핀 + **86399초 진행 후
+  재생 성공·provider 미재호출** — 창이 줄면 409 로 닫혀 실패) + 몽고 TTL 인덱스
+  셀의 literal 핀(하방·상방·`max(1,·)` 바닥 3점).
+- **B2 — 가짜 몽고 셀 6개.** `tests/test_quota_replay_mongo.py` 신규 4셀(TTL
+  인덱스 경계·round-trip·`_id` 축·같은 키 덮어쓰기) + `test_quota_ledger_mongo.py`
+  `has_usage` 2셀(세 축 각각 갈림 — 남의 회원·다른 동작·다른 키 전부 미일치,
+  조정 행은 미일치). fake `_Collection` 에 `find_one` 추가.
+- **H1~H3.** SoT v1.8.32 행 오기 2건 정정(산수 8→6·세션 8→9 — 당일 행의
+  정오판이자 검증이 "각 한 줄 정정"으로 지시한 것). §43H·`replay.py` 에 확인
+  재실행의 저장 응답 **덮어쓰기**(재생은 마지막 응답) 명시 — 저장소 셀
+  (`test_put_overwrites_the_stored_response_for_the_same_key`)이 그 의미를 잠금.
+  HANDOFF 함정에 "stored" 처분 신규 경로의 `.body` 요건 한 줄.
+
+## Verification
+
+- 포커스: `test_quota_enforcement_api.py` **45 passed / 236 subtests** ·
+  `test_quota_replay_mongo.py` 4 · `test_quota_ledger_mongo.py` **14(+2)** · 문서 가드 15/292.
+- **뮤테이션 3종 기명 재실패**(커밋 뒤 클린 트리):
+
+| # | 뮤테이션 | 재실패한 셀 |
+|---|---|---|
+| MB1 | `DEFAULT_REPLAY_TTL_SECONDS` 86400→3600(검증 N-c 재유도) | TTL 하방 HTTP 셀 + 몽고 literal 핀 **2 failed** |
+| MB2 | 재생 저장소 `create_index` 블록 제거 | 몽고 TTL 셀 **3 SUBFAILED**(경계 전 점) |
+| MB3 | `ledger_mongo.has_usage` 를 `False and …` 로 무력화 | 축 셀 **1 failed**(조정 행 셀은 과잉 방향 단정이라 green 유지가 정상) |
+
+- 전수 **2727 passed / 151 skipped / 3213 subtests / 0 failed**(260초, 라이브 Mongo
+  없음). 산수: 2720+7셀 · subtest 3206+7.
+- 검증 기록의 판정 열은 승격하지 않는다(S-3 폐쇄 선례) — 조건 소멸은 검증기록
+  Outstanding 의 정의대로 폐쇄 슬라이스 도달로 성립.
+
+## Next steps
+
+- **S-0 문서 스윕** 이 다음(오너 판정 대기 — 검증 기록도 "짧은 폐쇄 슬라이스로
+  묶든 S-0 에 끼워 넣든 무방" 이라고 봄). S-0 에는 `signup_attempts` 의
+  mongo_collections.md 미등재(S-3 부채)가 이미 기다리고 있다.
