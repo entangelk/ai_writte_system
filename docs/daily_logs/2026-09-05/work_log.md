@@ -768,3 +768,95 @@ Phase S 맨 앞에 잘못된 우선순위가 남을 뻔했다.
 - Phase S 남은 순서: **S-1 quota dedupe**(가입 열기 전 필수) → **S-0 문서 스윕** →
   **S-7 토큰 저장 방식** → 나머지 트리거. S-2(nginx 보안 헤더)는 nginx 앞단과 같은 슬라이스로 묶으면 싸다.
 - 로그인 IP 축(P-6 유예)은 `client_ip.py` 가 생겨 **남은 것이 정책 판단 하나**다.
+
+---
+
+# 세션 7 — Phase S-3 검증 조건 폐쇄(무셀 3종 셀 보강 + SoT 경로수 정정, v1.8.31)
+
+## Goals
+
+- 오너 지시: *"검증기록 확인해서 보강할 부분 보강해줘"* — 독립 검증
+  [`verifications/2026-09-05/phase_s3_signup_throttle.md`](../../verifications/2026-09-05/phase_s3_signup_throttle.md)
+  (판정 **조건부 합격**)의 B1~B4 를 닫는 폐쇄 슬라이스.
+- 성공 기준: ① B1·B2·B4 가 검증자 뮤테이션(M5·M6·TTL 제거 상당)에 **기명 재실패**하는 셀
+  ② B3 정정 후 살아있는 텍스트에 낡은 경로수 잔여 0건 ③ 전수 green ④ 기록 의무(work_log·
+  CHANGELOG·SoT 행·README 버전) 전부 이행.
+
+## Completed work
+
+커밋 `126bf42`(셀+주석 정정) · `a492751`(SoT v1.8.31·README·HANDOFF) + 본 기록.
+
+**B1 — 라우터 순서 잠금 셀**(`tests/test_signup_throttle.py`).
+`test_the_throttled_429_answers_before_the_hasher_runs`: 상한 2 로 201 두 번 → `hasher.calls == 2`
+(통과 요청은 해셔에 닿는다는 **과잉 방어 단정**) → 셋째 요청 429 뒤 `hasher.calls` 불변.
+기존 `_app()` 을 `_assemble()` 로만 분리(앱+해셔 함께 반환) — 기존 22셀 무변.
+
+**B2 — env 기동 거부 셀 7종**(같은 파일 `SignupEnvBootGuardTest`, `AUTH_SESSION_TTL_HOURS`
+선례 모양). 거부 6(두 축 0 이하·비정수, 신뢰 대역 깨진 CIDR·콤마만 남은 빈 목록) + 양성·배선 1
+(상한 1 의 둘째 consume 거부 + env 신뢰 대역 10.9/16 이 XFF 축에 실제로 닿는 것). `_boot()` 는
+네 키(세 env + `CORE_SOT_MONGO_URI`)를 clear-and-patch — 조립기가 Mongo 저장소를 만들러 가는
+경로를 셀과 무관하게 만든다.
+
+**B4 — `tests/test_auth_signup_guard_mongo.py` 신규 7셀**(다른 Mongo 저장소의 전용 파일 규범으로).
+TTL literal `expireAfterSeconds=max(86400, 창×24)` 경계 4점(60/3600/3601/7200 — `max` 의
+교차점 3600 과 그 한 초 뒤를 정확히 핀)·`_id`=발신 IP 축·naive BSON 재라벨링 3축·서비스 창 판정
+end-to-end.
+
+**B3 — 경로수 정정.** `BILLABLE_OPERATIONS` 실측 **11**. 살아있는 텍스트 6곳을 11 로:
+SoT 429행(본문·시행 열)·SoT Phase 2 현황 불릿("유료 10번째")·`errors.py` 주석("유료 9경로에만")·
+`billable_actions.py` 주석("현재 유료 10경로")·quota 가드 헤더 4곳("유료 9경로")·HANDOFF
+Slice 5 검증 축("유료 10번째 경로"). **패턴 스윕 추가 발견 2건**(검증기록 B3·H3 이 못 짚은 것):
+`billable_actions.py:25`·SoT Phase 2 불릿 — blame 모두 09-04 이후(이미 11경로인 시점)의 우발적
+오기로 확인(`ea55474`·`fad29c51`), 정정 대상.
+
+## Issues found
+
+- **문제(검증 B3의 뿌리)**: 09-01 `832089b`(finalize 등재, 10→11) 때 SoT 서술을 안 올린
+  선결함이 이후 모든 서술에 복제됐다 — v1.8.29 행"9→10"·검증 지적 4곳·패턴 스윕 2곳.
+  **처리**: 살아있는 텍스트는 전부 정정. 낡은 개수가 구조적으로 재발하는 통로라서, 바꾼 자리 중
+  SoT 429행은 이미 목록(`BILLABLE_OPERATIONS`)을 가리키는 구조라 수 갱신 부담이 없다.
+- **남기는 것(오너 판단)**: v1.8.29 변경이력 행의 "유료 9→10경로" 소급 정정 여부.
+  검증 H3 이 오너 판단으로 명시. 이 슬라이스는 **소급하지 않았다** — 변경이력 행은 날짜 있는
+  역사 기록이고 v1.7.88·v1.7.89 의 "유료 9경로"도 당시 값 그대로 남아 있는 선례.
+
+## User Decisions and Rationale
+
+- 오너 지시로 폐쇄 범위는 **검증기록의 조건 그대로**(셀 3종 + 경로수)로 좁혔다. 검증 비차단
+  H1(172.16/12 의 이웃 컨테이너 여지)·H2(두 429 detail 문구)는 이 슬라이스에서 만지지
+  않았다 — H1 은 Follow-up 등재 여부, H2 는 오너 취향 사안이다.
+
+## Verification
+
+- 포커스: `tests/test_signup_throttle.py`+`tests/test_auth_signup_guard_mongo.py` **37 passed /
+  8 subtests**. 문서 가드 **15 passed / 292 subtests**(세션 6 의 291 + 검증기록 등재분 1).
+- 전수 `python3 -m pytest tests/ -q` → **2693 passed / 151 skipped / 3196 subtests / 0 failed**
+  (240.27초, 라이브 Mongo 없음). 산수: 2678+15셀 · subtest 3187+8(신규)+1(기록 등재).
+- 프론트·`gen:api` 무변 — 이 슬라이스는 API 표면(라우트·모델·선언)을 하나도 안 바꿨다.
+- **뮤테이션 9종 전부 기명 재실패**(커밋 `126bf42` 위 클린 트리에서 Edit→실행→
+  `git checkout --`→`git status --short` 공백 확인):
+
+| # | 뮤테이션(적용 diff·위치) | 재실패한 셀 |
+|---|---|---|
+| MU1 | `routers/auth.py` signup 핸들러 — throttle 블록(resolve+consume+429)을 `request_signup` try/except 뒤·return 직전으로 **이동**(검증 M5 재유도) | `..._the_throttled_429_answers_before_the_hasher_runs` 1 failed |
+| MU2 | `main.py` max 축 `if parsed <= 0: raise` → `parsed = DEFAULT_MAX_REQUESTS`(검증 M6 재유도) | `..._a_non_positive_max_requests_refuses_to_start` SUBFAILED(raw='0'·'-1') |
+| MU3 | 같은 자리 window 축 `raise` → `parsed = DEFAULT_WINDOW_SECONDS` | `..._a_non_positive_window_refuses_to_start` SUBFAILED(raw='0'·'-60') |
+| MU4 | 과잉 방향 — max 축 `parsed <= 0` → `parsed <= 1`(정상값 1 까지 거부) | `..._valid_values_boot_and_wire_through` 1 failed |
+| MU5 | `signup_guard_mongo.py` `create_index(...)` 블록 전체 제거 | `..._declares_the_ttl_index_...` SUBFAILED 4점 전부 |
+| MU6 | `expireAfterSeconds=max(바닥, 창×24)` → `창×24`(바닥 제거 — 60s 창에서 1440초, 인덱스가 서비스보다 먼저 행을 지움) | 같은 셀 SUBFAILED(window_seconds=60) 1점만 |
+| MU7 | → `_TTL_FLOOR_SECONDS` 상수만(곱 제거) | 같은 셀 SUBFAILED(3601·7200) 2점 |
+| MU8 | `_aware` 본문 → `return value`(재라벨링 제거) | `NaiveBsonDatetimeTest` 3 failed(utc_aware·no_shift·service_judges) — passthrough 셀만 green, 이는 과잉 방향 단정이라 의도 |
+| MU9 | `main.py` 빈 CIDR 목록 `raise ValueError(...)` 제거 | `..._an_all_blank_trusted_list_refuses_to_start` 1 failed |
+
+- 살아있는 텍스트 잔여 스윕: `grep "유료 9경로\|유료 10경로\|10번째 경로"` → 변경이력 행
+  (v1.7.88·v1.7.89·v1.8.29)과 날짜 있는 브리프(08-3·08-4·08-5·09-1·08-2b·identity-group
+  페이즈 문서)만 남음 — 전부 집필 시점 기준 참(또는 소급 여부가 오너 판단인 역사 기록).
+
+## Next steps
+
+- **오너 확인(작음)**: v1.8.29 변경이력 행 "유료 9→10경로" 소급 정정 여부(권고: 안 함 —
+  역사 기록 선례).
+- Phase S 순서 불변: **S-1(quota dedupe) → S-0(문서 스윕) → S-7(토큰 저장)**. 낡은 vhost 도
+  여전히 오너 확인 항목.
+- 이 슬라이스는 검증 판정 열을 승격하지 않는다(Slice 0~4·v1.8.28 선례) — 조건 소멸 확인은
+  검증기록의 Outstanding 정의대로 폐쇄 슬라이스 도달로 성립하고, 재검이 필요하면 다음 독립
+  세션이 한다.
