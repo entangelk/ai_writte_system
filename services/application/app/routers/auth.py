@@ -30,6 +30,7 @@ from ..api.errors import (
 from ..auth.users import (
     DuplicateUsername,
     InvalidUserInput,
+    SignupQueueFull,
     USER_STATUS_PENDING,
     USER_STATUS_REJECTED,
 )
@@ -41,7 +42,8 @@ from ..api.dependencies import (
 from services.application.app.quota.enforcement import QuotaEnforcementService
 
 
-def register_auth(app, *, users, sessions, core_sot, activity, login_guard) -> None:
+def register_auth(app, *, users, sessions, core_sot, activity, login_guard,
+                  signup_throttle, client_ip_resolver) -> None:
     # --- Auth (multi-user D8) ---------------------------------------------
     # D8-3a: authentication is now enforced. Every operation except /health and
     # the three below declares ``dependencies=_REQUIRE_AUTH``, so a sessionless
@@ -67,17 +69,40 @@ def register_auth(app, *, users, sessions, core_sot, activity, login_guard) -> N
 
     @app.post("/auth/signup", status_code=201, response_model=SignupResponse,
               responses=_ERRORS_SIGNUP)
-    async def signup(request: SignupRequest) -> dict[str, object]:
+    async def signup(
+        request: SignupRequest, http_request: Request
+    ) -> dict[str, object]:
         # Public by design (owner 2026-08-22): requesting an account is how an
         # account begins to exist. What the request *grants* is nothing — the
         # row is pending and no session can be issued against it until an
         # administrator approves (1-d).
+        #
+        # Phase S-3 (owner 2026-09-05, option C): what the request *costs* was
+        # the hole. Argon2 (t=3·m=64MiB·p=4) runs before any approval and the
+        # deployed app is a single uvicorn worker, so an unauthenticated caller
+        # could stall the whole service without ever holding an account. The
+        # throttle answers **before** `request_signup` so a refused attempt
+        # never reaches the hasher — that cheapness is the entire defense.
+        client_ip = client_ip_resolver.resolve(
+            peer=http_request.client.host if http_request.client else None,
+            forwarded_for=http_request.headers.get("x-forwarded-for"),
+        )
+        retry_after = signup_throttle.consume(client_ip)
+        if retry_after is not None:
+            raise HTTPException(
+                status_code=429,
+                detail="too many signup requests",
+                headers={"Retry-After": str(retry_after)},
+            )
         try:
             user = users.request_signup(
                 username=request.username, password=request.password
             )
         except DuplicateUsername as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except SignupQueueFull as exc:
+            # Same 429 face as the throttle above (S-3): "not now" either way.
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
         except InvalidUserInput as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"username": user.username, "status": user.status}

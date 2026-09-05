@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from services.application.app.auth.client_ip import ClientIpResolver
     from services.application.app.auth.login_guard import LoginFailureGuard
+    from services.application.app.auth.signup_guard import SignupThrottle
 
 import os
 import uuid
@@ -516,6 +518,67 @@ def _default_login_failure_guard() -> "LoginFailureGuard":
         repository,
         max_failures=max_failures,
         lockout=timedelta(seconds=lockout_seconds),
+    )
+
+
+def _default_client_ip_resolver() -> "ClientIpResolver":
+    # Phase S-3 (owner 2026-09-05). The trusted set is where an IP-axis guard
+    # silently dies: too wide and anyone picks their own bucket by sending a
+    # header, too narrow and everyone behind the proxy shares one. So a broken
+    # value refuses to start rather than defaulting to "trust nobody", which
+    # looks identical in the logs to a working guard.
+    from services.application.app.auth.client_ip import (
+        ClientIpResolver, DEFAULT_TRUSTED_PROXY_CIDRS,
+    )
+    raw = os.environ.get("AUTH_TRUSTED_PROXY_CIDRS")
+    if not raw:
+        return ClientIpResolver(DEFAULT_TRUSTED_PROXY_CIDRS)
+    cidrs = tuple(part.strip() for part in raw.split(",") if part.strip())
+    if not cidrs:
+        raise ValueError("AUTH_TRUSTED_PROXY_CIDRS must name at least one CIDR")
+    return ClientIpResolver(cidrs)
+
+
+def _default_signup_throttle() -> "SignupThrottle":
+    # Same posture as _default_login_failure_guard: malformed/negative values
+    # refuse to start. A throttle that quietly became "no throttle" is worse
+    # than no throttle, because the surface it guards is the one an
+    # unauthenticated caller can reach without holding an account at all.
+    from services.application.app.auth.signup_guard import (
+        DEFAULT_MAX_REQUESTS, DEFAULT_WINDOW_SECONDS,
+        InMemoryAttemptRecordRepository, SignupThrottle,
+    )
+    max_requests = DEFAULT_MAX_REQUESTS
+    raw_max = os.environ.get("AUTH_SIGNUP_MAX_REQUESTS")
+    if raw_max:
+        parsed = int(raw_max)
+        if parsed <= 0:
+            raise ValueError("AUTH_SIGNUP_MAX_REQUESTS must be > 0")
+        max_requests = parsed
+    window_seconds = DEFAULT_WINDOW_SECONDS
+    raw_window = os.environ.get("AUTH_SIGNUP_WINDOW_SECONDS")
+    if raw_window:
+        parsed = int(raw_window)
+        if parsed <= 0:
+            raise ValueError("AUTH_SIGNUP_WINDOW_SECONDS must be > 0")
+        window_seconds = parsed
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if uri:
+        from services.application.app.auth.signup_guard_mongo import (
+            MongoAttemptRecordRepository,
+        )
+        from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+        repository = MongoAttemptRecordRepository.from_uri(
+            uri,
+            db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME),
+            window_seconds=window_seconds,
+        )
+    else:
+        repository = InMemoryAttemptRecordRepository()
+    return SignupThrottle(
+        repository,
+        max_requests=max_requests,
+        window=timedelta(seconds=window_seconds),
     )
 
 
@@ -1728,6 +1791,8 @@ def create_app(
     user_service: UserService | None = None,
     session_service: SessionService | None = None,
     login_failure_guard: "LoginFailureGuard | None" = None,
+    signup_throttle: "SignupThrottle | None" = None,
+    client_ip_resolver: "ClientIpResolver | None" = None,
     access_grant_service: AccessGrantService | None = None,
     admin_audit_service: AdminAuditService | None = None,
     project_name_history_service: ProjectNameHistoryService | None = None,
@@ -2055,7 +2120,10 @@ def create_app(
     if include_product:
         register_auth(app, users=users, sessions=sessions,
                       core_sot=core_sot, activity=activity,
-                      login_guard=login_failure_guard or _default_login_failure_guard())
+                      login_guard=login_failure_guard or _default_login_failure_guard(),
+                      signup_throttle=signup_throttle or _default_signup_throttle(),
+                      client_ip_resolver=(
+                          client_ip_resolver or _default_client_ip_resolver()))
 
     if include_admin:
         register_admin(

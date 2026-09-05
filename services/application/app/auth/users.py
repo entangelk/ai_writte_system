@@ -38,6 +38,16 @@ class SignupNotPending(AuthError):
     """
 
 
+class SignupQueueFull(AuthError):
+    """The pending-approval queue is at its ceiling (Phase S-3, 2026-09-05).
+
+    Answered as 429, the same face as the per-IP throttle: from the requester's
+    side both mean "not now, try later", and neither is a statement about their
+    username or password. Distinguishing them in the response would only tell a
+    flooder which bound they hit.
+    """
+
+
 class UserNotFound(AuthError):
     pass
 
@@ -55,6 +65,25 @@ class LastActiveAdmin(AuthError):
 # choose. A contract literal — changing it is a deliberate edit, and the
 # regression pins it.
 MIN_PASSWORD_LENGTH = 12
+
+# Phase S-3 (owner 2026-09-05). The public signup body had **no upper bound** on
+# either field, so a multi-megabyte username was a Mongo document and a
+# multi-megabyte password was Argon2 input — the same request cost, amplified
+# by whatever the caller felt like sending (audit §A.11-(3)). Enforced here and
+# not on the pydantic model on purpose: the model would answer 422, while every
+# other signup policy refusal is a 400 (`InvalidUserInput`), and a screen that
+# has to branch on two shapes of "your input is wrong" gets one of them wrong.
+MAX_USERNAME_LENGTH = 64
+MAX_PASSWORD_LENGTH = 256
+
+# Phase S-3. The IP throttle bounds one sender; this bounds the *queue*. Pending
+# rows grant nothing and carry no TTL, so without a ceiling a distributed caller
+# could still bury the approval list an administrator has to read (audit
+# §A.11-(2)). A contract literal like MIN_PASSWORD_LENGTH above — 200 is a list
+# a person can still scroll, and changing it is a deliberate edit the regression
+# pins. Deliberately *not* an env knob: a deployment that quietly raised it
+# would make the queue unreadable without any signal that it had.
+MAX_PENDING_SIGNUPS = 200
 
 # Signup approval statuses (owner 2026-08-22 — plans/auth-signup-approval-decisions.md).
 USER_STATUS_PENDING = "pending"
@@ -208,9 +237,19 @@ class UserService:
         username = username.strip()
         if not username:
             raise InvalidUserInput("username is required")
+        # S-3: the two upper bounds come *before* the hasher and before the
+        # store, because they exist to bound what those two are asked to chew.
+        if len(username) > MAX_USERNAME_LENGTH:
+            raise InvalidUserInput(
+                f"username must be at most {MAX_USERNAME_LENGTH} characters"
+            )
         if len(password) < MIN_PASSWORD_LENGTH:
             raise InvalidUserInput(
                 f"password must be at least {MIN_PASSWORD_LENGTH} characters"
+            )
+        if len(password) > MAX_PASSWORD_LENGTH:
+            raise InvalidUserInput(
+                f"password must be at most {MAX_PASSWORD_LENGTH} characters"
             )
         existing = self._repo.get_by_username(username)
         if existing is not None:
@@ -234,6 +273,15 @@ class UserService:
             )
             self._repo.replace(replacement)
             return replacement
+        # S-3 queue ceiling. Only the *new row* path is capped: the re-request
+        # branch above needs a rejected username the caller already knows, so it
+        # cannot be a flood vector, and refusing it would turn the ceiling into
+        # a way to permanently ban whoever was rejected last. Checked before the
+        # hasher runs, like every other refusal on this path.
+        if len(self._repo.list_pending()) >= MAX_PENDING_SIGNUPS:
+            raise SignupQueueFull(
+                "too many pending signup requests; try again later"
+            )
         user = User(
             id=self._id_factory(),
             username=username,

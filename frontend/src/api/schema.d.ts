@@ -4413,6 +4413,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
             /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
             503: {
                 headers: {

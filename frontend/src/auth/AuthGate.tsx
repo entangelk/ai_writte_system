@@ -356,8 +356,16 @@ function LoginScreen({
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         setError("이미 사용 중인 아이디입니다. 다른 아이디를 사용해 주세요.");
+      } else if (err instanceof ApiError && err.status === 429) {
+        // Phase S-3(2026-09-05): 발신 축 레이트리밋과 승인 대기열 상한이 같은
+        // 429 를 쓴다 — 둘을 구분해 알려 주면 홍수를 보내는 쪽에 어느 상한에
+        // 걸렸는지를 알려 주게 되므로, 화면도 한 문구로 답한다.
+        setError("가입 요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.");
       } else if (err instanceof ApiError && err.status === 400) {
-        setError("요청 내용을 확인해 주세요. 비밀번호는 12자 이상이어야 합니다.");
+        setError(
+          "요청 내용을 확인해 주세요. 비밀번호는 12자 이상 256자 이하, " +
+          "아이디는 64자 이하여야 합니다."
+        );
       } else {
         setError("가입 요청을 보내지 못했습니다. 잠시 후 다시 시도해 주세요.");
       }

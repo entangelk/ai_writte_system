@@ -13,7 +13,8 @@ route 객체에서 dependency 신원을 보고, ``test_billable_actions.py`` 가
 실제 라우트와 대조한다. 여기서 새로 강제하는 것 넷 —
 ① 유료 9경로가 시행 dependency 를 **소유권 뒤에** 달고 있다
 ② 무료 경로에는 없다
-③ 유료 9경로가 402·429 를 선언한다(무료는 안 한다)
+③ 유료 9경로가 402·429 를 선언한다(무료는 안 한다 — 429 는 ``THROTTLED_OPERATIONS``
+   에 **등재된** 두 번째 생산자만 예외이고, 402 는 예외가 없다)
 ④ 유료 9경로가 확인 헤더를 **선언한다**(Q6=C — 헤더는 쿼리보다 안 보이는 통로라
    "한 경로만 확인을 무시하는" 드리프트가 조용하다).
 """
@@ -78,6 +79,16 @@ from tests.test_writing import (
     _package,
     _service,
 )
+
+# 429 의 **두 번째 생산자**(Phase S-3, 오너 2026-09-05). 이 시스템에서 429 는
+# 8.3 이래로 quota 한 뜻이었고 위 가드 ③이 "유료 9경로에만"을 강제해 왔다.
+# 공개 signup 의 발신 IP 축 레이트리밋은 한도가 아니라 **비용 상한**이라 같은
+# 상태코드를 다른 뜻으로 쓴다 — 403 이 소유권·관리자·가입상태 셋을 갖게 된 것과
+# 같은 취급이라, 조용히 통과시키지 않고 **여기 등재**한다. 목록이 늘어나는 것은
+# 이 줄을 고치는 의도적 편집이어야 한다(아래 두 셀이 양방향으로 잠근다).
+THROTTLED_OPERATIONS: frozenset[tuple[str, str]] = frozenset({
+    ("/auth/signup", "post"),
+})
 
 _USER = User(
     id="quota-user",
@@ -590,8 +601,28 @@ class BillableRouteWiringTest(unittest.TestCase):
                 else:
                     # over-strict: 무료 경로에 quota 얼굴이 선언되면 프론트가
                     # 있지도 않은 한도를 다루게 된다.
+                    # 402 에는 예외가 없다 — 등재된 429 생산자도 **한도를 팔지
+                    # 않는다**. 여기서 402 까지 풀면 "무료인데 결제를 요구하는
+                    # 경로"가 조용히 생길 수 있다.
                     self.assertNotIn("402", declared)
-                    self.assertNotIn("429", declared)
+                    if (path, method) not in THROTTLED_OPERATIONS:
+                        self.assertNotIn("429", declared)
+
+    def test_the_second_429_producer_stays_exactly_one_operation(self):
+        """등재된 429 생산자 목록이 실제 선언과 정확히 일치한다.
+
+        under-strict: signup 에서 429 선언이 사라지면(= S-3 스로틀이 계약에서
+        빠지면) 실패한다. over-strict: 다른 무료 경로가 429 를 얻으면 위
+        가드가 아니라 **이 셀**이 먼저 실패해서, 예외 목록에 한 줄 더하는 것이
+        의도적 편집이 되게 만든다.
+        """
+        actually_declared = {
+            (path, method)
+            for (path, method), _route in self._operations()
+            if (path, method) not in BILLABLE_OPERATIONS
+            and "429" in self.spec["paths"][path][method]["responses"]
+        }
+        self.assertEqual(actually_declared, THROTTLED_OPERATIONS)
 
     def test_every_billable_operation_accepts_the_confirm_header(self):
         # Q6=C 전수 가드. 헤더는 쿼리보다 안 보이는 통로라 한 경로만 확인을
