@@ -136,7 +136,9 @@ def make_client(runner):
     draft = client.post(
         f"/projects/{project['id']}/drafts",
         json={"title": "Episode 1", "chapter_id": chapter["id"]}).json()
-    return client, project["id"], draft["id"]
+    # S-1(2026-09-05): analysis 서비스를 함께 돌려준다 — S12 가 재시도 쿨다운을
+    # 지난 상태로 만들려면 실패 행의 failed_at 을 되돌려야 하기 때문이다.
+    return client, project["id"], draft["id"], analysis
 
 
 def main():
@@ -145,7 +147,7 @@ def main():
 
     # --- S1 happy path (fresh app so runner state is clean).
     runner = SucceedingRunner()
-    client, pid, did = make_client(runner)
+    client, pid, did, _analysis = make_client(runner)
     response = client.post(
         f"/projects/{pid}/drafts/{did}/finalize",
         json={"raw_text": "민아는 밤에 일기를 쓴다.", "idempotency_key": "final-key-1"})
@@ -213,7 +215,7 @@ def main():
 
     # --- S6 D5=A: runner failure is analysis state, never a 502 save failure.
     runner6 = ExplodingRunner()
-    client6, pid6, did6 = make_client(runner6)
+    client6, pid6, did6, analysis6 = make_client(runner6)
     response = client6.post(
         f"/projects/{pid6}/drafts/{did6}/finalize",
         json={"raw_text": "결말 장면.", "idempotency_key": "final-key-6"})
@@ -235,6 +237,13 @@ def main():
     failed_job_id = body6["analysis_job"]["id"]
 
     # --- S12 the failed job can be re-armed through the manual retry route.
+    # S-1 D2(2026-09-05): 재시도에는 이제 쿨다운(60s)이 있으므로, 이 검사는
+    # 쿨다운을 ** 지난** 상태에서 재현한다(쿨다운 안의 429 는 별도 셀이 잠근다).
+    from dataclasses import replace as _replace
+    from datetime import UTC as _UTC, datetime as _datetime, timedelta as _timedelta
+    _failed = analysis6.repository.get_job(failed_job_id)
+    analysis6.repository.update_job(_replace(
+        _failed, failed_at=_datetime.now(_UTC) - _timedelta(seconds=61)))
     retried = client6.post(
         f"/projects/{pid6}/analysis/jobs/{failed_job_id}/retry")
     check("S12 retry status", 200, retried.status_code)
@@ -242,7 +251,7 @@ def main():
           retried.json().get("status"))
 
     # --- S7 runner unconfigured (None) — the 0922a24 fix.
-    client7, pid7, did7 = make_client(None)
+    client7, pid7, did7, _analysis7 = make_client(None)
     response = client7.post(
         f"/projects/{pid7}/drafts/{did7}/finalize",
         json={"raw_text": "또 다른 결말.", "idempotency_key": "final-key-7"})
@@ -281,7 +290,7 @@ def main():
     check("S9 rejection face is 422", 422, final_too_long.status_code)
 
     # --- S10 archived project.
-    client10, pid10, did10 = make_client(SucceedingRunner())
+    client10, pid10, did10, _analysis10 = make_client(SucceedingRunner())
     client10.delete(f"/projects/{pid10}")
     response = client10.post(
         f"/projects/{pid10}/drafts/{did10}/finalize",
