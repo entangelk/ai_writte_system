@@ -148,7 +148,7 @@ _ERRORS_LOGOUT: dict[int | str, dict] = {503: _STORAGE_503}
 # under the same envelope as every other auth write).
 #
 # 429 는 Phase S-3(오너 2026-09-05)이 더했다. 이 시스템에서 429 의 기존 생산자는
-# quota 뿐이라 "유료 9경로에만 429" 가드가 서 있었는데, 여기서 429 는 **한도가
+# quota 뿐이라 "유료 11경로에만 429" 가드가 서 있었는데, 여기서 429 는 **한도가
 # 아니라 발신 IP 축 레이트리밋**이다 — 403 이 소유권·관리자·가입상태 셋을 갖게
 # 된 것과 같은, 등재된 두 번째 생산자다. 가드의 예외는
 # ``tests/test_quota_enforcement_api.py`` 의 ``THROTTLED_OPERATIONS`` 에 있다.

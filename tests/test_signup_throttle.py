@@ -15,11 +15,21 @@ Argon2(t=3·m=64MiB·p=4)를 태우고, 앱은 단일 uvicorn 워커라 요청 �
    막힌 요청이 창을 **연장하지 않는다**는 것까지 잰다(연장하면 두드리는 동안
    정직한 재시도자가 영구히 못 들어온다).
 ③ 입력 상한과 대기열 상한 — 둘 다 **해셔 앞**에서 거절된다.
+
+독립 검증(2026-09-05, 조건부 합격)이 축 넷을 더 달라고 해서 달았다(B1·B2 폐쇄):
+
+④ **라우터 순서** — 서비스 레벨 거절의 해셔-미달(③)과 달리, IP 스로틀의 429 가
+   ``request_signup`` **앞**에서 나는 것은 핸들러 배선의 계약이다. 순서를 뒤집는
+   변이(감사 §A.5 원결함의 재등장)가 전수 2678 을 통과했던 것이 차단 B1 이었다.
+⑤ **env 기동 거부** — ``AUTH_SIGNUP_MAX_REQUESTS`` 등 브리프 literal 표에 올라간
+   거부가 테스트 참조 0건이었던 것이 차단 B2 다.
 """
 
 from __future__ import annotations
 
+import os
 import unittest
+import unittest.mock
 from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
@@ -292,21 +302,30 @@ class SignupQueueCeilingTest(unittest.TestCase):
 
 # ── HTTP 계약 ───────────────────────────────────────────────────────────────
 
-def _app(*, max_requests: int = 2, window_seconds: int = 60):
-    users = UserService(InMemoryUserRepository(), hasher=_CountingHasher())
+def _assemble(*, max_requests: int = 2, window_seconds: int = 60):
+    """앱과 그 안에 든 해셔를 함께 돌려준다 — ④ 축의 단정 재료다."""
+    hasher = _CountingHasher()
+    users = UserService(InMemoryUserRepository(), hasher=hasher)
     sessions = SessionService(InMemorySessionRepository(), ttl=timedelta(hours=1))
     throttle = SignupThrottle(
         InMemoryAttemptRecordRepository(),
         max_requests=max_requests,
         window=timedelta(seconds=window_seconds),
     )
-    return create_app(
+    app = create_app(
         user_service=users,
         session_service=sessions,
         signup_throttle=throttle,
         # 테스트 클라이언트의 peer 를 신뢰 대역으로 잡아 XFF 축을 실제로 태운다.
         client_ip_resolver=ClientIpResolver(("172.16.0.0/12", "127.0.0.0/8")),
     )
+    return app, hasher
+
+
+def _app(*, max_requests: int = 2, window_seconds: int = 60):
+    return _assemble(
+        max_requests=max_requests, window_seconds=window_seconds
+    )[0]
 
 
 class SignupThrottleHttpTest(unittest.TestCase):
@@ -401,6 +420,40 @@ class SignupThrottleHttpTest(unittest.TestCase):
             429,
         )
 
+    def test_the_throttled_429_answers_before_the_hasher_runs(self) -> None:
+        """④ 라우터 순서 — IP 스로틀의 429 는 ``request_signup`` 앞에서 낸다.
+
+        독립 검증 B1 폐쇄. 이 순서가 슬라이스의 핵심 계약인데(거절이 해셔에
+        닿지 않는 것이 이 가드의 전부다) 서비스 레벨 상한 셀들은 입력·대기열
+        거절의 해셔-미달만 잠그고 있었다 — 스로틀 블록을 ``request_signup``
+        뒤로 옮기는 변이가 전수 2678 을 통과했다.
+
+        under-strict: 순서를 뒤집으면(429 를 확정하기 전에 Argon2 와 pending 행
+        생성이 실행된다 — 감사 §A.5 원결함의 재등장) 마지막 단정이 실패한다.
+        over-strict: 통과 요청까지 해셔를 못 가게 하는 과잉은 ``before == 2``
+        단정이 실패하게 한다.
+        """
+        app, hasher = _assemble(max_requests=2)
+        client = self._client(app, "203.0.113.9")
+        for index in range(2):
+            self.assertEqual(
+                client.post(
+                    "/auth/signup",
+                    json={"username": f"n{index}", "password": "long-enough-pw"},
+                ).status_code,
+                201,
+            )
+        before = hasher.calls
+        # 통과된 두 요청은 각각 해셔에 닿았다 — "거절만 잡는" 공허한 셀이 되지
+        # 않게 하는 과잉 방어 단정이다.
+        self.assertEqual(before, 2)
+        refused = client.post(
+            "/auth/signup", json={"username": "n2", "password": "long-enough-pw"}
+        )
+        self.assertEqual(refused.status_code, 429)
+        # 거절은 해셔 앞이다. 뒤로 밀리면 이 요청의 Argon2 가 이미 끝나 있다.
+        self.assertEqual(hasher.calls, before)
+
     def test_the_input_bounds_answer_400_not_422(self) -> None:
         """정책 거절은 한 얼굴이어야 한다.
 
@@ -418,6 +471,97 @@ class SignupThrottleHttpTest(unittest.TestCase):
                 },
             ).status_code,
             400,
+        )
+
+
+# ── ⑤ env 기동 거부 (독립 검증 B2 폐쇄) ─────────────────────────────────────
+
+class SignupEnvBootGuardTest(unittest.TestCase):
+    """브리프 literal 표의 "파싱 실패·0 이하는 기동 거부"를 잠그는 셀.
+
+    SoT v1.8.30 이 등재했지만 테스트 참조가 0건이었다 — 검증 뮤테이션이 가드를
+    지워도 아무 셀이 안 물었다. 조용히 "no throttle" 로 기동하는 것이 no throttle
+    보다 나쁘다는 것이 이 literal 의 존재 이유다. ``AUTH_SESSION_TTL_HOURS``
+    선례(2026-08-08 같은 구멍, 2026-08-22 폐쇄)와 같은 모양이다.
+
+    under-strict: 거부 분기를 지우면 아래 다섯 셀이 실패한다.
+    over-strict: 정상 값까지 거부하면(형식 검사 과잉) 양성 셀이 실패한다.
+    """
+
+    # CORE_SOT_MONGO_URI 까지 비우는 이유: 조립기가 이 값을 보면 Mongo 저장소를
+    # 만들러 가므로, 셀의 대상(env 거부)과 무관한 실패가 섞이지 않게 한다.
+    _CLEARABLE = (
+        "AUTH_SIGNUP_MAX_REQUESTS",
+        "AUTH_SIGNUP_WINDOW_SECONDS",
+        "AUTH_TRUSTED_PROXY_CIDRS",
+        "CORE_SOT_MONGO_URI",
+    )
+
+    def _boot(self, **overrides):
+        from services.application.app.main import (
+            _default_client_ip_resolver,
+            _default_signup_throttle,
+        )
+        env = {
+            key: value for key, value in os.environ.items()
+            if key not in self._CLEARABLE
+        }
+        env.update(overrides)
+        with unittest.mock.patch.dict(os.environ, env, clear=True):
+            return (
+                _default_signup_throttle(),
+                _default_client_ip_resolver(),
+            )
+
+    def test_a_non_positive_max_requests_refuses_to_start(self) -> None:
+        for raw in ("0", "-1"):
+            with self.subTest(raw=raw):
+                with self.assertRaises(ValueError):
+                    self._boot(AUTH_SIGNUP_MAX_REQUESTS=raw)
+
+    def test_a_non_integer_max_requests_refuses_to_start(self) -> None:
+        with self.assertRaises(ValueError):
+            self._boot(AUTH_SIGNUP_MAX_REQUESTS="five")
+
+    def test_a_non_positive_window_refuses_to_start(self) -> None:
+        for raw in ("0", "-60"):
+            with self.subTest(raw=raw):
+                with self.assertRaises(ValueError):
+                    self._boot(AUTH_SIGNUP_WINDOW_SECONDS=raw)
+
+    def test_a_non_integer_window_refuses_to_start(self) -> None:
+        with self.assertRaises(ValueError):
+            self._boot(AUTH_SIGNUP_WINDOW_SECONDS="hour")
+
+    def test_a_malformed_trusted_cidr_refuses_to_start(self) -> None:
+        with self.assertRaises(ValueError):
+            self._boot(AUTH_TRUSTED_PROXY_CIDRS="127.0.0.0/8, not-a-cidr")
+
+    def test_an_all_blank_trusted_list_refuses_to_start(self) -> None:
+        # 값은 있는데 항목이 없다 — 비었다고 기본 대역으로 조용히 떨어지면
+        # "신뢰 대역이 비었다"와 정상 기동이 로그로 구분되지 않는다.
+        with self.assertRaises(ValueError):
+            self._boot(AUTH_TRUSTED_PROXY_CIDRS=" , ")
+
+    def test_valid_values_boot_and_wire_through(self) -> None:
+        """양성 대조 — 거부 셀들이 정상 값을 잡아먹지 않는다는 증명.
+
+        아울러 값이 실제로 스로틀·해석기에 닿는다: 상한 1 은 두 번째 consume 를
+        막아야 하고, env 로 준 신뢰 대역(기본값엔 없는 10.9/16)을 peer 가 통과하면
+        XFF 의 오른쪽 값을 축으로 읽는다.
+        """
+        throttle, resolver = self._boot(
+            AUTH_SIGNUP_MAX_REQUESTS="1",
+            AUTH_SIGNUP_WINDOW_SECONDS="60",
+            AUTH_TRUSTED_PROXY_CIDRS="10.9.0.0/16, 127.0.0.0/8",
+        )
+        self.assertIsNone(throttle.consume("203.0.113.9"))
+        self.assertIsNotNone(throttle.consume("203.0.113.9"))
+        self.assertEqual(
+            resolver.resolve(
+                peer="10.9.0.5", forwarded_for="203.0.113.9, 10.9.0.1"
+            ),
+            "203.0.113.9",
         )
 
 

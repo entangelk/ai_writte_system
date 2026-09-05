@@ -22,7 +22,7 @@
   여는가"이며, 그 기준에 대해서는 가드가 기계적으로 판정한다. **다만 그것이
   "provider를 부르는 route는 반드시 잡힌다"를 뜻하지는 않는다** — scope를 아예 열지
   않는 route는 관측도 분류도 비껴간다(``ObservedProvider.generate``가 scope 없는
-  호출을 미기록 통과시키는 것은 worker·script를 위한 계약이다). 현재 유료 10경로는
+  호출을 미기록 통과시키는 것은 worker·script를 위한 계약이다). 현재 유료 11경로는
   per-endpoint 관측 셀로 덮여 있고(``BillableActionObservabilityCoverageTest``),
   남은 것은 관습 위반 미래 route에 대한 잔존 한계다(2026-08-03 독립 검증 H1,
   HANDOFF 추적 부채). 임베딩·색인(색인 rebuild·재색인 outbox·색인 worker)은 이번
