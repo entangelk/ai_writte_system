@@ -33,6 +33,13 @@ Slice 1(오너 C 채택, 2026-09-02). 후보 하나를 기준으로 같은 proje
   ``closed`` 그룹은 이후 소속 판정에서 제외되므로 두 그룹이 다시 갈라지지
   않는다.
 - relation의 ``source`` 리터럴은 ``identity_judge``다.
+- **run당 판정 상한**(S-1 D3, 오너 2026-09-05): 한 run 이 새로 판정하는 pair 는
+  ``DEFAULT_MAX_NEW_RELATIONS_PER_RUN``(20)을 넘지 못한다. 같은 이름의
+  ``needs_review`` 풀이 run마다 누적되면 run 1회의 과금으로 수백 쌍의 판정이
+  팬아웃됐다(감사 §A.4). 초과분은 **이월**이다 — relation 이 없는 쌍은 그 한쪽이
+  다시 focal 로 기록되는 다음 run(재분석 트리거)의 shortlist에서 다시 선정된다.
+  상한은 지연이지 폐기가 아니다; 다만 양쪽 다 다시 기록되지 않으면 그 쌍은
+  relation 없이 남는다(판정 이전 상태 그대로 — 그룹 병합만 늦어진다).
 """
 
 from __future__ import annotations
@@ -55,6 +62,18 @@ from services.application.app.analysis.models import (
 )
 from services.application.app.analysis.repository import AnalysisRepository
 from services.application.app.memory.scope import normalize_name
+
+#: S-1 D3(오너 2026-09-05 = 지금 시행). run 하나가 새로 판정할 수 있는 pair 수.
+#: 판정은 성공 경로 뒤·격리 경계 안이라 상한을 걸어도 run 결과는 무변이다.
+DEFAULT_MAX_NEW_RELATIONS_PER_RUN = 20
+
+
+@dataclass(slots=True)
+class JudgingBudget:
+    """run 하나의 새 판정 잔여 예산. 뮤터블이다 — runner 가 run 시작 시 하나
+    만들어 후보마다 같은 것을 넘기므로 상한이 **run 단위**로 걸린다."""
+
+    remaining: int
 
 
 class CandidateIdentityJudgingError(RuntimeError):
@@ -133,8 +152,16 @@ class CandidateIdentityJudgingService:
         self._shortlist_retriever = shortlist_retriever
 
     async def judge_candidate(
-        self, *, project_id: str, candidate_id: str
+        self, *, project_id: str, candidate_id: str,
+        budget: JudgingBudget | None = None,
     ) -> CandidateIdentityJudgingResult:
+        """focal 하나의 shortlist를 판정한다.
+
+        ``budget`` 는 **run 단위** 새 판정 상한이다(S-1 D3). ``None`` 이면
+        제한 없음 — 순수 도메인 시맨틱을 잠그는 테스트가 쓰는 자리고, runner 는
+        항상 ``JudgingBudget(DEFAULT_MAX_NEW_RELATIONS_PER_RUN)`` 을 만들어
+        같은 것을 후보마다 넘긴다.
+        """
         focal = self._candidates.get_candidate(candidate_id)
         if focal is None or focal.project_id != project_id:
             raise CandidateNotFoundForIdentityJudging(
@@ -156,7 +183,13 @@ class CandidateIdentityJudgingService:
                 project_id, focal.candidate_type, left, right
             )
             if relation is None:
+                # S-1 D3: run 예산이 바닥나면 이번 run 은 여기서 멈춘다. 남는 쌍은
+                # 그 한쪽이 다시 focal 로 기록되는 다음 run이 이어받는다(이월).
+                if budget is not None and budget.remaining <= 0:
+                    break
                 judgement = await self._judge_pair(focal, other)
+                if budget is not None:
+                    budget.remaining -= 1
                 judged.append(pair)
                 group_id = None
                 if judgement.verdict is IdentityRelationVerdict.SAME:

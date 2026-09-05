@@ -33,6 +33,7 @@ from services.application.app.analysis.identity_groups import (
 )
 from services.application.app.analysis.identity_judging import (
     CandidateIdentityJudgingService,
+    JudgingBudget,
     CandidateNotNeedsReviewError,
     CandidateNotFoundForIdentityJudging,
     IdentityJudgeNotConfigured,
@@ -148,10 +149,11 @@ class IdentityJudgingTestBase(unittest.TestCase):
             shortlist_retriever=retriever,
         )
 
-    def _judge_candidate(self, service, *, candidate_id, project_id="p1"):
+    def _judge_candidate(self, service, *, candidate_id, project_id="p1",
+                         budget=None):
         return asyncio.run(
             service.judge_candidate(
-                project_id=project_id, candidate_id=candidate_id
+                project_id=project_id, candidate_id=candidate_id, budget=budget
             )
         )
 
@@ -391,6 +393,83 @@ class JudgementApplicationTest(IdentityJudgingTestBase):
         self._store(rejected)
         with self.assertRaises(CandidateNotNeedsReviewError):
             self._judge_candidate(self._service(), candidate_id="cand-r")
+
+
+class RunBudgetTest(IdentityJudgingTestBase):
+    """S-1 D3(오너 2026-09-05) — run 예산: 새 판정 상한과 이월(감사 §A.4).
+
+    같은 이름의 needs_review 풀이 run마다 누적되면 run 1회의 과금으로 수백 쌍의
+    판정이 팬아웃됐다. 상한은 run 단위 예산이고, 남는 쌍은 한쪽이 다시 focal 로
+    기록될 때 이어받는다(이월).
+    """
+
+    def test_the_budget_stops_new_judgements_mid_shortlist(self):
+        """under-strict: 예산 검사를 지우면 4쌍이 전부 판정된다. over-strict:
+        통과한 run 이라도 판정 수가 상한과 다르면 이 단정이 실패한다."""
+        focal = _candidate(candidate_id="cand-a")
+        others = tuple(
+            _candidate(candidate_id=f"cand-{name}")
+            for name in ("b", "c", "d", "e")
+        )
+        self._store(focal, *others)
+        table = {
+            _pair(focal.id, other.id): IdentityJudgement(
+                IdentityRelationVerdict.DIFFERENT, "scripted")
+            for other in others
+        }
+        judge = _ScriptedJudge(table)
+        service = self._service(judge=judge)
+
+        result = self._judge_candidate(
+            service, candidate_id=focal.id, budget=JudgingBudget(1))
+
+        self.assertEqual(len(judge.calls), 1)
+        self.assertEqual(len(result.judged_pair_ids), 1)
+
+    def test_reuse_does_not_consume_the_budget(self):
+        """저장된 relation 의 재사용은 judge 재호출도 예산도 안 탄다 — 상한이
+        '새 판정'에만 걸린다는 계약(과잉 방어 방향)."""
+        focal = _candidate(candidate_id="cand-a")
+        b = _candidate(candidate_id="cand-b")
+        c = _candidate(candidate_id="cand-c")
+        self._store(focal, b, c)
+        self.groups.record_relation(
+            project_id="p1", candidate_type=CHARACTER,
+            left_candidate_id="cand-a", right_candidate_id="cand-b",
+            verdict=IdentityRelationVerdict.DIFFERENT,
+            rationale="known", source="identity_judge", group_id=None)
+        table = {_pair("cand-a", "cand-c"): IdentityJudgement(
+            IdentityRelationVerdict.DIFFERENT, "scripted")}
+        judge = _ScriptedJudge(table)
+        service = self._service(judge=judge)
+
+        result = self._judge_candidate(
+            service, candidate_id="cand-a", budget=JudgingBudget(1))
+
+        self.assertEqual(result.reused_pair_ids, (_pair("cand-a", "cand-b"),))
+        self.assertEqual(result.judged_pair_ids, (_pair("cand-a", "cand-c"),))
+
+    def test_a_fresh_budget_picks_up_the_deferred_pairs(self):
+        """이월 — 예산이 바닥난 뒤 같은 focal 을 새 예산으로 다시 판정하면 남은
+        쌍이 판정된다(relation 이 없으므로 shortlist 에 다시 선정된다)."""
+        focal = _candidate(candidate_id="cand-a")
+        b = _candidate(candidate_id="cand-b")
+        c = _candidate(candidate_id="cand-c")
+        self._store(focal, b, c)
+        table = {
+            pair: IdentityJudgement(IdentityRelationVerdict.DIFFERENT, "s")
+            for pair in (_pair("cand-a", "cand-b"), _pair("cand-a", "cand-c"))
+        }
+        judge = _ScriptedJudge(table)
+        service = self._service(judge=judge)
+
+        self._judge_candidate(
+            service, candidate_id="cand-a", budget=JudgingBudget(1))
+        self.assertEqual(len(judge.calls), 1)
+        self._judge_candidate(
+            service, candidate_id="cand-a", budget=JudgingBudget(1))
+        self.assertEqual(len(judge.calls), 2)  # 남은 쌍이 이어서 판정됐다
+        self.assertEqual(len(self.groups.list_relations("p1")), 2)
 
 
 class IdempotencyTest(IdentityJudgingTestBase):

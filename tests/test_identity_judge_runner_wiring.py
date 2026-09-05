@@ -41,6 +41,7 @@ from services.application.app.analysis.identity_judge import (
 )
 from services.application.app.analysis.identity_judging import (
     CandidateIdentityJudgingError,
+    DEFAULT_MAX_NEW_RELATIONS_PER_RUN,
     CandidateIdentityJudgingService,
     IdentityJudgement,
     IdentityJudgeNotConfigured,
@@ -346,6 +347,34 @@ class SuccessPathWiringTest(RunnerWiringTestBase):
         )
 
 
+class FanOutCapTest(RunnerWiringTestBase):
+    """S-1 D3(오너 2026-09-05): run당 새 판정 상한 20 — 팬아웃 DoS 축(§A.4)."""
+
+    def _seven_same_name_drafts(self, saved):
+        return tuple(
+            self._draft(f"c{i}", "민아", saved["anchors"]["min-a"])
+            for i in range(1, 8)
+        )
+
+    async def test_one_run_judges_at_most_twenty_new_pairs(self):
+        """7개 동명 후보 = 21쌍 → 정확히 20판정·1쌍 이월. under-strict: 상한을
+        지우면 21판정이 잡힌다. over-strict: 상한이 잘못 걸려도 job 은 여전히
+        SUCCEEDED 여야 한다(판정은 성공 경로 뒤·격리 안이다)."""
+        judge = _AlwaysSameJudge()
+        wiring = self._wiring(judge, self._seven_same_name_drafts)
+
+        result = await self._run(wiring, key="fanout-run-1")
+
+        self.assertIs(result.job.status, AnalysisJobStatus.SUCCEEDED)
+        self.assertEqual(DEFAULT_MAX_NEW_RELATIONS_PER_RUN, 20)  # literal 핀
+        self.assertEqual(len(judge.calls), DEFAULT_MAX_NEW_RELATIONS_PER_RUN)
+        self.assertEqual(
+            len(wiring["groups"].list_relations(
+                wiring["saved"]["project_id"])),
+            DEFAULT_MAX_NEW_RELATIONS_PER_RUN,
+        )
+
+
 class IsolationTest(RunnerWiringTestBase):
     async def test_judging_runs_after_the_job_reaches_success(self):
         # 판정이 mark_job_succeeded **뒤**에 돈다는 잠금 — judge가 불릴 때
@@ -389,11 +418,12 @@ class IsolationTest(RunnerWiringTestBase):
         raised: list[str] = []
 
         class _EnteringJudging(CandidateIdentityJudgingService):
-            async def judge_candidate(self, *, project_id, candidate_id):
+            async def judge_candidate(self, *, project_id, candidate_id, budget=None):
                 entered.append(candidate_id)
                 try:
                     return await super().judge_candidate(
-                        project_id=project_id, candidate_id=candidate_id
+                        project_id=project_id, candidate_id=candidate_id,
+                        budget=budget,
                     )
                 except CandidateIdentityJudgingError as exc:
                     raised.append(type(exc).__name__)

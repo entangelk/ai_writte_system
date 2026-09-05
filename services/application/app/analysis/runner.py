@@ -10,8 +10,10 @@ from services.application.app.analysis.extractor import (
     AnalysisExtractionError,
 )
 from services.application.app.analysis.identity_judging import (
+    DEFAULT_MAX_NEW_RELATIONS_PER_RUN,
     CandidateIdentityJudgingService,
     InvalidIdentityJudgement,
+    JudgingBudget,
 )
 from services.application.app.analysis.models import (
     AnalysisCandidate,
@@ -207,10 +209,15 @@ class AnalysisExtractionRunner:
         if self._identity_judging is None:
             return
         try:
+            # S-1 D3(오너 2026-09-05): run 하나가 새로 판정하는 pair 의 상한 —
+            # 같은 예산을 후보마다 넘기므로 상한이 run 단위로 걸린다. 넘친 쌍은
+            # relation 이 없는 채로 남아 다음 run 이 이어받는다(이월).
+            budget = JudgingBudget(DEFAULT_MAX_NEW_RELATIONS_PER_RUN)
             for result in recorded:
                 await self._identity_judging.judge_candidate(
                     project_id=project_id,
                     candidate_id=result.candidate.id,
+                    budget=budget,
                 )
         except InvalidIdentityJudgement as exc:
             # D4 (owner decision 2026-07-26, compare endpoint's branch): the
