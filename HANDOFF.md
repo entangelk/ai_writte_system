@@ -130,6 +130,7 @@
 - **컨텍스트 항목 렌더링은 한 정의다** — [`context_search/item_render.py`](services/application/app/context_search/item_render.py) 를 프롬프트와 예산 회계가 **함께** 쓴다. 항목 렌더링을 바꾸면 예산이 자동으로 따라오지만 **정확히 한 곳에 여유가 있다**: 회계는 인용 번호를 모르므로 `_BUDGET_CITATION_NUMBER=999` 로 센다(항목당 최대 1토큰 과대평가). **여유를 넓히려면 `0 ≤ 여유 ≤ 항목수` 를 단정하는 세 셀을 함께 고친다** — 밴드 뒤에 숨기면 항목을 두 번 세는 과잉 교정이 통과한다.
 - **`GET …/memory` 의 `scope: null` 은 결측이 아니라 계약된 값이다**(`event_observation`·`open_question_observation` 은 엔티티 id가 없다). *"비었으니 채우자"* 는 과잉 교정을 셀이 문다.
 - **재색인 enqueue는 무조건 choke point다** — canonical을 만드는 모든 경로가 `MemoryService._enqueue_reindex` 를 지난다. **memory는 append-only**이고 canonical만 색인된다.
+- **"stored" 재생 처분을 받는 신규 유료 경로는 응답이 표준 `Response`(`.body` 바이트)여야 한다** — `QuotaSettledRoute` 의 저장이 `getattr(response, "body", None)` 로만 읽으므로 스트리밍 등 다른 응답 형태는 **조용히 미저장**되고, 그 키의 재제출은 재생이 아니라 409 로 닫힌다(지금 경로 `writing_report` 는 전부 JSONResponse 라 무해 — S-1 검증 H3).
 
 **CSS·프론트**
 - **기본 동작 버튼의 겉모습을 자리마다 쓰지 말 것** — 색·테두리·커서·모션은 **base·hover·disabled 세 규칙 한 묶음**에서만 정하고 **새 버튼은 세 규칙 전부에 선택자를 더한다**(base에만 넣으면 hover·disabled 반응을 못 얻는데 화면을 열기 전에는 안 보인다). **패딩은 공통 규칙에 넣지 말 것**(자리마다 다르다). 가드 [`buttonAppearance.test.ts`](frontend/src/buttonAppearance.test.ts).

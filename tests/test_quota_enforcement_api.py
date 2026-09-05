@@ -64,6 +64,7 @@ from services.application.app.quota.lock import (
     RequestLockService,
 )
 from services.application.app.quota.replay import (
+    DEFAULT_REPLAY_TTL_SECONDS,
     InMemoryReplayResponseRepository,
 )
 from services.application.app.quota.policy import (
@@ -626,6 +627,33 @@ class KeyConsumptionHttpTest(unittest.TestCase):
         expired = client.post(
             f"/projects/{project_id}/writing/report", json=body)
         self.assertEqual(expired.status_code, 409)
+        self.assertEqual(provider.calls, 1)
+
+    def test_the_replay_window_lasts_the_full_24_hours(self):
+        """S-1 검증 B1 폐쇄(2026-09-05) — TTL **하방**. 등재 literal(24시간)은
+        "경과 후 409" 방향으로만 잠혀 있어 TTL 이 조용히 줄어드는 것을 못 잡았다
+        (검증 실측: 86400→3600 변이에 0 실패).
+
+        under-strict: ``DEFAULT_REPLAY_TTL_SECONDS`` 를 3600 으로 줄이면 이 셀이
+        실패한다(86399초는 1시간보다 많이 지났다 — 409 로 닫힌다). over-strict:
+        창을 24시간보다 늘리면 literal 핀 단정이 실패한다.
+        """
+        self.assertEqual(DEFAULT_REPLAY_TTL_SECONDS, 86400)
+        provider = _CountingProvider(_REPORT_JSON)
+        clock = _Clock()
+        replays = InMemoryReplayResponseRepository(clock=clock)
+        client, project_id, _ledger, _clock, _jobs = _app(
+            clock=clock, replays=replays,
+            report_service=_build_report_service(provider))
+        body = {"request_id": "rep-24h", "instruction": "이어서 써줘.",
+                "candidate_text": "문이 열렸다."}
+        first = client.post(f"/projects/{project_id}/writing/report", json=body)
+        self.assertEqual(first.status_code, 200)
+        clock.advance(86399)  # 24시간에서 1초 모자라다 — 창의 안쪽이다
+        still = client.post(
+            f"/projects/{project_id}/writing/report", json=body)
+        self.assertEqual(still.status_code, 200)
+        self.assertEqual(still.json(), first.json())
         self.assertEqual(provider.calls, 1)
 
 

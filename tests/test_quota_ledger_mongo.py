@@ -66,6 +66,12 @@ class _Collection:
     def find(self, query):
         return [doc for doc in self.docs.values() if _matches(doc, query)]
 
+    def find_one(self, query):
+        for doc in self.docs.values():
+            if _matches(doc, query):
+                return doc
+        return None
+
 
 def _matches(doc, query):
     return all(doc.get(key) == value for key, value in query.items())
@@ -138,6 +144,32 @@ class MongoUsageLedgerRepositoryTest(unittest.TestCase):
         self.repo.add_usage(_usage("e1"))
         with self.assertRaises(DuplicateUsageEntry):
             self.repo.add_usage(_usage("e2"))
+
+    def test_has_usage_finds_only_that_members_action_and_key(self):
+        """S-1 A안의 포인트 리드 — 입장의 키 소비 판정(409)이 이 조회 위에 선다.
+
+        under-strict: 조회를 없애면(항상 False) 소비 셀 전체가, 세 축 중 하나를
+        빼면 이 셀의 해당 단정이 실패한다(남의 키가 내 키로 접힌다).
+        """
+        self.repo.add_usage(
+            _usage("e1", action="writing_generate", key="k1", user="u1"))
+        self.assertTrue(self.repo.has_usage(
+            "u1", action="writing_generate", dedupe_key="k1"))
+        for user, action, key in (
+            ("u2", "writing_generate", "k1"),
+            ("u1", "writing_gate", "k1"),
+            ("u1", "writing_generate", "k2"),
+        ):
+            with self.subTest(axis=(user, action, key)):
+                self.assertFalse(self.repo.has_usage(
+                    user, action=action, dedupe_key=key))
+
+    def test_an_adjustment_row_alone_never_satisfies_has_usage(self):
+        # 조정 행은 action·dedupe_key 를 아예 안 들므로 소비 판정에 걸리지
+        # 않는다 — 조회의 kind 제한과 함께 원장 두 종류가 섞이지 않는다는 핀.
+        self.repo.add_adjustment(_adjustment("a1"))
+        self.assertFalse(self.repo.has_usage(
+            "u1", action="writing_generate", dedupe_key="k1"))
 
     def test_the_same_key_under_a_different_action_is_accepted(self):
         self.repo.add_usage(_usage("e1", action="writing_generate", key="same"))
