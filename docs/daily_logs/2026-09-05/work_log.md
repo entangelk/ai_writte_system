@@ -669,3 +669,102 @@ Phase S 맨 앞에 잘못된 우선순위가 남을 뻔했다.
 **Phase S 순서**: S-7(터널 토큰 회전·인자 제거 — 가장 싸고 즉시) → S-3(signup 레이트리밋, **착수 전
 터널 ingress 확인**) → S-1(quota dedupe, 가입 열기 전 필수) → S-0(문서 스윕) → 나머지 트리거.
 그 뒤 Slice 5 독립 검증.
+
+---
+
+# 세션 6 — Phase S-3: 공개 signup 표면 속박(오너 결정 C) + 터널 경로 실측
+
+## Goals
+
+- HANDOFF Next Tasks 0 의 첫 항목 착수: **S-3 signup 레이트리밋**. 착수 전 조건이 걸려 있었다 —
+  *"터널이 nginx 로 가는지 확인"*.
+- 세션 5가 남긴 두 판단(레이트리밋 층은 nginx 권고 · 구현하지 않고 기록만)을 **실측으로 재검토**한다.
+
+## Completed work
+
+커밋 `be54124`(결정 브리프) · `79515fd`(모듈 셋) · `7e5ee23`(배선·계약·회귀) + 본 기록.
+
+**① 결정 브리프를 먼저 올렸다** — [`plans/security-phase-s3-signup-throttle-decisions.md`](../../plans/security-phase-s3-signup-throttle-decisions.md).
+축 선택이 곧 2026-08-22 가 *"공개 배포 전"* 으로 유예한 `X-Forwarded-For` 신뢰 정책 결정이라,
+선례에서 유도되지 않는 오너 급 결정이었다. 선택지 넷(nginx `limit_req`+real-ip / 앱 전역 비용상한 /
+앱 IP축+신뢰정책 / 표면 폐쇄)과 추천(B 2단)을 적고 멈췄다.
+
+**② 오너가 원격 확인을 승인했고, 실측이 추정을 뒤집었다.** 읽기 전용으로 잰 것:
+
+| 물음 | 실측 |
+|---|---|
+| 터널 ingress | **`frontend` nginx 로 간다** — 공개 오리진에 보낸 표식 요청이 그 컨테이너 접근 로그에 찍혔다 |
+| 공유 호스트의 **공용 리버스 프록시**를 지나는가 | **지나지 않는다.** 터널이 호스트에서 이 프로젝트 frontend 포트로 직접 붙는다 |
+| 그 공용 프록시에 이 프로젝트 vhost 가 있는가 | **있는데 죽어 있다** — upstream 이름이 그 프록시 네트워크에서 해석되지 않는다 |
+| origin 이 보는 `remote_addr` | 터널 트래픽 전부가 **도커 게이트웨이 한 주소** |
+| origin 이 보는 `X-Forwarded-For` | **`<클라이언트가 보낸 값>, <진짜 IP>`** — 엣지가 지우지 않고 **오른쪽에 덧붙인다** |
+| 클라이언트가 `CF-Connecting-IP` 를 보내면 | **엣지가 403** (오리진에 닿지 않는다) |
+| 앱 포트에 직결하면 앱이 보는 주소 | **발신자 주소 그대로**(SNAT 없음) |
+
+**③ 오너 결정 = C**(앱 IP축 + XFF 신뢰 정책). 추천(B)은 채택되지 않았다.
+
+**④ 구현**(프로덕션 5파일 · 테스트 2파일 · 프론트 1파일):
+- `auth/client_ip.py` — peer 가 신뢰 대역 밖이면 XFF 를 통째로 버리고, 안이면 **오른쪽에서** 걸으며
+  신뢰 항목을 건너뛴다. 깨진 CIDR 는 기동 거부.
+- `auth/signup_guard.py`(+`_mongo`) — 발신 IP축 고정창(기본 시간당 5). 막힌 요청은 창을 연장하지
+  않는다. Mongo 쪽은 **TTL 인덱스를 둔다**(`login_failures` 와 갈리는 지점 — 축이 인터넷 발신
+  주소라 행 집합에 상한이 없다).
+- `routers/auth.py` — 해석 → 스로틀 → `request_signup` 순. 거절이 **해셔 앞**이다.
+- `auth/users.py` — username 64 · password 256 상한(400), pending 200 상한(429). 재요청은 면제.
+- 계약 — `/auth/signup` 이 429+`Retry-After` 선언, `schema.d.ts` 재생성(+9줄).
+- `AuthGate.tsx` — 429 문구 하나(두 상한을 구분하지 않는다) + 400 문구 갱신.
+
+## Issues found
+
+- **문제(설계 전제가 틀렸다)**: 세션 5는 *"CPU 소진 방어는 요청이 앱에 닿기 전에 끊는 것이 맞다"* 며
+  **nginx 층을 권고**했다. 실측하니 origin nginx 의 `remote_addr` 는 터널 트래픽 전부가 **한 주소**라,
+  real-ip 설정 없는 `limit_req` 는 **전역 상한으로 퇴화**한다. 즉 "nginx 라서 싸다"는 이점이 그대로
+  오지 않는다. **원인**: 터널 뒤 origin 이 무엇을 보는지 재지 않고 일반론으로 층을 골랐다.
+  **처리**: 브리프에 실측 표를 넣고 층 선택 근거를 교체. nginx 앞단은 트리거 항목으로 남겼다.
+- **문제(공유 호스트, 이 저장소 범위 밖)**: 공용 리버스 프록시에 이 프로젝트용 vhost 가 **낡은 채로
+  남아 있다**. 지금은 upstream 이 해석되지 않아 죽어 있어 무해하지만, 누군가 그 프록시의 네트워크를
+  손보면 **살아나서 두 번째 진입로**가 된다. **처리**: 타 프로젝트 저장소 소관이라 고치지 않고
+  브리프 Follow-up + 아래 Next steps 로 올린다.
+- **관찰**: `CF-Connecting-IP` 를 클라이언트가 보내면 엣지가 403 을 낸다. 더 단단해 보이지만 채택하지
+  않았다 — 그 단단함은 대시보드 설정에서 오고 **이 저장소가 검증할 수 없다**. XFF 오른쪽 규칙은
+  경로를 몰라도 성립한다(터널·LAN 직결·프록시 없는 개발이 같은 코드).
+
+## User Decisions and Rationale
+
+- **축 = C(앱 IP축 + XFF 신뢰 정책 확립).** 오너가 구현자 추천(B, 전역 비용 상한)을 **택하지 않았다.**
+  근거로 보면 추천이 빗나간 지점이 분명하다 — B 를 민 이유는 *"C 는 신뢰 정책을 틀리면 조용히
+  무력해진다"* 였는데, 실측이 **틀릴 여지 자체를 좁혔다**(엣지가 오른쪽에 덧붙인다 · 직결은 SNAT
+  되지 않는다). 즉 그 추천의 근거는 사실이 아니라 **모르는 상태**였다. 이 결정으로 2026-08-22 의
+  *"IP 축 rate limit — 공개 배포 전"* 유예가 닫혔다.
+- **터널 경로는 대시보드가 아니라 서버에서 직접 확인**(오너가 읽기 전용 접근을 열어 줬다). 세션 5는
+  이것을 *"오너만 답할 수 있다"* 고 적었는데, 실제로는 **관측으로 답이 나오는 물음**이었다.
+- 계약 literal 은 브리프가 B 전제로 제안했던 값을 **IP당** 으로 옮겨 채택했다(시간당 5 · pending 200 ·
+  username 64 · password 256).
+
+## Verification
+
+- 신규 `tests/test_signup_throttle.py` **22 passed** — 해석 7 · 스로틀 5 · 상한 5 · HTTP 5.
+- 계약 가드: `tests/test_quota_enforcement_api.py` **39 passed / 236 subtests**
+  (429 두 번째 생산자를 `THROTTLED_OPERATIONS` 에 등재 + 목록 자체를 양방향으로 잠그는 셀 신설).
+- 문서 가드 `tests/test_docs_indexes.py` **15 passed / 291 subtests**(SoT 버전 주장 갱신을 이 가드가 잡았다).
+- 전수 backend **2678 passed / 151 skipped / 3187 subtests**(256초, 라이브 Mongo 없음) · `tsc --noEmit` **0**.
+- **뮤테이션 4종 전부 기명 재실패** — 커밋 뒤 뮤테이트, 복원 후 `git status` 공백 확인:
+
+| # | 뮤테이션 | 재실패한 셀 |
+|---|---|---|
+| 1 | XFF 를 **왼쪽에서** 읽는다 | `..._rightmost_untrusted_entry_wins` · `..._forged_forwarded_for_cannot_buy_a_fresh_bucket`(HTTP) |
+| 2 | 직결(신뢰 밖 peer)에서도 XFF 를 읽는다 | `..._untrusted_peer_is_the_client_and_its_header_is_ignored` |
+| 3 | 막힌 요청이 창을 연장한다 | `..._refused_attempt_does_not_extend_the_window` · `..._refusal_reports_seconds_until_the_window_resets` |
+| 4 | 대기열 상한을 **재요청 경로까지** 확장 | `..._re_request_over_a_rejected_row_survives_the_ceiling` |
+
+- 원격 확인은 **읽기 전용**이었다 — `docker ps`·`docker inspect`·`docker logs`·설정 파일 `cat`·
+  공개 오리진 `curl`(GET). 타 프로젝트 서비스에 쓰기 명령을 보내지 않았다.
+- 민감정보: 주소·계정명·키 경로·도메인·토큰을 저장소 문서에 **0건** 기록(역할 별칭만).
+
+## Next steps
+
+- **★ 오너 확인 필요**: 공유 호스트의 공용 리버스 프록시에 남은 **낡은 vhost** — 지금 죽어 있으나
+  살아나면 두 번째 진입로다. 타 프로젝트 저장소 소관이라 여기서 손대지 않았다.
+- Phase S 남은 순서: **S-1 quota dedupe**(가입 열기 전 필수) → **S-0 문서 스윕** →
+  **S-7 토큰 저장 방식** → 나머지 트리거. S-2(nginx 보안 헤더)는 nginx 앞단과 같은 슬라이스로 묶으면 싸다.
+- 로그인 IP 축(P-6 유예)은 `client_ip.py` 가 생겨 **남은 것이 정책 판단 하나**다.

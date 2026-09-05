@@ -226,7 +226,7 @@
 | [`auth-d8-6-purge-ui-decisions.md`](auth-d8-6-purge-ui-decisions.md) | D8-6 영구 삭제 UI·2단계 시행·삭제 감사·재시도 의미 | Verified PASS(v1.7.82, c2ca946) |
 | [`auth-d8-7-infra-auth-decisions.md`](auth-d8-7-infra-auth-decisions.md) | D8-7 인프라 노출면·자격증명 | Partially — **G1=C 확정** / G2~G6 유예 |
 | [`auth-signup-approval-decisions.md`](auth-signup-approval-decisions.md) | 자기 가입(승인제) — v1.7.82 가입 금지 문구 개정·403 생산자 셋·브루트포스 잠금·시드 정리 | **Resolved(2026-08-22)** — 403+사유 / 방어 동봉 / 시드 정리+오너 계정 |
-| [`security-phase-s3-signup-throttle-decisions.md`](security-phase-s3-signup-throttle-decisions.md) | Phase S-3 — 공개 `/auth/signup` 속박(축: nginx IP / 앱 전역 / IP+XFF 신뢰정책 / 표면 폐쇄). 2026-08-22 이 "공개 배포 전"으로 유예한 `X-Forwarded-For` 신뢰 정책이 이 결정이다 | **Proposed — 오너 결정 대기** · 착수 전 확인 필요: Cloudflare 터널 ingress 가 nginx 인가 앱 직행인가 |
+| [`security-phase-s3-signup-throttle-decisions.md`](security-phase-s3-signup-throttle-decisions.md) | Phase S-3 — 공개 `/auth/signup` 속박(축: nginx IP / 앱 전역 / IP+XFF 신뢰정책 / 표면 폐쇄). 2026-08-22 이 "공개 배포 전"으로 유예한 `X-Forwarded-For` 신뢰 정책이 이 결정이다 | **Resolved(2026-09-05)** — C 채택(앱 IP축 + XFF 신뢰 정책) · 구현 완료 · 2026-08-22 의 "공개 배포 전 IP 축" 유예가 닫혔다 |
 
 ### 외부 확장 (배선 완료 · 어댑터 미착수)
 
