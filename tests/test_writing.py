@@ -13,6 +13,7 @@ import json
 import os
 import unittest
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import httpx
@@ -1438,10 +1439,14 @@ class WritingGenerationJobRetryTest(unittest.TestCase):
         client, project_id, jobs = self._seed()
         job = self._enqueue(jobs, project_id)
         jobs.claim_next()
-        jobs.mark_failed(
+        failed = jobs.mark_failed(
             jobs.get(job.id),
             reason=WritingGenerationJobFailureReason.PROVIDER_TIMEOUT,
             detail="upstream 504")
+        # S-1 D2: 재시도 쿨다운(60s)을 지난 상태로 만든다 — 서비스 클록이 실시간이므로
+        # 저장된 실패 시각을 되돌려 놓는다(test_application_api 와 같은 처방).
+        jobs._repo.update(replace(  # noqa: SLF001 — 옛 시각의 행을 만드는 입력
+            failed, failed_at=datetime.now(UTC) - timedelta(seconds=61)))
         response = client.post(
             f"/projects/{project_id}/writing/generation-jobs/{job.id}/retry")
         self.assertEqual(response.status_code, 200)
