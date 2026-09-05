@@ -374,5 +374,8 @@ _BILLABLE_404_409_JUDGE: dict[int | str, dict] = _billable(
     _ERRORS_404_409_JUDGE)
 
 
+# S-1 A안(오너 2026-09-05): 이 상수를 쓰는 경로(writing gate·report·revise·
+# generate 병합·context_search)는 전부 **BODY dedupe 키** 경로다 — 정산된 키의
+# 재제출이 409 로 닫히므로 그 얼굴을 함께 선언한다(H3: 상태는 선언한다).
 _BILLABLE_400_404_502_504_CONFIG: dict[int | str, dict] = _billable(
-    _ERRORS_400_404_502_504_CONFIG)
+    {409: _ERROR, **_ERRORS_400_404_502_504_CONFIG})

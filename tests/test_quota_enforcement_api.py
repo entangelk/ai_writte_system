@@ -22,6 +22,7 @@ route 객체에서 dependency 신원을 보고, ``test_billable_actions.py`` 가
 from __future__ import annotations
 
 import asyncio
+import json
 import unittest
 from datetime import UTC, datetime
 
@@ -35,6 +36,7 @@ from services.application.app.core_sot.service import (
 )
 from services.application.app.main import (
     QuotaSettledRoute,
+    _build_report_service,
     create_app,
 )
 from services.application.app.api.dependencies import (
@@ -59,6 +61,9 @@ from services.application.app.quota.ledger import (
 from services.application.app.quota.lock import (
     InMemoryRequestLockRepository,
     RequestLockService,
+)
+from services.application.app.quota.replay import (
+    InMemoryReplayResponseRepository,
 )
 from services.application.app.quota.policy import (
     InMemoryQuotaPolicyRepository,
@@ -140,7 +145,7 @@ class _Client:
         return asyncio.run(send())
 
 
-def _enforcement(*, clock, limits=None, jobs=None):
+def _enforcement(*, clock, limits=None, jobs=None, replays=None):
     policy_repo = InMemoryQuotaPolicyRepository()
     if limits is not None:
         # 8.1 P6 은 불리한 변경을 주 경계로 유예하므로 문서를 직접 넣는다.
@@ -162,15 +167,18 @@ def _enforcement(*, clock, limits=None, jobs=None):
             lock_repo, clock=clock, minimum_window_seconds=5, lease_seconds=180),
         mutex=AdmissionMutex(lock_repo, clock=clock, sleep=lambda _s: None),
         jobs=jobs,
+        replays=replays,
     )
     return service, ledger_repo
 
 
-def _app(*, provider=None, limits=None, clock=None, jobs=None, context_error=None):
+def _app(*, provider=None, limits=None, clock=None, jobs=None,
+         context_error=None, replays=None, report_service=None):
     clock = clock or _Clock()
     jobs = jobs or WritingGenerationJobService(
         InMemoryWritingGenerationJobRepository())
-    enforcement, ledger = _enforcement(clock=clock, limits=limits, jobs=jobs)
+    enforcement, ledger = _enforcement(
+        clock=clock, limits=limits, jobs=jobs, replays=replays)
     app = create_app(
         service=CoreSotService(InMemoryCoreSotRepository()),
         # ★ ``ObservedProvider`` 로 감싸는 것이 이 fixture 의 요점이다. Q1-a=A 의
@@ -185,6 +193,7 @@ def _app(*, provider=None, limits=None, clock=None, jobs=None, context_error=Non
         context_search_service=_FakeContextSearch(
             _package(), error=context_error),
         writing_generation_job_service=jobs,
+        writing_report_service=report_service,
         quota_enforcement_service=enforcement,
     )
     client = _Client(app)
@@ -476,6 +485,108 @@ class ConfirmHeaderContentTest(unittest.TestCase):
         # over-strict 짝: 빈 값을 거르는 변경이 정상 확인까지 막으면 안 된다.
         self.assertEqual(
             self._second({CONFIRM_DUPLICATE_HEADER: "1"}).status_code, 200)
+
+
+class _CountingProvider(_FakeProvider):
+    """provider 호출 수를 잰다 — S-1 셀의 요점은 "다시 안 돈다"다."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.calls = 0
+
+    async def generate(self, request):
+        self.calls += 1
+        return await super().generate(request)
+
+
+#: report v3 파서가 받아들이는 최소 payload(test_writing_report `_payload` 와 같은 모양).
+_REPORT_JSON = json.dumps({
+    "self_reported_constraints": ["제한 시점"],
+    "candidate_claims": [{"text": "문이 열렸다", "type": "narrative_event",
+                          "related_context_pointers": []}],
+    "new_memory_hints": [{"type": "event", "text": "문이 열림",
+                          "confidence": 0.8}],
+    "risk_notes": [{"type": "pov", "severity": "high", "message": "시점 확인"}],
+}, ensure_ascii=False)
+
+
+class KeyConsumptionHttpTest(unittest.TestCase):
+    """S-1(오너 2026-09-05 = A+D+report 국소 C) — BODY dedupe 키는 1회만 소비된다.
+
+    감사 §A.1 의 공격: 같은 ``request_id`` 를 반복 전송하면 LLM 파이프라인은
+    매번 실제로 돌면서 원장은 1행으로 접혀 무과금 무한 재실행이 됐다. 계약
+    문장 — 정산된 키의 재제출은 **실행 전 409**, 확인된 재실행은 **+1 과금**,
+    ``writing_report`` 의 재제출은 **저장 응답 재생**.
+    """
+
+    def test_a_settled_request_id_is_refused_before_execution(self):
+        """under-strict: 키 소비 검사를 지우면 이 재제출이 200 으로 돌아가
+        과금은 접힌다(§A.1 원결함). over-strict: 첫 요청까지 막으면 첫 단정이
+        실패한다.
+        """
+        provider = _CountingProvider()
+        client, project_id, ledger, _clock, _jobs = _app(provider=provider)
+        first = _generate(client, project_id, json={"request_id": "evade-1"})
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(provider.calls, 1)
+        refused = _generate(client, project_id, json={"request_id": "evade-1"})
+        self.assertEqual(refused.status_code, 409)
+        self.assertIn("already used", refused.json()["detail"])
+        self.assertEqual(provider.calls, 1)  # provider 는 다시 안 돈다
+        self.assertEqual(len(_rows(ledger)), 1)
+
+    def test_a_confirmed_resubmission_runs_again_and_charges_one_more(self):
+        """8.2b G4=A 가 약속한 +1 과금을 원장이 처음으로 이행하는 자리다."""
+        provider = _CountingProvider()
+        client, project_id, ledger, _clock, _jobs = _app(provider=provider)
+        _generate(client, project_id, json={"request_id": "again-1"})
+        again = _generate(
+            client, project_id, json={"request_id": "again-1"},
+            headers={CONFIRM_DUPLICATE_HEADER: "1"},
+        )
+        self.assertEqual(again.status_code, 200)
+        self.assertEqual(provider.calls, 2)
+        self.assertEqual(len(_rows(ledger)), 2)
+
+    def test_the_report_replays_its_stored_response_without_the_provider(self):
+        """국소 C — 응답을 지속하지 않는 유일한 경로의 유실 회복. 재생은 provider
+        도 과금도 다시 일으키지 않는다(이미 세린 요청이다).
+        """
+        provider = _CountingProvider(_REPORT_JSON)
+        clock = _Clock()
+        replays = InMemoryReplayResponseRepository(clock=clock)
+        client, project_id, ledger, _clock, _jobs = _app(
+            clock=clock, replays=replays,
+            report_service=_build_report_service(provider))
+        body = {"request_id": "rep-1", "instruction": "이어서 써줘.",
+                "candidate_text": "문이 열렸다."}
+        first = client.post(f"/projects/{project_id}/writing/report", json=body)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(provider.calls, 1)
+        replayed = client.post(
+            f"/projects/{project_id}/writing/report", json=body)
+        self.assertEqual(replayed.status_code, 200)
+        self.assertEqual(replayed.json(), first.json())
+        self.assertEqual(provider.calls, 1)
+        self.assertEqual(len(_rows(ledger)), 1)
+
+    def test_the_report_replay_expires_to_409_after_the_ttl(self):
+        """TTL 지난 재제출은 무료 재실행이 아니라 409 로 닫힌다."""
+        provider = _CountingProvider(_REPORT_JSON)
+        clock = _Clock()
+        replays = InMemoryReplayResponseRepository(clock=clock)
+        client, project_id, _ledger, _clock, _jobs = _app(
+            clock=clock, replays=replays,
+            report_service=_build_report_service(provider))
+        body = {"request_id": "rep-2", "instruction": "이어서 써줘.",
+                "candidate_text": "문이 열렸다."}
+        first = client.post(f"/projects/{project_id}/writing/report", json=body)
+        self.assertEqual(first.status_code, 200)
+        clock.advance(86401)  # 재생 TTL(24h)을 넘긴다
+        expired = client.post(
+            f"/projects/{project_id}/writing/report", json=body)
+        self.assertEqual(expired.status_code, 409)
+        self.assertEqual(provider.calls, 1)
 
 
 class UnclassifiedActionFailsClosedTest(unittest.TestCase):

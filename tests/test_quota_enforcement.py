@@ -17,6 +17,11 @@ from __future__ import annotations
 import unittest
 from datetime import UTC, datetime, timedelta
 
+from services.application.app.quota.dedupe import (
+    DEDUPE_SOURCES,
+    DedupeSource,
+    key_resubmission_policy,
+)
 from services.application.app.quota.enforcement import (
     ADMISSION_KEY_PREFIX,
     AdmissionMutex,
@@ -34,8 +39,13 @@ from services.application.app.quota.ledger import (
 )
 from services.application.app.quota.lock import (
     InMemoryRequestLockRepository,
+    RequestLock,
     RequestLockService,
     lock_key,
+)
+from services.application.app.quota.replay import (
+    InMemoryReplayResponseRepository,
+    replay_key,
 )
 from services.application.app.quota.policy import (
     InMemoryQuotaPolicyRepository,
@@ -90,7 +100,7 @@ class _Jobs:
 
 def _build(
     *, clock: _Clock | None = None, limits: QuotaLimits | None = None,
-    jobs: _Jobs | None = None, lock_repo=None,
+    jobs: _Jobs | None = None, lock_repo=None, replays=None,
 ):
     clock = clock or _Clock()
     policy_repo = InMemoryQuotaPolicyRepository()
@@ -117,6 +127,7 @@ def _build(
             sleep=lambda _seconds: None,
         ),
         jobs=jobs,
+        replays=replays,
     )
     return service, ledger_repo, lock_repo, clock
 
@@ -653,11 +664,154 @@ class DuplicateLockTest(unittest.TestCase):
         self.assertEqual(len(_usage_rows(ledger)), 2)
 
     def test_the_same_dedupe_key_is_never_counted_twice(self):
+        """S-1(오너 2026-09-05 = A+D) 이후 같은 키의 재제출은 **입장에서** 닫힌다.
+
+        under-strict: 키 소비 검사를 지우면 셋째 단정(미확인 재제출의 CONSUMED)이
+        실패한다 — 그 상태가 감사 §A.1 의 원결함이다(실행은 돌고 과금은 접힌다).
+        over-strict: 확인된 재실행(+1 과금, 8.2b G4=A 를 원장이 처음 이행)까지
+        거부하면 넷째 단정이 실패한다.
+        """
         service, ledger, _locks, clock = _build()
         service.settle(_admit(service, dedupe_key="same"), charged=True)
         clock.advance(10)
-        service.settle(_admit(service, dedupe_key="same"), charged=True)
+        # 미확인 재제출은 provider 실행 전에 거부된다(409 CONSUMED).
+        with self.assertRaises(QuotaRefused) as refused:
+            _admit(service, dedupe_key="same")
+        self.assertIs(refused.exception.reason, QuotaRefusalReason.CONSUMED)
+        # 확인된 재실행은 통과하고 새 논리 행으로 +1 과금한다.
+        service.settle(
+            _admit(service, dedupe_key="same", confirmed=True), charged=True)
+        self.assertEqual(len(_usage_rows(ledger)), 2)
+
+    def test_a_bypassing_double_settlement_still_collapses_to_one_row(self):
+        """우회 방어: 입장을 건너뛴 자리(워커 차감 등)가 같은 키로 다시 쓰면
+        유니크 인덱스가 그대로 접는다 — S-1 이 세운 문 앞에 두 번째 벽이다.
+        """
+        service, ledger, _locks, _clock = _build()
+        charge = _admit(service, dedupe_key="once")
+        service.settle(charge, charged=True)
+        service.settle(charge, charged=True)  # 같은 영수증의 이중 정산
         self.assertEqual(len(_usage_rows(ledger)), 1)
+
+
+class KeyConsumptionTest(unittest.TestCase):
+    """S-1(오너 2026-09-05 = A+D+report 국소 C) — BODY dedupe 키는 1회만 소비된다.
+
+    감사 §A.1: 같은 키를 반복 재제출하면 LLM 은 실제로 돌면서 원장은 1행으로
+    접혀 무과금 무한 재실행이 됐다. 계약 문장 — *"같은 논리 요청은 한 번만
+    실행된다: 정산된 키의 재제출은 409, 진행 중 재전송은 잠금 429, 확인된
+    재실행은 +1 과금."* 경로별 갈림은 ``dedupe.KEY_REPLAY_ACTIONS`` 이다.
+    """
+
+    def test_every_body_key_action_has_one_of_the_three_dispositions(self):
+        """경로×처분 전수. 새 BODY 키 경로는 명시적으로 처분을 받아야 한다.
+
+        under-strict: ``key_resubmission_policy`` 가 BODY 를 "pass" 로 잘못
+        돌려주면 실패한다. over-strict: 처분 표가 존재하지 않는 경로를 적으면
+        실패한다(매핑은 ``DEDUPE_SOURCES`` 에서 온 것만 인정한다).
+        """
+        expected = {
+            "writing_generate": "consume",
+            "writing_gate": "consume",
+            "writing_revise": "consume",
+            "writing_revise_and_gate": "consume",
+            "writing_report": "stored",
+            "writing_accept": "handler",
+            "draft_finalize": "handler",
+            "context_search": "consume",
+        }
+        for action in DEDUPE_SOURCES:
+            if DEDUPE_SOURCES[action][0] is DedupeSource.BODY:
+                self.assertEqual(
+                    key_resubmission_policy(action), expected[action],
+                    f"{action} 의 재제출 처분이 계약과 다르다",
+                )
+        self.assertEqual(
+            {a for a in expected if a in DEDUPE_SOURCES},
+            {a for a in DEDUPE_SOURCES
+             if DEDUPE_SOURCES[a][0] is DedupeSource.BODY},
+        )
+        # 등록되지 않은 가상의 BODY 경로는 fail-safe 로 "consume" 이다.
+        self.assertEqual(key_resubmission_policy("made_up_action"), "pass")
+
+    def test_server_and_path_keys_are_not_subject_to_consumption(self):
+        """``analysis_compare``(서버 생성)·``analysis_extract``(경로 파라미터) —
+        클라이언트가 키를 못 고르므로 감사 §A.1 의 결함이 성립하지 않는다.
+        """
+        service, ledger, _locks, clock = _build()
+        for action in ("analysis_compare", "analysis_extract"):
+            service.settle(
+                _admit(service, action=action, dedupe_key="k"), charged=True)
+            clock.advance(10)  # 냉각(5s)은 이 셀의 축이 아니다
+            # 재제출이 CONSUMED 로 막히지 않는다(검증 대상이 아니다).
+            service.settle(
+                _admit(service, action=action, dedupe_key="k"), charged=True)
+        self.assertGreaterEqual(len(_usage_rows(ledger)), 1)
+
+    def test_handler_replay_actions_are_exempt_at_admission(self):
+        """accept·finalize — 입장은 막지 않는다(핸들러가 저장 결과로 답한다).
+        under-strict: 처분을 "handler" 대신 "consume" 으로 좁히면 이 셀이 실패한다.
+        """
+        service, ledger, _locks, clock = _build()
+        for action in ("writing_accept", "draft_finalize"):
+            service.settle(
+                _admit(service, action=action, dedupe_key="ik"), charged=True)
+            clock.advance(10)  # 냉각(5s)은 이 셀의 축이 아니다
+            service.settle(
+                _admit(service, action=action, dedupe_key="ik"), charged=True)
+            # 핸들러가 replay 로 답하므로 둘째 실행은 charged=False 가 정상 —
+            # 여기선 입장이 거부하지 않는다는 것만 잠근다.
+        self.assertEqual(len(_usage_rows(ledger)), 2)
+
+    def test_a_stored_replay_action_replays_without_locking_or_charging(self):
+        """report — 저장 응답이 있으면 재생 영수증(잠금·뮤텍스 없음)."""
+        clock = _Clock()
+        replays = InMemoryReplayResponseRepository(clock=clock)
+        service, ledger, lock_repo, _clock = _build(clock=clock, replays=replays)
+        replays.put(
+            replay_key(_USER, "writing_report", "rr"), b'{"replayed": true}')
+        # 같은 축으로 진행 중 잠금을 미리 걸어 둔다 — 재생은 이것을 안 본다.
+        lock_repo.claim(
+            RequestLock(
+                key=lock_key(_USER, "writing_report", _PROJECT),
+                holder="someone-else", claimed_at=clock(),
+                expires_at=clock() + timedelta(seconds=60)),
+            now=clock(),
+        )
+        charge = _admit(service, action="writing_report", dedupe_key="rr")
+        self.assertTrue(charge.replay)
+        self.assertEqual(
+            service.replay_response(charge), b'{"replayed": true}')
+        # 재생 영수증의 정산은 아무것도 쓰지 않는다(이미 세린 요청이다).
+        service.settle(charge, charged=True)
+        self.assertEqual(len(_usage_rows(ledger)), 0)
+
+    def test_a_stored_replay_action_falls_back_to_consumed_after_the_ttl(self):
+        """TTL 이 지나면 무료 재실행이 아니라 409 로 닫힌다."""
+        clock = _Clock()
+        replays = InMemoryReplayResponseRepository(clock=clock)
+        service, ledger, _locks, _clock = _build(clock=clock, replays=replays)
+        service.settle(
+            _admit(service, action="writing_report", dedupe_key="rr2"),
+            charged=True)
+        replays.put(
+            replay_key(_USER, "writing_report", "rr2"), b"{}")
+        clock.advance(86401)  # TTL(24h)을 넘긴다
+        replays.get(replay_key(_USER, "writing_report", "rr2"))  # 청소 트리거
+        with self.assertRaises(QuotaRefused) as refused:
+            _admit(service, action="writing_report", dedupe_key="rr2")
+        self.assertIs(refused.exception.reason, QuotaRefusalReason.CONSUMED)
+
+    def test_a_confirmed_resubmission_bypasses_the_replay(self):
+        """확인된 재실행은 저장 응답을 안 주고 다시 돈다(+1 과금이 요점)."""
+        clock = _Clock()
+        replays = InMemoryReplayResponseRepository(clock=clock)
+        service, ledger, _locks, _clock = _build(clock=clock, replays=replays)
+        replays.put(
+            replay_key(_USER, "writing_report", "rr3"), b"{}")
+        charge = _admit(
+            service, action="writing_report", dedupe_key="rr3", confirmed=True)
+        self.assertFalse(charge.replay)
 
     def test_different_actions_sharing_one_client_key_are_counted_separately(self):
         # 8.2 L2=A: 프론트는 한 흐름에 uuid 하나를 쓴다. 원장 키에서 action 을

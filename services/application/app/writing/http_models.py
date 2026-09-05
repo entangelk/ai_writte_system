@@ -283,6 +283,8 @@ REVISE_AND_GATE_RESPONSES: dict[int | str, dict] = {
     400: _REVISE_GATE_PARTIAL,
     401: _DETAIL_ONLY,
     404: _DETAIL_ONLY,
+    # S-1 A안(2026-09-05): BODY dedupe 키가 이미 정산됐다 — 409 consumed.
+    409: _DETAIL_ONLY,
     502: _REVISE_GATE_PARTIAL,
     503: _REVISE_GATE_PARTIAL,
     504: _REVISE_GATE_PARTIAL,

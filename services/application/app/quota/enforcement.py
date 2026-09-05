@@ -45,6 +45,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Callable, Iterator, Protocol
 
+from services.application.app.quota.dedupe import key_resubmission_policy
 from services.application.app.quota.ledger import UsageLedgerService
 from services.application.app.quota.lock import (
     LockBlocked,
@@ -58,6 +59,10 @@ from services.application.app.quota.policy import (
     QuotaStatus,
     next_daily_boundary,
     next_week_boundary,
+)
+from services.application.app.quota.replay import (
+    ReplayResponseRepository,
+    replay_key,
 )
 
 logger = logging.getLogger(__name__)
@@ -85,6 +90,10 @@ class QuotaRefusalReason(StrEnum):
     SUSPENDED = "suspended"
     EXCEEDED = "exceeded"
     LOCKED = "locked"
+    CONSUMED = "consumed"
+    #: S-1 A안(오너 2026-09-05): 이 BODY dedupe 키는 이미 정산됐다 — 409. 쿼리를
+    #: 고쳐서 풀 수 없는 클라이언트 오류이고, 정직한 회복 경로는 상태 재조회 또는
+    #: 새 키(새 클릭)다. 확인된 재실행(+1 과금)은 이 사유를 타지 않는다(D안).
 
 
 class QuotaRefused(RuntimeError):
@@ -117,6 +126,10 @@ class QuotaCharge:
 
     ``holder`` 없이는 잠금을 풀 수 없다(8.2b §0.4 fencing) — 강제 재차지로 주인이
     바뀐 뒤 먼저 시작한 요청이 해제를 불러 새 주인의 보호를 지우는 것을 막는다.
+
+    S-1(오너 2026-09-05)이 더한 두 깃발: ``confirmed`` 는 확인된 재실행(+1 과금,
+    G4=A 를 원장이 처음으로 이행)임을 정산에 알리고, ``replay`` 는 입장이 **저장된
+    응답의 재생**을 승인했음을 핸들러에 알린다(잠금·차감 없음 — 이미 세린 요청이다).
     """
 
     user_id: str
@@ -125,6 +138,8 @@ class QuotaCharge:
     target_project_id: str
     dedupe_key: str
     holder: str
+    confirmed: bool = False
+    replay: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,6 +289,7 @@ class QuotaEnforcementService:
         locks: RequestLockService,
         mutex: AdmissionMutex,
         jobs: ActiveJobCounter | None = None,
+        replays: ReplayResponseRepository | None = None,
     ) -> None:
         self._policy = policy
         self._ledger = ledger
@@ -282,6 +298,8 @@ class QuotaEnforcementService:
         # None 이면 async job 을 세지 않는다 — 비동기 생성이 없는 조립(테스트·
         # 스크립트)에서 세울 것이 없기 때문이고, 배포 조립은 항상 넘긴다.
         self._jobs = jobs
+        # S-1 국소 C: 응답을 지속하지 않는 유료 경로(writing_report)의 재생 저장소.
+        self._replays = replays
 
     # 8.5-a: the admin read surface needs the stored policy row (stored limits,
     # pending reservation) next to the effective snapshot. Exposing the service
@@ -301,8 +319,28 @@ class QuotaEnforcementService:
 
         저장소가 실패하면 예외가 그대로 올라간다(Q4=A) — 잡아서 통과시키는 순간
         "계량할 수 없으면 무료"가 된다.
+
+        S-1(오너 2026-09-05 = A+D): BODY 키의 재제출 처분이 여기 붙는다 —
+        (1) ``"stored"`` 경로의 재생 저장소에 응답이 있으면 **재생 영수증**(잠금·
+        차감 없음), (2) 정산된 키의 **미확인** 재제출은 ``CONSUMED``(409), (3) 확인된
+        재제출은 그냥 통과시키고 정산에서 +1 한다(D안 — G4=A 의 이행).
         """
 
+        policy = key_resubmission_policy(action)
+        if (
+            policy == "stored" and self._replays is not None and not confirmed
+            and self._replays.get(replay_key(user_id, action, dedupe_key))
+            is not None
+        ):
+            return QuotaCharge(
+                user_id=user_id,
+                member_created_at=member_created_at,
+                action=action,
+                target_project_id=target_project_id,
+                dedupe_key=dedupe_key,
+                holder="replay",
+                replay=True,
+            )
         limits = self._policy.limits_for(user_id)
         if limits.status is QuotaStatus.SUSPENDED:
             # 정지는 동시성 문제가 아니라 계정 상태다 — 뮤텍스를 잡을 이유가 없고,
@@ -314,6 +352,17 @@ class QuotaEnforcementService:
         with self._mutex.hold(user_id):
             # ★ 임계 구역 안에서 하는 일은 이 셋뿐이다: 센다 → 판정한다 → 차지한다.
             # provider 호출이 여기 들어오면 한 회원의 요청이 91초씩 직렬화된다.
+            if (
+                policy in ("consume", "stored") and not confirmed
+                and self._ledger.has_settled_usage(
+                    user_id=user_id, action=action, dedupe_key=dedupe_key)
+            ):
+                # S-1 A안. 순서가 소진 판정보다 앞인 이유: 소진된 키는 한도 사건이
+                # 아니라 클라이언트 오류이기 때문이다(409 와 402 중 409 가 정직하다).
+                raise QuotaRefused(
+                    QuotaRefusalReason.CONSUMED,
+                    "this request key was already used; send a new request",
+                )
             self._refuse_if_exhausted(
                 user_id=user_id, member_created_at=member_created_at,
                 limits=limits,
@@ -329,6 +378,7 @@ class QuotaEnforcementService:
             target_project_id=target_project_id,
             dedupe_key=dedupe_key,
             holder=granted,
+            confirmed=confirmed,
         )
 
     def effective_usage(
@@ -433,13 +483,20 @@ class QuotaEnforcementService:
         """
 
         try:
-            if charged:
+            if charged and not charge.replay:
+                # 재생 영수증은 어떤 호출 형태로도 원장에 쓰지 않는다 — 이미 세린
+                # 요청이다(S-1 국소 C). wrapper 는 provider 호출이 없어 charged 가
+                # False 로 오는 것이 정상이지만, 영수증이 스스로 그 뜻을 지키게
+                # 한다(방어는 문의 성질이 아니라 문 자체에 있어야 한다).
                 self._record(
                     user_id=charge.user_id,
                     member_created_at=charge.member_created_at,
                     target_project_id=charge.target_project_id,
                     action=charge.action,
                     dedupe_key=charge.dedupe_key,
+                    # S-1 D안: 확인된 실행은 유니크 충돌 시에도 새 논리 행으로 적는다
+                    # — 8.2b G4=A 의 "+1 과금" 을 원장이 처음으로 이행하는 자리.
+                    force_new=charge.confirmed,
                 )
         finally:
             try:
@@ -475,9 +532,47 @@ class QuotaEnforcementService:
             dedupe_key=request_id,
         )
 
+    # ------------------------------------------------------------ 재생 (S-1 국소 C)
+
+    def store_replay_response(self, charge: QuotaCharge, body: bytes) -> None:
+        """정산 완료 응답을 재생 저장소에 남긴다(저장소가 없으면 조용한 no-op).
+
+        ``"stored"`` 처분 경로만 저장한다 — 다른 경로는 결과가 서버에 지속되므로
+        재생이 필요 없다. 실패해도 요청을 되돌리지 않는다(정산과 같은 규칙):
+        재생은 최선 노력이고, 저장이 안 된 재제출은 무료 재실행이 아니라 409 로
+        닫힌다.
+        """
+
+        if self._replays is None:
+            return
+        if key_resubmission_policy(charge.action) != "stored":
+            return
+        try:
+            self._replays.put(
+                replay_key(charge.user_id, charge.action, charge.dedupe_key),
+                body,
+            )
+        except Exception:  # noqa: BLE001 — 응답을 뒤집지 않는다
+            logger.exception(
+                "storing the replay response failed (user=%s action=%s "
+                "key=%s) — a later resubmit of this key will be refused "
+                "rather than replayed",
+                charge.user_id, charge.action, charge.dedupe_key,
+            )
+
+    def replay_response(self, charge: QuotaCharge) -> bytes | None:
+        """재생 영수증(``charge.replay``)이 가리키는 저장 응답. 핸들러가 부른다."""
+
+        if not charge.replay or self._replays is None:
+            return None
+        return self._replays.get(
+            replay_key(charge.user_id, charge.action, charge.dedupe_key)
+        )
+
     def _record(
         self, *, user_id: str, member_created_at: datetime,
         target_project_id: str, action: str, dedupe_key: str,
+        force_new: bool = False,
     ) -> None:
         try:
             self._ledger.record_usage(
@@ -486,6 +581,7 @@ class QuotaEnforcementService:
                 target_project_id=target_project_id,
                 action=action,
                 dedupe_key=dedupe_key,
+                force_new=force_new,
             )
         except Exception:  # noqa: BLE001 — 요청은 이미 성공했다
             # Q2 의 남은 한 자리: 성공 뒤 삽입이 실패하면 그 요청은 **무과금으로

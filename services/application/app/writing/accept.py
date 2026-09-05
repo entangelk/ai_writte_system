@@ -126,17 +126,23 @@ class WritingAcceptService:
         project = self._core_sot.get_project(project_id=request.project_id)
         if project.archived or chapter.archived or draft.archived:
             raise Archived("project, chapter, or draft is archived")
-        if self._reporter is not None:
-            candidate = await self._reporter.enrich(candidate, package)
         save_key = f"writing-accept:{idempotency_key}"
         intent = request.intent
 
-        # Replay lookup precedes stale-base and Gate (§3.3, WI-19).
+        # Replay lookup precedes stale-base and Gate (§3.3, WI-19) — and, since
+        # S-1 (감사 §A.1 말미), the provider call too: the same idempotency_key
+        # used to re-run reporter.enrich before converging on the stored unit,
+        # so every replay burned a real report call for nothing. The un-enriched
+        # candidate on this path is harmless — _create_job is idempotent per
+        # snapshot and the original accept already minted that job, so the
+        # report payload built here is discarded, not stored.
         replay = self._replay(request.project_id, draft_id, save_key, intent)
         if replay is not None:
             saved, target = replay
             return self._finalize(request.project_id, saved, candidate,
                                   intent, target, gate=None, replay=True)
+        if self._reporter is not None:
+            candidate = await self._reporter.enrich(candidate, package)
 
         base = self._core_sot.get_draft_version(
             project_id=request.project_id, draft_id=draft_id,

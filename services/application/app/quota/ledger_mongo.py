@@ -71,6 +71,16 @@ class MongoUsageLedgerRepository:
     def add_adjustment(self, entry: AdjustmentEntry) -> None:
         self._entries.insert_one(_adjustment_doc(entry))
 
+    def has_usage(self, user_id: str, *, action: str, dedupe_key: str) -> bool:
+        # 유니크 인덱스와 같은 세 축 + kind 제한(조정 행은 null 키로 오탐한다 —
+        # 부분 인덱스의 함정이 여기서도 같은 모양으로 성립한다).
+        return self._entries.find_one({
+            "user_id": user_id,
+            "action": action,
+            "dedupe_key": dedupe_key,
+            "kind": LedgerEntryKind.USAGE.value,
+        }) is not None
+
     def count_usage(self, user_id: str, *, window_field: str, window_key: str) -> int:
         return self._entries.count_documents({
             "user_id": user_id,

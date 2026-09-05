@@ -28,6 +28,13 @@
 값이 비어 있으면 **서버 생성으로 떨어진다**: 막지 못하는 것은 재전송 중복뿐이고
 (그 자리는 잠금이 덮는다), 빈 키를 그대로 쓰면 서로 다른 요청 두 건이 한 행으로
 접혀 **일한 요청이 무과금**이 된다 — 두 실패 중 후자가 더 나쁘다.
+
+**S-1 (오너 2026-09-05 = A+D+report 국소 C) — BODY 키는 1회만 소비된다.** 위 신뢰
+가정("프론트가 한 흐름에 uuid 하나")을 악성 클라이언트가 어기면 같은 키의 반복
+재제출로 LLM 은 실제로 돌면서 과금은 1행으로 접힌다(감사 §A.1). 계약 문장은
+*"같은 논리 요청은 한 번만 실행된다 — 정산된 키의 재제출은 실행 전 409, 진행 중
+재전송은 잠금 429, 확인된(``X-Confirm-Duplicate``) 재실행은 +1 과금"* 이다.
+경로별 처분은 :data:`KEY_REPLAY_ACTIONS` 이 정한다.
 """
 
 from __future__ import annotations
@@ -69,6 +76,36 @@ DEDUPE_SOURCES: dict[str, tuple[DedupeSource, str | None]] = {
     "identity_group_approve": (DedupeSource.SERVER, None),
     "context_search": (DedupeSource.BODY, "idempotency_key"),
 }
+
+#: S-1 D1 — BODY 키가 **이미 정산됐을 때**의 재제출 처분(서버·경로 키는 해당 없음).
+#:
+#: - ``"consume"``(기본): 입장에서 409 로 거부한다. 글쓰기 4경로(generate·gate·
+#:   revise·revise-and-gate)와 ``context_search`` — 결과가 서버에 지속되거나 애초에
+#:   재생할 것이 없어, 정직한 재시도는 상태 재조회 또는 새 키로 회복된다.
+#: - ``"handler"``: 입장은 통과시키고 핸들러가 **자기 replay 장치**로 저장 결과를
+#:   돌려준다(``writing_accept`` — 멱등 receipt 조회를 enrich 앞으로 옮긴 순서
+#:   교정. ``draft_finalize`` — ``idempotent_replay`` 면 runner 를 안 돌린다).
+#: - ``"stored"``: 입장에서 **응답 저장소**를 조회한다(``writing_report`` — 응답을
+#:   지속하지 않는 유일한 경로라 국소 C). 저장 응답이 있으면 재생하고, TTL 로
+#:   사라졌으면 409 — 어느 쪽이든 provider 는 다시 안 돈다.
+KEY_REPLAY_ACTIONS: dict[str, str] = {
+    "writing_accept": "handler",
+    "draft_finalize": "handler",
+    "writing_report": "stored",
+}
+
+
+def key_resubmission_policy(action: str) -> str:
+    """BODY 키 경로의 재제출 처분. ``"pass"`` 는 검증 대상이 아니라는 뜻이다.
+
+    서버 생성 키(클라이언트가 못 고른다)와 경로 파라미터 키(``job_id``)는 감사
+    §A.1 의 결함이 성립하지 않으므로 입장에서 아무것도 묻지 않는다.
+    """
+
+    source, _ = DEDUPE_SOURCES.get(action, (None, None))
+    if source is not DedupeSource.BODY:
+        return "pass"
+    return KEY_REPLAY_ACTIONS.get(action, "consume")
 
 
 def resolve_dedupe_key(

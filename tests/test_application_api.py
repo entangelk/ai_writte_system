@@ -2803,7 +2803,8 @@ class MemorySourceErrorContractDeclarationTest(unittest.TestCase):
          "/index/source-blocks/rebuild", "post"): {"401", "403", "404", "502", "503"},
         # 402/429: Slice 8.3 quota enforcement (Q5=B) — billable operation.
         ("/projects/{project_id}/context-search", "post"):
-            {"401", "402", "403", "429", "400", "404", "502", "503", "504"},
+            {"401", "402", "403", "429", "400", "404", "409", "502", "503",
+             "504"},
     }
 
     def setUp(self):
@@ -3233,20 +3234,24 @@ class WritingErrorContractDeclarationTest(unittest.TestCase):
         # the nine billable operations and nowhere else, which is what makes the
         # 429 on a *free* neighbour below a real signal rather than noise.
         ("/projects/{project_id}/writing/generate", "post"):
-            {"401", "402", "403", "429", "202", "400", "404", "502", "503",
-             "504"},
+            {"401", "402", "403", "429", "202", "400", "404", "409", "502",
+             "503", "504"},
         ("/projects/{project_id}/writing/generation-jobs/{job_id}", "get"):
             {"401", "403", "404", "503"},
         ("/projects/{project_id}/writing/generation-jobs/{job_id}/retry", "post"):
             {"401", "403", "404", "409", "503"},
         ("/projects/{project_id}/writing/gate", "post"):
-            {"401", "402", "403", "429", "400", "404", "502", "503", "504"},
+            {"401", "402", "403", "429", "400", "404", "409", "502", "503",
+             "504"},
         ("/projects/{project_id}/writing/report", "post"):
-            {"401", "402", "403", "429", "400", "404", "502", "503", "504"},
+            {"401", "402", "403", "429", "400", "404", "409", "502", "503",
+             "504"},
         ("/projects/{project_id}/writing/revise", "post"):
-            {"401", "402", "403", "429", "400", "404", "502", "503", "504"},
+            {"401", "402", "403", "429", "400", "404", "409", "502", "503",
+             "504"},
         ("/projects/{project_id}/writing/revise-and-gate", "post"):
-            {"401", "402", "403", "429", "400", "404", "502", "503", "504"},
+            {"401", "402", "403", "429", "400", "404", "409", "502", "503",
+             "504"},
         ("/projects/{project_id}/writing/loop-audits", "get"): {"401", "403", "404", "503"},
         ("/projects/{project_id}/writing/loop-audits/{audit_id}", "get"):
             {"401", "403", "404", "503"},

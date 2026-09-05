@@ -28,7 +28,8 @@ KST 경계는 ``quota/policy.py``가 이 저장소의 유일한 지역 시간대
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import uuid
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Callable, Protocol
@@ -80,6 +81,12 @@ class AdjustmentEntry:
     kind: LedgerEntryKind = LedgerEntryKind.ADJUSTMENT
 
 
+def _entry_fields(entry: UsageEntry) -> dict:
+    """강제 신규 행을 만들 때 베껴 쓸 필드 모음(``id``·``dedupe_key`` 는 갈아낸다)."""
+
+    return asdict(entry)
+
+
 @dataclass(frozen=True, slots=True)
 class WindowUsage:
     """두 창의 사용량. **단일 값이 아니다** — 요청은 두 창을 모두 통과해야 한다.
@@ -96,6 +103,9 @@ class WindowUsage:
 class UsageLedgerRepository(Protocol):
     def add_usage(self, entry: UsageEntry) -> None:
         """Raises DuplicateUsageEntry if (user_id, action, dedupe_key) exists."""
+
+    def has_usage(self, user_id: str, *, action: str, dedupe_key: str) -> bool:
+        """그 키의 **사용 행**이 이미 정산돼 있는가(S-1 — 키 소비 판정)."""
 
     def add_adjustment(self, entry: AdjustmentEntry) -> None: ...
 
@@ -120,6 +130,9 @@ class InMemoryUsageLedgerRepository:
             raise DuplicateUsageEntry(str(key))
         self._keys.add(key)
         self._usage.append(entry)
+
+    def has_usage(self, user_id: str, *, action: str, dedupe_key: str) -> bool:
+        return (user_id, action, dedupe_key) in self._keys
 
     def add_adjustment(self, entry: AdjustmentEntry) -> None:
         self._adjustments.append(entry)
@@ -162,11 +175,17 @@ class UsageLedgerService:
     def record_usage(
         self, *, user_id: str, member_created_at: datetime,
         target_project_id: str, action: str, dedupe_key: str,
+        force_new: bool = False,
     ) -> UsageEntry | None:
         """유료 동작 1회를 기록한다. 이미 있는 키면 ``None``(중복이라 안 셌다).
 
         ``member_created_at`` 은 회원 가입 시각이다 — 주 창이 가입일 기준 7일
         주기이므로(8.1 P2-b) 창 키를 얻으려면 필요하다.
+
+        ``force_new`` 는 **확인된 재실행**(S-1 D=D4 정렬)에만 쓴다: 8.2b G4=A 가
+        *"확인 한 번으로 통과하고 사용량 1회를 더 쓴다"* 고 약속한 그 +1 이다.
+        유니크 인덱스와 충돌하면 키에 일회성 접미를 붙인 **새 논리 행**으로 적는다
+        — 원 키의 행은 그대로 남아 이후 미확인 재제출의 409 판정 재료가 된다.
         """
 
         now = self._clock()
@@ -184,8 +203,29 @@ class UsageLedgerService:
         try:
             self._repo.add_usage(entry)
         except DuplicateUsageEntry:
-            return None
+            if not force_new:
+                return None
+            forced = UsageEntry(
+                **{
+                    **_entry_fields(entry),
+                    "id": self._id_factory(),
+                    "dedupe_key": f"{dedupe_key}!{uuid.uuid4().hex[:12]}",
+                }
+            )
+            self._repo.add_usage(forced)
+            return forced
         return entry
+
+    def has_settled_usage(
+        self, *, user_id: str, action: str, dedupe_key: str
+    ) -> bool:
+        """이 키로 이미 **정산된 사용 행**이 있는가(S-1 A안 — 키 소비 판정).
+
+        입장에서 부른다: 있으면 provider 실행 전에 409 로 거절한다. 유니크
+        인덱스와 같은 세 축이라 추가 인덱스가 필요 없다.
+        """
+
+        return self._repo.has_usage(user_id, action=action, dedupe_key=dedupe_key)
 
     def record_adjustment(
         self, *, user_id: str, member_created_at: datetime,

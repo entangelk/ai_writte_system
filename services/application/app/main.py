@@ -160,6 +160,9 @@ from services.application.app.quota.policy import (
     InMemoryQuotaPolicyRepository,
     QuotaPolicyService,
 )
+from services.application.app.quota.replay import (
+    InMemoryReplayResponseRepository,
+)
 from services.application.app.writing.scratch import (
     MAX_SCRATCH_PER_DRAFT,
     InMemoryWritingScratchRepository,
@@ -751,6 +754,7 @@ def _default_quota_enforcement_service(
         policy_repo = InMemoryQuotaPolicyRepository()
         ledger_repo = InMemoryUsageLedgerRepository()
         lock_repo = InMemoryRequestLockRepository()
+        replay_repo = InMemoryReplayResponseRepository()
     else:
         from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
         from services.application.app.quota.ledger_mongo import (
@@ -762,10 +766,14 @@ def _default_quota_enforcement_service(
         from services.application.app.quota.policy_mongo import (
             MongoQuotaPolicyRepository,
         )
+        from services.application.app.quota.replay import (
+            MongoReplayResponseRepository,
+        )
         db_name = os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
         policy_repo = MongoQuotaPolicyRepository.from_uri(uri, db_name=db_name)
         ledger_repo = MongoUsageLedgerRepository.from_uri(uri, db_name=db_name)
         lock_repo = MongoRequestLockRepository.from_uri(uri, db_name=db_name)
+        replay_repo = MongoReplayResponseRepository.from_uri(uri, db_name=db_name)
     return QuotaEnforcementService(
         policy=QuotaPolicyService(policy_repo),
         ledger=UsageLedgerService(
@@ -774,6 +782,7 @@ def _default_quota_enforcement_service(
         locks=RequestLockService(lock_repo),
         mutex=AdmissionMutex(lock_repo),
         jobs=jobs,
+        replays=replay_repo,
     )
 
 
@@ -1484,10 +1493,20 @@ class QuotaSettledRoute(APIRoute):
                         request.state, _QUOTA_STATE, None
                     )
                     if charge is not None:
+                        charged = _is_charged(
+                            status_code, tally.provider_calls)
                         request.app.state.quota.settle(
-                            charge,
-                            charged=_is_charged(status_code, tally.provider_calls),
+                            charge, charged=charged,
                         )
+                        # S-1 국소 C: 과금된 성공 응답을 재생 저장소에 남긴다.
+                        # 대상은 "stored" 처분 경로뿐이고 저장은 최선 노력이다
+                        # (실패해도 응답을 안 뒤집는다 — 서비스가 같은 규칙을 지킨다).
+                        if charged:
+                            body = getattr(response, "body", None)
+                            if body is not None:
+                                request.app.state.quota.store_replay_response(
+                                    charge, body
+                                )
 
         return settled
 

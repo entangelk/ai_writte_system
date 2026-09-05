@@ -126,6 +126,17 @@ class _Reporter:
             "문이 열렸다", CandidateClaimType.NARRATIVE_EVENT, True),))
 
 
+class _CountingReporter(_Reporter):
+    """enrich 호출 수를 잰다 — S-1 셀의 요점은 "replay 가 다시 안 돈다"다."""
+
+    def __init__(self):
+        self.calls = 0
+
+    async def enrich(self, candidate, package):
+        self.calls += 1
+        return await super().enrich(candidate, package)
+
+
 class WritingAcceptServiceTest(unittest.TestCase):
     def setUp(self):
         self.core = CoreSotService(InMemoryCoreSotRepository())
@@ -218,6 +229,23 @@ class WritingAcceptServiceTest(unittest.TestCase):
         self.assertEqual(replay.analysis_job.id, first.analysis_job.id)
         self.assertEqual(self.gate.calls, calls)
         self.assertEqual(len(self.analysis_repo.jobs), 1)
+
+    def test_same_key_replay_does_not_re_run_the_reporter(self):
+        """S-1(감사 §A.1 말미) — replay 조회가 reporter.enrich(provider 호출)보다
+        앞으로 옮겨졌다. under-strict: 순서를 되돌리면 둘째 단정이 실패한다
+        (replay 가 실제 report 호출을 다시 태운다).
+        """
+        reporter = _CountingReporter()
+        service = self._service(reporter=reporter)
+        kwargs = dict(draft_id=self.draft.id,
+            base_version_id=self.base.draft_version.id,
+            idempotency_key="no-enrich", request=_request(self.project),
+            candidate=_candidate(self.project), package=_package(self.project))
+        asyncio.run(service.accept(**kwargs))
+        self.assertEqual(reporter.calls, 1)
+        replay = asyncio.run(service.accept(**kwargs))
+        self.assertTrue(replay.idempotent_replay)
+        self.assertEqual(reporter.calls, 1)
 
     def test_different_key_creates_next_version_and_job(self):
         first = self._accept(key="one")

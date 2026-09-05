@@ -24,6 +24,7 @@ from fastapi import (
     Depends,
     HTTPException,
     Request,
+    Response,
 )
 from fastapi.responses import JSONResponse
 from services.application.app.context_search.models import (
@@ -682,8 +683,24 @@ def register_writing(
               responses=_owned(_BILLABLE_400_404_502_504_CONFIG),
               dependencies=_REQUIRE_PROJECT_OWNER_BILLABLE)
     async def writing_report_endpoint(
-        project_id: str, body: WritingReportRequest
+        project_id: str, body: WritingReportRequest, http_request: Request
     ) -> dict[str, object]:
+        # S-1 국소 C(오너 2026-09-05): 이 경로는 응답을 지속하지 않는 유일한 유료
+        # 경로라 정산 시점에 응답 본문을 저장해 둔다. 같은 request_id 의 재제출은
+        # 입장이 **재생 영수증**을 내주고, 여기서 저장 응답을 그대로 돌려준다 —
+        # provider 도 과금도 다시 일어나지 않는다(이미 세린 요청이다).
+        charge = quota_charge(http_request)
+        if charge.replay:
+            stored = http_request.app.state.quota.replay_response(charge)
+            if stored is None:
+                # 입장이 본 저장 응답이 그 사이에 만료됐다 — 재실행이 아니라 같은
+                # 얼굴(409)로 닫는다.
+                raise HTTPException(
+                    status_code=409,
+                    detail="this request key was already used; "
+                           "send a new request",
+                )
+            return Response(content=stored, media_type="application/json")
         try:
             _require_project_exists(project_id)
             task_type = WritingTaskType(body.task_type)

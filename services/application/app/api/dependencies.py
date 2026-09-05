@@ -157,10 +157,13 @@ CONFIRM_DUPLICATE_HEADER = "X-Confirm-Duplicate"
 
 #: Q5=B — 프론트가 **다르게 행동해야 하는 사건이 셋**이라 코드가 셋이다.
 #: 429 "확인하면 지금 통과" / 402 "이번 창에는 방법이 없다" / 403 "관리자만 푼다".
+#: S-1 A안(오너 2026-09-05)이 넷째를 더했다: 409 "이 키는 이미 썼다 — 새 요청을
+#: 보내라"(기다림으로 풀리지 않는다).
 _QUOTA_REFUSAL_STATUS: dict[QuotaRefusalReason, int] = {
     QuotaRefusalReason.LOCKED: 429,
     QuotaRefusalReason.EXCEEDED: 402,
     QuotaRefusalReason.SUSPENDED: 403,
+    QuotaRefusalReason.CONSUMED: 409,
 }
 
 
