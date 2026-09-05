@@ -6,7 +6,7 @@
 
 서비스 경계와 확정된 계약을 먼저 볼 때는 [`../system-contract-sot.md`](../system-contract-sot.md)를 정본 SoT로 사용한다. 이 인덱스는 Phase별 세부 계획과 **모든 착수 결정 브리프**를 찾는 자리다.
 
-> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(120개 중 100개)는
+> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(121개 중 101개)는
 > `*-decisions.md` 착수 결정 브리프이며, **오너 결정의 근거 기록**이다. 파일명 접두 체계는 이미 무너져
 > 있고(`00`~`07` 계열 + 접두 없는 최근 것들) 파일명만으로는 트랙을 알 수 없다 — 그래서 아래는 **접두가
 > 아니라 트랙으로** 묶었다. 디렉터리 재편은 아직 결정되지 않은 별개 사안이다(HANDOFF 추적 부채).
@@ -226,6 +226,7 @@
 | [`auth-d8-6-purge-ui-decisions.md`](auth-d8-6-purge-ui-decisions.md) | D8-6 영구 삭제 UI·2단계 시행·삭제 감사·재시도 의미 | Verified PASS(v1.7.82, c2ca946) |
 | [`auth-d8-7-infra-auth-decisions.md`](auth-d8-7-infra-auth-decisions.md) | D8-7 인프라 노출면·자격증명 | Partially — **G1=C 확정** / G2~G6 유예 |
 | [`auth-signup-approval-decisions.md`](auth-signup-approval-decisions.md) | 자기 가입(승인제) — v1.7.82 가입 금지 문구 개정·403 생산자 셋·브루트포스 잠금·시드 정리 | **Resolved(2026-08-22)** — 403+사유 / 방어 동봉 / 시드 정리+오너 계정 |
+| [`security-phase-s3-signup-throttle-decisions.md`](security-phase-s3-signup-throttle-decisions.md) | Phase S-3 — 공개 `/auth/signup` 속박(축: nginx IP / 앱 전역 / IP+XFF 신뢰정책 / 표면 폐쇄). 2026-08-22 이 "공개 배포 전"으로 유예한 `X-Forwarded-For` 신뢰 정책이 이 결정이다 | **Proposed — 오너 결정 대기** · 착수 전 확인 필요: Cloudflare 터널 ingress 가 nginx 인가 앱 직행인가 |
 
 ### 외부 확장 (배선 완료 · 어댑터 미착수)
 
