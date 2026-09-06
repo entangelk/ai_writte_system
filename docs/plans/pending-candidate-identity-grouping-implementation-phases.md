@@ -1,9 +1,9 @@
 # 미승인 후보 정체성 그룹 — 구현 페이즈
 
-상태: `Active — Slice 0~5 완료(Slice 5 검증 대기), Slice 6(grouped UI) 다음`
+상태: `Active — Slice 0~6 구현 완료(Slice 0~5 검증 폐쇄), Slice 6 독립 검증 대기`
 작성: 2026-09-02
 결정 정본: [`pending-candidate-identity-grouping-decisions.md`](pending-candidate-identity-grouping-decisions.md) — **C 채택**
-계약 정본: [`../system-contract-sot.md`](../system-contract-sot.md) v1.8.29
+계약 정본: [`../system-contract-sot.md`](../system-contract-sot.md) v1.8.34
 
 ## 목적과 완료 기준
 
@@ -325,14 +325,50 @@ terminal-skip 셀에 선제 포함)·뮤테이션 12종 전부 기명 재실패(
 ## Slice 6 — grouped Inbox UI
 
 **범위:** Review Inbox 화면에서 grouped item을 접고 펼치며, 그룹 승인/거절 버튼을 제공한다. 개별 후보
-detail과 edit/conflict 화면은 유지한다. `uncertain` relation은 "같은 대상일 수 있음"으로 표시하되,
-수동 합치기/분리 확정 액션은 아래 Deferred의 트리거 전까지 열지 않는다.
+detail과 edit/conflict 화면은 유지한다. ~~`uncertain` relation은 "같은 대상일 수 있음"으로 표시하되,~~
+~~수동 합치기/분리 확정 액션은 아래 Deferred의 트리거 전까지 열지 않는다.~~ → **표시도 액션과 함께
+유예한다**(착수 브리프 D2=B, 오너 2026-09-06): `uncertain`은 relation 행에만 남고 group member로
+연결되지 않아 읽기면에 노출 경로가 없는데, 그 경로를 여는 것은 그룹 요약이 아니라 **item 최상위의 새
+읽기 축**이라 Slice 3 규모의 백엔드 작업이 UI 슬라이스 안에 들어온다. 완료 기준 #6과 아래 검증 목록
+어느 쪽도 이 표시를 요구하지 않는다.
 
 **규칙:** 목록 첫 화면에서 실제 후보 payload가 보이게 한다. 그룹 안 후보는 source/job 단위 차이를
 확인할 수 있어야 한다. 부분 실패와 conflict는 성공처럼 닫지 않고, 남은 조치가 보이는 상태로 남긴다.
 
 **검증:** grouped/ungrouped 혼합 렌더, expand/collapse, group reject/approve 요청 body와 idempotency key,
 partial failure 표시, 기존 개별 approve/reject affordance 유지, 모바일 폭에서 버튼/텍스트 겹침 없음.
+
+**★ 이 Slice는 계약을 한 곳 건드린다**(위 "공통 작업 규칙"의 *"계약을 바꾸는 Slice 0·3·4·5"* 열거에
+**6이 더해진다**). 착수 브리프 D1=A(오너 2026-09-06): 그룹 승인 body `expected_revision`이 필수인데
+읽기면이 `revision`을 주는 경로가 없어 **승인 버튼을 만들 수 없었다**(409 detail에 값이 있으나 H3가
+`detail` 분기를 금지한다). `identity_group` payload에 **`group_revision` 키 하나**를 additive로 더한다 —
+이 표에서 **표시 전용이 아닌 유일한 필드**이고, 값은 살아 있는 그룹의 것 그대로다(파생하지 않는다.
+`revision`은 `set_group_status`에서만 오르고 `add_member`는 그룹 행을 안 건드린다).
+
+**완료 기록(2026-09-06):** 착수 브리프
+[`pending-candidate-identity-grouping-slice6-grouped-inbox-ui-decisions.md`](pending-candidate-identity-grouping-slice6-grouped-inbox-ui-decisions.md)
+— **D1=A·D2=B 채택**. 이 Slice가 확정한 리터럴 —
+
+- **`group_revision`은 읽기면의 요청 입력**이다(위 ★). `IdentityGroupSummary.revision` +
+  `_identity_group_payload`. **OpenAPI 무변 실측**(응답이 `dict[str, object]` 선언 — 경계 md5 동일
+  `d60b94d3…`), 프론트 `schema.d.ts` 재생성 불요.
+- **묶는 것은 화면의 일이다** — 서버는 평평한 item 목록을 주고 같은 그룹 멤버가 같은
+  `identity_group`을 반복한다. 순서는 **첫 등장**(멤버가 검토함을 떠나도 그룹이 자리를 안 옮긴다).
+- **기본은 펼침**(규칙 "목록 첫 화면에서 실제 후보 payload가 보이게 한다"의 직접 이행). 접어도
+  그룹 머리와 그룹 액션은 남는다 — 접힌 그룹도 처리할 수 있어야 한다.
+- **그룹 액션 결과 상자는 페이지 수준**이다. 그룹 행 안에 두면 끝난 그룹이 목록에서 빠질 때 결과도
+  함께 사라진다 — 거절 요약(`건너뜀 N건`)과 부분 실패가 **재조회를 넘겨 살아야 하는** 바로 그
+  사실이다. `applied`/`skipped`가 아닌 step은 "반영"으로 세지 않고 남은 건수를 따로 말한다(D4=A의
+  200을 성공처럼 닫지 않는다).
+- **그룹 안 멤버에 분석 job을 표시**(그룹 안 후보를 가르는 축) · `contradicted`는 경고 문구를 달되
+  액션은 막지 않는다(서버가 받는다 — 읽기면 정본과 같은 순서).
+- **좁은 폭 겹침 방지는 스타일시트에서 유도해 잰다** — jsdom이 배치를 못 재므로 `pageLayout.test.ts`
+  선례대로 **규칙성**(`flex-wrap: wrap` + 요약 열의 `min-width: 0`·고정 basis)을 단정한다.
+
+셀 +15(백엔드 1 + 프론트 14: ReviewInbox 그룹 12 · pageLayout 2)·뮤테이션 9종 전부 기명 재실패
+(M1~M3 읽기면 · M4~M8 화면 · M9 배치 규칙). 프론트 전수 403 → **417 passed**. 프론트 기존 결함
+2건(`--type-body` 미정의 · 이관 목록 49↔54)은 착수 전에 닫았다 — **`.review-summary-link`의 실제
+글꼴 크기가 1.3rem → 1rem으로 바뀌므로 육안 확인 대상**이다.
 
 ## 공통 작업 규칙
 
@@ -350,8 +386,11 @@ partial failure 표시, 기존 개별 approve/reject affordance 유지, 모바�
 
 canonical memory 간 기존 중복 backfill/merge, threshold 운영 캘리브레이션, project 간 identity 공유,
 bulk group 처리, 사람이 확인하지 않는 자동 병합, candidate document 물리 병합은 이 페이즈 밖이다.
-`uncertain` relation의 수동 합치기/분리 확정 액션은 dogfood에서 uncertain 표시가 실제 검토를 막거나,
-`contradicted` group을 사람이 해소해야 하는 첫 사례가 생길 때 별도 Slice로 연다. **shortlist 상한·페이징**도
+`uncertain` relation의 **표시와** 수동 합치기/분리 확정 액션은 한 Slice로 함께 연다(브리프 D2=B,
+2026-09-06 — 표시가 없는데 "표시가 검토를 막을 때"를 트리거로 두면 자기모순이라 트리거를 고쳐 단다).
+**트리거: `contradicted` group이 처음 관측되거나, 오너가 검토함에서 "이 둘이 같은 대상인데 안 묶였다"를
+만날 때.** 그때 읽기면에 item 최상위 축(예: `uncertain_peer_ids`)을 열고 가시성·정렬·결정성 규칙을
+Slice 3과 같은 밀도로 정한다. **shortlist 상한·페이징**도
 유예다(Slice 1 검증 비차단 #3, 2026-09-03) — 같은 이름 후보가 수백 개면 판정 재사용의 성분 확인(BFS)이
 O(pool×relations)로 커지는데 dogfood 규모에서 문제된 징후가 없으므로, **트리거: Review Inbox의 그룹 수가
 세 자리로 관측될 때** 상한·페이징을 논의한다.

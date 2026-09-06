@@ -42,7 +42,7 @@
 
 ## 지금의 계약
 
-정본은 [`docs/system-contract-sot.md`](docs/system-contract-sot.md) **v1.8.29**(Approved). **미확정 항목은 추측 구현하지 않는다.** 아래는 코드를 만지기 전에 알아야 하는 요약이다.
+정본은 [`docs/system-contract-sot.md`](docs/system-contract-sot.md) **v1.8.34**(Approved). **미확정 항목은 추측 구현하지 않는다.** 아래는 코드를 만지기 전에 알아야 하는 요약이다.
 
 - **배포되는 앱이 둘이다.** `/admin` **17 operation**은 포트를 게시하지 않는 `admin` compose 서비스가 서빙하고 도달 경로는 nginx `location /api/admin/` 하나다. 제품 앱에는 그 route가 **없으므로** LAN에서 치면 가드가 아니라 **라우터가 404**다. `create_app()` 은 **102 operation 합집합**이고 테스트·경계 행렬·`dump_openapi.py`(= 프론트 `schema.d.ts`)가 전부 그것을 쓴다 — 브라우저는 nginx 뒤에서 한 origin만 보므로 **계약은 하나여야 한다**. 세 factory(`create_app`·`create_product_app`·`create_admin_app`)는 **한 함수 본문**이고 플래그로만 갈린다. 가드 [`test_admin_surface_separation.py`](tests/test_admin_surface_separation.py).
 - **operation tier = 전체 102 · project 76 · admin 17**([`test_auth_api.py:1910`](tests/test_auth_api.py#L1910) 핀이 정본).
@@ -57,6 +57,7 @@
 - **에러 계약(H3).** 본문은 균일 `{"detail": <string>}`. 상태코드=기계용·`detail`=사람용이라 **`detail` 문자열로 분기하면 안 된다**. 균일 본문의 유일한 예외는 **partial envelope**이고 허용 지점은 **정확히 6곳**(revise-and-gate 4 · accept 1 · auto-promote 1). 새 endpoint는 `responses=` 와 dependency를 함께 붙이고 tier 전수 가드에 등재한다.
 - **길이 상한.** 유닛 본문 **4000자** · 브리프 스칼라(premise·genre·tone·pov) **1000자**. 상수는 [`app/env.py::draft_raw_text_max_chars`](services/application/app/env.py) **하나**이고 저장 축(422)과 accept 축(400)이 같은 상수를 읽는다. **accept의 검증은 provider 호출 앞**이다(상한 넘을 몸에 유료 호출이 돈을 쓰면 안 된다). **프론트는 경고+저장 차단이지 잘라내기가 아니다 — textarea `maxLength` 금지**(정본 보존, no-maxlength 셀이 문다).
 - **Chapter/Scene 계층.** metadata-only Chapter + Scene(Draft), parent별 연속 순열, AI는 같은 장의 다음 Scene만. **legacy 평면 Draft는 CRUD·accept가 503 fail-closed(2층)이고 export·versions만 대피 경로로 200**이다 — 대피 경로를 막으면 이관 못 한 데이터가 갇힌다. 공개 `unit_kind` 는 제거됐고 `core_sot` 의 legacy migration 입력으로만 남아 있다.
+- **검토함 그룹 읽기면.** `identity_group` payload 6키 중 **`group_revision` 만 표시 전용이 아니다** — 그룹 승인 body `expected_revision` 의 **유일한 조달 경로**이고(409 detail 에 값이 있으나 **H3 가 detail 분기를 금지**한다) 값은 살아 있는 그룹의 것 그대로여야 한다(파생 금지). **`revision` 은 `set_group_status` 에서만 오른다** — `add_member` 는 그룹 행을 안 건드리므로 실전 값은 대개 `0` 이고, 그래서 **셀 픽스처를 0 으로 두면 상수 박기가 전건 통과한다**(신규 셀이 상태 전이 2회로 revision 2 ≠ 멤버 3 을 만드는 이유). **그룹 액션 결과 상자는 페이지 수준에 둔다** — 그룹 행 안에 두면 끝난 그룹이 목록에서 빠질 때 결과도 사라지는데, 거절 요약과 부분 실패는 **재조회를 넘겨 살아야 하는** 사실이다. `applied`/`skipped` 아닌 step 을 "반영"으로 세면 D4=A 의 200 이 성공으로 닫힌다.
 - **검색과 리랭커.** 벡터(Chroma/BGE-m3-ko) + lexical(ES/nori)을 RRF(`1/(k+rank)`, k=60)로 융합하고 리랭커는 **그 뒤에** 걸린다. **★ 리랭커 표기는 세 조각이고 "있음" 한 단어로 쓰면 거짓이다** — *"외부 API 리랭커 붙일 수 있음(**기본 꺼짐**) · self-host 미구현 · **품질 평가 미실시**"*. `RERANK_API_URL` 이 비면 조립이 감싸지 않고 검색은 RRF까지만으로 동작한다. **실패는 열려 있다(fail-open) — 프로바이더가 아니라 *단계 전체*가 그렇다**(순열 아닌 응답·텍스트 투영 예외 포함). 다만 **조용히 삼키지 않는다**(`logging.WARNING` + `exc_info`) — fail-open이 조용하면 리랭킹이 영원히 no-op인 채로 아무도 모른다.
 - **회귀 기준선**: backend **test-mongo ON 2890 passed / 1 skipped / 3791 subtests**(2026-09-06 **알파**). **전수 판정은 `passed` 가 아니라 `skip` 수를 먼저 본다 — `skip 1 = live Chroma` 하나뿐이고, 2 이상이면 호스트에 빠진 패키지가 있다는 뜻이다**(함정 절 "호스트 도구 공백"). **★ subtest 수가 하루 안에 3189 → 7881 → 3789 로 출렁였다 — 커버리지 변화가 아니다.** 위생 가드가 처음엔 (파일×금지값)마다 subtest 를 냈다가(단독 4665), 검증 조건 B1 을 닫으면서 **스캔을 회계로 바꿔** 위반이 있을 때만 subtest 를 낸다(단독 572). 파일별 검사는 그대로 돌고 **전건 방문 여부를 셀이 직접 단정하므로 오히려 강해졌다** — subtest 수를 커버리지 대리지표로 읽지 말 것. **★ 최상위 [`README.md`](README.md) 절차 표의 `N passed / N subtests` 는 아무 가드도 안 잡는다** — 기준선을 갱신하는 슬라이스가 그 한 줄도 함께 고친다.
 
@@ -183,7 +184,6 @@
 | `docs/README.md` 의 "브리프 96개" | 실측 **100**. 최상위 `README.md` 의 같은 주장은 가드가 잡는데 **이 줄은 가드 밖**이다 | `docs/README.md:11` |
 | `chat-revision-ideation.md`·`dogfood-checklist.md` 가 문서 지도에 없다 | 후자는 HANDOFF 가 실제로 가리키는 살아 있는 문서다 | `docs/README.md` |
 | 미사용 import에 회귀 가드 없음 | 유일한 신호가 스위트 밖 linter. **ⓐ(정리 슬라이스마다 수동 측정)가 현 단계에 맞다** | — |
-| 프론트 기존 결함 2건 | `typeScale.test.ts` 이관 목록 49↔54 · `designTokens.test.ts` `--type-body` 미정의. **사전존재 확인됨** | — |
 | `scripts/` 를 pytest가 실행하지 않는다 | CI 없음(`.github` 부재). 부분 방어가 `mypy.ini`(`call-arg`+`misc`) 가드다 — **`misc` 를 disable 목록에 넣으면 표적 결함이 조용해진다** | `tests/test_typecheck.py` |
 
 **🛡 보안 — Phase S**(2026-09-05 이중 다중 에이전트 감사. 기록 [`security_audit_dual_workflow.md`](docs/verifications/2026-09-05/security_audit_dual_workflow.md) 가 위치·근거 코드·공격 시나리오까지 담는다 — **여기 옮기지 않는다**)
@@ -226,7 +226,7 @@
 
 0. **★ Phase S — 보안 감사 후속**(기록 [`security_audit_dual_workflow.md`](docs/verifications/2026-09-05/security_audit_dual_workflow.md), 확정 39건 · critical 0 · HIGH 1). 아래 "🛡 보안 — Phase S" 표가 항목별 정본이다. **~~S-3 signup~~·~~S-1 quota dedupe~~·~~S-0 문서 스윕~~·~~S-7 토큰 저장 방식~~(닫힘) → **저장소·호스트 양쪽에 남은 착수 항목이 없다.** 나머지(S-2·S-5·S-6)는 트리거 대기.** S-2(nginx 보안 헤더)를 할 때는 **nginx 앞단 레이트리밋·`client_max_body_size` 와 한 슬라이스로 묶는 편이 싸다** — nginx 를 한 번만 연다.
    - **낡은 vhost(공용 리버스 프록시)**: 오너 확인 완료(2026-09-05) — **타 프로젝트 쪽 작업 AI가 처리 중**이다. 이 저장소 소관 아님(살아나면 두 번째 진입로인 구조는 그대로).
-1. **Slice 6(grouped Inbox UI)** — **막던 것이 없어졌다**: Slice 0~5 구현·검증이 모두 폐쇄됐다(Slice 5 조건 B1·B2 = 2026-09-06). 착수 전 아래 "🔧 미수리"의 **프론트 기존 결함 2건**을 먼저 본다.
+1. **~~Slice 6(grouped Inbox UI)~~ 구현 완료(2026-09-06, SoT v1.8.34) → 남은 것은 독립 검증**이다. **착수 전 브리프가 두 축을 열었고 오너가 D1=A·D2=B 로 닫았다** — 읽기면에 `group_revision` 한 키(승인 body 의 유일한 조달 경로) · `uncertain` 표시는 액션과 함께 유예. 검증자가 볼 자리: **① 결과 상자가 페이지 수준인 이유**(그룹 행 안에 두면 끝난 그룹과 함께 사라진다 — 부분 실패 계약이 절반만 지켜진다) **② `group_revision` 셀의 픽스처가 revision 0 이 아닌 이유**(0 이면 상수 박기가 전건 통과한다) **③ 좁은 폭은 jsdom 이 못 재므로 스타일시트 규칙성으로 잰다**.
 2. **최종 저장·분석 연동 5차(승격) 재검증** — 4차 조건부 합격의 조건 N1은 닫혔다. **집중 셀 + 변이로 충분**(4차 판정문).
 3. **장면 메모 Slice 3~4(화면 둘)** — API는 완결(Slice 0~2). **Slice 3는 API 계약을 안 바꾼다** — 목록은 미리보기(200자)만 싣고 전문은 단건 GET이 주므로 **화면이 목록에서 전문을 기대하게 만들지 말 것**. 저장 화면은 **요청 중 저장 버튼 비활성화**. 확정값 [`scene-note-decisions.md`](docs/plans/scene-note-decisions.md).
 4. **육안 확인(누적)** — 프론트 재빌드 선행. Phase 10 마감 다섯(첫 화면 콘텐츠 · 오른쪽 끝 정렬 · 목록 행 간격 · 차트 막대 테두리 · 버튼 hover) · 비활성 버튼 색 · 편집기 드로어와 설정 탭이 좁은 화면에서 겹치는지 · 관측 화면과 비동기 패드 렌더 · **최종 저장·분석 연동의 첫 실사용**(운영 이력 0건).
