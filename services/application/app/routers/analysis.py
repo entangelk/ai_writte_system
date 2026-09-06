@@ -813,12 +813,16 @@ def register_analysis(
     def _identity_group_payload(summary) -> dict[str, object] | None:
         # 정체성 그룹 Slice 3 — additive group metadata. ungrouped는 null.
         # 기존 개별 item 필드·detail 경계는 개별 후보 기준으로 무변이다.
+        # Slice 6(브리프 D1=A) — `group_revision`은 이 표의 유일한 **요청
+        # 입력**이다: 그룹 승인 body `expected_revision`의 조달 경로가 여기뿐이고
+        # (H3가 409 detail 분기를 금지한다), 값은 살아 있는 그룹의 것 그대로다.
         if summary is None:
             return None
         return {
             "group_id": summary.group_id,
             "group_size": len(summary.member_ids),
             "group_status": summary.status.value,
+            "group_revision": summary.revision,
             "group_member_ids": list(summary.member_ids),
             "identity_rationale_summary": summary.rationale_summary,
         }

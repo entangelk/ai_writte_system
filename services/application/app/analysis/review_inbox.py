@@ -46,10 +46,16 @@ class IdentityGroupSummary:
     수 있으므로 표시 전용이다. ``member_ids``는 그 멤버십을 검토함 population
     (needs_review·미승격)으로 자른 roster다 — 검토함을 떠난 stale member는
     목록 렌더에 싣지 않는다(member 수명 자체는 Slice 4·5가 확정한다).
+
+    ``revision``만 표시 전용이 아니라 **요청 입력**이다(Slice 6 브리프 D1=A,
+    2026-09-06): 그룹 승인 body의 ``expected_revision``이 필수인데 읽기면이
+    값을 주지 않아 UI가 승인 버튼을 만들 수 없었다. 값은 살아 있는 그룹의
+    것을 그대로 싣는다 — 파생하지 않는다(``set_group_status``에서만 오른다).
     """
 
     group_id: str
     status: IdentityGroupStatus
+    revision: int
     member_ids: tuple[str, ...]
     rationale_summary: str | None
 
@@ -161,6 +167,7 @@ class ReviewInboxService:
                 summaries[candidate_id] = IdentityGroupSummary(
                     group_id=group.group_id,
                     status=group.status,
+                    revision=group.revision,
                     member_ids=roster,
                     rationale_summary=(
                         rationale.rationale[:IDENTITY_RATIONALE_SUMMARY_MAX_CHARS]

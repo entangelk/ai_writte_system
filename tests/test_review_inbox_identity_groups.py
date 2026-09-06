@@ -8,6 +8,12 @@
 - 목록 렌더에 필요한 최소값: ``group_id``·``group_size``·``group_status``·
   ``group_member_ids``·``identity_rationale_summary``.
 
+Slice 6(브리프 D1=A, 2026-09-06)이 여섯 번째 키 ``group_revision``을 더한다.
+**이것만 표시 전용이 아니라 요청 입력**이다 — 그룹 승인
+(``POST …/groups/{gid}/approve``)의 body ``expected_revision``이 필수인데
+(D1=A, SoT v1.8.29 ①) 읽기면이 값을 주지 않아 UI가 버튼을 만들 수 없었다.
+``revision``은 ``set_group_status``에서만 오른다(멤버 추가는 안 올린다).
+
 양방향 회귀:
 - under-strict: 그룹 메타데이터가 빠지거나 closed 그룹이 새어 들면 재실패.
 - over-strict: 검토함을 떠난(stale) 멤버까지 roster에 싣거나 가시 멤버가
@@ -175,6 +181,7 @@ class GroupMetadataTest(unittest.TestCase):
             "group_id": group.group_id,
             "group_size": 2,
             "group_status": "open",
+            "group_revision": 0,
             "group_member_ids": sorted([a.id, b.id]),
             "identity_rationale_summary": "same normalized name",
         }
@@ -264,6 +271,42 @@ class GroupMetadataTest(unittest.TestCase):
             items[b.id]["identity_group"]["group_id"], group.group_id
         )
 
+    def test_group_revision_is_the_live_group_revision(self):
+        """``expected_revision``의 유일한 조달 경로다(Slice 6 브리프 D1=A).
+
+        UI는 이 값을 그대로 승인 body에 실어야 한다. 그래서 읽기면은
+        **살아 있는 그룹의 revision**을 말해야 하고, 상수도 파생값도 아니다.
+
+        under-strict: 키를 빼거나 0으로 고정하면 재실패한다 — 상태 전이를 두
+        번 태워 revision을 2로 만들어 둔다.
+        over-strict: revision 자리에 roster 길이·멤버 수 같은 **다른 수**를
+        실어도 재실패한다(멤버 3 ≠ revision 2). 멤버 추가가 revision을 올리지
+        않는다는 저장 계약(`add_member`는 그룹 행을 안 건드린다)이 읽기면에
+        그대로 온다.
+        """
+        client, analysis, groups, _clock, project_id = _build()
+        a = _seed_candidate(analysis, project_id=project_id,
+                            logical_key="a", payload={"name": "Ariel", "observation": "brave"})
+        b = _seed_candidate(analysis, project_id=project_id,
+                            logical_key="b", payload={"name": "Ariel", "observation": "brave"})
+        c = _seed_candidate(analysis, project_id=project_id,
+                            logical_key="c", payload={"name": "Ariel", "observation": "brave"})
+        group = _open_group(groups, project_id, a, b, c)
+        groups.set_group_status(
+            project_id, group.group_id, IdentityGroupStatus.CONTRADICTED
+        )
+        groups.set_group_status(
+            project_id, group.group_id, IdentityGroupStatus.OPEN
+        )
+
+        items = _by_id(_items(client, project_id))
+
+        self.assertEqual(items[a.id]["identity_group"]["group_revision"], 2)
+        self.assertEqual(items[a.id]["identity_group"]["group_size"], 3)
+        self.assertEqual(
+            groups.get_group(project_id, group.group_id).revision, 2
+        )
+
     def test_members_outside_the_inbox_are_excluded_from_the_roster(self):
         client, analysis, groups, _clock, project_id = _build()
         a = _seed_candidate(analysis, project_id=project_id,
@@ -285,6 +328,7 @@ class GroupMetadataTest(unittest.TestCase):
             "group_id": group.group_id,
             "group_size": 2,
             "group_status": "open",
+            "group_revision": 0,
             "group_member_ids": sorted([a.id, c.id]),
             "identity_rationale_summary": None,
         }
@@ -453,6 +497,7 @@ class GroupMetadataTest(unittest.TestCase):
                 "group_id": group.group_id,
                 "group_size": 2,
                 "group_status": "open",
+                "group_revision": 0,
                 "group_member_ids": sorted([a.id, b.id]),
                 "identity_rationale_summary": None,
             },
@@ -541,6 +586,7 @@ class GroupMetadataTest(unittest.TestCase):
                 "group_id": group.group_id,
                 "group_size": 2,
                 "group_status": "open",
+                "group_revision": 0,
                 "group_member_ids": sorted([a.id, c.id]),
                 "identity_rationale_summary": None,
             },
@@ -572,6 +618,7 @@ class GroupMetadataTest(unittest.TestCase):
                 "group_id": group.group_id,
                 "group_size": 2,
                 "group_status": "open",
+                "group_revision": 0,
                 "group_member_ids": sorted([a.id, b.id]),
                 "identity_rationale_summary": None,
             },
