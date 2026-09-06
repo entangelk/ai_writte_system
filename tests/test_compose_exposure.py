@@ -228,5 +228,61 @@ class ExternalComposeExposureTest(unittest.TestCase):
         )
 
 
+class ComposeRestartPolicyTest(unittest.TestCase):
+    """배포 스택의 모든 서비스가 재부팅 뒤 **스스로 돌아온다**.
+
+    2026-09-06 배포 호스트 재부팅에서 측정된 결함: 정책이 서비스마다 갈려 있었다 —
+    `frontend`·`admin`·`worker`·`generation_worker` 만 `unless-stopped` 였고
+    `mongo`·`application`·`gateway`·`chroma`·`elasticsearch` 는 정책이 없어 재부팅
+    뒤 올라오지 않았다. 그 결과가 **조용한 장애**다: frontend 는 200 을 주는데 API 는
+    죽어 있고, 정책이 있는 자식들(admin·worker)만 mongo 를 못 찾아 무한 재시작한다.
+    사람이 볼 때까지 아무도 안 알려 준다.
+
+    양방향:
+    - under-strict: 어느 서비스에서든 `restart:` 를 지우면 실패한다(원 결함의 재현).
+    - over-strict: 목록을 손으로 들지 않고 **파일에서 서비스 집합을 유도**하므로,
+      정책 없는 새 서비스를 더해도 실패한다.
+    """
+
+    def test_every_service_restarts_itself_after_a_host_reboot(self) -> None:
+        text = (_REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        service: str | None = None
+        policy: dict[str, str | None] = {}
+        in_services = False
+        for line in text.splitlines():
+            # ★ 최상위 키로 구획을 잡는다 — `volumes:` 아래의 이름들도 두 칸
+            # 들여쓰기라 그냥 세면 볼륨이 "정책 없는 서비스"로 잡힌다(초판이 그랬다).
+            if line and not line[0].isspace():
+                in_services = line.startswith("services:")
+                service = None
+                continue
+            if not in_services:
+                continue
+            match = _SERVICE_RE.match(line)
+            if match is not None:
+                service = match.group(1)
+                policy.setdefault(service, None)
+                continue
+            if service is not None and line.startswith("    restart:"):
+                policy[service] = line.split(":", 1)[1].strip()
+
+        self.assertNotEqual(policy, {}, "compose 에서 서비스를 하나도 못 읽었다")
+        missing = sorted(name for name, value in policy.items() if value is None)
+        self.assertEqual(
+            missing, [],
+            "재부팅 뒤 스스로 돌아오지 않는 서비스 — 새 서비스는 restart 정책을 "
+            "함께 적는다(2026-09-06 배포 호스트 재부팅에서 실측된 조용한 장애)",
+        )
+        wrong = sorted(
+            f"{name}={value}" for name, value in policy.items()
+            if value != "unless-stopped"
+        )
+        self.assertEqual(
+            wrong, [],
+            "정책은 한 값으로 통일한다 — `always` 는 오너가 일부러 멈춘 컨테이너까지 "
+            "되살리고, `on-failure` 는 재부팅을 실패로 보지 않아 이 결함을 안 막는다",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

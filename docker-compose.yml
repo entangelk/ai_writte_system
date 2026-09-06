@@ -42,6 +42,12 @@ services:
       timeout: 10s
       retries: 12
       start_period: 10s
+    # ★ 재부팅 뒤 스택이 스스로 돌아오게 하는 유일한 자리다. 2026-09-06 배포 호스트
+    # 재부팅에서 정책이 **서비스마다 갈려 있었다** — frontend·admin·worker 만
+    # unless-stopped 였고 mongo·application·gateway 등 핵심은 정책이 없어 안 살아났다.
+    # 그 결과가 조용한 장애다: frontend 는 200 을 주는데 API 는 죽어 있고, 정책이 있는
+    # 자식들(admin·worker)만 mongo 를 못 찾아 무한 재시작한다. 새 서비스는 이 줄을 함께 적는다.
+    restart: unless-stopped
 
   application:
     # ★ 이 Dockerfile 을 쓰는 네 서비스(application·admin·worker·
@@ -154,6 +160,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    restart: unless-stopped
 
   admin:
     # Slice 2 (A1=ⓑ, 2026-08-09): the administrator surface on its own address.
@@ -244,6 +251,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    restart: unless-stopped
 
   embedding:
     build:
@@ -277,6 +285,7 @@ services:
       timeout: 5s
       retries: 20
       start_period: 300s
+    restart: unless-stopped
 
   chroma:
     # Persistent vector backend for the Phase 4 real vector index. The tag and
@@ -305,6 +314,7 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
+    restart: unless-stopped
 
   elasticsearch:
     # §8 lexical/hybrid backend: canonical memory nori (Korean) index. Built from
@@ -352,6 +362,7 @@ services:
       timeout: 5s
       retries: 20
       start_period: 60s
+    restart: unless-stopped
 
   worker:
     # b-6 (G0=A): the index-sync drain as an always-on compose service instead
