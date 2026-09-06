@@ -2045,6 +2045,65 @@ describe("최종 저장 표시 축 (확정 계약 제3조·D3=B — 4차 재검�
     expect(sent.idempotency_key.length).toBeGreaterThan(0);
   });
 
+  it("final 뒤의 일반 저장: 저장은 실제로 나가고 배지가 최종 저장 후 수정됨으로 전이한다", async () => {
+    // 5차 재검증 B1 — 확정 계약 "final marker 뒤의 일반 저장은 허용하되 분석을
+    // 자동으로 만들지 않는다" 의 프런트 잠금. 세 번째 배지(최종 저장 후 수정됨)에
+    // 사용자가 도달하는 유일한 경로가 이 저장이다 — 위 셀들은 그 상태를 픽스처로
+    // 마운트할 뿐 저장으로 전이시키지 않았고, 저장 버튼에 isFinalized 를 더하는
+    // 과잉교정(검증 변이 MV-D)이 프런트 전수 418셀 전부 초록이었다.
+    // 양방향: over — 저장 차단(isFinalized 추가)이 저장 버튼 활성 단정을 문다.
+    // under — 배지 전이 파괴(marker 동일성 무시)가 마지막 expectOnly 를 문다.
+    const fetchMock = mockFetch(
+      { body: project },
+      { body: draft },
+      { body: { versions: [version1] } },
+      { body: detail(version1, "본문") },
+      finalizeResponse(version2, "succeeded"),
+      {
+        body: {
+          draft_version: { id: "v3", version_number: 3, snapshot_id: "s3" },
+          snapshot: { id: "s3", content_hash: "hash-3" },
+          blocks: [],
+          idempotent_replay: false,
+        },
+      },
+    );
+
+    renderEditor();
+
+    await screen.findByLabelText("작업 상태");
+    await userEvent.click(screen.getByRole("button", { name: "최종 저장·분석" }));
+    expect(
+      await screen.findByText("최종 저장과 분석이 완료되었습니다"),
+    ).toBeInTheDocument();
+    const status = screen.getByLabelText("작업 상태");
+    expectOnly(status, FINALITY_LABELS, "최종 저장됨");
+
+    // final 뒤 본문 수정 — 저장 버튼이 활성이어야 한다(과잉교정 방향).
+    fireEvent.change(screen.getByLabelText("원고 본문"), { target: { value: "본문 수정" } });
+    const saveButton = screen.getByRole("button", { name: "저장" });
+    expect(saveButton).toBeEnabled();
+    await userEvent.click(saveButton);
+
+    // 저장이 실제로 나간다 — /finalize 재호출이 아니라 /versions 로.
+    expect(await screen.findByText("version 3 저장됨")).toBeInTheDocument();
+    const saveCall = fetchMock.mock.calls.find(
+      (call) =>
+        typeof call[0] === "string" &&
+        call[0].endsWith("/versions") &&
+        (call[1] as RequestInit | undefined)?.method === "POST",
+    );
+    expect(saveCall).toBeDefined();
+    expect(JSON.parse(String((saveCall?.[1] as RequestInit).body)).raw_text).toBe(
+      "본문 수정",
+    );
+
+    // 배지 전이 — marker(s2) != 최신 snapshot(s3). 일반 저장은 분석을 자동으로
+    // 만들지 않으므로 분석 라벨은 필요로 돌아간다.
+    expectOnly(status, FINALITY_LABELS, "최종 저장 후 수정됨");
+    expectOnly(status, ANALYSIS_LABELS, "분석 필요");
+  });
+
   it("최종 저장 요청을 기다리는 동안 상태 바와 버튼에 분석 진행을 표시한다", async () => {
     let release: ((value: ReturnType<typeof response>) => void) | undefined;
     const pending = new Promise<ReturnType<typeof response>>((resolve) => {
