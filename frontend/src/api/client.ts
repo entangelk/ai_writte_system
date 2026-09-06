@@ -846,6 +846,25 @@ export interface ReviewAffordance {
   reason: string | null;
 }
 
+/**
+ * Identity-group metadata on a candidate row (Slice 3, `null` when ungrouped).
+ * Every member of one group carries the same object, so the UI groups rows by
+ * `group_id` rather than expecting the server to nest them.
+ *
+ * `group_revision` is the one field here that is not display-only: the group
+ * approve endpoint requires it as `expected_revision` (D1=A), and this payload
+ * is its only source — the 409 carries the current revision in `detail`, and
+ * H3 forbids branching on that string.
+ */
+export interface ReviewIdentityGroup {
+  group_id: string;
+  group_size: number;
+  group_status: string;
+  group_revision: number;
+  group_member_ids: string[];
+  identity_rationale_summary: string | null;
+}
+
 /** A review-inbox candidate row (list) — detail adds source_refs/conflicts. */
 export interface ReviewInboxItem {
   candidate_id: string;
@@ -857,6 +876,9 @@ export interface ReviewInboxItem {
   conflict_count: number;
   payload: Record<string, unknown>;
   actions: ReviewAffordance[];
+  // Optional on the type because the fixtures that predate Slice 3 omit it;
+  // the server always sends the key (null for ungrouped).
+  identity_group?: ReviewIdentityGroup | null;
 }
 
 /** A resolved (or missing) source_ref pointer for a candidate's evidence quote. */
@@ -975,6 +997,67 @@ export function reconcileConflict(
   return request(
     `/projects/${projectId}/analysis/review-queue/${entryId}/reconcile`,
     { method: "POST", body: JSON.stringify({ action }) },
+  );
+}
+
+// --- Identity group actions (Slice 4 reject · Slice 5 approve) -------------
+
+/** Group reject is state-derived — no request body, and replays are idempotent. */
+export interface IdentityGroupRejectResult {
+  group_id: string;
+  rejected: string[];
+  skipped: string[];
+  idempotent_replay: boolean;
+}
+
+/**
+ * One member's outcome in a group approval pass. `status` is the server's
+ * literal (`applied` | `conflict` | `failed` | `skipped` | `pending`) — the UI
+ * renders it, never recomputes it. `pending` members did not run in this pass
+ * (the first judge failure ends the pass, D4=A), so the group needs another
+ * approve click; that is why a partial pass must not read as done.
+ */
+export interface IdentityGroupApproveStep {
+  candidate_id: string;
+  status: string;
+  action: string | null;
+  memory_id: string | null;
+  version: number | null;
+  error: string | null;
+}
+
+export interface IdentityGroupApproveResult {
+  group_id: string;
+  expected_revision: number;
+  canonical_memory_id: string | null;
+  steps: IdentityGroupApproveStep[];
+  idempotent_replay: boolean;
+}
+
+export function rejectIdentityGroup(
+  projectId: string,
+  groupId: string,
+): Promise<IdentityGroupRejectResult> {
+  return request(
+    `/projects/${projectId}/analysis/review-inbox/groups/${groupId}/reject`,
+    { method: "POST" },
+  );
+}
+
+// `expectedRevision` doubles as the idempotency key (D1=A): resending the same
+// revision resumes the stored pass instead of redoing applied members, and a
+// stale revision is a 409 telling the client to re-read the inbox.
+export function approveIdentityGroup(
+  projectId: string,
+  groupId: string,
+  expectedRevision: number,
+): Promise<IdentityGroupApproveResult> {
+  return request(
+    `/projects/${projectId}/analysis/review-inbox/groups/${groupId}/approve`,
+    {
+      method: "POST",
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    },
   );
 }
 

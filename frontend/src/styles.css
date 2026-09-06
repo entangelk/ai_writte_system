@@ -2134,6 +2134,90 @@ main {
   padding: 1.25rem 0;
 }
 
+/* --- 정체성 그룹 (Slice 6) ------------------------------------------------
+   그룹은 목록의 한 행이 아니라 **행을 감싸는 상자**다: 머리(요약 + 그룹 액션)
+   아래에 멤버 행이 그대로 들어간다(개별 승인·거절 affordance 유지). 그래서
+   `.review-group` 은 `.review-row` 의 2열 격자를 쓰지 않고 세로로 쌓는다.
+   ★ 머리는 `flex-wrap` 이다 — 좁은 화면에서 그룹 액션 셋이 요약 위로 접히지
+   않으면 글자와 버튼이 겹친다(Slice 6 검증 항목). */
+.review-group {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4) 0;
+}
+
+.review-group-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.review-group-copy {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+
+.review-group-copy p {
+  margin: var(--space-2) 0 0;
+}
+
+.group-warning {
+  color: var(--state-warn-text);
+  background: var(--state-warn-surface);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--type-small);
+}
+
+/* 멤버 행은 목록 안의 목록이라 들여쓰기 대신 왼쪽 선으로 소속을 말한다. */
+.review-group-members {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0 0 0 var(--space-4);
+  border-left: 2px solid var(--border-hairline);
+  list-style: none;
+}
+
+.review-group-members > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+/* 그룹 액션의 결과 — 목록을 다시 읽어도 남는다. 부분 실패를 성공처럼 닫지
+   않는 자리라 상자가 눈에 보여야 한다. */
+.group-outcome {
+  padding: var(--space-3);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-md);
+  font-size: var(--type-small);
+}
+
+.group-outcome p {
+  margin: 0;
+}
+
+.group-step-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.group-step-status {
+  font-weight: 700;
+}
+
+.group-outcome-remaining {
+  margin-top: var(--space-2);
+  color: var(--state-warn-text);
+}
+
 .row-meta {
   display: block;
   margin-top: 0.2rem;

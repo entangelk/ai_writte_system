@@ -112,6 +112,10 @@ const MIGRATED: Record<string, string> = {
   ".scratch-recovery-error": "small",
   ".scratch-recovery-gate": "small",
 
+  // Slice 6 — 정체성 그룹의 경고 문구와 그룹 액션 결과 상자.
+  ".group-warning": "small",
+  ".group-outcome": "small",
+
   ".page-heading > p:last-child": "base",
   // `.resource-link` 의 1.3rem 세리프를 목록 행에서 UI 본문으로 되돌리는 자리.
   // 종전 `var(--type-body)` 는 **선언된 적 없는 토큰**이라 선언이 통째로 버려져

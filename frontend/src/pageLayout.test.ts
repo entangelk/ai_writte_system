@@ -181,3 +181,37 @@ describe("관리 상세와 편집기 도구 독 배치", () => {
     expect(selected?.body).toMatch(/background:\s*var\(--action-primary\)/);
   });
 });
+
+describe("정체성 그룹 상자 배치 (Slice 6)", () => {
+  it("wraps the group actions under the summary instead of letting them overlap", () => {
+    /**
+     * jsdom 은 배치를 재지 못하므로 — 이 저장소가 폭·버튼에 대해 그랬듯 —
+     * **규칙성**을 잰다. 그룹 머리는 요약(가변)과 액션 셋(고정)을 한 줄에
+     * 놓는 flex 행이고, 좁은 화면에서 접히지 않으면 글자와 버튼이 겹친다
+     * (계획 §Slice 6 검증 "모바일 폭에서 버튼/텍스트 겹침 없음").
+     *
+     * under-strict: `flex-wrap` 을 빼거나 `nowrap` 으로 되돌리면 실패한다.
+     * over-strict: 요약 열에서 `min-width: 0` 을 빼면(= 긴 근거 문구가 열을
+     * 밀어내 액션을 화면 밖으로 보낸다) 같은 셀이 실패한다.
+     */
+    const header = rules.find(
+      (rule) => rule.selector === ".review-group-header",
+    );
+    expect(header?.body).toMatch(/flex-wrap:\s*wrap/);
+
+    const copy = rules.find((rule) => rule.selector === ".review-group-copy");
+    expect(copy?.body).toMatch(/min-width:\s*0/);
+    // 고정 basis 없이 `flex: 1` 만 주면 액션과 한 줄을 다투다가 둘 다 찌그러진다.
+    expect(copy?.body).toMatch(/flex:\s*1\s+1\s+[\d.]+rem/);
+  });
+
+  it("keeps a group member row on the two-column grid the flat rows use", () => {
+    // 그룹 안에 들어갔다고 멤버 행의 배치가 달라지면 같은 화면에 두 배치가 된다.
+    const memberRow = rules.find(
+      (rule) => rule.selector === ".review-group-members > li",
+    );
+    expect(memberRow?.body).toMatch(
+      /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/,
+    );
+  });
+});
