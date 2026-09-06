@@ -601,6 +601,38 @@ export async function listSceneNotes(
   return response.notes;
 }
 
+/**
+ * 한 장면의 현재 메모. **`body === null` 은 "메모 없음"이고 `""` 는 "빈 메모가
+ * 저장됨"이다** — 저장 계약(SoT v1.8.11)이 그 둘을 구분하므로 화면도 구분한다.
+ */
+export type SceneNote = components["schemas"]["SceneNotePayload"];
+
+export function getSceneNote(
+  projectId: string,
+  draftId: string,
+): Promise<SceneNote> {
+  return request(
+    `/projects/${encodeURIComponent(projectId)}/drafts/${encodeURIComponent(draftId)}/note`,
+  );
+}
+
+/**
+ * 명시적 저장 한 번(D4=A). `idempotency_key` 가 없는 것은 의도다 — 값을 통째로
+ * 바꾸는 upsert 라 재전송해도 저장 결과가 같고, 재전송이 만드는 유일한 흔적인
+ * 활동 행은 서버의 연타 창(5초)이 접는다. 화면은 요청 중 버튼을 비활성화해
+ * 같은 실수를 앞단에서도 막는다.
+ */
+export function putSceneNote(
+  projectId: string,
+  draftId: string,
+  body: string,
+): Promise<SceneNote> {
+  return request(
+    `/projects/${encodeURIComponent(projectId)}/drafts/${encodeURIComponent(draftId)}/note`,
+    { method: "PUT", body: JSON.stringify({ body }) },
+  );
+}
+
 // --- 유료 요청 (Phase 8) ------------------------------------------------------
 // 8.0이 분류한 유료 동작 9개 중 화면에서 부르는 것은 5개다(generate·gate·
 // revise-and-gate·accept·analysis extract). 그 다섯만 아래 옵션을 받는다.

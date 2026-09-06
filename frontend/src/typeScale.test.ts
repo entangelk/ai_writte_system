@@ -112,8 +112,11 @@ const MIGRATED: Record<string, string> = {
   ".scratch-recovery-error": "small",
   ".scratch-recovery-gate": "small",
 
-  // 장면 메모 Slice 3 — 목록 행의 본문 미리보기.
+  // 장면 메모 Slice 3~4 — 목록 미리보기·드로어의 메모 상자와 그 상태 줄.
   ".note-preview": "small",
+  ".rail-note-editor": "small",
+  ".note-body": "small",
+  ".rail-note-status": "micro",
 
   // Slice 6 — 정체성 그룹의 경고 문구와 그룹 액션 결과 상자.
   ".group-warning": "small",

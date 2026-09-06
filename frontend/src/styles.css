@@ -1410,6 +1410,84 @@ main {
   opacity: var(--disabled-opacity);
 }
 
+/* 편집기 드로어의 메모 패널 (Slice 4). 본문 상자는 이어쓰기 지시 입력과 같은
+   면을 쓰되(같은 레일 안이다) 메모는 여러 문단이라 더 높다. */
+.scene-note-panel {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.rail-note-label {
+  font-weight: 700;
+}
+
+.rail-note-editor {
+  width: 100%;
+  min-height: 10rem;
+  resize: vertical;
+  padding: 0.9rem 1rem;
+  color: var(--text-body);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-hairline);
+  border-radius: 0;
+  outline: none;
+  font-family: inherit;
+  font-size: var(--type-small);
+  line-height: 1.7;
+}
+
+.rail-note-editor:focus {
+  border-color: var(--text-link);
+}
+
+.rail-note-editor:read-only {
+  color: var(--text-muted);
+}
+
+.rail-note-status {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--type-micro);
+}
+
+/* 다른 장면 메모의 전문(읽기 전용). 줄바꿈은 사용자가 쓴 그대로 보인다. */
+.note-body {
+  margin: 0;
+  color: var(--text-body);
+  font-size: var(--type-small);
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+/* 장면 메모 검색 (Slice 3·4 공용). 별도 화면과 좁은 드로어가 같은 컴포넌트를
+   쓰므로 폭을 고정하지 않는다 — 입력·버튼 줄은 `.form-controls` 가 그린다. */
+.note-search-form {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-6) 0 0;
+}
+
+.note-search-form label {
+  font-weight: 700;
+}
+
+/* 드로어에서 행 제목은 링크가 아니라 선택 버튼이다(현재 편집 문맥을 떠나지
+   않고 다른 장면 메모를 읽는 자리). 면은 벗기고 위치만 잡는다. */
+.note-select {
+  flex: 1;
+  padding: var(--space-3) 0;
+  color: var(--text-body);
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.note-select[aria-pressed="true"] {
+  color: var(--text-link);
+  font-weight: 700;
+}
+
 /* 장면 메모 목록 행 (Slice 3). 원고 행은 한 줄이라 `.resource-row` 가 가로
    정렬인데, 메모 행은 제목 줄 아래에 미리보기 한 문단을 둔다 — 그 축만 뒤집고
    행의 나머지 성질(구분선·간격)은 그대로 물려받는다. */
