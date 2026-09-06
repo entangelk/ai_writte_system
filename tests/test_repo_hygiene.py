@@ -35,6 +35,7 @@ import re
 import subprocess
 import unittest
 from pathlib import Path
+from typing import NamedTuple
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -50,8 +51,13 @@ _FORBIDDEN_VALUES: tuple[tuple[str, str], ...] = (
 
 # 사설 대역의 **호스트 주소**만 본다 — 옥텟 4개를 정확히 요구한다.
 # ★ 3~4개를 허용하면 `npm 10.9.8` 같은 버전 문자열이 사설 주소로 잡힌다(실측 4파일).
-# 뒤에 `/` 가 오면 CIDR 대역 표기라 통과시킨다 — `172.16.0.0/12`·`127.0.0.0/8` 은
-# 신뢰 대역 계약 literal 이지 이 집 LAN 의 호스트가 아니다.
+# 후행 조건이 둘인 이유(2026-09-06 독립 검증 H1):
+#   `(?![0-9/])`  — CIDR 대역 표기(`172.16.0.0/12`·`127.0.0.0/8`)는 신뢰 대역 계약
+#                   literal 이지 이 집 LAN 의 호스트가 아니라 통과시킨다.
+#   `(?!\.[0-9])` — 5옥텟 이상(`192.168.1.2.3`)은 주소가 아니라 통과시킨다.
+# ★ 종전에는 이 둘을 `(?![0-9./])` 한 덩어리로 썼는데, 그러면 **문장 끝 마침표가
+#   붙은 주소가 통째로 빠져나갔다**(검증자 실측). 마침표는 막고 5옥텟은 통과시키려면
+#   "숫자가 뒤따르는 점"만 배제해야 한다.
 _PRIVATE_HOST_RE = re.compile(
     r"(?<![0-9.])"
     r"(?:"
@@ -59,7 +65,7 @@ _PRIVATE_HOST_RE = re.compile(
     r"|10(?:\.[0-9]{1,3}){3}"
     r"|172\.(?:1[6-9]|2[0-9]|3[01])(?:\.[0-9]{1,3}){2}"
     r")"
-    r"(?![0-9./])"
+    r"(?![0-9/])(?!\.[0-9])"
 )
 
 # 오너 결정 D1=D(2026-09-06) — 이 한 파일만 **두 규칙 모두**에서 예외다. 이 문서가
@@ -114,32 +120,106 @@ def _is_document(relative: str) -> bool:
     )
 
 
+# 정확 일치 규칙에서 빠지는 파일의 **전부**. 인라인 `if` 로 흩어 두면 집합 자체를
+# 단정할 수 없어 예외 확장이 조용히 통과한다 — 2026-09-06 독립 검증 B1 이 그것을
+# 실측했다(가드 파일을 예외로 넣고 금지값을 통째로 심어도 전수가 초록이었다).
+_EXACT_RULE_EXCEPTIONS = frozenset({_AUDIT_RECORD})
+
+
+class _ExactScan(NamedTuple):
+    """정확 일치 스캔의 **완전한 회계**.
+
+    셋을 합치면 추적 파일 전건이어야 한다 — 그래야 어떤 방식으로 파일이 스캔에서
+    빠지든(예외 확장이든, 루프 어딘가의 `continue` 든) 수가 안 맞아 드러난다.
+    검사한 파일 목록만 세면 *왜* 빠졌는지를 못 봐서 자기예외가 통과한다.
+    """
+
+    scanned: list[str]
+    skipped_as_exception: list[str]
+    skipped_as_binary: list[str]
+    violations: list[str]
+
+
+def _run_exact_scan() -> _ExactScan:
+    scanned: list[str] = []
+    as_exception: list[str] = []
+    as_binary: list[str] = []
+    violations: list[str] = []
+    for relative in _tracked_files():
+        if relative in _EXACT_RULE_EXCEPTIONS:
+            as_exception.append(relative)
+            continue
+        text = _read(relative)
+        if text is None:
+            as_binary.append(relative)
+            continue
+        scanned.append(relative)
+        for label, value in _FORBIDDEN_VALUES:
+            if value in text:
+                violations.append(f"{relative}: {label}")
+    return _ExactScan(scanned, as_exception, as_binary, violations)
+
+
 class ForbiddenLiteralsTest(unittest.TestCase):
-    """정확 일치 — 추적 파일 **전건**. 산문이든 코드든 예외가 없다."""
+    """정확 일치 — 추적 파일 **전건**. 산문이든 코드든 예외는 감사 기록 하나뿐이다."""
 
     def test_no_swept_address_or_secret_returns(self) -> None:
-        for relative in _tracked_files():
-            if relative == _AUDIT_RECORD:
-                continue
-            text = _read(relative)
-            if text is None:
-                continue
-            for label, value in _FORBIDDEN_VALUES:
-                with self.subTest(file=relative, value=label):
-                    self.assertNotIn(
-                        value, text,
-                        f"{relative}: {label} 가 저장소에 되돌아왔다. "
-                        "역할 별칭으로 쓰거나(산문) 환경변수로 받는다(코드) — "
-                        "docs/plans/security-phase-s0-docs-hygiene-decisions.md",
-                    )
+        scan = _run_exact_scan()
+        for violation in scan.violations:
+            with self.subTest(violation=violation):
+                self.fail(
+                    f"{violation} 가 저장소에 되돌아왔다. "
+                    "역할 별칭으로 쓰거나(산문) 환경변수로 받는다(코드) — "
+                    "docs/plans/security-phase-s0-docs-hygiene-decisions.md"
+                )
+        self.assertEqual(scan.violations, [])
 
-    def test_the_guard_covers_its_own_file(self) -> None:
-        """over-strict 방향의 짝: 가드 파일을 예외로 빼지 않았음을 단정한다.
+    def test_the_exception_set_is_exactly_the_audit_record(self) -> None:
+        """★ B1(2026-09-06 독립 검증)이 요구한 셀 — 예외 **집합**을 단정한다.
 
-        예외로 빼면 이 파일이 다음 구멍이 된다. 조각 조립(`_FORBIDDEN_VALUES`)은
-        그 예외를 만들지 않으려고 치른 비용이고, 이 셀이 그 비용을 잠근다.
+        종전 셀은 가드 파일이 `_tracked_files()` 에 있는지만 봤다. 그것은 스캔이
+        그 파일을 실제로 **읽었는지**와 무관해서, 스캔 루프에 자기예외를 더하면
+        조용히 통과했다. 브리프 D3 가 경고한 실패 경로가 정확히 그 모양이다 —
+        금지값을 통째로 쓰고, 가드가 물면, 예외로 "해결"한다.
         """
-        self.assertIn("tests/test_repo_hygiene.py", _tracked_files())
+        self.assertEqual(set(_EXACT_RULE_EXCEPTIONS), {_AUDIT_RECORD})
+
+    def test_the_scan_accounts_for_every_tracked_file(self) -> None:
+        """어떤 경로로든 파일이 스캔에서 빠지면 회계가 안 맞아 드러난다.
+
+        예외 확장이 아니라 루프 중간의 `continue` 로 빠뜨려도 이 셀이 문다 —
+        `test_the_exception_set_is_exactly_the_audit_record` 가 못 보는 방향이다.
+        """
+        scan = _run_exact_scan()
+        counted = (
+            set(scan.scanned)
+            | set(scan.skipped_as_exception)
+            | set(scan.skipped_as_binary)
+        )
+        self.assertEqual(
+            counted, set(_tracked_files()),
+            "정확 일치 스캔이 추적 파일 일부를 조용히 건너뛰었다",
+        )
+        self.assertEqual(
+            set(scan.skipped_as_exception), set(_EXACT_RULE_EXCEPTIONS),
+            "스캔이 건너뛴 파일과 선언된 예외 집합이 다르다 — "
+            "예외는 _EXACT_RULE_EXCEPTIONS 한 곳에서만 선언한다",
+        )
+        self.assertIn(
+            "tests/test_repo_hygiene.py", scan.scanned,
+            "가드 파일이 스캔에서 빠졌다 — 조각 조립(_FORBIDDEN_VALUES)은 "
+            "이 예외를 만들지 않으려고 치른 비용이다",
+        )
+
+    def test_binary_skips_are_only_images(self) -> None:
+        """바이너리 예외가 조용히 넓어지지 않게 한다 — 지금은 `docs/img/*.png` 뿐이다."""
+        scan = _run_exact_scan()
+        unexpected = [p for p in scan.skipped_as_binary if not p.endswith(".png")]
+        self.assertEqual(
+            unexpected, [],
+            "텍스트로 못 읽는 새 파일이 생겼다 — 스캔 밖이라는 뜻이니 "
+            "가드 계약(바이너리는 대상이 아니다)이 여전히 맞는지 확인한다",
+        )
 
 
 class PrivateHostAddressInDocsTest(unittest.TestCase):
@@ -191,6 +271,35 @@ class PrivateHostAddressInDocsTest(unittest.TestCase):
                 self.assertFalse(
                     _is_document(fixture),
                     f"{fixture}: 픽스처가 사는 자리는 광의 규칙의 대상이 아니다",
+                )
+
+    def test_trailing_punctuation_does_not_hide_an_address(self) -> None:
+        """★ H1(2026-09-06 독립 검증) — 문장 끝 마침표로 빠져나가지 않는다.
+
+        종전 후행 조건 `(?![0-9./])` 은 `.` 을 통째로 배제해서, **문장 끝에 온 새
+        사설 주소가 세 대역 모두에서 조용히 빠졌다**(검증자 실측, 당시 실피해 0).
+        산문에 주소를 적으면 마침표가 붙는 것이 오히려 보통이라, 이 우회는 광의
+        규칙이 가장 필요한 자리에서 정확히 열려 있었다.
+        """
+        for suffix in (".", ",", ")", "", " 이다", "\n"):
+            for network in ("192.168." + "100.50", "10." + "1.2.3", "172.20." + "3.4"):
+                with self.subTest(address=network, suffix=repr(suffix)):
+                    self.assertTrue(
+                        _PRIVATE_HOST_RE.search(network + suffix),
+                        f"{network!r} 이 {suffix!r} 뒤에서 빠져나갔다",
+                    )
+
+    def test_five_octet_strings_are_still_not_addresses(self) -> None:
+        """H1 수정의 짝(over-strict): 마침표를 막느라 5옥텟까지 잡으면 안 된다.
+
+        `(?!\\.[0-9])` 가 "숫자가 뒤따르는 점"만 배제하는 이유가 이것이다 — 전체
+        `.` 을 배제하면 H1 이 돌아오고, 아무것도 배제하지 않으면 이 셀이 문다.
+        """
+        for text in ("192.168.1.2.3", "10.0.0.1.5", "172.16.0.1.9"):
+            with self.subTest(text=text):
+                self.assertIsNone(
+                    _PRIVATE_HOST_RE.search(text),
+                    f"{text}: 옥텟 5개는 호스트 주소가 아니다",
                 )
 
 
