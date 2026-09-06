@@ -710,10 +710,15 @@ class GroupApproveOrchestrationTest(unittest.TestCase):
 
         response = _approve(w["client"], w["project_id"], group.group_id)
 
-        self.assertEqual(
-            response.status_code, 503, response.text,
+        self.assertEqual(response.status_code, 503, response.text)
+        # ★ 상태코드만으로는 부족하다 — 판정 단계의 `judge_against` 도 같은 503 을
+        # 낸다. 이 fail-fast 가 사는 이유는 **시작 전**이라는 것이고, 그 차이는
+        # 진행 문서에서만 보인다. 면제를 넓히면 패스가 진행돼 문서가 남는다.
+        self.assertIsNone(
+            w["approvals"].get(w["project_id"], group.group_id),
+            "판정이 필요한데 judge 가 없으면 아무것도 시작하지 않는다 — "
+            "진행 문서가 남으면 반쪽 상태다",
         )
-        # 반쪽 상태가 남지 않는다 — 남은 멤버는 그대로이고 새 memory 도 없다.
         self.assertEqual(
             w["analysis"].get_candidate(
                 project_id=w["project_id"], candidate_id=remaining.id
