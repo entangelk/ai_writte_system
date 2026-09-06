@@ -83,7 +83,11 @@ describe("메모 드로어 패널", () => {
 
     renderPanel();
 
-    expect(await screen.findByLabelText("이 장면 메모")).toHaveValue("현재 장면 메모");
+    // 값으로 기다린다 — 상자는 조회가 끝나기 전에 이미 그려져 있어서 라벨로
+    // 기다리면 빈 상자에서도 곧바로 통과한다.
+    expect(await screen.findByDisplayValue("현재 장면 메모")).toHaveAttribute(
+      "id", "scene-note-body",
+    );
     const urls = fetchMock.mock.calls.map((call) => call[0]);
     expect(urls).toContain("/api/projects/p1/notes");
     expect(urls).toContain("/api/projects/p1/drafts/d1/note");
@@ -123,7 +127,8 @@ describe("메모 드로어 패널", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     renderPanel();
-    const editor = await screen.findByLabelText("이 장면 메모");
+    // 먼저 서버 값이 실렸는지 기다린다 — 조회가 늦게 끝나면 타이핑을 덮어쓴다.
+    const editor = await screen.findByDisplayValue("옛 메모");
     await userEvent.clear(editor);
     await userEvent.type(editor, "새 메모");
     await userEvent.click(screen.getByRole("button", { name: "메모 저장" }));
@@ -173,7 +178,7 @@ describe("메모 드로어 패널", () => {
     );
 
     await userEvent.click(screen.getByRole("button", { name: "← 현재 장면 메모" }));
-    expect(await screen.findByLabelText("이 장면 메모")).toHaveValue("현재 장면 메모");
+    expect(await screen.findByDisplayValue("현재 장면 메모")).toBeInTheDocument();
   });
 
   it("follows the editor to another scene", async () => {
@@ -184,7 +189,7 @@ describe("메모 드로어 패널", () => {
     ]);
 
     const view = renderPanel();
-    expect(await screen.findByLabelText("이 장면 메모")).toHaveValue("첫 장면 메모");
+    expect(await screen.findByDisplayValue("첫 장면 메모")).toBeInTheDocument();
 
     view.rerender(
       <MemoryRouter>
@@ -237,7 +242,7 @@ describe("메모 드로어 패널", () => {
     ]);
 
     renderPanel();
-    await screen.findByLabelText("이 장면 메모");
+    await screen.findByDisplayValue("현재 장면 메모");
     await userEvent.click(screen.getByRole("button", { name: "메모 저장" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("project access is read-only");
@@ -267,6 +272,8 @@ describe("메모 드로어 패널", () => {
 
     renderPanel();
     const editor = await screen.findByLabelText("이 장면 메모");
+    // 빈 메모라 기다릴 값이 없다 — 글자 수 줄로 조회 완료를 기다린다.
+    await screen.findByText("0자");
 
     // over-strict 방향: 상한 아래에서는 잠그면 안 된다.
     await userEvent.type(editor, "짧은 메모");

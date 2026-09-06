@@ -27,6 +27,7 @@ import { GenerationPad } from "../writing/GenerationPad";
 import { useGenerationJobs } from "../writing/useGenerationJobs";
 import { AnalysisTrigger } from "../review/AnalysisTrigger";
 import { WorkspaceReviewPanel } from "../review/WorkspaceReviewPanel";
+import { SceneNotePanel } from "../notes/SceneNotePanel";
 
 type SaveIntent = {
   key: string;
@@ -38,12 +39,19 @@ const DEFINITIVE_SAVE_FAILURES = new Set([400, 404, 409, 422]);
 /** 저장 기록에서 접지 않고 바로 내놓는 최신 version 수 (오너 2026-08-27). */
 const RECENT_VERSION_COUNT = 5;
 
-type ToolPanel = "writing" | "analysis" | "review";
+type ToolPanel = "writing" | "analysis" | "review" | "notes";
 
-const TOOL_PANELS: ToolPanel[] = ["writing", "analysis", "review"];
+const TOOL_PANELS: ToolPanel[] = ["writing", "analysis", "review", "notes"];
+
+const TOOL_PANEL_LABELS: Record<ToolPanel, string> = {
+  writing: "이어쓰기",
+  analysis: "분석",
+  review: "검토",
+  notes: "메모",
+};
 
 function toolPanelLabel(panel: ToolPanel): string {
-  return panel === "writing" ? "이어쓰기" : panel === "analysis" ? "분석" : "검토";
+  return TOOL_PANEL_LABELS[panel];
 }
 
 function latestOf(versions: DraftVersion[]): DraftVersion | null {
@@ -74,12 +82,10 @@ export function DraftEditor() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedPanel = searchParams.get("panel");
+  // 열거를 두 벌로 두지 않는다 — 탭을 더할 때 `TOOL_PANELS` 만 고치면 주소로
+  // 여는 경로(`?panel=`)가 함께 따라온다.
   const routedPanel: ToolPanel | null =
-    requestedPanel === "writing" ||
-    requestedPanel === "analysis" ||
-    requestedPanel === "review"
-      ? requestedPanel
-      : null;
+    TOOL_PANELS.find((panel) => panel === requestedPanel) ?? null;
   const [lastPanel, setLastPanel] = useState<ToolPanel>(() => routedPanel ?? "writing");
   const activePanel = routedPanel ?? lastPanel;
   // 오버레이 드로어(2026-08-26): `panel` param 이 있으면 그 탭으로 열리고, 없으면
@@ -967,6 +973,20 @@ export function DraftEditor() {
                       tabActive={activePanel === "review"}
                       onSourceSelect={(source) => void openSource(source)}
                       onPendingCountChange={setPendingReviewCount}
+                      onBeforeNavigateAway={allowNavigationAway}
+                    />
+                  </div>
+                  <div
+                    className={
+                      activePanel === "notes" ? "rail-layer" : "rail-layer hidden"
+                    }
+                    aria-hidden={activePanel !== "notes"}
+                  >
+                    <SceneNotePanel
+                      projectId={projectId}
+                      draftId={draftId}
+                      tabActive={activePanel === "notes"}
+                      readOnly={readOnly}
                       onBeforeNavigateAway={allowNavigationAway}
                     />
                   </div>

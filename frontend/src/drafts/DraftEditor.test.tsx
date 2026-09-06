@@ -1299,7 +1299,10 @@ describe("DraftEditor", () => {
     const drawerTabs = screen.getByRole("tablist", {
       name: "열린 집필 도구 전환",
     });
-    expect(within(drawerTabs).getAllByRole("tab")).toHaveLength(3);
+    // 탭 수는 `TOOL_PANELS` 를 따라간다 — 2026-09-06 장면 메모 Slice 4 가 넷째
+    // 탭(메모)을 더했다. 이 셀이 잠그는 것은 개수가 아니라 헤더 탭↔패널↔독의
+    // 연동이므로 수만 따라 올린다(메모 탭 자체는 notes/SceneNoteDrawer.test.tsx).
+    expect(within(drawerTabs).getAllByRole("tab")).toHaveLength(4);
     await userEvent.click(within(drawerTabs).getByRole("tab", { name: "분석" }));
     expect(screen.getByRole("button", { name: "이 원고 분석" })).toBeInTheDocument();
     expect(within(drawerTabs).getByRole("tab", { name: "분석" }))
