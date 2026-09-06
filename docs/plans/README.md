@@ -72,7 +72,7 @@
 | [`02b-7-character-alias-homonym-decisions.md`](02b-7-character-alias-homonym-decisions.md) | 2B.7 character 별칭/동명이인 semantic 보강 | Resolved |
 
 | [`pending-candidate-identity-grouping-decisions.md`](pending-candidate-identity-grouping-decisions.md) | 서로 다른 분석 job의 미승인 후보 정체성 그룹·그룹 승인 | **확정 — C 채택**(2026-09-02 dogfood) |
-| [`pending-candidate-identity-grouping-implementation-phases.md`](pending-candidate-identity-grouping-implementation-phases.md) | C 채택 후 미승인 후보 identity group 구현 슬라이스 분할 | Active — **Slice 0~6 구현·검증 완료**, Slice 6 조건 B1·B2 대기(검증 2026-09-06) |
+| [`pending-candidate-identity-grouping-implementation-phases.md`](pending-candidate-identity-grouping-implementation-phases.md) | C 채택 후 미승인 후보 identity group 구현 슬라이스 분할 | Active — **Slice 0~6 구현·검증 완료**(Slice 6 조건 B1·B2 폐쇄, 2026-09-06) |
 | [`pending-candidate-identity-grouping-slice4-activity-log-decisions.md`](pending-candidate-identity-grouping-slice4-activity-log-decisions.md) | Slice 4 착수 브리프 — 그룹 거절의 활동 로그 모양 | **확정 — A 채택**(2026-09-04, 그룹 행 1줄·변경 시에만) |
 | [`pending-candidate-identity-grouping-slice5-approval-orchestration-decisions.md`](pending-candidate-identity-grouping-slice5-approval-orchestration-decisions.md) | Slice 5 착수 브리프 — 그룹 승인 오케스트레이션(요청 면·멤버 상태·그룹 행·실패 격리) | **확정 — D1=A·D2=A·D3=A·D4=A 채택**(2026-09-04) |
 | [`pending-candidate-identity-grouping-slice6-grouped-inbox-ui-decisions.md`](pending-candidate-identity-grouping-slice6-grouped-inbox-ui-decisions.md) | Slice 6 착수 브리프 — grouped Inbox UI 가 읽을 것이 없다(승인 `expected_revision` 조달 · `uncertain` 표시) | **확정 — D1=A·D2=B 채택**(2026-09-06, `group_revision` 추가 · uncertain 표시 유예) |

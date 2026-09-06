@@ -117,9 +117,10 @@ const MIGRATED: Record<string, string> = {
   ".group-outcome": "small",
 
   ".page-heading > p:last-child": "base",
-  // `.resource-link` 의 1.3rem 세리프를 목록 행에서 UI 본문으로 되돌리는 자리.
-  // 종전 `var(--type-body)` 는 **선언된 적 없는 토큰**이라 선언이 통째로 버려져
-  // 1.3rem 이 그대로 그려지고 있었다(HANDOFF 미수리 "--type-body 미정의").
+  // 검토함 목록 행을 UI 본문 계단에 고정하는 자리. 종전 `var(--type-body)` 는
+  // **선언된 적 없는 토큰**이라 선언이 버려져 상속값(1rem)으로 떨어졌다 — 이
+  // 규칙은 cascade 에서 이미 이기고 있어 가시 변화는 0 이고, 교정은 같은 계산값을
+  // 유효 선언으로 만든 정리다(2026-09-06 검증 실측, Slice 6 검증 B2 정정).
   ".review-summary-link": "base",
 
   ".editor-form textarea": "reading",

@@ -1,9 +1,9 @@
 # 미승인 후보 정체성 그룹 — 구현 페이즈
 
-상태: `Active — Slice 0~6 구현 완료, Slice 6 검증 조건부(조건 B1·B2, 2026-09-06)`
+상태: `Active — Slice 0~6 구현·검증 완료(조건 B1·B2 폐쇄, 2026-09-06)`
 작성: 2026-09-02
 결정 정본: [`pending-candidate-identity-grouping-decisions.md`](pending-candidate-identity-grouping-decisions.md) — **C 채택**
-계약 정본: [`../system-contract-sot.md`](../system-contract-sot.md) v1.8.34
+계약 정본: [`../system-contract-sot.md`](../system-contract-sot.md) v1.8.35
 
 ## 목적과 완료 기준
 
@@ -367,8 +367,21 @@ partial failure 표시, 기존 개별 approve/reject affordance 유지, 모바�
 
 셀 +15(백엔드 1 + 프론트 14: ReviewInbox 그룹 12 · pageLayout 2)·뮤테이션 9종 전부 기명 재실패
 (M1~M3 읽기면 · M4~M8 화면 · M9 배치 규칙). 프론트 전수 403 → **417 passed**. 프론트 기존 결함
-2건(`--type-body` 미정의 · 이관 목록 49↔54)은 착수 전에 닫았다 — **`.review-summary-link`의 실제
-글꼴 크기가 1.3rem → 1rem으로 바뀌므로 육안 확인 대상**이다.
+2건(`--type-body` 미정의 · 이관 목록 49↔54)은 착수 전에 닫았다 — 교정 자체는 유효하지만 **가시
+변화는 없었다**(아래 폐쇄 기록에서 정정).
+
+**검증 조건 폐쇄(2026-09-06, SoT v1.8.35):** 독립 검증
+[`verifications/2026-09-06/identity_group_slice_6.md`](../verifications/2026-09-06/identity_group_slice_6.md)
+(판정 조건부 합격 — 구현 주장은 전부 재현됨)의 차단 2건을 닫았다. **B1** — SoT 가 열거한 잔여 step
+리터럴 `pending`에 셀이 없었다(검증 변이 M10f가 22 passed로 통과해 입증) → 3멤버 그룹 steps
+`[applied, failed, pending]` 셀 1개로 "2건이 남았습니다" + "이번 패스에서 처리 안 됨" 라벨을 잠갔다
+(뮤테이션 M10 재유도 1 재실패 · M7 재유도 3 재실패). 프론트 전수 **418 passed**. **B2** — 위 결함
+폐쇄 서술이 *"실제 글꼴 크기가 1.3rem → 1rem으로 바뀌므로 육안 확인 대상"*이라 적었으나 **실측
+반증**(headless Chrome — `.review-summary-link`가 cascade에서 이미 이겨 pre/post 실효값 모두
+16px·system-ui, 가시 변화 0. 가시 변화가 있었다면 그 시점은 `d02837a` 2026-09-02). `--type-base`
+교정은 같은 계산값을 유효 선언으로 만든 무해한 정리로 유지된다. 하드닝 H1~H4(유료 402/429 화면
+처리·409 뒤 재동기화·`idempotent_replay` 표시·outcome 단일 슬롯)는 비차단으로 검증 기록에 남아
+있다(완료 기준 #6과의 관계는 오너 판단 몫).
 
 ## 공통 작업 규칙
 

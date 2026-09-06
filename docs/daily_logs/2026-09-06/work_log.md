@@ -394,10 +394,10 @@ to_judge = len(runnable) - exempt
 
 | 결함 | 진짜 원인 | 처방 |
 |---|---|---|
-| `designTokens` — `--type-body` 미정의 | **선언된 적 없는 토큰**이라 `.review-summary-link` 의 `font-size` 선언이 통째로 버려지고 `.resource-link` 의 **1.3rem 세리프가 그대로 그려지고 있었다** | `--type-base`(램프의 "UI 본문") |
+| `designTokens` — `--type-body` 미정의 | **선언된 적 없는 토큰**이라 `font-size` 선언이 버려져 **상속값(1rem)으로 떨어지고 있었다** — `.resource-link` 의 1.3rem 은 cascade 에서 이미 진 값이라 되살지 않았다(세션 19 정정: 당초 "1.3rem 세리프가 그대로 그려지고 있었다"는 반증) | `--type-base`(램프의 "UI 본문") |
 | `typeScale` — 이관 목록 49↔54 | 스타일시트는 이미 토큰으로 옮겼는데 **목록만 뒤처졌다**(`.review-*` 4 + `.scene-status`) | 5행 등재 |
 
-**★ 이것은 무해한 정리가 아니다 — 목록 행의 실제 글꼴이 1.3rem → 1rem 으로 바뀐다.** 육안 확인 대상으로 올렸다.
+**★ 세션 19 정정 — 이것은 무해한 정리가 맞다(가시 변화 0).** 당초 "목록 행의 실제 글꼴이 1.3rem → 1rem 으로 바뀐다 · 육안 확인 대상"은 실측 반증된 서술이다(headless Chrome — pre/post 모두 16px·system-ui. 검증 B2).
 
 ### 2. 막힌 자리 — UI 가 그릴 것이 읽기면에 없었다
 
