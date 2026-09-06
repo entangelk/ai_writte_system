@@ -230,10 +230,14 @@ describe("메모 드로어 패널", () => {
     // 변이 MN-8 이 찾은 빈 칸: 다른 장면을 고른 채 편집기가 장면을 옮기면, 선택을
     // 그대로 두는 순간 패널이 **옛 장면의 메모를 읽으면서 새 장면을 저장 대상으로**
     // 들고 있게 된다(D1=A "편집 대상은 현재 Scene" 위반).
+    // ★ 고른 장면과 옮겨 간 장면이 **다른** 경우여야 한다 — d2 를 고른 채 d2 로
+    // 옮기면 선택이 우연히 현재 장면과 같아져 초기화 없이도 통과한다(첫 시도의
+    // 셀이 그 모양이라 변이를 못 물었다).
     stubRoutes([
       [/\/notes$/, { body: LIST }],
       [/\/drafts\/d1\/note$/, { body: { draft_id: "d1", body: "첫 장면 메모", updated_at: null } }],
       [/\/drafts\/d2\/note$/, { body: { draft_id: "d2", body: "두 번째 장면 메모", updated_at: null } }],
+      [/\/drafts\/d3\/note$/, { body: { draft_id: "d3", body: "세 번째 장면 메모", updated_at: null } }],
     ]);
 
     const view = renderPanel();
@@ -243,18 +247,19 @@ describe("메모 드로어 패널", () => {
 
     view.rerender(
       <MemoryRouter>
-        <SceneNotePanel projectId="p1" draftId="d2" tabActive />
+        <SceneNotePanel projectId="p1" draftId="d3" tabActive />
       </MemoryRouter>,
     );
 
-    expect(await screen.findByDisplayValue("두 번째 장면 메모")).toHaveAttribute(
+    expect(await screen.findByDisplayValue("세 번째 장면 메모")).toHaveAttribute(
       "id", "scene-note-body",
     );
+    expect(screen.queryByText("두 번째 장면 메모")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "← 현재 장면 메모" })).not.toBeInTheDocument();
   });
 
   it("does not clobber unsaved note text when the tab is closed and reopened", async () => {
-    stubRoutes([
+    const fetchMock = stubRoutes([
       [/\/notes$/, { body: LIST }],
       [/\/note$/, { body: { draft_id: "d1", body: "서버 본문", updated_at: null } }],
     ]);
@@ -262,6 +267,9 @@ describe("메모 드로어 패널", () => {
     const view = renderPanel();
     const editor = await screen.findByDisplayValue("서버 본문");
     await userEvent.type(editor, " + 아직 저장 안 한 글");
+    const readsBefore = fetchMock.mock.calls.filter(
+      (call) => String(call[0]).endsWith("/drafts/d1/note"),
+    ).length;
 
     view.rerender(
       <MemoryRouter>
@@ -274,10 +282,18 @@ describe("메모 드로어 패널", () => {
       </MemoryRouter>,
     );
 
-    // 다시 읽어 덮으면 사용자가 방금 쓴 글이 소리 없이 사라진다.
+    // ★ 값만 보면 덮어쓰기 **전에** 통과한다(응답이 오기 전 첫 폴에서 초록).
+    // 그래서 "다시 읽지 않았다"를 요청 수로 단정한다 — 이 화면이 미저장 글을
+    // 지키는 방법이 곧 재조회를 하지 않는 것이다.
     await waitFor(() =>
-      expect(screen.getByLabelText("이 장면 메모")).toHaveValue("서버 본문 + 아직 저장 안 한 글"),
+      expect(
+        fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/notes")).length,
+      ).toBeGreaterThan(1),
     );
+    expect(
+      fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/drafts/d1/note")).length,
+    ).toBe(readsBefore);
+    expect(screen.getByLabelText("이 장면 메모")).toHaveValue("서버 본문 + 아직 저장 안 한 글");
   });
 
   it("keeps the selection while the drawer is closed and reopened", async () => {
