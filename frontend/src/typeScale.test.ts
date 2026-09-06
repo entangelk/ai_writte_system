@@ -65,6 +65,11 @@ const MIGRATED: Record<string, string> = {
   ".rail-detail-fields dt": "micro",
   ".eyebrow": "micro",
   ".candidate-model": "micro",
+  // 검토함 목록 행(Phase 6 B)과 장면 상태 — 스타일시트는 이미 토큰으로 옮겨
+  // 놓고 이 목록만 뒤처져 있었다(HANDOFF 미수리 "이관 목록 49↔54").
+  ".review-preview-fields dt": "micro",
+  ".review-detail-link": "micro",
+  ".scene-status": "micro",
 
   ".workspace-status": "meta",
   ".source-jump-notice": "meta",
@@ -108,10 +113,16 @@ const MIGRATED: Record<string, string> = {
   ".scratch-recovery-gate": "small",
 
   ".page-heading > p:last-child": "base",
+  // `.resource-link` 의 1.3rem 세리프를 목록 행에서 UI 본문으로 되돌리는 자리.
+  // 종전 `var(--type-body)` 는 **선언된 적 없는 토큰**이라 선언이 통째로 버려져
+  // 1.3rem 이 그대로 그려지고 있었다(HANDOFF 미수리 "--type-body 미정의").
+  ".review-summary-link": "base",
 
   ".editor-form textarea": "reading",
   ".candidate-text": "reading",
   ".scratch-recovery-text": "reading",
+
+  ".review-summary-heading strong": "subhead",
 
   ".rail-section-heading h2": "subhead",
   ".rail-drawer-tabs button": "small",

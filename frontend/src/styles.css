@@ -2074,7 +2074,7 @@ main {
   align-items: flex-start;
   padding-right: var(--space-6);
   font-family: system-ui, sans-serif;
-  font-size: var(--type-body);
+  font-size: var(--type-base);
 }
 
 .review-summary {
