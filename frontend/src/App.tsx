@@ -7,6 +7,7 @@ import { ProjectList } from "./projects/ProjectList";
 import { ProjectSettingsPage } from "./projects/ProjectSettingsPage";
 import { AccessLogPage } from "./projects/AccessLogPage";
 import { PersonalHubPage } from "./me/PersonalHubPage";
+import { SceneNotesPage } from "./notes/SceneNotesPage";
 import { ReviewInbox } from "./review/ReviewInbox";
 import { ReviewInboxDetail } from "./review/ReviewInboxDetail";
 
@@ -43,6 +44,7 @@ export function App() {
         <Route path="/projects/:projectId/overview" element={<SettingsRedirect tab="brief" />} />
         <Route path="/projects/:projectId/activity" element={<SettingsRedirect tab="activity" />} />
         <Route path="/projects/:projectId/access-log" element={<AccessLogPage />} />
+        <Route path="/projects/:projectId/notes" element={<SceneNotesPage />} />
         <Route
           path="/projects/:projectId/review"
           element={<ReviewInbox />}

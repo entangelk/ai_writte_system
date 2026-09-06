@@ -67,6 +67,23 @@ describe("DraftList Chapter→Scene hierarchy", () => {
     ]);
   });
 
+  it("작업 공간에서 메모 화면으로 가는 입구를 낸다 (메모 Slice 3)", async () => {
+    // 화면을 만들고 링크를 안 내면 route 는 주소를 아는 사람만 쓸 수 있다.
+    // 검토함·설정과 같은 자리(섹션 링크)를 쓰되 그 둘을 밀어내지 않는다.
+    mockFetch(
+      { body: { id: "p1", name: "겨울 이야기", archived: false } },
+      { body: { chapters: [] } },
+    );
+
+    renderDraftList();
+
+    expect(await screen.findByRole("link", { name: "메모 →" })).toHaveAttribute(
+      "href", "/projects/p1/notes",
+    );
+    expect(screen.getByRole("link", { name: "검토함 →" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "프로젝트 설정 →" })).toBeInTheDocument();
+  });
+
   it("장면별 최종 저장·분석 상태를 목록에서 구분한다", async () => {
     const draftScene = scene("s1", "c1", "초안 장면", 1);
     const runningScene = {

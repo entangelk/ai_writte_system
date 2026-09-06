@@ -579,6 +579,28 @@ export function exportProject(
   return request(`/projects/${projectId}/export?${query.toString()}`);
 }
 
+// --- 장면 메모 (Slice 1~2 API · Slice 3 화면) --------------------------------
+// 목록 행은 **본문 전문을 싣지 않는다**(`body_preview` + `truncated`). 전문이
+// 필요하면 단건 GET 을 부른다 — 상한이 12000자라 목록에 전문을 실으면 장면 수만큼
+// 곱해진다. 화면이 목록에서 전문을 기대하게 만들지 말 것.
+export type SceneNoteListItem = components["schemas"]["SceneNoteListItemPayload"];
+
+/** `query` 는 서버가 적용한다(제목·본문 부분 일치, 대소문자 무시). */
+export async function listSceneNotes(
+  projectId: string,
+  query?: string,
+): Promise<SceneNoteListItem[]> {
+  const search = new URLSearchParams();
+  if (query !== undefined && query.trim() !== "") {
+    search.set("query", query);
+  }
+  const suffix = search.toString() === "" ? "" : `?${search.toString()}`;
+  const response = await request<components["schemas"]["SceneNoteListResponse"]>(
+    `/projects/${encodeURIComponent(projectId)}/notes${suffix}`,
+  );
+  return response.notes;
+}
+
 // --- 유료 요청 (Phase 8) ------------------------------------------------------
 // 8.0이 분류한 유료 동작 9개 중 화면에서 부르는 것은 5개다(generate·gate·
 // revise-and-gate·accept·analysis extract). 그 다섯만 아래 옵션을 받는다.

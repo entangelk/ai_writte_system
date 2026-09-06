@@ -1410,6 +1410,29 @@ main {
   opacity: var(--disabled-opacity);
 }
 
+/* 장면 메모 목록 행 (Slice 3). 원고 행은 한 줄이라 `.resource-row` 가 가로
+   정렬인데, 메모 행은 제목 줄 아래에 미리보기 한 문단을 둔다 — 그 축만 뒤집고
+   행의 나머지 성질(구분선·간격)은 그대로 물려받는다. */
+.note-row {
+  display: grid;
+  gap: var(--space-1);
+  padding-bottom: var(--space-4);
+}
+
+.note-row-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.note-preview {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--type-small);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
 .chapter-group {
   padding: var(--space-4) 0;
   border-bottom: 1px solid var(--border-hairline);

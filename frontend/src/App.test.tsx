@@ -123,6 +123,27 @@ describe("App routes", () => {
     ]);
   });
 
+  it("keeps the scene-notes screen behind the session gate (메모 Slice 3)", async () => {
+    const fetchMock = mockFetch(
+      { body: { id: "u1", username: "alice", is_admin: false } },
+      { body: { notes: [] } },
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/projects/p1/notes"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "메모" })).toBeInTheDocument();
+    // 세션 확인이 먼저다 — 목록 요청이 `/auth/me` 앞에 나가면 route 가 AuthGate
+    // 밖에 있다는 뜻이고, 그때 401 은 로그인 화면이 아니라 오류 문구로 보인다.
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/auth/me",
+      "/api/projects/p1/notes",
+    ]);
+  });
+
   it("keeps an unknown route inside the product shell", async () => {
     mockFetch({ body: { id: "u1", username: "alice", is_admin: false } });
 
