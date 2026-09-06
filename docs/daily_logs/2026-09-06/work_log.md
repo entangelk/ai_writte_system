@@ -481,3 +481,46 @@ M8 원복의 `git checkout -- frontend/src/review/ReviewInbox.tsx` 가 **`error:
 - 세션 17의 cwd 함정 보고(2회, 무손실)는 사실로 확인. 검증자도 유사 경로 오류 1회(저장소 루트에서 vitest → jsdom 미부착 22 전건 실패) — 측정 폐기·`frontend/` 재실행으로 처리, 변이 아님.
 - 함께 갱신: 검증 인덱스+판정 분포(286건 · 조건부 92) · README 검증 건수 2곳 · HANDOFF Next Tasks 1 · 페이즈/plans 상태 마커.
 
+## 세션 19 — Slice 6 검증 조건 B1·B2 폐쇄 (SoT v1.8.35)
+
+인계 "다음 작업 1번"(HANDOFF Next Tasks 1 — 검증 세션 18이 남긴 처방). 같은 날 세 번째 세션(구현 17 → 검증 18 → 폐쇄 19). 처방(셀 모양·정정 범위·"고침 자체는 유지")은 그대로 시행했다.
+
+### 1. B1 — pending step 잔여 판정 셀 (커밋 `6a6fe4a`)
+
+검증자 변이 M10f(잔여를 `failed||conflict` 열거로 좁히기)가 22 passed로 통과한 무셀. 신규 셀 `counts a pending step as unfinished — the D4=A partial-pass tail` — mixedInbox 모양의 **3멤버 그룹**(c1·c2·c3, `group_size` 3) 승인 응답 steps `[applied, failed, pending]`으로 ① "2건이 남았습니다"(applied 1 · 나머지 2) ② "이번 패스에서 처리 안 됨" 라벨(`STEP_STATUS_LABELS.pending` 렌더 — 검증 하드닝 H3 축도 함께 잠김) ③ "그룹 승인 — 반영 1건"(applied만 셈)을 함께 단정. describe 블록 docstring에 under-strict 방향 한 줄 추가.
+
+뮤테이션(clean-tree 분기 — 게이트 `git status --short` 공백 확인 → 변형 → 집중 실행 → `git -C /mnt/f/devel/ai_writte_system checkout -- frontend/src/review/ReviewInbox.tsx` → 공백 재확인):
+
+| # | 변이(diff) | 재실패 셀 | 실측 |
+|---|---|---|---|
+| M10 재유도 | `ReviewInbox.tsx` `unfinished` — `step.status !== "applied" && step.status !== "skipped"` → `step.status === "failed" \|\| step.status === "conflict"` | 신규 pending 셀 | **1 failed / 22 passed** |
+| M7 재유도 | 같은 자리 → `steps.filter(() => false)`(잔여 공집합 = 전원 성공 취급) | failed·conflict·pending 셀(검증 M7f 실측 2 + 신규 1) | **3 failed / 20 passed** |
+
+프론트 전수 **418 passed**(417+1 정확히) · tsc 무오류.
+
+### 2. B2 — 가시 변화 서술 정정 (커밋 `c0abd1e`)
+
+검증 반증(Findings §5) 그대로: SoT v1.8.34 행 꼬리·페이즈 완료 기록·CHANGELOG Slice 6 행·세션 17 §1(표 원인 칼럼 + ★문단)·`typeScale.test.ts` 주석의 *"1.3rem→1rem 가시 변화 · 육안 확인 대상"*을 정정. `--type-base` 교정은 유지 — 같은 계산값을 유효 선언으로 만든 **무해한 정리**였다. 커밋 `c8ab9cf` 메시지는 이력 불변이라 그대로 둔다. 세션 17 본문은 인플레이스 정정 + 이 세션 참조(S-0 슬라이스의 세션 12 정정 선례와 같은 모양).
+
+SoT **v1.8.35** 행 신설(폐쇄+정정 기록) · 헤더 버전 · `README.md:106` · 페이즈 계약 정본 줄 동반 갱신. 상태 마커 — 페이즈 머리 `Active — Slice 0~6 구현·검증 완료(조건 B1·B2 폐쇄, 2026-09-06)` + plans 인덱스 같은 꼬리(선두 토큰 `Active` 무변 — 가드 비교 요건).
+
+가드: `test_docs_indexes` + `test_repo_hygiene` **24 passed / 871 subtests** · typeScale 집중 4 passed.
+
+### 3. 정정 후 패턴 스윕
+
+`1.3rem` 전수 grep — 정정 대상 5곳 외 잔존은 검증 기록 원문(불변)·`styles.css` 실제 선언 2건(무관)·이 세션과 폐쇄 기록의 정정 인용문뿐. 검증이 나열한 전파 경로와 정확히 일치 — 누락 없음.
+
+### 4. 하드닝 H1~H5 (비차단 — 미시행)
+
+- H1(유료 402/429 화면 처리)·H2(409 뒤 재동기화)·H3(idempotent_replay 표시 — 라벨 축은 B1 셀이 함께 잠금)·H4(outcome 단일 슬롯) — 검증 기록 Hardening 절에 남아 있고 완료 기준 #6과의 관계는 오너 판단 몫. 페이즈 폐쇄 기록에 비차단임만 명시.
+- H5(plans 인덱스 꼬리 낡음) — 검증 세션 18이 이미 닫음(실측 확인).
+
+### 5. 병렬 작업 주의
+
+같은 시간대에 다른 AI가 `frontend/src/drafts/DraftEditor.tsx`를 수정 중이었다(미커밋 — 오너 사전 통보). 커밋마다 `git status`로 확인하고 제 파일만 스테이징했다(B1 `6a6fe4a` 1파일 · B2 `c0abd1e` 7파일). cwd 함정: 패턴 스윕 명령을 `frontend/` 잔류 cwd에서 돌려 "No such file"을 한 번 받았다 — 저장소 루트에서 재실행으로 해결(세션 17·18과 같은 함정, 무손실).
+
+### 결정·다음
+
+- **결정**: 검증자 처방 준수(위). SoT 정정은 버전 개정 사안 선례대로 v1.8.35. 검증 인덱스 판정 열은 승격하지 않는다(Slice 0~5·S-1·S-3 폐쇄 선례 — 조건부 합격 기록은 그대로).
+- **다음**: HANDOFF Next Tasks 1 폐쇄 → 다음은 2번(최종 저장·분석 연동 5차 재검증).
+
