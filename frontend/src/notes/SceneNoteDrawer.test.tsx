@@ -10,6 +10,7 @@
  * "마운트는 유지하되 활성 탭만 조회한다" 계약).
  */
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 import { DraftEditor } from "../drafts/DraftEditor";
@@ -102,6 +103,24 @@ it("opens the memo panel from the address and loads this scene's note", async ()
   expect(await screen.findByDisplayValue("이 장면 메모")).toHaveAttribute(
     "id", "scene-note-body",
   );
+});
+
+it("keeps the memo tab selected across an actual drawer close and reopen", async () => {
+  // 패널 단위 셀은 `tabActive` 를 손으로 내려서 재현하는데, 실제 배선에서는 드로어를
+  // 닫아도 `activePanel` 이 마지막 탭으로 남는다(레일 계약) — 계획의 "drawer close 뒤
+  // 선택 상태"를 보려면 이렇게 **진짜로 닫아야** 한다(독립 검증 H3).
+  stubEditor();
+
+  renderEditor("/projects/p1/drafts/d1?panel=notes");
+  await screen.findByDisplayValue("이 장면 메모");
+
+  await userEvent.click(screen.getByRole("button", { name: "패널 닫기" }));
+  const dock = screen.getByRole("tablist", { name: "집필 도구 선택" });
+  expect(within(dock).getByRole("tab", { name: "메모" }))
+    .toHaveAttribute("aria-selected", "true");
+
+  await userEvent.click(within(dock).getByRole("tab", { name: "메모" }));
+  expect(await screen.findByDisplayValue("이 장면 메모")).toBeInTheDocument();
 });
 
 it("does not fetch notes while another tab is the open one", async () => {

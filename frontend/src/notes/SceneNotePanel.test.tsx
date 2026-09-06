@@ -17,7 +17,7 @@
  */
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SceneNotePanel } from "./SceneNotePanel";
 
@@ -200,6 +200,9 @@ describe("메모 드로어 패널", () => {
     expect(screen.getByRole("link", { name: "두 번째 밤 열기 →" })).toHaveAttribute(
       "href", "/projects/p1/drafts/d2",
     );
+    // 선택 표시는 고른 행 하나뿐이다 — 목록이 무엇을 보여 주고 있는지의 유일한 단서다.
+    expect(screen.getByRole("button", { name: "두 번째 밤" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "첫눈" })).toHaveAttribute("aria-pressed", "false");
 
     await userEvent.click(screen.getByRole("button", { name: "← 현재 장면 메모" }));
     expect(await screen.findByDisplayValue("현재 장면 메모")).toBeInTheDocument();
@@ -378,9 +381,17 @@ describe("메모 드로어 패널", () => {
     await userEvent.paste("가".repeat(12_000));
     expect(screen.getByRole("button", { name: "메모 저장" })).toBeEnabled();
 
+    // 상한 아래에서는 초과 경고가 뜨면 안 된다(경고 축의 over-strict).
+    expect(screen.getByRole("status").textContent).not.toContain("상한");
+
     await userEvent.clear(editor);
     await userEvent.paste("가".repeat(12_001));
     expect(screen.getByRole("button", { name: "메모 저장" })).toBeDisabled();
+    // SoT ⑧ 은 "경고 + 저장 차단" 둘을 함께 말한다 — 차단만 남기고 경고를 지우면
+    // 사용자는 버튼이 왜 잠겼는지 모른 채 남는다(검증 변이 MV-C 가 연 자리).
+    expect(screen.getByRole("status").textContent).toContain(
+      `상한 ${(12_000).toLocaleString("ko-KR")}자 초과 — 저장할 수 없습니다`,
+    );
     // ★ 잘라내기가 아니다 — 붙여넣은 본문은 그대로 남아 있어야 한다.
     expect(editor).toHaveValue("가".repeat(12_001));
     expect(editor).not.toHaveAttribute("maxlength");
@@ -397,5 +408,117 @@ describe("메모 드로어 패널", () => {
     const editor = await screen.findByLabelText("이 장면 메모");
     expect(editor).toHaveValue("");
     expect(within(screen.getByRole("status")).getByText("아직 메모가 없습니다.")).toBeInTheDocument();
+  });
+
+  it("tells an empty saved memo apart from a scene with no memo row", async () => {
+    // 계약(SoT v1.8.11)이 `body === null`(메모 없음)과 `body === ""`(빈 메모가
+    // 저장됨)을 구분하므로 읽기면도 구분해야 한다. 둘 다 빈 상자로 보이지만
+    // 상태 줄이 다른 사실을 말한다.
+    stubRoutes([
+      [/\/notes$/, { body: { notes: [] } }],
+      [/\/note$/, { body: { draft_id: "d1", body: "", updated_at: "2026-09-06T00:00:00Z" } }],
+    ]);
+
+    renderPanel();
+
+    const status = await screen.findByRole("status");
+    await waitFor(() => expect(status).toHaveTextContent("0자"));
+    expect(screen.queryByText("아직 메모가 없습니다.")).not.toBeInTheDocument();
+  });
+  it("hands the drawer's search box to the server too — the same contract as the notes screen", async () => {
+    // 완료 기준 1: **두 화면이 같은 검색 결과를 읽는다.** 한 컴포넌트를 공유한다는
+    // 사실은 구현이지 잠금이 아니다 — 드로어 쪽에서 제목으로 한 번 더 거르면 본문
+    // 매치로 올라온 행이 **드로어에서만** 사라지는데(리터럴 ① 금지) 화면 셀은 그것을
+    // 못 본다(독립 검증 변이 MV-A 가 연 자리).
+    let listCall = 0;
+    const fetchMock = vi.fn((url: string) => {
+      // ★ `$` 로 끝을 묶으면 안 된다 — 검색 요청은 `/notes?query=…` 라 끝이 다르다.
+      if (url.includes("/notes")) {
+        listCall += 1;
+        return Promise.resolve(response({
+          body: listCall === 1
+            ? LIST
+            : { notes: [{ ...LIST.notes[1], body_preview: "…편지를 태우는…" }] },
+        }));
+      }
+      return Promise.resolve(
+        response({ body: { draft_id: "d1", body: "현재 장면 메모", updated_at: null } }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPanel();
+    await screen.findByDisplayValue("현재 장면 메모");
+
+    await userEvent.type(screen.getByLabelText("메모 검색"), "편지");
+    await userEvent.click(screen.getByRole("button", { name: "검색" }));
+
+    expect(await screen.findByText("…편지를 태우는…")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toContain(
+      "/api/projects/p1/notes?query=%ED%8E%B8%EC%A7%80",
+    );
+    // over-strict: 제목에 검색어가 없고 **본문에만** 있는 행이 드로어에서 사라지면 안 된다.
+    expect(screen.getByRole("button", { name: "두 번째 밤" })).toBeInTheDocument();
+  });
+
+  it("keeps the save button after a refusal that is not about permission", async () => {
+    // 보관된 장·장면의 저장은 **409** 다(계약 Slice 2 의 archived 3축). 읽기 전용으로
+    // 승격해야 하는 것은 403 하나뿐이고, 모든 오류를 승격하면 화면이 "grant 읽기
+    // 전용"이라는 **틀린 이유**로 저장 버튼을 영구히 걷어낸다(변이 MV-B 가 연 자리).
+    stubRoutes([
+      [/\/notes$/, { body: LIST }],
+      [/\/note$/, (init) =>
+        init?.method === "PUT"
+          ? { body: { detail: "draft is archived" }, status: 409 }
+          : { body: { draft_id: "d1", body: "현재 장면 메모", updated_at: null } }],
+    ]);
+
+    renderPanel();
+    await screen.findByDisplayValue("현재 장면 메모");
+    await userEvent.click(screen.getByRole("button", { name: "메모 저장" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("draft is archived");
+    expect(screen.getByRole("button", { name: "메모 저장" })).toBeInTheDocument();
+    expect(screen.getByLabelText("이 장면 메모")).not.toHaveAttribute("readonly");
+  });
+
+  it("lets the editor guard cancel the link into another scene", async () => {
+    // 이 링크는 편집기를 떠난다 — 원고에 미저장 편집이 있으면 편집기의 확인을
+    // 거쳐야 한다(`WorkspaceReviewPanel`·`AnalysisTrigger` 와 같은 선례).
+    stubRoutes([
+      [/\/notes$/, { body: LIST }],
+      [/\/drafts\/d1\/note$/, { body: { draft_id: "d1", body: "현재 장면 메모", updated_at: null } }],
+      [/\/drafts\/d2\/note$/, { body: { draft_id: "d2", body: "다른 장면 전문", updated_at: null } }],
+    ]);
+    const onBeforeNavigateAway = vi.fn(() => false);
+
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <SceneNotePanel
+                projectId="p1"
+                draftId="d1"
+                tabActive
+                onBeforeNavigateAway={onBeforeNavigateAway}
+              />
+            }
+          />
+          <Route path="/projects/:projectId/drafts/:draftId" element={<p>다른 장면 route</p>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByDisplayValue("현재 장면 메모");
+    await userEvent.click(screen.getByRole("button", { name: "두 번째 밤" }));
+    await screen.findByText("다른 장면 전문");
+
+    await userEvent.click(screen.getByRole("link", { name: "두 번째 밤 열기 →" }));
+
+    expect(onBeforeNavigateAway).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("다른 장면 route")).toBeNull();
+    expect(screen.getByRole("heading", { name: "메모" })).toBeInTheDocument();
   });
 });

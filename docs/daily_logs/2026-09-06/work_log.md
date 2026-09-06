@@ -577,7 +577,7 @@ SoT **v1.8.35** 행 신설(폐쇄+정정 기록) · 헤더 버전 · `README.md:
 | 변이 | diff | 재실패 셀 |
 |---|---|---|
 | MN-1 검색 축 | `SceneNoteSearch` 가 query 없이 전량을 받아 제목으로 브라우저 필터 | 화면 "hands the search box to the server" 1 |
-| MN-2 실패 처리 | 목록 조회 실패에 `setNotes([])` 추가 | 화면 오류 2셀(초기 403 · 검색 503) |
+| MN-2 실패 처리 | 목록 조회 실패에 `setNotes([])` 추가 | 화면 오류 2셀(초기 **404** · 검색 503 — 종전 표기 "403"은 픽스처 오독, 2026-09-06 검증 H6 정정) |
 | MN-3 in-flight | 저장 버튼 `disabled` 에서 `saving` 제거 | 패널 저장 셀 1 |
 | MN-4 dirty 과잉교정 | `savedBody` 상태를 넣고 `body === savedBody` 면 잠금 | 3(의도한 "unchanged 저장 허용" + 저장을 거치는 2셀) |
 | MN-5 읽기 전용 표시 | `readOnly={false}` | 403 셀 · 보관 셀 2 |
