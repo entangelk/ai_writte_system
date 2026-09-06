@@ -460,6 +460,8 @@ M2 가 이 셀의 존재 이유다: 픽스처가 전부 revision 0 이면 상수
 
 프론트 전수 403 → **417 passed**. tsc 무오류 · `npm run build` 성공 · `gen:api` 후 `schema.d.ts` 무변.
 
+백엔드 전수 **2891 passed / 1 skipped / 3792 subtests**(기준선 2890/1/3791 대비 정확히 +1 셀·+1 subtest, **skip 은 live Chroma 1건 그대로** — 호스트 패키지 공백 없음). 기준선 갱신은 HANDOFF 와 **가드가 안 잡는 최상위 README 한 줄**을 함께 고쳤다.
+
 ### 7. ★ cwd 함정에 실제로 걸렸다
 
 M8 원복의 `git checkout -- frontend/src/review/ReviewInbox.tsx` 가 **`error: pathspec … did not match`** 로 실패했다 — 앞선 명령이 셸을 `frontend/` 에 남겨 뒀기 때문이다. M9 에서도 같은 실수를 반복했다.
