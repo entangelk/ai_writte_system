@@ -646,6 +646,130 @@ class GroupApproveOrchestrationTest(unittest.TestCase):
         self.assertEqual(_step_by(payload, a.id)["status"], "applied")
         self.assertEqual(_step_by(payload, rejected.id)["status"], "skipped")
 
+    def test_the_adopted_canonicals_own_member_needs_no_judge(self):
+        """★ 2026-09-06 독립 검증 B1 — 판정이 필요 없는 승인이 503으로 거부됐다.
+
+        개별 승격된 멤버(`promote`)는 canonical 을 가진 채 needs_review 로 남는다.
+        그 멤버가 **유일한 runnable** 이면 루프는 그를 seed 가지로 닫으므로
+        (`canonical.source_candidate_id == candidate_id`) 판정 대상이 0인데,
+        `to_judge` 는 canonical 이 있다는 이유로 면제를 잃어 503 을 냈다 —
+        리터럴 ⑦("남은 멤버가 있을 때만 judge 가 필요하다")과 정면 충돌이고,
+        judge 를 구성하지 않는 한 그 그룹은 영영 승인할 수 없었다.
+        """
+        w = _build()  # judge=None — 판정이 필요 없으면 없어도 통과해야 한다
+        promoted_member = _seed_candidate(
+            w["analysis"], project_id=w["project_id"], logical_key="b")
+        rejected = _seed_candidate(
+            w["analysis"], project_id=w["project_id"], logical_key="c")
+        self.assertEqual(w["client"].post(
+            f"/projects/{w['project_id']}/analysis/candidates/{rejected.id}/reject"
+        ).status_code, 200)
+        self.assertEqual(w["client"].post(
+            f"/projects/{w['project_id']}/analysis/candidates/{promoted_member.id}/promote"
+        ).status_code, 200)
+        adopted = _memories(w)
+        self.assertEqual(len(adopted), 1)
+        group = _open_group(w["groups"], w["project_id"], promoted_member, rejected)
+
+        response = _approve(w["client"], w["project_id"], group.group_id)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        # 채택된 canonical 그대로 — 두 번째 canonical 을 mint 하지 않는다.
+        self.assertEqual(payload["canonical_memory_id"], adopted[0].id)
+        self.assertEqual(len(_memories(w)), 1)
+        self.assertEqual(_step_by(payload, promoted_member.id)["status"], "applied")
+        self.assertEqual(_step_by(payload, rejected.id)["status"], "skipped")
+
+    def test_a_second_runnable_member_still_needs_the_judge(self):
+        """B1 수정의 **과잉 방향 짝**(검증자 H4) — 면제를 넓혀 정상 503 을 지우면 문다.
+
+        채택된 canonical 의 원천 멤버 말고 **판정 대상이 하나라도 남으면** judge 는
+        여전히 필요하다. B1 을 고치면서 면제를 무조건 1 로 두거나 `canonical is not
+        None` 을 통째로 면제로 바꾸면 이 셀이 문다 — 반쪽 상태 금지(셀 12와 같은 계약).
+        """
+        w = _build()  # judge=None
+        promoted_member = _seed_candidate(
+            w["analysis"], project_id=w["project_id"], logical_key="b")
+        remaining = _seed_candidate(
+            w["analysis"], project_id=w["project_id"], logical_key="a")
+        self.assertEqual(w["client"].post(
+            f"/projects/{w['project_id']}/analysis/candidates/{promoted_member.id}/promote"
+        ).status_code, 200)
+        group = _open_group(
+            w["groups"], w["project_id"], promoted_member, remaining)
+
+        response = _approve(w["client"], w["project_id"], group.group_id)
+
+        self.assertEqual(response.status_code, 503, response.text)
+        # 반쪽 상태가 남지 않는다 — 남은 멤버는 그대로이고 새 memory 도 없다.
+        self.assertEqual(
+            w["analysis"].get_candidate(
+                project_id=w["project_id"], candidate_id=remaining.id
+            ).status.value, "needs_review"
+        )
+        self.assertEqual(len(_memories(w)), 1)
+
+    def test_approval_leaves_the_group_and_member_rows_untouched(self):
+        """★ 2026-09-06 독립 검증 B2 — D3=A "그룹·멤버·relation 행 불변"의 멤버행 축.
+
+        행동은 계약대로였지만 **관측면이 진행 문서(steps) 기반**이라 멤버행을 지워도
+        승인 응답·replay 가 똑같았다(검증자 실측: 삭제 후 replay 200·steps 동일).
+        Slice 4 의 우연 잠금(거절 응답이 live 멤버를 순회한다)은 승인 구조에서
+        성립하지 않는다 — 그래서 행을 **직접** 단정한다.
+        """
+        judge = _ScriptedJudge(_no_change())
+        w = _build(judge)
+        a = _seed_candidate(w["analysis"], project_id=w["project_id"], logical_key="a")
+        b = _seed_candidate(w["analysis"], project_id=w["project_id"], logical_key="b")
+        group = _open_group(w["groups"], w["project_id"], a, b)
+        before = w["groups"].get_group(w["project_id"], group.group_id)
+
+        response = _approve(w["client"], w["project_id"], group.group_id)
+        self.assertEqual(response.status_code, 200, response.text)
+
+        after = w["groups"].get_group(w["project_id"], group.group_id)
+        self.assertEqual(after.status, before.status)
+        self.assertEqual(after.revision, before.revision)
+        members = w["groups"].list_members(w["project_id"], group.group_id)
+        self.assertEqual(
+            {member.candidate_id for member in members}, {a.id, b.id},
+            "승인은 멤버행을 지우거나 더하지 않는다(D3=A)",
+        )
+
+    def test_steps_are_sorted_by_candidate_id_not_by_membership_order(self):
+        """H2(2026-09-06 독립 검증) — 리터럴 ⑨ "steps 는 후보 id 정렬"이 무셀이었다.
+
+        모든 기존 셀에서 added_at 순 == id 순이라 **정렬을 지워도 관측이 같았다**.
+        Slice 4 M8 과 같은 형태의 우연 통과라, 여기서는 **id 가 큰 멤버를 먼저
+        추가해** 두 순서를 어긋나게 만든 뒤 응답이 id 순인지 본다.
+        """
+        judge = _ScriptedJudge(_no_change())
+        w = _build(judge)
+        first = _seed_candidate(
+            w["analysis"], project_id=w["project_id"], logical_key="a")
+        second = _seed_candidate(
+            w["analysis"], project_id=w["project_id"], logical_key="b")
+        earlier_added, later_added = sorted(
+            (first, second), key=lambda c: c.id, reverse=True
+        )
+        self.assertGreater(
+            earlier_added.id, later_added.id,
+            "가입 순서와 id 순서가 어긋나야 이 셀이 의미를 갖는다",
+        )
+        group = _open_group(
+            w["groups"], w["project_id"], earlier_added, later_added)
+
+        response = _approve(w["client"], w["project_id"], group.group_id)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        ordering = [step["candidate_id"] for step in response.json()["steps"]]
+        self.assertEqual(
+            ordering, sorted(ordering),
+            "steps 는 가입 순이 아니라 후보 id 순이다(리터럴 ⑨)",
+        )
+        self.assertEqual(ordering, [later_added.id, earlier_added.id])
+
     def test_a_group_with_no_eligible_members_is_a_noop_replay(self):
         w = _build(_ScriptedJudge(_no_change()))
         a = _seed_candidate(w["analysis"], project_id=w["project_id"], logical_key="a")

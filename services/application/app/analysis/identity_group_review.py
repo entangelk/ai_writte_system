@@ -288,8 +288,17 @@ class CandidateIdentityGroupReviewService:
             else:
                 runnable.append(member.candidate_id)
 
-        # judge fail-fast — seed 하나뿐이면 판정이 필요 없다(eligible==1).
-        to_judge = len(runnable) - (0 if canonical is not None else 1)
+        # judge fail-fast — 판정 없이 닫히는 멤버 하나는 면제다.
+        # ★ 면제 조건은 "canonical 이 없다"가 아니라 **seed 가지로 닫히는 멤버가
+        # runnable 안에 있다**이다(아래 루프의 분기와 같은 조건). 개별 승격으로
+        # canonical 을 가진 채 needs_review 로 남은 멤버가 그 경우인데, 종전 식은
+        # canonical 이 있다는 이유만으로 면제를 잃어 **판정이 필요 없는 승인을
+        # 503 으로 거부**했다(2026-09-06 독립 검증 B1 — 그 그룹은 judge 를 구성하지
+        # 않는 한 영영 승인 불가였다).
+        exempt = 1 if (
+            canonical is None or canonical.source_candidate_id in runnable
+        ) else 0
+        to_judge = len(runnable) - exempt
         if to_judge > 0 and not self._compare.has_judge:
             raise CompareJudgeNotConfigured(
                 "group approval needs the compare judge but none is configured"
