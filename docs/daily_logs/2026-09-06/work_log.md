@@ -471,3 +471,13 @@ M8 원복의 `git checkout -- frontend/src/review/ReviewInbox.tsx` 가 **`error:
 ### 8. 문서
 
 브리프 신규 1(인덱스 등재 + 숫자 4곳) · 페이즈 §Slice 6 완료 기록 + Deferred 트리거 수정 + 상태 줄 · SoT **v1.8.34**(변경이력 + 계약 절) · README 계약 버전.
+
+## 세션 18 — identity group Slice 6 독립 검증 (조건부 합격)
+
+요청: 오너("검증하고 의심하고 또 의심해줘"). 검증자는 구현 세션 17과 다른 세션이다. **서술·측정 전부 [`docs/verifications/2026-09-06/identity_group_slice_6.md`](../verifications/2026-09-06/identity_group_slice_6.md)에 있다** — 여기는 경과만.
+
+- 구현 주장 전부 재현(전수 백 2891/1/3792 · 프론트 417 · OpenAPI md5 무변 · gen:api 무변). 구현자 뮤테이션 8종 재유도 — 전부 재실패 수치까지 일치. HANDOFF가 지정한 검증자 자리 셋(①페이지 수준 결과 상자 ②픽스처 revision≠0 ③폭 규칙성)은 전부 실질 잠금 확인.
+- **차단 2건(조건부 합격의 조건)** — **B1** 잔여 step 리터럴 `pending`에 셀이 없다(검증자 변이 M10f가 22 passed로 통과 — SoT가 `conflict·failed·pending`을 열거). **B2** SoT v1.8.34 변경이력의 "`--type-body` 고침으로 실크기가 1.3rem→1rem 로 바뀌어 육안 확인 대상"이 **실측 반증**됐다 — `var()` 실패는 진 cascade 선언(1.3rem)을 되살리지 않고 상속값으로 떨어지며, headless Chrome 실측 pre/post **모두 16px·system-ui(가시 변화 0)**. 가시 변화가 있었다면 그 시점은 `d02837a`(09-02)다. 세션 17 본문·페이즈·CHANGELOG·typeScale 주석에 같은 오류가 전파돼 있어 정정이 조건이다.
+- 세션 17의 cwd 함정 보고(2회, 무손실)는 사실로 확인. 검증자도 유사 경로 오류 1회(저장소 루트에서 vitest → jsdom 미부착 22 전건 실패) — 측정 폐기·`frontend/` 재실행으로 처리, 변이 아님.
+- 함께 갱신: 검증 인덱스+판정 분포(286건 · 조건부 92) · README 검증 건수 2곳 · HANDOFF Next Tasks 1 · 페이즈/plans 상태 마커.
+

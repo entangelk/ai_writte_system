@@ -1,6 +1,6 @@
 # 미승인 후보 정체성 그룹 — 구현 페이즈
 
-상태: `Active — Slice 0~6 구현 완료(Slice 0~5 검증 폐쇄), Slice 6 독립 검증 대기`
+상태: `Active — Slice 0~6 구현 완료, Slice 6 검증 조건부(조건 B1·B2, 2026-09-06)`
 작성: 2026-09-02
 결정 정본: [`pending-candidate-identity-grouping-decisions.md`](pending-candidate-identity-grouping-decisions.md) — **C 채택**
 계약 정본: [`../system-contract-sot.md`](../system-contract-sot.md) v1.8.34
