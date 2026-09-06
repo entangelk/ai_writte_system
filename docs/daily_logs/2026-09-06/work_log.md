@@ -259,3 +259,75 @@ S-3·S-1 은 서비스 동작을 바꿔 SoT 버전(v1.8.30·v1.8.32)을 받았�
 - **2026-09-06 점검은 남지 않았다** — 모든 원격 명령이 `--token` 값을 `sed` 로 마스킹했고 길이·발생 수만 셌다.
 
 **★ 순서가 있다**: 회전만 하고 인자를 그대로 두면 새 값이 같은 자리에 놓인다. 저장 방식이 먼저였고 그것은 이제 닫혔으므로, 회전은 지금 하면 새 값이 `0600` 파일로 바로 들어간다.
+
+---
+
+## 세션 14 — identity group Slice 5 검증 조건 폐쇄 (B1·B2) + 하드닝 (H1·H2)
+
+검증 기록 [`../../verifications/2026-09-06/identity_group_slice_5.md`](../../verifications/2026-09-06/identity_group_slice_5.md)(조건부 합격, 커밋 `1eb1e6c`)의 차단 2건과 하드닝 2건.
+
+### 1. B1 — 행동 결함: 판정이 필요 없는 승인이 503이었다
+
+`to_judge = len(runnable) - (0 if canonical is not None else 1)` 는 **canonical 이 있다는 이유만으로 면제를 잃는다**. 그런데 개별 승격(`promote`)된 멤버는 canonical 을 가진 채 `needs_review` 로 남고, 그 멤버가 유일한 runnable 이면 루프는 그를 **seed 가지**로 닫는다(`canonical.source_candidate_id == candidate_id`) — 판정 대상이 0이다. 리터럴 ⑦(*"남은 멤버가 있을 때만 judge 가 필요하다"*)과 정면 충돌이고, **judge 를 구성하지 않는 한 그 그룹은 영영 승인 불가**였다.
+
+**면제 조건을 루프의 분기와 같은 조건으로 맞췄다** — 값이 아니라 *같은 질문*을 두 곳이 하도록:
+
+```python
+exempt = 1 if (canonical is None or canonical.source_candidate_id in runnable) else 0
+to_judge = len(runnable) - exempt
+```
+
+셀을 먼저 쓰고 **수정 전 503 재현을 확인한 뒤** 고쳤다(`AssertionError: 503 != 200`).
+
+### 2. B2 — D3=A 멤버행 축 무셀
+
+행동은 계약대로였지만 **관측면이 진행 문서(steps) 기반**이라 멤버행을 지워도 응답·replay 가 같았다. Slice 4 의 우연 잠금(거절 응답이 live 멤버를 순회)은 승인 구조에서 성립하지 않는다 — 그룹행(status·revision)과 멤버행 전건을 **직접** 단정하는 셀을 넣었다.
+
+### 3. 하드닝
+
+- **H1** — `execute_project_purge` docstring 의 "22컬렉션"이 approvals 합류 후 실제(SoT v1.8.29 = **23**)와 어긋난 낡은 산문. 한 줄 정정.
+- **H2** — 리터럴 ⑨ "steps 는 후보 id 정렬" 무셀. 아래 §4 참조.
+
+### 4. ★ 이 세션에서 가장 많이 배운 것 — 뮤테이션이 세 번 통과했고, 매번 원인이 달랐다
+
+| 회차 | 통과한 변이 | 진짜 원인 | 교훈 |
+|---|---|---|---|
+| 1 | `exempt = 1` (과잉 교정) | **셀 설정이 안 갈렸다.** 채택 원천이 `runnable` **안**이면 옛 식과 새 식이 같은 값을 낸다 | over-strict 짝은 *두 식이 실제로 갈리는* 자리에서 세운다 — 그 자리는 채택 원천이 terminal 이라 runnable **밖**일 때다 |
+| 2 | `exempt = 1` (다시) | **상태코드가 같았다.** 판정 단계의 `judge_against` 도 같은 503 을 낸다 | fail-fast 가 사는 이유는 코드가 아니라 **"시작 전"**이다 — 진행 문서 부재를 단정해야 갈린다 |
+| 3 | steps 정렬 제거 | **셀이 아예 실행되지 않았다.** 재작성 splice 의 끝 앵커가 시작 앵커보다 파일 앞에 있어(`end < start`) 그 사이가 통째로 복제됐고, 셀 4종이 두 번 정의됐다 | **파이썬은 뒤 정의가 앞을 가린다.** 약한 초안이 돌고 있었고 **셀 수로도 안 드러난다**(32 → 32) |
+
+**HANDOFF 함정의 *"mutation 이 통과하면 먼저 mutation 이 안 먹었는지 의심한다"* 를 세 번 다 적용했고, 세 번째에서야 맞았다.** 두 번째까지는 "변이는 먹었고 셀이 약하다"가 맞는 진단이었지만, 세 번째는 **변이도 먹었고 셀도 옳았는데 그 셀이 실행 대상이 아니었다.** 셋째 축(*셀이 실제로 도는가*)이 확인 목록에 없었다.
+
+**H2 셀 자체의 함정도 같은 종류다**: `_FixedClock` 은 자동 전진하지 않아 `_open_group` 으로 한 번에 넣으면 멤버 `added_at` 이 전부 같고, `list_members` 가 동률을 `candidate_id` 로 깨서 **결과가 이미 id 순**이 된다. 초안 셀이 *잡으려던 우연 통과를 스스로 반복했다.* 지금 셀은 `clock.advance()` 로 `added_at` 을 가르고, **승인 전에 `list_members` 가 실제로 반대 순서인지 먼저 단정**한다.
+
+### 5. 뮤테이션 — 최종(중복 제거 후, 커밋 후 변형·사전 `git status` 확인)
+
+기준선 `32 passed`.
+
+| # | 적용한 변형 | 자리 | 결과 |
+|---|---|---|---|
+| M-B1a | `exempt` 계산을 옛 식 `(0 if canonical is not None else 1)` 로 되돌림 | `identity_group_review.py` | **1 failed** ✅ under-strict |
+| M-B1b | `exempt = 1` 무조건 | 같음 | **1 failed** ✅ over-strict |
+| M-B1c | `if to_judge > 0 and not has_judge:` → `if False:` | 같음 | **1 failed** ✅ |
+| M-B1d | 면제 조건을 `canonical is not None or canonical is None` | 같음 | **1 failed** ✅ |
+| M-B2a | 승인 끝에 `set_group_status(CLOSED)` | 같음 | **3 failed** ✅ |
+| M-B2b | 승인 끝에 멤버행 `clear()` | 같음 | **2 failed** ✅ |
+| M-B2c | 승인 끝에 같은 status 로 `set_group_status`(revision 만 +1 — 좁은 변이) | 같음 | **3 failed** ✅ revision 축이 잠겼다 |
+| M-H2 | `sorted(steps.values(), key=…)` → `steps.values()`(2곳) | 같음 | **1 failed** ✅ |
+
+**검증자 권고 H3 을 반영해 "적용한 변형" 열에 diff 문언을 적었다** — 라인 번호만으로는 재유도가 안 된다.
+
+### 6. 검증
+
+- 집중 **32 passed**(`test_identity_group_approve.py`) · approvals mongo 포함 **36** · 인접+typecheck **154 passed / 367 subtests**.
+- OpenAPI **operation 102 유지** — 이 수정은 계약 표면을 안 바꾼다(503 이 나는 *조건*만 바뀐다).
+- 전수 **2887 passed / 4 skipped / 3791 subtests, 331s**. 기준선(2883) 대비 **+4셀**, skip 내역 동일(live Chroma 1 + `elasticsearch` 미설치 3).
+
+---
+
+## 세션 14 발견 — 중복 테스트 이름은 조용히 가려지고 셀 수로도 안 드러난다
+
+- **문제**: 같은 클래스에 같은 이름의 테스트가 둘 있으면 **뒤 정의가 앞을 가린다.** 이번에 셀 4종이 중복됐는데 `pytest` 수집 수는 그대로였고(32), 초록도 그대로였다. **약한 초안이 도는 것을 아무것도 알려주지 않았다.**
+- **원인**: 이 세션의 splice 실수(끝 앵커가 시작 앵커보다 앞) — 도구 문제이지 계약 문제가 아니다.
+- **처리**: 중복 140행 제거. **가드는 만들지 않았다** — 이 저장소의 회귀 가드는 계약을 잠그는 자리이고, 이것은 편집 사고라 성격이 다르다. 다만 **뮤테이션이 통과했을 때 확인할 축이 둘이 아니라 셋**이라는 것을 위 표에 남겼다: ① 변이가 먹었나 ② 셀이 약한가 ③ **그 셀이 실제로 실행되는가**.
+- **결과**: 판정에 영향 없음(중복 제거 전후 32 passed 동일 — 다만 제거 후에야 뮤테이션이 물었다).
