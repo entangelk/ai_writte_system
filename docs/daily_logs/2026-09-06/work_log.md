@@ -631,3 +631,43 @@ SoT **v1.8.35** 행 신설(폐쇄+정정 기록) · 헤더 버전 · `README.md:
 ### 판정 열은 승격하지 않는다
 
 검증 인덱스의 판정은 그 기록 자신의 최종 문구를 따르되, 이 저장소 선례(Slice 0~5·S-1·S-3·Slice 6)대로 **조건 폐쇄가 판정을 자동 승격하지 않는다**. 승격은 다른 세션의 재검이 할 일이다.
+
+## 세션 23 — 배포 + 재부팅 장애 수습 (오너 지시)
+
+지시: 오너(*"수정시각 넣고, 더보기를 여는게 좋겠다. 그건 다음 작업에서 하고, 마무리하고 서버 배포까지 하고 오늘 작업 마무리하자"*). 배포 서버는 오너 제공 키로 접속했고 **주소·계정·키 경로는 저장소에 적지 않는다**(공개 저장소 보안 규칙).
+
+### 배포 전에 발견 — 서비스가 이미 죽어 있었다
+
+접속해 상태를 재 보니 **호스트가 12분 전 재부팅**됐고(`uptime`), 그때 스택 절반이 살아나지 못한 상태였다.
+
+- `application`·`mongo`·`gateway`·`chroma`·`elasticsearch` — 재부팅 전 종료 상태 그대로(`Exited`).
+- `admin`·`worker`·`generation_worker` — `unless-stopped` 라 살아났지만 mongo 를 못 찾아 **15초 주기 무한 재시작**(`ServerSelectionTimeoutError: mongo:27017 … name resolution`).
+- `frontend` — 살아서 **200 을 준다**.
+
+**이 조합이 조용한 장애다.** 화면은 열리는데 API 는 죽어 있고, 아무 알림도 없다. 원인은 단순했다 — `restart` 정책이 서비스마다 갈려 있었고 핵심 셋(mongo·application·gateway)에는 아예 없었다.
+
+### 배포 (오너가 origin push 를 마친 뒤)
+
+절차는 2026-09-05 선례 그대로 — pull → build → up -d → 스모크. 운용 조합은 `docker-compose.yml` + `docker-compose.external-embedding.yml`(생성 라벨에서 확인).
+
+1. `git pull --ff-only` `d37eb84` → **`c18a993`**(오늘치 40커밋 — Slice 6 마감·최종 저장 5차 재검증과 B1 폐쇄·장면 메모 Slice 3·4와 그 검증·조건 폐쇄).
+2. 이미지 재빌드 — app(4서비스 공유 태그)·frontend·gateway·elasticsearch **Built**. **frontend 재빌드는 필수**였다(이번 슬라이스가 프론트 소스를 바꿨다).
+3. `up -d` — 전 컨테이너 재생성.
+
+### Verification (배포 호스트 실측)
+
+- 상태: **healthy 7**(application·admin·gateway·mongo·elasticsearch·chroma·frontend) + healthcheck 없는 2(worker·generation_worker). **이 조합의 정상값은 8이 아니라 7이다** — external-embedding override 가 `embedding` 을 profile 뒤로 보낸다.
+- `GET /health` → `{"status":"ok"}` · `GET /projects` 무세션 → **401**(인증 생존 — 낡은 이미지 함정 아님) · frontend → 200 · `/docs` → **404**(비공개 유지, SoT v1.7.98).
+- nginx 경유 `GET /api/health` → 200(프론트→API 프록시 생존).
+- **오늘 슬라이스가 실제로 실렸다** — 배포된 번들(`/assets/index-*.js`)에서 메모 화면 리터럴 2건 확인.
+
+### restart 정책 시행 (오너: "지금 함께 고친다")
+
+`docker-compose.yml` 전 서비스에 `restart: unless-stopped`. 가드 `ComposeRestartPolicyTest` 를 함께 넣었고 **목록을 손으로 들지 않고 compose 에서 서비스 집합을 유도**하므로 정책 없는 새 서비스도 잡는다. 양방향 실측 — mongo 정책 제거(under)·worker 를 `always` 로(over) 둘 다 재실패. `always` 를 막는 이유는 오너가 일부러 멈춘 컨테이너까지 되살리기 때문이고, `on-failure` 는 재부팅을 실패로 보지 않아 이 결함을 못 막는다.
+
+**★ 이 커밋은 아직 배포에 반영되지 않았다** — 서버는 origin 에서 pull 하고 push 는 오너 몫이라, 다음 push 뒤 `pull → up -d`(재빌드 불필요, compose 변경은 **컨테이너 재생성에만** 적용된다) 한 번이면 끝난다.
+
+### 오너 결정
+
+- **장면 메모 목록에 수정 시각을 싣고, 절단 표시("더 보기")를 연다** — 다만 **다음 작업**으로 미룬다(2026-09-06). 둘 다 검증이 남긴 자리다: 수정 시각은 세션 21 이 계획 범위를 좁게 읽어 뺀 것이고, `truncated` 는 세션 22 가 문언 정정(B4)으로 닫으면서 *"열 때 true/false 양방향 셀과 함께 연다"* 는 조건을 붙여 둔 자리다.
+- **restart 정책은 오늘 함께 고친다**(위) — 배포 범위가 코드+인프라로 커지는 것을 감수했다. 근거는 같은 사고가 반복되면 조용히 죽는다는 것.
