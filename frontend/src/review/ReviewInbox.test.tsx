@@ -311,6 +311,9 @@ describe("ReviewInbox", () => {
  * - over-strict — 그룹으로 묶었다고 멤버의 개별 승인·거절을 없애면(= 그룹
  *   단위로만 처리 가능하게 만들면) affordance 유지 셀이 실패한다.
  * - over-strict — 부분 실패를 재조회로 지워 "성공"처럼 닫으면 잔여 셀이 실패한다.
+ * - under-strict — 잔여 판정을 failed/conflict 열거로 좁히면(= `pending` 을 빼면)
+ *   pending 잔여 셀이 실패한다(검증 2026-09-06 B1 — 그 좁히기 변이가 22 passed
+ *   로 통과해 입증된 무셀이었다).
  */
 describe("ReviewInbox — 정체성 그룹", () => {
   it("folds grouped members into one group row and leaves ungrouped rows alone", async () => {
@@ -499,6 +502,63 @@ describe("ReviewInbox — 정체성 그룹", () => {
     );
     expect(screen.getByText(/그룹 승인 — 반영 1건/)).toBeInTheDocument();
     expect(screen.getByText(/1건이 남았습니다/)).toBeInTheDocument();
+  });
+
+  it("counts a pending step as unfinished — the D4=A partial-pass tail", async () => {
+    // 검증 2026-09-06 B1(docs/verifications/2026-09-06/identity_group_slice_6.md):
+    // SoT 는 잔여 판정을 applied/skipped 아닌 step(conflict·failed·pending)으로
+    // 열거하는데 셀은 failed·conflict 표본뿐이었다 — 잔여를 두 리터럴로 좁히는
+    // 변이가 22 passed 로 통과했다. D4=A(첫 판정 실패에 패스 종료)의 실전 부분
+    // 패스 모양 [applied, failed, pending, …] 에서 남은 건수의 대부분이 정확히
+    // pending 이므로 이 step 이 잘못 세여도 안 잡히면 green 이 거짓말이 된다.
+    // 양방향:
+    // - under-strict — 잔여를 failed/conflict 열거로 좁히면 "2건이 남았습니다"가
+    //   안 그려져 재실패한다(검증 변이 M10f).
+    // - over-strict — 잔여를 공집합으로 만들면(전원 성공 취급, M7f 방향) 재실패한다.
+    mockFetch(
+      { body: inboxBody({
+          items: [
+            member("c1", "j1", "서윤", group({
+              group_size: 3, group_member_ids: ["c1", "c2", "c3"],
+            })),
+            member("c2", "j2", "서윤", group({
+              group_size: 3, group_member_ids: ["c1", "c2", "c3"],
+            })),
+            member("c3", "j3", "서윤", group({
+              group_size: 3, group_member_ids: ["c1", "c2", "c3"],
+            })),
+          ],
+          gate_findings: [],
+        }) },
+      {
+        body: {
+          group_id: "g-1", expected_revision: 3, canonical_memory_id: "m-1",
+          steps: [
+            { candidate_id: "c1", status: "applied", action: "create",
+              memory_id: "m-1", version: 1, error: null },
+            { candidate_id: "c2", status: "failed", action: null,
+              memory_id: null, version: null, error: "InvalidJudgeResult" },
+            { candidate_id: "c3", status: "pending", action: null,
+              memory_id: null, version: null, error: null },
+          ],
+          idempotent_replay: false,
+        },
+      },
+      { body: inboxBody({ items: [], gate_findings: [] }) },
+    );
+    renderInbox();
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "그룹 승인" }),
+    );
+
+    // pending 라벨 렌더와 남은 건수 2(applied 1 · 나머지 2)를 함께 단정한다.
+    await waitFor(() =>
+      expect(screen.getByText("이번 패스에서 처리 안 됨")).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/2건이 남았습니다/)).toBeInTheDocument();
+    // "반영" 머리는 applied 만 센다 — pending·failed 를 성공으로 세지 않는다.
+    expect(screen.getByText(/그룹 승인 — 반영 1건/)).toBeInTheDocument();
   });
 
   it("warns on a contradicted group instead of grouping it silently", async () => {
