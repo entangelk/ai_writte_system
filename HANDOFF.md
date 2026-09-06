@@ -159,8 +159,7 @@
 | 항목 | 무엇을 정해야 하나 | 정본 |
 |---|---|---|
 | **랜딩 기획 · 약관 · 개인정보 처리방침** | 공개 전 법적 요건이고 **정본은 오너만 쓸 수 있다**(원고가 구글 API로 나가는 고지 포함 여부 포함). 병목이 여기다 | — |
-| **N2** Scene 목록의 finality·분석 표시 | 계약 제7조 문언과 긴장 — *현행 유지=문언 수정* 또는 *배지 구현* | `final_save_d5_closure.md` |
-| **N3** 같은 finalize key 재전송이 활동 행 중복 | ⓐ 그대로 ⓑ 생략(accept 선례) — UI는 매 클릭 새 UUID라 도달 불가 | 같음 |
+| **N3** 같은 finalize key 재전송이 활동 행 중복 | ⓐ 그대로 ⓑ 생략(accept 선례) — UI는 매 클릭 새 UUID라 도달 불가. **★ "도달 불가"의 전제가 무잠금이다**(5차 재검증 H1: 키를 상수로 바꿔도 프런트 68셀 전건 통과) | `final_save_d5_closure.md` |
 | **idempotent replay가 활동 이벤트를 매번 추가** | ⓐ 그대로 ⓑ replay 제외 ⓒ replay 표식 | 2026-08-09 검증 |
 | **auto-promote 503 partial 미기록** | ⓐ 그대로(권장) ⓑ 승격 memory마다 한 행 ⓒ 개수 한 행 | `routers/analysis.py` |
 | **K-3: 창을 모르는 호출은 가드 밖** | ⓐ 그대로 ⓑ 짧은 대기 허용(v1.7.60 개정) ⓒ `/props` 1회 재시도 | v1.7.60 |
@@ -227,7 +226,7 @@
 0. **★ Phase S — 보안 감사 후속**(기록 [`security_audit_dual_workflow.md`](docs/verifications/2026-09-05/security_audit_dual_workflow.md), 확정 39건 · critical 0 · HIGH 1). 아래 "🛡 보안 — Phase S" 표가 항목별 정본이다. **~~S-3 signup~~·~~S-1 quota dedupe~~·~~S-0 문서 스윕~~·~~S-7 토큰 저장 방식~~(닫힘) → **저장소·호스트 양쪽에 남은 착수 항목이 없다.** 나머지(S-2·S-5·S-6)는 트리거 대기.** S-2(nginx 보안 헤더)를 할 때는 **nginx 앞단 레이트리밋·`client_max_body_size` 와 한 슬라이스로 묶는 편이 싸다** — nginx 를 한 번만 연다.
    - **낡은 vhost(공용 리버스 프록시)**: 오너 확인 완료(2026-09-05) — **타 프로젝트 쪽 작업 AI가 처리 중**이다. 이 저장소 소관 아님(살아나면 두 번째 진입로인 구조는 그대로). **★ 이것은 회신 경로가 없는 위임이다** — 저쪽이 끝내도 여기에 알려 줄 사람이 없고 이 저장소에서는 고칠 수도 없다. **닫으려면 오너가 그쪽 결과를 물어다 이 줄을 지우는 수밖에 없다**(2026-09-06 분류).
 1. **~~Slice 6(grouped Inbox UI)~~ 완료(2026-09-06)** — 구현(SoT v1.8.34) → 독립 검증 **조건부 합격**([`identity_group_slice_6.md`](docs/verifications/2026-09-06/identity_group_slice_6.md)) → **조건 B1·B2 폐쇄(같은 날, SoT v1.8.35 — B1 `pending` 잔여 셀 · B2 "1.3rem→1rem 가시 변화" 서술 반증·정정, `--type-base` 교정은 유지)**. 검증 하드닝 H1~H4(그룹 승인 유료 402/429 화면 처리가 `WritingPanel` 표준과 안 맞음 · 409 뒤 재동기화 없음 · `idempotent_replay` 표시 무셀 · outcome 단일 슬롯)는 **비차단으로 검증 기록에 남아 있다** — 완료 기준 #6("실패를 사람이 이해할 수 있다")과의 관계는 오너 판단 몫.
-2. **최종 저장·분석 연동 5차(승격) 재검증** — 4차 조건부 합격의 조건 N1은 닫혔다. **집중 셀 + 변이로 충분**(4차 판정문).
+2. **최종 저장·분석 연동 — 5차 재검증 완료(2026-09-06), 조건 B1 하나가 열려 있다**([`final_save_n1_promotion.md`](docs/verifications/2026-09-06/final_save_n1_promotion.md), **조건부 합격**). 4차 조건 N1 자체는 폐쇄 확인(요구 분기 전건 기명 셀 · 구현자 변이 11종 셀 짝까지 재현). **B1** — 확정 계약 *"final marker 뒤의 일반 저장은 허용한다"* 의 **과잉교정 방향이 프런트 무가드**다: 일반 저장 버튼([`DraftEditor.tsx:735`](frontend/src/drafts/DraftEditor.tsx#L735))에 `isFinalized` 를 더해도 **프런트 전수 418 전건 초록**(백엔드는 프로브 S4 가 잠근다 — 한쪽만 잠긴 계약). 이 분기는 배지 `최종 저장 후 수정됨` 에 **사용자가 도달하는 유일한 경로**이고 기존 셀은 그 상태를 픽스처로 마운트할 뿐이다. 처방 한 셀: final 성공 직후 본문 수정 → 저장 버튼 활성·저장 실행·배지 전이 단정.
 3. **장면 메모 Slice 3~4(화면 둘)** — API는 완결(Slice 0~2). **Slice 3는 API 계약을 안 바꾼다** — 목록은 미리보기(200자)만 싣고 전문은 단건 GET이 주므로 **화면이 목록에서 전문을 기대하게 만들지 말 것**. 저장 화면은 **요청 중 저장 버튼 비활성화**. 확정값 [`scene-note-decisions.md`](docs/plans/scene-note-decisions.md).
 4. **육안 확인(누적)** — 프론트 재빌드 선행. Phase 10 마감 다섯(첫 화면 콘텐츠 · 오른쪽 끝 정렬 · 목록 행 간격 · 차트 막대 테두리 · 버튼 hover) · 비활성 버튼 색 · 편집기 드로어와 설정 탭이 좁은 화면에서 겹치는지 · 관측 화면과 비동기 패드 렌더 · **최종 저장·분석 연동의 첫 실사용**(운영 이력 0건).
 5. **dogfood 관찰**: `report field must be an array` 실패율 · `analysis_extract` 의 `aspect` 오분류 빈도 · scratch per-draft 상한(기본 20) 밀어냄. 체크리스트 [`docs/dogfood-checklist.md`](docs/dogfood-checklist.md).
