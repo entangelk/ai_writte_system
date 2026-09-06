@@ -146,6 +146,30 @@ describe("메모 드로어 패널", () => {
     ).toHaveLength(1);
   });
 
+  it("re-reads the list after a save so the preview stops contradicting the editor", async () => {
+    const fetchMock = stubRoutes([
+      [/\/notes$/, { body: LIST }],
+      [/\/note$/, { body: { draft_id: "d1", body: "옛 메모", updated_at: null } }],
+    ]);
+
+    renderPanel();
+    await screen.findByDisplayValue("옛 메모");
+    const listCallsBefore = fetchMock.mock.calls.filter(
+      (call) => String(call[0]).endsWith("/notes"),
+    ).length;
+
+    await userEvent.click(screen.getByRole("button", { name: "메모 저장" }));
+    await screen.findByText("메모를 저장했습니다.");
+
+    // 목록의 미리보기는 방금 저장한 본문에서 만들어진다 — 다시 읽지 않으면 같은
+    // 화면 안에서 목록과 편집기가 서로 다른 본문을 말한다.
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/notes")).length,
+      ).toBe(listCallsBefore + 1),
+    );
+  });
+
   it("does not lock saving an unchanged body — the owner chose to count the act, not the value", async () => {
     stubRoutes([
       [/\/notes$/, { body: LIST }],
@@ -277,6 +301,11 @@ describe("메모 드로어 패널", () => {
 
     // over-strict 방향: 상한 아래에서는 잠그면 안 된다.
     await userEvent.type(editor, "짧은 메모");
+    expect(screen.getByRole("button", { name: "메모 저장" })).toBeEnabled();
+
+    // 경계값: 정확히 상한이면 저장할 수 있다(off-by-one 과잉 교정 방어).
+    await userEvent.clear(editor);
+    await userEvent.paste("가".repeat(12_000));
     expect(screen.getByRole("button", { name: "메모 저장" })).toBeEnabled();
 
     await userEvent.clear(editor);
