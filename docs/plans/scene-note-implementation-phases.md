@@ -1,6 +1,6 @@
 # 장면 메모 기능 — 구현 페이즈
 
-상태: `Active — Slice 0·1·2 완료(SoT v1.8.11·v1.8.12·v1.8.13, 2026-08-31) · Slice 3부터 진행`
+상태: `완료 — Slice 0~4 구현 완료(API SoT v1.8.11·v1.8.12·v1.8.13, 2026-08-31 · 화면 v1.8.36, 2026-09-06)`
 작성: 2026-08-29
 결정 정본: [`scene-note-decisions.md`](scene-note-decisions.md) D1=C+A · D2=A · D3=A · D4=A
 
