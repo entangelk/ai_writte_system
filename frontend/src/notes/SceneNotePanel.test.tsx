@@ -226,6 +226,60 @@ describe("메모 드로어 패널", () => {
     );
   });
 
+  it("returns to the new scene's note when the editor moves while another note is selected", async () => {
+    // 변이 MN-8 이 찾은 빈 칸: 다른 장면을 고른 채 편집기가 장면을 옮기면, 선택을
+    // 그대로 두는 순간 패널이 **옛 장면의 메모를 읽으면서 새 장면을 저장 대상으로**
+    // 들고 있게 된다(D1=A "편집 대상은 현재 Scene" 위반).
+    stubRoutes([
+      [/\/notes$/, { body: LIST }],
+      [/\/drafts\/d1\/note$/, { body: { draft_id: "d1", body: "첫 장면 메모", updated_at: null } }],
+      [/\/drafts\/d2\/note$/, { body: { draft_id: "d2", body: "두 번째 장면 메모", updated_at: null } }],
+    ]);
+
+    const view = renderPanel();
+    await screen.findByDisplayValue("첫 장면 메모");
+    await userEvent.click(screen.getByRole("button", { name: "두 번째 밤" }));
+    expect(await screen.findByText("두 번째 장면 메모")).toBeInTheDocument();
+
+    view.rerender(
+      <MemoryRouter>
+        <SceneNotePanel projectId="p1" draftId="d2" tabActive />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByDisplayValue("두 번째 장면 메모")).toHaveAttribute(
+      "id", "scene-note-body",
+    );
+    expect(screen.queryByRole("button", { name: "← 현재 장면 메모" })).not.toBeInTheDocument();
+  });
+
+  it("does not clobber unsaved note text when the tab is closed and reopened", async () => {
+    stubRoutes([
+      [/\/notes$/, { body: LIST }],
+      [/\/note$/, { body: { draft_id: "d1", body: "서버 본문", updated_at: null } }],
+    ]);
+
+    const view = renderPanel();
+    const editor = await screen.findByDisplayValue("서버 본문");
+    await userEvent.type(editor, " + 아직 저장 안 한 글");
+
+    view.rerender(
+      <MemoryRouter>
+        <SceneNotePanel projectId="p1" draftId="d1" tabActive={false} />
+      </MemoryRouter>,
+    );
+    view.rerender(
+      <MemoryRouter>
+        <SceneNotePanel projectId="p1" draftId="d1" tabActive />
+      </MemoryRouter>,
+    );
+
+    // 다시 읽어 덮으면 사용자가 방금 쓴 글이 소리 없이 사라진다.
+    await waitFor(() =>
+      expect(screen.getByLabelText("이 장면 메모")).toHaveValue("서버 본문 + 아직 저장 안 한 글"),
+    );
+  });
+
   it("keeps the selection while the drawer is closed and reopened", async () => {
     stubRoutes([
       [/\/notes$/, { body: LIST }],
