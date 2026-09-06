@@ -681,27 +681,38 @@ class GroupApproveOrchestrationTest(unittest.TestCase):
         self.assertEqual(_step_by(payload, promoted_member.id)["status"], "applied")
         self.assertEqual(_step_by(payload, rejected.id)["status"], "skipped")
 
-    def test_a_second_runnable_member_still_needs_the_judge(self):
+    def test_a_runnable_member_outside_the_adopted_canonical_needs_the_judge(self):
         """B1 수정의 **과잉 방향 짝**(검증자 H4) — 면제를 넓혀 정상 503 을 지우면 문다.
 
-        채택된 canonical 의 원천 멤버 말고 **판정 대상이 하나라도 남으면** judge 는
-        여전히 필요하다. B1 을 고치면서 면제를 무조건 1 로 두거나 `canonical is not
-        None` 을 통째로 면제로 바꾸면 이 셀이 문다 — 반쪽 상태 금지(셀 12와 같은 계약).
+        ★ 설정이 까다롭다. 채택 원천 멤버가 **runnable 안에 있으면** 옛 식과 새 식이
+        같은 값을 내서 변이를 못 잡는다(초안이 그렇게 썼다가 `exempt = 1` 변이를
+        놓쳤다). 갈리는 자리는 **채택 원천이 terminal 이라 runnable 밖일 때**다 —
+        `confirm` 은 승격을 동반해 canonical 을 남기고 그 멤버는 skipped 가 되므로,
+        남은 멤버는 그 canonical 을 대상으로 **판정을 받아야 한다.** 면제를 무조건
+        1 로 두거나 `canonical is not None` 을 통째로 면제로 바꾸면 이 승인이 판정
+        없이 200 으로 닫혀 반쪽 상태가 된다.
+
+        기존 셀 11 의 docstring 이 이 경우를 *"셀 12가 잠근다"* 고 적었지만 셀 12 는
+        canonical 이 **없는** 형태라 실제로는 무셀이었다.
         """
         w = _build()  # judge=None
-        promoted_member = _seed_candidate(
-            w["analysis"], project_id=w["project_id"], logical_key="b")
-        remaining = _seed_candidate(
+        confirmed = _seed_candidate(
             w["analysis"], project_id=w["project_id"], logical_key="a")
+        remaining = _seed_candidate(
+            w["analysis"], project_id=w["project_id"], logical_key="b")
+        # confirm 은 승격을 동반한다 — canonical 이 남고 멤버 자신은 terminal 이다.
         self.assertEqual(w["client"].post(
-            f"/projects/{w['project_id']}/analysis/candidates/{promoted_member.id}/promote"
+            f"/projects/{w['project_id']}/analysis/candidates/{confirmed.id}/confirm"
         ).status_code, 200)
-        group = _open_group(
-            w["groups"], w["project_id"], promoted_member, remaining)
+        adopted = _memories(w)
+        self.assertEqual(len(adopted), 1)
+        group = _open_group(w["groups"], w["project_id"], confirmed, remaining)
 
         response = _approve(w["client"], w["project_id"], group.group_id)
 
-        self.assertEqual(response.status_code, 503, response.text)
+        self.assertEqual(
+            response.status_code, 503, response.text,
+        )
         # 반쪽 상태가 남지 않는다 — 남은 멤버는 그대로이고 새 memory 도 없다.
         self.assertEqual(
             w["analysis"].get_candidate(
