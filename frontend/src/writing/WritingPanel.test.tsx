@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WritingPanel } from "./WritingPanel";
@@ -819,6 +819,43 @@ describe("WritingPanel — accept (pass only)", () => {
     await waitFor(() =>
       expect(fetchMock.mock.calls.length).toBeGreaterThan(before),
     );
+  });
+
+  it("surfaces the duplicate prompt at the accept action, naming what it re-runs", async () => {
+    /**
+     * ★ 오너 실사용 관측(2026-09-07)의 **실제 원인**이다.
+     *
+     * 콘솔 증거: `POST …/writing/accept 429`. 버튼은 동작했고 서버가 **429(같은
+     * 요청이 이미 진행 중)** 로 거절했다 — 계약상 `X-Confirm-Duplicate` 재전송으로
+     * 풀리는 상태다(`api/errors.py`). 화면은 그때 확인 대화를 띄우는데,
+     * **그 대화는 패널 맨 위에 그려지고 채택 버튼은 맨 아래**라 아래쪽에서 누른
+     * 사용자에게는 화면 밖에서 열렸다 → *"아무것도 안 된다"*.
+     *
+     * 그리고 확인 버튼이 **"하나 더 만들기"** 라 채택 문맥에서 뜻이 안 맞았다 —
+     * 무엇을 승인하는지 알 수 없다.
+     *
+     * 잠그는 것 둘: ① 확인 대화가 **초점을 받는다**(길이와 무관하게 사용자에게
+     * 도달한다) ② 확인 버튼이 **그 동작의 말**을 쓴다.
+     */
+    const fetchMock = mockFetch(
+      { body: candidate },
+      { body: gatePass },
+      { body: { detail: "same request in progress" }, status: 429 },
+    );
+    renderPanel();
+    await generateAndGate(fetchMock);
+
+    await userEvent.click(acceptButton());
+
+    const prompt = await screen.findByRole("alertdialog", { name: "중복 요청 확인" });
+    expect(prompt).toHaveFocus();
+    expect(
+      within(prompt).getByRole("button", { name: "그래도 채택하기" }),
+    ).toBeInTheDocument();
+    // over-strict 방향: 생성 문맥의 말이 채택 뒤에 뜨면 안 된다.
+    expect(
+      within(prompt).queryByRole("button", { name: "하나 더 만들기" }),
+    ).not.toBeInTheDocument();
   });
 
   it("accepts a pass candidate, binds the exact body, reloads, and clears", async () => {

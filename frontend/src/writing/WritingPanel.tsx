@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ApiError,
   acceptWriting,
@@ -237,8 +237,16 @@ export function WritingPanel(props: WritingPanelProps) {
   const [notice, setNotice] = useState<string | null>(null);
   // 8.4 W3=A: 중복 잠금(429)은 되묻는 자리다. `run` 은 **그 단계만** 다시 보내는
   // 클로저이며(연쇄 전체가 아니다), 사용자가 누르기 전에는 아무 요청도 안 나간다.
+  /**
+   * 확인 대화를 띄운 뒤 **그 자리로 시선을 옮기기 위한** 자리.
+   * ★ 이 패널은 세로로 길고 동작이 위아래에 흩어져 있다 — 생성은 맨 위, 채택은
+   * 맨 아래다. 확인 대화는 한 곳(위)에만 그려지므로, **아래쪽 버튼을 누른
+   * 사용자에게는 화면 밖에서 열린다**. 그러면 429(같은 요청이 이미 진행 중)가
+   * *"아무 일도 안 일어났다"* 로 보인다(오너 실사용 관측 2026-09-07).
+   */
+  const confirmRef = useRef<HTMLDivElement | null>(null);
   const [pendingConfirm, setPendingConfirm] =
-    useState<{ message: string; run: () => void } | null>(null);
+    useState<{ message: string; run: () => void; confirmLabel: string } | null>(null);
   const { quota, refresh: refreshQuota } = useMemberQuota();
   // Coarse phase label so the server-side pipeline (근거 검색 → 초안 생성 → 보고서
   // → Gate) is not a black box while the two calls run.
@@ -279,9 +287,24 @@ export function WritingPanel(props: WritingPanelProps) {
    * `retry` 는 사용자가 "하나 더 만들기"를 누를 때만 실행된다 — 여기서 자동으로
    * 부르면 확인이 무력화되고 사용자가 모르는 사이 사용량이 늘어난다(W4=A).
    */
+  // 확인 대화가 열리면 **그 자리로 시선을 옮긴다.** 이 패널은 세로로 길고 동작이
+  // 위아래에 흩어져 있어(생성=위, 채택=아래) 대화가 화면 밖에서 열릴 수 있다 —
+  // 그러면 429(같은 요청이 이미 진행 중)가 사용자에게 *"아무 일도 안 일어났다"* 가
+  // 된다(오너 실사용 관측 2026-09-07: 채택 429 가 정확히 그랬다).
+  useEffect(() => {
+    if (pendingConfirm === null) return;
+    // `?.()` 로 부른다 — jsdom 에는 `scrollIntoView` 가 없고(테스트 환경), 없다고
+    // 해서 포커스까지 못 주면 안 된다. 스크롤은 보조이고 **포커스가 본체**다.
+    confirmRef.current?.scrollIntoView?.({ block: "center" });
+    confirmRef.current?.focus();
+  }, [pendingConfirm]);
+
   async function handleQuotaRefusal(
     err: unknown,
     retry: () => void,
+    /** 확인 버튼에 쓸 말. **무엇을 다시 하는지**가 동작마다 다르다 — 채택 뒤에
+     *  "하나 더 만들기" 가 뜨면 사용자는 무엇을 승인하는지 알 수 없다. */
+    confirmLabel: string,
   ): Promise<boolean> {
     let refusal = describeQuotaError(err, quota);
     if (refusal === null && err instanceof ApiError && err.status === 403) {
@@ -303,7 +326,7 @@ export function WritingPanel(props: WritingPanelProps) {
     if (refusal.confirmable) {
       setError(null);
       setRetryable(false);
-      setPendingConfirm({ message: confirmPrompt(quota), run: retry });
+      setPendingConfirm({ message: confirmPrompt(quota), run: retry, confirmLabel });
       return true;
     }
     setPendingConfirm(null);
@@ -384,7 +407,7 @@ export function WritingPanel(props: WritingPanelProps) {
       await runGate(produced, { requestId, trimmed, position });
     } catch (err) {
       if (await handleQuotaRefusal(err, () =>
-        void runGenerate({ confirmDuplicate: true }))) {
+        void runGenerate({ confirmDuplicate: true }), "하나 더 만들기")) {
         return;
       }
       const described = describeWritingError(err);
@@ -450,7 +473,7 @@ export function WritingPanel(props: WritingPanelProps) {
       }
     } catch (err) {
       if (await handleQuotaRefusal(err, () =>
-        void runGate(produced, context, { confirmDuplicate: true }))) {
+        void runGate(produced, context, { confirmDuplicate: true }), "다시 검사하기")) {
         return;
       }
       const described = describeWritingError(err);
@@ -497,7 +520,7 @@ export function WritingPanel(props: WritingPanelProps) {
       }
     } catch (err) {
       if (await handleQuotaRefusal(err, () =>
-        void executeLoop(body, { confirmDuplicate: true }))) {
+        void executeLoop(body, { confirmDuplicate: true }), "다시 개선하기")) {
         return;
       }
       const described = describeWritingError(err);
@@ -612,7 +635,7 @@ export function WritingPanel(props: WritingPanelProps) {
       }
     } catch (err) {
       if (await handleQuotaRefusal(err, () =>
-        void accept({ confirmDuplicate: true }))) {
+        void accept({ confirmDuplicate: true }), "그래도 채택하기")) {
         // 확인 대화가 뜬 상태다 — intent 는 그대로 두어야 확인 뒤 **같은 키**로
         // 재전송된다(다른 키면 accept 의 멱등 계약이 깨진다).
       } else if (err instanceof ApiError && err.status === 409) {
@@ -663,7 +686,13 @@ export function WritingPanel(props: WritingPanelProps) {
       </div>
 
       {pendingConfirm !== null && (
-        <div className="writing-confirm" role="alertdialog" aria-label="중복 요청 확인">
+        <div
+          className="writing-confirm"
+          role="alertdialog"
+          aria-label="중복 요청 확인"
+          ref={confirmRef}
+          tabIndex={-1}
+        >
           <p>{pendingConfirm.message}</p>
           <div className="writing-confirm-actions">
             <button
@@ -674,7 +703,7 @@ export function WritingPanel(props: WritingPanelProps) {
                 run();
               }}
             >
-              하나 더 만들기
+              {pendingConfirm.confirmLabel}
             </button>
             <button type="button" onClick={() => setPendingConfirm(null)}>
               취소
