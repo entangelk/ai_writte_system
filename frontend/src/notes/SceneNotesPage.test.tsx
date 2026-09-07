@@ -257,6 +257,30 @@ describe("장면 메모 화면", () => {
     expect(screen.queryByText(/미리보기 뒤에 남아 있던 나머지 전문/)).not.toBeInTheDocument();
   });
 
+  it("folds an expanded row back when a new list arrives", async () => {
+    // 변이 MN-8 이 드러낸 빈 칸: 펼친 전문을 목록 갱신에서 안 접으면, 새 목록이
+    // 준 **매치 중심 스니펫** 대신 옛 전문이 그 행에 남는다 — 계약 ①(서버가 만든
+    // 스니펫을 화면이 그대로 보여 준다)이 그 행에서만 깨지고, 저장 뒤 갱신
+    // (`refreshKey`)에서는 편집기와 목록이 서로 다른 본문을 말한다.
+    mockFetch(
+      { body: { notes: [{ ...NOTE, truncated: true }] } },
+      { body: { draft_id: "d1", body: "펼쳐 둔 옛 전문", updated_at: NOTE.updated_at } },
+      { body: { notes: [{ ...NOTE, truncated: true, body_preview: "…편지를 태우는…" }] } },
+    );
+
+    renderPage();
+    await screen.findByRole("link", { name: "첫눈" });
+    await userEvent.click(screen.getByRole("button", { name: "더 보기" }));
+    expect(await screen.findByText("펼쳐 둔 옛 전문")).toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText("메모 검색"), "편지");
+    await userEvent.click(screen.getByRole("button", { name: "검색" }));
+
+    expect(await screen.findByText("…편지를 태우는…")).toBeInTheDocument();
+    expect(screen.queryByText("펼쳐 둔 옛 전문")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "더 보기" })).toBeInTheDocument();
+  });
+
   it("keeps the preview on screen when the full body cannot be read", async () => {
     mockFetch(
       { body: { notes: [{ ...NOTE, truncated: true }] } },
