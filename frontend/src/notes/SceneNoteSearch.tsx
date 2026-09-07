@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import {
   describeApiError,
@@ -44,6 +44,12 @@ export function SceneNoteSearch({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   /** 펼친 행의 전문. `null` 은 단건 GET 이 아직 안 돌아왔다는 뜻이다. */
   const [expandedBody, setExpandedBody] = useState<string | null>(null);
+  /**
+   * **지금 기다리고 있는 펼침 대상.** 응답이 돌아왔을 때 그새 다른 행으로 옮겨
+   * 갔는지 판정하는 유일한 기준이다 — `expandedId` 상태는 handler 가 닫아 둔 옛
+   * 값이라 이 판정을 못 한다(패널의 `let active = true` 정리와 같은 계열).
+   */
+  const awaiting = useRef<string | null>(null);
 
   const load = useCallback(
     async (query: string) => {
@@ -53,6 +59,7 @@ export function SceneNoteSearch({
         setAppliedQuery(query.trim());
         // 목록이 새로 오면 펼침을 접는다 — 저장 뒤 갱신(`refreshKey`)에서 펼친
         // 전문만 옛 본문으로 남으면 같은 행의 미리보기와 다른 사실을 말한다.
+        awaiting.current = null;
         setExpandedId(null);
         setExpandedBody(null);
         setError(null);
@@ -70,15 +77,24 @@ export function SceneNoteSearch({
    * 계약이다(12000자 × 장면 수). 그래서 펼치는 것은 새 요청 하나다.
    */
   async function expand(note: SceneNoteListItem): Promise<void> {
-    setExpandedId(note.draft_id);
+    const target = note.draft_id;
+    awaiting.current = target;
+    setExpandedId(target);
     setExpandedBody(null);
     try {
-      const full = await getSceneNote(projectId, note.draft_id);
+      const full = await getSceneNote(projectId, target);
+      // **만료된 응답은 버린다.** A 를 펼치는 중에 B 를 누르면 A 의 늦은 성공이
+      // B 행에 A 본문을 싣고, A 의 늦은 실패가 B 의 펼침을 접고 틀린 오류를
+      // 띄운다(2026-09-07 독립 검증 H1). 어느 쪽이든 화면이 사용자가 누른 적
+      // 없는 행에 대해 말하게 된다.
+      if (awaiting.current !== target) return;
       setExpandedBody(full.body ?? "");
       setError(null);
     } catch (cause: unknown) {
+      if (awaiting.current !== target) return;
       // 전문을 못 읽었다고 미리보기를 걷어내지 않는다 — 걷어내면 사용자는 메모가
       // 사라진 것으로 읽는다.
+      awaiting.current = null;
       setExpandedId(null);
       setError(describeApiError(cause));
     }
@@ -179,7 +195,11 @@ export function SceneNoteSearch({
                       type="button"
                       className="note-expand"
                       disabled={expandedBody === null}
-                      onClick={() => { setExpandedId(null); setExpandedBody(null); }}
+                      onClick={() => {
+                        awaiting.current = null;
+                        setExpandedId(null);
+                        setExpandedBody(null);
+                      }}
                     >
                       {expandedBody === null ? "불러오는 중…" : "접기"}
                     </button>

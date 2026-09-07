@@ -17,6 +17,9 @@
  *    장면 수가 목록 응답에 들어온다(2번과 같은 계약의 반대편).
  * 6. **행마다 자기 수정 시각을 싣는다**(오너 2026-09-06) — payload 에 이미 있던
  *    `updated_at` 이고, 어느 메모가 최근 것인지는 목록에서만 답할 수 있다.
+ * 7. **늦게 도착한 펼침 응답은 버린다**(2026-09-07 독립 검증 H1) — 펼침은 행마다
+ *    따로 나가는 요청이라, 기다리는 대상이 바뀐 뒤 도착한 응답을 반영하면 화면이
+ *    **사용자가 누른 적 없는 행**에 대해 말한다.
  */
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -296,6 +299,101 @@ describe("장면 메모 화면", () => {
     // 미리보기가 남고, 다시 시도할 자리도 남는다.
     expect(screen.getByText(NOTE.body_preview)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "더 보기" })).toBeInTheDocument();
+  });
+
+  /**
+   * 펼침 응답을 손으로 잡아 두는 stub. 목록 GET 은 곧바로 답하고 단건 GET 은
+   * **URL 별로 멈춰 세워** 도착 순서를 셀이 정한다 — 경쟁 상태는 순서가 전부라
+   * 순서 기반 mock 으로는 재현할 수 없다.
+   */
+  function stubDeferredNotes(notes: unknown[]) {
+    const pending = new Map<string, (reply: { body: unknown; status?: number }) => void>();
+    const fetchMock = vi.fn((url: string) => {
+      if (url.endsWith("/notes")) return Promise.resolve(response({ notes }));
+      return new Promise((resolve) => {
+        pending.set(url, (reply) => resolve(response(reply.body, reply.status)));
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return pending;
+  }
+
+  const TWO_CUT = [
+    { ...NOTE, truncated: true },
+    { ...NOTE, draft_id: "d2", scene_title: "두 번째 밤", truncated: true },
+  ];
+
+  it("locks the fold control while the full body is still on the way", async () => {
+    const pending = stubDeferredNotes([{ ...NOTE, truncated: true }]);
+
+    renderPage();
+    await screen.findByRole("link", { name: "첫눈" });
+    await userEvent.click(screen.getByRole("button", { name: "더 보기" }));
+
+    // 응답 전에 접으면 늦게 도착한 전문이 접힌 행에 붙는다 — 그래서 잠근다.
+    const loading = await screen.findByRole("button", { name: "불러오는 중…" });
+    expect(loading).toBeDisabled();
+
+    pending.get("/api/projects/p1/drafts/d1/note")!({
+      body: { draft_id: "d1", body: "도착한 전문", updated_at: NOTE.updated_at },
+    });
+
+    expect(await screen.findByRole("button", { name: "접기" })).toBeEnabled();
+    expect(screen.getByText("도착한 전문")).toBeInTheDocument();
+  });
+
+  it("drops a late expand success that belongs to a row the reader left", async () => {
+    const pending = stubDeferredNotes(TWO_CUT);
+
+    renderPage();
+    await screen.findByRole("link", { name: "첫눈" });
+
+    // d1 을 펼치는 중에 d2 로 옮겨 간다 — d1 의 버튼은 "불러오는 중…" 이 되므로
+    // 남은 "더 보기" 는 d2 하나다.
+    await userEvent.click(screen.getAllByRole("button", { name: "더 보기" })[0]);
+    await screen.findByRole("button", { name: "불러오는 중…" });
+    await userEvent.click(screen.getByRole("button", { name: "더 보기" }));
+
+    pending.get("/api/projects/p1/drafts/d2/note")!({
+      body: { draft_id: "d2", body: "두 번째 밤 전문", updated_at: NOTE.updated_at },
+    });
+    expect(await screen.findByText("두 번째 밤 전문")).toBeInTheDocument();
+
+    // d1 의 응답이 이제야 도착한다.
+    pending.get("/api/projects/p1/drafts/d1/note")!({
+      body: { draft_id: "d1", body: "첫눈 전문 — 늦게 도착", updated_at: NOTE.updated_at },
+    });
+
+    const rows = await screen.findAllByRole("listitem");
+    expect(within(rows[1]).getByText("두 번째 밤 전문")).toBeInTheDocument();
+    // 가드가 없으면 d1 본문이 `expandedBody` 에 실리는데 펼친 행은 d2 라, d2 행이
+    // **누른 적 없는 장면의 본문**을 말한다.
+    expect(screen.queryByText("첫눈 전문 — 늦게 도착")).not.toBeInTheDocument();
+  });
+
+  it("drops a late expand failure so it cannot fold the row that is open", async () => {
+    const pending = stubDeferredNotes(TWO_CUT);
+
+    renderPage();
+    await screen.findByRole("link", { name: "첫눈" });
+
+    await userEvent.click(screen.getAllByRole("button", { name: "더 보기" })[0]);
+    await screen.findByRole("button", { name: "불러오는 중…" });
+    await userEvent.click(screen.getByRole("button", { name: "더 보기" }));
+
+    pending.get("/api/projects/p1/drafts/d2/note")!({
+      body: { draft_id: "d2", body: "두 번째 밤 전문", updated_at: NOTE.updated_at },
+    });
+    expect(await screen.findByText("두 번째 밤 전문")).toBeInTheDocument();
+
+    // d1 이 이제야 실패한다 — 사용자는 d1 을 이미 떠났다.
+    pending.get("/api/projects/p1/drafts/d1/note")!({
+      body: { detail: "note not found" }, status: 404,
+    });
+
+    // 가드가 없으면 열려 있던 d2 가 접히고 d1 의 오류가 배너로 뜬다.
+    expect(screen.getByText("두 번째 밤 전문")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("surfaces a refused list without emptying the screen silently", async () => {

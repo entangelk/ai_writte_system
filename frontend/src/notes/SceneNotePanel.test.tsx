@@ -16,6 +16,8 @@
  * 5. **12000자 상한**(SoT v1.8.11)은 경고 + 저장 차단이지 잘라내기가 아니다.
  * 6. **"더 보기"는 목록의 것이므로 두 화면에 똑같이 있다**(완료 기준 1) — 그리고 그것을
  *    눌러도 **편집 대상은 바뀌지 않는다**: 행 제목(선택)과 "더 보기"(펼침)는 다른 일이다.
+ * 7. **행 꼬리줄도 목록의 것이다** — 수정 시각이 여기에도 있어야 한다. 컴포넌트를
+ *    공유한다는 사실은 잠금이 아니다(v1.8.37 B1 이 같은 종의 공백이었다).
  */
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -208,6 +210,29 @@ describe("메모 드로어 패널", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "← 현재 장면 메모" }));
     expect(await screen.findByDisplayValue("현재 장면 메모")).toBeInTheDocument();
+  });
+
+  it("carries the row metadata into the drawer list too", async () => {
+    stubRoutes([
+      [/\/notes$/, { body: LIST }],
+      [/\/drafts\/d1\/note$/, { body: { draft_id: "d1", body: "현재 장면 메모", updated_at: null } }],
+    ]);
+
+    renderPanel();
+    await screen.findByDisplayValue("현재 장면 메모");
+
+    // 실행 머신의 시간대에 기대 문자열이 달리므로 같은 변환을 기대값으로 쓴다.
+    const rows = screen.getAllByRole("listitem");
+    expect(
+      within(rows[0]).getByText(
+        `수정 ${new Date(LIST.notes[0].updated_at).toLocaleString("ko-KR")}`,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(rows[1]).getByText(
+        `수정 ${new Date(LIST.notes[1].updated_at).toLocaleString("ko-KR")}`,
+      ),
+    ).toBeInTheDocument();
   });
 
   it("expands a cut preview in place without moving the editing target", async () => {
