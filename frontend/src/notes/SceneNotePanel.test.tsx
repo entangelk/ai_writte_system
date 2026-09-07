@@ -14,6 +14,8 @@
  *    소유자 여부는 payload 에 없으므로(2c 유예) 403 을 받은 뒤에 읽기 전용으로
  *    내려온다 — 원고 편집기의 `forcedReadOnly` 와 같은 선례다.
  * 5. **12000자 상한**(SoT v1.8.11)은 경고 + 저장 차단이지 잘라내기가 아니다.
+ * 6. **"더 보기"는 목록의 것이므로 두 화면에 똑같이 있다**(완료 기준 1) — 그리고 그것을
+ *    눌러도 **편집 대상은 바뀌지 않는다**: 행 제목(선택)과 "더 보기"(펼침)는 다른 일이다.
  */
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -206,6 +208,35 @@ describe("메모 드로어 패널", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "← 현재 장면 메모" }));
     expect(await screen.findByDisplayValue("현재 장면 메모")).toBeInTheDocument();
+  });
+
+  it("expands a cut preview in place without moving the editing target", async () => {
+    stubRoutes([
+      [/\/notes$/, {
+        body: {
+          notes: [
+            { ...LIST.notes[0], truncated: false },
+            { ...LIST.notes[1], truncated: true },
+          ],
+        },
+      }],
+      [/\/drafts\/d1\/note$/, { body: { draft_id: "d1", body: "현재 장면 메모", updated_at: null } }],
+      [/\/drafts\/d2\/note$/, { body: { draft_id: "d2", body: "두 번째 메모 그리고 잘려 있던 뒷부분", updated_at: null } }],
+    ]);
+
+    renderPanel();
+    await screen.findByDisplayValue("현재 장면 메모");
+
+    // 드로어의 목록도 같은 컴포넌트이므로 같은 자리가 있어야 한다(완료 기준 1).
+    await userEvent.click(screen.getByRole("button", { name: "더 보기" }));
+
+    expect(await screen.findByText("두 번째 메모 그리고 잘려 있던 뒷부분")).toBeInTheDocument();
+    // over-strict 방향: "더 보기"를 선택(`onSelect`)에 물리면 편집 대상이 d2 로
+    // 옮겨 가 현재 장면의 편집 상자가 사라진다 — 그러면 여기서 걸린다.
+    expect(screen.getByDisplayValue("현재 장면 메모")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "두 번째 밤" })).toHaveAttribute(
+      "aria-pressed", "false",
+    );
   });
 
   it("follows the editor to another scene", async () => {

@@ -117,6 +117,9 @@ const MIGRATED: Record<string, string> = {
   ".rail-note-editor": "small",
   ".note-body": "small",
   ".rail-note-status": "micro",
+  // 행 꼬리줄(수정 시각 · "더 보기"). `.note-expand` 는 `inherit` 이라 여기 없다 —
+  // 계단을 다시 고르지 않고 꼬리줄의 것을 그대로 물려받는 자리다.
+  ".note-row-meta": "micro",
 
   // Slice 6 — 정체성 그룹의 경고 문구와 그룹 액션 결과 상자.
   ".group-warning": "small",

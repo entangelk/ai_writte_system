@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
 import {
   describeApiError,
+  getSceneNote,
   listSceneNotes,
   type SceneNoteListItem,
 } from "../api/client";
@@ -39,6 +40,10 @@ export function SceneNoteSearch({
   const [input, setInput] = useState("");
   /** 마지막으로 **서버가 적용한** 검색어. 입력 중인 글자가 아니다. */
   const [appliedQuery, setAppliedQuery] = useState("");
+  /** "더 보기"로 펼친 행. 한 번에 하나다. */
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  /** 펼친 행의 전문. `null` 은 단건 GET 이 아직 안 돌아왔다는 뜻이다. */
+  const [expandedBody, setExpandedBody] = useState<string | null>(null);
 
   const load = useCallback(
     async (query: string) => {
@@ -46,6 +51,10 @@ export function SceneNoteSearch({
         const result = await listSceneNotes(projectId, query);
         setNotes(result);
         setAppliedQuery(query.trim());
+        // 목록이 새로 오면 펼침을 접는다 — 저장 뒤 갱신(`refreshKey`)에서 펼친
+        // 전문만 옛 본문으로 남으면 같은 행의 미리보기와 다른 사실을 말한다.
+        setExpandedId(null);
+        setExpandedBody(null);
         setError(null);
       } catch (cause: unknown) {
         // 실패한 검색이 이미 떠 있는 목록을 지우지 않는다 — 지우면 사용자는
@@ -55,6 +64,25 @@ export function SceneNoteSearch({
     },
     [projectId],
   );
+
+  /**
+   * "더 보기" — 전문은 **단건 GET 이** 준다. 목록 행이 전문을 싣지 않는 것은
+   * 계약이다(12000자 × 장면 수). 그래서 펼치는 것은 새 요청 하나다.
+   */
+  async function expand(note: SceneNoteListItem): Promise<void> {
+    setExpandedId(note.draft_id);
+    setExpandedBody(null);
+    try {
+      const full = await getSceneNote(projectId, note.draft_id);
+      setExpandedBody(full.body ?? "");
+      setError(null);
+    } catch (cause: unknown) {
+      // 전문을 못 읽었다고 미리보기를 걷어내지 않는다 — 걷어내면 사용자는 메모가
+      // 사라진 것으로 읽는다.
+      setExpandedId(null);
+      setError(describeApiError(cause));
+    }
+  }
 
   useEffect(() => {
     if (!active) return;
@@ -132,7 +160,40 @@ export function SceneNoteSearch({
                 {note.scene_archived && <span className="status-badge">장면 보관됨</span>}
                 {note.chapter_archived && <span className="status-badge">장 보관됨</span>}
               </div>
-              <p className="note-preview">{note.body_preview}</p>
+              {/* 펼친 행만 전문을 싣는다. 나머지는 서버가 만든 미리보기(200자,
+                  검색어가 잡히면 매치 중심 스니펫)를 그대로 보여 준다. */}
+              <p className="note-preview">
+                {expandedId === note.draft_id && expandedBody !== null
+                  ? expandedBody
+                  : note.body_preview}
+              </p>
+              <div className="note-row-meta">
+                <time dateTime={note.updated_at}>
+                  수정 {new Date(note.updated_at).toLocaleString("ko-KR")}
+                </time>
+                {/* `truncated` 는 본문이 미리보기보다 길다는 서버의 신호다. 거짓인
+                    행에서는 미리보기가 이미 전문이라 펼칠 것이 없다. */}
+                {note.truncated && (
+                  expandedId === note.draft_id ? (
+                    <button
+                      type="button"
+                      className="note-expand"
+                      disabled={expandedBody === null}
+                      onClick={() => { setExpandedId(null); setExpandedBody(null); }}
+                    >
+                      {expandedBody === null ? "불러오는 중…" : "접기"}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="note-expand"
+                      onClick={() => void expand(note)}
+                    >
+                      더 보기
+                    </button>
+                  )
+                )}
+              </div>
             </li>
           ))}
         </ul>

@@ -1511,6 +1511,32 @@ main {
   white-space: pre-wrap;
 }
 
+/* 행의 꼬리줄 — 수정 시각과 "더 보기". 제목 줄에 얹지 않는 이유는 좁은 드로어에서
+   제목·장 배지·보관 배지와 같은 줄에 서면 제목이 먼저 줄바꿈되기 때문이다. */
+.note-row-meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--type-micro);
+}
+
+/* 링크형 버튼이다 — accent 면을 쓰지 않으므로 기본 동작 버튼의 겉모습 자리
+   (buttonAppearance.test.ts)에 등재하지 않는다. `.rail-back` 과 같은 모양이다. */
+.note-expand {
+  padding: 0;
+  color: var(--text-link);
+  background: transparent;
+  border: 0;
+  font-size: inherit;
+  cursor: pointer;
+}
+
+.note-expand:disabled {
+  color: var(--text-muted);
+  cursor: progress;
+}
+
 .chapter-group {
   padding: var(--space-4) 0;
   border-bottom: 1px solid var(--border-hairline);
