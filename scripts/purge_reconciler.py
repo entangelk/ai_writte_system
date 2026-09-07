@@ -37,6 +37,13 @@ import json
 import os
 
 from pymongo import MongoClient
+import sys
+from pathlib import Path
+
+# ``python scripts/x.py`` 는 스크립트의 디렉터리를 sys.path 에 넣지 CWD 를 넣지 않는다 —
+# 저장소 루트를 얹어야 `services` 를 찾는다(이 디렉터리의 관례, 2026-09-07 전수 정렬).
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
 
