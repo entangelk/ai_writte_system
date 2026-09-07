@@ -21,7 +21,7 @@
  *    따로 나가는 요청이라, 기다리는 대상이 바뀐 뒤 도착한 응답을 반영하면 화면이
  *    **사용자가 누른 적 없는 행**에 대해 말한다.
  */
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -318,6 +318,15 @@ describe("장면 메모 화면", () => {
     return pending;
   }
 
+  /**
+   * 늦게 도착한 응답을 **끝까지 흘려 보낸다.** 그냥 resolve 만 하고 단정하면
+   * 상태 갱신이 아직 안 붙은 시점을 재게 되어, 가드를 걷어낸 변이도 초록으로
+   * 통과한다(2026-09-07 변이 MN-10 실측 — 이 셀 자신이 그렇게 새고 있었다).
+   */
+  async function deliver(reply: () => void) {
+    await act(async () => { reply(); });
+  }
+
   const TWO_CUT = [
     { ...NOTE, truncated: true },
     { ...NOTE, draft_id: "d2", scene_title: "두 번째 밤", truncated: true },
@@ -360,11 +369,11 @@ describe("장면 메모 화면", () => {
     expect(await screen.findByText("두 번째 밤 전문")).toBeInTheDocument();
 
     // d1 의 응답이 이제야 도착한다.
-    pending.get("/api/projects/p1/drafts/d1/note")!({
+    await deliver(() => pending.get("/api/projects/p1/drafts/d1/note")!({
       body: { draft_id: "d1", body: "첫눈 전문 — 늦게 도착", updated_at: NOTE.updated_at },
-    });
+    }));
 
-    const rows = await screen.findAllByRole("listitem");
+    const rows = screen.getAllByRole("listitem");
     expect(within(rows[1]).getByText("두 번째 밤 전문")).toBeInTheDocument();
     // 가드가 없으면 d1 본문이 `expandedBody` 에 실리는데 펼친 행은 d2 라, d2 행이
     // **누른 적 없는 장면의 본문**을 말한다.
@@ -387,9 +396,9 @@ describe("장면 메모 화면", () => {
     expect(await screen.findByText("두 번째 밤 전문")).toBeInTheDocument();
 
     // d1 이 이제야 실패한다 — 사용자는 d1 을 이미 떠났다.
-    pending.get("/api/projects/p1/drafts/d1/note")!({
+    await deliver(() => pending.get("/api/projects/p1/drafts/d1/note")!({
       body: { detail: "note not found" }, status: 404,
-    });
+    }));
 
     // 가드가 없으면 열려 있던 d2 가 접히고 d1 의 오류가 배너로 뜬다.
     expect(screen.getByText("두 번째 밤 전문")).toBeInTheDocument();
