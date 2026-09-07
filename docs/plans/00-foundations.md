@@ -129,13 +129,17 @@ Writing Request → Agentic Search → ES/Chroma 후보
 
 ## 전역 착수 전 결정사항
 
-- [ ] 첫 구현이 소설 전용인지, 일반 글쓰기까지 포함하는지 결정
-- [ ] `confirmed`와 `canonical`의 의미 및 승격 주체 확정
-- [ ] [`llm-gateway.md`](llm-gateway.md)의 monorepo/독립 서비스 경계 승인
+> **전부 닫혔다(2026-09-07 확인).** 여기 있던 미체크는 *"아직 안 정했다"* 가 아니라 **갱신이 안 따라온 것**이었다(HANDOFF 미수리 항목). 각 줄에 **어디서 닫혔는지**를 붙인다 — 체크 표시만 바꾸면 다음 사람이 근거를 다시 찾아야 한다.
+>
+> **★ 이 목록은 착수 전 관문이므로 다시 열리지 않는다.** 새 전역 결정이 생기면 여기에 더하지 말고 `*-decisions.md` 브리프를 만든다(그것이 이 저장소의 결정 정본 형식이다).
+
+- [x] 첫 구현이 소설 전용인지, 일반 글쓰기까지 포함하는지 결정 — **장편 창작**이다. 제품 정의가 *"장편 창작에서 무너지는 것은 문장력이 아니라 일관성"* 이고([`../product-overview.md`](../product-overview.md)), 저장 모델 자체가 Chapter→Scene 계층이다(SoT v1.8.9)
+- [x] `confirmed`와 `canonical`의 의미 및 승격 주체 확정 — SoT §"Candidate 원칙"과 분석 승격 계약. 승격 주체는 **사람의 승인**이며 미승인 후보는 정본·검색 constraint 로 위장되지 않는다
+- [x] [`llm-gateway.md`](llm-gateway.md)의 monorepo/독립 서비스 경계 승인 — **monorepo 안의 독립 서비스**로 확정됐다(`services/llm_gateway/`, compose 별도 컨테이너)
 - [x] 첫 model/runtime 기준: `google/gemma-4-12B-it-qat-q4_0-gguf:Q4_0` + llama.cpp CUDA
-- [ ] 실제 실행 장비와 Gemma model terms/download 권한 확인
-- [ ] API 오류 envelope, ID 형식, timestamp 규칙을 공통 계약으로 확정
-- [ ] 프로젝트/원고 삭제와 snapshot 보존 정책의 최소 범위 결정
+- [x] 실제 실행 장비와 Gemma model terms/download 권한 확인 — 머신 셋(알파/베타/감마)의 성질과 기동 절차가 HANDOFF §"머신 · 기동"·[`../runbooks/local-llama-server.md`](../runbooks/local-llama-server.md) 에 있다
+- [x] API 오류 envelope, ID 형식, timestamp 규칙을 공통 계약으로 확정 — SoT §"HTTP 에러 응답 계약"(H3, 브리프 [`api-error-response-contract-decisions.md`](api-error-response-contract-decisions.md) D1~D4=A): 본문은 균일한 `{"detail": <string>}`, 유일한 예외가 partial envelope 다
+- [x] 프로젝트/원고 삭제와 snapshot 보존 정책의 최소 범위 결정 — 삭제는 D8-6(2단계 파기·SoT v1.7.82)과 [`08-2c`](08-2c-project-name-history-decisions.md)(이름 한 값 보존), 보존 기간은 **무기한**(오너 2026-09-07, [`service-policy-decisions.md`](service-policy-decisions.md) 결정 2)
 
 ## 참고 아이디에이션
 

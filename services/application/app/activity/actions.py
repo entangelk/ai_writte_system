@@ -9,7 +9,7 @@
   memory 가 append-only 라 이 제품에서 되돌리기가 가장 어려운 종류다.
 - **★ 표는 mutating operation *전수* 다.** 오너가 B 를 고른 것은 범위 판단이지
   C(AI 요청까지)의 각하가 아니므로, **C 로 넓히는 일이 "행 값 하나 바꾸기"여야
-  한다**는 것이 A2 확정 조건이다. 그래서 기록하지 않는 21 경로도 **사유와 함께**
+  한다**는 것이 A2 확정 조건이다. 그래서 기록하지 않는 29 경로도 **사유와 함께**
   여기 등재된다 — 빠진 것과 일부러 뺀 것이 구분돼야 한다.
   ``tests/test_activity_actions.py`` 가 미등재 mutating route 를 실패시킨다.
 - **★ C 를 열 때 A8 을 함께 다시 본다.** A8=A("중복 기록 없음")가 성립하는 근거가
@@ -170,8 +170,11 @@ _REVIEW: tuple[ActivityAction, ...] = (
 #: 기록하는 경로 전수.
 ACTIVITY_ACTIONS: tuple[ActivityAction, ...] = _CANONICAL + _REVIEW
 
-#: 기록하지 않는 21 — **사유와 함께**. 이 목록이 있어야 "빠진 것"과 "일부러 뺀 것"이
+#: 기록하지 않는 29 — **사유와 함께**. 이 목록이 있어야 "빠진 것"과 "일부러 뺀 것"이
 #: 구분되고, C 확장이 값 변경으로 끝난다.
+#:
+#: ★ 아래 절 주석의 수는 `test_activity_log.py` 가 실제 항목 수와 대조한다
+#: (2026-09-07 — 종전에는 아무도 안 봐서 21/2/6 으로 뒤처져 있었다).
 EXCLUDED_OPERATIONS: tuple[ExcludedOperation, ...] = (
     # --- AI·작업 요청 14 (A2=C 로 넓힐 때 이 행들이 logged 가 된다) -------------
     #
@@ -215,7 +218,7 @@ EXCLUDED_OPERATIONS: tuple[ExcludedOperation, ...] = (
                       "/index/source-blocks/rebuild",
                       "derived_rebuild",
                       "파생 색인이라 사용자가 바꾼 정본이 아니다 — 정본은 그대로다"),
-    # --- 인증 2 ---------------------------------------------------------------
+    # --- 인증 3 ---------------------------------------------------------------
     #
     # project 를 지목하지 않는다. 활동 로그는 **프로젝트 자식**(I1)이라 `project_id`
     # 없는 행을 담을 자리가 없고, 담게 만들면 purge 가 못 지우는 행이 생긴다.
@@ -223,7 +226,7 @@ EXCLUDED_OPERATIONS: tuple[ExcludedOperation, ...] = (
     ExcludedOperation("POST", "/auth/logout", "not_project_scoped", "세션 축"),
     # 승인제 가입(2026-08-22): 요청은 pending 행 하나뿐 — 정본도 세션도 아니다.
     ExcludedOperation("POST", "/auth/signup", "not_project_scoped", "가입 요청 축"),
-    # --- 관리자 4 + 승인 2 ----------------------------------------------------
+    # --- 관리자 + 승인 11 ----------------------------------------------------
     #
     # I3: 관리자 행위·승격 접근과 소유자 활동을 섞으면 양쪽이 쓸모를 잃는다
     # (SoT v1.7.78). purge 생존 여부도 정반대라 한 컬렉션에 둘 수 없다.

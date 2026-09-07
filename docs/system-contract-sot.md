@@ -839,7 +839,7 @@ Loop decision이 `completed`여도 domain Gate가 reject할 수 있다. 반대�
 | AgentLoopRunner production budget defaults | benchmark 기반 확정 | `docs/benchmarks/2026-06-30/gemma_q4_llama_cpp_repeats3_warmup1.json`, `plans/flat-loop-gate.md` |
 | Core SOT minimal skeleton | 구현·조건부 검증 보강 완료 | `services/application/app/core_sot/`, `services/application/app/main.py`, `tests/test_core_sot.py`, `tests/test_application_api.py`; C1/C2/C3 보강 |
 | Product Shell UI | A editor/save/history/export 구현 완료. Writing 작업공간 **C0 HTTP contract + C1 기본 UI(generate→Gate→accept/save) + C2 bounded revise/retrieve loop UI 구현 완료**. 다음은 B Review Inbox | `frontend/`, `frontend/src/drafts/DraftEditor.tsx`, `frontend/src/writing/WritingPanel.tsx`, `services/application/app/writing/http_models.py`, 프론트 회귀 |
-| Phase 2~6 UI | 미구현 | 백엔드 계약과 계획 문서만 존재 |
+| Phase 2~6 UI | **구현됨**(2026-09-07 기준) — 이 표가 오래 *"미구현"* 이라고 말해 온 자리다. 같은 문서의 변경 이력이 Review Inbox(v1.6.67)·정체성 그룹 UI(v1.8.34)·장면 메모 화면과 드로어(v1.8.36)·최종 저장 화면을 **구현으로 기록**하고 있었으므로 자기모순이었다. **화면별 현재 상태의 정본은 이 표가 아니라 변경 이력**이다 — 여기에 화면 목록을 두 벌로 만들지 않는다 | 변경 이력 v1.6.67·v1.8.34~v1.8.38, `frontend/src/{review,notes,drafts,writing}/` |
 
 ## 다음 구현 경계
 

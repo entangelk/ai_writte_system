@@ -18,10 +18,13 @@
 from __future__ import annotations
 
 import inspect
+import re
 import unittest
+from pathlib import Path
 
 from fastapi.routing import APIRoute
 
+from services.application.app.activity import actions as actions_module
 from services.application.app.activity.actions import (
     ACTIVITY_ACTIONS,
     CLASSIFIED_OPERATIONS,
@@ -155,6 +158,60 @@ class ActivityActionClassificationTest(unittest.TestCase):
                     f'"{action.action}"', self.routes[operation],
                     f"{operation} 이 표의 리터럴 {action.action!r} 을 쓰지 않는다",
                 )
+
+
+class ExcludedOperationCountCommentTest(unittest.TestCase):
+    """주석이 말하는 개수가 실제 항목 수와 같은가 (2026-09-07).
+
+    **왜 필요한가 — 아무도 안 보는 수는 반드시 뒤처진다.** 기존 가드는 *등재 여부* 만
+    본다(미등재 route 를 실패시킨다). 그래서 `actions.py` 가 *"기록하지 않는 21"* 이라고
+    적어 둔 채 실제는 **29** 가 됐고, 절 주석도 `인증 2`(실제 3)·`관리자 4 + 승인 2`
+    (실제 11)로 갈라져 있었다 — HANDOFF 미수리 표에 오래 남아 있던 항목이다.
+
+    재는 것은 **주석의 수 ≡ 실제 수**뿐이다. 어느 절에 무엇이 들어가는지는 사람의
+    분류이고 이 셀의 관심이 아니다.
+
+    **양방향**: 항목을 더하고 주석을 안 고치면 실패한다(under). 주석만 키워도
+    실패한다(over).
+    """
+
+    #: `# --- <이름> <수> ...` 절 주석. 수는 그 절에 이어지는 항목의 개수다.
+    _SECTION = re.compile(r"^\s*# --- .*?(\d+)\s*(?:\(|-)")
+    _ITEM = re.compile(r"^\s*ExcludedOperation\(")
+
+    def setUp(self) -> None:
+        source = Path(actions_module.__file__).read_text(encoding="utf-8")
+        body = source[source.index("EXCLUDED_OPERATIONS"):]
+        self.lines = body[: body.index("\n)")].splitlines()
+
+    def test_the_header_comment_counts_every_excluded_operation(self) -> None:
+        source = Path(actions_module.__file__).read_text(encoding="utf-8")
+        stated = {int(one) for one in re.findall(r"기록하지 않는 (\d+)", source)}
+        self.assertEqual(
+            stated, {len(actions_module.EXCLUDED_OPERATIONS)},
+            "`기록하지 않는 N` 이라고 적은 자리가 실제 수와 다르거나 서로 어긋난다",
+        )
+
+    def test_each_section_comment_counts_its_own_entries(self) -> None:
+        sections: list[tuple[str, int, int]] = []
+        for line in self.lines:
+            header = self._SECTION.match(line)
+            if header is not None:
+                sections.append((line.strip(), int(header.group(1)), 0))
+                continue
+            if self._ITEM.match(line) and sections:
+                label, stated, seen = sections[-1]
+                sections[-1] = (label, stated, seen + 1)
+
+        self.assertGreaterEqual(len(sections), 3, "절 주석을 못 찾았다 — 형식이 바뀌었나")
+        for label, stated, seen in sections:
+            with self.subTest(section=label):
+                self.assertEqual(stated, seen, f"{label!r} 이 {stated} 라는데 실제 {seen}")
+
+    def test_the_sections_together_account_for_every_entry(self) -> None:
+        # 절이 통째로 빠지면 위 셀은 조용하다 — 합계가 그 자리를 닫는다.
+        counted = sum(1 for line in self.lines if self._ITEM.match(line))
+        self.assertEqual(counted, len(actions_module.EXCLUDED_OPERATIONS))
 
 
 if __name__ == "__main__":  # pragma: no cover

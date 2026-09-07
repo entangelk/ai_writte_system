@@ -8,12 +8,14 @@
 | **포트폴리오** | [`portfolio.md`](portfolio.md) | 평가자용 안내 — 시간 예산별 읽기 경로·하이라이트·증거 지도 |
 | **기획** | [`product-overview.md`](product-overview.md) · [`observability-kpi-rationale.md`](observability-kpi-rationale.md) · [`plans/00-foundations.md`](plans/00-foundations.md) · [`plans/product-readiness-backlog.md`](plans/product-readiness-backlog.md) · (원본) [`abstract.md`](abstract.md) | 제품 컨셉·MVP 범위·설계 원칙·운영 KPI의 근거 |
 | **계약** | [`system-contract-sot.md`](system-contract-sot.md) | 확정된 계약의 **현재 정본**과 버전별 변경 이유 |
-| **결정** | [`plans/README.md`](plans/README.md) | Phase 계획 + 착수 결정 브리프 100개 |
+| **결정** | [`plans/README.md`](plans/README.md) | Phase 계획 + 착수 결정 브리프 105개 |
 | **검증** | [`verifications/README.md`](verifications/README.md) | 독립 검증 기록 290건(반증 시도·뮤테이션·판정) |
 | **정책** | [`service-policy-contract.md`](service-policy-contract.md) · [`legal/`](legal/README.md) | 회원에게 약속하는 정책값(코드의 파생본, 가드가 상수와 대조) + 약관·방침 **초안**(미시행) |
+| **운영 관찰** | [`dogfood-checklist.md`](dogfood-checklist.md) | 실사용에서 무엇을 지켜볼지 — HANDOFF Next Tasks 가 실제로 가리키는 살아 있는 목록 |
 | **실행 이력** | [`daily_logs/`](daily_logs/) | 일자별 작업 로그·오너 결정·실측값 |
 | **서비스/운영** | [`runbooks/`](runbooks/local-llama-server.md) · [`benchmarks/`](benchmarks/2026-07-15/writing_loop_per_stage_ceiling_q4.md) · [`live_review_briefs/`](live_review_briefs/2026-07-18/writing_workspace_ux_restructure.md) | 기동 절차·성능 실측·실사용 검수에서 온 계약 재협상 |
 | **작업 절차** | [`guides/`](guides/records-and-handoff.md) | 기록·인수인계 규칙, 독립 검증 절차 |
+| **아이디에이션 원본**(보존) | [`abstract.md`](abstract.md) · [`contracts.md`](contracts.md) · [`chat-revision-ideation.md`](chat-revision-ideation.md) | 착수 전 구상 — **계약이 아니다**. Phase 7 대화형 수정은 여기서 왔고 아직 유예다 |
 
 아래는 각 영역의 상세다.
 

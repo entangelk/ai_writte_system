@@ -181,11 +181,6 @@
 | `llm_call_audits` 로 "출력이 잘렸다"를 못 본다 | `finish_reason`·`truncated` 없음(실측 0건). 헤드룸만 계산 가능 | `observability/` |
 | 자료(source) 원문 길이 상한 없음 | `analysis_extract` 가 `snapshot.raw_text` 를 **통째로** 싣는다 — 검색 조각 예산의 보호를 안 받는 유일한 LLM 경로 | [`extractor.py`](services/application/app/analysis/extractor.py) |
 | 프론트 4000 상수가 서버 env override와 미동기화 | 서버 422·400이 최종 방어. 해소하려면 public 설정 계약 위치를 먼저 결정 | [`tokenEstimate.ts:23`](frontend/src/writing/tokenEstimate.ts#L23) |
-| 정본 SoT §"현재 구현 상태" 표가 자기모순 | 같은 표가 "구현"과 "미구현"을 함께 말한다. 정정은 버전 개정 사안 | `system-contract-sot.md:821` |
-| `00-foundations.md` 착수 전 체크박스 미갱신 | 실제로는 확정된 항목들이 미체크 — 거짓 단언이 아니라 미갱신 | `docs/plans/00-foundations.md` |
-| `activity/actions.py` 주석의 "기록하지 않는 21" | 실제 29건. 가드는 등재 여부만 보고 개수를 안 본다 | `actions.py:173` |
-| `docs/README.md` 의 "브리프 96개" | 실측 **100**. 최상위 `README.md` 의 같은 주장은 가드가 잡는데 **이 줄은 가드 밖**이다 | `docs/README.md:11` |
-| `chat-revision-ideation.md`·`dogfood-checklist.md` 가 문서 지도에 없다 | 후자는 HANDOFF 가 실제로 가리키는 살아 있는 문서다 | `docs/README.md` |
 | 미사용 import에 회귀 가드 없음 | 유일한 신호가 스위트 밖 linter. **ⓐ(정리 슬라이스마다 수동 측정)가 현 단계에 맞다** | — |
 | `scripts/` 를 pytest가 실행하지 않는다 | CI 없음(`.github` 부재). 부분 방어가 `mypy.ini`(`call-arg`+`misc`) 가드다 — **`misc` 를 disable 목록에 넣으면 표적 결함이 조용해진다** | `tests/test_typecheck.py` |
 
