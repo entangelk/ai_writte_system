@@ -33,6 +33,7 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
 _DOC = _ROOT / "docs" / "service-policy-contract.md"
+_LEGAL_MAP = _ROOT / "docs" / "legal" / "README.md"
 _PACKAGE = "services.application.app"
 
 #: 표 한 행: | 축 | 값 | `모듈::상수`(들) |
@@ -51,6 +52,28 @@ def _rows() -> list[tuple[str, str, list[tuple[str, str]]]]:
         if not pointers:
             continue
         found.append((match["axis"].strip(), match["value"].strip(), pointers))
+    return found
+
+
+#: 표의 머리 행(대조 대상이 아니다).
+_HEADERS = {"축", "정책", "정책 문서의 축", "조항", "구분", "공백"}
+
+
+def _axes() -> list[str]:
+    """정책 문서의 **모든 표 행**에서 축 이름을 걷는다.
+
+    `_rows()` 와 달리 정본 포인터를 요구하지 않는다 — §8(정해졌으나 미시행)은
+    아직 상수가 없어 포인터가 없지만, **약관이 담아야 하는 정책이라는 점은 같다.**
+    """
+    found = []
+    for line in _DOC.read_text(encoding="utf-8").splitlines():
+        match = _ROW.match(line)
+        if match is None:
+            continue
+        axis = match["axis"].strip().strip("*").strip()
+        if axis in _HEADERS or set(axis) <= {"-", ":", " "}:
+            continue
+        found.append(axis)
     return found
 
 
@@ -108,6 +131,44 @@ class ServicePolicyContractTest(unittest.TestCase):
                     f"'{axis}' 행이 {stated} 라고 적었는데 상수는 {actual} 다 —"
                     " 값의 정본은 상수 쪽이므로 문서를 고친다",
                 )
+
+
+class LegalDraftCoverageTest(unittest.TestCase):
+    """약관 초안이 **우리가 정한 것을 담았는가**(오너 합격 기준 2026-09-07).
+
+    오너가 약관 초안을 요구하며 낸 기준이 *"중요한건 우리가 정해놓은걸 제대로
+    담았는가"* 였다. 그것을 **대조표의 존재**로 기계화한다 — `docs/legal/README.md`
+    가 정책 문서의 각 축을 어느 조항이 받는지 적고, 이 셀이 **빠진 축이 있는지**만
+    본다.
+
+    ★ **조항의 내용이 맞는지는 재지 않는다.** 문장이 정책을 정확히 옮겼는지는
+    사람이 읽어야 한다. 이 셀이 막는 것은 다른 것이다 — **정책이 늘었는데 약관이
+    안 따라가는 것**(이 저장소에서 가장 흔한 문서 부패 방향이다).
+
+    **양방향**: 정책 문서에 축을 더하고 대조표에 안 더하면 실패한다(under).
+    대조표에서 행을 지워도 실패한다(under). 조항 번호만 고치는 것은 통과한다(over)
+    — 재는 것은 **축 이름의 존재**이지 조항 번호가 아니다.
+    """
+
+    def test_the_mapping_table_covers_every_policy_axis(self):
+        mapping = _LEGAL_MAP.read_text(encoding="utf-8")
+        axes = _axes()
+        # 0개면 공허하게 만족된다.
+        self.assertGreaterEqual(len(axes), 15)
+        missing = [axis for axis in axes if axis not in mapping]
+        self.assertEqual(
+            missing, [],
+            "정책 문서에는 있는데 약관 대조표에 없는 축이다 — 약관 초안이 "
+            "그 정책을 담았는지 확인하고 docs/legal/README.md 에 행을 더한다",
+        )
+
+    def test_both_drafts_stay_marked_as_unenforced_drafts(self):
+        # 초안이 시행 중인 문서로 읽히면 안 된다. 실제 시행은 오너가 이 표식을
+        # 걷어내는 것으로 시작하며, 그때 이 셀도 함께 고친다.
+        for name in ("terms-of-service-draft.md", "privacy-policy-draft.md"):
+            with self.subTest(document=name):
+                text = (_LEGAL_MAP.parent / name).read_text(encoding="utf-8")
+                self.assertIn("Draft — 법률 검토 전 · 미시행", text)
 
 
 if __name__ == "__main__":  # pragma: no cover
