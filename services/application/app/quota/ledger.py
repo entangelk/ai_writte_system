@@ -48,10 +48,15 @@ class DuplicateUsageEntry(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class UsageEntry:
-    """유료 동작 1회. ``delta``·``reason``·``admin_user_id`` 를 **갖지 않는다**(L5)."""
+    """유료 동작 1회. ``delta``·``reason``·``admin_user_id`` 를 **갖지 않는다**(L5).
+
+    ★ 소유 축이 ``target_user_id`` 인 것은 계약이다(D4, 오너 2026-09-07) —
+    ``user_id`` 면 사용자 축 purge reconciler 가 이 원장을 쓸어 간다.
+    ``target_project_id`` 가 같은 이유로 그 이름인 것과 한 뿌리다(8.2 L1=B).
+    """
 
     id: str
-    user_id: str
+    target_user_id: str
     target_project_id: str
     action: str
     dedupe_key: str
@@ -70,7 +75,7 @@ class AdjustmentEntry:
     """
 
     id: str
-    user_id: str
+    target_user_id: str
     target_project_id: str
     delta: int
     reason: str
@@ -125,7 +130,7 @@ class InMemoryUsageLedgerRepository:
         self._keys: set[tuple[str, str, str]] = set()
 
     def add_usage(self, entry: UsageEntry) -> None:
-        key = (entry.user_id, entry.action, entry.dedupe_key)
+        key = (entry.target_user_id, entry.action, entry.dedupe_key)
         if key in self._keys:
             raise DuplicateUsageEntry(str(key))
         self._keys.add(key)
@@ -140,7 +145,7 @@ class InMemoryUsageLedgerRepository:
     def count_usage(self, user_id: str, *, window_field: str, window_key: str) -> int:
         return sum(
             1 for entry in self._usage
-            if entry.user_id == user_id
+            if entry.target_user_id == user_id
             and getattr(entry, window_field) == window_key
         )
 
@@ -149,7 +154,7 @@ class InMemoryUsageLedgerRepository:
     ) -> int:
         return sum(
             entry.delta for entry in self._adjustments
-            if entry.user_id == user_id
+            if entry.target_user_id == user_id
             and getattr(entry, window_field) == window_key
         )
 
@@ -192,7 +197,7 @@ class UsageLedgerService:
         day, week = self._windows(member_created_at, now)
         entry = UsageEntry(
             id=self._id_factory(),
-            user_id=user_id,
+            target_user_id=user_id,
             target_project_id=target_project_id,
             action=action,
             dedupe_key=dedupe_key,
@@ -237,7 +242,7 @@ class UsageLedgerService:
         day, week = self._windows(member_created_at, now)
         entry = AdjustmentEntry(
             id=self._id_factory(),
-            user_id=user_id,
+            target_user_id=user_id,
             target_project_id=target_project_id,
             delta=delta,
             reason=reason,

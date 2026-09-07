@@ -151,11 +151,11 @@ class SuccessfulChargeTest(unittest.TestCase):
         service.settle(_admit(service), charged=True)
         rows = _usage_rows(ledger)
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0].user_id, _USER)
+        self.assertEqual(rows[0].target_user_id, _USER)
         self.assertEqual(rows[0].action, "writing_gate")
         self.assertEqual(rows[0].dedupe_key, "req-1")
-        # L1=B: 필드 이름이 계약이다 — `project_id` 로 적으면 purge reconciler 가
-        # 과금 기록을 지운다.
+        # L1=B / D4: 필드 이름이 계약이다 — `project_id`·`user_id` 로 적으면 purge
+        # reconciler 가 과금 기록을 지운다.
         self.assertEqual(rows[0].target_project_id, _PROJECT)
 
     def test_a_failed_request_leaves_no_row(self):
@@ -513,7 +513,7 @@ class RemainingSnapshotTest(unittest.TestCase):
         service, ledger_repo, _locks, clock = _build(
             limits=QuotaLimits(daily_limit=1, weekly_limit=100))
         ledger_repo.add_adjustment(AdjustmentEntry(
-            id="adj-1", user_id=_USER, target_project_id=_PROJECT, delta=3,
+            id="adj-1", target_user_id=_USER, target_project_id=_PROJECT, delta=3,
             reason="운영 보정", admin_user_id="admin-1",
             daily_key=daily_key(clock()),
             weekly_key=weekly_key(_JOINED, clock()), at=clock(),

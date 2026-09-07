@@ -104,14 +104,14 @@ class _Client:
 
 def _usage(entry_id="e1", *, action="writing_generate", key="k1", user="u1"):
     return UsageEntry(
-        id=entry_id, user_id=user, target_project_id="p1", action=action,
+        id=entry_id, target_user_id=user, target_project_id="p1", action=action,
         dedupe_key=key, daily_key="2026-07-08", weekly_key="2026-07-06", at=AT,
     )
 
 
 def _adjustment(entry_id, delta=-1):
     return AdjustmentEntry(
-        id=entry_id, user_id="u1", target_project_id="p1", delta=delta,
+        id=entry_id, target_user_id="u1", target_project_id="p1", delta=delta,
         reason="오류 보상", admin_user_id="admin-1",
         daily_key="2026-07-08", weekly_key="2026-07-06", at=AT,
     )
@@ -138,7 +138,7 @@ class MongoUsageLedgerRepositoryTest(unittest.TestCase):
         self.assertTrue(options["unique"])
         self.assertEqual(options["partialFilterExpression"], {"kind": "usage"})
         self.assertEqual([name for name, _ in keys],
-                         ["user_id", "action", "dedupe_key"])
+                         ["target_user_id", "action", "dedupe_key"])
 
     def test_a_repeated_usage_key_is_refused(self):
         self.repo.add_usage(_usage("e1"))
@@ -211,6 +211,26 @@ class MongoUsageLedgerRepositoryTest(unittest.TestCase):
                 self.assertIn("target_project_id", doc)
                 self.assertNotIn("project_id", doc)
 
+    def test_the_member_axis_is_stored_as_target_user_id(self):
+        """★ 사용자 축도 이름이 계약이다 (D4, 오너 2026-09-07).
+
+        프로젝트 축이 `target_project_id` 인 이유(위 셀)가 **사용자 축에도 그대로
+        적용된다.** 계정 탈퇴 파기가 열리면 사용자 축 reconciler 가 생기고, 그것이
+        프로젝트 쪽과 같은 방식(`find_one({user_id: {$exists: true}})`, **표본 한 건**)
+        으로 컬렉션을 고르면 **원장이 통째로 쓸려 간다** — 오너 결정은 *"탈퇴해도
+        사용량 원장은 남긴다"* 이므로 정면으로 어긋난다.
+
+        `admin_user_id` 는 **행위자**이지 이 원장의 소유 축이 아니고, 이름이 달라
+        정확 일치 판정에 걸리지 않는다(활동 로그의 `actor_user_id` 와 같은 선례).
+        """
+        self.repo.add_usage(_usage("e1"))
+        self.repo.add_adjustment(_adjustment("a1"))
+        for doc_id in ("e1", "a1"):
+            with self.subTest(doc=doc_id):
+                doc = self.collection.docs[doc_id]
+                self.assertIn("target_user_id", doc)
+                self.assertNotIn("user_id", doc)
+
     def test_the_stored_key_sets_are_pinned_so_no_field_creeps_in(self):
         # H2 보강(독립 검증 2026-08-03): 파기 reconciler 의 컬렉션 발견은
         # `find_one({project_id: {$exists: true}})` 라 **표본 한 건**이다. 원장 문서
@@ -220,11 +240,11 @@ class MongoUsageLedgerRepositoryTest(unittest.TestCase):
         self.repo.add_usage(_usage("e1"))
         self.repo.add_adjustment(_adjustment("a1"))
         self.assertEqual(set(self.collection.docs["e1"]), {
-            "_id", "kind", "user_id", "target_project_id", "action",
+            "_id", "kind", "target_user_id", "target_project_id", "action",
             "dedupe_key", "daily_key", "weekly_key", "at",
         })
         self.assertEqual(set(self.collection.docs["a1"]), {
-            "_id", "kind", "user_id", "target_project_id", "delta", "reason",
+            "_id", "kind", "target_user_id", "target_project_id", "delta", "reason",
             "admin_user_id", "daily_key", "weekly_key", "at",
         })
 

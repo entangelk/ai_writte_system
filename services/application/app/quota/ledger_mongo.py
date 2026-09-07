@@ -42,7 +42,7 @@ class MongoUsageLedgerRepository:
         # 중복 방지(L2=A). `action` 이 키에 있어야 한 흐름의 서로 다른 유료 동작이
         # 같은 클라이언트 uuid 를 공유해도 각각 세어진다.
         self._entries.create_index(
-            [("user_id", ASCENDING), ("action", ASCENDING),
+            [("target_user_id", ASCENDING), ("action", ASCENDING),
              ("dedupe_key", ASCENDING)],
             name="request_usage_ledger_dedupe_unique",
             unique=True,
@@ -50,11 +50,11 @@ class MongoUsageLedgerRepository:
         )
         # 집계(L3=A) — 잔여는 세어서 얻는다.
         self._entries.create_index(
-            [("user_id", ASCENDING), ("daily_key", ASCENDING)],
+            [("target_user_id", ASCENDING), ("daily_key", ASCENDING)],
             name="request_usage_ledger_by_user_day",
         )
         self._entries.create_index(
-            [("user_id", ASCENDING), ("weekly_key", ASCENDING)],
+            [("target_user_id", ASCENDING), ("weekly_key", ASCENDING)],
             name="request_usage_ledger_by_user_week",
         )
 
@@ -75,7 +75,7 @@ class MongoUsageLedgerRepository:
         # 유니크 인덱스와 같은 세 축 + kind 제한(조정 행은 null 키로 오탐한다 —
         # 부분 인덱스의 함정이 여기서도 같은 모양으로 성립한다).
         return self._entries.find_one({
-            "user_id": user_id,
+            "target_user_id": user_id,
             "action": action,
             "dedupe_key": dedupe_key,
             "kind": LedgerEntryKind.USAGE.value,
@@ -83,7 +83,7 @@ class MongoUsageLedgerRepository:
 
     def count_usage(self, user_id: str, *, window_field: str, window_key: str) -> int:
         return self._entries.count_documents({
-            "user_id": user_id,
+            "target_user_id": user_id,
             window_field: window_key,
             "kind": LedgerEntryKind.USAGE.value,
         })
@@ -92,7 +92,7 @@ class MongoUsageLedgerRepository:
         self, user_id: str, *, window_field: str, window_key: str
     ) -> int:
         cursor = self._entries.find({
-            "user_id": user_id,
+            "target_user_id": user_id,
             window_field: window_key,
             "kind": LedgerEntryKind.ADJUSTMENT.value,
         })
@@ -103,7 +103,7 @@ def _usage_doc(entry: UsageEntry) -> dict:
     return {
         "_id": entry.id,
         "kind": LedgerEntryKind.USAGE.value,
-        "user_id": entry.user_id,
+        "target_user_id": entry.target_user_id,
         "target_project_id": entry.target_project_id,
         "action": entry.action,
         "dedupe_key": entry.dedupe_key,
@@ -117,7 +117,7 @@ def _adjustment_doc(entry: AdjustmentEntry) -> dict:
     return {
         "_id": entry.id,
         "kind": LedgerEntryKind.ADJUSTMENT.value,
-        "user_id": entry.user_id,
+        "target_user_id": entry.target_user_id,
         "target_project_id": entry.target_project_id,
         "delta": entry.delta,
         "reason": entry.reason,
@@ -130,7 +130,7 @@ def _adjustment_doc(entry: AdjustmentEntry) -> dict:
 
 def usage_entry(doc: dict) -> UsageEntry:
     return UsageEntry(
-        id=doc["_id"], user_id=doc["user_id"],
+        id=doc["_id"], target_user_id=doc["target_user_id"],
         target_project_id=doc["target_project_id"], action=doc["action"],
         dedupe_key=doc["dedupe_key"], daily_key=doc["daily_key"],
         weekly_key=doc["weekly_key"], at=_aware(doc["at"]),
@@ -139,7 +139,7 @@ def usage_entry(doc: dict) -> UsageEntry:
 
 def adjustment_entry(doc: dict) -> AdjustmentEntry:
     return AdjustmentEntry(
-        id=doc["_id"], user_id=doc["user_id"],
+        id=doc["_id"], target_user_id=doc["target_user_id"],
         target_project_id=doc["target_project_id"], delta=doc["delta"],
         reason=doc["reason"], admin_user_id=doc["admin_user_id"],
         daily_key=doc["daily_key"], weekly_key=doc["weekly_key"],
