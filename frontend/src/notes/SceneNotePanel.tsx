@@ -50,6 +50,13 @@ export function SceneNotePanel({
   /** 본문을 이미 읽어 둔 장면. 되돌아올 때 편집 중인 글자를 덮어쓰지 않는다. */
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const [otherBody, setOtherBody] = useState<string | null>(null);
+  /**
+   * 고른 장면에 **메모 행이 없다**(`body === null`)는 뜻. `""`(빈 메모 저장됨)과
+   * 구분해야 한다 — SoT v1.8.11 이 그 둘을 계약으로 가르고, 편집면은 이미 가른다.
+   * 안 가르면 **둘 다 빈 문단이 되어 화면이 아무 말도 안 한다**(오너 실사용 관측
+   * 2026-09-07: *"저장된 메모를 눌렀을 때 메모가 안 보였다"*).
+   */
+  const [otherMissing, setOtherMissing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +71,7 @@ export function SceneNotePanel({
   useEffect(() => {
     setSelected(null);
     setOtherBody(null);
+    setOtherMissing(false);
     setNotice(null);
   }, [draftId]);
 
@@ -86,6 +94,7 @@ export function SceneNotePanel({
         .then((note) => {
           if (!active) return;
           setOtherBody(note.body ?? "");
+          setOtherMissing(note.body === null);
           setError(null);
         })
         .catch((cause: unknown) => { if (active) setError(describeApiError(cause)); });
@@ -162,6 +171,10 @@ export function SceneNotePanel({
           </button>
           {otherBody === null ? (
             <p className="status-copy">메모를 불러오는 중…</p>
+          ) : otherMissing ? (
+            <p className="status-copy">아직 메모가 없습니다.</p>
+          ) : otherBody === "" ? (
+            <p className="status-copy">빈 메모가 저장돼 있습니다.</p>
           ) : (
             <p className="note-body">{otherBody}</p>
           )}
@@ -180,6 +193,7 @@ export function SceneNotePanel({
         selectedDraftId={selected?.draft_id ?? draftId}
         onSelect={(note) => {
           setOtherBody(null);
+          setOtherMissing(false);
           setSelected(note.draft_id === draftId ? null : note);
         }}
       />

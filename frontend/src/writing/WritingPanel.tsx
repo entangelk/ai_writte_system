@@ -249,14 +249,19 @@ export function WritingPanel(props: WritingPanelProps) {
   // The base version + request id are frozen for the lifetime of a candidate:
   // generate → gate → accept all reference the version that was latest when the
   // candidate was produced (brief D1=A: base id fixed to the intent).
+  const [acceptContextReady, setAcceptContextReady] = useState(false);
   const contextRef = useRef<{ baseVersionId: string; requestId: string } | null>(null);
 
   const availability = availabilityOf(props);
   const startingNextUnit = writingIntent === "start_next_unit";
   // A new unit needs a nonblank title; the backend rejects a blank one with 400.
   const nextUnitReady = !startingNextUnit || nextTitle.trim() !== "";
+  // ★ `disabled` 는 `accept()` 가 보는 **모든** 조건을 덮어야 한다. 하나라도 빠지면
+  // 버튼이 활성인데 눌러도 조용히 return 하는 **죽은 버튼**이 된다(오너 실사용 관측
+  // 2026-09-07: *"채택이 아무 동작도 하지 않는다"*). `contextRef` 는 ref 라 렌더를
+  // 다시 돌리지 않으므로 같은 사실을 상태로도 든다 — 둘은 항상 같이 움직인다.
   const canAccept =
-    candidate !== null && gate?.decision === "pass" && nextUnitReady;
+    candidate !== null && gate?.decision === "pass" && nextUnitReady && acceptContextReady;
   const eligibleFinding =
     candidate !== null && gate !== null
       ? eligibleRevisionFinding(candidate, gate)
@@ -334,6 +339,7 @@ export function WritingPanel(props: WritingPanelProps) {
     intentRef.current = null;
     loopIntentRef.current = null;
     contextRef.current = null;
+    setAcceptContextReady(false);
     const baseVersionId = latestVersionId;
     const requestId = crypto.randomUUID();
     const position = { draft_id: draftId, version_id: baseVersionId };
@@ -374,6 +380,7 @@ export function WritingPanel(props: WritingPanelProps) {
       // (transport/5xx preserves the candidate); accept stays disabled until pass.
       setCandidate(produced);
       contextRef.current = { baseVersionId, requestId };
+      setAcceptContextReady(true);
       await runGate(produced, { requestId, trimmed, position });
     } catch (err) {
       if (await handleQuotaRefusal(err, () =>
@@ -504,13 +511,21 @@ export function WritingPanel(props: WritingPanelProps) {
   }
 
   async function accept(options: BillableRequestOptions = {}) {
+    if (busyRef.current) return;
     if (
       candidate === null ||
       gate?.decision !== "pass" ||
       !nextUnitReady ||
-      busyRef.current ||
       contextRef.current === null
     ) {
+      // ★ 조용히 돌아서지 않는다. 여기 닿았다는 것은 `disabled`(canAccept)가
+      // 못 막았다는 뜻이고, 그때 사용자가 보는 것은 **아무 일도 안 일어나는 버튼**
+      // 이다(오너 실사용 관측 2026-09-07). 이유를 말하는 편이 언제나 낫다.
+      setNotice(
+        contextRef.current === null
+          ? "이 후보의 기준 version 정보가 없습니다. 다시 생성한 뒤 채택하세요."
+          : "지금은 채택할 수 없습니다. 아래 안내를 확인하세요.",
+      );
       return;
     }
     // The candidate's base version is frozen at generate time, so accept saves
@@ -573,6 +588,7 @@ export function WritingPanel(props: WritingPanelProps) {
         setGate(null);
         setLoopResult(null);
         contextRef.current = null;
+        setAcceptContextReady(false);
         intentRef.current = null;
         loopIntentRef.current = null;
         setInstruction("");
@@ -912,6 +928,15 @@ export function WritingPanel(props: WritingPanelProps) {
             >
               {busy === "accepting" ? "채택 중…" : "채택하고 저장"}
             </button>
+            {canAccept && (
+              // 오너 실사용 관측 2026-09-07: *"채택을 눌렀을 때 어떤 동작이 되는지도
+              // 모르겠네."* 이 사실은 종전에 **확인 대화상자에만** 있었다 — 즉 누르기
+              // 전에는 어디에도 없었다. 무엇이 저장되는지는 누르기 **전에** 보여야 한다.
+              <span className="candidate-accept-note">
+                생성 시점의 본문에 이 후보를 이어 붙여 새 version 으로 저장합니다.
+                그 뒤 편집기에 직접 친 글은 함께 저장되지 않습니다.
+              </span>
+            )}
             {gate?.decision === "pass" && !nextUnitReady && (
               <span className="candidate-accept-note">
                 새 장면 제목을 입력해야 생성·채택할 수 있습니다.

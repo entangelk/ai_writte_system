@@ -235,6 +235,55 @@ describe("메모 드로어 패널", () => {
     ).toBeInTheDocument();
   });
 
+  /**
+   * 오너 실사용 관측(2026-09-07): *"저장된 메모를 눌렀을 때 메모가 안 보였다."*
+   * 읽기면이 `body: null`(메모 없음)과 `""`(빈 메모 저장됨)을 **둘 다 빈 문단**으로
+   * 그려 화면이 아무 말도 안 했다. 편집면은 이미 그 둘을 가르고, **SoT v1.8.11 이
+   * 그 구분을 계약으로 박아 뒀다.**
+   */
+  async function openOtherSceneWith(body: string | null) {
+    stubRoutes([
+      [/\/notes$/, { body: LIST }],
+      [/\/drafts\/d1\/note$/, { body: { draft_id: "d1", body: "현재 장면 메모", updated_at: null } }],
+      [/\/drafts\/d2\/note$/, { body: { draft_id: "d2", body, updated_at: null } }],
+    ]);
+    renderPanel();
+    await screen.findByDisplayValue("현재 장면 메모");
+    await userEvent.click(screen.getByRole("button", { name: "두 번째 밤" }));
+  }
+
+  it("says a scene has no memo instead of showing an empty panel", async () => {
+    await openOtherSceneWith(null);
+
+    expect(await screen.findByText("아직 메모가 없습니다.")).toBeInTheDocument();
+    expect(screen.queryByText("빈 메모가 저장돼 있습니다.")).not.toBeInTheDocument();
+  });
+
+  it("distinguishes a saved empty memo from having no memo", async () => {
+    await openOtherSceneWith("");
+
+    expect(await screen.findByText("빈 메모가 저장돼 있습니다.")).toBeInTheDocument();
+    expect(screen.queryByText("아직 메모가 없습니다.")).not.toBeInTheDocument();
+  });
+
+  it("shows another scene's saved memo as body text, not as a status line", async () => {
+    stubRoutes([
+      [/\/notes$/, { body: LIST }],
+      [/\/drafts\/d1\/note$/, { body: { draft_id: "d1", body: "현재 장면 메모", updated_at: null } }],
+      [/\/drafts\/d2\/note$/, { body: { draft_id: "d2", body: "다른 장면 전문", updated_at: null } }],
+    ]);
+
+    renderPanel();
+    await screen.findByDisplayValue("현재 장면 메모");
+    await userEvent.click(screen.getByRole("button", { name: "두 번째 밤" }));
+
+    // over-strict 방향: 내용이 있는 메모를 "없음/빈 메모" 문구로 바꾸면 안 된다.
+    const shown = await screen.findByText("다른 장면 전문");
+    expect(shown).toHaveClass("note-body");
+    expect(screen.queryByText("아직 메모가 없습니다.")).not.toBeInTheDocument();
+    expect(screen.queryByText("빈 메모가 저장돼 있습니다.")).not.toBeInTheDocument();
+  });
+
   it("expands a cut preview in place without moving the editing target", async () => {
     stubRoutes([
       [/\/notes$/, {

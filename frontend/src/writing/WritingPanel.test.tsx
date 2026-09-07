@@ -772,6 +772,55 @@ describe("WritingPanel — accept (pass only)", () => {
     ).toBeInTheDocument();
   });
 
+  it("says what accepting will save, before it is clicked", async () => {
+    /**
+     * 오너 실사용 관측(2026-09-07): *"애초에 채택을 눌렀을 때 어떤 동작이 되는지도
+     * 모르겠네."* 이 사실은 종전에 **확인 대화상자에만** 있었다 — 즉 누르기 전에는
+     * 어디에도 없었다. 채택은 **생성 시점에 고정된 본문 + 후보**를 저장하고 그 뒤
+     * 편집기에 친 글은 버리므로, 누르기 **전에** 말해야 한다.
+     */
+    const fetchMock = mockFetch({ body: candidate }, { body: gatePass });
+    renderPanel();
+    await generateAndGate(fetchMock);
+
+    expect(acceptButton()).toBeEnabled();
+    expect(
+      screen.getByText(/새 version 으로 저장합니다/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/편집기에 직접 친 글은 함께 저장되지 않습니다/),
+    ).toBeInTheDocument();
+  });
+
+  it("never leaves accept enabled while the handler would refuse silently", async () => {
+    /**
+     * ★ 이 셀이 잠그는 것은 **문구가 아니라 두 가드의 일치**다.
+     *
+     * 버튼의 `disabled`(=`canAccept`)가 `accept()` 의 조건 중 하나라도 빠뜨리면,
+     * 버튼은 활성인데 눌러도 조용히 `return` 하는 **죽은 버튼**이 된다(오너 실사용
+     * 관측 2026-09-07: *"채택이 아무 동작도 하지 않는다"*). 종전 `canAccept` 는
+     * `contextRef.current === null` 을 안 봤다.
+     *
+     * 여기서는 **채택이 활성일 때 누르면 반드시 요청이 나간다**를 단정한다 —
+     * 조건이 어긋나면 요청이 0건이라 실패한다. 문구를 바꿔도 이 셀은 통과한다.
+     */
+    const fetchMock = mockFetch(
+      { body: candidate },
+      { body: gatePass },
+      { body: acceptOk },
+    );
+    renderPanel();
+    await generateAndGate(fetchMock);
+    const before = fetchMock.mock.calls.length;
+
+    expect(acceptButton()).toBeEnabled();
+    await userEvent.click(acceptButton());
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.length).toBeGreaterThan(before),
+    );
+  });
+
   it("accepts a pass candidate, binds the exact body, reloads, and clears", async () => {
     const fetchMock = mockFetch(
       { body: candidate },
