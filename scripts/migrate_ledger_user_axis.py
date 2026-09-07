@@ -32,8 +32,20 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
+from pathlib import Path
 
 from pymongo import MongoClient
+
+# ``python scripts/x.py`` 는 **스크립트의 디렉터리**를 sys.path 에 넣지 CWD 를 넣지
+# 않는다 — 그래서 저장소 루트를 손수 얹어야 `services` 를 찾는다. 선례는
+# ``index_sync_worker.py``·``generation_job_worker.py`` 이고, 그 둘은 compose 가
+# ``python scripts/…`` 로 실행하기 때문에 이 줄을 갖고 있다.
+# ★ 마이그레이션이야말로 이것이 있어야 한다 — **배포 도중 사람이 손으로 치는
+# 명령**이라, 여기서 ModuleNotFoundError 가 나면 배포가 멈춘다(2026-09-07 실제로
+# 멈췄다). ``PYTHONPATH`` 를 기억해야 도는 스크립트를 남기지 않는다.
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
 from services.application.app.quota.ledger_mongo import COLLECTION
