@@ -66,7 +66,7 @@
 - 스타일 가드 3파일 16 passed(`typeScale`·`buttonAppearance`·`pageLayout`).
 - `tsc --noEmit` 0.
 - 프론트 전수 **451 → 457 passed / 38 files**(캡처 실행 `EXIT=0`, 38파일 전건).
-- **★ 그 앞 실행 하나가 1실패를 보고했는데 정체를 못 남겼다** — `tail` 파이프에 실패 블록이 잘렸다(운영 실수). 같은 트리를 전체 출력 캡처로 다시 돌려 **457/457 초록**이고, 파일을 읽는 가드 10개(`typeScale`·`buttonAppearance`·`pageLayout`·`designTokens`·`navigationLinks`·`disabledState`·`scratchPadCss`·`adsense`·`productName`·`chartColors`)도 따로 돌려 35 passed 다. 그 실행 창(09:30~09:47)에 SoT·CHANGELOG·HANDOFF·README 를 편집하고 있었지만 **그 가드들이 저장소 문서를 읽지 않는다는 것은 확인했으므로 원인으로 지목하지 않는다**. 머신 부하가 극단적이었다(같은 실행 `environment 1778s`). **정체 미상으로 남긴다** — 다음 전수에서 재현되면 그때 잡는다.
+- **★ 그 앞 실행 하나가 1실패를 보고했는데 정체를 못 남겼다** — `tail` 파이프에 실패 블록이 잘렸다(운영 실수). 같은 트리를 전체 출력 캡처로 **두 번 연속** 다시 돌려 둘 다 **457/457 초록**(`EXIT=0`)이고, 파일을 읽는 가드 10개(`typeScale`·`buttonAppearance`·`pageLayout`·`designTokens`·`navigationLinks`·`disabledState`·`scratchPadCss`·`adsense`·`productName`·`chartColors`)도 따로 돌려 35 passed 다. 그 실행 창(09:30~09:47)에 SoT·CHANGELOG·HANDOFF·README 를 편집하고 있었지만 **그 가드들이 저장소 문서를 읽지 않는다는 것은 확인했으므로 원인으로 지목하지 않는다**. 머신 부하가 극단적이었다(같은 실행 `environment 1778s`). **정체 미상으로 남긴다** — 다음 전수에서 재현되면 그때 잡는다.
 - 백엔드는 돌리지 않았다 — 이 슬라이스가 `services/`·`tests/`·`schemas/` 를 한 바이트도 건드리지 않았다(`git show --stat`).
 
 ### Next steps
