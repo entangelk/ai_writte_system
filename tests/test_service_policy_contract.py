@@ -37,7 +37,7 @@ _LEGAL_MAP = _ROOT / "docs" / "legal" / "README.md"
 _PACKAGE = "services.application.app"
 
 #: 표 한 행: | 축 | 값 | `모듈::상수`(들) |
-_ROW = re.compile(r"^\|(?P<axis>[^|]+)\|(?P<value>[^|]+)\|(?P<sources>[^|]+)\|\s*$")
+_ROW = re.compile(r"^\|(?P<axis>[^|]+)\|(?P<value>[^|]+)\|(?P<sources>[^|]*)\|")
 _POINTER = re.compile(r"`([a-z_0-9/]+\.py)::([A-Z_][A-Z_0-9]*)`")
 
 
@@ -75,6 +75,22 @@ def _axes() -> list[str]:
             continue
         found.append(axis)
     return found
+
+
+def _mapped_axes() -> set[str]:
+    """대조표가 **첫 칸으로** 이름을 든 축.
+
+    본문 어디든 문자열이 있으면 통과하게 두면 안 된다 — 변이 ML-1 실측: 행
+    이름을 `계정 탈퇴` → `계정 탈퇴(미기재)` 로 바꿔도 부분 문자열이라 초록이었다.
+    표의 첫 칸을 **정확히** 대조해야 잠긴다.
+    """
+    mapped = set()
+    for line in _LEGAL_MAP.read_text(encoding="utf-8").splitlines():
+        match = _ROW.match(line)
+        if match is None:
+            continue
+        mapped.add(match["axis"].strip().strip("*").strip())
+    return mapped
 
 
 def _load(module_path: str, name: str) -> object:
@@ -146,16 +162,18 @@ class LegalDraftCoverageTest(unittest.TestCase):
     안 따라가는 것**(이 저장소에서 가장 흔한 문서 부패 방향이다).
 
     **양방향**: 정책 문서에 축을 더하고 대조표에 안 더하면 실패한다(under).
-    대조표에서 행을 지워도 실패한다(under). 조항 번호만 고치는 것은 통과한다(over)
-    — 재는 것은 **축 이름의 존재**이지 조항 번호가 아니다.
+    대조표에서 행을 지우거나 **이름을 바꿔도** 실패한다(under — 변이 ML-1 이 이
+    자리를 열었다: 종전 구현은 본문 부분 문자열을 봐서 이름 변경이 초록이었다).
+    조항 번호만 고치는 것은 통과한다(over) — 재는 것은 **표 첫 칸의 축 이름**이지
+    조항 번호가 아니다.
     """
 
     def test_the_mapping_table_covers_every_policy_axis(self):
-        mapping = _LEGAL_MAP.read_text(encoding="utf-8")
+        mapped = _mapped_axes()
         axes = _axes()
         # 0개면 공허하게 만족된다.
         self.assertGreaterEqual(len(axes), 15)
-        missing = [axis for axis in axes if axis not in mapping]
+        missing = [axis for axis in axes if axis not in mapped]
         self.assertEqual(
             missing, [],
             "정책 문서에는 있는데 약관 대조표에 없는 축이다 — 약관 초안이 "
