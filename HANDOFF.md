@@ -122,6 +122,7 @@
 - **공유 직렬화기는 [`api/payloads.py`](services/application/app/api/payloads.py), 한 도메인 전용은 그 라우터 모듈.** 전부 모으면 `payloads.py` 가 두 번째 `main.py` 가 된다. **`_require_project_exists` 를 새로 쓰지 말고 [`project_existence_check`](services/application/app/api/dependencies.py) 를 부른다.**
 - **import를 재작성할 때 `as` 별칭을 버리지 말 것.** **`main.X` 를 patch하는 자리는 저장소 전체에 셋뿐**(`connect_chroma_collection`·`_build_embedding_provider`·`GatewayGenerateProvider`) — 심볼을 지울 때 이 스윕을 먼저 한다.
 
+- **★ 수를 적은 주석·문서는 이제 가드가 센다(2026-09-07 신설 3종).** 빨개지면 *가드가 이상한 게 아니라 값이 뒤처진 것*이다. ① `activity/actions.py` 의 *"기록하지 않는 N"* 과 절 주석 수 — `test_activity_actions.py` 가 실제 항목 수와 대조한다(21 로 적힌 채 29 가 돼 있던 자리). ② [`docs/service-policy-contract.md`](docs/service-policy-contract.md) 의 정책값 — `test_service_policy_contract.py` 가 각 행의 `모듈::상수` 를 **import 해서** 대조하므로 **값을 고치려면 상수를 고친다**. 새 행에는 포인터를 함께 단다(포인터 없는 행은 안 잠긴다). ③ [`docs/legal/README.md`](docs/legal/README.md) 대조표 — 정책 문서의 **모든 표 축**이 여기 첫 칸에 있어야 한다(정책이 늘었는데 약관이 안 따라가는 것을 막는다).
 **새 것을 더할 때 — 함께 가야 하는 것들**
 - **새 LLM 호출부**: ① 조립 지점에서 `ObservedProvider(inner, call_site=…)` 로 감싼다 ② 그 요청 경로에서 `llm_call_scope(...)` 를 연다 — **감싸기와 scope 개방은 항상 함께 간다. 빠뜨리면 레코드가 조용히 0건인데 스위트는 green이다** ③ **조립 가드도 함께 넣는다**(하네스는 `ObservedProvider` 를 직접 만들기 때문에 조립에서 벗겨도 green이고 **배포에서만** 계측이 사라진다) ④ 도메인 판정은 `scope.annotate_last(...)`, 최종 도메인 거부는 `scope.reclassify_last_as_parse_error(...)`.
 - **새 mutating route**: [`activity/actions.py`](services/application/app/activity/actions.py) 에 `logged` 또는 `EXCLUDED(사유)` 로 등재해야 전수 가드가 통과한다. **★ 전수 가드는 배선의 *존재*만 보고 *분기*는 못 본다** — 한 handler에 기록 분기가 여럿이면 **분기마다 행위 셀**이 필요하다.
@@ -218,6 +219,11 @@
 | 관측 화면 확장 | **Phase 9 F1(커서 페이징)과 같은 트리거를 쓴다** — *"'최근 100건' 문구 아래가 궁금해지는 순간, 특히 하루 저작 뒤 타임라인이 그날 하루로 다 차면"*([`09-1-…-decisions.md`](docs/plans/09-1-activity-timeline-screen-decisions.md) §"나중에 여는 문"). **★ 둘을 따로 열지 않는다 — 먼저 여는 쪽이 페이징 관례를 정하고 다른 쪽이 따른다.** 무엇을 더하든 **`React.lazy` 경계 안**. *(2026-09-06 정정: 종전 트리거 "API에 시간 창 `?since=` 이 생긴 뒤"는 **순환이었다** — `?since=` 는 이 작업 자신의 API 축이라 그것을 만들어 줄 다른 작업이 없다. 실측: [`observability.py`](services/application/app/routers/observability.py) 의 KPI endpoint 는 `project_id` 하나만 받는다)* |
 
 ## Next Tasks
+
+> **★ 다음 작업자에게 — "남은 일"은 이 절에만 있지 않다(2026-09-07 실수 기록).** 오너가 *"남은 거 뭐지?"* 라고 물었을 때 이 번호 목록만 세어 답했다가 **랜딩 페이지 기획을 통째로 빠뜨렸다.** 이 파일은 남은 일을 **세 곳**에 나눠 싣는다 — ① 이 번호 목록(착수 순서) ② 위 "열린 것"의 **⚠️ 오너 결정 표**(막힌 것 — 병목은 여기 산다) ③ 같은 절의 **🔧 미수리 표**(아는 결함). 셀 때는 `grep -n '^## ' HANDOFF.md` 로 **절부터 뽑고**, 답할 때 **집계 범위를 함께 말한다.**
+>
+> **오늘(2026-09-07) 착수 가능한 순서로 정리하면**: **11번(계정 탈퇴 Slice 0~5 — 가장 큰 덩어리, 결정 전부 확정)** → 12번(랜딩 기획) → 10번(가입 동의 게이트, 오너 검토 선행) → S-2(nginx 헤더). 그 밖은 오너 병목이거나 운영 데이터 대기다.
+
 
 > **★ 2026-09-05 보안 감사 후속(Phase S)이 진행 중이다.** 감사 판단 **critical 0건** + 오너 확인 둘(확인용 계정은 배포에 없었다 · 승인된 계정이 오너뿐이다). **S-3 signup 축과 S-1 quota 우회 체인(HIGH)이 같은 날 닫히고 그대로 배포됐다**(각각 SoT v1.8.30·v1.8.32, 배포 서버 HEAD `d37eb84` — 세부는 work_log 세션 11). **S-0 문서 위생·S-7 토큰 저장 방식이 2026-09-06 에 닫혔다**(S-0 = 스윕 + 재유입 가드 · S-7 = 오너가 배포 호스트에서 `--token-file` 로 시행). **남은 셋은 성격이 서로 다르다 — "전부 트리거 대기"가 아니다**(2026-09-06 정정): **S-2 는 트리거가 없다. 일정이 안 잡힌 것뿐이다** — 감사가 공격 경로까지 적어 두었고(광고 스크립트 오염 → same-origin `fetch` 로 원고 유출) 무엇이 일어나야 착수 가능한지가 없다. 굳이 묶자면 랜딩·약관 축(오너 병목)과 같은 자리다. **S-5 는 유예가 아니라 수용된 위험**이다(표 자신이 *"알고 두는 것 — 수리 대상 아님"*). **S-6 의 낡은 vhost 만 진짜 대기**인데 그것도 타 프로젝트 소관이라 **회신 경로가 없다**(아래 0번). S-7 회전은 2026-09-06 오너 결정으로 닫혔다. **4번(장면 메모 후속)은 2026-09-07 에 닫혔다 — 다음은 2번(최종 저장·분석 연동 6차 승격 재검증)이다.**
 
