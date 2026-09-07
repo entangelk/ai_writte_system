@@ -2,12 +2,14 @@
 
 import unittest
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from services.application.app.auth.models import User
 from services.application.app.auth.users import (
     DuplicateUsername, InMemoryUserRepository, InvalidUserInput,
     LastActiveAdmin, SignupNotPending, UserNotFound, UserService,
+    WITHDRAWAL_GRACE_PERIOD, WithdrawalNotRequested,
+    is_purge_due, purge_due_at,
     USER_STATUS_ACTIVE, USER_STATUS_PENDING, USER_STATUS_REJECTED,
 )
 
@@ -492,6 +494,209 @@ class SignupRequestTest(unittest.TestCase):
             username="bob", password="long-enough-pw-2"
         )
         self.assertFalse(second.is_admin)
+
+
+class WithdrawalGracePeriodLiteralTest(unittest.TestCase):
+    """유예 기간 30일은 오너가 고른 계약 리터럴이다(2026-09-07).
+
+    상징 참조로는 못 잠근다 — `WITHDRAWAL_GRACE_PERIOD` 를 쓰는 셀은 상수를 60일로
+    바꿔도 전부 초록이다(자기 자신과 비교하기 때문이다). 이 저장소의 다른 계약
+    리터럴(`MIN_PASSWORD_LENGTH`·`SCENE_NOTE_MAX_CHARS`)과 같은 모양으로 **값을
+    직접 박는 핀 셀**을 둔다.
+
+    ★ **시행되면 이 셀의 자리가 바뀐다.** 정책 문서 §6 이 이 상수를 가리키게 되는
+    순간(Slice 5) `tests/test_service_policy_contract.py` 가 문서-상수 대조를
+    맡는다. 그때까지는 §8(정해졌으나 미시행)이라 포인터가 없고, 그래서 여기다.
+    """
+
+    def test_the_grace_period_is_thirty_days(self) -> None:
+        self.assertEqual(WITHDRAWAL_GRACE_PERIOD, timedelta(days=30))
+
+
+class WithdrawalStateAxisTest(unittest.TestCase):
+    """Slice 0 — 상태 축과 경계 판정. **이 슬라이스는 아무것도 지우지 않는다.**"""
+
+    def setUp(self) -> None:
+        self.repo = InMemoryUserRepository()
+        self.service = _service(self.repo)
+
+    def _member(self) -> User:
+        return self.service.create_user(username="alice", password="pw")
+
+    # --- 전이: 활성 → 탈퇴 요청 → 취소 → 활성 -------------------------------
+
+    def test_a_new_account_is_not_withdrawing(self) -> None:
+        self.assertIsNone(self._member().withdrawal_requested_at)
+
+    def test_requesting_stamps_the_clock_and_persists(self) -> None:
+        user = self._member()
+        requested = self.service.request_withdrawal(user.id)
+        self.assertEqual(requested.withdrawal_requested_at, _FIXED_TIME)
+        # 반환값만 맞고 저장이 안 되는 구현을 막는다.
+        self.assertEqual(
+            self.repo.get_by_id(user.id).withdrawal_requested_at, _FIXED_TIME
+        )
+
+    def test_requesting_deletes_nothing_and_keeps_the_account_usable(self) -> None:
+        """Slice 0 의 인계 문장 그대로 — 상태만 만든다.
+
+        유예 중 접근 제한은 Slice 2(D1=C)의 몫이고, 계정 자체는 **여전히 활성**
+        이어야 취소하러 로그인할 수 있다. 여기서 `is_active=False` 로 만드는
+        과잉 교정은 취소 경로를 통째로 잠근다.
+        """
+        user = self._member()
+        self.service.request_withdrawal(user.id)
+        stored = self.repo.get_by_id(user.id)
+        self.assertTrue(stored.is_active)
+        self.assertEqual(stored.status, USER_STATUS_ACTIVE)
+        self.assertIsNotNone(self.service.authenticate(
+            username="alice", password="pw"
+        ))
+
+    def test_cancelling_clears_the_stamp(self) -> None:
+        user = self._member()
+        self.service.request_withdrawal(user.id)
+        cancelled = self.service.cancel_withdrawal(user.id)
+        self.assertIsNone(cancelled.withdrawal_requested_at)
+        self.assertIsNone(
+            self.repo.get_by_id(user.id).withdrawal_requested_at
+        )
+
+    def test_a_cancelled_account_is_indistinguishable_from_one_that_never_asked(self):
+        # D5=A 의 성질: 취소 뒤에는 제한을 걷는 두 번째 규칙이 필요 없다 —
+        # 상태 자체가 사라지기 때문이다.
+        never = self.service.create_user(username="never", password="pw")
+        user = self._member()
+        self.service.request_withdrawal(user.id)
+        self.service.cancel_withdrawal(user.id)
+        after = self.repo.get_by_id(user.id)
+        self.assertEqual(
+            (after.is_active, after.status, after.withdrawal_requested_at),
+            (never.is_active, never.status, never.withdrawal_requested_at),
+        )
+
+    def test_cancelling_then_requesting_again_starts_a_new_grace_period(self) -> None:
+        clock = {"now": _FIXED_TIME}
+        service = UserService(
+            self.repo, hasher=_FakeHasher(),
+            clock=lambda: clock["now"], id_factory=_seq_ids(),
+        )
+        user = service.create_user(username="alice", password="pw")
+        service.request_withdrawal(user.id)
+        service.cancel_withdrawal(user.id)
+        clock["now"] = _FIXED_TIME + timedelta(days=5)
+        again = service.request_withdrawal(user.id)
+        self.assertEqual(
+            again.withdrawal_requested_at, _FIXED_TIME + timedelta(days=5)
+        )
+
+    # --- 멱등: 두 번 눌러도 삭제 예정일이 밀리지 않는다 ----------------------
+
+    def test_a_repeat_request_keeps_the_first_stamp(self) -> None:
+        """under-strict 짝: 재요청이 시각을 다시 찍으면 회원이 두 번 누르는 것만
+        으로 자기 삭제일을 미룬다(화면의 '남은 N일'이 이유 없이 되돌아간다)."""
+        clock = {"now": _FIXED_TIME}
+        service = UserService(
+            self.repo, hasher=_FakeHasher(),
+            clock=lambda: clock["now"], id_factory=_seq_ids(),
+        )
+        user = service.create_user(username="alice", password="pw")
+        service.request_withdrawal(user.id)
+        clock["now"] = _FIXED_TIME + timedelta(days=7)
+        second = service.request_withdrawal(user.id)
+        self.assertEqual(second.withdrawal_requested_at, _FIXED_TIME)
+
+    # --- 없는 계정 · 잘못된 전이 -------------------------------------------
+
+    def test_requesting_for_an_unknown_user_raises(self) -> None:
+        with self.assertRaises(UserNotFound):
+            self.service.request_withdrawal("user:ghost")
+
+    def test_cancelling_for_an_unknown_user_raises(self) -> None:
+        with self.assertRaises(UserNotFound):
+            self.service.cancel_withdrawal("user:ghost")
+
+    def test_cancelling_an_account_that_never_asked_is_refused(self) -> None:
+        user = self._member()
+        with self.assertRaises(WithdrawalNotRequested):
+            self.service.cancel_withdrawal(user.id)
+
+    # --- D6: 마지막 활성 관리자 --------------------------------------------
+
+    def test_the_last_active_admin_cannot_withdraw(self) -> None:
+        admin = self.service.create_user(
+            username="root", password="pw", is_admin=True
+        )
+        with self.assertRaises(LastActiveAdmin):
+            self.service.request_withdrawal(admin.id)
+        self.assertIsNone(
+            self.repo.get_by_id(admin.id).withdrawal_requested_at
+        )
+
+    def test_a_second_active_admin_makes_the_first_able_to_withdraw(self) -> None:
+        # over-strict 짝: D6 을 "관리자는 탈퇴 못 한다"로 넓히면 이 셀이 문다.
+        first = self.service.create_user(
+            username="root", password="pw", is_admin=True
+        )
+        self.service.create_user(username="root2", password="pw", is_admin=True)
+        self.assertIsNotNone(
+            self.service.request_withdrawal(first.id).withdrawal_requested_at
+        )
+
+    def test_a_plain_member_is_never_blocked_by_the_admin_rule(self) -> None:
+        self.service.create_user(username="root", password="pw", is_admin=True)
+        member = self._member()
+        self.assertIsNotNone(
+            self.service.request_withdrawal(member.id).withdrawal_requested_at
+        )
+
+
+class PurgeDueBoundaryTest(unittest.TestCase):
+    """30일 경계. **양방향**이라 `>` 도 `>=` 도 한쪽만 고르면 기명 셀이 문다."""
+
+    def _withdrawing(self, requested_at: datetime | None) -> User:
+        return User(
+            id="user:1", username="alice", password_hash="H:pw",
+            is_admin=False, is_active=True, created_at=_FIXED_TIME,
+            withdrawal_requested_at=requested_at,
+        )
+
+    def test_an_account_that_never_asked_has_no_due_date(self) -> None:
+        self.assertIsNone(purge_due_at(self._withdrawing(None)))
+
+    def test_an_account_that_never_asked_is_never_due(self) -> None:
+        # 이 셀이 없으면 `is_purge_due` 가 None 을 만나 터지거나 True 를 낸다 —
+        # 후자는 탈퇴를 요청한 적 없는 계정을 파기 대상으로 만든다.
+        self.assertFalse(
+            is_purge_due(self._withdrawing(None), now=_FIXED_TIME)
+        )
+
+    def test_the_due_date_is_the_request_plus_the_grace_period(self) -> None:
+        user = self._withdrawing(_FIXED_TIME)
+        self.assertEqual(purge_due_at(user), _FIXED_TIME + timedelta(days=30))
+
+    def test_day_29_is_not_due(self) -> None:
+        # under-strict: 유예를 짧게 만드는 변이(`- 1`·29일 상수)가 여기서 문다.
+        self.assertFalse(is_purge_due(
+            self._withdrawing(_FIXED_TIME), now=_FIXED_TIME + timedelta(days=29)
+        ))
+
+    def test_exactly_day_30_is_due(self) -> None:
+        # over-strict: `>=` → `>` 또는 유예에 `+1` 을 얹는 과잉 교정이 여기서 문다.
+        self.assertTrue(is_purge_due(
+            self._withdrawing(_FIXED_TIME), now=_FIXED_TIME + timedelta(days=30)
+        ))
+
+    def test_day_31_is_due(self) -> None:
+        self.assertTrue(is_purge_due(
+            self._withdrawing(_FIXED_TIME), now=_FIXED_TIME + timedelta(days=31)
+        ))
+
+    def test_a_moment_before_day_30_is_not_due(self) -> None:
+        self.assertFalse(is_purge_due(
+            self._withdrawing(_FIXED_TIME),
+            now=_FIXED_TIME + timedelta(days=30) - timedelta(microseconds=1),
+        ))
 
 
 if __name__ == "__main__":

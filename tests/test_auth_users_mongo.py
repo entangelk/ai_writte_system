@@ -10,7 +10,7 @@ from pymongo.errors import DuplicateKeyError
 
 from services.application.app.auth.models import User
 from services.application.app.auth.users import (
-    DuplicateUsername,
+    DuplicateUsername, is_purge_due,
     USER_STATUS_ACTIVE, USER_STATUS_PENDING, USER_STATUS_REJECTED,
 )
 from services.application.app.auth.users_mongo import MongoUserRepository
@@ -276,6 +276,72 @@ class MongoUserRepositoryTest(unittest.TestCase):
         self.assertIsNone(
             self.repo.set_status("user:ghost", status=USER_STATUS_ACTIVE)
         )
+
+    # --- 계정 탈퇴 상태 축(Slice 0, 2026-09-07) ----------------------------
+
+    def test_withdrawal_request_persists_and_returns_the_updated_user(self) -> None:
+        self.repo.insert(_user())
+        updated = self.repo.set_withdrawal_requested_at("user:1", at=_FIXED_TIME)
+        self.assertEqual(updated.withdrawal_requested_at, _FIXED_TIME)
+        self.assertEqual(
+            self.repo.get_by_id("user:1").withdrawal_requested_at, _FIXED_TIME
+        )
+
+    def test_cancelling_writes_none_rather_than_leaving_the_stamp(self) -> None:
+        self.repo.insert(_user())
+        self.repo.set_withdrawal_requested_at("user:1", at=_FIXED_TIME)
+        cleared = self.repo.set_withdrawal_requested_at("user:1", at=None)
+        self.assertIsNone(cleared.withdrawal_requested_at)
+        self.assertIsNone(
+            self.repo.get_by_id("user:1").withdrawal_requested_at
+        )
+        # 저장면까지 본다: 필드가 남아 옛 값을 들고 있으면 파기 데몬이 취소한
+        # 계정을 집는다.
+        self.assertIsNone(
+            self.collection.docs["user:1"]["withdrawal_requested_at"]
+        )
+
+    def test_set_withdrawal_on_an_unknown_user_returns_none(self) -> None:
+        self.assertIsNone(
+            self.repo.set_withdrawal_requested_at("user:ghost", at=_FIXED_TIME)
+        )
+
+    def test_a_row_written_before_the_withdrawal_axis_reads_back_as_not_withdrawing(self):
+        """탈퇴 축 이전에 쓰인 행에는 그 키가 없다.
+
+        `must_change_password`·`status` 와 같은 계열의 셀이다 — `_entry` 의
+        `.get` 을 하드 서브스크립트로 바꾸면 **기존 계정 전부가 로그인에서
+        KeyError(500)** 로 죽는데, fake collection 이 늘 새 필드를 갖고 있으면
+        스위트는 초록인 채다(2026-08-02 독립 검증이 잡은 바로 그 빈 셀).
+        """
+        self.collection.docs["user:legacy"] = {
+            "_id": "user:legacy", "username": "legacy",
+            "password_hash": "H:old", "is_admin": False, "is_active": True,
+            "created_at": _FIXED_TIME, "status": USER_STATUS_ACTIVE,
+        }
+        stored = self.repo.get_by_id("user:legacy")
+        self.assertIsNotNone(stored)
+        self.assertIsNone(stored.withdrawal_requested_at)
+
+    def test_a_naive_stored_stamp_reads_back_aware(self) -> None:
+        """★ pymongo 는 BSON 날짜를 **naive** 로 돌려준다.
+
+        `is_purge_due` 가 이 값을 aware `now` 와 비교하므로, 재라벨링이 없으면
+        파기 데몬이 탈퇴한 계정마다 `TypeError` 로 죽는다 — 그리고 그것은
+        **드라이버가 있는 배포에서만** 드러난다(fake collection 은 넣은 그대로를
+        돌려준다). 그래서 드라이버가 하는 일을 여기서 흉내 낸다.
+        """
+        self.repo.insert(_user())
+        # 드라이버가 돌려주는 모양: tzinfo 가 벗겨진 채로.
+        self.collection.docs["user:1"]["withdrawal_requested_at"] = (
+            _FIXED_TIME.replace(tzinfo=None)
+        )
+        stored = self.repo.get_by_id("user:1")
+        self.assertEqual(stored.withdrawal_requested_at, _FIXED_TIME)
+        # 비교 자체가 서는지까지 본다(TypeError 가 나면 여기서 터진다).
+        self.assertTrue(is_purge_due(
+            stored, now=_FIXED_TIME + timedelta(days=30)
+        ))
 
 
 if __name__ == "__main__":

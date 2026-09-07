@@ -29,6 +29,18 @@ class User:
     # keeps its unified 401 (enumeration defense); status is what an *approved
     # or not* question answers, only visible after correct credentials.
     status: str = "active"
+    # Account withdrawal (owner 2026-09-07 — plans/account-withdrawal-…-phases.md).
+    # When the member asked to be deleted; None means they did not. The purge
+    # falls due one grace period later — see ``auth/users.py::purge_due_at``,
+    # which is the only place that arithmetic is done.
+    #
+    # A *third* axis, deliberately not folded into ``status`` or ``is_active``:
+    # a withdrawing account is neither disabled (it must still sign in to
+    # cancel — D1=C) nor a resolved signup request, and folding it in would put
+    # a reversible state on ``is_active``, which is one-way by contract (D6=A).
+    # Defaults to None so rows written before this field keep reading — same
+    # migration posture as ``must_change_password`` and ``status`` above.
+    withdrawal_requested_at: datetime | None = None
 
 
 

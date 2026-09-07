@@ -1,6 +1,6 @@
 """Mongo repository for users."""
 
-from datetime import UTC
+from datetime import UTC, datetime
 
 from pymongo import ASCENDING, MongoClient, ReturnDocument
 from pymongo.errors import DuplicateKeyError
@@ -83,6 +83,20 @@ class MongoUserRepository:
         )
         return _entry(doc) if doc else None
 
+    def set_withdrawal_requested_at(
+        self, user_id: str, *, at: datetime | None
+    ) -> User | None:
+        # `$set` to None rather than `$unset`: the two read back identically
+        # through `_entry`'s `.get`, and one write shape is one thing to get
+        # right. Cancelling has to leave the row saying "not withdrawing", not
+        # merely stop saying "withdrawing".
+        doc = self._users.find_one_and_update(
+            {"_id": user_id},
+            {"$set": {"withdrawal_requested_at": at}},
+            return_document=ReturnDocument.AFTER,
+        )
+        return _entry(doc) if doc else None
+
 
 def _doc(value: User) -> dict:
     return {
@@ -94,6 +108,7 @@ def _doc(value: User) -> dict:
         "is_active": value.is_active,
         "created_at": value.created_at,
         "status": value.status,
+        "withdrawal_requested_at": value.withdrawal_requested_at,
     }
 
 
@@ -119,4 +134,16 @@ def _entry(doc: dict) -> User:
             doc["created_at"] if doc["created_at"].tzinfo is not None
             else doc["created_at"].replace(tzinfo=UTC)
         ),
+        # `.get` for the same migration reason as the two fields above, and the
+        # same UTC re-labeling as created_at — but here it is a *fix*, not
+        # consistency: `is_purge_due` compares this against an aware `now`, and
+        # pymongo hands BSON dates back naive, so without the relabel the purge
+        # daemon raises TypeError on every withdrawing account.
+        withdrawal_requested_at=_aware(doc.get("withdrawal_requested_at")),
     )
+
+
+def _aware(value: datetime | None) -> datetime | None:
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=UTC)

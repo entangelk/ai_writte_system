@@ -9,7 +9,7 @@ from __future__ import annotations
 import secrets
 import uuid
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Callable, Protocol
 
 from services.application.app.auth.models import User
@@ -52,6 +52,15 @@ class UserNotFound(AuthError):
     pass
 
 
+class WithdrawalNotRequested(AuthError):
+    """Cancel targeted an account that never asked to be deleted.
+
+    409 rather than a silent no-op, following ``SignupNotPending``: "there is
+    nothing to cancel" is a different answer from "cancelled", and a screen that
+    cannot tell them apart will report success for a request that did nothing.
+    """
+
+
 class LastActiveAdmin(AuthError):
     """Refusing to deactivate the only remaining active admin (D8-5 F2=A).
 
@@ -90,6 +99,40 @@ USER_STATUS_PENDING = "pending"
 USER_STATUS_ACTIVE = "active"
 USER_STATUS_REJECTED = "rejected"
 
+# Account withdrawal grace period (owner 2026-09-07). A contract literal like
+# MIN_PASSWORD_LENGTH above: the member asks to be deleted, and the purge falls
+# due this long afterwards, during which cancelling restores the account whole
+# (D5=A). **One place** — the policy document points here once withdrawal is
+# actually enforced, and a pin cell holds the value until then. Deliberately not
+# an env knob: a deployment that shortened it would delete manuscripts earlier
+# than the terms promise, with nothing saying it had.
+WITHDRAWAL_GRACE_PERIOD = timedelta(days=30)
+
+
+def purge_due_at(user: User) -> datetime | None:
+    """When this account's purge falls due, or None if it is not withdrawing.
+
+    The single place the grace-period arithmetic is done. Doing it a second time
+    somewhere else is how the screen and the daemon come to disagree about which
+    day the account disappears.
+    """
+    if user.withdrawal_requested_at is None:
+        return None
+    return user.withdrawal_requested_at + WITHDRAWAL_GRACE_PERIOD
+
+
+def is_purge_due(user: User, *, now: datetime) -> bool:
+    """Has the grace period elapsed?
+
+    ``>=``, not ``>``: the promise is *thirty days of grace*, so the instant the
+    thirtieth day is complete the grace is spent. The boundary cells pin day 29
+    (not due), exactly day 30 (due) and day 31 (due), which is what makes the
+    two off-by-one corrections — ``>`` here, or a ``+1`` on the period — each
+    fail a named cell rather than only one of them.
+    """
+    due = purge_due_at(user)
+    return due is not None and now >= due
+
 
 class UserRepository(Protocol):
     def insert(self, user: User) -> None:
@@ -114,6 +157,11 @@ class UserRepository(Protocol):
 
     def set_status(self, user_id: str, *, status: str) -> User | None:
         """Flip the signup status and return the stored user, or None."""
+
+    def set_withdrawal_requested_at(
+        self, user_id: str, *, at: datetime | None
+    ) -> User | None:
+        """Stamp (or clear, with None) the withdrawal request time. D5=A."""
 
 
 class InMemoryUserRepository:
@@ -178,6 +226,16 @@ class InMemoryUserRepository:
         if stored is None:
             return None
         updated = replace(stored, status=status)
+        self._by_id[user_id] = updated
+        return updated
+
+    def set_withdrawal_requested_at(
+        self, user_id: str, *, at: datetime | None
+    ) -> User | None:
+        stored = self._by_id.get(user_id)
+        if stored is None:
+            return None
+        updated = replace(stored, withdrawal_requested_at=at)
         self._by_id[user_id] = updated
         return updated
 
@@ -329,6 +387,55 @@ class UserService:
             other.id != candidate.id and other.is_admin and other.is_active
             for other in self._repo.list_all()
         )
+
+    # --- Account withdrawal (owner 2026-09-07 — self request, 30-day grace) ---
+
+    def request_withdrawal(self, user_id: str) -> User:
+        """Start the grace period. **Deletes nothing** — the daemon does that.
+
+        Idempotent on purpose, and idempotent *keeping the first stamp*: a
+        second request must not re-stamp, or a member clicking twice would
+        silently push their own deletion date out by however long they waited,
+        and the screen's "N days left" would jump backwards for no visible
+        reason.
+        """
+        stored = self._repo.get_by_id(user_id)
+        if stored is None:
+            raise UserNotFound("user does not exist")
+        if stored.withdrawal_requested_at is not None:
+            return stored
+        if stored.is_active and self._is_last_active_admin(stored):
+            # D6=A, the same population invariant ``deactivate_user`` protects
+            # and deliberately the same rule rather than a second one: an admin
+            # withdrawing is an admin leaving, and the lockout it would cause is
+            # identical. Reused, not re-derived — including the ``is_active``
+            # half: an already-disabled admin is not in the active population,
+            # so refusing it would be a refusal that protects nothing.
+            raise LastActiveAdmin("cannot withdraw the last active admin")
+        updated = self._repo.set_withdrawal_requested_at(
+            user_id, at=self._clock()
+        )
+        if updated is None:  # pragma: no cover - deleted between read and write
+            raise UserNotFound("user does not exist")
+        return updated
+
+    def cancel_withdrawal(self, user_id: str) -> User:
+        """Back to a plain active account, with nothing left behind (D5=A).
+
+        Cancelling clears the stamp rather than recording a cancellation, so the
+        account that comes back is indistinguishable from one that never asked —
+        which is the point: the restrictions of the grace period fall away
+        because the *state* is gone, not because a second rule lifts them.
+        """
+        stored = self._repo.get_by_id(user_id)
+        if stored is None:
+            raise UserNotFound("user does not exist")
+        if stored.withdrawal_requested_at is None:
+            raise WithdrawalNotRequested("account is not withdrawing")
+        updated = self._repo.set_withdrawal_requested_at(user_id, at=None)
+        if updated is None:  # pragma: no cover - deleted between read and write
+            raise UserNotFound("user does not exist")
+        return updated
 
     # --- Signup approval (owner 2026-08-22 — requests public, approval admin) --
 
