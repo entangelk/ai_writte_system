@@ -6,7 +6,7 @@
 
 서비스 경계와 확정된 계약을 먼저 볼 때는 [`../system-contract-sot.md`](../system-contract-sot.md)를 정본 SoT로 사용한다. 이 인덱스는 Phase별 세부 계획과 **모든 착수 결정 브리프**를 찾는 자리다.
 
-> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(124개 중 104개)는
+> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(125개 중 105개)는
 > `*-decisions.md` 착수 결정 브리프이며, **오너 결정의 근거 기록**이다. 파일명 접두 체계는 이미 무너져
 > 있고(`00`~`07` 계열 + 접두 없는 최근 것들) 파일명만으로는 트랙을 알 수 없다 — 그래서 아래는 **접두가
 > 아니라 트랙으로** 묶었다. 디렉터리 재편은 아직 결정되지 않은 별개 사안이다(HANDOFF 추적 부채).
@@ -186,6 +186,7 @@
 | [`frontend-review-inbox-decisions.md`](frontend-review-inbox-decisions.md) | Review Inbox 첫 슬라이스 범위 | Resolved |
 | [`writing-workspace-v2-w0-contract.md`](writing-workspace-v2-w0-contract.md) | Workspace V2 W0 exact contract(ProjectBrief·ordered unit·accept 원자성) | Approved — W0~W4 완료 |
 | [`chapter-scene-hierarchy-decisions.md`](chapter-scene-hierarchy-decisions.md) | 평면 ordered unit을 **장→장면 실제 계층**으로 전환(저장 모델·본문 소유·무손실 이관·정렬·Writing intent·삭제·export) | **Resolved(2026-08-28)** — D1~D6·D8=A, D7=B · 구현 진행 |
+| [`service-policy-decisions.md`](service-policy-decisions.md) | 서비스 정책의 빈 칸 셋(추론 경계 밖 전송 고지 · 데이터 보존 기간 · 계정 삭제) | **Proposed** — 오너 결정 대기(2026-09-07) |
 | [`scene-note-decisions.md`](scene-note-decisions.md) | 장면 메모 기능(화면 위치·저장 단위·공개 범위·저장 경험) | **Resolved** — D1=C+A · D2~D4=A · Slice 0~4 구현 완료 |
 | [`scene-note-implementation-phases.md`](scene-note-implementation-phases.md) | 장면 메모 구현 순서(Slice 0~4: 저장→읽기→쓰기→화면→드로어) | **완료** — Slice 0~4 구현 완료(2026-09-06, SoT v1.8.36) |
 | [`final-save-analysis-decisions.md`](final-save-analysis-decisions.md) | Scene 최종 저장 1회·분석 연동·후속 수정 상태 | **Resolved(2026-09-01)** — D1~D3=B · D4=A(서버 동기 실행) · D5=A(분석 실패는 200 + `analysis_error`) |
