@@ -491,3 +491,67 @@ MN-12 는 검증자가 예고한 모양 그대로다 — **컴포넌트 공유�
 - `test_activity_actions`·`test_activity_log`·`test_docs_indexes`·`test_repo_hygiene`·`test_billable_actions` **67 passed / 1091 subtests**.
 - 변이 2종 기명 재실패.
 
+---
+
+## 세션 34 — 배포 (원장 소유 축 개명 + 오늘치 슬라이스)
+
+오너가 배포 호스트에서 직접 실행했다. **주소·계정·키 경로는 저장소에 적지 않는다**(공개 저장소 보안 규칙) — 아래는 결과만이다.
+
+### 절차와 실측
+
+| 단계 | 결과 |
+|---|---|
+| `git pull --ff-only` | **Already up to date** — 오너가 앞서 push 해 둔 상태였다 |
+| `build`(두 override) | app(4서비스 공유 태그)·frontend·gateway·elasticsearch **Built**, 15.1초 |
+| 마이그레이션 `--dry-run` | `documents_with_old_field: **14**` · `stale_indexes: 3` · `renamed: 0`(dry-run 이므로) |
+| 마이그레이션 적용 | **`renamed: 14`** · `dropped_indexes: 3`(dedupe_unique · by_user_day · by_user_week) |
+| `up -d` | 9 컨테이너 — **application·admin·gateway·mongo·elasticsearch·chroma healthy**, worker·generation_worker·frontend Started |
+
+**★ `application` 이 healthy 로 떴다는 것이 마이그레이션 성공의 증거다.** 어댑터는 기동 때 `target_user_id` 키로 인덱스를 만드는데, 옛 인덱스가 남아 있었다면 같은-이름-다른-키라 **code=86 으로 거부돼 기동이 깨졌을 것**이다(v1.8.44 실측). 즉 healthy 자체가 *"옛 인덱스가 지워졌다"* 를 말한다.
+
+### ★ 배포가 한 번 멈췄다 — 진입점 부트스트랩 누락
+
+첫 시도가 `ModuleNotFoundError: No module named 'services'` 로 죽었다. 원인·처방·전수 정렬은 세션 35 에 있다. **오너는 `-e PYTHONPATH=/app` 우회로 계속 진행했고 배포 자체는 성공했다.**
+
+이번 배포에 **부트스트랩 수정은 안 실렸다** — 그 두 커밋(`5759d9e`·`a207a7c`)이 배포 시점에 아직 origin 밖이었기 때문이다. 서버 스크립트에 H1 수정(`stale_indexes` 필드)은 있는데 부트스트랩만 없던 것이 그 증거다. **다음 배포부터는 `-e PYTHONPATH=/app` 없이 그냥 된다.**
+
+### 남은 확인 (선택)
+
+- 마이그레이션 적용과 `up -d` 사이에 **옛 앱이 돌던 짧은 창**이 있었다. 그 사이 유료 요청이 있었다면 그 행만 옛 이름으로 남는다 — 마이그레이션을 **한 번 더** 돌려 `documents_with_old_field: 0` 이면 깨끗하다(멱등이라 안전).
+- 사용량이 화면에서 정상으로 보이는지(14행이 옮겨졌으므로 0 으로 보이면 안 된다).
+
+---
+
+## 세션 35 — 진입점 부트스트랩 (배포를 멈춘 결함)
+
+### 무엇이 일어났나
+
+배포 중 오너가 컨테이너 안에서 마이그레이션을 실행하자 **`ModuleNotFoundError: No module named 'services'`** 로 죽었다.
+
+**원인은 운영이 아니라 내 스크립트다.** `python scripts/x.py` 는 `sys.path[0]` 에 **CWD 가 아니라 스크립트의 디렉터리**를 넣는다. 그래서 저장소 루트를 손수 얹어야 하고, 이 디렉터리의 **23/29 가 이미 그러고 있었다**(`index_sync_worker.py` 선례 — compose 가 `python scripts/…` 로 실행하기 때문에 그 둘은 갖고 있다). 내 스크립트가 그 관례를 빠뜨렸다.
+
+### ★ 왜 테스트가 못 잡았나
+
+**단위 셀 5개가 전부 초록이었다.** 셀은 `migrate()` 를 **import 해서 부르지 진입점을 밟지 않는다** — 그리고 pytest 는 저장소 루트가 이미 `sys.path` 에 있는 상태로 돌아서 이 결함이 원리적으로 안 보인다. HANDOFF 미수리 표의 *"`scripts/` 를 pytest 가 실행하지 않는다"* 가 **정확히 문 자리**다. 오늘 아침에 그 표를 읽고도 *문서* 항목만 닫았다.
+
+### 처방
+
+- 내 스크립트에 부트스트랩 추가(다른 cwd 에서 `--help` 실행으로 확인).
+- **낙오돼 있던 6개도 맞췄다** — `create_user`·`migrate_ordered_units`·`migrate_chapter_scene_hierarchy`·**`purge_reconciler`**·스모크 2. 하필 **사람이 배포 중에 손으로 치는 것들**이라 같은 자리에서 같이 멈춘다(특히 `purge_reconciler` 는 파기 실패의 수습 경로다 — 계정 탈퇴 계획이 기대는 자리).
+- `tests/test_script_entrypoints.py` — `from services.` 를 쓰는 스크립트가 그 import **앞에** 루트를 얹는지 **정적으로** 잠근다. 실행해서 재지 않는 이유는 다수가 실행 즉시 mongo·LLM 에 붙기 때문이다(이 자리가 오래 비어 있던 이유이기도 하다).
+
+### Issues found
+
+1. **가드가 처음에 틀렸다.** 인라인 형태만 인정해 **멀쩡한 8개**를 잡았다 — `REPO_ROOT` 변수 경유도 정당한 형태다. *"어떤 모양이냐"* 가 아니라 **"services import 전에 0번 자리에 루트를 얹는가"** 만 재도록 고쳤다. 가드를 쓸 때 **기존 코드를 먼저 훑어 형태의 폭을 재야** 한다.
+2. **★ CLAUDE.md §6 을 어겼다(이 저장소 열 번째).** 부트스트랩 수정을 **커밋하기 전에** 변이를 걸었고, `git checkout -- <file>` 이 HEAD 로 되돌리면서 **미커밋 수정을 지웠다.** 그 상태를 그대로 커밋해 `5759d9e` 는 정작 고치려던 파일만 안 고친 채 나갔다. 순서는 **커밋 → 변이 → 원복**이고 첫 변이 전에 `git status --short` 가 비어야 한다. **방금 만든 가드가 즉시 잡아** 다음 커밋(`a207a7c`)에서 복구했다 — 가드가 없었으면 배포용 스크립트가 안 고쳐진 채 나갔다.
+
+### Verification
+
+- `test_script_entrypoints` **2 passed / 29 subtests**(스크립트 29개 전수) · 마이그레이션 셀 7 · `test_purge_reconciler` 포함 9 passed.
+- 변이: 부트스트랩 제거 → 그 파일 하나가 기명 SUBFAILED.
+- 다른 cwd(`/tmp`)에서 `python3 …/migrate_ledger_user_axis.py --help` 실행 확인.
+
+### Next steps
+
+- **다음 push 뒤 배포부터 `-e PYTHONPATH=/app` 이 필요 없다.**
+
