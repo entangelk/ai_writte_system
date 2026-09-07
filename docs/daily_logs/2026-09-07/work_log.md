@@ -66,10 +66,66 @@
 - 스타일 가드 3파일 16 passed(`typeScale`·`buttonAppearance`·`pageLayout`).
 - `tsc --noEmit` 0.
 - 프론트 전수 **451 → 457 passed / 38 files**(캡처 실행 `EXIT=0`, 38파일 전건).
-- **★ 그 앞 실행 하나가 1실패를 보고했는데 정체를 못 남겼다** — `tail` 파이프에 실패 블록이 잘렸다(운영 실수). 같은 트리를 전체 출력 캡처로 **두 번 연속** 다시 돌려 둘 다 **457/457 초록**(`EXIT=0`)이고, 파일을 읽는 가드 10개(`typeScale`·`buttonAppearance`·`pageLayout`·`designTokens`·`navigationLinks`·`disabledState`·`scratchPadCss`·`adsense`·`productName`·`chartColors`)도 따로 돌려 35 passed 다. 그 실행 창(09:30~09:47)에 SoT·CHANGELOG·HANDOFF·README 를 편집하고 있었지만 **그 가드들이 저장소 문서를 읽지 않는다는 것은 확인했으므로 원인으로 지목하지 않는다**. 머신 부하가 극단적이었다(같은 실행 `environment 1778s`). **정체 미상으로 남긴다** — 다음 전수에서 재현되면 그때 잡는다.
+- **★ 그 앞 실행 하나가 1실패를 보고했는데 정체를 못 남겼다** — `tail` 파이프에 실패 블록이 잘렸다(운영 실수). 같은 트리를 전체 출력 캡처로 **두 번 연속** 다시 돌려 둘 다 **457/457 초록**(`EXIT=0`)이고, 파일을 읽는 가드 10개(`typeScale`·`buttonAppearance`·`pageLayout`·`designTokens`·`navigationLinks`·`disabledState`·`scratchPadCss`·`adsense`·`productName`·`chartColors`)도 따로 돌려 35 passed 다. 그 실행 창(09:30~09:47)에 SoT·CHANGELOG·HANDOFF·README 를 편집하고 있었지만 **그 가드들이 저장소 문서를 읽지 않는다는 것은 확인했으므로 원인으로 지목하지 않는다**. ~~머신 부하가 극단적이었다(같은 실행 `environment 1778s`)~~ — **이 해석은 2026-09-07 독립 검증 F7 이 반증했다**: 실패 실행의 `environment 1778s` vs 검증자 **초록** 실행의 **1712s**, 겨우 4% 차이라 그 실행이 특별히 무거웠다는 근거가 없다. 부하를 원인으로 적은 것은 **측정 없이 고른 설명**이었다(같은 축의 다른 실행과 대조했어야 했다). 남는 가설은 **재현율이 낮은 타이밍 플레이크** 하나뿐이다. **정체 미상으로 남긴다** — 다음 전수에서 재현되면 그때 잡는다. 덧붙여 검증자가 별건 함정 하나를 실측했다: **vitest 를 저장소 루트에서 돌리면** jsdom 환경이 없어 `ReferenceError: document is not defined` 로 **전멸**한다(2회 재현). 실패 모양이 "1개 실패"와 달라 그 실행의 정체는 아니지만, 전수 실행의 **cwd 도 변인**이다 — `frontend/` 안에서 돌린다.
 - 백엔드는 돌리지 않았다 — 이 슬라이스가 `services/`·`tests/`·`schemas/` 를 한 바이트도 건드리지 않았다(`git show --stat`).
 
 ### Next steps
 
 - 육안 확인 누적 목록에 두 자리를 더한다(좁은 드로어에서 꼬리줄 줄바꿈 · 긴 전문 펼침의 스크롤).
 - 독립 검증 대기.
+
+---
+
+## 세션 25 — 독립 검증 하드닝 H1~H3 폐쇄 (SoT v1.8.39)
+
+독립 검증([`scene_note_follow_up.md`](../../verifications/2026-09-07/scene_note_follow_up.md)) 판정 **합격**, 차단 0. 비차단 하드닝 셋과 기록 정정 하나가 이 세션의 범위다. **검증 기록 자체는 고치지 않는다** — 검증자 소유이고, 선례(Slice 3·4 검증 기록)도 폐쇄 세션이 손대지 않았다.
+
+### 1. H1 — 진짜 결함이었다(셋 중 유일하게 동작이 틀렸다)
+
+H2·H3 는 잠금 공백이지만 **H1 은 코드가 틀린 자리**다. 펼침은 행마다 따로 나가는 요청인데 `expand()` 가 응답의 **주인을 확인하지 않았다**:
+
+- A 를 펼치는 중에 B 를 누르면, A 의 늦은 **성공**이 `expandedBody` 에 A 본문을 싣는데 펼친 행은 B 다 → **B 행이 A 본문을 말한다**(B 응답이 오면 자기 교정되지만 그 사이가 거짓이다).
+- A 의 늦은 **실패**는 더 나쁘다 — `setExpandedId(null)` 로 **열려 있던 B 를 접고** A 의 오류를 배너로 띄운다. 사용자는 자기가 떠난 행 때문에 지금 보던 것을 잃는다.
+
+처방은 기다리는 대상을 `useRef` 로 들고 응답마다 대조하는 것이다. **`expandedId` 상태로는 판정할 수 없다** — handler 가 닫아 둔 옛 값이라 늘 자기 자신과 같다. 패널의 `let active = true` 정리와 같은 계열이고, 접기·목록 갱신도 그 ref 를 비운다.
+
+### 2. ★ H1 셀이 처음에 새고 있었다 — 변이가 아니었으면 못 봤다
+
+늦은 실패 셀이 `resolve` **직후에** 단정하고 있었다. 상태 갱신이 아직 안 붙은 시점이라 **가드를 걷어낸 변이(MN-10)가 35셀 전건 초록**으로 통과했다. `act` 로 흘려 보내 닫았다(커밋 `8e415ab`). 늦은 성공 셀은 뒤에 `findAllByRole` 이 있어 **우연히** 물고 있었는데, 같은 이유로 `deliver()` 를 태우고 `getAllByRole` 로 바꿨다 — 우연한 대기에 기대지 않는다.
+
+이것이 이 세션에서 가장 값이 큰 발견이다: **하드닝을 닫으면서 새 셀을 넣으면 그 셀도 변이로 재야 한다.** 안 그러면 "닫았다"는 기록만 남고 잠금은 없다.
+
+### 3. 변이 (커밋 `fdb4c69`·`8e415ab` → 변이 → 원복, 매회 `git status --short` 대조)
+
+| 변이 | diff | 재실패 셀 |
+|---|---|---|
+| MN-9 늦은 성공 가드 제거 | 성공부 `if (awaiting.current !== target) return;` 삭제 | drops a late expand success … 1 |
+| MN-10 늦은 실패 가드 제거 | catch 의 같은 줄 삭제 | **처음엔 0 → 셀 보강 후 1**(drops a late expand failure …) |
+| MN-11 로딩 잠금 제거 | 접기 버튼 `disabled={expandedBody === null}` 삭제 | locks the fold control … 1 |
+| MN-12 드로어에서만 시각 끄기 | `<time>` 을 `onSelect === undefined` 뒤로 | carries the row metadata into the drawer list too 1 |
+
+MN-12 는 검증자가 예고한 모양 그대로다 — **컴포넌트 공유는 잠금이 아니다**(v1.8.37 B1 과 같은 종).
+
+### 4. 기록 정정 — 부하 해석은 반증됐다
+
+세션 24 가 미확인 1실패에 *"머신 부하가 극단적이었다"* 를 붙였는데, 검증 F7 이 실패 실행 `environment 1778s` vs 초록 실행 **1712s**(4% 차)로 반증했다. **측정 없이 고른 설명**이었다 — 같은 축의 다른 실행과 대조했으면 그 자리에서 무너졌다. 세션 24 의 해당 문장을 취소선으로 정정하고 남는 가설(낮은 재현율의 타이밍 플레이크)만 남겼다. 검증자가 실측한 별건 함정(**루트에서 vitest 실행 시 `document is not defined` 전멸**, 2회 재현)도 같은 자리에 박았다.
+
+### Issues found
+
+1. 위 2절 — 새 셀 자신이 무잠금이었다(MN-10).
+
+### Decisions
+
+- **검증 기록은 고치지 않는다.** 폐쇄는 SoT·work_log 에 남긴다(선례: Slice 3·4 검증 기록은 조건 폐쇄 뒤에도 단일 커밋).
+- **`awaiting` 은 ref 다.** 상태로 두면 같은 경쟁이 판정 쪽으로 옮겨 갈 뿐이다.
+
+### Verification
+
+- focused `src/notes/` **40 passed**(페이지 15 · 패널 20 · 드로어 5).
+- 프론트 전수 457 → **461 passed / 38 files**(전량 캡처, `EXIT=0`) · `tsc --noEmit` 0.
+- 백엔드 무변(`services/`·`tests/`·`schemas/` 0건) — 문서 가드만 별도 확인.
+
+### Next steps
+
+- 배포 대기(프론트 이미지 재빌드 선행) · 육안 확인 누적.
+
