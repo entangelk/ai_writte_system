@@ -186,7 +186,7 @@
 | [`frontend-review-inbox-decisions.md`](frontend-review-inbox-decisions.md) | Review Inbox 첫 슬라이스 범위 | Resolved |
 | [`writing-workspace-v2-w0-contract.md`](writing-workspace-v2-w0-contract.md) | Workspace V2 W0 exact contract(ProjectBrief·ordered unit·accept 원자성) | Approved — W0~W4 완료 |
 | [`chapter-scene-hierarchy-decisions.md`](chapter-scene-hierarchy-decisions.md) | 평면 ordered unit을 **장→장면 실제 계층**으로 전환(저장 모델·본문 소유·무손실 이관·정렬·Writing intent·삭제·export) | **Resolved(2026-08-28)** — D1~D6·D8=A, D7=B · 구현 진행 |
-| [`service-policy-decisions.md`](service-policy-decisions.md) | 서비스 정책의 빈 칸 셋(추론 경계 밖 전송 고지 · 데이터 보존 기간 · 계정 삭제) | **Proposed** — 오너 결정 대기(2026-09-07) |
+| [`service-policy-decisions.md`](service-policy-decisions.md) | 서비스 정책의 빈 칸 셋(추론 경계 밖 전송 고지 · 데이터 보존 기간 · 계정 삭제) | **Resolved** — 1=B+가입 동의 · 2=A · 3=셀프 탈퇴+유예 파기(오너 2026-09-07), 구현 미착수 |
 | [`scene-note-decisions.md`](scene-note-decisions.md) | 장면 메모 기능(화면 위치·저장 단위·공개 범위·저장 경험) | **Resolved** — D1=C+A · D2~D4=A · Slice 0~4 구현 완료 |
 | [`scene-note-implementation-phases.md`](scene-note-implementation-phases.md) | 장면 메모 구현 순서(Slice 0~4: 저장→읽기→쓰기→화면→드로어) | **완료** — Slice 0~4 구현 완료(2026-09-06, SoT v1.8.36) |
 | [`final-save-analysis-decisions.md`](final-save-analysis-decisions.md) | Scene 최종 저장 1회·분석 연동·후속 수정 상태 | **Resolved(2026-09-01)** — D1~D3=B · D4=A(서버 동기 실행) · D5=A(분석 실패는 200 + `analysis_error`) |
