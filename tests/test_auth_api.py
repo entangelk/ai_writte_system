@@ -15,7 +15,7 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from unittest import mock
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
@@ -348,6 +348,29 @@ class SelfWithdrawalApiTest(unittest.TestCase):
                     else:
                         self.assertIn(require_active_user_for_write, declared)
         self.assertEqual(seen_exemptions, exemptions)
+
+    def test_the_grace_guard_is_bidirectional_at_the_dependency_seam(self) -> None:
+        """Under-strict blocks writes; over-strict still admits reads and active users."""
+        withdrawing = mock.Mock(withdrawal_requested_at=datetime.now(UTC))
+        active = mock.Mock(withdrawal_requested_at=None)
+
+        self.assertIs(
+            require_active_user_for_write(
+                Request({"type": "http", "method": "GET"}), current=withdrawing
+            ),
+            withdrawing,
+        )
+        self.assertIs(
+            require_active_user_for_write(
+                Request({"type": "http", "method": "POST"}), current=active
+            ),
+            active,
+        )
+        with self.assertRaises(HTTPException) as raised:
+            require_active_user_for_write(
+                Request({"type": "http", "method": "POST"}), current=withdrawing
+            )
+        self.assertEqual(raised.exception.status_code, 403)
 
     def test_every_guarded_write_declares_403(self) -> None:
         """Runtime refusal and OpenAPI stay the same mechanical truth."""
