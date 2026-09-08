@@ -145,6 +145,8 @@ subtest 축(3839→3876, +37)도 같은 방식으로 귀속했다: `test_script_
 
 - `tests/test_auth_users.py`·`test_auth_users_mongo.py` **83 passed**(신규 1 포함, 26→**27셀**) · `test_docs_indexes.py` **15 passed / 301 subtests**.
 - 변이 X1 재적용 → 기명 셀 1실패 → 원복 → `git status --short` 공백 확인.
+- **백엔드 전수 재측정 `2937 passed / 1 skipped / 3878 subtests · EXIT=0`**(알파, 1661초). H1 셀을 세션 39 전수 **뒤에** 더했으므로 기준선 한 칸을 추정으로 고치지 않고 다시 쟀다. **증분이 전부 설명된다**: 셀 **+1**(H1) · subtest **+2** — 검증 기록 파일이 커밋되며 추적 대상이 돼 `test_repo_hygiene`(파일마다 subtest)과 `test_docs_indexes`(검증 목록)가 각각 하나씩 늘었다. **테스트를 안 더해도 문서 파일 하나로 subtest 가 는다**는 세션 39 의 관찰이 같은 날 두 번째로 확인됐다.
+- HANDOFF 기준선 · README ② 행 둘 다 이 값으로 갱신했다.
 
 ### Next steps
 
