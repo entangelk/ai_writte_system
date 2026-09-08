@@ -206,7 +206,19 @@ H2(첫 시각 보존의 원자성)를 저장소 조건부 쓰기(`only_if_absent
 - 초점 전수 **277 passed / 1244 subtests**(auth_api·auth_users·auth_users_mongo·activity_actions·activity_log·billable_actions·typecheck).
 - `schema.d.ts` 재생성 후 `npx tsc --noEmit` **rc=0**. **★ `cwd` 가 `frontend/` 로 남는다** — 함정 절이 경고하는 자리라 이후 명령을 전부 절대경로로 썼다.
 - 변이 6종 기명 재실패(위 표) · 매회 원복 후 트리 clean.
-- 백엔드 전수는 아래에.
+- **백엔드 전수 `2954 passed / 1 skipped / 3900 subtests · EXIT=0`**(알파, 1371초). `skip 1 = live Chroma` 하나뿐.
+- **증분 22 를 전부 귀속했다**(추정 없이 커밋 전후 실측 — `git worktree add --detach <경로> 936ae4f`):
+
+  | 축 | 이전 → HEAD | 무엇 |
+  |---|---|---|
+  | 셀 | 2937 → **2954**(+17) | 내 신규 셀과 **정확히 일치**(API 11 · 도메인 4 · Mongo 2) |
+  | subtest, 경로 순회 가드 5파일 | 1341 → 1359(+18) | `test_auth_api`·`test_activity_actions`·`test_admin_surface_separation`·`test_billable_actions`·`test_app_import_paths` |
+  | subtest, 나머지 4파일 | 827 → 831(+4) | `test_application_api`·`test_quota_enforcement_api`·`test_observability_kpi`·`test_prompt_templates` |
+
+  **★ 전부 "새 operation 2 × 순회 자리" 다.** 내 셀이 직접 낸 subtest 는 **2** 뿐이고(`test_neither_operation_declares_a_403` 가 POST·DELETE 를 각각 단정), 나머지 20 은 **기존 가드들이 늘어난 operation 을 도는 것**이다 — `test_auth_api` 안에서만 전 operation 순회 × subTest 자리가 **4곳**이다(`_operations()` 3 · `_tiers()` 1).
+
+  이로써 오늘 같은 관찰이 **세 번째**다: subtest 수는 커버리지 대리지표가 아니다. 문서 파일 하나로도(세션 39·40), **operation 하나로도** 는다.
+- HANDOFF 기준선 · README ② 행 둘 다 이 값으로 갱신했다.
 
 ### Next steps
 
