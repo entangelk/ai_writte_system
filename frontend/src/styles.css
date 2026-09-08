@@ -1617,8 +1617,8 @@ main {
 }
 
 /* K-4: 원고 본문 글자수 가이드. flex 에서 오른쪽으로. D5-2(2026-08-27)부터 상한이
-   있다(서버 4000자, RAW_TEXT_MAX_CHARS 미러) — 임박은 warn, 초과(이미 긴 본문을 불러온
-   레거시 케이스)는 danger 로 알린다. */
+   있다(서버 6000자, RAW_TEXT_MAX_CHARS 미러 — 오너 2026-09-08에 4000에서 상향) — 임박은
+   warn, 초과(이미 긴 본문을 불러온 레거시 케이스)는 danger 로 알린다. */
 .editor-char-count {
   margin-left: auto;
   color: var(--text-muted);

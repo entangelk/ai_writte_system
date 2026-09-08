@@ -1829,7 +1829,7 @@ describe("저장 기록 접기 (오너 2026-08-27 dogfood)", () => {
   });
 });
 
-describe("본문 4000자 상한 (D5-2, 오너 2026-08-27)", () => {
+describe("본문 6000자 상한 (오너 2026-09-08 상향; 종전 4000 = D5-2 2026-08-27)", () => {
   // ★ 시행 방식: **경고 + 저장 차단**이지 잘라내기가 아니다 — textarea maxLength 는
   // 붙여넣기를 몰래 잘라 정본을 손상시키므로 금지다(위 "opens a zero-version" 셀이
   // no-maxlength 를 잠근다). 서버가 최후 방어(저장 422·accept 400)다.
@@ -1839,14 +1839,14 @@ describe("본문 4000자 상한 (D5-2, 오너 2026-08-27)", () => {
       { body: project },
       { body: draft },
       { body: { versions: [version1] } },
-      { body: detail(version1, "가".repeat(3_900)) },
+      { body: detail(version1, "가".repeat(5_900)) },
     );
 
     renderEditor();
 
-    const counter = await screen.findByText(/3,900자/);
+    const counter = await screen.findByText(/5,900자/);
     expect(counter).toHaveClass("limit-near");
-    expect(counter).toHaveTextContent("상한 4,000자 임박");
+    expect(counter).toHaveTextContent("상한 6,000자 임박");
   });
 
   it("keeps save disabled for a body already past the limit", async () => {
@@ -1856,14 +1856,14 @@ describe("본문 4000자 상한 (D5-2, 오너 2026-08-27)", () => {
       { body: project },
       { body: draft },
       { body: { versions: [version1] } },
-      { body: detail(version1, "가".repeat(4_100)) },
+      { body: detail(version1, "가".repeat(6_100)) },
     );
 
     renderEditor();
     const editor = await screen.findByLabelText("원고 본문");
-    const counter = await screen.findByText(/4,100자/);
+    const counter = await screen.findByText(/6,100자/);
     expect(counter).toHaveClass("limit-over");
-    expect(counter).toHaveTextContent("상한 4,000자 초과 — 저장할 수 없습니다");
+    expect(counter).toHaveTextContent("상한 6,000자 초과 — 저장할 수 없습니다");
 
     await userEvent.type(editor, "다");
     expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
@@ -1872,7 +1872,7 @@ describe("본문 4000자 상한 (D5-2, 오너 2026-08-27)", () => {
   it("blocks saving a freshly typed body that passes the limit", async () => {
     // under 방향 앵커: overLimit 차단을 지우면 이 셀이 재실패한다. over 방향도 함께 잠는다 —
     // 짧은 본문은 경고 없이 저장 가능이어야 한다(과잉 차단 방지). fireEvent.change 로 값을
-    // 넣는다(4001키 타이핑은 느리다).
+    // 넣는다(6001키 타이핑은 느리다).
     mockFetch({ body: project }, { body: draft }, { body: { versions: [] } });
 
     renderEditor();
@@ -1882,8 +1882,8 @@ describe("본문 4000자 상한 (D5-2, 오너 2026-08-27)", () => {
     expect(screen.getByText("6자")).not.toHaveClass("limit-near");
     expect(screen.getByRole("button", { name: "저장" })).toBeEnabled();
 
-    fireEvent.change(editor, { target: { value: "가".repeat(4_001) } });
-    const counter = await screen.findByText(/4,001자/);
+    fireEvent.change(editor, { target: { value: "가".repeat(6_001) } });
+    const counter = await screen.findByText(/6,001자/);
     expect(counter).toHaveClass("limit-over");
     expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
   });
@@ -2228,7 +2228,7 @@ describe("최종 저장 표시 축 (확정 계약 제3조·D3=B — 4차 재검�
   );
 
   it("상한을 넘은 본문은 저장 버튼과 함께 최종 저장 버튼도 잠근다", async () => {
-    // 제 계약: final 저장도 4000자 상한을 일반 저장과 같은 순서로 적용한다.
+    // 제 계약: final 저장도 6000자 상한을 일반 저장과 같은 순서로 적용한다.
     mockFetch({ body: project }, { body: draft }, { body: { versions: [] } });
 
     renderEditor();
@@ -2238,7 +2238,7 @@ describe("최종 저장 표시 축 (확정 계약 제3조·D3=B — 4차 재검�
     fireEvent.change(editor, { target: { value: "짧은 문장." } });
     expect(screen.getByRole("button", { name: "최종 저장·분석" })).toBeEnabled();
 
-    fireEvent.change(editor, { target: { value: "가".repeat(4_001) } });
+    fireEvent.change(editor, { target: { value: "가".repeat(6_001) } });
     expect(screen.getByRole("button", { name: "최종 저장·분석" })).toBeDisabled();
   });
 

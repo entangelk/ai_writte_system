@@ -1,4 +1,4 @@
-"""D5-2(오너 2026-08-27, "전 경로 4000자") — 유닛 본문 길이 상한의 회귀.
+"""유닛 본문 길이 상한의 회귀 — 현재 6000자(오너 2026-09-08; 종전 4000 = D5-2 2026-08-27).
 
 두 축이 같은 상수(app/env.py draft_raw_text_max_chars)를 쓴다:
 
@@ -133,14 +133,14 @@ class SaveEndpointLimitTest(unittest.TestCase):
 
     def test_exactly_at_the_limit_saves(self):
         # over 방향 앵커: 상한을 1로 내리면 이 셀이 재실패한다(정상 요청을 막는 과잉).
-        response = self._save("가" * 4000)
+        response = self._save("가" * 6000)
         self.assertEqual(response.status_code, 200)
 
     def test_one_over_the_limit_is_rejected(self):
         # under 방향 앵커: validator 를 지우면 이 셀이 재실패한다.
-        response = self._save("가" * 4001)
+        response = self._save("가" * 6001)
         self.assertEqual(response.status_code, 422)
-        self.assertIn("4000", response.json()["detail"][0]["msg"])
+        self.assertIn("6000", response.json()["detail"][0]["msg"])
 
     def test_the_limit_is_env_adjustable_in_both_directions(self):
         with patch.dict(os.environ, {"DRAFT_RAW_TEXT_MAX_CHARS": "10"}):
@@ -188,8 +188,8 @@ class AcceptRawTextLimitTest(unittest.TestCase):
             package=_package(self.project)))
 
     def test_append_past_the_limit_fails_before_any_provider_call(self):
-        # 레거시 몸(상한 이전에 저장된 4000자)에 1문단이라도 얹으면 합성이 상한을 넘는다.
-        base = self._seed_base("가" * 4000)
+        # 레거시 몸(상한과 같은 6000자)에 1문단이라도 얹으면 합성이 상한을 넘는다.
+        base = self._seed_base("가" * 6000)
         with self.assertRaises(WritingAcceptError):
             self._accept_append(base_version_id=base.draft_version.id,
                                 text="넘는 문단.")
@@ -197,15 +197,15 @@ class AcceptRawTextLimitTest(unittest.TestCase):
                          "상한을 넘을 몸에 enrich·gate 어느 쪽에도 돈을 쓰면 안 된다")
 
     def test_append_composed_exactly_at_the_limit_passes(self):
-        # 3997 + "\n\n"(2) + 1 = 4000 — 경계는 통과해야 한다(over 방향 앵커).
-        base = self._seed_base("가" * 3997)
+        # 5997 + "\n\n"(2) + 1 = 6000 — 경계는 통과해야 한다(over 방향 앵커).
+        base = self._seed_base("가" * 5997)
         result = self._accept_append(base_version_id=base.draft_version.id,
                                      text="가")
         self.assertTrue(result.accepted)
         self.assertEqual(self.gate.calls, 1)
-        # 합성은 3997 + "\n\n" + 1 — 구분자까지 합쳐 정확히 4000자다.
-        self.assertEqual(result.saved.snapshot.raw_text, "가" * 3997 + "\n\n" + "가")
-        self.assertEqual(len(result.saved.snapshot.raw_text), 4000)
+        # 합성은 5997 + "\n\n" + 1 — 구분자까지 합쳐 정확히 6000자다.
+        self.assertEqual(result.saved.snapshot.raw_text, "가" * 5997 + "\n\n" + "가")
+        self.assertEqual(len(result.saved.snapshot.raw_text), 6000)
 
     def test_start_next_unit_seed_past_the_limit_fails_before_any_provider_call(self):
         base = self._seed_base("짧은 본문.")
@@ -219,7 +219,7 @@ class AcceptRawTextLimitTest(unittest.TestCase):
         # (M3 뮤테이션으로 발견한 무효 통과).
         candidate = WritingCandidate("wr1", self.project,
                                      WritingTaskType.CONTINUE_SCENE,
-                                     WritingOutputType.DRAFT_PATCH, "가" * 4001,
+                                     WritingOutputType.DRAFT_PATCH, "가" * 6001,
                                      intent=WritingIntent.START_NEXT_UNIT,
                                      next_unit=next_unit)
         with self.assertRaises(WritingAcceptError) as ctx:
@@ -228,7 +228,7 @@ class AcceptRawTextLimitTest(unittest.TestCase):
                 base_version_id=base.draft_version.id,
                 idempotency_key="accept-start", request=request,
                 candidate=candidate, package=_package(self.project)))
-        self.assertIn("at most 4000 characters", str(ctx.exception))
+        self.assertIn("at most 6000 characters", str(ctx.exception))
         self.assertEqual((self.reporter.calls, self.gate.calls), (0, 0))
 
     def test_a_missing_base_still_reports_not_found_not_the_limit(self):
