@@ -36,6 +36,7 @@ from services.application.app.auth.sessions import (
 )
 from services.application.app.auth.models import User
 from services.application.app.auth.users import (
+    WITHDRAWAL_GRACE_PERIOD,
     MIN_PASSWORD_LENGTH, InMemoryUserRepository, UserService,
 )
 from services.application.app.core_sot.service import (
@@ -134,6 +135,140 @@ def _client(*, ttl=timedelta(hours=1), core_sot=None, index_sync_outbox=None,
     # client would silently drop it and every session test would pass/fail for
     # the wrong reason. This exercises the deployed configuration.
     return TestClient(app, base_url="https://testserver"), users, sessions
+
+
+class SelfWithdrawalApiTest(unittest.TestCase):
+    """셀프 탈퇴 요청·취소 (계정 탈퇴 Slice 1, 오너 결정 2026-09-07).
+
+    **이 슬라이스도 아무것도 지우지 않는다** — 유예를 시작하고 되돌릴 뿐이다.
+    실제 파기는 Slice 3 의 데몬이고, 유예 중 접근 제한은 Slice 2(D1=C)다.
+    """
+
+    def _logged_in(self):
+        client, users, _ = _client()
+        client.post("/auth/login", json={"username": "alice", "password": "pw123"})
+        return client, users
+
+    # --- 요청 --------------------------------------------------------------
+
+    def test_a_request_answers_both_faces_of_the_same_fact(self) -> None:
+        client, _ = self._logged_in()
+        response = client.post("/me/withdrawal")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(set(body), {"withdrawal_requested_at", "purge_due_at"})
+        requested = datetime.fromisoformat(body["withdrawal_requested_at"])
+        due = datetime.fromisoformat(body["purge_due_at"])
+        # 유예의 정본은 서버 상수 한 곳이다 — 화면이 30 을 박으면 두 번째 정본이
+        # 생기고, 상수를 고친 날 화면만 다른 날짜를 말한다.
+        self.assertEqual(due - requested, WITHDRAWAL_GRACE_PERIOD)
+
+    def test_requesting_deletes_nothing_and_leaves_the_session_usable(self) -> None:
+        # Slice 0 의 인계 문장이 HTTP 면에서도 성립하는지. 유예 중에도 로그인
+        # 상태가 살아 있어야 취소 버튼에 닿는다(D1=C).
+        client, _ = self._logged_in()
+        client.post("/me/withdrawal")
+        self.assertEqual(client.get("/auth/me").status_code, 200)
+        self.assertEqual(client.get("/projects").status_code, 200)
+
+    def test_a_repeat_request_is_idempotent_and_keeps_the_first_stamp(self) -> None:
+        # under-strict: 재요청이 시각을 다시 찍으면 두 번 누르는 것만으로 자기
+        # 삭제일이 밀리고 화면의 "남은 N일" 이 되돌아간다.
+        client, _ = self._logged_in()
+        first = client.post("/me/withdrawal").json()
+        second = client.post("/me/withdrawal")
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.json(), first)
+
+    def test_the_last_active_admin_is_refused_with_409(self) -> None:
+        client, users = self._logged_in()
+        admin = users.create_user(username="root", password="pw", is_admin=True)
+        client.post("/auth/logout")
+        client.post("/auth/login", json={"username": "root", "password": "pw"})
+        response = client.post("/me/withdrawal")
+        self.assertEqual(response.status_code, 409)
+        # 거부가 상태를 남기지 않았다.
+        self.assertIsNone(users.get_by_id(admin.id).withdrawal_requested_at)
+
+    def test_a_second_active_admin_lets_the_first_withdraw(self) -> None:
+        # over-strict 짝: D6 을 "관리자는 탈퇴 못 한다"로 넓히면 이 셀이 문다.
+        client, users = self._logged_in()
+        users.create_user(username="root", password="pw", is_admin=True)
+        users.create_user(username="root2", password="pw", is_admin=True)
+        client.post("/auth/logout")
+        client.post("/auth/login", json={"username": "root", "password": "pw"})
+        self.assertEqual(client.post("/me/withdrawal").status_code, 200)
+
+    # --- 취소 --------------------------------------------------------------
+
+    def test_cancelling_returns_the_account_to_never_having_asked(self) -> None:
+        client, _ = self._logged_in()
+        client.post("/me/withdrawal")
+        response = client.delete("/me/withdrawal")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"withdrawal_requested_at": None, "purge_due_at": None},
+        )
+
+    def test_cancelling_without_a_request_is_409_not_404(self) -> None:
+        # 404 면 "그런 회원 없음" 으로 읽힌다 — 계정은 있고 취소할 것이 없을 뿐이다
+        # (`SignupNotPending` 이 해결된 요청에 409 를 주는 것과 같은 선례).
+        client, _ = self._logged_in()
+        self.assertEqual(client.delete("/me/withdrawal").status_code, 409)
+
+    def test_cancelling_then_requesting_again_starts_a_new_grace_period(self) -> None:
+        client, _ = self._logged_in()
+        first = client.post("/me/withdrawal").json()
+        client.delete("/me/withdrawal")
+        again = client.post("/me/withdrawal")
+        self.assertEqual(again.status_code, 200)
+        self.assertIsNotNone(again.json()["withdrawal_requested_at"])
+        # 취소가 상태를 지웠으므로 새 요청은 **새 유예**다 — 재요청 멱등(첫 시각
+        # 유지)과 갈리는 자리이고, 이 둘을 한 규칙으로 접으면 하나가 깨진다.
+        self.assertGreaterEqual(
+            datetime.fromisoformat(again.json()["withdrawal_requested_at"]),
+            datetime.fromisoformat(first["withdrawal_requested_at"]),
+        )
+
+    # --- 경계 --------------------------------------------------------------
+
+    def test_both_operations_are_401_without_a_session(self) -> None:
+        client, _, _ = _client()
+        self.assertEqual(client.post("/me/withdrawal").status_code, 401)
+        self.assertEqual(client.delete("/me/withdrawal").status_code, 401)
+
+    def test_the_subject_is_the_session_not_a_path_argument(self) -> None:
+        """★ "본인만 가능" 은 가드가 아니라 **경로의 모양**이 보장한다.
+
+        계획서 검증 목록의 *"타인 403"* 은 이 슬라이스에서 도달 불가다 — 경로가
+        대상을 받지 않으므로 남의 계정을 향한 요청을 **만들 수 없다**(S-3 의
+        "IDOR 표면 없음" 과 같은 성질). 403 을 선언하지 않은 것도 그래서다.
+
+        그 성질을 셀로 잠근다: 두 사람이 각각 요청해도 서로의 상태에 닿지 않는다.
+        경로에 대상 인자가 생기는 순간 이 셀은 여전히 통과하지만 **선언 가드**가
+        403 없는 project-tier route 로 잡는다.
+        """
+        client, users = self._logged_in()
+        bob = users.create_user(username="bob", password="pw")
+        client.post("/me/withdrawal")
+        self.assertIsNone(users.get_by_id(bob.id).withdrawal_requested_at)
+
+        other = TestClient(client.app, base_url="https://testserver")
+        other.post("/auth/login", json={"username": "bob", "password": "pw"})
+        self.assertEqual(other.delete("/me/withdrawal").status_code, 409)
+
+    def test_neither_operation_declares_a_403(self) -> None:
+        # 위 셀의 짝: 선언면에서도 403 이 없어야 "확인할 소유자가 없다" 가 계약이
+        # 된다. 403 을 더하면 화면이 오지 않을 응답을 처리하게 된다.
+        app = create_app()
+        for route in app.routes:
+            if getattr(route, "path", None) != "/me/withdrawal":
+                continue
+            with self.subTest(methods=sorted(route.methods)):
+                self.assertNotIn(403, route.responses)
+                self.assertIn(401, route.responses)
+                self.assertIn(409, route.responses)
 
 
 class LoginTest(unittest.TestCase):
@@ -1778,6 +1913,10 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
                                  "지목하지 않는다. **경로가 project id 를 받지 "
                                  "않는 것이 S-3(IDOR 표면 없음)이다** — 남의 "
                                  "프로젝트는 요청할 방법 자체가 없다",
+        ("/me/withdrawal", "post"): "계정 탈퇴 Slice 1 — 대상이 세션 주체 자신이라 "
+                                    "확인할 소유자도 거절할 타인도 없다. 남의 계정 "
+                                    "탈퇴는 **경로가 없어서** 못 한다",
+        ("/me/withdrawal", "delete"): "같은 이유. 취소도 자기 것에만 한다",
     }
 
     # D8-5's tier. Admin operations name no project on purpose: the admin
@@ -1907,8 +2046,11 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # 정체성 그룹 Slice 4(2026-09-04)가 그룹 거절 POST 를 project tier 에
         # 더해 75/101 이 됐고, Slice 5(같은 날)가 그룹 승인 POST 를 더해
         # 76/102 이 됐다.
+        # 계정 탈퇴 Slice 1(2026-09-08)이 셀프 탈퇴 요청·취소 2경로를 **인증 전용**
+        # tier 에 더해 104 가 됐다(project tier 는 무변 76 — 계정 축이라 project 를
+        # 지목하지 않는다).
         self.assertEqual(len(by_tier["project"]), 76)
-        self.assertEqual(len(tiers), 102)
+        self.assertEqual(len(tiers), 104)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:

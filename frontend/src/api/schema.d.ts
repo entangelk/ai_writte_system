@@ -396,6 +396,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me/withdrawal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request My Withdrawal
+         * @description 탈퇴를 요청한다. **아무것도 지우지 않는다** — 유예가 시작될 뿐이다.
+         *
+         *     201 이 아니라 200 인 것은 **멱등이기 때문**이다: 두 번째 요청은 새 자원을
+         *     만들지 않고 먼저 찍힌 시각을 그대로 돌려준다. 201 을 주면 재요청이 무언가를
+         *     새로 만든 것처럼 읽히고, 화면의 "남은 N일" 이 되돌아간 것처럼 보인다.
+         */
+        post: operations["request_my_withdrawal_me_withdrawal_post"];
+        /**
+         * Cancel My Withdrawal
+         * @description 탈퇴를 취소한다. 계정은 **요청한 적 없는 상태로** 돌아간다(D5=A).
+         *
+         *     요청한 적 없는 계정의 취소는 404 가 아니라 **409** 다 — 계정은 있고(404 면
+         *     "그런 회원 없음" 으로 읽힌다) 다만 취소할 것이 없다. `SignupNotPending` 이
+         *     해결된 가입 요청에 409 를 주는 것과 같은 선례다.
+         */
+        delete: operations["cancel_my_withdrawal_me_withdrawal_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects": {
         parameters: {
             query?: never;
@@ -2708,6 +2740,25 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /**
+         * WithdrawalResponse
+         * @description 회원 자신의 탈퇴 상태 (계정 탈퇴 Slice 1, 오너 결정 2026-09-07).
+         *
+         *     두 값은 **한 사실의 두 면**이다 — 언제 요청했는가와 언제 지워지는가. 뒤엣것을
+         *     화면이 스스로 더하게 두지 않는 이유는 유예 기간의 정본이 서버 상수 한 곳
+         *     (``auth/users.py::WITHDRAWAL_GRACE_PERIOD``)이기 때문이다: 프런트가 30을 박으면
+         *     두 번째 정본이 생기고, 상수를 고친 날 화면만 다른 날짜를 말한다.
+         *
+         *     탈퇴 중이 아닌 계정은 **둘 다 ``null``** 이다. 취소가 상태를 지우지 취소 기록을
+         *     남기지 않으므로(D5=A), 취소한 계정과 한 번도 요청한 적 없는 계정은 이 payload
+         *     에서 구별되지 않는다 — 그것이 계약이다.
+         */
+        WithdrawalResponse: {
+            /** Purge Due At */
+            purge_due_at: string | null;
+            /** Withdrawal Requested At */
+            withdrawal_requested_at: string | null;
+        };
         /** WritingAcceptAnalysisPartial */
         WritingAcceptAnalysisPartial: {
             /** Accepted */
@@ -4513,6 +4564,100 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    request_my_withdrawal_me_withdrawal_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WithdrawalResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    cancel_my_withdrawal_me_withdrawal_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WithdrawalResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

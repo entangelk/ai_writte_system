@@ -159,9 +159,17 @@ class UserRepository(Protocol):
         """Flip the signup status and return the stored user, or None."""
 
     def set_withdrawal_requested_at(
-        self, user_id: str, *, at: datetime | None
+        self, user_id: str, *, at: datetime | None,
+        only_if_absent: bool = False,
     ) -> User | None:
-        """Stamp (or clear, with None) the withdrawal request time. D5=A."""
+        """Stamp (or clear, with None) the withdrawal request time. D5=A.
+
+        ``only_if_absent`` makes the write conditional on the account not
+        already withdrawing, so "the first stamp wins" is decided by the store
+        rather than by a read the caller did earlier. Returns None when the row
+        is missing **or** when the condition failed — the caller re-reads to
+        tell those apart.
+        """
 
 
 class InMemoryUserRepository:
@@ -230,10 +238,13 @@ class InMemoryUserRepository:
         return updated
 
     def set_withdrawal_requested_at(
-        self, user_id: str, *, at: datetime | None
+        self, user_id: str, *, at: datetime | None,
+        only_if_absent: bool = False,
     ) -> User | None:
         stored = self._by_id.get(user_id)
         if stored is None:
+            return None
+        if only_if_absent and stored.withdrawal_requested_at is not None:
             return None
         updated = replace(stored, withdrawal_requested_at=at)
         self._by_id[user_id] = updated
@@ -413,11 +424,28 @@ class UserService:
             # so refusing it would be a refusal that protects nothing.
             raise LastActiveAdmin("cannot withdraw the last active admin")
         updated = self._repo.set_withdrawal_requested_at(
-            user_id, at=self._clock()
+            user_id, at=self._clock(), only_if_absent=True
         )
-        if updated is None:  # pragma: no cover - deleted between read and write
+        if updated is not None:
+            return updated
+        # 조건부 쓰기가 안 걸렸다 — 행이 사라졌거나 **경쟁에서 졌다**. 다시 읽어
+        # 가른다: 졌으면 먼저 찍힌 시각을 그대로 돌려주는 것이 멱등의 정의다.
+        #
+        # ★ 위의 조기 반환만으로는 부족하다(독립 검증 H2, 2026-09-08): 읽기와
+        # 쓰기 사이가 열려 있으면 **동시 첫 요청 둘이 모두** 그 반환을 지나고,
+        # 무조건 쓰기였다면 나중 시각이 이겨 삭제 예정일이 그만큼 밀린다.
+        # 조건을 저장소로 내리면 그 창이 닫힌다.
+        #
+        # **닫히지 않는 것도 적어 둔다** — 조건이 "없을 때만"이라 *취소를
+        # 가로지르는* 지연 요청은 여전히 걸린다(A 가 읽고 멈춘 사이 B 가 찍고
+        # 사용자가 취소하면, 깨어난 A 가 다시 찍는다). 그것은 결함이 아니라
+        # 순서의 모호함이다 — 저장소가 보기에 늦게 온 요청과 새 요청은 같고,
+        # 계정은 그 뒤로도 취소할 수 있다. 막으려면 요청마다 토큰이 필요한데
+        # 그 값을 살 만한 피해가 없다.
+        stored = self._repo.get_by_id(user_id)
+        if stored is None:  # pragma: no cover - deleted between read and write
             raise UserNotFound("user does not exist")
-        return updated
+        return stored
 
     def cancel_withdrawal(self, user_id: str) -> User:
         """Back to a plain active account, with nothing left behind (D5=A).

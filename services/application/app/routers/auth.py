@@ -20,19 +20,24 @@ from ..api.models import (
     SignupRequest,
     SignupResponse,
     UserPayload,
+    WithdrawalResponse,
 )
 from ..api.errors import (
     _ERRORS_401,
     _ERRORS_LOGIN,
     _ERRORS_LOGOUT,
     _ERRORS_SIGNUP,
+    _ERRORS_WITHDRAWAL,
 )
 from ..auth.users import (
     DuplicateUsername,
     InvalidUserInput,
+    LastActiveAdmin,
     SignupQueueFull,
     USER_STATUS_PENDING,
     USER_STATUS_REJECTED,
+    WithdrawalNotRequested,
+    purge_due_at,
 )
 from ..api.dependencies import (
     _REQUIRE_AUTH,
@@ -238,6 +243,62 @@ def register_auth(app, *, users, sessions, core_sot, activity, login_guard,
                 "resets_at": snapshot.weekly_resets_at,
             },
         }
+
+    # --- 회원 셀프 탈퇴 (오너 결정 2026-09-07 · Slice 1) --------------------
+    #
+    # **경로가 대상을 지목하지 않는 것이 설계다.** `/me/…` 라 주체는 세션이 정하고
+    # 남의 계정을 향한 요청은 **만들 수 없다** — 그래서 이 두 operation 에는 403 이
+    # 없고(`AUTH_ONLY` tier), IDOR 표면도 없다(S-3 와 같은 성질).
+    #
+    # **활동 로그에 남기지 않는다**(`activity/actions.py` 에 `not_project_scoped` 로
+    # 등재). `activity_events` 는 `project_id` 를 쓰는 **프로젝트 축**이고 파기와
+    # 함께 사라지는데(D8-6), 탈퇴는 계정 축이라 지목할 프로젝트가 없다 —
+    # `/auth/login`·`/auth/logout`·`/auth/signup` 과 같은 자리다. 관리자 감사
+    # (`admin_audit`)도 아니다: 그것은 `admin_user_id` 를 요구하는 **관리자 행위**
+    # 축이고, 셀프 탈퇴에는 행위자가 곧 대상이라 그 필드가 거짓말이 된다.
+    def _withdrawal_payload(user) -> dict[str, object]:
+        # 예정 시각을 여기서 계산하지 않고 `purge_due_at` 를 부른다 — 유예 산술의
+        # 정본이 한 곳이어야 화면과 파기 데몬이 같은 날을 말한다.
+        return {
+            "withdrawal_requested_at": user.withdrawal_requested_at,
+            "purge_due_at": purge_due_at(user),
+        }
+
+    @app.post("/me/withdrawal", response_model=WithdrawalResponse,
+              responses=_ERRORS_WITHDRAWAL, dependencies=_REQUIRE_AUTH)
+    async def request_my_withdrawal(
+        current=Depends(require_authenticated_user),
+    ) -> dict[str, object]:
+        """탈퇴를 요청한다. **아무것도 지우지 않는다** — 유예가 시작될 뿐이다.
+
+        201 이 아니라 200 인 것은 **멱등이기 때문**이다: 두 번째 요청은 새 자원을
+        만들지 않고 먼저 찍힌 시각을 그대로 돌려준다. 201 을 주면 재요청이 무언가를
+        새로 만든 것처럼 읽히고, 화면의 "남은 N일" 이 되돌아간 것처럼 보인다.
+        """
+        try:
+            user = users.request_withdrawal(current.id)
+        except LastActiveAdmin as exc:
+            # D6. `deactivate_user` 와 **같은 규칙·같은 상태코드**다 — 관리자가
+            # 떠나는 것이 관리자 잠금을 만드는 자리라 두 경로가 갈릴 이유가 없다.
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _withdrawal_payload(user)
+
+    @app.delete("/me/withdrawal", response_model=WithdrawalResponse,
+                responses=_ERRORS_WITHDRAWAL, dependencies=_REQUIRE_AUTH)
+    async def cancel_my_withdrawal(
+        current=Depends(require_authenticated_user),
+    ) -> dict[str, object]:
+        """탈퇴를 취소한다. 계정은 **요청한 적 없는 상태로** 돌아간다(D5=A).
+
+        요청한 적 없는 계정의 취소는 404 가 아니라 **409** 다 — 계정은 있고(404 면
+        "그런 회원 없음" 으로 읽힌다) 다만 취소할 것이 없다. `SignupNotPending` 이
+        해결된 가입 요청에 409 를 주는 것과 같은 선례다.
+        """
+        try:
+            user = users.cancel_withdrawal(current.id)
+        except WithdrawalNotRequested as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _withdrawal_payload(user)
 
     @app.get("/me/activity", response_model=PersonalActivityLogResponse,
              responses=_ERRORS_401, dependencies=_REQUIRE_AUTH)

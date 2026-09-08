@@ -84,14 +84,20 @@ class MongoUserRepository:
         return _entry(doc) if doc else None
 
     def set_withdrawal_requested_at(
-        self, user_id: str, *, at: datetime | None
+        self, user_id: str, *, at: datetime | None,
+        only_if_absent: bool = False,
     ) -> User | None:
         # `$set` to None rather than `$unset`: the two read back identically
         # through `_entry`'s `.get`, and one write shape is one thing to get
         # right. Cancelling has to leave the row saying "not withdrawing", not
         # merely stop saying "withdrawing".
+        query: dict[str, object] = {"_id": user_id}
+        if only_if_absent:
+            # `None` 은 필드가 **없는 문서도** 함께 고른다(탈퇴 축 이전 행) — 그
+            # 둘은 `_entry` 에서 이미 같은 값으로 읽히므로 여기서도 같아야 한다.
+            query["withdrawal_requested_at"] = None
         doc = self._users.find_one_and_update(
-            {"_id": user_id},
+            query,
             {"$set": {"withdrawal_requested_at": at}},
             return_document=ReturnDocument.AFTER,
         )

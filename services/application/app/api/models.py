@@ -114,6 +114,23 @@ class QuotaWindowPayload(BaseModel):
     resets_at: datetime
 
 
+class WithdrawalResponse(BaseModel):
+    """회원 자신의 탈퇴 상태 (계정 탈퇴 Slice 1, 오너 결정 2026-09-07).
+
+    두 값은 **한 사실의 두 면**이다 — 언제 요청했는가와 언제 지워지는가. 뒤엣것을
+    화면이 스스로 더하게 두지 않는 이유는 유예 기간의 정본이 서버 상수 한 곳
+    (``auth/users.py::WITHDRAWAL_GRACE_PERIOD``)이기 때문이다: 프런트가 30을 박으면
+    두 번째 정본이 생기고, 상수를 고친 날 화면만 다른 날짜를 말한다.
+
+    탈퇴 중이 아닌 계정은 **둘 다 ``null``** 이다. 취소가 상태를 지우지 취소 기록을
+    남기지 않으므로(D5=A), 취소한 계정과 한 번도 요청한 적 없는 계정은 이 payload
+    에서 구별되지 않는다 — 그것이 계약이다.
+    """
+
+    withdrawal_requested_at: datetime | None
+    purge_due_at: datetime | None
+
+
 class MyQuotaResponse(BaseModel):
     """회원이 보는 자기 사용량 (Slice 8.4 W5=B, operation 76).
 
