@@ -148,7 +148,67 @@ subtest 축(3839→3876, +37)도 같은 방식으로 귀속했다: `test_script_
 - **백엔드 전수 재측정 `2937 passed / 1 skipped / 3878 subtests · EXIT=0`**(알파, 1661초). H1 셀을 세션 39 전수 **뒤에** 더했으므로 기준선 한 칸을 추정으로 고치지 않고 다시 쟀다. **증분이 전부 설명된다**: 셀 **+1**(H1) · subtest **+2** — 검증 기록 파일이 커밋되며 추적 대상이 돼 `test_repo_hygiene`(파일마다 subtest)과 `test_docs_indexes`(검증 목록)가 각각 하나씩 늘었다. **테스트를 안 더해도 문서 파일 하나로 subtest 가 는다**는 세션 39 의 관찰이 같은 날 두 번째로 확인됐다.
 - HANDOFF 기준선 · README ② 행 둘 다 이 값으로 갱신했다.
 
+---
+
+## 세션 41 — 계정 탈퇴 Slice 1: 요청·취소 API (SoT v1.8.46)
+
+오너 *"진행시켜"*. 오너가 답할 것이 없는 유일한 큰 덩어리라 Slice 1 로 읽었다(약관 대괄호 넷은 오너만 채울 수 있어 진행 불가).
+
+### 1. 착수 전 — 계획서 체크리스트가 프로젝트 축 계약을 몰랐다
+
+Slice 1 검증 목록에 *"활동 로그 기록"* 이 있는데 **불가능하다.** `activity_events` 는 `project_id` 를 쓰는 **프로젝트 축**이고 파기와 함께 사라진다(D8-6 I1) — 탈퇴는 계정 축이라 지목할 프로젝트가 없다. 선례가 이미 셋이다: `/auth/login`·`/auth/logout`·`/auth/signup` 이 전부 `EXCLUDED("not_project_scoped")` 다.
+
+`admin_audit` 도 아니다 — `admin_user_id`·`action: Literal["project_purge","member_quota_policy"]` 를 요구하는 **관리자 행위** 축이고, 셀프 탈퇴는 **행위자가 곧 대상**이라 그 필드가 거짓말이 된다. 넓히려면 Literal 을 늘리고 `admin_user_id` 를 optional 로 만들어야 하는데 그것은 감사면의 성격을 바꾸는 일이다.
+
+→ **사유와 함께 EXCLUDED 등재.** 브리프가 필요한 갈림길이 아니라 **계약이 이미 정한 것**이고, 체크리스트 문언이 그 계약을 몰랐던 것이다.
+
+### 2. 설계 판단
+
+**① 경로가 대상을 지목하지 않는다.** `/me/withdrawal` 이라 주체는 세션이 정하고 남의 계정을 향한 요청은 **만들 수 없다** — 그래서 403 이 없다. 계획서의 *"타인 403"* 은 이 모양에서 **도달 불가**이고, 그것을 두 면으로 잠갔다: 행위 축(두 사람이 각각 요청해도 서로에게 안 닿는다)과 **선언 축**(`route.responses` 에 403 이 없다). 선언 셀이 있어야 나중에 403 을 더하는 과잉 교정이 물린다 — 실제로 MW-3 에서 6 subtests 가 물었다(내 셀 2 + 기존 경계 행렬 4).
+
+**② 200 이지 201 이 아니다.** 재요청은 새 자원을 만들지 않는다. 201 이면 재요청이 무언가를 새로 만든 것처럼 읽히고 화면의 *남은 N일* 이 되돌아간 것처럼 보인다.
+
+**③ 취소 없는 취소는 404 가 아니라 409.** 계정은 **있고** 취소할 것이 없을 뿐이다. 404 면 *"그런 회원 없음"* 으로 읽힌다 — `SignupNotPending` 이 해결된 가입 요청에 409 를 주는 것과 같은 선례.
+
+**④ `purge_due_at` 를 응답에 싣는다.** 유예의 정본이 서버 상수 한 곳이라, 프런트가 30 을 박으면 두 번째 정본이 생기고 상수를 고친 날 화면만 다른 날짜를 말한다.
+
+### 3. ★ 내 처방이 한 번 무가드였다 (MW-4)
+
+H2(첫 시각 보존의 원자성)를 저장소 조건부 쓰기(`only_if_absent`)로 닫고 **커밋 메시지에 "닫는다"고 썼는데**, 변이 MW-4(조건부 → 무조건)가 **83셀 전건 통과**했다. **처방만 넣고 셀을 안 둔 것이라 그 시점의 H2 는 닫힌 적이 없다** — 검증자가 X1 로 잡았던 것과 **같은 종류의 빈 자리**이고, 같은 슬라이스 안에서 두 번째다.
+
+규칙대로 **먼저 "변이가 안 먹었나"를 의심**했다 — 재적용 후 `grep` 으로 427행이 실제로 `only_if_absent=False` 가 된 것을 확인했다. 변이는 정확히 먹었고 **가드가 없는 쪽이 맞았다.**
+
+셀 6을 붙여 닫았다:
+- **seam 조건 자체** — 이미 찍힌 계정에 조건부 쓰기가 거부되고 옛 시각이 남는다. over-strict 짝 둘: 없을 때는 찍혀야 하고(첫 요청), 무조건 쓰기는 여전히 덮어야 한다(**취소가 그 경로다** — 조건을 전역으로 켜는 과잉 교정이 취소를 잠근다).
+- **서비스가 그 조건을 실제로 쓰는가** — `get_by_id` 가 한 번 낡은 값을 주게 해 **조기 반환을 지나치게** 만든다. 동시 요청 둘 중 늦게 쓰는 쪽이 정확히 그 상태이고, 그 뒤 계정을 지키는 것은 조건부 쓰기 하나뿐이다.
+- **Mongo 필터** — 조건이 질의로 내려가는가, 그리고 **키가 없는 옛 행도 고르는가**. 후자를 놓치면 **기존 계정 전부가 탈퇴를 요청하지 못하고** 첫 요청이 조용히 실패한다(`_entry` 가 `None` 과 키 없음을 같은 값으로 읽으므로 쓰기면도 같아야 한다).
+
+**★ 남는 교훈**: *"처방을 넣었다"* 와 *"닫았다"* 는 다른 말이다. 이 저장소에서 그 둘을 가르는 것은 변이 하나뿐이고, **자기 처방에도 변이를 걸어야 한다** — 검증자가 잡아 준 자리를 고치면서 같은 병을 반복했다.
+
+### 4. 닫히지 않는 것도 계약에 적었다
+
+조건이 *"없을 때만"* 이라 **취소를 가로지르는 지연 요청은 여전히 걸린다**(A 가 읽고 멈춘 사이 B 가 찍고 사용자가 취소하면, 깨어난 A 가 다시 찍는다). 처음 쓴 주석은 이것까지 막는다고 **과장했고 틀렸다** — 취소 뒤엔 필드가 다시 `None` 이라 조건이 통과한다. 정정해서 *막는 것* 과 *안 막는 것* 을 나눠 적었다. 결함이 아니라 순서의 모호함이다(저장소가 보기에 늦게 온 요청과 새 요청은 같고, 계정은 그 뒤로도 취소할 수 있다). 막으려면 요청마다 토큰이 필요한데 그 값을 살 피해가 없다.
+
+### 변이 (커밋 → 변이 → 원복 → clean, 매회 프리플라이트 공백 확인)
+
+| 변이 | diff | 재실패한 셀(이름) |
+|---|---|---|
+| MW-1 멱등 파괴 | 조기 반환 삭제 + `only_if_absent=False` | API `test_a_repeat_request_is_idempotent…` · 도메인 `test_a_repeat_request_keeps_the_first_stamp` (**2**) |
+| MW-2 취소 no-op | `WithdrawalNotRequested` raise 삭제 | `test_cancelling_without_a_request_is_409_not_404` · `test_the_subject_is_the_session_not_a_path_argument` · `test_cancelling_an_account_that_never_asked_is_refused` (**3**) |
+| MW-3 **over-strict** 403 선언 | `_ERRORS_WITHDRAWAL` 에 `403` 추가 | `test_neither_operation_declares_a_403` 2 + 기존 경계 행렬 `ProjectAuthorizationTest`·`CombinedBoundaryMatrixTest` 각 2 (**6 subtests**) |
+| MW-4 조건부 → 무조건 | `only_if_absent=False` | **셀 추가 전 0실패**(무가드) → 추가 후 `test_the_service_survives_a_stale_read_of_a_withdrawing_account` (**1**) |
+| MW-5 활동 등재 제거 | `ExcludedOperation` 2행 삭제 | `test_every_mutating_operation_is_classified` · 절 주석 subtest · 머리 수 (**3**) |
+| MW-6 Mongo 조건 제거 | 필터 한 줄 → `pass` | `test_a_conditional_stamp_is_decided_by_the_query_not_the_caller` (**1**) |
+
+### Verification (세션 41)
+
+- 신규 **17셀**(API 11 · 도메인 4 · Mongo 2). `test_auth_api.py` +11 · `test_auth_users.py` 27→31 · `test_auth_users_mongo.py` 23→25.
+- 초점 전수 **277 passed / 1244 subtests**(auth_api·auth_users·auth_users_mongo·activity_actions·activity_log·billable_actions·typecheck).
+- `schema.d.ts` 재생성 후 `npx tsc --noEmit` **rc=0**. **★ `cwd` 가 `frontend/` 로 남는다** — 함정 절이 경고하는 자리라 이후 명령을 전부 절대경로로 썼다.
+- 변이 6종 기명 재실패(위 표) · 매회 원복 후 트리 clean.
+- 백엔드 전수는 아래에.
+
 ### Next steps
 
-- **Slice 1**(탈퇴 요청·취소 API): 라우트 둘 + `activity/actions.py` 등재 + `test_auth_api.py` tier 전수 가드 등재. 유료 경로가 아니므로 quota 분류표는 대상이 아니다. `WithdrawalNotRequested` → 409, `LastActiveAdmin` → 409(관리자 비활성화 선례와 같은 코드).
-- Slice 2~5 는 계획서 순서 그대로.
+- **Slice 2**(유예 중 접근 규칙, D1=C): 유예 중 **쓰기와 유료 경로를 막고** 로그인·조회·취소는 연다. **★ 취소 경로가 유예 내내 도달 가능한지를 별도 셀로** — 장면 메모의 *"저장 버튼을 잠그지 말 것"* 과 같은 종류의 함정이고, Slice 1 에도 이미 그 셀이 하나 있다(`test_requesting_deletes_nothing_and_leaves_the_session_usable`). 상태를 읽는 표면(남은 일수)이 여기서 필요해진다 — `/auth/me` 확장인지 별도 GET 인지가 이 슬라이스의 첫 판단이다.
+- Slice 3~5 는 계획서 순서 그대로.
