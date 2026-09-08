@@ -109,6 +109,43 @@ subtest 축(3839→3876, +37)도 같은 방식으로 귀속했다: `test_script_
 
 **★ 그래서 subtest 수는 커버리지 대리지표가 아니다**(HANDOFF 계약 절이 이미 경고하는 바로 그 성질이 여기서 다시 확인됐다): 이 저장소에서 subtest 는 **테스트를 더하지 않아도 문서 파일 하나로 늘어난다.**
 
+---
+
+## 세션 40 — 독립 검증 수령 · 하드닝 H1 폐쇄 (기록 `0bd8153`)
+
+독립 검증 세션이 같은 트리에서 병행으로 돌았고 **판정 합격 · 차단 0**([`verifications/2026-09-08/account_withdrawal_slice0_state_axis.md`](../../verifications/2026-09-08/account_withdrawal_slice0_state_axis.md)). 초점 229/1054·전수 2936/1/3876·경계 행렬 26/26·변이 7종 셀 수까지 재현됐고, 계획서 §6 이관의 심판 근거도 원문 확인됐다.
+
+**★ 병행 세션과 한 트리를 쓸 때의 함정을 하나 실측했다.** 검증자가 문서를 쓰는 도중 내가 문서 가드를 돌려 **9실패**(부모 2 + subTest 7)를 봤다 — 디스크에는 검증 기록이 291건인데 인덱스 문언은 아직 290이던 **중간 상태**였다. 결함이 아니라 **경합**이다. 판별법: 실패가 *"디스크 N vs 문언 N-1"* 모양이면 먼저 `git status --short` 로 **내가 안 만든 파일이 있는지** 본다. 겸하여 내 미커밋 `README.md` 편집(기준선 칸)이 검증자 커밋 `0bd8153` 에 함께 실려 갔다 — 내용은 정확하나, **한 트리를 나눠 쓸 때는 `git add -A` 가 아니라 경로를 지정해 커밋한다**(그렇게 해서 검증자의 미커밋 기록을 내 커밋에 쓸어 담지 않았다).
+
+### H1 폐쇄 — 쓰기면 왕복 셀 (커밋에 포함)
+
+검증자의 **대항 변이 X1**(`_doc` 에서 `withdrawal_requested_at` 등재 제거)이 **0실패**였다. 내 Mongo 셀이 전부 `set_withdrawal_requested_at`(=`find_one_and_update`)로 값을 넣어 **`_doc` 을 한 번도 지나지 않았다** — 전형적인 빈 셀이다.
+
+- **왜 지금 닫는가**: 지금은 `insert`·`replace` 가 쓰는 값이 늘 `None` 이라 무해하지만, **`replace` 는 행을 통째로 덮는다**. Slice 1 이후 탈퇴 상태를 든 행이 그 경로를 지나면 **스탬프가 조용히 사라지고**, 파기 예정 계정이 예정에서 빠진 것을 아무도 못 본다. 검증자는 Slice 1 로 미뤄도 된다고 했으나 **셀 하나로 닫히는 내 슬라이스의 구멍**이라 여기서 닫았다.
+- **처방**: `insert`(스탬프를 든 채) → 읽기 + **저장면 키 직접 확인** → `replace`(다른 시각) → 읽기. `_doc` 을 지나는 두 경로를 모두 왕복시킨다.
+- **재검증**: X1 재적용 → `test_the_write_face_carries_the_stamp_through_insert_and_replace` **1실패**(종전 0실패) → 원복 → 트리 clean.
+
+### H2 — 받아 적고 열지 않는다 (트리거 있음)
+
+`request_withdrawal` 의 첫 시각 보존은 **읽기-쓰기라 원자적이지 않다**(동시 첫 요청 둘 → 나중 시각이 이긴다). **지금 열지 않는 이유**: 도달 경로가 없다(Slice 1 전이라 HTTP 표면 자체가 없고, 생기면 같은 동작 5초 최소 창이 연속 클릭을 429로 막는다). **트리거**: *"Slice 1 이 이 전이를 유료 아닌 경로로 열면서 확인 헤더 재전송을 허용하는 순간"*, 또는 **Slice 3 데몬이 같은 행을 경쟁적으로 claim 하게 될 때** — 그때 필요한 것은 잠금이 아니라 **조건부 갱신**(`withdrawal_requested_at` 이 없을 때만 set)이고, 그것은 저장소 seam 의 모양을 바꾸는 결정이라 Slice 1 착수 브리프에서 다룬다.
+
+### CHANGELOG 를 안 쓴 판단
+
+**Slice 0 은 CHANGELOG 행을 만들지 않는다.** 기록 규칙이 *"major design or feature changes (not every small edit)"* 이고, 이 슬라이스는 **사용자에게 보이는 것이 하나도 없는 백엔드 상태 축**이다. 바로 앞 선례가 같은 성질이었고 같은 판단을 받았다 — **D4(원장 소유 축 개명)도 CHANGELOG 행이 없다**(SoT v1.8.43 만 있다). 탈퇴 기능의 CHANGELOG 행은 **화면이 붙는 Slice 4~5 에서** 한 번 쓴다. *(검증자가 "행이 오는지 확인해 달라"고 남긴 열린 질문에 대한 답이다 — 누락이 아니라 판단이다.)*
+
+### 별건 — 개발 스택이 8일 내려가 있었다 (검증자 발견·복구)
+
+검증자가 인프라 6컨테이너(`mongo`·`application`·`gateway`·`chroma`·`elasticsearch`·`embedding`)가 내려가 있는 것을 발견해 복구했다. **주장을 직접 확인했다**(작업자의 보고를 그대로 받지 않는다):
+
+- `docker inspect` 실측 — 그 여섯은 **2026-09-08T00:2x 에 재생성**됐고 지금 `unless-stopped` 를 든다. 나머지(`frontend`·`worker`·`generation_worker`·`admin`)는 2026-08-11·08-26 생성인데도 이미 `unless-stopped` 다.
+- `git show 1a0b94a` — 그 커밋(2026-09-06)이 정확히 **정책이 없던 다섯**(mongo·application·gateway·chroma·elasticsearch)에 `restart` 를 더했고, 이미 갖고 있던 넷이 위의 넷이다. **HANDOFF 가 경고하던 함정이 그대로 터진 것**이다 — 파일은 고쳤지만 **그때 떠 있던 컨테이너는 재생성 전까지 옛 정책(`no`)을 든다.**
+- **이 머신은 재생성으로 닫혔다(실측).** **배포 호스트는 미확인**이고 여기서 잴 수 없다 → HANDOFF 함정 절에 실측 근거와 함께 올렸다.
+
+### Verification (세션 40)
+
+- `tests/test_auth_users.py`·`test_auth_users_mongo.py` **83 passed**(신규 1 포함, 26→**27셀**) · `test_docs_indexes.py` **15 passed / 301 subtests**.
+- 변이 X1 재적용 → 기명 셀 1실패 → 원복 → `git status --short` 공백 확인.
+
 ### Next steps
 
 - **Slice 1**(탈퇴 요청·취소 API): 라우트 둘 + `activity/actions.py` 등재 + `test_auth_api.py` tier 전수 가드 등재. 유료 경로가 아니므로 quota 분류표는 대상이 아니다. `WithdrawalNotRequested` → 409, `LastActiveAdmin` → 409(관리자 비활성화 선례와 같은 코드).
