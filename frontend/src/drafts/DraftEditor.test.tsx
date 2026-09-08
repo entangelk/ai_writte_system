@@ -761,250 +761,6 @@ describe("DraftEditor", () => {
     expect(screen.getByRole("button", { name: "이어쓰기 생성" })).toBeDisabled();
   });
 
-  it("reloads the editor to the new latest after a Writing candidate is accepted", async () => {
-    const randomUUID = vi.fn()
-      .mockReturnValueOnce("req-1")
-      .mockReturnValueOnce("accept-1");
-    vi.stubGlobal("crypto", { randomUUID });
-    const version4 = { ...version1, id: "v4", version_number: 4, snapshot_id: "s4" };
-    const candidate = {
-      request_id: "req-1", project_id: "p1", task_type: "continue_scene",
-      output_type: "draft_patch", text: "아린은 도시로 들어섰다.", status: "candidate",
-      self_reported_constraints: [], candidate_claims: [], new_memory_hints: [],
-      risk_notes: [], candidate_id: null, generated_by_model: "fake-writer",
-    };
-    const gatePass = {
-      request_id: "req-1", project_id: "p1", decision: "pass", findings: [],
-      checked_constraints: [], evaluated_by_model: "fake-gate",
-    };
-    const fetchMock = mockFetch(
-      { body: project },
-      { body: draft },
-      { body: { versions: [version1] } },
-      { body: detail(version1, "기존.") },
-      { body: candidate },
-      { body: gatePass },
-      {
-        body: {
-          accepted: true, gate: gatePass,
-          saved: { draft_version_id: "v4", version_number: 4, snapshot_id: "s4", content_hash: "h4" },
-          analysis_job: { id: "j1", project_id: "p1", snapshot_id: "s4", status: "pending", failure_reason: null, failure_detail: null },
-          idempotent_replay: false,
-        },
-      },
-      { body: { versions: [version1, version4] } },
-      { body: detail(version4, "기존.\n\n아린은 도시로 들어섰다.") },
-    );
-
-    renderEditor();
-    await screen.findByLabelText("원고 본문");
-    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
-    await userEvent.click(screen.getByRole("button", { name: "이어쓰기 생성" }));
-    await userEvent.click(await screen.findByRole("button", { name: "채택하고 저장" }));
-
-    // The editor reloaded to the new latest saved by accept.
-    await waitFor(() =>
-      expect(screen.getByLabelText("원고 본문")).toHaveValue("기존.\n\n아린은 도시로 들어섰다."),
-    );
-    expect(screen.getByText("현재 version 4")).toBeInTheDocument();
-    expect(fetchMock.mock.calls[6][0]).toBe("/api/projects/p1/writing/accept");
-    expect(fetchMock.mock.calls[7][0]).toBe("/api/projects/p1/drafts/d1/versions");
-  });
-
-  it("reloads the editor to the new latest after a PAD item is accepted (패드 채택 배선)", async () => {
-    // Same seam as the WritingPanel accept above, driven from the recovery
-    // pad: an async-generated candidate living in scratch is 채택'd there, and
-    // the editor must reload the saved version (scratchRefresh + reloadLatest).
-    seedMemberQuota({
-      remaining: 7, unlimited: false, status: "active",
-      daily: { limit: 20, used: 13, remaining: 7, resets_at: null },
-      weekly: { limit: 100, used: 41, remaining: 59, resets_at: null },
-    } as never);
-    const version4 = { ...version1, id: "v4", version_number: 4, snapshot_id: "s4" };
-    const padItem = {
-      id: "wds:1", draft_id: "d1", request_id: "wr1",
-      task_type: "continue_scene", output_type: "draft_patch",
-      instruction: "이어서", candidate_text: "복구된 문단.",
-      intent: null, version_id: "v1", created_at: "2026-07-20T00:00:00Z",
-    };
-    const acceptBody = {
-      accepted: true,
-      gate: {
-        request_id: "wr1", project_id: "p1", decision: "pass", findings: [],
-        checked_constraints: [], evaluated_by_model: "fake-gate",
-      },
-      saved: {
-        draft_version_id: "v4", version_number: 4, snapshot_id: "s4",
-        content_hash: "h4",
-      },
-      analysis_job: {
-        id: "j1", project_id: "p1", snapshot_id: "s4", status: "pending",
-        failure_reason: null, failure_detail: null,
-      },
-      idempotent_replay: false,
-    };
-    const fetchMock = vi.fn();
-    for (const next of [
-      { body: project },
-      { body: draft },
-      { body: { versions: [version1] } },
-      { body: detail(version1, "기존.") },
-      { body: acceptBody },
-      { body: { versions: [version1, version4] } },
-      { body: detail(version4, "기존.\n\n복구된 문단.") },
-    ]) {
-      fetchMock.mockResolvedValueOnce(response(next));
-    }
-    // Local stub: the scratch LIST (GET) serves the pad item — the file-level
-    // stubFetch always answers empty, which this test must override.
-    vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
-      if (
-        typeof url === "string" && url.includes("/writing/scratch") &&
-        init?.method !== "DELETE"
-      ) {
-        return Promise.resolve(
-          response({ body: { project_id: "p1", draft_id: "d1", items: [padItem] } }),
-        );
-      }
-      if (typeof url === "string" && url.includes("/writing/budget")) {
-        return Promise.resolve(
-          response({
-            body: {
-              project_id: "p1",
-              context_budget_tokens: { short: 8192, medium: 8192, long: 8192 },
-            },
-          }),
-        );
-      }
-      return fetchMock(url, init);
-    });
-
-    renderEditor();
-    await screen.findByText("복구된 문단.");
-    await userEvent.click(screen.getByRole("button", { name: "채택" }));
-
-    // The editor reloaded to the version the pad accept saved.
-    await waitFor(() =>
-      expect(screen.getByLabelText("원고 본문")).toHaveValue(
-        "기존.\n\n복구된 문단.",
-      ),
-    );
-    expect(screen.getByText("현재 version 4")).toBeInTheDocument();
-    const acceptCall = fetchMock.mock.calls.find(
-      ([url]) => String(url).endsWith("/writing/accept"),
-    );
-    expect(acceptCall?.[0]).toBe("/api/projects/p1/writing/accept");
-  });
-
-  it("confirms before an accept discards unsaved editor edits, and cancel keeps them (미저장 편집 결손 fix)", async () => {
-    // The candidate is generated on a clean latest; the author then types into the
-    // editor (dirty) before accepting. Accept saves base+candidate and reloadLatest
-    // overwrites the editor with it — silently dropping those edits. The guard
-    // confirms first; cancel must abort the save AND preserve the typed text.
-    const randomUUID = vi.fn()
-      .mockReturnValueOnce("req-1")
-      .mockReturnValueOnce("accept-1");
-    vi.stubGlobal("crypto", { randomUUID });
-    const candidate = {
-      request_id: "req-1", project_id: "p1", task_type: "continue_scene",
-      output_type: "draft_patch", text: "아린은 도시로 들어섰다.", status: "candidate",
-      self_reported_constraints: [], candidate_claims: [], new_memory_hints: [],
-      risk_notes: [], candidate_id: null, generated_by_model: "fake-writer",
-    };
-    const gatePass = {
-      request_id: "req-1", project_id: "p1", decision: "pass", findings: [],
-      checked_constraints: [], evaluated_by_model: "fake-gate",
-    };
-    const fetchMock = mockFetch(
-      { body: project },
-      { body: draft },
-      { body: { versions: [version1] } },
-      { body: detail(version1, "기존.") },
-      { body: candidate },
-      { body: gatePass },
-    );
-
-    renderEditor();
-    await screen.findByLabelText("원고 본문");
-    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
-    await userEvent.click(screen.getByRole("button", { name: "이어쓰기 생성" }));
-    await screen.findByRole("button", { name: "채택하고 저장" });
-
-    // Author types unsaved edits into the editor after the candidate appears.
-    const kept = "기존. 손으로 이어쓴 미저장 문장";
-    fireEvent.change(screen.getByLabelText("원고 본문"), { target: { value: kept } });
-
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
-    await userEvent.click(screen.getByRole("button", { name: "채택하고 저장" }));
-
-    // Cancel: nothing saved (still 6 fetches) and the unsaved edits survive.
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledTimes(6); // load(4) + generate + gate; no accept
-    expect(screen.getByLabelText("원고 본문")).toHaveValue(kept);
-    expect(screen.getByText(candidate.text)).toBeInTheDocument(); // candidate still offered
-  });
-
-  it("confirming the discard proceeds: accept saves and the editor reloads to the new latest (미저장 편집 결손 fix, proceed 사슬)", async () => {
-    // The proceed direction of the same guard, driven end-to-end: dirty editor +
-    // confirm=true must run accept AND let reloadLatest overwrite the typed text
-    // with base+candidate (the consented discard). Locks onAccepted→reloadLatest→
-    // setRawText integration, not just WritingPanel's onAccepted call.
-    const randomUUID = vi.fn()
-      .mockReturnValueOnce("req-1")
-      .mockReturnValueOnce("accept-1");
-    vi.stubGlobal("crypto", { randomUUID });
-    const version4 = { ...version1, id: "v4", version_number: 4, snapshot_id: "s4" };
-    const candidate = {
-      request_id: "req-1", project_id: "p1", task_type: "continue_scene",
-      output_type: "draft_patch", text: "아린은 도시로 들어섰다.", status: "candidate",
-      self_reported_constraints: [], candidate_claims: [], new_memory_hints: [],
-      risk_notes: [], candidate_id: null, generated_by_model: "fake-writer",
-    };
-    const gatePass = {
-      request_id: "req-1", project_id: "p1", decision: "pass", findings: [],
-      checked_constraints: [], evaluated_by_model: "fake-gate",
-    };
-    const fetchMock = mockFetch(
-      { body: project },
-      { body: draft },
-      { body: { versions: [version1] } },
-      { body: detail(version1, "기존.") },
-      { body: candidate },
-      { body: gatePass },
-      {
-        body: {
-          accepted: true, gate: gatePass,
-          saved: { draft_version_id: "v4", version_number: 4, snapshot_id: "s4", content_hash: "h4" },
-          analysis_job: { id: "j1", project_id: "p1", snapshot_id: "s4", status: "pending", failure_reason: null, failure_detail: null },
-          idempotent_replay: false,
-        },
-      },
-      { body: { versions: [version1, version4] } },
-      { body: detail(version4, "기존.\n\n아린은 도시로 들어섰다.") },
-    );
-
-    renderEditor();
-    await screen.findByLabelText("원고 본문");
-    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
-    await userEvent.click(screen.getByRole("button", { name: "이어쓰기 생성" }));
-    await screen.findByRole("button", { name: "채택하고 저장" });
-
-    fireEvent.change(screen.getByLabelText("원고 본문"), {
-      target: { value: "기존. 채택하며 버릴 미저장 문장" },
-    });
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-    await userEvent.click(screen.getByRole("button", { name: "채택하고 저장" }));
-
-    // Confirmed discard: accept saved, and the editor reloaded to base+candidate
-    // (the typed text is intentionally gone — the user consented).
-    await waitFor(() =>
-      expect(screen.getByLabelText("원고 본문")).toHaveValue("기존.\n\n아린은 도시로 들어섰다."),
-    );
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[6][0]).toBe("/api/projects/p1/writing/accept");
-    expect(screen.getByText("현재 version 4")).toBeInTheDocument();
-  });
-
   // 증분 3 (D6): a medium/long generate returns a 202 job that the editor tracks
   // and polls. The in-progress state renders in the pad; on completion the worker
   // result surfaces via the scratch list.
@@ -1122,14 +878,14 @@ describe("DraftEditor", () => {
 
     // The started job shows as in-progress in the pad (no result yet).
     expect(screen.getByText(/백그라운드 생성 1건 진행 중/)).toBeInTheDocument();
-    expect(screen.queryByText(scratchResult.candidate_text)).not.toBeInTheDocument();
+    expect(screen.queryAllByText(scratchResult.candidate_text)).toHaveLength(0);
     const pollsBefore = jobPolls(fetchMock);
 
     // Worker finished: the next poll (5s) sees succeeded → pad refreshes from scratch.
     state.jobStatus = "succeeded";
     await pump(5000);
 
-    expect(screen.getByText(scratchResult.candidate_text)).toBeInTheDocument();
+    expect(screen.getAllByText(scratchResult.candidate_text).length).toBeGreaterThan(0);
     expect(screen.queryByText(/진행 중/)).not.toBeInTheDocument();
     expect(jobPolls(fetchMock)).toBeGreaterThan(pollsBefore); // it actually polled
 
@@ -1414,7 +1170,7 @@ describe("DraftEditor", () => {
       ),
     ).toBe(true); // the retry button actually hit the retry endpoint
     expect(jobPolls(fetchMock)).toBeGreaterThan(pollsBeforeRetry); // polling resumed
-    expect(screen.getByText(scratchResult.candidate_text)).toBeInTheDocument(); // result
+    expect(screen.getAllByText(scratchResult.candidate_text).length).toBeGreaterThan(0); // result
     vi.useRealTimers();
   });
 

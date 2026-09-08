@@ -1948,6 +1948,21 @@ main {
   white-space: pre-wrap;
 }
 
+/* 후보 본문 접기(오너 2026-09-08 *"이어쓰기에 있는 글들이 너무 긴데 접어둘 수 없나?"*).
+   네이티브 <details> 라 상태가 없다 — summary 를 눌리는 줄로 보이게만 손본다. 방금 만든
+   후보(.candidate-fold)는 기본 펼침, 지나간 후보(.scratch-recovery-fold)는 기본 접힘이다. */
+.candidate-fold > summary,
+.scratch-recovery-fold > summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: var(--type-small);
+}
+
+.candidate-fold > summary:hover,
+.scratch-recovery-fold > summary:hover {
+  color: var(--text-body);
+}
+
 .gate-result {
   margin-top: 1.5rem;
   padding-top: 1.2rem;
@@ -2564,7 +2579,8 @@ main {
   }
 }
 
-/* 스크래치 복구 패드 (2026-08-26 항목별 채택·버리기). 핵심은 .scratch-recovery-text:
+/* 스크래치 복구 패드 (2026-08-26 항목별 복사·버리기 — 채택은 오너 2026-09-08 로 제거).
+   핵심은 .scratch-recovery-text:
    pre의 기본 white-space:pre가 긴 문단을 가로 스크롤로 밀어내 검토를 막았다 —
    .candidate-text와 같은 pre-wrap으로 세로로 흐르게 한다. */
 .scratch-recovery {
@@ -2623,28 +2639,6 @@ main {
 
 .scratch-recovery-actions button {
   padding: 0.45rem 0.9rem;
-}
-
-.scratch-recovery-note {
-  margin: 0;
-  font-size: var(--type-meta);
-  color: var(--text-muted);
-}
-
-.scratch-recovery-gate {
-  display: grid;
-  gap: var(--space-1);
-  font-size: var(--type-small);
-}
-
-.scratch-recovery-gate p {
-  margin: 0;
-}
-
-.scratch-recovery-gate ul {
-  margin: 0;
-  padding-left: 1.1rem;
-  color: var(--text-muted);
 }
 
 .scratch-recovery-discard {

@@ -1,15 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ApiError,
-  acceptWriting,
-  describeApiError,
   describeQuotaError,
   describeWritingError,
   gateWriting,
   generateWriting,
   reviseAndGateWriting,
   type BillableRequestOptions,
-  type WritingAcceptRequest,
   type WritingCandidate,
   type WritingGate,
   type WritingGateFinding,
@@ -27,32 +24,23 @@ import { confirmPrompt, formatResetMoment } from "./quotaConfirm";
 // continue_scene emits a draft_patch (writing-workspace brief §확인된 계약). These
 // are fixed for the C1 slice; a later slice may expose other task/output types.
 const TASK_TYPE = "continue_scene";
-const OUTPUT_TYPE = "draft_patch";
 // 입력 ContextPackage 예산. **서버 기본값(8192)과 같은 값을 명시적으로 보낸다** — 화면이
 // 이 값을 실어 보내므로 서버 기본값만 올리면 제품에는 아무 효과가 없다(K-1(a) 착수 시 실측으로
 // 확인했다). 근거는 `main.py::DEFAULT_CONTEXT_BUDGET_TOKENS` 주석에 있다: 4096은 동기 생성
 // 시절의 값이고, 회계가 한글 실측(`len/1.7`)으로 정직해지면서 같은 숫자의 실제 분량이 절반이
-// 됐기 때문에 8192가 종전 실효 분량을 유지하는 짝이다. ScratchRecovery(패드 채택)가 같은
-// 값을 쓴다.
+// 됐기 때문에 8192가 종전 실효 분량을 유지하는 짝이다.
 export const MAX_TOKENS = 8192;
-// 400/404/422 are definitive rejections: the candidate can never be accepted
-// with the same body, so the bound idempotency key is discarded. 409 (stale
-// base) is handled separately, and transport/5xx preserve the key for retry.
-const DEFINITIVE_ACCEPT_FAILURES = new Set([400, 404, 422]);
 
 type WritingPanelProps = {
   projectId: string;
   draftId: string;
-  // The version that is latest right now. generate/gate/accept all reference it;
-  // when Writing is available it is also the selected version (D1=A clean latest).
+  // The version that is latest right now. generate/gate both reference it; when
+  // Writing is available it is also the selected version (D1=A clean latest).
   latestVersionId: string | null;
   onLatest: boolean;
   dirty: boolean;
   hasVersions: boolean;
   readOnly: boolean;
-  // Called after a version is saved (accept success or 502 partial) so the
-  // editor reloads its baseline/history from the server.
-  onAccepted: () => void;
   // 증분 3 (D6): called when an async (medium/long) generate is accepted as a
   // background job, so the editor starts polling it for the result pad.
   onAsyncJobStarted?: (job: WritingGenerationJob) => void;
@@ -62,7 +50,6 @@ type WritingBlock =
   | { blocked: false }
   | { blocked: true; reason: string; resolution: string };
 
-type AcceptIntent = { key: string; signature: string };
 type LoopResult = {
   loop: WritingLoop;
   stages: WritingLoopStage[];
@@ -110,9 +97,8 @@ function availabilityOf(
   return { blocked: false };
 }
 
-// 패드(ScratchRecovery)의 채택 반려 안내가 같은 라벨을 쓴다.
 export const DECISION_LABEL: Record<string, string> = {
-  pass: "채택 가능 (pass)",
+  pass: "통과 (pass)",
   revise: "수정 필요 (revise)",
   retrieve_more: "추가 근거 필요 (retrieve_more)",
   needs_user_review: "사용자 검토 필요 (needs_user_review)",
@@ -125,7 +111,7 @@ const LOOP_STATUS_COPY: Record<
 > = {
   pass: {
     label: "자동 개선 완료",
-    action: "Gate를 통과했습니다. 후보를 확인한 뒤 채택해 저장할 수 있습니다.",
+    action: "Gate를 통과했습니다. 후보를 확인한 뒤 복사해 쓰세요.",
   },
   terminal_decision: {
     label: "자동 개선 중단",
@@ -206,8 +192,6 @@ export function WritingPanel(props: WritingPanelProps) {
     draftId,
     latestVersionId,
     readOnly,
-    dirty,
-    onAccepted,
     onAsyncJobStarted,
   } = props;
   const [instruction, setInstruction] = useState("");
@@ -229,9 +213,7 @@ export function WritingPanel(props: WritingPanelProps) {
   const [candidate, setCandidate] = useState<WritingCandidate | null>(null);
   const [gate, setGate] = useState<WritingGate | null>(null);
   const [loopResult, setLoopResult] = useState<LoopResult | null>(null);
-  const [busy, setBusy] = useState<
-    "generating" | "improving" | "accepting" | null
-  >(null);
+  const [busy, setBusy] = useState<"generating" | "improving" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retryable, setRetryable] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -252,24 +234,14 @@ export function WritingPanel(props: WritingPanelProps) {
   // → Gate) is not a black box while the two calls run.
   const [progress, setProgress] = useState<string | null>(null);
   const busyRef = useRef(false);
-  const intentRef = useRef<AcceptIntent | null>(null);
   const loopIntentRef = useRef<WritingReviseRequest | null>(null);
-  // The base version + request id are frozen for the lifetime of a candidate:
-  // generate → gate → accept all reference the version that was latest when the
-  // candidate was produced (brief D1=A: base id fixed to the intent).
-  const [acceptContextReady, setAcceptContextReady] = useState(false);
-  const contextRef = useRef<{ baseVersionId: string; requestId: string } | null>(null);
+  // 후보 본문을 클립보드로 옮긴 직후인지 — 버튼 문구를 "복사됨"으로 바꾸는 데만 쓴다.
+  const [copied, setCopied] = useState(false);
 
   const availability = availabilityOf(props);
   const startingNextUnit = writingIntent === "start_next_unit";
   // A new unit needs a nonblank title; the backend rejects a blank one with 400.
   const nextUnitReady = !startingNextUnit || nextTitle.trim() !== "";
-  // ★ `disabled` 는 `accept()` 가 보는 **모든** 조건을 덮어야 한다. 하나라도 빠지면
-  // 버튼이 활성인데 눌러도 조용히 return 하는 **죽은 버튼**이 된다(오너 실사용 관측
-  // 2026-09-07: *"채택이 아무 동작도 하지 않는다"*). `contextRef` 는 ref 라 렌더를
-  // 다시 돌리지 않으므로 같은 사실을 상태로도 든다 — 둘은 항상 같이 움직인다.
-  const canAccept =
-    candidate !== null && gate?.decision === "pass" && nextUnitReady && acceptContextReady;
   const eligibleFinding =
     candidate !== null && gate !== null
       ? eligibleRevisionFinding(candidate, gate)
@@ -339,6 +311,17 @@ export function WritingPanel(props: WritingPanelProps) {
     return true;
   }
 
+  /** 후보 본문을 클립보드로. 실패하면(권한·비보안 컨텍스트) 직접 선택해 복사하도록 안내한다. */
+  async function copyCandidate() {
+    if (candidate === null) return;
+    try {
+      await navigator.clipboard?.writeText(candidate.text);
+      setCopied(true);
+    } catch {
+      setError("클립보드 복사를 사용할 수 없습니다. 위 본문을 직접 선택해 복사하세요.");
+    }
+  }
+
   async function runGenerate(options: BillableRequestOptions = {}) {
     const trimmed = instruction.trim();
     if (
@@ -359,10 +342,8 @@ export function WritingPanel(props: WritingPanelProps) {
     setCandidate(null);
     setGate(null);
     setLoopResult(null);
-    intentRef.current = null;
+    setCopied(false);
     loopIntentRef.current = null;
-    contextRef.current = null;
-    setAcceptContextReady(false);
     const baseVersionId = latestVersionId;
     const requestId = crypto.randomUUID();
     const position = { draft_id: draftId, version_id: baseVersionId };
@@ -400,10 +381,8 @@ export function WritingPanel(props: WritingPanelProps) {
         return;
       }
       // short (sync): keep the candidate even if the following Gate call fails
-      // (transport/5xx preserves the candidate); accept stays disabled until pass.
+      // (transport/5xx preserves the candidate).
       setCandidate(produced);
-      contextRef.current = { baseVersionId, requestId };
-      setAcceptContextReady(true);
       await runGate(produced, { requestId, trimmed, position });
     } catch (err) {
       if (await handleQuotaRefusal(err, () =>
@@ -503,6 +482,7 @@ export function WritingPanel(props: WritingPanelProps) {
       void refreshQuota();
       const stageError = partialStageError(outcome.data);
       setCandidate(outcome.data.candidate);
+      setCopied(false);
       setGate(outcome.data.gate);
       setLoopResult({
         loop: outcome.data.loop,
@@ -512,9 +492,6 @@ export function WritingPanel(props: WritingPanelProps) {
         errorDetail: stageError?.detail ?? null,
         retryable: outcome.retryable,
       });
-      // A changed candidate is a different accept intent. Clearing eagerly is
-      // defense in depth; the exact-body signature also mints a new key.
-      intentRef.current = null;
       if (!outcome.partial) {
         loopIntentRef.current = null;
       }
@@ -528,135 +505,6 @@ export function WritingPanel(props: WritingPanelProps) {
       setRetryable(described.retryable);
     } finally {
       setProgress(null);
-      busyRef.current = false;
-      setBusy(null);
-    }
-  }
-
-  async function accept(options: BillableRequestOptions = {}) {
-    if (busyRef.current) return;
-    if (
-      candidate === null ||
-      gate?.decision !== "pass" ||
-      !nextUnitReady ||
-      contextRef.current === null
-    ) {
-      // ★ 조용히 돌아서지 않는다. 여기 닿았다는 것은 `disabled`(canAccept)가
-      // 못 막았다는 뜻이고, 그때 사용자가 보는 것은 **아무 일도 안 일어나는 버튼**
-      // 이다(오너 실사용 관측 2026-09-07). 이유를 말하는 편이 언제나 낫다.
-      setNotice(
-        contextRef.current === null
-          ? "이 후보의 기준 version 정보가 없습니다. 다시 생성한 뒤 채택하세요."
-          : "지금은 채택할 수 없습니다. 아래 안내를 확인하세요.",
-      );
-      return;
-    }
-    // The candidate's base version is frozen at generate time, so accept saves
-    // base+candidate — it does NOT include edits typed into the editor since.
-    // On success the editor reloads to that new latest, discarding those edits.
-    // Match the app's dirty-guard idiom (navigation/version/source): confirm the
-    // discard before saving, so it is never silent. Cancel aborts the accept.
-    if (
-      dirty &&
-      !window.confirm(
-        "저장하지 않은 편집 내용이 있습니다. 채택하면 그 내용은 사라지고, 채택된 후보가 새 version으로 저장됩니다. 계속할까요?",
-      )
-    ) {
-      return;
-    }
-    busyRef.current = true;
-    setBusy("accepting");
-    setError(null);
-    setNotice(null);
-    setPendingConfirm(null);
-    const { baseVersionId, requestId } = contextRef.current;
-    const fields: Omit<WritingAcceptRequest, "idempotency_key"> = {
-      request_id: requestId,
-      draft_id: draftId,
-      base_version_id: baseVersionId,
-      instruction: instruction.trim(),
-      candidate_text: candidate.text,
-      draft_excerpt: "",
-      max_tokens: MAX_TOKENS,
-      task_type: TASK_TYPE,
-      output_type: OUTPUT_TYPE,
-      current_position: { draft_id: draftId, version_id: baseVersionId },
-      intent: writingIntent,
-      next_unit: startingNextUnit
-        ? {
-            title: nextTitle.trim(),
-            goal: nextGoal.trim() === "" ? null : nextGoal.trim(),
-          }
-        : null,
-    };
-    // Bind the idempotency key to the EXACT accept body (minus the key): a
-    // transport/5xx retry of the same candidate replays with the same key, while
-    // a different candidate/base mints a new key (brief accept intent lock).
-    const signature = JSON.stringify(fields);
-    const intent: AcceptIntent =
-      intentRef.current?.signature === signature
-        ? intentRef.current
-        : { key: crypto.randomUUID(), signature };
-    intentRef.current = intent;
-    try {
-      const outcome = await acceptWriting(projectId, {
-        ...fields,
-        idempotency_key: intent.key,
-      }, options);
-      void refreshQuota();
-      if (outcome.accepted) {
-        // A version was saved (200 accepted=true or 502 partial). Consume the
-        // candidate and let the editor reload the new latest from the server.
-        setCandidate(null);
-        setGate(null);
-        setLoopResult(null);
-        contextRef.current = null;
-        setAcceptContextReady(false);
-        intentRef.current = null;
-        loopIntentRef.current = null;
-        setInstruction("");
-        const savedNextUnit = startingNextUnit;
-        setWritingIntent("append_current");
-        setNextTitle("");
-        setNextGoal("");
-        setNotice(
-          outcome.analysisFailed
-            ? "채택되어 새 version으로 저장됐습니다. 분석 작업은 실패해 재시도가 필요합니다."
-            : savedNextUnit
-              ? "같은 장의 새 장면으로 채택·저장됐습니다."
-              : "채택되어 새 version으로 저장됐습니다.",
-        );
-        onAccepted();
-      } else {
-        // A non-pass re-gate: nothing was saved. Preserve the candidate and show
-        // the returned Gate — this is a result, not a failure.
-        setGate(outcome.gate);
-        setNotice("채택되지 않았습니다. 아래 Gate 결과를 확인하세요.");
-      }
-    } catch (err) {
-      if (await handleQuotaRefusal(err, () =>
-        void accept({ confirmDuplicate: true }), "그래도 채택하기")) {
-        // 확인 대화가 뜬 상태다 — intent 는 그대로 두어야 확인 뒤 **같은 키**로
-        // 재전송된다(다른 키면 accept 의 멱등 계약이 깨진다).
-      } else if (err instanceof ApiError && err.status === 409) {
-        // A newer version appeared: the frozen base is stale. Preserve the
-        // candidate and steer the user to reload the latest and regenerate.
-        intentRef.current = null;
-        setError(
-          "그 사이 새 저장이 생겨 기준 version이 최신이 아닙니다. 최신 version을 불러온 뒤 다시 생성하세요.",
-        );
-      } else if (
-        err instanceof ApiError &&
-        DEFINITIVE_ACCEPT_FAILURES.has(err.status)
-      ) {
-        intentRef.current = null;
-        setError(describeApiError(err));
-      } else {
-        // transport/5xx (or a 502 without a saved version): preserve the
-        // candidate and the intent so the same body retries with the same key.
-        setError(describeApiError(err));
-      }
-    } finally {
       busyRef.current = false;
       setBusy(null);
     }
@@ -678,7 +526,7 @@ export function WritingPanel(props: WritingPanelProps) {
         {describeRemaining(quota) !== null && (
           <p
             className="writing-quota"
-            title="생성·Gate 검사·자동 개선·채택이 각각 1회입니다."
+            title="생성·Gate 검사·자동 개선이 각각 1회입니다."
           >
             {describeRemaining(quota)}
           </p>
@@ -719,8 +567,8 @@ export function WritingPanel(props: WritingPanelProps) {
         </p>
       ) : (
         <p className="writing-hint">
-          최신 저장 version을 기준으로 다음 장면을 제안합니다. 채택하기 전에는 원고
-          본문이 바뀌지 않습니다.
+          최신 저장 version을 기준으로 다음 장면을 제안합니다. 이 패널은 원고 본문을
+          바꾸지 않습니다 — 후보가 마음에 들면 편집기로 옮겨 저장하세요.
         </p>
       )}
 
@@ -767,7 +615,7 @@ export function WritingPanel(props: WritingPanelProps) {
         </select>
 
         <fieldset className="writing-intent" disabled={readOnly}>
-          <legend>채택 방식</legend>
+          <legend>이어쓰기 방식</legend>
           <label>
             <input
               type="radio"
@@ -863,7 +711,16 @@ export function WritingPanel(props: WritingPanelProps) {
               <span className="candidate-model">{candidate.generated_by_model}</span>
             )}
           </div>
-          <p className="candidate-text">{candidate.text}</p>
+          {/*
+            오너 2026-09-08: *"이어쓰기에 있는 글들이 너무 긴데 접어둘 수 없나?"*
+            **기본 펼침**이다 — 방금 생성한 후보는 읽으려고 만든 것이라 접힌 채
+            나오면 매번 펴야 한다. 지나간 후보(ScratchRecovery 패드)는 반대로 기본
+            접힘이다. 상태 없이 네이티브 <details> 로 접는다.
+          */}
+          <details className="candidate-fold" open>
+            <summary>생성된 본문 ({[...candidate.text].length}자)</summary>
+            <p className="candidate-text">{candidate.text}</p>
+          </details>
           <p className="candidate-summary">
             근거 주장 {candidate.candidate_claims.length}개
             {candidate.new_memory_hints.length > 0 &&
@@ -896,7 +753,7 @@ export function WritingPanel(props: WritingPanelProps) {
                       )}
                       {finding.type === "style" && (
                         <span className="finding-advisory">
-                          문체 참고 사항입니다. 의도한 표현이라면 그대로 채택할 수 있습니다.
+                          문체 참고 사항입니다. 의도한 표현이라면 그대로 두어도 됩니다.
                         </span>
                       )}
                     </li>
@@ -950,31 +807,24 @@ export function WritingPanel(props: WritingPanelProps) {
           )}
 
           <div className="candidate-actions">
-            <button
-              type="button"
-              disabled={!canAccept || busy !== null}
-              onClick={() => void accept()}
-            >
-              {busy === "accepting" ? "채택 중…" : "채택하고 저장"}
+            {/*
+              ★ 채택 버튼은 없다(오너 2026-09-08): *"채택은 완전 자동화일 때 사용할 수
+              있을 것 같아. 일반 사용자에게는 불필요한 항목 같아. 버튼을 그냥 없애주고
+              통로만 열어두자."* 서버 `POST …/writing/accept` 와 API 클라이언트
+              `acceptWriting` 은 그대로 있다 — 없앤 것은 화면의 버튼이지 통로가 아니다.
+              사람이 쓰는 길은 **복사 → 편집기에 붙여넣기 → 저장**이고, 그 저장은 유료가
+              아니다(채택은 보고서+Gate 재검사를 다시 사므로 유료였다).
+            */}
+            <button type="button" onClick={() => void copyCandidate()}>
+              {copied ? "복사됨" : "본문 복사"}
             </button>
-            {canAccept && (
-              // 오너 실사용 관측 2026-09-07: *"채택을 눌렀을 때 어떤 동작이 되는지도
-              // 모르겠네."* 이 사실은 종전에 **확인 대화상자에만** 있었다 — 즉 누르기
-              // 전에는 어디에도 없었다. 무엇이 저장되는지는 누르기 **전에** 보여야 한다.
-              <span className="candidate-accept-note">
-                생성 시점의 본문에 이 후보를 이어 붙여 새 version 으로 저장합니다.
-                그 뒤 편집기에 직접 친 글은 함께 저장되지 않습니다.
-              </span>
-            )}
-            {gate?.decision === "pass" && !nextUnitReady && (
-              <span className="candidate-accept-note">
-                새 장면 제목을 입력해야 생성·채택할 수 있습니다.
-              </span>
-            )}
-            {gate !== null && gate.decision !== "pass" && !canAccept && (
+            <span className="candidate-accept-note">
+              복사해 편집기에 붙여넣고 저장하세요. 이 패널은 원고를 직접 바꾸지 않습니다.
+            </span>
+            {gate !== null && gate.decision !== "pass" && (
               <>
                 <span className="candidate-accept-note">
-                  Gate 판정이 pass일 때만 채택할 수 있습니다.
+                  Gate가 통과 판정을 내리지 않았습니다. 아래 지적을 확인하세요.
                 </span>
                 {(gate.decision === "revise" || gate.decision === "retrieve_more") && (
                   <span className="candidate-accept-note">

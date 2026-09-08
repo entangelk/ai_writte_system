@@ -54,7 +54,7 @@
 
 | 축 | 지금 시행되는 값 | 시행 자리(정본) |
 |---|---|---|
-| 원고 유닛 본문 상한 | 4000자 | `env.py::DRAFT_RAW_TEXT_MAX_CHARS` |
+| 원고 유닛 본문 상한 | 6000자 | `env.py::DRAFT_RAW_TEXT_MAX_CHARS` |
 | 장면 메모 본문 상한 | 12000자 | `core_sot/service.py::SCENE_NOTE_MAX_CHARS` |
 
 - 원고 상한은 **환경변수로 조정 가능**하다(같은 이름). 위 값은 조정하지 않았을 때의 값이다.

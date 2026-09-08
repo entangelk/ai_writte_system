@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WritingPanel } from "./WritingPanel";
@@ -142,34 +142,7 @@ function loopResponse(
   };
 }
 
-const saved = {
-  draft_id: "d1",
-  draft_version_id: "v4",
-  version_number: 4,
-  snapshot_id: "s4",
-  content_hash: "h4",
-  chapter_id: "c1",
-  position: 1,
-};
-
-const acceptOk = {
-  accepted: true,
-  intent: "append_current",
-  gate: gatePass,
-  saved,
-  analysis_job: {
-    id: "job-1",
-    project_id: "p1",
-    snapshot_id: "s4",
-    status: "pending",
-    failure_reason: null,
-    failure_detail: null,
-  },
-  idempotent_replay: false,
-};
-
 function renderPanel(overrides: Partial<PanelProps> = {}) {
-  const onAccepted = vi.fn();
   const props: PanelProps = {
     projectId: "p1",
     draftId: "d1",
@@ -178,15 +151,13 @@ function renderPanel(overrides: Partial<PanelProps> = {}) {
     dirty: false,
     hasVersions: true,
     readOnly: false,
-    onAccepted,
     ...overrides,
   };
-  const utils = render(<WritingPanel {...props} />);
-  return { ...utils, onAccepted };
+  return render(<WritingPanel {...props} />);
 }
 
 const generateButton = () => screen.getByRole("button", { name: "이어쓰기 생성" });
-const acceptButton = () => screen.getByRole("button", { name: /채택하고 저장|채택 중/ });
+const copyButton = () => screen.getByRole("button", { name: /본문 복사|복사됨/ });
 
 async function generateAndGate(fetchMock: ReturnType<typeof mockFetch>) {
   await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
@@ -338,7 +309,8 @@ describe("WritingPanel — generate → gate", () => {
     expect(screen.getByText(candidate.text)).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("다시 생성해 주세요");
     expect(screen.getByRole("button", { name: "다시 생성" })).toBeInTheDocument();
-    expect(acceptButton()).toBeDisabled();
+    // Gate 가 죽어도 후보는 남고 복사 길은 열려 있다(작가가 손으로 판단해 가져간다).
+    expect(copyButton()).toBeEnabled();
   });
 
   it("maps a 502 report failure on generate to human guidance and retries", async () => {
@@ -459,7 +431,7 @@ describe("WritingPanel — automatic revise/retrieve loop", () => {
     expect(screen.getByRole("list", { name: "자동 개선 단계" })).toHaveTextContent(
       "1. 후보 수정완료",
     );
-    expect(acceptButton()).toBeEnabled();
+    expect(copyButton()).toBeEnabled();
   });
 
   it("does not enter the loop for a non-continuity or non-unique evidence finding", async () => {
@@ -508,7 +480,7 @@ describe("WritingPanel — automatic revise/retrieve loop", () => {
   });
 
   it.each([
-    ["pass", "자동 개선 완료", "채택해 저장할 수 있습니다."],
+    ["pass", "자동 개선 완료", "복사해 쓰세요."],
     ["terminal_decision", "자동 개선 중단", "사용자 판단이 필요한 Gate 결과입니다."],
     ["not_eligible", "자동 수정 대상 아님", "안전하게 자동 수정할 수 없는 지적입니다."],
     ["budget_exhausted", "자동 개선 한도 도달", "마지막 후보를 보존했습니다."],
@@ -617,22 +589,25 @@ describe("WritingPanel — automatic revise/retrieve loop", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(`502 · ${type}: ${detail}`);
   });
 
-  it("accepts the loop's final candidate text (candidate-change safety)", async () => {
+  it("carries the loop's final candidate text into the copy path (candidate-change safety)", async () => {
+    // 개선 루프가 후보를 바꾸면 화면도 **바뀐 본문**을 들어야 한다 — 복사가 개선 전
+    // 본문을 집어가면 작가는 자기가 본 것과 다른 글을 붙여넣게 된다.
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
     const fetchMock = mockFetch(
       { body: candidate },
       { body: gateEligibleRevise },
       { body: loopResponse("pass") },
-      { body: acceptOk },
     );
     renderPanel();
     await userEvent.type(screen.getByLabelText("이어쓰기 지시"), "이어서 써줘");
     await userEvent.click(generateButton());
     await screen.findByText(revisedCandidate.text);
-    await userEvent.click(acceptButton());
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
-    const accepted = JSON.parse(fetchMock.mock.calls[3][1].body);
-    expect(accepted.candidate_text).toBe(revisedCandidate.text);
-    expect(accepted.idempotency_key).toBe("uuid-2");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+
+    copyButton().click();
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(revisedCandidate.text));
   });
 });
 
@@ -743,184 +718,122 @@ describe("WritingPanel — style advisory (증분 3)", () => {
     ],
   };
 
-  it("keeps accept enabled on a pass and shows the style finding as advisory", async () => {
-    // D5=A/D6=A: a style finding is advisory — decision stays pass, so accept is
-    // enabled and the author sees the note. If style escalated the decision, accept
-    // would be disabled and this fails.
+  it("keeps the decision at pass and shows the style finding as advisory", async () => {
+    // D5=A/D6=A: a style finding is advisory — the decision stays pass, so no
+    // "Gate가 통과 판정을 내리지 않았습니다" warning appears. If style escalated the
+    // decision, that warning would show and this fails.
     const fetchMock = mockFetch({ body: candidate }, { body: gatePassWithStyle });
     renderPanel();
     await generateAndGate(fetchMock);
-    expect(acceptButton()).toBeEnabled();
+    expect(
+      screen.queryByText(/Gate가 통과 판정을 내리지 않았습니다/),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("설정한 문체와 어조가 다릅니다.")).toBeInTheDocument();
     expect(
-      screen.getByText(/문체 참고 사항입니다.*채택할 수 있습니다/),
+      screen.getByText(/문체 참고 사항입니다.*그대로 두어도 됩니다/),
     ).toBeInTheDocument();
     // style is not auto-revise eligible → no loop call, only generate + gate.
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
-describe("WritingPanel — accept (pass only)", () => {
-  it("enables accept only on a pass gate", async () => {
-    const fetchMock = mockFetch({ body: candidate }, { body: gateRevise });
-    renderPanel();
-    await generateAndGate(fetchMock);
-    // revise → disabled, with the pass-only explanation.
-    expect(acceptButton()).toBeDisabled();
-    expect(
-      screen.getByText("Gate 판정이 pass일 때만 채택할 수 있습니다."),
-    ).toBeInTheDocument();
-  });
-
-  it("says what accepting will save, before it is clicked", async () => {
-    /**
-     * 오너 실사용 관측(2026-09-07): *"애초에 채택을 눌렀을 때 어떤 동작이 되는지도
-     * 모르겠네."* 이 사실은 종전에 **확인 대화상자에만** 있었다 — 즉 누르기 전에는
-     * 어디에도 없었다. 채택은 **생성 시점에 고정된 본문 + 후보**를 저장하고 그 뒤
-     * 편집기에 친 글은 버리므로, 누르기 **전에** 말해야 한다.
-     */
+describe("WritingPanel — 후보를 꺼내는 길 (오너 2026-09-08: 채택 버튼 제거)", () => {
+  /**
+   * 오너 결정 2026-09-08: *"채택은 완전 자동화일 때 사용할 수 있을 것 같아. 일반
+   * 사용자에게는 불필요한 항목 같아. 버튼을 그냥 없애주고 통로만 열어두자."*
+   *
+   * 없앤 것은 **화면의 버튼**이다 — 서버 `POST …/writing/accept` 와 API 클라이언트
+   * `acceptWriting` 은 그대로 있다(완전 자동화가 쓸 통로). 사람이 쓰는 길은
+   * 복사 → 편집기 붙여넣기 → 저장이고, 그 저장은 유료가 아니다.
+   */
+  it("채택 버튼이 없고, 후보에는 복사 버튼이 있다", async () => {
+    // 양방향: 채택이 되살아나면 첫 단정이, 복사까지 같이 지우면 둘째 단정이 재실패한다.
     const fetchMock = mockFetch({ body: candidate }, { body: gatePass });
     renderPanel();
     await generateAndGate(fetchMock);
 
-    expect(acceptButton()).toBeEnabled();
     expect(
-      screen.getByText(/새 version 으로 저장합니다/),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/편집기에 직접 친 글은 함께 저장되지 않습니다/),
-    ).toBeInTheDocument();
-  });
-
-  it("never leaves accept enabled while the handler would refuse silently", async () => {
-    /**
-     * ★ 이 셀이 잠그는 것은 **문구가 아니라 두 가드의 일치**다.
-     *
-     * 버튼의 `disabled`(=`canAccept`)가 `accept()` 의 조건 중 하나라도 빠뜨리면,
-     * 버튼은 활성인데 눌러도 조용히 `return` 하는 **죽은 버튼**이 된다(오너 실사용
-     * 관측 2026-09-07: *"채택이 아무 동작도 하지 않는다"*). 종전 `canAccept` 는
-     * `contextRef.current === null` 을 안 봤다.
-     *
-     * 여기서는 **채택이 활성일 때 누르면 반드시 요청이 나간다**를 단정한다 —
-     * 조건이 어긋나면 요청이 0건이라 실패한다. 문구를 바꿔도 이 셀은 통과한다.
-     */
-    const fetchMock = mockFetch(
-      { body: candidate },
-      { body: gatePass },
-      { body: acceptOk },
-    );
-    renderPanel();
-    await generateAndGate(fetchMock);
-    const before = fetchMock.mock.calls.length;
-
-    expect(acceptButton()).toBeEnabled();
-    await userEvent.click(acceptButton());
-
-    await waitFor(() =>
-      expect(fetchMock.mock.calls.length).toBeGreaterThan(before),
-    );
-  });
-
-  it("surfaces the duplicate prompt at the accept action, naming what it re-runs", async () => {
-    /**
-     * ★ 오너 실사용 관측(2026-09-07)의 **실제 원인**이다.
-     *
-     * 콘솔 증거: `POST …/writing/accept 429`. 버튼은 동작했고 서버가 **429(같은
-     * 요청이 이미 진행 중)** 로 거절했다 — 계약상 `X-Confirm-Duplicate` 재전송으로
-     * 풀리는 상태다(`api/errors.py`). 화면은 그때 확인 대화를 띄우는데,
-     * **그 대화는 패널 맨 위에 그려지고 채택 버튼은 맨 아래**라 아래쪽에서 누른
-     * 사용자에게는 화면 밖에서 열렸다 → *"아무것도 안 된다"*.
-     *
-     * 그리고 확인 버튼이 **"하나 더 만들기"** 라 채택 문맥에서 뜻이 안 맞았다 —
-     * 무엇을 승인하는지 알 수 없다.
-     *
-     * 잠그는 것 둘: ① 확인 대화가 **초점을 받는다**(길이와 무관하게 사용자에게
-     * 도달한다) ② 확인 버튼이 **그 동작의 말**을 쓴다.
-     */
-    const fetchMock = mockFetch(
-      { body: candidate },
-      { body: gatePass },
-      { body: { detail: "same request in progress" }, status: 429 },
-    );
-    renderPanel();
-    await generateAndGate(fetchMock);
-
-    await userEvent.click(acceptButton());
-
-    const prompt = await screen.findByRole("alertdialog", { name: "중복 요청 확인" });
-    expect(prompt).toHaveFocus();
-    expect(
-      within(prompt).getByRole("button", { name: "그래도 채택하기" }),
-    ).toBeInTheDocument();
-    // over-strict 방향: 생성 문맥의 말이 채택 뒤에 뜨면 안 된다.
-    expect(
-      within(prompt).queryByRole("button", { name: "하나 더 만들기" }),
+      screen.queryByRole("button", { name: /채택/ }),
     ).not.toBeInTheDocument();
+    expect(copyButton()).toBeEnabled();
+    expect(
+      screen.getByText(/복사해 편집기에 붙여넣고 저장하세요/),
+    ).toBeInTheDocument();
+    // Gate 는 그대로 돈다 — 없앤 것은 채택이지 검사가 아니다.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("accepts a pass candidate, binds the exact body, reloads, and clears", async () => {
-    const fetchMock = mockFetch(
-      { body: candidate },
-      { body: gatePass },
-      { body: acceptOk },
-    );
-    const { onAccepted } = renderPanel();
+  it("Gate 가 통과가 아니어도 후보를 복사할 수 있다", async () => {
+    // 종전에는 pass 가 아니면 채택이 잠겼다. 복사는 사람이 판단해서 가져가는 길이라
+    // 판정으로 막지 않는다 — 대신 통과가 아니라는 사실은 말한다.
+    const fetchMock = mockFetch({ body: candidate }, { body: gateRevise });
+    renderPanel();
     await generateAndGate(fetchMock);
-    expect(acceptButton()).toBeEnabled();
-    await userEvent.click(acceptButton());
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
 
-    const [acceptUrl, acceptInit] = fetchMock.mock.calls[2];
-    expect(acceptUrl).toBe("/api/projects/p1/writing/accept");
-    expect(JSON.parse(acceptInit.body)).toEqual({
-      request_id: "uuid-1",
-      draft_id: "d1",
-      base_version_id: "v3",
-      instruction: "이어서 써줘",
-      candidate_text: candidate.text,
-      draft_excerpt: "",
-      max_tokens: 8192,
-      task_type: "continue_scene",
-      output_type: "draft_patch",
-      current_position: { draft_id: "d1", version_id: "v3" },
-      intent: "append_current",
-      next_unit: null,
-      idempotency_key: "uuid-2",
-    });
-    expect(onAccepted).toHaveBeenCalledTimes(1);
-    // Candidate consumed after a successful save.
-    await waitFor(() => expect(screen.queryByText(candidate.text)).not.toBeInTheDocument());
-    expect(screen.getByRole("status")).toHaveTextContent("채택되어 새 version으로 저장됐습니다.");
+    expect(copyButton()).toBeEnabled();
+    expect(
+      screen.getByText(/Gate가 통과 판정을 내리지 않았습니다/),
+    ).toBeInTheDocument();
   });
 
-  it("sends intent=start_next_unit with the next-unit metadata (goal not persisted client-side)", async () => {
-    const startAccept = { ...acceptOk, intent: "start_next_unit" };
-    const fetchMock = mockFetch(
-      { body: candidate },
-      { body: gatePass },
-      { body: startAccept },
-    );
+  it("복사 버튼이 후보 본문을 클립보드에 넣고 문구가 바뀐다", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const fetchMock = mockFetch({ body: candidate }, { body: gatePass });
+    renderPanel();
+    await generateAndGate(fetchMock);
+
+    copyButton().click();
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(candidate.text));
+    expect(await screen.findByRole("button", { name: "복사됨" })).toBeInTheDocument();
+    // 복사는 서버를 부르지 않는다 — 생성·Gate 두 번 그대로다(무료 경로).
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("클립보드를 못 쓰면 직접 선택해 복사하라고 말한다", async () => {
+    vi.stubGlobal("navigator", {
+      clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+    });
+    const fetchMock = mockFetch({ body: candidate }, { body: gatePass });
+    renderPanel();
+    await generateAndGate(fetchMock);
+
+    copyButton().click();
+
+    expect(
+      await screen.findByText(/클립보드 복사를 사용할 수 없습니다/),
+    ).toBeInTheDocument();
+  });
+
+  it("후보 본문은 기본 펼침이고 접을 수 있다 (오너 2026-09-08: 글이 너무 길다)", async () => {
+    // 양방향: 기본을 접힘으로 바꾸면 첫 단정이(방금 만든 후보는 읽으라고 만든 것),
+    // 접기 자체를 없애면 둘째 단정이 재실패한다. 지나간 후보(패드)는 반대로 기본 접힘.
+    const fetchMock = mockFetch({ body: candidate }, { body: gatePass });
+    const { container } = renderPanel();
+    await generateAndGate(fetchMock);
+
+    const fold = container.querySelector("details.candidate-fold") as HTMLDetailsElement;
+    expect(fold.open).toBe(true);
+    expect(screen.getByText(candidate.text)).toBeVisible();
+
+    await userEvent.click(fold.querySelector("summary") as HTMLElement);
+
+    expect(fold.open).toBe(false);
+    expect(screen.getByText(candidate.text)).not.toBeVisible();
+  });
+
+  it("sends intent=start_next_unit with the next-unit metadata on generate", async () => {
+    const fetchMock = mockFetch({ body: candidate }, { body: gatePass });
     renderPanel();
     await userEvent.click(screen.getByLabelText("같은 장의 다음 장면 시작"));
     await userEvent.type(screen.getByLabelText("새 장면 제목"), "성 안");
     await userEvent.type(screen.getByLabelText("장면 목표(선택)"), "반전을 심는다");
     await generateAndGate(fetchMock);
+
     const generated = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(generated.intent).toBe("start_next_unit");
-    expect(generated.next_unit).toEqual({
-      title: "성 안",
-      goal: "반전을 심는다",
-    });
-    expect(acceptButton()).toBeEnabled();
-    await userEvent.click(acceptButton());
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const body = JSON.parse(fetchMock.mock.calls[2][1].body);
-    expect(body.intent).toBe("start_next_unit");
-    expect(body.next_unit).toEqual({
-      title: "성 안",
-      goal: "반전을 심는다",
-    });
-    expect(screen.getByRole("status")).toHaveTextContent("같은 장의 새 장면으로 채택·저장됐습니다.");
+    expect(generated.next_unit).toEqual({ title: "성 안", goal: "반전을 심는다" });
   });
 
   it("blocks generation when starting the next unit without a title", async () => {
@@ -932,192 +845,6 @@ describe("WritingPanel — accept (pass only)", () => {
     await userEvent.type(screen.getByLabelText("새 장면 제목"), "장면 2");
     expect(generateButton()).toBeEnabled();
     expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("treats 200 accepted=false as a Gate result, not a failure (candidate kept)", async () => {
-    const acceptNonPass = { accepted: false, gate: gateRevise, saved: null, analysis_job: null, idempotent_replay: false };
-    const fetchMock = mockFetch({ body: candidate }, { body: gatePass }, { body: acceptNonPass });
-    const { onAccepted } = renderPanel();
-    await generateAndGate(fetchMock);
-    await userEvent.click(acceptButton());
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    expect(onAccepted).not.toHaveBeenCalled();
-    expect(screen.getByText(candidate.text)).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("채택되지 않았습니다");
-    // The re-gate result replaces the shown gate; accept disables (now revise).
-    expect(screen.getByText("[error] continuity → revise")).toBeInTheDocument();
-    expect(acceptButton()).toBeDisabled();
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
-  it("treats 502 + accepted=true + saved as a saved version with a failed analysis", async () => {
-    const partial = { accepted: true, saved, analysis_job: null, analysis_error: "job store down" };
-    const fetchMock = mockFetch({ body: candidate }, { body: gatePass }, { status: 502, body: partial });
-    const { onAccepted } = renderPanel();
-    await generateAndGate(fetchMock);
-    await userEvent.click(acceptButton());
-    await waitFor(() => expect(onAccepted).toHaveBeenCalledTimes(1));
-    expect(screen.getByRole("status")).toHaveTextContent("분석 작업은 실패해 재시도가 필요합니다");
-    expect(screen.queryByText(candidate.text)).not.toBeInTheDocument();
-    // A saved 502 partial is NOT surfaced as an error.
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
-  it("keeps the candidate and steers to reload on a 409 stale base", async () => {
-    const fetchMock = mockFetch(
-      { body: candidate },
-      { body: gatePass },
-      { status: 409, body: { detail: "base draft version is not the latest version" } },
-    );
-    const { onAccepted } = renderPanel();
-    await generateAndGate(fetchMock);
-    await userEvent.click(acceptButton());
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    expect(onAccepted).not.toHaveBeenCalled();
-    expect(screen.getByText(candidate.text)).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent("최신 version을 불러온 뒤 다시 생성하세요");
-  });
-
-  it("reuses the same idempotency key when retrying the same body after a 5xx", async () => {
-    // under-strict: a transport/5xx retry of the SAME candidate must replay with
-    // the SAME key (no duplicate-intent). A new UUID here would be a bug.
-    const fetchMock = mockFetch(
-      { body: candidate },
-      { body: gatePass },
-      { status: 500, body: { detail: "boom" } },
-      { body: acceptOk },
-    );
-    renderPanel();
-    await generateAndGate(fetchMock);
-    await userEvent.click(acceptButton());
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    expect(screen.getByRole("alert")).toHaveTextContent("boom");
-    // candidate preserved for retry
-    expect(screen.getByText(candidate.text)).toBeInTheDocument();
-    await userEvent.click(acceptButton());
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
-    const firstKey = JSON.parse(fetchMock.mock.calls[2][1].body).idempotency_key;
-    const retryKey = JSON.parse(fetchMock.mock.calls[3][1].body).idempotency_key;
-    expect(firstKey).toBe("uuid-2");
-    expect(retryKey).toBe("uuid-2");
-  });
-
-  it("mints a NEW key when the accept body changes before retrying (over-strict)", async () => {
-    // The counterpart of the reuse test: if the accept body changes (here the
-    // instruction is edited after generate, no regenerate), the retry must NOT
-    // replay the previous key. This pins the signature guard directly — removing
-    // it would reuse uuid-2. Load-bearing once candidates become mutable (C2/D4=B):
-    // replaying a different candidate under the same key would let the server's
-    // key-only idempotency silently return the old version (verification H1).
-    const fetchMock = mockFetch(
-      { body: candidate },
-      { body: gatePass },
-      { status: 500, body: { detail: "boom" } },
-      { body: acceptOk },
-    );
-    renderPanel();
-    await generateAndGate(fetchMock);
-    await userEvent.click(acceptButton());
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    // change the request body (instruction) without regenerating the candidate
-    await userEvent.type(screen.getByLabelText("이어쓰기 지시"), " 더 자세히");
-    await userEvent.click(acceptButton());
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
-    const firstKey = JSON.parse(fetchMock.mock.calls[2][1].body).idempotency_key;
-    const retryKey = JSON.parse(fetchMock.mock.calls[3][1].body).idempotency_key;
-    expect(firstKey).toBe("uuid-2");
-    expect(retryKey).toBe("uuid-3");
-    expect(retryKey).not.toBe(firstKey);
-  });
-
-  it.each([400, 422])(
-    "rejects definitively and keeps the candidate on a %i accept",
-    async (status) => {
-      // brief D2=A: 400/404/422 are definitive rejections (shown, not retried as
-      // the same intent). The candidate is preserved and no save is reported.
-      const fetchMock = mockFetch(
-        { body: candidate },
-        { body: gatePass },
-        { status, body: { detail: "정본 위반" } },
-      );
-      const { onAccepted } = renderPanel();
-      await generateAndGate(fetchMock);
-      await userEvent.click(acceptButton());
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-      expect(onAccepted).not.toHaveBeenCalled();
-      expect(screen.getByRole("alert")).toHaveTextContent(String(status));
-      expect(screen.getByText(candidate.text)).toBeInTheDocument();
-    },
-  );
-});
-
-describe("WritingPanel — accept dirty guard (미저장 편집 덮어쓰기 결손 fix)", () => {
-  // The candidate is generated on a clean latest, then the user types into the
-  // editor (dirty=true) before accepting. Accept saves base+candidate and the
-  // editor reloads to it, discarding those edits — this guard confirms first.
-  const dirtyProps: PanelProps = {
-    projectId: "p1",
-    draftId: "d1",
-    latestVersionId: "v3",
-    onLatest: true,
-    dirty: false, // clean at generate time; flipped to dirty before accept
-    hasVersions: true,
-    readOnly: false,
-    onAccepted: vi.fn(),
-  };
-
-  it("aborts the accept when the discard confirm is cancelled (under-strict: the fix)", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
-    const fetchMock = mockFetch({ body: candidate }, { body: gatePass });
-    const onAccepted = vi.fn();
-    const { rerender } = render(
-      <WritingPanel {...dirtyProps} onAccepted={onAccepted} />,
-    );
-    await generateAndGate(fetchMock);
-    // The editor became dirty after generate.
-    rerender(<WritingPanel {...dirtyProps} dirty onAccepted={onAccepted} />);
-    await userEvent.click(acceptButton());
-
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledTimes(2); // generate + gate only — no accept
-    expect(onAccepted).not.toHaveBeenCalled();
-    expect(screen.getByText(candidate.text)).toBeInTheDocument(); // candidate kept
-  });
-
-  it("proceeds with the accept once the discard is confirmed", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-    const fetchMock = mockFetch(
-      { body: candidate },
-      { body: gatePass },
-      { body: acceptOk },
-    );
-    const onAccepted = vi.fn();
-    const { rerender } = render(
-      <WritingPanel {...dirtyProps} onAccepted={onAccepted} />,
-    );
-    await generateAndGate(fetchMock);
-    rerender(<WritingPanel {...dirtyProps} dirty onAccepted={onAccepted} />);
-    await userEvent.click(acceptButton());
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[2][0]).toBe("/api/projects/p1/writing/accept");
-    expect(onAccepted).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not prompt when the editor is clean (over-strict: no needless nag)", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm");
-    const fetchMock = mockFetch(
-      { body: candidate },
-      { body: gatePass },
-      { body: acceptOk },
-    );
-    renderPanel(); // dirty defaults to false
-    await generateAndGate(fetchMock);
-    await userEvent.click(acceptButton());
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    expect(confirmSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -1189,7 +916,7 @@ describe("WritingPanel — 요청 quota (Slice 8.4 W3=A · W5=B)", () => {
     const tile = screen.getByText("남은 사용 12회");
     expect(tile).toHaveAttribute(
       "title",
-      "생성·Gate 검사·자동 개선·채택이 각각 1회입니다.",
+      "생성·Gate 검사·자동 개선이 각각 1회입니다.",
     );
   });
 

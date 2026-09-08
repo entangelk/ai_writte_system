@@ -602,36 +602,7 @@ export function DraftEditor() {
     }
   }
 
-  // After a Writing candidate is accepted (a new version is saved, including the
-  // 502-partial case where only the Analysis job failed), reload the latest from
-  // the server so the editor baseline/history reflect the new version.
-  async function reloadLatest() {
-    if (projectId === undefined || draftId === undefined) return;
-    try {
-      const { versions: nextVersions } = await listDraftVersions(projectId, draftId);
-      const latest = latestOf(nextVersions);
-      const detail = latest === null
-        ? null
-        : await getDraftVersion(projectId, draftId, latest.id);
-      const nextText = detail?.snapshot.raw_text ?? "";
-      setRawText(nextText);
-      setBaseline(nextText);
-      setVersions(nextVersions);
-      setSelectedVersionId(detail?.draft_version.id ?? null);
-      setSelectedContentHash(detail?.snapshot.content_hash ?? null);
-      setVersionNumber(detail?.draft_version.version_number ?? null);
-      setSourceNotice(null);
-      setNotice(null);
-      setError(null);
-    } catch (err) {
-      setError(describeApiError(err));
-    }
-  }
-
   // Manual analysis changes the Draft read-model fields but creates no version.
-  // Keep this refresh separate from reloadLatest: writing acceptors only need the
-  // version/history refresh above, while a global Draft fetch would add an
-  // unrelated request to their established completion path.
   async function refreshAnalysisStatus() {
     if (projectId === undefined || draftId === undefined) return;
     try {
@@ -919,12 +890,6 @@ export function DraftEditor() {
                       projectId={projectId}
                       draftId={draftId}
                       refreshKey={scratchRefresh}
-                      dirty={dirty}
-                      readOnly={readOnly}
-                      onAccepted={() => {
-                        setScratchRefresh((n) => n + 1);
-                        void reloadLatest();
-                      }}
                     />
                     <WritingPanel
                       projectId={projectId}
@@ -934,10 +899,6 @@ export function DraftEditor() {
                       dirty={dirty}
                       hasVersions={versions.length > 0}
                       readOnly={readOnly}
-                      onAccepted={() => {
-                        setScratchRefresh((n) => n + 1);
-                        void reloadLatest();
-                      }}
                       onAsyncJobStarted={trackGenerationJob}
                     />
                   </div>
