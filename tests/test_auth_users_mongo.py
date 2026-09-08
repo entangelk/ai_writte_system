@@ -355,6 +355,41 @@ class MongoUserRepositoryTest(unittest.TestCase):
             self.repo.get_by_id("user:1").withdrawal_requested_at, later
         )
 
+    def test_a_conditional_stamp_is_decided_by_the_query_not_the_caller(self) -> None:
+        """H2 — 조건이 **질의로** 내려가야 저장소가 경쟁을 가른다.
+
+        `find_one_and_update` 의 필터에 조건이 없으면 두 요청이 모두 쓰기에
+        도달하고 나중 것이 이긴다. 여기서 재는 것은 그 필터다.
+        """
+        self.repo.insert(_user())
+        self.repo.set_withdrawal_requested_at("user:1", at=_FIXED_TIME)
+        later = _FIXED_TIME + timedelta(days=7)
+        self.assertIsNone(self.repo.set_withdrawal_requested_at(
+            "user:1", at=later, only_if_absent=True
+        ))
+        self.assertEqual(
+            self.collection.docs["user:1"]["withdrawal_requested_at"], _FIXED_TIME
+        )
+
+    def test_a_conditional_stamp_also_matches_a_row_that_never_had_the_field(self):
+        """★ 조건은 `None` 과 **키 없음**을 같이 골라야 한다.
+
+        탈퇴 축 이전에 쓰인 행에는 키 자체가 없다. 필터가 그것을 못 고르면
+        **기존 계정 전부가 탈퇴를 요청할 수 없다** — 첫 요청이 조용히 실패하고
+        화면은 아무 일도 안 일어난 것처럼 보인다. `_entry` 가 둘을 같은 값으로
+        읽으므로 쓰기면도 같아야 한다.
+        """
+        self.collection.docs["user:legacy"] = {
+            "_id": "user:legacy", "username": "legacy",
+            "password_hash": "H:old", "is_admin": False, "is_active": True,
+            "created_at": _FIXED_TIME, "status": USER_STATUS_ACTIVE,
+        }
+        updated = self.repo.set_withdrawal_requested_at(
+            "user:legacy", at=_FIXED_TIME, only_if_absent=True
+        )
+        self.assertIsNotNone(updated, "옛 행이 탈퇴를 요청하지 못한다")
+        self.assertEqual(updated.withdrawal_requested_at, _FIXED_TIME)
+
     def test_a_naive_stored_stamp_reads_back_aware(self) -> None:
         """★ pymongo 는 BSON 날짜를 **naive** 로 돌려준다.
 

@@ -651,6 +651,99 @@ class WithdrawalStateAxisTest(unittest.TestCase):
         )
 
 
+class WithdrawalFirstStampRaceTest(unittest.TestCase):
+    """첫 시각 보존이 **저장소에서** 결정되는가 (독립 검증 H2, 2026-09-08).
+
+    서비스의 조기 반환만으로는 부족하다 — 읽기와 쓰기 사이가 열려 있으면 동시 첫
+    요청 둘이 **모두** 그 반환을 지나고, 무조건 쓰기였다면 나중 시각이 이겨
+    삭제 예정일이 그만큼 밀린다. 조건을 저장소로 내려야 닫힌다.
+
+    ★ 이 클래스가 있는 이유: 처방만 넣고 셀을 안 두면 `only_if_absent=True` 를
+    `False` 로 되돌려도 **83셀이 전부 초록이었다**(실측 MW-4). 검증자의 X1 과
+    같은 종류의 빈 자리다.
+    """
+
+    def setUp(self) -> None:
+        self.repo = InMemoryUserRepository()
+
+    def _stored(self, at: datetime | None) -> User:
+        user = User(
+            id="user:1", username="alice", password_hash="H:pw",
+            is_admin=False, is_active=True, created_at=_FIXED_TIME,
+            withdrawal_requested_at=at,
+        )
+        self.repo.insert(user)
+        return user
+
+    # --- seam 자체 -----------------------------------------------------------
+
+    def test_a_conditional_stamp_refuses_to_overwrite_an_existing_one(self) -> None:
+        self._stored(_FIXED_TIME)
+        later = _FIXED_TIME + timedelta(days=7)
+        self.assertIsNone(self.repo.set_withdrawal_requested_at(
+            "user:1", at=later, only_if_absent=True
+        ))
+        self.assertEqual(
+            self.repo.get_by_id("user:1").withdrawal_requested_at, _FIXED_TIME
+        )
+
+    def test_a_conditional_stamp_lands_when_there_is_none(self) -> None:
+        # over-strict 짝: 조건을 "항상 거부" 로 만드는 과잉 교정이면 첫 요청조차
+        # 못 찍는다.
+        self._stored(None)
+        updated = self.repo.set_withdrawal_requested_at(
+            "user:1", at=_FIXED_TIME, only_if_absent=True
+        )
+        self.assertEqual(updated.withdrawal_requested_at, _FIXED_TIME)
+
+    def test_an_unconditional_write_still_overwrites(self) -> None:
+        # 취소(`at=None`)가 지나는 경로다 — 조건을 전역으로 켜는 과잉 교정이면
+        # 취소가 안 먹는다.
+        self._stored(_FIXED_TIME)
+        cleared = self.repo.set_withdrawal_requested_at("user:1", at=None)
+        self.assertIsNone(cleared.withdrawal_requested_at)
+
+    # --- 서비스가 그 조건을 실제로 쓰는가 ------------------------------------
+
+    def test_the_service_survives_a_stale_read_of_a_withdrawing_account(self) -> None:
+        """경쟁 재현: 조기 반환을 **지나가게** 만들고 저장소만 남긴다.
+
+        `get_by_id` 가 한 번 낡은(탈퇴 전) 값을 돌려주게 해서 서비스가 조기
+        반환을 지나치게 한다 — 동시 요청 둘 중 늦게 쓰는 쪽이 정확히 이 상태다.
+        그 뒤로 계정을 지키는 것은 **조건부 쓰기 하나뿐**이고, 그것을 무조건으로
+        되돌리면(MW-4) 이 셀이 나중 시각을 보고 실패한다.
+        """
+        self._stored(_FIXED_TIME)
+        stale = replace(self.repo.get_by_id("user:1"), withdrawal_requested_at=None)
+
+        class _StaleOnce:
+            """첫 `get_by_id` 만 낡은 값을 준다. 나머지는 진짜 저장소."""
+
+            def __init__(self, inner, stale_user):
+                self._inner, self._stale, self._served = inner, stale_user, False
+
+            def get_by_id(self, user_id):
+                if not self._served:
+                    self._served = True
+                    return self._stale
+                return self._inner.get_by_id(user_id)
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+        service = UserService(
+            _StaleOnce(self.repo, stale), hasher=_FakeHasher(),
+            clock=lambda: _FIXED_TIME + timedelta(days=7),
+            id_factory=_seq_ids(),
+        )
+        returned = service.request_withdrawal("user:1")
+        # 늦은 요청이 **먼저 찍힌 시각을 그대로** 받아야 한다.
+        self.assertEqual(returned.withdrawal_requested_at, _FIXED_TIME)
+        self.assertEqual(
+            self.repo.get_by_id("user:1").withdrawal_requested_at, _FIXED_TIME
+        )
+
+
 class PurgeDueBoundaryTest(unittest.TestCase):
     """30일 경계. **양방향**이라 `>` 도 `>=` 도 한쪽만 고르면 기명 셀이 문다."""
 
