@@ -186,8 +186,8 @@
 | [`frontend-review-inbox-decisions.md`](frontend-review-inbox-decisions.md) | Review Inbox 첫 슬라이스 범위 | Resolved |
 | [`writing-workspace-v2-w0-contract.md`](writing-workspace-v2-w0-contract.md) | Workspace V2 W0 exact contract(ProjectBrief·ordered unit·accept 원자성) | Approved — W0~W4 완료 |
 | [`chapter-scene-hierarchy-decisions.md`](chapter-scene-hierarchy-decisions.md) | 평면 ordered unit을 **장→장면 실제 계층**으로 전환(저장 모델·본문 소유·무손실 이관·정렬·Writing intent·삭제·export) | **Resolved(2026-08-28)** — D1~D6·D8=A, D7=B · 구현 진행 |
-| [`account-withdrawal-implementation-phases.md`](account-withdrawal-implementation-phases.md) | 계정 탈퇴 구현 순서(셀프 요청 · 30일 유예 · 취소 · 파기 데몬) | **Resolved** — D1~D6 확정(오너 2026-09-07) · **D4·Slice 0·1 완료** · Slice 2~5 미착수 |
-| [`slice2-withdrawal-grace-read-surface-decisions.md`](slice2-withdrawal-grace-read-surface-decisions.md) | 계정 탈퇴 Slice 2 — 유예 상태(남은 일수·취소)를 어디서 읽는가 | **Resolved** — ⓑ 별도 `GET /me/withdrawal`(오너 2026-09-08) · **Slice 2 착수 가능** |
+| [`account-withdrawal-implementation-phases.md`](account-withdrawal-implementation-phases.md) | 계정 탈퇴 구현 순서(셀프 요청 · 30일 유예 · 취소 · 파기 데몬) | **Resolved** — D1~D6 확정(오너 2026-09-07) · **D4·Slice 0~2 완료** · Slice 3~5 미착수 |
+| [`slice2-withdrawal-grace-read-surface-decisions.md`](slice2-withdrawal-grace-read-surface-decisions.md) | 계정 탈퇴 Slice 2 — 유예 상태(남은 일수·취소)를 어디서 읽는가 | **Resolved** — ⓑ 별도 `GET /me/withdrawal`(오너 2026-09-08) · **Slice 2 완료(SoT v1.8.48)** |
 | [`activity-log-replay-and-partial-decisions.md`](activity-log-replay-and-partial-decisions.md) | 활동 로그 — 재전송·idempotent replay·부분 실패가 행을 남기는가(결정 셋) | **Resolved** — D1=ⓑ · D2=유예(트리거) · D3=ⓐ(오너 2026-09-08) |
 | [`k3-context-window-guard-decisions.md`](k3-context-window-guard-decisions.md) | K-3 — 창을 모르는 호출을 예산 가드가 어떻게 다루는가(외부 API 에서 영구 미판정) | **Resolved** — ⓐ 유지(오너 2026-09-08) · **가드가 꺼져 있음을 알고 둔다** |
 | [`analysis-extractor-alignment-and-gate-exposure-decisions.md`](analysis-extractor-alignment-and-gate-exposure-decisions.md) | `analysis_extractor` 의 D4 정렬 · loop round별 gate decision 노출 | **Resolved** — 둘 다 유예 · **트리거 확정**(오너 2026-09-08) |
