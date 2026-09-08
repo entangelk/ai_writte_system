@@ -3,6 +3,7 @@ following the gate_findings/loop_audit convention so the standard suite covers
 the persistence wire without infra."""
 
 import unittest
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 from pymongo import ReturnDocument
@@ -322,6 +323,37 @@ class MongoUserRepositoryTest(unittest.TestCase):
         stored = self.repo.get_by_id("user:legacy")
         self.assertIsNotNone(stored)
         self.assertIsNone(stored.withdrawal_requested_at)
+
+    def test_the_write_face_carries_the_stamp_through_insert_and_replace(self) -> None:
+        """★ 쓰기면(`_doc`)에도 탈퇴 필드가 실려야 한다 — 독립 검증 H1(2026-09-08).
+
+        위의 두 셀은 전부 `set_withdrawal_requested_at`(=`find_one_and_update`)로
+        값을 넣으므로 **`_doc` 을 한 번도 지나지 않는다.** 그래서 `_doc` 에서 이
+        필드를 빼도 **아무 셀도 안 물렸다**(검증자 대항 변이 X1 = 0실패).
+
+        빠졌을 때 실제로 나는 일: `insert`(신규 계정)와 `replace`(가입 재요청)가
+        쓰는 문서에 키가 없어진다. 지금은 두 경로 다 값이 `None` 이라 무해하지만,
+        **`replace` 는 행을 통째로 덮으므로** 탈퇴 상태를 든 행이 그 경로를 지나면
+        스탬프가 **조용히 사라진다** — 파기 예정이던 계정이 예정에서 빠지고, 그
+        실패는 아무 데서도 안 보인다.
+
+        `_doc` 을 지나는 두 경로 모두 왕복시킨다.
+        """
+        withdrawing = replace(_user(), withdrawal_requested_at=_FIXED_TIME)
+        self.repo.insert(withdrawing)
+        self.assertEqual(
+            self.repo.get_by_id("user:1").withdrawal_requested_at, _FIXED_TIME
+        )
+        # 저장면까지: `_doc` 이 키를 안 실으면 여기서 KeyError 다.
+        self.assertEqual(
+            self.collection.docs["user:1"]["withdrawal_requested_at"], _FIXED_TIME
+        )
+
+        later = _FIXED_TIME + timedelta(days=3)
+        self.repo.replace(replace(withdrawing, withdrawal_requested_at=later))
+        self.assertEqual(
+            self.repo.get_by_id("user:1").withdrawal_requested_at, later
+        )
 
     def test_a_naive_stored_stamp_reads_back_aware(self) -> None:
         """★ pymongo 는 BSON 날짜를 **naive** 로 돌려준다.

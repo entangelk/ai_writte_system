@@ -87,7 +87,27 @@
 - 신규 셀 **26** (전이 13 · 경계 7 · 리터럴 핀 1 · Mongo 5). `tests/test_auth_users.py` 39→60 · `tests/test_auth_users_mongo.py` 17→22 — 센 것은 **그 두 파일의 `def test` 수**다.
 - 초점 전수 **229 passed / 1054 subtests**(`test_auth_users`·`test_auth_users_mongo`·`test_auth_api`·`test_create_user_script`·`test_service_policy_contract`·`test_typecheck`, 110초).
 - 변이 **7종 전부 기명 셀 재실패** · 매 회 원복 후 `git status --short` 빈 것 확인.
-- 백엔드 전수는 아래 세션 마감에 기록.
+- **백엔드 전수 `2936 passed / 1 skipped / 3876 subtests · EXIT=0`**(알파, 1893초, test-mongo ON). `skip 1 = live Chroma` 하나뿐이라 호스트 패키지 공백은 없다. 출력은 파일로 통째 캡처했다.
+
+### ★ 기준선 줄이 세 슬라이스 동안 뒤처져 있었다 (유도 기록)
+
+전수 뒤 HANDOFF 기준선(**2903 / 3839**)과 실측(**2936 / 3876**)의 차가 **+33** 인데 내가 더한 셀은 **26** 이었다. 7 을 추측으로 덮지 않고 유도했다.
+
+`git worktree add --detach <경로> <리비전>` 으로 옛 리비전을 따로 펼치고 양쪽에서 `python3 -m pytest --collect-only -q` 를 돌렸다(**수집 수 = passed + skipped** 라 31분짜리 전수를 다시 돌리지 않아도 된다).
+
+| 리비전 | 수집 | 무엇이 더해졌나 |
+|---|---|---|
+| `6eeedf5`(D4 원장 개명) | **2904** | = 기록된 2903 passed + 1 skipped — **기준선은 이 커밋의 값이었다** |
+| `285205b`(D4 하드닝 H1·H2) | 2906 | +2 (SoT v1.8.44 의 *"마이그레이션 셀 5→7"*) |
+| `8083a94`(actions.py 개수 가드) | 2909 | +3 |
+| `5759d9e`(진입점 부트스트랩) | 2911 | +2 |
+| HEAD(이 슬라이스) | **2937** | **+26** — 내 셀 수와 정확히 일치 |
+
+**결론: 기준선 줄이 틀린 게 아니라 세 슬라이스가 갱신을 안 했다.** 셀을 더한 슬라이스가 그 줄을 함께 고치는 것이 규칙이고(HANDOFF 계약 절이 README 한 줄에 대해 같은 말을 한다), 이번에 **HANDOFF·README 둘 다** 갱신했다 — README 절차 표의 칸은 `2,903` 처럼 **쉼표가 들어 있어** 순진한 `grep 2903` 이 못 찾는다(실제로 한 번 놓쳤다).
+
+subtest 축(3839→3876, +37)도 같은 방식으로 귀속했다: `test_script_entrypoints.py` 신설 **+29** · 하드닝/가드 두 파일 **+4** · `test_repo_hygiene.py` **+3**(추적 파일마다 subtest 를 내므로 그 사이 문서 커밋들이 파일을 더한 만큼 늘었다) — **내 슬라이스의 subtest 기여는 +1**(새 work_log 파일 한 개가 repo_hygiene 에 한 칸). 나머지 **1** 은 개별 파일까지 못 짚었다. 파일 인벤토리 가드의 성질과 방향이 같아 더 파지 않았다 — **적어 두는 이유는 다음 사람이 같은 1 을 보고 결함으로 읽지 않게 하기 위해서다.**
+
+**★ 그래서 subtest 수는 커버리지 대리지표가 아니다**(HANDOFF 계약 절이 이미 경고하는 바로 그 성질이 여기서 다시 확인됐다): 이 저장소에서 subtest 는 **테스트를 더하지 않아도 문서 파일 하나로 늘어난다.**
 
 ### Next steps
 
