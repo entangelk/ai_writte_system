@@ -68,6 +68,28 @@ def require_authenticated_user(request: Request):
     return user
 
 
+_READ_METHODS = frozenset({"GET", "HEAD"})
+
+
+def require_active_user_for_write(
+    request: Request,
+    current=Depends(require_authenticated_user),
+):
+    """탈퇴 유예 중인 계정은 조회만 통과시킨다(D1=C).
+
+    요청·취소 자체는 별도 인증 스택을 쓴다. 그래야 유예 중 취소가 닿고,
+    Slice 1 의 재요청 200 멱등 계약도 유지된다. 이 가드는 프로젝트 소유권
+    뒤·quota 앞에 선언되므로 404·타인 403 경계를 바꾸지 않고 비용도
+    발생시키지 않는다.
+    """
+    if (
+        current.withdrawal_requested_at is not None
+        and request.method not in _READ_METHODS
+    ):
+        raise HTTPException(status_code=403, detail="account withdrawal is pending")
+    return current
+
+
 # C-2 read-only. HEAD rides along with GET because Starlette answers it from the
 # same route; both are side-effect free by HTTP contract.
 _GRANTED_METHODS = frozenset({"GET", "HEAD"})
@@ -323,14 +345,22 @@ def require_admin_user(current=Depends(require_authenticated_user)):
     return current
 
 
-# One shared list so every protected operation declares the *same* dependency
-# object. ``dependencies=`` copies it per route, so sharing is safe.
-_REQUIRE_AUTH = [Depends(require_authenticated_user)]
+# Slice 2 (D1=C): authenticated reads pass through this same stack, while writes
+# stop here. Withdrawal POST/DELETE deliberately use the narrower stack below:
+# cancellation must remain reachable and repeat requests keep Slice 1 idempotency.
+_REQUIRE_AUTH = [
+    Depends(require_authenticated_user),
+    Depends(require_active_user_for_write),
+]
+
+
+_REQUIRE_AUTH_DURING_WITHDRAWAL = [Depends(require_authenticated_user)]
 
 
 _REQUIRE_PROJECT_OWNER = [
     Depends(require_authenticated_user),
     Depends(require_project_owner),
+    Depends(require_active_user_for_write),
 ]
 
 
@@ -341,6 +371,7 @@ _REQUIRE_PROJECT_OWNER = [
 _REQUIRE_ADMIN = [
     Depends(require_authenticated_user),
     Depends(require_admin_user),
+    Depends(require_active_user_for_write),
 ]
 
 

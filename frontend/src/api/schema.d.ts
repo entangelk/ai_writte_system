@@ -403,7 +403,14 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Read My Withdrawal
+         * @description 새로고침 후에도 유예 상태와 파기 예정 시각을 다시 읽는다.
+         *
+         *     ``/auth/me`` 를 넓히지 않는다. 탈퇴는 대다수 요청과 무관한 축이고,
+         *     ``UserPayload`` 는 로그인 응답과 공유되므로 별도 표면이 변경 반경을 좁힌다.
+         */
+        get: operations["read_my_withdrawal_me_withdrawal_get"];
         put?: never;
         /**
          * Request My Withdrawal
@@ -4582,6 +4589,53 @@ export interface operations {
             };
         };
     };
+    read_my_withdrawal_me_withdrawal_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WithdrawalResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
     request_my_withdrawal_me_withdrawal_post: {
         parameters: {
             query?: never;
@@ -4738,6 +4792,15 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

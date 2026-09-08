@@ -169,6 +169,11 @@ def _protected(declaration: dict[int | str, dict]) -> dict[int | str, dict]:
     return {401: _ERROR, **declaration}
 
 
+def _active_write(declaration: dict[int | str, dict]) -> dict[int | str, dict]:
+    """Declare the 403 face for a non-project authenticated write (D1=C)."""
+    return {403: _ERROR, **declaration}
+
+
 def _owned(declaration: dict[int | str, dict]) -> dict[int | str, dict]:
     """Declare the 403 face added by the project ownership dependency."""
     return {403: _ERROR, **declaration}

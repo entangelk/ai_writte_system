@@ -62,6 +62,7 @@ from services.application.app.memory.service import (
 from services.application.app.main import create_app
 from services.application.app.api.dependencies import (
     enforce_quota,
+    require_active_user_for_write,
     require_admin_user,
     require_authenticated_user,
     require_project_owner,
@@ -138,7 +139,7 @@ def _client(*, ttl=timedelta(hours=1), core_sot=None, index_sync_outbox=None,
 
 
 class SelfWithdrawalApiTest(unittest.TestCase):
-    """셀프 탈퇴 요청·취소 (계정 탈퇴 Slice 1, 오너 결정 2026-09-07).
+    """셀프 탈퇴 요청·취소·상태 조회 (Slice 1·2, 오너 결정 2026-09-07·08).
 
     **이 슬라이스도 아무것도 지우지 않는다** — 유예를 시작하고 되돌릴 뿐이다.
     실제 파기는 Slice 3 의 데몬이고, 유예 중 접근 제한은 Slice 2(D1=C)다.
@@ -163,6 +164,18 @@ class SelfWithdrawalApiTest(unittest.TestCase):
         # 생기고, 상수를 고친 날 화면만 다른 날짜를 말한다.
         self.assertEqual(due - requested, WITHDRAWAL_GRACE_PERIOD)
 
+    def test_the_dedicated_read_surface_reports_active_and_withdrawing_states(self) -> None:
+        client, _ = self._logged_in()
+        active = client.get("/me/withdrawal")
+        self.assertEqual(active.status_code, 200)
+        self.assertEqual(
+            active.json(),
+            {"withdrawal_requested_at": None, "purge_due_at": None},
+        )
+
+        requested = client.post("/me/withdrawal").json()
+        self.assertEqual(client.get("/me/withdrawal").json(), requested)
+
     def test_requesting_deletes_nothing_and_leaves_the_session_usable(self) -> None:
         # Slice 0 의 인계 문장이 HTTP 면에서도 성립하는지. 유예 중에도 로그인
         # 상태가 살아 있어야 취소 버튼에 닿는다(D1=C).
@@ -170,6 +183,47 @@ class SelfWithdrawalApiTest(unittest.TestCase):
         client.post("/me/withdrawal")
         self.assertEqual(client.get("/auth/me").status_code, 200)
         self.assertEqual(client.get("/projects").status_code, 200)
+
+    def test_grace_period_allows_reads_but_refuses_state_changing_writes(self) -> None:
+        """Under-strict: D1=C blocks writes while preserving every read surface."""
+        client, _ = self._logged_in()
+        project_id = client.post("/projects", json={"name": "Novel"}).json()["id"]
+        client.post("/me/withdrawal")
+
+        self.assertEqual(client.get("/projects").status_code, 200)
+        self.assertEqual(client.get(f"/projects/{project_id}/chapters").status_code, 200)
+        self.assertEqual(
+            client.post("/projects", json={"name": "Blocked"}).status_code,
+            403,
+        )
+        self.assertEqual(
+            client.post(
+                f"/projects/{project_id}/chapters", json={"title": "Blocked"}
+            ).status_code,
+            403,
+        )
+
+    def test_a_billable_write_is_refused_before_quota_or_handler_work(self) -> None:
+        client, _ = self._logged_in()
+        project_id = client.post("/projects", json={"name": "Novel"}).json()["id"]
+        client.post("/me/withdrawal")
+
+        # No job exists and the default app has no quota service. Either 404 or
+        # 503 would prove a later layer ran; withdrawal must stop it first.
+        response = client.post(
+            f"/projects/{project_id}/analysis/jobs/missing/run"
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_cancelling_removes_every_grace_period_restriction(self) -> None:
+        """Over-strict: the guard follows current state, not withdrawal history."""
+        client, _ = self._logged_in()
+        client.post("/me/withdrawal")
+        self.assertEqual(client.delete("/me/withdrawal").status_code, 200)
+        self.assertEqual(
+            client.post("/projects", json={"name": "Allowed again"}).status_code,
+            200,
+        )
 
     def test_a_repeat_request_is_idempotent_and_keeps_the_first_stamp(self) -> None:
         # under-strict: 재요청이 시각을 다시 찍으면 두 번 누르는 것만으로 자기
@@ -235,6 +289,7 @@ class SelfWithdrawalApiTest(unittest.TestCase):
 
     def test_both_operations_are_401_without_a_session(self) -> None:
         client, _, _ = _client()
+        self.assertEqual(client.get("/me/withdrawal").status_code, 401)
         self.assertEqual(client.post("/me/withdrawal").status_code, 401)
         self.assertEqual(client.delete("/me/withdrawal").status_code, 401)
 
@@ -258,7 +313,7 @@ class SelfWithdrawalApiTest(unittest.TestCase):
         other.post("/auth/login", json={"username": "bob", "password": "pw"})
         self.assertEqual(other.delete("/me/withdrawal").status_code, 409)
 
-    def test_neither_operation_declares_a_403(self) -> None:
+    def test_no_withdrawal_operation_declares_a_403(self) -> None:
         # 위 셀의 짝: 선언면에서도 403 이 없어야 "확인할 소유자가 없다" 가 계약이
         # 된다. 403 을 더하면 화면이 오지 않을 응답을 처리하게 된다.
         app = create_app()
@@ -269,6 +324,57 @@ class SelfWithdrawalApiTest(unittest.TestCase):
                 self.assertNotIn(403, route.responses)
                 self.assertIn(401, route.responses)
                 self.assertIn(409, route.responses)
+
+    def test_every_protected_operation_declares_the_grace_period_guard(self) -> None:
+        """No new authenticated write may open outside D1=C by accident."""
+        exemptions = {
+            ("/me/withdrawal", "post"),
+            ("/me/withdrawal", "delete"),
+        }
+        seen_exemptions = set()
+        app = create_app()
+        for route in app.routes:
+            if not isinstance(route, APIRoute):
+                continue
+            declared = [dependency.dependency for dependency in route.dependencies]
+            if require_authenticated_user not in declared:
+                continue
+            for method in route.methods:
+                operation = (route.path, method.lower())
+                with self.subTest(operation=operation):
+                    if operation in exemptions:
+                        seen_exemptions.add(operation)
+                        self.assertNotIn(require_active_user_for_write, declared)
+                    else:
+                        self.assertIn(require_active_user_for_write, declared)
+        self.assertEqual(seen_exemptions, exemptions)
+
+    def test_every_guarded_write_declares_403(self) -> None:
+        """Runtime refusal and OpenAPI stay the same mechanical truth."""
+        app = create_app()
+        for route in app.routes:
+            if not isinstance(route, APIRoute):
+                continue
+            declared = [dependency.dependency for dependency in route.dependencies]
+            if require_active_user_for_write not in declared:
+                continue
+            for method in route.methods - {"GET", "HEAD"}:
+                with self.subTest(operation=(route.path, method.lower())):
+                    self.assertIn(403, route.responses)
+
+    def test_the_grace_guard_precedes_quota_on_every_billable_route(self) -> None:
+        app = create_app()
+        for route in app.routes:
+            if not isinstance(route, APIRoute):
+                continue
+            declared = [dependency.dependency for dependency in route.dependencies]
+            if enforce_quota not in declared:
+                continue
+            with self.subTest(path=route.path):
+                self.assertLess(
+                    declared.index(require_active_user_for_write),
+                    declared.index(enforce_quota),
+                )
 
 
 class LoginTest(unittest.TestCase):
@@ -706,7 +812,8 @@ class ProjectAuthorizationTest(unittest.TestCase):
         """Declaration guard in both directions: scoped routes only, no drift.
 
         D8-5 widened the *declaration* half: 403 gained its second producer (the
-        admin boundary) and signup approval (owner 2026-08-22) its third — so
+        admin boundary), signup approval its third, quota suspension its fourth,
+        and withdrawal grace its fifth — so
         "declares 403" no longer means "is project-scoped". The dependency half
         stayed exact — the ownership dependency belongs on `{project_id}` routes
         and nowhere else, which is the property this class exists to protect.
@@ -772,7 +879,13 @@ class ProjectAuthorizationTest(unittest.TestCase):
                         self.assertIn("401", responses)
                     else:
                         self.assertEqual(
-                            "403" in responses, expected or admin_guarded
+                            "403" in responses,
+                            expected
+                            or admin_guarded
+                            or (
+                                require_active_user_for_write in declared
+                                and method not in {"get", "head"}
+                            ),
                         )
 
 
@@ -1917,6 +2030,8 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
                                     "확인할 소유자도 거절할 타인도 없다. 남의 계정 "
                                     "탈퇴는 **경로가 없어서** 못 한다",
         ("/me/withdrawal", "delete"): "같은 이유. 취소도 자기 것에만 한다",
+        ("/me/withdrawal", "get"): "계정 탈퇴 Slice 2 — 상태 조회도 세션 주체 자신의 "
+                                   "사실이고 남의 계정을 지목하지 않는다",
     }
 
     # D8-5's tier. Admin operations name no project on purpose: the admin
@@ -2047,10 +2162,10 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # 더해 75/101 이 됐고, Slice 5(같은 날)가 그룹 승인 POST 를 더해
         # 76/102 이 됐다.
         # 계정 탈퇴 Slice 1(2026-09-08)이 셀프 탈퇴 요청·취소 2경로를 **인증 전용**
-        # tier 에 더해 104 가 됐다(project tier 는 무변 76 — 계정 축이라 project 를
-        # 지목하지 않는다).
+        # tier 에 더해 104 가 됐고, Slice 2 상태 GET 이 105 를 만든다
+        # (project tier 는 무변 76 — 계정 축이라 project 를 지목하지 않는다).
         self.assertEqual(len(by_tier["project"]), 76)
-        self.assertEqual(len(tiers), 104)
+        self.assertEqual(len(tiers), 105)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:
@@ -2067,11 +2182,9 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         #     even though the sub-dependency would still resolve.
         #   * a repeated identity is the drift a copy-pasted `dependencies=`
         #     list produces, and it makes "is this route guarded" ambiguous.
-        #   * 403 has three producers: D8-5's two boundaries (ownership, admin)
-        #     and — since signup approval (owner 2026-08-22) — the login
-        #     handshake itself, which answers 403 to a correct password on a
-        #     pending/rejected account. That third producer lives only on
-        #     /auth/login; a 403 on any other operation is a false declaration.
+        #   * 403 has five producers: ownership, admin, signup status, quota
+        #     suspension, and withdrawal grace. The last shares existing
+        #     project/admin declarations except for POST /projects.
         for route, path, method, tier in self._tiers():
             with self.subTest(path=path, method=method):
                 declared = [d.dependency for d in route.dependencies]
@@ -2090,7 +2203,12 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
                     self.assertIn("403", responses)
                 else:
                     self.assertEqual(
-                        tier in ("project", "admin"), "403" in responses
+                        tier in ("project", "admin")
+                        or (
+                            require_active_user_for_write in declared
+                            and method not in {"get", "head"}
+                        ),
+                        "403" in responses,
                     )
                 # The two authorization boundaries are alternatives, never a
                 # stack: an operation behind both would have two different

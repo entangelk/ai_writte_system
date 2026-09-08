@@ -41,6 +41,7 @@ from ..auth.users import (
 )
 from ..api.dependencies import (
     _REQUIRE_AUTH,
+    _REQUIRE_AUTH_DURING_WITHDRAWAL,
     current_user_or_none,
     require_authenticated_user,
 )
@@ -244,7 +245,7 @@ def register_auth(app, *, users, sessions, core_sot, activity, login_guard,
             },
         }
 
-    # --- 회원 셀프 탈퇴 (오너 결정 2026-09-07 · Slice 1) --------------------
+    # --- 회원 셀프 탈퇴 (오너 결정 2026-09-07·08 · Slice 1·2) ----------------
     #
     # **경로가 대상을 지목하지 않는 것이 설계다.** `/me/…` 라 주체는 세션이 정하고
     # 남의 계정을 향한 요청은 **만들 수 없다** — 그래서 이 두 operation 에는 403 이
@@ -264,8 +265,21 @@ def register_auth(app, *, users, sessions, core_sot, activity, login_guard,
             "purge_due_at": purge_due_at(user),
         }
 
+    @app.get("/me/withdrawal", response_model=WithdrawalResponse,
+             responses=_ERRORS_WITHDRAWAL, dependencies=_REQUIRE_AUTH)
+    async def read_my_withdrawal(
+        current=Depends(require_authenticated_user),
+    ) -> dict[str, object]:
+        """새로고침 후에도 유예 상태와 파기 예정 시각을 다시 읽는다.
+
+        ``/auth/me`` 를 넓히지 않는다. 탈퇴는 대다수 요청과 무관한 축이고,
+        ``UserPayload`` 는 로그인 응답과 공유되므로 별도 표면이 변경 반경을 좁힌다.
+        """
+        return _withdrawal_payload(current)
+
     @app.post("/me/withdrawal", response_model=WithdrawalResponse,
-              responses=_ERRORS_WITHDRAWAL, dependencies=_REQUIRE_AUTH)
+              responses=_ERRORS_WITHDRAWAL,
+              dependencies=_REQUIRE_AUTH_DURING_WITHDRAWAL)
     async def request_my_withdrawal(
         current=Depends(require_authenticated_user),
     ) -> dict[str, object]:
@@ -284,7 +298,8 @@ def register_auth(app, *, users, sessions, core_sot, activity, login_guard,
         return _withdrawal_payload(user)
 
     @app.delete("/me/withdrawal", response_model=WithdrawalResponse,
-                responses=_ERRORS_WITHDRAWAL, dependencies=_REQUIRE_AUTH)
+                responses=_ERRORS_WITHDRAWAL,
+                dependencies=_REQUIRE_AUTH_DURING_WITHDRAWAL)
     async def cancel_my_withdrawal(
         current=Depends(require_authenticated_user),
     ) -> dict[str, object]:

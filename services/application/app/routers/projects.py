@@ -44,6 +44,7 @@ from ..api.errors import (
     _ERRORS_404,
     _ERRORS_404_409,
     _ERRORS_STORAGE,
+    _active_write,
     _owned,
 )
 from ..api.dependencies import (
@@ -66,7 +67,7 @@ def register_projects(
         return {"id": project.id, "name": project.name, "archived": project.archived}
 
     @app.post("/projects", response_model=ProjectPayload,
-              responses=_ERRORS_STORAGE,
+              responses=_active_write(_ERRORS_STORAGE),
               dependencies=_REQUIRE_AUTH)
     async def create_project(
         request: CreateProjectRequest,
