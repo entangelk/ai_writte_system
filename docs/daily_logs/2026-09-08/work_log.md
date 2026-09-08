@@ -129,9 +129,13 @@ subtest 축(3839→3876, +37)도 같은 방식으로 귀속했다: `test_script_
 
 `request_withdrawal` 의 첫 시각 보존은 **읽기-쓰기라 원자적이지 않다**(동시 첫 요청 둘 → 나중 시각이 이긴다). **지금 열지 않는 이유**: 도달 경로가 없다(Slice 1 전이라 HTTP 표면 자체가 없고, 생기면 같은 동작 5초 최소 창이 연속 클릭을 429로 막는다). **트리거**: *"Slice 1 이 이 전이를 유료 아닌 경로로 열면서 확인 헤더 재전송을 허용하는 순간"*, 또는 **Slice 3 데몬이 같은 행을 경쟁적으로 claim 하게 될 때** — 그때 필요한 것은 잠금이 아니라 **조건부 갱신**(`withdrawal_requested_at` 이 없을 때만 set)이고, 그것은 저장소 seam 의 모양을 바꾸는 결정이라 Slice 1 착수 브리프에서 다룬다.
 
-### CHANGELOG 를 안 쓴 판단
+### CHANGELOG 를 안 쓴 판단 — ❌ **틀렸다(2026-09-08 세션 42 정정)**
 
-**Slice 0 은 CHANGELOG 행을 만들지 않는다.** 기록 규칙이 *"major design or feature changes (not every small edit)"* 이고, 이 슬라이스는 **사용자에게 보이는 것이 하나도 없는 백엔드 상태 축**이다. 바로 앞 선례가 같은 성질이었고 같은 판단을 받았다 — **D4(원장 소유 축 개명)도 CHANGELOG 행이 없다**(SoT v1.8.43 만 있다). 탈퇴 기능의 CHANGELOG 행은 **화면이 붙는 Slice 4~5 에서** 한 번 쓴다. *(검증자가 "행이 오는지 확인해 달라"고 남긴 열린 질문에 대한 답이다 — 누락이 아니라 판단이다.)*
+> **아래 단락의 근거가 사실이 아니다.** *"D4 도 CHANGELOG 행이 없다"* 고 적었는데 **D4 는 행을 갖고 있다**(`계정 탈퇴 D1~D6 확정 + 원장 소유 축 개명(SoT v1.8.43)`). 잘못 추측한 문구로 grep 해 0건이 나온 것을 *"선례 없음"* 으로 단정했다. 이 저장소의 관행은 **SoT 버전이 오르는 슬라이스마다 한 행**이고 코드 무변 문서 슬라이스까지 포함한다. Slice 0·1 을 묶은 행을 세션 42 에서 실었다. 경위는 세션 42 ③.
+>
+> **원문을 지우지 않고 남긴다** — 틀린 판단이 어떤 모양이었는지가 교훈의 일부다.
+
+**Slice 0 은 CHANGELOG 행을 만들지 않는다.** 기록 규칙이 *"major design or feature changes (not every small edit)"* 이고, 이 슬라이스는 **사용자에게 보이는 것이 하나도 없는 백엔드 상태 축**이다. 바로 앞 선례가 같은 성질이었고 같은 판단을 받았다 — ~~**D4(원장 소유 축 개명)도 CHANGELOG 행이 없다**(SoT v1.8.43 만 있다)~~. 탈퇴 기능의 CHANGELOG 행은 **화면이 붙는 Slice 4~5 에서** 한 번 쓴다. *(검증자가 "행이 오는지 확인해 달라"고 남긴 열린 질문에 대한 답이다 — 누락이 아니라 판단이다.)*
 
 ### 별건 — 개발 스택이 8일 내려가 있었다 (검증자 발견·복구)
 
@@ -193,7 +197,7 @@ H2(첫 시각 보존의 원자성)를 저장소 조건부 쓰기(`only_if_absent
 
 | 변이 | diff | 재실패한 셀(이름) |
 |---|---|---|
-| MW-1 멱등 파괴 | 조기 반환 삭제 + `only_if_absent=False` | API `test_a_repeat_request_is_idempotent…` · 도메인 `test_a_repeat_request_keeps_the_first_stamp` (**2**) |
+| MW-1 멱등 파괴 | 조기 반환 삭제 + `only_if_absent=False` | API `test_a_repeat_request_is_idempotent…` · 도메인 `test_a_repeat_request_keeps_the_first_stamp` · `test_the_service_survives_a_stale_read…` (**3**) |
 | MW-2 취소 no-op | `WithdrawalNotRequested` raise 삭제 | `test_cancelling_without_a_request_is_409_not_404` · `test_the_subject_is_the_session_not_a_path_argument` · `test_cancelling_an_account_that_never_asked_is_refused` (**3**) |
 | MW-3 **over-strict** 403 선언 | `_ERRORS_WITHDRAWAL` 에 `403` 추가 | `test_neither_operation_declares_a_403` 2 + 기존 경계 행렬 `ProjectAuthorizationTest`·`CombinedBoundaryMatrixTest` 각 2 (**6 subtests**) |
 | MW-4 조건부 → 무조건 | `only_if_absent=False` | **셀 추가 전 0실패**(무가드) → 추가 후 `test_the_service_survives_a_stale_read_of_a_withdrawing_account` (**1**) |
@@ -203,7 +207,7 @@ H2(첫 시각 보존의 원자성)를 저장소 조건부 쓰기(`only_if_absent
 ### Verification (세션 41)
 
 - 신규 **17셀**(API 11 · 도메인 4 · Mongo 2). `test_auth_api.py` +11 · `test_auth_users.py` 27→31 · `test_auth_users_mongo.py` 23→25.
-- 초점 전수 **277 passed / 1244 subtests**(auth_api·auth_users·auth_users_mongo·activity_actions·activity_log·billable_actions·typecheck).
+- 초점 전수 **283 passed / 1244 subtests**(auth_api·auth_users·auth_users_mongo·activity_actions·activity_log·billable_actions·typecheck, EXIT=0).
 - `schema.d.ts` 재생성 후 `npx tsc --noEmit` **rc=0**. **★ `cwd` 가 `frontend/` 로 남는다** — 함정 절이 경고하는 자리라 이후 명령을 전부 절대경로로 썼다.
 - 변이 6종 기명 재실패(위 표) · 매회 원복 후 트리 clean.
 - **백엔드 전수 `2954 passed / 1 skipped / 3900 subtests · EXIT=0`**(알파, 1371초). `skip 1 = live Chroma` 하나뿐.
@@ -219,6 +223,41 @@ H2(첫 시각 보존의 원자성)를 저장소 조건부 쓰기(`only_if_absent
 
   이로써 오늘 같은 관찰이 **세 번째**다: subtest 수는 커버리지 대리지표가 아니다. 문서 파일 하나로도(세션 39·40), **operation 하나로도** 는다.
 - HANDOFF 기준선 · README ② 행 둘 다 이 값으로 갱신했다.
+
+---
+
+## 세션 42 — Slice 1 독립 검증 수령 · 기록 정확성 3건 보강 (기록 `f55ad01`)
+
+독립 검증 **판정 합격 · 차단 0**([`verifications/2026-09-08/`](../../verifications/2026-09-08/)). 초점 283·전수 2954/1/3900·403 부재 계약·계획서 두 줄 정정·등재 6축·변이 9종(구현자 6 재유도 + 대항 3)이 전부 재현됐고, **내 자기포착(MW-4 무가드)의 폐쇄가 셀 수준에서 실증**됐다(X1·MW-4 각 1실패).
+
+비차단 지적 셋을 **그대로 받지 않고 직접 확인**한 뒤 전부 반영했다.
+
+### ① 초점 "277" 은 낡은 측정이었다 — 확인
+
+세션 41 이 적은 277 은 **H2 셀 6개 커밋(`374d93f`) 이전 트리**에서 잰 값인데 마감 기록까지 흘러들었다. 최종 트리 재측정 **283**(277+6 정확히 성립, subtests 1244 불변). 표기 문제이지 잠금 문제가 아니다.
+
+**★ 교훈은 순서다** — 초점 전수를 *셀을 더하기 전에* 재고 그 수를 마감 기록에 옮겨 적었다. 셀을 더하는 커밋이 뒤에 오면 **그 앞의 모든 측정치가 낡는다.** 마감 기록의 수는 **마지막 커밋 뒤에** 다시 잰다.
+
+### ② 변이 표 MW-1 "2실패" 도 같은 낡음 — 확인
+
+최종 트리 재측정 **3**(경쟁 재현 셀 `test_the_service_survives_a_stale_read_of_a_withdrawing_account` 가 추가로 문다 — MW-1 이 조기 반환과 조건부 쓰기를 **함께** 되돌리므로 당연히 그 셀도 걸린다). ①과 같은 뿌리다.
+
+### ③ ★ CHANGELOG 판단이 틀렸다 — 잘못 추측한 grep 하나 위에 세운 결론
+
+세션 40 에서 *"Slice 0 은 CHANGELOG 행을 만들지 않는다"* 고 적으며 근거로 **"D4 도 CHANGELOG 행이 없다"** 를 들었다. **사실이 아니다.** D4 는 행을 갖고 있다 — `| 2026-09-07 | **계정 탈퇴 D1~D6 확정 + 원장 소유 축 개명(SoT v1.8.43).**` 이고, D4 하드닝(v1.8.44)도 별도 행이며, **코드가 전혀 안 바뀐 문서 슬라이스**(v1.8.40·v1.8.41·v1.8.42)까지 행이 있다.
+
+**왜 놓쳤나**: `grep "원장의 소유 축 개명\|target_user_id" CHANGELOG.md` 로 찾았는데 실제 문구는 *"원장 소유 축 개명"*(**의** 없음)이었다. 0건이 나오자 **"선례 없음"으로 단정**했고 그 위에 판단을 세웠다.
+
+**★ 남는 교훈**: *"grep 이 0 건"* 은 **"없다"가 아니라 "내가 추측한 문구가 없다"** 이다. 부재를 근거로 판단할 때는 **넓은 축으로 한 번 더** 본다(여기서는 `grep -o "^| 2026-09-07 | \*\*[^*]*\*\*"` 로 그날 행 전체를 보는 것 — 11행이 한눈에 나왔고 D4 가 그 안에 있었다). 이 저장소의 실제 관행은 **SoT 버전이 오르는 슬라이스마다 한 행**이다.
+
+→ Slice 0·1 을 **묶은 행 하나**를 CHANGELOG 에 실었다(두 SoT 버전을 함께 명기 — 검증자 권고는 1행, 저장소 관행은 버전당 1행이라 양쪽을 만족시킨다). 세션 40 의 그 판단 단락은 **틀린 근거를 남기지 않도록** 정정 표시와 함께 고쳤다.
+
+### Verification (세션 42)
+
+- 초점 7파일 재측정 **283 passed / 1244 subtests**(89초).
+- MW-1 최종 트리 재측정 → 기명 셀 **3실패** → 원복 → 트리 clean(프리플라이트 공백 확인).
+- CHANGELOG 선례를 그날 행 전체 열거로 재확인(11행 중 D4 행 실재).
+- `test_docs_indexes` 는 CHANGELOG 행 추가 뒤 함께 돌린다.
 
 ### Next steps
 
