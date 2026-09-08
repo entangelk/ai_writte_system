@@ -276,8 +276,12 @@ def main():
                and (b["start_offset"], b["end_offset"]) not in covered]
     check("S8 all final blocks have source refs", [], missing)
 
-    # --- S9 4001-char body: same rejection face as ordinary save.
-    oversized = "가" * 4001
+    # --- S9 6001-char body: same rejection face as ordinary save.
+    # 상한이 오너 결정으로 4000→6000 자(2026-09-08, env.py::DRAFT_RAW_TEXT_MAX_CHARS).
+    # 이 셀은 스키마 422 가 handler 상태 검사(이미 final → 409)보다 **앞선다**는
+    # 사실까지 함께 잠근다 — 4001 로 두면 바디가 유효해져 finalize 가 409 로 갈리고
+    # "저장과 같은 거절 면" 이라는 시나리오의 의도가 사라진다.
+    oversized = "가" * 6001
     final_too_long = client.post(
         f"/projects/{pid}/drafts/{did}/finalize",
         json={"raw_text": oversized, "idempotency_key": "final-key-9"},
