@@ -353,6 +353,68 @@ llama 를 ⓐ 로 고른 근거가 *"어차피 빌드할 때 볼륨으로 들어
 
 ---
 
+## 세션 45 — 계정 탈퇴 Slice 2: 유예 중 접근 규칙 (SoT v1.8.48)
+
+> **이 세션은 두 번에 걸쳤다.** 구현·가드 셀·CRUD 정확 집합까지를 앞선 작업 세션이 커밋(`e04c863`·`a0801f0`·`fa05f18`)하고 사용량 한도로 멈췄다. 이어받은 세션이 변이 실증·전수 기준선·이 기록을 마쳤다. 중단 시점의 미완은 **기록**이었다 — CHANGELOG 과 SoT v1.8.48 행은 "세션 45"를 가리키는데 이 절이 없었다.
+
+### 1. 설계 판단 (앞선 세션 · 커밋 `e04c863`)
+
+- **별도 읽기 표면(오너 ⓑ)** — `GET /me/withdrawal`을 `WithdrawalResponse`·`_ERRORS_WITHDRAWAL` 재사용으로 열고 `/auth/me`·`UserPayload`(로그인 응답과 공유)은 무변. operation 104→**105**(project 76·admin 17 무변).
+- **중앙 dependency `require_active_user_for_write`** — 스탬프가 있고 method 가 GET·HEAD 밖이면 403 `account withdrawal is pending`. 세 스택(`_REQUIRE_AUTH`·`_REQUIRE_PROJECT_OWNER`·`_REQUIRE_ADMIN`) 끝에 각각 붙는다.
+- **예외 스택 `_REQUIRE_AUTH_DURING_WITHDRAWAL`(인증만)** — `POST`·`DELETE /me/withdrawal`이 쓴다. **재요청의 200 멱등(Slice 1)과 취소의 상시 도달(D5)이 예외인 이유다** — 가드 스택에 두면 두 번째 누름부터 403이고 취소 자체가 막힌다.
+- **유료 순서 = 인증 → 소유권 → 가드 → quota.** 소유권이 먼저 답하므로 404·타인 403 경계가 탈퇴 문구로 덧칠되지 않고(3절 MS2-7), 탈퇴 계정은 quota 입장에 닿지 않는다(사용량·잠금을 건드리지 않는다).
+- **가드 밖은 셋** — `/auth/login`(공개)·`/auth/logout`(공개·멱등 — 유예 중 로그아웃도 닿는다)·`/auth/me`(session probe — 가드를 안 쓰는 것이 계약).
+- **선언** — `_active_write()` 헬퍼로 `POST /projects`에 403 면. 403 생산자 넷→**다섯**(SoT §403 행 갱신).
+
+### 2. 실행 환경 — 하루에 세 가지가 겹쳤다
+
+① 앞선 세션: 호스트 pytest가 첫 동기 dependency에서 정체(시스템 전역 스레드 과다 — 병행 세션 부하) → 컨테이너 격리로 우회. ② 이어받은 세션: **docker 데몬이 병행 세션의 빌드와 함께 요량 불량** — 이미지 태그가 `docker images`엔 보이는데 `run`이 못 찾는 현상 3회, `docker system df` 교착 1회 → 지속 컨테이너 + `docker exec` 패턴으로 버티다가 최종적으로 **호스트 직접 실행으로 복귀**(위생 가드가 git 을 쓰므로 호스트가 오히려 견고했다). ③ 컨테이너 위생 가드는 루트 소유 마운트라 `git ls-files`가 exit 128(dubious ownership) — `git config --global --add safe.directory /workspace`로 해결. **"불가"라고 말하기 전에 상태를 직접 확인한다**는 규칙의 사례가 하루에 셋 들어왔다.
+
+### 3. 변이 7종 — SoT 행의 주장을 이어받은 세션이 전부 재실행했다
+
+행이 *"변이 7종 기명 재실패"*라고 썼으나 앞선 세션 기록에 증적이 없었다. 초점(`test_auth_api`+`test_application_api` **280 passed / 1773 subtests**, 컨테이너, 리비전 `7e73233`)을 기준으로 변이 → 실행 → `git checkout -- <경로>` → clean 확인을 반복했다(병행 세션의 미커밋 파일이 있으므로 원복은 변이 대상 경로만).
+
+| 변이 | diff | 방향 | 재실패(기명 셀) |
+|---|---|---|---|
+| MS2-1 | 가드 조건 `and False` | under | **3** — `billable_write_is_refused_before_quota` · `grace_period_allows_reads` · `bidirectional_at_the_dependency_seam` |
+| MS2-2 | `_READ_METHODS`→빈 집합 | over | **4** — 위 2 + `requesting_deletes_nothing` + `dedicated_read_surface` |
+| MS2-3 | 탈퇴 POST/DELETE를 `_REQUIRE_AUTH`로 | over | **12** — 취소 3종·재요청 멱원 1 + 선언 스윕 8(`every_guarded_write_declares_403`·`every_protected_operation_declares`·경계행렬 2종) |
+| MS2-4 | billable 스택에서 quota 를 가드 앞으로 | 순서 | **11 subtests** — `grace_guard_precedes_quota` × 11 유료 경로 |
+| MS2-5 | `POST /projects` 403 선언 제거 | 선언 | **5** — `every_guarded_write_declares_403` · CRUD 정확 집합 2 · 경계행렬 2 |
+| MS2-6 | `_REQUIRE_ADMIN`에서 가드 제거 | under | **17** — `every_protected_operation_declares` × 17 admin operation |
+| MS2-7 | 가드를 소유권 **앞으로** | over | **0 — 무가드** |
+
+**★ MS2-7이 무가드였다.** 소유권 403과 탈퇴 403이 **같은 상태코드**라 status 단정은 둘을 못 가르고 detail을 보는 셀이 없었다. 핀 셀 `test_the_guard_sits_behind_the_ownership_boundary`(커밋 `19e422b`)로 닫았다 — 없는 프로젝트는 **404**, 남의 프로젝트는 소유권 **`forbidden`** 403으로 detail까지 단정한다. **그때의 SoT 행 "변이 7종 기명 재실패"는 사실이 아니었다** — 세션 46 뒤 `79c065a`로 행이 정정됐고, 핀 셀의 물림(재변이 시 `403 != 404`)은 오너 세션이 독립 재현해 기록했다. *"처방을 넣었다"와 "닫았다"는 다른 말이다*가 Slice 0·1에 이어 이 슬라이스에서도 성립했다 — 다른 점은 **이번엔 변이를 돌린 쪽이 커밋 전에 빈 자리를 봤다**는 것.
+
+### 4. 전수 — 두 번에 걸쳐 초록을 만들었다
+
+첫 전수(컨테이너, git 설치했으나 `safe.directory` 누락): **2958 passed / 1 skipped / 3518 subtests** — 5실패. 4건은 2절 ③ 환경(위생), **1건은 실제 회귀**: `test_final_save_analysis` S9 — 오너 세션의 상한 6000자 커밋(`97bc149`)이 핀 셀만 고치고 **pytest 전수가 실행하는 재현 스크립트**(`docs/verifications/2026-09-01/repro_final_save_flow.py`)의 4001자 경계를 놓쳤다. 4001자가 유효해지자 finalize가 스키마 422를 못 받고 handler 상태 검사(이미 final)의 **409**로 갈렸다 → 경계를 6001로 옮겨 수정(커밋 `b4b1d7c`). **재현 스크립트가 기록용 장식이 아니라 살아있는 인프라라는 것이 이 사건의 본체다** — `tests/test_final_save_analysis.py`가 import 해서 돌린다.
+
+최종 전수(호스트, test-mongo ON, git 내장): **2963 passed / 1 skipped / 4086 subtests · EXIT=0**(1488초, 커밋 `b4b1d7c`). skip 1 = live Chroma 하나뿐.
+
+**증분 전건 귀속**(`git worktree add --detach /tmp/attr_939 939d1e2` 뒤 양쪽 `--collect-only`·초점 실측):
+
+| 축 | 2954/3900(종전) → 2963/4086 | 귀속 |
+|---|---|---|
+| 셀 | **+9**(2955→2964 수집) | Slice 2 순증 **+8**(9 defs − 1: `test_neither_operation_declares_a_403`→`test_no_…` 개명) + 핀 셀 **+1**. 오너 세션 코드 커밋 4건은 **+0**(기존 셀 수정만) |
+| subtest | **+186** | 두 파일 초점 1600→1773 = **+173**(신규 셀 자체 subTest — 특히 `every_protected_operation_declares`가 protected 전 operation×method를 도는 것 — 와 105번째 operation을 도는 기존 스윕). 나머지 **+13**은 다른 파일의 operation 순회 가드(세션 41 표와 같은 파일들)가 105번째 op를 돈 것 — 파일별 개수까지는 재지 않았다 |
+
+### Issues found
+
+- **MS2-7 무가드**(3절) — 닫힘(핀 셀 `19e422b` + 오너 세션 독립 재현 `79c065a`).
+- **S9 회귀**(4절) — 오너 슬라이스가 남긴 것을 전수가 잡았다. 닫힘(`b4b1d7c`).
+- **SoT v1.8.48 행의 순서 문장이 배선과 뒤집혀 있었다**("인증→가드→소유권→quota"로 적힘) — 실제는 인증→**소유권**→가드→quota. 정정(`7e73233`).
+- 환경 셋(2절) — 컨테이너로 전수를 돌리는 다음 사람을 위해: 앱 이미지에 git이 없고, 설치해도 `safe.directory`가 필요하다.
+
+### Verification (세션 45)
+
+- 초점 **281 passed / 1773 subtests**(HEAD `b4b1d7c`, 호스트 — 핀 셀 포함) · `npx tsc --noEmit` rc=0(schema.d.ts 재생성분은 `e04c863`에 포함).
+- 변이 7종 표(위) · 핀 셀 물림은 오너 세션 재현(`79c065a`).
+- **백엔드 전수 2963 passed / 1 skipped / 4086 subtests · EXIT=0**(호스트 `b4b1d7c`, 1488초, test-mongo ON).
+- 문서 가드 `test_docs_indexes`·`test_repo_hygiene` **24 passed / 899 subtests**(호스트 — 이 기록 반영 뒤 재실행).
+
+---
+
 ## 세션 46 — 오너 도그푸드: 채택 400 추적 → 채택 버튼 제거 · 후보 접기 · 본문 상한 6000
 
 > **슬라이스 2(계정 탈퇴) 작업자와 동시 진행.** 워킹트리를 공유하므로 커밋은 **내 경로만
