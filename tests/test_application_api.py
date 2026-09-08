@@ -2337,7 +2337,7 @@ class CrudErrorContractDeclarationTest(unittest.TestCase):
     # 422 is excluded because FastAPI emits it automatically for any endpoint
     # with a validated body/param and its body shape is a different contract.
     EXPECTED = {
-        ("/projects", "post"): {"401", "503"},
+        ("/projects", "post"): {"401", "403", "503"},
         ("/projects", "get"): {"401", "503"},
         ("/projects/{project_id}", "get"): {"401", "403", "404", "503"},
         ("/projects/{project_id}", "patch"): {"401", "403", "404", "409", "503"},
