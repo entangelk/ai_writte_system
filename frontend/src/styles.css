@@ -2080,6 +2080,13 @@ main {
   margin-top: 1.6rem;
 }
 
+/* 복사 실패 문구. 위쪽 오류 상자가 아니라 **버튼 옆**이라는 것이 요점이다(세로로 긴
+   패널에서 아래 동작의 실패를 위에 그리면 화면 밖이 된다 — HANDOFF 14번). */
+.candidate-copy-error {
+  color: var(--state-danger-text);
+  font-size: var(--type-meta);
+}
+
 .candidate-accept-note {
   color: var(--text-muted);
   font-size: var(--type-meta);

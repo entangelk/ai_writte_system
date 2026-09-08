@@ -801,9 +801,11 @@ describe("WritingPanel — 후보를 꺼내는 길 (오너 2026-09-08: 채택 �
 
     copyButton().click();
 
-    expect(
-      await screen.findByText(/클립보드 복사를 사용할 수 없습니다/),
-    ).toBeInTheDocument();
+    // ★ 문구는 **버튼 옆**에 그려져야 한다 — 위쪽 오류 상자에 그리면 세로로 긴 이 패널에서
+    // 화면 밖이 되고, 그것이 2026-09-07 429 와 2026-09-08 채택 400 이 두 번 안 보인 이유다.
+    const note = await screen.findByText(/클립보드 복사를 사용할 수 없습니다/);
+    expect(note.closest(".candidate-actions")).not.toBeNull();
+    expect(note.closest(".writing-error")).toBeNull();
   });
 
   it("후보 본문은 기본 펼침이고 접을 수 있다 (오너 2026-09-08: 글이 너무 길다)", async () => {

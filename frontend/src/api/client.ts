@@ -752,6 +752,10 @@ export async function reviseAndGateWriting(
   throw new ApiError(response.status, data.detail, readRetryAfter(response));
 }
 
+// ★ 화면에는 채택 버튼이 없다(오너 2026-09-08) — 이 함수는 **완전 자동화가 쓸 통로**로
+// 일부러 남겨 둔 것이지 잊힌 죽은 코드가 아니다. "호출자가 없다"는 이유로 지우지 말 것.
+// 사람이 쓰는 길은 복사 → 편집기 붙여넣기 → 저장이고, 되살릴 트리거는 HANDOFF 유예 절에 있다.
+//
 // A normalized accept outcome. The endpoint's load-bearing behaviour is that a
 // version can be saved even on a 502 (Analysis job failed after the save): a
 // `502 + accepted=true + saved` is a successful write, not a plain error, and

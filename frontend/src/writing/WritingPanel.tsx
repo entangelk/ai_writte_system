@@ -237,6 +237,14 @@ export function WritingPanel(props: WritingPanelProps) {
   const loopIntentRef = useRef<WritingReviseRequest | null>(null);
   // 후보 본문을 클립보드로 옮긴 직후인지 — 버튼 문구를 "복사됨"으로 바꾸는 데만 쓴다.
   const [copied, setCopied] = useState(false);
+  /**
+   * 복사 실패 문구는 **위쪽 오류 상자가 아니라 버튼 옆**에 그린다.
+   * ★ 이 패널은 세로로 길고 오류 상자는 맨 위, 후보 동작은 맨 아래다 — 아래에서 누른
+   * 실패를 위에 그리면 사용자에게는 *"아무 일도 안 일어났다"* 가 된다. 2026-09-07 의
+   * 429 확인 대화와 2026-09-08 의 채택 400 이 **같은 이유로** 두 번 안 보였다(HANDOFF
+   * 14번 항목). 새 하단 동작의 실패는 그 자리에서 말한다.
+   */
+  const [copyError, setCopyError] = useState<string | null>(null);
 
   const availability = availabilityOf(props);
   const startingNextUnit = writingIntent === "start_next_unit";
@@ -314,11 +322,14 @@ export function WritingPanel(props: WritingPanelProps) {
   /** 후보 본문을 클립보드로. 실패하면(권한·비보안 컨텍스트) 직접 선택해 복사하도록 안내한다. */
   async function copyCandidate() {
     if (candidate === null) return;
+    setCopyError(null);
     try {
       await navigator.clipboard?.writeText(candidate.text);
       setCopied(true);
     } catch {
-      setError("클립보드 복사를 사용할 수 없습니다. 위 본문을 직접 선택해 복사하세요.");
+      setCopyError(
+        "클립보드 복사를 사용할 수 없습니다. 위 본문을 직접 선택해 복사하세요.",
+      );
     }
   }
 
@@ -343,6 +354,7 @@ export function WritingPanel(props: WritingPanelProps) {
     setGate(null);
     setLoopResult(null);
     setCopied(false);
+    setCopyError(null);
     loopIntentRef.current = null;
     const baseVersionId = latestVersionId;
     const requestId = crypto.randomUUID();
@@ -818,6 +830,11 @@ export function WritingPanel(props: WritingPanelProps) {
             <button type="button" onClick={() => void copyCandidate()}>
               {copied ? "복사됨" : "본문 복사"}
             </button>
+            {copyError !== null && (
+              <span className="candidate-copy-error" role="alert">
+                {copyError}
+              </span>
+            )}
             <span className="candidate-accept-note">
               복사해 편집기에 붙여넣고 저장하세요. 이 패널은 원고를 직접 바꾸지 않습니다.
             </span>

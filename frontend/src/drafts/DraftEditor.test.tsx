@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DraftEditor } from "./DraftEditor";
-import { resetMemberQuota, seedMemberQuota } from "../quota/useMemberQuota";
+import { resetMemberQuota } from "../quota/useMemberQuota";
 
 type MockResponse = { status?: number; body: unknown };
 

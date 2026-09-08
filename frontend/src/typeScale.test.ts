@@ -87,8 +87,9 @@ const MIGRATED: Record<string, string> = {
   ".writing-confirm-actions button": "meta",
   ".candidate-summary": "meta",
 
-  // 2026-08-26 — 스크래치 패드(항목별 채택·버리기)와 오버레이 드로어 표면.
-  ".scratch-recovery-note": "meta",
+  // 2026-09-08 — 채택 제거로 후보를 꺼내는 길이 복사 하나가 됐다. 복사 실패 문구는
+  // **버튼 옆**에 그린다(위쪽 오류 상자는 이 패널에서 화면 밖이 된다 — HANDOFF 14번).
+  ".candidate-copy-error": "meta",
 
   ".back-link": "small",
   // 오너 2026-08-28 — 화면 가장자리 도구 탭은 축소 화면에서도 식별되어야 한다.
@@ -110,7 +111,9 @@ const MIGRATED: Record<string, string> = {
   ".review-link": "small",
   ".scratch-recovery-lead": "small",
   ".scratch-recovery-error": "small",
-  ".scratch-recovery-gate": "small",
+  // 2026-09-08 — 후보 접기(오너 "글들이 너무 긴데 접어둘 수 없나"). 두 표면이 한 규칙을
+  // 공유한다: 새 후보는 기본 펼침, 패드의 지나간 후보는 기본 접힘.
+  ".candidate-fold > summary, .scratch-recovery-fold > summary": "small",
 
   // 장면 메모 Slice 3~4 — 목록 미리보기·드로어의 메모 상자와 그 상태 줄.
   ".note-preview": "small",
