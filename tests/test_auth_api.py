@@ -215,6 +215,30 @@ class SelfWithdrawalApiTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_the_guard_sits_behind_the_ownership_boundary(self) -> None:
+        """Over-strict: the guard must not repaint the 404/foreign-403 boundary.
+
+        소유권 dependency 가 먼저 답하므로 탈퇴 중에도 없는 프로젝트는 404,
+        남의 프로젝트는 소유권 403("forbidden")이다. 가드를 소유권 앞으로
+        옮기는 과잉 교정은 이 경계를 탈퇴 문구로 덮어쓴다(변이 MS2-7).
+        """
+        client, users = self._logged_in()
+        users.create_user(username="bob", password="pw123")
+        client.post("/auth/logout")
+        client.post("/auth/login", json={"username": "bob", "password": "pw123"})
+        foreign_id = client.post("/projects", json={"name": "Bobs"}).json()["id"]
+        client.post("/auth/logout")
+        client.post("/auth/login", json={"username": "alice", "password": "pw123"})
+        client.post("/me/withdrawal")
+
+        missing = client.post("/projects/missing/chapters", json={"title": "X"})
+        self.assertEqual(missing.status_code, 404)  # not the withdrawal 403
+        foreign = client.post(
+            f"/projects/{foreign_id}/chapters", json={"title": "X"}
+        )
+        self.assertEqual(foreign.status_code, 403)
+        self.assertEqual(foreign.json()["detail"], "forbidden")
+
     def test_cancelling_removes_every_grace_period_restriction(self) -> None:
         """Over-strict: the guard follows current state, not withdrawal history."""
         client, _ = self._logged_in()
