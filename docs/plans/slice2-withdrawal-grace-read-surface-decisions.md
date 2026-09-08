@@ -1,6 +1,6 @@
 # 계정 탈퇴 Slice 2 — 유예 상태를 어디서 읽는가
 
-상태: `Proposed — 오너 결정 대기(2026-09-08 작성)`
+상태: `Resolved — ⓑ 별도 GET(오너 2026-09-08)`
 작성: 2026-09-08
 선행: [`account-withdrawal-implementation-phases.md`](account-withdrawal-implementation-phases.md) Slice 0·1 완료(SoT v1.8.45·v1.8.46) · D1=C(유예 중 로그인·조회·취소만)
 
@@ -40,3 +40,17 @@ Slice 1 은 `POST`·`DELETE /me/withdrawal` 만 열었다 — **요청·취소�
 
 - **탈퇴 상태를 관리자 화면에 보여 줄지**는 이 결정이 아니다(관리자 축은 `AdminUserPayload` 이고 D6 단방향 축과 라벨 순서 계약이 걸린다).
 - **통지**(유예 만료 임박 알림)는 통지 채널 자체가 없어 계획서가 이미 Deferred 로 뒀다.
+
+---
+
+## ✅ 오너 결정 (2026-09-08)
+
+**ⓑ — 별도 `GET /me/withdrawal`.** 구현자 추천안 채택(*"나머지는 네 추천대로"*).
+
+**따라서 Slice 2 가 열린다.** 착수 시 함께 가는 것:
+- operation **104 → 105**. tier 핀 + `AUTH_ONLY` 1행(읽기도 계정 축이라 project tier 가 아니다). `WithdrawalResponse`·`_ERRORS_WITHDRAWAL` 재사용이라 **새 계약 모양은 없다**.
+- **활동 분류표는 대상이 아니다** — mutating 이 아니다.
+- `schema.d.ts` 재생성.
+- 화면은 **남은 일수를 빼기만 한다** — 서버가 `purge_due_at` 를 주므로 프런트가 30 을 박으면 두 번째 정본이 된다.
+
+**★ 남은 계약 주의(이 결정이 만든 것)**: 읽기 표면이 생겨도 **`/auth/me` 는 안 바뀐다** — 탈퇴는 대다수 요청과 무관한 축이고, `UserPayload` 는 `LoginResponse` 와 공유라 넓히면 되돌리기가 비싸다. 나중에 *"배너를 전 화면 상단 고정"* 을 원하게 되면 그때 ⓐ 를 다시 본다(그 트리거가 이 결정을 되돌리는 유일한 자리다).

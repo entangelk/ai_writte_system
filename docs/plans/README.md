@@ -187,13 +187,13 @@
 | [`writing-workspace-v2-w0-contract.md`](writing-workspace-v2-w0-contract.md) | Workspace V2 W0 exact contract(ProjectBrief·ordered unit·accept 원자성) | Approved — W0~W4 완료 |
 | [`chapter-scene-hierarchy-decisions.md`](chapter-scene-hierarchy-decisions.md) | 평면 ordered unit을 **장→장면 실제 계층**으로 전환(저장 모델·본문 소유·무손실 이관·정렬·Writing intent·삭제·export) | **Resolved(2026-08-28)** — D1~D6·D8=A, D7=B · 구현 진행 |
 | [`account-withdrawal-implementation-phases.md`](account-withdrawal-implementation-phases.md) | 계정 탈퇴 구현 순서(셀프 요청 · 30일 유예 · 취소 · 파기 데몬) | **Resolved** — D1~D6 확정(오너 2026-09-07) · **D4·Slice 0·1 완료** · Slice 2~5 미착수 |
-| [`slice2-withdrawal-grace-read-surface-decisions.md`](slice2-withdrawal-grace-read-surface-decisions.md) | 계정 탈퇴 Slice 2 — 유예 상태(남은 일수·취소)를 어디서 읽는가 | **Proposed** — 오너 결정 대기 · **Slice 2 착수를 막고 있다** |
-| [`activity-log-replay-and-partial-decisions.md`](activity-log-replay-and-partial-decisions.md) | 활동 로그 — 재전송·idempotent replay·부분 실패가 행을 남기는가(결정 셋) | **Proposed** — 오너 결정 대기 |
-| [`k3-context-window-guard-decisions.md`](k3-context-window-guard-decisions.md) | K-3 — 창을 모르는 호출을 예산 가드가 어떻게 다루는가(외부 API 에서 영구 미판정) | **Proposed** — 오너 결정 대기 |
-| [`analysis-extractor-alignment-and-gate-exposure-decisions.md`](analysis-extractor-alignment-and-gate-exposure-decisions.md) | `analysis_extractor` 의 D4 정렬 · loop round별 gate decision 노출(둘 다 트리거 확정이 목적) | **Proposed** — 오너 결정 대기 |
-| [`landing-page-scope-decisions.md`](landing-page-scope-decisions.md) | 랜딩 페이지 범위·푸터 + 약관 초안의 대괄호 넷 조달 | **Proposed** — 오너 결정 대기 · **10·12번을 막고 있다** |
-| [`docs-directory-dormant-and-restructure-decisions.md`](docs-directory-dormant-and-restructure-decisions.md) | 휴면 문서 디렉터리 셋 · `docs/plans` 재편 | **Proposed** — 오너 결정 대기 |
-| [`llama-model-revision-pin-decisions.md`](llama-model-revision-pin-decisions.md) | in-stack llama 모델을 리비전으로 고정할 것인가 | **Proposed** — 오너 결정 대기 |
+| [`slice2-withdrawal-grace-read-surface-decisions.md`](slice2-withdrawal-grace-read-surface-decisions.md) | 계정 탈퇴 Slice 2 — 유예 상태(남은 일수·취소)를 어디서 읽는가 | **Resolved** — ⓑ 별도 `GET /me/withdrawal`(오너 2026-09-08) · **Slice 2 착수 가능** |
+| [`activity-log-replay-and-partial-decisions.md`](activity-log-replay-and-partial-decisions.md) | 활동 로그 — 재전송·idempotent replay·부분 실패가 행을 남기는가(결정 셋) | **Resolved** — D1=ⓑ · D2=유예(트리거) · D3=ⓐ(오너 2026-09-08) |
+| [`k3-context-window-guard-decisions.md`](k3-context-window-guard-decisions.md) | K-3 — 창을 모르는 호출을 예산 가드가 어떻게 다루는가(외부 API 에서 영구 미판정) | **Resolved** — ⓐ 유지(오너 2026-09-08) · **가드가 꺼져 있음을 알고 둔다** |
+| [`analysis-extractor-alignment-and-gate-exposure-decisions.md`](analysis-extractor-alignment-and-gate-exposure-decisions.md) | `analysis_extractor` 의 D4 정렬 · loop round별 gate decision 노출 | **Resolved** — 둘 다 유예 · **트리거 확정**(오너 2026-09-08) |
+| [`landing-page-scope-decisions.md`](landing-page-scope-decisions.md) | 랜딩 페이지 범위·푸터 + 약관 초안의 대괄호 넷 조달 | **Resolved** — D1=ⓒ · D2=ⓐ · **값 넷 확정**(오너 2026-09-08) |
+| [`docs-directory-dormant-and-restructure-decisions.md`](docs-directory-dormant-and-restructure-decisions.md) | 휴면 문서 디렉터리 셋 · `docs/plans` 재편 | **Resolved** — D1=ⓐ 휴면 명시 · D2=ⓐ 재편 안 함(오너 2026-09-08) |
+| [`llama-model-revision-pin-decisions.md`](llama-model-revision-pin-decisions.md) | in-stack llama 모델을 리비전으로 고정할 것인가 | **Resolved** — ⓐ 최신 추종 유지(오너 2026-09-08) |
 | [`service-policy-decisions.md`](service-policy-decisions.md) | 서비스 정책의 빈 칸 셋(추론 경계 밖 전송 고지 · 데이터 보존 기간 · 계정 삭제) | **Resolved** — 1=B+가입 동의 · 2=A · 3=셀프 탈퇴+유예 파기(오너 2026-09-07), 구현 미착수 |
 | [`scene-note-decisions.md`](scene-note-decisions.md) | 장면 메모 기능(화면 위치·저장 단위·공개 범위·저장 경험) | **Resolved** — D1=C+A · D2~D4=A · Slice 0~4 구현 완료 |
 | [`scene-note-implementation-phases.md`](scene-note-implementation-phases.md) | 장면 메모 구현 순서(Slice 0~4: 저장→읽기→쓰기→화면→드로어) | **완료** — Slice 0~4 구현 완료(2026-09-06, SoT v1.8.36) |

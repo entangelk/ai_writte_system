@@ -45,7 +45,7 @@
 
 ## 지금의 계약
 
-정본은 [`docs/system-contract-sot.md`](docs/system-contract-sot.md) **v1.8.46**(Approved). **미확정 항목은 추측 구현하지 않는다.** 아래는 코드를 만지기 전에 알아야 하는 요약이다.
+정본은 [`docs/system-contract-sot.md`](docs/system-contract-sot.md) **v1.8.47**(Approved). **미확정 항목은 추측 구현하지 않는다.** 아래는 코드를 만지기 전에 알아야 하는 요약이다.
 
 - **배포되는 앱이 둘이다.** `/admin` **17 operation**은 포트를 게시하지 않는 `admin` compose 서비스가 서빙하고 도달 경로는 nginx `location /api/admin/` 하나다. 제품 앱에는 그 route가 **없으므로** LAN에서 치면 가드가 아니라 **라우터가 404**다. `create_app()` 은 **104 operation 합집합**이고 테스트·경계 행렬·`dump_openapi.py`(= 프론트 `schema.d.ts`)가 전부 그것을 쓴다 — 브라우저는 nginx 뒤에서 한 origin만 보므로 **계약은 하나여야 한다**. 세 factory(`create_app`·`create_product_app`·`create_admin_app`)는 **한 함수 본문**이고 플래그로만 갈린다. 가드 [`test_admin_surface_separation.py`](tests/test_admin_surface_separation.py).
 - **operation tier = 전체 104 · project 76 · admin 17**([`test_auth_api.py`](tests/test_auth_api.py) 의 tier 핀이 정본 — 줄 번호는 움직인다).
@@ -94,6 +94,7 @@
 - **호스트 도구 공백**: 일부 호스트에 `python` 이 없고 `python3` 만 있다 · **Mongo DB 이름은 `ai_writing_system`** 이다(`ai_writing` 아님 — 그 이름으로 조회해 "DB가 비었다"는 거짓 판독을 한 번 냈다) · **★ 전수는 컨테이너가 아니라 호스트에서 돈다** — 앱이 lazy import 하는 패키지가 호스트에 없으면 그 셀은 실패가 아니라 **skip** 이고 요약줄은 초록이다(2026-09-06: `elasticsearch` 부재로 lexical retrieval 셀 3개가 그렇게 숨어 있었다 → `requirements-dev.txt` 에 프로덕션과 같은 핀으로 등재해 닫았다). **★ 이 호스트의 파이썬 의존성은 전부 `~/.local` user-site 에 있다**(`pytest`·`mypy`·`argon2`·`elasticsearch` …). PEP 668 때문에 맨 `pip install` 은 거부되므로 **`pip install --user --break-system-packages`** 로 넣는다 — 이름과 달리 `--user` 와 함께 쓰면 `/usr` 를 건드리지 않고 `~/.local` 에만 쓴다. **scratchpad venv 는 이 용도로 못 쓴다** — 전수를 `/usr/bin/python3` 로 돌리므로 venv 안의 패키지는 안 보인다(일회성 도구 하나를 격리해 돌릴 때만 venv 가 맞다).
 - **첫 `docker` 명령이 30초 넘게 안 돌아올 수 있다**(데몬 워밍업). **라이브 검증은 재빌드 말고 작업 트리를 마운트해 돌린다**: `docker compose run --rm --no-deps -v "$PWD/services:/app/services" …`.
 - **외부 API 벤더에 붙일 때 넷**: ① OpenAI 호환 벤더엔 `LLAMA_API_FORMAT=openai` **필수**(llama.cpp 전용 필드를 400으로 거부 — 추론 금지) ② 그 형식에서 게이트웨이가 `<thought>` 를 걷는데 **짧은 `max_tokens` 로는 사고가 예산을 다 써 빈 답**이 온다 ③ **임베딩은 `EMBEDDING_API_FORMAT=openai` 로 명시해야 외부 API로 나간다 — 키만 넣으면 안 바뀐다**(일부러 그렇다. 키 유무로 형식을 추론하면 키를 지운 순간 형식이 조용히 바뀌고 그 실패는 원인에서 가장 먼 자리에 404로 떨어진다). 차원 전환 절차는 README에 있다 — **규칙은 "차원이 바뀌면"이 아니라 "모델이 바뀌면 재색인"**이다(차원이 다르면 fail-fast로 멈추지만 **차원이 같은 다른 모델이면 아무 일도 안 일어나고 품질만 조용히 떨어진다**) ④ 무료층 한도는 **프로젝트 단위 집계일 수 있다**(키 회전이 한도를 곱하지 않을 수 있다).
+- **★ 외부 API 배포에서는 컨텍스트 예산 가드가 사실상 걸리지 않는다 — 알고 두는 것이다**(오너 결정 2026-09-08, K-3=ⓐ). `/props` 가 없어 창을 **영영 모른 채** 돌 수 있고, 그때 `context_window_guard.exercised: false` 는 **과도기가 아니라 정상 상태**다. 따라서 **예산 초과는 가드가 아니라 벤더의 400 이나 잘린 출력으로**, 즉 **원인에서 가장 먼 자리**에서 드러난다. 겪으면 그때 브리프 [`k3-context-window-guard-decisions.md`](docs/plans/k3-context-window-guard-decisions.md) 의 ⓓ(설정 대체값)를 다시 연다.
 - **`/props`·`/tokenize`·`/apply-template` 는 llama.cpp 전용이고 셋 다 예외를 삼켜 `None` 을 반환한다** — 외부 API로 바꾸면 **에러가 아니라 조용한 품질 저하**로 예산 가드가 실측에서 추정으로 내려간다(추정은 과소평가 방향 = 가드가 늦게 걸린다). **"뜨긴 뜬다"로 끝내지 말고 토큰 계수가 살아 있는지 따로 확인한다.** 위치는 줄 번호가 아니라 **함수 이름으로 찾는다**([`client.py`](services/llm_gateway/app/client.py) 의 `_probe_context_window`·`count_tokens`).
 
 **검증·회귀**
@@ -158,21 +159,20 @@
 
 ## 열린 것 — 부채 · 결정 대기
 
-**⚠️ 오너 결정이 있어야 움직이는 것**
+**⚠️ 오너 결정이 있어야 움직이는 것 — ✅ 2026-09-08 현재 비어 있다**
 
-> **★ 2026-09-08 — 이 표의 모든 항목에 결정 브리프가 생겼다.** 종전에는 선택지가 이 표 칸에만 있고 `docs/plans/*-decisions.md` 브리프가 **하나도 없었다**(셋은 근거조차 `—` 였다) — 오너가 답하려면 매번 근거를 다시 찾아야 했다. 이제 각 행의 **정본 열이 브리프를 가리키고**, 브리프마다 `선택지 · 설명 · 장점 · 단점` 표 + 구현자 추천 + 트리거가 있다. **답은 브리프에 기록하고 그 행의 상태를 `Resolved` 로 바꾼다**(파일 머리 `상태:` 와 [`plans/README.md`](docs/plans/README.md) 상태 열이 **둘 다** 바뀌어야 가드가 통과한다).
+> **★ 이 표가 비었다는 것은 상태이지 완료가 아니다.** 2026-09-08 에 브리프 7건이 만들어지고 **같은 날 오너가 전부 답했다**(종전에는 선택지가 이 표 칸에만 있고 `docs/plans/*-decisions.md` 브리프가 **하나도 없었다** — 셋은 근거조차 `—` 였다). **결정은 브리프에 있다** — 여기 옮겨 적지 않는다(그것이 두 번째 정본이다). 새 결정 대기 항목이 생기면 **브리프를 먼저 쓰고** 이 표에 한 줄로 올린다.
 
-| 항목 | 무엇을 정해야 하나 | 정본 |
+| 결정된 것(2026-09-08) | 답 | 브리프 |
 |---|---|---|
-| **랜딩 기획**(약관·방침은 초안 완료) · ★ **브리프 있음** | **약관·개인정보처리방침은 2026-09-07 초안이 나왔다**([`docs/legal/`](docs/legal/README.md), `draft-0`·미시행) — 남은 것은 **오너 검토와 대괄호 넷**(`[운영자]`·`[문의 연락처]`·`[시행일]`·`[추론 서비스 사업자]`). **`[문의 연락처]` 는 랜딩 푸터에 들어간다(오너 2026-09-07)** — 랜딩 기획 때 함께 채운다. **랜딩 기획 자체는 아직 아무것도 없다**: 화면·문구·푸터(약관·방침·문의 링크) 구성이 미착수이고, 정본 문구는 오너지만 **기획·초안은 작업 가능하다** | **브리프 [`landing-page-scope-decisions.md`](docs/plans/landing-page-scope-decisions.md)** — 범위 D1·푸터 D2 + **대괄호 넷 조달**. 초안은 [`docs/legal/README.md`](docs/legal/README.md) |
-| **N3** 같은 finalize key 재전송이 활동 행 중복 | ⓐ 그대로 ⓑ 생략(accept 선례) — UI는 매 클릭 새 UUID라 도달 불가. **★ "도달 불가"의 전제가 무잠금이다**(5차 재검증 H1: 키를 상수로 바꿔도 프런트 68셀 전건 통과) | **브리프 [`activity-log-replay-and-partial-decisions.md`](docs/plans/activity-log-replay-and-partial-decisions.md)** D1. 근거 [`final_save_d5_closure.md`](docs/verifications/2026-09-01/final_save_d5_closure.md) |
-| **idempotent replay가 활동 이벤트를 매번 추가** | ⓐ 그대로 ⓑ replay 제외 ⓒ replay 표식 | 같은 브리프 D2. 근거 [`service_activity_log_accept_extension.md`](docs/verifications/2026-08-09/service_activity_log_accept_extension.md) §6-② |
-| **auto-promote 503 partial 미기록** | ⓐ 그대로(권장) ⓑ 승격 memory마다 한 행 ⓒ 개수 한 행 | 같은 브리프 D3. 근거 [`routers/analysis.py`](services/application/app/routers/analysis.py) 주석 |
-| **K-3: 창을 모르는 호출은 가드 밖** | ⓐ 그대로 ⓑ 짧은 대기 허용(v1.7.60 개정) ⓒ `/props` 1회 재시도 | **브리프 [`k3-context-window-guard-decisions.md`](docs/plans/k3-context-window-guard-decisions.md)** — ★ 외부 API 에서는 `/props` 가 없어 가드가 **영구히 안 걸린다**(선택지 ⓓ 신설). 근거 SoT v1.7.60 |
-| **`analysis_extractor` D4 정렬 / loop round별 gate decision 노출** | 둘 다 dogfood 데이터가 쌓인 뒤 판단 가치가 올라간다(지금 표본 0) | **브리프 [`analysis-extractor-alignment-and-gate-exposure-decisions.md`](docs/plans/analysis-extractor-alignment-and-gate-exposure-decisions.md)** — 둘 다 *지금 정하지 않는다* 가 유력하고 **트리거 확정이 목적**이다. 근거 SoT v1.7.47 |
-| **휴면 문서 디렉터리 처리**(2026-09-05 전수) | **상태 마커 축은 같은 날 닫혔다**(13건 갱신 · 파일↔인덱스 가드 신설 · 설계 원본 4건 배너). **남은 것은 디렉터리 셋뿐**이다: ① **`docs/verification_briefs/2026-06-24`(3건)은 어떤 인덱스에도 없다** — `verifications/` 로 대체된 초기 실험이고, 살아 있는 문서 그래프에서 완전히 끊긴 유일한 파일이 여기 있다 ② `benchmarks/2026-07-15`(1건)·`live_review_briefs/2026-07-18`(2건)은 **인덱싱은 됐지만 한 번 쓰고 멈췄다**(관행이 `verifications/`·`daily_logs/` 로 흡수됐다 — 고아가 아니라 휴면이다). 선택지: ⓐ 인덱스에 "휴면"으로 명시(권장) ⓑ `archive/` 로 옮긴다 ⓒ 그대로 둔다 | **브리프 [`docs-directory-dormant-and-restructure-decisions.md`](docs/plans/docs-directory-dormant-and-restructure-decisions.md)** D1 |
-| **`docs/plans` 디렉터리 재편** | 브리프 경로 인용 1,083건/253파일 중 183개가 과거 검증 기록 — **"지금 하지 않는다"가 근거 있는 판단**이고 남은 동기는 미학뿐 | 같은 브리프 D2(인용 실측 **285문서**) |
-| **llama `-hf` 리비전 고정** | 최신 추종 vs 현행 고정. 새 리비전이 프롬프트 sha 핀·gate 동작에 주는 영향 미측정 | **브리프 [`llama-model-revision-pin-decisions.md`](docs/plans/llama-model-revision-pin-decisions.md)** |
+| 계정 탈퇴 Slice 2 읽기 표면 | **ⓑ 별도 `GET /me/withdrawal`** | [`slice2-withdrawal-grace-read-surface-decisions.md`](docs/plans/slice2-withdrawal-grace-read-surface-decisions.md) |
+| 랜딩 범위·푸터 · **약관 값 넷** | **D1=ⓒ · D2=ⓐ** · `[운영자]`~`[추론 서비스 사업자]` 확정 | [`landing-page-scope-decisions.md`](docs/plans/landing-page-scope-decisions.md) |
+| 활동 로그 셋(N3·replay·503 partial) | **D1=ⓑ · D2=유예(트리거) · D3=ⓐ** | [`activity-log-replay-and-partial-decisions.md`](docs/plans/activity-log-replay-and-partial-decisions.md) |
+| K-3 창 미상 호출 | **ⓐ 유지** — ★ 아래 함정 절이 그 조건이다 | [`k3-context-window-guard-decisions.md`](docs/plans/k3-context-window-guard-decisions.md) |
+| `analysis_extractor` D4 · gate 노출 | **둘 다 유예 · 트리거 확정** | [`analysis-extractor-alignment-and-gate-exposure-decisions.md`](docs/plans/analysis-extractor-alignment-and-gate-exposure-decisions.md) |
+| 휴면 디렉터리 · `docs/plans` 재편 | **D1=ⓐ 휴면 명시 · D2=ⓐ 안 함** | [`docs-directory-dormant-and-restructure-decisions.md`](docs/plans/docs-directory-dormant-and-restructure-decisions.md) |
+| llama `-hf` 리비전 | **ⓐ 최신 추종 유지** — ★ 브리프가 오너 근거의 전제 하나를 정정해 두었다 | [`llama-model-revision-pin-decisions.md`](docs/plans/llama-model-revision-pin-decisions.md) |
+
 
 **🔧 미수리 — 알고 있고 아직 안 고친 것**
 
@@ -226,17 +226,16 @@
 
 > **★ 다음 작업자에게 — "남은 일"은 이 절에만 있지 않다(2026-09-07 실수 기록).** 오너가 *"남은 거 뭐지?"* 라고 물었을 때 이 번호 목록만 세어 답했다가 **랜딩 페이지 기획을 통째로 빠뜨렸다.** 이 파일은 남은 일을 **세 곳**에 나눠 싣는다 — ① 이 번호 목록(착수 순서) ② 위 "열린 것"의 **⚠️ 오너 결정 표**(막힌 것 — 병목은 여기 산다) ③ 같은 절의 **🔧 미수리 표**(아는 결함). 셀 때는 `grep -n '^## ' HANDOFF.md` 로 **절부터 뽑고**, 답할 때 **집계 범위를 함께 말한다.**
 >
-> **★ 다음 작업은 오너 확인이 먼저다(2026-09-08).** 이 시점의 **모든 착수 가능 항목이 오너 결정 대기**로 모였다 — 계정 탈퇴 Slice 1 까지 닫히면서 **Slice 2 가 결정 없이는 시작할 수 없는 자리**(유예 상태를 어디서 읽는가)에 서 있고, 12번·10번은 원래 오너 병목이었다. **브리프 7건을 써 두었으니 읽고 답만 주면 된다** — 각 브리프에 `선택지 · 설명 · 장점 · 단점` 표와 구현자 추천이 있다.
+> **★ 오너 결정이 2026-09-08 에 전부 끝났다 — 착수 가능한 순서**(브리프 7건, 위 "열린 것" 표가 답을 요약한다). **막고 있던 것이 없다**: 계정 탈퇴 Slice 2 는 읽기 표면이 정해졌고, 10·12번은 약관 값 넷이 왔다.
 >
-> | 먼저 볼 것 | 브리프 | 무엇을 정하나 |
+> | 순서 | 무엇 | 왜 이 순서인가 |
 > |---|---|---|
-> | **1. 계정 탈퇴 Slice 2** | [`slice2-withdrawal-grace-read-surface-decisions.md`](docs/plans/slice2-withdrawal-grace-read-surface-decisions.md) | 유예 상태(남은 일수·취소)를 `/auth/me` 확장 vs **별도 GET**(추천) vs 응답에만. **이것만 답하면 11번이 다시 굴러간다** |
-> | **2. 랜딩 + 약관 값 넷** | [`landing-page-scope-decisions.md`](docs/plans/landing-page-scope-decisions.md) | 랜딩 범위·푸터 + **`[운영자]`·`[문의 연락처]`·`[시행일]`·`[추론 서비스 사업자]`**. **10번·12번을 함께 푼다** — 넷은 선택지가 아니라 **오너만 아는 값**이다 |
-> | 3. 활동 로그 셋 | [`activity-log-replay-and-partial-decisions.md`](docs/plans/activity-log-replay-and-partial-decisions.md) | 재전송·replay·부분 실패가 행을 남기는가 |
-> | 4. K-3 | [`k3-context-window-guard-decisions.md`](docs/plans/k3-context-window-guard-decisions.md) | ★ **외부 API 배포에서 예산 가드가 사실상 꺼져 있다** — 이 사실이 이번에 드러났다 |
-> | 5. 문서 디렉터리 | [`docs-directory-dormant-and-restructure-decisions.md`](docs/plans/docs-directory-dormant-and-restructure-decisions.md) | 휴면 셋 · `docs/plans` 재편(둘 다 *지금 하지 않는다* 가 추천) |
-> | 6. llama 리비전 | [`llama-model-revision-pin-decisions.md`](docs/plans/llama-model-revision-pin-decisions.md) | 최신 추종 vs 고정 |
-> | 7. 관측 둘 | [`analysis-extractor-alignment-and-gate-exposure-decisions.md`](docs/plans/analysis-extractor-alignment-and-gate-exposure-decisions.md) | 둘 다 *지금 정하지 않는다* 가 유력 — **트리거 확정이 목적**이다 |
+> | **1** | **11번 계정 탈퇴 Slice 2~5** | 결정이 전부 확정됐고 가장 큰 덩어리다. Slice 2 는 `GET /me/withdrawal`(operation 104→105) + 유예 중 쓰기·유료 경로 차단(D1=C) |
+> | **2** | **12번 랜딩 + 10번 동의 게이트** | **한 창에서 본다.** 순서는 ① 약관 대괄호 넷 치환 + 시행 버전 문자열(+ 미시행 표식 제거, **가드 셀 동반 수정**) ② `/terms`·`/privacy` + 푸터 ③ 랜딩 본문 ④ 동의 게이트. **Phase S-2(nginx 헤더)·AdSense 화면별 제어도 같은 창** — 광고가 랜딩·로그인에도 뜬다 |
+> | 3 | 2번 최종 저장·분석 6차 승격 재검증 | 셀은 이미 있고 MW-D 재적용만 남았다 |
+> | 4 | 6번 육안 확인 · 8번 확인용 계정 정리 | 오너·운영 데이터 축 |
+>
+> **결정이 만든 작은 후속 둘**(독립 슬라이스를 열 크기가 아니라 다음 슬라이스에 얹는다): **활동 로그 D1=ⓑ** — finalize 재전송이 활동 행을 안 남기게 한다(★ 분기가 생기므로 **행위 셀이 따로** 필요하다) · **문서 D1=ⓐ** — 휴면 디렉터리 셋을 인덱스에 *휴면* 으로 올린다(끊긴 `verification_briefs/2026-06-24` 가 그때 그래프에 붙는다).
 >
 > **결정을 기다리지 않고 할 수 있는 것**: S-2(nginx 보안 헤더 — 트리거 없이 일정만 안 잡혔다. 다만 **랜딩·광고 축과 한 창에서 보는 편이 싸다**) · 6번 육안 확인 · 8번 확인용 계정 정리. 그 밖은 오너 병목이거나 운영 데이터 대기다. **13·14 는 같은 날 고쳤다** — 남은 것은 14번의 재현 하나이고, 그것은 **오너가 다시 겪을 때 화면이 말하는 문구**를 받아야 진행된다.
 

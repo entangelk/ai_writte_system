@@ -1,6 +1,6 @@
 # 활동 로그 — 아무 일도 안 한 요청과 부분 실패를 어떻게 적는가
 
-상태: `Proposed — 오너 결정 대기(2026-09-08 작성, 결정 셋)`
+상태: `Resolved — D1=ⓑ · D2=유예(트리거) · D3=ⓐ(오너 2026-09-08)`
 작성: 2026-09-08
 선행: Phase 9 활동 로그(A2=B·A7=A·A8=A) · 분류표 정본 [`../../services/application/app/activity/actions.py`](../../services/application/app/activity/actions.py)
 근거 기록: [`verifications/2026-08-09/service_activity_log_accept_extension.md`](../verifications/2026-08-09/service_activity_log_accept_extension.md) §6-② · [`verifications/2026-09-01/final_save_d5_closure.md`](../verifications/2026-09-01/final_save_d5_closure.md) N3
@@ -60,3 +60,19 @@ D1 과 같은 병이 **더 넓은 자리**에 있다. 실측(검증자 프로브
 
 - **활동 로그를 계정 축으로 넓히는 것**(탈퇴 등)은 이 브리프가 아니다 — `activity_events` 는 프로젝트 자식이고 그 계약은 D8-6 I1 이다.
 - **커서 페이징·필터**(Phase 9 F1~F6)는 각자 트리거를 갖고 있다.
+
+---
+
+## ✅ 오너 결정 (2026-09-08)
+
+구현자 추천안 셋 모두 채택(*"나머지는 네 추천대로"*).
+
+| # | 결정 | 뜻 |
+|---|---|---|
+| **D1** | **ⓑ — replay 는 생략** | finalize 재전송이 활동 행을 만들지 않는다. **새 규칙이 아니라 `writing/accept` 선례에 맞추는 것**이다 — 같은 "재전송" 개념에 두 경로가 다르게 답하던 것이 결함이었다 |
+| **D2** | **유예 — 지금 정하지 않는다** | 범위가 넓고(수동 저장 포함 전 경로) ⓒ 의 스키마 비용이 정당한지 판단할 표본이 없다 |
+| **D3** | **ⓐ — 그대로** | 부분 실패의 정본은 envelope 하나(A8=A 와 같은 방향). **"몰랐다"가 아니라 "알고 둔다"** 이며 `routers/analysis.py` 주석이 이미 그렇게 적혀 있다 — 그 주석을 유지한다 |
+
+**★ D2 의 트리거(유예는 트리거와 함께 산다)**: **활동 타임라인 화면에서 중복 행이 실제로 보이는 순간**. 검증 기록 자신이 트리거를 *"화면 슬라이스"* 로 적었고 그 화면은 이미 있으므로, **다음 도그푸드에서 *저장 3번* 같은 행이 눈에 띄면** 그때 ⓑ 인지 ⓒ 인지 고른다.
+
+**D1 착수 시**: `routers/drafts.py` 의 finalize handler 에서 `idempotent_replay` 분기를 지나 `activity.record` 를 건너뛴다. **★ 전수 가드는 배선의 *존재*만 보고 *분기*는 못 본다** — 분기가 생기므로 **행위 셀이 따로** 필요하다(재전송 시 행이 안 늘어남 · 첫 요청은 여전히 남음, 양방향).
