@@ -91,6 +91,10 @@ from services.application.app.analysis.identity_judge import (
     TerminalJsonIdentityJudge,
     seed_analysis_identity_judge_template,
 )
+from services.application.app.analysis.candidate_shortlist import (
+    DEFAULT_CANDIDATE_SHORTLIST_LIMIT,
+    VectorCandidateShortlistRetriever,
+)
 from services.application.app.analysis.identity_judging import (
     CandidateIdentityJudgingService,
 )
@@ -900,6 +904,11 @@ def _default_analysis_runner(
         identity_judging = CandidateIdentityJudgingService(
             group_service=identity_groups,
             candidate_repository=analysis.repository,
+            # event/open_question 의 shortlist 어댑터. character 는 정규화 이름이라
+            # 이것 없이도 묶이지만 나머지 두 타입은 여기 없으면 no-op 이었다(Slice 1
+            # 이 열어 둔 seam 을 조립부가 채운 적이 없다). 벡터가 없는 배포에서는
+            # None 이라 종전 동작 그대로다.
+            shortlist_retriever=_build_candidate_shortlist_retriever(),
             judge=TerminalJsonIdentityJudge(
                 ObservedProvider(
                     GatewayGenerateProvider(
@@ -1331,6 +1340,32 @@ def _build_candidate_memory_retriever(analysis: AnalysisService):
     # Same wrapper, same seam — the two retrieval families differ only in the
     # item type, which is why the text projection is the injected part.
     return _rerank_wrapped(inner, text_of=candidate_index_text)
+
+
+def _build_candidate_shortlist_retriever():
+    # 같은 env 스위치를 쓰는 벡터 다리 — 실 Chroma collection 과 실 embedding 이 둘 다
+    # 있어야 한다(fake 차원은 안 맞는다). 하나라도 없으면 None 이고, 그때
+    # CandidateIdentityJudgingService 는 event/open_question 을 종전대로 no-op 로 둔다.
+    host = os.environ.get("CHROMA_HOST")
+    if not host or not os.environ.get("EMBEDDING_SERVICE_URL"):
+        return None
+    vector_index = ChromaCandidateVectorIndexAdapter(
+        connect_chroma_collection(
+            host=host,
+            port=int(os.environ.get("CHROMA_PORT", "8000")),
+            collection_name=os.environ.get(
+                "CHROMA_CANDIDATE_COLLECTION", CANDIDATE_VECTOR_COLLECTION
+            ),
+        )
+    )
+    return VectorCandidateShortlistRetriever(
+        embeddings=_build_embedding_provider(),
+        vector_index=vector_index,
+        limit=int(os.environ.get(
+            "ANALYSIS_CANDIDATE_SHORTLIST_LIMIT",
+            str(DEFAULT_CANDIDATE_SHORTLIST_LIMIT),
+        )),
+    )
 
 
 def _build_vector_candidate_retriever(analysis: AnalysisService):
