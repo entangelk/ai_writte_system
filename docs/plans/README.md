@@ -6,7 +6,7 @@
 
 서비스 경계와 확정된 계약을 먼저 볼 때는 [`../system-contract-sot.md`](../system-contract-sot.md)를 정본 SoT로 사용한다. 이 인덱스는 Phase별 세부 계획과 **모든 착수 결정 브리프**를 찾는 자리다.
 
-> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(134개 중 113개)는
+> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(135개 중 114개)는
 > `*-decisions.md` 착수 결정 브리프이며, **오너 결정의 근거 기록**이다. 파일명 접두 체계는 이미 무너져
 > 있고(`00`~`07` 계열 + 접두 없는 최근 것들) 파일명만으로는 트랙을 알 수 없다 — 그래서 아래는 **접두가
 > 아니라 트랙으로** 묶었다. 디렉터리 재편은 아직 결정되지 않은 별개 사안이다(HANDOFF 추적 부채).
@@ -94,6 +94,7 @@
 | [`04-agentic-search.md`](04-agentic-search.md) | 검색 계획, 정본 재조회, ContextPackage | 이행됨 |
 | [`04-agentic-search-kickoff-decisions.md`](04-agentic-search-kickoff-decisions.md) | Phase 4 착수 | Approved |
 | [`04-context-package-completion-decisions.md`](04-context-package-completion-decisions.md) | ContextPackage 완성(§8 C / §5 B) | Resolved |
+| [`context-compaction-layer-decisions.md`](context-compaction-layer-decisions.md) | 압축 층(`ContextCompressor`) — 원자에 없는 지식을 만드는 파생 요약 계층 | **Proposed** — D1·D2 확정(2026-09-09) · D3~D6 대기 |
 | [`04-shared-vector-index-decisions.md`](04-shared-vector-index-decisions.md) | 공유 in-process vector index | Approved |
 | [`04-real-vector-backend-decisions.md`](04-real-vector-backend-decisions.md) | 영속 vector 백엔드(Chroma). **cross-encoder 리랭커 유예의 출처** | Approved |
 | [`04-compose-elasticsearch-service-decisions.md`](04-compose-elasticsearch-service-decisions.md) | compose 전용 ES 서비스(배포 lexical/hybrid) | Resolved |
