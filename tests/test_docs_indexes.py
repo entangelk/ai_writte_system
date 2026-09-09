@@ -244,6 +244,55 @@ class VerificationsIndexTest(unittest.TestCase):
                     f"적는다({'·'.join(sorted(allowed))})",
                 )
 
+    def test_every_record_is_filed_under_its_own_date_section(self) -> None:
+        """날짜 단면 헤더와 기록 디렉터리가 **같은 날**을 말해야 한다.
+
+        2026-09-09 검증이 발견한 지연: 09-08 기록 둘이 ``### 2026-09-07`` 단면 아래
+        끼어 있었다(단면 라벨 지연). 도달성 가드는 링크가 열리는지만 보고 **어느
+        단면 아래인지**는 못 본다 — 날짜가 어긋나도 293건 전건 초록이었다.
+
+        검사 대상은 표 행의 **첫 열(기록 열) 링크**뿐이다. under-strict: 단면 헤더
+        날짜를 하루 늦추면 그 아래 전 행이 물린다(실제 결함의 모양이다).
+        over-strict: 설명 칸의 상호 참조(후속 기록을 가리키는 dated 링크 2건)와
+        단면 밖 본문의 서술 링크 4건까지 물면 정상 문서가 깨진다 — 그래서 첫 열만
+        본다. 첫 열 링크의 집합이 디스크의 기록과 **쌍대**여야 하므로, 단면 밖으로
+        빠져 나가거나 아예 못 들어간 행도 같이 잡힌다.
+        """
+        index = self.index.read_text(encoding="utf-8")
+        current: str | None = None
+        filed: set[str] = set()
+        for line in index.splitlines():
+            heading = re.match(r"^### (\d{4}-\d{2}-\d{2})\s*$", line)
+            if heading:
+                current = heading.group(1)
+                continue
+            if not line.startswith("|") or current is None:
+                continue
+            cells = line.split("|")
+            if len(cells) < 3:
+                continue
+            for target in _LINK_RE.findall(cells[1]):
+                match = re.match(r"^(\d{4}-\d{2}-\d{2})/([^/]+\.md)$", target)
+                if match is None:
+                    continue
+                date, name = match.groups()
+                self.assertEqual(
+                    date, current,
+                    f"{date}/{name} 이 {current} 단면 아래에 있다 — 단면 헤더가 "
+                    "지연됐거나 행이 잘못 끼워졌다",
+                )
+                filed.add(f"{date}/{name}")
+        on_disk = {
+            f"{path.parent.name}/{path.name}"
+            for path in _VERIFICATIONS.glob("*/*.md")
+        }
+        self.assertEqual(
+            filed, on_disk,
+            "기록 열 등재와 디스크의 기록이 쌍대가 아니다 — 디스크에만 있는 기록은 "
+            "날짜 단면 아래 행으로 등재되지 않았고, 인덱스에만 있는 링크는 대상 "
+            "디렉터리가 없는 것이다",
+        )
+
 
 class RepositoryReadmeTest(unittest.TestCase):
     """최상위 `README.md` — 저장소를 처음 보는 사람이 닿는 곳."""
