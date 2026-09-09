@@ -334,7 +334,20 @@ Slice 3 이 오너 대기가 되어, HANDOFF Next Tasks 2번(랜딩 + 동의 게
 - 초점 `tests/test_account_purge.py` **26 passed / 2 subtests** · `tests/test_account_withdrawal_worker.py` **12 passed** · `tests/test_service_policy_contract.py` **7 passed / 44 subtests**.
 - auth 묶음(`test_auth_users`·`test_auth_users_mongo`·`test_auth_api`) **262 passed / 1207 subtests** — `User` 에 필드가 늘어 정확 키 집합 핀이 있는 자리를 확인했다.
 - compose·script entrypoint·typecheck·docs 인덱스 가드 초록. 등재 가드가 **또 물었다** — 루트 README 의 SoT 버전 주장 `v1.8.49` 가 낡아 `v1.8.51` 로 갱신했다.
-- 백엔드 전수는 이 절 아래에 기록한다.
+- **백엔드 전수 `3017 passed / 1 skipped / 4113 subtests · EXIT=0`**(호스트, 커밋 `ad8e86a`, 2469초, test-mongo ON). skip 1 = live Chroma.
+- **증분 전건 귀속** — 세션 48 종결 기준선 2977/4095 대비 **셀 +40 · subtest +18**, 넷으로 전부 설명된다:
+
+| 출처 | 셀 | subtest | 측정 |
+|---|---|---|---|
+| `test_account_purge.py`(신규) | +26 | +2 | 초점 실행 |
+| `test_account_withdrawal_worker.py`(신규) | +12 | 0 | 초점 실행 |
+| `test_service_policy_contract.py` | +2 | +14 | 기준선 워크트리 대조(30 → 44) |
+| 문서 가드(`test_repo_hygiene` 문서 루프 · `test_docs_indexes` 문서 루프) | 0 | +1 | 기준선 대조 936 → 951 중 나머지 |
+| 스크립트·compose 가드(`test_script_entrypoints` 등) | 0 | +1 | 기준선 대조 117 → 118 |
+| **합** | **+40** | **+18** | |
+
+  **★ 나머지 둘은 추론이 아니라 실측이다.** 새 브리프 1건과 새 스크립트 2개가 *문서/스크립트를 순회하는* 가드의 subtest 를 늘린다는 것을 확인하려고, 기준선 커밋 `8ae1c2b` 을 **임시 워크트리**에 띄워 같은 파일 묶음을 양쪽에서 쟀다(작업 트리는 건드리지 않는다 — 검증 중 `docs/` 수정 금지 규칙과 같은 이유). 잰 뒤 워크트리는 제거했다.
+- **루트 README 회귀 가드 행도 이 수치로 갱신했다**(2,977/4,095 → **3,017/4,113**).
 
 ### Next steps
 
