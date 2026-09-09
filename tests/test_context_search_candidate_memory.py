@@ -306,6 +306,40 @@ class MongoDirectCandidateRetrieverTest(unittest.TestCase):
         all_got = retriever.retrieve(project_id="project-1", query="x", limit=10)
         self.assertEqual({c.id for c in all_got}, {"c1", "c3"})  # confirmed excluded
 
+    def test_warns_when_the_unranked_backend_drops_candidates(self):
+        """under-strict guard: canonical 형제와 같은 절단이 여기도 조용했다.
+
+        같은 뿌리의 결함이 두 retriever 에 나란히 있었다(패턴 sweep) — 한쪽만 고치면
+        후보 경로는 여전히 아무 말 없이 최근 후보를 버린다.
+        """
+        analysis = _analysis_with(
+            _candidate("c1", payload={"event": "a"}),
+            _candidate("c2", payload={"event": "b"}),
+            _candidate("c3", payload={"event": "c"}),
+        )
+        retriever = MongoDirectCandidateMemoryRetriever(analysis)
+        with self.assertLogs(
+            "services.application.app.context_search.service", level="WARNING"
+        ) as captured:
+            retriever.retrieve(project_id="project-1", query="x", limit=1)
+        self.assertEqual(len(captured.records), 1)
+        message = captured.records[0].getMessage()
+        self.assertIn("unranked", message)
+        self.assertIn("kept 1 of 3", message)
+
+    def test_does_not_warn_when_everything_fits(self):
+        """over-strict guard: 상한 안의 호출까지 경고하면 신호가 잡음이 된다."""
+        analysis = _analysis_with(
+            _candidate("c1", payload={"event": "a"}),
+            _candidate("c2", payload={"event": "b"}),
+        )
+        retriever = MongoDirectCandidateMemoryRetriever(analysis)
+        with self.assertNoLogs(
+            "services.application.app.context_search.service", level="WARNING"
+        ):
+            retriever.retrieve(project_id="project-1", query="x", limit=2)
+            retriever.retrieve(project_id="project-1", query="x", limit=10)
+
 
 class _PromotedCandidateAnalysis:
     """Analysis stub whose candidate is no longer needs_review (Phase 6 state)."""

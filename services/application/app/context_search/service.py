@@ -10,6 +10,7 @@ SOT before it can become a ContextItem.
 from __future__ import annotations
 
 import inspect
+import logging
 import time
 from typing import Awaitable, Callable, Protocol
 
@@ -125,6 +126,37 @@ class VectorSearchAdapter(Protocol):
     ) -> tuple[SourceBlockIndexRecord, ...]: ...
 
 
+_log = logging.getLogger(__name__)
+
+
+def _warn_unranked_truncation(
+    *, kind: str, project_id: str, total: int, limit: int
+) -> None:
+    """무순위 백엔드가 상한을 넘겨 잘랐다는 것을 남긴다.
+
+    Mongo-direct 백엔드는 ``query`` 를 무시하고 저장 순서(`_id`) 앞에서 자른다. 저장된
+    것이 상한 이하일 때는 무순위여도 손해가 없지만(전부 실린다), **넘는 순간부터는 항상
+    같은 오래된 것들만 실리고 최근 기억은 영원히 안 들어온다.** 그런데 이것은 예외도
+    아니고 실패한 step 도 아니라서 — 벡터/렉시컬 백엔드가 배선되지 않았을 뿐이다 —
+    호출자에게 아무 신호도 안 간다.
+
+    **조용히 삼키지 않는다**: 같은 형태의 선례가 `rerank.py` 의 폴백 경고다(로그가 없으면
+    리랭킹이 영원히 no-op 인 채로 아무도 모른다). `degraded` 플래그는 쓰지 않는다 —
+    이 파일의 확립된 규약에서 `degraded` 는 **step 실패**를 뜻하고, 배선되지 않은 능력은
+    실패가 아니다(`_run_canonical_memory_step` 의 미배선 분기가 `failure=None` 으로
+    같은 구분을 이미 새겨 두었다). 여기서 그 뜻을 넓히면 HTTP 계약의 의미가 바뀐다.
+
+    요청마다 뜬다. 이 경로의 호출량은 쿼터(일 20)가 묶고 있고, 억제 상태를 만드는 값이
+    이 신호의 값보다 크지 않다.
+    """
+    _log.warning(
+        "%s retrieval is unranked (mongo-direct backend): "
+        "kept %d of %d by storage order for project=%s — "
+        "the dropped %d were never scored for relevance",
+        kind, limit, total, project_id, total - limit,
+    )
+
+
 DEFAULT_CANONICAL_MEMORY_LIMIT = 8
 
 
@@ -161,6 +193,13 @@ class MongoDirectCanonicalMemoryRetriever:
             for entry in self._memory.list_memories(project_id=project_id)
             if entry.status is MemoryStatus.CANONICAL
         ]
+        if len(canonical) > limit:
+            _warn_unranked_truncation(
+                kind="canonical memory",
+                project_id=project_id,
+                total=len(canonical),
+                limit=limit,
+            )
         return tuple(canonical[:limit])
 
 
@@ -375,6 +414,13 @@ class MongoDirectCandidateMemoryRetriever:
         candidates = self._analysis.list_needs_review_candidates(
             project_id=project_id
         )
+        if len(candidates) > limit:
+            _warn_unranked_truncation(
+                kind="candidate memory",
+                project_id=project_id,
+                total=len(candidates),
+                limit=limit,
+            )
         return tuple(candidates[:limit])
 
 

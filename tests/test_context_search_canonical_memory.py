@@ -244,6 +244,42 @@ class MongoDirectRetrieverTest(unittest.TestCase):
         all_got = retriever.retrieve(project_id="project-1", query="x", limit=10)
         self.assertEqual({e.id for e in all_got}, {"m1", "m3"})  # superseded excluded
 
+    def test_warns_when_the_unranked_backend_drops_entries(self):
+        """under-strict guard: 무순위 절단이 다시 조용해지면 재실패한다.
+
+        이 백엔드는 query 를 무시하고 저장 순서 앞에서 자르므로, 상한을 넘는 순간부터
+        최근 기억은 영원히 안 실린다. 그 사실이 어디에도 안 남는 것이 결함이었다.
+        """
+        memory = MemoryService(InMemoryMemoryRepository())
+        for suffix in ("1", "2", "3"):
+            memory._repo.put_memory(_memory(f"m{suffix}", payload={"event": suffix}))
+        retriever = MongoDirectCanonicalMemoryRetriever(memory)
+        with self.assertLogs(
+            "services.application.app.context_search.service", level="WARNING"
+        ) as captured:
+            retriever.retrieve(project_id="project-1", query="x", limit=1)
+        self.assertEqual(len(captured.records), 1)
+        message = captured.records[0].getMessage()
+        self.assertIn("unranked", message)
+        self.assertIn("kept 1 of 3", message)
+
+    def test_does_not_warn_when_everything_fits(self):
+        """over-strict guard: 상한 안이면 무순위여도 손해가 없다 — 경고하면 실패한다.
+
+        전부 실리는 호출까지 경고하면 신호가 잡음이 되어(요청마다 뜬다) 진짜 절단을
+        가린다. 경고 조건은 `> limit` 이지 `>= limit` 이 아니다.
+        """
+        memory = MemoryService(InMemoryMemoryRepository())
+        memory._repo.put_memory(_memory("m1", payload={"event": "a"}))
+        memory._repo.put_memory(_memory("m2", payload={"event": "b"}))
+        retriever = MongoDirectCanonicalMemoryRetriever(memory)
+        with self.assertNoLogs(
+            "services.application.app.context_search.service", level="WARNING"
+        ):
+            # 경계 그 자체(2건·상한 2)도 절단이 아니다.
+            retriever.retrieve(project_id="project-1", query="x", limit=2)
+            retriever.retrieve(project_id="project-1", query="x", limit=10)
+
 
 class CanonicalMemoryGateTest(unittest.TestCase):
     def _memory_with(self, *entries):
