@@ -1,6 +1,6 @@
 # 계정 탈퇴 — 구현 순서 (셀프 요청 · 30일 유예 · 취소 · 파기 데몬)
 
-상태: `Resolved(D1~D6 오너 2026-09-07) — **D4·Slice 0~2 완료(2026-09-08)** · **Slice 3 은 브리프 대기**(2026-09-09) · 슬라이스 4~5 미착수`
+상태: `Resolved(D1~D6 오너 2026-09-07) — **D4·Slice 0~3 완료**(0~2: 2026-09-08 · 3: 2026-09-09, SoT v1.8.51) · 슬라이스 4~5 미착수`
 작성: 2026-09-07
 확정된 것: [`service-policy-decisions.md`](service-policy-decisions.md) 결정 3(오너 2026-09-07) — **셀프 탈퇴 → 30일 유예 뒤 파기 · 문서는 지우고 사용량 원장은 남기며 사용자명 한 값 보존**
 선행: D8-6 프로젝트 파기(v1.7.82) · 08-2c 이름 이력(v1.7.90) · 정책 문서 [`../service-policy-contract.md`](../service-policy-contract.md) §6·§8
@@ -73,22 +73,35 @@
 
 **검증:** 상태 조회 active/withdrawing 양면 · 유예 중 GET 허용/일반 쓰기 403 · 유료 경로가 quota/handler 전에 403 · 취소 뒤 쓰기·유료 경로 복구 · POST/DELETE 예외 정확 집합 · 모든 guarded write의 403 선언 · guard→quota 순서. under-strict와 over-strict 변이를 모두 재실패시켰다.
 
-## Slice 3 — 파기 데몬
+## Slice 3 — 파기 데몬 — ✅ 완료(2026-09-09, SoT v1.8.51)
 
-> **★ 착수 전 오너 결정이 하나 있다(2026-09-09)** — [`slice3-withdrawal-purge-daemon-decisions.md`](slice3-withdrawal-purge-daemon-decisions.md). 아래 *"목록은 DB 에서 유도"* 가 **사용자 축에서는 그대로 성립하지 않는다**: 프로젝트 축의 필드 이름 스윕이 `request_quota_policies`(`_id` = user_id)를 못 보고, 규칙을 `_id` 로 넓히면 이번엔 아래 3번의 **사용자명 묘비를 스스로 지운다**(그 선례가 `_id` 키잉으로 파기를 비껴가도록 *일부러* 지어졌다). 브리프가 그 갈림길과 슬라이스 범위(D3 의 관리자 통제가 Slice 3 인가 4 인가)를 함께 묻는다.
+**확정 계약**([`slice3-withdrawal-purge-daemon-decisions.md`](slice3-withdrawal-purge-daemon-decisions.md) ⓑ·ⓔ):
+계정 축 식별은 **`user_id` 필드 또는 `_id`** 두 규칙이고 **보존 표식은 `target_user_id`** 다.
+범위는 **데몬 + reconciler 스크립트**이며 관리자 화면은 Slice 4 다.
 
-**범위:** `scripts/account_withdrawal_worker.py --loop --interval N`. 선례는 [`index_sync_worker.py`](../../scripts/index_sync_worker.py) — 청구 가능한 항목을 배수(drain)하고 없으면 idle-sleep, SIGTERM 까지 도는 데몬이며 compose 서비스로 뜬다. 파기 예정 시각이 지난 계정을 claim 해서 처리한다.
+**구현 결과**
 
-**한 계정의 처리 순서:**
-1. 계정의 프로젝트를 하나씩 **archive → `execute_project_purge`**(2단계는 그 함수가 강제한다).
-2. 프로젝트 밖 사용자 축 데이터 파기(세션·가입 기록 등 — 목록은 **DB 에서 유도**하고 손으로 들지 않는다).
-3. **사용자명 한 값 보존**(08-2c `project_name_history` 와 같은 모양).
-4. **사용량 원장은 남긴다**(D4 가 그 안전을 정한다).
-5. 계정 행 파기.
+| 무엇 | 자리 |
+|---|---|
+| 파기 오케스트레이션(청구 → 묘비 → 프로젝트 → 스윕 → 계정 행) | `deletion/account_purge.py` |
+| 두 규칙 스윕(목록을 손으로 안 든다) | `deletion/account_axis_sweep.py` |
+| 사용자명 묘비(`_id` = `user_name:<id>` · 표식 `target_user_id`) | `deletion/user_name_history.py`(+`_mongo`) |
+| 청구·부분 파기 표식 · 저장소 seam | `auth/models.py::User.purge_started_at` · `auth/users*.py` |
+| 데몬(one-shot · `--loop` · `--dry-run`) + compose `withdrawal_worker` | `scripts/account_withdrawal_worker.py` · `docker-compose.yml` |
+| 수습 경로 | `scripts/account_purge_reconciler.py` |
 
-**★ 실패 처리(D3):** 위 실측 2 때문에 **재시도로 수습되지 않는다.** 실패하면 그 계정을 *부분 파기* 로 표시하고 **멈춘다** — 데몬이 같은 프로젝트를 다시 때리면 404 로 끝나며 derived 는 영영 남는다. **관리자 화면에 잔여 정리 실행을 둔다**(오너 추가): 그 통제는 파기 재호출이 아니라 **reconciler 경로**이며, 대상 컬렉션을 **DB 에서 발견**하는 성질을 그대로 가져온다(손으로 든 목록은 뒤처진다).
+**★ 착수 실측이 이 문서를 두 군데 정정했다.**
+① *"목록은 DB 에서 유도"* 는 사용자 축에서 **컬렉션 하나를 놓친다**(`request_quota_policies` 가 `_id` = user id).
+② 그 규칙을 `_id` 로 넓히면 **3번의 사용자명 묘비를 스스로 지운다**(선례의 `_id` 키잉이 곧 *파기를 살아남는다* 의 표식이라).
+둘이 한 갈림길의 양쪽이라 브리프로 물었고 오너가 ⓑ 로 닫았다.
 
-**검증:** 시각을 주입해 경계에서만 도는지 · 한 계정 실패가 다른 계정을 막지 않는지 · 실패 시 표시와 정지 · `execute_project_purge` 를 **재사용하는지**(새 파기 그래프를 만들면 실패하는 셀).
+**남는 계약 주의**
+- **재시도하지 않는다.** `purge_started_at` 이 찍힌 계정은 다시 청구되지 않는다 — 재시도는 404 로 끝나고 derived 에 못 간다.
+- **`purge_started_at` 은 리스가 아니다.** 리스는 *"나중에 다시 가져가라"* 인데 이 축이 절대 하면 안 되는 것이 그것이다.
+- **한 계정의 실패는 거기서 멈춘다** — 다음 프로젝트로 넘어가면 부분 파기가 커진다.
+- **묘비가 맨 앞이다**(프로젝트 축 8.2c N3 와 같은 이유). 뒤로 미루면 저장 장애 한 번에 이름이 영영 사라진다.
+- **`login_failures`(`_id` = username)는 어느 규칙도 못 찾는다** — 이 슬라이스에서 정하지 않았다(브리프 후속 고려).
+- **reconciler 는 프로젝트가 남았거나 묘비가 없으면 계정 행을 안 지운다.**
 
 ## Slice 4 — 화면
 
@@ -121,7 +134,7 @@
 
 ### 남은 착수 순서 (오너 *"급한거 먼저"*)
 
-~~D4(원장 개명)~~ · ~~Slice 0(상태 축)~~ · ~~Slice 1(요청·취소 API)~~ · ~~Slice 2(유예 접근 규칙)~~ **완료 → Slice 3~5.** 다음은 파기 데몬이며, 원장의 `target_user_id` 개명·마이그레이션이 선행 조건이다. **착수는 위 브리프의 오너 답을 받은 뒤다**(2026-09-09).
+~~D4(원장 개명)~~ · ~~Slice 0(상태 축)~~ · ~~Slice 1(요청·취소 API)~~ · ~~Slice 2(유예 접근 규칙)~~ · ~~Slice 3(파기 데몬)~~ **완료 → Slice 4~5.** 다음은 화면(요청·취소·남은 일수 + D3 의 관리자 잔여 정리)이다.
 
 ## Deferred
 
