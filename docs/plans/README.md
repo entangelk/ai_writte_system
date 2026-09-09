@@ -190,7 +190,7 @@
 | [`chapter-scene-hierarchy-decisions.md`](chapter-scene-hierarchy-decisions.md) | 평면 ordered unit을 **장→장면 실제 계층**으로 전환(저장 모델·본문 소유·무손실 이관·정렬·Writing intent·삭제·export) | **Resolved(2026-08-28)** — D1~D6·D8=A, D7=B · 구현 진행 |
 | [`account-withdrawal-implementation-phases.md`](account-withdrawal-implementation-phases.md) | 계정 탈퇴 구현 순서(셀프 요청 · 30일 유예 · 취소 · 파기 데몬) | **Resolved** — D1~D6 확정(오너 2026-09-07) · **D4·Slice 0~2 완료** · **Slice 3 은 브리프 대기**(2026-09-09) |
 | [`slice2-withdrawal-grace-read-surface-decisions.md`](slice2-withdrawal-grace-read-surface-decisions.md) | 계정 탈퇴 Slice 2 — 유예 상태(남은 일수·취소)를 어디서 읽는가 | **Resolved** — ⓑ 별도 `GET /me/withdrawal`(오너 2026-09-08) · **Slice 2 완료(SoT v1.8.48)** |
-| [`slice3-withdrawal-purge-daemon-decisions.md`](slice3-withdrawal-purge-daemon-decisions.md) | 계정 탈퇴 Slice 3 — 파기 데몬이 계정 축 데이터를 무엇으로 식별하는가(+ 슬라이스 범위) | **Proposed — 오너 결정 대기** |
+| [`slice3-withdrawal-purge-daemon-decisions.md`](slice3-withdrawal-purge-daemon-decisions.md) | 계정 탈퇴 Slice 3 — 파기 데몬이 계정 축 데이터를 무엇으로 식별하는가(+ 슬라이스 범위) | **Resolved** — ⓑ 두 규칙 스윕 · ⓔ 데몬+스크립트(오너 2026-09-09) |
 | [`activity-log-replay-and-partial-decisions.md`](activity-log-replay-and-partial-decisions.md) | 활동 로그 — 재전송·idempotent replay·부분 실패가 행을 남기는가(결정 셋) | **Resolved** — D1=ⓑ · D2=유예(트리거) · D3=ⓐ(오너 2026-09-08) |
 | [`k3-context-window-guard-decisions.md`](k3-context-window-guard-decisions.md) | K-3 — 창을 모르는 호출을 예산 가드가 어떻게 다루는가(외부 API 에서 영구 미판정) | **Resolved** — ⓐ 유지(오너 2026-09-08) · **가드가 꺼져 있음을 알고 둔다** |
 | [`analysis-extractor-alignment-and-gate-exposure-decisions.md`](analysis-extractor-alignment-and-gate-exposure-decisions.md) | `analysis_extractor` 의 D4 정렬 · loop round별 gate decision 노출 | **Resolved** — 둘 다 유예 · **트리거 확정**(오너 2026-09-08) |

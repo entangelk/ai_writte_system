@@ -44,12 +44,18 @@ _POINTER = re.compile(r"`([a-z_0-9/]+\.py)::([A-Z_][A-Z_0-9]*)`")
 _DRAFTS = ("terms-of-service-draft.md", "privacy-policy-draft.md")
 
 #: 오너만 채울 수 있어 대괄호로 비워 두었던 값 (브리프 landing-page-scope, 2026-09-08).
-#: `[시행일]` 은 여기 없다 — 아직 안 채웠고, 그 이유는 시행 전제가 안 끝났기 때문이다.
+#: `[시행일]` 은 2026-09-09 오너 결정으로 합류했다 — 시행 전제(파기 데몬·동의 게이트)가
+#: 안 끝났지만 **포트폴리오 단계라 문서를 붙잡지 않는다**(그 사실은 문서 머리말이 적는다).
 _PROCURED = {
     "`[운영자]`": "entangelk",
     "`[문의 연락처]`": "kdtyohan@gmail.com",
     "`[추론 서비스 사업자]`": "Google",
+    "`[시행일]`": "2026-09-08",
 }
+
+#: 시행 표기의 두 리터럴. 버전 문자열은 **동의 게이트가 저장할 값**이라 계약이다.
+_ENFORCED_VERSION = "1.0"
+_ENFORCED_DATE = "2026-09-08"
 
 
 def _rows() -> list[tuple[str, str, list[tuple[str, str]]]]:
@@ -191,17 +197,34 @@ class LegalDraftCoverageTest(unittest.TestCase):
             "그 정책을 담았는지 확인하고 docs/legal/README.md 에 행을 더한다",
         )
 
-    def test_both_drafts_stay_marked_as_unenforced_drafts(self):
-        # 초안이 시행 중인 문서로 읽히면 안 된다. 실제 시행은 오너가 이 표식을
-        # 걷어내는 것으로 시작하며, 그때 이 셀도 함께 고친다.
+    def test_both_documents_carry_the_enforced_version_and_date(self):
+        """시행 표기와 **버전·시행일 리터럴**을 잠근다(오너 2026-09-09).
+
+        종전 셀은 `미시행` 표식이 남아 있는지만 봤고, 그 docstring 이
+        *"실제 시행은 오너가 이 표식을 걷어내는 것으로 시작하며, 그때 이 셀도
+        함께 고친다"* 라고 예고했다 — 지금이 그때다.
+
+        ★ **버전 문자열이 계약 리터럴이다.** 가입 동의 게이트(HANDOFF 10번)가
+        회원의 동의 시각과 **함께 이 문자열을 저장**하므로, 문서에서 조용히 바뀌면
+        저장된 동의가 어느 판본에 대한 것인지 갈라진다. 상수가 아직 코드에 없어
+        상징 참조로는 못 잠그고 **핀 셀**이 값을 직접 든다 — 게이트가 상수를
+        만드는 날 이 셀이 그 상수를 가리키게 바꾼다.
+        """
         for name in _DRAFTS:
             with self.subTest(document=name):
                 text = (_LEGAL_MAP.parent / name).read_text(encoding="utf-8")
-                self.assertIn("Draft — 법률 검토 전 · 미시행", text)
+                self.assertNotIn(
+                    "Draft — 법률 검토 전 · 미시행", text,
+                    f"{name}: 미시행 표식이 남았다 — 시행 표기와 섞이면 문서가 "
+                    "자기 지위를 두 가지로 말한다",
+                )
+                self.assertIn(f"버전: `{_ENFORCED_VERSION}`", text)
+                self.assertIn(f"시행 — {_ENFORCED_DATE}", text)
+                self.assertIn(f"- 시행일: {_ENFORCED_DATE}", text)
 
 
 class LegalDraftProcuredValuesTest(unittest.TestCase):
-    """오너가 조달한 값 넷이 초안에 실제로 들어갔는가 (2026-09-08 확정 · 09-09 반영).
+    """오너가 조달한 값 넷이 문서에 실제로 들어갔는가 (2026-09-08 확정 · 09-09 반영).
 
     이 값들은 **코드에서 유도할 수 없다** — 없는 운영자·연락처를 지어내면 그 자체가
     허위 문서라 초안이 일부러 대괄호로 비워 두었고, 오너가 브리프
@@ -214,7 +237,7 @@ class LegalDraftProcuredValuesTest(unittest.TestCase):
     셀이 있어야 그 연결이 끊긴 것을 전수가 말해 준다.
     """
 
-    def test_the_three_procured_values_are_filled_in_both_drafts(self):
+    def test_the_procured_values_are_filled_in_both_documents(self):
         # 값이 들어갔는가(under) + 대괄호가 남아 있지 않은가(같은 축의 반대편).
         # 셋을 한 번에 재지 않고 문서별로 가르는 이유: 한쪽만 채우고 다른 쪽을
         # 빠뜨리는 것이 실제로 일어나는 실수다(약관·방침이 같은 값을 나눠 든다).
