@@ -1,6 +1,6 @@
 # 계정 탈퇴 — 구현 순서 (셀프 요청 · 30일 유예 · 취소 · 파기 데몬)
 
-상태: `Resolved(D1~D6 오너 2026-09-07) — **D4·Slice 0~2 완료(2026-09-08)** · 슬라이스 3~5 미착수`
+상태: `Resolved(D1~D6 오너 2026-09-07) — **D4·Slice 0~2 완료(2026-09-08)** · **Slice 3 은 브리프 대기**(2026-09-09) · 슬라이스 4~5 미착수`
 작성: 2026-09-07
 확정된 것: [`service-policy-decisions.md`](service-policy-decisions.md) 결정 3(오너 2026-09-07) — **셀프 탈퇴 → 30일 유예 뒤 파기 · 문서는 지우고 사용량 원장은 남기며 사용자명 한 값 보존**
 선행: D8-6 프로젝트 파기(v1.7.82) · 08-2c 이름 이력(v1.7.90) · 정책 문서 [`../service-policy-contract.md`](../service-policy-contract.md) §6·§8
@@ -75,6 +75,8 @@
 
 ## Slice 3 — 파기 데몬
 
+> **★ 착수 전 오너 결정이 하나 있다(2026-09-09)** — [`slice3-withdrawal-purge-daemon-decisions.md`](slice3-withdrawal-purge-daemon-decisions.md). 아래 *"목록은 DB 에서 유도"* 가 **사용자 축에서는 그대로 성립하지 않는다**: 프로젝트 축의 필드 이름 스윕이 `request_quota_policies`(`_id` = user_id)를 못 보고, 규칙을 `_id` 로 넓히면 이번엔 아래 3번의 **사용자명 묘비를 스스로 지운다**(그 선례가 `_id` 키잉으로 파기를 비껴가도록 *일부러* 지어졌다). 브리프가 그 갈림길과 슬라이스 범위(D3 의 관리자 통제가 Slice 3 인가 4 인가)를 함께 묻는다.
+
 **범위:** `scripts/account_withdrawal_worker.py --loop --interval N`. 선례는 [`index_sync_worker.py`](../../scripts/index_sync_worker.py) — 청구 가능한 항목을 배수(drain)하고 없으면 idle-sleep, SIGTERM 까지 도는 데몬이며 compose 서비스로 뜬다. 파기 예정 시각이 지난 계정을 claim 해서 처리한다.
 
 **한 계정의 처리 순서:**
@@ -115,10 +117,11 @@
 - `admin_user_id` 는 **행위자**라 대상이 아니다(활동 로그의 `actor_user_id` 와 같은 선례). 정확 일치 판정에 걸리지 않는다.
 - **★ 배포 전에 `python scripts/migrate_ledger_user_axis.py` 를 돌려야 한다.** 옛 문서가 `user_id` 를 든 채 남으면 ① 새 질의가 그 행을 못 찾아 **사용량이 0 으로 보이고** ② 사용자 축 reconciler 가 생기는 날 그 행들만 쓸려 간다. 마이그레이션은 **멱등**이고 `--dry-run` 이 있다. **옛 인덱스 3개를 지운다** — 키가 바뀌어 같은 이름으로 재생성할 수 없기 때문이며, 새 인덱스는 어댑터가 기동 때 만든다.
 - **★ 다른 컬렉션은 개명하지 않는다. 그것이 옳다.** 세션·색인·생성 job·회원 한도 정책도 `user_id` 를 쓰지만 **탈퇴 시 지워져야 하는 계정 데이터**라 쓸이 대상인 것이 맞다. 활동 로그가 `project_id` 를 **일부러** 유지해 파기에 쓸리는 것과 같은 구조다 — **필드 이름은 파기의 opt-in/opt-out 스위치**이고, 원장만 opt-out 이다.
+  - **★ 정정(2026-09-09 실측)**: 이 문단이 **회원 한도 정책에 대해 틀렸다** — `request_quota_policies` 는 `user_id` **필드를 쓰지 않는다.** `_id` 가 곧 user_id 다([`quota/policy_mongo.py:46`](../../services/application/app/quota/policy_mongo.py); 회원당 한 행이라는 P1 계약을 DB 가 강제하게 한 의도적 설계라 그 자체는 옳다). 따라서 *필드 이름이 스위치* 라는 문장은 **사용자 축에서 컬렉션 하나를 조용히 빠뜨린다.** 무엇으로 정정할지는 [`slice3-withdrawal-purge-daemon-decisions.md`](slice3-withdrawal-purge-daemon-decisions.md) 가 묻는다 — 여기서 미리 고르지 않는다.
 
 ### 남은 착수 순서 (오너 *"급한거 먼저"*)
 
-~~D4(원장 개명)~~ · ~~Slice 0(상태 축)~~ · ~~Slice 1(요청·취소 API)~~ · ~~Slice 2(유예 접근 규칙)~~ **완료 → Slice 3~5.** 다음은 파기 데몬이며, 원장의 `target_user_id` 개명·마이그레이션이 선행 조건이다.
+~~D4(원장 개명)~~ · ~~Slice 0(상태 축)~~ · ~~Slice 1(요청·취소 API)~~ · ~~Slice 2(유예 접근 규칙)~~ **완료 → Slice 3~5.** 다음은 파기 데몬이며, 원장의 `target_user_id` 개명·마이그레이션이 선행 조건이다. **착수는 위 브리프의 오너 답을 받은 뒤다**(2026-09-09).
 
 ## Deferred
 

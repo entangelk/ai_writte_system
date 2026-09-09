@@ -168,3 +168,47 @@ import 방향 확인: `analysis.candidate_shortlist → indexing.memory_index �
 - 필요한 것은 **압축 층이 버전 체인을 걷는 읽기 경로** 하나뿐이고, 그것은 압축 층만 쓰므로 **canonical-only 계약을 안 건드린다**.
 - **비용**: 앞의 두 축은 장 귀속만 풀면 끝인데 이 축은 읽기 경로가 추가다 — 슬라이스가 커진다. 브리프에 그대로 적었다.
 - **부수 소득**: 장 귀속 숙제의 답이 반쯤 나왔다 — 인물 메모리는 **엔트리가 아니라 버전 단위**로 장에 귀속시킨다(새 필드 없이 기존 이력으로 성립).
+
+---
+
+## 세션 49 — 계정 탈퇴 Slice 3 착수 실측 → 결정 브리프 (구현 없음)
+
+핸드오프 Next Tasks 1번(계정 탈퇴 Slice 3~5)을 착수하려 실측부터 했고, **계획서와 코드가 어긋나는 지점 하나**와 **선례를 그대로 따르면 자기 발을 무는 지점 하나**가 나와 구현 전에 멈추고 브리프를 썼다.
+
+### 1. 실측 — 계정 축 컬렉션 전수 (`db_name` 인덱싱 + 필드 이름)
+
+| 컬렉션 | 사용자 축 키 | `user_id` 필드 스윕이 보는가 | 파기 대상 |
+|---|---|---|---|
+| `users` | `_id` | ✗ | 계정 행(마지막) |
+| `sessions` | `user_id` 필드 | ✓ | ✓ |
+| `writing_generation_jobs` | `user_id` 필드 (+`project_id`) | ✓ | ✓(프로젝트 파기가 이미) |
+| `index_sync_outbox`·`index_sync_logs` | `user_id` 필드지만 **값이 항상 `None`**(`indexing/service.py:439`) | 컬렉션은 발견되나 일치 0건 | ✗ |
+| **`request_quota_policies`** | **`_id` = user_id**(`quota/policy_mongo.py:46`) | **✗** | ✓ |
+| `request_usage_ledger` | `target_user_id` | ✗ | 남긴다(D4) |
+| `admin_audit_events` | `admin_user_id`/`target_user_id` | ✗ | 남긴다 |
+| `login_failures` | **`_id` = username**(`auth/login_guard_mongo.py:39`) | ✗ | 제3의 축 |
+| `access_grants(_uses)`·`activity_events` | 행위자 + `project_id` | ✗ | 프로젝트 파기가 |
+
+### 2. 발견 ① — 계획서 D4 절이 회원 한도 정책에 대해 틀렸다
+
+계획서는 *"세션·색인·생성 job·**회원 한도 정책**도 `user_id` 를 쓰지만 … 쓸이 대상인 것이 맞다"* 라고 적었는데, `request_quota_policies` 는 **`user_id` 필드를 쓰지 않는다** — `_id` 가 곧 user_id 다(회원당 한 행이라는 P1 계약을 DB 가 강제하게 한 의도적 설계라 그 자체는 옳다). 즉 *"필드 이름이 파기의 opt-in/opt-out 스위치"* 라는 계약이 **사용자 축에서는 컬렉션 하나를 조용히 빠뜨린다.** 계획서에 정정 표시를 달되 **무엇으로 정정할지는 고르지 않고** 브리프로 보냈다(CLAUDE.md §1 — 스펙 모순은 어느 쪽이 정본인지 오너에게 묻는다).
+
+### 3. 발견 ② — 규칙을 `_id` 로 넓히면 사용자명 묘비를 스스로 지운다
+
+계획서 Slice 3 의 3번이 *"사용자명 한 값 보존(`project_name_history` 와 같은 모양)"* 인데, 그 선례의 `_id` 키잉은 **우연이 아니라 명시된 설계**다 — `deletion/project_name_history_mongo.py` 머리말이 *"`_id` is the project id **on purpose**: … `purge_reconciler.py` … cannot mistake this collection for orphaned project data"* 라고 적었다. **이 저장소에서 "파기를 살아남는다"의 기존 표식이 곧 `_id` 키잉**이므로, 사용자 축 스윕에 `_id` 규칙을 더하면 데몬이 방금 자기가 쓴 묘비를 지운다. 두 실측이 **한 갈림길의 양쪽**이라 따로 물을 수 없어 한 브리프에 묶었다.
+
+### 4. 브리프 — [`slice3-withdrawal-purge-daemon-decisions.md`](../../plans/slice3-withdrawal-purge-daemon-decisions.md)
+
+- 발견 규칙 4안(ⓐ 필드 스윕+손목록 · **ⓑ 두 규칙 스윕 + 보존 표식을 `target_user_id` 로 통일(추천)** · ⓒ 서비스마다 `purge_user()` · ⓓ 데몬은 프로젝트만, 잔류는 reconciler).
+- 범위 2안(**ⓔ Slice 3 = 데몬 + reconciler 스크립트, 관리자 화면은 Slice 4(추천)** · ⓕ 화면까지 한 슬라이스). D3 의 *"관리자 화면에 잔여 정리"* 와 Slice 4 의 *"화면"* 이 한 편집을 서로 자기 것이라 말하던 것을 드러냈다(Slice 0·5 의 §6 승격 중복과 같은 모양).
+- 후속 고려에 `login_failures`(`_id` = username) 제3의 축, 파기 본체 `HTTPException` 경계, 부분 파기 표시 자리, `deletion/` 패키지, archive→purge 강제 순서를 남겼다.
+
+### 5. 아직 하지 않은 것
+
+**코드 한 줄도 안 건드렸다.** 데몬·묘비·부분 파기 표시가 전부 위 결정에 매달려 있어, 먼저 지으면 답에 따라 버리게 된다. Slice 3 이 막히면 **Next Tasks 2번(랜딩 + 동의 게이트)** 이 다음 자리다.
+
+### Verification (세션 49)
+
+- 문서 전용 변경. `tests/test_docs_indexes.py` + `tests/test_repo_hygiene.py` **25 passed / 907 subtests · EXIT=0**.
+- 등재 가드가 **실제로 물었다**: 브리프 파일을 더하고 인덱스 행만 넣었더니 개수 주장 4건(`docs/plans/README.md` 전체·브리프 · 루트 `README.md` 전체·브리프)이 SUBFAIL — 135→136 · 114→115 로 갱신해 초록. 가드가 없었으면 두 README 가 조용히 낡았다.
+- 새 회귀 셀 없음(행위 변경 없음).
