@@ -145,5 +145,8 @@ import 방향 확인: `analysis.candidate_shortlist → indexing.memory_index �
 
 ### Verification (조건 폐쇄)
 
-- 초점 `test_candidate_shortlist.py` **9 passed / 2 subtests**(7→9, 신규 2셀) · `test_docs_indexes.py` **16 passed / 304 subtests**.
-- 전수는 아래 Next steps 참조.
+- 초점 `test_candidate_shortlist.py` **9 passed / 2 subtests**(7→9, 신규 2셀) · 조건 폐쇄 초점 묶음 **83 passed / 911 subtests**.
+- 변이 양방향 2종: **MU-4** `if limit < 1:` → `if False:` (검증 무력화) → `test_a_limit_below_one_is_rejected_at_assembly` **2 SUBFAIL**(limit=0·-1) · **MO-4** `< 1` → `< 2`(경계 과잉 조임) → `test_a_limit_of_one_is_still_valid` **1실패**. 각각 원복 후 `git status --short`·`git diff HEAD` 무출력 확인.
+- **백엔드 전수 `2977 passed / 1 skipped / 4095 subtests · EXIT=0`**(호스트, 커밋 `c08e1fc`, 1938초, test-mongo ON). skip 1 = live Chroma.
+- **증분 전건 귀속**: 세션 48 종결 수치 2975/4091 대비 **셀 +2**(limit 거절·limit=1 유효) · **subtest +4** = 거절 셀의 `subTest` 2(limit 0·-1) + 검증자 기록 파일 1건(위생 +1 · 검증 인덱스 판정행 +1, 커밋 `6d1e151`).
+- **루트 README 회귀 가드 행도 이 수치로 갱신했다**(2,975/4,091 → **2,977/4,095**) — 차단 2가 지적한 관례를 닫자마자 다시 낡히지 않기 위해서다.
