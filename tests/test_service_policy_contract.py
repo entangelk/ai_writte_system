@@ -40,6 +40,17 @@ _PACKAGE = "services.application.app"
 _ROW = re.compile(r"^\|(?P<axis>[^|]+)\|(?P<value>[^|]+)\|(?P<sources>[^|]*)\|")
 _POINTER = re.compile(r"`([a-z_0-9/]+\.py)::([A-Z_][A-Z_0-9]*)`")
 
+#: 법적 문서 초안 둘. 값·표식 가드가 같은 목록을 쓴다.
+_DRAFTS = ("terms-of-service-draft.md", "privacy-policy-draft.md")
+
+#: 오너만 채울 수 있어 대괄호로 비워 두었던 값 (브리프 landing-page-scope, 2026-09-08).
+#: `[시행일]` 은 여기 없다 — 아직 안 채웠고, 그 이유는 시행 전제가 안 끝났기 때문이다.
+_PROCURED = {
+    "`[운영자]`": "entangelk",
+    "`[문의 연락처]`": "kdtyohan@gmail.com",
+    "`[추론 서비스 사업자]`": "Google",
+}
+
 
 def _rows() -> list[tuple[str, str, list[tuple[str, str]]]]:
     """문서에서 정본 포인터를 가진 표 행만 걷는다."""
@@ -183,10 +194,71 @@ class LegalDraftCoverageTest(unittest.TestCase):
     def test_both_drafts_stay_marked_as_unenforced_drafts(self):
         # 초안이 시행 중인 문서로 읽히면 안 된다. 실제 시행은 오너가 이 표식을
         # 걷어내는 것으로 시작하며, 그때 이 셀도 함께 고친다.
-        for name in ("terms-of-service-draft.md", "privacy-policy-draft.md"):
+        for name in _DRAFTS:
             with self.subTest(document=name):
                 text = (_LEGAL_MAP.parent / name).read_text(encoding="utf-8")
                 self.assertIn("Draft — 법률 검토 전 · 미시행", text)
+
+
+class LegalDraftProcuredValuesTest(unittest.TestCase):
+    """오너가 조달한 값 넷이 초안에 실제로 들어갔는가 (2026-09-08 확정 · 09-09 반영).
+
+    이 값들은 **코드에서 유도할 수 없다** — 없는 운영자·연락처를 지어내면 그 자체가
+    허위 문서라 초안이 일부러 대괄호로 비워 두었고, 오너가 브리프
+    (`docs/plans/landing-page-scope-decisions.md`)에서 채웠다. 정본이 문서뿐이므로
+    상징 참조로는 잠글 수 없고 **핀 셀**이 값을 직접 든다(`MIN_PASSWORD_LENGTH`
+    선례와 같은 이유).
+
+    ★ **`[추론 서비스 사업자]` 는 배포 설정이 정하는 값**이다(방침 제4조 3항이 그
+    사실을 문장으로 적는다). 벤더를 바꾸면 **이 셀과 방침이 함께** 바뀌어야 한다 —
+    셀이 있어야 그 연결이 끊긴 것을 전수가 말해 준다.
+    """
+
+    def test_the_three_procured_values_are_filled_in_both_drafts(self):
+        # 값이 들어갔는가(under) + 대괄호가 남아 있지 않은가(같은 축의 반대편).
+        # 셋을 한 번에 재지 않고 문서별로 가르는 이유: 한쪽만 채우고 다른 쪽을
+        # 빠뜨리는 것이 실제로 일어나는 실수다(약관·방침이 같은 값을 나눠 든다).
+        seen = {value: False for value in _PROCURED.values()}
+        for name in _DRAFTS:
+            text = (_LEGAL_MAP.parent / name).read_text(encoding="utf-8")
+            for placeholder, value in _PROCURED.items():
+                with self.subTest(document=name, placeholder=placeholder):
+                    self.assertNotIn(
+                        placeholder, text,
+                        f"{name} 에 {placeholder} 가 남아 있다 — 오너가 채운 값을 "
+                        "본문에 반영한다",
+                    )
+                if value in text:
+                    seen[value] = True
+        for value, found in seen.items():
+            with self.subTest(value=value):
+                self.assertTrue(
+                    found, f"조달된 값 {value!r} 이 어느 초안에도 없다"
+                )
+
+    def test_the_effective_date_and_the_unenforced_marker_move_together(self):
+        """시행일을 채우는 것과 `미시행` 표식을 걷는 것은 **한 걸음**이다.
+
+        갈라지면 문서가 자기 지위를 두 가지로 말한다 — 날짜만 채우면 *"시행일이
+        지났는데 미시행"*, 표식만 걷으면 *"시행 중인데 시행일이 대괄호"*. 둘 다
+        읽는 사람에게 거짓이라 **양방향으로** 잠근다.
+
+        - under-strict: `[시행일]` 을 채우면서 표식을 안 걷으면 실패한다.
+        - over-strict: 표식만 걷고 날짜를 안 채우면 실패한다.
+
+        ★ 진짜 시행은 이 셀을 **삭제**하는 것이 아니라 그때의 사실로 고치는 것이다.
+        시행 전제(README `시행 전제` 열 — 계정 탈퇴 파기 데몬 · 가입 동의 게이트)가
+        닫히기 전에는 어느 쪽도 움직이면 안 된다.
+        """
+        for name in _DRAFTS:
+            with self.subTest(document=name):
+                text = (_LEGAL_MAP.parent / name).read_text(encoding="utf-8")
+                self.assertEqual(
+                    "`[시행일]`" in text,
+                    "Draft — 법률 검토 전 · 미시행" in text,
+                    f"{name}: 시행일 대괄호와 미시행 표식이 갈라졌다 — 둘은 함께 "
+                    "움직인다",
+                )
 
 
 if __name__ == "__main__":  # pragma: no cover
