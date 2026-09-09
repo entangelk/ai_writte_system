@@ -271,6 +271,76 @@ class TwoRuleSweepTest(unittest.TestCase):
         self.assertNotEqual(user.id, user.username)
 
 
+class PurgeClaimTest(unittest.TestCase):
+    """청구 자체 — `list_withdrawing` 의 거르기와 **다른 것**을 잠근다.
+
+    ★ 이 클래스는 변이가 열었다(2026-09-09): 청구 조건(`purge_started_at` 이 없을
+    때만 찍는다)을 통째로 지워도 배수 셀이 **초록이었다.** 순차 배수는
+    `list_withdrawing` 이 이미 걸러 주기 때문이다. 그러나 그 거르기는 **읽기**이고,
+    읽기와 쓰기 사이는 열려 있다 — 워커 둘(또는 재시작한 자기 자신)이 같은 계정을
+    **두 번 파기**할 수 있고 파기는 비가역이다. 조건을 저장소로 내리는 것이 그 창을
+    닫는 유일한 수단이며(Slice 1 의 `only_if_absent` 와 같은 뿌리), 그 사실은 여기서만
+    재진다.
+    """
+
+    def setUp(self) -> None:
+        self.users = InMemoryUserRepository()
+        self.users.insert(_user())
+
+    def test_the_second_claim_of_the_same_account_is_refused(self) -> None:
+        first = self.users.claim_for_purge("user:a", at=_NOW)
+        second = self.users.claim_for_purge("user:a", at=_NOW + timedelta(hours=1))
+
+        self.assertIsNotNone(first)
+        self.assertEqual(first.purge_started_at, _NOW)
+        self.assertIsNone(second, "이미 시작된 계정이 다시 청구됐다")
+
+    def test_the_first_stamp_is_kept(self) -> None:
+        """두 번째 청구가 시각을 덮어쓰면 *언제 시작됐는가* 가 사라진다 —
+        운영자가 부분 파기를 언제부터 안고 있었는지 알 유일한 값이다."""
+        self.users.claim_for_purge("user:a", at=_NOW)
+        self.users.claim_for_purge("user:a", at=_NOW + timedelta(hours=1))
+
+        self.assertEqual(self.users.get_by_id("user:a").purge_started_at, _NOW)
+
+    def test_an_unknown_account_claims_as_none(self) -> None:
+        self.assertIsNone(self.users.claim_for_purge("user:missing", at=_NOW))
+
+    def test_the_mongo_claim_query_carries_the_condition(self) -> None:
+        """저장소 축 — in-memory 가 조건을 지켜도 실 어댑터가 안 지키면 배포에서만
+        열린다(fake 가 못 보는 계열의 함정). 질의 모양을 직접 잰다."""
+        from services.application.app.auth.users_mongo import MongoUserRepository
+
+        collection = _CapturingUsers()
+        repo = MongoUserRepository.__new__(MongoUserRepository)
+        repo._users = collection
+
+        repo.claim_for_purge("user:a", at=_NOW)
+
+        query, update = collection.calls[0]
+        self.assertEqual(query, {"_id": "user:a", "purge_started_at": None})
+        self.assertEqual(update, {"$set": {"purge_started_at": _NOW}})
+
+    def test_a_claimed_account_is_no_longer_listed(self) -> None:
+        """두 번째 방어선 — 청구 조건과 **함께** 있어야 배수가 헛돌지 않는다."""
+        self.assertEqual(
+            [u.id for u in self.users.list_withdrawing()], ["user:a"]
+        )
+
+        self.users.claim_for_purge("user:a", at=_NOW)
+
+        self.assertEqual(self.users.list_withdrawing(), ())
+
+
+class _CapturingUsers:
+    def __init__(self) -> None:
+        self.calls: list[tuple[dict, dict]] = []
+
+    def find_one_and_update(self, query, update, **_kwargs):
+        self.calls.append((query, update))
+        return None
+
+
 class AccountPurgeOrderTest(unittest.TestCase):
     def setUp(self) -> None:
         self.users = InMemoryUserRepository()
