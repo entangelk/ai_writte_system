@@ -419,6 +419,36 @@ services:
     # 30s timeouts with headroom. NOTE: keep INDEX_SYNC_INTERVAL <= this.
     stop_grace_period: 120s
 
+  withdrawal_worker:
+    # 계정 탈퇴 Slice 3 (오너 D2=ⓐ, 2026-09-07): 유예 30일이 끝난 계정의 파기를
+    # **전용 프로세스**로 돈다. 워커당 한 관심사가 이 스택의 선례이고, 무엇보다
+    # 파기는 되돌릴 수 없어 다른 일과 한 프로세스에 두지 않는다 — 색인 배수나 생성
+    # job 의 장애가 파기 루프를 끌고 들어가면 안 된다.
+    #
+    # ★ D3=ⓐ 라 **재시도가 없다.** 실패한 계정은 `purge_started_at` 이 찍힌 채 남아
+    # 다시 청구되지 않고, 잔여 청소는 scripts/account_purge_reconciler.py 가 한다.
+    # 그래서 `restart: unless-stopped` 이 파기를 되풀이하지 않는다 — 프로세스가
+    # 살아나도 표시된 계정은 건너뛴다.
+    image: ai_writte_system-app  # application 과 공유(사유는 application 참조)
+    build:
+      context: .
+      dockerfile: services/application/Dockerfile
+    command: ["python", "scripts/account_withdrawal_worker.py", "--loop"]
+    environment:
+      CORE_SOT_MONGO_URI: "mongodb://mongo:27017/?replicaSet=rs0"
+      CORE_SOT_MONGO_DB: "ai_writing_system"
+      CORE_SOT_MONGO_TRANSACTIONS: "true"
+      # 유예가 30일이라 분 단위로 깨울 이유가 없다. 기본 1시간.
+      ACCOUNT_PURGE_INTERVAL: "${ACCOUNT_PURGE_INTERVAL:-3600}"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+    # 한 계정의 파기는 프로젝트 여러 개를 순차로 부수므로 SIGTERM 이 진행 중인
+    # **계정 하나**를 끝낼 시간이 필요하다. 중간에 SIGKILL 되면 그 계정이 부분 파기로
+    # 남고 그 수습은 reconciler 몫이 된다.
+    stop_grace_period: 120s
+
   generation_worker:
     # async-pad 증분 2b (D3=B): the background generation worker. Separate from
     # the index-sync `worker` above — the index outbox is idempotent single-shot
