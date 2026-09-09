@@ -41,6 +41,20 @@ class User:
     # Defaults to None so rows written before this field keep reading — same
     # migration posture as ``must_change_password`` and ``status`` above.
     withdrawal_requested_at: datetime | None = None
+    # Purge claim **and** partial-purge marker, one field (Slice 3, D3=ⓐ).
+    # Set atomically by the withdrawal worker when it begins destroying this
+    # account; never cleared, because a successful purge deletes the row itself.
+    #
+    # So its presence means exactly one thing to the daemon: *someone already
+    # started* — in flight, crashed midway, or stopped on a failure. All three
+    # must be left alone. Retrying is not merely wasteful, it is wrong:
+    # ``execute_project_purge`` empties core_sot first, so a second pass ends in
+    # 404 and never reaches the derived collections (see that function's known
+    # limit). Cleanup is the reconciler's job, not a retry's.
+    #
+    # Deliberately not a lease with an expiry: a lease says "take it again
+    # later", which is the one thing this axis must not do.
+    purge_started_at: datetime | None = None
 
 
 

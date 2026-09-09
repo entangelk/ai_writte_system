@@ -103,6 +103,45 @@ class MongoUserRepository:
         )
         return _entry(doc) if doc else None
 
+    def claim_for_purge(self, user_id: str, *, at: datetime) -> User | None:
+        """파기 청구 — ``purge_started_at`` 이 **없을 때만** 찍는다 (Slice 3).
+
+        조건을 저장소로 내리는 이유는 `set_withdrawal_requested_at` 의
+        ``only_if_absent`` 와 같다: 읽고 쓰는 사이가 열려 있으면 두 워커(또는
+        재시작한 자기 자신)가 **같은 계정을 두 번 파기한다.** 파기는 비가역이고
+        두 번째 시도는 404 로 끝나 derived 를 남기므로, 그 창을 열어 둘 수 없다.
+
+        None 이면 행이 없거나 **이미 누가 시작했다** — 어느 쪽이든 건드리지 않는다.
+        """
+        doc = self._users.find_one_and_update(
+            {"_id": user_id, "purge_started_at": None},
+            {"$set": {"purge_started_at": at}},
+            return_document=ReturnDocument.AFTER,
+        )
+        return _entry(doc) if doc else None
+
+    def delete(self, user_id: str) -> bool:
+        """계정 행 파기. 파기 그래프의 **마지막** 단계다(Slice 3).
+
+        앞 단계가 실패하면 여기 오지 않으므로, 행이 남아 있다는 것 자체가
+        ``purge_started_at`` 과 함께 *부분 파기* 를 말한다.
+        """
+        return self._users.delete_one({"_id": user_id}).deleted_count == 1
+
+    def list_withdrawing(self) -> tuple[User, ...]:
+        """탈퇴 스탬프가 있고 **아직 아무도 시작하지 않은** 계정 (Slice 3).
+
+        경계 판정(30일이 지났는가)은 여기서 하지 않는다 — `is_purge_due` 한 곳이고,
+        저장소가 그 산술을 두 번째로 구현하면 화면과 데몬이 갈라진다(Slice 0 계약 ⓑ).
+        """
+        cursor = self._users.find(
+            {
+                "withdrawal_requested_at": {"$ne": None},
+                "purge_started_at": None,
+            }
+        ).sort("_id", ASCENDING)
+        return tuple(_entry(doc) for doc in cursor)
+
 
 def _doc(value: User) -> dict:
     return {
@@ -115,6 +154,7 @@ def _doc(value: User) -> dict:
         "created_at": value.created_at,
         "status": value.status,
         "withdrawal_requested_at": value.withdrawal_requested_at,
+        "purge_started_at": value.purge_started_at,
     }
 
 
@@ -146,6 +186,9 @@ def _entry(doc: dict) -> User:
         # pymongo hands BSON dates back naive, so without the relabel the purge
         # daemon raises TypeError on every withdrawing account.
         withdrawal_requested_at=_aware(doc.get("withdrawal_requested_at")),
+        # 같은 이유로 `.get` 이고 같은 이유로 재라벨링이다 — 이 값도 aware `now` 와
+        # 비교되는 자리(청구 조건·부분 파기 판정)에 간다.
+        purge_started_at=_aware(doc.get("purge_started_at")),
     )
 
 

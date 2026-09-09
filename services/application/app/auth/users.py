@@ -171,6 +171,15 @@ class UserRepository(Protocol):
         tell those apart.
         """
 
+    def claim_for_purge(self, user_id: str, *, at: datetime) -> User | None:
+        """Stamp ``purge_started_at`` only if it is absent. None = already claimed."""
+
+    def delete(self, user_id: str) -> bool:
+        """Destroy the account row. The last step of the purge graph."""
+
+    def list_withdrawing(self) -> tuple[User, ...]:
+        """Accounts with a withdrawal stamp that nobody has started purging."""
+
 
 class InMemoryUserRepository:
     def __init__(self) -> None:
@@ -249,6 +258,32 @@ class InMemoryUserRepository:
         updated = replace(stored, withdrawal_requested_at=at)
         self._by_id[user_id] = updated
         return updated
+
+    def claim_for_purge(self, user_id: str, *, at: datetime) -> User | None:
+        stored = self._by_id.get(user_id)
+        if stored is None or stored.purge_started_at is not None:
+            return None
+        updated = replace(stored, purge_started_at=at)
+        self._by_id[user_id] = updated
+        return updated
+
+    def delete(self, user_id: str) -> bool:
+        stored = self._by_id.pop(user_id, None)
+        if stored is None:
+            return False
+        # The username index has to go too, or the name stays taken by a row
+        # that no longer exists — signup would answer 409 for an account nobody
+        # can log into. (Re-registration is out of scope, but *blocking* it by
+        # accident is not the same as deciding to block it.)
+        self._by_username.pop(stored.username, None)
+        return True
+
+    def list_withdrawing(self) -> tuple[User, ...]:
+        return tuple(
+            user for user in sorted(self._by_id.values(), key=lambda u: u.id)
+            if user.withdrawal_requested_at is not None
+            and user.purge_started_at is None
+        )
 
 
 class UserService:
