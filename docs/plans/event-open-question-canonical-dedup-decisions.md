@@ -1,6 +1,6 @@
 # 착수 결정 브리프 — event/open_question 정본 중복 누적을 어디서 막는가
 
-상태: `Proposed — 오너 결정 대기`
+상태: `Resolved — 오너 ⓒ 채택(2026-09-09) · candidate 축 배선 구현 완료(`7a34e21`)`
 작성: 2026-09-09
 선행: [`02b-6-semantic-identity-resolution-decisions.md`](02b-6-semantic-identity-resolution-decisions.md)(D4=A, off 기본) · [`pending-candidate-identity-grouping-decisions.md`](pending-candidate-identity-grouping-decisions.md)(C 채택, Slice 0~6 구현 완료) · [`final-save-analysis-decisions.md`](final-save-analysis-decisions.md)(D4=A, 최종 저장이 분석을 동기 실행)
 
@@ -41,6 +41,21 @@
 3. **ⓒ가 ⓑ의 전제를 만들어준다.** 2B.6 D7이 실 fixture를 sandbox 밖 후속으로 미뤘는데, 승인·거절된 그룹이 바로 그 라벨 데이터다. ⓑ를 켤 시점의 threshold를 **추측이 아니라 측정**으로 정할 수 있다.
 
 **ⓐ도 정당하다.** 실데이터가 0건이고 도그푸드가 아직 시작 전이라면 *"지금은 안 만든다"* 가 값싼 답이다. **다만 그 경우 트리거를 반드시 함께 적는다** — 트리거 없는 유예는 망각이고, K-3 ⓐ도 트리거 문장이 있어서 살아남았다. 제안 트리거: **한 프로젝트의 canonical event가 50건을 넘는 순간, 또는 리뷰에서 같은 사건의 중복을 사람이 처음 알아본 순간.**
+
+## ✅ 오너 결정 (2026-09-09) — **ⓒ candidate 축 배선**
+
+추천 ⓔ 중 **ⓒ를 지금 한다**로 확정됐다(ⓑ canonical 축은 열지 않는다 — 추측 threshold 로 canon 을
+병합하지 않는다는 2B.6 D4=A 를 유지한다). 구현 `7a34e21`:
+
+- `analysis/candidate_shortlist.py` 의 `VectorCandidateShortlistRetriever` 가 `candidate_vectors` 를
+  재사용해 focal 과 가까운 같은 타입 후보를 고르고, `main.py` 조립부가 그것을 주입한다.
+- **유사도 임계값을 만들지 않았다** — 이웃 상위 K(기본 5)만 뽑고 `same|different|uncertain` 판정은
+  identity judge 가 한다. K 는 의미적 컷오프가 아니라 **팬아웃 예산**이고 run 당 20쌍 상한(S-1 D3)이
+  비용을 묶는다. 아래 "후속 고려"의 *threshold 정본은 하나여야 한다* 는 **임계값을 안 만드는 것으로
+  해소**됐다.
+- 벡터 다리(`CHROMA_HOST` + `EMBEDDING_SERVICE_URL`)가 없으면 조립이 `None` 이라 **종전 no-op 그대로**다.
+
+**아직 실데이터에서 돌지 않았다**(정본·후보 0건). 첫 도그푸드에서 K=5 와 20쌍 상한의 배분을 관측한다.
 
 ## 후속 고려 (어느 쪽을 고르든 열어 둘 것)
 

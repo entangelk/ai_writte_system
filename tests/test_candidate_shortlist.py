@@ -10,11 +10,14 @@ shortlist 는 비게 된다(no-op)"* 로 계약했는데 조립부가 그것을 
 3. pool 밖 hit(다른 타입·이미 전이된 후보·낡은 벡터)는 **버린다.**
 4. pool 이 비면 embedding·질의를 **사지 않는다**(비교 대상이 없는데 돈을 쓰지 않는다).
 5. 상한 K 는 의미적 컷오프가 아니라 팬아웃 예산이다 — 넘치면 앞에서 자른다.
+6. **K < 1 은 조립에서 거절한다** — 루프가 담고 나서 상한을 보므로 `limit=0` 이
+   "아무도 안 데려온다"가 아니라 **한 명을 데려온다**(독립 검증 2026-09-09 비차단 ①).
 
 양방향:
 - under — focal 제외를 지우면 2가, pool 필터를 지우면 3이, 상한을 지우면 5가
   재실패한다.
-- over — pool 이 빌 때 그래도 질의하면 4가, 이웃 순서를 정렬로 바꾸면 1이 실패한다.
+- over — pool 이 빌 때 그래도 질의하면 4가, 이웃 순서를 정렬로 바꾸면 1이, 유효한
+  `limit=1` 까지 거절하면 6이 실패한다.
 """
 
 import unittest
@@ -162,6 +165,28 @@ class ShortlistAdapterTest(unittest.TestCase):
         )
         self.assertEqual(index.calls[0]["candidate_type"], EVENT.value)
         self.assertEqual(index.calls[0]["project_id"], "p1")
+
+
+    def test_a_limit_below_one_is_rejected_at_assembly(self):
+        """6 under-strict: `limit=0` 은 조용히 한 명을 데려왔다 — 이제 거절한다.
+
+        조용히 1로 올리지 않는 이유는 이 값이 **조립 시점의 설정**이기 때문이다. 잘못
+        적혔으면 기동에서 알아야 하고, 뒤늦게 판정 팬아웃으로 드러나면 원인이 멀다.
+        """
+        for bad in (0, -1):
+            with self.subTest(limit=bad):
+                with self.assertRaises(ValueError):
+                    _retriever(_ScriptedVectorIndex(()), _CountingEmbeddings(), limit=bad)
+
+    def test_a_limit_of_one_is_still_valid(self):
+        """6 over-strict: 경계를 조이다 유효한 최솟값까지 막으면 실패한다."""
+        focal = _candidate("c-focal")
+        pool = (_candidate("c-a"), _candidate("c-b"))
+        index = _ScriptedVectorIndex(("c-a", "c-b"))
+        got = _retriever(index, _CountingEmbeddings(), limit=1).shortlist(
+            project_id="p1", candidate=focal, pool=pool
+        )
+        self.assertEqual([c.id for c in got], ["c-a"])
 
 
 class ShortlistWiringTest(unittest.TestCase):

@@ -70,7 +70,7 @@
 | [`02b-5-memory-vector-reindex-decisions.md`](02b-5-memory-vector-reindex-decisions.md) | 2B.5 memory→vector 재색인 | Resolved |
 | [`02b-6-semantic-identity-resolution-decisions.md`](02b-6-semantic-identity-resolution-decisions.md) | 2B.6 event/open_question 의미적 identity resolution | Resolved |
 | [`02b-7-character-alias-homonym-decisions.md`](02b-7-character-alias-homonym-decisions.md) | 2B.7 character 별칭/동명이인 semantic 보강 | Resolved |
-| [`event-open-question-canonical-dedup-decisions.md`](event-open-question-canonical-dedup-decisions.md) | event/open_question 정본 중복 누적을 어느 축에서 막는가(canonical vs candidate) | **Proposed — 오너 결정 대기** |
+| [`event-open-question-canonical-dedup-decisions.md`](event-open-question-canonical-dedup-decisions.md) | event/open_question 정본 중복 누적을 어느 축에서 막는가(canonical vs candidate) | **Resolved** — ⓒ 채택(2026-09-09) · 배선 구현 완료 |
 
 | [`pending-candidate-identity-grouping-decisions.md`](pending-candidate-identity-grouping-decisions.md) | 서로 다른 분석 job의 미승인 후보 정체성 그룹·그룹 승인 | **확정 — C 채택**(2026-09-02 dogfood) |
 | [`pending-candidate-identity-grouping-implementation-phases.md`](pending-candidate-identity-grouping-implementation-phases.md) | C 채택 후 미승인 후보 identity group 구현 슬라이스 분할 | Active — **Slice 0~6 구현·검증 완료**(Slice 6 조건 B1·B2 폐쇄, 2026-09-06) |
@@ -94,7 +94,7 @@
 | [`04-agentic-search.md`](04-agentic-search.md) | 검색 계획, 정본 재조회, ContextPackage | 이행됨 |
 | [`04-agentic-search-kickoff-decisions.md`](04-agentic-search-kickoff-decisions.md) | Phase 4 착수 | Approved |
 | [`04-context-package-completion-decisions.md`](04-context-package-completion-decisions.md) | ContextPackage 완성(§8 C / §5 B) | Resolved |
-| [`context-compaction-layer-decisions.md`](context-compaction-layer-decisions.md) | 압축 층(`ContextCompressor`) — 원자에 없는 지식을 만드는 파생 요약 계층 | **Resolved** — D1~D6 확정(2026-09-09) · 구현은 D6 트리거(정본 16건) 대기 |
+| [`context-compaction-layer-decisions.md`](context-compaction-layer-decisions.md) | 압축 층(`ContextCompressor`) — 원자에 없는 지식을 만드는 파생 요약 계층 | **Resolved** — D1~D7 확정(2026-09-09) · 구현은 D6 트리거(정본 16건) 대기 |
 | [`04-shared-vector-index-decisions.md`](04-shared-vector-index-decisions.md) | 공유 in-process vector index | Approved |
 | [`04-real-vector-backend-decisions.md`](04-real-vector-backend-decisions.md) | 영속 vector 백엔드(Chroma). **cross-encoder 리랭커 유예의 출처** | Approved |
 | [`04-compose-elasticsearch-service-decisions.md`](04-compose-elasticsearch-service-decisions.md) | compose 전용 ES 서비스(배포 lexical/hybrid) | Resolved |

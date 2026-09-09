@@ -1361,10 +1361,10 @@ def _build_candidate_shortlist_retriever():
     return VectorCandidateShortlistRetriever(
         embeddings=_build_embedding_provider(),
         vector_index=vector_index,
-        limit=int(os.environ.get(
+        limit=_env_int(
             "ANALYSIS_CANDIDATE_SHORTLIST_LIMIT",
-            str(DEFAULT_CANDIDATE_SHORTLIST_LIMIT),
-        )),
+            DEFAULT_CANDIDATE_SHORTLIST_LIMIT,
+        ),
     )
 
 

@@ -111,7 +111,7 @@
 - **pymongo는 BSON 날짜를 naive로 돌려준다** — aware `datetime.now(UTC)` 와 비교하면 `TypeError` 다.
 - **쿠키 인증 테스트는 `TestClient(app, base_url="https://testserver")` 로 만든다**(세션 쿠키는 `Secure` 기본 on).
 - **문서를 쓸 때 `abstract.md` 를 그대로 인용하면 거짓이 된다** — 초안(2026-06)에서 달라진 다섯을 [`docs/product-overview.md`](docs/product-overview.md) §5가 모아 두었다(단일→다중 사용자 · 추출 5종→**관찰 3종** · Gate 4종→**Writing Gate 하나** · 문체는 학습이 아니라 **선언** · 관측이 제품 기능으로 추가). 그런 문서의 숫자는 **날짜 스냅샷**이고 살아 있는 정본은 README·SoT다.
-- **event/open_question 의 그룹 판정은 벡터 다리가 있어야 돈다.** 후보 정체성 shortlist 는 `CHROMA_HOST` + `EMBEDDING_SERVICE_URL` 이 **둘 다** 있을 때만 조립되고, 없으면 `None` → **그 두 타입은 조용히 no-op**(실패가 아니다 — character 는 정규화 이름이라 계속 묶인다). *"왜 안 묶이지"* 를 만나면 먼저 이 env 를 본다. **임계값은 없다** — 이웃 상위 K(기본 5, `ANALYSIS_CANDIDATE_SHORTLIST_LIMIT`)만 뽑고 판정은 judge 가 한다. **K 는 run 당 20쌍 상한을 character 와 나눠 쓴다** — 키우면 첫 focal 한둘이 run 예산을 다 쓰고 나머지가 전부 이월된다.
+- **event/open_question 의 그룹 판정은 벡터 다리가 있어야 돈다.** 후보 정체성 shortlist 는 `CHROMA_HOST` + `EMBEDDING_SERVICE_URL` 이 **둘 다** 있을 때만 조립되고, 없으면 `None` → **그 두 타입은 조용히 no-op**(실패가 아니다 — character 는 정규화 이름이라 계속 묶인다). *"왜 안 묶이지"* 를 만나면 먼저 이 env 를 본다. **★ dev 스택은 그 둘을 이미 갖고 있다** — 즉 **이미지 재빌드 시점에 즉시 켜진다**(2026-09-09 실측). 아직 실데이터에서 한 번도 안 돌았으므로 **첫 도그푸드에서 판정 팬아웃을 관측할 것**. **임계값은 없다** — 이웃 상위 K(기본 5, `ANALYSIS_CANDIDATE_SHORTLIST_LIMIT`)만 뽑고 판정은 judge 가 한다. **K 는 run 당 20쌍 상한을 character 와 나눠 쓴다** — 키우면 첫 focal 한둘이 run 예산을 다 쓰고 나머지가 전부 이월된다.
 - **검증 기록의 판정 어휘는 `합격`·`조건부 합격`·`불합격` 셋뿐이고** 첫 줄 형식까지 [`guides/verification.md`](docs/guides/verification.md) 가 규정한다. **분류를 정규식에 맡기지 말 것** — 분류는 사람이 하고 가드는 구조만 잠근다.
 
 ## 코드를 만질 때의 규칙

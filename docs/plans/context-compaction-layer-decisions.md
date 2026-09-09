@@ -1,6 +1,6 @@
 # 착수 결정 브리프 — 컨텍스트 압축 층(`ContextCompressor`)
 
-상태: `Resolved — D1~D6 오너 확정(2026-09-09) · 구현은 D6 트리거 대기`
+상태: `Resolved — D1~D7 오너 확정(2026-09-09) · 구현은 D6 트리거 대기`
 작성: 2026-09-09
 선행: [`event-open-question-canonical-dedup-decisions.md`](event-open-question-canonical-dedup-decisions.md)(ⓒ 배선 확정) · [`04-context-package-completion-decisions.md`](04-context-package-completion-decisions.md)(canonical 기반 need 유보) · [`chapter-scene-hierarchy-decisions.md`](chapter-scene-hierarchy-decisions.md)(장 = metadata-only) · [`../abstract.md`](../abstract.md) · [`../agentic_search_flow.md`](../agentic_search_flow.md)
 
@@ -101,10 +101,30 @@ Gate 는 item 을 SOT 에서 재검증하는데(경계 6) 요약은 여러 정�
 
 ---
 
+## ✅ D7 — `constraints`/`do_not_use` 를 같은 슬라이스에 넣는가 (오너 **포함** 2026-09-09)
+
+원설계의 `do_not_use`(*"아린은 아직 레온의 배신을 모른다"* · *"검은 태양단의 정체는 아직 공개하지 않는다"*)는
+**요약이 아니라 제약**이다. Phase 4 가 *"채우는 출처 미정"* 으로 남겨 `constraints`/`do_not_use` 는 지금도 항상
+빈 tuple 인데, **챕터 압축본이 그것을 아는 첫 번째 자리**다(장 유효 시점 정보를 이미 들고 있다).
+
+| 선택지 | 설명 | 장점 | 단점 |
+|---|---|---|---|
+| **포함** ✅ | 압축 층 슬라이스가 `do_not_use` 까지 채운다 | *"초반에 정한 규칙을 끝까지 지킨다"* 가 이 층의 목적에 이미 들어 있다 — 나눠 열면 **압축본이 아는 것을 쓰지 못하는 기간**이 생긴다 · Phase 4 가 남긴 빈 칸이 닫힌다 | 슬라이스가 커진다 · 경계를 그어야 한다(아래) |
+| 분리 | 압축 층을 먼저 열고 제약은 뒤에 | 각 슬라이스가 작다 | 같은 데이터를 두 번 훑는다 · 압축본이 제약을 알면서 안 쓰는 상태가 남는다 |
+
+**확정 근거(오너)**: 압축 층이 노리는 것이 *"길어져도 초반 규칙·지시사항을 끝까지 준수"* 인데, 그 절반인 제약을
+빼면 층을 만들고도 목적을 반만 이룬다.
+
+**★ 착수 시 먼저 그을 경계 — 이 결정이 문을 하나 더 연다.** `do_not_use` 의 내용은 대부분 **POV·시점 제약에서
+유도된다.** 그런데 아래 "유예·범위 밖" 이 `timeline_constraints`·`pov_constraints` 를 빼 두었다. 둘 중 하나를 정해야
+한다: **(a) 압축본이 이미 아는 범위 안에서만** `do_not_use` 를 만든다(장 경계·유효 시점까지) — 범위 밖 유지 ·
+**(b) 셋을 한 묶음으로** 본다 — 그러면 `macro_context` 의 나머지 칸이 함께 열린다. **지금 정하지 않는다**(슬라이스를
+열 때, 실제 데이터를 보고 정한다).
+
 ## 후속 고려 (문을 열어 둘 것)
 
 - **`MACRO_NEEDS` 는 확장 지점이다.** 압축본은 macro 로 실리고 원자는 micro 로 남아야 원설계의 드릴다운이 성립한다 — 지금처럼 모든 memory 가 micro 로 가면 압축본이 원자와 같은 8칸을 두고 경쟁한다.
-- **`constraints`/`do_not_use` 의 출처가 여기서 생길 수 있다.** 원설계의 `do_not_use`(*"아린은 아직 레온의 배신을 모른다"*)는 챕터 유효 시점 정보이고, 챕터 압축본이 그것을 아는 첫 번째 자리다. Phase 4 가 *"출처 미정"* 으로 남긴 칸이 이 층에서 채워질 수 있다 — 지금 정하지는 않는다.
+- **`constraints`/`do_not_use` 는 이 층의 슬라이스에 포함된다 — D7 로 확정됐다**(아래).
 - **ⓒ 배선(후보 정체성 그룹)과 충돌하지 않는다.** ⓒ 는 승인 **전** 후보 축이고 압축은 승인 **후** 정본 축이다. 다만 ⓒ 가 중복을 줄이면 압축 대상 원자도 줄어 트리거가 늦춰진다.
 - **★ 정본은 자기가 어느 장 소속인지 모른다 — D2 의 숨은 전제다.** `MemoryEntry` 에 chapter 축이 없다(필드: id·project_id·memory_type·status·provenance·confidence·source_ref_ids·payload·version·analysis_job_id·source_candidate_id·promotion_mode·applied_threshold·scope·supersedes). 유도는 된다 — `Draft.chapter_id` 가 있으므로([`../../services/application/app/core_sot/models.py:85`](../../services/application/app/core_sot/models.py#L85)) `memory → analysis_job_id → snapshot_id → draft → chapter_id` 경로가 선다. 두 가지가 걸린다: ① **4단 조인**이고 ② `add_evidence` 가 여러 장의 `source_ref` 를 union 하면 **한 정본이 여러 장에 걸쳐** 장 경계가 흐려진다. 구현 전에 귀속 규칙을 정해야 한다 — 대략 (a) 최초 관측 장에 귀속 (b) 걸친 모든 장에 중복 등장 (c) memory 에 chapter 스냅샷 필드를 더한다. **지금 정하지 않는다.**
 
@@ -112,5 +132,5 @@ Gate 는 item 을 SOT 에서 재검증하는데(경계 6) 요약은 여러 정�
 
 - **주체축(엔티티) 롤업 구현** — D5=A 의 트리거로 유예.
 - **장소·관계 요약** — 현재 memory type 이 character/event/open_question 셋뿐이라 새 타입을 여는 결정이 선행돼야 한다(원설계에는 있다).
-- **`voice_profile`·`timeline_constraints`·`pov_constraints`** — 원설계 `macro_context` 의 나머지 칸이며 압축 층과 별개 축이다.
+- **`voice_profile`·`timeline_constraints`·`pov_constraints`** — 원설계 `macro_context` 의 나머지 칸이다. **★ D7 이 이 경계를 건드린다** — `do_not_use` 가 POV·시점에서 유도되므로 착수 시 (a)/(b) 를 먼저 정한다(D7 말미).
 - **검색 상한(8)·예산(8192) 자체의 조정** — 압축이 있어야 의미가 달라지는 값이라 이 층 뒤에 다시 본다.

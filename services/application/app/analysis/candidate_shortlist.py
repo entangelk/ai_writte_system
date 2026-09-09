@@ -68,6 +68,14 @@ class VectorCandidateShortlistRetriever:
         vector_index: CandidateVectorSearch,
         limit: int = DEFAULT_CANDIDATE_SHORTLIST_LIMIT,
     ) -> None:
+        if limit < 1:
+            # 0 이면 "아무도 안 데려온다"로 읽히지만 실제로는 **한 명을 데려왔다** —
+            # 루프가 담고 나서 상한을 보기 때문이다(독립 검증 2026-09-09 비차단 ①).
+            # 조용히 1로 올리지 않고 거절한다: 이 값은 조립 시점의 설정이라 잘못 적혔으면
+            # 기동에서 알아야 하고, 뒤늦게 판정 팬아웃으로 드러나면 원인이 멀다.
+            raise ValueError(
+                f"candidate shortlist limit must be >= 1, got {limit}"
+            )
         self._embeddings = embeddings
         self._vector_index = vector_index
         self._limit = limit
