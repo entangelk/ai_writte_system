@@ -94,7 +94,7 @@
 | [`04-agentic-search.md`](04-agentic-search.md) | 검색 계획, 정본 재조회, ContextPackage | 이행됨 |
 | [`04-agentic-search-kickoff-decisions.md`](04-agentic-search-kickoff-decisions.md) | Phase 4 착수 | Approved |
 | [`04-context-package-completion-decisions.md`](04-context-package-completion-decisions.md) | ContextPackage 완성(§8 C / §5 B) | Resolved |
-| [`context-compaction-layer-decisions.md`](context-compaction-layer-decisions.md) | 압축 층(`ContextCompressor`) — 원자에 없는 지식을 만드는 파생 요약 계층 | **Proposed** — D1~D6 확정(2026-09-09) · D3 시점 정정 확인 대기 |
+| [`context-compaction-layer-decisions.md`](context-compaction-layer-decisions.md) | 압축 층(`ContextCompressor`) — 원자에 없는 지식을 만드는 파생 요약 계층 | **Resolved** — D1~D6 확정(2026-09-09) · 구현은 D6 트리거(정본 16건) 대기 |
 | [`04-shared-vector-index-decisions.md`](04-shared-vector-index-decisions.md) | 공유 in-process vector index | Approved |
 | [`04-real-vector-backend-decisions.md`](04-real-vector-backend-decisions.md) | 영속 vector 백엔드(Chroma). **cross-encoder 리랭커 유예의 출처** | Approved |
 | [`04-compose-elasticsearch-service-decisions.md`](04-compose-elasticsearch-service-decisions.md) | compose 전용 ES 서비스(배포 lexical/hybrid) | Resolved |

@@ -111,6 +111,7 @@
 - **pymongo는 BSON 날짜를 naive로 돌려준다** — aware `datetime.now(UTC)` 와 비교하면 `TypeError` 다.
 - **쿠키 인증 테스트는 `TestClient(app, base_url="https://testserver")` 로 만든다**(세션 쿠키는 `Secure` 기본 on).
 - **문서를 쓸 때 `abstract.md` 를 그대로 인용하면 거짓이 된다** — 초안(2026-06)에서 달라진 다섯을 [`docs/product-overview.md`](docs/product-overview.md) §5가 모아 두었다(단일→다중 사용자 · 추출 5종→**관찰 3종** · Gate 4종→**Writing Gate 하나** · 문체는 학습이 아니라 **선언** · 관측이 제품 기능으로 추가). 그런 문서의 숫자는 **날짜 스냅샷**이고 살아 있는 정본은 README·SoT다.
+- **event/open_question 의 그룹 판정은 벡터 다리가 있어야 돈다.** 후보 정체성 shortlist 는 `CHROMA_HOST` + `EMBEDDING_SERVICE_URL` 이 **둘 다** 있을 때만 조립되고, 없으면 `None` → **그 두 타입은 조용히 no-op**(실패가 아니다 — character 는 정규화 이름이라 계속 묶인다). *"왜 안 묶이지"* 를 만나면 먼저 이 env 를 본다. **임계값은 없다** — 이웃 상위 K(기본 5, `ANALYSIS_CANDIDATE_SHORTLIST_LIMIT`)만 뽑고 판정은 judge 가 한다. **K 는 run 당 20쌍 상한을 character 와 나눠 쓴다** — 키우면 첫 focal 한둘이 run 예산을 다 쓰고 나머지가 전부 이월된다.
 - **검증 기록의 판정 어휘는 `합격`·`조건부 합격`·`불합격` 셋뿐이고** 첫 줄 형식까지 [`guides/verification.md`](docs/guides/verification.md) 가 규정한다. **분류를 정규식에 맡기지 말 것** — 분류는 사람이 하고 가드는 구조만 잠근다.
 
 ## 코드를 만질 때의 규칙
@@ -163,7 +164,7 @@
 
 > **★ 이 표가 비었다는 것은 상태이지 완료가 아니다.** 2026-09-08 에 브리프 7건이 만들어지고 **같은 날 오너가 전부 답했다**(종전에는 선택지가 이 표 칸에만 있고 `docs/plans/*-decisions.md` 브리프가 **하나도 없었다** — 셋은 근거조차 `—` 였다). **결정은 브리프에 있다** — 여기 옮겨 적지 않는다(그것이 두 번째 정본이다). 새 결정 대기 항목이 생기면 **브리프를 먼저 쓰고** 이 표에 한 줄로 올린다.
 
-| 결정된 것(2026-09-08) | 답 | 브리프 |
+| 결정된 것(2026-09-08~09) | 답 | 브리프 |
 |---|---|---|
 | 계정 탈퇴 Slice 2 읽기 표면 | **ⓑ 별도 `GET /me/withdrawal`** | [`slice2-withdrawal-grace-read-surface-decisions.md`](docs/plans/slice2-withdrawal-grace-read-surface-decisions.md) |
 | 랜딩 범위·푸터 · **약관 값 넷** | **D1=ⓒ · D2=ⓐ** · `[운영자]`~`[추론 서비스 사업자]` 확정 | [`landing-page-scope-decisions.md`](docs/plans/landing-page-scope-decisions.md) |
@@ -172,6 +173,8 @@
 | `analysis_extractor` D4 · gate 노출 | **둘 다 유예 · 트리거 확정** | [`analysis-extractor-alignment-and-gate-exposure-decisions.md`](docs/plans/analysis-extractor-alignment-and-gate-exposure-decisions.md) |
 | 휴면 디렉터리 · `docs/plans` 재편 | **D1=ⓐ 휴면 명시 · D2=ⓐ 안 함** | [`docs-directory-dormant-and-restructure-decisions.md`](docs/plans/docs-directory-dormant-and-restructure-decisions.md) |
 | llama `-hf` 리비전 | **ⓐ 최신 추종 유지** — ★ 브리프가 오너 근거의 전제 하나를 정정해 두었다 | [`llama-model-revision-pin-decisions.md`](docs/plans/llama-model-revision-pin-decisions.md) |
+| event/open_question 정본 중복(09-09) | **ⓒ candidate 축 배선** — 구현 완료 | [`event-open-question-canonical-dedup-decisions.md`](docs/plans/event-open-question-canonical-dedup-decisions.md) |
+| 압축 층(09-09) | **D1=파생+트리거 · D2=챕터 드릴다운 · D3=정본이 바뀔 때(D4 에 흡수) · D4=A · D5=A선 · D6=정본 16건** — 구현은 트리거 대기 | [`context-compaction-layer-decisions.md`](docs/plans/context-compaction-layer-decisions.md) |
 
 
 **🔧 미수리 — 알고 있고 아직 안 고친 것**
@@ -184,6 +187,7 @@
 | `/writing/generate` 만 provider TIMEOUT을 502로(나머지는 504) | 선언 surface와 잠긴 셀을 함께 바꿔야 함 | [`writing.py:469`](services/application/app/routers/writing.py#L469) |
 | 결정적 `provider_error` 에도 "다시 시도" 버튼 | 게이트웨이의 `retryable=False` 가 화면까지 안 온다 | `GenerationPad.tsx` |
 | `llm_call_audits` 로 "출력이 잘렸다"를 못 본다 | `finish_reason`·`truncated` 없음(실측 0건). 헤드룸만 계산 가능 | `observability/` |
+| 무순위 폴백은 관련도를 모른다 | 벡터·렉시컬 다리가 **둘 다 없는** 구성에서 `MongoDirect*MemoryRetriever` 가 `query` 를 무시하고 저장 순서 앞 8개를 자른다 — 정본이 상한을 넘으면 **오래된 것만 영원히 실린다**. 2026-09-09 에 **경고로 드러냈을 뿐 고친 것이 아니다**(`"… is unranked (mongo-direct backend)"` 가 뜨면 그 구성이라는 뜻) | [`context_search/service.py`](services/application/app/context_search/service.py) |
 | 자료(source) 원문 길이 상한 없음 | `analysis_extract` 가 `snapshot.raw_text` 를 **통째로** 싣는다 — 검색 조각 예산의 보호를 안 받는 유일한 LLM 경로 | [`extractor.py`](services/application/app/analysis/extractor.py) |
 | 프론트 6000 상수가 서버 env override와 미동기화 | 서버 422·400이 최종 방어. 해소하려면 public 설정 계약 위치를 먼저 결정 | [`tokenEstimate.ts:23`](frontend/src/writing/tokenEstimate.ts#L23) |
 | 미사용 import에 회귀 가드 없음 | 유일한 신호가 스위트 밖 linter. **ⓐ(정리 슬라이스마다 수동 측정)가 현 단계에 맞다** | — |
@@ -222,6 +226,7 @@
 | 2c `owner_id` 공개 payload 노출 | 프론트가 읽을 이유가 생길 때(`schema.d.ts` 변경이라 공짜 아님) |
 | 공유·협업 글쓰기 | **공동 작업이 생기는 날** — Phase 9 **F4(행위자 열)와 같은 트리거**다(오너 2026-08-10: *"개인 시스템이라고 하면 되겠지"* — 즉 그 전제가 바뀌면 되살린다). 둘을 따로 열지 않는다. D3=A가 그 문을 닫지 않게 설계돼 있다 |
 | 프론트 스타일 나머지 축(다른 지점 줄바꿈·넘침 · 좁은 화면 표 넘침 · 실패 UX 문구) | **육안 확인** — 위 Phase 10 ③④ 와 같은 트리거이고 같은 자리에서 함께 본다. *(2026-09-06 정정: 이 칸에는 트리거가 아니라 **범위 목록**이 들어 있었다 — 표 제목이 금지하는 바로 그 모양이라 범위를 항목 칸으로 옮겼다)* |
+| 컨텍스트 압축 층(파생 요약) | **한 프로젝트의 canonical memory 총계가 16건을 넘는 순간**(검색 상한 8의 2배 = 랭킹이 무엇을 고르든 절반 이상이 잘리기 시작하는 지점) 또는 **오너가 "AI 가 앞 내용을 잊었다"를 실제로 만날 때**. 열 때 **먼저 풀 것**: 정본의 장 귀속 규칙 — `MemoryEntry` 에 chapter 축이 없고 `add_evidence` 의 source_ref union 이 장 경계를 흐린다 → [`context-compaction-layer-decisions.md`](docs/plans/context-compaction-layer-decisions.md) §후속 고려 |
 | 사용자 가이드 | 도그푸드에서 UI가 안정되면. **공개 전** 최신 화면 기준으로 |
 | Phase 8.6 결제 seam | 결제 도입이 계기일 때(오너: *"당장은 안 붙일 것 같다"*) |
 | 관측 화면 확장 | **Phase 9 F1(커서 페이징)과 같은 트리거를 쓴다** — *"'최근 100건' 문구 아래가 궁금해지는 순간, 특히 하루 저작 뒤 타임라인이 그날 하루로 다 차면"*([`09-1-…-decisions.md`](docs/plans/09-1-activity-timeline-screen-decisions.md) §"나중에 여는 문"). **★ 둘을 따로 열지 않는다 — 먼저 여는 쪽이 페이징 관례를 정하고 다른 쪽이 따른다.** 무엇을 더하든 **`React.lazy` 경계 안**. *(2026-09-06 정정: 종전 트리거 "API에 시간 창 `?since=` 이 생긴 뒤"는 **순환이었다** — `?since=` 는 이 작업 자신의 API 축이라 그것을 만들어 줄 다른 작업이 없다. 실측: [`observability.py`](services/application/app/routers/observability.py) 의 KPI endpoint 는 `project_id` 하나만 받는다)* |

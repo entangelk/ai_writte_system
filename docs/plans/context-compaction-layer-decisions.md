@@ -1,6 +1,6 @@
 # 착수 결정 브리프 — 컨텍스트 압축 층(`ContextCompressor`)
 
-상태: `Proposed — D1~D6 오너 확정(2026-09-09) · D3 시점 정정 제안 확인 대기`
+상태: `Resolved — D1~D6 오너 확정(2026-09-09) · 구현은 D6 트리거 대기`
 작성: 2026-09-09
 선행: [`event-open-question-canonical-dedup-decisions.md`](event-open-question-canonical-dedup-decisions.md)(ⓒ 배선 확정) · [`04-context-package-completion-decisions.md`](04-context-package-completion-decisions.md)(canonical 기반 need 유보) · [`chapter-scene-hierarchy-decisions.md`](chapter-scene-hierarchy-decisions.md)(장 = metadata-only) · [`../abstract.md`](../abstract.md) · [`../agentic_search_flow.md`](../agentic_search_flow.md)
 
@@ -48,7 +48,7 @@
 
 ---
 
-## ✅ D3 — 압축본을 언제 만드는가 (오너 **B** 채택 2026-09-09 · ★ 시점 정정 제안)
+## ✅ D3 — 압축본을 언제 만드는가 (오너 **B** 채택 · **시점 정정 확정** 2026-09-09)
 
 | 선택지 | 설명 | 장점 | 단점 |
 |---|---|---|---|
@@ -61,9 +61,9 @@
 
 **★ 그런데 "분석 완료"는 정본을 만들지 않는다 — 트리거를 한 칸 옮겨야 한다.** 분석이 만드는 것은 `needs_review` **후보**이고 canonical memory 는 승인(promote/apply)에서 생긴다. auto-promotion 은 **기본 off** 이며(`memory/service.py` `evaluate_auto_promotion` — *"Off by default (None)"*) **이 머신에도 `MEMORY_AUTO_PROMOTION_THRESHOLD` 가 미설정**이다(실측 2026-09-09). 그래서 B 를 글자 그대로 구현하면 ① 분석 완료 시점에는 **아직 아무것도 안 바뀐 채로 재생성**하고 ② **정본이 실제로 느는 승인 시점에는 아무 일도 안 일어난다.**
 
-**정정 제안 — 트리거를 "정본이 바뀔 때"(승인/apply 완료)로 옮긴다.** 오너 의도(*"모아서 하지 말고 그때그때, 중복이면 패스"*)는 그대로 보존되고 오히려 정확해진다.
+**정정 확정(오너 2026-09-09) — 트리거는 "정본이 바뀔 때"(승인/apply 완료)다.** 오너 의도(*"모아서 하지 말고 그때그때, 중복이면 패스"*)는 그대로 보존되고 오히려 정확해진다. *"분석 완료마다"* 는 이 정정으로 **대체된다** — 구현이 분석 완료를 트리거로 삼으면 안 된다.
 
-**그리고 그렇게 하면 D3 은 D4 에 흡수된다.** D4=A 는 압축본이 source memory version 집합을 들고 하나라도 superseded 면 stale 로 본다 — 정본이 바뀌면 집합이 어긋나 stale → 재생성, 안 바뀌면 stale 이 아니라 그냥 넘어간다(= *"중복이면 패스"* 가 공짜로 나온다). **별도 트리거를 둘 필요가 없고 D4 의 stale 판정이 곧 D3 이다.** 구현 시 이 형태를 취한다.
+**그리고 그 결과 D3 은 D4 에 흡수된다 — 이것이 이 결정의 최종 형태다.** D4=A 는 압축본이 source memory version 집합을 들고 하나라도 superseded 면 stale 로 본다 — 정본이 바뀌면 집합이 어긋나 stale → 재생성, 안 바뀌면 stale 이 아니라 그냥 넘어간다(= *"중복이면 패스"* 가 공짜로 나온다). **별도 트리거를 둘 필요가 없고 D4 의 stale 판정이 곧 D3 이다.** 구현 시 이 형태를 취한다.
 
 ## ✅ D4 — 압축본의 stale 규칙 (오너 **A** 채택 2026-09-09)
 
