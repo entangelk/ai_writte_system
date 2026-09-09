@@ -29,5 +29,5 @@
 
 - `test_docs_indexes.py` **16 passed / 303 subtests** · `test_scene_notes.py` 포함 초점 **41 passed / 306 subtests**.
 - 변이 MU·MO 각 1실패 확인 후 원복, 매번 `git status --short` 대상 경로 무출력 확인.
-- **백엔드 전수**: (아래 확정)
+- **백엔드 전수 `2964 passed / 1 skipped / 4089 subtests · EXIT=0`**(호스트, 커밋 `422e79c`, 2268초, test-mongo ON). skip 1 = live Chroma. **증분 전건 귀속**: 셀 **+1**(새 가드) · subtest **+3** = 검증 기록 파일(위생 파일 subtest +1 · 판정행 subTest +1) + 이 작업 로그 파일(위생 +1) — 새 가드 셀 자체는 subtest 를 내지 않는다. 최종 커밋은 기존 파일 내용 수정만 남으므로 이 수치는 그대로 유효하다.
 
