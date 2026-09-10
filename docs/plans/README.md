@@ -188,7 +188,7 @@
 | [`frontend-review-inbox-decisions.md`](frontend-review-inbox-decisions.md) | Review Inbox 첫 슬라이스 범위 | Resolved |
 | [`writing-workspace-v2-w0-contract.md`](writing-workspace-v2-w0-contract.md) | Workspace V2 W0 exact contract(ProjectBrief·ordered unit·accept 원자성) | Approved — W0~W4 완료 |
 | [`chapter-scene-hierarchy-decisions.md`](chapter-scene-hierarchy-decisions.md) | 평면 ordered unit을 **장→장면 실제 계층**으로 전환(저장 모델·본문 소유·무손실 이관·정렬·Writing intent·삭제·export) | **Resolved(2026-08-28)** — D1~D6·D8=A, D7=B · 구현 진행 |
-| [`account-withdrawal-implementation-phases.md`](account-withdrawal-implementation-phases.md) | 계정 탈퇴 구현 순서(셀프 요청 · 30일 유예 · 취소 · 파기 데몬) | **Resolved** — D1~D6 확정(오너 2026-09-07) · **D4·Slice 0~3 완료**(SoT v1.8.51) · Slice 4~5 미착수 |
+| [`account-withdrawal-implementation-phases.md`](account-withdrawal-implementation-phases.md) | 계정 탈퇴 구현 순서(셀프 요청 · 30일 유예 · 취소 · 파기 데몬) | **Resolved** — D1~D6 확정(오너 2026-09-07) · **D4·Slice 0~4 완료**(SoT v1.8.54) · Slice 4b·5 미착수 |
 | [`slice2-withdrawal-grace-read-surface-decisions.md`](slice2-withdrawal-grace-read-surface-decisions.md) | 계정 탈퇴 Slice 2 — 유예 상태(남은 일수·취소)를 어디서 읽는가 | **Resolved** — ⓑ 별도 `GET /me/withdrawal`(오너 2026-09-08) · **Slice 2 완료(SoT v1.8.48)** |
 | [`slice3-withdrawal-purge-daemon-decisions.md`](slice3-withdrawal-purge-daemon-decisions.md) | 계정 탈퇴 Slice 3 — 파기 데몬이 계정 축 데이터를 무엇으로 식별하는가(+ 슬라이스 범위) | **Resolved** — ⓑ 두 규칙 스윕 · ⓔ 데몬+스크립트(오너 2026-09-09) |
 | [`slice4-withdrawal-screen-decisions.md`](slice4-withdrawal-screen-decisions.md) | 계정 탈퇴 Slice 4 — 유예 배너를 어디에 두는가 · 관리자 잔여 정리의 슬라이스 귀속 | **Resolved** — D1=ⓐ 전역 배너 · D2=ⓐ Slice 4b 분리(오너 2026-09-10) |
