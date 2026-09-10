@@ -454,14 +454,68 @@ class VerificationCountClaimsTest(unittest.TestCase):
         # 같은 문장의 파생값. 분포를 고치면서 이 백분율만 두면 "조건부 27%"가
         # 조용히 낡는다 — 이 주장은 포트폴리오 정문에서 **절차가 형식적이지
         # 않다는 근거**로 쓰이므로 낡은 채 두면 근거가 아니라 흠이 된다.
-        readme = (_ROOT / "README.md").read_text(encoding="utf-8")
-        stated = re.search(r"조건부 합격이 (\d+)%", readme)
-        self.assertIsNotNone(stated, "README 의 조건부 합격 비율 문장을 못 찾았다")
+        #
+        # ★ 2026-09-10 2차 재검이 실측한 사각: 이 셀이 **루트 README 만** 봤다.
+        # 그래서 승격 커밋이 루트 백분율만 고치고 **분포표가 사는 바로 그 파일**
+        # (`docs/verifications/README.md`)의 같은 문장은 33% 로 남겼는데 전건
+        # 초록이었다. 같은 수를 말하는 자리가 둘이면 둘 다 본다.
         conditional = self._distribution()[1]
+        expected = round(conditional / self.actual * 100)
+        for name in ("README.md", "docs/verifications/README.md"):
+            with self.subTest(document=name):
+                text = (_ROOT / name).read_text(encoding="utf-8")
+                stated = re.search(r"조건부 합격이 (\d+)%", text)
+                self.assertIsNotNone(
+                    stated, f"{name} 의 조건부 합격 비율 문장을 못 찾았다 — 문구가 "
+                            "바뀌었으면 이 패턴도 함께 고친다",
+                )
+                self.assertEqual(
+                    int(stated.group(1)), expected,
+                    f"{name}: 조건부 {conditional}/{self.actual} = "
+                    f"{conditional / self.actual * 100:.1f}%",
+                )
+
+    def test_the_readme_repeats_the_regression_baseline(self) -> None:
+        """README 절차 표 ②행의 `N passed / M subtests` 를 **HANDOFF 기준선 줄**에
+        잠근다.
+
+        ★ 이 자리는 HANDOFF 스스로 *"아무 가드도 안 잡는다 — 기준선을 갱신하는
+        슬라이스가 그 한 줄도 함께 고친다"* 고 규정해 둔 곳이고, **규정만으로는
+        안 지켜졌다**: 2026-09-10 에 기준선이 4117 → 4119 로 올라가는 동안 이
+        줄만 4,117 에 남았고(2차 재검이 손으로 발견) 전건 초록이었다. 규정을
+        가드로 바꾼다.
+
+        정본은 **HANDOFF 의 회귀 기준선 줄 하나**다(측정값이라 코드에서 유도할
+        수 없다 — `test_the_readme_names_the_current_contract_version` 이 SoT
+        헤더를 정본으로 삼는 것과 같은 모양이다).
+
+        - under — 기준선을 올리면서 README 를 안 고치면 실패한다(이번 병).
+        - over — README 만 고치고 HANDOFF 를 안 고쳐도 실패한다. 재는 것은
+          **두 자리가 같은 수를 말하는가** 이지 어느 쪽이 맞는가가 아니다.
+        """
+        handoff = (_ROOT / "HANDOFF.md").read_text(encoding="utf-8")
+        source = re.search(
+            r"회귀 기준선\*\*: backend \*\*test-mongo ON "
+            r"([\d,]+) passed / [\d,]+ skipped / ([\d,]+) subtests",
+            handoff,
+        )
+        self.assertIsNotNone(
+            source, "HANDOFF 의 회귀 기준선 줄을 못 읽었다 — 문구가 바뀌었으면 이 "
+                    "패턴도 함께 고친다(정본이 그 줄이다)",
+        )
+        readme = (_ROOT / "README.md").read_text(encoding="utf-8")
+        stated = re.search(
+            r"\*\*([\d,]+) passed / ([\d,]+) subtests\*\*", readme
+        )
+        self.assertIsNotNone(
+            stated, "README 절차 표 ②행의 회귀 수 칸을 못 찾았다",
+        )
+        strip = lambda value: int(value.replace(",", ""))
         self.assertEqual(
-            int(stated.group(1)), round(conditional / self.actual * 100),
-            f"조건부 {conditional}/{self.actual} = "
-            f"{conditional / self.actual * 100:.1f}%",
+            (strip(stated.group(1)), strip(stated.group(2))),
+            (strip(source.group(1)), strip(source.group(2))),
+            "README 절차 표가 HANDOFF 기준선과 다른 수를 말한다 — 정본은 HANDOFF "
+            "회귀 기준선 줄이고, 기준선을 움직인 슬라이스가 둘 다 고친다",
         )
 
     def test_the_readme_names_the_current_contract_version(self) -> None:
