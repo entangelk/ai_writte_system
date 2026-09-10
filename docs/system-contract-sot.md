@@ -313,7 +313,7 @@
 | [`plans/04-agentic-search.md`](plans/04-agentic-search.md) | ContextPackage와 Context Gate | Draft |
 | [`plans/05-writing-ai.md`](plans/05-writing-ai.md) | WritingCandidate와 Writing Gate | Draft |
 | [`plans/06-review-ui.md`](plans/06-review-ui.md) | 후보 검토와 상태 전이 UI | Draft |
-| [`legal/README.md`](legal/README.md) | 약관·개인정보처리방침 **초안**과 정책 대조표 | Draft — 법률 검토 전·미시행 |
+| [`legal/README.md`](legal/README.md) | 약관·개인정보처리방침과 정책 대조표 | 시행 — 2026-09-08 · 버전 1.0 · 법률 검토 전 |
 | [`service-policy-contract.md`](service-policy-contract.md) | **회원에게 약속하는 정책값 한 장**(코드가 시행하는 값의 파생본, 약관·방침의 입력) | Derived — `tests/test_service_policy_contract.py` 가 상수와 대조 |
 | [`contracts.md`](contracts.md) | 초기 계약 아이디에이션 | Reference only |
 

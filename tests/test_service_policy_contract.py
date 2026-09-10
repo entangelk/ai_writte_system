@@ -57,6 +57,17 @@ _PROCURED = {
 _ENFORCED_VERSION = "1.0"
 _ENFORCED_DATE = "2026-09-08"
 
+#: 부칙이 자기 버전을 다시 적는 줄(문서마다 표기가 다르다). 머리말과 **같은 값**을
+#: 말해야 한다 — 2026-09-10 독립 검증 B1 실측: 시행 표기 커밋이 머리말·상태줄만
+#: 고쳐 부칙만 `draft-0` (미시행) 로 남았고, 문서가 자기 지위를 두 가지로 말했다.
+_ADDENDUM_VERSION_LINES = {
+    "terms-of-service-draft.md": f"- 이 약관 버전: `{_ENFORCED_VERSION}`",
+    "privacy-policy-draft.md": f"- 이 방침 버전: `{_ENFORCED_VERSION}`",
+}
+
+#: 시행 전 판본의 버전 문자열. 문서 어디에도 남아 있으면 안 된다.
+_DRAFT_VERSION = "draft-0"
+
 
 def _rows() -> list[tuple[str, str, list[tuple[str, str]]]]:
     """문서에서 정본 포인터를 가진 표 행만 걷는다."""
@@ -197,6 +208,50 @@ class LegalDraftCoverageTest(unittest.TestCase):
             "그 정책을 담았는지 확인하고 docs/legal/README.md 에 행을 더한다",
         )
 
+    def test_the_length_limits_in_the_terms_match_the_constants(self):
+        """약관 제5조 1항의 두 수를 **상수와** 대조한다(핀이 아니라 상징 참조).
+
+        ★ 2026-09-10 독립 검증(B2)이 실측한 결함: 약관이 원고 본문 상한을
+        **4,000자**라고 적는 동안 시행값은 이미 **6,000자**였다(`97bc149`,
+        2026-09-08 상향). 정책 문서(`service-policy-contract.md`)의 같은 축은
+        정본 포인터를 달고 있어 위 셀이 잡았지만, **약관 본문의 수는 아무도 안
+        봤다** — 대조표는 *어느 조항이 받는지*만 재고 조항의 내용은 사람이 읽기
+        때문이다. 회원에게 보이는 문장이 시행값과 다르면 그 자체로 거짓 고지다.
+
+        **양방향**:
+          · under — 상수가 오르는데 약관을 안 고치면 실패한다(이번 병).
+          · over — 약관만 고치고 상수를 안 올려도 실패한다. 값의 정본은 상수다.
+
+        ★ 이 셀은 **이 한 축만** 잠근다. 약관·방침의 나머지 수(사용자명 64자 ·
+        비밀번호 12/256자 · 대기 200건 · 5건/3,600초 · 5회/300초 · 세션 7일 ·
+        하루 20/주 100 · 승격 1시간 · 유예 30일)는 2026-09-10 검증이 손으로 훑어
+        전부 일치를 확인했을 뿐 기계가 보지 않는다 — 축마다 조항 앵커가 달라서
+        일반화하려면 조항 ↔ 상수 표가 따로 필요하다(HANDOFF 잔여 부채).
+        """
+        text = (_LEGAL_MAP.parent / "terms-of-service-draft.md").read_text(
+            encoding="utf-8"
+        )
+        clause = [
+            line for line in text.splitlines()
+            if line.startswith("1. 원고 한 단위의 본문은")
+        ]
+        self.assertEqual(
+            len(clause), 1,
+            "약관 제5조 1항(길이 제한)의 자리를 못 찾았다 — 문장을 고쳤다면 이 "
+            "앵커도 함께 고친다. 앵커가 헛돌면 이 셀은 아무것도 잠그지 않는다",
+        )
+
+        self.assertEqual(
+            # 목록 번호(`1.`)는 조항의 값이 아니다.
+            _numbers(clause[0].removeprefix("1.")),
+            [
+                _load("env.py", "DRAFT_RAW_TEXT_MAX_CHARS"),
+                _load("core_sot/service.py", "SCENE_NOTE_MAX_CHARS"),
+            ],
+            "약관 제5조 1항이 시행값과 다른 수를 적는다 — 값의 정본은 상수이므로 "
+            "약관 문장을 고친다",
+        )
+
     def test_both_documents_carry_the_enforced_version_and_date(self):
         """시행 표기와 **버전·시행일 리터럴**을 잠근다(오너 2026-09-09).
 
@@ -209,16 +264,35 @@ class LegalDraftCoverageTest(unittest.TestCase):
         저장된 동의가 어느 판본에 대한 것인지 갈라진다. 상수가 아직 코드에 없어
         상징 참조로는 못 잠그고 **핀 셀**이 값을 직접 든다 — 게이트가 상수를
         만드는 날 이 셀이 그 상수를 가리키게 바꾼다.
+
+        ★★ **2026-09-10 독립 검증(B1)이 이 셀의 사각을 실측했다.** 종전에는 옛
+        상태줄의 **정확한 문구**(`Draft — 법률 검토 전 · 미시행`)만 부정하고
+        버전은 *어디든* 문자열이 있으면 통과시켰다. 그래서 시행 표기 커밋이
+        머리말만 고치고 **부칙에 `draft-0` (미시행) 를 남긴 채로도 초록**이었다.
+        지금은 셋을 함께 본다:
+
+        - `draft-0` **토큰이 문서 어디에도 없다**(부칙 잔류를 곧바로 잡는다).
+        - 머리말 버전은 **줄 전체**로 대조한다 — 부분 문자열로 재면 부칙 줄
+          (`- 이 약관 버전: \`1.0\``)이 머리말을 대신 만족시켜, 머리말이 다른
+          판본을 말해도 초록이 된다.
+        - 부칙 버전 줄도 **같은 리터럴**을 든다(문서 안 두 자리가 함께 움직인다).
         """
         for name in _DRAFTS:
             with self.subTest(document=name):
                 text = (_LEGAL_MAP.parent / name).read_text(encoding="utf-8")
+                lines = text.splitlines()
                 self.assertNotIn(
                     "Draft — 법률 검토 전 · 미시행", text,
                     f"{name}: 미시행 표식이 남았다 — 시행 표기와 섞이면 문서가 "
                     "자기 지위를 두 가지로 말한다",
                 )
-                self.assertIn(f"버전: `{_ENFORCED_VERSION}`", text)
+                self.assertNotIn(
+                    _DRAFT_VERSION, text,
+                    f"{name}: 시행 전 버전 문자열 {_DRAFT_VERSION!r} 이 남았다 — "
+                    "머리말이 시행을 말하는데 다른 자리가 초안을 말한다",
+                )
+                self.assertIn(f"버전: `{_ENFORCED_VERSION}`", lines)
+                self.assertIn(_ADDENDUM_VERSION_LINES[name], lines)
                 self.assertIn(f"시행 — {_ENFORCED_DATE}", text)
                 self.assertIn(f"- 시행일: {_ENFORCED_DATE}", text)
 

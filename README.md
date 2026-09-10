@@ -328,7 +328,7 @@ CHANGELOG 작성 규칙 · [`docs/guides/verification.md`](docs/guides/verificat
 | 계획 · 결정 브리프 인덱스 (136개) | [`docs/plans/README.md`](docs/plans/README.md) |
 | 독립 검증 기록 (295건) | [`docs/verifications/README.md`](docs/verifications/README.md) |
 | 서비스 정책(코드가 시행하는 값) | [`docs/service-policy-contract.md`](docs/service-policy-contract.md) |
-| 약관 · 방침 초안 (미시행) | [`docs/legal/`](docs/legal/README.md) |
+| 약관 · 방침 (버전 1.0 · 시행 2026-09-08) | [`docs/legal/`](docs/legal/README.md) |
 | 현재 상태 스냅샷 | [`HANDOFF.md`](HANDOFF.md) |
 | 마일스톤 이력 | [`CHANGELOG.md`](CHANGELOG.md) |
 | 일자별 작업 이력 | [`docs/daily_logs/`](docs/daily_logs/) |
