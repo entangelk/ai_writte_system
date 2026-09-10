@@ -178,11 +178,11 @@ HANDOFF Next Tasks 1번이 가리킨 **승격 재검**. 세션 51 이 닫은 조
 
 - 변이: MU-20 → 43 passed·EXIT=0(갭) · MU-8 → 1 failed `GracefulStopTest::test_a_stop_request_ends_the_pass_at_the_next_claim_boundary`. 원복 후 `git status --short`·`git diff --stat HEAD` 무출력.
 - 문서 가드(이 세션 기록 실은 뒤): `test_docs_indexes` **307** · `test_repo_hygiene` **608**(각 +1 = 이 기록 파일의 몫).
-- 전수: 위 Issues 표 첫 행. 소요 1712초는 머신-로컬 값(같은 날 1618·1534·1712초).
+- 전수 **두 번**: HEAD `7f30027` — 위 Issues 표 첫 행(S13 플레이크) · 커밋 `8990fbc` — **3023/1/4121 · EXIT=0**(2133초, 기준선 직접 실측 확정·S13 미재발). 소요는 머신-로컬 값(같은 날 1618·1534·1712·2133초).
 
 ### Next steps
 
-- **커밋 후 전수 직접 실측** — 기준선 3023/1/**4121** 확인 + S13 플레이크 재발 관측(2회째)을 겸한다.
+- ~~커밋 후 전수 직접 실측~~ 완료(위 Verification) — **3023/1/4121 · EXIT=0**(2133초).
 - H1' 등급(하드닝 유지 vs Slice 4 게이트) 오너 결정 대기.
 - Slice 4 착수 — 이 세션이 바꾼 것은 없다.
 

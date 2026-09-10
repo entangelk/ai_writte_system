@@ -96,7 +96,7 @@ python3 -m pytest -q                                  # 전수(고정 트리, �
 ## Outstanding items
 
 - **H1' 등급(하드닝 유지 vs Slice 4 게이트)은 오너 결정으로 열려 있다** — 세션 52 가 서피스했고 이 재검은 사실 관계만 확인했다: 갭 실재(MU-20 초록 재현)·production 배선 존재·선례 존재. 등급을 올리려면 HANDOFF Next Tasks 순서 한 줄이면 된다.
-- **이 기록 자신**이 subtest 를 4119 → **4121** 로 움직인다(문서 가드 실측: `test_docs_indexes` 306→**307**·`test_repo_hygiene` 607→**608**). 셀·skip 은 그대로(3023·1). **직접 실측은 이 기록이 실린 커밋에서 전수로 확인한다** — 그 실행은 S13 플레이크 재발 관측(2회째)을 겸한다.
+- **이 기록 자신**이 subtest 를 4119 → **4121** 로 움직인다(문서 가드 실측: `test_docs_indexes` 306→**307**·`test_repo_hygiene` 607→**608**). 셀·skip 은 그대로(3023·1). **직접 실측으로 확인했다** — 이 기록까지 실린 커밋 `8990fbc` 전수 **3023 passed / 1 skipped / 4121 subtests · EXIT=0**(2133초). 산술과 직접 측정이 일치하며 **S13 은 재발하지 않았다**(같은 날 2회 중 1회).
 - **개발 스택 재생성·배포 대기** — 세션 52 와 동일하게 남아 있다(`withdrawal_worker` 컨테이너 부재 실측·`migrate_ledger_user_axis.py` 선행).
 
 ## Reproduction
