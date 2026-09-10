@@ -41,3 +41,52 @@
 - 변이 5종(표는 검증 기록 §5) — 원복 5회 전부 `git status --short` 무출력.
 - 전수 3017/1/4114 EXIT=0(위).
 - 문서 가드(편집 뒤): `test_docs_indexes`·`test_repo_hygiene` 초록 — 커밋 전 최종 확인.
+
+## 세션 51 — 검증 조건 셋 폐쇄 + 하드닝 둘 (오너 지시 "검증 기록 확인해서 보강")
+
+세션 50 독립 검증([기록](../verifications/2026-09-10/account_withdrawal_slice3_legal_effective.md), 조건부 합격)이 지목한 **차단 셋(B1·B2·B3)** 과 셀이 비어 있던 **하드닝 둘(H1·H2)** 을 닫았다. 커밋 `b23f689`(법률 축)·`7e07b37`(파기 축).
+
+### Completed work
+
+- **B1 — 부칙 시행 표기**: 양 문서 부칙의 `이 약관(방침) 버전: draft-0 (미시행)` → **`1.0`**. 머리말(`시행 — 2026-09-08 · 버전 1.0`)과의 자기모순을 없앴다. **가드도 함께 조였다** — 종전 결합 가드는 옛 상태줄의 *정확한 문구* 만 부정하고 버전은 **어디든** 문자열이 있으면 통과시켜, 부칙 잔류가 그대로 새 갔다. 지금은 셋을 함께 본다: ① `draft-0` 토큰이 문서 어디에도 없다 ② 머리말 버전은 **줄 전체**로 대조한다(부분 문자열로 재면 부칙 줄이 머리말을 대신 만족시킨다 — MU-15 로 실증) ③ 부칙 버전 줄도 같은 리터럴을 든다.
+- **B2 — 약관 제5조 1항 4,000자 → 6,000자**(시행값 `env.py::DRAFT_RAW_TEXT_MAX_CHARS`, 상향 `97bc149`). **그 축을 상수와 대조하는 셀을 새로 넣었다** — 핀이 아니라 **상징 참조**라 상수가 움직이면 문서가 자동으로 따라가야 한다. 정책 문서의 같은 축은 정본 포인터가 있어 잠겨 있었지만 **약관 본문의 수는 아무도 안 보고 있었다**(대조표는 *어느 조항이 받는지* 만 잰다).
+- **B3 — 파기 순서 4→5단계 잠금**: 스윕이 실패하는 픽스처에서 **계정 행 생존 + `purge_started_at` 표식**을 단정하는 셀. 순서가 바뀐 채 스윕이 실패하면 표식이 행과 함께 사라져 reconciler 의 `stalled_user_ids` 질의가 그 계정을 영영 못 찾는다 — 재는 것이 실패 라벨이 아니라 **그때 무엇이 살아 있는가** 인 이유다.
+- **H1 — `run_once(stop_check=…)` 경계 정지 두 셀**(양방향): 정지 요청이면 다음 청구 경계에서 나가고(청구 안 한 계정에는 표식도 안 찍힌다), 요청이 없으면 배수를 끝까지 한다.
+- **H2 — 일회성 apply 요약 두 셀**: `failures` 가 실패만·전부 싣는가, 그리고 실패가 없을 때 **키가 있는 채로** 비는가. 워커가 재시도하지 않으므로(D3=ⓐ) 이 목록이 운영자의 유일한 수습 통로다.
+- **패턴 스윕(B1 계열)**: 시행 표기를 안 따라간 색인 셋을 함께 고쳤다 — 루트 [`README.md`](../../../README.md) 문서 표 · [`docs/README.md`](../../README.md) 정책 행 · SoT 문서 색인의 `legal/README.md` 상태 열이 아직 *"초안(미시행)"* 이라고 적었다(`docs/legal/README.md` 자신은 이미 `시행 — 2026-09-08 · 버전 1.0`). 상태 열 가드는 `docs/plans/` 만 보므로 이 셋은 기계가 안 잡는다.
+
+### Issues found
+
+| 문제 | 원인 | 해결 | 결과 |
+|---|---|---|---|
+| 결합 가드가 머리말 버전을 **부분 문자열**로 재고 있었다 | `버전: \`1.0\`` 이 부칙 줄(`- 이 약관 버전: \`1.0\``)의 부분 문자열이라 한쪽이 다른 쪽을 대신 만족시킨다 | 줄 전체 대조로 전환 | MU-15(머리말만 `2.0`)가 재실패 — 종전 가드로는 초록이었다 |
+| 약관 본문의 수를 아무도 안 본다 | 대조표는 *어느 조항이 받는지* 만 재고 조항 내용은 사람이 읽는다 | 길이 제한 축만 상수 대조 셀로 잠금 | **나머지 수는 여전히 무잠금**(아래 부채) |
+
+### Decisions
+
+- **약관 수치 가드를 한 축만 만들었다** — 축마다 조항 앵커가 다르고, 전부 잠그려면 *조항 ↔ 상수* 표가 따로 필요하다(대조표의 셋째 표 격). 이번에 실제로 틀린 축 하나만 잠그고 나머지는 부채로 남긴다(HANDOFF). 검증 세션이 손으로 훑어 **현재는 전부 일치**함을 확인한 상태다.
+- **판정 승격은 하지 않았다** — 조건을 닫은 세션이 자기 판정을 올리면 독립성이 사라진다. 검증 기록에는 **폐쇄 보고 절**만 덧붙이고, 승격 재검(변이 재적용)은 다음 검증 세션 몫으로 남긴다.
+
+### Verification (세션 51)
+
+- 초점: `tests/test_account_purge.py tests/test_account_withdrawal_worker.py` **38 → 43 passed / 2 subtests** · `tests/test_service_policy_contract.py` **7 → 8 passed / 44 subtests** · 문서 가드 `test_docs_indexes`·`test_repo_hygiene` **25 passed / 911 subtests**.
+- **변이 9종 — 전부 기명 셀 재실패**(프리플라이트 `git status --short` 무출력 → 편집 → 초점 실행 → `git checkout --` → clean 확인, 9회 전부 clean):
+
+| # | 방향 | 적용한 diff | 기명 재실패 |
+|---|---|---|---|
+| MU-7 | under | `account_purge.py::purge_account` 의 스윕 블록 ↔ `self._users.delete` 블록 교환 | `test_a_failed_sweep_leaves_the_account_row_alive_and_stamped` 1실패 |
+| MU-7b | over | 스윕 실패를 삼키고(`except: swept = {}`) 계정 행을 그대로 삭제 | 같은 셀 1실패 |
+| MU-8 | under | `run_once` 의 `if stop_check is not None and stop_check(): break` 두 줄 삭제 | `test_a_stop_request_ends_the_pass_at_the_next_claim_boundary` 1실패 |
+| MU-8b | over | 같은 자리를 `if stop_check is not None: break`(값과 무관하게 끊음) | 위 셀 + `test_without_a_stop_request_the_pass_drains_everything` 2실패 |
+| MU-16 | under | `_summary_doc` 의 `if not result.succeeded` 필터 제거(성공까지 실음) | `ApplyModeTest` 2셀 실패 |
+| MU-12 | under | 약관 부칙을 `draft-0` (미시행) 로 복원 | `test_both_documents_carry_the_enforced_version_and_date` 1실패 |
+| MU-13 | under | 방침 부칙을 `draft-0` (미시행) 로 복원 | 같은 셀 1실패 |
+| MU-14 | under | 제5조 1항을 4,000자로 복원 | `test_the_length_limits_in_the_terms_match_the_constants` 1실패 |
+| MU-15 | over | 머리말 버전만 `2.0` 으로(부칙은 `1.0` 유지) | `test_both_documents_carry_the_enforced_version_and_date` 1실패 — **종전 가드로는 초록이던 자리** |
+
+- 전수: 아래 "전수" 절.
+
+### Next steps
+
+- **승격 재검**(다음 검증 세션): 변이 재적용 + 이 세션이 더한 다섯 셀의 교합 확인 → 검증 기록 판정 갱신.
+- 그다음 **Slice 4(화면)**. 개발 스택 재생성(`withdrawal_worker` 동반 기동)은 그대로 남아 있다.
