@@ -215,7 +215,7 @@ HANDOFF Next Tasks 1번이 가리킨 **승격 재검**. 세션 51 이 닫은 조
 
 ### Verification (세션 54)
 
-- 프리플라이트 `git status --short` 무출력(각 변이 전) → 변이 6회, 매번 `git checkout --` 뒤 무출력 확인.
+- 프리플라이트 `git status --short` 무출력(각 변이 전) → 변이 **8회**(표는 6행 — MU-24/24b 가 한 행이다), 매번 `git checkout --` 뒤 무출력 확인.
 
 | # | 방향 | 적용한 diff | 실측 |
 |---|---|---|---|
