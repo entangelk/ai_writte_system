@@ -103,12 +103,16 @@ class _FakeService:
         self._claims = list(claims)
         self.calls = 0
         self.due: list = []
+        #: 마지막 pass 가 받은 정지 확인자. **받고 버리면 배선이 안 잠긴다** —
+        #: 2026-09-10 승격 재검(MU-20)이 그 사각을 실측했다.
+        self.last_stop_check = None
 
     def due_accounts(self, *, now):
         return tuple(self.due)
 
     async def run_once(self, *, limit=10, stop_check=None, now=None):
         self.calls += 1
+        self.last_stop_check = stop_check
         claimed = self._claims.pop(0) if self._claims else 0
         return AccountPurgeSummary(accounts_claimed=claimed, accounts_purged=claimed)
 
@@ -117,6 +121,11 @@ class _FakeStop:
     def __init__(self, stop_after: int) -> None:
         self._stop_after = stop_after
         self.checks = 0
+
+    def force(self) -> None:
+        """이후 확인은 무조건 정지를 말한다 — 배선 셀이 *넘겨받은 호출자* 에게
+        물어볼 때 쓴다(동일성이 아니라 동작으로 재기 위해)."""
+        self._stop_after = -1
 
     def is_requested(self) -> bool:
         self.checks += 1
@@ -141,6 +150,49 @@ class LoopTest(unittest.TestCase):
         self.assertEqual(slept, [7.0])
         events = [json.loads(line)["event"] for line in out.getvalue().splitlines()]
         self.assertEqual(events, ["loop_started", "pass", "pass", "loop_stopped"])
+
+    def test_the_loop_threads_its_stop_flag_into_run_once(self) -> None:
+        """★ **배선 문장 자체**를 잠근다(2026-09-10 승격 재검 H1').
+
+        H1 이 닫은 것은 **피호출자**였다 — `run_once` 가 `stop_check` 를 존중하는가.
+        그런데 `run_loop` 이 그 인자를 **넘기는 문장**은 아무도 안 봤고, 인자를
+        지우는 변이(MU-20)가 **43셀 전건 초록**이었다(대역이 인자를 받고 버렸다).
+
+        끊기면 SIGTERM 은 `while` 경계에서만 서고 **진행 중인 pass 가 최대
+        `limit`(기본 10) 계정을 끝까지 돈다** — compose `stop_grace_period: 120s`
+        를 넘기면 SIGKILL 이라 그 계정이 **부분 파기**로 남는다. H1 이 막으려던
+        결과가 다른 문으로 들어오는 자리다.
+
+        형제 워커가 같은 축을 같은 방법으로 잠근다:
+        `test_index_sync_worker_script.py::WorkerLoopTest::
+        test_run_loop_drains_until_stop_then_exits`(*"stop_check was threaded into
+        run_once (G2 wiring, not just the loop guard)"*).
+
+        **양방향**:
+          · under — `stop_check=` 인자를 지우면 `None` 이 기록돼 실패한다(MU-20).
+          · over — **동일성이 아니라 동작**으로 잰다. 넘겨받은 호출자에게 *정지를
+            세운 뒤* 물어보므로, 배선을 람다로 감싸도 같은 플래그를 가리키는 한
+            안 깨진다. 반대로 **다른** 플래그를 넘기면 잡힌다.
+        """
+        service = _FakeService(claims=[1, 0])
+        stop = _FakeStop(stop_after=4)
+
+        worker.run_loop(
+            Namespace(limit=10, interval=7.0), build_fn=lambda _a: service,
+            stop=stop, sleep_fn=lambda _s: None, stdout=StringIO(),
+        )
+
+        self.assertIsNotNone(
+            service.last_stop_check,
+            "run_loop 이 정지 플래그를 run_once 로 안 넘겼다 — 진행 중인 pass 가 "
+            "SIGTERM 을 못 듣고 limit 만큼 계속 파기한다",
+        )
+        stop.force()
+        self.assertTrue(
+            service.last_stop_check(),
+            "run_once 가 받은 호출자가 **이 루프의** 정지 플래그가 아니다 — 세워 "
+            "놓고 물었는데 아니라고 답했다",
+        )
 
     def test_dry_run_and_loop_are_mutually_exclusive(self) -> None:
         """`--dry-run` 은 *조사만* 이고 `--loop` 은 *계속 지운다* 다 — 함께 주면
