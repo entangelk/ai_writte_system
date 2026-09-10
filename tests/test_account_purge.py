@@ -13,6 +13,9 @@
    놓치고, `_id` 축만으로는 `sessions` 를 놓친다.
 3. **보존 축은 `target_user_id`** — 원장·감사·묘비가 어느 규칙에도 안 걸린다.
 4. **실패하면 그 계정에서 멈춘다** — 재시도하지 않고, 다른 계정을 막지도 않는다.
+5. **순서의 마지막 두 단계와 정지 경계** — 스윕이 실패하면 계정 행이 표식과 함께
+   살아남고, SIGTERM 은 계정 하나를 끝낸 뒤 다음 청구 경계에서 나간다(2026-09-10
+   독립 검증 B3·H1 이 변이로 연 사각이다).
 """
 
 from __future__ import annotations
@@ -415,6 +418,25 @@ class AccountPurgeOrderTest(unittest.TestCase):
         self.assertIsNotNone(self.users.get_by_id("user:a"))
 
 
+class _FailingSweeper:
+    """스윕(4단계)만 실패시키는 대역 — 그 자리에서 멈춘 계정의 모양을 본다."""
+
+    def sweep(self, user_id):
+        raise RuntimeError("sweep storage went away")
+
+
+class _StopAfter:
+    """`stop_check` 대역 — `n` 번째 확인까지는 계속하고 그 뒤로 정지를 알린다."""
+
+    def __init__(self, calls_before_stop: int) -> None:
+        self._before = calls_before_stop
+        self.checks = 0
+
+    def __call__(self) -> bool:
+        self.checks += 1
+        return self.checks > self._before
+
+
 class AccountPurgeFailureTest(unittest.TestCase):
     """D3=ⓐ — 실패하면 표시하고 멈춘다. 재시도하지 않는다."""
 
@@ -473,6 +495,42 @@ class AccountPurgeFailureTest(unittest.TestCase):
         self.assertEqual(summary.accounts_purged, 1)
         self.assertIsNone(self.users.get_by_id("user:b"))
 
+    def test_a_failed_sweep_leaves_the_account_row_alive_and_stamped(self) -> None:
+        """★ 파기 순서의 **4→5단계 자체**를 잠근다(2026-09-10 독립 검증 B3).
+
+        모듈 머리말과 `NEVER_SWEPT` 주석이 *"계정 행은 마지막이다 — 스윕이 먼저
+        지우면 실패를 표시할 자리가 사라진다"* 를 두 번 적지만, 두 블록을
+        **교환하는 변이(MU-7)가 38셀 전건 초록**이었다. 계약이 문장으로만 있었다.
+
+        순서가 바뀐 채 스윕이 실패하면: 계정 행이 이미 지워져 `purge_started_at`
+        표식이 함께 사라지고, reconciler 의 `stalled_user_ids` 질의(= 표식이 남은
+        행)가 그 계정을 **영영 못 찾는다** — 잔여가 조용한 고아로 남는다(D5 금지).
+        그래서 여기서 재는 것은 실패 라벨이 아니라 **그때 무엇이 살아 있는가** 다.
+
+        - under — 스윕과 계정 행 삭제의 순서를 바꾸면 행이 사라져 실패한다.
+        - over — 스윕 실패를 삼키고 계정 행을 지워도 실패한다(`failed_at` 이
+          `None` 이 된다). 반대편, **성공하면 행이 반드시 사라진다** 는
+          `AccountPurgeOrderTest::test_a_due_account_is_purged_end_to_end` 가 받는다.
+        """
+        service = _service(
+            self.users, self.core_sot, _FailingSweeper(), _RecordingPurge()
+        )
+
+        summary = asyncio.run(service.run_once(now=_NOW))
+
+        failed = [r for r in summary.results if r.user_id == "user:a"][0]
+        self.assertEqual(failed.failed_at, "account_axis_sweep")
+        stalled = self.users.get_by_id("user:a")
+        self.assertIsNotNone(
+            stalled,
+            "스윕이 실패했는데 계정 행이 사라졌다 — 표식이 함께 사라져 "
+            "reconciler 가 이 잔여를 찾을 실마리가 없다",
+        )
+        self.assertEqual(
+            stalled.purge_started_at, _NOW,
+            "표식 없이 살아남은 행은 다시 청구돼 부분 파기를 키운다",
+        )
+
     def test_limit_below_one_is_rejected_rather_than_silently_raised(self) -> None:
         service = _service(self.users, self.core_sot, self.sweeper, _RecordingPurge())
 
@@ -488,6 +546,55 @@ class AccountPurgeFailureTest(unittest.TestCase):
         summary = asyncio.run(service.run_once(now=_NOW, limit=1))
 
         self.assertEqual(summary.accounts_claimed, 1)
+
+
+class GracefulStopTest(unittest.TestCase):
+    """SIGTERM 경계(H1, 2026-09-10 검증) — **진행 중인 계정 하나는 끝내고** 다음
+    청구 경계에서 나간다.
+
+    이 메커니즘에 compose 의 `stop_grace_period: 120s` 와 워커 docstring 의 약속이
+    걸려 있는데, `run_once` 의 정지 확인 두 줄을 **삭제하는 변이(MU-8)가 38셀 전건
+    초록**이었다. 없으면 SIGTERM 이 최대 `limit`(기본 10) 계정을 다 돌거나 유예
+    만료로 SIGKILL 을 맞아 **파기 중간에 죽는다** — 그 계정이 부분 파기로 남는다.
+    """
+
+    def setUp(self) -> None:
+        self.users = InMemoryUserRepository()
+        self.users.insert(_user())
+        self.users.insert(_user("user:b", username="bob"))
+        self.core_sot = _FakeCoreSot({})
+        self.sweeper = InMemoryAccountAxisSweeper({})
+
+    def _run(self, stop_check):
+        service = _service(
+            self.users, self.core_sot, self.sweeper, _RecordingPurge()
+        )
+        return asyncio.run(service.run_once(now=_NOW, stop_check=stop_check))
+
+    def test_a_stop_request_ends_the_pass_at_the_next_claim_boundary(self) -> None:
+        """under — 정지 확인을 지우면 둘 다 파기돼 이 셀이 실패한다."""
+        summary = self._run(_StopAfter(calls_before_stop=1))
+
+        self.assertEqual(summary.accounts_claimed, 1)
+        # 두 계정 중 **하나만** 지워졌고, 나머지는 손대지 않은 채 남았다.
+        alive = [
+            uid for uid in ("user:a", "user:b")
+            if self.users.get_by_id(uid) is not None
+        ]
+        self.assertEqual(len(alive), 1)
+        self.assertIsNone(
+            self.users.get_by_id(alive[0]).purge_started_at,
+            "정지 뒤에 남은 계정에 표식이 찍혔다 — 청구는 했는데 파기를 안 한 "
+            "것이라 다시 청구되지 않는다",
+        )
+
+    def test_without_a_stop_request_the_pass_drains_everything(self) -> None:
+        """over 반대편 — 정지 확인이 **값과 무관하게** 끊으면 배수가 멈춘다."""
+        summary = self._run(_StopAfter(calls_before_stop=99))
+
+        self.assertEqual(summary.accounts_purged, 2)
+        self.assertIsNone(self.users.get_by_id("user:a"))
+        self.assertIsNone(self.users.get_by_id("user:b"))
 
 
 class MongoSweeperShapeTest(unittest.TestCase):

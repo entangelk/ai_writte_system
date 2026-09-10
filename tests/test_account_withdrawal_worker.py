@@ -8,6 +8,8 @@
 2. **HTTP 예외가 경계를 못 넘는가** — 넘으면 워커가 상태 코드를 들고 죽는다.
 3. **`--loop` 이 배수하고 SIGTERM 에 선다.**
 4. **`--dry-run` 은 아무것도 지우지 않는다.**
+5. **일회성 apply 가 실패를 요약에 싣는다** — 재시도가 없으므로 그 목록이 운영자의
+   유일한 수습 통로다(2026-09-10 검증 H2 로 더해졌다).
 """
 
 from __future__ import annotations
@@ -22,7 +24,10 @@ from io import StringIO
 from unittest import mock
 
 from scripts import account_withdrawal_worker as worker
-from services.application.app.deletion.account_purge import AccountPurgeSummary
+from services.application.app.deletion.account_purge import (
+    AccountPurgeResult,
+    AccountPurgeSummary,
+)
 
 
 class BoundarySignatureTest(unittest.TestCase):
@@ -157,6 +162,77 @@ class LoopTest(unittest.TestCase):
         self.assertEqual(summary["mode"], "dry-run")
         self.assertEqual(summary["due_user_ids"], ["user:a", "user:b"])
         self.assertEqual(service.calls, 0, "dry-run 이 파기를 돌렸다")
+
+
+class _StubSummaryService:
+    """준비된 요약을 그대로 돌려주는 대역 — apply 모드의 **출력 모양**만 잰다."""
+
+    def __init__(self, summary) -> None:
+        self._summary = summary
+        self.limit: int | None = None
+
+    async def run_once(self, *, limit=10, stop_check=None, now=None):
+        self.limit = limit
+        return self._summary
+
+
+class ApplyModeTest(unittest.TestCase):
+    """일회성 apply(H2, 2026-09-10 검증) — 셀이 dry-run·loop 에만 있었다.
+
+    ★ 워커는 **재시도하지 않는다**(D3=ⓐ). 실패한 계정은 `purge_started_at` 만
+    찍힌 채 조용히 남으므로, 운영자가 *무엇을 수습해야 하는지* 아는 통로는
+    이 요약의 `failures` 뿐이다(`account_purge._failure` 주석이 그렇게 적는다).
+    비면 실패가 없어서 빈 것인지 출력이 삼킨 것인지 구별되지 않는다.
+    """
+
+    def test_apply_mode_reports_every_failure_with_its_stage(self) -> None:
+        """- under — `_summary_doc` 이 `failures` 를 빠뜨리면 실패한다.
+        - over — 성공한 계정까지 실어도 실패한다(수습 목록이 아니라 전체 목록이
+          되면 운영자가 무엇을 봐야 하는지 다시 골라야 한다).
+        """
+        service = _StubSummaryService(AccountPurgeSummary(
+            accounts_claimed=2, accounts_purged=1, accounts_failed=1,
+            results=(
+                AccountPurgeResult(user_id="user:a", username="alice"),
+                AccountPurgeResult(
+                    user_id="user:b", username="bob",
+                    failed_at="account_axis_sweep",
+                    error="RuntimeError: sweep storage went away",
+                ),
+            ),
+        ))
+        args = Namespace(limit=3, dry_run=False)
+
+        doc = worker.run_worker(args, build_fn=lambda _a: service)
+
+        self.assertEqual(doc["mode"], "apply")
+        self.assertEqual(
+            (doc["accounts_claimed"], doc["accounts_purged"], doc["accounts_failed"]),
+            (2, 1, 1),
+        )
+        self.assertEqual(doc["failures"], [{
+            "user_id": "user:b",
+            "failed_at": "account_axis_sweep",
+            "error": "RuntimeError: sweep storage went away",
+        }])
+        self.assertEqual(
+            service.limit, 3, "--limit 이 run_once 로 전달되지 않았다"
+        )
+
+    def test_a_clean_apply_pass_reports_an_empty_failure_list(self) -> None:
+        """빈 목록은 **키가 있는 채로** 비어야 한다 — 키가 사라지면 요약을 읽는
+        쪽이 *실패 없음* 과 *출력 형식이 바뀜* 을 구별할 수 없다."""
+        service = _StubSummaryService(AccountPurgeSummary(
+            accounts_claimed=1, accounts_purged=1,
+            results=(AccountPurgeResult(user_id="user:a", username="alice"),),
+        ))
+
+        doc = worker.run_worker(
+            Namespace(limit=10, dry_run=False), build_fn=lambda _a: service
+        )
+
+        self.assertEqual(doc["failures"], [])
+        self.assertEqual(doc["accounts_failed"], 0)
 
 
 class ParseArgsTest(unittest.TestCase):
