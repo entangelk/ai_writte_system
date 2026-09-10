@@ -314,6 +314,16 @@ a {
   font-size: 0.82rem;
 }
 
+/* 계정 탈퇴 유예 배너(Slice 4, D1=ⓐ) — 폭·색·글자 크기는 위 `.header-alert` 것을
+   그대로 쓰고 여기서는 **배치만** 정한다. 새 색도 새 `font-size` 도 쓰지 않으므로
+   버튼 세 규칙(base·hover·disabled)과 타입 계단 가드의 대상이 아니다. */
+.withdrawal-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
 main {
   max-width: 76rem;
   margin: 0 auto;

@@ -1,6 +1,6 @@
 # 계정 탈퇴 Slice 4 — 배너를 어디에 두고, 관리자 잔여 정리를 어느 슬라이스가 지는가
 
-상태: `Proposed — 오너 결정 대기(2026-09-10)`
+상태: `Resolved — D1=ⓐ 전역 배너 · D2=ⓐ Slice 4b 분리(오너 2026-09-10)`
 작성: 2026-09-10
 선행: [`account-withdrawal-implementation-phases.md`](account-withdrawal-implementation-phases.md) **Slice 0~3 완료**(SoT v1.8.51) · 검증 닫힘(2026-09-10 승격 2차 합격) · D1=ⓒ(유예 중 로그인·조회·취소만) · D3=ⓐ+관리자 재실행 통제 · [`slice2-…-decisions.md`](slice2-withdrawal-grace-read-surface-decisions.md)(ⓑ `GET /me/withdrawal`)
 
@@ -64,3 +64,29 @@ Slice 3 브리프 ⓔ 가 *"관리자 endpoint·화면은 Slice 4"* 로 넘겼�
 - **관리자 대행 탈퇴 · 탈퇴 전 데이터 내보내기 · 탈퇴 사유 수집 · 재가입 차단 · 유예 만료 알림** — 계획서 Deferred 그대로.
 - **`login_failures`(`_id` = username)를 어느 규칙이 찾는가** — Slice 3 브리프 ⓔ 가 미결로 남긴 것이고 화면 축이 아니다.
 - **`request_quota_policies` 가 `user_id` 필드를 안 쓴다는 정정**(2026-09-09 실측) 도 계정 축 파기 문제이지 화면 문제가 아니다.
+
+---
+
+## ✅ 오너 결정 (2026-09-10)
+
+**D1 = ⓐ 앱 셸 전역 고정** · **D2 = ⓐ Slice 4b 분리.** 둘 다 구현자 추천안 채택.
+
+**따라서 Slice 4 의 범위가 확정된다 — 프런트 전용이다.** `POST`·`DELETE`·`GET /me/withdrawal`
+셋이 Slice 1·2 에서 이미 서 있으므로 **operation 수는 105 그대로**이고 등재 6곳도 지나지 않는다.
+
+착수 시 함께 가는 것:
+- **전역 배너**는 `AuthGate` 의 app-shell 안, `header-alert` 아래 자리다. 상태는 셸이 들고
+  `/me` 의 요청·취소가 **같은 상태를 갱신**한다 — 두 자리가 각자 조회하면 취소한 뒤에도
+  배너가 남는다.
+- **`vitest.setup.ts` 시드**가 함께 간다(`seedMemberQuota` 선례). 안 넣으면 fetch 시퀀스를
+  세는 셀들이 무관하게 빨개진다.
+- **`/auth/me` 는 안 바뀐다** — Slice 2 의 ⓑ 가 유지된다. 전역 고정을 골랐어도 `LoginResponse`
+  공유 payload 를 넓히는 비용은 그대로이고, 배너가 첫 페인트보다 한 박자 늦는 것은 유예 30일짜리
+  사실에 대해 손해가 아니다. **이로써 Slice 2 브리프가 남긴 "ⓐ 를 다시 보는 트리거" 는
+  소멸한다** — 트리거가 왔고(전 화면 고정) 그럼에도 ⓑ 를 유지하기로 정했다.
+- **새 CSS 규칙 없이** `.confirm-panel`·`.danger-button`·`.hub-section`·`.header-alert` 를 쓴다.
+
+**Slice 4b(관리자 축)로 미룬 것**: `AdminUserPayload` 탈퇴/파기 상태 필드 · 잔여 정리 실행
+operation · 관리자 화면. **트리거는 없다 — 일정만 안 잡힌 것이다**(S-2 와 같은 분류). 수습
+경로는 그동안 `scripts/account_purge_reconciler.py` 다. 4b 브리프가 물을 갈래 셋은 위
+"후속 고려" 첫 항목에 그대로 있다.

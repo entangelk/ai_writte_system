@@ -3,6 +3,8 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PersonalHubPage } from "./PersonalHubPage";
 import { resetMemberQuota, seedMemberQuota } from "../quota/useMemberQuota";
+import { AuthUserContext } from "../auth/AuthGate";
+import { WithdrawalProvider } from "./withdrawal";
 
 beforeEach(() => {
   seedMemberQuota({
@@ -31,12 +33,24 @@ function stub(projects: unknown[], events: unknown[]) {
   return fetchMock;
 }
 
+/**
+ * 허브는 앱 셸 **안에서만** 산다 — 계정 탈퇴 절(Slice 4)이 세션 사용자명과 유예
+ * 상태를 읽으므로 두 context 가 필요하다. 프로덕션에서 그 둘을 주는 것이 `AuthGate`
+ * 이고, 여기서는 같은 자리를 최소로 세운다(`AuthGate` 자체를 세우면 세션 확인
+ * 요청이 아래 fetch 시퀀스에 끼어든다).
+ *
+ * 유예 상태는 `vitest.setup.ts` 가 *탈퇴 중 아님* 으로 시드하므로 조회가 안 나간다.
+ */
 function renderHub() {
   render(
     <MemoryRouter initialEntries={["/me"]}>
-      <Routes>
-        <Route path="/me" element={<PersonalHubPage />} />
-      </Routes>
+      <AuthUserContext.Provider value={{ id: "u1", username: "alice", is_admin: false }}>
+        <WithdrawalProvider>
+          <Routes>
+            <Route path="/me" element={<PersonalHubPage />} />
+          </Routes>
+        </WithdrawalProvider>
+      </AuthUserContext.Provider>
     </MemoryRouter>,
   );
 }

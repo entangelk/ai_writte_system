@@ -365,6 +365,41 @@ export async function listMyActivity(): Promise<PersonalActivityEvent[]> {
   return response.events;
 }
 
+// --- 계정 탈퇴 (Slice 1·2, 화면은 Slice 4) ------------------------------------
+
+export type Withdrawal = components["schemas"]["WithdrawalResponse"];
+
+/**
+ * 유예 상태를 읽는다 (Slice 2 = ⓑ, operation 105).
+ *
+ * **탈퇴 중이 아닌 계정은 두 필드가 모두 `null` 이다** — 취소한 계정과 한 번도
+ * 요청한 적 없는 계정은 이 payload 에서 구별되지 않는다(D5=A, 서버 계약).
+ */
+export function getMyWithdrawal(): Promise<Withdrawal> {
+  return request("/me/withdrawal");
+}
+
+/**
+ * 탈퇴를 요청한다. **아무것도 지우지 않는다** — 유예가 시작될 뿐이다.
+ *
+ * **재요청은 200 멱등**이라 먼저 찍힌 시각이 그대로 온다(화면의 "남은 N일" 이
+ * 되돌아가지 않는다). **409 는 마지막 활성 관리자**다(D6) — H3 가 `detail` 분기를
+ * 금지하므로 호출부는 **상태코드로** 가른다.
+ */
+export function requestMyWithdrawal(): Promise<Withdrawal> {
+  return request("/me/withdrawal", { method: "POST" });
+}
+
+/**
+ * 탈퇴를 취소한다. 계정은 **요청한 적 없는 상태로** 돌아간다(D5=A).
+ *
+ * **409 는 취소할 것이 없다는 뜻**이지 계정이 없다는 뜻이 아니다(404 를 안 쓰는
+ * 이유가 그것이다). 다른 탭에서 이미 취소했을 때 여기로 온다.
+ */
+export function cancelMyWithdrawal(): Promise<Withdrawal> {
+  return request("/me/withdrawal", { method: "DELETE" });
+}
+
 export function listProjects(): Promise<ProjectListResponse> {
   return request("/projects");
 }

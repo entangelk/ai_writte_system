@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { beforeEach } from "vitest";
 import { seedMemberQuota } from "./src/quota/useMemberQuota";
+import { seedWithdrawal } from "./src/me/withdrawal";
 
 // Slice 8.4 (W5=B): 잔여 표시는 **보조 조회**다. 화면 테스트는 유료 요청의 응답
 // 시퀀스를 순서대로 세는데, 그 사이에 `GET /me/quota` 가 끼면 세던 것이 통째로
@@ -21,4 +22,9 @@ beforeEach(() => {
       resets_at: "2026-08-08T15:00:00Z",
     },
   });
+  // 계정 탈퇴 Slice 4(D1=ⓐ): 유예 배너가 **앱 셸**에 있으므로 `GET /me/withdrawal`
+  // 이 모든 화면 마운트에 끼어든다 — 위 quota 와 정확히 같은 문제다. 기본값은
+  // **탈퇴 중 아님**(두 필드 모두 null)이라 배너가 안 그려지고 조회도 안 나간다.
+  // 탈퇴 축 셀만 자기 값을 시드하거나 `resetWithdrawal()` 로 실제 조회를 켠다.
+  seedWithdrawal({ withdrawal_requested_at: null, purge_due_at: null });
 });

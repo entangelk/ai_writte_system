@@ -3,6 +3,7 @@ import {
 } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { Link } from "react-router";
+import { WithdrawalBanner, WithdrawalProvider } from "../me/withdrawal";
 import {
   ApiError,
   getCurrentUser,
@@ -14,7 +15,13 @@ import {
 } from "../api/client";
 
 type AuthState = "checking" | "authenticated" | "anonymous" | "error";
-const AuthUserContext = createContext<User | null>(null);
+/**
+ * 세션 사용자. **export 하는 이유는 테스트가 앱 셸 없이 화면 하나를 세울 때**
+ * 이 자리를 최소로 채워야 하기 때문이다 — `AuthGate` 자체를 세우면 세션 확인
+ * 요청이 그 셀의 fetch 시퀀스에 끼어든다. 프로덕션 소비자는 `useAuthenticatedUser`
+ * 하나뿐이다.
+ */
+export const AuthUserContext = createContext<User | null>(null);
 
 export function useAuthenticatedUser(): User {
   const user = useContext(AuthUserContext);
@@ -133,6 +140,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthUserContext.Provider value={user}>
+    <WithdrawalProvider>
     <div className="app-shell">
       <header className="app-header">
         <Link className="brand" to="/">에-라잇</Link>
@@ -147,8 +155,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           {logoutError}
         </p>
       )}
+      {/* 계정 탈퇴 유예 배너(Slice 4, D1=ⓐ) — **화면 안이 아니라 셸이다.**
+          유예 중에는 쓰기가 전 화면에서 403 이므로, 그 이유도 전 화면에서
+          보여야 한다. 여기서 옮기면 편집기의 403 이 다시 정체불명이 된다. */}
+      <WithdrawalBanner />
       <main>{children}</main>
     </div>
+    </WithdrawalProvider>
     </AuthUserContext.Provider>
   );
 }

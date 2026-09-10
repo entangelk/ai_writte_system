@@ -10,6 +10,8 @@ import {
 import { useMemberQuota } from "../quota/useMemberQuota";
 import { activityActionLabel } from "../projects/activityActions";
 import { groupActivityByDay } from "../projects/activityDays";
+import { WithdrawalSection } from "./withdrawal";
+import { useAuthenticatedUser } from "../auth/AuthGate";
 
 /** 서버가 통합 조회에서 한 번에 주는 최대 건수 (per-project 와 **같은 수** — P2 역전 방지). */
 const ACTIVITY_PAGE_SIZE = 100;
@@ -31,6 +33,7 @@ const ACTIVITY_PAGE_SIZE = 100;
  * 프로젝트는 소유자 1인 소유라 행위자가 항상 보는 사람이다).
  */
 export function PersonalHubPage() {
+  const user = useAuthenticatedUser();
   const { quota } = useMemberQuota();
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [events, setEvents] = useState<PersonalActivityEvent[] | null>(null);
@@ -173,6 +176,11 @@ export function PersonalHubPage() {
           </details>
         ))}
       </details>
+
+      {/* 계정 탈퇴(Slice 4) — 개인 허브의 **마지막 자리**다. 되돌릴 수 없는 일은
+          자주 하는 일과 같은 눈높이에 두지 않는다(프로젝트 설정의 삭제 절과 같은
+          판단이고 같은 확인 가드를 쓴다). */}
+      <WithdrawalSection username={user.username} />
     </section>
   );
 }
