@@ -192,7 +192,6 @@
 | `llm_call_audits` 로 "출력이 잘렸다"를 못 본다 | `finish_reason`·`truncated` 없음(실측 0건). 헤드룸만 계산 가능 | `observability/` |
 | 무순위 폴백은 관련도를 모른다 | 벡터·렉시컬 다리가 **둘 다 없는** 구성에서 `MongoDirect*MemoryRetriever` 가 `query` 를 무시하고 저장 순서 앞 8개를 자른다 — 정본이 상한을 넘으면 **오래된 것만 영원히 실린다**. 2026-09-09 에 **경고로 드러냈을 뿐 고친 것이 아니다**(`"… is unranked (mongo-direct backend)"` 가 뜨면 그 구성이라는 뜻) | [`context_search/service.py`](services/application/app/context_search/service.py) |
 | 자료(source) 원문 길이 상한 없음 | `analysis_extract` 가 `snapshot.raw_text` 를 **통째로** 싣는다 — 검색 조각 예산의 보호를 안 받는 유일한 LLM 경로 | [`extractor.py`](services/application/app/analysis/extractor.py) |
-| **탈퇴 워커의 정지 배선이 무셀** | `run_loop` 이 `stop_check=stop.is_requested` 를 `run_once` 로 넘기는 그 인자를 지워도 **43셀 전건 초록**이다(2026-09-10 MU-20 실측). 끊기면 SIGTERM 이 `while` 경계에서만 서서 진행 중 pass 가 최대 `limit`(기본 10) 계정을 끝까지 돌고, compose `stop_grace_period: 120s` 를 넘기면 SIGKILL·부분 파기다. **처방은 선례 복사 한 줄** — 형제 워커가 `self.last_stop_check = stop_check` + `assertIsNotNone(...)` 로 같은 축을 잠근다([`test_index_sync_worker_script.py:294·341`](tests/test_index_sync_worker_script.py)). Slice 4 에 얹는다 | [`account_withdrawal_worker.py:257`](scripts/account_withdrawal_worker.py#L257) · 대역 [`test_account_withdrawal_worker.py:110`](tests/test_account_withdrawal_worker.py#L110) |
 | 약관·방침 본문의 수를 기계가 거의 안 본다 | 길이 제한 축(제5조 1항)만 상수 대조 셀이 있다 — 나머지(사용자명 64자·비밀번호 12/256·대기 200건·5건/3,600초·5회/300초·세션 7일·하루 20/주 100·승격 1시간·유예 30일)는 사람이 읽는다. 2026-09-10 검증이 손으로 훑어 **현재 전부 일치**. 일반화하려면 *조항 ↔ 상수* 표가 필요하다 | [`test_service_policy_contract.py`](tests/test_service_policy_contract.py) · [`docs/legal/README.md`](docs/legal/README.md) |
 | 프론트 6000 상수가 서버 env override와 미동기화 | 서버 422·400이 최종 방어. 해소하려면 public 설정 계약 위치를 먼저 결정 | [`tokenEstimate.ts:23`](frontend/src/writing/tokenEstimate.ts#L23) |
 | 미사용 import에 회귀 가드 없음 | 유일한 신호가 스위트 밖 linter. **ⓐ(정리 슬라이스마다 수동 측정)가 현 단계에 맞다** | — |
@@ -248,11 +247,11 @@
 >
 > **★ 막고 있는 것이 없다(2026-09-09).** Slice 3 브리프 둘과 시행일까지 오너가 같은 날 답했다. **약관·방침은 버전 `1.0`·시행일 2026-09-08 로 시행 표기됐다** — 그래서 12번 랜딩 ①이 닫혔고 10번 동의 게이트의 입력(버전 문자열)도 확정이다.
 >
-> **★★ 계정 탈퇴 축의 검증이 닫혔다(2026-09-10 승격 완료).** 조건 셋 폐쇄 → 승격 재검까지 끝나 **Slice 4(화면)가 1번**이다. 승격 대기 중 걸려 있던 *"Slice 4 를 열지 말 것"* 금지는 해제됐다. **승격 재검이 새 부채 하나를 남겼다** — 탈퇴 워커의 정지 배선 무셀(위 🔧 미수리 표). 셀 하나이고 같은 워커 축이라 **Slice 4 에 얹는다**.
+> **★★ 계정 탈퇴 축이 조건 없이 열려 있다(2026-09-10).** 조건 셋 폐쇄 → 승격 재검 → 2차 재검(**둘 다 합격**)까지 끝났고, 재검이 남긴 하드닝 둘(**정지 배선 무셀 · 산문 숫자**)도 SoT v1.8.53 이 닫았다. **Slice 4(화면)가 1번**이고 선행 조건은 없다. 한때 열려 있던 *"H1' 등급 — 하드닝이냐 게이트냐"* 오너 질문은 **셀이 들어오면서 소멸했다**(올릴 대상이 없다).
 >
 > | 순서 | 무엇 | 왜 이 순서인가 |
 > |---|---|---|
-> | **1** | **★ 11번 계정 탈퇴 Slice 4~5** | 검증이 닫혀 열렸다. 다음은 **화면** — 요청·취소·남은 일수 배너 + **D3 의 관리자 잔여 정리**(ⓔ 로 여기에 왔다). **정지 배선 셀(H1')을 여기 얹는다.** 그 뒤 Slice 5(정책 §8 → §6 승격) |
+> | **1** | **★ 11번 계정 탈퇴 Slice 4~5** | 검증이 닫혀 열렸다. 다음은 **화면** — 요청·취소·남은 일수 배너 + **D3 의 관리자 잔여 정리**(ⓔ 로 여기에 왔다). 그 뒤 Slice 5(정책 §8 → §6 승격) |
 > | 2 | **12번 랜딩 + 10번 동의 게이트** | **한 창에서 본다.** 순서는 ~~① 약관 대괄호 넷 치환 + 시행 버전 문자열~~ **완료(2026-09-09, 버전 `1.0`)** ② `/terms`·`/privacy` + 푸터 ③ 랜딩 본문 ④ 동의 게이트. **Phase S-2(nginx 헤더)·AdSense 화면별 제어도 같은 창** — 광고가 랜딩·로그인에도 뜬다 |
 > | 3 | 2번 최종 저장·분석 6차 승격 재검증 | 셀은 이미 있고 MW-D 재적용만 남았다 |
 > | 4 | 6번 육안 확인 · 8번 확인용 계정 정리 | 오너·운영 데이터 축 |
