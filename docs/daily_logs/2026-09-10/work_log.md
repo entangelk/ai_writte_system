@@ -91,3 +91,61 @@
 
 - **승격 재검**(다음 검증 세션): 변이 재적용 + 이 세션이 더한 다섯 셀의 교합 확인 → 검증 기록 판정 갱신.
 - 그다음 **Slice 4(화면)**. 개발 스택 재생성(`withdrawal_worker` 동반 기동)은 그대로 남아 있다.
+
+## 세션 52 — 승격 재검(변이 재적용) · 선행 기록 판정 승격 (오너 지시 "핸드오프 확인해서 다음작업 진행해줘")
+
+HANDOFF Next Tasks 1번이 가리킨 **승격 재검**. 세션 51 이 닫은 조건 셋의 폐쇄분은 **미검증 구간**이었다 — 조건을 닫은 세션이 자기 판정을 못 올리기 때문이다(세션 51 Decisions). 이 세션은 구현(49)·검증(50)·폐쇄(51) 어느 쪽도 아니므로 그 승격 권한을 가진다. 기록 [`slice3_closure_promotion.md`](../verifications/2026-09-10/slice3_closure_promotion.md) · 커밋 `4f451c4`.
+
+### Completed work
+
+- **전수 재현 먼저, 문서는 그 뒤** — 고정 트리 `c1cb282` 에서 **3023 passed / 1 skipped / 4117 subtests · EXIT=0**(1618초). 세션 51 주장과 **셀·skip·subtest 전건 일치**. 문서는 전수가 끝난 뒤에 한 자도 고쳤다(세션 51 이 겹쳐 돌려 37분을 버린 선례 넷째를 피했다).
+- **지정 변이 재적용 아홉 종**(MU-7·8·12~16 + over MU-7b·8b) — **전부 세션 51 이 적은 기명 셀·개수 그대로 재실패**. 한 셀이 여럿을 흡수한 자리 없음(표는 아래).
+- **반증 시도 신규 여섯** — 다섯은 폐쇄를 더 굳혔고 **하나(MU-20)가 새 갭을 열었다**.
+- **조건 폐쇄 ↔ 처방 대조** — B1 은 처방(권고한 `draft-0` 토큰 부재)보다 **넓게** 닫혔고(머리말 버전 **줄 전체** 대조 추가), B2·B3 은 처방 그대로. B3 이 처방에 없던 `purge_started_at` 표식까지 단정한 것이 옳다 — 결함 서술이 *"reconciler 가 못 찾는다"* 이고 그 질의 조건이 `{"purge_started_at": {"$ne": None}}` 이다([account_purge_reconciler.py:56](../../../scripts/account_purge_reconciler.py)).
+- **판정 승격** — 선행 기록 [`account_withdrawal_slice3_legal_effective.md`](../verifications/2026-09-10/account_withdrawal_slice3_legal_effective.md) 를 `조건부 합격` → **`합격`** 으로. 발행 시점 판정 원문은 인용 블록으로 보존(선례 2026-08-10). 인덱스 분포 합격 194 → **196** · 조건부 96 → **95** · 건수 295 → **296**, 루트 README 백분율 33% → **32%** 동반.
+
+### Issues found
+
+| 문제 | 원인 | 해결 | 결과 |
+|---|---|---|---|
+| **★ `run_loop` → `run_once` 정지 배선이 무셀**(MU-20 초록) | H1 폐쇄가 **피호출자**만 닫았다. `LoopTest` 의 대역 `_FakeService.run_once` 가 `stop_check` 를 **받고 버려서**([test_account_withdrawal_worker.py:110](../../../tests/test_account_withdrawal_worker.py)) 배선을 끊어도 `calls`·`slept`·`events` 가 전부 그대로다 | **비차단 H1' 로 기록**(선행 기록이 이 축 전체를 H1=비차단으로 분류했고 이것은 그 이음매다). 처방은 한 줄이고 **저장소에 선례가 있다** — 형제 워커가 `self.last_stop_check = stop_check` + `assertIsNotNone(...)` 로 같은 축을 잠근다([test_index_sync_worker_script.py:294·341](../../../tests/test_index_sync_worker_script.py)) | Slice 4 에 얹는다(같은 워커 축·셀 하나 — 독립 슬라이스를 열 크기가 아니다) |
+| 인덱스 판정 열에 승격 사유를 붙였더니 가드가 물었다 | `test_every_record_row_states_a_verdict` 는 판정 열이 `*` 를 벗기면 **정확히 세 토큰 중 하나**여야 한다 — `**합격**(발행 시점 조건부 합격 → 승격)` 은 알 수 없는 값이다 | 판정 열은 `**합격**` 만, 승격 경위는 설명 칸으로 | 가드가 의도대로 물었다. **판정 열은 분류값이지 서술 자리가 아니다** |
+| 분포표를 안 고쳐 두 셀이 물었다 | 검증 인덱스의 **분포표(38~40행)가 분포의 정본**이고 루트 README 문장은 그것을 되뇐다 — 건수만 고치면 합이 안 맞는다 | 분포표·README 문장·백분율 셋을 함께 | `test_the_verdict_distribution_adds_up_to_the_total`·`..._repeats_the_distribution_verbatim` 초록. **승격은 건수가 아니라 분포를 움직인다** — 등재보다 고칠 자리가 하나 많다 |
+| 법률 축 변이가 `SUBFAILED` 로만 나온다 | 결합 가드가 `subTest(document=…)` 로 문서 둘을 돈다 | 요약 카운트 줄 + `FAILED\|SUBFAILED` 양쪽으로 판독 | 가이드 §"`grep FAILED` misses subtest failures" 가 실제로 적용된 자리 — `FAILED` 만 걸렀으면 넷 다 *"안 물었다"* 로 오독했다 |
+
+### Decisions
+
+- **MU-20 을 차단이 아니라 하드닝으로 분류했다.** 선행 기록이 정지 경계 축 **전체**를 H1(비차단)으로 판단했고, 이 발견은 그 축의 남은 절반이다. 여기서 등급을 올리면 이미 내려진 분류를 재심하는 것이 되고, 승격 판정(조건 B1·B2·B3 의 폐쇄 여부)과도 무관하다. **판정은 합격, 부채는 명시**가 정직한 조합이다.
+- **반사실 변이(MU-15r)를 넣었다** — 세션 51 의 *"종전 가드로는 초록이던 자리"* 는 **주장**이지 재현된 측정이 아니었다. 변이를 적용한 채 **가드만** 옛 형태로 되돌려 초록을 확인했다. 폐쇄가 실제로 하중을 받는지는 이렇게만 알 수 있다.
+- **subtest 증분을 예고로 두지 않고 실측했다** — 워크트리 양단(`c1cb282` 305/606 · 현행 306/607)으로 갈라 **다음 기준선은 3023/1/4119** 이고 그 +2 의 주인이 이 기록 파일임을 확정했다.
+
+### Verification (세션 52)
+
+- 프리플라이트 `git status --short` 무출력 → 변이 15회, 매번 `git checkout -- <path>` 뒤 무출력 확인. 마지막에 `git diff --stat HEAD` 도 무출력(내용까지 원복 확인). 초점 51셀(43 + 8) 초록.
+
+| # | 방향 | 적용한 diff | 실측 |
+|---|---|---|---|
+| MU-7 | under | `purge_account` 의 sweep 4줄 ↔ delete 4줄 교환 | 1 failed `test_a_failed_sweep_leaves_the_account_row_alive_and_stamped` |
+| MU-7b | over | 같은 자리를 `except Exception: swept = {}` 로 | 1 failed 같은 셀 |
+| MU-8 | under | `run_once` 의 `if stop_check is not None and stop_check(): break` 두 줄 삭제 | 1 failed `test_a_stop_request_ends_the_pass_at_the_next_claim_boundary` |
+| MU-8b | over | 같은 자리를 `if stop_check is not None:` | 2 failed 위 셀 + `test_without_a_stop_request_the_pass_drains_everything` |
+| MU-16 | under | `_summary_doc` 의 `if not result.succeeded` 제거 | 2 failed `ApplyModeTest` 두 셀 |
+| MU-12 | under | 약관 부칙 버전 줄 → `` `draft-0` (미시행) `` | 1 failed(SUBFAILED terms) `test_both_documents_carry_the_enforced_version_and_date` |
+| MU-13 | under | 방침 부칙에 같은 복원 | 1 failed(SUBFAILED privacy) 같은 셀 |
+| MU-14 | under | 제5조 1항 6,000자 → 4,000자 | 1 failed `test_the_length_limits_in_the_terms_match_the_constants` |
+| MU-15 | over | 머리말 `버전: \`1.0\`` → `\`2.0\``(부칙 유지) | 1 failed(SUBFAILED) 결합 셀 |
+| **MU-15r** | 반사실 | MU-15 를 둔 채 **가드만** 폐쇄 이전 형태로(부분 문자열 대조) | **8 passed — 초록.** 세션 51 주장이 실측으로 참 |
+| MU-17 | under | 약관 상태줄 시행일만 `2026-10-01` 로 | 1 failed(SUBFAILED) 결합 셀 — 날짜도 두 자리가 함께 잠긴다 |
+| MU-18 | over/순서 | `run_once` 의 정지 확인을 루프 머리 → 꼬리로 **이동** | 1 failed — H1 셀은 **위치**까지 잠근다 |
+| MU-19 | over | `env.py::DRAFT_RAW_TEXT_MAX_CHARS` 6000 → 5000(문서 유지) | 2 failed — 정책 축(SUBFAILED) + 새 약관 셀. 상수→문서 방향도 문다 |
+| **MU-20** | under | `run_loop` 의 `run_once(..., stop_check=stop.is_requested)` **인자 삭제** | **43 passed — 초록(갭 → H1')** |
+| MU-22 | under | `purge_account` 의 `self._users.delete(user.id)` → `pass` | 4 failed, 그중 `test_a_due_account_is_purged_end_to_end` — 새 셀 docstring 의 *"반대편은 그 셀이 받는다"* 가 참 |
+
+- 문서 가드(편집 뒤): `test_docs_indexes` + `test_repo_hygiene` **25 passed / 913 subtests**.
+- 전수는 **문서 편집 전** 값이 정본이다(위 3023/1/4117). 편집분은 셀을 안 늘리고 subtest 만 +2 한다(실측 귀속).
+
+### Next steps
+
+- **Slice 4(화면) 착수 가능** — 승격 전 금지가 해제됐다. 요청·취소·남은 일수 배너 + D3 관리자 잔여 정리.
+- **H1'(정지 배선 셀)을 Slice 4 에 얹는다** — 선례 복사 한 줄.
+- 개발 스택 재생성(`withdrawal_worker` 미기동)·배포 대기는 그대로.

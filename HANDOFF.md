@@ -62,7 +62,7 @@
 - **Chapter/Scene 계층.** metadata-only Chapter + Scene(Draft), parent별 연속 순열, AI는 같은 장의 다음 Scene만. **legacy 평면 Draft는 CRUD·accept가 503 fail-closed(2층)이고 export·versions만 대피 경로로 200**이다 — 대피 경로를 막으면 이관 못 한 데이터가 갇힌다. 공개 `unit_kind` 는 제거됐고 `core_sot` 의 legacy migration 입력으로만 남아 있다.
 - **검토함 그룹 읽기면.** `identity_group` payload 6키 중 **`group_revision` 만 표시 전용이 아니다** — 그룹 승인 body `expected_revision` 의 **유일한 조달 경로**이고(409 detail 에 값이 있으나 **H3 가 detail 분기를 금지**한다) 값은 살아 있는 그룹의 것 그대로여야 한다(파생 금지). **`revision` 은 `set_group_status` 에서만 오른다** — `add_member` 는 그룹 행을 안 건드리므로 실전 값은 대개 `0` 이고, 그래서 **셀 픽스처를 0 으로 두면 상수 박기가 전건 통과한다**(신규 셀이 상태 전이 2회로 revision 2 ≠ 멤버 3 을 만드는 이유). **그룹 액션 결과 상자는 페이지 수준에 둔다** — 그룹 행 안에 두면 끝난 그룹이 목록에서 빠질 때 결과도 사라지는데, 거절 요약과 부분 실패는 **재조회를 넘겨 살아야 하는** 사실이다. `applied`/`skipped` 아닌 step 을 "반영"으로 세면 D4=A 의 200 이 성공으로 닫힌다.
 - **검색과 리랭커.** 벡터(Chroma/BGE-m3-ko — **다만 배포는 외부 임베딩이라 모델도 차원도 다르다**, 위 "머신 · 기동") + lexical(ES/nori)을 RRF(`1/(k+rank)`, k=60)로 융합하고 리랭커는 **그 뒤에** 걸린다. **★ 리랭커 표기는 세 조각이고 "있음" 한 단어로 쓰면 거짓이다** — *"외부 API 리랭커 붙일 수 있음(**기본 꺼짐**) · self-host 미구현 · **품질 평가 미실시**"*. `RERANK_API_URL` 이 비면 조립이 감싸지 않고 검색은 RRF까지만으로 동작한다. **실패는 열려 있다(fail-open) — 프로바이더가 아니라 *단계 전체*가 그렇다**(순열 아닌 응답·텍스트 투영 예외 포함). 다만 **조용히 삼키지 않는다**(`logging.WARNING` + `exc_info`) — fail-open이 조용하면 리랭킹이 영원히 no-op인 채로 아무도 모른다.
-- **회귀 기준선**: backend **test-mongo ON 3023 passed / 1 skipped / 4117 subtests**(2026-09-10 **알파·호스트**, 2271초 — 검증 조건 폐쇄 트리, 커밋 `f37fab0`. **소요는 머신-로컬 값이라 다른 머신 값과 비교하지 말 것**). 직전 3017/1/4114(`dec3808`)와의 차 — **셀 +6은 조건 폐쇄가 더한 것**(`--collect-only` 3018→3024로 확정)이고 **subtest +3은 그 사이의 검증 기록 커밋 `a3d6cf2` 몫**이다(문서 파일 1건이 `test_repo_hygiene`·`test_docs_indexes` 회계에 들어갔다 — 워크트리 양단에서 두 가드가 606/305 로 **같게** 나와 이번 세션 기여 0 으로 귀속). **갱신은 셀을 더한 슬라이스의 몫**이고, 어긋났을 때 유도하는 법은 `git worktree add --detach <경로> <리비전>` 뒤 양쪽에서 `python3 -m pytest --collect-only -q`(수집 수 = passed + skipped)다. 프런트는 **467 passed / 38 files**(2026-09-07, 오너 관측 2건 수정 포함). **전수 1실패를 만나면 위 미수리 표의 *알려진 플레이크* 부터 볼 것.** **전수 판정은 `passed` 가 아니라 `skip` 수를 먼저 본다 — `skip 1 = live Chroma` 하나뿐이고, 2 이상이면 호스트에 빠진 패키지가 있다는 뜻이다**(함정 절 "호스트 도구 공백"). **★ subtest 수는 커버리지 대리지표가 아니다** — 위생 가드는 위반이 있을 때만 subtest 를 내고 파일 회계는 조용히 돈다(파일 하나를 더하면 subtest 가 +1 될 수 있다). **★ 최상위 [`README.md`](README.md) 절차 표의 `N passed / N subtests` 는 아무 가드도 안 잡는다** — 기준선을 갱신하는 슬라이스가 그 한 줄도 함께 고친다.
+- **회귀 기준선**: backend **test-mongo ON 3023 passed / 1 skipped / 4119 subtests**(2026-09-10 **알파·호스트** — passed·skip 은 커밋 `c1cb282` 실측 1618초, **subtest 는 그 뒤 승격 재검 기록 1파일이 더한 +2 를 반영한 값**이다. **소요는 머신-로컬 값이라 다른 머신 값과 비교하지 말 것**). 증분 귀속: 3017/1/4114(`dec3808`) → **셀 +6 = 조건 폐쇄**(`--collect-only` 3018→3024) · **subtest +3 = 검증 기록 커밋 `a3d6cf2`** · **subtest +2 = 승격 재검 기록**(워크트리 양단 실측 — `c1cb282` 에서 `test_docs_indexes` 305·`test_repo_hygiene` 606, 현행 306·607). **문서 파일 하나가 subtest 를 2 늘린다**(판정 열 전수 셀 + 파일 회계). **갱신은 셀을 더한 슬라이스의 몫**이고, 어긋났을 때 유도하는 법은 `git worktree add --detach <경로> <리비전>` 뒤 양쪽에서 `python3 -m pytest --collect-only -q`(수집 수 = passed + skipped)다. 프런트는 **467 passed / 38 files**(2026-09-07, 오너 관측 2건 수정 포함). **전수 1실패를 만나면 위 미수리 표의 *알려진 플레이크* 부터 볼 것.** **전수 판정은 `passed` 가 아니라 `skip` 수를 먼저 본다 — `skip 1 = live Chroma` 하나뿐이고, 2 이상이면 호스트에 빠진 패키지가 있다는 뜻이다**(함정 절 "호스트 도구 공백"). **★ subtest 수는 커버리지 대리지표가 아니다** — 위생 가드는 위반이 있을 때만 subtest 를 내고 파일 회계는 조용히 돈다(파일 하나를 더하면 subtest 가 +1 될 수 있다). **★ 최상위 [`README.md`](README.md) 절차 표의 `N passed / N subtests` 는 아무 가드도 안 잡는다** — 기준선을 갱신하는 슬라이스가 그 한 줄도 함께 고친다.
 
 ## 표준 제약 (Active Decisions)
 
@@ -191,6 +191,7 @@
 | `llm_call_audits` 로 "출력이 잘렸다"를 못 본다 | `finish_reason`·`truncated` 없음(실측 0건). 헤드룸만 계산 가능 | `observability/` |
 | 무순위 폴백은 관련도를 모른다 | 벡터·렉시컬 다리가 **둘 다 없는** 구성에서 `MongoDirect*MemoryRetriever` 가 `query` 를 무시하고 저장 순서 앞 8개를 자른다 — 정본이 상한을 넘으면 **오래된 것만 영원히 실린다**. 2026-09-09 에 **경고로 드러냈을 뿐 고친 것이 아니다**(`"… is unranked (mongo-direct backend)"` 가 뜨면 그 구성이라는 뜻) | [`context_search/service.py`](services/application/app/context_search/service.py) |
 | 자료(source) 원문 길이 상한 없음 | `analysis_extract` 가 `snapshot.raw_text` 를 **통째로** 싣는다 — 검색 조각 예산의 보호를 안 받는 유일한 LLM 경로 | [`extractor.py`](services/application/app/analysis/extractor.py) |
+| **탈퇴 워커의 정지 배선이 무셀** | `run_loop` 이 `stop_check=stop.is_requested` 를 `run_once` 로 넘기는 그 인자를 지워도 **43셀 전건 초록**이다(2026-09-10 MU-20 실측). 끊기면 SIGTERM 이 `while` 경계에서만 서서 진행 중 pass 가 최대 `limit`(기본 10) 계정을 끝까지 돌고, compose `stop_grace_period: 120s` 를 넘기면 SIGKILL·부분 파기다. **처방은 선례 복사 한 줄** — 형제 워커가 `self.last_stop_check = stop_check` + `assertIsNotNone(...)` 로 같은 축을 잠근다([`test_index_sync_worker_script.py:294·341`](tests/test_index_sync_worker_script.py)). Slice 4 에 얹는다 | [`account_withdrawal_worker.py:257`](scripts/account_withdrawal_worker.py#L257) · 대역 [`test_account_withdrawal_worker.py:110`](tests/test_account_withdrawal_worker.py#L110) |
 | 약관·방침 본문의 수를 기계가 거의 안 본다 | 길이 제한 축(제5조 1항)만 상수 대조 셀이 있다 — 나머지(사용자명 64자·비밀번호 12/256·대기 200건·5건/3,600초·5회/300초·세션 7일·하루 20/주 100·승격 1시간·유예 30일)는 사람이 읽는다. 2026-09-10 검증이 손으로 훑어 **현재 전부 일치**. 일반화하려면 *조항 ↔ 상수* 표가 필요하다 | [`test_service_policy_contract.py`](tests/test_service_policy_contract.py) · [`docs/legal/README.md`](docs/legal/README.md) |
 | 프론트 6000 상수가 서버 env override와 미동기화 | 서버 422·400이 최종 방어. 해소하려면 public 설정 계약 위치를 먼저 결정 | [`tokenEstimate.ts:23`](frontend/src/writing/tokenEstimate.ts#L23) |
 | 미사용 import에 회귀 가드 없음 | 유일한 신호가 스위트 밖 linter. **ⓐ(정리 슬라이스마다 수동 측정)가 현 단계에 맞다** | — |
@@ -234,13 +235,11 @@
 | Phase 8.6 결제 seam | 결제 도입이 계기일 때(오너: *"당장은 안 붙일 것 같다"*) |
 | 관측 화면 확장 | **Phase 9 F1(커서 페이징)과 같은 트리거를 쓴다** — *"'최근 100건' 문구 아래가 궁금해지는 순간, 특히 하루 저작 뒤 타임라인이 그날 하루로 다 차면"*([`09-1-…-decisions.md`](docs/plans/09-1-activity-timeline-screen-decisions.md) §"나중에 여는 문"). **★ 둘을 따로 열지 않는다 — 먼저 여는 쪽이 페이징 관례를 정하고 다른 쪽이 따른다.** 무엇을 더하든 **`React.lazy` 경계 안**. *(2026-09-06 정정: 종전 트리거 "API에 시간 창 `?since=` 이 생긴 뒤"는 **순환이었다** — `?since=` 는 이 작업 자신의 API 축이라 그것을 만들어 줄 다른 작업이 없다. 실측: [`observability.py`](services/application/app/routers/observability.py) 의 KPI endpoint 는 `project_id` 하나만 받는다)* |
 
-## 세션 49 검증 — 조건 셋 폐쇄, 승격 재검 대기 (2026-09-10)
+## 계정 탈퇴 Slice 3 · 법률 축 — 검증 닫힘 (2026-09-10)
 
-기록: [`docs/verifications/2026-09-10/account_withdrawal_slice3_legal_effective.md`](docs/verifications/2026-09-10/account_withdrawal_slice3_legal_effective.md)(§폐쇄 보고). **런타임은 실 mongod 전 경로에서 무결**이었고(재현 21/21 · 실 개발 DB `_id` 충돌 0건), 차단 셋과 하드닝 둘은 세션 51 이 닫았다(`b23f689`·`7e07b37` · SoT v1.8.52 · 변이 9종 전부 기명 재실패).
+기록 [`account_withdrawal_slice3_legal_effective.md`](docs/verifications/2026-09-10/account_withdrawal_slice3_legal_effective.md) **합격**(조건부 → 승격) · 승격 근거 [`slice3_closure_promotion.md`](docs/verifications/2026-09-10/slice3_closure_promotion.md) **합격**. 조건 셋·하드닝 둘은 세션 51 이 닫았고(`b23f689`·`7e07b37` · SoT v1.8.52), 세션 52 가 **변이 재적용으로 재현해 판정을 올렸다** — 지정 아홉 종 전부 기명 셀 그대로 재실패 · 신규 여섯 중 다섯이 폐쇄를 더 굳혔다. **Slice 4 를 열어도 된다.**
 
-**남은 것은 판정 승격뿐이다** — 조건을 닫은 세션이 자기 판정을 올리면 독립성이 사라지므로 기록의 판정은 **조건부 합격 그대로**다. 다음 검증 세션이 **변이 재적용**(MU-7·8·12~16)으로 새 셀 다섯의 교합을 확인하고 판정을 갱신한다. 그 전에는 Slice 4 를 열지 말 것(파기 축은 되돌릴 수 없다).
-
-**남는 계약 주의**: 법률 문서의 **버전 문자열 `1.0` 은 계약 리터럴**이고(동의 게이트가 저장한다) 이제 머리말·부칙 **두 자리**가 함께 잠긴다 — 한쪽만 고치면 전수가 빨개진다. 약관 제5조 1항의 두 수는 상수(`env.py::DRAFT_RAW_TEXT_MAX_CHARS`·`core_sot/service.py::SCENE_NOTE_MAX_CHARS`)를 따라간다. **개발 스택 재생성은 그대로 남아 있다** — 현 컨테이너들이 Slice 3 이전 상태라 `withdrawal_worker` 가 안 떠 있다.
+**남는 계약 주의**: 법률 문서의 **버전 문자열 `1.0` 은 계약 리터럴**이고(동의 게이트가 저장한다) 머리말·부칙 **두 자리**가 함께 잠긴다 — 한쪽만 고치면 전수가 빨개진다(머리말은 **줄 전체** 대조라 부분 문자열로는 못 만족시킨다). 약관 제5조 1항의 두 수는 상수(`env.py::DRAFT_RAW_TEXT_MAX_CHARS`·`core_sot/service.py::SCENE_NOTE_MAX_CHARS`)를 따라간다. **법률 축 변이는 `SUBFAILED` 로 나온다** — `FAILED` 만 걸면 "안 물었다"로 오독한다. **개발 스택 재생성은 그대로 남아 있다** — 현 컨테이너들이 Slice 3 이전 상태라 `withdrawal_worker` 가 안 떠 있다.
 
 ## Next Tasks
 
@@ -248,15 +247,14 @@
 >
 > **★ 막고 있는 것이 없다(2026-09-09).** Slice 3 브리프 둘과 시행일까지 오너가 같은 날 답했다. **약관·방침은 버전 `1.0`·시행일 2026-09-08 로 시행 표기됐다** — 그래서 12번 랜딩 ①이 닫혔고 10번 동의 게이트의 입력(버전 문자열)도 확정이다.
 >
-> **★★ 1번은 승격 재검이다(2026-09-10 조건 셋 폐쇄됨).** 세션 49 산출물 둘의 독립 검증이 끝났고 조건 셋·하드닝 둘도 닫혔다 — 남은 것은 **다른 세션의 승격 재검**(변이 재적용으로 새 셀 다섯의 교합 확인 → 기록 판정 갱신). 그 뒤 Slice 4 다. 승격 전에 Slice 4 를 열지 말 것(파기 축은 되돌릴 수 없다).
+> **★★ 계정 탈퇴 축의 검증이 닫혔다(2026-09-10 승격 완료).** 조건 셋 폐쇄 → 승격 재검까지 끝나 **Slice 4(화면)가 1번**이다. 승격 대기 중 걸려 있던 *"Slice 4 를 열지 말 것"* 금지는 해제됐다. **승격 재검이 새 부채 하나를 남겼다** — 탈퇴 워커의 정지 배선 무셀(위 🔧 미수리 표). 셀 하나이고 같은 워커 축이라 **Slice 4 에 얹는다**.
 >
 > | 순서 | 무엇 | 왜 이 순서인가 |
 > |---|---|---|
-> | **1** | **★ 승격 재검**(검증 조건 셋은 폐쇄됐다) | 변이 MU-7·8·12~16 재적용 → 검증 기록 판정 갱신. **위 "세션 49 검증" 절이 착수점이다** — 무엇이 닫혔고 무엇이 부채로 남았는지 거기 있다 |
-> | 2 | **11번 계정 탈퇴 Slice 4~5** | 조건 폐쇄 뒤다. 다음은 **화면** — 요청·취소·남은 일수 배너 + **D3 의 관리자 잔여 정리**(ⓔ 로 여기에 왔다). 그 뒤 Slice 5(정책 §8 → §6 승격) |
-> | 3 | **12번 랜딩 + 10번 동의 게이트** | **한 창에서 본다.** 순서는 ~~① 약관 대괄호 넷 치환 + 시행 버전 문자열~~ **완료(2026-09-09, 버전 `1.0`)** ② `/terms`·`/privacy` + 푸터 ③ 랜딩 본문 ④ 동의 게이트. **Phase S-2(nginx 헤더)·AdSense 화면별 제어도 같은 창** — 광고가 랜딩·로그인에도 뜬다 |
-> | 4 | 2번 최종 저장·분석 6차 승격 재검증 | 셀은 이미 있고 MW-D 재적용만 남았다 |
-> | 5 | 6번 육안 확인 · 8번 확인용 계정 정리 | 오너·운영 데이터 축 |
+> | **1** | **★ 11번 계정 탈퇴 Slice 4~5** | 검증이 닫혀 열렸다. 다음은 **화면** — 요청·취소·남은 일수 배너 + **D3 의 관리자 잔여 정리**(ⓔ 로 여기에 왔다). **정지 배선 셀(H1')을 여기 얹는다.** 그 뒤 Slice 5(정책 §8 → §6 승격) |
+> | 2 | **12번 랜딩 + 10번 동의 게이트** | **한 창에서 본다.** 순서는 ~~① 약관 대괄호 넷 치환 + 시행 버전 문자열~~ **완료(2026-09-09, 버전 `1.0`)** ② `/terms`·`/privacy` + 푸터 ③ 랜딩 본문 ④ 동의 게이트. **Phase S-2(nginx 헤더)·AdSense 화면별 제어도 같은 창** — 광고가 랜딩·로그인에도 뜬다 |
+> | 3 | 2번 최종 저장·분석 6차 승격 재검증 | 셀은 이미 있고 MW-D 재적용만 남았다 |
+> | 4 | 6번 육안 확인 · 8번 확인용 계정 정리 | 오너·운영 데이터 축 |
 >
 > **결정이 만든 작은 후속 둘**(독립 슬라이스를 열 크기가 아니라 다음 슬라이스에 얹는다): **활동 로그 D1=ⓑ** — finalize 재전송이 활동 행을 안 남기게 한다(★ 분기가 생기므로 **행위 셀이 따로** 필요하다) · **문서 D1=ⓐ** — 휴면 디렉터리 셋을 인덱스에 *휴면* 으로 올린다(끊긴 `verification_briefs/2026-06-24` 가 그때 그래프에 붙는다).
 >
