@@ -142,7 +142,7 @@ HANDOFF Next Tasks 1번이 가리킨 **승격 재검**. 세션 51 이 닫은 조
 | MU-22 | under | `purge_account` 의 `self._users.delete(user.id)` → `pass` | 4 failed, 그중 `test_a_due_account_is_purged_end_to_end` — 새 셀 docstring 의 *"반대편은 그 셀이 받는다"* 가 참 |
 
 - 문서 가드(편집 뒤): `test_docs_indexes` + `test_repo_hygiene` **25 passed / 913 subtests**.
-- 전수는 **문서 편집 전** 값이 정본이다(위 3023/1/4117). 편집분은 셀을 안 늘리고 subtest 만 +2 한다(실측 귀속).
+- 전수 **두 번** 돌렸다: 문서 편집 전 `c1cb282` **3023/1/4117**(1618초) · 기록까지 전부 실린 `3644147` **3023/1/4119**(1534초). 편집분은 셀을 안 늘리고 subtest 만 +2 하며, 그 +2 는 워크트리 양단 귀속(305→306 · 606→607)과 **직접 측정이 일치**한다. **소요 1618 vs 1534 초는 같은 날 같은 머신 값이다** — 소요로 회귀를 판정하지 말 것.
 
 ### Next steps
 
