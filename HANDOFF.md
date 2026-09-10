@@ -5,7 +5,7 @@
 > **완료 서술도, 근거·측정치·발견 경위도 여기 쓰지 않는다** — `docs/daily_logs/`(상세) · `docs/system-contract-sot.md` 변경이력 · `CHANGELOG.md`(마일스톤) · `docs/verifications/`(독립 검증) · `docs/plans/*-decisions.md`(왜 그렇게 정했는가)에 있다. **여기 남는 것은 "지키지 않으면 깨지는 것"과 "어디를 보면 되는가"뿐이다.**
 > 편집 규칙은 `CLAUDE.md`·`AGENTS.md`의 "HANDOFF.md" 절에 있다. **~200줄을 넘으면 자가 검수**하고(그 뒤로는 ~100줄마다) 결과를 아래 한 줄로 남긴다.
 >
-> 마지막 자가 검수: **2026-09-08 · 304줄** — 절별로 현재 착수에 필요한 계약·함정·열린 일만 남는지 다시 확인하고, Slice 2 완료 서술은 작업 로그·SoT로 보내며 Next Tasks와 11번을 Slice 3 기준으로 다시 썼다.
+> 마지막 자가 검수: **2026-09-10 · 340줄** — "검증자에게" 절을 검증 결과(조건 셋)로 교체하고 Next Tasks 1번을 폐쇄 작업으로 다시 썼으며, 회귀 기준선·스택 health·이미지 공유 서비스 수의 낡은 세 줄을 갱신했다.
 
 ## 머신 · 기동
 
@@ -39,9 +39,9 @@
 
 **★ 배포 호스트가 실제로 쓰는 조합은 `docker-compose.yml` + `docker-compose.external-embedding.yml` 이다**(2026-09-06 컨테이너 생성 라벨 실측 — 위 표의 "외부 API 전용" 행이 가리키는 `external.yml` 이 아니다). **그 조합의 정상값은 healthy 8이 아니라 7이다** — `embedding` 이 profile 뒤로 가기 때문이다.
 
-**스택 health**: 정상은 **healthy 8**(application·**admin**·gateway·mongo·elasticsearch·embedding·chroma·frontend) + **healthcheck 없는 2**(worker·generation_worker — by design, "Up"이지 healthy 아님). **"전부 healthy"라고 쓰지 않는다.**
+**스택 health**: 정상은 **healthy 8**(application·**admin**·gateway·mongo·elasticsearch·embedding·chroma·frontend) + **healthcheck 없는 3**(worker·generation_worker·withdrawal_worker — by design, "Up"이지 healthy 아님). **"전부 healthy"라고 쓰지 않는다.**
 
-**이미지**: `application`·`admin`·`worker`·`generation_worker` 네 서비스가 **같은 `image: ai_writte_system-app` 태그**를 공유하므로 `docker compose build` 한 번이면 넷이 갱신된다. **새 서비스가 이 Dockerfile 을 쓰면 `image:` 를 함께 적는다.** 인증 백엔드 변경은 application, 로그인 UI 변경은 frontend rebuild가 필요하다.
+**이미지**: `application`·`admin`·`worker`·`generation_worker`·`withdrawal_worker` 다섯 서비스가 **같은 `image: ai_writte_system-app` 태그**를 공유하므로 `docker compose build` 한 번이면 다섯이 갱신된다. **새 서비스가 이 Dockerfile 을 쓰면 `image:` 를 함께 적는다.** 인증 백엔드 변경은 application, 로그인 UI 변경은 frontend rebuild가 필요하다.
 
 ## 지금의 계약
 
@@ -62,7 +62,7 @@
 - **Chapter/Scene 계층.** metadata-only Chapter + Scene(Draft), parent별 연속 순열, AI는 같은 장의 다음 Scene만. **legacy 평면 Draft는 CRUD·accept가 503 fail-closed(2층)이고 export·versions만 대피 경로로 200**이다 — 대피 경로를 막으면 이관 못 한 데이터가 갇힌다. 공개 `unit_kind` 는 제거됐고 `core_sot` 의 legacy migration 입력으로만 남아 있다.
 - **검토함 그룹 읽기면.** `identity_group` payload 6키 중 **`group_revision` 만 표시 전용이 아니다** — 그룹 승인 body `expected_revision` 의 **유일한 조달 경로**이고(409 detail 에 값이 있으나 **H3 가 detail 분기를 금지**한다) 값은 살아 있는 그룹의 것 그대로여야 한다(파생 금지). **`revision` 은 `set_group_status` 에서만 오른다** — `add_member` 는 그룹 행을 안 건드리므로 실전 값은 대개 `0` 이고, 그래서 **셀 픽스처를 0 으로 두면 상수 박기가 전건 통과한다**(신규 셀이 상태 전이 2회로 revision 2 ≠ 멤버 3 을 만드는 이유). **그룹 액션 결과 상자는 페이지 수준에 둔다** — 그룹 행 안에 두면 끝난 그룹이 목록에서 빠질 때 결과도 사라지는데, 거절 요약과 부분 실패는 **재조회를 넘겨 살아야 하는** 사실이다. `applied`/`skipped` 아닌 step 을 "반영"으로 세면 D4=A 의 200 이 성공으로 닫힌다.
 - **검색과 리랭커.** 벡터(Chroma/BGE-m3-ko — **다만 배포는 외부 임베딩이라 모델도 차원도 다르다**, 위 "머신 · 기동") + lexical(ES/nori)을 RRF(`1/(k+rank)`, k=60)로 융합하고 리랭커는 **그 뒤에** 걸린다. **★ 리랭커 표기는 세 조각이고 "있음" 한 단어로 쓰면 거짓이다** — *"외부 API 리랭커 붙일 수 있음(**기본 꺼짐**) · self-host 미구현 · **품질 평가 미실시**"*. `RERANK_API_URL` 이 비면 조립이 감싸지 않고 검색은 RRF까지만으로 동작한다. **실패는 열려 있다(fail-open) — 프로바이더가 아니라 *단계 전체*가 그렇다**(순열 아닌 응답·텍스트 투영 예외 포함). 다만 **조용히 삼키지 않는다**(`logging.WARNING` + `exc_info`) — fail-open이 조용하면 리랭킹이 영원히 no-op인 채로 아무도 모른다.
-- **회귀 기준선**: backend **test-mongo ON 2964 passed / 1 skipped / 4089 subtests**(2026-09-09 **알파·호스트**, 2268초 — 계정 탈퇴 Slice 0·1·2 + 검증 하드닝(인덱스 단면 가드·주석 정정) 포함, 커밋 `422e79c`. **소요는 머신-로컬 값이라 333초와 비교하지 말 것**). **★ 이 줄은 세 슬라이스 동안 뒤처져 있었다**(종전 2903 은 D4 커밋 `6eeedf5` 의 값이고 그 뒤 `285205b`·`8083a94`·`5759d9e` 가 7셀을 더했다) — **갱신은 셀을 더한 슬라이스의 몫**이고, 어긋났을 때 유도하는 법은 `git worktree add --detach <경로> <리비전>` 뒤 양쪽에서 `python3 -m pytest --collect-only -q`(수집 수 = passed + skipped)다. 프런트는 **467 passed / 38 files**(2026-09-07, 오너 관측 2건 수정 포함). **전수 1실패를 만나면 위 미수리 표의 *알려진 플레이크* 부터 볼 것.** **전수 판정은 `passed` 가 아니라 `skip` 수를 먼저 본다 — `skip 1 = live Chroma` 하나뿐이고, 2 이상이면 호스트에 빠진 패키지가 있다는 뜻이다**(함정 절 "호스트 도구 공백"). **★ subtest 수가 하루 안에 3189 → 7881 → 3789 로 출렁였다 — 커버리지 변화가 아니다.** 위생 가드가 처음엔 (파일×금지값)마다 subtest 를 냈다가(단독 4665), 검증 조건 B1 을 닫으면서 **스캔을 회계로 바꿔** 위반이 있을 때만 subtest 를 낸다(단독 572). 파일별 검사는 그대로 돌고 **전건 방문 여부를 셀이 직접 단정하므로 오히려 강해졌다** — subtest 수를 커버리지 대리지표로 읽지 말 것. **★ 최상위 [`README.md`](README.md) 절차 표의 `N passed / N subtests` 는 아무 가드도 안 잡는다** — 기준선을 갱신하는 슬라이스가 그 한 줄도 함께 고친다.
+- **회귀 기준선**: backend **test-mongo ON 3017 passed / 1 skipped / 4114 subtests**(2026-09-10 **알파·호스트**, 2171초 — 세션 49 산출물 독립 검증 트리, 커밋 `dec3808`. **소요는 머신-로컬 값이라 다른 머신 값과 비교하지 말 것**). 세션 49 의 3017/1/4113(`ad8e86a`)과 셀·skip 일치 — **subtest +1은 재현 스크립트 파일 1건이 `test_repo_hygiene` 회계에 들어간 것**(임시 워크트리 양단 실측으로 귀속). **갱신은 셀을 더한 슬라이스의 몫**이고, 어긋났을 때 유도하는 법은 `git worktree add --detach <경로> <리비전>` 뒤 양쪽에서 `python3 -m pytest --collect-only -q`(수집 수 = passed + skipped)다. 프런트는 **467 passed / 38 files**(2026-09-07, 오너 관측 2건 수정 포함). **전수 1실패를 만나면 위 미수리 표의 *알려진 플레이크* 부터 볼 것.** **전수 판정은 `passed` 가 아니라 `skip` 수를 먼저 본다 — `skip 1 = live Chroma` 하나뿐이고, 2 이상이면 호스트에 빠진 패키지가 있다는 뜻이다**(함정 절 "호스트 도구 공백"). **★ subtest 수는 커버리지 대리지표가 아니다** — 위생 가드는 위반이 있을 때만 subtest 를 내고 파일 회계는 조용히 돈다(파일 하나를 더하면 subtest 가 +1 될 수 있다). **★ 최상위 [`README.md`](README.md) 절차 표의 `N passed / N subtests` 는 아무 가드도 안 잡는다** — 기준선을 갱신하는 슬라이스가 그 한 줄도 함께 고친다.
 
 ## 표준 제약 (Active Decisions)
 
@@ -233,25 +233,15 @@
 | Phase 8.6 결제 seam | 결제 도입이 계기일 때(오너: *"당장은 안 붙일 것 같다"*) |
 | 관측 화면 확장 | **Phase 9 F1(커서 페이징)과 같은 트리거를 쓴다** — *"'최근 100건' 문구 아래가 궁금해지는 순간, 특히 하루 저작 뒤 타임라인이 그날 하루로 다 차면"*([`09-1-…-decisions.md`](docs/plans/09-1-activity-timeline-screen-decisions.md) §"나중에 여는 문"). **★ 둘을 따로 열지 않는다 — 먼저 여는 쪽이 페이징 관례를 정하고 다른 쪽이 따른다.** 무엇을 더하든 **`React.lazy` 경계 안**. *(2026-09-06 정정: 종전 트리거 "API에 시간 창 `?since=` 이 생긴 뒤"는 **순환이었다** — `?since=` 는 이 작업 자신의 API 축이라 그것을 만들어 줄 다른 작업이 없다. 실측: [`observability.py`](services/application/app/routers/observability.py) 의 KPI endpoint 는 `project_id` 하나만 받는다)* |
 
-## 검증자에게 — 세션 49 산출물 (2026-09-09, 미검증)
+## 세션 49 검증 결과 — 조건 셋 (2026-09-10, 조건부 합격)
 
-> **다음 작업자가 여기서 시작한다(오너 지시).** 절차는 [`docs/guides/verification.md`](docs/guides/verification.md).
-> **★ 작업 트리가 깨끗하고 전부 커밋돼 있다** — `git checkout` 을 쓸 수 있다(누군가의 미커밋 트리를 감사하는 경우가 **아니다**). 그래도 **변이 전에 `git status --short` 가 비었는지 먼저 본다**(§6). 세션 49 의 커밋은 `b6c5aa5`~ 이고 전수를 잰 트리는 `ad8e86a` 다.
+기록: [`docs/verifications/2026-09-10/account_withdrawal_slice3_legal_effective.md`](docs/verifications/2026-09-10/account_withdrawal_slice3_legal_effective.md). **런타임은 실 mongod 전 경로에서 무결하다**(재현 스크립트 21/21 · 실 개발 DB `_id` 충돌 0건 · compose 최소 env로 조립 성립) — 구현자 신고 약점 ①②는 닫혔고 ③은 수용. 남은 것은 문서 둘·잠금 하나다:
 
-| 대상 | SoT | 무엇이 새로 생겼나 |
-|---|---|---|
-| **계정 탈퇴 Slice 3** | v1.8.51 | `deletion/{account_purge,account_axis_sweep,user_name_history,user_name_history_mongo}.py` · `auth` 의 `purge_started_at`+3 seam · `scripts/account_withdrawal_worker.py` · `scripts/account_purge_reconciler.py` · compose `withdrawal_worker` |
-| **약관·방침 시행 표기** | v1.8.50 | `docs/legal/*` 값 넷·버전 `1.0`·시행일 · `tests/test_service_policy_contract.py` 가드 둘 |
+1. **양 법률 문서 부칙의 `draft-0 (미시행)` 잔류** — 머리말(`시행 — 2026-09-08 · 버전 1.0`)과 자기모순. 결합 가드가 옛 상태줄의 정확한 문구만 봐서 부칙 표기는 새 간다 — `draft-0` 토큰 잔류도 보게 조이는 것을 권장.
+2. **약관 제5조 1항 4,000자 → 6,000자**(`env.py::DRAFT_RAW_TEXT_MAX_CHARS`, 상향 `97bc149` 미반영 — 다른 모든 숫자는 일치).
+3. **파기 순서 4→5단계(계정 축 스윕→계정 행) 잠금 셀** — 순서 교환 변이(MU-7)가 현재 38셀 전건 초록. 순서가 바뀐 채 스윕이 실패하면 `purge_started_at` 표식이 사라져 **reconciler가 잔류를 영영 못 찾는다**. 처방: 스위퍼 실패 픽스처에서 계정 행 생존 단정 한 셀.
 
-**구현자가 스스로 신고하는 약한 자리 — 여기부터 보면 빠르다.**
-
-1. **★ 파기 경로는 실 Mongo 로 한 번도 안 돌았다.** 셀은 전부 fake/in-memory 이고, 이 저장소는 그 조합이 **배포에서만 터지는** 계열을 이미 여러 번 겪었다(naive→UTC 재라벨링·같은-이름-다른-키 인덱스 code=86). 특히 `MongoAccountAxisSweeper` 는 `list_collection_names()` 전건에 질의를 던지는데 **실 DB 에서 그 목록이 무엇인지 재 본 적이 없다.**
-2. **`_id` 스윕의 안전 근거가 "user id 접두" 하나에 걸려 있다.** 셀이 접두를 잠그지만, **다른 축의 `_id` 가 미래에 그 모양이 될 수 있는지**는 아무도 안 셌다. 실 DB 로 *"user id 와 같은 `_id` 를 가진 문서가 `users` 밖에 있는가"* 를 한 번 재는 것이 이 슬라이스에서 가장 값이 큰 확인일 수 있다.
-3. **`purge_started_at` 이 붙은 계정을 되살릴 통로가 스크립트뿐이다.** 관리자 화면은 Slice 4 이고(오너 ⓔ), 그때까지 실패한 계정은 **사람이 스크립트를 부르지 않으면 영영 그대로**다. 그 지위가 받아들일 만한지는 검증자 판단.
-4. **변이가 이 세션에서 두 번 사각을 열었다**(MU-1·MU-3, 둘 다 처음에 통과). 그 계열이 더 있는지 — 특히 **새로 넣은 셀 자신**에 변이를 걸어 볼 것. 2026-09-07 세션 25 가 같은 자리에서 새 셀이 새는 것을 잡았다.
-5. **약관 축**: 시행 전제 둘(파기 데몬·동의 게이트)이 미구현인 채 시행 표기됐다 — **오너가 알고 고른 것**이고(*"포트폴리오다"*) 문서가 그 사실을 적는다. 검증할 것은 그 판단이 아니라 **문서가 실제로 그렇게 적고 있는지**와 **핀 셀이 값을 잡는지**다.
-
-**기준선**: 백엔드 전수 **3017 passed / 1 skipped / 4113 subtests**(호스트, `ad8e86a`, 2469초, test-mongo ON). 증분 전건 귀속은 `daily_logs/2026-09-09/work_log.md` 세션 49.
+비차단 하드닝 6(stop_check 경계 정지 무셀 · one-shot apply 무셀 · work_log auth 묶음 측정 262/1207 재현 불가(실측 241/1205) 등)은 기록 참조. **개발 스택 재생성 필요** — 현 컨테이너들이 Slice 3 이전 상태라 `withdrawal_worker`가 안 떠 있다.
 
 ## Next Tasks
 
@@ -259,12 +249,12 @@
 >
 > **★ 막고 있는 것이 없다(2026-09-09).** Slice 3 브리프 둘과 시행일까지 오너가 같은 날 답했다. **약관·방침은 버전 `1.0`·시행일 2026-09-08 로 시행 표기됐다** — 그래서 12번 랜딩 ①이 닫혔고 10번 동의 게이트의 입력(버전 문자열)도 확정이다.
 >
-> **★★ 1번은 새 구현이 아니라 검증이다(오너 지시 2026-09-09).** 세션 49 가 낸 것 둘(**계정 탈퇴 Slice 3** · **약관·방침 시행 표기**)이 **독립 검증을 아직 안 받았다.** 이 저장소의 관례는 슬라이스 종결 → 독립 검증 → 조건 폐쇄이고, 지금 그 사이에 서 있다. **다음 세션은 여기서 시작한다** — 절차는 [`docs/guides/verification.md`](docs/guides/verification.md).
+> **★★ 1번은 검증 폐쇄다(2026-09-10 검증 완료 — 조건부 합격).** 세션 49 산출물 둘의 독립 검증이 끝났고 런타임은 무결 — 남은 것은 **위 "세션 49 검증 결과" 절의 조건 셋**(문서 둘·잠금 하나, 각각 소규모 커밋). 폐쇄 후 승격 재검(변이 재적용)을 거쳐 Slice 4 로 간다. 조건을 닫기 전에 Slice 4 를 열지 말 것(파기 축은 되돌릴 수 없다).
 >
 > | 순서 | 무엇 | 왜 이 순서인가 |
 > |---|---|---|
-> | **1** | **★ 세션 49 산출물 독립 검증** | **Slice 3(파기 데몬·두 규칙 스윕·사용자명 묘비, SoT v1.8.51)** 과 **약관 시행 표기(v1.8.50)**. 검증 없이 Slice 4(화면)로 넘어가면 **화면이 아직 안 잡힌 계약 위에 올라선다** — 파기 축은 되돌릴 수 없어 그 비용이 특히 크다. **아래 "검증자에게" 절이 착수점이다** |
-> | 2 | **11번 계정 탈퇴 Slice 4~5** | 검증이 끝난 뒤다. 다음은 **화면** — 요청·취소·남은 일수 배너 + **D3 의 관리자 잔여 정리**(ⓔ 로 여기에 왔다). 그 뒤 Slice 5(정책 §8 → §6 승격) |
+> | **1** | **★ 검증 조건 셋 폐쇄 → 승격 재검** | 부칙 `draft-0` 잔류 정리 · 제5조 4,000자→6,000자 · 파기 순서 4→5단계 잠금 셀. **위 "세션 49 검증 결과" 절이 착수점이다** — 처방·이유가 거기 있다 |
+> | 2 | **11번 계정 탈퇴 Slice 4~5** | 조건 폐쇄 뒤다. 다음은 **화면** — 요청·취소·남은 일수 배너 + **D3 의 관리자 잔여 정리**(ⓔ 로 여기에 왔다). 그 뒤 Slice 5(정책 §8 → §6 승격) |
 > | 3 | **12번 랜딩 + 10번 동의 게이트** | **한 창에서 본다.** 순서는 ~~① 약관 대괄호 넷 치환 + 시행 버전 문자열~~ **완료(2026-09-09, 버전 `1.0`)** ② `/terms`·`/privacy` + 푸터 ③ 랜딩 본문 ④ 동의 게이트. **Phase S-2(nginx 헤더)·AdSense 화면별 제어도 같은 창** — 광고가 랜딩·로그인에도 뜬다 |
 > | 4 | 2번 최종 저장·분석 6차 승격 재검증 | 셀은 이미 있고 MW-D 재적용만 남았다 |
 > | 5 | 6번 육안 확인 · 8번 확인용 계정 정리 | 오너·운영 데이터 축 |
