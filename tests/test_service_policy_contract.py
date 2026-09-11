@@ -68,6 +68,24 @@ _ADDENDUM_VERSION_LINES = {
 #: 시행 전 판본의 버전 문자열. 문서 어디에도 남아 있으면 안 된다.
 _DRAFT_VERSION = "draft-0"
 
+#: **공개면에 가면 안 되는 편집 어휘** (오너 결정 2026-09-11 = 갈래 ⓑ).
+#:
+#: 약관·방침은 이제 프런트에도 실려 **회원이 읽는 화면**이 된다. 바이트 대조 가드는
+#: 두 사본이 *같은가* 만 알고 *무엇이 실렸는가* 를 모르므로, 개발 과정의 서술이
+#: 문서로 되돌아와도 전 셀이 초록이었다(독립 검증 H2 · 변이 ML-10 실측).
+#:
+#: 고른 어휘는 **저장소 안에서만 뜻이 있는 말**이다 — 회원에게는 뜻이 없거나,
+#: 약관이 제 권위를 스스로 깎는 말이다. 법률 문장에 정상적으로 나올 수 없는
+#: 것만 담아 거짓양성을 피한다(`세션` 처럼 본문이 실제로 쓰는 말은 넣지 않는다).
+_EDITORIAL_VOCABULARY = (
+    "오너", "브리프", "HANDOFF", "SoT", "work_log", "커밋",
+    "저장소", "포트폴리오", "구현 중", "미착수",
+)
+
+#: 렌더러가 공개면에서 걷어내는 머리말 줄(`frontend/src/legal/markdown.tsx` 와 같은 접두).
+#: 여기는 저장소 경로를 가리켜도 되는 유일한 자리라 어휘 검사에서 빼고 센다.
+_STRIPPED_PREFIX = "근거:"
+
 
 def _rows() -> list[tuple[str, str, list[tuple[str, str]]]]:
     """문서에서 정본 포인터를 가진 표 행만 걷는다."""
@@ -362,6 +380,45 @@ class LegalDraftProcuredValuesTest(unittest.TestCase):
                     f"{name}: 시행일 대괄호와 미시행 표식이 갈라졌다 — 둘은 함께 "
                     "움직인다",
                 )
+
+    def test_the_public_documents_carry_no_editorial_vocabulary(self):
+        """공개면에 **개발 과정의 말**이 실리지 않는가 (오너 결정 2026-09-11, 갈래 ⓑ).
+
+        **왜 필요한가 — 바이트 가드가 못 보는 축이다.** 약관·방침은 프런트에도 실려
+        회원이 읽는 화면이 되었고, 프런트 사본과 정본이 같은지는
+        `frontend/src/legal/legalSource.test.ts` 가 바이트로 잠근다. 그러나 그 가드는
+        *"두 사본이 같은가"* 만 말한다 — 편집 메모를 **양쪽에 일관되게** 되돌리면
+        전 셀이 초록이고(독립 검증 H2, 변이 ML-10 실측) 회원은 *"랜딩 페이지 푸터에도
+        싣는다(오너 2026-09-07)"* 같은 운영 지시를 약관에서 읽는다. 실제로 한 번
+        실려 있었고 세션 58 이 손으로 걷어냈다.
+
+        **오너 결정(2026-09-11)은 갈래 ⓑ** — 머리말 고지에서 오너·날짜 서술을 걷고
+        그 뒤 어휘를 금지한다. 그래서 두 머리말은 이제 *"시행일 2026-09-08 · 버전
+        `1.0` 로 시행합니다"* 만 말하고, **왜 그렇게 정했는지는
+        [`docs/legal/README.md`](../docs/legal/README.md) 와 브리프가 든다**(정본은
+        그쪽이고 여기는 회원이 읽는 면이다).
+
+        **양방향**:
+        - under-strict — 편집 서술이 어느 한 문서로 되돌아오면 그 문서·그 어휘
+          이름으로 실패한다(ML-10 이 더는 조용하지 않다).
+        - over-strict — 본문이 정상적으로 쓰는 말(`세션`·`관리자`·`기록`)은 목록에
+          없다. 그리고 저장소 경로를 가리켜도 되는 `근거:` 머리말 줄은 **렌더러가
+          공개면에서 걷는 줄**이라 같은 접두로 빼고 센다 — 빼지 않으면 이 셀이
+          화면에 없는 것을 문다.
+        """
+        for name in _DRAFTS:
+            text = (_LEGAL_MAP.parent / name).read_text(encoding="utf-8")
+            public = "\n".join(
+                line for line in text.splitlines()
+                if not line.startswith(_STRIPPED_PREFIX)
+            )
+            for word in _EDITORIAL_VOCABULARY:
+                with self.subTest(document=name, word=word):
+                    self.assertNotIn(
+                        word, public,
+                        f"{name}: 회원이 읽는 면에 개발 과정의 말 {word!r} 이 "
+                        "실렸다 — 그 서술의 자리는 docs/legal/README.md 다",
+                    )
 
 
 if __name__ == "__main__":  # pragma: no cover
