@@ -6,6 +6,7 @@ import { DraftEditor } from "./drafts/DraftEditor";
 import { ProjectList } from "./projects/ProjectList";
 import { ProjectSettingsPage } from "./projects/ProjectSettingsPage";
 import { AccessLogPage } from "./projects/AccessLogPage";
+import { LegalPage } from "./legal/LegalPage";
 import { PersonalHubPage } from "./me/PersonalHubPage";
 import { SceneNotesPage } from "./notes/SceneNotesPage";
 import { ReviewInbox } from "./review/ReviewInbox";
@@ -26,7 +27,29 @@ const AdminUserDetail = lazy(async () => ({
   default: (await import("./admin/AdminUserDetail")).AdminUserDetail,
 }));
 
+/**
+ * 라우트는 **두 구간**이다 (브리프 `landing-page-scope`, 착수 순서 ②).
+ *
+ * 약관·방침은 **가입하기 전에** 읽어야 하는 문서라 세션 확인 앞에 선다 — 그래서
+ * `AuthGate` 가 앱 전체가 아니라 **보호 구간만** 감싼다(9.2 P6=ⓐ 가 "자리만
+ * 확보"라고 예고한 모양이다). 보호 구간은 `path="*"` 한 자리로 남아 있어
+ * `AuthGate` 는 이동할 때마다 다시 마운트되지 않는다 — 세션 확인이 라우트마다
+ * 되풀이되면 화면마다 "세션을 확인하는 중…" 이 번쩍인다.
+ *
+ * **공개 라우트가 느는 것은 API 가 느는 것이 아니다** — 공개 API 표면은 그대로
+ * `/health`·`/auth/login`·`/auth/signup`·`/auth/logout` 넷이다.
+ */
 export function App() {
+  return (
+    <Routes>
+      <Route path="/terms" element={<LegalPage name="terms" />} />
+      <Route path="/privacy" element={<LegalPage name="privacy" />} />
+      <Route path="*" element={<ProtectedRoutes />} />
+    </Routes>
+  );
+}
+
+function ProtectedRoutes() {
   return (
     <AuthGate>
       <Routes>

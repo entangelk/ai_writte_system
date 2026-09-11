@@ -148,9 +148,17 @@ const MIGRATED: Record<string, string> = {
   // 10.4 — 화면 제목은 전 표면이 한 계단을 쓴다. 종전에는 `.page-heading h1`
   // clamp(2.8~5.4rem) · `.project-heading h1` clamp(2.5~4.7rem) · `.editor-heading h1`
   // 셋으로 갈려 있었고, 앞의 둘은 첫 화면의 절반을 먹었다(실측 근거는 styles.css).
-  ".page-heading h1, .workspace-page > h1": "title",
+  ".page-heading h1, .workspace-page > h1, .legal-document > h1": "title",
   // 로그인은 작업 화면이 아니라 정문이라 한 계단 위를 쓴다 — 램프 밖으로 나가지는 않는다.
   ".login-heading h1": "display",
+
+  // 약관·방침 페이지와 공개 푸터(브리프 landing-page-scope D2=ⓐ). 읽는 글이라
+  // 본문은 UI 본문 계단(1rem)을 상속하고, **조 제목과 보조 표면만** 계단을 고른다.
+  ".legal-document h2": "subhead",
+  ".legal-document .legal-meta": "small",
+  ".legal-notice": "small",
+  ".legal-table": "small",
+  ".legal-footer": "small",
 };
 
 describe("타이포 축 (Phase 10 Slice 10.3)", () => {

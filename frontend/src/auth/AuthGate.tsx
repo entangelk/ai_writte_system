@@ -3,6 +3,7 @@ import {
 } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { Link } from "react-router";
+import { LegalFooter } from "../legal/LegalFooter";
 import { WithdrawalBanner, WithdrawalProvider } from "../me/withdrawal";
 import {
   ApiError,
@@ -173,6 +174,7 @@ function AuthStatus({ children }: { children: React.ReactNode }) {
         <p className="eyebrow">에-라잇</p>
         {children}
       </section>
+      <LegalFooter />
     </main>
   );
 }
@@ -409,6 +411,7 @@ function LoginScreen({
             </button>
           </form>
         </section>
+        <LegalFooter />
       </main>
     );
   }
@@ -584,6 +587,7 @@ function LoginScreen({
           </form>
         )}
       </section>
+      <LegalFooter />
     </main>
   );
 }
