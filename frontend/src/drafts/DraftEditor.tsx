@@ -646,6 +646,37 @@ export function DraftEditor() {
             <span>{isFinalized ? latestSnapshotId === draft.finalized_snapshot_id ? "최종 저장됨" : "최종 저장 후 수정됨" : "초안"}</span>
             <span>검토 대기 {pendingReviewCount === null ? "—" : `${pendingReviewCount}건`}</span>
           </div>
+          {/* 모바일에서는 원고 앞의 도구 줄, 데스크톱에서는 고정 우측 띠. */}
+          {projectId !== undefined && draftId !== undefined && (
+            <nav
+              className="rail-dock"
+              ref={dockRef}
+              role="tablist"
+              aria-label="집필 도구 선택"
+              aria-hidden={drawerOpen}
+            >
+              {TOOL_PANELS.map((panel) => (
+                <button
+                  key={panel}
+                  type="button"
+                  role="tab"
+                  data-panel={panel}
+                  aria-selected={activePanel === panel}
+                  onClick={() => selectPanel(panel)}
+                >
+                  {toolPanelLabel(panel)}
+                  {panel === "writing" && unseenGenerationJobs > 0 && (
+                    <span
+                      className="tab-badge"
+                      aria-label={`백그라운드 생성 완료 ${unseenGenerationJobs}건`}
+                    >
+                      {unseenGenerationJobs}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </nav>
+          )}
           <div className="split-workspace">
             <div className="editor-canvas">
               {readOnly && (
@@ -791,39 +822,9 @@ export function DraftEditor() {
             </div>
           </div>
 
-          {/* 오버레이 드로어(2026-08-26): 레일은 그리드 밖 고정 요소다. 독(세로 탭
-              띠)은 항상 노출되어 닫힘 상태에서도 탭 전환·완료 배지에 닿게 하고,
-              드로어는 `panel` param 으로 열린 탭을 정한다. */}
+          {/* 드로어는 마운트를 유지하고 `panel` param으로 열린 탭을 정한다. */}
           {projectId !== undefined && draftId !== undefined && (
             <>
-              <nav
-                className="rail-dock"
-                ref={dockRef}
-                role="tablist"
-                aria-label="집필 도구 선택"
-                aria-hidden={drawerOpen}
-              >
-                {TOOL_PANELS.map((panel) => (
-                  <button
-                    key={panel}
-                    type="button"
-                    role="tab"
-                    data-panel={panel}
-                    aria-selected={activePanel === panel}
-                    onClick={() => selectPanel(panel)}
-                  >
-                    {toolPanelLabel(panel)}
-                    {panel === "writing" && unseenGenerationJobs > 0 && (
-                      <span
-                        className="tab-badge"
-                        aria-label={`백그라운드 생성 완료 ${unseenGenerationJobs}건`}
-                      >
-                        {unseenGenerationJobs}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </nav>
               <aside
                 className="workspace-rail rail-drawer"
                 ref={drawerRef}

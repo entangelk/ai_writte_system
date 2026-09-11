@@ -1091,6 +1091,25 @@ main {
   background: var(--tint-accent-soft);
 }
 
+/* 태블릿·모바일에서는 도구 줄이 원고 앞에서 자기 높이를 차지한다.
+   고정/스티키 배치는 긴 원고를 스크롤할 때 다시 본문을 가리므로 쓰지 않는다. */
+@media (max-width: 48rem) {
+  .rail-dock {
+    position: static;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin-bottom: var(--space-4);
+    border-right: 1px solid var(--border-hairline);
+    border-radius: var(--radius-md);
+    box-shadow: none;
+    transform: none;
+  }
+
+  .rail-dock button {
+    min-width: 0;
+    padding: var(--space-2) var(--space-1);
+  }
+}
+
 .tab-badge {
   display: inline-block;
   min-width: 1.15rem;
@@ -2120,6 +2139,10 @@ main {
 }
 
 @media (max-width: 42rem) {
+  .rail-dock {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .app-header,
   main {
     padding-right: 1.1rem;
