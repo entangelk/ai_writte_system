@@ -266,7 +266,6 @@ export function DraftList() {
             {chapters.map((chapter, chapterIndex) => <li className="chapter-group" key={chapter.id}>
               <div className="resource-row chapter-row">
                 <strong>{chapter.title}</strong>
-                <span className="status-badge">장 순서 {chapter.position}</span>
                 {chapter.archived && <span className="status-badge">보관됨</span>}
                 <span className="order-controls">
                   {!project.archived && <>
@@ -298,7 +297,6 @@ export function DraftList() {
                       {" · "}
                       <span>{sceneAnalysisLabel(scene)}</span>
                     </span>
-                    <span className="status-badge">장면 순서 {scene.position}</span>
                     {scene.archived && <span className="status-badge">보관됨</span>}
                     <span className="order-controls">
                       {!project.archived && !chapter.archived && <>

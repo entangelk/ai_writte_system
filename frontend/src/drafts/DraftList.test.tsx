@@ -60,8 +60,6 @@ describe("DraftList Chapter→Scene hierarchy", () => {
     expect(screen.getByRole("link", { name: "첫 장면" })).toHaveAttribute(
       "href", "/projects/p1/drafts/s1",
     );
-    expect(screen.getByText("장 순서 1")).toBeInTheDocument();
-    expect(screen.getByText("장면 순서 1")).toBeInTheDocument();
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       "/api/projects/p1", "/api/projects/p1/chapters",
     ]);

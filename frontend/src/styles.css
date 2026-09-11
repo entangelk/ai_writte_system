@@ -1416,10 +1416,31 @@ main {
   font-size: 1.22rem;
 }
 
+/* W3: 상태 배지는 텍스트가 아니라 칩이다 — "(보관됨)" 괄호 없이 형태로 구분하고
+   색만으로 상태를 말하지 않게 배경을 준다. */
 .status-badge {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  background: var(--tint-accent-weak);
   color: var(--text-muted);
-  font-size: 0.74rem;
+  font-size: var(--type-micro);
   white-space: nowrap;
+}
+
+/* W3: 좁은 화면에서 목록 행은 두 줄 — 첫 줄에 제목(링크), 둘째 줄에 상태·배지·
+   컨트롤. 한 줄에 다 담으면 320px에서 가로로 넘친다(2026-09-12 실측).
+   메모 행(.note-row)은 자체 레이아웃이 있어 제외한다. */
+@media (max-width: 48rem) {
+  .resource-row:not(.note-row) {
+    flex-wrap: wrap;
+    row-gap: var(--space-2);
+  }
+
+  .resource-row:not(.note-row) > .resource-link,
+  .chapter-row > strong {
+    flex-basis: 100%;
+  }
 }
 
 .order-controls {
@@ -1599,6 +1620,9 @@ main {
 
 .scene-creation-form input {
   flex: 1;
+  /* W3: flex 항목의 기본 min-width:auto 가 320px에서 줄어들기를 막아 폼이
+     뷰포트를 17px 넘겼다(2026-09-12 실측). */
+  min-width: 0;
 }
 
 .scene-list {

@@ -70,6 +70,8 @@ const MIGRATED: Record<string, string> = {
   ".review-preview-fields dt": "micro",
   ".review-detail-link": "micro",
   ".scene-status": "micro",
+  // W3(2026-09-12): 상태 배지를 칩으로 바꾸며 0.74rem 리터럴에서 계단으로 옮김.
+  ".status-badge": "micro",
 
   ".workspace-status": "meta",
   ".source-jump-notice": "meta",

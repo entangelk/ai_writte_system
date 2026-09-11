@@ -52,7 +52,8 @@ describe("ProjectList", () => {
       "/projects/p1",
     );
     // Archived projects are readable but marked (Core SOT: archive = read + write 409).
-    expect(screen.getByText("(보관됨)")).toBeInTheDocument();
+    // W3: 괄호 텍스트가 아니라 칩 배지가 구분을 맡는다.
+    expect(screen.getByText("보관됨")).toBeInTheDocument();
   });
 
   it("calls the single-origin /api path, never a cross-origin URL", async () => {

@@ -94,7 +94,7 @@ export function ProjectList() {
                 <span>{project.name}</span>
                 <span className="row-arrow" aria-hidden="true">→</span>
               </Link>
-              {project.archived && <span className="status-badge">(보관됨)</span>}
+              {project.archived && <span className="status-badge">보관됨</span>}
             </li>
           ))}
         </ul>
