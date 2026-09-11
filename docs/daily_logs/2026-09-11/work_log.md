@@ -302,9 +302,11 @@ HANDOFF Next Tasks 2번(랜딩 + 동의 게이트)의 **착수 순서 ②** 를 
 ### Verification
 - 스타일 가드 5파일 23 passed (89.38초): designTokens/typeScale/pageLayout/scratchPadCss/chartColors.
 - `npm run build`: tsc 및 Vite 성공, CSS 45.63kB(gzip 8.30kB).
-- 문서/위생/팔레트 출처 가드 재실행: 31 passed / 1018 subtests passed (73.28초). 마지막 기록 반영 후 재검 예정.
+- 문서/위생/팔레트 출처 가드 재실행: 31 passed / 1018 subtests passed (73.28초). 마지막 기록 반영 후 31 passed / 1018 subtests passed (52.36초) 재확인.
 - 실제 React 앱 + CDP 검증용 API fixture: 1440×900·768×1024·390×844, 긴 한국어 원고·빈 원고·읽기 전용·드로어 열림. 외부 요청 차단, 미매핑 API 0, 런타임 예외 0. 가로 넘침 없음. 활성 창의 본문 포커스 색 확인. 상세 치수는 Phase W 문서.
-- 프론트 전체 회귀 진행 중. 운영 API·유료 생성·소프트 키보드·장시간 피로도는 검증하지 않았다.
+- 프론트 전체 회귀: **477 passed / 1 failed / 41 files · EXIT=1** (802.93초). 실패는 `App routes > sends an administrator to the console when they log in at the root` (`App.test.tsx:246`), 실패 DOM은 `관리 화면을 불러오는 중…`인 Suspense fallback이다. CSS는 main.tsx에서만 로드되고 이 테스트는 App을 직접 import하므로 이번 스타일 변경과의 직접 연결은 없다. 지연 import 타이밍 문제로 추정하며 같은 파일 단독 재검은 **29 passed / EXIT=0**(67.80초, 해당 셀 562ms)였다. 전수 통과로 합산하지 않으며 별도 타이밍 부채로 HANDOFF에 추적한다. 운영 API·유료 생성·소프트 키보드·장시간 피로도는 검증하지 않았다.
+
+- W1 체크포인트 `dede62b`. 최종 문서 반영 후 diff/상태 동기화를 검사하고 기록 커밋한다.
 
 ### Next steps
 - W1a 모바일 도구 가림부터 수정하고, W2 한글 타이포를 진행한다. 후속 작업자는 Phase W의 해당 슬라이스 지침과 기존 회귀를 먼저 읽는다.
