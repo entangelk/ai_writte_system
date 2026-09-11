@@ -30,6 +30,11 @@ const IN_APP_LINKS: Record<string, string> = {
  * 머리말에서 걷어내는 줄. `근거:` 는 저장소 경로 둘을 가리키는 **편집용 메타**라
  * 읽는 사람에게는 뜻이 없다. `상태:`·`작성:`·`버전:` 은 남긴다 — 검토 전이라는
  * 사실과 판본이 독자에게 필요한 정보다.
+ *
+ * **★ 둘 다 머리말에만 적용된다**(독립 검증 H3, 2026-09-11). 종전에는 문서 **전체**를
+ * 훑어서, 본문 한가운데 `근거:` 로 시작하는 줄이 오면 **조용히 사라졌다** — 약관
+ * 조항이 통째로 없어지는데 아무것도 말하지 않는다. 접두 규칙은 제 자리(머리말)
+ * 안에서만 산다.
  */
 const EDITORIAL_PREFIX = "근거:";
 
@@ -84,10 +89,28 @@ function startsBlock(line: string): boolean {
     ORDERED_ITEM.test(line);
 }
 
+/**
+ * 머리말의 끝. 두 문서는 제목·메타·고지 상자 뒤에 수평선을 놓고 본문을 시작한다.
+ * 수평선이 없는 문서라면 첫 조항 제목이 경계다.
+ */
+function headEnd(lines: string[]): number {
+  const rule = lines.findIndex((line) => line.startsWith("---"));
+  if (rule !== -1) {
+    return rule;
+  }
+  const clause = lines.findIndex((line) => line.startsWith("## "));
+  return clause === -1 ? lines.length : clause;
+}
+
 /** 마크다운 본문을 엘리먼트 목록으로 바꾼다. 블록 단위로 한 번만 훑는다. */
 export function renderLegalDocument(source: string): ReactNode[] {
-  const lines = source.split("\n")
+  const raw = source.split("\n");
+  const boundary = headEnd(raw);
+  const head = raw.slice(0, boundary)
     .filter((line) => !line.startsWith(EDITORIAL_PREFIX));
+  const lines = [...head, ...raw.slice(boundary)];
+  /** 접두 규칙이 사는 범위 — 걷어낸 뒤의 머리말 길이다. */
+  const headLines = head.length;
   const blocks: ReactNode[] = [];
   let cursor = 0;
 
@@ -232,7 +255,7 @@ export function renderLegalDocument(source: string): ReactNode[] {
       continue;
     }
 
-    if (METADATA_LINE.test(line)) {
+    if (cursor < headLines && METADATA_LINE.test(line)) {
       blocks.push(
         <p key={key} className="legal-meta">{inline(line, key)}</p>,
       );
@@ -251,7 +274,7 @@ export function renderLegalDocument(source: string): ReactNode[] {
     cursor += 1;
     while (
       cursor < lines.length && !startsBlock(lines[cursor]) &&
-      !METADATA_LINE.test(lines[cursor])
+      !(cursor < headLines && METADATA_LINE.test(lines[cursor]))
     ) {
       paragraph.push(lines[cursor]);
       cursor += 1;

@@ -126,6 +126,31 @@ describe("약관·방침 페이지", () => {
     expect(screen.getByText("본문.")).toBeInTheDocument();
   });
 
+  it("strips the editorial head line without eating a body line that starts the same way", () => {
+    /**
+     * **H3 폐쇄**(독립 검증 2026-09-11). 접두 규칙(`근거:` 걷기 · `상태`·`작성`·`버전`
+     * 한 줄씩)은 **머리말에만** 적용된다. 종전에는 문서 전체를 훑어서 본문 한가운데
+     * 같은 모양의 줄이 오면 **조용히 사라졌다** — 약관 조항이 통째로 없어지는데
+     * 화면도 전수도 아무 말을 하지 않는다(검증이 관찰로만 기록한 축이다).
+     *
+     * 양방향: 범위를 문서 전체로 되돌리면 본문 줄 단정이 실패하고(조용한 삭제),
+     * 걷기를 아예 없애면 머리말 단정이 실패한다(편집용 메타가 공개면에 뜬다).
+     */
+    render(
+      <MemoryRouter>
+        <article>
+          {renderLegalDocument(
+            "# 이용약관\n\n근거: 머리말의 편집용 메타\n\n---\n\n" +
+            "## 제1조 (목적)\n\n근거: 본문 한가운데의 같은 모양\n",
+          )}
+        </article>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByText(/머리말의 편집용 메타/)).not.toBeInTheDocument();
+    expect(screen.getByText("근거: 본문 한가운데의 같은 모양")).toBeInTheDocument();
+  });
+
   it("links the two documents to each other and leaves repository paths as plain text", async () => {
     stubFetch();
 
@@ -171,6 +196,68 @@ describe("공개 푸터", () => {
       .toHaveAttribute("href", "/privacy");
     expect(within(footer).getByRole("link", { name: /kdtyohan@gmail.com/ }))
       .toHaveAttribute("href", "mailto:kdtyohan@gmail.com");
+  });
+
+  it("hangs the footer off every public face of the front door, not just the form", async () => {
+    /**
+     * **LB1 폐쇄**(독립 검증 2026-09-11, 세션 59). SoT v1.8.56 은 장착 지점을
+     * *"정문 세 얼굴과 약관·방침 페이지"* 로 **열거**했지만, 셀이 지나는 얼굴은
+     * **로그인 폼 하나**였다 — `AuthStatus`(세션 확인·오류)와 가입 접수 얼굴은
+     * 각각만 지워도 `legal` 14 + `App` 29 셀이 전건 초록이었다(MO-6a·6b).
+     *
+     * **세션 56 B1(배너 장착 지점)과 같은 실패 형태가 한 슬라이스 만에 재발했다**:
+     * 계약이 *어디에 걸리는가* 를 말하면 셀이 **그 자리를 지나야** 한다. 열거가
+     * 셋이면 셀도 셋을 본다.
+     *
+     * 한 셀에 세 얼굴을 담고 사이를 `unmount()` 로 끊는다 — 얼굴마다 셀을 쪼개면
+     * 같은 계약이 세 자리에서 갈라지고, 하나가 빠지는 것이 다시 조용해진다.
+     *
+     * 양방향: 어느 한 얼굴에서 `<LegalFooter />` 를 지우면 이 셀이 **그 얼굴의
+     * 이름과 함께** 실패한다(MO-6a·6b 가 각각 이 셀을 문다) · 푸터를 앱 셸까지
+     * 번지게 하는 과잉은 아래 작업 화면 셀이 잡는다.
+     */
+    const legalNav = () => screen.queryByRole("navigation", { name: "법적 고지" });
+
+    // ① 세션을 확인하는 중 — 응답이 아직 없다(영원히 pending 한 fetch).
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+    let face = render(
+      <MemoryRouter initialEntries={["/"]}><App /></MemoryRouter>,
+    );
+    expect(await screen.findByText("세션을 확인하는 중…")).toBeInTheDocument();
+    expect(legalNav(), "세션 확인 얼굴에 법적 고지가 없다").not.toBeNull();
+    face.unmount();
+
+    // ② 세션을 확인하지 못했다 — 401 이 아닌 실패(서버가 죽었을 때의 얼굴).
+    vi.unstubAllGlobals();
+    stubFetch({ status: 500, body: { detail: "boom" } });
+    face = render(
+      <MemoryRouter initialEntries={["/"]}><App /></MemoryRouter>,
+    );
+    expect(
+      await screen.findByText("세션을 확인하지 못했습니다."),
+    ).toBeInTheDocument();
+    expect(legalNav(), "세션 오류 얼굴에 법적 고지가 없다").not.toBeNull();
+    face.unmount();
+
+    // ③ 가입 요청이 접수되었다 — 세션이 없는 채로 머무는 얼굴이다.
+    vi.unstubAllGlobals();
+    stubFetch(
+      { status: 401, body: { detail: "not authenticated" } },
+      { status: 201, body: { username: "bob", status: "pending" } },
+    );
+    render(<MemoryRouter initialEntries={["/"]}><App /></MemoryRouter>);
+    await screen.findByLabelText("아이디");
+    await userEvent.click(
+      screen.getByRole("button", { name: "계정이 없나요? 새 계정 요청" }),
+    );
+    await userEvent.type(screen.getByLabelText("아이디"), "bob");
+    await userEvent.type(screen.getByLabelText("비밀번호"), "long-enough-pw");
+    await userEvent.type(screen.getByLabelText("비밀번호 확인"), "long-enough-pw");
+    await userEvent.click(screen.getByRole("button", { name: "가입 요청 보내기" }));
+    expect(
+      await screen.findByRole("heading", { name: "가입 요청이 접수되었습니다" }),
+    ).toBeInTheDocument();
+    expect(legalNav(), "가입 접수 얼굴에 법적 고지가 없다").not.toBeNull();
   });
 
   it("walks an anonymous visitor from the login screen into the terms and back", async () => {
