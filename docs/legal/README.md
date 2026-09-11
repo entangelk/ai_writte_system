@@ -6,6 +6,8 @@
 
 - [이용약관](terms-of-service-draft.md) · [개인정보처리방침](privacy-policy-draft.md) — **버전 `1.0` · 시행일 2026-09-08**
 
+**★ "왜 그렇게 정했는가"는 이 파일이 든다**(오너 결정 2026-09-11). 두 문서의 머리말은 **회원이 읽는 면**이라 시행 사실과 아직 제공되지 않는 조항만 말하고, 결정 경위·단계 판단·값 조달 같은 개발 과정의 서술은 여기와 브리프에 남는다 — `tests/test_service_policy_contract.py::...test_the_public_documents_carry_no_editorial_vocabulary` 가 그 경계를 지킨다(약관·방침이 프런트에도 실려 회원이 읽는 화면이 되었고, 바이트 대조 가드는 *두 사본이 같은가* 만 알고 *무엇이 실렸는가* 를 모른다 — 독립 검증 H2).
+
 ## 이 표가 하는 일
 
 오너가 낸 합격 기준은 *"우리가 정해놓은 걸 제대로 담았는가"* 였다. **아래 표가 그 답이고**, [`tests/test_service_policy_contract.py`](../../tests/test_service_policy_contract.py) 가 **정책 문서의 모든 축이 이 표에 나타나는지** 대조한다 — 정책이 늘었는데 약관이 안 따라가면 전수가 빨개진다. (조항 *내용*이 맞는지는 기계가 못 본다. 그건 사람이 읽는다.)
