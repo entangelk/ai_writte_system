@@ -6,7 +6,6 @@ import { DraftEditor } from "./drafts/DraftEditor";
 import { ProjectList } from "./projects/ProjectList";
 import { ProjectSettingsPage } from "./projects/ProjectSettingsPage";
 import { AccessLogPage } from "./projects/AccessLogPage";
-import { LegalPage } from "./legal/LegalPage";
 import { PersonalHubPage } from "./me/PersonalHubPage";
 import { SceneNotesPage } from "./notes/SceneNotesPage";
 import { ReviewInbox } from "./review/ReviewInbox";
@@ -26,6 +25,12 @@ const AdminConsole = lazy(async () => ({
 const AdminUserDetail = lazy(async () => ({
   default: (await import("./admin/AdminUserDetail")).AdminUserDetail,
 }));
+// 약관·방침도 같은 이유로 진입 번들 밖이다: 본문 사본 둘이 **14 kB 의 원문**이고
+// 매일 쓰는 집필 세션은 그 페이지를 열지 않는다(실측 진입 번들 **474→457 kB** ·
+// gzip 145→139). 렌더러도 이 경계 안에 함께 들어간다(별도 청크 17.4 kB · gzip 6.4 kB).
+const LegalPage = lazy(async () => ({
+  default: (await import("./legal/LegalPage")).LegalPage,
+}));
 
 /**
  * 라우트는 **두 구간**이다 (브리프 `landing-page-scope`, 착수 순서 ②).
@@ -42,10 +47,18 @@ const AdminUserDetail = lazy(async () => ({
 export function App() {
   return (
     <Routes>
-      <Route path="/terms" element={<LegalPage name="terms" />} />
-      <Route path="/privacy" element={<LegalPage name="privacy" />} />
+      <Route path="/terms" element={<LegalRoute name="terms" />} />
+      <Route path="/privacy" element={<LegalRoute name="privacy" />} />
       <Route path="*" element={<ProtectedRoutes />} />
     </Routes>
+  );
+}
+
+function LegalRoute({ name }: { name: "terms" | "privacy" }) {
+  return (
+    <Suspense fallback={<p className="status-copy">문서를 불러오는 중…</p>}>
+      <LegalPage name={name} />
+    </Suspense>
   );
 }
 
