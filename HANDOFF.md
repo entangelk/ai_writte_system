@@ -99,6 +99,7 @@
 
 **검증·회귀**
 - **★ 프런트 전수는 `frontend/` 안에서, 출력은 파일로 캡처해서 돌린다.** 저장소 루트에서 `vitest` 를 돌리면 jsdom 환경이 없어 `ReferenceError: document is not defined` 로 **전 파일이 죽는다**(2026-09-07 독립 검증 실측, 2회 재현). 그리고 `| tail` 로 요약만 보면 **Failed Tests 블록이 잘려 어느 셀이 실패했는지 영영 모른다** — 같은 날 실제로 정체 미상 1실패가 그렇게 남았고 16분짜리 전수를 두 번 더 돌렸다. `npx vitest run --reporter=basic > <파일> 2>&1; echo EXIT=$?` 로 돌리고 그 파일을 grep 한다.
+- **★ 브라우저 검증 전에 dev 서버 신선도를 먼저 잰다** — 죽은 세션이 남긴 Vite가 포트(5173)를 잡고 있으면 **옛 CSS를 아무 오류 없이 서빙한다**(2026-09-12 하루 두 실화: W1a 세션과 W2 세션 둘 다 밟았다). CSS 수정 뒤 새 서버는 다음 포트(5174)로 뜬다. 확인법: 서빙된 CSS에 이번 변경 표식이 있는지 그 자리에서 대조한다(`curl -s http://127.0.0.1:<포트>/src/styles.css | grep <신규 이름>`). 남은 옛 서버는 죽이고 시작한다.
 - **★ 뮤테이션 원복에 `git checkout -- <file>` 을 쓰면 미커밋 작업이 사라진다.** 순서는 **커밋 → 변형 → 원복 → 트리 clean 확인**이고, **첫 변형 전 `git status --short` 가 비어 있어야 한다**(이 저장소에서 아홉 번 어겼다). **★ 그 게이트를 실제로 무력화하는 것은 `cwd` 다** — 셸의 작업 디렉터리는 명령 사이에 남으므로 원복 명령은 항상 절대경로(`cd /mnt/f/devel/ai_writte_system && …`)로 쓴다. 남의 미커밋 트리를 감사할 때는 `git checkout` 을 아예 쓰지 말고 `cp` 백업 + 역방향 편집(→ [`guides/verification.md`](docs/guides/verification.md) §"Mutation testing").
 - **뮤테이션 결과를 `grep FAILED` 로 읽으면 subtest 실패를 통째로 놓친다**(`pytest-subtests` 는 `SUBFAIL` 로 낸다).
 - **mutation이 통과하면 가드가 약한 것일 수도, mutation이 안 먹은 것일 수도 있다 — 먼저 후자를 의심한다.**
