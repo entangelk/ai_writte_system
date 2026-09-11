@@ -11,6 +11,11 @@
  * 3. **상태는 한 벌이다.** `/me` 의 취소가 셸의 배너를 끈다 — 두 자리가 각자
  *    조회하면 취소한 뒤에도 배너가 남는다.
  *
+ * **★ 1번은 셀이 진짜 `AuthGate` 를 세워야만 잠긴다.** 아래 `renderShell` 은 배너를
+ * 직접 마운트하는 복제 셸이라 **장착 지점이 비어도 초록**이다 — 세션 56 독립 검증이
+ * 변이 MV-2b 로 실증했고(3파일 52셀 전건 초록), 그것을 무는 셀이
+ * "hangs the banner off the real app shell" 하나다.
+ *
  * **양방향**:
  * - under-strict — 배너를 화면 안으로 옮기면 "다른 경로에서도 뜬다" 셀이 실패한다 ·
  *   남은 일수를 30 으로 박으면 "서버가 준 날짜만 말한다" 셀이 실패한다(픽스처가
@@ -24,7 +29,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AuthUserContext } from "../auth/AuthGate";
+import { AuthGate, AuthUserContext } from "../auth/AuthGate";
 import { PersonalHubPage } from "./PersonalHubPage";
 import {
   WithdrawalBanner,
@@ -144,6 +149,43 @@ describe("전역 배너 (D1=ⓐ)", () => {
     expect(screen.getByRole("button", { name: "탈퇴 취소" })).toBeInTheDocument();
   });
 
+  /**
+   * ★ **이 셀만 진짜 앱 셸(`AuthGate`)을 세운다.** 위아래의 `renderShell` 은 배너를
+   * 직접 마운트하는 **복제 셸**이라, 계약이 말하는 *장착 지점* 은 그 어떤 셀에게도
+   * 보이지 않았다 — 세션 56 독립 검증이 `AuthGate` 에서 `<WithdrawalBanner />` 를
+   * 통째로 지우는 변이(MV-2b)로 실증했다: 프로덕션 전 화면에서 배너가 사라져도
+   * 3파일 52셀 전건 초록이었다.
+   *
+   * 그래서 D1=ⓐ 를 실제로 잠그는 것은 이 셀이다 — `/me` 가 **아닌** 경로에서 셸이
+   * 배너를 건다는 단정. 배너를 지우면(MV-2b) 물론이고 `/me` 로 한정해도(MV-2)
+   * 여기서 실패한다.
+   *
+   * 남은 일수는 일부러 안 잰다 — 그 축은 위 순수함수 셋이 고정 시각으로 잠그고,
+   * 여기서 또 재면 시계 의존 픽스처를 장착 지점 셀에 끌어들이게 된다(H1).
+   */
+  it("hangs the banner off the real app shell, not off the tests' copy of it", async () => {
+    seedWithdrawal(WITHDRAWING);
+    stubFetch({ body: USER }); // `AuthGate` 의 세션 확인 — 셸이 서는 조건이다
+
+    render(
+      <MemoryRouter initialEntries={["/projects/p1"]}>
+        <AuthGate>
+          <Routes>
+            <Route path="/projects/:projectId" element={<p>원고 작업 공간</p>} />
+          </Routes>
+        </AuthGate>
+      </MemoryRouter>,
+    );
+
+    // 셸이 실제로 섰다는 것부터 — 세션 확인이 안 끝났으면 아래 단정이 무의미하다.
+    expect(await screen.findByText("원고 작업 공간")).toBeInTheDocument();
+    const banner = await screen.findByRole("status");
+    expect(banner).toHaveTextContent("저장·생성이 되지 않습니다");
+    expect(
+      within(banner).getByRole("button", { name: "탈퇴 취소" }),
+    ).toBeInTheDocument();
+  });
+
   it("stays out of the way when the account is not withdrawing", () => {
     seedWithdrawal(NOT_WITHDRAWING);
     stubFetch();
@@ -238,7 +280,7 @@ describe("탈퇴 취소", () => {
   it("treats a 409 as nothing left to cancel, not as an error", async () => {
     seedWithdrawal(WITHDRAWING);
     // 다른 탭이 먼저 취소했다 — DELETE 409 뒤에 서버의 지금 상태를 다시 읽는다.
-    stubFetch(
+    const fetchMock = stubFetch(
       { body: { detail: "withdrawal was not requested" }, status: 409 },
       { body: NOT_WITHDRAWING },
     );
@@ -252,5 +294,33 @@ describe("탈퇴 취소", () => {
     await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
     // 오류로 말하지 않는다 — 409 를 `describeApiError` 로 넘기면 여기서 실패한다.
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    // ★ 결과만이 아니라 **수단**을 잠근다: 계약은 "서버의 지금 상태를 다시 읽어
+    // 화면을 맞춘다"이지 "배너를 끈다"가 아니다. 로컬에서 null 을 합성해도 화면은
+    // 똑같이 비므로(세션 56 MV-7 이 11/11 초록으로 실증) 두 번째 호출을 직접 센다.
+    await waitFor(() => expect(fetchMock.mock.calls).toHaveLength(2));
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/me/withdrawal");
+    expect(fetchMock.mock.calls[1][1].method ?? "GET").toBe("GET");
+  });
+
+  it("says the state could not be re-read instead of guessing, when the re-read fails too", async () => {
+    seedWithdrawal(WITHDRAWING);
+    // 409 뒤 재조회까지 실패한다 — 지금 상태를 모르는 채로 화면을 지어내지 않는다.
+    stubFetch(
+      { body: { detail: "withdrawal was not requested" }, status: 409 },
+      { body: { detail: "boom" }, status: 500 },
+    );
+    const user = userEvent.setup();
+
+    renderShell("/me");
+
+    const banner = await screen.findByRole("status");
+    await user.click(within(banner).getByRole("button", { name: "탈퇴 취소" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "탈퇴 상태를 다시 읽지 못했습니다",
+    );
+    // 배너는 그대로 남는다 — 취소됐다고 **가정하면** 유예 중인 사람이 저장을
+    // 눌렀을 때 403 이 다시 정체불명이 된다.
+    expect(screen.getByRole("status")).toBeInTheDocument();
   });
 });
