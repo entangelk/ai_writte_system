@@ -325,7 +325,7 @@ CHANGELOG 작성 규칙 · [`docs/guides/verification.md`](docs/guides/verificat
 |---|---|
 | 제품 한 장 요약 (기획 진입점) | [`docs/product-overview.md`](docs/product-overview.md) |
 | 정본 계약(먼저 읽기) | [`docs/system-contract-sot.md`](docs/system-contract-sot.md) |
-| 계획 · 결정 브리프 인덱스 (137개) | [`docs/plans/README.md`](docs/plans/README.md) |
+| 계획 · 결정 브리프 인덱스 (138개) | [`docs/plans/README.md`](docs/plans/README.md) |
 | 독립 검증 기록 (300건) | [`docs/verifications/README.md`](docs/verifications/README.md) |
 | 서비스 정책(코드가 시행하는 값) | [`docs/service-policy-contract.md`](docs/service-policy-contract.md) |
 | 약관 · 방침 (버전 1.0 · 시행 2026-09-08) | [`docs/legal/`](docs/legal/README.md) |

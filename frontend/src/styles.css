@@ -138,7 +138,6 @@
   --tint-accent-weak: rgb(0 110 190 / 0.06);
   --tint-accent-soft: rgb(0 110 190 / 0.10);
   --tint-accent-strong: rgb(0 110 190 / 0.25);
-  --grid-line: rgb(4 40 71 / 0.04);
   --shadow-panel: 0 6px 18px rgb(4 40 71 / 0.10);
 
   /* --- 치수 축 ---------------------------------------------------------- */
@@ -199,9 +198,7 @@ body {
   min-width: 20rem;
   min-height: 100vh;
   margin: 0;
-  background:
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px) 0 0 / 4rem 4rem,
-    var(--surface-page);
+  background: var(--surface-page);
 }
 
 button,
@@ -1609,8 +1606,12 @@ main {
   border-bottom: 1px solid var(--border-hairline);
 }
 
+/* Phase W1: 원고와 조작부가 하나의 밝은 면을 공유한다. 페이지 외곽 폭은 유지한다. */
 .editor-form {
-  border-top: 1px solid var(--text-body);
+  padding: var(--space-2) clamp(var(--space-4), 4vw, 3rem) 0;
+  background: var(--surface-card);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-lg);
 }
 
 .editor-meta,
