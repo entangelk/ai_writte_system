@@ -181,7 +181,7 @@
 
 | 문서 | 무엇 | 상태 |
 |---|---|---|
-| [`frontend-writing-studio-phase.md`](frontend-writing-studio-phase.md) | 원고면 → 한글 타이포 → 작품 서재 → 보조 표면, 인계·검증 기준 | Active — W1 구현 완료 · W1a 우선 대기 |
+| [`frontend-writing-studio-phase.md`](frontend-writing-studio-phase.md) | 원고면 → 한글 타이포 → 작품 서재 → 보조 표면, 인계·검증 기준 | 구현 완료 — W1~W4 전 슬라이스 시각 확인 마침(2026-09-12) |
 
 ### 프론트엔드
 

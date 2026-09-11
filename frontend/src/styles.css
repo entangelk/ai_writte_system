@@ -2860,6 +2860,17 @@ main {
   font-variant-numeric: tabular-nums;
 }
 
+/* W4: 데이터 표(관측 KPI·검토 diff)는 좁은 화면에서 스스로 가로 스크롤한다 —
+   9열 KPI 표가 375px 뷰포트를 215px 넘겨 문서 전체가 흔들렸다(2026-09-12 실측).
+   문서용 .legal-table(약관)은 열이 좁아 대상이 아니다. */
+@media (max-width: 48rem) {
+  .kpi-table,
+  .diff-table {
+    display: block;
+    overflow-x: auto;
+  }
+}
+
 .kpi-table th,
 .kpi-table td {
   padding: 0.5rem 0.7rem;

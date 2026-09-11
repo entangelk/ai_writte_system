@@ -114,7 +114,7 @@ export function PersonalHubPage() {
                   <span>{project.name}</span>
                   <span className="row-arrow" aria-hidden="true">→</span>
                 </Link>
-                {project.archived && <span className="status-badge">(보관됨)</span>}
+                {project.archived && <span className="status-badge">보관됨</span>}
                 <span className="row-actions hub-row-links">
                   <Link className="inline-navigation-link" to={`/projects/${project.id}/activity`}>활동</Link>
                   <Link className="inline-navigation-link" to={`/projects/${project.id}/observability`}>관측</Link>
