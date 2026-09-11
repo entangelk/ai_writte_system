@@ -16,6 +16,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
+import { renderLegalDocument } from "./markdown";
 
 function response(body: unknown, status = 200) {
   return { ok: status >= 200 && status < 300, status, statusText: "", json: async () => body };
@@ -96,6 +97,29 @@ describe("약관·방침 페이지", () => {
     expect(
       within(clause.closest("li") as HTMLElement).getByText(/사용자명: 최대/),
     ).toBeInTheDocument();
+  });
+
+  it("degrades an unsupported construct to text instead of hanging the page", () => {
+    /**
+     * 렌더러는 부분집합이고 **그 경계 밖에서 멈추지 않아야 한다.** 지원하지 않는
+     * 표제 단계(`### …`)는 `startsBlock` 이 블록이라고 말하지만 받아 줄 분기가
+     * 없는 줄이다 — 현재 줄을 먹지 않으면 `cursor` 가 제자리에 머물러 **무한
+     * 루프**이고, 화면은 "느리다"가 아니라 **탭이 멈춘다**. 실측으로 드러났다:
+     * 표 분기를 지운 변이(ML-4)가 실패가 아니라 **OOM 으로 죽었다.**
+     *
+     * under-strict: 현재 줄을 먹는 문장을 지우면 이 셀이 **영영 끝나지 않는다**
+     * (타임아웃으로 실패한다). over-strict: 지원 문법을 문단으로 떨어뜨리는
+     * 과잉 교정은 위 표·목록·인용 셀들이 잡는다.
+     */
+    render(
+      <MemoryRouter>
+        <article>{renderLegalDocument("## 제1조 (목적)\n\n### 소제목\n\n본문.\n")}</article>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("heading", { name: "제1조 (목적)" })).toBeInTheDocument();
+    expect(screen.getByText("### 소제목")).toBeInTheDocument();
+    expect(screen.getByText("본문.")).toBeInTheDocument();
   });
 
   it("links the two documents to each other and leaves repository paths as plain text", async () => {

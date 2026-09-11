@@ -240,7 +240,15 @@ export function renderLegalDocument(source: string): ReactNode[] {
       continue;
     }
 
-    const paragraph: string[] = [];
+    // ★ **현재 줄은 무조건 먹는다.** 이 자리는 `startsBlock` 이 *블록의 시작*
+    // 이라고 말했지만 **위 분기 중 어느 것도 받지 않은 줄**에도 도달한다(지원하지
+    // 않는 표제 단계 `### …` 가 그렇다). 현재 줄을 먹지 않고 while 조건에만 맡기면
+    // 문단이 빈 채로 `cursor` 가 제자리에 머물러 **무한 루프**가 되고, 브라우저
+    // 탭이 멈춘다 — 실측으로 드러났다(표 분기를 지우는 변이 ML-4 가 OOM 으로
+    // 죽었다). 그래야 이 파일 머리말의 약속("지원하지 않는 문법은 문단 텍스트로
+    // 그려진다")이 참이 된다.
+    const paragraph: string[] = [line];
+    cursor += 1;
     while (
       cursor < lines.length && !startsBlock(lines[cursor]) &&
       !METADATA_LINE.test(lines[cursor])
