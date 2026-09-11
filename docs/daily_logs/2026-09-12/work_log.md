@@ -1,28 +1,30 @@
 # 2026-09-12 작업 로그
 
-## Goals
+## 세션 63 — Phase W1a: 모바일 도구가 원고를 가리던 것 해소 (오너 지시 "핸드오프 읽고 프론트엔드 스타일 변경 다음 작업 진행해줄래?")
+
+### Goals
 
 - 핸드오프의 프론트 스타일 다음 작업인 Phase W1a를 구현하고, 모바일 원고 가림과 도구 접근성을 실제 React 앱에서 확인한다.
 
-## Completed work
+### Completed work
 
 - `frontend/src/drafts/DraftEditor.tsx`: 같은 도구 선택 nav를 원고 앞에 옮겼다. 도구를 복제하거나 드로어를 재마운트하지 않는다. 라벨·이벤트·배지·ref는 유지한다.
 - `frontend/src/styles.css`: 48rem 이하에서 도구가 일반 문서 흐름을 차지한다. 42rem 이하 2열, 그 위 4열이며 기존 버튼 최소 높이 4.25rem을 유지한다. 데스크톱 fixed 우측 배치·블루 토큰·페이지 폭은 유지한다.
 - Phase W 계획과 HANDOFF의 다음 작업을 W2로 갱신하고 CHANGELOG에 사용자에게 보이는 배치 변경을 기록했다. API·저장 계약은 바뀌지 않아 SoT 버전은 올리지 않는다.
 
-## Issues found
+### Issues found
 
 - 원인: 고정 우측 도구는 모바일의 좁은 원고와 같은 좌표를 차지했다. 가로 넘침이 없어도 가림은 발생하므로 브라우저에서 두 요소의 사각형 교차를 검사했다.
 - 패턴 스윕: `styles.css`의 `position: fixed`·`right: 0` 전수 검색과 blame을 확인했다. 도구는 `42e91cd2`에서 fixed, `ca1a833e`에서 버튼 확대. 다른 fixed인 `.workspace-rail`(980줄, `42e91cd2`)은 사용자가 열 때만 원고를 덮는 의도된 드로어다. `.session-panel`(263줄, `444b1b45`)은 계정 메뉴의 absolute 배치라 같은 상시 원고 가림 패턴이 아니다. 추가 동일 결함은 발견하지 못했다.
 - 이 환경의 Vite 파일 감시가 CSS 수정 뒤 옛 모듈을 제공했다. HTTP 응답에서 확인하고 서버를 재시작해 최종 2열/4열 배치를 검증했다.
 - 검증 환경에 한글 폰트가 없어 처음에는 네모 글리프가 나왔다. 기존 로컬 Windows 맑은 고딕을 임시 fontconfig로 검증용 Chrome에만 제공했다. 앱의 서체 제공 문제는 해결된 것이 아니며 W2 범위다. 폰트 파일은 저장소에 넣지 않았다.
 
-## Decisions — User Decisions and Rationale
+### Decisions — User Decisions and Rationale
 
 - 사용자 요청: 핸드오프를 읽고 프론트엔드 스타일 변경의 다음 작업을 진행한다. 기록된 순서에 따라 W1a를 이번 슬라이스로 삼고 W2~W4까지 범위를 확대하지 않았다.
 - 구현 선택: 모바일 도구를 원고 앞의 일반 흐름에 둔다. 스티키 도구는 스크롤 중 원고를 다시 가릴 수 있다. 대가로 모바일에서는 긴 원고 아래에서 도구를 쓰려면 페이지 위쪽으로 돌아가야 한다. 데스크톱은 계속 고정 우측 도구다.
 
-## Verification
+### Verification
 
 실제 Vite React 앱 `/projects/p1/drafts/d1`을 headless Chrome CDP로 검사했다. API는 테스트용 프로젝트·원고·버전 fixture로 대체하고 외부 요청은 차단했다. 긴 원고는 한글/영문/숫자 혼용 2,220자다. 운영 데이터·유료 생성·저장 API는 호출하지 않았다. 보조 예산/쿼터 API는 503 fixture여서 생성 성공 흐름의 실사용 검증은 아니다.
 
@@ -45,7 +47,66 @@
 - `npx tsc --noEmit` EXIT=0 · `npm run build` 성공.
 - 문서 가드 `test_docs_indexes`·`test_repo_hygiene`·`test_design_token_provenance`: **31 passed / 1019 subtests passed** · `git diff --check` 이상 없음.
 
-## Next steps
+### Next steps
 
 - Phase W2: 한글 서체 로딩·fallback과 원고/UI 역할 점검. 웹폰트 의존성 갈림길은 계획의 결정 브리프 지침을 따른다.
 - W3 서재, W4 보조 표면·마감. 배포와 푸시는 오너 소관이다.
+
+## 세션 64 — Phase W2: 한글 타이포 — 원고 명조 폴백과 UI 고딕 고정 (오너 지시 "작업 AI가 작업하다 지쳐서 진행하던 작업 마무리좀 해줄래? 핸드오프 읽고 프론트엔드 스타일 변경 다음 작업 진행해줄래?")
+
+세션 63의 마무리(전수·기록·커밋 `bc78ed6`)를 이어받아 계획의 다음 슬라이스 W2를 구현했다.
+
+### Goals
+
+- 원고 본문의 한글이 명조로, UI의 한글이 고딕으로 결정론적으로 렌더링되게 한다. 라틴·숫자 외형은 바꾸지 않는다.
+
+### Completed work
+
+- `frontend/src/styles.css` `.editor-form textarea`(원고 본문 — 편집·읽기 전용이 같은 규칙): serif 스택에 한글 명조 후보(바탕·AppleMyungjo·나눔명조·Noto Serif KR/CJK KR)를 generic `serif` 앞에 추가했다. 라틴·숫자는 Georgia(설치 환경)에서 먼저 매치되어 그대로다.
+- `:root` UI 스택: `system-ui` 뒤에 한글 고딕(맑은 고딕·Apple SD Gothic Neo·나눔고딕·Noto Sans CJK KR)을 추가했다. 라틴은 system-ui(Segoe/SF)에서 먼저 매치되므로 외형이 변하지 않고, 한글 음절만 위 이름들에서 해소된다.
+- 제목 등 나머지 serif 표면(~20곳, 같은 리터럴)은 이번에 바꾸지 않았다 — 계획 지침 "제목까지 무조건 명조로 바꾸지 않는다. 원고 중심의 작은 표면부터 비교한다".
+- 웹폰트는 도입하지 않았다(파일 출처·라이선스·전송량·자체 호스팅은 오너 결정 갈림길). 외부 폰트 서비스 호출은 추가하지 않았다.
+
+### Issues found
+
+- 원인: serif 스택 `Georgia, "Times New Roman", serif`에 한글 서체가 없어 원고 맥락의 한글 음절이 무작위 OS 폴백으로 떨어졌다. 세션 62(W1) 검증 환경에서 제목 한글이 나눔고딕 — 고딕 — 으로 렌더링된 것이 이 결함의 관측이었다(명조 맥락에 고딕 한글).
+- 패턴 스윕: `styles.css`의 `font-family` 선언 31곳 전수 확인. serif 리터럴 ~20곳 중 이번에 고친 것은 원고 본문 1곳뿐이고 나머지는 제목·인용·후보본 등 "안 바꾼 표면"이다. `system-ui, sans-serif` 리터럴 7곳은 serif 표면 안의 메타 라벨용 의도된 UI 리셋이라 그대로 뒀다.
+- 세션 63 함정의 변형 재발: 5173 포트에 죽은 세션의 Vite가 남아 **옛 CSS**를 서빹하고 있었다. 새 서버(5174)의 응답에 신규 스택(`Batang`)이 있는지 대조해 가려내고 낡은 서버를 정리한 뒤 5174로 검증했다.
+- 한글 폰트가 아예 없는 시스템에서는 두자(tofu)가 된다 — 시스템 폰트 접근의 근본 한계이고 옛 스택과 거동이 같다(아래 미설치 실측). 모든 기기에 동일 외형을 보장하려면 자체 호스팅 웹폰트뿐이다.
+
+### Decisions — User Decisions and Rationale
+
+- 구현 선택: 계획의 W2 착수 지침이 "로컬 시스템 서체 보완은 의존성 없이 검토 가능"이라고 명시했으므로 시스템 서체 스택 완성으로 슬라이스를 닫았다. 웹폰트 도입은 기기 간 원고 외형 일관성이 필요해질 때 오너 결정 브리프로 연다.
+- 제목의 한글은 이번에 고딕 폴백 그대로 뒀다. 원고 본문의 명조 전환을 먼저 보는 것이 계획의 "작은 표면부터 비교"에 맞다.
+
+### Verification
+
+실제 Vite React 앱 `/projects/p1/drafts/d1`(390×844 기준)을 CDP로 검사했다. API fixture·외부 요청 차단은 세션 63과 같다(하네스는 이어받아 적응). 폰트 환경을 둘로 나눠 측정했다: **한글 폰트 제공 환경**(바탕+맑은 고딕을 임시 fontconfig로 검증용 Chrome에만 제공 — 폰트 파일은 저장소에 넣지 않음)과 **무한글 폰트 환경**(시스템에 한글 폰트 0개, `fc-list :lang=ko` 실측).
+
+탐침 비교 — 같은 텍스트를 신·구 스택으로 렌더해 `CSS.getPlatformFontsForNode`로 실제 사용 글꼴을 읽었다(한글 폰트 제공 환경):
+
+| 탐침 | 실측 | 뜻 |
+|---|---|---|
+| 원고 한글, 새 스택 | **Batang 8자** + Liberation Serif 2자(공백) | 한글 → 명조 전환 |
+| 원고 한글, 옛 스택 | Malgun Gothic 8자 | 옛 결함(명조 맥락에 고딕 폴백) 실증 |
+| 원고 라틴·숫자, 신/구 | Liberation Serif 11자로 동일 | 라틴·숫자 불변 |
+| UI 한글(도구 버튼 스택) | Malgun Gothic 7자 | 고딕 결정론적 해소 |
+| 제목(H1) 한글 | Malgun Gothic 5자 | 안 바꾼 표면 무변 |
+
+- Georgia는 이 검증 환경에 없어 라틴이 fontconfig 대체(Liberation Serif)로 렌더링됐다. 라틴 불변 단정은 신·구 스택 간 동일성으로 세웠다.
+- 줄바꿈: 280px 폭 탐침에서 한글/영문/숫자 혼용 문장이 3줄로 래핑(100px > 행 높이 33.3px). 문서 가로 넘침은 320/390/768/1440 전부 없음, W1a 배치(모바일 static·데스크톱 fixed) 유지.
+- 미설치(무한글 폰트) 환경: 신·구 스택의 거동이 동일(한글이 Liberation Serif/DejaVu Sans로 귀속 = 두자 렌더링)이고 레이아웃 깨짐·넘침 없음 — 회귀 없음. 두자 해소는 웹폰트 몫이다.
+- 스크린샷 육안(한글 폰트 환경, 390px): 원고는 명조(획 대비 있는 바탕), UI·제목은 고딕 — 역할 대비 성립. 두자·겹침·넘침 없음.
+- 한계: 실제 모바일 기기·소프트 키보드 미확인. 바탕·맑은 고딕에 굵은 변형이 없어 `font-synthesis: none` 하에서 굵은 한글 제목은 기본 굵기로 난다(기존과 같음). 독립 검증 판정은 부여하지 않는다.
+
+자동 검증 결과:
+
+- 스타일 가드 `designTokens`·`typeScale`·`pageLayout`·`scratchPadCss`·`buttonAppearance`·`disabledState`·`observability/chartColors`: **7파일 30 passed**(EXIT=0).
+- `npm run build` 성공(8.08s).
+- 프런트 전수 `npx vitest run --reporter=basic`(파일 캡처): **478 passed / 41 files · EXIT=0** — 기준선과 같은 수, 플레이크 재발 없음.
+
+### Next steps
+
+- Phase W3: 작품 서재(프로젝트/원고 목록의 제목·행 간격·행동 위계).
+- (오너 갈림길로 남김) 자체 호스팅 웹폰트 — 기기 간 원고 외형 일관성이 필요해질 때 결정 브리프로 연다. 한글 폰트가 없는 기기의 두자도 이 갈림길에서만 해소된다.
+- 제목 등 나머지 serif 표면의 한글 서체는 원고 명조가 자리 잡은 뒤 별도 비교로 정한다(Phase W 마감 무렵).

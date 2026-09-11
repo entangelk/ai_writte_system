@@ -1,5 +1,7 @@
 :root {
-  font-family: Inter, Pretendard, "Noto Sans KR", system-ui, sans-serif;
+  /* W2: 한글은 OS 고딕으로 결정론적으로 — 라틴은 system-ui(Segoe/SF)에서 먼저
+     매치되므로 외형이 그대로이고, 한글 음절만 아래 이름들에서 해소된다. */
+  font-family: Inter, Pretendard, "Noto Sans KR", system-ui, "Malgun Gothic", "Apple SD Gothic Neo", "NanumGothic", "Noto Sans CJK KR", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 
@@ -1692,7 +1694,10 @@ main {
   border-bottom: 1px solid var(--border-hairline);
   border-radius: 0;
   outline: none;
-  font-family: Georgia, "Times New Roman", serif;
+  /* W2: 한글 명조 폴백 — 라틴(Georgia)과 숫자는 그대로 두고 한글 음절만 OS별
+     명조(바탕/AppleMyungjo/나눔명조/Noto Serif)로 내려간다. 제목 등 나머지
+     serif 표면은 이 슬라이스에서 바꾸지 않는다(Phase W2 지침). */
+  font-family: Georgia, "Times New Roman", "Batang", "AppleMyungjo", "Nanum Myeongjo", "Noto Serif KR", "Noto Serif CJK KR", serif;
   font-size: var(--type-reading);
   line-height: 1.85;
 }
