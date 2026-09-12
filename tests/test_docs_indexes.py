@@ -109,6 +109,21 @@ def _assert_all_reachable(
     )
 
 
+def _dormant_section(index: Path) -> str:
+    """`docs/README.md` 의 휴면 절 본문만 떼어 낸다(다음 `## ` 앞까지).
+
+    절 밖에서 우연히 같은 낱말이 나와 가드를 만족시키지 않도록 **범위를 좁힌다** —
+    이 파일은 `verifications/` 를 여러 줄에서 인용한다.
+    """
+
+    text = index.read_text(encoding="utf-8")
+    start = text.find("\n## 휴면 디렉터리")
+    assert start != -1, "docs/README.md 에 휴면 디렉터리 절이 없다"
+    rest = text[start + 1 :]
+    end = rest.find("\n## ", 1)
+    return rest if end == -1 else rest[:end]
+
+
 def _assert_links_resolve(case: unittest.TestCase, index: Path) -> None:
     broken = sorted(
         target
@@ -335,6 +350,22 @@ class DocsReadmeIndexTest(unittest.TestCase):
         }
         self.assertTrue(documents, "휴면 디렉터리에서 문서를 하나도 못 찾았다")
         _assert_all_reachable(self, self.index, documents, "휴면 문서")
+
+    def test_the_dormant_section_says_what_the_old_name_was(self) -> None:
+        """오너 결정이 **함께 적으라고 지시한 한 문장**을 잠근다(H3, 2026-09-12 검증).
+
+        브리프 `docs-directory-dormant-and-restructure-decisions.md` 의 *"★ D1 착수 시
+        함께 적을 한 문장"* 은 `verification_briefs/` 줄이 **`verifications/` 의 전신**
+        임을 말하라고 요구한다 — 두 이름이 헷갈린다는 사실이 이 디렉터리가 오래 안
+        보인 이유의 절반이라는 것이 그 지시의 근거다. 즉 이 문장은 서술이 아니라
+        **결정의 내용물**인데, 지우면 도달성 셀은 여전히 초록이다(검증 H3 실측).
+
+        앵커는 **수사가 아니라 두 낱말**(`verifications/`·`전신`)로 잡는다 — 문장을
+        다듬는 정상 편집까지 물면 가드가 문장을 화석으로 만든다.
+        """
+        section = _dormant_section(self.index)
+        self.assertIn("verifications/", section)
+        self.assertIn("전신", section)
 
 
 # "검증 기록 N건"을 세 문서가 각자 적는다. 세는 사람이 셋이면 반드시 갈라진다 —
