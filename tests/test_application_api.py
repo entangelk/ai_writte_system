@@ -2495,6 +2495,13 @@ class AdminErrorContractDeclarationTest(unittest.TestCase):
         ("/admin/users", "post"): {"400", "401", "403", "409", "503"},
         ("/admin/users/{user_id}/deactivate", "post"):
             {"401", "403", "404", "409", "503"},
+        # 계정 잔여 정리(Slice 4b, 2026-09-12): 조사 GET 은 파괴가 없어 값 검증이
+        # 없다(404 사용자 없음 · 409 파기 미시작만). 실행 POST 는 빈 사유 400 이 더
+        # 낀다 — 프로젝트 purge 의 409 선언에 값 검증 축이 하나 더 낀 모양.
+        ("/admin/users/{user_id}/reconcile", "get"):
+            {"401", "403", "404", "409", "503"},
+        ("/admin/users/{user_id}/reconcile", "post"):
+            {"400", "401", "403", "404", "409", "503"},
         # Phase 8.5-a (2026-08-23): quota operations read surface. List looks
         # nothing up (no 404); detail resolves a user_id (404). Both can 503 —
         # unassembled quota enforcement must not read as "unlimited".
@@ -2549,7 +2556,8 @@ class AdminErrorContractDeclarationTest(unittest.TestCase):
         }
 
     def test_declared_error_statuses_match_the_lock_list(self):
-        self.assertEqual(len(self.EXPECTED), 17)  # 2026-08-28: 관리자 아카이브 추가
+        # 2026-09-12 Slice 4b: 잔여 정리 조사·실행 둘 추가(17→19).
+        self.assertEqual(len(self.EXPECTED), 19)  # 2026-08-28: 관리자 아카이브 추가
         for (path, method), expected in self.EXPECTED.items():
             with self.subTest(path=path, method=method):
                 self.assertEqual(self._declared(path, method), expected)
