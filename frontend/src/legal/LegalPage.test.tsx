@@ -189,6 +189,10 @@ describe("공개 푸터", () => {
 
     renderAt("/");
 
+    // 루트의 익명 얼굴은 랜딩이다 — 로그인 폼은 그 아래 문(2026-09-12).
+    await userEvent.click(
+      await screen.findByRole("button", { name: "로그인" }),
+    );
     await screen.findByLabelText("아이디");
     const footer = screen.getByRole("navigation", { name: "법적 고지" });
     expect(within(footer).getByRole("link", { name: "이용약관" })).toHaveAttribute("href", "/terms");
@@ -209,8 +213,12 @@ describe("공개 푸터", () => {
      * 계약이 *어디에 걸리는가* 를 말하면 셀이 **그 자리를 지나야** 한다. 열거가
      * 셋이면 셀도 셋을 본다.
      *
-     * 한 셀에 세 얼굴을 담고 사이를 `unmount()` 로 끊는다 — 얼굴마다 셀을 쪼개면
-     * 같은 계약이 세 자리에서 갈라지고, 하나가 빠지는 것이 다시 조용해진다.
+     * **랜딩(2026-09-12)이 넷째 얼굴로 합류했다** — 루트의 익명 얼굴도 공개
+     * 표면이라 푸터가 붙는다. 열거가 넷이면 셀도 넷을 지나야 한다는 같은 규칙.
+     *
+     * 한 셀에 네 얼굴을 담고 사이를 `unmount()` 로 끊는다 — 얼굴마다 셀을
+     * 쪼개면 같은 계약이 네 자리에서 갈라지고, 하나가 빠지는 것이 다시
+     * 조용해진다.
      *
      * 양방향: 어느 한 얼굴에서 `<LegalFooter />` 를 지우면 이 셀이 **그 얼굴의
      * 이름과 함께** 실패한다(MO-6a·6b 가 각각 이 셀을 문다) · 푸터를 앱 셸까지
@@ -218,9 +226,26 @@ describe("공개 푸터", () => {
      */
     const legalNav = () => screen.queryByRole("navigation", { name: "법적 고지" });
 
+    // ⓪ 랜딩 — 루트의 익명 얼굴(D1=ⓒ). 세션 확인이 401 으로 끝나야 볼 수 있다.
+    vi.stubGlobal("fetch", vi.fn(() =>
+      Promise.resolve({
+        ok: false,
+        status: 401,
+        json: () => Promise.resolve({ detail: "not authenticated" }),
+      } as Response),
+    ));
+    let face = render(
+      <MemoryRouter initialEntries={["/"]}><App /></MemoryRouter>,
+    );
+    expect(
+      await screen.findByRole("heading", { name: "쓴 것을 기억하는 집필 작업실" }),
+    ).toBeInTheDocument();
+    expect(legalNav(), "랜딩 얼굴에 법적 고지가 없다").not.toBeNull();
+    face.unmount();
+
     // ① 세션을 확인하는 중 — 응답이 아직 없다(영원히 pending 한 fetch).
     vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
-    let face = render(
+    face = render(
       <MemoryRouter initialEntries={["/"]}><App /></MemoryRouter>,
     );
     expect(await screen.findByText("세션을 확인하는 중…")).toBeInTheDocument();
@@ -246,6 +271,9 @@ describe("공개 푸터", () => {
       { status: 201, body: { username: "bob", status: "pending" } },
     );
     render(<MemoryRouter initialEntries={["/"]}><App /></MemoryRouter>);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "로그인" }),
+    );
     await screen.findByLabelText("아이디");
     await userEvent.click(
       screen.getByRole("button", { name: "계정이 없나요? 새 계정 요청" }),
@@ -273,6 +301,9 @@ describe("공개 푸터", () => {
 
     renderAt("/");
 
+    await userEvent.click(
+      await screen.findByRole("button", { name: "로그인" }),
+    );
     await screen.findByLabelText("아이디");
     await userEvent.click(
       within(screen.getByRole("navigation", { name: "법적 고지" }))
@@ -282,9 +313,12 @@ describe("공개 푸터", () => {
     expect(
       await screen.findByRole("heading", { level: 1, name: "이용약관" }),
     ).toBeInTheDocument();
-    // 약관 페이지의 유일한 퇴로. 세션이 없으므로 브랜드는 정문으로 떨어진다.
+    // 약관 페이지의 유일한 퇴로. 세션이 없으므로 브랜드는 정문으로 떨어진다 —
+    // 루트의 익명 얼굴은 이제 랜딩이다(2026-09-12).
     await userEvent.click(screen.getByRole("link", { name: "에-라잇" }));
-    expect(await screen.findByLabelText("아이디")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "쓴 것을 기억하는 집필 작업실" }),
+    ).toBeInTheDocument();
   });
 
   it("carries the footer on the legal pages themselves", async () => {

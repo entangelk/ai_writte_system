@@ -15,6 +15,16 @@ function response(body: unknown, status = 200) {
   };
 }
 
+/**
+ * 랜딩(루트의 익명 얼굴, 2026-09-12)이 로그인 폼 앞에 생겼다 — 루트에서 시작해
+ * 로그인 폼을 세우는 셀은 문을 지나 들어온다. 딥링크 셀은 이 문이 없다.
+ */
+async function enterFromLanding() {
+  await userEvent.click(
+    await screen.findByRole("button", { name: "로그인" }),
+  );
+}
+
 function mockFetch(...responses: Array<{ body: unknown; status?: number }>) {
   const fetchMock = vi.fn();
   for (const next of responses) {
@@ -51,6 +61,69 @@ afterEach(() => {
 });
 
 describe("App routes", () => {
+  it("shows the landing face to an anonymous visitor at the root route", async () => {
+    // 랜딩(브리프 landing-page-scope D1=ⓒ, 2026-09-12): 주소를 치면 소개와
+    // 정직한 한계가 먼저 나오고, 로그인 폼은 그 아래 문이다.
+    // under-strict: 루트가 곧바로 로그인 폼이면(랜딩 얼굴 없음) 첫 단정이
+    // 실패한다. over-strict: 랜딩의 버튼이 폼으로 못 넘어가면 둘째·셋째
+    // 단정이 실패한다 — 소개가 도달 불가인 것도 과잉이다.
+    mockFetch({ status: 401, body: { detail: "not authenticated" } });
+
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "쓴 것을 기억하는 집필 작업실" }),
+    ).toBeInTheDocument();
+    // D1=ⓒ — 세 가지 정직한 한계가 가입 절차 앞에 있다.
+    expect(screen.getByText("시작하기 전에")).toBeInTheDocument();
+    expect(screen.getByText(/가입은 승인제입니다/)).toBeInTheDocument();
+    expect(screen.getByText(/원고가 외부로 전송됩니다/)).toBeInTheDocument();
+    expect(screen.getByText(/개인 프로젝트입니다/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "개인정보처리방침 제4조" }),
+    ).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "로그인" }));
+    expect(await screen.findByLabelText("아이디")).toBeInTheDocument();
+  });
+
+  it("takes the landing signup button to the consent-gated form", async () => {
+    mockFetch({ status: 401, body: { detail: "not authenticated" } });
+
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole("heading", { name: "쓴 것을 기억하는 집필 작업실" });
+    await userEvent.click(screen.getByRole("button", { name: "새 계정 요청" }));
+    // 도착지는 동의 게이트가 있는 가입 폼이다 — 랜딩이 그 길을 우회하지 않는다.
+    expect(await screen.findByRole("checkbox")).toBeInTheDocument();
+  });
+
+  it("keeps deep links off the landing face", async () => {
+    // 목적지가 이미 주소에 있는 사람은 문구를 건너뛴다 — 랜딩은 루트의 얼굴이지
+    // 모든 익명 경로의 얼굴이 아니다(로그인 뒤 원래 화면으로 돌려보내는 딥링크
+    // 계약, P5=ⓐ 와 같은 축). over-strict: 랜딩이 딥링크를 잡아먹으면 실패한다.
+    mockFetch({ status: 401, body: { detail: "not authenticated" } });
+
+    render(
+      <MemoryRouter initialEntries={["/projects/p1"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByLabelText("아이디")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "쓴 것을 기억하는 집필 작업실" }),
+    ).toBeNull();
+  });
+
   it("renders the project index at the root route", async () => {
     const fetchMock = mockFetch(
       { body: { id: "u1", username: "alice", is_admin: false } },
@@ -237,6 +310,7 @@ describe("App routes", () => {
       </MemoryRouter>,
     );
 
+    await enterFromLanding();
     await screen.findByLabelText("아이디");
     await userEvent.type(screen.getByLabelText("아이디"), "root");
     await userEvent.type(screen.getByLabelText("비밀번호"), "pw123");
@@ -306,6 +380,7 @@ describe("App routes", () => {
       </MemoryRouter>,
     );
 
+    await enterFromLanding();
     await userEvent.type(await screen.findByLabelText("아이디"), "ghost");
     await userEvent.type(screen.getByLabelText("비밀번호"), "wrong");
     await userEvent.click(screen.getByRole("button", { name: "작업실 입장" }));
@@ -335,6 +410,7 @@ describe("App routes", () => {
       </MemoryRouter>,
     );
 
+    await enterFromLanding();
     await userEvent.type(await screen.findByLabelText("아이디"), "alice");
     await userEvent.type(screen.getByLabelText("비밀번호"), "temporary-password");
     await userEvent.click(screen.getByRole("button", { name: "작업실 입장" }));
@@ -543,6 +619,7 @@ describe("App routes", () => {
 
     resolveLogout(response({ ok: true }));
 
+    await enterFromLanding();
     expect(await screen.findByLabelText("아이디")).toBeInTheDocument();
   });
 
@@ -586,6 +663,7 @@ describe("App routes", () => {
     await userEvent.click(await screen.findByRole("button", { name: "alice" }));
     await userEvent.click(screen.getByRole("button", { name: "로그아웃" }));
 
+    await enterFromLanding();
     expect(await screen.findByLabelText("아이디")).toBeInTheDocument();
     expect(fetchMock.mock.calls[2][0]).toBe("/api/auth/logout");
     expect(fetchMock.mock.calls[2][1]).toMatchObject({
@@ -707,6 +785,7 @@ describe("App routes", () => {
       expect(screen.getByRole("button", { name: "나가는 중…" })).toBeDisabled();
 
       resolveLogout(response({ ok: true }));
+      await enterFromLanding();
       expect(await screen.findByLabelText("아이디")).toBeInTheDocument();
     });
 
@@ -741,6 +820,7 @@ describe("App routes", () => {
         </MemoryRouter>,
       );
 
+      await enterFromLanding();
       await screen.findByLabelText("아이디");
       await userEvent.click(
         screen.getByRole("button", { name: "계정이 없나요? 새 계정 요청" }),
@@ -784,6 +864,7 @@ describe("App routes", () => {
         </MemoryRouter>,
       );
 
+      await enterFromLanding();
       await screen.findByLabelText("아이디");
       await userEvent.click(
         screen.getByRole("button", { name: "계정이 없나요? 새 계정 요청" }),
@@ -822,6 +903,7 @@ describe("App routes", () => {
         </MemoryRouter>,
       );
 
+      await enterFromLanding();
       await screen.findByLabelText("아이디");
       await userEvent.type(screen.getByLabelText("아이디"), "bob");
       await userEvent.type(screen.getByLabelText("비밀번호"), "long-enough-pw");
@@ -848,6 +930,7 @@ describe("App routes", () => {
         </MemoryRouter>,
       );
 
+      await enterFromLanding();
       await screen.findByLabelText("아이디");
       await userEvent.type(screen.getByLabelText("아이디"), "bob");
       await userEvent.type(screen.getByLabelText("비밀번호"), "long-enough-pw");

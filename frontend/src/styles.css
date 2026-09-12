@@ -475,6 +475,66 @@ main {
   line-height: 1.5;
 }
 
+/* 랜딩 — 루트의 익명 얼굴(브리프 landing-page-scope D1=ⓒ). 폭은 이 블록이
+   스스로 제한한다(약관 문서와 같은 측정폭; main 폭 규칙은 건드리지 않는다). */
+.landing-page {
+  width: min(100%, 46rem);
+}
+
+.landing-blocks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  gap: 1.4rem;
+  margin-top: 1.8rem;
+}
+
+.landing-blocks h2 {
+  margin: 0 0 0.45rem;
+  font-size: var(--type-base);
+  font-weight: 700;
+}
+
+.landing-blocks p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--type-small);
+  line-height: 1.65;
+}
+
+.landing-limits {
+  margin-top: 1.8rem;
+  padding: 1.1rem 1.25rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-control);
+  border-radius: 0.5rem;
+}
+
+.landing-limits h2 {
+  margin: 0 0 0.6rem;
+  font-size: var(--type-base);
+  font-weight: 700;
+}
+
+.landing-limits ul {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.landing-limits li {
+  font-size: var(--type-small);
+  line-height: 1.6;
+}
+
+.landing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.9rem;
+  margin-top: 1.8rem;
+}
+
 /* 동의 확인란(방침 제3조) — 텍스트 입력 규칙(.login-form input 의 밑줄·전체폭)을
    물려받지 않게 input 축을 되돌리고, 문장 라벨이라 굵기를 본문으로 낮춘다. */
 .consent-check {

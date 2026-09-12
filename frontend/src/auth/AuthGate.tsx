@@ -14,6 +14,7 @@ import {
   subscribeUnauthorized,
   type User,
 } from "../api/client";
+import { Landing } from "./Landing";
 
 type AuthState = "checking" | "authenticated" | "anonymous" | "error";
 /**
@@ -117,6 +118,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     return (
       <LoginScreen
         sessionExpired={sessionExpired}
+        // 랜딩은 루트의 익명 얼굴이되 **세션 만료로 쫓겨난 사람은 건너뛴다** —
+        // 그 사람에게 필요한 것은 소개가 아니라 "세션이 만료되었습니다" 안내와
+        // 로그인 폼이다(랜딩에는 그 배너가 없다).
+        initialMode={
+          location.pathname === "/" && !sessionExpired ? "landing" : "signin"
+        }
         onAuthenticated={(nextUser) => {
           setUser(nextUser);
           setSessionExpired(false);
@@ -280,8 +287,11 @@ function SessionMenu({
   );
 }
 
-/** 로그인 화면의 세 얼굴 (승인제 가입, 2026-08-22).
+/** 로그인 화면의 네 얼굴 (승인제 가입 2026-08-22 · 랜딩 2026-09-12).
  *
+ * - "landing": 루트의 익명 얼굴 — 소개와 정직한 한계를 먼저 보여 준다
+ *   (브리프 landing-page-scope D1=ⓒ, 오너 2026-09-08). 딥링크로 들어온
+ *   사람은 이 얼굴을 건너뛴다: 목적지가 이미 주소에 있으므로.
  * - "signin": 아이디·비밀번호 (+ 관리자 1회용 비밀번호 교체 분기)
  * - "signup": 새 계정 요청 — **요청만** 만들고, 계정은 관리자 승인 뒤 생긴다.
  * - "requested": 요청 접수 안내 — 세션이 없으니 "가입됐다"가 아니라
@@ -292,16 +302,18 @@ function SessionMenu({
  * 그 403 을 받았다는 것 자체가 비밀번호까지 맞았다는 뜻이라, 사실상 본인에게만
  * 보이는 안내다.
  */
-type LoginMode = "signin" | "signup" | "requested";
+type LoginMode = "landing" | "signin" | "signup" | "requested";
 
 function LoginScreen({
   sessionExpired,
+  initialMode,
   onAuthenticated,
 }: {
   sessionExpired: boolean;
+  initialMode: LoginMode;
   onAuthenticated: (user: User) => void;
 }) {
-  const [mode, setMode] = useState<LoginMode>("signin");
+  const [mode, setMode] = useState<LoginMode>(initialMode);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [signupPasswordConfirmation, setSignupPasswordConfirmation] =
@@ -399,6 +411,15 @@ function LoginScreen({
     }
   }
 
+  if (mode === "landing") {
+    return (
+      <Landing
+        onEnter={() => switchMode("signin")}
+        onSignup={() => switchMode("signup")}
+      />
+    );
+  }
+
   if (mode === "requested") {
     return (
       <main className="auth-shell">
@@ -436,14 +457,14 @@ function LoginScreen({
           <h1>
             {mustReplacePassword
               ? "새 비밀번호 설정"
-              : signupForm ? "새 계정 요청" : "쓴 것을 기억하는 집필 작업실"}
+              : signupForm ? "새 계정 요청" : "로그인"}
           </h1>
           <p>
             {mustReplacePassword
               ? "관리자가 만든 초기 비밀번호를 본인만 아는 비밀번호로 바꿔 주세요."
               : signupForm
                 ? "요청하면 관리자 승인 뒤 계정이 열립니다. 비밀번호는 12자 이상입니다."
-                : "설정과 인물, 지난 원고를 AI가 기억한 채로 이어서 씁니다."}
+                : "아이디와 비밀번호로 작업실에 들어갑니다."}
           </p>
         </header>
 
