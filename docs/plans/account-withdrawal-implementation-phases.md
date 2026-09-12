@@ -1,6 +1,6 @@
 # 계정 탈퇴 — 구현 순서 (셀프 요청 · 30일 유예 · 취소 · 파기 데몬)
 
-상태: `Resolved(D1~D6 오너 2026-09-07) — **D4·Slice 0~5 완료**(0~2: 2026-09-08 · 3: 2026-09-09, SoT v1.8.51 · 4: 2026-09-10, SoT v1.8.54 · 5: 2026-09-12, SoT v1.8.60) · Slice 4b 미착수`
+상태: `Resolved(D1~D6 오너 2026-09-07) — **D4·Slice 0~5·Slice 4b 전부 완료**(0~2: 2026-09-08 · 3: 2026-09-09, SoT v1.8.51 · 4: 2026-09-10, SoT v1.8.54 · 5: 2026-09-12, SoT v1.8.60 · 4b: 2026-09-12)`
 작성: 2026-09-07
 확정된 것: [`service-policy-decisions.md`](service-policy-decisions.md) 결정 3(오너 2026-09-07) — **셀프 탈퇴 → 30일 유예 뒤 파기 · 문서는 지우고 사용량 원장은 남기며 사용자명 한 값 보존**
 선행: D8-6 프로젝트 파기(v1.7.82) · 08-2c 이름 이력(v1.7.90) · 정책 문서 [`../service-policy-contract.md`](../service-policy-contract.md) §6·§8
@@ -114,9 +114,11 @@
 
 **남는 계약 주의**: 상태는 **한 벌**이다(셸이 들고 `/me` 가 갱신한다 — 두 벌이면 취소가 배너를 못 끈다) · 남은 일수는 `purge_due_at` 에서 **빼기 + 올림**(30 을 프런트에 박지 않는다. 올림이라야 마지막 반나절이 "취소할 수 있는 하루"로 남는다) · **409 가 두 뜻**이라 동작별로 가른다(요청=마지막 관리자 · 취소=취소할 것 없음, 오류 아님) · 배너를 화면 안으로 옮기지 말 것(셀이 `/me` 아닌 경로에서 단정한다).
 
-## Slice 4b — 관리자 잔여 정리 (미착수)
+## Slice 4b — 관리자 잔여 정리 ✅ 완료(2026-09-12)
 
-**범위:** `AdminUserPayload` 의 탈퇴/파기 상태 · 잔여 정리 실행 operation · 관리자 화면. **트리거 없음 — 일정만 안 잡혔다.** 그때까지 수습 경로는 `scripts/account_purge_reconciler.py` 다. 갈래 셋은 위 브리프 §후속 고려에 있다.
+**범위:** `AdminUserPayload` 의 탈퇴/파기 상태 · 잔여 정리 실행 operation · 관리자 화면. 브리프 [`slice4b-admin-residual-purge-decisions.md`](slice4b-admin-residual-purge-decisions.md) — **오너 결정 ①ⓐ 계정 하나 · ②ⓐ 두 액션(조사→확인→실행) · ③ⓐ admin_audit 감사**(2026-09-12).
+
+**한 것** — 조사 dry-run `GET /admin/users/{id}/reconcile` + 실행 `POST` 동일 경로(operation 105→107 · admin 17→19). **본체는 한 벌**: 스크립트가 세웠던 조건·순서가 `deletion/account_reconcile.py` 로 옮겼고 스크립트와 라우터가 같은 모듈을 쓴다. 감사는 프로젝트 purge 의 2단계 선례(action `account_reconcile`·`target_type="user"`·outcome 이 `target_user_id` 를 상속). 읽기는 탈퇴 축 두 스탬프가 목록·상세에 오르고 stalled 계정만 정리 UI 를 얻는다(사용자명 입력 확인 — 프로젝트 파기 UI 선례의 계정축 이행).
 
 ## Slice 5 — 문서 승격 ✅ 완료(2026-09-12, SoT v1.8.60)
 
@@ -151,7 +153,7 @@
 
 ### 남은 착수 순서 (오너 *"급한거 먼저"*)
 
-~~D4(원장 개명)~~ · ~~Slice 0(상태 축)~~ · ~~Slice 1(요청·취소 API)~~ · ~~Slice 2(유예 접근 규칙)~~ · ~~Slice 3(파기 데몬)~~ · ~~Slice 4(화면)~~ · ~~Slice 5(문서 승격)~~ **완료 → 남은 것은 Slice 4b 하나**(관리자 잔여 정리)이고 **브리프가 먼저다**(트리거 없음).
+~~D4(원장 개명)~~ · ~~Slice 0(상태 축)~~ · ~~Slice 1(요청·취소 API)~~ · ~~Slice 2(유예 접근 규칙)~~ · ~~Slice 3(파기 데몬)~~ · ~~Slice 4(화면)~~ · ~~Slice 5(문서 승격)~~ · ~~Slice 4b(관리자 잔여 정리)~~ **전부 완료 — 이 계획서의 축은 닫혔다.** 남는 것은 유예 축(계획서 Deferred)과 오너 결정 대기 브리프뿐이다.
 
 ## Deferred
 
