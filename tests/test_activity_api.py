@@ -188,9 +188,11 @@ class ActivityRecordingTest(unittest.TestCase):
         `test_auth_users.py::WithdrawalCancelAfterPurgeClaimTest` 다.
 
         **★ 행 *수* 만 세면 이 셀은 행의 정체에 장님이다**(HP-1 폐쇄, 2026-09-12 승격
-        재검). replay 가 엉뚱한 action 을 남겨도 전건 초록이었다(실측) — 그래서 첫 저장
-        축의 짝(`test_the_first_final_save_is_recorded`)과 같은 모양으로 마지막 행의
-        정체를 함께 단정한다. 계약이 명시적으로 요구하는 것은 *행을 남기는가* 와
+        재검). replay 가 엉뚱한 action 을 남겨도 전건 초록이었다(실측) — 그래서 **같은
+        축(수동 저장)의 첫 저장 짝**(`test_saving_a_draft_version_records_who_and_when`)
+        과 같은 모양으로 마지막 행의 정체를 함께 단정한다(finalize 축의
+        `test_the_first_final_save_is_recorded` 는 다른 엔드포인트·다른 action 이라
+        이 셀의 짝이 아니다 — 독립 검증 2026-09-13 정정). 계약이 명시적으로 요구하는 것은 *행을 남기는가* 와
         `idempotent_replay` 둘이므로 이 단정은 하드닝이지 계약 확장이 아니다.
         """
         project_id, draft_id = self._finalizable_draft()

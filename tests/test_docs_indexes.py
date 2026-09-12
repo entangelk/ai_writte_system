@@ -374,22 +374,28 @@ class DocsReadmeIndexTest(unittest.TestCase):
         두 방향:
         - under — 지시받은 문장을 지우거나 두 낱말 중 하나를 걷으면 재실패한다.
         - over — 그 행의 수사를 다듬는 정상 편집(다른 행·맺음 문단 편집 포함)은 통과한다.
+
+        **★ 행을 `next()` 로 고르면 "그 행" 이 아니라 "첫 행" 을 잠근다**(독립 검증
+        2026-09-13, 변이 MS-4 실측). 같은 절 *앞쪽* 에 두 낱말을 다 가진 `- ` 행을
+        하나 끼워 넣으면, 지시받은 문장을 통째로 걷어내도 **20 passed 로 조용했다** —
+        앵커가 미끼로 옮겨 가기 때문이다. 그래서 후보를 세어 **정확히 하나**임을
+        먼저 단정한다: 둘이면 어느 줄이 잠기는지 아무도 모르므로 조용히 통과시키지
+        않고 그 자리에서 멈춘다.
         """
         section = _dormant_section(self.index)
-        briefs_line = next(
-            (
-                line
-                for line in section.splitlines()
-                if line.startswith("- ") and "verification_briefs/" in line
-            ),
-            None,
+        briefs_lines = [
+            line
+            for line in section.splitlines()
+            if line.startswith("- ") and "verification_briefs/" in line
+        ]
+        self.assertEqual(
+            len(briefs_lines),
+            1,
+            "휴면 절에서 verification_briefs/ 를 가리키는 불릿이 정확히 하나가 아니다 "
+            f"({len(briefs_lines)}개) — 앵커가 어느 줄에 걸리는지 모호해진다",
         )
-        self.assertIsNotNone(
-            briefs_line, "휴면 절에 verification_briefs/ 를 가리키는 행이 없다"
-        )
-        assert briefs_line is not None
-        self.assertIn("verifications/", briefs_line)
-        self.assertIn("전신", briefs_line)
+        self.assertIn("verifications/", briefs_lines[0])
+        self.assertIn("전신", briefs_lines[0])
 
 
 # "검증 기록 N건"을 세 문서가 각자 적는다. 세는 사람이 셋이면 반드시 갈라진다 —
