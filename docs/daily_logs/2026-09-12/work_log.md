@@ -396,3 +396,74 @@ HANDOFF Next Tasks 2·4번(한 창)을 구현했다. **같은 저장소에서 �
 - **판정 승격은 다음 독립 검증/승격 재검 몫**(조건을 닫은 세션이 자기 판정을 못 올린다 — 검증 기록에 폐쇄 보고만 남겼다).
 - 하드닝 H1(503 분기 도달 불가 — quota 선례와 같은 모양)·H2(스크립트 dry-run survey 두 번 호출)·H4(감사 payload 가 `target_user_id` 를 안 실어 화면이 계정 이벤트 대상을 reason 으로만 식별)·H5(스크립트 `main()` 무셀 — 이관 전과 동일)·H6(InMemory 저장소 분리)은 **비차단**으로 검증 기록에 남아 있다 — 화면 개선(H4)을 언제 열지는 오너 판단.
 - 배포 환경에서 스크립트 dry-run 한 번(검증 환경은 Mongo 접속 불가로 대체 확인만 했다).
+
+## 세션 72 — 오너 결정이 남긴 작은 후속 둘: 활동 로그 D1=ⓑ · 문서 D1=ⓐ (오너 지시 "핸드오프 확인해서 다음작업 진행해줘. 작업 다 되면 서브에이전트 스폰해서 독립검증 맡긴 후에 검증기록 확인해서 보강할 부분 보강까지 해줘")
+
+**착수 전에 갈래를 오너에게 물었다.** 핸드오프 번호표 5번은 *"최종 저장·분석 6차 승격 재검증"* 인데 그것은 **검증 작업**이라 지시하신 흐름(작업 → 서브에이전트 독립검증)과 층이 안 맞았다. 오너가 **"작은 후속 둘 구현"** 을 골랐다(그리고 5번 축은 **다른 작업 AI에게 맡겼다**고 같은 창에서 알려 왔다 — 이 세션은 트리를 공유한 채 돌았다). 커밋: `7979ff2`(활동 로그) · `68aedf3`(문서) · 기록(이 커밋).
+
+### Goals
+
+- 오너가 2026-09-08 에 답해 두고 *"독립 슬라이스를 열 크기가 아니라 다음 슬라이스에 얹는다"* 로 대기하던 후속 둘을 닫는 것. 핸드오프 Next Tasks 말미의 **"결정이 만든 작은 후속 둘"** 이 그 자리다.
+
+### Completed work
+
+- **① 활동 로그 D1=ⓑ**(브리프 [`plans/activity-log-replay-and-partial-decisions.md`](../../plans/activity-log-replay-and-partial-decisions.md)): `routers/drafts.py` 의 finalize handler 가 `idempotent_replay` 면 `activity.record` 를 건너뛴다. HTTP 계약·응답 스키마·operation 107 전부 무변.
+- **행위 셀 둘**(`tests/test_activity_api.py`, 18→20): `test_the_first_final_save_is_recorded`(over — 생략이 첫 요청까지 먹으면 재실패) · `test_resending_the_same_final_save_key_leaves_no_second_row`(under — 분기를 벗기면 재실패). **한 쌍이어야 하는 이유를 docstring 에 적었다**: under 만 두면 *"아무것도 기록 안 함"* 이 전건 통과한다. replay 셀은 응답의 `idempotent_replay: true` 를 함께 단정한다 — 그러지 않으면 *"재전송이 409 로 막혔다"* 와 구분이 안 되고 그때는 분기를 벗겨도 초록이다.
+- **② 문서 D1=ⓐ**(브리프 [`plans/docs-directory-dormant-and-restructure-decisions.md`](../../plans/docs-directory-dormant-and-restructure-decisions.md)): [`docs/README.md`](../../README.md) 에 §"휴면 디렉터리 (한 번 쓰고 멈춘 것)" 신설. 휴면 셋의 `.md` 전부를 링크하고, 브리프가 지시한 한 문장(*"`verifications/` 의 전신 — 더는 쓰지 않는다"*)을 `verification_briefs` 줄에 적었다. **파일은 안 옮겼다**(옛 인용 보존).
+- **가드 `DocsReadmeIndexTest` 신설**(`tests/test_docs_indexes.py`, 17→19): 링크 해석 + 휴면 문서 도달성, 양방향. 상수 `_DORMANT_DIRECTORIES` 에 *이 목록은 늘지 않는 것이 정상* 이라는 이유를 달았다.
+- **브리프 정정 셋 + 신설 절**: 아래 §Issues 의 반증을 브리프 세 곳(§결정 필요 13행 = 진원지 · §추천 · 오너 결정 D1 행)에 표식으로 달고 §"착수가 반증한 것" 을 신설했다. **원문은 지우지 않았다** — 그때의 근거라 이력 문서 규칙(제품명 개명 때의 판단)이 그대로 적용된다.
+- 기록: SoT **v1.8.64** · 루트 `README.md` 계약 버전 동기화(가드가 잡았다) · HANDOFF · CHANGELOG.
+
+### Issues found
+
+- **★ 활동 로그 브리프의 D1 근거가 거짓이었다 — 결정이 아니라 근거다.** 브리프가 세 곳에서 *"`writing/accept` 는 replay 를 안 남긴다 → ⓑ 는 선례에 맞추는 것"* 이라 적었는데 **코드에서 성립하지 않는다**. 착수 실측(in-memory 조립):
+
+  | 경로 | 같은 키 2회 POST | `idempotent_replay` | 활동 행 |
+  |---|---|---|---|
+  | `drafts/{id}/finalize` | 200 · 200 | `false` · `true` | **2건** |
+  | `writing/accept` | 200 · 200 | `false` · `true` | **2건** |
+
+  코드도 대칭이다 — `quota/dedupe.py::KEY_REPLAY_ACTIONS` 에서 둘 다 `"handler"` 이고, accept 의 `activity.record` 는 `result.saved is not None` 만 본다(replay 에도 `saved` 가 있다). **브리프가 근거로 인용한 [`verifications/2026-08-09/service_activity_log_accept_extension.md`](../../verifications/2026-08-09/service_activity_log_accept_extension.md) §6-② 의 표가 처음부터 반대로 적고 있었다** — 브리프가 자기 근거를 반대로 요약한 것이다.
+  - **결정은 유효해서 그대로 시행했다**: D1 행의 *뜻*(*"finalize 재전송이 활동 행을 만들지 않는다"*)은 명시적이고 반증되지 않았다. 반증된 것은 *왜 싼가* 다.
+  - **다만 결과가 예고와 다르다** — ⓑ 는 두 규칙을 하나로 모으는 것이 아니라 **셋으로 가른다**(finalize 무행 · accept 유행 · 수동 저장 유행). **D2 의 트리거가 당겨졌다**(종전 트리거 *"도그푸드에서 중복 행이 눈에 띄면"* 을 기다릴 것 없이 구현이 비대칭을 하나 더 만들었다). 갈래 둘(ⓐ 그대로 · ⓑ accept·수동 저장까지 확대)은 **오너 결정 사안이라 구현자가 고르지 않았다** — D2 는 오너가 유예로 명시한 축이고 유예를 구현자가 푸는 것은 결정을 대신하는 것이다. HANDOFF 오너 결정 대기 표에 한 줄로 올렸다.
+- **★ 문서 D1=ⓐ 의 전제도 거짓이었다.** 브리프 §후속 고려가 *"ⓐ 를 고르면 `test_docs_indexes` 가 그때부터 그 셋의 링크를 본다"* 고 적었지만, **착수 시점에 `docs/README.md` 는 어느 링크 가드 밖에도 있었다** — 잠긴 것은 `plans/`·`verifications/` 두 인덱스와 **최상위** `README.md` 셋뿐이었다(`_assert_links_resolve` 호출 지점 3개). 등재만 했다면 기계는 아무것도 안 봤을 것이고 결정의 값이 통째로 사라졌다. 그래서 가드를 함께 세웠다 — **이것은 범위 확대가 아니라 결정이 값으로 삼은 문장을 참으로 만드는 최소 작업**이다.
+- `draft_finalized` 는 **행위 셀이 하나도 없었다**(착수 전 실측 — `tests/` 전체에서 그 문자열은 `test_activity_actions.py` 의 분류표 개수 주석 한 줄뿐). 분류표 가드가 "배선의 존재"만 본다는 브리프의 경고가 그대로 관측된 것이다.
+
+### Decisions — User Decisions and Rationale
+
+- 오너(2026-09-12): 다음 축으로 **"작은 후속 둘 구현"** 선택(선택지 셋 중). 근거 — 지시한 흐름(구현 → 서브에이전트 독립검증 → 보강)과 층이 맞고, 오너 결정이 이미 끝난 유일한 미구현 축이다. 번호표 5번(최종 저장 6차 승격 재검증)은 **다른 작업 AI에게 맡겼다**(같은 창 고지).
+- 구현 선택: **D2 를 함께 풀지 않았다** — 근거가 반증돼 비대칭이 하나 늘었지만, D2 는 오너가 명시적으로 유예한 축이라 구현자가 푸는 것은 결정을 대신하는 것이다. 갈래만 브리프·HANDOFF 에 세웠다.
+- 구현 선택: **브리프 원문을 고쳐 쓰지 않고 표식 + 신설 절로 정정** — 이력 문서는 그때의 사실이고 이 저장소는 그것을 고치지 않는다(제품명 개명 때의 판단과 같은 자리). 읽는 사람이 거짓 문장을 지나치지 않도록 **진원지 줄에도** 표식을 달았다.
+
+### Verification
+
+- **변이 5종 전부 설계대로**(모두 **탈치 워크트리** `/tmp/mv_slice72` 에서 — 다른 AI와 트리를 공유하는 창이라 본 트리에 `git checkout` 을 쓰지 않았다. 프리플라이트 `git status --short` 무출력 확인 후 커밋 → 변이 → 원복 → clean 확인):
+
+  | 변이 | 방향 | diff | 결과 |
+  |---|---|---|---|
+  | MV-1 | under | `if not finalized.idempotent_replay:` → `if True:` | **1실패** `test_resending_the_same_final_save_key_leaves_no_second_row`(`5 != 4`) |
+  | MV-2 | over | 같은 줄 → `if False:` | **1실패** `test_the_first_final_save_is_recorded`(`+ draft_finalized`) |
+  | MV-3 | under | `docs/README.md` 의 `llm_gateway_f1_f2_live_smoke.md` 링크를 평문 코드로 | **1실패** `test_every_dormant_document_is_reachable_from_the_index` |
+  | MV-4 | over | `llm_gateway_slice_0_6_httpx.md` → 없는 `llm_gateway_slice_0_6.md` | **2실패**(도달성 + `test_every_index_link_resolves`) |
+  | MV-5 | 등가 | 분기를 `if …replay: pass / else:` 로 재작성 + 산문 *"폐기가 아니다"*→*"폐기와 다르다"* | **39 전건 초록** — 잠근 것이 표현이 아니라 도달성·분기임을 확인 |
+
+- 초점: `test_activity_api` **20 passed**(18→20) · `test_docs_indexes` **19 passed / 317 subtests**(17→19) · `test_activity_actions`·`test_activity_log`·`test_final_save_analysis`·`test_billable_actions` **45 passed / 212 subtests** · `test_repo_hygiene`·`test_typecheck` **17 passed / 624 subtests**.
+- 백엔드 전수: **3060 passed / 1 skipped / 4215 subtests · EXIT=0**(287초). 백엔드 소스가 바뀌었으므로(유도 조건 불성립) 전수를 돌렸고, **다른 AI와 겹치지 않게 탈치 워크트리**(`/tmp/mv_slice72` @ `68aedf3`)에서 실행했다.
+- **★ 두 리비전 통제 대조로 귀속했고, 그 과정에서 종전 기준선의 오류를 찾았다.** 직전 리비전 `0769cc9` 를 별도 워크트리에서 전수로 재 **3056 / 1 / 4215 · EXIT=0**(294초)을 얻었다 → 이 슬라이스의 델타는 **+4 passed / +0 subtests** 로 신규 셀 넷과 정확히 일치한다. **그런데 HANDOFF·README 가 적고 있던 값은 `3056 / 1 / 4213` 이었다 — subtest 가 2 틀렸다.** 세션 70 이 `3053/1/4213` 에서 *"+3 은 조건 폐쇄 셀 · 서비스 소스 무변이라 subtest 무변"* 으로 유도했는데, **그 사이 커밋 하나가 문서를 늘렸다**: `6beb7d3` 가 더한 **독립 검증 기록 자신**(`verifications/2026-09-12/admin_residual_purge_slice4b.md`). 양단 실측으로 갈랐다 —
+
+  | 리비전 | 무엇 | 문서 가드 둘(`test_docs_indexes`+`test_repo_hygiene`) | `test_admin_account_reconcile`+`test_auth_api` |
+  |---|---|---|---|
+  | `9806b7a` | 세션 70 기록(3053/1/4213 실측 시점) | 26 passed / **936** | — |
+  | `6beb7d3` | 검증 기록 문서 1건 추가 | 26 passed / **938**(+2) | 166 / 1222 |
+  | `a460237` | 조건 셋 폐쇄 셀 | — | **169**(+3) / 1222(**+0**) |
+  | `0769cc9` | 기록(새 문서 없음) | 26 / 938 | 169 / 1222 |
+
+  즉 **+2 는 검증 기록 문서 한 건**(`test_repo_hygiene` 문서당 1 + `test_docs_indexes` 검증 인덱스 행 1)이고, 조건 폐쇄 셀은 **passed 만 +3** 이었다. **★ 이것은 HANDOFF 가 이미 두 번 적어 둔 함정이다** — *"유도값은 시점의 함수다: 유도 직후 커밋(자기 슬라이스의 기록 포함)이 문서를 늘리면 그 값은 그 자리에서 낡는다"* 와 *"verifications 인덱스 행은 subtest 를 낸다"*. 두 문장이 다 있는데도 샜다 — **유도하는 슬라이스는 자기 검증 기록·work_log 가 낼 +N 을 함께 세야 한다**는 것을 기준선 줄에 적었다. HANDOFF·README 둘 다 정정했다(README ②행은 가드가 물고 있어 어긋나면 전수가 빨개진다).
+- 프런트: **무변**(이 슬라이스는 프런트 파일을 한 줄도 안 건드렸다 — `git show --stat` 로 확인 가능). 기준선 488/41 그대로.
+- **독립 검증(서브에이전트)**: 같은 세션에서 스폰해 진행 — 결과·판정은 이 절에 이어 적는다(기록 파일은 `verifications/2026-09-12/`).
+
+### Next steps
+
+- **오너 결정 대기 한 건 추가**: 활동 로그 **D2**(replay 축을 accept·수동 저장까지 넓힐지) — 트리거가 당겨졌다. 브리프 §착수가 반증한 것에 갈래 둘.
+- 판정 승격은 이 세션이 하지 않는다(조건을 닫은 세션이 자기 판정을 못 올린다).
+
