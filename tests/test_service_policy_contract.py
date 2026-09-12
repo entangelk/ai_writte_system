@@ -73,6 +73,13 @@ _ADDENDUM_VERSION_LINES = {
 #: 시행 전 판본의 버전 문자열. 문서 어디에도 남아 있으면 안 된다.
 _DRAFT_VERSION = "draft-0"
 
+#: 탈퇴 유예 기간을 적는 조항(문서마다 문장이 다르다). **수가 없는 부분**을 앵커로
+#: 쓴다 — 수를 포함하면 값이 바뀔 때 앵커가 먼저 죽어 진단이 바뀐다.
+_GRACE_CLAUSE_ANCHORS = {
+    "terms-of-service-draft.md": "3. **회원은 탈퇴를 요청할 수 있습니다.**",
+    "privacy-policy-draft.md": "3. **탈퇴를 요청하면",
+}
+
 #: **공개면에 가면 안 되는 편집 어휘** (오너 결정 2026-09-11 = 갈래 ⓑ).
 #:
 #: 약관·방침은 이제 프런트에도 실려 **회원이 읽는 화면**이 된다. 바이트 대조 가드는
@@ -251,9 +258,12 @@ class LegalDraftCoverageTest(unittest.TestCase):
 
         ★ 이 셀은 **이 한 축만** 잠근다. 약관·방침의 나머지 수(사용자명 64자 ·
         비밀번호 12/256자 · 대기 200건 · 5건/3,600초 · 5회/300초 · 세션 7일 ·
-        하루 20/주 100 · 승격 1시간 · 유예 30일)는 2026-09-10 검증이 손으로 훑어
+        하루 20/주 100 · 승격 1시간)는 2026-09-10 검증이 손으로 훑어
         전부 일치를 확인했을 뿐 기계가 보지 않는다 — 축마다 조항 앵커가 달라서
         일반화하려면 조항 ↔ 상수 표가 따로 필요하다(HANDOFF 잔여 부채).
+        **유예 30일은 그 목록을 떠났다** — 아래 `...grace_period...` 셀이 같은
+        모양으로 잠근다(Slice 5 가 그 축을 시행 중으로 올렸기 때문이다). 부채를
+        닫은 것이 아니라 **축 하나를 덜어낸 것**이다.
         """
         text = (_LEGAL_MAP.parent / "terms-of-service-draft.md").read_text(
             encoding="utf-8"
@@ -278,6 +288,50 @@ class LegalDraftCoverageTest(unittest.TestCase):
             "약관 제5조 1항이 시행값과 다른 수를 적는다 — 값의 정본은 상수이므로 "
             "약관 문장을 고친다",
         )
+
+    def test_the_withdrawal_grace_period_matches_the_constant(self):
+        """탈퇴 유예 **30일**을 두 문서에서 상수와 대조한다(Slice 5, 2026-09-12).
+
+        **왜 이 축이 이제 여기 있는가.** 승격(§8 → §6) 전에는 정책 문서에 포인터가
+        없어 값을 핀 셀 하나가 들었고, 약관·방침이 적는 *문장의 수* 는 아무도 보지
+        않았다 — 위 셀의 docstring 이 그 목록에 `유예 30일` 을 적어 둔 자리다.
+        승격이 그 공백을 드러냈다: 시행되는 축이 되면 **회원에게 보이는 수**가
+        시행값과 갈라질 수 있고, 제5조 1항이 실제로 그렇게 갈라졌다(4,000 대 6,000).
+
+        **두 문서를 함께 본다.** 같은 값을 둘이 나눠 드는 구조라 한쪽만 고치는 것이
+        실제로 일어나는 실수다(`_PROCURED` 셀이 같은 이유로 문서별로 가른다).
+
+        **양방향**:
+          · under — 상수가 60일로 바뀌고 문서를 안 고치면 문서별로 실패한다.
+          · over — 문서만 고치고 상수를 안 바꿔도 실패한다. 값의 정본은 상수다.
+          · over — 수를 그대로 둔 문장 다듬기는 통과한다(세는 것은 **수의 집합**
+            이므로 조항이 `30일` 을 몇 번 말하는지는 묶지 않는다).
+
+        ★ 앵커는 **수가 없는 부분**으로 잡는다 — 수를 포함하면 값이 바뀔 때 앵커가
+        먼저 죽어 *"조항을 못 찾았다"* 로 실패하는데, 그것은 값 불일치와 다른
+        진단이다. 조항 문장을 고쳤다면 이 앵커도 함께 고친다.
+        """
+        grace = _as_number(_load("auth/users.py", "WITHDRAWAL_GRACE_PERIOD"))
+        for name, anchor in _GRACE_CLAUSE_ANCHORS.items():
+            with self.subTest(document=name):
+                text = (_LEGAL_MAP.parent / name).read_text(encoding="utf-8")
+                clause = [
+                    line for line in text.splitlines() if line.startswith(anchor)
+                ]
+                self.assertEqual(
+                    len(clause), 1,
+                    f"{name}: 탈퇴 유예 조항의 자리를 못 찾았다 — 문장을 고쳤다면 "
+                    "이 앵커도 함께 고친다. 앵커가 헛돌면 이 셀은 아무것도 "
+                    "잠그지 않는다",
+                )
+                # 목록 번호(`3.`)는 조항의 값이 아니다.
+                stated = set(_numbers(clause[0].removeprefix("3.")))
+                self.assertEqual(
+                    stated, {grace},
+                    f"{name}: 탈퇴 조항이 {sorted(stated)} 을 적는데 시행값은 "
+                    f"{grace}일이다 — 값의 정본은 "
+                    "`auth/users.py::WITHDRAWAL_GRACE_PERIOD` 이므로 문장을 고친다",
+                )
 
     def test_both_documents_carry_the_enforced_version_and_date(self):
         """시행 표기와 **버전·시행일 리터럴**을 잠근다(오너 2026-09-09).
@@ -372,8 +426,9 @@ class LegalDraftProcuredValuesTest(unittest.TestCase):
         - over-strict: 표식만 걷고 날짜를 안 채우면 실패한다.
 
         ★ 진짜 시행은 이 셀을 **삭제**하는 것이 아니라 그때의 사실로 고치는 것이다.
-        시행 전제(README `시행 전제` 열 — 계정 탈퇴 파기 데몬 · 가입 동의 게이트)가
-        닫히기 전에는 어느 쪽도 움직이면 안 된다.
+        시행 전제(README `시행 전제` 열)는 **계정 탈퇴 축이 2026-09-12 에 닫혀**
+        가입 절차의 동의 기록 한 줄만 남았다 — 그 줄이 닫히는 날 README 표와 두
+        문서 머리말의 미제공 고지가 함께 움직인다.
 
         ★★ **이 셀이 못 보는 것 — 변이가 실제로 드러냈다(2026-09-09).** 재는 것은
         대괄호 *문자열의 존재*라, 머리말이 설명하려고 대괄호 표기를 **언급**하면

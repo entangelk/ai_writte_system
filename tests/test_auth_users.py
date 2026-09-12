@@ -619,9 +619,15 @@ class WithdrawalGracePeriodLiteralTest(unittest.TestCase):
     리터럴(`MIN_PASSWORD_LENGTH`·`SCENE_NOTE_MAX_CHARS`)과 같은 모양으로 **값을
     직접 박는 핀 셀**을 둔다.
 
-    ★ **시행되면 이 셀의 자리가 바뀐다.** 정책 문서 §6 이 이 상수를 가리키게 되는
-    순간(Slice 5) `tests/test_service_policy_contract.py` 가 문서-상수 대조를
-    맡는다. 그때까지는 §8(정해졌으나 미시행)이라 포인터가 없고, 그래서 여기다.
+    ★ **시행됐고(Slice 5, 2026-09-12) 이 셀은 그대로 남는다.** 종전 이 자리의
+    예고는 *"정책 문서 §6 이 상수를 가리키는 순간
+    `tests/test_service_policy_contract.py` 가 문서-상수 대조를 맡는다"* 였는데,
+    그것을 **이 셀이 필요 없어진다는 뜻으로 읽으면 안 된다.** 그 가드가 막는 것은
+    *문서가 상수와 갈라지는 것* 이고, 문서와 상수를 **함께** 60일로 바꾸면
+    초록이다 — 값을 잠그는 것은 여전히 이 핀뿐이다. 승격된 다른 축도 둘을 함께
+    든다(`MIN_PASSWORD_LENGTH` = §1 행 + `test_auth_api.py` 핀 ·
+    `SCENE_NOTE_MAX_CHARS` = §4 행 + `test_scene_notes.py` 핀). **승격은 잠금을
+    옮기는 것이 아니라 하나를 더하는 것이다.**
     """
 
     def test_the_grace_period_is_thirty_days(self) -> None:
