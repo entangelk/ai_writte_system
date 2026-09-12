@@ -1,5 +1,7 @@
 # 계정 탈퇴 Slice 4b — 관리자 잔여 정리 독립 검증
 
+**최종 판정은 합격이다** — 조건 셋(C1·C2·C3)은 폐쇄 커밋 `a460237`(SoT v1.8.63)이 닫았고, 승격 재검([`slice4b_closure_promotion.md`](slice4b_closure_promotion.md) — 변이 재적용 5종 전건 일치)이 판정을 올렸다. 아래 본문은 발행 시점 그대로다.
+
 ## Subject metadata
 
 - **검증일**: 2026-09-12 (검증 세션 71)
@@ -107,7 +109,9 @@
 
 ## Verdict
 
-**조건부 합격** — C1(POST 측 404·409 재확인 셀)·C2(member_quota 화면 배제 셀)·C3(프로젝트 purge 감사 축 무변 셀)를 추가로 닫을 것.
+**합격**(승격 — 2026-09-12 승격 재검 [`slice4b_closure_promotion.md`](slice4b_closure_promotion.md) 이 변이 재적용 5종으로 조건 폐쇄를 확증). 발행 시점 판정 원문:
+
+> **조건부 합격** — C1(POST 측 404·409 재확인 셀)·C2(member_quota 화면 배제 셀)·C3(프로젝트 purge 감사 축 무변 셀)를 추가로 닫을 것.
 
 이유: 구현 자체는 스코프 계약 전 축에서 성립한다 — 본체 한 벌(질의·조건·출력 키 무변 이관)·라우터 대상 계약·감사 2단계·읽기 표면(세 번째 축)·등재 전부·프런트 ②ⓐ 흐름이 모두 코드·셀·실측으로 확인됐고 뮤테이션 10종 중 7종이 기명 셀을 정확히 물었다. 그러나 계약이 요구하는 분기 셋(M3·M5b·M6 으로 실증된 무셀)이 남아 있어 — 경계 행렬에 빈 칸이 있는 채로 합격을 줄 수 없다(guide: "An untraced contract-required branch is a blocking finding regardless of the green bar").
 
