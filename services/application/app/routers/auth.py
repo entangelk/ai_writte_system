@@ -102,7 +102,8 @@ def register_auth(app, *, users, sessions, core_sot, activity, login_guard,
             )
         try:
             user = users.request_signup(
-                username=request.username, password=request.password
+                username=request.username, password=request.password,
+                agreed_terms_version=request.agreed_terms_version,
             )
         except DuplicateUsername as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc

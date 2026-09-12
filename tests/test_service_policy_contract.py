@@ -31,6 +31,8 @@ import unittest
 from datetime import timedelta
 from pathlib import Path
 
+from services.application.app.auth.users import TERMS_VERSION
+
 _ROOT = Path(__file__).resolve().parents[1]
 _DOC = _ROOT / "docs" / "service-policy-contract.md"
 _LEGAL_MAP = _ROOT / "docs" / "legal" / "README.md"
@@ -54,7 +56,10 @@ _PROCURED = {
 }
 
 #: 시행 표기의 두 리터럴. 버전 문자열은 **동의 게이트가 저장할 값**이라 계약이다.
-_ENFORCED_VERSION = "1.0"
+#: 동의 게이트(2026-09-12)가 상수를 만들었으므로 이제 이 핀은 그 상수를 가리킨다 —
+#: 여기서 값을 직접 들던 종전의 핀 방식(문서가 유일한 정본이었기 때문)의 자리를
+#: `auth/users.py::TERMS_VERSION` 이 이어받았고, 아래 셀들이 문서와 그 상수를 묶는다.
+_ENFORCED_VERSION = TERMS_VERSION
 _ENFORCED_DATE = "2026-09-08"
 
 #: 부칙이 자기 버전을 다시 적는 줄(문서마다 표기가 다르다). 머리말과 **같은 값**을
@@ -281,11 +286,12 @@ class LegalDraftCoverageTest(unittest.TestCase):
         *"실제 시행은 오너가 이 표식을 걷어내는 것으로 시작하며, 그때 이 셀도
         함께 고친다"* 라고 예고했다 — 지금이 그때다.
 
-        ★ **버전 문자열이 계약 리터럴이다.** 가입 동의 게이트(HANDOFF 10번)가
-        회원의 동의 시각과 **함께 이 문자열을 저장**하므로, 문서에서 조용히 바뀌면
-        저장된 동의가 어느 판본에 대한 것인지 갈라진다. 상수가 아직 코드에 없어
-        상징 참조로는 못 잠그고 **핀 셀**이 값을 직접 든다 — 게이트가 상수를
-        만드는 날 이 셀이 그 상수를 가리키게 바꾼다.
+        ★ **버전 문자열이 계약 리터럴이다.** 가입 동의 게이트(HANDOFF 10번,
+        2026-09-12 구현)가 회원의 동의 시각과 **함께 이 문자열을 저장**하므로,
+        문서에서 조용히 바뀌면 저장된 동의가 어느 판본에 대한 것인지 갈라진다.
+        게이트가 `auth/users.py::TERMS_VERSION` 상수를 만들었고 이 셀은 그
+        상수와 문서를 묶는다 — 버전을 올리려면 상수와 두 문서(그리고 프런트
+        상수, `frontend/src/legal/legalSource.test.ts` 핀)가 함께 움직여야 한다.
 
         ★★ **2026-09-10 독립 검증(B1)이 이 셀의 사각을 실측했다.** 종전에는 옛
         상태줄의 **정확한 문구**(`Draft — 법률 검토 전 · 미시행`)만 부정하고

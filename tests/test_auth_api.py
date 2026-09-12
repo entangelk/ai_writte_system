@@ -37,7 +37,7 @@ from services.application.app.auth.sessions import (
 from services.application.app.auth.models import User
 from services.application.app.auth.users import (
     WITHDRAWAL_GRACE_PERIOD,
-    MIN_PASSWORD_LENGTH, InMemoryUserRepository, UserService,
+    MIN_PASSWORD_LENGTH, TERMS_VERSION, InMemoryUserRepository, UserService,
 )
 from services.application.app.core_sot.service import (
     CoreSotService, InMemoryCoreSotRepository,
@@ -492,7 +492,8 @@ class SignupApiTest(unittest.TestCase):
     def test_a_signup_request_is_public_and_creates_a_pending_row(self) -> None:
         client, _, _ = _client()
         response = client.post(
-            "/auth/signup", json={"username": "bob", "password": "long-enough-pw"}
+            "/auth/signup", json={"username": "bob", "password": "long-enough-pw",
+                            "agreed_terms_version": TERMS_VERSION}
         )
         self.assertEqual(response.status_code, 201)
         body = response.json()
@@ -502,21 +503,24 @@ class SignupApiTest(unittest.TestCase):
     def test_a_taken_active_username_is_409(self) -> None:
         client, _, _ = _client()  # alice exists
         response = client.post(
-            "/auth/signup", json={"username": "alice", "password": "long-enough-pw"}
+            "/auth/signup", json={"username": "alice", "password": "long-enough-pw",
+                              "agreed_terms_version": TERMS_VERSION}
         )
         self.assertEqual(response.status_code, 409)
 
     def test_a_password_under_the_policy_minimum_is_400(self) -> None:
         client, _, _ = _client()
         response = client.post(
-            "/auth/signup", json={"username": "bob", "password": "short"}
+            "/auth/signup", json={"username": "bob", "password": "short",
+                             "agreed_terms_version": TERMS_VERSION}
         )
         self.assertEqual(response.status_code, 400)
 
     def test_a_pending_account_is_403_pending(self) -> None:
         client, _, _ = _client()
         client.post(
-            "/auth/signup", json={"username": "bob", "password": "long-enough-pw"}
+            "/auth/signup", json={"username": "bob", "password": "long-enough-pw",
+                            "agreed_terms_version": TERMS_VERSION}
         )
         # Right password, no session, told *why* (owner 2026-08-22): the 403 is
         # effectively addressed to the account owner alone, since reaching it
@@ -531,7 +535,8 @@ class SignupApiTest(unittest.TestCase):
     def test_a_rejected_account_is_403_rejected(self) -> None:
         client, users, _ = _client()
         client.post(
-            "/auth/signup", json={"username": "bob", "password": "long-enough-pw"}
+            "/auth/signup", json={"username": "bob", "password": "long-enough-pw",
+                            "agreed_terms_version": TERMS_VERSION}
         )
         # An admin's rejection (1-d will expose this as an operation; the domain
         # write itself is exercised in the users tests — here we only need the
@@ -555,7 +560,8 @@ class SignupApiTest(unittest.TestCase):
         # must look identical to guessing at any other account.
         client, _, _ = _client()
         client.post(
-            "/auth/signup", json={"username": "bob", "password": "long-enough-pw"}
+            "/auth/signup", json={"username": "bob", "password": "long-enough-pw",
+                            "agreed_terms_version": TERMS_VERSION}
         )
         wrong = client.post(
             "/auth/login", json={"username": "bob", "password": "not-the-password"}
@@ -1220,7 +1226,11 @@ class SignupApprovalApiTest(unittest.TestCase):
 
     def _request(self, username: str) -> str:
         response = self.client.post(
-            "/auth/signup", json={"username": username, "password": "long-enough-pw"}
+            "/auth/signup",
+            json={
+                "username": username, "password": "long-enough-pw",
+                "agreed_terms_version": TERMS_VERSION,
+            },
         )
         self.assertEqual(response.status_code, 201)
         # The signup response deliberately carries no id — the requester has no

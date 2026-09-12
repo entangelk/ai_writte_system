@@ -155,6 +155,8 @@ def _doc(value: User) -> dict:
         "status": value.status,
         "withdrawal_requested_at": value.withdrawal_requested_at,
         "purge_started_at": value.purge_started_at,
+        "terms_agreed_at": value.terms_agreed_at,
+        "terms_version_agreed": value.terms_version_agreed,
     }
 
 
@@ -189,6 +191,13 @@ def _entry(doc: dict) -> User:
         # 같은 이유로 `.get` 이고 같은 이유로 재라벨링이다 — 이 값도 aware `now` 와
         # 비교되는 자리(청구 조건·부분 파기 판정)에 간다.
         purge_started_at=_aware(doc.get("purge_started_at")),
+        # Consent axis (privacy policy §3): `.get` because every row written
+        # before the gate — administrator-created and pre-gate signups, the
+        # "no retroactive consent" population — has no field, and `.get(None)`
+        # is exactly the reading those rows must keep. Same UTC re-labeling as
+        # the two stamps above.
+        terms_agreed_at=_aware(doc.get("terms_agreed_at")),
+        terms_version_agreed=doc.get("terms_version_agreed"),
     )
 
 

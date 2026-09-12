@@ -82,6 +82,12 @@ class SignupRequest(BaseModel):
     # handed by the same untrusted party.
     username: str
     password: str
+    # Consent gate (privacy policy §3, 2026-09-12): the version of the terms
+    # documents the requester says they were shown and agreed to. Optional on
+    # the model *on purpose* (S-3 precedent) so the refusal — missing or stale
+    # version — is a 400 from the service like every other signup policy
+    # refusal, not a second, different "your input is wrong" shape.
+    agreed_terms_version: str | None = None
 
 
 class SignupResponse(BaseModel):

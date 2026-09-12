@@ -55,6 +55,17 @@ class User:
     # Deliberately not a lease with an expiry: a lease says "take it again
     # later", which is the one thing this axis must not do.
     purge_started_at: datetime | None = None
+    # Terms consent at signup (owner 2026-09-07, implemented 2026-09-12 —
+    # privacy policy §3). The signup request carries the version string of the
+    # documents the requester was shown; the server stamps the time and the
+    # *server's* current version (``TERMS_VERSION``), never the client's claim.
+    #
+    # None on every pre-gate row — administrator-created accounts and everyone
+    # who joined before the gate, because retroactive consent is deliberately
+    # not collected (policy §3 notice box). Same migration posture as
+    # ``must_change_password`` above: defaults keep old rows reading.
+    terms_agreed_at: datetime | None = None
+    terms_version_agreed: str | None = None
 
 
 

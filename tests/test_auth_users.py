@@ -10,6 +10,7 @@ from services.application.app.auth.users import (
     LastActiveAdmin, SignupNotPending, UserNotFound, UserService,
     WITHDRAWAL_GRACE_PERIOD, WithdrawalNotRequested,
     is_purge_due, purge_due_at,
+    TERMS_VERSION,
     USER_STATUS_ACTIVE, USER_STATUS_PENDING, USER_STATUS_REJECTED,
 )
 
@@ -320,7 +321,8 @@ class SignupApprovalTest(unittest.TestCase):
 
     def _pending(self, username: str):
         return self.service.request_signup(
-            username=username, password="long-enough-pw"
+            username=username, password="long-enough-pw",
+            agreed_terms_version=TERMS_VERSION,
         )
 
     def test_approval_moves_pending_to_active(self) -> None:
@@ -365,7 +367,10 @@ class SignupApprovalTest(unittest.TestCase):
         second = UserService(
             self.repo, hasher=self.hasher,
             clock=lambda: later, id_factory=self.ids,
-        ).request_signup(username="dave", password="long-enough-pw")
+        ).request_signup(
+            username="dave", password="long-enough-pw",
+            agreed_terms_version=TERMS_VERSION,
+        )
         # An active account and a rejected row must not appear in the queue.
         self.service.create_user(username="admin", password="pw123")
         rejected = self._pending("erin")
@@ -395,7 +400,8 @@ class SignupRequestTest(unittest.TestCase):
 
     def test_a_signup_request_creates_a_pending_row(self) -> None:
         user = self.service.request_signup(
-            username="bob", password="long-enough-pw"
+            username="bob", password="long-enough-pw",
+            agreed_terms_version=TERMS_VERSION,
         )
         self.assertEqual(user.status, USER_STATUS_PENDING)
         # The request grants nothing: enabled as a row, but not sign-in-able and
@@ -408,31 +414,43 @@ class SignupRequestTest(unittest.TestCase):
 
     def test_a_short_password_is_refused(self) -> None:
         with self.assertRaises(InvalidUserInput):
-            self.service.request_signup(username="bob", password="short")
+            self.service.request_signup(
+                username="bob", password="short",
+                agreed_terms_version=TERMS_VERSION,
+            )
         # Nothing was written — the refusal is not a pending row.
         self.assertIsNone(self.repo.get_by_username("bob"))
 
     def test_an_empty_username_is_refused(self) -> None:
         with self.assertRaises(InvalidUserInput):
-            self.service.request_signup(username="  ", password="long-enough-pw")
+            self.service.request_signup(
+                username="  ", password="long-enough-pw",
+                agreed_terms_version=TERMS_VERSION,
+            )
 
     def test_an_active_username_cannot_be_requested(self) -> None:
         self.service.create_user(username="alice", password="pw123")
         with self.assertRaises(DuplicateUsername):
             self.service.request_signup(
-                username="alice", password="long-enough-pw"
+                username="alice", password="long-enough-pw",
+                agreed_terms_version=TERMS_VERSION,
             )
 
     def test_a_pending_username_cannot_be_requested_twice(self) -> None:
-        self.service.request_signup(username="bob", password="long-enough-pw")
+        self.service.request_signup(
+            username="bob", password="long-enough-pw",
+            agreed_terms_version=TERMS_VERSION,
+        )
         with self.assertRaises(DuplicateUsername):
             self.service.request_signup(
-                username="bob", password="another-long-pw"
+                username="bob", password="another-long-pw",
+                agreed_terms_version=TERMS_VERSION,
             )
 
     def test_a_rejected_username_can_be_re_requested(self) -> None:
         first = self.service.request_signup(
-            username="bob", password="long-enough-pw"
+            username="bob", password="long-enough-pw",
+            agreed_terms_version=TERMS_VERSION,
         )
         # An admin's rejection (1-d writes this via set_status; simulated here
         # because this slice's domain only owns the request side).
@@ -448,7 +466,10 @@ class SignupRequestTest(unittest.TestCase):
         second = UserService(
             self.repo, hasher=self.hasher,
             clock=lambda: later, id_factory=_seq_ids(),
-        ).request_signup(username="bob", password="different-long-pw")
+        ).request_signup(
+            username="bob", password="different-long-pw",
+            agreed_terms_version=TERMS_VERSION,
+        )
 
         # Same row overwritten (not a second row), fresh request evidence:
         # new hash, new created_at, back to pending.
@@ -462,7 +483,8 @@ class SignupRequestTest(unittest.TestCase):
 
     def test_a_deactivated_rejected_row_is_not_resurrected(self) -> None:
         first = self.service.request_signup(
-            username="bob", password="long-enough-pw"
+            username="bob", password="long-enough-pw",
+            agreed_terms_version=TERMS_VERSION,
         )
         deactivated_and_rejected = User(
             id=first.id, username=first.username,
@@ -475,13 +497,15 @@ class SignupRequestTest(unittest.TestCase):
         # back — that would make signup an un-deactivation surface.
         with self.assertRaises(DuplicateUsername):
             self.service.request_signup(
-                username="bob", password="yet-another-long-pw"
+                username="bob", password="yet-another-long-pw",
+                agreed_terms_version=TERMS_VERSION,
             )
         self.assertFalse(self.repo.get_by_username("bob").is_active)
 
     def test_a_replacement_row_is_never_an_admin(self) -> None:
         first = self.service.request_signup(
-            username="bob", password="long-enough-pw"
+            username="bob", password="long-enough-pw",
+            agreed_terms_version=TERMS_VERSION,
         )
         rejected_admin = User(
             id=first.id, username=first.username,
@@ -491,9 +515,100 @@ class SignupRequestTest(unittest.TestCase):
         )
         self.repo.replace(rejected_admin)
         second = self.service.request_signup(
-            username="bob", password="long-enough-pw-2"
+            username="bob", password="long-enough-pw-2",
+            agreed_terms_version=TERMS_VERSION,
         )
         self.assertFalse(second.is_admin)
+
+
+class SignupConsentGateTest(unittest.TestCase):
+    """가입 동의 게이트 (방침 제3조, 오너 2026-09-07 · 구현 2026-09-12).
+
+    계약은 방침 문장 그대로다: *가입 절차에서 확인하고 동의*하며, 운영자는
+    **동의한 시각과 동의한 문서의 버전을 기록**한다.
+
+    under-strict 방향: 동의 축이 없어도(2번) 시행 버전과 다른 청구이면(3번)
+    가입이 되면 실패한다 — 게이트가 없는 것이므로.
+    over-strict 방향: 동의한 정상 가입에서 스탬프가 안 찍히거나(1번) 관리자가
+    만든 계정에 소급으로 동의가 박히면(5번) 실패한다 — 소급 동의를 받지
+    않는다는 방침 제3조 안내 상자와 어긋난다.
+    """
+
+    def setUp(self) -> None:
+        self.repo = InMemoryUserRepository()
+        self.hasher = _FakeHasher()
+        self.service = UserService(
+            self.repo, hasher=self.hasher,
+            clock=lambda: _FIXED_TIME, id_factory=_seq_ids(),
+        )
+
+    def test_consent_is_stamped_with_the_server_clock_and_version(self) -> None:
+        user = self.service.request_signup(
+            username="bob", password="long-enough-pw",
+            agreed_terms_version=TERMS_VERSION,
+        )
+        # 시각은 서버 시계다 — 클라이언트가 시각을 보낸 적도 없고, 보냈다면
+        # 그 값을 믿는 이유가 없다. 버전은 서버 상수다(아래 3번과 짝).
+        self.assertEqual(user.terms_agreed_at, _FIXED_TIME)
+        self.assertEqual(user.terms_version_agreed, TERMS_VERSION)
+
+    def test_a_signup_without_a_version_is_refused(self) -> None:
+        with self.assertRaises(InvalidUserInput):
+            self.service.request_signup(
+                username="bob", password="long-enough-pw",
+            )
+        # 거절은 행을 남기지 않는다 — 동의 없는 pending 행이 생기면 그 행의
+        # 승인은 "동의한 적 없는 계정"을 만든다.
+        self.assertIsNone(self.repo.get_by_username("bob"))
+
+    def test_a_stale_version_claim_is_refused(self) -> None:
+        # 게이트가 보여 준 문서가 서버가 시행하는 판본이 아닌 순간의 요청이다
+        # (옛 캐시의 폼). 동의의 대상이 무엇이었는지 서버가 보증할 수 없으므로
+        # 가입 자체를 거부한다 — 저장을 서버 상수로 대체하는 것으로는 부족하다.
+        with self.assertRaises(InvalidUserInput):
+            self.service.request_signup(
+                username="bob", password="long-enough-pw",
+                agreed_terms_version="0.9",
+            )
+        self.assertIsNone(self.repo.get_by_username("bob"))
+
+    def test_a_re_request_stamps_a_fresh_consent(self) -> None:
+        first = self.service.request_signup(
+            username="bob", password="long-enough-pw",
+            agreed_terms_version=TERMS_VERSION,
+        )
+        # 재요청은 거절된 username 에만 열린다(위 SignupRequestTest 5번 축).
+        rejected = User(
+            id=first.id, username=first.username,
+            password_hash=first.password_hash, is_admin=False,
+            is_active=True, created_at=first.created_at,
+            must_change_password=False, status=USER_STATUS_REJECTED,
+        )
+        self.repo.replace(rejected)
+        later = datetime(2026, 9, 12, 9, 0, tzinfo=UTC)
+        second = UserService(
+            self.repo, hasher=self.hasher,
+            clock=lambda: later, id_factory=_seq_ids(),
+        ).request_signup(
+            username="bob", password="different-long-pw",
+            agreed_terms_version=TERMS_VERSION,
+        )
+        # 재요청은 새 가입이다 — 거절된 옛 행이 동의를 남긴 적 없다면(None
+        # 이라기보다는 이 테스트에서는 첫 동의가 있었지만) 스탬프는 재요청
+        # 시각으로 다시 찍힌다. 첫 동의 시각이 승계되면 재요청자가 옛 판본에
+        # 동의한 것으로 기록된 채 계정이 열린다.
+        self.assertEqual(second.id, first.id)
+        self.assertEqual(second.terms_agreed_at, later)
+        self.assertEqual(second.terms_version_agreed, TERMS_VERSION)
+
+    def test_an_admin_created_account_carries_no_consent(self) -> None:
+        # 소급 동의를 받지 않는다(방침 제3조 안내 상자). 관리자가 만든 계정과
+        # 게이트 이전 계정의 None 은 "동의하지 않은 인구"라는 방침적 사실이지
+        # 결함이 아니다 — 이 셀은 그 축이 게이트에 의해 조용히 채워지지
+        # 않는지를 잠근다.
+        made = self.service.create_user(username="carol", password="pw123")
+        self.assertIsNone(made.terms_agreed_at)
+        self.assertIsNone(made.terms_version_agreed)
 
 
 class WithdrawalGracePeriodLiteralTest(unittest.TestCase):

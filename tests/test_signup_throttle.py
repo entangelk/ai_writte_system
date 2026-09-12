@@ -54,6 +54,7 @@ from services.application.app.auth.users import (
     InMemoryUserRepository,
     InvalidUserInput,
     SignupQueueFull,
+    TERMS_VERSION,
     UserService,
 )
 from services.application.app.main import create_app
@@ -238,21 +239,24 @@ class SignupInputBoundsTest(unittest.TestCase):
     def test_an_over_long_username_is_refused_before_hashing(self) -> None:
         with self.assertRaises(InvalidUserInput):
             self.users.request_signup(
-                username="u" * (MAX_USERNAME_LENGTH + 1), password="long-enough-pw"
+                username="u" * (MAX_USERNAME_LENGTH + 1), password="long-enough-pw",
+                agreed_terms_version=TERMS_VERSION,
             )
         self.assertEqual(self.hasher.calls, 0)
 
     def test_an_over_long_password_is_refused_before_hashing(self) -> None:
         with self.assertRaises(InvalidUserInput):
             self.users.request_signup(
-                username="bob", password="p" * (MAX_PASSWORD_LENGTH + 1)
+                username="bob", password="p" * (MAX_PASSWORD_LENGTH + 1),
+                agreed_terms_version=TERMS_VERSION,
             )
         self.assertEqual(self.hasher.calls, 0)
 
     def test_the_boundary_values_themselves_are_accepted(self) -> None:
         """over-strict 축: 상한을 한 글자 당기면 이 셀이 실패한다."""
         user = self.users.request_signup(
-            username="u" * MAX_USERNAME_LENGTH, password="p" * MAX_PASSWORD_LENGTH
+            username="u" * MAX_USERNAME_LENGTH, password="p" * MAX_PASSWORD_LENGTH,
+            agreed_terms_version=TERMS_VERSION,
         )
         self.assertEqual(user.status, "pending")
 
@@ -265,7 +269,8 @@ class SignupQueueCeilingTest(unittest.TestCase):
     def _fill(self, count: int) -> None:
         for index in range(count):
             self.users.request_signup(
-                username=f"pending-{index}", password="long-enough-pw"
+                username=f"pending-{index}", password="long-enough-pw",
+                agreed_terms_version=TERMS_VERSION,
             )
 
     def test_the_queue_is_refused_at_the_ceiling_and_accepted_below_it(self) -> None:
@@ -274,11 +279,15 @@ class SignupQueueCeilingTest(unittest.TestCase):
         over-strict: 상한을 한 칸 당기면 ``_fill`` 자체가 예외로 죽는다.
         """
         self._fill(MAX_PENDING_SIGNUPS - 1)
-        self.users.request_signup(username="last-one", password="long-enough-pw")
+        self.users.request_signup(
+            username="last-one", password="long-enough-pw",
+            agreed_terms_version=TERMS_VERSION,
+        )
         before = self.hasher.calls
         with self.assertRaises(SignupQueueFull):
             self.users.request_signup(
-                username="one-too-many", password="long-enough-pw"
+                username="one-too-many", password="long-enough-pw",
+                agreed_terms_version=TERMS_VERSION,
             )
         # 거절이 해셔 앞이다 — 이 가드의 요점.
         self.assertEqual(self.hasher.calls, before)
@@ -290,12 +299,14 @@ class SignupQueueCeilingTest(unittest.TestCase):
         막으면 오너 결정 *"거절은 밴이 아니다"*(SoT v1.7.97)가 뒤집힌다.
         """
         rejected = self.users.request_signup(
-            username="comeback", password="long-enough-pw"
+            username="comeback", password="long-enough-pw",
+            agreed_terms_version=TERMS_VERSION,
         )
         self.users.reject_signup(rejected.id)
         self._fill(MAX_PENDING_SIGNUPS)
         again = self.users.request_signup(
-            username="comeback", password="long-enough-pw"
+            username="comeback", password="long-enough-pw",
+            agreed_terms_version=TERMS_VERSION,
         )
         self.assertEqual(again.status, "pending")
 
@@ -339,12 +350,19 @@ class SignupThrottleHttpTest(unittest.TestCase):
             self.assertEqual(
                 client.post(
                     "/auth/signup",
-                    json={"username": f"u{index}", "password": "long-enough-pw"},
+                    json={
+                        "username": f"u{index}", "password": "long-enough-pw",
+                        "agreed_terms_version": TERMS_VERSION,
+                    },
                 ).status_code,
                 201,
             )
         refused = client.post(
-            "/auth/signup", json={"username": "u2", "password": "long-enough-pw"}
+            "/auth/signup",
+            json={
+                "username": "u2", "password": "long-enough-pw",
+                "agreed_terms_version": TERMS_VERSION,
+            },
         )
         self.assertEqual(refused.status_code, 429)
         self.assertIn("Retry-After", refused.headers)
@@ -362,12 +380,18 @@ class SignupThrottleHttpTest(unittest.TestCase):
         for index in range(2):
             attacker.post(
                 "/auth/signup",
-                json={"username": f"spray-{index}", "password": "long-enough-pw"},
+                json={
+                    "username": f"spray-{index}", "password": "long-enough-pw",
+                    "agreed_terms_version": TERMS_VERSION,
+                },
             )
         self.assertEqual(
             attacker.post(
                 "/auth/signup",
-                json={"username": "spray-2", "password": "long-enough-pw"},
+                json={
+                    "username": "spray-2", "password": "long-enough-pw",
+                    "agreed_terms_version": TERMS_VERSION,
+                },
             ).status_code,
             429,
         )
@@ -375,7 +399,10 @@ class SignupThrottleHttpTest(unittest.TestCase):
         self.assertEqual(
             bystander.post(
                 "/auth/signup",
-                json={"username": "honest", "password": "long-enough-pw"},
+                json={
+                    "username": "honest", "password": "long-enough-pw",
+                    "agreed_terms_version": TERMS_VERSION,
+                },
             ).status_code,
             201,
         )
@@ -393,7 +420,10 @@ class SignupThrottleHttpTest(unittest.TestCase):
         for index in range(3):
             response = client.post(
                 "/auth/signup",
-                json={"username": f"f{index}", "password": "long-enough-pw"},
+                json={
+                    "username": f"f{index}", "password": "long-enough-pw",
+                    "agreed_terms_version": TERMS_VERSION,
+                },
                 headers={
                     # 매 요청 왼쪽 값을 바꾼다 — 왼쪽을 읽으면 매번 새 버킷이다.
                     "X-Forwarded-For": f"10.9.9.{index}, 203.0.113.9, 172.19.0.1",
@@ -408,14 +438,20 @@ class SignupThrottleHttpTest(unittest.TestCase):
             self.assertEqual(
                 client.post(
                     "/auth/signup",
-                    json={"username": f"q{index}", "password": "long-enough-pw"},
+                    json={
+                        "username": f"q{index}", "password": "long-enough-pw",
+                        "agreed_terms_version": TERMS_VERSION,
+                    },
                 ).status_code,
                 201,
             )
         self.assertEqual(
             client.post(
                 "/auth/signup",
-                json={"username": "one-too-many", "password": "long-enough-pw"},
+                json={
+                    "username": "one-too-many", "password": "long-enough-pw",
+                    "agreed_terms_version": TERMS_VERSION,
+                },
             ).status_code,
             429,
         )
@@ -439,7 +475,10 @@ class SignupThrottleHttpTest(unittest.TestCase):
             self.assertEqual(
                 client.post(
                     "/auth/signup",
-                    json={"username": f"n{index}", "password": "long-enough-pw"},
+                    json={
+                        "username": f"n{index}", "password": "long-enough-pw",
+                        "agreed_terms_version": TERMS_VERSION,
+                    },
                 ).status_code,
                 201,
             )
@@ -448,7 +487,11 @@ class SignupThrottleHttpTest(unittest.TestCase):
         # 않게 하는 과잉 방어 단정이다.
         self.assertEqual(before, 2)
         refused = client.post(
-            "/auth/signup", json={"username": "n2", "password": "long-enough-pw"}
+            "/auth/signup",
+            json={
+                "username": "n2", "password": "long-enough-pw",
+                "agreed_terms_version": TERMS_VERSION,
+            },
         )
         self.assertEqual(refused.status_code, 429)
         # 거절은 해셔 앞이다. 뒤로 밀리면 이 요청의 Argon2 가 이미 끝나 있다.
@@ -468,10 +511,44 @@ class SignupThrottleHttpTest(unittest.TestCase):
                 json={
                     "username": "u" * (MAX_USERNAME_LENGTH + 1),
                     "password": "long-enough-pw",
+                    "agreed_terms_version": TERMS_VERSION,
                 },
             ).status_code,
             400,
         )
+
+    def test_the_consent_gate_answers_400_not_422(self) -> None:
+        """동의 게이트(방침 제3조)도 같은 얼굴로 거부한다.
+
+        ``agreed_terms_version`` 을 모델 필수 필드로 만들면 누락이 422 가 되어
+        "약관에 동의하지 않았다"와 "입력 형식이 틀렸다"가 다른 상태코드로 갈라
+        진다 — 동의 누락·옛 판본 청구 모두 이 파일의 다른 정책 거절과 같은
+        400 이다. under-strict: 게이트 검증을 지우면 201 이 되어 실패한다.
+        over-strict: 동의한 정상 요청까지 막으면 아래 승인 단정이 실패한다.
+        """
+        app = _app(max_requests=5)
+        client = self._client(app, "203.0.113.9")
+        missing = client.post(
+            "/auth/signup",
+            json={"username": "bob", "password": "long-enough-pw"},
+        )
+        self.assertEqual(missing.status_code, 400)
+        stale = client.post(
+            "/auth/signup",
+            json={
+                "username": "bob", "password": "long-enough-pw",
+                "agreed_terms_version": "0.9",
+            },
+        )
+        self.assertEqual(stale.status_code, 400)
+        agreed = client.post(
+            "/auth/signup",
+            json={
+                "username": "bob", "password": "long-enough-pw",
+                "agreed_terms_version": TERMS_VERSION,
+            },
+        )
+        self.assertEqual(agreed.status_code, 201)
 
 
 # ── ⑤ env 기동 거부 (독립 검증 B2 폐쇄) ─────────────────────────────────────

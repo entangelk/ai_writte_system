@@ -108,6 +108,16 @@ USER_STATUS_REJECTED = "rejected"
 # than the terms promise, with nothing saying it had.
 WITHDRAWAL_GRACE_PERIOD = timedelta(days=30)
 
+# The version string of the enforced terms/privacy documents (owner 2026-09-08;
+# the documents themselves carry it in two places each, pinned by
+# ``tests/test_service_policy_contract.py``). The signup consent gate stores
+# this together with the consent time — privacy policy §3. **One place** on the
+# code side: the frontend carries its own constant and a byte guard ties both
+# to the documents, so a version bump moves documents + both constants
+# together or the suites go red. The server stores *this* value, never the
+# version a client claims to have agreed to.
+TERMS_VERSION = "1.0"
+
 
 def purge_due_at(user: User) -> datetime | None:
     """When this account's purge falls due, or None if it is not withdrawing.
@@ -330,13 +340,25 @@ class UserService:
         self._repo.insert(user)
         return user
 
-    def request_signup(self, *, username: str, password: str) -> User:
+    def request_signup(
+        self, *, username: str, password: str,
+        agreed_terms_version: str | None = None,
+    ) -> User:
         """Self-service signup request (owner 2026-08-22 — approval required).
 
         Creates a ``pending`` row. No session is ever issued against it; an
         administrator approves it to ``active`` later (1-d). The password is
         final — unlike C-6 there is nobody else choosing it — so the minimum
         length policy applies *here*, the moment it is chosen.
+
+        ``agreed_terms_version`` is the consent gate (privacy policy §3, owner
+        2026-09-07): the requester's statement that they were shown — and
+        agreed to — documents of that version. It must name the version the
+        server is currently enforcing; anything else (including nothing) is a
+        400 refusal, so a stale cached form can never mint an account whose
+        consent points at documents the server no longer serves. What gets
+        *stored* is the server clock and ``TERMS_VERSION``, not the claim —
+        the server is the only witness of what "1.0" meant.
         """
         username = username.strip()
         if not username:
@@ -355,6 +377,17 @@ class UserService:
             raise InvalidUserInput(
                 f"password must be at most {MAX_PASSWORD_LENGTH} characters"
             )
+        # Same cheapness rule as the bounds above: refuse before the hasher.
+        # Rejected here rather than on the pydantic model on purpose (S-3
+        # precedent): every signup policy refusal keeps the single 400 face,
+        # so a screen never has to branch on two shapes of "your input is
+        # wrong".
+        if agreed_terms_version != TERMS_VERSION:
+            raise InvalidUserInput(
+                "agreed_terms_version must name the enforced terms version "
+                f"({TERMS_VERSION})"
+            )
+        agreed_at = self._clock()
         existing = self._repo.get_by_username(username)
         if existing is not None:
             # Re-request is allowed only over a rejected row that is still an
@@ -374,6 +407,11 @@ class UserService:
                 created_at=self._clock(),
                 must_change_password=False,
                 status=USER_STATUS_PENDING,
+                # A re-request is a *new* signup — the consent is taken again
+                # at whatever version is enforced now, not inherited from the
+                # rejected row (which predates the gate and carries None).
+                terms_agreed_at=agreed_at,
+                terms_version_agreed=TERMS_VERSION,
             )
             self._repo.replace(replacement)
             return replacement
@@ -395,6 +433,8 @@ class UserService:
             created_at=self._clock(),
             must_change_password=False,
             status=USER_STATUS_PENDING,
+            terms_agreed_at=agreed_at,
+            terms_version_agreed=TERMS_VERSION,
         )
         self._repo.insert(user)
         return user
