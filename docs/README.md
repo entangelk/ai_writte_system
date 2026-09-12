@@ -14,6 +14,7 @@
 | **운영 관찰** | [`dogfood-checklist.md`](dogfood-checklist.md) | 실사용에서 무엇을 지켜볼지 — HANDOFF Next Tasks 가 실제로 가리키는 살아 있는 목록 |
 | **실행 이력** | [`daily_logs/`](daily_logs/) | 일자별 작업 로그·오너 결정·실측값 |
 | **서비스/운영** | [`runbooks/`](runbooks/local-llama-server.md) · [`benchmarks/`](benchmarks/2026-07-15/writing_loop_per_stage_ceiling_q4.md) · [`live_review_briefs/`](live_review_briefs/2026-07-18/writing_workspace_ux_restructure.md) | 기동 절차·성능 실측·실사용 검수에서 온 계약 재협상 |
+| **휴면**(보존) | [아래 절](#휴면-디렉터리-한-번-쓰고-멈춘-것) | 한 번 쓰고 관행이 멈춘 디렉터리 셋 — 지우지 않고 여기서 닿게 한다 |
 | **작업 절차** | [`guides/`](guides/records-and-handoff.md) | 기록·인수인계 규칙, 독립 검증 절차 |
 | **아이디에이션 원본**(보존) | [`abstract.md`](abstract.md) · [`contracts.md`](contracts.md) · [`chat-revision-ideation.md`](chat-revision-ideation.md) | 착수 전 구상 — **계약이 아니다**. Phase 7 대화형 수정은 여기서 왔고 아직 유예다 |
 
@@ -32,6 +33,18 @@
 ## 실검수 브리프
 
 실제 브라우저 dogfood에서 발견된 결함이 기존 승인 계약의 충돌이나 owner-level 수정 결정을 요구할 때는 [`live_review_briefs/`](live_review_briefs/)에 날짜별 브리프를 남긴다. 이 문서는 재현 증거·충돌 계약·오너 결정·구현/재검수 기준을 보존한다. 실행 이력은 `daily_logs/`, 독립 감사 결과는 `verifications/`에 둔다.
+
+## 휴면 디렉터리 (한 번 쓰고 멈춘 것)
+
+> 오너 결정 2026-09-08 **D1=ⓐ**([`plans/docs-directory-dormant-and-restructure-decisions.md`](plans/docs-directory-dormant-and-restructure-decisions.md)).
+> 아래 셋은 **한 번 쓰고 관행이 멈춘** 디렉터리다. **파일을 옮기지 않는다** — 옛 기록의 인용이 깨지기 때문이다.
+> 대신 여기서 한 줄씩 닿게 해 문서 그래프에 붙여 둔다. `test_docs_indexes` 가 이 절의 링크를 양방향으로 본다.
+
+- **[`verification_briefs/2026-06-24/`](verification_briefs/) — 휴면.** **[`verifications/`](verifications/README.md) 의 전신이고 더는 쓰지 않는다**(이름이 닮아 헷갈리는 것이 이 셋이 오래 안 보인 이유의 절반이다). LLM Gateway 착수기의 초기 실험 셋: [`llm_gateway_slice_0_1_to_0_5.md`](verification_briefs/2026-06-24/llm_gateway_slice_0_1_to_0_5.md) · [`llm_gateway_slice_0_6_httpx.md`](verification_briefs/2026-06-24/llm_gateway_slice_0_6_httpx.md) · [`llm_gateway_f1_f2_live_smoke.md`](verification_briefs/2026-06-24/llm_gateway_f1_f2_live_smoke.md). **2026-09-08 실측으로 이 셋이 살아 있는 문서 그래프에서 완전히 끊긴 유일한 파일들이었다.**
+- **[`benchmarks/2026-07-15/`](benchmarks/) — 휴면.** 글쓰기 루프의 단계별 상한 실측을 한 번 재고 멈췄다: [`writing_loop_per_stage_ceiling_q4.md`](benchmarks/2026-07-15/writing_loop_per_stage_ceiling_q4.md)(원자료 [`writing_loop_per_stage_ceiling_q4.json`](benchmarks/2026-07-15/writing_loop_per_stage_ceiling_q4.json) · [`writing_gate_quality_q4_baseline.json`](benchmarks/2026-07-15/writing_gate_quality_q4_baseline.json)). **머신-로컬 수치라 다른 머신 값과 비교하지 않는다.**
+- **[`live_review_briefs/2026-07-18/`](live_review_briefs/) — 휴면.** 실사용 검수 브리프 둘: [`writing_workspace_ux_restructure.md`](live_review_briefs/2026-07-18/writing_workspace_ux_restructure.md) · [`analysis_retry_after_accept.md`](live_review_briefs/2026-07-18/analysis_retry_after_accept.md). 관행이 [`verifications/`](verifications/README.md)·[`daily_logs/`](daily_logs/) 로 흡수됐다(위 "실검수 브리프" 절이 그때의 규칙을 그대로 적고 있다).
+
+**★ 휴면은 폐기가 아니다.** 셋 다 그때의 사실을 적은 이력 문서이고, 이 저장소는 이력 문서를 고치거나 옮기지 않는다(제품명 개명 때의 판단과 같은 자리). 같은 성격의 관행이 다시 필요해지면 새 디렉터리가 아니라 [`verifications/`](verifications/README.md) 로 간다.
 
 ## 아이디에이션 문서
 

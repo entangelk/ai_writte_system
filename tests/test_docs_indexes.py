@@ -30,6 +30,12 @@ _ROOT = Path(__file__).resolve().parents[1]
 _PLANS = _ROOT / "docs" / "plans"
 _VERIFICATIONS = _ROOT / "docs" / "verifications"
 
+#: 휴면 디렉터리 셋(오너 결정 2026-09-08 D1=ⓐ). **파일은 옮기지 않는다** — 옛 기록의
+#: 인용이 깨지기 때문이고, 대신 `docs/README.md` 가 이들에 닿는 유일한 진입점이다.
+#: 관행이 다시 필요해지면 새 디렉터리가 아니라 `verifications/` 로 간다 — 그래서 이
+#: 목록은 늘지 않는 것이 정상이다.
+_DORMANT_DIRECTORIES = ("verification_briefs", "benchmarks", "live_review_briefs")
+
 # 마크다운 링크의 `.md` 대상만 뽑는다. 외부 URL·디렉터리·LICENSE 는 대상이 아니다.
 # `#절-제목` 앵커는 떼고 **파일 경로만** 본다 — 앵커가 붙었다는 이유로 검사에서 빠지면
 # 파일이 사라진 링크가 조용히 통과한다.
@@ -299,6 +305,36 @@ class RepositoryReadmeTest(unittest.TestCase):
 
     def test_every_readme_link_resolves(self) -> None:
         _assert_links_resolve(self, _ROOT / "README.md")
+
+
+class DocsReadmeIndexTest(unittest.TestCase):
+    """`docs/README.md` — 기록의 성격별 지도이자 **휴면 디렉터리의 유일한 진입점**.
+
+    오너 결정 2026-09-08 **D1=ⓐ**(`plans/docs-directory-dormant-and-restructure-
+    decisions.md`): 휴면 셋을 옮기지 않고 인덱스에 올려 그래프에 붙인다. 그 결정이
+    값으로 삼은 문장이 *"그때부터 가드가 그 링크를 본다"* 인데, **착수 시점에
+    `docs/README.md` 는 어느 가드 밖에도 있었다** — 위 세 인덱스(plans·verifications·
+    최상위 README)만 잠겨 있었다. 그래서 등재와 함께 이 클래스를 세운다.
+
+    - **under-strict**: 휴면 디렉터리의 `.md` 를 인덱스에서 빼면 실패한다. 그것이
+      `verification_briefs/2026-06-24` 가 **끊긴 채 오래 안 보인** 상태 그 자체다.
+    - **over-strict**: 인덱스가 없는 파일을 가리켜도 실패한다(파일을 옮기고 링크를
+      안 고치는 방향).
+    """
+
+    index = _ROOT / "docs" / "README.md"
+
+    def test_every_index_link_resolves(self) -> None:
+        _assert_links_resolve(self, self.index)
+
+    def test_every_dormant_document_is_reachable_from_the_index(self) -> None:
+        documents = {
+            path
+            for directory in _DORMANT_DIRECTORIES
+            for path in (_ROOT / "docs" / directory).glob("*/*.md")
+        }
+        self.assertTrue(documents, "휴면 디렉터리에서 문서를 하나도 못 찾았다")
+        _assert_all_reachable(self, self.index, documents, "휴면 문서")
 
 
 # "검증 기록 N건"을 세 문서가 각자 적는다. 세는 사람이 셋이면 반드시 갈라진다 —
