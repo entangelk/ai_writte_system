@@ -748,6 +748,8 @@ describe("App routes", () => {
       await userEvent.type(screen.getByLabelText("아이디"), "bob");
       await userEvent.type(screen.getByLabelText("비밀번호"), "long-enough-pw");
       await userEvent.type(screen.getByLabelText("비밀번호 확인"), "long-enough-pw");
+      // 동의 게이트(방침 제3조): 체크가 서명 역할을 한다.
+      await userEvent.click(screen.getByRole("checkbox"));
       await userEvent.click(
         screen.getByRole("button", { name: "가입 요청 보내기" }),
       );
@@ -759,9 +761,52 @@ describe("App routes", () => {
       expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
         username: "bob",
         password: "long-enough-pw",
+        agreed_terms_version: "1.0",
       });
       // "가입 완료"가 아니다 — 세션이 없으니 승인 전엔 들어갈 수 없다.
       expect(screen.queryByText(/가입 완료/)).toBeNull();
+    });
+
+    it("keeps the signup request behind the terms consent checkbox", async () => {
+      // 동의 게이트(방침 제3조, 2026-09-12). 서버가 400 으로 거부하지만 화면이
+      // 먼저 잠가야 한다 — 체크 전 요청이 나가면 서버만 믿는 화면이 되고,
+      // 사용자는 왜 거부됐는지 문구에서 듣지 못한다.
+      // under-strict: 체크 없이도 제출이 가능해지면(버튼 잠금 제거) 두 번째
+      // 단정이 실패한다. over-strict: 체크해도 풀리지 않으면 첫 번째 단정이
+      // 실패한다 — 정상 가입을 막는 과잉이다.
+      const fetchMock = mockFetch(
+        { status: 401, body: { detail: "not authenticated" } },
+      );
+
+      render(
+        <MemoryRouter initialEntries={["/"]}>
+          <App />
+        </MemoryRouter>,
+      );
+
+      await screen.findByLabelText("아이디");
+      await userEvent.click(
+        screen.getByRole("button", { name: "계정이 없나요? 새 계정 요청" }),
+      );
+      await userEvent.type(screen.getByLabelText("아이디"), "bob");
+      await userEvent.type(screen.getByLabelText("비밀번호"), "long-enough-pw");
+      await userEvent.type(screen.getByLabelText("비밀번호 확인"), "long-enough-pw");
+
+      // 아직 동의하지 않았다 — 서명(체크) 없이는 제출이 잠겨 있고, 강제로
+      // 눌러도 요청은 나가지 않는다.
+      const submit = screen.getByRole("button", { name: "가입 요청 보내기" });
+      expect(submit).toBeDisabled();
+      await userEvent.click(submit);
+      expect(fetchMock.mock.calls).toHaveLength(1); // 세션 확인만 나갔다
+
+      await userEvent.click(screen.getByRole("checkbox"));
+      expect(submit).toBeEnabled();
+      await userEvent.click(submit);
+      expect(fetchMock.mock.calls).toHaveLength(2);
+      expect(fetchMock.mock.calls[1][0]).toBe("/api/auth/signup");
+      expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({
+        agreed_terms_version: "1.0",
+      });
     });
 
     it("tells a pending member their approval is still waiting", async () => {

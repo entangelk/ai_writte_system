@@ -475,6 +475,30 @@ main {
   line-height: 1.5;
 }
 
+/* 동의 확인란(방침 제3조) — 텍스트 입력 규칙(.login-form input 의 밑줄·전체폭)을
+   물려받지 않게 input 축을 되돌리고, 문장 라벨이라 굵기를 본문으로 낮춘다. */
+.consent-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  font-weight: 400;
+  line-height: 1.55;
+}
+
+.consent-check input {
+  width: auto;
+  flex: none;
+  margin-top: 0.18rem;
+  padding: 0;
+  border: 0;
+  accent-color: var(--action-primary);
+}
+
+.consent-check input:focus {
+  outline: 2px solid var(--action-primary);
+  outline-offset: 2px;
+}
+
 .auth-submit {
   justify-self: start;
   margin-top: 0.45rem;

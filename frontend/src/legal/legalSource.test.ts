@@ -26,7 +26,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { CONTACT_EMAIL, OPERATOR } from "./LegalFooter";
+import { CONTACT_EMAIL, OPERATOR, TERMS_VERSION } from "./LegalFooter";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CANONICAL = resolve(here, "../../../docs/legal");
@@ -37,8 +37,13 @@ const BUNDLED = {
   "privacy-policy.md": "privacy-policy-draft.md",
 } as const;
 
-/** 시행 판본의 버전 문자열 — 동의 게이트가 저장할 값. */
-const ENFORCED_VERSION = "1.0";
+/**
+ * 시행 판본의 버전 문자열 — 동의 게이트(가입 폼)가 요청에 실어 보내고 서버가
+ * 저장하는 값. 동의 게이트(2026-09-12)가 프런트 상수를 만들었으므로 이 핀은
+ * 그 상수와 문서를 묶는다(백엔드 핀은 `tests/test_service_policy_contract.py`
+ * 가 `auth/users.py::TERMS_VERSION` 과 묶는다).
+ */
+const ENFORCED_VERSION = TERMS_VERSION;
 
 describe("법적 문서 사본 (브리프 landing-page-scope D2=ⓐ)", () => {
   it("keeps every bundled copy byte-identical to the canonical document", () => {

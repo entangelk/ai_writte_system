@@ -253,6 +253,9 @@ describe("공개 푸터", () => {
     await userEvent.type(screen.getByLabelText("아이디"), "bob");
     await userEvent.type(screen.getByLabelText("비밀번호"), "long-enough-pw");
     await userEvent.type(screen.getByLabelText("비밀번호 확인"), "long-enough-pw");
+    // 동의 게이트(방침 제3조, 2026-09-12) — 접수 얼굴로 가는 길에 체크가
+    // 끼었다. 체크 없이는 제출이 잠겨 이 얼굴 자체에 도달하지 못한다.
+    await userEvent.click(screen.getByRole("checkbox"));
     await userEvent.click(screen.getByRole("button", { name: "가입 요청 보내기" }));
     expect(
       await screen.findByRole("heading", { name: "가입 요청이 접수되었습니다" }),

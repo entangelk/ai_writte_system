@@ -3,7 +3,7 @@ import {
 } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { Link } from "react-router";
-import { LegalFooter } from "../legal/LegalFooter";
+import { LegalFooter, TERMS_VERSION } from "../legal/LegalFooter";
 import { WithdrawalBanner, WithdrawalProvider } from "../me/withdrawal";
 import {
   ApiError,
@@ -306,6 +306,7 @@ function LoginScreen({
   const [password, setPassword] = useState("");
   const [signupPasswordConfirmation, setSignupPasswordConfirmation] =
     useState("");
+  const [termsAgreed, setTermsAgreed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mustReplacePassword, setMustReplacePassword] = useState(false);
@@ -317,6 +318,7 @@ function LoginScreen({
     setError(null);
     setPassword("");
     setSignupPasswordConfirmation("");
+    setTermsAgreed(false);
   }
 
   async function submit(event: React.FormEvent) {
@@ -357,14 +359,22 @@ function LoginScreen({
     const normalizedUsername = username.trim();
     if (
       normalizedUsername === "" || password.length < 12 ||
-      password !== signupPasswordConfirmation || submitting
+      password !== signupPasswordConfirmation || !termsAgreed || submitting
     ) {
       return;
     }
     setSubmitting(true);
     setError(null);
     try {
-      await requestSignup({ username: normalizedUsername, password });
+      // 동의 게이트(방침 제3조): 요청에 실리는 것은 "이 버전을 보고 동의했다"는
+      // 청구뿐이다. 시각과 저장 버전은 서버가 찍는다 — 클라이언트 시계를 믿는
+      // 이유가 없고, 청구를 그대로 저장하면 무엇에 동의했는지를 클라이언트가
+      // 정하는 꼴이 된다.
+      await requestSignup({
+        username: normalizedUsername,
+        password,
+        agreed_terms_version: TERMS_VERSION,
+      });
       setPassword("");
       setSignupPasswordConfirmation("");
       setMode("requested");
@@ -482,6 +492,22 @@ function LoginScreen({
               />
             </label>
             <p className="form-hint">12자 이상, 두 입력이 같아야 합니다.</p>
+            {/* 동의 게이트(방침 제3조, 2026-09-12): 체크 없이는 요청이 나가지
+                않고, 서버도 같은 판본을 요구해 거부한다. 링크는 새 탭으로
+                연다 — 가입 폼의 입력이 라우트 이동으로 날아가는 것을 막는다. */}
+            <label className="consent-check" htmlFor="signup-consent">
+              <input
+                id="signup-consent"
+                type="checkbox"
+                checked={termsAgreed}
+                onChange={(event) => setTermsAgreed(event.target.checked)}
+              />
+              <span>
+                <Link to="/terms" target="_blank">이용약관</Link>과{" "}
+                <Link to="/privacy" target="_blank">개인정보처리방침</Link>
+                (버전 {TERMS_VERSION})을 확인했고 동의합니다.
+              </span>
+            </label>
             {error !== null && (
               <p className="login-error" role="alert">{error}</p>
             )}
@@ -490,7 +516,8 @@ function LoginScreen({
               type="submit"
               disabled={
                 username.trim() === "" || password.length < 12 ||
-                password !== signupPasswordConfirmation || submitting
+                password !== signupPasswordConfirmation || !termsAgreed ||
+                submitting
               }
             >
               {submitting ? "보내는 중…" : "가입 요청 보내기"}

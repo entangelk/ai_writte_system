@@ -22,6 +22,16 @@ export const CONTACT_EMAIL = "kdtyohan@gmail.com";
 /** 약관 제1조가 정한 운영 주체 표기. */
 export const OPERATOR = "entangelk";
 
+/**
+ * 시행 중인 약관·방침의 버전 문자열 (방침 제3조 — 동의 게이트가 저장하는 값).
+ *
+ * 백엔드의 `auth/users.py::TERMS_VERSION` 과 같은 값을 든다. 둘 사이에는 스키마가
+ * 없으므로(이 값은 요청 바디로만 건너간다) 양쪽을 문서에 묶는 핀 셀 둘
+ * (`legalSource.test.ts` · `tests/test_service_policy_contract.py`)이 그 대신
+ * 연결한다 — 버전을 올리려면 문서와 두 상수가 함께 움직여야 전수가 초록이다.
+ */
+export const TERMS_VERSION = "1.0";
+
 export function LegalFooter() {
   return (
     <footer className="legal-footer">

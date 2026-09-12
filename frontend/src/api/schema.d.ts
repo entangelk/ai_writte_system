@@ -2684,6 +2684,8 @@ export interface components {
         };
         /** SignupRequest */
         SignupRequest: {
+            /** Agreed Terms Version */
+            agreed_terms_version?: string | null;
             /** Password */
             password: string;
             /** Username */
