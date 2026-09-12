@@ -1,5 +1,7 @@
 # mypy 가드 슬라이스(축 ②) — 독립 검증
 
+**최종 판정은 합격이다** — 조건 **B1** 은 폐쇄 커밋 `5182cad`(2026-08-20 구현 세션 · H1 동반)이 닫았고, 같은 날 재검([`mypy_guard_closure.md`](mypy_guard_closure.md) — M4~M13 열 종 독립 재현)이 판정을 올렸다. 아래 본문은 발행 시점 그대로다.
+
 ## Subject metadata
 
 - **날짜**: 2026-08-20 (베타)
@@ -96,7 +98,9 @@
 
 ## Verdict
 
-**조건부 합격** — 억제 잠금 셀의 우회 벡터 셋(무공백 `#type:ignore` · `# mypy: ignore-errors` 프라그마 · mypy.ini 퍼모듈 `ignore_errors`)을 닫거나, 산출물 문언을 실제 잠긴 범위로 좁혀 기록할 것.
+**합격**(승격 — 2026-08-20 같은 날 재검 [`mypy_guard_closure.md`](mypy_guard_closure.md) 이 M4~M13 열 종 독립 재현으로 B1 폐쇄를 확증). 발행 시점 판정 원문:
+
+> **조건부 합격** — 억제 잠금 셀의 우회 벡터 셋(무공백 `#type:ignore` · `# mypy: ignore-errors` 프라그마 · mypy.ini 퍼모듈 `ignore_errors`)을 닫거나, 산출물 문언을 실제 잠긴 범위로 좁혀 기록할 것.
 
 > **★ 승격 — 합격 (2026-08-20, 같은 날 재검 [`mypy_guard_closure.md`](mypy_guard_closure.md)).** 위 조건은 `5182cad` 에서 닫혔고(구현 세션 추기 §조건 폐쇄), 재검이 M4~M13 열 종을 독립 재현해 폐쇄를 실증했다. 오너 지목 축(허용 키 집합 과소)은 실재하나 계약 위반이 아닌 문언 정련 사안(재검 H4·H5)이라 추가 조건 없이 승격한다 — 08-10 accept 선례와 같은 형태다. 발행 시점 문구는 그대로 둔다.
 
