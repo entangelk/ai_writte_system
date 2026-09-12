@@ -379,6 +379,41 @@ class WritingAcceptApiTest(unittest.TestCase):
         )
         asyncio.run(client.aclose())
 
+    def test_resending_the_same_accept_key_still_records_a_second_row(self):
+        """★ 특성 셀 — **이 동작을 승인하지 않는다**(D2 유예의 현재 상태를 고정한다).
+
+        활동 로그 D1=ⓑ(오너 2026-09-08)는 `drafts/{id}/finalize` **하나만** 바꿨다.
+        `writing/accept` 는 replay 에도 행을 남기고, 그것이 SoT v1.8.64·HANDOFF
+        §활동 로그가 *"세 갈래"*(finalize 무행 · accept 유행 · 수동 저장 유행)로 적은
+        계약의 한 행이다.
+
+        **★ 왜 셀이 필요한가.** D1=ⓑ 를 고른 *근거* 가 원래 *"accept 는 이미 replay 를
+        안 남긴다"* 였는데 그것이 **거짓**이었다 — 산문으로만 적힌 replay 처분 주장이
+        한 달 동안 아무도 모르게 틀려 있었던 것이 이 슬라이스의 발원이다. 같은 주장을
+        다시 산문으로만 두면 같은 병이 재발한다(독립 검증 2026-09-12 조건 C1 — 이
+        경로의 기록을 replay 에서 꺼도 236셀 전건 초록이었다).
+
+        **★ 오너가 D2=ⓑ 를 고르면 이 셀과 SoT v1.8.64 문장·HANDOFF 줄이 *함께*
+        뒤집힌다.** 셀이 있다는 것을 "옳은 동작"으로 읽지 말 것 — 선례는 v1.8.61 의
+        `test_auth_users.py::WithdrawalCancelAfterPurgeClaimTest` 다.
+        """
+        repo = InMemoryActivityLogRepository()
+        client, project, draft, base, _ = self._setup(activity_repo=repo)
+
+        first = self._post(client, project, draft, base.draft_version.id)
+        self.assertEqual(first.status_code, 200)
+        self.assertFalse(first.json()["idempotent_replay"])
+
+        again = self._post(client, project, draft, base.draft_version.id)
+
+        self.assertEqual(again.status_code, 200)
+        self.assertTrue(again.json()["idempotent_replay"])
+        self.assertEqual(len(repo.events), 2)
+        self.assertEqual(
+            {event.action for event in repo.events}, {"draft_version_accepted"}
+        )
+        asyncio.run(client.aclose())
+
     def test_a_partial_accept_still_records_the_saved_version(self):
         """★ 기록 조건은 상태코드가 아니라 **정본이 바뀌었는가**다 (SoT v1.7.93).
 

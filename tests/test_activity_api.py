@@ -174,6 +174,37 @@ class ActivityRecordingTest(unittest.TestCase):
         self.assertTrue(again.json()["idempotent_replay"])
         self.assertEqual(len(self.repo.events), before)
 
+    def test_resending_the_same_save_key_still_records_a_second_row(self) -> None:
+        """★ 특성 셀 — **이 동작을 승인하지 않는다**(D2 유예의 현재 상태를 고정한다).
+
+        D1=ⓑ 는 `finalize` **하나만** 바꿨다. 수동 저장은 replay 에도 행을 남기고,
+        그것이 SoT v1.8.64·HANDOFF §활동 로그가 *"세 갈래"* 로 적은 계약의 한 행이다.
+        그 문장이 **산문으로만 있으면 다음 슬라이스가 코드 한 줄로 조용히 뒤집을 수
+        있고**, 그때 계약이 거짓이 된다 — 이 브리프의 원래 근거가 거짓이 돼 있던 것과
+        정확히 같은 병이다(독립 검증 2026-09-12 조건 C1).
+
+        **★ 오너가 D2=ⓑ 를 고르면 이 셀과 SoT v1.8.64 문장·HANDOFF 줄이 *함께*
+        뒤집힌다.** 셀이 있다는 것을 "옳은 동작"으로 읽지 말 것 — 선례는 v1.8.61 의
+        `test_auth_users.py::WithdrawalCancelAfterPurgeClaimTest` 다.
+        """
+        project_id, draft_id = self._finalizable_draft()
+        first = self.client.post(
+            f"/projects/{project_id}/drafts/{draft_id}/versions",
+            json={"raw_text": "본문", "idempotency_key": "sk1"},
+        )
+        self.assertEqual(first.status_code, 200)
+        before = len(self.repo.events)
+
+        again = self.client.post(
+            f"/projects/{project_id}/drafts/{draft_id}/versions",
+            json={"raw_text": "본문", "idempotency_key": "sk1"},
+            headers={"X-Confirm-Duplicate": "1"},
+        )
+
+        self.assertEqual(again.status_code, 200)
+        self.assertTrue(again.json()["idempotent_replay"])
+        self.assertEqual(len(self.repo.events), before + 1)
+
     def test_archiving_records_the_state_change(self) -> None:
         project_id = self._create_project()
 
