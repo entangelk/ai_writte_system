@@ -16,3 +16,17 @@ export function adminUserStateLabel(user: AdminUser): string {
   if (user.status === "rejected") return "거절됨";
   return "활성";
 }
+
+/**
+ * 탈퇴 축 한 줄 (계정 탈퇴 Slice 4b, 2026-09-12).
+ *
+ * **승인 축·활성 축과 별개인 세 번째 축이다.** `adminUserStateLabel` 의 라벨
+ * 순서(비활성 > 승인 대기 > 거절됨 > 활성, D6 단방향 축)에 섞이지 않는다 —
+ * 유예 중 계정도 활성이고, 파기 중 계정은 그 아래 단계다. 두 스탬프가 없으면
+ * 이 축은 화면에 나오지도 않는다(빈 라벨).
+ */
+export function adminWithdrawalLabel(user: AdminUser): string {
+  if (user.purge_started_at !== null) return "파기 진행";
+  if (user.withdrawal_requested_at !== null) return "탈퇴 유예";
+  return "";
+}

@@ -24,6 +24,9 @@ const SECONDARY_NAVIGATION = [
   "projects/ActivityTimelinePage.tsx",
   "me/PersonalHubPage.tsx",
   "admin/AdminProjectCard.tsx",
+  // 계정 탈퇴 Slice 4b(2026-09-12): 잔여 정리가 계정 행을 지운 뒤의
+  // "사용자 목록으로" — 대상이 사라진 상세에 머무는 링크가 아니다.
+  "admin/AdminUserDetail.tsx",
 ];
 
 function sourcesUsingSharedTreatment(directory: string): string[] {

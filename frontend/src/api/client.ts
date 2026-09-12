@@ -212,6 +212,29 @@ export function deactivateAdminUser(userId: string): Promise<AdminUser> {
   });
 }
 
+// 계정 잔여 정리(Slice 4b, 2026-09-12): dry-run 조사 → 사용자명 확인 → 실행.
+// 조사는 파괴가 없고(②ⓐ), 실행의 사유는 감사 행에 남는다(③ⓐ).
+export type AdminAccountReconcileSurvey =
+  components["schemas"]["AdminAccountReconcileSurvey"];
+export type AdminAccountReconcileResult =
+  components["schemas"]["AdminAccountReconcileResult"];
+
+export function surveyAdminAccountReconcile(
+  userId: string,
+): Promise<components["schemas"]["AdminAccountReconcileSurvey"]> {
+  return request(`/admin/users/${encodeURIComponent(userId)}/reconcile`);
+}
+
+export function reconcileAdminAccount(
+  userId: string,
+  body: components["schemas"]["AdminAccountReconcileRequest"],
+): Promise<components["schemas"]["AdminAccountReconcileResult"]> {
+  return request(`/admin/users/${encodeURIComponent(userId)}/reconcile`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 // 승인제 가입(2026-08-22): 요청 목록·승인·거절. 승인·거절은 pending 요청에만
 // 성공한다 — 서버가 이미 처리된 요청에 409 로 답하면 화면은 목록을 다시 읽는다.
 export type AdminSignupRequest =

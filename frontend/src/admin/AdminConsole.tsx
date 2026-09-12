@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { MemberQuotaSection } from "./MemberQuotaSection";
 import { AdminProjectCard } from "./AdminProjectCard";
-import { adminUserStateLabel } from "./userStatus";
+import { adminUserStateLabel, adminWithdrawalLabel } from "./userStatus";
 import {
   approveAdminSignup,
   createAdminUser,
@@ -216,6 +216,9 @@ export function AdminConsole() {
                       <span>
                         {user.is_admin ? "관리자" : "사용자"}
                         {" · "}{adminUserStateLabel(user)}
+                        {adminWithdrawalLabel(user) !== "" && (
+                          <>{" · "}{adminWithdrawalLabel(user)}</>
+                        )}
                         {" · 프로젝트 "}{projectCount.get(user.id) ?? 0}개
                       </span>
                     </div>

@@ -351,3 +351,44 @@ HANDOFF Next Tasks 2·4번(한 창)을 구현했다. **같은 저장소에서 �
 - **검증이 조용히 통과한다고 실측한 변이 둘(MX-D 행 삭제 · MX-I `미기재` 행 삭제)이 이제 기명 실패한다** — 같은 변이 재적용으로 확인(`cp` 백업 → 역복원 → `cmp`, `git checkout` 미사용).
 - 수치: 정책 가드 **11셀/70** · `test_docs_indexes` **17/316**(브리프 등재 + 건수 139/117) · `SelfWithdrawalApiTest` **21/169** · 백엔드 소스 무변.
 - **판정 승격은 하지 않았다** — 조건을 닫은 세션이 자기 판정을 올리면 독립성이 사라진다(v1.8.52 선례). 승격 재검은 다음 검증 세션 몫이다.
+
+## 세션 70 — 계정 탈퇴 Slice 4b: 관리자 잔여 정리 (오너 지시 "핸드오프 읽고 다음작업 진행해줘. 진행한다음 서브 에이전트 하나 스폰해서 독립검증 맡기고 결과 나오면 보강할 부분 보강까지 해줘")
+
+**브리프 선행 → 오너 결정 → 구현 → 독립 검증(서브에이전트) → 보강까지 한 세션에서.** 커밋: `73ae7f7`(착수 결정 브리프) · `2aa9e3f`(백엔드 구현) · 프런트·기록(이 커밋).
+
+### Goals
+
+- 핸드오프 Next Tasks 가 명시한 **다음 구현 축 Slice 4b(관리자 잔여 정리 — 브리프 선행)** 를 여는 것. 갈래 셋(범위·dry-run·감사)은 오너 결정 사항이라 브리프를 먼저 쓰고 물었다.
+
+### Completed work
+
+- **착수 결정 브리프** [`plans/slice4b-admin-residual-purge-decisions.md`](../../plans/slice4b-admin-residual-purge-decisions.md): 갈래 셋의 선택지 표 + 추천(①ⓐ·②ⓐ·③ⓐ). **오너가 셋 다 추천안 채택**(2026-09-12). plans 인덱스 등재 + 개수 주장 갱신(139/117 → 140/118 — `README.md`·`docs/README.md`·`plans/README.md` 세 곳).
+- **본체 한 벌**: 스크립트가 직접 돌던 `stalled_user_ids`·`leftover_projects`·`reconcile` 을 `deletion/account_reconcile.py`(신규)로 옮기고 **스크립트와 라우터가 같은 모듈**을 쓴다(Slice 3 계약 주의 ⓕ "두 벌째 금지" 와 같은 정신). 스크립트 출력 키는 그대로(dry-run/apply 호환). 조건 넷(프로젝트 잔여 시 행 유지 · 묘비 없으면 행 유지 · 조사는 파괴 없음 · stalled 정의)을 이관 전 ReconcilerTest 셋이 그대로 잠근다(가리키기만 새 모듈로).
+- **operation 둘** (`routers/admin.py`): `GET /admin/users/{id}/reconcile`(dry-run 조사 — 파괴 없음) · `POST …/reconcile`(실행). 대상 계약: 404(없음)·409(**파기 미시작** — 프로젝트 purge 의 "archived 선행 409" 와 대칭)·400(빈 사유). 사유는 프로젝트 purge·quota 정지 선례처럼 필수.
+- **감사(③ⓐ)**: `AdminAuditEvent.action` 에 `account_reconcile` 추가 · `record_account_reconcile_requested`(2단계 선례 — fail-closed 요청 행 → `record_purge_outcome` 결과 행) · **`record_purge_outcome` 이 요청 행의 `target_user_id` 를 상속**하게 함(프로젝트 purge 는 None 이라 무변) · 감사 화면 `/admin/audit-events` 가 `list_destructive_events`(purge+reconcile) 로 — 회원 정책(member_quota_policy)은 파괴가 아니라 계속 밖.
+- **읽기 표면**: `AdminUserPayload` 에 탈퇴 축 두 스탬프(`withdrawal_requested_at`·`purge_started_at` — **세 번째 축**, 승인 `status`·활성 `is_active` 와 별개). `AdminAuditEventPayload.target_project_id` 를 `str | None` 로(계정 축 이벤트는 None — 감사 화면이 계정 이벤트를 처음 싣는 자리라 응답 검증이 잡았다).
+- **등재 전부**: tier 핀 **105→107 · admin 17→19** · `responses=` 신규 상수 `_ERRORS_ADMIN_400_404_409` · `activity/actions.py` EXCLUDED 등재(31→32, 절 주석 11→12) · 프런트 `gen:api` 재생성.
+- **프런트**: 상세 화면 `AdminUserDetail` — 탈퇴 축 표시 + stalled 일 때만 **잔여 조사 → 결과(잔여 프로젝트·묘비) → 사유 + 사용자명 입력 확인(`.admin-danger-zone`·`.danger-button` 선례) → 실행 → 결과(지운 컬렉션·계정 행 처분 + 목록 링크)**. 목록 `AdminConsole` — `adminWithdrawalLabel`(세 번째 축 라벨, 기존 라벨 순서 계약 밖) 옆 표시. 기존 fixture 전부에 스탬프 둘 추가(undefined 가 `!== null` 로 읽혀 섹션이 잘못 뜨는 것을 막음).
+- **셀**: 백엔드 신규 `test_admin_account_reconcile.py` **13셀**(dry-run 무변·404·409 둘(미청구·유예만)·실행 조건 셋·감사 2단계+target 상속+failed 경로+감사 화면 노출·빈 사유 400·읽기 스탬프·401/403) · payload 핀 셀 둘 갱신 · ReconcilerTest 4셀 이관. 프런트 **+5셀**(섹션 조건부·조사→사용자명 확인→실행 파이프·잔여 보고·409·목록 라벨 축).
+
+### Issues found
+
+- **감사 화면이 계정 이벤트를 처음 싣는 순간 응답 검증이 실패했다** — `AdminAuditEventPayload.target_project_id` 가 `str` 필수였는데 account_reconcile 은 None. 스키마(`AdminAuditEvent`)와 같은 폭(`str | None`)으로 고쳤다. member_quota 이벤트도 None 이라 이 화면이 그 필드를 채우는 일은 앞으로 없다(계속 밖).
+- **프런트 집합 가드가 새 링크를 잡았다**(`navigationLinks.test.ts` — Slice 4 가 배운 정확-일치 집합). "사용자 목록으로" 링크는 정당한 보조 이동이므로 **가드의 기대 집합에 추가**했다(링크를 빼는 Slice 4 때와 결론이 다르다 — 그때는 링크의 일이 아니었다).
+- **InMemory 조립에서 reconcile 저장소와 users 저장소가 갈라진다** — Mongo 배포는 둘이 같은 `users` 컬렉션을 보지만 InMemory 는 별개 상태라 "계정 행 삭제"를 `deleted_rows` 관측으로 잠갔다(셀 주석에 그 이유를 적음). 테스트 픽스처 세팅에서 reconcile repo 의 stalled 목록에도 대상을 심는다.
+
+### Decisions — User Decisions and Rationale
+
+- 오너(2026-09-12): 갈래 셋 **①ⓐ 계정 하나 · ②ⓐ 두 액션(조사→확인→실행) · ③ⓐ admin_audit 남긴다** — 셋 다 구현자 추천안 채택. 브리프 "✅ 오너 결정" 절에 근거와 함께 기록.
+- 구현 선택: **전역 스윕 op 은 만들지 않는다**(①ⓐ) — 도그푸드에서 stalled 다발을 만나면 그때 얹는다(스크립트 경로 유지). **dry-run 을 GET 으로** — 부수효과 없는 조사는 읽기 계약이 맞다. **실행 시점 재확인**(`_stalled_user_or_error` 를 조사·실행 양쪽이 호출) — dry-run 과 실행 사이 데몬 청구가 끼어들어도 409 로 걸린다.
+
+### Verification
+
+- 백엔드 초점(구현 직후): `test_auth_api`(tier 핀 포함) · `test_admin_account_reconcile` · `test_account_purge` · `test_account_withdrawal_worker` · `test_admin_audit` · `test_admin_surface_separation` · `test_activity_actions` — **전부 초록**. 앱 조립 스모크: reconcile route GET/POST 등록 확인.
+- 프런트: `tsc --noEmit` 통과 · `npm run build` 통과 · 전수 **488 passed / 41 files · EXIT=0**(재실행 — 첫 전수는 집합 가드 1실패를 냈고 그 원인을 닫은 뒤 재측정). 기존 482 대비 +6: **+5 는 이 슬라이스**(AdminUserDetail 4 · AdminConsole 1), **+1 은 세션 69 조건 폐쇄(`cbd88f7` 의 확인란 문구·새 탭 링크 셀)가 핸드오프 기준선에 아직 반영 안 된 것**.
+- 백엔드 전수: (전수 결과 확정 후 이 줄을 채운다)
+- **독립 검증(서브에이전트)**: 구현 커밋 뒤 별도 세션으로 반증 시도 — 결과는 검증 기록 참조.
+
+### Next steps
+
+- 검증 결과에 따른 보강(조건 폐쇄) → SoT·HANDOFF·CHANGELOG 갱신으로 슬라이스 닫기.

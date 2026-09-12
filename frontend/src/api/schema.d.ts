@@ -277,6 +277,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/users/{user_id}/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Survey Account Reconcile */
+        get: operations["survey_account_reconcile_admin_users__user_id__reconcile_get"];
+        put?: never;
+        /** Reconcile Account */
+        post: operations["reconcile_account_admin_users__user_id__reconcile_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/login": {
         parameters: {
             query?: never;
@@ -1677,6 +1695,37 @@ export interface components {
             /** Events */
             events: components["schemas"]["ActivityEventPayload"][];
         };
+        /** AdminAccountReconcileRequest */
+        AdminAccountReconcileRequest: {
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * AdminAccountReconcileResult
+         * @description ``POST /admin/users/{id}/reconcile`` — 실행 결과(스크립트 출력 키와 같은 넷).
+         */
+        AdminAccountReconcileResult: {
+            /** Has Username Tombstone */
+            has_username_tombstone: boolean;
+            /** Leftover Projects */
+            leftover_projects: string[];
+            /** Removed User Row */
+            removed_user_row: boolean;
+            /** Swept */
+            swept: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * AdminAccountReconcileSurvey
+         * @description ``GET /admin/users/{id}/reconcile`` — dry-run 조사(②ⓐ). 파괴가 없다.
+         */
+        AdminAccountReconcileSurvey: {
+            /** Has Username Tombstone */
+            has_username_tombstone: boolean;
+            /** Leftover Projects */
+            leftover_projects: string[];
+        };
         /** AdminAuditEventListResponse */
         AdminAuditEventListResponse: {
             /** Events */
@@ -1704,7 +1753,7 @@ export interface components {
             /** Reason */
             reason: string;
             /** Target Project Id */
-            target_project_id: string;
+            target_project_id: string | null;
             /** Target Type */
             target_type: string;
         };
@@ -1873,10 +1922,14 @@ export interface components {
             is_active: boolean;
             /** Is Admin */
             is_admin: boolean;
+            /** Purge Started At */
+            purge_started_at: string | null;
             /** Status */
             status: string;
             /** Username */
             username: string;
+            /** Withdrawal Requested At */
+            withdrawal_requested_at: string | null;
         };
         /** AnalysisJobPayload */
         AnalysisJobPayload: {
@@ -4221,6 +4274,171 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminUserPayload"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    survey_account_reconcile_admin_users__user_id__reconcile_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAccountReconcileSurvey"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    reconcile_account_admin_users__user_id__reconcile_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminAccountReconcileRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAccountReconcileResult"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
                 };
             };
             /** @description Unauthorized */

@@ -23,8 +23,8 @@ describe("AdminConsole", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({
         users: [
-          { id: "u1", username: "root", is_admin: true, is_active: true, status: "active" },
-          { id: "u2", username: "alice", is_admin: false, is_active: true, status: "active" },
+          { id: "u1", username: "root", is_admin: true, is_active: true, status: "active", withdrawal_requested_at: null, purge_started_at: null },
+          { id: "u2", username: "alice", is_admin: false, is_active: true, status: "active", withdrawal_requested_at: null, purge_started_at: null },
         ],
       }))
       .mockResolvedValueOnce(response({
@@ -102,7 +102,7 @@ describe("AdminConsole", () => {
   it("creates and deactivates users without losing the returned state", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({ users: [
-        { id: "u1", username: "root", is_admin: true, is_active: true, status: "active" },
+        { id: "u1", username: "root", is_admin: true, is_active: true, status: "active", withdrawal_requested_at: null, purge_started_at: null },
       ] }))
       .mockResolvedValueOnce(response({ projects: [] }))
       .mockResolvedValueOnce(response({
@@ -121,10 +121,12 @@ describe("AdminConsole", () => {
       .mockResolvedValueOnce(response({
         id: "u2", username: "alice", is_admin: false, is_active: true,
         status: "active",
+        withdrawal_requested_at: null, purge_started_at: null
       }))
       .mockResolvedValueOnce(response({
         id: "u2", username: "alice", is_admin: false, is_active: false,
         status: "active",
+        withdrawal_requested_at: null, purge_started_at: null
       }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -152,10 +154,10 @@ describe("AdminConsole", () => {
     // 비활성화는 단방향(D6)이고 대기와는 다른 축이라 라벨이 달라야 한다.
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({ users: [
-        { id: "u1", username: "root", is_admin: true, is_active: true, status: "active" },
-        { id: "u2", username: "bob", is_admin: false, is_active: true, status: "pending" },
-        { id: "u3", username: "carol", is_admin: false, is_active: false, status: "active" },
-        { id: "u4", username: "dave", is_admin: false, is_active: false, status: "rejected" },
+        { id: "u1", username: "root", is_admin: true, is_active: true, status: "active", withdrawal_requested_at: null, purge_started_at: null },
+        { id: "u2", username: "bob", is_admin: false, is_active: true, status: "pending", withdrawal_requested_at: null, purge_started_at: null },
+        { id: "u3", username: "carol", is_admin: false, is_active: false, status: "active", withdrawal_requested_at: null, purge_started_at: null },
+        { id: "u4", username: "dave", is_admin: false, is_active: false, status: "rejected", withdrawal_requested_at: null, purge_started_at: null },
       ] }))
       .mockResolvedValueOnce(response({ projects: [] }))
       .mockResolvedValueOnce(response({
@@ -187,11 +189,50 @@ describe("AdminConsole", () => {
       .toBeInTheDocument();
   });
 
+  it("shows the withdrawal axis beside the approval axis, not inside it", async () => {
+    // 계정 탈퇴 Slice 4b: 탈퇴는 세 번째 축이다 — 승인 라벨 순서(비활성 >
+    // 승인 대기 > 거절됨 > 활성)에 섞이지 않고 옆에 표시된다. 스탬프가 없는
+    // 계정에는 이 축이 아예 나오지 않는다(빈 라벨 = 화면 무변).
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ users: [
+        { id: "u1", username: "root", is_admin: true, is_active: true, status: "active", withdrawal_requested_at: null, purge_started_at: null },
+        { id: "u2", username: "eve", is_admin: false, is_active: true, status: "active", withdrawal_requested_at: "2026-08-10T00:00:00Z", purge_started_at: "2026-09-10T00:00:00Z" },
+        { id: "u3", username: "frank", is_admin: false, is_active: true, status: "active", withdrawal_requested_at: "2026-09-01T00:00:00Z", purge_started_at: null },
+      ] }))
+      .mockResolvedValueOnce(response({ projects: [] }))
+      .mockResolvedValueOnce(response({
+        projects_considered: 0,
+        totals: {
+          calls: 0, success: 0, provider_error: 0, parse_error: 0,
+          total_tokens: 0, tokens_counted_from: 0,
+          thin_headroom_calls: 0, headroom_considered: 0,
+        },
+        sites: [], gate: {}, loop: {},
+      }))
+      .mockResolvedValueOnce(response({ events: [] }))
+      .mockResolvedValueOnce(response({ requests: [] }))
+      .mockResolvedValueOnce(response({ policies: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MemoryRouter><AdminConsole /></MemoryRouter>);
+
+    const eveRow = (await screen.findByText("eve")).closest("li")!;
+    // 파기 진행은 유예보다 아래 단계 — 두 스탬프가 함께 있으면 이 라벨이 이긴다.
+    expect(within(eveRow).getByText(/파기 진행/)).toBeInTheDocument();
+    expect(within(eveRow).queryByText(/탈퇴 유예/)).not.toBeInTheDocument();
+    expect(within(screen.getByText("frank").closest("li")!).getByText(/탈퇴 유예/))
+      .toBeInTheDocument();
+    // 스탬프 없는 계정(root)은 승인 상태 줄에 탈퇴 축이 끼지 않는다.
+    const rootLine = screen.getByText("root").closest("li")!
+      .querySelector("span")!.textContent;
+    expect(rootLine).not.toMatch(/탈퇴|파기/);
+  });
+
   it("filters the user list by username", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({ users: [
-        { id: "u1", username: "root", is_admin: true, is_active: true, status: "active" },
-        { id: "u2", username: "alice", is_admin: false, is_active: true, status: "active" },
+        { id: "u1", username: "root", is_admin: true, is_active: true, status: "active", withdrawal_requested_at: null, purge_started_at: null },
+        { id: "u2", username: "alice", is_admin: false, is_active: true, status: "active", withdrawal_requested_at: null, purge_started_at: null },
       ] }))
       .mockResolvedValueOnce(response({ projects: [] }))
       .mockResolvedValueOnce(response({
@@ -223,7 +264,7 @@ describe("AdminConsole", () => {
   it("purges an orphan project and re-reads the audit log", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({ users: [
-        { id: "u1", username: "root", is_admin: true, is_active: true, status: "active" },
+        { id: "u1", username: "root", is_admin: true, is_active: true, status: "active", withdrawal_requested_at: null, purge_started_at: null },
       ] }))
       .mockResolvedValueOnce(response({ projects: [
         { id: "p1", name: "주인 잃은 원고", archived: true, owner_id: null },
@@ -271,7 +312,7 @@ describe("AdminConsole", () => {
   it("lists signup requests and approves one", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({ users: [
-        { id: "u1", username: "root", is_admin: true, is_active: true, status: "active" },
+        { id: "u1", username: "root", is_admin: true, is_active: true, status: "active", withdrawal_requested_at: null, purge_started_at: null },
       ] }))
       .mockResolvedValueOnce(response({ projects: [] }))
       .mockResolvedValueOnce(response({
@@ -295,8 +336,8 @@ describe("AdminConsole", () => {
       .mockResolvedValueOnce(response({ requests: [] }))
       // 승인은 그 행의 상태를 대기 → 활성으로 바꾼다. 사용자 목록도 함께 다시 읽는다.
       .mockResolvedValueOnce(response({ users: [
-        { id: "u1", username: "root", is_admin: true, is_active: true, status: "active" },
-        { id: "s1", username: "bob", is_admin: false, is_active: true, status: "active" },
+        { id: "u1", username: "root", is_admin: true, is_active: true, status: "active", withdrawal_requested_at: null, purge_started_at: null },
+        { id: "s1", username: "bob", is_admin: false, is_active: true, status: "active", withdrawal_requested_at: null, purge_started_at: null },
       ] }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -317,7 +358,7 @@ describe("AdminConsole", () => {
     // 409(다른 관리자가 먼저 처리)여도 목록을 다시 읽어 서버 상태를 따른다.
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({ users: [
-        { id: "u1", username: "root", is_admin: true, is_active: true, status: "active" },
+        { id: "u1", username: "root", is_admin: true, is_active: true, status: "active", withdrawal_requested_at: null, purge_started_at: null },
       ] }))
       .mockResolvedValueOnce(response({ projects: [] }))
       .mockResolvedValueOnce(response({
@@ -338,7 +379,7 @@ describe("AdminConsole", () => {
       .mockResolvedValueOnce(response({ detail: "signup request already resolved" }, 409))
       .mockResolvedValueOnce(response({ requests: [] }))
       .mockResolvedValueOnce(response({ users: [
-        { id: "u1", username: "root", is_admin: true, is_active: true, status: "active" },
+        { id: "u1", username: "root", is_admin: true, is_active: true, status: "active", withdrawal_requested_at: null, purge_started_at: null },
       ] }));
     vi.stubGlobal("fetch", fetchMock);
 

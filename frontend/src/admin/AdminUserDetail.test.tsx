@@ -24,8 +24,8 @@ function renderDetail(userId = "u2") {
 }
 
 const USERS = [
-  { id: "u1", username: "root", is_admin: true, is_active: true, status: "active" },
-  { id: "u2", username: "alice", is_admin: false, is_active: true, status: "active" },
+  { id: "u1", username: "root", is_admin: true, is_active: true, status: "active", withdrawal_requested_at: null, purge_started_at: null },
+  { id: "u2", username: "alice", is_admin: false, is_active: true, status: "active", withdrawal_requested_at: null, purge_started_at: null },
 ];
 
 afterEach(() => {
@@ -188,6 +188,7 @@ describe("AdminUserDetail", () => {
       .mockResolvedValueOnce(response({
         id: "u2", username: "alice", is_admin: false, is_active: false,
         status: "active",
+        withdrawal_requested_at: null, purge_started_at: null
       }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -212,5 +213,129 @@ describe("AdminUserDetail", () => {
     renderDetail("ghost");
 
     expect(await screen.findByText("그런 사용자가 없습니다.")).toBeInTheDocument();
+  });
+
+  // --- 잔여 정리(계정 탈퇴 Slice 4b, 2026-09-12 — 오너 ①ⓐ·②ⓐ·③ⓐ) ----------
+
+  const STALLED_USER = {
+    id: "u9", username: "stalled", is_admin: false, is_active: true,
+    status: "active",
+    withdrawal_requested_at: "2026-08-10T00:00:00Z",
+    purge_started_at: "2026-09-10T00:00:00Z",
+  };
+
+  it("keeps the reconcile section off accounts without a purge stamp", async () => {
+    // over-strict: 파기가 시작되지 않은 계정(유예 중 포함)에 정리 UI 를
+    // 제안하면 대상 아닌 계정에서 409 만나는 화면이 된다 — 섹션 자체가 없다.
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({
+        users: [{ ...USERS[1], withdrawal_requested_at: "2026-09-01T00:00:00Z" }],
+      }))
+      .mockResolvedValueOnce(response({ projects: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderDetail();
+
+    expect(await screen.findByRole("heading", { name: "alice" })).toBeInTheDocument();
+    expect(screen.getByText("탈퇴 유예")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "잔여 정리" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "잔여 조사" })).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("surveys first, then executes only on the exact username", async () => {
+    // ②ⓐ: 조사(파괴 없음) → 결과 확인 → 사유·사용자명 입력 → 실행.
+    // under: 확인 절차를 통째로 걷어도 POST 만 남아 초록이 되지 않게, 조사
+    // 응답 전에는 실행 버튼이 존재하지 않는 것까지 잠근다.
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ users: [USERS[0], STALLED_USER] }))
+      .mockResolvedValueOnce(response({ projects: [] }))
+      .mockResolvedValueOnce(response({
+        leftover_projects: [], has_username_tombstone: true,
+      }))
+      .mockResolvedValueOnce(response({
+        leftover_projects: [],
+        swept: { sessions: 2, request_quota_policies: 1 },
+        has_username_tombstone: true,
+        removed_user_row: true,
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderDetail("u9");
+
+    expect(await screen.findByText("파기 진행")).toBeInTheDocument();
+    // 조사 전에는 실행 컨트롤이 아직 없다 — 무엇이 지워질지 모르는 실행은 없다.
+    expect(screen.queryByRole("button", { name: "잔여 정리 실행" })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "잔여 조사" }));
+
+    expect(await screen.findByRole("heading", { name: "조사 결과" })).toBeInTheDocument();
+    expect(screen.getByText("남은 프로젝트가 없습니다.")).toBeInTheDocument();
+    expect(fetchMock.mock.calls[2][0]).toBe("/api/admin/users/u9/reconcile");
+    expect(fetchMock.mock.calls[2][1].method).toBeUndefined(); // GET — 파괴 없음
+
+    // 사유만으로는 부족하다 — 확인 입력이 사용자명과 다르면 잠긴 채로 남는다.
+    await userEvent.type(screen.getByLabelText("정리 사유"), "데몬 실패 수습");
+    const execute = screen.getByRole("button", { name: "잔여 정리 실행" });
+    expect(execute).toBeDisabled();
+    await userEvent.type(
+      screen.getByLabelText(/확인을 위해 stalled 입력/), "stalled",
+    );
+    expect(screen.getByRole("button", { name: "잔여 정리 실행" })).toBeEnabled();
+
+    await userEvent.click(screen.getByRole("button", { name: "잔여 정리 실행" }));
+
+    expect(await screen.findByRole("heading", { name: "정리 결과" })).toBeInTheDocument();
+    expect(screen.getByText("sessions")).toBeInTheDocument();
+    expect(screen.getByText("2건 삭제")).toBeInTheDocument();
+    expect(screen.getByText(/계정 행을 삭제했습니다/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "사용자 목록으로" }))
+      .toHaveAttribute("href", "/admin");
+    const [url, init] = fetchMock.mock.calls[3];
+    expect(url).toBe("/api/admin/users/u9/reconcile");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ reason: "데몬 실패 수습" });
+  });
+
+  it("reports leftover projects from the survey instead of hiding them", async () => {
+    // 프로젝트가 남아 있으면 계정 행이 유지된다 — 조사가 그 사실을 말해야
+    // 관리자가 "실행했는데 왜 계정이 남지"라고 묻지 않는다.
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ users: [USERS[0], STALLED_USER] }))
+      .mockResolvedValueOnce(response({ projects: [] }))
+      .mockResolvedValueOnce(response({
+        leftover_projects: ["p1"], has_username_tombstone: true,
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderDetail("u9");
+
+    await userEvent.click(await screen.findByRole("button", { name: "잔여 조사" }));
+
+    expect(await screen.findByText("p1")).toBeInTheDocument();
+    expect(screen.getByText(/프로젝트가 남아 있어 계정 행은 유지됩니다/))
+      .toBeInTheDocument();
+  });
+
+  it("surfaces a 409 survey answer without offering execution", async () => {
+    // 유예 만료 청구 등으로 대상이 아니게 된 순간 서버는 409 — 화면은 그 말을
+    // 그대로 전하고 확인 절차를 열지 않는다(H3: detail 분기 금지, 상태코드로).
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ users: [USERS[0], STALLED_USER] }))
+      .mockResolvedValueOnce(response({ projects: [] }))
+      .mockResolvedValueOnce(response(
+        { detail: "purge has not started for this account" }, 409,
+      ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderDetail("u9");
+
+    await userEvent.click(await screen.findByRole("button", { name: "잔여 조사" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /purge has not started/,
+    );
+    expect(screen.queryByRole("heading", { name: "조사 결과" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "잔여 정리 실행" })).not.toBeInTheDocument();
   });
 });
