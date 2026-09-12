@@ -647,12 +647,19 @@ def register_drafts(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         # 이 행이 부모 계획 §1 의 공백을 닫는다 — `draft_versions` 에는
         # `created_at` 도 `user_id` 도 없어서 "누가 언제 저장했나"에 답할 수 없었다.
-        activity.record(
-            project_id=project_id, actor_user_id=current.id,
-            action="draft_version_saved", target_type="draft_version",
-            target_id=result.draft_version.id,
-            after=str(result.draft_version.version_number),
-        )
+        # 활동 로그 D2=ⓑ(오너 2026-09-13): 같은 저장 key 재전송은 **아무것도 바꾸지
+        # 않은 재생**이므로 행을 남기지 않는다 — D1=ⓑ(finalize)와 같은 규칙이고,
+        # 이제 세 경로(finalize·accept·수동 저장)가 **한 답**을 말한다. 종전에는
+        # finalize 만 조용해 같은 개념에 답이 셋이었다(D1 의 근거가 거짓이던 탓).
+        # ★ 이 분기는 전수 가드가 못 본다 — 잠그는 것은 `test_activity_api.py` 의
+        # 행위 셀 둘(첫 저장은 남긴다 · 재전송은 안 남긴다)이다.
+        if not result.idempotent_replay:
+            activity.record(
+                project_id=project_id, actor_user_id=current.id,
+                action="draft_version_saved", target_type="draft_version",
+                target_id=result.draft_version.id,
+                after=str(result.draft_version.version_number),
+            )
         return {
             "draft_version": {
                 "id": result.draft_version.id,

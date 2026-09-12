@@ -1365,7 +1365,14 @@ def register_writing(
         # 바꿨는가"이고, 여기가 주 저작 흐름의 저장 경로다. **기록하는 것은 AI 요청이
         # 아니라 정본 저장**이므로 A8(중복 없음)은 그대로다 — `llm_call_audits`·원장이
         # 담는 사건과 다른 사실이다. Gate 가 통과하지 않으면 저장이 없고 기록도 없다.
-        if result.saved is not None:
+        # 활동 로그 D2=ⓑ(오너 2026-09-13): 같은 accept key 재전송은 **아무것도 바꾸지
+        # 않은 재생**이므로 행을 남기지 않는다 — D1=ⓑ(finalize)와 같은 규칙이다.
+        # ★ 이 브리프의 원래 근거(*"accept 는 이미 replay 를 안 남긴다"*)는 거짓이었고
+        # (2026-09-12 실측 — accept 도 2건), 그 탓에 같은 개념에 답이 셋이었다. D2=ⓑ 가
+        # 그 셋을 하나로 모은다. 위 502 partial 경로는 **D3=ⓐ 로 별개 축**이다.
+        # ★ 이 분기는 전수 가드가 못 본다 — 잠그는 것은 `test_writing_accept.py` 의
+        # 행위 셀 둘(첫 accept 는 남긴다 · 재전송은 안 남긴다)이다.
+        if result.saved is not None and not result.idempotent_replay:
             activity.record(
                 project_id=project_id, actor_user_id=current.id,
                 action="draft_version_accepted", target_type="draft_version",
