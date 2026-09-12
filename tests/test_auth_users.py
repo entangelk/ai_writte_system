@@ -634,6 +634,49 @@ class WithdrawalGracePeriodLiteralTest(unittest.TestCase):
         self.assertEqual(WITHDRAWAL_GRACE_PERIOD, timedelta(days=30))
 
 
+class WithdrawalCancelAfterPurgeClaimTest(unittest.TestCase):
+    """파기가 청구된 뒤의 취소 — **오늘의 동작을 잠근다. 계약이 아니다.**
+
+    독립 검증(2026-09-12, 조건 **B1**)이 실측한 거리다: 오너 결정 **D5 는 *파기 실행
+    전까지* 취소 가능**인데 `cancel_withdrawal` 은 `purge_started_at` 을 **보지 않아**
+    청구 뒤에도 통과하고 유예 제한이 풀린다. 창이 둘이다 — 파기가 도는 수초~수분,
+    그리고 **파기가 실패해 표식만 남은 계정의 영구 창**(그 계정은 다시 청구되지
+    않으므로 reconciler 를 부르기 전까지 그 상태로 남는다).
+
+    **이 셀은 그 동작을 승인하지 않는다.** 승격(Slice 5)이 §6 에 *"취소는 파기가
+    시작되기 전까지"* 라고 적었던 것이 코드보다 앞서 나간 문장이었고, 검증 조건 B1 의
+    갈래 **ⓑ**(문장을 코드가 하는 말로 맞추고 거리를 부채로 등재)를 택해 문서를
+    고쳤다. 이 셀은 그 문장과 코드가 **같은 것을 말하는 상태**를 잠근다.
+
+    ★ **경계를 시행할지는 오너 결정이다** — 갈래는
+    `docs/plans/slice5-withdrawal-cancel-after-purge-claim-decisions.md` 에 있고,
+    **ⓐ 가 선택되면 이 셀과 §6 문장이 함께 뒤집힌다.** 여기가 그 자리라는 표식이다.
+    """
+
+    def setUp(self) -> None:
+        self.repo = InMemoryUserRepository()
+        self.service = _service(self.repo)
+
+    def test_cancelling_still_succeeds_after_the_purge_was_claimed(self) -> None:
+        user = self.service.create_user(username="alice", password="pw")
+        self.service.request_withdrawal(user.id)
+        self.assertIsNotNone(
+            self.repo.claim_for_purge(user.id, at=_FIXED_TIME),
+            "픽스처가 파기 청구에 실패했다 — 이 셀은 청구된 계정을 전제한다",
+        )
+
+        cancelled = self.service.cancel_withdrawal(user.id)
+
+        # 오늘의 동작: 취소가 통과하고 유예 상태가 사라진다(쓰기 403 이 풀린다).
+        self.assertIsNone(cancelled.withdrawal_requested_at)
+        # 그런데 파기 표식은 남는다 — 계정이 *활성인데 파기 청구됨* 이 된다.
+        self.assertEqual(
+            self.repo.get_by_id(user.id).purge_started_at, _FIXED_TIME,
+            "취소가 파기 표식까지 지웠다면 바뀐 것은 이 셀이 아니라 파기 그래프다 "
+            "— 표식은 reconciler 가 잔여를 발견하는 유일한 단서다",
+        )
+
+
 class WithdrawalStateAxisTest(unittest.TestCase):
     """Slice 0 — 상태 축과 경계 판정. **이 슬라이스는 아무것도 지우지 않는다.**"""
 

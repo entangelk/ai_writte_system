@@ -6,7 +6,7 @@
 
 서비스 경계와 확정된 계약을 먼저 볼 때는 [`../system-contract-sot.md`](../system-contract-sot.md)를 정본 SoT로 사용한다. 이 인덱스는 Phase별 세부 계획과 **모든 착수 결정 브리프**를 찾는 자리다.
 
-> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(138개 중 116개)는
+> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(139개 중 117개)는
 > `*-decisions.md` 착수 결정 브리프이며, **오너 결정의 근거 기록**이다. 파일명 접두 체계는 이미 무너져
 > 있고(`00`~`07` 계열 + 접두 없는 최근 것들) 파일명만으로는 트랙을 알 수 없다 — 그래서 아래는 **접두가
 > 아니라 트랙으로** 묶었다. 디렉터리 재편은 아직 결정되지 않은 별개 사안이다(HANDOFF 추적 부채).
@@ -197,6 +197,7 @@
 | [`account-withdrawal-implementation-phases.md`](account-withdrawal-implementation-phases.md) | 계정 탈퇴 구현 순서(셀프 요청 · 30일 유예 · 취소 · 파기 데몬) | **Resolved** — D1~D6 확정(오너 2026-09-07) · **D4·Slice 0~5 완료**(SoT v1.8.60) · Slice 4b 미착수 |
 | [`slice2-withdrawal-grace-read-surface-decisions.md`](slice2-withdrawal-grace-read-surface-decisions.md) | 계정 탈퇴 Slice 2 — 유예 상태(남은 일수·취소)를 어디서 읽는가 | **Resolved** — ⓑ 별도 `GET /me/withdrawal`(오너 2026-09-08) · **Slice 2 완료(SoT v1.8.48)** |
 | [`slice3-withdrawal-purge-daemon-decisions.md`](slice3-withdrawal-purge-daemon-decisions.md) | 계정 탈퇴 Slice 3 — 파기 데몬이 계정 축 데이터를 무엇으로 식별하는가(+ 슬라이스 범위) | **Resolved** — ⓑ 두 규칙 스윕 · ⓔ 데몬+스크립트(오너 2026-09-09) |
+| [`slice5-withdrawal-cancel-after-purge-claim-decisions.md`](slice5-withdrawal-cancel-after-purge-claim-decisions.md) | 계정 탈퇴 — **파기가 청구된 뒤의 취소**를 거부할지, 거부하면 어떤 얼굴로 답할지(D5 가 정하지 않은 구간) | **Proposed** — 오너 결정 대기(2026-09-12 독립 검증 조건 B1 이 제기) |
 | [`slice4-withdrawal-screen-decisions.md`](slice4-withdrawal-screen-decisions.md) | 계정 탈퇴 Slice 4 — 유예 배너를 어디에 두는가 · 관리자 잔여 정리의 슬라이스 귀속 | **Resolved** — D1=ⓐ 전역 배너 · D2=ⓐ Slice 4b 분리(오너 2026-09-10) |
 | [`activity-log-replay-and-partial-decisions.md`](activity-log-replay-and-partial-decisions.md) | 활동 로그 — 재전송·idempotent replay·부분 실패가 행을 남기는가(결정 셋) | **Resolved** — D1=ⓑ · D2=유예(트리거) · D3=ⓐ(오너 2026-09-08) |
 | [`k3-context-window-guard-decisions.md`](k3-context-window-guard-decisions.md) | K-3 — 창을 모르는 호출을 예산 가드가 어떻게 다루는가(외부 API 에서 영구 미판정) | **Resolved** — ⓐ 유지(오너 2026-09-08) · **가드가 꺼져 있음을 알고 둔다** |

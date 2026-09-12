@@ -73,6 +73,13 @@ _ADDENDUM_VERSION_LINES = {
 #: 시행 전 판본의 버전 문자열. 문서 어디에도 남아 있으면 안 된다.
 _DRAFT_VERSION = "draft-0"
 
+#: 코드가 시행하지만 약관·방침이 아직 적지 않은 제한(Slice 5 가 발견 · 검증 하드닝 H2).
+#: 대조표가 **빠진 것** 을 적는 행이고, 축 이름이 그 행의 앵커다.
+_UNDISCLOSED_AXIS = "유예 중에는 쓰기와 유료 경로가 막힌다"
+
+#: 그 제한을 실제로 시행하는 자리. 이것이 사라지면 위 행도 사라져야 한다(양방향).
+_UNDISCLOSED_GUARD = ("api/dependencies.py", "require_active_user_for_write")
+
 #: 탈퇴 유예 기간을 적는 조항(문서마다 문장이 다르다). **수가 없는 부분**을 앵커로
 #: 쓴다 — 수를 포함하면 값이 바뀔 때 앵커가 먼저 죽어 진단이 바뀐다.
 _GRACE_CLAUSE_ANCHORS = {
@@ -185,7 +192,10 @@ class ServicePolicyContractTest(unittest.TestCase):
     def test_the_document_exists_and_carries_pinned_rows(self):
         self.assertTrue(_DOC.exists(), "정책 계약 문서가 없다")
         # 0행이면 아래 두 셀이 공허하게 만족된다 — 포인터를 다 걷어낸 것도 결함이다.
-        self.assertGreaterEqual(len(_rows()), 10)
+        # ★ 하한은 **디스크 실제 수**여야 일을 한다(검증 하드닝 H3, 2026-09-12):
+        # 종전 `>= 10` 은 실제 14행보다 넉넉해서 행을 하나 지워도 아무도 안 물었다.
+        # 행을 **의도적으로 지울 때** 이 수를 함께 내린다(늘 때는 그대로 통과한다).
+        self.assertGreaterEqual(len(_rows()), 14)
 
     def test_every_row_points_at_a_constant_that_still_exists(self):
         for axis, _value, pointers in _rows():
@@ -241,6 +251,46 @@ class LegalDraftCoverageTest(unittest.TestCase):
             "정책 문서에는 있는데 약관 대조표에 없는 축이다 — 약관 초안이 "
             "그 정책을 담았는지 확인하고 docs/legal/README.md 에 행을 더한다",
         )
+
+    def test_the_undisclosed_restriction_keeps_its_row_while_code_enforces_it(self):
+        """코드가 시행하는데 약관이 **안 적은** 제한은 대조표에 흔적이 남아야 한다.
+
+        **왜 필요한가 — 이 행이 유일한 흔적이다.** Slice 5(2026-09-12)가 승격하면서
+        *유예 중 일반 쓰기·유료 경로 403* 이 약관·방침 어디에도 없다는 것을 발견했고,
+        조항 문장은 오너 몫이라 대조표에 `미기재` 행으로만 세웠다. 독립 검증 하드닝
+        **H2** 가 그 다음을 짚었다 — **그 행을 지워도 전 셀이 초록**이었다(변이 MX-I).
+        고지 없는 제한이 조용히 잊히는 경로가 그것이다.
+
+        **양방향**:
+          · under — 행을 지우면 실패한다(시행 중인 제한의 기록이 사라지는 것).
+          · over — 제한을 **코드에서 걷으면** 행도 없어야 한다. 가드 심볼이 사라진
+            세계에서는 이 셀이 *행이 없을 것* 을 요구하므로, 제한을 없앤 사람이
+            대조표를 청소하지 않고 지나가지 못한다.
+
+        ★ **조항이 실제로 쓰이는 날 이 셀도 바뀐다** — 그때는 행의 조항 칸이 채워지고
+        이 셀의 뜻이 *"제한이 고지됐다"* 로 옮겨간다. 이름과 이 docstring 을 함께
+        고치는 것이 그 작업의 일부다(지우는 것이 아니다).
+        """
+        try:
+            _load(*_UNDISCLOSED_GUARD)
+        except (ImportError, AttributeError):
+            enforced = False
+        else:
+            enforced = True
+
+        mapped = _mapped_axes()
+        if enforced:
+            self.assertIn(
+                _UNDISCLOSED_AXIS, mapped,
+                "코드가 유예 중 쓰기를 막는데 대조표에 그 행이 없다 — 고지되지 않은 "
+                "제한의 유일한 기록이므로 지우려면 약관에 문언을 먼저 넣는다",
+            )
+        else:
+            self.assertNotIn(
+                _UNDISCLOSED_AXIS, mapped,
+                "유예 쓰기 가드가 코드에서 사라졌는데 대조표가 아직 그 제한을 "
+                "미기재로 적는다 — 없는 제한을 빠진 고지로 세어 두면 거짓이다",
+            )
 
     def test_the_length_limits_in_the_terms_match_the_constants(self):
         """약관 제5조 1항의 두 수를 **상수와** 대조한다(핀이 아니라 상징 참조).

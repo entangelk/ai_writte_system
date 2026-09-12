@@ -184,6 +184,26 @@ class SelfWithdrawalApiTest(unittest.TestCase):
         self.assertEqual(client.get("/auth/me").status_code, 200)
         self.assertEqual(client.get("/projects").status_code, 200)
 
+    def test_a_withdrawing_member_can_sign_in_again(self) -> None:
+        """유예 중 **재로그인** — 정책 문서 §6 이 열거한 셋 중 하나(하드닝 H1).
+
+        위 셀이 잠그는 것은 *이미 있는 세션이 계속 산다* 까지다. 독립 검증
+        (2026-09-12, H1)이 그 구분을 짚었다: 브라우저를 닫았다 다시 온 회원이
+        **로그인을 못 하면 취소 버튼에 닿지 못하고**, D1=C 의 취지가 바로 그 자리에서
+        무너진다. 로그인은 `status`·`must_change_password` 만 보므로 지금도 되지만,
+        **탈퇴 가드를 로그인까지 확대하는 과잉 교정**은 이 셀 없이 조용히 통과한다.
+        """
+        client, _ = self._logged_in()
+        client.post("/me/withdrawal")
+        client.post("/auth/logout")
+
+        again = client.post(
+            "/auth/login", json={"username": "alice", "password": "pw123"}
+        )
+        self.assertEqual(again.status_code, 200)
+        # 로그인이 된 것만으로는 부족하다 — 취소 경로에 실제로 닿아야 한다.
+        self.assertEqual(client.delete("/me/withdrawal").status_code, 200)
+
     def test_grace_period_allows_reads_but_refuses_state_changing_writes(self) -> None:
         """Under-strict: D1=C blocks writes while preserving every read surface."""
         client, _ = self._logged_in()
