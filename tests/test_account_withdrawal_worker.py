@@ -318,12 +318,32 @@ if __name__ == "__main__":  # pragma: no cover
 
 
 class ReconcilerTest(unittest.TestCase):
-    """부분 파기 수습 경로 — 데몬이 멈춘 자리를 이 스크립트가 잇는다."""
+    """부분 파기 수습 경로 — 데몬이 멈춘 자리를 잇는 본체의 조건 넷.
+
+    Slice 4b(2026-09-12)부터 본체는 ``deletion/account_reconcile.py`` 다 —
+    스크립트와 관리자 operation 이 같이 쓰는 한 벌. 이 조건 셀들은 이관 전에
+    스크립트가 지키던 것과 같은 넷을 그 모듈에 잠근다.
+    """
 
     def setUp(self) -> None:
-        from scripts import account_purge_reconciler as reconciler
+        from services.application.app.deletion.account_reconcile import (
+            AccountReconcileService,
+            MongoAccountReconcileRepository,
+        )
 
-        self.reconciler = reconciler
+        class _Client:
+            def __init__(self, db) -> None:
+                self._db = db
+
+            def __getitem__(self, _name):
+                return self._db
+
+        self._make_service = lambda db: AccountReconcileService(
+            MongoAccountReconcileRepository(
+                _Client(db), db_name="ai_writing_system"
+            ),
+            sweeper=_NullSweeper(),
+        )
 
     def test_a_stalled_account_is_the_one_with_a_purge_stamp(self) -> None:
         """성공하면 행이 사라지므로 이 질의가 곧 *부분 파기* 의 정의다."""
@@ -334,7 +354,8 @@ class ReconcilerTest(unittest.TestCase):
             ],
         })
 
-        self.assertEqual(self.reconciler.stalled_user_ids(db), ["user:b"])
+        service = self._make_service(db)
+        self.assertEqual(service._repo.stalled_user_ids(), ["user:b"])
 
     def test_leftover_projects_hold_the_user_row_back(self) -> None:
         """★ 프로젝트가 남았으면 계정 행을 지우지 않는다.
@@ -348,12 +369,10 @@ class ReconcilerTest(unittest.TestCase):
             "user_name_history": [{"_id": "user_name:user:b"}],
         })
 
-        result = self.reconciler.reconcile(
-            db, "user:b", sweeper=_NullSweeper()
-        )
+        result = self._make_service(db).reconcile("user:b")
 
-        self.assertEqual(result["leftover_projects"], ["p9"])
-        self.assertFalse(result["removed_user_row"])
+        self.assertEqual(result.leftover_projects, ["p9"])
+        self.assertFalse(result.removed_user_row)
         self.assertEqual(len(db.collections["users"]), 1)
 
     def test_a_missing_tombstone_also_holds_the_user_row_back(self) -> None:
@@ -365,10 +384,10 @@ class ReconcilerTest(unittest.TestCase):
             "user_name_history": [],
         })
 
-        result = self.reconciler.reconcile(db, "user:b", sweeper=_NullSweeper())
+        result = self._make_service(db).reconcile("user:b")
 
-        self.assertFalse(result["has_username_tombstone"])
-        self.assertFalse(result["removed_user_row"])
+        self.assertFalse(result.has_username_tombstone)
+        self.assertFalse(result.removed_user_row)
         self.assertEqual(len(db.collections["users"]), 1)
 
     def test_a_clean_stalled_account_is_finished_off(self) -> None:
@@ -379,9 +398,9 @@ class ReconcilerTest(unittest.TestCase):
             "user_name_history": [{"_id": "user_name:user:b"}],
         })
 
-        result = self.reconciler.reconcile(db, "user:b", sweeper=_NullSweeper())
+        result = self._make_service(db).reconcile("user:b")
 
-        self.assertTrue(result["removed_user_row"])
+        self.assertTrue(result.removed_user_row)
         self.assertEqual(db.collections["users"], [])
 
 

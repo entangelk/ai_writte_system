@@ -24,7 +24,9 @@ class AdminAuditEvent:
     # 8.5-b(D3=ⓑ, 오너 2026-08-23): 회원 정책 조작이 감사의 네 번째 대상이 된다.
     # purge 는 여전히 target_project_id 를 쓰고, 회원 정책은 target_user_id 를
     # 쓴다 — 한 필드를 겹쳐 쓰면 필드명이 거짓말을 한다.
-    action: Literal["project_purge", "member_quota_policy"]
+    # Slice 4b(오너 2026-09-12, ③ⓐ): 계정 잔여 정리가 다섯 번째 대상이다 —
+    # 프로젝트 purge 와 같은 2단계(요청→결과) 파괴 축이라 action 만 하나 더한다.
+    action: Literal["project_purge", "member_quota_policy", "account_reconcile"]
     target_type: Literal["project", "user"]
     target_project_id: str | None
     reason: str
@@ -44,6 +46,8 @@ class AdminAuditRepository(Protocol):
 
     def list_member_quota_events(self, *, limit: int) -> tuple[AdminAuditEvent, ...]: ...
 
+    def list_destructive_events(self, *, limit: int) -> tuple[AdminAuditEvent, ...]: ...
+
 
 class InMemoryAdminAuditRepository:
     def __init__(self) -> None:
@@ -60,6 +64,15 @@ class InMemoryAdminAuditRepository:
             event for event in sorted(
                 self.events, key=lambda event: event.at, reverse=True)
             if event.action == "member_quota_policy"
+        )[:limit]
+
+    def list_destructive_events(self, *, limit: int) -> tuple[AdminAuditEvent, ...]:
+        # Slice 4b: 감사 화면이 보는 축 — 파괴 2종(purge·reconcile). 회원 정책
+        # (member_quota_policy)은 파괴가 아니므로 계속 제외한다.
+        return tuple(
+            event for event in sorted(
+                self.events, key=lambda event: event.at, reverse=True)
+            if event.action in ("project_purge", "account_reconcile")
         )[:limit]
 
 
@@ -112,13 +125,45 @@ class AdminAuditService:
             reason=requested.reason,
             outcome=outcome,
             at=self._clock(),
+            # Slice 4b: 요청 행의 대상 축을 결과 행이 상속한다. 프로젝트 purge
+            # 는 None 이라 무변 — 계정 축(account_reconcile)만 이 값을 얻는다.
+            target_user_id=requested.target_user_id,
             error_kind=error_kind,
+        )
+        self._repo.insert(event)
+        return event
+
+    def record_account_reconcile_requested(
+        self, *, admin_user_id: str, target_user_id: str, reason: str
+    ) -> AdminAuditEvent:
+        """Slice 4b(③ⓐ, 오너 2026-09-12) — 계정 잔여 정리의 fail-closed 요청 행.
+
+        프로젝트 purge 의 2단계 선례를 그대로 따른다: 요청 행이 먼저 남고,
+        결과(``record_purge_outcome``)가 같은 ``operation_id`` 로 뒤따른다.
+        """
+        normalized_reason = reason.strip()
+        if not normalized_reason:
+            raise ValueError("reconcile reason must not be blank")
+        event = AdminAuditEvent(
+            id=self._id_factory(),
+            operation_id=self._id_factory(),
+            admin_user_id=admin_user_id,
+            action="account_reconcile",
+            target_type="user",
+            target_project_id=None,
+            reason=normalized_reason,
+            outcome="requested",
+            at=self._clock(),
+            target_user_id=target_user_id,
         )
         self._repo.insert(event)
         return event
 
     def list_project_purge_events(self, *, limit: int = 50) -> tuple[AdminAuditEvent, ...]:
         return self._repo.list_project_purge_events(limit=limit)
+
+    def list_destructive_events(self, *, limit: int = 50) -> tuple[AdminAuditEvent, ...]:
+        return self._repo.list_destructive_events(limit=limit)
     def record_member_quota_change(
         self,
         *,

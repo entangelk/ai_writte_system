@@ -237,6 +237,34 @@ class AdminUserPayload(BaseModel):
     # admin list showed a signup request as "활성" — an account that cannot sign
     # in at all, labelled the same as one that can (owner 2026-08-27, dogfood).
     status: str
+    # 계정 탈퇴 축(Slice 4b, 오너 2026-09-12) — 승인 축(status)·활성 축
+    # (is_active) 과 별개인 **세 번째 축**의 두 스탬프를 서버 값 그대로 보여
+    # 준다. 파생값 purge_due_at 은 회원 배너의 것이지 관리자 잔여 정리의
+    # 입력이 아니다(브리프 "결정을 따라오는 것").
+    withdrawal_requested_at: datetime | None
+    purge_started_at: datetime | None
+
+
+class AdminAccountReconcileSurvey(BaseModel):
+    """``GET /admin/users/{id}/reconcile`` — dry-run 조사(②ⓐ). 파괴가 없다."""
+
+    leftover_projects: list[str]
+    has_username_tombstone: bool
+
+
+class AdminAccountReconcileResult(BaseModel):
+    """``POST /admin/users/{id}/reconcile`` — 실행 결과(스크립트 출력 키와 같은 넷)."""
+
+    leftover_projects: list[str]
+    swept: dict[str, int]
+    has_username_tombstone: bool
+    removed_user_row: bool
+
+
+class AdminAccountReconcileRequest(BaseModel):
+    # 잔여 정리 실행 사유 — 프로젝트 purge·quota 정지와 같은 감사 사유 필수
+    # (③ⓐ). 감사 행에 그대로 남는다.
+    reason: str
 
 
 class AdminSignupPayload(BaseModel):
@@ -463,7 +491,9 @@ class AdminAuditEventPayload(BaseModel):
     admin_user_id: str
     action: str
     target_type: str
-    target_project_id: str
+    # 계정 축 이벤트(account_reconcile·member_quota_policy)는 프로젝트를 지목하지
+    # 않는다 — AdminAuditEvent 스키마(str | None)와 같은 폭(Slice 4b).
+    target_project_id: str | None
     reason: str
     outcome: str
     at: datetime

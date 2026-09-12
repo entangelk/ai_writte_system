@@ -291,6 +291,13 @@ _ERRORS_ADMIN_404_409: dict[int | str, dict] = _admin(_protected({
 }))
 
 
+# 계정 잔여 정리(Slice 4b, 2026-09-12) — 사유 400 · 대상 없음 404 · 정리 대상
+# 아님 409(purge 미시작). 프로젝트 purge 의 409 선언에 값 검증 축이 하나 더 낀 모양.
+_ERRORS_ADMIN_400_404_409: dict[int | str, dict] = _admin(_protected({
+    400: _ERROR, 404: _ERROR, 409: _ERROR, 503: _STORAGE_503,
+}))
+
+
 # Access-grant issuance: the target project must exist, but there is no project
 # lifecycle conflict on this surface. Purge has its own 404/409 declaration.
 _ERRORS_ADMIN_404: dict[int | str, dict] = _admin(_protected({

@@ -1112,7 +1112,10 @@ class AdminUserApiTest(unittest.TestCase):
             {u["username"] for u in users}, {"alice", "root"}
         )
         self.assertEqual(
-            set(users[0]), {"id", "username", "is_admin", "is_active", "status"}
+            set(users[0]),
+            {"id", "username", "is_admin", "is_active", "status",
+             # Slice 4b(2026-09-12): 탈퇴 축의 두 스탬프 — 세 번째 축이다.
+             "withdrawal_requested_at", "purge_started_at"},
         )
         # Over-strict: the wire model is what keeps a hash from ever riding
         # along, so assert the absence on the raw body rather than the parsed
@@ -1131,6 +1134,9 @@ class AdminUserApiTest(unittest.TestCase):
             {
                 "id": created.json()["id"], "username": "carol",
                 "is_admin": False, "is_active": True, "status": "active",
+                # Slice 4b: 관리자가 만든 계정은 동의 이전 세계와 같이 두 스탬프
+                # 모두 None(유예·파기 미청구)이다.
+                "withdrawal_requested_at": None, "purge_started_at": None,
             },
         )
         # C-6: the account is real, but the administrator-set password is
@@ -2122,6 +2128,11 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         ("/admin/users", "get"),
         ("/admin/users", "post"),
         ("/admin/users/{user_id}/deactivate", "post"),
+        # 계정 잔여 정리(Slice 4b, 2026-09-12, 오너 ①ⓐ·②ⓐ·③ⓐ): dry-run 조사
+        # GET + 실행 POST. 대상은 계정이라 project 를 지목하지 않는다. 실행은
+        # admin_audit(account_reconcile action)에 남는다.
+        ("/admin/users/{user_id}/reconcile", "get"),
+        ("/admin/users/{user_id}/reconcile", "post"),
         # Phase 8.5-a (owner 2026-08-23, plans/08-5-usage-admin-cms-decisions.md):
         # the quota operations read surface. Reads only — changes/suspend and
         # their audit are 8.5-b. Not project-scoped: the subject is users.id.
@@ -2241,8 +2252,10 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # 계정 탈퇴 Slice 1(2026-09-08)이 셀프 탈퇴 요청·취소 2경로를 **인증 전용**
         # tier 에 더해 104 가 됐고, Slice 2 상태 GET 이 105 를 만든다
         # (project tier 는 무변 76 — 계정 축이라 project 를 지목하지 않는다).
+        # Slice 4b(2026-09-12)가 잔여 정리 dry-run GET·실행 POST 2경로를 admin
+        # tier 에 더해 107 이 됐다(admin 17→19).
         self.assertEqual(len(by_tier["project"]), 76)
-        self.assertEqual(len(tiers), 105)
+        self.assertEqual(len(tiers), 107)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:

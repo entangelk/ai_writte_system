@@ -9,7 +9,7 @@
   memory 가 append-only 라 이 제품에서 되돌리기가 가장 어려운 종류다.
 - **★ 표는 mutating operation *전수* 다.** 오너가 B 를 고른 것은 범위 판단이지
   C(AI 요청까지)의 각하가 아니므로, **C 로 넓히는 일이 "행 값 하나 바꾸기"여야
-  한다**는 것이 A2 확정 조건이다. 그래서 기록하지 않는 31 경로도 **사유와 함께**
+  한다**는 것이 A2 확정 조건이다. 그래서 기록하지 않는 32 경로도 **사유와 함께**
   여기 등재된다 — 빠진 것과 일부러 뺀 것이 구분돼야 한다.
   ``tests/test_activity_actions.py`` 가 미등재 mutating route 를 실패시킨다.
 - **★ C 를 열 때 A8 을 함께 다시 본다.** A8=A("중복 기록 없음")가 성립하는 근거가
@@ -170,7 +170,7 @@ _REVIEW: tuple[ActivityAction, ...] = (
 #: 기록하는 경로 전수.
 ACTIVITY_ACTIONS: tuple[ActivityAction, ...] = _CANONICAL + _REVIEW
 
-#: 기록하지 않는 31 — **사유와 함께**. 이 목록이 있어야 "빠진 것"과 "일부러 뺀 것"이
+#: 기록하지 않는 32 — **사유와 함께**. 이 목록이 있어야 "빠진 것"과 "일부러 뺀 것"이
 #: 구분되고, C 확장이 값 변경으로 끝난다.
 #:
 #: ★ 아래 절 주석의 수는 `test_activity_log.py` 가 실제 항목 수와 대조한다
@@ -231,7 +231,7 @@ EXCLUDED_OPERATIONS: tuple[ExcludedOperation, ...] = (
     # 축이고, 셀프 탈퇴는 행위자가 곧 대상이라 그 필드가 거짓말이 된다.
     ExcludedOperation("POST", "/me/withdrawal", "not_project_scoped", "계정 축"),
     ExcludedOperation("DELETE", "/me/withdrawal", "not_project_scoped", "계정 축"),
-    # --- 관리자 + 승인 11 ----------------------------------------------------
+    # --- 관리자 + 승인 12 ----------------------------------------------------
     #
     # I3: 관리자 행위·승격 접근과 소유자 활동을 섞으면 양쪽이 쓸모를 잃는다
     # (SoT v1.7.78). purge 생존 여부도 정반대라 한 컬렉션에 둘 수 없다.
@@ -254,6 +254,11 @@ EXCLUDED_OPERATIONS: tuple[ExcludedOperation, ...] = (
                       "admin_audited", "관리자 축(회원 정책)"),
     ExcludedOperation("POST", "/admin/projects/{project_id}/purge",
                       "admin_audited", "admin_audit_events(파기 tombstone)"),
+    # 계정 잔여 정리(Slice 4b, 2026-09-12): 파기 수습 파괴 행위 — 프로젝트
+    # purge 와 같은 2단계 감사(account_reconcile action)가 남는다(③ⓐ). 조사
+    # GET 은 mutating 이 아니라 등재 대상이 아니다.
+    ExcludedOperation("POST", "/admin/users/{user_id}/reconcile",
+                      "admin_audited", "admin_audit_events(계정 파기 수습)"),
     # 소유자 purge(2026-08-28): 파기가 activity 를 통째로 지우므로 행을 남길 수
     # 없다 — 감사는 admin_audit_events 가 담는다(execute_project_purge 공유 본체).
     ExcludedOperation("POST", "/projects/{project_id}/purge",

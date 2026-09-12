@@ -6,15 +6,9 @@
 못한다. 그래서 실패한 계정은 `purge_started_at` 이 찍힌 채 남고, **이 스크립트가 그
 잔류를 쓸어 간다.**
 
-**어떻게 찾는가.** `users` 에 `purge_started_at` 이 찍힌 행이 곧 *시작됐지만 안 끝난*
-계정이다(성공하면 행 자체가 사라진다). 그 각각에 대해 **계정 축 두 규칙**을 다시 돌고,
-남은 프로젝트가 있으면 프로젝트 축 reconciler 가 쓸 수 있도록 **이름만 보고한다** —
-프로젝트 파괴 그래프를 여기서 두 번째로 구현하지 않는다(`purge_reconciler.py` 가 그
-일을 하고, 이 스크립트는 계정 축만 본다).
-
-**순서**: 계정 축 스윕 → 사용자명 묘비 확인 → 계정 행 삭제. 묘비가 없으면 **지우지
-않는다** — 이름 한 값을 남기는 것이 오너 결정이라, 묘비 없이 행을 지우면 원장이
-영원히 id 로만 답한다.
+**조건·순서의 본체는 한 벌이다** — Slice 4b(2026-09-12)부터 관리자 operation
+(`GET/POST /admin/users/{id}/reconcile`)과 이 스크립트가 같은
+`deletion/account_reconcile.py` 를 쓴다. 이 파일은 조립·출력만 한다.
 
 기본은 **dry-run** 이다. 파기는 비가역이므로 `--apply` 를 명시해야 지운다.
 
@@ -40,47 +34,10 @@ from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
 from services.application.app.deletion.account_axis_sweep import (
     MongoAccountAxisSweeper,
 )
-from services.application.app.deletion.user_name_history import document_id
-from services.application.app.deletion.user_name_history_mongo import (
-    COLLECTION as USER_NAME_HISTORY,
+from services.application.app.deletion.account_reconcile import (
+    AccountReconcileService,
+    MongoAccountReconcileRepository,
 )
-
-_USERS = "users"
-_PROJECTS = "projects"
-
-
-def stalled_user_ids(db) -> list[str]:
-    """파기가 시작됐지만 안 끝난 계정. 성공하면 행이 사라지므로 이 질의가 곧 정의다."""
-    return sorted(
-        doc["_id"] for doc in db[_USERS].find(
-            {"purge_started_at": {"$ne": None}}, {"_id": 1}
-        )
-    )
-
-
-def leftover_projects(db, user_id: str) -> list[str]:
-    return sorted(
-        doc["_id"] for doc in db[_PROJECTS].find({"owner_id": user_id}, {"_id": 1})
-    )
-
-
-def reconcile(db, user_id: str, *, sweeper) -> dict:
-    projects = leftover_projects(db, user_id)
-    swept = sweeper.sweep(user_id)
-    has_tombstone = db[USER_NAME_HISTORY].find_one(
-        {"_id": document_id(user_id)}, {"_id": 1}
-    ) is not None
-    removed_user_row = False
-    if not projects and has_tombstone:
-        # 프로젝트가 남아 있으면 계정 행을 지우지 않는다 — 그 행이 `owner_id` 로
-        # 잔여를 찾는 유일한 실마리다. 묘비가 없어도 지우지 않는다(위 머리말).
-        removed_user_row = db[_USERS].delete_one({"_id": user_id}).deleted_count == 1
-    return {
-        "leftover_projects": projects,
-        "swept": swept,
-        "has_username_tombstone": has_tombstone,
-        "removed_user_row": removed_user_row,
-    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -95,33 +52,40 @@ def main(argv: list[str] | None = None) -> int:
     db_name = os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
     client = MongoClient(uri)
     try:
-        db = client[db_name]
-        stalled = stalled_user_ids(db)
+        repository = MongoAccountReconcileRepository(client, db_name=db_name)
+        service = AccountReconcileService(
+            repository, sweeper=MongoAccountAxisSweeper(client, db_name=db_name)
+        )
+        stalled = repository.stalled_user_ids()
         summary: dict = {
             "mode": "apply" if args.apply else "dry-run",
             # 살아 있는 쪽의 규모를 요약이 보여 준다 — 삭제 도구라 "이만큼은 안
             # 건드린다"가 안 보이면 실행하기 무섭다(purge_reconciler 의 선례).
-            "live_user_count": db[_USERS].count_documents(
-                {"purge_started_at": None}
-            ),
+            "live_user_count": repository.live_user_count(),
             "stalled_user_ids": stalled,
         }
         if stalled and not args.apply:
+            survey = service.survey  # dry-run: 파괴 없음
             summary["would_reconcile"] = {
                 user_id: {
-                    "leftover_projects": leftover_projects(db, user_id),
-                    "has_username_tombstone": db[USER_NAME_HISTORY].find_one(
-                        {"_id": document_id(user_id)}, {"_id": 1}
-                    ) is not None,
+                    "leftover_projects": survey(user_id).leftover_projects,
+                    "has_username_tombstone": (
+                        survey(user_id).has_username_tombstone
+                    ),
                 }
                 for user_id in stalled
             }
         if stalled and args.apply:
-            sweeper = MongoAccountAxisSweeper(client, db_name=db_name)
-            summary["reconciled"] = {
-                user_id: reconcile(db, user_id, sweeper=sweeper)
-                for user_id in stalled
-            }
+            reconciled: dict[str, dict] = {}
+            for user_id in stalled:
+                result = service.reconcile(user_id)
+                reconciled[user_id] = {
+                    "leftover_projects": result.leftover_projects,
+                    "swept": result.swept,
+                    "has_username_tombstone": result.has_username_tombstone,
+                    "removed_user_row": result.removed_user_row,
+                }
+            summary["reconciled"] = reconciled
         print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
         return 0
     finally:

@@ -49,6 +49,18 @@ class MongoAdminAuditRepository:
             .limit(limit)
         )
 
+    def list_destructive_events(self, *, limit: int) -> tuple[AdminAuditEvent, ...]:
+        # Slice 4b: 파괴 2종(purge·reconcile) — 기존 action 인덱스가 이 질의에
+        # 그대로 붙는다(action 오름차순 + at 내림차순의 접두 질의다).
+        return tuple(
+            _entry(doc)
+            for doc in self._events.find({
+                "action": {"$in": ["project_purge", "account_reconcile"]},
+            })
+            .sort("at", DESCENDING)
+            .limit(limit)
+        )
+
 
 def _doc(event: AdminAuditEvent) -> dict:
     return {

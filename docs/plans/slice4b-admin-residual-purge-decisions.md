@@ -1,6 +1,6 @@
 # 계정 탈퇴 Slice 4b — 관리자 잔여 정리 착수 결정 브리프
 
-상태: Proposed — 오너 결정 대기(2026-09-12)
+상태: Resolved — ①ⓐ 계정 하나 · ②ⓐ 두 액션 · ③ⓐ admin_audit 감사(오너 2026-09-12)
 작성: 2026-09-12 (구현 세션 70)
 근거 계획: [`account-withdrawal-implementation-phases.md`](account-withdrawal-implementation-phases.md) §Slice 4b · 갈래 셋은 [`slice4-withdrawal-screen-decisions.md`](slice4-withdrawal-screen-decisions.md) §후속 고려 첫 항목 그대로
 
@@ -73,4 +73,8 @@
 
 ## ✅ 오너 결정 (2026-09-12)
 
-*(결정 후 이 절을 채운다 — 어느 갈래를 골랐는지·오너 근거가 있으면 그대로.)*
+**①ⓐ 계정 하나 · ②ⓐ 두 액션(조사 → 확인 → 실행) · ③ⓐ admin_audit 남긴다** — 셋 다 구현자 추천안 채택.
+
+- **①ⓐ**: `GET/POST /admin/users/{user_id}/reconcile`. 전역 스윕은 도그푸드에서 stalled 다발을 만나면 그때 얹는다(스크립트 경로 유지).
+- **②ⓐ**: 조사는 dry-run GET(파괴 없음), 실행은 사용자명 입력 확인 뒤 POST.
+- **③ⓐ**: 프로젝트 purge 의 `record_purge_requested`/`record_purge_outcome` 선례 재사용 — action `account_reconcile`, `target_type="user"`.

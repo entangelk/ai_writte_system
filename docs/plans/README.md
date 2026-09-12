@@ -199,7 +199,7 @@
 | [`slice3-withdrawal-purge-daemon-decisions.md`](slice3-withdrawal-purge-daemon-decisions.md) | 계정 탈퇴 Slice 3 — 파기 데몬이 계정 축 데이터를 무엇으로 식별하는가(+ 슬라이스 범위) | **Resolved** — ⓑ 두 규칙 스윕 · ⓔ 데몬+스크립트(오너 2026-09-09) |
 | [`slice5-withdrawal-cancel-after-purge-claim-decisions.md`](slice5-withdrawal-cancel-after-purge-claim-decisions.md) | 계정 탈퇴 — **파기가 청구된 뒤의 취소**를 거부할지, 거부하면 어떤 얼굴로 답할지(D5 가 정하지 않은 구간) | **Proposed** — 오너 결정 대기(2026-09-12 독립 검증 조건 B1 이 제기) |
 | [`slice4-withdrawal-screen-decisions.md`](slice4-withdrawal-screen-decisions.md) | 계정 탈퇴 Slice 4 — 유예 배너를 어디에 두는가 · 관리자 잔여 정리의 슬라이스 귀속 | **Resolved** — D1=ⓐ 전역 배너 · D2=ⓐ Slice 4b 분리(오너 2026-09-10) |
-| [`slice4b-admin-residual-purge-decisions.md`](slice4b-admin-residual-purge-decisions.md) | 계정 탈퇴 Slice 4b — 관리자 잔여 정리의 범위(계정/전역)·dry-run 두 단계·admin_audit 감사 | **Proposed** — 오너 결정 대기(2026-09-12) |
+| [`slice4b-admin-residual-purge-decisions.md`](slice4b-admin-residual-purge-decisions.md) | 계정 탈퇴 Slice 4b — 관리자 잔여 정리의 범위(계정/전역)·dry-run 두 단계·admin_audit 감사 | **Resolved** — ①ⓐ 계정 하나 · ②ⓐ 두 액션 · ③ⓐ 감사(오너 2026-09-12) |
 | [`activity-log-replay-and-partial-decisions.md`](activity-log-replay-and-partial-decisions.md) | 활동 로그 — 재전송·idempotent replay·부분 실패가 행을 남기는가(결정 셋) | **Resolved** — D1=ⓑ · D2=유예(트리거) · D3=ⓐ(오너 2026-09-08) |
 | [`k3-context-window-guard-decisions.md`](k3-context-window-guard-decisions.md) | K-3 — 창을 모르는 호출을 예산 가드가 어떻게 다루는가(외부 API 에서 영구 미판정) | **Resolved** — ⓐ 유지(오너 2026-09-08) · **가드가 꺼져 있음을 알고 둔다** |
 | [`analysis-extractor-alignment-and-gate-exposure-decisions.md`](analysis-extractor-alignment-and-gate-exposure-decisions.md) | `analysis_extractor` 의 D4 정렬 · loop round별 gate decision 노출 | **Resolved** — 둘 다 유예 · **트리거 확정**(오너 2026-09-08) |

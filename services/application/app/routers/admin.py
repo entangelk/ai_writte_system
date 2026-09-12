@@ -25,6 +25,9 @@ from services.application.app.auth.users import (
 from ..api.models import (
     AccessGrantCreateRequest,
     AccessGrantCreateResponse,
+    AdminAccountReconcileRequest,
+    AdminAccountReconcileResult,
+    AdminAccountReconcileSurvey,
     AdminAuditEventListResponse,
     AdminObservabilityKpiResponse,
     AdminProjectListResponse,
@@ -47,6 +50,7 @@ from ..api.errors import (
     _ERRORS_ADMIN,
     _ERRORS_ADMIN_400_404,
     _ERRORS_ADMIN_400_409,
+    _ERRORS_ADMIN_400_404_409,
     _ERRORS_ADMIN_404,
     _ERRORS_ADMIN_404_409,
     _STORAGE_ERRORS,
@@ -201,6 +205,7 @@ def register_admin(
     quota=None,
     access_grants,
     admin_audit,
+    account_reconcile=None,
     llm_call_audit,
     writing_loop_audit,
     memory,
@@ -226,6 +231,9 @@ def register_admin(
             "id": user.id, "username": user.username,
             "is_admin": user.is_admin, "is_active": user.is_active,
             "status": user.status,
+            # Slice 4b(2026-09-12): 탈퇴 축의 두 스탬프 — 서버 값 그대로.
+            "withdrawal_requested_at": user.withdrawal_requested_at,
+            "purge_started_at": user.purge_started_at,
         }
 
     @app.get("/admin/users", response_model=AdminUserListResponse,
@@ -471,6 +479,95 @@ def register_admin(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return _admin_user_payload(user)
 
+    # --- Account residual reconcile (Slice 4b, owner 2026-09-12 ①ⓐ·②ⓐ·③ⓐ).
+    # A ``purge_started_at`` stamp with the row still present is the daemon-
+    # failure state D3=A leaves behind. The destructive body is shared with the
+    # script (``deletion/account_reconcile.py`` — one body, never two); this
+    # surface adds the survey step and the audit trail, both owner decisions.
+    def _reconcile_unavailable() -> HTTPException:
+        # Same shape as the quota read: an unassembled destructive tool must
+        # not answer 404 ("nothing to do") — it must say it is not configured.
+        return HTTPException(
+            status_code=503, detail="account reconcile is not configured"
+        )
+
+    def _stalled_user_or_error(user_id: str):
+        # 대상 계약 한 곳: 없으면 404, 스탬프 없으면(=정리 대상 아님) 409 —
+        # 프로젝트 purge 의 "must be archived before purge" 409 와 대칭이다.
+        # 호출 시점 재확인이므로 조사와 실행 사이에 유예 만료 청구가 끼어들어도
+        # 이 자리에서 걸린다(브리프 후속 고려 "실행 중 경합").
+        stored = users.get_by_id(user_id)
+        if stored is None:
+            raise HTTPException(status_code=404, detail="user does not exist")
+        if stored.purge_started_at is None:
+            raise HTTPException(
+                status_code=409,
+                detail="purge has not started for this account",
+            )
+        return stored
+
+    @app.get("/admin/users/{user_id}/reconcile",
+             response_model=AdminAccountReconcileSurvey,
+             responses=_ERRORS_ADMIN_404_409, dependencies=_REQUIRE_ADMIN)
+    async def survey_account_reconcile(user_id: str) -> dict[str, object]:
+        # ②ⓐ: 조사는 dry-run — 잔여 프로젝트·묘비 유무만 보고 파괴가 없다.
+        if account_reconcile is None:
+            raise _reconcile_unavailable()
+        _stalled_user_or_error(user_id)
+        survey = account_reconcile.survey(user_id)
+        return {
+            "leftover_projects": survey.leftover_projects,
+            "has_username_tombstone": survey.has_username_tombstone,
+        }
+
+    @app.post("/admin/users/{user_id}/reconcile",
+              response_model=AdminAccountReconcileResult,
+              responses=_ERRORS_ADMIN_400_404_409,
+              dependencies=_REQUIRE_ADMIN)
+    async def reconcile_account(
+        user_id: str, request: AdminAccountReconcileRequest,
+        current=Depends(require_admin_user),
+    ) -> dict[str, object]:
+        # ③ⓐ: 프로젝트 purge 의 2단계 감사 선례 — fail-closed 요청 행 → 실행 →
+        # 결과 행. 사유는 감사 행에 그대로 남는다(quota 정지와 같은 400 얼굴).
+        if account_reconcile is None:
+            raise _reconcile_unavailable()
+        _stalled_user_or_error(user_id)
+        reason = request.reason.strip()
+        if not reason:
+            raise HTTPException(status_code=400, detail="reason is required")
+        requested = admin_audit.record_account_reconcile_requested(
+            admin_user_id=current.id, target_user_id=user_id, reason=reason,
+        )
+        try:
+            result = account_reconcile.reconcile(user_id)
+        except Exception as exc:
+            try:
+                admin_audit.record_purge_outcome(
+                    requested,
+                    outcome="failed",
+                    error_kind=(
+                        "storage_error"
+                        if isinstance(exc, _STORAGE_ERRORS)
+                        else "internal_error"
+                    ),
+                )
+            except Exception:
+                # 실패 기록이 실제 실패를 덮지 않는다(execute_project_purge 선례).
+                pass
+            raise
+        try:
+            admin_audit.record_purge_outcome(requested, outcome="succeeded")
+        except Exception:
+            # 실행은 이미 끝났다 — 503 은 재시도 불가한 경로를 재시도하게 한다.
+            pass
+        return {
+            "leftover_projects": result.leftover_projects,
+            "swept": result.swept,
+            "has_username_tombstone": result.has_username_tombstone,
+            "removed_user_row": result.removed_user_row,
+        }
+
     # --- Signup approval (owner 2026-08-22: requests are public, the check is
     # admin). Approve/reject operate on *pending* rows only — the service
     # enforces that, so a resolved account can never change status again (an
@@ -559,9 +656,11 @@ def register_admin(
     @app.get("/admin/audit-events", response_model=AdminAuditEventListResponse,
              responses=_ERRORS_ADMIN, dependencies=_REQUIRE_ADMIN)
     async def list_admin_audit_events() -> dict[str, object]:
+        # Slice 4b: 파괴 이벤트 축(purge·account_reconcile) — 회원 정책
+        # (member_quota_policy)은 파괴가 아니므로 계속 이 화면 밖이다.
         return {"events": [
             _admin_audit_payload(event)
-            for event in admin_audit.list_project_purge_events()
+            for event in admin_audit.list_destructive_events()
         ]}
 
     @app.get("/admin/projects", response_model=AdminProjectListResponse,

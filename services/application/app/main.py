@@ -25,6 +25,13 @@ from services.application.app.auth.admin_audit import (
     AdminAuditService,
     InMemoryAdminAuditRepository,
 )
+from services.application.app.deletion.account_axis_sweep import (
+    InMemoryAccountAxisSweeper,
+)
+from services.application.app.deletion.account_reconcile import (
+    AccountReconcileService,
+    InMemoryAccountReconcileRepository,
+)
 from services.application.app.deletion.project_name_history import (
     InMemoryProjectNameHistoryRepository,
     ProjectNameHistoryService,
@@ -620,6 +627,33 @@ def _default_admin_audit_service() -> AdminAuditService:
         MongoAdminAuditRepository.from_uri(
             uri, db_name=os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
         )
+    )
+
+
+def _default_account_reconcile_service() -> AccountReconcileService:
+    # Slice 4b: 관리자 잔여 정리 본체 — 스크립트와 같은 deletion/ 모듈.
+    # 무-Mongo 조립은 인메모리(빈) — 앱은 뜨고 조사·실행은 빈 결과를 준다.
+    # Mongo 조립은 repo·sweeper 가 한 client 를 공유한다(스크립트와 같은 모양).
+    uri = os.environ.get("CORE_SOT_MONGO_URI")
+    if not uri:
+        return AccountReconcileService(
+            InMemoryAccountReconcileRepository(),
+            sweeper=InMemoryAccountAxisSweeper(),
+        )
+    from pymongo import MongoClient
+
+    from services.application.app.core_sot.mongo_repository import DEFAULT_DB_NAME
+    from services.application.app.deletion.account_axis_sweep import (
+        MongoAccountAxisSweeper,
+    )
+    from services.application.app.deletion.account_reconcile import (
+        MongoAccountReconcileRepository,
+    )
+    db_name = os.environ.get("CORE_SOT_MONGO_DB", DEFAULT_DB_NAME)
+    client = MongoClient(uri)
+    return AccountReconcileService(
+        MongoAccountReconcileRepository(client, db_name=db_name),
+        sweeper=MongoAccountAxisSweeper(client, db_name=db_name),
     )
 
 
@@ -1849,6 +1883,7 @@ def create_app(
     client_ip_resolver: "ClientIpResolver | None" = None,
     access_grant_service: AccessGrantService | None = None,
     admin_audit_service: AdminAuditService | None = None,
+    account_reconcile_service: AccountReconcileService | None = None,
     project_name_history_service: ProjectNameHistoryService | None = None,
     quota_enforcement_service: QuotaEnforcementService | None = None,
     activity_log_service: ActivityLogService | None = None,
@@ -2184,7 +2219,12 @@ def create_app(
             app,
             users=users, core_sot=core_sot,
             quota=app.state.quota, access_grants=access_grants,
-            admin_audit=admin_audit, llm_call_audit=llm_call_audit,
+            admin_audit=admin_audit,
+            account_reconcile=(
+                account_reconcile_service
+                or _default_account_reconcile_service()
+            ),
+            llm_call_audit=llm_call_audit,
             writing_loop_audit=writing_loop_audit, memory=memory,
             analysis=analysis, review_queue=review_queue,
             identity_groups=identity_groups,
