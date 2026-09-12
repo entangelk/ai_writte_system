@@ -2,6 +2,14 @@
 
 **조건부 합격** — 동의 스탬프의 **Mongo 영속 축이 무셀**이다(쓰기면에서 스탬프가 통째로 사라져도 277셀 전건 초록 — MV-A 실측). 세부 조건 둘: ① `tests/test_auth_users_mongo.py` 에 동의 축 셀 둘(게이트 이전 행 None 판독 + 스탬프가 `insert`·`replace` 문서에 실리는 쓰기면 왕복 — 같은 파일의 C-6·탈퇴축 선례 그대로) ② 확인란 문구의 버전 표기·약관·방침 링크 새 탭(`target="_blank"`)의 단정 셀(HANDOFF 10 완료 문언이 계약으로 적은 축). 이 둘을 닫으면 합격이다.
 
+> ## 폐쇄 보고 (2026-09-12, 구현 세션 — `cbd88f7`)
+>
+> 조건 둘을 닫았다. **판정 승격은 이 보고가 하지 않는다** — 조건을 닫은 세션이 자기 판정을 올리면 독립성이 사라지므로(v1.8.52·v1.8.57 선례), 승격은 다음 독립 검증 세션이 재적용으로 판정한다.
+>
+> - **C1 → `tests/test_auth_users_mongo.py` 셀 둘**(탈퇴축 선례 모양 그대로): `test_the_write_face_carries_the_consent_stamp_through_insert_and_replace`(insert·replace 저장면 `collection.docs[…]` 까지 왕복) · `test_a_row_written_before_the_consent_axis_reads_back_as_not_consenting`(legacy None 판독). **뮤테이션 재실증(구현 세션)**: MV-A 재현(`_doc` 두 줄 삭제) → 쓰기면 셀 **1 재실패** · MV-B 재현(`_entry` 하드 서브스크립트) → legacy 셀 5실패 중 **동의 이름 셀이 기명 포함**(검증 시점 "동의 이름 셀 0"의 갭이 메워짐). 원복 후 27 passed.
+> - **C2 → App.test.tsx `states the consented version and opens the documents in a new tab`**: 문구 `버전 1.0`·두 링크 `href`·`target="_blank"` 단정(푸터와 같은 이름 링크가 있어 확인란 라벨 안으로 한정 — `within`). **뮤테이션**: `target="_blank"` 제거 → 1 재실패.
+> - 회귀: `test_auth_users_mongo.py` 25→**27 passed** · App.test.tsx 34셀(신규 1 포함) — 폐쇄 커밋 `cbd88f7`.
+
 - **일시**: 2026-09-12 · **검증자**: 독립 세션 — 구현(세션 68)·문서 폐쇄 어느 쪽도 아니다
 - **대상 커밋 4개**: `58a8ac9`(백엔드 동의 게이트) · `86a4de7`(프런트 동의 게이트) · `f36c7bd`(랜딩) · `b6fd464`(S-2 nginx 헤더)
 - **정본**: SoT [`docs/system-contract-sot.md`](../../system-contract-sot.md) **v1.8.59** 행(랜딩 ② 의 v1.8.56~58 계약 — "AuthGate 는 보호 구간만"·"푸터는 공개 표면에만"·"버전 핀 두 곳" 포함) · 방침 [`docs/legal/privacy-policy-draft.md`](../../legal/privacy-policy-draft.md) **제3조 본문**(머리말 고지는 Slice 5 편집 중이므로 제외) · 브리프 [`plans/landing-page-scope-decisions.md`](../../plans/landing-page-scope-decisions.md) D1=ⓒ·착수 순서 ③④·"② 가 실제로 만든 것" · HANDOFF 10·12번 완료 문언
