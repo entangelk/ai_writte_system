@@ -697,12 +697,19 @@ def register_drafts(
         except CoreSotError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         saved = finalized.saved
-        activity.record(
-            project_id=project_id, actor_user_id=current.id,
-            action="draft_finalized", target_type="draft_version",
-            target_id=saved.draft_version.id,
-            after=str(saved.draft_version.version_number),
-        )
+        # 활동 로그 D1=ⓑ(오너 2026-09-08, 브리프 `activity-log-replay-and-partial-
+        # decisions.md`): 같은 finalize key 재전송은 **아무것도 바꾸지 않은 재생**
+        # 이므로 행을 남기지 않는다. 그렇지 않으면 한 번 누른 최종 저장이 타임라인에
+        # "최종 저장 2번"으로 그려진다(N3).
+        # ★ 이 분기는 전수 가드가 못 본다 — `activity/actions.py` 대조는 배선의
+        # **존재**만 본다. 잠그는 것은 `test_activity_api.py` 의 행위 셀 둘이다.
+        if not finalized.idempotent_replay:
+            activity.record(
+                project_id=project_id, actor_user_id=current.id,
+                action="draft_finalized", target_type="draft_version",
+                target_id=saved.draft_version.id,
+                after=str(saved.draft_version.version_number),
+            )
         analysis_error = None
         job = None
         try:

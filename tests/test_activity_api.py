@@ -114,6 +114,66 @@ class ActivityRecordingTest(unittest.TestCase):
         self.assertEqual(event.target_type, "draft_version")
         self.assertIsNotNone(event.at.tzinfo)
 
+    def _finalizable_draft(self) -> tuple[str, str]:
+        project_id = self._create_project()
+        chapter_id = self.client.post(
+            f"/projects/{project_id}/chapters", json={"title": "1장"}
+        ).json()["id"]
+        draft_id = self.client.post(
+            f"/projects/{project_id}/drafts",
+            json={"title": "첫 장면", "chapter_id": chapter_id},
+        ).json()["id"]
+        return project_id, draft_id
+
+    def test_the_first_final_save_is_recorded(self) -> None:
+        """활동 로그 D1=ⓑ 의 **over-strict 짝** — 생략이 첫 요청까지 먹으면 안 된다.
+
+        `if not finalized.idempotent_replay:` 를 `if False:` 로(또는 `activity.record`
+        를 통째로) 바꾸면 여기가 재실패한다. 아래 replay 셀만 있으면 "아무것도 기록
+        안 함"이 전건 통과하므로 두 셀이 한 쌍이다.
+        """
+        project_id, draft_id = self._finalizable_draft()
+
+        response = self.client.post(
+            f"/projects/{project_id}/drafts/{draft_id}/finalize",
+            json={"raw_text": "본문", "idempotency_key": "fk1"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["idempotent_replay"])
+        event = self.repo.events[-1]
+        self.assertEqual(event.action, "draft_finalized")
+        self.assertEqual(event.target_type, "draft_version")
+
+    def test_resending_the_same_final_save_key_leaves_no_second_row(self) -> None:
+        """★ 활동 로그 D1=ⓑ(오너 2026-09-08, N3) — replay 는 행을 안 남긴다.
+
+        under-strict: `routers/drafts.py` 의 `if not finalized.idempotent_replay:`
+        분기를 벗기면(= 결함 재도입) 여기가 재실패한다. **전수 가드는 이 분기를 못
+        본다** — `activity/actions.py` 대조는 배선의 *존재*만 보므로 행위 셀이 따로
+        필요하다(브리프 §후속 고려).
+
+        ★ 응답이 `idempotent_replay: true` 인 것을 함께 단정한다 — 그것이 아니면 이
+        셀은 "재전송이 409 로 막혔다"와 구분되지 않고, 그때는 분기를 벗겨도 초록이다.
+        """
+        project_id, draft_id = self._finalizable_draft()
+        first = self.client.post(
+            f"/projects/{project_id}/drafts/{draft_id}/finalize",
+            json={"raw_text": "본문", "idempotency_key": "fk1"},
+        )
+        self.assertEqual(first.status_code, 200)
+        before = len(self.repo.events)
+
+        again = self.client.post(
+            f"/projects/{project_id}/drafts/{draft_id}/finalize",
+            json={"raw_text": "본문", "idempotency_key": "fk1"},
+            headers={"X-Confirm-Duplicate": "1"},
+        )
+
+        self.assertEqual(again.status_code, 200)
+        self.assertTrue(again.json()["idempotent_replay"])
+        self.assertEqual(len(self.repo.events), before)
+
     def test_archiving_records_the_state_change(self) -> None:
         project_id = self._create_project()
 
