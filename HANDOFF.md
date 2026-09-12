@@ -107,6 +107,7 @@
 - **★ 같은 트리에서 다른 작업 AI 가 동시에 돌 수 있다**(2026-09-12 오너가 두 축을 나눠 맡겼다). 그때 **개수 주장 가드는 양쪽이 서로의 미커밋 문서를 세면서 계속 빨갛다** — `docs/verifications/README.md`·`docs/README.md`·루트 `README.md` 의 `N건`·판정 분포·기준선 줄이 그 자리다. **자기 실패인지 먼저 지목 실행으로 가른다**(`pytest <파일>::<클래스>`), 남의 것이면 **고치지 말고** 마지막에 커밋하는 쪽이 한 번에 맞춘다. 남의 미커밋 파일을 `git add` 하지 않도록 **경로를 명시해 스테이징**한다.
 - **뮤테이션 결과를 `grep FAILED` 로 읽으면 subtest 실패를 통째로 놓친다**(`pytest-subtests` 는 `SUBFAIL` 로 낸다).
 - **mutation이 통과하면 가드가 약한 것일 수도, mutation이 안 먹은 것일 수도 있다 — 먼저 후자를 의심한다.**
+- **★ 2026-08-23 이전 기록의 커밋 해시는 `git show` 로 안 잡힌다 — 결함이 아니다.** 그날 `git filter-repo` 로 이력을 재작성해 **해시가 전부 바뀌었다**(퍼블릭 전환 전 보안 점검 — `daily_logs/2026-08-23/work_log.md` 세션 16). 코퍼스 전수(2026-09-13)로 경계를 쟀다: **2026-07-06~08-23 구간은 264개 중 1개만** 해소되고 08-24 이후는 **272개 중 269개**가 해소된다. **그 구간 기록의 해시를 따라가 실패하면 근거를 의심하지 말고 이 줄을 떠올릴 것** — 실제로 한 검증 세션이 그 이유로 시간을 썼다. **옛 해시는 고쳐 쓰지 않는다**(그때의 사실이고 이 저장소는 이력 문서를 고치지 않는다).
 - **미검증 구간은 인계 문구에서 베끼지 말고 git에서 유도한다**: `git log --diff-filter=A -1 --format='%h %s' -- 'docs/verifications/*.md'`. **`--diff-filter=A` 를 빼면 폐쇄 주석 커밋이 답으로 나와 미검증이 0으로 계산된다.** 개수는 구조적으로 낡으므로 **"코드 N커밋 + 기록 계열" + 유도 명령**으로 적는다.
 - **셀 수를 적을 때는 "무엇을 돌린 수인지" 를 같은 줄에 적는다**(이 저장소의 확인법이 "그 파일을 열어 세어 보기"라, 세트 수를 파일 행에 적으면 재현이 안 된다).
 - **계약에 "…는 잠기지 않는다 / …해도 안 깨진다" 류의 방어적 단언을 쓰면, 그 단언을 지나는 셀이 있는지 그 자리에서 확인한다.**
@@ -166,12 +167,11 @@
 
 ## 열린 것 — 부채 · 결정 대기
 
-**⚠️ 오너 결정이 있어야 움직이는 것 — 2026-09-12 현재 두 건**
+**⚠️ 오너 결정이 있어야 움직이는 것 — 2026-09-13 현재 0건**
 
-| 대기 중인 것 | 무엇을 묻는가 | 브리프 |
-|---|---|---|
-| **활동 로그 replay 축을 어디까지 넓히는가(D2)** | D1=ⓑ 시행으로 **비대칭이 하나 늘었다** — `finalize` 는 replay 에 활동 행을 안 남기는데 `writing/accept` 와 수동 저장(`drafts/{id}/versions`)은 남긴다. **★ D1 을 고른 근거였던 *"accept 는 이미 안 남긴다"* 가 거짓이었다**(2026-09-12 실측 — accept 도 2건). 종전 D2 트리거(*도그푸드에서 중복 행이 눈에 띄면*)를 기다릴 것 없이 구현이 당겼다. 갈래 둘: **ⓐ 지금 상태로 둔다**(비용 0 · 같은 개념에 두 답) · **ⓑ accept·수동 저장까지 넓힌다**(규칙이 하나가 된다 · 라우터 두 줄 + 행위 셀 둘) | [`activity-log-replay-and-partial-decisions.md`](docs/plans/activity-log-replay-and-partial-decisions.md) §착수가 반증한 것 |
-| **파기 청구 뒤의 탈퇴 취소** | D5 가 *"파기 실행 전까지 취소 가능"* 이라 정했는데 **실행이 시작된 뒤의 답이 없다** — 거부할지, 거부하면 어떤 얼굴인지(409 합류 · 새 코드 · 현 동작 유지 · 표식까지 되돌리기). 지금 코드는 `purge_started_at` 을 안 봐서 **부분 파기된 계정이 취소로 활성 복귀**한다. 추천은 **ⓐ 409 합류** | [`slice5-withdrawal-cancel-after-purge-claim-decisions.md`](docs/plans/slice5-withdrawal-cancel-after-purge-claim-decisions.md) |
+**표가 비었다.** 2026-09-13 에 오너가 대기 중이던 둘을 답했고 **같은 날 둘 다 시행됐다** — **활동 로그 D2=ⓑ**(replay 는 행을 안 남긴다 · 세 경로가 한 답, 브리프 [`activity-log-replay-and-partial-decisions.md`](docs/plans/activity-log-replay-and-partial-decisions.md) §D2 결정) · **파기 청구 뒤 탈퇴 취소 = ⓐ 409 거부**(D5 경계 시행, 브리프 [`slice5-withdrawal-cancel-after-purge-claim-decisions.md`](docs/plans/slice5-withdrawal-cancel-after-purge-claim-decisions.md) §결정).
+
+> **★ 새 대기 항목이 생기면 브리프를 먼저 쓰고 여기 한 줄로 올린다.** 그리고 **브리프에 추천이 있고 그것이 기존 결정의 뜻을 잇는 것이면 묻지 말고 그대로 진행한다** — 2026-09-13 에 오너가 그 셋을 *"당연한 것들"* 로 지적했다. 진짜로 물어야 하는 것은 **오너만 가진 정보**가 필요한 때다: 법률 문언 · 제품 방향 · 돈 쓰는 선택 · 외부 서비스 승인 여부 · 트리거가 실제로 왔는지.
 
 > **★ 이 표는 상태이지 완료가 아니다.** 2026-09-08 에 브리프 7건이 만들어지고 **같은 날 오너가 전부 답했다**(종전에는 선택지가 이 표 칸에만 있고 `docs/plans/*-decisions.md` 브리프가 **하나도 없었다** — 셋은 근거조차 `—` 였다). **결정은 브리프에 있다** — 여기 옮겨 적지 않는다(그것이 두 번째 정본이다). 새 결정 대기 항목이 생기면 **브리프를 먼저 쓰고** 이 표에 한 줄로 올린다.
 
@@ -187,6 +187,8 @@
 | 탈퇴 파기 데몬 식별 규칙 · 범위(09-09) | **ⓑ 두 규칙 스윕 + `target_user_id` 보존 표식 · ⓔ 데몬+스크립트** | [`slice3-withdrawal-purge-daemon-decisions.md`](docs/plans/slice3-withdrawal-purge-daemon-decisions.md) |
 | 약관·방침 시행일(09-09) | **지난 날짜 그대로 시행** — *"서비스가 아니라 포트폴리오"*. 시행 전제 둘은 미구현으로 남았고 그 사실을 문서가 적는다 | [`legal/README.md`](docs/legal/README.md) §8 |
 | event/open_question 정본 중복(09-09) | **ⓒ candidate 축 배선** — 구현 완료 | [`event-open-question-canonical-dedup-decisions.md`](docs/plans/event-open-question-canonical-dedup-decisions.md) |
+| 활동 로그 replay 축 D2(09-13) | **ⓑ — replay 는 행을 안 남긴다**(세 경로가 한 답) · 시행 완료 | [`activity-log-replay-and-partial-decisions.md`](docs/plans/activity-log-replay-and-partial-decisions.md) §D2 결정 |
+| 파기 청구 뒤 탈퇴 취소(09-13) | **ⓐ — 기존 409 에 합류**(D5 경계 시행 · 표식은 안 지운다) · 시행 완료 | [`slice5-withdrawal-cancel-after-purge-claim-decisions.md`](docs/plans/slice5-withdrawal-cancel-after-purge-claim-decisions.md) §결정 |
 | 압축 층(09-09) | **D1=파생+트리거 · D2=챕터 드릴다운 · D3=정본이 바뀔 때(D4 에 흡수) · D4=A · D5=A선 · D6=정본 16건** — 구현은 트리거 대기 | [`context-compaction-layer-decisions.md`](docs/plans/context-compaction-layer-decisions.md) |
 
 
@@ -199,7 +201,7 @@
 | **백엔드 전수의 S13 플레이크(저장 503)** | `final_save S13 unknown draft status: expected=404 observed=503` 이 **전수에서만** 발생(2026-09-10 세션 53 실측, 1712초 실행). 단독 재실행 초록(2 passed·7.9초)·코드는 세션 52 초록 트리와 동일(`7e07b37` 이후 전부 문서 커밋) → **회귀 아님**. 503 은 SoT v1.7.38 의 전역 저장-오류 얼굴(`PyMongoError` 핸들러)이라 일시 저장 계층 오류가 404 자리를 대신한 것. **프런트 둘과 같은 절차: 단독 재실행으로 가른다.** 재발 관측: 같은 날 2회 전수 중 1회(재검 2차 커밋 트리 실행은 초록). 재발이 쌓이면 S13 의 404 기대가 저장-오류 얼굴과 구분되는지(404/503 재분류 또는 프로브의 저장 백엔드 완전 주입) 재검토 | [`tests/test_final_save_analysis.py`](tests/test_final_save_analysis.py) · 프로브 [`repro_final_save_flow.py`](docs/verifications/2026-09-01/repro_final_save_flow.py) |
 | **배포 화면에 report-only CSP 가 붙어 있다** | 콘솔에 `connect-src 'none'`(report-only) 위반이 찍힌다 — **저장소의 nginx 에는 CSP 헤더가 없으므로**(S-2 가 지적한 공백) **앞단 프록시나 브라우저 확장이 넣은 것**이다. 지금은 차단 안 하지만 **enforcing 이 되면 API 호출이 전부 막힌다** — 출처 확인 필요 | 오너 콘솔 2026-09-07 |
 | ~~**수동 저장 replay 특성 셀이 행의 정체를 안 본다**(HP-1)~~ · ~~**휴면 절 가드의 앵커가 실효 한 낱말이다**(HA-1)~~ | **둘 다 닫혔다(2026-09-13 세션 76 · `5a8e8c7`, 보강 `d3ef8cd`)** — 독립 검증 **합격**([`promotion_alignment_and_ha1_hp1_closure.md`](docs/verifications/2026-09-13/promotion_alignment_and_ha1_hp1_closure.md), 변이 열둘). **HP-1**: replay 행의 `action`·`target_type` 을 함께 단정 — 분리 증명은 *replay 경로만* 다른 action 을 내는 변이가 폐쇄 전 **조용**(50 passed)하고 폐쇄 후 **1 failed** 인 것이다(`target_type` 축도 같은 모양으로 실효 확인). **★ 계약은 여전히 침묵이다** — 잠근 것은 하드닝이고 **D2=ⓑ 면 이 셀과 함께 뒤집힐 줄이 둘 늘었다**. **HA-1**: 앵커 범위를 절 → `verification_briefs/` 행으로 좁혔다. **★ 그 처방이 낳은 사각을 검증이 찾아 닫았다** — `next()` 는 "그 행"이 아니라 **"첫 행"** 을 골라, 미끼 `- ` 행을 앞에 끼우면 앵커가 옮겨 가 조용해졌다(MS-4). 지금은 후보를 모아 **정확히 하나임을 먼저 단정**한다. 불릿 모양·절 제목 변경은 원래부터 물었다(MS-1·2·3) | [`tests/test_activity_api.py`](tests/test_activity_api.py) · [`tests/test_docs_indexes.py`](tests/test_docs_indexes.py) |
-| **검증 기록의 폐쇄 커밋 해시가 2026-07-06~08-23 구간에서 해소되지 않는다 — 선재 377종**(2026-09-13 코퍼스 전수) | `git filter-repo` **이력 재작성**(2026-08-23, `daily_logs/2026-08-23/work_log.md` 세션 16 *"★ 커밋 해시 전체가 바뀌었다"*)의 잔여다. 오기가 아니라 **그때의 사실**이고, 날짜별 해소율이 칼같이 갈린다: **2026-06-24~07-05 65/66** · **2026-07-06~08-23 1/264** · **08-24 이후 269/272**. 그래서 그 구간 기록의 해시를 `git show` 로 따라가면 전부 없는 커밋이다 — **기록이 틀린 게 아니라 해시 공간이 바뀐 것**이므로 고쳐 쓰면 안 된다(이력 문서를 안 고치는 이 저장소의 원칙과 같은 자리). **처방 후보는 [`docs/verifications/README.md`](docs/verifications/README.md) 머리 한 줄**(구간과 이유를 적어 다음 사람이 `git show` 실패를 결함으로 오독하지 않게)인데 **코퍼스 전체에 닿는 주장이라 오너 결정 없이 적지 않았다** | [`docs/verifications/README.md`](docs/verifications/README.md) · [`verifications/2026-09-13/promotion_alignment_and_ha1_hp1_closure.md`](docs/verifications/2026-09-13/promotion_alignment_and_ha1_hp1_closure.md) |
+| ~~**검증 기록의 폐쇄 커밋 해시가 해소되지 않는다 — 선재 377종**~~ | **주석으로 닫았다(2026-09-13, 오너 결정 ⓒ)** — 두 자리에 적었다: [`docs/verifications/README.md`](docs/verifications/README.md) 머리 · 위 함정 절. 해시는 **고치지 않는다**(2026-08-23 `git filter-repo` 재작성 전 공간의 값이고 그때의 사실이다). 구간별 해소율 65/66 · **1/264** · 269/272 | [`docs/verifications/README.md`](docs/verifications/README.md) · HANDOFF §함정 |
 | **본문↔인덱스 판정 대조 가드가 없다 — 병 자체는 0건이 됐다**(2026-09-12 패턴 스윕 · 2026-09-13 재확인) | 병 여섯(AC1 1 + 선재 5)은 전부 닫혔다 — **AC1 은 `88a16fe`**, **선재 5건은 `a1d71fc`**(본문을 선례 모양 `**최종 판정은 합격이다** + 발행 시점 판정 인용 으로 올림 · 문서 가드 952 무변). 세션 76 승격 재검의 전수 대조로 **병 0건** 확인(선두 토큰 있는 91건 기준 — 옛 영어 병기 220건은 이 규칙이 못 보는 범위 밖). **남는 것은 처방 ⓑ — 대조 셀 신설**: `VerificationCountClaimsTest` 는 판정 열이 *비어 있지 않은가* 만 재고 본문은 안 읽는다(217건이 판정 토큰을 줄머리에 안 두어 정규식이 못 읽으므로 먼저 형식을 정해야 한다). 가이드 §Required sections 가 둘을 같은 말로 묶은 자리이고, 갈라지면 나중 분류가 흔들린다(2026-08-06 에 실제로 오분류 5건·4건이 났던 병이다) | [`docs/verifications/README.md`](docs/verifications/README.md) · [`guides/verification.md`](docs/guides/verification.md) §Required sections |
 | 프론트가 `detail` 문자열로 분기(H3 위반) | 세 사건이 전부 502라 코드로 구분 불가. 닫으려면 H3 개정 또는 상태코드 분리 | [`client.ts:1088`](frontend/src/api/client.ts#L1088) |
 | `/writing/generate` 만 provider TIMEOUT을 502로(나머지는 504) | 선언 surface와 잠긴 셀을 함께 바꿔야 함 | [`writing.py:469`](services/application/app/routers/writing.py#L469) |
