@@ -1,6 +1,6 @@
 # 파기가 청구된 뒤의 탈퇴 취소 — 결정 브리프
 
-상태: `Proposed(오너 결정 대기 — 2026-09-12 제기)`
+상태: `Resolved — ⓐ 기존 409 에 합류(오너 2026-09-13) · 시행 완료`
 작성: 2026-09-12
 근거: 독립 검증 [`../verifications/2026-09-12/account_withdrawal_slice5_promotion.md`](../verifications/2026-09-12/account_withdrawal_slice5_promotion.md) 조건 **B1** · 계획 [`account-withdrawal-implementation-phases.md`](account-withdrawal-implementation-phases.md) **D5** · 정책 문서 [`../service-policy-contract.md`](../service-policy-contract.md) §6
 
@@ -40,3 +40,15 @@
 - **파기 실패 자체의 재시도 정책**(지금은 재시도 없음 · 일회성 apply 요약의 `failures` 가 운영자의 통로다) — 이 결정은 *취소* 만 다룬다.
 - **회원에게 보내는 통지**(파기 시작·실패 알림) — 통지 채널이 이 제품에 없다.
 - **약관 문언** — 약관 제8조 3항은 *"30일 이내에는 취소할 수 있습니다"* 까지만 적는다. 경계를 시행하기로 하면 그 문장에 조건이 붙어야 하고, **법률 문언은 오너가 쓴다**(같은 자리의 미고지 항목이 하나 더 있다 — 유예 중 쓰기 차단, `../legal/README.md` 대조표의 `미기재` 행).
+
+## ✅ 결정 — ⓐ (오너 2026-09-13, 시행 완료)
+
+**오너가 ⓐ 를 골랐다.** 근거(오너 발화 요지): *"파기가 됐다는 건 30일 지난 후잖아. 근데 그때 탈퇴 취소는 당연히 되면 안 되지."* — §Options 의 ⓒ·ⓓ 가 전제하던 *"회원이 막히면 안 된다"* 는 이 축에서 성립하지 않는다. 청구는 유예가 **끝난** 뒤에만 일어나므로, 거부를 만나는 회원은 이미 30일을 쓴 사람이다.
+
+시행: `auth/users.py::cancel_withdrawal` 이 `purge_started_at` 을 보고 `WithdrawalPurgeAlreadyClaimed` 를 낸다. 라우터가 그것을 `WithdrawalNotRequested` 와 **같은 409** 로 매핑한다(ⓑ 새 상태코드는 택하지 않았다 — 화면의 처방이 같다).
+
+- **거부는 아무것도 되돌리지 않는다** — 유예 스탬프도 파기 표식도 그대로다. ⓓ(표식까지 되돌리기)를 택하지 않은 이유가 여기 그대로 산다: 표식은 reconciler 가 부분 파기 계정을 발견하는 **유일한 단서**다(SoT v1.8.52).
+- **특성 셀이 예고대로 뒤집혔다** — `WithdrawalCancelAfterPurgeClaimTest` 가 *"취소가 통과한다"* 를 잠그던 자리에서 *"거부된다 + 두 스탬프가 그대로다"* 두 셀로 바뀌었고, **정책 문서 §6 문장도 함께** D5 의 약속으로 돌아갔다(§Follow-up 이 예고한 "셋이 함께 뒤집힌다"가 실제로 그렇게 됐다).
+- HTTP 경계는 `test_auth_api.py::test_cancelling_after_the_purge_was_claimed_is_409` 가 잠근다(over-strict 짝으로 유예 스탬프 존치를 함께 단정).
+
+**남는 것**(§Follow-up 그대로): 부분 파기 계정의 수습 경로가 이제 **더** 중요하다 — 회원은 취소도 쓰기도 못 하는 계정에 갇히고, 푸는 것은 관리자 잔여 정리(Slice 4b, 화면 있음)나 `scripts/account_purge_reconciler.py` 다. **약관 제8조 3항**(*"30일 이내에는 취소할 수 있습니다"*)은 이제 조건이 붙어야 맞는데 **법률 문언은 오너 몫**이라 `docs/legal/README.md` 대조표에 미기재 행으로 세운다.

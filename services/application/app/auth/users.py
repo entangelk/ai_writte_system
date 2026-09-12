@@ -52,6 +52,19 @@ class UserNotFound(AuthError):
     pass
 
 
+class WithdrawalPurgeAlreadyClaimed(AuthError):
+    """Cancel arrived after the purge had already been claimed (owner 2026-09-13).
+
+    Shares the 409 of ``WithdrawalNotRequested`` on purpose: the screen's remedy
+    is the same either way — re-read the server's current state and redraw. What
+    it must *not* do is let the cancel through. A claim only happens once the
+    30-day grace has elapsed, and an account whose purge failed keeps the stamp
+    indefinitely, so allowing the cancel would quietly restore a partially purged
+    account to active writing — and the stamp would still be there for the
+    reconciler to finish the job later.
+    """
+
+
 class WithdrawalNotRequested(AuthError):
     """Cancel targeted an account that never asked to be deleted.
 
@@ -535,6 +548,29 @@ class UserService:
             raise UserNotFound("user does not exist")
         if stored.withdrawal_requested_at is None:
             raise WithdrawalNotRequested("account is not withdrawing")
+        # 오너 결정 2026-09-13 (브리프 `slice5-withdrawal-cancel-after-purge-claim-
+        # decisions.md` ⓐ): 파기가 **청구된 뒤**의 취소는 거부한다. D5 가 약속한
+        # 경계(*"파기 실행 전까지"*)를 코드가 실제로 시행하는 자리다.
+        #
+        # ★ 왜 거부가 허용보다 나은가 — 청구는 유예 30일이 끝난 뒤에만 일어나고,
+        # 파기가 실패해 표식만 남은 계정은 reconciler 를 부르기 전까지 그 상태로
+        # **영구히** 남는다. 허용하면 **문서가 일부 사라진 계정이 아무 말 없이 활성으로
+        # 돌아와** 글을 계속 쓰게 되고, 표식이 남아 있어 reconciler 가 나중에 그 계정을
+        # 다시 파기한다(회원 입장에서는 *"취소했는데 지워졌다"*). 이 저장소는 그런
+        # 조용한 거짓을 시끄러운 거부보다 나쁘게 취급한다(D5 §조용한 고아 금지).
+        #
+        # ★ 표식을 지우는 선택지(ⓓ)는 택하지 않았다 — `purge_started_at` 은
+        # reconciler 가 부분 파기 계정을 발견하는 **유일한 실마리**이고 그것은 이미
+        # 셀로 잠긴 계약이다(SoT v1.8.52). 지우면 조용한 고아가 된다.
+        #
+        # 상태코드는 위 `WithdrawalNotRequested` 와 **같은 409** 다(브리프 ⓐ) —
+        # 화면의 처방이 같기 때문이다(*서버의 지금 상태를 다시 읽어 화면을 맞춘다*).
+        # H3 가 금지하는 것은 `detail` **분기**이지 상태코드 공유가 아니므로, 사람이
+        # 읽는 문구만 구분한다.
+        if stored.purge_started_at is not None:
+            raise WithdrawalPurgeAlreadyClaimed(
+                "purge already started for this account"
+            )
         updated = self._repo.set_withdrawal_requested_at(user_id, at=None)
         if updated is None:  # pragma: no cover - deleted between read and write
             raise UserNotFound("user does not exist")

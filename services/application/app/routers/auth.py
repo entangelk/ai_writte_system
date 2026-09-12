@@ -37,6 +37,7 @@ from ..auth.users import (
     USER_STATUS_PENDING,
     USER_STATUS_REJECTED,
     WithdrawalNotRequested,
+    WithdrawalPurgeAlreadyClaimed,
     purge_due_at,
 )
 from ..api.dependencies import (
@@ -309,10 +310,14 @@ def register_auth(app, *, users, sessions, core_sot, activity, login_guard,
         요청한 적 없는 계정의 취소는 404 가 아니라 **409** 다 — 계정은 있고(404 면
         "그런 회원 없음" 으로 읽힌다) 다만 취소할 것이 없다. `SignupNotPending` 이
         해결된 가입 요청에 409 를 주는 것과 같은 선례다.
+
+        ★ **파기가 청구된 뒤의 취소도 같은 409 다**(오너 결정 2026-09-13, 브리프 ⓐ).
+        두 뜻이 한 코드에 합쳐지는 것은 의도다 — 화면의 처방이 같기 때문이고(재조회),
+        H3 가 `detail` 분기를 금지하므로 화면은 **어느 동작이었는가**로만 판정한다.
         """
         try:
             user = users.cancel_withdrawal(current.id)
-        except WithdrawalNotRequested as exc:
+        except (WithdrawalNotRequested, WithdrawalPurgeAlreadyClaimed) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return _withdrawal_payload(user)
 

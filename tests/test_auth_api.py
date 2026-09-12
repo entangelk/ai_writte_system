@@ -315,6 +315,34 @@ class SelfWithdrawalApiTest(unittest.TestCase):
         client, _ = self._logged_in()
         self.assertEqual(client.delete("/me/withdrawal").status_code, 409)
 
+    def test_cancelling_after_the_purge_was_claimed_is_409(self) -> None:
+        """★ 파기 청구 뒤의 취소는 거부된다 — **같은 409**(오너 2026-09-13, 브리프 ⓐ).
+
+        D5 의 경계(*"파기 실행 전까지 취소 가능"*)를 코드가 시행하는 자리다. 청구는
+        유예 30일이 끝난 뒤에만 일어나고, 파기가 실패해 표식만 남은 계정은 reconciler
+        를 부르기 전까지 영구히 그 상태이므로 — 허용하면 **문서가 일부 사라진 계정이
+        조용히 활성으로 돌아온다**.
+
+        **상태코드를 `WithdrawalNotRequested` 와 나누지 않는 것이 결정의 내용이다**
+        (ⓑ 새 코드를 택하지 않았다). 화면의 처방이 같고(재조회) H3 가 `detail` 분기를
+        금지하므로, 화면은 **어느 동작이었는가**로만 판정한다.
+        """
+        client, users = self._logged_in()
+        client.post("/me/withdrawal")
+        stored = users._repo.get_by_username("alice")
+        self.assertIsNotNone(
+            users._repo.claim_for_purge(stored.id, at=datetime.now(UTC)),
+            "픽스처가 파기 청구에 실패했다 — 이 셀은 청구된 계정을 전제한다",
+        )
+
+        response = client.delete("/me/withdrawal")
+
+        self.assertEqual(response.status_code, 409)
+        # over-strict 짝: 거부가 유예를 되돌리지 않는다(되돌리면 쓰기 403 이 풀린다).
+        self.assertIsNotNone(
+            users._repo.get_by_id(stored.id).withdrawal_requested_at
+        )
+
     def test_cancelling_then_requesting_again_starts_a_new_grace_period(self) -> None:
         client, _ = self._logged_in()
         first = client.post("/me/withdrawal").json()

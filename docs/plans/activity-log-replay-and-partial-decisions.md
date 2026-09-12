@@ -1,6 +1,6 @@
 # 활동 로그 — 아무 일도 안 한 요청과 부분 실패를 어떻게 적는가
 
-상태: `Resolved — D1=ⓑ · D2=유예(트리거) · D3=ⓐ(오너 2026-09-08)`
+상태: `Resolved — D1=ⓑ · D2=ⓑ(오너 2026-09-13) · D3=ⓐ(오너 2026-09-08)`
 작성: 2026-09-08
 선행: Phase 9 활동 로그(A2=B·A7=A·A8=A) · 분류표 정본 [`../../services/application/app/activity/actions.py`](../../services/application/app/activity/actions.py)
 근거 기록: [`verifications/2026-08-09/service_activity_log_accept_extension.md`](../verifications/2026-08-09/service_activity_log_accept_extension.md) §6-② · [`verifications/2026-09-01/final_save_d5_closure.md`](../verifications/2026-09-01/final_save_d5_closure.md) N3
@@ -101,3 +101,19 @@ D1 과 같은 병이 **더 넓은 자리**에 있다. 실측(검증자 프로브
 | `drafts/{id}/versions`(수동 저장) | 행 있음 | D2 유예(ⓐ 그대로) |
 
 **D2 의 트리거가 당겨졌다.** 위 §D2 트리거는 *"도그푸드에서 중복 행이 눈에 띄면"* 이었는데, 그 관측을 기다릴 필요 없이 **구현이 비대칭을 하나 더 만들었다**. 갈래는 둘이고 **오너 결정 사안**이다 — ⓐ **지금 상태로 둔다**(finalize 만 조용하고 나머지 둘은 종전대로. 비용 0, 다만 같은 개념에 두 답이 남는다) · ⓑ **accept·수동 저장까지 ⓑ 로 넓힌다**(규칙이 하나가 된다. `routers/writing.py` 한 줄 + `routers/drafts.py` 저장 경로 한 줄 + 행위 셀 둘, D1 과 같은 모양이라 크기는 이 슬라이스와 비슷하다). **구현자는 고르지 않았다** — D2 는 오너가 유예로 명시한 축이고, 유예를 구현자가 푸는 것은 결정을 대신하는 것이다.
+
+## ✅ D2 결정 — ⓑ (오너 2026-09-13, 시행 완료)
+
+**오너가 ⓑ 를 골랐다.** 근거(오너 발화 요지): *"재시도가 사용자에게 보일 필요가 없다 — 쿼터에서 줄어드는 것도 아닌데"*. 즉 replay 행이 회원에게 주는 정보가 없고, 과금 축과도 무관하다(replay 는 provider 호출이 없어 차감되지 않는다 — HANDOFF §quota). **ⓒ 의 스키마 비용은 표본 없이 치를 이유가 없다**는 §추천의 판단은 유지된 채로, ⓐ 가 남기던 *"같은 개념에 답이 셋"* 이 해소됐다.
+
+시행: `routers/writing.py` 의 accept 기록에 `and not result.idempotent_replay` · `routers/drafts.py` 의 저장 기록을 `if not result.idempotent_replay:` 로 감쌈. **502 partial 경로는 D3=ⓐ 로 별개 축**이라 건드리지 않았다.
+
+| 경로 | replay 처분 | 잠그는 셀 |
+|---|---|---|
+| `drafts/{id}/finalize` | **행 없음** | `test_activity_api.py::test_resending_the_same_final_save_key_leaves_no_second_row` |
+| `writing/accept` | **행 없음** | `test_writing_accept.py::test_resending_the_same_accept_key_leaves_no_second_row` |
+| `drafts/{id}/versions`(수동 저장) | **행 없음** | `test_activity_api.py::test_resending_the_same_save_key_leaves_no_second_row` |
+
+**특성 셀 둘이 예고대로 뒤집혔다** — 둘 다 docstring 이 *"오너가 D2=ⓑ 를 고르면 이 셀이 함께 뒤집힌다"* 고 적어 둔 자리였고, 이름도 `..._still_records_a_second_row` → `..._leaves_no_second_row` 로 바뀌었다. 2026-09-12 에 HP-1 하드닝으로 더했던 replay 행의 `action`·`target_type` 단정은 **행 자체가 사라져 함께 걷혔고**, 그 축은 over-strict 짝(`test_saving_a_draft_version_records_who_and_when`)이 계속 잠근다.
+
+**★ 트리거는 결국 안 왔다** — §D2 트리거는 *"도그푸드에서 중복 행이 눈에 띄면"* 이었는데, 도그푸드가 아니라 **구현이 만든 비대칭**이 결정을 당겼다(§착수가 반증한 것). 유예에 트리거를 붙이는 관행이 옳았다는 증거는 아니다 — 이 축은 트리거가 오기 전에 이미 답이 정해져 있었고, 오너가 *"저번에도 얘기했던 것"* 이라고 지적한 자리다.
