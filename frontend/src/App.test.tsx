@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -888,6 +888,41 @@ describe("App routes", () => {
       expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({
         agreed_terms_version: "1.0",
       });
+    });
+
+    it("states the consented version and opens the documents in a new tab", async () => {
+      // 독립 검증 조건 C2(2026-09-12). 확인란 문구의 버전 표기와 문서 링크의
+      // 새 탭이 어떤 셀의 단정이 아니었다 — 바디의 버전은 서버가 버리고
+      // (400), 링크가 같은 탭이면 가입 폼의 입력이 라우트 이동으로 날아간다.
+      // under-strict: 문구에서 버전이 빠지거나(동의의 대상이 무엇인지 화면이
+      // 말하지 않는다) 링크가 같은 탭이 되면 실패한다. over-strict: 링크가
+      // 다른 곳을 가리키면 href 단정이 실패한다.
+      mockFetch({ status: 401, body: { detail: "not authenticated" } });
+
+      render(
+        <MemoryRouter initialEntries={["/"]}>
+          <App />
+        </MemoryRouter>,
+      );
+
+      await enterFromLanding();
+      await screen.findByLabelText("아이디");
+      await userEvent.click(
+        screen.getByRole("button", { name: "계정이 없나요? 새 계정 요청" }),
+      );
+
+      const checkbox = screen.getByRole("checkbox");
+      // 푸터도 같은 이름의 링크를 들고 있으므로 확인란 안에서만 잰다.
+      const consent = within(checkbox.closest("label") as HTMLElement);
+      // 문구는 **어느 판본에** 동의하는지를 말한다(방침 제3조 — 동의의 대상).
+      expect(checkbox.closest("label")).toHaveTextContent(/버전 1\.0/);
+      // 두 문서는 새 탭에서 열린다 — 폼 입력 보존.
+      const terms = consent.getByRole("link", { name: "이용약관" });
+      expect(terms).toHaveAttribute("href", "/terms");
+      expect(terms).toHaveAttribute("target", "_blank");
+      const privacy = consent.getByRole("link", { name: "개인정보처리방침" });
+      expect(privacy).toHaveAttribute("href", "/privacy");
+      expect(privacy).toHaveAttribute("target", "_blank");
     });
 
     it("tells a pending member their approval is still waiting", async () => {

@@ -11,7 +11,7 @@ from pymongo.errors import DuplicateKeyError
 
 from services.application.app.auth.models import User
 from services.application.app.auth.users import (
-    DuplicateUsername, is_purge_due,
+    DuplicateUsername, is_purge_due, TERMS_VERSION,
     USER_STATUS_ACTIVE, USER_STATUS_PENDING, USER_STATUS_REJECTED,
 )
 from services.application.app.auth.users_mongo import MongoUserRepository
@@ -409,6 +409,61 @@ class MongoUserRepositoryTest(unittest.TestCase):
         self.assertTrue(is_purge_due(
             stored, now=_FIXED_TIME + timedelta(days=30)
         ))
+
+    def test_a_row_written_before_the_consent_axis_reads_back_as_not_consenting(self):
+        """동의 축 이전에 쓰인 행에는 그 키가 없다 (방침 제3조 — 소급 동의 금지).
+
+        `must_change_password`·`status`·탈퇴 축과 같은 계열의 방어 셀이다 —
+        `_entry` 의 `.get` 을 하드 서브스크립트로 바꾸면 **현존 계정 전부가
+        로그인에서 KeyError(500)** 로 죽는다(독립 검증 2026-09-12 조건 C1·MV-B).
+        None 판독은 결함이 아니라 방침적 사실이다: 게이트 이전 가입자와 관리자가
+        만든 계정은 동의한 적 없는 인구다.
+        """
+        self.collection.docs["user:legacy"] = {
+            "_id": "user:legacy", "username": "legacy",
+            "password_hash": "H:old", "is_admin": False, "is_active": True,
+            "created_at": _FIXED_TIME, "status": USER_STATUS_ACTIVE,
+        }
+        stored = self.repo.get_by_id("user:legacy")
+        self.assertIsNotNone(stored)
+        self.assertIsNone(stored.terms_agreed_at)
+        self.assertIsNone(stored.terms_version_agreed)
+
+    def test_the_write_face_carries_the_consent_stamp_through_insert_and_replace(self):
+        """★ 쓰기면(`_doc`)에도 동의 스탬프가 실려야 한다 — 독립 검증 C1·MV-A.
+
+        동의 스탬프는 `insert`(신규 가입)와 `replace`(거절 재요청)로만 들어간다
+        — 갱신 API 가 없다. 그래서 `_doc` 에서 이 두 필드를 빼도 **가입은 계속
+        성공**하고(201) 스탬프는 몽고에 영영 안 쓰인다. 방침 제3조 *"운영자는
+        동의한 시각과 동의한 문서의 버전을 기록합니다"* 가 배포에서 조용히
+        거짓이 되는 모양이고, 2026-09-12 독립 검증이 실측했다(변이 MV-A =
+        auth 초점 277셀 전건 초록). 탈퇴축 선례
+        (`test_the_write_face_carries_the_stamp_through_insert_and_replace`)
+        와 같은 모양으로 저장면까지 왕복시킨다.
+        """
+        agreed = replace(
+            _user(),
+            terms_agreed_at=_FIXED_TIME, terms_version_agreed=TERMS_VERSION,
+        )
+        self.repo.insert(agreed)
+        self.assertEqual(
+            self.repo.get_by_id("user:1").terms_agreed_at, _FIXED_TIME
+        )
+        # 저장면까지: `_doc` 이 키를 안 실으면 여기서 KeyError 다.
+        self.assertEqual(
+            self.collection.docs["user:1"]["terms_agreed_at"], _FIXED_TIME
+        )
+        self.assertEqual(
+            self.collection.docs["user:1"]["terms_version_agreed"], TERMS_VERSION
+        )
+
+        # 재요청 갈래 — `replace` 가 행을 통째로 덮으므로 새 동의가 실려야 한다.
+        later = _FIXED_TIME + timedelta(days=2)
+        self.repo.replace(replace(agreed, terms_agreed_at=later))
+        self.assertEqual(self.repo.get_by_id("user:1").terms_agreed_at, later)
+        self.assertEqual(
+            self.collection.docs["user:1"]["terms_agreed_at"], later
+        )
 
 
 if __name__ == "__main__":
