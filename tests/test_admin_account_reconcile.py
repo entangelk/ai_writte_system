@@ -267,6 +267,53 @@ class AdminAccountReconcileTest(unittest.TestCase):
         response = self.client.get(f"/admin/users/{dave.id}/reconcile")
         self.assertEqual(response.status_code, 409)
 
+    # --- 실행 측 대상 재확인(검증 조건 C1, 2026-09-12) ------------------------
+    # SoT v1.8.62: "조사·실행 양쪽이 호출 직전에 스탬프를 재확인한다" — 실행
+    # 쪽 절반이 무셀이었다(변이 M3: POST 의 재확인 삭제에 전건 초록). 실행은
+    # 파괴라 이 축이 더 중요하다: 감사 행은 대상 검증 **뒤에** 남는다.
+
+    def test_execute_for_a_missing_user_is_404(self) -> None:
+        response = self.client.post(
+            "/admin/users/user:missing/reconcile", json={"reason": "수습"}
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self.audit_repo.events, [])
+
+    def test_execute_for_an_unclaimed_account_is_409_and_unaudited(self) -> None:
+        # 파기가 시작되지 않은 계정의 실행 요청은 대상 검증에서 끝난다 —
+        # 감사 행까지 남기면 "정리했다"의 흔적이 대상 아닌 계정에 생긴다.
+        self.users.create_user(username="erin", password="pw123")
+        erin = next(
+            u for u in self.users.list_users() if u.username == "erin"
+        )
+        self.users_repo.set_withdrawal_requested_at(erin.id, at=_NOW)
+        response = self.client.post(
+            f"/admin/users/{erin.id}/reconcile", json={"reason": "수습"}
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.audit_repo.events, [])
+
+    # --- 감사 화면의 축 배제(검증 조건 C2, 2026-09-12) ------------------------
+    # SoT: member_quota_policy 은 파괴가 아니라 이 화면 밖이다(변이 M6: 필터에
+    # 추가돼도 전건 초록이었다). 회원 정책 행을 심어도 보이지 않는지 잰다.
+
+    def test_the_audit_surface_excludes_member_quota_events(self) -> None:
+        root = next(u for u in self.users.list_users() if u.username == "root")
+        self.admin_audit.record_member_quota_change(
+            admin_user_id=root.id, target_user_id=self.bob.id,
+            change="suspend", reason="화면 배제 확인",
+        )
+        self.reconcile_repo._tombstoned.add(self.bob.id)
+        self.client.post(
+            f"/admin/users/{self.bob.id}/reconcile", json={"reason": "화면 배제 확인"}
+        )
+        actions = [
+            event["action"]
+            for event in self.client.get("/admin/audit-events").json()["events"]
+        ]
+        self.assertIn("account_reconcile", actions)
+        self.assertNotIn("member_quota_policy", actions)
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

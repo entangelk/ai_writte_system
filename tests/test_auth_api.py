@@ -1638,6 +1638,14 @@ class AdminProjectPurgeTest(unittest.TestCase):
         self.assertEqual({event["reason"] for event in events}, {"고객 삭제 요청"})
         self.assertEqual(len({event["operation_id"] for event in events}), 1)
         self.assertTrue(all("project_id" not in event for event in events))
+        # Slice 4b(2026-09-12, 검증 조건 C3): record_purge_outcome 이 요청 행의
+        # target_user_id 를 상속하게 되며 공유 함수가 됐다 — 프로젝트 purge 의
+        # 요청·결과 행은 여전히 계정 축이 None 이어야 한다(wire payload 는 이
+        # 필드를 안 실으므로 저장소에서 직접 잰다 — 상속이 target_project_id 로
+        # 과교정되면 이 단정이 잡는다).
+        self.assertTrue(
+            all(event.target_user_id is None for event in self.audit_repo.events)
+        )
 
     def test_requested_audit_failure_prevents_the_purge(self) -> None:
         if _STORAGE_FAILURE is None:
