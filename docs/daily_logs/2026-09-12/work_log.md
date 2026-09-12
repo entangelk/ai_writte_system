@@ -239,3 +239,48 @@ HANDOFF Next Tasks 1번(랜딩 ② 승격 재검 — 검증 세션 몫)과 회�
 ### Next steps
 
 - **랜딩 ③(본문)·④(가입 동의 게이트)** 가 구현 세션의 다음 축이다(NEXT 표 2번) — "한 창에서 본다"(S-2 nginx 헤더·AdSense 화면별 제어 포함).
+
+## 세션 68 — 랜딩 ③ 본문 · ④ 가입 동의 게이트 · S-2 nginx 헤터 (오너 지시 "핸드오프 읽고 다음작업 진행해줘")
+
+HANDOFF Next Tasks 2·4번(한 창)을 구현했다. **같은 저장소에서 다른 작업 AI가 11번 Slice 5(정책 §8 → §6 승격)를 동시 진행했다** — 법률 문서 축(방침 머리말 고지·`legal/README.md` §8 표)은 그쪽에 양보하고 내 기록에만 넘겼다. 커밋 4개: `58a8ac9`(백엔드 게이트) · `86a4de7`(프런트 게이트) · `f36c7bd`(랜딩) · `b6fd464`(nginx 헤더).
+
+### Goals
+
+- 방침 제3조(가입 절차 확인·동의 시각·버전 기록)의 게이트를 백엔드·프런트 양축으로 구현하고, 랜딩(D1=ⓒ)을 루트의 익명 얼굴로 세운다. S-2의 nginx 헤더 축을 같은 창에서 닫는다.
+
+### Completed work
+
+- **백엔드**: `TERMS_VERSION = "1.0"` 계약 상수(`auth/users.py`) · `User` 에 `terms_agreed_at`·`terms_version_agreed`(None 기본 — 게이트 이전 행·관리자 생성 계정 마이그레이션 무변, 소급 동의 금지) · `request_signup` 이 `agreed_terms_version` 을 시행 상수와 대조(누락·옛 판본 → 400 단일 얼굴, 해셔 앞)하고 **서버 시계·서버 상수로만** 스탬프 — 신규·거절 재요청(새 동의) 두 갈래. `SignupRequest` 는 모델에서 관대(S-3 선례). `users_mongo.py` 매핑 동반.
+- **핀 셀 상수화**: `tests/test_service_policy_contract.py` `_ENFORCED_VERSION = TERMS_VERSION`(docstring 예고 이행) · `frontend/src/legal/legalSource.test.ts` `ENFORCED_VERSION = TERMS_VERSION`.
+- **프런트 게이트**: 가입 폼에 동의 확인란(약관·방침 새 탭 링크 — 폼 입력 보존), 미체크 제출 잠금, 요청 바디에 `agreed_terms_version`. `LegalFooter.tsx` 에 `TERMS_VERSION` 상수. `.consent-check` CSS(텍스트 입력 규칙 상속 차단).
+- **랜딩**: `frontend/src/auth/Landing.tsx`(소개 블록 넷 — 원고 구조·기억·Gate·관측 + 정직한 한계 셋 — 승인제·원고 외부 전송·개인 프로젝트 + LegalFooter). `LoginMode` 에 `"landing"` 추가, `AuthGate` 가 `pathname === "/" && !sessionExpired` 일 때만 랜딩 — 라우팅 무변. 로그인 폼 h1 "쓴 것을 기억하는 집필 작업실"→"로그인", 랜딩 버튼 "로그인"(제출 버튼 "작업실 입장"과 이름 충돌 방지). typeScale 이관 목록에 랜딩 규칙 등재.
+- **nginx**: server 레벨에 X-Frame-Options DENY·X-Content-Type-Options nosniff·Referrer-Policy 셋 `always`. 가드 `tests/test_frontend_nginx_headers.py`(server 레벨 배치 — depth 파서로 location 추출, always).
+
+### Issues found
+
+- **세션 만료가 랜딩에 안내를 삼키는 결함을 셀이 잡았다** — 만료 셀 셋이 "세션이 만료되었습니다" 문구를 못 찾아 재실패. 랜딩에 그 배너가 없으므로 만료 상태는 initialMode 에서 signin 직행시켰다(설계 수정).
+- **버튼 이름 충돌**: 랜딩 입장 버튼을 처음 "작업실 입장"으로 지었다가 로그인 제출 버튼과 이름이 같아 역할 질의가 흔들렸다 — "로그인"으로 교체하고 Landing.tsx 주석에 근거를 남김.
+- **정규식 location 제거가 server 레벨까지 삼켰다**(nginx 가드 초안) — greedy 매치가 location 사이 지시문을 먹어 add_header 3건이 사라짐. 중첩을 아는 depth 파서로 교체.
+- 파이썬 일괄 삽입이 `userEvent.type(...)` 안의 anchor 에 끼어 5곳의 문법을 깨고 전역 치환이 제출 클릭 문장까지 바꿨다 — tsc·실행으로 발견해 수리(자동화 편집은 기계 검증 없이 쓰지 않는다).
+- **다른 작업 AI(Slice 5)가 같은 tests 파일을 편집 중**(`test_auth_users.py` 헬퍼 리팩터·`test_service_policy_contract.py` 앵커 추가) — 백엔드 전수 카운트에 그 트리가 섞여 내 슬라이스 단독 귀속이 안 된다(아래 Verification 주석).
+
+### Decisions — User Decisions and Rationale
+
+- 오너: 핸드오프의 다음 작업(랜딩 ③·동의 게이트 ④, S-2 같은 창) 진행. 슬라이스 분할·범위는 구현자가 계획대로 나눴다(백엔드→프런트 게이트→랜딩→nginx).
+- 오너: 다른 작업 AI가 11번 Slice 5 진행 예고 — 법률 문서 축(방침 머리말·§8 표)을 그쪽에 넘겨 충돌을 피했다.
+- 오너: 완료 후 독립 세션 검증(서브에이전트)·검증기록 보강 지시 — 세션 말미에 수행(아래).
+- 구현 선택: 동의 검증을 서비스 계층 400 으로(모델 422 금지 — signup 정책 거부의 단일 얼굴). 저장 값을 서버 상수로 통일(클라이언트 청구 저장 금지). 랜딩을 라우팅 무변으로(딥링크·관리자 리다이렉트 계약 보존). CSP 미포함(AdSense 심의 전 안전 지시문 작성 불가 — 오너 결정 대기 항목으로 명시).
+
+### Verification
+
+- 초점: 백엔드 인증 축 `test_auth_users`·`test_signup_throttle`·`test_service_policy_contract`·`test_auth_api` **261 passed / 1275 subtests** · nginx 가드 **2 passed / 6 subtests** · 프런트 초점(랜딩·게이트·스타일 가드) **70 passed** · `tsc --noEmit`·`npm run build` 초록.
+- **전수**: 백엔드 **3034 passed / 1 skipped / 4166 subtests · EXIT=0**(340.7초 · skip 1 = live Chroma 뿐). 프런트 **482 passed / 41 files · EXIT=0**(파일 캡처). ★ 백엔드 수치는 Slice 5 동시 진행 트리 포함(내 확정 기여는 동의 게이트 +6셀·스로틀 +1셀·nginx +2셀이지만 합이 +8 — 나머지 ±는 Slice 5의 `tests` 편집).
+- **뮤테이션 8종 기명 재실패**(프리플라이트 게이트·절대경로 원복 매번 확인): 게이트 검증 제거 → 3실패 · 신규 행 스탬프 제거(over) → 1 · 프런트 잠금 조건 제거 → 1 · 바디 필드 제거(over) → 1 · 랜딩 signin 고정(under) → 2 · 랜딩 전경 확장(over) → 2 · nginx 헤더 제거 → 2.
+- **실브라우저(CDP)**: 랜딩 4폭(1440/768/390/320) 넘침 0 · h1·한계 셋·버튼 둘·푸터 실측 확인. dev 서버 신선도는 발생 수 셈법(5174 신규 선택자 3·5173 옛 0)으로 판정. 가입 폼 확인란 존재·제출 잠금 확인(체크 후 풀림은 vitest 셀이 잠금 — CDP 동기 타이밍 한계).
+- 한계: 랜딩 실기기(모바일 스크롤·소프트 키보드)·배포 화면 육안 미확인 — 오너 확인 목록에 남긴다.
+
+### Next steps
+
+- 독립 세션 검증(서브에이전트) → 검증기록 보강.
+- AdSense 화면별 제어는 방침 제6조 2항("모든 화면") 수정을 동반하는 오너 결정 대기.
+- 랜딩 스크린샷은 육안 확인 목록 닫힌 뒤(브리프 지침).
