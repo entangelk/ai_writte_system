@@ -386,7 +386,7 @@ HANDOFF Next Tasks 2·4번(한 창)을 구현했다. **같은 저장소에서 �
 
 - 백엔드 초점(구현 직후): `test_auth_api`(tier 핀 포함) · `test_admin_account_reconcile` · `test_account_purge` · `test_account_withdrawal_worker` · `test_admin_audit` · `test_admin_surface_separation` · `test_activity_actions` — **전부 초록**. 앱 조립 스모크: reconcile route GET/POST 등록 확인.
 - 프런트: `tsc --noEmit` 통과 · `npm run build` 통과 · 전수 **488 passed / 41 files · EXIT=0**(재실행 — 첫 전수는 집합 가드 1실패를 냈고 그 원인을 닫은 뒤 재측정). 기존 482 대비 +6: **+5 는 이 슬라이스**(AdminUserDetail 4 · AdminConsole 1), **+1 은 세션 69 조건 폐쇄(`cbd88f7` 의 확인란 문구·새 탭 링크 셀)가 핸드오프 기준선에 아직 반영 안 된 것**.
-- 백엔드 전수: (전수 결과 확정 후 이 줄을 채운다)
+- 백엔드 전수: **3053 passed / 1 skipped / 4213 subtests · EXIT=0**(2차 실측 355.9초). 1차 전수(3052/1/4200 · EXIT=1)의 유일한 실패는 **선언 잠금 지도 누락**(`test_application_api` 의 `AdminErrorContractDeclarationTest` 가 새 operation 둘을 못 찾은 것)이었고 — **내 슬라이스 결함**이라 닫고(지도 두 행 + 17→19) 재실측했다. 이전 기준선 3034/1/4166(세션 68) 대비 **+19 passed / +47 subtests**의 귀속: **이 슬라이스 +13 passed(신규 파일)·+2 subtests(선언 지도)**, 나머지 +6/+44 는 **Slice 5 조건 폐쇄·하드닝 커밋들**(`cbd88f7`·`566ea4b`·`dfc455a` — 세션 68 기준선에 아직 반영 안 된 백엔드 셀·정책 가드 확장)이다.
 - **독립 검증(서브에이전트)**: 구현 커밋 뒤 별도 세션으로 반증 시도 — 결과는 검증 기록 참조.
 
 ### Next steps
