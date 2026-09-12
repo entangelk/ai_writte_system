@@ -186,6 +186,12 @@ class ActivityRecordingTest(unittest.TestCase):
         **★ 오너가 D2=ⓑ 를 고르면 이 셀과 SoT v1.8.64 문장·HANDOFF 줄이 *함께*
         뒤집힌다.** 셀이 있다는 것을 "옳은 동작"으로 읽지 말 것 — 선례는 v1.8.61 의
         `test_auth_users.py::WithdrawalCancelAfterPurgeClaimTest` 다.
+
+        **★ 행 *수* 만 세면 이 셀은 행의 정체에 장님이다**(HP-1 폐쇄, 2026-09-12 승격
+        재검). replay 가 엉뚱한 action 을 남겨도 전건 초록이었다(실측) — 그래서 첫 저장
+        축의 짝(`test_the_first_final_save_is_recorded`)과 같은 모양으로 마지막 행의
+        정체를 함께 단정한다. 계약이 명시적으로 요구하는 것은 *행을 남기는가* 와
+        `idempotent_replay` 둘이므로 이 단정은 하드닝이지 계약 확장이 아니다.
         """
         project_id, draft_id = self._finalizable_draft()
         first = self.client.post(
@@ -204,6 +210,9 @@ class ActivityRecordingTest(unittest.TestCase):
         self.assertEqual(again.status_code, 200)
         self.assertTrue(again.json()["idempotent_replay"])
         self.assertEqual(len(self.repo.events), before + 1)
+        replayed = self.repo.events[-1]
+        self.assertEqual(replayed.action, "draft_version_saved")
+        self.assertEqual(replayed.target_type, "draft_version")
 
     def test_archiving_records_the_state_change(self) -> None:
         project_id = self._create_project()

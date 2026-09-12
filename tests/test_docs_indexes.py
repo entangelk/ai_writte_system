@@ -362,10 +362,34 @@ class DocsReadmeIndexTest(unittest.TestCase):
 
         앵커는 **수사가 아니라 두 낱말**(`verifications/`·`전신`)로 잡는다 — 문장을
         다듬는 정상 편집까지 물면 가드가 문장을 화석으로 만든다.
+
+        **★ 범위는 절이 아니라 `verification_briefs/` 행 하나다**(HA-1 폐쇄,
+        2026-09-12 재감사). 절 전체를 보면 `verifications/` 는 실효 앵커가 아니다 —
+        같은 절의 다른 두 행과 맺음 문단이 그 문자열을 이미 세 번 더 쓰므로 지시받은
+        문장을 통째로 지워도 그 단정은 만족된다(양방향 실측: `전신` 만 걷으면 1 failed,
+        `verifications/` 만 걷으면 20 passed). 그리고 오너 지시가 요구한 것은 낱말의
+        존재가 아니라 **두 이름의 관계**("`verification_briefs/` 는 `verifications/`
+        의 전신")이므로, 둘은 애초에 *같은 행* 에 있어야 한다.
+
+        두 방향:
+        - under — 지시받은 문장을 지우거나 두 낱말 중 하나를 걷으면 재실패한다.
+        - over — 그 행의 수사를 다듬는 정상 편집(다른 행·맺음 문단 편집 포함)은 통과한다.
         """
         section = _dormant_section(self.index)
-        self.assertIn("verifications/", section)
-        self.assertIn("전신", section)
+        briefs_line = next(
+            (
+                line
+                for line in section.splitlines()
+                if line.startswith("- ") and "verification_briefs/" in line
+            ),
+            None,
+        )
+        self.assertIsNotNone(
+            briefs_line, "휴면 절에 verification_briefs/ 를 가리키는 행이 없다"
+        )
+        assert briefs_line is not None
+        self.assertIn("verifications/", briefs_line)
+        self.assertIn("전신", briefs_line)
 
 
 # "검증 기록 N건"을 세 문서가 각자 적는다. 세는 사람이 셋이면 반드시 갈라진다 —
