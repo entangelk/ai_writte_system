@@ -133,3 +133,15 @@ npx vitest run src/admin/AdminUserDetail.test.tsx src/admin/AdminConsole.test.ts
 # C2 재현: admin_audit.py list_destructive_events 필터에 "member_quota_policy" 추가 → 전부 초록
 # C3 재현: admin_audit.py:130 을 target_user_id=requested.target_project_id 로 → test_auth_api 만으로는 초록
 ```
+
+---
+
+## 폐쇄 보고 (구현 세션, 2026-09-12 · 커밋 `a460237`)
+
+조건 셋을 닫았다 — **판정 승격은 하지 않는다**(조건을 닫은 세션이 자기 판정을 올리면 독립성이 사라진다 — v1.8.52·v1.8.55 선례. 승격은 다음 독립 검증/승격 재검 몫).
+
+- **C1 — 실행 측 재확인 무셀 폐쇄**: 셀 둘(`test_admin_account_reconcile.py::…test_execute_for_a_missing_user_is_404` · `…test_execute_for_an_unclaimed_account_is_409_and_unaudited`). 후자는 **감사 행이 남지 않음**(대상 검증 뒤에 감사가 온다는 순서)까지 잠근다. **변이 M3 재적용 → 2셀 기명 재실패** 확인.
+- **C2 — member_quota 화면 배제 무셀 폐쇄**: 셀 하나(`…test_the_audit_surface_excludes_member_quota_events` — 회원 정책 행을 심은 뒤 `/admin/audit-events` 에 `account_reconcile` 은 보이고 `member_quota_policy` 는 안 보이는지). **변이 M6 재적용(InMemory 필터) → 1셀 기명 재실패** 확인.
+- **C3 — `record_purge_outcome` 상속의 과교정 방향 폐쇄**: 기존 프로젝트 purge 감사 셀(`test_auth_api.py::AdminProjectPurgeTest::test_success_records_requested_and_succeeded_tombstones`)에 **저장소에서 직접** 요청·결과 행의 `target_user_id is None` 단정 추가(wire payload 는 이 필드를 안 실어 워이어로는 잴 수 없다 — 하드닝 H4 와 같은 근원). **변이 M5b 재적용 → 1셀 기명 재실패** 확인.
+- **하드닝 H3(범위 밖 인용부호 변경)도 원복**했다 — `AdminUserDetail.tsx` 의 알림 문구 두 곳을 곡은 인용부호로 되돌림(구현 세션이 `b3e5ec0` 에서 직은으로 바꿨던 것).
+- 초점 재실측(원복 뒤): `test_admin_account_reconcile`+`test_auth_api`+`test_admin_audit`+`test_owner_project_purge` **181 passed / 1225 subtests**. 전수 재실측은 하지 않았다 — **백엔드 서비스 소스 무변**(순수 테스트 추가)이므로 유도가 정당: 백엔드 3053→**3056 passed**(subtest 무변 4213). 프런트는 문구 원복 두 곳(셀 수 무변 — 488/41 그대로).

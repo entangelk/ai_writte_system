@@ -387,8 +387,12 @@ HANDOFF Next Tasks 2·4번(한 창)을 구현했다. **같은 저장소에서 �
 - 백엔드 초점(구현 직후): `test_auth_api`(tier 핀 포함) · `test_admin_account_reconcile` · `test_account_purge` · `test_account_withdrawal_worker` · `test_admin_audit` · `test_admin_surface_separation` · `test_activity_actions` — **전부 초록**. 앱 조립 스모크: reconcile route GET/POST 등록 확인.
 - 프런트: `tsc --noEmit` 통과 · `npm run build` 통과 · 전수 **488 passed / 41 files · EXIT=0**(재실행 — 첫 전수는 집합 가드 1실패를 냈고 그 원인을 닫은 뒤 재측정). 기존 482 대비 +6: **+5 는 이 슬라이스**(AdminUserDetail 4 · AdminConsole 1), **+1 은 세션 69 조건 폐쇄(`cbd88f7` 의 확인란 문구·새 탭 링크 셀)가 핸드오프 기준선에 아직 반영 안 된 것**.
 - 백엔드 전수: **3053 passed / 1 skipped / 4213 subtests · EXIT=0**(2차 실측 355.9초). 1차 전수(3052/1/4200 · EXIT=1)의 유일한 실패는 **선언 잠금 지도 누락**(`test_application_api` 의 `AdminErrorContractDeclarationTest` 가 새 operation 둘을 못 찾은 것)이었고 — **내 슬라이스 결함**이라 닫고(지도 두 행 + 17→19) 재실측했다. 이전 기준선 3034/1/4166(세션 68) 대비 **+19 passed / +47 subtests**의 귀속: **이 슬라이스 +13 passed(신규 파일)·+2 subtests(선언 지도)**, 나머지 +6/+44 는 **Slice 5 조건 폐쇄·하드닝 커밋들**(`cbd88f7`·`566ea4b`·`dfc455a` — 세션 68 기준선에 아직 반영 안 된 백엔드 셀·정책 가드 확장)이다.
-- **독립 검증(서브에이전트)**: 구현 커밋 뒤 별도 세션으로 반증 시도 — 결과는 검증 기록 참조.
+- **독립 검증(서브에이전트)**: [`verifications/2026-09-12/admin_residual_purge_slice4b.md`](../../verifications/2026-09-12/admin_residual_purge_slice4b.md) — **조건부 합격(셋 C1·C2·C3)**. 구현 자체는 스코프 계약 전 축에서 성립(본체 한 벌 diff 대조 · 등재 전부 · 프런트 ②ⓐ 흐름 · 변이 10종 중 7종 기명 재실패)이고, 막은 것은 전부 **무셀**이었다: C1 실행 측 스탬프 재확인(M3 변이에 전건 초록) · C2 감사 화면의 member_quota 배제(M6 무셀) · C3 `record_purge_outcome` 상속의 과교정 방향(M5b — 계정 셀만 물고 프로젝트 purge 축 오염은 wire 에 안 보여 무셀).
+- **조건 셋 폐쇄(같은 날, `a460237`)**: C1 셀 둘(POST 404 · 409+**감사 무행** — 대상 검증 뒤에 감사가 온다는 순서까지) · C2 셀 하나(회원 정책 행을 심고 화면에 안 보이는지) · C3 기존 purge 감사 셀에 **저장소 직접** `target_user_id is None` 단정(wire payload 는 그 필드를 안 실는다 — 검증 하드닝 H4 와 같은 근원). **변이 재적용 셋으로 폐쇄 실증**: M3→2셀 · M6→1셀 · M5b→1셀 전부 기명 재실패(매번 커밋 → 변이 → 재실행 → `git checkout --` 원복 → clean 확인). 하드닝 **H3(구현 커밋이 알림 문구 인용부호를 직은으로 바꾼 범위 밖 변경)도 원복**했다. 원복 뒤 초점 네 파일 **181 passed / 1225 subtests**.
+- 백엔드 기준선 유도 갱신: **3053 → 3056 passed**(+3 = 조건 셋 셀, 서비스 소스 무변이라 전수 대신 유도 — subtest 4213 무변). 프런트 무변(문구 원복만).
 
 ### Next steps
 
-- 검증 결과에 따른 보강(조건 폐쇄) → SoT·HANDOFF·CHANGELOG 갱신으로 슬라이스 닫기.
+- **판정 승격은 다음 독립 검증/승격 재검 몫**(조건을 닫은 세션이 자기 판정을 못 올린다 — 검증 기록에 폐쇄 보고만 남겼다).
+- 하드닝 H1(503 분기 도달 불가 — quota 선례와 같은 모양)·H2(스크립트 dry-run survey 두 번 호출)·H4(감사 payload 가 `target_user_id` 를 안 실어 화면이 계정 이벤트 대상을 reason 으로만 식별)·H5(스크립트 `main()` 무셀 — 이관 전과 동일)·H6(InMemory 저장소 분리)은 **비차단**으로 검증 기록에 남아 있다 — 화면 개선(H4)을 언제 열지는 오너 판단.
+- 배포 환경에서 스크립트 dry-run 한 번(검증 환경은 Mongo 접속 불가로 대체 확인만 했다).
