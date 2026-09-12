@@ -1,6 +1,8 @@
 # 조건 C1 승격 재검(`432f790`) 재감사 — 승격의 자격과 변이 표 재현
 
-**조건부 합격** — 조건 **AC1**: 이 커밋이 인덱스에서 선행 기록 [`activity_replay_and_dormant_docs.md`](activity_replay_and_dormant_docs.md) 의 판정 열을 **합격**으로 올렸는데 **그 기록 본문의 판정 첫 줄은 여전히 `**조건부 합격** — 조건 C1:` 이다.** [`guides/verification.md`](../../guides/verification.md) §Required sections 가 *"The index's 판정 column and this first line must say the same thing"* 이라고 못 박은 자리이고, **디스크 310건 전수 대조에서 이 불일치는 이 기록 하나뿐이다**(내가 직접 센 수치 — 아래 §5). 바로 앞 커밋 `2e025dc` 는 같은 상황에서 선행 기록 넷의 판정 줄을 **전부** 고쳤다(4/4 선례). 한 줄로 닫힌다.
+**합격** — 조건 **AC1** 은 폐쇄 커밋 `88a16fe`(재감사 세션의 폐쇄 보고)가 닫았고, 승격 재검([`activity_replay_ac1_promotion.md`](../2026-09-13/activity_replay_ac1_promotion.md) — 변이 재적용 열 회 전건 일치)이 판정을 올렸다. 아래 본문은 발행 시점 그대로다.
+
+> **조건부 합격**(발행 시점 판정 원문) — 조건 **AC1**: 이 커밋이 인덱스에서 선행 기록 [`activity_replay_and_dormant_docs.md`](activity_replay_and_dormant_docs.md) 의 판정 열을 **합격**으로 올렸는데 **그 기록 본문의 판정 첫 줄은 여전히 `**조건부 합격** — 조건 C1:` 이다.** [`guides/verification.md`](../../guides/verification.md) §Required sections 가 *"The index's 판정 column and this first line must say the same thing"* 이라고 못 박은 자리이고, **디스크 310건 전수 대조에서 이 불일치는 이 기록 하나뿐이다**(내가 직접 센 수치 — 아래 §5 — 폐쇄 보고의 패턴 스윕이 이 "유일"을 정정해 선재 5건을 찾았다). 바로 앞 커밋 `2e025dc` 는 같은 상황에서 선행 기록 넷의 판정 줄을 **전부** 고쳤다(4/4 선례). 한 줄로 닫힌다.
 
 그 밖에는 **승격이 정당하다.** 대상이 보고한 변이 **열한 종을 diff 원문 그대로 재적용해 건수·기명 셀까지 전건 일치**했고(§2), 대상이 재지 않은 점 다섯을 더 찍어 **경계를 좁혔다**(§3). C1 이 요구한 두 갈래는 실제로 기명 셀을 얻었고 세 갈래가 분리 소유된다. **HP-1 을 비차단으로 분류한 것도 타당하다 — 다만 대상이 댄 근거는 약하고, 옳은 근거는 따로 있다**(§6). **범위 밖 변경 0.**
 
@@ -189,7 +191,9 @@
 
 ## Verdict
 
-**조건부 합격** — **AC1**: 인덱스 판정 열(`**합격**`)과 선행 기록 [`activity_replay_and_dormant_docs.md`](activity_replay_and_dormant_docs.md) 본문 3행(`**조건부 합격** — 조건 C1: …`)이 서로 다른 말을 한다. 가이드 §Required sections 이 *"같은 말을 해야 한다"* 로 못 박은 자리이고, **디스크 310건 중 유일한 불일치**이며, 바로 앞 커밋이 같은 상황을 **4/4 로 반대로** 처리했다. 한 줄로 닫힌다(§Issues AC1).
+**합격**(승격 — 2026-09-13 승격 재검 [`activity_replay_ac1_promotion.md`](../2026-09-13/activity_replay_ac1_promotion.md) 이 변이 재적용 열 회로 조건 폐쇄를 확증). 발행 시점 판정 원문:
+
+> **조건부 합격** — **AC1**: 인덱스 판정 열(`**합격**`)과 선행 기록 [`activity_replay_and_dormant_docs.md`](activity_replay_and_dormant_docs.md) 본문 3행(`**조건부 합격** — 조건 C1: …`)이 서로 다른 말을 한다. 가이드 §Required sections 이 *"같은 말을 해야 한다"* 로 못 박은 자리이고, **디스크 310건 중 유일한 불일치**이며, 바로 앞 커밋이 같은 상황을 **4/4 로 반대로** 처리했다. 한 줄로 닫힌다(§Issues AC1).
 
 승격의 **실체는 정당하다**:
 
