@@ -390,3 +390,54 @@ D5 의 경계(*"파기 실행 전까지"*)가 **처음으로 시행된다**. 종
 ### Next steps
 
 - 오너 결정 대기 둘(H4 · 옛 해시 수치)과 도그푸드·육안·배포 축은 HANDOFF "열린 것"·Next Tasks 가 정본이다.
+
+## 세션 83 — 오너 즉닃 셋 시행: H4 ⓐ · login_failures 청소 · 약관 v1.1 (+ 해시 수치 교체 · 시계 픽스처)
+
+### Goals — 오너 결정·피드백 (원문 보존)
+
+- **H4**: *"넓혀"* (ⓐ) — *"넓힌다로 되어있었다면서 근데 이걸 왜 물어봐"*
+- **옛 해시**: *"새 측정값으로 해"*
+- **법률 문언**: *"법률문헌은 대충 써놔 이거 포트폴리오라고… 유예 중 쓰기 차단 고지는 약관에도 넣고 삭제할 때 팝업으로 띄워 인지하게"*
+- **파기 뒤 취소 경계**: *"당연한걸 왜 자꾸 물어보는거지… 알았어 넣어놔"*
+- **시계 뒤점프**: *"대충 해"*
+- **login_failures**: *"옛 잠금이 뭔데… 그걸 이어받으면 당연히 안 되지"*
+- **★ 규칙 갱신(오너 피드백)**: 브리프 추천·자명한 귀결을 되묻지 않는 규칙을 또 어겼다 — HANDOFF ⚠️ 규칙 문단에 *법률 문언 제외*·*자명한 귀결 금지* 를 추가했다.
+
+### Completed work
+
+#### 1. H4 ⓐ — 다섯째 표면 (`76568ba`)
+
+`PUT /projects/{id}/brief` 의 `activity.record` 를 `if not result.idempotent_replay:` 로 — **다섯 표면이 한 규칙**. 셀 한 쌍(under `test_replayed_brief_save_leaves_no_second_row` · over `test_first_brief_save_records_an_activity_row` — `project_brief_saved` 축 분리 셈, replay 셀은 `idempotent_replay: true`+version 수렴 동반). 변이 검증: 분기 벗김(`if True:`) → under 셀 1 재실패 · 바이트 복원 확인.
+
+#### 2. login_failures 파기 청소 (`377cbe3`)
+
+`AccountPurgeService` 에 `LoginFailureClearer` 주입 — sweep 뒤·계정 행 삭제 앞에 `clear(username)`(실패 라벨 `login_failures`). 워커 조립 연결. 셀: 그 사용자명 행만 지운다(다른 사용자명 무변). 변이 검증: clear 단계 제거 → 셀 1 재실패. Slice 3 계약 주의 ⓔ *"아직 안 정했다"* 의 시행.
+
+#### 3. 약관·방침 v1.1 + 패널 고지 + 해시 수치 + 시계 픽스처 (`5be61b3`)
+
+- 제8조 3항: **유예 중 저장·유료 제한 고지** + **파기 뒤 취소 불가 경계** · 방침 제5조 3항: 경계 문장. 버전 `1.0→1.1`·시행일 2026-09-13(양 문서 머리말·인용·부칙 + `TERMS_VERSION` 백엔드·프런트 상수 + 핀 셋 동반 — 기존 계정 소급 동의 없음).
+- 탈퇴 신청 패널 status-copy: *"조회와 취소만 가능하며, 저장·유료 기능은 이용할 수 없습니다"* + 셀(요청 전부터 고지 보임).
+- `me/withdrawal.test.tsx` 시계 고정(`vi.useFakeTimers({toFake:["Date"]})`) — WSL2 clock-jump 플레이크 셋째 계열.
+- 옛 해시 분모 재측정값 교체(검증 인덱스 머리·HANDOFF 함정 — `1/371`·`229/239`·`69/70`, 종전값은 재현 불능 주석으로).
+- 대조표 미기재 행 셋 → 기재.
+
+#### 4. SoT v1.8.68 (`bfcc8e0`) · README ④행
+
+### Issues found
+
+- **N3 "오너 결정 대기"는 낡은 문장이었다** — N3(finalize 같은 키 재전송의 활동 행 중복)은 D1=ⓑ(v1.8.66, 09-12)가 이미 닫은 것. 세션 82의 정리가 놓친 것을 오너 질문("4번은 또 뭔데"류)으로 발견 — HANDOFF item 2 정정.
+- **같은 트리에서 README 축 작업 AI 병행(H5)** — README 미커밋 분을 diff 로 확인한 뒤 내 ④행 한 줄만 커밋했다. 기준선 ②행 갱신 시 다시 확인할 것.
+
+### Decisions
+
+- 오너 즉닃 6건은 브리프 없이 시행했다(오너 명령이 그 자리에서 떨어졌고 전부 기존 결정의 뜻을 잇거나 자명한 귀결이다).
+
+### Verification
+
+- 초점: test_project_brief 26 passed · test_account_purge·login_guard·script_entrypoints 41 passed · test_service_policy_contract+docs 가드 40 passed/1031 subtests · 프런트 legal+auth EXIT=0 · me/withdrawal 14 passed.
+- 변이 검증 2회(H4·login_failures) 전부 재실패·바이트 복원 확인.
+- 백엔드 전수·프런트 전수: 아래 기준선 줄 참조.
+
+### Next steps
+
+- **오너 결정 대기 0건.** 남은 축: 트리거 대기(AdSense 승인·웹폰트·14번 재현) · 최종 저장 H1/H2 값 인정(오너에게 설명 완료 — 답 오면 셀 1줄·1개) · Slice 6 하드닝 H1~H4 완료 기준 #6 판단 · D8-7 G2~G6 "다중 테넌트" 재해석.
