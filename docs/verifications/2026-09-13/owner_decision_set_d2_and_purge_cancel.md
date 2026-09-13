@@ -92,9 +92,9 @@ target_ids distinct: 1
 - **under**: 경계를 벗기면(M9) 3셀 재실패 — 서비스 2 + HTTP 1.
 - **over(더 나쁜 결함 방향)**: 항상 거부로 바꾸면(M10) **6셀 재실패**. 그중 `test_cancelling_removes_every_grace_period_restriction`·`test_cancelling_returns_the_account_to_never_having_asked`·`test_cancelling_clears_the_stamp` 이 *"청구 전 취소는 여전히 200 이고 제한이 전부 풀린다"* 를 직접 든다. **회원이 유예 중에 되돌릴 수 없게 되는 사고는 여섯 겹으로 막혀 있다.**
 - **거부가 아무것도 되돌리지 않는가**: M12(거부 직전에 유예 스탬프를 지우는 과잉 교정)가 2셀 재실패 — `test_the_refused_cancel_leaves_both_stamps_intact`(서비스) + `test_cancelling_after_the_purge_was_claimed_is_409`(HTTP over-strict 짝). 파기 표식 존치는 같은 셀이 `purge_started_at == _FIXED_TIME` 으로 단정한다(SoT v1.8.52 의 계약 — 표식은 reconciler 의 유일한 단서).
-- **파기가 끝난 계정(행 없음)**: `cancel_withdrawal` 의 검사 순서는 `stored is None → UserNotFound` **먼저**, 그 다음 `withdrawal_requested_at is None`, 마지막이 새 `purge_started_at` 검사다([`auth/users.py:546-572`](../../../services/application/app/auth/users.py#L546)). **409 로 바뀌지 않았다.** 어느 문서도 이 경우에 404 를 약속하지 않는다(정책 §6 은 *"되살릴 수 없다(행이 없다)"* 까지만 적고, 실제로는 세션이 함께 사라져 401 이 먼저 온다) — 이 결정이 건드린 축이 아니다.
+- **파기가 끝난 계정(행 없음)**: `cancel_withdrawal` 의 검사 순서는 `stored is None → UserNotFound` **먼저**, 그 다음 `withdrawal_requested_at is None`, 마지막이 새 `purge_started_at` 검사다([`auth/users.py:538-574`](../../../services/application/app/auth/users.py#L538)). **409 로 바뀌지 않았다.** 어느 문서도 이 경우에 404 를 약속하지 않는다(정책 §6 은 *"되살릴 수 없다(행이 없다)"* 까지만 적고, 실제로는 세션이 함께 사라져 401 이 먼저 온다) — 이 결정이 건드린 축이 아니다.
 - **경계가 `purge_started_at` 하나로 충분한가 (브리프 §Follow-up 의 물음) — 충분하다.** `claim_for_purge` 가 표식의 **유일한 writer** 이고, 파기 그래프의 **1단계**다([`deletion/account_purge.py:135`](../../../services/application/app/deletion/account_purge.py#L135) — 머리말의 순서 1~5 중 청구가 첫째, 사용자명 묘비가 둘째). **표식이 찍히기 전에는 아무것도 파괴되지 않는다.** 따라서 "파괴가 시작됐는가"와 "표식이 있는가"는 동치이고 둘째 조건이 필요 없다.
-- **선언 정합**: `_ERRORS_WITHDRAWAL` 이 이미 `409` 를 담고 있어([`api/errors.py:240`](../../../services/application/app/api/errors.py#L240)) **선언 누락은 없다**. 경계 셀 `test_no_withdrawal_operation_declares_a_403` 이 `/me/withdrawal` 의 모든 method 에 대해 401·409 존재 + 403 부재를 subTest 로 잠근다. M11(라우터 매핑에서 신규 예외를 뺌)은 1셀 재실패로 HTTP 얼굴이 잠겨 있음을 확인.
+- **선언 정합**: `_ERRORS_WITHDRAWAL` 이 이미 `409` 를 담고 있어([`api/errors.py:242`](../../../services/application/app/api/errors.py#L242)) **선언 누락은 없다**. 경계 셀 `test_no_withdrawal_operation_declares_a_403` 이 `/me/withdrawal` 의 모든 method 에 대해 401·409 존재 + 403 부재를 subTest 로 잠근다. M11(라우터 매핑에서 신규 예외를 뺌)은 1셀 재실패로 HTTP 얼굴이 잠겨 있음을 확인.
   - **다만 그 선언의 주석이 거짓이 됐다** — *"409 는 **두 생산자**를 갖는다"* 인데 이제 셋이다. 이 저장소가 가장 싫어하는 *산문이 코드보다 낡은 자리*라 `867ba15` 가 셋으로 정정했다(선언 자체는 무변).
 - **유예 중 쓰기 차단(403)과 충돌하지 않는다**: `/me/withdrawal` 의 POST·DELETE 는 `_REQUIRE_AUTH_DURING_WITHDRAWAL`(인증만)을 쓰고, `test_every_protected_operation_declares_the_grace_period_guard` 가 그 둘을 **명시 예외 집합**으로 두고 `seen_exemptions == exemptions` 까지 단정한다(예외가 조용히 늘거나 줄면 실패). 거부는 서비스 층에서 나므로 이 축과 독립이다.
 
@@ -129,6 +129,17 @@ target_ids distinct: 1
   두 리비전(`3681d77`·`d9a1bd2`)에서 같은 값이 나와 코퍼스 드리프트가 원인이 아니다. **분자 `1` 과 경계의 날카로움은 정확히 재현**되고 총계도 1 차이라 **질적 주장은 성립**하지만, 분모는 어떤 변형(백틱 7~12 hex · 정확히 7자 · 백틱 없는 토큰)으로도 맞출 수 없었다. 원인은 발행된 두 자리 **어디에도 유도 명령이 없다**는 것이다 — 가이드 §*"Recording a measurement"* 가 정확히 금지하는 형태(*"숫자는 맞는데 라벨이 불완전하고, 그 틈이 다음 독자에게 안 보인다"*). **처방: 두 자리에 유도 명령 한 줄을 붙이거나, 방법을 고정해 수치를 재측정해 맞춘다.** 이 검증은 수치를 임의로 바꾸지 않고 **유도 명령과 재측정값을 병기**했다 — 발행값은 오너 결정 ⓒ 로 들어간 문장이라 지우지 않는다.
 - **H3 — `_ERRORS_WITHDRAWAL` 주석의 생산자 수**(두 → 셋). 이 검증이 정정했다(`867ba15`).
 
+- **★ H4 — 패턴 스윕이 *다섯째* 표면을 찾았다: `PUT /projects/{id}/brief`**(`routers/projects.py:211`). 응답이 `idempotent_replay` 를 싣는데([`routers/projects.py:218`](../../../services/application/app/routers/projects.py#L218)) `activity.record` 는 **무조건** 돈다 — D2=ⓑ 가 고친 수동 저장 경로와 **글자 그대로 같은 모양**이다. 검증 프로브 실측:
+
+  ```
+  first : 200 idempotent_replay=False rows=2
+  replay: 200 idempotent_replay=True  rows=3   ← +1 (project_brief_saved 2건)
+  ```
+
+  `git blame` → `d422bc4`(2026-08-09, *"서비스 활동 로그 — 저장·배선·조회 Phase 9 Slice 9.0"*) — **의도적 이탈이 아니라 D1·D2 이전의 기본값**이 그대로 남은 것이다.
+
+  **왜 이 검증이 고치지 않았는가**: §2(C1)의 502 표면은 **브리프 §D2 의 실측표가 명시 열거**했고 구현자가 그 축을 *다뤘다고 주장* 한 자리라 미시행분이 분명했다. 이 자리는 **어느 브리프도 열거한 적이 없다** — D2 의 뜻(*"재전송이 타임라인을 두 번 채우지 않는다"*)은 문자 그대로 여기에도 닿지만, 열거되지 않은 표면까지 검증자가 넓히는 것은 **오너 결정의 범위를 대신 늘리는 것**이다. 부채로 등재하고 오너에게 올린다(§Outstanding 4). 고치는 비용은 **한 줄 + 행위 셀 한 쌍**으로 D2 시행과 같다.
+
 ## Verdict
 
 **조건부 합격** — 조건 **C1**: 활동 로그 D2=ⓑ 가 계약이 열거한 넷째 표면(`writing/accept` 502 partial)에 시행되지 않아 replay 가 활동 행을 2건 남겼고, 그 자리를 D3=ⓐ 로 돌린 것은 **다른 endpoint 의 축을 가져온 오귀속**이다. **이 검증이 `867ba15` 로 닫았으므로 조건은 해소 상태이며, 합격 승격은 다음 독립 세션의 변이 재적용 몫이다.**
@@ -144,7 +155,8 @@ target_ids distinct: 1
 
 1. **★ 오너가 볼 것 — 구현자의 명시적 반대 판단을 이 검증이 뒤집었다.** 구현자는 네 자리에 *"502 partial 은 D3=ⓐ 로 별개 축"* 이라고 적었고, 이 검증은 그것을 오귀속으로 판정해 **D2=ⓑ 를 그 자리까지 시행**했다. 근거는 §2 (a)(b)(c) 다. 오너가 *"502 partial 은 그래도 replay 에도 행을 남겨라"* 로 보신다면 되돌릴 곳은 `867ba15` 한 커밋이다.
 2. **H2 의 발행 수치** — 유도 명령을 붙였지만 **발행된 분모 셋은 여전히 재현되지 않는다.** 원 측정을 한 세션(세션 76)만이 자기 분류 규칙을 안다. 수치를 재측정값으로 교체할지는 기록 정정 정책이 걸린 자리라 오너/후속 세션 몫으로 남긴다.
-3. 검증 기록 313 → **314건**.
+3. **★ 오너 결정 감 — D2=ⓑ 를 *열거되지 않은* 표면까지 넓히는가**(H4). `PUT /projects/{id}/brief` 가 같은 키 재전송에 `project_brief_saved` 를 2건 남긴다(실측). 갈래 둘 — **ⓐ 넓힌다**(라우터 한 줄 + 행위 셀 한 쌍 · 규칙이 진짜로 하나가 된다 · D2 의 뜻 그대로) · **ⓑ 열거된 넷으로 둔다**(비용 0 · 다만 같은 개념에 답이 다시 둘이 된다 — 이번 슬라이스가 없애려던 상태). **구현자 추천은 ⓐ** 지만, 브리프가 열거한 적 없는 축이라 검증자가 임의로 시행하지 않았다. ※ `analysis.py` 의 나머지 `activity.record` 자리들은 확인 결과 **멱등 키가 없거나**(후보 승격·확정·거부·편집은 상태 전이라 재전송이 409 로 걸린다) **이미 분기가 있다**(`analysis.py:497`·`analysis.py:994`) — 스윕에서 나온 실제 구멍은 이 하나다.
+4. 검증 기록 313 → **314건**.
 
 ## Reproduction
 
