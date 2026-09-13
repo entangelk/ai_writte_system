@@ -841,7 +841,7 @@ describe("App routes", () => {
       expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
         username: "bob",
         password: "long-enough-pw",
-        agreed_terms_version: "1.0",
+        agreed_terms_version: "1.1",
       });
       // "가입 완료"가 아니다 — 세션이 없으니 승인 전엔 들어갈 수 없다.
       expect(screen.queryByText(/가입 완료/)).toBeNull();
@@ -886,7 +886,7 @@ describe("App routes", () => {
       expect(fetchMock.mock.calls).toHaveLength(2);
       expect(fetchMock.mock.calls[1][0]).toBe("/api/auth/signup");
       expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({
-        agreed_terms_version: "1.0",
+        agreed_terms_version: "1.1",
       });
     });
 
@@ -915,7 +915,7 @@ describe("App routes", () => {
       // 푸터도 같은 이름의 링크를 들고 있으므로 확인란 안에서만 잰다.
       const consent = within(checkbox.closest("label") as HTMLElement);
       // 문구는 **어느 판본에** 동의하는지를 말한다(방침 제3조 — 동의의 대상).
-      expect(checkbox.closest("label")).toHaveTextContent(/버전 1\.0/);
+      expect(checkbox.closest("label")).toHaveTextContent(/버전 1\.1/);
       // 두 문서는 새 탭에서 열린다 — 폼 입력 보존.
       const terms = consent.getByRole("link", { name: "이용약관" });
       expect(terms).toHaveAttribute("href", "/terms");
