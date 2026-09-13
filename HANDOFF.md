@@ -167,9 +167,9 @@
 
 ## 열린 것 — 부채 · 결정 대기
 
-**⚠️ 오너 결정이 있어야 움직이는 것 — 2026-09-13 현재 0건**
+**⚠️ 오너 결정이 있어야 움직이는 것 — 2026-09-13 현재 2건 대기(브리프 미작성)**
 
-**표가 비었다.** 2026-09-13 에 오너가 대기 중이던 둘을 답했고 **같은 날 둘 다 시행됐다** — **활동 로그 D2=ⓑ**(replay 는 행을 안 남긴다 · 세 경로가 한 답, 브리프 [`activity-log-replay-and-partial-decisions.md`](docs/plans/activity-log-replay-and-partial-decisions.md) §D2 결정) · **파기 청구 뒤 탈퇴 취소 = ⓐ 409 거부**(D5 경계 시행, 브리프 [`slice5-withdrawal-cancel-after-purge-claim-decisions.md`](docs/plans/slice5-withdrawal-cancel-after-purge-claim-decisions.md) §결정).
+아래 표의 행은 전부 답을 받았다(마지막 2026-09-13). 2026-09-13 에 오너가 대기 중이던 둘을 답했고 **같은 날 둘 다 시행됐다** — **활동 로그 D2=ⓑ**(replay 는 행을 안 남긴다 · 세 경로가 한 답, 브리프 [`activity-log-replay-and-partial-decisions.md`](docs/plans/activity-log-replay-and-partial-decisions.md) §D2 결정) · **파기 청구 뒤 탈퇴 취소 = ⓐ 409 거부**(D5 경계 시행, 브리프 [`slice5-withdrawal-cancel-after-purge-claim-decisions.md`](docs/plans/slice5-withdrawal-cancel-after-purge-claim-decisions.md) §결정).
 
 > **★ 새 대기 항목이 생기면 브리프를 먼저 쓰고 여기 한 줄로 올린다.** 그리고 **브리프에 추천이 있고 그것이 기존 결정의 뜻을 잇는 것이면 묻지 말고 그대로 진행한다** — 2026-09-13 에 오너가 그 셋을 *"당연한 것들"* 로 지적했다. 진짜로 물어야 하는 것은 **오너만 가진 정보**가 필요한 때다: 법률 문언 · 제품 방향 · 돈 쓰는 선택 · 외부 서비스 승인 여부 · 트리거가 실제로 왔는지.
 
@@ -190,6 +190,8 @@
 | 활동 로그 replay 축 D2(09-13) | **ⓑ — replay 는 행을 안 남긴다**(세 경로가 한 답) · 시행 완료 | [`activity-log-replay-and-partial-decisions.md`](docs/plans/activity-log-replay-and-partial-decisions.md) §D2 결정 |
 | 파기 청구 뒤 탈퇴 취소(09-13) | **ⓐ — 기존 409 에 합류**(D5 경계 시행 · 표식은 안 지운다) · 시행 완료 | [`slice5-withdrawal-cancel-after-purge-claim-decisions.md`](docs/plans/slice5-withdrawal-cancel-after-purge-claim-decisions.md) §결정 |
 | 압축 층(09-09) | **D1=파생+트리거 · D2=챕터 드릴다운 · D3=정본이 바뀔 때(D4 에 흡수) · D4=A · D5=A선 · D6=정본 16건** — 구현은 트리거 대기 | [`context-compaction-layer-decisions.md`](docs/plans/context-compaction-layer-decisions.md) |
+
+**★ 같은 날 독립 검증(세션 79)이 대기 둘을 새로 만들었다** — 둘 다 브리프가 아직 없어(위 규칙: 브리프 먼저 쓰고 이 표에 한 줄) 🔧 미수리 표·검증 기록 §Outstanding 에 실려 있다: **H4** — 다섯째 replay 표면 `PUT /projects/{id}/brief` 를 D2=ⓑ 에 넓힐지(**ⓐ** 넓힌다 · 구현자 추천 / **ⓑ** 열거된 넷으로 둔다) · **옛 해시 구간별 분모 수치 교체** 여부(재측정 `1/371`·`229/239`·`69/70` — 분자·경계는 재현, 결론 무변).
 
 
 **🔧 미수리 — 알고 있고 아직 안 고친 것**
@@ -287,7 +289,7 @@
 >
 > **★★ 랜딩 축 ③(본문)과 ④(가입 동의 게이트)가 2026-09-12 에 구현됐다(SoT v1.8.59 · 아래 10·12번).** **Slice 4b(관리자 잔여 정리)도 2026-09-12 구현이 끝나 계정 탈퇴 구현 축은 전부 닫혔다** — ~~남은 구현 축은 5번(최종 저장 6차 재검증)뿐이다. Slice 5·4b 의 **판정 승격은 다음 검증 세션 몫**이다.~~ **5번을 포함한 승격 재검 넷(L3·Slice 5·4b·최종 저장)이 같은 날 세션 73(독립 승격 재검)이 전부 합격으로 올렸다 — 검증 대기 축이 없다.**
 >
-> **★★ "결정이 만든 작은 후속 둘"도 2026-09-12 에 닫혔다(세션 72 · SoT v1.8.64 — 아래 표 마지막 행).** 그래서 **오너 결정이 이미 끝난 미구현 축은 남아 있지 않다.** 다만 그 슬라이스가 **오너 결정 대기를 한 건 새로 만들었다**(활동 로그 D2 — 위 ⚠️ 표). **★ 승격 재검증 백로그 넷(랜딩 L3 · Slice 5 · Slice 4b · 최종 저장 6차)은 같은 날 세션 73(독립 승격 재검)이 변이 재적용으로 전부 닫았다** — 각 축의 판정이 합격으로 승격됐다(아래 표 3·5행·맨 아래 행·[`landing_l3_closure_promotion.md`](docs/verifications/2026-09-12/landing_l3_closure_promotion.md)). ~~**새 검증 백로그는 하나** — 세션 72 슬라이스의 독립 검증 [`activity_replay_and_dormant_docs.md`](docs/verifications/2026-09-12/activity_replay_and_dormant_docs.md) 조건부 합격(C1: replay 세 갈래 중 둘 무셀)**의 폐쇄·승격**이다.~~ **완료(2026-09-12)** — C1 폐쇄는 `70efc23`·`d6e381e`(SoT v1.8.65), **판정 승격은 세션 74 승격 재검** [`activity_replay_c1_promotion.md`](docs/verifications/2026-09-12/activity_replay_c1_promotion.md) **합격**(변이 재적용 열세 회). **★ 그 승격을 다시 독립 감사했다**(같은 날 · [`activity_replay_c1_promotion_audit.md`](docs/verifications/2026-09-12/activity_replay_c1_promotion_audit.md)) — 변이 열한 종 재현 **전건 일치**, 조건 **AC1**(선행 기록 *본문* 판정 줄이 인덱스와 갈라져 있었다)은 **같은 날 폐쇄**했고 정정 셋(HP-1 근거·MP-6 결론·낡은 수치)을 반영했다. **그 감사 기록의 판정 승격만 다음 검증 세션 몫이다** — 조건을 닫은 세션이 자기 판정을 못 올린다. **완료(2026-09-13, 세션 77)** — 승격 재검 [`activity_replay_ac1_promotion.md`](docs/verifications/2026-09-13/activity_replay_ac1_promotion.md) **합격**(변이 재적용 열 회 전건 일치 · 인덱스 311행 전수 대조 병 0건). **검증 승격 백로그는 이제 비어 있다.**
+> **★★ "결정이 만든 작은 후속 둘"도 2026-09-12 에 닫혔다(세션 72 · SoT v1.8.64 — 아래 표 마지막 행).** 그래서 **오너 결정이 이미 끝난 미구현 축은 남아 있지 않다.** 다만 그 슬라이스가 **오너 결정 대기를 한 건 새로 만들었다**(활동 로그 D2 — 위 ⚠️ 표). **★ 승격 재검증 백로그 넷(랜딩 L3 · Slice 5 · Slice 4b · 최종 저장 6차)은 같은 날 세션 73(독립 승격 재검)이 변이 재적용으로 전부 닫았다** — 각 축의 판정이 합격으로 승격됐다(아래 표 3·5행·맨 아래 행·[`landing_l3_closure_promotion.md`](docs/verifications/2026-09-12/landing_l3_closure_promotion.md)). ~~**새 검증 백로그는 하나** — 세션 72 슬라이스의 독립 검증 [`activity_replay_and_dormant_docs.md`](docs/verifications/2026-09-12/activity_replay_and_dormant_docs.md) 조건부 합격(C1: replay 세 갈래 중 둘 무셀)**의 폐쇄·승격**이다.~~ **완료(2026-09-12)** — C1 폐쇄는 `70efc23`·`d6e381e`(SoT v1.8.65), **판정 승격은 세션 74 승격 재검** [`activity_replay_c1_promotion.md`](docs/verifications/2026-09-12/activity_replay_c1_promotion.md) **합격**(변이 재적용 열세 회). **★ 그 승격을 다시 독립 감사했다**(같은 날 · [`activity_replay_c1_promotion_audit.md`](docs/verifications/2026-09-12/activity_replay_c1_promotion_audit.md)) — 변이 열한 종 재현 **전건 일치**, 조건 **AC1**(선행 기록 *본문* 판정 줄이 인덱스와 갈라져 있었다)은 **같은 날 폐쇄**했고 정정 셋(HP-1 근거·MP-6 결론·낡은 수치)을 반영했다. **그 감사 기록의 판정 승격만 다음 검증 세션 몫이다** — 조건을 닫은 세션이 자기 판정을 못 올린다. **완료(2026-09-13, 세션 77)** — 승격 재검 [`activity_replay_ac1_promotion.md`](docs/verifications/2026-09-13/activity_replay_ac1_promotion.md) **합격**(변이 재적용 열 회 전건 일치 · 인덱스 311행 전수 대조 병 0건). **검증 승격 백로그는 비어 있다가 같은 날 세션 79 가 하나 다시 만들었다** — 오너 결정 셋 독립 검증 [`owner_decision_set_d2_and_purge_cancel.md`](docs/verifications/2026-09-13/owner_decision_set_d2_and_purge_cancel.md) **조건부 합격**(조건 C1 을 같은 세션이 폐쇄)의 승격이 **다음 독립 세션 몫**이다(M14·M15 재적용이 확증 재료).
 >
 > | 순서 | 무엇 | 왜 이 순서인가 |
 > |---|---|---|
