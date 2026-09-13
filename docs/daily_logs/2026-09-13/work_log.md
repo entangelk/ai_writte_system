@@ -490,4 +490,74 @@ D5 의 경계(*"파기 실행 전까지"*)가 **처음으로 시행된다**. 종
 - **오너에게 보고**: ① 분석 retry 500 결함(analysis 어댑터 경계 정규화 누락 — 코드 수정은 별도 슬라이스/브리프 필요 여부 판단) ② 분석 run의 120s 프록시 타임아웃 초과 ③ 데모 데이터·계정(`portfolio_demo`)이 로컬 Mongo에 남아 있음(삭제 원하면 계정 탈퇴 경로 사용).
 - 원고 작업공간 GIF에서 Gate 평가 탭은 role 셀렉터 불일치로 미포함 — 후속 GIF에 넣을 때 `aria-label` 기반으로 잡을 것.
 
+## 세션 85 — 세션 84 산출물 보강: 사실 정정 셋 + 진입 경로 · 패턴 스윕 재수행 (오너 지시 "검증이라기 보다는 작업한 부분에 미흡한 부분이 있다면 보강해줘")
+
+### Goals
+
+- 세션 84가 낸 문서(README 두 절 · `docs/architecture.md`)의 **주장 리터럴을 코드·테스트에 전수 대조**한다.
+- 포트폴리오 축의 **도달성** 점검 — 새 문서가 평가자 경로에서 실제로 닿는가.
+- 세션 84가 남긴 결함 기록의 **패턴 스윕을 CLAUDE.md §4 범위(저장소 전역)로 다시 돌린다.**
+
+### Completed work
+
+#### 1. 문서 사실 정정 셋 + 진입 경로 (`1440cb7`)
+
+전수 대조 결과 **틀린 리터럴 둘 · 미흡 셋**이었고, 나머지 주장은 전부 코드와 일치했다(아래 §대조표).
+
+| 자리 | 종전 | 정정 | 근거 |
+|---|---|---|---|
+| `architecture.md` §7 | 공개 API **87** operation | **107**(project 76 · admin 19 · 나머지 공개·인증 전용) | `tests/test_auth_api.py:2294` tier 핀 · HANDOFF §50-51. 87은 2026-08-23 값인데 문서 머리는 기준 시점을 **2026-09-13**으로 선언한다 — 날짜 단서 없는 낡은 수라 자기 선언과 어긋난다 |
+| `architecture.md` §8 | 트랙별 인덱스 **118건** | **140건**(그중 착수 결정 브리프 118) | `docs/plans/README.md:9` — 118은 전체가 아니라 `*-decisions.md` 부분집합이다 |
+| `architecture.md` §6 | 배포 뷰 9행 | 워커 셋(포트 없음) 행 추가 → compose **11 서비스**가 표에서 닫힌다 | `docker-compose.yml` 서비스 열거. 종전 표는 §4 컨테이너 뷰에 그려 둔 워커 셋을 배포 뷰에서 빠뜨려 두 뷰가 어긋났다 |
+| 컨테이너 뷰 노드(양쪽) | `index_sync worker` | `worker (index_sync)` | compose 서비스명은 `worker` 다 — 배포 뷰 문서에서 실재하지 않는 이름은 읽는 사람을 `docker compose logs` 에서 헛돌게 한다 |
+| `portfolio.md` | architecture.md 링크 **0건** | 5분·30분 읽기 경로 + 증거 지도에 연결 | README가 *"채용·평가 목적이면 portfolio.md부터"* 로 평가자를 보내는데, 그 문서에서 신규 아키텍처 그림에 닿는 경로가 없었다 |
+
+오탈자 둘도 함께(`나머지 전부은` · `이 README과`).
+
+#### 2. ★ 패턴 스윕 재수행 — 같은 결함이 **한 자리 더** 있다 (미수선, 등재)
+
+세션 84의 스윕은 *"analysis 컬렉션의 datetime 노출"* 로 범위를 좁혀 돌았다(그 범위 안에서는 결론이 맞다). CLAUDE.md §4가 요구하는 범위는 **저장소 전역의 같은 근본원인 패턴**이고, 그렇게 다시 돌리자 쌍둥이가 나왔다.
+
+- **[`writing/generation_job_mongo.py:193`](../../../services/application/app/writing/generation_job_mongo.py#L193)** — `_entry()` 가 `failed_at=doc.get("failed_at")` 을 경계 정규화 없이 싣는다(analysis 와 **한 글자도 다르지 않다**).
+- 소비처 [`writing/generation_job.py:438`](../../../services/application/app/writing/generation_job.py#L438) `mark_pending_for_retry` → `cooldown_remaining(job.failed_at, self._clock())` → aware `now` 와 naive 를 뺀다.
+- 도달 경로: **`POST /projects/{project_id}/writing/generation-jobs/{job_id}/retry`**([`routers/writing.py:572`](../../../services/application/app/routers/writing.py#L572)) — analysis retry 와 같은 모양의 **500**. 비동기(medium·long) 생성 잡의 실패 회복 경로 전체가 여기에 걸린다.
+- **`git blame` 이 결정적이다**: 두 자리와 소비처 `retry_policy.py:48` 이 **전부 같은 커밋 `63b6c0d`**(2026-09-05, S-1 D2 재시도 쿨다운 슬라이스)다. 한 슬라이스가 두 어댑터에 같은 누락을 동시에 심었다 — "버그는 혼자 오지 않는다"의 교과서적 사례이고, 한쪽만 고치면 나머지 절반이 남는다.
+
+**전역 스윕의 나머지 결과(음성 확인)** — Mongo 어댑터 28개 중 경계 정규화가 없는 것은 7개이고, 그중 **파이썬 쪽 시각 연산에 들어가는 것은 위 두 자리뿐**이다.
+
+| 어댑터 | 정규화 | 판정 |
+|---|---|---|
+| `indexing/mongo_repository.py` | `_to_utc_datetime` (이름만 다름) | 안전 |
+| `context_search/gate_findings_mongo.py` · `observability/llm_call_audit_mongo.py` · `writing/loop_audit_mongo.py` · `writing/scratch_mongo.py` | 없음 | `created_at`·`terminal_at` 뿐 — 파이썬 산술 없음(직렬화·정렬만). **naive 로 나가면 `Z` 표기가 빠지므로** 이 값들이 응답에 실리게 될 때 함께 본다 |
+| `writing/generation_job_mongo.py`(claimed_at·created_at) | 없음 | claim lease 비교는 **Mongo 쿼리 쪽**(BSON)이라 안전. 파이썬 비교는 in-memory 저장소 경로뿐 |
+| 그 외 21개 | `replace(tzinfo=UTC)` 계열 있음 | 안전 |
+
+파이썬 쪽에서 Mongo 시각과 산술하는 자리는 저장소 전역에 `retry_policy.py:48` **하나**이고(`quota/policy.py:162` 의 anchor 는 정규화된 어댑터에서 온다), 그래서 이 결함의 표면은 정확히 **두 retry 엔드포인트**로 닫힌다.
+
+### 세션 84 주장 대조표 — 정정하지 않은 것들(전부 일치 확인)
+
+| 주장 | 실측 |
+|---|---|
+| `LlmCallSite` 9종 · 표의 9행 이름 | `observability/llm_call_audit.py:42` 열거 9개 — 리터럴까지 일치 |
+| bounded 루프 수정 2회 · 추가 검색 1회 · 게이트 3회 | `writing/revise_gate.py:113-115` (`2`·`1`·`3`) |
+| 재시도 2회 · 냉각 60초 | `retry_policy.py:20,23` |
+| 실패 8종 taxonomy `INVALID_REQUEST … INTERNAL` | `generation_job.py:60` 열거 8개, 양 끝 이름 일치 |
+| quota 일 20 / 주 100 | `quota/policy.py:52-53` |
+| 포트·바인드 9행 전부 | `docker-compose.yml` 실측 일치(제품 표면 둘만 `0.0.0.0`) |
+| Mongo 단일 노드 replica set | `docker-compose.yml:7` `--replSet rs0` |
+| 추출 1회 + 실패 시 repair 1회 | `analysis/extractor.py:143,150` `_repair_once` |
+| SoT `v1.8.68` | `system-contract-sot.md:4` |
+| 링크·앵커 전건 | README·architecture·docs/README·portfolio 4문서 교차 해석 0 실패 |
+
+### Verification
+
+- 문서 가드 `tests/test_docs_indexes.py` + `tests/test_repo_hygiene.py` **29 passed / 962 subtests** — 세션 84 기준선과 동일(문서 수·링크 무변, 정정은 본문 리터럴).
+- 링크·앵커 검사기를 따로 돌렸다(가드는 `.md` 경로만 보고 `#앵커` 는 떼고 본다) — 4문서의 상대 링크·섹션 앵커 **전건 해석**, 0 실패. 세션 84가 새로 심은 상호 참조 앵커 셋(`#어떻게-풀었는가--llm-오케스트레이션-한눈에` 등)이 실제로 문다.
+- **코드 무변** — 이 세션은 문서만 고쳤다. §2의 결함은 등재만 하고 수선하지 않았다(오너 판단 대기).
+
+### Next steps
+
+- **오너 결정 대기 — 재시도 500 수선 슬라이스**: 두 자리(`analysis/mongo_repository.py:317` · `writing/generation_job_mongo.py:193`)에 저장소 선례(`_aware()`)를 적용하고 **양방향 회귀**를 단다 — under: naive `failed_at` 을 심은 문서로 retry 를 부르면 재실패 / over: 정규화가 쿨다운 **판정 자체**를 무르게 하지 않는지(냉각 중이면 여전히 429). 두 자리를 한 슬라이스로 묶는 근거는 `git blame` 동일 커밋이다.
+- 추적 부채(세션 84 밖의 선재 드리프트, 이번에 안 건드림): `docs/portfolio.md` §3·§7 은 **2026-08-25 스냅숏**을 문서 머리에서 선언하고 있으나 그 뒤로 값이 움직였다 — compose 서비스 10→**11**(`withdrawal_worker` 2026-09-09 추가), operation 87→**107**, SoT v1.8.4→**v1.8.68**, 결정 브리프 93→118. 스냅숏 규약상 거짓은 아니지만 이제 `architecture.md` 와 나란히 읽히므로 **기준일 갱신 슬라이스**가 필요하다.
+
 
