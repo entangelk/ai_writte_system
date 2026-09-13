@@ -232,9 +232,11 @@ _ERRORS_400_404: dict[int | str, dict] = _protected({
 })
 
 
-# 계정 탈퇴 셀프 경로(Slice 1). 409 는 **두 생산자**를 갖는다 — 마지막 활성
-# 관리자의 탈퇴 요청(D6, `deactivate_user` 와 같은 인구 불변식)과 탈퇴 중이 아닌
-# 계정의 취소다. 둘을 상태코드로 가르지 않는 것은 H3 계약 그대로다(`detail` 은
+# 계정 탈퇴 셀프 경로(Slice 1). 409 는 **세 생산자**를 갖는다 — 마지막 활성
+# 관리자의 탈퇴 요청(D6, `deactivate_user` 와 같은 인구 불변식) · 탈퇴 중이 아닌
+# 계정의 취소 · **파기가 청구된 뒤의 취소**(오너 2026-09-13, 브리프
+# `slice5-withdrawal-cancel-after-purge-claim-decisions.md` ⓐ — 셋째가 2026-09-13 에
+# 합류했다). 셋을 상태코드로 가르지 않는 것은 H3 계약 그대로다(`detail` 은
 # 사람용이고 화면은 문자열로 분기하지 않는다). 403 은 **없다** — 경로가 대상을
 # 지목하지 않아 남의 계정을 요청할 방법 자체가 없다(S-3 와 같은 성질).
 _ERRORS_WITHDRAWAL: dict[int | str, dict] = _protected({

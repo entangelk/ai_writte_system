@@ -1337,12 +1337,29 @@ def register_writing(
                 # ★ 상태코드가 아니라 **정본이 바뀌었는가**로 기록한다(A7=A). 이
                 # 경로는 version 이 저장된 뒤 분석 job 만 실패한 자리이므로, 여기서
                 # 안 남기면 타임라인이 실제로 일어난 저장을 빠뜨린다.
-                activity.record(
-                    project_id=project_id, actor_user_id=current.id,
-                    action="draft_version_accepted", target_type="draft_version",
-                    target_id=exc.saved.draft_version.id,
-                    after=str(exc.saved.draft_version.version_number),
-                )
+                # 활동 로그 D2=ⓑ(오너 2026-09-13)는 **이 분기에도 닿는다** — 같은
+                # 축의 같은 물음(*아무것도 바꾸지 않은 재생이 행을 남기는가*)이고,
+                # 브리프 §D2 의 실측표가 세 표면 중 하나로 `writing/accept`(502
+                # partial)을 **명시적으로 열거**했다. replay 는 `_replay()` 가 돌려준
+                # 기존 version 위에서 `_create_job` 만 실패한 자리라 **정본이 바뀌지
+                # 않았다**(같은 `draft_version.id`) — A7=A 의 기록 조건 자체가 안 선다.
+                # ★ D3=ⓐ 는 이 자리가 아니다 — D3 은
+                # `analysis/jobs/{id}/auto-promote` 의 503 partial(행이 **하나도**
+                # 안 남는 침묵)을 다루는 다른 endpoint 의 축이다. v1.8.66 이 이 분기를
+                # D3 으로 돌린 것은 오귀속이었고 독립 검증 2026-09-13 이 실측으로
+                # 갈랐다(같은 키 2회 → 502·502 · 저장 version 1개 · 활동 행 **2건**).
+                # ★ 이 분기는 전수 가드가 못 본다 — 같은 handler 에 기록 분기가 둘이라
+                # 소스 스캔은 성공 분기 하나로 만족된다. 잠그는 것은 행위 셀 둘이다
+                # (`test_a_partial_accept_still_records_the_saved_version` 이 첫 요청을,
+                # `test_a_replayed_partial_accept_leaves_no_second_row` 가 재전송을).
+                if not exc.saved.idempotent_replay:
+                    activity.record(
+                        project_id=project_id, actor_user_id=current.id,
+                        action="draft_version_accepted",
+                        target_type="draft_version",
+                        target_id=exc.saved.draft_version.id,
+                        after=str(exc.saved.draft_version.version_number),
+                    )
                 return JSONResponse(status_code=502, content={
                     "accepted": True,
                     "intent": exc.intent.value,
@@ -1369,7 +1386,8 @@ def register_writing(
         # 않은 재생**이므로 행을 남기지 않는다 — D1=ⓑ(finalize)와 같은 규칙이다.
         # ★ 이 브리프의 원래 근거(*"accept 는 이미 replay 를 안 남긴다"*)는 거짓이었고
         # (2026-09-12 실측 — accept 도 2건), 그 탓에 같은 개념에 답이 셋이었다. D2=ⓑ 가
-        # 그 셋을 하나로 모은다. 위 502 partial 경로는 **D3=ⓐ 로 별개 축**이다.
+        # 그 셋을 하나로 모은다. 위 502 partial 경로도 **같은 답**이다(독립 검증
+        # 2026-09-13 정정 — v1.8.66 이 그 자리를 D3=ⓐ 로 돌렸던 것은 오귀속이다).
         # ★ 이 분기는 전수 가드가 못 본다 — 잠그는 것은 `test_writing_accept.py` 의
         # 행위 셀 둘(첫 accept 는 남긴다 · 재전송은 안 남긴다)이다.
         if result.saved is not None and not result.idempotent_replay:

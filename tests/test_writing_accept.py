@@ -448,6 +448,51 @@ class WritingAcceptApiTest(unittest.TestCase):
         )
         asyncio.run(client.aclose())
 
+    def test_a_replayed_partial_accept_leaves_no_second_row(self):
+        """★ 활동 로그 D2=ⓑ 는 **502 partial 분기에도 닿는다**(독립 검증 2026-09-13).
+
+        v1.8.66 은 이 분기를 *"D3=ⓐ 로 별개 축"* 이라며 안 건드렸는데 **오귀속이다**
+        — D3 은 `analysis/jobs/{id}/auto-promote` 의 503 partial(행이 하나도 안 남는
+        **침묵**)을 다루는 다른 endpoint 의 축이고, 이 자리는 D2 브리프 §D2 의 실측표가
+        *세 표면 중 하나*로 `writing/accept`(502 partial) 를 **명시적으로 열거**한
+        바로 그 자리다. 폐쇄 전 실측: 같은 키 2회 POST → 502·502 · 저장 version **1개**
+        · 활동 행 **2건**(형제 200 경로가 잠긴 뒤에도 남아 있던 마지막 무셀이다).
+
+        under-strict: `routers/writing.py` 의 502 분기에서
+        `if not exc.saved.idempotent_replay:` 를 벗기면(= 결함 재도입) 여기가 재실패
+        한다. **전수 가드는 못 본다** — 같은 handler 에 기록 분기가 둘이라 소스 스캔은
+        성공 분기 하나로 만족된다(형제 셀 docstring 이 그 실측을 적어 두었다).
+
+        over-strict 짝은 `test_a_partial_accept_still_records_the_saved_version`
+        (첫 partial 은 계속 행을 남기고 action·target_id 까지 잠근다)이다 — 한쪽만
+        두면 *"이 분기는 아무것도 기록 안 함"* 이 전건 통과한다.
+
+        ★ **저장 version 이 같다는 것을 함께 단정한다.** 502 partial envelope 은
+        `idempotent_replay` 키를 싣지 않으므로(§응답 키 셀) *재전송이 수렴했다* 를
+        말하는 공개 신호는 `saved.draft_version_id` 동일뿐이다. 그것이 없으면 이 셀은
+        *"두 번째 요청이 새 version 을 안 만들고 그냥 실패했다"* 와 구분되지 않는다.
+        """
+        repo = InMemoryActivityLogRepository()
+        client, project, draft, base, _ = self._setup(
+            analysis=_FailingAnalysis(InMemoryAnalysisRepository()),
+            activity_repo=repo)
+
+        first = self._post(client, project, draft, base.draft_version.id)
+        self.assertEqual(first.status_code, 502)
+        before = len(repo.events)
+
+        again = self._post(client, project, draft, base.draft_version.id)
+
+        self.assertEqual(again.status_code, 502)
+        self.assertEqual(
+            again.json()["saved"]["draft_version_id"],
+            first.json()["saved"]["draft_version_id"],
+            "재전송이 같은 version 으로 수렴하지 않았다면 이 셀은 replay 를 재고 "
+            "있는 것이 아니다",
+        )
+        self.assertEqual(len(repo.events), before)
+        asyncio.run(client.aclose())
+
     def test_a_bounced_accept_is_not_recorded(self):
         """over-strict — Gate 가 거부하면 저장이 없고, 저장이 없으면 기록도 없다.
 

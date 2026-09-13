@@ -106,13 +106,18 @@ D1 과 같은 병이 **더 넓은 자리**에 있다. 실측(검증자 프로브
 
 **오너가 ⓑ 를 골랐다.** 근거(오너 발화 요지): *"재시도가 사용자에게 보일 필요가 없다 — 쿼터에서 줄어드는 것도 아닌데"*. 즉 replay 행이 회원에게 주는 정보가 없고, 과금 축과도 무관하다(replay 는 provider 호출이 없어 차감되지 않는다 — HANDOFF §quota). **ⓒ 의 스키마 비용은 표본 없이 치를 이유가 없다**는 §추천의 판단은 유지된 채로, ⓐ 가 남기던 *"같은 개념에 답이 셋"* 이 해소됐다.
 
-시행: `routers/writing.py` 의 accept 기록에 `and not result.idempotent_replay` · `routers/drafts.py` 의 저장 기록을 `if not result.idempotent_replay:` 로 감쌈. **502 partial 경로는 D3=ⓐ 로 별개 축**이라 건드리지 않았다.
+시행: `routers/writing.py` 의 accept 기록에 `and not result.idempotent_replay` · `routers/drafts.py` 의 저장 기록을 `if not result.idempotent_replay:` 로 감쌈.
 
-| 경로 | replay 처분 | 잠그는 셀 |
-|---|---|---|
-| `drafts/{id}/finalize` | **행 없음** | `test_activity_api.py::test_resending_the_same_final_save_key_leaves_no_second_row` |
-| `writing/accept` | **행 없음** | `test_writing_accept.py::test_resending_the_same_accept_key_leaves_no_second_row` |
-| `drafts/{id}/versions`(수동 저장) | **행 없음** | `test_activity_api.py::test_resending_the_same_save_key_leaves_no_second_row` |
+**⚠️ 시행이 한 표면을 빠뜨렸고 독립 검증(2026-09-13)이 닫았다.** 위 문장은 원래 *"**502 partial 경로는 D3=ⓐ 로 별개 축**이라 건드리지 않았다"* 로 이어졌는데 **오귀속이었다** — D3 은 `analysis/jobs/{id}/auto-promote` 의 **503** partial(행이 **하나도** 안 남는 침묵)을 다루는 **다른 endpoint** 의 축이고, `writing/accept` 의 502 partial 은 **이 브리프 §D2 의 실측표가 세 표면 중 하나로 명시적으로 열거한** 자리다(*"`writing/accept`(성공)·`writing/accept`(502 partial)·`drafts/{id}/versions` 셋 다 3회 POST → 이벤트 3건 / 대상 1개"*). 검증 프로브 실측: 같은 키 2회 POST → **502·502 · 저장 version 1개 · 활동 행 2건**. 즉 ⓑ 가 없애려던 바로 그 중복이 한 자리에 남아 있었다. 원문은 그때의 판단이라 지우지 않고 여기 표식을 단다(이력 문서 규칙).
+
+| 경로 | replay 처분 | 잠그는 셀(under) | 짝(over) |
+|---|---|---|---|
+| `drafts/{id}/finalize` | **행 없음** | `test_activity_api.py::test_resending_the_same_final_save_key_leaves_no_second_row` | `test_activity_api.py::test_the_first_final_save_is_recorded` |
+| `writing/accept`(성공) | **행 없음** | `test_writing_accept.py::test_resending_the_same_accept_key_leaves_no_second_row` | `test_writing_accept.py::test_a_saved_accept_is_recorded_in_the_activity_log` |
+| `writing/accept`(502 partial) | **행 없음**(2026-09-13 검증 보강) | `test_writing_accept.py::test_a_replayed_partial_accept_leaves_no_second_row` | `test_writing_accept.py::test_a_partial_accept_still_records_the_saved_version` |
+| `drafts/{id}/versions`(수동 저장) | **행 없음** | `test_activity_api.py::test_resending_the_same_save_key_leaves_no_second_row` | `test_activity_api.py::test_saving_a_draft_version_records_who_and_when` |
+
+**네 표면이 한 답을 말한다** — 한 handler 안에 기록 분기가 둘인 `writing/accept` 가 표에서 두 행인 이유는 **전수 가드가 분기를 못 보기 때문**이다(소스 스캔은 `activity.record(` 의 *존재* 만 본다 — 성공 분기가 남아 있으면 502 분기를 통째로 지워도 초록이다, 2026-08-09 실측). 기록 분기마다 행위 셀 한 쌍이 필요하다.
 
 **특성 셀 둘이 예고대로 뒤집혔다** — 둘 다 docstring 이 *"오너가 D2=ⓑ 를 고르면 이 셀이 함께 뒤집힌다"* 고 적어 둔 자리였고, 이름도 `..._still_records_a_second_row` → `..._leaves_no_second_row` 로 바뀌었다. 2026-09-12 에 HP-1 하드닝으로 더했던 replay 행의 `action`·`target_type` 단정은 **행 자체가 사라져 함께 걷혔고**, 그 축은 over-strict 짝(`test_saving_a_draft_version_records_who_and_when`)이 계속 잠근다.
 
