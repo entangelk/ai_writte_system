@@ -39,7 +39,7 @@ flowchart LR
 ```
 
 LAN에 열리는 것은 인증 뒤의 제품 표면(frontend 5520 · application 8520)뿐이고, 모델 서버
-(llama override의 9080)는 내용이 아닌 연산을 제공한다. 나머지 전부은 loopback이다(§6).
+(llama override의 9080)는 내용이 아닌 연산을 제공한다. 나머지 전부는 loopback이다(§6).
 
 ## 4. 컨테이너 뷰 — 무엇이 어디에 붙어 있나
 
@@ -58,7 +58,7 @@ flowchart TB
         direction LR
         gateway["llm_gateway :8521\n키 회전 · 모델 폴백 · 창 가드"]
         gworker["generation_worker\n비동기 생성 잡 (medium·long)"]
-        iworker["index_sync worker\noutbox → 색인 drain"]
+        iworker["worker (index_sync)\noutbox → 색인 drain"]
         wworker["withdrawal_worker\n탈퇴 30일 종료 파기"]
     end
 
@@ -176,6 +176,11 @@ generation_worker가 Mongo에서 잡을 원자적으로 claim해 §5-1과 같은
 | elasticsearch | 9520 | `127.0.0.1` | 내부 |
 | mongo | 27520 | `127.0.0.1` | 내부 — 정본 |
 | admin | (없음) | — | nginx `/api/admin/` 경로로만 도달 |
+| worker · generation_worker · withdrawal_worker | (없음) | — | 포트를 아예 게시하지 않는다 — 들어오는 요청이 없고 Mongo에서 잡을 claim 해 간다 |
+
+compose 서비스는 이 표의 **11개**가 전부다(워커 셋 포함). 워커에 health 포트가 없는 것은 누락이
+아니라 결정이다 — 관측 채널은 재시작과 pass 당 stdout JSON이고, 각 sink 호출이 자기
+request timeout 으로 묶여 있어 루프가 무한정 걸리지 않는다(`docker-compose.yml` worker 절 G1=A).
 
 이 분류는 취향이 아니라 **오너 결정으로 정본에 박힌 계약**(SoT v1.7.75)이며
 [`tests/test_compose_exposure.py`](../tests/test_compose_exposure.py)가 compose 파일을 읽어
@@ -186,7 +191,9 @@ generation_worker가 Mongo에서 잡을 원자적으로 claim해 §5-1과 같은
 
 - **관측** — LLM을 부르는 호출부 **9종**(`LlmCallSite` = 어댑터 수)이 표준 감사 레코드를 남기고
   KPI로 집계된다. 실패한 호출도 센다. 계약은 SoT "LLM 파이프라인 관측(KPI)" 절.
-- **인증·소유권** — 공개 API 87 operation 전부가 인증 tier·소유권·에러 선언 전수 가드 아래.
+- **인증·소유권** — 공개 API **107 operation**(project tier 76 · admin 19 · 나머지는 공개·인증
+  전용) 전부가 인증 tier·소유권·에러 선언 전수 가드 아래다 — tier 핀의 정본은
+  [`tests/test_auth_api.py`](../tests/test_auth_api.py)이고 그 수는 거기서 다시 잴 수 있다.
   관리자 표면은 별도 주소로 분리돼 제품 앱에는 관리 라우트가 없다.
 - **quota** — 유료 경로는 요청 단위 과금(일 20/주 100 기본, 관리자 정책 행으로 무제한 가능).
   생성 잡은 성공 시에만 과금.
@@ -195,7 +202,7 @@ generation_worker가 Mongo에서 잡을 원자적으로 claim해 §5-1과 같은
 ## 8. 결정 기록
 
 이 문서의 모든 그림 뒤에는 결정 브리프가 있다 — [`plans/README.md`](plans/README.md)
-(트랙별 인덱스 118건). 특히:
+(트랙별 인덱스 140건, 그중 착수 결정 브리프 118건). 특히:
 - 검색 계층 전반 — [`plans/04-agentic-search.md`](plans/04-agentic-search.md) 계열
 - bounded 루프 예산 — [`benchmarks/2026-07-15/writing_loop_per_stage_ceiling_q4.md`](benchmarks/2026-07-15/writing_loop_per_stage_ceiling_q4.md)(실측에서 유도)
 - 노출 경계 — [`plans/auth-d8-7-infra-auth-decisions.md`](plans/auth-d8-7-infra-auth-decisions.md)

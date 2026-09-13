@@ -70,19 +70,23 @@
 ## 4. 시간 예산별 읽기 경로
 
 **5분 — 무엇인지만**
-1. [`../README.md`](../README.md) 상단의 세 축 표.
-2. [`product-overview.md`](product-overview.md) §1~4(문제·원칙·MVP 도달점).
-3. 이 문서 §1~3.
+1. [`../README.md`](../README.md) 상단의 세 축 표 + 화면·동작 녹화.
+2. 같은 README의 **["어떻게 풀었는가 — LLM 오케스트레이션 한눈에"](../README.md#어떻게-풀었는가--llm-오케스트레이션-한눈에)**
+   그림 하나 — 기억이 쌓이는 쪽과 쓰이는 쪽, 그리고 LLM을 부르는 9개 호출부가 한 장에 있다.
+3. [`product-overview.md`](product-overview.md) §1~4(문제·원칙·MVP 도달점).
+4. 이 문서 §1~3.
 
 **30분 — 작업 방식까지 (권장)**
-1. 최상위 [`README.md`](../README.md)의 **"개발 — 어떻게 만들어졌는가"** 축 전체(절차 표 +
+1. [`architecture.md`](architecture.md) — arc42 축약형(컨텍스트·컨테이너·런타임·배포 뷰).
+   "무엇이 어디에 붙어 있고 한 번 이어쓰는 동안 무엇이 벌어지는가"를 그림으로 먼저 잡는다.
+2. 최상위 [`README.md`](../README.md)의 **"개발 — 어떻게 만들어졌는가"** 축 전체(절차 표 +
    "평가자를 위한 짧은 경로").
-2. 그 짧은 경로의 링크 둘 — 결정 브리프
+3. 그 짧은 경로의 링크 둘 — 결정 브리프
    [`plans/auth-d8-7-infra-auth-decisions.md`](plans/auth-d8-7-infra-auth-decisions.md)(저장소
    무인증 노출을 자격증명으로 막을지, 노출면을 없앨지를 놓은 4지선다)와 검증 기록
    [`verifications/2026-08-02/d8_7_g1c_loopback_exposure.md`](verifications/2026-08-02/d8_7_g1c_loopback_exposure.md)
    ("시행 완료"가 파일 수준에서만 참이고 런타임에서는 거짓이었음을 잡아낸 기록).
-3. 이 문서 §5~6(하이라이트와 스토리).
+4. 이 문서 §5~6(하이라이트와 스토리).
 
 **2시간 — 코드·계약까지**
 1. [`system-contract-sot.md`](system-contract-sot.md) 헤더·문서 우선순위 + 변경이력 최근 20행
@@ -192,6 +196,7 @@ fail-closed"다(SoT v1.7.87). 교훈: **green은 셀이 통과한다는 뜻이�
 
 | 궁금한 것 | 어디 |
 |---|---|
+| 시스템이 어떻게 생겼는가 | [`architecture.md`](architecture.md) — arc42 축약형(컨텍스트·컨테이너·런타임·배포). LLM 오케스트레이션 전체 그림은 [README "어떻게 풀었는가"](../README.md#어떻게-풀었는가--llm-오케스트레이션-한눈에) |
 | 검증이 정말 반증 시도인가 | [`verifications/README.md`](verifications/README.md)(절차 설명 + 256건 판정 분포) · [`guides/verification.md`](guides/verification.md) |
 | 결정이 어떻게 내려지나 | [`plans/README.md`](plans/README.md)(트랙별 브리프 인덱스) · [`daily_logs/`](daily_logs/)(오너 결정 원문) |
 | 하루 작업의 실제 모습 | [`daily_logs/`](daily_logs/) — 착수 전 실측·결정·뮤테션·회귀 수치까지 |

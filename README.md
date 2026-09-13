@@ -221,7 +221,7 @@ flowchart TB
 어느 머신에서든 같은 번호로 뜬다([`.env.example`](.env.example)에 값과 근거).
 
 **arc42 컨테이너 뷰** — 무엇이 어디에 붙어 있고 무엇이 밖으로 노출되는가(전체 문서는
-[`docs/architecture.md`](docs/architecture.md), 그림은 이 README과 쌍둥이다):
+[`docs/architecture.md`](docs/architecture.md), 그림은 이 README와 쌍둥이다):
 
 ```mermaid
 flowchart TB
@@ -238,7 +238,7 @@ flowchart TB
         direction LR
         gateway["llm_gateway :8521\n키 회전 · 모델 폴백 · 창 가드"]
         gworker["generation_worker\n비동기 생성 잡 (medium·long)"]
-        iworker["index_sync worker\noutbox → 색인 drain"]
+        iworker["worker (index_sync)\noutbox → 색인 drain"]
         wworker["withdrawal_worker\n탈퇴 30일 종료 파기"]
     end
 
