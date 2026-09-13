@@ -1,10 +1,10 @@
 # 법적 문서 — 정책 대조표
 
-상태: `시행 — 2026-09-08 · 버전 1.0 · 법률 전문가 검토 전`
+상태: `시행 — 2026-09-13 · 버전 1.1 · 법률 전문가 검토 전`
 
 이 폴더는 [`../service-policy-contract.md`](../service-policy-contract.md) 가 모은 정책을 **사람이 읽는 문장으로 옮긴 것**이다. 파일명은 `*-draft.md` 그대로 두었다 — 경로일 뿐이고 고치면 참조 넷이 따라 움직인다.
 
-- [이용약관](terms-of-service-draft.md) · [개인정보처리방침](privacy-policy-draft.md) — **버전 `1.0` · 시행일 2026-09-08**
+- [이용약관](terms-of-service-draft.md) · [개인정보처리방침](privacy-policy-draft.md) — **버전 `1.1` · 시행일 2026-09-13**
 
 **★ "왜 그렇게 정했는가"는 이 파일이 든다**(오너 결정 2026-09-11). 두 문서의 머리말은 **회원이 읽는 면**이라 시행 사실과 아직 제공되지 않는 조항만 말하고, 결정 경위·단계 판단·값 조달 같은 개발 과정의 서술은 여기와 브리프에 남는다 — `tests/test_service_policy_contract.py::...test_the_public_documents_carry_no_editorial_vocabulary` 가 그 경계를 지킨다(약관·방침이 프런트에도 실려 회원이 읽는 화면이 되었고, 바이트 대조 가드는 *두 사본이 같은가* 만 알고 *무엇이 실렸는가* 를 모른다 — 독립 검증 H2).
 
@@ -88,9 +88,9 @@
 | `[운영자]` | entangelk | 약관 제1조 |
 | `[문의 연락처]` | kdtyohan@gmail.com | 약관 제11조 · 방침 제8조 5항 · 방침 말미. **랜딩 페이지 푸터에도 싣는다**(오너 2026-09-07) |
 | `[추론 서비스 사업자]` | Google (Gemini API) | 방침 제4조 3항. **배포 설정(`.env`)이 정하는 값**이라 벤더를 바꾸면 그 항목도 함께 고친다 |
-| `[시행일]` | 2026-09-08 | 약관·방침 말미 · 방침 제3조 안내 상자 |
+| `[시행일]` | 2026-09-13(v1.1 · 최초 시행 2026-09-08) | 약관·방침 말미 · 방침 제3조 안내 상자 |
 
-**핀 셀이 넷과 버전 문자열을 잠근다** — [`tests/test_service_policy_contract.py`](../../tests/test_service_policy_contract.py) 의 `LegalDraftProcuredValuesTest`. 정본이 문서뿐이라 상징 참조로는 못 잠근다. **버전 `1.0` 은 계약 리터럴**이다: 가입 동의 게이트(HANDOFF 10번)가 회원의 동의 시각과 함께 이 문자열을 저장한다.
+**핀 셀이 넷과 버전 문자열을 잠근다** — [`tests/test_service_policy_contract.py`](../../tests/test_service_policy_contract.py) 의 `LegalDraftProcuredValuesTest`. 정본이 문서뿐이라 상징 참조로는 못 잠근다. **버전 `1.1` 은 계약 리터럴**이다: 가입 동의 게이트(HANDOFF 10번)가 회원의 동의 시각과 함께 이 문자열을 저장한다.
 
 ## 문서가 정책 문서보다 더 말한 것
 
