@@ -9,6 +9,10 @@ from pathlib import Path
 
 import httpx
 
+from services.application.app.activity.log import (
+    ActivityLogService,
+    InMemoryActivityLogRepository,
+)
 from services.application.app.core_sot.service import (
     CoreSotService,
     InMemoryCoreSotRepository,
@@ -210,7 +214,11 @@ class ProjectBriefContractTest(unittest.TestCase):
 class ProjectBriefApiTest(unittest.TestCase):
     def setUp(self):
         self.service = CoreSotService(InMemoryCoreSotRepository())
-        self.client = _Client(authenticated(create_app(self.service)))
+        self.activity_repo = InMemoryActivityLogRepository()
+        self.client = _Client(authenticated(create_app(
+            self.service,
+            activity_log_service=ActivityLogService(self.activity_repo),
+        )))
         self.project = self.client.post("/projects", json={"name": "Novel"}).json()
 
     @property
@@ -266,6 +274,46 @@ class ProjectBriefApiTest(unittest.TestCase):
         self.assertEqual(brief["premise"], "Premise")
         self.assertEqual(brief["constraints"], ["Rule one", "Rule two"])
         self.assertEqual(brief["style_examples"], ["Snow fell."])
+
+    def test_first_brief_save_records_an_activity_row(self):
+        """over-strict 짝 — 활동 로그 D2=ⓑ 의 다섯째 표면(H4 ⓐ) 첫 저장 축.
+
+        첫 저장은 계속 행을 남긴다 — action·target_type 까지 잠가 *"이 분기는
+        아무것도 기록 안 함"* 전건 통과를 막는다(under 짝의 필수 짝꿍).
+        """
+        self.client.put(self.path, json=_brief_body())
+        rows = [
+            event for event in self.activity_repo.events
+            if event.action == "project_brief_saved"
+        ]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].target_type, "project_brief")
+
+    def test_replayed_brief_save_leaves_no_second_row(self):
+        """★ under-strict — 같은 키 재전송(replay)은 활동 행을 안 남긴다(D2=ⓑ, H4 ⓐ).
+
+        다섯째 표면(독립 검증 2026-09-13 H4): 응답은 ``idempotent_replay`` 를
+        실는데 ``activity.record`` 가 무조건 돌던 자리였다(실측: 같은 키 2회 PUT →
+        ``project_brief_saved`` 2건). 오너 승인으로 넷(finalize·accept 200·수동
+        저장·accept 502 partial)과 같은 답으로 넓혔다 — **다섯 표면이 한 규칙**.
+        replay 셀은 응답의 ``idempotent_replay: true`` 를 함께 단정한다(안 그러면
+        *재전송이 409 로 막혔다* 와 구분이 안 된다).
+        """
+        first = self.client.put(self.path, json=_brief_body())
+        self.assertFalse(first.json()["idempotent_replay"])
+
+        replay = self.client.put(self.path, json=_brief_body())
+
+        self.assertTrue(replay.json()["idempotent_replay"])
+        self.assertEqual(
+            replay.json()["brief"]["id"], first.json()["brief"]["id"],
+            "재전송이 같은 version 으로 수렴하지 않았다면 replay 가 아니다",
+        )
+        rows = [
+            event for event in self.activity_repo.events
+            if event.action == "project_brief_saved"
+        ]
+        self.assertEqual(len(rows), 1)
 
     def test_invalid_content_rejected_without_write(self):
         invalid = [

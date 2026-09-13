@@ -208,11 +208,16 @@ def register_projects(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (Archived, StaleProjectBriefBase) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        activity.record(
-            project_id=project_id, actor_user_id=current.id,
-            action="project_brief_saved", target_type="project_brief",
-            target_id=result.brief.id,
-        )
+        if not result.idempotent_replay:
+            # 활동 로그 D2=ⓑ(2026-09-13) — replay 는 행을 안 남긴다. 다서째 표면
+            # (오너 승인 2026-09-13 · 독립 검증 H4 ⓐ): 어느 브리프도 열거하지
+            # 않은 자리였지만 넷(finalize·accept·수동 저장·502 partial)과 같은
+            # 답으로 넓혔다 — 이제 다섯 표면이 한 규칙이다.
+            activity.record(
+                project_id=project_id, actor_user_id=current.id,
+                action="project_brief_saved", target_type="project_brief",
+                target_id=result.brief.id,
+            )
         return {
             "brief": _project_brief_payload(result.brief),
             "idempotent_replay": result.idempotent_replay,
