@@ -48,6 +48,69 @@
 그래서 이 시스템의 중심은 생성 모델이 아니라 **기억**이다. 원고·설정·세계관·문체를 장기 기억으로
 축적하고, 글을 쓰는 시점마다 **필요한 조각만 검색해** 모델에 준다.
 
+### 어떻게 풀었는가 — LLM 오케스트레이션 한눈에
+
+아래 그림이 이 시스템의 전부다. **좌측이 기억이 쌓이는 쪽, 우측이 기억이 쓰이는 쪽**이고,
+채택된 원고가 다시 좌측으로 돌아가면서 루프가 닫힌다. LLM을 부르는 곳은 9개 호출부뿐이고
+(표 참조) 전부 **게이트웨이 뒤**에서 호출된다 — 검색 결과 검증·게이트 통과 판정 규칙·토큰 예산은
+LLM이 아니라 **결정론 코드**가 가진다. 그래서 모델을 바꿔도 시스템의 안전성 성질은 그대로다.
+
+```mermaid
+flowchart TB
+    subgraph collect["① 기억이 쌓이는 쪽 — 원고에서 후보를 뽑아 사람이 확정"]
+        direction TB
+        save["원고 저장\n불변 snapshot + 블록 분해"]
+        extract["추출 LLM\nanalysis_extractor"]
+        cand["기억 후보 3종 — 전부 needs_review\n인물 관찰 · 사건 관찰 · 열린 질문"]
+        compare["기존 기억과 대조\n결정론 매치, 애매하면 LLM compare_judge"]
+        review["사람 검토 — Review Inbox\n승인 · 거절 · 수정 · 병합 · 분할"]
+        promote["승격 → canonical memory\nappend-only, 근거 포인터 필수"]
+        reindex["색인 워커 (async outbox)\nChroma 벡터 + ES lexical upsert"]
+
+        save --> extract --> cand --> compare --> review --> promote --> reindex
+    end
+
+    subgraph use["② 기억이 쓰이는 쪽 — 필요한 기억만 골라 생성을 지탱"]
+        direction TB
+        request["이어쓰기 요청 (지시문)"]
+        plan["검색 계획 LLM query_planner"]
+        hybrid["하이브리드 검색\nChroma 벡터 + ES lexical (RRF 융합)"]
+        reload["Mongo 정본 재조회\nstale · 타 프로젝트 항목 제거"]
+        pkg["ContextPackage 조립\n결정론 게이트 · 토큰 예산"]
+        gen["글 후보 생성 LLM writing_generation"]
+        selfreport["자기보고 LLM writing_report\n주장 · 위험을 스스로 나열"]
+        gate["Writing Gate LLM writing_gate\n서버가 판정 파생 — 5종 판정"]
+        accept["작가 채택 → 새 원고 버전"]
+
+        request --> plan --> hybrid --> reload --> pkg --> gen --> selfreport --> gate --> accept
+    end
+
+    loopnote["bounded 루프 — 수정 2회 · 추가 검색 1회 · 게이트 3회 한도"]
+
+    reindex -.->|"색인 hit"| hybrid
+    accept -.->|"채택 원고는 다시 ①으로"| save
+    gate -.-> loopnote
+    loopnote -.->|"수정 재생성 · 재검색"| gen
+```
+
+**LLM을 부르는 9개 호출부** (`LlmCallSite` = 감사 레코드의 단위이기도 하다 — 아래
+[무엇을 보고 있는가](#무엇을-보고-있는가)):
+
+| 호출부 | 하는 일 |
+|---|---|
+| `query_planner` | 검색 요청을 하위 문제로 쪼개 `steps[]` 계획 (terminal JSON) |
+| `writing_retrieval_planner` | 생성 루프의 `retrieve_more`용 추가 검색 계획 |
+| `writing_generation` | ContextPackage + 지시문으로 글 후보 생성 |
+| `writing_revision` | 게이트 지적 위치만 부분 수정 |
+| `writing_report` | 후보 스스로 주장·위험을 나열하는 자기보고 |
+| `writing_gate` | 품질 게이트 — findings를 내고 **최종 판정은 서버가 파생** |
+| `analysis_extractor` | 원고 snapshot에서 기억 후보 3종 추출 |
+| `identity_judge` | 새 후보가 기존 후보와 같은 대상인지 판정 (그룹화) |
+| `compare_judge` | 후보 vs 기존 canonical 기억 — 갱신·증거추가·무변화·충돌 |
+
+시나리오별 시퀀스(이어쓰기 한 번의 여정)와 arc42 전체 문서는
+[`docs/architecture.md`](docs/architecture.md)에 있다.
+
 ### 제품 원칙 (기획 단계에서 못박은 것)
 
 - **AI 출력은 정본이 아니다.** 생성·분석 결과는 전부 **candidate**로 남고, Gate 판정과 사람의
@@ -144,6 +207,58 @@
 
 전 구성요소가 `docker compose up` 하나로 뜬다. **포트는 전용 대역으로 repo에 고정**돼 있어
 어느 머신에서든 같은 번호로 뜬다([`.env.example`](.env.example)에 값과 근거).
+
+**arc42 컨테이너 뷰** — 무엇이 어디에 붙어 있고 무엇이 밖으로 노출되는가(전체 문서는
+[`docs/architecture.md`](docs/architecture.md), 그림은 이 README과 쌍둥이다):
+
+```mermaid
+flowchart TB
+    browser["작가 · 관리자 (브라우저)"]
+
+    subgraph surface["제품 표면 — LAN 개시, 인증 뒤"]
+        direction LR
+        frontend["frontend · nginx :5520\nReact SPA + /api 역방향 프록시"]
+        application["application · FastAPI :8520\n제품 API 68 op"]
+        adminsvc["admin · FastAPI\n(/api/admin/ 로만 도달)"]
+    end
+
+    subgraph compute["내부 서비스 — loopback"]
+        direction LR
+        gateway["llm_gateway :8521\n키 회전 · 모델 폴백 · 창 가드"]
+        gworker["generation_worker\n비동기 생성 잡 (medium·long)"]
+        iworker["index_sync worker\noutbox → 색인 drain"]
+        wworker["withdrawal_worker\n탈퇴 30일 종료 파기"]
+    end
+
+    subgraph derived["파생 검색 계층 — Mongo에서 재생성 가능 (loopback)"]
+        direction LR
+        chroma[("ChromaDB :8523\n벡터 인덱스")]
+        es[("Elasticsearch :9520\nlexical 인덱스 · nori")]
+        embedding["embedding :8522\nBGE-m3-ko 임베딩"]
+    end
+
+    mongo[("MongoDB :27520\n정본 SOT · append-only · replica set")]
+    llm["외부 LLM provider\n(구글 Gemini · llama.cpp 서버)"]
+
+    browser --> frontend
+    frontend -->|"/api/"| application
+    frontend -->|"/api/admin/"| adminsvc
+    application -->|"정본 저장·재조회"| mongo
+    adminsvc --> mongo
+    application -->|"하이브리드 검색 + 임베딩"| derived
+    application -->|"생성"| gateway
+    gworker -->|"잡 claim → 생성"| gateway
+    gworker --> mongo
+    iworker -->|"outbox claim"| mongo
+    iworker -->|"색인 upsert"| derived
+    wworker --> mongo
+    gateway -->|"키 회전·모델 폴백"| llm
+```
+
+**MongoDB만이 정본이고 Chroma·ES는 언제나 재생성 가능한 파생 색인**이다. 파생 인덱스의
+hit는 그대로 쓰이지 않고 Mongo 정본 재조회(version·hash·상태 확인)를 통과해야 AI에게
+전달된다 — 이 위계가 [위의 기억 루프](#어떻게-풀었는가--llm-오케스트레이션-한눈에)가
+성립하는 이유다.
 
 ### 임베딩 모델을 바꾸면 색인을 다시 만들어야 한다
 
@@ -290,8 +405,9 @@ LAN에 열리는 것은 **인증 뒤에 있는 제품 표면 둘**(application �
 
 ### 무엇을 보고 있는가
 
-LLM을 부르는 **호출부 8곳 전부**가 표준 감사 레코드를 남기고, 그것을 집계한 KPI를 화면으로 본다
-(프로젝트별 + 전역 관리자). **"8"은 `LlmCallSite` enum 리터럴 수 = LLM 어댑터 수**이고,
+LLM을 부르는 **호출부 9곳 전부**가 표준 감사 레코드를 남기고, 그것을 집계한 KPI를 화면으로 본다
+(프로젝트별 + 전역 관리자). **"9"는 `LlmCallSite` enum 리터럴 수 = LLM 어댑터 수**이고(위
+[호출부 표](#어떻게-풀었는가--llm-오케스트레이션-한눈에)),
 **"전부"는 호출부 단위이지 "모든 LLM 호출"이 아니다** — 요청 경로와 생성 워커는 기록하지만
 script·diagnostic 등 감사 scope 밖 경로는 **계약상** 기록하지 않는다(추측한 `project_id`는 오염이다).
 지표 선정 이유는 위 [운영 KPI 기획](#운영-kpi-기획), 계약 정의는 정본의
@@ -324,6 +440,7 @@ CHANGELOG 작성 규칙 · [`docs/guides/verification.md`](docs/guides/verificat
 | | 어디 |
 |---|---|
 | 제품 한 장 요약 (기획 진입점) | [`docs/product-overview.md`](docs/product-overview.md) |
+| 아키텍처 (arc42 · 컨테이너·런타임 뷰) | [`docs/architecture.md`](docs/architecture.md) |
 | 정본 계약(먼저 읽기) | [`docs/system-contract-sot.md`](docs/system-contract-sot.md) |
 | 계획 · 결정 브리프 인덱스 (140개) | [`docs/plans/README.md`](docs/plans/README.md) |
 | 독립 검증 기록 (315건) | [`docs/verifications/README.md`](docs/verifications/README.md) |
