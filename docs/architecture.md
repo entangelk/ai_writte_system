@@ -50,7 +50,7 @@ flowchart TB
     subgraph surface["제품 표면 — LAN 개시, 인증 뒤"]
         direction LR
         frontend["frontend · nginx :5520\nReact SPA + /api 역방향 프록시"]
-        application["application · FastAPI :8520\n제품 API 68 op"]
+        application["application · FastAPI :8520\n제품 API"]
         adminsvc["admin · FastAPI\n(/api/admin/ 로만 도달)"]
     end
 
