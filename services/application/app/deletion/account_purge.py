@@ -46,6 +46,11 @@ class AccountAxisSweeper(Protocol):
         """계정 축 잔여를 지우고 ``컬렉션 → 삭제 건수`` 를 돌려준다."""
 
 
+class LoginFailureClearer(Protocol):
+    def clear(self, username: str) -> None:
+        """사용자명 키 로그인 실패 기록을 지운다(사용자명 재사용 승계 방지)."""
+
+
 @dataclass(frozen=True, slots=True)
 class AccountPurgeResult:
     user_id: str
@@ -76,6 +81,7 @@ class AccountPurgeService:
         core_sot,
         user_name_history,
         sweeper: AccountAxisSweeper,
+        login_failures: LoginFailureClearer,
         purge_project: Callable[..., Awaitable[None]],
         clock: Callable[[], datetime] | None = None,
     ) -> None:
@@ -83,6 +89,7 @@ class AccountPurgeService:
         self._core_sot = core_sot
         self._names = user_name_history
         self._sweeper = sweeper
+        self._login_failures = login_failures
         # 프로젝트 파괴 본체로 가는 **경계**. 서비스 18개를 이 모듈이 알 이유가 없고,
         # HTTP 예외를 도메인 예외로 옮기는 자리도 여기가 아니라 조립부다.
         self._purge_project = purge_project
@@ -160,6 +167,15 @@ class AccountPurgeService:
             swept = self._sweeper.sweep(user.id)
         except Exception as exc:
             return _failure(user, "account_axis_sweep", exc, purged_projects)
+        try:
+            # ★ ``login_failures`` 는 ``_id`` 가 **사용자명**이라 ⓑ 두 규칙 스윕
+            #    어느 쪽도 못 찾는다(``_id`` 규칙의 안전 근거는 user id 접두다).
+            #    파기 시점에 명시적으로 지운다 — 안 지우면 그 사용자명을 재사용한
+            #    새 계정이 옛 잠금·실패 수를 물려받는다(오너 2026-09-13: 당연히
+            #    안 되는 일이다).
+            self._login_failures.clear(user.username)
+        except Exception as exc:
+            return _failure(user, "login_failures", exc, purged_projects)
         try:
             self._users.delete(user.id)
         except Exception as exc:

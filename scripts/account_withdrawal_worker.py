@@ -124,6 +124,9 @@ def _build_purge_service(args: argparse.Namespace):
         MongoAccountAxisSweeper,
     )
     from services.application.app.deletion.account_purge import AccountPurgeService
+    from services.application.app.auth.login_guard_mongo import (
+        MongoFailureRecordRepository,
+    )
     from services.application.app.deletion.user_name_history import (
         UserNameHistoryService,
     )
@@ -146,6 +149,9 @@ def _build_purge_service(args: argparse.Namespace):
             )
         ),
         sweeper=MongoAccountAxisSweeper.from_uri(
+            args.mongo_uri, db_name=args.mongo_db
+        ),
+        login_failures=MongoFailureRecordRepository.from_uri(
             args.mongo_uri, db_name=args.mongo_db
         ),
         purge_project=_project_purge_boundary(services),

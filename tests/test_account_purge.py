@@ -25,6 +25,10 @@ import unittest
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
+from services.application.app.auth.login_guard import (
+    FailureRecord,
+    InMemoryFailureRecordRepository,
+)
 from services.application.app.auth.models import User
 from services.application.app.auth.users import (
     InMemoryUserRepository,
@@ -99,13 +103,15 @@ class _RecordingPurge:
             raise RuntimeError("storage went away")
 
 
-def _service(users, core_sot, sweeper, purge, names=None):
+def _service(users, core_sot, sweeper, purge, names=None, login_failures=None):
     return AccountPurgeService(
         users=users, core_sot=core_sot,
         user_name_history=names or UserNameHistoryService(
             InMemoryUserNameHistoryRepository(), clock=lambda: _NOW
         ),
-        sweeper=sweeper, purge_project=purge, clock=lambda: _NOW,
+        sweeper=sweeper,
+        login_failures=login_failures or InMemoryFailureRecordRepository(),
+        purge_project=purge, clock=lambda: _NOW,
     )
 
 
@@ -333,6 +339,49 @@ class PurgeClaimTest(unittest.TestCase):
         self.users.claim_for_purge("user:a", at=_NOW)
 
         self.assertEqual(self.users.list_withdrawing(), ())
+
+
+class LoginFailureInheritanceTest(unittest.TestCase):
+    """★ 사용자명 재사용은 옛 잠금을 물려받지 않는다(오너 2026-09-13).
+
+    ``login_failures`` 의 ``_id`` 는 **사용자명**이라 ⓑ 두 규칙 스윕 어느 쪽도
+    못 찾는다(``_id`` 규칙의 안전 근거는 user id 접두다). 그래서 파기 시점에
+    명시적으로 지운다 — 안 지우면 파기된 사용자명을 재사용한 새 계정이 옛 계정의
+    실패 수·잠금을 물려받는다(오너: *"그걸 이어받으면 당연히 안 되지"*).
+
+    under-strict: 파기의 ``clear`` 단계를 없애면(= 결함 재도입) 재실패한다.
+    over-strict: 다른 사용자명의 행은 건드리지 않는다(같은 셀이 잠근다).
+    """
+
+    def setUp(self) -> None:
+        self.users = InMemoryUserRepository()
+        self.user = _user()
+        self.users.insert(self.user)
+        self.core_sot = _FakeCoreSot({"user:a": []})
+        self.purge = _RecordingPurge()
+        self.names_repo = InMemoryUserNameHistoryRepository()
+        self.names = UserNameHistoryService(self.names_repo, clock=lambda: _NOW)
+        self.sweeper = InMemoryAccountAxisSweeper({})
+        self.failures = InMemoryFailureRecordRepository()
+        self.failures.put(
+            "alice",
+            FailureRecord(failures=3, last_failure_at=_NOW, locked_until=None),
+        )
+        self.failures.put(
+            "bob",
+            FailureRecord(failures=1, last_failure_at=_NOW, locked_until=None),
+        )
+        self.service = _service(
+            self.users, self.core_sot, self.sweeper,
+            self.purge, self.names, self.failures,
+        )
+
+    def test_purge_clears_only_that_usernames_failure_row(self) -> None:
+        summary = asyncio.run(self.service.run_once(now=_NOW))
+
+        self.assertEqual(summary.accounts_purged, 1)
+        self.assertIsNone(self.failures.get("alice"))
+        self.assertIsNotNone(self.failures.get("bob"))
 
 
 class _CapturingUsers:
