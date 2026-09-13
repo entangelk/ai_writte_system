@@ -441,3 +441,53 @@ D5 의 경계(*"파기 실행 전까지"*)가 **처음으로 시행된다**. 종
 ### Next steps
 
 - **오너 결정 대기 0건.** 남은 축: 트리거 대기(AdSense 승인·웹폰트·14번 재현) · 최종 저장 H1/H2 값 인정(오너에게 설명 완료 — 답 오면 셀 1줄·1개) · Slice 6 하드닝 H1~H4 완료 기준 #6 판단 · D8-7 G2~G6 "다중 테넌트" 재해석.
+
+## 세션 84 — 리드미 포트폴리오 갱신: LLM 오케스트레이션·arc42 다이어그램 + 스크린샷·GIF 최신화 (오너 지시 "리드미 업데이트와 그를 위한 포트폴리오 용 시각화 및 문서 제작")
+
+### Goals
+
+- "어떤 문제를 어떻게 풀었는가"에 **LLM 오케스트레이션 시각화**를 문서로 남긴다 — 무엇이 어디로 이어지고 어떻게 쓰이는지.
+- **arc42 형식 아키텍처 구조도**를 보이는 형태로 포함한다.
+- 낡은 스크린샷 5장을 최신 UI로 다시 찍고, 동작 **GIF** 2종을 만든다. 프론트엔드 작업 AI가 같은 트리에서 돌아가므로 그 파일은 무접촉.
+
+### Completed work
+
+#### 1. 다이어그램 둘 + arc42 문서 (`12e163a`)
+
+- **README "어떻게 풀었는가 — LLM 오케스트레이션 한눈에"** 절 신설: 기억 루프 flowchart(① 기억이 쌓이는 쪽 → ② 쓰이는 쪽, 루프 폐쇄 엣지) + **LlmCallSite 9종 표**.
+- **README "구성" 절에 arc42 컨테이너 뷰** mermaid(제품 표면/내부/파생·정본 저장소·외부 provider, 포트·노출 경계 포함) + "Mongo만 정본, Chroma·ES는 파생" 위계 문단.
+- **`docs/architecture.md` 신규** — arc42 축약형(컨텍스트·컨테이너·런타임 시나리오 3개·배포·횡단 관심사·결정 기록 링크). README의 컨테이너 뷰와 쌍둥이(양쪽이 홀로 서야 해서 중복을 받아들임 — 각주로 상호 참조).
+- **정정**: README "호출부 8곳" → **9곳**(`identity_judge` 2026-09-03 추가가 반영 안 돼 있었다. product-overview는 이미 9였음).
+- mermaid 검증: mermaid@11 `parse()` 전건 + `mmdc`(playwright chromium 재사용) 렌더로 눈검증 — 첫 컨테이너 뷰 초안은 엣지 헤어볼(중앙 교차 다발)이라 방향·서브그래프 재구성으로 두 번 다시 그렸다.
+
+#### 2. 스크린샷 7장 + GIF 2종 최신화
+
+- **환경 수습**: 스택이 2주 전 데몬 종료로 일부 down + **앱 이미지가 08-23 빌드**(chapters API 08-28 커밋 미포함) → 이미지 재빌드. 기동 시 `request_usage_ledger` 인덱스 충돌(code=86)으로 크래시 루프 → **저장소 제공 `scripts/migrate_ledger_user_axis.py` 실행**(worker 컨테이너 안에서 — 호스트에서는 replica host `mongo`가 안 풀림) 후 정상 기동. 워커 셋(admin·worker·generation_worker)의 416회 재시작 잔해도 함께 해소.
+- **데모 데이터**: 계정 `portfolio_demo`(스크립트 발급, 1회용 비밀번호 회전 완료) + 프로젝트 **"검은 태양의 연대기"**(설계 문서 예시와 같은 세계관 — 아린·레온·노스워치·검은 태양 단검). 2부×장면 4개 원고 저장 → **실 파이프라인으로 분석 4건**(소스레퍼런스 카탈로그 → job → run, Gemini 호출) → 후보 **38건**(인물/사건/열린질문) → 검토·승인 2건(아린·레온). 관측 대시보드의 지시표가 전부 이 실측 데이터다.
+- **스크린샷**: 로그인·프로젝트 목록·원고 목록(장·장면)·원고 작업공간·기억 후보 목록·후보 검토(근거 인용 포함)·관측 대시보드 — Playwright(1600×1000·1920×1200, @2x) → `normalize.py` 규칙 그대로 3:2 정규화. 후보 목록은 1600px에서 좁아 1920px+후보 선택 상태로 재촬영했다.
+- **GIF**: ① **이어쓰기생성**(지시 타이핑 → 생성 클릭 → 실 LLM 대기(타임랩스) → 후보 표시) ② **기억후보검토**(목록 → 상세 스크롤 → 근거 → 승인 클릭). 프레임 조립(400ms 단위 PNG) + mtime 간격으로 대기 프레임 식별해 5장마다 1장·0.5s로 압축 → ffmpeg palette GIF(168KB·83KB).
+
+#### 3. 발견한 것
+
+- **★ 실결함 — 분석 잡 retry가 500으로 죽는다**: 실패 잡의 `POST /analysis/jobs/{id}/retry` → `TypeError: can't subtract offset-naive and offset-aware datetimes`. 원인 [`analysis/mongo_repository.py:317`](../../../services/application/app/analysis/mongo_repository.py#L317) `_to_job` 이 `failed_at=doc.get("failed_at")` 을 **경계 정규화 없이** 그대로 싣는다 — core_sot 의 `_aware`(같은 파일 계열 docstring 이 "다른 어댑터(auth·activity·quota)와 같은 경계 정규화"라고 못박은 바로 그 규칙)가 analysis 어댑터에만 빠져 있다. `retry_policy.cooldown_remaining` 이 aware `now` 와 빼면서 런타임 500. **HANDOFF "pymongo naive datetime" 함정의 재발**. 이 세션은 문서 축이라 고치지 않았다(우회: 새 멱등키로 신규 잡). 패턴 스윕(30초 예산): `failed_at` 외 analysis 컬렉션의 datetime 노출은 이 자리뿐(`created_at` 등은 문서에 안 실림).
+- nginx `/api` 프록시 `proxy_read_timeout 120s` 를 분석 run(추출+정체성 판정, 120s+)이 넘긴다 — 서버는 계속 돌아 성공하지만 클라이언트는 504를 본다. 프론트 실사용 경로에서도 재현 가능한 이슈로 보인다(기록만 남김).
+- 백그라운드 분석 2건이 클라이언트 종료 뒤에도 서버에서 완료돼 후보가 촬영 중간에 도착 — GIF 2의 엔딩 프레임이 어긋나 전면 재촬영했다(원인은 시스템이 아니라 내 촬영 설계).
+
+### Decisions — User Decisions and Rationale
+
+- 오너 지시 그대로 시행(브리프 불요 — 시각화·최신화가 지시 자체). 컨테이너 뷰 mermaid 블록을 README·architecture 양쪽에 두 것은 "README는 저장소 정문, architecture.md는 엔지니어링 문서"라는 판단 — 각주로 쌍둥임을 명시.
+- 데모 세계관을 설계 문서 예시(아린·노스워치)와 맞춘 것은 문서↔스크린샷이 서로를 검증하게 하려는 의도.
+
+### Verification
+
+- 문서 가드 둘: `tests/test_docs_indexes.py` + `tests/test_repo_hygiene.py` **29 passed / 962 subtests**(README 신규 링크 — architecture.md·이미지 7장·GIF 2종 전부 해석 통과 · README↔HANDOFF 기준선 가드 포함 전건 초록). mermaid `parse()` 6블록 전건.
+- **가드 계약 확장(의식적)**: `test_binary_skips_are_only_images` 가 바이너리 예외를 `docs/img/*.png` 로 못박고 있어 GIF 2종이 스캔 예외로 잡혔다 — 오너 요청("gif파일로")에 따른 확장이므로 예외에 `.gif` 를 추가하고 docstring 에 그 연유를 남겼다(조용한 확대가 아님을 가드 스스로 말하게). 바이너리는 여전히 이 두 확장자만.
+- 이 세션은 **코드 무변**(예외: 위 가드 셀 하나 — 문서·이미지·/tmp 촬영 스크립트만). 프런트 소스 무접촉(다른 AI 작업 영역).
+- 스크린샷·GIF 내용 육안 검증(관측 대시보드의 수치가 실 데모 호출 기록과 일치).
+
+### Next steps
+
+- **오너에게 보고**: ① 분석 retry 500 결함(analysis 어댑터 경계 정규화 누락 — 코드 수정은 별도 슬라이스/브리프 필요 여부 판단) ② 분석 run의 120s 프록시 타임아웃 초과 ③ 데모 데이터·계정(`portfolio_demo`)이 로컬 Mongo에 남아 있음(삭제 원하면 계정 탈퇴 경로 사용).
+- 원고 작업공간 GIF에서 Gate 평가 탭은 role 셀렉터 불일치로 미포함 — 후속 GIF에 넣을 때 `aria-label` 기반으로 잡을 것.
+
+

@@ -212,9 +212,17 @@ class ForbiddenLiteralsTest(unittest.TestCase):
         )
 
     def test_binary_skips_are_only_images(self) -> None:
-        """바이너리 예외가 조용히 넓어지지 않게 한다 — 지금은 `docs/img/*.png` 뿐이다."""
+        """바이너리 예외가 조용히 넓어지지 않게 한다 — `docs/img/` 의 이미지뿐이다.
+
+        2026-09-13(세션 84): README 동작 녹화용 GIF 가 들어오며 `.gif` 를 이미지
+        예외에 추가했다 — 오너 요청("gif파일로")에 따른 의식적 확장이지 조용한
+        확대가 아니다. 바이너리는 여전히 이 두 확장자만 허용한다.
+        """
         scan = _run_exact_scan()
-        unexpected = [p for p in scan.skipped_as_binary if not p.endswith(".png")]
+        unexpected = [
+            p for p in scan.skipped_as_binary
+            if not (p.endswith(".png") or p.endswith(".gif"))
+        ]
         self.assertEqual(
             unexpected, [],
             "텍스트로 못 읽는 새 파일이 생겼다 — 스캔 밖이라는 뜻이니 "
