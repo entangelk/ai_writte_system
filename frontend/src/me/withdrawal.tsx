@@ -280,7 +280,7 @@ export function WithdrawalSection({ username }: { username: string }) {
           <p className="status-copy">
             탈퇴를 요청하면 유예 기간이 시작됩니다. 유예가 끝나면 계정과 모든
             프로젝트·원고·기억이 영구히 사라지며 되돌릴 수 없습니다. 유예 중에는
-            조회와 취소만 가능합니다.
+            조회와 취소만 가능하며, 저장·유료 기능은 이용할 수 없습니다.
           </p>
           {error !== null && <p className="alert" role="alert">{error}</p>}
           {!open ? (

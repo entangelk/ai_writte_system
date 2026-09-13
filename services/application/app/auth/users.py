@@ -129,7 +129,7 @@ WITHDRAWAL_GRACE_PERIOD = timedelta(days=30)
 # to the documents, so a version bump moves documents + both constants
 # together or the suites go red. The server stores *this* value, never the
 # version a client claims to have agreed to.
-TERMS_VERSION = "1.0"
+TERMS_VERSION = "1.1"
 
 
 def purge_due_at(user: User) -> datetime | None:

@@ -30,7 +30,7 @@ export const OPERATOR = "entangelk";
  * (`legalSource.test.ts` · `tests/test_service_policy_contract.py`)이 그 대신
  * 연결한다 — 버전을 올리려면 문서와 두 상수가 함께 움직여야 전수가 초록이다.
  */
-export const TERMS_VERSION = "1.0";
+export const TERMS_VERSION = "1.1";
 
 export function LegalFooter() {
   return (

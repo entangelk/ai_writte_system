@@ -176,9 +176,9 @@ describe("약관·방침 페이지", () => {
       (_, element) => element?.classList.contains("legal-meta") ?? false,
     );
     expect(meta.map((element) => element.textContent)).toEqual([
-      "상태: 시행 — 2026-09-08 · 법률 전문가 검토 전",
+      "상태: 시행 — 2026-09-13 · 법률 전문가 검토 전",
       "작성: 2026-09-07",
-      "버전: 1.0",
+      "버전: 1.1",
     ]);
   });
 });

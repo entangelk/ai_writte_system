@@ -42,6 +42,13 @@ import { resetMemberQuota, seedMemberQuota } from "../quota/useMemberQuota";
 
 const USER = { id: "u1", username: "alice", is_admin: false };
 
+/**
+ * ★ 시계를 고정한다(미수리 표 셋째 계열 — WSL2 부팅 직후 clock jump 로 재발 2회).
+ * 모듈 스코프의 `Date.now()` 와 렌더 시점의 `Date` 가 뒤점프로 어긋나면 `ceil` 이
+ * 하루를 더 세서 "남은 기간 3일" 셀이 깨진다. **Date 만** 가짜로 둔다 — 타이머는
+ * 진짜여야 `waitFor`·`userEvent` 가 돈다. 파일 단위 고정이라 다른 파일은 무관.
+ */
+vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-09-13T09:00:00Z").getTime() });
 /** 서버가 준 파기 예정 시각 — **30일이 아니라 3일 뒤**다(상수 박기 방지). */
 const DUE_IN_THREE_DAYS = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
 const WITHDRAWING = {
@@ -207,6 +214,19 @@ describe("전역 배너 (D1=ⓐ)", () => {
 });
 
 describe("탈퇴 요청 (`/me`)", () => {
+  it("discloses the write-and-paid blackout before the request (약관 v1.1 과 같은 말)", async () => {
+    /** 오너 2026-09-13: "삭제할 때 팝업으로 띄워 인지하게" — 확인 패널을 열기
+     * 전부터 status-copy 가 유예 중 제한을 말한다. 약관 제8조 3항(v1.1) 문장과
+     * 같은 말이어야 문서와 화면이 갈라지지 않는다. */
+    seedWithdrawal(NOT_WITHDRAWING);
+    stubFetch({ body: WITHDRAWING });
+    renderShell("/me");
+
+    expect(
+      await screen.findByText(/저장·유료 기능은 이용할 수 없습니다/)
+    ).toBeVisible();
+  });
+
   it("keeps the irreversible action shut until the username is typed back", async () => {
     seedWithdrawal(NOT_WITHDRAWING);
     stubFetch();
