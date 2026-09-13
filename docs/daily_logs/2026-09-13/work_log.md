@@ -301,3 +301,54 @@ D5 의 경계(*"파기 실행 전까지"*)가 **처음으로 시행된다**. 종
 ### Next steps
 
 - 대기 셋(전부 세션 79 가 발의하고 HANDOFF 가 싣는다): 검증 기록 판정 승격(**독립 세션 몫** — M14·M15 재적용이 확증 재료) · **H4** 다섯째 표면 오너 결정(ⓐ 넓힌다 / ⓑ 열거된 넷 — 구현자 추천 ⓐ) · 옛 해시 분모 수치 교체 여부.
+
+## 세션 81 — 독립 승격 재검: owner_decision_set_d2_and_purge_cancel.md 판정 승격 (오너 지시 — 조건 C1 폐쇄의 변이 재적용 확증이 승격 조건)
+
+### Goals
+
+- 세션 79 가 발행한 조건부 합격(조건 **C1** — 활동 로그 D2=ⓑ 의 `writing/accept` 502 partial 무셀)을 **조건을 닫지 않은 독립 세션**이 변이 재적용으로 확증해 판정을 합격으로 올린다. 폐쇄(`867ba15`)를 한 세션(79)이 자기 판정을 올리면 독립성이 사라진다(v1.8.52·v1.8.63·v1.8.65·세션 77 선례).
+- 핵심 재적용 대상: 대상 기록 변이 표의 **M14·M15**(502 폐쇄의 양방향). 표본 1~2개 이상 더(선례 73·77 은 4~6개).
+
+### Completed work
+
+#### 1. 변이 재적용 — 다섯 종 전건 일치(핵심 둘 + 표본 셋)
+
+탈치 워크트리 `/tmp/vs81-mut`(`1715bae` detached). 절차: 앵커 `count==1` 단정 → `shutil.copy2` 백업 → `pathlib.write_text` 치환 → 초점 실행 → 복원 → 바이트 동일성 단정 → `git status --short` 공백 확인(`sed -i`·`perl -i` 미사용 · 본 트리에 `checkout`·`restore`·`stash`·`reset` 0회). 결과는 요약 줄 + `FAILED|SUBFAILED` 를 함께 읽었다.
+
+| 변이 | diff(원문) | 위치 | 대상 기록 실측 | 내 실측 | 일치 |
+|---|---|---|---|---|---|
+| **M14**(under) | `if not exc.saved.idempotent_replay:` → `if True:` | `routers/writing.py:1355` | 1 failed / 87 passed / 113 subtests · `test_a_replayed_partial_accept_leaves_no_second_row` | 동일(셀까지) | ✅ |
+| **M15**(over) | 같은 줄 → `if False:` | 같은 자리 | 1 failed / 87 passed · `test_a_partial_accept_still_records_the_saved_version` | 1 failed / 87 passed / **113 subtests**(subtests 는 표 미기재 — 이번에 보강) · 같은 셀 | ✅ |
+| **M9**(under) | `if stored.purge_started_at is not None:` → `if False:` | `auth/users.py:570` | 3 failed / 222 passed / 1222 subtests · 기명 셋 | 동일(셋까지) | ✅ |
+| **M10**(over) | 같은 줄 → `if True:` | 같은 자리 | 6 failed / 219 passed · 기명 여섯 | 동일(여섯까지 · 1222 subtests) | ✅ |
+| **M1**(under) | `if not result.idempotent_replay:` → `if True:` | `routers/drafts.py:656` | 1 failed / 76 passed / 19 subtests · `test_resending_the_same_save_key_leaves_no_second_row` | 1 failed / **77 passed** / 19 subtests · 같은 셀 | ✅ (passed +1 = `867ba15` under 셀 순증가 — 트리 드리프트) |
+
+- 무변이 기준을 먼저 측정해 변이 결과를 차분으로 읽었다: activity 3종+accept **88/113** · auth 2종 **225/1222** · activity 2종 **78/19**.
+- 앵커 유일성 사전 확인: 셋 다 파일에서 1회(HANDOFF 함정 "같은 문자열 두 곳" 해당 없음 — `drafts.py` 의 `finalized` 쌍은 문자열이 다르다).
+
+#### 2. 판정 승격 + 기록·수치 갱신
+
+- 대상 기록: 머리에 최종 판정 한 줄 + §Verdict 선두 토큰 `**합격**`(승격 재검 링크) — 발행 시점 판정 원문은 인용 보존(한 글자도 지우지 않음 · 선례 `1f4f95a` 모양).
+- 신규 승격 기록 [`verifications/2026-09-13/owner_decision_set_promotion.md`](../../verifications/2026-09-13/owner_decision_set_promotion.md)(합격 · 변이 표 행 단위) 등재 + 검증 인덱스 행(대상 행 판정 열·승격 문구 포함).
+- 수치: 검증 기록 **314→315건**(디스크 직접 계수) · 분포 **합격 216 / 조건부 94 / 불합격 5**(합계 315 ✓ · 73일치 무변 · 조건부 30%) — 검증 인덱스 머리·분포 표 · 루트 README ③행·분포 문장·문서 목록 · docs/README 전부 동일 커밋에서.
+- 기준선(유도 · 백엔드 소스·테스트 무변): 문서 가드 둘 `1715bae` 워크트리 **29/959**(세션 80 실측과 동일) → 슬라이스 뒤 **29/961**(+2 = 승격 기록 문서·인덱스 행) · passed 무변 → **3066/1/4236 → 3066/1/4238**(HANDOFF 기준선 줄 + 루트 README ②행, 가드 `test_the_readme_repeats_the_regression_baseline` 가 묶는 쌍).
+
+### Issues found
+
+- **M1 의 passed 가 대상 기록(76)과 하나 다르게 나왔다(77)** — 결함이 아니라 트리 드리프트다: 대상 기록의 M1 은 폐쇄 전 트리(`d9a1bd2`) 실측이고 그 뒤 `867ba15` 가 under 셀 하나를 더해 같은 초점 셋이 77→78 셀로 늘었다(세션 80 대조 전수가 같은 귀속을 확정). 실패 셀 정체·건수·subtests 는 무변 — 기록에 이 설명을 남겼다.
+- 대상 기록 변이 표의 M15 행에 subtests(113)가 적혀 있지 않았다(틀린 값이 아니라 미기재) — 승격 기록에서 실측치를 완전한 형태로 보강했다.
+
+### Decisions
+
+- **SoT 를 올리지 않았다** — git log 확인 결과 승격-only 커밋(`2e025dc`·`432f790`·`1f4f95a`)은 SoT 를 한 번도 안 올렸다(계약 변화가 없다). `449784d` 의 v1.8.67 은 코드·계약 정정을 동반한 검증 세션(79) 몫이다.
+- 표본은 M9·M10·M1 셋을 골랐다 — 파기 취소 축의 **양방향**(under 3셀 · over 6셀)과 세 경로 분리 소유의 대표(수동 저장 under)라 대상 기록의 주장 두 축을 각각 독립 확인한다.
+
+### Verification
+
+- 문서 가드 둘(슬라이스 뒤 메인 트리): **29 passed / 961 subtests** 전건 초록 — 개수·분포·기준선 가드 포함.
+- 이 세션은 백엔드 소스·테스트·프런트 무변(문서만: 대상 기록 승격 · 신규 승격 기록 · 인덱스 · README 셋 · HANDOFF 기준선 줄 · work_log · CHANGELOG).
+
+### Next steps
+
+- 검증 승격 백로그 다시 비었다. 남은 대기 둘은 그대로: **H4** 다섯째 표면 오너 결정(ⓐ 넓힌다 / ⓑ 열거된 넷 — 구현자 추천 ⓐ) · 옛 해시 분모 수치 교체 여부(오너 몫). 대상 기록 §Outstanding 1(구현자 반대 판단 뒤집기 통지)도 열려 있다.
+- HANDOFF Next Tasks 머리의 승격 대기 문장 정리는 메인 세션 몫(핸드오프 대정리 예정).
