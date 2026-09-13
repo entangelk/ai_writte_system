@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from typing import Any
 
 from bson import ObjectId
@@ -299,6 +300,22 @@ def _job_doc(job: AnalysisJob) -> dict[str, Any]:
     }
 
 
+def _aware(value: datetime | None) -> datetime | None:
+    """BSON 날짜를 UTC-aware 로 되돌린다 — 저장소 공통의 경계 정규화.
+
+    pymongo 는 client 가 ``tz_aware`` 가 아니면 naive 를 돌려주고, naive 와 aware 를
+    빼면 TypeError 다. `retry_policy.cooldown_remaining` 이 aware `now` 와 여기서
+    나온 ``failed_at`` 을 빼므로, 정규화가 빠지면 실패 잡의 retry 가 **500** 이다
+    (2026-09-13 실측 · 같은 누락이 `writing/generation_job_mongo.py` 에도 있었다 —
+    둘 다 `63b6c0d` 가 심었다). 라벨을 붙일 뿐 **시각을 옮기지 않는다** — BSON 은
+    이미 UTC 라 `astimezone` 으로 바꾸면 값이 로컬 오프셋만큼 밀린다.
+    """
+
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=UTC)
+
+
 def _to_job(doc: dict[str, Any]) -> AnalysisJob:
     failure_reason = doc.get("failure_reason")
     return AnalysisJob(
@@ -314,7 +331,7 @@ def _to_job(doc: dict[str, Any]) -> AnalysisJob:
         ),
         failure_detail=doc.get("failure_detail"),
         retry_count=int(doc.get("retry_count") or 0),
-        failed_at=doc.get("failed_at"),
+        failed_at=_aware(doc.get("failed_at")),
         writing_candidate_report=(
             immutable_payload(doc["writing_candidate_report"])
             if doc.get("writing_candidate_report") is not None else None),

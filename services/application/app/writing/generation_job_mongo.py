@@ -13,7 +13,7 @@ is not a concurrency hotspot — the worker claim is; see the module docstring i
 ``generation_job.py``.)
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from pymongo import ASCENDING, DESCENDING, MongoClient, ReturnDocument
 from pymongo.errors import DuplicateKeyError
@@ -161,6 +161,24 @@ def _doc(job: WritingGenerationJob) -> dict:
     }
 
 
+def _aware(value: datetime | None) -> datetime | None:
+    """BSON 날짜를 UTC-aware 로 되돌린다 — 저장소 공통의 경계 정규화.
+
+    ``mark_pending_for_retry`` 가 `cooldown_remaining` 에 aware `now` 와 함께
+    ``failed_at`` 을 넘기므로, 정규화가 빠지면 실패한 async job 의 retry 가 **500**
+    이다(analysis 어댑터에 있던 것과 같은 누락 — 둘 다 `63b6c0d`). 라벨만 붙이고
+    **시각은 옮기지 않는다**(BSON 은 이미 UTC).
+
+    ``created_at``·``claimed_at`` 은 **일부러 두었다** — 응답에 `.isoformat()` 으로
+    실려 나가는 값이라 여기서 aware 로 바꾸면 문자열 모양이 바뀐다(계약면). 그쪽은
+    별도 슬라이스다(HANDOFF 미수리 표).
+    """
+
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=UTC)
+
+
 def _entry(doc: dict) -> WritingGenerationJob:
     failure_reason = doc.get("failure_reason")
     return WritingGenerationJob(
@@ -190,5 +208,5 @@ def _entry(doc: dict) -> WritingGenerationJob:
         failure_detail=doc.get("failure_detail"),
         result_scratch_id=doc.get("result_scratch_id"),
         retry_count=int(doc.get("retry_count") or 0),
-        failed_at=doc.get("failed_at"),
+        failed_at=_aware(doc.get("failed_at")),
     )
