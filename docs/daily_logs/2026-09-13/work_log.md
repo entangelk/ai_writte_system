@@ -534,6 +534,29 @@ D5 의 경계(*"파기 실행 전까지"*)가 **처음으로 시행된다**. 종
 
 파이썬 쪽에서 Mongo 시각과 산술하는 자리는 저장소 전역에 `retry_policy.py:48` **하나**이고(`quota/policy.py:162` 의 anchor 는 정규화된 어댑터에서 온다), 그래서 이 결함의 표면은 정확히 **두 retry 엔드포인트**로 닫힌다.
 
+#### 3. 재시도 500 수선 — 두 자리를 한 슬라이스로 (`3757693`)
+
+**오너 결정 사안이 아니라고 판단한 근거**를 먼저 적는다. 이 저장소에는 같은 경계 정규화가 **21개 어댑터에 이미 있고**(`auth`·`activity`·`quota`·`core_sot`·`deletion`·`indexing`), `core_sot/mongo_repository.py:916` 의 `_aware` docstring 이 *"다른 어댑터와 같은 경계 정규화다"* 라고 규칙으로 못박아 두었다. HANDOFF 함정 절에도 같은 병의 선례가 있다. 즉 **새 선택이 아니라 규칙이 빠진 자리를 메우는 일**이고, 오너만 가진 정보(제품 방향·비용·외부 승인)가 필요하지 않다 — HANDOFF 결정 절의 *"이미 결정된 것의 자명한 귀결은 묻지 않는다"* 에 해당한다.
+
+- 처방: 두 어댑터에 `_aware()` 를 두고 `failed_at` 에만 적용. **라벨만 붙이고 시각은 안 옮긴다.**
+- **범위를 일부러 좁혔다** — 같은 문서의 `created_at`·`claimed_at`·`terminal_at` 은 **응답에 `.isoformat()` 으로 실려 나간다**(`routers/writing.py:218,271,1424` · `routers/analysis.py:1031`). 지금 배포는 그 자리에 **오프셋 없는 문자열**을 내보내고 있고(프런트 픽스처는 `…Z` 를 가정한다 — 어긋나 있다), 여기서 aware 로 바꾸면 **문자열 모양이 바뀐다 = 계약면 변경**이다. 그건 별도 슬라이스로 남기고 아래 미수리에 등재했다. `failed_at` 은 어떤 응답에도 실리지 않는다(전수 grep 0건) — 그래서 이 수선은 계약면 무변이다.
+
+**회귀 — `tests/test_retry_cooldown_naive_datetime.py` 6셀(어댑터 둘 × 3).** 한 파일에 둘을 담은 것은 같은 커밋이 심은 쌍둥이라는 사실 자체를 셀이 말하게 하려는 것이다.
+
+**기존 셀이 왜 못 봤는지도 셀에 적었다** — `test_analysis_job_state.py`·`test_writing_generation_job.py` 는 in-memory 저장소로 돈다. 그 저장소는 넣은 aware 를 그대로 돌려주므로 **드라이버가 실제로 하는 일(tzinfo 떼기)을 재현하지 않는다**. 전수가 초록인 채 배포가 깨져 있던 이유이고, 2026-07-27 세션 어댑터에서 똑같이 났던 병이다(`test_auth_sessions_mongo.py::NaiveBsonDatetimeTest` 가 그때 만든 선례 — 이번 셀은 그 모양을 따랐다).
+
+**변이 표** — 커밋(`3757693`) 뒤에 변이했고(`git status --short` 빈 것 확인 후 착수), 각 변이마다 앵커 `count == 1` 단정 → 치환 → 초점 실행 → `git checkout -- <경로>` 복원 → `git status --short` 빈 것 확인.
+
+| 변이 | 방향 | 적용 | 결과 | 기명 셀 |
+|---|---|---|---|---|
+| **MR-1** | under | `analysis/mongo_repository.py` 의 `_aware(doc.get("failed_at"))` → `doc.get("failed_at")` | **3 failed** / 3 passed | `AnalysisRetryReadsNaiveFailedAtTest` 3셀 전부 |
+| **MR-2** | under | `writing/generation_job_mongo.py` 같은 자리 | **3 failed** / 3 passed | `GenerationJobRetryReadsNaiveFailedAtTest` 3셀 전부 |
+| **MR-3** | over | **양쪽** `_aware` 의 `replace(tzinfo=UTC)` → `astimezone(UTC)` | **2 failed** / 4 passed | 양 클래스의 `test_relabelling_does_not_shift_the_instant` 정확히 둘 |
+
+**MR-3 이 이 슬라이스의 핵심 가드다.** BSON 은 이미 UTC라 naive 를 로컬 시각으로 해석하는 *변환* 은 값을 오프셋만큼 민다 — KST 에서 9시간 과거가 되고, 그러면 **실패 10초 뒤의 재시도가 429 대신 통과**해 쿨다운(오너 결정 S-1 D2의 60초)이 조용히 무력해진다. 이 방향은 **UTC 머신에서는 무해**해서 잴 수가 없으므로, 셀 클래스가 프로세스 시간대를 `Asia/Seoul` 로 고정하고 잰다(`time.tzset()`, `tearDownClass` 복원). 잴 수 없는 가드는 가드가 아니라는 판단이다.
+
+`mypy` 두 파일 무오류 · 초점 인접 6모듈 **93 passed** · analysis·writing 계열 선택 실행 **863 passed / 507 subtests**.
+
 ### 세션 84 주장 대조표 — 정정하지 않은 것들(전부 일치 확인)
 
 | 주장 | 실측 |
@@ -553,11 +576,13 @@ D5 의 경계(*"파기 실행 전까지"*)가 **처음으로 시행된다**. 종
 
 - 문서 가드 `tests/test_docs_indexes.py` + `tests/test_repo_hygiene.py` **29 passed / 962 subtests** — 세션 84 기준선과 동일(문서 수·링크 무변, 정정은 본문 리터럴).
 - 링크·앵커 검사기를 따로 돌렸다(가드는 `.md` 경로만 보고 `#앵커` 는 떼고 본다) — 4문서의 상대 링크·섹션 앵커 **전건 해석**, 0 실패. 세션 84가 새로 심은 상호 참조 앵커 셋(`#어떻게-풀었는가--llm-오케스트레이션-한눈에` 등)이 실제로 문다.
-- **코드 무변** — 이 세션은 문서만 고쳤다. §2의 결함은 등재만 하고 수선하지 않았다(오너 판단 대기).
+- **전수 재측정**(§3 이 백엔드 소스를 바꿨으므로 유도 금지 — 규칙대로 돌렸다): **3075 passed / 1 skipped / 4239 subtests · EXIT=0 · 351초**. 기준선 3069/1/4238 대비 **+6 passed · +1 subtest**. **귀속을 갈라 적는다(처음엔 틀리게 귀속했다가 실측으로 고쳤다)** — +6 passed 는 이 세션의 신규 셀 정확히 6이고, **+1 subtest 는 세션 84 몫**이다: 스크린샷·GIF 등재가 문서 가드 둘을 **961 → 962** 로 올렸는데 그 세션이 *"코드 무변"* 으로 전수를 안 돌려 기준선 줄에 안 들어와 있었다. 실측 — 문서 가드 둘 단독 **29 passed / 962 subtests**(세션 84 스스로 적은 값과 일치) · 이 세션의 셀 6은 `subTest` 를 쓰지 않아 subtest 를 **0** 낸다. **skip 은 1**(live Chroma) — 호스트 패키지 공백 없음.
+- 기준선 줄 둘을 함께 갱신했다(HANDOFF §회귀 기준선 · README 절차 표 ②행) — `test_docs_indexes::test_the_readme_repeats_the_regression_baseline` 이 둘을 묶고 있으므로 한쪽만 고치면 전수가 빨개진다.
 
 ### Next steps
 
-- **오너 결정 대기 — 재시도 500 수선 슬라이스**: 두 자리(`analysis/mongo_repository.py:317` · `writing/generation_job_mongo.py:193`)에 저장소 선례(`_aware()`)를 적용하고 **양방향 회귀**를 단다 — under: naive `failed_at` 을 심은 문서로 retry 를 부르면 재실패 / over: 정규화가 쿨다운 **판정 자체**를 무르게 하지 않는지(냉각 중이면 여전히 429). 두 자리를 한 슬라이스로 묶는 근거는 `git blame` 동일 커밋이다.
+- **독립 검증 대상**: 세션 85 의 §3(수선 + 셀 6 + 변이 3종)은 **구현자가 아닌 세션**이 반증해야 한다. 재현 지점을 적어 둔다 — 변이 앵커 셋(`_aware(doc.get("failed_at"))` ×2 · `return value.replace(tzinfo=UTC)` ×2)과 기명 셀, 그리고 **over 방향은 로컬 시간대가 UTC 면 물리지 않는다**는 사실(클래스가 `Asia/Seoul` 로 고정하는 이유).
+- **남은 이웃 — 응답 시각 넷의 오프셋 누락**(HANDOFF 미수리 표에 등재): `created_at`(생성 잡·loop audit·scratch)·`terminal_at`(gate findings)이 어댑터 정규화 없이 `.isoformat()` 으로 나가 `+00:00` 이 빠진다. **계약면이라 이번에 안 묶었다** — 닫으려면 응답 문자열 모양 변경을 계약으로 받고 프런트 픽스처를 동반한다. 지금은 프런트가 이 값을 날짜로 파싱하지 않아 증상이 없고, **파싱하는 화면이 생기는 때가 트리거**다.
 - 추적 부채(세션 84 밖의 선재 드리프트, 이번에 안 건드림): `docs/portfolio.md` §3·§7 은 **2026-08-25 스냅숏**을 문서 머리에서 선언하고 있으나 그 뒤로 값이 움직였다 — compose 서비스 10→**11**(`withdrawal_worker` 2026-09-09 추가), operation 87→**107**, SoT v1.8.4→**v1.8.68**, 결정 브리프 93→118. 스냅숏 규약상 거짓은 아니지만 이제 `architecture.md` 와 나란히 읽히므로 **기준일 갱신 슬라이스**가 필요하다.
 
 
