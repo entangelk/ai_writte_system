@@ -301,6 +301,21 @@ class GenerateTest(unittest.TestCase):
         # over-strict 방향: stop 종료의 정상 산문 통과는
         # test_plain_prose_is_wrapped_into_candidate 가 잠근다.
 
+    def test_non_stop_provider_output_is_rejected_as_provider_fault(self):
+        # B2 under-strict: == "length"로 가드를 좁히면 content_filter 산문이
+        # 후보·저장 성공으로 흐른다. stop 정상 산문은 plain-prose 셀이 잠근다.
+        provider = _FakeProvider(
+            content="아린은 성문을 넘었다.", finish_reason="content_filter"
+        )
+        with self.assertRaises(ProviderError) as caught:
+            _run(_service(provider).generate(
+                request=_request(), package=_package(),
+            ))
+        self.assertIs(caught.exception.code,
+                      ProviderErrorCode.INVALID_RESPONSE)
+        self.assertIn("content_filter", str(caught.exception))
+        self.assertFalse(caught.exception.retryable)
+
     def test_non_continue_scene_task_rejected(self):
         # over-strict (row 5): the enum has one member, so build an invalid one.
         class _OtherTask:

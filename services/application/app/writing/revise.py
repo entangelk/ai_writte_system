@@ -133,7 +133,15 @@ class WritingRevisionService:
         except Exception as exc:
             raise MeteredCallError(exc, result.usage) from exc
         if not replacement:
-            cause = InvalidWritingRevision("replacement must not be empty")
+            cause = ProviderError(
+                code=ProviderErrorCode.INVALID_RESPONSE,
+                message=(
+                    "provider returned an empty writing revision result "
+                    f"(finish_reason={result.finish_reason!r})"
+                ),
+                retryable=False,
+                provider="llm_gateway",
+            )
             raise MeteredCallError(cause, result.usage)
         if replacement == finding.evidence:
             cause = UnchangedWritingRevision(

@@ -153,3 +153,18 @@ D와 동일한 "length 인데 repair 를 돈다" 낭비가 1회 repair 파서 4�
 
 ### Next steps
 - B1(빈 revise 결과의 `INVALID_RESPONSE` 분류·finish_reason 메시지·usage 보존)과 B2(생성·revise 각 non-stop 일반값 회귀)를 시행한 뒤 독립 승격 재검과 전수를 수행한다.
+
+## 세션 6 — LLM 출력 가드 재감사 차단 B1·B2 폐쇄
+
+### Goals
+- 재감사 기록의 B1(빈 revise 결과 분류·진단·usage)과 B2(두 산문 표면의 length 외 non-stop 종료 경계)를 SoT v1.8.70 그대로 최소 변경으로 닫는다.
+
+### Completed work
+- **B1**: `WritingRevisionService.revise_metered`의 빈/공백 replacement를 `InvalidWritingRevision`이 아닌 생성 표면과 같은 `ProviderErrorCode.INVALID_RESPONSE`로 분류했다. `MeteredCallError`를 유지해 usage를 보존하고, 메시지에 `finish_reason`을 넣었다.
+- **B2**: 생성·개정 각각에 `finish_reason="content_filter"` 회귀를 추가했다. 기존 `length` 셀과 합쳐 `!= "stop"` 일반 계약을 잠그며, 각 셀은 code·실제 종료 사유·retryable을, revise는 usage까지 단정한다. 정상 `stop` 경로는 기존 생성/개정 성공 셀이 over-strict 방향으로 유지한다.
+
+### Verification
+- focused: 생성 빈·length·content_filter, 개정 빈·length·content_filter·정상 splice **7 passed** (`-p no:cacheprovider`).
+
+### Next steps
+- checkpoint commit 뒤 B1/B2 under-strict 및 정상 stop over-strict 변이를 재적용하고, 관련 파일·문서 가드와 전수를 재측정한다.

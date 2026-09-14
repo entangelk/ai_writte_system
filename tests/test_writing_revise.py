@@ -156,13 +156,19 @@ class WritingRevisionServiceTest(unittest.TestCase):
         self.assertEqual(revised.text, "앞 문장. 고친 문장. 뒤 문장.")
         self.assertEqual(usage.total_tokens, 2)
 
-    def test_revise_metered_invalid_result_carries_usage(self):
+    def test_revise_metered_empty_result_is_provider_fault_and_carries_usage(self):
+        # 빈/공백 치환문도 생성 표면과 같은 provider_invalid_response다. under-strict:
+        # 도메인 InvalidWritingRevision으로 되돌리면 HTTP 502·루프 재시도 분류가 갈린다.
         with self.assertRaises(MeteredCallError) as caught:
             asyncio.run(_service(_Provider("")).revise_metered(
                 candidate=_candidate(), finding=_finding(), instruction="고쳐줘",
                 package=_package(),
             ))
-        self.assertIsInstance(caught.exception.cause, InvalidWritingRevision)
+        cause = caught.exception.cause
+        self.assertIsInstance(cause, ProviderError)
+        self.assertIs(cause.code, ProviderErrorCode.INVALID_RESPONSE)
+        self.assertIn("finish_reason='stop'", str(cause))
+        self.assertFalse(cause.retryable)
         self.assertEqual(caught.exception.usage.total_tokens, 2)
 
     def test_truncated_replacement_is_rejected_as_provider_fault(self):
@@ -181,6 +187,23 @@ class WritingRevisionServiceTest(unittest.TestCase):
         self.assertIsInstance(cause, ProviderError)
         self.assertIs(cause.code, ProviderErrorCode.INVALID_RESPONSE)
         self.assertIn("length", str(cause))
+        self.assertFalse(cause.retryable)
+        self.assertEqual(caught.exception.usage.total_tokens, 2)
+
+    def test_non_stop_replacement_is_rejected_as_provider_fault(self):
+        # B2 under-strict: == "length"로 가드를 좁히면 content_filter 치환문이
+        # splice·저장된다. stop 정상 치환은 test_replaces_only_unique...가 잠근다.
+        with self.assertRaises(MeteredCallError) as caught:
+            asyncio.run(_service(
+                _Provider("고친 문장", finish_reason="content_filter")
+            ).revise_metered(
+                candidate=_candidate(), finding=_finding(), instruction="고쳐줘",
+                package=_package(),
+            ))
+        cause = caught.exception.cause
+        self.assertIsInstance(cause, ProviderError)
+        self.assertIs(cause.code, ProviderErrorCode.INVALID_RESPONSE)
+        self.assertIn("content_filter", str(cause))
         self.assertFalse(cause.retryable)
         self.assertEqual(caught.exception.usage.total_tokens, 2)
 
