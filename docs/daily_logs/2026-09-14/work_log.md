@@ -60,3 +60,29 @@
 
 ### Next steps
 - 오너 육안 확인(실기기 포함) → 도그푸드 관찰. 웹폰트 자체 호스팅·serif 제목 서체·비활성 버튼 색 갈림길은 그대로 열려 있다(HANDOFF 6번).
+
+## 세션 2 — LLM 출력 가드 조사 + 생성 표면 빈 출력 가드 (오너 요청 "가드 있는지 확인 + 보강")
+
+### Goals
+- gemma4_12b 게이트웨이의 LLM 호출/응답 가드 목록(오너 제공 분석)을 기준으로 이 저장소의 가드 현황을 대조·조사하고, 빠진 것이 있으면 보강한다.
+
+### Completed work
+- **가드 인벤토리 대조 완료** — 게이트웨이(`services/llm_gateway/`): stream 거부·thinking 토글(gemma4 485c4e2 이식)·창 가드 K-3(호출 전 `입력+출력상한≤n_ctx` 서버 실측 판정)·빈 choices 거부·`<thought>` 마크업 제거(닫히지 않으면 빈 문자열)·usage 엄격 검증. 앱: agent_loop 이중 예산·WritingLoopPolicy 상한(revision 2/검색 1/게이트 3)·`UnchangedWritingRevision` 루프 종료(동일 반복 차단 아날로그)·repair 상한(report 2회/extractor·judge 1회)·job 재시도 상한+쿨다운·gate/report/extractor/judge/planner 전부 strict 파서(스키마 exact-set·enum·증거 실재·1-based 포인터 검증). gemma4에만 있고 여기 없는 것(`reasoning_content` 재전송 차단·eval 금지)은 구조적으로 불필요(`ChatMessage`에 해당 필드 없음·계산기 없음).
+- **빈틈 2건 발견** — GAP-1: `finish_reason`을 게이트웨이가 반환하지만 앱 전체에서 아무도 소비하지 않음(`length`=잘린 출력이 완성 후보로 스크래치 저장·job 성공·과금). GAP-2: 생성 표면(산문 경로)만 빈 출력을 판단하지 않음 — 게이트/accept/수동 입력(400)은 이미 같은 계약으로 거부.
+- **GAP-2 폐쇄** (`09c002f`) — `WritingService.generate`에서 빈(공백만) `result.content`를 `INVALID_RESPONSE` `ProviderError`(502/PROVIDER_ERROR)로 승격. 게이트웨이 수준 거부는 기각: `닫히지 않은 thought → 빈 content 통과`가 변이 테스트까지 있는 문서화된 계약이라, 거부는 소비자 몫이고 다른 소비자는 전부 이미 거부한다.
+- 회귀 테스트 `test_empty_provider_output_is_rejected_as_provider_fault` 신설(양방향 명시).
+
+### Issues found
+- GAP-1(finish_reason 미소비)은 정책 방향이 갈리는 진짜 분기라 구현 전 결정 브리프를 제시했다(아래 Decisions). 잘린 report JSON은 같은 상한으로 repair 2회 재생성 후 같은 이유로 잘리는 낭비가 구조적으로 존재한다.
+
+### Decisions — User Decisions and Rationale
+- (대기 중) GAP-1 finish_reason 계약 — 브리프 제시: 옵션 A 게이트웨이 에러 승격(기각 권고) / B 산문 경로에서 `stop` 외 종료 거부(추천) / C audit 기록+UI 표시만 / D repair 단락(효율 후속). 오너 결정 대기.
+
+### Verification
+- `tests/test_writing.py` 69 passed / 22 subtests(변이 전) → 신규 셀 포함.
+- 변이 검증(구현 커밋 `09c002f` 뒤): 가드 조건을 `False and …`로 무력화 → 신규 셀 기명 재실패(1 failed) → `git checkout` 원복, 트리 clean 확인. over-strict 방향은 기존 `test_plain_prose_is_wrapped_into_candidate`(앞뒤 공백 산문 통과)가 잠금.
+- 광범위: writing 가족+게이트웨이 provider 8파일 237 passed / 140 subtests.
+- 패턴 스윕: `result.content` 소비처 전수 — 나머지는 전부 strict 파서로 빈 출력 이미 거부, 무방비 소비자는 산문 경로뿐이었다.
+
+### Next steps
+- GAP-1 오너 결정 → 선택지 반영 구현(선택 시 repair 단락 후속 포함 검토).
