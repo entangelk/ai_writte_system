@@ -232,13 +232,22 @@ class WritingRevisionServiceTest(unittest.TestCase):
                 ))
             self.assertEqual(provider.calls, 0)
 
-    def test_empty_and_unchanged_replacement_are_invalid_provider_results(self):
-        for content in ("   ", "잘못된 문장."):
-            with self.subTest(content=content), self.assertRaises(InvalidWritingRevision):
-                asyncio.run(_service(_Provider(content)).revise(
-                    candidate=_candidate(), finding=_finding(),
-                    instruction="고쳐줘", package=_package(),
-                ))
+    def test_empty_replacement_is_public_provider_fault(self):
+        # B1의 동기 표면: revise()는 MeteredCallError를 벗겨 502 분류를 보낸다.
+        with self.assertRaises(ProviderError) as caught:
+            asyncio.run(_service(_Provider("   ")).revise(
+                candidate=_candidate(), finding=_finding(),
+                instruction="고쳐줘", package=_package(),
+            ))
+        self.assertIs(caught.exception.code, ProviderErrorCode.INVALID_RESPONSE)
+
+    def test_unchanged_replacement_is_invalid_revision(self):
+        # 빈 provider 출력과 달리, 같은 evidence 재제출은 모델 응답이 아닌 개정 도메인 오류다.
+        with self.assertRaises(InvalidWritingRevision):
+            asyncio.run(_service(_Provider("잘못된 문장.")).revise(
+                candidate=_candidate(), finding=_finding(),
+                instruction="고쳐줘", package=_package(),
+            ))
 
     def test_markdown_fence_is_unwrapped_by_application(self):
         revised = asyncio.run(_service(_Provider("```text\n고친 문장.\n```" )).revise(

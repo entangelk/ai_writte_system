@@ -5,7 +5,7 @@
 > **완료 서술도, 근거·측정치·발견 경위도 여기 쓰지 않는다** — `docs/daily_logs/`(상세) · `docs/system-contract-sot.md` 변경이력 · `CHANGELOG.md`(마일스톤) · `docs/verifications/`(독립 검증) · `docs/plans/*-decisions.md`(왜 그렇게 정했는가)에 있다. **여기 남는 것은 "지키지 않으면 깨지는 것"과 "어디를 보면 되는가"뿐이다.**
 > 편집 규칙은 `CLAUDE.md`·`AGENTS.md`의 "HANDOFF.md" 절에 있다. **~200줄을 넘으면 자가 검수**하고(그 뒤로는 ~100줄마다) 결과를 아래 한 줄로 남긴다.
 >
-> 마지막 자가 검수: **2026-09-14 · 340줄** — LLM 출력 가드 재감사의 B1·B2는 시행·변이 재검 대기다: revise 빈 content의 `provider_invalid_response` 분류·finish_reason 진단 일치, 생성·revise의 non-stop 일반값 회귀. 근거·재현은 [`llm_output_guards_closure_reaudit.md`](docs/verifications/2026-09-14/llm_output_guards_closure_reaudit.md)에 있다.
+> 마지막 자가 검수: **2026-09-14 · 340줄** — LLM 출력 가드 재감사의 B1·B2는 시행·변이 재검까지 완료했다: revise 빈 content의 `provider_invalid_response` 분류·finish_reason 진단 일치, 생성·revise의 non-stop 일반값 회귀. 근거·재현은 [`llm_output_guards_closure_reaudit.md`](docs/verifications/2026-09-14/llm_output_guards_closure_reaudit.md)에 있다. 다음 일은 독립 승격 재검·전수 재측정이다.
 
 ## 머신 · 기동
 

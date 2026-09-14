@@ -160,11 +160,22 @@ D와 동일한 "length 인데 repair 를 돈다" 낭비가 1회 repair 파서 4�
 - 재감사 기록의 B1(빈 revise 결과 분류·진단·usage)과 B2(두 산문 표면의 length 외 non-stop 종료 경계)를 SoT v1.8.70 그대로 최소 변경으로 닫는다.
 
 ### Completed work
-- **B1**: `WritingRevisionService.revise_metered`의 빈/공백 replacement를 `InvalidWritingRevision`이 아닌 생성 표면과 같은 `ProviderErrorCode.INVALID_RESPONSE`로 분류했다. `MeteredCallError`를 유지해 usage를 보존하고, 메시지에 `finish_reason`을 넣었다.
+- **B1**: `WritingRevisionService.revise_metered`의 빈/공백 replacement를 `InvalidWritingRevision`이 아닌 생성 표면과 같은 `ProviderErrorCode.INVALID_RESPONSE`로 분류했다. `MeteredCallError`를 유지해 usage를 보존하고, 메시지에 `finish_reason`을 넣었다. 2026-07-13의 기존 셀이 공백과 unchanged evidence를 같은 도메인 오류로 묶은 것을 발견해, 전자는 public `revise()`의 provider 502·후자는 도메인 오류로 분리했다.
 - **B2**: 생성·개정 각각에 `finish_reason="content_filter"` 회귀를 추가했다. 기존 `length` 셀과 합쳐 `!= "stop"` 일반 계약을 잠그며, 각 셀은 code·실제 종료 사유·retryable을, revise는 usage까지 단정한다. 정상 `stop` 경로는 기존 생성/개정 성공 셀이 over-strict 방향으로 유지한다.
 
+### 변이 표 (checkpoint `f5060b8` 뒤 — 매 회 역패치 원복·clean 확인)
+
+| # | 방향 | 적용 diff | 위치 | 재실패 셀 |
+|---|---|---|---|---|
+| M11 | under | 빈 replacement의 `ProviderError(...)` → `InvalidWritingRevision("replacement must not be empty")` | `revise.py:135` | `test_revise_metered_empty_result_is_provider_fault_and_carries_usage` (1) |
+| M12 | under | 두 `if result.finish_reason != "stop"` → `== "length"` | `service.py:130`, `revise.py:151` | `test_non_stop_provider_output_is_rejected_as_provider_fault`, `test_non_stop_replacement_is_rejected_as_provider_fault` (2) |
+| M13 | over | 두 `if result.finish_reason != "stop"` → `if True` | `service.py:130`, `revise.py:151` | `test_plain_prose_is_wrapped_into_candidate`, `test_replaces_only_unique_evidence_and_clears_stale_report` (2) |
+
 ### Verification
-- focused: 생성 빈·length·content_filter, 개정 빈·length·content_filter·정상 splice **7 passed** (`-p no:cacheprovider`).
+- contract focused: 생성 빈·length·content_filter·정상 stop, 개정 metered 빈·public 빈·length·content_filter·정상 splice·unchanged **10 passed** (`-p no:cacheprovider`).
+- related classes: `GenerateTest` + `WritingRevisionServiceTest` **20 passed / 4 subtests** (5.89초).
+- 문서 가드: `test_docs_indexes.py` **20 passed / 330 subtests** (13.27초), `test_repo_hygiene.py` **9 passed / 638 subtests** (25.42초).
+- 3파일 전체는 실행 셀 30초 제한으로 12개 뒤 강제 종료되어, 변경 경계의 named focused·두 관련 클래스로 분할 검증했다. 전수는 이 작업자가 시작하지 않았다.
 
 ### Next steps
-- checkpoint commit 뒤 B1/B2 under-strict 및 정상 stop over-strict 변이를 재적용하고, 관련 파일·문서 가드와 전수를 재측정한다.
+- 독립 승격 재검과 환경을 명시한 전수 재측정은 다음 검증자의 몫이다. 1회 repair 파서 5곳의 length 낭비는 SoT 트리거가 올 때까지 유예다.
