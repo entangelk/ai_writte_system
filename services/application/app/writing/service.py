@@ -124,6 +124,19 @@ class WritingService:
                 retryable=False,
                 provider="llm_gateway",
             )
+        if result.finish_reason != "stop":
+            # GAP-1 계약(B, 오너 2026-09-14): stop 외 종료는 대부분 length — 출력이
+            # 상한에서 잘렸다는 뜻이다. 잘린 산문을 완성 후보로 내보내면 저장·과금이
+            # 모두 "정상"으로 기록된다(조용한 헛소리). 실제 종료 사유를 메시지에 싣는다.
+            raise ProviderError(
+                code=ProviderErrorCode.INVALID_RESPONSE,
+                message=(
+                    "provider finished without completing the generation: "
+                    f"finish_reason={result.finish_reason!r}"
+                ),
+                retryable=False,
+                provider="llm_gateway",
+            )
         candidate = WritingCandidate(
             request_id=request.request_id,
             project_id=request.project_id,

@@ -116,8 +116,12 @@ class WritingCandidateReportService:
             report, error = None, exc
         # Bounded repair loop: feed the latest malformed output + its parse error
         # back for up to MAX_REPORT_REPAIRS retries before discarding the candidate.
+        # GAP-1 D(오너 2026-09-14): length 로 잘린 출력은 같은 상한의 재생성이 같은
+        # 잘림을 반복한다 — 예측 가능한 실패에는 repair 예산을 태우지 않는다. 판정은
+        # 항상 최신 결과 기준이다(repair 도중 잘리면 다음 repair 도 건너뛴다).
         repairs = 0
-        while report is None and repairs < MAX_REPORT_REPAIRS:
+        while (report is None and repairs < MAX_REPORT_REPAIRS
+               and result.finish_reason != "length"):
             repairs += 1
             try:
                 retry = await self.provider.generate(ChatCompletionRequest(messages=(
@@ -129,6 +133,7 @@ class WritingCandidateReportService:
                 raise MeteredCallError(exc, usage) from exc
             usage = add_usage(usage, retry.usage)
             raw = retry.content
+            result = retry
             try:
                 report = parse_report(raw, allowed_pointers=allowed)
             except ValueError as exc:

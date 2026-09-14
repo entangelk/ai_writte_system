@@ -31,12 +31,14 @@ def _payload():
 
 
 class _Provider:
-    def __init__(self, outputs):
+    def __init__(self, outputs, *, finish="stop"):
         self.outputs=list(outputs); self.calls=0; self.requests=[]
+        self._finish=finish
     async def generate(self, request):
         self.calls += 1
         self.requests.append(request)
-        return GenerationResult("fake", self.outputs.pop(0), "stop", TokenUsage(1,1))
+        return GenerationResult("fake", self.outputs.pop(0), self._finish,
+                                TokenUsage(1,1))
 
 
 class WritingReportTest(unittest.TestCase):
@@ -95,6 +97,23 @@ class WritingReportTest(unittest.TestCase):
         self.assertIn("narrative_event|character_state", system_prompt)
         self.assertIn("low|medium|high|critical", system_prompt)
         self.assertEqual(provider.requests[1].messages[0].content, system_prompt)
+
+    def test_truncated_first_output_skips_the_repair_loop(self):
+        # GAP-1 D(오너 2026-09-14): length 로 잘린 출력은 같은 상한의 재생성이 같은
+        # 잘림을 반복한다 — repair 예산을 태우지 않고 곧바로 실패한다.
+        # under-strict: repair 를 돌리면 calls==2 로 재실패한다.
+        provider=_Provider(["bad"], finish="length")
+        templates=PromptTemplateService(InMemoryPromptTemplateRepository())
+        seed_report_template(templates)
+        service=WritingCandidateReportService(provider, prompt_templates=templates)
+        candidate=WritingCandidate("r","p",WritingTaskType.CONTINUE_SCENE,
+                                   WritingOutputType.DRAFT_PATCH,"본문")
+        package=ContextPackage("p",ContextSearchPurpose.WRITING_CONTEXT,(),(),(),(),0,False)
+        with self.assertRaises(InvalidCandidateReport):
+            asyncio.run(service.enrich(candidate, package))
+        self.assertEqual(provider.calls,1)
+        # over-strict 방향: stop 종료의 malformed 출력은 여전히 repair 한다 —
+        # test_invalid_first_output_repairs_once 가 그 셀이다.
 
     def test_enrich_metered_sums_initial_and_repair_usage(self):
         # Phase 5.10 ("B2"): enrich_metered returns the summed provider usage of

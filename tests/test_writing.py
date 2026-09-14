@@ -139,9 +139,11 @@ def _request(project_id="p1", *, instruction="이어서 써줘.",
 
 
 class _FakeProvider:
-    def __init__(self, content="아린은 성문 앞에서 멈췄다.", *, error=None):
+    def __init__(self, content="아린은 성문 앞에서 멈췄다.", *, error=None,
+                 finish_reason="stop"):
         self._content = content
         self._error = error
+        self._finish_reason = finish_reason
         self.last_request = None
 
     async def generate(self, request):
@@ -150,7 +152,7 @@ class _FakeProvider:
             raise self._error
         return GenerationResult(
             model="fake-writer", content=self._content,
-            finish_reason="stop", usage=TokenUsage(1, 1),
+            finish_reason=self._finish_reason, usage=TokenUsage(1, 1),
         )
 
 
@@ -282,6 +284,22 @@ class GenerateTest(unittest.TestCase):
         self.assertFalse(caught.exception.retryable)
         # over-strict 방향: 공백을 둘러싼 정상 산문은 여전히 통과한다 —
         # test_plain_prose_is_wrapped_into_candidate 가 그 셀이다.
+
+    def test_truncated_provider_output_is_rejected_as_provider_fault(self):
+        # under-strict: finish_reason=length(상한에서 잘림)가 완성 후보로 흐르면
+        # 재실패한다 — GAP-1 계약 B(오너 2026-09-14). 잘린 산문의 저장·과금이
+        # "정상"으로 기록되는 것이 이 가드가 막는 실패 모드다.
+        provider = _FakeProvider(content="아린은 성문을 ", finish_reason="length")
+        with self.assertRaises(ProviderError) as caught:
+            _run(_service(provider).generate(
+                request=_request(), package=_package(),
+            ))
+        self.assertIs(caught.exception.code,
+                      ProviderErrorCode.INVALID_RESPONSE)
+        self.assertIn("length", str(caught.exception))
+        self.assertFalse(caught.exception.retryable)
+        # over-strict 방향: stop 종료의 정상 산문 통과는
+        # test_plain_prose_is_wrapped_into_candidate 가 잠근다.
 
     def test_non_continue_scene_task_rejected(self):
         # over-strict (row 5): the enum has one member, so build an invalid one.
