@@ -10,7 +10,7 @@
 | **계약** | [`system-contract-sot.md`](system-contract-sot.md) | 확정된 계약의 **현재 정본**과 버전별 변경 이유 |
 | **아키텍처** | [`architecture.md`](architecture.md) | arc42 축약형 지도 — 컨텍스트·컨테이너·런타임 시나리오·배포 뷰 (계약이 아니라 그림으로 되짚는 진입 문서) |
 | **결정** | [`plans/README.md`](plans/README.md) | Phase 계획 + 착수 결정 브리프 118개 |
-| **검증** | [`verifications/README.md`](verifications/README.md) | 독립 검증 기록 316건(반증 시도·뮤테이션·판정) |
+| **검증** | [`verifications/README.md`](verifications/README.md) | 독립 검증 기록 317건(반증 시도·뮤테이션·판정) |
 | **정책** | [`service-policy-contract.md`](service-policy-contract.md) · [`legal/`](legal/README.md) | 회원에게 약속하는 정책값(코드의 파생본, 가드가 상수와 대조) + 약관·방침(버전 `1.1` · 시행 2026-09-13) |
 | **운영 관찰** | [`dogfood-checklist.md`](dogfood-checklist.md) | 실사용에서 무엇을 지켜볼지 — HANDOFF Next Tasks 가 실제로 가리키는 살아 있는 목록 |
 | **실행 이력** | [`daily_logs/`](daily_logs/) | 일자별 작업 로그·오너 결정·실측값 |

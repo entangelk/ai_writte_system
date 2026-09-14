@@ -132,3 +132,24 @@ D와 동일한 "length 인데 repair 를 돈다" 낭비가 1회 repair 파서 4�
 - 집중(파일 목록, H3): `tests/test_writing_revise.py` `tests/test_writing_report.py` `tests/test_writing.py` — **142 passed / 84 subtests**.
 - 문서 가드: `tests/test_docs_indexes.py` `tests/test_repo_hygiene.py` — **29 passed / 966 subtests**(SoT/plans/CHANGELOG/product-overview/README/HANDOFF 편집 뒤).
 - 전수(호스트·파일 캡처): **3080 passed / 1 skipped / 4274 subtests · EXIT=0 · 1885.32초** (+2 passed = 신규 셀 2 · +2 subtests = 검증 기록 `df4e909`의 기록 파일·인덱스 행 몫 — 검증자 전수 뒤 커밋돼 이번 전수가 처음 짊어짐. 본 슬라이스 문서는 기존 파일 편집만이라 subtests 무변). 기준선 줄(HANDOFF)·README ②행 동시 갱신.
+
+## 세션 5 — LLM 출력 가드 조건 폐쇄 독립 재감사
+
+### Goals
+- C1~C3 폐쇄 주장과 SoT v1.8.70의 산문 두 표면 계약을 구현·테스트·변이로 다시 대조한다.
+
+### Completed work
+- C1 length 가드 제거·C2 `result = retry` 삭제·stop도 거부하는 과잉 교정 변이를 각각 재적용했다. 새 revise length 셀, C2 calls=2 셀, 기존 stop 정상 셀이 각각 재실패해 그 세 경계는 성립했다.
+- 독립 기록 `verifications/2026-09-14/llm_output_guards_closure_reaudit.md`와 인덱스를 추가했다. 이 검증은 코드·테스트를 수정하지 않았다.
+
+### Issues found
+- **B1 차단**: 정본은 revise도 빈/공백 content를 `provider_invalid_response`로 분류하고 finish_reason을 진단에 싣는다고 하나, `revise.py`는 먼저 `InvalidWritingRevision`으로 분기한다.
+- **B2 차단**: 계약은 `finish_reason != "stop"` 전체인데 양 표면의 회귀 표본은 `length`뿐이다. revise 가드를 `== "length"`로 좁힌 변이도 기존 length·stop focused 셀이 모두 통과해, 다른 non-stop 문자열을 허용하는 과소 보정을 잡지 못했다.
+
+### Verification
+- focused 원 트리: 5 passed (revise length·정상 계량, report initial/mid-loop length·stop repair).
+- 변이: C1 가드 제거 → 1 failed; C2 최신 결과 갱신 제거 → calls 3≠2, 1 failed; stop도 거부 → 정상 revise 2 failed; `!= "stop"`→`== "length"` → 기존 focused 2 passed(무셀 증명). 변이마다 역패치로 복원하고 diff가 비었음을 확인했다.
+- 새 차단을 확인한 시점에 작업자 전수 3080/1/4274은 이 세션에서 재실행하지 않았다. B1·B2 폐쇄 뒤 clean 트리에서 환경과 함께 재측정할 일이다.
+
+### Next steps
+- B1(빈 revise 결과의 `INVALID_RESPONSE` 분류·finish_reason 메시지·usage 보존)과 B2(생성·revise 각 non-stop 일반값 회귀)를 시행한 뒤 독립 승격 재검과 전수를 수행한다.

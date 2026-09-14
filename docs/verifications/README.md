@@ -1,7 +1,7 @@
 # 독립 검증 기록
 
 이 디렉터리는 **구현자가 아닌 검증자가** 각 슬라이스를 다시 뜯어본 기록이다. 2026-06-24부터
-**74일치 · 316건**이 쌓여 있다.
+**74일치 · 317건**이 쌓여 있다.
 
 > **★ 2026-08-23 이전 기록의 커밋 해시는 이 저장소에서 `git show` 로 안 잡힌다 — 기록이 틀린 것이 아니다.**
 > 그날 `git filter-repo` 로 이력을 재작성해(퍼블릭 전환 전 보안 점검) **커밋 해시가 전부 바뀌었다**
@@ -66,7 +66,7 @@
 | 판정 | 건수 | 뜻 |
 |---|---|---|
 | 합격 | 216 | blocking 결함 없음 |
-| **조건부 합격** | **95** | 합격이되 닫아야 할 조건이 있었다 |
+| **조건부 합격** | **96** | 합격이되 닫아야 할 조건이 있었다 |
 | **불합격** | **5** | 핵심 계약 위반으로 다음 슬라이스 진행이 차단됐다 |
 
 **조건부 합격이 30%**라는 것이 이 절차가 형식이 아니라는 증거다. 검증이 실제로 지적을 냈고,
@@ -97,6 +97,7 @@
 
 | 기록 | 요약 | 판정 |
 |---|---|---|
+| [`llm_output_guards_closure_reaudit.md`](2026-09-14/llm_output_guards_closure_reaudit.md) | **LLM 출력 가드 C1~C3 폐쇄(`d26fe1e`·`35d3e21`) 독립 재감사.** C1 length 거부·C2 최신 결과 갱신은 변이로 재실패했고, stop 정상 치환을 막는 과잉 교정도 기존 셀이 문다. 그러나 정본 v1.8.70이 말한 두 산문 표면의 **"같은 두 가드·같은 분류"**와 실제 revise가 갈린다: 공백 content는 `provider_invalid_response`·finish_reason 진단이 아니라 `InvalidWritingRevision`으로 먼저 빠진다. 또 `!= "stop"` 계약은 length 표본만 있어 `== "length"`로 좁혀도 focused 셀이 초록이다. **차단 B1·B2**: revise 빈 결과 분류/진단 정렬 및 양 표면 non-stop 일반값 회귀가 필요하다. | **조건부 합격** |
 | [`llm_output_guards_gap1_gap2.md`](2026-09-14/llm_output_guards_gap1_gap2.md) | **LLM 출력 가드 보강(GAP-2 `09c002f` · GAP-1 B+D `8f6682c`) 독립 검증.** 가드 실질은 전부 성립 — finish_reason 전파 체인(llama `choice` 엄격 파싱→게이트웨이 응답→앱 provider→서비스)에 하드코딩·기본값 없음을 전 구간 추적(죽은 코드 아님) · 검증자 변이 **7종** 재실행(under 3·over 3 기명 재실패 · **M7은 `result=retry` 삭제에 18셀 전원 초록**) · 전수 **3078/1/4272 EXIT=0**(기준선+3=신규 셋의 정확히 몫) · 광범위 초집합 30파일 **632/257** · fixture finish_reason 전수 `"stop"` · gemma4 `485c4e2` thinking 토글 실재 확인. **차단 3**: **C1** 결정 문면 "산문 경로에서 stop 외 거부"가 `WritingService.generate`에만 시행됐고 **`revise.py`가 같은 산문 표면인데 finish_reason 무가드** — length 잘린 치환문이 원고에 splice·저장·과금(GAP-1이 막기로 한 실패 모드의 잔존, 오너 범위 확정 필요) · **C2** D의 "최신 결과 기준" mid-loop 분기는 동작(calls=2 실측)하나 잠금 셀 없음(M7 실증) · **C3** 세 계약 리터럴(빈→INVALID_RESPONSE 502·stop 외 거부·length repair 단락)이 SoT·plans에 무반영(report 플랜은 "1회 repair"로 드리프트). 하드닝 7(retrieval.py 5번째 부채 누락 · work_log 3종↔CHANGELOG "5종" 변이 기록 불일치 · "13파일 400/187" 비재현 · 빈 content 메시지에 finish_reason 부재 · product-overview 낡은 문구 · finish_reason 대소문자 정규화 없음 · 슬라이스가 백엔드 셀 수를 움직이고도 HANDOFF/README 기준선 미갱신 — 검증자가 3078/1/4272로 갱신). | **조건부 합격** |
 
 ### 2026-09-13
