@@ -31,14 +31,17 @@ def _payload():
 
 
 class _Provider:
+    # outputs 항목은 str(→ finish) 또는 (content, finish_reason) 쌍 — 호출별 종료
+    # 사유가 필요한 셀(검증 C2)만 쌍을 쓰고 기존 str 셀은 무변으로 둔다.
     def __init__(self, outputs, *, finish="stop"):
-        self.outputs=list(outputs); self.calls=0; self.requests=[]
-        self._finish=finish
+        self.outputs=[o if isinstance(o, tuple) else (o, finish)
+                      for o in outputs]
+        self.calls=0; self.requests=[]
     async def generate(self, request):
         self.calls += 1
         self.requests.append(request)
-        return GenerationResult("fake", self.outputs.pop(0), self._finish,
-                                TokenUsage(1,1))
+        content, finish = self.outputs.pop(0)
+        return GenerationResult("fake", content, finish, TokenUsage(1,1))
 
 
 class WritingReportTest(unittest.TestCase):
@@ -114,6 +117,22 @@ class WritingReportTest(unittest.TestCase):
         self.assertEqual(provider.calls,1)
         # over-strict 방향: stop 종료의 malformed 출력은 여전히 repair 한다 —
         # test_invalid_first_output_repairs_once 가 그 셀이다.
+
+    def test_a_repair_that_finishes_length_stops_further_repairs(self):
+        # GAP-1 D '최신 결과 기준' 분기 잠금(검증 C2, 2026-09-14): 첫 출력은 stop 이라
+        # repair 로 들어가되, repair 결과가 length 로 잘리면 다음 repair 는 건너뛴다
+        # (result = retry 갱신이 이 계약의 메커니즘이다). 세 번째 출력 "bad3" 은
+        # 잘못된 구현이 repair2 까지 돌 때 그 사실을 calls 수로 드러내기 위한 미끼다.
+        provider=_Provider(["bad1", ("bad2", "length"), "bad3"])
+        templates=PromptTemplateService(InMemoryPromptTemplateRepository())
+        seed_report_template(templates)
+        service=WritingCandidateReportService(provider, prompt_templates=templates)
+        candidate=WritingCandidate("r","p",WritingTaskType.CONTINUE_SCENE,
+                                   WritingOutputType.DRAFT_PATCH,"본문")
+        package=ContextPackage("p",ContextSearchPurpose.WRITING_CONTEXT,(),(),(),(),0,False)
+        with self.assertRaises(InvalidCandidateReport):
+            asyncio.run(service.enrich(candidate, package))
+        self.assertEqual(provider.calls,2)
 
     def test_enrich_metered_sums_initial_and_repair_usage(self):
         # Phase 5.10 ("B2"): enrich_metered returns the summed provider usage of

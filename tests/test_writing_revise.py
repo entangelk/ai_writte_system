@@ -93,9 +93,10 @@ def _finding(evidence="잘못된 문장.", *, finding_type=WritingGateFindingTyp
 
 
 class _Provider:
-    def __init__(self, content="고친 문장.", *, error=None):
+    def __init__(self, content="고친 문장.", *, error=None, finish_reason="stop"):
         self.content = content
         self.error = error
+        self.finish_reason = finish_reason
         self.calls = 0
         self.last_request = None
         self.last_package = None
@@ -105,7 +106,8 @@ class _Provider:
         self.last_request = request
         if self.error:
             raise self.error
-        return GenerationResult("fake-reviser", self.content, "stop", TokenUsage(1, 1))
+        return GenerationResult("fake-reviser", self.content,
+                                self.finish_reason, TokenUsage(1, 1))
 
 
 class _SequenceProvider(_Provider):
@@ -161,6 +163,25 @@ class WritingRevisionServiceTest(unittest.TestCase):
                 package=_package(),
             ))
         self.assertIsInstance(caught.exception.cause, InvalidWritingRevision)
+        self.assertEqual(caught.exception.usage.total_tokens, 2)
+
+    def test_truncated_replacement_is_rejected_as_provider_fault(self):
+        # GAP-1 B 확장(검증 C1-a, 오너 2026-09-14): length 로 잘린 치환문이 원고에
+        # splice 되는 것을 막는다. under-strict: 가드가 없으면 잘린 개정이
+        # 저장·반환되어 재실패한다. MeteredCallError 감싼 usage 도 검사한다(루프 집계).
+        # over-strict 방향: stop 종료 치환의 정상 splice 는 위 revise 셀들이 잠근다.
+        with self.assertRaises(MeteredCallError) as caught:
+            asyncio.run(_service(
+                _Provider("고친 문장", finish_reason="length")
+            ).revise_metered(
+                candidate=_candidate(), finding=_finding(), instruction="고쳐줘",
+                package=_package(),
+            ))
+        cause = caught.exception.cause
+        self.assertIsInstance(cause, ProviderError)
+        self.assertIs(cause.code, ProviderErrorCode.INVALID_RESPONSE)
+        self.assertIn("length", str(cause))
+        self.assertFalse(cause.retryable)
         self.assertEqual(caught.exception.usage.total_tokens, 2)
 
     def test_missing_or_duplicate_anchor_rejected_before_provider(self):

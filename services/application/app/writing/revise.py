@@ -19,6 +19,7 @@ from services.application.app.writing.models import (
 )
 from services.application.app.writing.metering import MeteredCallError
 from services.application.app.writing.prompt import format_context_package
+from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
 from services.llm_gateway.app.payload import ChatCompletionRequest, ChatMessage
 from services.llm_gateway.app.provider import LLMProvider, TokenUsage
 
@@ -137,6 +138,21 @@ class WritingRevisionService:
         if replacement == finding.evidence:
             cause = UnchangedWritingRevision(
                 "replacement did not change the evidence"
+            )
+            raise MeteredCallError(cause, result.usage)
+        if result.finish_reason != "stop":
+            # GAP-1 B 확장(검증 C1-a, 오너 2026-09-14): 개정 치환문도 산문 표면이다.
+            # length 로 잘린 치환문이 그대로 원고에 splice 되면 잘린 개정의 저장·과금이
+            # "정상"으로 기록된다 — generate 와 같은 분류(INVALID_RESPONSE)로 거부한다.
+            # MeteredCallError 로 감싸 usage 를 루프 집계에 흘린다(빈·동일 치환과 같은 결).
+            cause = ProviderError(
+                code=ProviderErrorCode.INVALID_RESPONSE,
+                message=(
+                    "writing revise finished without completing the "
+                    f"replacement: finish_reason={result.finish_reason!r}"
+                ),
+                retryable=False,
+                provider="llm_gateway",
             )
             raise MeteredCallError(cause, result.usage)
         start = candidate.text.index(finding.evidence)

@@ -120,7 +120,10 @@ class WritingService:
             # 흘렀다 — 업스트림 실패(502/PROVIDER_ERROR)로 승격한다.
             raise ProviderError(
                 code=ProviderErrorCode.INVALID_RESPONSE,
-                message="provider returned an empty generation result",
+                message=(
+                    "provider returned an empty generation result "
+                    f"(finish_reason={result.finish_reason!r})"
+                ),
                 retryable=False,
                 provider="llm_gateway",
             )
