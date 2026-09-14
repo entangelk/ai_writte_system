@@ -268,6 +268,21 @@ class GenerateTest(unittest.TestCase):
                 request=_request(), package=_package(),
             ))
 
+    def test_empty_provider_output_is_rejected_as_provider_fault(self):
+        # under-strict: 게이트웨이는 빈 content를 정직한 신호로 통과시키므로(닫히지 않은
+        # thought 계약), 이 소비자가 거부하지 않으면 빈 후보가 200·scratch 저장·job
+        # 성공으로 흘러간다. 게이트·accept·수동 입력 경로가 이미 같은 계약을 지킨다.
+        provider = _FakeProvider(content="   ")
+        with self.assertRaises(ProviderError) as caught:
+            _run(_service(provider).generate(
+                request=_request(), package=_package(),
+            ))
+        self.assertIs(caught.exception.code,
+                      ProviderErrorCode.INVALID_RESPONSE)
+        self.assertFalse(caught.exception.retryable)
+        # over-strict 방향: 공백을 둘러싼 정상 산문은 여전히 통과한다 —
+        # test_plain_prose_is_wrapped_into_candidate 가 그 셀이다.
+
     def test_non_continue_scene_task_rejected(self):
         # over-strict (row 5): the enum has one member, so build an invalid one.
         class _OtherTask:

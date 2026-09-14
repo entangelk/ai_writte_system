@@ -6,8 +6,10 @@ provider pattern of ``analysis/compare_judge.py`` but needs no JSON parse/repair
 because the output is prose, not structured JSON.
 
 Deterministic safety in this slice is limited to what generation can enforce
-without an LLM: project isolation, task-type, and a non-empty instruction (owner
-D6). do_not_use/POV *semantic* verification is the Writing Gate slice.
+without an LLM: project isolation, task-type, a non-empty instruction (owner
+D6), and a non-empty provider result (the prose path's empty-output guard — the
+gate/revise/report parsers reject emptiness at their own boundaries).
+do_not_use/POV *semantic* verification is the Writing Gate slice.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from services.application.app.analysis.prompt_templates import (
     PromptTemplateError,
     PromptTemplateService,
 )
+from services.llm_gateway.app.errors import ProviderError, ProviderErrorCode
 from services.llm_gateway.app.provider import LLMProvider
 from typing import Protocol
 
@@ -109,6 +112,18 @@ class WritingService:
         # A provider fault (ProviderError) is not swallowed — it propagates so the
         # HTTP layer maps it to 502 (never a success disguising a failure).
         result = await self._provider.generate(chat_request)
+        if not result.content.strip():
+            # 게이트웨이는 빈 content를 "정직한 신호"로 통과시킨다(닫히지 않은 thought 를
+            # 지어내지 않는 계약). 그 빈 답을 거부할지는 소비자의 몫이고 gate(validate)·
+            # revise(빈 replacement)·report(strict 파싱)은 이미 각자 거부한다. 이 산문
+            # 경로가 유일하게 판단하지 않아 빈 후보가 scratch 저장·200 응답·job 성공으로
+            # 흘렀다 — 업스트림 실패(502/PROVIDER_ERROR)로 승격한다.
+            raise ProviderError(
+                code=ProviderErrorCode.INVALID_RESPONSE,
+                message="provider returned an empty generation result",
+                retryable=False,
+                provider="llm_gateway",
+            )
         candidate = WritingCandidate(
             request_id=request.request_id,
             project_id=request.project_id,
