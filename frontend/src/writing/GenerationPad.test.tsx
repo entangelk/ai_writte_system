@@ -63,6 +63,18 @@ describe("GenerationPad (증분 3 D6)", () => {
     ).toBeInTheDocument();
   });
 
+  it("names the five-minute context-search deadline instead of a token budget", () => {
+    render(
+      <GenerationPad
+        activeJobs={[]}
+        failedJobs={[job({ status: "failed", failure_reason: "context_budget_exceeded" })]}
+        onDismissFailed={vi.fn()}
+        onRetryFailed={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/근거 검색이 5분 안에 끝나지 않아/)).toBeInTheDocument();
+  });
+
   it("falls back to the raw reason for an unknown failure reason", () => {
     render(
       <GenerationPad

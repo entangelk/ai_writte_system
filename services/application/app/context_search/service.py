@@ -87,7 +87,9 @@ from services.llm_gateway.app.errors import ProviderError
 # candidate-origin item from a canonical-memory or source-block one.
 CANDIDATES_COLLECTION = "analysis_candidates"
 
-DEFAULT_WALL_CLOCK_SECONDS = 60
+# Owner 2026-09-14: planning, embedding, and backing-store retrieval can each
+# take substantial time; the ContextPackage request ceiling is five minutes.
+DEFAULT_WALL_CLOCK_SECONDS = 300
 DEFAULT_VECTOR_HIT_LIMIT = 8
 DEFAULT_RECENT_SCENE_BLOCK_LIMIT = 5
 

@@ -29,6 +29,7 @@ from services.application.app.context_search.service import (
     ContextSearchBudgetExceeded,
     ContextSearchFailed,
     ContextSearchService,
+    DEFAULT_WALL_CLOCK_SECONDS,
     InvalidContextSearchRequest,
     estimate_tokens,
     evaluate_context_gate,
@@ -723,6 +724,11 @@ class ContextSearchPackageTest(unittest.IsolatedAsyncioTestCase):
                 _request(saved, needs=(ContextNeed.SOURCE_QUOTE,))
             )
         self.assertIs(ctx.exception.error_type, ContextSearchErrorType.LLM_ERROR)
+
+    def test_default_wall_clock_budget_is_five_minutes(self):
+        # Owner 2026-09-14: retrieval may include planner, embedding, and store
+        # calls, so its per-request wall-clock ceiling is 5 minutes.
+        self.assertEqual(DEFAULT_WALL_CLOCK_SECONDS, 300)
 
     async def test_wall_clock_budget_exceeded_raises_budget_error(self):
         core_sot, vector_index, indexing, saved = _fixture()

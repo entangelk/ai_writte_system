@@ -15,7 +15,7 @@ const LENGTH_LABEL: Record<string, string> = {
 const FAILURE_COPY: Record<string, string> = {
   invalid_request: "요청이 올바르지 않아 생성하지 못했습니다.",
   invalid_report: "생성 결과의 근거 보고서를 해석하지 못했습니다.",
-  context_budget_exceeded: "근거 예산을 초과해 생성이 중단됐습니다.",
+  context_budget_exceeded: "근거 검색이 5분 안에 끝나지 않아 생성이 중단됐습니다.",
   context_search_failed: "근거 검색에 실패했습니다.",
   // K-3 창 가드: 모델을 부르기 전에 거부된 실패라 같은 요청을 다시 보내면 반드시 같은
   // 결과다. 그래서 문구가 "무엇을 해야 하는지"까지 말한다.

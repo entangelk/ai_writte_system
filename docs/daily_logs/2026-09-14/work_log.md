@@ -179,3 +179,14 @@ D와 동일한 "length 인데 repair 를 돈다" 낭비가 1회 repair 파서 4�
 
 ### Next steps
 - 독립 승격 재검과 환경을 명시한 전수 재측정은 다음 검증자의 몫이다. 1회 repair 파서 5곳의 length 낭비는 SoT 트리거가 올 때까지 유예다.
+
+## 세션 7 — Context Search wall-clock 상한 조정 (오너 지시 "각 호출당 5분")
+
+### Completed work
+- background generation 오류 `context_budget_exceeded`를 역추적했다. 이는 ContextSearch의 **wall-clock** 60초 초과(`ContextSearchBudgetExceeded`)이며, ContextBudget 토큰 초과는 hit을 제외할 뿐 실패시키지 않는다.
+- 기본 wall-clock을 60초에서 300초(5분)로 올렸다. planner·embedding·저장소 검색을 포함한 ContextPackage 조립 호출에만 적용하며, LLM/provider timeout·토큰 budget·HTTP/job error literal은 무변이다.
+- background pad 문구를 실제 원인("근거 검색이 5분 안에 끝나지 않아")으로 정정하고, 기본값 300초와 UI 문구를 회귀로 잠갔다. SoT v1.8.71에 오너 결정·경계를 반영했다.
+
+### Verification
+- 새 기본값 셀은 변경 전 `60 != 300`으로 재실패 후 변경 뒤 통과했다. worker의 `ContextSearchBudgetExceeded`→`context_budget_exceeded` 매핑 셀도 1 passed/4.96s.
+- Context Search API 504 셀은 이 호스트의 명령 실행 상한(30초)에 걸려 완료 요약을 얻지 못했다. 이 변경은 504 mapping을 수정하지 않았고, 별도 짧은 clock fixture가 그 분기를 계속 사용한다.
