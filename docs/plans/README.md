@@ -182,7 +182,7 @@
 | 문서 | 무엇 | 상태 |
 |---|---|---|
 | [`frontend-writing-studio-phase.md`](frontend-writing-studio-phase.md) | 원고면 → 한글 타이포 → 작품 서재 → 보조 표면, 인계·검증 기준 | 구현 완료 — W1~W4 전 슬라이스 시각 확인 마침(2026-09-12) |
-| [`frontend-neutral-studio-phase.md`](frontend-neutral-studio-phase.md) | 중성색 중심 리디자인: 색·서재·집필·반응형 검수 | Draft — 기존 블루 유지 결정의 변경 범위 확인 대기 |
+| [`frontend-neutral-studio-phase.md`](frontend-neutral-studio-phase.md) | 중성색 중심 리디자인: 색·서재·집필·반응형 검수 | 구현 완료 — 중성 면·랜딩 재구성·서재/편집기 위계(2026-09-14) |
 
 ### 프론트엔드
 
