@@ -6,7 +6,7 @@
 
 서비스 경계와 확정된 계약을 먼저 볼 때는 [`../system-contract-sot.md`](../system-contract-sot.md)를 정본 SoT로 사용한다. 이 인덱스는 Phase별 세부 계획과 **모든 착수 결정 브리프**를 찾는 자리다.
 
-> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(141개 중 118개)는
+> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(142개 중 119개)는
 > `*-decisions.md` 착수 결정 브리프이며, **오너 결정의 근거 기록**이다. 파일명 접두 체계는 이미 무너져
 > 있고(`00`~`07` 계열 + 접두 없는 최근 것들) 파일명만으로는 트랙을 알 수 없다 — 그래서 아래는 **접두가
 > 아니라 트랙으로** 묶었다. 디렉터리 재편은 아직 결정되지 않은 별개 사안이다(HANDOFF 추적 부채).
@@ -236,6 +236,7 @@
 | [`observability-kpi-decisions.md`](observability-kpi-decisions.md) | 관측 KPI 페이즈 착수 | Approved |
 | [`observability-instrumentation-seam-decisions.md`](observability-instrumentation-seam-decisions.md) | 계측 seam(=provider 데코레이터 C) | Approved |
 | [`observability-site-mapping-decisions.md`](observability-site-mapping-decisions.md) | site 매핑 · scope 개방 범위 · `parse_error` 재분류 | Approved |
+| [`observability-repair-chain-decisions.md`](observability-repair-chain-decisions.md) | `finish_reason`·부모 호출 연결로 `length → repair` 회복률/비용을 측정하는 관측성 슬라이스 | **Draft — 오너 결정 필요(A/B/C)** |
 | [`observability-kpi-readout-decisions.md`](observability-kpi-readout-decisions.md) | 집계 API read-out | Approved |
 | [`observability-dashboard-decisions.md`](observability-dashboard-decisions.md) | 대시보드 화면 첫 슬라이스 | Approved |
 

@@ -5,7 +5,7 @@
 > **완료 서술도, 근거·측정치·발견 경위도 여기 쓰지 않는다** — `docs/daily_logs/`(상세) · `docs/system-contract-sot.md` 변경이력 · `CHANGELOG.md`(마일스톤) · `docs/verifications/`(독립 검증) · `docs/plans/*-decisions.md`(왜 그렇게 정했는가)에 있다. **여기 남는 것은 "지키지 않으면 깨지는 것"과 "어디를 보면 되는가"뿐이다.**
 > 편집 규칙은 `CLAUDE.md`·`AGENTS.md`의 "HANDOFF.md" 절에 있다. **~200줄을 넘으면 자가 검수**하고(그 뒤로는 ~100줄마다) 결과를 아래 한 줄로 남긴다.
 >
-> 마지막 자가 검수: **2026-09-14 · 340줄** — LLM 출력 가드 재감사의 B1·B2는 시행·변이 재검까지 완료했다: revise 빈 content의 `provider_invalid_response` 분류·finish_reason 진단 일치, 생성·revise의 non-stop 일반값 회귀. 근거·재현은 [`llm_output_guards_closure_reaudit.md`](docs/verifications/2026-09-14/llm_output_guards_closure_reaudit.md)에 있다. 다음 일은 독립 승격 재검·전수 재측정이다.
+> 마지막 자가 검수: **2026-09-14 · 342줄** — LLM 출력 가드 재감사의 B1·B2는 시행·변이 재검까지 완료했다: revise 빈 content의 `provider_invalid_response` 분류·finish_reason 진단 일치, 생성·revise의 non-stop 일반값 회귀. 근거·재현은 [`llm_output_guards_closure_reaudit.md`](docs/verifications/2026-09-14/llm_output_guards_closure_reaudit.md)에 있다. 다음 일은 독립 승격 재검·전수 재측정이다.
 
 ## 머신 · 기동
 
@@ -260,6 +260,8 @@
 > **★ 다음 작업자에게 — "남은 일"은 이 절에만 있지 않다(2026-09-07 실수 기록).** 오너가 *"남은 거 뭐지?"* 라고 물었을 때 이 번호 목록만 세어 답했다가 **랜딩 페이지 기획을 통째로 빠뜨렸다.** 이 파일은 남은 일을 **세 곳**에 나눠 싣는다 — ① 이 번호 목록(착수 순서) ② 위 "열린 것"의 **⚠️ 오너 결정 표**(막힌 것 — 병목은 여기 산다) ③ 같은 절의 **🔧 미수리 표**(아는 결함). 셀 때는 `grep -n '^## ' HANDOFF.md` 로 **절부터 뽑고**, 답할 때 **집계 범위를 함께 말한다.**
 >
 > **★ 2026-09-14 현재**: [Phase N](docs/plans/frontend-neutral-studio-phase.md)(중성 스튜디오 리디자인) **완료** — 오너 승인(*"블루는 주요 버튼과 선택 상태의 포인트로 남기겠습니다"* + 색 외에 랜딩 첫 화면 구성·서재 정보 위계·편집기·세부 페이지 배치 개선 명시)으로 N0~N4 전 단계를 구현·검증했다(SoT v1.8.69 · 구현 `95418bc`). **★ 배포 시 `frontend` 이미지 재빌드가 필요하다**(CSS·정적 자산 변경). 구현 백로그는 다시 비었다. **착수 순서**: 6번 육안 확인(Phase N 실기기 포함) → 7번 도그푸드 관찰 → 8번 계정 정리. 배포(5번)는 오너 몫이고 그 선행 조건이다. 그 밖는 위 "열린 것"의 🔧 미수리 표·⏸ 유예 표가 정본이다.
+
+> **★ repair 관측성 슬라이스는 오너 결정 대기다.** 다섯 구조화 출력 파서의 `length → 1회 repair` 낭비를 현재 감사 레코드만으로는 판정할 수 없다(`finish_reason`·repair 부모 연결이 없음). 다음 작업자는 [`observability-repair-chain-decisions.md`](docs/plans/observability-repair-chain-decisions.md)의 **A/B/C**를 오너에게 먼저 확정받는다. 추천은 **A: 기존 per-call 감사에 nullable `finish_reason`·`repair_attempt`·`repair_parent_call_id`를 추가**하는 방식이다. 선택 뒤 문서의 구현 순서·양방향 검증 기준을 그대로 따른다. `length` repair를 건너뛰는 정책 변경은 이 결정/측정 전에는 하지 않는다.
 
 
 > **★ 2026-09-05 보안 감사 후속(Phase S)이 진행 중이다.** 감사 판단 **critical 0건** + 오너 확인 둘(확인용 계정은 배포에 없었다 · 승인된 계정이 오너뿐이다). **S-3 signup 축과 S-1 quota 우회 체인(HIGH)이 같은 날 닫히고 그대로 배포됐다**(각각 SoT v1.8.30·v1.8.32, 배포 서버 HEAD `d37eb84` — 세부는 work_log 세션 11). **S-0 문서 위생·S-7 토큰 저장 방식이 2026-09-06 에 닫혔다**(S-0 = 스윕 + 재유입 가드 · S-7 = 오너가 배포 호스트에서 `--token-file` 로 시행). **S-2 의 nginx 헤더 축이 2026-09-12 에 닫혔다**(위 표). **남은 것**: S-2 의 CSP·AdSense 화면별 제어 축(방침 제6조 2항 수정 동반 오너 결정) · **S-5 는 유예가 아니라 수용된 위험**이다(표 자신이 *"알고 두는 것 — 수리 대상 아님"*). **S-6 의 낡은 vhost 만 진짜 대기**인데 그것도 타 프로젝트 소관이라 **회신 경로가 없다**(아래 0번). S-7 회전은 2026-09-06 오너 결정으로 닫혔다.

@@ -190,3 +190,19 @@ D와 동일한 "length 인데 repair 를 돈다" 낭비가 1회 repair 파서 4�
 ### Verification
 - 새 기본값 셀은 변경 전 `60 != 300`으로 재실패 후 변경 뒤 통과했다. worker의 `ContextSearchBudgetExceeded`→`context_budget_exceeded` 매핑 셀도 1 passed/4.96s.
 - Context Search API 504 셀은 이 호스트의 명령 실행 상한(30초)에 걸려 완료 요약을 얻지 못했다. 이 변경은 504 mapping을 수정하지 않았고, 별도 짧은 clock fixture가 그 분기를 계속 사용한다.
+
+## 세션 8 — `length → repair` 관측성 후속 브리프
+
+### Goals
+- 유예된 다섯 1회 repair 파서에서 실제 재생성 낭비를 판단할 수 있는 다음 작업 슬라이스를, 구현 없이 결정 가능한 계약으로 고정한다.
+
+### Completed work
+- 신규 브리프 [`observability-repair-chain-decisions.md`](../../plans/observability-repair-chain-decisions.md)를 만들고 plans 인덱스에 등재했다. 현재 `StoredLlmCall`이 호출부·상관 ID·결과·토큰·지연은 남기지만 `finish_reason`·repair 시도·부모 호출 관계는 남기지 않는 공백을 명시했다.
+- 추천 A(기존 per-call audit의 nullable 후행 필드 확장), B(별도 원장), C(구조화 로그만)의 trade-off와 A 채택 시 스키마·다섯 경로 배선·집계·양방향 mutation·승격 순서를 적었다. 원고·프롬프트·응답 본문을 저장하지 않는 경계를 고정했다.
+- HANDOFF의 Next Tasks에 오너 결정 대기와 다음 작업자의 시작점만 추가했다. 정책 변경(`length`이면 repair 단락)은 관측 표본 전에는 하지 않는다.
+
+### Decisions — User Decisions and Rationale
+- 오너는 유예 부채를 방치하지 않고, 다음 작업자가 바로 이어갈 수 있는 독립 슬라이스 문서와 인계를 요청했다. 다만 기존 감사 스키마를 넓힐지 별도 원장을 둘지는 제품/운영 계약 선택이므로 브리프의 A/B/C 결정을 남기고 구현은 시작하지 않았다.
+
+### Next steps
+- 오너가 `observability-repair-chain-decisions.md`의 A/B/C를 확정한다. 추천 A가 선택되면 문서의 1~6 구현 순서와 완료 기준으로 착수한다.
