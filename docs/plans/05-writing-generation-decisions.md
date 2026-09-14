@@ -54,3 +54,13 @@ Writing Gate(pass/revise/retrieve_more/needs_user_review/block, LLM 기반)·acc
 ## 성격
 
 신규 `writing/` 패키지(models·prompt·service) + HTTP 엔드포인트 1개 + versioned prompt seed. 신규 public 표면(`WritingRequest`/`WritingCandidate` 계약, `POST /writing/generate`). Gate·save·구조적 self-report는 후속 → **minor bump(v1.6.68)**. Phase 5의 나머지(§21 착수 결정 대부분)는 후속 slice.
+
+## 후속 계약 추가 — LLM 출력 가드 (2026-09-14, SoT v1.8.70)
+
+검증 [`verifications/2026-09-14/llm_output_guards_gap1_gap2.md`](../verifications/2026-09-14/llm_output_guards_gap1_gap2.md)의 조건 C3로 등재. 이 브리프의 결정 D2(평문 프로즈·서비스 래핑)가 만든 산문 출력 표면에 대한 소비자 측 가드 계약이다(오너 결정 B+D — 브리프 옵션 표는 `daily_logs/2026-09-14/work_log.md` 세션 3).
+
+- **빈(공백만) provider content → `provider_invalid_response`**(동기 502 · 잡 `provider_error`). 게이트웨이는 빈 content를 통과시킨다(닫히지 않은 thought→빈 문자열은 지어내지 않는 계약) — 거부는 소비자 몫이고, 게이트(`gate._validate`)·수동 입력(400)·accept이 이미 같은 계약이었다. 생성 표면만 판단하지 않았다(GAP-2).
+- **`finish_reason != "stop"` → 같은 분류, 실제 종료 사유를 메시지에**(GAP-1 B). `length`(출력 상한 잘림)인 산문이 완성 후보로 저장·과금되는 것을 막는다. 경계 매트릭스 행 2(평문 래핑)의 소비자 측 짝이다.
+- **개정 표면(`WritingRevisionService.revise_metered`)도 같은 두 가드를 쓴다**(검증 C1(a) 확장) — 잘린 치환문이 원고에 splice 되지 않는다. `MeteredCallError`로 감싸 루프 토큰 집계를 보존한다.
+- 셀: `test_writing.py` `test_empty_provider_output_is_rejected_as_provider_fault` · `test_truncated_provider_output_is_rejected_as_provider_fault` / `test_writing_revise.py` `test_truncated_replacement_is_rejected_as_provider_fault`(변이로 양방향 확인).
+- **유예(트리거 붙음)**: 1회 repair 파서 5곳(extractor·compare_judge·identity_judge·context_search/planner·writing/retrieval)의 repair가 `length`를 만나도 재생성한다 — report의 length 단락과 같은 조건으로 확장한다. **트리거: 해당 경로의 length 낭비를 실측하거나 다음 finish_reason 결정을 다룰 때.**

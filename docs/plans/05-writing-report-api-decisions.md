@@ -31,7 +31,8 @@
 - persistence 도입 시 persisted candidate/report를 서버에서 읽는 id 기반 endpoint를 additive로 둘지 inline endpoint를 대체할지 별도 결정한다.
 - inline 요청에서도 `project_id`/request/candidate identity 불일치는 provider 호출 전에 거부한다.
 - report는 candidate text를 바꾸거나 저장하지 않으며 Gate/Analysis/canonical write를 자동 실행하지 않는다.
-- strict parse, 1회 repair, provider error/timeout mapping은 v1.6.71 계약을 그대로 재사용한다.
+- strict parse, provider error/timeout mapping은 v1.6.71 계약을 그대로 재사용한다. repair 상한은 **2회**다(`MAX_REPORT_REPAIRS` — v1.6.71 시점의 1회에서 `3fb3b08`, 2026-07-18·SoT v1.7.7 테스트베드 슬라이스가 2차 repair로 올렸고 이 문서가 못 따라갔던 드리프트를 2026-09-14 정정, 검증 C3).
+- **repair 루프의 length 단락(2026-09-14, SoT v1.8.70 — GAP-1 D, 오너 결정 B+D)**: 파싱 실패한 결과의 `finish_reason`이 **최신 결과 기준** `"length"`면 재시도하지 않는다(repair 도중 잘리면 다음 repair도 건너뛴다) — 같은 `max_tokens` 상한의 재생성은 같은 잘림을 반복하므로 예측 가능한 실패에 repair 예산을 태우지 않는다. 셀: `test_writing_report.py` `test_truncated_first_output_skips_the_repair_loop` · `test_a_repair_that_finishes_length_stops_further_repairs`.
 - ContextPackage를 client가 제출할지 서버가 기존 context-search 입력으로 재구성할지는 A 선택 시 세부 계약으로 함께 잠가야 한다.
 
 ## Deferred / out of scope

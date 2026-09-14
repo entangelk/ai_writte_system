@@ -105,3 +105,30 @@ D와 동일한 "length 인데 repair 를 돈다" 낭비가 1회 repair 파서 4�
 - `services/application/app/analysis/compare_judge.py:113`
 - `services/application/app/analysis/identity_judge.py:109`
 - `services/application/app/context_search/planner.py:119`
+
+## 세션 4 — 검증 조건 3건 폐쇄 (오너 지시 "검증기록 확인해서 보강할 부분 보강해줘")
+
+### Goals
+- 독립 검증 [`verifications/2026-09-14/llm_output_guards_gap1_gap2.md`](../verifications/2026-09-14/llm_output_guards_gap1_gap2.md)(`df4e909`, 조건부 합격·조건 3)의 C1·C2·C3와 하드닝 H1·H2·H4·H5를 닫는다. H6은 검증자가 "엄격 리터럴이 오히려 정확한 해석"이라 판정한 대로 무동작. H7 기준선은 본 세션 전수로 재갱신(검증자가 3078로 올린 줄을 이번 셀 몫만큼 다시).
+
+### Completed work
+- **C1(a) 결정 해석**: 오너의 "보강할 부분 보강해줘"를 브리프 옵션 (a) 확장으로 받았다 — revise의 잘린 치환문이 원고에 splice 되는 것은 GAP-1이 막기로 한 바로 그 실패 모드라 (b) 범위 명시는 보강이 아니다.
+- **C1**(`d26fe1e`): `WritingRevisionService.revise_metered` 에 `finish_reason != "stop"` 거부 추가 — `MeteredCallError(ProviderError(INVALID_RESPONSE), usage)` 로 루프 토큰 집계 보존. 셀 `test_truncated_replacement_is_rejected_as_provider_fault`.
+- **C2**(`d26fe1e`): mid-loop 분기(`result = retry`) 잠금 — `_Provider` fixture가 (content, finish_reason) 쌍을 받도록 확장(기존 str 셀 무변), 셀 `test_a_repair_that_finishes_length_stops_further_repairs`("bad3" 미끼로 calls 수로 재실패).
+- **H4**(`d26fe1e`): generate 빈 content 에러 메시지에 `finish_reason` 동봉.
+- **C3**: SoT v1.8.70 — 헤더·버전 행·Phase 5 본문 불릿(계약 구조 "게이트웨이는 통과·소비자가 거부"·산문 두 표면·report length 단락·부채 5곳 트리거). `05-writing-generation-decisions.md` 후속 계약 절·`05-writing-report-api-decisions.md` "1회 repair"→2회 드리프트 정정(근거 `3fb3b08`, 2026-07-18)+length 단락. README ④·HANDOFF 정본 셀 v1.8.70(상호 가드 `test_the_readme_names_the_current_contract_version` 대응).
+- **H1**: 부채 목록에 5번째 동일 패턴 `writing/retrieval.py:144` 등재(SoT 불릿·generation 플랜 유예 절 모두 5곳으로).
+- **H2/H5**: CHANGELOG "변이 5종"→3종(under) 정정 + 근거 문구, `product-overview.md` 낡은 finish_reason 문구 정정.
+
+### 변이 표 (구현 커밋 `d26fe1e` 뒤 — 매 회 원복·clean 확인)
+
+| # | 방향 | 적용 diff | 위치 | 재실패 셀 |
+|---|---|---|---|---|
+| M8 | under | `if result.finish_reason != "stop":` → `if False and …:` | `revise.py`(revise_metered) | `test_truncated_replacement_is_rejected_as_provider_fault` (1) |
+| M7b | under | `result = retry` 줄 삭제(검증 M7 재현) | `report.py:136` | `test_a_repair_that_finishes_length_stops_further_repairs` (1 — calls 3≠2) |
+| M10 | over | `if result.finish_reason != "stop":` → `if True:` | `revise.py` | 정상 revise 셀 3개 재실패 |
+
+### Verification
+- 집중(파일 목록, H3): `tests/test_writing_revise.py` `tests/test_writing_report.py` `tests/test_writing.py` — **142 passed / 84 subtests**.
+- 문서 가드: `tests/test_docs_indexes.py` `tests/test_repo_hygiene.py` — **29 passed / 966 subtests**(SoT/plans/CHANGELOG/product-overview/README/HANDOFF 편집 뒤).
+- 전수(호스트·파일 캡처): **3080 passed / 1 skipped / 4274 subtests · EXIT=0 · 1885.32초** (+2 passed = 신규 셀 2 · +2 subtests = 검증 기록 `df4e909`의 기록 파일·인덱스 행 몫 — 검증자 전수 뒤 커밋돼 이번 전수가 처음 짊어짐. 본 슬라이스 문서는 기존 파일 편집만이라 subtests 무변). 기준선 줄(HANDOFF)·README ②행 동시 갱신.
