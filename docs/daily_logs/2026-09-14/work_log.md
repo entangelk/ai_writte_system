@@ -61,7 +61,7 @@
 ### Next steps
 - 오너 육안 확인(실기기 포함) → 도그푸드 관찰. 웹폰트 자체 호스팅·serif 제목 서체·비활성 버튼 색 갈림길은 그대로 열려 있다(HANDOFF 6번).
 
-## 세션 2 — LLM 출력 가드 조사 + 생성 표면 빈 출력 가드 (오너 요청 "가드 있는지 확인 + 보강")
+## 세션 3 — LLM 출력 가드 조사 + 생성 표면 빈 출력 가드 (오너 요청 "가드 있는지 확인 + 보강")
 
 ### Goals
 - gemma4_12b 게이트웨이의 LLM 호출/응답 가드 목록(오너 제공 분석)을 기준으로 이 저장소의 가드 현황을 대조·조사하고, 빠진 것이 있으면 보강한다.
@@ -86,3 +86,22 @@
 
 ### Next steps
 - GAP-1 오너 결정 → 선택지 반영 구현(선택 시 repair 단락 후속 포함 검토).
+
+### 세션 3 후속 — GAP-1 결정 반영 (B + repair 단락, `8f6682c`)
+
+오너가 브리프에서 **B + repair 단락**을 선택했다("finish_reason=length(출력 잘림) 등 stop 외 종료를 어떻게 다룰까요?" → B+D).
+
+- **B**: `WritingService.generate` 에서 `finish_reason != "stop"` 이면 `INVALID_RESPONSE` `ProviderError`(502/PROVIDER_ERROR)로 거부. 실제 종료 사유를 에러 메시지에 실었다. 빈 content 가드(GAP-2) 바로 뒤 같은 자리·같은 분류다.
+- **D**: `report.enrich_metered` 의 repair 루프가 **최신 결과** 기준 `finish_reason == "length"` 면 재시도를 생략한다(repair 도중 잘리면 다음 repair 도 건너뜀) — 같은 `max_tokens` 상한의 재생성은 같은 잘림을 반복하므로 `MAX_REPORT_REPAIRS=2` 만큼의 전체 생성이 예측 가능하게 낭비됐다.
+
+#### Verification
+- 신규 셀 2: `test_truncated_provider_output_is_rejected_as_provider_fault`(test_writing.py) · `test_truncated_first_output_skips_the_repair_loop`(test_writing_report.py). 기존 fixture 전수가 `finish_reason="stop"`임을 grep으로 확인(가드가 기존 경로 무변).
+- 변이(구현 커밋 뒤): B 조건 `False and …` 무력화 + D 조건 `and True` 무력화 → 두 셀 기명 재실패(2 failed) → `git checkout` 원복, 트리 clean. over-strict 방향은 각각 `test_plain_prose_is_wrapped_into_candidate`·`test_invalid_first_output_repairs_once`이 잠근다.
+- 광범위: writing 가족+게이트웨이 provider+분석 파서 13파일 **400 passed / 187 subtests**.
+
+#### 패턴 스윕 — 같은 낭비가 다른 repair 경로에도 있다 (추적 부채)
+D와 동일한 "length 인데 repair 를 돈다" 낭비가 1회 repair 파서 4곳에 반복된다. 결정 문면은 report 에 국한됐으므로 이번 슬라이스에서 고치지 않고 부채로 남긴다(트리거: 다음으로 이 경로들의 낭비를 실측하거나 length 관련 결정을 다룰 때 같은 조건으로 확장):
+- `services/application/app/analysis/extractor.py:142` (`_repair_once` 호출부)
+- `services/application/app/analysis/compare_judge.py:113`
+- `services/application/app/analysis/identity_judge.py:109`
+- `services/application/app/context_search/planner.py:119`
