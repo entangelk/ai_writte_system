@@ -59,6 +59,15 @@ for (const rule of blanked.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
  * 패널 포함)이 실제로 그리는 자리 전부다.
  */
 const MIGRATED: Record<string, string> = {
+  ".landing-blocks > section::before": "small",
+  ".landing-section-heading h2, .landing-start-copy h2": "title",
+  ".landing-hero-caption": "micro",
+  ".landing-hero h1": "panel",
+  ".landing-wordmark": "display",
+  ".landing-nav a:not(.landing-logo)": "small",
+  ".landing-logo": "subhead",
+  ".resource-link": "reading",
+  ".app-header .brand": "subhead",
   ".tab-badge": "micro",
   ".rail-section-heading span, .rail-review-list small": "micro",
   ".rail-source-list button span": "micro",
@@ -164,7 +173,7 @@ const MIGRATED: Record<string, string> = {
 
   // 랜딩(D1=ⓒ) — 소개 블록의 제목·보조 문구와 정직한 한계 상자. 소개 블록의
   // h2 는 문서 조 제목(subhead)이 아니라 카드 소제목이라 base 계단을 쓴다.
-  ".landing-blocks h2": "base",
+  ".landing-blocks h3": "reading",
   ".landing-blocks p": "small",
   ".landing-limits h2": "base",
   ".landing-limits li": "small",

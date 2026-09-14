@@ -14,7 +14,7 @@
        - OKLCH 에서 hue 250·chroma 고정, **L 등간격** → 지각 균등 램프
        - 색역을 벗어나면 **L 은 유지하고 채도만** 이분 탐색으로 줄인다
          (L 을 건드리면 램프도 아래 대비 수치도 함께 어긋난다)
-       - **WCAG 2.2 AA 30짝 전수 검산, 실패 0** (본문은 AAA ≥7:1)
+       - **WCAG 2.2 AA 59짝 전수 검산, 실패 0** (본문은 AAA ≥7:1)
 
      **여기 hex 를 손으로 고치지 말 것.** 스크립트를 고치고 다시 돌린 뒤 옮긴다.
      특히 `--slate-400`(테두리 3:1)과 `--slate-450`(placeholder 4.5:1)은
@@ -38,15 +38,15 @@
   --blue-900: #042847;
   --slate-0: #ffffff;
   --slate-50: #f6f9fc;
-  --slate-100: #ecf1f5;
-  --slate-200: #dbe2e9;
+  --slate-100: #f2f3f5;
+  --slate-200: #e0e1e2;
   --slate-300: #c6cfd8;
   --slate-400: #7f8994;
   --slate-450: #636c77;
   --slate-500: #727c86;
-  --slate-600: #545f6a;
+  --slate-600: #5b5e60;
   --slate-700: #3c4651;
-  --slate-900: #1c242c;
+  --slate-900: #212325;
   --danger-100: #ffdfdc;
   --danger-600: #b63132;
   --danger-700: #951e22;
@@ -60,14 +60,14 @@
   /* 면. ★ 이 앱에는 침강면보다 **융기면**이 많다 — 브리프의 가정과 달랐고
      실제 CSS 사용을 따라 `--surface-raised` 를 두었다. 밝기 순서는
      page < raised < card 이며 sunken 만 page 보다 어둡다. */
-  --surface-page: var(--blue-50);
+  --surface-page: var(--slate-100);
   --surface-raised: var(--slate-50);
   --surface-card: var(--slate-0);
-  --surface-sunken: var(--blue-100);
+  --surface-sunken: var(--slate-100);
   --surface-accent-soft: var(--blue-100);
 
   /* 글자 */
-  --text-body: var(--blue-900);
+  --text-body: var(--slate-900);
   --text-muted: var(--slate-600);
   --text-placeholder: var(--slate-450);
   --text-link: var(--blue-700);
@@ -140,7 +140,10 @@
   --tint-accent-weak: rgb(0 110 190 / 0.06);
   --tint-accent-soft: rgb(0 110 190 / 0.10);
   --tint-accent-strong: rgb(0 110 190 / 0.25);
-  --shadow-panel: 0 6px 18px rgb(4 40 71 / 0.10);
+  --shadow-panel: 0 12px 36px rgb(24 24 27 / 0.08);
+  --surface-inverse: var(--slate-900);
+  --text-inverse: var(--slate-0);
+  --hero-veil: rgb(243 244 245 / 0.94);
 
   /* --- 치수 축 ---------------------------------------------------------- */
   --space-1: 0.25rem;
@@ -186,6 +189,7 @@
   --type-subhead: 1.266rem; /* 1.125^2  · 레일 소제목 */
   --type-panel: 1.602rem;   /* 1.125^4  · 패널 제목 */
   --type-title: 2.027rem;   /* 1.125^6  · 화면 제목 */
+  --type-brand: 6.583rem; /* 1.125^16 — 랜딩 제품명 */
   --type-display: 2.887rem; /* 1.125^9  · 로그인 화면 제목(정문) */
 
   color: var(--text-body);
@@ -209,6 +213,21 @@ textarea {
   font: inherit;
 }
 
+/* 공통 보조 컨트롤. 주요/위험/도구 버튼의 구체 선택자가 이 기본값을 덮는다. */
+:where(button) {
+  min-height: 2.25rem;
+  padding: 0.4rem 0.75rem;
+  color: var(--text-body);
+  background: var(--surface-card);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+:where(button:disabled) {
+  cursor: not-allowed;
+}
+
 button,
 a {
   -webkit-tap-highlight-color: transparent;
@@ -220,20 +239,19 @@ a {
 
 .app-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   max-width: 76rem;
   margin: 0 auto;
-  padding: 1.6rem 2rem 1.1rem;
+  padding: 1.4rem 2rem;
   border-bottom: 1px solid var(--border-hairline);
 }
 
 .app-header .brand {
   color: var(--text-body);
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 1.05rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
+  font-size: var(--type-subhead);
+  font-weight: 800;
+  letter-spacing: -0.05em;
   text-decoration: none;
 }
 
@@ -418,11 +436,10 @@ main {
 
 .login-heading h1 {
   margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
   font-size: var(--type-display);
-  font-weight: 500;
+  font-weight: 700;
   letter-spacing: -0.06em;
-  line-height: 0.94;
+  line-height: 1.2;
 }
 
 .login-heading > p:last-child {
@@ -475,64 +492,291 @@ main {
   line-height: 1.5;
 }
 
-/* 랜딩 — 루트의 익명 얼굴(브리프 landing-page-scope D1=ⓒ). 폭은 이 블록이
-   스스로 제한한다(약관 문서와 같은 측정폭; main 폭 규칙은 건드리지 않는다). */
+/* Phase N — 사진과 제품명이 중심인 공개 정문. 앱의 main 폭과 독립적이다. */
+.landing-shell {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  background: var(--surface-card);
+}
+
+.landing-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: 5rem;
+  padding: 1rem max(1.5rem, calc((100% - 72rem) / 2));
+}
+
+.landing-logo {
+  color: var(--text-body);
+  font-size: var(--type-subhead);
+  font-weight: 800;
+  letter-spacing: -0.06em;
+  text-decoration: none;
+}
+
+.landing-logo span,
+.landing-wordmark span {
+  color: var(--action-primary);
+}
+
+.landing-nav > div {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+}
+
+.landing-nav a:not(.landing-logo) {
+  color: var(--text-muted);
+  font-size: var(--type-small);
+  text-decoration: none;
+}
+
+.landing-nav .auth-submit {
+  margin: 0;
+  padding: 0.65rem 1.2rem;
+}
+
+.landing-hero {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  min-height: min(44rem, calc(100svh - 5rem));
+  padding: 4rem max(1.5rem, calc((100% - 72rem) / 2));
+  overflow: hidden;
+  background: var(--surface-page);
+}
+
+.landing-photo {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 55%;
+  animation: photo-enter 900ms ease-out both;
+}
+
+.landing-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(90deg, var(--hero-veil), transparent 85%);
+}
+
+.landing-hero-copy {
+  max-width: 33rem;
+  animation: page-enter 600ms ease-out both;
+}
+
+.landing-wordmark {
+  margin: 0 0 1.5rem;
+  font-size: var(--type-brand);
+  font-weight: 800;
+  letter-spacing: -0.09em;
+  line-height: 1;
+}
+
+.landing-hero h1 {
+  margin: 0;
+  font-size: var(--type-panel);
+  font-weight: 650;
+  letter-spacing: -0.05em;
+  line-height: 1.5;
+  word-break: keep-all;
+}
+
+.landing-hero-copy > p:last-of-type {
+  max-width: 25rem;
+  margin: 1rem 0 2rem;
+  color: var(--text-body);
+  line-height: 1.85;
+  word-break: keep-all;
+}
+
+.landing-explore {
+  display: inline-flex;
+  align-items: center;
+  gap: 2rem;
+  padding: 0.9rem 0;
+  color: var(--text-body);
+  border-bottom: 1px solid var(--text-body);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.landing-explore span {
+  transition: transform 180ms ease;
+}
+
+.landing-explore:hover span {
+  transform: translate(3px, 3px);
+}
+
+.landing-hero-caption {
+  position: absolute;
+  right: 2rem;
+  bottom: 1.5rem;
+  padding: 0.4rem 0.6rem;
+  color: var(--text-body);
+  background: var(--hero-veil);
+  font-size: var(--type-micro);
+  letter-spacing: 0.08em;
+}
+
 .landing-page {
-  width: min(100%, 46rem);
+  max-width: 76rem;
+  margin: 0 auto;
+  padding: 0 2rem;
+}
+
+.landing-workflow {
+  display: grid;
+  grid-template-columns: 0.85fr 1.15fr;
+  align-items: start;
+  gap: 5rem;
+  padding: 6rem 0;
+  scroll-margin-top: 2rem;
+}
+
+.landing-section-heading {
+  position: sticky;
+  top: 3rem;
+}
+
+.landing-section-heading h2,
+.landing-start-copy h2 {
+  margin: 0;
+  font-size: var(--type-title);
+  font-weight: 700;
+  letter-spacing: -0.05em;
+  line-height: 1.45;
+  word-break: keep-all;
+}
+
+.landing-section-heading > p:last-child {
+  color: var(--text-muted);
+  line-height: 1.7;
 }
 
 .landing-blocks {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
-  gap: 1.4rem;
-  margin-top: 1.8rem;
+  counter-reset: workflow;
 }
 
-.landing-blocks h2 {
-  margin: 0 0 0.45rem;
-  font-size: var(--type-base);
+.landing-blocks > section {
+  position: relative;
+  padding: 1.5rem 0 1.5rem 3rem;
+  border-top: 1px solid var(--border-hairline);
+  counter-increment: workflow;
+}
+
+.landing-blocks > section::before {
+  content: "0" counter(workflow);
+  position: absolute;
+  top: 1.5rem;
+  left: 0;
+  color: var(--text-muted);
+  font-size: var(--type-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.landing-blocks h3 {
+  margin: 0 0 0.65rem;
+  font-size: var(--type-reading);
   font-weight: 700;
+  letter-spacing: -0.03em;
 }
 
 .landing-blocks p {
   margin: 0;
   color: var(--text-muted);
   font-size: var(--type-small);
-  line-height: 1.65;
+  line-height: 1.9;
+  word-break: keep-all;
 }
 
 .landing-limits {
-  margin-top: 1.8rem;
-  padding: 1.1rem 1.25rem;
-  background: var(--surface-raised);
-  border: 1px solid var(--border-control);
-  border-radius: 0.5rem;
+  padding: 2rem 0;
+  border-top: 1px solid var(--border-hairline);
+  scroll-margin-top: 2rem;
 }
 
 .landing-limits h2 {
-  margin: 0 0 0.6rem;
+  margin: 0 0 1.25rem;
   font-size: var(--type-base);
-  font-weight: 700;
 }
 
 .landing-limits ul {
   display: grid;
-  gap: 0.55rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2rem;
+  padding: 0;
   margin: 0;
-  padding-left: 1.1rem;
+  list-style: none;
 }
 
 .landing-limits li {
+  color: var(--text-muted);
   font-size: var(--type-small);
-  line-height: 1.6;
+  line-height: 1.8;
+}
+
+.landing-limits strong {
+  display: block;
+  color: var(--text-body);
 }
 
 .landing-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.9rem;
-  margin-top: 1.8rem;
+  gap: 1rem 1.5rem;
+  margin: 2rem 0 3rem;
+  padding: 2.5rem;
+  color: var(--text-inverse);
+  background: var(--surface-inverse);
+}
+
+.landing-start-copy {
+  flex: 1 1 100%;
+}
+
+.landing-actions .eyebrow,
+.landing-actions .auth-switch {
+  color: var(--text-inverse);
+}
+
+.landing-actions :is(button, a):focus-visible {
+  outline-color: var(--text-inverse);
+}
+
+.landing-shell > .legal-footer {
+  margin: 0;
+  padding: 1.5rem;
+}
+
+@keyframes photo-enter {
+  from { opacity: 0; transform: scale(1.025); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media (max-width: 48rem) {
+  .landing-wordmark { font-size: var(--type-display); }
+  .landing-hero { min-height: 34rem; padding-block: 3rem 7rem; }
+  .landing-photo { object-position: 65% center; }
+  .landing-hero::before { background: var(--hero-veil); opacity: 0.8; }
+  .landing-hero-copy { max-width: 26rem; }
+  .landing-page { padding-inline: 1.5rem; }
+  .landing-workflow { grid-template-columns: minmax(0, 1fr); gap: 2rem; padding: 3.5rem 0; }
+  .landing-section-heading { position: static; }
+  .landing-limits ul { grid-template-columns: minmax(0, 1fr); gap: 1.25rem; }
+  .landing-actions { padding: 1.5rem; }
+  .landing-nav > div { gap: 0.75rem; }
 }
 
 /* 동의 확인란(방침 제3조) — 텍스트 입력 규칙(.login-form input 의 밑줄·전체폭)을
@@ -603,7 +847,7 @@ main {
 .auth-status-title {
   margin: 0 0 0.55rem;
   color: var(--text-body);
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
   font-size: 1.7rem;
 }
 
@@ -639,7 +883,7 @@ main {
 
 .admin-section > h2 {
   margin: 0 0 1rem;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
   font-size: 1.8rem;
   font-weight: 500;
 }
@@ -861,10 +1105,10 @@ main {
 .workspace-page > h1,
 .legal-document > h1 {
   margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
   font-size: var(--type-title);
-  font-weight: 500;
-  letter-spacing: -0.02em;
+  font-weight: 700;
+  letter-spacing: -0.04em;
   line-height: 1.2;
 }
 
@@ -879,7 +1123,8 @@ main {
   margin: 0 0 2rem;
   padding: var(--space-6);
   border: 1px solid var(--border-hairline);
-  background: var(--veil-raised);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
 }
 
 .overview-heading {
@@ -892,7 +1137,7 @@ main {
 
 .overview-heading h2 {
   margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
   font-size: 1.75rem;
   font-weight: 500;
 }
@@ -966,6 +1211,9 @@ main {
 }
 
 .brief-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 2rem;
   margin: 0;
 }
 
@@ -983,6 +1231,8 @@ main {
 }
 
 .brief-summary dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
   margin: 0;
   line-height: 1.55;
 }
@@ -1029,11 +1279,12 @@ main {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem 1rem;
-  margin-bottom: 1rem;
-  padding: 0.7rem 0;
+  margin-bottom: 1.25rem;
+  padding: 0.75rem 1rem;
   color: var(--text-muted);
-  border-top: 1px solid var(--border-hairline);
-  border-bottom: 1px solid var(--border-hairline);
+  background: var(--surface-card);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-sm);
   font-size: var(--type-meta);
 }
 
@@ -1056,6 +1307,9 @@ main {
 
 .editor-canvas {
   min-width: 0;
+  width: 100%;
+  max-width: 56rem;
+  margin-inline: auto;
 }
 
 /* 항상 DOM 에 남고 변환으로만 숨는다 — display:none 이면 마운트 유지 인바리언트
@@ -1259,7 +1513,7 @@ main {
 .rail-section-heading h2,
 .workspace-review h3 {
   margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
   font-weight: 500;
 }
 
@@ -1346,17 +1600,17 @@ main {
 }
 
 .eyebrow {
-  margin: 0 0 0.9rem;
-  color: var(--text-link);
+  margin: 0 0 0.75rem;
+  color: var(--text-muted);
   font-size: var(--type-micro);
   font-weight: 700;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
 .back-link {
   display: inline-block;
-  margin-bottom: 2.5rem;
+  margin-bottom: 1.5rem;
   color: var(--text-muted);
   font-size: var(--type-small);
   text-decoration: none;
@@ -1374,9 +1628,10 @@ main {
   grid-template-columns: minmax(12rem, 0.8fr) minmax(18rem, 1.4fr);
   gap: var(--space-8);
   align-items: end;
-  padding: 1.5rem 0 2rem;
-  border-top: 1px solid var(--text-body);
-  border-bottom: 1px solid var(--border-hairline);
+  padding: 1.5rem;
+  background: var(--surface-card);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
 }
 
 .form-copy {
@@ -1410,17 +1665,12 @@ main {
 .form-controls select {
   min-width: 0;
   flex: 1;
-  padding: 0.8rem 0.1rem;
+  padding: 0.8rem 0.75rem;
   color: var(--text-body);
-  background: transparent;
-  border: 0;
-  border-bottom: 1px solid var(--border-control);
-  border-radius: 0;
+  background: var(--surface-card);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
   outline: none;
-  /* ★ 오너 2026-08-27: 원고 단위 select 가 옆 입력칸과 높이가 안 맞았다.
-     원인은 padding 이 아니라 **글꼴**이다 — 브라우저는 select 에 제 UI 글꼴을
-     주므로 같은 padding 을 줘도 line-box 높이가 달라진다. 둘 다 페이지 글꼴을
-     물려받게 해서 맞춘다(`font: inherit` 은 크기·행간까지 함께 가져온다). */
   font: inherit;
 }
 
@@ -1450,7 +1700,9 @@ main {
 }
 
 .form-controls input:focus {
-  border-bottom-color: var(--action-primary);
+  border-color: var(--action-primary);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .form-controls button {
@@ -1466,21 +1718,26 @@ main {
 
 .resource-row {
   display: flex;
-  min-height: 4.4rem;
+  min-height: 5rem;
   align-items: center;
   gap: var(--space-4);
+  padding: 0 var(--space-4);
   border-bottom: 1px solid var(--border-hairline);
+  transition: background 180ms ease;
 }
 
 .resource-link {
   display: flex;
   flex: 1;
+  min-width: 0;
   align-items: center;
   justify-content: space-between;
-  padding: 1.25rem 0;
+  gap: var(--space-4);
+  padding: 1.4rem 0;
   color: var(--text-body);
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 1.3rem;
+  font-size: var(--type-reading);
+  font-weight: 650;
+  overflow-wrap: anywhere;
   text-decoration: none;
 }
 
@@ -1496,7 +1753,7 @@ main {
 
 .resource-title {
   flex: 1;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
   font-size: 1.22rem;
 }
 
@@ -1691,7 +1948,7 @@ main {
 
 .chapter-row > strong {
   flex: 1;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
   font-size: 1.35rem;
 }
 
@@ -1699,11 +1956,17 @@ main {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  margin: 0.5rem 0 0 1.5rem;
+  flex-wrap: wrap;
+  margin: 0.75rem 0 0 1.5rem;
 }
 
 .scene-creation-form input {
-  flex: 1;
+  flex: 1 1 10rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--surface-card);
+  color: var(--text-body);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
   /* W3: flex 항목의 기본 min-width:auto 가 320px에서 줄어들기를 막아 폼이
      뷰포트를 17px 넘겼다(2026-09-12 실측). */
   min-width: 0;
@@ -1847,7 +2110,7 @@ main {
 
 .version-panel-heading h2 {
   margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
   font-size: var(--type-panel);
   font-weight: 500;
 }
@@ -1954,7 +2217,7 @@ main {
 
 .empty-state p {
   margin: 0 0 0.35rem;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
   font-size: 1.3rem;
 }
 
@@ -2086,7 +2349,7 @@ main {
 .candidate-text {
   margin: 1rem 0 0;
   color: var(--text-body);
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
   font-size: var(--type-reading);
   line-height: 1.85;
   white-space: pre-wrap;
@@ -2282,7 +2545,7 @@ main {
   }
 
   .resource-link {
-    font-size: 1.14rem;
+    font-size: var(--type-reading);
   }
 
   .review-row {
@@ -2360,7 +2623,7 @@ main {
 
 .section-title {
   margin: 2.4rem 0 0;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
   font-size: 1.25rem;
   font-weight: 500;
 }
@@ -2396,7 +2659,7 @@ main {
 }
 
 .review-summary-heading strong {
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
   font-size: var(--type-subhead);
   font-weight: 500;
 }
@@ -2538,7 +2801,7 @@ main {
 }
 
 .finding-check {
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
   font-size: 1.15rem;
 }
 
@@ -2584,7 +2847,7 @@ main {
 .detail-field dd {
   margin: 0;
   flex: 1;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
 }
 
 .quote-list {
@@ -2598,7 +2861,7 @@ main {
   padding: 0.8rem 1.1rem;
   border-left: 3px solid var(--action-primary);
   background: var(--tint-accent-weak);
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
 }
 
 .conflict-card {
@@ -2649,7 +2912,7 @@ main {
   border: 1px solid var(--border-hairline);
   background: var(--surface-card);
   color: var(--text-body);
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
   resize: vertical;
 }
 
@@ -2779,7 +3042,7 @@ main {
 
 .scratch-recovery-text {
   margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
   font-size: var(--type-reading);
   line-height: 1.85;
   white-space: pre-wrap;
@@ -3307,7 +3570,7 @@ main {
 
 .legal-document h2 {
   margin: var(--space-8) 0 var(--space-3);
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
   font-size: var(--type-subhead);
   font-weight: 500;
 }
@@ -3408,4 +3671,97 @@ main {
   margin: 0;
   color: var(--text-muted);
   font-size: var(--type-small);
+}
+
+/* Phase N — 서재는 생성 도구 + 작품 목록, 원고는 독립된 읽기 면이다. */
+.library-page {
+  display: grid;
+  grid-template-columns: 18rem minmax(0, 1fr);
+  align-items: start;
+  gap: 0 3rem;
+}
+
+.library-page > .page-heading {
+  grid-column: 1 / -1;
+  margin-bottom: 2.5rem;
+}
+
+.library-page > .creation-form {
+  grid-column: 1;
+  grid-row: 2 / span 3;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.5rem;
+}
+
+.library-page .form-controls {
+  flex-wrap: wrap;
+}
+
+.library-page .form-controls input {
+  flex-basis: 100%;
+}
+
+.library-page > .resource-list,
+.library-page > .empty-state,
+.library-page > .status-copy,
+.library-page > .alert {
+  grid-column: 2;
+  margin-top: 0;
+}
+
+.resource-row:hover,
+.resource-row:focus-within {
+  background: var(--surface-card);
+}
+
+.project-heading:has(.section-links) {
+  display: grid;
+  max-width: none;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 2rem;
+}
+
+.project-heading:has(.section-links) > :not(.section-links) {
+  grid-column: 1;
+}
+
+.project-heading .section-links {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  align-self: end;
+  padding-bottom: 0.5rem;
+}
+
+:is(button, input, select, textarea, a):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+@media (max-width: 64rem) {
+  .project-heading:has(.section-links) { grid-template-columns: minmax(0, 1fr); }
+  .project-heading .section-links { grid-column: 1; grid-row: auto; margin-top: 1rem; }
+}
+
+@media (max-width: 48rem) {
+  .library-page { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; }
+  .library-page > .page-heading { margin-bottom: 0; }
+  .library-page > .creation-form { grid-row: auto; }
+  .library-page > .resource-list,
+  .library-page > .empty-state,
+  .library-page > .status-copy,
+  .library-page > .alert { grid-column: 1; }
+}
+
+@media (max-width: 42rem) {
+  .brief-summary { grid-template-columns: minmax(0, 1fr); }
+  .creation-form .form-controls { flex-wrap: wrap; }
+  .creation-form .form-controls input { flex-basis: 100%; }
+  .scene-creation-form { margin-left: 0; }
+  .scene-creation-form label { flex-basis: 100%; }
+  .scene-list { margin-left: 0; }
+}
+
+@media (max-width: 26rem) {
+  .landing-nav a:not(.landing-logo) { display: none; }
+  .landing-logo, .landing-nav button { white-space: nowrap; }
 }

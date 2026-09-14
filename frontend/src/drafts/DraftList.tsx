@@ -211,11 +211,11 @@ export function DraftList() {
       <p className="eyebrow">원고 작업 공간</p>
       <h1>{project?.name ?? "프로젝트"}</h1>
       <p>장은 장면의 집합입니다. 장과 장면의 순서를 각각 관리합니다.</p>
-      {projectId !== undefined && <div className="section-links">
+      {projectId !== undefined && <nav className="section-links" aria-label="작품 도구">
         <Link className="section-link" to={`/projects/${projectId}/notes`}>메모 →</Link>
         <Link className="section-link" to={`/projects/${projectId}/review`}>검토함 →</Link>
         <Link className="section-link" to={`/projects/${projectId}/settings`}>프로젝트 설정 →</Link>
-      </div>}
+      </nav>}
     </header>
 
     {error !== null && <p className="alert" role="alert">{error}</p>}

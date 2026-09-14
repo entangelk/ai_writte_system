@@ -123,7 +123,7 @@ class PaletteProvenanceTest(unittest.TestCase):
         expected = len(self.generator.PAIRS)
         claims = {
             "frontend/src/styles.css": r"WCAG 2\.2 AA (\d+)짝 전수 검산",
-            "docs/daily_logs/2026-08-11/work_log.md": r"WCAG 2\.2 AA (\d+)짝 전수 검산",
+            "docs/daily_logs/2026-09-14/work_log.md": r"WCAG 2\.2 AA (\d+)짝 전수 검산",
             "docs/plans/10-frontend-design-system-decisions.md":
                 r"#### WCAG 2\.2 검산 — \*\*(\d+)짝\*\* 전수",
         }
@@ -188,10 +188,10 @@ class PaletteProvenanceTest(unittest.TestCase):
 
         이것이 없으면 본문 잉크를 AA 경계(4.5)까지 밝혀도 위 셀이 통과한다.
         """
-        surfaces = ("blue-50", "slate-50", "slate-0", "blue-100")
+        surfaces = ("slate-100", "slate-50", "slate-0", "blue-100")
         for surface in surfaces:
             with self.subTest(surface=surface):
                 ratio = self.generator.contrast(
-                    self.generator.P["blue-900"], self.generator.P[surface]
+                    self.generator.P["slate-900"], self.generator.P[surface]
                 )
                 self.assertGreaterEqual(round(ratio, 2), 7.0)

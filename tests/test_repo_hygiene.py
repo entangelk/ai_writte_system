@@ -221,7 +221,7 @@ class ForbiddenLiteralsTest(unittest.TestCase):
         scan = _run_exact_scan()
         unexpected = [
             p for p in scan.skipped_as_binary
-            if not (p.endswith(".png") or p.endswith(".gif"))
+            if not (p.endswith(".png") or p.endswith(".gif") or p.endswith(".webp"))
         ]
         self.assertEqual(
             unexpected, [],

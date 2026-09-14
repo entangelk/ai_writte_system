@@ -47,7 +47,7 @@ export function ProjectList() {
   }
 
   return (
-    <section className="workspace-page page-enter">
+    <section className="workspace-page library-page page-enter">
       <header className="page-heading">
         <p className="eyebrow">작품 서재</p>
         <h1>프로젝트</h1>
