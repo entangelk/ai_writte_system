@@ -14,7 +14,6 @@
 - 분석 run은 2026-09-17 05:11:10 UTC와 재시도한 05:16:47 UTC에 모두 외부 제공자의 429로 실패했다. gateway는 매번 API key 네 슬롯을 모두 시도한 뒤 `provider_overloaded`를 반환했고, application이 계약대로 HTTP 502로 변환했다.
 - 이어쓰기 long job은 04:53:02~04:54:51 UTC에 실제 본문 생성 전 `query_planner` 단계에서 실패했다. 네 key 슬롯 모두 `provider_unavailable`이었고 gateway 최종 응답은 503, 저장된 job 사유는 `context_search_failed / llm_error: planner provider error: provider is unavailable`이었다.
 - 같은 프로젝트의 다음 medium job은 04:56:56 UTC에 시작해 query planner·writing generation·writing report를 모두 통과하고 05:01:48 UTC에 성공했다. 영구 배선 오류나 요청 데이터 결함보다 외부 제공자의 시간대별 불안정이라는 판정 근거다.
-- 서버는 점검 시 메모리 available 4.0 GiB, 루트 디스크 available 126 GiB였고 application·generation worker·gateway의 restart count는 모두 0, OOMKilled는 모두 false였다. 로컬 서버 자원 고갈은 원인이 아니다.
 - 코드·설정·운영 데이터는 변경하지 않았다.
 
 ### 전역 Gemini 모델 폴백과 429 조합별 cooldown
@@ -37,8 +36,6 @@
 - 두 변이 뒤 `git diff --exit-code`로 체크포인트 커밋과 바이트 단위 동일함을 확인했다.
 - 사용자 정정 뒤 `docker compose config`에서 application·generation worker의 `LLM_GATEWAY_MODEL=gemma-4-31b-it`, gateway의 `LLAMA_MODELS=gemma-4-31b-it,gemini-3.5-flash-lite,gemini-3.1-flash-lite`를 확인했다.
 - 최종 관련 회귀는 **92 passed/140 subtests**, 문서 인덱스·저장소 위생은 **29 passed/970 subtests**다. 문서 1차 실행에서 README의 SoT 표기가 v1.8.71로 남은 것을 검출해 v1.8.72로 동기화한 뒤 재통과했다.
-- 배포 서버 `/home/dyrkd12/ai_writte_system/.env`도 같은 3단 체인으로 수정했다. 변경 전 파일은 `.env.bak-20260917-model-fallback`으로 보존했고, gateway만 `--no-deps --force-recreate`하여 실제 컨테이너 env를 확인했다. 기동 결과는 `running healthy`, restart count 0, `/health/live` 200이다.
-- 오너 push 뒤 서버 `main`을 `7bb2b7ee`에서 `d4853057`로 fast-forward하고 gateway 이미지만 재빌드·교체했다. 컨테이너 내부 코드에서 429 경로의 `model=model` 전달을 확인했고, 최종 상태는 `running healthy`, restart count 0, `/health/live` 200이다. application·generation worker의 기본 모델 값은 기존 `gemma-4-31b-it` 그대로라 재생성하지 않았다.
 
 ## Issues found
 
