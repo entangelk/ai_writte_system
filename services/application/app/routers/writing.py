@@ -111,7 +111,6 @@ from services.application.app.writing.revise_gate import (
 )
 from services.application.app.retry_policy import (
     RetryCooldownActive,
-    RetryLimitReached,
 )
 from services.application.app.writing.service import WritingError
 from services.llm_gateway.app.errors import (
@@ -597,8 +596,6 @@ def register_writing(
         try:
             job = writing_generation_jobs.mark_pending_for_retry(job)
         except InvalidGenerationJobStateTransition as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except RetryLimitReached as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except RetryCooldownActive as exc:
             raise HTTPException(

@@ -1293,12 +1293,11 @@ class ApplicationApiTest(unittest.TestCase):
         self.assertIsNone(response.json()["failure_reason"])
         self.assertIsNone(response.json()["failure_detail"])
 
-    def test_analysis_retry_endpoint_enforces_cooldown_then_cap(self):
-        """S-1 D2(오너 2026-09-05): 실패 직후 429(+Retry-After), 상한 초과 409.
-
-        under-strict: 쿨다운이나 상한을 지우면 첫·셋째 단정이 실패한다 — 그
-        상태가 감사 §A.2 의 결함이다(무과금 재실행 루프). over-strict: 정상
-        재시도까지 막으면 둘째 단정이 실패한다.
+    def test_analysis_retry_endpoint_enforces_cooldown_without_cap(self):
+        """오너 정정(2026-09-17, SoT v1.8.74): 실패 직후 429(+Retry-After)는 유지,
+        영구 상한은 없다 — 상한이 결정적 snapshot 키와 만나면 원고가 영원히 분석
+        불가해진다. under-strict: 쿨다운을 지우면 첫 단정, 상한을 되돌리면 셋째
+        재시도가 실패한다. over-strict: 정상 재시도까지 막으면 중간 단정이 실패한다.
         """
         core_sot = CoreSotService(InMemoryCoreSotRepository())
         analysis = AnalysisService(InMemoryAnalysisRepository())
@@ -1327,22 +1326,12 @@ class ApplicationApiTest(unittest.TestCase):
         self.assertEqual(cooldown.status_code, 429)
         self.assertEqual(cooldown.headers.get("Retry-After"), "60")
 
-        _backdate(failed)
-        first = client.post(
-            f"/projects/{project['id']}/analysis/jobs/{job.id}/retry")
-        self.assertEqual(first.status_code, 200)
-
-        failed = _fail()
-        _backdate(failed)
-        second = client.post(
-            f"/projects/{project['id']}/analysis/jobs/{job.id}/retry")
-        self.assertEqual(second.status_code, 200)
-
-        failed = _fail()
-        _backdate(failed)
-        capped = client.post(
-            f"/projects/{project['id']}/analysis/jobs/{job.id}/retry")
-        self.assertEqual(capped.status_code, 409)
+        for attempt in range(1, 4):
+            _backdate(failed)
+            retried = client.post(
+                f"/projects/{project['id']}/analysis/jobs/{job.id}/retry")
+            self.assertEqual(retried.status_code, 200, attempt)
+            failed = _fail()
 
     def test_analysis_retry_endpoint_rejects_non_failed_and_cross_project(self):
         core_sot = CoreSotService(InMemoryCoreSotRepository())

@@ -14,7 +14,6 @@ from services.application.app.analysis.models import (
 )
 from services.application.app.retry_policy import (
     RetryCooldownActive,
-    RetryLimitReached,
 )
 from services.application.app.analysis.service import (
     AnalysisNotFound,
@@ -171,10 +170,12 @@ class AnalysisJobStateTests(unittest.TestCase):
         self.assertIsNone(retried.failure_detail)
         self.assertEqual(repo.get_job(job.id), retried)
 
-    def test_explicit_retry_is_capped_at_two_attempts(self):
-        """S-1 D2(오너 2026-09-05): 상한 2회 — B5 의 "재시도는 드문 회복 수단"
-        전제를 지키는 숫자(감사 §A.2). under-strict: 상한을 지우면 세 번째가
-        통과하고, over-strict: 1 로 당기면 둘째에서 실패한다.
+    def test_explicit_retry_has_no_cap(self):
+        """오너 정정(2026-09-17, SoT v1.8.74): 재시도에 영구 상한이 없다 — 상한이
+        결정적 snapshot 키(``analyze:<snapshot>``)와 만나면 실패 누적 원고가 영원히
+        분석 불가해진다. retry_count는 상한 없이 감사값으로 계속 오른다. 쿨다운은
+        유지된다(아래 쿨다운 셀이 over-strict 방향을 잠근다). under-strict: 어떤
+        형태의 상한을 되돌리면 여섯 번째 재시도가 실패한다.
         """
         clock = _Clock()
         service, repo = _service(clock=clock)
@@ -184,18 +185,21 @@ class AnalysisJobStateTests(unittest.TestCase):
             project_id="project-1", job_id=job.id,
             failure_reason=AnalysisJobFailureReason.PROVIDER_ERROR,
         )
-        for _ in range(2):
+        for attempt in range(1, 6):
             clock.advance(61)
             job = service.retry_failed_job(
                 project_id="project-1", job_id=job.id)
+            self.assertEqual(job.retry_count, attempt)
             service.mark_job_running(project_id="project-1", job_id=job.id)
             job = service.mark_job_failed(
                 project_id="project-1", job_id=job.id,
                 failure_reason=AnalysisJobFailureReason.PROVIDER_ERROR,
             )
         clock.advance(61)
-        with self.assertRaises(RetryLimitReached):
-            service.retry_failed_job(project_id="project-1", job_id=job.id)
+        sixth = service.retry_failed_job(project_id="project-1", job_id=job.id)
+        self.assertEqual(sixth.status, AnalysisJobStatus.PENDING)
+        self.assertEqual(sixth.retry_count, 6)
+        self.assertEqual(repo.get_job(job.id), sixth)
 
     def test_explicit_retry_within_the_cooldown_is_refused(self):
         """쿨다운 60s — 실패 직후의 재시도 나열을 막는다."""

@@ -22,7 +22,6 @@ from fastapi.responses import JSONResponse
 from services.application.app.analysis.apply import MemoryApplyError, MissingMatchedMemory
 from services.application.app.retry_policy import (
     RetryCooldownActive,
-    RetryLimitReached,
 )
 from services.application.app.analysis.compare import (
     ActionProposal,
@@ -212,8 +211,6 @@ def register_analysis(
         except (AnalysisNotFound, NotFound) as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except InvalidJobStateTransition as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except RetryLimitReached as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except RetryCooldownActive as exc:
             raise HTTPException(

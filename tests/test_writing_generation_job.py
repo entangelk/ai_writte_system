@@ -20,7 +20,6 @@ from datetime import UTC, datetime, timedelta
 
 from services.application.app.retry_policy import (
     RetryCooldownActive,
-    RetryLimitReached,
 )
 from services.application.app.writing.generation_job import (
     DEFAULT_CLAIM_TIMEOUT_SECONDS,
@@ -262,25 +261,28 @@ class RetryTest(unittest.TestCase):
         self.assertEqual(reclaimed.id, failed.id)
         self.assertEqual(reclaimed.status, WritingGenerationJobStatus.RUNNING)
 
-    def test_retry_is_capped_at_two_attempts(self):
-        """S-1 D2(오너 2026-09-05): 상한 2회 — B5 의 "재시도는 드문 회복 수단"
-        전제를 지키는 숫자. under-strict: 상한을 지우면 세 번째 재시도가 통과해
-        실패한다. over-strict: 상한을 1 로 당기면 둘째 재시도에서 실패한다.
+    def test_retry_has_no_cap(self):
+        """오너 정정(2026-09-17, SoT v1.8.74): 재시도에 영구 상한이 없다(분석과
+        같은 정책 — S-1 의 한몸 원칙). retry_count는 감사값으로 계속 오른다.
+        쿨다운 셀이 over-strict 방향을 잠근다. under-strict: 상한을 되돌리면
+        네 번째 재시도가 실패한다.
         """
         clock = _Clock()
         svc = _service(clock=clock)
         job = self._failed(svc)
-        for _ in range(2):
+        for attempt in range(1, 4):
             clock.advance(61)
             job = svc.mark_pending_for_retry(job)
+            self.assertEqual(job.retry_count, attempt)
             claimed = svc.claim_next()
             job = svc.mark_failed(
                 claimed,
                 reason=WritingGenerationJobFailureReason.PROVIDER_TIMEOUT,
             )
         clock.advance(61)
-        with self.assertRaises(RetryLimitReached):
-            svc.mark_pending_for_retry(job)
+        fourth = svc.mark_pending_for_retry(job)
+        self.assertEqual(fourth.status, WritingGenerationJobStatus.PENDING)
+        self.assertEqual(fourth.retry_count, 4)
 
     def test_retry_within_the_cooldown_is_refused_with_the_remaining_seconds(self):
         """쿨다운 60s — 실패 직후의 재시도 나열을 막는다(감사 §A.3)."""

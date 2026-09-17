@@ -37,9 +37,7 @@ from typing import Callable, Protocol
 from uuid import uuid4
 
 from services.application.app.retry_policy import (
-    MAX_JOB_RETRIES,
     RetryCooldownActive,
-    RetryLimitReached,
     cooldown_remaining,
 )
 
@@ -426,15 +424,12 @@ class WritingGenerationJobService:
         that to 409) — succeeded and the in-flight states are never retryable.
         The failure fields and the stale claim lease are cleared on the way back.
 
-        S-1 D2(오너 2026-09-05 = 상한 2회·쿨다운 60초): 재시도는 회복 수단이지
-        무과금 재실행의 통로가 아니다(감사 §A.3). 상한 초과는 ``RetryLimitReached``
-        (409), 마지막 실패 직후는 ``RetryCooldownActive``(429+Retry-After).
+        S-1 D2(2026-09-05)의 영구 상한은 오너 정정(2026-09-17, SoT v1.8.74)으로
+        폐지됐다 — 상한이 analysis 의 결정적 snapshot 키와 만나 원고가 영원히
+        재분석 불가해지는 본말전도가 실제 배포에서 관측됐다. 정책은 양쪽이 한몸
+        이라 여기도 상한이 없다. 남는 방어는 쿨다운(``RetryCooldownActive``
+        429+Retry-After)과 입장 게이트다. ``retry_count``는 감사값으로 계속 오른다.
         """
-        if job.retry_count >= MAX_JOB_RETRIES:
-            raise RetryLimitReached(
-                f"this job was already retried {job.retry_count} times "
-                f"(limit {MAX_JOB_RETRIES})"
-            )
         remaining = cooldown_remaining(job.failed_at, self._clock())
         if remaining > 0:
             raise RetryCooldownActive(

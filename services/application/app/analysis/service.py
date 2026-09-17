@@ -33,9 +33,7 @@ from services.application.app.analysis.schema import (
 )
 from services.application.app.analysis.source import SourceRefResolver
 from services.application.app.retry_policy import (
-    MAX_JOB_RETRIES,
     RetryCooldownActive,
-    RetryLimitReached,
     cooldown_remaining,
     now_utc,
 )
@@ -345,17 +343,12 @@ class AnalysisService:
     def retry_failed_job(self, *, project_id: str, job_id: str) -> AnalysisJob:
         """Explicitly reset one failed job; ordinary replay remains terminal.
 
-        S-1 D2(오너 2026-09-05 = 상한 2회·쿨다운 60초): 재시도는 회복 수단이지
-        무과금 재실행의 통로가 아니다(감사 §A.2 — B5 의 "재시도는 드문 회복 수단"
-        전제를 지키는 상한). 상한 초과는 ``RetryLimitReached``(409), 마지막 실패
-        직후는 ``RetryCooldownActive``(429+Retry-After).
+        오너 정정(2026-09-17, SoT v1.8.74): 영구 상한은 폐지 — 상한이 결정적
+        snapshot 키와 만나면 실패 누적 원고가 영원히 재분석 불가해진다. 남는
+        방어는 쿨다운(``RetryCooldownActive`` 429+Retry-After), 입장 게이트,
+        확인 재실행 +1 과금이다. ``retry_count``는 감사값으로 계속 오른다.
         """
         job = self._require_job(project_id, job_id)
-        if job.retry_count >= MAX_JOB_RETRIES:
-            raise RetryLimitReached(
-                f"this job was already retried {job.retry_count} times "
-                f"(limit {MAX_JOB_RETRIES})"
-            )
         remaining = cooldown_remaining(job.failed_at, self._clock())
         if remaining > 0:
             raise RetryCooldownActive(
