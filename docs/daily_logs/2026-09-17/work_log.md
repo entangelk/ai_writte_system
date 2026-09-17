@@ -38,7 +38,7 @@
 - 사용자 정정 뒤 `docker compose config`에서 application·generation worker의 `LLM_GATEWAY_MODEL=gemma-4-31b-it`, gateway의 `LLAMA_MODELS=gemma-4-31b-it,gemini-3.5-flash-lite,gemini-3.1-flash-lite`를 확인했다.
 - 최종 관련 회귀는 **92 passed/140 subtests**, 문서 인덱스·저장소 위생은 **29 passed/970 subtests**다. 문서 1차 실행에서 README의 SoT 표기가 v1.8.71로 남은 것을 검출해 v1.8.72로 동기화한 뒤 재통과했다.
 - 배포 서버 `/home/dyrkd12/ai_writte_system/.env`도 같은 3단 체인으로 수정했다. 변경 전 파일은 `.env.bak-20260917-model-fallback`으로 보존했고, gateway만 `--no-deps --force-recreate`하여 실제 컨테이너 env를 확인했다. 기동 결과는 `running healthy`, restart count 0, `/health/live` 200이다.
-- 서버 HEAD는 아직 `7bb2b7ee`이고 429 key-global 코드이므로, 환경 설정은 활성화됐지만 B안의 429 조합별 cooldown은 로컬 구현 커밋을 오너가 push하고 서버를 동기화한 뒤 활성화된다.
+- 오너 push 뒤 서버 `main`을 `7bb2b7ee`에서 `d4853057`로 fast-forward하고 gateway 이미지만 재빌드·교체했다. 컨테이너 내부 코드에서 429 경로의 `model=model` 전달을 확인했고, 최종 상태는 `running healthy`, restart count 0, `/health/live` 200이다. application·generation worker의 기본 모델 값은 기존 `gemma-4-31b-it` 그대로라 재생성하지 않았다.
 
 ## Issues found
 
@@ -62,4 +62,4 @@
 - 사용자는 잠시 뒤 실패한 분석 job과 이어쓰기 job을 다시 시도할 수 있다.
 - 같은 오류가 반복되면 gateway의 key별 `provider_overloaded`/`provider_unavailable` 빈도와 외부 제공자 상태·quota를 함께 확인한다.
 - 후속 개선을 원하면 generation pad와 분석 오류 상자에 retryable 제공자 사유를 안전한 사용자 문구로 구분 노출하는 별도 UX 작업을 검토한다.
-- 구현 커밋을 오너가 push한 뒤 배포 서버 소스를 동기화하고 gateway·application·generation worker를 재생성한다.
+- 실패했던 분석·이어쓰기를 다시 실행해 실제 제공자 응답과 3단 폴백 결과를 관측한다.
