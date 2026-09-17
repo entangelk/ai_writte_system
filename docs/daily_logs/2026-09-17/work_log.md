@@ -19,13 +19,26 @@
 
 ### 전역 Gemini 모델 폴백과 429 조합별 cooldown
 
-- 오너가 분석뿐 아니라 이어쓰기를 포함한 모든 LLM 호출에 전역 모델 체인을 쓰기로 확정했다. 로컬 `.env`는 `LLAMA_DEFAULT_MODEL=gemini-3.5-flash-lite`, `LLAMA_MODELS=gemini-3.5-flash-lite,gemini-3.1-flash-lite`로 바꾸고 `.env.example`도 같은 운영 예시로 갱신했다.
+- 오너가 분석뿐 아니라 이어쓰기를 포함한 모든 LLM 호출에 전역 모델 체인을 쓰기로 확정했다. 후속 확인에서 기존 기본 모델도 포함한 총 3개가 의도였음이 명확해져, 로컬 `.env`는 `LLAMA_DEFAULT_MODEL=gemma-4-31b-it`, `LLAMA_MODELS=gemma-4-31b-it,gemini-3.5-flash-lite,gemini-3.1-flash-lite`로 맞추고 `.env.example`도 같은 운영 예시로 갱신했다.
 - 새 분석 전용 env를 만들지 않았다. 기존 gateway 계약이 요청의 명시 모델을 첫 순위, `LLAMA_MODELS`를 후속 폴백으로 합성하고 중복을 제거하므로 전 호출부가 이미 같은 체인을 소비한다.
 - 구현 전에 기존 정책의 모순을 발견했다. 첫 모델에서 네 key가 모두 429이면 key-global 60초 cooldown 때문에 fallback 모델 차례에는 시도 가능한 key가 0개였다. 오너에게 선택지를 제시했고 **B — LLM 429 cooldown을 `(key, model)` 조합 단위로 축소**가 확정됐다.
 - `SlidingWindowRateLimiter`는 key-global cooldown(401/403)과 `(key, model)` cooldown(429)을 분리했다. RPM window는 계속 key-global이라 모델 변경으로 키당 분당 상한을 우회할 수 없다.
 - 임베딩·리랭커에는 모델 폴백이 없으므로 동기 key rotation 코드는 건드리지 않았다. 패턴 스윕과 `git blame`에서 세 축의 원래 정책이 같은 2026-08-22 슬라이스에서 의도적으로 도입됐음을 확인했고, 이번 오너 결정이 LLM 축만 좁힌다는 경계를 정본에 기록했다.
 - SoT v1.8.72와 기존 fallback 결정 문서·CHANGELOG를 갱신했다. HANDOFF는 완료 서술을 중복하지 않는 snapshot 규칙에 따라 변경하지 않았다.
 - 회귀: 신규/수정 셀을 포함한 `tests/test_llm_fallback.py` 21 passed/7 subtests, gateway·env·HTTP 매핑·compose 관련 7파일은 **92 passed/140 subtests**.
+
+### Verification
+
+| 변이 | 대상 | 기대한 실패 | 결과 |
+|---|---|---|---|
+| 429 cooldown을 다시 key-global로 변경 | `services/llm_gateway/app/fallback.py:209` | `test_overloaded_cools_only_the_key_model_combination_short`가 fallback 모델 미호출로 실패 | 실패 확인 후 원복 |
+| 429 cooldown 호출 제거 | `services/llm_gateway/app/fallback.py:209` | 같은 테스트가 실패 조합의 cooldown 부재를 검출해 실패 | 실패 확인 후 원복 |
+
+- 두 변이 뒤 `git diff --exit-code`로 체크포인트 커밋과 바이트 단위 동일함을 확인했다.
+- 사용자 정정 뒤 `docker compose config`에서 application·generation worker의 `LLM_GATEWAY_MODEL=gemma-4-31b-it`, gateway의 `LLAMA_MODELS=gemma-4-31b-it,gemini-3.5-flash-lite,gemini-3.1-flash-lite`를 확인했다.
+- 최종 관련 회귀는 **92 passed/140 subtests**, 문서 인덱스·저장소 위생은 **29 passed/970 subtests**다. 문서 1차 실행에서 README의 SoT 표기가 v1.8.71로 남은 것을 검출해 v1.8.72로 동기화한 뒤 재통과했다.
+- 배포 서버 `/home/dyrkd12/ai_writte_system/.env`도 같은 3단 체인으로 수정했다. 변경 전 파일은 `.env.bak-20260917-model-fallback`으로 보존했고, gateway만 `--no-deps --force-recreate`하여 실제 컨테이너 env를 확인했다. 기동 결과는 `running healthy`, restart count 0, `/health/live` 200이다.
+- 서버 HEAD는 아직 `7bb2b7ee`이고 429 key-global 코드이므로, 환경 설정은 활성화됐지만 B안의 429 조합별 cooldown은 로컬 구현 커밋을 오너가 push하고 서버를 동기화한 뒤 활성화된다.
 
 ## Issues found
 
@@ -41,7 +54,7 @@
 - 이번 요청은 원인 진단으로 한정했다. 외부 제공자 일시 장애가 증명됐고 서버·컨테이너는 정상이라 재시작, 재배포, 데이터 수정은 하지 않았다.
 - HANDOFF는 변경하지 않는다. 이번 관측은 일시적인 외부 상태이며 다음 작업자의 현재 개발 방향을 바꾸는 지속 상태가 아니다.
 - 최초 진단 작업에서는 제품 설계나 기능 변경이 없어 CHANGELOG를 바꾸지 않았다. 후속 폴백 구현은 계약 변경이라 별도 행을 추가했다.
-- 후속 구현 결정: 분석 전용 변수를 만들지 않고 기존 전역 `LLAMA_DEFAULT_MODEL`+`LLAMA_MODELS`를 사용한다. 모든 분석·이어쓰기 call site가 같은 두 모델을 쓴다.
+- 후속 구현 결정: 분석 전용 변수를 만들지 않고 기존 전역 `LLAMA_DEFAULT_MODEL`+`LLAMA_MODELS`를 사용한다. 모든 분석·이어쓰기 call site가 기존 기본 모델과 신규 폴백 두 개로 이루어진 같은 3단 체인을 쓴다.
 - 후속 오너 결정: **B** — 429 cooldown은 LLM의 `(key, model)` 조합 단위다. 키 RPM과 401/403 cooldown은 key-global로 유지한다.
 
 ## Next steps
