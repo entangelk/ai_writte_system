@@ -227,24 +227,65 @@ class FallbackProviderTests(unittest.IsolatedAsyncioTestCase):
         clock.now += 2.0
         self.assertFalse(limiter.is_cooling(0))
 
-    async def test_overloaded_cools_the_key_short(self):
-        # 429 — 분당 한도. 슬라이딩 창과 같은 60초면 충분하다.
+    async def test_key_rejected_cooldown_still_blocks_every_model(self):
+        """401/403은 모델 문제가 아니라 키 문제라 다음 모델에서도 건너뛴다."""
+        attempts: list[str] = []
+        providers = [
+            RecordingProvider(
+                "a", [_error(ProviderErrorCode.KEY_REJECTED, False)], attempts
+            ),
+            RecordingProvider("b", [_unavailable(), _unavailable()], attempts),
+        ]
+        fallback = self._fallback(providers, ["m1", "m2"])
+
+        with self.assertRaises(ProviderError):
+            await fallback.generate(_request())
+
+        self.assertEqual(attempts, ["a:m1", "b:m1", "b:m2"])
+
+    async def test_overloaded_cools_only_the_key_model_combination_short(self):
+        """429 조합은 재사용하지 않고 다른 모델은 계속 시도한다.
+
+        under-strict: key 전체를 식히면 m2까지 막혀 아래 정상 폴백이 실패한다.
+        over-strict: cooldown을 없애면 같은 key+m1 조합의 냉각 단정이 실패한다.
+        """
         clock = FakeClock()
         overloaded = _error(ProviderErrorCode.OVERLOADED, True)
-        providers = [FakeLLMProvider([overloaded]), FakeLLMProvider([_result()])]
+        attempts: list[str] = []
+        providers = [
+            RecordingProvider("a", [overloaded, _result()], attempts),
+            RecordingProvider("b", [overloaded], attempts),
+        ]
         limiter = SlidingWindowRateLimiter(slots=2, limit=30, clock=clock)
         fallback = FallbackProvider(
-            providers=providers, models=["m1"], limiter=limiter,
+            providers=providers, models=["m1", "m2"], limiter=limiter,
             total_timeout_seconds=10.0,
         )
 
         result = await fallback.generate(_request())
         self.assertEqual(result.content, "ok")
-        self.assertTrue(limiter.is_cooling(0))
+        self.assertEqual(attempts, ["a:m1", "b:m1", "a:m2"])
+        self.assertTrue(limiter.is_cooling(0, model="m1"))
+        self.assertTrue(limiter.is_cooling(1, model="m1"))
+        self.assertFalse(limiter.is_cooling(0, model="m2"))
+        self.assertFalse(limiter.is_cooling(1, model="m2"))
         clock.now += RATE_LIMIT_COOLDOWN_SECONDS - 1.0
-        self.assertTrue(limiter.is_cooling(0))
+        self.assertTrue(limiter.is_cooling(0, model="m1"))
         clock.now += 2.0
-        self.assertFalse(limiter.is_cooling(0))
+        self.assertFalse(limiter.is_cooling(0, model="m1"))
+
+    async def test_rpm_window_remains_key_wide_across_models(self):
+        """모델 cooldown 분리와 달리 키 RPM은 모델을 바꿔 우회할 수 없다."""
+        attempts: list[str] = []
+        unavailable = _unavailable()
+        provider = RecordingProvider("a", [unavailable], attempts)
+        fallback = self._fallback([provider], ["m1", "m2"], limit=1)
+
+        with self.assertRaises(ProviderError) as raised:
+            await fallback.generate(_request())
+
+        self.assertIs(raised.exception, unavailable)
+        self.assertEqual(attempts, ["a:m1"])
 
     async def test_non_retryable_errors_stop_the_chain_immediately(self):
         # 400류 — 키·모델을 바꿔도 같은 결과다. 남은 조합에 왕복 비용을 쓰지 않는다.

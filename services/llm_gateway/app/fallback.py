@@ -38,7 +38,8 @@ log = logging.getLogger(__name__)
 
 # 401/403 — 키 자체가 거부된 경우. 잘못된 키는 60초 뒤에도 잘못됐으므로 길게 쉰다.
 KEY_REJECTED_COOLDOWN_SECONDS = 600.0
-# 429 — 키의 분당 한도에 걸린 경우. 슬라이딩 창(60초)과 같은 길이면 충분하다.
+# 429 — 키·모델 조합의 분당 한도에 걸린 경우. 슬라이딩 창(60초)과 같은 길이면
+# 충분하다. 키 전체를 식히면 같은 키로 다음 모델을 시도할 수 없어 모델 폴백이 죽는다.
 RATE_LIMIT_COOLDOWN_SECONDS = 60.0
 
 
@@ -63,28 +64,55 @@ class SlidingWindowRateLimiter:
         if limit < 1:
             raise ValueError("limit must be at least 1")
         self._windows: list[deque[float]] = [deque() for _ in range(slots)]
-        self._cooldown_until: list[float] = [float("-inf")] * slots
+        # 401/403은 키 자체의 문제라 슬롯 전체, 429는 모델별 용량일 수 있어
+        # (slot, model) 조합만 식힌다. RPM 창은 공급자 요청 수이므로 모델과 무관하게
+        # 계속 슬롯 단위로 센다.
+        self._key_cooldown_until: list[float] = [float("-inf")] * slots
+        self._model_cooldown_until: dict[tuple[int, str], float] = {}
         self._limit = limit
         self._window_seconds = window_seconds
         self._clock = clock
 
-    def try_acquire(self, slot: int) -> bool:
+    def try_acquire(self, slot: int, *, model: str | None = None) -> bool:
         """이 슬롯으로 한 번 시도해도 되는가. 가능하면 즉시 기록까지 마친다."""
         now = self._clock()
         self._evict(slot, now)
-        if now < self._cooldown_until[slot]:
+        if now < self._key_cooldown_until[slot]:
+            return False
+        if model is not None and self._is_model_cooling(slot, model, now):
             return False
         if len(self._windows[slot]) >= self._limit:
             return False
         self._windows[slot].append(now)
         return True
 
-    def cool(self, slot: int, seconds: float) -> None:
-        """이 슬롯을 `seconds` 동안 아예 쓰지 않는다(429·401/403 응답용)."""
-        self._cooldown_until[slot] = self._clock() + seconds
+    def cool(
+        self, slot: int, seconds: float, *, model: str | None = None
+    ) -> None:
+        """키 전체 또는 지정한 키·모델 조합을 `seconds` 동안 쓰지 않는다."""
+        until = self._clock() + seconds
+        if model is None:
+            self._key_cooldown_until[slot] = until
+        else:
+            self._model_cooldown_until[(slot, model)] = until
 
-    def is_cooling(self, slot: int) -> bool:
-        return self._clock() < self._cooldown_until[slot]
+    def is_cooling(self, slot: int, *, model: str | None = None) -> bool:
+        now = self._clock()
+        if now < self._key_cooldown_until[slot]:
+            return True
+        return (
+            model is not None and self._is_model_cooling(slot, model, now)
+        )
+
+    def _is_model_cooling(self, slot: int, model: str, now: float) -> bool:
+        key = (slot, model)
+        until = self._model_cooldown_until.get(key)
+        if until is None:
+            return False
+        if now < until:
+            return True
+        del self._model_cooldown_until[key]
+        return False
 
     def _evict(self, slot: int, now: float) -> None:
         window = self._windows[slot]
@@ -150,7 +178,7 @@ class FallbackProvider:
             async with asyncio.timeout(self._total_timeout_seconds):
                 for model in chain:
                     for slot, provider in rotated:
-                        if not self._limiter.try_acquire(slot):
+                        if not self._limiter.try_acquire(slot, model=model):
                             continue
                         try:
                             return await provider.generate(
@@ -179,7 +207,8 @@ class FallbackProvider:
                                 )
                             elif exc.code is ProviderErrorCode.OVERLOADED:
                                 self._limiter.cool(
-                                    slot, RATE_LIMIT_COOLDOWN_SECONDS
+                                    slot, RATE_LIMIT_COOLDOWN_SECONDS,
+                                    model=model,
                                 )
                             if not exc.retryable and not key_fatal:
                                 # 요청 자체가 못 쓰는 실패 — 키·모델을 바꿔도 같은
