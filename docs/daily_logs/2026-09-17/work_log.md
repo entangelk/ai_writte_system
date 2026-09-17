@@ -36,6 +36,7 @@
 - **무변 확인**: 저장되는 candidate의 `source_ref_ids`, `logical_key`(조립 앵커 기준이라 값 무변), 검토함·후보 저장·적용 API의 외부 형식은 그대로다.
 - **패턴 스윕(30초 예산)**: `source_ref_id` 사용처 전수 구분 — 나머지 전부는 서버 저장/API 계약(apply·mongo·core_sot·memory·context_search 내부)이고 LLM 프롬프트로 흐르는 잔존은 없었다. writing report는 이미 번호 인용+서버 매핑(K-6=R-e), query planner·compare/identity judge는 서버 id 무사용, `writing/retrieval.py:273`의 pointer 참조는 예산 중복제거용 내부 값이다. 분석 extract가 마지막 경로였다.
 - **회귀**: 집중 5파일 85 passed/25 subtests, API 묶음 129 passed/581 subtests, **전체 스위트 2939 passed/148 skipped/4274 subtests**, 문서 위생(`test_docs_indexes`·`test_product_name`·`test_service_policy_contract`) 36 passed/408 subtests.
+- **배포(오너 push 후)**: 배포 서버 `main`을 `d4853057`에서 `7dbdeb04`로 fast-forward하고, 실행 중 컨테이너의 compose 구성 라벨(`docker-compose.yml` + `docker-compose.external-embedding.yml`)을 확인한 뒤 같은 조합으로 공유 앱 이미지를 재빌드했다. 이미지를 쓰는 다섯 서비스(application·admin·generation_worker·worker·withdrawal_worker)를 재생성했고, 컨테이너 내부 코드에서 `analysis_extract_v7` 확인, `/health` 200, restart count 0, 재기동 후 3분 로그에 오류 없음. 배포 Mongo `prompt_templates`에 `analysis_extract_v1`~`v7` 전량 seed를 확인했다(신규 버전이라 `PromptTemplateConflict` 없음 — 부팅 seed가 그 자체로 검증).
 
 #### Verification(v7 슬라이스)
 
