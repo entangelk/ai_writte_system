@@ -20,7 +20,7 @@ class AnalysisPromptBuilderTest(unittest.TestCase):
     def test_build_request_contains_template_snapshot_and_source_ref_catalog(self):
         template = PromptTemplateService(
             InMemoryPromptTemplateRepository()
-        ).seed_analysis_extract_v4()
+        ).seed_analysis_extract_v7()
         snapshot = SnapshotText(
             project_id="project-1",
             snapshot_id="snapshot-1",
@@ -56,18 +56,22 @@ class AnalysisPromptBuilderTest(unittest.TestCase):
         self.assertEqual(payload["task_type"], ANALYSIS_EXTRACT_TASK_TYPE)
         self.assertEqual(payload["prompt_version"], template.version)
         self.assertEqual(payload["snapshot"]["raw_text"], snapshot.raw_text)
-        # 스키마 중복 전수조사 A: 카탈로그 렌더는 id·블록·인용문만 싣는다.
-        # offset/hash는 모델에게 에코 원천일 뿐이고 서버가 id로 조립한다.
+        # v7: 실제 source_ref/block id는 서버에만 남고 모델은 요청 로컬 순번과
+        # 인용문만 본다.
         self.assertEqual(
             payload["source_ref_catalog"],
             [
                 {
-                    "source_ref_id": "source-ref-1",
-                    "block_id": "block-1",
+                    "source_ref_index": 0,
                     "quote": "민아",
                 }
             ],
         )
+        self.assertEqual(payload["snapshot"], {"raw_text": snapshot.raw_text})
+        self.assertNotIn("source-ref-1", request.messages[1].content)
+        self.assertNotIn("block-1", request.messages[1].content)
+        self.assertNotIn("project-1", request.messages[1].content)
+        self.assertNotIn("snapshot-1", request.messages[1].content)
         self.assertEqual(payload["output_contract"]["top_level_key"], "candidates")
 
     def test_build_request_includes_writing_candidate_report_when_present(self):
@@ -76,7 +80,7 @@ class AnalysisPromptBuilderTest(unittest.TestCase):
         # advisory input. Removing the inclusion re-fails this test.
         template = PromptTemplateService(
             InMemoryPromptTemplateRepository()
-        ).seed_analysis_extract_v4()
+        ).seed_analysis_extract_v7()
         report = {"risk_notes": [
             {"type": "pov", "severity": "high", "message": "시점"}]}
         snapshot = SnapshotText(
@@ -105,10 +109,10 @@ class AnalysisPromptBuilderTest(unittest.TestCase):
         payload = json.loads(request.messages[1].content)
         self.assertEqual(payload["writing_candidate_report"], report)
 
-    def test_v2_separates_old_report_pointers_from_current_source_ref_ids(self):
+    def test_v7_strips_report_pointers_and_server_source_ids(self):
         template = PromptTemplateService(
             InMemoryPromptTemplateRepository()
-        ).seed_analysis_extract_v4()
+        ).seed_analysis_extract_v7()
         report = {
             "candidate_claims": [
                 {
@@ -150,16 +154,23 @@ class AnalysisPromptBuilderTest(unittest.TestCase):
         )
         payload = json.loads(request.messages[1].content)
 
-        self.assertEqual(payload["writing_candidate_report"], report)
         self.assertEqual(
-            payload["source_ref_catalog"][0]["source_ref_id"],
-            "current-source-ref",
+            payload["writing_candidate_report"],
+            {"candidate_claims": [{"text": "문이 열렸다."}]},
+        )
+        self.assertEqual(
+            payload["source_ref_catalog"][0],
+            {"source_ref_index": 0, "quote": "문이 열렸다."},
         )
         system = request.messages[0].content
         self.assertIn("advisory provenance", system)
-        self.assertIn("Never copy document_id", system)
-        self.assertIn("current source_ref_catalog", system)
+        self.assertIn("server-owned", system)
         raw_payload = request.messages[1].content
+        for server_identifier in (
+            "current-source-ref", "old-snapshot:block:4", "old-version",
+            "old-hash", "new-snapshot", "new-block", "new-hash", "project-1",
+        ):
+            self.assertNotIn(server_identifier, raw_payload)
         self.assertLess(
             raw_payload.index("writing_candidate_report"),
             raw_payload.index("source_ref_catalog"),
@@ -171,7 +182,7 @@ class AnalysisPromptBuilderTest(unittest.TestCase):
         # candidate report.
         template = PromptTemplateService(
             InMemoryPromptTemplateRepository()
-        ).seed_analysis_extract_v4()
+        ).seed_analysis_extract_v7()
         snapshot = SnapshotText(
             project_id="project-1",
             snapshot_id="snapshot-1",
@@ -200,7 +211,7 @@ class AnalysisPromptBuilderTest(unittest.TestCase):
     def test_empty_source_ref_catalog_is_explicit_error(self):
         template = PromptTemplateService(
             InMemoryPromptTemplateRepository()
-        ).seed_analysis_extract_v4()
+        ).seed_analysis_extract_v7()
         snapshot = SnapshotText(
             project_id="project-1",
             snapshot_id="snapshot-1",
@@ -219,7 +230,7 @@ class AnalysisPromptBuilderTest(unittest.TestCase):
     def test_cross_snapshot_source_ref_is_rejected_before_provider_call(self):
         template = PromptTemplateService(
             InMemoryPromptTemplateRepository()
-        ).seed_analysis_extract_v4()
+        ).seed_analysis_extract_v7()
         snapshot = SnapshotText(
             project_id="project-1",
             snapshot_id="snapshot-1",

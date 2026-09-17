@@ -834,6 +834,7 @@ def _default_prompt_template_service() -> PromptTemplateService:
         service.seed_analysis_extract_v4()
         service.seed_analysis_extract_v5()
         service.seed_analysis_extract_v6()
+        service.seed_analysis_extract_v7()
         return service
 
     from services.application.app.analysis.prompt_template_mongo_repository import (
@@ -852,6 +853,7 @@ def _default_prompt_template_service() -> PromptTemplateService:
     service.seed_analysis_extract_v4()
     service.seed_analysis_extract_v5()
     service.seed_analysis_extract_v6()
+    service.seed_analysis_extract_v7()
     return service
 
 

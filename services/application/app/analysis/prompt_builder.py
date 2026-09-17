@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from services.application.app.analysis.models import SnapshotText
 from services.application.app.analysis.prompt_templates import PromptTemplate
@@ -36,20 +38,19 @@ def build_analysis_extract_request(
         "task_type": prompt_template.task_type,
         "prompt_version": prompt_template.version,
         "snapshot": {
-            "project_id": snapshot.project_id,
-            "snapshot_id": snapshot.snapshot_id,
-            "content_hash": snapshot.content_hash,
-            "block_ids": list(snapshot.block_ids),
             "raw_text": snapshot.raw_text,
         },
         "writing_candidate_report": (
-            dict(snapshot.writing_candidate_report)
+            _without_server_identifiers(snapshot.writing_candidate_report)
             if snapshot.writing_candidate_report is not None else None),
         # Keep the authoritative namespace after the advisory report in the
         # serialized prompt. Small local models overweight the last identifier
         # namespace they see; putting the current catalog here makes the
         # contract structural as well as instructional.
-        "source_ref_catalog": [_source_ref_payload(ref) for ref in source_refs],
+        "source_ref_catalog": [
+            _source_ref_payload(index, ref)
+            for index, ref in enumerate(source_refs)
+        ],
         "output_contract": {
             "type": "json_object",
             "top_level_key": "candidates",
@@ -74,13 +75,35 @@ def build_analysis_extract_request(
     )
 
 
-def _source_ref_payload(source_ref: SourceRef) -> dict[str, object]:
-    # 스키마 중복 전수조사 A(2026-09-03): 카탈로그 렌더는 모델이 근거를 고르는 데
-    # 필요한 필드만 싣는다(id·블록·인용문). start/end offset과 content_hash는 모델에게
-    # 무의미한 에코 원천이었고(v6 이전 출력 계약이 그대로 복사하게 했다) 이제 서버가
-    # id로 조립하므로 렌더에서도 뺀다.
+def _source_ref_payload(index: int, source_ref: SourceRef) -> dict[str, object]:
+    # v7: 영속 source_ref/block id는 모델 경계를 넘지 않는다. 순번은 이 요청의
+    # 배열에서만 유효하고, 서버가 응답 순번을 원래 SourceRef로 되돌린다.
     return {
-        "source_ref_id": source_ref.id,
-        "block_id": source_ref.block_id,
+        "source_ref_index": index,
         "quote": source_ref.quote,
     }
+
+
+_SERVER_IDENTIFIER_KEYS = {
+    "project_id",
+    "snapshot_id",
+    "source_ref_id",
+    "block_id",
+    "document_id",
+    "version_id",
+    "content_hash",
+}
+
+
+def _without_server_identifiers(value: Any) -> Any:
+    """Keep report semantics while removing storage pointers from the prompt."""
+    if isinstance(value, Mapping):
+        return {
+            key: _without_server_identifiers(item)
+            for key, item in value.items()
+            if key not in _SERVER_IDENTIFIER_KEYS
+            and key != "related_context_pointers"
+        }
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return [_without_server_identifiers(item) for item in value]
+    return value

@@ -372,12 +372,12 @@ def _snapshot():
 
 
 def _extract_output():
-    # 스키마 중복 전수조사 A: 앵커는 id 하나 — 나머지는 파서가 카탈로그에서 조립.
+    # v7: 앵커는 요청 로컬 순번 하나 — 영속 id는 서버가 카탈로그에서 조립.
     return json.dumps({"candidates": [{
         "candidate_type": "character_observation",
         "provenance": "source_observed",
         "confidence": 0.8,
-        "source_anchors": [{"source_ref_id": "source-ref-1"}],
+        "source_anchors": [{"source_ref_index": 0}],
         "payload": {"name": "민아", "observation": "민아가 편지를 발견했다."},
     }]}, ensure_ascii=False)
 
@@ -392,7 +392,7 @@ class ExtractorRepairIsRecordedTest(unittest.TestCase):
 
     def _adapter(self, provider):
         templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        templates.seed_analysis_extract_v6()
+        templates.seed_analysis_extract_v7()
         return VersionedPromptAnalysisExtractionAdapter(
             _observed(provider), prompt_templates=templates,
             source_ref_catalog=_Catalog((_source_ref(),)), max_tokens=256,

@@ -1138,9 +1138,9 @@ class ApplicationApiTest(unittest.TestCase):
                                     "provenance": "source_observed",
                                     "confidence": 0.9,
                                     "source_anchors": [
-                                        # 스키마 중복 전수조사 A: id만 내면
-                                        # 서버가 카탈로그에서 조립한다.
-                                        {"source_ref_id": source_ref.id}
+                                        # v7: 요청 로컬 순번만 내면 서버가 실제
+                                        # source_ref를 카탈로그에서 조립한다.
+                                        {"source_ref_index": 0}
                                     ],
                                     "payload": {
                                         "name": "Mina",

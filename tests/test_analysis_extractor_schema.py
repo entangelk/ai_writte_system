@@ -35,15 +35,15 @@ def _candidate(candidate_type, payload):
         "candidate_type": candidate_type,
         "provenance": "source_observed",
         "confidence": 0.8,
-        "source_anchors": [_anchor("source-ref-1")],
+        "source_anchors": [_anchor(0)],
         "payload": payload,
     }
 
 
-def _anchor(source_ref_id):
-    # 스키마 중복 전수조사 A(2026-09-03): 모델 앵커는 카탈로그 항목의 id 하나다.
-    # span/quote/hash는 파서가 카탈로그에서 조립한다.
-    return {"source_ref_id": source_ref_id}
+def _anchor(source_ref_index=0):
+    # v7: 모델은 요청 안에서만 유효한 배열 순번을 고른다. 실제 source_ref id와
+    # span/quote/hash는 서버가 카탈로그에서 조립한다.
+    return {"source_ref_index": source_ref_index}
 
 
 # 서버 조립의 근거 카탈로그. 값들은 v6 이행 무손실 핀(아래 identity 셀)이
@@ -309,7 +309,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(drafts[0].provenance, AnalysisProvenance.SOURCE_OBSERVED)
         self.assertEqual(drafts[0].source_anchors[0].source_ref_id, "source-ref-1")
-        # 조립 정확성 핀: 모델은 id만 냈고 span/quote/hash는 카탈로그 행에서 왔다.
+        # 조립 정확성 핀: 모델은 순번만 냈고 id/span/quote/hash는 서버에서 왔다.
         self.assertEqual(drafts[0].source_anchors[0].start_offset, 0)
         self.assertEqual(drafts[0].source_anchors[0].end_offset, 2)
         self.assertEqual(drafts[0].source_anchors[0].quote, "민아")
@@ -318,7 +318,9 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             drafts[0].logical_key.startswith("character_observation:")
         )
         self.assertEqual(len(provider.requests), 1)
-        self.assertEqual(provider.requests[0].messages[-1].content, "민아")
+        request_payload = json.loads(provider.requests[0].messages[-1].content)
+        self.assertEqual(request_payload["snapshot_raw_text"], "민아")
+        self.assertNotIn("source-ref-1", provider.requests[0].messages[-1].content)
         self.assertIs(provider.requests[0].thinking, False)
 
     async def test_versioned_prompt_adapter_uses_template_and_source_ref_catalog(self):
@@ -342,7 +344,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        template = prompt_templates.seed_analysis_extract_v6()
+        template = prompt_templates.seed_analysis_extract_v7()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -364,7 +366,12 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(drafts), 1)
         self.assertEqual(drafts[0].source_anchors[0].source_ref_id, "source-ref-1")
         self.assertEqual(provider.requests[0].messages[0].content, template.template)
-        self.assertIn("source-ref-1", provider.requests[0].messages[1].content)
+        request_payload = json.loads(provider.requests[0].messages[1].content)
+        self.assertEqual(
+            request_payload["source_ref_catalog"][0],
+            {"source_ref_index": 0, "quote": "민아"},
+        )
+        self.assertNotIn("source-ref-1", provider.requests[0].messages[1].content)
         self.assertEqual(provider.requests[0].model, "gemma")
         self.assertEqual(provider.requests[0].max_tokens, 512)
 
@@ -394,7 +401,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        prompt_templates.seed_analysis_extract_v6()
+        prompt_templates.seed_analysis_extract_v7()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -421,10 +428,10 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertIs(repair.thinking, False)
         self.assertIn("Return valid JSON only", repair.messages[0].content)
         self.assertIn("provider content must be JSON", repair.messages[1].content)
-        self.assertIn("source-ref-1", repair.messages[1].content)
+        self.assertNotIn("source-ref-1", repair.messages[1].content)
         self.assertIn("candidate_type", repair.messages[0].content)
 
-    async def test_versioned_prompt_adapter_repairs_catalog_id_drift_once(self):
+    async def test_versioned_prompt_adapter_repairs_out_of_range_catalog_index_once(self):
         provider = FakeLLMProvider(
             [
                 GenerationResult(
@@ -439,9 +446,9 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
                                         "observation": "민아가 편지를 발견했다.",
                                     },
                                 ),
-                                # 근사 id(언더스코어) — 카탈록 조회는 정확 일치다.
+                                # 카탈로그 범위 밖 순번은 서버가 조립할 수 없다.
                                 "source_anchors": [
-                                    _anchor("source_ref-1")
+                                    _anchor(999)
                                 ],
                             }
                         ]
@@ -466,7 +473,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        prompt_templates.seed_analysis_extract_v6()
+        prompt_templates.seed_analysis_extract_v7()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -501,22 +508,18 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(provider.requests), 2)
         self.assertEqual(drafts[0].source_anchors[0].source_ref_id, "source-ref-1")
         self.assertIn(
-            "source_ref_id must exactly match the source_ref catalog",
+            "source_ref_index must identify an item in the source_ref catalog",
             provider.requests[1].messages[1].content,
         )
-        self.assertIn("advisory provenance", provider.requests[1].messages[0].content)
-        self.assertIn("Never copy document_id", provider.requests[1].messages[0].content)
+        self.assertIn("server-owned", provider.requests[1].messages[0].content)
         repair_payload = json.loads(provider.requests[1].messages[1].content)
         self.assertEqual(
-            repair_payload["authoritative_source_ref_catalog"][0]["source_ref_id"],
-            "source-ref-1",
+            repair_payload["authoritative_source_ref_catalog"][0],
+            {"source_ref_index": 0, "quote": "민아"},
         )
         self.assertNotIn("writing_candidate_report", repair_payload)
         self.assertNotIn("old-snapshot:block:4", provider.requests[1].messages[1].content)
-        self.assertIn(
-            "authoritative_source_ref_catalog in the repair payload",
-            provider.requests[1].messages[0].content,
-        )
+        self.assertNotIn("source-ref-1", provider.requests[1].messages[1].content)
 
     async def test_versioned_prompt_adapter_repairs_legacy_five_field_anchor_once(self):
         """스키마 중복 전수조사 A의 후속 셀(옛 anchor-drift 셀 대체). 구 v5 출력
@@ -568,7 +571,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        prompt_templates.seed_analysis_extract_v6()
+        prompt_templates.seed_analysis_extract_v7()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -586,7 +589,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(len(provider.requests), 2)
-        # 조립 출처 핀: repair가 낸 것은 id뿐이고 quote는 카탈로그 행에서 왔다.
+        # 조립 출처 핀: repair가 낸 것은 순번뿐이고 quote는 카탈로그 행에서 왔다.
         self.assertEqual(drafts[0].source_anchors[0].quote, "민아")
         self.assertIn(
             "fields do not match schema",
@@ -609,7 +612,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        prompt_templates.seed_analysis_extract_v6()
+        prompt_templates.seed_analysis_extract_v7()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -632,7 +635,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
     async def test_versioned_prompt_adapter_rejects_missing_catalog_before_provider(self):
         provider = FakeLLMProvider([])
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        prompt_templates.seed_analysis_extract_v6()
+        prompt_templates.seed_analysis_extract_v7()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -721,11 +724,10 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(AnalysisExtractionError):
                     parse_analysis_extraction(content, source_refs=_REFS)
 
-    def test_unknown_source_ref_id_is_rejected(self):
-        # under-strict: 카탈로그에 없는 id는 조립 불가라 거부된다(lookup은
-        # 정확 일치 — 근사 id도 못 들어간다).
+    def test_out_of_range_source_ref_index_is_rejected(self):
+        # under-strict: 카탈로그 범위 밖 순번은 조립 불가라 거부된다.
         with self.assertRaisesRegex(
-            AnalysisExtractionError, "must exactly match the source_ref catalog"
+            AnalysisExtractionError, "must identify an item in the source_ref catalog"
         ):
             parse_analysis_extraction(
                 _content(
@@ -735,7 +737,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
                                 "character_observation",
                                 {"name": "민아", "observation": "관찰"},
                             ),
-                            "source_anchors": [_anchor("source_ref-1")],
+                            "source_anchors": [_anchor(99)],
                         }
                     ]
                 ),
@@ -804,8 +806,8 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
                         {"name": "민아", "observation": "민아가 편지를 발견했다."},
                     ),
                     "source_anchors": [
-                        _anchor("source-ref-1"),
-                        _anchor("source-ref-2"),
+                        _anchor(0),
+                        _anchor(1),
                     ],
                 }
             ]
@@ -820,8 +822,8 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
     def test_logical_key_treats_same_anchor_set_as_order_insensitive(self):
         """Under/over guard: provider anchor ordering does not duplicate candidates."""
         anchors = [
-            _anchor("source-ref-1"),
-            _anchor("source-ref-2"),
+            _anchor(0),
+            _anchor(1),
         ]
         first = _candidate(
             "character_observation",
@@ -838,8 +840,8 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
         first["source_anchors"] = anchors
         replay["source_anchors"] = tuple(reversed(anchors))
         distinct["source_anchors"] = [
-            _anchor("source-ref-1"),
-            _anchor("source-ref-3"),
+            _anchor(0),
+            _anchor(2),
         ]
 
         first_draft, replay_draft, distinct_draft = parse_analysis_extraction(
@@ -851,7 +853,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
 
     def test_logical_key_treats_duplicate_anchor_as_same_set_member(self):
         """Under/over guard: duplicate evidence anchors do not split identity."""
-        anchor = _anchor("source-ref-1")
+        anchor = _anchor(0)
         first = _candidate(
             "character_observation",
             {"name": "민아", "observation": "민아가 편지를 발견했다."},
@@ -868,7 +870,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
         replay["source_anchors"] = [anchor, anchor]
         distinct["source_anchors"] = [
             anchor,
-            _anchor("source-ref-2"),
+            _anchor(1),
         ]
 
         first_draft, replay_draft, distinct_draft = parse_analysis_extraction(

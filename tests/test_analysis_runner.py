@@ -58,12 +58,12 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
                         self._candidate(
                             "character_observation",
                             {"name": "민아", "observation": "민아가 편지를 발견했다."},
-                            saved["anchors"]["min-a"],
+                            0,
                         ),
                         self._candidate(
                             "event_observation",
                             {"event": "민아가 편지를 발견했다."},
-                            saved["anchors"]["letter"],
+                            1,
                         ),
                     ]
                 )
@@ -94,7 +94,9 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
                 AnalysisCandidateType.EVENT_OBSERVATION,
             },
         )
-        self.assertEqual(provider.requests[0].messages[-1].content, saved["raw_text"])
+        request_payload = json.loads(provider.requests[0].messages[-1].content)
+        self.assertEqual(request_payload["snapshot_raw_text"], saved["raw_text"])
+        self.assertNotIn(saved["refs"][0].id, provider.requests[0].messages[-1].content)
 
     async def test_runner_replays_same_job_tasks_and_candidates(self):
         saved = self._saved_source()
@@ -106,7 +108,7 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
                 self._candidate(
                     "character_observation",
                     {"name": "민아", "observation": "민아가 편지를 발견했다."},
-                    saved["anchors"]["min-a"],
+                    0,
                 )
             ]
         )
@@ -187,7 +189,6 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
             quote="잘못된 인용",
             content_hash=saved["anchors"]["letter"]["content_hash"],
         )
-        bad_anchor = {"source_ref_id": ghost_ref.id}
         runner = AnalysisExtractionRunner(
             analysis_service=analysis_service,
             snapshot_loader=source_adapter,
@@ -203,12 +204,12 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
                                         "name": "민아",
                                         "observation": "민아가 편지를 발견했다.",
                                     },
-                                    saved["anchors"]["min-a"],
+                                    0,
                                 ),
                                 self._candidate(
                                     "event_observation",
                                     {"event": "민아가 편지를 발견했다."},
-                                    bad_anchor,
+                                    2,
                                 ),
                             ]
                         )
@@ -733,15 +734,14 @@ class AnalysisExtractionRunnerTest(unittest.IsolatedAsyncioTestCase):
         }
 
     @staticmethod
-    def _candidate(candidate_type, payload, source_anchor):
-        # 스키마 중복 전수조사 A: 모델 앵커는 id 하나(source_anchor dict는 서버 조립
-        # 값으로도 쓰이므로 여기서 id만 추출해 싣는다).
+    def _candidate(candidate_type, payload, source_ref_index):
+        # v7: provider output contains only the request-local catalog index.
         return {
             "candidate_type": candidate_type,
             "provenance": "source_observed",
             "confidence": 0.9,
             "source_anchors": [
-                {"source_ref_id": source_anchor["source_ref_id"]}
+                {"source_ref_index": source_ref_index}
             ],
             "payload": payload,
         }

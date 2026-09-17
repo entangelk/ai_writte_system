@@ -10,6 +10,7 @@ from services.application.app.analysis.prompt_templates import (
     ANALYSIS_EXTRACT_PROMPT_VERSION_V3,
     ANALYSIS_EXTRACT_PROMPT_VERSION_V4,
     ANALYSIS_EXTRACT_PROMPT_VERSION_V5,
+    ANALYSIS_EXTRACT_PROMPT_VERSION_V6,
     ANALYSIS_EXTRACT_TASK_TYPE,
     ANALYSIS_EXTRACT_TEMPLATE,
     ANALYSIS_EXTRACT_TEMPLATE_V1,
@@ -17,6 +18,7 @@ from services.application.app.analysis.prompt_templates import (
     ANALYSIS_EXTRACT_TEMPLATE_V3,
     ANALYSIS_EXTRACT_TEMPLATE_V4,
     ANALYSIS_EXTRACT_TEMPLATE_V5,
+    ANALYSIS_EXTRACT_TEMPLATE_V6,
     InMemoryPromptTemplateRepository,
     PromptTemplateConflict,
     PromptTemplateError,
@@ -51,10 +53,13 @@ _IMMUTABLE_TEMPLATE_DIGESTS = {
     ANALYSIS_EXTRACT_PROMPT_VERSION_V5: (
         "bc2a0b126fe3342a31da2fcc566cd29eb5557ea83add13838dbc290400834751"
     ),
-    # v6 (2026-09-03, 스키마 중복 전수조사 A): source_anchors id-선택 계약 — 현행
-    # 버전이라 더더욱 핀이 필요하다(고치는 순간 기존 Mongo 배포가 부팅에 실패한다).
-    ANALYSIS_EXTRACT_PROMPT_VERSION: (
+    # v6 (2026-09-03): id-선택 계약 — v7 등장으로 출시 동결본이다.
+    ANALYSIS_EXTRACT_PROMPT_VERSION_V6: (
         "7e2c5f93f5a53c276af93472906da9d0ccb619d6aba50b0b2e58649835be4c3a"
+    ),
+    # v7 (2026-09-17): 실제 source_ref id를 LLM 경계 밖으로 이동.
+    ANALYSIS_EXTRACT_PROMPT_VERSION: (
+        "443b0ea3199733477e16476e32a623253fbb7dccbca8faac4fc37e00e9a999dc"
     ),
 }
 
@@ -72,7 +77,7 @@ class PromptTemplateServiceTest(unittest.TestCase):
         self.assertEqual(fetched, seeded)
         self.assertEqual(fetched.template, ANALYSIS_EXTRACT_TEMPLATE_V1)
 
-    def test_seed_analysis_extract_v6_is_current_and_keeps_v1_through_v5(self):
+    def test_seed_analysis_extract_v7_is_current_and_keeps_v1_through_v6(self):
         service = PromptTemplateService(InMemoryPromptTemplateRepository())
 
         legacy = service.seed_analysis_extract_v1()
@@ -80,7 +85,8 @@ class PromptTemplateServiceTest(unittest.TestCase):
         v3 = service.seed_analysis_extract_v3()
         v4 = service.seed_analysis_extract_v4()
         v5 = service.seed_analysis_extract_v5()
-        current = service.seed_analysis_extract_v6()
+        v6 = service.seed_analysis_extract_v6()
+        current = service.seed_analysis_extract_v7()
 
         self.assertEqual(current.version, ANALYSIS_EXTRACT_PROMPT_VERSION)
         self.assertEqual(current.template, ANALYSIS_EXTRACT_TEMPLATE)
@@ -88,6 +94,8 @@ class PromptTemplateServiceTest(unittest.TestCase):
         self.assertEqual(v4.template, ANALYSIS_EXTRACT_TEMPLATE_V4)
         self.assertEqual(v5.version, ANALYSIS_EXTRACT_PROMPT_VERSION_V5)
         self.assertEqual(v5.template, ANALYSIS_EXTRACT_TEMPLATE_V5)
+        self.assertEqual(v6.version, ANALYSIS_EXTRACT_PROMPT_VERSION_V6)
+        self.assertEqual(v6.template, ANALYSIS_EXTRACT_TEMPLATE_V6)
         self.assertEqual(legacy.version, ANALYSIS_EXTRACT_PROMPT_VERSION_V1)
         self.assertEqual(v2.version, ANALYSIS_EXTRACT_PROMPT_VERSION_V2)
         self.assertEqual(v2.template, ANALYSIS_EXTRACT_TEMPLATE_V2)
@@ -99,16 +107,14 @@ class PromptTemplateServiceTest(unittest.TestCase):
         self.assertIn("advisory provenance", current.template)
         self.assertIn("source_ref_catalog", current.template)
 
-    def test_v6_output_contract_asks_for_ids_only(self):
-        """스키마 중복 전수조사 A의 프롬프트 축. 양방향: v6은 id-선택만 가르치고
-        (under-strict — 복사 지시가 돌아오면 문다), v5 동결본은 그대로 남아 있다
-        (over-strict — 동결본을 몰래 고쳐 v6과 맞추면 문다)."""
+    def test_v7_output_contract_uses_indexes_and_keeps_v6_frozen(self):
+        """v7은 서버 id를 숨기고, 이미 배포된 v6 본문은 그대로 보존한다."""
         self.assertIn(
-            '{"source_ref_id": "..."}', ANALYSIS_EXTRACT_TEMPLATE)
-        self.assertNotIn("must copy source_ref_id", ANALYSIS_EXTRACT_TEMPLATE)
+            '{"source_ref_index": 0}', ANALYSIS_EXTRACT_TEMPLATE)
+        self.assertNotIn("source_ref_id", ANALYSIS_EXTRACT_TEMPLATE)
+        self.assertIn("server-owned", ANALYSIS_EXTRACT_TEMPLATE)
         self.assertIn(
-            "must copy source_ref_id, start_offset, end_offset, quote, and content_hash",
-            ANALYSIS_EXTRACT_TEMPLATE_V5)
+            '{"source_ref_id": "..."}', ANALYSIS_EXTRACT_TEMPLATE_V6)
 
     def test_optional_character_aspect_guidance_is_v4_only(self):
         """The v1.7.23 aspect line belongs to v4; v3 stays as it was deployed.
@@ -133,6 +139,7 @@ class PromptTemplateServiceTest(unittest.TestCase):
             ANALYSIS_EXTRACT_PROMPT_VERSION_V3: ANALYSIS_EXTRACT_TEMPLATE_V3,
             ANALYSIS_EXTRACT_PROMPT_VERSION_V4: ANALYSIS_EXTRACT_TEMPLATE_V4,
             ANALYSIS_EXTRACT_PROMPT_VERSION_V5: ANALYSIS_EXTRACT_TEMPLATE_V5,
+            ANALYSIS_EXTRACT_PROMPT_VERSION_V6: ANALYSIS_EXTRACT_TEMPLATE_V6,
             ANALYSIS_EXTRACT_PROMPT_VERSION: ANALYSIS_EXTRACT_TEMPLATE,
         }
         # 핀 목록이 **출시된 버전 전부**를 덮는지 함께 본다. v4가 빠져 있던 것을
@@ -154,12 +161,18 @@ class PromptTemplateServiceTest(unittest.TestCase):
         deployed.seed_analysis_extract_v1()
         deployed.seed_analysis_extract_v2()
         deployed.seed_analysis_extract_v3()
+        deployed.seed_analysis_extract_v4()
+        deployed.seed_analysis_extract_v5()
+        deployed.seed_analysis_extract_v6()
 
         restarted = PromptTemplateService(repository)
         restarted.seed_analysis_extract_v1()
         restarted.seed_analysis_extract_v2()
         restarted.seed_analysis_extract_v3()
-        current = restarted.seed_analysis_extract_v6()
+        restarted.seed_analysis_extract_v4()
+        restarted.seed_analysis_extract_v5()
+        restarted.seed_analysis_extract_v6()
+        current = restarted.seed_analysis_extract_v7()
 
         self.assertEqual(current.version, ANALYSIS_EXTRACT_PROMPT_VERSION)
         self.assertEqual(
