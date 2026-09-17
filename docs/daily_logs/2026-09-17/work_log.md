@@ -4,6 +4,7 @@
 
 - 배포 환경에서 관측된 분석 502와 이어쓰기 생성 실패의 발생 지점과 원인을 읽기 전용으로 확인한다.
 - 애플리케이션 결함, 서버 자원 고갈, 외부 추론 제공자 장애를 증거로 구분한다.
+- 분석 추출 400(`source_ref_id must exactly match the source_ref catalog`)의 근본 원인인 "서버 id가 LLM 입력에 실림"을 계약 수준으로 제거한다(SoT v1.8.73).
 
 ## Completed work
 
@@ -26,6 +27,26 @@
 - SoT v1.8.72와 기존 fallback 결정 문서·CHANGELOG를 갱신했다. HANDOFF는 완료 서술을 중복하지 않는 snapshot 규칙에 따라 변경하지 않았다.
 - 회귀: 신규/수정 셀을 포함한 `tests/test_llm_fallback.py` 21 passed/7 subtests, gateway·env·HTTP 매핑·compose 관련 7파일은 **92 passed/140 subtests**.
 
+### 분석 추출 프롬프트 v7 — 서버 소유 id를 LLM 경계 밖으로(쓰러진 작업 이어받기)
+
+- **사건**: 배포 서버에서 기본 `gemma-4-31b-it`이 네 key 모두 429로 실패하고 폴백된 `gemini-3.5-flash-lite`가 응답은 했지만 255개 항목 카탈로그에 없는 24자 `source_ref_id`를 복사해, 정확 일치 검증이 `schema_invalid` 400을 반환했다(job 재시도 2회 소진). 감사 로그가 응답 본문을 저장하지 않아 잘못된 ID의 실측값은 확인 불가다.
+- **오너 정정**: 최초 제안("r1/r2 짧은 별칭을 주고 서버가 변환")은 여전히 LLM에게 식별자를 다루게 하는 방식이라 기각됐다. 확정 계약 — **실제 source_ref id는 LLM 요청에 한 글자도 들어가지 않고, 모델은 카탈로그 배열의 순번만 선택한다. 실제 ID·offset·hash 조립은 전적으로 서버 소관이다.**
+- **이어받기**: 앞선 작업 AI가 구현 도중 쓰러져 작업트리에 구현 일부와 테스트가 남아 있었다. 상속 시점의 집중 테스트 5파일 85 passed/25 subtests, API 묶음 129 passed/581 subtests로 구현 완결을 확인한 뒤 체크포인트 커밋(`a77fcc2`)으로 고정하고 검증을 이어갔다.
+- **구현(프롬프트 v7, `analysis_extract_v7`)**: 카탈로그 렌더를 `{source_ref_index, quote}`로 축소했고 snapshot 축에서 `project_id`/`snapshot_id`/`content_hash`/`block_ids`를, advisory 보고서에서 서버 id 키 전부와 `related_context_pointers`를 제거했다(`_without_server_identifiers`). 모델 출력 앵커는 `{"source_ref_index": N}` 하나이고 파서(`_source_anchor`)가 그 순번의 카탈로그 행 `SourceRef`에서 id/span/quote/hash를 조립한다(범위 밖 순번·legacy id 앵커·5필드 앵커 거부). repair는 잘못된 원문 출력을 되보내지 않고(`invalid_content` 파라미터 제거) 정제된 본문·순번 카탈로그로 재생성한다. v6은 출시 동결본으로 seed·sha 핀 유지, `main.py`의 in-memory/Mongo 두 seed 경로에 v7을 추가했다.
+- **무변 확인**: 저장되는 candidate의 `source_ref_ids`, `logical_key`(조립 앵커 기준이라 값 무변), 검토함·후보 저장·적용 API의 외부 형식은 그대로다.
+- **패턴 스윕(30초 예산)**: `source_ref_id` 사용처 전수 구분 — 나머지 전부는 서버 저장/API 계약(apply·mongo·core_sot·memory·context_search 내부)이고 LLM 프롬프트로 흐르는 잔존은 없었다. writing report는 이미 번호 인용+서버 매핑(K-6=R-e), query planner·compare/identity judge는 서버 id 무사용, `writing/retrieval.py:273`의 pointer 참조는 예산 중복제거용 내부 값이다. 분석 extract가 마지막 경로였다.
+- **회귀**: 집중 5파일 85 passed/25 subtests, API 묶음 129 passed/581 subtests, **전체 스위트 2939 passed/148 skipped/4274 subtests**, 문서 위생(`test_docs_indexes`·`test_product_name`·`test_service_policy_contract`) 36 passed/408 subtests.
+
+#### Verification(v7 슬라이스)
+
+| 변이 | 대상 | 기대한 실패 | 결과 |
+|---|---|---|---|
+| 카탈로그 렌더에 `source_ref_id` 되살리기 | `services/application/app/analysis/prompt_builder.py:81`(_source_ref_payload) | `test_build_request_contains_template_snapshot_and_source_ref_catalog`, `test_v7_strips_report_pointers_and_server_source_ids`, extractor의 요청 무-ID·repair 무-ID 단정 3셀 | 5셀 재실패 후 원복 |
+| 순번 0을 거부하도록 과교정(`< 0` → `<= 0`) | `services/application/app/analysis/extractor.py`(_source_anchor 경계 검사) | 정상 경로 조립 셀 전반(extractor·runner·API의 유효 순번 경로) | 16셀 재실패 후 원복 |
+| 보고서 `related_context_pointers` 스트립 제거 | `services/application/app/analysis/prompt_builder.py:105` | `test_v7_strips_report_pointers_and_server_source_ids` | 1셀 재실패 후 원복 |
+
+- 세 변이 후 `git status --short` 빈 트리(HEAD=`a77fcc2`) 확인. 상속 시점에 앞선 작업자가 "구 계약 구현이 신규 회귀에 실패함"을 이미 실측했다(신규 테스트 선행 작성).
+
 ### Verification
 
 | 변이 | 대상 | 기대한 실패 | 결과 |
@@ -45,6 +66,8 @@
 | 이어쓰기 long 생성 실패 | 컨텍스트 검색의 query planner가 네 key 슬롯에서 모두 `provider_unavailable`; gateway 최종 503 | 실패 job의 재시도 경로 사용. 같은 시각대 후속 medium job 성공으로 배선 변경은 불필요 | 본문 생성 전 실패했으며 scratch 결과는 생성되지 않음 |
 | 사용자 오류 문구의 원인 식별이 어려움 | 화면은 generation job의 `context_search_failed`를 일반 문구로 요약하고, 세부 제공자 사유는 저장하지만 표시하지 않음 | 이번 진단 범위에서는 변경하지 않음 | 운영 로그·감사 기록을 봐야 `unavailable`과 `overloaded`를 구분 가능 |
 | 429에서 모델 폴백이 실행되지 않음 | cooldown이 key-global이라 첫 모델의 429가 다음 모델까지 막음 | 오너 결정 B로 LLM 429만 `(key, model)` cooldown으로 축소 | 같은 key의 fallback 모델 호출 가능, 실패 조합 재호출은 60초 차단 |
+| 분석 400 "source_ref_id must exactly match the source_ref catalog" | 폴백 모델이 255개 항목 카탈로그에서 비슷한 24자 id를 복사 오류 — v6 카탈로그 렌더가 실제 id를 실어 모델에게 복사시키는 구조였음 | 프롬프트 v7로 서버 id를 LLM 경계 밖으로 이동(순번 선택+서버 조립) | 해당 job은 재시도 2회 소진으로 새 idempotency_key 재실행 필요. 배포 후 구조적으로 재발 불가 |
+| 감사 로그가 LLM 응답 본문을 저장하지 않아 잘못된 id 실측 불가 | `llm_call_audits`가 응답 메타데이터만 기록 | 이번 슬라이스에서 변경하지 않음 — v7으로 원천(모델이 id를 냄)이 사라져 진단 필요성도 축소 | 본문 저장 확대는 별도 정책 결정 대상 |
 
 ## Decisions
 
@@ -53,6 +76,7 @@
 - 최초 진단 작업에서는 제품 설계나 기능 변경이 없어 CHANGELOG를 바꾸지 않았다. 후속 폴백 구현은 계약 변경이라 별도 행을 추가했다.
 - 후속 구현 결정: 분석 전용 변수를 만들지 않고 기존 전역 `LLAMA_DEFAULT_MODEL`+`LLAMA_MODELS`를 사용한다. 모든 분석·이어쓰기 call site가 기존 기본 모델과 신규 폴백 두 개로 이루어진 같은 3단 체인을 쓴다.
 - 후속 오너 결정: **B** — 429 cooldown은 LLM의 `(key, model)` 조합 단위다. 키 RPM과 401/403 cooldown은 key-global로 유지한다.
+- 오너 정정(프롬프트 v7): **서버가 관리하는 id는 LLM 경계를 넘지 않는다.** "짧은 별칭 r1/r2를 주고 서버가 변환"하는 제안도 식별자를 모델에게 다루게 하는 방식이라 기각됐다("소스 id는 서버에서 관리가 가능한데 왜 LLM까지 들어가지"). 확정 계약: 모델은 요청 로컬 배열 순번만 선택하고 id·offset·hash 조립은 전적으로 서버가 한다.
 
 ## Next steps
 
@@ -60,3 +84,4 @@
 - 같은 오류가 반복되면 gateway의 key별 `provider_overloaded`/`provider_unavailable` 빈도와 외부 제공자 상태·quota를 함께 확인한다.
 - 후속 개선을 원하면 generation pad와 분석 오류 상자에 retryable 제공자 사유를 안전한 사용자 문구로 구분 노출하는 별도 UX 작업을 검토한다.
 - 실패했던 분석·이어쓰기를 다시 실행해 실제 제공자 응답과 3단 폴백 결과를 관측한다.
+- 프롬프트 v7 배포: 오너가 `main`을 push하면 배포 서버에서 fast-forward 후 공유 앱 이미지(`ai_writte_system-app`)를 재빌드하고 그 이미지를 쓰는 컨테이너(application·generation worker 등)를 재생성한다. 부팅 시 `prompt_templates`에 v7이 seed되고(신규 버전이라 conflict 없음) 어댑터 기본 조회가 v7로 넘어간다. 이어 400이 났던 snapshot을 새 `idempotency_key`로 재분석해 순번 선택 계약의 실제 응답을 관측한다.
