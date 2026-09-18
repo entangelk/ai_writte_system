@@ -37,12 +37,32 @@ from services.llm_gateway.app.provider import LLMProvider
 
 
 ANALYSIS_IDENTITY_TASK_TYPE = "analysis_identity"
-ANALYSIS_IDENTITY_PROMPT_VERSION = "analysis_identity_v1"
-ANALYSIS_IDENTITY_TEMPLATE = """You decide whether two analysis candidates of the same type describe the same real-world identity.
+# v1은 2026-09-18부터 출시 동결본이다 — 배포 Mongo가 이 본문을 저장했고
+# seed_template()은 저장본과 코드본이 다르면 PromptTemplateConflict로 부팅을
+# 죽인다. 본문을 고치려면 v2처럼 새 버전을 발행한다.
+ANALYSIS_IDENTITY_PROMPT_VERSION_V1 = "analysis_identity_v1"
+ANALYSIS_IDENTITY_TEMPLATE_V1 = """You decide whether two analysis candidates of the same type describe the same real-world identity.
 
 Return one JSON object with exactly these fields:
 - verdict: one of "same", "different", "uncertain"
 - rationale: a short string explaining the choice
+
+Do not wrap the JSON in markdown fences and do not add prose.
+
+Verdict meanings (both candidates are observations of the same kind of thing):
+- same: both candidates clearly refer to the same identity (the same character, the same event, or the same open question).
+- different: the candidates clearly refer to different identities.
+- uncertain: the evidence is not enough to tell them apart.
+"""
+# v2 (2026-09-18): rationale을 한국어로 쓴다 — 이 근거는 검토함의 묶임 그룹 행에
+# "근거 — …"로 사용자에게 그대로 노출되는데 지시가 없으면 모델 기본값(영어)으로
+# 나왔다(오너 관측). verdict 열거값과 구조는 무변이다.
+ANALYSIS_IDENTITY_PROMPT_VERSION = "analysis_identity_v2"
+ANALYSIS_IDENTITY_TEMPLATE = """You decide whether two analysis candidates of the same type describe the same real-world identity.
+
+Return one JSON object with exactly these fields:
+- verdict: one of "same", "different", "uncertain"
+- rationale: a short string explaining the choice, written in Korean
 
 Do not wrap the JSON in markdown fences and do not add prose.
 
@@ -60,6 +80,16 @@ class IdentityJudgeParseError(ValueError):
 def seed_analysis_identity_judge_template(
     prompt_templates: PromptTemplateService,
 ) -> PromptTemplate:
+    """Seed every shipped identity template: frozen v1 first, current v2 last.
+
+    Restarting against a deployed Mongo must replay both versions or the
+    conflict guard fires (same contract as the extract chain).
+    """
+    prompt_templates.seed_template(
+        task_type=ANALYSIS_IDENTITY_TASK_TYPE,
+        version=ANALYSIS_IDENTITY_PROMPT_VERSION_V1,
+        template=ANALYSIS_IDENTITY_TEMPLATE_V1,
+    )
     return prompt_templates.seed_template(
         task_type=ANALYSIS_IDENTITY_TASK_TYPE,
         version=ANALYSIS_IDENTITY_PROMPT_VERSION,

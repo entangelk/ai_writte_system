@@ -200,6 +200,8 @@ Each candidate must contain exactly these fields:
 - source_anchors: non-empty array of {"source_ref_index": 0} naming a zero-based item in the request-local catalog — identifiers, span, quote, and content_hash are derived by the server, so emit nothing else
 - payload: character_observation requires {"name": "...", "observation": "..."} and may add an optional "aspect" (e.g. "voice", "trait"); event_observation requires {"event": "..."}; open_question_observation requires {"question": "..."}
 
+Write every payload text value (name, observation, event, question, and the optional aspect) in Korean — these strings are shown to the user as-is. Keys, enum values, and the JSON structure stay exactly as specified.
+
 Use only source_ref_index values present in the authoritative_source_ref_catalog. If no valid candidate can be produced, return {"candidates":[]}.
 Backend source references are server-owned and must never be invented or emitted.
 """

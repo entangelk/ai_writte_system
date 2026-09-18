@@ -392,7 +392,7 @@ class ExtractorRepairIsRecordedTest(unittest.TestCase):
 
     def _adapter(self, provider):
         templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        templates.seed_analysis_extract_v7()
+        templates.seed_analysis_extract_v8()
         return VersionedPromptAnalysisExtractionAdapter(
             _observed(provider), prompt_templates=templates,
             source_ref_catalog=_Catalog((_source_ref(),)), max_tokens=256,

@@ -241,7 +241,7 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  max-width: 76rem;
+  max-width: 100rem;
   margin: 0 auto;
   padding: 1.4rem 2rem;
   border-bottom: 1px solid var(--border-hairline);
@@ -324,7 +324,7 @@ a {
 }
 
 .header-alert {
-  max-width: 76rem;
+  max-width: 100rem;
   margin: 0 auto;
   padding: 0.75rem 2rem;
   color: var(--state-danger-text);
@@ -342,7 +342,7 @@ a {
 }
 
 main {
-  max-width: 76rem;
+  max-width: 100rem;
   margin: 0 auto;
   padding: 0 2rem 5rem;
 }
@@ -630,7 +630,7 @@ main {
 }
 
 .landing-page {
-  max-width: 76rem;
+  max-width: 100rem;
   margin: 0 auto;
   padding: 0 2rem;
 }
@@ -864,14 +864,17 @@ main {
    헤더 1232 · 편집기 1232 · 관리자 1200 · 나머지 **1040**(192px 모자람)이었고
    규칙이 적힌 곳은 없었다. 이제 셋 다 헤더와 같은 폭을 쓴다 — 10.4 에서 68rem,
    2026-08-26 오너 결정으로 **76rem** 으로 넓혔다(전체 페이지 적용; pageLayout
-   가드가 네 리터럴의 일치를 핀하므로 변수화하지 않는다).
+   가드가 네 리터럴의 일치를 핀하므로 변수화하지 않는다). 2026-09-18 오너 결정으로
+   다시 **100rem** — /review 에서 인물이 묶인 그룹 행이 기본 폭에 눌려 양쪽이
+   빡빡하다는 지적(오너 관측)으로, "기본 페이지 폭" 자체를 넓힌다. 개별 화면만
+   넓히는 것은 이 규칙(폭을 정하는 자리는 하나)과 가드 셋 둘 다 깨는 길이다.
 
    ★ 좁은 측정폭이 필요한 블록은 **스스로** 제한한다(`.page-heading` 42rem ·
    그 설명문단 34rem) — 컨테이너를 좁혀서 얻지 않는다. 그래야 정렬과 가독성이
    서로를 깎지 않는다. */
 .workspace-page,
 .admin-page {
-  width: min(100%, 76rem);
+  width: min(100%, 100rem);
   padding-top: clamp(var(--space-8), 4vw, 3rem);
 }
 
@@ -3554,7 +3557,7 @@ main {
    약관·방침 페이지와 공개 푸터 (브리프 landing-page-scope D2=ⓐ, 2026-09-11)
    ==========================================================================
 
-   두 페이지는 **읽는 글**이지 작업 화면이 아니다 — 그래서 컨테이너 폭(76rem)을
+   두 페이지는 **읽는 글**이지 작업 화면이 아니다 — 그래서 컨테이너 폭(100rem)을
    그대로 쓰지 않고 이 블록이 **스스로** 측정폭을 제한한다(`.page-heading` 42rem 과
    같은 처방이며, 10.4 의 "폭을 정하는 자리는 하나" 를 깨지 않는 유일한 방법이다).
 

@@ -38,12 +38,35 @@ from services.llm_gateway.app.provider import LLMProvider
 
 
 ANALYSIS_COMPARE_TASK_TYPE = "analysis_compare"
-ANALYSIS_COMPARE_PROMPT_VERSION = "analysis_compare_v1"
-ANALYSIS_COMPARE_TEMPLATE = """You compare a new analysis observation against an existing canonical memory about the SAME subject.
+# v1은 2026-09-18부터 출시 동결본이다 — 배포 Mongo가 이 본문을 저장했고
+# seed_template()은 저장본과 코드본이 다르면 PromptTemplateConflict로 부팅을
+# 죽인다. 본문을 고치려면 v2처럼 새 버전을 발행한다.
+ANALYSIS_COMPARE_PROMPT_VERSION_V1 = "analysis_compare_v1"
+ANALYSIS_COMPARE_TEMPLATE_V1 = """You compare a new analysis observation against an existing canonical memory about the SAME subject.
 
 Return one JSON object with exactly these fields:
 - action: one of "update", "add_evidence", "no_change", "conflict"
 - rationale: a short string explaining the choice
+
+Do not wrap the JSON in markdown fences and do not add prose.
+
+Action meanings (both refer to the same subject):
+- update: the new observation changes or refines an attribute already recorded in the memory.
+- add_evidence: the new observation corroborates the memory or adds supporting detail without changing it.
+- no_change: the new observation adds nothing not already captured.
+- conflict: the new observation contradicts the memory.
+
+Never return "create" — the subject already exists.
+"""
+# v2 (2026-09-18): rationale을 한국어로 쓴다 — 판단 근거는 검토 UX에서 사용자에게
+# 그대로 노출되는데 지시가 없으면 모델 기본값(영어)으로 나왔다(오너 관측).
+# action 열거값과 구조는 무변이다.
+ANALYSIS_COMPARE_PROMPT_VERSION = "analysis_compare_v2"
+ANALYSIS_COMPARE_TEMPLATE = """You compare a new analysis observation against an existing canonical memory about the SAME subject.
+
+Return one JSON object with exactly these fields:
+- action: one of "update", "add_evidence", "no_change", "conflict"
+- rationale: a short string explaining the choice, written in Korean
 
 Do not wrap the JSON in markdown fences and do not add prose.
 
@@ -64,6 +87,17 @@ class CompareJudgeParseError(ValueError):
 def seed_analysis_compare_template(
     prompt_templates: PromptTemplateService,
 ) -> PromptTemplate:
+    """Seed every shipped compare template: frozen v1 first, current v2 last.
+
+    The single call keeps boot wiring (main.py) and tests seeding the full set
+    — restarting against a deployed Mongo must replay both versions or the
+    conflict guard fires (same contract as the extract chain).
+    """
+    prompt_templates.seed_template(
+        task_type=ANALYSIS_COMPARE_TASK_TYPE,
+        version=ANALYSIS_COMPARE_PROMPT_VERSION_V1,
+        template=ANALYSIS_COMPARE_TEMPLATE_V1,
+    )
     return prompt_templates.seed_template(
         task_type=ANALYSIS_COMPARE_TASK_TYPE,
         version=ANALYSIS_COMPARE_PROMPT_VERSION,

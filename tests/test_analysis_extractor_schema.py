@@ -344,7 +344,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        template = prompt_templates.seed_analysis_extract_v7()
+        template = prompt_templates.seed_analysis_extract_v8()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -401,7 +401,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        prompt_templates.seed_analysis_extract_v7()
+        prompt_templates.seed_analysis_extract_v8()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -430,6 +430,10 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("provider content must be JSON", repair.messages[1].content)
         self.assertNotIn("source-ref-1", repair.messages[1].content)
         self.assertIn("candidate_type", repair.messages[0].content)
+        # v8 정합(2026-09-18): repair 재생성도 본체와 같은 한국어 출력 계약을
+        # 운반한다. under-strict — 이 지시를 빼면 실패. over-strict 방향은
+        # test_prompt_templates 의 동결 핀이 v7/v1 본문을 지킨다.
+        self.assertIn("in Korean", repair.messages[0].content)
 
     async def test_versioned_prompt_adapter_repairs_out_of_range_catalog_index_once(self):
         provider = FakeLLMProvider(
@@ -473,7 +477,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        prompt_templates.seed_analysis_extract_v7()
+        prompt_templates.seed_analysis_extract_v8()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -571,7 +575,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        prompt_templates.seed_analysis_extract_v7()
+        prompt_templates.seed_analysis_extract_v8()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -612,7 +616,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        prompt_templates.seed_analysis_extract_v7()
+        prompt_templates.seed_analysis_extract_v8()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,
@@ -635,7 +639,7 @@ class AnalysisExtractionAdapterTest(unittest.IsolatedAsyncioTestCase):
     async def test_versioned_prompt_adapter_rejects_missing_catalog_before_provider(self):
         provider = FakeLLMProvider([])
         prompt_templates = PromptTemplateService(InMemoryPromptTemplateRepository())
-        prompt_templates.seed_analysis_extract_v7()
+        prompt_templates.seed_analysis_extract_v8()
         adapter = VersionedPromptAnalysisExtractionAdapter(
             provider,
             prompt_templates=prompt_templates,

@@ -96,7 +96,26 @@ Do not invent facts outside the supplied snapshot text.
 # v7 (2026-09-17): backend source_ref ids are server-owned and never enter an
 # LLM request. The prompt carries only request-local array indexes and quotes;
 # the parser resolves an index back to the authoritative SourceRef.
-ANALYSIS_EXTRACT_PROMPT_VERSION = "analysis_extract_v7"
+# 2026-09-18부터 v7은 출시 동결본이다 — v8 등장으로.
+ANALYSIS_EXTRACT_PROMPT_VERSION_V7 = "analysis_extract_v7"
+ANALYSIS_EXTRACT_TEMPLATE_V7 = """You extract Phase 2A analysis candidates.
+
+Return one JSON object with a top-level candidates list as raw JSON text only.
+Do not wrap the JSON in markdown code fences: no ```json, no ```, no prose before or after.
+Treat writing_candidate_report as advisory provenance only.
+Each candidate must contain exactly candidate_type, provenance, confidence, source_anchors, and payload.
+candidate_type is character_observation, event_observation, or open_question_observation.
+provenance is source_observed or ai_inferred. confidence is a number from 0.0 to 1.0.
+Each source_anchors item is {"source_ref_index": 0} naming one zero-based item of the current source_ref_catalog, and nothing else. These indexes are request-local selectors; backend source references are server-owned and the server derives their identifiers, spans, quotes, and content hashes.
+payload is {"name":"...","observation":"..."} for character, {"event":"..."} for event, or {"question":"..."} for open question.
+For character, you MAY add an optional "aspect" classifying the observation (e.g. "voice" for how the character speaks, "trait" for a personality trait); omit it for a plain observation.
+Do not invent facts outside the supplied snapshot text.
+"""
+# v8 (2026-09-18): 추출 텍스트의 출력 언어를 한국어로 고정한다. payload의 문장
+# 필드(name·observation·event·question·선택 aspect)는 검토함·상세 화면에서 사용자에게
+# 그대로 노출되는데, 지시가 없으면 모델 기본값(영어)으로 나왔다(오너 관측
+# 2026-09-18). 구조·키·열거값 계약은 무변 — 문장 값의 언어만 정한다.
+ANALYSIS_EXTRACT_PROMPT_VERSION = "analysis_extract_v8"
 ANALYSIS_EXTRACT_TEMPLATE = """You extract Phase 2A analysis candidates.
 
 Return one JSON object with a top-level candidates list as raw JSON text only.
@@ -107,6 +126,7 @@ candidate_type is character_observation, event_observation, or open_question_obs
 provenance is source_observed or ai_inferred. confidence is a number from 0.0 to 1.0.
 Each source_anchors item is {"source_ref_index": 0} naming one zero-based item of the current source_ref_catalog, and nothing else. These indexes are request-local selectors; backend source references are server-owned and the server derives their identifiers, spans, quotes, and content hashes.
 payload is {"name":"...","observation":"..."} for character, {"event":"..."} for event, or {"question":"..."} for open question.
+Write every payload text value (name, observation, event, question, and the optional aspect) in Korean — these strings are shown to the user as-is, so they must match the manuscript's language. Keys, enum values, and the JSON structure stay exactly as specified.
 For character, you MAY add an optional "aspect" classifying the observation (e.g. "voice" for how the character speaks, "trait" for a personality trait); omit it for a plain observation.
 Do not invent facts outside the supplied snapshot text.
 """
@@ -238,6 +258,13 @@ class PromptTemplateService:
         )
 
     def seed_analysis_extract_v7(self) -> PromptTemplate:
+        return self.seed_template(
+            task_type=ANALYSIS_EXTRACT_TASK_TYPE,
+            version=ANALYSIS_EXTRACT_PROMPT_VERSION_V7,
+            template=ANALYSIS_EXTRACT_TEMPLATE_V7,
+        )
+
+    def seed_analysis_extract_v8(self) -> PromptTemplate:
         return self.seed_template(
             task_type=ANALYSIS_EXTRACT_TASK_TYPE,
             version=ANALYSIS_EXTRACT_PROMPT_VERSION,

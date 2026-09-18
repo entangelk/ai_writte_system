@@ -61,6 +61,54 @@ def _server_level_block() -> str:
     return "\n".join(server_lines)
 
 
+def _location_block(path: str) -> str:
+    """``location <path> {`` 블록 본문을 괄호 깊이로 추출한다.
+
+    ``/api/`` 와 ``/api/admin/`` 을 구분하는 것도 이 정확 매치의 몫이다 —
+    접두사 포함 매치로 잡으면 admin 블록의 상한을 잘못 읽는다.
+    """
+    lines = _CONF.read_text(encoding="utf-8").splitlines()
+    body: list[str] = []
+    depth = 0
+    inside = False
+    for line in lines:
+        if not inside and re.match(rf"^\s*location {re.escape(path)} \{{", line):
+            inside = True
+            depth = 1
+            continue
+        if inside:
+            body.append(line)
+            depth += line.count("{") - line.count("}")
+            if depth <= 0:
+                break
+    return "\n".join(body)
+
+
+class FrontendNginxApiProxyTimeoutTest(unittest.TestCase):
+    def test_api_proxy_timeout_sits_above_the_app_worst_case_budget(self) -> None:
+        """2026-09-18 실측: 분석 POST /run 은 제공자 불안 구간에서 363s 를
+        버티고 **성공**했는데 nginx 의 120s 가 먼저 끊어 브라우저는 504 를 받았다.
+        프록시 상한은 앱의 자체 최악 예산(체인 예산 300s × 런당 LLM 호출 ~5회 =
+        1500s)보다 높아야 한다 — nginx.conf 의 산술 주석과 같은 근거다.
+
+        under-strict: 120s 로 되돌리면 실패한다.
+        over-strict: 상한을 1500s 미만으로 낮춰도 같은 셀이 실패한다.
+        LLAMA_TIMEOUT_SECONDS(배포 300s)를 올리면 이 셀이 먼저 깨져 nginx 를
+        다시 맞추도록 강제한다.
+        """
+        block = _location_block("/api/")
+        for directive in ("proxy_read_timeout", "proxy_send_timeout"):
+            with self.subTest(directive=directive):
+                match = re.search(rf"{directive}\s+(\d+)s;", block)
+                self.assertIsNotNone(
+                    match, f"{directive} 가 /api/ 블록에 없다")
+                self.assertGreaterEqual(
+                    int(match.group(1)), 1500,
+                    "프록시 상한이 앱 최악 예산(300s × 5)보다 낮다 — "
+                    "성공할 run 을 504 로 뒤집는다(2026-09-18 실측)",
+                )
+
+
 class FrontendNginxSecurityHeadersTest(unittest.TestCase):
     def test_the_three_audit_headers_are_present_at_the_server_level(self) -> None:
         """under-strict: 헤더가 없거나 location 안에 갇혀 있으면 실패한다."""
