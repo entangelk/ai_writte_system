@@ -20,6 +20,10 @@
 - **오너 결정(완전 D5=A 정렬)**: **analysis job key를 snapshot 유도(`analyze:{snapshot_id}`)로 개정**한다. accept와 trigger가 동일 literal(`writing/accept.py::analysis_job_key`, 프론트 `client.ts::analyzeVersion`이 미러)을 파생하므로 `create_job`의 `(project, snapshot, key)` 멱등이 **snapshot당 한 job**으로 수렴한다 — accept가 심은 job을 trigger가 재사용(orphan 0), 재클릭도 같은 job(중복 후보 0, 이미 SUCCEEDED면 재추출 없이 기존 후보 반환), accept가 job에 실은 `writing_candidate_report`도 실제 run에서 소비된다.
 - **범위**: **analysis key literal만** 개정한다. **save key는 `writing-accept:{idempotency_key}` 무변**(정본 version replay는 accept intent 단위 유지). accept-replay 멱등은 보존된다 — 같은 accept는 같은 snapshot을 재도출하므로 여전히 같은 job으로 replay된다(회귀 `test_writing_accept.py::test_analysis_job_key_is_snapshot_scoped_and_shared_with_trigger`, `test_same_key_replays_without_gate_or_duplicate`).
 
+## Owner decision amendment — 2026-09-29 (성공한 snapshot 재분석)
+
+배포에서 성공한 분석의 후보를 모두 거절해도 `succeeded` job은 그대로 남아, 다시 누른 분석 버튼이 기존 후보를 replay하는 결함이 드러났다. 2026-07-18의 “snapshot당 한 job”은 **첫 분석과 일반 재클릭**에 적용한다. 오너 결정: 성공한 job을 발견하면 “재분석 하시겠습니까?” 확인을 보이고, 예를 누른 경우에만 새 job으로 재분석한다. 새 job은 `reanalyze:{snapshot_id}:{UUID}` 키를 사용하며 그 의도의 실패·과금 중복 확인 재시도에서는 같은 키를 유지한다. 취소 시 `/run`은 호출하지 않는다. 원 job과 기존 후보는 보존한다. 실패 job은 기존 같은 job 명시 retry를 사용한다. 따라서 이 조항 이전의 “이미 SUCCEEDED면 기존 후보 반환”은 **API replay 동작**으로만 남고, 집필 화면에서는 새 분석 성공으로 표시하지 않는다.
+
 ## Options table
 
 ### D1 — 적용 대상과 stale base 처리

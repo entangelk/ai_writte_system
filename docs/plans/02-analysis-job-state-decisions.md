@@ -55,6 +55,7 @@
 - `pending`/`running`/`succeeded`에 retry command는 409로 거절한다. 특히 succeeded는 계속 불변/replay-only다.
 - same-job task/candidate identity를 재사용해 retry 성공 후 candidate 중복을 만들지 않는다. strict validation과 candidate all-or-nothing은 무변이다.
 - 새 key/new job 재시도 권고는 D5=A trigger 경로에는 더 이상 적용하지 않는다. 비-D5 내부 caller의 별도 key 생성 가능성은 공개 retry UX가 아니다.
+- 2026-09-29 후속 오너 결정(v1.8.77): 위 문장은 **실패 job 재시도**에 한정한다. `succeeded` job은 여전히 불변이고, 집필 화면에서 사용자가 명시 확인한 **새 분석**은 새 key/new job으로 실행한다. 후보 거절은 job 상태를 바꾸지 않는다.
 
 ### 4. 실패 상태 저장 — 닫힌 enum + detail
 

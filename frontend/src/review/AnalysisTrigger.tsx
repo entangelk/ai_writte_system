@@ -42,6 +42,7 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState<string | undefined>();
   // Synchronous re-entrancy guard: setBusy is async, so a fast double-click can
   // pass the state check and launch two jobs (WritingPanel uses the same busyRef
   // pattern). The ref flips immediately.
@@ -49,7 +50,7 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
   // 8.4 W3=A: 분석도 유료 요청이라 같은 확인 통로를 쓴다. 여기서 되묻지 않으면
   // 이 화면만 raw `"429: …"` 를 뿌리게 된다.
   const [pendingConfirm, setPendingConfirm] =
-    useState<{ message: string; run: () => void } | null>(null);
+    useState<{ kind: "duplicate" | "reanalyze"; message: string; run: () => void } | null>(null);
   const { quota, refresh: refreshQuota } = useMemberQuota();
 
   function guardNavigation(event: MouseEvent<HTMLAnchorElement>): void {
@@ -66,7 +67,7 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
           : "저장된 version이 없습니다. 본문을 먼저 저장하세요."
       : null;
 
-  async function run(options: BillableRequestOptions = {}) {
+  async function run(options: BillableRequestOptions = {}, reanalysisKey?: string) {
     if (
       busyRef.current ||
       blocked !== null ||
@@ -80,6 +81,7 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
     setError(null);
     setResult(null);
     setPendingConfirm(null);
+    setRetryKey(reanalysisKey);
     try {
       const outcome = await analyzeVersion(
         projectId,
@@ -87,7 +89,18 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
         latestVersionId,
         latestSnapshotId,
         options,
+        reanalysisKey,
       );
+      if (outcome.reanalysisRequired) {
+        setPendingConfirm({
+          kind: "reanalyze",
+          message: "기존 분석이 있습니다. 재분석 하시겠습니까? 새 분석은 사용량 1회가 듭니다.",
+          run: () => void run({}, `reanalyze:${latestSnapshotId}:${crypto.randomUUID()}`),
+        });
+        onStatusChange?.("idle");
+        return;
+      }
+      setRetryKey(undefined);
       void refreshQuota();
       setResult({ candidateCount: outcome.candidateCount });
       onStatusChange?.("complete");
@@ -109,9 +122,10 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
           // 확인은 사용자 클릭에서만 나온다(W4=A) — 여기서 바로 다시 보내면
           // 확인이 무력화된다.
           setPendingConfirm({
+            kind: "duplicate",
             message:
               "방금 같은 분석을 요청했습니다. 다시 분석할까요? 사용량이 1회 더 듭니다.",
-            run: () => void run({ confirmDuplicate: true }),
+            run: () => void run({ confirmDuplicate: true }, reanalysisKey),
           });
         } else {
           setError(refusal.message);
@@ -152,7 +166,7 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
       )}
 
       <div className="writing-actions">
-        <button type="button" disabled={busy || blocked !== null} onClick={() => void run()}>
+        <button type="button" disabled={busy || blocked !== null || pendingConfirm !== null} onClick={() => void run()}>
           {busy ? "분석 중… (12B 추출)" : "이 원고 분석"}
         </button>
       </div>
@@ -164,7 +178,7 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
         </p>
       )}
       {pendingConfirm !== null && (
-        <div className="writing-confirm" role="alertdialog" aria-label="중복 요청 확인">
+        <div className="writing-confirm" role="alertdialog" aria-label={pendingConfirm.kind === "reanalyze" ? "재분석 확인" : "중복 요청 확인"}>
           <p>{pendingConfirm.message}</p>
           <div className="writing-confirm-actions">
             <button
@@ -175,7 +189,7 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
                 rerun();
               }}
             >
-              다시 분석
+              {pendingConfirm.kind === "reanalyze" ? "예, 재분석" : "다시 분석"}
             </button>
             <button type="button" onClick={() => setPendingConfirm(null)}>
               취소
@@ -190,7 +204,7 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
             type="button"
             className="writing-retry"
             disabled={busy || blocked !== null}
-            onClick={() => void run()}
+            onClick={() => void run({}, retryKey)}
           >
             다시 분석
           </button>

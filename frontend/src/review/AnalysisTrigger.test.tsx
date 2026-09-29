@@ -209,21 +209,71 @@ describe("AnalysisTrigger", () => {
     expect(await screen.findByText(/1개 검토 후보가 생성/)).toBeInTheDocument();
   });
 
-  it("does not retry a succeeded replay and reports its existing candidates", async () => {
+  it("asks before a succeeded replay and cancel leaves the old job untouched", async () => {
     const fetchMock = mockFetch(
       CATALOG_FULL,
       VERSION_DETAIL,
       { body: { job: { id: "j1", status: "succeeded" }, idempotent_replay: true } },
-      runResult(2),
     );
     renderTrigger();
     await userEvent.click(runButton());
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
-    expect(fetchMock.mock.calls.map((call) => call[0])).not.toContain(
-      "/api/projects/p1/analysis/jobs/j1/retry",
+    const prompt = await screen.findByRole("alertdialog", { name: "재분석 확인" });
+    expect(prompt).toHaveTextContent("재분석 하시겠습니까?");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(screen.queryByText(/검토 후보가 생성/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "취소" }));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("runs a distinct job after confirmation while keeping the first snapshot key", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => "fresh-intent" });
+    const fetchMock = mockFetch(
+      CATALOG_FULL, VERSION_DETAIL,
+      { body: { job: { id: "j1", status: "succeeded" }, idempotent_replay: true } },
+      CATALOG_FULL, VERSION_DETAIL,
+      { body: { job: { id: "j2", status: "pending" }, idempotent_replay: false } },
+      { body: { job: { id: "j2", status: "succeeded" }, candidates: [{}] } },
     );
-    expect(await screen.findByText(/2개 검토 후보가 생성/)).toBeInTheDocument();
+    renderTrigger();
+    await userEvent.click(runButton());
+    await userEvent.click(await screen.findByRole("button", { name: "예, 재분석" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(7));
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body).idempotency_key).toBe("analyze:s1");
+    expect(JSON.parse(fetchMock.mock.calls[5][1].body).idempotency_key)
+      .toBe("reanalyze:s1:fresh-intent");
+    expect(fetchMock.mock.calls[6][0]).toBe("/api/projects/p1/analysis/jobs/j2/run");
+    expect(await screen.findByText(/1개 검토 후보가 생성/)).toBeInTheDocument();
+  });
+
+  it("retries a failed confirmed reanalysis with the same intent key", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => "fresh-intent" });
+    const fetchMock = mockFetch(
+      CATALOG_FULL, VERSION_DETAIL,
+      { body: { job: { id: "j1", status: "succeeded" }, idempotent_replay: true } },
+      CATALOG_FULL, VERSION_DETAIL,
+      { body: { job: { id: "j2", status: "pending" }, idempotent_replay: false } },
+      { status: 502, body: { detail: "provider unavailable" } },
+      CATALOG_FULL, VERSION_DETAIL,
+      { body: { job: { id: "j2", status: "failed" }, idempotent_replay: true } },
+      { body: { id: "j2", status: "pending" } },
+      { body: { job: { id: "j2", status: "succeeded" }, candidates: [{}] } },
+    );
+    renderTrigger();
+    await userEvent.click(runButton());
+    await userEvent.click(await screen.findByRole("button", { name: "예, 재분석" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("provider unavailable");
+    await userEvent.click(screen.getByRole("button", { name: "다시 분석" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(12));
+    expect(JSON.parse(fetchMock.mock.calls[5][1].body).idempotency_key)
+      .toBe("reanalyze:s1:fresh-intent");
+    expect(JSON.parse(fetchMock.mock.calls[9][1].body).idempotency_key)
+      .toBe("reanalyze:s1:fresh-intent");
+    expect(fetchMock.mock.calls[10][0]).toBe("/api/projects/p1/analysis/jobs/j2/retry");
+    expect(fetchMock.mock.calls[11][0]).toBe("/api/projects/p1/analysis/jobs/j2/run");
+    expect(await screen.findByText(/1개 검토 후보가 생성/)).toBeInTheDocument();
   });
 
   it("treats a 200 failed run envelope as an error instead of an empty success", async () => {

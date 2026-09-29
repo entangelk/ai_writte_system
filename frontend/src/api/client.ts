@@ -1397,7 +1397,11 @@ export async function analyzeVersion(
   versionId: string,
   snapshotId: string,
   options?: BillableRequestOptions,
-): Promise<{ jobId: string; candidateCount: number; sourceRefsCreated: number }> {
+  reanalysisKey?: string,
+): Promise<
+  | { reanalysisRequired: true }
+  | { reanalysisRequired: false; jobId: string; candidateCount: number; sourceRefsCreated: number }
+> {
   const sourceRefsCreated = await ensureSourceRefCatalog(
     projectId,
     draftId,
@@ -1410,15 +1414,16 @@ export async function analyzeVersion(
       method: "POST",
       body: JSON.stringify({
         snapshot_id: snapshotId,
-        // D5=A alignment: a per-snapshot deterministic key (mirrors accept's
-        // `analysis_job_key`, accept.py) so accept's pending job AND repeat
-        // clicks converge on ONE job per snapshot — no orphan jobs, and no
-        // duplicate candidates from re-analyzing the same snapshot.
-        idempotency_key: `analyze:${snapshotId}`,
+        // First analysis shares accept's snapshot key. An explicit, confirmed
+        // reanalysis uses its own stable key so a succeeded job stays immutable.
+        idempotency_key: reanalysisKey ?? `analyze:${snapshotId}`,
       }),
     },
   );
   let job = created.job;
+  if (job.status === "succeeded" && reanalysisKey === undefined) {
+    return { reanalysisRequired: true };
+  }
   if (job.status === "failed") {
     job = await request<AnalysisJobRef>(
       `/projects/${projectId}/analysis/jobs/${job.id}/retry`,
@@ -1442,6 +1447,7 @@ export async function analyzeVersion(
     );
   }
   return {
+    reanalysisRequired: false,
     jobId: created.job.id,
     candidateCount: run.candidates.length,
     sourceRefsCreated,
