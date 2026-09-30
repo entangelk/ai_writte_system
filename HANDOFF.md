@@ -46,6 +46,7 @@
 ## 지금의 계약
 
 - **분석 `/run`의 긴 응답.** 524는 job 실패를 확정하지 않는다. 화면은 지연 안내와 검토함 수동 확인을 제공하며 자동 조회하지 않는다. 최종 저장 분석도 동기 경로라 별도 검토가 필요하다. [작업 로그](docs/daily_logs/2026-09-30/work_log.md).
+- **그룹 후보 이름 교정 결정 대기.** 작업공간 바의 그룹 표시와 개별 후보 수정은 구현됐다. 현행 `/edit`는 즉시 정본 승인하므로 그룹 멤버 전체에 반복 호출하면 그룹 승인 계약의 단일 정본 수렴과 충돌한다. 승인 전 이름 교정의 계약 방향이 정해져야 그룹 전체 반영을 구현할 수 있다. [결정 근거](docs/plans/06-candidate-edit-decisions.md), [그룹 계약](docs/plans/pending-candidate-identity-grouping-decisions.md).
 
 - **성공한 원고의 재분석(v1.8.77).** 첫 job은 accept와 공유하는 `analyze:{snapshot_id}`다. 이미 `succeeded`이면 집필 화면이 확인을 묻고, 예를 누른 새 의도만 `reanalyze:{snapshot_id}:{UUID}` job을 만든다. 실패 job은 기존 같은 job retry다. 후보 거절은 job 상태를 바꾸지 않는다. [`05-writing-accept-decisions.md`](docs/plans/05-writing-accept-decisions.md) 참조.
 
