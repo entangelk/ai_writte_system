@@ -130,6 +130,71 @@ describe("WorkspaceReviewPanel", () => {
     );
   });
 
+  it("groups related candidates in the rail while keeping each member selectable", async () => {
+    // Under-strict: a flat list loses the identity group. Over-strict: the
+    // unrelated candidate must remain outside the group and still selectable.
+    const identityGroup = {
+      group_id: "g1", group_size: 2, group_status: "open",
+      group_revision: 3, group_member_ids: ["c1", "c2"],
+      identity_rationale_summary: "같은 인물",
+    };
+    const grouped = { ...item, identity_group: identityGroup };
+    const another = { ...grouped, candidate_id: "c2", job_id: "j2" };
+    const separate = { ...item, candidate_id: "c3" };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ ...list, items: [grouped, another, separate] }))
+      .mockResolvedValueOnce(response({ ...detail, ...another }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <MemoryRouter initialEntries={["/?panel=review"]}>
+        <WorkspaceReviewPanel projectId="p1" onSourceSelect={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("인물 후보 2건 묶음")).toBeInTheDocument();
+    expect(screen.getByText("같은 인물")).toBeInTheDocument();
+    const groupList = screen.getByRole("list", { name: "그룹 안 후보 목록" });
+    expect(groupList.querySelectorAll("button")).toHaveLength(2);
+    expect(screen.getByText("검토 대기").parentElement).toHaveTextContent("3건");
+    await userEvent.click(groupList.querySelectorAll("button")[1]);
+    expect(await screen.findByText("민아")).toBeInTheDocument();
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/projects/p1/analysis/review-inbox/c2");
+  });
+
+  it("edits a candidate in the rail using the existing edit-and-confirm action", async () => {
+    // Under-strict: saving must call the edit endpoint with every payload field.
+    // Over-strict: opening edit alone must not submit or remove the candidate.
+    const editable = {
+      ...detail,
+      actions: [...item.actions, { action: "edit", eligible: true, reason: null }],
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(list))
+      .mockResolvedValueOnce(response(editable))
+      .mockResolvedValueOnce(response({ candidate_id: "c2", status: "confirmed" }))
+      .mockResolvedValueOnce(response({ ...list, items: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <MemoryRouter initialEntries={["/?panel=review&candidate=c1"]}>
+        <WorkspaceReviewPanel projectId="p1" onSourceSelect={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "수정" }));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await userEvent.clear(screen.getByRole("textbox", { name: "관찰" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "관찰" }), "편지를 발견함");
+    await userEvent.click(screen.getByRole("button", { name: "저장" }));
+
+    expect(await screen.findByText("검토할 기억 후보가 없습니다.")).toBeInTheDocument();
+    expect(fetchMock.mock.calls[2][0]).toBe("/api/projects/p1/analysis/candidates/c1/edit");
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({
+      payload: { name: "민아", observation: "편지를 발견함" },
+    });
+  });
+
   it("lets the editor guard cancel a full-inbox link while text is dirty", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(response(list)));
     const onBeforeNavigateAway = vi.fn(() => false);

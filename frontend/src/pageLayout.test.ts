@@ -183,6 +183,13 @@ describe("관리 상세와 편집기 도구 독 배치", () => {
 });
 
 describe("정체성 그룹 상자 배치 (Slice 6)", () => {
+  it("keeps explanatory text inset on both sides of the group box", () => {
+    // under-strict: 좌우 padding 을 0으로 되돌리면 실패한다.
+    // over-strict: 세로 padding 을 없애 그룹 머리와 경계가 붙어도 실패한다.
+    const group = rules.find((rule) => rule.selector === ".review-group");
+    expect(group?.body).toMatch(/padding:\s*var\(--space-4\)\s*;/);
+  });
+
   it("wraps the group actions under the summary instead of letting them overlap", () => {
     /**
      * jsdom 은 배치를 재지 못하므로 — 이 저장소가 폭·버튼에 대해 그랬듯 —
