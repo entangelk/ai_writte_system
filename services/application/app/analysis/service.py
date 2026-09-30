@@ -605,6 +605,62 @@ class AnalysisService:
         self._repo.update_candidate(updated)
         return CandidateTransition(candidate=updated, changed=True)
 
+    def group_name_successor(
+        self, *, project_id: str, candidate_id: str, group_id: str,
+    ) -> AnalysisCandidate | None:
+        original = self._require_candidate(project_id, candidate_id)
+        successor_id = self._repo.find_candidate_request(
+            project_id, original.task_id, f"group-name:{group_id}:{original.id}"
+        )
+        return (self._require_candidate(project_id, successor_id)
+                if successor_id is not None else None)
+
+    def correct_pending_name(
+        self, *, project_id: str, candidate_id: str, group_id: str,
+        name: str,
+    ) -> "CandidateEdit":
+        """Mint a pending successor for a group name correction, without promotion."""
+        original = self._require_candidate(project_id, candidate_id)
+        logical_key = f"group-name:{group_id}:{original.id}"
+        existing_id = self._repo.find_candidate_request(
+            project_id, original.task_id, logical_key
+        )
+        if existing_id is not None:
+            successor = self._require_candidate(project_id, existing_id)
+            changed = original.status is AnalysisCandidateStatus.NEEDS_REVIEW
+            if changed:
+                self._repo.update_candidate(
+                    replace(original, status=AnalysisCandidateStatus.SUPERSEDED)
+                )
+            return CandidateEdit(candidate=successor, idempotent_replay=not changed)
+        if original.status is not AnalysisCandidateStatus.NEEDS_REVIEW:
+            raise InvalidCandidateStateTransition(
+                f"cannot correct candidate in status {original.status}"
+            )
+        payload = self._validate_payload(
+            original.candidate_type, {**original.payload, "name": name}
+        )
+        successor = replace(
+            original, id=self._repo.next_candidate_id(),
+            status=AnalysisCandidateStatus.NEEDS_REVIEW,
+            payload=immutable_payload(payload), supersedes_candidate_id=original.id,
+        )
+        try:
+            self._repo.put_candidate(successor, logical_key=logical_key)
+        except DuplicateAnalysisCandidateRequest:
+            return CandidateEdit(
+                candidate=self._require_candidate(
+                    project_id, self._repo.find_candidate_request(
+                        project_id, original.task_id, logical_key
+                    )
+                ),
+                idempotent_replay=True,
+            )
+        self._repo.update_candidate(
+            replace(original, status=AnalysisCandidateStatus.SUPERSEDED)
+        )
+        return CandidateEdit(candidate=successor, idempotent_replay=False)
+
     def edit_candidate(
         self,
         *,

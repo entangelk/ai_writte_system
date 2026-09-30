@@ -51,6 +51,7 @@ export const ACTIVITY_ACTION_LABELS: Record<string, string> = {
   identity_group_rejected: "정체성 그룹 거절",
   // 정체성 그룹 승인(2026-09-04, Slice 5) — Slice 4 A안이 승인의 기록 모양에도 묶는다.
   identity_group_approved: "정체성 그룹 승인",
+  identity_group_name_corrected: "정체성 그룹 이름 교정",
 };
 
 /**

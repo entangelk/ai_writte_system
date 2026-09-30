@@ -30,6 +30,9 @@ from services.application.app.analysis.compare import (
     InvalidJudgeResult,
 )
 from services.application.app.analysis.extractor import AnalysisExtractionError
+from services.application.app.analysis.identity_group_review import (
+    GroupNameCorrectionConflict, GroupNameCorrectionInvalid,
+)
 from services.application.app.analysis.identity_groups import (
     CandidateIdentityGroupNotFoundError,
     CandidateIdentityGroupRevisionMismatch,
@@ -96,6 +99,7 @@ from ..api.errors import (
 from ..api.models import (
     ApplyMemoryRequest,
     ApproveGroupRequest,
+    CorrectGroupNameRequest,
     CreateAnalysisJobRequest,
     EditCandidateRequest,
     ReconcileCharacterRequest,
@@ -909,6 +913,42 @@ def register_analysis(
         except (NotFound, ReviewInboxNotFound) as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return _review_inbox_payload(item, include_detail=True)
+
+    @app.post(
+        "/projects/{project_id}/analysis/review-inbox/groups/{group_id}/correct-name",
+        responses=_owned(_ERRORS_400_404_409),
+        dependencies=_REQUIRE_PROJECT_OWNER,
+    )
+    async def correct_review_inbox_group_name(
+        project_id: str, group_id: str, body: CorrectGroupNameRequest,
+        current=Depends(require_authenticated_user),
+    ) -> dict[str, object]:
+        try:
+            _require_project_exists(project_id)
+            result = identity_group_review.correct_group_name(
+                project_id=project_id, group_id=group_id,
+                expected_revision=body.expected_revision, name=body.name,
+            )
+        except (CandidateIdentityGroupNotFoundError, AnalysisNotFound,
+                NotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except GroupNameCorrectionInvalid as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except (CandidateIdentityGroupRevisionMismatch,
+                GroupNameCorrectionConflict, InvalidCandidateStateTransition) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if result.corrected_ids:
+            activity.record(
+                project_id=project_id, actor_user_id=current.id,
+                action="identity_group_name_corrected",
+                target_type="candidate_identity_group", target_id=group_id,
+                after=f"corrected={len(result.corrected_ids)}",
+            )
+        return {
+            "group_id": result.group_id,
+            "group_revision": result.group_revision,
+            "corrected_ids": list(result.corrected_ids),
+        }
 
     @app.post(
         "/projects/{project_id}/analysis/review-inbox/groups/{group_id}/reject",

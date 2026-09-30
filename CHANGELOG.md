@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-09-30 | **그룹 후보의 승인 전 인물 이름 교정(SoT v1.8.78).** 검토함과 작업공간 바에서 그룹 인물 이름을 함께 고쳐도 각 관찰 문장과 근거는 유지되고, 후보는 그룹 승인 전까지 검토 대기에 남는다. 새 후보 버전과 그룹 revision을 기록하며 그룹 승인에서 정본 하나로 수렴한다. 사용자는 기존 수정의 즉시 승인과 그룹 승인 계약의 충돌을 확인한 뒤 이 방식을 선택했다. | [결정](docs/plans/group-name-correction-decisions.md) · [작업 로그](docs/daily_logs/2026-09-30/work_log.md) |
 | 2026-09-29 | **성공한 원고의 확인 후 재분석(SoT v1.8.77).** 기존 성공 job과 거절된 후보가 남아도 “재분석 하시겠습니까?”에 예를 누르면 새 키·새 job으로 실제 추출을 실행한다. 취소하면 실행하지 않고, 실패한 새 분석은 같은 키로 재시도한다. 첫 분석과 실패 job 재시도 계약은 유지한다. | [SoT](docs/system-contract-sot.md) v1.8.77 · [작업 로그](docs/daily_logs/2026-09-29/work_log.md) |
 | 2026-09-18 | **분석 출력 한국어(SoT v1.8.75).** 사용자에게 그대로 노출되는 분석 문장 — 추출 후보의 payload(name·observation·event·question)와 판단자 근거(rationale) — 이 모델 기본값인 영어로 나오는 것이 배포에서 관측됐다. 추출 프롬프트 v8(`analysis_extract_v8`)과 compare·identity 판단 v2를 발행해 문장 값을 한국어로 고정했고 repair 재생성 프롬프트에도 같은 지시를 넣었다. 구조·열거값·source_ref 순번 계약·`logical_key`는 무변이며, v7·판단자 v1은 배포 Mongo 충돌 방지용 동결본으로 남는다(판단자 축은 이번에 처음 다이제스트 핀). | [SoT](docs/system-contract-sot.md) v1.8.75 · [작업 로그](docs/daily_logs/2026-09-18/work_log.md) |
 | 2026-09-18 | **/api/ 프록시 대기 상한 120s→3600s(SoT v1.8.76).** 분석 재실행(동기 `/run`)이 제공자 불안 구간에서 363초 만에 **성공**했는데 nginx가 정확히 120초에 504를 반환한 배포 실측이 근거다 — 잡과 후보 7건은 실제로 저장됐다. 프록시 상한을 앱 최악 예산(체인 300s × 런당 호출 ~5회 = 1500s) 위로 올리고, 가드가 `/api/` 상한 ≥1500s를 핀해 `LLAMA_TIMEOUT_SECONDS` 인상 시 재검토를 강제한다. | [SoT](docs/system-contract-sot.md) v1.8.76 · [작업 로그](docs/daily_logs/2026-09-18/work_log.md) |

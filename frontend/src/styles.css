@@ -1557,6 +1557,17 @@ main {
 }
 
 .rail-review-group > strong,
+.group-name-form {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+.group-name-form input {
+  width: 100%;
+  min-width: 0;
+}
+
 .rail-review-group > small {
   display: block;
 }

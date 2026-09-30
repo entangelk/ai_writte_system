@@ -1,9 +1,9 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`
-계약 버전: `v1.8.77`
+계약 버전: `v1.8.78`
 승인일: `2026-06-26`
-최근 갱신일: `2026-09-29`
+최근 갱신일: `2026-09-30`
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
 적용 범위: 제품 경계, 서비스 책임, 데이터 정본, Gateway, AgentLoopRunner, Gate 합성, 검증 기록.
 
@@ -33,6 +33,7 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.8.78 | 2026-09-30 | **검토 대기 그룹의 인물 이름 교정.** 기존 `/edit`는 즉시 정본 승인으로 유지한다. 새 `POST .../review-inbox/groups/{group_id}/correct-name`은 `{expected_revision, name}`을 받아 인물 그룹의 검토 대기 후보 각각에 이름만 고친 새 검토 대기 버전을 만든다. 옛 후보·근거·각 관찰 문장은 보존하고 새 후보를 그룹에 연결한다. revision 증가로 낡은 그룹 승인 요청을 막고, 이후 그룹 승인에서 단일 정본으로 수렴한다. 활동 로그는 그룹 행 하나다. 인물 외 그룹·빈 이름 400, 닫힌 그룹 404, 낡은 revision·이미 시작된 검토 409. | 오너 결정 2026-09-30, `plans/group-name-correction-decisions.md`, `daily_logs/2026-09-30/work_log.md` |
 | v1.8.77 | 2026-09-29 | **성공한 원고의 명시 재분석.** 첫 분석은 accept와 같은 `analyze:{snapshot_id}` job을 사용한다. 같은 snapshot의 성공 job이 있으면 집필 화면은 저장된 후보를 새 결과로 표시하거나 `/run`을 호출하지 않고 “재분석 하시겠습니까?”를 묻는다. 취소는 기존 job·후보를 그대로 둔다. 확인하면 `reanalyze:{snapshot_id}:{새 UUID}` 키로 새 job을 만들고 실행한다. 새 job의 키는 그 의도의 실패 재시도·중복 요청 확인 동안 유지한다. 기존 성공 job과 거절된 후보의 기록은 보존하며 새 후보는 별도 job에 저장한다. 실패 job은 기존 `failed→pending` 명시 재시도 경로를 유지한다. HTTP API·스키마·과금 경로는 무변이다. | 오너 결정 2026-09-29, `plans/05-writing-accept-decisions.md`, `frontend/src/api/client.ts`·`review/AnalysisTrigger.tsx`, `daily_logs/2026-09-29/work_log.md` |
 | v1.8.76 | 2026-09-18 | **동기 면의 HTTP 창을 앱 자체 예산 위로 — /api/ 프록시 상한 120s→3600s.** 분석 ``POST /run``(동기)이 제공자 불안 구간에서 폴백 체인을 363초 버티고 **성공**했으나(01:23:42 UTC, 네 key 중 key3 통과 — key0~2는 ``provider_unavailable``) nginx의 ``proxy_read_timeout 120s``가 정확히 120초에 브라우저에 504를 반환한 배포 실측에 근거한다. 클라이언트 절단은 서버 작업을 취소하지 않아 잡·후보 7건은 저장됐고, 그 504는 "거짓 실패"였다. v1.6.89가 Writing 60s 예산에 세운 원칙(프록시 상한 > 앱 자체 예산)을 동기 분석 면에 맞게 적용한다: 최악 예산 = 체인 총예산 ``LLAMA_TIMEOUT_SECONDS``(배포 300s) × 런당 LLM 호출 ~5회 = 1500s, 3600s는 2배 이상 여유. 가드(``test_frontend_nginx_headers.py``)가 ``/api/`` 의 read/send 상한 ≥1500s를 핀해 ``LLAMA_TIMEOUT_SECONDS``를 올리면 이 셀이 먼저 깨지도록 한다. 일반 요청의 응답 속도는 무변 — 느린 요청만 끝까지 기다린다. | 오너 결정 2026-09-18("없애거나 대폭 늘린다"), `frontend/nginx.conf`, `tests/test_frontend_nginx_headers.py`, `daily_logs/2026-09-18/work_log.md` |
 | v1.8.75 | 2026-09-18 | **분석 LLM 출력 언어 계약 — 사용자에게 노출되는 문장은 한국어.** 배포 실측에서 추출 후보의 payload 문장(name·observation·event·question)과 판단자 rationale이 영어로 생성돼 검토함·그룹 행("근거 — …")에 그대로 노출되는 것이 관측됐다(오너 지시: 사용자에게 보여주는 부분은 한글로 생성). 세 경계를 모두 버전 발행으로 고쳤다 — 추출 ``analysis_extract_v8``(payload 문장 **값만** 한국어, 구조·키·열거·source_ref 순번 계약·``logical_key`` 무변), compare 판단 ``analysis_compare_v2``·identity 판단 ``analysis_identity_v2``(rationale 한국어, action/verdict 열거 무변), extractor의 repair 시스템 프롬프트(같은 지시 — repair 재생성도 같은 언어 계약을 운반). v7과 판단자 v1은 배포 Mongo의 저장본과 달라지면 부팅이 죽는 ``PromptTemplateConflict`` 때문에 동결본으로 남고, 판단자 축에도 다이제스트 핀이 처음 생겼다. | 오너 지시 2026-09-18, `services/application/app/analysis/prompt_templates.py`·`compare_judge.py`·`identity_judge.py`·`extractor.py`·`main.py`, `tests/test_prompt_templates.py`·`test_analysis_extractor_schema.py`·`test_llm_call_scope.py`, `daily_logs/2026-09-18/work_log.md` |

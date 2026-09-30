@@ -446,6 +446,10 @@ export interface paths {
          *     요청한 적 없는 계정의 취소는 404 가 아니라 **409** 다 — 계정은 있고(404 면
          *     "그런 회원 없음" 으로 읽힌다) 다만 취소할 것이 없다. `SignupNotPending` 이
          *     해결된 가입 요청에 409 를 주는 것과 같은 선례다.
+         *
+         *     ★ **파기가 청구된 뒤의 취소도 같은 409 다**(오너 결정 2026-09-13, 브리프 ⓐ).
+         *     두 뜻이 한 코드에 합쳐지는 것은 의도다 — 화면의 처방이 같기 때문이고(재조회),
+         *     H3 가 `detail` 분기를 금지하므로 화면은 **어느 동작이었는가**로만 판정한다.
          */
         delete: operations["cancel_my_withdrawal_me_withdrawal_delete"];
         options?: never;
@@ -841,6 +845,23 @@ export interface paths {
         put?: never;
         /** Approve Review Inbox Group */
         post: operations["approve_review_inbox_group_projects__project_id__analysis_review_inbox_groups__group_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/analysis/review-inbox/groups/{group_id}/correct-name": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Correct Review Inbox Group Name */
+        post: operations["correct_review_inbox_group_name_projects__project_id__analysis_review_inbox_groups__group_id__correct_name_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2066,6 +2087,13 @@ export interface components {
             purpose: string;
             /** Query */
             query: string;
+        };
+        /** CorrectGroupNameRequest */
+        CorrectGroupNameRequest: {
+            /** Expected Revision */
+            expected_revision: number;
+            /** Name */
+            name: string;
         };
         /** CreateAnalysisJobRequest */
         CreateAnalysisJobRequest: {
@@ -6927,6 +6955,98 @@ export interface operations {
                 };
             };
             /** @description The store is unreachable, or no compare judge is configured for a group that needs one. Recover the store / configure the judge and retry the same revision — nothing was started. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+        };
+    };
+    correct_review_inbox_group_name_projects__project_id__analysis_review_inbox_groups__group_id__correct_name_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CorrectGroupNameRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The canonical store is unreachable or failing. Recover it and retry the same request; the request itself needs no change. */
             503: {
                 headers: {
                     [name: string]: unknown;

@@ -116,6 +116,19 @@ class ReviewInboxService:
         visible = {candidate.id for candidate in candidates}
         if not visible:
             return {}
+        # A group name correction mints pending successors. Relations remain
+        # historical judgements about their original candidate IDs; follow the
+        # version chain for display without rewriting those judgements.
+        ancestor_to_visible: dict[str, str] = {}
+        for candidate in candidates:
+            current = candidate
+            ancestor_to_visible[current.id] = candidate.id
+            while current.supersedes_candidate_id is not None:
+                current = self._analysis.get_candidate(
+                    project_id=project_id,
+                    candidate_id=current.supersedes_candidate_id,
+                )
+                ancestor_to_visible[current.id] = candidate.id
         relations = self._identity.list_relations(project_id)
         # 병합 생존 규칙과 같은 순서(오래된 그룹 first) — 후보가 non-closed
         # 그룹에 동시에 들어 있는 비정상 상태에서도 결정적으로 말한다.
@@ -145,15 +158,15 @@ class ReviewInboxService:
                     continue
                 if relation.verdict is not IdentityRelationVerdict.SAME:
                     continue
-                if (relation.left_candidate_id not in roster_set
-                        or relation.right_candidate_id not in roster_set):
+                left = ancestor_to_visible.get(relation.left_candidate_id)
+                right = ancestor_to_visible.get(relation.right_candidate_id)
+                if left not in roster_set or right not in roster_set or left == right:
                     continue
                 # relation.group_id는 보지 않는다(기록 시점 값 — 표시 전용).
                 # 소속·근거 선택의 정본은 현재 roster의 pair 멤버십이다.
                 order = (relation.created_at, relation.left_candidate_id,
                          relation.right_candidate_id)
-                for candidate_id in (relation.left_candidate_id,
-                                     relation.right_candidate_id):
+                for candidate_id in (left, right):
                     current = latest_same.get(candidate_id)
                     if current is None or order > (
                         current.created_at, current.left_candidate_id,

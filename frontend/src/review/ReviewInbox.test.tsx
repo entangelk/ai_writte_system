@@ -316,6 +316,27 @@ describe("ReviewInbox", () => {
  *   로 통과해 입증된 무셀이었다).
  */
 describe("ReviewInbox — 정체성 그룹", () => {
+  it("corrects every grouped character name before approval without editing observations", async () => {
+    const changed = mixedInbox();
+    changed.items[0].payload.name = "민아";
+    changed.items[1].payload.name = "민아";
+    const fetchMock = mockFetch(
+      { body: mixedInbox() },
+      { body: { group_id: "g-1", group_revision: 4, corrected_ids: ["n1", "n2"] } },
+      { body: changed },
+    );
+    renderInbox();
+    await userEvent.click(await screen.findByRole("button", { name: "그룹 이름 수정" }));
+    const input = screen.getByRole("textbox", { name: "그룹에 함께 적용할 인물 이름" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "민아");
+    await userEvent.click(screen.getByRole("button", { name: "이름 적용" }));
+    await waitFor(() => expect(screen.getAllByText("민아")).toHaveLength(2));
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/projects/p1/analysis/review-inbox/groups/g-1/correct-name");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ expected_revision: 3, name: "민아" });
+    expect(screen.getAllByText("비밀 통로를 알고 있다")).toHaveLength(3);
+  });
+
   it("folds grouped members into one group row and leaves ungrouped rows alone", async () => {
     mockFetch({ body: mixedInbox() });
     renderInbox();

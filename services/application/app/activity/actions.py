@@ -121,7 +121,7 @@ _CANONICAL: tuple[ActivityAction, ...] = (
                    "/projects/{project_id}/drafts/{draft_id}/note", "scene_note"),
 )
 
-#: 검토 결정 11 — 원고가 아니라 **기억을 바꾸는 사용자 판단**.
+#: 검토 결정 12 — 원고가 아니라 **기억을 바꾸는 사용자 판단**.
 _REVIEW: tuple[ActivityAction, ...] = (
     ActivityAction("candidate_promoted", "POST",
                    "/projects/{project_id}/analysis/candidates/{candidate_id}/promote",
@@ -164,6 +164,10 @@ _REVIEW: tuple[ActivityAction, ...] = (
     ActivityAction("identity_group_approved", "POST",
                    "/projects/{project_id}/analysis/review-inbox/groups/"
                    "{group_id}/approve",
+                   "candidate_identity_group"),
+    ActivityAction("identity_group_name_corrected", "POST",
+                   "/projects/{project_id}/analysis/review-inbox/groups/"
+                   "{group_id}/correct-name",
                    "candidate_identity_group"),
 )
 

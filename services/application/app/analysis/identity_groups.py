@@ -386,6 +386,11 @@ class CandidateIdentityGroupService:
         self._repo.save_group(updated)
         return updated
 
+    def bump_revision(self, project_id: str, group_id: str) -> CandidateIdentityGroup:
+        """Invalidate a stale approval request after a pending correction."""
+        group = self.get_group(project_id, group_id)
+        return self.set_group_status(project_id, group_id, group.status)
+
     def add_member(
         self,
         project_id: str,

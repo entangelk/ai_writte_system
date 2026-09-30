@@ -2290,8 +2290,10 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # (project tier 는 무변 76 — 계정 축이라 project 를 지목하지 않는다).
         # Slice 4b(2026-09-12)가 잔여 정리 dry-run GET·실행 POST 2경로를 admin
         # tier 에 더해 107 이 됐다(admin 17→19).
-        self.assertEqual(len(by_tier["project"]), 76)
-        self.assertEqual(len(tiers), 107)
+        # 그룹 이름 교정 POST(2026-09-30)가 project tier 에 1경로를 더해
+        # 77/108 이 됐다.
+        self.assertEqual(len(by_tier["project"]), 77)
+        self.assertEqual(len(tiers), 108)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:

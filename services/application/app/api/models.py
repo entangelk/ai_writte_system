@@ -934,6 +934,11 @@ class ApproveGroupRequest(BaseModel):
     expected_revision: int
 
 
+class CorrectGroupNameRequest(BaseModel):
+    expected_revision: int
+    name: str
+
+
 class EditCandidateRequest(BaseModel):
     payload: dict[str, object]
 

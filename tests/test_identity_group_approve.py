@@ -46,6 +46,7 @@ from services.application.app.analysis.compare_judge import (
 from services.application.app.analysis.identity_groups import (
     CandidateIdentityGroupService,
     IdentityGroupStatus,
+    IdentityRelationVerdict,
     InMemoryCandidateIdentityGroupRepository,
 )
 from services.application.app.analysis.identity_group_approvals import (
@@ -287,6 +288,106 @@ def _activity(client, project_id):
 
 def _memories(w):
     return w["memory"].list_memories(project_id=w["project_id"])
+
+
+class GroupNameCorrectionTest(unittest.TestCase):
+    def test_corrects_only_names_before_group_approval(self):
+        """Old path: approving every edit would mint multiple canonical memories.
+        Over-correction: each member keeps its own observation and provenance.
+        """
+        w = _build(_ScriptedJudge(_no_change()))
+        a = _seed_candidate(w["analysis"], project_id=w["project_id"], logical_key="a")
+        b = _seed_candidate(w["analysis"], project_id=w["project_id"], logical_key="b",
+                            payload={"name": "Aria", "observation": "watchful"})
+        group = _open_group(w["groups"], w["project_id"], a, b)
+        w["groups"].record_relation(
+            w["project_id"], CHARACTER, a.id, b.id,
+            verdict=IdentityRelationVerdict.SAME,
+            rationale="같은 인물로 판정", source="judge", group_id=group.group_id,
+        )
+        path = f"/projects/{w['project_id']}/analysis/review-inbox/groups/{group.group_id}/correct-name"
+        response = w["client"].post(path, json={"expected_revision": 0, "name": "Mina"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["group_revision"], 1)
+        self.assertEqual(len(_memories(w)), 0)
+        items = w["client"].get(f"/projects/{w['project_id']}/analysis/review-inbox").json()["items"]
+        self.assertEqual(len(items), 2)
+        self.assertEqual({item["payload"]["name"] for item in items}, {"Mina"})
+        self.assertEqual({item["payload"]["observation"] for item in items}, {"brave", "watchful"})
+        self.assertEqual({item["identity_group"]["group_id"] for item in items}, {group.group_id})
+        self.assertEqual({item["identity_group"]["group_revision"] for item in items}, {1})
+        self.assertEqual({item["identity_group"]["identity_rationale_summary"] for item in items}, {"같은 인물로 판정"})
+        self.assertEqual({item["status"] for item in items}, {"needs_review"})
+        new_ids = {item["candidate_id"] for item in items}
+        for item in items:
+            source = w["analysis"].get_candidate(
+                project_id=w["project_id"], candidate_id=item["candidate_id"]
+            )
+            original = a if source.supersedes_candidate_id == a.id else b
+            self.assertEqual(source.source_ref_ids, original.source_ref_ids)
+            self.assertEqual(source.provenance, original.provenance)
+            self.assertEqual(source.confidence, original.confidence)
+        events = {(entry.event, entry.source.mongo_id)
+                  for entry in w["index_repo"].outbox_entries.values()}
+        self.assertTrue({(IndexSyncEvent.CANDIDATE_REMOVED, cid) for cid in (a.id, b.id)} <= events)
+        self.assertTrue({(IndexSyncEvent.CANDIDATE_UPSERTED, cid) for cid in new_ids} <= events)
+        self.assertEqual(len([row for row in _activity(w["client"], w["project_id"])
+                              if row["action"] == "identity_group_name_corrected"]), 1)
+        self.assertEqual({w["analysis"].get_candidate(project_id=w["project_id"], candidate_id=c.id).status.value for c in (a, b)}, {"superseded"})
+        self.assertEqual(w["client"].post(path, json={"expected_revision": 0, "name": "Mina"}).status_code, 409)
+        approved = _approve(w["client"], w["project_id"], group.group_id, revision=1)
+        self.assertEqual(approved.status_code, 200, approved.text)
+        self.assertEqual(len(_memories(w)), 1)
+        self.assertEqual(_memories(w)[0].payload["name"], "Mina")
+
+    def test_retry_recovers_a_successor_left_outside_the_group(self):
+        """An interrupted member append must not strand a pending candidate.
+        A normal second correction still changes the name again at the next revision.
+        """
+        w = _build()
+        a = _seed_candidate(w["analysis"], project_id=w["project_id"], logical_key="a")
+        b = _seed_candidate(w["analysis"], project_id=w["project_id"], logical_key="b")
+        group = _open_group(w["groups"], w["project_id"], a, b)
+        path = f"/projects/{w['project_id']}/analysis/review-inbox/groups/{group.group_id}/correct-name"
+        original_add = w["groups"].add_member
+        failed = False
+
+        def fail_once(*args, **kwargs):
+            nonlocal failed
+            if not failed and kwargs["candidate_id"] not in (a.id, b.id):
+                failed = True
+                raise PyMongoError("member store unavailable")
+            return original_add(*args, **kwargs)
+
+        w["groups"].add_member = fail_once
+        first = w["client"].post(path, json={"expected_revision": 0, "name": "Mina"})
+        self.assertEqual(first.status_code, 503)
+        w["groups"].add_member = original_add
+        retry = w["client"].post(path, json={"expected_revision": 0, "name": "Mina"})
+        self.assertEqual(retry.status_code, 200, retry.text)
+        items = w["client"].get(f"/projects/{w['project_id']}/analysis/review-inbox").json()["items"]
+        self.assertEqual(len(items), 2)
+        self.assertEqual({item["payload"]["name"] for item in items}, {"Mina"})
+        second = w["client"].post(path, json={"expected_revision": 1, "name": "Mira"})
+        self.assertEqual(second.status_code, 200, second.text)
+        items = w["client"].get(f"/projects/{w['project_id']}/analysis/review-inbox").json()["items"]
+        self.assertEqual(len(items), 2)
+        self.assertEqual({item["payload"]["name"] for item in items}, {"Mira"})
+
+    def test_rejects_non_character_and_blank_name_without_changing_members(self):
+        w = _build()
+        a = _seed_candidate(w["analysis"], project_id=w["project_id"], logical_key="a")
+        b = _seed_candidate(w["analysis"], project_id=w["project_id"], logical_key="b")
+        group = _open_group(w["groups"], w["project_id"], a, b)
+        path = f"/projects/{w['project_id']}/analysis/review-inbox/groups/{group.group_id}/correct-name"
+        self.assertEqual(w["client"].post(path, json={"expected_revision": 0, "name": "  "}).status_code, 400)
+        self.assertEqual(w["groups"].get_group(w["project_id"], group.group_id).revision, 0)
+        self.assertEqual(len(w["groups"].list_members(w["project_id"], group.group_id)), 2)
+        event_group = w["groups"].create_group(
+            w["project_id"], AnalysisCandidateType.EVENT_OBSERVATION
+        )
+        event_path = f"/projects/{w['project_id']}/analysis/review-inbox/groups/{event_group.group_id}/correct-name"
+        self.assertEqual(w["client"].post(event_path, json={"expected_revision": 0, "name": "Mina"}).status_code, 400)
 
 
 class GroupApproveOrchestrationTest(unittest.TestCase):

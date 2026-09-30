@@ -1152,6 +1152,12 @@ export interface IdentityGroupApproveResult {
   idempotent_replay: boolean;
 }
 
+export function correctIdentityGroupName(projectId: string, groupId: string, expectedRevision: number, name: string): Promise<{ group_id: string; group_revision: number; corrected_ids: string[] }> {
+  return request(`/projects/${projectId}/analysis/review-inbox/groups/${groupId}/correct-name`, {
+    method: "POST", body: JSON.stringify({ expected_revision: expectedRevision, name }),
+  });
+}
+
 export function rejectIdentityGroup(
   projectId: string,
   groupId: string,

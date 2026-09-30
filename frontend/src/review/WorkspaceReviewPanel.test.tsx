@@ -162,6 +162,34 @@ describe("WorkspaceReviewPanel", () => {
     expect(fetchMock.mock.calls[1][0]).toBe("/api/projects/p1/analysis/review-inbox/c2");
   });
 
+  it("corrects a grouped character name from the rail", async () => {
+    const identityGroup = {
+      group_id: "g1", group_size: 2, group_status: "open",
+      group_revision: 3, group_member_ids: ["c1", "c2"],
+      identity_rationale_summary: null,
+    };
+    const grouped = { ...item, payload: detail.payload, identity_group: identityGroup };
+    const another = { ...grouped, candidate_id: "c2", job_id: "j2" };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ ...list, items: [grouped, another] }))
+      .mockResolvedValueOnce(response({ group_id: "g1", group_revision: 4, corrected_ids: ["n1", "n2"] }))
+      .mockResolvedValueOnce(response({ ...list, items: [grouped, another] }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <MemoryRouter initialEntries={["/?panel=review"]}>
+        <WorkspaceReviewPanel projectId="p1" onSourceSelect={vi.fn()} />
+      </MemoryRouter>,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "그룹 이름 수정" }));
+    const input = screen.getByRole("textbox", { name: "그룹에 함께 적용할 인물 이름" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "새 이름");
+    await userEvent.click(screen.getByRole("button", { name: "이름 적용" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/projects/p1/analysis/review-inbox/groups/g1/correct-name");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ expected_revision: 3, name: "새 이름" });
+  });
+
   it("edits a candidate in the rail using the existing edit-and-confirm action", async () => {
     // Under-strict: saving must call the edit endpoint with every payload field.
     // Over-strict: opening edit alone must not submit or remove the candidate.

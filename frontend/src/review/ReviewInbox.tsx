@@ -4,6 +4,7 @@ import { buildEntries, type InboxEntry } from "./reviewEntries";
 import {
   approveIdentityGroup,
   confirmCandidate,
+  correctIdentityGroupName,
   describeApiError,
   dismissGateFinding,
   listReviewInbox,
@@ -79,6 +80,7 @@ export function ReviewInbox() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [groupNameDraft, setGroupNameDraft] = useState<{ groupId: string; name: string } | null>(null);
   // Kept out of `data` on purpose: the reload after an action replaces `data`,
   // and a partial pass (conflict/failed/pending members) must not disappear
   // with it — "부분 실패는 성공처럼 닫지 않는다" lives here.
@@ -320,6 +322,12 @@ export function ReviewInbox() {
             >
               {isCollapsed ? "펼치기" : "접기"}
             </button>
+            {members[0].candidate_type === "character_observation" && (
+              <button type="button" className="ghost" disabled={busy !== null}
+                onClick={() => setGroupNameDraft({ groupId: group.group_id, name: String(members[0].payload.name ?? "") })}>
+                그룹 이름 수정
+              </button>
+            )}
             <button
               type="button"
               disabled={busy !== null}
@@ -362,6 +370,25 @@ export function ReviewInbox() {
             </button>
           </div>
         </div>
+
+        {groupNameDraft?.groupId === group.group_id && (
+          <form className="group-name-form" onSubmit={(event) => {
+            event.preventDefault();
+            if (!groupNameDraft.name.trim()) return;
+            void runAction(`group-name:${group.group_id}`, async () => {
+              await correctIdentityGroupName(projectId!, group.group_id, group.group_revision, groupNameDraft.name.trim());
+              setGroupNameDraft(null);
+            });
+          }}>
+            <label htmlFor={`group-name-${group.group_id}`}>그룹에 함께 적용할 인물 이름</label>
+            <input id={`group-name-${group.group_id}`} value={groupNameDraft.name}
+              onChange={(event) => setGroupNameDraft({ groupId: group.group_id, name: event.target.value })} />
+            <div className="row-actions">
+              <button type="submit" disabled={busy !== null || !groupNameDraft.name.trim()}>이름 적용</button>
+              <button type="button" className="ghost" disabled={busy !== null} onClick={() => setGroupNameDraft(null)}>취소</button>
+            </div>
+          </form>
+        )}
 
         {!isCollapsed && (
           <ul

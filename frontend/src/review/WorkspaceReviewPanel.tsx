@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react
 import { Link, useSearchParams } from "react-router";
 import {
   confirmCandidate,
+  correctIdentityGroupName,
   describeApiError,
   editCandidate,
   getReviewInboxItem,
@@ -65,6 +66,7 @@ export function WorkspaceReviewPanel({
   const [data, setData] = useState<ReviewInboxListResponse | null>(null);
   const [detail, setDetail] = useState<ReviewInboxDetailItem | null>(null);
   const [draft, setDraft] = useState<Record<string, string> | null>(null);
+  const [groupNameDraft, setGroupNameDraft] = useState<{ groupId: string; name: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -226,6 +228,34 @@ export function WorkspaceReviewPanel({
                     )}
                     {entry.group.group_status === "contradicted" && (
                       <small>상충하는 판정이 있어 개별 확인이 필요합니다.</small>
+                    )}
+                    {entry.members[0].candidate_type === "character_observation" && (
+                      groupNameDraft?.groupId === entry.group.group_id ? (
+                        <form className="group-name-form" onSubmit={(event) => {
+                          event.preventDefault();
+                          if (!groupNameDraft.name.trim() || busy) return;
+                          setBusy(true);
+                          void correctIdentityGroupName(projectId, entry.group.group_id, entry.group.group_revision, groupNameDraft.name.trim())
+                            .then(async () => {
+                              setGroupNameDraft(null);
+                              setDetail(null);
+                              selectCandidate(null);
+                              await load();
+                              setError(null);
+                            }).catch((err: unknown) => setError(describeApiError(err)))
+                            .finally(() => setBusy(false));
+                        }}>
+                          <label htmlFor={`rail-group-name-${entry.group.group_id}`}>그룹에 함께 적용할 인물 이름</label>
+                          <input id={`rail-group-name-${entry.group.group_id}`} value={groupNameDraft.name}
+                            onChange={(event) => setGroupNameDraft({ groupId: entry.group.group_id, name: event.target.value })} />
+                          <button type="submit" disabled={busy || !groupNameDraft.name.trim()}>이름 적용</button>
+                          <button type="button" className="ghost" disabled={busy} onClick={() => setGroupNameDraft(null)}>취소</button>
+                        </form>
+                      ) : (
+                        <button type="button" className="ghost" disabled={busy} onClick={() => setGroupNameDraft({
+                          groupId: entry.group.group_id, name: String(entry.members[0].payload.name ?? ""),
+                        })}>그룹 이름 수정</button>
+                      )
                     )}
                     <ul className="rail-group-members" aria-label="그룹 안 후보 목록">
                       {entry.members.map((item) => candidateRow(item, true))}

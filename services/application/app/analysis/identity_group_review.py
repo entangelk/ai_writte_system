@@ -72,7 +72,9 @@ from services.application.app.analysis.identity_groups import (
     CandidateIdentityGroupService,
     IdentityGroupStatus,
 )
-from services.application.app.analysis.models import AnalysisCandidateStatus
+from services.application.app.analysis.models import (
+    AnalysisCandidateStatus, AnalysisCandidateType,
+)
 from services.application.app.analysis.review_queue import ReviewQueueService
 from services.application.app.analysis.service import AnalysisService
 from services.application.app.memory.models import MemoryEntry, MemoryStatus
@@ -139,6 +141,25 @@ class GroupApprovalRemovalOutbox(Protocol):
         self, *, project_id: str, candidate_id: str
     ) -> object: ...
 
+    def enqueue_candidate_upserted(
+        self, *, project_id: str, candidate_id: str
+    ) -> object: ...
+
+
+class GroupNameCorrectionInvalid(ValueError):
+    pass
+
+
+class GroupNameCorrectionConflict(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class GroupNameCorrectionResult:
+    group_id: str
+    group_revision: int
+    corrected_ids: tuple[str, ...]
+
 
 class CandidateIdentityGroupReviewService:
     def __init__(
@@ -163,6 +184,99 @@ class CandidateIdentityGroupReviewService:
         self._memory = memory_service
         self._review_queue = review_queue
         self._removal_outbox = removal_outbox
+
+    def correct_group_name(
+        self, *, project_id: str, group_id: str, expected_revision: int,
+        name: str,
+    ) -> GroupNameCorrectionResult:
+        """Correct all pending character names while retaining group review."""
+        group = self._identity.get_group(project_id, group_id)
+        if group.status is IdentityGroupStatus.CLOSED:
+            raise CandidateIdentityGroupNotFoundError(
+                "candidate identity group is closed"
+            )
+        if expected_revision != group.revision:
+            raise CandidateIdentityGroupRevisionMismatch(
+                expected=expected_revision, current=group.revision
+            )
+        if group.candidate_type is not AnalysisCandidateType.CHARACTER_OBSERVATION:
+            raise GroupNameCorrectionInvalid("only character groups have a shared name")
+        name = name.strip()
+        if not name:
+            raise GroupNameCorrectionInvalid("name must not be blank")
+        approval = self._approvals.get(project_id, group_id)
+        if approval is not None and approval.expected_revision == group.revision:
+            raise GroupNameCorrectionConflict("group approval has already started")
+        candidates = [
+            self._analysis.get_candidate(
+                project_id=project_id, candidate_id=member.candidate_id
+            ) for member in self._identity.list_members(project_id, group_id)
+        ]
+        if any(candidate.status in (
+            AnalysisCandidateStatus.CONFIRMED, AnalysisCandidateStatus.REJECTED
+        ) for candidate in candidates):
+            raise GroupNameCorrectionConflict("group review has already started")
+        # Repair an interrupted pass: a successor may have been stored and its
+        # original superseded just before adding the new group member failed.
+        member_ids = {candidate.id for candidate in candidates}
+        for candidate in tuple(candidates):
+            if candidate.status is not AnalysisCandidateStatus.SUPERSEDED:
+                continue
+            successor = self._analysis.group_name_successor(
+                project_id=project_id, candidate_id=candidate.id, group_id=group_id
+            )
+            if successor is None or successor.status is not AnalysisCandidateStatus.NEEDS_REVIEW:
+                continue
+            if successor.id not in member_ids:
+                self._identity.add_member(
+                    project_id=project_id, group_id=group_id,
+                    candidate_id=successor.id, candidate_type=group.candidate_type,
+                )
+                member_ids.add(successor.id)
+                candidates.append(successor)
+            if self._removal_outbox is not None:
+                self._removal_outbox.enqueue_candidate_removed(
+                    project_id=project_id, candidate_id=candidate.id
+                )
+                self._removal_outbox.enqueue_candidate_upserted(
+                    project_id=project_id, candidate_id=successor.id
+                )
+            self._review_queue.resolve_for_candidate(
+                project_id=project_id, candidate_id=candidate.id
+            )
+        pending = [candidate for candidate in candidates
+                   if candidate.status is AnalysisCandidateStatus.NEEDS_REVIEW]
+        if len(pending) < 2:
+            raise GroupNameCorrectionConflict("group needs at least two pending members")
+        corrected: list[str] = []
+        for candidate in pending:
+            if candidate.payload.get("name") == name:
+                continue
+            edit = self._analysis.correct_pending_name(
+                project_id=project_id, candidate_id=candidate.id,
+                group_id=group_id, name=name,
+            )
+            self._identity.add_member(
+                project_id=project_id, group_id=group_id,
+                candidate_id=edit.candidate.id,
+                candidate_type=group.candidate_type,
+            )
+            if self._removal_outbox is not None:
+                self._removal_outbox.enqueue_candidate_removed(
+                    project_id=project_id, candidate_id=candidate.id
+                )
+                self._removal_outbox.enqueue_candidate_upserted(
+                    project_id=project_id, candidate_id=edit.candidate.id
+                )
+            self._review_queue.resolve_for_candidate(
+                project_id=project_id, candidate_id=candidate.id
+            )
+            corrected.append(edit.candidate.id)
+        updated = self._identity.bump_revision(project_id, group_id)
+        return GroupNameCorrectionResult(
+            group_id=group_id, group_revision=updated.revision,
+            corrected_ids=tuple(corrected),
+        )
 
     # --- Slice 4 — 그룹 거절 -------------------------------------------------
 
