@@ -45,9 +45,11 @@
 
 ## 지금의 계약
 
+- **분석 `/run`의 긴 응답.** 524는 job 실패를 확정하지 않는다. 화면은 지연 안내와 검토함 수동 확인을 제공하며 자동 조회하지 않는다. 최종 저장 분석도 동기 경로라 별도 검토가 필요하다. [작업 로그](docs/daily_logs/2026-09-30/work_log.md).
+
 - **성공한 원고의 재분석(v1.8.77).** 첫 job은 accept와 공유하는 `analyze:{snapshot_id}`다. 이미 `succeeded`이면 집필 화면이 확인을 묻고, 예를 누른 새 의도만 `reanalyze:{snapshot_id}:{UUID}` job을 만든다. 실패 job은 기존 같은 job retry다. 후보 거절은 job 상태를 바꾸지 않는다. [`05-writing-accept-decisions.md`](docs/plans/05-writing-accept-decisions.md) 참조.
 
-정본은 [`docs/system-contract-sot.md`](docs/system-contract-sot.md) **v1.8.71**(Approved). **미확정 항목은 추측 구현하지 않는다.** 아래는 코드를 만지기 전에 알아야 하는 요약이다.
+정본은 [`docs/system-contract-sot.md`](docs/system-contract-sot.md) **v1.8.77**(Approved). **미확정 항목은 추측 구현하지 않는다.** 아래는 코드를 만지기 전에 알아야 하는 요약이다.
 
 - **배포되는 앱이 둘이다.** `/admin` **19 operation**은 포트를 게시하지 않는 `admin` compose 서비스가 서빙하고 도달 경로는 nginx `location /api/admin/` 하나다. 제품 앱에는 그 route가 **없으므로** LAN에서 치면 가드가 아니라 **라우터가 404**다. `create_app()` 은 **107 operation 합집합**이고 테스트·경계 행렬·`dump_openapi.py`(= 프론트 `schema.d.ts`)가 전부 그것을 쓴다 — 브라우저는 nginx 뒤에서 한 origin만 보므로 **계약은 하나여야 한다**. 세 factory(`create_app`·`create_product_app`·`create_admin_app`)는 **한 함수 본문**이고 플래그로만 갈린다. 가드 [`test_admin_surface_separation.py`](tests/test_admin_surface_separation.py).
 - **operation tier = 전체 107 · project 76 · admin 19**([`test_auth_api.py`](tests/test_auth_api.py) 의 tier 핀이 정본 — 줄 번호는 움직인다).

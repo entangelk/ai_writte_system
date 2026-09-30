@@ -2,6 +2,7 @@ import { useRef, useState, type MouseEvent } from "react";
 import { Link } from "react-router";
 import {
   ApiError,
+  AnalysisRunResponseDelayed,
   analyzeVersion,
   describeApiError,
   describeQuotaError,
@@ -42,6 +43,7 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [delayed, setDelayed] = useState(false);
   const [retryKey, setRetryKey] = useState<string | undefined>();
   // Synchronous re-entrancy guard: setBusy is async, so a fast double-click can
   // pass the state check and launch two jobs (WritingPanel uses the same busyRef
@@ -79,6 +81,7 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
     setBusy(true);
     onStatusChange?.("running");
     setError(null);
+    setDelayed(false);
     setResult(null);
     setPendingConfirm(null);
     setRetryKey(reanalysisKey);
@@ -105,6 +108,10 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
       setResult({ candidateCount: outcome.candidateCount });
       onStatusChange?.("complete");
     } catch (err) {
+      if (err instanceof AnalysisRunResponseDelayed) {
+        setDelayed(true);
+        return;
+      }
       let refusal = describeQuotaError(err, quota);
       if (refusal === null && err instanceof ApiError && err.status === 403) {
         // 독립 검증 2026-08-04 H-1 — WritingPanel 과 같은 경합 창, 같은 처방.
@@ -166,7 +173,7 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
       )}
 
       <div className="writing-actions">
-        <button type="button" disabled={busy || blocked !== null || pendingConfirm !== null} onClick={() => void run()}>
+        <button type="button" disabled={busy || blocked !== null || pendingConfirm !== null || delayed} onClick={() => void run()}>
           {busy ? "분석 중… (12B 추출)" : "이 원고 분석"}
         </button>
       </div>
@@ -195,6 +202,15 @@ export function AnalysisTrigger(props: AnalysisTriggerProps) {
               취소
             </button>
           </div>
+        </div>
+      )}
+      {delayed && (
+        <div className="writing-notice" role="status">
+          <p>응답이 늦어지고 있습니다. 분석은 서버에서 계속 진행 중일 수 있습니다.</p>
+          <p>잠시 후 검토함을 새로고침해 생성된 후보를 확인해주세요.</p>
+          <Link className="inline-navigation-link" to={`/projects/${projectId}/review`} onClick={guardNavigation}>
+            검토함에서 확인 →
+          </Link>
         </div>
       )}
       {error !== null && (

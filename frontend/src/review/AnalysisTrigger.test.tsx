@@ -325,6 +325,42 @@ describe("AnalysisTrigger", () => {
     expect(screen.getByText(/보관된 원고는 분석할 수 없습니다/)).toBeInTheDocument();
   });
 
+  it("shows a manual review path only for a 524 after the run started", async () => {
+    // Under-strict: 524 must not claim the server job failed or invite another
+    // paid run. Over-strict: the 502 test below still requires normal errors.
+    const fetchMock = mockFetch(
+      CATALOG_FULL, VERSION_DETAIL, JOB_CREATED,
+      { status: 524, body: { detail: "A timeout occurred" } },
+    );
+    const onStatusChange = vi.fn();
+    renderTrigger({ onStatusChange });
+    await userEvent.click(runButton());
+
+    expect(await screen.findByText(/응답이 늦어지고 있습니다/)).toBeInTheDocument();
+    expect(screen.getByText(/검토함을 새로고침/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /검토함에서 확인/ }))
+      .toHaveAttribute("href", "/projects/p1/review");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "다시 분석" })).not.toBeInTheDocument();
+    expect(runButton()).toBeDisabled();
+    expect(onStatusChange.mock.calls.map(([status]) => status)).toEqual(["running"]);
+    expect(fetchMock).toHaveBeenCalledTimes(4); // no automatic GET polling
+  });
+
+  it("keeps a pre-run 524 as an error because no analysis run started", async () => {
+    // Over-strict guard: only /run may become the delayed notice.
+    const fetchMock = mockFetch(
+      CATALOG_FULL, VERSION_DETAIL,
+      { status: 524, body: { detail: "A timeout occurred" } },
+    );
+    renderTrigger();
+    await userEvent.click(runButton());
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("524");
+    expect(screen.queryByText(/응답이 늦어지고 있습니다/)).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it("surfaces an error and offers retry when the run fails", async () => {
     mockFetch(CATALOG_FULL, VERSION_DETAIL, JOB_CREATED, { status: 502, body: { detail: "extraction failed" } });
     const onStatusChange = vi.fn();

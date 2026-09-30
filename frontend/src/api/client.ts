@@ -1330,6 +1330,8 @@ export function describeWritingError(err: unknown): {
   };
 }
 
+export class AnalysisRunResponseDelayed extends Error {}
+
 // Analysis trigger (review candidates). The jobs create/run endpoints are
 // untyped (dict responses), so these shapes are hand-declared (v1.6.94 precedent
 // for review reads). Running a job extracts needs_review candidates for the
@@ -1435,10 +1437,20 @@ export async function analyzeVersion(
   }
   // 유료 동작은 이 `/run` 하나다 — job 생성과 재시도 준비는 provider 를 부르지
   // 않으므로 무료다(8.0 B4).
-  const run = await request<{ job: AnalysisJobRef; candidates: unknown[] }>(
-    `/projects/${projectId}/analysis/jobs/${created.job.id}/run`,
-    { method: "POST", headers: billableHeaders(options) },
-  );
+  let run: { job: AnalysisJobRef; candidates: unknown[] };
+  try {
+    run = await request<{ job: AnalysisJobRef; candidates: unknown[] }>(
+      `/projects/${projectId}/analysis/jobs/${created.job.id}/run`,
+      { method: "POST", headers: billableHeaders(options) },
+    );
+  } catch (err) {
+    // A proxy 524 says only that the response was late. The already-created
+    // job may still finish, so the UI must not call it failed or re-run it.
+    if (err instanceof ApiError && err.status === 524) {
+      throw new AnalysisRunResponseDelayed();
+    }
+    throw err;
+  }
   if (run.job.status !== "succeeded") {
     throw new ApiError(
       409,
