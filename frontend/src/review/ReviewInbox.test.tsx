@@ -394,6 +394,32 @@ describe("ReviewInbox — 정체성 그룹", () => {
     expect(screen.getAllByText("서윤")).toHaveLength(2);
   });
 
+  it("shows progress during group approval and clears it on failure, excluding individual approval", async () => {
+    // Under-strict: a slow approval must not look idle. Over-strict: ordinary
+    // candidate approval and completed/failed requests must not show this notice.
+    const fetchMock = mockFetch({ body: mixedInbox() });
+    let finish!: (response: unknown) => void;
+    fetchMock.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    fetchMock.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => mixedInbox() });
+    renderInbox();
+    const approve = await screen.findByRole("button", { name: "그룹 승인" });
+    expect(screen.queryByText(/후보를 순서대로 판정하고 있습니다/)).toBeNull();
+    await userEvent.click(approve);
+    expect(screen.getByRole("button", { name: "그룹 승인 중…" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("후보를 순서대로 판정하고 있습니다");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    finish({ ok: false, status: 503, statusText: "", json: async () => ({ detail: "잠시 후 다시 시도하세요" }) });
+    await screen.findByRole("alert");
+    expect(screen.queryByText(/후보를 순서대로 판정하고 있습니다/)).toBeNull();
+    expect(screen.getByRole("button", { name: "그룹 승인" })).toBeEnabled();
+    await userEvent.click(screen.getAllByRole("button", { name: "승인" })[0]);
+    expect(screen.queryByText(/후보를 순서대로 판정하고 있습니다/)).toBeNull();
+    finish({ ok: true, json: async () => ({}) });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(screen.queryByText(/후보를 순서대로 판정하고 있습니다/)).toBeNull();
+  });
+
   it("approves a group with the revision the read surface gave it, then re-reads", async () => {
     const fetchMock = mockFetch(
       { body: mixedInbox() },
@@ -431,6 +457,7 @@ describe("ReviewInbox — 정체성 그룹", () => {
       "/api/projects/p1/analysis/review-inbox",
     );
     expect(screen.getByText(/그룹 승인 — 반영 2건/)).toBeInTheDocument();
+    expect(screen.queryByText(/후보를 순서대로 판정하고 있습니다/)).toBeNull();
   });
 
   it("rejects a group with no request body and reports what it skipped", async () => {

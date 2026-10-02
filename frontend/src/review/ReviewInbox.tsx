@@ -346,7 +346,7 @@ export function ReviewInbox() {
                 })
               }
             >
-              그룹 승인
+              {busy === `group-confirm:${group.group_id}` ? "그룹 승인 중…" : "그룹 승인"}
             </button>
             <button
               type="button"
@@ -370,6 +370,13 @@ export function ReviewInbox() {
             </button>
           </div>
         </div>
+
+        {busy === `group-confirm:${group.group_id}` && (
+          <p className="status-copy" role="status">
+            후보를 순서대로 판정하고 있습니다. 잠시 기다려 주세요.
+            처리 중 새로고침하면 먼저 반영된 후보만 목록에서 빠져 보일 수 있습니다.
+          </p>
+        )}
 
         {groupNameDraft?.groupId === group.group_id && (
           <form className="group-name-form" onSubmit={(event) => {
