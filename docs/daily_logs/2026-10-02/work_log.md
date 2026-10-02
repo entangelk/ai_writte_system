@@ -11,7 +11,16 @@
 - 14:14:58 목록 조회는 승인 완료 전이었다. 첫 후보는 이미 승인돼 검토함에서 빠졌고 두 번째 후보는 판정 중이었다. 사용자도 이 요청이 신고 대상이라고 확인했다.
 - `frontend/src/review/ReviewInbox.tsx`: 해당 그룹 승인 버튼을 `그룹 승인 중…`으로 바꾸고 버튼 아래에 순차 판정 대기 및 새로고침 중간 상태 안내를 표시한다.
 - `frontend/src/review/ReviewInbox.test.tsx`: 응답을 지연시킨 상태의 진행 안내·중복 클릭 잠금·실패 후 해제·개별 승인에는 안내를 표시하지 않는 경계를 검증한다. 기존 정상 승인 셀에도 안내 해제 단정을 추가했다.
-- 구현 체크포인트: `e12cebd`. API·스키마·승인 처리 계약 변경 없음. TypeScript 검사와 프로덕션 빌드 통과.
+- 구현 체크포인트: `e12cebd`. API·스키마·승인 처리 계약 변경 없음. `npm test -- --reporter=dot` 전체 42파일/502셀 통과. `npm run build` TypeScript 검사와 프로덕션 빌드 통과. 기존 WritingPanel의 `act(...)` 경고는 실패가 아니다.
+- 변이 전 `git status --short`가 빈 출력인 것을 확인했다. 각 변이 후 HEAD의 파일 바이트를 복원하고 빈 작업 트리를 확인했다. 이 환경의 `git checkout`은 index.lock 쓰기가 거부돼, `git show HEAD:<path>` 출력으로 복원했다.
+
+  | 적용한 변이 | 위치 | 실패한 셀 |
+  | --- | --- | --- |
+  | 버튼 문구를 `그룹 승인`으로 복원하고 안내 조건을 `{false && (`로 교체 | `frontend/src/review/ReviewInbox.tsx:349`, `:374` | `shows progress during group approval and clears it on failure, excluding individual approval` — 진행 버튼 부재, 1 failed/24 skipped |
+  | 안내 조건을 `busy === group-confirm 키`에서 `busy !== null`로 확대 | `frontend/src/review/ReviewInbox.tsx:374` | 같은 셀 — 개별 승인 중 안내가 표시돼 `toBeNull()` 실패, 1 failed/24 skipped |
+
+- 재현 명령: `cd frontend`, `npm test -- --reporter=dot src/review/ReviewInbox.test.tsx -t 'shows progress during group approval'`. 정상 완료 후 안내 해제는 기존 `approves a group with the revision the read surface gave it, then re-reads` 셀에서 잠근다.
+- 두 변이 복원 후 `npm test -- --reporter=dot src/review/ReviewInbox.test.tsx` 25/25 재통과. 기록 참조 파일 존재와 `git diff --check`를 확인했다.
 
 ## Issues found
 
@@ -27,5 +36,4 @@
 
 ## Next steps
 
-- 전체 프런트 테스트와 회귀 변이 결과를 기록한다.
 - 대기 안내는 미배포다. 적용 시 frontend 이미지를 재빌드한다. 서버 데이터 변경·승인 재실행·push는 수행하지 않는다.
