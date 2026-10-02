@@ -21,6 +21,8 @@
 
 - 재현 명령: `cd frontend`, `npm test -- --reporter=dot src/review/ReviewInbox.test.tsx -t 'shows progress during group approval'`. 정상 완료 후 안내 해제는 기존 `approves a group with the revision the read surface gave it, then re-reads` 셀에서 잠근다.
 - 두 변이 복원 후 `npm test -- --reporter=dot src/review/ReviewInbox.test.tsx` 25/25 재통과. 기록 참조 파일 존재와 `git diff --check`를 확인했다.
+- 사용자 배포 지시에 따라 09:22 KST 프런트엔드를 재빌드·교체했다. Git bundle로 검증된 커밋까지 fast-forward했고, 기존 이미지는 롤백용 태그로 보관했다. 서버의 기존 미추적 Compose 파일은 그대로 보존했다.
+- 배포 검증: Compose의 health 대기 통과, frontend `healthy`·restart 0, 컨테이너 내부 및 외부 HTTPS `/api/health` 200·`status=ok`. 외부 홈페이지가 새 JS 자산을 참조하고 내려받은 자산에 `그룹 승인 중…`과 순차 판정 안내가 모두 있음을 확인했다. 최근 프런트 로그에 오류 없음. 승인 요청을 재실행하지 않았다.
 
 ## Issues found
 
@@ -31,9 +33,10 @@
 ## Decisions / User Decisions and Rationale
 
 - 사용자는 배포 서버의 로그 조회를 허용했고, 조회된 10월 1일 오후 그룹 승인 요청이 신고한 요청임을 확인했다.
+- 사용자는 수정한 진행 안내의 배포를 요청했다. frontend만 재빌드·교체하고 기존 서버 Compose 설정을 유지했다. 원격 저장소 push는 하지 않았다.
 - 기존 문서 우선순위는 `docs/system-contract-sot.md`에 있다. 그룹의 단계별 반영·부분 실패·재시도 계약을 유지하고 대기 안내만 보완한다.
 - 소규모 UI 결함 수정이므로 기록 가이드에 따라 CHANGELOG 마일스톤과 SoT 계약 버전은 추가하지 않는다.
 
 ## Next steps
 
-- 대기 안내는 미배포다. 적용 시 frontend 이미지를 재빌드한다. 서버 데이터 변경·승인 재실행·push는 수행하지 않는다.
+- 다음 그룹 승인에서 대기 안내와 완료 결과를 사용자 브라우저로 확인한다. 실제 승인 데이터는 변경하지 않았다.
