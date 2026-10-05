@@ -172,6 +172,8 @@
 
 ## 열린 것 — 부채 · 결정 대기
 
+- **그룹 승인 장시간 대기 UX**: `frontend/src/review/ReviewInbox.tsx:374`의 정적 안내에 수분 소요·경과 시간·부분 실패 설명을 보강할 필요가 있다. 서버 진행 계약 없이 완료 건수를 추정하지 말 것. 개별 confirm 후 과거 패스의 failed 표시와 현재 후보 상태도 구분해야 한다. 조사 범위·근거·제안은 [`2026-10-05 work_log.md`](docs/daily_logs/2026-10-05/work_log.md).
+
 **⚠️ 오너 결정이 있어야 움직이는 것 — 2026-09-13 현재 0건**
 
 아래 표의 행은 전부 답을 받았다(마지막 2026-09-13). 2026-09-13 에 오너가 대기 중이던 둘을 답했고 **같은 날 둘 다 시행됐다** — **활동 로그 D2=ⓑ**(replay 는 행을 안 남긴다 · 세 경로가 한 답, 브리프 [`activity-log-replay-and-partial-decisions.md`](docs/plans/activity-log-replay-and-partial-decisions.md) §D2 결정) · **파기 청구 뒤 탈퇴 취소 = ⓐ 409 거부**(D5 경계 시행, 브리프 [`slice5-withdrawal-cancel-after-purge-claim-decisions.md`](docs/plans/slice5-withdrawal-cancel-after-purge-claim-decisions.md) §결정).
