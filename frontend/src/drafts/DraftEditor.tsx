@@ -247,7 +247,7 @@ export function DraftEditor() {
   );
 
   async function createNextScene(seed: NextSceneSeed): Promise<boolean> {
-    if (projectId === undefined || draft === null || readOnly || saving || finalizing ||
+    if (projectId === undefined || draft === null || readOnly || saving || finalizing || selecting ||
       creatingNextSceneRef.current || !allowNavigationAway()) return false;
     creatingNextSceneRef.current = true;
     setCreatingNextScene(true);
@@ -462,6 +462,7 @@ export function DraftEditor() {
       draftId === undefined ||
       version.id === selectedVersionId ||
       savingRef.current ||
+      creatingNextSceneRef.current ||
       selectingRef.current
     ) {
       return;
@@ -827,7 +828,7 @@ export function DraftEditor() {
                       <button
                         type="button"
                         aria-current={version.id === selectedVersionId ? "true" : undefined}
-                        disabled={saving || selecting}
+                        disabled={saving || selecting || creatingNextScene}
                         onClick={() => void selectVersion(version)}
                       >
                         version {version.version_number}
@@ -849,7 +850,7 @@ export function DraftEditor() {
                           <button
                             type="button"
                             aria-current={version.id === selectedVersionId ? "true" : undefined}
-                            disabled={saving || selecting}
+                            disabled={saving || selecting || creatingNextScene}
                             onClick={() => void selectVersion(version)}
                           >
                             version {version.version_number}

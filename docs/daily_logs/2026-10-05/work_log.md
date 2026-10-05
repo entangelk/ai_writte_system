@@ -66,3 +66,17 @@
 - 검증: focused 3파일/132 passed, 전체 프론트 43파일/510 passed(기존 502 대비 회귀 8개), `npm run build` TypeScript clean/723 modules 및 `git diff --check` 통과. 로컬 설치 의존성은 Vitest 3.2.7/Vite 7.3.6이다. 새 공개 API가 없어 `schema.d.ts`/OpenAPI diff는 0이고 기존 예제·literal은 유지한다.
 - 패턴 sweep: 후보 동작은 live/scratch 두 표면이며 둘 다 연결했다. blame은 `f66d6563`의 의도된 채택 제거였다. 편집기 기본 로딩 `setRawText(nextText)`는 `3c176a12`의 정본 로딩 선례이므로 저장된 version을 유지하면서 빈 Scene에만 seed를 적용했다. 발견된 다른 동일 원인의 미연결 표면은 없다.
 - 핵심 변이 검증은 아래에 기록한다.
+
+### 다음 Scene 회귀 가드 변이
+
+- `9ac6410` checkpoint 이후 `git status --short` 공백을 실행 확인했다. 각 변이 후 원본 바이트를 복원하고 `git diff --exit-code`로 clean 복원을 확인했다. 명령은 `npm test -- --run src/drafts/DraftEditor.test.tsx -t 'creates the next scene|never replaces'`다.
+
+| 변이 diff | 위치 | 재실패 셀 |
+|---|---|---|
+| `setRawText(initialText ?? nextText)` → `setRawText(nextText)` | `frontend/src/drafts/DraftEditor.tsx:184` | `creates the next scene as an unsaved editable draft, with reorder retry=false` 및 `...retry=true` — 2 failed/1 passed/65 skipped |
+| seed 조건의 `latest === null &&` 제거 | `frontend/src/drafts/DraftEditor.tsx:182` | `never replaces a saved version with next-scene navigation text` — 1 failed/2 passed/65 skipped |
+| `let target = nextScenesRef.current.get(key)` → `let target: Draft \| undefined`(생성 Scene 재사용 제거) | `frontend/src/drafts/DraftEditor.tsx:256` | `creates the next scene as an unsaved editable draft, with reorder retry=true` — 1 failed/2 passed/65 skipped |
+
+- 배포·push 없이 로컬 main에 구현을 커밋했다. 배포 후 기존 scratch에서도 버튼을 사용할 수 있으므로 재생성은 필요 없다.
+- 원본 복원 뒤 같은 focused 명령이 3 passed/65 skipped로 재통과했다.
+- 후속 검수에서 Scene 생성 대기 중 기존 version을 여는 경로도 잠갔다. 대기 중 version 조회가 늦게 끝나면 새 Scene 초안을 덮을 수 있으므로 `selectVersion`과 새 Scene 만들기를 상호 잠그고 버전 버튼을 disabled 처리했다. 생성 요청을 지연하는 회귀로 본문 읽기 전용·version 버튼 잠금·추가 version 조회 없음도 확인한다. 해당 변경 뒤 DraftEditor 68개 및 production build를 재검했다.

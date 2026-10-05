@@ -141,6 +141,7 @@ describe("DraftEditor", () => {
     const target = { ...draft, id: "d2", title: "다음 장면", chapter_id: "ch1", position: 3 };
     const source = { ...draft, chapter_id: "ch1", position: 1 };
     let orderFailed = false;
+    let finishCreate!: () => void;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.includes("/writing/scratch")) return response({ body: { items: url.includes("draft_id=d1") ? [{
         id: "scratch1", request_id: "wr1", draft_id: "d1", candidate_text: "생성된 다음 장면 본문",
@@ -151,13 +152,15 @@ describe("DraftEditor", () => {
       if (url === "/api/projects/p1") return response({ body: project });
       if (url === "/api/projects/p1/drafts/d1") return response({ body: source });
       if (url === "/api/projects/p1/drafts/d2") return response({ body: target });
-      if (url.endsWith("/d1/versions")) return response({ body: { versions: [version1] } });
-      if (url.endsWith("/d1/versions/v1")) return response({ body: detail(version1, "기존 장면 본문") });
+      if (url.endsWith("/d1/versions")) return response({ body: { versions: [version3, version1] } });
+      if (url.endsWith("/d1/versions/v3")) return response({ body: detail(version3, "기존 장면 본문") });
       if (url.endsWith("/d2/versions") && init?.method !== "POST") return response({ body: { versions: [] } });
       if (url.endsWith("/d2/versions") && init?.method === "POST") return response({
         body: detail({ ...version1, id: "v2", draft_id: "d2" }, "생성된 다음 장면 본문"),
       });
-      if (url === "/api/projects/p1/drafts" && init?.method === "POST") return response({ body: target });
+      if (url === "/api/projects/p1/drafts" && init?.method === "POST") return new Promise((resolve) => {
+        finishCreate = () => resolve(response({ body: target }));
+      });
       if (url === "/api/projects/p1/drafts") return response({ body: { drafts: [source,
         { ...source, id: "later", position: 2 }, target, { ...source, id: "other", chapter_id: "ch2" },
       ] } });
@@ -182,6 +185,12 @@ describe("DraftEditor", () => {
     expect(fetchMock.mock.calls.some(([url, init]) => url.endsWith("/drafts") && init?.method === "POST")).toBe(false);
     fireEvent.change(sourceEditor, { target: { value: "기존 장면 본문" } });
     await userEvent.click(button);
+    expect(sourceEditor).toHaveAttribute("readonly");
+    expect(screen.getByRole("button", { name: "version 1" })).toBeDisabled();
+    // A version fetch started here could later overwrite the new scene seed.
+    fireEvent.click(screen.getByRole("button", { name: "version 1" }));
+    expect(fetchMock.mock.calls.some(([url]) => url.endsWith("/d1/versions/v1"))).toBe(false);
+    act(() => finishCreate());
     if (failOrder) {
       await screen.findByRole("alert");
       await userEvent.click(screen.getByRole("button", { name: "이 내용으로 다음 장면 만들기" }));
