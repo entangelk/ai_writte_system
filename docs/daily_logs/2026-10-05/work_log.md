@@ -35,4 +35,13 @@
 - 완료된 패스는 완료 문구를, 부분 실패는 실패 건수와 반영된 내용의 보존을 안내한다. InvalidJudgeResult/ProviderError를 사람이 읽을 수 있는 설명과 함께 표시한다. 기존 결과 상자의 재조회 후 보존과 재시도 안내를 유지한다.
 - `frontend/src/review/ReviewInbox.test.tsx`: 0초/59초/61초 경과·장기 대기 안내·그룹 접기·실패 후 종료·개별 승인 제외 및 완료/부분 실패 문구를 검증한다. 양방향 가드: 장시간 안내 누락과 일반 승인/완료 결과의 잘못된 실패 표시를 모두 잡는다.
 - 패턴 검색: 그룹 승인 대기 안내는 ReviewInbox 한 곳이다. 기존 안내의 blame은 `e12cebd5`(2026-10-02)로, 순차 판정과 새로고침 주의 안내를 추가한 선례를 유지했다.
-- 검증 결과는 실행 후 아래에 기록한다.
+- 검증: 로컬 설치 의존성(Vitest 3.2.7/Vite 7.3.6)으로 검토함 25개 및 전체 프론트 42파일/502개 통과. `npm run build`의 TypeScript 검사 및 production build 통과. WritingPanel의 기존 act 경고는 있지만 테스트 실패는 없다. 테스트 작성 중 fake timer와 비동기 userEvent 조합이 timeout을 일으켜 해당 시간 검증의 클릭만 동기 fireEvent로 바꾼 뒤 정상 통과했다.
+- 변경분을 `7b5f2f1`에 먼저 커밋하고, `git status --short`가 비어 있음을 실행으로 확인한 뒤 다음 변이를 수행했다. 매번 원본 바이트를 복원하고 git diff가 없음을 확인했다.
+
+| 변이 diff | 위치 | 재실패 셀 |
+|---|---|---|
+| `elapsedSeconds >= 60` → `>= 600`(장기 대기 안내 지연) | `frontend/src/review/ReviewInbox.tsx:94` | `shows progress during group approval and clears it on failure, excluding individual approval` — 1 failed/24 skipped, 61초 장기 안내 누락 |
+| `elapsedSeconds >= 60` → `>= 0`(즉시 장기 대기 안내) | 같은 위치 | 같은 셀 — 1 failed/24 skipped, 0초에 추가 status가 생겨 초기 상태 가드 재실패 |
+
+- 배포·push는 수행하지 않았다. 과거 승인 결과와 이후 개별 승인 상태의 재동기화는 별도 후속 범위로 남긴다.
+- 변이 복원 후 같은 focused 명령이 1 passed/24 skipped로 재통과했고, 기록 링크 대상 존재 및 `git diff --check`도 확인했다.
