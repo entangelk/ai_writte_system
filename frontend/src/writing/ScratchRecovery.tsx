@@ -5,6 +5,7 @@ import {
   listWritingScratch,
   type ScratchCandidate,
 } from "../api/client";
+import { NextSceneButton, type CreateNextScene } from "./NextSceneButton";
 
 type ScratchRecoveryProps = {
   projectId: string;
@@ -12,6 +13,8 @@ type ScratchRecoveryProps = {
   // Bumped by the parent after a settled background job, so the list re-fetches
   // — the worker appends results.
   refreshKey?: number;
+  readOnly?: boolean;
+  onCreateNextScene?: CreateNextScene;
 };
 
 // Pre-dogfood safety net (brief D0=B/D1=B/D2=A): a candidate generated but not
@@ -24,6 +27,8 @@ type ScratchRecoveryProps = {
 // 것 같아. 일반 사용자에게는 불필요한 항목 같아. 버튼을 그냥 없애주고 통로만 열어두자."*
 // 서버 엔드포인트(`POST …/writing/accept`)와 API 클라이언트(`acceptWriting`)는 그대로
 // 열려 있다 — 없앤 것은 화면의 버튼이지 통로가 아니다.
+// 2026-10-05: start_next_unit 결과는 별도 버튼으로 다음 Scene의 편집 초안을
+// 열 수 있다. 본문 저장은 사용자의 일반 저장이며 accept를 호출하지 않는다.
 export function ScratchRecovery(props: ScratchRecoveryProps) {
   const { projectId, draftId, refreshKey } = props;
   const [items, setItems] = useState<ScratchCandidate[]>([]);
@@ -130,6 +135,14 @@ export function ScratchRecovery(props: ScratchRecoveryProps) {
               <button type="button" onClick={() => void copy(entry)}>
                 {copiedId === entry.id ? "복사됨" : "복사"}
               </button>
+              {entry.intent === "start_next_unit" && entry.next_unit !== null &&
+                props.onCreateNextScene !== undefined && (
+                  <NextSceneButton
+                    seed={{ requestId: entry.request_id, title: entry.next_unit.title, text: entry.candidate_text }}
+                    onCreate={props.onCreateNextScene}
+                    disabled={props.readOnly === true || discardingId !== null}
+                  />
+                )}
             </div>
           </li>
         ))}

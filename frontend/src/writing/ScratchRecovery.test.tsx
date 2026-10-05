@@ -52,6 +52,22 @@ const listBody = (
 });
 
 describe("ScratchRecovery", () => {
+  it("opens saved next-scene candidates but leaves append and legacy candidates as copy only", async () => {
+    // Under-strict: async/reloaded results must retain the creation path.
+    // Over-strict: append and pre-intent records must not create new scenes.
+    mockFetch(listBody([
+      { id: "next", text: "생성 본문", intent: "start_next_unit", next_unit: { title: "다음", goal: null } },
+      { id: "append", text: "이어 붙일 본문", intent: "append_current" },
+      { id: "legacy", text: "옛 본문" },
+    ]));
+    const onCreateNextScene = vi.fn().mockResolvedValue(true);
+    render(<ScratchRecovery projectId="p1" draftId="d1" onCreateNextScene={onCreateNextScene} />);
+    const buttons = await screen.findAllByRole("button", { name: "이 내용으로 다음 장면 만들기" });
+    expect(buttons).toHaveLength(1);
+    await userEvent.click(buttons[0]);
+    expect(onCreateNextScene).toHaveBeenCalledWith({ requestId: "wr1", title: "다음", text: "생성 본문" });
+    expect(screen.getAllByRole("button", { name: "복사" })).toHaveLength(3);
+  });
   it("renders nothing when there is no unaccepted draft", async () => {
     mockFetch(listBody([]));
     const { container } = render(

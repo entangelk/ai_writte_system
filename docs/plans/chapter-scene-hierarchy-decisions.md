@@ -216,6 +216,16 @@ draft purge보다 넓어진 파괴 범위를 잠근다.
   기존 draft purge graph와 Chapter를 함께 제거한다. 자식 중 active generation job이 있으면
   write 0·409다. UI는 exact Chapter title 확인 뒤 호출하고 파기 단계 503을 uncertain으로 잠근다.
 
+## 2026-10-05 — 다음 Scene 초안 열기 (오너 승인)
+
+- 사용자는 생성 결과에 **“이 내용으로 다음 장면 만들기”** 동작을 추가하는 방향을 승인했다.
+- 동기 결과 및 저장된 scratch의 `intent=start_next_unit` 결과에 적용한다. 생성 자체는 Scene을 만들지 않는다.
+- 버튼을 누르면 같은 Chapter에 Scene metadata를 만들고 현재 Scene 바로 뒤로 순서를 정한 뒤, 생성문을 편집기의 **미저장 초안**으로 연다. 본문은 사용자가 일반 저장으로 확정한다.
+- 2026-09-08의 채택 버튼 제거 결정은 유지한다. `writing/accept`, Gate 통과 강제, 자동 저장, 자동 분석, 새 Chapter 생성은 이 동작에 포함하지 않는다.
+- 기존 Scene 생성·목록·순서 API를 재사용한다. 순서 변경에 실패하면 같은 화면의 재시도에서 이미 만든 Scene을 재사용한다. 생성 결과는 원본 scratch에 남겨 복구 가능성을 유지한다.
+- 현재 Scene의 dirty 이동 확인·보관 상태를 존중하고, 저장된 version이 있는 대상에서는 이동용 초안이 본문을 덮지 않는다.
+- 생성 응답이 네트워크에서 유실된 경우 및 새로고침을 넘는 Scene 생성 멱등은 기존 일반 Scene 생성 API의 한계로 남는다. 새로운 서버 생성/저장 원자 API는 이번 범위 밖이다.
+
 ## Deferred / out of scope
 
 - 장보다 위의 부/권(volume/part) 계층

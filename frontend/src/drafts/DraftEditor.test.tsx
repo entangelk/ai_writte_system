@@ -56,9 +56,9 @@ function mockFetch(...responses: MockResponse[]) {
 
 // 기본 경로는 드로어를 연 채 시작한다(?panel=writing) — 이 파일의 대부분 셀은
 // 이어쓰기 패널의 컨트롤을 조작한다. 드로어가 닫힌 기본 상태는 별도 셀이 잠근다.
-function renderEditor(path = "/projects/p1/drafts/d1?panel=writing") {
+function renderEditor(path = "/projects/p1/drafts/d1?panel=writing", state?: unknown) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
+    <MemoryRouter initialEntries={[state === undefined ? path : { pathname: path, state }]}>
       <Routes>
         <Route path="/projects/:projectId" element={<p>원고 목록</p>} />
         <Route path="/projects/:projectId/drafts/:draftId" element={<DraftEditor />} />
@@ -134,6 +134,86 @@ afterEach(() => {
 });
 
 describe("DraftEditor", () => {
+  it.each([false, true])("creates the next scene as an unsaved editable draft, with reorder retry=%s", async (failOrder) => {
+    // Under-strict: a recovered next-scene candidate must reach a real scene.
+    // Over-strict: no accept/auto-save, no duplicate create after reorder failure,
+    // and only scenes in the source chapter may be reordered.
+    const target = { ...draft, id: "d2", title: "다음 장면", chapter_id: "ch1", position: 3 };
+    const source = { ...draft, chapter_id: "ch1", position: 1 };
+    let orderFailed = false;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes("/writing/scratch")) return response({ body: { items: url.includes("draft_id=d1") ? [{
+        id: "scratch1", request_id: "wr1", draft_id: "d1", candidate_text: "생성된 다음 장면 본문",
+        intent: "start_next_unit", next_unit: { title: "다음 장면", goal: null },
+      }] : [] } });
+      if (url.includes("/writing/budget")) return response({ body: { context_budget_tokens: {} } });
+      if (url === "/api/me/quota") return response({ status: 401, body: { detail: "로그인 필요" } });
+      if (url === "/api/projects/p1") return response({ body: project });
+      if (url === "/api/projects/p1/drafts/d1") return response({ body: source });
+      if (url === "/api/projects/p1/drafts/d2") return response({ body: target });
+      if (url.endsWith("/d1/versions")) return response({ body: { versions: [version1] } });
+      if (url.endsWith("/d1/versions/v1")) return response({ body: detail(version1, "기존 장면 본문") });
+      if (url.endsWith("/d2/versions") && init?.method !== "POST") return response({ body: { versions: [] } });
+      if (url.endsWith("/d2/versions") && init?.method === "POST") return response({
+        body: detail({ ...version1, id: "v2", draft_id: "d2" }, "생성된 다음 장면 본문"),
+      });
+      if (url === "/api/projects/p1/drafts" && init?.method === "POST") return response({ body: target });
+      if (url === "/api/projects/p1/drafts") return response({ body: { drafts: [source,
+        { ...source, id: "later", position: 2 }, target, { ...source, id: "other", chapter_id: "ch2" },
+      ] } });
+      if (url.endsWith("/scene-order")) {
+        if (failOrder && !orderFailed) {
+          orderFailed = true;
+          return response({ status: 503, body: { detail: "순서 변경 실패" } });
+        }
+        return response({ body: { scenes: [] } });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderEditor();
+    const button = await screen.findByRole("button", { name: "이 내용으로 다음 장면 만들기" });
+    const sourceEditor = await screen.findByDisplayValue("기존 장면 본문");
+    fireEvent.change(sourceEditor, { target: { value: "저장하지 않은 수정" } });
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    await userEvent.click(button);
+    expect(window.confirm).toHaveBeenCalled();
+    expect(screen.getByDisplayValue("저장하지 않은 수정")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url, init]) => url.endsWith("/drafts") && init?.method === "POST")).toBe(false);
+    fireEvent.change(sourceEditor, { target: { value: "기존 장면 본문" } });
+    await userEvent.click(button);
+    if (failOrder) {
+      await screen.findByRole("alert");
+      await userEvent.click(screen.getByRole("button", { name: "이 내용으로 다음 장면 만들기" }));
+    }
+    const editor = await screen.findByDisplayValue("생성된 다음 장면 본문");
+    expect(editor).not.toHaveAttribute("readonly");
+    expect(screen.getByText(/생성문을 새 장면의 초안으로 열었습니다/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "저장" })).toBeEnabled();
+    const creates = fetchMock.mock.calls.filter(([url, init]) => url.endsWith("/drafts") && init?.method === "POST");
+    expect(creates).toHaveLength(1);
+    expect(JSON.parse(creates[0][1]!.body as string)).toEqual({ chapter_id: "ch1", title: "다음 장면" });
+    const orders = fetchMock.mock.calls.filter(([url]) => url.endsWith("/scene-order"));
+    expect(JSON.parse(orders.at(-1)![1]!.body as string)).toEqual({ ordered_draft_ids: ["d1", "d2", "later"] });
+    expect(fetchMock.mock.calls.some(([url, init]) => url.includes("/writing/accept") ||
+      (url.endsWith("/versions") && init?.method === "POST"))).toBe(false);
+    await userEvent.click(screen.getByRole("button", { name: "저장" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "저장" })).toBeDisabled());
+    const saves = fetchMock.mock.calls.filter(([url, init]) => url.endsWith("/versions") && init?.method === "POST");
+    expect(saves).toHaveLength(1);
+    expect(saves[0][0]).toBe("/api/projects/p1/drafts/d2/versions");
+    expect(JSON.parse(saves[0][1]!.body as string).raw_text).toBe("생성된 다음 장면 본문");
+  });
+
+  it("never replaces a saved version with next-scene navigation text", async () => {
+    // Under-strict: navigation seeds apply only to empty scenes. Over-strict:
+    // returning after a save must continue to load the canonical saved text.
+    mockFetch({ body: project }, { body: draft }, { body: { versions: [version1] } },
+      { body: detail(version1, "저장된 본문") });
+    renderEditor("/projects/p1/drafts/d1", { draftId: "d1", draftText: "예전 생성문" });
+    expect(await screen.findByDisplayValue("저장된 본문")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("예전 생성문")).toBeNull();
+  });
   it("opens a zero-version draft as an unchanged empty editor", async () => {
     const fetchMock = mockFetch(
       { body: project },

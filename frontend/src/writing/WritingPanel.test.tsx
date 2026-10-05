@@ -848,6 +848,31 @@ describe("WritingPanel — 후보를 꺼내는 길 (오너 2026-09-08: 채택 �
     expect(generateButton()).toBeEnabled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("opens a next scene from the generated candidate, excluding append candidates", async () => {
+    // Under-strict: next-scene results need an action. Over-strict: changing
+    // the form afterwards must not retarget the result or turn append into next.
+    const onCreateNextScene = vi.fn().mockResolvedValue(true);
+    const fetchMock = mockFetch({ body: {
+      ...candidate, intent: "start_next_unit", next_unit: { title: "성 안", goal: null },
+    } }, { body: gatePass });
+    renderPanel({ onCreateNextScene });
+    await generateAndGate(fetchMock);
+    await userEvent.click(screen.getByRole("button", { name: "이 내용으로 다음 장면 만들기" }));
+    expect(onCreateNextScene).toHaveBeenCalledWith({
+      requestId: candidate.request_id, title: "성 안", text: candidate.text,
+    });
+    expect(screen.queryByRole("button", { name: /채택/ })).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps append candidates as copy only even when next-scene creation is available", async () => {
+    const fetchMock = mockFetch({ body: candidate }, { body: gatePass });
+    renderPanel({ onCreateNextScene: vi.fn() });
+    await generateAndGate(fetchMock);
+    expect(screen.queryByRole("button", { name: "이 내용으로 다음 장면 만들기" })).toBeNull();
+    expect(copyButton()).toBeEnabled();
+  });
 });
 
 describe("WritingPanel — K-4 instruction budget counter", () => {

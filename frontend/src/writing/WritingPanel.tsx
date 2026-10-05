@@ -20,6 +20,7 @@ import { describeRemaining, useMemberQuota } from "../quota/useMemberQuota";
 import { useWritingBudget } from "./useWritingBudget";
 import { estimateTokens, formatInstructionCount } from "./tokenEstimate";
 import { confirmPrompt, formatResetMoment } from "./quotaConfirm";
+import { NextSceneButton, type CreateNextScene } from "./NextSceneButton";
 
 // continue_scene emits a draft_patch (writing-workspace brief §확인된 계약). These
 // are fixed for the C1 slice; a later slice may expose other task/output types.
@@ -44,6 +45,7 @@ type WritingPanelProps = {
   // 증분 3 (D6): called when an async (medium/long) generate is accepted as a
   // background job, so the editor starts polling it for the result pad.
   onAsyncJobStarted?: (job: WritingGenerationJob) => void;
+  onCreateNextScene?: CreateNextScene;
 };
 
 type WritingBlock =
@@ -830,13 +832,24 @@ export function WritingPanel(props: WritingPanelProps) {
             <button type="button" onClick={() => void copyCandidate()}>
               {copied ? "복사됨" : "본문 복사"}
             </button>
+            {candidate.intent === "start_next_unit" && candidate.next_unit !== null &&
+              props.onCreateNextScene !== undefined && (
+                <NextSceneButton
+                  key={candidate.request_id}
+                  seed={{ requestId: candidate.request_id, title: candidate.next_unit.title, text: candidate.text }}
+                  onCreate={props.onCreateNextScene}
+                  disabled={readOnly || busy !== null}
+                />
+              )}
             {copyError !== null && (
               <span className="candidate-copy-error" role="alert">
                 {copyError}
               </span>
             )}
             <span className="candidate-accept-note">
-              복사해 편집기에 붙여넣고 저장하세요. 이 패널은 원고를 직접 바꾸지 않습니다.
+              {candidate.intent === "start_next_unit" && props.onCreateNextScene !== undefined
+                ? "다음 장면을 만들면 생성문을 편집 가능한 초안으로 엽니다. 검토한 뒤 저장하세요."
+                : "복사해 편집기에 붙여넣고 저장하세요. 이 패널은 원고를 직접 바꾸지 않습니다."}
             </span>
             {gate !== null && gate.decision !== "pass" && (
               <>

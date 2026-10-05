@@ -55,3 +55,14 @@
 - 제안(미결정): 채택 API 복구 대신 별도 “이 내용으로 다음 장면 만들기” 동작으로 같은 Chapter에 Scene을 만들고 생성문을 편집 가능한 초안으로 열어, 사용자가 일반 저장하도록 하는 흐름을 검토한다. 기존 채택 버튼 제거 방향을 보존하면서 누락된 장면 이동 동작을 채울 수 있다. 생성 즉시 자동 저장/유료 accept 재도입은 결정하지 않았다.
 - 변경/검증: 서버 및 코드 변경 없이 DB·access log·worker log·코드·기존 결정/회귀를 대조했다. 기록 파일만 변경했고 관련 참조 및 `git diff --check`를 확인한다. 새 테스트 실행은 동작 변경이 없어 해당하지 않는다.
 - 다음 단계: 다음 Scene을 만드는 시점과 생성문을 초안/저장 중 어느 상태로 여는지 사용자 방향을 정한 뒤 구현한다. 이미 저장된 scratch 후보로 이어갈 수 있으며 재생성을 전제하지 않는다.
+
+## 다음 Scene 초안 열기 구현
+- 사용자 결정/근거: 진단 후 제안한 “이 내용으로 다음 장면 만들기 → 같은 Chapter의 새 Scene → 생성문을 편집 초안으로 열기 → 사용자가 일반 저장” 흐름을 승인했다. 2026-09-08의 채택 버튼 제거는 유지한다. `chapter-scene-hierarchy-decisions.md`에 승인 방향을 반영하고 SoT v1.8.79를 기록했다.
+- 구현 파일: `WritingPanel.tsx`·`ScratchRecovery.tsx`에 결과 자체의 intent/title/text를 사용하는 버튼을 추가했다. 현재 폼을 바꿔도 과거 결과의 대상이 바뀌지 않으며 append/legacy 결과에는 버튼을 붙이지 않는다. `NextSceneButton.tsx`는 두 표면의 요청 중 잠금·실패 시 인접 오류·재시도를 공유한다.
+- `DraftEditor.tsx`: 기존 createDraft/listDrafts/putSceneOrder로 새 Scene을 같은 Chapter의 현재 Scene 바로 뒤에 둔다. 생성 후 순서 실패는 request별 생성 Scene을 기억해 재시도에서 새 Scene을 중복 생성하지 않는다. live/scratch의 동시 클릭은 부모 잠금으로 공유한다. 원본 dirty 이동 확인, 생성 중 본문 편집/저장 잠금과 원본 보관 제한을 적용한다.
+- 편집기 이동 state는 대상 Draft ID와 본문을 함께 싣고, 대상에 version이 없을 때만 미저장 초안으로 읽는다. 저장된 version이 있으면 canonical 본문이 우선한다. route별 패널 key로 이전 Scene의 후보가 새 Scene에 남지 않게 한다. 기존 scratch는 보존한다.
+- 공개 API/OpenAPI 및 backend 코드는 변경하지 않았다. Scene 생성 응답 유실 및 새로고침을 넘는 생성 멱등은 기존 API의 한계이고, 새로운 원자 endpoint는 이번 범위 밖이다. 배포·push는 요청 범위 밖이다.
+- 회귀: 동기 후보·복구 후보의 버튼, append/legacy 제외, dirty 이동 취소, 같은 Chapter 바로 뒤 배치, 순서 실패 뒤 단일 create, 미저장·편집 가능·일반 저장, 저장된 version 우선, 중복 클릭·오류 복구·읽기 전용을 잠근다. 변경 행동의 회귀를 먼저 작성한 뒤 구현했고, 최초 순서 실패 테스트의 문자열은 실제 `503: ...` 오류 표시 형식에 맞춰 role=alert 검증으로 정정했다.
+- 검증: focused 3파일/132 passed, 전체 프론트 43파일/510 passed(기존 502 대비 회귀 8개), `npm run build` TypeScript clean/723 modules 및 `git diff --check` 통과. 로컬 설치 의존성은 Vitest 3.2.7/Vite 7.3.6이다. 새 공개 API가 없어 `schema.d.ts`/OpenAPI diff는 0이고 기존 예제·literal은 유지한다.
+- 패턴 sweep: 후보 동작은 live/scratch 두 표면이며 둘 다 연결했다. blame은 `f66d6563`의 의도된 채택 제거였다. 편집기 기본 로딩 `setRawText(nextText)`는 `3c176a12`의 정본 로딩 선례이므로 저장된 version을 유지하면서 빈 Scene에만 seed를 적용했다. 발견된 다른 동일 원인의 미연결 표면은 없다.
+- 핵심 변이 검증은 아래에 기록한다.

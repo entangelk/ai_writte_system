@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   RAW_TEXT_MAX_CHARS,
   RAW_TEXT_WARN_CHARS,
@@ -8,6 +8,7 @@ import {
 import {
   ApiError,
   describeApiError,
+  createDraft,
   exportDraftVersion,
   finalizeDraft,
   getDraft,
@@ -15,6 +16,7 @@ import {
   getProject,
   listDrafts,
   listDraftVersions,
+  putSceneOrder,
   saveDraft,
   type Draft,
   type DraftVersion,
@@ -28,6 +30,7 @@ import { useGenerationJobs } from "../writing/useGenerationJobs";
 import { AnalysisTrigger } from "../review/AnalysisTrigger";
 import { WorkspaceReviewPanel } from "../review/WorkspaceReviewPanel";
 import { SceneNotePanel } from "../notes/SceneNotePanel";
+import type { NextSceneSeed } from "../writing/NextSceneButton";
 
 type SaveIntent = {
   key: string;
@@ -80,6 +83,7 @@ export function DraftEditor() {
     draftId: string;
   }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedPanel = searchParams.get("panel");
   // 열거를 두 벌로 두지 않는다 — 탭을 더할 때 `TOOL_PANELS` 만 고치면 주소로
@@ -106,6 +110,7 @@ export function DraftEditor() {
   const [saving, setSaving] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [selecting, setSelecting] = useState(false);
+  const [creatingNextScene, setCreatingNextScene] = useState(false);
   const [exporting, setExporting] = useState<"txt" | "markdown" | null>(null);
   const [forcedReadOnly, setForcedReadOnly] = useState(false);
   // Bumped after a successful accept so the scratch-recovery banner re-fetches
@@ -128,6 +133,10 @@ export function DraftEditor() {
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
   const drawerRef = useRef<HTMLElement | null>(null);
   const dockRef = useRef<HTMLElement | null>(null);
+  // Retain an already-created scene if reordering fails, and share it between
+  // the live candidate and its scratch copy so retrying never creates another.
+  const nextScenesRef = useRef(new Map<string, Draft>());
+  const creatingNextSceneRef = useRef(false);
 
   // 증분 3 (D6): track async (medium/long) generations. Polling lives here (not in
   // WritingPanel) so it survives tab switches and drives the tab completion badge.
@@ -169,7 +178,10 @@ export function DraftEditor() {
         const nextText = detail?.snapshot.raw_text ?? "";
         setProject(nextProject);
         setDraft(nextDraft);
-        setRawText(nextText);
+        const seed = location.state as { draftId?: string; draftText?: string } | null;
+        const initialText = latest === null && seed?.draftId === nextDraft.id &&
+          typeof seed.draftText === "string" ? seed.draftText : null;
+        setRawText(initialText ?? nextText);
         setBaseline(nextText);
         setVersions(versions);
         setSelectedVersionId(detail?.draft_version.id ?? null);
@@ -177,6 +189,7 @@ export function DraftEditor() {
         setVersionNumber(detail?.draft_version.version_number ?? null);
         setSourceNotice(null);
         setError(null);
+        setNotice(initialText === null ? null : "생성문을 새 장면의 초안으로 열었습니다. 검토한 뒤 저장하세요.");
       })
       .catch((err: unknown) => {
         if (active) setError(describeApiError(err));
@@ -188,7 +201,7 @@ export function DraftEditor() {
     return () => {
       active = false;
     };
-  }, [projectId, draftId]);
+  }, [projectId, draftId, location.state]);
 
   // 저장 기록: 최신 RECENT_VERSION_COUNT 개만 펼쳐 두고 나머지는 접는다
   // (오너 2026-08-27). 목록 자체는 자르지 않는다 — 접는 것은 화면이다.
@@ -232,6 +245,35 @@ export function DraftEditor() {
     () => !dirty || window.confirm("저장하지 않은 변경 사항을 버리고 페이지를 이동하시겠습니까?"),
     [dirty],
   );
+
+  async function createNextScene(seed: NextSceneSeed): Promise<boolean> {
+    if (projectId === undefined || draft === null || readOnly || saving || finalizing ||
+      creatingNextSceneRef.current || !allowNavigationAway()) return false;
+    creatingNextSceneRef.current = true;
+    setCreatingNextScene(true);
+    try {
+      const key = `${draft.id}:${seed.requestId}`;
+      let target = nextScenesRef.current.get(key);
+      if (target === undefined) {
+        target = await createDraft(projectId, { chapter_id: draft.chapter_id, title: seed.title });
+        nextScenesRef.current.set(key, target);
+      }
+      const { drafts } = await listDrafts(projectId);
+      const ids = drafts.filter((scene) => scene.chapter_id === draft.chapter_id && scene.id !== target.id)
+        .sort((left, right) => left.position - right.position).map((scene) => scene.id);
+      const currentIndex = ids.indexOf(draft.id);
+      if (currentIndex < 0) throw new Error("현재 장면을 찾지 못했습니다. 다시 시도하세요.");
+      ids.splice(currentIndex + 1, 0, target.id);
+      await putSceneOrder(projectId, draft.chapter_id, { ordered_draft_ids: ids });
+      navigate(`/projects/${projectId}/drafts/${target.id}`, {
+        state: { draftId: target.id, draftText: seed.text },
+      });
+      return true;
+    } finally {
+      creatingNextSceneRef.current = false;
+      setCreatingNextScene(false);
+    }
+  }
 
   useEffect(() => {
     setAnalysisStatus("idle");
@@ -316,6 +358,7 @@ export function DraftEditor() {
       draftId === undefined ||
       !dirty ||
       readOnly ||
+      creatingNextSceneRef.current ||
       savingRef.current ||
       overLimit
     ) {
@@ -373,7 +416,7 @@ export function DraftEditor() {
   async function finalize(): Promise<void> {
     if (
       projectId === undefined || draftId === undefined || readOnly || isFinalized ||
-      finalizingRef.current || savingRef.current || overLimit
+      finalizingRef.current || savingRef.current || creatingNextSceneRef.current || overLimit
     ) return;
     finalizingRef.current = true;
     setFinalizing(true);
@@ -717,7 +760,7 @@ export function DraftEditor() {
                 setNotice(null);
                 setSourceNotice(null);
               }}
-              readOnly={readOnly || selecting}
+              readOnly={readOnly || selecting || creatingNextScene}
               aria-busy={selecting}
               spellCheck="true"
               placeholder="이곳에서 원고를 시작하세요."
@@ -730,7 +773,7 @@ export function DraftEditor() {
                 <button
                   type="button"
                   className="final-save-button"
-                  disabled={isFinalized || finalizing || saving || selecting || overLimit}
+                  disabled={isFinalized || finalizing || saving || selecting || creatingNextScene || overLimit}
                   title={isFinalized ? "최종 저장은 Scene당 한 번만 할 수 있습니다." : undefined}
                   onClick={() => void finalize()}
                 >
@@ -740,7 +783,7 @@ export function DraftEditor() {
               {!readOnly && (
                 <button
                   type="submit"
-                  disabled={!dirty || saving || selecting || overLimit}
+                  disabled={!dirty || saving || selecting || creatingNextScene || overLimit}
                 >
                   {saving ? "저장 중…" : "저장"}
                 </button>
@@ -888,11 +931,15 @@ export function DraftEditor() {
                       onRetryFailed={(jobId) => void retryGenerationJob(jobId)}
                     />
                     <ScratchRecovery
+                      key={`scratch:${draftId}`}
                       projectId={projectId}
                       draftId={draftId}
                       refreshKey={scratchRefresh}
+                      readOnly={readOnly}
+                      onCreateNextScene={createNextScene}
                     />
                     <WritingPanel
+                      key={`writing:${draftId}`}
                       projectId={projectId}
                       draftId={draftId}
                       latestVersionId={latestVersionId}
@@ -901,6 +948,7 @@ export function DraftEditor() {
                       hasVersions={versions.length > 0}
                       readOnly={readOnly}
                       onAsyncJobStarted={trackGenerationJob}
+                      onCreateNextScene={createNextScene}
                     />
                   </div>
                   <div
