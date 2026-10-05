@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -405,13 +405,28 @@ describe("ReviewInbox — 정체성 그룹", () => {
     renderInbox();
     const approve = await screen.findByRole("button", { name: "그룹 승인" });
     expect(screen.queryByText(/후보를 순서대로 판정하고 있습니다/)).toBeNull();
-    await userEvent.click(approve);
-    expect(screen.getByRole("button", { name: "그룹 승인 중…" })).toBeDisabled();
-    expect(screen.getByRole("status")).toHaveTextContent("후보를 순서대로 판정하고 있습니다");
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(approve);
+      expect(screen.getByRole("button", { name: "그룹 승인 중…" })).toBeDisabled();
+      expect(screen.getByRole("status")).toHaveTextContent("후보를 순서대로 판정하고 있습니다");
+      expect(screen.getByRole("status")).toHaveTextContent("수분이 걸릴 수 있습니다");
+      expect(screen.getByText("경과 시간: 0분 0초")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "접기" }));
+      expect(screen.getByText(/수분이 걸릴 수 있습니다/)).toBeInTheDocument();
+      act(() => { vi.advanceTimersByTime(59000); });
+      expect(screen.queryByText(/AI 응답을 기다리고 있습니다/)).toBeNull();
+      act(() => { vi.advanceTimersByTime(2000); });
+      expect(screen.getByText("경과 시간: 1분 1초")).toBeInTheDocument();
+      expect(screen.getByText(/AI 응답을 기다리고 있습니다/)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
     expect(fetchMock).toHaveBeenCalledTimes(2);
     finish({ ok: false, status: 503, statusText: "", json: async () => ({ detail: "잠시 후 다시 시도하세요" }) });
     await screen.findByRole("alert");
     expect(screen.queryByText(/후보를 순서대로 판정하고 있습니다/)).toBeNull();
+    expect(screen.queryByText(/경과 시간:/)).toBeNull();
     expect(screen.getByRole("button", { name: "그룹 승인" })).toBeEnabled();
     await userEvent.click(screen.getAllByRole("button", { name: "승인" })[0]);
     expect(screen.queryByText(/후보를 순서대로 판정하고 있습니다/)).toBeNull();
@@ -457,6 +472,8 @@ describe("ReviewInbox — 정체성 그룹", () => {
       "/api/projects/p1/analysis/review-inbox",
     );
     expect(screen.getByText(/그룹 승인 — 반영 2건/)).toBeInTheDocument();
+    expect(screen.getByText("그룹 승인이 완료됐습니다.")).toBeInTheDocument();
+    expect(screen.queryByText(/AI 판정 응답을 해석하지 못했습니다/)).toBeNull();
     expect(screen.queryByText(/후보를 순서대로 판정하고 있습니다/)).toBeNull();
   });
 
@@ -517,6 +534,9 @@ describe("ReviewInbox — 정체성 그룹", () => {
     await waitFor(() => expect(screen.getByText("실패")).toBeInTheDocument());
     expect(screen.getByText("반영됨")).toBeInTheDocument();
     expect(screen.getByText(/InvalidJudgeResult/)).toBeInTheDocument();
+    expect(screen.getByText(/AI 판정 응답을 해석하지 못했습니다/)).toBeInTheDocument();
+    expect(screen.getByText(/이미 반영된 1건은 유지됩니다/)).toBeInTheDocument();
+    expect(screen.queryByText("그룹 승인이 완료됐습니다.")).toBeNull();
     expect(screen.getByText(/1건이 남았습니다/)).toBeInTheDocument();
   });
 

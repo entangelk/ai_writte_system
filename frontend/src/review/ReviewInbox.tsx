@@ -73,6 +73,36 @@ type GroupOutcome =
   | { kind: "approve"; groupId: string; result: IdentityGroupApproveResult }
   | { kind: "reject"; groupId: string; result: IdentityGroupRejectResult };
 
+function GroupApprovalProgress() {
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="group-outcome">
+      <p className="status-copy" role="status">
+        후보를 순서대로 판정하고 있습니다. AI가 후보를 정본과 비교하므로
+        수분이 걸릴 수 있습니다.
+      </p>
+      <p>경과 시간: {Math.floor(elapsedSeconds / 60)}분 {elapsedSeconds % 60}초</p>
+      {elapsedSeconds >= 60 && (
+        <p className="status-copy" role="status">
+          AI 응답을 기다리고 있습니다. 응답 지연이나 판정 재시도로 시간이 더 걸릴 수 있습니다.
+        </p>
+      )}
+      <p className="status-copy">
+        처리 중 새로고침하면 먼저 반영된 후보만 목록에서 빠져 보일 수 있습니다.
+      </p>
+    </div>
+  );
+}
+
 export function ReviewInbox() {
   const { projectId } = useParams<{ projectId: string }>();
   const [data, setData] = useState<ReviewInboxListResponse | null>(null);
@@ -257,13 +287,22 @@ export function ReviewInbox() {
     const unfinished = steps.filter(
       (step) => step.status !== "applied" && step.status !== "skipped",
     );
+    const appliedCount = steps.filter((step) => step.status === "applied").length;
+    const failedCount = steps.filter((step) => step.status === "failed").length;
     return (
       <div className="group-outcome" role="status">
         <p>
-          그룹 승인 — 반영 {steps.filter((s) => s.status === "applied").length}건
+          그룹 승인 — 반영 {appliedCount}건
           {canonical_memory_id !== null && ` · 정본 기억 ${canonical_memory_id}`}
           {idempotent_replay && " (이미 끝난 패스의 재확인입니다)"}
         </p>
+        {unfinished.length === 0 && <p>그룹 승인이 완료됐습니다.</p>}
+        {failedCount > 0 && (
+          <p>
+            {failedCount}건의 AI 판정에 실패했습니다.
+            {appliedCount > 0 && ` 이미 반영된 ${appliedCount}건은 유지됩니다.`}
+          </p>
+        )}
         <ul className="group-step-list">
           {steps.map((step) => (
             <li key={step.candidate_id}>
@@ -273,7 +312,11 @@ export function ReviewInbox() {
               <span className="row-meta">
                 {step.candidate_id}
                 {step.action !== null && ` · ${step.action}`}
-                {step.error !== null && ` · ${step.error}`}
+                {step.error !== null && ` · ${step.error === "InvalidJudgeResult"
+                  ? "AI 판정 응답을 해석하지 못했습니다 (InvalidJudgeResult)"
+                  : step.error === "ProviderError"
+                    ? "AI 서비스 호출에 실패했습니다 (ProviderError)"
+                    : step.error}`}
               </span>
             </li>
           ))}
@@ -371,13 +414,6 @@ export function ReviewInbox() {
           </div>
         </div>
 
-        {busy === `group-confirm:${group.group_id}` && (
-          <p className="status-copy" role="status">
-            후보를 순서대로 판정하고 있습니다. 잠시 기다려 주세요.
-            처리 중 새로고침하면 먼저 반영된 후보만 목록에서 빠져 보일 수 있습니다.
-          </p>
-        )}
-
         {groupNameDraft?.groupId === group.group_id && (
           <form className="group-name-form" onSubmit={(event) => {
             event.preventDefault();
@@ -431,6 +467,8 @@ export function ReviewInbox() {
       {error !== null && <p className="alert" role="alert">{error}</p>}
 
       {groupOutcomePanel()}
+
+      {busy?.startsWith("group-confirm:") && <GroupApprovalProgress key={busy} />}
 
       {loading ? (
         <p className="status-copy">검토 항목을 불러오는 중…</p>
