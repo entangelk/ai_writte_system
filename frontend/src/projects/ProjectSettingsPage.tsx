@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { ProjectOverview } from "./ProjectOverview";
 import { ProjectExportPanel } from "./ProjectExportPanel";
 import { ActivityTimelinePage } from "./ActivityTimelinePage";
+import { CanonicalMemoryPage } from "./CanonicalMemoryPage";
 import {
   ApiError,
   archiveProject,
@@ -14,6 +15,7 @@ import {
 
 const TABS = [
   { id: "brief", label: "작품 정보·개요" },
+  { id: "memory", label: "작품 기억" },
   { id: "export", label: "원고 내보내기" },
   { id: "activity", label: "활동 타임라인" },
 ] as const;
@@ -144,6 +146,12 @@ export function ProjectSettingsPage() {
       </nav>
 
       {activeTab === "brief" && <ProjectOverview />}
+      {activeTab === "memory" && (
+        <CanonicalMemoryPage
+          projectId={projectId}
+          archived={project?.archived ?? false}
+        />
+      )}
       {activeTab === "export" && <ProjectExportPanel projectId={projectId} />}
       {activeTab === "activity" && <ActivityTimelinePage />}
 

@@ -11,6 +11,7 @@ import {
   type Project,
   type ProjectBrief,
 } from "../api/client";
+import { memoryTitle, memoryTypeLabel } from "./memoryPresentation";
 
 type BriefForm = {
   premise: string;
@@ -85,23 +86,6 @@ function lines(value: string): string[] {
 function examples(values: string[]): string[] {
   return values.map((value) => value.trim()).filter(Boolean);
 }
-
-function memoryTitle(memory: CanonicalMemory): string {
-  const payload = memory.payload;
-  const preferred =
-    memory.memory_type === "character_observation"
-      ? payload.name
-      : memory.memory_type === "event_observation"
-        ? payload.event
-        : payload.question;
-  return typeof preferred === "string" ? preferred : "정본 항목";
-}
-
-const MEMORY_LABELS: Record<string, string> = {
-  character_observation: "인물",
-  event_observation: "사건",
-  open_question_observation: "떡밥·미해결 질문",
-};
 
 export function ProjectOverview() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -298,7 +282,10 @@ export function ProjectOverview() {
       <section className="overview-section" aria-labelledby="canon-heading">
         <div className="overview-heading">
           <div><p className="eyebrow">Canonical only</p><h2 id="canon-heading">승인된 작품 기억</h2></div>
-          <Link className="inline-navigation-link" to={`/projects/${projectId}/review`}>검토 전 {pending}개 →</Link>
+          <div className="overview-heading-links">
+            <Link className="inline-navigation-link" to={`/projects/${projectId}/settings?tab=memory`}>전체 보기 →</Link>
+            <Link className="inline-navigation-link" to={`/projects/${projectId}/review`}>검토 전 {pending}개 →</Link>
+          </div>
         </div>
         {memory.length === 0 ? (
           <div className="empty-state"><p>승인된 작품 기억이 없습니다.</p><span>분석 후보는 검토함에서 승인한 뒤 여기에 표시됩니다.</span></div>
@@ -306,7 +293,7 @@ export function ProjectOverview() {
           <ul className="memory-grid">
             {memory.map((item) => (
               <li key={item.id}>
-                <span>{MEMORY_LABELS[item.memory_type] ?? item.memory_type} · 정본</span>
+                <span>{memoryTypeLabel(item.memory_type)} · 정본</span>
                 <strong>{memoryTitle(item)}</strong>
               </li>
             ))}

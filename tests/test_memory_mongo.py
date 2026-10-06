@@ -157,6 +157,52 @@ class MongoMemoryRepositoryTest(unittest.TestCase):
         self.assertEqual(old_entry.status, MemoryStatus.SUPERSEDED)
         self.assertIsNone(old_entry.supersedes)
 
+    def test_manual_edit_round_trips_and_replays_through_fresh_services(self):
+        # 정본 기억 수동 수정(2026-10-06): 사람 편집도 후보 경로와 같은 append-only
+        # 사슬을 이룬다. fresh service 둘로 재시도 재생(replay)까지 잰다 — 멱등이
+        # Mongo 의 후보 유일 인덱스(manual:{key} 리터럴)에서 나오는 것이므로
+        # in-process 상태가 없어도 성립해야 한다.
+        candidate = _candidate(candidate_id="candidate-origin", confidence=0.5)
+        promoted = MemoryService(self.repo).promote_candidate(
+            project_id="project-1", candidate=candidate, mode=PromotionMode.MANUAL
+        ).memory
+
+        first = MemoryService(self.repo).edit_canonical_version(
+            project_id="project-1",
+            target_memory_id=promoted.id,
+            base_version=1,
+            idempotency_key="edit-1",
+            payload={"name": "민아", "observation": "민아가 편지를 숨겼다."},
+        )
+        replay = MemoryService(self.repo).edit_canonical_version(
+            project_id="project-1",
+            target_memory_id=promoted.id,
+            base_version=1,
+            idempotency_key="edit-1",
+            payload={"name": "민아", "observation": "민아가 편지를 숨겼다."},
+        )
+
+        reread = MemoryService(self.repo)
+        self.assertFalse(first.idempotent_replay)
+        self.assertTrue(replay.idempotent_replay)
+        self.assertEqual(replay.memory.id, first.memory.id)
+        edited = reread.get_memory(
+            project_id="project-1", memory_id=first.memory.id
+        )
+        self.assertEqual(edited.version, 2)
+        self.assertEqual(edited.status, MemoryStatus.CANONICAL)
+        self.assertEqual(edited.supersedes, promoted.id)
+        self.assertEqual(edited.provenance, AnalysisProvenance.HUMAN_EDITED)
+        self.assertEqual(edited.source_candidate_id, "manual:edit-1")
+        self.assertEqual(
+            edited.payload["observation"], "민아가 편지를 숨겼다."
+        )
+        old = reread.get_memory(project_id="project-1", memory_id=promoted.id)
+        self.assertEqual(old.status, MemoryStatus.SUPERSEDED)
+        self.assertEqual(
+            len(reread.list_memories(project_id="project-1")), 2
+        )
+
     def test_unique_index_rejects_second_promotion_of_same_candidate(self):
         # Directly exercise the race guard: a second insert for the same
         # (project_id, source_candidate_id) must surface DuplicatePromotionRequest

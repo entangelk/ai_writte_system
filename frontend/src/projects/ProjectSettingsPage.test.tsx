@@ -45,20 +45,26 @@ afterEach(() => {
 /**
  * 프로젝트 설정 셸 (오너 2026-08-27).
  *
- * under-strict: 세 화면 중 하나를 다시 작업 공간 첫 화면으로 빼면 탭이 사라져
- * 재실패한다 — *"너무 어지럽다"* 던 그 상태다.
+ * under-strict: 네 화면 중 하나를 다시 작업 공간 첫 화면으로 빼면 탭이 사라져
+ * 재실패한다 — *"너무 어지럽다"* 던 그 상태다. 작품 기억 탭(2026-10-06)은
+ * 승인된 정본 기억의 목록·수정이라 가끔 보는 화면 — 같은 자리다.
  * over-strict: 검토함까지 여기로 끌어오는 과대교정도 실패한다. 검토함은 집필
  * 중 수시로 드나드는 작업 흐름이라 설정이 아니다(오너 결정).
  */
 describe("ProjectSettingsPage", () => {
-  it("gathers the three occasional screens under one tab bar", async () => {
+  it("gathers the four occasional screens under one tab bar", async () => {
     stubFetch();
     renderSettings();
 
     expect(await screen.findByRole("heading", { name: "겨울 이야기" }))
       .toBeInTheDocument();
     const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
-    expect(tabs).toEqual(["작품 정보·개요", "원고 내보내기", "활동 타임라인"]);
+    expect(tabs).toEqual([
+      "작품 정보·개요",
+      "작품 기억",
+      "원고 내보내기",
+      "활동 타임라인",
+    ]);
     expect(screen.queryByRole("tab", { name: "검토함" })).toBeNull();
     expect(screen.getByRole("link", { name: "← 원고 작업 공간" }))
       .toHaveAttribute("href", "/projects/p1");

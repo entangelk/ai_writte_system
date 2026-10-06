@@ -2657,6 +2657,12 @@ class AnalysisErrorContractDeclarationTest(unittest.TestCase):
          "post"): {"401", "403", "404", "409", "503"},
         ("/projects/{project_id}/analysis/gate-findings/{finding_id}/dismiss",
          "post"): {"401", "403", "404", "409", "503"},
+        # 그룹 이름 교정(2026-09-30, v1.8.78) — 그 슬라이스가 이 잠금 목록에
+        # 등재하지 않아 closure 셀이 main 에서 빨간 채로 남아 있었다(2026-10-06
+        # 정본 기억 슬라이스가 뒤늦게 채웠다). 400 빈 이름·인물 외 그룹, 409 낡은
+        # revision·이미 시작된 검토.
+        ("/projects/{project_id}/analysis/review-inbox/groups/{group_id}"
+         "/correct-name", "post"): {"401", "403", "400", "404", "409", "503"},
     }
 
     def setUp(self):
@@ -2667,7 +2673,7 @@ class AnalysisErrorContractDeclarationTest(unittest.TestCase):
         return {code for code in responses if code not in ("200", "204", "422")}
 
     def test_declared_error_statuses_match_the_lock_list(self):
-        self.assertEqual(len(self.EXPECTED), 23)
+        self.assertEqual(len(self.EXPECTED), 24)
         for (path, method), expected in self.EXPECTED.items():
             with self.subTest(path=path, method=method):
                 self.assertEqual(self._declared(path, method), expected)
@@ -2845,6 +2851,10 @@ class MemorySourceErrorContractDeclarationTest(unittest.TestCase):
     EXPECTED = {
         ("/projects/{project_id}/memory", "get"): {"401", "403", "404", "503"},
         ("/projects/{project_id}/memory/{memory_id}", "get"): {"401", "403", "404", "503"},
+        # 정본 기억 수동 수정(2026-10-06) — 400 taxonomy 위반, 409 는 세 얼굴
+        # (낡은 base_version·비-canonical 대상·보관 프로젝트).
+        ("/projects/{project_id}/memory/{memory_id}", "put"):
+            {"401", "403", "400", "404", "409", "503"},
         ("/projects/{project_id}/snapshots/{snapshot_id}/source-refs", "post"):
             {"401", "403", "400", "404", "503"},
         ("/projects/{project_id}/snapshots/{snapshot_id}/source-refs", "get"):
@@ -2870,7 +2880,7 @@ class MemorySourceErrorContractDeclarationTest(unittest.TestCase):
         return {code for code in responses if code not in ("200", "204", "422")}
 
     def test_declared_error_statuses_match_the_lock_list(self):
-        self.assertEqual(len(self.EXPECTED), 7)
+        self.assertEqual(len(self.EXPECTED), 8)
         for (path, method), expected in self.EXPECTED.items():
             with self.subTest(path=path, method=method):
                 self.assertEqual(self._declared(path, method), expected)

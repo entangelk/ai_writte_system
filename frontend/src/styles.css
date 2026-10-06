@@ -1262,6 +1262,66 @@ main {
   font-weight: 700;
 }
 
+/* 개요 머리의 링크 두 개(전체 보기·검토함)를 한 줄에 묶는다(2026-10-06). */
+.overview-heading-links {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+}
+
+/* 작품 기억 탭(2026-10-06) — 승인된 정본 기억의 목록·상태·이력. */
+.memory-list {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.memory-item {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border-hairline);
+}
+
+.memory-item-head {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.memory-item-head > span {
+  color: var(--text-link);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.memory-item-body {
+  margin: 0;
+  font-family: inherit;
+}
+
+.memory-history {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.memory-history li {
+  display: grid;
+  gap: 0.3rem;
+  padding: var(--space-3);
+  border: 1px solid var(--border-hairline);
+}
+
+.memory-history li > span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
 .secondary-button {
   color: var(--text-body);
   background: transparent;

@@ -473,12 +473,44 @@ export interface CanonicalMemory {
   status: string;
   payload: Record<string, unknown>;
   version: number;
+  // 아래는 GET 응답에 원래 실려 있던 _memory_payload 의 나머지 — 작품 기억
+  // 탭(2026-10-06)이 이력·근거 수·출처 표시를 위해 읽기 시작했다.
+  provenance: string;
+  confidence: number;
+  source_ref_ids: string[];
+  analysis_job_id: string;
+  source_candidate_id: string;
+  promotion_mode: string;
+  applied_threshold: number | null;
+  scope: { scope_type: string; scope_id: string } | null;
+  supersedes: string | null;
 }
 
 export function listCanonicalMemory(
   projectId: string,
 ): Promise<{ memory: CanonicalMemory[] }> {
   return request(`/projects/${projectId}/memory`);
+}
+
+// 정본 기억 수동 수정(2026-10-06 오너 결정 B안). append-only — 서버가 새
+// canonical 버전을 발행하고 옛 버전은 superseded 로 보존한다. base_version 는
+// 편집을 시작한 version(낡았으면 409), idempotency_key 는 재시도가 replay 가
+// 되게 하는 값이다(brief PUT 과 같은 모양).
+export interface PutCanonicalMemoryRequest {
+  base_version: number;
+  idempotency_key: string;
+  payload: Record<string, string>;
+}
+
+export function putCanonicalMemory(
+  projectId: string,
+  memoryId: string,
+  body: PutCanonicalMemoryRequest,
+): Promise<{ memory: CanonicalMemory; idempotent_replay: boolean }> {
+  return request(`/projects/${projectId}/memory/${memoryId}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
 }
 
 export function listDrafts(projectId: string): Promise<DraftListResponse> {
