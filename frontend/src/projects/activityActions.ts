@@ -52,6 +52,8 @@ export const ACTIVITY_ACTION_LABELS: Record<string, string> = {
   // 정체성 그룹 승인(2026-09-04, Slice 5) — Slice 4 A안이 승인의 기록 모양에도 묶는다.
   identity_group_approved: "정체성 그룹 승인",
   identity_group_name_corrected: "정체성 그룹 이름 교정",
+  // 정본 기억 수동 수정(2026-10-06) — 검토함 없이 사람이 직접 고친 canonical 버전.
+  canonical_memory_edited: "정본 기억 수정",
 };
 
 /**
@@ -85,6 +87,7 @@ export const NON_LINKABLE_TARGET_TYPES: Record<string, string> = {
   analysis_job: "전용 화면이 없다",
   review_queue_entry: "검토함 목록 안에만 있다",
   gate_finding: "지적 목록 안에만 있다",
+  memory: "설정의 작품 기억 탭 안에 있다(전용 route 없음)",
 };
 
 /** 미등재 리터럴은 **원문 그대로** 보여준다 — 라벨이 없다고 행을 숨기지 않는다. */

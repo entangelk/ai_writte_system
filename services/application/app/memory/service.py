@@ -11,17 +11,22 @@ records. Two promotion paths exist:
   preserved. The threshold defaults to ``None`` (auto-promotion disabled) so no
   canon is minted from a guessed value; real thresholds await quality fixtures
   (SoT v1.6.39 D2=B).
+
+정본 기억 수동 수정(2026-10-06)은 승격이 아니라 **이미 canonical 인 항목의 새
+버전 발행**이다 — ``edit_canonical_version`` 이 그 경로다(append-only 유지).
 """
 
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Protocol
+from typing import Any, Mapping, Protocol
 
 from services.application.app.analysis.models import (
     AnalysisCandidate,
+    AnalysisProvenance,
     immutable_payload,
 )
+from services.application.app.analysis.schema import validate_candidate_payload
 from services.application.app.memory.models import (
     MemoryEntry,
     MemoryStatus,
@@ -327,6 +332,93 @@ class MemoryService:
             target_memory_id=target_memory_id,
             evidence_only=True,
         )
+
+    def edit_canonical_version(
+        self,
+        *,
+        project_id: str,
+        target_memory_id: str,
+        base_version: int,
+        idempotency_key: str,
+        payload: Mapping[str, Any],
+    ) -> PromoteMemoryResult:
+        """정본 기억 수동 수정(오너 결정 2026-10-06, B안): 사람이 후보 절차 없이
+        canonical 값을 직접 고친다. append-only 는 그대로다 — 고친 값은 **새
+        canonical 버전**이고 대상은 ``SUPERSEDED`` 로 남는다(``record_updated_version``
+        과 같은 모양)므로 아무 것도 덮어써지지 않고 감사 사슬이 보존된다.
+
+        후보 주도 versioned upsert 와 다른 세 가지:
+
+        * ``provenance`` 는 ``HUMAN_EDITED`` — ``source_observed``/``ai_inferred``
+          둘 다 "누가 이 값을 주장했나"에 대해 거짓말을 한다.
+        * ``source_candidate_id`` 는 합성 리터럴 ``manual:{idempotency_key}`` 다.
+          사람 편집에 후보는 없고, 저장소의 후보 유일 인덱스가 바로 그 키로
+          중복을 막으므로 **재시도는 새 버전이 아니라 replay** 가 된다 — 별도의
+          idempotency 저장소 없이 brief PUT 과 같은 멱등 모양.
+        * ``scope`` 는 고친 payload 로 **재계산**한다 — 이름이 바뀐 인물이 옛
+          정체성 키에 묶이면 compare·별칭 매처가 옛 이름을 계속 본다.
+          ``base_version``(정수)은 lost update 가드다: 클라이언트가 편집을
+          시작한 버전을 되돌려 보내고, 서버 정본과 다르면 거절한다.
+        """
+        if not idempotency_key:
+            raise MemoryError("idempotency_key is required")
+
+        synthetic_candidate_id = f"manual:{idempotency_key}"
+        existing_id = self._repo.find_memory_by_candidate(
+            project_id, synthetic_candidate_id
+        )
+        if existing_id is not None:
+            # Same unconditional choke point as promote_candidate's replay branch
+            # (SoT v1.7.37): a replay re-enqueues too, so no canonical version can
+            # stay unindexed just because the first enqueue already drained.
+            existing = self._require_memory(project_id, existing_id)
+            self._enqueue_reindex(existing)
+            return PromoteMemoryResult(memory=existing, idempotent_replay=True)
+
+        target = self._require_memory(project_id, target_memory_id)
+        if target.status is not MemoryStatus.CANONICAL:
+            raise MemoryError("cannot version a non-canonical memory entry")
+        if base_version != target.version:
+            raise MemoryError("canonical memory base is stale")
+
+        # 후보 경로와 같은 taxonomy 검증 — 사람 편집이라고 정본 스키마가 느슨해지면
+        # 안 된다(키 추가·제거·빈 문자열 모두 거절).
+        normalized = validate_candidate_payload(target.memory_type, payload)
+
+        new_entry = MemoryEntry(
+            id=self._repo.next_memory_id(),
+            project_id=project_id,
+            memory_type=target.memory_type,
+            status=MemoryStatus.CANONICAL,
+            provenance=AnalysisProvenance.HUMAN_EDITED,
+            confidence=target.confidence,
+            source_ref_ids=target.source_ref_ids,
+            payload=immutable_payload(normalized),
+            version=target.version + 1,
+            analysis_job_id=target.analysis_job_id,
+            source_candidate_id=synthetic_candidate_id,
+            promotion_mode=PromotionMode.MANUAL,
+            applied_threshold=None,
+            scope=derive_scope(target.memory_type, normalized),
+            supersedes=target.id,
+        )
+        try:
+            self._repo.put_memory(new_entry)
+        except DuplicatePromotionRequest:
+            # Concurrent retry of the same idempotency key: replay the winner.
+            return PromoteMemoryResult(
+                memory=self._require_memory_by_candidate(
+                    project_id, synthetic_candidate_id
+                ),
+                idempotent_replay=True,
+            )
+        # Append-only: mint the new version first (canonical), then supersede the
+        # prior entry so it is preserved immutably rather than overwritten.
+        self._repo.update_memory(
+            replace(target, status=MemoryStatus.SUPERSEDED)
+        )
+        self._enqueue_reindex(new_entry)
+        return PromoteMemoryResult(memory=new_entry, idempotent_replay=False)
 
     def _versioned_upsert(
         self,

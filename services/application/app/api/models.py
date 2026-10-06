@@ -943,6 +943,17 @@ class EditCandidateRequest(BaseModel):
     payload: dict[str, object]
 
 
+# 정본 기억 수동 수정(2026-10-06) — brief PUT 과 같은 낙관 버전 축이되 정수
+# version 을 쓴다(memory 는 version_number 필드가 version 하나뿐이다).
+# idempotency_key 는 저장소의 후보 유일 인덱스가 manual:{key} 리터럴로 재사용한다.
+class EditMemoryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    base_version: int = Field(ge=1)
+    idempotency_key: NonBlankBriefString
+    payload: dict[str, object]
+
+
 # 입력 ContextPackage 예산의 기본값(오너 지시 ④, 2026-07-28). 4096은 **동기 생성 시절 응답
 # 속도** 때문에 고른 값이었고, 생성이 백그라운드 job + 푸시로 바뀌면서(v1.7.27) 그 제약이
 # 사라졌다는 것이 오너의 근거다.

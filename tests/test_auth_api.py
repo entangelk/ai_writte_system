@@ -2292,8 +2292,10 @@ class CombinedBoundaryMatrixTest(unittest.TestCase):
         # tier 에 더해 107 이 됐다(admin 17→19).
         # 그룹 이름 교정 POST(2026-09-30)가 project tier 에 1경로를 더해
         # 77/108 이 됐다.
-        self.assertEqual(len(by_tier["project"]), 77)
-        self.assertEqual(len(tiers), 108)
+        # 정본 기억 수동 수정 PUT(2026-10-06)이 project tier 에 1경로를 더해
+        # 78/109 가 됐다 — memory 라우터의 첫 쓰기 경로다.
+        self.assertEqual(len(by_tier["project"]), 78)
+        self.assertEqual(len(tiers), 109)
         # A project tier derived from dependencies must coincide with the path
         # shape; the reverse direction is locked by ProjectAuthorizationTest.
         for path, method in by_tier["project"]:

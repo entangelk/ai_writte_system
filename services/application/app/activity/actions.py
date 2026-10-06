@@ -121,7 +121,7 @@ _CANONICAL: tuple[ActivityAction, ...] = (
                    "/projects/{project_id}/drafts/{draft_id}/note", "scene_note"),
 )
 
-#: 검토 결정 12 — 원고가 아니라 **기억을 바꾸는 사용자 판단**.
+#: 검토 결정 13 — 원고가 아니라 **기억을 바꾸는 사용자 판단**.
 _REVIEW: tuple[ActivityAction, ...] = (
     ActivityAction("candidate_promoted", "POST",
                    "/projects/{project_id}/analysis/candidates/{candidate_id}/promote",
@@ -169,6 +169,11 @@ _REVIEW: tuple[ActivityAction, ...] = (
                    "/projects/{project_id}/analysis/review-inbox/groups/"
                    "{group_id}/correct-name",
                    "candidate_identity_group"),
+    # 정본 기억 수동 수정(2026-10-06, 오너 결정 B안) — 검토함 후보 절차 없이 사람이
+    # 직접 고치는 canonical 판단. 승격·거절과 같은 축("기억을 바꾸는 사용자 판단")이고
+    # append-only 라 이전 버전은 SUPERSEDED 로 남는다.
+    ActivityAction("canonical_memory_edited", "PUT",
+                   "/projects/{project_id}/memory/{memory_id}", "memory"),
 )
 
 #: 기록하는 경로 전수.

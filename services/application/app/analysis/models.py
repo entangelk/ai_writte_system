@@ -18,6 +18,11 @@ class AnalysisCandidateType(StrEnum):
 class AnalysisProvenance(StrEnum):
     SOURCE_OBSERVED = "source_observed"
     AI_INFERRED = "ai_inferred"
+    # 정본 기억 수동 수정(오너 결정 2026-10-06, B안): 검토함 후보가 아니라 사람이
+    # 직접 고친 canonical 버전이 쓰는 값. 위 둘은 "값을 누가 주장했나"에 대해
+    # 둘 다 거짓말을 하므로 세 번째 값을 열었다 — 감사 축에 남는 provenance 는
+    # 정직해야 한다. 후보 생성 경로(추출기)는 이 값을 만들지 않는다.
+    HUMAN_EDITED = "human_edited"
 
 
 class AnalysisCandidateAction(StrEnum):

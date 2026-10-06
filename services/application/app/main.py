@@ -2242,7 +2242,11 @@ def create_app(
     if not include_product:
         return app
 
-    register_memory(app, core_sot=core_sot, memory=memory)
+    # memory 는 읽기 2 + 수동 수정 PUT 1(2026-10-06). activity 는
+    # ``canonical_memory_edited`` 한 행 때문에 든다.
+    register_memory(
+        app, core_sot=core_sot, memory=memory, activity=activity,
+    )
 
     register_observability(
         app,
