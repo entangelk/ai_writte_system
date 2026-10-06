@@ -6,7 +6,7 @@
 
 서비스 경계와 확정된 계약을 먼저 볼 때는 [`../system-contract-sot.md`](../system-contract-sot.md)를 정본 SoT로 사용한다. 이 인덱스는 Phase별 세부 계획과 **모든 착수 결정 브리프**를 찾는 자리다.
 
-> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(143개 중 120개)는
+> **브리프를 찾고 있다면 아래 "전체 인덱스"에서 트랙으로 좁힌다.** 이 디렉터리의 대다수(144개 중 121개)는
 > `*-decisions.md` 착수 결정 브리프이며, **오너 결정의 근거 기록**이다. 파일명 접두 체계는 이미 무너져
 > 있고(`00`~`07` 계열 + 접두 없는 최근 것들) 파일명만으로는 트랙을 알 수 없다 — 그래서 아래는 **접두가
 > 아니라 트랙으로** 묶었다. 디렉터리 재편은 아직 결정되지 않은 별개 사안이다(HANDOFF 추적 부채).
@@ -71,6 +71,7 @@
 | [`02b-6-semantic-identity-resolution-decisions.md`](02b-6-semantic-identity-resolution-decisions.md) | 2B.6 event/open_question 의미적 identity resolution | Resolved |
 | [`02b-7-character-alias-homonym-decisions.md`](02b-7-character-alias-homonym-decisions.md) | 2B.7 character 별칭/동명이인 semantic 보강 | Resolved |
 | [`event-open-question-canonical-dedup-decisions.md`](event-open-question-canonical-dedup-decisions.md) | event/open_question 정본 중복 누적을 어느 축에서 막는가(canonical vs candidate) | **Resolved** — ⓒ 채택(2026-09-09) · 배선 구현 완료 |
+| [`canonical-memory-manual-edit-decisions.md`](canonical-memory-manual-edit-decisions.md) | 정본 기억 조회 확장·수동 수정 경로(작품 기억 탭 · `PUT /memory/{id}`) | **Approved — B 채택**(2026-10-06) · 첫 슬라이스 구현 완료 |
 
 | [`group-name-correction-decisions.md`](group-name-correction-decisions.md) | 검토 대기 그룹의 인물 이름 동시 교정 · 승인 전 버전 계약 | **Resolved — A 채택**(2026-09-30) |
 | [`pending-candidate-identity-grouping-decisions.md`](pending-candidate-identity-grouping-decisions.md) | 서로 다른 분석 job의 미승인 후보 정체성 그룹·그룹 승인 | **확정 — C 채택**(2026-09-02 dogfood) |

@@ -1,9 +1,9 @@
 # 시스템 정본 계약 SoT
 
 상태: `Approved`
-계약 버전: `v1.8.79`
+계약 버전: `v1.8.80`
 승인일: `2026-06-26`
-최근 갱신일: `2026-10-05`
+최근 갱신일: `2026-10-06`
 목적: 흩어진 계획 문서의 확정된 계약과 서비스 경계를 한 곳에서 추적한다.  
 적용 범위: 제품 경계, 서비스 책임, 데이터 정본, Gateway, AgentLoopRunner, Gate 합성, 검증 기록.
 
@@ -33,6 +33,7 @@
 
 | 버전 | 날짜 | 변경 | 근거 |
 |---|---|---|---|
+| v1.8.80 | 2026-10-06 | **정본 기억 조회·수동 수정(memory 라우터 첫 쓰기 operation, 프로젝트 tier 78/전체 109).** 오너 지적 *"세부정보의 승인된 작품 기억에서 무엇이 승인됐는지 볼 곳이 없어 수정도 못한다"* 에 대한 답. **① 조회는 계약 무변** — `GET /memory` 가 원래 주던 payload 전 필드를 설정의 새 "작품 기억" 탭이 렌더한다: canonical 목록(타입·버전·출처 라벨 + 관찰 본문), 상세(payload 필드·근거 수), `supersedes` 사슬 이력(옛 버전 `superseded` 보존 표시). 개요 요약 그리드는 남고 "전체 보기" 가 탭을 가리킨다. **② `PUT /projects/{id}/memory/{memory_id}` 신설** — 사람이 후보 절차 없이 canonical 값을 직접 고친다. append-only 유지: 고친 값은 **새 canonical 버전**, 대상은 `SUPERSEDED` 보존(후보 경로 versioned upsert 와 같은 모양). **세 계약 리터럴**: `provenance` 신규 값 `human_edited`(기존 둘은 사람 편집에 거짓말) · `source_candidate_id` 합성 리터럴 **`manual:{idempotency_key}`** — 후보 유일 인덱스가 그 키로 중복을 막으므로 재시도는 replay(별도 저장소 없는 brief PUT 멱등 모양) · `scope` 는 payload 로 **재계산**(이름이 바뀐 인물이 옛 정체성 키에 묶이는 것 방지). `base_version`(정수) 불일치·비-canonical 대상·**보관 프로젝트**는 409 — 보관 가드는 brief PUT 선례로, sibling 승격 경로(promote)에는 없는 가드다(알려진 차이). payload 는 후보 taxonomy 검증을 그대로 통과해야 한다(키 추가·제거·빈 문자열 400). 재색인 outbox 는 2B.5 D3=B 초크 포인트가 그대로 덮는다. 활동 로그 `canonical_memory_edited` 1행(replay 는 무행, D2=ⓑ), 검토 결정 12→**13**(기록 30→31). **③ main 의 기존 빨간 셀 수선** — v1.8.78 의 correct-name 이 분석 OpenAPI 잠금 목록에 등재되지 않아 closure 셀이 c22c239 에서 이미 실패 중이었다; memory PUT 행과 함께 채웠다(memory 7→8, analysis 23→24). | 오너 결정 2026-10-06(B안), [`plans/canonical-memory-manual-edit-decisions.md`](plans/canonical-memory-manual-edit-decisions.md), `daily_logs/2026-10-06/work_log.md` |
 | v1.8.79 | 2026-10-05 | **다음 장면 생성문을 편집 초안으로 열기.** 동기 후보와 scratch의 `start_next_unit` 결과에 “이 내용으로 다음 장면 만들기”를 제공한다. 기존 Scene 생성·목록·순서 API로 같은 Chapter의 현재 Scene 바로 뒤에 새 Scene을 두고, 생성문을 미저장 편집 초안으로 연다. 일반 저장은 사용자 동작이며 유료 accept·자동 분석·새 Chapter 생성은 호출하지 않는다. 원본 dirty 이동 확인, 읽기 전용 잠금, 같은 화면 내 순서 변경 실패 재시도의 Scene 재사용, 저장된 version 우선 로딩을 유지한다. scratch 원본은 보존한다. HTTP/OpenAPI 계약은 무변이다. | 오너 승인 2026-10-05, `plans/chapter-scene-hierarchy-decisions.md` §2026-10-05, `daily_logs/2026-10-05/work_log.md` |
 | v1.8.78 | 2026-09-30 | **검토 대기 그룹의 인물 이름 교정.** 기존 `/edit`는 즉시 정본 승인으로 유지한다. 새 `POST .../review-inbox/groups/{group_id}/correct-name`은 `{expected_revision, name}`을 받아 인물 그룹의 검토 대기 후보 각각에 이름만 고친 새 검토 대기 버전을 만든다. 옛 후보·근거·각 관찰 문장은 보존하고 새 후보를 그룹에 연결한다. revision 증가로 낡은 그룹 승인 요청을 막고, 이후 그룹 승인에서 단일 정본으로 수렴한다. 활동 로그는 그룹 행 하나다. 인물 외 그룹·빈 이름 400, 닫힌 그룹 404, 낡은 revision·이미 시작된 검토 409. | 오너 결정 2026-09-30, `plans/group-name-correction-decisions.md`, `daily_logs/2026-09-30/work_log.md` |
 | v1.8.77 | 2026-09-29 | **성공한 원고의 명시 재분석.** 첫 분석은 accept와 같은 `analyze:{snapshot_id}` job을 사용한다. 같은 snapshot의 성공 job이 있으면 집필 화면은 저장된 후보를 새 결과로 표시하거나 `/run`을 호출하지 않고 “재분석 하시겠습니까?”를 묻는다. 취소는 기존 job·후보를 그대로 둔다. 확인하면 `reanalyze:{snapshot_id}:{새 UUID}` 키로 새 job을 만들고 실행한다. 새 job의 키는 그 의도의 실패 재시도·중복 요청 확인 동안 유지한다. 기존 성공 job과 거절된 후보의 기록은 보존하며 새 후보는 별도 job에 저장한다. 실패 job은 기존 `failed→pending` 명시 재시도 경로를 유지한다. HTTP API·스키마·과금 경로는 무변이다. | 오너 결정 2026-09-29, `plans/05-writing-accept-decisions.md`, `frontend/src/api/client.ts`·`review/AnalysisTrigger.tsx`, `daily_logs/2026-09-29/work_log.md` |
