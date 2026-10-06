@@ -954,6 +954,21 @@ class EditMemoryRequest(BaseModel):
     payload: dict[str, object]
 
 
+# 정본 기억 병합(2026-10-06, A안) — 생존·흡수 둘의 version 을 각각 받는다:
+# 어느 한쪽이라도 편집 시작 뒤 바뀌었으면 409(lost update 가드가 두 축에 모두
+# 선다). payload 는 화면이 양쪽 관찰을 합쳐 다듬은 편집 결과다(서비스가
+# 이어붙이지 않는다).
+class MergeMemoryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    survivor_memory_id: NonBlankBriefString
+    absorbed_memory_id: NonBlankBriefString
+    base_survivor_version: int = Field(ge=1)
+    base_absorbed_version: int = Field(ge=1)
+    idempotency_key: NonBlankBriefString
+    payload: dict[str, object]
+
+
 # 입력 ContextPackage 예산의 기본값(오너 지시 ④, 2026-07-28). 4096은 **동기 생성 시절 응답
 # 속도** 때문에 고른 값이었고, 생성이 백그라운드 job + 푸시로 바뀌면서(v1.7.27) 그 제약이
 # 사라졌다는 것이 오너의 근거다.

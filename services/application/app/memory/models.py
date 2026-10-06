@@ -53,6 +53,11 @@ class MemoryEntry:
     # Phase 2B.4: id of the memory version this entry replaced (update/
     # add_evidence). ``None`` for a first (``version=1``) canonical entry.
     supersedes: str | None = None
+    # 정본 병합(2026-10-06, 오너 결정 A안): 흡수된(병합으로 사라진) 항목이
+    # 병합 결과를 가리키는 앞링크다. ``supersedes`` 가 뒤링크(새→옛)인 것과
+    # 짝을 이뤄 두 사슬을 모두 데이터로 연결한다. 병합 결과 자체와 옛 행은
+    # ``None``(옛 Mongo 행은 결측이며 reader 가 ``None`` 으로 읽는다).
+    merged_into: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

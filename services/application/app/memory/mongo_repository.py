@@ -133,6 +133,9 @@ def _memory_doc(entry: MemoryEntry) -> dict[str, Any]:
             }
         ),
         "supersedes": entry.supersedes,
+        # 정본 병합(2026-10-06)의 앞링크. 옛 행에는 없는 필드다 — reader 는
+        # 결측을 None 으로 읽는다(병합 이전 상태와 구별되지 않는 것이 맞다).
+        "merged_into": entry.merged_into,
     }
 
 
@@ -161,4 +164,5 @@ def _to_memory(doc: dict[str, Any]) -> MemoryEntry:
             )
         ),
         supersedes=doc.get("supersedes"),
+        merged_into=doc.get("merged_into"),
     )

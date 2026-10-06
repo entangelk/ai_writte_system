@@ -88,15 +88,16 @@ class ActivityActionClassificationTest(unittest.TestCase):
         정체성 그룹 Slice 4(2026-09-04, 브리프 A안)가 그룹 거절
         `identity_group_rejected` 를 더해 **28** 이다(검토 결정 10).
         정본 기억 수동 수정(2026-10-06, 오너 결정 B안)이 `canonical_memory_edited`
-        를 더해 **31** 이다(검토 결정 13).
+        를 더해 **31** 이다(검토 결정 13). 같은 날 병합(A안)이
+        `canonical_memory_merged` 를 더해 **32** 가 됐다(검토 결정 14).
 
         숫자를 셀에 적는 이유는 범위가 **오너 결정**이기 때문이다. 넓히는 것은
         결정이지 리팩터링이 아니므로, 여기서 눈에 띄게 실패해야 한다.
         """
-        self.assertEqual(len(LOGGED_OPERATIONS), 31)
-        self.assertEqual(len(ACTIVITY_ACTIONS), 31)
+        self.assertEqual(len(LOGGED_OPERATIONS), 32)
+        self.assertEqual(len(ACTIVITY_ACTIONS), 32)
         self.assertEqual(
-            len({action.action for action in ACTIVITY_ACTIONS}), 31,
+            len({action.action for action in ACTIVITY_ACTIONS}), 32,
             "action 리터럴이 중복이다 — 조회 화면이 두 사건을 구분 못 한다",
         )
 

@@ -54,6 +54,8 @@ export const ACTIVITY_ACTION_LABELS: Record<string, string> = {
   identity_group_name_corrected: "정체성 그룹 이름 교정",
   // 정본 기억 수동 수정(2026-10-06) — 검토함 없이 사람이 직접 고친 canonical 버전.
   canonical_memory_edited: "정본 기억 수정",
+  // 정본 기억 병합(같은 날) — 갈라진 같은 인물 canonical 둘을 하나로 통합.
+  canonical_memory_merged: "정본 기억 병합",
 };
 
 /**

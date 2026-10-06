@@ -2855,6 +2855,10 @@ class MemorySourceErrorContractDeclarationTest(unittest.TestCase):
         # (낡은 base_version·비-canonical 대상·보관 프로젝트).
         ("/projects/{project_id}/memory/{memory_id}", "put"):
             {"401", "403", "400", "404", "409", "503"},
+        # 정본 기억 병합(같은 날, A안) — 같은 면. 409 는 낡은 base(양쪽)·
+        # 비-canonical·자기 병합·타입 불일치·인물 외·보관 프로젝트.
+        ("/projects/{project_id}/memory/merge", "post"):
+            {"401", "403", "400", "404", "409", "503"},
         ("/projects/{project_id}/snapshots/{snapshot_id}/source-refs", "post"):
             {"401", "403", "400", "404", "503"},
         ("/projects/{project_id}/snapshots/{snapshot_id}/source-refs", "get"):
@@ -2880,7 +2884,7 @@ class MemorySourceErrorContractDeclarationTest(unittest.TestCase):
         return {code for code in responses if code not in ("200", "204", "422")}
 
     def test_declared_error_statuses_match_the_lock_list(self):
-        self.assertEqual(len(self.EXPECTED), 8)
+        self.assertEqual(len(self.EXPECTED), 9)
         for (path, method), expected in self.EXPECTED.items():
             with self.subTest(path=path, method=method):
                 self.assertEqual(self._declared(path, method), expected)

@@ -203,6 +203,63 @@ class MongoMemoryRepositoryTest(unittest.TestCase):
             len(reread.list_memories(project_id="project-1")), 2
         )
 
+    def test_merge_round_trips_the_forward_link_through_fresh_services(self):
+        # 정본 병합(2026-10-06, A안): merged_into 앞링크가 Mongo 왕복에서 살아야
+        # 한다. 병합 이전의 옛 행에는 그 필드가 없다 — 결측은 None 이어야 한다.
+        first = MemoryService(self.repo).promote_candidate(
+            project_id="project-1",
+            candidate=_candidate(candidate_id="candidate-a"),
+            mode=PromotionMode.MANUAL,
+        ).memory
+        second = MemoryService(self.repo).promote_candidate(
+            project_id="project-1",
+            candidate=AnalysisCandidate(
+                id="candidate-b",
+                project_id="project-1",
+                job_id="analysis-job-2",
+                task_id="analysis-task-2",
+                candidate_type=AnalysisCandidateType.CHARACTER_OBSERVATION,
+                action=AnalysisCandidateAction.CREATE,
+                status=AnalysisCandidateStatus.NEEDS_REVIEW,
+                provenance=AnalysisProvenance.SOURCE_OBSERVED,
+                confidence=0.5,
+                source_ref_ids=("source-ref-b",),
+                payload={"name": "주인공", "observation": "폭풍을 마주 선다"},
+            ),
+            mode=PromotionMode.MANUAL,
+        ).memory
+
+        merged = MemoryService(self.repo).merge_canonical_entries(
+            project_id="project-1",
+            survivor_memory_id=second.id,
+            absorbed_memory_id=first.id,
+            base_survivor_version=1,
+            base_absorbed_version=1,
+            idempotency_key="merge-1",
+            payload={"name": "주인공", "observation": "편지를 발견하고 폭풍을 마주 선다"},
+        ).memory
+
+        reread = MemoryService(self.repo)
+        self.assertEqual(merged.version, 2)
+        self.assertEqual(merged.supersedes, second.id)
+        reread_absorbed = reread.get_memory(
+            project_id="project-1", memory_id=first.id
+        )
+        self.assertEqual(reread_absorbed.status, MemoryStatus.SUPERSEDED)
+        self.assertEqual(reread_absorbed.merged_into, merged.id)
+        # 병합 이전 항목과 병합 결과 자체의 앞링크는 None — 옛 행 결측과 같은 값.
+        self.assertIsNone(
+            reread.get_memory(project_id="project-1", memory_id=second.id)
+            .merged_into
+        )
+        self.assertIsNone(merged.merged_into)
+        self.assertEqual(
+            list(reread.get_memory(
+                project_id="project-1", memory_id=merged.id
+            ).source_ref_ids),
+            ["source-ref-1", "source-ref-b"],
+        )
+
     def test_unique_index_rejects_second_promotion_of_same_candidate(self):
         # Directly exercise the race guard: a second insert for the same
         # (project_id, source_candidate_id) must surface DuplicatePromotionRequest

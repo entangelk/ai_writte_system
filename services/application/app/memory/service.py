@@ -23,6 +23,7 @@ from typing import Any, Mapping, Protocol
 
 from services.application.app.analysis.models import (
     AnalysisCandidate,
+    AnalysisCandidateType,
     AnalysisProvenance,
     immutable_payload,
 )
@@ -419,6 +420,117 @@ class MemoryService:
         )
         self._enqueue_reindex(new_entry)
         return PromoteMemoryResult(memory=new_entry, idempotent_replay=False)
+
+    def merge_canonical_entries(
+        self,
+        *,
+        project_id: str,
+        survivor_memory_id: str,
+        absorbed_memory_id: str,
+        base_survivor_version: int,
+        base_absorbed_version: int,
+        idempotency_key: str,
+        payload: Mapping[str, Any],
+    ) -> PromoteMemoryResult:
+        """정본 기억 병합(오너 결정 2026-10-06, A안): 같은 인물인데 분석이 갈라
+        만든 두 canonical 을 하나로 통합한다("나"/"주인공" 사례).
+
+        사슬 연결 — 두 쪽 모두 데이터로 보존된다:
+
+        * 병합 결과는 **생존(survivor) 쪽의 다음 버전**이다(``version+1``,
+          ``supersedes``=생존 현재) — 버전 사슬이 리셋되지 않는다.
+        * 흡수(absorbed) 항목은 ``SUPERSEDED`` 로 보존되되 ``merged_into`` 가
+          병합 결과를 앞으로 가리킨다 — 흡수된 사슬이 조용한 막다름이 되지
+          않는다.
+
+        본문은 편집 기반이다: 호출자가 양쪽 관찰을 이미 합쳐 다듬은 payload 를
+        보낸다(서비스는 이어붙이지 않는다). 근거는 양쪽 유니온, 나머지 이어받기
+        규칙은 ``edit_canonical_version`` 과 같다(신뢰도·분석 잡·합성 멱등 키
+        ``manual:{idempotency_key}``·scope 재계산). 1차 대상은 인물
+        (character_observation)이다 — 사건·떡밥은 같은 기계의 후속 확장.
+        """
+        if not idempotency_key:
+            raise MemoryError("idempotency_key is required")
+        if survivor_memory_id == absorbed_memory_id:
+            raise MemoryError("cannot merge an entry with itself")
+
+        synthetic_candidate_id = f"manual:{idempotency_key}"
+        existing_id = self._repo.find_memory_by_candidate(
+            project_id, synthetic_candidate_id
+        )
+        if existing_id is not None:
+            # edit_canonical_version 의 replay 분기와 같은 무조건 초크 포인트
+            # (SoT v1.7.37) — 재시도도 재색인을 다시 건다.
+            existing = self._require_memory(project_id, existing_id)
+            self._enqueue_reindex(existing)
+            return PromoteMemoryResult(memory=existing, idempotent_replay=True)
+
+        survivor = self._require_memory(project_id, survivor_memory_id)
+        absorbed = self._require_memory(project_id, absorbed_memory_id)
+        for target, base_version, label in (
+            (survivor, base_survivor_version, "survivor"),
+            (absorbed, base_absorbed_version, "absorbed"),
+        ):
+            if target.status is not MemoryStatus.CANONICAL:
+                raise MemoryError("cannot version a non-canonical memory entry")
+            if base_version != target.version:
+                raise MemoryError(
+                    f"canonical memory base is stale ({label})"
+                )
+        if survivor.memory_type is not absorbed.memory_type:
+            raise MemoryError(
+                "merge requires both entries to share a memory type"
+            )
+        # 1차 정책(2026-10-06): 인물만. reconciliation 의 character-only 제한과
+        # 같은 이유 — 사건·떡밥의 통합 의미(사건 합침? 떡밥 중복?)는 아직 정의된
+        # 적이 없다.
+        if survivor.memory_type is not AnalysisCandidateType.CHARACTER_OBSERVATION:
+            raise MemoryError("merge is character-only for now")
+
+        normalized = validate_candidate_payload(survivor.memory_type, payload)
+
+        merged = MemoryEntry(
+            id=self._repo.next_memory_id(),
+            project_id=project_id,
+            memory_type=survivor.memory_type,
+            status=MemoryStatus.CANONICAL,
+            provenance=AnalysisProvenance.HUMAN_EDITED,
+            confidence=survivor.confidence,
+            source_ref_ids=_union_source_refs(
+                survivor.source_ref_ids, absorbed.source_ref_ids
+            ),
+            payload=immutable_payload(normalized),
+            version=survivor.version + 1,
+            analysis_job_id=survivor.analysis_job_id,
+            source_candidate_id=synthetic_candidate_id,
+            promotion_mode=PromotionMode.MANUAL,
+            applied_threshold=None,
+            scope=derive_scope(survivor.memory_type, normalized),
+            supersedes=survivor.id,
+        )
+        try:
+            self._repo.put_memory(merged)
+        except DuplicatePromotionRequest:
+            # Concurrent retry of the same idempotency key: replay the winner.
+            return PromoteMemoryResult(
+                memory=self._require_memory_by_candidate(
+                    project_id, synthetic_candidate_id
+                ),
+                idempotent_replay=True,
+            )
+        # Append-only: mint first, then retire both parents — the survivor steps
+        # down like a plain edit, the absorbed entry additionally records where
+        # it lives on now (merged_into).
+        self._repo.update_memory(
+            replace(survivor, status=MemoryStatus.SUPERSEDED)
+        )
+        self._repo.update_memory(
+            replace(
+                absorbed, status=MemoryStatus.SUPERSEDED, merged_into=merged.id
+            )
+        )
+        self._enqueue_reindex(merged)
+        return PromoteMemoryResult(memory=merged, idempotent_replay=False)
 
     def _versioned_upsert(
         self,

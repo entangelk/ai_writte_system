@@ -54,6 +54,8 @@ def _memory_payload(entry) -> dict[str, object]:
         "applied_threshold": entry.applied_threshold,
         "scope": _scope_payload(entry.scope),
         "supersedes": entry.supersedes,
+        # 정본 병합(2026-10-06): 흡수된 항목이 병합 결과를 가리키는 앞링크.
+        "merged_into": entry.merged_into,
     }
 
 

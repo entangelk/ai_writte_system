@@ -121,7 +121,7 @@ _CANONICAL: tuple[ActivityAction, ...] = (
                    "/projects/{project_id}/drafts/{draft_id}/note", "scene_note"),
 )
 
-#: 검토 결정 13 — 원고가 아니라 **기억을 바꾸는 사용자 판단**.
+#: 검토 결정 14 — 원고가 아니라 **기억을 바꾸는 사용자 판단**.
 _REVIEW: tuple[ActivityAction, ...] = (
     ActivityAction("candidate_promoted", "POST",
                    "/projects/{project_id}/analysis/candidates/{candidate_id}/promote",
@@ -174,6 +174,10 @@ _REVIEW: tuple[ActivityAction, ...] = (
     # append-only 라 이전 버전은 SUPERSEDED 로 남는다.
     ActivityAction("canonical_memory_edited", "PUT",
                    "/projects/{project_id}/memory/{memory_id}", "memory"),
+    # 정본 기억 병합(같은 날, A안) — 갈라진 같은 인물 canonical 둘을 하나로.
+    # 그룹 승인 선례처럼 요청당 그룹 행 1줄(after="version=N, absorbed=1").
+    ActivityAction("canonical_memory_merged", "POST",
+                   "/projects/{project_id}/memory/merge", "memory"),
 )
 
 #: 기록하는 경로 전수.
