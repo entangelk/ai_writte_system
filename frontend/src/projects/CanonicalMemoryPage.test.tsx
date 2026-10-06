@@ -280,3 +280,192 @@ describe("CanonicalMemoryPage", () => {
     ).toBeInTheDocument();
   });
 });
+
+/**
+ * 병합(2026-10-06, A안) — 갈라진 같은 인물 canonical 둘을 하나로.
+ *
+ * under-strict: 선택→미리채움→저장 배선·흡수 사슬 표시를 빼면 재실패한다.
+ * over-strict: 인물 외 항목에 병합 버튼을 내놓으면 실패한다(서버는 409).
+ */
+describe("CanonicalMemoryPage — 병합", () => {
+  function characterEntry(overrides: Record<string, unknown> = {}) {
+    return memoryEntry(overrides);
+  }
+
+  it("merges two split characters, sending both bases and the joined payload", async () => {
+    const me = characterEntry({ id: "m1", payload: { name: "나", observation: "편지를 발견했다" } });
+    const hero = characterEntry({
+      id: "m2",
+      payload: { name: "주인공", observation: "폭풍을 마주 선다" },
+    });
+    const merged = characterEntry({
+      id: "m3",
+      version: 2,
+      supersedes: "m2",
+      provenance: "human_edited",
+      payload: { name: "주인공", observation: "편지를 발견하고 폭풍을 마주 선다" },
+    });
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (url.endsWith("/memory/merge")) {
+        return {
+          ok: true,
+          status: 200,
+          statusText: "",
+          json: async () => ({ memory: merged, idempotent_replay: false }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        statusText: "",
+        json: async () => ({ memory: [me, hero] }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("편지를 발견했다");
+
+    // 1단계 — 생존 항목에서 병합 시작.
+    await userEvent.click(
+      screen.getAllByRole("button", { name: "다른 기억과 병합…" })[1],
+    );
+    // 2단계 — 흡수 상대 선택(같은 인물 항목에만 상대 버튼이 뜬다).
+    await userEvent.click(screen.getByRole("button", { name: "이 항목과 병합" }));
+
+    // 폼 — 양쪽 관찰이 이어져 미리 채워져 있다(편집 기반 통합).
+    const observation = await screen.findByLabelText("관찰");
+    expect(observation).toHaveValue("폭풍을 마주 선다\n편지를 발견했다");
+    await userEvent.clear(observation);
+    await userEvent.type(observation, "편지를 발견하고 폭풍을 마주 선다");
+    await userEvent.click(screen.getByRole("button", { name: "병합 저장" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/projects/p1/memory/merge",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+    const body = JSON.parse(
+      (fetchMock.mock.calls.find(
+        ([, init]) => (init as RequestInit | undefined)?.method === "POST",
+      )![1] as RequestInit).body as string,
+    ) as Record<string, unknown>;
+    expect(body.survivor_memory_id).toBe("m2");
+    expect(body.absorbed_memory_id).toBe("m1");
+    expect(body.base_survivor_version).toBe(1);
+    expect(body.base_absorbed_version).toBe(1);
+    expect(body.payload).toEqual({
+      name: "주인공",
+      observation: "편지를 발견하고 폭풍을 마주 선다",
+    });
+    expect(
+      await screen.findByText(
+        "병합했습니다 — 기억 version 2. 흡수된 기억의 이력은 아래에 보존됩니다.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("offers no merge button for non-character entries", async () => {
+    const event = memoryEntry({
+      id: "m9",
+      memory_type: "event_observation",
+      payload: { event: "다리가 무너졌다" },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        statusText: "",
+        json: async () => ({ memory: [event] }),
+      })),
+    );
+
+    renderPage();
+    // 제목(<strong>)·본문(<p>) 두 자리에 같은 문장이 오니 AllBy 로 기다린다.
+    expect(await screen.findAllByText("다리가 무너졌다")).not.toHaveLength(0);
+
+    expect(
+      screen.queryByRole("button", { name: "다른 기억과 병합…" }),
+    ).toBeNull();
+  });
+
+  it("shows the absorbed chain under the merged entry's detail", async () => {
+    const absorbedOld = memoryEntry({
+      id: "m1",
+      status: "superseded",
+      merged_into: "m3",
+      payload: { name: "나", observation: "편지를 발견했다" },
+    });
+    const survivorOld = memoryEntry({
+      id: "m2",
+      status: "superseded",
+      payload: { name: "주인공", observation: "폭풍을 마주 선다" },
+    });
+    const merged = memoryEntry({
+      id: "m3",
+      version: 2,
+      supersedes: "m2",
+      provenance: "human_edited",
+      payload: { name: "주인공", observation: "편지를 발견하고 폭풍을 마주 선다" },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        statusText: "",
+        json: async () => ({ memory: [absorbedOld, survivorOld, merged] }),
+      })),
+    );
+
+    renderPage();
+    // 흡수된 항목은 canonical 목록에 남지 않는다.
+    await screen.findByText("편지를 발견하고 폭풍을 마주 선다");
+    expect(screen.queryByText("나")).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "상세·이력" }));
+    expect(screen.getByText("병합으로 합쳐진 기억")).toBeInTheDocument();
+    // 앞링크의 화면 표시 — 흡수 행이 결과를 가리킨다.
+    expect(screen.getByText(/병합됨 → 주인공\(v2\)/)).toBeInTheDocument();
+    // 흡수 사슬의 본문(인물의 별도 상태)이 이력에 살아 있다.
+    expect(screen.getByText("편지를 발견했다")).toBeInTheDocument();
+  });
+
+  it("surfaces a merge 409 as the error alert", async () => {
+    const me = characterEntry({ id: "m1", payload: { name: "나", observation: "관찰 A" } });
+    const hero = characterEntry({ id: "m2", payload: { name: "주인공", observation: "관찰 B" } });
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (url.endsWith("/memory/merge")) {
+        return {
+          ok: false,
+          status: 409,
+          statusText: "",
+          json: async () => ({ detail: "canonical memory base is stale (absorbed)" }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        statusText: "",
+        json: async () => ({ memory: [me, hero] }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("관찰 A");
+    await userEvent.click(
+      screen.getAllByRole("button", { name: "다른 기억과 병합…" })[1],
+    );
+    await userEvent.click(screen.getByRole("button", { name: "이 항목과 병합" }));
+    await userEvent.click(screen.getByRole("button", { name: "병합 저장" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "canonical memory base is stale (absorbed)",
+      );
+    });
+  });
+});

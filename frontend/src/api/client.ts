@@ -484,6 +484,8 @@ export interface CanonicalMemory {
   applied_threshold: number | null;
   scope: { scope_type: string; scope_id: string } | null;
   supersedes: string | null;
+  // 정본 병합(2026-10-06, A안): 흡수된 항목이 병합 결과를 가리키는 앞링크.
+  merged_into: string | null;
 }
 
 export function listCanonicalMemory(
@@ -509,6 +511,28 @@ export function putCanonicalMemory(
 ): Promise<{ memory: CanonicalMemory; idempotent_replay: boolean }> {
   return request(`/projects/${projectId}/memory/${memoryId}`, {
     method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+// 정본 기억 병합(2026-10-06, A안) — 갈라진 같은 인물 canonical 둘을 하나로.
+// 결과는 생존 쪽의 다음 버전(사슬 승계), 흡수 항목은 merged_into 로 결과를
+// 가리키며 SUPERSEDED 보존된다. payload 는 화면이 양쪽 관찰을 합쳐 다듬은 값.
+export interface MergeCanonicalMemoryRequest {
+  survivor_memory_id: string;
+  absorbed_memory_id: string;
+  base_survivor_version: number;
+  base_absorbed_version: number;
+  idempotency_key: string;
+  payload: Record<string, string>;
+}
+
+export function mergeCanonicalMemory(
+  projectId: string,
+  body: MergeCanonicalMemoryRequest,
+): Promise<{ memory: CanonicalMemory; idempotent_replay: boolean }> {
+  return request(`/projects/${projectId}/memory/merge`, {
+    method: "POST",
     body: JSON.stringify(body),
   });
 }
