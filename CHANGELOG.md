@@ -2,6 +2,7 @@
 
 | Date | Change | Detail |
 |---|---|---|
+| 2026-10-06 | **갈라진 같은 인물 정본 기억의 병합(SoT v1.8.81).** 같은 인물이 분석 표기(“나”/“주인공”)에 따라 별개 정본으로 살아 있던 것을 작품 기억 탭에서 하나로 합친다. 병합 결과는 생존 쪽의 다음 버전(사슬 승계)이고 흡수된 기억은 `merged_into` 앞링크로 결과를 가리키며 이력에 보존된다 — 근거는 양쪽이 모두 이어지고 관찰은 편집해 하나의 문장으로 다듬는다. 사용자는 같은 인물 분리와 “이어져 있어야 한다” 요구를 이 방향으로 확정했다. | [결정](docs/plans/canonical-memory-manual-edit-decisions.md) · [작업 로그](docs/daily_logs/2026-10-06/work_log.md) |
 | 2026-10-06 | **승인된 작품 기억의 목록·이력 표시와 직접 수정(SoT v1.8.80).** 설정에 "작품 기억" 탭이 생겨 승인된 정본 기억의 본문·버전·근거 수·append-only 이력(superseded 보존)을 보고, 항목을 직접 고칠 수 있다. 수정은 새 canonical 버전 발행 + 이전 버전 SUPERSEDED 보존(`PUT /memory/{id}`, provenance `human_edited`·`manual:{idempotency_key}` 합성 키로 재시도 replay·낡은 base_version 409). 사용자는 제목만 보여 수정할 곳이 없다는 지점을 이 결정 방향으로 확정했다. | [결정](docs/plans/canonical-memory-manual-edit-decisions.md) · [작업 로그](docs/daily_logs/2026-10-06/work_log.md) |
 | 2026-10-05 | **이어쓰기 결과로 다음 장면 초안 열기(SoT v1.8.79).** 동기 결과와 복구 패드에 “이 내용으로 다음 장면 만들기”를 제공한다. 같은 장의 현재 장면 바로 뒤에 새 장면을 만들고 생성문을 편집기에 열며, 본문은 사용자가 일반 저장한다. 사용자는 복사만 남아 장면 생성이 끊긴 흐름을 확인한 뒤 이 방향을 승인했다. | [계약](docs/plans/chapter-scene-hierarchy-decisions.md) · [작업 로그](docs/daily_logs/2026-10-05/work_log.md) |
 | 2026-10-05 | 그룹 승인 중 수분 소요 안내와 경과 시간을 페이지 상단에 표시하고, 장기 대기·완료·부분 실패를 설명한다. 실제 배포의 장시간 대기를 확인한 사용자의 요청에 따라 반영된 내용의 보존도 안내한다. | [작업 로그](docs/daily_logs/2026-10-05/work_log.md) |

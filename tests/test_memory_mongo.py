@@ -253,11 +253,12 @@ class MongoMemoryRepositoryTest(unittest.TestCase):
             .merged_into
         )
         self.assertIsNone(merged.merged_into)
+        # 근거 유니온은 순서 보존 — 생존 쪽 근거가 먼저 온다(API 셀과 같은 계약).
         self.assertEqual(
             list(reread.get_memory(
                 project_id="project-1", memory_id=merged.id
             ).source_ref_ids),
-            ["source-ref-1", "source-ref-b"],
+            ["source-ref-b", "source-ref-1"],
         )
 
     def test_unique_index_rejects_second_promotion_of_same_candidate(self):

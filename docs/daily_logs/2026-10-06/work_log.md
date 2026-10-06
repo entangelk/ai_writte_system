@@ -61,3 +61,44 @@
 - 되돌리기 버전 재발행(유예 D)·폐기(retire)는 결정 문서의 후속 경로가 열려 있다.
 - 승격 경로(promote)의 보관 프로젝트 가드 부재를 별도 검토한다.
 - 근거 인용문 본문 조회는 memory↔source_ref 교차 계약이 필요하다(유예).
+
+## 세션 2 — 정본 기억 병합 (오너 결정 A안)
+
+### Goals
+- 같은 인물이 분석 표기("나"/"주인공")에 따라 별개 canonical 으로 갈라져 살아 있는 사례를 하나로 통합하는 경로 — "수정 및 통합, 이어져 있어야지, 인물의 별도 상태도 포함"(오너).
+
+### Completed work
+- 사전 확인: 기존 병합 기계(`analysis/reconciliation.py`)는 **후보→정본** 흡수뿐 — 정본↔정본 경로는 없었다. 상세·이력의 v1/v2가 본문 버전(payload 사슬)임을 오너에게 확인.
+- 브리프(사슬 연결 3안) → 오너 결정 **A. 생존 사슬 승계 + `merged_into` 포인터**.
+- 백엔드: `MemoryEntry.merged_into`(옛 행 결측=None, Mongo reader `.get`) · `MemoryService.merge_canonical_entries()` — 병합 결과 = 생존 쪽 다음 버전, 흡수 항목 SUPERSEDED+앞링크, 근거 양쪽 유니온, `provenance=human_edited`, 합성 멱등 키 `manual:{key}`, `scope` 재계산 · `POST /projects/{id}/memory/merge`(양쪽 base 각각 검사, 오류 메시지가 survivor/absorbed 축을 밝힘; 자기 병합·타입 불일치·인물 외·비-canonical·보관 409, 스키마 400) · 활동 로그 `canonical_memory_merged`(`after="version=N, absorbed=1"`, replay 무행).
+- 프런트: 작품 기억 탭에 병합 흐름 — 인물 항목의 "다른 기억과 병합…" → 같은 종류 상대 선택("이 항목과 병합") → **양쪽 관찰이 이어져 미리 채워진 편집 폼**(하나의 문장으로 다듬음) → 저장; 병합 결과 상세에 "병합으로 합쳐진 기억" 절(흡수 사슬 + `병합됨 → 결과(vN)` 앞링크 표시).
+- 가드 카운트: 검토 결정 13→14(기록 31→32) · 프로젝트 tier 78→79/전체 109→110 · memory OpenAPI 잠금 목록 8→9.
+
+### Files changed
+- 백엔드: `memory/models.py`, `memory/service.py`, `memory/mongo_repository.py`, `api/payloads.py`, `api/models.py`, `routers/memory.py`, `activity/actions.py`
+- 프런트: `api/client.ts`, `CanonicalMemoryPage.tsx`, `styles.css`, `activityActions.ts`
+- 테스트: `test_memory_merge.py`(신설 12셀), `test_memory_mongo.py`(병합 패리티 +1), `test_activity_actions.py`·`test_auth_api.py`·`test_application_api.py`(카운트), `CanonicalMemoryPage.test.tsx`(병합 4셀 추가)
+- 문서: 결정 문서 §4·SoT v1.8.81·CHANGELOG·본 로그
+
+### Decisions / User Decisions and Rationale
+- 오너 결정 2026-10-06(두 번째): 병합 사슬 연결 = **A**. 생존 사슬 승계(버전 리셋 없음) + `merged_into` 앞링크 — "이어져 있어야지"를 데이터로 보존. B는 로그 검색으로만 만족, C는 버전 리셋.
+- 인물(character_observation) 한정은 `reconciliation` 의 character-only 선례와 같은 이유 — 사건·떡밥의 통합 의미는 미정의(유예).
+
+### Verification
+- `test_memory_merge.py` 12 passed · `test_activity_actions.py`·`test_activity_ui_labels.py`·`test_application_api.py`·`test_memory_api.py`·`test_memory_manual_edit.py` 194 passed(748 subtests) · `test_auth_api.py` 154 passed(1261 subtests) · 분석 계열 68 passed. 프런트 `CanonicalMemoryPage.test.tsx` 11 passed · `npm run build` 통과 · **전수 521 passed / 44 files · EXIT=0**.
+- 변이 검증(커밋 `1242d92` 위, 각 후 `git checkout --` 복원, 복원 후 12 passed 재확인):
+
+| 변이 | 위치(file:line 당시) | 실패한 셀 |
+|---|---|---|
+| M5 흡수 항목 업데이트에서 `merged_into=merged.id` 제거 | `memory/service.py` merge_canonical_entries | `MergeHappyPathTest::test_merge_continues_the_survivor_chain_and_links_the_absorbed_one` |
+| M6 `version=1`·`supersedes=None`(사슬 리셋) | 〃 | happy path · `test_merge_enqueues_a_reindex_and_records_one_activity_row` · `test_the_merged_chain_accepts_a_later_edit_as_v3` — 3셀 |
+| M7 근거 유니온을 생존 쪽만으로 | 〃 | happy path(유니온 단정) |
+
+- over-strict: replay 가 재발행하면 실패(`test_same_key_replays_...`), 낡은 base 양축 각각 409, 자기 병합·타입 불일치·인물 외 409, 사건 항목에 병합 버튼 없음(프런트).
+- **Mongo 패리티 셀 정정**: 첫 전수(test-mongo ON)에서 신규 병합 패리티 셀이 실패했다 — 원인은 구현이 아니라 **테스트 기대값의 순서 오류**였다(근거 유니온은 순서 보존으로 생존 쪽이 먼저 오는데 흡수 쪽 순서로 적었음). 기대값을 고치고 같은 서버에서 7/7 재확인, 전수를 다시 돌렸다(테스트 한 줄이 바뀌어도 재측정이 규칙).
+
+### Issues found
+- 병합 재발 가능성: 분석이 같은 표기("나")를 다시 승격하면 중복이 재생된다 — 별칭 매처 축에서 병합 뒤 지속을 검토해야 한다(유예 등재).
+
+### Next steps
+- (마무리됨) 전수 재측정: backend **3120 passed / 1 skipped / 4372 subtests · EXIT=0 · 384.86초**(test-mongo ON, +13 passed = 이 슬라이스 전부). HANDOFF·README 기준선 행을 같은 수로 갱신했다.

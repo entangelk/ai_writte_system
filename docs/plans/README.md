@@ -71,7 +71,7 @@
 | [`02b-6-semantic-identity-resolution-decisions.md`](02b-6-semantic-identity-resolution-decisions.md) | 2B.6 event/open_question 의미적 identity resolution | Resolved |
 | [`02b-7-character-alias-homonym-decisions.md`](02b-7-character-alias-homonym-decisions.md) | 2B.7 character 별칭/동명이인 semantic 보강 | Resolved |
 | [`event-open-question-canonical-dedup-decisions.md`](event-open-question-canonical-dedup-decisions.md) | event/open_question 정본 중복 누적을 어느 축에서 막는가(canonical vs candidate) | **Resolved** — ⓒ 채택(2026-09-09) · 배선 구현 완료 |
-| [`canonical-memory-manual-edit-decisions.md`](canonical-memory-manual-edit-decisions.md) | 정본 기억 조회 확장·수동 수정 경로(작품 기억 탭 · `PUT /memory/{id}`) | **Approved — B 채택**(2026-10-06) · 첫 슬라이스 구현 완료 |
+| [`canonical-memory-manual-edit-decisions.md`](canonical-memory-manual-edit-decisions.md) | 정본 기억 조회 확장·수동 수정·병합 경로(작품 기억 탭 · `PUT /memory/{id}` · `POST /memory/merge`) | **Approved — B·A 채택**(2026-10-06) · 슬라이스 구현 완료 |
 
 | [`group-name-correction-decisions.md`](group-name-correction-decisions.md) | 검토 대기 그룹의 인물 이름 동시 교정 · 승인 전 버전 계약 | **Resolved — A 채택**(2026-09-30) |
 | [`pending-candidate-identity-grouping-decisions.md`](pending-candidate-identity-grouping-decisions.md) | 서로 다른 분석 job의 미승인 후보 정체성 그룹·그룹 승인 | **확정 — C 채택**(2026-09-02 dogfood) |
