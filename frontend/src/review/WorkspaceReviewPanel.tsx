@@ -273,6 +273,13 @@ export function WorkspaceReviewPanel({
             to={`/projects/${projectId}/review`}
             onClick={guardNavigation}
           >전체 검토함 열기 →</Link>
+          {/* 승인 뒤 정본을 확인·수정·병합하러 가는 길(2026-10-06 오너 요청) —
+              편집기 이탈은 같은 dirty 가드를 지난다. */}
+          <Link
+            className="section-link"
+            to={`/projects/${projectId}/settings?tab=memory`}
+            onClick={guardNavigation}
+          >승인된 작품 기억 보기 →</Link>
         </>
       ) : detailLoading ? (
         <p className="status-copy">후보 상세를 불러오는 중…</p>

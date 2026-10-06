@@ -113,6 +113,10 @@ function renderInbox(path = "/projects/p1/review") {
       <Routes>
         <Route path="/projects/:projectId" element={<p>원고 홈</p>} />
         <Route path="/projects/:projectId/review" element={<ReviewInbox />} />
+        <Route
+          path="/projects/:projectId/settings"
+          element={<p>설정 라우트</p>}
+        />
       </Routes>
     </MemoryRouter>,
   );
@@ -695,5 +699,16 @@ describe("ReviewInbox — 정체성 그룹", () => {
     expect(screen.queryByText(/같은 대상으로 묶였습니다/)).toBeNull();
     expect(screen.queryByRole("button", { name: "그룹 승인" })).toBeNull();
     expect(screen.queryByRole("list", { name: "그룹 안 후보 목록" })).toBeNull();
+  });
+
+  // 작품 기억 탭으로 가는 길(2026-10-06 오너 요청) — 승인 뒤 정본 확인·수정·병합.
+  it("links to the canonical memory tab from the inbox header", async () => {
+    mockFetch({ body: inboxBody() });
+    renderInbox();
+
+    const link = await screen.findByRole("link", {
+      name: "승인된 작품 기억 보기 →",
+    });
+    expect(link).toHaveAttribute("href", "/projects/p1/settings?tab=memory");
   });
 });

@@ -251,4 +251,42 @@ describe("WorkspaceReviewPanel", () => {
     expect(screen.queryByText("전체 검토함 route")).toBeNull();
     expect(screen.getByRole("heading", { name: "검토 대기" })).toBeInTheDocument();
   });
+
+  // 작품 기억 탭으로 가는 길(2026-10-06) — 드로어의 같은 검토함에서도 열리고
+  // 편집기 이탈 가드를 그대로 지난다(전체 검토함 링크와 같은 처방).
+  it("links to the canonical memory tab through the same dirty guard", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(response(list)));
+    const onBeforeNavigateAway = vi.fn(() => false);
+
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <WorkspaceReviewPanel
+                projectId="p1"
+                onSourceSelect={vi.fn()}
+                onBeforeNavigateAway={onBeforeNavigateAway}
+              />
+            }
+          />
+          <Route
+            path="/projects/:projectId/settings"
+            element={<p>설정 라우트</p>}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const link = await screen.findByRole("link", {
+      name: "승인된 작품 기억 보기 →",
+    });
+    expect(link).toHaveAttribute("href", "/projects/p1/settings?tab=memory");
+
+    await userEvent.click(link);
+    expect(onBeforeNavigateAway).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("설정 라우트")).toBeNull();
+    expect(screen.getByRole("heading", { name: "검토 대기" })).toBeInTheDocument();
+  });
 });

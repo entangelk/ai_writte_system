@@ -464,6 +464,14 @@ export function ReviewInbox() {
         <p>AI가 만든 기억 후보와 문맥 게이트 지적을 확인하고 처리합니다.</p>
       </header>
 
+      {/* 승인 뒤 정본을 확인·수정·병합하러 가는 길(2026-10-06 오너 요청). */}
+      <p>
+        <Link
+          className="inline-navigation-link"
+          to={`/projects/${projectId}/settings?tab=memory`}
+        >승인된 작품 기억 보기 →</Link>
+      </p>
+
       {error !== null && <p className="alert" role="alert">{error}</p>}
 
       {groupOutcomePanel()}

@@ -102,3 +102,18 @@
 
 ### Next steps
 - (마무리됨) 전수 재측정: backend **3120 passed / 1 skipped / 4372 subtests · EXIT=0 · 384.86초**(test-mongo ON, +13 passed = 이 슬라이스 전부). HANDOFF·README 기준선 행을 같은 수로 갱신했다.
+
+## 세션 3 — 검토함 → 작품 기억 이동 링크 (오너 요청)
+
+### Goals
+- 검토함에서 승인 뒤 정본(작품 기억 탭)으로 갈 길이 없다는 오너 지적 — 양방향 이동 완성.
+
+### Completed work
+- `ReviewInbox.tsx`: 머리 아래 "승인된 작품 기억 보기 →"(`settings?tab=memory`). `WorkspaceReviewPanel.tsx`(편집기 드로어의 같은 검토함): "전체 검토함 열기 →" 옆에 같은 링크 — 편집기 이탈 가드(guardNavigation)를 그대로 지난다.
+- `navigationLinks.test.ts` 집합에 `review/ReviewInbox.tsx` 등재(드로어 링크는 `section-link` 클래스라 가드 밖).
+
+### Verification
+- `ReviewInbox.test.tsx`·`WorkspaceReviewPanel.test.tsx`·`navigationLinks.test.ts` 37 passed — 링크 href 단정과 dirty 가드 취소(over-strict: 더러우면 이동이 취소돼야 한다) 포함. `npm run build` 통과 · **전수 523 passed / 44 files · EXIT=0**(+2 셀). 백엔드 소스 무변이라 백엔드 전수는 무변(기준선 규칙).
+
+### Decisions
+- SoT 무변 — 계약에 닿지 않는 내비게이션 링크 하나(2026-10-05 그룹 승인 UX 선례와 같은 취급: work_log·CHANGELOG 만).

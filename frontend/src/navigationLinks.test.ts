@@ -25,6 +25,8 @@ const SECONDARY_NAVIGATION = [
   // 작품 기억 탭(2026-10-06): 머리의 "검토함 →" — 승인 전 후보로 가는
   // 보조 이동이다.
   "projects/CanonicalMemoryPage.tsx",
+  // 같은 날 역방향: 검토함 머리의 "승인된 작품 기억 보기 →" — 승인 뒤 정본으로.
+  "review/ReviewInbox.tsx",
   "me/PersonalHubPage.tsx",
   "admin/AdminProjectCard.tsx",
   // 계정 탈퇴 Slice 4b(2026-09-12): 잔여 정리가 계정 행을 지운 뒤의
